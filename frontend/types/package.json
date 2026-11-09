@@ -1,0 +1,11 @@
+{
+  "name": "@ax/types",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "백엔드 openapi.json에서 자동 생성한 API 타입 — 직접 수정 금지",
+  "exports": {
+    "./shop-api": "./src/shop-api.ts",
+    "./dashboard-api": "./src/dashboard-api.ts"
+  }
+}

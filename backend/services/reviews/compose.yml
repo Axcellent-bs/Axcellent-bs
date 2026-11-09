@@ -1,0 +1,12 @@
+services:
+  reviews:
+    build:
+      context: ../..
+      dockerfile: services/reviews/Dockerfile
+    ports:
+      - "8122:8122"
+    env_file:
+      - path: ../../.env
+        required: false
+      - path: ./.env
+        required: false

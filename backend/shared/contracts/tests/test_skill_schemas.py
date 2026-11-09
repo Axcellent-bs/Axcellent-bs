@@ -1,0 +1,398 @@
+import pytest
+from pydantic import ValidationError
+
+from ax_contracts.schemas import (
+    AnomalyDetectionInput,
+    AnomalyDetectionOutput,
+    CategoryImpact,
+    ChangeResultInput,
+    ChangeResultOutput,
+    CreateTicketInput,
+    CreateTicketOutput,
+    DiagnoseIncidentInput,
+    DiagnoseIncidentOutput,
+    FindRelatedPrsInput,
+    FindRelatedPrsOutput,
+    FraudScoreInput,
+    FraudScoreOutput,
+    ImpactAnalysisInput,
+    ImpactAnalysisOutput,
+    IncidentKpi,
+    KpiSummaryInput,
+    KpiSummaryOutput,
+    LinkIncidentInput,
+    LinkIncidentOutput,
+    MetricIdVerdict,
+    MetricVerdict,
+    RelatedPr,
+    RollbackDeploymentParams,
+    SuspectDeployment,
+    VerifyRecoveryInput,
+    VerifyRecoveryOutput,
+    VerifyRollbackTargetInput,
+    VerifyRollbackTargetOutput,
+)
+
+T0 = "2026-10-22T05:00:00Z"
+T1 = "2026-10-22T05:40:00Z"
+
+PR = {
+    "pr_number": 42,
+    "title": "결제 타임아웃 조정",
+    "merged_at": T0,
+    "spec_id": "spec_pay",
+    "para_id": "R1",
+    "changed_paths": ["shop-api/payment.py"],
+}
+
+
+def test_find_related_prs_and_link_incident() -> None:
+    query = FindRelatedPrsInput.model_validate({"window_from": T0, "window_to": T1})
+    assert query.component is None
+    related = FindRelatedPrsOutput.model_validate({"candidates": [PR]})
+    assert related.candidates[0].para_id == "R1"
+    assert FindRelatedPrsOutput().candidates == []  # 후보가 없어도 된다
+    minimal = RelatedPr.model_validate({"pr_number": 1, "title": "t", "merged_at": T0})
+    assert (minimal.spec_id, minimal.para_id, minimal.changed_paths) == (None, None, [])
+    link = LinkIncidentInput.model_validate(
+        {"incident_context_id": "ctx_inc_1", "pr_numbers": [42], "follow_up_title": "재발 방지"}
+    )
+    assert link.pr_numbers == [42]
+    out = LinkIncidentOutput.model_validate({"linked_paras": ["R1"], "follow_up_request_id": "r1"})
+    assert out.follow_up_request_id == "r1"
+    assert LinkIncidentOutput().follow_up_request_id is None
+
+
+def test_create_ticket() -> None:
+    ask = CreateTicketInput.model_validate(
+        {"title": "배송 안내 문구 변경", "evidence": "반복 문의 42건"}
+    )
+    assert (ask.source_ref, ask.evidence_ids) == (None, [])
+    created = CreateTicketOutput.model_validate(
+        {"request_id": "REQ-1", "context_id": "ctx_req_1", "outcome": "created"}
+    )
+    assert created.duplicate_of is None
+    dup = CreateTicketOutput.model_validate(
+        {
+            "request_id": "REQ-2",
+            "context_id": "ctx_req_1",
+            "outcome": "linked_duplicate",
+            "duplicate_of": "REQ-1",
+        }
+    )
+    assert dup.duplicate_of == "REQ-1"
+    with pytest.raises(ValidationError):
+        CreateTicketOutput.model_validate(
+            {"request_id": "REQ-3", "context_id": "ctx_req_1", "outcome": "linked_duplicate"}
+        )
+    with pytest.raises(ValidationError):
+        CreateTicketOutput.model_validate(
+            {
+                "request_id": "REQ-3",
+                "context_id": "ctx_req_1",
+                "outcome": "created",
+                "duplicate_of": "REQ-1",
+            }
+        )
+
+
+def test_change_result() -> None:
+    done = ChangeResultInput.model_validate(
+        {
+            "request_id": "REQ-1",
+            "status": "completed",
+            "pr_numbers": [42],
+            "merged_at": T0,
+            "summary": "PR #42 머지",
+        }
+    )
+    assert (done.spec_id, done.reason_code) == (None, None)
+    no = ChangeResultInput.model_validate(
+        {
+            "request_id": "REQ-2",
+            "status": "declined",
+            "reason_code": "out_of_scope",
+            "summary": "범위 밖",
+        }
+    )
+    assert no.pr_numbers == []
+    assert ChangeResultOutput.model_validate({"applied": 3}).applied == 3
+    with pytest.raises(ValidationError):
+        ChangeResultInput.model_validate(
+            {"request_id": "REQ-3", "status": "requested", "summary": "s"}
+        )
+    with pytest.raises(ValidationError):
+        ChangeResultInput.model_validate(
+            {"request_id": "REQ-3", "status": "declined", "pr_numbers": [1], "summary": "s"}
+        )
+    with pytest.raises(ValidationError):
+        ChangeResultInput.model_validate(
+            {"request_id": "REQ-3", "status": "completed", "reason_code": "x", "summary": "s"}
+        )
+
+
+def test_verify_rollback_target() -> None:
+    ask = VerifyRollbackTargetInput.model_validate(
+        {
+            "service": "shop-api",
+            "target_version": "v1.4.0",
+            "deployed_at": T0,
+            "incident_opened_at": T1,
+        }
+    )
+    assert ask.service == "shop-api"
+    answer = VerifyRollbackTargetOutput.model_validate(
+        {"approved": True, "reason_code": "deploy_before_incident", "related_prs": [PR]}
+    )
+    assert answer.related_prs[0].pr_number == 42
+    with pytest.raises(ValidationError):
+        VerifyRollbackTargetOutput.model_validate({"approved": True, "reason_code": "because"})
+
+
+def test_infra_diagnose_and_rollback() -> None:
+    assert DiagnoseIncidentInput().component is None
+    suspect = {
+        "service": "shop-api",
+        "version": "v1.4.0",
+        "deployed_at": T0,
+        "change_summary": "결제 타임아웃 설정 변경",
+        "confidence": "mid",
+    }
+    assert SuspectDeployment.model_validate(suspect).confidence == "mid"
+    diagnosis = DiagnoseIncidentOutput.model_validate(
+        {"status": "suspected", "suspects": [suspect], "impact_scope": ["payment"]}
+    )
+    assert diagnosis.impact_scope == ["payment"]
+    assert DiagnoseIncidentOutput.model_validate({"status": "undetermined"}).suspects == []
+    with pytest.raises(ValidationError):  # 확신도는 low·mid·high만 (퍼센트 금지)
+        SuspectDeployment.model_validate({**suspect, "confidence": "0.9"})
+    with pytest.raises(ValidationError):
+        DiagnoseIncidentOutput.model_validate({"status": "confirmed"})
+    params = RollbackDeploymentParams.model_validate(
+        {"service": "shop-api", "from_version": "v1.4.0", "to_version": "v1.3.2"}
+    )
+    assert params.release_fault_injection is True  # 데모 기본값
+
+
+IMPACT = {
+    "failed_order_count": 3,
+    "affected_customer_count": 2,
+    "affected_customer_ids": ["cus_a", "cus_b"],
+    "damage_amount": 150000,
+    "by_category": [{"category": "fashion", "failed_order_count": 3, "damage_amount": 150000}],
+    "summary": "결제 실패 3건",
+}
+
+
+def test_data_impact_analysis() -> None:
+    query = ImpactAnalysisInput.model_validate({"window_from": T0, "window_to": T1})
+    assert (query.scope, query.category) == (None, None)
+    out = ImpactAnalysisOutput.model_validate(IMPACT)
+    assert out.by_category[0].damage_amount == 150000
+    with pytest.raises(ValidationError):  # 고객 수 불일치
+        ImpactAnalysisOutput.model_validate({**IMPACT, "affected_customer_count": 5})
+    with pytest.raises(ValidationError):  # 음수 금액
+        ImpactAnalysisOutput.model_validate({**IMPACT, "damage_amount": -1})
+    with pytest.raises(ValidationError):
+        CategoryImpact.model_validate(
+            {"category": "x", "failed_order_count": 1, "damage_amount": -5}
+        )
+    with pytest.raises(ValidationError):  # camelCase 거부
+        ImpactAnalysisInput.model_validate({"windowFrom": T0, "window_to": T1})
+    with pytest.raises(ValidationError):  # 모르는 필드 거부
+        ImpactAnalysisOutput.model_validate({**IMPACT, "eta": "10m"})
+
+
+def test_data_anomaly_detection() -> None:
+    assert AnomalyDetectionInput.model_validate({"window_from": T0, "window_to": T1}).metrics == []
+    verdict = {
+        "metric": "payment_fail_rate",
+        "observed": 0.3,
+        "baseline": 0.02,
+        "ratio": 15.0,
+        "is_anomaly": True,
+        "severity": "high",
+    }
+    assert MetricVerdict.model_validate(verdict).severity == "high"
+    out = AnomalyDetectionOutput.model_validate(
+        {"verdicts": [verdict], "any_anomaly": True, "summary": "이상"}
+    )
+    assert out.any_anomaly
+    with pytest.raises(ValidationError):
+        MetricVerdict.model_validate({**verdict, "metric": "cpu"})
+    with pytest.raises(ValidationError):
+        MetricVerdict.model_validate({**verdict, "severity": "critical"})
+
+
+def test_data_anomaly_detection_metric_ids() -> None:
+    """회사 카탈로그 id로 지표를 싣는 칸 (추가만, 예전 응답은 그대로 읽힌다)."""
+    old = {
+        "metric": "payment_fail_rate",
+        "observed": 0.3,
+        "baseline": 0.02,
+        "is_anomaly": True,
+    }
+    # 예전 응답: 새 칸은 비어 있다
+    parsed = AnomalyDetectionOutput.model_validate(
+        {"verdicts": [old], "any_anomaly": True, "summary": "이상"}
+    )
+    assert parsed.verdicts[0].metric_id is None and parsed.verdicts[0].metric_label is None
+    assert parsed.metric_verdicts == [] and parsed.unknown_metric_ids == []
+
+    # 캣북스 지표: 예전 칸과 새 칸 둘 다
+    both = MetricVerdict.model_validate(
+        {**old, "metric_id": "payment_fail_rate", "metric_label": "결제 실패율"}
+    )
+    assert (both.metric, both.metric_id, both.metric_label) == (
+        "payment_fail_rate",
+        "payment_fail_rate",
+        "결제 실패율",
+    )
+
+    # 다른 회사 지표: 예전 목록에는 못 싣고(지표 이름이 캣북스 4개뿐), 새 목록에만 싣는다
+    other = {
+        "metric_id": "shipment_delay_count",
+        "metric_label": "출고 지연 건수",
+        "observed": 12,
+        "baseline": 3,
+        "is_anomaly": True,
+        "status": "anomaly",
+        "direction": "up",
+    }
+    with pytest.raises(ValidationError):
+        MetricVerdict.model_validate({**other, "metric": "shipment_delay_count"})
+    out = AnomalyDetectionOutput.model_validate(
+        {
+            "metric_verdicts": [other, {**other, "metric_id": "pick_count", "is_anomaly": False}],
+            "unknown_metric_ids": ["return_count"],
+            "any_anomaly": True,
+            "summary": "이상",
+        }
+    )
+    assert out.verdicts == [] and out.unknown_metrics == []
+    assert [v.metric_id for v in out.metric_verdicts] == ["shipment_delay_count", "pick_count"]
+    assert isinstance(out.metric_verdicts[0], MetricIdVerdict)
+    assert out.unknown_metric_ids == ["return_count"]
+    with pytest.raises(ValidationError):  # metric_id는 필수
+        MetricIdVerdict.model_validate({k: v for k, v in other.items() if k != "metric_id"})
+
+
+def test_data_fraud_score() -> None:
+    assert FraudScoreInput.model_validate({"seller_id": "sel_1"}).seller_id == "sel_1"
+    body = {
+        "seller_id": "sel_1",
+        "score": 80,
+        "level": "high",
+        "reasons": [{"rule_code": "dup_card", "value": 3.0, "weight": 0.5}],
+        "similar_card_ids": ["card_1"],
+        "summary": "카드 중복",
+    }
+    assert FraudScoreOutput.model_validate(body).reasons[0].rule_code == "dup_card"
+    for bad in (-1, 101):
+        with pytest.raises(ValidationError):
+            FraudScoreOutput.model_validate({**body, "score": bad})
+    # 예전 응답(unknown_rules·note 없음)도 그대로 읽힌다
+    assert FraudScoreOutput.model_validate(body).unknown_rules == []
+    assert FraudScoreOutput.model_validate(body).reasons[0].note is None
+    unknown = FraudScoreOutput.model_validate(
+        {
+            **body,
+            "reasons": [
+                {
+                    "rule_code": "FRAUD_SIMILAR",
+                    "value": 0.0,
+                    "weight": 0.0,
+                    "note": "확인할 수 없음: FRAUD_SIMILAR",
+                }
+            ],
+            "unknown_rules": ["FRAUD_SIMILAR"],
+        }
+    )
+    assert unknown.unknown_rules == ["FRAUD_SIMILAR"]
+    assert unknown.reasons[0].note == "확인할 수 없음: FRAUD_SIMILAR"
+
+
+def test_data_fraud_score_bounds() -> None:
+    body = {"seller_id": "sel_1", "score": 28, "level": "low", "summary": "s"}
+    # 예전 응답(세 필드 없음)은 알 수 없음(None)으로 읽힌다. 기본값으로 complete를 지어내지 않는다
+    legacy = FraudScoreOutput.model_validate(body)
+    assert (legacy.complete, legacy.max_possible_score, legacy.max_possible_level) == (
+        None,
+        None,
+        None,
+    )
+    partial = FraudScoreOutput.model_validate(
+        {
+            **body,
+            "unknown_rules": ["DUP_BUSINESS", "FRAUD_SIMILAR"],
+            "complete": False,
+            "max_possible_score": 73,
+            "max_possible_level": "high",
+        }
+    )
+    assert (partial.complete, partial.max_possible_score, partial.max_possible_level) == (
+        False,
+        73,
+        "high",
+    )
+    dumped = partial.model_dump(mode="json")
+    assert {"complete", "max_possible_score", "max_possible_level"} <= dumped.keys()
+    whole = FraudScoreOutput.model_validate(
+        {**body, "complete": True, "max_possible_score": 28, "max_possible_level": "low"}
+    )
+    assert whole.complete is True
+    bad_cases = [
+        {"complete": True, "unknown_rules": ["FRAUD_SIMILAR"]},  # 빠진 규칙이 있는데 complete
+        {"complete": False},  # 빠진 규칙이 없는데 불완전
+        {"max_possible_score": 27},  # 상한이 점수보다 작음
+        {"max_possible_score": 101},
+        {"max_possible_score": -1},
+        {"max_possible_level": "critical"},
+    ]
+    for bad in bad_cases:
+        with pytest.raises(ValidationError):
+            FraudScoreOutput.model_validate({**body, **bad})
+
+
+def test_data_kpi_summary() -> None:
+    assert KpiSummaryInput().context_ids == []
+    incident = {"context_id": "ctx_inc_1", "detected_at": T0, "used_memory": False}
+    kpi = IncidentKpi.model_validate(incident)
+    assert (kpi.recovered_at, kpi.mttr_seconds) == (None, None)
+    out = KpiSummaryOutput.model_validate(
+        {
+            "incidents": [incident],
+            "auto_handled_rate": 0.8,
+            "grade_counts": {"A": 3},
+            "blocked_counts": {"C": 1},
+            "escalation_count": 1,
+        }
+    )
+    assert out.grade_counts["A"] == 3
+    # 사건 0건이면 auto_handled_rate는 None (#40). 값이 있으면 0~1 범위는 그대로
+    empty = KpiSummaryOutput.model_validate({"escalation_count": 0})
+    assert empty.auto_handled_rate is None
+    assert (
+        KpiSummaryOutput.model_validate(
+            {"auto_handled_rate": None, "escalation_count": 0}
+        ).auto_handled_rate
+        is None
+    )
+    with pytest.raises(ValidationError):
+        KpiSummaryOutput.model_validate({"auto_handled_rate": 1.5, "escalation_count": 0})
+    with pytest.raises(ValidationError):
+        IncidentKpi.model_validate({**incident, "mttr_seconds": -1})
+
+
+def test_verify_recovery_and_strictness() -> None:
+    assert VerifyRecoveryInput.model_validate({"component": "payment", "since": T0}).since
+    result = VerifyRecoveryOutput.model_validate(
+        {"recovered": True, "infra_metrics_ok": True, "checked_at": T1}
+    )
+    assert result.business_metrics_ok is None  # 못 받으면 None
+    with pytest.raises(ValidationError):  # 모르는 필드는 거부
+        VerifyRecoveryOutput.model_validate(
+            {"recovered": True, "infra_metrics_ok": True, "checked_at": T1, "eta": "10m"}
+        )
+    with pytest.raises(ValidationError):  # 시간대 없는 시각은 거부
+        VerifyRecoveryInput.model_validate({"component": "payment", "since": "2026-10-22T05:00:00"})

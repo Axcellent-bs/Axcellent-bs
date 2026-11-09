@@ -1,0 +1,112 @@
+"""정확도 평가 회귀 관문: 평가를 돌려 기준(`eval/baseline.json`)보다 떨어지면 실패한다.
+
+평가는 `eval/run.py`이고, LLM은 평가용 클라이언트라 CI에서도 같은 값이 나온다.
+코드를 고쳐 정확도가 올라가면 `uv run python domains/data/eval/run.py --write-baseline`으로
+기준을 새로 저장한다(기준을 낮추는 커밋은 리뷰에서 이유를 본다).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+EVAL = Path(__file__).resolve().parents[1] / "eval"
+
+# 평가를 실제로 돌려 느리다. 기본 backend job은 `-m "not eval"`로 빼고 data-eval job이 돌린다
+pytestmark = pytest.mark.eval
+
+
+def _load(name: str):  # noqa: ANN202
+    sys.path.insert(0, str(EVAL))
+    spec = importlib.util.spec_from_file_location(f"data_eval_{name}", EVAL / f"{name}.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def run():  # noqa: ANN201
+    return _load("run")
+
+
+@pytest.fixture(scope="module")
+def report(run):  # noqa: ANN001, ANN201
+    return asyncio.run(run.evaluate())
+
+
+def test_golden_cases_cover_the_required_situations(run) -> None:  # noqa: ANN001
+    scenarios, sellers = run.load_cases()
+    kinds = {c["kind"] for c in scenarios}
+    assert len(scenarios) >= 20
+    assert kinds >= {"payment_fault", "order_drop", "normal", "sale", "empty"}
+    assert {c["cause"]["type"] for c in scenarios} >= {"deploy", "notice", "campaign", "none"}
+    assert {s["label"] for s in sellers} == {"fraud", "normal"}
+
+
+def test_answers_are_computed_from_the_scenario_data(run) -> None:  # noqa: ANN001
+    """정답지의 정답이 시나리오 데이터에서 다시 센 값과 같다 (손으로 적은 정답이 아님)."""
+    make_cases = _load("make_cases")
+    scenarios, _ = run.load_cases()
+    for case in scenarios:
+        spec = {k: v for k, v in case.items() if k != "expected"}
+        assert make_cases.expected(spec) == case["expected"], case["id"]
+
+
+def test_holdout_is_regenerated_from_its_seed(run) -> None:  # noqa: ANN001
+    """holdout은 seed로 다시 만든 시나리오·정답과 같다 (손으로 고친 케이스가 아님)."""
+    make_cases = _load("make_cases")
+    holdout = run.load_holdout()
+    assert len(holdout) == make_cases.HOLDOUT_COUNT
+    seed = holdout[0]["holdout"]["seed"]
+    assert seed == make_cases.HOLDOUT_SEED
+    specs = {s["id"]: s for s in make_cases.holdout_specs(seed)}
+    faults = sum(1 for c in holdout if c["holdout"]["fault"] is not None)
+    assert faults == len(holdout) // 2  # 장애 없는 케이스와 장애 케이스가 반반
+    for case in holdout:
+        spec = {k: v for k, v in case.items() if k != "expected"}
+        assert specs[case["id"]] == spec, case["id"]
+        assert make_cases.holdout_expected(spec) == case["expected"], case["id"]
+
+
+def test_accuracy_does_not_drop_below_baseline(run, report) -> None:  # noqa: ANN001
+    baseline = json.loads((EVAL / "baseline.json").read_text(encoding="utf-8"))["metrics"]
+    worse = run.compare(report["metrics"], baseline)
+    assert not worse, "정확도가 기준보다 떨어졌다:\n" + "\n".join(worse)
+    assert set(baseline) == set(run.METRICS)  # 지표를 늘리면 기준도 다시 저장한다
+
+
+def test_guards_hold_regardless_of_the_baseline(report) -> None:  # noqa: ANN001
+    """기준과 상관없이 지켜야 하는 것: 지어낸 숫자·근거 없는 후보가 남지 않는다."""
+    assert report["metrics"]["llm.fabricated_number_rate"] == 0.0
+    assert report["metrics"]["root_cause.ungrounded_survived_rate"] == 0.0
+    assert not any(c["answer_drift"] for c in report["cases"])
+    # 판매자 데이터를 shop-api 코드로 만들었을 때 정답지 facts가 그대로 나온다
+    assert not any(s["facts_drift"] for s in report["sellers"])
+    assert all(s["skill_status"] == "completed" for s in report["sellers"])
+    # 불완전 표시와 보수적 상한이 늘 채워지고, 상한은 점수 이상이다
+    for s in report["sellers"]:
+        assert s["skill_complete"] is (not s["unknown_rules"])
+        assert s["skill_score"] <= s["skill_max_score"] <= 100
+        assert s["skill_max_level"] in ("low", "mid", "high")
+
+
+def test_compare_flags_drops_and_lost_values(run) -> None:  # noqa: ANN001
+    base = {
+        "anomaly.detection_rate": 0.8,
+        "impact.mean_abs_amount_error": 10.0,
+        "fraud.precision": 0.5,
+    }
+    now = {
+        "anomaly.detection_rate": 0.7,
+        "impact.mean_abs_amount_error": 12.0,
+        "fraud.precision": None,
+    }
+    worse = run.compare(now, base)
+    assert len(worse) == 3
+    assert run.compare(base, base) == []

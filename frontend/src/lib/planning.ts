@@ -1,0 +1,560 @@
+// 기획(planning 8101)·개발(dev 8111) 백엔드 REST·SSE와 화면 상태(State)를 잇는다.
+// 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
+// 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
+import type { Proposal } from './proposals'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
+import { RULE_LABEL, type Action, type FillPreview, type Activity, type AuditItem, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
+
+export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
+/** 개발·배포 서비스 에이전트(dev, 8111). 업무 로직은 기획과 같은 planning 도메인이라 같은 REST(`/api/planning`)를 쓴다 */
+export const DEV_API = (import.meta.env.VITE_DEV_API_URL as string | undefined) ?? 'http://localhost:8111'
+/** 화면 서비스(요청·기획서 / 개발·배포)마다 자기 에이전트를 부른다 */
+export const apiBase = (part: 'planning' | 'dev') => (part === 'dev' ? DEV_API : PLANNING_API)
+
+type Json = Record<string, unknown>
+const camel = (k: string) => k.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+function camelize(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(camelize)
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [camel(k), camelize(x)]))
+  return v
+}
+
+const pad = (n: number) => String(n).padStart(2, '0')
+/** ISO 시각 → KST "MM-DD HH:mm". 비어 있으면 빈 문자열 */
+export function kst(iso?: unknown): string {
+  if (typeof iso !== 'string' || !iso) return ''
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return iso
+  const k = new Date(t + 9 * 3_600_000)
+  return `${pad(k.getUTCMonth() + 1)}-${pad(k.getUTCDate())} ${pad(k.getUTCHours())}:${pad(k.getUTCMinutes())}`
+}
+
+export const EMPTY_STATE: State = {
+  seq: 0,
+  outbox: [],
+  requests: [],
+  specs: [],
+  tasks: [],
+  prs: [],
+  threads: [],
+  docs: [],
+  decisions: [],
+  incidents: [],
+  activity: [],
+  reviews: [],
+  audit: [],
+  draftsIn: 0,
+  draftsAccepted: 0,
+  warnings: 0,
+  firstPrMinutes: [],
+  autoPolicy: { rules: [], observing: [], history: [], log: [] },
+}
+
+/** `GET /api/planning/review-queue` 한 줄 */
+export interface QueueItem {
+  kind: 'spec' | 'pr'
+  id: string
+  title: string
+  action: 'confirm_spec' | 'merge_pr'
+  state: string
+  rules: string[]
+  params: Record<string, number | string | boolean | string[]>
+  at?: string
+  decide_with?: Action
+  evidence?: CrossEvidence[] // 교차검증 근거 (merge_pr, 총괄·데이터분석에 물은 결과)
+}
+
+const VERIFIER: Record<QueueItem['action'], string> = { confirm_spec: '인사 check_plan', merge_pr: '총괄 · 데이터분석 근거 → 안전 관문' }
+
+function toReview(q: QueueItem, ctxOf: (ref: string) => string): CrossReview & { decideWith?: Action } {
+  const done = /승인|확정|머지/.test(q.state) ? '승인' : /거절/.test(q.state) ? '거절' : undefined
+  return {
+    id: `XR-${q.id}`,
+    t: kst(q.at),
+    ctx: ctxOf(q.id),
+    target: q.action,
+    ref: q.id,
+    title: q.title,
+    lane: Number(q.params.irreversible_count ?? 0) > 0 || q.state.includes('사람') ? 'human' : 'ai',
+    routeWhy: q.rules.map((k) => RULE_LABEL[k] ?? k),
+    summary: Object.entries(q.params).map(([k, v]) => `${k} ${v}`).join(' · '),
+    evidence: q.evidence ?? [],
+    checks: [],
+    verifier: VERIFIER[q.action],
+    result: done,
+    decideWith: q.decide_with,
+    at: q.at,
+  }
+}
+
+/** 백엔드 상태(`GET /api/planning/state`·SSE `state`)와 교차검증 대기열 → 화면 상태 */
+export function fromBackend(raw: Json, queue: QueueItem[]): State {
+  const s = camelize(raw) as Json
+  const list = <T,>(k: string) => (Array.isArray(s[k]) ? (s[k] as Json[]) : []) as unknown as T[]
+  const requests = list<Json>('requests').map((r) => ({ ...r, ctx: r.contextId ?? '' }) as unknown as Request)
+  const prs = list<Json>('prs').map((p) => ({
+    ...p,
+    mergedBy: p.merged ? (p.autoReview ? 'review' : p.auto ? 'rule' : 'human') : undefined,
+  }) as unknown as PR)
+  const ctxOf = (ref: string): string => {
+    const spec = ref.startsWith('SPEC') ? ref : undefined
+    const task = (s.tasks as Json[] | undefined)?.find((t) => prs.find((p) => p.id === ref)?.task === t.id)
+    const specId = spec ?? (task?.spec as string | undefined)
+    const req = (s.specs as Json[] | undefined)?.find((x) => x.id === specId)?.request
+    return requests.find((r) => r.id === req)?.ctx ?? ''
+  }
+  const policy = (s.autoPolicy ?? {}) as Json
+  return {
+    ...EMPTY_STATE,
+    seq: typeof s.seq === 'number' ? s.seq : 0,
+    outbox: list<Json>('outbox').map((m) => ({ ...m, t: kst(m.at) || (m.t as string) || '', ctx: m.contextId ?? m.ctx ?? '' }) as unknown as OutMsg),
+    requests,
+    specs: list('specs'),
+    tasks: list('tasks'),
+    prs,
+    threads: list<Json>('threads').map((th) => ({
+      ...th,
+      messages: ((th.messages as Json[]) ?? []).map((m) => ({ ...m, t: kst(m.at) || undefined, decision: m.decision ?? undefined })),
+    }) as unknown as Thread),
+    docs: list<Json>('docs').map((d) => ({ ...d, updated: kst(d.updatedAt), created: kst(d.createdAt) || undefined, about: d.about ?? undefined }) as unknown as Doc),
+    decisions: list('decisions'),
+    incidents: list<Json>('incidents').map((i) => ({ ...i, ctx: i.contextId ?? '', at: kst(i.openedAt) }) as unknown as Incident),
+    activity: list<Json>('activity').map((a) => ({ ...a, t: kst(a.at), ctx: a.contextId ?? '', seq: a.seq ?? undefined, grade: a.grade ?? undefined }) as unknown as Activity),
+    reviews: queue.map((q) => toReview(q, ctxOf)),
+    audit: [] as AuditItem[], // 백엔드에 감사 목록 API가 아직 없다
+    draftsIn: Number(s.draftsIn ?? 0),
+    draftsAccepted: Number(s.draftsAccepted ?? 0),
+    warnings: Number(s.warnings ?? 0),
+    firstPrMinutes: (s.firstPrMinutes as number[]) ?? [],
+    ...(Array.isArray(s.chats) ? { chats: toThreads(raw.chats) } : {}),
+    proposals: list<Json>('proposals').map((p) => {
+      const h = p.handoff as Json | null
+      const r = p.result as Json | null
+      return {
+        ...p, created: kst(p.createdAt), note: p.note ?? undefined, insightId: p.insightId ?? undefined, format: p.format ?? undefined, request: p.request ?? undefined, spec: p.spec ?? undefined,
+        bodyMd: p.bodyMd ?? undefined, target: p.target ? { ...(p.target as Json), measure: (p.target as Json).measure ?? undefined } : undefined, warnings: p.warnings ?? [], audience: p.audience ?? undefined, shortsFormat: p.shortsFormat ?? undefined,
+        handoff: h ? { ok: !!h.ok, reason: h.reason ?? undefined, campaign: h.campaign ?? undefined, at: kst(h.at) || undefined, retry: (h.retry as number | undefined) || undefined } : undefined,
+        result: r ? { ...r, at: kst(r.at) } : undefined,
+        past: ((Array.isArray(p.past) ? p.past : []) as Json[]).map((x) => ({ ...x, noteLine: x.noteLine ?? undefined, actions: x.actions ?? [] })),
+        followOf: p.followOf ?? undefined,
+      } as unknown as Proposal
+    }),
+    autoPolicy: {
+      rules: [], // 관찰 기반 학습 기준은 백엔드에 아직 없다 (FR-ATL-007~009)
+      observing: [],
+      history: ((policy.history as Json[]) ?? []).map((h) => ({ ...h, t: kst(h.at) || (h.t as string) || '' })) as unknown as State['autoPolicy']['history'],
+      log: ((policy.log as Json[]) ?? []).map((l) => ({ ...l, t: kst(l.at) })) as unknown as State['autoPolicy']['log'],
+    },
+  }
+}
+
+export class PlanningApiError extends Error {
+  readonly code: string
+  readonly details?: { action?: string; status?: string; review_id?: string | null }
+  constructor(code: string, message: string, details?: PlanningApiError['details']) {
+    super(message)
+    this.code = code
+    this.details = details
+  }
+}
+
+/** 실행 관문이 보류(held)한 건을 사람이 승인한다 (safety 보류 건 결정, 재무 화면과 같은 방식) */
+export async function approveReview(reviewId: string, note = '교차검증 대기에서 사람이 확인하고 진행'): Promise<void> {
+  const res = await fetch(`${SAFETY_API_URL}/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` },
+    body: JSON.stringify({ decision: 'approved', note }),
+  })
+  if (!res.ok) {
+    const err = ((await res.json().catch(() => ({}))) as { error?: { message?: string } }).error
+    throw new PlanningApiError('REVIEW_FAILED', `안전 관문 승인 실패: ${err?.message ?? res.status}`)
+  }
+}
+
+async function call<T>(base: string, path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = (body as { error?: { code?: string; message?: string; details?: PlanningApiError['details'] } }).error
+    throw new PlanningApiError(err?.code ?? `HTTP_${res.status}`, err?.message ?? `서버 응답 ${res.status}`, err?.details)
+  }
+  return (body as { data: T }).data
+}
+
+// 쓰기 토큰 (백엔드 auth.py): 사람 결정·요청 접수·대화는 사람 토큰, 초기화·형상관리 연결은 운영자(admin) 토큰
+type Who = 'human' | 'admin'
+const post = (body: unknown = {}, who: Who = 'human'): RequestInit => {
+  const token = who === 'admin' ? RELAY_TOKEN : SAFETY_HUMAN_TOKEN
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  }
+}
+
+/** 연결 페이지 › 문서 › 노션 (기획 서버). 토큰 값은 돌려받지 않고 끝 4자리만 */
+export interface NotionConnection { connected: boolean; source: 'saved' | 'env' | 'none'; hint: string; workspace: string; checked_at: string | null; oauth_ready: boolean }
+export const notionApi = {
+  get: () => call<NotionConnection>(PLANNING_API, '/notion/connection'),
+  save: (token: string) => call<NotionConnection>(PLANNING_API, '/notion/connection', post({ token }, 'admin')),
+  check: () => call<NotionConnection>(PLANNING_API, '/notion/connection/check', post({}, 'admin')),
+  remove: () => call<NotionConnection>(PLANNING_API, '/notion/connection/delete', post({}, 'admin')),
+  oauthStart: () => call<{ url: string }>(PLANNING_API, '/notion/oauth/start', post({}, 'admin')),
+  search: (query: string) => call<NotionHit[]>(PLANNING_API, '/notion/search', post({ query })),
+}
+/** 자동 채우기 (저장하지 않음): 기획 AI가 화면 초안의 자유 작성·지금 칸·질문을 읽은 값. 예시 모드에서도 같은 AI */
+export async function previewFill(input: { spec: string; template?: string; title: string; bodyMd: string; question?: string; current: { problem: string; goal: string; requirements: string[]; done_criteria: string[] } }): Promise<FillPreview & { ai: boolean }> {
+  const r = await call<FillPreview & { ai: boolean }>(PLANNING_API, '/spec-fill', post({ spec: input.spec, template: input.template ?? 'plan', title: input.title, body_md: input.bodyMd, question: input.question ?? '', current: input.current }))
+  return { problem: r.problem ?? '', goal: r.goal ?? '', reqs: r.reqs ?? [], done: r.done ?? [], answer: r.answer ?? '', extra: r.extra ?? {}, by: r.by ?? 'rule', ai: !!r.ai }
+}
+/** 빈 칸 제안 (저장하지 않음): 비어 있는 칸(fields)에 쓸 안을 기획 AI가 낸다 */
+export async function previewSuggest(input: { spec: string; template: string; title: string; bodyMd: string; basis: string[]; fields: string[]; current: Record<string, unknown> }): Promise<FillPreview & { ai: boolean }> {
+  const r = await call<FillPreview & { ai: boolean }>(PLANNING_API, '/spec-fill', post({ mode: 'suggest', spec: input.spec, template: input.template, title: input.title, body_md: input.bodyMd, basis: input.basis, fields: input.fields, current: input.current }))
+  return { problem: r.problem ?? '', goal: r.goal ?? '', reqs: r.reqs ?? [], done: r.done ?? [], answer: '', extra: r.extra ?? {}, by: r.by ?? 'none', ai: !!r.ai }
+}
+export interface NotionHit { id: string; title: string; url: string; edited: string }
+
+export const planningApi = (base: string) => ({
+  state: () => call<Json>(base, '/state'),
+  reviewQueue: () => call<QueueItem[]>(base, '/review-queue'),
+  action: (a: Action) => call<Json>(base, '/actions', post(a)),
+  eventsUrl: () => `${base}/api/planning/events`,
+})
+
+// ---- 배포 전 기획서 대조 (planning `/api/planning/release-checks`). SSE 상태와 따로 읽는다
+export interface ReleaseCheckItem { para_id: string; status: 'covered' | 'missing_task' | 'not_merged' | 'incident_open'; pr_numbers: number[]; content: 'match' | 'mismatch' | 'none'; content_notes: string[] }
+export interface ReleaseCheck {
+  check_id: string; spec_id: string; request_id: string; env: 'dev' | 'prod'; at: string
+  verdict: 'ready' | 'hold' | 'needs_human'; hold_reasons: string[]; items: ReleaseCheckItem[]
+  pr_numbers: number[]; order_sent: boolean; order_result: string | null
+}
+/** 기획서 하나의 배포 전 대조 기록 (최근 순). 10초마다 다시 읽는다. 서버가 꺼져 있으면 빈 목록 */
+export function useReleaseChecks(spec: string): ReleaseCheck[] {
+  return useAllReleaseChecks().filter((x) => x.spec_id === spec)
+}
+/** 모든 기획서의 배포 전 대조 기록 (최근 순). 요청 목록처럼 여러 기획서를 한 번에 볼 때 쓴다 */
+export function useAllReleaseChecks(): ReleaseCheck[] {
+  const [rows, setRows] = useState<ReleaseCheck[]>([])
+  useEffect(() => {
+    let alive = true
+    const load = () => call<ReleaseCheck[]>(PLANNING_API, '/release-checks')
+      .then((all) => { if (alive) setRows(all) })
+      .catch(() => { if (alive) setRows([]) })
+    void load()
+    const t = setInterval(load, 10_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  return rows
+}
+
+// ---- 배포 기록·배포 후 확인 (dev 서비스 `/api/planning/deployments`). SSE 상태와 따로 읽는다
+export interface RollbackSuggestion { suspect_count: number; low_confidence: number; irreversible_count: number; prior_rollbacks: number; grade: 'B' | 'C'; rules: string[] }
+export interface DeployCheck { deployment: string; at: string; window_minutes: number; verdict: 'ok' | 'watch' | 'suspect'; evidence: string[]; candidate_prs: string[]; rollback: RollbackSuggestion | null }
+export interface Deployment {
+  id: string; pr_numbers: number[]; version: string | null; env: 'dev' | 'prod'; at: string
+  status: 'requested' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
+  approved_by: string | null; approval_reasons: string[]; protected_paths: string[]; check: DeployCheck | null
+}
+
+export const deployApi = (base: string) => ({
+  list: () => call<unknown>(base, '/deployments').then((d) => (Array.isArray(d) ? (d as Deployment[]).filter((x) => x && typeof x.id === 'string') : [])),
+  approve: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, post()),
+  check: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/check`, post()),
+})
+
+// ---- 형상관리 연결 목록 (dev 서비스 `/api/planning/vcs/connections`). 레포 여러 개를 잇고 PR마다 대상 레포를 고른다
+export interface VcsConnection {
+  id: string; kind: string; repo: string; base_url: string; base_branch: string; description: string
+  paths: string[]; mount?: string; token_set: boolean; token_hint: string; source: 'screen' | 'env'
+  // 인증: token(사람 토큰) · app(GitHub App). App 개인 키는 넣었는지만 온다
+  auth?: VcsAuth; app_id?: string; installation_id?: string; key_set?: boolean
+}
+export type VcsAuth = 'token' | 'app'
+export interface VcsConnectionInput {
+  id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string
+  auth?: VcsAuth; app_id?: string; installation_id?: string; private_key?: string
+  detect_branch?: boolean // 브랜치를 비우면 레포 기본 브랜치를 읽어 넣는다 (GitHub)
+}
+export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string; inventory?: VcsInventory | null }
+// 연결 대장 (`/vcs/inventory`): 서버 종류·버전·토큰 권한·마지막 확인. 사내 설치형은 패치 기준과 맞춘다
+export type VcsInventoryStatus = 'ok' | 'outdated' | 'no_policy' | 'hosted' | 'unknown' | 'error'
+export interface VcsInventory {
+  connection_id: string; repo: string; kind: string; product: string; hosted: boolean
+  version: string; min_version: string; scopes: string[]; scope_note: string; token_expires: string
+  status: VcsInventoryStatus; warnings: string[]; checked_at: string; error_code: string; error: string
+  // 취약점 소식 맞춰 보기: emergency(KEV) · warning · clear · feed_failed. 긴급이면 안전 서비스에 보류 알림
+  vuln?: '' | 'emergency' | 'warning' | 'clear' | 'feed_failed'; kev_cves?: string[]; vuln_cves?: string[]; vuln_total?: number; vuln_error?: string
+  safety_hold?: { hold: boolean; sent: boolean; error: string; judged_at: string } | null
+}
+const toInventory = (d: unknown): VcsInventory[] =>
+  Array.isArray(d) ? (d as VcsInventory[]).filter((r) => r && typeof r.connection_id === 'string').map((r) => ({ ...r, scopes: r.scopes ?? [], warnings: r.warnings ?? [] })) : []
+
+// 녹화 데모(목)는 모르는 주소에 빈 배열·{ok:true}를 준다. 연결 모양이 아닌 값은 버린다
+const toConnections = (d: unknown): VcsConnection[] =>
+  Array.isArray(d) ? (d as VcsConnection[]).filter((c) => c && typeof c.id === 'string' && typeof c.repo === 'string').map((c) => ({ ...c, paths: Array.isArray(c.paths) ? c.paths : [] })) : []
+
+export const vcsApi = (base: string) => {
+  const list = () => call<unknown>(base, '/vcs/connections').then(toConnections)
+  // POST 응답이 목록이 아니면(목 등) 다시 읽는다
+  const after = (d: unknown) => (Array.isArray(d) ? toConnections(d) : list())
+  return {
+    list,
+    save: (c: VcsConnectionInput) => call<unknown>(base, '/vcs/connections', post(c, 'admin')).then(after),
+    remove: (id: string) => call<unknown>(base, `/vcs/connections/${encodeURIComponent(id)}/delete`, post({}, 'admin')).then(after),
+    test: (id: string) => call<VcsTestResult>(base, `/vcs/connections/${encodeURIComponent(id)}/test`, post({}, 'admin')),
+    inventory: () => call<unknown>(base, '/vcs/inventory').then(toInventory),
+    checkAll: () => call<unknown>(base, '/vcs/inventory/check', post({}, 'admin')).then(toInventory),
+  }
+}
+
+// ---- 요청 작업 코딩 방식 (dev 서비스 `/api/planning/coding-settings`). 회사 설정 + 서버 AI 체험 한도
+export type CodingSetting = 'auto' | 'agent' | 'subscription'
+export interface CodingSettings {
+  mode: CodingSetting // 회사 설정
+  resolved: 'agent' | 'subscription' // 지금 넘겨받는 요청 작업을 실제로 누가 코딩하나
+  why: string
+  agents_connected: string[] // 최근 본인 Claude(MCP)로 작업을 본 개발자
+  trial_used: number // 서버 AI가 쓴 토큰
+  trial_limit: number
+  run_max_calls?: number // 코딩 실행 한 번의 LLM 호출 한도
+  run_max_tokens?: number // 코딩 실행 한 번의 토큰 한도
+  estimate?: CodingEstimate // 대기 작업 예상 규모 (지난 서버 AI 코딩의 중앙값)
+  models?: Partial<Record<CodingStep, string>> // 서버 AI 단계별 모델 (비운 단계는 기본 모델)
+  model_default?: string | null
+  // 고객사 API 키(BYOK): 넣었는지·끝 4자리만. 있으면 체험 한도 대신 월 예산만 본다
+  company_key?: { key_set: boolean; key_hint: string; base_url: string; model: string }
+  budget?: { month: string; limit: number | null; used: number } // 서버 AI 월 예산 (토큰)
+}
+// 토큰 한도 (비율 표시용). 한 번 읽어 화면들이 같이 쓴다. 못 읽으면 서버 기본값
+export interface CodingEstimate { samples: number; tokens: number; tokens_max: number; calls: number; files: number }
+const LIMIT_DEFAULT: { trial: number; runCalls: number; runTokens: number; est: CodingEstimate | null } = { trial: 1_000_000, runCalls: 40, runTokens: 600_000, est: null }
+let limitCache: Promise<typeof LIMIT_DEFAULT> | null = null
+export function useCodingLimits(): typeof LIMIT_DEFAULT {
+  const [v, setV] = useState(LIMIT_DEFAULT)
+  useEffect(() => {
+    limitCache ??= codingSettingsApi(DEV_API).get()
+      .then((c) => ({ trial: c.trial_limit || LIMIT_DEFAULT.trial, runCalls: c.run_max_calls || LIMIT_DEFAULT.runCalls, runTokens: c.run_max_tokens || LIMIT_DEFAULT.runTokens, est: c.estimate ?? null }))
+      .catch(() => { limitCache = null; return LIMIT_DEFAULT })
+    let alive = true
+    void limitCache.then((x) => alive && setV(x))
+    return () => { alive = false }
+  }, [])
+  return v
+}
+
+// ---- 나 (dev 서비스 `/api/planning/me`): 이 화면을 쓰는 사람(사람 토큰)과 그 사람의 본인 Claude 연결
+export interface Me { name: string | null; claude_connected: boolean; claude_seen_at: string | null; team: { name: string; seen_at: string }[] }
+let meCache: Promise<Me | null> | null = null
+export function useMe(): Me | null {
+  const [v, setV] = useState<Me | null>(null)
+  useEffect(() => {
+    meCache ??= call<Me>(DEV_API, '/me', { headers: SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {} })
+      .then((m) => (m && 'claude_connected' in m ? m : null))
+      .catch(() => { meCache = null; return null })
+    let alive = true
+    void meCache.then((x) => alive && setV(x))
+    return () => { alive = false }
+  }, [])
+  return v
+}
+
+export type CodingStep = 'plan' | 'write' | 'review'
+export const codingSettingsApi = (base: string) => ({
+  get: () => call<CodingSettings>(base, '/coding-settings'),
+  set: (mode: CodingSetting) => call<CodingSettings>(base, '/coding-settings', post({ mode }, 'admin')),
+  setModels: (models: Partial<Record<CodingStep, string>>) => call<CodingSettings>(base, '/coding-settings', post({ models }, 'admin')),
+  setBudget: (tokens: number | null) => call<CodingSettings>(base, '/coding-settings', post({ budget_tokens: tokens }, 'admin')),
+  // 키는 보내기만 한다 (응답은 끝 4자리만). 비우면 이전 키 그대로
+  setCompanyKey: (k: { api_key?: string; base_url?: string; model?: string }) => call<CodingSettings>(base, '/coding-settings/company-key', post(k, 'admin')),
+  deleteCompanyKey: () => call<CodingSettings>(base, '/coding-settings/company-key/delete', post({}, 'admin')),
+})
+
+// ---- 직접 개발 (dev 서비스 `/api/planning/dev-tasks`). 개발팀이 기획을 바로 넣으면 코딩 에이전트가 PR까지 만든다
+export interface DevTaskInput { title: string; plan: string; done?: string; paths?: string[]; connection?: string }
+export interface DevTaskStarted { request_id: string; spec_id: string; task_id: string; status: 'queued' }
+
+export const devTaskApi = (base: string) => ({
+  // 목(녹화 데모)은 POST에 {ok:true}만 준다. task_id가 없으면 실패로 본다
+  create: (x: DevTaskInput) => call<Partial<DevTaskStarted>>(base, '/dev-tasks', post(x)).then((d) => {
+    if (!d || typeof d.task_id !== 'string') throw new PlanningApiError('NO_TASK', '개발·배포 서버가 작업을 만들지 않았어요')
+    return d as DevTaskStarted
+  }),
+  retry: (taskId: string, approved = false) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post(approved ? { approved } : {})),
+  // PR 열기 보류 건 새로 받기 (만료·모름). 받은 review_id를 사람이 승인한 뒤 retry(approved)
+  renewHold: (taskId: string) => call<{ review_id: string | null }>(base, `/dev-tasks/${encodeURIComponent(taskId)}/renew-hold`, post()),
+  cancel: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/cancel`, post()),
+  // 멈춘 작업(중단·실패·돌려보냄) 폐기. 다시 돌리지 않고 작업 목록에서 숨길 수 있다
+  discard: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/discard`, post()),
+  // 사람이 기획에 돌려보내기 (코드 변경이 아닌 일). 돌고 있으면 멈추고 열린 PR은 닫는다
+  returnToPlanning: (taskId: string, to: string, reason: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/return`, post({ to, reason })),
+  // 서버 AI로 넘기기: 개발자 Claude 대기열에서 아무도 안 가져간 작업을 서버 AI가 맡는다
+  toAgent: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/to-agent`, post()),
+  textOk: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/text-ok`, post()),
+  // 반영됨으로 닫기: 바뀐 내용이 없어 멈춘 작업을 앞 작업 PR이 반영한 것으로 완료 (PR 없음)
+  closeCovered: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/close-covered`, post()),
+  revise: (taskId: string, note: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/revise`, post({ note })),
+})
+
+// ---- AI와 대화 (dev 서비스 `/api/planning/dev-chat`). 답이 오면 바뀐 대화 전체를 돌려준다 (5~30초)
+export interface ChatSend { thread_id?: string; message: string; connection?: string; mode?: CodingMode }
+
+// 대화 모양이 아닌 값(목의 {ok:true} 등)은 버린다
+const isThread = (x: unknown): x is Json => !!x && typeof x === 'object' && typeof (x as Json).id === 'string' && Array.isArray((x as Json).messages)
+const toThread = (x: Json): ChatThread => camelize(x) as ChatThread
+export const toThreads = (d: unknown): ChatThread[] => (Array.isArray(d) ? d.filter(isThread).map(toThread) : [])
+
+export const chatApi = (base: string) => {
+  const one = (d: unknown) => {
+    if (!isThread(d)) throw new PlanningApiError('NO_THREAD', '개발·배포 서버가 대화를 돌려주지 않았어요')
+    return toThread(d)
+  }
+  return {
+    list: () => call<unknown>(base, '/dev-chat').then(toThreads),
+    get: (id: string) => call<unknown>(base, `/dev-chat/${encodeURIComponent(id)}`).then(one),
+    send: (x: ChatSend) => call<unknown>(base, '/dev-chat', post(x)).then(one),
+  }
+}
+
+// ---- 레포 작업 공간 (dev 서비스 `/api/planning/repo/*`). 연결된 레포의 PR·브랜치를 GitHub를 열지 않고 다룬다
+export type RepoPrState = 'open' | 'merged' | 'closed'
+export type RepoCheckState = 'passed' | 'failed' | 'pending'
+export interface RepoInternal { id: string; task: string; merged: boolean; closed: boolean }
+export interface RepoPr {
+  number: number; title: string; state: RepoPrState; branch: string; base: string; author: string; body?: string; draft: boolean
+  created_at: string | null; updated_at: string | null; merged_at: string | null; closed_at: string | null; url: string | null
+  comments: number | null; checks: RepoCheckState | null; internal?: RepoInternal | null
+}
+export interface RepoMeta { connection: string; repo: string; base_branch: string; read_only: boolean; issues?: boolean }
+export type RepoIssueState = 'open' | 'closed'
+export interface RepoIssue {
+  number: number; title: string; state: RepoIssueState; author: string; body?: string; labels: string[]; assignees: string[]
+  comments: number | null; created_at: string | null; updated_at: string | null; closed_at: string | null; url: string | null
+  reason: string | null // completed · not_planned
+}
+export interface RepoIssueDetail extends RepoMeta { issue: RepoIssue; comments: RepoComment[] }
+export interface RepoFile { path: string; status: string; additions: number; deletions: number; patch: string | null; previous_path: string | null; truncated: boolean }
+export interface RepoCommit { sha: string; message: string; author: string; at: string | null }
+export interface RepoComment { id: string; author: string; body: string; at: string | null }
+export interface RepoPrDetail extends RepoMeta {
+  pr: RepoPr; internal: RepoInternal | null
+  diff: { number: number; files: RepoFile[]; truncated: boolean; total_files: number }
+  commits: RepoCommit[]; comments: RepoComment[]
+  checks: { state: RepoCheckState; runs: { name: string; state: RepoCheckState }[] } | null
+}
+export interface RepoBranch {
+  name: string; sha: string; protected: boolean; default: boolean; base: boolean; last_commit_at: string | null
+  ahead: number | null; behind: number | null; pr: { number: number; state: RepoPrState; title: string } | null
+}
+export type MergeMethod = 'merge' | 'squash' | 'rebase'
+// 커밋 그래프: 최신이 먼저, 자식이 늘 부모보다 앞. refs = 이 커밋이 끝인 브랜치, prs = 이 커밋에 달린 PR
+export interface RepoGraphPr { number: number; state: RepoPrState; title: string; branch: string; internal: string | null }
+export interface RepoGraphCommit { sha: string; parents: string[]; message: string; author: string; at: string | null; refs: string[]; prs: RepoGraphPr[] }
+export interface RepoGraph extends RepoMeta {
+  commits: RepoGraphCommit[]; heads: Record<string, string>; selected: string[]
+  branches: { name: string; sha: string; default: boolean; base: boolean }[]; truncated: boolean; limit: number
+}
+export interface RepoCommitDetail {
+  sha: string; parents: string[]; message: string; author: string; at: string | null; url: string | null
+  files: RepoFile[]; total_files: number
+}
+
+const qs = (x: Record<string, string | number | undefined>) => {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(x)) if (v !== undefined && v !== '') p.set(k, String(v))
+  const t = p.toString()
+  return t ? `?${t}` : ''
+}
+
+export const repoApi = (base: string, connection?: string) => {
+  const c = connection || undefined
+  const pr = (n: number, act: string) => `/repo/prs/${n}/${act}${qs({ connection: c })}`
+  return {
+    prs: (state: 'all' | RepoPrState = 'all', q?: string, limit = 100) =>
+      call<RepoMeta & { items: RepoPr[] }>(base, `/repo/prs${qs({ connection: c, state, q, limit })}`),
+    pr: (n: number) => call<RepoPrDetail>(base, `/repo/prs/${n}${qs({ connection: c })}`),
+    branches: () => call<RepoMeta & { items: RepoBranch[] }>(base, `/repo/branches${qs({ connection: c })}`),
+    merge: (n: number, method: MergeMethod) => call<{ pr: RepoPr; via: 'internal' | 'repo' }>(base, pr(n, 'merge'), post({ method })),
+    close: (n: number) => call<{ pr: RepoPr }>(base, pr(n, 'close'), post()),
+    reopen: (n: number) => call<{ pr: RepoPr }>(base, pr(n, 'reopen'), post()),
+    comment: (n: number, body: string) => call<{ comment: RepoComment }>(base, pr(n, 'comment'), post({ body })),
+    revert: (n: number) => call<{ revert: { number: number; url: string | null; branch: string } }>(base, pr(n, 'revert'), post()),
+    graph: (branches: string[] | null, limit: number) =>
+      call<RepoGraph>(base, `/repo/graph${qs({ connection: c, branches: branches?.length ? branches.join(',') : undefined, limit })}`),
+    commit: (sha: string) => call<RepoMeta & { commit: RepoCommitDetail }>(base, `/repo/commits/${encodeURIComponent(sha)}${qs({ connection: c })}`),
+    deleteBranch: (name: string) => call<{ deleted: string }>(base, `/repo/branches/delete${qs({ connection: c })}`, post({ name })),
+    issues: (state: 'all' | RepoIssueState = 'all', q?: string, limit = 100) =>
+      call<RepoMeta & { items: RepoIssue[] }>(base, `/repo/issues${qs({ connection: c, state, q, limit })}`),
+    issue: (n: number) => call<RepoIssueDetail>(base, `/repo/issues/${n}${qs({ connection: c })}`),
+    commentIssue: (n: number, body: string) => call<{ comment: RepoComment }>(base, `/repo/issues/${n}/comment${qs({ connection: c })}`, post({ body })),
+  }
+}
+
+// ── 화면 상태 (예전 store.ts) ──
+// 화면 상태는 그 화면의 백엔드(기획 8101 또는 개발 8111) 한 곳에서 온다.
+// SSE `GET /api/planning/events`로 바뀔 때마다 전체 상태를 받고, 사람 버튼은 `POST /api/planning/actions`로 보낸다.
+// 화면 안에서 상태를 지어내거나 혼자 진행시키지 않는다. 서버가 꺼져 있으면 빈 화면과 "연결 안 됨"을 보여 준다.
+
+/** 액션이 실패하면 화면(PlanningPage)이 토스트로 알린다 */
+export const ACTION_ERROR_EVENT = 'planning:action-error'
+const report = (message: string) => window.dispatchEvent(new CustomEvent(ACTION_ERROR_EVENT, { detail: message }))
+
+export function useSharedStore(base: string): [State, (a: Action) => void, boolean] {
+  const [state, setState] = useState<State>(EMPTY_STATE)
+  const [connected, setConnected] = useState(false)
+  const api = planningApi(base)
+  const reviews = useRef(state.reviews)
+  reviews.current = state.reviews
+
+  useEffect(() => {
+    let alive = true
+    const apply = async (raw: Record<string, unknown>) => {
+      const queue = await api.reviewQueue().catch(() => [] as QueueItem[])
+      if (alive) setState(fromBackend(raw, queue))
+    }
+    const es = new EventSource(api.eventsUrl())
+    es.addEventListener('state', (e) => {
+      setConnected(true)
+      void apply(JSON.parse((e as MessageEvent).data) as Record<string, unknown>)
+    })
+    es.onopen = () => setConnected(true)
+    es.onerror = () => setConnected(es.readyState === EventSource.OPEN)
+    return () => {
+      alive = false
+      es.close()
+    }
+  }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dispatch = useCallback((a: Action) => {
+    let send: Action | undefined = a
+    // 교차검증 대기열의 "승인"은 백엔드가 알려 준 확정·머지 액션(decide_with)으로 보낸다
+    if (a.type === 'decideReview' || (a.type === 'humanDecide' && a.ok)) {
+      const r = reviews.current.find((x) => x.id === a.review) as { decideWith?: Action } | undefined
+      send = r?.decideWith
+      if (!send) return report('이 검증 건을 처리할 서버 액션이 없습니다')
+    } else if (a.type === 'humanDecide') {
+      return report('보류는 아직 서버에서 받지 않습니다. 기다리면 대기열에 남습니다')
+    }
+    const human = a.type === 'humanDecide' || a.type === 'decideReview'
+    const action = send
+    api.action(action).catch(async (e: unknown) => {
+      // 사람이 "확인하고 진행"을 눌렀는데 관문이 사람 승인(C)으로 보류하면, 그 보류 건을 사람 토큰으로
+      // 승인하고 같은 액션을 다시 보낸다 (같은 멱등성 키라 관문은 승인된 결정을 돌려준다)
+      const held = e instanceof PlanningApiError && e.code === 'GATE_REJECTED' && e.details?.status === 'held' && e.details.review_id
+      if (human && held) {
+        try {
+          await approveReview(String((e as PlanningApiError).details?.review_id))
+          await api.action(action)
+          return
+        } catch (again) {
+          e = again
+        }
+      }
+      if (e instanceof PlanningApiError && e.code === 'UNKNOWN_ACTION') report(`이 기능은 아직 ${base === DEV_API ? '개발' : '기획'} 서버에 연결되지 않았습니다`)
+      else if (e instanceof PlanningApiError) report(e.message)
+      else report(`${base === DEV_API ? '개발' : '기획'} 서버에 연결할 수 없습니다`)
+    })
+  }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return [state, dispatch, connected]
+}

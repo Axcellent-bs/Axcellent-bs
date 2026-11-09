@@ -1,0 +1,350 @@
+"""`request_incident_compensation`: 사건(장애)으로 피해를 본 고객 전원에게 보상 쿠폰을 요청한다.
+
+SCN-A 8단계. 영향 고객(데이터분석 영향 분석)은 문의를 안 낸 사람도 있어서
+`request_compensation`(문의가 있어야 한다)으로는 보낼 수 없다. 총괄만 사건(`ctx_inc_`) 안에서
+부를 수 있고, 단가·건수 상한은 정책표가 정한다. 고객 한 명마다 마케팅 `issue_coupon`(A 등급,
+안전 관문의 한도 검사, 초과는 C 보류)에 한 건씩 직렬로 요청하며, 지급은 마케팅이 한다.
+같은 사건·구매자·사유는 한 번만 요청한다 (`request_compensation`과 같은 키라 문의 경로로
+이미 보상한 고객은 다시 보내지 않는다).
+
+공지·쿠폰 서비스(coupon)를 켜지 않은 고객사는 고객마다 보내지 않고 사건 하나에 한 건으로 묶어
+마케팅 담당 부서 할 일함에 넘긴다(대상 고객 목록·건수·총액). 결과는 완료가 아니라
+`input-required` + `handed_to_human`이고, 사람이 끝내면 총괄이 `handoff.completed`로 이어 간다.
+"""
+
+from __future__ import annotations
+
+import re
+
+from ax_agent_template import routing
+from ax_agent_template.server import error_result
+from ax_agent_template.services import route_target
+from ax_contracts.schemas import (
+    HANDED_TO_HUMAN,
+    AgentRequest,
+    AgentResult,
+    Evidence,
+    InputReason,
+    TaskStatus,
+)
+from support_agent import buyer_ids, compensation
+from support_agent import handlers as h
+from support_agent.incident_schemas import (
+    BUYER_PATTERN,
+    CompensatedBuyer,
+    IncidentCompensation,
+    IncidentCompensationOutput,
+    IncidentCouponResult,
+    ListIncidentCompensationInput,
+    ListIncidentCompensationOutput,
+    RequestIncidentCompensationInput,
+)
+
+INCIDENT_CONTEXT_PREFIX = "ctx_inc_"
+NOT_REACHED = ("failed", "canceled")  # 마케팅이 응답하지 않으면(output 없음) 남은 요청을 멈춘다
+# 마케팅이 요청 자체를 거부(`rejected`, 예: SEQUENCE_GAP)해도 멈춘다
+
+
+def clean_buyers(values: list[str]) -> list[str] | None:
+    """구매자 ID를 `buy_<4자리>`로 맞추고 중복을 뺀다. 형식이 틀린 값이 있으면 None이다."""
+    cleaned: list[str] = []
+    for value in values:
+        buyer = buyer_ids.normalize(value)
+        if not re.fullmatch(BUYER_PATTERN, buyer):
+            return None
+        if buyer not in cleaned:
+            cleaned.append(buyer)
+    return cleaned
+
+
+def _key(context_id: str, buyer_id: str, reason_code: str) -> str:
+    return f"{context_id}:request_compensation:{buyer_id}:{reason_code}"
+
+
+def issued_in_incident(context_id: str) -> tuple[int, int]:
+    """이 사건에서 쿠폰 지급이 끝난 (구매자 수, 합계 원). 멱등 기록(`LEDGER.results`)에서 센다.
+
+    문의 경로(`request_compensation`)로 보상한 고객도 사건 번호로 시작하는 키면 포함한다.
+    마케팅이 이전 결과에 이은 건(`linked_duplicate`)과 지급 전인 보류는 넣지 않는다.
+    """
+    prefix = f"{context_id}:"
+    buyers = total = 0
+    for key, output in h.LEDGER.results.items():
+        if not key.startswith(prefix) or not isinstance(output, dict):
+            continue
+        if output.get("marketing_status") != "completed":
+            continue
+        if output.get("marketing_outcome") == "linked_duplicate":
+            continue
+        buyers += 1
+        total += int(output.get("total_value") or 0)
+    return buyers, total
+
+
+async def request_incident_compensation(request: AgentRequest) -> AgentResult:
+    parsed = h._parse(request, RequestIncidentCompensationInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    context_id = request.meta.context_id
+    if not context_id.startswith(INCIDENT_CONTEXT_PREFIX):
+        return error_result(
+            request.meta, TaskStatus.FAILED, "invalid_input", "사건(ctx_inc_) 요청에서만 받는다"
+        )
+    buyers = clean_buyers(parsed.buyer_ids)
+    if buyers is None:
+        return error_result(
+            request.meta, TaskStatus.FAILED, "invalid_input", "구매자 ID 형식이 맞지 않는다"
+        )
+    decision = compensation.decide(parsed.reason_code, parsed.count)
+    if not decision.eligible:
+        return h._done(
+            request, {"eligible": False, "reason": decision.reason}, outcome="not_eligible"
+        )
+
+    ref_ids = [f"buyer:{b}" for b in buyers]
+    if parsed.impact_ref:
+        ref_ids.append(parsed.impact_ref)
+    evidence = Evidence(
+        queries=["compensation_policy", "impact_analysis"],
+        data_summary=(
+            f"{parsed.reason_code}: {len(buyers)}명 × {decision.count}건 × {decision.unit_value}원"
+        ),
+        ref_ids=ref_ids,
+    )
+
+    if not routing.is_enabled(route_target("marketing", "issue_coupon")):
+        return await _hand_off_batch(request, parsed.reason_code, buyers, decision, evidence)
+
+    results: list[IncidentCouponResult] = []
+    stopped = limit_reached = False
+    async with h.LEDGER.lock(context_id):  # 같은 사건의 요청은 한 건씩 (sequence가 이어지게)
+        issued_buyers, issued_total = issued_in_incident(context_id)
+        added_buyers = added_total = 0  # 이번 호출에서 새로 요청한 몫 (보류 포함)
+        for buyer in buyers:
+            if stopped:
+                results.append(IncidentCouponResult(buyer_id=buyer, status="skipped"))
+                continue
+            key = _key(context_id, buyer, parsed.reason_code)
+            known = key in h.LEDGER.results
+            if not known and (
+                issued_buyers + added_buyers + 1 > compensation.MAX_INCIDENT_BUYERS
+                or issued_total + added_total + decision.total_value
+                > compensation.MAX_INCIDENT_TOTAL
+            ):
+                limit_reached = True  # 이미 한 요청의 재전송은 막지 않고, 새 요청만 막는다
+                results.append(IncidentCouponResult(buyer_id=buyer, status="skipped"))
+                continue
+            sent = await h._request_coupon(request, buyer, decision, key, evidence)
+            output = sent.output
+            marketing = output.get("marketing_output") or {}
+            marketing_status = output.get("marketing_status")
+            coupon_id = marketing.get("coupon_id") if isinstance(marketing, dict) else None
+            reached = not (marketing_status in NOT_REACHED and not marketing)
+            if known or sent.outcome == "linked_duplicate":
+                # 마케팅은 같은 사건·구매자에게 번호만 달라도 새 쿠폰을 내지 않고 이전 결과에 잇는다
+                status = "duplicate"
+            elif marketing_status == "completed" and sent.outcome is None:
+                status = "requested"
+            elif marketing_status == "input-required":  # 한도 초과로 사람 승인을 기다린다 (C 보류)
+                status = "held"
+            elif marketing_status == "working":  # 처리 중이라 번호가 소비되지 않았다
+                status = "pending"
+            else:
+                status = "failed"
+            results.append(
+                IncidentCouponResult(
+                    buyer_id=buyer,
+                    status=status,
+                    sequence=output.get("sequence"),
+                    marketing_status=marketing_status,
+                    marketing_outcome=output.get("marketing_outcome"),
+                    coupon_id=coupon_id,
+                    total_value=decision.total_value if status == "requested" else 0,
+                )
+            )
+            if status in ("requested", "held"):
+                added_buyers += 1
+                added_total += decision.total_value
+            if not reached or marketing_status in ("rejected", "working"):
+                # 닿지 않았거나, 거부했거나(번호 건너뜀·권한), 검증 중이라 번호를 못 썼다.
+                # 같은 번호로 다음 고객을 보내면 어긋나므로 멈추고 나중에 다시 요청한다
+                stopped = True
+
+    bad = [r for r in results if r.status in ("failed", "skipped", "pending")]
+    notes = ["지급은 마케팅 issue_coupon이 안전 관문의 한도 검사를 거쳐 한다"]
+    if limit_reached:
+        notes.append(
+            f"사건당 상한(최대 {compensation.MAX_INCIDENT_BUYERS}명, "
+            f"{compensation.MAX_INCIDENT_TOTAL}원)에 닿아 남은 고객은 보내지 않았다"
+        )
+    body = IncidentCompensationOutput(
+        reason_code=parsed.reason_code,
+        unit_value=decision.unit_value,
+        count=decision.count,
+        requested=sum(1 for r in results if r.status == "requested"),
+        results=results,
+        stopped_early=stopped,
+        limit_reached=limit_reached,
+        notes=notes,
+    )
+    return h._done(
+        request,
+        body.model_dump(mode="json"),
+        outcome="partial" if bad else "requested",
+        evidence=evidence,
+    )
+
+
+async def _hand_off_batch(
+    request: AgentRequest,
+    reason_code: str,
+    buyers: list[str],
+    decision: compensation.CompensationDecision,
+    evidence: Evidence,
+) -> AgentResult:
+    """쿠폰 서비스가 꺼진 고객사: 사건의 보상을 한 건으로 묶어 담당 부서 할 일함에 넘긴다.
+
+    사건당 상한과 이미 지급한 고객은 쿠폰 서비스가 켜졌을 때와 같은 규칙으로 뺀다.
+    같은 사건·사유는 같은 멱등 키라 다시 불러도 할 일함에 한 건만 생긴다.
+    """
+    context_id = request.meta.context_id
+    async with h.LEDGER.lock(context_id):
+        issued_buyers, issued_total = issued_in_incident(context_id)
+        selected: list[str] = []
+        limit_reached = False
+        for buyer in buyers:
+            if _key(context_id, buyer, reason_code) in h.LEDGER.results:
+                continue  # 이미 보상한 고객
+            if (
+                issued_buyers + len(selected) + 1 > compensation.MAX_INCIDENT_BUYERS
+                or issued_total + (len(selected) + 1) * decision.total_value
+                > compensation.MAX_INCIDENT_TOTAL
+            ):
+                limit_reached = True
+                continue
+            selected.append(buyer)
+        summary = {
+            "reason_code": reason_code,
+            "unit_value": decision.unit_value,
+            "count": decision.count,
+            "buyer_ids": selected,
+            "buyer_count": len(selected),
+            "total_value": len(selected) * decision.total_value,
+            "limit_reached": limit_reached,
+        }
+        if not selected:
+            output = {**summary, "requested": 0}
+            return h._done(request, output, outcome="requested", evidence=evidence)
+        key = f"{context_id}:request_incident_compensation:{reason_code}"
+        batch = AgentRequest(
+            meta=request.meta.model_copy(update={"idempotency_key": key}),
+            skill="issue_coupon",
+            input={"purpose_code": "compensation", "batch": True, **summary},
+        )
+        reply = await h.SEND("marketing", batch)
+
+    if reply.outcome != HANDED_TO_HUMAN:
+        # 조직도에 맡은 부서가 없거나(no_assignee) 할 일함에 못 넣었다(inbox_unreachable)
+        failed = error_result(request.meta, TaskStatus.FAILED, reply.outcome or "handoff_failed")
+        failed.output.update(summary)
+        return failed
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.INPUT_REQUIRED,
+        reason_code=InputReason.DEPT_INPUT,
+        outcome=HANDED_TO_HUMAN,
+        output={**reply.output, **summary},
+        evidence=evidence,
+        decision_reason=(
+            f"쿠폰 서비스가 켜져 있지 않아 보상 {len(selected)}명을 한 건으로 담당 부서에 넘김"
+        ),
+    )
+
+
+_KEY = re.compile(r"^(ctx_inc_[A-Za-z0-9]+):request_compensation:(buy_[0-9]{4}):([A-Za-z_]+)$")
+LIST_NOTES = [
+    "지급이 끝난 기록만 센다 (보류·거부·검증 중은 아직 기록이 없다).",
+    "쿠폰 서비스가 꺼진 고객사의 일괄 이관은 고객별 기록이 없어 여기에 나오지 않는다.",
+]
+
+
+def compensated_in_incidents(context_id: str | None = None) -> dict[str, list[CompensatedBuyer]]:
+    """멱등 기록(`LEDGER.results`)에서 사건별로 보상 쿠폰을 받은 고객을 모은다."""
+    found: dict[str, list[CompensatedBuyer]] = {}
+    for key, output in h.LEDGER.results.items():
+        match = _KEY.match(key)
+        if match is None or not isinstance(output, dict):
+            continue
+        context, buyer, reason = match.groups()
+        if context_id is not None and context != context_id:
+            continue
+        if output.get("marketing_status") != "completed":
+            continue
+        duplicate = output.get("marketing_outcome") == "linked_duplicate"
+        marketing = output.get("marketing_output") or {}
+        coupon_id = marketing.get("coupon_id")
+        found.setdefault(context, []).append(
+            CompensatedBuyer(
+                buyer_id=buyer,
+                status="linked_duplicate" if duplicate else "issued",
+                reason_code=reason,
+                coupon_id=coupon_id if isinstance(coupon_id, str) else None,
+                count=int(output.get("count") or 0),
+                unit_value=int(output.get("unit_value") or 0),
+                total_value=int(output.get("total_value") or 0),
+                marketing_outcome=output.get("marketing_outcome"),
+            )
+        )
+    for rows in found.values():
+        rows.sort(key=lambda r: r.buyer_id)
+    return found
+
+
+async def list_incident_compensation(request: AgentRequest) -> AgentResult:
+    """사건별로 보상 쿠폰을 받은 고객을 돌려준다 (읽기라 `execute()`를 안 거친다)."""
+    parsed = h._parse(request, ListIncidentCompensationInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    compare: list[str] | None = None
+    if parsed.buyer_ids is not None:
+        compare = clean_buyers(parsed.buyer_ids)
+        if compare is None:
+            return error_result(
+                request.meta, TaskStatus.FAILED, "invalid_input", "구매자 ID 형식이 맞지 않는다"
+            )
+    found = compensated_in_incidents(parsed.incident_context_id)
+    if parsed.incident_context_id is not None:
+        found.setdefault(parsed.incident_context_id, [])  # 기록이 없는 사건도 빈 목록으로 답한다
+    incidents: list[IncidentCompensation] = []
+    for context, rows in sorted(found.items()):
+        issued = [r for r in rows if r.status == "issued"]
+        have = {r.buyer_id for r in rows}
+        incidents.append(
+            IncidentCompensation(
+                context_id=context,
+                buyers=rows,
+                issued_buyers=len(issued),
+                issued_total=sum(r.total_value for r in issued),
+                missing_buyer_ids=None
+                if compare is None
+                else [b for b in compare if b not in have],
+                outside_buyer_ids=None
+                if compare is None
+                else [r.buyer_id for r in rows if r.buyer_id not in set(compare)],
+            )
+        )
+    output = ListIncidentCompensationOutput(incidents=incidents, notes=LIST_NOTES)
+    return h._done(
+        request,
+        output.model_dump(mode="json"),
+        evidence=Evidence(
+            ref_ids=[i.context_id for i in incidents],
+            data_summary=f"보상 기록이 있는 사건 {len(incidents)}건",
+        ),
+    )
+
+
+INCIDENT_HANDLERS = {
+    "request_incident_compensation": request_incident_compensation,
+    "list_incident_compensation": list_incident_compensation,
+}

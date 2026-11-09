@@ -1,0 +1,227 @@
+# backend
+
+AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사해 와서 **서비스 14개 단위**로 나눴다.
+부서가 아니라 서비스 단위로 팔기 때문에(고객사가 필요한 서비스만 고름) 에이전트도 서비스마다 하나씩 띄운다.
+
+## 폴더
+
+| 폴더 | 내용 |
+| --- | --- |
+| `shared/` | 공통: `contracts`(계약), `agent-template`(에이전트 틀·서비스 대응표), `safety`(안전 관문), `memory`(회사 기억), `dashboard-api`(화면 중계), `shop-api`(고객사 쇼핑몰 시뮬·총괄 읽기 중계) |
+| `domains/` | 업무 로직. 원래 부서 패키지 그대로(support·hr·marketing·finance·data·planning·infra-dejafix). 직접 띄우지 않고 서비스가 가져다 쓴다 |
+| `services/` | 서비스 에이전트 14개. 각자 카드(`agent-card.json`)·포트·실행 설정을 가진다 |
+| `infra/` | docker compose (`infra/compose.yml`이 `shared/*`·`services/*` compose를 모은다) |
+| `config/` | 회사 설정 폴더 `tenants/<회사>/`(카탈로그·커넥터·조직도, "새 회사를 붙일 때") |
+| `scripts/` | `split_services.py`(서비스 폴더 생성), `run_all.sh`(로컬 전체 실행), `tenant_env.py`(회사 설정 읽기) |
+| `docs/` | ax-backend 설계 문서 복사본 |
+
+## 서비스 14개
+
+| 서비스 | 화면 | 포트 | 업무 로직 | skill |
+| --- | --- | --- | --- | --- |
+| `orchestrator` | 총괄·사건 | 8000 | services/orchestrator | 1 |
+| `inquiry` | 고객 문의 | 8102 | domains/support | 17 |
+| `claims` | 클레임·보상 | 8112 | domains/support | 14 |
+| `reviews` | 리뷰·지식 | 8122 | domains/support | 2 |
+| `coupon` | 공지·쿠폰 | 8103 | domains/marketing | 5 |
+| `finance` | 재무 관리 | 8105 | domains/finance | 4 |
+| `data` | 데이터 분석 | 8106 | domains/data | 4 |
+| `handover` | 인수인계 (화면에서 접음: 띄우지 않고 켠 서비스에서도 뺌) | 8104 | domains/hr | 6 |
+| `decisions` | 결정 기록 | 8114 | domains/hr | 5 |
+| `org` | 조직 변동 | 8124 | domains/hr | 5 |
+| `planning` | 요청·기획서 | 8101 | domains/planning | 2 |
+| `dev` | 개발·배포 | 8111 | domains/planning | 6 |
+| `incident` | 장애 대응 | 8107 | domains/infra-dejafix | 3 |
+| `hosts` | PC·서버 연결 | 8117 | 없음 | 0 (`services/hosts/README.md`) |
+
+대응표는 `shared/agent-template/src/ax_agent_template/services.py` 한 곳에 있다. 서비스 id는 화면 `frontend/src/demo/services.ts`와 같다(인수인계 `handover`는 화면에서 접어 `services.ts`에 없다).
+
+## 나눈 방식
+
+- 서비스는 부서 패키지의 앱을 그대로 띄우고, 카드에는 자기 skill만 올린다. 카드에 없는 skill은 템플릿 ACL이 막는다.
+- 다른 에이전트는 예전처럼 부서 이름(`support`)으로 불러도 된다. `call_agent`가 skill을 보고 맡은 서비스(`claims`)로 보낸다.
+- 받는 쪽 허용 목록에는 부서 이름이 적혀 있어서, 서비스가 보낸 요청은 부서 이름으로도 인정한다(`claims` → `support`).
+- 총괄은 부서 단위로 일을 나눈다. 카드를 모을 때 같은 부서의 서비스 카드를 합쳐 부서 카드 하나로 본다.
+
+## 로컬 실행 (실제 모드, 기본)
+
+실제 LLM·실제 에이전트 토큰·이벤트 버스·파일 DB로 돈다. 로컬 실행은 이 실제 모드 하나다. 고객사는 캣북스(쇼핑몰 `shop-api`)이고,
+AXcellent 에이전트들이 캣북스의 실제 주문·결제 데이터로 A2A 작업을 한다.
+
+```bash
+cd backend
+uv sync --all-packages
+cp .env.example .env            # LLM_MODEL·LLM_BASE_URL·LLM_API_KEY(·EMBED_MODEL)를 채운다. 커밋하지 않는다. 이미지를 읽는 모델이면 영수증 사진 대조도 켜진다
+bash scripts/run_all.sh         # 16개 서버 + 캣북스 고객 주문 트래픽. 로그 backend/.logs/, 데이터 backend/.data/
+bash scripts/run_web.sh         # 다른 터미널: 화면(frontend 3090)을 실제 모드 토큰으로 켠다
+bash scripts/run_all.sh stop
+```
+
+- **임베딩 설정** (memory 카드 검색, data 소재↔상품 연결): 모델은 `<부서>_EMBED_MODEL` → `EMBED_MODEL`.
+  주소·키는 `<부서>_EMBED_BASE_URL`·`<부서>_EMBED_API_KEY` → `EMBED_BASE_URL`·`EMBED_API_KEY` → 없으면 LLM 주소·키
+  (`<부서>_LLM_*` → `LLM_*`, 예전 동작). 문장 생성은 늘 LLM 주소로 가고, 임베딩 주소를 넣으면 임베딩 요청만 그리로 간다.
+  임베딩 주소가 LLM 주소와 다른데 임베딩 키가 없으면 LLM 키를 그 주소로 보내지 않고 임베딩이 설정 오류로
+  실패한다(경고 로그에 빠진 이름만 남긴다). 주소가 같으면 키를 비워도 LLM 키를 쓴다. 레포 맨 위 `.env`에서도
+  `EMBED_MODEL`·`EMBED_BASE_URL`·`EMBED_API_KEY`를 읽는다(`backend/.env`에 없을 때만)
+
+- **일부 서버만 띄우기** (`--only`, 없으면 전부): 메모리가 모자라거나 한 부서만 볼 때 쓴다.
+  ```bash
+  bash scripts/run_all.sh --only data,finance,shop-api   # 이름은 run_all.sh의 APPS 목록 이름
+  bash scripts/run_all.sh --only core                    # safety, memory, shop-api, dashboard-api, orchestrator
+  bash scripts/run_all.sh --only data-demo               # core + data, finance, inquiry, coupon, dev (data 업무 리포트가 부르는 곳)
+  bash scripts/run_all.sh --only data-demo,incident      # 묶음과 이름을 섞어도 된다
+  ```
+  - 시작할 때 `띄운 서버 N개: …, 안 띄움: …`을 출력한다. 모르는 이름이면 목록을 보여 주고 멈춘다.
+  - 안 띄운 서비스는 `AX_ENABLED_SERVICES`에서도 자동으로 빠진다. 그래서 라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다. 이미 `AX_ENABLED_SERVICES`를 줬으면 둘의 교집합이고, 남는 서비스가 없으면 `none`(모두 끔)이다.
+  - 캣북스 주문 트래픽은 shop-api를 띄웠을 때만 돈다. `stop`은 지금처럼 전체 포트를 끈다.
+  - 메모리(전용 메모리, Windows 로컬 측정): 전체 16개 서버 + 트래픽은 프로세스 36개·약 940MB, `data-demo`는 26개·약 680MB다.
+- Docker가 필요하다. 이벤트 버스(Redis)를 컨테이너 `ax-redis`로 띄운다 (`REDIS_URL`을 주면 그걸 쓴다).
+- 에이전트 토큰(`AX_AGENT_TOKENS`)·사람 토큰은 켤 때마다 새로 만들어 프로세스에만 넘긴다. 화면에 넘길 값만
+  `backend/.data/web.env`에 쓴다 (커밋 안 함).
+- 사내망 서버처럼 관리자 토큰을 화면에 넣을 수 없는 곳은 **읽기 전용 열람 토큰**을 쓴다: `.env`의 `SHOP_VIEWER_TOKEN`(24자 이상)과
+  화면 빌드의 `VITE_SHOP_VIEWER_TOKEN`에 같은 값을 넣는다. 총괄 사건·부서 읽기 중계와 장애 상태 읽기(GET)만 열리고,
+  쓰기·그 밖의 관리 API는 모두 403이다. 에이전트 토큰 명부와 따로 두어 다른 서버(총괄 등)로는 통하지 않는다.
+  켤 때마다 바뀌는 에이전트 토큰과 달리 고정 값이라 정적 빌드에 넣어도 재시작에 깨지지 않는다.
+- 캣북스 데이터(`.data/shop.db`)·공통 로그(`.data/common_log.db`)·인사(`.data/hr.db`)는 파일이라 다시 켜도 남는다.
+- `scripts/shop_traffic.py`가 3초마다 캣북스 고객 주문·결제를 넣는다. 결제 성공·실패는 쇼핑몰이 정한다.
+  결제가 실패한 고객 일부(30%)는 쇼핑몰 문의 창구로 그 주문에 대해 문의를 남긴다 → 고객지원 AI가 받아 답변 초안을 쓴다.
+- 장애 넣기·빼기는 운영자 명령이다: `bash scripts/shop_fault.sh failure|latency|clear|status`. 테스트 기록을 지우려면 `bash scripts/run_all.sh reset`.
+- 캣북스 쇼핑몰 화면(고객이 보는 곳)은 ax-frontend의 shop-web이다. 같은 shop-api(8010)에 붙여 띄우면 장애 때 결제 화면에
+  "결제 서버에 문제가 있어 결제하지 못했습니다"가 뜬다: `cd ax-frontend && npm run dev:shop` (3000, CORS 허용됨).
+  마케팅 AI가 게시한 공지 배너는 shop-web에 아직 그리는 곳이 없다(ax-frontend 쪽 작업).
+- 장애 대응 흐름: AI 대화방의 "캣북스에 장애 넣기" → 캣북스 결제가 실제로 실패 → 쇼핑몰 감시가 `shop.degraded`
+  (20초 지속, `SHOP_DEGRADED_SUSTAIN_S`) → Redis → 총괄이 사건을 열고 7개 부서를 실제로 부른다.
+- **목 스위치는 테스트 전용**: `AGENT_TEMPLATE_MOCK=1`·`<서비스>_MOCK=1`(예: `DATA_MOCK`, `ORCHESTRATOR_MOCK`, `DASHBOARD_MOCK`)과 테스트용 가짜 부서(`services/orchestrator/.../mock/`)는 CI 단위 테스트가 쓴다. 로컬 실행·데모에는 쓰지 않는다. `run_all.sh`는 `.env`에 남아 있어도 끄고, `run_all.sh mock`은 지웠다.
+- dashboard-api의 목 데이터 응답(`routes.py` `mock_only`)도 테스트 전용이다. 실제 모드에서 출처가 없는 응답(지식 조각·후기)은 지어내지 않고 빈 목록이고, 화면은 "준비 중"으로 표시한다.
+
+## 업무 요청 라우터
+
+고객사는 서비스를 골라서 산다. 서비스 하나만 사도 다른 부서(사람)와 협업이 되고, 여러 개 사면 그 서비스 에이전트끼리
+A2A로 협업한다. 같은 요청(`call_agent(target, req)`)이 받는 쪽만 바뀐다.
+
+```
+call_agent("finance", req)
+  → route_target(): skill을 맡은 서비스 (finance)
+  → 켠 서비스?  예 → 지금처럼 A2A (POST <finance>/a2a)
+               아니오 → 조직도에서 맡은 부서를 찾아 사람 할 일함(dashboard-api)에 HandoffTask로 넣는다
+                        → AgentResult(status=input-required, outcome="handed_to_human", output.task_id)
+                        조직도에도 없으면 → failed + outcome "no_assignee" (지어내지 않는다)
+사람이 콘솔에서 결과를 적고 끝내면 → dashboard-api가 handoff.completed 이벤트 발행 (context_id·task_id, 결과는 untrusted)
+```
+
+- **켠 서비스**: `backend/.env`의 `AX_ENABLED_SERVICES` (쉼표 목록, 예: `inquiry,claims`). 비어 있으면 전부 켠다(예전 동작).
+  `run_all.sh`가 읽어서 모든 서버에 넘긴다. 서비스 14개만 이 목록을 따르고, 공통 서버(safety·memory·shop-api·dashboard-api)와
+  주소로 부른 대상은 늘 켜져 있다. 서버는 목록과 관계없이 다 띄운다(꺼진 서비스로 가는 요청만 사람에게 간다).
+- **켠 서비스 파일**: `AX_ENABLED_SERVICES_FILE`(run_all.sh 기본값 `backend/.data/enabled_services.json`)이 가리키는 파일이 있으면
+  환경변수보다 먼저 쓴다. 형식은 `{"enabled": ["data", "finance"], "updated_at": "...", "updated_by": "..."}`이고, 빈 목록은 "모두 끔"이다.
+  라우터가 부를 때마다 바뀐 시각을 확인하므로 파일을 바꾸면 **재시작 없이** 반영된다. data `activity_report`도 같은 함수로 읽는다.
+  파일이 없거나 깨졌으면(경고 로그) 환경변수 `AX_ENABLED_SERVICES`를 쓴다(전부 켬으로 바꾸지 않는다).
+  `--only`로 띄울 때 이 파일이 있으면 파일이 먼저 쓰이므로, 안 띄운 서비스가 파일에 있으면 고치거나 지운다(run_all.sh가 경고한다).
+- **조직도**: 회사 설정 폴더의 `config/tenants/<회사>/org.yaml`(캣북스는 커밋함, "새 회사를 붙일 때")을 `run_all.sh`가
+  `AX_ORG_CONFIG`로 넘긴다. 내 PC에서만 바꾸려면 `config/org.example.yaml`을 `config/org.yaml`로 복사해 고친다(커밋 안 함, 그쪽이 먼저). 키는 서비스 id 또는 skill id이고 skill 줄이 먼저다. 부서 이름은 이 파일에만 있다.
+- **할 일함 API** (dashboard-api 8020, 저장 `AX_HANDOFF_DB` = `.data/handoffs.db`)
+  - `POST /api/dashboard/handoffs`: 에이전트가 넣는다(에이전트 토큰). 에이전트는 dashboard-api를 import하지 않고 HTTP로만 넣는다
+  - `GET /api/dashboard/handoffs?unit=<부서>&status=open|done|rejected`
+  - `POST /api/dashboard/handoffs/{task_id}/complete` `{"result": "...", "status": "done"|"rejected"}`: 사람 토큰 필요
+- **기록**: 모든 넘김(`handed_to_human`·`no_assignee`·`inbox_unreachable`)과 사람의 완료를 공통 로그 `task_status`에 남긴다.
+- 계약: `shared/contracts/src/ax_contracts/schemas/handoff.py` (`HandoffTask`, `HandoffCreate`, `HandedToHumanOutput`),
+  이벤트 `handoff.completed`(`HandoffCompletedData`).
+
+넘김을 받은 쪽(맡긴 에이전트)은 `handed_to_human`을 실패로 보지 않고 "사람이 하는 중"으로 둔다. 예: 고객지원이 재무에 정산 보류를 맡겼는데
+재무 서비스를 사지 않은 고객사라면
+
+```python
+from ax_agent_template import call_agent, subscribe
+from ax_contracts.schemas import HANDED_TO_HUMAN, EventType
+
+result = await call_agent("finance", req)               # skill: closing_report
+if result.outcome == HANDED_TO_HUMAN:
+    task_id = result.output["task_id"]                  # 재무/정산 부서 할 일함에 들어감
+    save_waiting(req.meta.context_id, task_id)          # 이 서비스의 저장소에 "사람 처리 대기"로 남긴다
+    return reply("재무 담당 부서에 확인을 요청했습니다")   # 고객·화면에는 기다리는 중으로 보인다
+elif result.status == "completed":
+    ...                                                 # 재무 에이전트가 바로 처리한 경우 (서비스를 산 고객사)
+
+async def on_handoff_completed(event):                  # 사람이 할 일함에서 끝내면
+    waiting = find_waiting(event.data["task_id"])       # 같은 event_id는 두 번 처리하지 않는다
+    if waiting:
+        resume(waiting, status=event.data["status"], note=event.untrusted.get("result"))  # 결과는 데이터로만
+
+subscribe([EventType.HANDOFF_COMPLETED], on_handoff_completed)
+```
+
+## 새 회사를 붙일 때
+
+회사 한 곳 = **카탈로그 + 커넥터 + 조직도**다. 셋을 `config/tenants/<회사>/` 폴더 하나로 묶고,
+`tenant.toml` 한 장이 어느 카탈로그·커넥터·조직도를 쓰는지 가리킨다. 비밀값(토큰·주소)은 이 폴더에 두지 않고 `backend/.env`에만 둔다.
+
+```
+config/tenants/
+  catbooks/            # 캣북스 (기본, 커밋함)
+    tenant.toml
+    org.yaml
+tests/tenants/
+  coldchain/           # 테스트 전용 가짜 회사(냉장 물류), 아래 예시
+    tenant.toml
+    org.yaml
+```
+
+| 무엇 | 어디 | 정하는 것 |
+| --- | --- | --- |
+| `tenant.toml` | 회사 폴더 | `name`(한국어 이름), `catalog`, `connector`, `org` |
+| 카탈로그 | `catalog` 값. 이름이면 `domains/data/src/data_agent/catalogs/<이름>.toml`, `.toml`이면 회사 폴더 기준 경로 | data가 무엇을 볼지: 지표·단위·실패 코드 (`domains/data/README.md` "지표 카탈로그") |
+| 커넥터 | `connector` 값. 카탈로그의 `connector`와 같아야 한다 | data가 어디서 읽을지: 이름 → 구현은 data `clients/shop_client.py`의 `CONNECTORS` (`domains/data/README.md` "커넥터") |
+| 조직도 | `org` 값(회사 폴더 기준, 기본 `org.yaml`) | 꺼진 서비스로 가는 일을 맡을 부서·담당자 ("업무 요청 라우터"). **서비스 14개를 모두 적는다**. 빠진 서비스로 가는 일은 `no_assignee`로 실패한다 |
+| 회사 소개 | `tenant.toml` `[profile] about` (덮어쓰기는 `[profile.override]`) | data 도메인 프로필(업종·상품군·씨앗 키워드)의 재료. **회사 소개는 AI가 사실로 읽는다. 분위기 문장·별명은 쓰지 말고, 카탈로그와 맞게** (소개에 없는 상품군이 카탈로그에 있으면 프로필에 경고) |
+
+### 예시: 냉장 물류 (테스트 전용 가짜 회사)
+
+`tests/tenants/coldchain/tenant.toml`
+
+```toml
+name = "냉장물류 테스트"
+catalog = "../../../domains/data/tests/catalogs/coldchain.toml"   # 회사 폴더 기준 경로
+connector = "memory"                                             # 카탈로그 connector와 같다 (테스트 메모리 커넥터)
+org = "org.yaml"
+```
+
+`tests/tenants/coldchain/org.yaml` (일부)
+
+```yaml
+assignments:
+  incident: {unit: 관제실, assignee: 야간 당직}
+  inquiry: {unit: 거래처지원}
+  finance: {unit: 경영지원}
+  # … 서비스 14개 모두
+```
+
+카탈로그 `coldchain.toml`은 지표 2개(냉장 유통 이탈 건수·출고 지연 건수), 단위 "출고", 고객 "거래처"다. 이 회사로 돌리면 data 문장에 캣북스 단어(결제·주문·판매자)가 나오지 않는다(`domains/data/tests/test_catalog_wording.py`).
+
+### 순서
+
+1. `config/tenants/<회사>/` 폴더를 만들고 `tenant.toml`·`org.yaml`을 둔다 (위 예시를 복사해 고친다)
+2. 카탈로그를 만든다. 실제 회사는 `domains/data/src/data_agent/catalogs/<회사>.toml`에 두고 `catalog = "<회사>"`
+3. 그 회사 시스템을 읽는 커넥터가 없으면 data에 만들고 `CONNECTORS`에 이름을 올린다 (메서드 3개, 못 읽으면 `ConnectorUnavailable`, 0으로 채우지 않음)
+4. `uv run pytest tests/test_tenant_config.py`: 회사 폴더 확인 (카탈로그 있음, 커넥터 일치, 조직도에 서비스 14개). 새 회사 폴더는 이 테스트의 목록에 더한다
+5. `AX_TENANT=<회사> bash scripts/run_all.sh`
+
+### run_all.sh가 정하는 것 (`scripts/tenant_env.py`)
+
+`AX_TENANT`(기본 `catbooks`)의 폴더를 읽어 아래 값을 정한다. **이미 준 값이 먼저다**(지금 쓰는 사람이 깨지지 않게).
+
+| 환경변수 | 순서 |
+| --- | --- |
+| `AX_ORG_CONFIG` | 환경변수(`.env` 포함) → `config/org.yaml`(각자 덮어쓰기, 커밋 안 함) → 회사 폴더 `org` |
+| `DATA_TENANT_CATALOG` | 환경변수(`.env` 포함) → 회사 폴더 `catalog` |
+
+- 회사 폴더가 없거나 틀리면(카탈로그 없음, 커넥터가 카탈로그와 다름) 서버를 켜지 않고 이유를 알려 준다.
+- 조직도를 찾지 못하면 켜면서 분명히 알린다: `조직도 없음: 꺼진 서비스로 가는 일은 no_assignee로 실패합니다`
+
+## 알아 둘 것
+
+- 실제 모드에서 아직 출처가 없는 화면 데이터(지식 조각·후기)는 지어내지 않고 빈 목록이다.
+- 캣북스에는 배포 기록이 없어서, 인프라 진단은 원인 배포를 특정하지 못하면 롤백하지 않고 사람에게 넘긴다(이관 큐).
+- 같은 부서에서 나뉜 서비스는 메모리를 따로 가진다. 예: `inquiry`의 문의가 `claims`에 안 보인다. 공유 저장소(DB)를 붙여야 이어진다.
+- `planning`·`dev`는 A2A로 잇는다(`PLANNING_ROLE`, `planning_agent/dev_handoff.py`). `planning`이 확정한 기획서·작업을 `start_dev`로 넘기면 `dev`가 PR·검수·자동 머지를 하고 `receive_dev_result`로 작업·PR·요청 상태를 돌려준다. 역할 없이(합친 모드) 띄우면 예전처럼 한 프로세스에서 다 한다.
+- `infra/compose.server.yml`(서버 PC·게이트웨이)은 아직 옛 이름이다. Docker 빌드는 아직 확인하지 않았다.
+- 원본 ax-backend는 계속 바뀐다. 이 복사본과 어느 쪽을 기준으로 할지 정해야 한다.

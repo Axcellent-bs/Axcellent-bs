@@ -1,0 +1,79 @@
+"""보상 판정과 `sequence` 관리 (DEP-CS-02). 프레임워크에 의존하지 않는다.
+
+- 단가·대상은 코드의 정책표로 판정한다. LLM이나 요청 값을 쓰지 않는다.
+- 같은 사건(`context_id`)의 보상 요청은 마케팅 `issue_coupon`에 `sequence` 1부터 한 건씩 보낸다.
+- 정책표는 시드다. memory의 정책 문서 API가 생기면 거기서 읽도록 바꾼다.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime
+
+# 사유 코드 → 쿠폰 1건 단가(원). 표에 없는 사유는 보상 대상이 아니다.
+UNIT_VALUE_BY_REASON: dict[str, int] = {
+    "late_delivery": 2000,
+    # 결제 장애로 주문이 실패한 고객 (SCN-A). 시드 값, 고객지원 정책표(팀 확정)
+    "payment_failure": 2000,
+    "damaged": 3000,
+    "wrong_item": 3000,
+    "missing_item": 3000,
+    "defect": 3000,
+}
+MAX_COUNT = 3
+# 같은 사건에서 여러 번 불러도 넘지 못하는 보상 상한 (시드 값, 고객지원 정책표·팀 확정).
+# 1회 호출은 50명까지다.
+# 금액 한도(C 보류 기준)는 사람이 바꾸는 기준표(`thresholds.toml`)가 따로 정한다.
+MAX_INCIDENT_BUYERS = 100
+MAX_INCIDENT_TOTAL = 600_000
+# 약속한 배송일을 이만큼(일) 이상 넘기면 지연 보상 후보다. 정책표와 같은 시드다.
+LATE_MIN_DAYS = 1
+
+
+def days_late(
+    promised_at: datetime | None, delivered_at: datetime | None, now: datetime
+) -> int | None:
+    """약속 배송일을 넘긴 일수 (배송 완료 전이면 지금까지). 약속일을 모르면 None이다."""
+    if promised_at is None:
+        return None
+    end = delivered_at or now
+    return max((end - promised_at).days, 0)
+
+
+@dataclass(frozen=True)
+class CompensationDecision:
+    eligible: bool
+    count: int = 0
+    unit_value: int = 0
+    total_value: int = 0
+    reason: str = ""
+
+
+def decide(reason_code: str, count: int) -> CompensationDecision:
+    unit = UNIT_VALUE_BY_REASON.get(reason_code)
+    if unit is None:
+        return CompensationDecision(False, reason=f"보상 대상이 아닌 사유: {reason_code}")
+    if not 1 <= count <= MAX_COUNT:
+        return CompensationDecision(False, reason=f"건수는 1~{MAX_COUNT}건이어야 한다")
+    return CompensationDecision(True, count, unit, count * unit, "정책표 단가 적용")
+
+
+class SequenceLedger:
+    """사건별 다음 `sequence`와 요청 키별 결과를 기억한다."""
+
+    def __init__(self) -> None:
+        self._next: dict[str, int] = defaultdict(lambda: 1)
+        self.results: dict[str, dict] = {}
+        self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+    def lock(self, context_id: str) -> asyncio.Lock:
+        """같은 사건의 `sequence` 요청을 한 건씩 처리하기 위한 잠금."""
+        return self._locks[context_id]
+
+    def peek(self, context_id: str) -> int:
+        return self._next[context_id]
+
+    def advance(self, context_id: str) -> None:
+        self._next[context_id] += 1

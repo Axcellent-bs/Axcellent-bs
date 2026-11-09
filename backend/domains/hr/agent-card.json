@@ -1,0 +1,381 @@
+{
+  "name": "hr",
+  "owner": "준하",
+  "description": "인사 — 부서가 보낸 사건·결정 기록을 받아 회사 기억에 카드로 남긴다",
+  "url": "http://hr:8104/a2a",
+  "version": "0.1.0",
+  "capabilities": {
+    "streaming": true,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "record_case",
+      "description": "부서가 보낸 사건·결정 기록(kind, 요약, 결정 이유, 검토한 대안, 근거 참조)을 받아 결정 카드로 정리해 회사 기억에 저장한다. 결정이 없는 기록은 기록만 남기고, 확신이 낮은 카드는 후보로 보류한다. 같은 기록이 두 번 오면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/record.py#RecordCase",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordCaseOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator",
+        "planning",
+        "support",
+        "marketing",
+        "finance",
+        "data",
+        "infra"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "get_roster",
+      "description": "영역별 담당자·역할·교대 일정과, 담당이 없거나 교대 시각에 비는 공백 영역을 조회한다(조회 전용, 개인 인사 정보 없음).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetRosterInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetRosterOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator",
+        "planning",
+        "support",
+        "marketing",
+        "finance",
+        "data",
+        "infra"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "team_headcount",
+      "description": "그달 1일 기준 팀별 인원수를 돌려준다(조회 전용). 이름·ID는 내보내지 않는다. 발령일이 1일이면 그 달부터, 아니면 다음 달 1일부터 센다. 확정된 발령 기록이 있고 \"전 직원 등록 완료\"가 표시됐으면 그 기록으로 세고, 아니면 가상 명부(예시)로 세며 example=true로 밝힌다. 인원을 알 수 없으면 0명으로 채우지 않고 실패로 답한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#TeamHeadcountInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#TeamHeadcountOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "finance",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "start_handover",
+      "description": "인계자·영역을 받아 인수인계 초안을 만든다. 진행 중인 일(planning)·결정 카드(회사 기억)·연락처(명부)는 자동으로 채우고, 빈 자리는 인계자에게 묻는 질문으로 돌려준다. 완성도와 빈 자리 수는 코드가 계산한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#StartHandoverInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#StartHandoverOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "answer_handover_question",
+      "description": "인계자가 빈 자리 질문에 답하면 해당 항목을 채우고 완성도를 다시 계산한다. 같은 답을 두 번 보내도 한 번만 반영한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#AnswerHandoverQuestionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#AnswerHandoverQuestionOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "confirm_handover",
+      "description": "인수인계를 확정한다. 완성도가 기준 이상이면 planning이 진행 중 항목 누락을 교차검증한 뒤 확정(B), 기준 미만이면 보류 큐에 올려 사람이 결정한다(C).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ConfirmHandoverInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ConfirmHandoverOutput",
+      "grade": "B",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": "planning",
+      "priority": "recommended"
+    },
+    {
+      "id": "check_plan",
+      "description": "새 계획 초안을 같은 영역의 결정 카드와 비교한다. 기각된 안과 비슷하면 경고(경과 일수는 코드가 계산), 채택하지 않기로 한 대안과 같으면 충돌, 확정된 결정과 같은 방향이면 일치로 알린다. 관련 카드가 없으면 판정하지 않고 '기록에 없음'으로 답한다. 조회 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#CheckPlanInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#CheckPlanOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator",
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "find_similar_fraud_cards",
+      "description": "판매자 사실(가입 일수·저가 상품 비율·24시간 등록 수·사업자 중복 여부)과 비슷한 지난 사기 카드(kind=fraud)를 찾아 카드 id와 유사도(0~1)를 돌려준다. 기준 미만이면 빈 목록과 max_similarity 0을 준다. 조회 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarFraudCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarFraudCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "data"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "find_similar_cases",
+      "description": "현재 사건을 설명하는 글과 비슷한 과거 사건·결정 카드를 찾아, 카드에 기록된 당시 해결 내용(원인·조치·결과·소요 시간)과 함께 돌려준다. 기준 미만이면 빈 목록을 준다. 해결 방법을 새로 만들지 않고 기록된 값만 돌려주며 조회 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarCasesInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarCasesOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "infra",
+        "data",
+        "planning",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "record_resolution",
+      "description": "사건이 해결되면 그 사건에서 만든 결정 카드에 원인·조치·결과·소요 시간을 채운다. 값이 없으면 지어내지 않고 확인할 수 없음으로 적는다. 같은 내용을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordResolutionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordResolutionOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator",
+        "infra",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "record_event_times",
+      "description": "이벤트의 감지·원인 후보 도착·사람 작업 시작과 완료·정상 복귀 시각을 그 이벤트에서 만든 결정 카드에 채운다. 시스템이 잰 시각만 받고 이미 있는 시각은 덮어쓰지 않는다. 같은 내용을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordEventTimesInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordEventTimesOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_duplicate_groups",
+      "description": "사람 승인을 기다리는 중복 결정 묶음과 최근에 병합된 카드를 조회한다. 저장된 값을 그대로 돌려주는 읽기 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListDuplicateGroupsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListDuplicateGroupsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "decide_duplicate_group",
+      "description": "같은 결정을 다시 쓴 카드 묶음을 사람이 병합하거나 그대로 두기로 정한다. 병합은 옛 카드를 지우지 않고 대체됨으로 표시한다. 같은 결정을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideDuplicateGroupInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideDuplicateGroupOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "restore_merged_card",
+      "description": "병합으로 대체됨이 된 카드를 다시 유효 카드로 되돌린다. 같은 요청을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RestoreMergedCardInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RestoreMergedCardOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_handovers",
+      "description": "인수인계 현황(상태·완성도·인계 목록·답을 기다리는 질문)을 조회한다. 저장된 값을 그대로 돌려주는 읽기 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListHandoversInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListHandoversOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_open_questions",
+      "description": "인계자의 답을 기다리는 질문 목록을 조회한다(대시보드가 인계자에게 보여 주는 질문).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListOpenQuestionsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListOpenQuestionsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_candidate_cards",
+      "description": "확신이 낮아 사람 확인을 기다리는 후보 카드를 조회한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCandidateCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCandidateCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_cards",
+      "description": "확정된(후보가 아닌) 결정 카드를 최근 순으로 조회한다. 사건 번호를 주면 그 사건에서 만든 카드만 돌려준다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "get_audit_timeline",
+      "description": "사건 하나에서 hr이 한 일을 시간순으로 조회한다. 기록이 없으면 비어 있다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetAuditTimelineInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetAuditTimelineOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "decide_candidate_card",
+      "description": "후보 카드를 사람이 승인(active)하거나 폐기(retired)한다. 승인하면 같은 영역의 옛 결정을 대체됨으로 연결한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideCandidateCardInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideCandidateCardOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "answer_planning_question",
+      "description": "기획 질문에 답한다. 기획이 인사가 보낸 요청(create_ticket)의 근거를 되물으면, 인사가 보낸 요청의 기록(보낼 때 코드가 만든 사실 문장·근거 ID)으로만 답한다. 근거 질문이고 기록에 사실이 있으면 answered, 인사가 보낸 요청이지만 기록으로 답할 수 없으면 needs_human(사람이 답하면 planning receive_planning_answer로 보낸다), 보낸 기록이 없으면 unknown. 지어내지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "record_org_change",
+      "description": "조직 변동(팀 이동·입사·퇴사) 초안을 저장한다. 승인은 필요 없고 확정 전에는 팀 인원에 세지 않는다. 팀은 조직도에 있는 이름만 받고, 같은 발령을 두 번 접수하면 처음 것을 돌려준다. 근거 결정 카드(basis_card_id)는 선택이며 확정된 업무 결정 카드만 받는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordOrgChangeInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordOrgChangeOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "decide_org_change",
+      "description": "인사 담당자가 조직 변동 초안을 확정하거나 반려한다. 확정하면 그때부터 team_headcount의 인원에 센다. 앞선 확정 기록과 맞지 않으면(없는 사람의 이동 등) 확정하지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideOrgChangeInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideOrgChangeOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_org_changes",
+      "description": "조직 변동 기록(초안·확정·반려)과 명부 등록 상태(등록된 직원 수, 전 직원 등록 완료 여부)를 조회한다(조회 전용).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListOrgChangesInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListOrgChangesOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "set_org_roster_complete",
+      "description": "인사 담당자가 \"전 직원 등록 완료\"를 표시하거나 해제한다. 확정된 명부가 전체 직원 수와 같을 때만 표시할 수 있고, 표시해야 team_headcount가 확정 기록으로 센다(일부만 등록된 인원이 재무에 나가지 않게).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#SetOrgRosterCompleteInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#SetOrgRosterCompleteOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "find_org_change_basis",
+      "description": "발령 사유와 비슷한 과거 업무 결정 카드를 임베딩 검색(RAG)으로 찾는다(조회 전용). 확정된 업무 결정 카드만 대상이고 기준을 넘는 카드가 없으면 비어 있다. 과거에 기각된 안은 rejected로 표시한다. 자동으로 연결하지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindOrgChangeBasisInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindOrgChangeBasisOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "parse_org_change_text",
+      "description": "직원 번호로 적은 발령 문장을 입력 칸(종류·직원 번호·원래 팀·새 팀·발령일)으로 나눈 제안을 만든다(LLM, 조회 전용, 저장 안 함). 팀·날짜·소속은 코드가 검증하고 틀리면 경고한다. LLM이 꺼져 있거나 실패하면 available=false다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ParseOrgChangeTextInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ParseOrgChangeTextOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "describe_org_change",
+      "description": "발령이 팀 인원에 주는 변화를 승인하는 사람이 읽을 설명문으로 쓴다(조회 전용). 인원 변화는 코드가 세고 LLM은 문장만 다듬는다. 문장 속 숫자가 코드 값과 다르거나 금액을 말하면 템플릿 문장으로 대체한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DescribeOrgChangeInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DescribeOrgChangeOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    }
+  ]
+}

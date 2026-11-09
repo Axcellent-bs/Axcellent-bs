@@ -1,0 +1,95 @@
+{
+ "id": "gap_window_1h_14h",
+ "kind": "unknown",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T15:00:00Z",
+  "products": [
+   "prd_0004"
+  ]
+ },
+ "spec": {
+  "id": "gap_window_1h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T15:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "product_boost": {
+   "product_id": "prd_0004",
+   "factor": 3.0
+  },
+  "payment_gap": {
+   "days_ago": [
+    0
+   ]
+  }
+ },
+ "expected": {
+  "products": {
+   "matched": [
+    "prd_0004"
+   ],
+   "unmatched": [],
+   "status": "unknown",
+   "unknown_reason": "payment_gap"
+  }
+ },
+ "counted": {
+  "actual": {
+   "orders": 0,
+   "units": 0,
+   "gross": 0
+  },
+  "past_days": {
+   "1": {
+    "orders": 8,
+    "units": 11,
+    "gross": 82500
+   },
+   "2": {
+    "orders": 6,
+    "units": 6,
+    "gross": 45000
+   },
+   "3": {
+    "orders": 5,
+    "units": 6,
+    "gross": 45000
+   },
+   "4": {
+    "orders": 8,
+    "units": 9,
+    "gross": 67500
+   },
+   "5": {
+    "orders": 9,
+    "units": 10,
+    "gross": 75000
+   },
+   "6": {
+    "orders": 9,
+    "units": 10,
+    "gross": 75000
+   },
+   "7": {
+    "orders": 10,
+    "units": 12,
+    "gross": 90000
+   }
+  },
+  "orders_baseline": 7.8571,
+  "orders_excess": -7.8571,
+  "units_baseline": 9.1429,
+  "units_excess": -9.1429,
+  "gross_baseline": 68571.4286,
+  "gross_excess": -68571.4286
+ },
+ "memo": "구간 주문은 있는데 결제 기록이 없음 → 결제 기록 공백 unknown"
+}

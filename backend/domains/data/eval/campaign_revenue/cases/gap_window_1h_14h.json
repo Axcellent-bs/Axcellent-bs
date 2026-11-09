@@ -1,0 +1,52 @@
+{
+ "id": "gap_window_1h_14h",
+ "kind": "unknown",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T15:00:00Z"
+ },
+ "spec": {
+  "id": "gap_window_1h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T15:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "sale",
+   "factor": 2.0,
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T15:00:00Z"
+  },
+  "payment_gap": {
+   "days_ago": [
+    0
+   ]
+  }
+ },
+ "expected": {
+  "sales": {
+   "status": "unknown",
+   "unknown_reason": "payment_gap"
+  }
+ },
+ "counted": {
+  "gross_actual": 0,
+  "gross_baseline": 1772742.8571,
+  "gross_excess": -1772742.8571,
+  "gross_past_days": {
+   "1": 2106900,
+   "2": 1725600,
+   "3": 1721200,
+   "4": 1867100,
+   "5": 1653000,
+   "6": 1487400,
+   "7": 1848000
+  },
+  "direct_attributed": null
+ },
+ "memo": "구간 주문은 있는데 결제 기록이 없음 → 결제 기록 공백 unknown"
+}

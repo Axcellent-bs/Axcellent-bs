@@ -1,0 +1,3012 @@
+[
+ {
+  "card_id": "gold_A1_01",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A1_01",
+  "title": "shop-api v2.14 배포 롤백",
+  "body": "결정: shop-api v2.14를 배포 40분 만에 v2.13으로 롤백\n이유: 주문 생성 API의 5xx가 3%까지 올라 장바구니 이탈이 급증\n검토한 대안: 설정 값만 되돌리기, 부분 트래픽만 차단\n적용 범위: shop-api 전체 인스턴스",
+  "tags": [
+   "합성",
+   "서비스별 배포·롤백 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-01T20:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A1_02",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A1_02",
+  "title": "shop-web 쿠폰 배너 배포 롤백",
+  "body": "결정: shop-web 쿠폰 배너 변경을 롤백\n이유: 배너 클릭 시 모바일 화면에서 결제 버튼이 가려지는 화면 깨짐\n검토한 대안: 배너만 숨김 처리, 핫픽스 CSS 배포\n적용 범위: shop-web 모바일 화면",
+  "tags": [
+   "합성",
+   "서비스별 배포·롤백 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-02T07:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A1_03",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A1_03",
+  "title": "payment v1.8 카나리 중단",
+  "body": "결정: payment v1.8 카나리(5%)를 중단하고 v1.7 유지\n이유: 카나리 구간에서만 승인 실패율이 평소의 2배\n검토한 대안: 카나리 비율을 1%로 낮춰 관찰 연장\n적용 범위: payment 서비스 카나리 그룹",
+  "tags": [
+   "합성",
+   "서비스별 배포·롤백 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-02T18:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A1_04",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A1_04",
+  "title": "shop-api 야간 핫픽스 배포 승인",
+  "body": "결정: 가격 반올림 오류 핫픽스를 야간 02시에 배포하기로 승인\n이유: 잘못 계산된 가격으로 주문이 이어지는 중이라 즉시 차단이 필요\n검토한 대안: 다음 날 정기 배포까지 대기\n적용 범위: shop-api 가격 계산 모듈",
+  "tags": [
+   "합성",
+   "서비스별 배포·롤백 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-03T05:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A1_05",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A1_05",
+  "title": "shop-web 장바구니 개편 배포 보류",
+  "body": "결정: 장바구니 개편 배포를 이벤트 이후로 보류\n이유: 이벤트 주간 트래픽이 큰 시점에 화면 구조를 바꾸는 위험이 큼\n검토한 대안: 일부 사용자 대상 실험 배포\n적용 범위: shop-web 장바구니 화면",
+  "tags": [
+   "합성",
+   "서비스별 배포·롤백 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-03T16:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A1_06",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A1_06",
+  "title": "payment 타임아웃 설정 변경 유지",
+  "body": "결정: payment 승인 타임아웃을 5초에서 8초로 올린 변경을 롤백하지 않고 유지\n이유: 롤백하면 PG 지연 시 승인 실패가 늘어나 오히려 손해\n검토한 대안: 5초로 롤백, 6초 절충안\n적용 범위: payment 서비스 설정",
+  "tags": [
+   "합성",
+   "서비스별 배포·롤백 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-04T03:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A2_01",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A2_01",
+  "title": "금요일 오후 배포 금지",
+  "body": "정책: 금요일 15시 이후에는 일반 배포를 하지 않는다\n이유: 주말 사이 문제가 생기면 대응 인력이 부족\n예외: 고객 영향이 큰 보안 패치는 팀장 승인 후 가능\n적용 범위: shop-api, shop-web 전체",
+  "tags": [
+   "합성",
+   "배포 시간대·동결 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-04T14:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A2",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A2_02",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A2_02",
+  "title": "프로모션 기간 배포 동결",
+  "body": "정책: 대형 프로모션 3일 전부터 종료일까지 신규 기능 배포를 동결\n이유: 프로모션 기간에는 작은 변경도 매출에 직결\n예외: 결제·재고 장애 수정은 예외\n적용 범위: 쇼핑몰 전체 서비스",
+  "tags": [
+   "합성",
+   "배포 시간대·동결 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-05T01:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A2",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A2_03",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A2_03",
+  "title": "월말 정산일 결제 모듈 동결",
+  "body": "정책: 매월 말일과 익월 1일에는 결제·정산 모듈을 변경하지 않는다\n이유: 정산 배치와 변경이 겹치면 대사가 어긋남\n예외: 정산 담당자가 사전 승인한 경우\n적용 범위: payment, 정산 배치",
+  "tags": [
+   "합성",
+   "배포 시간대·동결 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-05T12:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A2",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A2_04",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A2_04",
+  "title": "야간 배포 당직 2인 이상",
+  "body": "정책: 22시~06시 배포는 당직자 2인 이상이 대기할 때만 진행\n이유: 야간에 혼자 대응하다 복구가 지연된 전례\n예외: 읽기 전용 설정 변경\n적용 범위: 모든 서비스",
+  "tags": [
+   "합성",
+   "배포 시간대·동결 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-05T23:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A2",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A2_05",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A2_05",
+  "title": "긴급 배포 예외 승인 절차",
+  "body": "정책: 동결 기간 긴급 배포는 팀장과 운영 책임자 두 명의 승인이 필요\n이유: 예외가 상시화되는 것을 막기 위함\n예외: 승인자가 부재하면 지정 대리인 1인\n적용 범위: 모든 서비스",
+  "tags": [
+   "합성",
+   "배포 시간대·동결 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-06T10:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A2",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A3_01",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A3_01",
+  "title": "대형 테이블 컬럼 추가는 온라인 DDL",
+  "body": "결정: 주문 테이블 컬럼 추가는 온라인 DDL로만 수행\n이유: 테이블 잠금으로 쓰기 요청이 막힌 사례가 있음\n검토한 대안: 점검 시간에 일괄 변경\n적용 범위: 행 수 1천만 이상 테이블",
+  "tags": [
+   "합성",
+   "DB 스키마·마이그레이션 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-06T21:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A3",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A3_02",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A3_02",
+  "title": "인덱스 추가는 새벽 시간만",
+  "body": "결정: 대용량 인덱스 생성은 02~05시에만 허용\n이유: 생성 중 I/O 부하로 조회가 느려짐\n검토한 대안: 복제본에서 먼저 생성 후 승격\n적용 범위: 운영 DB 전체",
+  "tags": [
+   "합성",
+   "DB 스키마·마이그레이션 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-07T08:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A3",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A3_03",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A3_03",
+  "title": "컬럼 삭제는 2단계",
+  "body": "결정: 컬럼 삭제는 사용 중단 표시 후 2주 뒤 삭제하는 2단계로 진행\n이유: 구버전 코드가 컬럼을 읽는 경우 오류가 발생\n검토한 대안: 즉시 삭제\n적용 범위: 공용 스키마 전체",
+  "tags": [
+   "합성",
+   "DB 스키마·마이그레이션 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-07T19:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A3",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A3_04",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A3_04",
+  "title": "마이그레이션 롤백 스크립트 필수",
+  "body": "결정: 모든 마이그레이션은 되돌리는 스크립트와 함께 검토\n이유: 실패 시 수동 복구에 시간이 오래 걸림\n검토한 대안: 백업 복원에만 의존\n적용 범위: 스키마 변경 PR",
+  "tags": [
+   "합성",
+   "DB 스키마·마이그레이션 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-08T06:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A3",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A3_05",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A3_05",
+  "title": "복제 지연 시 마이그레이션 중단",
+  "body": "결정: 읽기 복제본 지연이 30초를 넘으면 마이그레이션을 자동 중단\n이유: 복제본 조회 결과가 오래된 데이터로 노출\n검토한 대안: 지연을 무시하고 완료\n적용 범위: 운영 DB 마이그레이션",
+  "tags": [
+   "합성",
+   "DB 스키마·마이그레이션 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-08T17:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A3",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A4_01",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A4_01",
+  "title": "PG사 이전 보류",
+  "body": "결정: 현재 PG사에서 신규 PG사로의 전면 이전을 분기 이후로 보류\n이유: 수수료는 낮지만 정산 주기와 환불 API 차이를 아직 검증하지 못함\n검토한 대안: 일부 카드사만 이전\n적용 범위: payment 서비스",
+  "tags": [
+   "합성",
+   "외부 결제사 변경·연동 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-09T04:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A4",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A4_02",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A4_02",
+  "title": "간편결제 신규 연동 10% 단계 오픈",
+  "body": "결정: 신규 간편결제를 트래픽 10%에게만 먼저 노출\n이유: 승인 실패율을 비교하며 확대하기 위함\n검토한 대안: 전체 사용자에게 한 번에 오픈\n적용 범위: payment 결제 수단 선택 화면",
+  "tags": [
+   "합성",
+   "외부 결제사 변경·연동 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-09T15:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A4",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A4_03",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A4_03",
+  "title": "대체 PG 자동 전환 미도입",
+  "body": "결정: PG 장애 시 대체 PG로 자동 전환하는 기능은 이번 분기에 도입하지 않음\n이유: 이중 승인으로 중복 결제될 위험이 있어 대사 체계가 먼저 필요\n검토한 대안: 수동 전환 절차만 문서화\n적용 범위: payment 서비스",
+  "tags": [
+   "합성",
+   "외부 결제사 변경·연동 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-10T02:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A4",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A4_04",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A4_04",
+  "title": "결제사 웹훅 서명 검증 필수",
+  "body": "결정: 결제사 웹훅은 서명 검증을 통과해야만 처리\n이유: 위조 요청으로 결제 완료 상태가 바뀔 수 있음\n검토한 대안: IP 허용 목록만 사용\n적용 범위: 결제 완료 웹훅 엔드포인트",
+  "tags": [
+   "합성",
+   "외부 결제사 변경·연동 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-10T13:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A4",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A4_05",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A4_05",
+  "title": "해외카드 결제 연동 보류",
+  "body": "결정: 해외카드 결제 연동은 사기 방지 체계를 갖출 때까지 보류\n이유: 해외 결제는 부정 결제 비율이 높음\n검토한 대안: 소액 한도를 두고 시범 운영\n적용 범위: payment 서비스",
+  "tags": [
+   "합성",
+   "외부 결제사 변경·연동 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-11T00:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A4",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A5_01",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A5_01",
+  "title": "운영자 권한 변경 2인 승인",
+  "body": "정책: 운영자 권한을 올리거나 내릴 때는 두 명이 승인해야 한다\n이유: 혼자 권한을 키워 사고가 난 전례를 막기 위함\n예외: 긴급 상황은 사후 24시간 내 확인\n적용 범위: 관리 콘솔 전체",
+  "tags": [
+   "합성",
+   "관리자 권한·승인 체계 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-11T11:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A5",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A5_02",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A5_02",
+  "title": "퇴사자 계정 당일 회수",
+  "body": "정책: 퇴사일에 모든 계정과 접근 키를 회수한다\n이유: 퇴사 후 접근 가능한 계정이 남는 위험\n예외: 인수인계 중인 계정은 읽기 전용으로 7일\n적용 범위: 사내 시스템 전체",
+  "tags": [
+   "합성",
+   "관리자 권한·승인 체계 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-11T22:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A5",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A5_03",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A5_03",
+  "title": "임시 권한 최대 7일",
+  "body": "정책: 임시로 부여한 권한은 최대 7일 후 자동으로 만료\n이유: 임시 권한이 영구 권한으로 굳는 것을 방지\n예외: 연장은 담당 팀장 승인\n적용 범위: 임시 권한 신청 건",
+  "tags": [
+   "합성",
+   "관리자 권한·승인 체계 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-12T09:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A5",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A5_04",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A5_04",
+  "title": "운영 DB 직접 접속 금지",
+  "body": "정책: 운영 DB에는 점프 서버와 읽기 전용 계정으로만 접속\n이유: 직접 쓰기 접속으로 데이터가 잘못 수정된 사례\n예외: 장애 대응 시 임시 쓰기 권한 1시간\n적용 범위: 운영 DB",
+  "tags": [
+   "합성",
+   "관리자 권한·승인 체계 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-12T20:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A5",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A5_05",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A5_05",
+  "title": "외주 인력은 읽기 전용",
+  "body": "정책: 외주 인력에게는 읽기 전용 권한만 부여\n이유: 외부 인력의 변경 책임 범위가 불분명\n예외: 전담 책임자를 지정한 경우 제한적 쓰기\n적용 범위: 외주 계약 인력",
+  "tags": [
+   "합성",
+   "관리자 권한·승인 체계 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-13T07:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A5",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A6_01",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A6_01",
+  "title": "클라우드 월 예산 초과 승인",
+  "body": "결정: 월 예산의 110%를 넘으면 재무 담당 승인 후에만 추가 사용\n이유: 자원 증설이 예산 확인 없이 이어짐\n검토한 대안: 초과분을 자동 허용\n적용 범위: 클라우드 계정 전체",
+  "tags": [
+   "합성",
+   "비용·예산 승인 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-13T18:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A6",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A6_02",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A6_02",
+  "title": "LLM API 일일 한도",
+  "body": "결정: LLM API 호출 비용에 하루 한도를 두고 초과 시 규칙 기반 응답으로 대체\n이유: 호출 폭주 시 비용이 한 번에 커질 수 있음\n검토한 대안: 한도 없이 월말 정산\n적용 범위: 에이전트 LLM 호출",
+  "tags": [
+   "합성",
+   "비용·예산 승인 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-14T05:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A6",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A6_03",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A6_03",
+  "title": "신규 모니터링 도구 도입 보류",
+  "body": "결정: 신규 모니터링 도구 도입을 다음 예산 주기까지 보류\n이유: 기존 도구로 대부분 충족되고 이중 운영 비용이 큼\n검토한 대안: 무료 평가판만 시험\n적용 범위: 운영 모니터링",
+  "tags": [
+   "합성",
+   "비용·예산 승인 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-14T16:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A6",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A6_04",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A6_04",
+  "title": "로그 보관 30일로 단축",
+  "body": "결정: 애플리케이션 로그 보관을 90일에서 30일로 줄임\n이유: 저장 비용이 월 예산의 15%를 차지\n검토한 대안: 압축 후 90일 유지\n적용 범위: 애플리케이션 로그",
+  "tags": [
+   "합성",
+   "비용·예산 승인 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-15T03:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A6",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A7_01",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A7_01",
+  "title": "점검 공지는 10분 내 게시",
+  "body": "정책: 장애 확인 후 10분 안에 점검 공지를 게시한다\n이유: 공지가 늦으면 문의가 폭증\n예외: 원인 불명이어도 영향 범위만 먼저 안내\n적용 범위: 쇼핑몰 공지 영역",
+  "tags": [
+   "합성",
+   "공지·고객 커뮤니케이션 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-15T14:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A7",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A7_02",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A7_02",
+  "title": "보상 쿠폰 문구 승인",
+  "body": "정책: 보상 쿠폰 안내 문구는 고객지원 팀장이 승인한 뒤 게시\n이유: 보상 범위를 잘못 적으면 추가 비용이 발생\n예외: 정형 문구 템플릿을 그대로 쓰는 경우\n적용 범위: 보상 공지 전체",
+  "tags": [
+   "합성",
+   "공지·고객 커뮤니케이션 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-16T01:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A7",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A7_03",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A7_03",
+  "title": "정상화 공지 필수",
+  "body": "정책: 장애 복구 후에는 정상화 공지를 반드시 게시한다\n이유: 점검 공지만 남아 있으면 고객이 계속 이용을 망설임\n예외: 10분 미만 장애는 생략 가능\n적용 범위: 점검 공지가 있었던 장애",
+  "tags": [
+   "합성",
+   "공지·고객 커뮤니케이션 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-16T12:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A7",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A7_04",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A7_04",
+  "title": "배송 지연 공지 템플릿",
+  "body": "정책: 택배사 지연은 정해진 템플릿으로 공지\n이유: 문구 편차로 인한 오해를 줄이기 위함\n예외: 자연재해는 별도 문구\n적용 범위: 배송 관련 공지",
+  "tags": [
+   "합성",
+   "공지·고객 커뮤니케이션 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-16T23:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A7",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A7_05",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A7_05",
+  "title": "사과문 표현 기준",
+  "body": "정책: 사과문에는 원인 추정이나 책임 전가 표현을 넣지 않는다\n이유: 확정되지 않은 원인이 잘못 알려지는 문제\n예외: 원인이 확정되면 후속 공지에 기재\n적용 범위: 고객 대상 모든 사과문",
+  "tags": [
+   "합성",
+   "공지·고객 커뮤니케이션 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-17T10:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A7",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_A8_01",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A8_01",
+  "title": "탈퇴 회원 정보 30일 후 파기",
+  "body": "정책: 탈퇴한 회원의 개인정보는 30일 뒤 파기\n이유: 복구 요청 유예를 두면서 보관 기간을 줄이기 위함\n예외: 법적 보관 대상은 해당 기간 유지\n적용 범위: 회원 정보",
+  "tags": [
+   "합성",
+   "개인정보·데이터 보관 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-17T21:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A8",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A8_02",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A8_02",
+  "title": "주문 기록 5년 보관",
+  "body": "정책: 주문·결제 기록은 5년간 보관\n이유: 관련 법령상 보관 의무\n예외: 개인 식별 정보는 분리 저장\n적용 범위: 주문·결제 데이터",
+  "tags": [
+   "합성",
+   "개인정보·데이터 보관 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-18T08:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A8",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A8_03",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A8_03",
+  "title": "로그 내 카드번호 마스킹",
+  "body": "정책: 로그에는 카드번호를 앞 6자리와 뒤 4자리만 남긴다\n이유: 로그 유출 시 카드 정보가 노출될 위험\n예외: 없음\n적용 범위: 모든 서비스 로그",
+  "tags": [
+   "합성",
+   "개인정보·데이터 보관 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-18T19:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A8",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A8_04",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A8_04",
+  "title": "문의 첨부 파일 90일 보관",
+  "body": "정책: 고객 문의 첨부 파일은 90일 후 삭제\n이유: 영수증·사진에 개인정보가 들어 있을 수 있음\n예외: 분쟁 진행 건은 종료 시까지\n적용 범위: 고객지원 첨부 파일",
+  "tags": [
+   "합성",
+   "개인정보·데이터 보관 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-19T06:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A8",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A8_05",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A8_05",
+  "title": "개인정보 접근 로그 1년",
+  "body": "정책: 개인정보 열람 기록은 1년 이상 보관\n이유: 누가 언제 열람했는지 추적하기 위함\n예외: 없음\n적용 범위: 개인정보 조회 화면",
+  "tags": [
+   "합성",
+   "개인정보·데이터 보관 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-19T17:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A8",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A9_01",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A9_01",
+  "title": "주문 처리 서버 증설",
+  "body": "결정: 주문 처리 서버를 4대에서 6대로 증설\n이유: 평시 CPU 사용률이 75%를 넘어 여유가 없음\n검토한 대안: 인스턴스 사양만 상향\n적용 범위: 주문 처리 서버 그룹",
+  "tags": [
+   "합성",
+   "인프라 용량·확장 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-20T04:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A9",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A9_02",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A9_02",
+  "title": "이벤트 전 사전 스케일아웃",
+  "body": "결정: 대형 이벤트 하루 전에 서버를 미리 두 배로 늘림\n이유: 자동 확장이 따라가지 못해 초반 응답이 느려진 사례\n검토한 대안: 자동 확장 임계값만 낮춤\n적용 범위: 웹·API 서버",
+  "tags": [
+   "합성",
+   "인프라 용량·확장 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-20T15:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A9",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A9_03",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A9_03",
+  "title": "읽기 복제본 추가",
+  "body": "결정: DB 읽기 복제본을 1대 추가하고 조회를 분산\n이유: 상품 조회가 주 DB 부하의 60%를 차지\n검토한 대안: 캐시만 확대\n적용 범위: 조회 전용 쿼리",
+  "tags": [
+   "합성",
+   "인프라 용량·확장 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-21T02:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A9",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A9_04",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A9_04",
+  "title": "캐시 TTL 조정",
+  "body": "결정: 상품 상세 캐시 유효시간을 60초에서 5분으로 늘림\n이유: 캐시 미스가 많아 DB 조회가 반복됨\n검토한 대안: 재고만 짧게, 나머지는 길게 분리\n적용 범위: 상품 상세 캐시",
+  "tags": [
+   "합성",
+   "인프라 용량·확장 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-21T13:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A9",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A9_05",
+  "kind": "decision",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A9_05",
+  "title": "오토스케일 상한 20",
+  "body": "결정: 자동 확장의 최대 인스턴스를 20대로 제한\n이유: 오류로 무한 확장되어 비용이 폭증한 전례\n검토한 대안: 상한 없이 알림만 설정\n적용 범위: 자동 확장 그룹",
+  "tags": [
+   "합성",
+   "인프라 용량·확장 결정"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-22T00:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A9",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A10_01",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A10_01",
+  "title": "배포 전 커버리지 70%",
+  "body": "정책: 배포하려면 테스트 커버리지가 70% 이상이어야 한다\n이유: 검증되지 않은 변경이 늘어나는 것을 방지\n예외: 문서·설정만 바꾸는 변경\n적용 범위: 서비스 코드 PR",
+  "tags": [
+   "합성",
+   "테스트·품질 게이트 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-22T11:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A10",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A10_02",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A10_02",
+  "title": "결제 모듈 e2e 필수",
+  "body": "정책: 결제 관련 변경은 e2e 테스트를 통과해야 머지\n이유: 결제 흐름이 깨지면 매출 손실이 큼\n예외: 스타일 수정 같은 비기능 변경\n적용 범위: 결제 관련 PR",
+  "tags": [
+   "합성",
+   "테스트·품질 게이트 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-22T22:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A10",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A10_03",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A10_03",
+  "title": "린트 실패 시 머지 금지",
+  "body": "정책: 린트와 서식 검사가 실패하면 머지하지 않는다\n이유: 코드 스타일 편차가 리뷰 부담을 키움\n예외: 자동 수정이 가능한 경우 수정 후 재검사\n적용 범위: 모든 PR",
+  "tags": [
+   "합성",
+   "테스트·품질 게이트 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-23T09:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A10",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A10_04",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A10_04",
+  "title": "플레이키 테스트 격리",
+  "body": "정책: 간헐적으로 실패하는 테스트는 격리 목록으로 옮기고 이슈를 만든다\n이유: 무시되는 실패가 늘어 신뢰가 떨어짐\n예외: 격리는 2주를 넘기지 않는다\n적용 범위: 자동 테스트 전체",
+  "tags": [
+   "합성",
+   "테스트·품질 게이트 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-23T20:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A10",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_A10_05",
+  "kind": "policy",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_A10_05",
+  "title": "성능 회귀 5% 초과 시 차단",
+  "body": "정책: 응답 시간이 이전 대비 5%를 넘게 느려지면 배포를 차단\n이유: 작은 지연이 누적되는 것을 막기 위함\n예외: 의도된 변경은 사유를 기록하고 승인\n적용 범위: 성능 측정 대상 API",
+  "tags": [
+   "합성",
+   "테스트·품질 게이트 정책"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-24T07:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "plan_check",
+   "cluster": "A10",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B1_01",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_inc_2e3e120e0950",
+  "title": "[사건] payment 장애 감지 (error_rate_5xx) — 완료 8단계, 미완료 3단계",
+  "body": "결정: payment 장애 감지 (error_rate_5xx) — 완료 8단계, 미완료 3단계\n이유: scenario_a plan 실행 결과 — 완료: diagnose_incident, impact_analysis, find_related_prs, link_incident, draft_notice, publish_notice, request_incident_compensation, kpi_summary; 미완료: verify_recovery, draft_notice, publish_notice\n검토한 대안: verify_recovery: skipped (선행 단계 미완료(rollback)), draft_notice: skipped (선행 단계 미완료(recovery)), publish_notice: skipped (선행 단계 미완료(recovered_draft))\n근거: step:diagnose, step:impact, step:related_prs, step:link_incident, step:notice, step:publish_notice, step:compensation, step:kpi",
+  "tags": [
+   "실제",
+   "결제 5xx 오류율 급증"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [
+   "step:diagnose",
+   "step:impact",
+   "step:related_prs",
+   "step:link_incident",
+   "step:notice",
+   "step:publish_notice",
+   "step:compensation",
+   "step:kpi"
+  ],
+  "author": "orchestrator",
+  "confidence": "high",
+  "created_at": "2026-10-28T07:32:17.539296Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": false,
+   "function": "escalation",
+   "cluster": "B1",
+   "domain": "캣북스",
+   "source_card_id": "card_65cde0f59a30"
+  }
+ },
+ {
+  "card_id": "gold_B1_02",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B1_02",
+  "title": "PG 응답 오류로 결제 5xx 급증",
+  "body": "증상: 결제 API 5xx 비율이 18분간 6%까지 상승\n원인: 외부 PG 승인 서버가 간헐적으로 502를 반환\n조치: PG 상태 페이지 확인 후 재시도 간격을 늘리고 점검 공지 게시\n결과: PG 복구 후 25분 만에 정상화, 실패 주문 41건 재안내",
+  "tags": [
+   "합성",
+   "결제 5xx 오류율 급증"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-25T05:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B1_03",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B1_03",
+  "title": "신규 배포 후 NPE로 5xx",
+  "body": "증상: 배포 직후 결제 승인 5xx가 급증하고 로그에 NullPointerException\n원인: 쿠폰 없는 주문에서 쿠폰 객체를 참조하는 코드\n조치: 직전 버전으로 롤백하고 원인 PR을 링크\n결과: 롤백 12분 만에 오류율 정상, 수정 PR은 다음 날 재배포",
+  "tags": [
+   "합성",
+   "결제 5xx 오류율 급증"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-25T16:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B1_04",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B1_04",
+  "title": "커넥션 만료로 결제 5xx",
+  "body": "증상: 야간 시간대 결제 승인이 불규칙하게 실패\n원인: PG 커넥션이 유휴 후 끊겨 재사용 시 오류\n조치: 커넥션 유효성 검사 주기를 단축하는 설정 변경\n결과: 이후 3일간 재발 없음",
+  "tags": [
+   "합성",
+   "결제 5xx 오류율 급증"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-26T03:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B1_05",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B1_05",
+  "title": "환경변수 누락으로 결제 5xx",
+  "body": "증상: 신규 인스턴스에서만 결제가 모두 실패\n원인: 배포 스크립트가 결제 키 환경변수를 새 그룹에 복사하지 않음\n조치: 누락된 변수를 추가하고 해당 인스턴스를 재시작\n결과: 재시작 후 정상, 배포 점검 항목에 변수 확인 추가",
+  "tags": [
+   "합성",
+   "결제 5xx 오류율 급증"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-26T14:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B1_06",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B1_06",
+  "title": "인증서 만료로 결제 5xx",
+  "body": "증상: 특정 카드사 승인만 지속적으로 실패\n원인: 카드사 연동용 클라이언트 인증서가 만료\n조치: 갱신된 인증서로 교체하고 만료 알림을 추가\n결과: 교체 후 즉시 정상, 같은 카드사 실패 건은 재시도",
+  "tags": [
+   "합성",
+   "결제 5xx 오류율 급증"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-27T01:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B1",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B2_01",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B2_01",
+  "title": "PG 지연으로 결제 응답 지연",
+  "body": "증상: 결제 완료까지 평균 9초, 평소 2초\n원인: PG 승인 서버 응답이 느려짐\n조치: 타임아웃을 늘리고 안내 문구를 표시\n결과: 40분 뒤 PG 측 정상화",
+  "tags": [
+   "합성",
+   "결제 응답 지연"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-27T12:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B2",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B2_02",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B2_02",
+  "title": "느린 쿼리로 결제 지연",
+  "body": "증상: 결제 시작 단계에서 응답 지연\n원인: 주문 조회 쿼리에 인덱스가 없어 전체 스캔\n조치: 인덱스를 추가하고 쿼리를 수정\n결과: 응답이 평소 수준으로 회복",
+  "tags": [
+   "합성",
+   "결제 응답 지연"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-27T23:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B2",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B2_03",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B2_03",
+  "title": "GC 정지로 결제 지연",
+  "body": "증상: 몇 분마다 결제 응답이 5초 이상 멈춤\n원인: 메모리 설정이 작아 전체 GC가 잦음\n조치: 힙 크기를 늘리고 GC 설정을 조정\n결과: 정지 현상 사라짐",
+  "tags": [
+   "합성",
+   "결제 응답 지연"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-28T10:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B2",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B2_04",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B2_04",
+  "title": "사기 탐지 API 지연",
+  "body": "증상: 결제 직전 검증 단계에서만 지연\n원인: 외부 사기 탐지 API 응답이 느려짐\n조치: 탐지 호출에 짧은 타임아웃을 두고 초과 시 건너뜀\n결과: 지연 해소, 건너뛴 건은 사후 검수",
+  "tags": [
+   "합성",
+   "결제 응답 지연"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-28T21:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B2",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B2_05",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B2_05",
+  "title": "네트워크 손실로 결제 지연",
+  "body": "증상: 일부 가용 영역에서만 결제가 느림\n원인: 영역 간 네트워크에서 패킷 손실\n조치: 해당 영역 트래픽을 다른 영역으로 이동\n결과: 클라우드 측 복구 후 원복",
+  "tags": [
+   "합성",
+   "결제 응답 지연"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-29T08:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B2",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B3_01",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B3_01",
+  "title": "재고 서비스 대기로 주문 타임아웃",
+  "body": "증상: 주문 생성이 30초 후 타임아웃\n원인: 재고 서비스 응답이 느려 주문이 대기\n조치: 재고 호출에 타임아웃과 재시도 제한을 설정\n결과: 주문 성공률 회복",
+  "tags": [
+   "합성",
+   "주문 API 타임아웃"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-29T19:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B3",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B3_02",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B3_02",
+  "title": "락 경합으로 주문 타임아웃",
+  "body": "증상: 인기 상품 주문에서만 타임아웃\n원인: 같은 재고 행에 쓰기 락이 몰림\n조치: 재고 차감 방식을 낙관적 락으로 변경\n결과: 경합 구간에서도 정상 응답",
+  "tags": [
+   "합성",
+   "주문 API 타임아웃"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-30T06:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B3",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B3_03",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B3_03",
+  "title": "스레드 풀 고갈로 주문 타임아웃",
+  "body": "증상: 트래픽 증가 시 주문 요청이 대기열에 쌓임\n원인: 외부 호출이 느려 스레드가 모두 점유\n조치: 비동기 처리로 전환하고 풀 크기 조정\n결과: 대기열 해소",
+  "tags": [
+   "합성",
+   "주문 API 타임아웃"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-09-30T17:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B3",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B3_04",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B3_04",
+  "title": "배치 충돌로 주문 타임아웃",
+  "body": "증상: 매시 정각 주문 지연\n원인: 정산 배치가 같은 테이블을 장시간 읽음\n조치: 배치 실행 시간을 이동하고 읽기 복제본으로 분리\n결과: 정각 지연 사라짐",
+  "tags": [
+   "합성",
+   "주문 API 타임아웃"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-01T04:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B3",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B3_05",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B3_05",
+  "title": "DNS 지연으로 주문 타임아웃",
+  "body": "증상: 간헐적으로 주문 서비스 호출 실패\n원인: 내부 DNS 해석이 느려짐\n조치: DNS 캐시를 설정하고 해석 서버를 점검\n결과: 호출 실패 감소",
+  "tags": [
+   "합성",
+   "주문 API 타임아웃"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-01T15:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B3",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B4_01",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B4_01",
+  "title": "동시 주문으로 재고 음수",
+  "body": "증상: 한정 상품 재고가 음수로 표시\n원인: 동시 주문이 재고 확인과 차감 사이에 끼어듦\n조치: 재고 차감을 원자적 쿼리로 변경\n결과: 이후 음수 재고 없음",
+  "tags": [
+   "합성",
+   "재고 수량 불일치"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-02T02:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B4",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B4_02",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B4_02",
+  "title": "취소 시 재고 복구 누락",
+  "body": "증상: 취소 주문이 많은 날 재고가 실제보다 적음\n원인: 취소 처리에서 재고 복구 단계가 실패\n조치: 복구 실패를 재시도하고 누락분을 일괄 보정\n결과: 재고 일치 확인",
+  "tags": [
+   "합성",
+   "재고 수량 불일치"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-02T13:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B4",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B4_03",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B4_03",
+  "title": "배치 동기화 오류",
+  "body": "증상: 창고 재고와 쇼핑몰 재고가 다름\n원인: 야간 동기화 배치가 중간에 중단\n조치: 중단된 배치를 재실행하고 완료 알림 추가\n결과: 다음 날부터 일치",
+  "tags": [
+   "합성",
+   "재고 수량 불일치"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-03T00:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B4",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B4_04",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B4_04",
+  "title": "반품 입고 미반영",
+  "body": "증상: 반품 상품이 재고에 반영되지 않음\n원인: 입고 확인 후 재고 갱신 이벤트가 유실\n조치: 이벤트를 재발행하고 유실 감시 추가\n결과: 반품 재고 정상 반영",
+  "tags": [
+   "합성",
+   "재고 수량 불일치"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-03T11:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B4",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B5_01",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B5_01",
+  "title": "서명 키 교체 후 로그인 실패",
+  "body": "증상: 로그인 직후 인증 오류가 급증\n원인: 토큰 서명 키를 교체하며 기존 키가 제거됨\n조치: 이전 키를 일정 기간 함께 허용하도록 복구\n결과: 기존 로그인 상태가 유지됨",
+  "tags": [
+   "합성",
+   "로그인·인증 실패 급증"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-03T22:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B5",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B5_02",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B5_02",
+  "title": "세션 저장소 장애",
+  "body": "증상: 로그인 상태가 계속 풀림\n원인: 세션 저장소 노드 하나가 응답하지 않음\n조치: 저장소를 정상 노드로 전환하고 세션 일부 재발급\n결과: 사용자 재로그인 후 정상",
+  "tags": [
+   "합성",
+   "로그인·인증 실패 급증"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-04T09:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B5",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B5_03",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B5_03",
+  "title": "소셜 로그인 제공자 장애",
+  "body": "증상: 소셜 로그인 버튼만 실패\n원인: 외부 제공자의 인증 서버 장애\n조치: 일반 로그인 안내를 노출하고 제공자 복구를 대기\n결과: 제공자 복구 후 정상",
+  "tags": [
+   "합성",
+   "로그인·인증 실패 급증"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-04T20:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B5",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B5_04",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B5_04",
+  "title": "봇의 대량 로그인 시도",
+  "body": "증상: 로그인 실패 요청이 평소의 50배\n원인: 자동화된 계정 대입 공격\n조치: IP 단위 제한과 캡차를 적용\n결과: 공격 트래픽 차단, 계정 잠금 해제 안내",
+  "tags": [
+   "합성",
+   "로그인·인증 실패 급증"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-05T07:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B5",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B6_01",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B6_01",
+  "title": "이중 클릭으로 쿠폰 중복 발급",
+  "body": "증상: 한 사용자가 같은 쿠폰을 두 번 받음\n원인: 발급 버튼 이중 클릭에 멱등 키가 없음\n조치: 발급 요청에 멱등 키를 적용\n결과: 중복 발급 0건",
+  "tags": [
+   "합성",
+   "쿠폰 중복 발급"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-05T18:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B6",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B6_02",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B6_02",
+  "title": "재시도로 쿠폰 중복 발급",
+  "body": "증상: 네트워크 오류 후 쿠폰이 두 장 발급\n원인: 클라이언트 재시도가 서버에서 별개 요청으로 처리\n조치: 요청 식별자로 중복 처리를 막음\n결과: 재현되지 않음",
+  "tags": [
+   "합성",
+   "쿠폰 중복 발급"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-06T05:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B6",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B6_03",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B6_03",
+  "title": "동시 오픈 시 쿠폰 중복",
+  "body": "증상: 이벤트 시작 직후 발급 수가 한도를 초과\n원인: 한도 확인과 발급 사이에 경합\n조치: 한도 확인과 발급을 하나의 트랜잭션으로 묶음\n결과: 한도 내에서 정확히 발급",
+  "tags": [
+   "합성",
+   "쿠폰 중복 발급"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-06T16:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B6",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B6_04",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B6_04",
+  "title": "발급 배치 재실행으로 중복",
+  "body": "증상: 생일 쿠폰이 같은 사용자에게 두 번 발급\n원인: 배치가 실패 후 재실행되며 이전 결과를 확인하지 않음\n조치: 발급 이력을 먼저 조회하도록 수정\n결과: 재실행해도 중복 없음",
+  "tags": [
+   "합성",
+   "쿠폰 중복 발급"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-07T03:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B6",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B7_01",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B7_01",
+  "title": "상품 이미지 404",
+  "body": "증상: 일부 상품 이미지가 표시되지 않음\n원인: 이미지 경로 변경 후 원본 동기화가 누락\n조치: 원본을 재동기화하고 경로 매핑 점검\n결과: 이미지 정상 표시",
+  "tags": [
+   "합성",
+   "이미지·정적 자원 CDN 장애"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-07T14:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B7",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B7_02",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B7_02",
+  "title": "캐시 무효화 실패",
+  "body": "증상: 교체한 이미지가 이전 것으로 계속 표시\n원인: CDN 캐시 무효화 요청이 제한에 걸림\n조치: 무효화 요청을 분할해 재전송\n결과: 새 이미지 노출",
+  "tags": [
+   "합성",
+   "이미지·정적 자원 CDN 장애"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-08T01:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B7",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B7_03",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B7_03",
+  "title": "CDN 지역 장애",
+  "body": "증상: 특정 지역에서만 정적 자원 로딩 실패\n원인: CDN 업체의 해당 지역 장애\n조치: 다른 지역 엣지로 우회하도록 설정\n결과: 업체 복구 후 원복",
+  "tags": [
+   "합성",
+   "이미지·정적 자원 CDN 장애"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-08T12:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B7",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B7_04",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B7_04",
+  "title": "CDN 인증서 만료",
+  "body": "증상: 브라우저에 보안 경고가 표시\n원인: 정적 자원 도메인 인증서가 만료\n조치: 인증서를 갱신하고 자동 갱신 알림 추가\n결과: 경고 사라짐",
+  "tags": [
+   "합성",
+   "이미지·정적 자원 CDN 장애"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-08T23:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B7",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B8_01",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B8_01",
+  "title": "장시간 트랜잭션으로 풀 고갈",
+  "body": "증상: 요청이 커넥션 대기로 멈춤\n원인: 리포트 쿼리가 오래 트랜잭션을 유지\n조치: 쿼리를 분할하고 타임아웃을 설정\n결과: 대기 해소",
+  "tags": [
+   "합성",
+   "DB 커넥션 풀 고갈"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-09T10:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B8",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B8_02",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B8_02",
+  "title": "커넥션 누수로 풀 고갈",
+  "body": "증상: 시간이 지날수록 사용 가능한 커넥션이 줄어듦\n원인: 예외 경로에서 커넥션이 반환되지 않음\n조치: 반환 누락을 수정하고 누수 감지 알림 추가\n결과: 풀 사용량이 안정",
+  "tags": [
+   "합성",
+   "DB 커넥션 풀 고갈"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-09T21:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B8",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B8_03",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B8_03",
+  "title": "풀 크기 설정 오류",
+  "body": "증상: 배포 후 동시 요청이 많을 때 지연\n원인: 설정 변경으로 풀 크기가 기본값으로 돌아감\n조치: 풀 크기를 복원하고 설정을 코드로 관리\n결과: 지연 해소",
+  "tags": [
+   "합성",
+   "DB 커넥션 풀 고갈"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-10T08:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B8",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B8_04",
+  "kind": "incident",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B8_04",
+  "title": "복제본 장애로 주 DB 쏠림",
+  "body": "증상: 주 DB 커넥션이 한계에 도달\n원인: 읽기 복제본 하나가 장애로 빠져 조회가 주 DB로 이동\n조치: 복제본을 복구하고 조회 분산 비율 조정\n결과: 주 DB 부하 정상",
+  "tags": [
+   "합성",
+   "DB 커넥션 풀 고갈"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-10T19:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B8",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_B9_01",
+  "kind": "fraud",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B9_01",
+  "title": "동일 카드 다회 환불",
+  "body": "증상: 같은 카드로 하루 12건 환불 요청\n원인: 환불 후 재주문을 반복하는 패턴\n조치: 해당 카드의 환불을 보류하고 수동 검토\n결과: 정상 환불만 재승인, 계정 모니터링",
+  "tags": [
+   "합성",
+   "환불 남용·의심 거래"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-11T06:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B9",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B9_02",
+  "kind": "fraud",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B9_02",
+  "title": "신규 계정 대량 환불",
+  "body": "증상: 가입 3일 이내 계정의 환불 비율이 급증\n원인: 프로모션 상품만 구매 후 환불하는 계정 군\n조치: 신규 계정 환불 한도를 설정\n결과: 의심 계정 42건 정지 검토",
+  "tags": [
+   "합성",
+   "환불 남용·의심 거래"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-11T17:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B9",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B9_03",
+  "kind": "fraud",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B9_03",
+  "title": "미수령 주장 반복",
+  "body": "증상: 배송 완료 후 미수령 신고가 특정 주소에 집중\n원인: 같은 주소에서 반복적인 미수령 신고\n조치: 배송 증빙 확인 전까지 환불 보류\n결과: 허위 신고 건은 거절",
+  "tags": [
+   "합성",
+   "환불 남용·의심 거래"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-12T04:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B9",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_B9_04",
+  "kind": "fraud",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_B9_04",
+  "title": "쿠폰 후 환불 악용",
+  "body": "증상: 쿠폰으로 구매한 상품을 현금으로 환불받는 사례\n원인: 쿠폰 금액이 환불 금액에서 차감되지 않음\n조치: 쿠폰 사용분을 환불에서 제외하는 규칙 추가\n결과: 해당 패턴 재발 없음",
+  "tags": [
+   "합성",
+   "환불 남용·의심 거래"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-12T15:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "escalation",
+   "cluster": "B9",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_C1_01",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C1_01",
+  "title": "야간→주간 당직 교대",
+  "body": "인수인계 대상: 야간 당직 결제 알림 담당\n진행 상황: 새벽 3시 결제 지연 경보가 1회 있었고 자연 회복\n주의: 같은 경보가 다시 오면 PG 상태 페이지를 먼저 확인\n연락: 야간 당직자 메신저, 교대 후 1시간 응대 가능",
+  "tags": [
+   "합성",
+   "당직 교대 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-13T02:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C1",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C1_02",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C1_02",
+  "title": "주말 당직 교대",
+  "body": "인수인계 대상: 주말 당직 운영 알림\n진행 상황: 토요일 오전 배송 지연 문의가 늘어난 상태\n주의: 공지는 이미 게시되어 있어 추가 게시 불필요\n연락: 주말 당직 연락망 문서 참고",
+  "tags": [
+   "합성",
+   "당직 교대 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-13T13:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C1",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C1_03",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C1_03",
+  "title": "휴일 당직 교대 지연",
+  "body": "인수인계 대상: 휴일 당직 교대 확인\n진행 상황: 교대자가 도착하기 전 2시간 공백이 있었음\n주의: 공백 시간에 발생한 경보 3건의 처리 결과 확인 필요\n연락: 팀장 직통 연락",
+  "tags": [
+   "합성",
+   "당직 교대 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-14T00:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C1",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C1_04",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C1_04",
+  "title": "당직 중 교대",
+  "body": "인수인계 대상: 진행 중 알림 처리 이어받기\n진행 상황: 알림 확인 후 조치 전 단계\n주의: 알림이 이미 확인 처리되었는지 먼저 확인\n연락: 교대자와 통화로 상황 공유",
+  "tags": [
+   "합성",
+   "당직 교대 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-14T11:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C1",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C1_05",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C1_05",
+  "title": "교대자 미확인",
+  "body": "인수인계 대상: 교대 확인이 없는 당직 구간\n진행 상황: 인수 확인 없이 교대가 끝난 상태\n주의: 다음 당직자가 직전 교대 기록을 직접 확인\n연락: 운영 책임자에게 사실 보고",
+  "tags": [
+   "합성",
+   "당직 교대 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-14T22:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C1",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C2_01",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C2_01",
+  "title": "개발 담당 퇴사",
+  "body": "인수인계 대상: 결제 연동 모듈 유지보수\n진행 상황: 다음 주 수정 예정 PR 1건이 미완료\n주의: 배포 키는 퇴사자 개인 저장소에만 있어 회수 필요\n연락: 퇴사 후 연락 불가",
+  "tags": [
+   "합성",
+   "담당자 퇴사 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-15T09:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C2",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C2_02",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C2_02",
+  "title": "정산 담당 퇴사",
+  "body": "인수인계 대상: 월 정산 대사 업무\n진행 상황: 이번 달 대사가 절반 완료\n주의: 대사 기준 엑셀의 숨은 시트에 예외 규칙이 있음\n연락: 퇴사 후 연락 불가, 문서에 의존",
+  "tags": [
+   "합성",
+   "담당자 퇴사 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-15T20:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C2",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C2_03",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C2_03",
+  "title": "운영 담당 퇴사",
+  "body": "인수인계 대상: 고객 보상 승인 업무\n진행 상황: 승인 대기 3건이 남아 있음\n주의: 승인 한도 규칙을 후임이 다시 확인해야 함\n연락: 퇴사 후 연락 불가",
+  "tags": [
+   "합성",
+   "담당자 퇴사 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-16T07:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C2",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C2_04",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C2_04",
+  "title": "퇴사자 계정 이관",
+  "body": "인수인계 대상: 공용 계정 비밀번호 관리\n진행 상황: 공용 계정 5개의 소유자가 퇴사자\n주의: 비밀번호를 즉시 변경하고 소유자를 재지정\n연락: 보안 담당과 협의",
+  "tags": [
+   "합성",
+   "담당자 퇴사 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-16T18:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C2",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C2_05",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C2_05",
+  "title": "퇴사자 문서 위치",
+  "body": "인수인계 대상: 개인 드라이브에 있는 운영 문서\n진행 상황: 문서 12개가 개인 폴더에 흩어져 있음\n주의: 공용 위키로 옮기기 전까지 삭제 금지\n연락: 퇴사 후 연락 불가",
+  "tags": [
+   "합성",
+   "담당자 퇴사 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-17T05:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C2",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C3_01",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C3_01",
+  "title": "인사→기획 부서 이동",
+  "body": "인수인계 대상: 입퇴사 알림 업무\n진행 상황: 월간 보고 작성이 남아 있음\n주의: 보고 양식은 후임이 처음 보는 형식\n연락: 이동 후 질문 가능, 오후 시간대",
+  "tags": [
+   "합성",
+   "부서 이동 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-17T16:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C3",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C3_02",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C3_02",
+  "title": "재무→데이터 부서 이동",
+  "body": "인수인계 대상: 매출 집계 자료\n진행 상황: 집계 쿼리와 검증 규칙이 정리된 상태\n주의: 환율 기준일이 월말이 아닌 영업일 기준\n연락: 이동 후에도 문의 가능",
+  "tags": [
+   "합성",
+   "부서 이동 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-18T03:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C3",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C3_03",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C3_03",
+  "title": "부서 이동 후 문의 가능",
+  "body": "인수인계 대상: 협력사 담당 창구\n진행 상황: 협력사 계약 갱신 논의가 진행 중\n주의: 협력사에 담당자 변경을 알렸는지 확인\n연락: 이전 담당자와 주 1회 확인",
+  "tags": [
+   "합성",
+   "부서 이동 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-18T14:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C3",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C3_04",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C3_04",
+  "title": "겸직 기간 인수",
+  "body": "인수인계 대상: 이전 업무 2주 겸직\n진행 상황: 새 업무와 이전 업무를 병행 중\n주의: 겸직 종료일을 지나면 이전 업무 요청은 후임에게\n연락: 겸직 종료일까지 응답",
+  "tags": [
+   "합성",
+   "부서 이동 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-19T01:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C3",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C3_05",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C3_05",
+  "title": "권한 이전",
+  "body": "인수인계 대상: 업무 시스템 권한 이전\n진행 상황: 이전 부서 권한이 아직 남아 있음\n주의: 새 권한 승인 후 이전 권한을 회수\n연락: 권한 담당자와 확인",
+  "tags": [
+   "합성",
+   "부서 이동 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-19T12:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C3",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C4_01",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C4_01",
+  "title": "육아휴직 대행",
+  "body": "인수인계 대상: 고객 문의 팀 업무\n진행 상황: 6개월 대행이 필요하고 복귀일이 정해짐\n주의: 복귀 시 인수인계 회의를 다시 진행\n연락: 휴직 중 연락은 긴급 시에만",
+  "tags": [
+   "합성",
+   "장기 휴가 업무 대행"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-19T23:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C4",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C4_02",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C4_02",
+  "title": "장기 병가 대행",
+  "body": "인수인계 대상: 보안 점검 담당\n진행 상황: 병가 기간이 정해지지 않음\n주의: 점검 일정은 팀 내 다른 담당이 임시 수행\n연락: 본인 연락은 병가 중 제한",
+  "tags": [
+   "합성",
+   "장기 휴가 업무 대행"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-20T10:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C4",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C4_03",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C4_03",
+  "title": "해외 연수 대행",
+  "body": "인수인계 대상: 신규 기능 기획 업무\n진행 상황: 연수 중에도 주 1회 회의 참석 가능\n주의: 시차가 있어 회의는 한국시간 저녁\n연락: 메신저로 비동기 소통",
+  "tags": [
+   "합성",
+   "장기 휴가 업무 대행"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-20T21:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C4",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C4_04",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C4_04",
+  "title": "휴가 중 긴급 연락",
+  "body": "인수인계 대상: 휴가 중 장애 대응 연락 규칙\n진행 상황: 일주일 휴가, 대행자가 1차 대응\n주의: 대행자가 판단하기 어려운 경우만 휴가자에게 연락\n연락: 긴급 연락은 전화만",
+  "tags": [
+   "합성",
+   "장기 휴가 업무 대행"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-21T08:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C4",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C5_01",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C5_01",
+  "title": "결제 장애 대응 중 교대",
+  "body": "인수인계 대상: 결제 5xx 장애 대응\n진행 상황: 원인 후보 2개 중 PG 응답 오류를 조사하는 단계\n주의: 롤백은 원인 확정 전까지 보류하기로 한 상태\n연락: 대응 채널에서 실시간 공유",
+  "tags": [
+   "합성",
+   "진행 중인 장애 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-21T19:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C5",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_C5_02",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C5_02",
+  "title": "쿠폰 장애 모니터링 인계",
+  "body": "인수인계 대상: 쿠폰 중복 발급 사건 모니터링\n진행 상황: 수정 배포 후 24시간 관찰 중\n주의: 중복 발급이 다시 보이면 즉시 배포를 롤백\n연락: 모니터링 대시보드 링크",
+  "tags": [
+   "합성",
+   "진행 중인 장애 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-22T06:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C5",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_C5_03",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C5_03",
+  "title": "재고 불일치 조사 인계",
+  "body": "인수인계 대상: 재고 불일치 원인 조사\n진행 상황: 배치 동기화 로그를 분석하는 중\n주의: 수동 재고 보정은 조사가 끝날 때까지 하지 않음\n연락: 조사 노트 문서 참고",
+  "tags": [
+   "합성",
+   "진행 중인 장애 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-22T17:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C5",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_C5_04",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C5_04",
+  "title": "주문 지연 대응 인계",
+  "body": "인수인계 대상: 주문 API 지연 대응\n진행 상황: 스레드 풀 증설 후 관찰 단계\n주의: 증설한 인스턴스는 이벤트 종료 후 줄일 것\n연락: 대응 채널에서 상황 확인",
+  "tags": [
+   "합성",
+   "진행 중인 장애 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-23T04:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C5",
+   "domain": "캣북스"
+  }
+ },
+ {
+  "card_id": "gold_C6_01",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C6_01",
+  "title": "월 마감 인수인계",
+  "body": "인수인계 대상: 월 마감 점검\n진행 상황: 마감 체크리스트 8개 중 5개 완료\n주의: 마감 후 수정 불가, 오류는 다음 달 조정\n연락: 재무 담당 확인",
+  "tags": [
+   "합성",
+   "정기 업무 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-23T15:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C6",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C6_02",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C6_02",
+  "title": "급여 정산 인수인계",
+  "body": "인수인계 대상: 급여 정산 자료 준비\n진행 상황: 수당 항목 확인이 남아 있음\n주의: 수당 기준표는 매달 15일에 갱신\n연락: 인사 담당 확인",
+  "tags": [
+   "합성",
+   "정기 업무 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-24T02:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C6",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C6_03",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C6_03",
+  "title": "분기 감사 자료 인수인계",
+  "body": "인수인계 대상: 분기 감사 대응 자료\n진행 상황: 접근 로그 증빙 수집 중\n주의: 감사 기간 내 자료 수정 이력 보존\n연락: 감사 담당 확인",
+  "tags": [
+   "합성",
+   "정기 업무 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-24T13:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C6",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C6_04",
+  "kind": "case",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C6_04",
+  "title": "연간 계약 갱신 인수인계",
+  "body": "인수인계 대상: 연간 계약 갱신 업무\n진행 상황: 갱신 협상이 한 달 남음\n주의: 자동 갱신 조항이 있어 해지 의사는 60일 전에 통지\n연락: 계약 담당 확인",
+  "tags": [
+   "합성",
+   "정기 업무 인수인계"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-25T00:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C6",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C7_01",
+  "kind": "notice",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C7_01",
+  "title": "신규 입사자 계정 발급 안내",
+  "body": "입사 첫날 계정은 인사팀이 발급하며, 메일과 메신저, 코드 저장소 순으로 권한이 열립니다. 비밀번호는 첫 로그인 때 변경해야 합니다.",
+  "tags": [
+   "합성",
+   "신규 입사자 온보딩 안내"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-25T11:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C7",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C7_02",
+  "kind": "notice",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C7_02",
+  "title": "보안 교육 일정 안내",
+  "body": "신규 입사자는 입사 후 첫 주 안에 보안 교육 2시간을 수료해야 합니다. 수료 전에는 운영 시스템 접근이 제한됩니다.",
+  "tags": [
+   "합성",
+   "신규 입사자 온보딩 안내"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-25T22:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C7",
+   "domain": "일반"
+  }
+ },
+ {
+  "card_id": "gold_C7_03",
+  "kind": "notice",
+  "tenant_id": "shop-demo",
+  "context_id": "ctx_gold_C7_03",
+  "title": "첫 주 업무 안내",
+  "body": "첫 주에는 담당 멘토와 함께 업무 도구 설정과 팀 소개를 진행합니다. 실제 업무 배정은 둘째 주부터입니다.",
+  "tags": [
+   "합성",
+   "신규 입사자 온보딩 안내"
+  ],
+  "status": "active",
+  "superseded_by": null,
+  "source_refs": [],
+  "author": "eval-gold",
+  "confidence": "high",
+  "created_at": "2026-10-26T09:00:00Z",
+  "candidate": false,
+  "extra": {
+   "synthetic": true,
+   "function": "handover",
+   "cluster": "C7",
+   "domain": "일반"
+  }
+ }
+]

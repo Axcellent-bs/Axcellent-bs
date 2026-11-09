@@ -1,0 +1,453 @@
+{
+  "name": "data",
+  "owner": "재현",
+  "description": "데이터 분석 — data 업무 중 이 서비스 skill만 맡는다. 데이터분석 — 이상 징후를 탐지하고, 장애 영향(실패 주문·영향 고객·피해 금액)을 계산하고, 사기 위험 점수와 KPI 요약을 돌려준다",
+  "url": "http://data:8106/a2a",
+  "version": "0.1.0",
+  "capabilities": {
+    "streaming": true,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "anomaly_detection",
+      "description": "업무 지표(결제 실패율, 주문 실패 건수, 주문 수, 문의량)를 5분 단위로 집계해 지난 7일 같은 시간대 기준선과 비교하고, 지표별 이상 여부·배수·심각도를 돌려준다. 숫자는 코드로 계산하고 원인은 판정하지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#AnomalyDetectionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#AnomalyDetectionOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "infra",
+        "dev"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "impact_analysis",
+      "description": "장애 구간(시작·종료 시각)을 받아 실패 주문 수, 영향 고객 수와 고객 ID 목록, 피해 금액(정수 원), 카테고리별 분포를 계산해 돌려준다. 영향 원천 숫자의 유일한 출처다. 숫자는 shop-api 조회 결과로 코드가 계산한다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#ImpactAnalysisInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#ImpactAnalysisOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "infra",
+        "support",
+        "finance",
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "fraud_score",
+      "description": "신규 판매자 ID를 받아 사기 위험 점수(0~100)·등급과 규칙 근거, 유사 사기 카드를 돌려준다. 점수는 규칙 코드가 계산하며 승인·보류는 결정하지 않는다(재무/정산이 판단). 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#FraudScoreInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#FraudScoreOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "kpi_summary",
+      "description": "공통 로그 저장소를 읽어 사건별 MTTR, 자동 처리율, 등급별 처리·차단 건수, 이관 건수, 1차·2차 유사 사건 처리 시간 비교를 돌려준다. 숫자는 코드가 산출한다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#KpiSummaryInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#KpiSummaryOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "root_cause_hypotheses",
+      "description": "이상 구간(시작·끝 시각)과 지표를 받아 구간 앞 30분~구간 끝의 사실(배포·머지된 PR, 게시 중 공지, 문의 급증, 지난 비슷한 사건)을 A2A로 모으고, 그 사실만 근거로 원인 후보(설명·근거 사실 id·확신도)를 고른다. 숫자·시각은 사실에서만 나오고, 근거 없는 후보와 사실에 없는 숫자·시각을 쓴 후보는 버린다. LLM이 실패하면 시간 순서 규칙(이상 직전 배포 1순위)으로 대체한다. 확신도 high 후보가 없으면 확인 필요, 사실이 없으면 확인할 수 없음. 꺼진 서비스의 사실은 건너뛰고 확인할 수 없음으로 남긴다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#RootCauseInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#RootCauseOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "accuracy_report",
+      "description": "데이터 분석 에이전트 정확도 평가(domains/data/eval/run.py) 결과를 읽어 준다. 최근 실행 결과가 있으면 그것을, 없으면 커밋된 기준값을 준다. 둘 다 없으면 확인할 수 없음. 다시 계산하지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#AccuracyReportInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#AccuracyReportOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "activity_report",
+      "description": "부서별 AI 업무 리포트. 기간(day·week·month, 한국 시간 날짜)의 공통 로그를 읽어 부서(서비스 대응표 department)별 처리한 요청·skill 상위 5개, 결과(자동 완료·사람 확인 후 실행·보류·거절·확인할 수 없음·실패), 사람에게 넘긴 일, 템플릿 대체 비율과 이유, 평균 응답 시간, 참여한 사건과 MTTR 중앙값, 부서 간 A2A 협업 횟수를 직전 기간과 함께 센다. 회사 숫자는 재무 closing_report(A2A), shop-api metric-series, 공통 로그 사건 수에서 받는다. 숫자는 코드가 세고, 비율은 분모 3 미만이면 null(표본 부족)이다. 직전 대비 변화가 큰 항목 최대 3개만 LLM이 3줄로 설명하며, 없으면 '특이사항 없음'이다. AI를 거친 일만 세고 절약 시간 같은 추정치는 내지 않는다. 셀 수 없는 칸은 unknown_sections에 이유를 남긴다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#ActivityReportInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#ActivityReportOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_scan",
+      "description": "네이버 검색어 트렌드로 키워드 그룹별 급상승을 판정한다. 최근 56일 대비 마지막 7일을 같은 응답 안에서만 비교하고(로그 강건 z), 그룹마다 따로 요청한다. 계절 반복 구분은 범위 밖이다. 자료가 없거나 짧거나 너무 작으면 unknown과 이유를 준다. 그룹을 비우면 회사 기본 키워드(config/tenants/<회사>/trends.toml)를 본다. 숫자는 코드가 산출하고 LLM은 설명 문장만 쓴다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendScanRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendScanOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_candidates",
+      "description": "최신 YouTube 인기 영상 스냅샷의 태그에서 후보 키워드를 코드 규칙으로 뽑고(앞뒤 공백·# 제거, 영문 소문자, 2개 이상 영상, 회사 제외 목록 뺌, 회사 별칭 표로 같은 대상을 대표 이름 하나로 묶어 영상 기준 중복 없이 셈, 나온 영상 수 많은 순으로 최대 N개), 후보마다 trend_scan과 같은 판정 함수로 네이버 검색어 급상승을 붙인다(대표 이름 그룹에 별칭들을 키워드로 함께 넣음). 묶인 별칭 목록도 준다. 후보마다 YouTube 근거(나온 영상 수·스냅샷 시각·대표 영상 id)와 네이버 판정을 준다. 스냅샷이 없거나 오래되면 후보 없이 unknown과 이유, 네이버를 못 읽은 후보는 그 후보만 unknown이다. 설정은 config/tenants/<회사>/trends.toml [candidates]. LLM을 쓰지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendCandidatesRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendCandidatesOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_history",
+      "description": "키워드 그룹별 네이버 검색어 트렌드를 월 단위(timeUnit=month)로 보여 준다. 그룹마다 따로 요청하고(작은 키워드가 눌리지 않게), 기본은 회사 기본 키워드(config/tenants/<회사>/trends.toml)·최근 24개월(설정 [history] months)·다 채워진 지난달까지. 급상승·계절 판정은 하지 않고(평가가 없어서) 달마다 값과 작년 같은 달 대비 배수만 코드로 계산한다. 작년 값이 없거나 0이면 배수는 비운다. 자료가 없거나 못 읽은 그룹은 그 그룹만 unknown과 이유. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendHistoryRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendHistoryOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "youtube_velocity",
+      "description": "YouTube 영상 통계 스냅샷의 최근 두 수집 시각 사이 영상별 시간당 조회 증가(지금 속도)와, 셋째 스냅샷이 있으면 그 전 구간보다 빨라졌는지(가속)를 준다. 지금 속도 상위 N개(config/tenants/<회사>/trends.toml [velocity] top)와 각 영상의 태그. 판정하지 않는다(평소 속도 기준이 아직 없음). 조회수가 빠진 영상은 속도를 비우고 순위에서 빼며, 좋아요·댓글 숨김은 그 칸만 비운다. 최근 스냅샷에 없는 영상은 뺀다. 스냅샷이 2개 미만이면 unknown과 이유. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#YouTubeVelocityRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#YouTubeVelocityOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "content_recommend",
+      "description": "검색어 급상승 판정(trend_scan의 회사 기본 키워드 그룹 + trend_candidates의 YouTube 인기 태그 후보)에서 급상승한 것만 골라 지금 만들 만한 영상 소재를 순위대로 추천한다(콘텐츠 루프 2단계). 순위는 코드 규칙: 점수 = z 가중치 × z + 두 소스(검색 급상승 + YouTube 근거)면 가산점, 가중치·개수는 config/tenants/<회사>/trends.toml [recommend]. 회사 키워드와 겹치는지(related·low)는 표시만 하고 순위에서 빼지 않는다. 소재마다 영상 아이디어 1~2문장과 형식(숏폼·롱폼)을 LLM이 쓰고 숫자를 검증한다(실패하면 고정 문장, fallback). 이름(외부 태그)은 데이터 블록에만 넣는다. 급상승이 없으면 빈 목록과 이유. 네이버는 하루 캐시를 같이 써서 이번 실행에서 실제로 부른 수를 준다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#ContentRecommendRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#ContentRecommendOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_popular",
+      "description": "최신 YouTube 인기 스냅샷의 태그·제목 구(trend_candidates와 같은 정리·별칭·제외 규칙)와 최신 인기 검색어 스냅샷에서 주제를 모아 \"지금 인기\" 순위를 준다(급상승 판정과 별개). 점수는 코드: video_weight × 인기 영상 수 몫 + velocity_weight × 지금 조회 속도 몫(최근 두 스냅샷) + trending_weight × 인기 검색어 순위 몫, 가중치·개수는 config/tenants/<회사>/trends.toml [popular]. 출처를 못 읽으면 그 몫만 unknown과 이유이고 0으로 채우지 않는다. 주제 분류는 LLM이 정해진 목록에서 한 번에 묶어 고르고(하루 캐시) 회사 추천 안 함 분류면 brand_safe false. 오늘 이미 낸 네이버 판정이 급상승이면 rising_now. 네이버를 부르지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendPopularRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendPopularOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "promo_concepts",
+      "description": "회사 상품을 알리는 광고·홍보 숏츠 예시 아이디어(참고용) 3~5개를 만든다(확정 기획은 기획팀 몫, 제작·게시는 마케팅). 예시마다 빌린 트렌드의 타깃 연령대(trend_age, 평소 대비 가장 크게 오른 연령대와 배수)를 붙이고, 모르면 타깃 미정과 이유. 재료는 코드가 모은다: shop-api 상품 카탈로그(이름·카테고리·설명·가격), shorts_stats 형식별 평균 조회수 상위 숏츠 형식, trend_popular 카테고리별 인기 중 게임·연예·스포츠·IT만(뉴스·사건·기부·재난·정치·사회·인물은 늘 뺌), 카탈로그 카테고리 이름과 상품 핵심어를 trend_history로 봐서 작년 같은 달·다음 달이 평균보다 크게 오른 시즌(키워드마다 네이버 1번, 상한·하루 캐시, 확인한 키워드와 배율을 응답에), 비어 있어도 되는 회사 이벤트 달력. LLM은 정해진 스키마로 제목·컨셉·길이(15~60초)·콘티(길이에 맞는 컷 수)·빌려 온 숏츠 형식·빌려 온 트렌드(맞는 것이 없으면 없이)·맞는 이유·등장 상품 id·주의사항만 쓴다(IP·인물은 분위기·형식만, 과장 광고 금지, 롱폼 없음). 길이·컷 수가 기준 밖이거나 카탈로그에 없는 상품·재료 밖 트렌드·재료 밖 형식·재료에 없는 숫자면 코드가 버리고 이유를 남긴다. 실존 인물·팀·리그·상표 이름이 제목·콘티에 그대로 있으면 상표·초상권 확인 필요 경고. LLM 실패면 빈 목록과 이유. 하루 캐시(regenerate로 새로 만들기), 만든 초안은 data 기록 파일에만 남긴다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#PromoConceptsRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#PromoConceptsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api",
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "shorts_stats",
+      "description": "YouTube 숏츠 통계를 카테고리별·형식별로 준다. API에 숏츠 표시가 없어 길이(contentDetails.duration)가 설정 이하(기본 60초)인 영상을 숏츠로 본다. 표본은 최신 인기 스냅샷의 숏츠와, 인기 스냅샷에 많이 나온 YouTube 카테고리마다 짧은 영상 검색(search.list videoDuration=short, regionCode=KR)을 하루 1번(호출 상한 설정, 기본 8번) 한 결과다. 카테고리는 주제 분류기, 형식은 정해진 목록(챌린지·상황극·스케치·리액션·정보·팁·비포애프터·브이로그·밈 패러디·기타)에서 LLM이 묶어서 고르고 저장해 재사용한다. 숫자(숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개)는 코드가 계산하고, 표본이 5개 미만인 묶음은 unknown과 표본 부족, 검색 실패·할당량 초과는 그 검색만 unknown이다. 인기 영상 상위 200개 안에서의 비교라 이미 뜬 영상끼리 비교한다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#ShortsStatsRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#ShortsStatsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "answer_planning_question",
+      "description": "기획 질문에 답한다. 기획이 data가 보낸 요청(create_ticket)의 근거를 되물으면, data가 보낸 요청의 기록(보낼 때 코드가 만든 사실 문장·근거 ID)으로만 답한다. 근거 질문이고 기록에 사실이 있으면 answered, data가 보낸 요청이지만 기록으로 답할 수 없으면 needs_human(사람이 답하면 planning receive_planning_answer로 보낸다), 보낸 기록이 없으면 unknown. 지어내지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "campaign_effect",
+      "description": "캠페인 기간 주문 수를 지난 7일 같은 시간대 평균과 비교해 방향(늘었음·같음·줄었음)과 증분(실제 − 기대)을 내고, campaign_id가 있으면 캠페인 쿠폰 발급·사용 장수로 조회 시점 누적 사용률(캠페인 뒤 사용분도 섞임)을 낸다. 매출은 매출 지표가 없으면 확인할 수 없음이다. 자료가 없거나 쿠폰이 없으면 0으로 채우지 않고 확인할 수 없음과 이유를 준다. 숫자는 코드가 산출하고 LLM은 요약 문장만 쓴다. 상태를 바꾸지 않는다. 요청에 선택 칸 insight_id·proposal_id가 있으면 결과에 그대로 돌려준다(기획이 결과 기록 때 연결용, 저장하지 않음). 선택 칸 sales: shop-api 주문 기록으로 결제 완료 주문의 주문 금액(할인 전)·쿠폰 할인·결제 금액·환불 합(원 정수)을 구간과 기준선(주문 수와 같은 기준선)에서 세어 증분 판매액과 기준선 날들 범위로 낸 하한·상한, 방향(증분 범위가 0을 넘으면 늘었음·0 아래면 줄었음·아니면 확실하지 않음, 주문 수 판정과 함께), 캠페인 쿠폰 주문 판매액 합(direct_attributed_krw). 결제 기록 공백이면 확인할 수 없음과 이유. facts에 금액마다 출처·기간·표본.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignEffectInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignEffectOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api",
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "video_performance",
+      "description": "게시한 영상 성과. 요청의 video_url(YouTube·인스타그램·틱톡 주소)을 추적 목록에 넣고(campaign_id·insight_id·proposal_id·test 같이 저장), campaign_id만 오면 등록된 영상을 찾는다. YouTube 영상은 게시 후 1시간·1일·3일·7일 시점이 지나면(허용 창 안) YouTube videos.list로 조회수·좋아요·댓글을 저장한다(1시간마다 도는 수집기와 요청이 같은 함수, YouTube 장부·하루 상한 안에서 영상 50개당 1단위). 결과는 시점별 값, 시간당 조회, 좋아요·댓글 비율, 그 인사이트의 목표 참고값(target_views_reference) 대비 배수, 같은 카테고리·형식 숏츠 조회 중앙값(숏츠 통계 저장분) 대비 배수이고 숫자는 모두 facts에 있다. 아직 그 시점이 안 됐으면 unknown + 측정 중, 창을 넘겨 못 쟀으면 unknown + 놓침. 인스타그램·틱톡은 unknown + 연결 대기와 필요한 것(계정 토큰 등). 시험 영상(test)은 화면·브리프 집계에서 뺀다. LLM을 쓰지 않는다. 회사 상태를 바꾸지 않는다(추적 목록 기록만).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#VideoPerformanceRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#VideoPerformanceOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "marketing",
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "campaign_result",
+      "description": "성과 결과 1건 (campaign_id 기준). ① 연결(insight_id·proposal_id·campaign_id·측정 기간·schema_version) ② 영상 성과(video_performance 결과 그대로: 영상별 판정·목표 대비·시점별 조회·신호 4개) ③ 매출 효과(campaign_effect 계산 그대로, 귀속·상품·쿠폰·전체 매장 네 칸은 따로, 더하지 않음; 판매액 증분이 기준선 날들의 흔들림 범위 안이면 효과 확인 안 됨·위면 더 팔림·아래면 덜 팔림, 표본이 적으면 효과 확인 안 됨(표본 적음); 프로모션 링크·쿠폰 없는 영상은 측정 불가) ④ 성과 요인·개선 방향·한계 문구 ⑤ 알림(loss·data_gap). view로 부서별 묶음을 고른다(planning ①~⑤, marketing ① + 개선 방향만, finance ①③⑤). 조회와 매출을 합친 점수·수익·ROI·캠페인 자동 중단은 하지 않는다. LLM을 쓰지 않는다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignResultRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignResultOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "marketing",
+        "finance",
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_age",
+      "description": "연령대별 상승: 오늘 급상승 판정·지금 인기 상위·시즌 키워드(수는 회사 설정 [age], 기본 3·5·2 = 10개, 손으로 나열하지 않음) 또는 요청 keywords를 연령대(회사 설정, 기본 10대·20대·30대·40대·50대 이상 = 네이버 연령 코드 묶음)마다 네이버 검색어 트렌드로 따로 조회해, trend_scan과 같은 판정 함수로 '그 연령대에서 평소 대비 몇 배'를 코드로 계산한다. 네이버 값은 요청마다 최댓값이 100인 상대값이라 연령대끼리 절대량은 비교하지 않는다. 하루 네이버 호출 상한(기본 80번), 넘으면 그 주제만 unknown + 이유. 하루 캐시. LLM을 쓰지 않는다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendAgeRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendAgeOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "marketing",
+        "dashboard-api",
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_insight_brief",
+      "description": "기획에 넘기는 근거 있는 인사이트 3~7개(데이터는 기획안을 확정하지 않는다). 기존 skill 결과를 코드로 묶는다: trend_popular(주제·분류·광고 재료 판정·YouTube 영상 수·시간당 조회·구독자 대비 배수·Google 인기 검색어 순위·관련 뉴스), 오늘 네이버 급상승 판정(평소 대비 배수·상승 시작일), trend_age(후보 상위의 타깃 연령대와 배수), 오늘 저장된 promo_concepts 예시 아이디어(참고용)·시즌 확인, product_link 임베딩 기준을 통과한 상품. 인사이트마다 insight_id(날짜+주제, 같은 날 같은 주제면 같은 id), 한 줄(LLM은 근거 숫자만, 숫자 검증 실패면 고정 문장), 카테고리, 광고 재료 가능 여부와 이유, 실존 이름 표시, 근거·링크·불러온 시각, 타깃 연령대(없으면 미정과 이유), 상품과 시즌 근거, 잘 맞는 숏츠 형식과 표본 수, 한계. 순서는 코드 점수(회사 설정 [brief] 가중치), 광고 재료가 아닌 것은 맨 아래 참고용. 하루 캐시(날짜 + 규칙 버전). 회사 상태를 바꾸지 않는다. 선택 칸 opportunities(기회 가설 카드): 도메인 프로필 → 수집 계획대로 사용 가능·승인된 출처만 불러 하위 주제마다 실제 소비 근거(없으면 키 등록 후 가능·승인 후 수집), 검색 관심(네이버 평소 대비 배수), 연령대별 배수, 숏츠 적합도(그 분류 숏츠 조회 중앙값 ÷ 전체 중앙값·표본 수 → 높음/불확실/낮음), 잘 되는 형식, 목표 참고값, 연결 상품, 한계, 기획이 정할 것. 근거마다 출처·기간·표본. 가설 한 줄은 LLM(근거 숫자만, 숫자 검증).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendInsightBriefRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendInsightBriefOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "domain_profile",
+      "description": "회사 소개(테넌트 설정 [profile] about)와 회사 카탈로그(이름·카테고리·설명)로 업종·상품군·고객 축·분석 질문·씨앗 키워드를 만든다. 고객사가 바뀌어도 사람이 키워드·카테고리를 손으로 정하지 않게 한다. LLM은 정해진 스키마와 목록(업종 태그·고객 축) 안에서만 고르고, 씨앗 키워드는 근거 문장이 소개·카탈로그 원문에 있을 때만 코드가 남긴다(없으면 이유와 함께 버림). 상품군 카테고리 코드는 카탈로그에 있는 것만, 상품 수는 코드가 센다. 사람 덮어쓰기([profile.override])가 먼저다. 소개·카탈로그가 같으면 저장된 프로필을 다시 쓴다(regenerate로 새로). 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DomainProfileRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DomainProfileOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "data_sources",
+      "description": "데이터 출처 목록. 출처마다 주는 데이터 종류(검색 관심·실제 소비·시청·조사 통계), 맞는 업종 태그(전체 또는 특정, 회사 이름 없음), 연령·성별 지원, 카테고리 목록을 어디서 받는지, 자료 주기, 하루 한도(공식 문서 기준, 확인 못 한 수치는 미확인), 필요한 키 환경변수 이름(값은 넣지 않음), 상태(사용 가능 / 키 필요), 공식 문서 주소, 사람 승인 여부를 돌려준다. 상태는 코드가 정한다: 키가 모두 있으면 사용 가능, 없으면 키 필요와 키 이름. 같은 키를 쓰지만 이용 신청이 따로일 수 있는 출처(네이버 쇼핑인사이트)는 실제 호출 1번이 성공해야 사용 가능이고 결과를 저장한다. 수집 계획(source_plan)은 이 목록 안에서만 고른다. 새 출처 수집은 회사 설정 승인 플래그가 있어야 시작한다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataSourcesRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataSourcesOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "source_plan",
+      "description": "수집 계획. 도메인 프로필(domain_profile)과 출처 목록(data_sources)을 보고 LLM이 출처 목록 안에서만 출처·이유·카테고리·키워드·연령 여부를 정해진 스키마로 고르고, 코드가 검증한다. 카테고리는 출처마다 실제 목록에서만 고른다(YouTube videoCategories.list, 네이버 쇼핑인사이트는 공식 목록 API가 없어 네이버쇼핑 cat_id 후보를 실제 호출로 확인). 목록 밖·중복·업종이 안 맞는 출처, 실제 목록에 없는 카테고리, 씨앗 키워드 밖 키워드, 연령을 못 주는 출처의 연령은 이유와 함께 버린다. 키 필요 출처는 카테고리 확인을 건너뛰고 '키 등록 후 확인'으로 남기며, 키가 있으면 더 쓸 수 있는 근거를 보여 준다. 출처마다 호출 수·할당량을 코드가 세고 회사 설정 상한 안으로 자른다. 계획은 저장하고 다시 쓴다(regenerate로 새로). 새 출처 수집은 사람 승인 후(설정 파일 승인 플래그). 수집은 하지 않고 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#SourcePlanRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#SourcePlanOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "domain_subtopics",
+      "description": "하위 주제 넓히기. 도메인 프로필의 씨앗 키워드마다 YouTube에서 한국 숏츠를 검색해(씨앗마다 결과 일주일 캐시, 새 검색은 하루 상한 기본 5번, 수집 계획 YouTube 할당량 합계에 들어감) 결과 영상 태그·제목에 함께 나오는 말을 코드가 모은다. 정리·별칭 표는 trend_candidates와 같고, 씨앗 자체·회사 제외 목록·쌓인 인기 영상 문서 빈도로 찾은 흔한 말은 뺀다. 같은 대상(공백만 다른 이름, 같은 영상들에만 나온 더 긴 구)은 묶는다. LLM은 프로필의 하위 주제 축(고객 축에 맞춰 프로필이 정함, 사람이 나열하지 않음)과 기타 중에서만 분류한다. 하위 주제마다 함께 나온 숏츠 수·조회 중앙값·근거 영상. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DomainSubtopicsRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DomainSubtopicsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "video_explorer",
+      "description": "영상 탐색. 카테고리(설정: 게임·유머·드라마·교양·교육·책) × 기간(올린 시각 기준 1일·3일·7일) × 길이(숏 = 60초 이하, 롱 = 그 초과)마다 한국 영상 목록을 준다. 영상 풀은 저장된 인기 차트·추적·숏츠 표본·하위 주제·보충 검색에서 올린 지 7일 이내 영상이고(다른 저장분 영상은 videos.list로 다시 읽어 올린 시각·좋아요·채널 id를 채움), 칸이 10개보다 적으면 그 카테고리 지금 인기 주제 이름(교육·책은 도메인 프로필 씨앗)으로 보충 검색한다(카테고리 × 길이마다 7일 검색 하루 1번, 1일 칸이 모자라면 1일 보충 한 번, 하루 검색 상한 기본 20번). 영상마다 제목·채널·썸네일·주소·길이·올린 시각·조회수·좋아요·구독자 대비 배수·카테고리(공유 영상 분류기)·광고 재료 칸. 없는 값은 unknown과 이유. 정렬(조회수·구독자 대비·좋아요)은 코드. 수집기가 미리 계산하고 요청은 저장분을 읽는다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#VideoExplorerRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#VideoExplorerOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "marketing",
+        "planning",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "data_chat_send",
+      "description": "데이터분석 AI 직접 대화(dashboard-api /api/dashboard/data-chat). 말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 data_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. 답의 재료는 저장된 결과만(영상 탐색·지금 인기·브리프·영상 성과·보내기 상태·수집 장부, 코드가 질문 낱말로 최대 3묶음, 새 수집·계산 없음). 답 숫자가 재료에 없으면 고정 문장, 마지막 줄 근거는 서버가 붙임. 상태 변경 명령은 LLM 없이 거절. 조회·설명만 하고 업무 상태를 바꾸지 않아 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채우고 사람 말은 untrusted로만 넣는다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy·chat_limit(대화 하루 30회·80,000토큰 또는 하루 LLM 100%).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatSendInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "data_chat_list",
+      "description": "데이터분석 AI 대화 목록(최근 순). 본인 대화는 원문 전부, 남의 대화는 messages 없이 요약만(restricted). 대화 기록만 읽는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatListInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatListOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "data_chat_get",
+      "description": "데이터분석 AI 대화 하나. 본인 대화는 원문 전부, 남의 대화는 요약만(restricted). 거절 outcome: not_found.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "data_chat_close",
+      "description": "데이터분석 AI 대화 끝내기(closed, 더는 못 보냄). 요약이 없으면 첫 질문 일부만 남긴다. 대화 기록만 바꾸고 업무 상태는 바꾸지 않는다. 거절 outcome: not_found·forbidden(남의 대화).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+services:
+  safety:
+    build:
+      context: ../..
+      dockerfile: shared/safety/Dockerfile
+    ports:
+      - "8001:8001"
+    env_file:
+      - path: ../../.env
+        required: false
+      - path: ./.env
+        required: false

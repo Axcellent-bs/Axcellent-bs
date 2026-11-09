@@ -1,0 +1,278 @@
+{
+ "collected_at": "2026-11-03T03:43:48+00:00",
+ "dropped_overlap": [],
+ "topics": [
+  {
+   "id": "t001",
+   "kind": "related_name",
+   "text": "파이썬 입문서 추천",
+   "evidence_count": 0,
+   "source_product": "prd_0001"
+  },
+  {
+   "id": "t002",
+   "kind": "related_name",
+   "text": "파이썬 입문서 리뷰",
+   "evidence_count": 0,
+   "source_product": "prd_0001"
+  },
+  {
+   "id": "t003",
+   "kind": "related_name",
+   "text": "데이터 분석 실전 추천",
+   "evidence_count": 0,
+   "source_product": "prd_0002"
+  },
+  {
+   "id": "t004",
+   "kind": "related_name",
+   "text": "데이터 분석 실전 리뷰",
+   "evidence_count": 0,
+   "source_product": "prd_0002"
+  },
+  {
+   "id": "t005",
+   "kind": "related_name",
+   "text": "에세이 모음집 추천",
+   "evidence_count": 0,
+   "source_product": "prd_0003"
+  },
+  {
+   "id": "t006",
+   "kind": "related_name",
+   "text": "에세이 모음집 리뷰",
+   "evidence_count": 0,
+   "source_product": "prd_0003"
+  },
+  {
+   "id": "t007",
+   "kind": "related_name",
+   "text": "무지 노트 추천",
+   "evidence_count": 0,
+   "source_product": "prd_0004"
+  },
+  {
+   "id": "t008",
+   "kind": "related_name",
+   "text": "무지 노트 리뷰",
+   "evidence_count": 0,
+   "source_product": "prd_0004"
+  },
+  {
+   "id": "t009",
+   "kind": "related_name",
+   "text": "젤펜 추천",
+   "evidence_count": 0,
+   "source_product": "prd_0005"
+  },
+  {
+   "id": "t010",
+   "kind": "related_name",
+   "text": "젤펜 리뷰",
+   "evidence_count": 0,
+   "source_product": "prd_0005"
+  },
+  {
+   "id": "t011",
+   "kind": "related_name",
+   "text": "독서대 추천",
+   "evidence_count": 0,
+   "source_product": "prd_0006"
+  },
+  {
+   "id": "t012",
+   "kind": "related_name",
+   "text": "독서대 리뷰",
+   "evidence_count": 0,
+   "source_product": "prd_0006"
+  },
+  {
+   "id": "t013",
+   "kind": "related_name",
+   "text": "소설 베스트 추천",
+   "evidence_count": 0,
+   "source_product": "prd_0007"
+  },
+  {
+   "id": "t014",
+   "kind": "related_name",
+   "text": "소설 베스트 리뷰",
+   "evidence_count": 0,
+   "source_product": "prd_0007"
+  },
+  {
+   "id": "t015",
+   "kind": "related_name",
+   "text": "만년필 입문 추천",
+   "evidence_count": 0,
+   "source_product": "prd_0008"
+  },
+  {
+   "id": "t016",
+   "kind": "related_name",
+   "text": "만년필 입문 리뷰",
+   "evidence_count": 0,
+   "source_product": "prd_0008"
+  },
+  {
+   "id": "t017",
+   "kind": "related_category",
+   "text": "도서 추천",
+   "evidence_count": 0,
+   "source_category": "book"
+  },
+  {
+   "id": "t018",
+   "kind": "related_category",
+   "text": "도서 신상",
+   "evidence_count": 0,
+   "source_category": "book"
+  },
+  {
+   "id": "t019",
+   "kind": "related_category",
+   "text": "문구 추천",
+   "evidence_count": 0,
+   "source_category": "stationery"
+  },
+  {
+   "id": "t020",
+   "kind": "related_category",
+   "text": "문구 신상",
+   "evidence_count": 0,
+   "source_category": "stationery"
+  },
+  {
+   "id": "t021",
+   "kind": "unrelated_trending",
+   "text": "삼성 갤럭시 z 폴드 6",
+   "evidence_count": 3
+  },
+  {
+   "id": "t022",
+   "kind": "unrelated_trending",
+   "text": "jtbc",
+   "evidence_count": 0
+  },
+  {
+   "id": "t023",
+   "kind": "unrelated_trending",
+   "text": "김은중",
+   "evidence_count": 3
+  },
+  {
+   "id": "t024",
+   "kind": "unrelated_trending",
+   "text": "부동산 투자",
+   "evidence_count": 3
+  },
+  {
+   "id": "t025",
+   "kind": "unrelated_trending",
+   "text": "유가증권",
+   "evidence_count": 3
+  },
+  {
+   "id": "t026",
+   "kind": "unrelated_trending",
+   "text": "디에이치 반포124",
+   "evidence_count": 3
+  },
+  {
+   "id": "t027",
+   "kind": "unrelated_trending",
+   "text": "저기압",
+   "evidence_count": 3
+  },
+  {
+   "id": "t028",
+   "kind": "unrelated_trending",
+   "text": "lg디스플레이",
+   "evidence_count": 3
+  },
+  {
+   "id": "t029",
+   "kind": "unrelated_trending",
+   "text": "춘천 마라톤",
+   "evidence_count": 2
+  },
+  {
+   "id": "t030",
+   "kind": "unrelated_trending",
+   "text": "상속세",
+   "evidence_count": 3
+  },
+  {
+   "id": "t031",
+   "kind": "unrelated_youtube",
+   "text": "리그오브레전드",
+   "evidence_count": 3
+  },
+  {
+   "id": "t032",
+   "kind": "unrelated_youtube",
+   "text": "LOL",
+   "evidence_count": 3
+  },
+  {
+   "id": "t033",
+   "kind": "unrelated_youtube",
+   "text": "t1",
+   "evidence_count": 3
+  },
+  {
+   "id": "t034",
+   "kind": "unrelated_youtube",
+   "text": "마인크래프트",
+   "evidence_count": 3
+  },
+  {
+   "id": "t035",
+   "kind": "unrelated_youtube",
+   "text": "LCK",
+   "evidence_count": 3
+  },
+  {
+   "id": "t036",
+   "kind": "unrelated_youtube",
+   "text": "피파",
+   "evidence_count": 3
+  },
+  {
+   "id": "t037",
+   "kind": "unrelated_youtube",
+   "text": "마크",
+   "evidence_count": 3
+  },
+  {
+   "id": "t038",
+   "kind": "unrelated_youtube",
+   "text": "젠지",
+   "evidence_count": 3
+  },
+  {
+   "id": "t039",
+   "kind": "unrelated_youtube",
+   "text": "메이플",
+   "evidence_count": 3
+  },
+  {
+   "id": "t040",
+   "kind": "unrelated_youtube",
+   "text": "모바일게임",
+   "evidence_count": 3
+  },
+  {
+   "id": "t041",
+   "kind": "unrelated_youtube",
+   "text": "배그",
+   "evidence_count": 3
+  },
+  {
+   "id": "t042",
+   "kind": "unrelated_youtube",
+   "text": "leagueoflegends",
+   "evidence_count": 3
+  }
+ ]
+}

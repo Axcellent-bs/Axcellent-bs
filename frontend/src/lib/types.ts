@@ -1,0 +1,232 @@
+export type Level = "error" | "warning";
+export interface Finding { code: string; level: Level; message: string }
+export interface Validation { passed: boolean; findings: Finding[] }
+
+// ---------------------------------------------------------------- shop
+export interface Me { id: number; name: string; email: string; points: number }
+export interface Category { key: string; label: string; count: number }
+
+export interface Product {
+  id: number; category: string; category_ko: string; title: string; author: string; publisher: string; description: string;
+  list_price: number; sale_price: number; discount_pct: number; stock: number; sold_out: boolean; returnable: boolean;
+  custom_made: boolean; hue: number; sales: number; rating: number | null; review_count: number; published_at: string;
+}
+
+export interface Review {
+  id: number; product_id: number; user: string; rating: number; title: string; body: string; helpful: number;
+  verified: boolean; created_at: string; status: string;
+}
+export interface ProductDetail extends Product {
+  related: Product[]; reviews: Review[]; rating_distribution: Record<string, number>;
+}
+
+export interface CartPrice { items_total: number; shipping_fee: number; total: number; free_shipping_gap: number }
+
+export interface OrderItem {
+  id: number; product_id: number; title: string; category: string; unit_price: number; qty: number; paid_amount: number;
+  points_share: number; returnable: boolean; refunded_qty: number; remaining_qty: number; reviewed: boolean; can_review: boolean; hue: number;
+}
+
+export type OrderStatus = "paid" | "preparing" | "shipped" | "delivered" | "cancelled";
+export interface Order {
+  id: number; order_no: string; status: OrderStatus; status_ko: string; items_total: number; shipping_fee: number;
+  points_used: number; paid_amount: number; refunded_amount: number; payment_method: string; receiver: string; address: string;
+  paid_at: string; shipped_at: string | null; delivered_at: string | null; expected_delivery_at: string | null; late_days: number;
+  items: OrderItem[]; claims?: Claim[]; open_claims?: number;
+}
+
+// ---------------------------------------------------------------- claims
+export type ClaimType = "cancel" | "return" | "exchange" | "compensation";
+export type ClaimReason = "change_of_mind" | "defect" | "wrong_item" | "damaged" | "late_delivery" | "missing_item" | "other";
+export type ClaimStatus = "needs_info" | "needs_review" | "awaiting_return" | "return_received" | "completed" | "rejected" | "withdrawn";
+export type Outcome = "auto_rejected" | "needs_info" | "needs_review" | "approved_pending_return" | "auto_approved";
+
+export interface Reason { code: string; level: "block" | "review" | "warn" | "info"; message: string; rule: string | null }
+export interface DecisionLine { order_item_id: number; title: string; qty: number; requested_qty: number; unit_price: number; refund_cash: number; points_back: number }
+
+export interface Decision {
+  outcome: Outcome; resolution: string; requires_return: boolean; reasons: Reason[]; lines: DecisionLine[];
+  refund_cash: number; points_back: number; shipping_refund: number; payable: number;
+  deductions: { code: string; amount: number; message: string }[];
+  compensation: { kind: string; amount: number; reason: string } | null; claimed_amount: number | null; policy_refs: string[];
+}
+
+export interface Claim {
+  id: number; order_id: number; type: ClaimType; reason: ClaimReason; status: ClaimStatus; created_at: string; description: string;
+  claimed_amount: number | null; unsealed: boolean; evidence_count: number; outcome: Outcome | null; resolution: string | null;
+  requires_return: boolean; reasons: Reason[]; lines: DecisionLine[]; deductions: { code: string; amount: number; message: string }[];
+  expected_refund: number; points_back: number; compensation: number; payable: number; tracking: string | null;
+  return_received_at: string | null; inspection: string | null; refund: number; compensation_paid: number; points_returned: number;
+  policy_refs: string[]; exchange_shipment: { tracking: string; shipped_at: string } | null; processed_at: string | null;
+  conversation_id: number | null; order_no?: string;
+  // agent-only
+  customer?: string; abuse?: { score: number; signals: { code: string; points: number; message: string }[] }; decided_by?: string;
+  agent_note?: string | null; hold_reason?: string | null; manager_approved?: boolean; inspection_note?: string | null; user_id?: number;
+}
+
+export interface ClaimInput {
+  order_id: number; type: ClaimType; reason: ClaimReason; items?: { order_item_id: number; qty: number }[];
+  claimed_amount?: number | null; unsealed?: boolean; evidence_count?: number; description?: string;
+}
+
+export interface AuditEntry { actor: string; action: string; detail: Record<string, unknown>; at: string }
+/** 영수증 분석 결과 (dashboard-api POST /conversations/{id}/receipt-analysis). 대조만 하고 환불 판정은 하지 않는다. */
+export interface ReceiptFacts {
+  total: number | null; paid_on: string | null; order_no: string | null; shipping_fee: number | null;
+  items: { title: string; qty: number; amount: number | null }[]; ambiguous_total: boolean;
+}
+export interface ReceiptAnalysis {
+  facts: ReceiptFacts;
+  order: { order_id: string; cash_paid: number; gross_total: number; shipping_fee: number; paid_on: string; item_titles: string[] };
+  check: {
+    verdict: "consistent" | "mismatch" | "insufficient"; checked: string[]; mismatches: string[];
+    matched_basis: "cash" | "gross" | null; unmatched_receipt_items: string[]; missing_from_receipt: string[];
+  };
+  images_status: "none" | "read" | "unavailable" | "failed" | "skipped";
+  pii_masked: string[]; notes: string[];
+}
+export interface ReceiptImageInput { ref: string; media_type: "image/jpeg" | "image/png" | "image/webp"; data_base64: string }
+
+export interface ClaimDetail extends Claim {
+  audit: AuditEntry[];
+  receipt: {
+    order_no: string; status: string; items_total: number; shipping_fee: number; points_used: number; paid_amount: number;
+    paid_at: string; delivered_at: string | null; expected_delivery_at: string | null;
+    items: { id: number; title: string; qty: number; paid_amount: number; points_share: number; refunded_qty: number }[];
+  };
+}
+
+export interface QueueEntry {
+  position: number; claim_id: number; order_no: string; customer: string; type: ClaimType; reason: ClaimReason; received_at: string;
+  inspection: string | null; amount: number; compensation: number; ready: boolean; blockers: { code: string; message: string }[];
+  items: { title: string; qty: number }[];
+}
+export interface QueueView { queue: QueueEntry[]; awaiting_return: Claim[] }
+export interface QueueRun {
+  results: { claim_id: number; result: "paid" | "held" | "skipped"; blockers?: { code: string; message: string }[]; refund?: number; compensation?: number }[];
+  paid: number; held: number; queue: QueueEntry[];
+}
+export interface ClaimStats {
+  total: number; by_status: Record<string, number>; rule_hits: Record<string, number>;
+  agent_reviews: number; agent_overrides: number; overridden_rules: Record<string, number>;
+}
+
+// ---------------------------------------------------------------- support
+export interface InquiryItem { id: number; subject: string; status: string; order_id: number | null; updated_at: string; answered: boolean; preview: string }
+export interface InquiryMessage { id: number; role: "customer" | "agent"; text: string; created_at: string }
+export interface Inquiry extends InquiryItem { messages: InquiryMessage[] }
+
+export interface Source { id: string; doc_id: string; category: string; title: string; section: string; text: string; score: number; from_decision?: boolean }
+export interface Draft { style: "empathetic" | "concise" | "step_by_step"; reply: string; source_ids: string[]; validation: Validation }
+export interface Classification {
+  intent_ko: string; category: string; sentiment: "calm" | "frustrated" | "angry"; urgency: "low" | "medium" | "high";
+  search_query: string; pii_masked: string[];
+  /** 한국어가 아닌 문의의 한국어 번역과 핵심 요청 (한국어 문의·옛 응답에는 없다) */
+  language?: string; message_ko?: string; request_points_ko?: string[];
+}
+export interface Analysis {
+  classification?: Classification; sources?: Source[]; drafts?: Draft[]; timings_ms?: Record<string, number>; validation?: Validation;
+  facts?: unknown;
+}
+export type AbuseLevel = "none" | "profanity" | "insult" | "threat";
+/** `text`는 접수된 원문, `display_text`는 욕설·모욕·위협 표현을 가린 글(가릴 것이 없으면 null) */
+export interface Message {
+  id: number; role: "customer" | "agent"; text: string; display_text?: string | null;
+  abuse_level?: AbuseLevel; abuse_kinds?: string[]; softened_text?: string | null; analysis: Analysis | null; created_at: string;
+}
+export interface Summary {
+  summary_ko: string; issue_ko: string; actions_ko: string[]; next_action_ko: string; category: string; resolved: boolean;
+  escalate: boolean; escalate_reason_ko: string; tags: string[];
+}
+export interface ConversationListItem {
+  id: number; customer_name: string; subject: string; subject_display?: string | null; category: string | null; sentiment: string | null;
+  urgency: "low" | "medium" | "high" | null; status: "open" | "resolved" | "escalated"; order_id: number | null;
+  updated_at: string; preview: string; awaiting_reply: boolean;
+  /** 고객이 마지막으로 쓴 언어. 옛 응답에는 없을 수 있다 */
+  language?: "ko" | "en" | "ja" | "zh" | "other";
+  /** 어느 회사(고객사)의 문의인지. 옛 응답에는 없을 수 있다 */
+  tenant_id?: string;
+  /** 로그·오류 코드로 원인을 모르는 문의를 따로 모은 "분류 필요" 표시. 없으면 일반 문의 */
+  triage?: Triage | null;
+}
+/** 분류 필요 표시. needed=분류가 필요함, done=상담원이 분류 이름을 정하고 마침 */
+export interface Triage {
+  state: "needed" | "done"; reason: "no_error_code" | "unclassified" | "manual"; marked_by: "auto" | "agent";
+  marked_at: string; label?: string | null; decided_at?: string | null;
+}
+/** 상담 콘솔의 클레임 접수 입력 (구매자·주문은 서버가 문의에서 읽는다) */
+export interface ClaimIntake {
+  type: "cancel" | "return" | "exchange"; reason: ClaimReason; items?: { order_item_id: string; qty: number }[] | null;
+  unsealed: boolean; evidence_count: number; description: string;
+}
+/** AI가 고객의 마지막 메시지에서 읽은 요청과 접수했을 때 규칙이 낼 판정 (접수하지 않는다) */
+export interface ClaimSuggestion {
+  request_kind: "refund" | "exchange" | "cancel" | "event_inquiry" | "other"; reason: ClaimReason | null;
+  claim_type: ClaimIntake["type"] | null; items: string[]; unmatched_items: string[]; source: "llm" | "rules"; notes: string[];
+  preview: { outcome: string; resolution: string; requires_return: boolean; expected_refund: number; reasons: { code: string; level: string; message: string }[] } | null;
+  suggested_items: ClaimIntake["items"] | null;
+}
+/** 해결된 문의에 고객이 남긴 평가(후기). 글은 개인정보를 가려 저장돼 온다 */
+export type FeedbackStatus = "visible" | "flagged" | "hidden";
+export interface Feedback {
+  rating: number; resolved: boolean; comment: string; status: FeedbackStatus;
+  flags: { code: string; message: string; info: boolean }[];
+  source: "customer" | "console"; created_at: string; decided_by: string | null; decided_at: string | null;
+}
+/** 후기 관리 화면의 한 줄: 어느 문의의 후기인지와 후기 */
+export interface FeedbackItem {
+  inquiry_id: number; customer_name: string; subject: string; category: string | null;
+  order_id: string | null; order_no: string | null; feedback: Feedback;
+}
+/** 만족도 요약 (고객지원이 코드로 센 값. 평가가 없으면 평균·비율은 null) */
+export interface FeedbackOverview {
+  resolved_inquiries: number; rated: number; response_rate: number | null; average_rating: number | null;
+  satisfied_rate: number | null; solved_rate: number | null; distribution: Record<string, number>;
+  by_category: Record<string, { count: number; average: number | null }>;
+  pending_review: number; hidden: number; follow_up: number;
+}
+/** 문의의 AI 처리 내력 한 줄 (고객지원이 코드로 남긴 사실. `data`는 코드 값이라 화면이 이름표를 붙인다) */
+export interface ActivityEntry {
+  at: string; actor: "ai" | "agent" | "customer" | "system"; kind: string; title: string; detail: string;
+  ref: string | null; data: Record<string, unknown>;
+}
+export interface ResolutionNote { id: number; author: string; root_cause: string | null; action_taken: string | null; result: string | null; created_at: string }
+export interface Conversation extends ConversationListItem { messages: Message[]; summary: Summary | null; order_no: string | null; claims: Claim[]; activity: ActivityEntry[]; feedback: Feedback | null; resolution_notes: ResolutionNote[] }
+
+export interface Kpi {
+  conversations: number; by_status: Record<string, number>; agent_replies: number; draft_adoption_rate: number | null;
+  accepted_as_is: number; edited: number; rejected: number; avg_edit_ratio: number | null; avg_first_draft_ms: number | null;
+  drafts_generated: number; drafts_blocked_by_guard: number;
+}
+
+export interface AdminReview extends Review { product: string; flags: { code: string; message: string; info?: boolean }[] }
+
+export interface Dashboard {
+  days: number; timezone: string;
+  daily: { date: string; inquiries: number; claims: number; auto: number; agent: number; paid: number }[];
+  totals: {
+    inquiries: number; open_waiting: number; high_waiting: number; claims: number; auto_rate: number | null; claims_rejected: number;
+    needs_review: number; awaiting_return: number; queue_waiting: number; queue_ready: number; paid_cash: number; paid_points: number;
+    agent_reviews: number; agent_overrides: number; flagged_reviews: number;
+  };
+  by_category: Record<string, number>; claim_reasons: Record<string, number>; guard_findings: Record<string, number>;
+  queue: QueueEntry[];
+  inquiry_queue: { id: number; customer_name: string; subject: string; category: string | null; urgency: string | null; sentiment: string | null; preview: string; waiting_minutes: number }[];
+}
+
+export interface Health { status: string; llm_provider: string; kb_chunks: number; demo_tools: boolean }
+
+// ---------------------------------------------------------------- 공통 로그 소통 (dashboard-api GET /api/dashboard/communications)
+/** 결과 값 5가지. 소통 탭과 AI 대화방이 같은 값·같은 이름표(labels.ts COMM_OUTCOME_KO)를 쓴다 */
+export type CommOutcome = "completed" | "rejected" | "held" | "needs_human" | "in_progress";
+/** 소통 한 줄 (communications.py CommunicationLine). 코드가 만든 필드만 있고 payload·고객 원문은 없다 */
+export interface CommLine {
+  log_id: string; occurred_at: string; from_agent: string; to_agent: string | null; skill: string | null;
+  outcome: CommOutcome; context_id: string | null; execution_id: string | null;
+}
+export interface CommMeta { total: number; truncated: boolean }
+
+/** 개인정보 삭제 미리보기·집행 결과 (고객 요청). 고객 원문은 없고 건수·이유 코드·날짜만 있다 */
+export interface PurgeItem { inquiry_id: number; action: "purge" | "already_purged" | "blocked" | "not_found"; reasons: string[]; purged: Record<string, number>; retained_until: string | null }
+export interface PurgeReport { mode: "customer_request" | "expired"; items: PurgeItem[]; purge_count: number; retained_count: number; applied: boolean }
+

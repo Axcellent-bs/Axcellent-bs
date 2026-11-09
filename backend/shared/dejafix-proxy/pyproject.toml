@@ -1,0 +1,18 @@
+[project]
+name = "ax-dejafix-proxy"
+version = "0.1.0"
+description = "dejafix-proxy — DejaFix 읽기 전용 로그인 대행 프록시"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ax_dejafix_proxy"]

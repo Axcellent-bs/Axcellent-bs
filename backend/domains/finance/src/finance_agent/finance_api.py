@@ -1,0 +1,1252 @@
+"""재무 대시보드 API (재무 재설계 6·11장). 응답은 `{data, meta}`, 실패는 `{error: {code, message}}`.
+
+| 메서드·경로 | 하는 일 | 토큰 |
+| --- | --- | --- |
+| `GET /api/finance/overview` | 오늘 요약(KPI)과 사람이 할 일 | 없음 |
+| `GET /api/finance/closing?period=&date=` | ① 손익·분개 미리보기·설명 | 없음 |
+| `POST /api/finance/closing/confirm` | ① 결산 확정 기록. 날짜 필수, 끝난 기간만 | **사람** |
+| `POST /api/finance/closing/cancel` | ① 잘못한 결산 확정 취소. 이유 필수, 기록이 남음 | **사람** |
+| `POST /api/finance/closing/adjust` | ① 확정한 달의 차이를 전기 조정으로 반영 | **사람** |
+| `POST /api/finance/tax/vat/confirm` | ⑤ 끝난 분기의 부가세 숫자 확정 | **사람** |
+| `POST /api/finance/tax/vat/cancel` | ⑤ 잘못한 부가세 확정 취소. 이유 필수 | **사람** |
+| `GET /api/finance/statements?period=&date=&format=` | ① 손익계산서, `csv`면 내려받기 | 없음 |
+| `GET /api/finance/reconciliation?date=` | ② 결제별 PG 대사 (생략 = 최근 7일) | 없음 |
+| `POST /api/finance/reconciliation/{payment_id}/note` | ② 불일치 처리 메모 | **사람** |
+| `GET /api/finance/settlements?period=YYYY-Www` | ③ 판매자 정산 내역서 (생략 = 지난주) | 없음 |
+| `POST /api/finance/settlements/batch` | ③ 묶음 → `execute(confirm_settlement)` | 선택 |
+| `GET /api/finance/settlements/deadlines` | ③ 판매 대금 지급 기한 점검 | 없음 |
+| `GET /api/finance/payables?date=` | ③ 판매자 미지급금 롤포워드 (그 달) | 없음 |
+| `GET /api/finance/variance?date=` | ① 월간 변동 분석 (지난달·작년 같은 달 대비) | 없음 |
+| `GET /api/finance/bank` | ② 은행 입금 대조 (올린 거래내역 기간만) | 없음 |
+| `POST /api/finance/bank/statement` | ② 은행 거래내역 올리기 (출금은 음수) | **사람** |
+| `POST /api/finance/bank/file?name=` | ② 은행 거래내역 파일(CSV·xlsx)을 서버가 읽기 | **사람** |
+| `GET /api/finance/bank/outflows` | ② 은행 출금 대조 (판매자 이체·항목별·설명 없는 출금) | 없음 |
+| `POST /api/finance/bank/outflows/{row_id}/note` | ② 설명 없는 출금 메모 | **사람** |
+| `GET /api/finance/cashflow` | ③ 13주 현금 흐름 (확정 + 추정, 통장 잔액 기초) | 없음 |
+| `GET /api/finance/close-checklist?date=` | ① 월 마감 체크리스트 | 없음 |
+| `GET /api/finance/tax/vat?date=` | ⑤ 부가세 신고 보조 집계 (분기) | 없음 |
+| `GET /api/finance/tax/seller-report?date=&format=` | ⑤ 판매자별 판매 명세 (제75조 초안) | 없음 |
+| `GET /api/finance/team-budget?month=YYYY-MM` | ④ 팀 예산 (팀 인원 × 인당 월 단가) | 없음 |
+| `POST /api/finance/team-budget/{month}/approve` | ④ 팀 예산 확정 (`signature` 일치) | **사람** |
+| `GET /api/finance/rules` | 재무·세무 규칙과 근거 | 없음 |
+| `GET /api/finance/other-pnl?month=` | ① 그 달의 장부 밖 손익 | 없음 |
+| `POST /api/finance/other-pnl` | ① 장부 밖 손익 입력. 확정한 달은 409 | **사람** |
+| `GET /api/finance/campaigns` | ⑥ 캠페인 손익·예산 판단·교훈·의견 | 없음 |
+| `GET /api/finance/campaigns/compare?channel=&requested=` | ⑥ 실패 이력 전/후 판단 비교 | 없음 |
+| `GET /api/finance/insights` | ⑥ 재무 인사이트와 근거 | 없음 |
+| `GET /api/finance/tax/income-estimate?year=` | ⑤ 법인세 참고 추정 | 없음 |
+| `GET /api/finance/exports` | ⑤ 자동으로 만든 파일과 은행 폴더 기록 | 없음 |
+| `GET /api/finance/exports/{id}/files/{name}` | ⑤ 파일 내려받기 | 없음 |
+| `GET /api/finance/exports/{id}/bundle` | ⑤ 묶음 전체 zip 내려받기 | 없음 |
+| `POST /api/finance/exports/run` | ⑤ 지금 만들기 | **사람** |
+
+`meta`: `mock`, `collected_at`, `source`(`seed`|`shop-api`), `unavailable`(못 받은 자료 이름).
+정산 묶음 지급은 안전 관문이 항상 C로 보류하고 사람이 승인한다. 안전 관문에 닿지 않으면 503
+`safety_unavailable`이고 아무것도 기록하지 않는다(fail-closed). 사람 결정 기록은 메모리(데모용)다.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from datetime import timedelta
+from typing import Any
+
+import httpx
+from fastapi import FastAPI, Header, Request
+from fastapi.responses import JSONResponse, Response
+
+from ax_agent_template.config import agent_name_scope, agent_url, is_mock
+from ax_agent_template.execute import execute
+from ax_contracts.schemas import Evidence, RequestMeta
+from finance_agent import (
+    bank,
+    bank_file,
+    cashflow,
+    close_checklist,
+    closing,
+    deadline,
+    exports,
+    payables,
+    reconciliation,
+    settlement,
+    statements,
+    tax,
+    team_budget,
+    variance,
+)
+from finance_agent import campaign as cp
+from finance_agent import finance_config as fc
+from finance_agent.books import off
+from finance_agent.handlers import (
+    cash_net_krw,
+    closing_key,
+    current_insights,
+    monthly_budget,
+    started_campaigns,
+    state,
+    team_budget_data,
+)
+from finance_agent.human import human_from_authorization
+from finance_agent.rules import load_rules
+
+TODO_ITEMS = 10  # 할 일 카드에 바로 보여 줄 건수
+RECON_KO = {
+    "mismatch": "결제 금액과 PG 금액이 다름",
+    "missing_in_pg": "PG 정산에 없음",
+    "fee_anomaly": "PG 수수료가 기준과 다름",
+}
+UNAVAILABLE_EXECUTION = "exe_unavailable"  # agent-template execute()가 safety에 못 닿았을 때
+REVIEW_CHECK_SECONDS = 3.0
+
+
+OTHER_PNL_FIELDS = ("salary", "rent", "other_sga", "non_operating_income", "non_operating_expense")
+
+
+def _month_confirmed(closings: dict[tuple[str, str], dict[str, Any]], month: str) -> bool:
+    return ("month", f"{month}-01") in closings
+
+
+def ok(data: Any, meta: dict[str, Any]) -> dict[str, Any]:
+    return {"data": data, "meta": meta}
+
+
+def error(status: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
+
+
+async def _body(request: Request) -> dict[str, Any]:
+    try:
+        raw = await request.json()
+    except ValueError:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+# ---------------------------------------------------------------- 파일 자동화
+_export_lock = asyncio.Lock()
+
+
+async def run_export_cycle(trigger: str = "auto") -> dict[str, Any]:
+    """은행 폴더 읽기 → 지난달 묶음 만들기. 돈과 외부 전송은 없다.
+
+    자동 회차와 사람의 "지금 만들기"가 겹쳐도 한 번에 하나만 돈다.
+    """
+    async with _export_lock:
+        records = state().records
+        imported = exports.scan_inbox(
+            records.bank_rows, records.bank_imports, records.bank_out_periods
+        )
+        books = await state().fresh_books()
+        package = exports.make_package(
+            books,
+            records.exports,
+            closings=records.closings,
+            filings=records.vat_filings,
+            other_pnl=records.other_pnl,
+        )
+        return {"trigger": trigger, "package": package, "imported": imported}
+
+
+# ---------------------------------------------------------------- 정산 묶음 상태
+async def refresh_batch(batch: dict[str, Any]) -> None:
+    """요청 중인 묶음의 보류 건 결정을 안전 관문에서 읽어 반영한다. 못 읽으면 그대로 둔다."""
+    if batch.get("status") != "requested" or not batch.get("review_id"):
+        return
+    if is_mock("finance") and not os.getenv("AX_SAFETY_URL"):
+        return  # 목 모드에 safety가 없으면 물어볼 곳이 없다
+    url = f"{agent_url('safety')}/api/safety/reviews/{batch['review_id']}"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=REVIEW_CHECK_SECONDS)
+        status = response.json()["data"]["status"] if response.status_code == 200 else None
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        return
+    if status == "approved":
+        batch["status"] = "approved"
+        batch.setdefault("approved_at", fc.iso(fc.now()))
+    elif status in ("rejected", "expired"):
+        batch["status"] = "rejected"
+
+
+def _batch_status(decision_status: str) -> str:
+    return {"held": "requested", "verifying": "requested", "executed": "approved"}.get(
+        decision_status, "rejected"
+    )
+
+
+async def settlements_view(
+    period: str | None, fresh: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    books = await (state().fresh_books() if fresh else state().books())
+    result = await off(settlement.statements, books, period)
+    batch = state().records.batches.get(result["period"])
+    if batch:
+        await refresh_batch(batch)
+    return settlement.apply_batch(result, batch), books.meta()
+
+
+# ---------------------------------------------------------------- 사람이 할 일
+async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
+    books = await state().books()
+    today = fc.today()
+    totals = await off(
+        closing.compute_totals, books, fc.day_start(today), fc.day_start(today + timedelta(1))
+    )
+    unknown = await off(closing.unknown_codes, books)
+    todo: list[dict[str, Any]] = []
+
+    sett, _ = await settlements_view(None)
+    batch = sett["batch"]
+    if batch["status"] == "requested":
+        todo.append(
+            {
+                "kind": "settlement_batch",
+                "title": f"판매자 정산 {len(batch['seller_ids'])}곳 지급 승인 대기 (안전 장치)",
+                "count": len(batch["seller_ids"]),
+                "amount": batch["total_payout"],
+                "link": "settlements",
+                # 사람이 안전 장치 보류 큐에서 진행·멈춤을 누른다
+                "action": {
+                    "type": "review_decision",
+                    "period": sett["period"],
+                    "review_id": batch["review_id"],
+                },
+            }
+        )
+    elif batch["status"] in ("none", "rejected"):
+        ready = settlement.ready(sett)
+        if ready:
+            todo.append(
+                {
+                    "kind": "settlement_batch",
+                    "title": f"판매자 정산 {len(ready)}곳 지급 승인 요청 대기",
+                    "count": len(ready),
+                    "amount": sum(r["payout"] for r in ready),
+                    "link": "settlements",
+                    # 사람이 묶음 지급 승인을 요청한다 (안전 장치가 C로 보류 → 승인)
+                    "action": {"type": "settlement_request", "period": sett["period"]},
+                }
+            )
+
+    report = await off(deadline.deadline_report, books, state().records.batches, today)
+    late = deadline.needs_attention(report)
+    if late:
+        worst = late[0]
+        todo.append(
+            {
+                "kind": "settlement_deadline",
+                "title": f"정산 기한 확인 필요 판매자 {len(late)}곳 ({worst['status_label']} 포함)",
+                "count": len(late),
+                "amount": sum(r["amount"] for r in late),
+                "link": "settlements",
+                # 보류 사유를 풀거나 이번 묶음에 넣어 기한 안에 지급되게 한다 (지급은 보류 큐 승인)
+                "action": {"type": "open_tab"},
+                "items": [
+                    {
+                        "ref": r["seller_id"],
+                        "title": f"{r['name']} · {r['status_label']}",
+                        "detail": f"기한 {r['deadline']} (D{r['days_left']:+d})",
+                        "amount": r["amount"],
+                    }
+                    for r in late[:TODO_ITEMS]
+                ],
+            }
+        )
+
+    for filing in state().vat_drifts:
+        payable = next((x["diff"] for x in filing["lines"] if x["code"] == "payable"), None)
+        todo.append(
+            {
+                "kind": "vat_drift",
+                "title": f"{filing['quarter']} 부가세 확정 뒤 숫자가 달라짐. 세무사 확인 필요",
+                "count": 1,
+                "amount": payable,
+                "link": "tax",
+            }
+        )
+    drifts = state().closing_drifts
+    if drifts:
+        todo.append(
+            {
+                "kind": "closing_drift",
+                "title": f"확정 뒤 숫자가 달라진 결산 {len(drifts)}건. 조정 처리 필요",
+                "count": len(drifts),
+                "amount": sum(x["net_diff"] for x in drifts),
+                "link": "closing",
+                "items": [
+                    {
+                        "ref": f"{x['period']}:{x['date']}",
+                        "title": x["date"],
+                        "detail": ", ".join(
+                            f"{line['label']} {fc.won(line['diff'])}" for line in x["lines"][:3]
+                        ),
+                        "amount": x["net_diff"],
+                    }
+                    for x in drifts[:TODO_ITEMS]
+                ],
+            }
+        )
+    yesterday = today - timedelta(days=1)
+    if closing_key("day", yesterday) not in state().records.closings:
+        y = await off(closing.compute_totals, books, fc.day_start(yesterday), fc.day_start(today))
+        todo.append(
+            {
+                "kind": "closing_confirm",
+                "title": f"어제({yesterday.isoformat()}) 결산 확정 대기",
+                "count": 1,
+                "amount": None if "net_result" in unknown else y.net_result,
+                "link": "closing",
+                "action": {
+                    "type": "closing_confirm",
+                    "period": "day",
+                    "date": yesterday.isoformat(),
+                },
+            }
+        )
+
+    recon = await off(reconciliation.reconcile, books, None, state().records.recon_notes, today)
+    open_items = [i for i in reconciliation.exceptions(recon) if not i["note"]]
+    if open_items:
+        todo.append(
+            {
+                "kind": "recon_exception",
+                "title": f"최근 7일 매출·PG 대사 불일치 {len(open_items)}건",
+                "count": len(open_items),
+                "amount": sum(reconciliation.exception_amount(i) for i in open_items),
+                "link": "reconciliation",
+                # 사람이 건마다 확인 결과(메모)를 남긴다
+                "action": {"type": "recon_note"},
+                "items": [
+                    {
+                        "ref": i["payment_id"],
+                        "title": RECON_KO.get(i["status"], i["status"]),
+                        "detail": f"주문 {i.get('order_id')}",
+                        "amount": reconciliation.exception_amount(i),
+                    }
+                    for i in open_items[:TODO_ITEMS]
+                ],
+            }
+        )
+
+    # 팀 예산: 이번 달과 다음 달(발령은 다음 달 1일부터 반영) 중 확정이 안 됐거나 숫자가 바뀐 달
+    this_month = team_budget.month_of(today)
+    for month in (this_month, team_budget.shift_month(this_month, 1)):
+        tb, _ = await team_budget_data(month)
+        if tb["status"] not in ("pending", "changed") or tb["example"]:
+            continue  # 예시 인원은 확정할 일이 아니다
+        changed = [r for r in tb["rows"] if r["change"]]
+        todo.append(
+            {
+                "kind": "team_budget",
+                "title": (
+                    f"{month} 팀 예산 다시 확인 필요 (확정 뒤 인원·단가가 바뀜)"
+                    if tb["status"] == "changed"
+                    else f"{month} 팀 예산 확정 대기"
+                ),
+                "count": len(tb["rows"]),
+                "amount": tb["total"],
+                "link": "policy",
+                # 재무 담당이 숫자를 보고 확정한다. 재무 AI는 예산을 혼자 바꾸지 않는다
+                "action": {
+                    "type": "team_budget_approve",
+                    "month": month,
+                    "signature": tb["signature"],
+                },
+                "items": [
+                    {
+                        "ref": r["team"],
+                        "title": r["team"],
+                        "detail": f"{r['prev_headcount']}명 → {r['headcount']}명",
+                        "amount": r["change"],
+                    }
+                    for r in changed[:TODO_ITEMS]
+                ],
+            }
+        )
+    return {"date": today.isoformat(), "kpis": totals.as_kpis(unknown), "todo": todo}, books.meta()
+
+
+def _team_budget_meta(missing: list[str]) -> dict[str, Any]:
+    return {
+        "mock": is_mock("finance"),
+        "collected_at": fc.iso(fc.now()),
+        "source": "hr.team_headcount",
+        "unavailable": missing,
+    }
+
+
+# ---------------------------------------------------------------- 라우트
+RECON_LIMIT = 1000
+RECON_LIMIT_MAX = 5000
+
+
+def add_finance_api(app: FastAPI) -> None:
+    @app.get("/api/finance/overview")
+    async def overview() -> dict:
+        data, meta = await overview_data()
+        return ok(data, meta)
+
+    @app.get("/api/finance/closing", response_model=None)
+    async def get_closing(period: str = "day", date: str | None = None) -> dict | JSONResponse:
+        if period not in ("day", "week", "month"):
+            return error(400, "invalid_request", "period는 day, week, month 중 하나")
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        confirmation = state().records.closings.get(closing_key(period, d))
+        report = await closing.closing_report(  # type: ignore[arg-type]
+            books, period, d, confirmation, state().records.closings
+        )
+        return ok(report, books.meta())
+
+    @app.get("/api/finance/statements", response_model=None)
+    async def get_statements(
+        period: str = "month", date: str | None = None, format: str = "json"
+    ) -> dict | Response:
+        if period not in statements.PERIODS:
+            return error(400, "invalid_request", "period는 month, quarter, year 중 하나")
+        if format not in ("json", "csv", "xlsx"):
+            return error(400, "invalid_request", "format은 json, csv, xlsx 중 하나")
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        records = state().records
+        report = await off(
+            statements.income_statement,
+            books,
+            period,
+            d,
+            records.closings,
+            records.other_pnl,
+        )
+        meta = books.meta()
+        if format == "json":
+            return ok(report, meta)
+        if format == "xlsx":
+            name = statements.filename(report, "xlsx")
+            return Response(
+                content=statements.to_xlsx(report, meta["unavailable"]),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="{name}"'},
+            )
+        return Response(
+            content=statements.to_csv(report, meta["unavailable"]).encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{statements.filename(report)}"'
+            },
+        )
+
+    @app.post("/api/finance/closing/confirm", response_model=None)
+    async def confirm_closing(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        period = body.get("period", "day")
+        if period not in ("day", "week", "month"):
+            return error(400, "invalid_request", "period는 day, week, month 중 하나")
+        # 날짜를 빠뜨려 오늘 결산이 확정되는 일을 막는다
+        if not body.get("date"):
+            return error(400, "invalid_request", "date가 필요하다")
+        try:
+            d = fc.parse_date(body.get("date")) or fc.today()
+        except (ValueError, TypeError) as exc:
+            return error(400, "invalid_request", str(exc))
+        key = closing_key(period, d)
+        records = state().records.closings
+        if key not in records and not closing.period_finished(period, d):
+            return error(409, "period_not_closed", "아직 끝나지 않은 기간은 결산을 확정할 수 없다")
+        books = await state().fresh_books()
+        if key not in records and closing.unknown_codes(books):
+            return error(
+                409,
+                "books_unavailable",
+                "받지 못한 장부 자료가 있어 확인할 수 없는 숫자로는 결산을 확정하지 않는다",
+            )
+        if key not in records:
+            start, end = closing.period_range(period, d)
+            if period == "month" and (pending := closing.pending_recon(books, start, end)):
+                return error(
+                    409,
+                    "recon_pending",
+                    f"PG 정산 전 결제 {pending:,}건이 남아 월 결산을 확정할 수 없다",
+                )
+            draft = await closing.closing_report(books, period, d, None, records)
+            entered = state().records.other_pnl.get(start.isoformat()[:7])
+            column = statements.column(
+                books,
+                fc.day_start(start),
+                fc.day_start(end),
+                entered if period == "month" else None,
+            )
+            records[key] = {
+                "by": person,
+                "at": fc.iso(fc.now()),
+                "snapshot": closing.snapshot_of(draft, books, column),
+            }
+        report = await closing.closing_report(books, period, d, records[key], records)
+        return ok(report, books.meta())
+
+    @app.post("/api/finance/closing/cancel", response_model=None)
+    async def cancel_closing(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """잘못한 확정을 취소한다. 지우지 않고 누가 왜 취소했는지 남긴다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        period, reason = body.get("period"), body.get("reason")
+        if period not in ("day", "week", "month") or not body.get("date"):
+            return error(400, "invalid_request", "period와 date가 필요하다")
+        if not isinstance(reason, str) or not reason.strip():
+            return error(400, "invalid_request", "reason이 필요하다")
+        try:
+            d = fc.parse_date(body.get("date"))
+        except (ValueError, TypeError) as exc:
+            return error(400, "invalid_request", str(exc))
+        key = closing_key(period, d)
+        records = state().records
+        confirmed = records.closings.get(key)
+        if confirmed is None:
+            return error(404, "not_confirmed", "확정된 결산이 아니다")
+        records.closing_cancels.append(
+            {
+                "period": key[0],
+                "date": key[1],
+                "confirmed_by": confirmed["by"],
+                "confirmed_at": confirmed["at"],
+                "snapshot": confirmed.get("snapshot"),
+                "canceled_by": person,
+                "canceled_at": fc.iso(fc.now()),
+                "reason": reason.strip()[:300],
+            }
+        )
+        del records.closings[key]
+        books = await state().fresh_books()
+        return ok(await closing.closing_report(books, period, d, None), books.meta())
+
+    @app.get("/api/finance/other-pnl", response_model=None)
+    def get_other_pnl(month: str) -> dict | JSONResponse:
+        if not team_budget.MONTH_RE.match(month):
+            return error(400, "invalid_request", "month는 YYYY-MM")
+        records = state().records
+        return ok(
+            {
+                "month": month,
+                "entry": records.other_pnl.get(month),
+                "locked": _month_confirmed(records.closings, month),
+            },
+            {"collected_at": fc.iso(fc.now())},
+        )
+
+    @app.post("/api/finance/other-pnl", response_model=None)
+    async def post_other_pnl(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """쇼핑몰 장부에 없는 월 손익을 사람이 입력한다. 고치면 이전 값을 기록에 남긴다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        month = body.get("month")
+        if not isinstance(month, str) or not team_budget.MONTH_RE.match(month):
+            return error(400, "invalid_request", "month는 YYYY-MM")
+        if month > fc.today().isoformat()[:7]:
+            return error(400, "invalid_request", "아직 오지 않은 달은 입력할 수 없다")
+        records = state().records
+        if _month_confirmed(records.closings, month):
+            return error(409, "month_confirmed", "확정한 달은 고칠 수 없다. 조정으로 처리해 달라")
+        entry: dict[str, Any] = {}
+        for field in OTHER_PNL_FIELDS:
+            value = body.get(field, 0)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                return error(400, "invalid_request", f"{field}는 0 이상의 정수 원")
+            entry[field] = value
+        tax_value = body.get("income_tax")
+        if tax_value is not None and (
+            isinstance(tax_value, bool) or not isinstance(tax_value, int) or tax_value < 0
+        ):
+            return error(400, "invalid_request", "income_tax는 0 이상의 정수 원이거나 비운다")
+        previous = records.other_pnl.get(month)
+        history = list((previous or {}).get("history", []))
+        if previous:
+            history.append({k: v for k, v in previous.items() if k != "history"})
+        records.other_pnl[month] = entry | {
+            "income_tax": tax_value,
+            "memo": str(body.get("memo") or "")[:300],
+            "by": person,
+            "at": fc.iso(fc.now()),
+            "history": history,
+        }
+        return ok(
+            {"month": month, "entry": records.other_pnl[month], "locked": False},
+            {"collected_at": fc.iso(fc.now())},
+        )
+
+    @app.post("/api/finance/closing/adjust", response_model=None)
+    async def adjust_closing(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """확정한 달의 차이를 조정으로 반영한다. 재무 AI는 안을 만들고 반영은 사람이 한다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        reason, signature = body.get("reason"), body.get("signature")
+        if not body.get("date") or not isinstance(reason, str) or not reason.strip():
+            return error(400, "invalid_request", "date와 reason이 필요하다")
+        try:
+            d = fc.parse_date(body.get("date"))
+        except (ValueError, TypeError) as exc:
+            return error(400, "invalid_request", str(exc))
+        records = state().records.closings
+        key = closing_key("month", d)
+        confirmation = records.get(key)
+        if confirmation is None or not confirmation.get("snapshot"):
+            return error(404, "not_confirmed", "숫자를 저장해 확정한 달이 아니다")
+        books = await state().fresh_books()
+        report = await closing.closing_report(books, "month", d, confirmation, records)
+        proposal = report["adjustment_proposal"]
+        if proposal is None:
+            return error(409, "no_drift", "조정할 차이가 없다")
+        if signature != proposal["signature"]:
+            return error(409, "drift_changed", "본 차이와 지금 차이가 다르다. 다시 확인해 달라")
+        confirmation.setdefault("adjustments", []).append(
+            {
+                "for_month": key[1][:7],
+                "posted_month": fc.today().isoformat()[:7],
+                "lines": report["drift"],
+                "journal": proposal["journal"],
+                "by": person,
+                "at": fc.iso(fc.now()),
+                "reason": reason.strip()[:300],
+            }
+        )
+        return ok(
+            await closing.closing_report(books, "month", d, confirmation, records), books.meta()
+        )
+
+    @app.post("/api/finance/tax/vat/confirm", response_model=None)
+    async def confirm_vat(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """끝난 분기의 부가세 숫자를 고정한다. 세무사에게 넘길 기준이고 신고가 아니다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        if not body.get("date"):
+            return error(400, "invalid_request", "date가 필요하다")
+        try:
+            d = fc.parse_date(body.get("date"))
+        except (ValueError, TypeError) as exc:
+            return error(400, "invalid_request", str(exc))
+        filings = state().records.vat_filings
+        key = tax.filing_key(d)
+        if key not in filings:
+            if not tax.quarter_finished(d):
+                return error(409, "period_not_closed", "끝나지 않은 분기는 확정할 수 없다")
+            books = await state().fresh_books()
+            if closing.unknown_codes(books):
+                return error(409, "books_unavailable", "받지 못한 장부 자료가 있다")
+            start, end, _ = tax.quarter_range(d)
+            if pending := closing.pending_recon(books, start, end):
+                return error(
+                    409, "recon_pending", f"PG 정산 전 결제 {pending:,}건이 남아 확정할 수 없다"
+                )
+            filings[key] = {
+                "by": person,
+                "at": fc.iso(fc.now()),
+                "pack": tax.vat_pack(books, d),
+                "seller_report": tax.seller_report(books, d),
+            }
+        books = await state().books()
+        return ok(tax.vat_view(books, d, filings), books.meta())
+
+    @app.post("/api/finance/tax/vat/cancel", response_model=None)
+    async def cancel_vat(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        reason = body.get("reason")
+        if not body.get("date") or not isinstance(reason, str) or not reason.strip():
+            return error(400, "invalid_request", "date와 reason이 필요하다")
+        try:
+            d = fc.parse_date(body.get("date"))
+        except (ValueError, TypeError) as exc:
+            return error(400, "invalid_request", str(exc))
+        records = state().records
+        filing = records.vat_filings.pop(tax.filing_key(d), None)
+        if filing is None:
+            return error(404, "not_confirmed", "확정한 분기가 아니다")
+        records.vat_filing_cancels.append(
+            filing
+            | {
+                "canceled_by": person,
+                "canceled_at": fc.iso(fc.now()),
+                "reason": reason.strip()[:300],
+            }
+        )
+        books = await state().books()
+        return ok(tax.vat_view(books, d, records.vat_filings), books.meta())
+
+    @app.get("/api/finance/reconciliation", response_model=None)
+    async def get_reconciliation(
+        date: str | None = None, status: str | None = None, limit: int = RECON_LIMIT
+    ) -> dict | JSONResponse:
+        """대사 결과. `items`는 고른 상태(`status`, 쉼표로 여럿·`all`)의 건만 `limit`건까지 준다.
+
+        기본은 사람이 볼 불일치(일치·정산 전 제외)다. 일치·정산 전까지 다 보내면 최근 7일이
+        십수만 건(2026-11-06 서버 37MB)이라 화면이 켤 때만 따로 받는다.
+        `counts`·`totals`는 늘 기간 전체다.
+        """
+        try:
+            d = fc.parse_date(date)
+            wanted = reconciliation.parse_statuses(status)
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        if not 1 <= limit <= RECON_LIMIT_MAX:
+            return error(400, "invalid_request", f"limit은 1~{RECON_LIMIT_MAX}")
+        books = await state().books()
+        result = await off(reconciliation.reconcile, books, d, state().records.recon_notes)
+        meta = books.meta() | {"pg_source": "mock_toss_settlement"}
+        return ok(reconciliation.pick(result, wanted, limit), meta)
+
+    @app.post("/api/finance/reconciliation/{payment_id}/note", response_model=None)
+    async def note_reconciliation(
+        payment_id: str, request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        note = (await _body(request)).get("note")
+        if not isinstance(note, str) or not note.strip() or len(note) > 500:
+            return error(400, "invalid_request", "note는 1~500자 문자열")
+        books = await state().fresh_books()
+        payment = next((p for p in books.payments() if p["payment_id"] == payment_id), None)
+        if payment is None:
+            return error(404, "not_found", f"결제 {payment_id}이 장부에 없다")
+        records = state().records
+        records.recon_notes[payment_id] = note.strip()
+        records.recon_note_log.append(
+            {"payment_id": payment_id, "note": note.strip(), "by": person, "at": fc.iso(fc.now())}
+        )
+        result = reconciliation.reconcile(books, payment["created_at"].date(), records.recon_notes)
+        item = next(i for i in result["items"] if i["payment_id"] == payment_id)
+        return ok(item, books.meta() | {"noted_by": person})
+
+    @app.get("/api/finance/settlements", response_model=None)
+    async def get_settlements(period: str | None = None) -> dict | JSONResponse:
+        try:
+            data, meta = await settlements_view(period)
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        return ok(data, meta)
+
+    @app.post("/api/finance/settlements/batch", response_model=None)
+    async def request_batch(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        requested_by = None
+        if authorization:  # 토큰은 선택. 보냈다면 사람 토큰이어야 한다
+            try:
+                requested_by = human_from_authorization(authorization)
+            except PermissionError as exc:
+                return error(401, "unauthorized", str(exc))
+        period = (await _body(request)).get("period")
+        if period is not None and not isinstance(period, str):
+            return error(400, "invalid_request", "period는 YYYY-Www 문자열")
+        try:
+            data, meta = await settlements_view(period, fresh=True)
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        name = data["period"]
+        batches = state().records.batches
+        current = batches.get(name)
+        if current and current["status"] in ("requested", "approved"):
+            return ok(data, meta)  # 같은 기간은 한 번만 요청한다
+        rows = settlement.ready(data)
+        if not rows:
+            return error(409, "nothing_to_settle", "보류 없이 지급할 판매자가 없다")
+
+        attempt = (current or {}).get("attempt", 0) + 1
+        seller_ids = [r["seller_id"] for r in rows]
+        total = sum(r["payout"] for r in rows)
+        summary = f"{name} 판매자 정산 {len(rows)}곳 {fc.won(total)} 지급 승인 요청"
+        params = {
+            "period": name,
+            "from": data["from"],
+            "to": data["to"],
+            "pay_date": data["pay_date"],
+            "seller_ids": seller_ids,
+            "total_payout": total,
+            "statements": [
+                {
+                    k: r[k]
+                    for k in (
+                        "seller_id",
+                        "name",
+                        "orders",
+                        "gross",
+                        "commission",
+                        "seller_coupon",
+                        "refunds",
+                        "payout",
+                    )
+                }
+                for r in rows
+            ],
+            "summary": summary,
+            "requested_by": requested_by,  # 요청한 사람은 승인하지 못한다 (안전 관문)
+        }
+        context_id = f"ctx_req_settlement_{name}"
+        meta_req = RequestMeta(
+            context_id=context_id,
+            token="finance-dashboard",
+            deadline=fc.now() + timedelta(seconds=40),
+            idempotency_key=f"{context_id}:confirm_settlement:{name}:{attempt}",
+        )
+        evidence = Evidence(
+            queries=["finance:settlements", "shop-api:/api/shop/orders"],
+            data_summary=summary,
+            collected_at=fc.now(),
+            ref_ids=seller_ids,
+        )
+        with agent_name_scope("finance"):
+            decision = await execute("confirm_settlement", params, meta_req, evidence)
+        if decision.execution_id == UNAVAILABLE_EXECUTION or decision.status == "failed":
+            return error(
+                503,
+                "safety_unavailable",
+                "안전 장치에 닿지 않아 정산 묶음을 요청하지 않았다 (지급 기록 없음)",
+            )
+        batches[name] = {
+            "status": _batch_status(decision.status),
+            "review_id": decision.review_id,
+            "execution_id": decision.execution_id,
+            "total_payout": total,
+            "seller_ids": seller_ids,
+            "payouts": {r["seller_id"]: r["payout"] for r in rows},
+            "attempt": attempt,
+            "requested_by": requested_by,
+            "requested_at": fc.iso(fc.now()),
+            **({"approved_at": fc.iso(fc.now())} if decision.status == "executed" else {}),
+        }
+        data, meta = await settlements_view(name)
+        return ok(data, meta)
+
+    @app.get("/api/finance/support-costs")
+    async def get_support_costs() -> dict:
+        """고객지원이 닫은 문의의 비용 기록(`record_support_cost`가 남긴 것). 최근 기록이 먼저."""
+        books = await state().books()
+        rows = sorted(
+            state().ledger.support_costs.values(), key=lambda r: r["recorded_at"], reverse=True
+        )
+        return ok(rows, books.meta())
+
+    @app.get("/api/finance/team-budget", response_model=None)
+    async def get_team_budget(month: str | None = None) -> dict | JSONResponse:
+        try:
+            m = team_budget.parse_month(month, fc.today())
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        data, missing = await team_budget_data(m)
+        return ok(data, _team_budget_meta(missing))
+
+    @app.post("/api/finance/team-budget/{month}/approve", response_model=None)
+    async def approve_team_budget(
+        month: str, request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """재무 담당이 그 달 팀 예산을 확정한다. 보던 숫자(`signature`)와 지금이 같아야 한다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        try:
+            m = team_budget.parse_month(month, fc.today())
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        body = await _body(request)
+        sig, note = body.get("signature"), body.get("note")
+        if not isinstance(sig, str) or not sig:
+            return error(400, "invalid_request", "signature(확정할 때 보던 숫자)가 필요하다")
+        if note is not None and (not isinstance(note, str) or len(note) > 500):
+            return error(400, "invalid_request", "note는 500자 이하 문자열")
+        # 확정은 지금 인원과 맞춰 본다. 화면용으로 기억해 둔 인원이면 그사이 확정된 발령을 놓친다
+        state().sources.forget_headcount(m)
+        data, missing = await team_budget_data(m)
+        if data["status"] == "unavailable":
+            return error(
+                503, "team_headcount_unavailable", "인사 AI에서 팀 인원을 받지 못해 확정할 수 없다"
+            )
+        if data["example"]:
+            return error(
+                409,
+                "example_headcount",
+                "인사 AI가 준 인원이 가상 명부(예시)라 팀 예산으로 확정하지 않는다",
+            )
+        if data["signature"] != sig:
+            return error(
+                409, "stale", "그사이 인원이나 단가가 바뀌었다. 다시 불러와 확인하고 확정한다"
+            )
+        record = team_budget.approval(data, person, fc.iso(fc.now()), (note or "").strip() or None)
+        state().records.team_budgets[m] = record
+        data, missing = await team_budget_data(m)
+        return ok(data, _team_budget_meta(missing) | {"approved_by": person})
+
+    @app.get("/api/finance/settlements/deadlines")
+    async def get_deadlines() -> dict:
+        books = await state().books()
+        report = await off(deadline.deadline_report, books, state().records.batches)
+        return ok(report, books.meta())
+
+    @app.get("/api/finance/payables", response_model=None)
+    async def get_payables(date: str | None = None) -> dict | JSONResponse:
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        return ok(await off(payables.rollforward, books, state().records.batches, d), books.meta())
+
+    @app.get("/api/finance/variance", response_model=None)
+    async def get_variance(date: str | None = None) -> dict | JSONResponse:
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        report = await off(variance.variance_report, books, d, state().records.closings)
+        return ok(report, books.meta())
+
+    @app.post("/api/finance/bank/statement", response_model=None)
+    async def upload_bank(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """사람이 은행에서 내려받은 거래내역을 올린다. 겹치는 줄은 한 번만 센다.
+
+        출금은 음수 금액이다. `has_withdrawals`가 참이면(파일에 출금 열이 있었으면) 그 기간을
+        출금 대조 기간으로 남긴다. 출금 열이 없던 내역은 출금 대조를 하지 않는다.
+        """
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        rows, problems = bank.parse_rows(body.get("rows"))
+        if problems and not rows:
+            return error(400, "invalid_request", "; ".join(problems[:5]))
+        records = state().records
+        added = bank.merge_rows(records.bank_rows, rows)
+        with_out = body.get("has_withdrawals") is True
+        if with_out:
+            bank.add_out_period(records.bank_out_periods, rows)
+        books = await state().books()
+        result = bank.match(books, records.bank_rows)
+        meta = books.meta() | {
+            "uploaded_by": person,
+            "added": added,
+            "skipped": problems[:20],
+            "withdrawals": sum(1 for r in rows if r["amount"] < 0),
+            "has_withdrawals": with_out,
+        }
+        return ok(result, meta)
+
+    @app.post("/api/finance/bank/file", response_model=None)
+    async def upload_bank_file(
+        request: Request, name: str = "", authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """사람이 은행에서 내려받은 거래내역 파일(CSV·xlsx)을 그대로 올린다. 본문은 파일 바이트다.
+
+        읽는 규칙은 폴더 읽기와 같다(`bank_file.py`): 글자 인코딩(UTF-8·CP949), 안내 줄 아래의
+        머리줄, 은행마다 다른 칸 이름을 코드가 맞춘다. 올린 기록은 `bank_imports`에 남는다.
+        """
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await request.body()
+        if not body:
+            return error(400, "invalid_request", "파일 내용이 비어 있습니다.")
+        records = state().records
+        record: dict[str, Any] = {
+            "file": (name.strip() or "올린 파일")[:120],
+            "at": fc.iso(fc.now()),
+            "source": "upload",
+            "by": person,
+        }
+        try:
+            record |= exports.import_statement(
+                body, name, records.bank_rows, records.bank_out_periods
+            )
+        except bank_file.BankFileError as exc:
+            record |= {"status": "failed", "reason": str(exc)[:200]}
+            records.bank_imports.append(record)
+            del records.bank_imports[:-100]
+            return error(400, "invalid_file", str(exc))
+        records.bank_imports.append(record)
+        del records.bank_imports[:-100]
+        books = await state().books()
+        result = await off(bank.match, books, records.bank_rows)
+        meta = books.meta() | {
+            "uploaded_by": person,
+            "import": record,
+            "added": record["added"],
+            "withdrawals": record["withdrawals"],
+            "has_withdrawals": record["has_withdrawals"],
+        }
+        return ok(result, meta)
+
+    def bank_outflows(books: Any) -> dict[str, Any]:
+        records = state().records
+        return bank.outflows(
+            records.bank_rows,
+            records.bank_out_periods,
+            records.batches,
+            seller_name=books.seller_name,
+            other_pnl=records.other_pnl,
+            campaigns=records.campaigns,
+            notes=records.bank_notes,
+        )
+
+    @app.get("/api/finance/bank/outflows")
+    async def get_bank_outflows() -> dict:
+        books = await state().books()
+        return ok(bank_outflows(books), books.meta())
+
+    @app.post("/api/finance/bank/outflows/{row_id}/note", response_model=None)
+    async def note_bank_outflow(
+        row_id: str, request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """설명 없는 출금에 이유를 적는다. 장부는 바꾸지 않는다 (틀린 돈은 조정 분개로)."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        note = (await _body(request)).get("note")
+        if not isinstance(note, str) or not note.strip() or len(note) > 500:
+            return error(400, "invalid_request", "note는 1~500자 문자열")
+        books = await state().books()
+        view = bank_outflows(books)
+        if row_id not in {u["id"] for u in view["unexplained"]}:
+            return error(404, "not_found", "설명 없는 출금 목록에 없는 거래다")
+        records = state().records
+        entry = {"note": note.strip(), "by": person, "at": fc.iso(fc.now())}
+        records.bank_notes[row_id] = entry
+        records.bank_note_log.append({"row_id": row_id, **entry})
+        return ok(bank_outflows(books), books.meta() | {"noted_by": person})
+
+    @app.get("/api/finance/bank")
+    async def get_bank() -> dict:
+        books = await state().books()
+        return ok(await off(bank.match, books, state().records.bank_rows), books.meta())
+
+    @app.get("/api/finance/cashflow")
+    async def get_cashflow() -> dict:
+        books = await state().books()
+        records = state().records
+        forecast = await off(
+            cashflow.forecast,
+            books,
+            records.batches,
+            opening=bank.latest_balance(records.bank_rows),
+            fixed=cashflow.fixed_costs(records.other_pnl),
+        )
+        return ok(forecast, books.meta())
+
+    @app.get("/api/finance/close-checklist", response_model=None)
+    async def get_close_checklist(date: str | None = None) -> dict | JSONResponse:
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        return ok(await off(close_checklist.checklist, books, state().records, d), books.meta())
+
+    @app.get("/api/finance/campaigns")
+    async def get_campaigns() -> dict:
+        records = state().records
+        budget = await monthly_budget()
+        month = fc.today().isoformat()[:7]
+        started = await started_campaigns()
+        spent = (
+            None
+            if started is None
+            else cp.committed_this_month("", month, records.campaigns, started)
+        )
+        running = [
+            row
+            for cid, row in (started or {}).items()
+            if cid not in records.campaigns and row["active_krw"] > 0
+        ]
+        return ok(
+            {
+                "campaigns": sorted(
+                    records.campaigns.values(), key=lambda c: c["period_to"], reverse=True
+                ),
+                "running": running,
+                "reviews": list(reversed(records.budget_reviews)),
+                "lessons": list(reversed(records.lessons)),
+                "opinions": list(reversed(records.opinions)),
+                "budget": {
+                    "month": month,
+                    "monthly_krw": budget["amount_krw"],
+                    "provisional": budget["provisional"],
+                    "basis": budget["basis"],
+                    "committed_krw": spent,
+                },
+                "break_even_roas": cp.break_even_roas(),
+            },
+            {
+                "collected_at": fc.iso(fc.now()),
+                "source": "finance.campaigns",
+                "mock": False,
+                "unavailable": [],
+            },
+        )
+
+    @app.get("/api/finance/campaigns/compare", response_model=None)
+    async def get_campaign_compare(channel: str, requested: int) -> dict | JSONResponse:
+        if requested <= 0:
+            return error(400, "invalid_request", "requested는 1원 이상")
+        records = state().records
+        ask = {
+            "campaign_id": "compare",
+            "campaign_name": "비교용 요청",
+            "channel": channel,
+            "requested_krw": requested,
+        }
+        result = cp.compare_with_history(
+            ask,
+            campaigns=records.campaigns,
+            reviews=records.budget_reviews,
+            lessons=records.lessons,
+            cash_net_krw=await cash_net_krw(),
+            today=fc.today(),
+            monthly_budget=await monthly_budget(),
+            started=await started_campaigns(),
+        )
+        return ok(result, {"collected_at": fc.iso(fc.now())})
+
+    @app.get("/api/finance/insights")
+    async def get_insights() -> dict:
+        return ok(await current_insights(), {"collected_at": fc.iso(fc.now())})
+
+    @app.get("/api/finance/rules")
+    def get_rules() -> dict:
+        book = load_rules()
+        return ok(book.model_dump(mode="json"), {"version": book.version, "updated": book.updated})
+
+    @app.get("/api/finance/tax/income-estimate", response_model=None)
+    async def get_income_estimate(year: int | None = None) -> dict | JSONResponse:
+        if year is not None and not 2026 <= year <= fc.today().year:
+            return error(400, "invalid_request", "year는 2026년 이후 올해까지만 계산한다")
+        books = await state().books()
+        estimate = await off(
+            tax.income_tax_estimate, books, year, other_pnl=state().records.other_pnl
+        )
+        return ok(estimate, books.meta())
+
+    @app.get("/api/finance/exports")
+    async def get_exports() -> dict:
+        records = state().records
+        packages = sorted(records.exports.values(), key=lambda p: p["package_id"], reverse=True)
+        return ok(
+            {"packages": packages, "bank_imports": list(reversed(records.bank_imports))},
+            {
+                "export_enabled": exports.export_dir() is not None,
+                "inbox_enabled": exports.inbox_dir() is not None,
+            },
+        )
+
+    @app.get("/api/finance/exports/{package_id}/files/{name}", response_model=None)
+    def get_export_file(package_id: str, name: str) -> Response | JSONResponse:
+        body = exports.read_file(state().records.exports, package_id, name)
+        if body is None:
+            return error(404, "not_found", "파일이 없거나 내용이 기록과 다르다")
+        media = {
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }.get(os.path.splitext(name)[1], "text/csv; charset=utf-8")
+        return Response(
+            content=body,
+            media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
+
+    @app.get("/api/finance/exports/{package_id}/bundle", response_model=None)
+    def get_export_bundle(package_id: str) -> Response | JSONResponse:
+        made = exports.bundle(state().records.exports, package_id)
+        if made is None:
+            return error(404, "not_found", "묶음이 없거나 파일 내용이 기록과 다르다")
+        name, body = made
+        return Response(
+            content=body,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
+
+    @app.post("/api/finance/exports/run", response_model=None)
+    async def post_export_run(
+        authorization: str | None = Header(default=None),
+    ) -> dict | JSONResponse:
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        return ok(await run_export_cycle("manual"), {"by": person})
+
+    @app.get("/api/finance/tax/vat", response_model=None)
+    async def get_vat(date: str | None = None) -> dict | JSONResponse:
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        return ok(await off(tax.vat_view, books, d, state().records.vat_filings), books.meta())
+
+    @app.get("/api/finance/tax/seller-report", response_model=None)
+    async def get_seller_report(date: str | None = None, format: str = "json") -> dict | Response:
+        if format not in ("json", "csv", "xlsx"):
+            return error(400, "invalid_request", "format은 json, csv, xlsx 중 하나")
+        try:
+            d = fc.parse_date(date) or fc.today()
+        except ValueError as exc:
+            return error(400, "invalid_request", str(exc))
+        books = await state().books()
+        filing = state().records.vat_filings.get(tax.filing_key(d))
+        report = filing["seller_report"] if filing else await off(tax.seller_report, books, d)
+        if format == "json":
+            return ok(report, books.meta())
+        if format == "xlsx":
+            xlsx_name = f"seller-sales-{report['from'][:7]}.xlsx"
+            return Response(
+                content=tax.seller_report_xlsx(report),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="{xlsx_name}"'},
+            )
+        name = f"seller-sales-{report['from'][:7]}.csv"
+        return Response(
+            content=tax.seller_report_csv(report).encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )

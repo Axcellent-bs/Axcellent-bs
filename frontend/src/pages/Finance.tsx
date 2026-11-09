@@ -1,0 +1,376 @@
+import { useCallback, useEffect, useState } from "react";
+import { Navigate, useLocation, useNavigate } from "react-router";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ClosingSection } from "@/components/finance/Closing";
+import { DeadlineSection, PayablesSection, VarianceSection } from "@/components/finance/CloseControls";
+import { BankSection, CashflowSection, ChecklistSection } from "@/components/finance/CashAndClose";
+import { CampaignsSection } from "@/components/finance/Campaigns";
+import { TaxSection } from "@/components/finance/Tax";
+import { StatementsSection } from "@/components/finance/Statements";
+import { Chip, ErrorBox, MetaLine, MockBadge, TONE, Waiting, useResource } from "@/components/finance/bits";
+import { IncidentFinance } from "@/components/finance/Incident";
+import { SelfTestPanel } from "@/components/finance/Kept";
+import { TeamBudgetSection } from "@/components/finance/TeamBudget";
+import { ReconciliationSection } from "@/components/finance/Reconciliation";
+import { SafetyQueue } from "@/components/finance/SafetyQueue";
+import { SettlementsSection } from "@/components/finance/Settlements";
+import { SupportCostsSection } from "@/components/finance/SupportCosts";
+import { TodoCard } from "@/components/finance/Todo";
+import { Link } from "@/lib/nav";
+import {
+  FINANCE_SERVER, FINANCE_TABS, NOT_FINANCE_ACTIONS, SAFETY_SERVER, exampleMode, finance, krw, sortIncidents, todoTab,
+  type FinanceKpis, type FinanceTab, type Review, type SelfTest, type SelfTestLastMeta,
+} from "@/lib/finance";
+import { CompanyName } from "@/demo/CompanyName";
+import { setExampleOn } from "@/lib/financeExample";
+
+// 재무 AI 화면 = 고객사 재무팀. 기본 화면은 시나리오 A(결제 장애)의 "장애 이벤트 재무"(이벤트별 쿠폰·환불 장부).
+// 평상시 업무(결산·대사·정산·팀 예산·보류 추이)는 두 번째 탭에 둔다. 재무 AI 테스트는 서버가 10분마다 자동으로 한다.
+// 재무는 쿠폰·환불의 끝난 금액을 장부에 적기만 한다.
+// 숫자는 서버가 계산한 값을 그대로 보여 주고, 말만 쉽게 바꾼다.
+// 기준: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md §8·§11·§12
+
+const REFRESH_MS = 30_000;
+/** 재무 AI 테스트 최근 결과를 다시 받는 간격 */
+const SELF_TEST_POLL_MS = 60_000;
+
+const TAB_LABEL: Record<FinanceTab, string> = {
+  closing: "① 결산·리포트",
+  reconciliation: "② 매출·PG 대사",
+  settlements: "③ 판매자 정산",
+  policy: "④ 팀 예산",
+  tax: "⑤ 세무 지원",
+  campaigns: "⑥ 캠페인 재무",
+};
+
+const KPI: { key: keyof FinanceKpis; label: string; hint: string }[] = [
+  { key: "gmv", label: "총거래액", hint: "고객이 결제한 금액 전체" },
+  { key: "commission_revenue", label: "판매 수수료 매출", hint: "판매자에게 받는 수수료. 회사의 매출" },
+  { key: "refund_total", label: "환불", hint: "고객에게 돌려준 돈. 판매자 정산에서 차감" },
+  { key: "coupon_cost", label: "쿠폰 비용", hint: "회사가 부담한 쿠폰 할인" },
+  { key: "pg_fee", label: "PG 수수료", hint: "결제대행사에 내는 수수료" },
+  { key: "net_result", label: "영업 결과", hint: "판매 수수료 매출에서 쿠폰 비용과 PG 수수료를 뺀 값" },
+];
+
+const TERMS: [string, string][] = [
+  ["총거래액", "고객이 결제한 금액 전체입니다. 대부분 판매자 몫이라 회사 매출이 아닙니다."],
+  ["판매 수수료 매출", "판매자에게 받는 수수료입니다. 이것이 회사의 매출입니다."],
+  ["PG", "카드 결제를 처리해 주는 결제대행사입니다. 결제마다 수수료를 뗍니다."],
+  ["영업 결과", "판매 수수료 매출에서 쿠폰 비용과 PG 수수료를 뺀 값입니다. 급여·임차료는 들어가지 않습니다."],
+  ["결산 확정", "그날·그달 숫자를 확인하고 고정하는 일입니다. 돈은 움직이지 않습니다."],
+  ["대사", "우리 주문 기록과 PG 자료를 한 건씩 맞춰 보는 일입니다. 다른 건만 확인하고 메모를 남깁니다."],
+  ["정산", "판매자에게 줄 돈을 계산해 지급하는 일입니다. 판매액에서 수수료·판매자 부담 쿠폰·환불을 뺍니다."],
+  ["정산 보류", "구매가 확정되지 않은 것처럼 아직 지급할 수 없는 상태입니다. 이유가 함께 표시됩니다."],
+  ["미지급금", "판매자에게 줘야 하지만 아직 주지 않은 돈입니다."],
+  ["분개", "회계 장부에 적는 방식입니다. 회계 담당자가 참고하는 자료라 몰라도 결산 확정은 할 수 있습니다."],
+  ["안전 장치 보류", "사람이 정해야 해서 AI가 멈춰 둔 일입니다. 진행 또는 멈춤을 누릅니다."],
+];
+
+/** 재무를 처음 보는 사람을 위한 용어 풀이 */
+function Glossary() {
+  return (
+    <details className="rounded-2xl border border-ink-100 bg-surface px-4 py-3 text-sm sm:px-5">
+      <summary className="cursor-pointer font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">용어 풀이</summary>
+      <dl className="mt-3 grid gap-x-6 gap-y-2 md:grid-cols-2">
+        {TERMS.map(([term, meaning]) => (
+          <div key={term}>
+            <dt className="font-medium text-ink-900">{term}</dt>
+            <dd className="text-sm leading-relaxed text-ink-700">{meaning}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+/** 실제 데이터 / 예시 데이터 전환. 기획·개발, 사람 할 일함 화면과 같은 방식으로 브라우저에 기억하고 화면을 다시 읽는다 */
+function DataToggle() {
+  const pick = (on: boolean) => {
+    if (on === exampleMode) return;
+    setExampleOn(on);
+    window.location.reload();
+  };
+  return (
+    <div className="flex gap-1 rounded-full bg-ink-50 p-0.5" role="group" aria-label="데이터 보기">
+      {([[false, "실제 데이터"], [true, "예시 데이터"]] as const).map(([on, label]) => (
+        <button key={label} type="button" aria-pressed={exampleMode === on} onClick={() => pick(on)}
+          className={`rounded-full px-3 py-1 text-sm font-medium ${exampleMode === on ? "bg-brand-600 text-white" : "text-ink-700 hover:bg-ink-100"}`}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+/** 한쪽 서버가 꺼져 있어도 나머지는 보이도록 따로 받는다 */
+async function settle<T>(p: Promise<T>): Promise<[T | null, string | null]> {
+  try { return [await p, null]; } catch (e) { return [null, (e as Error).message]; }
+}
+
+/** 화면 전환은 왼쪽 사이드바의 하위 탭이 한다(demo/services.ts finance 서비스 children, 데이터 AI와 같은 짜임):
+ *  /finance 장애 이벤트 재무 · /finance/daily 평상시 재무 업무(①~⑥ 업무 탭은 #closing 같은 해시).
+ *  옛 주소(/finance#daily, /finance#closing 등)는 새 주소로 옮긴다 */
+type Mode = "incident" | "daily";
+const DAILY_PATH = "/finance/daily";
+const INCIDENT_PATH = "/finance";
+
+const scrollToId = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+
+export default function FinancePage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const hashTab = location.hash.replace(/^#/, "");
+  const isTab = (FINANCE_TABS as string[]).includes(hashTab);
+  const mode: Mode = location.pathname.startsWith(DAILY_PATH) ? "daily" : "incident";
+  const legacyDaily = mode === "incident" && (isTab || hashTab === "daily");
+  const tab: FinanceTab = isTab ? (hashTab as FinanceTab) : "closing";
+  const urlIncident = new URLSearchParams(location.search).get("incident");
+  const [closingFocus, setClosingFocus] = useState<{ date: string } | null>(null);
+  const openTab = useCallback((t: FinanceTab, scroll = false) => {
+    navigate({ pathname: DAILY_PATH, search: location.search, hash: `#${t}` }, { replace: location.pathname.startsWith(DAILY_PATH) });
+    if (scroll) scrollToId("finance-modules");
+  }, [navigate, location.search, location.pathname]);
+  /** 이벤트 고르기: 주소(?incident=)에 남겨 새로고침해도 같은 이벤트를 본다 */
+  const openIncident = useCallback((id: string, scroll = false) => {
+    navigate({ pathname: INCIDENT_PATH, search: `?incident=${encodeURIComponent(id)}`, hash: "" }, { replace: location.pathname === INCIDENT_PATH });
+    if (scroll) scrollToId("incident-finance");
+  }, [navigate, location.pathname]);
+
+  // 30초마다, 그리고 무언가를 바꾼 뒤 모든 섹션을 새로 받는다
+  const [tick, setTick] = useState(0);
+  const bump = useCallback(() => setTick((n) => n + 1), []);
+  useEffect(() => {
+    const t = setInterval(bump, REFRESH_MS);
+    return () => clearInterval(t);
+  }, [bump]);
+
+  const overview = useResource("overview", () => finance.overview(), tick);
+  const incidents = useResource("incidents", () => finance.incidents(), tick);
+  const incidentList = sortIncidents(incidents.env?.data ?? []);
+  const selectedIncident = urlIncident ?? incidentList[0]?.context_id ?? null;
+
+  // 서버 상태 · 보류 큐 (환불·쿠폰 보류는 고객지원·마케팅 화면에서 결정해 여기서 뺀다)
+  const [financeUp, setFinanceUp] = useState<boolean | null>(null);
+  const [safetyUp, setSafetyUp] = useState<boolean | null>(null);
+  const [reviews, setReviews] = useState<Review[] | null>(null);
+  const [reviewsError, setReviewsError] = useState<string | null>(null);
+
+  const loadSide = useCallback(async () => {
+    const [[fh], [sh], [rv, rvErr]] = await Promise.all([
+      settle(finance.financeHealth()), settle(finance.safetyHealth()), settle(finance.reviews()),
+    ]);
+    setFinanceUp(fh != null);
+    setSafetyUp(sh != null);
+    if (rv) setReviews(rv.filter((r) => !NOT_FINANCE_ACTIONS.has(r.action)));
+    setReviewsError(rvErr);
+  }, []);
+  useEffect(() => { void loadSide(); }, [loadSide, tick]);
+
+  // 재무 AI 테스트: 서버가 10분마다 자동으로 하고, 화면은 1분마다 최근 결과를 받는다
+  const [test, setTest] = useState<SelfTest | null>(null);
+  const [testMeta, setTestMeta] = useState<SelfTestLastMeta | null>(null);
+  const [testLoaded, setTestLoaded] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testOpen, setTestOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const loadLastTest = useCallback(async () => {
+    try {
+      const res = await finance.lastSelfTest();
+      setTest(res.data ?? null);
+      setTestMeta(res.meta ?? null);
+    } catch { /* 서버가 꺼져 있으면 위의 연결 안내가 대신 보인다 */ }
+    finally { setTestLoaded(true); }
+  }, []);
+  useEffect(() => {
+    void loadLastTest();
+    const t = setInterval(() => void loadLastTest(), SELF_TEST_POLL_MS);
+    return () => clearInterval(t);
+  }, [loadLastTest]);
+  async function runTest() {
+    setTesting(true);
+    setError(null);
+    try { setTest(await finance.selfTest()); setTestOpen(true); void loadLastTest(); }
+    catch { setError(`재무 AI 테스트를 실행하지 못했습니다. ${FINANCE_SERVER}가 켜져 있는지 확인하세요.`); }
+    finally { setTesting(false); }
+  }
+
+  // 정산 묶음 요청 뒤 보류 큐로 이동
+  const [highlight, setHighlight] = useState<string | null>(null);
+  const goToQueue = useCallback((reviewId: string | null) => {
+    setHighlight(reviewId);
+    void loadSide().then(() => scrollToId("safety-queue"));
+  }, [loadSide]);
+
+  const pendingReviews = (reviews ?? []).filter((r) => r.status === "pending");
+  const todo = overview.env?.data.todo ?? [];
+  // 정산 승인 대기는 판매자 정산 할 일에 결정 버튼이 있으므로 "보류 큐" 항목에서 다시 세지 않는다
+  const todoReviewIds = new Set(todo.map((t) => t.action?.review_id).filter(Boolean));
+  const otherPending = pendingReviews.filter((r) => !todoReviewIds.has(r.review_id));
+  const todoCount = todo.length + (otherPending.length ? 1 : 0);
+  const anyTodoLoaded = overview.env || reviews;
+
+  // 옛 주소(/finance#daily, /finance#closing 등)는 평상시 업무 주소로 옮긴다 (?incident= 같은 쿼리는 그대로)
+  if (legacyDaily) {
+    return <Navigate replace to={{ pathname: DAILY_PATH, search: location.search, hash: hashTab === "daily" ? "" : location.hash }} />;
+  }
+
+  return (
+    <div className="w-full space-y-6 px-4 pb-12 pt-2 sm:space-y-8 sm:px-8">
+      {/* 머리말 */}
+      <header className="flex flex-wrap items-end gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight">재무 관리</h1>
+          <p className="mt-1 text-sm text-ink-500">
+            <CompanyName />의 재무팀입니다. 쿠폰·환불은 끝난 금액을 장부에 적기만 합니다.
+            평소에는 결산·대사·판매자 정산·팀 예산을 합니다.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-sm sm:ml-auto">
+          <DataToggle />
+          <button className="btn-ghost" onClick={bump}>새로고침</button>
+          {safetyUp != null && <Chip label={safetyUp ? "안전 장치 켜짐" : "안전 장치 꺼짐"} tone={safetyUp ? TONE.ok : TONE.bad} />}
+          {financeUp != null && <Chip label={financeUp ? "재무 AI 켜짐" : "재무 AI 꺼짐"} tone={financeUp ? TONE.ok : TONE.bad} />}
+        </div>
+      </header>
+
+      <details className="rounded-2xl border border-ink-100 bg-surface px-4 py-3 text-sm sm:px-5">
+        <summary className="cursor-pointer font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">처음이라면: 관리자가 할 일</summary>
+        <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-ink-700">
+          <li><b>재무 AI 테스트 확인</b>: 맨 위 <b>재무 AI 테스트</b>가 초록색(정상)인지 봅니다. 서버가 10분마다 스스로 테스트하므로 누를 필요는 없습니다. "늦어지고 있습니다" 경고가 보이면 재무 AI 서버를 확인합니다.</li>
+          <li><b>이벤트 고르기</b>: <b>장애 이벤트 재무</b> 탭 위쪽 이벤트 탭에서 살펴볼 이벤트를 고릅니다. 가장 최근 이벤트가 먼저 열려 있고, 오래된 이벤트는 끝의 <b>이전 이벤트</b> 목록에 있습니다.</li>
+          <li><b>장부 확인</b>: 피해(데이터 AI가 센 숫자), 보상 쿠폰, 환불로 빠져나간 돈을 봅니다.</li>
+          <li><b>보류 큐 결정</b>: 판매자 정산 지급은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다.</li>
+          <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정, 대사 메모, 판매자 정산 묶음 요청, 팀 예산 확정을 합니다.</li>
+        </ol>
+        <p className="mt-3 text-sm text-ink-500">
+          단계별 설명과 자주 묻는 질문은 <Link href="/finance/guide" className="font-medium text-brand-700 underline">재무 AI 관리자 사용법</Link>에 있습니다.
+        </p>
+      </details>
+
+      <Glossary />
+
+      {exampleMode && (
+        <p role="status" className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
+          <b>예시 데이터</b>를 보고 있습니다. 재무 AI를 연습용 예시 장부로 돌린 결과이며 실제 쇼핑몰 숫자가 아닙니다.
+          여기서 누른 결정(결산 확정·메모·승인)은 이 화면 안에서만 바뀌고 서버에는 보내지 않습니다. 새로고침하면 처음으로 돌아갑니다.
+        </p>
+      )}
+
+      {/* 재무 AI 테스트는 실제 서버 상태를 보는 것이라 예시 모드에서는 숨긴다 */}
+      {!exampleMode && <SelfTestPanel test={test} meta={testMeta} loaded={testLoaded} open={testOpen} running={testing} disabled={financeUp === false} onRunNow={runTest} />}
+
+      {(financeUp === false || safetyUp === false) && (
+        <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+          {financeUp === false && `${FINANCE_SERVER}에 연결하지 못했습니다. `}
+          {safetyUp === false && `${SAFETY_SERVER}에 연결하지 못했습니다(꺼져 있는 동안 돈이 나가는 일은 모두 멈춥니다). `}
+          ax-backend에서 <code>docker compose -f infra/compose.yml up -d safety finance</code>로 켜 주세요.
+        </p>
+      )}
+      {error && <ErrorBox message={error} />}
+
+      {/* 지금 사람이 할 일 */}
+      <section aria-labelledby="todo" className={`rounded-3xl p-4 ring-1 sm:p-6 ${todoCount ? "bg-amber-50 ring-amber-100" : "bg-emerald-50 ring-emerald-100"}`}>
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <h2 id="todo" className={`text-sm font-semibold ${todoCount ? "text-amber-800" : "text-emerald-800"}`}>지금 사람이 할 일</h2>
+          <p className={`text-3xl font-bold tabular-nums ${todoCount ? "text-amber-800" : "text-emerald-800"}`}>{anyTodoLoaded ? (todoCount ? `${todoCount}가지` : "없음") : "–"}</p>
+          <MockBadge meta={overview.env?.meta} />
+        </div>
+        {overview.error && !overview.env && <div className="mt-3"><ErrorBox message={overview.error} onRetry={overview.reload} /></div>}
+        {!overview.env && !overview.error && <Waiting />}
+        {todoCount > 0 && (
+          <ul className="mt-4 space-y-2">
+            {todo.map((t, i) => (
+              <TodoCard key={`${t.kind}-${i}`} todo={t} onDone={() => { bump(); void loadSide(); }}
+                onOpen={() => {
+                  if (t.action?.type === "closing_confirm" && t.action.date) setClosingFocus({ date: t.action.date });
+                  openTab(todoTab(t), true);
+                }} onGoToQueue={goToQueue} />
+            ))}
+            {otherPending.length > 0 && (
+              <li>
+                <button type="button" onClick={() => scrollToId("safety-queue")}
+                  className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+                  <Chip label="보류 큐" tone={TONE.warn} />
+                  <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">안전 장치 보류 큐에서 결정 기다림 {otherPending.length}건</span>
+                  <span className="text-sm font-medium text-brand-700">보류 큐에서 결정하기 →</span>
+                </button>
+              </li>
+            )}
+          </ul>
+        )}
+        {overview.env && todoCount === 0 && <p className="mt-2 text-sm text-emerald-800">재무 AI가 맞춰 본 결과, 지금 사람이 볼 예외가 없습니다.</p>}
+      </section>
+
+      {mode === "incident" && (
+        <div aria-label="장애 이벤트 재무">
+          <ErrorBoundary title="이벤트 화면을 그리지 못했습니다">
+            <IncidentFinance list={incidents} selected={selectedIncident} onSelect={(id) => openIncident(id)} tick={tick} />
+          </ErrorBoundary>
+        </div>
+      )}
+
+      {mode === "daily" && (
+      <div aria-label="평상시 재무 업무" className="space-y-6 sm:space-y-8">
+      {/* 오늘의 재무 */}
+      <section aria-labelledby="today" className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 id="today" className="text-base font-semibold text-ink-900">오늘의 재무</h2>
+          {overview.env && <span className="text-sm text-ink-500">{overview.env.data.date}</span>}
+          <MockBadge meta={overview.env?.meta} />
+        </div>
+        {overview.env ? (
+          <>
+            <dl className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+              {KPI.map(({ key, label, hint }) => {
+                const v = overview.env!.data.kpis[key];
+                return (
+                  <div key={key} className={`card px-4 py-3 ${key === "net_result" ? "ring-1 ring-brand-100" : ""}`}>
+                    <dt className="text-sm text-ink-500">{label}</dt>
+                    <dd className={`mt-0.5 break-words font-semibold tabular-nums ${v == null ? "text-sm text-ink-500" : `text-lg sm:text-xl ${v < 0 ? "text-red-700" : "text-ink-900"}`}`}>
+                      {v != null && v < 0 ? `−${krw(-v)}` : krw(v)}
+                    </dd>
+                    <dd className="mt-0.5 text-sm leading-snug text-ink-500">{hint}</dd>
+                  </div>
+                );
+              })}
+            </dl>
+            <MetaLine meta={overview.env.meta} />
+          </>
+        ) : overview.error ? <ErrorBox message={overview.error} onRetry={overview.reload} /> : <Waiting />}
+      </section>
+
+      {/* 재무팀 5개 모듈 */}
+      <div id="finance-modules" className="scroll-mt-4 space-y-4">
+        <div role="tablist" aria-label="재무팀 업무" className="scroll-thin -mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
+          {FINANCE_TABS.map((t) => (
+            <button key={t} type="button" role="tab" id={`tab-${t}`} aria-selected={tab === t} aria-controls={`panel-${t}`} onClick={() => openTab(t)}
+              className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium transition ${tab === t ? "bg-brand-600 text-white" : "bg-surface text-ink-700 hover:bg-ink-100"}`}>
+              {TAB_LABEL[t]}
+            </button>
+          ))}
+        </div>
+        <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+          {tab === "closing" && <div className="mb-4"><ChecklistSection tick={tick} onOpen={(t) => openTab(todoTab({ kind: "closing_confirm", link: t }), true)} /></div>}
+          {tab === "closing" && <ClosingSection tick={tick} onChanged={bump} focus={closingFocus} />}
+          {tab === "closing" && <div className="mt-4"><VarianceSection tick={tick} /></div>}
+          {tab === "closing" && <div className="mt-4"><StatementsSection tick={tick} /></div>}
+          {tab === "reconciliation" && <ReconciliationSection tick={tick} />}
+          {tab === "reconciliation" && <div className="mt-4"><BankSection tick={tick} /></div>}
+          {tab === "settlements" && <SettlementsSection tick={tick} onChanged={bump} onGoToQueue={goToQueue} />}
+          {tab === "settlements" && <div className="mt-4"><DeadlineSection tick={tick} /></div>}
+          {tab === "settlements" && <div className="mt-4"><PayablesSection tick={tick} /></div>}
+          {tab === "settlements" && <div className="mt-4"><CashflowSection tick={tick} /></div>}
+          {tab === "policy" && <TeamBudgetSection tick={tick} />}
+          {tab === "tax" && <TaxSection tick={tick} />}
+          {tab === "campaigns" && <CampaignsSection tick={tick} />}
+        </div>
+      </div>
+
+      <SupportCostsSection tick={tick} />
+
+      </div>
+      )}
+
+      {/* 보류 큐에서 결정하면 할 일(정산 승인 대기 등)도 새로 받는다 */}
+      <SafetyQueue reviews={reviews} error={reviewsError} highlight={highlight} reload={() => { bump(); return loadSide(); }} />
+    </div>
+  );
+}

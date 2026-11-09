@@ -1,0 +1,75 @@
+{
+ "id": "short_baseline_2h_14h",
+ "kind": "unknown",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T16:00:00Z",
+  "products": [
+   "prd_0004"
+  ]
+ },
+ "spec": {
+  "id": "short_baseline_2h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "product_boost": {
+   "product_id": "prd_0004",
+   "factor": 3.0
+  },
+  "payment_gap": {
+   "days_ago": [
+    1,
+    2,
+    3,
+    4,
+    5
+   ]
+  }
+ },
+ "expected": {
+  "products": {
+   "matched": [
+    "prd_0004"
+   ],
+   "unmatched": [],
+   "status": "unknown",
+   "unknown_reason": "baseline_short",
+   "baseline_days": 2
+  }
+ },
+ "counted": {
+  "actual": {
+   "orders": 45,
+   "units": 55,
+   "gross": 412500
+  },
+  "past_days": {
+   "6": {
+    "orders": 11,
+    "units": 12,
+    "gross": 90000
+   },
+   "7": {
+    "orders": 16,
+    "units": 19,
+    "gross": 142500
+   }
+  },
+  "orders_baseline": 13.5,
+  "orders_excess": 31.5,
+  "units_baseline": 15.5,
+  "units_excess": 39.5,
+  "gross_baseline": 116250.0,
+  "gross_excess": 296250.0
+ },
+ "memo": "지난 7일 중 5일이 결제 공백 → 기준선 2일(최소 3일) → unknown"
+}

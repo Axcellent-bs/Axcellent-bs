@@ -1,0 +1,60 @@
+{
+  "id": "holdout_2026102902_22",
+  "kind": "normal",
+  "description": "무작위 생성 (holdout)",
+  "window": {
+    "from": "2026-11-23T06:00:00Z",
+    "to": "2026-11-23T07:00:00Z"
+  },
+  "traffic": {
+    "orders_per_5m": 5
+  },
+  "injection": {
+    "type": "none",
+    "noise_at_minutes": [
+      55
+    ],
+    "noise_history": false,
+    "noise_code": "PG_TIMEOUT"
+  },
+  "cause": {
+    "type": "none"
+  },
+  "llm": "grounded",
+  "holdout": {
+    "seed": 2026102902,
+    "hour": 6,
+    "fault": null,
+    "minutes": null,
+    "strength": null,
+    "sale_factor": null,
+    "noise": 1
+  },
+  "expected": {
+    "anomaly": {
+      "expected": false,
+      "low_expected": false,
+      "metric": null,
+      "onset": null,
+      "first_failure_bucket": null,
+      "unknown_expected": false,
+      "noise_fault_failures": 0
+    },
+    "impact": {
+      "unknown_expected": false,
+      "failed_order_count": 0,
+      "affected_customer_count": 0,
+      "damage_amount": 0,
+      "injected_failed_order_count": 0,
+      "injected_customer_count": 0,
+      "injected_damage_amount": 0,
+      "noise_failed_orders": 0,
+      "all_failed_payments": 1,
+      "declined_payments": 1
+    },
+    "root_cause": {
+      "injected": "none",
+      "ref": null
+    }
+  }
+}

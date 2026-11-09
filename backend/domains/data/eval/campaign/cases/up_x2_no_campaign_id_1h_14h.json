@@ -1,0 +1,48 @@
+{
+ "id": "up_x2_no_campaign_id_1h_14h",
+ "kind": "up",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T15:00:00Z"
+ },
+ "spec": {
+  "id": "up_x2_no_campaign_id_1h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T15:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "sale",
+   "factor": 2.0,
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T15:00:00Z"
+  }
+ },
+ "expected": {
+  "orders": {
+   "status": "known",
+   "direction": "up",
+   "multiplier": 2.0
+  },
+  "revenue": {
+   "status": "known",
+   "direction": "up"
+  },
+  "coupon": {
+   "status": "unknown",
+   "unknown_reason": "no_campaign_id"
+  }
+ },
+ "counted": {
+  "orders_actual": 167,
+  "orders_baseline": 79.1429,
+  "revenue_actual": 4388400,
+  "revenue_baseline": 2020200.0,
+  "history_days_with_orders": 7
+ },
+ "memo": "campaign_id 없이 요청 → 주문·매출만, 쿠폰은 확인할 수 없음"
+}

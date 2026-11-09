@@ -1,0 +1,398 @@
+"""목 모드가 아닐 때 문의 API가 support skill을 올바로 부르고 결과를 오류로 바꾸는지 본다."""
+
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
+from ax_dashboard_api import support_client
+from ax_dashboard_api.main import app
+
+BASE = "/api/dashboard"
+ITEM = {
+    "id": 7,
+    "customer_name": "김하늘",
+    "subject": "배송 문의",
+    "status": "open",
+    "updated_at": "2026-10-22T00:00:00Z",
+    "preview": "언제 오나요",
+    "awaiting_reply": True,
+}
+
+
+class Fake:
+    """support 에이전트 대역. `reply`를 바꿔 결과를 정한다."""
+
+    def __init__(self) -> None:
+        self.sent: list[AgentRequest] = []
+        self.status = TaskStatus.COMPLETED
+        self.outcome: str | None = None
+        self.output: dict[str, Any] = {}
+
+    async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
+        assert target == "support"
+        self.sent.append(req)
+        return AgentResult(
+            meta=req.meta, status=self.status, outcome=self.outcome, output=self.output
+        )
+
+
+@pytest.fixture
+def fake(monkeypatch: pytest.MonkeyPatch) -> Fake:
+    monkeypatch.delenv("DASHBOARD_MOCK", raising=False)
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    monkeypatch.setenv("DASHBOARD_API_TOKEN", "test-token")
+    fake = Fake()
+    monkeypatch.setattr(support_client, "SEND", fake)
+    return fake
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(app)
+
+
+def test_list_calls_list_inquiries(client: TestClient, fake: Fake) -> None:
+    fake.output = {"items": [ITEM]}
+    body = client.get(BASE + "/conversations").json()
+    assert body["data"][0]["id"] == 7
+    assert body["meta"]["total"] == 1
+    sent = fake.sent[0]
+    assert sent.skill == "list_inquiries"
+    assert sent.meta.context_id.startswith(support_client.UI_CONTEXT_PREFIX)
+    assert sent.meta.token == "test-token"
+    assert sent.meta.idempotency_key is None
+
+
+def test_create_passes_text_only_in_untrusted(client: TestClient, fake: Fake) -> None:
+    fake.output = {**ITEM, "messages": []}
+    response = client.post(
+        BASE + "/conversations",
+        json={"user_id": 1, "subject": "제목", "message": "본문", "order_id": 101},
+    )
+    assert response.status_code == 201
+    sent = fake.sent[0]
+    assert sent.skill == "create_inquiry"
+    assert sent.untrusted == {"subject": "제목", "message": "본문"}
+    assert sent.input == {"user_id": 1, "customer_name": "고객 1", "order_id": 101}
+    assert sent.meta.idempotency_key == f"{sent.meta.context_id}:create_inquiry:user:1"
+
+
+def test_agent_message_sends_draft_info(client: TestClient, fake: Fake) -> None:
+    fake.output = {**ITEM, "messages": []}
+    client.post(
+        BASE + "/conversations/7/agent-messages",
+        json={"text": "안내드립니다", "draft_style": "concise", "draft_text": "안내"},
+    )
+    sent = fake.sent[0]
+    assert sent.skill == "send_reply"
+    assert sent.input == {"inquiry_id": 7, "draft_style": "concise", "draft_text": "안내"}
+    assert sent.untrusted == {"text": "안내드립니다"}
+
+
+def test_guard_block_becomes_422(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "blocked_by_guard"
+    fake.output = {
+        "validation": {
+            "passed": False,
+            "findings": [{"code": "promise_refund", "level": "error", "message": "환불 약속"}],
+        }
+    }
+    response = client.post(BASE + "/conversations/7/agent-messages", json={"text": "무조건 환불"})
+    assert response.status_code == 422
+    assert response.json()["error"] == {"code": "REPLY_BLOCKED", "message": "환불 약속"}
+
+
+def test_not_found_becomes_404(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "not_found"
+    fake.output = {"message": "문의 9를 찾을 수 없다"}
+    assert client.get(BASE + "/conversations/9").status_code == 404
+
+
+def test_not_executed_becomes_409(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "not_executed_held"
+    response = client.post(BASE + "/conversations/7/status", json={"status": "resolved"})
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "NOT_EXECUTED"
+
+
+@pytest.mark.parametrize(
+    ("status", "outcome", "code", "http"),
+    [
+        (TaskStatus.CANCELED, "TIMEOUT", "UPSTREAM_TIMEOUT", 504),
+        (TaskStatus.FAILED, "unreachable", "UPSTREAM_ERROR", 502),
+        (TaskStatus.REJECTED, "FORBIDDEN_SKILL", "UPSTREAM_REJECTED", 403),
+    ],
+)
+def test_upstream_failures_map_to_errors(
+    client: TestClient, fake: Fake, status: TaskStatus, outcome: str, code: str, http: int
+) -> None:
+    fake.status, fake.outcome = status, outcome
+    response = client.get(BASE + "/conversations")
+    assert response.status_code == http
+    assert response.json()["error"]["code"] == code
+
+
+def test_status_change_uses_execute_target_key(client: TestClient, fake: Fake) -> None:
+    fake.output = ITEM
+    data = client.post(BASE + "/conversations/7/status", json={"status": "resolved"}).json()
+    assert data["data"]["id"] == 7
+    assert fake.sent[0].input == {"inquiry_id": 7, "status": "resolved"}
+    assert fake.sent[0].meta.idempotency_key.endswith(":set_inquiry_status:inquiry:7:resolved")
+
+
+def test_other_routes_still_require_mock(client: TestClient, fake: Fake) -> None:
+    # 후기 상태 변경은 아직 support가 없는 쓰기 경로 (후기 읽기는 실제 모드에서 빈 목록)
+    response = client.post(BASE + "/reviews/1/status", json={"status": "visible"})
+    assert response.status_code in (401, 403, 503)
+    assert fake.sent == []
+
+
+def test_ui_contexts_never_use_a_prefix_owned_by_another_department(
+    client: TestClient, fake: Fake
+) -> None:
+    """`ctx_req_`는 기획이 발급하는 변경 요청 사건이다. 화면 호출이 이를 흉내 내면 안 된다."""
+    from ax_contracts.schemas.ids import ContextPrefix
+
+    fake.output = {"items": []}
+    for _ in range(3):
+        client.get(BASE + "/conversations")
+    contexts = [req.meta.context_id for req in fake.sent]
+    assert len(set(contexts)) == 3  # 호출마다 새 사건
+    for context in contexts:
+        assert context.startswith(support_client.UI_CONTEXT_PREFIX)
+        assert not any(context.startswith(reserved.value) for reserved in ContextPrefix)
+
+
+# ---------------------------------------------------------------- 영수증 분석
+RECEIPT_OUT = {
+    "facts": {
+        "total": 27000,
+        "paid_on": "2026-10-28",
+        "order_no": "ORD_0216",
+        "shipping_fee": 3000,
+        "items": [],
+        "ambiguous_total": False,
+    },
+    "order": {
+        "order_id": "ord_0216",
+        "cash_paid": 27000,
+        "gross_total": 27000,
+        "shipping_fee": 3000,
+        "paid_on": "2026-10-28",
+        "item_titles": ["데이터 분석 실전"],
+    },
+    "check": {
+        "verdict": "consistent",
+        "checked": ["total", "date"],
+        "mismatches": [],
+        "matched_basis": "cash",
+        "unmatched_receipt_items": [],
+        "missing_from_receipt": [],
+    },
+    "images_status": "read",
+    "pii_masked": [],
+    "notes": [],
+}
+PHOTO = {"ref": "receipt.png", "media_type": "image/png", "data_base64": "aGVsbG8="}
+
+
+def test_receipt_analysis_calls_analyze_receipt_with_untrusted_images(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.output = RECEIPT_OUT
+    response = client.post(BASE + "/conversations/7/receipt-analysis", json={"images": [PHOTO]})
+    assert response.status_code == 200
+    assert response.json()["data"]["check"]["verdict"] == "consistent"
+    sent = fake.sent[0]
+    assert sent.skill == "analyze_receipt" and sent.input == {"inquiry_id": 7}
+    assert sent.untrusted["images"] == [PHOTO]  # 사진·글은 untrusted로만 넘긴다
+    assert "receipt_text" not in sent.untrusted
+    assert sent.meta.idempotency_key is None  # 읽기라 멱등 키가 없다
+
+
+def test_receipt_analysis_forwards_text_and_needs_something_to_read(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.output = RECEIPT_OUT
+    assert client.post(BASE + "/conversations/7/receipt-analysis", json={}).status_code == 422
+    assert (
+        client.post(
+            BASE + "/conversations/7/receipt-analysis", json={"receipt_text": "  "}
+        ).status_code
+        == 422
+    )
+    assert fake.sent == []
+    client.post(BASE + "/conversations/7/receipt-analysis", json={"receipt_text": "총 27,000원"})
+    assert fake.sent[0].untrusted == {"images": [], "receipt_text": "총 27,000원"}
+
+
+def test_receipt_analysis_rejects_too_many_or_unknown_images(
+    client: TestClient, fake: Fake
+) -> None:
+    url = BASE + "/conversations/7/receipt-analysis"
+    assert client.post(url, json={"images": [PHOTO] * 5}).status_code == 422
+    gif = {**PHOTO, "media_type": "image/gif"}
+    assert client.post(url, json={"images": [gif]}).status_code == 422
+    assert fake.sent == []
+
+
+def test_receipt_analysis_without_an_order_is_a_conflict(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "no_order"
+    fake.output = {"message": "문의에 주문이 없어 분석할 수 없다"}
+    response = client.post(BASE + "/conversations/7/receipt-analysis", json={"images": [PHOTO]})
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "NO_ORDER"
+
+
+def test_receipt_analysis_unknown_inquiry_is_not_found(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "not_found"
+    fake.output = {"message": "문의 9를 찾을 수 없다"}
+    response = client.post(BASE + "/conversations/9/receipt-analysis", json={"images": [PHOTO]})
+    assert response.status_code == 404
+
+
+def test_skills_that_read_inquiries_are_served_by_the_inquiry_service() -> None:
+    """문의 저장소는 서비스마다 따로라서, 문의를 읽는 skill은 문의 서비스에서 받아야 한다."""
+    from ax_agent_template.services import BY_ID, route_target
+
+    for skill in ("analyze_receipt", "analyze_claim_request"):
+        assert route_target("support", skill) == "inquiry"
+        assert skill in BY_ID["inquiry"].skills
+        assert skill not in BY_ID["claims"].skills
+
+
+def test_abuse_fields_reach_the_console(client: TestClient, fake: Fake) -> None:
+    """욕설을 가린 글·순화문·가린 제목은 상담 콘솔 응답에서 빠지지 않는다."""
+    message = {
+        "id": 1,
+        "role": "customer",
+        "text": "씨발 환불해 주세요",
+        "display_text": "[비속어] 환불해 주세요",
+        "abuse_level": "profanity",
+        "abuse_kinds": ["profanity"],
+        "softened_text": "환불을 요청합니다.",
+        "created_at": "2026-10-22T00:00:00Z",
+    }
+    fake.output = {**ITEM, "subject_display": "[비속어] 문의", "messages": [message]}
+    one = client.get(BASE + "/conversations/7").json()["data"]
+    assert one["subject_display"] == "[비속어] 문의"
+    got = one["messages"][0]
+    assert got["text"] == ""  # 가린 메시지의 원문은 응답에 없다 (원문 열기 호출로만 받는다)
+    assert got["display_text"] == "[비속어] 환불해 주세요"
+    assert (got["abuse_level"], got["abuse_kinds"]) == ("profanity", ["profanity"])
+    assert got["softened_text"] == "환불을 요청합니다."
+
+    fake.output = {"items": [{**ITEM, "subject_display": "[비속어] 문의"}]}
+    listed = client.get(BASE + "/conversations").json()["data"][0]
+    assert listed["subject_display"] == "[비속어] 문의"
+
+
+def test_abusive_original_is_left_out_and_opened_only_through_its_own_call(
+    client: TestClient, fake: Fake
+) -> None:
+    """가린 고객 메시지의 원문은 응답에서 빠지고, 원문 열기 호출로만 받는다 (연 사람은 토큰에서)."""
+    abusive = {
+        "id": 1,
+        "role": "customer",
+        "text": "씨발 환불해 주세요",
+        "display_text": "[비속어] 환불해 주세요",
+        "abuse_level": "profanity",
+        "abuse_kinds": ["profanity"],
+        "created_at": "2026-10-22T00:00:00Z",
+    }
+    polite = {**abusive, "id": 2, "text": "환불해 주세요", "abuse_level": "none"}
+    agent = {**polite, "id": 3, "role": "agent", "text": "안내드립니다"}
+    fake.output = {**ITEM, "messages": [abusive, polite, agent]}
+    texts = [m["text"] for m in client.get(BASE + "/conversations/7").json()["data"]["messages"]]
+    assert texts == ["", "환불해 주세요", "안내드립니다"]
+
+    fake.sent.clear()
+    fake.output = {"inquiry_id": 7, "message_id": 1, "text": "씨발 환불해 주세요"}
+    body = client.post(BASE + "/conversations/7/messages/1/original").json()["data"]
+    assert body == {"message_id": 1, "text": "씨발 환불해 주세요"}
+    sent = fake.sent[0]
+    assert sent.skill == "reveal_original"
+    assert (sent.input["inquiry_id"], sent.input["message_id"]) == (7, 1)
+    assert sent.input["viewer"]  # 사람 토큰에서 채운 이름
+
+
+def test_abusive_subject_is_replaced_by_the_masked_one_everywhere(
+    client: TestClient, fake: Fake
+) -> None:
+    """제목 원문도 응답에 없다: 목록·상세·상태 변경 모두 가린 제목을 `subject`로 준다."""
+    item = {**ITEM, "subject": "씨발 환불", "subject_display": "[비속어] 환불"}
+    fake.output = {"items": [item, ITEM]}
+    subjects = [c["subject"] for c in client.get(BASE + "/conversations").json()["data"]]
+    assert subjects == ["[비속어] 환불", "배송 문의"]  # 멀쩡한 제목은 그대로
+
+    fake.output = {**item, "messages": []}
+    assert client.get(BASE + "/conversations/7").json()["data"]["subject"] == "[비속어] 환불"
+
+    fake.output = item
+    body = {"status": "resolved"}
+    assert client.post(BASE + "/conversations/7/status", json=body).json()["data"]["subject"] == (
+        "[비속어] 환불"
+    )
+
+
+def test_conversation_list_carries_the_language_and_can_be_filtered(
+    client: TestClient, fake: Fake
+) -> None:
+    """목록에 언어가 실리고, 언어 조건이 support로 넘어간다."""
+    fake.output = {"items": [{**ITEM, "language": "ja"}]}
+    listed = client.get(BASE + "/conversations", params={"language": "ja"}).json()["data"][0]
+    assert listed["language"] == "ja"
+    assert fake.sent[-1].input["language"] == "ja"
+
+    fake.output = {"items": [ITEM]}  # 언어 값이 없는 옛 응답
+    client.get(BASE + "/conversations")
+    assert "language" not in fake.sent[-1].input  # 조건이 없으면 보내지 않는다
+    assert client.get(BASE + "/conversations").json()["data"][0]["language"] == "ko"  # 기본값
+
+
+def test_list_carries_company_and_triage(client: TestClient, fake: Fake) -> None:
+    triage = {
+        "state": "needed",
+        "reason": "no_error_code",
+        "marked_by": "auto",
+        "marked_at": "2026-11-06T10:00:00Z",
+    }
+    fake.output = {"items": [{**ITEM, "tenant_id": "acme-books", "triage": triage}, ITEM]}
+    rows = client.get(BASE + "/conversations").json()["data"]
+    assert rows[0]["tenant_id"] == "acme-books" and rows[0]["triage"]["reason"] == "no_error_code"
+    assert rows[1]["tenant_id"] == "shop-demo" and rows[1]["triage"] is None
+
+
+def test_triage_route_calls_set_triage_with_execute_target_key(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.output = {**ITEM, "triage": None}
+    body = {"action": "decide", "label": "장바구니 화면 오류"}
+    data = client.post(BASE + "/conversations/7/triage", json=body).json()
+    assert data["data"]["id"] == 7
+    sent = fake.sent[0]
+    assert sent.skill == "set_triage"
+    assert sent.input == {"inquiry_id": 7, "action": "decide", "label": "장바구니 화면 오류"}
+    assert ":set_triage:" in sent.meta.idempotency_key or ":triage:" in sent.meta.idempotency_key
+
+
+def test_triage_route_reports_a_refused_step_as_conflict(client: TestClient, fake: Fake) -> None:
+    fake.output = {"message": "분류 필요로 올린 문의만 분류를 정할 수 있다"}
+    response = client.post(
+        BASE + "/conversations/7/triage", json={"action": "decide", "label": "화면 오류"}
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_STATE"
+
+
+def test_triage_route_rejects_an_unknown_action_and_a_long_label(
+    client: TestClient, fake: Fake
+) -> None:
+    assert (
+        client.post(BASE + "/conversations/7/triage", json={"action": "delete"}).status_code == 422
+    )
+    long = {"action": "decide", "label": "가" * 41}
+    assert client.post(BASE + "/conversations/7/triage", json=long).status_code == 422
+    assert fake.sent == []

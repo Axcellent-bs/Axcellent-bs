@@ -1,0 +1,148 @@
+import type { ReactNode } from "react";
+import { Bars, Stat } from "@/components/admin/bits";
+import { AgentAccuracy } from "@/components/data/AgentAccuracy";
+import { ChartWithTable, RingMeter, TableView } from "@/components/charts";
+import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/finance/bits";
+import { humanId, shortDateTime } from "@/lib/format";
+import {
+  BLOCK_KO, DATA_SERVER, GRADE_KO, UNKNOWN, dataAi, duration, evidenceLines, kpiLive, minutes, num,
+  type A2AResult, type KpiSummaryOutput,
+} from "@/lib/data";
+
+// 학습 효과·KPI: 회사 기억을 참조한 2차 사건이 1차보다 얼마나 빨리 복구됐는지, 자동 처리율·등급·차단·이관.
+// 데이터 AI(8106)의 kpi_summary(POST /data-a2a/a2a) 결과를 그대로 보여 준다. 화면에서는 초 → 분 단위만 바꾼다.
+
+/** 값이 0이거나 비었을 때 근거의 "확인할 수 없음" 사유를 같이 보여 준다 */
+function Notes({ notes }: { notes: string[] }) {
+  if (!notes.length) return null;
+  return (
+    <ul className="mt-2 space-y-1">
+      {notes.map((n, i) => <li key={i} className="rounded-md bg-ink-100 px-2 py-1 text-[11px] leading-relaxed text-ink-500">{n}</li>)}
+    </ul>
+  );
+}
+
+function sum(r: Record<string, number> | null | undefined) {
+  return Object.values(r ?? {}).reduce((a, b) => a + (num(b) ?? 0), 0);
+}
+
+/** 운영 지표 묶음 제목 (평상시 지표 · 복구 속도 · AI 단독 처리율) */
+function Group({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  return (
+    <section aria-labelledby={`${id}-group`} className="space-y-3">
+      <h2 id={`${id}-group`} className="text-lg font-bold tracking-tight text-ink-900">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function KpiBody({ res, accuracy }: { res: A2AResult<KpiSummaryOutput>; accuracy: ReactNode }) {
+  const o = res.output;
+  const { headline, notes } = evidenceLines(res.evidence?.data_summary);
+  // 감지 시각 순서대로 1차, 2차 … (서버 값의 순서만 맞춘다)
+  const incs = [...(o.incidents ?? [])].sort((a, b) => (a.detected_at ?? "").localeCompare(b.detected_at ?? ""));
+  const name = (i: number, id: string) => `${i + 1}차 · ${humanId(id)}`;
+  const bars: Record<string, number> = {};
+  incs.forEach((x, i) => { const s = num(x.mttr_seconds); if (s != null) bars[name(i, x.context_id)] = minutes(s); });
+  const rate = num(o.auto_handled_rate);
+  const grades = o.grade_counts ?? {};
+  const blocked = o.blocked_counts ?? {};
+  const meta = { mock: false, collected_at: res.evidence?.collected_at ?? undefined };
+
+  return (
+    <div className="space-y-8">
+      <Group id="data-daily" title="평상시 지표">{accuracy}</Group>
+      <Group id="data-mttr" title="복구 속도">
+      <Panel id="data-learning" title="사건별 복구 시간 비교" meta={meta}
+        hint="같은 종류의 장애가 다시 났을 때, 회사 기억(지난 사건 기록)을 참조해 더 빨리 복구했는지 봅니다.">
+        {headline && <p className="mb-4 rounded-2xl bg-brand-50 px-4 py-3 text-sm font-medium text-brand-700">{headline}</p>}
+        {incs.length === 0 ? (
+          <><Empty>아직 비교할 사건이 없어요. 장애 사건이 해결되면 사건별 복구 시간이 여기에 쌓입니다.</Empty><Notes notes={notes} /></>
+        ) : (
+          <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
+            <div>
+              <p className="mb-2 text-xs font-medium text-ink-700">복구까지 걸린 시간 (분)</p>
+              <ChartWithTable
+                chart={<Bars data={bars} />}
+                table={<TableView columns={["사건", "감지", "복구", "복구까지 걸린 시간", "회사 기억"]}
+                  rows={incs.map((x, i) => [name(i, x.context_id), shortDateTime(x.detected_at), shortDateTime(x.recovered_at), duration(x.mttr_seconds), x.used_memory === true ? "참조함" : x.used_memory === false ? "참조 안 함" : UNKNOWN])} />}
+              />
+            </div>
+            <ul className="space-y-2">
+              {incs.map((x, i) => (
+                <li key={x.context_id} className="flex flex-wrap items-center gap-2 rounded-2xl bg-surface-2 px-4 py-3">
+                  <span className="text-sm font-semibold text-ink-900">{i + 1}차</span>
+                  <span className="text-xs text-ink-500">{humanId(x.context_id)}</span>
+                  <span className="ml-auto text-sm font-semibold tabular-nums">{duration(x.mttr_seconds)}</span>
+                  <Chip label={x.used_memory === true ? "회사 기억 참조" : x.used_memory === false ? "회사 기억 참조 안 함" : `회사 기억: ${UNKNOWN}`}
+                    tone={x.used_memory === true ? TONE.info : TONE.muted} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Panel>
+      </Group>
+
+      <Group id="data-auto" title="AI 단독 처리율">
+      <Panel id="data-kpi" title="자동 처리·안전 지표" meta={meta} hint="AI가 사람 없이 끝낸 비율, 안전 등급별 처리 건수, 안전 장치가 막은 요청, 사람에게 넘긴 건수입니다.">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl bg-surface-2 px-4 py-3">
+            <p className="text-xs font-medium text-ink-700">자동 처리율</p>
+            <div className="mt-2 flex items-center gap-3">
+              <RingMeter value={rate} size={72}><span className="text-sm font-semibold tabular-nums">{rate == null ? "–" : `${Math.round(rate * 100)}%`}</span></RingMeter>
+              <p className="text-xs text-ink-500">{rate == null ? UNKNOWN : "사람 승인 없이 AI가 끝낸 비율"}</p>
+            </div>
+            {!rate && <Notes notes={notes} />}
+          </div>
+          <div className="rounded-2xl bg-surface-2 px-4 py-3">
+            <p className="mb-2 text-xs font-medium text-ink-700">등급별 처리 (건)</p>
+            {sum(grades) ? <Bars data={grades} labels={GRADE_KO} /> : <><p className="text-xs text-ink-500">0건</p><Notes notes={notes} /></>}
+          </div>
+          <div className="rounded-2xl bg-surface-2 px-4 py-3">
+            <p className="mb-2 text-xs font-medium text-ink-700">차단 사유별 (건)</p>
+            {sum(blocked) ? <Bars data={blocked} labels={BLOCK_KO} color="bg-red-500" /> : <><p className="text-xs text-ink-500">0건</p><Notes notes={notes} /></>}
+          </div>
+          <div className="flex flex-col">
+            <Stat label="사람에게 넘긴 건수 (이관)" value={num(o.escalation_count) == null ? UNKNOWN : `${o.escalation_count}건`} sub="AI가 스스로 끝내지 않고 사람에게 넘긴 일" />
+            {!o.escalation_count && <Notes notes={notes} />}
+          </div>
+        </div>
+      </Panel>
+      </Group>
+    </div>
+  );
+}
+
+function LiveKpi({ tick }: { tick: number }) {
+  const res = useResource("kpi", () => dataAi.kpiSummary().then((r) => ({ data: r, meta: { mock: false } })), tick);
+  if (!res.env) {
+    if (!res.error) return <Waiting />;
+    return (
+      <div className="space-y-5">
+        <ErrorBox message={`${res.error}. ${DATA_SERVER}가 켜져 있는지 확인해 주세요.`} onRetry={res.reload} />
+        <AgentAccuracy tick={tick} feedback={undefined} feedbackError={`운영 중 반응 비율: ${UNKNOWN} (KPI를 받지 못함)`} />
+      </div>
+    );
+  }
+  return (
+    <>
+      {res.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${res.error}`} onRetry={res.reload} /></div>}
+      <KpiBody res={res.env.data} accuracy={<AgentAccuracy tick={tick} feedback={res.env.data.output.human_feedback ?? null} />} />
+    </>
+  );
+}
+
+export function LearningKpi({ tick }: { tick: number }) {
+  if (!kpiLive) {
+    return (
+      <div className="space-y-5">
+        <Panel id="data-learning" title="학습 효과·KPI">
+          <Empty>데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 평상시 지표를 받지 않아요. backend/의 scripts/run_web.sh로 화면을 켜면 토큰이 들어갑니다.</Empty>
+        </Panel>
+        <AgentAccuracy tick={tick} feedback={null} />
+      </div>
+    );
+  }
+  return <LiveKpi tick={tick} />;
+}

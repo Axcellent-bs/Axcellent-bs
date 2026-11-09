@@ -1,0 +1,174 @@
+{
+  "name": "finance",
+  "owner": "태윤",
+  "description": "재무팀 에이전트. 결산·리포트·재무제표, 매출·PG 대사, 판매자 정산 내역, 팀 예산. 쿠폰·환불은 끝난 금액을 장부에 기록만 한다. 마켓운영(판매자 입점 심사·정산 보류)은 하지 않는다. 숫자는 코드로 계산하고 LLM은 설명 문장만 쓴다.",
+  "url": "http://finance:8105/a2a",
+  "version": "0.1.0",
+  "capabilities": {
+    "streaming": true,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "closing_report",
+      "description": "기간(day|week|month) 손익 요약: 총거래액, 판매 수수료 매출, 쿠폰 비용, 환불, PG 수수료, 영업 결과와 자동 분개 미리보기, 쉬운 말 설명. 숫자는 코드가 계산하고 못 받은 자료는 unavailable에 적는다. 못 받은 자료로 계산하는 줄의 amount는 0이 아니라 null(확인할 수 없음)이다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/finance/src/finance_agent/schemas.py#ClosingReportInput",
+      "output_schema": "agents/finance/src/finance_agent/schemas.py#ClosingReportOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "data"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "record_support_cost",
+      "description": "고객지원이 끝낸 문의의 처리 결과(해결·클레임 판정·환불액·쿠폰)를 받아 주문 배송비와 함께 재무 장부에 적는다(읽기·기록). 환불 여부를 확인·검증하지 않는다. 경비를 쓰지 않은 문의도 처리 결과를 기록한다. 같은 문의는 한 번만 기록하고, 주문을 장부에서 찾지 못하면 배송비를 비우고 이유를 적는다. 돈을 움직이지 않고 환불·쿠폰 상태를 바꾸지 않는다.",
+      "input_schema": "agents/finance/src/finance_agent/schemas.py#SupportCostInput",
+      "output_schema": "agents/finance/src/finance_agent/schemas.py#SupportCostOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "answer_planning_question",
+      "description": "기획 질문에 답한다. 기획이 재무가 보낸 요청(create_ticket)의 근거를 되물으면, 재무가 보낸 요청의 기록(보낼 때 코드가 만든 사실 문장·근거 ID)으로만 답한다. 근거 질문이고 기록에 사실이 있으면 answered, 재무가 보낸 요청이지만 기록으로 답할 수 없으면 needs_human(사람이 답하면 planning receive_planning_answer로 보낸다), 보낸 기록이 없으면 unknown. 지어내지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "record_campaign_result",
+      "description": "캠페인 성과를 받아 손익(수수료 기준)을 장부에 적고 효율을 판단해 총괄에 의견을 낸다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignResultInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "marketing",
+        "orchestrator",
+        "data"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "review_campaign_budget",
+      "description": "캠페인 예산 요청을 승인·조건부·거절로 판단하고 이유와 근거를 돌려준다. 쿠폰 발급·환불은 대상이 아니다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "marketing",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "verify_campaign_budget",
+      "description": "안전 관문 start_campaign의 금액이 재무 승인 한도 안인지 검증한다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#VerifyAmountInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "safety"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "finance_insights",
+      "description": "사람이 놓치기 쉬운 재무 패턴과 근거 데이터를 돌려준다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "cancel_campaign",
+      "description": "시작한 캠페인을 취소하고 재무가 잡아 둔 예산을 푼다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignCancelInput",
+      "grade": "read",
+      "allowed_requesters": [
+        "marketing",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "record_incident_finance",
+      "description": "장애 이벤트(ctx_inc_)의 재무 기록. 총괄이 영향 분석·보상 뒤에 부른다. 장애 구간·부품과 데이터 영향 분석 숫자(총괄이 옮겨 준 값 그대로)를 장부에 남기고, 재무 장부의 보상 쿠폰 합계와 구간 안 영향 고객 환불 합계를 더해 돌려준다. 모르는 금액은 0이 아니라 null이고 unavailable에 이름이 있다. 돈을 움직이지 않고 보상·환불을 결정하거나 승인하지 않는다(장부에만 적는다). 쿠폰·환불·결제의 상태를 바꾸지 않는다. 같은 이벤트를 다시 부르면 기록을 새 값으로 바꾼다.",
+      "input_schema": "domains/finance/src/finance_agent/schemas.py#IncidentFinanceInput",
+      "output_schema": "domains/finance/src/finance_agent/schemas.py#IncidentFinanceOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "finance_chat_send",
+      "description": "말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 finance_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. LLM은 코드가 모은 재무 사실(오늘 손익·월말 체크리스트·통장 대조·현금 예측·캠페인 손익·장애 이벤트 재무 기록)만 풀어 쓴다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy. 재무 AI 직접 대화(dashboard-api /api/dashboard/finance-chat). 조회·설명만 하고 장부·결산·정산의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatSendInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatThreadOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "finance_chat_list",
+      "description": "대화 목록(최근 순). 본인 대화는 원문, 다른 사람 대화는 messages 빈 목록+summary+restricted true. 30분 말이 없던 대화는 이때 끝낸다. 재무 AI 직접 대화(dashboard-api /api/dashboard/finance-chat). 조회·설명만 하고 장부·결산·정산의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatListInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatListOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "finance_chat_get",
+      "description": "대화 하나. 열람 규칙은 finance_chat_list와 같다. 없으면 not_found. 재무 AI 직접 대화(dashboard-api /api/dashboard/finance-chat). 조회·설명만 하고 장부·결산·정산의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "finance_chat_close",
+      "description": "대화를 끝낸다(status closed). 요약이 비어 있으면 첫 질문 일부를 남긴다. 남의 대화는 forbidden. 재무 AI 직접 대화(dashboard-api /api/dashboard/finance-chat). 조회·설명만 하고 장부·결산·정산의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#FinanceChatThreadOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    }
+  ]
+}

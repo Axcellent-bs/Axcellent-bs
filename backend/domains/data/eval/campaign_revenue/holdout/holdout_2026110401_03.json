@@ -1,0 +1,71 @@
+{
+ "id": "holdout_2026110401_03",
+ "kind": "unknown",
+ "input": {
+  "campaign_id": "cmp_rh03",
+  "window_from": "2026-09-24T11:00:00Z",
+  "window_to": "2026-09-24T12:00:00Z"
+ },
+ "spec": {
+  "id": "holdout_2026110401_03",
+  "window": {
+   "from": "2026-09-24T11:00:00Z",
+   "to": "2026-09-24T12:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "sale",
+   "factor": 1.5,
+   "from": "2026-09-24T11:00:00Z",
+   "to": "2026-09-24T12:00:00Z"
+  },
+  "basket": {
+   "qty_factor": 2
+  },
+  "payment_gap": {
+   "days_ago": [
+    0
+   ]
+  },
+  "campaign": {
+   "campaign_id": "cmp_rh03",
+   "buyers": 23,
+   "units_each": 3,
+   "unit_value": 1000,
+   "use_fraction": 0.52,
+   "used_after": 0
+  }
+ },
+ "expected": {
+  "sales": {
+   "status": "unknown",
+   "unknown_reason": "payment_gap"
+  }
+ },
+ "counted": {
+  "gross_actual": 0,
+  "gross_baseline": 1960671.4286,
+  "gross_excess": -1960671.4286,
+  "gross_past_days": {
+   "1": 1759900,
+   "2": 1468200,
+   "3": 2020800,
+   "4": 1983400,
+   "5": 2256700,
+   "6": 2052100,
+   "7": 2183600
+  },
+  "direct_attributed": 0
+ },
+ "memo": "",
+ "holdout": {
+  "seed": 2026110401,
+  "factor": 1.5,
+  "qty": 2,
+  "gaps": [
+   0
+  ]
+ }
+}

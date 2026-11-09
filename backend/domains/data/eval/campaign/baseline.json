@@ -1,0 +1,45 @@
+{
+ "judge": "data_agent.skills.campaign_effect:eval_judge",
+ "settings": {
+  "direction_alpha": 0.001
+ },
+ "holdout_seed": 2026110203,
+ "metrics": {
+  "campaign.order_direction_rate": 1.0,
+  "campaign.order_excess_error": 0.0,
+  "campaign.unknown_handled_rate": 1.0,
+  "campaign.coupon_usage_match": 1.0,
+  "campaign.revenue_direction_rate": 0.0,
+  "campaign.revenue_unknown_rate": 1.0,
+  "holdout.campaign.order_direction_rate": 0.9167,
+  "holdout.campaign.order_excess_error": 0.0,
+  "holdout.campaign.unknown_handled_rate": null,
+  "holdout.campaign.coupon_usage_match": 1.0
+ },
+ "multiday_metrics": {
+  "campaign.order_direction_rate": 1.0,
+  "campaign.order_excess_error": 10.62,
+  "campaign.unknown_handled_rate": 1.0,
+  "campaign.coupon_usage_match": 1.0,
+  "campaign.revenue_direction_rate": 0.0,
+  "campaign.revenue_unknown_rate": 1.0,
+  "holdout.campaign.order_direction_rate": 0.8,
+  "holdout.campaign.order_excess_error": 8.82,
+  "holdout.campaign.unknown_handled_rate": null,
+  "holdout.campaign.coupon_usage_match": 1.0
+ },
+ "multiday_holdout_seed": 2026110204,
+ "multiday4_metrics": {
+  "campaign.order_direction_rate": 1.0,
+  "campaign.order_excess_error": 0.0,
+  "campaign.unknown_handled_rate": 1.0,
+  "campaign.coupon_usage_match": 1.0,
+  "campaign.revenue_direction_rate": 0.0,
+  "campaign.revenue_unknown_rate": 1.0,
+  "holdout.campaign.order_direction_rate": 1.0,
+  "holdout.campaign.order_excess_error": 0.0,
+  "holdout.campaign.unknown_handled_rate": null,
+  "holdout.campaign.coupon_usage_match": 1.0
+ },
+ "multiday4_holdout_seed": 2026110402
+}

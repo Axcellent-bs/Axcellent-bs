@@ -1,0 +1,65 @@
+"""총괄(orchestrator) 사건 목록 조회 (finance 에이전트가 읽기 전용으로 사용).
+
+제공: orchestrator `GET /api/incidents` (8000) · 사용: finance
+합의: [협업] 이슈 #417 (제안 A, 2026-10-27). 후속 요청 #418.
+
+재무가 사건 장부 화면에서 사건 구간을 알려고 읽는다.
+재무가 쓰는 필드는 `context_id`, `component`, `status`, `opened_at`, `closed_at`과
+`impact_from`, `impact_to`(총괄이 영향 분석에 쓴 구간, 2026-10-30 추가)다.
+`opened_at`·`closed_at`은 AI 처리가 시작·끝난 시각이라 장애 구간과 다를 수 있다(감시가 장애를
+몇십 초 지켜본 뒤 사건을 연다). 그래서 영향 고객 판정에는 `impact_from`·`impact_to`가 있으면
+그걸 쓴다.
+실제 장애가 풀린 시각은 `recovered_at`이다(shop.recovered를 받은 시각, 2026-11-02 추가).
+`impact_to`는 시작 + 15분 고정값이라 실제 종료가 아니다. 복귀 신호가 오기 전까지 `recovered_at`은
+None이고, 신호가 와도 `status`가 `resolved`이면 `closed_at`이 이미 있을 수 있다.
+
+`GET /api/incidents`는 지금 질의 매개변수를 받지 않고 사건 전부를
+`{"data": [...], "meta": {...}}`로 돌려준다. 그래서 `OrchestratorIncidentsQuery`의 값은
+**읽는 쪽이 받은 뒤에 거르는 조건**이다. 응답 행에는 재무가 쓰지 않는 키(`steps`, `events`,
+`summary`, `metrics` 등)가 더 들어 있고 `AxModel`은 모르는 키를 거부하므로, 읽는 쪽이 위 다섯
+키만 골라낸 뒤 검증한다.
+
+`status`는 문자열로 둔다(총괄이 값을 늘릴 수 있다). 지금 쓰는 값: `open`, `resolved`, `degraded`.
+"""
+
+from __future__ import annotations
+
+from pydantic import ConfigDict, Field
+
+from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
+
+
+class OrchestratorIncidentsQuery(AxModel):
+    """입력(읽는 쪽이 거르는 조건). `from`은 파이썬 예약어라 별칭으로 받는다."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    from_: UtcDatetime | None = Field(default=None, alias="from")  # 사건 시작 시각 이후만
+    to: UtcDatetime | None = None  # 사건 시작 시각 이전만
+    statuses: list[str] | None = None  # 비우면 상태를 가리지 않는다
+    limit: int = Field(default=1000, ge=1)
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class OrchestratorIncident(AxModel):
+    """사건 한 건. 사건 번호는 `ctx_inc_`로 시작한다."""
+
+    context_id: str
+    component: str | None = None  # 장애 구성요소. 모르면 None
+    status: str
+    opened_at: UtcDatetime
+    closed_at: UtcDatetime | None = None  # 아직 열려 있으면 None
+    # 총괄이 data `impact_analysis`에 넘긴 구간 (장애 시작 `since` ~ 끝). 아직 안 실으면 None
+    impact_from: UtcDatetime | None = None
+    impact_to: UtcDatetime | None = None
+    # 쇼핑몰이 정상 복귀를 알린 시각(shop.recovered). 오기 전이면 None. 실제 장애 종료 시각이다
+    recovered_at: UtcDatetime | None = None
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class OrchestratorIncidentsResult(AxModel):
+    """출력. 조회 자체의 근거(쿼리·시각)는 `Evidence`로 붙인다."""
+
+    incidents: list[OrchestratorIncident] = Field(default_factory=list)
+    collected_at: UtcDatetime | None = None  # 조회 시각
+    truncated: bool = False  # limit에 걸려 잘렸으면 True

@@ -1,0 +1,153 @@
+import { useCallback, useEffect, useState } from "react";
+import { ago, shortDateTime } from "@/lib/format";
+import { STATUS_STEPS, briefStatusKo, briefs, briefsError, briefsEnabled, safeLink, type BriefList, type StoredBrief } from "@/lib/briefs";
+
+// 받은 기획안. 기획이 사람 확정을 거쳐 넘긴 기획안을 마케팅이 받은 그대로 보여 준다(읽기만).
+// 근거 수치는 데이터분석이 낸 값 그대로 인용하고 이 화면에서 다시 계산하지 않는다.
+// 캠페인 시작·거절 버튼은 다음 단계에서 붙인다(예산 입력과 쓰기 경로가 필요하다).
+
+const REFRESH_MS = 30_000;
+
+function StatusSteps({ current }: { current: string }) {
+  return (
+    <ol className="flex flex-wrap items-center gap-1 text-xs text-ink-500" aria-label="진행 상태">
+      {STATUS_STEPS.map((step, i) => (
+        <li key={step} className="flex items-center gap-1">
+          {i > 0 && <span aria-hidden="true">›</span>}
+          <span className={step === current ? "font-semibold text-brand-700" : ""}>{step}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function Detail({ item }: { item: StoredBrief }) {
+  const b = item.brief;
+  return (
+    <article className="space-y-4 rounded-2xl border border-ink-100 p-5">
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-1">
+        <div>
+          <h3 className="text-base font-semibold">{b.title}</h3>
+          <p className="mt-1 text-xs text-ink-500">
+            <span title="기획안 번호">{item.proposal_id}</span> · <span title="마케팅이 붙인 캠페인 번호">{item.campaign_id}</span> · {shortDateTime(item.received_at)} 받음 · 확정 {b.approved_by}
+          </p>
+        </div>
+        <a className="ml-auto text-xs text-brand-700 underline" href={`/planning/proposals/${encodeURIComponent(item.proposal_id)}`}>기획 화면에서 보기</a>
+      </div>
+      <StatusSteps current={briefStatusKo(item.status)} />
+
+      <dl className="space-y-3 text-sm">
+        <div><dt className="text-xs text-ink-500">무엇을 하나</dt><dd className="mt-0.5 whitespace-pre-wrap">{b.idea}</dd></div>
+        <div><dt className="text-xs text-ink-500">왜 하나</dt><dd className="mt-0.5 whitespace-pre-wrap">{b.why}</dd></div>
+        <div>
+          <dt className="text-xs text-ink-500">목표 (기획이 정함)</dt>
+          <dd className="mt-0.5">
+            {b.target ? <><b>{b.target.label} {b.target.value}</b>{b.target.measure && <span className="text-ink-500"> · 잴 때 쓰는 기능 {b.target.measure}</span>}</> : "확인할 수 없음"}
+          </dd>
+        </div>
+      </dl>
+
+      <div>
+        <p className="text-xs text-ink-500">근거 (데이터분석이 낸 값 그대로)</p>
+        {b.facts.length === 0 ? <p className="mt-1 text-sm text-ink-500">넘어온 근거가 없습니다.</p> : (
+          <table className="mt-1 w-full text-left text-xs">
+            <thead className="text-ink-500"><tr>{["항목", "값", "출처"].map((h) => <th key={h} className="px-2 py-1 font-medium">{h}</th>)}</tr></thead>
+            <tbody className="divide-y divide-ink-100">
+              {b.facts.map((f, i) => {
+                const href = safeLink(f.link);
+                return (
+                  <tr key={`${f.label}-${i}`}>
+                    <td className="px-2 py-1">{f.label}</td>
+                    <td className="px-2 py-1 font-medium tabular-nums">{f.value}</td>
+                    <td className="px-2 py-1">{href ? <a className="text-brand-700 underline" href={href} target="_blank" rel="noreferrer noopener" title={f.source}>출처 보기</a> : <span title={f.source}>{f.source}</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+        <div className="flex gap-2"><dt className="text-xs text-ink-500">형식</dt><dd>{b.format ?? "정하지 않음"}</dd></div>
+        <div className="flex gap-2"><dt className="text-xs text-ink-500">상품</dt><dd>{b.products.length ? b.products.join(", ") : "정하지 않음"}</dd></div>
+      </dl>
+      {b.note && <p className="rounded-lg bg-ink-50 px-3 py-2 text-xs"><span className="text-ink-500">메모 </span>{b.note}</p>}
+
+      {b.body_md && (
+        <details className="rounded-lg border border-ink-100 px-3 py-2 text-xs">
+          <summary className="cursor-pointer font-medium text-ink-700">기획안 본문 보기</summary>
+          <pre className="mt-2 whitespace-pre-wrap font-sans text-ink-700">{b.body_md}</pre>
+          <p className="mt-2 text-ink-500">사람이 고친 기획안 전체입니다. 설명용이고 판단은 위 근거와 목표만 씁니다.</p>
+        </details>
+      )}
+    </article>
+  );
+}
+
+export function ReceivedBriefs() {
+  const [list, setList] = useState<BriefList | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setList(await briefs.list());
+      setError(null);
+    } catch (e) {
+      const err = e as { status?: number; message?: string };
+      setError(briefsError({ status: err.status, message: err.message ?? "알 수 없는 오류" }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!briefsEnabled) return;
+    void load();
+    const timer = window.setInterval(() => { void load(); }, REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  const items = list?.items ?? [];
+  const current = items.find((i) => i.proposal_id === selected) ?? items[0] ?? null;
+
+  return (
+    <section className="card space-y-4 p-6">
+      <div>
+        <h2 className="text-lg font-semibold">받은 기획안 {list && <span className="text-sm font-normal text-ink-500">{list.total}건</span>}</h2>
+        <p className="mt-1 text-xs text-ink-500">기획이 사람 확정을 거쳐 넘긴 기획안입니다. 읽기만 하며, 캠페인 시작은 이 화면의 캠페인 칸에서 합니다. 서버를 다시 배포하면 목록이 비어 기획이 다시 보내야 할 수 있습니다.</p>
+      </div>
+
+      {!briefsEnabled && <p className="py-4 text-center text-sm text-ink-500">받은 기획안 읽기 연결이 꺼져 있습니다. 열람 토큰을 설정해 주세요.</p>}
+      {error && <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{error}</p>}
+      {briefsEnabled && !list && !error && <p className="text-sm text-ink-500">불러오는 중입니다.</p>}
+      {list && items.length === 0 && <p className="py-6 text-center text-sm text-ink-500">{list.unknown_reason ?? "받은 기획안이 없습니다."}</p>}
+
+      {items.length > 0 && (
+        <>
+          <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100" aria-label="받은 기획안 목록">
+            {items.map((i) => {
+              const on = current?.proposal_id === i.proposal_id;
+              return (
+                <li key={i.proposal_id}>
+                  <button
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setSelected(i.proposal_id)}
+                    className={`flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-left text-xs hover:bg-ink-50 ${on ? "bg-brand-50" : ""}`}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{i.brief.title}</span>
+                    <span className="tabular-nums text-ink-500">{i.proposal_id}</span>
+                    <span>{i.brief.target ? `${i.brief.target.label} ${i.brief.target.value}` : "목표 없음"}</span>
+                    <span className="chip bg-ink-50 text-ink-700">{briefStatusKo(i.status)}</span>
+                    <span className="text-ink-500" title={shortDateTime(i.received_at)}>{ago(i.received_at)}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {current && <Detail item={current} />}
+        </>
+      )}
+    </section>
+  );
+}

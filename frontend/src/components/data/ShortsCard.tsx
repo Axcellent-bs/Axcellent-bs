@@ -1,0 +1,324 @@
+import { useState, type ReactNode } from "react";
+import { TONE } from "@/components/finance/bits";
+import type { CautionType, DataFact, EvidenceHighlight, EvidenceHighlightSource, ShortsFit, VideoLink } from "@/lib/data";
+
+// 2단계 인사이트 v2 카드 틀 (v2 시안 ② 보드). 인사이트 카드와 기회 가설 카드가 같이 쓴다.
+// 왼쪽: 판정 칩 하나 → 제목 → 한 문장(서버 line) → 근거 요약(서버 evidence_highlights, #710) → 숫자 타일(서버 값이 있는 것만)
+//   → 연결 상품 → "근거 전체 보기" 접힘 하나
+// 근거 요약 한 줄: 출처 배지 · 배수 크게(평소 값이 없으면 지금 값) · "평소 vs 지금" 가로 막대 2개(회색 평소, 파랑 지금) · 서버 문장 한 줄.
+//   서버가 평소 값을 주지 않은 근거는 막대 없이 숫자와 문장만. 막대 길이는 둘 중 큰 값에 대한 비율(그리기용)
+// 오른쪽: 근거 숏츠 썸네일 최대 3개(서버 evidence_shorts 먼저). 서버 thumbnail_url 이미지(세로 비율, cover) · 제목 · 조회수 · 광고 칩.
+//   값이 없거나 깨지면 회색 자리. 누르면 서버 video_url(없으면 근거 주소) 새 탭
+// 문단 글은 카드당 한 문장(line)만. 나머지 이유·한계·예시는 접힘 안
+// 판정 칩·숫자 타일(verdictOf·shortsTiles)은 서버 칸 그대로: shorts_fit · target_views_reference · top_age_band (#678). 화면에서 고르지 않는다
+
+export type Verdict = { label: string; tone: string; title?: string | null };
+export type Tile = { label: string; value: string; note?: string | null };
+/** 근거 숏츠 하나: 누르면 갈 주소, 썸네일 주소(없으면 null), 서버 제목·조회수, 서버 광고 재료 칸(VideoLink에 있을 때만) */
+export type Thumb = { url: string; thumb: string | null; title?: string | null; views?: number | null; caution?: CautionFields };
+
+const fmt = (v: number, digits = 0) => v.toLocaleString("ko-KR", { maximumFractionDigits: digits });
+const COMPACT = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
+
+/** 판정 칩: 숏츠 적합도 high → "숏츠로 해볼 만함", 그 밖(uncertain·low, 표본 부족 unknown) → "아직 불확실". 칸이 없는 예전 응답은 칩 없음 */
+export function verdictOf(fit: ShortsFit | null | undefined, status?: "known" | "unknown" | null, reason?: string | null): Verdict | null {
+  if (fit) return fit.level === "high" ? { label: "숏츠로 해볼 만함", tone: TONE.ok, title: fit.reason } : { label: "아직 불확실", tone: TONE.muted, title: fit.reason };
+  if (status === "unknown") return { label: "아직 불확실", tone: TONE.muted, title: reason ?? null };
+  return null;
+}
+
+/** 숫자 타일 3개(서버 값이 있는 것만): 숏츠 반응(shorts_fit.ratio·samples) · 가장 오른 연령(top_age_band·배수) · 목표 참고값(target_views_reference) */
+export function shortsTiles(x: {
+  shorts_fit?: ShortsFit | null; target_views_reference?: number | null; target_reference_basis?: string | null;
+  top_age_band?: string | null; top_age_band_ratio?: number | null;
+}): Tile[] {
+  const tiles: Tile[] = [];
+  const fit = x.shorts_fit;
+  if (fit && typeof fit.ratio === "number") {
+    tiles.push({ label: "숏츠 반응", value: `${fmt(fit.ratio, 2)}배`, note: [fit.category, fit.samples ? `표본 ${fmt(fit.samples)}개` : null].filter(Boolean).join(" · ") || null });
+  }
+  if (x.top_age_band) {
+    tiles.push({ label: "가장 오른 연령", value: x.top_age_band, note: typeof x.top_age_band_ratio === "number" ? `검색 평소의 ${fmt(x.top_age_band_ratio, 2)}배` : null });
+  }
+  if (typeof x.target_views_reference === "number") {
+    tiles.push({ label: "목표 참고값", value: `${COMPACT.format(x.target_views_reference)}회`, note: x.target_reference_basis ?? null });
+  }
+  return tiles;
+}
+
+const YOUTUBE = /^https:\/\/(www\.|m\.)?(youtube\.com\/(watch|shorts)|youtu\.be\/)/;
+const YOUTUBE_ID = /(?:[?&]v=|\/shorts\/|youtu\.be\/)([A-Za-z0-9_-]{6,})/;
+const idOf = (url: string) => YOUTUBE_ID.exec(url)?.[1] ?? url;
+
+/** 근거 숏츠 최대 3개. 서버 video_links(주소·썸네일)를 먼저, 이어서 근거 주소(evidence.links·facts[].link) 중 YouTube 영상.
+ *  같은 영상(id)은 한 번만이고, 썸네일이 있는 쪽을 쓴다 */
+export function shortsThumbs(videoLinks: VideoLink[] | undefined, links: (string | null | undefined)[]): Thumb[] {
+  const out: Thumb[] = [];
+  const seen = new Set<string>();
+  const push = (url: string | null | undefined, thumb: string | null, id?: string, v?: VideoLink) => {
+    if (!url || !YOUTUBE.test(url) || out.length === 3) return;
+    const key = id ?? idOf(url);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ url, thumb, title: v?.title ?? null, views: v?.views ?? null, caution: v });
+  };
+  for (const v of videoLinks ?? []) push(v.video_url, v.thumbnail_url, v.video_id, v);
+  for (const l of links) push(l, null);
+  return out;
+}
+
+/** 썸네일(기본 세로 9:16, wide면 가로 16:9). 서버 thumbnail_url이 있으면 이미지(object-fit: cover), 없거나 깨지면 회색 자리 그대로 */
+export function ThumbImage({ src, alt, className = "", wide = false, children }: {
+  src: string | null | undefined; alt: string; className?: string; wide?: boolean; children?: ReactNode;
+}) {
+  const [broken, setBroken] = useState<string | null>(null);
+  const ok = !!src && /^https:\/\//.test(src) && broken !== src;
+  return (
+    <span className={`relative block ${wide ? "aspect-video" : "aspect-[9/16]"} overflow-hidden rounded-xl bg-ink-100 ${className}`}>
+      {ok && <img src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setBroken(src)}
+        className="absolute inset-0 h-full w-full object-cover" />}
+      {children}
+    </span>
+  );
+}
+
+const CAUTION_LABEL: Record<CautionType, string> = { real_person: "실존 인물", trademark: "상표", music: "음원" };
+type CautionFields = { ad_usable?: boolean | null; caution_types?: CautionType[]; caution_reason?: string | null };
+
+/** 서버 광고 재료 칸이 있는지 (예전 응답·칸 없는 영상은 false) */
+export const hasCaution = (v: CautionFields) => typeof v.ad_usable === "boolean" || (v.caution_types?.length ?? 0) > 0;
+
+/** 영상 칩 하나 (서버 ad_usable·caution_types 그대로, #678). 확인할 것이 있으면 "실존 인물·음원 주의"처럼 노랑,
+ *  없고 ad_usable true면 "광고 재료 가능" 초록. 모르면(null) 그리지 않는다. 마우스를 올리면 서버 이유 */
+export function CautionChip({ v, className = "text-xs" }: { v: CautionFields; className?: string }) {
+  const types = v.caution_types ?? [];
+  if (types.length > 0) {
+    return <span className={`chip ${className} ${TONE.warn}`} title={v.caution_reason ?? undefined}>{types.map((t) => CAUTION_LABEL[t]).join("·")} 주의</span>;
+  }
+  if (v.ad_usable === true) return <span className={`chip ${className} ${TONE.ok}`}>광고 재료 가능</span>;
+  if (v.ad_usable === false) return <span className={`chip ${className} ${TONE.muted}`} title={v.caution_reason ?? undefined}>광고에 안 씀</span>;
+  return null;
+}
+
+/** 브리프 facts 중 이 항목(about = insight_id·opportunity_id)이거나 fact_ids가 가리키는 숫자 */
+export function cardFacts(facts: DataFact[] | undefined, about: string, ids: string[] | undefined): DataFact[] {
+  const want = new Set(ids ?? []);
+  return (facts ?? []).filter((f) => f.about === about || want.has(f.fact_id));
+}
+
+/** 그 숫자들의 근거 주소 */
+export function factLinks(facts: DataFact[] | undefined, about: string, ids: string[] | undefined): (string | null)[] {
+  return cardFacts(facts, about, ids).map((f) => f.link);
+}
+
+const SOURCE_LABEL: Record<EvidenceHighlightSource, string> = {
+  naver_search: "네이버 검색", naver_shopping: "네이버 쇼핑", youtube: "YouTube", google: "Google",
+};
+const withUnit = (v: number, unit: string) => `${fmt(v, 2)}${unit === "배" ? "배" : unit ? ` ${unit}` : ""}`;
+
+const SOURCE_TONE: Record<EvidenceHighlightSource, string> = {
+  naver_search: "bg-blue-50 text-blue-700", naver_shopping: "bg-emerald-50 text-emerald-700",
+  youtube: "bg-red-50 text-red-700", google: "bg-amber-50 text-amber-800",
+};
+
+/** 숫자 타일 하나 (근거 요약 하나): 출처 배지 · 배수 26px · 평소 회색·지금 파랑 작은 막대 · 서버 문장 한 줄.
+ *  평소 값이 없으면 막대 없이. 표본이 적은 근거(low_sample)는 막대 없이 회색 "참고" + 서버 문장·표시 문구 */
+function HighlightTile({ h }: { h: EvidenceHighlight }) {
+  const base = typeof h.baseline_value === "number" ? h.baseline_value : null;
+  const max = Math.max(h.value, base ?? 0);
+  const width = (v: number) => `${max > 0 ? Math.max(4, (v / max) * 100) : 0}%`;
+  const big = typeof h.ratio === "number" ? `${fmt(h.ratio, 2)}배` : withUnit(h.value, h.unit);
+  return (
+    <div className="flex min-w-0 flex-col gap-2 rounded-xl bg-ink-50 p-3.5">
+      <span className={`self-start rounded px-1.5 py-0.5 text-[11px] font-semibold ${SOURCE_TONE[h.source]}`}>{SOURCE_LABEL[h.source]}</span>
+      {h.low_sample ? (
+        <>
+          <span className="text-[26px] font-bold leading-none text-ink-400" title={`${h.label} ${big}`}>참고</span>
+          <p className="text-xs leading-snug text-ink-500">{h.sentence}{h.sample_note ? ` · ${h.sample_note}` : ""}</p>
+        </>
+      ) : (
+        <>
+          <span className="text-[26px] font-bold leading-none tabular-nums text-ink-900" title={h.label}>{big}</span>
+          {base !== null && (
+            <span className="space-y-1" aria-label={`평소 ${withUnit(base, h.unit)}, 지금 ${withUnit(h.value, h.unit)}`}>
+              <span className="block h-1.5 rounded-full bg-ink-300" style={{ width: width(base) }} />
+              <span className="block h-1.5 rounded-full bg-brand-500" style={{ width: width(h.value) }} />
+            </span>
+          )}
+          <p className="truncate text-xs text-ink-700" title={h.sentence}>{h.sentence}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 숫자 타일 줄: 근거 요약(서버 evidence_highlights)을 앞에, extra 타일(예: 빌릴 형식)을 뒤에, 합쳐 3칸 */
+export function Highlights({ list, extra = [] }: { list: EvidenceHighlight[] | undefined; extra?: Tile[] }) {
+  const shown = (list ?? []).slice(0, Math.max(0, 3 - extra.length));
+  if (shown.length === 0 && extra.length === 0) return null;
+  return (
+    <div className="grid grid-cols-3 gap-2.5" aria-label="근거 요약">
+      {shown.map((h, k) => <HighlightTile key={h.fact_id ?? `${h.source}-${h.label}-${k}`} h={h} />)}
+      {extra.map((t) => (
+        <div key={t.label} className="flex min-w-0 flex-col gap-2 rounded-xl bg-ink-50 p-3.5">
+          <span className="self-start rounded bg-surface px-1.5 py-0.5 text-[11px] font-semibold text-ink-700 ring-1 ring-ink-100">{t.label}</span>
+          <span className="truncate text-xl font-bold text-ink-900">{t.value}</span>
+          {t.note && <p className="truncate text-xs text-ink-500" title={t.note}>{t.note}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 접힘 안 근거 숫자 목록 (서버 facts 그대로: 이름 · 값 · 출처 · 기간 · 표본 · 주소) */
+export function FactList({ facts }: { facts: DataFact[] }) {
+  if (facts.length === 0) return null;
+  return (
+    <ul className="space-y-1 text-xs text-ink-700">
+      {facts.map((f) => (
+        <li key={f.fact_id}>
+          <span className="font-semibold text-ink-900">{f.label}</span> {withUnit(f.value, f.unit)}
+          {[f.source, f.period, typeof f.sample === "number" ? `표본 ${fmt(f.sample)}` : null].filter(Boolean).map((x) => <span key={x} className="text-ink-500"> · {x}</span>)}
+          {f.link && <> · <a href={f.link} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">주소</a></>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** 접힘 안 "근거 숫자 N개": 이 카드 facts 중 근거 요약에 나오지 않은 나머지 전부 */
+export function RestFacts({ facts, about, ids, shown }: {
+  facts: DataFact[] | undefined; about: string; ids: string[] | undefined; shown: EvidenceHighlight[] | undefined;
+}) {
+  const used = new Set((shown ?? []).map((h) => h.fact_id).filter(Boolean));
+  const rest = cardFacts(facts, about, ids).filter((f) => !used.has(f.fact_id));
+  if (rest.length === 0) return null;
+  return <FoldRow label={`근거 숫자 ${rest.length}개`}><FactList facts={rest} /></FoldRow>;
+}
+
+/** 숫자 타일 3개(숏츠 반응·가장 오른 연령·목표 참고값)를 접힘 안에 한 줄로 */
+export function TileRow({ tiles }: { tiles: Tile[] }) {
+  if (tiles.length === 0) return null;
+  return (
+    <FoldRow label="숫자 요약">
+      <ul className="flex flex-wrap gap-x-4 gap-y-1">
+        {tiles.map((t) => <li key={t.label}><span className="text-ink-500">{t.label}</span> <b className="text-ink-900">{t.value}</b>{t.note ? <span className="text-xs text-ink-500"> · {t.note}</span> : null}</li>)}
+      </ul>
+    </FoldRow>
+  );
+}
+
+export function ShortsCard({ verdict, kicker, badges, title, line, lineNote, highlights, extraTiles, products, productsLabel = "연결 상품", thumbs, thumbsLabel = "이런 숏츠가 잘 돼요", fold, highlight, topBand }: {
+  verdict: Verdict | null;
+  kicker?: string | null;
+  /** 판정 칩 옆 작은 칩 (예: 상표 주의) */
+  badges?: ReactNode;
+  title: string;
+  line: string | null;
+  /** 한 문장 옆 작은 표시 (예: 고정 문장) */
+  lineNote?: string | null;
+  /** 근거 요약 (서버 evidence_highlights) → 숫자 타일 */
+  highlights?: EvidenceHighlight[];
+  /** 근거 요약 뒤에 붙일 타일 (예: 빌릴 형식). 합쳐 3칸 */
+  extraTiles?: Tile[];
+  products: { id: string; name: string }[];
+  productsLabel?: string;
+  thumbs: Thumb[];
+  thumbsLabel?: string;
+  fold: ReactNode;
+  highlight?: boolean;
+  /** 카드 맨 위 띠 (예: 인사이트 "지난번 결과"). 없으면 카드는 예전 그대로 */
+  topBand?: ReactNode;
+}) {
+  return (
+    <CardShell band={topBand} highlight={highlight}>
+      <div className="flex min-w-0 flex-1 flex-col gap-3">
+        {(verdict || kicker || badges) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {verdict && <span className={`chip text-sm font-bold ${verdict.tone}`} title={verdict.title ?? undefined}>{verdict.label}</span>}
+            {kicker && <span className="text-xs text-ink-500">{kicker}</span>}
+            {badges}
+          </div>
+        )}
+        <h3 className="text-2xl font-bold text-ink-900">{title}</h3>
+        {line && (
+          <p className="truncate text-base text-ink-900" title={line}>
+            {line}{lineNote && <span className="ml-1.5 text-xs text-ink-500">({lineNote})</span>}
+          </p>
+        )}
+        <Highlights list={highlights} extra={extraTiles} />
+        {products.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-semibold text-ink-500">{productsLabel}</span>
+            {products.map((p) => <span key={p.id} className="chip bg-surface text-sm text-ink-700 ring-1 ring-ink-100">{p.name}</span>)}
+          </div>
+        )}
+        <details>
+          <summary className="cursor-pointer text-sm font-semibold text-ink-900">근거 전체 보기</summary>
+          <div className="mt-2 space-y-3 rounded-xl bg-ink-50 p-3 text-sm text-ink-700">{fold}</div>
+        </details>
+      </div>
+      {thumbs.length > 0 && (
+        <div className="flex w-[19rem] shrink-0 flex-col gap-2">
+          <p className="text-xs font-semibold text-ink-700">{thumbsLabel}</p>
+          <ul className="grid grid-cols-3 gap-2">
+            {thumbs.map((t, k) => (
+              <li key={t.url} className="min-w-0">
+                {/* 제목이 없는 근거 영상(예전 응답·근거 주소)은 alt가 순번 */}
+                <a href={t.url} target="_blank" rel="noreferrer noopener" aria-label={`${t.title ?? `근거 숏츠 ${k + 1}`} · YouTube에서 보기`}
+                  className="block rounded-xl transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+                  <ThumbImage src={t.thumb} alt={t.title ?? `근거 숏츠 ${k + 1}`} />
+                  {t.title && <span className="mt-1 line-clamp-2 text-[11px] font-semibold leading-snug text-ink-900">{t.title}</span>}
+                  {typeof t.views === "number" && <span className="block text-xs font-bold tabular-nums text-ink-700" title={`조회 ${fmt(t.views)}회`}>조회 {COMPACT.format(t.views)}</span>}
+                </a>
+                {t.caution && <span className="mt-1 block empty:hidden"><CautionChip v={t.caution} className="text-[11px]" /></span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </CardShell>
+  );
+}
+
+/** 카드 틀: 띠가 없으면 예전과 같은 한 줄 배치, 있으면 띠 아래에 같은 배치 */
+function CardShell({ band, highlight, children }: { band?: ReactNode; highlight?: boolean; children: ReactNode }) {
+  const ring = highlight ? "ring-2 ring-emerald-200" : "";
+  if (!band) return <li className={`card flex gap-6 p-5 ${ring}`}>{children}</li>;
+  return (
+    <li className={`card flex flex-col gap-4 p-5 ${ring}`}>
+      {band}
+      <div className="flex gap-6">{children}</div>
+    </li>
+  );
+}
+
+/** 접힘 안 한 묶음 (제목 + 내용) */
+export function FoldRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)]">
+      <p className="text-xs font-semibold text-ink-500">{label}</p>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+/** 작은 id와 복사 버튼 (기획팀이 제안에 적는 값). 접힘 안에 둔다 */
+export function CopyId({ id, label = "인사이트 번호" }: { id: string; label?: string }) {
+  const [done, setDone] = useState<"idle" | "ok" | "failed">("idle");
+  const copy = () => {
+    if (!navigator.clipboard) { setDone("failed"); return; }
+    navigator.clipboard.writeText(id).then(() => setDone("ok"), () => setDone("failed"));
+  };
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5 text-[11px] text-ink-500">
+      <span>{label}</span>
+      <code className="rounded bg-surface px-1.5 py-0.5 font-mono">{id}</code>
+      <button type="button" className="rounded px-1.5 py-0.5 font-semibold text-brand-700 ring-1 ring-ink-100 hover:bg-brand-50" onClick={copy}
+        aria-label={`${label} ${id} 복사`}>
+        {done === "ok" ? "복사됨" : "복사"}
+      </button>
+      {done === "failed" && <span className="text-red-700">복사하지 못했어요</span>}
+    </span>
+  );
+}

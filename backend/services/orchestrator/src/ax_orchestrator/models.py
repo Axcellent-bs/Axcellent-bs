@@ -1,0 +1,239 @@
+"""이벤트·단계 상태 모델과 plan 정의 (docs/notes/orchestrator/interface.md 3·5장)."""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from ax_orchestrator.draft import resolution_draft
+from ax_orchestrator.recommend import recommend
+from ax_orchestrator.timeline import timeline_view
+
+
+def now() -> datetime:
+    return datetime.now(UTC)
+
+
+def iso(value: datetime | None) -> str | None:
+    return value.strftime("%Y-%m-%dT%H:%M:%SZ") if value else None
+
+
+@dataclass
+class Step:
+    """plan의 한 단계. 엔진은 시나리오를 모르고 이 정의만 실행한다."""
+
+    id: str
+    skill: str
+    label: str
+    after: tuple[str, ...] = ()  # 선행 단계. 모두 성공해야 실행
+    also_after: tuple[str, ...] = ()  # 선행 단계. 끝나기만 하면 실행
+    build: Callable[[Incident], dict[str, Any]] = lambda inc: {}
+    serial_group: str | None = None
+    required: bool = True
+    kind: str = "call"  # call | record(이벤트 종료 기록)
+    keep: dict[str, str] = field(default_factory=dict)  # 결과 필드 → 이벤트에 보관할 이름
+    # 호출하기 전에 "지금은 하지 않는다"를 판단한다: (상태, 사유 코드, 메모) 또는 None(그대로 호출)
+    gate: Callable[[Incident], tuple[str, str, str] | None] = lambda inc: None
+    # 성공한 결과를 보고 사람이 봐야 하면 이관 큐로 돌린다: (사유 코드, 메모) 또는 None
+    verdict: Callable[[dict[str, Any]], tuple[str, str] | None] = lambda output: None
+    timeout: float | None = None  # 이 단계만 마감을 길게 줄 때(예: 복구 확인 재시도) 초
+    # 한 번에 받는 상한이 있는 부서용: (나눌 입력 필드, 한 번에 보낼 개수). 넘으면 나눠 부른다.
+    split: tuple[str, int] | None = None
+    # 나눠 부른 결과들을 하나로 합친다. 없으면 첫 결과에 `batches`만 붙인다.
+    merge: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None
+
+
+@dataclass
+class Plan:
+    name: str
+    steps: list[Step]
+    # 복구 뒤 영향 분석을 다시 돌려 새 고객이 잡혔을 때만 부르는 단계(평소 plan에는 안 돈다)
+    late_steps: list[Step] = field(default_factory=list)
+
+
+@dataclass
+class StepRun:
+    step_id: str
+    skill: str
+    label: str
+    dept: str | None = None
+    status: str = "pending"
+    attempts: int = 0
+    note: str = ""
+    grade: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    output: dict[str, Any] = field(default_factory=dict)
+    transferred_to: str | None = None
+    reason_code: str | None = None
+    # 꺼진 서비스라 사람 할 일함으로 넘어간 일 번호 (status "waiting_human", 업무 요청 라우터)
+    handoff_task_id: str | None = None
+
+    def view(self) -> dict[str, Any]:
+        return {
+            "step_id": self.step_id,
+            "skill": self.skill,
+            "label": self.label,
+            "dept": self.dept,
+            "status": self.status,
+            "attempts": self.attempts,
+            "note": self.note,
+            "grade": self.grade,
+            "started_at": iso(self.started_at),
+            "finished_at": iso(self.finished_at),
+            "transferred_to": self.transferred_to,
+            "reason_code": self.reason_code,
+            "handoff_task_id": self.handoff_task_id,
+            "output": self.output,
+        }
+
+
+TERMINAL = {"completed", "failed", "skipped", "rejected_by_human", "transfer_queued"}
+# 끝나지 않은 대기 상태. C 등급 승인 대기(held)와
+# 사람 할 일함 처리 대기(waiting_human)는 다른 상태다
+WAITING = {"held", "waiting_human"}
+# 사유 코드가 있어도 사람이 개입한 일로 세지 않는 것 (자동 처리율)
+# - service_disabled: 꺼진 서비스라 건너뛴 조회
+# - cause_confident: 확신도 높은 원인 후보가 있어 원인 확인 요청을 하지 않음
+NOT_INTERVENTION = {"service_disabled", "cause_confident"}
+
+
+@dataclass
+class Incident:
+    context_id: str
+    kind: str
+    title: str
+    component: str
+    opened_at: datetime = field(default_factory=now)
+    # 신호가 알려 준 장애 시작 시각 (shop.degraded data.since). 없으면 None
+    since: datetime | None = None
+    closed_at: datetime | None = None
+    # 쇼핑몰이 복구됐다는 신호(shop.recovered)를 받은 시각. closed_at은 총괄 대응이 끝난 시각이라
+    # 장애가 풀린 때와 다르다. degraded로 끝난 이벤트는 이 값이 생길 때까지 장애 중으로 본다
+    recovered_at: datetime | None = None
+    status: str = "open"
+    # degraded로 끝났다가 복구 신호로 resolved가 된 이벤트. 복구 시간은 복구 신호 기준
+    settled_by_recovery: bool = False
+    steps: dict[str, StepRun] = field(default_factory=dict)
+    events: list[dict[str, Any]] = field(default_factory=list)
+    outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    holds: dict[str, Any] = field(default_factory=dict)  # step_id -> Hold
+    handoffs: dict[str, Any] = field(default_factory=dict)  # step_id -> HandoffWait
+    summary: list[str] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    shared: dict[str, Any] = field(default_factory=dict)  # 부서가 준 값 중 다른 부서에 넘길 것
+    # 같은 종류의 이벤트인지 가르는 값(구성요소:지표). 모르면 None
+    event_type: str | None = None
+    # 쇼핑몰이 정상 복귀를 알린 시각(shop.recovered). 닫힌 뒤에 와도 붙는다
+    recovered_at: datetime | None = None
+    # 인사 서비스가 꺼져 있으면(service_disabled) 이 이벤트에서는 시각 기록을 더 보내지 않는다
+    times_off: bool = False
+    # 인사 카드에 이미 남긴 시각(이름 → ISO). 같은 값을 다시 보내지 않는다
+    times_sent: dict[str, str] = field(default_factory=dict)
+    # 이벤트를 연 이벤트의 data (plan이 입력으로 쓴다)
+    signal: dict[str, Any] = field(default_factory=dict)
+
+    @staticmethod
+    def new_context_id() -> str:
+        return f"ctx_inc_{uuid.uuid4().hex[:12]}"
+
+    def mttr_seconds(self) -> float | None:
+        """복구까지 걸린 초(이벤트를 연 때부터).
+
+        장애가 안 풀린 채 대응이 끝난 이벤트(degraded)는 복구 신호(shop.recovered)가 올 때까지
+        None이다.
+        그 전의 `closed_at`은 AI 대응이 끝난 시각일 뿐이라 복구 시간으로 쓰면 3초 같은 값이 나온다.
+        """
+        if self.status == "degraded":
+            if self.recovered_at is None:
+                return None
+            return round((self.recovered_at - self.opened_at).total_seconds(), 2)
+        if self.settled_by_recovery and self.recovered_at is not None:
+            return round((self.recovered_at - self.opened_at).total_seconds(), 2)
+        if self.closed_at is None:
+            return None
+        return round((self.closed_at - self.opened_at).total_seconds(), 2)
+
+    def settle_after_recovery(self) -> None:
+        """복구 신호가 오면 장애 중으로 남아 있던 이벤트(degraded)를 해결로 바꾼다.
+
+        `closed_at`(AI 대응이 끝난 시각)과 `response_seconds`는 그대로 둔다.
+        """
+        if self.status == "degraded" and self.recovered_at is not None:
+            self.status = "resolved"
+            self.settled_by_recovery = True
+
+    def refresh_mttr(self) -> None:
+        """복구 신호가 늦게 와서 값이 바뀌면 이미 만든 지표에 반영한다(지표가 있을 때만)."""
+        if self.metrics:
+            self.metrics["mttr_seconds"] = self.mttr_seconds()
+
+    def impact_window(self) -> tuple[datetime, datetime]:
+        """영향 분석 구간. 장애 시작(since)부터, 없으면 열린 시각 앞 15분부터 뒤 15분까지.
+
+        복구 신호(recovered_at)가 구간 안에 있으면 거기서 끊는다. 복구 뒤 실패는 이 장애가 아니다.
+        """
+        start = self.since if self.since is not None else self.opened_at - timedelta(minutes=15)
+        end = self.opened_at + timedelta(minutes=15)
+        if self.recovered_at is not None and start < self.recovered_at < end:
+            end = self.recovered_at
+        return start, end
+
+    def _impact_window_view(self) -> dict[str, str | None]:
+        """재무 등 다른 부서가 같은 구간으로 영향을 다시 셀 수 있게 이벤트 행에 싣는다."""
+        if "impact" not in self.steps:
+            return {"impact_from": None, "impact_to": None}
+        start, end = self.impact_window()
+        return {"impact_from": iso(start), "impact_to": iso(end)}
+
+    def log(self, message: str) -> None:
+        self.events.append({"at": iso(now()), "message": message})
+
+    def view(self) -> dict[str, Any]:
+        return {
+            "context_id": self.context_id,
+            "kind": self.kind,
+            "title": self.title,
+            "event_type": self.event_type,
+            "component": self.component,
+            "status": self.status,
+            "opened_at": iso(self.opened_at),
+            "closed_at": iso(self.closed_at),
+            "recovered_at": iso(self.recovered_at),
+            **self._impact_window_view(),
+            "steps": [s.view() for s in self.steps.values()],
+            "events": self.events,
+            "summary": self.summary,
+            "metrics": self.metrics,
+            "shared": self.shared,
+            "recommendation": recommend(self.outputs.get("similar_cases")),
+            "timeline": timeline_view(self),
+            "resolution_draft": resolution_draft(self),
+            "pending_holds": [
+                {
+                    "step_id": sid,
+                    "skill": self.steps[sid].skill,
+                    "label": self.steps[sid].label,
+                    # 안전 관문 보류 건 번호, 대기 시작과 마감(화면에 남은 시간을 보여 준다)
+                    "review_id": getattr(hold, "review_id", None),
+                    "since": iso(getattr(hold, "started_at", None)),
+                    "expires_at": iso(getattr(hold, "expires_at", None)),
+                }
+                for sid, hold in self.holds.items()
+                if hold.pending
+            ],
+            "pending_handoffs": [
+                {
+                    "step_id": sid,
+                    "skill": self.steps[sid].skill,
+                    "label": self.steps[sid].label,
+                    "task_id": wait.task_id,
+                    "assignee_unit": wait.assignee_unit,
+                }
+                for sid, wait in self.handoffs.items()
+                if wait.pending
+            ],
+        }

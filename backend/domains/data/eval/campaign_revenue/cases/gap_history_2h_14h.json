@@ -1,0 +1,53 @@
+{
+ "id": "gap_history_2h_14h",
+ "kind": "up",
+ "input": {
+  "campaign_id": null,
+  "window_from": "2026-10-14T14:00:00Z",
+  "window_to": "2026-10-14T16:00:00Z"
+ },
+ "spec": {
+  "id": "gap_history_2h_14h",
+  "window": {
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "sale",
+   "factor": 2.0,
+   "from": "2026-10-14T14:00:00Z",
+   "to": "2026-10-14T16:00:00Z"
+  },
+  "payment_gap": {
+   "days_ago": [
+    2
+   ]
+  }
+ },
+ "expected": {
+  "sales": {
+   "status": "known",
+   "direction": "up",
+   "lift": 2.0,
+   "direct_attributed": false
+  }
+ },
+ "counted": {
+  "gross_actual": 5775500,
+  "gross_baseline": 3465350.0,
+  "gross_excess": 2310150.0,
+  "gross_past_days": {
+   "1": 3232300,
+   "3": 3783200,
+   "4": 3592400,
+   "5": 3560500,
+   "6": 3522900,
+   "7": 3100800
+  },
+  "direct_attributed": null
+ },
+ "memo": "2일 전 같은 시간대만 결제 공백 → 그날을 빼고 판정"
+}

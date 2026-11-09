@@ -1,0 +1,204 @@
+{
+  "name": "decisions",
+  "owner": "준하",
+  "description": "결정 기록 — hr 업무 중 이 서비스 skill만 맡는다. 인사 — 부서가 보낸 사건·결정 기록을 받아 회사 기억에 카드로 남긴다",
+  "url": "http://decisions:8114/a2a",
+  "version": "0.1.0",
+  "capabilities": {
+    "streaming": true,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "record_case",
+      "description": "부서가 보낸 사건·결정 기록(kind, 요약, 결정 이유, 검토한 대안, 근거 참조)을 받아 결정 카드로 정리해 회사 기억에 저장한다. 결정이 없는 기록은 기록만 남기고, 확신이 낮은 카드는 후보로 보류한다. 같은 기록이 두 번 오면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/record.py#RecordCase",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordCaseOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator",
+        "planning",
+        "support",
+        "marketing",
+        "finance",
+        "data",
+        "infra"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "check_plan",
+      "description": "새 계획 초안을 같은 영역의 결정 카드와 비교한다. 기각된 안과 비슷하면 경고(경과 일수는 코드가 계산), 채택하지 않기로 한 대안과 같으면 충돌, 확정된 결정과 같은 방향이면 일치로 알린다. 관련 카드가 없으면 판정하지 않고 '기록에 없음'으로 답한다. 조회 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#CheckPlanInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#CheckPlanOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator",
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_candidate_cards",
+      "description": "확신이 낮아 사람 확인을 기다리는 후보 카드를 조회한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCandidateCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCandidateCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "list_cards",
+      "description": "확정된(후보가 아닌) 결정 카드를 최근 순으로 조회한다. 사건 번호를 주면 그 사건에서 만든 카드만 돌려준다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "get_audit_timeline",
+      "description": "사건 하나에서 hr이 한 일을 시간순으로 조회한다. 기록이 없으면 비어 있다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetAuditTimelineInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetAuditTimelineOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "decide_candidate_card",
+      "description": "후보 카드를 사람이 승인(active)하거나 폐기(retired)한다. 승인하면 같은 영역의 옛 결정을 대체됨으로 연결한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideCandidateCardInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideCandidateCardOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "find_similar_fraud_cards",
+      "description": "판매자 사실(가입 일수·저가 상품 비율·24시간 등록 수·사업자 중복 여부)과 비슷한 지난 사기 카드(kind=fraud)를 찾아 카드 id와 유사도(0~1)를 돌려준다. 기준 미만이면 빈 목록과 max_similarity 0을 준다. 조회 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarFraudCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarFraudCardsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "data"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "find_similar_cases",
+      "description": "현재 사건을 설명하는 글과 비슷한 과거 사건·결정 카드를 찾아, 카드에 기록된 당시 해결 내용(원인·조치·결과·소요 시간)과 함께 돌려준다. 기준 미만이면 빈 목록을 준다. 해결 방법을 새로 만들지 않고 기록된 값만 돌려주며 조회 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarCasesInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarCasesOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "infra",
+        "data",
+        "planning",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "record_resolution",
+      "description": "사건이 해결되면 그 사건에서 만든 결정 카드에 원인·조치·결과·소요 시간을 채운다. 값이 없으면 지어내지 않고 확인할 수 없음으로 적는다. 같은 내용을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordResolutionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordResolutionOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator",
+        "infra",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "record_event_times",
+      "description": "이벤트의 감지·원인 후보 도착·사람 작업 시작과 완료·정상 복귀 시각을 그 이벤트에서 만든 결정 카드에 채운다. 시스템이 잰 시각만 받고 이미 있는 시각은 덮어쓰지 않는다. 같은 내용을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordEventTimesInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RecordEventTimesOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_duplicate_groups",
+      "description": "사람 승인을 기다리는 중복 결정 묶음과 최근에 병합된 카드를 조회한다. 저장된 값을 그대로 돌려주는 읽기 전용이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListDuplicateGroupsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#ListDuplicateGroupsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "decide_duplicate_group",
+      "description": "같은 결정을 다시 쓴 카드 묶음을 사람이 병합하거나 그대로 두기로 정한다. 병합은 옛 카드를 지우지 않고 대체됨으로 표시한다. 같은 결정을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideDuplicateGroupInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideDuplicateGroupOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "restore_merged_card",
+      "description": "병합으로 대체됨이 된 카드를 다시 유효 카드로 되돌린다. 같은 요청을 두 번 받으면 한 번만 처리한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RestoreMergedCardInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RestoreMergedCardOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "answer_planning_question",
+      "description": "기획 질문에 답한다. 기획이 인사가 보낸 요청(create_ticket)의 근거를 되물으면, 인사가 보낸 요청의 기록(보낼 때 코드가 만든 사실 문장·근거 ID)으로만 답한다. 근거 질문이고 기록에 사실이 있으면 answered, 인사가 보낸 요청이지만 기록으로 답할 수 없으면 needs_human(사람이 답하면 planning receive_planning_answer로 보낸다), 보낸 기록이 없으면 unknown. 지어내지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    }
+  ]
+}

@@ -1,0 +1,304 @@
+"""규칙 파일 테스트: 등록부·기준표 로딩, 합의 값, 규칙 키 중복·보호 경로 규칙, 자기 검증 금지
+(SAF-01)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from ax_safety.gate import Gate
+from ax_safety.main import create_app
+from ax_safety.rules import ActionSpec, Rule, ThresholdTable, load_registry, load_thresholds
+
+
+def test_rule_files_load_and_match_agreed_values() -> None:
+    registry, table = load_registry(), load_thresholds()
+    assert table.version == 8
+    assert table.review_timeout_seconds == 600  # 데모 10분 자동 거절
+    values = {rule.key: rule.value for rule in table.rules if rule.metric != "param"}
+    values.pop("pr_allowed_paths")
+    values.pop("merge_allowed_paths")
+    values.pop("pr_protected_paths")
+    values.pop("merge_protected_paths")
+    values.pop("revert_allowed_paths")
+    values.pop("revert_protected_paths")
+    values.pop("pr_agent_config_paths")
+    values.pop("merge_agent_config_paths")
+    values.pop("revert_agent_config_paths")
+    values.pop("merge_cross_data_verdict")
+    values.pop("auto_policy_shrink_only")
+    kinds = next(r for r in table.rules if r.key == "media_kind_known")
+    assert values.pop("media_kind_known") == 0 and kinds.allowed == ["image", "video"]
+    values.pop("notice_sns_channel")
+    assert values == {
+        "coupon_total": 300_000,
+        "coupon_unit": 20_000,
+        "coupon_daily": 1_000_000,
+        "compensation_per_context": 1_000_000,
+        "compensation_per_customer": 50_000,
+        "refund_single": 100_000,
+        "sns_daily_posts": 3,
+        "video_cost_single": 2_000,
+        "image_cost_single": 400,
+        "media_cost_daily": 10_000,
+        "media_cost_zero": 1,
+        "campaign_budget_single": 500_000,
+        "campaign_budget_daily": 1_000_000,
+        "campaign_budget_zero": 1,
+    }
+    issue = registry.get("issue_coupon")
+    assert issue is not None and (issue.base_grade, issue.verifier) == ("A", None)
+    refund = registry.get("refund_request")
+    assert refund is not None and (refund.base_grade, refund.verifier) == ("A", None)
+    assert issue.amount is not None and refund.amount is not None  # 금액 규칙은 그대로
+    assert registry.get("confirm_settlement").base_grade == "C"  # type: ignore[union-attr]
+    # 재무는 마켓운영(입점 심사·정산 보류)을 하지 않는다 (2026-10-30)
+    assert registry.get("seller_review") is None and registry.get("settlement_hold") is None
+    for spec in registry.actions:  # 자기 검증 금지
+        assert spec.verifier != spec.owner
+
+
+def test_no_action_is_routed_to_finance_verify_amount() -> None:
+    """재무 재설계: verify_amount skill은 없어졌으니 레지스트리에서 부르는 액션도 없어야 한다."""
+    registry = load_registry()
+    assert [s.action for s in registry.actions if s.verify_skill == "verify_amount"] == []
+    # 재무는 비용을 승인·반려하지 않는다(멘토 피드백). 재무가 검증하는 액션은 없다.
+    # 캠페인 예산은 안전 레이어 금액 규칙이 보고, 쿠폰·환불도 재무가 검증하지 않는다
+    assert [s.action for s in registry.actions if s.verifier == "finance"] == []
+    campaign = registry.get("start_campaign")
+    assert campaign is not None and (campaign.verifier, campaign.verify_skill) == ("safety", None)
+    settle = registry.get("confirm_settlement")
+    assert settle is not None and (settle.owner, settle.base_grade) == ("finance", "C")
+
+
+def test_review_timeout_env_overrides_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    """운영은 `SAFETY_REVIEW_TIMEOUT_SECONDS`로 사람 확인 기한을 24시간으로 덮어쓴다."""
+    monkeypatch.setenv("SAFETY_REVIEW_TIMEOUT_SECONDS", "86400")
+    table = load_thresholds()
+    assert table.review_timeout_seconds == 86_400
+    assert table.verify_timeout_seconds == load_thresholds().verify_timeout_seconds  # 나머지 그대로
+    monkeypatch.setenv("SAFETY_REVIEW_TIMEOUT_SECONDS", "")  # 비어 있으면 기준표 값
+    assert load_thresholds().review_timeout_seconds == 600
+
+
+@pytest.mark.parametrize("raw", ["abc", "1.5", "59", "604801", "-600", "0"])
+def test_invalid_review_timeout_env_fails_at_startup(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    monkeypatch.setenv("SAFETY_REVIEW_TIMEOUT_SECONDS", raw)
+    with pytest.raises(ValueError, match="SAFETY_REVIEW_TIMEOUT_SECONDS"):
+        load_thresholds()
+    with pytest.raises(ValueError, match="SAFETY_REVIEW_TIMEOUT_SECONDS"):
+        create_app(expire_interval=None)  # 서버 시작 단계에서 바로 멈춘다
+
+
+def test_duplicate_rule_keys_are_refused() -> None:
+    rule = {"key": "dup", "action": "x", "metric": "amount", "value": 1}
+    with pytest.raises(ValueError, match="같은 규칙 키가 두 번 있다: dup"):
+        ThresholdTable.model_validate(
+            {
+                "version": 1,
+                "verify_timeout_seconds": 30,
+                "review_timeout_seconds": 600,
+                "rules": [rule, {**rule, "action": "y"}],
+            }
+        )
+
+
+def test_self_verification_is_refused_at_registration() -> None:
+    with pytest.raises(ValueError, match="자기 검증"):
+        ActionSpec(
+            action="x", owner="finance", base_grade="B", verifier="finance", verify_skill="v"
+        )
+    with pytest.raises(ValueError, match="verifier"):
+        ActionSpec(action="x", owner="marketing", base_grade="B")
+    with pytest.raises(ValueError, match="자기 검증"):  # 요청자 목록에 검증자가 있어도 금지
+        ActionSpec(
+            action="x",
+            owner="memory",
+            requesters=["hr", "data"],
+            base_grade="B",
+            verifier="data",
+            verify_skill="v",
+        )
+
+
+def test_threshold_rules_must_reference_registered_actions(verifier: Any, sent: Any) -> None:
+    table = load_thresholds()
+    bad = table.model_copy(
+        update={"rules": [*table.rules, table.rules[0].model_copy(update={"action": "ghost"})]}
+    )
+    from ax_safety.store import Store
+
+    with pytest.raises(ValueError, match="ghost"):
+        Gate(load_registry(), bad, Store(), verifier, sent)
+
+
+def test_protected_paths_rules_are_loaded_for_both_actions() -> None:
+    """#169: 보호 경로는 generate_pr·merge_pr에 같은 목록으로 걸려 있다."""
+    table = load_thresholds()
+    rules = {rule.key: rule for rule in table.rules if rule.metric == "paths_avoid"}
+    assert set(rules) == {"pr_protected_paths", "merge_protected_paths", "revert_protected_paths"}
+    pr, merge = rules["pr_protected_paths"], rules["merge_protected_paths"]
+    revert = rules["revert_protected_paths"]
+    assert (pr.action, merge.action, revert.action) == ("generate_pr", "merge_pr", "repo_revert_pr")
+    assert pr.field == merge.field == revert.field == "changed_paths"
+    assert pr.protected == merge.protected == revert.protected
+    for path in ("shop-web/src/pages/Checkout.tsx", "shop-api/src/ax_shop_api/service.py"):
+        assert path in pr.protected
+
+
+def test_paths_avoid_rule_needs_protected() -> None:
+    base = {"key": "p", "action": "generate_pr", "metric": "paths_avoid", "field": "changed_paths"}
+    with pytest.raises(ValueError, match="protected가 필요하다"):
+        Rule.model_validate(base)
+    with pytest.raises(ValueError, match="protected가 필요하다"):
+        Rule.model_validate({**base, "protected": [""]})  # 빈 접두사는 모든 경로와 맞으므로 금지
+    with pytest.raises(ValueError, match="field가 필요하다"):
+        Rule.model_validate(
+            {**{k: v for k, v in base.items() if k != "field"}, "protected": ["a/"]}
+        )
+    rule = Rule.model_validate({**base, "protected": ["shop-web/src/lib/auth.tsx", ".github/"]})
+    assert rule.paths_protected(
+        ["shop-web/src/lib/auth.tsx", ".github/workflows/ci.yml", "shop-web/src/pages/Home.tsx"]
+    ) == ["shop-web/src/lib/auth.tsx", ".github/workflows/ci.yml"]
+
+
+# 이슈 #506 본문과 #504·#509의 개발 쪽 목록. 빠지면 개발이 놓친 파일을 safety도 놓친다
+DEV_AGENT_CONFIG_NAMES = """
+.claude .codex .cursor .gemini .vscode .devcontainer .husky .githooks .github .agents .agent .kiro
+.windsurf .roo .continue .amazonq .opencode .factory .idea .run
+CLAUDE.md AGENTS.md GEMINI.md .mcp.json .cursorrules .pre-commit-config.yaml .npmrc package.json
+pyproject.toml setup.py Makefile .clinerules .windsurfrules copilot-instructions.md conftest.py
+setup.cfg tox.ini noxfile.py requirements.txt composer.json Gemfile Taskfile.yml .envrc .gitmodules
+Dockerfile
+""".split()
+
+
+def _agent_config_rules() -> dict[str, Rule]:
+    return {rule.key: rule for rule in load_thresholds().rules if rule.metric == "paths_named"}
+
+
+def test_agent_config_rules_cover_three_actions_with_same_names() -> None:
+    """#506: PR 만들기·머지·되돌리기 PR 어느 문으로 와도 같은 목록으로 걸린다."""
+    rules = _agent_config_rules()
+    assert {key: rule.action for key, rule in rules.items()} == {
+        "pr_agent_config_paths": "generate_pr",
+        "merge_agent_config_paths": "merge_pr",
+        "revert_agent_config_paths": "repo_revert_pr",
+    }
+    pr, merge = rules["pr_agent_config_paths"], rules["merge_agent_config_paths"]
+    assert pr.names == merge.names == rules["revert_agent_config_paths"].names
+    assert pr.field == merge.field == "changed_paths"
+    assert len(set(pr.names)) == len(pr.names)
+    assert set(DEV_AGENT_CONFIG_NAMES) <= set(pr.names)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "CLAUDE.md",
+        "shop-web/CLAUDE.md",
+        "shop-web/src/deep/AGENTS.md",
+        "docs/GEMINI.md",
+        ".mcp.json",
+        "shop-web/.claude/settings.json",
+        "shop-api/.vscode/tasks.json",
+        ".claude/hooks/start.sh",
+        "shop-web/package.json",
+        "shop-web/package-lock.json",
+        "shop-api/uv.lock",
+        "shop-api/tests/conftest.py",
+        "shop-web/.gitlab-ci.yml",
+        # 표기만 다른 같은 파일
+        "shop-web/claude.md",
+        "shop-web/Claude.MD",
+        "shop-web/.CLAUDE/settings.json",
+        "sub\\CLAUDE.md",
+        "sub\\.claude\\settings.json",
+        "./CLAUDE.md",
+        "./shop-web/./CLAUDE.md",
+        "shop-web/../CLAUDE.md",
+        "shop-web//CLAUDE.md",
+        "shop-web/CLAUDE.md.",
+        "shop-web/CLAUDE.md ",
+        "shop-web/CLAUDE.md::$DATA",
+        "shop-web/.claude./settings.json",
+        # 끝 조각이 폴더 이름: 폴더 통째로, 또는 그 이름의 심볼릭 링크
+        ".claude",
+        ".claude/",
+        "shop-web/.github/",
+        "shop-web\\.claude\\",
+    ],
+)
+def test_paths_named_catches_at_any_depth_and_spelling(path: str) -> None:
+    rule = _agent_config_rules()["merge_agent_config_paths"]
+    assert rule.paths_named_hit(["docs/a.md", path]) == [path]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs/claude-notes.md",
+        "docs/CLAUDE.md.bak",
+        "docs/my.claude/a.md",
+        "shop-web/src/lib/env.ts",
+        "shop-web/src/github/index.ts",
+        "shop-web/src/package.ts",
+        "shop-web/src/pages/Notice.tsx",
+        "",
+        "./",
+    ],
+)
+def test_paths_named_leaves_similar_names_alone(path: str) -> None:
+    rule = _agent_config_rules()["merge_agent_config_paths"]
+    assert rule.paths_named_hit([path]) == []
+
+
+def test_paths_named_rule_needs_field_and_plain_names() -> None:
+    base = {"key": "n", "action": "merge_pr", "metric": "paths_named", "field": "changed_paths"}
+    with pytest.raises(ValueError, match="names가 필요하다"):
+        Rule.model_validate(base)
+    with pytest.raises(ValueError, match="field가 필요하다"):
+        Rule.model_validate(
+            {**{k: v for k, v in base.items() if k != "field"}, "names": ["CLAUDE.md"]}
+        )
+    for bad in ["", ".claude/", "sub/CLAUDE.md", "sub\\CLAUDE.md", "CLAUDE.md.", "a:b", "."]:
+        with pytest.raises(ValueError, match="이름만 쓴다"):
+            Rule.model_validate({**base, "names": ["CLAUDE.md", bad]})
+
+
+def test_on_verify_reject_hold_only_on_rollback() -> None:
+    """검증자 거절 → 사람 보류는 롤백만. 쿠폰 등은 기본값(reject) 유지 (팀 결정 12)."""
+    registry = load_registry()
+    holds = {spec.action for spec in registry.actions if spec.on_verify_reject == "hold"}
+    assert holds == {"rollback_deployment"}
+    assert registry.get("issue_coupon").on_verify_reject == "reject"  # type: ignore[union-attr]
+
+
+def test_on_verify_reject_is_validated() -> None:
+    with pytest.raises(ValueError):
+        ActionSpec(
+            action="x",
+            owner="infra",
+            base_grade="B",
+            verifier="planning",
+            verify_skill="v",
+            on_verify_reject="queue",
+        )  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="에이전트 검증자"):  # 검증자 없는 액션에는 못 쓴다
+        ActionSpec(action="x", owner="infra", base_grade="A", on_verify_reject="hold")
+    with pytest.raises(ValueError, match="에이전트 검증자"):  # 코드 규칙 검증자에도 못 쓴다
+        ActionSpec(
+            action="x", owner="infra", base_grade="B", verifier="safety", on_verify_reject="hold"
+        )
+    spec = ActionSpec(
+        action="x",
+        owner="infra",
+        base_grade="B",
+        verifier="planning",
+        verify_skill="v",
+        on_verify_reject="hold",
+    )
+    assert spec.on_verify_reject == "hold"

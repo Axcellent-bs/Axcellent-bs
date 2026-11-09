@@ -1,0 +1,393 @@
+"""에이전트 서버 뼈대: Agent Card 공개와 A2A 요청 수신.
+
+`create_agent_app(card, handlers)`가 FastAPI 앱을 만든다.
+
+- `GET /.well-known/agent-card.json`: Agent Card
+- `GET /health`: `{"data": {"status": "ok"}, "meta": {}}`
+- `POST /a2a`: `AgentRequest`를 받아 `AgentResult`를 돌려준다
+
+수신 순서 (각 단계는 아래의 작은 함수이고, 내부 로직 중 TODO는 아직 스텁이다):
+
+1. `context_id`·`tenant_id` 확인 → 없으면 `MISSING_CONTEXT`
+2. 토큰 검증 → 실패하면 `UNAUTHORIZED` (`requester`는 토큰에서 꺼내고 본문 값은 무시한다).
+   본문 `meta.token` 우선. 본문이 비었거나 자리표시자(`PLACEHOLDER_TOKEN`)일 때만
+   `Authorization: Bearer <토큰>` 헤더로 검증한다 (공유 서버의 nginx가 넣는 헤더)
+3. (새 요청일 때만) `path`에 자기 이름이 있으면 `LOOP_DETECTED`
+4. `path` 길이가 3을 넘으면 이관 큐에 넣고 `HOP_LIMIT`
+5. `allowed_requesters` 확인 → 없으면 `FORBIDDEN_SKILL`
+6. 마감(`deadline`)이 지났으면 실행하지 않고 `canceled`(`TIMEOUT`)
+7. 핸들러 호출
+8. `AgentResult` 스키마 검증 → 깨지면 `failed`(`INVALID_OUTPUT`)
+
+루프 검사는 새 요청에만 적용한다. 동기 질의의 응답은 같은 Task의 결과라서 검사하지 않는다
+(이 서버는 요청만 받으므로 응답은 HTTP 응답으로 돌려주는 값이고 별도 검사 대상이 아니다).
+"""
+
+from __future__ import annotations
+
+import hmac
+import logging
+import time
+import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
+
+from ax_agent_template import events
+from ax_agent_template.config import (
+    MAX_PATH_LENGTH,
+    PLACEHOLDER_TOKEN,
+    agent_name_scope,
+    is_mock,
+    placeholder_entries,
+    set_agent_name,
+    token_registry,
+)
+from ax_agent_template.logging import log_event
+from ax_agent_template.services import SERVICE_PORTS, department_of
+from ax_contracts.schemas import (
+    AgentCard,
+    AgentRequest,
+    AgentResult,
+    ErrorCode,
+    Escalation,
+    RequestMeta,
+    TaskStatus,
+)
+
+logger = logging.getLogger("ax.template.server")
+
+Handler = Callable[[AgentRequest], Awaitable[AgentResult | dict[str, Any]]]
+
+# 목 모드에서 이관 큐 대신 쌓아 두는 곳 (테스트에서 확인용)
+MOCK_ESCALATIONS: list[Escalation] = []
+
+
+def error_result(
+    meta: RequestMeta,
+    status: TaskStatus,
+    code: ErrorCode | str,
+    message: str = "",
+) -> AgentResult:
+    """거부·취소·실패 결과를 만든다. `outcome`에 `ErrorCode` 값을 담는다."""
+    code_value = code.value if isinstance(code, ErrorCode) else code
+    return AgentResult(
+        meta=meta,
+        status=status,
+        outcome=code_value,
+        output={"message": message} if message else {},
+    )
+
+
+# 공유 서버(251 등)의 화면은 번들에 실제 토큰을 넣지 않고 본문에 자리표시자(`PLACEHOLDER_TOKEN`,
+# config.py 하나에 둔다)를 보낸다. 그때만(또는 본문이 비었을 때만) nginx가 넣은
+# `Authorization: Bearer <토큰>`을 읽는다.
+
+
+def _bearer(authorization: str | None) -> str:
+    """`Authorization: Bearer <토큰>`의 토큰. 형식이 다르면 빈 문자열."""
+    scheme, _, value = (authorization or "").strip().partition(" ")
+    return value.strip() if scheme.lower() == "bearer" else ""
+
+
+def resolve_token(body_token: str, authorization: str | None) -> tuple[str, str]:
+    """검증에 쓸 토큰과 경로("body"·"header").
+
+    본문 우선: 본문 토큰이 실제 값이면(빈 값·자리표시자가 아니면) 헤더는 보지 않는다. 그래서 본문의
+    틀린 토큰은 헤더가 맞아도 거부된다. 본문이 비었거나 자리표시자일 때만 헤더를 쓰고, 헤더도
+    없으면 본문 값 그대로(검증에서 거부).
+    """
+    if body_token and body_token != PLACEHOLDER_TOKEN:
+        return body_token, "body"
+    header = _bearer(authorization)
+    return (header, "header") if header else (body_token, "body")
+
+
+def verify_token(token: str) -> str:
+    """토큰을 검증하고 요청자(에이전트 이름)를 돌려준다.
+
+    실제 모드: 토큰 명부(`AX_AGENT_TOKENS`)에서 같은 토큰을 찾아 그 이름을 돌려준다.
+    목 모드에서는 `mock:<이름>`도 받는다. 어느 쪽도 아니면 거부한다(fail-closed).
+    """
+    if is_mock() and token.startswith("mock:") and len(token) > len("mock:"):
+        return token.removeprefix("mock:")
+    for name, known in token_registry().items():
+        if hmac.compare_digest(known, token):
+            return name
+    raise PermissionError("토큰을 검증할 수 없다")
+
+
+async def enqueue_escalation(escalation: Escalation) -> None:
+    """이관 큐에 넣는다.
+
+    프로세스 메모리에 쌓고, 실제 모드는 공통 로그(`escalated`)에도 남겨 화면이 읽게 한다.
+    """
+    MOCK_ESCALATIONS.append(escalation)
+    if is_mock():
+        return
+    log_event(
+        escalation.context_id,
+        escalation.tenant_id,
+        "escalated",
+        {"reason": escalation.reason, "path": list(escalation.path)},
+    )
+
+
+def check_loop(card: AgentCard, meta: RequestMeta) -> bool:
+    """새 요청의 `path`에 자기 이름이 있으면 루프다."""
+    return card.name in meta.path
+
+
+def check_hop_limit(meta: RequestMeta) -> bool:
+    return len(meta.path) > MAX_PATH_LENGTH
+
+
+def check_acl(card: AgentCard, skill_id: str, requester: str) -> bool:
+    """skill이 카드에 있고, 요청자가 `allowed_requesters`에 있는지 확인한다."""
+    for skill in card.skills:
+        if skill.id == skill_id:
+            # 서비스(예: claims)가 보낸 요청은 원래 부서(support) 이름으로도 인정한다 (services.py)
+            allowed = skill.allowed_requesters
+            return requester in allowed or department_of(requester) in allowed
+    return False
+
+
+def check_deadline(meta: RequestMeta, now: datetime | None = None) -> bool:
+    """마감이 지났으면 False."""
+    return (now or datetime.now(UTC)) < meta.deadline
+
+
+def check_idempotency_key(card: AgentCard, request: AgentRequest) -> None:
+    """TODO: 상태 변경 skill(`grade`가 `read`가 아님)에는 `idempotency_key`가 필수다.
+
+    같은 키의 두 번째 요청은 이전 결과를 돌려준다. 저장소 연동 전이라 아직 검사하지 않는다.
+    """
+
+
+def _bad_request(code: str, message: str) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"error": {"code": code, "message": message}})
+
+
+def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAPI:
+    """Agent Card와 skill 핸들러로 에이전트 앱을 만든다.
+
+    `handlers`의 키는 skill id이고, 카드의 skill과 정확히 같아야 한다(어긋나면 시작할 때 실패).
+    핸들러는 `async def handler(request: AgentRequest) -> AgentResult`다.
+    """
+    skill_ids = {skill.id for skill in card.skills}
+    for name in placeholder_entries():  # 명부의 자리표시자 항목: 받지 않고 이름만 경고
+        logger.warning("AX_AGENT_TOKENS의 %s 항목은 자리표시자라 받지 않는다 (실제 토큰 필요)",
+                       name)  # fmt: skip
+    # 서비스 에이전트(services.py)는 부서 핸들러 중 자기 카드 skill만 쓴다.
+    # 핸들러 없는 skill은 그대로 실패
+    if card.name in SERVICE_PORTS:
+        handlers = {k: v for k, v in handlers.items() if k in skill_ids}
+    if set(handlers) != skill_ids:
+        missing = sorted(skill_ids - set(handlers))
+        extra = sorted(set(handlers) - skill_ids)
+        raise ValueError(f"카드와 핸들러가 다르다: 핸들러 없음={missing}, 카드에 없음={extra}")
+
+    set_agent_name(card.name)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        # 실제 모드에서 구독이 있으면 이벤트 소비를 시작한다(목 모드·구독 없음이면 아무 일도 안 함)
+        events.start_consumer()
+        try:
+            yield
+        finally:
+            await events.stop_consumer()
+
+    app = FastAPI(title=f"ax-agent-{card.name}", lifespan=lifespan)
+
+    @app.get("/health")
+    def health() -> dict:
+        return {"data": {"status": "ok"}, "meta": {}}
+
+    @app.get("/.well-known/agent-card.json")
+    def agent_card() -> dict:
+        return card.model_dump(mode="json")
+
+    @app.post("/a2a")
+    async def receive(http_request: Request) -> JSONResponse:
+        try:
+            raw = await http_request.json()
+        except ValueError:
+            return _bad_request("INVALID_REQUEST", "JSON이 아니다")
+
+        meta_raw = raw.get("meta") if isinstance(raw, dict) else None
+        if not isinstance(meta_raw, dict) or not meta_raw.get("context_id"):
+            return _bad_request(ErrorCode.MISSING_CONTEXT.value, "context_id가 없다")
+        if not meta_raw.get("tenant_id", "shop-demo"):
+            return _bad_request(ErrorCode.MISSING_CONTEXT.value, "tenant_id가 비었다")
+        try:
+            request = AgentRequest.model_validate(raw)
+        except ValidationError as exc:
+            return _bad_request("INVALID_REQUEST", str(exc))
+
+        token, via = resolve_token(request.meta.token, http_request.headers.get("authorization"))
+        if token != request.meta.token:
+            meta = request.meta.model_copy(update={"token": token})
+            request = request.model_copy(update={"meta": meta})
+        # 검증 경로와 명부 이름만 남긴다 (토큰 값은 남기지 않음)
+        name = _verified_requester(request.meta)
+        level = logging.DEBUG if via == "body" and name else logging.INFO
+        logger.log(level, "a2a 토큰 검증 via=%s requester=%s skill=%s", via, name or "(거부)",
+                   request.skill)  # fmt: skip
+
+        with agent_name_scope(card.name):
+            result = await _handle(card, handlers, request)
+        return JSONResponse(content=result.model_dump(mode="json"))
+
+    return app
+
+
+def _skill_grade(card: AgentCard, skill_id: str) -> str | None:
+    for skill in card.skills:
+        if skill.id == skill_id:
+            return skill.grade
+    return None
+
+
+def _verified_requester(meta: RequestMeta) -> str | None:
+    """로그용 요청자. 토큰에서만 꺼내고 본문 값은 쓰지 않는다. 검증에 실패하면 `None`이다."""
+    try:
+        return verify_token(meta.token)
+    except PermissionError:
+        return None
+
+
+def _hide_token(result: AgentResult) -> AgentResult:
+    """결과 `meta.token`을 비운다.
+
+    핸들러가 요청 meta를 그대로 돌려줘도 토큰이 응답에 남지 않게 한다.
+
+    계약의 `RequestMeta.token`은 필수 필드라 지우지 않고 빈 문자열로 가린다.
+    """
+    if not result.meta.token:
+        return result
+    return result.model_copy(update={"meta": result.meta.model_copy(update={"token": ""})})
+
+
+def _execution_id(result: AgentResult) -> str | None:
+    value = result.output.get("execution_id")
+    return value if isinstance(value, str) and len(value) <= 64 else None
+
+
+async def _handle(
+    card: AgentCard, handlers: Mapping[str, Handler], request: AgentRequest
+) -> AgentResult:
+    """요청을 처리하고 받은 것·보낸 것을 공통 로그에 한 줄씩 남긴다(COM-08).
+
+    `source`는 이 에이전트, `requester`는 요청한 쪽이다. 로그 `payload`에는 skill·상태·ID 같은
+    사실만 담고 `input`·`untrusted`·판단 문장은 넣지 않는다.
+
+    두 기록의 payload에 같은 `request_id`(요청마다 새로 만든 uuid4 hex)를 넣어 정확히 짝짓게 하고,
+    보낸 기록에는 받은 직후부터 결과까지 걸린 시간 `duration_ms`(정수, `time.monotonic`)를 넣는다.
+    거절·실패한 요청도 같다.
+    """
+    started = time.monotonic()
+    request_id = uuid.uuid4().hex
+    meta = request.meta
+    requester = _verified_requester(meta)
+    grade = _skill_grade(card, request.skill)
+    received: dict[str, Any] = {"skill": request.skill, "path": list(meta.path)}
+    if meta.idempotency_key:
+        received["idempotency_key"] = meta.idempotency_key
+    received["request_id"] = request_id
+    log_event(
+        meta.context_id,
+        meta.tenant_id,
+        "request_received",
+        received,
+        source=card.name,
+        skill=request.skill,
+        grade=grade,
+        requester=requester,
+    )
+    result = _hide_token(await _process(card, handlers, request))
+    sent: dict[str, Any] = {
+        "skill": request.skill,
+        "status": result.status.value,
+        "outcome": result.outcome,
+    }
+    if execution_id := _execution_id(result):
+        sent["execution_id"] = execution_id
+    if result.fallback:  # 템플릿으로 대체한 이유 (LLM 문장 원문은 남기지 않는다)
+        sent["fallback"] = True
+        if result.fallback_reason:
+            sent["fallback_reason"] = result.fallback_reason
+        if result.fallback_numbers:
+            sent["fallback_numbers"] = result.fallback_numbers
+    sent["request_id"] = request_id
+    sent["duration_ms"] = int((time.monotonic() - started) * 1000)
+    log_event(
+        meta.context_id,
+        meta.tenant_id,
+        "result_sent",
+        sent,
+        source=card.name,
+        skill=request.skill,
+        task_status=result.status.value,
+        grade=grade,
+        requester=requester,
+    )
+    return result
+
+
+async def _process(
+    card: AgentCard, handlers: Mapping[str, Handler], request: AgentRequest
+) -> AgentResult:
+    meta = request.meta
+
+    try:
+        requester = verify_token(meta.token)
+    except PermissionError:
+        return error_result(meta, TaskStatus.REJECTED, ErrorCode.UNAUTHORIZED)
+    meta = meta.model_copy(update={"requester": requester})  # 본문의 requester는 버린다
+    request = request.model_copy(update={"meta": meta})
+
+    if check_loop(card, meta):
+        return error_result(meta, TaskStatus.REJECTED, ErrorCode.LOOP_DETECTED)
+
+    if check_hop_limit(meta):
+        escalation = Escalation(
+            context_id=meta.context_id,
+            tenant_id=meta.tenant_id,
+            path=meta.path,
+            reason=ErrorCode.HOP_LIMIT.value,
+        )
+        try:
+            await enqueue_escalation(escalation)
+        except NotImplementedError:
+            logger.warning("이관 큐가 아직 연결되지 않았다: %s", escalation.context_id)
+        return error_result(meta, TaskStatus.REJECTED, ErrorCode.HOP_LIMIT)
+
+    if not check_acl(card, request.skill, requester):
+        return error_result(meta, TaskStatus.REJECTED, ErrorCode.FORBIDDEN_SKILL)
+
+    if not check_deadline(meta):
+        return error_result(meta, TaskStatus.CANCELED, ErrorCode.TIMEOUT)
+
+    check_idempotency_key(card, request)
+
+    try:
+        raw_result = await handlers[request.skill](request)
+    except Exception:
+        logger.exception("핸들러 오류: skill=%s context_id=%s", request.skill, meta.context_id)
+        return error_result(meta, TaskStatus.FAILED, "handler_error")
+
+    try:
+        result = AgentResult.model_validate(
+            raw_result.model_dump() if isinstance(raw_result, AgentResult) else raw_result
+        )
+    except ValidationError:
+        return error_result(meta, TaskStatus.FAILED, ErrorCode.INVALID_OUTPUT)
+    if result.meta.context_id != meta.context_id:
+        return error_result(meta, TaskStatus.FAILED, ErrorCode.INVALID_OUTPUT)
+    return result

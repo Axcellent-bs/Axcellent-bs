@@ -1,0 +1,163 @@
+{
+  "impacts": {
+    "ctx_inc_0001": {
+      "failed_order_count": 3,
+      "affected_customer_count": 3,
+      "damage_amount": 87000,
+      "affected_customer_ids": [
+        "buy_0901",
+        "buy_0902",
+        "buy_0903"
+      ]
+    },
+    "ctx_inc_0002": {
+      "failed_order_count": 8,
+      "affected_customer_count": 6,
+      "damage_amount": 214500,
+      "affected_customer_ids": [
+        "buy_0904",
+        "buy_0905",
+        "buy_0906",
+        "buy_0907",
+        "buy_0908",
+        "buy_0909"
+      ]
+    },
+    "ctx_inc_scn_a_0001": {
+      "failed_order_count": 6,
+      "affected_customer_count": 4,
+      "damage_amount": 95000,
+      "affected_customer_ids": [
+        "buy_0001",
+        "buy_0002",
+        "buy_0003",
+        "buy_0004"
+      ],
+      "by_category": [
+        {
+          "category": "books",
+          "failed_order_count": 4,
+          "damage_amount": 82500
+        },
+        {
+          "category": "stationery",
+          "failed_order_count": 2,
+          "damage_amount": 12500
+        }
+      ]
+    },
+    "ctx_inc_0100": {
+      "failed_order_count": 2,
+      "affected_customer_count": 2,
+      "damage_amount": 30000,
+      "affected_customer_ids": [
+        "buy_0005",
+        "buy_0006"
+      ],
+      "by_category": [
+        {
+          "category": "books",
+          "failed_order_count": 2,
+          "damage_amount": 30000
+        }
+      ]
+    },
+    "ctx_inc_0101": {
+      "failed_order_count": 2,
+      "affected_customer_count": 2,
+      "damage_amount": 41000,
+      "affected_customer_ids": [
+        "buy_0007",
+        "buy_0012"
+      ],
+      "by_category": [
+        {
+          "category": "books",
+          "failed_order_count": 2,
+          "damage_amount": 41000
+        }
+      ]
+    },
+    "ctx_inc_0102": {
+      "failed_order_count": 1,
+      "affected_customer_count": 1,
+      "damage_amount": 23000,
+      "affected_customer_ids": [
+        "buy_0007"
+      ],
+      "by_category": [
+        {
+          "category": "books",
+          "failed_order_count": 1,
+          "damage_amount": 23000
+        }
+      ]
+    },
+    "ctx_inc_0103": {
+      "failed_order_count": 2,
+      "affected_customer_count": 2,
+      "damage_amount": 35500,
+      "affected_customer_ids": [
+        "buy_0007",
+        "buy_0014"
+      ],
+      "by_category": [
+        {
+          "category": "books",
+          "failed_order_count": 1,
+          "damage_amount": 27000
+        },
+        {
+          "category": "stationery",
+          "failed_order_count": 1,
+          "damage_amount": 8500
+        }
+      ]
+    },
+    "ctx_inc_0104": {
+      "failed_order_count": 3,
+      "affected_customer_count": 2,
+      "damage_amount": 52000,
+      "affected_customer_ids": [
+        "buy_0011",
+        "buy_0016"
+      ],
+      "by_category": [
+        {
+          "category": "books",
+          "failed_order_count": 2,
+          "damage_amount": 44000
+        },
+        {
+          "category": "stationery",
+          "failed_order_count": 1,
+          "damage_amount": 8000
+        }
+      ]
+    }
+  },
+  "_note": "impacts.ctx_inc_scn_a_0001은 data 목(agents/data seed.py, 장애 구간 6건·4명·95,000원)과 같은 숫자다. ctx_inc_0100은 지난 사건이다.",
+  "team_headcount": {
+    "_note": "테스트·예시 전용 가상 팀 인원. 2026-12-01 발령: 개발팀 1명 → 기획팀",
+    "2026-01": {
+      "기획팀": 4,
+      "개발팀": 6,
+      "서비스운영": 3,
+      "고객지원": 5,
+      "마케팅": 3,
+      "재무/정산": 2,
+      "데이터분석": 2,
+      "인사총무": 2
+    },
+    "2026-12": {
+      "기획팀": 5,
+      "개발팀": 5,
+      "서비스운영": 3,
+      "고객지원": 5,
+      "마케팅": 3,
+      "재무/정산": 2,
+      "데이터분석": 2,
+      "인사총무": 2
+    }
+  }
+}

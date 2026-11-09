@@ -1,0 +1,403 @@
+{
+  "pairs": {
+    "dev": 32,
+    "test": 32,
+    "labels": {
+      "duplicate": 20,
+      "update": 20,
+      "related": 20,
+      "unrelated": 4
+    }
+  },
+  "thresholds": {
+    "dense_T_low": 0.7786,
+    "dense_best_candidates": 1,
+    "dice_current": 0.5,
+    "dice_tuned_on_dev": 0.2273,
+    "T_auto": 0.8351,
+    "auto_open": true
+  },
+  "dev": {
+    "dice_current": {
+      "n": 32,
+      "accuracy": 0.375,
+      "precision": null,
+      "recall": 0.0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 20,
+      "tn": 12
+    },
+    "dice_tuned": {
+      "n": 32,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tp": 20,
+      "fp": 0,
+      "fn": 0,
+      "tn": 12
+    },
+    "dense": {
+      "n": 32,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tp": 20,
+      "fp": 0,
+      "fn": 0,
+      "tn": 12
+    },
+    "cosine_by_label": {
+      "duplicate": [
+        0.836,
+        0.87,
+        0.858,
+        0.848,
+        0.827,
+        0.837,
+        0.885,
+        0.878,
+        0.861,
+        0.866
+      ],
+      "update": [
+        0.795,
+        0.826,
+        0.83,
+        0.808,
+        0.825,
+        0.779,
+        0.794,
+        0.825,
+        0.816,
+        0.808
+      ],
+      "related": [
+        0.726,
+        0.688,
+        0.692,
+        0.719,
+        0.724,
+        0.717,
+        0.727,
+        0.741,
+        0.734,
+        0.692
+      ],
+      "unrelated": [
+        0.653,
+        0.667
+      ]
+    },
+    "wrong_auto_merge_by_cosine": 0
+  },
+  "test1": {
+    "dice_current": {
+      "n": 32,
+      "accuracy": 0.5,
+      "precision": 1.0,
+      "recall": 0.2,
+      "tp": 4,
+      "fp": 0,
+      "fn": 16,
+      "tn": 12
+    },
+    "dice_tuned": {
+      "n": 32,
+      "accuracy": 0.9062,
+      "precision": 0.9048,
+      "recall": 0.95,
+      "tp": 19,
+      "fp": 2,
+      "fn": 1,
+      "tn": 10
+    },
+    "dense": {
+      "n": 32,
+      "accuracy": 0.9688,
+      "precision": 1.0,
+      "recall": 0.95,
+      "tp": 19,
+      "fp": 0,
+      "fn": 1,
+      "tn": 12
+    }
+  },
+  "test2": {
+    "candidates_over_T_low": 19,
+    "llm_calls": 19,
+    "llm_verdict_accuracy": 1.0,
+    "llm_confusion": {
+      "duplicate->same": 10,
+      "update->changed": 9
+    },
+    "auto_merged": 6,
+    "wrong_auto_merge": 0,
+    "duplicates_in_test": 10,
+    "duplicates_auto_merged": 6,
+    "human_queue": 13,
+    "human_queue_by_label": {
+      "duplicate": 4,
+      "update": 9,
+      "related": 0,
+      "unrelated": 0
+    }
+  },
+  "titles": {
+    "groups": 10,
+    "valid": 10,
+    "samples": [
+      {
+        "old": "일일 매출 리포트는 매일 오전 8시에 자동으로 만든다",
+        "new": "매일 아침 8시에 일일 매출 리포트를 자동 생성한다",
+        "title": "일일 매출 리포트를 매일 오전 8시에 자동 생성"
+      },
+      {
+        "old": "고객 문의는 접수 후 1시간 안에 첫 응답을 한다",
+        "new": "문의가 들어오면 한 시간 이내에 처음 답변을 보낸다",
+        "title": "고객 문의는 접수 후 1시간 이내에 첫 응답을 보낸다"
+      },
+      {
+        "old": "푸시 알림은 오후 9시 이후에는 보내지 않는다",
+        "new": "밤 9시가 지나면 푸시 알림을 발송하지 않는다",
+        "title": "오후 9시 이후에는 푸시 알림을 보내지 않는다"
+      },
+      {
+        "old": "인수인계 문서는 퇴사 2주 전까지 작성을 마친다",
+        "new": "퇴사 2주 전에는 인수인계 문서를 완성해 둔다",
+        "title": "인수인계 문서는 퇴사 2주 전까지 완성한다"
+      }
+    ]
+  },
+  "totals": {
+    "embedding_texts": 94,
+    "claude_calls": 29
+  },
+  "test_rows": [
+    {
+      "topic": 11,
+      "label": "duplicate",
+      "dense": 0.855,
+      "dice": 0.488,
+      "verdict": "same"
+    },
+    {
+      "topic": 11,
+      "label": "update",
+      "dense": 0.781,
+      "dice": 0.364,
+      "verdict": "changed"
+    },
+    {
+      "topic": 11,
+      "label": "related",
+      "dense": 0.706,
+      "dice": 0.195,
+      "verdict": null
+    },
+    {
+      "topic": 12,
+      "label": "duplicate",
+      "dense": 0.826,
+      "dice": 0.105,
+      "verdict": "same"
+    },
+    {
+      "topic": 12,
+      "label": "update",
+      "dense": 0.815,
+      "dice": 0.269,
+      "verdict": "changed"
+    },
+    {
+      "topic": 12,
+      "label": "related",
+      "dense": 0.685,
+      "dice": 0.1,
+      "verdict": null
+    },
+    {
+      "topic": 13,
+      "label": "duplicate",
+      "dense": 0.855,
+      "dice": 0.389,
+      "verdict": "same"
+    },
+    {
+      "topic": 13,
+      "label": "update",
+      "dense": 0.821,
+      "dice": 0.267,
+      "verdict": "changed"
+    },
+    {
+      "topic": 13,
+      "label": "related",
+      "dense": 0.708,
+      "dice": 0.171,
+      "verdict": null
+    },
+    {
+      "topic": 14,
+      "label": "duplicate",
+      "dense": 0.85,
+      "dice": 0.486,
+      "verdict": "same"
+    },
+    {
+      "topic": 14,
+      "label": "update",
+      "dense": 0.821,
+      "dice": 0.327,
+      "verdict": "changed"
+    },
+    {
+      "topic": 14,
+      "label": "related",
+      "dense": 0.718,
+      "dice": 0.146,
+      "verdict": null
+    },
+    {
+      "topic": 15,
+      "label": "duplicate",
+      "dense": 0.882,
+      "dice": 0.789,
+      "verdict": "same"
+    },
+    {
+      "topic": 15,
+      "label": "update",
+      "dense": 0.805,
+      "dice": 0.426,
+      "verdict": "changed"
+    },
+    {
+      "topic": 15,
+      "label": "related",
+      "dense": 0.76,
+      "dice": 0.3,
+      "verdict": null
+    },
+    {
+      "topic": 16,
+      "label": "duplicate",
+      "dense": 0.888,
+      "dice": 0.524,
+      "verdict": "same"
+    },
+    {
+      "topic": 16,
+      "label": "update",
+      "dense": 0.844,
+      "dice": 0.56,
+      "verdict": "changed"
+    },
+    {
+      "topic": 16,
+      "label": "related",
+      "dense": 0.74,
+      "dice": 0.154,
+      "verdict": null
+    },
+    {
+      "topic": 17,
+      "label": "duplicate",
+      "dense": 0.844,
+      "dice": 0.368,
+      "verdict": "same"
+    },
+    {
+      "topic": 17,
+      "label": "update",
+      "dense": 0.76,
+      "dice": 0.245,
+      "verdict": null
+    },
+    {
+      "topic": 17,
+      "label": "related",
+      "dense": 0.728,
+      "dice": 0.054,
+      "verdict": null
+    },
+    {
+      "topic": 18,
+      "label": "duplicate",
+      "dense": 0.834,
+      "dice": 0.5,
+      "verdict": "same"
+    },
+    {
+      "topic": 18,
+      "label": "update",
+      "dense": 0.816,
+      "dice": 0.281,
+      "verdict": "changed"
+    },
+    {
+      "topic": 18,
+      "label": "related",
+      "dense": 0.701,
+      "dice": 0.095,
+      "verdict": null
+    },
+    {
+      "topic": 19,
+      "label": "duplicate",
+      "dense": 0.811,
+      "dice": 0.326,
+      "verdict": "same"
+    },
+    {
+      "topic": 19,
+      "label": "update",
+      "dense": 0.788,
+      "dice": 0.286,
+      "verdict": "changed"
+    },
+    {
+      "topic": 19,
+      "label": "related",
+      "dense": 0.775,
+      "dice": 0.256,
+      "verdict": null
+    },
+    {
+      "topic": 20,
+      "label": "duplicate",
+      "dense": 0.83,
+      "dice": 0.478,
+      "verdict": "same"
+    },
+    {
+      "topic": 20,
+      "label": "update",
+      "dense": 0.817,
+      "dice": 0.357,
+      "verdict": "changed"
+    },
+    {
+      "topic": 20,
+      "label": "related",
+      "dense": 0.698,
+      "dice": 0.186,
+      "verdict": null
+    },
+    {
+      "topic": 12,
+      "label": "unrelated",
+      "dense": 0.667,
+      "dice": 0.051,
+      "verdict": null
+    },
+    {
+      "topic": 15,
+      "label": "unrelated",
+      "dense": 0.614,
+      "dice": 0.098,
+      "verdict": null
+    }
+  ]
+}

@@ -1,0 +1,529 @@
+{
+  "name": "inquiry",
+  "owner": "병환",
+  "description": "고객 문의 — support 업무 중 이 서비스 skill만 맡는다. 고객지원 — 고객 문의를 접수하고 분류·근거 검색·답변 초안 3가지와 가드 검사를 만들어 상담원 화면에 제공한다",
+  "url": "http://inquiry:8102/a2a",
+  "version": "0.1.0",
+  "capabilities": {
+    "streaming": true,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "list_inquiries",
+      "description": "문의 목록을 최근 수정 순으로 돌려준다. 상태(open, resolved, escalated)로 거를 수 있다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#ListInquiriesInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#ConversationListItem",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator",
+        "shop-api"
+      ],
+      "verifier": null,
+      "priority": "required",
+      "handoff": false
+    },
+    {
+      "id": "get_inquiry",
+      "description": "문의 하나의 메시지 전체와 메시지별 분석(분류, 근거, 초안 3가지, 가드 결과)을 돌려준다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#GetInquiryInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator",
+        "shop-api",
+        "support"
+      ],
+      "verifier": null,
+      "priority": "required",
+      "handoff": false
+    },
+    {
+      "id": "check_reply",
+      "description": "고객에게 보낼 답변 문장을 코드 규칙으로 검사해 통과 여부와 걸린 규칙(환불 약속, 개인정보, 빈 답변)을 돌려준다. 답변 문장은 untrusted.text로 받는다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#CheckReplyInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Validation",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "summarize_inquiry",
+      "description": "문의 대화를 요약하고 해결 여부, 다음 조치, 사람에게 넘길 필요를 돌려준다. 저장하지 않는다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SummarizeInquiryInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Summary",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "create_inquiry",
+      "description": "새 문의를 접수하고 첫 메시지를 분석한다. 제목과 본문은 untrusted.subject, untrusted.message로 받는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#CreateInquiryInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "shop-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "add_customer_message",
+      "description": "기존 문의에 고객 메시지를 추가하고 분석한다. 본문은 untrusted.message로 받는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#AddCustomerMessageInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "shop-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "send_reply",
+      "description": "상담원이 확정한 답변을 고객에게 보낸다. 가드를 통과하지 못하면 보내지 않고 이유를 돌려준다. 답변은 untrusted.text로 받는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SendReplyInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "reject_draft",
+      "description": "상담원이 거절한 답변 초안 스타일을 기록한다 (초안 채택률 지표용). 선택 reason_code(wrong_info·missing_policy·tone·too_long·other)로 거절 이유를 남기면 지식 공백 보고서가 쓴다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#RejectDraftInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#RejectDraftInput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "set_inquiry_status",
+      "description": "문의 상태를 open, resolved, escalated 중 하나로 바꾼다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SetInquiryStatusInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "set_triage",
+      "description": "문의를 \"분류 필요\"로 올리거나(send), 상담원이 분류 이름을 정하고 마치거나(decide), 표시를 지운다(clear). 오류 코드가 없는 문의를 따로 모으는 표시이고 돈은 움직이지 않는다. 분류 이름에 개인정보가 있으면 거절한다. 상태 변경이라 execute()를 거친다. 자동으로 올리는 일은 접수 때 코드 규칙이 한다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SetTriageInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Conversation",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "record_claim_activity",
+      "description": "클레임 서비스가 알려 준 클레임 처리 결과(접수·판단·입고·검수·지급)를 이어진 문의의 AI 처리 내력에 남긴다. 코드 값과 금액만 받고 고객 글은 받지 않는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#RecordClaimActivityInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#RecordClaimActivityInput",
+      "grade": "A",
+      "allowed_requesters": [
+        "support"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "submit_feedback",
+      "description": "해결된 문의에 고객이 별점·해결 여부·후기 글(untrusted.comment)로 평가를 남긴다. 문의당 한 번이고 개인정보는 가려 저장하며, 부적절한 표현이 있으면 확인 대기로 둔다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SubmitFeedbackInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Feedback",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "shop-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "set_feedback_status",
+      "description": "후기를 공개 또는 숨김으로 정한다 (확인 대기 후기의 결정). 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#SetFeedbackStatusInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Feedback",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "add_resolution_note",
+      "description": "해결된 문의에 상담원이 해결 메모(원인·조치·결과)를 남긴다. 글은 untrusted(root_cause·action_taken·result)로만 받고 개인정보는 가려 저장하며 칸마다 1000자까지, 셋 다 비면 받지 않는다. 작성자는 화면이 사람 토큰에서 채운 이름이다. 메모는 최신 순으로 쌓고 고치거나 지우지 않는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#AddResolutionNoteInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#ResolutionNote",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "preview_data_purge",
+      "description": "개인정보 삭제를 미리 본다(읽기). mode=customer_request면 삭제를 요청한 문의(inquiry_id)의 구매자 문의 중 무엇이 지워지고 무엇이 보존 의무로 남는지(처리 중·클레임 연결, 남기는 날 retained_until)를, mode=expired면 받은 지 3년이 지나 지울 문의를 돌려준다. 아무것도 바꾸지 않고 고객 원문은 싣지 않는다. 클레임 연결을 읽지 못하면 claims_unavailable.",
+      "input_schema": "agents/support/src/support_agent/purge_schemas.py#PreviewPurgeInput",
+      "output_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeReport",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "purge_customer_data",
+      "description": "고객 요청에 따라 삭제를 요청한 문의(inquiry_id)의 구매자의 문의 원문(이름·제목·메시지·답변 초안·번역·요약·활동 상세·피드백 글·해결 메모 본문)을 [삭제됨]으로 바꾼다. 안전 관문 approve_data_deletion(C)이 늘 사람에게 보류하며, 승인된 뒤 같은 키로 다시 부르면 집행한다. 처리 중(열림·이관)인 문의와 클레임이 이어진 문의는 보존 의무로 남기고 지우는 날(retained_until, 받은 날로부터 3년)을 알린다. 지울 것이 없으면 승인을 부탁하지 않는다(nothing_to_purge). 행은 감사 기록 때문에 남기고 retention_purge 기록을 건마다 남긴다. 되돌릴 수 없다.",
+      "input_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeCustomerDataInput",
+      "output_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeReport",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "purge_expired_inquiries",
+      "description": "받은 지 3년이 지난 문의의 원문을 [삭제됨]으로 바꾼다. 대시보드가 하루에 한 번 부른다. 팀 방식(shop-api retention)대로 기본은 dry-run이라 사람이 SUPPORT_INQUIRY_RETENTION_APPLY=1로 켜기 전에는 건수만 알리고(outcome dry_run) 아무것도 바꾸지 않는다. 열린 문의도 지우지만 클레임이 이어진 문의는 클레임 기록의 보유기간(기본 5년)까지 남기고 지우는 날(retained_until)만 알린다. 클레임 연결을 읽지 못하면 지우지 않는다(claims_unavailable). 행은 감사 기록 때문에 남기고 건마다 retention_purge 기록(기준 retention_3y, 실행자 역할 system)을 남긴다. 지울 문의가 없으면 nothing_expired. 되돌릴 수 없어 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeExpiredInput",
+      "output_schema": "agents/support/src/support_agent/purge_schemas.py#PurgeReport",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "reveal_original",
+      "description": "욕설·모욕·위협으로 가려진 고객 메시지의 원문을 연다. 상담 콘솔은 가려진 메시지의 원문을 응답에서 빼므로 이 skill로만 받는다. 열 때마다 연 사람(화면이 사람 토큰에서 채운 이름)을 문의의 AI 처리 내력에 남기고 원문은 내력에 싣지 않는다. 가려진 고객 메시지가 아니면 not_found. 기록이 남아서 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#RevealOriginalInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Message",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "support_chat_send",
+      "description": "사람이 고객지원 AI에게 말을 건다(직접 대화, 조회와 설명만). 말은 untrusted.message로만 받고 who는 화면이 사람 토큰에서 채운 이름이다. thread_id가 없으면 새 대화를 열고, 말을 저장한 대화(status answering)를 곧바로 돌려준 뒤 AI 답은 뒤에서 만들어 덧붙인다(화면은 support_chat_get으로 다시 읽는다). context는 화면 API가 코드로 센 문의·클레임·후기 집계 숫자다. 대화 글이 저장돼서 execute()를 거치고, 문의·돈·쿠폰 상태는 바꾸지 않는다. 닫힌 대화·답을 만드는 중인 대화는 invalid_state, 남의 대화는 not_found.",
+      "input_schema": "agents/support/src/support_agent/chat_schemas.py#ChatSendInput",
+      "output_schema": "agents/support/src/support_agent/chat.py#ChatThread",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "support_chat_close",
+      "description": "직접 대화를 끝내고 한두 줄 요약(summary)을 남긴다. 본인과 담당·관리자(role)만 닫을 수 있고 그 밖은 not_found. 이미 닫힌 대화는 그대로 돌려준다. 말이 30분(SUPPORT_CHAT_IDLE_MINUTES) 없는 대화는 읽을 때 같은 방식으로 자동으로 끝난다. 대화 상태가 바뀌어서 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/chat_schemas.py#ChatCloseInput",
+      "output_schema": "agents/support/src/support_agent/chat.py#ChatThread",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "support_chat_list",
+      "description": "직접 대화 목록을 최근 순으로 읽는다. 열람 권한대로 본인 대화는 원문, 담당·관리자는 다른 사람 대화의 요약(일이 생긴 대화는 원문), 그 밖의 사람은 다른 사람 대화를 보지 못한다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/support/src/support_agent/chat_schemas.py#ChatListInput",
+      "output_schema": "agents/support/src/support_agent/chat.py#ChatThread",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "support_chat_get",
+      "description": "직접 대화 하나를 읽는다. 열람 권한이 없으면(남의 대화) not_found. 화면은 status가 answering이면 이 skill로 다시 읽는다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/support/src/support_agent/chat_schemas.py#ChatGetInput",
+      "output_schema": "agents/support/src/support_agent/chat.py#ChatThread",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_feedback",
+      "description": "후기(해결 결과 평가) 목록을 최근 순으로 읽는다. 상태·별점으로 거를 수 있다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#ListFeedbackInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Feedback",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "feedback_overview",
+      "description": "해결된 문의의 평가를 코드가 센 만족도 요약(평균 별점, 만족 비율, 해결 응답 비율, 분포, 분류별, 확인 대기, 선제 연락 대상)으로 읽는다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#ListFeedbackInput",
+      "output_schema": "agents/support/src/support_agent/schemas.py#Feedback",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "inquiry_overview",
+      "description": "문의 KPI(초안 채택률·수정 정도·가드 적중·분류별 건수)와 답변 대기 문의를 코드로 집계해 돌려준다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/support/src/support_agent/schemas.py#ListInquiriesInput",
+      "output_schema": "agents/support/src/support_agent/insight_schemas.py#InquiryOverview",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator",
+        "data"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "detect_inquiry_surge",
+      "description": "최근 창의 분류별 문의 수를 평소(앞선 기간의 같은 길이 창 평균, baseline_method=median이면 창별 건수의 중앙값)와 견줘 급증한 분류를 돌려준다 (DEP-CS-05). 샘플은 문의 ID만 담고 원문은 담지 않는다. 총량 이상은 data 소관이다.",
+      "input_schema": "agents/support/src/support_agent/insight_schemas.py#SurgeInput",
+      "output_schema": "agents/support/src/support_agent/insight_schemas.py#SurgeReport",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator",
+        "data"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "propose_change_requests",
+      "description": "분류별 문의 급증(detect_inquiry_surge와 같은 입력)에서 기획에 보낼 변경 요청안을 코드 규칙으로 만든다 (LLM 없음). 제안마다 제목 한 줄·근거 요약(건수·평소 대비 배수)·대표 문의(샘플 중 번호가 가장 작은 문의)·나머지 근거 문의 ID(inq_<번호>)·이미 요청됨 여부·보내지 않기로 한 제안의 이유를 담고, 고객 원문이나 개인정보는 담지 않는다. 만들기만 하고 아무것도 보내거나 저장하지 않는다. 보내는 일은 사람이 고른 뒤 request_change가 한다.",
+      "input_schema": "agents/support/src/support_agent/proposal_schemas.py#ProposeChangesInput",
+      "output_schema": "agents/support/src/support_agent/proposal_schemas.py#ProposeChangesReport",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "decline_change_proposal",
+      "description": "변경 요청 제안을 보내지 않기로 한 이유를 남긴다 (#281). 제안은 저장하지 않으므로 분류(topic_code)와 대표 문의(inquiry_id)로 가리킨다. 이유는 already_known·not_a_real_problem·other 중 하나이고, 자유 메모는 untrusted note(200자 이하, 개인정보가 있으면 거부)로 받는다. 결정한 사람(author)은 서버가 사람 토큰에서 채운다. 기획으로는 아무것도 보내지 않으며 같은 제안에 두 번 해도 한 번만 기록된다. execute()를 거치는 쓰기라 안전 관문에 등록돼 있다.",
+      "input_schema": "agents/support/src/support_agent/proposal_schemas.py#DeclineProposalInput",
+      "output_schema": "agents/support/src/support_agent/proposal_schemas.py#DeclineProposalOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "answer_planning_question",
+      "description": "기획이 문의에서 보낸 변경 요청(create_ticket)의 근거를 되물으면, 문의 서비스가 보낸 요청의 기록(보낼 때 코드가 정리한 근거 요약·근거 문의 ID)으로만 답한다 (#264, LLM 없음). 이 사건(ctx_req_)·요청 번호(REQ-n)·테넌트가 모두 맞는 기록이 없으면 unknown, 근거(about: evidence) 질문이고 고를 답(options)이 없고 보낸 근거 요약이 있으면 answered(근거 요약·대표 문의·보낸 시각 + 근거 ID), 우리 요청이지만 기록으로 답할 수 없으면(다른 칸을 묻거나 고를 답이 있거나 보낸 근거가 없는 예전 기록, 답에 개인정보가 섞일 때) needs_human. 질문 문구는 판단에 쓰지 않는다. 시각은 요청을 보낸 시각이고 문의가 몰린 시각이 아니다. 상태를 바꾸지 않는 read skill이라 execute()를 거치지 않는다. 사람이 답하는 화면과 receive_planning_answer 전송은 후속이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "request_change",
+      "description": "문의에서 나온 변경 요청을 기획 create_ticket(직통, 기획이 execute)로 보내고, 돌려받은 ctx_req_ 사건 번호를 문의와 연결해 저장한다. 같은 요청이 있으면 linked_duplicate로 묶여 한 사건에 문의가 여러 개 붙을 수 있다. 제목·근거는 요약만 받고 개인정보가 있으면 거부한다. 고객 원문은 보내지 않는다.",
+      "input_schema": "agents/support/src/support_agent/change_schemas.py#RequestChangeInput",
+      "output_schema": "agents/support/src/support_agent/change_schemas.py#RequestChangeOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_change_requests",
+      "description": "문의와 기획 변경 요청의 연결 목록 (문의·사건·상태로 거름).",
+      "input_schema": "agents/support/src/support_agent/change_schemas.py#ListChangeRequestsInput",
+      "output_schema": "agents/support/src/support_agent/change_schemas.py#ListChangeRequestsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "optional",
+      "handoff": false
+    },
+    {
+      "id": "receive_change_result",
+      "description": "기획이 변경 요청을 닫을 때(완료·거절) 보내는 결과(ChangeResultInput)를 그 ctx_req_ 사건에 연결된 모든 문의에 적용하고 적용한 문의 수를 돌려준다(저장소 기록). 같은 결과의 재전송은 한 번만 적용하고, 이미 닫힌 요청에 다른 결과가 오면 거절한다. 연결된 문의가 없으면 applied=0. 요약은 코드가 만든 한 줄이며 고객 공지는 따로 붙인다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ChangeResultInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ChangeResultOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "diagnose_payment",
+      "description": "문의의 주문에서 결제가 어디서 막혔는지 주문 상태와 결제 시도 기록으로 코드가 정한다(읽기). 결제 완료·결제 실패(서버 문제인지 거절인지)·결제 시도 없음·중복 결제·기록 불일치·취소를 가르고 다음 할 일(재시도·대기·환불 검토·담당자 확인)을 돌려준다. 고객 원문은 읽지 않고, 재결제·취소·환불은 하지 않는다. 문의의 구매자와 주문의 구매자가 다르면 not_found다.",
+      "input_schema": "agents/support/src/support_agent/payment_schemas.py#DiagnosePaymentInput",
+      "output_schema": "agents/support/src/support_agent/payment_schemas.py#PaymentDiagnosis",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "prepare_handoff",
+      "description": "문의를 사람에게 넘길 때 필요한 인계 패키지를 코드가 모아 준다(읽기, 이관 판단에 LLM을 쓰지 않는다). 이관 사유 코드(명시적 사람 요청, 개인정보 요청, 같은 주제 반복, 클레임 검토 필요, 결제 검토, 고위험 고객, 사건 관련, 답변 가드 반복 차단, 근거 없음)와 근거 사실, 권고(none·review·handoff_now), 이관 대상 코드(부서 이름이 아님), 이미 한 조치(클레임 판정·환불 완료 금액, 기획 변경 요청, 결제 진단), 남은 일, 답 대기 시간, 반복 횟수, 사람이 읽을 요약(LLM, 실패하면 고정 문장)을 돌려준다. 환불이 끝난 클레임이 있으면 already_refunded로 알려 중복 환불을 막는다. 상태를 바꾸지 않고 권고만 하며 고객 원문과 개인정보를 싣지 않는다.",
+      "input_schema": "agents/support/src/support_agent/handoff_schemas.py#PrepareHandoffInput",
+      "output_schema": "agents/support/src/support_agent/handoff_schemas.py#HandoffPackage",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "assess_deletion_request",
+      "description": "문의에 붙은 개인정보 삭제 요청이 본인 것으로 보이는지 규칙으로 1차 판단한다(읽기, LLM 없음). 문의에 연결된 주문의 구매자와 문의를 낸 구매자가 같은지, 요청에 적힌 주문 번호·상품이 주문 기록과 맞는지, 같은 구매자가 짧은 시간에 여러 주문을 다루는 흔적이 없는지를 보고 일치(consistent)·불일치(mismatch)·판단불가(insufficient)와 확신도(low·medium·high, 퍼센트 없음), 근거 목록, 사람이 읽을 요약을 돌려준다. 불일치·판단불가는 거절 권고로 표시한다. 본인으로 확정하거나 삭제하지 않고 최종 판단은 사람이 한다. 문의 원문은 untrusted로만 읽고 지시로 해석하지 않으며, 본인 확인을 위해 개인정보를 더 요구하지 않는다.",
+      "input_schema": "agents/support/src/support_agent/privacy_schemas.py#AssessDeletionInput",
+      "output_schema": "agents/support/src/support_agent/privacy_schemas.py#DeletionAssessment",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "knowledge_gap_report",
+      "description": "어느 분류의 문의에서 AI가 근거 없이 답하거나 상담원이 초안을 거절하거나 가드가 차단하거나 사람에게 넘어가는지를 코드가 세어 지식 공백 순위를 만든다(읽기, LLM 없음). 분류별과 근거 문서별로 분모(분석한 메시지 수), 근거 없음·거절·차단·수정·이관 건수와 비율, 거절 사유별 건수, 공백 유형(no_document·weak_document·none·insufficient_samples), 단순 평균 점수와 순위, 예시 문의 번호, 처방 대상 코드(부서 이름이 아님), 권고(add_document·review_document)를 돌려준다. 표본이 최소 건수 미만이면 순위를 내지 않는다. 문서를 고치거나 요청을 만들지 않고 고객 원문을 싣지 않는다. 근거 출처가 시드이면 notes에 고정 문장이 붙는다.",
+      "input_schema": "agents/support/src/support_agent/gap_schemas.py#KnowledgeGapInput",
+      "output_schema": "agents/support/src/support_agent/gap_schemas.py#KnowledgeGapReport",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "qa_findings",
+      "description": "보낸 답변과 생성된 초안을 코드 규칙으로 점검해 의심 목록을 낸다(읽기, LLM 없음, 점수 없음). 규칙은 가드 적중(guard_hit), 근거 없이 나간 답변(no_evidence_reply), 근거 조각 활용이 약함(weak_grounding), 근거에 없는 숫자(unsupported_number), 고객 언어와 다른 답변 언어(language_mismatch), 초안을 많이 고친 정도(heavy_edit)이고 문의·메시지 번호, 규칙 코드, 심각도(flag·info), 잰 값과 기준값만 돌려준다. 점검한 답변 수와 의심 비율, 규칙별 건수를 세고, 규칙에 하나도 걸리지 않은 문의 중 일부를 고정 시드로 뽑은 사람 점검용 대조군 번호를 준다. 아무것도 바꾸지 않고 고객 원문·답변 본문을 싣지 않는다. 기준값은 모두 시드이고 규칙은 근사라 오탐·누락이 있다.",
+      "input_schema": "agents/support/src/support_agent/qa_schemas.py#QaFindingsInput",
+      "output_schema": "agents/support/src/support_agent/qa_schemas.py#QaReport",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "get_privacy_audit",
+      "description": "문의 하나의 개인정보 처리 기록을 보여 준다(읽기, LLM 없음). 마스킹 감사 기록(단계 ingest·llm_input·event_untrusted·transfer, 종류별 탐지 건수, 조치, 마스킹 규칙 버전, 시각)과 답변 출처 기록(초안 스타일, 근거 문서 ID·점수, 경로 llm·template_fallback, 모델 이름, 가드 규칙 코드, 결과 generated·accepted·edited·rejected·blocked)을 시간순으로 돌려주고, 처리 활동 요약(범주·목적·받는 곳·보유·국외 이전)을 코드 상수에서 붙인다. 기록은 기존 쓰기 skill이 처리 중에 추가만 하며 이 skill은 아무것도 바꾸지 않는다. 고객 원문, 마스킹한 글, 값의 해시, 이름·연락처는 출력에 없다. 탐지한 것의 증빙이지 개인정보가 없었다는 증빙이 아니며 법적 판단이 아니다.",
+      "input_schema": "agents/support/src/support_agent/audit_schemas.py#GetPrivacyAuditInput",
+      "output_schema": "agents/support/src/support_agent/audit_schemas.py#PrivacyAudit",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "analyze_receipt",
+      "description": "영수증 글(untrusted.receipt_text)과 사진(untrusted.images)에서 금액·날짜·주문번호·배송비·품목을 코드가 뽑아 문의에 붙은 주문과 대조한다(읽기). 개인정보는 가린 뒤 읽고 원문은 저장하지 않는다. 사진은 이미지 분석이 연결됐을 때만 읽고 아니면 읽지 못했다고 알린다. 같음·다름·확인할 수 없음만 말하고 환불 판정은 하지 않는다.",
+      "input_schema": "agents/support/src/support_agent/analysis_schemas.py#AnalyzeReceiptInput",
+      "output_schema": "agents/support/src/support_agent/analysis_schemas.py#AnalyzeReceiptOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "analyze_claim_request",
+      "description": "문의의 마지막 고객 메시지를 환불·교환·취소·이벤트 문의로 분류하고(LLM은 분류만, 못 쓰면 단어 규칙) 고객이 말한 품목을 주문과 맞춘 뒤, 접수했다면 어떻게 판정될지 규칙(claim_rules)으로 환불 범위를 미리 계산한다(읽기, 접수하지 않음). 담당자가 확인해 create_claim에 보낼 입력(suggested_claim)을 함께 돌려준다.",
+      "input_schema": "agents/support/src/support_agent/analysis_schemas.py#AnalyzeClaimRequestInput",
+      "output_schema": "agents/support/src/support_agent/analysis_schemas.py#AnalyzeClaimRequestOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    }
+  ]
+}

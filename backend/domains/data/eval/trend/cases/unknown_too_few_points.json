@@ -1,0 +1,41 @@
+{
+ "id": "unknown_too_few_points",
+ "kind": "unknown",
+ "input": {
+  "keyword_groups": [
+   {
+    "group_name": "고양이 독서대",
+    "keywords": [
+     "고양이 독서대"
+    ]
+   }
+  ],
+  "start_date": "2026-03-09",
+  "end_date": "2026-05-10",
+  "time_unit": "date"
+ },
+ "window": {
+  "from": "2026-05-04",
+  "to": "2026-05-10"
+ },
+ "series": {
+  "고양이 독서대": [
+   [
+    "2026-05-04",
+    100.0
+   ]
+  ]
+ },
+ "expected": {
+  "고양이 독서대": {
+   "status": "unknown",
+   "unknown_reason": "too_few_points"
+  }
+ },
+ "injection": null,
+ "source": {
+  "series": "sparse_cat_bookstand",
+  "segment_end": "2026-05-10"
+ },
+ "memo": "458일 중 1일만 값이 있다(실제 응답). 나머지는 0이 아니라 자료 없음"
+}

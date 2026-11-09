@@ -1,0 +1,20 @@
+{
+ "judge": "data_agent.skills.campaign_effect:eval_products_judge",
+ "holdout_seed": 2026110501,
+ "metrics": {
+  "campaign_products.direction_rate": 1.0,
+  "campaign_products.other_product_none_rate": 1.0,
+  "campaign_products.excess_error": 0.0,
+  "campaign_products.match_rate": 1.0,
+  "campaign_products.no_match_unknown_rate": 1.0,
+  "campaign_products.gap_unknown_rate": 1.0,
+  "campaign_products.short_baseline_unknown_rate": 1.0,
+  "holdout.campaign_products.direction_rate": 0.8889,
+  "holdout.campaign_products.other_product_none_rate": null,
+  "holdout.campaign_products.excess_error": 0.0,
+  "holdout.campaign_products.match_rate": 1.0,
+  "holdout.campaign_products.no_match_unknown_rate": null,
+  "holdout.campaign_products.gap_unknown_rate": 1.0,
+  "holdout.campaign_products.short_baseline_unknown_rate": null
+ }
+}

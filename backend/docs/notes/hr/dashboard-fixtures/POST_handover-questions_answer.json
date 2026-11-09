@@ -1,0 +1,11 @@
+{
+  "data": {
+    "completeness": 100,
+    "handover_id": "hnd_748c7c4358f6",
+    "remaining_questions": [],
+    "status": "ready"
+  },
+  "meta": {
+    "tenant_id": "shop-demo"
+  }
+}

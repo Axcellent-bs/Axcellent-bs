@@ -1,0 +1,23 @@
+{
+ "judge": "data_agent.skills.trend_scan:judge",
+ "settings": {
+  "z_threshold": 3.2,
+  "max_segment_days": 7,
+  "mad_floor": 0.05,
+  "min_baseline_points": 28,
+  "min_baseline_level": 0.01
+ },
+ "holdout_seed": 2026110202,
+ "metrics": {
+  "trend.detection_rate": 0.9091,
+  "trend.false_positive_rate": 0.0,
+  "trend.unknown_handled_rate": 1.0,
+  "trend.group_isolation": 1.0,
+  "trend.seasonal_false_positive_rate": 0.6667,
+  "trend.real_detection_rate": 1.0,
+  "holdout.trend.detection_rate": 0.8125,
+  "holdout.trend.false_positive_rate": 0.0,
+  "holdout.trend.unknown_handled_rate": null,
+  "holdout.trend.group_isolation": null
+ }
+}

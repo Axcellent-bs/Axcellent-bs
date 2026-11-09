@@ -1,0 +1,2 @@
+# 셸 스크립트는 어느 OS에서 받아도 LF (CRLF로 받으면 bash가 줄 끝 CR 때문에 오류를 낸다)
+*.sh text eol=lf

@@ -1,0 +1,15 @@
+{
+ "judge": "data_agent.skills.campaign_effect:eval_sales_judge",
+ "holdout_seed": 2026110401,
+ "metrics": {
+  "campaign_revenue.direction_rate": 1.0,
+  "campaign_revenue.excess_error": 0.0,
+  "campaign_revenue.gap_unknown_rate": 1.0,
+  "campaign_revenue.short_baseline_unknown_rate": 1.0,
+  "campaign_revenue.direct_match": 1.0,
+  "holdout.campaign_revenue.direction_rate": 0.875,
+  "holdout.campaign_revenue.excess_error": 0.0,
+  "holdout.campaign_revenue.gap_unknown_rate": 1.0,
+  "holdout.campaign_revenue.direct_match": 1.0
+ }
+}

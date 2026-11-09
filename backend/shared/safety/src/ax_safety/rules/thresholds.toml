@@ -1,0 +1,641 @@
+# 기준 금액 등급표 (SAF-02). 원본은 재무 기준표 v1, 공통 구성안 13장 결정 5번.
+#
+# 모든 값은 시작값이다. 바꾸면 version을 올린다. 사람만 바꾼다(PR). 에이전트는 조회만 한다.
+# 규칙에 걸리면 C, 아니면 레지스트리 기본 등급을 쓴다.
+#
+# metric:
+# - amount: 이번 요청의 코드 계산 금액
+# - unit: 이번 요청의 단가
+# - daily_total: 같은 tenant·같은 액션의 오늘(UTC) 실행 누적 + 이번 금액
+# - context_total: 같은 context_id·같은 액션의 실행 누적 + 이번 금액
+# - customer_total: 같은 context_id·같은 고객의 실행 누적 + 이번 금액
+# - daily_count: 같은 tenant·같은 액션의 오늘(UTC) 실행 건수 + 이번 1건
+# - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
+# op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
+
+version = 8
+
+# B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
+verify_timeout_seconds = 30
+
+# C 보류 건을 사람이 결정하지 않으면 자동 거절하는 시간(초). 데모 10분
+review_timeout_seconds = 600
+
+[[rules]]
+key = "coupon_total"
+action = "issue_coupon"
+metric = "amount"
+op = ">="
+value = 300000
+
+[[rules]]
+key = "coupon_unit"
+action = "issue_coupon"
+metric = "unit"
+op = ">"
+value = 20000
+
+[[rules]]
+key = "coupon_daily"
+action = "issue_coupon"
+metric = "daily_total"
+op = ">="
+value = 1000000
+
+[[rules]]
+key = "compensation_per_context"
+action = "issue_coupon"
+metric = "context_total"
+op = ">="
+value = 1000000
+when = { purpose_code = "compensation" }
+
+[[rules]]
+key = "compensation_per_customer"
+action = "issue_coupon"
+metric = "customer_total"
+op = ">="
+value = 50000
+when = { purpose_code = "compensation" }
+
+[[rules]]
+key = "refund_single"
+action = "refund_request"
+metric = "amount"
+op = ">="
+value = 100000
+
+# ---- 금액이 아닌 규칙. 아래 값은 모두 제안값(담당 확인 전)
+[[rules]]
+key = "pr_changed_lines"
+action = "generate_pr"
+metric = "param"
+field = "changed_lines"
+op = ">"
+value = 300
+
+[[rules]]
+key = "pr_changed_files"
+action = "generate_pr"
+metric = "param"
+field = "changed_files"
+op = ">"
+value = 20
+
+[[rules]]
+key = "pr_allowed_paths"
+action = "generate_pr"
+metric = "paths_within"
+field = "changed_paths"
+allowed = ["shop-api/", "shop-web/", "docs/"]
+
+# 보호 경로 (#169, 안전 담당). 결제·인증·데이터에 닿는 변경은 허용 경로·크기 안이어도
+# planning이 보낸 irreversible_count와 상관없이 항상 C. 값은 제안값.
+# 경로는 ax-backend·ax-frontend 저장소 루트 기준. 같은 경로이거나 그 접두사로 시작하면 걸린다.
+# 필드가 없거나 문자열 목록이 아니면 걸린 것으로 본다(fail-closed).
+[[rules]]
+key = "pr_protected_paths"
+action = "generate_pr"
+metric = "paths_avoid"
+field = "changed_paths"
+protected = [
+  # shop-web (ax-frontend): 결제 화면, 로그인·인증, API 클라이언트, 환경값
+  "shop-web/src/pages/Checkout.tsx",
+  "shop-web/src/lib/auth.tsx",
+  "shop-web/src/lib/api.ts",
+  "shop-web/src/lib/env.ts",
+  # shop-api: DB 스키마, 주문·결제 로직, 쿠폰 지급 로직, 시드 데이터
+  "shop-api/src/ax_shop_api/db.py",
+  "shop-api/src/ax_shop_api/service.py",
+  "shop-api/src/ax_shop_api/promotions.py",
+  "shop-api/src/ax_shop_api/seed.py",
+  # 관문 규칙·CI·계약. 허용 경로 밖이지만 허용 목록이 넓어져도 막히도록 같이 둔다
+  ".github/",
+  "safety/",
+  "contracts/",
+]
+
+# 에이전트 설정·훅·설치 스크립트 (#506). 머지되면 이 레포를 여는 개발자의 Claude Code·Codex·에디터나
+# CI가 자동으로 읽고 실행하는 파일이라 AI가 만든 PR이 바꾸면 항상 C. 경로 앞부분이 아니라 이름으로
+# 잡으므로 깊이와 상관없다(shop-web/CLAUDE.md). 대소문자를 가리지 않고, \ 구분자·./·끝의 /와 Windows가
+# 무시하는 끝의 점·공백·:스트림도 같은 이름으로 본다. 필드가 없거나 문자열 목록이 아니면 걸린 것으로
+# 본다(fail-closed). 개발 쪽 AGENT_CONFIG_DIRS·AGENT_CONFIG_FILES와 맞춘다. 세 규칙의 목록은 같다.
+[[rules]]
+key = "pr_agent_config_paths"
+action = "generate_pr"
+metric = "paths_named"
+field = "changed_paths"
+names = [
+  # 코딩 에이전트 지시·설정 (폴더)
+  ".claude", ".codex", ".cursor", ".gemini", ".agents", ".agent", ".kiro", ".windsurf", ".roo",
+  ".continue", ".amazonq", ".opencode", ".factory",
+  # 코딩 에이전트 지시·설정 (파일)
+  "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".mcp.json", ".cursorrules", ".clinerules", ".windsurfrules",
+  "copilot-instructions.md", ".aider.conf.yml",
+  # 에디터·개발 환경이 열 때 실행 (.devcontainer.json은 폴더 없이 쓰는 형태)
+  ".vscode", ".devcontainer", ".devcontainer.json", ".idea", ".run", ".envrc", ".env",
+  # git 훅·하위 저장소
+  ".husky", ".githooks", ".pre-commit-config.yaml", ".gitmodules",
+  # CI
+  ".github", ".gitlab", ".gitlab-ci.yml", ".circleci", "Jenkinsfile", "azure-pipelines.yml",
+  "bitbucket-pipelines.yml",
+  # 설치·빌드 스크립트
+  "package.json", "pyproject.toml", "setup.py", "setup.cfg", "composer.json", "Gemfile", "Pipfile",
+  "requirements.txt", "Makefile", "GNUmakefile", "Dockerfile", "Taskfile.yml", "Taskfile.yaml",
+  # 테스트 도구가 자동으로 실행
+  "conftest.py", "tox.ini", "noxfile.py",
+  # 패키지 관리자 설정 (받는 곳을 바꾸거나 설치 때 코드를 실행)
+  ".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmfile.cjs", "pnpm-workspace.yaml", "bunfig.toml", "uv.toml",
+  "pip.conf",
+  # 잠금 파일 (받을 주소를 바꿔치기할 수 있다)
+  "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
+  "uv.lock", "poetry.lock", "Pipfile.lock", "composer.lock", "Gemfile.lock",
+]
+
+# ---- 기획·개발 자동화 (#166). 값은 제안값. params 키는 planning이 맞춰 보낸다.
+# 필드가 없거나 정수가 아니면 걸린 것으로 본다(fail-closed).
+[[rules]]
+key = "spec_open_question"
+action = "confirm_spec"
+metric = "param"
+field = "open_questions"
+op = ">"
+value = 0
+
+[[rules]]
+key = "spec_rejected_warning"
+action = "confirm_spec"
+metric = "param"
+field = "warnings"
+op = ">"
+value = 0
+
+[[rules]]
+key = "spec_no_basis"
+action = "confirm_spec"
+metric = "param"
+field = "basis_count"
+op = "<"
+value = 1
+
+# 되돌릴 수 없는 영역(결제 데이터 삭제, 개인정보, 실제 송금 연동 등)에 닿는 항목 수. 0이 아니면 항상 C
+[[rules]]
+key = "irreversible"
+action = "confirm_spec"
+metric = "param"
+field = "irreversible_count"
+op = ">"
+value = 0
+
+# ---- 인사 (#180). 값은 제안값. 필드가 없거나 정수가 아니면 걸린 것으로 본다(fail-closed).
+# 인수인계 완성도(0~100 정수 %). 기준 미만이면 confirm_handover도 C
+[[rules]]
+key = "handover_completeness"
+action = "confirm_handover"
+metric = "param"
+field = "completeness_percent"
+op = "<"
+value = 80
+
+# merge_pr: generate_pr와 같은 크기·경로 기준. 규칙 키는 파일 안에서 겹치지 않게 merge_ 접두사
+[[rules]]
+key = "merge_changed_lines"
+action = "merge_pr"
+metric = "param"
+field = "changed_lines"
+op = ">"
+value = 300
+
+[[rules]]
+key = "merge_changed_files"
+action = "merge_pr"
+metric = "param"
+field = "changed_files"
+op = ">"
+value = 20
+
+[[rules]]
+key = "merge_allowed_paths"
+action = "merge_pr"
+metric = "paths_within"
+field = "changed_paths"
+allowed = ["shop-api/", "shop-web/", "docs/"]
+
+# 보호 경로: pr_protected_paths와 같은 목록. 값은 제안값
+[[rules]]
+key = "merge_protected_paths"
+action = "merge_pr"
+metric = "paths_avoid"
+field = "changed_paths"
+protected = [
+  # shop-web (ax-frontend): 결제 화면, 로그인·인증, API 클라이언트, 환경값
+  "shop-web/src/pages/Checkout.tsx",
+  "shop-web/src/lib/auth.tsx",
+  "shop-web/src/lib/api.ts",
+  "shop-web/src/lib/env.ts",
+  # shop-api: DB 스키마, 주문·결제 로직, 쿠폰 지급 로직, 시드 데이터
+  "shop-api/src/ax_shop_api/db.py",
+  "shop-api/src/ax_shop_api/service.py",
+  "shop-api/src/ax_shop_api/promotions.py",
+  "shop-api/src/ax_shop_api/seed.py",
+  # 관문 규칙·CI·계약. 허용 경로 밖이지만 허용 목록이 넓어져도 막히도록 같이 둔다
+  ".github/",
+  "safety/",
+  "contracts/",
+]
+
+# 에이전트 설정·훅·설치 스크립트: pr_agent_config_paths와 같은 목록
+[[rules]]
+key = "merge_agent_config_paths"
+action = "merge_pr"
+metric = "paths_named"
+field = "changed_paths"
+names = [
+  # 코딩 에이전트 지시·설정 (폴더)
+  ".claude", ".codex", ".cursor", ".gemini", ".agents", ".agent", ".kiro", ".windsurf", ".roo",
+  ".continue", ".amazonq", ".opencode", ".factory",
+  # 코딩 에이전트 지시·설정 (파일)
+  "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".mcp.json", ".cursorrules", ".clinerules", ".windsurfrules",
+  "copilot-instructions.md", ".aider.conf.yml",
+  # 에디터·개발 환경이 열 때 실행 (.devcontainer.json은 폴더 없이 쓰는 형태)
+  ".vscode", ".devcontainer", ".devcontainer.json", ".idea", ".run", ".envrc", ".env",
+  # git 훅·하위 저장소
+  ".husky", ".githooks", ".pre-commit-config.yaml", ".gitmodules",
+  # CI
+  ".github", ".gitlab", ".gitlab-ci.yml", ".circleci", "Jenkinsfile", "azure-pipelines.yml",
+  "bitbucket-pipelines.yml",
+  # 설치·빌드 스크립트
+  "package.json", "pyproject.toml", "setup.py", "setup.cfg", "composer.json", "Gemfile", "Pipfile",
+  "requirements.txt", "Makefile", "GNUmakefile", "Dockerfile", "Taskfile.yml", "Taskfile.yaml",
+  # 테스트 도구가 자동으로 실행
+  "conftest.py", "tox.ini", "noxfile.py",
+  # 패키지 관리자 설정 (받는 곳을 바꾸거나 설치 때 코드를 실행)
+  ".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmfile.cjs", "pnpm-workspace.yaml", "bunfig.toml", "uv.toml",
+  "pip.conf",
+  # 잠금 파일 (받을 주소를 바꿔치기할 수 있다)
+  "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
+  "uv.lock", "poetry.lock", "Pipfile.lock", "composer.lock", "Gemfile.lock",
+]
+
+[[rules]]
+key = "pr_review_mismatch"
+action = "merge_pr"
+metric = "param"
+field = "review_mismatch_count"
+op = ">="
+value = 2
+
+[[rules]]
+key = "pr_linked_incident"
+action = "merge_pr"
+metric = "param"
+field = "linked_incident_count"
+op = ">"
+value = 0
+# 교차검증 근거(cross_check = true)가 붙으면 아래 merge_cross_* 규칙 넷으로 대신 본다
+unless = { cross_check = true }
+
+# ---- merge_pr 교차검증 (다른 부서 근거로 판정). 개발 AI가 근거를 모아 cross_check = true와 함께 보낸다.
+# - 근거가 대신하는 것은 "장애 났던 경로"(pr_linked_incident) 하나뿐이다. 크기·허용 경로·보호 경로·
+#   검수 불일치·되돌릴 수 없는 영역은 코드 위험이라 운영 근거로 풀지 않는다 (걸리면 그대로 C)
+# - 하나라도 걸리면 C(사람 확인). 진행 중인 사건과 겹쳐도 자동 거절하지 않는다: 그 PR이 장애
+#   수정일 수 있어서, 거절 대신 사람이 본다 (보고서의 rules에 걸린 규칙이 남는다)
+# - 필드가 없거나 형식이 틀리면 걸린 것으로 본다(fail-closed). 서비스를 안 고른 회사는 근거를 못
+#   모으므로 evidence_missing으로 사람 확인
+# - 시간 창(데이터분석 24시간, 같은 경로 장애 7일)과 근거별 대기(30초)는 개발 AI가 근거를 모을 때
+#   쓰는 값이다. 관문은 그 결과만 본다
+# 진행 중인 사건과 바뀐 경로의 구성요소가 겹치는 수 (총괄 find_active_incident)
+[[rules]]
+key = "merge_cross_active_incident"
+action = "merge_pr"
+metric = "param"
+field = "active_incident_overlap"
+op = ">"
+value = 0
+when = { cross_check = true }
+
+# 데이터분석 anomaly_detection 최근 24시간 판정. "normal"만 통과 ("anomaly"·"unknown"은 사람 확인)
+[[rules]]
+key = "merge_cross_data_verdict"
+action = "merge_pr"
+metric = "param_in"
+field = "data_verdict"
+allowed = ["normal"]
+when = { cross_check = true }
+
+# 같은 경로의 최근 7일 장애·revert 수
+[[rules]]
+key = "merge_cross_recent_incident"
+action = "merge_pr"
+metric = "param"
+field = "recent_incident_count"
+op = ">"
+value = 0
+when = { cross_check = true }
+
+# 모으지 못한 근거 수 (서비스 꺼짐·호출 실패·30초 안에 응답 없음)
+[[rules]]
+key = "merge_cross_evidence_missing"
+action = "merge_pr"
+metric = "param"
+field = "evidence_missing"
+op = ">"
+value = 0
+when = { cross_check = true }
+
+[[rules]]
+key = "merge_irreversible"
+action = "merge_pr"
+metric = "param"
+field = "irreversible_count"
+op = ">"
+value = 0
+
+# ---- auto_policy_update: 자동 처리 범위 (L0~L3, planning AUTO_LEVELS). 한 단계 줄이기만 A, 나머지는 C.
+# planning은 params에 target = "L{지금}->L{바꿀 단계}"와 to = 바꿀 단계(정수)를 보낸다.
+# to만으로는 줄이기(L2 → L1)와 넓히기(L0 → L1)가 같은 값이라, 한 단계 내리는 이동만 목록으로 허용한다.
+# 목록 밖 이동(넓히기, 여러 단계 건너뛰기, 모르는 형식)이거나 target이 없으면 C
+[[rules]]
+key = "auto_policy_shrink_only"
+action = "auto_policy_update"
+metric = "param_in"
+field = "target"
+allowed = ["L1->L0", "L2->L1", "L3->L2"]
+
+# 줄이기 결과는 0~2만 될 수 있다. to가 없거나 정수가 아니거나 2보다 크면 C
+[[rules]]
+key = "auto_policy_to_level"
+action = "auto_policy_update"
+metric = "param"
+field = "to"
+op = ">"
+value = 2
+
+# repo_revert_pr: 되돌리기 PR도 merge_pr과 같은 크기·경로·보호 경로·되돌릴 수 없는 영역 기준 (revert_ 접두사)
+[[rules]]
+key = "revert_changed_lines"
+action = "repo_revert_pr"
+metric = "param"
+field = "changed_lines"
+op = ">"
+value = 300
+
+[[rules]]
+key = "revert_changed_files"
+action = "repo_revert_pr"
+metric = "param"
+field = "changed_files"
+op = ">"
+value = 20
+
+[[rules]]
+key = "revert_allowed_paths"
+action = "repo_revert_pr"
+metric = "paths_within"
+field = "changed_paths"
+allowed = ["shop-api/", "shop-web/", "docs/"]
+
+[[rules]]
+key = "revert_protected_paths"
+action = "repo_revert_pr"
+metric = "paths_avoid"
+field = "changed_paths"
+protected = [
+  # shop-web (ax-frontend): 결제 화면, 로그인·인증, API 클라이언트, 환경값
+  "shop-web/src/pages/Checkout.tsx",
+  "shop-web/src/lib/auth.tsx",
+  "shop-web/src/lib/api.ts",
+  "shop-web/src/lib/env.ts",
+  # shop-api: DB 스키마, 주문·결제 로직, 쿠폰 지급 로직, 시드 데이터
+  "shop-api/src/ax_shop_api/db.py",
+  "shop-api/src/ax_shop_api/service.py",
+  "shop-api/src/ax_shop_api/promotions.py",
+  "shop-api/src/ax_shop_api/seed.py",
+  # 관문 규칙·CI·계약. 허용 경로 밖이지만 허용 목록이 넓어져도 막히도록 같이 둔다
+  ".github/",
+  "safety/",
+  "contracts/",
+]
+
+# 에이전트 설정·훅·설치 스크립트: pr_agent_config_paths와 같은 목록
+[[rules]]
+key = "revert_agent_config_paths"
+action = "repo_revert_pr"
+metric = "paths_named"
+field = "changed_paths"
+names = [
+  # 코딩 에이전트 지시·설정 (폴더)
+  ".claude", ".codex", ".cursor", ".gemini", ".agents", ".agent", ".kiro", ".windsurf", ".roo",
+  ".continue", ".amazonq", ".opencode", ".factory",
+  # 코딩 에이전트 지시·설정 (파일)
+  "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".mcp.json", ".cursorrules", ".clinerules", ".windsurfrules",
+  "copilot-instructions.md", ".aider.conf.yml",
+  # 에디터·개발 환경이 열 때 실행 (.devcontainer.json은 폴더 없이 쓰는 형태)
+  ".vscode", ".devcontainer", ".devcontainer.json", ".idea", ".run", ".envrc", ".env",
+  # git 훅·하위 저장소
+  ".husky", ".githooks", ".pre-commit-config.yaml", ".gitmodules",
+  # CI
+  ".github", ".gitlab", ".gitlab-ci.yml", ".circleci", "Jenkinsfile", "azure-pipelines.yml",
+  "bitbucket-pipelines.yml",
+  # 설치·빌드 스크립트
+  "package.json", "pyproject.toml", "setup.py", "setup.cfg", "composer.json", "Gemfile", "Pipfile",
+  "requirements.txt", "Makefile", "GNUmakefile", "Dockerfile", "Taskfile.yml", "Taskfile.yaml",
+  # 테스트 도구가 자동으로 실행
+  "conftest.py", "tox.ini", "noxfile.py",
+  # 패키지 관리자 설정 (받는 곳을 바꾸거나 설치 때 코드를 실행)
+  ".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmfile.cjs", "pnpm-workspace.yaml", "bunfig.toml", "uv.toml",
+  "pip.conf",
+  # 잠금 파일 (받을 주소를 바꿔치기할 수 있다)
+  "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
+  "uv.lock", "poetry.lock", "Pipfile.lock", "composer.lock", "Gemfile.lock",
+]
+
+[[rules]]
+key = "revert_irreversible"
+action = "repo_revert_pr"
+metric = "param"
+field = "irreversible_count"
+op = ">"
+value = 0
+
+# ---- 인프라 롤백 (SCN-A, docs/notes/safety/rollback-paths.md). 값은 인프라 합의값.
+# params는 infra-dejafix가 코드로 계산해 보낸다(handlers.path_params). 하나라도 걸리면 C(사람 승인),
+# 넷 다 통과(1·0·0·0)하면 B로 planning verify_rollback_target 교차검증.
+# 필드가 없거나 0 이상 정수가 아니면 걸린 것으로 본다(fail-closed).
+# 원인 후보 배포 수. 후보가 여러 개면 C
+[[rules]]
+key = "rollback_multiple_suspects"
+action = "rollback_deployment"
+metric = "param"
+field = "suspect_count"
+op = ">"
+value = 1
+
+# 원인 확신도가 high가 아니면 1. 1이면 C
+[[rules]]
+key = "rollback_low_confidence"
+action = "rollback_deployment"
+metric = "param"
+field = "low_confidence"
+op = ">"
+value = 0
+
+# 되돌릴 대상 배포의 되돌릴 수 없는 변경(DB 마이그레이션 등) 수. 0이 아니면 C
+[[rules]]
+key = "rollback_irreversible"
+action = "rollback_deployment"
+metric = "param"
+field = "irreversible_count"
+op = ">"
+value = 0
+
+# 같은 사건에서 이미 실행한 롤백 수. 두 번째 롤백부터 C
+[[rules]]
+key = "rollback_repeat"
+action = "rollback_deployment"
+metric = "param"
+field = "prior_rollbacks"
+op = ">"
+value = 0
+
+# ---- 마케팅 SNS·영상 (#487). 필드가 없거나 정수가 아니면 걸린 것으로 본다(fail-closed).
+# 예산 근거: 영상 1건(720p 8초) 약 1,300원 = 0.81달러(2026-10-27 공급자 단가) × 1,500원(보수적 환율) + 입력 토큰 여유.
+# 하루 게시 3건 × 건당 2번 시도 = 6건 ≈ 7,800원. 넘어도 막지 않고 사람이 본다. 실제 비용을 재면 다시 정한다.
+# publish_sns는 기본 등급이 C라 지금은 어차피 사람이 본다. 아래 규칙은 무엇이 걸렸는지 보고서에
+# 남기고, 나중에 B로 내려도 그대로 C로 막는다.
+[[rules]]
+key = "sns_ai_label_missing"
+action = "publish_sns"
+metric = "param"
+field = "ai_label_missing_count"
+op = ">"
+value = 0
+
+[[rules]]
+key = "sns_text_mismatch"
+action = "publish_sns"
+metric = "param"
+field = "text_mismatch_count"
+op = ">"
+value = 0
+
+[[rules]]
+key = "sns_constraint_missing"
+action = "publish_sns"
+metric = "param"
+field = "constraint_missing_count"
+op = ">"
+value = 0
+
+# 오늘 게시 수. 요청 값을 믿지 않고 관문 실행 기록으로 센다. 4건째부터 걸린다
+[[rules]]
+key = "sns_daily_posts"
+action = "publish_sns"
+metric = "daily_count"
+op = ">"
+value = 3
+
+# 공지의 SNS 채널은 publish_sns로 보내야 한다 (마케팅 쪽 거부와 이중 방어)
+[[rules]]
+key = "notice_sns_channel"
+action = "publish_notice"
+metric = "param_in"
+field = "channel_code"
+allowed = ["banner", "email"]
+when = { channel_code = "sns" }
+
+# 영상 건당 비용. 1건 약 1,300원의 1.5배. 더 비싼 모델·길이로 바뀌면 사람이 본다
+# 매체 종류가 image·video가 아니거나 없으면 어느 상한을 쓸지 알 수 없어 C
+[[rules]]
+key = "media_kind_known"
+action = "generate_media"
+metric = "param_in"
+field = "media_kind"
+allowed = ["image", "video"]
+
+# 영상 8초 720p 약 0.81 USD(약 1,150원). 2,000원 이상이면 단가표·환율이 이상한 것이라 사람이 본다
+[[rules]]
+key = "video_cost_single"
+action = "generate_media"
+when = { media_kind = "video" }
+metric = "amount"
+op = ">="
+value = 2000
+
+# 이미지 1장 1024 medium 약 80원, high 약 300원(0.211 USD). 400원 이상이면 사람이 본다
+[[rules]]
+key = "image_cost_single"
+action = "generate_media"
+when = { media_kind = "image" }
+metric = "amount"
+op = ">="
+value = 400
+
+# 하루 누적은 이미지·영상을 합쳐 본다 (같은 생성 예산)
+[[rules]]
+key = "media_cost_daily"
+action = "generate_media"
+metric = "daily_total"
+op = ">="
+value = 10000
+
+# 유료 호출인데 비용이 0이면 계산이 잘못된 것이다. 0원이 상한을 지나가지 않게 막는다
+[[rules]]
+key = "media_cost_zero"
+action = "generate_media"
+metric = "amount"
+op = "<"
+value = 1
+
+[[rules]]
+key = "video_duration"
+action = "generate_media"
+when = { media_kind = "video" }
+metric = "param"
+field = "duration_s"
+op = ">"
+value = 8
+
+# ---- 캠페인 예산. 값은 시작값. 재무는 승인하지 않으므로 금액 기준은 이 표가 맡는다.
+# 월 예산(재무 finance_rules.toml, 임시 100만 원)의 절반 이상은 사람이 본다
+[[rules]]
+key = "campaign_budget_single"
+action = "start_campaign"
+metric = "amount"
+op = ">="
+value = 500000
+
+# 하루에 시작하는 캠페인 예산 합계가 월 예산 이상이면 사람이 본다 (작게 쪼개 여러 번 시작하는 것을 막는다)
+[[rules]]
+key = "campaign_budget_daily"
+action = "start_campaign"
+metric = "daily_total"
+op = ">="
+value = 1000000
+
+# 예산 0원 이하 시작은 계산이 잘못된 것이다
+[[rules]]
+key = "campaign_budget_zero"
+action = "start_campaign"
+metric = "amount"
+op = "<"
+value = 1
+
+# ---- 보유기간 지난 개인정보 지우기 (고객지원, #736). 기본 A(매일 도는 법정 파기)지만 되돌릴 수 없다.
+# 한 번에 지우는 건수가 평소보다 많으면 날짜 계산·설정이 잘못됐을 수 있어 사람이 본다.
+# 처음 켜는 날처럼 쌓인 건을 한꺼번에 지울 때도 사람이 한 번 확인한다. count가 없으면 C
+[[rules]]
+key = "purge_inquiries_batch"
+action = "purge_expired_inquiries"
+metric = "param"
+field = "count"
+op = ">"
+value = 200
+
+[[rules]]
+key = "purge_claims_batch"
+action = "purge_expired_claims"
+metric = "param"
+field = "count"
+op = ">"
+value = 100

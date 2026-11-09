@@ -1,0 +1,80 @@
+{
+ "id": "down_x0_6_2d_mon",
+ "kind": "down",
+ "input": {
+  "campaign_id": "cmp_m4_down",
+  "window_from": "2026-10-12T00:00:00Z",
+  "window_to": "2026-10-14T00:00:00Z"
+ },
+ "spec": {
+  "id": "down_x0_6_2d_mon",
+  "window": {
+   "from": "2026-10-12T00:00:00Z",
+   "to": "2026-10-14T00:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 0.5,
+   "history_days": 28,
+   "weekday_levels": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.1,
+    1.4,
+    1.3
+   ]
+  },
+  "injection": {
+   "type": "order_drop",
+   "factor": 0.6,
+   "from": "2026-10-12T00:00:00Z",
+   "to": "2026-10-14T00:00:00Z"
+  },
+  "campaign": {
+   "campaign_id": "cmp_m4_down",
+   "buyers": 15,
+   "units_each": 3,
+   "unit_value": 1000,
+   "use_fraction": 0.2,
+   "used_after": 2
+  }
+ },
+ "expected": {
+  "orders": {
+   "status": "known",
+   "direction": "down",
+   "multiplier": 0.6
+  },
+  "revenue": {
+   "status": "known",
+   "direction": "down"
+  },
+  "coupon": {
+   "status": "known",
+   "issued_units": 45,
+   "used_after_units": 2,
+   "note": "조회 시점 기준 누적 사용률이며 캠페인 뒤 사용분도 섞인다"
+  }
+ },
+ "counted": {
+  "orders_actual": 179,
+  "orders_baseline": 297.5,
+  "revenue_actual": 4731100,
+  "revenue_baseline": 7568725.0,
+  "baseline_rule": "7·14·21·28일 전 같은 요일·같은 길이 구간 평균 (최소 3구간)",
+  "baseline_weeks": [
+   7,
+   14,
+   21,
+   28
+  ],
+  "history_days_before_start": 28,
+  "coupon_issued_units": 45,
+  "coupon_used_in_window": 23,
+  "coupon_used_after": 2,
+  "coupon_used_units": 25,
+  "coupon_use_rate": 0.5556
+ },
+ "memo": "2일 캠페인 (월화). 월~화, 주문 0.6배"
+}

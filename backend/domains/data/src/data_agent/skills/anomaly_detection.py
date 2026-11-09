@@ -1,0 +1,191 @@
+"""anomaly_detection skill (DEP-DATA-01, 이슈 #55).
+
+구간 [window_from, window_to)의 5분 구간을 지난 7일 같은 시간대 기준과 비교해 지표별 판정을 낸다.
+숫자·판정은 코드(`metrics.judge`)가 만들고, LLM은 문장만 쓴다.
+infra `verify_recovery`가 롤백 후 구간을 물어 `any_anomaly`로 복구 여부를 확인한다.
+
+정확도 평가(PR #55) 이후 판정(자세한 규칙은 `metrics/judge.py`):
+- 결제 실패율은 5분 결제가 회사별 기준(`min_payments`) 이상인 구간만 판정한다.
+- 주문 수는 감소만 이상이다. 증가(세일·캠페인)는 이상이 아니고, 게시 중 공지·캠페인이 있으면
+  근거에 남긴다(`campaigns`).
+- 실패 주문 수는 주문이 평소보다 많으면 그만큼 기준을 늘려 본다.
+- 결제 실패율은 장애 쪽 실패 코드(영향 분석과 같은 분류)로 확률 기준을 본다. 평소 이 시각의
+  장애 쪽 실패율 λ(지난 7일 같은 시각 ±1시간, 하한 `fault_lambda_floor`)에서 관측 건수가
+  나올 확률이 `fault_p_anomaly`보다 작거나, 이어진 두 구간이 모두 `fault_p_low`보다 작고 곱이
+  `fault_p_anomaly`보다 작으면 기준선과 상관없이 이상이다. 이상이 아닌데 `fault_p_low`보다
+  작으면 severity low로 기록만 한다.
+- 판정할 수 없으면(기준선 0, 표본 부족, 빈 구간) 지표 `status`가 unknown이고,
+  모든 지표가 unknown이면 구간 `status`도 unknown이다("확인할 수 없음").
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import get_args
+
+from ax_agent_template.llm import LLMClient
+from ax_contracts.schemas import Evidence
+from ax_contracts.schemas.data import (
+    AnomalyDetectionInput,
+    AnomalyDetectionOutput,
+    BusinessMetric,
+    MetricIdVerdict,
+    MetricVerdict,
+)
+from data_agent import catalog
+from data_agent.clients.shop_client import get_connector
+from data_agent.detect import EMPTY_WINDOW, MetricSource, judge_window
+from data_agent.explain import explain
+from data_agent.metrics.judge import BASELINE_DAYS, Judgement, Settings, settings_for
+from data_agent.seed_metrics import MockMetricSource
+
+# 게시 중 공지·캠페인을 찾는 함수: (구간 시작, 구간 끝) → 한 줄씩. 없으면 빈 목록
+CampaignLookup = Callable[[datetime, datetime], Awaitable[list[str]]]
+__all__ = ["EMPTY_WINDOW", "AnomalyResult", "detect_anomalies", "env_settings", "get_metric_source"]
+
+
+@dataclass(frozen=True)
+class AnomalyResult:
+    output: AnomalyDetectionOutput
+    evidence: Evidence
+    fallback: bool
+    fallback_reason: str | None = None  # 설명을 템플릿으로 대체한 이유 (`explain.FALLBACK_REASONS`)
+    fallback_numbers: tuple[float, ...] = ()  # `number_invalid`일 때 계산에 없던 숫자
+
+
+def get_metric_source(env: Mapping[str, str]) -> MetricSource:
+    """`DATA_MOCK=1`(테스트 전용)이면 목 공급자, 아니면 회사 카탈로그의 커넥터(캣북스: shop-api)."""
+    if env.get("DATA_MOCK") == "1":
+        return MockMetricSource()
+    return get_connector(env)
+
+
+# 예전 목록(`verdicts`·`unknown_metrics`)에 실을 수 있는 지표: 계약의 캣북스 지표 4개
+LEGACY_METRICS: frozenset[str] = frozenset(get_args(BusinessMetric))
+
+
+def _metric_verdict(j: Judgement) -> MetricIdVerdict:
+    """모든 지표의 판정 (회사 카탈로그 id·이름)."""
+    return MetricIdVerdict(
+        metric_id=j.metric,
+        metric_label=catalog.label(j.metric),
+        observed=j.observed,
+        baseline=j.baseline,
+        ratio=j.ratio,
+        is_anomaly=j.status == "anomaly",
+        severity=j.severity,
+        status=j.status,
+        direction=j.direction,
+        note=j.note,
+    )
+
+
+def _verdict(j: Judgement) -> MetricVerdict | None:
+    """예전 목록의 판정. 캣북스 지표 4개만이고 그 밖의 지표는 None (새 목록에만 싣는다)."""
+    if j.metric not in LEGACY_METRICS:
+        return None
+    by_id = _metric_verdict(j)
+    return MetricVerdict(metric=j.metric, **by_id.model_dump())  # type: ignore[arg-type]
+
+
+async def detect_anomalies(
+    data: AnomalyDetectionInput,
+    source: MetricSource,
+    llm: LLMClient,
+    *,
+    settings: Settings | None = None,
+    campaigns: CampaignLookup | None = None,
+) -> AnomalyResult:
+    settings = settings or Settings()
+    # 판정은 주기 감시(monitor)와 같은 함수다 (`detect.judge_window`)
+    judged = await judge_window(
+        source, data.window_from, data.window_to, list(data.metrics), settings
+    )
+    judgements = judged.judgements
+    needed = judged.queried
+
+    notes = [n for j in judgements for n in j.notes]
+    if notes and campaigns is not None:
+        found = await campaigns(data.window_from, data.window_to)
+        notes.append(
+            "게시 중 공지·캠페인: " + "; ".join(found) if found else "게시 중 공지·캠페인 없음"
+        )
+
+    metric_verdicts = [_metric_verdict(j) for j in judgements]
+    verdicts = [v for j in judgements if (v := _verdict(j)) is not None]
+    abnormal = [j for j in judgements if j.status == "anomaly"]
+    unknown = [j for j in judgements if j.status == "unknown"]
+    any_anomaly = bool(abnormal)
+    status = "anomaly" if abnormal else "unknown" if len(unknown) == len(judgements) else "normal"
+    fallback = False
+    explained = None
+    if any_anomaly:
+        worst = min(abnormal, key=lambda j: j.p_value if j.p_value is not None else 1.0)
+        explanation = await explain(
+            "anomaly",
+            {
+                "metric": catalog.label(worst.metric),  # 회사 카탈로그의 한국어 이름
+                "baseline": worst.baseline,
+                "observed": worst.observed,
+                "ratio": worst.ratio if worst.ratio is not None else "-",
+            },
+            llm,
+        )
+        summary, fallback = explanation.summary, explanation.fallback
+        explained = explanation
+    elif status == "unknown":
+        reasons = sorted({j.note.removeprefix("확인할 수 없음: ") for j in unknown})
+        summary = "확인할 수 없음: " + "; ".join(reasons)
+    else:  # 이상이 없으면 설명할 숫자가 없어서 LLM 없이 고정 문장을 쓴다
+        summary = "구간 안에서 기준선을 벗어난 지표가 없습니다."
+        if unknown:
+            summary += f" (확인할 수 없음: {', '.join(j.metric for j in unknown)})"
+
+    output = AnomalyDetectionOutput(
+        verdicts=verdicts,
+        any_anomaly=any_anomaly,
+        summary=summary,
+        status=status,
+        unknown_metrics=[j.metric for j in unknown if j.metric in LEGACY_METRICS],  # type: ignore[misc]
+        metric_verdicts=metric_verdicts,
+        unknown_metric_ids=[j.metric for j in unknown],
+    )
+    lines = [
+        f"지표 {len(metric_verdicts)}개 중 이상 {len(abnormal)}개, 확인할 수 없음 {len(unknown)}개"
+        + (f" ({', '.join(j.metric for j in abnormal)})" if abnormal else ""),
+        *(f"{j.metric}: {j.note}" for j in judgements),
+        *notes,
+        f"판정 설정: 5분 {catalog.denominator_label()} {settings.min_payments}건 이상만 "
+        "실패율 판정, "
+        f"유의수준 {settings.alpha}, 장애 쪽 실패는 평소 이 시각에 그만큼 날 확률이 "
+        f"{settings.fault_p_anomaly:g}보다 작으면 이상(이어진 두 구간은 곱, "
+        f"{settings.fault_p_low:g}보다 작으면 low 기록, 평소 5분 실패 하한 "
+        f"{settings.fault_lambda_floor:g}건)"
+        + ("" if judged.fault_codes_read else " (실패 코드를 읽지 못해 이 규칙은 쓰지 않음)"),
+    ]
+    if explained is not None and (note := explained.note()):
+        lines.append(note)
+    evidence = Evidence(
+        queries=[
+            f"metric_series metrics={','.join(needed)} "
+            f"from={data.window_from.isoformat()} to={data.window_to.isoformat()} "
+            f"baseline_days={BASELINE_DAYS}"
+        ],
+        data_summary="\n".join(lines),
+        collected_at=datetime.now(UTC),
+    )
+    return AnomalyResult(
+        output=output,
+        evidence=evidence,
+        fallback=fallback,
+        fallback_reason=explained.reason if explained else None,
+        fallback_numbers=explained.bad_numbers if explained else (),
+    )
+
+
+def env_settings(tenant_id: str | None, env: Mapping[str, str] = os.environ) -> Settings:
+    """핸들러가 쓰는 회사별 판정 설정 (`metrics.judge.settings_for`)."""
+    return settings_for(tenant_id, env)

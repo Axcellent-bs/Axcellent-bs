@@ -1,0 +1,1555 @@
+"""상담원 화면 읽기 API. 경로는 `/api/dashboard/<복수 명사>`.
+
+dashboard-web 옛 경로와의 대응은 README "엔드포인트" 표를 본다. 지금은 목 모드(`DASHBOARD_MOCK=1`)만
+응답한다. 3단계부터 support 에이전트 skill(A2A), shop-api·memory 읽기 API로 바꾼다.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Path, Query, Request
+from pydantic import BaseModel, Field
+
+from ax_contracts.schemas.hr import (
+    AnswerHandoverQuestionOutput,
+    AuditEntry,
+    ChangeStatus,
+    CheckPlanInput,
+    CheckPlanOutput,
+    DecideCandidateCardOutput,
+    DecideDuplicateGroupOutput,
+    DecideOrgChangeOutput,
+    DescribeOrgChangeOutput,
+    FindOrgChangeBasisInput,
+    FindOrgChangeBasisOutput,
+    GetRosterOutput,
+    HandoverAnswerRequest,
+    HandoverQuestion,
+    HandoverStatus,
+    HandoverView,
+    ListOrgChangesOutput,
+    ParseOrgChangeTextInput,
+    ParseOrgChangeTextOutput,
+    RecordOrgChangeInput,
+    RecordOrgChangeOutput,
+    RecordResolutionOutput,
+    RestoreMergedCardOutput,
+    SetOrgRosterCompleteOutput,
+    TeamHeadcountOutput,
+)
+from ax_contracts.schemas.record import Card
+from ax_dashboard_api import (
+    claim_mapping,
+    data_chat,
+    dev_chat,
+    finance_chat,
+    hr_client,
+    live_views,
+    marketing_client,
+    mock_actions,
+    mock_customers,
+    mock_data,
+    mock_handover,
+    mock_hr,
+    planning_chat,
+    relay,
+    support_chat,
+    support_client,
+)
+from ax_dashboard_api import (
+    communications as communication_log,
+)
+from ax_dashboard_api.auth import human_from_authorization, require_human_for_writes
+from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, require_mock
+from ax_dashboard_api.schemas import (
+    AgentMessageBody,
+    CandidateDecisionBody,
+    ChangeProposalDeclineBody,
+    ChangeProposalSendBody,
+    ClaimIntakeBody,
+    ClaimSuggestion,
+    Conversation,
+    ConversationCreate,
+    ConversationListItem,
+    DraftStyleBody,
+    DuplicateDecisionBody,
+    FeedbackBody,
+    FeedbackItem,
+    FeedbackOverview,
+    FeedbackStatusBody,
+    IncidentCompensationDecideBody,
+    InspectionBody,
+    Kpi,
+    NoteBody,
+    OnboardingStepBody,
+    OrgChangeDecisionBody,
+    OrgRosterCompleteBody,
+    QueueProcessBody,
+    ReceiptAnalysisBody,
+    ResolutionBody,
+    ResolutionNoteBody,
+    ReviewStatusBody,
+    StatusBody,
+    Summary,
+    SupportChatSendBody,
+    TextBody,
+    TriageBody,
+    Validation,
+)
+
+HR_LIST_LIMIT = 200  # hr 조회 skill의 최대 건수
+
+router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human_for_writes)])
+# 목 모드는 메모리 데이터, 실제 모드는 shop-api·support에서 읽는다 (`live_views.py`).
+# 지식 조각·후기는 아직 실제 출처가 없어 실제 모드에서는 빈 목록이다 (지어내지 않는다).
+mock_only = APIRouter()
+
+
+@mock_only.get("/health")
+def health() -> dict:
+    return ok(mock_data.health() if is_mock() else live_views.health())
+
+
+@mock_only.get("/users")
+async def users() -> dict:
+    items = mock_data.USERS if is_mock() else await live_views.users()
+    return ok(items, total=len(items))
+
+
+@mock_only.get("/metrics")
+async def metrics(days: int = Query(14, ge=1, le=90)) -> dict:
+    return ok(mock_data.dashboard(days) if is_mock() else await live_views.metrics(days))
+
+
+@mock_only.get("/kb-chunks")
+def kb_chunks() -> dict:
+    items = mock_data.KB_CHUNKS if is_mock() else []
+    return ok(items, total=len(items))
+
+
+@mock_only.get("/orders")
+async def orders(user_id: int, since: str | None = None, until: str | None = None) -> dict:
+    """구매자의 주문 목록(최신순). `since`·`until`(ISO 8601)은 주문 시각 구간이고, 없으면 전체다."""
+    if is_mock():
+        items = mock_data.orders_for(user_id, since, until)
+    else:
+        items = await live_views.orders(user_id, since, until)
+    return ok(items, total=len(items))
+
+
+@mock_only.get("/orders/{order_no}")
+async def order_detail(order_no: str = Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")) -> dict:
+    """주문 한 건(읽기 전용). 실제 모드는 판매 서버(shop-api)의 주문을 그대로 맞춰 준다."""
+    if is_mock():
+        found = mock_data.ORDER_DETAILS.get(order_no)
+        if found is None:
+            raise ApiError(404, "NOT_FOUND", "주문을 찾을 수 없다")
+        return ok(found)
+    return ok(await live_views.order_detail(order_no))
+
+
+@mock_only.get("/reviews")
+def reviews() -> dict:
+    items = mock_data.REVIEWS if is_mock() else []
+    return ok(items, total=len(items))
+
+
+# ---------------------------------------- 클레임·보상 큐·KPI (목 모드 또는 support A2A)
+# 꺼진 서비스의 조회(`service_disabled`)는 지어내지 않는다.
+# 목록은 빈 목록, 숫자 집계는 `data: null`로 두고
+# `meta.unavailable`에 "확인할 수 없음 (○○ 서비스가 꺼져 있음)"을 남긴다 (envelope.or_unavailable).
+# 목 모드는 메모리 데이터, 아니면 support skill을 부르고 `claim_mapping`으로 화면 모델에 맞춘다.
+@router.get("/kpis")
+async def kpis() -> dict:
+    if is_mock():
+        return ok(mock_data.KPI)
+    out = await or_unavailable(support_client.call("inquiry_overview"), None)
+    return ok(Kpi.model_validate(out["kpis"]) if out is not None else None)
+
+
+@router.get("/claims")
+async def claims(status: str | None = None) -> dict:
+    if is_mock():
+        items = mock_data.list_claims(status)
+    else:
+        out = await or_unavailable(support_client.call("list_claims"), {"items": []})
+        items = claim_mapping.filter_by_status(
+            [claim_mapping.to_claim(c) for c in out["items"]], status
+        )
+    return ok(items, total=len(items))
+
+
+# 고정 경로가 `{claim_id}`보다 먼저 와야 한다
+@router.get("/claims/stats")
+async def claim_stats() -> dict:
+    if is_mock():
+        return ok(mock_data.claim_stats())
+    out = await or_unavailable(support_client.call("claim_stats"), None)
+    return ok(claim_mapping.to_stats(out) if out is not None else None)
+
+
+@router.get("/claims/{claim_id}")
+async def claim(claim_id: int) -> dict:
+    if is_mock():
+        found = mock_data.get_claim(claim_id)
+        if found is None:
+            raise ApiError(404, "NOT_FOUND", f"클레임 {claim_id}를 찾을 수 없다")
+        return ok(found)
+    out = await support_client.call("get_claim", {"claim_id": claim_id})
+    return ok(claim_mapping.to_detail(out))
+
+
+@router.get("/queue-entries")
+async def queue_entries() -> dict:
+    if is_mock():
+        view = mock_data.queue_view()
+    else:
+        out = await or_unavailable(support_client.call("claim_queue"), None)
+        if out is None:
+            return ok(None)
+        view = claim_mapping.to_queue(out)
+    return ok(view, total=len(view.queue))
+
+
+@router.post("/claims/{claim_id}/approve")
+async def approve_claim(claim_id: int, body: NoteBody) -> dict:
+    return await _decide(claim_id, "approve", body.note)
+
+
+@router.post("/claims/{claim_id}/reject")
+async def reject_claim(claim_id: int, body: NoteBody) -> dict:
+    return await _decide(claim_id, "reject", body.note)
+
+
+@router.post("/claims/{claim_id}/retry-refund")
+async def retry_refund_claim(claim_id: int, body: NoteBody) -> dict:
+    """만료(`review_timeout`)로 닫힌 환불을 다시 요청한다. 사람이 거절한 건은 409다."""
+    return await _decide(claim_id, "retry_refund", body.note)
+
+
+async def _decide(claim_id: int, decision: str, note: str) -> dict:
+    if is_mock():
+        if decision == "retry_refund":
+            raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "환불 다시 요청은 실제 모드에서만 된다")
+        action = mock_actions.approve_claim if decision == "approve" else mock_actions.reject_claim
+        return ok(action(claim_id, note))
+    out = await support_client.call(
+        "decide_claim",
+        {"claim_id": claim_id, "decision": decision},
+        {"note": note},
+        target=f"claim:{claim_id}:{decision}",
+    )
+    return ok(claim_mapping.to_detail(out))
+
+
+@router.post("/claims/{claim_id}/receive")
+async def receive_claim(claim_id: int, body: InspectionBody) -> dict:
+    if is_mock():
+        return ok(mock_actions.receive_claim(claim_id, body.inspection, body.note))
+    out = await support_client.call(
+        "receive_return",
+        {"claim_id": claim_id, "inspection": claim_mapping.inspection_in(body.inspection)},
+        {"note": body.note or ""},
+        target=f"claim:{claim_id}",
+    )
+    return ok(claim_mapping.to_detail(out))
+
+
+@router.post("/claims/{claim_id}/inspection")
+async def inspect_claim(claim_id: int, body: InspectionBody) -> dict:
+    if is_mock():
+        return ok(mock_actions.inspect_claim(claim_id, body.inspection, body.note))
+    inspection = claim_mapping.inspection_in(body.inspection)
+    out = await support_client.call(
+        "inspect_return",
+        {"claim_id": claim_id, "inspection": inspection},
+        {"note": body.note or ""},
+        target=f"claim:{claim_id}:{inspection}",
+    )
+    return ok(claim_mapping.to_detail(out))
+
+
+@router.post("/queue-entries/process")
+async def process_queue(body: QueueProcessBody | None = None) -> dict:
+    body = body or QueueProcessBody()
+    if is_mock():
+        return ok(mock_actions.process_queue(body.limit, body.claim_ids))
+    out = await support_client.call(
+        "process_claim_queue", {"limit": body.limit, "claim_ids": body.claim_ids}
+    )
+    return ok(claim_mapping.to_run(out))
+
+
+async def _conversation(out: dict) -> Conversation:
+    """support의 문의를 화면 모양으로 바꾼다.
+
+    이어진 클레임은 클레임 서비스에서 읽어(문의 서비스와 프로세스가 다르다) 화면 모양으로
+    붙인다. 클레임 서비스가 꺼져 있으면 문의 서비스가 준 것만 보인다.
+    """
+    linked = await or_unavailable(support_client.call("list_claims"), {"items": []})
+    claims: dict[int, dict] = {c["id"]: c for c in out.get("claims") or []}
+    for c in linked.get("items") or []:
+        if c.get("conversation_id") == out.get("id"):
+            claims[c["id"]] = c
+    ordered = sorted(claims.values(), key=lambda c: c["id"])
+    return Conversation.model_validate(
+        {
+            **_with_shown_subject(out),
+            "messages": [_without_abusive_original(m) for m in out.get("messages") or []],
+            "claims": [claim_mapping.to_claim(c) for c in ordered],
+        }
+    )
+
+
+def _with_shown_subject(item: dict) -> dict:
+    """제목에 욕설이 있으면 응답의 `subject`를 가린 제목으로 바꾼다 (원문 제목은 주지 않는다)."""
+    shown = item.get("subject_display")
+    return {**item, "subject": shown} if shown else item
+
+
+def _without_abusive_original(message: dict) -> dict:
+    """욕설·모욕·위협으로 가린 고객 메시지는 원문(`text`)을 응답에서 뺀다.
+
+    원문은 `POST /conversations/{id}/messages/{message_id}/original`로만 받고, 그때 연 사람이
+    문의의 AI 처리 내력에 남는다.
+    """
+    if message.get("role") == "customer" and message.get("abuse_level", "none") != "none":
+        return {**message, "text": ""}
+    return message
+
+
+# ---------------------------------------------------------------- 문의 (목 모드 또는 support A2A)
+# 목 모드(`DASHBOARD_MOCK=1`)는 메모리 데이터, 아니면 support 에이전트 skill을 부른다.
+@router.get("/conversations")
+async def conversations(language: str | None = None) -> dict:
+    if is_mock():
+        items = mock_data.list_conversations()
+        if language:
+            items = [i for i in items if getattr(i, "language", "ko") == language]
+    else:
+        args = {"language": language} if language else {}
+        out = await or_unavailable(support_client.call("list_inquiries", args), {"items": []})
+        items = [
+            ConversationListItem.model_validate(_with_shown_subject(i))
+            for i in out.get("items", [])
+        ]
+    return ok(items, total=len(items))
+
+
+@router.get("/conversations/{conversation_id}")
+async def conversation(conversation_id: int) -> dict:
+    if is_mock():
+        found = mock_data.get_conversation(conversation_id)
+        if found is None:
+            raise ApiError(404, "NOT_FOUND", f"문의 {conversation_id}를 찾을 수 없다")
+        return ok(found)
+    out = await support_client.call("get_inquiry", {"inquiry_id": conversation_id})
+    return ok(await _conversation(out))
+
+
+@router.post("/conversations", status_code=201)
+async def create_conversation(body: ConversationCreate) -> dict:
+    if is_mock():
+        return ok(
+            mock_actions.create_conversation(
+                body.user_id, body.subject, body.message, body.order_id
+            )
+        )
+    out = await support_client.call(
+        "create_inquiry",
+        {
+            "user_id": body.user_id,
+            "customer_name": body.customer_name or f"고객 {body.user_id}",
+            "order_id": body.order_id,
+        },
+        {"subject": body.subject, "message": body.message},
+        target=f"user:{body.user_id}",
+    )
+    return ok(await _conversation(out))
+
+
+@router.post("/conversations/{conversation_id}/customer-messages", status_code=201)
+async def customer_message(conversation_id: int, body: TextBody) -> dict:
+    if is_mock():
+        return ok(mock_actions.add_customer_message(conversation_id, body.text))
+    out = await support_client.call(
+        "add_customer_message",
+        {"inquiry_id": conversation_id},
+        {"message": body.text},
+        target=f"inquiry:{conversation_id}",
+    )
+    return ok(await _conversation(out))
+
+
+@router.post("/conversations/{conversation_id}/check")
+async def check_reply(conversation_id: int, body: TextBody) -> dict:
+    if is_mock():
+        return ok(mock_actions.check_reply(conversation_id, body.text))
+    out = await support_client.call(
+        "check_reply", {"inquiry_id": conversation_id}, {"text": body.text}
+    )
+    return ok(Validation.model_validate(out))
+
+
+@router.post("/conversations/{conversation_id}/receipt-analysis")
+async def receipt_analysis(conversation_id: int, body: ReceiptAnalysisBody) -> dict:
+    """문의에 붙은 주문과 고객이 보낸 영수증(글·사진)을 코드가 대조한다 (읽기, 저장 안 함).
+
+    사진은 support의 이미지 분석이 연결됐을 때만 읽고, 아니면 `images_status`로 알린다.
+    """
+    text = (body.receipt_text or "").strip()
+    if not text and not body.images:
+        raise ApiError(422, "INVALID_INPUT", "영수증 글 또는 사진이 필요하다")
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "영수증 분석은 실제 모드에서만 된다")
+    untrusted: dict = {"images": [i.model_dump() for i in body.images]}
+    if text:
+        untrusted["receipt_text"] = text
+    out = await support_client.call("analyze_receipt", {"inquiry_id": conversation_id}, untrusted)
+    if "check" not in out:  # 주문이 없는 문의 등: 분석 결과 없이 사유만 돌아온다
+        raise ApiError(409, "NO_ORDER", str(out.get("message", "영수증을 대조할 수 없다")))
+    return ok(out)
+
+
+@router.post("/conversations/{conversation_id}/claim-suggestion")
+async def claim_suggestion(conversation_id: int) -> dict:
+    """고객의 마지막 메시지에서 환불·교환·취소 요청을 읽어 접수 입력을 제안한다(접수 안 함)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "클레임 제안은 실제 모드에서만 된다")
+    out = await support_client.call("analyze_claim_request", {"inquiry_id": conversation_id})
+    if "request_kind" not in out:  # 고객 메시지가 없는 문의 등: 분석 결과 없이 사유만 돌아온다
+        raise ApiError(409, "NO_REQUEST", str(out.get("message", "분석할 요청이 없다")))
+    suggested = out.get("suggested_claim") or {}
+    return ok(ClaimSuggestion.model_validate({**out, "suggested_items": suggested.get("items")}))
+
+
+@router.post("/conversations/{conversation_id}/claims", status_code=201)
+async def create_conversation_claim(conversation_id: int, body: ClaimIntakeBody) -> dict:
+    """상담원이 확인한 클레임을 이 문의에서 접수한다. 구매자·주문은 문의에서 읽는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "클레임 접수는 실제 모드에서만 된다")
+    inquiry = await support_client.call("get_inquiry", {"inquiry_id": conversation_id})
+    order_id, user_id = inquiry.get("order_id"), inquiry.get("user_id")
+    if not order_id or user_id is None:
+        raise ApiError(409, "NO_ORDER", "문의에 주문이 연결되어 있지 않아 클레임을 접수할 수 없다")
+    out = await support_client.call(
+        "create_claim",
+        {
+            "buyer_id": claim_mapping.buyer_id_for(user_id),
+            "customer_name": inquiry.get("customer_name") or f"고객 {user_id}",
+            "order_id": str(order_id),
+            "type": body.type,
+            "reason": body.reason,
+            "items": [i.model_dump() for i in body.items] if body.items else None,
+            "unsealed": body.unsealed,
+            "evidence_count": body.evidence_count,
+            "conversation_id": conversation_id,
+        },
+        {"description": body.description},
+        target=f"inquiry:{conversation_id}:order:{order_id}:{body.type}",
+    )
+    return ok(claim_mapping.to_detail(out))
+
+
+@router.post("/conversations/{conversation_id}/feedback", status_code=201)
+async def submit_conversation_feedback(conversation_id: int, body: FeedbackBody) -> dict:
+    """해결된 문의에 고객 평가를 대신 남긴다(시험용). 문의당 한 번이고 해결된 문의만 된다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "평가는 실제 모드에서만 된다")
+    await support_client.call(
+        "submit_feedback",
+        {
+            "inquiry_id": conversation_id,
+            "rating": body.rating,
+            "resolved": body.resolved,
+            "source": "console",
+        },
+        {"comment": body.comment},
+        target=f"inquiry:{conversation_id}",
+    )
+    return ok(
+        await _conversation(
+            await support_client.call("get_inquiry", {"inquiry_id": conversation_id})
+        )
+    )
+
+
+@router.post("/conversations/{conversation_id}/messages/{message_id}/original")
+async def reveal_original(conversation_id: int, message_id: int, request: Request) -> dict:
+    """가려진 고객 메시지의 원문을 연다. 연 사람은 사람 토큰에서만 채워 내력에 남는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "원문 열기는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "reveal_original",
+        {"inquiry_id": conversation_id, "message_id": message_id, "viewer": request.state.human},
+        target=f"inquiry:{conversation_id}:message:{message_id}",
+    )
+    return ok({"message_id": out["message_id"], "text": out["text"]})
+
+
+@router.post("/conversations/{conversation_id}/resolution-notes", status_code=201)
+async def add_resolution_note(
+    conversation_id: int, body: ResolutionNoteBody, request: Request
+) -> dict:
+    """해결된 문의에 상담원이 해결 메모를 남긴다. 작성자는 사람 토큰에서만 채운다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "해결 메모는 실제 모드에서만 된다")
+    await support_client.call(
+        "add_resolution_note",
+        {"inquiry_id": conversation_id, "author": request.state.human},
+        {
+            "root_cause": body.root_cause,
+            "action_taken": body.action_taken,
+            "result": body.result,
+        },
+        target=f"inquiry:{conversation_id}",
+    )
+    return ok(
+        await _conversation(
+            await support_client.call("get_inquiry", {"inquiry_id": conversation_id})
+        )
+    )
+
+
+@router.get("/feedback")
+async def feedback_list(
+    status: Literal["visible", "flagged", "hidden"] | None = None,
+    max_rating: int | None = Query(default=None, ge=1, le=5),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    """후기(해결 결과 평가) 목록, 최근 순. 후기 관리 화면이 읽는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "후기는 실제 모드에서만 된다")
+    payload = {"limit": limit, **({"status": status} if status else {})}
+    if max_rating is not None:
+        payload["max_rating"] = max_rating
+    out = await or_unavailable(
+        support_client.call("list_feedback", payload), {"items": [], "total": 0}
+    )
+    items = [FeedbackItem.model_validate(i) for i in out.get("items", [])]
+    return ok(items, total=out.get("total", len(items)))
+
+
+@router.get("/feedback/stats")
+async def feedback_stats() -> dict:
+    """만족도 요약(평균 별점, 만족 비율, 해결 응답 비율, 분포, 분류별). 센 값 그대로다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "후기는 실제 모드에서만 된다")
+    out = await or_unavailable(support_client.call("feedback_overview"), None)
+    return ok(FeedbackOverview.model_validate(out) if out is not None else None)
+
+
+@router.post("/feedback/{inquiry_id}/status")
+async def set_feedback_status(inquiry_id: int, body: FeedbackStatusBody) -> dict:
+    """확인 대기 후기를 공개하거나 숨긴다. 상담원 결정이라 사람 토큰이 필요하다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "후기는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "set_feedback_status",
+        {"inquiry_id": inquiry_id, "status": body.status},
+        target=f"inquiry:{inquiry_id}:{body.status}",
+    )
+    return ok(FeedbackItem.model_validate(out))
+
+
+@router.post("/conversations/{conversation_id}/agent-messages", status_code=201)
+async def agent_message(conversation_id: int, body: AgentMessageBody) -> dict:
+    if is_mock():
+        return ok(mock_actions.add_agent_message(conversation_id, body.text))
+    out = await support_client.call(
+        "send_reply",
+        {
+            "inquiry_id": conversation_id,
+            "draft_style": body.draft_style,
+            "draft_text": body.draft_text,
+        },
+        {"text": body.text},
+        target=f"inquiry:{conversation_id}",
+    )
+    return ok(await _conversation(out))
+
+
+@router.post("/conversations/{conversation_id}/reject-draft")
+async def reject_draft(conversation_id: int, body: DraftStyleBody) -> dict:
+    if is_mock():
+        mock_actions.reject_draft(conversation_id)
+        return ok(None)
+    await support_client.call(
+        "reject_draft",
+        {"inquiry_id": conversation_id, "draft_style": body.draft_style},
+        target=f"inquiry:{conversation_id}:{body.draft_style}",
+    )
+    return ok(None)
+
+
+@router.post("/conversations/{conversation_id}/summary")
+async def summary(conversation_id: int) -> dict:
+    if is_mock():
+        return ok(mock_actions.summarize(conversation_id))
+    out = await support_client.call("summarize_inquiry", {"inquiry_id": conversation_id})
+    return ok(Summary.model_validate(out))
+
+
+@router.post("/conversations/{conversation_id}/status")
+async def conversation_status(conversation_id: int, body: StatusBody) -> dict:
+    if is_mock():
+        return ok(mock_actions.set_status(conversation_id, body.status))
+    out = await support_client.call(
+        "set_inquiry_status",
+        {"inquiry_id": conversation_id, "status": body.status},
+        target=f"inquiry:{conversation_id}:{body.status}",
+    )
+    return ok(ConversationListItem.model_validate(_with_shown_subject(out)))
+
+
+@router.post("/conversations/{conversation_id}/triage")
+async def conversation_triage(conversation_id: int, body: TriageBody) -> dict:
+    """분류 필요 표시: 올리기(send)·분류 정하고 마치기(decide)·지우기(clear). 실제 연결 전용."""
+    if is_mock():
+        raise ApiError(
+            409, "NOT_AVAILABLE_IN_MOCK", "분류 필요 표시는 실제 고객지원 연결에서만 쓸 수 있다"
+        )
+    out = await support_client.call(
+        "set_triage",
+        {"inquiry_id": conversation_id, "action": body.action, "label": body.label},
+        target=f"inquiry:{conversation_id}:triage:{body.action}:{body.label or ''}",
+    )
+    if "id" not in out:  # 문의가 아닌 응답(분류 필요로 올린 문의만 정할 수 있음 등)은 성공이 아니다
+        raise ApiError(409, "INVALID_STATE", out.get("message", "지금은 할 수 없다"))
+    return ok(ConversationListItem.model_validate(_with_shown_subject(out)))
+
+
+# ---------------------------------------------------------------- 쓰기 (목 모드)
+# 승인·지급 계열(claims approve·reject·receive·inspection, queue-entries/process)은
+# 실제 연결 때 support `execute()` 관문으로 넘긴다. 지금은 목 데이터만 바꾼다.
+@mock_only.post("/reviews/{review_id}/status", dependencies=[Depends(require_mock)])
+def review_status(review_id: int, body: ReviewStatusBody) -> dict:
+    return ok(mock_actions.set_review_status(review_id, body.status))
+
+
+# ------------------------------------ 인사 탭: 인수인계·후보 카드
+# 목 모드는 `mock_handover`, 아니면 hr skill을 A2A로 부른다 (`hr_client`).
+# 응답은 계약 모델 그대로다.
+@router.get("/handovers")
+async def handovers(status: HandoverStatus | None = None, area: str | None = None) -> dict:
+    if is_mock():
+        items = mock_handover.BOARD.list_handovers(status, area)
+    else:
+        items = await _live_handovers(status=status, area=area)
+    return ok(items, total=len(items))
+
+
+async def _live_handovers(**filters: str | None) -> list[HandoverView]:
+    payload = {k: v for k, v in filters.items() if v is not None}
+    out = await or_unavailable(
+        hr_client.call("list_handovers", {**payload, "limit": HR_LIST_LIMIT}), {"handovers": []}
+    )
+    return [HandoverView.model_validate(h) for h in out["handovers"]]
+
+
+@router.get("/handovers/{handover_id}")
+async def handover(handover_id: str) -> dict:
+    if is_mock():
+        return ok(mock_handover.BOARD.get(handover_id))
+    found = next((h for h in await _live_handovers() if h.handover_id == handover_id), None)
+    if found is None:  # hr에 단건 조회 skill이 없어 목록에서 찾는다
+        raise ApiError(404, "NOT_FOUND", f"인수인계 {handover_id}를 찾을 수 없다")
+    return ok(found)
+
+
+@router.get("/handover-questions")
+async def handover_questions(
+    assignee_id: str | None = None, handover_id: str | None = None
+) -> dict:
+    """인계자의 답을 기다리는 질문 전체. 각 질문에 `context_id`가 있어 답변이 같은 사건으로 간다."""
+    if is_mock():
+        items = mock_handover.BOARD.pending_questions(assignee_id, handover_id)
+    else:
+        items = await _live_questions(assignee_id=assignee_id, handover_id=handover_id)
+    return ok(items, total=len(items))
+
+
+async def _live_questions(**filters: str | None) -> list[HandoverQuestion]:
+    out = await or_unavailable(
+        hr_client.call("list_open_questions", {k: v for k, v in filters.items() if v is not None}),
+        {"questions": []},
+    )
+    return [HandoverQuestion.model_validate(q) for q in out["questions"]]
+
+
+@router.post("/handover-questions/{question_id}/answer")
+async def answer_handover_question(question_id: str, body: HandoverAnswerRequest) -> dict:
+    if body.question_id != question_id:
+        raise ApiError(422, "INVALID_REQUEST", "question_id: 경로와 본문이 다르다")
+    answer = body.answer.strip()
+    if not answer:
+        raise ApiError(422, "INVALID_REQUEST", "answer: 답변이 비었다")
+    if not body.idempotency_key.strip():
+        raise ApiError(422, "INVALID_REQUEST", "idempotency_key: 필수다")
+    if is_mock():
+        return ok(mock_handover.BOARD.answer(question_id, answer, body.idempotency_key))
+    # 답변은 질문이 속한 사건의 context_id로 보낸다. 이미 답해서 목록에서 빠진 질문(같은 답의
+    # 재전송)은 사건을 알 수 없어 새 사건으로 보낸다. hr은 질문 ID로 대기 상태를 찾고 같은 답은
+    # 한 번만 반영한다.
+    known = next((q for q in await _live_questions() if q.question_id == question_id), None)
+    out = await hr_client.call(
+        "answer_handover_question",
+        {"question_id": question_id, "answer": answer},
+        context_id=known.context_id if known else None,
+        key=body.idempotency_key,
+    )
+    return ok(AnswerHandoverQuestionOutput.model_validate(out))
+
+
+@router.get("/candidate-cards")
+async def candidate_cards(area: str | None = None) -> dict:
+    """확신이 낮아 후보로 둔 카드 (사람이 승인·폐기)."""
+    if is_mock():
+        items = mock_handover.BOARD.candidate_cards(area)
+    else:
+        out = await or_unavailable(
+            hr_client.call("list_candidate_cards", {"area": area} if area else {}), {"cards": []}
+        )
+        items = [Card.model_validate(c) for c in out["cards"]]
+    return ok(items, total=len(items))
+
+
+@router.get("/decision-cards")
+async def decision_cards(
+    area: str | None = None,
+    context_id: str | None = None,
+    limit: int = Query(50, ge=1, le=HR_LIST_LIMIT),
+) -> dict:
+    """확정된(후보가 아닌) 결정 카드 (최근 순). `context_id`를 주면 그 사건에서 만든 카드만."""
+    if is_mock():
+        items = mock_handover.BOARD.active_cards(area, context_id)[:limit]
+    else:
+        payload = _given(area=area, context_id=context_id)
+        out = await or_unavailable(
+            hr_client.call("list_cards", {**payload, "limit": limit}), {"cards": []}
+        )
+        items = [Card.model_validate(c) for c in out["cards"]]
+    return ok(items, total=len(items))
+
+
+@router.post("/candidate-cards/{card_id}/decision")
+async def decide_candidate_card(card_id: str, body: CandidateDecisionBody) -> dict:
+    """후보 카드 승인·폐기. hr이 `decide_candidate_card`(A)로 실행하고, 같은 결정은 성공한다."""
+    if is_mock():
+        return ok(mock_handover.BOARD.decide(card_id, body.decision))
+    payload: dict[str, str] = {"card_id": card_id, "decision": body.decision}
+    if body.note and body.note.strip():
+        payload["note"] = body.note.strip()
+    out = await hr_client.call(
+        "decide_candidate_card", payload, target=f"card:{card_id}:{body.decision}"
+    )
+    return ok(DecideCandidateCardOutput.model_validate(out))
+
+
+def _no_org_in_mock() -> None:
+    if is_mock():
+        raise ApiError(501, "NOT_IMPLEMENTED", "목 모드에는 조직 변동 기록이 없다")
+
+
+@router.get("/org-changes")
+async def org_changes(status: Literal["draft", "confirmed", "rejected"] | None = None) -> dict:
+    """조직 변동(발령) 기록과 명부 등록 상태(등록된 직원 수, 전 직원 등록 완료 여부)."""
+    _no_org_in_mock()
+    out = await hr_client.call("list_org_changes", {"status": status} if status else {})
+    return ok(ListOrgChangesOutput.model_validate(out))
+
+
+@router.post("/org-changes")
+async def record_org_change(body: RecordOrgChangeInput) -> dict:
+    """발령 초안 저장. 승인 없이 저장하고 확정 전에는 팀 인원에 세지 않는다."""
+    _no_org_in_mock()
+    target = ":".join(
+        [body.member_id, body.kind, body.effective_date, body.from_team or "", body.to_team or ""]
+    )
+    out = await hr_client.call(
+        "record_org_change", body.model_dump(exclude_none=True), target=f"org:{target}"
+    )
+    return ok(RecordOrgChangeOutput.model_validate(out))
+
+
+@router.post("/org-changes/basis")
+async def find_org_change_basis(body: FindOrgChangeBasisInput) -> dict:
+    """발령 사유와 비슷한 과거 업무 결정 카드 후보(RAG). 찾기만 하고 연결하지 않는다."""
+    _no_org_in_mock()
+    out = await hr_client.call("find_org_change_basis", body.model_dump())
+    return ok(FindOrgChangeBasisOutput.model_validate(out))
+
+
+@router.post("/org-changes/parse")
+async def parse_org_change_text(body: ParseOrgChangeTextInput) -> dict:
+    """직원 번호로 적은 발령 문장을 입력 칸으로 나눈 제안(LLM). 저장하지 않는다."""
+    _no_org_in_mock()
+    out = await hr_client.call("parse_org_change_text", body.model_dump())
+    return ok(ParseOrgChangeTextOutput.model_validate(out))
+
+
+@router.get("/org-changes/{change_id}/description")
+async def describe_org_change(change_id: str) -> dict:
+    """발령이 팀 인원에 주는 변화를 읽기 쉬운 설명문으로 쓴다. 숫자는 코드 값이다."""
+    _no_org_in_mock()
+    out = await hr_client.call("describe_org_change", {"change_id": change_id})
+    return ok(DescribeOrgChangeOutput.model_validate(out))
+
+
+@router.post("/org-changes/{change_id}/decision")
+async def decide_org_change(change_id: str, body: OrgChangeDecisionBody) -> dict:
+    """인사 담당자가 초안을 확정·반려한다(사람 토큰 필요). 같은 결정은 성공으로 돌려준다."""
+    _no_org_in_mock()
+    payload: dict[str, str] = {"change_id": change_id, "decision": body.decision}
+    if body.note and body.note.strip():
+        payload["note"] = body.note.strip()
+    out = await hr_client.call(
+        "decide_org_change", payload, target=f"org-change:{change_id}:{body.decision}"
+    )
+    return ok(DecideOrgChangeOutput.model_validate(out))
+
+
+# ---------------------------------------------------------------- 캠페인 (사람 토큰 필요)
+class CampaignStartBody(BaseModel):
+    campaign_id: str = Field(pattern=r"^cmp_[A-Za-z0-9_-]{1,40}$")
+    campaign_name: str = Field(min_length=1, max_length=100)
+    channel: str = Field(min_length=1, max_length=50)
+    budget_krw: int = Field(gt=0)
+
+
+class CampaignResultBody(BaseModel):
+    campaign_name: str = Field(min_length=1, max_length=100)
+    channel: str = Field(min_length=1, max_length=50)
+    period_from: str
+    period_to: str
+    spend_krw: int = Field(ge=0)
+    coupon_krw: int = Field(default=0, ge=0)
+    gmv_krw: int | None = Field(default=None, ge=0)
+    orders: int | None = Field(default=None, ge=0)
+    source: str = Field(min_length=1, max_length=100)
+    measured_gmv_krw: int | None = None
+    measured_orders: int | None = None
+    effect_generated_at: str | None = None
+
+
+class CampaignCancelBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=300)
+
+
+@router.post("/campaigns/start")
+async def start_campaign(body: CampaignStartBody) -> dict:
+    """캠페인 시작. 재무 판단과 안전 관문을 지난다. 보류·거절도 결과로 돌려준다."""
+    _no_org_in_mock()
+    key = f"ui:start:{body.campaign_id}:{body.budget_krw}"
+    return ok(
+        await marketing_client.call(
+            "start_campaign", body.model_dump(), campaign_id=body.campaign_id, key=key
+        )
+    )
+
+
+@router.post("/campaigns/{campaign_id}/result")
+async def record_campaign_result(campaign_id: str, body: CampaignResultBody) -> dict:
+    """화면의 성과를 재무에 넘긴다. 판매액·주문 수를 모르면 비워 둔다."""
+    _no_org_in_mock()
+    payload = body.model_dump(exclude_none=True) | {"campaign_id": campaign_id}
+    key = (
+        f"ui:result:{campaign_id}:{body.period_from}:{body.period_to}:{body.spend_krw}"
+        f":{body.gmv_krw}:{body.orders}:{body.coupon_krw}"
+    )
+    return ok(
+        await marketing_client.call(
+            "record_campaign_result", payload, campaign_id=campaign_id, key=key
+        )
+    )
+
+
+@router.post("/campaigns/{campaign_id}/cancel")
+async def cancel_campaign(campaign_id: str, body: CampaignCancelBody) -> dict:
+    _no_org_in_mock()
+    payload = {"campaign_id": campaign_id, "reason": body.reason}
+    return ok(
+        await marketing_client.call(
+            "cancel_campaign", payload, campaign_id=campaign_id, key=f"ui:cancel:{campaign_id}"
+        )
+    )
+
+
+class MarketingChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/marketing-chat")
+async def marketing_chat_list(request: Request) -> dict:
+    """마케팅 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await marketing_client.chat_call("marketing_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/marketing-chat/{thread_id}")
+async def marketing_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await marketing_client.chat_call(
+        "marketing_chat_get", {"who": who, "thread_id": thread_id}
+    )
+    return ok(out["thread"])
+
+
+@router.post("/marketing-chat")
+async def marketing_chat_send(body: MarketingChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await marketing_client.chat_call("marketing_chat_send", payload)
+    return ok(out["thread"])
+
+
+@router.post("/marketing-chat/{thread_id}/close")
+async def marketing_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await marketing_client.chat_call(
+        "marketing_chat_close", {"who": who, "thread_id": thread_id}
+    )
+    return ok(out["thread"])
+
+
+# ---- 기획 AI 직접 대화 (→ planning `planning_chat_*`). 마케팅 AI 대화와 같은 모양이다
+class PlanningChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/planning-chat")
+async def planning_chat_list(request: Request) -> dict:
+    """기획 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await planning_chat.call("planning_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/planning-chat/{thread_id}")
+async def planning_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await planning_chat.call("planning_chat_get", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/planning-chat")
+async def planning_chat_send(body: PlanningChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await planning_chat.call("planning_chat_send", payload)
+    return ok(out["thread"])
+
+
+@router.post("/planning-chat/{thread_id}/close")
+async def planning_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await planning_chat.call("planning_chat_close", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+# ---- 재무 AI 직접 대화 (→ finance `finance_chat_*`). 기획 AI 대화와 같은 모양이다.
+# 조회·설명만 한다(장부·결산·정산은 바꾸지 않는다). 사람 토큰이 필요하다
+class FinanceChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/finance-chat")
+async def finance_chat_list(request: Request) -> dict:
+    """재무 AI 대화 목록. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await finance_chat.call("finance_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/finance-chat/{thread_id}")
+async def finance_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await finance_chat.call("finance_chat_get", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/finance-chat")
+async def finance_chat_send(body: FinanceChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await finance_chat.call("finance_chat_send", payload)
+    return ok(out["thread"])
+
+
+@router.post("/finance-chat/{thread_id}/close")
+async def finance_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await finance_chat.call("finance_chat_close", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+# ---- 데이터분석 AI 직접 대화 (→ data `data_chat_*`). 기획 AI 대화와 같은 모양
+# + 대화 하루 상한(429 CHAT_LIMIT)
+class DataChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/data-chat")
+async def data_chat_list(request: Request) -> dict:
+    """데이터분석 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await data_chat.call("data_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/data-chat/{thread_id}")
+async def data_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await data_chat.call("data_chat_get", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/data-chat")
+async def data_chat_send(body: DataChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await data_chat.call("data_chat_send", payload)
+    return ok(out["thread"])
+
+
+@router.post("/data-chat/{thread_id}/close")
+async def data_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await data_chat.call("data_chat_close", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+# ---- 개발 AI 직접 대화 (→ dev `dev_chat_*`). 기획 AI 대화와 같은 모양에 connection·mode가 더 있다
+class DevChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=4000)
+    connection: str | None = Field(default=None, min_length=1, max_length=120)
+    mode: Literal["agent", "subscription"] | None = None
+
+
+@router.get("/dev-chat")
+async def dev_chat_list(request: Request) -> dict:
+    """개발 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await dev_chat.call("dev_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/dev-chat/{thread_id}")
+async def dev_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await dev_chat.call("dev_chat_get", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/dev-chat")
+async def dev_chat_send(body: DevChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    extra = body.model_dump(include={"thread_id", "connection", "mode"}, exclude_none=True)
+    out = await dev_chat.call("dev_chat_send", {"who": who, "message": body.message} | extra)
+    return ok(out["thread"])
+
+
+@router.post("/dev-chat/{thread_id}/close")
+async def dev_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await dev_chat.call("dev_chat_close", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/org-roster/complete")
+async def set_org_roster_complete(body: OrgRosterCompleteBody) -> dict:
+    """전 직원 등록 완료 표시(사람 토큰 필요). 확정 명부가 전체 직원 수일 때만 표시할 수 있다."""
+    _no_org_in_mock()
+    out = await hr_client.call(
+        "set_org_roster_complete", {"complete": body.complete}, target=f"org-roster:{body.complete}"
+    )
+    return ok(SetOrgRosterCompleteOutput.model_validate(out))
+
+
+@router.get("/org-headcount")
+async def org_headcount(month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")) -> dict:
+    """그 달 팀별 인원 미리 보기(재무에 나가는 값과 같다). 알 수 없는 달은 `available: false`."""
+    _no_org_in_mock()
+    try:
+        out = await hr_client.call("team_headcount", {"month": month})
+    except ApiError as err:
+        if err.status_code != 502:
+            raise
+        message = (
+            f"{month}의 팀 인원을 알 수 없다(발령 기록이 시작되기 전이거나 조직도를 읽지 못함)"
+        )
+        return ok({"available": False, "month": month, "message": message})
+    return ok(
+        {"available": True, **TeamHeadcountOutput.model_validate(out).model_dump(mode="json")}
+    )
+
+
+@router.get("/duplicate-groups")
+async def duplicate_groups(area: str | None = None) -> dict:
+    """사람 승인을 기다리는 중복 결정 묶음과 최근 병합된 카드(되돌리기용)."""
+    if is_mock():
+        return ok({"groups": [], "merged": []})
+    out = await or_unavailable(
+        hr_client.call("list_duplicate_groups", {"area": area} if area else {}),
+        {"groups": [], "merged": []},
+    )
+    return ok({"groups": out.get("groups", []), "merged": out.get("merged", [])})
+
+
+@router.post("/duplicate-groups/{group_id}/decision")
+async def decide_duplicate_group(group_id: str, body: DuplicateDecisionBody) -> dict:
+    """중복 묶음을 병합하거나 그대로 둔다. hr이 `decide_duplicate_group`(A)으로 실행한다."""
+    if is_mock():
+        raise ApiError(404, "NOT_FOUND", "시연 데이터에는 중복 묶음이 없다")
+    payload: dict = {"group_id": group_id, **body.model_dump(exclude_none=True)}
+    out = await hr_client.call(
+        "decide_duplicate_group",
+        payload,
+        target=f"dup:{group_id}:{body.decision}:{body.representative_id}",
+    )
+    result = DecideDuplicateGroupOutput.model_validate(out)
+    if result.outcome == "not_found":
+        raise ApiError(404, "NOT_FOUND", "그 중복 묶음을 찾을 수 없다")
+    return ok(result)
+
+
+@router.post("/cards/{card_id}/restore-merge")
+async def restore_merged_card(card_id: str) -> dict:
+    """병합으로 대체됨이 된 카드를 되돌린다. hr이 `restore_merged_card`(A)로 실행한다."""
+    if is_mock():
+        raise ApiError(404, "NOT_FOUND", "시연 데이터에는 병합된 카드가 없다")
+    out = await hr_client.call(
+        "restore_merged_card", {"card_id": card_id}, target=f"restore:{card_id}"
+    )
+    result = RestoreMergedCardOutput.model_validate(out)
+    if result.outcome == "not_found":
+        raise ApiError(404, "NOT_FOUND", "그 카드를 찾을 수 없다")
+    return ok(result)
+
+
+@router.post("/incidents/{context_id}/resolution")
+async def record_incident_resolution(context_id: str, body: ResolutionBody) -> dict:
+    """사람이 사건의 해결 내용(결과·원인·조치)을 적는다. hr이 `record_resolution`(A)으로 남긴다.
+
+    소요 시간은 받지 않고 hr이 `opened_at`부터 지금까지로 잰다.
+    같은 내용을 다시 보내면 한 번만 남는다.
+    """
+    if body.resolved_at is not None:
+        at = body.resolved_at if body.resolved_at.tzinfo else body.resolved_at.replace(tzinfo=UTC)
+        if at > datetime.now(UTC) + timedelta(minutes=1):
+            raise ApiError(422, "INVALID_INPUT", "해결 시각이 지금보다 늦을 수 없다")
+    payload: dict = {"context_id": context_id, **body.model_dump(mode="json", exclude_none=True)}
+    out = await hr_client.call(
+        "record_resolution",
+        payload,
+        context_id=context_id,
+        target=f"resolution:{context_id}:{body.outcome}:{body.root_cause}:{body.action}",
+    )
+    result = RecordResolutionOutput.model_validate(out)
+    if result.outcome == "no_card":
+        raise ApiError(404, "NOT_FOUND", "이 사건에서 만든 결정 카드가 없어 남길 곳이 없다")
+    return ok(result)
+
+
+# ------------------- 폐기 예정: 온보딩·발령 (hr에서 기능을 뺐다, #374·#377)
+# 경로를 지우면 깨지는 변경(`contracts-compat`)이라 응답만 바꿔 두고, 프론트(인사 화면)가 쓰지
+# 않게 된 뒤 따로 지운다. hr에는 이 skill이 없으니 부르지 않는다. 쿼리·본문 모양은 그대로 둔다.
+RETIRED_MESSAGE = "온보딩·발령 기능은 인사 에이전트에서 빠졌다. 이 경로는 폐기 예정이다"
+
+
+@router.get("/onboardings")
+async def onboardings(member_id: str | None = None, area: str | None = None) -> dict:
+    return ok([], total=0)
+
+
+@router.post("/onboardings/{onboarding_id}/steps/{step_id}")
+async def update_onboarding_step(
+    onboarding_id: str, step_id: str, body: OnboardingStepBody
+) -> dict:
+    raise ApiError(410, "ENDPOINT_RETIRED", RETIRED_MESSAGE)
+
+
+@router.get("/assignment-changes")
+async def assignment_changes(
+    status: ChangeStatus | None = None, area: str | None = None, member_id: str | None = None
+) -> dict:
+    return ok([], total=0)
+
+
+@router.get("/roster")
+async def roster(area: str | None = None) -> dict:
+    """영역별 담당·교대와 담당 공백. 개인 정보는 없다."""
+    if is_mock():
+        return ok(mock_hr.BOARD.get_roster(area))
+    out = await or_unavailable(hr_client.call("get_roster", _given(area=area)), None)
+    return ok(GetRosterOutput.model_validate(out) if out is not None else None)
+
+
+@router.get("/hr-activity/{context_id}")
+async def hr_activity(context_id: str) -> dict:
+    """사건에서 hr이 한 일의 시간순 기록."""
+    if is_mock():
+        items = mock_hr.BOARD.audit_timeline(context_id)
+    else:
+        out = await or_unavailable(
+            hr_client.call("get_audit_timeline", {"context_id": context_id}), {"entries": []}
+        )
+        items = [AuditEntry.model_validate(e) for e in out["entries"]]
+    return ok(items, total=len(items))
+
+
+@router.post("/plan-checks")
+async def plan_checks(body: CheckPlanInput) -> dict:
+    """새 계획이 과거에 기각된 안과 겹치는지 판정한다 (읽기, 저장 안 함)."""
+    if is_mock():
+        return ok(mock_hr.BOARD.check_plan(body.draft))
+    out = await hr_client.call("check_plan", {"draft": body.draft.model_dump(mode="json")})
+    return ok(CheckPlanOutput.model_validate(out))
+
+
+# ---------------------------------------- 고객관리 탭 (읽기 전용: support skill이 코드로 센 값)
+# 응답 모양은 support 출력을 그대로 둔다 (위험 단계·보상 제안은 코드가 사실에서 낸 값이다).
+@router.get("/customers/at-risk")
+async def customers_at_risk(
+    min_level: Literal["medium", "high"] = "medium", limit: int = Query(20, ge=1, le=50)
+) -> dict:
+    """이탈·재문의 위험이 기준 단계 이상인 구매자 (점수 높은 순)."""
+    if is_mock():
+        out = mock_customers.at_risk(min_level, limit)
+    else:
+        out = await or_unavailable(
+            support_client.call("list_at_risk_customers", {"min_level": min_level, "limit": limit}),
+            {"items": [], "total": 0},
+        )
+    return ok(out["items"], total=out["total"])
+
+
+@router.get("/customers/{buyer_id}/signals")
+async def customer_signals(buyer_id: str) -> dict:
+    """구매자 한 명의 위험 신호와 이유별 점수."""
+    if is_mock():
+        return ok(mock_customers.signals(buyer_id))
+    return ok(await support_client.call("customer_signals", {"buyer_id": buyer_id}))
+
+
+@router.get("/conversations/{conversation_id}/compensation-suggestion")
+async def compensation_suggestion(conversation_id: int) -> dict:
+    """문의의 주문 사실로 보상 쿠폰 후보를 제안한다 (읽기). 요청은 사람이 승인해 따로 보낸다."""
+    if is_mock():
+        return ok(mock_customers.compensation_suggestion(conversation_id))
+    return ok(await support_client.call("suggest_compensation", {"inquiry_id": conversation_id}))
+
+
+@router.get("/conversations/{conversation_id}/payment-diagnosis")
+async def payment_diagnosis(conversation_id: int) -> dict:
+    """문의의 주문에서 결제가 어디서 막혔는지 (읽기)."""
+    if is_mock():
+        return ok(mock_customers.payment_diagnosis(conversation_id))
+    return ok(await support_client.call("diagnose_payment", {"inquiry_id": conversation_id}))
+
+
+@router.get("/inquiry-surge")
+async def inquiry_surge() -> dict:
+    """최근 창의 분류별 문의 급증 (평소 대비)."""
+    if is_mock():
+        return ok(mock_customers.inquiry_surge())
+    return ok(await support_client.call("detect_inquiry_surge"))
+
+
+@router.get("/change-proposals")
+async def change_proposals() -> dict:
+    """문의 급증에서 만든 기획 변경 요청안. 제안만 돌려주고 아무것도 보내지 않는다."""
+    if is_mock():
+        return ok(mock_customers.change_proposals())
+    return ok(await support_client.call("propose_change_requests"))
+
+
+@router.post("/change-proposals/send", status_code=201)
+async def send_change_proposal(body: ChangeProposalSendBody) -> dict:
+    """상담원이 고른 제안을 기획에 보낸다. 사람 토큰이 필요하다 (라우터 전체에 걸려 있다).
+
+    같은 제목·근거를 여러 번 눌러도 한 번만 처리되도록 호출 사이에 변하지 않는 키를 쓴다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "변경 요청 보내기는 실제 모드에서만 된다")
+    digest = hashlib.sha1(
+        f"{body.title}\n{body.evidence}\n{sorted(body.evidence_ids)}".encode()
+    ).hexdigest()[:12]
+    out = await support_client.call(
+        "request_change",
+        {
+            "inquiry_id": body.inquiry_id,
+            "title": body.title,
+            "evidence": body.evidence,
+            "evidence_ids": body.evidence_ids,
+        },
+        key=f"change-proposal:{body.inquiry_id}:{digest}",
+    )
+    if "planning_outcome" in out:  # 기획이 요청을 만들지 않았다 (support는 완료로 돌려준다)
+        raise ApiError(
+            409, "PLANNING_REFUSED", str(out.get("message") or "기획이 요청을 받지 않았다")
+        )
+    return ok(out)
+
+
+@router.post("/change-proposals/decline", status_code=201)
+async def decline_change_proposal(body: ChangeProposalDeclineBody, request: Request) -> dict:
+    """제안을 보내지 않기로 한 이유를 남긴다. 결정한 사람은 사람 토큰에서만 채운다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "보내지 않기는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "decline_change_proposal",
+        {
+            "topic_code": body.topic_code,
+            "inquiry_id": body.inquiry_id,
+            "reason": body.reason,
+            "author": request.state.human,
+        },
+        {"note": body.note} if body.note else None,
+        target=f"inquiry:{body.inquiry_id}:decline:{body.topic_code}",
+    )
+    return ok(out)
+
+
+@router.get("/incident-compensation-queue")
+async def incident_compensation_queue(
+    incident_id: str | None = Query(default=None, pattern=r"^ctx_inc_[A-Za-z0-9]+$"),
+    include_closed: bool = False,
+) -> dict:
+    """장애 보상 대기·승인·보류 목록 (읽기). 사람이 승인하기 전에는 쿠폰이 나가지 않는다."""
+    if is_mock():
+        return ok({"incidents": [], "notes": []})
+    payload: dict = {"include_closed": include_closed}
+    if incident_id:
+        payload["incident_context_id"] = incident_id
+    return ok(await support_client.call("list_incident_queue", payload))
+
+
+@router.post("/incident-compensation-queue/decide", status_code=201)
+async def decide_incident_compensation(
+    body: IncidentCompensationDecideBody, request: Request
+) -> dict:
+    """대기 고객을 고객별로 승인·거절한다. 사람 토큰이 필요하다 (라우터 전체에 걸려 있다).
+
+    승인된 고객만 고객지원이 마케팅 쿠폰 요청으로 넘긴다. 결정한 사람은 사람 토큰에서만 채운다.
+    같은 선택을 여러 번 눌러도 한 번만 처리되도록 호출 사이에 변하지 않는 키를 쓴다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "보상 승인은 실제 모드에서만 된다")
+    if not body.approve_buyer_ids and not body.reject_buyer_ids:
+        raise ApiError(422, "NOTHING_TO_DECIDE", "승인하거나 거절할 고객을 골라 주세요")
+    digest = hashlib.sha1(
+        f"{body.incident_id}|{sorted(body.approve_buyer_ids)}|{sorted(body.reject_buyer_ids)}".encode()
+    ).hexdigest()[:12]
+    out = await support_client.call(
+        "decide_incident_compensation",
+        {
+            "incident_context_id": body.incident_id,
+            "approve_buyer_ids": body.approve_buyer_ids,
+            "reject_buyer_ids": body.reject_buyer_ids,
+            "author": request.state.human,
+        },
+        key=f"incident-compensation-decide:{body.incident_id}:{digest}",
+    )
+    return ok(out)
+
+
+@router.get("/incident-compensation")
+async def incident_compensation(
+    incident_id: str | None = Query(default=None, pattern=r"^ctx_inc_[A-Za-z0-9]+$"),
+) -> dict:
+    """사건별로 보상 쿠폰을 받은 고객 (읽기). 없는 사건은 빈 목록이다."""
+    if is_mock():
+        return ok(mock_customers.incident_compensation(incident_id))
+    payload = {"incident_context_id": incident_id} if incident_id else {}
+    return ok(await support_client.call("list_incident_compensation", payload))
+
+
+@router.get("/change-requests")
+async def change_requests(
+    inquiry_id: int | None = None,
+    status: Literal["requested", "completed", "declined"] | None = None,
+) -> dict:
+    """문의에서 기획으로 보낸 변경 요청과 처리 상태."""
+    if is_mock():
+        out = mock_customers.change_requests(inquiry_id, status)
+    else:
+        payload = {k: v for k, v in {"inquiry_id": inquiry_id, "status": status}.items() if v}
+        out = await or_unavailable(
+            support_client.call("list_change_requests", payload), {"items": []}
+        )
+    return ok(out["items"], total=len(out["items"]))
+
+
+@router.get("/communications")
+def communications(
+    dept: str | None = None, context_id: str | None = None, include_events: bool = False
+) -> dict:
+    """부서별 소통 탭. 공통 로그의 A2A 요청·응답을 한 줄씩 보여 준다 (코드가 만든 필드만).
+
+    `include_events=true`면 발행된 이벤트 줄(`kind="event"`, 종류만)도 함께 보여 준다.
+    """
+    lines, truncated = communication_log.list_communications(
+        dept, context_id, include_events=include_events
+    )
+    body = ok(lines, total=len(lines))
+    body["meta"]["truncated"] = truncated
+    return body
+
+
+# ------------------------------------ AI 대화방: 총괄 사건·안전 관문 기록 (읽기 전용 중계)
+@router.get("/incidents")
+async def incidents() -> dict:
+    """총괄이 다루는 사건(단계·이벤트·사람 결정 대기). 사람 결정은 안전 관문 보류 큐에서 한다."""
+    items = relay.mock_incidents() if is_mock() else await relay.incidents()
+    return ok(items, total=len(items))
+
+
+@router.get("/incidents/{context_id}")
+async def incident(context_id: str) -> dict:
+    if is_mock():
+        found = next((i for i in relay.mock_incidents() if i["context_id"] == context_id), None)
+        if found is None:
+            raise ApiError(404, "NOT_FOUND", f"사건 {context_id}를 찾을 수 없다")
+        return ok(found)
+    return ok(await relay.incident(context_id))
+
+
+@router.get("/executions")
+async def executions(context_id: str | None = None) -> dict:
+    """안전 관문 실행 기록. 요청 원문(`params`)은 빼고 판정과 금액만 보여 준다."""
+    if is_mock():
+        items = [
+            e
+            for e in relay.mock_executions()
+            if context_id is None or e["request"]["context_id"] == context_id
+        ]
+    else:
+        items = await relay.executions(context_id)
+    return ok(items, total=len(items))
+
+
+# ---------------------------------------- 고객지원 AI와 직접 대화 (support chat_* skill)
+# 응답 모양은 개발 AI `/dev-chat`과 같다 (id·title·status·messages[]·who·created_at·updated_at +
+# summary·task_ids·redacted). 보내기는 말을 저장하고 곧바로 돌려준다(status answering). 화면은
+# answering이면 GET으로 다시 읽는다. 읽기(GET)도 열람 권한을 가르려면 사람 토큰을 붙여야 한다.
+def _chat_viewer(request: Request) -> dict[str, str | None]:
+    viewer, role = support_chat.viewer_of(request.headers.get("authorization"))
+    return {"viewer": viewer, "role": role}
+
+
+@router.get("/support-chat")
+async def support_chat_list(request: Request) -> dict:
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
+    out = await support_client.call("support_chat_list", _chat_viewer(request))
+    return ok(out["items"], total=out["total"])
+
+
+@router.get("/support-chat/{thread_id}")
+async def support_chat_get(thread_id: str, request: Request) -> dict:
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
+    return ok(
+        await support_client.call(
+            "support_chat_get", {"thread_id": thread_id, **_chat_viewer(request)}
+        )
+    )
+
+
+@router.post("/support-chat")
+async def support_chat_send(body: SupportChatSendBody, request: Request) -> dict:
+    """말을 보낸다. 말한 사람은 사람 토큰에서만 채우고, 대화가 읽을 집계는 숫자만 넘긴다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "support_chat_send",
+        {
+            "thread_id": body.thread_id,
+            "who": request.state.human,
+            "context": await support_chat.snapshot(),
+        },
+        {"message": body.message},  # 사람의 말은 untrusted로만 넘긴다
+        key=f"support-chat:{uuid.uuid4().hex}",  # 보낼 때마다 한 번씩 처리한다
+    )
+    return ok(out)
+
+
+@router.post("/support-chat/{thread_id}/close")
+async def support_chat_close(thread_id: str, request: Request) -> dict:
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
+    # 닫는 사람은 사람 토큰(쓰기라 반드시 있다)에서만 채운다
+    role = _chat_viewer(request)["role"]
+    out = await support_client.call(
+        "support_chat_close",
+        {"thread_id": thread_id, "viewer": request.state.human, "role": role},
+        target=f"chat:{thread_id}",
+    )
+    return ok(out)
+
+
+@router.get("/privacy/purge-preview")
+async def purge_preview(
+    mode: Literal["customer_request", "expired"], inquiry_id: int | None = None
+) -> dict:
+    """개인정보 삭제 미리보기(읽기): 무엇이 지워지고 무엇이 보존 의무로 남는지.
+
+    `mode=customer_request`는 삭제를 요청한 문의 번호(`inquiry_id`)가 필요하다.
+    `mode=expired`는 받은 지 3년이 지나 지울 문의를 보여 준다. 아무것도 바꾸지 않는다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "개인정보 삭제는 실제 모드에서만 된다")
+    payload: dict = {"mode": mode}
+    if inquiry_id is not None:
+        payload["inquiry_id"] = inquiry_id
+    return ok(await support_client.call("preview_data_purge", payload))
+
+
+@router.post("/conversations/{conversation_id}/customer-data-purge")
+async def customer_data_purge(conversation_id: int) -> dict:
+    """고객 요청에 따른 개인정보 삭제. 삭제를 요청한 문의(`conversation_id`)의 구매자 것을 지운다.
+
+    안전 관문이 늘 사람에게 보류한다. 처음 누르면 409 NOT_EXECUTED(승인 대기)가 돌아오고, 사람이
+    보류 큐에서 승인한 뒤 같은 버튼을 다시 누르면 집행한다(키가 같아 한 번만 처리된다). 처리 중인
+    문의와 클레임이 이어진 문의는 지우지 않고 남긴 날(`retained_until`)을 응답에 담는다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "개인정보 삭제는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "purge_customer_data",
+        {"inquiry_id": conversation_id},
+        key=f"customer-deletion:{conversation_id}",  # 승인 전후 호출이 같은 건이다
+    )
+    return ok(out)
+
+
+def _given(**filters: str | None) -> dict[str, str]:
+    """값이 있는 필터만 hr 입력으로 보낸다."""
+    return {k: v for k, v in filters.items() if v is not None}
+
+
+router.include_router(mock_only)

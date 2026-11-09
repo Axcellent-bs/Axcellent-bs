@@ -1,0 +1,402 @@
+[
+ {
+  "query_id": "h_AP01",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "대형 행사 직전에는 새 기능을 내보내지 못하게 하는 규칙이 있었나",
+  "expected": [
+   "gold_A2_02"
+  ],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AP02",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "스키마를 바꾸는 작업이 실패하면 되돌릴 방법을 미리 준비하게 한 결정",
+  "expected": [
+   "gold_A3_04"
+  ],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AP03",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "새 결제 수단은 처음에 일부 고객에게만 보여 주기로 한 건 어떻게 됐나",
+  "expected": [
+   "gold_A4_02"
+  ],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AP04",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "클라우드 사용료가 예산을 넘으면 누구 허락을 받아야 하나",
+  "expected": [
+   "gold_A6_01"
+  ],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AP05",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "로그에 카드 번호가 그대로 남지 않게 하는 정책",
+  "expected": [
+   "gold_A8_03"
+  ],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AP06",
+  "function": "plan_check",
+  "type": "paraphrase",
+  "query": "서버가 자동으로 끝없이 늘어나지 않게 제한한 결정",
+  "expected": [
+   "gold_A9_05"
+  ],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AL01",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "결제와 관련된 코드를 바꾸려는데 어떤 시험을 꼭 통과해야 머지할 수 있나요?",
+  "expected": [
+   "gold_A10_02"
+  ],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AL02",
+  "function": "plan_check",
+  "type": "long_mixed",
+  "query": "관리 권한을 올려 달라는 요청이 왔는데 한 사람이 혼자 승인해도 되나요?",
+  "expected": [
+   "gold_A5_01"
+  ],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AN01",
+  "function": "plan_check",
+  "type": "no_answer_adjacent",
+  "query": "사내 카페 쿠폰은 어떤 규칙으로 쓰나",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AN02",
+  "function": "plan_check",
+  "type": "no_answer_adjacent",
+  "query": "법인 차량 배차는 어떤 기준으로 승인하나",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AN03",
+  "function": "plan_check",
+  "type": "no_answer_adjacent",
+  "query": "회사 로고를 외부 행사에서 써도 되는지 승인 방식",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AN04",
+  "function": "plan_check",
+  "type": "no_answer_adjacent",
+  "query": "출장 중에 노트북을 잃어버리면 어디에 신고하나",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AN05",
+  "function": "plan_check",
+  "type": "no_answer_adjacent",
+  "query": "채용 공고를 올릴 때 누구 승인을 받아야 하나",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AN06",
+  "function": "plan_check",
+  "type": "no_answer_adjacent",
+  "query": "외부 강연에 참석하려면 어떤 승인이 필요한가",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AU01",
+  "function": "plan_check",
+  "type": "no_answer_unrelated",
+  "query": "점심 식사 시간은 몇 시부터인가",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_AU02",
+  "function": "plan_check",
+  "type": "no_answer_unrelated",
+  "query": "연말 성과 평가는 어떤 기준으로 반영하나",
+  "expected": [],
+  "pool": "plan_check",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BP01",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "주문을 취소했는데 재고가 줄어든 채로 남아 있던 문제",
+  "expected": [
+   "gold_B4_02"
+  ],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BP02",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "구글이나 네이버로 로그인하는 버튼만 안 되던 사건",
+  "expected": [
+   "gold_B5_03"
+  ],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BP03",
+  "function": "escalation",
+  "type": "paraphrase",
+  "query": "상품 사진을 바꿨는데 예전 사진이 계속 보이던 일",
+  "expected": [
+   "gold_B7_02"
+  ],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BL01",
+  "function": "escalation",
+  "type": "long_mixed",
+  "query": "보고서 하나가 오래 돌면서 다른 요청이 줄줄이 대기하다 멈췄습니다.",
+  "expected": [
+   "gold_B8_01"
+  ],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BL02",
+  "function": "escalation",
+  "type": "long_mixed",
+  "query": "할인 쿠폰으로 산 뒤 환불하면 쿠폰 금액까지 돌려받는 악용이 보입니다.",
+  "expected": [
+   "gold_B9_04"
+  ],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BL03",
+  "function": "escalation",
+  "type": "long_mixed",
+  "query": "밤 시간대에만 결제 승인이 불규칙하게 실패하는데 끊어진 연결을 다시 쓴 것 같습니다.",
+  "expected": [
+   "gold_B1_04"
+  ],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BN01",
+  "function": "escalation",
+  "type": "no_answer_adjacent",
+  "query": "사무실 정전으로 서버실 경보가 울린 사건",
+  "expected": [],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BN02",
+  "function": "escalation",
+  "type": "no_answer_adjacent",
+  "query": "사내 프린터 서버 응답이 느려진 일",
+  "expected": [],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BN03",
+  "function": "escalation",
+  "type": "no_answer_adjacent",
+  "query": "사내 메신저에 접속이 안 되던 사건",
+  "expected": [],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BN04",
+  "function": "escalation",
+  "type": "no_answer_adjacent",
+  "query": "카페 결제 단말기가 오류를 낸 일",
+  "expected": [],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BU01",
+  "function": "escalation",
+  "type": "no_answer_unrelated",
+  "query": "구내식당 키오스크가 멈춘 사건",
+  "expected": [],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_BU02",
+  "function": "escalation",
+  "type": "no_answer_unrelated",
+  "query": "회의실 영상 장비 연결이 실패한 일",
+  "expected": [],
+  "pool": "escalation",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CP01",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "해외에 나가 있어도 주 1회 회의에는 들어오는 담당의 업무 대행",
+  "expected": [
+   "gold_C4_03"
+  ],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CP02",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "수당 기준표가 매달 15일에 바뀌는 정산 업무를 넘기는 일",
+  "expected": [
+   "gold_C6_02"
+  ],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CP03",
+  "function": "handover",
+  "type": "paraphrase",
+  "query": "주말 오전에 배송 지연 문의가 늘어난 상태에서의 당직 교대",
+  "expected": [
+   "gold_C1_02"
+  ],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CL01",
+  "function": "handover",
+  "type": "long_mixed",
+  "query": "새로 온 사람은 둘째 주부터 실제 업무를 맡는다고 안내해야 합니다.",
+  "expected": [
+   "gold_C7_03"
+  ],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CL02",
+  "function": "handover",
+  "type": "long_mixed",
+  "query": "옮긴 부서의 권한이 나오면 예전 부서 권한을 회수하는 인계를 하려고 합니다.",
+  "expected": [
+   "gold_C3_05"
+  ],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CL03",
+  "function": "handover",
+  "type": "long_mixed",
+  "query": "개인 폴더에 흩어진 운영 문서를 공용 위키로 옮기기 전에 인계해야 합니다.",
+  "expected": [
+   "gold_C2_05"
+  ],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CN01",
+  "function": "handover",
+  "type": "no_answer_adjacent",
+  "query": "연말 송년회 장소 예약 업무 인수인계",
+  "expected": [],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CN02",
+  "function": "handover",
+  "type": "no_answer_adjacent",
+  "query": "사내 동호회 회원 관리 업무 인수인계",
+  "expected": [],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CN03",
+  "function": "handover",
+  "type": "no_answer_adjacent",
+  "query": "건물 청소 일정 관리 업무 인수인계",
+  "expected": [],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CN04",
+  "function": "handover",
+  "type": "no_answer_adjacent",
+  "query": "사내 도서관 대출 업무 인수인계",
+  "expected": [],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CU01",
+  "function": "handover",
+  "type": "no_answer_unrelated",
+  "query": "주차장 배정은 어떻게 하나",
+  "expected": [],
+  "pool": "handover",
+  "split": "holdout"
+ },
+ {
+  "query_id": "h_CU02",
+  "function": "handover",
+  "type": "no_answer_unrelated",
+  "query": "복지몰 포인트는 언제 충전되나",
+  "expected": [],
+  "pool": "handover",
+  "split": "holdout"
+ }
+]

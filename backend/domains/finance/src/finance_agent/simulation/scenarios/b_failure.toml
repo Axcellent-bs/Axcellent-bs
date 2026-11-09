@@ -1,0 +1,48 @@
+# 시나리오 B: 광고 성과가 나쁠 때. 값의 출처와 가정은 backend/docs/notes/finance/simulation-assumptions.md
+id = "b"
+title = "성과가 나쁜 인스타그램 릴스 광고"
+today = "2026-10-15"
+cash_net_krw = 3000000
+monthly_budget_krw = 1000000
+repeat_multiple = 1.2
+
+[[rounds]]
+campaign_id = "cmp_b_1"
+campaign_name = "공개 쿠폰 릴스 1차"
+channel = "인스타그램 릴스"
+requested_krw = 400000
+period_from = "2026-10-01"
+period_to = "2026-10-05"
+cpc_krw = 1050
+ctr = 0.01
+cvr = 0.015
+aov_krw = 25000
+coupon_per_order_krw = 3000
+
+# 같은 요청이지만 실패 이력 때문에 한도가 줄어든다
+[[rounds]]
+campaign_id = "cmp_b_2"
+campaign_name = "공개 쿠폰 릴스 2차"
+channel = "인스타그램 릴스"
+requested_krw = 400000
+period_from = "2026-10-06"
+period_to = "2026-10-10"
+cpc_krw = 1050
+ctr = 0.01
+cvr = 0.015
+aov_krw = 25000
+coupon_per_order_krw = 3000
+
+# 두 번 연속 적자라 브레이크가 걸린다
+[[rounds]]
+campaign_id = "cmp_b_3"
+campaign_name = "공개 쿠폰 릴스 3차"
+channel = "인스타그램 릴스"
+requested_krw = 400000
+period_from = "2026-10-11"
+period_to = "2026-10-14"
+cpc_krw = 1050
+ctr = 0.01
+cvr = 0.015
+aov_krw = 25000
+coupon_per_order_krw = 3000

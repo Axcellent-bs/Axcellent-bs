@@ -1,0 +1,556 @@
+"""YouTube Data API v3 커넥터 (영상 통계 스냅샷용). 읽기만 한다.
+
+회사 지표 커넥터(`connectors.Connector`)와 모양이 달라 그 인터페이스를 구현하지 않는다.
+메서드 3개:
+- `popular(region, pages)`: 인기 목록(`videos.list chart=mostPopular`). 50개씩 최대 4페이지 = 200개.
+  인기 순위(1부터)를 붙인다. 쪽당 1단위
+- `videos(ids)`: 추적 중인 영상 통계(`videos.list id=`). 50개씩, 묶음당 1단위. 지워졌거나 비공개인
+  영상은 응답에 없어서 결과에도 없다(0으로 만들지 않는다)
+- `search(query, published_after, region)`: 키워드 검색(`search.list`, 100단위).
+  검색 결과에는 통계가 없어서 `videos.list`로 한 번 더 받는다(1단위)
+
+- 주소: `AX_YOUTUBE_API_URL`(없으면 `DEFAULT_URL`). 키: `YOUTUBE_API_KEY`(`.env`)만.
+  키는 URL에 넣지 않고 헤더 `X-Goog-Api-Key`로 보낸다(오류 문장·로그에 URL이 찍혀도 키가 없게).
+- 숫자 칸(조회수·좋아요·댓글)이 응답에 없으면(좋아요 숨김·댓글 막음) None이다. 0이 아니다.
+- 못 읽으면 `ConnectorUnavailable`: 키 없음·401·403 `UNAUTHORIZED`, 403 할당량 초과
+  `QUOTA_EXCEEDED`, 400 `BAD_REQUEST`, 429 `RATE_LIMITED`, 연결 실패·5xx `UNAVAILABLE`,
+  JSON 아님·형식 다름 `BAD_RESPONSE`.
+- 할당량: 부를 때마다 문서 단가(`COST`)를 `quota_used`에 더한다. 실패한 호출도 할당량을 쓰므로 센다.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from data_agent import youtube_quota
+from data_agent.connectors import ConnectorUnavailable, replay
+from data_agent.stage_timing import stage
+
+DEFAULT_URL = "https://www.googleapis.com/youtube/v3"
+URL_ENV = "AX_YOUTUBE_API_URL"
+KEY_ENV = "YOUTUBE_API_KEY"
+TIMEOUT_SECONDS = 15.0
+PAGE_SIZE = 50  # videos.list 한 번에 최대 50개
+MAX_POPULAR_PAGES = 4  # mostPopular는 200개까지 준다
+COST = {"videos": 1, "search": 100, "channels": 1, "videoCategories": 1}  # 문서 단가 (단위)
+QUOTA_REASONS = frozenset({"quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded"})
+
+_client: httpx.AsyncClient | None = None  # 테스트가 `use_client`로 바꿔 끼운다
+
+
+class QuotaRefused(ConnectorUnavailable):
+    """장부(youtube_quota)가 막아 YouTube를 부르지 않음 (할당량 안 씀). code는 QUOTA_EXCEEDED."""
+
+
+def use_client(client: httpx.AsyncClient | None) -> None:
+    """HTTP 클라이언트를 바꿔 끼운다 (테스트용). None이면 호출마다 새로 만든다."""
+    global _client
+    _client = client
+
+
+# ---------------------------------------------------------------- 표준 형식
+
+
+@dataclass(frozen=True)
+class VideoStat:
+    """영상 하나의 그 순간 값. 숫자 칸이 None이면 응답에 없던 것(숨김)이다."""
+
+    video_id: str
+    channel_id: str
+    category_id: str | None
+    published_at: datetime  # UTC
+    view_count: int | None
+    like_count: int | None
+    comment_count: int | None
+    tags: tuple[str, ...]
+    title: str = ""
+    rank: int | None = None  # 인기 순위 (인기 목록에서 받았을 때만, 1부터)
+    channel_title: str = ""  # 채널 이름 (snippet.channelTitle)
+    duration_seconds: int | None = None  # 길이(초, contentDetails.duration). 못 읽으면 None
+    # 영상 언어 (snippet.defaultAudioLanguage, 없으면 defaultLanguage). 채널이 안 적었으면 None
+    language: str | None = None
+    # 썸네일 주소 (snippet.thumbnails의 medium → high → default). 응답에 없으면 None
+    thumbnail_url: str | None = None
+
+
+# ---------------------------------------------------------------- YouTube 응답 형식 (여기서만 쓴다)
+
+
+class _Stats(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    viewCount: int | None = Field(default=None, ge=0)  # noqa: N815 - API 칸 이름
+    likeCount: int | None = Field(default=None, ge=0)  # noqa: N815
+    commentCount: int | None = Field(default=None, ge=0)  # noqa: N815
+
+
+class _Thumb(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    url: str | None = None
+
+
+class _Snippet(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    publishedAt: datetime  # noqa: N815
+    channelId: str  # noqa: N815
+    title: str = ""
+    categoryId: str | None = None  # noqa: N815
+    tags: list[str] = Field(default_factory=list)
+    channelTitle: str = ""  # noqa: N815
+    defaultAudioLanguage: str | None = None  # noqa: N815
+    defaultLanguage: str | None = None  # noqa: N815
+    thumbnails: dict[str, _Thumb] = Field(default_factory=dict)
+
+
+THUMB_ORDER = ("medium", "high", "default", "standard", "maxres")
+
+
+def thumbnail_url(thumbs: dict[str, _Thumb]) -> str | None:
+    """응답에 온 썸네일 중 하나 (medium 먼저). 없으면 None."""
+    for size in THUMB_ORDER:
+        t = thumbs.get(size)
+        if t is not None and t.url:
+            return t.url
+    return None
+
+
+class _Details(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    duration: str | None = None  # ISO 8601 (예: PT1M5S)
+
+
+_DURATION = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$")
+
+
+def duration_seconds(text: str | None) -> int | None:
+    """ISO 8601 길이(PT1M5S) → 초. 못 읽으면 None (0으로 채우지 않음)."""
+    if not text:
+        return None
+    m = _DURATION.match(text.strip())
+    if not m or not any(m.groups()):
+        return None
+    d, h, mi, se = (int(x) if x else 0 for x in m.groups())
+    return ((d * 24 + h) * 60 + mi) * 60 + se
+
+
+class _Video(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    snippet: _Snippet
+    statistics: _Stats = Field(default_factory=_Stats)
+    contentDetails: _Details = Field(default_factory=_Details)  # noqa: N815
+
+
+class _VideoPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    items: list[_Video]
+    nextPageToken: str | None = None  # noqa: N815
+
+
+class _ChannelStats(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    subscriberCount: int | None = Field(default=None, ge=0)  # noqa: N815
+    hiddenSubscriberCount: bool = False  # noqa: N815
+
+
+class _Channel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    statistics: _ChannelStats = Field(default_factory=_ChannelStats)
+
+
+class _ChannelPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    items: list[_Channel] = Field(default_factory=list)
+
+
+class _CategorySnippet(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    title: str
+    assignable: bool = True
+
+
+class _Category(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    snippet: _CategorySnippet
+
+
+class _CategoryPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    items: list[_Category]
+
+
+class _SearchId(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    videoId: str | None = None  # noqa: N815
+
+
+class _SearchItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: _SearchId
+
+
+class _SearchPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    items: list[_SearchItem]
+    nextPageToken: str | None = None  # noqa: N815
+
+
+def _stat(video: _Video, rank: int | None = None) -> VideoStat:
+    sn, st = video.snippet, video.statistics
+    return VideoStat(
+        video_id=video.id,
+        channel_id=sn.channelId,
+        category_id=sn.categoryId,
+        published_at=sn.publishedAt.astimezone(UTC),
+        view_count=st.viewCount,
+        like_count=st.likeCount,
+        comment_count=st.commentCount,
+        tags=tuple(t.strip() for t in sn.tags if t.strip()),
+        title=sn.title,
+        rank=rank,
+        channel_title=sn.channelTitle,
+        duration_seconds=duration_seconds(video.contentDetails.duration),
+        language=sn.defaultAudioLanguage or sn.defaultLanguage,
+        thumbnail_url=thumbnail_url(sn.thumbnails),
+    )
+
+
+# ---------------------------------------------------------------- 커넥터
+
+
+class YouTubeConnector:
+    """YouTube 읽기. 키·주소는 `env`(기본 `os.environ`)에서 읽는다.
+
+    `quota_used`에 쓴 할당량 단위가 쌓인다.
+    """
+
+    def __init__(
+        self, env: Mapping[str, str] | None = None, *, client: httpx.AsyncClient | None = None,
+        caller: str | None = None,
+    ) -> None:
+        env = os.environ if env is None else env
+        self.caller = caller  # 할당량 장부의 부른 곳 (단계 기록 중인 skill 이름이 먼저)
+        self.url = (env.get(URL_ENV) or DEFAULT_URL).rstrip("/")
+        self._key = env.get(KEY_ENV) or ""
+        self._client = client
+        self.quota_used = 0
+        self._env = env
+        self.mode = replay.mode(env)  # live · record · replay (README "외부 호출 없이 확인하기")
+        self.next_page_tokens: dict[str, str | None] = {}  # 숏츠 검색 카테고리마다 다음 페이지
+
+    def __repr__(self) -> str:  # 키를 담지 않는다
+        return f"YouTubeConnector(url={self.url!r}, quota_used={self.quota_used})"
+
+    async def popular(self, region: str = "KR", pages: int = MAX_POPULAR_PAGES) -> list[VideoStat]:
+        """인기 목록. 순위를 붙인다. 다음 쪽이 없으면 거기서 멈춘다."""
+        out: list[VideoStat] = []
+        token: str | None = None
+        for _ in range(max(1, min(pages, MAX_POPULAR_PAGES))):
+            params = {"part": "snippet,statistics,contentDetails", "chart": "mostPopular",
+                      "regionCode": region, "maxResults": PAGE_SIZE}  # fmt: skip
+            if token:
+                params["pageToken"] = token
+            page = _parse(_VideoPage, await self._get("videos", params), "인기 목록")
+            first = len(out) + 1  # 이 쪽 첫 영상의 순위
+            out.extend(_stat(v, rank=first + i) for i, v in enumerate(page.items))
+            token = page.nextPageToken
+            if not token:
+                break
+        return out
+
+    async def popular_category(self, category_id: str, region: str = "KR") -> list[VideoStat]:
+        """YouTube 카테고리 하나의 인기 차트 첫 쪽 (videos.list chart=mostPopular, 50개·1단위)."""
+        params = {"part": "snippet,statistics,contentDetails", "chart": "mostPopular",
+                  "regionCode": region, "videoCategoryId": category_id,
+                  "maxResults": PAGE_SIZE}  # fmt: skip
+        page = _parse(_VideoPage, await self._get("videos", params), "카테고리 인기 목록")
+        return [_stat(v, rank=n) for n, v in enumerate(page.items, start=1)]
+
+    async def videos(self, ids: Sequence[str]) -> list[VideoStat]:
+        """영상 id 목록의 지금 값. 응답에 없는 영상(지워짐·비공개)은 결과에도 없다."""
+        unique = list(dict.fromkeys(i for i in ids if i))
+        out: list[VideoStat] = []
+        for start in range(0, len(unique), PAGE_SIZE):
+            chunk = unique[start : start + PAGE_SIZE]
+            params = {
+                "part": "snippet,statistics,contentDetails",
+                "id": ",".join(chunk),
+                "maxResults": PAGE_SIZE,
+            }
+            page = _parse(_VideoPage, await self._get("videos", params), "영상 통계")
+            out.extend(_stat(v) for v in page.items)
+        return out
+
+    async def video_categories(self, region: str = "KR", hl: str = "ko") -> dict[str, str]:
+        """그 지역 영상 카테고리 id → 이름 (videoCategories.list, 1단위). 지정할 수 있는 것만."""
+        params = {"part": "snippet", "regionCode": region, "hl": hl}
+        page = _parse(_CategoryPage, await self._get("videoCategories", params), "영상 카테고리")
+        return {c.id: c.snippet.title for c in page.items if c.snippet.assignable}
+
+    async def channels(self, ids: Sequence[str]) -> dict[str, int | None]:
+        """채널 id → 구독자 수 (channels.list, 50개씩 1단위). 숨김은 None, 없는 채널은 빠진다."""
+        unique = list(dict.fromkeys(i for i in ids if i))
+        out: dict[str, int | None] = {}
+        for start in range(0, len(unique), PAGE_SIZE):
+            chunk = unique[start : start + PAGE_SIZE]
+            params = {"part": "statistics", "id": ",".join(chunk), "maxResults": PAGE_SIZE}
+            page = _parse(_ChannelPage, await self._get("channels", params), "채널 통계")
+            for c in page.items:
+                hidden = c.statistics.hiddenSubscriberCount
+                out[c.id] = None if hidden else c.statistics.subscriberCount
+        return out
+
+    async def search(
+        self, query: str, published_after: datetime, region: str = "KR", max_results: int = 25
+    ) -> list[VideoStat]:
+        """키워드 검색(최근 게시) → 결과 영상의 통계. 검색 100단위 + 통계 1단위."""
+        params = {
+            "part": "snippet",
+            "q": query,
+            "type": "video",
+            "regionCode": region,
+            "order": "viewCount",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        page = _parse(_SearchPage, await self._get("search", params), "검색")
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
+    async def search_query_shorts(
+        self,
+        query: str,
+        published_after: datetime,
+        region: str = "KR",
+        language: str | None = None,
+        max_results: int = PAGE_SIZE,
+    ) -> list[VideoStat]:
+        """검색어로 짧은 영상(4분 미만, `videoDuration=short`) 검색 → 결과 영상의 통계.
+
+        조회수 순, 최근 게시. `language`(예: ko)는 `relevanceLanguage`(앞에 둘 뿐 거르지 않음).
+        검색 100단위 + 통계 1단위(50개마다). 숏츠 길이 기준은 부르는 쪽이 `duration_seconds`로
+        거른다.
+        """
+        params = {
+            "part": "snippet",
+            "q": query,
+            "type": "video",
+            "videoDuration": "short",
+            "regionCode": region,
+            "order": "viewCount",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if language:
+            params["relevanceLanguage"] = language
+        page = _parse(_SearchPage, await self._get("search", params), "숏츠 검색")
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
+    async def search_fresh_shorts(
+        self,
+        query: str,
+        published_after: datetime,
+        region: str = "KR",
+        language: str | None = "ko",
+        max_results: int = PAGE_SIZE,
+    ) -> list[VideoStat]:
+        """새로 올라온 짧은 영상(4분 미만) 검색, **최신순**(`order=date`) → 결과 영상의 통계.
+
+        새 숏츠 추적(`fresh_shorts`)이 같은 형식 비교 기준 표본을 게시 직후부터 모으려고 쓴다.
+        검색 100단위 + 통계 1단위(50개마다). 숏츠 길이 기준(60초)은 부르는 쪽이 거른다.
+        """
+        params = {
+            "part": "snippet",
+            "q": query,
+            "type": "video",
+            "videoDuration": "short",
+            "regionCode": region,
+            "order": "date",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if language:
+            params["relevanceLanguage"] = language
+        page = _parse(_SearchPage, await self._get("search", params), "새 숏츠 검색")
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
+    async def search_category(
+        self,
+        category_id: str,
+        published_after: datetime,
+        region: str = "KR",
+        max_results: int = PAGE_SIZE,
+        language: str | None = None,
+        query: str | None = None,
+    ) -> list[VideoStat]:
+        """YouTube 카테고리 하나의 최근 게시 영상을 조회수 순으로 검색 → 결과 영상의 통계.
+
+        길이 조건 없음. `query`가 있으면 검색어(q, `|`는 또는). 검색 100단위 + 통계 1단위(50개마다).
+        """
+        params = {
+            "part": "snippet",
+            "type": "video",
+            "videoCategoryId": category_id,
+            "regionCode": region,
+            "order": "viewCount",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if language:
+            params["relevanceLanguage"] = language
+        if query:
+            params["q"] = query
+        page = _parse(_SearchPage, await self._get("search", params), "카테고리 검색")
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
+    async def search_shorts(
+        self,
+        category_id: str,
+        published_after: datetime,
+        region: str = "KR",
+        max_results: int = PAGE_SIZE,
+        language: str | None = None,
+        page_token: str | None = None,
+    ) -> list[VideoStat]:
+        """YouTube 카테고리 하나의 짧은 영상(4분 미만) 검색 → 결과 영상의 통계.
+
+        `language`(예: ko)를 주면 `relevanceLanguage`로 그 언어 영상을 앞에 둔다(거르지는 않는다).
+
+        `videoDuration=short`, 조회수 순, 최근 게시. 검색 100단위 + 통계 1단위(50개마다).
+        """
+        params = {
+            "part": "snippet",
+            "type": "video",
+            "videoDuration": "short",
+            "videoCategoryId": category_id,
+            "regionCode": region,
+            "order": "viewCount",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if language:
+            params["relevanceLanguage"] = language
+        if page_token:
+            params["pageToken"] = page_token
+        page = _parse(_SearchPage, await self._get("search", params), "숏츠 검색")
+        self.next_page_tokens[category_id] = page.nextPageToken
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
+    async def search_recent(
+        self,
+        published_after: datetime,
+        *,
+        query: str | None = None,
+        category_id: str | None = None,
+        short: bool = False,
+        region: str = "KR",
+        language: str | None = None,
+        max_results: int = PAGE_SIZE,
+    ) -> list[VideoStat]:
+        """최근 게시 영상을 조회수 순으로 검색 → 결과 영상의 통계 (영상 탐색 보충 검색).
+
+        `query`(q, `|`는 또는)·`category_id` 중 있는 것으로 찾는다. `short`면 `videoDuration=short`
+        (4분 미만, 숏츠 길이 기준은 부르는 쪽이 거른다), 아니면 길이 조건 없음.
+        검색 100단위 + 통계 1단위(50개마다).
+        """
+        params: dict[str, Any] = {
+            "part": "snippet",
+            "type": "video",
+            "regionCode": region,
+            "order": "viewCount",
+            "maxResults": max(1, min(max_results, PAGE_SIZE)),
+            "publishedAfter": published_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if query:
+            params["q"] = query
+        if category_id:
+            params["videoCategoryId"] = category_id
+        if short:
+            params["videoDuration"] = "short"
+        if language:
+            params["relevanceLanguage"] = language
+        page = _parse(_SearchPage, await self._get("search", params), "최근 영상 검색")
+        ids = [item.id.videoId for item in page.items if item.id.videoId]
+        return await self.videos(ids) if ids else []
+
+    async def _get(self, resource: str, params: dict[str, Any]) -> Any:
+        if self.mode == "replay":  # 저장된 응답만 (할당량을 세지 않는다)
+            return replay.load("youtube", f"{self.url}/{resource}", params, self._env)
+        with stage("external"):
+            payload = await self._get_live(resource, params)
+        if self.mode == "record":
+            replay.save("youtube", f"{self.url}/{resource}", params, payload, self._env)
+        return payload
+
+    async def _get_live(self, resource: str, params: dict[str, Any]) -> Any:
+        if not self._key:
+            raise ConnectorUnavailable(
+                "UNAUTHORIZED", f"{KEY_ENV}가 없어 YouTube Data API를 부를 수 없다"
+            )
+        # 하나의 장부(youtube_quota): 전체 상한, 검색은 부른 곳의 몫(새 숏츠 추적 예약 몫 / 다른
+        # 기능 몫)까지 확인하고 같이 적는다. 넘으면 부르지 않는다
+        caller = youtube_quota.current_caller(self.caller)
+        why = youtube_quota.LEDGER.take(caller, COST[resource], search=resource == "search",
+                                        env=self._env)  # fmt: skip
+        if why is not None:
+            raise QuotaRefused("QUOTA_EXCEEDED", why)
+        self.quota_used += COST[resource]
+        client = self._client or _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
+        try:
+            response = await client.get(
+                f"{self.url}/{resource}", params=params, headers={"X-Goog-Api-Key": self._key}
+            )
+        except httpx.HTTPError as exc:
+            raise ConnectorUnavailable(
+                "UNAVAILABLE", f"YouTube Data API에 연결할 수 없다 ({type(exc).__name__})"
+            ) from exc
+        finally:
+            if client is not self._client and client is not _client:
+                await client.aclose()
+        if response.status_code != 200:
+            raise _error(response)
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise ConnectorUnavailable("BAD_RESPONSE", "YouTube 응답이 JSON이 아니다") from exc
+
+
+def _parse[T: BaseModel](model: type[T], payload: Any, what: str) -> T:
+    try:
+        return model.model_validate(payload)
+    except ValidationError as exc:
+        raise ConnectorUnavailable(
+            "BAD_RESPONSE", f"YouTube {what} 응답 형식이 예상과 다르다"
+        ) from exc
+
+
+def _error(response: httpx.Response) -> ConnectorUnavailable:
+    status = response.status_code
+    reasons: set[str] = set()
+    message = ""
+    try:
+        error = response.json()["error"]
+        reasons = {str(e.get("reason")) for e in error.get("errors", []) if isinstance(e, dict)}
+        message = str(error.get("message", ""))[:200]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        pass
+    if status == 403 and reasons & QUOTA_REASONS:
+        code = "QUOTA_EXCEEDED"
+    else:
+        code = {400: "BAD_REQUEST", 401: "UNAUTHORIZED", 403: "UNAUTHORIZED",
+                429: "RATE_LIMITED"}.get(status, "UNAVAILABLE")  # fmt: skip
+    detail = f": {message}" if message else ""
+    return ConnectorUnavailable(code, f"YouTube 응답 {status} ({code}){detail}")

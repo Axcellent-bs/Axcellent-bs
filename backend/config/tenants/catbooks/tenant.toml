@@ -1,0 +1,36 @@
+# 회사 한 곳 = 카탈로그 + 커넥터 + 조직도 (backend/README.md "새 회사를 붙일 때")
+# run_all.sh가 AX_TENANT(기본 catbooks)로 이 폴더를 읽는다 (scripts/tenant_env.py)
+# 비밀값을 두지 않는다. 토큰·주소는 backend/.env 에만 둔다
+
+name = "캣북스"
+# data 지표 카탈로그: 이름이면 domains/data/src/data_agent/catalogs/<이름>.toml, .toml이면 이 폴더 기준 경로
+catalog = "catbooks"
+# 커넥터 이름. 카탈로그의 connector와 같아야 한다 (data clients/shop_client.py CONNECTORS)
+connector = "shop-api"
+# 조직도 (이 폴더 기준). 꺼진 서비스로 가는 일을 맡는 부서
+org = "org.yaml"
+# 검색어 급상승(data trend_scan) 기본 키워드 그룹 (이 폴더 기준)
+trends = "trends.toml"
+# YouTube 영상 통계 스냅샷이 검색하는 회사 키워드 (이 폴더 기준)
+youtube = "youtube.toml"
+
+# 회사 시간대 (요일·날짜 경계: campaign_effect 같은 요일 기준선, 시작 전 기록 일수). IANA 이름
+timezone = "Asia/Seoul"
+
+# 도메인 프로필(data domain_profile)이 읽는 회사 소개. 키워드·카테고리·출처는 적지 않는다(AI가 카탈로그로 고름)
+[profile]
+about = "캣북스는 책을 파는 온라인 쇼핑몰(이커머스)을 운영하는 출판사다. 직접 펴낸 책과 함께 소설·에세이·IT 학습서를 판매한다."
+
+# 사람이 덮어쓰기 (비어 있어도 됨). 쓸 수 있는 칸: industry, customer_axes, subtopic_axes, questions,
+# seed_keywords(더할 키워드), drop_keywords(뺄 키워드)
+[profile.override]
+
+# 새 데이터 출처 수집 승인 (사람). data_sources의 출처 id를 적으면 수집을 시작한다.
+# 기존 출처(youtube·google_trending·naver_search_trend)는 적지 않아도 승인된 것으로 본다
+[sources]
+# 새 출처는 사람이 승인해야 수집 계획·기회 카드가 부른다 (2026-11-05 쇼핑인사이트 이용 신청 후 승인)
+approved = ["naver_shopping"]
+
+[finance]
+# 팀 예산 = 그달 1일 팀 인원 × 인당 월 단가(원). 재무 AI가 계산하고 재무 담당이 승인한다
+per_head_monthly = 100000

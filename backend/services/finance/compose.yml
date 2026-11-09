@@ -1,0 +1,12 @@
+services:
+  finance:
+    build:
+      context: ../..
+      dockerfile: services/finance/Dockerfile
+    ports:
+      - "8105:8105"
+    env_file:
+      - path: ../../.env
+        required: false
+      - path: ./.env
+        required: false

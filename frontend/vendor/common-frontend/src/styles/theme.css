@@ -1,0 +1,127 @@
+/* 테마: 인디고 팔레트 + 각진(모서리 0) 모양. 원본: DejaFix/DejaFix (GitHub dev) frontend/src/styles/theme.css (값 그대로).
+   라이트 테마의 토큰과 컴포넌트 모양을 덮어쓴다. 다크 테마 토큰은 선택자가 더 강해서 그대로 유지된다(DejaFix와 같음).
+
+   DejaFix와 다른 점 2가지:
+   1) 모서리 0을 `* { border-radius: 0 !important }` 대신 토큰(--radius-* = 0)으로 만든다.
+      화면 결과는 같고, 쓰는 쪽에서 토큰만 바꾸면 둥글게 되돌릴 수 있다.
+   2) 버튼·검색칸·세그먼트 바탕의 #fff 를 var(--surface)로 썼다. 라이트에서는 같은 #fff이고, 다크에서 흰 버튼이 되지 않는다. */
+:root {
+  --bg: #f6f6fb;
+  --surface: #ffffff;
+  --surface-2: #f1f1f9;
+  --text: #232345;
+  --text-2: #4a4a6e;
+  --text-3: #8a8aa8;
+  --border: #e8e8f2;
+  --border-strong: #d8d8e8;
+  --hover: #eeeef8;
+  --track: #ebebf5;
+  --primary: #5b5bd6;
+  --primary-hover: #4545b8;
+  --primary-soft: #ececfb;
+  --sidebar-bg: #ffffff;
+  --topbar-bg: rgba(246, 246, 251, 0.9);
+  --code-bg: #232345;
+  --chip-neutral-bg: #ebebf5;
+  --skeleton-a: #e8e8f2;
+  --skeleton-b: #f1f1f9;
+  --chart-text: #8a8aa8;
+  --chart-grid: #e8e8f2;
+  --series-1: #5b5bd6;
+  --series-3: #7fa3c7;
+  --shadow-sm: 0 1px 2px rgba(35, 35, 69, 0.05), 0 6px 18px rgba(35, 35, 69, 0.05);
+  --blue-grad: linear-gradient(135deg, #7c7ce8, #5b5bd6);
+  --on-primary-ink: #ffffff;
+
+  --success: #2e9e6b; /* DejaFix --risk-low */
+  --success-soft: #e4f5ec;
+
+  /* 모서리 0 (DejaFix: '모서리 둥글게 하지 않음' 블록) */
+  --radius-lg: 0;
+  --radius-md: 0;
+  --radius-sm: 0;
+  --radius-pill: 0;
+  --radius-round: 0;
+}
+
+/* 사이드바: 흰 면 + 메뉴 (shell.css가 어두운 사이드바로 다시 덮는다) */
+.sidebar {
+  border-right: 0;
+  box-shadow: 1px 0 0 var(--border);
+}
+.nav-item {
+  border-radius: var(--radius-pill);
+  padding: 10px 14px;
+}
+.nav-item.active {
+  background: var(--primary);
+  color: var(--on-primary-ink);
+  font-weight: 700;
+}
+.nav-item.active .nav-badge {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--danger);
+}
+
+/* 상단 바: 면 없이 떠 있는 느낌 */
+.topbar {
+  border-bottom: 0;
+}
+.search {
+  background: var(--surface);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+}
+.btn {
+  border-radius: var(--radius-pill);
+  border-color: transparent;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.btn:hover {
+  background: var(--primary-soft);
+}
+.btn.dark {
+  background: var(--primary);
+  color: var(--on-primary-ink);
+  box-shadow: none;
+}
+.btn.dark:hover {
+  background: var(--primary-hover);
+}
+.btn.small {
+  border-radius: var(--radius-pill);
+  border-color: #d8d8f3;
+  box-shadow: none;
+  color: var(--text-2);
+}
+.seg {
+  background: var(--surface);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+}
+.seg button {
+  border-radius: var(--radius-pill);
+}
+.seg button.on {
+  background: var(--primary);
+  color: var(--on-primary-ink);
+  box-shadow: none;
+}
+
+/* 카드: 테두리 없이 흰 면 + 아주 옅은 그림자 */
+.card {
+  border: 0;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.card-title {
+  font-weight: 700;
+}
+.info-tip {
+  border-color: #d8d8f3;
+  color: var(--primary);
+}
+.collapsible {
+  border-radius: var(--radius-lg);
+}

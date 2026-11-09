@@ -1,0 +1,437 @@
+{
+  "pairs": {
+    "dev": 76,
+    "test": 32,
+    "labels": {
+      "duplicate": 30,
+      "update": 30,
+      "related": 30,
+      "unrelated": 18
+    }
+  },
+  "thresholds": {
+    "v2_T_low": 0.8184,
+    "v2_T_auto": 0.9101,
+    "v2_best_candidates": 1,
+    "v1_T_low": 0.7601,
+    "v1_T_auto": 0.8239
+  },
+  "dev": {
+    "dice_current": {
+      "n": 76,
+      "accuracy": 0.5263,
+      "precision": 1.0,
+      "recall": 0.1,
+      "tp": 4,
+      "fp": 0,
+      "fn": 36,
+      "tn": 36
+    },
+    "v1": {
+      "n": 76,
+      "accuracy": 0.9868,
+      "precision": 1.0,
+      "recall": 0.975,
+      "tp": 39,
+      "fp": 0,
+      "fn": 1,
+      "tn": 36
+    },
+    "v2": {
+      "n": 76,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tp": 40,
+      "fp": 0,
+      "fn": 0,
+      "tn": 36
+    },
+    "v2_wrong_auto_merge_by_cosine": 0,
+    "v2_duplicates_over_auto": 12,
+    "v2_cosine_span": {
+      "duplicate": [
+        0.878,
+        0.956
+      ],
+      "update": [
+        0.818,
+        0.905
+      ],
+      "related": [
+        0.695,
+        0.8
+      ],
+      "unrelated": [
+        0.547,
+        0.708
+      ]
+    },
+    "v1_cosine_span": {
+      "duplicate": [
+        0.776,
+        0.865
+      ],
+      "update": [
+        0.741,
+        0.819
+      ],
+      "related": [
+        0.671,
+        0.753
+      ],
+      "unrelated": [
+        0.569,
+        0.684
+      ]
+    }
+  },
+  "test1": {
+    "dice_current": {
+      "n": 32,
+      "accuracy": 0.4375,
+      "precision": 1.0,
+      "recall": 0.1,
+      "tp": 2,
+      "fp": 0,
+      "fn": 18,
+      "tn": 12
+    },
+    "v1": {
+      "n": 32,
+      "accuracy": 0.9375,
+      "precision": 0.95,
+      "recall": 0.95,
+      "tp": 19,
+      "fp": 1,
+      "fn": 1,
+      "tn": 11
+    },
+    "v2": {
+      "n": 32,
+      "accuracy": 0.9688,
+      "precision": 1.0,
+      "recall": 0.95,
+      "tp": 19,
+      "fp": 0,
+      "fn": 1,
+      "tn": 12
+    },
+    "v2_cosine_span": {
+      "duplicate": [
+        0.876,
+        0.938
+      ],
+      "update": [
+        0.807,
+        0.913
+      ],
+      "related": [
+        0.677,
+        0.815
+      ],
+      "unrelated": [
+        0.64,
+        0.647
+      ]
+    }
+  },
+  "test2": {
+    "candidates_over_T_low": 19,
+    "llm_calls": 19,
+    "llm_verdict_accuracy": 1.0,
+    "llm_confusion": {
+      "duplicate->same": 10,
+      "update->changed": 9
+    },
+    "auto_merged": 6,
+    "wrong_auto_merge": 0,
+    "duplicates_in_test": 10,
+    "duplicates_auto_merged": 6,
+    "duplicates_to_human": 4,
+    "updates_over_auto_by_cosine": 1
+  },
+  "titles": {
+    "groups": 10,
+    "valid": 10,
+    "samples": [
+      {
+        "old": "서버 점검은 매월 첫째 일요일 새벽 2시에 한다",
+        "new": "매달 첫 번째 일요일 새벽 2시에 서버 점검을 진행한다",
+        "title": "서버 점검은 매월 첫째 일요일 새벽 2시에 진행"
+      },
+      {
+        "old": "환불 금액이 50만 원을 넘으면 재무 확인 뒤에 처리한다",
+        "new": "50만 원을 초과하는 환불은 재무가 확인한 다음에 처리한다",
+        "title": "50만 원 초과 환불은 재무 확인 후 처리"
+      },
+      {
+        "old": "분석 리포트는 팀장 승인 후에만 외부에 공유한다",
+        "new": "팀장이 승인한 분석 리포트만 외부로 공유할 수 있다",
+        "title": "분석 리포트는 팀장 승인 후에만 외부 공유 가능"
+      }
+    ]
+  },
+  "totals": {
+    "embedding_texts": 180,
+    "claude_calls": 29
+  },
+  "test_rows": [
+    {
+      "topic": 21,
+      "label": "duplicate",
+      "v1": 0.809,
+      "v2": 0.916,
+      "dice": 0.615,
+      "verdict": "same"
+    },
+    {
+      "topic": 21,
+      "label": "update",
+      "v1": 0.813,
+      "v2": 0.913,
+      "dice": 0.408,
+      "verdict": "changed"
+    },
+    {
+      "topic": 21,
+      "label": "related",
+      "v1": 0.711,
+      "v2": 0.745,
+      "dice": 0.171,
+      "verdict": null
+    },
+    {
+      "topic": 22,
+      "label": "duplicate",
+      "v1": 0.851,
+      "v2": 0.938,
+      "dice": 0.489,
+      "verdict": "same"
+    },
+    {
+      "topic": 22,
+      "label": "update",
+      "v1": 0.788,
+      "v2": 0.859,
+      "dice": 0.246,
+      "verdict": "changed"
+    },
+    {
+      "topic": 22,
+      "label": "related",
+      "v1": 0.694,
+      "v2": 0.719,
+      "dice": 0.054,
+      "verdict": null
+    },
+    {
+      "topic": 23,
+      "label": "duplicate",
+      "v1": 0.829,
+      "v2": 0.918,
+      "dice": 0.462,
+      "verdict": "same"
+    },
+    {
+      "topic": 23,
+      "label": "update",
+      "v1": 0.775,
+      "v2": 0.84,
+      "dice": 0.327,
+      "verdict": "changed"
+    },
+    {
+      "topic": 23,
+      "label": "related",
+      "v1": 0.762,
+      "v2": 0.815,
+      "dice": 0.263,
+      "verdict": null
+    },
+    {
+      "topic": 24,
+      "label": "duplicate",
+      "v1": 0.821,
+      "v2": 0.92,
+      "dice": 0.323,
+      "verdict": "same"
+    },
+    {
+      "topic": 24,
+      "label": "update",
+      "v1": 0.803,
+      "v2": 0.904,
+      "dice": 0.372,
+      "verdict": "changed"
+    },
+    {
+      "topic": 24,
+      "label": "related",
+      "v1": 0.728,
+      "v2": 0.798,
+      "dice": 0.229,
+      "verdict": null
+    },
+    {
+      "topic": 25,
+      "label": "duplicate",
+      "v1": 0.804,
+      "v2": 0.894,
+      "dice": 0.182,
+      "verdict": "same"
+    },
+    {
+      "topic": 25,
+      "label": "update",
+      "v1": 0.777,
+      "v2": 0.843,
+      "dice": 0.14,
+      "verdict": "changed"
+    },
+    {
+      "topic": 25,
+      "label": "related",
+      "v1": 0.67,
+      "v2": 0.689,
+      "dice": 0.057,
+      "verdict": null
+    },
+    {
+      "topic": 26,
+      "label": "duplicate",
+      "v1": 0.783,
+      "v2": 0.876,
+      "dice": 0.516,
+      "verdict": "same"
+    },
+    {
+      "topic": 26,
+      "label": "update",
+      "v1": 0.774,
+      "v2": 0.86,
+      "dice": 0.292,
+      "verdict": "changed"
+    },
+    {
+      "topic": 26,
+      "label": "related",
+      "v1": 0.671,
+      "v2": 0.677,
+      "dice": 0.129,
+      "verdict": null
+    },
+    {
+      "topic": 27,
+      "label": "duplicate",
+      "v1": 0.864,
+      "v2": 0.935,
+      "dice": 0.316,
+      "verdict": "same"
+    },
+    {
+      "topic": 27,
+      "label": "update",
+      "v1": 0.804,
+      "v2": 0.867,
+      "dice": 0.356,
+      "verdict": "changed"
+    },
+    {
+      "topic": 27,
+      "label": "related",
+      "v1": 0.73,
+      "v2": 0.761,
+      "dice": 0.154,
+      "verdict": null
+    },
+    {
+      "topic": 28,
+      "label": "duplicate",
+      "v1": 0.807,
+      "v2": 0.902,
+      "dice": 0.258,
+      "verdict": "same"
+    },
+    {
+      "topic": 28,
+      "label": "update",
+      "v1": 0.779,
+      "v2": 0.859,
+      "dice": 0.233,
+      "verdict": "changed"
+    },
+    {
+      "topic": 28,
+      "label": "related",
+      "v1": 0.719,
+      "v2": 0.768,
+      "dice": 0.138,
+      "verdict": null
+    },
+    {
+      "topic": 29,
+      "label": "duplicate",
+      "v1": 0.831,
+      "v2": 0.902,
+      "dice": 0.211,
+      "verdict": "same"
+    },
+    {
+      "topic": 29,
+      "label": "update",
+      "v1": 0.755,
+      "v2": 0.807,
+      "dice": 0.227,
+      "verdict": null
+    },
+    {
+      "topic": 29,
+      "label": "related",
+      "v1": 0.721,
+      "v2": 0.764,
+      "dice": 0.057,
+      "verdict": null
+    },
+    {
+      "topic": 30,
+      "label": "duplicate",
+      "v1": 0.863,
+      "v2": 0.93,
+      "dice": 0.286,
+      "verdict": "same"
+    },
+    {
+      "topic": 30,
+      "label": "update",
+      "v1": 0.826,
+      "v2": 0.881,
+      "dice": 0.233,
+      "verdict": "changed"
+    },
+    {
+      "topic": 30,
+      "label": "related",
+      "v1": 0.691,
+      "v2": 0.721,
+      "dice": 0.056,
+      "verdict": null
+    },
+    {
+      "topic": 21,
+      "label": "unrelated",
+      "v1": 0.6,
+      "v2": 0.647,
+      "dice": 0.057,
+      "verdict": null
+    },
+    {
+      "topic": 22,
+      "label": "unrelated",
+      "v1": 0.628,
+      "v2": 0.64,
+      "dice": 0.053,
+      "verdict": null
+    }
+  ]
+}

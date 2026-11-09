@@ -1,0 +1,269 @@
+"""요청 작업 코딩 방식(회사 설정)·서버 AI 체험 한도.
+
+넘겨받은 요청 작업은 실제 레포에 올릴 때 코딩 작업이 된다. 누가 코딩할지는 회사 설정
+(auto·agent·subscription)으로 정하고, auto면 본인 Claude(MCP)를 연결한 개발자가 있을 때 내 Claude,
+없으면 서버 AI다. 서버 AI는 체험 한도(토큰) 안에서만 돈다.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+from fastapi.testclient import TestClient
+
+from ax_workflow.core import ActionError
+from ax_workflow.models import CodingRun
+from ax_workflow_testing import plan
+from dev_agent import coder, repo_routing, vcs
+from dev_agent.main import app
+from dev_agent.vcs import MockVcsAdapter
+
+ANSWER = "품절 상품도 남겨 두고 품절 표시해 주세요"
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+@pytest.fixture
+def adapter(monkeypatch: pytest.MonkeyPatch):
+    for name in ("PLANNING_VCS_KIND", "PLANNING_VCS_REPO", "PLANNING_VCS_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    vcs._screen = None
+    a = MockVcsAdapter()
+    vcs.set_vcs(a)
+    repo_routing.set_llm(None)
+    yield a
+    vcs._screen = None
+    vcs.set_vcs(None)
+    coder.reset_llm()
+    repo_routing.reset_llm()
+
+
+def _spec7_tasks(service):
+    return [t for t in service.state.tasks if t.spec == "SPEC-7"]
+
+
+def test_choice_follows_setting_agents_and_trial(service, monkeypatch) -> None:
+    s = service.state
+    assert service.coding_choice(s) == ("agent", "본인 Claude 연결 없음 → 서버 AI (체험)")
+    run(service.mark_agent_seen("operator"))
+    assert service.agents_connected(service.state) == ["operator"]
+    assert service.coding_choice(service.state)[0] == "subscription"
+    run(service.set_coding_mode("agent"))
+    assert service.coding_choice(service.state) == ("agent", "회사 설정: 서버 AI")
+    # 서버 AI가 쓴 토큰이 한도에 닿으면 설정이 서버 AI여도 내 Claude로
+    monkeypatch.setenv("PLANNING_TRIAL_TOKENS", "500")
+    t = service.state.tasks[0]
+    t.coding = CodingRun(status="merged", updated_at=service.clock(), mode="agent", llm_tokens=500)
+    mode, why = service.coding_choice(service.state)
+    assert mode == "subscription" and "체험 한도를 다 씀 (500/500 토큰)" in why
+    run(service.set_coding_mode("subscription"))
+    assert service.coding_choice(service.state) == ("subscription", "회사 설정: 내 Claude")
+    with pytest.raises(ActionError):
+        run(service.set_coding_mode("robot"))
+
+
+def test_agent_seen_is_written_once_per_ten_minutes(service) -> None:
+    run(service.mark_agent_seen("operator"))
+    version = service.version
+    run(service.mark_agent_seen("operator"))  # 10분 안 → 다시 적지 않는다
+    assert service.version == version
+
+
+def test_trial_exhausted_blocks_server_ai_task(service, adapter, monkeypatch) -> None:
+    monkeypatch.setenv("PLANNING_TRIAL_TOKENS", "100")
+    t = service.state.tasks[0]
+    t.coding = CodingRun(status="merged", updated_at=service.clock(), mode="agent", llm_tokens=100)
+    with pytest.raises(ActionError) as err:
+        run(service.create_dev_task(title="배너", plan="배너 문구 변경"))
+    assert err.value.code == "TRIAL_EXHAUSTED"
+    out = run(service.create_dev_task(title="배너", plan="배너 문구 변경", mode="subscription"))
+    assert out.output["status"] == "queued"  # 내 Claude는 체험 한도와 상관없다
+
+
+def test_handed_request_becomes_subscription_coding(service, adapter, monkeypatch) -> None:
+    """실제 코딩을 켜면 넘겨받은 작업은 시연용 PR 대신 코딩 작업이 된다 (설정: 내 Claude)."""
+    monkeypatch.setenv("PLANNING_REQUEST_CODING", "1")
+    run(service.set_coding_mode("subscription"))
+    plan(service, "answer_question", "SPEC-7", ANSWER)
+    plan(service, "confirm_spec", "SPEC-7")
+    tasks = _spec7_tasks(service)
+    assert [t.id for t in tasks] == ["T-11", "T-12"]
+    assert all(t.coding and t.coding.mode == "subscription" for t in tasks)
+    assert all(t.coding.status == "queued" for t in tasks)
+    assert not [p for p in service.state.prs if p.task in {"T-11", "T-12"}]  # 시연용 PR 없음
+    texts = [a.text for a in service.state.activity if a.point == "dev_task_create"]
+    assert any("T-11 요청 작업 → 개발자 Claude 대기 (회사 설정: 내 Claude" in x for x in texts)
+
+
+def test_handed_request_without_llm_falls_back_to_own_claude(service, adapter, monkeypatch) -> None:
+    monkeypatch.setenv("PLANNING_REQUEST_CODING", "1")
+    coder.set_llm(None)  # 서버 AI 설정이 없으면 서버 AI로 띄울 수 없다
+    plan(service, "answer_question", "SPEC-7", ANSWER)
+    plan(service, "confirm_spec", "SPEC-7")
+    tasks = _spec7_tasks(service)
+    assert all(t.coding and t.coding.mode == "subscription" for t in tasks)
+    texts = [a.text for a in service.state.activity if a.point == "dev_task_create"]
+    assert any("서버 AI 설정(LLM) 없음 → 내 Claude" in x for x in texts)
+
+
+def test_without_real_coding_keeps_demo_prs(service, adapter) -> None:
+    """목 모드·실제 코딩 꺼짐이면 지금처럼 시연용 PR 기록을 만든다."""
+    plan(service, "answer_question", "SPEC-7", ANSWER)
+    plan(service, "confirm_spec", "SPEC-7")
+    assert all(t.coding is None for t in _spec7_tasks(service))
+    assert [p.id for p in service.state.prs if p.task in {"T-11", "T-12"}] == ["PR #31", "PR #32"]
+
+
+def test_settings_api_and_work_call_marks_agent(service, monkeypatch) -> None:
+    monkeypatch.setenv("AX_AGENT_TOKENS", "admin=admin-test-token")
+    monkeypatch.setenv("SAFETY_HUMAN_TOKENS", "operator:human-test-token")
+    client = TestClient(app)
+    got = client.get("/api/planning/coding-settings").json()["data"]
+    assert got["mode"] == "auto" and got["resolved"] == "agent" and got["trial_used"] == 0
+    human = {"Authorization": "Bearer human-test-token"}
+    admin = {"Authorization": "Bearer admin-test-token"}
+    body = {"mode": "subscription"}
+    assert client.post("/api/planning/coding-settings", json=body, headers=human).status_code == 403
+    res = client.post("/api/planning/coding-settings", json=body, headers=admin)
+    assert res.status_code == 200 and res.json()["data"]["resolved"] == "subscription"
+    bad = client.post("/api/planning/coding-settings", json={"mode": "x"}, headers=admin)
+    assert bad.status_code == 400
+    # 본인 Claude가 작업 목록을 보면 '연결됨'
+    assert client.get("/api/planning/work/tasks", headers=human).status_code == 200
+    assert service.agents_connected(service.state) == ["operator"]
+
+
+def test_handed_request_with_trial_left_queues_server_ai(service, adapter, monkeypatch) -> None:
+    """설정 auto·본인 Claude 연결 없음·체험 한도 남음 → 서버 AI 코딩 작업 (바꿔 끼운 뒤 띄운다)."""
+    from ax_agent_template.llm import LLMSettings
+
+    class Idle:
+        settings = LLMSettings(model="fake-coder", base_url="http://llm.invalid")
+
+    monkeypatch.setenv("PLANNING_REQUEST_CODING", "1")
+    coder.set_llm(Idle())
+    spawned: list[str] = []
+    monkeypatch.setattr(service, "_spawn_coder", spawned.append)
+    plan(service, "answer_question", "SPEC-7", ANSWER)
+    plan(service, "confirm_spec", "SPEC-7")
+    tasks = _spec7_tasks(service)
+    assert all(
+        t.coding and t.coding.mode == "agent" and t.coding.model == "fake-coder" for t in tasks
+    )
+    assert spawned == ["T-11", "T-12"]
+
+
+class _NoLLM:
+    """서버 AI가 있다고만 보이게 하는 자리 (부르면 실패)."""
+
+    settings = None
+
+    async def structured(self, *a, **k):
+        raise RuntimeError("부르지 않는다")
+
+
+def _queued_subscription(service, monkeypatch):
+    monkeypatch.setenv("PLANNING_REQUEST_CODING", "1")
+    run(service.set_coding_mode("subscription"))
+    plan(service, "answer_question", "SPEC-7", ANSWER)
+    plan(service, "confirm_spec", "SPEC-7")
+    return _spec7_tasks(service)
+
+
+def test_switching_to_agent_moves_unclaimed_queue(service, adapter, monkeypatch) -> None:
+    tasks = _queued_subscription(service, monkeypatch)
+    tasks[1].coding.claimed_by = "dev-kim"  # 가져간 작업은 그대로 둔다
+    coder.set_llm(None)
+    out = run(service.set_coding_mode("agent"))  # 서버 AI 설정이 없으면 넘기지 않는다
+    assert out.output["moved_to_agent"] == []
+    run(service.set_coding_mode("subscription"))
+    coder.set_llm(_NoLLM())
+
+    async def go():
+        out = await service.set_coding_mode("auto")
+        await service.wait_coding()
+        return out
+
+    out = run(go())
+    assert out.output["resolved"] == "agent" and out.output["moved_to_agent"] == ["T-11"]
+    t11, t12 = _spec7_tasks(service)
+    assert t11.coding.mode == "agent" and t12.coding.mode == "subscription"
+    assert any(a.point == "dev_task_to_agent" and "T-11" in a.text for a in service.state.activity)
+
+
+def test_hand_to_agent_button(service, adapter, monkeypatch) -> None:
+    _queued_subscription(service, monkeypatch)
+    coder.set_llm(None)
+    with pytest.raises(ActionError) as err:
+        run(service.hand_to_agent("T-11"))
+    assert err.value.code == "NOT_MOVABLE"
+    coder.set_llm(_NoLLM())
+
+    async def go():
+        out = await service.hand_to_agent("T-11")
+        await service.wait_coding()
+        return out
+
+    assert run(go()).output["mode"] == "agent"
+    assert _spec7_tasks(service)[0].coding.mode == "agent"
+    with pytest.raises(ActionError) as err:  # 이미 넘겼으면 안 된다
+        run(service.hand_to_agent("T-11"))
+    assert err.value.code == "NOT_MOVABLE"
+
+
+def test_estimate_uses_median_of_finished_agent_runs(service) -> None:
+    from ax_workflow.models import CodingFile
+
+    assert service.coding_settings()["estimate"]["samples"] == 0
+    rows = [(10_000, 4, 1), (40_000, 9, 2), (90_000, 20, 3)]
+    base = service.state.tasks[0]
+    for i, (tok, calls, files) in enumerate(rows):
+        t = base.model_copy(update={"id": f"T-E{i}"})
+        service.state.tasks.append(t)
+        t.coding = CodingRun(
+            status="merged", updated_at=service.clock(), mode="agent", llm_tokens=tok,
+            llm_calls=calls, files=[CodingFile(path=f"f{i}.ts") for i in range(files)],
+        )  # fmt: skip
+    est = service.coding_settings()["estimate"]
+    assert est == {"samples": 3, "tokens": 40_000, "tokens_max": 90_000, "calls": 9, "files": 2}
+
+
+def test_step_models_pick_client_per_step(monkeypatch) -> None:
+    from ax_agent_template.llm import LLMSettings
+
+    assert [coder.step_of(x) for x in ("후보 고르기", "파일 확정", "파일 쓰기 a.ts", "리뷰")] == [
+        "plan", "plan", "write", "review",
+    ]  # fmt: skip
+    monkeypatch.setenv("PLANNING_CODER_MODEL_REVIEW", "env-review")
+    assert coder.step_models({"write": "big"}) == {"write": "big", "review": "env-review"}
+    assert coder.step_models({"review": "saved"})["review"] == "saved"  # 화면 설정이 먼저
+    base = coder.MeteredLLM(
+        "planning", settings=LLMSettings(model="base", base_url="http://llm.invalid")
+    )
+    token = coder._models.set({"write": "big"})
+    try:
+        w = coder._client_for(base, "파일 쓰기 a.ts")
+        assert w is not base and w.settings.model == "big"
+        assert w.settings.base_url == "http://llm.invalid"
+        assert coder._client_for(base, "후보 고르기") is base  # 정하지 않은 단계는 기본
+        assert coder._client_for(_NoLLM(), "파일 쓰기 a.ts").__class__ is _NoLLM  # 가짜는 그대로
+    finally:
+        coder._models.reset(token)
+
+
+def test_set_coding_models_validates_and_shows(service, monkeypatch) -> None:
+    monkeypatch.setenv("AX_AGENT_TOKENS", "admin=admin-test-token")
+    out = run(service.set_coding_models({"plan": "small", "review": ""}))
+    assert out.output["models"] == {"plan": "small"}
+    with pytest.raises(ActionError):
+        run(service.set_coding_models({"deploy": "x"}))
+    with pytest.raises(ActionError):
+        run(service.set_coding_models({"write": "two words"}))
+    c = TestClient(app)
+    admin = {"Authorization": "Bearer admin-test-token"}
+    r = c.post("/api/planning/coding-settings", json={"models": {"write": "big"}}, headers=admin)
+    assert r.status_code == 200 and r.json()["data"]["models"] == {"write": "big"}
+    assert r.json()["data"]["mode"] == "auto"  # 모드는 그대로

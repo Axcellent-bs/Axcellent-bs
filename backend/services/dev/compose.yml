@@ -1,0 +1,12 @@
+services:
+  dev:
+    build:
+      context: ../..
+      dockerfile: services/dev/Dockerfile
+    ports:
+      - "8111:8111"
+    env_file:
+      - path: ../../.env
+        required: false
+      - path: ./.env
+        required: false

@@ -1,0 +1,124 @@
+"""재무 AI 데모 데이터 넣기 (목 모드 전용).
+
+로컬에서 safety(8001)·finance(8105)를 목 모드(`AGENT_TEMPLATE_MOCK=1`)로 띄운 뒤 실행한다.
+마케팅·고객지원·통합 에이전트인 척 가짜 요청을 보내서 대시보드 `/finance` 화면을 채운다.
+목 토큰(`mock:<이름>`)을 쓰므로 실제 운영 서버에서는 거부된다.
+
+    uv run python agents/finance/demo/seed_demo.py
+    uv run python agents/finance/demo/seed_demo.py --safety http://localhost:8001
+
+가짜 데이터(finance `mock_seed.json`)
+- 사건 ctx_inc_0002: 영향 고객 buy_0904~buy_0909 6명, 실패 주문 8건, 피해 214,500원
+- 결제: ord_1003 32,000원, ord_1004 18,000원, ord_1005 150,000원
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import uuid
+from typing import Any
+
+import httpx
+
+CTX = "ctx_inc_0002"
+RUN = uuid.uuid4().hex[:6]  # 다시 실행해도 멱등성 키가 겹치지 않게
+
+
+def execute(
+    base: str, requester: str, action: str, key: str, params: dict[str, Any], context_id: str = CTX
+) -> dict:
+    body = {
+        "action": action,
+        "requester": requester,
+        "context_id": context_id,
+        "idempotency_key": f"{key}:{RUN}",
+        "params": params,
+    }
+    r = httpx.post(
+        f"{base}/api/safety/executions",
+        json=body,
+        headers={"Authorization": f"Bearer mock:{requester}"},
+        timeout=40,
+    )
+    r.raise_for_status()
+    return r.json()["data"]
+
+
+def coupon(buyer: str, count: int, unit: int, total: int | None = None) -> dict:
+    return {
+        "purpose_code": "compensation",
+        "buyer_id": buyer,
+        "count": count,
+        "unit_value": unit,
+        "total_value": count * unit if total is None else total,
+    }
+
+
+def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")  # Windows 콘솔에서도 한글이 깨지지 않게
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--safety", default="http://localhost:8001")
+    args = parser.parse_args()
+    s = args.safety
+    lines: list[str] = []
+
+    def show(title: str, result: dict) -> None:
+        brief = {
+            k: result.get(k)
+            for k in ("grade", "status", "hold_reason", "computed_amount")
+            if k in result
+        }
+        lines.append(f"- {title}: {json.dumps(brief or result, ensure_ascii=False)}")
+
+    # 0) 돈이 나가지 않는 일: 바로 처리
+    show(
+        "장애 안내 공지 올리기",
+        execute(
+            s,
+            "marketing",
+            "publish_notice",
+            "ntc-1",
+            {"draft_id": "drf_1", "channel_code": "banner"},
+        ),
+    )
+    show("장애 기록 남기기", execute(s, "hr", "memory.card_write", "card-1", {"kind": "incident"}))
+
+    # 1) 장애 보상 쿠폰 (마케팅 → 안전 레이어 기준표 검사. 재무는 끝난 금액을 장부에 적기만 한다)
+    for buyer in ("buy_0904", "buy_0905", "buy_0906"):
+        show(
+            f"보상 쿠폰 {buyer} 1장×5,000원",
+            execute(s, "marketing", "issue_coupon", f"cpn-{buyer}", coupon(buyer, 1, 5000)),
+        )
+    # 2) 환불 (고객지원 → 안전 레이어 기준표 검사. 재무는 끝난 환불 금액을 장부에 적기만 한다)
+    show(
+        "ord_1003 환불 20,000원(결제 32,000원)",
+        execute(
+            s,
+            "support",
+            "refund_request",
+            "rfd-1003",
+            {"order_id": "ord_1003", "refund_amount": 20000},
+        ),
+    )
+
+    # 5) 정책상 항상 사람이 보는 일: 판매자 정산 확정
+    show(
+        "판매자 sel_1 정산 확정(항상 사람 확인)",
+        execute(
+            s,
+            "finance",
+            "confirm_settlement",
+            "stl-sel_1",
+            {"settlement_id": "stl_1", "seller_id": "sel_1"},
+        ),
+    )
+
+    print("\n".join(lines))
+    print("\n대시보드 http://localhost:3001/finance 에서 확인하세요.")
+
+
+if __name__ == "__main__":
+    main()

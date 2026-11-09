@@ -1,0 +1,16 @@
+[project]
+name = "ax-svc-dev"
+version = "0.1.0"
+description = "services/dev — 개발·배포 (domains/dev)"
+requires-python = ">=3.12"
+dependencies = ["ax-agent-dev"]
+
+[tool.uv.sources]
+ax-agent-dev = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/svc_dev"]

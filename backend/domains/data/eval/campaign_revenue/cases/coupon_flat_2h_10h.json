@@ -1,0 +1,54 @@
+{
+ "id": "coupon_flat_2h_10h",
+ "kind": "none",
+ "input": {
+  "campaign_id": "cmp_revflat",
+  "window_from": "2026-10-14T10:00:00Z",
+  "window_to": "2026-10-14T12:00:00Z"
+ },
+ "spec": {
+  "id": "coupon_flat_2h_10h",
+  "window": {
+   "from": "2026-10-14T10:00:00Z",
+   "to": "2026-10-14T12:00:00Z"
+  },
+  "traffic": {
+   "orders_per_5m": 5
+  },
+  "injection": {
+   "type": "none"
+  },
+  "campaign": {
+   "campaign_id": "cmp_revflat",
+   "buyers": 15,
+   "units_each": 3,
+   "unit_value": 1000,
+   "use_fraction": 0.4,
+   "used_after": 0
+  }
+ },
+ "expected": {
+  "sales": {
+   "status": "known",
+   "direction": "none",
+   "lift": 1.0,
+   "direct_attributed": true
+  }
+ },
+ "counted": {
+  "gross_actual": 4217000,
+  "gross_baseline": 4086228.5714,
+  "gross_excess": 130771.4286,
+  "gross_past_days": {
+   "1": 3638400,
+   "2": 3932200,
+   "3": 4419500,
+   "4": 3761900,
+   "5": 3798100,
+   "6": 4559700,
+   "7": 4493800
+  },
+  "direct_attributed": 902100
+ },
+ "memo": "변화 없음 + 쿠폰 귀속"
+}
