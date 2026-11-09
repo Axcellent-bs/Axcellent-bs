@@ -1,0 +1,59 @@
+"""평가 대상 단계 배정표: 총괄 장애 대응 단계를 부서와 묶음에 배정하거나 제외한다.
+
+총괄의 장애 대응 계획(`scenario_a`)에 나오는 단계 번호(step_id) 기준이다. 표에 없는 단계는
+평가하지 않는다(다른 계획의 같은 이름 단계가 섞이지 않게 한다).
+- 제외: 기획 AI는 사람이 확인하는 단계라 처리 시간 기준을 정할 대상이 아니고, 복구 검증은 쇼핑몰이
+  언제 복구되느냐에 달려 부서 평가에서 빼고 "복구 확인에 걸린 시간"을 결과 지표로만 보인다.
+- 개발 `related_prs`·`link_incident`는 총괄 계획표에 아직 (planning)으로 적혀 있어도 개발 서비스에
+  있는 단계라 개발로 센다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+LOOKUP = "조회·분석"
+LLM = "LLM 분석"
+ACTION = "조치"
+NOTICE = "공지·기록"
+ROLLBACK = "되돌리기 교차검증"
+
+
+@dataclass(frozen=True)
+class Stage:
+    dept: str
+    group: str
+
+
+@dataclass(frozen=True)
+class Excluded:
+    reason: str
+
+
+STAGES: dict[str, Stage | Excluded] = {
+    "diagnose": Stage("infra", LOOKUP),
+    "similar_cases": Stage("hr", LOOKUP),
+    "impact": Stage("data", LOOKUP),
+    "root_cause": Stage("data", LLM),
+    "cause_check": Excluded("기획 AI: 사람이 확인하는 단계"),
+    "rollback": Stage("infra", ROLLBACK),
+    "related_prs": Stage("dev", LOOKUP),
+    "link_incident": Stage("dev", ACTION),
+    "notice": Stage("marketing", NOTICE),
+    "publish_notice": Stage("marketing", NOTICE),
+    "compensation": Stage("support", ACTION),
+    "recovery": Excluded("복구 검증: 쇼핑몰 복구 시점에 달려 결과 지표로만 본다"),
+    "recovered_draft": Stage("marketing", NOTICE),
+    "recovered_notice": Stage("marketing", NOTICE),
+    "finance_record": Stage("finance", NOTICE),
+    "kpi": Stage("data", LOOKUP),
+    "record": Stage("hr", NOTICE),
+    "resolution": Stage("hr", NOTICE),
+    "late_compensation": Stage("support", ACTION),
+}
+
+
+def stage_of(step_id: str) -> Stage | None:
+    """평가 대상이면 배정을, 제외거나 표에 없으면 None."""
+    found = STAGES.get(step_id)
+    return found if isinstance(found, Stage) else None
