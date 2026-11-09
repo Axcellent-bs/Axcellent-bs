@@ -128,3 +128,39 @@ def test_people_upload_the_bank_file_as_is() -> None:
         ("kb.csv", "imported", "upload"),
     ]
     assert client.post(url, params={"name": "e.csv"}, content=b"", headers=HUMAN).status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("name", "body"),
+    [
+        ("probe.bin", b"\x00" * 2_000_000),  # NUL로 찬 2MB: csv 한 칸 한도 초과였다(500)
+        ("kb.csv", b"\x00" * 2_000_000),
+        ("kb.csv", b"A" * 300_000),  # 줄바꿈 없는 긴 한 줄
+        ("probe", b"\x00" * 50),  # 확장자 없음
+        ("kb.csv", b"\xb0\xa1\xff\xfe\xfa\xfb"),  # 깨진 CP949
+        ("kb.csv", "거래일자,입금\n".encode("utf-16")),  # UTF-16
+        ("kb.csv", b"foo,bar\n1,2\n"),  # 알 수 없는 열 이름
+        ("kb.xlsx", b"PK\x00\x00junk"),  # 깨진 xlsx
+    ],
+)
+def test_unreadable_files_are_4xx_validation_errors(name: str, body: bytes) -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/finance/bank/file", params={"name": name}, content=body, headers=HUMAN
+    )
+    assert response.status_code == 400, response.text
+    error = response.json()["error"]
+    assert error["code"] == "invalid_file" and error["message"]
+
+
+def test_empty_upload_is_invalid_request_and_good_file_still_passes() -> None:
+    client = TestClient(app)
+    url = "/api/finance/bank/file"
+    empty = client.post(url, params={"name": "kb.csv"}, content=b"", headers=HUMAN)
+    assert (empty.status_code, empty.json()["error"]["code"]) == (400, "invalid_request")
+    big = client.post(url, params={"name": "kb.csv"}, content=b"x" * 5_000_001, headers=HUMAN)
+    assert big.status_code == 400 and "5MB" in big.json()["error"]["message"]
+    good = client.post(url, params={"name": "kb.csv"}, content=KB_LIKE, headers=HUMAN)
+    assert good.status_code == 200, good.text
+    with pytest.raises(BankFileError, match="CSV로 읽을 수 없는"):
+        read_statement(b"\x00" * 2_000_000, "probe.bin")

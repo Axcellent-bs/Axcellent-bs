@@ -114,7 +114,12 @@ def _table(body: bytes, filename: str) -> list[list[Any]]:
         raise BankFileError("글자를 읽지 못했습니다. CSV를 UTF-8이나 CP949로 저장해 주세요.")
     sample = text[:4000]
     delimiter = "\t" if sample.count("\t") > sample.count(",") else ","
-    return [row for row in csv.reader(io.StringIO(text), delimiter=delimiter)]
+    try:
+        return [row for row in csv.reader(io.StringIO(text), delimiter=delimiter)]
+    except csv.Error as exc:  # 한 칸이 너무 길다(NUL로 찬 파일 등): 거래내역 CSV가 아니다
+        raise BankFileError(
+            "CSV로 읽을 수 없는 파일입니다. 은행에서 받은 CSV·xlsx 파일이 맞는지 확인해 주세요."
+        ) from exc
 
 
 def _header_row(table: list[list[Any]]) -> int | None:
