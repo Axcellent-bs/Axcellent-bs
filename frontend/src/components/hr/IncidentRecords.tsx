@@ -122,6 +122,7 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
           </select>
         )}
         {current && <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">총괄 이벤트에서 보기 →</Link>}
+        {current && <Link href={`/agent-eval?ctx=${encodeURIComponent(current.context_id)}`} className="ml-4 inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">에이전트 평가에서 단계별 시간 보기 →</Link>}
         {current ? <Timeline inc={current} /> : <p className="text-xs text-ink-500">볼 이벤트가 없습니다.</p>}
       </section>
 

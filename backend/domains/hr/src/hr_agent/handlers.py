@@ -16,6 +16,7 @@ from hr_agent.cards import merge
 from hr_agent.cards import service as cards
 from hr_agent.case_memory import service as case_memory
 from hr_agent.clients.errors import UpstreamError, bind_meta
+from hr_agent.dept_eval import summary as dept_eval
 from hr_agent.fraud_similar import service as fraud_similar
 from hr_agent.handover import service as handover
 from hr_agent.org import basis as org_basis
@@ -118,6 +119,7 @@ _HANDLERS = {
     "list_candidate_cards": _with_services(views.list_candidate_cards),
     "list_cards": _with_services(views.list_cards),
     "get_audit_timeline": _with_services(views.get_audit_timeline),
+    "evaluate_agents": _with_services(dept_eval.evaluate_agents),
     "decide_candidate_card": _with_services(card_decision.decide_candidate_card),
     "check_plan": check_plan,
     "answer_planning_question": _with_services(planning_questions.answer_planning_question),

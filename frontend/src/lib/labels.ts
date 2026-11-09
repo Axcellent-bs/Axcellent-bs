@@ -97,7 +97,7 @@ export const SKILL_KO: Record<string, string> = {
   get_roster: "담당 명부 보기", start_handover: "인수인계 시작", answer_handover_question: "인수인계 질문 답하기",
   confirm_handover: "인수인계 확인", list_handovers: "인수인계 목록 보기", list_open_questions: "남은 질문 보기",
   find_similar_cases: "비슷한 과거 이벤트 찾기", record_resolution: "해결 내용 기록",
-  record_case: "결정 기록", check_plan: "계획 점검", list_candidate_cards: "후보 카드 보기", get_audit_timeline: "감사 기록 보기",
+  record_case: "결정 기록", check_plan: "계획 점검", list_candidate_cards: "후보 카드 보기", get_audit_timeline: "감사 기록 보기", evaluate_agents: "에이전트 평가 보기",
   decide_candidate_card: "후보 카드 결정",
   create_ticket: "요청 접수",
   find_related_prs: "관련 PR 찾기", link_incident: "이벤트 연결", verify_rollback_target: "롤백 대상 확인",

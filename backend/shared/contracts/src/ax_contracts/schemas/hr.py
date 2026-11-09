@@ -883,3 +883,91 @@ class GetAuditTimelineOutput(AxModel):
     context_id: str
     entries: list[AuditEntry] = Field(default_factory=list)
     collected_at: UtcDatetime
+
+
+# ---- 에이전트 평가 (장애 대응 시간으로 부서 AI를 보는 화면) -------------------------------------
+# 점수·등급·순위는 없다. 사람이 "제때 끝냈다 / 늦었다"를 한눈에 보도록 건수와 이유만 모아 준다.
+
+AgentVerdict = Literal[
+    "normal", "check", "no_record", "blocked", "approval_expired", "in_progress", "absent"
+]
+
+
+class EvaluateAgentsInput(AxModel):
+    """에이전트별로 모아 볼 최근 이벤트 수(새로운 순). 읽기 전용."""
+
+    limit: int = Field(default=30, ge=1, le=200)
+
+
+class AgentEventDot(AxModel):
+    """에이전트 하나가 이벤트 하나에서 한 일을 점 하나로. 그 이벤트에 참여하지 않았으면 absent."""
+
+    context_id: str
+    title: str
+    at: UtcDatetime | None = None
+    verdict: AgentVerdict
+    reason: str | None = None
+    steps: int = Field(default=0, ge=0)
+
+
+class RepeatEventType(AxModel):
+    event_type: str
+    title: str  # 이 유형의 가장 최근 이벤트 제목(화면에는 영어 유형 코드 대신 이걸 보인다)
+    count: int = Field(ge=2)
+
+
+class AgentSummary(AxModel):
+    dept: str
+    events: int = Field(ge=0)  # 이 에이전트가 참여한 이벤트 수
+    normal: int = Field(ge=0)
+    check: int = Field(ge=0)
+    no_record: int = Field(ge=0)
+    blocked: int = Field(ge=0)
+    approval_expired: int = Field(ge=0)
+    in_progress: int = Field(ge=0)
+    retried: int = Field(ge=0)  # 확인 필요 중 다시 시도가 있었던 이벤트 수
+    slow: int = Field(ge=0)  # 확인 필요 중 기준 시간을 넘긴 이벤트 수
+    avg_work_seconds: float | None = None
+    max_work_seconds: float | None = None
+    repeats: list[RepeatEventType] = Field(default_factory=list)
+    recent: list[AgentEventDot] = Field(default_factory=list)  # 새로운 이벤트부터
+
+
+class EvaluatedStep(AxModel):
+    step_id: str
+    label: str
+    dept: str
+    group: str
+    verdict: AgentVerdict
+    work_seconds: float | None = None
+    approval_wait_seconds: float | None = None
+    human_wait_seconds: float | None = None
+    attempts: int = Field(default=0, ge=0)
+    limit_seconds: float
+    reason: str | None = None
+
+
+class EvaluatedEvent(AxModel):
+    context_id: str
+    title: str
+    event_type: str | None = None
+    at: UtcDatetime | None = None
+    criteria_version: int = Field(ge=1)
+    steps: list[EvaluatedStep] = Field(default_factory=list)
+
+
+class DailyTrend(AxModel):
+    day: str  # 서울 시간 기준 YYYY-MM-DD
+    events: int = Field(ge=0)
+    with_check: int = Field(ge=0)  # 확인이 필요했던 에이전트가 하나라도 있던 이벤트 수
+
+
+class EvaluateAgentsOutput(AxModel):
+    criteria_version: int = Field(ge=1)
+    criteria_updated: str
+    normal_max_seconds: float
+    normal_max_attempts: int = Field(ge=1)
+    events: list[EvaluatedEvent] = Field(default_factory=list)  # 새로운 이벤트부터
+    agents: list[AgentSummary] = Field(default_factory=list)
+    trend: list[DailyTrend] = Field(default_factory=list)
+    collected_at: UtcDatetime
