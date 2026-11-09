@@ -8,7 +8,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -198,8 +201,8 @@ def _closings() -> dict[str, Any]:
     }
 
 
-async def collect() -> dict[str, Any]:
-    """재무 사실 묶음. 부분 실패는 `unavailable`에 이름만 남긴다(예외 내용은 넣지 않는다)."""
+async def _collect_now() -> dict[str, Any]:
+    """재무 사실 묶음을 새로 만든다. 부분 실패는 `unavailable`에 이름만 남긴다(예외 내용은 빼고)."""
     parts: dict[str, Callable[[], Awaitable[Any]]] = {
         "overview": _overview,
         "month_close_checklist": _checklist,
@@ -220,3 +223,132 @@ async def collect() -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         out["unavailable"].append("records")
     return out
+
+
+# ------------------------------------------------------- 기억해 두기 (2026-11-09 대화 느림)
+# 사실 묶음을 만드는 데 화면 계산 6개가 들어간다. 로컬 주문 8.5만 건에서 장부를 이미 모은 뒤에도
+# 12초 안팎이 걸려, 대화 한 번이 LLM까지 30초 가까이 걸렸다. 화면 응답 기억하기(`screen_cache.py`)와
+# 같은 방식으로 기억해 둔다.
+# - 같은 장부·같은 사람 기록이면 `FRESH_SECONDS` 안에는 그대로 쓴다
+# - 장부만 새로 모였으면(기록은 그대로) `MAX_STALE_SECONDS` 안에는 바로 쓰고 뒤에서 다시 만든다.
+#   언제 모은 장부인지는 overview의 숫자와 같다(장부도 최대 5분 묵은 것을 바로 준다)
+# - 사람 기록(결산 확정·통장 파일·정산 묶음·장애 장부 등)이 바뀌었으면 기다려서 새로 만든다
+# - 대화방을 열면(`warm`) 뒤에서 미리 만든다. 새 장부가 모이면 최근에 대화한 경우만 다시 만든다
+# - 목 모드(시드·시험)는 매번 새로 만든다
+FRESH_SECONDS = 60.0
+MAX_STALE_SECONDS = 600.0
+WARM_WINDOW_SECONDS = 600.0
+
+
+class _FactsCache:
+    def __init__(self) -> None:
+        self.value: dict[str, Any] | None = None
+        self.books_id: int | None = None
+        self.records_key: str | None = None
+        self.made = 0.0
+        self.used = float("-inf")
+        self.task: asyncio.Task[dict[str, Any]] | None = None
+
+    def clear(self) -> None:
+        self.__init__()
+
+
+CACHE = _FactsCache()
+
+
+def enabled() -> bool:
+    from ax_agent_template.config import is_mock
+
+    return not is_mock("finance")
+
+
+def _books_id() -> int | None:
+    from finance_agent import books as bk
+
+    cached = bk._live_cache
+    return id(cached[1]) if cached else None
+
+
+def _records_key() -> str:
+    """사람 기록 전체의 지문. 파일에 남기는 내용과 같은 것(`persist._text`)의 해시다."""
+    from finance_agent import persist
+    from finance_agent.handlers import state
+
+    return hashlib.sha1(persist._text(state()).encode("utf-8")).hexdigest()
+
+
+def _start() -> asyncio.Task[dict[str, Any]]:
+    """만드는 중이 아니면 새로 만들기 시작한다. 같은 묶음을 동시에 두 번 만들지 않는다."""
+    if CACHE.task is None or CACHE.task.done():
+        records_key = _records_key()
+
+        async def run() -> dict[str, Any]:
+            value = await _collect_now()
+            CACHE.value, CACHE.books_id = value, _books_id()
+            CACHE.records_key, CACHE.made = records_key, time.monotonic()
+            return value
+
+        CACHE.task = asyncio.get_running_loop().create_task(run())
+        CACHE.task.add_done_callback(_log_failure)
+    return CACHE.task
+
+
+async def _build() -> dict[str, Any]:
+    """만드는 중이면 그 결과를 기다린다."""
+    return await asyncio.shield(_start())
+
+
+def _refresh_later() -> None:
+    _start()
+
+
+def _log_failure(task: asyncio.Task[Any]) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        logger.warning("재무 대화 사실을 미리 만들지 못했다: %s", type(task.exception()).__name__)
+
+
+async def collect() -> dict[str, Any]:
+    """재무 사실 묶음. 실제 모드에서는 기억해 둔 것을 쓴다(위 설명)."""
+    if not enabled():
+        return await _collect_now()
+    CACHE.used = time.monotonic()
+    value = CACHE.value
+    if value is not None and CACHE.records_key == _records_key():
+        age = time.monotonic() - CACHE.made
+        if CACHE.books_id == _books_id() and age < FRESH_SECONDS:
+            return value
+        if age < MAX_STALE_SECONDS:
+            _refresh_later()
+            return value
+    return await _build()
+
+
+def warm() -> None:
+    """대화방을 열었다(목록·대화 읽기). 기억한 묶음이 없거나 낡았으면 뒤에서 미리 만든다."""
+    if not enabled():
+        return
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    CACHE.used = time.monotonic()
+    fresh = (
+        CACHE.value is not None
+        and CACHE.books_id == _books_id()
+        and time.monotonic() - CACHE.made < FRESH_SECONDS
+    )
+    if not fresh:
+        _refresh_later()
+
+
+def on_new_books() -> None:
+    """새 장부가 모였다. 최근에 대화했으면 뒤에서 다시 만든다."""
+    if enabled() and time.monotonic() - CACHE.used < WARM_WINDOW_SECONDS:
+        _refresh_later()
+
+
+def install() -> None:
+    from finance_agent import books as bk
+
+    if on_new_books not in bk.ON_NEW_BOOKS:
+        bk.ON_NEW_BOOKS.append(on_new_books)
