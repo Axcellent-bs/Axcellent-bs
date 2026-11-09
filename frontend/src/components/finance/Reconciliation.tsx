@@ -78,7 +78,7 @@ export function ReconciliationSection({ tick }: { tick: number }) {
 
   return (
     <Panel id="reconciliation" title="② 매출·PG 대사" titleHidden meta={res.env?.meta} tools={tools}
-      hint="대사는 '우리 주문 기록'과 '결제대행사(PG)가 보낸 정산 자료'를 한 건씩 맞춰 보는 일입니다. 재무 AI가 자동으로 맞추고, 맞지 않는 건만 보여 줍니다. 처리한 내용은 메모로 남기세요.">
+      hint="대사는 '우리 주문 기록'과 '결제대행사(PG)가 보낸 정산 자료'를 한 건씩 맞춰 보는 일입니다. 재무 AI가 자동으로 맞추고, 맞지 않는 건만 보여 줍니다. 처리한 내용은 메모로 남기세요. 지금은 실제 PG와 연결 전이라 PG 정산 자료를 결제 기록으로 만든 모의 자료와 맞춥니다.">
       <ResourceBody res={res}>
         {(r) => {
           const items = r.items

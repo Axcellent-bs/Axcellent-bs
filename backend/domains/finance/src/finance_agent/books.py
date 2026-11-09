@@ -15,7 +15,9 @@
   주문을 장부 모양으로 바꾸는 일과 화면 계산은 스레드에서 해서, 그동안에도 상태 확인·자기 테스트에
   바로 답한다(2026-11-06 서버: 주문 18만 건에 `/health`가 19초, 자기 테스트가 연결 실패로 떴다).
 - PG 정산은 실제 PG가 없어서 두 모드 모두 결제에서 **토스 정산 형식 목**을 만든다
-  (`amount`, `fee`, `pay_out_amount`, `sold_date`, `paid_out_date`). 데모용 불일치를 일부러 넣는다.
+  (`amount`, `fee`, `pay_out_amount`, `sold_date`, `paid_out_date`). 데모용 불일치는
+  목 모드(시드)에만 넣는다. 실제 모드는 결제 기록 그대로라 불일치를 지어내지 않는다
+  (실제 PG를 붙이면 그 자료와 맞춘다).
 
 모든 계산은 코드가 한다. 이 모듈은 자료를 같은 모양으로 맞추기만 한다.
 """
@@ -683,14 +685,6 @@ async def load_books(fresh: bool = False) -> Books:
 
 
 # ---------------------------------------------------------------- 목 PG 정산 (토스 정산 형식)
-def _live_overrides(settled_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """실제 모드에서 데모 불일치를 넣을 결제. 결제 번호 순서의 정해진 자리라 매번 같다."""
-    plan = {3: {"kind": "mismatch", "delta": -2000}, 7: {"kind": "missing"}}
-    plan |= {11: {"kind": "fee", "fee_rate": 0.035}, 13: {"kind": "mismatch", "delta": 1000}}
-    ordered = sorted(settled_ids)
-    return {ordered[i]: spec for i, spec in plan.items() if i < len(ordered)}
-
-
 def pg_settlements(books: Books, today: date | None = None) -> dict[str, dict[str, Any]]:
     """결제별 목 PG 정산 기록. PG에 없는 결제는 키가 없다.
 
@@ -706,12 +700,8 @@ def pg_settlements(books: Books, today: date | None = None) -> dict[str, dict[st
 
 def _pg_settlements(books: Books, today: date, cfg: Any) -> dict[str, dict[str, Any]]:
     payments = books.payments()
-    settled_ids = [
-        p["payment_id"]
-        for p in payments
-        if p["created_at"].date() + timedelta(days=cfg.payout_days) <= today
-    ]
-    overrides = books.pg_overrides if books.mock else _live_overrides(settled_ids)
+    # 데모용 불일치는 목 모드(시드·시험)에만 있다. 실제 모드는 결제 기록 그대로 만든다
+    overrides = books.pg_overrides if books.mock else {}
     out: dict[str, dict[str, Any]] = {}
     for p in payments:
         sold = p["created_at"].date()
