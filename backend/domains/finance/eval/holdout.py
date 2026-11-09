@@ -1,6 +1,6 @@
 """재무 AI holdout 평가 (처음 보는 실제 모양 데이터): uv run python domains/finance/eval/holdout.py
 
-`run.py`와 다른 점
+`run.py`(`finance_agent.accuracy`)와 다른 점
 - 장부를 손으로 만들지 않는다. **shop-api 실제 코드**(`Shop.place_order`·`pay`·`mark_delivered`,
   `Refunds.refund`, `Promotions.issue_coupon`, 장애 주입 `inject_fault`)로 쇼핑몰 DB를 만든다.
 - 재무는 **실서버와 같은 경로**로 읽는다: shop-api FastAPI 앱(`create_app`)에
@@ -40,7 +40,6 @@ os.environ["FINANCE_TOKEN"] = EVAL_TOKEN
 os.environ.setdefault("SHOP_MONITOR_INTERVAL_S", "0")
 
 import httpx  # noqa: E402
-import run as base  # noqa: E402
 
 from ax_shop_api import service  # noqa: E402
 from ax_shop_api.db import Db  # noqa: E402
@@ -48,6 +47,7 @@ from ax_shop_api.main import create_app  # noqa: E402
 from ax_shop_api.promotions import Promotions  # noqa: E402
 from ax_shop_api.refunds import Refunds  # noqa: E402
 from ax_shop_api.seed import seed  # noqa: E402
+from finance_agent import accuracy as base  # noqa: E402
 from finance_agent import finance_config as fc  # noqa: E402
 from finance_agent.bank import match as bank_match  # noqa: E402
 from finance_agent.books import OrderStore, live_books  # noqa: E402
@@ -540,7 +540,7 @@ async def main_async(args) -> dict[str, Any]:
     today = fc.today()
     areas: dict[str, Any] = {}
     with shop_clock() as clock:
-        for area, count in base.allocate(args.n).items():
+        for area, count in base.allocate(args.n, list(CASES)).items():
             stats = {b: 0 for b in ("actual", "documented")}
             wrong: list[dict[str, Any]] = []
             done = errors = 0

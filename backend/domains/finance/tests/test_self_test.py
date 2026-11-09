@@ -52,12 +52,17 @@ async def _run(client: httpx.AsyncClient) -> dict[str, Any]:
 async def test_all_green_when_everything_is_up() -> None:
     result = await _run(_network({"safety", "shop-api", "data"}))
     assert result["result"] == "pass", [c for c in result["checks"] if not c["ok"]]
-    assert result["passed"] == result["total"] == 7
+    assert result["passed"] == result["total"] == 8
     names = {c["name"] for c in result["checks"]}
     assert "안전 장치 연결" in names
     # 쿠폰·환불 판단과 예산·한도는 재무 일이 아니라 점검하지 않는다
     assert not {n for n in names if "쿠폰" in n or "환불" in n or "한도" in n or "예산" in n}
-    assert {"결산 계산 공식", "대사 상태 나누기", "판매자 정산 공식"} <= names
+    assert {
+        "결산 계산 공식",
+        "대사 상태 나누기",
+        "판매자 정산 공식",
+        "무작위 장부 계산 점검",
+    } <= names
 
 
 @pytest.mark.asyncio
@@ -280,3 +285,23 @@ def test_lifespan_does_not_start_auto_test_when_disabled(monkeypatch: pytest.Mon
         meta = client.get("/api/finance/self-test/last").json()["meta"]
         assert (meta["interval_seconds"], meta["next_run_at"]) == (0, None)
         assert handlers.state().last_self_test is None
+
+
+@pytest.mark.asyncio
+async def test_random_books_check_passes_and_catches_rounding_bugs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """무작위 장부 70건 점검: 정책대로면 통과, 계산이 틀어지면(예: 법인세 1원) 그 영역을 짚는다."""
+    from finance_agent import accuracy
+
+    result = await _run(_network({"safety", "shop-api", "data"}))
+    by = {c["name"]: c for c in result["checks"]}
+    assert by["무작위 장부 계산 점검"]["ok"], by["무작위 장부 계산 점검"]["detail"]
+    assert "70건 모두" in by["무작위 장부 계산 점검"]["detail"]
+
+    real = accuracy.income_tax_amount
+    monkeypatch.setattr(accuracy, "income_tax_amount", lambda base: real(base) + (base > 0))
+    result = await _run(_network({"safety", "shop-api", "data"}))
+    check = next(c for c in result["checks"] if c["name"] == "무작위 장부 계산 점검")
+    assert not check["ok"] and "법인세 누진 계산" in check["detail"]
+    assert result["result"] == "fail"
