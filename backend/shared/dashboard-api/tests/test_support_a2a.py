@@ -350,3 +350,49 @@ def test_conversation_list_carries_the_language_and_can_be_filtered(
     client.get(BASE + "/conversations")
     assert "language" not in fake.sent[-1].input  # 조건이 없으면 보내지 않는다
     assert client.get(BASE + "/conversations").json()["data"][0]["language"] == "ko"  # 기본값
+
+
+def test_list_carries_company_and_triage(client: TestClient, fake: Fake) -> None:
+    triage = {
+        "state": "needed",
+        "reason": "no_error_code",
+        "marked_by": "auto",
+        "marked_at": "2026-11-06T10:00:00Z",
+    }
+    fake.output = {"items": [{**ITEM, "tenant_id": "acme-books", "triage": triage}, ITEM]}
+    rows = client.get(BASE + "/conversations").json()["data"]
+    assert rows[0]["tenant_id"] == "acme-books" and rows[0]["triage"]["reason"] == "no_error_code"
+    assert rows[1]["tenant_id"] == "shop-demo" and rows[1]["triage"] is None
+
+
+def test_triage_route_calls_set_triage_with_execute_target_key(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.output = {**ITEM, "triage": None}
+    body = {"action": "decide", "label": "장바구니 화면 오류"}
+    data = client.post(BASE + "/conversations/7/triage", json=body).json()
+    assert data["data"]["id"] == 7
+    sent = fake.sent[0]
+    assert sent.skill == "set_triage"
+    assert sent.input == {"inquiry_id": 7, "action": "decide", "label": "장바구니 화면 오류"}
+    assert ":set_triage:" in sent.meta.idempotency_key or ":triage:" in sent.meta.idempotency_key
+
+
+def test_triage_route_reports_a_refused_step_as_conflict(client: TestClient, fake: Fake) -> None:
+    fake.output = {"message": "분류 필요로 올린 문의만 분류를 정할 수 있다"}
+    response = client.post(
+        BASE + "/conversations/7/triage", json={"action": "decide", "label": "화면 오류"}
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_STATE"
+
+
+def test_triage_route_rejects_an_unknown_action_and_a_long_label(
+    client: TestClient, fake: Fake
+) -> None:
+    assert (
+        client.post(BASE + "/conversations/7/triage", json={"action": "delete"}).status_code == 422
+    )
+    long = {"action": "decide", "label": "가" * 41}
+    assert client.post(BASE + "/conversations/7/triage", json=long).status_code == 422
+    assert fake.sent == []

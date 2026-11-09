@@ -118,6 +118,8 @@ export const api = {
     createClaim: (id: number, b: ClaimIntake) => post<ClaimDetail>(`/api/dashboard/conversations/${id}/claims`, b),
     summary: (id: number) => post<Summary>(`/api/dashboard/conversations/${id}/summary`),
     setStatus: (id: number, status: string) => post<ConversationListItem>(`/api/dashboard/conversations/${id}/status`, { status }),
+    /** 분류 필요: send=올리기, decide=분류 이름 정하고 마치기, clear=표시 지우기 */
+    setTriage: (id: number, b: { action: "send" | "decide" | "clear"; label?: string }) => post<ConversationListItem>(`/api/dashboard/conversations/${id}/triage`, b),
     /** `since`(ISO 8601)를 주면 그 시각 이후 주문만 읽는다. 구매자의 주문이 수천 건이면 전부 읽기에 느리다. 최신순 */
     orders: (user_id: number, since?: string) =>
       request<{ id: number; order_no: string; status: string; status_ko: string; title: string }[]>(

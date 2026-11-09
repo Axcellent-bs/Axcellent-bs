@@ -720,6 +720,15 @@ async def test_change_proposal_actions_are_a_for_support_only(gate: Gate, act, a
     assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
 
 
+@pytest.mark.asyncio
+async def test_set_triage_is_a_for_support_only(gate: Gate, act) -> None:
+    """분류 필요 표시(`set_triage`)는 고객지원만 A로 실행한다. 다른 부서가 부르면 보류된다."""
+    ok = await gate.execute(act("set_triage", "support", "triage-ok"))
+    assert (ok.grade, ok.status) == ("A", "executed")
+    other = await gate.execute(act("set_triage", "marketing", "triage-other"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
 # ------------------------------------------------ 캠페인 예산 (재무는 의견만, 금액은 안전 규칙)
 def _campaign(act, key: str, budget: int = 100_000, **over: Any):
     params = {

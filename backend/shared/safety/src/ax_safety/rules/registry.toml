@@ -114,6 +114,12 @@ action = "set_inquiry_status"
 owner = "support"
 base_grade = "A"
 
+# 분류 필요 표시: 오류 코드가 없는 문의를 따로 모으고 상담원이 분류 이름을 정한다. 돈은 움직이지 않는다
+[[actions]]
+action = "set_triage"
+owner = "support"
+base_grade = "A"
+
 # 클레임 서비스가 문의 서비스에 알리는 클레임 처리 결과 기록 (문의의 AI 처리 내력). 돈은 움직이지 않는다
 [[actions]]
 action = "record_claim_activity"

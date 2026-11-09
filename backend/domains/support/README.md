@@ -30,6 +30,7 @@
 | `send_reply` | A | dashboard-api, orchestrator | 답변 발송 (가드 통과 필수) |
 | `reject_draft` | A | dashboard-api | 거절한 초안 기록 |
 | `set_inquiry_status` | A | dashboard-api, orchestrator | 상태 변경 |
+| `set_triage` | A | dashboard-api | 문의를 **"분류 필요"**로 올리거나(`send`), 상담원이 분류 이름(`label`, 40자 이하, 개인정보 거절)을 정하고 마치거나(`decide`, 먼저 올라가 있어야 함), 표시를 지운다(`clear`). 오류 코드·로그가 없어 자동 진단이 원인을 못 찾는 문의를 따로 모으는 표시다 |
 | `request_compensation` | A | dashboard-api, orchestrator | 보상 단가 판정 + 마케팅 `issue_coupon(compensation)` 직렬 요청 (DEP-CS-02) |
 | `diagnose_payment` | read | dashboard-api, orchestrator | 문의의 주문에서 결제가 막힌 곳(실패 원인·중복 결제·기록 불일치)과 다음 할 일을 주문·결제 기록으로 판단 (재결제·환불은 안 함) |
 | `assess_deletion_request` | read | dashboard-api, orchestrator | 개인정보 삭제 요청이 본인 것으로 보이는지 규칙으로 1차 판단 (일치·불일치·판단불가 + 확신도 low·medium·high, 삭제·본인 확정은 안 함) |
@@ -177,6 +178,15 @@ ax-contracts, ax-agent-template
   말이 30분(`SUPPORT_CHAT_IDLE_MINUTES`) 없는 대화는 읽을 때 같은 방식으로 끝난다 (대화 안에서만 쓰는
   정리라 안전 관문을 거치지 않는다). 닫힌 대화에는 더 보낼 수 없다.
 - 저장은 서버 메모리이고 `SUPPORT_PG_DSN`이 있으면 `support_chats` 테이블에도 쓴다.
+
+
+## 분류 필요 문의와 회사별 관리 (`triage.py`, `triage_handlers.py`)
+
+- 예: "장바구니 창이 안 열려서 결제가 안 돼요"는 결제 문의지만 연결된 주문에 실패한 결제 기록(오류 코드)이 없다. 이런 문의는 `diagnose_payment`가 원인을 못 찾으므로 상담원이 원인 이름(분류)을 정해야 한다.
+- **자동으로 올리는 규칙**(접수 때 한 번, 코드만·LLM 없음): ① 분류가 어느 코드에도 안 맞아 `general`이면 `unclassified`, ② 분류가 `payment`인데 연결된 주문이 없거나 주문에 실패한 결제 시도가 하나도 없으면 `no_error_code`. 진행 중인 사건(`ctx_inc_`)에 이어진 문의, 이미 표시가 있는 문의, 주문을 읽지 못한 경우(원인이 없다고 단정하지 않는다)는 올리지 않는다. 접수는 막지 않는다.
+- **수동**: 상담 콘솔의 "분류 필요로 보내기" 버튼과 `/claims`의 분류 필요 보기가 `set_triage`를 부른다. 표시(`triage`: 상태 `needed`·`done`, 사유 `no_error_code`·`unclassified`·`manual`, 올린 쪽 `auto`·`agent`, 분류 이름)는 `list_inquiries`와 `get_inquiry` 응답에 실린다. 올림·분류·지움은 모두 AI 처리 내력에 코드 값으로 남고 고객 원문은 싣지 않는다.
+- **회사별 관리**: 문의는 접수 때 요청의 `tenant_id`를 그대로 저장하고, 목록 응답에도 실린다. 화면은 회사별로 나눠 보고(데모 쇼핑몰의 `shop-demo`는 "캣북스"), 모르는 회사는 ID를 그대로 보여 준다. 다른 회사의 문의도 같은 흐름으로 처리한다.
+- 화면: `/claims`의 "분류 필요" 보기(분류 필요·분류 완료, 회사 칩, 분류 이름별 건수)와 상담 콘솔 머리글의 회사·분류 표시. 안전 관문 등록은 `set_triage` A등급(돈이 움직이지 않음).
 
 ## 개인정보 삭제 (`purge_handlers.py`, `retention.py`) — 고객 요청과 3년 보유기간
 

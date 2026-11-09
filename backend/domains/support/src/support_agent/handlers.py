@@ -507,7 +507,10 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
             from support_agent import claim_analysis  # 순환 import를 피해 쓸 때 가져온다
 
             await claim_analysis.check_attached_photos(conversation, request.untrusted["images"])
-        return _view(conversation), fallback
+        from support_agent import triage  # 순환 import를 피해 쓸 때 가져온다
+
+        await triage.mark_automatically(conversation)  # 오류 코드가 없는 문의는 분류 필요로 모은다
+        return _view(STORE.get(conversation.id) or conversation), fallback
 
     return await _write(
         request, "create_inquiry", f"user:{parsed.user_id}", {"user_id": parsed.user_id}, apply

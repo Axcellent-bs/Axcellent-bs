@@ -102,6 +102,29 @@ class Summary(AxModel):
     tags: list[str] = Field(default_factory=list)
 
 
+TriageState = Literal["needed", "done"]
+TriageReason = Literal["no_error_code", "unclassified", "manual"]
+TRIAGE_LABEL_MAX = 40
+
+
+class Triage(AxModel):
+    """ "분류 필요" 표시. 로그·오류 코드로 원인을 모르는 문의를 따로 모아 상담원이 분류를 정한다.
+
+    - `needed`: 분류가 필요하다. `done`: 상담원이 분류 이름(`label`)을 정하고 마쳤다.
+    - `reason`: `no_error_code`(결제 문의인데 연결된 실패 기록이 없음), `unclassified`
+      (어느 분류에도 맞지 않음), `manual`(상담원이 직접 올림).
+    - `label`은 상담원이 적은 원인 이름(예: "장바구니 화면 오류")이다.
+      고객 원문이나 개인정보는 넣지 않는다.
+    """
+
+    state: TriageState
+    reason: TriageReason
+    marked_by: Literal["auto", "agent"]
+    marked_at: str
+    label: str | None = None
+    decided_at: str | None = None
+
+
 class ConversationListItem(AxModel):
     id: int
     customer_name: str
@@ -116,6 +139,8 @@ class ConversationListItem(AxModel):
     preview: str
     awaiting_reply: bool
     language: str = "ko"  # 고객이 마지막으로 쓴 언어 (`languages.detect`: ko·en·ja·zh·other)
+    tenant_id: str = TENANT_ID_DEFAULT  # 어느 회사(고객사)의 문의인지. 회사별로 따로 관리한다
+    triage: Triage | None = None  # "분류 필요" 표시 (없으면 일반 문의)
 
 
 class ActivityEntry(AxModel):
@@ -174,7 +199,6 @@ class ResolutionNote(AxModel):
 
 
 class Conversation(ConversationListItem):
-    tenant_id: str = TENANT_ID_DEFAULT
     context_id: str
     user_id: int | None = None
     messages: list[Message] = Field(default_factory=list)
@@ -280,6 +304,14 @@ class SummarizeInquiryInput(AxModel):
 class SetInquiryStatusInput(AxModel):
     inquiry_id: int
     status: InquiryStatus
+
+
+class SetTriageInput(AxModel):
+    """`send`: 분류 필요로 올린다. `decide`: 분류 이름을 정하고 마친다. `clear`: 표시를 지운다."""
+
+    inquiry_id: int
+    action: Literal["send", "decide", "clear"]
+    label: str | None = Field(default=None, max_length=TRIAGE_LABEL_MAX)
 
 
 ClaimActivityKind = Literal[

@@ -144,6 +144,15 @@ export interface ConversationListItem {
   updated_at: string; preview: string; awaiting_reply: boolean;
   /** 고객이 마지막으로 쓴 언어. 옛 응답에는 없을 수 있다 */
   language?: "ko" | "en" | "ja" | "zh" | "other";
+  /** 어느 회사(고객사)의 문의인지. 옛 응답에는 없을 수 있다 */
+  tenant_id?: string;
+  /** 로그·오류 코드로 원인을 모르는 문의를 따로 모은 "분류 필요" 표시. 없으면 일반 문의 */
+  triage?: Triage | null;
+}
+/** 분류 필요 표시. needed=분류가 필요함, done=상담원이 분류 이름을 정하고 마침 */
+export interface Triage {
+  state: "needed" | "done"; reason: "no_error_code" | "unclassified" | "manual"; marked_by: "auto" | "agent";
+  marked_at: string; label?: string | null; decided_at?: string | null;
 }
 /** 상담 콘솔의 클레임 접수 입력 (구매자·주문은 서버가 문의에서 읽는다) */
 export interface ClaimIntake {

@@ -30,6 +30,7 @@ from support_agent.qa_handlers import QA_HANDLERS
 from support_agent.resolution_note_handlers import RESOLUTION_NOTE_HANDLERS
 from support_agent.signal_handlers import SIGNAL_HANDLERS
 from support_agent.suggest_handlers import SUGGEST_HANDLERS
+from support_agent.triage_handlers import TRIAGE_HANDLERS
 
 
 def _card_path() -> Path:
@@ -68,6 +69,7 @@ ALL_HANDLERS = {
     **HANDOFF_HANDLERS,
     **GAP_HANDLERS,
     **QA_HANDLERS,
+    **TRIAGE_HANDLERS,
     **AUDIT_HANDLERS,
     **PRIVACY_HANDLERS,
     **SIGNAL_HANDLERS,

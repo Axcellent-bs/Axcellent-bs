@@ -97,6 +97,7 @@ from ax_dashboard_api.schemas import (
     Summary,
     SupportChatSendBody,
     TextBody,
+    TriageBody,
     Validation,
 )
 
@@ -602,6 +603,23 @@ async def conversation_status(conversation_id: int, body: StatusBody) -> dict:
         {"inquiry_id": conversation_id, "status": body.status},
         target=f"inquiry:{conversation_id}:{body.status}",
     )
+    return ok(ConversationListItem.model_validate(_with_shown_subject(out)))
+
+
+@router.post("/conversations/{conversation_id}/triage")
+async def conversation_triage(conversation_id: int, body: TriageBody) -> dict:
+    """분류 필요 표시: 올리기(send)·분류 정하고 마치기(decide)·지우기(clear). 실제 연결 전용."""
+    if is_mock():
+        raise ApiError(
+            409, "NOT_AVAILABLE_IN_MOCK", "분류 필요 표시는 실제 고객지원 연결에서만 쓸 수 있다"
+        )
+    out = await support_client.call(
+        "set_triage",
+        {"inquiry_id": conversation_id, "action": body.action, "label": body.label},
+        target=f"inquiry:{conversation_id}:triage:{body.action}:{body.label or ''}",
+    )
+    if "id" not in out:  # 문의가 아닌 응답(분류 필요로 올린 문의만 정할 수 있음 등)은 성공이 아니다
+        raise ApiError(409, "INVALID_STATE", out.get("message", "지금은 할 수 없다"))
     return ok(ConversationListItem.model_validate(_with_shown_subject(out)))
 
 
