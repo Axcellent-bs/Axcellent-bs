@@ -38,11 +38,6 @@ export interface OfficeTalk {
   quiet: ReadonlySet<string>;
 }
 
-// 창구가 살아 있는지 본 결과 (목록 읽기 1번). 그 호출도 공통 로그에 남아 단톡방에 보이므로,
-// 이 화면을 다시 열 때마다 묻지 않고 5분 동안 기억한다
-const PROBE_MS = 5 * 60_000;
-const probed = new Map<string, { at: number; prep: boolean; locked: string | null }>();
-
 const agentsOf = (): DirectAgent[] =>
   TALK_KEYS.map((k) => DIRECT_AGENTS.find((a) => a.key === k)).filter((a): a is DirectAgent => !!a && a.live && !!a.talk);
 const errText = (e: unknown, name: string) => (e instanceof Error ? e.message : `${name}에 연결할 수 없어요`);
@@ -71,7 +66,9 @@ export function useOfficeTalk(): OfficeTalk {
   }, []);
   const mine = useCallback((t: Thread, acc: Account) => !t.restricted && loadOwners()[t.id] === acc.id, []);
 
-  // 처음 열 때: 이 탭에서 이어 가던 내 대화를 읽고, 창구가 살아 있는지 본다(목록 읽기, 실패면 "준비 중")
+  // 처음 열 때: 이 탭에서 이어 가던 내 대화만 읽는다. 기억한 대화가 없는 부서는 아무 호출도 하지 않는다
+  // (미리 확인하는 목록 읽기도 공통 로그에 남아 모두의 단톡방에 줄이 쌓이므로 하지 않는다).
+  // 칩은 처음에 모두 켜 두고, 실제로 실패했을 때만(이 읽기·보내기) "준비 중"·막힘으로 바꾼다
   useEffect(() => {
     if (!account) return;
     let alive = true;
@@ -86,17 +83,6 @@ export function useOfficeTalk(): OfficeTalk {
           setThreads((cur) => ({ ...cur, [a.key]: t }));
         }).catch((err) => { if (alive && !failed(a.key, a.name, err)) saveThreadId(tkey, null); });
       }
-      const seen = probed.get(a.key);
-      if (seen && Date.now() - seen.at < PROBE_MS) {
-        if (seen.prep) setPrep((p) => ({ ...p, [a.key]: true }));
-        if (seen.locked) setLocked((l) => ({ ...l, [a.key]: seen.locked as string }));
-        continue;
-      }
-      talk.list().then(() => { probed.set(a.key, { at: Date.now(), prep: false, locked: null }); }).catch((err) => {
-        const k = classifyFailure(err);
-        probed.set(a.key, { at: Date.now(), prep: k === "preparing", locked: k === "forbidden" ? errText(err, a.name) : null });
-        if (alive) failed(a.key, a.name, err);
-      });
     }
     return () => { alive = false; };
   }, [account, agents, failed, mine]);
