@@ -168,6 +168,27 @@ async def test_conditional_within_limit_runs_gate(monkeypatch: pytest.MonkeyPatc
     assert len(gate.seen) == 1
 
 
+async def test_finance_opinion_passes_through_and_does_not_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """재무는 의견만 낸다: 권하지 않음이어도 막지 않고 의견 필드를 그대로 싣는다."""
+    review = _review("approved", 300_000) | {
+        "advisory": True,
+        "opinion": "not_recommended",
+        "suggested_krw": 0,
+    }
+    gate = _wire(monkeypatch, Finance(output=review))
+    result = await campaign.start_campaign(_req("start_campaign", START))
+    assert (result.status, result.outcome) == (TaskStatus.COMPLETED, "executed")
+    assert len(gate.seen) == 1
+    sent = result.output["review"]
+    assert (sent["advisory"], sent["opinion"], sent["suggested_krw"]) == (
+        True,
+        "not_recommended",
+        0,
+    )
+
+
 async def test_conditional_over_limit_stops(monkeypatch: pytest.MonkeyPatch) -> None:
     gate = _wire(monkeypatch, Finance(output=_review("conditional", 100_000)))
     result = await campaign.start_campaign(_req("start_campaign", START))
