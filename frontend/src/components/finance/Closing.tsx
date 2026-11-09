@@ -116,26 +116,10 @@ export function ClosingSection({ tick, onChanged, focus }: {
               </div>
 
               <div>
-                <h3 className="text-sm font-semibold text-ink-900">설명</h3>
-                <p className="text-sm text-ink-500">{r.commentary_source === "llm" ? "AI가 위 숫자를 보고 쓴 문장입니다. 숫자는 표가 기준입니다." : "정해진 문장 틀(템플릿)에 숫자를 넣어 만든 설명입니다."}</p>
-                <div className="mt-2 rounded-2xl bg-surface-2 px-4 py-3 text-sm leading-relaxed text-ink-700">
-                  <Chip label={r.commentary_source === "llm" ? "AI가 씀" : "템플릿 문장"} tone={r.commentary_source === "llm" ? TONE.info : TONE.muted} />
-                  <p className="mt-1.5 whitespace-pre-line">{plainText(r.commentary) || "설명이 없습니다."}</p>
-                </div>
-                {(r.adjustments ?? []).map((a) => <p key={a.at} className="mt-2 text-sm text-ink-700">{a.posted_month}에 조정 반영 · {a.by} · {a.reason}</p>)}
-                {(r.prior_adjustments ?? []).length > 0 && (
-                  <div className="mt-2 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-700">
-                    <p className="font-medium text-ink-900">이번 달에 반영한 전기 조정</p>
-                    {r.prior_adjustments!.map((a, n) => <p key={`${a.for_month}-${n}`}>{a.for_month} · {signedKrw(a.lines.find((x) => x.code === "net_result")?.diff ?? 0)} · {a.reason}</p>)}
-                    {r.net_after_adjustments != null && <p className="mt-1 font-medium tabular-nums text-ink-900">조정 후 영업 결과 {krw(r.net_after_adjustments)}</p>}
-                  </div>
-                )}
-                <div className="mt-3"><AppliedRules rules={r.applied_rules} /></div>
-
-                <div className="mt-4 rounded-2xl border border-ink-100 px-4 py-3">
+                <div className="rounded-2xl border border-ink-100 px-4 py-3">
                   {r.status === "confirmed" ? (
                     <div className="space-y-2 text-sm">
-                      <p className="text-emerald-800">{r.snapshot_at ? "이 기간의 결산은 확정됐습니다. 위 숫자는 확정할 때 저장한 값입니다." : "이 기간의 결산은 확정됐습니다. 예전 확정이라 숫자가 저장되지 않아 지금 장부로 계산한 값입니다."}</p>
+                      <p className="text-emerald-800">{r.snapshot_at ? "이 기간의 결산은 확정됐습니다. 표의 숫자는 확정할 때 저장한 값입니다." : "이 기간의 결산은 확정됐습니다. 예전 확정이라 숫자가 저장되지 않아 지금 장부로 계산한 값입니다."}</p>
                       {(r.close_warnings ?? []).map((w) => <p key={w.code} className="text-ink-700">확정할 때 경고: {w.message}</p>)}
                       {(r.drift ?? []).length > 0 && (
                         <div className="rounded-xl bg-amber-50 px-3 py-2 text-amber-900">
@@ -171,6 +155,22 @@ export function ClosingSection({ tick, onChanged, focus }: {
                   )}
                   {problem && <p role="alert" className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{problem}</p>}
                 </div>
+                <details className="mt-3 rounded-2xl border border-ink-100 px-4 py-2 text-sm">
+                  <summary className="cursor-pointer font-medium text-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+                    문장으로 읽기 <span className="font-normal text-ink-500">· {r.commentary_source === "llm" ? "AI가 씀, 숫자는 표가 기준" : "정해진 문장 틀"}</span>
+                  </summary>
+                  <p className="mt-2 whitespace-pre-line leading-relaxed text-ink-700">{plainText(r.commentary) || "설명이 없습니다."}</p>
+                </details>
+                {(r.adjustments ?? []).map((a) => <p key={a.at} className="mt-2 text-sm text-ink-700">{a.posted_month}에 조정 반영 · {a.by} · {a.reason}</p>)}
+                {(r.prior_adjustments ?? []).length > 0 && (
+                  <div className="mt-2 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-700">
+                    <p className="font-medium text-ink-900">이번 달에 반영한 전기 조정</p>
+                    {r.prior_adjustments!.map((a, n) => <p key={`${a.for_month}-${n}`}>{a.for_month} · {signedKrw(a.lines.find((x) => x.code === "net_result")?.diff ?? 0)} · {a.reason}</p>)}
+                    {r.net_after_adjustments != null && <p className="mt-1 font-medium tabular-nums text-ink-900">조정 후 영업 결과 {krw(r.net_after_adjustments)}</p>}
+                  </div>
+                )}
+                <div className="mt-3"><AppliedRules rules={r.applied_rules} /></div>
+
               </div>
             </div>
 

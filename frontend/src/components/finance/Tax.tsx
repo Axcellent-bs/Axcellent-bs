@@ -69,12 +69,16 @@ export function TaxSection({ tick }: { tick: number }) {
                 <VatTable title="매입 (공제할 세액)" rows={p.purchases} />
               </div>
               <dl className="grid grid-cols-3 gap-3">
-                {([["매출세액", p.output_vat], ["매입세액", p.input_vat], ["낼 세액 (참고)", p.payable]] as const).map(([label, v]) => (
-                  <div key={label} className="rounded-2xl bg-surface-2 px-3 py-2">
-                    <dt className="text-sm text-ink-500">{label}</dt>
-                    <dd className="text-base font-semibold tabular-nums">{krw(v)}</dd>
-                  </div>
-                ))}
+                {([["매출세액", p.output_vat], ["매입세액", p.input_vat], ["낼 세액 (참고)", p.payable]] as const).map(([label, v], i) => {
+                  // 매출세액 − 매입세액 = 낼 세액. 결과(낼 세액)를 가장 크게
+                  const lead = i === 2;
+                  return (
+                    <div key={label} className={`rounded-2xl border px-4 py-3 ${lead ? "border-brand-100 bg-brand-50/40" : "border-ink-100"}`}>
+                      <dt className="text-sm text-ink-500">{i === 1 ? `− ${label}` : i === 2 ? `= ${label}` : label}</dt>
+                      <dd className={`mt-1 font-semibold tabular-nums text-ink-900 ${lead ? "text-2xl" : "text-xl"}`}>{krw(v)}</dd>
+                    </div>
+                  );
+                })}
               </dl>
               <div className="rounded-2xl border border-ink-100 px-4 py-3 text-sm">
                 <h3 className="font-semibold text-ink-900">회사 부담 쿠폰과 수수료 과세표준</h3>
@@ -118,7 +122,7 @@ export function TaxSection({ tick }: { tick: number }) {
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[640px] text-sm">
                     <thead className="text-left text-sm text-ink-500">
-                      <tr><th className="pb-1 font-medium">판매자</th><th className="pb-1 font-medium">사업자번호</th><th className="pb-1 font-medium">월</th><th className="pb-1 text-right font-medium">판매금액</th><th className="pb-1 font-medium">결제수단</th><th className="pb-1 font-medium">면세·과세</th></tr>
+                      <tr><th className="pb-1 font-medium">판매자</th><th className="pb-1 font-medium">사업자번호</th><th className="pb-1 font-medium">월</th><th className="pb-1 text-right font-medium">판매금액</th><th className="pb-1 pl-6 font-medium">결제수단</th><th className="pb-1 pl-4 font-medium">면세·과세</th></tr>
                     </thead>
                     <tbody>
                       {r.rows.map((x) => (
@@ -126,9 +130,9 @@ export function TaxSection({ tick }: { tick: number }) {
                           <td className="py-1.5">{x.name}</td>
                           <td className="py-1.5">{x.business_no ?? <Chip label="자료 없음" tone={TONE.warn} />}</td>
                           <td className="py-1.5 tabular-nums">{x.month}</td>
-                          <td className="py-1.5 text-right tabular-nums">{krw(x.total)}</td>
-                          <td className="py-1.5 text-sm text-ink-700">{Object.entries(x.by_method).map(([k, v]) => `${k} ${krw(v)}`).join(", ")}</td>
-                          <td className="py-1.5 text-sm text-ink-700">{Object.entries(x.by_tax).map(([k, v]) => `${k} ${krw(v)}`).join(", ")}</td>
+                          <td className="py-1.5 text-right font-medium tabular-nums text-ink-900">{krw(x.total)}</td>
+                          <td className="py-1.5 pl-6 text-sm tabular-nums text-ink-500">{Object.entries(x.by_method).map(([k, v]) => `${k} ${krw(v)}`).join(", ")}</td>
+                          <td className="py-1.5 pl-4 text-sm tabular-nums text-ink-500">{Object.entries(x.by_tax).map(([k, v]) => `${k} ${krw(v)}`).join(", ")}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -156,12 +160,15 @@ function IncomeEstimatePanel({ tick }: { tick: number }) {
         {(e) => (
           <div className="space-y-3">
             <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {([["올해 영업 결과", e.operating_result], ["법인세", e.income_tax], ["지방소득세", e.local_income_tax], ["합계 (참고)", e.total]] as const).map(([label, v]) => (
-                <div key={label} className="rounded-2xl bg-surface-2 px-3 py-2">
-                  <dt className="text-sm text-ink-500">{label}</dt>
-                  <dd className="text-base font-semibold tabular-nums">{v === null ? "자료 없음" : krw(v)}</dd>
-                </div>
-              ))}
+              {([["올해 영업 결과", e.operating_result], ["법인세", e.income_tax], ["지방소득세", e.local_income_tax], ["합계 (참고)", e.total]] as const).map(([label, v], i) => {
+                const lead = i === 3;
+                return (
+                  <div key={label} className={`rounded-2xl border px-4 py-3 ${lead ? "border-brand-100 bg-brand-50/40" : "border-ink-100"}`}>
+                    <dt className="text-sm text-ink-500">{label}</dt>
+                    <dd className={`mt-1 font-semibold tabular-nums ${v === null ? "text-sm text-ink-500" : `text-ink-900 ${lead ? "text-2xl" : "text-xl"}`}`}>{v === null ? "자료 없음" : krw(v)}</dd>
+                  </div>
+                );
+              })}
             </dl>
             <p className="text-sm text-ink-700">빠진 항목: {e.not_included.join(", ")}</p>
             <AppliedRules rules={e.applied_rules} />
