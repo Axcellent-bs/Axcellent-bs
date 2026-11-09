@@ -69,6 +69,9 @@ def dump(s: State) -> dict[str, Any]:
             "opinions": records.opinions,
             "exports": records.exports,
             "bank_imports": records.bank_imports,
+            "pg_rows": records.pg_rows,
+            "pg_periods": records.pg_periods,
+            "pg_imports": records.pg_imports,
         },
     }
 
@@ -106,6 +109,10 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.opinions = [dict(r) for r in rec.get("opinions", [])]
     s.records.exports = {k: dict(v) for k, v in rec.get("exports", {}).items()}
     s.records.bank_imports = [dict(r) for r in rec.get("bank_imports", [])]
+    s.records.pg_rows = {k: dict(v) for k, v in rec.get("pg_rows", {}).items()}
+    s.records.pg_periods = [dict(p) for p in rec.get("pg_periods", [])]
+    s.records.pg_imports = [dict(r) for r in rec.get("pg_imports", [])]
+    s.records.pg_version += 1
 
 
 def _text(s: State) -> str:

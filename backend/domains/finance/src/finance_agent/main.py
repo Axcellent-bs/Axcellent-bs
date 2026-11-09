@@ -20,7 +20,7 @@ from ax_agent_template import events
 from ax_agent_template.events import subscribe
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from finance_agent import closing, exports, persist, screen_cache, tax
+from finance_agent import closing, exports, persist, pg_file, screen_cache, tax
 from finance_agent import finance_config as fc
 from finance_agent.chat.a2a import CHAT_HANDLERS
 from finance_agent.finance_api import add_finance_api, run_export_cycle
@@ -146,7 +146,8 @@ async def opinion_retry_loop(interval: float = OPINION_RETRY_SECONDS) -> None:
 
 def export_seconds() -> int:
     """`FINANCE_EXPORT_SECONDS` (기본 3600초). 0이면 끈다. 폴더를 정하지 않아도 끈다."""
-    if exports.export_dir() is None and exports.inbox_dir() is None:
+    no_dirs = exports.export_dir() is None and exports.inbox_dir() is None
+    if no_dirs and pg_file.inbox_dir() is None:
         return 0
     raw = os.getenv("FINANCE_EXPORT_SECONDS", "").strip()
     if not raw:

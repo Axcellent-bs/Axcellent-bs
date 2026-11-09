@@ -12,6 +12,9 @@
 | `GET /api/finance/statements?period=&date=&format=` | ① 손익계산서, `csv`면 내려받기 | 없음 |
 | `GET /api/finance/reconciliation?date=` | ② 결제별 PG 대사 (생략 = 최근 7일) | 없음 |
 | `POST /api/finance/reconciliation/{payment_id}/note` | ② 불일치 처리 메모 | **사람** |
+| `POST /api/finance/pg/file?name=` | ② PG 정산 파일(CSV) 올리기. 그 기간은 파일과 대사 | **사람** |
+| `GET /api/finance/pg/imports` | ② 올린 PG 정산 파일 기록·기간 | 없음 |
+| `POST /api/finance/pg/clear` | ② 올린 PG 정산 자료 모두 빼기(이유 필수, 기록은 남김) | **사람** |
 | `GET /api/finance/settlements?period=YYYY-Www` | ③ 판매자 정산 내역서 (생략 = 지난주) | 없음 |
 | `POST /api/finance/settlements/batch` | ③ 묶음 → `execute(confirm_settlement)` | 선택 |
 | `GET /api/finance/settlements/deadlines` | ③ 판매 대금 지급 기한 점검 | 없음 |
@@ -68,6 +71,7 @@ from finance_agent import (
     deadline,
     exports,
     payables,
+    pg_file,
     reconciliation,
     settlement,
     statements,
@@ -137,6 +141,11 @@ async def run_export_cycle(trigger: str = "auto") -> dict[str, Any]:
         imported = exports.scan_inbox(
             records.bank_rows, records.bank_imports, records.bank_out_periods
         )
+        pg_imported = scan_pg_inbox(records)
+        if pg_imported:
+            from finance_agent import screen_cache
+
+            screen_cache.CACHE.clear()  # 대사 화면을 새 PG 자료로 다시 계산한다
         books = await state().fresh_books()
         package = exports.make_package(
             books,
@@ -145,7 +154,53 @@ async def run_export_cycle(trigger: str = "auto") -> dict[str, Any]:
             filings=records.vat_filings,
             other_pnl=records.other_pnl,
         )
-        return {"trigger": trigger, "package": package, "imported": imported}
+        return {
+            "trigger": trigger,
+            "package": package,
+            "imported": imported,
+            "pg_imported": pg_imported,
+        }
+
+
+def import_pg(records: Any, body: bytes, name: str, source: str, by: str | None) -> dict:
+    """PG 정산 파일 하나를 기록에 더한다(화면 올리기·폴더 같이). 실패도 기록에 남긴다."""
+    record: dict[str, Any] = {"file": (name.strip() or "올린 파일")[:120], "at": fc.iso(fc.now())}
+    record |= {"source": source} | ({"by": by} if by else {})
+    try:
+        record |= pg_file.import_file(body, name, records.pg_rows, records.pg_periods)
+        records.pg_version += 1
+    except pg_file.PgFileError as exc:
+        record |= {"status": "failed", "reason": str(exc)[:200]}
+    records.pg_imports.append(record)
+    del records.pg_imports[:-100]
+    return record
+
+
+def scan_pg_inbox(records: Any) -> list[dict[str, Any]]:
+    """`FINANCE_PG_INBOX`의 CSV를 읽어 더하고 `processed/`·`failed/`로 옮긴다."""
+    folder = pg_file.inbox_dir()
+    if folder is None or not folder.is_dir():
+        return []
+    done: list[dict[str, Any]] = []
+    for path in sorted(
+        p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in pg_file.INBOX_SUFFIXES
+    ):
+        try:
+            body = path.read_bytes()
+        except OSError as exc:
+            body, reason = b"", str(exc)[:200]
+        else:
+            reason = ""
+        record = (
+            import_pg(records, body, path.name, "folder", None)
+            if body
+            else {"file": path.name, "status": "failed", "reason": reason or "빈 파일"}
+        )
+        dest = folder / ("processed" if record.get("status") == "imported" else "failed")
+        dest.mkdir(exist_ok=True)
+        path.replace(dest / f"{fc.now().strftime('%Y%m%dT%H%M%S')}-{path.name}")
+        done.append(record)
+    return done
 
 
 # ---------------------------------------------------------------- 정산 묶음 상태
@@ -727,7 +782,13 @@ def add_finance_api(app: FastAPI) -> None:
             return error(400, "invalid_request", f"limit은 1~{RECON_LIMIT_MAX}")
         books = await state().books()
         result = await off(reconciliation.reconcile, books, d, state().records.recon_notes)
-        meta = books.meta() | {"pg_source": "mock_toss_settlement"}
+        cov = result["pg_coverage"]
+        # 무엇과 맞췄나: 올린 PG 정산 파일 · 결제 기록으로 만든 모의 자료(토스 정산 형식) · 섞임
+        if not cov["uploaded"]:
+            source = "mock_toss_settlement"
+        else:
+            source = "pg_file+mock_toss_settlement" if cov["generated"] else "pg_file"
+        meta = books.meta() | {"pg_source": source}
         return ok(reconciliation.pick(result, wanted, limit), meta)
 
     @app.post("/api/finance/reconciliation/{payment_id}/note", response_model=None)
@@ -1015,6 +1076,73 @@ def add_finance_api(app: FastAPI) -> None:
             "has_withdrawals": record["has_withdrawals"],
         }
         return ok(result, meta)
+
+    @app.post("/api/finance/pg/file", response_model=None)
+    async def upload_pg_file(
+        request: Request, name: str = "", authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """PG 관리자 화면에서 내려받은 정산 내역 파일(CSV)을 올린다. 본문은 파일 바이트다.
+
+        파일이 덮는 판매일 기간의 결제는 이 파일과 대사한다(파일에 없으면 "PG에 없음").
+        같은 결제 번호를 다시 올리면 새 줄로 바꾼다. 올린 기록은 `pg_imports`에 남는다.
+        """
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await request.body()
+        if not body:
+            return error(400, "invalid_request", "파일 내용이 비어 있습니다.")
+        record = import_pg(state().records, body, name, "upload", person)
+        if record["status"] != "imported":
+            return error(400, "invalid_file", record["reason"])
+        return ok(record, {"uploaded_by": person})
+
+    @app.get("/api/finance/pg/imports")
+    async def pg_imports() -> dict:
+        records = state().records
+        return ok(
+            {
+                "imports": list(reversed(records.pg_imports[-20:])),
+                "periods": records.pg_periods[-20:],
+                "rows": len(records.pg_rows),
+                "inbox_enabled": pg_file.inbox_dir() is not None,
+            },
+            {},
+        )
+
+    @app.post("/api/finance/pg/clear", response_model=None)
+    async def clear_pg(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """올린 PG 정산 자료를 모두 뺀다(시연이 끝났거나 잘못 올린 경우). 다시 모의 자료와 맞춘다.
+
+        이유가 꼭 있어야 하고, 뺀 사람·이유·줄 수를 `pg_imports`에 남긴다.
+        """
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        reason = str((await _body(request)).get("reason") or "").strip()[:200]
+        if not reason:
+            return error(400, "invalid_request", "빼는 이유(reason)가 필요합니다.")
+        records = state().records
+        record = {
+            "file": None,
+            "at": fc.iso(fc.now()),
+            "source": "clear",
+            "by": person,
+            "status": "cleared",
+            "rows": len(records.pg_rows),
+            "periods": len(records.pg_periods),
+            "reason": reason,
+        }
+        records.pg_rows.clear()
+        records.pg_periods.clear()
+        records.pg_version += 1
+        records.pg_imports.append(record)
+        del records.pg_imports[:-100]
+        return ok(record, {"cleared_by": person})
 
     def bank_outflows(books: Any) -> dict[str, Any]:
         records = state().records

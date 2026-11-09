@@ -2,7 +2,7 @@ import { useState } from "react";
 import { humanId, shortDateTime } from "@/lib/format";
 import {
   DEFAULT_RECON_FILTER, RECON_ORDER, finance, humanTokenSet, krw, plainText,
-  type ReconItem, type ReconStatus,
+  type PgCoverage, type ReconItem, type ReconStatus,
 } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
@@ -63,11 +63,42 @@ export function ReconciliationSection({ tick }: { tick: number }) {
   const res = useResource(`recon:${date}:${wanted.join(",")}`, () => finance.reconciliation(date || null, wanted), tick);
   const toggle = (s: ReconStatus) => setShown((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
 
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  async function pgAction(run: () => Promise<string>) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      setMessage(await run());
+      await res.reload();
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const uploadPg = (file: File) =>
+    pgAction(async () => {
+      const got = (await finance.uploadPgFile(file)).data;
+      return `PG 정산 ${(got.rows ?? 0).toLocaleString("ko-KR")}줄을 읽었습니다. 판매일 ${got.period?.from} ~ ${got.period?.to}은 이 파일과 맞춥니다.`;
+    });
+  const clearPg = () =>
+    pgAction(async () => {
+      const got = (await finance.clearPg("화면에서 올린 PG 정산 자료 빼기")).data;
+      return `올린 PG 정산 ${(got.rows ?? 0).toLocaleString("ko-KR")}줄을 뺐습니다. 다시 결제 기록으로 만든 모의 자료와 맞춥니다.`;
+    });
+
   const saveItem = (next: ReconItem) =>
     res.set((cur) => ({ ...cur, data: { ...cur.data, items: cur.data.items.map((i) => (i.payment_id === next.payment_id ? next : i)) } }));
 
   const tools = (
     <>
+      <label className={`btn-ghost py-1 text-sm ${!humanTokenSet || busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}
+        title="PG 관리자 화면에서 받은 정산 내역 CSV. 그 판매일 기간은 이 파일과 맞춥니다">
+        {busy ? "처리 중…" : "PG 정산 파일 올리기"}
+        <input type="file" accept=".csv,.txt,text/csv" className="sr-only" disabled={!humanTokenSet || busy}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadPg(f); e.target.value = ""; }} />
+      </label>
       <label className="flex items-center gap-1 text-sm text-ink-500">
         <span className="sr-only">날짜</span>
         <input type="date" className="field w-auto py-1" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -78,7 +109,7 @@ export function ReconciliationSection({ tick }: { tick: number }) {
 
   return (
     <Panel id="reconciliation" title="② 매출·PG 대사" titleHidden meta={res.env?.meta} tools={tools}
-      hint="대사는 '우리 주문 기록'과 '결제대행사(PG)가 보낸 정산 자료'를 한 건씩 맞춰 보는 일입니다. 재무 AI가 자동으로 맞추고, 맞지 않는 건만 보여 줍니다. 처리한 내용은 메모로 남기세요. 지금은 실제 PG와 연결 전이라 PG 정산 자료를 결제 기록으로 만든 모의 자료와 맞춥니다.">
+      hint="대사는 '우리 주문 기록'과 '결제대행사(PG)가 보낸 정산 자료'를 한 건씩 맞춰 보는 일입니다. 재무 AI가 자동으로 맞추고, 맞지 않는 건만 보여 줍니다. 처리한 내용은 메모로 남기세요. 실제 PG와 연결 전이라, PG 정산 파일을 올린 기간은 그 파일과, 그 밖의 날은 결제 기록으로 만든 모의 자료와 맞춥니다.">
       <ResourceBody res={res}>
         {(r) => {
           const items = r.items
@@ -86,6 +117,8 @@ export function ReconciliationSection({ tick }: { tick: number }) {
             .sort((a, b) => RECON_ORDER.indexOf(a.status) - RECON_ORDER.indexOf(b.status));
           return (
             <div className="space-y-4">
+              {message && <p role="status" className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-ink-700">{message}</p>}
+              <PgSourceLine coverage={r.pg_coverage} onClear={humanTokenSet && !busy ? clearPg : undefined} />
               <div role="group" aria-label="상태로 거르기" className="flex flex-wrap gap-2">
                 {RECON_ORDER.map((s) => {
                   const on = shown.includes(s);
@@ -172,5 +205,21 @@ export function ReconciliationSection({ tick }: { tick: number }) {
         }}
       </ResourceBody>
     </Panel>
+  );
+}
+
+/** 이번 대사가 어느 PG 자료와 맞춘 것인지. 모의 자료와 맞춘 건은 실제 PG 확인이 아니다 */
+function PgSourceLine({ coverage, onClear }: { coverage?: PgCoverage; onClear?: () => void }) {
+  if (!coverage) return null;
+  const n = (v: number) => v.toLocaleString("ko-KR");
+  if (!coverage.uploaded) {
+    return <p className="text-sm text-ink-500">PG 자료: 결제 기록으로 만든 모의 자료 {n(coverage.generated)}건 (올린 PG 정산 파일 없음)</p>;
+  }
+  const days = coverage.periods.map((p) => (p.from === p.to ? p.from : `${p.from} ~ ${p.to}`)).join(", ");
+  return (
+    <p className="flex flex-wrap items-center gap-2 text-sm text-ink-700">
+      <span>PG 자료: 올린 PG 정산 파일 {n(coverage.uploaded)}건 (판매일 {days}){coverage.generated ? ` · 결제 기록으로 만든 모의 자료 ${n(coverage.generated)}건` : ""}</span>
+      {onClear && <button type="button" className="btn-quiet py-0.5 text-sm" onClick={onClear}>올린 PG 자료 빼기</button>}
+    </p>
   );
 }

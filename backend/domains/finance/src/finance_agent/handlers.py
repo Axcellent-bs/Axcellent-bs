@@ -58,7 +58,7 @@ from finance_agent import campaign as cp
 from finance_agent import cashflow, chat_log, closing, tax, team_budget
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
-from finance_agent.books import Books, load_books, off
+from finance_agent.books import Books, load_books, off, set_pg_upload
 from finance_agent.planning_questions import answer_question
 from finance_agent.rules import load_rules
 from finance_agent.schemas import (
@@ -169,6 +169,11 @@ class FinanceRecords:
         self.opinions: list[dict[str, Any]] = []  # 총괄에 낸 의견과 전달 상태
         self.exports: dict[str, dict[str, Any]] = {}  # 자동으로 만든 파일 묶음
         self.bank_imports: list[dict[str, Any]] = []  # 은행 내역 폴더에서 읽은 기록
+        # 올린 PG 정산 파일(`pg_file.py`): 결제 번호 → 줄, 덮는 판매일 기간, 올린 기록
+        self.pg_rows: dict[str, dict[str, Any]] = {}
+        self.pg_periods: list[dict[str, str]] = []
+        self.pg_imports: list[dict[str, Any]] = []
+        self.pg_version = 0  # 올린 자료가 바뀔 때마다 하나씩 (장부 계산 다시 하기)
         self.team_budgets: dict[str, dict[str, Any]] = {}  # YYYY-MM → 재무 담당이 확정한 팀 예산
 
 
@@ -180,6 +185,14 @@ def state() -> State:
     if STATE is None:
         STATE = State()
     return STATE
+
+
+def _pg_upload() -> tuple[object, dict[str, dict[str, Any]], list[dict[str, str]]]:
+    rec = state().records
+    return (id(rec), rec.pg_version), rec.pg_rows, rec.pg_periods
+
+
+set_pg_upload(_pg_upload)
 
 
 def reset_state(sources: Sources | None = None) -> None:
