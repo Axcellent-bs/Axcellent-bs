@@ -94,6 +94,46 @@ def _wire(monkeypatch: pytest.MonkeyPatch, finance: Finance, gate: Gate | None =
     return gate
 
 
+class Routed:
+    """`call_agent` 대역: 데이터는 data, 그 밖(재무)은 finance가 답한다."""
+
+    def __init__(self, finance: Finance, data: Finance) -> None:
+        self.finance, self.data = finance, data
+
+    async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
+        return await (self.data if target == "data" else self.finance)(target, req)
+
+
+RECORD = {
+    "campaign_id": "cmp_1",
+    "period_from": "2026-10-01",
+    "period_to": "2026-10-08",
+    "gmv_krw": 2_000_000,
+    "orders": 40,
+    "measured_gmv_krw": 2_000_000,
+    "measured_orders": 40,
+    "effect_generated_at": "2026-10-08T05:00:00Z",
+    "source": "data.campaign_result",
+}
+# 호출자가 아는 칸만 있다 (기간·매출 효과·출처는 데이터가 안다)
+CALLER = {
+    "campaign_id": "cmp_1",
+    "campaign_name": "가을 세일",
+    "channel": "sns",
+    "spend_krw": 300_000,
+    "coupon_krw": 120_000,
+}
+
+
+def _data(record: dict | None = RECORD, campaign_id: str = "cmp_1") -> Finance:
+    out = {"campaign_id": campaign_id, "view": "finance", "finance_record": record}
+    return Finance(output=out, outcome="completed")
+
+
+def _wire_routed(monkeypatch: pytest.MonkeyPatch, finance: Finance, data: Finance) -> None:
+    monkeypatch.setattr(campaign, "call_agent", Routed(finance, data))
+
+
 async def test_approved_runs_gate_after_review(monkeypatch: pytest.MonkeyPatch) -> None:
     finance = Finance()
     gate = _wire(monkeypatch, finance)
@@ -208,15 +248,113 @@ async def test_invalid_start_input_calls_nothing(
 
 
 async def test_record_result_passes_contract_through(monkeypatch: pytest.MonkeyPatch) -> None:
-    finance = Finance(output={"status": "waiting_revenue"}, outcome="waiting_revenue")
-    _wire(monkeypatch, finance)
-    result = await campaign.record_campaign_result(_req("record_campaign_result", RESULT))
-    assert result.outcome == "waiting_revenue"
+    # 호출자가 기간·출처와 잰 값을 모두 줬으면 데이터를 부르지 않는다
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    data = _data()
+    _wire_routed(monkeypatch, finance, data)
+    full = RESULT | {"gmv_krw": 1_000_000}
+    result = await campaign.record_campaign_result(_req("record_campaign_result", full))
+    assert result.outcome == "recorded"
+    assert data.calls == []
     target, sent = finance.calls[0]
     assert (target, sent.skill) == ("finance", "record_campaign_result")
-    assert "gmv_krw" not in sent.input  # 모르는 판매액은 채우지 않는다
-    assert sent.input["spend_krw"] == 300_000
+    assert sent.input["gmv_krw"] == 1_000_000 and sent.input["spend_krw"] == 300_000
     assert sent.input["coupon_krw"] == 0 and sent.input["source"] == "data.campaign_effect"
+
+
+async def test_record_result_fills_effect_from_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    data = _data()
+    _wire_routed(monkeypatch, finance, data)
+    result = await campaign.record_campaign_result(_req("record_campaign_result", CALLER))
+    assert result.outcome == "recorded"
+    target, asked = data.calls[0]
+    assert (target, asked.skill) == ("data", "campaign_result")
+    assert asked.input == {"campaign_id": "cmp_1", "view": "finance"}
+    sent = finance.calls[0][1].input
+    # 데이터가 아는 값은 그대로, 집행액·이름·채널·쿠폰은 호출자 값
+    assert sent["period_from"] == "2026-10-01" and sent["period_to"] == "2026-10-08"
+    assert (sent["gmv_krw"], sent["orders"]) == (2_000_000, 40)
+    assert (sent["measured_gmv_krw"], sent["measured_orders"]) == (2_000_000, 40)
+    assert sent["effect_generated_at"] == "2026-10-08T05:00:00Z"
+    assert sent["source"] == "data.campaign_result"
+    assert (sent["spend_krw"], sent["coupon_krw"]) == (300_000, 120_000)
+    assert (sent["campaign_name"], sent["channel"]) == ("가을 세일", "sns")
+    assert result.evidence.queries == ["data.campaign_result", "finance.record_campaign_result"]
+
+
+async def test_record_result_keeps_caller_effect_and_fills_period(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 기간만 비었으면 기간만 데이터로 채운다. 호출자가 준 매출 효과·출처는 덮어쓰지 않는다
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    _wire_routed(monkeypatch, finance, _data())
+    caller = CALLER | {"gmv_krw": 5_000, "source": "marketing.manual"}
+    await campaign.record_campaign_result(_req("record_campaign_result", caller))
+    sent = finance.calls[0][1].input
+    assert sent["period_from"] == "2026-10-01" and sent["period_to"] == "2026-10-08"
+    assert sent["gmv_krw"] == 5_000 and sent["source"] == "marketing.manual"
+    assert "orders" not in sent and "measured_gmv_krw" not in sent  # 두 기준을 섞지 않는다
+
+
+async def test_record_result_effect_unknown_leaves_gmv_blank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 측정 중이면 데이터 값이 null이다. 0으로 채우지 않고 재무가 판단을 미룬다
+    unknown = {
+        "campaign_id": "cmp_1",
+        "period_from": "2026-10-01",
+        "period_to": "2026-10-08",
+        "source": "data.campaign_result",
+    }
+    finance = Finance(output={"status": "waiting_revenue"}, outcome="waiting_revenue")
+    _wire_routed(monkeypatch, finance, _data(unknown))
+    result = await campaign.record_campaign_result(_req("record_campaign_result", CALLER))
+    assert result.outcome == "waiting_revenue"
+    sent = finance.calls[0][1].input
+    assert "gmv_krw" not in sent and "orders" not in sent
+
+
+async def test_record_result_no_finance_record_uses_caller_period(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance(output={"status": "waiting_revenue"}, outcome="waiting_revenue")
+    _wire_routed(monkeypatch, finance, _data(None))
+    caller = CALLER | {"period_from": "2026-10-01", "period_to": "2026-10-05", "source": "x.y"}
+    await campaign.record_campaign_result(_req("record_campaign_result", caller))
+    sent = finance.calls[0][1].input
+    assert "gmv_krw" not in sent and sent["source"] == "x.y"
+
+
+async def test_record_result_no_period_anywhere_fails_before_finance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire_routed(monkeypatch, finance, _data(None))
+    result = await campaign.record_campaign_result(_req("record_campaign_result", CALLER))
+    assert (result.status, result.outcome) == (TaskStatus.FAILED, "data_period_missing")
+    assert finance.calls == []
+
+
+@pytest.mark.parametrize(
+    ("data", "outcome"),
+    [
+        (Finance(status=TaskStatus.FAILED, output={}, outcome="unreachable"), "data_unavailable"),
+        (Finance(status=TaskStatus.CANCELED, output={}, outcome="TIMEOUT"), "data_unavailable"),
+        (Finance(output={"x": 1}, outcome="completed"), "data_result_invalid"),
+        (_data(campaign_id="cmp_other"), "data_result_invalid"),
+        (_data(RECORD | {"campaign_id": "cmp_other"}), "data_result_invalid"),
+    ],
+)
+async def test_record_result_data_unusable_never_calls_finance(
+    monkeypatch: pytest.MonkeyPatch, data: Finance, outcome: str
+) -> None:
+    finance = Finance()
+    _wire_routed(monkeypatch, finance, data)
+    result = await campaign.record_campaign_result(_req("record_campaign_result", CALLER))
+    assert result.outcome == outcome
+    assert result.status != TaskStatus.COMPLETED
+    assert finance.calls == []
 
 
 async def test_record_result_keeps_known_gmv(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -230,7 +368,8 @@ async def test_record_result_keeps_known_gmv(monkeypatch: pytest.MonkeyPatch) ->
 
 async def test_record_result_relays_finance_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire(monkeypatch, Finance(status=TaskStatus.FAILED, output={}, outcome="unreachable"))
-    result = await campaign.record_campaign_result(_req("record_campaign_result", RESULT))
+    full = RESULT | {"gmv_krw": 1_000_000}
+    result = await campaign.record_campaign_result(_req("record_campaign_result", full))
     assert (result.status, result.outcome) == (TaskStatus.FAILED, "unreachable")
 
 
@@ -239,7 +378,6 @@ async def test_record_result_relays_finance_failure(monkeypatch: pytest.MonkeyPa
     [
         {"spend_krw": -1},
         {"gmv_krw": -5},
-        {"source": None},
         {"period_from": "2026-10-09"},
         {"period_to": "10/05"},
     ],

@@ -6,6 +6,9 @@
   safety가 정하고, 여기서는 숫자를 만들지 않는다.
 - 결과: 끝난 캠페인의 성과를 재무 `record_campaign_result`에 계약 모델(`CampaignResultInput`)로
   그대로 전달한다. 모르는 숫자(`gmv_krw` 등)는 비워 두고 채우지 않는다.
+  매출 효과 숫자(기간·`gmv_krw`·`orders`·잰 값)를 호출자가 주지 않으면 데이터 `campaign_result`
+  (view=finance)의 `finance_record`를 그대로 가져와 채운다. 집행액·이름·채널·쿠폰은 호출자 값이다.
+  호출자가 준 값은 덮어쓰지 않는다. 데이터에 닿지 못하면 재무를 부르지 않고 실패로 올린다.
 - 쿠폰 지급(`issue_coupon`)은 이 흐름과 별개다. 재무는 쿠폰을 판단하지 않는다.
 - 재무에 닿지 못하면 승인으로 보지 않는다(fail-closed): 시작은 실행하지 않고 멈춘다.
 """
@@ -22,6 +25,7 @@ from ax_agent_template.execute import execute
 from ax_contracts.schemas import (
     AgentRequest,
     AgentResult,
+    CampaignResultOutput,
     Evidence,
     ExecuteDecision,
     HoldReason,
@@ -38,6 +42,8 @@ from ax_contracts.schemas.finance import (
 FINANCE = "finance"
 REVIEW_SKILL = "review_campaign_budget"
 RECORD_SKILL = "record_campaign_result"
+DATA = "data"
+DATA_RESULT_SKILL = "campaign_result"
 START_ACTION = "start_campaign"
 
 
@@ -50,19 +56,59 @@ class StartCampaignInput(AxModel):
     budget_krw: StrictInt = Field(gt=0)
 
 
-class RecordCampaignResultInput(CampaignResultInput):
-    """재무 계약(`CampaignResultInput`)에 날짜 순서만 확인을 더한다. 필드는 그대로다."""
+# 데이터가 재는 매출 효과 값 묶음. 호출자가 하나라도 주면 이 묶음은 데이터로 채우지 않는다
+# (호출자 숫자와 데이터 숫자가 섞이면 gmv와 주문 수가 서로 다른 기준이 된다)
+_MEASURE_FIELDS = (
+    "gmv_krw",
+    "orders",
+    "measured_gmv_krw",
+    "measured_orders",
+    "effect_generated_at",
+)
+_PERIOD_FIELDS = ("period_from", "period_to")
+
+
+class RecordCampaignResultInput(AxModel):
+    """재무 `CampaignResultInput`과 같은 칸. 데이터가 아는 칸(기간·매출 효과·출처)은 비워도 된다."""
+
+    campaign_id: str
+    campaign_name: str
+    channel: str
+    spend_krw: int = Field(ge=0)
+    coupon_krw: int = Field(default=0, ge=0)
+    period_from: str | None = None
+    period_to: str | None = None
+    gmv_krw: int | None = Field(default=None, ge=0)
+    impressions: int | None = Field(default=None, ge=0)
+    clicks: int | None = Field(default=None, ge=0)
+    orders: int | None = Field(default=None, ge=0)
+    source: str | None = None
+    measured_gmv_krw: int | None = None
+    measured_orders: int | None = None
+    effect_generated_at: str | None = None
 
     @model_validator(mode="after")
     def _period_in_order(self) -> RecordCampaignResultInput:
+        if self.period_from is None and self.period_to is None:
+            return self
         try:
-            start = date.fromisoformat(self.period_from)
-            end = date.fromisoformat(self.period_to)
+            start = date.fromisoformat(self.period_from or "")
+            end = date.fromisoformat(self.period_to or "")
         except ValueError as exc:
             raise ValueError("period_from·period_to는 YYYY-MM-DD여야 한다") from exc
         if start > end:
             raise ValueError("period_from이 period_to보다 늦다")
         return self
+
+    @property
+    def has_measurement(self) -> bool:
+        return any(getattr(self, name) is not None for name in _MEASURE_FIELDS)
+
+    @property
+    def needs_data(self) -> bool:
+        """호출자가 주지 않은 칸이 있어 데이터가 아는 값이 필요한가."""
+        missing_period = self.period_from is None or self.period_to is None
+        return missing_period or self.source is None or not self.has_measurement
 
 
 def _now() -> datetime:
@@ -214,14 +260,82 @@ async def start_campaign(request: AgentRequest) -> AgentResult:
     return _gate_outcome(request, decision, review, evidence)
 
 
+def _data_unusable(request: AgentRequest, answer: AgentResult, outcome: str) -> AgentResult:
+    """데이터 답이 없거나 쓸 수 없다. 재무를 부르지 않는다(숫자를 지어내지 않는다)."""
+    return _result(
+        request,
+        answer.status if answer.status != TaskStatus.COMPLETED else TaskStatus.FAILED,
+        outcome=outcome,
+        output={"data_status": answer.status.value, "data_outcome": answer.outcome},
+        reason_code=answer.reason_code,
+        evidence=answer.evidence,
+    )
+
+
+async def _fill_from_data(
+    request: AgentRequest, data: RecordCampaignResultInput
+) -> RecordCampaignResultInput | AgentResult:
+    """호출자가 주지 않은 칸을 데이터 `finance_record`로 채운다. 준 값은 덮어쓰지 않는다."""
+    sent = AgentRequest(
+        meta=request.meta,
+        skill=DATA_RESULT_SKILL,
+        input={"campaign_id": data.campaign_id, "view": "finance"},
+    )
+    answer = await call_agent(DATA, sent)
+    if answer.status != TaskStatus.COMPLETED:
+        return _data_unusable(request, answer, "data_unavailable")
+    try:
+        found = CampaignResultOutput.model_validate(answer.output)
+    except ValidationError:
+        return _data_unusable(request, answer, "data_result_invalid")
+    record = found.finance_record
+    if found.campaign_id != data.campaign_id or (record and record.campaign_id != data.campaign_id):
+        return _data_unusable(request, answer, "data_result_invalid")
+    if record is None:
+        return data
+    fill: dict[str, Any] = {}
+    for name in _PERIOD_FIELDS:
+        if getattr(data, name) is None and getattr(record, name) is not None:
+            fill[name] = getattr(record, name)
+    if not data.has_measurement:
+        for name in _MEASURE_FIELDS:
+            if getattr(record, name) is not None:
+                fill[name] = getattr(record, name)
+        if data.source is None:
+            fill["source"] = record.source
+    try:
+        return RecordCampaignResultInput.model_validate(data.model_dump() | fill)
+    except ValidationError:
+        return _data_unusable(request, answer, "data_result_invalid")
+
+
 async def record_campaign_result(request: AgentRequest) -> AgentResult:
     try:
         data = RecordCampaignResultInput.model_validate(request.input)
     except ValidationError as error:
         return _invalid(request, error)
 
+    queries = [f"finance.{RECORD_SKILL}"]
+    if data.needs_data:
+        filled = await _fill_from_data(request, data)
+        if isinstance(filled, AgentResult):
+            return filled
+        data = filled
+        queries.insert(0, f"data.{DATA_RESULT_SKILL}")
+        if data.period_from is None or data.period_to is None:
+            # 기간을 모르면 측정 기간을 지어내지 않는다
+            return _result(
+                request,
+                TaskStatus.FAILED,
+                outcome="data_period_missing",
+                output={"campaign_id": data.campaign_id},
+            )
+
     # 계약 모델 그대로 보낸다. 값이 없는 선택 필드는 보내지 않아 재무가 0으로 채우지 못한다
-    contract = CampaignResultInput.model_validate(data.model_dump())
+    try:
+        contract = CampaignResultInput.model_validate(data.model_dump())
+    except ValidationError as error:
+        return _invalid(request, error)
     answer = await _ask_finance(request, RECORD_SKILL, contract)
     return _result(
         request,
@@ -231,5 +345,5 @@ async def record_campaign_result(request: AgentRequest) -> AgentResult:
         reason_code=answer.reason_code,
         evidence=answer.evidence
         if answer.evidence.data_summary
-        else _evidence([f"finance.{RECORD_SKILL}"], f"{data.campaign_id} 결과 전달"),
+        else _evidence(queries, f"{data.campaign_id} 결과 전달"),
     )

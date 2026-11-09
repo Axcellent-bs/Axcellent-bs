@@ -147,7 +147,8 @@ async def test_record_result_not_started_passes_through_once(
     out = {"campaign_id": "cmp_1", "status": "not_started"}
     finance = Finance(status=TaskStatus.FAILED, output=out, outcome="not_started")
     _wire_cancel(monkeypatch, finance)
-    result = await campaign.record_campaign_result(_req("record_campaign_result", RESULT))
+    full = RESULT | {"gmv_krw": 1_000_000}
+    result = await campaign.record_campaign_result(_req("record_campaign_result", full))
     assert (result.status, result.outcome, result.output) == (
         TaskStatus.FAILED,
         "not_started",
