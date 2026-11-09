@@ -739,6 +739,16 @@ async def test_record_leave_is_a_for_hr_only(gate: Gate, act) -> None:
     assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
 
 
+@pytest.mark.asyncio
+async def test_cancel_leave_is_a_for_hr_only(gate: Gate, act) -> None:
+    """휴가 취소(`cancel_leave`)는 인사만 A로 실행한다. 다른 부서가 부르면 보류된다."""
+    ok = await gate.execute(act("cancel_leave", "hr", "cancel-ok"))
+    assert (ok.grade, ok.status) == ("A", "executed")
+    for other in ("support", "marketing", "finance"):
+        held = await gate.execute(act("cancel_leave", other, f"cancel-{other}"))
+        assert (held.status, held.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
 # ------------------------------------------------ 캠페인 예산 (재무는 의견만, 금액은 안전 규칙)
 def _campaign(act, key: str, budget: int = 100_000, **over: Any):
     params = {

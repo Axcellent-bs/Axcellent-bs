@@ -315,6 +315,13 @@ action = "record_leave"
 owner = "hr"
 base_grade = "A"
 
+# 휴가 취소. 기록을 지우지 않고 취소한 사람·시각만 남긴다(수정은 취소 + 새 기록). record_leave와 같은 관문(A)이고
+# 요청자는 인사 서비스(owner), 입력은 사람 토큰으로만 들어온다
+[[actions]]
+action = "cancel_leave"
+owner = "hr"
+base_grade = "A"
+
 # 인수인계·담당 변경 (#180). 기록·진행은 A, 확정은 B. 온보딩·발령 요청·퇴직 확정은 hr에서 빠져서
 # (#374, #375) 등록하지 않는다. 미등록은 항상 C(사람 승인)라 다시 쓰려면 그때 새로 등록한다
 [[actions]]
