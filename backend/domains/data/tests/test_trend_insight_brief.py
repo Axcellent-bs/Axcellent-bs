@@ -129,7 +129,10 @@ def _env(tmp_path: Path, extra: str = "", none_max: int = 7) -> dict[str, str]:
     # extra에 같은 키가 있으면 기본 줄을 쓰지 않는다 (TOML은 같은 키 두 번이면 읽기 실패)
     # gate_recent_min = 0: 이 파일의 예전 시험은 숏츠 통계 없이 몫·회사 연결을 본다 (기획에 넘기는
     # 기준의 "최근 N일 같은 형식 수"만 끈다. 기준 자체는 test_promo_video.py에서 본다)
-    base = {"max_insights": "3", "none_max": str(none_max), "gate_recent_min": "0"}
+    # gate_naver_min_format_ratio = 0: 같은 이유로 "검색으로 넘길 때 숏츠 전체 대비 1.0배 이상"
+    # 확인만 끈다 (숏츠 통계가 없어 배수가 없으므로. 이 규칙은 test_promo_video.py에서 본다)
+    base = {"max_insights": "3", "none_max": str(none_max), "gate_recent_min": "0",
+            "gate_naver_min_format_ratio": "0"}  # fmt: skip
     lines = [f"{k} = {v}\n" for k, v in base.items() if f"{k} =" not in extra]
     cfg.write_text("[brief]\n" + "".join(lines) + extra, encoding="utf-8")
     return {"DATA_TREND_CONFIG": str(cfg), "DATA_INSIGHT_BRIEF_DB": str(tmp_path / "brief.db")}
@@ -796,8 +799,11 @@ def test_promo_videos_come_first_and_weak_insights_are_held_back(tmp_path: Path)
     shorts = ShortsStatsOutput(
         status="known", snapshot_at=NOW, median_views_per_hour=100.0, recent_days=3,
         by_format=[
-            ShortsGroup(name="챌린지", count=12, median_views_per_hour=180.0, recent_count=7),
-            ShortsGroup(name="리액션", count=12, median_views_per_hour=160.0, recent_count=2),
+            # 분자 = 하위 주제 숏츠를 뺀 중앙값 (이 입력엔 하위 주제 숏츠가 없어 같은 값)
+            ShortsGroup(name="챌린지", count=12, median_views_per_hour=180.0, recent_count=7,
+                        promo_median_views_per_hour=180.0, promo_velocity_videos=12),
+            ShortsGroup(name="리액션", count=12, median_views_per_hour=160.0, recent_count=2,
+                        promo_median_views_per_hour=160.0, promo_velocity_videos=12),
         ],
     )  # fmt: skip
     env = _env(tmp_path)

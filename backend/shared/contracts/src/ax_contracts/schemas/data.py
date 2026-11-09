@@ -1389,6 +1389,13 @@ class ShortsGroup(AxModel):
     # 세지 않고 그 수를 recent_unknown에 둔다
     recent_count: int | None = Field(default=None, ge=0)
     recent_unknown: int | None = Field(default=None, ge=0)
+    # 아래는 예전 응답은 없다. 형식 그룹만: 하위 주제 숏츠를 뺀 이 형식 숏츠의 시간당 조회 중앙값과
+    # 그 표본 수 ("숏츠 전체 대비" 배수의 분자, 분모 ShortsStatsOutput.median_views_per_hour와 같은
+    # 모집단). 표본이 [shorts] min_sample 미만이면 None + promo_reason.
+    # recent_count·recent_unknown도 같은 모집단으로 센다
+    promo_median_views_per_hour: float | None = None
+    promo_velocity_videos: int = Field(default=0, ge=0)
+    promo_reason: str | None = None
 
 
 class ShortsSearch(AxModel):
@@ -1433,10 +1440,14 @@ class ShortsStatsOutput(AxModel):
     # 표본에 더한 수 (같은 영상은 한 번만, 추가 검색 없음)
     subtopic_shorts: int = Field(default=0, ge=0)
     # 아래는 예전 응답은 없다. 전체 숏츠 시간당 조회 증가 중앙값과 그 표본 수
-    # (형식별 "숏츠 전체 대비" 배수의 분모), 형식 그룹 recent_count를 센 기간(게시 후 일)
+    # (형식별 "숏츠 전체 대비" 배수의 분모), 형식 그룹 recent_count를 센 기간(게시 후 일).
+    # 하위 주제 숏츠(subtopic_shorts)는 넣지 않는다 (형식 분자 promo_median_views_per_hour와 같은
+    # 모집단). 표본이 [shorts] min_sample 미만이면 중앙값은 None이고 이유는
+    # median_views_per_hour_reason
     median_views_per_hour: float | None = None
     median_views_per_hour_count: int = Field(default=0, ge=0)
     recent_days: int | None = Field(default=None, ge=1)
+    median_views_per_hour_reason: str | None = None
 
 
 # --------------------------------------------------------------- video_explorer (영상 탐색)
@@ -2053,8 +2064,21 @@ class TrendInsight(AxModel):
     promo_recent_count: int | None = Field(default=None, ge=0)
     promo_recent_days: int | None = Field(default=None, ge=1)
     promo_recent_unknown: int | None = Field(default=None, ge=0)
+    # promo: 분자·분모에서 뺀 하위 주제 숏츠 수 (같은 모집단으로 맞추려고)
+    promo_subtopic_excluded: int | None = Field(default=None, ge=0)
     # 기획에 넘기는 기준을 통과한 근거 한 줄 (기준을 보는 인사이트만)
     gate_reason: str | None = None
+
+
+class BriefGate(AxModel):
+    """기획에 넘기는 기준 값 (브리프 v6, 설정·환경 변수 그대로)."""
+
+    vs_all_ratio: float  # 숏츠 전체 대비 배수 이상이면 통과
+    # 또는 네이버 검색 배수 이상 그리고 숏츠 전체 대비 naver_min_format_ratio 이상
+    naver_ratio: float
+    naver_min_format_ratio: float
+    recent_min: int  # 그리고 최근 N일 게시된 같은 형식 숏츠 수 이상
+    max_ratio: float  # 이보다 큰 배수는 근거로 치지 않음
 
 
 class HeldBack(AxModel):
@@ -2191,6 +2215,9 @@ class TrendInsightBriefOutput(AxModel):
     detect_latest_at: UtcDatetime | None = None
     # 아래는 예전 응답은 없다 (v6). 기준(트렌드 근거)을 넘지 못해 기획에 넘기지 않은 것
     held_back: list[HeldBack] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 이 판에 쓴 기획에 넘기는 기준 값
+    # (화면 칩이 지표마다 기준을 넘었는지 본다)
+    gate: BriefGate | None = None
 
 
 BriefTrigger = Literal["auto", "manual"]

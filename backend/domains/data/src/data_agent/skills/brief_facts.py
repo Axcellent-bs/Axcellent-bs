@@ -107,6 +107,10 @@ def insight_facts(i: TrendInsight) -> list[DataFact]:
         f.add(f"게시 시각 모름으로 제외한 같은 형식 숏츠 (최근 {days}일 수에 안 셈)",
               i.promo_recent_unknown, "개", "shorts_stats",
               period=_at(i.shorts_format_at))  # fmt: skip
+    if i.promo_subtopic_excluded:
+        f.add(f"하위 주제 숏츠 {i.promo_subtopic_excluded}개 제외 (숏츠 전체 대비 분자·분모 모두)",
+              i.promo_subtopic_excluded, "개", "shorts_stats",
+              period=_at(i.shorts_format_at))  # fmt: skip
     f.add("목표 참고값 (숏츠 조회 중앙값)", i.target_views_reference, "회", "shorts_stats")
     f.add("순서 점수", i.score, "점", "code")
     return f.rows

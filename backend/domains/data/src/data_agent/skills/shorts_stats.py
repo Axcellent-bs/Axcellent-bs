@@ -502,6 +502,26 @@ def _screen_video(s: _Short) -> ShortsVideo:
     )
 
 
+SUBTOPIC = "subtopic"  # 하위 주제 검색(domain_subtopics)으로 모은 숏츠의 source
+
+
+def _promo_median(speeds: Sequence[float], config: ShortsConfig) -> tuple[float | None, str | None]:
+    """홍보 영상 근거용 시간당 조회 중앙값. 표본이 min_sample 미만이면 (None, 표본 부족)."""
+    if len(speeds) < config.min_sample:
+        return None, f"표본 부족 ({len(speeds)}개, 기준 {config.min_sample}개)"
+    return round(statistics.median(speeds), 1), None
+
+
+def overall_promo_median(
+    items: Sequence[_Short], config: ShortsConfig
+) -> tuple[float | None, str | None, int]:
+    """숏츠 전체 대비 배수의 분모: 하위 주제 숏츠를 뺀 시간당 조회 중앙값 (값, 이유, 표본 수)."""
+    speeds = [s.views_per_hour for s in items
+              if s.views_per_hour is not None and s.source != SUBTOPIC]  # fmt: skip
+    value, reason = _promo_median(speeds, config)
+    return value, reason, len(speeds)
+
+
 def group_stats(
     shorts: Sequence[_Short], key: str, names: Sequence[str], config: ShortsConfig
 ) -> list[ShortsGroup]:
@@ -526,11 +546,22 @@ def group_stats(
                 f"측정 중 {measuring}개 (다시 본 간격 {config.min_recheck_minutes}분 미만)"
             )
         velocity_reason = ", ".join(notes) or None
-        # 형식 그룹만: 게시된 지 recent_days일 안인 수. 게시 시각을 모르는 숏츠는 세지 않고
-        # 그 수를 따로 둔다 (recent_unknown)
-        known_pub = [s for s in mine if "recent" in s.extra]
+        # 형식 그룹만 (홍보 영상 근거): 하위 주제 숏츠를 뺀 모집단(분모 전체 중앙값과 같음).
+        # 게시된 지 recent_days일 안인 수, 게시 시각을 모르는 수, 시간당 조회 중앙값
+        # (표본 부족이면 None)
+        main = [s for s in mine if s.source != SUBTOPIC]
+        known_pub = [s for s in main if "recent" in s.extra]
         recent = sum(1 for s in known_pub if s.extra["recent"]) if key == "format" else None
-        recent_unknown = len(mine) - len(known_pub) if key == "format" else None
+        recent_unknown = len(main) - len(known_pub) if key == "format" else None
+        main_speeds = [s.views_per_hour for s in main if s.views_per_hour is not None]
+        promo_median, promo_reason = _promo_median(main_speeds, config) if key == "format" else (
+            None, None)  # fmt: skip
+        promo = {
+            "recent_count": recent, "recent_unknown": recent_unknown,
+            "promo_median_views_per_hour": promo_median,
+            "promo_velocity_videos": len(main_speeds) if key == "format" else 0,
+            "promo_reason": promo_reason,
+        }  # fmt: skip
         top = sorted((s for s in mine if s.views is not None), key=lambda s: -(s.views or 0))
         # 카테고리 그룹만: 화면 카드 (조회수 순, 조회수를 모르는 숏츠는 뒤). 표본 부족 칸도 준다
         screen = (
@@ -559,8 +590,7 @@ def group_stats(
                     velocity_measuring=measuring,
                     formats=formats,
                     videos=screen,
-                    recent_count=recent,
-                    recent_unknown=recent_unknown,
+                    **promo,
                 )
             )
             continue
@@ -579,8 +609,7 @@ def group_stats(
                 median_views_per_hour=round(statistics.median(speeds), 1) if speeds else None,
                 top=[_video(s) for s in top[: config.top_videos]],
                 videos=screen,
-                recent_count=recent,
-                recent_unknown=recent_unknown,
+                **promo,
             )
         )
     # 대표값은 중앙값 (몇 개의 큰 영상이 평균을 끌어올리는 것을 막는다). 평균은 보조 칸
@@ -807,10 +836,10 @@ async def _run(
     all_views = [s.views for s in items if s.views is not None]
     out.median_views = round(statistics.median(all_views), 1) if all_views else None
     out.median_views_count = len(all_views)
-    # 전체 숏츠 시간당 조회 증가 중앙값 (형식별 시간당 조회 배수의 분모)
-    all_speeds = [s.views_per_hour for s in items if s.views_per_hour is not None]
-    out.median_views_per_hour = round(statistics.median(all_speeds), 1) if all_speeds else None
-    out.median_views_per_hour_count = len(all_speeds)
+    # 전체 숏츠 시간당 조회 증가 중앙값 ("숏츠 전체 대비" 배수의 분모). 형식 분자
+    # (promo_median_views_per_hour)와 같은 모집단: 하위 주제 숏츠는 뺀다(빠진 수는 subtopic_shorts)
+    (out.median_views_per_hour, out.median_views_per_hour_reason,
+     out.median_views_per_hour_count) = overall_promo_median(items, config)  # fmt: skip
     out.status = "known" if items else "unknown"
     if not items:
         out.reason = f"길이 {config.max_seconds}초 이하인 숏츠가 없음"

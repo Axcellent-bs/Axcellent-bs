@@ -76,7 +76,10 @@ def _run(case: dict, tmp_path: Path) -> dict | None:
     gate = pv.Gate()
     if case["kind"] == "trend":
         x = case["input"]
+        # 시험 입력만 고침(#914 2번째 수정): "숏츠 전체 대비" 분자가 하위 주제 숏츠를 뺀
+        # promo_median_views_per_hour로 바뀌어 같은 값을 그 칸에도 준다 (케이스·정답은 그대로)
         groups = [ShortsGroup(name=x["fmt"], count=12, median_views_per_hour=100.0,
+                              promo_median_views_per_hour=100.0, promo_velocity_videos=12,
                               recent_count=9)] if x["fmt"] else []  # fmt: skip
         shorts = ShortsStatsOutput(status="known", by_format=groups,
                                    median_views_per_hour=make.BASE_VPH, recent_days=3)  # fmt: skip
@@ -91,6 +94,7 @@ def _run(case: dict, tmp_path: Path) -> dict | None:
     shorts = ShortsStatsOutput(
         status="known", median_views_per_hour=make.BASE_VPH, recent_days=3,
         by_format=[ShortsGroup(name=x["format"], count=12, median_views_per_hour=x["vph"],
+                               promo_median_views_per_hour=x["vph"], promo_velocity_videos=12,
                                recent_count=x["recent"])],
     )  # fmt: skip
     promos, held = pv.build_promos(pv.format_signals(shorts), [], gate, insight_id=lambda t: t)
