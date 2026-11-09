@@ -219,7 +219,7 @@ export default function AgentOffice() {
         <section aria-label="부서 AI 사무실" className="card flex min-w-0 shrink-0 flex-col gap-3 p-4 xl:flex-1">
           <div className="flex items-center gap-2">
             <h2 className="card-title">부서 AI 사무실</h2>
-            <span className="text-xs text-ink-500">8자리 · 총괄 포함</span>
+            <span className="text-xs text-ink-500">9자리 · 총괄 포함</span>
             <span className={`chip ml-auto ${STATUS_LOOK[view.status]}`}>
               <span className={`h-1.5 w-1.5 rounded-full bg-current ${view.status === "alert" ? "animate-pulse" : ""}`} aria-hidden="true" />
               {liveReady ? statusText : "불러오는 중…"}
