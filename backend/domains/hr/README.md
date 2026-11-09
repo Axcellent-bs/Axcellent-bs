@@ -28,6 +28,7 @@ Agent Card: `agent-card.json` (`/.well-known/agent-card.json`으로 공개). 입
 | `list_org_changes` | 조회 | 조직 변동 기록 목록(초안·확정·반려)과 명부 등록 상태 | dashboard-api |
 | `set_org_roster_complete` | A | 인사 담당자가 "전 직원 등록 완료"를 표시(확정 명부가 전체 직원 수일 때만). 표시해야 `team_headcount`가 확정 기록으로 센다 | dashboard-api |
 | `record_leave` | A | 휴가 기간(서울 날짜)만 기록한다. 사유·종류는 받지 않는다. 사람 토큰으로 들어온 요청만 | dashboard-api |
+| `cancel_leave` | A | 휴가 기록을 지우지 않고 취소한 사람·시각만 남긴다(수정은 취소 + 새 기록). 이미 취소된 것은 성공(`duplicate`), 없는 ID는 거절. 사람 토큰으로 들어온 요청만 | dashboard-api |
 | `get_presence` | 조회 | 교대 명부와 휴가를 합친 상태(근무 중·교대 외·휴가 중). 휴가 기간·입력자는 상세 요청일 때만 | dashboard-api |
 | `start_handover` | A | 인수인계 초안, 빈 자리 질문, 완성도(코드 계산) | orchestrator |
 | `answer_handover_question` | A | 인계자 답변 반영, 같은 답은 한 번만 | orchestrator·dashboard-api |
@@ -71,7 +72,7 @@ Agent Card: `agent-card.json` (`/.well-known/agent-card.json`으로 공개). 입
 
 ## 근무 상태·휴가 (`roster/presence.py`)
 
-- 휴가는 `leaves` 표에 기간만 저장한다(사유·종류·출퇴근 시각 없음). 감사 로그에는 휴가 ID만 남는다.
+- 휴가는 `leaves` 표에 기간만 저장한다(사유·종류·출퇴근 시각 없음). 취소는 지우지 않고 `cancelled_by`·`cancelled_at`만 남기며, 취소한 기록은 상태 계산과 같은 기간 중복 확인에서 뺀다. 감사 로그에는 휴가 ID만 남는다.
 - 상태 계산: 휴가 기간(서울 날짜, 양 끝 포함)이면 휴가 중, 아니면 교대 안이면 근무 중, 아니면 교대 외.
 - 보유 기간은 3년(`HR_LEAVE_RETENTION_DAYS`, 늘리는 것만). 지금은 지울 건수만 센다
   (`roster/leave_retention.py`). 실제 삭제는 안전 관문에 새 액션을 등록한 뒤 켠다.

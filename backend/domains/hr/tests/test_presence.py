@@ -165,3 +165,79 @@ def test_보유기간은_3년이고_지울_건수만_센다(client, svc, monkeyp
 def test_보유_일수는_늘리는_것만_받는다(monkeypatch, raw: str, days: int) -> None:
     monkeypatch.setenv("HR_LEAVE_RETENTION_DAYS", raw)
     assert leave_retention.retention_days() == days
+
+
+# ---- 취소 (cancel_leave) ---------------------------------------------------------------
+
+
+def cancel(client, leave_id, by="emp_hr", token="mock:dashboard-api", key=None) -> dict:
+    inp = {"leave_id": leave_id, "cancelled_by": by}
+    return client.post("/a2a", json=_body("cancel_leave", inp, token, key)).json()
+
+
+def test_취소하면_휴가_중이_아니게_되고_기록은_남는다(client, svc) -> None:
+    made = leave(client, "emp_01", "2026-10-22", "2026-10-23")
+    assert status_of(presence(client), "emp_01") == "on_leave"
+    res = cancel(client, made["output"]["leave"]["leave_id"], by="emp_boss")
+    assert (res["status"], res["outcome"]) == ("completed", "cancelled")
+    gone = res["output"]["leave"]
+    assert gone["cancelled_by"] == "emp_boss" and gone["cancelled_at"]
+    assert status_of(presence(client), "emp_01") == "working"  # 교대 명부 상태로 돌아온다
+    assert presence(client, details=True)["leaves"] == []  # 취소한 기록은 상세에서도 뺀다
+    assert svc.store.one("SELECT COUNT(*) AS n FROM leaves")["n"] == 1  # 지우지 않는다
+
+
+def test_취소한_뒤_같은_기간을_다시_넣으면_새_기록이_생긴다(client, svc) -> None:
+    first = leave(client, "emp_01", "2026-10-22", "2026-10-23")["output"]["leave"]["leave_id"]
+    cancel(client, first)
+    again = leave(client, "emp_01", "2026-10-22", "2026-10-23")
+    assert again["outcome"] == "recorded"  # 취소된 기록이 돌아오지 않는다
+    new_id = again["output"]["leave"]["leave_id"]
+    assert new_id != first and again["output"]["leave"]["cancelled_at"] is None
+    assert status_of(presence(client), "emp_01") == "on_leave"
+    assert svc.store.one("SELECT COUNT(*) AS n FROM leaves")["n"] == 2  # 이력이 그대로 남는다
+    # 취소하지 않은 같은 기간을 또 넣으면 여전히 중복이다
+    assert leave(client, "emp_01", "2026-10-22", "2026-10-23")["outcome"] == "duplicate"
+
+
+def test_이미_취소된_기록을_다시_취소하면_성공으로_같은_기록을_돌려준다(client) -> None:
+    made = leave(client)["output"]["leave"]["leave_id"]
+    first = cancel(client, made, by="emp_a")
+    again = cancel(client, made, by="emp_b")
+    assert (again["status"], again["outcome"]) == ("completed", "duplicate")
+    assert again["output"]["leave"]["cancelled_by"] == "emp_a"  # 처음 취소한 사람이 그대로다
+    assert again["output"]["leave"]["cancelled_at"] == first["output"]["leave"]["cancelled_at"]
+
+
+def test_없는_ID는_거절하고_사유_칸은_받지_않는다(client, svc) -> None:
+    assert cancel(client, "lv_nope")["outcome"] == "UNKNOWN_LEAVE"
+    made = leave(client)["output"]["leave"]["leave_id"]
+    body = _body("cancel_leave", {"leave_id": made, "cancelled_by": "x", "reason": "실수"})
+    res = client.post("/a2a", json=body).json()
+    assert res["status"] in ("failed", "rejected")
+    body = _body("cancel_leave", {"leave_id": made, "cancelled_by": "x"})
+    body["meta"]["idempotency_key"] = None
+    assert client.post("/a2a", json=body).json()["status"] in ("failed", "rejected")
+    assert svc.store.one("SELECT cancelled_at FROM leaves")["cancelled_at"] is None
+
+
+def test_취소도_인사가_정한_요청자만_부를_수_있다(client, svc) -> None:
+    made = leave(client)["output"]["leave"]["leave_id"]
+    for token in ("mock:orchestrator", "mock:finance", "mock:support", "mock:stranger"):
+        res = cancel(client, made, token=token)
+        assert (res["status"], res["outcome"]) == ("rejected", "FORBIDDEN_SKILL")
+    assert svc.store.one("SELECT cancelled_at FROM leaves")["cancelled_at"] is None
+
+
+def test_취소_감사_기록에는_휴가_ID만_남는다(client, svc) -> None:
+    made = leave(client, "emp_05", "2026-11-01", "2026-11-03")["output"]["leave"]["leave_id"]
+    cancel(client, made, by="emp_boss")
+    text = str(svc.store.all("SELECT * FROM audit_logs"))
+    assert "leave.cancelled" in text
+    assert "emp_05" not in text and "emp_boss" not in text and "2026-11-03" not in text
+
+
+def test_취소해도_보유기간_건수는_그대로_센다(client, svc) -> None:
+    made = leave(client, "emp_01", "2022-01-01", "2022-01-05")["output"]["leave"]["leave_id"]
+    cancel(client, made)
+    assert leave_retention.expired_count(svc) == 1

@@ -80,6 +80,10 @@ async def record_leave(request: AgentRequest) -> AgentResult:
     return await presence.record_leave(get_services(), request)
 
 
+async def cancel_leave(request: AgentRequest) -> AgentResult:
+    return await presence.cancel_leave(get_services(), request)
+
+
 async def get_presence(request: AgentRequest) -> AgentResult:
     return await presence.get_presence(get_services(), request)
 
@@ -147,6 +151,7 @@ _HANDLERS = {
     "list_org_changes": list_org_changes,
     "set_org_roster_complete": set_org_roster_complete,
     "record_leave": record_leave,
+    "cancel_leave": cancel_leave,
     "get_presence": get_presence,
     "find_org_change_basis": find_org_change_basis,
     "parse_org_change_text": parse_org_change_text,
