@@ -159,6 +159,7 @@ support 출력은 `claim_mapping.py`에서 화면 모델로 바꾼다 (값을 �
 | --- | --- |
 | `GET /api/dashboard/presence?area=` | 담당별 상태 코드(`working`·`off_shift`·`on_leave`). 모두에게 보인다. 사람 토큰이 있는 요청에만 휴가 기간·입력자(`leaves`)를 담는다 |
 | `POST /api/dashboard/presence/leaves` | 휴가 기간 기록(사람 토큰 필요, 입력자는 토큰의 이름). 사유·종류는 받지 않는다(보내면 422) |
+| `POST /api/dashboard/presence/leaves/{leave_id}/cancel` | 휴가 취소(사람 토큰 필요). 지우지 않고 취소한 사람(토큰의 이름)·시각만 남긴다. 이미 취소된 기록은 성공, 없는 ID는 404. 수정은 취소 + 새 기록 |
 
 사람별 로그인이 생기기 전까지 "관리자"는 사람 토큰을 가진 요청이다. 토큰이 공용이면 누구 것인지 가려지지 않으므로, 사람별 로그인이 들어오면 상세·기록을 인사 지정자로 좁힌다.
 

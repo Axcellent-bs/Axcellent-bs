@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from ax_contracts.schemas.hr import (
     AnswerHandoverQuestionOutput,
     AuditEntry,
+    CancelLeaveOutput,
     ChangeStatus,
     CheckPlanInput,
     CheckPlanOutput,
@@ -1234,6 +1235,22 @@ async def record_leave(body: LeaveBody, request: Request) -> dict:
         target=f"leave:{body.member_id}:{body.start_date}:{body.end_date}",
     )
     return ok(RecordLeaveOutput.model_validate(out))
+
+
+@router.post("/presence/leaves/{leave_id}/cancel")
+async def cancel_leave(request: Request, leave_id: str = Path(min_length=1, max_length=64)) -> dict:
+    """휴가 기록 취소(사람 토큰 필요). 지우지 않고 취소한 사람(토큰의 이름)·시각만 남긴다.
+
+    이미 취소된 기록은 성공으로 처음 취소 그대로 돌려주고, 없는 ID는 404다. 수정은 취소 + 새 기록.
+    """
+    _presence_on()
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await hr_client.call(
+        "cancel_leave",
+        {"leave_id": leave_id, "cancelled_by": who},
+        target=f"leave-cancel:{leave_id}",
+    )
+    return ok(CancelLeaveOutput.model_validate(out))
 
 
 @router.get("/org-headcount")
