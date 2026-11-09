@@ -527,11 +527,15 @@ function commSentence(what: string, outcome: string, label: string, from?: strin
 }
 
 /** 소통 줄을 방별 말풍선으로. 총괄 기록과 겹치는 줄은 빼고, 안전 관문과 겹치는 줄은 `dupOf`를 단다 */
+// 대화 창구 읽기(목록·상세)는 화면이 다시 읽을 때마다 남아서 기록에서 뺀다. 원본 공통 로그는 그대로
+export const CHAT_READ_SKILL = /_chat_(list|get)$/;
+
 export function commItems(comms: CommLine[], incidents: OrchIncident[], executions: ExecutionRecord[]) {
   const byId = new Map(incidents.map((i) => [i.context_id, i]));
   const ids = new Set(byId.keys());
   const safetyIds = new Set(executions.map((e) => e.execution_id));
   return comms
+    .filter((line) => !CHAT_READ_SKILL.test(line.skill ?? ""))
     .map((line) => ({ line, room: commRoom(line, ids) }))
     .filter(({ line, room }) => !coveredByIncident(line, byId.get(room)))
     .map(({ line, room }) => commItem(line, room, safetyIds));
