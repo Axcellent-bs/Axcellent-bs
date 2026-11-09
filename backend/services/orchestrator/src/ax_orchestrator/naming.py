@@ -31,7 +31,7 @@ METRIC_KO = {
 }
 # 부서 코드 → 사람이 읽는 이름 (결정 카드·화면 문장에 쓴다)
 DEPT_KO = {
-    "infra": "장애 대응 AI",
+    "infra": "인프라 AI",
     "data": "데이터분석 AI",
     "planning": "기획 AI",
     "dev": "개발 AI",

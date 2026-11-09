@@ -87,7 +87,7 @@ const REASON_CODE: Record<string, string> = {
   human_input: "사람 확인이 필요함", cause_confident: "원인이 충분히 뚜렷함", undetermined: "원인을 특정하지 못함",
 };
 const DEPT_NAME: Record<string, string> = {
-  infra: "장애 대응 AI", data: "데이터분석 AI", planning: "기획 AI", dev: "개발 AI", marketing: "마케팅 AI",
+  infra: "인프라 AI", data: "데이터분석 AI", planning: "기획 AI", dev: "개발 AI", marketing: "마케팅 AI",
   support: "고객지원 AI", finance: "재무 AI", hr: "인사 AI", orchestrator: "총괄 AI",
 };
 // 글 속 영어 지표·구성요소 이름과 문의 처리 결과 코드를 한국어로 (긴 이름부터 바꾼다)

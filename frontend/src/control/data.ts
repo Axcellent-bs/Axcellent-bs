@@ -65,14 +65,14 @@ export const QUALITY: ServiceQuality[] = [
   { name: '리뷰·지식', autoRate: 91, approvals: 2, blocked: 0, rollbacks: 0, reported: 0 },
   { name: '공지·쿠폰', autoRate: 73, approvals: 5, blocked: 0, rollbacks: 1, reported: 0 },
   { name: '재무 관리', autoRate: 58, approvals: 7, blocked: 0, rollbacks: 0, reported: 0 },
-  { name: '장애 대응', autoRate: 77, approvals: 3, blocked: 0, rollbacks: 0, reported: 1 },
+  { name: '인프라 AI', autoRate: 77, approvals: 3, blocked: 0, rollbacks: 0, reported: 1 },
   { name: '개발·배포', autoRate: 64, approvals: 4, blocked: 0, rollbacks: 0, reported: 0 },
 ]
 
 export type ServiceCost = { name: string; calls: number; costKrw: number; model: string }
 export const COST_BY_SERVICE: ServiceCost[] = [
   { name: '고객 문의', calls: 4210, costKrw: 21800, model: '작은 모델 + 어려운 건만 큰 모델' },
-  { name: '장애 대응', calls: 1320, costKrw: 17400, model: '큰 모델' },
+  { name: '인프라 AI', calls: 1320, costKrw: 17400, model: '큰 모델' },
   { name: '클레임·보상', calls: 1580, costKrw: 11900, model: '작은 모델' },
   { name: '개발·배포', calls: 960, costKrw: 10600, model: '큰 모델' },
   { name: '공지·쿠폰', calls: 1240, costKrw: 6100, model: '작은 모델' },
