@@ -132,17 +132,18 @@ class BriefConfig:
     # 연결 없음(none, 분류 대기 포함)은 최대 이만큼
     domain_min: int = 3
     none_max: int = 2
-    # 기획에 넘기는 기준 (근거 없으면 안 넘김, promo_video.judge): 같은 형식 숏츠 시간당 조회 배수
-    # 이상 또는 네이버 검색 배수 이상, 그리고 최근 N일 새로 잡힌 같은 형식 숏츠 수 이상.
+    # 기획에 넘기는 기준 (근거 없으면 안 넘김, promo_video.judge): 숏츠 전체 대비 배수(이 형식
+    # 1시간 조회 중앙값 ÷ 전체 숏츠 1시간 조회 중앙값) 이상 또는 네이버 검색 배수 이상, 그리고
+    # 최근 N일 안에 게시된 같은 형식 숏츠 수 이상 (게시 시각을 모르는 숏츠는 세지 않음).
     # `[brief]` 설정 또는 환경 변수 DATA_BRIEF_GATE_* 로 바꾼다 (환경 변수가 이긴다)
-    gate_views_ratio: float = 1.5
+    gate_format_vs_all_ratio: float = 1.5
     gate_naver_ratio: float = 1.3
     gate_recent_min: int = 5
     promo_max: int = 3  # 홍보 영상 인사이트 최대 수
 
 
 GATE_ENV = {
-    "gate_views_ratio": "DATA_BRIEF_GATE_VIEWS_RATIO",
+    "gate_format_vs_all_ratio": "DATA_BRIEF_GATE_FORMAT_VS_ALL_RATIO",
     "gate_naver_ratio": "DATA_BRIEF_GATE_NAVER_RATIO",
     "gate_recent_min": "DATA_BRIEF_GATE_RECENT_MIN",
     "promo_max": "DATA_BRIEF_PROMO_MAX",
@@ -150,7 +151,7 @@ GATE_ENV = {
 
 
 def gate_of(config: BriefConfig) -> Gate:
-    return Gate(config.gate_views_ratio, config.gate_naver_ratio, config.gate_recent_min,
+    return Gate(config.gate_format_vs_all_ratio, config.gate_naver_ratio, config.gate_recent_min,
                 config.promo_max, config.highlight_max_ratio)  # fmt: skip
 
 

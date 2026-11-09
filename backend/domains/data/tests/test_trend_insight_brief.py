@@ -820,4 +820,5 @@ def test_promo_videos_come_first_and_weak_insights_are_held_back(tmp_path: Path)
     # 기획이 읽는 목록(참고용 아님)에는 기준을 넘은 것만
     assert all(i.kind == "promo" or i.gate_reason for i in out.insights if not i.reference_only)
     facts = {f.label for f in out.facts if f.about == first.insight_id}
-    assert "같은 형식 숏츠 시간당 조회 배수 (전체 숏츠 중앙값 대비)" in facts
+    assert "이 형식 1시간 조회 중앙값, 숏츠 전체 대비" in facts
+    assert "최근 3일 게시된 같은 형식 숏츠" in facts

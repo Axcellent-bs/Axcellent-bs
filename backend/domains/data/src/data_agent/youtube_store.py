@@ -430,8 +430,11 @@ def lookback_hours(env: Mapping[str, str] | None = None) -> float:
         return DEFAULT_LOOKBACK_HOURS
 
 
-def first_collected(path: str | Path, ids: Sequence[str]) -> dict[str, datetime]:
-    """영상 id → 스냅샷에 처음 들어온 수집 시각 (UTC). 파일이 없으면 빈 목록. 읽기 전용."""
+def published_times(path: str | Path, ids: Sequence[str]) -> dict[str, datetime]:
+    """영상 id → 게시 시각 (스냅샷 표 published_at = snippet.publishedAt, UTC).
+
+    파일이 없으면 빈 목록. 읽기 전용.
+    """
     if not ids or (str(path) != ":memory:" and not Path(path).is_file()):
         return {}
     conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
@@ -441,7 +444,7 @@ def first_collected(path: str | Path, ids: Sequence[str]) -> dict[str, datetime]
             part = list(ids[i : i + 500])
             marks = ",".join("?" * len(part))
             for vid, at in conn.execute(
-                f"SELECT video_id, MIN(collected_at) FROM snapshots WHERE video_id IN ({marks})"  # noqa: S608
+                f"SELECT video_id, MAX(published_at) FROM snapshots WHERE video_id IN ({marks})"  # noqa: S608
                 " GROUP BY video_id",
                 part,
             ):

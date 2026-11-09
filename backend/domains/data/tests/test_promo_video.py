@@ -43,50 +43,63 @@ def _trend(topic: str, *, fmt: str | None = None, naver: float | None = None,
 
 
 def test_gate_passes_rising_views_with_enough_new_shorts() -> None:
-    ok, why = pv.judge(GATE, views_ratio=1.6, search_ratio=None, recent=6, recent_days=3)
-    assert ok and why == "같은 형식 숏츠 시간당 조회 1.6배 · 최근 3일 같은 형식 숏츠 6개"
+    ok, why = pv.judge(GATE, vs_all_ratio=1.6, search_ratio=None, recent=6, recent_days=3)
+    assert ok
+    assert why == "이 형식 1시간 조회가 숏츠 전체 대비 1.6배 · 최근 3일 게시된 같은 형식 숏츠 6개"
+    assert "평소" not in why  # 숏츠 전체 대비 값이다 (지난 기간 대비가 아님)
 
 
 def test_gate_naver_alone_is_enough_when_new_shorts_are_there() -> None:
-    ok, why = pv.judge(GATE, views_ratio=1.1, search_ratio=1.4, recent=5, recent_days=3)
+    ok, why = pv.judge(GATE, vs_all_ratio=1.1, search_ratio=1.4, recent=5, recent_days=3)
     assert ok and "네이버 검색이 평소의 1.4배" in why
 
 
 def test_gate_holds_back_a_one_off_spike() -> None:
-    ok, why = pv.judge(GATE, views_ratio=1.6, search_ratio=None, recent=2, recent_days=3)
+    ok, why = pv.judge(GATE, vs_all_ratio=1.6, search_ratio=None, recent=2, recent_days=3)
     assert not ok and why == "최근 3일 같은 형식 숏츠 2개 (기준 5개, 반짝)"
+
+
+def test_gate_says_how_many_shorts_had_no_publish_time() -> None:
+    ok, why = pv.judge(GATE, vs_all_ratio=1.6, search_ratio=None, recent=2, recent_days=3,
+                       recent_unknown=3)  # fmt: skip
+    assert not ok and why == "최근 3일 같은 형식 숏츠 2개 (기준 5개, 게시 시각 모름 3개 제외)"
+    ok, why = pv.judge(GATE, vs_all_ratio=1.6, search_ratio=None, recent=6, recent_days=3,
+                       recent_unknown=3)  # fmt: skip
+    assert ok and why.endswith("최근 3일 게시된 같은 형식 숏츠 6개 (게시 시각 모름 3개 제외)")
 
 
 def test_gate_falling_search_is_not_evidence() -> None:
     label = "검색이 작년 같은 달의"
-    ok, why = pv.judge(GATE, views_ratio=None, search_ratio=0.8, search_label=label,
+    ok, why = pv.judge(GATE, vs_all_ratio=None, search_ratio=0.8, search_label=label,
                        recent=9, recent_days=3)  # fmt: skip
     assert not ok and why == "검색이 작년 같은 달의 0.8배(줄어듦)"
 
 
 def test_gate_price_only_and_not_sold() -> None:
-    assert pv.judge(GATE, views_ratio=None, search_ratio=None, recent=None, recent_days=3,
+    assert pv.judge(GATE, vs_all_ratio=None, search_ratio=None, recent=None, recent_days=3,
                     price_only=True) == (False, pv.PRICE_ONLY)  # fmt: skip
-    assert pv.judge(GATE, views_ratio=2.0, search_ratio=2.0, recent=9, recent_days=3,
+    assert pv.judge(GATE, vs_all_ratio=2.0, search_ratio=2.0, recent=9, recent_days=3,
                     not_sold=True) == (False, pv.NOT_SOLD)  # fmt: skip
 
 
 def test_gate_below_threshold_and_small_sample_say_why() -> None:
-    ok, why = pv.judge(GATE, views_ratio=1.2, search_ratio=1.1, recent=9, recent_days=3)
+    ok, why = pv.judge(GATE, vs_all_ratio=1.2, search_ratio=1.1, recent=9, recent_days=3)
     assert not ok
-    assert why == "오름 근거가 기준 미만 (숏츠 시간당 조회 1.2배 < 1.5배, 검색 1.1배 < 1.3배)"
-    ok, why = pv.judge(GATE, views_ratio=None, search_ratio=None, recent=1, recent_days=3,
+    assert why == "오름 근거가 기준 미만 (숏츠 전체 대비 1.2배 < 1.5배, 검색 1.1배 < 1.3배)"
+    ok, why = pv.judge(GATE, vs_all_ratio=None, search_ratio=None, recent=1, recent_days=3,
                        short_sample="표본 부족 (3개, 기준 5개)")  # fmt: skip
     assert not ok and why == "트렌드 근거 없음 (숏츠 표본 부족 (3개, 기준 5개))"
 
 
 def test_gate_values_come_from_config_and_env(tmp_path) -> None:  # noqa: ANN001
     cfg = tmp_path / "trends.toml"
-    cfg.write_text("[brief]\ngate_views_ratio = 2.0\n", encoding="utf-8")
+    cfg.write_text("[brief]\ngate_format_vs_all_ratio = 2.0\n", encoding="utf-8")
     env = {"DATA_TREND_CONFIG": str(cfg), "DATA_BRIEF_GATE_RECENT_MIN": "7",
            "DATA_BRIEF_GATE_NAVER_RATIO": "nope"}  # fmt: skip
     gate = brief.gate_of(brief.load_config(env))
-    assert gate == pv.Gate(views_ratio=2.0, naver_ratio=1.3, recent_min=7, promo_max=3)
+    assert gate == pv.Gate(vs_all_ratio=2.0, naver_ratio=1.3, recent_min=7, promo_max=3)
+    env2 = {"DATA_BRIEF_GATE_FORMAT_VS_ALL_RATIO": "1.8"}
+    assert brief.gate_of(brief.load_config(env2)).vs_all_ratio == 1.8
     assert gate.max_ratio == 10.0  # 브리프 highlight_max_ratio와 같은 값
     assert brief.gate_of(brief.load_config({})) == pv.Gate()  # 기본 1.5·1.3·5·3
 
@@ -97,8 +110,9 @@ def test_gate_values_come_from_config_and_env(tmp_path) -> None:  # noqa: ANN001
 def test_format_signals_are_ratios_of_the_shorts_values() -> None:
     groups = (_group("리액션", 160.0, 6), _group("브이로그", None, 2, "unknown"))
     sig = pv.format_signals(_shorts(*groups))
-    assert sig["리액션"].views_ratio == 1.6 and sig["리액션"].recent == 6 and sig["리액션"].at == AT
-    assert sig["브이로그"].views_ratio is None and sig["브이로그"].short_sample
+    assert sig["리액션"].vs_all_ratio == 1.6 and sig["리액션"].recent == 6
+    assert sig["리액션"].at == AT
+    assert sig["브이로그"].vs_all_ratio is None and sig["브이로그"].short_sample
     assert pv.format_signals(None) == {}
 
 
@@ -205,19 +219,35 @@ def test_group_stats_counts_recent_shorts_per_format() -> None:
         s = _Short(f"v{n}", "t", None, 100 + n, 10.0, (), "popular", format="리액션")
         s.extra["recent"] = n < 4
         items.append(s)
-    old = _Short("x", "t", None, 5, 1.0, (), "popular", format="챌린지")  # 처음 본 시각 모름
-    groups = {g.name: g for g in group_stats([*items, old], "format", ["리액션", "챌린지"],
-                                             ShortsConfig())}  # fmt: skip
-    assert groups["리액션"].recent_count == 4
-    assert groups["챌린지"].recent_count is None and groups["챌린지"].status == "unknown"
+    nopub = _Short("y", "t", None, 7, 1.0, (), "search", format="리액션")  # 게시 시각 모름
+    old = _Short("x", "t", None, 5, 1.0, (), "popular", format="챌린지")  # 게시 시각 모름
+    groups = {g.name: g for g in group_stats([*items, nopub, old], "format",
+                                             ["리액션", "챌린지"], ShortsConfig())}  # fmt: skip
+    assert groups["리액션"].recent_count == 4 and groups["리액션"].recent_unknown == 1
+    assert groups["챌린지"].recent_count == 0 and groups["챌린지"].recent_unknown == 1
+    assert groups["챌린지"].status == "unknown"
+
+
+def test_publish_times_come_from_snippet_published_at(tmp_path) -> None:  # noqa: ANN001
+    """검색·다시 조회 응답의 published_at을 남기고 그대로 읽는다 (처음 수집 시각이 아님)."""
+    from types import SimpleNamespace
+
+    from data_agent.skills.shorts_stats import ShortsStore
+
+    store = ShortsStore(tmp_path / "shorts.db")
+    pub = datetime(2026, 11, 1, 3, 0, tzinfo=UTC)
+    store.record_views(AT, [SimpleNamespace(video_id="a", view_count=10, published_at=pub),
+                            SimpleNamespace(video_id="b", view_count=5)])  # fmt: skip
+    assert store.published(["a", "b"]) == {"a": pub}
+    store.close()
 
 
 def test_gate_does_not_count_huge_ratios_from_tiny_baselines() -> None:
     """평소 값이 거의 0이라 부풀려진 배수(예: 검색 537배)는 근거로 치지 않는다."""
-    ok, why = pv.judge(GATE, views_ratio=0.84, search_ratio=537.61, recent=9, recent_days=3)
-    assert not ok and why == "오름 근거가 기준 미만 (숏츠 시간당 조회 0.84배 < 1.5배)"
-    ok, why = pv.judge(GATE, views_ratio=None, search_ratio=537.61, recent=9, recent_days=3)
-    assert not ok and why == "트렌드 근거 없음 (검색 537.61배는 평소 값이 작아 근거로 안 씀)"
+    ok, why = pv.judge(GATE, vs_all_ratio=0.84, search_ratio=537.61, recent=9, recent_days=3)
+    assert not ok and why == "오름 근거가 기준 미만 (숏츠 전체 대비 0.84배 < 1.5배)"
+    ok, why = pv.judge(GATE, vs_all_ratio=None, search_ratio=537.61, recent=9, recent_days=3)
+    assert not ok and why == "트렌드 근거 없음 (검색 537.61배는 비교 값이 너무 작아 근거로 안 씀)"
     signals = pv.format_signals(_shorts(_group("정보·팁", 84.0, 9)))
     promos, held = pv.build_promos(signals, [_trend("급상승 뉴스", fmt="정보·팁", naver=537.61)],
                                    GATE, insight_id=lambda t: t)  # fmt: skip

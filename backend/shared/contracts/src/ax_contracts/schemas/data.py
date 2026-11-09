@@ -1384,9 +1384,11 @@ class ShortsGroup(AxModel):
     # 아래는 예전 응답은 없다. 카테고리 그룹만: 화면 카드용 숏츠 (조회수 순, 설정 개수까지).
     # 이미 모은 숏츠 안에서만 고르고(더 검색하지 않음), 표본 부족 칸도 준다. 통계 칸과 무관
     videos: list[ShortsVideo] = Field(default_factory=list)
-    # 아래는 예전 응답은 없다. 형식 그룹만: 이 형식 숏츠 중 우리 수집에 처음 잡힌 지
-    # `ShortsStatsOutput.recent_days`일 안인 수 (반짝 1개인지 보려고). 모르면 None
+    # 아래는 예전 응답은 없다. 형식 그룹만: 이 형식 숏츠 중 게시된 지(YouTube snippet.publishedAt)
+    # `ShortsStatsOutput.recent_days`일 안인 수 (반짝 1개인지 보려고). 게시 시각을 모르는 숏츠는
+    # 세지 않고 그 수를 recent_unknown에 둔다
     recent_count: int | None = Field(default=None, ge=0)
+    recent_unknown: int | None = Field(default=None, ge=0)
 
 
 class ShortsSearch(AxModel):
@@ -1431,7 +1433,7 @@ class ShortsStatsOutput(AxModel):
     # 표본에 더한 수 (같은 영상은 한 번만, 추가 검색 없음)
     subtopic_shorts: int = Field(default=0, ge=0)
     # 아래는 예전 응답은 없다. 전체 숏츠 시간당 조회 증가 중앙값과 그 표본 수
-    # (형식별 시간당 조회 배수의 분모), 형식 그룹 recent_count를 센 기간(일)
+    # (형식별 "숏츠 전체 대비" 배수의 분모), 형식 그룹 recent_count를 센 기간(게시 후 일)
     median_views_per_hour: float | None = None
     median_views_per_hour_count: int = Field(default=0, ge=0)
     recent_days: int | None = Field(default=None, ge=1)
@@ -2044,10 +2046,13 @@ class TrendInsight(AxModel):
     promo_format: str | None = None  # promo: 빌리는 숏츠 형식
     promo_idea: str | None = None  # promo: 캣북스 홍보 아이디어 한 줄 (60자 이내)
     promo_idea_fallback: bool = False  # promo: LLM 대신 고정 틀 문장이면 true
-    # promo 근거: 같은 형식 숏츠 시간당 조회 ÷ 전체 숏츠 중앙값, 최근 N일 새로 잡힌 같은 형식 수
+    # promo 근거: 숏츠 전체 대비 배수 = 이 형식 1시간 조회 중앙값 ÷ 전체 숏츠 1시간 조회 중앙값
+    # (같은 형식의 지난 기간 대비 상승률이 아님), 최근 N일 안에 게시된 같은 형식 숏츠 수와
+    # 게시 시각을 몰라 세지 않은 수
     promo_views_per_hour_ratio: float | None = Field(default=None, ge=0)
     promo_recent_count: int | None = Field(default=None, ge=0)
     promo_recent_days: int | None = Field(default=None, ge=1)
+    promo_recent_unknown: int | None = Field(default=None, ge=0)
     # 기획에 넘기는 기준을 통과한 근거 한 줄 (기준을 보는 인사이트만)
     gate_reason: str | None = None
 

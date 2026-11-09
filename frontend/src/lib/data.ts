@@ -1002,7 +1002,8 @@ export interface TrendInsight {
   evidence_shorts?: VideoLink[];
   /**
    * 브리프 v6 (예전 응답은 없다). trend = 트렌드 주제, promo = 실제로 오르는 숏츠 형식만 빌린 캣북스 홍보 영상 아이디어
-   * (topic = 형식 이름). promo 근거: 같은 형식 숏츠 시간당 조회 ÷ 전체 숏츠 중앙값, 최근 N일 새로 잡힌 같은 형식 수
+   * (topic = 형식 이름). promo 근거: 숏츠 전체 대비 배수(이 형식 1시간 조회 중앙값 ÷ 전체 숏츠 1시간 조회 중앙값),
+   * 최근 N일 안에 게시된 같은 형식 수, 게시 시각을 몰라 세지 않은 수
    */
   kind?: "trend" | "promo";
   promo_format?: string | null;
@@ -1012,6 +1013,7 @@ export interface TrendInsight {
   promo_views_per_hour_ratio?: number | null;
   promo_recent_count?: number | null;
   promo_recent_days?: number | null;
+  promo_recent_unknown?: number | null;
   /** 기획에 넘기는 기준을 통과한 근거 한 줄 */
   gate_reason?: string | null;
 }

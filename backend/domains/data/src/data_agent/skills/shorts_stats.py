@@ -62,8 +62,8 @@ from data_agent.video_links import video_url
 from data_agent.youtube_store import (
     DB_ENV,
     DEFAULT_DB,
-    first_collected,
     latest_popular,
+    published_times,
     recent_snapshots,
     video_details,
     video_thumbnails,
@@ -111,7 +111,7 @@ class ShortsConfig:
     screen_videos: int = 10
     # 화면 카드 구독자 대비: channels.list 하루 호출 상한 (한 번 = 채널 50개·1단위)
     channel_calls: int = 2
-    # 형식 그룹 recent_count: 우리 수집에 처음 잡힌 지 이 일수 안인 숏츠 수 (반짝 1개인지 보려고)
+    # 형식 그룹 recent_count: 게시된 지(snippet.publishedAt) 이 일수 안인 숏츠 수 (반짝 1개인지)
     recent_days: int = 3
 
 
@@ -172,6 +172,9 @@ class ShortsStore:
                 # 받은 응답(검색·다시 조회)에 있던 채널 id (구독자 대비를 위해 더 부르지 않음)
                 "CREATE TABLE IF NOT EXISTS video_channels (video_id TEXT PRIMARY KEY,"
                 " channel_id TEXT NOT NULL, at TEXT NOT NULL);"
+                # 받은 응답(검색·다시 조회)에 있던 게시 시각 snippet.publishedAt (UTC)
+                "CREATE TABLE IF NOT EXISTS published (video_id TEXT PRIMARY KEY,"
+                " published_at TEXT NOT NULL, at TEXT NOT NULL);"
             )
             for table in ("searches", "searched_videos"):
                 cols = [r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")]
@@ -241,10 +244,16 @@ class ShortsStore:
             for v in videos
             if (cid := getattr(v, "channel_id", None))
         ]
+        published = [
+            (v.video_id, p.astimezone(UTC).isoformat(), at.isoformat())
+            for v in videos
+            if isinstance(p := getattr(v, "published_at", None), datetime)
+        ]
         with self._lock, self._conn:
             self._conn.executemany("INSERT OR REPLACE INTO views VALUES (?,?,?)", rows)
             self._conn.executemany("INSERT OR REPLACE INTO thumbnails VALUES (?,?,?)", thumbs)
             self._conn.executemany("INSERT OR REPLACE INTO video_channels VALUES (?,?,?)", channels)
+            self._conn.executemany("INSERT OR REPLACE INTO published VALUES (?,?,?)", published)
         return len(rows)
 
     def channels(self, ids: Sequence[str]) -> dict[str, str]:
@@ -271,30 +280,20 @@ class ShortsStore:
             ).fetchall()
         return {vid: url for vid, url in rows if url}
 
-    def first_seen(self, ids: Sequence[str]) -> dict[str, datetime]:
-        """영상 id → 이 저장소에서 처음 본 시각 (검색한 날 0시 KST·다시 조회한 시각 중 이른 것)."""
+    def published(self, ids: Sequence[str]) -> dict[str, datetime]:
+        """영상 id → 저장된 게시 시각 (응답의 snippet.publishedAt, UTC). 없으면 빠진다."""
         out: dict[str, datetime] = {}
         for i in range(0, len(ids), 500):
             part = list(ids[i : i + 500])
             marks = ",".join("?" * len(part))
             with self._lock:
-                days = self._conn.execute(
-                    f"SELECT video_id, MIN(day) FROM searched_videos WHERE video_id IN ({marks})"  # noqa: S608
-                    " GROUP BY video_id",
+                rows = self._conn.execute(
+                    f"SELECT video_id, published_at FROM published WHERE video_id IN ({marks})",  # noqa: S608
                     part,
                 ).fetchall()
-                seen = self._conn.execute(
-                    f"SELECT video_id, MIN(at) FROM views WHERE video_id IN ({marks})"  # noqa: S608
-                    " GROUP BY video_id",
-                    part,
-                ).fetchall()
-            for vid, day in days:
-                at = datetime.combine(date.fromisoformat(day), datetime.min.time(), KST)
-                out[vid] = min(out.get(vid, at), at)
-            for vid, raw in seen:
+            for vid, raw in rows:
                 at = datetime.fromisoformat(raw)
-                at = at if at.tzinfo else at.replace(tzinfo=UTC)
-                out[vid] = min(out.get(vid, at), at)
+                out[vid] = at if at.tzinfo else at.replace(tzinfo=UTC)
         return out
 
     def view_history(self, ids: Sequence[str]) -> dict[str, list[tuple[datetime, int]]]:
@@ -527,13 +526,11 @@ def group_stats(
                 f"측정 중 {measuring}개 (다시 본 간격 {config.min_recheck_minutes}분 미만)"
             )
         velocity_reason = ", ".join(notes) or None
-        # 형식 그룹만: 우리 수집에 처음 잡힌 지 recent_days일 안인 수 (처음 본 시각을 모르면 None)
-        known_seen = [s for s in mine if "recent" in s.extra]
-        recent = (
-            sum(1 for s in known_seen if s.extra["recent"])
-            if key == "format" and known_seen
-            else None
-        )
+        # 형식 그룹만: 게시된 지 recent_days일 안인 수. 게시 시각을 모르는 숏츠는 세지 않고
+        # 그 수를 따로 둔다 (recent_unknown)
+        known_pub = [s for s in mine if "recent" in s.extra]
+        recent = sum(1 for s in known_pub if s.extra["recent"]) if key == "format" else None
+        recent_unknown = len(mine) - len(known_pub) if key == "format" else None
         top = sorted((s for s in mine if s.views is not None), key=lambda s: -(s.views or 0))
         # 카테고리 그룹만: 화면 카드 (조회수 순, 조회수를 모르는 숏츠는 뒤). 표본 부족 칸도 준다
         screen = (
@@ -563,6 +560,7 @@ def group_stats(
                     formats=formats,
                     videos=screen,
                     recent_count=recent,
+                    recent_unknown=recent_unknown,
                 )
             )
             continue
@@ -582,6 +580,7 @@ def group_stats(
                 top=[_video(s) for s in top[: config.top_videos]],
                 videos=screen,
                 recent_count=recent,
+                recent_unknown=recent_unknown,
             )
         )
     # 대표값은 중앙값 (몇 개의 큰 영상이 평균을 끌어올리는 것을 막는다). 평균은 보조 칸
@@ -792,14 +791,14 @@ async def _run(
     # 4. 계산
     from data_agent.skills.topic_category import TOPIC_CATEGORIES
 
-    # 처음 잡힌 시각: 인기 스냅샷에 처음 나온 시각, 검색한 날, 다시 조회한 시각 중 가장 이른 것
-    seen_at = store.first_seen([s.video_id for s in items])
-    for vid, at in first_collected(db, [s.video_id for s in items]).items():
-        seen_at[vid] = min(seen_at.get(vid, at), at)
+    # 게시 시각(snippet.publishedAt): 인기 스냅샷 표 published_at, 검색·다시 조회 응답에서 남긴 값.
+    # 둘 다 없으면 recent를 두지 않는다 (세지 않고 "게시 시각 모름"으로 센다)
+    ids_all = [s.video_id for s in items]
+    published = {**published_times(db, ids_all), **store.published(ids_all)}
     recent_since = now - timedelta(days=config.recent_days)
     for s in items:
-        if s.video_id in seen_at:
-            s.extra["recent"] = seen_at[s.video_id] >= recent_since
+        if s.video_id in published:
+            s.extra["recent"] = published[s.video_id] >= recent_since
     out.recent_days = config.recent_days
 
     out.by_category = group_stats(items, "category", [*TOPIC_CATEGORIES, UNKNOWN], config)

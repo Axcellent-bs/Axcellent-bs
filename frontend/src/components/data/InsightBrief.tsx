@@ -369,10 +369,11 @@ function PromoCard({ i, facts }: { i: TrendInsight; facts: DataFact[] }) {
   const mine = facts.filter((f) => f.about === i.insight_id || (i.fact_ids ?? []).includes(f.fact_id));
   const rows: { label: string; value: string; source: string }[] = [];
   if (i.promo_views_per_hour_ratio != null) {
-    rows.push({ label: "같은 형식 숏츠 1시간 조회", value: `전체 숏츠의 ${num(i.promo_views_per_hour_ratio, 2)}배`, source: `${PROMO_SOURCE}${at ? ` · ${at} 기준` : ""}` });
+    rows.push({ label: "이 형식 1시간 조회 중앙값", value: `숏츠 전체 대비 ${num(i.promo_views_per_hour_ratio, 2)}배`, source: `${PROMO_SOURCE}${at ? ` · ${at} 기준` : ""}` });
   }
   if (i.promo_recent_count != null) {
-    rows.push({ label: `최근 ${days}일 새로 뜬 같은 형식`, value: `${num(i.promo_recent_count)}개`, source: `${PROMO_SOURCE}${at ? ` · ${at} 기준` : ""}` });
+    const unknown = i.promo_recent_unknown ? ` (게시 시각 모름 ${num(i.promo_recent_unknown)}개 제외)` : "";
+    rows.push({ label: `최근 ${days}일 게시된 같은 형식`, value: `${num(i.promo_recent_count)}개${unknown}`, source: `${PROMO_SOURCE}${at ? ` · ${at} 기준` : ""}` });
   }
   if (i.evidence.naver_ratio != null) {
     const age = i.target_age && i.target_age_ratio != null ? ` · ${i.target_age} ${num(i.target_age_ratio, 2)}배` : "";
@@ -382,8 +383,8 @@ function PromoCard({ i, facts }: { i: TrendInsight; facts: DataFact[] }) {
     <li className="card space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Chip label="홍보 영상" tone={TONE.info} />
-        {i.promo_views_per_hour_ratio != null && <Chip label={`1시간 조회 ${num(i.promo_views_per_hour_ratio, 2)}배`} tone={TONE.ok} />}
-        {i.promo_recent_count != null && <Chip label={`최근 ${days}일 ${num(i.promo_recent_count)}개`} tone={TONE.ok} />}
+        {i.promo_views_per_hour_ratio != null && <Chip label={`숏츠 전체 대비 ${num(i.promo_views_per_hour_ratio, 2)}배`} tone={TONE.ok} />}
+        {i.promo_recent_count != null && <Chip label={`최근 ${days}일 게시 ${num(i.promo_recent_count)}개`} tone={TONE.ok} />}
       </div>
       <h4 className="text-lg font-bold text-ink-900">{i.topic}</h4>
       {rows.length > 0 && (
@@ -505,7 +506,7 @@ export function InsightBrief({ state, examples, examplesCount }: {
           <h2 id="data-trend-insight-title" className="text-2xl font-bold text-ink-900">기획팀에 넘길 인사이트</h2>
           <p className="text-sm text-ink-500">
             {v6
-              ? "요즘 실제로 오르는 트렌드의 형식만 빌려 캣북스 홍보 영상을 만들어요. 다른 회사·연예인 이름과 로고는 쓰지 않아요. 아래 기준을 넘은 것만 기획에 넘겨요."
+              ? "요즘 숏츠 전체보다 1시간 조회가 많은 형식만 빌려 캣북스 홍보 영상을 만들어요. 다른 회사·연예인 이름과 로고는 쓰지 않아요. 아래 기준을 넘은 것만 기획에 넘겨요."
               : `두 가지예요. ${name} 책에서 뜨는 주제, 그리고 책 숏츠에 빌려 쓸 수 있는 요즘 유행. 숫자는 모두 데이터 근거예요.`}
           </p>
         </div>

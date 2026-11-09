@@ -144,13 +144,14 @@ def stats_view(output: Any) -> dict[str, Any]:
     data = output.model_dump(mode="json")
     # 예전 응답에 없던 칸: 이 시나리오엔 하위 주제 저장분이 없어 0이어야 한다
     assert data.pop("subtopic_shorts") == 0
-    # 예전 응답에 없던 칸 (홍보 영상 근거: 전체 시간당 조회 중앙값·최근 N일 새로 잡힌 수)
+    # 예전 응답에 없던 칸 (홍보 영상 근거: 전체 시간당 조회 중앙값·최근 N일 게시된 수)
     for k in ("median_views_per_hour", "median_views_per_hour_count", "recent_days"):
         data.pop(k, None)
     for key in ("by_category", "by_format"):
         for group in data[key]:
             group.pop("videos", None)
             group.pop("recent_count", None)
+            group.pop("recent_unknown", None)
             for v in group["top"]:
                 for k in NEW_VIDEO_KEYS:
                     v.pop(k, None)

@@ -4,8 +4,10 @@
 - promo: 실제로 오르는 숏츠 형식(shorts_stats 형식별 통계)과 검색 상승만 재료로, 그 형식을 빌린
   캣북스 홍보 영상 아이디어를 만든다
   (회사 상품은 없어도 된다, 다른 회사·인물·작품 이름은 쓰지 않는다)
-- 기준(코드): 같은 형식 숏츠 시간당 조회 배수 ≥ `gate_views_ratio` 또는 네이버 검색 배수 ≥
-  `gate_naver_ratio`, 그리고 최근 `recent_days`일 새로 잡힌 같은 형식 숏츠 ≥ `gate_recent_min`개.
+- 기준(코드): 숏츠 전체 대비 배수(이 형식 1시간 조회 중앙값 ÷ 전체 숏츠 1시간 조회 중앙값,
+  같은 형식의 지난 기간 대비 상승률이 아님) ≥ `gate_format_vs_all_ratio` 또는 네이버 검색 배수 ≥
+  `gate_naver_ratio`, 그리고 최근 `recent_days`일 안에 게시된(snippet.publishedAt) 같은 형식
+  숏츠 ≥ `gate_recent_min`개 (게시 시각을 모르는 숏츠는 세지 않는다).
   가격·줄어든 배수(1.0 미만)·표본 부족·경고로 뺀 상품군은 근거로 치지 않는다
 - 기준을 못 넘은 것은 기획에 넘기지 않고 `held_back`(주제·이유)에 남긴다
 - 아이디어 한 줄: 브리프 한 줄과 같은 LLM·같은 예산(묶어서 한 번). 막히거나 규칙 검사에 걸리면
@@ -67,9 +69,10 @@ IDEA_PROMPT = (
 
 @dataclass(frozen=True)
 class Gate:
-    views_ratio: float = 1.5  # 같은 형식 숏츠 시간당 조회 ÷ 전체 숏츠 중앙값
+    # 숏츠 전체 대비 배수 = 이 형식 1시간 조회 중앙값 ÷ 전체 숏츠 1시간 조회 중앙값
+    vs_all_ratio: float = 1.5
     naver_ratio: float = 1.3  # 네이버 검색 평소 대비 배수 (없으면 작년 같은 달 배율)
-    recent_min: int = 5  # 최근 N일 새로 잡힌 같은 형식 숏츠 수 (반짝 1개가 아님)
+    recent_min: int = 5  # 최근 N일 안에 게시된 같은 형식 숏츠 수 (반짝 1개가 아님)
     promo_max: int = 3
     # 배수가 이보다 크면 평소 값이 너무 작은 것(표본 적음)이라 근거로 치지 않는다
     # (브리프 근거 요약 `highlight_max_ratio`와 같은 기본값)
@@ -81,9 +84,10 @@ class FormatSignal:
     """숏츠 형식 하나의 근거 (shorts_stats 값 그대로)."""
 
     name: str
-    views_ratio: float | None  # 시간당 조회 중앙값 ÷ 전체 숏츠 시간당 조회 중앙값
-    recent: int | None
+    vs_all_ratio: float | None  # 숏츠 전체 대비: 이 형식 1시간 조회 중앙값 ÷ 전체 숏츠 중앙값
+    recent: int | None  # 최근 recent_days일 안에 게시된 수 (게시 시각을 아는 것만)
     recent_days: int | None
+    recent_unknown: int | None  # 게시 시각을 몰라 세지 않은 수
     samples: int
     median_views: float | None
     at: datetime | None
@@ -100,7 +104,8 @@ def format_signals(shorts: ShortsStatsOutput | None) -> dict[str, FormatSignal]:
         if g.status == "known" and base and g.median_views_per_hour is not None:
             ratio = round(g.median_views_per_hour / base, 2)
         out[g.name] = FormatSignal(
-            name=g.name, views_ratio=ratio, recent=g.recent_count, recent_days=shorts.recent_days,
+            name=g.name, vs_all_ratio=ratio, recent=g.recent_count, recent_days=shorts.recent_days,
+            recent_unknown=g.recent_unknown,
             samples=g.count, median_views=g.median_views, at=shorts.snapshot_at,
             short_sample=None if g.status == "known" else (g.reason or "표본 부족"),
         )  # fmt: skip
@@ -114,54 +119,67 @@ def _x(v: float) -> str:
 def judge(
     gate: Gate,
     *,
-    views_ratio: float | None,
+    vs_all_ratio: float | None,
     search_ratio: float | None,
     search_label: str = "네이버 검색이 평소의",
     recent: int | None,
     recent_days: int | None,
+    recent_unknown: int | None = None,
     price_only: bool = False,
     not_sold: bool = False,
     short_sample: str | None = None,
 ) -> tuple[bool, str]:
-    """(넘김, 통과 근거 또는 넘기지 않는 이유). 숫자는 받은 값 그대로 적는다."""
+    """(넘김, 통과 근거 또는 넘기지 않는 이유). 숫자는 받은 값 그대로 적는다.
+
+    vs_all_ratio는 "숏츠 전체 대비" 배수다 (이 형식 ÷ 전체 숏츠, 1시간 조회 중앙값).
+    recent는 최근 recent_days일 안에 게시된 같은 형식 숏츠 수, recent_unknown은 게시 시각을
+    몰라 세지 않은 수.
+    """
     days = recent_days or 3
     if not_sold:
         return False, NOT_SOLD
-    small: list[str] = []  # 평소 값이 너무 작아 근거로 치지 않은 배수
-    if views_ratio is not None and views_ratio > gate.max_ratio:
-        small.append(f"숏츠 시간당 조회 {_x(views_ratio)}배")
-        views_ratio = None
+    small: list[str] = []  # 분모가 너무 작아 근거로 치지 않은 배수
+    if vs_all_ratio is not None and vs_all_ratio > gate.max_ratio:
+        small.append(f"숏츠 전체 대비 {_x(vs_all_ratio)}배")
+        vs_all_ratio = None
     if search_ratio is not None and search_ratio > gate.max_ratio:
         small.append(f"검색 {_x(search_ratio)}배")
         search_ratio = None
-    v_ok = views_ratio is not None and views_ratio >= gate.views_ratio
+    v_ok = vs_all_ratio is not None and vs_all_ratio >= gate.vs_all_ratio
     s_ok = search_ratio is not None and search_ratio >= gate.naver_ratio
     if not v_ok and not s_ok:
         if search_ratio is not None and search_ratio < 1.0:
             return False, f"{search_label} {_x(search_ratio)}배(줄어듦)"
-        if views_ratio is None and search_ratio is None:
+        if vs_all_ratio is None and search_ratio is None:
             if small:
-                return False, f"트렌드 근거 없음 ({', '.join(small)}는 평소 값이 작아 근거로 안 씀)"
+                what = ", ".join(small)
+                return False, f"트렌드 근거 없음 ({what}는 비교 값이 너무 작아 근거로 안 씀)"
             if short_sample:
                 return False, f"트렌드 근거 없음 (숏츠 {short_sample})"
             return False, PRICE_ONLY if price_only else "트렌드 근거 없음"
         parts = []
-        if views_ratio is not None:
-            parts.append(f"숏츠 시간당 조회 {_x(views_ratio)}배 < {_x(gate.views_ratio)}배")
+        if vs_all_ratio is not None:
+            parts.append(f"숏츠 전체 대비 {_x(vs_all_ratio)}배 < {_x(gate.vs_all_ratio)}배")
         if search_ratio is not None:
             parts.append(f"검색 {_x(search_ratio)}배 < {_x(gate.naver_ratio)}배")
         return False, "오름 근거가 기준 미만 (" + ", ".join(parts) + ")"
+    unknown = f", 게시 시각 모름 {recent_unknown}개 제외" if recent_unknown else ""
     if gate.recent_min > 0 and recent is None:  # 0이면 이 확인을 끈다 (회사 설정)
         return False, f"최근 {days}일 같은 형식 숏츠 수를 모름"
     if recent is not None and recent < gate.recent_min:
-        return False, f"최근 {days}일 같은 형식 숏츠 {recent}개 (기준 {gate.recent_min}개, 반짝)"
+        return False, (
+            f"최근 {days}일 같은 형식 숏츠 {recent}개 (기준 {gate.recent_min}개"
+            + (unknown if unknown else ", 반짝")
+            + ")"
+        )
     why = []
     if v_ok:
-        why.append(f"같은 형식 숏츠 시간당 조회 {_x(views_ratio or 0)}배")
+        why.append(f"이 형식 1시간 조회가 숏츠 전체 대비 {_x(vs_all_ratio or 0)}배")
     if s_ok:
         why.append(f"{search_label} {_x(search_ratio or 0)}배")
     if recent is not None:
-        why.append(f"최근 {days}일 같은 형식 숏츠 {recent}개")
+        why.append(f"최근 {days}일 게시된 같은 형식 숏츠 {recent}개" + (
+            f" (게시 시각 모름 {recent_unknown}개 제외)" if recent_unknown else ""))
     return True, " · ".join(why)
 
 
@@ -221,9 +239,9 @@ class _Ideas(BaseModel):
 def idea_facts(i: TrendInsight) -> dict[str, int | float | str]:
     out: dict[str, int | float | str] = {"형식": i.promo_format or i.topic}
     if i.promo_views_per_hour_ratio is not None:
-        out["같은 형식 숏츠 시간당 조회 배수"] = i.promo_views_per_hour_ratio
+        out["이 형식 1시간 조회 (숏츠 전체 대비 배수)"] = i.promo_views_per_hour_ratio
     if i.promo_recent_count is not None:
-        out[f"최근 {i.promo_recent_days or 3}일 같은 형식 숏츠 수"] = i.promo_recent_count
+        out[f"최근 {i.promo_recent_days or 3}일 게시된 같은 형식 숏츠 수"] = i.promo_recent_count
     if i.evidence.naver_ratio is not None:
         out["네이버 검색 배수"] = round(i.evidence.naver_ratio, 2)
     if i.target_age and i.target_age_ratio is not None:
@@ -285,7 +303,7 @@ def build_promos(
     *,
     insight_id: Any,
 ) -> tuple[list[TrendInsight], list[HeldBack]]:
-    """형식마다 기준을 보고 넘길 promo (시간당 조회 배수 큰 순, 최대 promo_max개)와 넘기지 않은 것.
+    """형식마다 기준을 보고 넘길 promo (숏츠 전체 대비 배수 큰 순, 최대 promo_max개)와 못 넘은 것.
 
     검색 상승은 그 형식을 쓰는 트렌드 주제(같은 브리프) 중 가장 큰 네이버 배수를 쓴다
     (주제 이름은 카드에 쓰지 않는다).
@@ -301,9 +319,10 @@ def build_promos(
         ]
         mate = max(mates, key=lambda t: t.evidence.naver_ratio or 0, default=None)
         ok, why = judge(
-            gate, views_ratio=sig.views_ratio,
+            gate, vs_all_ratio=sig.vs_all_ratio,
             search_ratio=mate.evidence.naver_ratio if mate else None,
-            recent=sig.recent, recent_days=sig.recent_days, short_sample=sig.short_sample,
+            recent=sig.recent, recent_days=sig.recent_days, recent_unknown=sig.recent_unknown,
+            short_sample=sig.short_sample,
         )  # fmt: skip
         if not ok:
             held.append(HeldBack(topic=f"홍보 영상 · {name}", reason=why))
@@ -317,8 +336,9 @@ def build_promos(
         promo = TrendInsight(
             insight_id=insight_id(f"promo:{name}"), rank=1, topic=name, line="",
             kind="promo", promo_format=name,
-            promo_views_per_hour_ratio=sig.views_ratio, promo_recent_count=sig.recent,
-            promo_recent_days=sig.recent_days, gate_reason=why,
+            promo_views_per_hour_ratio=sig.vs_all_ratio, promo_recent_count=sig.recent,
+            promo_recent_days=sig.recent_days, promo_recent_unknown=sig.recent_unknown,
+            gate_reason=why,
             ad_material=True, ad_material_reason=PROMO_NOTE, reference_only=False,
             evidence=ev,
             target_age=mate.target_age if mate else None,
@@ -332,7 +352,7 @@ def build_promos(
             limits=[PROMO_NOTE, "숏츠 통계는 인기 영상 상위·조회수 순 검색 표본 안의 비교다"],
         )  # fmt: skip
         passed.append((sig, promo, why))
-    passed.sort(key=lambda x: -(x[0].views_ratio or 0))
+    passed.sort(key=lambda x: -(x[0].vs_all_ratio or 0))
     for sig, _promo, _why in passed[gate.promo_max :]:
         why = f"기준은 넘었지만 홍보 영상은 최대 {gate.promo_max}개"
         held.append(HeldBack(topic=f"홍보 영상 · {sig.name}", reason=why))
@@ -355,9 +375,10 @@ def apply_gate(
         sig = signals.get(i.shorts_format or "")
         search, label = search_of(i)
         ok, why = judge(
-            gate, views_ratio=sig.views_ratio if sig else None, search_ratio=search,
+            gate, vs_all_ratio=sig.vs_all_ratio if sig else None, search_ratio=search,
             search_label=label, recent=sig.recent if sig else None,
             recent_days=sig.recent_days if sig else None,
+            recent_unknown=sig.recent_unknown if sig else None,
             price_only=bool((price_only or {}).get(i.insight_id)),
             not_sold=bool(not_sold(i.topic)),
         )  # fmt: skip
