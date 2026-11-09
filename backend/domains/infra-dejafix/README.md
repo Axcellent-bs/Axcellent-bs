@@ -6,6 +6,7 @@
 - 진단(`diagnose_incident`): 배포 이력에서 사건 구간 안의 배포를 원인 후보로 낸다. 확신도는 코드 규칙으로 정한다(LLM 안 씀).
   - 실제 모드: 구간(`INFRA_DIAGNOSE_LOOKBACK_MIN`, 기본 60분) 안 후보 1개 + 15분 이내 → high, 1개 + 그보다 오래됨 → mid, 여러 개 → 최신 mid·나머지 low, 없음 → `undetermined`
   - 목 모드: 최신 배포를 high로 낸다(시연 시각과 무관하게 같은 결과)
+  - 실제 모드는 결제 서버 이상(shop-api 장애 상태: 실패·느림)도 확인돼야 원인으로 본다. 배포 후보가 있어도 서버가 정상이거나 상태를 못 읽으면 `undetermined`(후보는 근거에만 남김) → 총괄이 롤백하지 않고 사람에게 넘긴다. 고객 문의 급증만으로 열린 장애가 자동 롤백되지 않게 한다
   - 복구 예상 시각은 내지 않는다
 - 롤백(`rollback_deployment`, B): 대상 버전(`to_version`)은 이력에서 코드로 고른다(롤백된 배포는 건너뜀). 요청에 다른 버전이 오면 거부한다.
   - 경로 판정용 정수 4개를 코드로 계산해 params에 넣는다: `suspect_count`·`low_confidence`·`irreversible_count`·`prior_rollbacks`. safety 기준표에서 하나라도 걸리면 C(사람 승인)

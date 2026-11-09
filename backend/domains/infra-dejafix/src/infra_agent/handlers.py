@@ -28,7 +28,7 @@ from ax_contracts.schemas.infra import (
     VerifyRecoveryOutput,
 )
 from infra_agent.deployments import Deployment
-from infra_agent.diagnosis import Diagnosis, diagnose
+from infra_agent.diagnosis import Diagnosis, confirm_with_server, diagnose, server_state
 from infra_agent.runtime import get_runtime
 
 ACTION = "rollback_deployment"
@@ -59,7 +59,16 @@ def _diagnosis_evidence(diag: Diagnosis, component: str | None) -> Evidence:
             f"deployments WHERE {where} AND deployed_at BETWEEN "
             f"{_iso(diag.window_from)} AND {_iso(diag.diagnosed_at)}"
         )
-    if diag.candidates:
+    if diag.candidates and diag.server in ("ok", "unknown"):
+        names = ", ".join(
+            f"{d.service} {d.version}({_iso(d.deployed_at)})" for d in diag.candidates
+        )
+        seen = "정상" if diag.server == "ok" else "확인할 수 없음"
+        summary = (
+            f"구간 안 배포 후보 {names}가 있지만 결제 서버 상태가 {seen} — 이상이 확인되지 않아 "
+            "원인 미확정(롤백하지 않고 사람에게 넘김)"
+        )
+    elif diag.candidates:
         summary = ", ".join(
             f"{s.service} {s.version}({_iso(s.deployed_at)}, 확신도 {s.confidence})"
             for s in diag.output.suspects
@@ -80,7 +89,15 @@ async def diagnose_incident(request: AgentRequest) -> AgentResult:
     except ValidationError as exc:
         return _failed(request, "invalid_input", str(exc))
     rt = get_runtime()
-    diag = diagnose(rt.history, inp.component, rt.clock(), mock=is_mock("infra"))
+    mock = is_mock("infra")
+    diag = diagnose(rt.history, inp.component, rt.clock(), mock=mock)
+    if not mock and diag.output.status == "suspected":
+        # 배포 후보만으로는 롤백하지 않는다: 결제 서버 이상이 확인돼야 원인으로 본다
+        try:
+            state = await rt.shop.fault_state()
+        except Exception:  # noqa: BLE001 - 못 읽으면 이상이 확인되지 않은 것으로 본다
+            state = None
+        diag = confirm_with_server(diag, server_state(state))
     rt.diagnoses[request.meta.context_id] = diag
     return AgentResult(
         meta=request.meta,
