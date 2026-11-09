@@ -45,7 +45,7 @@ A2A (`POST /a2a`, `agent-card.json` → `/.well-known/agent-card.json`). 입출�
 | `rollback_deployment` | B (검증 planning) | orchestrator | `RollbackDeploymentParams` → `{rolled_back_to, path, fault_released, post_check_ok}`. 보류면 `input-required` + `{review_id, hold_reason}`, 거절은 `completed` + outcome `rejected`, safety 무응답은 `failed` + `safety_unavailable`. 멱등 키 `<context_id>:rollback_deployment:<service>:<from_version>` |
 | `verify_recovery` | read | orchestrator | `VerifyRecoveryInput` → `VerifyRecoveryOutput`. outcome `recovered` / `not_recovered` |
 
-safety로 보내는 params: 계약 필드 + 정수 4개 + `deployed_at`(+ 받았으면 `incident_opened_at`). planning 교차검증이 이 두 시각을 쓴다.
+safety로 보내는 params: 계약 필드 + 정수 4개 + `deployed_at` + `incident_opened_at`. dev 교차검증이 이 두 시각을 쓴다. `incident_opened_at`은 요청에 있으면 그 값, 없으면 총괄 사건 기록(`GET /api/incidents`)에서 읽는다(못 읽으면 비워 두고 교차검증이 판정하지 않아 보류).
 
 ## 4. 의존
 - ax-contracts, ax-agent-template
@@ -57,4 +57,4 @@ safety로 보내는 params: 계약 필드 + 정수 4개 + `deployed_at`(+ 받았
 - 운영 서버에 셸·SSH로 접속하거나 배포 도구를 직접 부르지 않는다. 시연 롤백은 장애 주입 해제뿐이다
 - 사람 승인을 대신하지 않는다. C는 보류 큐에서 사람이 결정한다
 - 복구 예상 시각을 추정하지 않는다
-- 미결: 계약 `to_version` 선택 필드화, 롤백 출력 계약, orchestrator의 `incident_opened_at` 전달, safety 기준표 4개 규칙(사람 PR), Zabbix 결제 API 감시 등록과 `component` 태그(DJF-02)
+- 미결: 계약 `to_version` 선택 필드화, 롤백 출력 계약, safety 기준표 4개 규칙(사람 PR), Zabbix 결제 API 감시 등록과 `component` 태그(DJF-02)
