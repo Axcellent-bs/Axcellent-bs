@@ -84,3 +84,36 @@ class DeploymentHistory:
 
     def mark_rolled_back(self, target: Deployment) -> None:
         self.rolled_back.add(target.deploy_id)
+
+    def next_version(self, service: str) -> str:
+        """그 서비스의 마지막 배포 버전에서 끝자리를 하나 올린다 (v2.4.1 → v2.4.2)."""
+        rows = [d for d in self.deployments if d.service == service]
+        if not rows:
+            return "v1.0.0"
+        head, _, last = max(rows, key=lambda d: d.deployed_at).version.rpartition(".")
+        version = f"{head}.{int(last) + 1}" if head and last.isdigit() else f"{head}.{last}.1"
+        while self.find(service, version):
+            head, _, last = version.rpartition(".")
+            version = f"{head}.{int(last) + 1}"
+        return version
+
+    def record(
+        self,
+        *,
+        service: str,
+        version: str,
+        components: tuple[str, ...],
+        change_summary: str,
+        at: datetime,
+    ) -> Deployment:
+        """배포 하나를 기록한다 (시연 준비 `POST /api/infra/demo-deploy`). 재시작하면 사라진다."""
+        deployment = Deployment(
+            deploy_id=f"dep_demo_{len(self.deployments) + 1:04d}",
+            service=service,
+            version=version,
+            deployed_at=at,
+            components=components,
+            change_summary=change_summary,
+        )
+        self.deployments.append(deployment)
+        return deployment
