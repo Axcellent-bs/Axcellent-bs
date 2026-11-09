@@ -334,44 +334,101 @@ def normalize_order(raw: dict[str, Any], categories: dict[str, str]) -> dict[str
         "delivered_at": fc.parse_dt(raw.get("delivered_at")),
         "items": norm_items,
         "payments": norm_payments,
+        "refund_events": _refund_events(raw.get("refunds"), _int(raw.get("refunded_amount")) or 0),
     }
 
 
-def refunds_from_orders(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """shop-api 주문의 `refunded_amount`를 환불 기록으로 옮긴다.
+def _refund_events(raw: Any, refunded_amount: int) -> list[dict[str, Any]] | None:
+    """shop-api 주문의 환불 기록 `refunds` → [{refund_id, payment_id, amount, created_at}].
 
-    shop-api 주문 응답에는 환불 시각이 없어서 주문 시각으로 둔다(`notes.refund_basis`).
-    판매자는 품목 결제 금액 비율로 나눈다(나머지는 마지막 품목).
+    없거나(예전 shop-api) 형식이 어긋나거나 합계가 `refunded_amount`와 다르면 None이다.
+    그때는 환불을 예전처럼 주문 시각에 둔다(`refunds_from_orders`).
+    """
+    if not isinstance(raw, list):
+        return None
+    events = []
+    for r in raw:
+        if not isinstance(r, dict):
+            return None
+        amount, at = _int(r.get("amount")), fc.parse_dt(r.get("created_at"))
+        if amount is None or amount <= 0 or at is None:
+            return None
+        events.append(
+            {
+                "refund_id": r.get("refund_id"),
+                "payment_id": r.get("payment_id"),
+                "amount": amount,
+                "created_at": at,
+            }
+        )
+    if sum(e["amount"] for e in events) != refunded_amount:
+        return None
+    return events
+
+
+def _split_refund(order: dict[str, Any], amount: int) -> list[tuple[dict[str, Any], int]]:
+    """환불 금액을 품목 결제 금액 비율로 판매자에게 나눈다(내림, 나머지는 마지막 품목)."""
+    paid_items = [i for i in order["items"] if i.get("paid_amount")]
+    total_paid = sum(i["paid_amount"] for i in paid_items) or 1
+    left, out = amount, []
+    for idx, item in enumerate(paid_items):
+        share = left if idx == len(paid_items) - 1 else amount * item["paid_amount"] // total_paid
+        left -= share
+        out.append((item, share))
+    return out
+
+
+def refunds_from_orders(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """shop-api 주문의 환불을 판매자별 환불 기록으로 옮긴다.
+
+    - 주문 응답에 환불 기록(`refunds`)이 있으면 한 건씩 **환불 시각**으로 둔다.
+    - 없으면(예전 shop-api·다른 회사 판매 서버) `refunded_amount`를 주문 시각에 둔다.
+      어느 쪽을 썼는지는 `refund_basis(orders)`가 알려 준다.
+    - 판매자는 품목 결제 금액 비율로 나눈다(나머지는 마지막 품목). 환불 한 건마다 나눈다.
     """
     rows = []
     for o in orders:
-        amount = o["refunded_amount"]
-        if not amount:
+        if not o["refunded_amount"]:
             continue
-        paid_items = [i for i in o["items"] if i.get("paid_amount")]
-        total_paid = sum(i["paid_amount"] for i in paid_items) or 1
-        left = amount
-        for idx, item in enumerate(paid_items):
-            share = (
-                left if idx == len(paid_items) - 1 else amount * item["paid_amount"] // total_paid
-            )
-            left -= share
-            if share:
-                rows.append(
-                    {
-                        "refund_id": f"rfd_of_{o['order_id']}_{idx}",
-                        "order_id": o["order_id"],
-                        "payment_id": next(
-                            (p["payment_id"] for p in o["payments"] if p.get("payment_id")), None
-                        ),
-                        "buyer_id": o.get("buyer_id"),
-                        "seller_id": item.get("seller_id"),
-                        "amount": share,
-                        "created_at": o["created_at"],
-                        "execution_id": None,
-                    }
-                )
+        events = o.get("refund_events")
+        if events is None:
+            events = [
+                {
+                    "refund_id": f"rfd_of_{o['order_id']}",
+                    "payment_id": next(
+                        (p["payment_id"] for p in o["payments"] if p.get("payment_id")), None
+                    ),
+                    "amount": o["refunded_amount"],
+                    "created_at": o["created_at"],
+                }
+            ]
+        for e in events:
+            for idx, (item, share) in enumerate(_split_refund(o, e["amount"])):
+                if share:
+                    rows.append(
+                        {
+                            "refund_id": f"{e['refund_id']}_{idx}",
+                            "order_id": o["order_id"],
+                            "payment_id": e["payment_id"],
+                            "buyer_id": o.get("buyer_id"),
+                            "seller_id": item.get("seller_id"),
+                            "amount": share,
+                            "created_at": e["created_at"],
+                            "execution_id": None,
+                        }
+                    )
     return rows
+
+
+def refund_basis(orders: list[dict[str, Any]]) -> str:
+    """환불 시각 기준. 환불 주문에 모두 기록이 있으면 `refund_created_at`, 모두 없으면
+    `order_created_at`, 섞이면 `mixed`."""
+    kinds = {o.get("refund_events") is not None for o in orders if o.get("refunded_amount")}
+    if kinds == {False}:
+        return "order_created_at"
+    if kinds == {True, False}:
+        return "mixed"
+    return "refund_created_at"
 
 
 def normalize_execution(raw: dict[str, Any]) -> dict[str, Any] | None:
@@ -534,7 +591,7 @@ async def _live_books(
         mock=False,
         collected_at=fc.now(),
         unavailable=unavailable,
-        notes={"refund_basis": "order_created_at"},
+        notes={"refund_basis": refund_basis(orders)},
     )
 
 
