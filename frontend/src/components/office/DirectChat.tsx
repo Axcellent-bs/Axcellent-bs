@@ -7,6 +7,7 @@ import { loadOwners, loadThreadId, saveOwner, saveThreadId, threadKey } from "@/
 import type { ChatMessage, ChatStatus, ChatThread as BaseThread } from "@/lib/planningData";
 import { READER_AREAS } from "@/demo/members";
 import { useSession, type Account } from "@/demo/session";
+import { humanizePlanIds } from "@/lib/format"
 
 // AI 대화방의 직접 대화. 사람이 부서 AI 하나를 골라 바로 말을 건다.
 // 사람 말을 바로 받는 창구: 개발 AI(dashboard-api /api/dashboard/dev-chat), 인사 AI(/api/hr/chat), 기획 AI(dashboard-api /api/dashboard/planning-chat), 마케팅 AI(dashboard-api /api/dashboard/marketing-chat), 재무 AI(dashboard-api /api/dashboard/finance-chat), 총괄 AI(dashboard-api /api/dashboard/orchestrator-chat), 인프라 AI(dashboard-api /api/dashboard/infra-chat). 나머지 AI는 창구가 생길 때까지 "준비 중"으로 둔다.
@@ -246,7 +247,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
                   <li key={t.id} className={`rounded-lg px-2 py-1.5 text-xs ${thread?.id === t.id ? "bg-brand-50" : "bg-ink-50"}`}>
                     <span className="block truncate font-medium">{t.title || "제목 없는 대화"}</span>
                     <span className="text-[11px] text-ink-500">{when(t.createdAt)} · 메시지 {t.messageCount ?? t.messages.length}개 · {RESULT[t.status]}</span>
-                    {t.summary && <span className="mt-0.5 block text-[11px] text-ink-700">{t.summary}</span>}
+                    {t.summary && <span className="mt-0.5 block text-[11px] text-ink-700">{humanizePlanIds(t.summary)}</span>}
                     {account.admin && madeWork(t) && !t.restricted && (
                       <button type="button" className="mt-1 block text-[11px] font-medium text-brand-700 hover:underline" onClick={() => open(t)} disabled={!!sending}>원문 보기</button>
                     )}
@@ -266,7 +267,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
             </p>
           )}
           {thread?.restricted && (
-            <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">다른 사람의 대화(요약만 보임){thread.summary ? `: ${thread.summary}` : ""}</p>
+            <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">다른 사람의 대화(요약만 보임){thread.summary ? `: ${humanizePlanIds(thread.summary)}` : ""}</p>
           )}
           {readOnly
             ? <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">다른 사람의 대화예요. 코딩 작업이 생긴 대화라 관리자에게 원문을 보여 줘요. 이어서 말할 수는 없어요.</p>
@@ -296,7 +297,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
         ) : (
           thread?.status === "closed" ? (
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ink-100 px-4 py-3 text-sm text-ink-500 lg:px-6">
-              <span>끝난 대화예요. 이어서 말할 수 없어요.{thread.summary ? ` 요약: ${thread.summary}` : ""}</span>
+              <span>끝난 대화예요. 이어서 말할 수 없어요.{thread.summary ? ` 요약: ${humanizePlanIds(thread.summary)}` : ""}</span>
               <button type="button" className="btn-ghost" onClick={reset}>새 대화</button>
             </div>
           ) : (
@@ -321,7 +322,7 @@ function Bubble({ m, name, me, requestId = null, onGo, goBusy = false }: { m: Ch
     <li className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
       <span className="mb-1 px-1 text-[11px] text-ink-500">{mine ? (me ? "나" : "말한 사람") : name}{m.at ? ` · ${hhmm(m.at)}` : ""}</span>
       <div className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm ${mine ? "bg-brand-600 text-white" : m.kind === "error" ? "bg-red-50 text-red-800" : "bg-ink-100 text-ink-900"}`}>
-        {m.text}
+        {humanizePlanIds(m.text)}
         {m.plan && <PlanCard plan={m.plan} onGo={onGo} disabled={goBusy} />}
         {m.kind === "handoff" && <HandoffLine requestId={requestId} />}
         {m.kind === "started" && <p className="mt-1 text-xs opacity-80">코딩 작업을 시작했어요. 개발 AI 작업 현황에서 볼 수 있어요.</p>}

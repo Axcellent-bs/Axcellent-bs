@@ -5,9 +5,10 @@ import { kindLabel } from '@/lib/planningLabels'
 import { useEffect, useRef, useState, type Dispatch, type KeyboardEvent } from 'react'
 import {Select, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type Activity, type Dept, type Message, type State, type Thread } from '@/lib/planningData'
-import { Linked, Ref, toPath } from '@/components/planning-common/links'
+import { Linked, Ref, toPath, idText } from '@/components/planning-common/links'
 import { Dep, Grade, Point, Tag } from '@/components/planning-common/parts'
 import { useCommunications } from '@/components/planning-common/comms'
+import { humanizePlanIds } from '@/lib/format'
 
 // 채널마다 마지막으로 본 메시지 수 (화면을 옮겨도 유지)
 const seen = new Map<string, number>()
@@ -149,7 +150,7 @@ function ThreadView({ s, d, th }: { s: State; d: Dispatch<Action>; th: Thread })
       <section className="sl-main">
         <header className="sl-head">
           <div><b>{th.kind === 'dept' ? '' : '# '}{channelName(th)}</b> <span className="muted small">{topic(th)}</span></div>
-          {spec && <a href={toPath(`work/specs/${spec.id}`)} className="small">{spec.id} 문서 열기</a>}
+          {spec && <a href={toPath(`work/specs/${spec.id}`)} className="small">{idText(spec.id)} 문서 열기</a>}
         </header>
         <div className="sl-msgs">
           <div className="sl-day"><span>오늘</span></div>
@@ -158,13 +159,13 @@ function ThreadView({ s, d, th }: { s: State; d: Dispatch<Action>; th: Thread })
             <Row key={i} s={s} m={m} cont={i > 0 && th.messages[i - 1].who === m.who}>
               <div className="sl-tools">
                 {!m.decision && <button type="button" onClick={() => { d({ type: 'extractDecision', thread: th.id, index: i }); toast.show('결정으로 기록 → 인사에 ① 전송') }}>결정으로 기록</button>}
-                {docId && <button type="button" onClick={() => { d({ type: 'addBlock', doc: docId, kind: 'p', text: `${m.who}: ${m.text}` }); toast.show(`${docId}에 추가`) }}>문서에 추가</button>}
+                {docId && <button type="button" onClick={() => { d({ type: 'addBlock', doc: docId, kind: 'p', text: `${m.who}: ${m.text}` }); toast.show(`${idText(docId)}에 추가`) }}>문서에 추가</button>}
               </div>
             </Row>
           ))}
           {th.on === 'SPEC-7' && spec?.question && (
             <div className="question" style={{ margin: '8px 20px' }}>
-              질문 · {spec.question}
+              질문 · {humanizePlanIds(spec.question)}
             </div>
           )}
           <div ref={end} />
@@ -189,7 +190,7 @@ function ThreadView({ s, d, th }: { s: State; d: Dispatch<Action>; th: Thread })
           </>
         )}
         <div className="sl-info-h">문서에 옮길 곳</div>
-        <Select value={docId} onChange={(e) => setDocId(e.target.value)} options={s.docs.slice().reverse().map((x) => ({ value: x.id, label: `${x.id} ${x.title}` }))} />
+        <Select value={docId} onChange={(e) => setDocId(e.target.value)} options={s.docs.slice().reverse().map((x) => ({ value: x.id, label: `${idText(x.id)} ${x.title}` }))} />
         {docId && <a href={toPath(`docs/${docId}`)} className="small">{docId} 열기</a>}
         <div className="sl-info-h">이 채널의 결정 {decisions.length}건</div>
         {decisions.length ? decisions.map((x) => <div key={x.id} className="small"><Ref s={s} id={x.id} /> {x.text}</div>) : <span className="muted small">아직 없음</span>}
@@ -261,7 +262,7 @@ function Row({ s, m, cont, children }: { s: State; m: Message; cont: boolean; ch
             <b>{m.who}</b> <span className="muted small">{DEPT_NAME[m.dept]}{m.t ? ` · ${m.t.slice(6)}` : ''}</span>
           </div>
         )}
-        <div className="sl-text"><Linked s={s} text={m.text} /> {m.decision && <Tag tone="green">결정 {m.decision}</Tag>}</div>
+        <div className="sl-text"><Linked s={s} text={m.text} /> {m.decision && <Tag tone="green" title={m.decision}>{idText(m.decision)}</Tag>}</div>
       </div>
       {children}
     </div>

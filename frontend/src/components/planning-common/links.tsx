@@ -2,6 +2,7 @@
 // 주소는 다른 서비스처럼 react-router 경로 /planning|/dev/<메뉴>/<가로탭>/<항목>[/<하위 항목>]라 뒤로 가기·새 탭·주소 공유가 된다.
 import type { ReactNode } from 'react'
 import type { Dept, PR, Request, State } from '@/lib/planningData'
+import { planId } from '@/lib/format'
 
 // 후속 요청 = 장애 뒤 재발 방지(link_incident)처럼 끝난 일에서 이어진 요청
 export const isFollowUp = (r: Request) => r.via.includes('재발 방지')
@@ -81,9 +82,9 @@ export function nextOf(s: State, r: Request): { href: string; label: string } {
     const waiting = open.map((p) => reviewOf(s, p.id)).find(Boolean)
     if (waiting) return { href: reviewHref(waiting), label: waiting.lane === 'human' ? `${waiting.ref} 사람 확인하기` : `${waiting.ref} AI 검토 보기` }
     const fix = open.find((p) => p.reviews[p.reviews.length - 1] === '불일치' || s.reviews.some((x) => x.ref === p.id && x.result === '거절'))
-    if (fix) return { href: toPath(`work/prs/${prSlug(fix.id)}`), label: `${fix.id} 고친 뒤 다시 검사` }
+    if (fix) return { href: toPath(`work/prs/${prSlug(fix.id)}`), label: `${idText(fix.id)} 고친 뒤 다시 검사` }
     const pr = open[0] ?? s.prs.find((p) => tasks.includes(p.task))
-    return pr ? { href: toPath(`work/prs/${prSlug(pr.id)}`), label: `${pr.id} 보기` } : { href: spec ? toPath(`work/specs/${spec.id}`) : toPath('work/prs'), label: '개발 진행 보기' }
+    return pr ? { href: toPath(`work/prs/${prSlug(pr.id)}`), label: `${idText(pr.id)} 보기` } : { href: spec ? toPath(`work/specs/${spec.id}`) : toPath('work/prs'), label: '개발 진행 보기' }
   }
   return { href: toPath(`projects/${r.id}`), label: '진행 기록 보기' }
 }
@@ -117,12 +118,8 @@ export function hrefOf(s: State, id: string): string | undefined {
   return undefined
 }
 
-/** 화면에 보이는 번호만 한글로: REQ-26 → 요청-26 (저장·주소·메시지의 번호는 그대로) */
-const ID_KO: [string, string][] = [['REQ-', '요청-'], ['SPEC-', '기획서-'], ['PROP-', '제안-'], ['DOC-', '문서-'], ['TH-', '대화-'], ['XR-', '교차검증-'], ['AR-', '자동머지기준-'], ['T-', '태스크-'], ['D-', '결정-']]
-export function idText(id: string): string {
-  const hit = ID_KO.find(([en]) => id.startsWith(en))
-  return hit ? hit[1] + id.slice(hit[0].length) : id
-}
+/** 화면에 보이는 번호만 쉬운 말로: REQ-26 → 요청 26, T-25 → 작업 25 (저장·주소·메시지의 번호는 그대로, lib/format `planId`) */
+export const idText = planId
 
 export function Ref({ s, id, children, className }: { s: State; id: string; children?: ReactNode; className?: string }) {
   const href = hrefOf(s, id)
@@ -133,7 +130,7 @@ export function Ref({ s, id, children, className }: { s: State; id: string; chil
 }
 
 // 문장 안의 ID를 링크로 바꾼다 (규칙으로만, 없는 ID는 글자 그대로)
-const ID_RE = /(?<![A-Za-z0-9_])(REQ-\d+|SPEC-[A-Z]?\d+|T-[A-Z]?\d+|PROP-\d+|PR #\d+|ctx_(?:req|inc)_\d+|DOC-\d+|TH-\d+|D-\d+|XR-\d+|AR-\d+)/g
+const ID_RE = /(?<![A-Za-z0-9_])(REQ-\d+|SPEC-[A-Z]?\d+|T-[A-Z]?\d+|PROP-\d+|PR #\d+|ctx_(?:req|inc)_\d+|DOC-\d+|TH-\d+|D-\d+|XR-\d+|AR-\d+|DEP-\d+|RC-\d+)/g
 export function Linked({ s, text }: { s: State; text: string }) {
   const parts = text.split(ID_RE)
   return <>{parts.map((p, i) => (i % 2 ? <Ref key={i} s={s} id={p} /> : p))}</>

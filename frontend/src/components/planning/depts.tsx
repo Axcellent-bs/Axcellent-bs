@@ -4,6 +4,8 @@ import { useEffect, useState, type Dispatch } from 'react'
 import { Button, Card, Chip, Notice, PageHeader, Select, useToast } from '@dejafix/common-frontend'
 import { DEPT_ANSWER, DEPT_NAME, type Action, type Dept, type InboundKind, type State } from '@/lib/planningData'
 import { Point } from '@/components/planning-common/parts'
+import { idText } from '@/components/planning-common/links'
+import { humanizePlanIds } from '@/lib/format'
 
 interface Sender { kind: InboundKind; point: string; label: string; what: string }
 const DEPTS: { dept: Dept; owner: string; senders: Sender[] }[] = [
@@ -74,7 +76,7 @@ export function DeptSimulator({ s, d }: { s: State; d: Dispatch<Action> }) {
                   <div key={r.id} className="dept-send-row">
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <Point>threshold_change</Point>
-                      <div className="muted small">{r.id} {r.path} {r.lines}줄·{r.files}파일 · 근거 {r.basis.join(', ')}</div>
+                      <div className="muted small" title={r.id}>{idText(r.id)} {r.path} {r.lines}줄·{r.files}파일 · 근거 {r.basis.join(', ')}</div>
                     </div>
                     <Button size="small" variant="primary" onClick={() => d({ type: 'decideRule', rule: r.id, ok: true })}>태윤 승인</Button>
                     <Button size="small" onClick={() => d({ type: 'decideRule', rule: r.id, ok: false })}>거절</Button>
@@ -101,7 +103,7 @@ export function DeptSimulator({ s, d }: { s: State; d: Dispatch<Action> }) {
                     {inbox.slice(0, 5).map((m) => (
                       <li key={m.id} className={m.read ? '' : 'unread'}>
                         <div><Point>{m.point}</Point> <span className="muted small mono">{m.t}</span></div>
-                        <div className="small">{m.text}</div>
+                        <div className="small">{humanizePlanIds(m.text)}</div>
                       </li>
                     ))}
                   </ul>

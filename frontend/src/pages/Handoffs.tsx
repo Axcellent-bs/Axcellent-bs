@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router";
 import { AGENTS, SERVICES } from "@/demo/services";
 import { ApiError } from "@/lib/apiError";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
-import { ago, shortDateTime } from "@/lib/format";
+import { ago, shortDateTime, humanizePlanIds } from "@/lib/format";
 import {
   HANDOFF_STATUS_KO, HANDOFF_STATUS_TONE, RESULT_MAX, UNREACHABLE, completeHandoff, listHandoffs, refreshOpenCount, setOpenCount,
   type HandoffStatus, type HandoffTask,
@@ -89,7 +89,7 @@ function Detail({ task, onClosed }: { task: HandoffTask; onClosed: (t: HandoffTa
 
       <div className="space-y-1">
         <h3 className="text-sm font-semibold text-ink-700">넘어온 이유</h3>
-        <p className="whitespace-pre-wrap text-sm text-ink-900">{task.reason}</p>
+        <p className="whitespace-pre-wrap text-sm text-ink-900">{humanizePlanIds(task.reason)}</p>
       </div>
 
       <div className="space-y-1">
@@ -128,7 +128,7 @@ function Detail({ task, onClosed }: { task: HandoffTask; onClosed: (t: HandoffTa
       ) : (
         <div className="space-y-1 border-t border-ink-100 pt-4">
           <h3 className="text-sm font-semibold text-ink-700">{task.status === "done" ? "처리 결과" : "반려 이유"}</h3>
-          <p className="whitespace-pre-wrap text-sm text-ink-900">{task.result}</p>
+          <p className="whitespace-pre-wrap text-sm text-ink-900">{humanizePlanIds(task.result)}</p>
           {task.closed_at && <p className="text-xs text-ink-500">{shortDateTime(task.closed_at)}에 닫음</p>}
         </div>
       )}

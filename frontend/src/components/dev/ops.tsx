@@ -163,13 +163,13 @@ function IncidentPanel({ s, i }: { s: S; i: S['incidents'][number] }) {
         <Flow>
           <Step name="접수" on href={convoHref(i.ctx)} title={`${i.at} · 통합 에이전트`} />
           <Step name="원인 PR" on={i.candidates.length > 0} title={i.candidates.map((c) => c.pr).join(', ') || '없음'}>
-            <ul>{i.candidates.map((c) => <li key={c.pr}><Ref s={s} id={c.pr} /> · <a href={toPath(`work/specs/${c.spec}/${c.para}`)} className="plain-link">{c.spec} {c.para}</a> · {c.mergedAt} 머지</li>)}</ul>
+            <ul>{i.candidates.map((c) => <li key={c.pr}><Ref s={s} id={c.pr} /> · <a href={toPath(`work/specs/${c.spec}/${c.para}`)} className="plain-link" title={`${c.spec} ${c.para}`}>{idText(c.spec)} {c.para}</a> · {c.mergedAt} 머지</li>)}</ul>
           </Step>
           <Step name="되돌리기" on={!!i.rollbackCheck} title={i.rollbackCheck ? `${i.rollbackCheck.result} · ${i.rollbackCheck.target}` : '없음'}>
             {i.rollbackCheck && <p className="muted">{i.rollbackCheck.why}</p>}
           </Step>
           <Step name="기획 연결" on={i.linked} href={c0 && i.linked ? toPath(`work/specs/${c0.spec}/${c0.para}`) : undefined} title={i.linked ? i.candidates.map((c) => `${c.spec} ${c.para}`).join(', ') || '-' : '아직 안 이음'} />
-          <Step name="후속 요청" on={!!follow} href={follow ? hrefOf(s, follow.id) : undefined} title={follow ? `${follow.id} · ${follow.state}` : '없음'}>
+          <Step name="후속 요청" on={!!follow} href={follow ? hrefOf(s, follow.id) : undefined} title={follow ? `${idText(follow.id)} · ${follow.state}` : '없음'}>
             {follow && <p>{follow.title}</p>}
           </Step>
         </Flow>

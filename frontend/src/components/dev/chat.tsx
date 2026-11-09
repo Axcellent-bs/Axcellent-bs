@@ -7,8 +7,9 @@ import type { ChatMessage, ChatStatus, ChatThread, CodingMode, CodingStatus, Sta
 import { DEV_API, PlanningApiError, chatApi, codingSettingsApi, useMe, vcsApi, type CodingSettings, type VcsConnection } from '@/lib/planning'
 import { CODING_LABEL, CancelButton, ResumeButton, codingState, isRunning } from '@/components/dev/coding'
 import { State } from '@/components/planning-common/parts'
-import { go, toPath } from '@/components/planning-common/links'
+import { go, toPath, idText } from '@/components/planning-common/links'
 import { Tag } from '@/components/planning-common/parts'
+import { humanizePlanIds } from '@/lib/format'
 
 const api = chatApi(DEV_API)
 
@@ -175,7 +176,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
       <div className="chat-drawer-bar">
         <select className="text-input chat-sel" value={cur?.id ?? ''} onChange={(e) => chat.select(e.target.value || null)} aria-label="대화 고르기" disabled={!!pending}>
           <option value="">새 대화</option>
-          {threads.map((t) => <option key={t.id} value={t.id}>{`${t.title || t.id} · ${STATUS[t.status]?.label ?? t.status}`}</option>)}
+          {threads.map((t) => <option key={t.id} value={t.id}>{`${t.title || idText(t.id)} · ${STATUS[t.status]?.label ?? t.status}`}</option>)}
         </select>
         <button type="button" className="btn-ghost" onClick={() => chat.select(null)} disabled={!!pending || !cur}>새 대화</button>
       </div>
@@ -232,14 +233,14 @@ const Tools = ({ onTools }: { onTools: () => void }) => (
 
 // onGo: 마지막 계획 카드의 "이대로 진행" (누르면 "진행해"를 보내 기획에 넘긴다)
 function Msg({ m, s, onOpen, onGo }: { m: ChatMessage; s: S; onOpen: () => void; onGo?: () => void }) {
-  if (m.role === 'user') return <div className="bubble user">{m.text}</div>
-  if (m.kind === 'error') return <div className="bubble ai err">{m.text}</div>
-  if (m.kind === 'question' || m.kind === 'waiting') return <div className="bubble ai q">{m.text}</div>
+  if (m.role === 'user') return <div className="bubble user">{humanizePlanIds(m.text)}</div>
+  if (m.kind === 'error') return <div className="bubble ai err">{humanizePlanIds(m.text)}</div>
+  if (m.kind === 'question' || m.kind === 'waiting') return <div className="bubble ai q">{humanizePlanIds(m.text)}</div>
   if (m.kind === 'plan') {
     const p = m.plan
     return (
       <>
-        {m.text && <div className="bubble ai">{m.text}</div>}
+        {m.text && <div className="bubble ai">{humanizePlanIds(m.text)}</div>}
         {p && (
           <div className="chat-card">
             <div className="chat-card-h">{p.title}</div>
@@ -252,7 +253,7 @@ function Msg({ m, s, onOpen, onGo }: { m: ChatMessage; s: S; onOpen: () => void;
     )
   }
   if (m.kind === 'started') return <Started m={m} s={s} onOpen={onOpen} />
-  return <div className="bubble ai">{m.text}</div>
+  return <div className="bubble ai">{humanizePlanIds(m.text)}</div>
 }
 
 function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void }) {
@@ -263,7 +264,7 @@ function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void })
   const files = c?.files?.length ?? 0
   return (
     <>
-      {m.text && <div className="bubble ai">{m.text}</div>}
+      {m.text && <div className="bubble ai">{humanizePlanIds(m.text)}</div>}
       <div className="chat-card">
         <div className="chat-card-h">
           <span className="mono">{id ?? '작업'}</span>

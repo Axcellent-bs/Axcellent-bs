@@ -7,7 +7,7 @@ import {
 } from "@/lib/adminRelay";
 import { incidentTitle, stepLabel } from "@/lib/agentChat";
 import { durationKo, segmentsOf, type EventTimes } from "@/lib/duration";
-import { ago } from "@/lib/format";
+import { ago, humanizePlanIds } from "@/lib/format";
 import { recordState } from "@/lib/incidentRecord";
 import { Link, useSearchParams } from "@/lib/nav";
 import { CompanyName } from "@/demo/CompanyName";
@@ -220,7 +220,7 @@ function PastRecommendation({ incident }: { incident: Incident }) {
     <section className="card space-y-2 p-5">
       <h3 className="text-[15px] font-semibold">과거 사례로 본 추천</h3>
       {r.status !== "found" ? (
-        <p className="text-sm text-ink-500">추천할 과거 근거가 없습니다. {r.reason}.</p>
+        <p className="text-sm text-ink-500">추천할 과거 근거가 없습니다. {humanizePlanIds(r.reason)}.</p>
       ) : (
         <>
           <p className="text-sm">

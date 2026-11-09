@@ -5,6 +5,7 @@ import { DEPT_NAME, IRREVERSIBLE, TARGET_LABEL, TODAY, GUARD, OBSERVE_MIN, OBSER
 import { ActivityList, Dep, Lead, LinkTable, Point, State, Stats, Tag } from '@/components/planning-common/parts'
 import { Linked, Ref, hrefOf, prSlug, toPath, idText } from '@/components/planning-common/links'
 import { Flow, Head, Layout, ListPane, Step } from '@/components/planning-common/flow'
+import { humanizePlanIds } from '@/lib/format'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -14,7 +15,7 @@ export function Autonomy({ s, d, item }: P & { item?: string }) {
   const pol = s.autoPolicy
   const by = (st: AutoRule['status']) => pol.rules.filter((r) => r.status === st).length
   const linked = pol.history.filter((h) => h.result === '장애 연결').length
-  const off = (r: AutoRule) => { d({ type: 'disableRule', rule: r.id }); toast.show(`${r.id} 해제 · 이 범위는 다시 교차검증으로`) }
+  const off = (r: AutoRule) => { d({ type: 'disableRule', rule: r.id }); toast.show(`${idText(r.id)} 해제 · 이 범위는 다시 교차검증으로`) }
   const cols: Column<AutoRule>[] = [
     { key: 'id', header: '기준', render: (r) => <span className="mono idc" title={r.id}>{idText(r.id)}</span> },
     { key: 'what', header: '내용', render: (r) => <>{TARGET_LABEL[r.action]} · {ruleText(r)}</> },
@@ -83,11 +84,11 @@ export function Audit({ s, d }: P) {
   const cols: Column<AuditItem>[] = [
     { key: 't', header: '시각', render: (x) => <span className="mono small">{x.t.slice(6)}</span> },
     { key: 'kind', header: 'AI가 한 일', render: (x) => <State v={x.kind} /> },
-    { key: 'ref', header: '대상', render: (x) => <><Ref s={s} id={x.ref} /> <span className="small">{x.what}</span></> },
+    { key: 'ref', header: '대상', render: (x) => <><Ref s={s} id={x.ref} /> <span className="small">{humanizePlanIds(x.what)}</span></> },
     { key: 'basis', header: '근거', render: (x) => <span className="small">{x.rule && x.rule !== x.ref && <><Ref s={s} id={x.rule} /> · </>}<Linked s={s} text={x.basis} /></span> },
     { key: 'verifier', header: '검토한 쪽', render: (x) => <span className="small">{x.verifier}</span> },
-    { key: 'result', header: '결과', render: (x) => <span className="small">{x.result}</span> },
-    { key: 'off', header: '', render: (x) => x.rule && live.has(x.rule) ? <Button size="small" onClick={() => { d({ type: 'disableRule', rule: x.rule! }); toast.show(`${x.rule} 해제`) }}>이 기준 끄기</Button> : null },
+    { key: 'result', header: '결과', render: (x) => <span className="small">{humanizePlanIds(x.result)}</span> },
+    { key: 'off', header: '', render: (x) => x.rule && live.has(x.rule) ? <Button size="small" onClick={() => { d({ type: 'disableRule', rule: x.rule! }); toast.show(`${idText(x.rule)} 해제`) }}>이 기준 끄기</Button> : null },
   ]
   return (
     <>

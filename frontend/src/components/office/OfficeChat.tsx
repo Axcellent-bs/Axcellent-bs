@@ -4,6 +4,7 @@ import { TalkInput } from "@/components/office/TalkInput";
 import { proceed, type OfficeTalk } from "@/components/office/useOfficeTalk";
 import type { ChatItem, Tone } from "@/lib/agentChat";
 import { Link } from "@/lib/nav";
+import { humanizePlanIds } from "@/lib/format"
 
 // AI 오피스 옆 단톡방. AI 대화방과 같은 ChatItem을 메신저처럼 좁게 보여 준다 (결정 버튼은 두지 않고 AI 대화방으로 보낸다).
 
@@ -64,7 +65,7 @@ export function OfficeChat({ items, typing, freshIds, title, sub, talk }: { item
               <span className="flex gap-0.5" aria-hidden="true">
                 {[0, 1, 2].map((i) => <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-500" style={{ animationDelay: `${i * 120}ms` }} />)}
               </span>
-              <span className="truncate"><b className="font-semibold text-ink-700">{ty.name}</b> {ty.what} 중</span>
+              <span className="truncate"><b className="font-semibold text-ink-700">{ty.name}</b> {humanizePlanIds(ty.what)} 중</span>
             </li>
           ))}
         </ul>
@@ -79,14 +80,14 @@ function Row({ it, fresh, talk }: { it: ChatItem; fresh: boolean; talk?: OfficeT
   if (it.kind === "system") {
     return (
       <li className={`flex justify-center ${pop}`}>
-        <p className="max-w-[92%] rounded-full bg-ink-100 px-3 py-1 text-center text-[11px] text-ink-500">{it.text}</p>
+        <p className="max-w-[92%] rounded-full bg-ink-100 px-3 py-1 text-center text-[11px] text-ink-500">{humanizePlanIds(it.text)}</p>
       </li>
     );
   }
   if (it.kind === "separator") {
     return (
       <li role="separator" className="flex items-center gap-2 pt-1 text-[11px] font-medium text-ink-500">
-        <span className="h-px flex-1 bg-ink-300/60" /><span className="max-w-[80%] truncate">{it.text}</span><span className="h-px flex-1 bg-ink-300/60" />
+        <span className="h-px flex-1 bg-ink-300/60" /><span className="max-w-[80%] truncate">{humanizePlanIds(it.text)}</span><span className="h-px flex-1 bg-ink-300/60" />
       </li>
     );
   }
@@ -96,7 +97,7 @@ function Row({ it, fresh, talk }: { it: ChatItem; fresh: boolean; talk?: OfficeT
     return (
       <li className={`rounded-2xl bg-ink-900 px-3.5 py-2.5 text-app dark:bg-surface dark:text-ink-900 dark:ring-1 dark:ring-amber-700/40 ${pop}`}>
         <p className="text-[13px] font-semibold"><span aria-hidden="true">🚩 </span>{done ? "인간 판단" : "사람 판단 필요"}: {it.title}</p>
-        <p className="mt-0.5 text-[11px] opacity-75">{it.detail}</p>
+        <p className="mt-0.5 text-[11px] opacity-75">{humanizePlanIds(it.detail)}</p>
         {done ? <p className="mt-1 text-[11px] font-medium opacity-90">{outcome}</p>
           : it.contextId === "replay-scn-a" ? <p className="mt-1 text-[11px] opacity-90">리플레이에서는 잠시 뒤 자동으로 승인됩니다.</p>
           : <Link href="/agents/chat" className="mt-1.5 inline-block text-[11px] font-semibold underline underline-offset-2">AI 대화방에서 결정 →</Link>}
@@ -116,7 +117,7 @@ function Row({ it, fresh, talk }: { it: ChatItem; fresh: boolean; talk?: OfficeT
         <span className="text-[11px] text-ink-700">{it.from} <span className="text-ink-500">→ {it.to}</span></span>
         <div className={`mt-0.5 flex items-end gap-1.5 ${right ? "flex-row-reverse" : ""}`}>
           <div title={it.raw} className={`rounded-2xl px-3 py-1.5 text-[13px] leading-relaxed ${bubble}`}>
-            <p className={direct ? "whitespace-pre-wrap break-words" : undefined}>{right ? "" : TONE_ICON[it.tone]}{it.text}</p>
+            <p className={direct ? "whitespace-pre-wrap break-words" : undefined}>{right ? "" : TONE_ICON[it.tone]}{humanizePlanIds(it.text)}</p>
             {it.facts.length > 0 && (
               <dl className="mt-1 flex flex-wrap gap-1">
                 {it.facts.map((f) => (

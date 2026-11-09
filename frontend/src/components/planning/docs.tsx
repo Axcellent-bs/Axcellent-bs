@@ -18,8 +18,8 @@ export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: str
   const make = (
     <div className="dl-make">
       <Button size="small" onClick={() => { d({ type: 'newDoc', title: '' }); setSel(lastId) }}>+ 새 문서</Button>
-      <Select value={about} onChange={(e) => setAbout(e.target.value)} options={s.requests.map((r) => ({ value: r.id, label: `${r.id} ${r.title}` }))} />
-      <Button size="small" variant="primary" icon="sparkle" onClick={() => { d({ type: 'gatherDoc', about }); setSel(lastId); toast.show(`${about}에 걸린 것을 모아 ${lastId}로 정리`) }}>모아서 문서 만들기</Button>
+      <Select value={about} onChange={(e) => setAbout(e.target.value)} options={s.requests.map((r) => ({ value: r.id, label: `${idText(r.id)} ${r.title}` }))} />
+      <Button size="small" variant="primary" icon="sparkle" onClick={() => { d({ type: 'gatherDoc', about }); setSel(lastId); toast.show(`${idText(about)}에 걸린 것을 모아 ${idText(lastId)}로 정리`) }}>모아서 문서 만들기</Button>
     </div>
   )
 
@@ -67,7 +67,7 @@ export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: str
         {doc && <DocOutline doc={doc} />}
       </aside>
 
-      <section className="col-doc">{doc ? <Editor key={doc.id} doc={doc} d={d} s={s} /> : <span className="muted">{item} 문서가 없습니다.</span>}</section>
+      <section className="col-doc">{doc ? <Editor key={doc.id} doc={doc} d={d} s={s} /> : <span className="muted">{idText(item ?? '')} 문서가 없습니다.</span>}</section>
 
       <aside className="col-right">
         {doc && <Related doc={doc} s={s} />}
@@ -84,7 +84,7 @@ function DocOutline({ doc }: { doc: Doc }) {
   const jump = (id: string) => document.getElementById(`blk-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   return (
     <>
-      <div className="ph" style={{ marginTop: 10 }}>{doc.id} 개요</div>
+      <div className="ph" style={{ marginTop: 10 }} title={doc.id}>{idText(doc.id)} 개요</div>
       <ul className="outline">
         {heads.length ? heads.map((b) => <li key={b.id}><button type="button" onClick={() => jump(b.id)}>{b.text}</button></li>) : <li className="muted">소제목 없음</li>}
         {todos.length > 0 && <li><button type="button" onClick={() => jump(todos[0].id)}>할 일 {todos.filter((b) => b.done).length}/{todos.length}</button></li>}
@@ -97,11 +97,11 @@ function Editor({ doc, d, s }: { doc: Doc; d: Dispatch<Action>; s: State }) {
   const toast = useToast()
   const todos = doc.blocks.filter((b) => b.kind === 'todo')
   // 글은 칸에서 벗어날 때 저장된다. "저장"은 지금 쓰던 칸을 바로 저장한다
-  const saveNow = () => { (document.activeElement as HTMLElement | null)?.blur(); toast.show(`${doc.id} 저장됨`) }
+  const saveNow = () => { (document.activeElement as HTMLElement | null)?.blur(); toast.show(`${idText(doc.id)} 저장됨`) }
   const remove = () => {
-    if (!window.confirm(`${doc.id} "${doc.title}" 문서를 지울까요? 되돌릴 수 없어요.`)) return
+    if (!window.confirm(`${idText(doc.id)} "${doc.title}" 문서를 지울까요? 되돌릴 수 없어요.`)) return
     d({ type: 'deleteDoc', doc: doc.id })
-    toast.show(`${doc.id} 삭제`)
+    toast.show(`${idText(doc.id)} 삭제`)
     go(toPath('work/specs'))
   }
   return (
