@@ -209,6 +209,7 @@ async def test_recovery_reruns_impact_to_the_recovery_time(harness, monkeypatch)
     inc = await manager.handle(event(EventType.SHOP_DEGRADED, "evt_deg_1"))
     await manager.wait(inc.context_id)
     first = set(inc.outputs["impact"]["affected_customer_ids"])
+    first_finished = inc.steps["impact"].finished_at
     sent = harness.fakes.calls
     comp_before = len([1 for _, r in sent if r.skill == "request_incident_compensation"])
     seen = []
@@ -226,6 +227,10 @@ async def test_recovery_reruns_impact_to_the_recovery_time(harness, monkeypatch)
     assert seen[0]["window_to"] == recovered_at.strftime("%Y-%m-%dT%H:%M:%SZ")
     assert inc.outputs["impact"]["added_customer_ids"] == ["buyer-late-1", "buyer-late-2"]
     assert inc.steps["impact"].output is inc.outputs["impact"]
+    # 다시 계산한 시각은 따로 남기고, 단계 시간(첫 분석의 시작~끝)은 그대로다
+    impact_run = inc.steps["impact"]
+    assert impact_run.refreshed_at is not None and impact_run.finished_at == first_finished
+    assert impact_run.refreshed_at > first_finished
     keys = [r.meta.idempotency_key for _, r in harness.fakes.calls if r.skill == "impact_analysis"]
     assert len(keys) == 2 and len(set(keys)) == 2
     # 보상은 자동으로 다시 보내지 않는다

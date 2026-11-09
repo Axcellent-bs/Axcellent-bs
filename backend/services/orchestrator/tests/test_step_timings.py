@@ -160,3 +160,38 @@ async def test_step_timings_are_not_sent_while_the_incident_is_still_open(harnes
     inc = new_incident()
     await engine.sync_times(inc)  # 아직 열린 이벤트
     assert all("step_timings" not in c for c in _calls(harness))
+
+
+def _event(kind, event_id: str, at=None):
+    from ax_contracts.schemas import EventEnvelope
+
+    return EventEnvelope(
+        event_id=event_id,
+        type=kind,
+        occurred_at=at or now(),
+        source="shop-api",
+        idempotency_key=event_id,
+        data={"component": "payment", "metric_code": "p95_latency_ms", "severity": "high"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_recompute_after_recovery_does_not_stretch_the_impact_time(harness) -> None:
+    """복구 뒤 영향 분석을 다시 계산해도 일한 시간은 첫 분석의 시간이다."""
+    from ax_contracts.schemas import EventType
+    from ax_orchestrator.manager import IncidentManager
+
+    engine = await harness.start()
+    manager = IncidentManager(engine, scenario_a)
+    inc = await manager.handle(_event(EventType.SHOP_DEGRADED, "evt_deg_t"))
+    await manager.wait(inc.context_id)
+    inc.steps["impact"].finished_at = inc.steps["impact"].started_at + timedelta(seconds=7)
+    before = _by_step(step_timings(inc))["impact"]["work_seconds"]
+    recovered = _event(
+        EventType.SHOP_RECOVERED, "evt_rec_t", at=inc.opened_at + timedelta(seconds=240)
+    )
+    await manager.process(recovered)
+    after = _by_step(step_timings(inc))["impact"]["work_seconds"]
+    assert before == after == 7.0
+    restored = incident_from_dict(incident_to_dict(inc))
+    assert restored.steps["impact"].refreshed_at == inc.steps["impact"].refreshed_at

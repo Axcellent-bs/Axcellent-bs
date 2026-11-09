@@ -67,6 +67,7 @@ def step_to_dict(run: StepRun) -> dict[str, Any]:
         "handoff_task_id": run.handoff_task_id,
         "approval_wait_seconds": run.approval_wait_seconds,
         "human_wait_seconds": run.human_wait_seconds,
+        "refreshed_at": _dt(run.refreshed_at),
     }
 
 
@@ -88,6 +89,7 @@ def step_from_dict(raw: dict[str, Any]) -> StepRun:
         handoff_task_id=raw.get("handoff_task_id"),
         approval_wait_seconds=raw.get("approval_wait_seconds"),
         human_wait_seconds=raw.get("human_wait_seconds"),
+        refreshed_at=_parse(raw.get("refreshed_at")),
     )
 
 

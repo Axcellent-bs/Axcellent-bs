@@ -1,7 +1,7 @@
 // 에이전트 평가 화면 → 인사 AI가 모은 판정 (dashboard-api /agent-evaluation). 모양은 contracts/hr.py 그대로다.
 // 화면은 점수·등급·순위를 만들지 않는다. 사람이 "제때 끝냈다 / 늦었다"를 바로 읽도록 문장과 점으로만 보인다.
 
-export type Verdict = "normal" | "check" | "no_record" | "blocked" | "approval_expired" | "in_progress" | "absent";
+export type Verdict = "normal" | "check" | "no_record" | "blocked" | "approval_expired" | "in_progress" | "absent" | "handed_off";
 
 export interface AgentEventDot {
   context_id: string;
@@ -19,6 +19,7 @@ export interface AgentSummary {
   check: number;
   no_record: number;
   blocked: number;
+  handed_off: number;
   approval_expired: number;
   in_progress: number;
   retried: number;
@@ -79,6 +80,8 @@ export const VERDICT: Record<Verdict, { label: string; mark: string; dot: string
   check: { label: "확인 필요", mark: "▲", dot: "text-amber-600", chip: "bg-amber-50 text-amber-700" },
   no_record: { label: "기록 없음", mark: "○", dot: "text-ink-400", chip: "bg-ink-100 text-ink-600" },
   blocked: { label: "실패·막힘", mark: "✕", dot: "text-red-600", chip: "bg-red-50 text-red-700" },
+  // 사람에게 넘김은 설계된 동작이라 실패처럼 보이지 않게 빨강·노랑을 피하고 중립 색을 쓴다
+  handed_off: { label: "사람에게 넘김", mark: "⇢", dot: "text-sky-700", chip: "bg-sky-50 text-sky-800" },
   approval_expired: { label: "승인 만료", mark: "✕", dot: "text-red-600", chip: "bg-red-50 text-red-700" },
   in_progress: { label: "진행 중", mark: "…", dot: "text-ink-400", chip: "bg-ink-100 text-ink-600" },
   absent: { label: "참여 안 함", mark: "–", dot: "text-ink-300", chip: "bg-ink-100 text-ink-500" },
@@ -103,6 +106,7 @@ export function readout(a: AgentSummary): { text: string; tone: Tone } {
   if (count("check")) rest.push(`${count("check")}건은 늦었거나 다시 시도했어요`);
   if (count("blocked")) rest.push(`${count("blocked")}건은 실패하거나 막혔어요`);
   if (count("approval_expired")) rest.push(`${count("approval_expired")}건은 승인이 만료됐어요`);
+  if (count("handed_off")) rest.push(`${count("handed_off")}건은 사람의 확인이 필요해 사람에게 넘겼어요`);
   if (count("no_record")) rest.push(`${count("no_record")}건은 시간 기록이 없어요`);
   if (count("in_progress")) rest.push(`${count("in_progress")}건은 아직 끝나지 않았어요`);
   const bad = count("blocked", "approval_expired") > 0;

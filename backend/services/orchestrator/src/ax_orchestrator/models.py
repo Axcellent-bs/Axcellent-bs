@@ -76,6 +76,9 @@ class StepRun:
     # 사람 할 일함 대기: 넘긴 때 ~ 사람이 끝낸 때
     approval_wait_seconds: float | None = None
     human_wait_seconds: float | None = None
+    # 복구 뒤 영향 분석을 같은 구간으로 다시 계산한 시각. 단계 시간(started_at~finished_at)은
+    # 첫 분석의 것이라, 다시 계산한 시각을 finished_at에 덮어쓰지 않는다(몇 분 뒤라서 부풀려진다)
+    refreshed_at: datetime | None = None
 
     def view(self) -> dict[str, Any]:
         return {
@@ -94,6 +97,7 @@ class StepRun:
             "handoff_task_id": self.handoff_task_id,
             "approval_wait_seconds": self.approval_wait_seconds,
             "human_wait_seconds": self.human_wait_seconds,
+            "refreshed_at": iso(self.refreshed_at),
             "output": self.output,
         }
 
