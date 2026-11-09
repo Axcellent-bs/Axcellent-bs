@@ -19,7 +19,9 @@ from finance_agent.rules import applied, load_rules
 
 Verdict = Literal["good", "neutral", "bad"]
 VERDICT_KO = {"good": "좋음", "neutral": "보통", "bad": "나쁨"}
-DECISION_KO = {"approved": "승인", "conditional": "조건부 승인", "rejected": "거절"}
+# 재무는 비용을 승인·반려하지 않는다(2026-11-06). 판단 이름은 기록 호환으로 두고 의견으로 읽는다
+DECISION_KO = {"approved": "권장", "conditional": "줄여서 권장", "rejected": "권하지 않음"}
+OPINION_OF = {"approved": "recommend", "conditional": "reduce", "rejected": "not_recommended"}
 
 
 def _month(day: str) -> str:
@@ -371,9 +373,12 @@ def decide(
     monthly_budget: dict[str, Any] | None = None,
     started: dict[str, dict[str, Any]] | None = NO_STARTS,
 ) -> dict[str, Any]:
-    """승인·조건부·거절. 거절 사유가 있어도 모든 기준의 확인 결과를 근거로 남긴다.
+    """재무 의견: 권장·줄여서 권장·권하지 않음. 집행을 막지 않는다(막는 것은 안전 관문과 사람).
 
-    `started`가 None이면 안전 관문 기록을 못 읽은 것이다. 쓴 돈을 모르니 승인하지 않는다.
+    기록 이름은 approved·conditional·rejected 그대로다. 권하지 않는 이유가 있어도 모든 기준의
+    확인 결과를 근거로 남긴다.
+
+    `started`가 None이면 안전 관문 기록을 못 읽은 것이다. 쓴 돈을 모르니 권하지 않는다.
     """
     book = load_rules()
     brake, lesson_rules = book.brake, book.lessons
@@ -405,7 +410,7 @@ def decide(
         detail = f"앞으로 {weeks}주 현금 흐름을 확인할 수 없음"
         if brake.min_viable_krw < limit:  # 현금을 모르면 큰돈은 쓰지 않고, 흐름은 멈추지 않는다
             limit = brake.min_viable_krw
-            limits.append(f"{detail}. 최소 금액 {fc.won(limit)}까지만 승인")
+            limits.append(f"{detail}. 최소 금액 {fc.won(limit)}까지만 권장")
     elif cash_net_krw <= 0:
         detail = f"앞으로 {weeks}주 누적 순현금 {fc.won(cash_net_krw)}"
         rejects.append(detail)
@@ -413,7 +418,7 @@ def decide(
         detail = f"앞으로 {weeks}주 누적 순현금 {fc.won(cash_net_krw)}"
         if cash_net_krw < limit:
             limit = cash_net_krw
-            limits.append(f"{detail}까지만 승인")
+            limits.append(f"{detail}까지만 권장")
     rules.append(applied("BRK-004", detail))
 
     # 남은 예산
@@ -432,7 +437,7 @@ def decide(
         rejects.append(f"{detail}, 최소 {fc.won(brake.min_viable_krw)}보다 적음")
     elif budget_limited:
         limit = remaining
-        limits.append(f"{detail}까지만 승인")
+        limits.append(f"{detail}까지만 권장")
 
     # 실패 교훈
     open_lessons = [x for x in lessons if x["channel"] == channel and x["status"] == "open"]
@@ -451,20 +456,23 @@ def decide(
             limits.append(detail)
 
     if not rejects and limit < brake.min_viable_krw:
-        rejects.append(
-            f"승인 가능 금액 {fc.won(limit)}이 최소 {fc.won(brake.min_viable_krw)}보다 적음"
-        )
+        rejects.append(f"권장 금액 {fc.won(limit)}이 최소 {fc.won(brake.min_viable_krw)}보다 적음")
     rules.append(applied("BRK-005"))
 
     if rejects:
         decision, limit, reasons = "rejected", 0, rejects
-        advice = "이번 요청은 집행하지 않습니다. 필요하면 재무 담당이 기준을 고쳐야 합니다."
+        advice = (
+            "재무는 이번 요청을 권하지 않습니다. 집행 여부는 요청한 쪽과 사람이 정하고, "
+            "재무는 결과를 장부에 기록합니다."
+        )
     elif limit < requested:
         decision, reasons = "conditional", limits
-        advice = f"{fc.won(limit)} 이내로 줄여서 집행하세요."
+        advice = (
+            f"{fc.won(limit)} 이내로 줄이기를 권합니다. 집행 여부는 요청한 쪽과 사람이 정합니다."
+        )
     else:
         decision, reasons = "approved", ["모든 기준을 통과함"]
-        advice = "요청 금액 그대로 집행할 수 있습니다."
+        advice = "요청 금액 그대로 써도 재무 기준에 걸리지 않습니다."
     return {
         "campaign_id": request["campaign_id"],
         "campaign_name": request["campaign_name"],
@@ -518,7 +526,7 @@ def compare_with_history(
 
 
 def budget_opinion(review: dict[str, Any]) -> dict[str, Any]:
-    """거절·조건부 승인을 총괄에 알리는 의견."""
+    """권하지 않음·줄여서 권장을 총괄에 알리는 의견."""
     return {
         "opinion_id": review["review_id"].replace("bud_", "op_bud_"),
         "kind": "budget_decision",
@@ -628,14 +636,14 @@ def insights(
                 "severity": "warn",
                 "title": "예산 초과가 반복됩니다",
                 "message": (
-                    f"최근 {cfg.overrun_window_days}일 동안 승인 한도나 남은 예산을 "
+                    f"최근 {cfg.overrun_window_days}일 동안 재무 권장 금액이나 남은 예산을 "
                     "넘는 일이 반복됐습니다."
                 ),
                 "evidence": [
                     *[
                         _evidence(
                             c["campaign_name"],
-                            f"승인 {fc.won(limit_of[c['campaign_id']])}, "
+                            f"권장 {fc.won(limit_of[c['campaign_id']])}, "
                             f"실제 {fc.won(c['spend_krw'])}",
                         )
                         for c in overspent

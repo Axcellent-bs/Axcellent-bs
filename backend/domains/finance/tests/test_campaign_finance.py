@@ -356,8 +356,10 @@ def test_skill_acl_and_record_flow() -> None:
     blocked = client.post("/a2a", json=_body("review_campaign_budget", _ask(), "mock:hr"))
     assert blocked.json()["status"] != "completed"
     reviewed = client.post("/a2a", json=_body("review_campaign_budget", _ask(), "mock:marketing"))
-    assert reviewed.json()["output"]["decision"] == "approved"
-    assert got == []  # 승인은 총괄에 알리지 않는다
+    out = reviewed.json()["output"]
+    assert out["decision"] == "approved" and out["advisory"] is True
+    assert (out["opinion"], out["suggested_krw"]) == ("recommend", out["requested_krw"])
+    assert got == []  # 권장은 총괄에 알리지 않는다
 
     done = client.post(
         "/a2a", json=_body("record_campaign_result", _result("new", gmv=0), "mock:marketing")
@@ -380,8 +382,26 @@ def test_rejection_goes_to_orchestrator_as_opinion() -> None:
 
     state().cash_override = 0
     asyncio.run(handlers.review_budget(handlers.CampaignBudgetReviewInput(**_ask()), "ctx"))
-    assert got[0]["kind"] == "budget_decision" and got[0]["verdict"] == "거절"
+    assert got[0]["kind"] == "budget_decision" and got[0]["verdict"] == "권하지 않음"
     assert got[0]["reasons"] and got[0]["applied_rules"]
+
+
+def test_finance_never_blocks_the_request_and_keeps_its_opinion() -> None:
+    """재무는 비용을 승인·반려하지 않는다(멘토 피드백). 권하지 않을 때도 요청 쪽이 막지 않게
+    decision은 approved·한도는 요청액으로 주고, 의견은 opinion·suggested_krw·reasons에 담는다."""
+    _sender(state())
+    state().cash_override = 0  # 앞으로 순현금 0 → 재무는 권하지 않는다
+    client = TestClient(app)
+    answer = client.post(
+        "/a2a", json=_body("review_campaign_budget", _ask(100_000), "mock:marketing")
+    ).json()
+    out = answer["output"]
+    assert answer["outcome"] == "not_recommended"
+    assert (out["decision"], out["approved_limit_krw"]) == ("approved", 100_000)
+    assert (out["advisory"], out["opinion"], out["suggested_krw"]) == (True, "not_recommended", 0)
+    assert out["reasons"] and "권하지 않습니다" in out["recommendation"]
+    # 장부의 판단 기록은 실제 의견을 남긴다 (화면·인사이트용)
+    assert state().records.budget_reviews[-1]["decision"] == "rejected"
 
 
 def test_undelivered_opinion_stays_pending_and_retries() -> None:
@@ -418,7 +438,8 @@ def _verify(amount: int, params: dict) -> dict:
     return client.post("/a2a", json=_body("verify_campaign_budget", data, "mock:safety")).json()
 
 
-def test_gate_verification_uses_the_approved_limit() -> None:
+def test_old_gate_verification_never_blocks_and_carries_the_opinion() -> None:
+    """관문은 더 부르지 않지만, 예전 skill이 불려도 막지 않고 재무 의견만 돌려준다."""
     _sender(state())
     state().cash_override = 10_000_000
     params = {"campaign_id": "new", "campaign_name": "n", "channel": "릴스"}
@@ -435,9 +456,11 @@ def test_gate_verification_uses_the_approved_limit() -> None:
     )
     client = TestClient(app)
     client.post("/a2a", json=_body("review_campaign_budget", _ask(100_000), "mock:marketing"))
-    assert _verify(50_000, params)["output"]["decision"] == "approved"
+    within = _verify(50_000, params)["output"]
+    assert (within["decision"], within["opinion"]) == ("approved", "recommend")
     over = _verify(100_000, params)["output"]
-    assert over["decision"] == "rejected" and over["approved_limit_krw"] == 50_000
+    assert (over["decision"], over["reason_code"]) == ("approved", "finance_advisory_only")
+    assert (over["opinion"], over["suggested_krw"]) == ("reduce", 50_000)
     assert _verify(1000, {"campaign_id": "x"})["output"]["reason_code"] == "invalid_params"
 
 

@@ -47,7 +47,7 @@ async def test_verify_task_carries_code_amount_not_claims(
     task = verifier.tasks[0]
     assert (task.verifier, task.skill) == ("finance", "verify_bonus")
     assert task.input["computed_amount"] == 15_000
-    assert task.input["threshold_version"] == 7
+    assert task.input["threshold_version"] == 8
     assert task.timeout_seconds == 30
 
 
