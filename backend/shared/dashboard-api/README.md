@@ -151,6 +151,17 @@ support 출력은 `claim_mapping.py`에서 화면 모델로 바꾼다 (값을 �
 - **임시 값이다.** 화면 호출용 접두사는 계약 `ContextPrefix`와 `docs/agent-common.md`에 아직 없다 (요청 이슈 참고). 정해지면 상수만 바꾼다.
 - 이미 사건이 있는 대상(인수인계 질문, 클레임 지급 등)은 그 사건의 `context_id`를 그대로 쓴다.
 
+### 근무 상태·휴가 (AI 사무실 머리 위 표시)
+
+끄는 스위치: `DASHBOARD_PRESENCE_ENABLED`. **기본 꺼짐**이고 `1`일 때만 켠다(끄면 아래 두 경로가 404 `PRESENCE_DISABLED`). 251은 시범 팀만 켠다.
+
+| 경로 | 하는 일 |
+| --- | --- |
+| `GET /api/dashboard/presence?area=` | 담당별 상태 코드(`working`·`off_shift`·`on_leave`). 모두에게 보인다. 사람 토큰이 있는 요청에만 휴가 기간·입력자(`leaves`)를 담는다 |
+| `POST /api/dashboard/presence/leaves` | 휴가 기간 기록(사람 토큰 필요, 입력자는 토큰의 이름). 사유·종류는 받지 않는다(보내면 422) |
+
+사람별 로그인이 생기기 전까지 "관리자"는 사람 토큰을 가진 요청이다. 토큰이 공용이면 누구 것인지 가려지지 않으므로, 사람별 로그인이 들어오면 상세·기록을 인사 지정자로 좁힌다.
+
 ## 4. 의존
 ax-contracts, ax-agent-template
 ## 5. 하지 않는 것
