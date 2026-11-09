@@ -41,6 +41,9 @@ def clean_source_tag(value: str | None) -> str | None:
     return value if _SOURCE_TAG.fullmatch(value) else None
 
 
+_REFUND_CHUNK = 500  # IN (...) 한 번에 넣는 주문 수(SQLite 변수 상한 안쪽)
+
+
 def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -217,9 +220,41 @@ class Shop:
         with self.db.tx() as conn:
             sql = "SELECT order_id FROM orders" + (" WHERE " + " AND ".join(where) if where else "")
             ids = [r["order_id"] for r in conn.execute(sql + " ORDER BY order_id", args)]
-            return [self._order(conn, order_id) for order_id in ids]
+            refunds = self._refunds_by_order(conn, ids)
+            return [self._order(conn, order_id, refunds) for order_id in ids]
 
-    def _order(self, conn: sqlite3.Connection, order_id: str) -> dict[str, Any]:
+    @staticmethod
+    def _refunds_by_order(
+        conn: sqlite3.Connection, order_ids: list[str]
+    ) -> dict[str, list[dict[str, Any]]]:
+        """주문 id 묶음의 환불 기록을 쿼리 몇 번으로 읽는다(주문마다 읽지 않는다). 시각 오름차순."""
+        found: dict[str, list[dict[str, Any]]] = {}
+        for start in range(0, len(order_ids), _REFUND_CHUNK):
+            chunk = order_ids[start : start + _REFUND_CHUNK]
+            marks = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                "SELECT order_id, refund_id, payment_id, amount, created_at FROM refunds "
+                f"WHERE order_id IN ({marks}) ORDER BY created_at, rowid",
+                chunk,
+            )
+            for r in rows:
+                found.setdefault(r["order_id"], []).append(
+                    {
+                        "refund_id": r["refund_id"],
+                        "payment_id": r["payment_id"],
+                        "amount": r["amount"],
+                        "created_at": r["created_at"],
+                    }
+                )
+        return found
+
+    def _order(
+        self,
+        conn: sqlite3.Connection,
+        order_id: str,
+        refunds: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> dict[str, Any]:
+        """`refunds`는 목록 조회가 미리 읽어 온 묶음. 없으면(단건) 이 주문 것만 읽는다."""
         order = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
         if order is None:
             raise ShopError("ORDER_NOT_FOUND", "주문을 찾을 수 없다", 404)
@@ -235,16 +270,17 @@ class Shop:
             "FROM payments WHERE order_id = ? ORDER BY rowid",
             (order_id,),
         ).fetchall()
-        refunded = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS total FROM refunds WHERE order_id = ?",
-            (order_id,),
-        ).fetchone()["total"]
+        if refunds is None:
+            refunds = self._refunds_by_order(conn, [order_id])
+        refund_list = refunds.get(order_id, [])
+        refunded = sum(r["amount"] for r in refund_list)
         return {
             "order_id": order["order_id"],
             "buyer_id": order["buyer_id"],
             "status": order["status"],
             "total_amount": order["total_amount"],
             "refunded_amount": refunded,
+            "refunds": refund_list,
             "shipping_fee": order["shipping_fee"],
             "points_used": order["points_used"],
             "coupon_id": order["coupon_id"],
