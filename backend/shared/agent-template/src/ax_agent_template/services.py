@@ -32,7 +32,15 @@ SERVICES: tuple[Service, ...] = (
         "orchestrator",
         "orchestrator",
         8000,
-        ("find_active_incident", "answer_planning_question", "receive_finance_opinion"),
+        (
+            "find_active_incident",
+            "answer_planning_question",
+            "receive_finance_opinion",
+            "orchestrator_chat_send",
+            "orchestrator_chat_close",
+            "orchestrator_chat_list",
+            "orchestrator_chat_get",
+        ),
         "총괄·사건",
     ),
     Service(

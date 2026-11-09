@@ -55,6 +55,7 @@ from ax_dashboard_api import (
     mock_data,
     mock_handover,
     mock_hr,
+    orchestrator_chat,
     planning_chat,
     relay,
     support_chat,
@@ -997,6 +998,48 @@ async def finance_chat_send(body: FinanceChatSendBody, request: Request) -> dict
 async def finance_chat_close(thread_id: str, request: Request) -> dict:
     who = human_from_authorization(request.headers.get("authorization"))
     out = await finance_chat.call("finance_chat_close", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+# ---- 총괄 AI 직접 대화 (→ 총괄 `orchestrator_chat_*`). 재무 AI 대화와 같은 모양이다.
+# 조회·설명만 한다(이벤트·승인·단계는 바꾸지 않는다). 사람 토큰이 필요하다
+class OrchestratorChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/orchestrator-chat")
+async def orchestrator_chat_list(request: Request) -> dict:
+    """총괄 AI 대화 목록. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await orchestrator_chat.call("orchestrator_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/orchestrator-chat/{thread_id}")
+async def orchestrator_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "thread_id": thread_id}
+    out = await orchestrator_chat.call("orchestrator_chat_get", payload)
+    return ok(out["thread"])
+
+
+@router.post("/orchestrator-chat")
+async def orchestrator_chat_send(body: OrchestratorChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await orchestrator_chat.call("orchestrator_chat_send", payload)
+    return ok(out["thread"])
+
+
+@router.post("/orchestrator-chat/{thread_id}/close")
+async def orchestrator_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "thread_id": thread_id}
+    out = await orchestrator_chat.call("orchestrator_chat_close", payload)
     return ok(out["thread"])
 
 

@@ -26,6 +26,8 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.finance import FinanceOpinion, ReceiveFinanceOpinionOutput
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
+from ax_orchestrator.chat.a2a import CHAT_HANDLERS
+from ax_orchestrator.chat.turn import get_chat_service
 from ax_orchestrator.manager import IncidentManager
 from ax_orchestrator.planning_questions import answer_question
 
@@ -171,11 +173,13 @@ def receive_finance_opinion(get_manager: GetManager) -> Handler:
 
 def build_a2a_app(get_manager: GetManager) -> FastAPI:
     """`/a2a`와 `/.well-known/agent-card.json`을 가진 앱. 총괄 서버 맨 끝에 붙인다."""
+    get_chat_service(get_manager)  # 대화가 이벤트 기록을 읽을 수 있게 매니저를 넘겨 둔다
     return create_agent_app(
         load_card(),
         {
             "find_active_incident": find_active_incident(get_manager),
             "answer_planning_question": answer_planning_question(get_manager),
             "receive_finance_opinion": receive_finance_opinion(get_manager),
+            **CHAT_HANDLERS,
         },
     )

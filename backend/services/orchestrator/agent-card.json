@@ -48,6 +48,54 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
+    },
+    {
+      "id": "orchestrator_chat_send",
+      "description": "말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 orchestrator_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. LLM은 코드가 모은 총괄 사실(이벤트 단계·시간·승인 대기)만 풀어 쓴다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy. 총괄 AI 직접 대화(dashboard-api /api/dashboard/orchestrator-chat). 조회·설명만 하고 이벤트·승인·단계의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/orchestrator_chat.py#OrchestratorChatSendInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/orchestrator_chat.py#OrchestratorChatThreadOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "orchestrator_chat_list",
+      "description": "대화 목록(최근 순). 본인 대화는 원문, 다른 사람 대화는 messages 빈 목록+summary+restricted true. 30분 말이 없던 대화는 이때 끝낸다. 총괄 AI 직접 대화(dashboard-api /api/dashboard/orchestrator-chat). 조회·설명만 하고 이벤트·승인·단계의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/orchestrator_chat.py#OrchestratorChatListInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/orchestrator_chat.py#OrchestratorChatListOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "orchestrator_chat_get",
+      "description": "대화 하나. 열람 규칙은 orchestrator_chat_list와 같다. 없으면 not_found. 총괄 AI 직접 대화(dashboard-api /api/dashboard/orchestrator-chat). 조회·설명만 하고 이벤트·승인·단계의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/orchestrator_chat.py#OrchestratorChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/orchestrator_chat.py#OrchestratorChatThreadOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "orchestrator_chat_close",
+      "description": "대화를 끝낸다(status closed). 요약이 비어 있으면 첫 질문 일부를 남긴다. 남의 대화는 forbidden. 총괄 AI 직접 대화(dashboard-api /api/dashboard/orchestrator-chat). 조회·설명만 하고 이벤트·승인·단계의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/orchestrator_chat.py#OrchestratorChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/orchestrator_chat.py#OrchestratorChatThreadOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }
