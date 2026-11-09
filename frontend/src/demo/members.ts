@@ -83,7 +83,13 @@ export const memberLinked = (email: string, ip = thisPcIp(), l = links) => l.ema
 // ---------------------------------------------------------------- 회원 부서·확인 권한
 // 관리자가 회원·서버 관리(/system/members)에서 바꾼 부서·확인 권한. 이메일을 열쇠로 기억하고 데모 계정에도 덮어쓴다.
 // 확인 권한: 받은 요청 중 위험한 건(환불·롤백 등)을 승인할 수 있다.
-export type MemberProfile = { dept?: string; approver?: boolean }
+// 열람 담당: 인사·재무 AI의 다른 사람 대화 요약을 본다. 지정하지 않으면 관리자만 본다 (그 밖의 AI는 모두가 본다).
+export const READER_AREAS = [
+  { id: 'hr', label: '인사' },
+  { id: 'finance', label: '재무' },
+] as const
+export type ReaderArea = (typeof READER_AREAS)[number]['id']
+export type MemberProfile = { dept?: string; approver?: boolean; readers?: ReaderArea[] }
 const PROFILE_KEY = 'axcellent-demo-member-profiles'
 const readProfiles = (): Record<string, MemberProfile> => {
   try {
@@ -112,7 +118,14 @@ export function setProfile(email: string, patch: MemberProfile) {
   profileListeners.forEach((l) => l())
 }
 /** 계정에 관리자가 바꾼 부서·확인 권한을 덮어쓴다 */
-export const withProfile = <T extends { email: string; dept?: string; approver?: boolean }>(a: T, p = profiles): T => {
+export const withProfile = <T extends { email: string; dept?: string; approver?: boolean; readers?: ReaderArea[] }>(a: T, p = profiles): T => {
   const o = p[norm(a.email)]
-  return o ? { ...a, ...(o.dept !== undefined ? { dept: o.dept } : {}), ...(o.approver !== undefined ? { approver: o.approver } : {}) } : a
+  return o
+    ? {
+        ...a,
+        ...(o.dept !== undefined ? { dept: o.dept } : {}),
+        ...(o.approver !== undefined ? { approver: o.approver } : {}),
+        ...(o.readers !== undefined ? { readers: o.readers } : {}),
+      }
+    : a
 }
