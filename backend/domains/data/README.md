@@ -961,6 +961,21 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 4-2. **숏츠 형식 단계**: ① `topic` 이 주제 근거 숏츠(shorts_stats가 분류해 둔 것) 중 가장 많은 형식 → 없으면 ② `category` 이 주제 분류의 숏츠 통계(`by_category[].formats`, 표본이 `[shorts] min_sample` 이상일 때만)에서 가장 많은 형식 → 없으면 ③ `all` 전체 숏츠 통계(`by_format`)에서 가장 많은 형식. ②·③에서는 목록 밖 형식 "기타"와 미분류를 고르지 않는다(표본 수에는 센다). 칸: `shorts_format_source`(단계), `shorts_format_source_count`(그 단계에서 이 형식인 숏츠 수)·`shorts_format_source_total`(그 단계에서 형식을 분류한 숏츠 수), ②·③이면 `shorts_format_reason`에 앞 단계를 못 쓴 이유. 중앙값·기준 시각(`shorts_format_median_views`·`shorts_format_at`)은 어느 단계든 숏츠 통계의 그 형식 값. 한 줄 데이터 블록에도 "숏츠 형식을 고른 단계"를 넣어 이 주제 숏츠의 형식처럼 쓰지 않게 한다
 5. **한 줄**: 인사이트마다 근거 숫자만 데이터 블록에 넣고 묶어서 LLM 한 번. 숫자 검증(`explain`)·단정 말 검사에 걸리면 코드가 만든 고정 문장(`line_status: fixed` + 이유)
 6. **하루 캐시**: (한국 날짜, 규칙 버전 = `[brief]` 설정·프롬프트·한계 문장·칸 모양(`SHAPE`) 해시) → 브리프. `regenerate: true`면 새로 묶는다
+7. **판과 다시 추천** (v5, `brief_versions.py`, 인사이트 탭 맨 위 줄)
+   - **판 저장.** 같은 날 브리프를 지우지 않고 `brief_versions`(day·rules·판 번호·created_at·trigger auto/manual·누른 사람·쓴 감지 데이터 시각과 키·snapshot_id·토큰·출력)에 쌓는다. 판 목록과 최신 판은 (한국 날짜, 지금 규칙 버전) 기준. `briefs` 표에는 지금처럼 그날 최신 판을 써서 수집기(`youtube_collect.in_use_ids`)와 데이터분석 AI 대화(`data_chat.read_insight`)가 바꾸지 않아도 최신 판을 읽는다. 0시 이후 첫 자동 브리프는 지금처럼 만들고 trigger auto(다시 추천 횟수에 안 셈). 같은 날 같은 주제는 판이 바뀌어도 같은 `insight_id`라 기획 제안·지난번 결과 연결이 이어진다
+   - **요청.** `action`: `read`(기본, `version` 없으면 최신 판) · `regenerate_start`(다시 추천 시작) · `status`(진행 상태만, 본문 비움, 화면이 2초마다). `requested_by`는 화면 계정 표시 이름(기록·표시용, 인증에 쓰지 않음). 기획이 부르면 기본은 오늘 최신 판이고 `version_label`·`created_at`이 같이 간다
+   - **비동기.** 시작하면 바로 `started`(작업 번호는 `regen_job`)를 돌려주고, data 서버 안에서 백그라운드로 만든다(A2A 시간 제한에 안 걸림). 한 줄 문장 재사용(#751)과 같은 LLM 요청 중복 막기(#835)는 그대로
+   - **"만드는 중" 잠금.** 같은 sqlite 파일의 `brief_lock`(서버·수집기 공용, #835와 같은 방식), 만료 10분(`DATA_BRIEF_LOCK_SECONDS`). 만든 프로세스가 죽어도 10분 뒤 풀린다. 0시 자동 브리프도 같은 잠금을 쓰고, 다른 쪽이 만드는 중이면 끝날 때까지(최대 90초) 기다렸다가 저장된 판을 준다
+   - **막는 조건** (서버 판단, 모두 횟수 차감 없음, 코드와 문장):
+     - `in_progress` "지금 만드는 중이에요 (재현이 11:16에 시작)"(자동이면 "자동으로")
+     - `daily_limit` "오늘 다시 추천 3번을 다 썼어요"(한국 0시 초기화)
+     - `cooldown` "HH:MM 이후에 다시 추천할 수 있어요"(마지막 판 뒤 1시간, 자동 판 포함)
+     - `llm_budget` "LLM 오늘 72% · 다시 추천은 70% 미만일 때만"
+     - `no_new_data` "감지 데이터가 HH:MM 이후 그대로라 새로 만들 게 없어요"(마지막 판과 감지 스냅샷 = 마지막 YouTube·인기 검색어 스냅샷 시각 + 오늘 판정판이 같음)
+   - **실패.** 이전 판이 그대로 최신이고 횟수 차감 없음, 이유는 `regen_job.reason`
+   - **출력 칸.** `version`·`latest_version`·`version_label`("00:27 자동"·"11:16 다시 추천")·`created_at`·`trigger`·`requested_by`·`detect_as_of`·`versions`(오늘 판 목록)·`regen_used`/`regen_limit`·`regen_blocked`(지금 누르면 막히는 이유)·`regen_job`·`building`(누가 만드는 중, "만드는 중… (시작 HH:MM)")·`diff_from_previous`(앞 판 대비 새·빠진 주제 이름과 수)·`estimated_llm_pct`(최근 다시 추천 실제 토큰 중앙값 ÷ 하루 토큰 한도. 기록이 없으면 오늘 첫 자동 브리프 토큰으로 추정하고 `estimated: true`)·`llm_pct_now`
+   - **토큰.** 판마다 실제 LLM 토큰(`llm_budget.counting`, 기다려 받은 답은 0)을 남긴다. 공통 로그(`event_published`)에 `brief_regen_started`·`brief_regen_finished`/`failed`와 누가·몇 토큰
+   - 평가: `eval/brief_regen/`(막는 조건·한 번만 만들기(같은 프로세스·서로 다른 두 프로세스)·잠금 만료·판 보존·규칙별 분리·insight_id·briefs 표 최신·diff, 관문 모두 1.0)
 
 ### domain_profile (도메인 프로필)
 

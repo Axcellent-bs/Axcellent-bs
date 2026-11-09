@@ -242,6 +242,30 @@ class BriefStore:
     _VERSION_COLS = ("version", "created_at", "trigger", "requested_by", "detect_as_of",
                      "detect_key", "snapshot_id", "tokens")  # fmt: skip
 
+    def _backfill(self, day: date, rules: str) -> None:
+        """판 표가 생기기 전(v4)에 저장된 그날 브리프를 1번 "자동" 판으로 옮긴다 (잠금 안에서).
+
+        배포하는 날 다시 추천이 `briefs`의 그날 브리프를 덮어 지우지 않게 한다."""
+        if self._conn.execute(
+            "SELECT 1 FROM brief_versions WHERE day = ? AND rules = ? LIMIT 1",
+            (day.isoformat(), rules),
+        ).fetchone():
+            return
+        old = self._conn.execute(
+            "SELECT created_at, output FROM briefs WHERE day = ? AND rules = ?",
+            (day.isoformat(), rules),
+        ).fetchone()
+        if old is None:
+            return
+        body = TrendInsightBriefOutput.model_validate_json(old[1]).model_copy(update={
+            "version": 1, "latest_version": 1, "trigger": "auto",
+            "created_at": datetime.fromisoformat(old[0]),
+        }).model_dump_json()  # fmt: skip
+        self._conn.execute(
+            "INSERT INTO brief_versions VALUES (?,?,1,?,'auto',NULL,NULL,NULL,NULL,NULL,?)",
+            (day.isoformat(), rules, old[0], body),
+        )
+
     def versions(self, day: date, rules: str) -> list[dict[str, Any]]:
         """그날·규칙 버전의 판 목록 (오래된 순, 출력 JSON 없이)."""
         with self._lock:
@@ -363,6 +387,7 @@ class BriefStore:
             detect_key: str | None = None, tokens: int | None = None) -> int:  # fmt: skip
         """새 판으로 저장하고 판 번호를 돌려준다. `briefs` 표(그날 최신 판)도 같이 바꾼다."""
         with self._lock, self._conn:
+            self._backfill(day, rules)
             row = self._conn.execute(
                 "SELECT COALESCE(MAX(version), 0) FROM brief_versions WHERE day = ? AND rules = ?",
                 (day.isoformat(), rules),

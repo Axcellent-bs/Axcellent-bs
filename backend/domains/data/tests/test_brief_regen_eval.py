@@ -5,7 +5,7 @@
 - "만드는 중" 잠금은 sqlite(서버·수집기 공용), 10분 뒤 만료. 두 번 눌러도·두 프로세스여도 판 1개
 - 판은 지우지 않고 기본은 최신 판, 규칙 버전별로 따로. 같은 주제는 같은 insight_id
 - briefs 표는 그날 최신 판 (대화 read_insight 호환). diff는 새·빠진 주제
-- LLM은 부르지 않는다 (만들기는 가짜 함수). 관문은 코드 PR에서 켬 (이 PR은 관찰만)
+- LLM은 부르지 않는다 (만들기는 가짜 함수). 관문 켬 (평가 정의 PR #851은 관찰만: dev 모두 0.0)
 """
 
 from __future__ import annotations
@@ -232,10 +232,13 @@ def observe(tmp_path: Path) -> tuple[dict[str, float], dict]:
     return score.score(cases, got), got
 
 
-def test_brief_regen_observe(tmp_path: Path) -> None:
-    """관찰만: 지표를 출력하고 모양만 본다 (관문은 코드 PR에서 켬)."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (평가 정의 PR #851 dev: 0.0 / 0.0 / 0.0)
+
+
+def test_brief_regen_passes_the_gates(tmp_path: Path) -> None:
     metrics, got = observe(tmp_path)
     print("brief_regen eval:", json.dumps(metrics, ensure_ascii=False))
     print("brief_regen cases:", json.dumps(got, ensure_ascii=False, default=str))
     assert set(metrics) == set(score.METRICS)
-    assert all(0.0 <= v <= 1.0 for v in metrics.values())
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, (name, metrics[name], got)

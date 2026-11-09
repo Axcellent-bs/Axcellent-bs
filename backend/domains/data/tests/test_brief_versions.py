@@ -19,7 +19,11 @@ from types import ModuleType
 import pytest
 
 from ax_contracts.schemas import AgentRequest, RequestMeta
-from ax_contracts.schemas.data import TrendInsight, TrendInsightBriefOutput, TrendInsightBriefRequest
+from ax_contracts.schemas.data import (
+    TrendInsight,
+    TrendInsightBriefOutput,
+    TrendInsightBriefRequest,
+)
 from data_agent import brief_versions as bv
 from data_agent import llm_budget
 from data_agent.skills import trend_insight_brief as tib
@@ -85,6 +89,35 @@ def test_auto_brief_is_version_1_auto_and_regenerate_keeps_insight_ids(tmp_path:
     ids = {i.topic: i.insight_id for i in first.insights}
     assert second is not None
     assert all(ids[i.topic] == i.insight_id for i in second.insights if i.topic in ids)
+
+
+def test_a_v4_brief_of_the_day_becomes_version_1_before_the_first_new_version(
+    tmp_path: Path,
+) -> None:
+    """배포하는 날: 판 표가 생기기 전에 저장된 그날 브리프를 지우지 않고 1번 자동 판으로 옮긴다."""
+    import sqlite3
+
+    env = _env(tmp_path)
+    path, rules = env["DATA_INSIGHT_BRIEF_DB"], _rules(env)
+    old = TrendInsightBriefOutput(status="known", insights=[
+        TrendInsight(insight_id="iA", rank=1, topic="예전판", line="x")])  # fmt: skip
+    tib.BriefStore(path).close()
+    conn = sqlite3.connect(path)  # v4가 쓰던 그대로 (briefs 표만)
+    with conn:
+        conn.execute("INSERT INTO briefs (day, rules, created_at, output) VALUES (?,?,?,?)",
+                     (bt.DAY.isoformat(), rules, "2026-11-03T15:27:00+00:00",
+                      old.model_dump_json()))  # fmt: skip
+    conn.close()
+    store = tib.BriefStore(path)
+    new = TrendInsightBriefOutput(status="known", insights=[
+        TrendInsight(insight_id="iB", rank=1, topic="새판", line="x")])  # fmt: skip
+    n = store.put(bt.DAY, rules, new, bt.NOW, trigger="manual", requested_by="재현")
+    rows = store.versions(bt.DAY, rules)
+    first = store.version(bt.DAY, rules, 1)
+    store.close()
+    assert n == 2 and [(r["version"], r["trigger"]) for r in rows] == [(1, "auto"), (2, "manual")]
+    assert first is not None and first.insights[0].topic == "예전판"
+    assert bv.label(rows[0]) == "00:27 자동"
 
 
 def test_auto_waits_for_a_build_in_progress_and_takes_that_version(tmp_path: Path) -> None:
@@ -250,5 +283,5 @@ def test_handler_blocks_at_70_percent_llm(
     got = asyncio.run(handlers.HANDLERS["trend_insight_brief"](
         _request({"action": "regenerate_start", "requested_by": "재현"})))  # fmt: skip
     assert got.outcome == "blocked"
-    assert got.output["regen_blocked"] == {"code": "llm_budget",
-                                           "text": "LLM 오늘 72% · 다시 추천은 70% 미만일 때만"}  # fmt: skip
+    want = {"code": "llm_budget", "text": "LLM 오늘 72% · 다시 추천은 70% 미만일 때만"}
+    assert got.output["regen_blocked"] == want
