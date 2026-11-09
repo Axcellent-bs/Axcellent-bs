@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 from pydantic import ValidationError
 
@@ -244,8 +245,15 @@ async def record_event_times(svc: Services, request: AgentRequest) -> AgentResul
         for name in (*TIMES, "prior_case_id")
         if getattr(current, name) is None and getattr(params, name) is not None
     }
+    # 단계별 시간은 시각과 달리 장애가 끝난 뒤 값이 바뀔 수 있어, 달라졌으면 마지막 값으로 바꾼다
+    new_timings = (
+        [t.model_dump(mode="json") for t in params.step_timings]
+        if params.step_timings is not None
+        else None
+    )
+    timings_changed = new_timings is not None and new_timings != card.extra.get("step_timings")
     evidence = make_evidence(svc.clock, f"이벤트 시각 기록: {params.context_id}", [card.card_id])
-    if not fresh:
+    if not fresh and not timings_changed:
         return completed(
             request,
             RecordEventTimesOutput(outcome="duplicate", card_id=card.card_id, timeline=current),
@@ -253,7 +261,10 @@ async def record_event_times(svc: Services, request: AgentRequest) -> AgentResul
             evidence=evidence,
         )
     merged = current.model_copy(update=fresh)
-    digest = hashlib.sha256(merged.model_dump_json().encode("utf-8")).hexdigest()[:12]
+    digest_source = merged.model_dump_json() + (
+        json.dumps(new_timings, sort_keys=True) if timings_changed else ""
+    )
+    digest = hashlib.sha256(digest_source.encode("utf-8")).hexdigest()[:12]
     decision = await svc.gate.execute(
         "memory.card_write",
         {
@@ -270,12 +281,20 @@ async def record_event_times(svc: Services, request: AgentRequest) -> AgentResul
             params.context_id, "record_event_times.blocked", {"status": decision.status}
         )
         return gate_blocked(request, decision)
-    updated = card.model_copy(
-        update={"extra": {**card.extra, "timeline": merged.model_dump(mode="json")}}
-    )
-    await svc.memory.write_card(updated)
+    extra = dict(card.extra)
+    if fresh:
+        extra["timeline"] = merged.model_dump(mode="json")
+    if timings_changed:
+        extra["step_timings"] = new_timings
+    await svc.memory.write_card(card.model_copy(update={"extra": extra}))
     svc.audit.record(
-        params.context_id, "record_event_times", {"card_id": card.card_id, "added": sorted(fresh)}
+        params.context_id,
+        "record_event_times",
+        {
+            "card_id": card.card_id,
+            "added": sorted(fresh),
+            "step_timings": len(new_timings or []) if timings_changed else 0,
+        },
     )
     return completed(
         request,

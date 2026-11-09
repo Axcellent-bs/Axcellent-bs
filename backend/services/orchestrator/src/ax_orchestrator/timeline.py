@@ -60,6 +60,39 @@ def times_of(inc: Incident) -> dict[str, datetime]:
     return out
 
 
+def step_timings(inc: Incident) -> list[dict[str, Any]]:
+    """단계별 시간(인사 부서 평가용). 총괄이 아는 시각만 쓰고 모르는 값은 None으로 둔다.
+
+    - work_seconds: 단계 전체 시간(시작~끝)에서 승인 대기·사람 할 일함 대기를 뺀 시간.
+      시작이나 끝 시각을 모르면(아직 끝나지 않았거나 건너뜀) None.
+    - 부서 안에서 외부를 기다린 시간은 총괄이 구분할 수 없어 work_seconds에 그대로 들어간다.
+    """
+    out: list[dict[str, Any]] = []
+    for run in inc.steps.values():
+        work: float | None = None
+        if run.started_at and run.finished_at:
+            total = (run.finished_at - run.started_at).total_seconds()
+            waits = (run.approval_wait_seconds or 0.0) + (run.human_wait_seconds or 0.0)
+            work = round(max(0.0, total - waits), 3)
+        out.append(
+            {
+                "step_id": run.step_id,
+                "dept": run.dept,
+                "status": run.status,
+                "work_seconds": work,
+                "approval_wait_seconds": _round(run.approval_wait_seconds),
+                "human_wait_seconds": _round(run.human_wait_seconds),
+                "attempts": run.attempts,
+                "reason_code": run.reason_code,
+            }
+        )
+    return out
+
+
+def _round(value: float | None) -> float | None:
+    return None if value is None else round(value, 3)
+
+
 def prior_case_of(inc: Incident) -> str | None:
     """시작할 때 근거로 본 같은 유형의 과거 이벤트 카드(반복 장애). 없으면 None."""
     rec = recommend(inc.outputs.get("similar_cases")) or {}
