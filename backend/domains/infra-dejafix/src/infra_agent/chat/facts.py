@@ -4,6 +4,7 @@
 - 쇼핑몰 결제 서버 상태 (shop-api 장애 스위치 상태: 실패 중·느림)
 - 최근 진단 결과 (이 서버가 기억하는 사건별 마지막 진단: 원인 후보·확신도)
 - 최근 장애 사건과 그 안의 인프라 단계 (총괄 `GET /api/incidents`, 읽기 전용)
+- DejaFix 현재 장애 (Zabbix 알람, `INFRA_DEJAFIX_URL`이 없으면 `configured: false`)
 
 숫자·상태는 코드가 모으고 LLM은 풀어 쓸 뿐이다. 하나를 못 읽어도 나머지는 넣고,
 못 읽은 이름은 `unavailable`에 남긴다(모르는 값을 채워 넣지 않는다).
@@ -17,6 +18,7 @@ from typing import Any
 import httpx
 
 from ax_agent_template.config import agent_url, is_mock
+from infra_agent import dejafix_watch
 from infra_agent.runtime import get_runtime
 
 logger = logging.getLogger(__name__)
@@ -112,6 +114,29 @@ async def _incidents() -> list[dict[str, Any]]:
     return out
 
 
+async def _dejafix() -> dict[str, Any]:
+    url = dejafix_watch.base_url()
+    if url is None:
+        return {"configured": False, "problems": []}
+    rows = await dejafix_watch.fetch_problems(url)
+    rows = sorted(rows, key=lambda r: str(r.get("started_at") or ""), reverse=True)
+    return {
+        "configured": True,
+        "count": len(rows),
+        "problems": [
+            {
+                "title": str(r.get("title") or "")[:NOTE_CHARS],
+                "host": (r.get("host") or {}).get("name"),
+                "severity": (r.get("severity") or {}).get("label"),
+                "started_at": r.get("started_at"),
+                # 이 값이 있으면 총괄에 장애로 알린 것이다(없으면 DejaFix만 맡음)
+                "component": dejafix_watch.component_of(r),
+            }
+            for r in rows[:RECENT]
+        ],
+    }
+
+
 async def collect() -> dict[str, Any]:
     """인프라 사실 묶음. 부분 실패는 `unavailable`에 이름만 남긴다(예외 내용은 넣지 않는다)."""
     out: dict[str, Any] = {"unavailable": []}
@@ -121,7 +146,11 @@ async def collect() -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - 하나를 못 읽어도 대화는 이어 간다
             logger.warning("인프라 대화 사실 %s를 읽지 못했다", name, exc_info=True)
             out["unavailable"].append(name)
-    for name, afn in (("shop_payment_server", _shop), ("recent_incidents", _incidents)):
+    for name, afn in (
+        ("shop_payment_server", _shop),
+        ("recent_incidents", _incidents),
+        ("dejafix_problems", _dejafix),
+    ):
         try:
             out[name] = await afn()
         except Exception:  # noqa: BLE001

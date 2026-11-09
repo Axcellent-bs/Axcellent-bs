@@ -11,6 +11,7 @@
   - 경로 판정용 정수 4개를 코드로 계산해 params에 넣는다: `suspect_count`·`low_confidence`·`irreversible_count`·`prior_rollbacks`. safety 기준표에서 하나라도 걸리면 C(사람 승인)
   - `execute(rollback_deployment)` → safety가 planning `verify_rollback_target`으로 교차검증 → `executed`면 자동 경로(`path: auto`), `held`면 `input-required` + `review_id`. 사람이 승인한 뒤 같은 요청을 다시 보내면 같은 `idempotency_key`로 `executed`를 받아 실행한다(`path: human_approved`)
   - 시연의 "롤백"은 shop-api 장애 주입 해제(`DELETE /api/shop/admin/faults`)다
+- 장애 감시(`dejafix_watch.py`): `INFRA_DEJAFIX_URL`(DejaFix 읽기 전용 프록시 주소)이 있으면 `INFRA_DEJAFIX_POLL_SECONDS`(기본 30초)마다 DejaFix `GET /api/incidents?status=problem`을 읽는다. `component` 태그가 붙은 장애만 총괄에 `infra.anomaly_detected`로 알린다(`metric` 태그 → `metric_code`, 없으면 `zabbix_problem`). 태그가 없는 PC·호스트 장애는 DejaFix만 맡는다. 같은 장애는 한 번만 보낸다. Zabbix 쪽에서 감시 트리거에 `component=<부위>` 태그를 달아야 한다(DJF-02)
 - 복구 확인(`verify_recovery`): 30초 간격 최대 5회(`INFRA_RECOVERY_ATTEMPTS`·`INFRA_RECOVERY_INTERVAL_S`). 인프라 지표(shop-api 장애 상태)와 업무 지표(data `anomaly_detection`: `payment_fail_rate`·`order_fail_count`)가 둘 다 정상이어야 `recovered`. 업무 지표를 못 받으면(`null`) 복구로 보지 않는다. 마감(`deadline`) 전에 멈춘다
 
 코드 구성 (`src/infra_agent/`):
@@ -23,6 +24,8 @@
 | `clients.py` | shop-api·data 호출 (URL이 없으면 목) |
 | `runtime.py` | 프로세스 메모리 상태 (진단 결과, 실행한 롤백) |
 | `handlers.py` | A2A skill 3개 |
+| `dejafix_watch.py` | DejaFix 현재 장애 → 총괄 `infra.anomaly_detected` |
+| `chat/` | 인프라 AI 직접 대화. 근거(`facts.py`)에 DejaFix 현재 장애(`dejafix_problems`)도 넣는다 |
 
 ## 2. 실행 방법
 - 서버: `docker compose -f infra/compose.yml up infra-dejafix`, 또는 레포 루트에서 `uv run uvicorn infra_agent.main:app --port 8107`
@@ -53,4 +56,4 @@ safety로 보내는 params: 계약 필드 + 정수 4개 + `deployed_at`(+ 받았
 - 운영 서버에 셸·SSH로 접속하거나 배포 도구를 직접 부르지 않는다. 시연 롤백은 장애 주입 해제뿐이다
 - 사람 승인을 대신하지 않는다. C는 보류 큐에서 사람이 결정한다
 - 복구 예상 시각을 추정하지 않는다
-- 미결: 계약 `to_version` 선택 필드화, 롤백 출력 계약, orchestrator의 `incident_opened_at` 전달, safety 기준표 4개 규칙(사람 PR), Zabbix 등록·`infra.anomaly_detected` 이벤트(DJF-02)
+- 미결: 계약 `to_version` 선택 필드화, 롤백 출력 계약, orchestrator의 `incident_opened_at` 전달, safety 기준표 4개 규칙(사람 PR), Zabbix 결제 API 감시 등록과 `component` 태그(DJF-02)
