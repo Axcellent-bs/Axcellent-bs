@@ -48,6 +48,7 @@ from support_agent import (
     privacy_audit,
     secure_transfer,
     shop_client,
+    surge_events,
 )
 from support_agent.schemas import (
     AddCustomerMessageInput,
@@ -510,6 +511,7 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
         from support_agent import triage  # 순환 import를 피해 쓸 때 가져온다
 
         await triage.mark_automatically(conversation)  # 오류 코드가 없는 문의는 분류 필요로 모은다
+        await surge_events.check_and_emit(request, STORE)  # 같은 분류가 몰렸으면 총괄에 알린다
         return _view(STORE.get(conversation.id) or conversation), fallback
 
     return await _write(
@@ -548,6 +550,7 @@ async def add_customer_message(request: AgentRequest) -> AgentResult:
         updated = await _refine_abuse(updated, analysis, early)
         _log_abuse(updated)
         log_activity(parsed.inquiry_id, **_analysis_entry(analysis, fallback=fallback, first=False))
+        await surge_events.check_and_emit(request, STORE)
         return _view(updated), fallback
 
     return await _write(
