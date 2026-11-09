@@ -143,3 +143,16 @@ def test_seller_report_xlsx_has_the_same_table_with_real_numbers() -> None:
     first = report["rows"][0]
     assert ws["A2"].value == first["seller_id"] and ws["F2"].value == first["total"]
     assert isinstance(ws["F2"].value, int)
+
+
+def test_vat_rounds_half_up_like_company_policy() -> None:
+    """세액이 x.5원이면 0.5 올림 (예전 round()는 짝수 쪽이라 1원 적었다, 재무 평가 eval/run.py)."""
+    from finance_agent.tax import _vat
+
+    assert _vat(161_425, "excluded") == (161_425, 16_143)
+    assert _vat(285_425, "excluded") == (285_425, 28_543)
+    assert _vat(825_235, "excluded") == (825_235, 82_524)  # x.5가 아니면 그대로
+    assert _vat(11_000, "included") == (10_000, 1_000)
+    assert _vat(3_000, "included") == (2_727, 273)
+    assert _vat(16_500, "included") == (15_000, 1_500)
+    assert _vat(0, "excluded") == (0, 0)
