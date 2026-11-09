@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { SERVICES, toggleHidden, useHiddenServices, type Service } from '@/demo/services'
+import { SERVICES, isRequired, toggleHidden, useHiddenServices, type Service } from '@/demo/services'
 import { COMPANIES } from './data'
 
 // 서비스 관리 (AXcellent 운영팀). 우리가 만든 서비스의 버전·배포·카탈로그 공개를 관리한다.
@@ -139,10 +139,14 @@ export default function ServiceOps() {
                     )}
                   </td>
                   <td className="px-3 py-3">
-                    <button type="button" role="switch" aria-checked={!off} onClick={() => toggleHidden(s.id)}
-                      className={`px-3 py-1 text-xs font-medium ${off ? 'bg-ink-100 text-ink-500' : 'bg-brand-50 text-brand-700'}`}>
-                      {off ? '내림' : '공개 중'}
-                    </button>
+                    {isRequired(s.id) ? (
+                      <span className="chip bg-brand-50 text-brand-700" title="필수 서비스라 카탈로그에서 내릴 수 없어요">필수</span>
+                    ) : (
+                      <button type="button" role="switch" aria-checked={!off} onClick={() => toggleHidden(s.id)}
+                        className={`px-3 py-1 text-xs font-medium ${off ? 'bg-ink-100 text-ink-500' : 'bg-brand-50 text-brand-700'}`}>
+                        {off ? '내림' : '공개 중'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               )
