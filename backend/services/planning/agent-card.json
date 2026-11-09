@@ -69,6 +69,16 @@
       "priority": "required"
     },
     {
+      "id": "receive_insight",
+      "description": "기획 제안 받기. 데이터분석(·마케팅)이 인사이트 한 건(insight_id·제목·요약·근거 수치 facts·관련 상품·설명 body_md·schema_version)을 보내면, 기획이 할 일·이유·목표치(target)를 판단해 제안 PROP-n(사람 확인 대기)을 만든다. 수치는 데이터분석 facts만 인용하고 기획이 넣는 숫자는 목표치뿐이다. 글에 근거·목표에 없는 숫자가 있으면 경고한다. facts가 없으면 받지 않고, 같은 insight_id 재전송은 duplicate. execute()를 거친다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceiveInsightInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceiveInsightOutput",
+      "grade": "A",
+      "allowed_requesters": ["data", "marketing"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
       "id": "planning_chat_send",
       "description": "말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 planning_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. LLM은 기획 상태에서 코드가 모은 사실(받은 요청·기획서·결정·제안)만 풀어 쓴다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy. 기획 AI 직접 대화(dashboard-api /api/dashboard/planning-chat). 조회·설명만 하고 요청·기획서·제안 상태는 바꾸지 않아 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#PlanningChatSendInput",

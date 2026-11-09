@@ -9,6 +9,7 @@
 | `receive_planning_answer` | A |
 | `request_release_check` | A |
 | `receive_campaign_update` | A |
+| `receive_insight` | A |
 | `planning_chat_send` | A |
 | `planning_chat_list` | read |
 | `planning_chat_get` | read |
