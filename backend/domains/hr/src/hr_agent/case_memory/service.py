@@ -33,6 +33,7 @@ from ax_contracts.schemas import (
     SimilarCase,
 )
 from hr_agent.cards.builder import UNKNOWN
+from hr_agent.dept_eval import CriteriaError, judge_timings, load_criteria
 from hr_agent.results import (
     completed,
     gate_blocked,
@@ -286,6 +287,7 @@ async def record_event_times(svc: Services, request: AgentRequest) -> AgentResul
         extra["timeline"] = merged.model_dump(mode="json")
     if timings_changed:
         extra["step_timings"] = new_timings
+        _store_judgments(svc, params.context_id, extra, new_timings or [])
     await svc.memory.write_card(card.model_copy(update={"extra": extra}))
     svc.audit.record(
         params.context_id,
@@ -301,6 +303,27 @@ async def record_event_times(svc: Services, request: AgentRequest) -> AgentResul
         RecordEventTimesOutput(outcome="recorded", card_id=card.card_id, timeline=merged),
         outcome="recorded",
         evidence=evidence,
+    )
+
+
+def _store_judgments(svc: Services, context_id: str, extra: dict, timings: list[dict]) -> None:
+    """단계 시간이 바뀔 때마다 부서 평가 판정을 다시 계산해 카드에 기준값 버전과 같이 둔다.
+
+    기준값 파일을 읽지 못해도 시각 기록은 막지 않는다(판정만 건너뛰고 감사 기록에 남긴다).
+    """
+    try:
+        extra["step_judgments"] = judge_timings(timings, load_criteria())
+    except CriteriaError as exc:
+        extra.pop("step_judgments", None)
+        svc.audit.record(context_id, "dept_eval.criteria_unreadable", {"error": str(exc)[:200]})
+        return
+    svc.audit.record(
+        context_id,
+        "dept_eval.judged",
+        {
+            "criteria_version": extra["step_judgments"]["criteria_version"],
+            "steps": len(extra["step_judgments"]["items"]),
+        },
     )
 
 
