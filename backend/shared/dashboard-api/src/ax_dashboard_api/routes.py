@@ -44,6 +44,7 @@ from ax_contracts.schemas.hr import (
 from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
     claim_mapping,
+    data_chat,
     dev_chat,
     hr_client,
     live_views,
@@ -937,6 +938,46 @@ async def planning_chat_send(body: PlanningChatSendBody, request: Request) -> di
 async def planning_chat_close(thread_id: str, request: Request) -> dict:
     who = human_from_authorization(request.headers.get("authorization"))
     out = await planning_chat.call("planning_chat_close", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+# ---- 데이터분석 AI 직접 대화 (→ data `data_chat_*`). 기획 AI 대화와 같은 모양
+# + 대화 하루 상한(429 CHAT_LIMIT)
+class DataChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/data-chat")
+async def data_chat_list(request: Request) -> dict:
+    """데이터분석 AI 대화 목록. 사람 토큰이 필요하다. 남의 대화는 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await data_chat.call("data_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/data-chat/{thread_id}")
+async def data_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await data_chat.call("data_chat_get", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/data-chat")
+async def data_chat_send(body: DataChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await data_chat.call("data_chat_send", payload)
+    return ok(out["thread"])
+
+
+@router.post("/data-chat/{thread_id}/close")
+async def data_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await data_chat.call("data_chat_close", {"who": who, "thread_id": thread_id})
     return ok(out["thread"])
 
 
