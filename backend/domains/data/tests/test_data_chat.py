@@ -199,6 +199,29 @@ def test_missing_files_are_not_created_and_mean_no_result(tmp_path: Path) -> Non
     assert list(tmp_path.iterdir()) == []  # 읽기 전용: 파일을 만들지 않는다
 
 
+def test_performance_says_a_test_campaign_is_not_sent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """시험 캠페인은 "아직 안 보냄"이 아니라 보내기 판정과 같은 "보내지 않음 · 시험 캠페인"."""
+    from data_agent import campaign_update
+    from data_agent.skills import video_performance as vp
+
+    env = {**_env(tmp_path), campaign_update.FLAG_ENV: "1"}
+    store = vp.VideoStore(env[vp.DB_ENV])
+    store.upsert(vp.Video(
+        key="youtube:abc", platform="youtube", video_id="abc",
+        video_url="https://www.youtube.com/shorts/abc", campaign_id="test-video-1",
+        insight_id=None, proposal_id=None, test=True,
+        published_at=NOW - timedelta(days=3), title="시험 숏츠",
+        registered_at=NOW - timedelta(days=3),
+        category=None, shorts_format=None, promo_id=None, coupon_id=None,
+    ))  # fmt: skip
+    store.close()
+    part = dc.read_performance(env, NOW)
+    assert part is not None
+    assert part["facts"]["캠페인"][0]["기획에 보내기"] == "보내지 않음 · 시험 캠페인"
+
+
 def test_collect_reads_the_ledgers(tmp_path: Path, budget: llm_budget.Budget) -> None:
     budget.add(10, 5000, skill="data_chat", task="문장")
     part = dc.read_collect(_env(tmp_path), NOW)

@@ -392,8 +392,12 @@ def read_performance(env: Mapping[str, str], now: datetime) -> dict | None:
         elif row:
             c["기획에 보내기"] = row[0] + (f" · {kst(row[1])}" if row[1] else "") + (
                 f" · {row[2]}" if row[2] else "")
+        elif o.test:  # 보내기 판정(campaign_update.decide)과 같은 이유
+            c["기획에 보내기"] = "보내지 않음 · 시험 캠페인"
+        elif not o.proposal_id:
+            c["기획에 보내기"] = "보내지 않음 · 기획 제안 번호 없음"
         else:
-            c["기획에 보내기"] = "아직 보내지 않음"
+            c["기획에 보내기"] = "기획에 보낼 예정 · 7일 측정이 끝난 뒤 자동으로 보냄"
     facts = {
         "영상": videos,
         "캠페인": list(campaigns.values()),
