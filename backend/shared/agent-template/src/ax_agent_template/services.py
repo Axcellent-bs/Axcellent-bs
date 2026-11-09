@@ -255,6 +255,8 @@ SERVICES: tuple[Service, ...] = (
             "request_release_check",
             # 마케팅 게시(published)·데이터분석 성과(result)를 제안에 기록
             "receive_campaign_update",
+            # 데이터분석·마케팅 인사이트를 기획 제안으로 받기
+            "receive_insight",
             # 사람과 직접 대화 (dashboard-api /api/dashboard/planning-chat)
             "planning_chat_send",
             "planning_chat_list",
