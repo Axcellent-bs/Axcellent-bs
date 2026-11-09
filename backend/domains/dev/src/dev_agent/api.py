@@ -308,6 +308,28 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _deploy_err(exc)
         return _ok(_deploy_row(dep_id), svc)
 
+    @router.post("/demo/incident-merge", response_model=None, dependencies=ADMIN)
+    async def post_demo_incident_merge(request: Request) -> dict | JSONResponse:
+        """시연 준비(운영자): 장애 직전 배포로 나간 머지 PR을 지금 시각으로 기록한다.
+
+        본문 `{deployed_version: "shop-api v2.4.2", title?, changed_paths?}`. infra 시연 배포와
+        같이 `scripts/demo_deploy.sh`가 부른다. 롤백 교차검증이 이 PR을 찾는다."""
+        svc = get_service()
+        body = await _body(request)
+        if body is None:
+            return _err(400, "INVALID_DEMO", "본문은 JSON 객체여야 한다")
+        version = body.get("deployed_version")
+        title = body.get("title") or "결제 타임아웃 재조정 (시연 배포)"
+        paths = body.get("changed_paths", ["shop-api/payment/config.py"])
+        if not isinstance(version, str) or len(version.split()) != 2:
+            return _err(400, "INVALID_DEMO", 'deployed_version은 "서비스 버전" 형식이어야 한다')
+        if not isinstance(title, str) or not (
+            isinstance(paths, list) and paths and all(isinstance(p, str) and p for p in paths)
+        ):
+            return _err(400, "INVALID_DEMO", "title은 글자, changed_paths는 경로 목록이어야 한다")
+        pr = await svc.record_demo_merge(deployed_version=version, title=title, changed_paths=paths)
+        return _ok(dump(pr), svc)
+
     # ---- 코딩 에이전트: 개발팀원이 쓴 기획을 레포에 구현 (coder.py). 진행은 작업 `coding`(SSE)
 
     def _coding_err(exc: ActionError) -> JSONResponse:
