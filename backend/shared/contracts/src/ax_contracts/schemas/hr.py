@@ -989,6 +989,9 @@ class RecordLeaveInput(AxModel):
     member_id: str = Field(min_length=1, max_length=64)
     start_date: str = Date  # 서울 날짜, 포함
     end_date: str = Date  # 서울 날짜, 포함
+    recorded_by: str = Field(
+        min_length=1, max_length=64
+    )  # 입력한 사람. dashboard-api가 로그인에서 채운다
 
     @model_validator(mode="after")
     def _end_not_before_start(self) -> RecordLeaveInput:
