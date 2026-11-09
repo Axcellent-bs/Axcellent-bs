@@ -4,8 +4,8 @@
 
 | 파일 | 출처 | 라이선스 |
 | --- | --- | --- |
-| `startup-cowork.jpg` | [Sebaspelusa/pixel-office](https://github.com/Sebaspelusa/pixel-office) `public/offices/startup-cowork.jpg`. 체크무늬 테두리를 잘라내고(원본 x 0.045~0.955, y 0.085~0.935) 1600px로 줄였다 | MIT, Copyright (c) 2026 Vasyl Pavlyuchok |
-| `char_0.png` ~ `char_5.png` | 같은 레포 `public/pixel-agents/` (원작 [pablodelucca/pixel-agents](https://github.com/pablodelucca/pixel-agents)) | MIT, Copyright (c) pablodelucca |
+| `seoul-office.webp` | 팀이 만든 서울 사무실 그림을 Higgsfield(Flux Kontext)로 편집(사람·이름표 제거, 빈 의자 복원). 편집: 장재현 | — |
+| `char_0.png` ~ `char_5.png` | [Sebaspelusa/pixel-office](https://github.com/Sebaspelusa/pixel-office) `public/pixel-agents/` (원작 [pablodelucca/pixel-agents](https://github.com/pablodelucca/pixel-agents)) | MIT, Copyright (c) pablodelucca |
 
 MIT 라이선스 원문:
 

@@ -1,31 +1,38 @@
 import { useEffect, useRef } from "react";
 import { DESKS, type Bubble, type DeskKey, type OfficeView } from "@/lib/office";
 
-// 픽셀 사무실 캔버스: "Startup Cowork" 장면 (벽돌 벽·커피 바·빈백 라운지).
-// 배경과 캐릭터 스프라이트는 Sebaspelusa/pixel-office(MIT)와 pablodelucca/pixel-agents(MIT)에서 가져왔다
-// (public/office/CREDITS.md). 배경은 원본(2912×1440)에서 체크무늬 테두리를 잘라낸 방 안쪽만 쓴다.
+// 픽셀 사무실 캔버스: 서울 사무실 장면 (통유리 창 너머 한강·63빌딩, 오른쪽 라운지).
+// 배경은 사람·이름표가 없는 빈 사무실 그림이고, 9자리 사람·이름표·말풍선·보드 카드는 코드로 그린다.
+// 캐릭터 스프라이트는 pablodelucca/pixel-agents(MIT)에서 가져왔다 (public/office/CREDITS.md).
 // 그림 색은 이미지·캔버스 전용이다 (화면 UI는 디자인 토큰을 쓴다).
 
-const W = 1280, H = 591; // 캔버스 픽셀 = 잘라낸 배경 비율(2650×1224)
+const W = 1280, H = 692; // 캔버스 픽셀 = 배경 비율(1392×752), 자르기 없음
 const BASE = import.meta.env.BASE_URL;
-const BG_SRC = `${BASE}office/startup-cowork.jpg`;
+const BG_SRC = `${BASE}office/seoul-office.webp`;
 const FONT = '"Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
 
-/** 원본 이미지 비율 좌표 → 캔버스 좌표 (잘라낸 영역: x 0.045~0.955, y 0.085~0.935) */
-const toC = (fx: number, fy: number) => ({ x: ((fx - 0.045) / 0.91) * W, y: ((fy - 0.085) / 0.85) * H });
+/** 배경 그림 비율 좌표 → 캔버스 좌표 */
+const toC = (fx: number, fy: number) => ({ x: fx * W, y: fy * H });
 
-/** 자리(원본 이미지 비율, 의자 위 발끝)와 스프라이트. 그림이 6벌이라 멀리 앉은 자리끼리 같은 그림을 쓴다.
- *  `back`: 책상 앞쪽 의자라 뒷모습으로 앉고, 말풍선은 늘 머리 위에 띄운다 */
-const SEATS: Record<DeskKey, { fx: number; fy: number; char: number; back?: boolean }> = {
-  infra: { fx: 0.151, fy: 0.392, char: 0 },
-  data: { fx: 0.282, fy: 0.392, char: 2 },
-  support: { fx: 0.366, fy: 0.392, char: 4 },
-  finance: { fx: 0.496, fy: 0.392, char: 1 },
-  planning: { fx: 0.189, fy: 0.585, char: 5 },
-  marketing: { fx: 0.302, fy: 0.585, char: 1 },
-  hr: { fx: 0.411, fy: 0.585, char: 0 },
-  dev: { fx: 0.192, fy: 0.835, char: 4, back: true }, // 기획 맞은편 빈 의자 (왼쪽 아래 책상 앞쪽)
-  orchestrator: { fx: 0.591, fy: 0.676, char: 3 },
+type Side = "up" | "down";
+/** 말풍선 최대 폭 (캔버스 폭의 22%) */
+const BUBBLE_MAX_W = Math.round(W * 0.22);
+/** 자리(그림 비율, 의자 위 발끝)와 스프라이트. 그림이 6벌이라 멀리 앉은 자리끼리 같은 그림을 쓴다.
+ *  `back`: 책상 앞쪽 의자라 뒷모습으로 앉는다. `bubble`: 말풍선 방향(up 머리 위, down 이름표 아래) */
+const SEATS: Record<DeskKey, { fx: number; fy: number; char: number; back?: boolean; bubble: Side }> = {
+  // 위 책상 뒤쪽 의자 (앞모습). 위 책상 앞쪽 의자 2개는 비워 둔다
+  infra: { fx: 0.272, fy: 0.436, char: 0, bubble: "up" },
+  data: { fx: 0.413, fy: 0.436, char: 2, bubble: "up" },
+  // 아래 책상 뒤쪽 의자 (앞모습)
+  planning: { fx: 0.246, fy: 0.654, char: 5, bubble: "up" },
+  marketing: { fx: 0.359, fy: 0.654, char: 1, bubble: "up" },
+  hr: { fx: 0.471, fy: 0.654, char: 0, bubble: "up" },
+  // 아래 책상 앞쪽 의자 (뒷모습). 말풍선은 이름표 아래 (옆 사람 머리·위 줄 이름표를 가리지 않게)
+  dev: { fx: 0.248, fy: 0.81, char: 4, back: true, bubble: "down" },
+  support: { fx: 0.359, fy: 0.81, char: 2, back: true, bubble: "down" },
+  finance: { fx: 0.472, fy: 0.81, char: 1, back: true, bubble: "down" },
+  // 라운지 빈백 (앞모습, 왕관)
+  orchestrator: { fx: 0.795, fy: 0.638, char: 3, bubble: "up" },
 };
 /** 대기 동작(고개 돌리기·좌우) 씨앗. 개발 자리를 끼워 넣어도 원래 8자리의 동작이 바뀌지 않게 예전 순번을 쓴다 */
 const SEED = Object.fromEntries(DESKS.filter((d) => d.key !== "dev").map((d, i) => [d.key, i])) as Record<DeskKey, number>;
@@ -33,19 +40,21 @@ SEED.dev = 8;
 const SEAT_PX = Object.fromEntries(DESKS.map((d) => [d.key, toC(SEATS[d.key].fx, SEATS[d.key].fy)])) as Record<DeskKey, Pt>;
 const DESK_BY = Object.fromEntries(DESKS.map((d) => [d.key, d])) as Record<DeskKey, (typeof DESKS)[number]>;
 
-/** 위 책상 섬과 아래 책상 사이 통로. 총괄은 이 줄을 따라 걷고, 맡긴 부서 바로 앞(통로)에 선다 */
-const AISLE_Y = toC(0, 0.52).y;
+/** 위 책상과 아래 책상 사이 통로. 총괄은 라운지에서 이 줄을 따라 걷고, 맡긴 부서 앞(통로)에 선다 */
+const AISLE_Y = toC(0, 0.563).y;
 const HOME = SEAT_PX.orchestrator;
 const SPEED = 220; // 캔버스 px/초
+/** 보드 카드 (그림 비율 fx0, fy0, fx1, fy1): 라운지 위 화이트보드 */
+const BOARD = [0.74, 0.305, 0.867, 0.445] as const;
 
 // 스프라이트 시트: 16×32 칸 7열 × 3줄 (줄 0 앞, 1 뒤, 2 옆). 열 0~2 걷기, 3~4 타이핑, 5~6 읽기
-const FW = 16, FH = 32, SC = 2.5;
+const FW = 16, FH = 32, SC = 2.2;
 const SW = FW * SC, SH = FH * SC;
 
 type Pt = { x: number; y: number };
 type Pose = { row: number; col: number; flip: boolean };
 
-const standOf = (k: DeskKey): Pt => ({ x: SEAT_PX[k].x + (k === "orchestrator" ? 0 : 44), y: AISLE_Y });
+const standOf = (k: DeskKey): Pt => ({ x: SEAT_PX[k].x + (k === "orchestrator" ? 0 : 30), y: AISLE_Y });
 
 function loadImage(src: string): HTMLImageElement {
   const img = new Image();
@@ -113,9 +122,7 @@ function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number,
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
   if (ready(art.bg)) ctx.drawImage(art.bg, 0, 0, W, H);
-  else { ctx.fillStyle = "#b8743a"; ctx.fillRect(0, 0, W, H); }
-  // 조명 아래 따뜻한 빛
-  ctx.fillStyle = "rgba(255,200,120,.05)"; ctx.fillRect(0, 0, W, H);
+  else { ctx.fillStyle = "#d6d3cf"; ctx.fillRect(0, 0, W, H); }
 
   // 사람: 발끝 y 순서로 그려 앞사람이 위에 오게 한다
   const people = DESKS.map((d) => {
@@ -136,20 +143,18 @@ function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number,
   boardCard(ctx, v);
   for (const { key, p } of people) nameTag(ctx, key, p);
 
-  // 말풍선: 위 줄은 머리 위(한 자리 걸러 한 칸 더 위), 아래 줄 책상 사람은 위 줄 이름표를 가리지 않게 이름표 아래로
-  DESKS.forEach((d, i) => {
+  // 말풍선: 자리마다 정한 방향. 걷는 총괄은 머리 위(맡긴 부서 말풍선이 있으면 한 칸 더 위)
+  DESKS.forEach((d) => {
     const dv = v.desks[d.key];
     const away = d.key === "orchestrator" && orchMode !== "sit";
     const p = away ? orch : SEAT_PX[d.key];
     const b: Bubble | null = dv.state === "waiting" ? { text: "! 승인 대기", kind: "warn" } : dv.bubble;
     if (!b) return;
-    const back = SEATS[d.key].fy < 0.5;
-    // 뒷모습 자리(개발)는 아래가 캔버스 끝이라 늘 머리 위에. 그 높이는 기획 이름표보다 아래라 겹치지 않는다
-    if (SEATS[d.key].back) { bubble(ctx, p.x, p.y - SH - 6, b, t, dv.state === "waiting", "up"); return; }
-    if (!back && !away) { bubble(ctx, p.x, p.y + 32, b, t, dv.state === "waiting", "down"); return; }
+    const blink = dv.state === "waiting";
+    // 이름표(p.y + 16, 높이 26) 바로 아래
+    if (!away && SEATS[d.key].bubble === "down") { bubble(ctx, p.x, p.y + 32, b, t, blink, "down"); return; }
     const crowded = away && v.walkTo !== null && (v.desks[v.walkTo].state === "waiting" || v.desks[v.walkTo].bubble !== null);
-    const lift = (back && i % 2 === 1 ? 44 : 0) + (crowded ? 48 : 0);
-    bubble(ctx, p.x, p.y - SH - 6 - lift, b, t, dv.state === "waiting", "up");
+    bubble(ctx, p.x, p.y - SH - 6 - (crowded ? 48 : 0), b, t, blink, "up");
   });
 }
 
@@ -206,9 +211,9 @@ function nameTag(ctx: CanvasRenderingContext2D, key: DeskKey, p: Pt) {
   ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(d.label, cx + 8, cy + 1);
 }
 
-/** 벽의 스프린트 보드 자리에 사건 진행 카드를 붙인다 */
+/** 라운지 위 화이트보드에 사건 진행 카드를 붙인다 */
 function boardCard(ctx: CanvasRenderingContext2D, v: OfficeView) {
-  const a = toC(0.765, 0.135), b = toC(0.9, 0.28);
+  const a = toC(BOARD[0], BOARD[1]), b = toC(BOARD[2], BOARD[3]);
   const x = a.x, y = a.y, w = b.x - a.x, h = b.y - a.y;
   const { done, total } = v.progress;
   ctx.fillStyle = "rgba(255,255,252,.94)"; rr(ctx, x, y, w, h, 6); ctx.fill();
@@ -232,26 +237,41 @@ function boardCard(ctx: CanvasRenderingContext2D, v: OfficeView) {
   }
 }
 
-/** `up`: 꼬리가 아래(머리 위 말풍선, anchor = 꼬리 끝 아래 기준). `down`: 꼬리가 위(anchor = 말풍선 꼬리 끝) */
-function bubble(ctx: CanvasRenderingContext2D, cx: number, anchor: number, b: Bubble, t: number, blink: boolean, side: "up" | "down") {
+/** 글을 폭(px)에 맞게 줄이고 "…"로 끝낸다 */
+function clip(ctx: CanvasRenderingContext2D, s: string, room: number): string {
+  if (ctx.measureText(s).width <= room) return s;
+  let out = s;
+  while (out && ctx.measureText(`${out}…`).width > room) out = out.slice(0, -1);
+  return `${out}…`;
+}
+
+/**
+ * `up`: 꼬리가 아래(머리 위 말풍선, anchor = 꼬리 끝 아래 기준).
+ * `down`: 꼬리가 위(이름표 아래 말풍선, anchor = 꼬리 끝). 캔버스 아래로 넘치면 안으로 올려 붙인다.
+ * 폭은 BUBBLE_MAX_W까지. 넘는 글은 줄여서 "…"로 끝낸다 (글 길이 규칙 short가 먼저 적용된다)
+ */
+function bubble(ctx: CanvasRenderingContext2D, cx: number, anchor: number, b: Bubble, t: number, blink: boolean, side: Side) {
   ctx.font = `700 18px ${FONT}`;
   const think = b.kind === "think";
-  const txt = think ? b.text + ".".repeat(1 + (Math.floor(t * 3) % 3)) : b.text;
-  const w = Math.ceil(ctx.measureText(think ? `${b.text}...` : txt).width) + 24, h = 34;
+  const room = BUBBLE_MAX_W - 24 - (think ? ctx.measureText("...").width : 0);
+  const base = clip(ctx, b.text, room);
+  const txt = think ? base + ".".repeat(1 + (Math.floor(t * 3) % 3)) : base;
+  const w = Math.ceil(ctx.measureText(think ? `${base}...` : txt).width) + 24, h = 34;
   const x = Math.round(Math.max(6, Math.min(W - w - 6, cx - w / 2)));
-  const y = Math.round(side === "up" ? anchor - h - 12 : anchor + 12);
+  const y = Math.round(side === "up" ? anchor - h - 12 : Math.min(anchor + 12, H - 4 - 3 - h));
   const look: Record<string, [string, string, string]> = {
     say: ["#ffffff", "#1d2233", "#1d2233"], think: ["#eef1ff", "#2e2688", "#2e2688"], ok: ["#dcf7e6", "#065f46", "#065f46"],
     warn: [blink && Math.floor(t * 2.5) % 2 ? "#ffb020" : "#ffc95a", "#3b2600", "#6b4500"], alert: ["#ff4d5e", "#ffffff", "#7a1420"],
   };
   const [bg, fg, bd] = look[b.kind];
-  const ax = Math.round(cx);
   ctx.fillStyle = bd; ctx.fillRect(x - 3, y, w + 6, h); ctx.fillRect(x, y - 3, w, h + 6);
   ctx.fillStyle = bg; ctx.fillRect(x, y, w, h);
   if (side === "up") {
+    const ax = Math.round(cx);
     ctx.fillStyle = bd; ctx.fillRect(ax - 7, y + h, 14, 4); ctx.fillRect(ax - 4, y + h + 4, 8, 4); ctx.fillRect(ax - 1, y + h + 8, 3, 4);
     ctx.fillStyle = bg; ctx.fillRect(ax - 4, y + h, 8, 4); ctx.fillRect(ax - 1, y + h + 4, 3, 1);
   } else {
+    const ax = Math.round(cx);
     ctx.fillStyle = bd; ctx.fillRect(ax - 7, y - 4, 14, 4); ctx.fillRect(ax - 4, y - 8, 8, 4); ctx.fillRect(ax - 1, y - 12, 3, 4);
     ctx.fillStyle = bg; ctx.fillRect(ax - 4, y - 4, 8, 4); ctx.fillRect(ax - 1, y - 5, 3, 1);
   }
