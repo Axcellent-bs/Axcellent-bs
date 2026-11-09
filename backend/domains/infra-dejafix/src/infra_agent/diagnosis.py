@@ -4,14 +4,18 @@
 - 확신도: 후보가 하나이고 배포 뒤 15분 안에 진단하면 `high`, 그보다 오래됐으면 `mid`.
   후보가 여럿이면 가장 최근 것이 `mid`, 나머지는 `low`.
 - 목 모드는 시간과 상관없이 가장 최근 배포 1건을 `high` 후보로 돌려준다(SCN-A 체크리스트).
+- 실제 모드는 결제 서버 이상도 확인돼야 원인으로 본다(`confirm_with_server`). 배포 후보가 있어도
+  서버가 정상이거나 상태를 못 읽으면 `undetermined`로 두어 롤백하지 않고 사람에게 넘긴다
+  (고객 문의 급증만으로 열린 장애 등, #소통 2026-11-09 합의).
 - 복구 예상 시각은 만들지 않는다.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from typing import Any, Literal
 
 from ax_contracts.schemas.infra import DiagnoseIncidentOutput, SuspectDeployment
 from infra_agent.deployments import Deployment, DeploymentHistory
@@ -29,6 +33,9 @@ class Diagnosis:
     candidates: tuple[Deployment, ...]
     diagnosed_at: datetime
     window_from: datetime | None  # 목 모드는 구간 없음
+    # 결제 서버 확인: fault(이상 확인) / ok(정상) / unknown(못 읽음)
+    # / None(확인 안 함: 목 모드·후보 없음)
+    server: Literal["fault", "ok", "unknown"] | None = None
 
     def confidence_of(self, service: str, version: str) -> str | None:
         for suspect in self.output.suspects:
@@ -72,3 +79,23 @@ def diagnose(
     return Diagnosis(
         output=output, candidates=tuple(picked), diagnosed_at=now, window_from=window_from
     )
+
+
+def server_state(state: dict[str, Any] | None) -> Literal["fault", "ok", "unknown"]:
+    """shop-api 장애 상태(`fault_state`)를 세 가지로 줄인다. 실패·느림이면 fault."""
+    if not isinstance(state, dict):
+        return "unknown"
+    return "fault" if state.get("failing") or state.get("degraded") else "ok"
+
+
+def confirm_with_server(diag: Diagnosis, server: Literal["fault", "ok", "unknown"]) -> Diagnosis:
+    """배포 후보가 있어도 결제 서버 이상이 확인되지 않으면 원인 미확정으로 바꾼다.
+
+    후보 배포(`candidates`)는 근거로 남기고 `suspects`만 비운다. 그래서 롤백 단계로 가지 않는다.
+    """
+    if diag.output.status != "suspected":
+        return diag
+    if server == "fault":
+        return replace(diag, server=server)
+    output = diag.output.model_copy(update={"status": "undetermined", "suspects": []})
+    return replace(diag, output=output, server=server)
