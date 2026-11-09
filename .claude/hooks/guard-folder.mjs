@@ -49,7 +49,13 @@ function main() {
   const rel = path.relative(norm(root), norm(abs));
   if (rel === '' || rel.split(path.sep)[0] === '..' || path.isAbsolute(rel)) return block(`레포 밖은 고치지 않습니다: ${file}`);
 
-  const segs = path.relative(root, abs).split(path.sep).filter(Boolean);
+  // path.resolve 로 이미 정규화했으므로 `..` 는 여기 남지 않는다 (.wt/x/../.. 는 위에서 레포 자체로 막힘)
+  let segs = path.relative(root, abs).split(path.sep).filter(Boolean);
+  // 작업 트리: .wt/<브랜치 이름>/ 아래는 그 다음 폴더를 맨 앞 폴더로 보고 같은 규칙을 적용한다
+  if (segs[0].toLowerCase() === '.wt') {
+    if (segs.length < 3) return block(`.wt/<브랜치 이름>/ 아래 작업 폴더만 고칩니다: ${file}`);
+    segs = segs.slice(2);
+  }
   const low = segs.map((s) => s.toLowerCase());
   const base = low[low.length - 1];
 
