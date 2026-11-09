@@ -12,7 +12,9 @@
   하는지 안내한다. 재무는 비용을 승인·반려하지 않으므로 그런 판단도 하지 않는다.
   대화는 `execute()`를 부르지 않는다(대화 기록 저장은 업무 상태가 아니다).
 - 열람: 본인(`who` 같음)은 원문 전부, 다른 사람 대화는 `messages: []` + 요약 + `restricted: true`.
-  남의 대화에 쓰기(보내기·끝내기)는 거절(403).
+  재무 지정 열람자(`FINANCE_CHAT_VIEWERS`, 사람 토큰 이름 쉼표 목록)는 남의 대화 원문도 본다
+  (대화방 열람 규칙: 요약은 모두, 인사·재무 원문은 지정 열람자). 비어 있으면 본인만 원문을 본다.
+  남의 대화에 쓰기(보내기·끝내기)는 지정 열람자도 거절(403).
 - 답의 숫자는 코드가 facts와 맞춰 본다(`verify.py`). 없는 숫자면 한 번 다시 쓰게 하고, 그래도
   남으면 "확인 필요" 한 줄을 붙인다.
 - LLM 오류는 이유 한 줄만 답으로 남긴다(예외 내용·비밀 값은 넣지 않는다).
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -115,10 +118,19 @@ def make_title(message: str) -> str:
     return one if len(one) <= TITLE_CHARS else one[: TITLE_CHARS - 1] + "…"
 
 
+VIEWERS_ENV = "FINANCE_CHAT_VIEWERS"
+
+
+def designated_viewers() -> frozenset[str]:
+    """재무 대화 원문을 모두 볼 수 있는 사람(사람 토큰 이름). 부를 때마다 읽는다."""
+    raw = os.getenv(VIEWERS_ENV, "")
+    return frozenset(name.strip() for name in raw.split(",") if name.strip())
+
+
 def visible(th: dict[str, Any], who: str | None) -> dict[str, Any]:
-    """본인 대화는 전부, 남의 대화는 원문 없이 요약만."""
+    """본인 대화와 지정 열람자는 전부, 그 밖의 사람에게는 원문 없이 요약만."""
     count = len(th["messages"])
-    if not th["who"] or th["who"] == who:
+    if not th["who"] or th["who"] == who or (who and who in designated_viewers()):
         return {**th, "restricted": False, "message_count": count}
     return {**th, "messages": [], "restricted": True, "message_count": count}
 
