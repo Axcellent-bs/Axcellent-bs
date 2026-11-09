@@ -417,7 +417,8 @@ export function InsightBrief({ state, examples, examplesCount }: {
           <p className="text-sm text-ink-500">두 가지예요. {name} 책에서 뜨는 주제, 그리고 책 숏츠에 빌려 쓸 수 있는 요즘 유행. 숫자는 모두 데이터 근거예요.</p>
         </div>
         {out && <BriefWhen out={out} />}
-        {out && head && out.status === "known" && all.length > 0 && <BriefControls out={out} head={head} pick={pick} start={start} startError={startError} />}
+        {/* 예전 서버(v5 전)는 판·다시 추천 칸이 없어 버튼을 숨긴다 */}
+        {out && head && out.status === "known" && all.length > 0 && head.versions !== undefined && <BriefControls out={out} head={head} pick={pick} start={start} startError={startError} />}
       </div>
       {out && head && head.latest_version != null && out.version != null && out.version !== head.latest_version && (
         <p className="rounded-xl bg-ink-50 px-3 py-2 text-sm text-ink-700">
