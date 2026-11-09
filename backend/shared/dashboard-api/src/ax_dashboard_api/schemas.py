@@ -90,6 +90,47 @@ class OrderSummary(BaseModel):
     status: str
     status_ko: str
     title: str
+    # 아래 칸은 판매 서버가 주지 않으면 None이다(0·빈 문자열로 채우지 않는다)
+    created_at: str | None = None
+    total_amount: int | None = None  # 실제 결제(현금) 금액
+    refunded_amount: int | None = None
+    item_count: int | None = None
+
+
+class OrderLine(BaseModel):
+    title: str | None = None
+    qty: int | None = None
+    unit_price: int | None = None
+    paid_amount: int | None = None
+
+
+class OrderPayment(BaseModel):
+    """결제 한 건. 결제 ID는 화면에 내보내지 않는다."""
+
+    amount: int | None = None
+    method_code: str | None = None
+    status: str | None = None
+    failure_code: str | None = None
+    created_at: str | None = None
+
+
+class OrderDetail(BaseModel):
+    """상담 콘솔 주문 상세(읽기 전용). 구매자 ID·쿠폰 ID·결제 ID는 싣지 않는다."""
+
+    order_no: str
+    status: str
+    status_ko: str
+    created_at: str | None = None
+    total_amount: int | None = None
+    refunded_amount: int | None = None
+    shipping_fee: int | None = None
+    points_used: int | None = None
+    coupon_discount: int | None = None
+    promised_delivery_at: str | None = None
+    shipped_at: str | None = None
+    delivered_at: str | None = None
+    items: list[OrderLine] = []
+    payments: list[OrderPayment] = []
 
 
 # ---------------------------------------------------------------- 클레임
