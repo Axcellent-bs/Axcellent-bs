@@ -279,11 +279,14 @@ def test_who_may_close(env: Spawned, llm: MockLLMClient) -> None:
         call("support_chat_close", {"thread_id": "chat-9", "viewer": "병환"})["outcome"]
         == "not_found"
     )
-    staff = thread_of(
-        call("support_chat_close", {"thread_id": "chat-1", "viewer": "병환", "role": "staff"})
+    admin = thread_of(
+        call("support_chat_close", {"thread_id": "chat-1", "viewer": "병환", "role": "admin"})
     )
-    assert staff["status"] == "closed"
-    assert staff["restricted"] is True and staff["messages"] == []  # 담당은 요약만 본다
+    assert admin["status"] == "closed"
+    assert admin["restricted"] is True and admin["messages"] == []  # 관리자도 요약만 본다
+    # 예전 화면 API가 보내던 `staff`는 일반 사람(member)으로 읽어 막힘 없이 거절된다
+    legacy = call("support_chat_close", {"thread_id": "chat-1", "viewer": "병환", "role": "staff"})
+    assert legacy["outcome"] == "forbidden"
 
 
 def test_closing_twice_returns_the_same_thread(env: Spawned, llm: MockLLMClient) -> None:
@@ -456,13 +459,13 @@ def test_owner_sees_originals_and_others_get_the_restricted_summary(
     assert theirs["who"] == "병환" and "병환의 질문" not in str(theirs)  # 원문은 어디에도 없다
 
 
-def test_staff_and_admin_see_summaries_but_originals_when_a_task_exists(
+def test_everyone_sees_summaries_and_only_admin_sees_originals_when_a_task_exists(
     env: Spawned, llm: MockLLMClient
 ) -> None:
     _two_threads(env)
     thread_of(call("support_chat_close", {"thread_id": "chat-1", "viewer": "예진"}))
     env.run()
-    for role in ("staff", "admin"):
+    for role in ("member", "admin"):  # 로그인한 사람 모두 요약을 본다 (예진님 2026-11-09)
         items = call("support_chat_list", {"viewer": "담당자", "role": role})["output"]["items"]
         assert len(items) == 2
         for item in items:
@@ -473,13 +476,16 @@ def test_staff_and_admin_see_summaries_but_originals_when_a_task_exists(
     # 일이 생긴 대화는 원문까지 본다
     chat_handlers.CHATS.add_task("chat-2", "task-9")
     got = thread_of(
-        call("support_chat_get", {"thread_id": "chat-2", "viewer": "담당자", "role": "staff"})
+        call("support_chat_get", {"thread_id": "chat-2", "viewer": "관리자", "role": "admin"})
     )
     assert got["restricted"] is False and got["task_ids"] == ["task-9"] and got["messages"]
     assert got["task_id"] == "task-9"
-    # 일이 생겨도 일반 사람은 원문을 못 본다
-    plain = thread_of(call("support_chat_get", {"thread_id": "chat-2", "viewer": "낯선사람"}))
-    assert plain["restricted"] is True and plain["messages"] == []
+    # 일이 생겨도 관리자가 아닌 사람은 원문을 못 본다 (예전 `staff`로 와도 같다)
+    for role in ("member", "staff"):
+        plain = thread_of(
+            call("support_chat_get", {"thread_id": "chat-2", "viewer": "낯선사람", "role": role})
+        )
+        assert plain["restricted"] is True and plain["messages"] == []
 
 
 def test_getting_someone_elses_thread_returns_the_restricted_view(
@@ -514,7 +520,6 @@ def test_access_rules_are_pure() -> None:
     assert chat.access_of(t, "예진", "member") == "full"
     assert chat.access_of(t, "병환", "member") == "summary"
     assert chat.access_of(t, None, "member") == "summary"
-    assert chat.access_of(t, "병환", "staff") == "summary"
     assert chat.access_of(t, "병환", "admin") == "summary"
     with_task = store.add_task(t.id, "task-1")
     assert chat.access_of(with_task, "병환", "admin") == "full"

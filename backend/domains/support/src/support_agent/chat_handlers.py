@@ -320,7 +320,7 @@ async def chat_close(request: AgentRequest) -> AgentResult:
     thread = CHATS.get(parsed.thread_id)
     if thread is None:
         return _gone(request, parsed.thread_id)
-    if thread.who != parsed.viewer and parsed.role not in ("staff", "admin"):
+    if thread.who != parsed.viewer and parsed.role != "admin":
         return _forbidden(request)
     if thread.status == "closed":  # 이미 끝난 대화는 그대로 돌려준다
         return h._done(
