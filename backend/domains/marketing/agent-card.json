@@ -136,7 +136,7 @@
         "orchestrator",
         "dashboard-api"
       ],
-      "verifier": "finance",
+      "verifier": "safety",
       "priority": "recommended"
     },
     {
