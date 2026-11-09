@@ -118,7 +118,10 @@ export const api = {
     createClaim: (id: number, b: ClaimIntake) => post<ClaimDetail>(`/api/dashboard/conversations/${id}/claims`, b),
     summary: (id: number) => post<Summary>(`/api/dashboard/conversations/${id}/summary`),
     setStatus: (id: number, status: string) => post<ConversationListItem>(`/api/dashboard/conversations/${id}/status`, { status }),
-    orders: (user_id: number) => request<{ id: number; order_no: string; status: string; status_ko: string; title: string }[]>(`/api/dashboard/orders?user_id=${user_id}`),
+    /** `since`(ISO 8601)를 주면 그 시각 이후 주문만 읽는다. 구매자의 주문이 수천 건이면 전부 읽기에 느리다. 최신순 */
+    orders: (user_id: number, since?: string) =>
+      request<{ id: number; order_no: string; status: string; status_ko: string; title: string }[]>(
+        `/api/dashboard/orders?user_id=${user_id}${since ? `&since=${encodeURIComponent(since)}` : ""}`),
     claims: (status?: string) => request<Claim[]>(`/api/dashboard/claims${status ? `?status=${status}` : ""}`),
     claimStats: () => request<ClaimStats>("/api/dashboard/claims/stats"),
     claim: (id: number) => request<ClaimDetail>(`/api/dashboard/claims/${id}`),
