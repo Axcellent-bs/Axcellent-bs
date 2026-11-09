@@ -41,7 +41,7 @@ from ax_orchestrator.models import (
 )
 from ax_orchestrator.naming import DEPT_KO, RESOLUTION_KO
 from ax_orchestrator.registry import Registry
-from ax_orchestrator.timeline import prior_case_of, times_of
+from ax_orchestrator.timeline import prior_case_of, step_timings, times_of
 
 Caller = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 Publisher = Callable[[str, Incident], Awaitable[None]]
@@ -76,12 +76,14 @@ class Hold:
         self.review_id = review_id
         self.started_at = now()
         self.expires_at = self.started_at + timedelta(seconds=wait_seconds)
+        self.decided_at: datetime | None = None  # 사람이 결정한 시각(승인 대기 시간 계산용)
         self.event = asyncio.Event()
 
     def decide(self, approved: bool, reason: str, by: str | None = None) -> None:
         if not self.pending:
             return
         self.pending = False
+        self.decided_at = now()
         self.approved = approved
         self.reason = reason
         self.decided_by = by
@@ -108,6 +110,7 @@ TIME_KO = {
     "human_work_started_at": "사람에게 넘긴 시각",
     "human_work_done_at": "사람이 처리를 끝낸 시각",
     "recovered_at": "정상 복귀 시각",
+    "step_timings": "단계별 시간",
 }
 
 
@@ -574,6 +577,10 @@ class Engine:
                 hold.decide(outcome.approved, outcome.reason, outcome.by)
             else:
                 hold.decide(False, "review_timeout")
+        if hold.decided_at is not None:
+            run.approval_wait_seconds = max(
+                0.0, (hold.decided_at - hold.started_at).total_seconds()
+            )
         if hold.approved:
             by = f"({hold.decided_by})" if hold.decided_by else ""
             inc.log(f"{run.label}: 사람이 승인{by} — 재개")
@@ -623,6 +630,8 @@ class Engine:
         except TimeoutError:
             wait.finish("timeout", None)
         run.finished_at = now()
+        if wait.finished_at is not None:
+            run.human_wait_seconds = max(0.0, (wait.finished_at - wait.started_at).total_seconds())
         if wait.status == "done":
             run.status = "completed"
             run.output = {
@@ -781,9 +790,21 @@ class Engine:
         prior = prior_case_of(inc)
         if prior and inc.times_sent.get("prior_case_id") != prior:
             fresh["prior_case_id"] = prior
-        if not fresh:
+        # 단계별 시간은 이벤트가 끝난 뒤에만 보낸다. 사람 처리가 늦게 끝나 값이 바뀌면 다시 보낸다
+        timings = step_timings(inc) if inc.status in ("resolved", "degraded") else []
+        timings_digest = (
+            hashlib.sha256(json.dumps(timings, sort_keys=True).encode()).hexdigest()[:12]
+            if timings
+            else None
+        )
+        send_timings = (
+            timings_digest is not None and inc.times_sent.get("step_timings") != timings_digest
+        )
+        if not fresh and not send_timings:
             return
-        payload = {"context_id": inc.context_id, **fresh}
+        payload: dict[str, Any] = {"context_id": inc.context_id, **fresh}
+        if send_timings:
+            payload["step_timings"] = timings
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:10]
         req = AgentRequest(
             meta=RequestMeta(
@@ -809,7 +830,11 @@ class Engine:
             return
         if outcome in ("recorded", "duplicate"):
             inc.times_sent.update(fresh)
-            inc.log(f"이벤트 시각 기록: {', '.join(TIME_KO.get(k, k) for k in sorted(fresh))}")
+            sent = sorted(fresh)
+            if send_timings and timings_digest is not None:
+                inc.times_sent["step_timings"] = timings_digest
+                sent.append("step_timings")
+            inc.log(f"이벤트 시각 기록: {', '.join(TIME_KO.get(k, k) for k in sent)}")
         else:
             inc.log(f"이벤트 시각 기록 보류: {outcome or '결과 없음'}")
 

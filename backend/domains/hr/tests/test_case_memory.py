@@ -478,6 +478,89 @@ async def test_later_times_fill_the_gaps_and_keep_the_earlier_ones(svc) -> None:
     assert saved["detected_at"] and saved["recovered_at"] and saved["prior_case_id"] == "card_old"
 
 
+def _timing(step_id: str, **kw) -> dict:
+    base = {"step_id": step_id, "dept": "infra", "status": "completed", "attempts": 1}
+    return {**base, **kw}
+
+
+@pytest.mark.asyncio
+async def test_step_timings_are_saved_on_the_card_without_any_new_time(svc) -> None:
+    card_id = await _incident(svc)
+    rows = [
+        _timing("diagnose", work_seconds=1.5),
+        _timing("rollback", work_seconds=4.0, approval_wait_seconds=46.0),
+    ]
+    result = await record_event_times(
+        svc, _req("record_event_times", _times(step_timings=rows), key="a")
+    )
+    assert result.output["outcome"] == "recorded"
+    extra = (await svc.memory.get_card(card_id)).extra
+    saved = {t["step_id"]: t for t in extra["step_timings"]}
+    assert (
+        saved["rollback"]["work_seconds"] == 4.0
+        and saved["rollback"]["approval_wait_seconds"] == 46.0
+    )
+    assert "timeline" not in extra  # 시각을 안 보냈으면 빈 시각표를 만들지 않는다
+
+
+@pytest.mark.asyncio
+async def test_the_same_step_timings_again_are_a_duplicate(svc) -> None:
+    await _incident(svc)
+    rows = [_timing("diagnose", work_seconds=1.5)]
+    await record_event_times(svc, _req("record_event_times", _times(step_timings=rows), key="a"))
+    again = await record_event_times(
+        svc, _req("record_event_times", _times(step_timings=rows), key="b")
+    )
+    assert again.output["outcome"] == "duplicate"
+
+
+@pytest.mark.asyncio
+async def test_changed_step_timings_replace_the_old_ones_but_times_never_do(svc) -> None:
+    card_id = await _incident(svc)
+    first = svc.clock()
+    await record_event_times(
+        svc,
+        _req(
+            "record_event_times",
+            _times(
+                detected_at=first.isoformat(),
+                step_timings=[_timing("rollback", work_seconds=4.0)],
+            ),
+            key="a",
+        ),
+    )
+    later = first + timedelta(minutes=5)
+    result = await record_event_times(
+        svc,
+        _req(
+            "record_event_times",
+            _times(
+                detected_at=later.isoformat(),  # 이미 있는 시각이라 덮어쓰지 않는다
+                step_timings=[_timing("rollback", work_seconds=4.0, human_wait_seconds=99.0)],
+            ),
+            key="b",
+        ),
+    )
+    assert result.output["outcome"] == "recorded"
+    extra = (await svc.memory.get_card(card_id)).extra
+    assert extra["step_timings"][0]["human_wait_seconds"] == 99.0  # 단계 시간은 마지막 값
+    assert extra["timeline"]["detected_at"].startswith(first.isoformat()[:19])
+
+
+@pytest.mark.asyncio
+async def test_negative_step_times_are_rejected(svc) -> None:
+    await _incident(svc)
+    result = await record_event_times(
+        svc,
+        _req(
+            "record_event_times",
+            _times(step_timings=[_timing("rollback", work_seconds=-1)]),
+            key="a",
+        ),
+    )
+    assert result.status.value in ("failed", "rejected")
+
+
 @pytest.mark.asyncio
 async def test_event_times_without_a_card_say_so(svc) -> None:
     result = await record_event_times(

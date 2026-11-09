@@ -65,6 +65,8 @@ def step_to_dict(run: StepRun) -> dict[str, Any]:
         "transferred_to": run.transferred_to,
         "reason_code": run.reason_code,
         "handoff_task_id": run.handoff_task_id,
+        "approval_wait_seconds": run.approval_wait_seconds,
+        "human_wait_seconds": run.human_wait_seconds,
     }
 
 
@@ -84,6 +86,8 @@ def step_from_dict(raw: dict[str, Any]) -> StepRun:
         transferred_to=raw.get("transferred_to"),
         reason_code=raw.get("reason_code"),
         handoff_task_id=raw.get("handoff_task_id"),
+        approval_wait_seconds=raw.get("approval_wait_seconds"),
+        human_wait_seconds=raw.get("human_wait_seconds"),
     )
 
 
