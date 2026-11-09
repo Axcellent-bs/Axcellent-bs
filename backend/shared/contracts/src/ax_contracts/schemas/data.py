@@ -1385,8 +1385,8 @@ class ShortsGroup(AxModel):
     # 이미 모은 숏츠 안에서만 고르고(더 검색하지 않음), 표본 부족 칸도 준다. 통계 칸과 무관
     videos: list[ShortsVideo] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. 형식 그룹만: 이 형식 숏츠 중 게시된 지(YouTube snippet.publishedAt)
-    # `ShortsStatsOutput.recent_days`일 안인 수 (반짝 1개인지 보려고). 게시 시각을 모르는 숏츠는
-    # 세지 않고 그 수를 recent_unknown에 둔다
+    # `ShortsStatsOutput.recent_days`일(= 숏츠 검색 기간 search_days) 안인 수 (반짝 1개인지 보려고).
+    # 게시 시각을 모르는 숏츠는 세지 않고 그 수를 recent_unknown에 둔다
     recent_count: int | None = Field(default=None, ge=0)
     recent_unknown: int | None = Field(default=None, ge=0)
 
@@ -1433,7 +1433,8 @@ class ShortsStatsOutput(AxModel):
     # 표본에 더한 수 (같은 영상은 한 번만, 추가 검색 없음)
     subtopic_shorts: int = Field(default=0, ge=0)
     # 아래는 예전 응답은 없다. 전체 숏츠 시간당 조회 증가 중앙값과 그 표본 수
-    # (형식별 "숏츠 전체 대비" 배수의 분모), 형식 그룹 recent_count를 센 기간(게시 후 일)
+    # (형식별 "숏츠 전체 대비" 배수의 분모), 형식 그룹 recent_count를 센 기간
+    # (게시 후 일, = 숏츠 검색 search_days)
     median_views_per_hour: float | None = None
     median_views_per_hour_count: int = Field(default=0, ge=0)
     recent_days: int | None = Field(default=None, ge=1)

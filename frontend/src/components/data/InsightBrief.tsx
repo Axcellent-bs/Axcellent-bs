@@ -363,7 +363,8 @@ function RegenConfirm({ head, onCancel, onOk }: { head: TrendInsightBriefOutput;
 const PROMO_SOURCE = "YouTube 숏츠 통계 (인기 영상 상위·조회수 순 검색 표본)";
 
 function PromoCard({ i, facts }: { i: TrendInsight; facts: DataFact[] }) {
-  const days = i.promo_recent_days ?? 3;
+  // 기간은 서버 값(= 숏츠 검색 search_days). 없으면 숫자를 지어내지 않는다
+  const days = i.promo_recent_days ? `최근 ${i.promo_recent_days}일` : "최근 검색 기간";
   const at = when(i.shorts_format_at ?? i.evidence.youtube_at ?? null);
   const naverAt = i.evidence.naver_until ?? null;
   const mine = facts.filter((f) => f.about === i.insight_id || (i.fact_ids ?? []).includes(f.fact_id));
@@ -373,7 +374,7 @@ function PromoCard({ i, facts }: { i: TrendInsight; facts: DataFact[] }) {
   }
   if (i.promo_recent_count != null) {
     const unknown = i.promo_recent_unknown ? ` (게시 시각 모름 ${num(i.promo_recent_unknown)}개 제외)` : "";
-    rows.push({ label: `최근 ${days}일 게시된 같은 형식`, value: `${num(i.promo_recent_count)}개${unknown}`, source: `${PROMO_SOURCE}${at ? ` · ${at} 기준` : ""}` });
+    rows.push({ label: `${days} 게시된 같은 형식`, value: `${num(i.promo_recent_count)}개${unknown}`, source: `${PROMO_SOURCE}${at ? ` · ${at} 기준` : ""}` });
   }
   if (i.evidence.naver_ratio != null) {
     const age = i.target_age && i.target_age_ratio != null ? ` · ${i.target_age} ${num(i.target_age_ratio, 2)}배` : "";
@@ -384,7 +385,7 @@ function PromoCard({ i, facts }: { i: TrendInsight; facts: DataFact[] }) {
       <div className="flex flex-wrap items-center gap-2">
         <Chip label="홍보 영상" tone={TONE.info} />
         {i.promo_views_per_hour_ratio != null && <Chip label={`숏츠 전체 대비 ${num(i.promo_views_per_hour_ratio, 2)}배`} tone={TONE.ok} />}
-        {i.promo_recent_count != null && <Chip label={`최근 ${days}일 게시 ${num(i.promo_recent_count)}개`} tone={TONE.ok} />}
+        {i.promo_recent_count != null && <Chip label={`${days} 게시 ${num(i.promo_recent_count)}개`} tone={TONE.ok} />}
       </div>
       <h4 className="text-lg font-bold text-ink-900">{i.topic}</h4>
       {rows.length > 0 && (
@@ -426,11 +427,12 @@ function PromoCard({ i, facts }: { i: TrendInsight; facts: DataFact[] }) {
   );
 }
 
-function HeldBackList({ items }: { items: HeldBack[] }) {
+function HeldBackList({ items, open }: { items: HeldBack[]; open: boolean }) {
   if (items.length === 0) return null;
   return (
-    <details className="card p-4">
-      <summary className="cursor-pointer text-sm font-semibold text-ink-900">근거 부족이라 넘기지 않은 것 {items.length}개</summary>
+    // 홍보 영상이 0개면 펼쳐 둔다 (왜 아무것도 넘기지 않았는지가 이 목록이라서)
+    <details className="card p-4" open={open}>
+      <summary className="cursor-pointer text-sm font-semibold text-ink-900">이번에 넘기지 않은 것 {items.length}개와 이유</summary>
       <ul className="mt-3 space-y-1.5 text-sm">
         {items.map((h) => (
           <li key={`${h.topic}:${h.reason}`} className="flex flex-wrap gap-x-2">
@@ -528,14 +530,14 @@ export function InsightBrief({ state, examples, examplesCount }: {
             {v6 && (
               <section aria-labelledby="data-trend-insight-promo" className="space-y-3">
                 <h3 id="data-trend-insight-promo" className="text-lg font-bold text-ink-900">
-                  홍보 영상 아이디어 <span className="text-sm font-normal text-ink-500">형식만 빌려요 · 기준: 같은 형식 숏츠 1시간 조회 또는 검색이 오르고, 최근 며칠 새 같은 형식 숏츠가 여러 개</span>
+                  홍보 영상 아이디어 <span className="text-sm font-normal text-ink-500">형식만 빌려요 · 기준: 이 형식 1시간 조회가 숏츠 전체 대비 높거나 검색이 오르고, 숏츠 검색 기간 안에 게시된 같은 형식 숏츠가 여러 개</span>
                 </h3>
                 {promos.length > 0
                   ? <ul className="space-y-4">{promos.map((i) => <PromoCard key={i.insight_id} i={i} facts={out.facts ?? []} />)}</ul>
-                  : <p className="card p-4 text-sm text-ink-500">지금 기준을 넘은 홍보 영상 형식이 없어요.{out.limits.find((l) => l.startsWith("홍보 영상 0개")) ? ` ${out.limits.find((l) => l.startsWith("홍보 영상 0개"))}` : ""}</p>}
+                  : <p className="card p-4 text-sm text-ink-500">지금 기준을 넘은 홍보 영상 형식이 없어요.{held.length > 0 ? " 넘기지 않은 것과 이유는 바로 아래에 있어요." : ""}{out.limits.find((l) => l.startsWith("홍보 영상 0개")) ? ` ${out.limits.find((l) => l.startsWith("홍보 영상 0개"))}` : ""}</p>}
               </section>
             )}
-            <HeldBackList items={held} />
+            <HeldBackList items={held} open={v6 && promos.length === 0} />
             {/* v6: 기준을 넘은 것만, 없으면 칸을 숨긴다 (기회 가설 카드는 아래 참고용 접힘으로) */}
             {(!v6 || bookOnes.length > 0) && (
               <section aria-labelledby="data-trend-insight-books" className="space-y-3">
