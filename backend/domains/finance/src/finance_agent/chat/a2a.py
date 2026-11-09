@@ -18,7 +18,10 @@ from ax_contracts.schemas.finance import (
     FinanceChatRef,
     FinanceChatSendInput,
 )
+from finance_agent.chat import facts
 from finance_agent.chat.turn import ChatRefused, get_chat_service
+
+facts.install()  # 새 장부가 모이면 최근 대화한 경우 사실 묶음을 미리 다시 만든다
 
 
 def _invalid(request: AgentRequest, exc: ValidationError) -> AgentResult:
@@ -69,6 +72,7 @@ async def finance_chat_list(request: AgentRequest) -> AgentResult:
         inp = FinanceChatListInput.model_validate(request.input)
     except ValidationError as exc:
         return _invalid(request, exc)
+    facts.warm()  # 대화방을 열었다: 첫 질문 전에 사실 묶음을 미리 만든다
     return _done(
         request, "finance_chat_list", {"threads": get_chat_service().list(inp.who, inp.limit)}
     )
@@ -83,6 +87,7 @@ async def finance_chat_get(request: AgentRequest) -> AgentResult:
         thread = get_chat_service().get(inp.who, inp.thread_id)
     except ChatRefused as exc:
         return _refused(request, exc)
+    facts.warm()
     return _done(request, "finance_chat_get", {"thread": thread})
 
 
