@@ -12,6 +12,7 @@ import Finance from '@/pages/Finance'
 import FinanceGuide from '@/pages/FinanceGuide'
 import Handoffs from '@/pages/Handoffs'
 import Hr from '@/pages/Hr'
+import AgentEvaluation from '@/pages/AgentEvaluation'
 import OrgChanges from '@/pages/OrgChanges'
 import Incidents from '@/pages/Incidents'
 import IncidentDetail from '@/pages/IncidentDetail'
@@ -81,6 +82,7 @@ function Pages() {
           <Route path="/finance/daily" element={<Finance />} />
           <Route path="/finance/guide" element={<FinanceGuide />} />
           <Route path="/ops" element={<Hr />} />
+          <Route path="/agent-eval" element={<AgentEvaluation />} />
           <Route path="/org" element={<OrgChanges />} />
           <Route path="/marketing" element={<Marketing />} />
           <Route path="/orchestrator" element={<Orchestrator />} />

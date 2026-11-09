@@ -52,6 +52,7 @@ def judge_step(timing: dict[str, Any], criteria: Criteria) -> dict[str, Any] | N
         "dept": stage.dept,
         "group": stage.group,
         "verdict": verdict,
+        "status": status,
         "work_seconds": work,
         "attempts": attempts,
         "limit_seconds": rule.normal_max_seconds,

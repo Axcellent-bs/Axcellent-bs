@@ -24,6 +24,7 @@ from ax_contracts.schemas.hr import (
     DecideDuplicateGroupOutput,
     DecideOrgChangeOutput,
     DescribeOrgChangeOutput,
+    EvaluateAgentsOutput,
     FindOrgChangeBasisInput,
     FindOrgChangeBasisOutput,
     GetRosterOutput,
@@ -1307,6 +1308,26 @@ async def hr_activity(context_id: str) -> dict:
         )
         items = [AuditEntry.model_validate(e) for e in out["entries"]]
     return ok(items, total=len(items))
+
+
+@router.get("/agent-evaluation")
+async def agent_evaluation(limit: int = Query(30, ge=1, le=200)) -> dict:
+    """에이전트 평가: 최근 장애 이벤트에서 부서 AI가 일한 시간을 기준값과 비교한 판정 모음 (읽기).
+
+    점수·등급·순위는 없다. 목 모드는 가짜 판정을 만들지 않고 빈 결과를 돌려준다.
+    """
+    if is_mock():
+        return ok(
+            EvaluateAgentsOutput(
+                criteria_version=1,
+                criteria_updated="",
+                normal_max_seconds=30,
+                normal_max_attempts=1,
+                collected_at=datetime.now(UTC),
+            )
+        )
+    out = await or_unavailable(hr_client.call("evaluate_agents", {"limit": limit}), None)
+    return ok(EvaluateAgentsOutput.model_validate(out) if out is not None else None)
 
 
 @router.post("/plan-checks")

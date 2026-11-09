@@ -84,6 +84,19 @@
       "handoff": false
     },
     {
+      "id": "evaluate_agents",
+      "description": "최근 장애 이벤트에서 부서 AI가 일한 시간을 기준값과 비교한 판정을 에이전트별로 모아 조회한다. 점수·등급·순위는 없고 저장된 판정만 쓴다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#EvaluateAgentsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#EvaluateAgentsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "decide_candidate_card",
       "description": "후보 카드를 사람이 승인(active)하거나 폐기(retired)한다. 승인하면 같은 영역의 옛 결정을 대체됨으로 연결한다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#DecideCandidateCardInput",

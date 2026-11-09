@@ -240,6 +240,7 @@ SERVICES: tuple[Service, ...] = (
             "list_candidate_cards",
             "list_cards",
             "get_audit_timeline",
+            "evaluate_agents",
             "decide_candidate_card",
             "answer_planning_question",
         ),

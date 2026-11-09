@@ -224,6 +224,36 @@ def test_activity_is_the_audit_timeline_of_the_context(client: TestClient, fake:
     assert fake.last("get_audit_timeline").input == {"context_id": "ctx_hnd_0001"}
 
 
+EVALUATION = {
+    "criteria_version": 1,
+    "criteria_updated": "2026-11-09",
+    "normal_max_seconds": 30,
+    "normal_max_attempts": 1,
+    "events": [],
+    "agents": [],
+    "trend": [],
+    "collected_at": NOW,
+}
+
+
+def test_agent_evaluation_is_the_hr_summary_with_the_limit(client: TestClient, fake: Fake) -> None:
+    fake.outputs["evaluate_agents"] = EVALUATION
+    body = client.get(BASE + "/agent-evaluation", params={"limit": 10}).json()
+    assert body["data"]["criteria_version"] == 1 and body["data"]["agents"] == []
+    assert fake.last("evaluate_agents").input == {"limit": 10}
+
+
+def test_agent_evaluation_limit_is_checked_before_hr(client: TestClient, fake: Fake) -> None:
+    assert client.get(BASE + "/agent-evaluation", params={"limit": 0}).status_code == 422
+    assert client.get(BASE + "/agent-evaluation", params={"limit": 201}).status_code == 422
+    assert fake.sent == []
+
+
+def test_mock_agent_evaluation_is_empty_not_invented(mock_client: TestClient) -> None:
+    data = mock_client.get(BASE + "/agent-evaluation").json()["data"]
+    assert data["events"] == [] and data["agents"] == [] and data["trend"] == []
+
+
 def test_plan_check_sends_the_draft_as_input(client: TestClient, fake: Fake) -> None:
     fake.outputs["check_plan"] = PLAN
     response = client.post(BASE + "/plan-checks", json={"draft": DRAFT})

@@ -3,7 +3,7 @@
 // 화면은 예전 캣북스 대시보드의 AI 화면을 옮겨 온 것이다. paths가 그 서비스에 속한 화면 주소, agent가 맡은 AI다.
 import { useSyncExternalStore, type ComponentType } from 'react'
 import {
-  IconBolt, IconBook, IconBox, IconChart, IconCode, IconMegaphone, IconOffice, IconPlan, IconReceipt, IconShield, IconStar, IconUser, IconUsers,
+  IconBolt, IconBook, IconBox, IconChart, IconClock, IconCode, IconMegaphone, IconOffice, IconPlan, IconReceipt, IconShield, IconStar, IconUser, IconUsers,
 } from '@/components/icons'
 
 export type SubItem = { href: string; label: string; soon?: boolean }
@@ -117,6 +117,10 @@ export const SERVICES: Service[] = [
   {
     id: 'decisions', agent: 'hr', family: 'backoffice', name: '결정 기록', by: 'AXcellent', Icon: IconBook, entry: '/ops', paths: ['/ops'],
     desc: '회사의 결정을 기록하고, 새 계획이 과거에 기각된 안과 겹치는지 봅니다.',
+  },
+  {
+    id: 'agent-eval', agent: 'hr', family: 'backoffice', name: '에이전트 평가', by: 'AXcellent', Icon: IconClock, entry: '/agent-eval', paths: ['/agent-eval'],
+    desc: '장애가 났을 때 각 에이전트가 맡은 일을 제때 끝냈는지 봅니다. 점수나 순위 없이 늦은 이유를 함께 보여 줍니다.',
   },
   {
     id: 'org', agent: 'hr', family: 'backoffice', name: '조직 변동', by: 'AXcellent', Icon: IconOffice, entry: '/org', paths: ['/org'],
