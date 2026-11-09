@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -109,6 +110,11 @@ def restore(s: State, data: dict[str, Any]) -> None:
 
 def _text(s: State) -> str:
     return json.dumps(dump(s), ensure_ascii=False, sort_keys=True)
+
+
+def fingerprint(s: State) -> str:
+    """사람 기록·장부 기록 전체의 지문. 파일에 남기는 내용과 같은 것의 해시다(바뀌었는지만 본다)."""
+    return hashlib.sha1(_text(s).encode("utf-8")).hexdigest()
 
 
 def load(s: State, path: Path) -> bool:
