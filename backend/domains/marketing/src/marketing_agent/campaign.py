@@ -1,9 +1,13 @@
 """캠페인 시작·결과 전달 (skill `start_campaign`, `record_campaign_result`).
 
-- 시작: 재무 `review_campaign_budget`로 먼저 예산을 묻고(A2A `call_agent`), 거절이면 관문을 부르지
-  않고 멈춘다. 그 밖에는 `execute("start_campaign")`로 실행한다. 관문 결과(executed·held·
-  rejected 등)는 있는 그대로 돌려준다. 승인 한도·보류 기준(50만 원 이상은 사람 승인)은 재무와
-  safety가 정하고, 여기서는 숫자를 만들지 않는다.
+- 시작: 재무 `review_campaign_budget`로 먼저 예산 의견을 묻고(A2A `call_agent`),
+  `execute("start_campaign")`로 실행한다. 재무는 예산을 승인·반려하지 않고 의견만 낸다(`decision`은
+  늘 `approved`, 한도는 요청액, 의견은 `opinion`·`suggested_krw`). 의견이 "권하지 않음"이어도
+  막지 않고 `output.review`에 그대로 실어 돌려준다. 막는 것은 safety 관문(건당 50만 원 이상·하루
+  합계 100만 원 이상은 사람 승인, 0원 이하는 거부)뿐이고 관문 결과(executed·held·rejected 등)는
+  있는 그대로 돌려준다. 여기서는 숫자를 만들지 않는다.
+  옛 재무 답(`rejected`, 한도 미만 `conditional`)이 오면 관문을 부르지 않고 멈추는 분기는
+  방어로 남겨 둔다(지금 재무는 보내지 않는다).
 - 결과: 끝난 캠페인의 성과를 재무 `record_campaign_result`에 계약 모델(`CampaignResultInput`)로
   그대로 전달한다. 모르는 숫자(`gmv_krw` 등)는 비워 두고 채우지 않는다.
   매출 효과 숫자(기간·`gmv_krw`·`orders`·잰 값)를 호출자가 주지 않으면 데이터 `campaign_result`
@@ -235,7 +239,7 @@ async def start_campaign(request: AgentRequest) -> AgentResult:
             evidence=evidence,
         )
     if data.budget_krw > review.approved_limit_krw:
-        # 조건부 한도를 넘는 요청은 재무 검증이 거절하므로 관문을 부르지 않는다
+        # 옛 재무 답 방어: 한도보다 큰 요청은 관문을 부르지 않는다(지금 재무는 한도=요청액)
         return _result(
             request,
             TaskStatus.COMPLETED,
