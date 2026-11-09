@@ -827,3 +827,13 @@ async def test_create_ticket_is_a_for_planning_and_dev(gate: Gate, act, requeste
     assert (ok.grade, ok.status) == ("A", "executed")
     other = await gate.execute(act("create_ticket", "support", "tkt-support"))
     assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["planning", "dev"])
+async def test_send_message_is_a_for_planning_and_dev(gate: Gate, act, requester: str) -> None:
+    """부서 간 소통 메시지: 개발도 개발 화면 "소통" 탭에서 보낸다 (#881)."""
+    ok = await gate.execute(act("send_message", requester, f"msg-{requester}"))
+    assert (ok.grade, ok.status) == ("A", "executed")
+    other = await gate.execute(act("send_message", "support", "msg-support"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
