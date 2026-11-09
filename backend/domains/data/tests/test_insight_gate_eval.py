@@ -3,7 +3,7 @@
 - 근거로 치지 않음: 가격만, 검색 줄어듦(1.0 미만), 캣북스가 팔지 않는 상품군 → 넘기지 않고 이유
 - 숏츠 형식: 시간당 조회 1.6배·최근 3일 6개 → 홍보 영상, 1.6배여도 3일 2개 → 반짝이라 넘기지 않음
 - LLM 없이(고정 틀) 돌린다
-- 평가 정의 PR은 관찰만 (dev에는 기준 코드가 없어 모두 0.0). 관문은 코드 PR에서 켠다
+- 관문 켬 (평가 정의 PR #913은 관찰만: dev 모두 0.0)
 """
 
 from __future__ import annotations
@@ -118,9 +118,13 @@ def observe(tmp_path: Path) -> tuple[dict[str, float], dict]:
     return score.score(cases, got), got
 
 
-def test_insight_gate_is_observed(tmp_path: Path) -> None:
-    """관찰만 (관문 없음). 숫자는 PR 본문에 적는다."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (평가 정의 PR #913 dev: 0.0 / 0.0)
+
+
+def test_insight_gate_passes_the_gates(tmp_path: Path) -> None:
     metrics, got = observe(tmp_path)
     print("insight_gate eval:", json.dumps(metrics, ensure_ascii=False))
     print("insight_gate cases:", json.dumps(got, ensure_ascii=False, default=str))
     assert set(metrics) == set(score.METRICS)
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, (name, metrics[name], got)
