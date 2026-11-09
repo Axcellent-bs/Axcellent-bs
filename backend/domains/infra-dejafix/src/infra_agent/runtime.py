@@ -12,7 +12,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from infra_agent.clients import DataClient, ShopClient, default_data, default_shop
+from infra_agent.clients import (
+    DataClient,
+    ShopClient,
+    default_data,
+    default_shop,
+    orchestrator_opened_at,
+)
 from infra_agent.deployments import DeploymentHistory
 from infra_agent.diagnosis import Diagnosis
 
@@ -28,6 +34,8 @@ class Runtime:
     data: DataClient = field(default_factory=default_data)
     clock: Callable[[], datetime] = _now
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
+    # 사건이 열린 시각 (총괄 사건 기록). 롤백 요청에 incident_opened_at이 없을 때 채운다
+    incident_opened_at: Callable[[str], Awaitable[str | None]] = orchestrator_opened_at
     diagnoses: dict[str, Diagnosis] = field(default_factory=dict)  # context_id → 마지막 진단
     rollbacks: dict[str, dict[str, Any]] = field(default_factory=dict)  # idempotency_key → 결과
 

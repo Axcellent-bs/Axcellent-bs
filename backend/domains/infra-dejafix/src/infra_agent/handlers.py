@@ -185,8 +185,11 @@ async def rollback_deployment(request: AgentRequest) -> AgentResult:
     ).model_dump(mode="json")
     params.update(ints)
     params["deployed_at"] = _iso(target.deployed_at)
-    if inp.incident_opened_at:
-        params["incident_opened_at"] = inp.incident_opened_at
+    # 교차검증(dev verify_rollback_target)에 사건이 열린 시각이 필요하다. 총괄이 싣지 않으면
+    # 총괄 사건 기록에서 읽어 채운다(못 읽으면 비워 두고, 교차검증이 판정하지 않아 보류된다)
+    opened_at = inp.incident_opened_at or await rt.incident_opened_at(context_id)
+    if opened_at:
+        params["incident_opened_at"] = opened_at
 
     evidence = Evidence(
         queries=[

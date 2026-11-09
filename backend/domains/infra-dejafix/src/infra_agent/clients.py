@@ -16,7 +16,7 @@ import httpx
 
 from ax_agent_template import call_agent
 from ax_agent_template.company_connection import shop_api_override
-from ax_agent_template.config import agent_token, is_mock
+from ax_agent_template.config import agent_token, agent_url, is_mock
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 
 FAULTS_PATH = "/api/shop/admin/faults"
@@ -95,6 +95,31 @@ class HttpShop:
             response = await client.delete(self.base_url + FAULTS_PATH, headers=self._headers())
         response.raise_for_status()
         return dict(response.json().get("data") or {})
+
+
+ORCHESTRATOR_TIMEOUT_SECONDS = 5.0
+
+
+async def orchestrator_opened_at(context_id: str) -> str | None:
+    """총괄 사건 기록(`GET /api/incidents`)에서 이 사건이 열린 시각. 못 찾으면 None.
+
+    롤백 교차검증(dev `verify_rollback_target`)이 사건 시각을 요구하는데 총괄이 롤백 요청에
+    싣지 않을 때 쓴다. 지어내지 않는다: 기록이 없거나 못 읽으면 None이다.
+    """
+    if is_mock("infra"):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=ORCHESTRATOR_TIMEOUT_SECONDS) as client:
+            response = await client.get(f"{agent_url('orchestrator')}/api/incidents")
+        response.raise_for_status()
+        rows = response.json().get("data") or []
+    except (httpx.HTTPError, ValueError):
+        return None
+    for row in rows:
+        if isinstance(row, dict) and row.get("context_id") == context_id:
+            opened = row.get("opened_at")
+            return str(opened) if opened else None
+    return None
 
 
 class A2AData:
