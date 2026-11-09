@@ -50,7 +50,27 @@ export interface OfficeView {
 export const BUBBLE_MS = 4500;
 const WALK_MS = 3200;
 
-const short = (s: string, n = 14) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+/** 숫자 덩어리: 쉼표·소수점과 뒤에 붙은 단위까지 한 덩어리 */
+const NUMBER = /\d[\d,.]*(?:%|원|만원|억원|만|억|건|명|개|초|분|시간|일|배|ms|px)?/g;
+
+/**
+ * 말풍선 글을 n자 안으로 줄이고 "…"로 끝낸다. 숫자 덩어리 중간에서는 자르지 않는다:
+ * 자를 자리가 숫자 안이면 그 숫자 앞 띄어쓰기에서 자른다 (숫자는 통째로 넣거나 통째로 뺀다)
+ */
+export function short(s: string, n = 14): string {
+  if (s.length <= n) return s;
+  let cut = n - 1;
+  for (const m of s.matchAll(NUMBER)) {
+    const start = m.index ?? 0, end = start + m[0].length;
+    if (start >= cut) break;
+    if (end <= cut) continue;
+    const space = s.lastIndexOf(" ", start);
+    // 앞에 띄어쓰기가 없으면 숫자 바로 앞에서. 맨 앞부터 숫자라 남는 글이 없으면 숫자를 통째로 넣는다
+    cut = space > 0 ? space : start > 0 ? start : end;
+    break;
+  }
+  return `${s.slice(0, cut).trimEnd()}…`;
+}
 
 /** 가장 최근 사건: 열린 것이 있으면 그것, 없으면 마지막 것 */
 export function focusIncident(incidents: OrchIncident[]): OrchIncident | null {

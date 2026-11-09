@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  INCIDENT_STATUS_KO, SAFETY_ROOM, buildTimeline, incidentTitle, messageCount,
+  ALL_ROOM, INCIDENT_STATUS_KO, SAFETY_ROOM, buildTimeline, incidentTitle, messageCount,
   type ChatItem, type OrchIncident, type Tone,
 } from "@/lib/agentChat";
 import { api, ApiError } from "@/lib/api";
 import { finance, type ExecutionRecord } from "@/lib/finance";
 import { Link } from "@/lib/nav";
 import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
+import { HandoffLine, PlanCard } from "@/components/office/DevCards";
+import { TalkInput } from "@/components/office/TalkInput";
+import { proceed, useOfficeTalk, type OfficeTalk } from "@/components/office/useOfficeTalk";
+import { mergeTalk } from "@/lib/officeTalk";
 import { orchestrator } from "@/lib/orchestrator";
 import { shopFaults, type FaultState } from "@/lib/shopFaults";
 import type { CommLine } from "@/lib/types";
 
 // AI 대화방. 부서 AI들이 A2A로 주고받은 일을 메신저처럼 보여 준다.
+// 맨 위 "전체 대화방"은 사람과 부서 AI가 함께 쓰는 곳이다: 모든 부서 기록(AI 오피스 단톡방과 같은 규칙)에 사람 대화를 섞고, 아래 입력창으로 부서 AI에게 바로 말을 건다.
 // 말풍선 문장은 lib/agentChat.ts가 기록된 값으로만 만든다. 이 파일은 화면과 새로고침만 맡는다.
 // 출처 세 곳: 총괄(이벤트·단계), 안전 관문(돈이 나가는 실행), dashboard-api 공통 로그(부서 간 소통).
 // 운영 환경에서는 총괄·안전 관문 기록도 dashboard-api를 거쳐 읽어야 한다 (지금은 개발용 직접 호출, 백엔드 후속 작업).
@@ -39,6 +44,8 @@ const BUBBLE: Record<string, { bubble: string; avatar: string }> = {
   support: { bubble: "bg-emerald-50", avatar: "bg-emerald-700 text-white dark:text-app" },
   finance: { bubble: "bg-amber-50", avatar: "bg-amber-700 text-white dark:text-app" },
   hr: { bubble: "bg-red-50", avatar: "bg-red-700 text-white dark:text-app" },
+  dev: { bubble: "bg-sky-50", avatar: "bg-sky-700 text-white dark:text-app" },
+  human: { bubble: "bg-teal-700 text-white", avatar: "bg-teal-700 text-white" },
   safety: { bubble: "bg-brand-600 text-white", avatar: "bg-brand-strong text-white" },
   orchestrator: { bubble: "bg-brand-600 text-white", avatar: "bg-brand-strong text-white" },
 };
@@ -73,8 +80,10 @@ function Avatar({ name, k, small = false }: { name: string; k: string; small?: b
   );
 }
 
-function Message({ m }: { m: Extract<ChatItem, { kind: "msg" }> }) {
-  const right = m.central;
+function Message({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: OfficeTalk }) {
+  // 사람이 건 말은 오른쪽 청록 말풍선 (AI 오피스 단톡방과 같은 색), 직접 대화는 줄바꿈을 그대로
+  const right = m.central || !!m.human;
+  const direct = m.id.startsWith("direct:");
   const look = bubbleOf(m.fromKey);
   return (
     <li className={`flex gap-2.5 ${right ? "flex-row-reverse" : ""}`}>
@@ -87,7 +96,12 @@ function Message({ m }: { m: Extract<ChatItem, { kind: "msg" }> }) {
           {m.repeat && <span className="chip bg-brand-50 px-1.5 py-0 text-[10px] font-semibold text-brand-700" title="같은 내용을 여러 번 주고받아 하나로 묶었습니다">×{m.repeat}</span>}
         </div>
         <div title={m.raw} className={`mt-1 rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${right ? "rounded-tr-md" : "rounded-tl-md"} ${look.bubble} ${right ? "" : TONE_MARK[m.tone]}`}>
-          <p>{right ? "" : TONE_ICON[m.tone]}{m.text}</p>
+          <p className={direct ? "whitespace-pre-wrap break-words" : undefined}>{right ? "" : TONE_ICON[m.tone]}{m.text}</p>
+          {m.plan && (
+            <PlanCard plan={m.plan} disabled={!talk || !m.goKey || talk.busy(m.goKey)}
+              onGo={talk && m.goKey ? () => { void proceed(talk, m.goKey as string); } : undefined} />
+          )}
+          {m.handoff && <HandoffLine requestId={m.handoff.requestId} />}
           {m.facts.length > 0 && (
             <dl className="mt-1.5 flex flex-wrap gap-1.5">
               {m.facts.map((f) => (
@@ -146,10 +160,10 @@ function HoldBanner({ h, busy, canDecide, orchMock, onDecide }: {
   );
 }
 
-function Item({ it, busyHold, orchOn, orchMock, onDecide }: { it: ChatItem; busyHold: string | null; orchOn: boolean; orchMock: boolean; onDecide: (h: Extract<ChatItem, { kind: "hold" }>, approved: boolean) => void }) {
+function Item({ it, busyHold, orchOn, orchMock, onDecide, talk }: { it: ChatItem; busyHold: string | null; orchOn: boolean; orchMock: boolean; onDecide: (h: Extract<ChatItem, { kind: "hold" }>, approved: boolean) => void; talk?: OfficeTalk }) {
   switch (it.kind) {
     case "msg":
-      return <Message m={it} />;
+      return <Message m={it} talk={talk} />;
     case "hold":
       return <HoldBanner h={it} busy={busyHold === it.id} canDecide={orchOn} orchMock={orchMock} onDecide={(a) => onDecide(it, a)} />;
     case "system":
@@ -180,10 +194,23 @@ const STATUS_TONE: Record<string, string> = {
   open: "bg-brand-50 text-brand-700", resolved: "bg-emerald-50 text-emerald-700", degraded: "bg-amber-50 text-amber-700",
 };
 
-function RoomList({ rooms, selected, unseen, onSelect }: { rooms: Room[]; selected: string; unseen: Record<string, number>; onSelect: (id: string) => void }) {
+function RoomList({ rooms, all, selected, unseen, onSelect }: { rooms: Room[]; all: Room; selected: string; unseen: Record<string, number>; onSelect: (id: string) => void }) {
+  const allOn = selected === all.id;
+  const allNew = unseen[all.id] ?? 0;
   return (
     <nav aria-label="대화방 목록" className="card shrink-0 overflow-hidden lg:w-72">
-      <h2 className="px-4 pb-1 pt-4 text-sm font-semibold">직접 대화</h2>
+      <div className="px-2 pt-2">
+        <button onClick={() => onSelect(all.id)} aria-current={allOn ? "true" : undefined}
+          className={`w-full rounded-xl px-3 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${allOn ? "bg-brand-50" : "hover:bg-ink-50"}`}>
+          <div className="flex items-center gap-2">
+            <span className={`truncate text-sm font-semibold ${allOn ? "text-brand-700" : ""}`}><span aria-hidden="true">📌 </span>{all.title}</span>
+            <span className="ml-auto shrink-0 text-[11px] tabular-nums text-ink-500">{all.count}</span>
+            {allNew > 0 && !allOn && <span className="chip shrink-0 bg-accent px-1.5 text-white" aria-label={`새 메시지 ${allNew}개`}>{allNew}</span>}
+          </div>
+          <p className="mt-1 truncate text-[11px] text-ink-500">{all.sub}</p>
+        </button>
+      </div>
+      <h2 className="px-4 pb-1 pt-3 text-sm font-semibold">직접 대화</h2>
       <ul className="scroll-thin flex gap-1 overflow-x-auto px-2 pb-3 lg:flex-col lg:overflow-x-visible">
         {DIRECT_AGENTS.map((a) => {
           const id = DIRECT_PREFIX + a.key;
@@ -240,7 +267,8 @@ export default function AgentChat() {
   const [commTruncated, setCommTruncated] = useState(false);
   // 총괄이 목 모드라고 알려 줄 때만(GET /api/incidents의 meta.mock) 총괄 보류에 승인·거절 버튼을 보인다
   const [orchMock, setOrchMock] = useState(false);
-  const [room, setRoom] = useState<string>(SAFETY_ROOM);
+  // 처음 열면 전체 대화방
+  const [room, setRoom] = useState<string>(ALL_ROOM);
   const roomPicked = useRef(false);
   const [seen, setSeen] = useState<Record<string, number>>({});
   const [busyHold, setBusyHold] = useState<string | null>(null);
@@ -276,13 +304,18 @@ export default function AgentChat() {
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVis); };
   }, [refresh]);
 
+  // ------------------------------------------------ 사람이 부서 AI에게 직접 말 걸기 (AI 오피스·직접 대화와 같은 대화)
+  const talk = useOfficeTalk();
+
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const id of [SAFETY_ROOM, ...incidents.map((i) => i.context_id)]) {
       c[id] = messageCount(buildTimeline(incidents, executions, comms, id));
     }
+    c[ALL_ROOM] = messageCount(mergeTalk(buildTimeline(incidents, executions, comms, ALL_ROOM), talk.items));
     return c;
-  }, [incidents, executions, comms]);
+  }, [incidents, executions, comms, talk.items]);
+  const allRoom: Room = useMemo(() => ({ id: ALL_ROOM, title: "전체 대화방", sub: "모든 부서 기록 · 여기서 부서에 말 걸기", count: counts[ALL_ROOM] ?? 0 }), [counts]);
 
   const rooms: Room[] = useMemo(() => [
     ...[...incidents].reverse().map((inc) => ({
@@ -297,7 +330,7 @@ export default function AgentChat() {
 
   // 지금 보고 있는 방은 읽음 처리
   useEffect(() => { setSeen((s) => (s[room] === counts[room] ? s : { ...s, [room]: counts[room] ?? 0 })); }, [room, counts]);
-  const unseen = useMemo(() => Object.fromEntries(rooms.map((r) => [r.id, seen[r.id] == null ? 0 : Math.max(0, r.count - seen[r.id])])), [rooms, seen]);
+  const unseen = useMemo(() => Object.fromEntries([allRoom, ...rooms].map((r) => [r.id, seen[r.id] == null ? 0 : Math.max(0, r.count - seen[r.id])])), [allRoom, rooms, seen]);
 
   const direct = directAgentOf(room);
   const items = useMemo(() => buildTimeline(incidents, executions, comms, room), [incidents, executions, comms, room]);
@@ -309,14 +342,13 @@ export default function AgentChat() {
   useEffect(() => {
     if (orchConn !== "on") return;
     const ids = incidents.map((i) => i.context_id);
-    if (!roomPicked.current) {
-      roomPicked.current = true;
-      if (ids.length) setRoom((r) => (r.startsWith(DIRECT_PREFIX) ? r : ids[ids.length - 1]));
-    }
+    // 처음 열면 전체 대화방에 머문다 (마지막 사건 방으로 옮기지 않는다)
+    if (!roomPicked.current) roomPicked.current = true;
     if (knownIncidents.current === null) { knownIncidents.current = new Set(ids); return; }
     const opened = ids.find((id) => !knownIncidents.current?.has(id));
     for (const id of ids) knownIncidents.current.add(id);
-    if (opened) { replayRoom.current = opened; setRoom((r) => (r.startsWith(DIRECT_PREFIX) ? r : opened)); }
+    // 새 사건이 열리면 그 방으로 옮긴다. 직접 대화·전체 대화방(사람이 말을 거는 곳)에 있으면 옮기지 않는다
+    if (opened) { replayRoom.current = opened; setRoom((r) => (r.startsWith(DIRECT_PREFIX) || r === ALL_ROOM ? r : opened)); }
   }, [incidents, orchConn]);
 
   // ------------------------------------------------ 하나씩 보여 주기
@@ -336,7 +368,12 @@ export default function AgentChat() {
     const t = setTimeout(() => setRevealed((r) => r + 1), backlog > FAST_BACKLOG ? REVEAL_FAST_MS : REVEAL_MS);
     return () => clearTimeout(t);
   }, [revealed, items.length]);
-  const shown = useMemo(() => items.slice(0, Math.min(revealed, items.length)), [items, revealed]);
+  // 전체 대화방: 하나씩 보여 주기는 부서 기록에만 쓰고, 사람 대화는 바로 시각순으로 끼워 넣는다 (내 말풍선이 바로 붙게)
+  const isAll = room === ALL_ROOM;
+  const shown = useMemo(() => {
+    const base = items.slice(0, Math.min(revealed, items.length));
+    return isAll ? mergeTalk(base, talk.items) : base;
+  }, [items, revealed, isAll, talk.items]);
   const typing = primed.current && revealed < items.length;
   // 참석자: 이 방에서 말한 쪽과 받은 쪽 (처음 등장한 순서)
   const participants = useMemo(() => {
@@ -397,7 +434,9 @@ export default function AgentChat() {
   }
 
   const orchOn = orchConn === "on";
-  const roomEmpty = items.length === 0;
+  const roomEmpty = items.length === 0 && !(isAll && talk.items.length > 0);
+  // 전체 대화방: 답을 기다리는 부서 (AI 오피스 단톡방과 같은 문구)
+  const answering = isAll ? DIRECT_AGENTS.filter((a) => talk.busyKeys.includes(a.key)) : [];
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 lg:p-6">
@@ -424,7 +463,7 @@ export default function AgentChat() {
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{error}</p>}
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <RoomList rooms={rooms} selected={room} unseen={unseen} onSelect={setRoom} />
+        <RoomList rooms={rooms} all={allRoom} selected={room} unseen={unseen} onSelect={setRoom} />
 
         {direct ? <DirectChat agent={direct} /> : (
         <section aria-label="대화 기록" className="card relative flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden">
@@ -449,13 +488,27 @@ export default function AgentChat() {
               )}
               {room !== SAFETY_ROOM && <CommNote conn={commConn} truncated={commTruncated} />}
               <ol role="log" aria-live="polite" aria-relevant="additions" aria-label="부서 AI 대화" className="flex flex-col gap-4">
-                {shown.map((it) => <Item key={it.id} it={it} busyHold={busyHold} orchOn={orchOn} orchMock={orchMock} onDecide={decide} />)}
+                {shown.map((it) => <Item key={it.id} it={it} busyHold={busyHold} orchOn={orchOn} orchMock={orchMock} onDecide={decide} talk={isAll ? talk : undefined} />)}
                 {typing && <p className="animate-pulse px-1 text-xs text-ink-500" aria-live="polite">AI들이 이야기하는 중… ({items.length - revealed}개 남음)</p>}
               </ol>
               <p className="mt-6 text-center text-[11px] text-ink-500">{PROD_NOTE}</p>
               </>
             )}
           </div>
+          {answering.length > 0 && (
+            <ul aria-label="답하는 중인 부서" className="flex flex-col gap-1.5 border-t border-ink-100 px-4 py-2.5 lg:px-6">
+              {answering.map((a) => (
+                <li key={a.key} className="flex items-center gap-2 text-xs text-ink-500">
+                  <Avatar name={a.name} k={a.key} small />
+                  <span className="flex gap-0.5" aria-hidden="true">
+                    {[0, 1, 2].map((i) => <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-500" style={{ animationDelay: `${i * 120}ms` }} />)}
+                  </span>
+                  <span className="truncate"><b className="font-semibold text-ink-700">{a.name}</b> 질문에 답하는 중</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {isAll && <TalkInput talk={talk} onSent={() => toBottom(true)} where="chat" />}
           {fresh > 0 && (
             <button onClick={() => toBottom(true)}
               className="btn-primary absolute bottom-4 left-1/2 -translate-x-1/2 shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
