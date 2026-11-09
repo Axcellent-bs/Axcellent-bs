@@ -98,7 +98,7 @@ function Row({ it, fresh, talk }: { it: ChatItem; fresh: boolean; talk?: OfficeT
         <p className="text-[13px] font-semibold"><span aria-hidden="true">🚩 </span>{done ? "인간 판단" : "사람 판단 필요"}: {it.title}</p>
         <p className="mt-0.5 text-[11px] opacity-75">{it.detail}</p>
         {done ? <p className="mt-1 text-[11px] font-medium opacity-90">{outcome}</p>
-          : it.contextId === "replay-scn-a" ? <p className="mt-1 text-[11px] opacity-90">리플레이에서는 잠시 뒤 자동으로 승인됩니다.</p>
+          : it.contextId?.startsWith("replay-") ? <p className="mt-1 text-[11px] opacity-90">리플레이에서는 잠시 뒤 자동으로 승인됩니다.</p>
           : <Link href="/agents/chat" className="mt-1.5 inline-block text-[11px] font-semibold underline underline-offset-2">AI 대화방에서 결정 →</Link>}
       </li>
     );
