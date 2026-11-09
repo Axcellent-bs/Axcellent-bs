@@ -3,10 +3,15 @@
 발행에 실패하면(Redis 연동 전 포함) 미발행으로 남겨 두고 다음 `flush`에서 다시 보낸다
 (최소 한 번 전달). 받는 쪽은 같은 `event_id`를 두 번 처리하지 않는다.
 모든 이벤트는 `events.publish`로만 발행하고 별도 HTTP 엔드포인트는 만들지 않는다.
+
+`flush` 한 번은 오래된 순으로 `FLUSH_BATCH`건까지만 읽어 보낸다. 미발행이 수십만 건 쌓여도
+한꺼번에 메모리로 읽지 않아 서버가 멈추지 않는다(로컬 주문 48만 건에서 시작하자마자
+1.3GB·`/health` 무응답). 쌓인 것은 주기 판정 루프가 묶음씩 이어서 비운다(`drain`).
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import sqlite3
 from datetime import UTC, datetime
@@ -44,11 +49,18 @@ def enqueue(
     )
 
 
-async def flush(db: Db) -> int:
-    """미발행 이벤트를 발행 순서대로 보낸다. 실패하면 멈추고 보낸 개수를 돌려준다."""
+FLUSH_BATCH = 500  # flush 한 번에 읽어 보내는 최대 건수
+
+
+async def flush(db: Db, *, batch: int = FLUSH_BATCH) -> int:
+    """미발행 이벤트를 발행 순서대로 `batch`건까지 보낸다. 실패하면 멈추고 보낸 개수를 돌려준다.
+
+    주문·결제 요청마다 부르므로 한 번에 다 비우지 않는다(요청이 쌓인 이벤트를 기다리지 않게)."""
     with db.tx() as conn:
         rows = conn.execute(
-            "SELECT event_id, payload FROM outbox_events WHERE sent_at IS NULL ORDER BY rowid"
+            "SELECT event_id, payload FROM outbox_events WHERE sent_at IS NULL "
+            "ORDER BY rowid LIMIT ?",
+            (batch,),
         ).fetchall()
     sent = 0
     for row in rows:
@@ -62,3 +74,16 @@ async def flush(db: Db) -> int:
             )
         sent += 1
     return sent
+
+
+async def drain(db: Db, *, batch: int = FLUSH_BATCH) -> int:
+    """미발행이 남지 않을 때까지 묶음씩 보낸다. 묶음 사이에 다른 요청이 돌 틈을 준다.
+
+    한 묶음을 다 못 보냈으면(발행 실패·남은 것 없음) 멈춘다. 보낸 전체 개수를 돌려준다."""
+    total = 0
+    while True:
+        sent = await flush(db, batch=batch)
+        total += sent
+        if sent < batch:
+            return total
+        await asyncio.sleep(0)

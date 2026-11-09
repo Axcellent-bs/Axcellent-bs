@@ -327,7 +327,7 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
         while True:
             await asyncio.sleep(interval)
             shop.evaluate_monitor()
-            await outbox.flush(database)
+            await outbox.drain(database)  # 쌓인 미발행은 여기서 묶음씩 비운다
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
