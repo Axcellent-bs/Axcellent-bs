@@ -391,3 +391,57 @@ def test_team_headcount_carries_only_team_and_count() -> None:
                 "collected_at": T0,
             }
         )
+
+
+# ---- 근무 상태 · 휴가 (AI 사무실 머리 위 표시) ----------------------------------------------
+
+
+def test_휴가는_기간만_받고_사유와_종류는_거절한다() -> None:
+    from ax_contracts.schemas import RecordLeaveInput
+
+    ok = RecordLeaveInput(member_id="emp_1", start_date="2026-11-10", end_date="2026-11-12")
+    assert ok.end_date == "2026-11-12"
+    for extra in ({"reason": "병가"}, {"kind": "annual"}):
+        with pytest.raises(ValidationError):
+            RecordLeaveInput(
+                member_id="emp_1", start_date="2026-11-10", end_date="2026-11-12", **extra
+            )
+
+
+def test_휴가_끝이_시작보다_빠르면_거절한다() -> None:
+    from ax_contracts.schemas import RecordLeaveInput
+
+    with pytest.raises(ValidationError):
+        RecordLeaveInput(member_id="emp_1", start_date="2026-11-12", end_date="2026-11-10")
+    with pytest.raises(ValidationError):
+        RecordLeaveInput(member_id="emp_1", start_date="11/10", end_date="11/12")
+
+
+def test_상태_코드는_세_가지뿐이고_출퇴근_시각_칸은_없다() -> None:
+    from ax_contracts.schemas import GetPresenceOutput, PresenceEntry
+
+    for status in ("working", "off_shift", "on_leave"):
+        PresenceEntry(area="support", role="primary", member_id="emp_1", status=status)
+    with pytest.raises(ValidationError):
+        PresenceEntry(area="support", role="primary", member_id="emp_1", status="online")
+    with pytest.raises(ValidationError):
+        PresenceEntry(
+            area="support", role="primary", member_id="emp_1", status="working", checked_in_at=T0
+        )
+    out = GetPresenceOutput(collected_at=T0)
+    assert out.entries == [] and out.leaves == []
+
+
+def test_상세는_요청이_있어야_담기는_모양이다() -> None:
+    from ax_contracts.schemas import GetPresenceInput, GetPresenceOutput, LeaveView
+
+    assert GetPresenceInput().include_details is False
+    leave = LeaveView(
+        leave_id="lv_1",
+        member_id="emp_1",
+        start_date="2026-11-10",
+        end_date="2026-11-12",
+        recorded_by="emp_hr",
+        recorded_at=T0,
+    )
+    assert GetPresenceOutput(collected_at=T0, leaves=[leave]).leaves[0].leave_id == "lv_1"
