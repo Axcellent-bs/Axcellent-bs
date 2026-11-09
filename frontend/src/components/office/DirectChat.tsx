@@ -4,6 +4,7 @@ import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { POLL_MS, classifyFailure, directChatApi, isAnswering } from "@/lib/directChat";
 import { loadOwners, loadThreadId, saveOwner, saveThreadId, threadKey } from "@/lib/directThreads";
 import type { ChatMessage, ChatStatus, ChatThread as BaseThread } from "@/lib/planningData";
+import { READER_AREAS } from "@/demo/members";
 import { useSession, type Account } from "@/demo/session";
 
 // AI 대화방의 직접 대화. 사람이 부서 AI 하나를 골라 바로 말을 건다.
@@ -12,8 +13,9 @@ import { useSession, type Account } from "@/demo/session";
 //
 // 열람 권한
 // - 본인: 자기 대화 원문 전부
-// - 관리자: 다른 사람 대화는 요약(제목·메시지 수·시각·결과)만. 일이 생긴 대화(작업 시작)는 원문까지
-// - 그 밖의 사람: 다른 사람 대화를 볼 수 없다
+// - 다른 사람 대화: 모두가 요약(제목·메시지 수·시각·결과)만 본다 (2026-11-09 팀 결정, 소규모 회사 기준)
+// - 인사·재무 AI만 예외: 관리자와 회원·서버 관리에서 고른 열람 담당만 요약을 본다 (개인 사정·장부 숫자)
+// - 관리자: 일이 생긴 대화(작업 시작)는 원문까지
 // 데모 한계: 백엔드는 브라우저마다 같은 사람 토큰(공용)으로 대화를 받아 주인을 구분하지 못한다.
 // 그래서 대화 주인은 이 브라우저가 기억한다(OWNER_KEY). 서버가 가린 대화(restricted, 인사 AI)는 서버가 준 요약만 보여 준다.
 
@@ -72,14 +74,17 @@ export const DIRECT_AGENTS: DirectAgent[] = [
 export const directAgentOf = (room: string) =>
   room.startsWith(DIRECT_PREFIX) ? DIRECT_AGENTS.find((a) => DIRECT_PREFIX + a.key === room) : undefined;
 
-/** 다른 사람 대화 요약을 보는가: 관리자만 (회원 부서는 표시용이라 권한에 쓰지 않는다) */
-const isKeeper = (account: Account) => !!account.admin;
+/** 다른 사람 대화 요약을 보는가: 모두. 인사·재무 AI만 관리자와 열람 담당 (회원 부서는 표시용이라 권한에 쓰지 않는다) */
+const canSeeOthers = (agentKey: string, account: Account) => {
+  const area = READER_AREAS.find((r) => r.id === agentKey);
+  return !area || !!account.admin || !!account.readers?.includes(area.id);
+};
 
 const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
 const when = (iso: string) => (iso ? new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
 const errText = (e: unknown, name: string) => (e instanceof Error ? e.message : `${name}에 연결할 수 없어요`);
 const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", handed: "기획에 넘김", started: "코딩 작업 시작", blocked: "막힘", waiting: "앞 요청 대기", answering: "답하는 중", closed: "끝난 대화" };
-/** 일이 생긴 대화: 담당자가 원문까지 본다 */
+/** 일이 생긴 대화: 관리자가 원문까지 본다 */
 const madeWork = (t: ChatThread) => t.status === "started" || !!t.taskId;
 
 export function DirectChat({ agent }: { agent: DirectAgent }) {
@@ -108,7 +113,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
   const [closing, setClosing] = useState(false);
   const [owners, setOwners] = useState(loadOwners);
   const box = useRef<HTMLDivElement>(null);
-  const keeper = isKeeper(account);
+  const seeOthers = canSeeOthers(agent.key, account);
   const tkey = threadKey(agent.key, account.id);
 
   // 백엔드가 아직 없거나 LLM 키가 없으면 "준비 중", 403이면 입력을 막고 이유를 보여 준다
@@ -125,7 +130,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
   const isMine = (t: ChatThread) => !t.restricted && owners[t.id] === account.id;
   const mine = all.filter(isMine);
   const others = all.filter((t) => !isMine(t));
-  // 지금 연 대화가 남의 대화면 보기 전용 (담당자가 일이 생긴 대화 원문을 연 경우)
+  // 지금 연 대화가 남의 대화면 보기 전용 (관리자가 일이 생긴 대화 원문을 연 경우)
   const readOnly = !!thread && !isMine(thread);
 
   useEffect(() => {
@@ -226,18 +231,18 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
         </div>
         <div>
           <h3 className="text-xs font-semibold text-ink-700">다른 사람 대화</h3>
-          {!keeper ? (
-            <p className="mt-2 text-xs text-ink-500">관리자만 요약을 볼 수 있어요.</p>
+          {!seeOthers ? (
+            <p className="mt-2 text-xs text-ink-500">{agent.name} 대화는 관리자와 열람 담당만 요약을 볼 수 있어요. 열람 담당은 관리자가 회원·서버 관리에서 정해요.</p>
           ) : others.length === 0 ? <p className="mt-2 text-xs text-ink-500">아직 없어요.</p> : (
             <>
-              <p className="mt-1 text-[11px] text-ink-500">다른 사람의 대화(요약만 보임). 담당이라 볼 수 있어요. 코딩 작업이 생긴 대화는 원문을 열 수 있어요.</p>
+              <p className="mt-1 text-[11px] text-ink-500">다른 사람의 대화(요약만 보임).{account.admin ? " 관리자는 코딩 작업이 생긴 대화의 원문을 열 수 있어요." : ""}</p>
               <ul className="mt-2 space-y-1.5">
                 {others.map((t) => (
                   <li key={t.id} className={`rounded-lg px-2 py-1.5 text-xs ${thread?.id === t.id ? "bg-brand-50" : "bg-ink-50"}`}>
                     <span className="block truncate font-medium">{t.title || "제목 없는 대화"}</span>
                     <span className="text-[11px] text-ink-500">{when(t.createdAt)} · 메시지 {t.messageCount ?? t.messages.length}개 · {RESULT[t.status]}</span>
                     {t.summary && <span className="mt-0.5 block text-[11px] text-ink-700">{t.summary}</span>}
-                    {madeWork(t) && !t.restricted && (
+                    {account.admin && madeWork(t) && !t.restricted && (
                       <button type="button" className="mt-1 block text-[11px] font-medium text-brand-700 hover:underline" onClick={() => open(t)} disabled={!!sending}>원문 보기</button>
                     )}
                   </li>
@@ -259,7 +264,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
             <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">다른 사람의 대화(요약만 보임){thread.summary ? `: ${thread.summary}` : ""}</p>
           )}
           {readOnly
-            ? <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">다른 사람의 대화예요. 코딩 작업이 생긴 대화라 담당자에게 원문을 보여 줘요. 이어서 말할 수는 없어요.</p>
+            ? <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">다른 사람의 대화예요. 코딩 작업이 생긴 대화라 관리자에게 원문을 보여 줘요. 이어서 말할 수는 없어요.</p>
             : <p className="mb-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">{agent.note}</p>}
           {messages.length === 0 && !sending ? (
             <p className="py-12 text-center text-sm text-ink-500">{agent.name}에게 하고 싶은 말을 적어 보세요.</p>

@@ -6,7 +6,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { SERVICES, SHARED_PATHS, getEnabled, matchPath } from './services'
 import { getCompany } from './company'
-import { memberLinked, useProfiles, withProfile } from './members'
+import { memberLinked, useProfiles, withProfile, type ReaderArea } from './members'
 import { endSupport, getSupport, supportActive } from './support'
 
 export type Account = {
@@ -25,6 +25,8 @@ export type Account = {
   dept?: string
   /** 확인 권한: 받은 요청 중 위험한 건(확인 권한 필요)을 승인할 수 있다 */
   approver?: boolean
+  /** 열람 담당: 인사·재무 AI의 다른 사람 대화 요약을 본다 (그 밖의 AI는 모두가 본다) */
+  readers?: ReaderArea[]
 }
 
 export type MemberKind = '운영자' | '관리자' | '일반회원'

@@ -2,13 +2,13 @@ import { useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router'
 import { useCompany } from './company'
 import InfraHosts from './InfraHosts'
-import { ipMatches, linkEmail, linkIp, setProfile, unlinkEmail, unlinkIp, useLinks, useProfiles, validRule } from './members'
+import { READER_AREAS, ipMatches, linkEmail, linkIp, setProfile, unlinkEmail, unlinkIp, useLinks, useProfiles, validRule } from './members'
 import { DeptPicker } from './DeptPicker'
 import { customerAccounts, kindOf, type Account } from './session'
 import { privateIp, useHosts } from './store'
 
 // 회원·서버 관리 (관리자 /system/members). 회사 사람과 PC를 한 화면 탭으로 관리한다.
-// - 회원: 계정 연결(이메일)·부서(선택, 표시·조직도용)·확인 권한·쓰는 PC를 한 표에서
+// - 회원: 계정 연결(이메일)·부서(선택, 표시·조직도용)·확인 권한·열람 담당(인사·재무 AI 대화 요약)·쓰는 PC를 한 표에서
 // - PC·서버: 조직도와 PC 연결 (InfraHosts). 예전 /system/hosts 주소는 이 탭으로 온다
 // - 접속 허용: 사내 PC IP나 대역. 그 PC에서 가입·로그인하면 회사 회원이 된다
 // 계정 연결과 접속 허용 중 하나라도 맞으면 그 회원은 회사 회원이다.
@@ -30,6 +30,23 @@ function ApproverSwitch({ account }: { account: Account }) {
       className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${on ? 'bg-brand-600' : 'bg-ink-100'}`}>
       <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${on ? 'translate-x-4' : 'translate-x-0.5'}`} />
     </button>
+  )
+}
+
+/** 열람 담당 고르기: 인사·재무 AI의 다른 사람 대화 요약을 볼 사람 */
+function ReaderPicker({ account }: { account: Account }) {
+  const on = account.readers ?? []
+  return (
+    <div className="flex gap-1" role="group" aria-label={`${account.name} 열람 담당`}>
+      {READER_AREAS.map((r) => {
+        const sel = on.includes(r.id)
+        return (
+          <button key={r.id} type="button" aria-pressed={sel}
+            onClick={() => setProfile(account.email, { readers: sel ? on.filter((x) => x !== r.id) : [...on, r.id] })}
+            className={`chip ${sel ? 'bg-brand-600 text-white' : 'bg-ink-50 text-ink-500 hover:bg-ink-100'}`}>{r.label}</button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -71,7 +88,7 @@ export default function MembersPage() {
   )
 }
 
-/** 회원 한 표: 연결 · 부서 · 확인 권한 · 쓰는 PC */
+/** 회원 한 표: 연결 · 부서 · 확인 권한 · 열람 담당 · 쓰는 PC */
 function Members() {
   const links = useLinks()
   useProfiles() // 부서·확인 권한을 바꾸면 다시 그린다
@@ -98,6 +115,7 @@ function Members() {
         <div>
           <h2 className="font-semibold">회원</h2>
           <p className="mt-1 text-xs text-ink-500">이메일을 연결하면 가입 전이어도 미리 회사 회원으로 넣어 둬요. 부서는 고르지 않아도 되고, 표시와 조직도에만 써요.</p>
+          <p className="mt-1 text-xs text-ink-500">AI 대화방의 다른 사람 대화 요약은 모두가 봐요. 인사·재무 AI만 관리자와 열람 담당으로 고른 사람이 봐요.</p>
         </div>
         <form onSubmit={addEmail} className="flex gap-2">
           <input className="field w-64" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="회원 이메일" aria-label="연결할 회원 이메일" />
@@ -114,6 +132,7 @@ function Members() {
               <th className="px-4 py-2.5 font-medium">연결</th>
               <th className="px-4 py-2.5 font-medium">부서 (선택)</th>
               <th className="px-4 py-2.5 font-medium">확인 권한</th>
+              <th className="px-4 py-2.5 font-medium">열람 담당</th>
               <th className="px-4 py-2.5 font-medium">쓰는 PC</th>
               <th />
             </tr>
@@ -134,6 +153,7 @@ function Members() {
                   </td>
                   <td className="px-4 py-2.5"><DeptPicker size="sm" label={`${m.name} 부서`} value={m.dept ?? ''} onChange={(d) => setProfile(m.email, { dept: d })} allowNone /></td>
                   <td className="px-4 py-2.5"><ApproverSwitch account={m} /></td>
+                  <td className="px-4 py-2.5">{m.admin ? <span className="text-xs text-ink-500">관리자는 모두 봐요</span> : <ReaderPicker account={m} />}</td>
                   <td className="px-4 py-2.5 text-xs">
                     {pcs.length ? pcs.map((h) => <span key={h.id} className="mr-1 font-mono">{h.hostname}</span>) : <span className="text-ink-500">없음</span>}
                   </td>
@@ -157,7 +177,7 @@ function Members() {
               </tr>
             ))}
             {!accounts.length && !pending.length && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-ink-500">가입한 회원이 없어요</td></tr>
+              <tr><td colSpan={8} className="px-4 py-6 text-center text-ink-500">가입한 회원이 없어요</td></tr>
             )}
           </tbody>
         </table>
