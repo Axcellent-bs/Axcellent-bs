@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { OfficeTalk } from "@/components/office/useOfficeTalk";
-import { TALK_KEYS, TALK_LABEL } from "@/components/office/useOfficeTalk";
+import { DEV_OFF, DEV_TAG_TEXT, TALK_KEYS, TALK_LABEL } from "@/components/office/useOfficeTalk";
 import type { ChatItem, Tone } from "@/lib/agentChat";
 import { Link } from "@/lib/nav";
 
@@ -12,6 +12,7 @@ const AVATAR: Record<string, string> = {
   finance: "bg-amber-700 text-white dark:text-app", hr: "bg-red-700 text-white dark:text-app",
   safety: "bg-brand-strong text-white", orchestrator: "bg-brand-strong text-white",
   human: "bg-teal-700 text-white",
+  dev: "bg-sky-700 text-white", // 이름표 점(#0369a1)과 같은 파랑. 공통 로그의 dev 줄에도 쓰인다
 };
 const TONE_ICON: Record<Tone, string> = { request: "", ok: "✓ ", warn: "⏸ ", fail: "✕ ", muted: "" };
 const TONE_EDGE: Record<Tone, string> = {
@@ -84,7 +85,7 @@ function parseTag(text: string): { key: string | null; bad: boolean; body: strin
   let rest = text.slice(m[0].length);
   if (name.endsWith("AI") && name.length > 2) name = name.slice(0, -2);
   else if (/^AI(\s|$)/.test(rest)) rest = rest.replace(/^AI\s*/, "");
-  const key = TAG_KEY[name] ?? null;
+  const key = TAG_KEY[name] ?? (name === TALK_LABEL.dev ? DEV_OFF.key : null);
   return { key, bad: !key, body: rest.trim() };
 }
 
@@ -102,6 +103,7 @@ function TalkBox({ talk, onSent }: { talk: OfficeTalk; onSent: () => void }) {
     if (!raw) return;
     const tag = parseTag(raw);
     if (tag.bad) { setWarn("그 부서는 아직 말을 받을 수 없어요"); return; }
+    if (tag.key === DEV_OFF.key) { setWarn(DEV_TAG_TEXT); return; }
     const key = tag.key ?? to;
     const target = talk.chips.find((c) => c.key === key);
     if (!target || target.disabled) { setWarn("그 부서는 아직 말을 받을 수 없어요"); return; }

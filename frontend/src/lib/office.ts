@@ -4,7 +4,7 @@ import { skillKo, type ChatItem, type OrchIncident, type OrchStep } from "./agen
 // 상태는 기록된 값(단계 status·말풍선 문장·facts)으로만 정하고, 화면 없는 순수 함수만 둔다.
 
 // ---------------------------------------------------------------- 자리
-export type DeskKey = "infra" | "data" | "support" | "finance" | "planning" | "marketing" | "hr" | "orchestrator";
+export type DeskKey = "infra" | "data" | "support" | "finance" | "planning" | "marketing" | "hr" | "dev" | "orchestrator";
 
 export interface DeskDef { key: DeskKey; label: string; x: number; y: number; shirt: string; hair: string; skin: string }
 
@@ -17,6 +17,8 @@ export const DESKS: DeskDef[] = [
   { key: "planning", label: "기획", x: 14, y: 128, shirt: "#5b4fd0", hair: "#191919", skin: "#f5d0b0" },
   { key: "marketing", label: "마케팅", x: 74, y: 128, shirt: "#ec7452", hair: "#7a4a2a", skin: "#f2c9a0" },
   { key: "hr", label: "인사", x: 134, y: 128, shirt: "#b91c1c", hair: "#4a2f1b", skin: "#e8b98f" },
+  // 개발: 기획 맞은편 의자(뒷모습). x·y는 쓰는 곳이 없어(그림 자리는 PixelOffice SEATS) 기획 아래쪽 값만 둔다
+  { key: "dev", label: "개발", x: 14, y: 150, shirt: "#0369a1", hair: "#3a2a1a", skin: "#f2c9a0" },
   { key: "orchestrator", label: "총괄", x: 194, y: 128, shirt: "#2e2688", hair: "#222222", skin: "#f5d0b0" },
 ];
 

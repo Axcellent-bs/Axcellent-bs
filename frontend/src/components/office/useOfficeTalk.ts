@@ -13,15 +13,23 @@ import { useSession, type Account } from "@/demo/session";
 type Talk = NonNullable<DirectAgent["talk"]>;
 type Thread = Awaited<ReturnType<Talk["get"]>>;
 
-/** 단톡방에서 말을 거는 부서 (받는 곳 칩 순서) */
-export const TALK_KEYS = ["data", "support", "finance", "planning", "marketing", "hr"] as const;
-export type TalkKey = (typeof TALK_KEYS)[number];
+/**
+ * 단톡방에서 말을 거는 부서 (받는 곳 칩 순서, 서버를 부르는 대상은 이 목록뿐).
+ * dev(개발 AI)는 넣지 않는다: 대화에서 코딩 작업(PR)을 시작할 수 있어, 작업 시작 전 사람 확인 규칙이
+ * 서버에 생기면 여기에 "dev"를 더해 켠다(그 전까지 칩은 DEV_OFF로 "준비 중").
+ */
+export const OFFICE_TALK_KEYS = ["data", "support", "finance", "planning", "marketing", "hr"] as const;
+export const TALK_KEYS = OFFICE_TALK_KEYS;
+export type TalkKey = (typeof OFFICE_TALK_KEYS)[number];
 /** 칩 이름 (사무실 자리 이름과 같다) */
 export const TALK_LABEL: Record<string, string> = {
-  data: "데이터분석", support: "고객지원", finance: "재무", planning: "기획", marketing: "마케팅", hr: "인사", orchestrator: "총괄", infra: "인프라",
+  dev: "개발", data: "데이터분석", support: "고객지원", finance: "재무", planning: "기획", marketing: "마케팅", hr: "인사", orchestrator: "총괄", infra: "인프라",
 };
 /** 말을 받을 수 없는 자리 (칩만 비활성으로 보인다) */
 export const TALK_OFF = ["orchestrator", "infra"] as const;
+/** 개발 칩: 맨 앞에 비활성으로만 둔다 */
+export const DEV_OFF = { key: "dev", reason: "작업 시작 전 사람 확인 규칙이 생기면 켜져요" } as const;
+export const DEV_TAG_TEXT = "개발 AI는 아직 단톡방에서 받을 수 없어요. AI 대화방에서 이야기해 주세요";
 
 export interface TalkChip { key: string; label: string; disabled: boolean; reason: string | null }
 export interface OfficeTalk {
@@ -39,7 +47,7 @@ export interface OfficeTalk {
 }
 
 const agentsOf = (): DirectAgent[] =>
-  TALK_KEYS.map((k) => DIRECT_AGENTS.find((a) => a.key === k)).filter((a): a is DirectAgent => !!a && a.live && !!a.talk);
+  OFFICE_TALK_KEYS.map((k) => DIRECT_AGENTS.find((a) => a.key === k)).filter((a): a is DirectAgent => !!a && a.live && !!a.talk);
 const errText = (e: unknown, name: string) => (e instanceof Error ? e.message : `${name}에 연결할 수 없어요`);
 const byAt = (a: ChatItem, b: ChatItem) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
 
@@ -136,7 +144,8 @@ export function useOfficeTalk(): OfficeTalk {
   const busyKeys = useMemo(() => agents.map((a) => a.key).filter(busy), [agents, busy]);
 
   const chips = useMemo<TalkChip[]>(() => [
-    ...TALK_KEYS.map((key) => {
+    { key: DEV_OFF.key, label: `${TALK_LABEL.dev}(준비 중)`, disabled: true, reason: DEV_OFF.reason },
+    ...OFFICE_TALK_KEYS.map((key) => {
       const a = agents.find((x) => x.key === key);
       const reason = !a ? "준비 중" : prep[key] ? "준비 중" : locked[key] ?? null;
       return { key, label: TALK_LABEL[key], disabled: !!reason, reason };

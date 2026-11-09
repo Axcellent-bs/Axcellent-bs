@@ -14,8 +14,9 @@ const FONT = '"Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sa
 /** 원본 이미지 비율 좌표 → 캔버스 좌표 (잘라낸 영역: x 0.045~0.955, y 0.085~0.935) */
 const toC = (fx: number, fy: number) => ({ x: ((fx - 0.045) / 0.91) * W, y: ((fy - 0.085) / 0.85) * H });
 
-/** 자리(원본 이미지 비율, 의자 위 발끝)와 스프라이트. 그림이 6벌이라 멀리 앉은 두 쌍은 같은 그림을 쓴다 */
-const SEATS: Record<DeskKey, { fx: number; fy: number; char: number }> = {
+/** 자리(원본 이미지 비율, 의자 위 발끝)와 스프라이트. 그림이 6벌이라 멀리 앉은 자리끼리 같은 그림을 쓴다.
+ *  `back`: 책상 앞쪽 의자라 뒷모습으로 앉고, 말풍선은 늘 머리 위에 띄운다 */
+const SEATS: Record<DeskKey, { fx: number; fy: number; char: number; back?: boolean }> = {
   infra: { fx: 0.151, fy: 0.392, char: 0 },
   data: { fx: 0.282, fy: 0.392, char: 2 },
   support: { fx: 0.366, fy: 0.392, char: 4 },
@@ -23,8 +24,12 @@ const SEATS: Record<DeskKey, { fx: number; fy: number; char: number }> = {
   planning: { fx: 0.189, fy: 0.585, char: 5 },
   marketing: { fx: 0.302, fy: 0.585, char: 1 },
   hr: { fx: 0.411, fy: 0.585, char: 0 },
+  dev: { fx: 0.192, fy: 0.835, char: 4, back: true }, // 기획 맞은편 빈 의자 (왼쪽 아래 책상 앞쪽)
   orchestrator: { fx: 0.591, fy: 0.676, char: 3 },
 };
+/** 대기 동작(고개 돌리기·좌우) 씨앗. 개발 자리를 끼워 넣어도 원래 8자리의 동작이 바뀌지 않게 예전 순번을 쓴다 */
+const SEED = Object.fromEntries(DESKS.filter((d) => d.key !== "dev").map((d, i) => [d.key, i])) as Record<DeskKey, number>;
+SEED.dev = 8;
 const SEAT_PX = Object.fromEntries(DESKS.map((d) => [d.key, toC(SEATS[d.key].fx, SEATS[d.key].fy)])) as Record<DeskKey, Pt>;
 const DESK_BY = Object.fromEntries(DESKS.map((d) => [d.key, d])) as Record<DeskKey, (typeof DESKS)[number]>;
 
@@ -124,7 +129,7 @@ function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number,
     statusGlow(ctx, p, st, t);
     const seat = SEATS[key];
     const sheet = art.sprites[seat.char];
-    if (ready(sheet)) sprite(ctx, sheet, p, poseOf(mode, st, t, DESKS.findIndex((d) => d.key === key), dir));
+    if (ready(sheet)) sprite(ctx, sheet, p, poseOf(mode, st, t, SEED[key], dir, !!seat.back));
     if (key === "orchestrator") crown(ctx, p);
   }
 
@@ -139,6 +144,8 @@ function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number,
     const b: Bubble | null = dv.state === "waiting" ? { text: "! 승인 대기", kind: "warn" } : dv.bubble;
     if (!b) return;
     const back = SEATS[d.key].fy < 0.5;
+    // 뒷모습 자리(개발)는 아래가 캔버스 끝이라 늘 머리 위에. 그 높이는 기획 이름표보다 아래라 겹치지 않는다
+    if (SEATS[d.key].back) { bubble(ctx, p.x, p.y - SH - 6, b, t, dv.state === "waiting", "up"); return; }
     if (!back && !away) { bubble(ctx, p.x, p.y + 32, b, t, dv.state === "waiting", "down"); return; }
     const crowded = away && v.walkTo !== null && (v.desks[v.walkTo].state === "waiting" || v.desks[v.walkTo].bubble !== null);
     const lift = (back && i % 2 === 1 ? 44 : 0) + (crowded ? 48 : 0);
@@ -146,16 +153,19 @@ function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number,
   });
 }
 
-function poseOf(mode: Mode, state: string, t: number, seed: number, dir: Pt): Pose {
+function poseOf(mode: Mode, state: string, t: number, seed: number, dir: Pt, back = false): Pose {
   if (mode === "walk") {
     const col = [0, 1, 2, 1][Math.floor(t * 8) % 4];
     if (Math.abs(dir.y) > Math.abs(dir.x)) return { row: dir.y < 0 ? 1 : 0, col, flip: false };
     return { row: 2, col, flip: dir.x < 0 };
   }
   if (mode === "stand") return { row: 0, col: 1, flip: false };
-  if (state === "working") return { row: 0, col: 3 + (Math.floor(t * 8 + seed) % 2), flip: false };
-  if (state === "waiting") return { row: 0, col: 5 + (Math.floor(t * 2) % 2), flip: false };
-  // 쉬는 중: 가끔 고개를 돌린다
+  // 뒷모습 자리는 앉은 자세에서 줄 1(뒤)을 쓴다. 열 규칙은 같다
+  const row = back ? 1 : 0;
+  if (state === "working") return { row, col: 3 + (Math.floor(t * 8 + seed) % 2), flip: false };
+  if (state === "waiting") return { row, col: 5 + (Math.floor(t * 2) % 2), flip: false };
+  // 쉬는 중: 가끔 고개를 돌린다 (뒷모습 자리는 돌리지 않는다)
+  if (back) return { row, col: 1, flip: false };
   return { row: Math.floor(t / 3.1 + seed) % 5 === 0 ? 2 : 0, col: 1, flip: seed % 2 === 1 };
 }
 
