@@ -29,6 +29,7 @@ import csv
 import io
 from collections import defaultdict
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from finance_agent import closing
@@ -59,11 +60,17 @@ def filing_deadline(quarter_end: date) -> tuple[str, date]:
 
 
 def _vat(amount: int, mode: str) -> tuple[int, int]:
-    """(공급가액, 세액). mode: excluded(금액이 공급가액) / included(금액에 세액 포함)."""
+    """(공급가액, 세액). mode: excluded(금액이 공급가액) / included(금액에 세액 포함).
+
+    원 단위는 회사 정책과 같은 0.5 올림(`fc.rate_amount`, Decimal)이다. 예전에는 Python `round()`
+    (0.5에서 짝수 쪽)라 세액이 x.5원이면 1원 적게 나왔다(재무 평가 eval/run.py·holdout.py).
+    """
     if mode == "included":
-        supply = round(amount / 1.1)
+        supply = int(
+            (Decimal(amount) / Decimal("1.1")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
         return supply, amount - supply
-    return amount, round(amount * 0.1)
+    return amount, fc.rate_amount(amount, 0.1)
 
 
 def vat_pack(books: Books, d: date | None = None) -> dict[str, Any]:
