@@ -111,10 +111,10 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                   ["PG 수수료", r.totals.pg_fee, "결제대행사가 떼는 돈"],
                   ["입금 예정액", r.totals.pay_out, "수수료를 빼고 받을 돈"],
                 ] as const).map(([label, v, sub]) => (
-                  <div key={label} className="rounded-2xl bg-surface-2 px-3 py-2">
+                  <div key={label} title={sub} className="rounded-2xl border border-ink-100 px-4 py-3">
                     <dt className="text-sm text-ink-500">{label}</dt>
-                    <dd className={`text-base font-semibold tabular-nums ${v == null ? "text-ink-500" : ""}`}>{krw(v)}</dd>
-                    <dd className="text-sm text-ink-500">{sub}</dd>
+                    <dd className={`mt-1 text-xl font-semibold tabular-nums ${v == null ? "text-ink-500" : "text-ink-900"}`}>{krw(v)}</dd>
+                    <dd className="mt-0.5 text-xs text-ink-500">{sub}</dd>
                   </div>
                 ))}
               </dl>

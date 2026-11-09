@@ -1,5 +1,5 @@
 import { CATEGORY_KO, finance, krw, percent, plainText, signedKrw, type DeadlineStatus, type VarianceLine } from "@/lib/finance";
-import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
+import { Chip, Delta, Empty, Panel, ResourceBody, ShareBars, Stat, TONE, useResource } from "./bits";
 
 // 마감 통제 3종. 숫자는 모두 재무 AI 서버가 계산한 값을 그대로 보여 준다(화면에서 다시 계산하지 않음).
 // - 정산 기한 점검(③): 판매 대금을 법이 정한 날 안에 줄 수 있는지 미리 본다
@@ -30,17 +30,17 @@ export function DeadlineSection({ tick }: { tick: number }) {
                   <thead className="text-left text-sm text-ink-500">
                     <tr>
                       <th className="pb-1 font-medium">판매자</th><th className="pb-1 font-medium">상태</th>
-                      <th className="pb-1 text-right font-medium">미지급 판매 대금</th><th className="pb-1 font-medium">가장 이른 기한</th>
+                      <th className="pb-1 text-right font-medium">미지급 판매 대금</th><th className="pb-1 pl-6 font-medium">가장 이른 기한</th>
                       <th className="pb-1 font-medium">지급 예정</th><th className="pb-1 font-medium">막는 이유</th>
                     </tr>
                   </thead>
                   <tbody>
                     {r.sellers.map((s) => (
                       <tr key={s.seller_id} className="border-t border-ink-100 align-top">
-                        <td className="py-1.5">{s.name}<span className="ml-1 text-sm text-ink-500">주문 {s.orders}건</span></td>
+                        <td className="py-1.5"><span className="font-medium text-ink-900">{s.name}</span><span className="ml-1 text-sm tabular-nums text-ink-500">주문 {s.orders.toLocaleString("ko-KR")}건</span></td>
                         <td className="py-1.5"><Chip label={s.status_label} tone={DEADLINE_TONE[s.status]} /></td>
-                        <td className="py-1.5 text-right tabular-nums">{krw(s.amount)}</td>
-                        <td className="py-1.5 tabular-nums">{s.deadline} <span className={`text-sm ${s.days_left < 0 ? "text-red-700" : "text-ink-500"}`}>({s.days_left < 0 ? `${-s.days_left}일 지남` : `${s.days_left}일 남음`})</span></td>
+                        <td className="py-1.5 text-right font-medium tabular-nums text-ink-900">{krw(s.amount)}</td>
+                        <td className="py-1.5 pl-6 tabular-nums">{s.deadline} <span className={`text-sm ${s.days_left < 0 ? "text-red-700" : "text-ink-500"}`}>({s.days_left < 0 ? `${-s.days_left}일 지남` : `${s.days_left}일 남음`})</span></td>
                         <td className="py-1.5 tabular-nums">{s.expected_pay_date ?? <span className="text-sm text-amber-800">예정 없음</span>}</td>
                         <td className="py-1.5 text-sm text-ink-700">{s.hold_reasons.map((h) => plainText(h.label)).join(", ") || "–"}</td>
                       </tr>
@@ -65,12 +65,15 @@ export function PayablesSection({ tick }: { tick: number }) {
         {(p) => (
           <div className="space-y-3">
             <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {([["기초", p.totals.opening], ["발생 (+)", p.totals.accrued], ["지급 (−)", p.totals.paid], ["기말", p.totals.closing]] as const).map(([label, v]) => (
-                <div key={label} className="rounded-2xl bg-surface-2 px-3 py-2">
-                  <dt className="text-sm text-ink-500">{p.month} {label}</dt>
-                  <dd className="text-base font-semibold tabular-nums">{krw(v)}</dd>
-                </div>
-              ))}
+              {([["기초", p.totals.opening], ["발생 (+)", p.totals.accrued], ["지급 (−)", p.totals.paid], ["기말", p.totals.closing]] as const).map(([label, v], i) => {
+                const lead = i === 3; // 기초 + 발생 − 지급 = 기말. 결과를 가장 크게
+                return (
+                  <div key={label} className={`rounded-2xl border px-4 py-3 ${lead ? "border-brand-100 bg-brand-50/40" : "border-ink-100"}`}>
+                    <dt className="text-sm text-ink-500">{p.month} {label}</dt>
+                    <dd className={`mt-1 font-semibold tabular-nums text-ink-900 ${lead ? "text-2xl" : "text-xl"}`}>{krw(v)}</dd>
+                  </div>
+                );
+              })}
             </dl>
             <p className="text-sm text-ink-500">
               {p.balanced === true ? "기초 + 발생 − 지급 = 기말이 맞습니다." : p.balanced === false ? "합계가 맞지 않습니다. 재무 담당자에게 알리세요." : "주문·쿠폰 자료를 받지 못해 맞는지 확인할 수 없습니다."} {p.basis}
@@ -110,43 +113,78 @@ function valueOf(l: VarianceLine, v: number | null): string {
   return krw(v);
 }
 
+// 늘어나는 게 좋은 값(매출·주문)인지, 줄어드는 게 좋은 값(비용)인지
+const GOOD_UP: Record<string, boolean> = {
+  gmv: true, order_count: true, aov: true, commission_revenue: true, take_rate: true,
+  coupon_cost: false, pg_fee: false, refund_total: false, net_result: true,
+};
+// 맨 위 큰 숫자로 보여 줄 항목 (영업 결과가 가장 중요)
+const KEY_LINES = ["net_result", "commission_revenue", "gmv", "order_count", "pg_fee"];
+const unitOf = (code: string) => (code === "order_count" ? "count" : code === "take_rate" ? "pp" : "won") as "won" | "count" | "pp";
+
 export function VarianceSection({ tick }: { tick: number }) {
   const res = useResource("variance", () => finance.variance(), tick);
   return (
     <Panel id="variance" title="월간 변동 분석" meta={res.env?.meta}
-      hint="이번 달 손익이 지난달과 왜 달라졌는지 숫자로 나눠 봅니다. 숫자와 원인 나누기는 코드가 계산하고, 문장도 정해진 틀로 씁니다.">
+      hint="이번 달 손익이 지난달과 왜 달라졌는지 숫자로 나눠 봅니다. 숫자와 원인 나누기는 코드가 계산합니다.">
       <ResourceBody res={res}>
-        {(v) => (
-          <div className="space-y-4">
-            <ul className="space-y-1 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-700">
-              {v.summary.map((s, i) => <li key={i}>{plainText(s)}</li>)}
-            </ul>
+        {(v) => {
+          const byCode = Object.fromEntries(v.lines.map((l) => [l.code, l]));
+          const keys = KEY_LINES.map((c) => byCode[c]).filter((l): l is VarianceLine => !!l);
+          return (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+              {keys.map((l) => (
+                <Stat key={l.code} lead={l.code === "net_result"} flag={l.flag ? "크게 움직임" : undefined}
+                  label={l.label.replace("(건)", "")} value={valueOf(l, l.current)}
+                  delta={<Delta diff={l.diff} pct={l.pct} unit={unitOf(l.code)} good={GOOD_UP[l.code]} />}
+                  sub={`지난달 ${valueOf(l, l.previous)}`} />
+              ))}
+            </div>
+
+            {v.drivers && (
+              <div className="rounded-2xl border border-ink-100 px-4 py-3">
+                <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                  <span className="font-medium text-ink-900">수수료 매출이 왜 바뀌었나</span>
+                  <Delta diff={v.drivers.commission_change} good />
+                </p>
+                <div className="mt-3">
+                  <ShareBars format={signedKrw} rows={[
+                    { label: "거래량 효과", value: v.drivers.volume_effect },
+                    { label: "수수료율·구성 효과", value: v.drivers.rate_mix_effect },
+                  ]} />
+                </div>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full min-w-[600px] text-sm">
+                <caption className="sr-only">{v.month} 항목별 변동</caption>
                 <thead className="text-left text-sm text-ink-500">
-                  <tr><th className="pb-1 pl-3 font-medium">항목 ({v.month})</th><th className="pb-1 text-right font-medium">이번 달</th><th className="pb-1 text-right font-medium">지난달</th><th className="pb-1 text-right font-medium">변동</th><th className="pb-1 pr-3 text-right font-medium">작년 같은 달</th></tr>
+                  <tr><th className="pb-2 pl-3 font-medium">항목 ({v.month})</th><th className="pb-2 text-right font-medium">이번 달</th><th className="pb-2 text-right font-medium">지난달</th><th className="pb-2 text-right font-medium">지난달 대비</th><th className="pb-2 pr-3 text-right font-medium">작년 같은 달</th></tr>
                 </thead>
                 <tbody>
                   {v.lines.map((l) => (
-                    <tr key={l.code} className={`border-t border-ink-100 ${l.flag ? "bg-amber-50" : ""}`}>
-                      <th scope="row" className="py-1.5 pl-3 pr-3 text-left font-normal">{l.label}{l.flag && <span className="ml-1 text-sm text-amber-800">크게 움직임</span>}</th>
-                      <td className="py-1.5 text-right tabular-nums">{valueOf(l, l.current)}</td>
-                      <td className="py-1.5 text-right tabular-nums text-ink-500">{valueOf(l, l.previous)}</td>
-                      <td className="py-1.5 text-right tabular-nums">
-                        {l.diff == null ? "–" : l.code === "take_rate" ? `${l.diff > 0 ? "+" : ""}${(l.diff * 100).toFixed(1)}%p` : l.code === "order_count" ? `${l.diff > 0 ? "+" : ""}${l.diff.toLocaleString("ko-KR")}건` : signedKrw(l.diff)}
-                        {l.pct != null && l.code !== "take_rate" && <span className="ml-1 text-sm text-ink-500">({l.pct > 0 ? "+" : ""}{(l.pct * 100).toFixed(0)}%)</span>}
-                      </td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums text-ink-500">{valueOf(l, l.last_year)}</td>
+                    <tr key={l.code} className={`border-t border-ink-100 ${l.code === "net_result" ? "font-semibold text-ink-900" : ""}`}>
+                      <th scope="row" className="py-2 pl-3 pr-3 text-left font-normal">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.flag ? "bg-amber-700" : "bg-transparent"}`} aria-hidden="true" />
+                          {l.code === "net_result" ? <b>{l.label}</b> : l.label}
+                          {l.flag && <span className="sr-only">크게 움직임</span>}
+                        </span>
+                      </th>
+                      <td className="py-2 text-right tabular-nums">{valueOf(l, l.current)}</td>
+                      <td className="py-2 text-right tabular-nums text-ink-500">{valueOf(l, l.previous)}</td>
+                      <td className="py-2 text-right"><Delta diff={l.diff} pct={l.pct} unit={unitOf(l.code)} good={GOOD_UP[l.code]} /></td>
+                      <td className="py-2 pr-3 text-right tabular-nums text-ink-500">{valueOf(l, l.last_year)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-            {v.drivers && (
-              <p className="text-sm text-ink-700">
-                수수료 매출 변동 {signedKrw(v.drivers.commission_change)} = 거래량 효과 {signedKrw(v.drivers.volume_effect)} + 수수료율·구성 효과 {signedKrw(v.drivers.rate_mix_effect)}
+              <p className="mt-2 flex items-center gap-1.5 text-sm text-ink-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-700" aria-hidden="true" />크게 움직인 항목
               </p>
-            )}
+            </div>
             {v.categories.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[480px] text-sm">
@@ -167,7 +205,8 @@ export function VarianceSection({ tick }: { tick: number }) {
               </div>
             )}
           </div>
-        )}
+          );
+        }}
       </ResourceBody>
     </Panel>
   );
