@@ -4,23 +4,46 @@ import { campaigns, type CampaignAnswer } from "@/lib/marketingLive";
 import { dataAi, kpiLive, type CampaignEffectOutput } from "@/lib/data";
 import { todayKst } from "@/lib/finance";
 
-// 캠페인 시작·결과·취소. 시작은 재무 판단과 안전 장치를 지난다. 광고 플랫폼 연결이 없어
+// 캠페인 시작·결과·취소. 재무는 예산에 의견만 내고 막지 않는다(2026-11-06). 시작을 막는 것은
+// 안전 관문의 금액 규칙(사람 승인 보류)이다. 광고 플랫폼 연결이 없어
 // 광고비는 사람이 보고서를 보고 적는다. 판매액·주문 수는 데이터 AI의 캠페인 효과에서 불러오거나
 // 사람이 적는다. 어느 쪽인지 재무 기록에 남긴다(source). 사람이 고치면 사람이 적은 값이 된다.
 
 const SOURCE = "marketing_screen_manual";
 
+type FinanceOpinionKind = "recommend" | "reduce" | "not_recommended";
+const OPINION_KO: Record<FinanceOpinionKind, string> = { recommend: "권장", reduce: "줄여서 권장", not_recommended: "권하지 않음" };
+
+interface FinanceReview { reasons?: string[]; recommendation?: string; opinion?: string | null; suggested_krw?: number | null; requested_krw?: number }
+
+const reviewOf = (a: CampaignAnswer) => ((a.output ?? {}).review ?? {}) as FinanceReview;
+
+/** 시작 결과의 재무 의견(`output.review`). 의견이 없으면 null이라 칸을 보이지 않는다. 시작을 막지 않는 참고용이다 */
+export function financeOpinionOf(a: CampaignAnswer): { label: string; suggestedKrw: number | null; requestedKrw: number | null; reasons: string[]; recommendation: string } | null {
+  const r = reviewOf(a);
+  const label = r.opinion && r.opinion in OPINION_KO ? OPINION_KO[r.opinion as FinanceOpinionKind] : null;
+  const reasons = (r.reasons ?? []).filter((x) => x.trim() !== "");
+  const recommendation = (r.recommendation ?? "").trim();
+  if (!label && !reasons.length && !recommendation) return null;
+  return {
+    label: label ?? "의견",
+    suggestedKrw: typeof r.suggested_krw === "number" ? r.suggested_krw : null,
+    requestedKrw: typeof r.requested_krw === "number" ? r.requested_krw : null,
+    reasons, recommendation,
+  };
+}
+
 function explain(a: CampaignAnswer): string {
-  const o = a.output ?? {};
-  const review = (o.review ?? {}) as { reasons?: string[]; recommendation?: string };
+  const review = reviewOf(a);
   const reasons = [...(review.reasons ?? []), review.recommendation ?? ""].join(" ").trim();
   switch (a.outcome) {
     case "executed": return "집행이 승인됐습니다.";
-    case "held": return "금액이 커서 사람 확인을 기다립니다. 위 보류 큐에서 결정하세요.";
-    case "rejected_by_finance": return `재무가 거절했습니다. ${reasons}`.trim();
-    case "over_approved_limit": return `재무 승인 한도를 넘었습니다. 금액을 줄여 다시 요청하세요. ${reasons}`.trim();
+    case "held": return "안전 관문의 금액 규칙(건당 50만 원 이상, 하루 합계 100만 원 이상)에 걸려 사람 승인을 기다립니다. 위 보류 큐에서 결정하세요.";
+    // 예전 응답용. 지금은 재무가 막지 않고 의견만 내서 새 응답에는 나오지 않는다
+    case "rejected_by_finance": return `이전 방식의 응답입니다. 재무 반대 의견으로 시작하지 않았습니다. ${reasons}`.trim();
+    case "over_approved_limit": return `이전 방식의 응답입니다. 요청액이 당시 재무 한도를 넘어 시작하지 않았습니다. 금액을 줄여 다시 요청하세요. ${reasons}`.trim();
     case "rejected_by_review": return "사람이 거절했습니다.";
-    case "finance_review_unavailable": return "재무 AI에 닿지 않아 시작하지 않았습니다.";
+    case "finance_review_unavailable": return "재무 AI의 의견을 받지 못해 시작하지 않았습니다.";
     case "recorded": return "재무에 손익을 기록했습니다. 재무 AI의 캠페인 재무 탭에서 볼 수 있습니다.";
     case "waiting_revenue": return "판매액이 없어 판단을 미뤘습니다. 판매액을 알면 다시 저장하세요.";
     case "not_started": return "시작하지 않은 캠페인이라 기록하지 않았습니다.";
@@ -70,6 +93,7 @@ export function CampaignControl() {
   const [channel, setChannel] = useState("");
   const [budget, setBudget] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [opinion, setOpinion] = useState<ReturnType<typeof financeOpinionOf>>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState<{ campaign_id: string; active_krw: number }[]>([]);
@@ -92,8 +116,11 @@ export function CampaignControl() {
     setBusy(true);
     setProblem(null);
     setMessage(null);
+    setOpinion(null);
     try {
-      setMessage(explain(await job()));
+      const answer = await job();
+      setMessage(explain(answer));
+      setOpinion(financeOpinionOf(answer));
       after?.();
       await load();
     } catch (e) { setProblem((e as Error).message); }
@@ -108,7 +135,7 @@ export function CampaignControl() {
   return (
     <section className="card p-4 sm:p-5">
       <h2 className="text-base font-semibold text-ink-900">캠페인 집행</h2>
-      <p className="mt-0.5 text-sm text-ink-500">시작하면 재무가 예산을 판단하고 안전 장치를 지납니다. 광고 플랫폼 연결이 없어 실제 광고는 나가지 않고, 광고비는 보고서를 보고 적습니다. 판매액과 주문 수는 데이터 AI에서 불러오거나 직접 적습니다.{left ? ` 이달 예산 ${left}.` : ""}</p>
+      <p className="mt-0.5 text-sm text-ink-500">재무는 예산에 의견만 내고 시작을 막지 않습니다. 시작은 안전 관문의 금액 규칙(건당 50만 원 이상, 하루 합계 100만 원 이상이면 사람 승인)을 지납니다. 광고 플랫폼 연결이 없어 실제 광고는 나가지 않고, 광고비는 보고서를 보고 적습니다. 판매액과 주문 수는 데이터 AI에서 불러오거나 직접 적습니다.{left ? ` 이달 예산 ${left}.` : ""}</p>
       <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_160px_auto] sm:items-end">
         <label className="block text-sm"><span className="text-ink-700">캠페인 이름</span><input className="field mt-0.5 w-full" value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label className="block text-sm"><span className="text-ink-700">채널</span><input className="field mt-0.5 w-full" placeholder="예: 네이버 검색" value={channel} onChange={(e) => setChannel(e.target.value)} /></label>
@@ -116,6 +143,16 @@ export function CampaignControl() {
         <button className="btn-primary" disabled={busy || !humanTokenSet || !name.trim() || !channel.trim() || !Number(budget)} onClick={start}>시작 요청</button>
       </div>
       {message && <p role="status" className="mt-3 rounded-xl bg-brand-50 px-4 py-2 text-sm text-brand-700">{message}</p>}
+      {opinion && (
+        <div className="mt-2 rounded-xl border border-ink-100 px-4 py-2 text-sm">
+          <p className="text-ink-900"><span className="font-medium">재무 의견</span> <span className="chip">{opinion.label}</span>
+            {opinion.suggestedKrw !== null && <span className="ml-2 text-ink-700">권하는 금액 {krw(opinion.suggestedKrw)}{opinion.requestedKrw !== null ? ` (요청 ${krw(opinion.requestedKrw)})` : ""}</span>}
+          </p>
+          {opinion.reasons.length > 0 && <ul className="mt-1 list-disc pl-5 text-ink-700">{opinion.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+          {opinion.recommendation && <p className="mt-1 text-ink-700">{opinion.recommendation}</p>}
+          <p className="mt-1 text-xs text-ink-500">참고용 의견입니다. 시작 여부는 재무가 아니라 안전 관문과 사람이 정합니다.</p>
+        </div>
+      )}
       {problem && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{problem}</p>}
       {(running.length > 0 || waiting.length > 0) && (
         <ul className="mt-4 space-y-3">
