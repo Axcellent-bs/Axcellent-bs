@@ -6,7 +6,7 @@
 - 재료 4,000자·지난 대화 6개, 하루 30회·80,000토큰(먼저 닿는 쪽), 80% 넘어도 허용·100%에서 멈춤,
   장부 이름 data_chat, 개인정보 묶음 없음
 - LLM은 가짜 서버(httpx MockTransport)로 실제 TimedLLMClient를 거친다. 실제 키는 부르지 않는다
-- 관문은 코드 PR에서 켬 (이 평가 정의 PR은 관찰만)
+- 관문 켬 (평가 정의 PR #840은 관찰만: dev 모두 0.0)
 """
 
 from __future__ import annotations
@@ -262,9 +262,14 @@ def observe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, 
     return score.score(cases, got), got
 
 
-def test_data_chat_observe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """관찰만: 지표를 출력하고 모양만 본다 (관문은 코드 PR에서 켬)."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (평가 정의 PR #840 dev: 모두 0.0)
+
+
+def test_data_chat_passes_the_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     metrics, got = observe(tmp_path, monkeypatch)
     print("data_chat eval:", json.dumps(metrics, ensure_ascii=False))
     assert set(metrics) == set(score.METRICS)
-    assert all(0.0 <= v <= 1.0 for v in metrics.values())
+    wrong = {k: v for k, v in got.items() if not score._ok(
+        next(c for c in make.cases() if c["name"] == k), v)}  # fmt: skip
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, (name, metrics[name], wrong)

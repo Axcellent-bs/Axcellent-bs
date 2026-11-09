@@ -55,6 +55,11 @@ from ax_contracts.schemas.data import (
     AnomalyDetectionInput,
     CampaignEffectInput,
     ContentRecommendRequest,
+    DataChatListInput,
+    DataChatListOutput,
+    DataChatRef,
+    DataChatSendInput,
+    DataChatThreadOutput,
     FraudScoreInput,
     ImpactAnalysisInput,
     KpiSummaryInput,
@@ -71,7 +76,7 @@ from ax_contracts.schemas.data import (
     YouTubeVelocityRequest,
 )
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
-from data_agent import llm_budget, llm_failure, llm_halt, llm_inflight
+from data_agent import data_chat, llm_budget, llm_failure, llm_halt, llm_inflight
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import (
@@ -84,6 +89,7 @@ from data_agent.clients.shop_client import (
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.naver_datalab import NaverDatalabConnector
 from data_agent.connectors.youtube import YouTubeConnector
+from data_agent.data_chat_store import ChatStorageError, DataChatStore
 from data_agent.explain import EXPLAIN_DB_ENV, ExplainCache
 from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
@@ -1310,7 +1316,79 @@ TIMED_SKILLS = frozenset({
     "promo_concepts", "trend_insight_brief", "video_explorer",
 })  # fmt: skip
 
+# ---- 데이터분석 AI 직접 대화 (dashboard-api → data_chat_*). 조회·설명만, execute() 안 씀
+_CHAT: data_chat.DataChatService | None = None
+
+
+def get_chat() -> data_chat.DataChatService:
+    """대화 서비스 (처음 부를 때 저장소를 연다: `DATA_CHAT_DB`, 기본 backend/.data/data_chat.db)."""
+    global _CHAT
+    if _CHAT is None:
+        _CHAT = data_chat.DataChatService(DataChatStore())
+    return _CHAT
+
+
+def _chat_failed(request: AgentRequest, refused: data_chat.ChatRefused) -> AgentResult:
+    return _result(request, TaskStatus.FAILED, outcome=refused.outcome,
+                   output={"message": refused.message})  # fmt: skip
+
+
+def _chat_done(request: AgentRequest, skill: str, output: dict[str, Any]) -> AgentResult:
+    # 대화 기록만 읽고 쓴다. 업무 상태는 바꾸지 않아 execute()를 부르지 않는다
+    evidence = Evidence(queries=[skill], data_summary="데이터분석 AI 대화")
+    return _result(request, TaskStatus.COMPLETED, output=output, evidence=evidence)
+
+
+async def _chat_call(request: AgentRequest, model: type[BaseModel], skill: str,
+                     run: Callable[[Any], dict[str, Any]]) -> AgentResult:  # fmt: skip
+    data = _parse(request, model)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        output = run(data)
+    except data_chat.ChatRefused as refused:
+        return _chat_failed(request, refused)
+    except ChatStorageError:
+        return _result(request, TaskStatus.FAILED, outcome="storage_error")
+    return _chat_done(request, skill, output)
+
+
+async def data_chat_send(request: AgentRequest) -> AgentResult:
+    def run(d: DataChatSendInput) -> dict[str, Any]:
+        thread = get_chat().send(d.who, d.thread_id, d.message)
+        return DataChatThreadOutput(thread=thread).model_dump(mode="json")
+
+    return await _chat_call(request, DataChatSendInput, "data_chat_send", run)
+
+
+async def data_chat_list(request: AgentRequest) -> AgentResult:
+    def run(d: DataChatListInput) -> dict[str, Any]:
+        return DataChatListOutput(threads=get_chat().list(d.who, d.limit)).model_dump(mode="json")
+
+    return await _chat_call(request, DataChatListInput, "data_chat_list", run)
+
+
+async def data_chat_get(request: AgentRequest) -> AgentResult:
+    def run(d: DataChatRef) -> dict[str, Any]:
+        thread = get_chat().get(d.who, d.thread_id)
+        return DataChatThreadOutput(thread=thread).model_dump(mode="json")
+
+    return await _chat_call(request, DataChatRef, "data_chat_get", run)
+
+
+async def data_chat_close(request: AgentRequest) -> AgentResult:
+    def run(d: DataChatRef) -> dict[str, Any]:
+        thread = get_chat().close(d.who, d.thread_id)
+        return DataChatThreadOutput(thread=thread).model_dump(mode="json")
+
+    return await _chat_call(request, DataChatRef, "data_chat_close", run)
+
+
 HANDLERS = {
+    "data_chat_send": data_chat_send,
+    "data_chat_list": data_chat_list,
+    "data_chat_get": data_chat_get,
+    "data_chat_close": data_chat_close,
     "impact_analysis": impact_analysis,
     "anomaly_detection": anomaly_detection,
     "fraud_score": fraud_score,
