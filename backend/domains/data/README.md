@@ -30,6 +30,7 @@
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
 | `campaign_effect` | 캠페인 기간 주문 방향(늘었음·같음·줄었음)·증분(실제 − 지난 7일 같은 시간대 평균), 캠페인 쿠폰 조회 시점 누적 사용률. 매출은 매출 지표가 생기면 같은 방법(지금은 확인할 수 없음) | shop-api `GET /api/shop/metric-series`(`order_count`), `GET /api/shop/coupons?campaign_id=` |
 | 기획에 결과 보내기 (skill 아님, data 서버 주기 루틴) | 7일 측정이 끝난 캠페인의 성과(direction·summary·facts)를 기획 `receive_campaign_update`(stage result)로 캠페인당 1번 보냄. 기능 플래그 `DATA_SEND_CAMPAIGN_UPDATE`(기본 꺼짐). 아래 "기획에 결과 보내기" | `campaign_result` 기획 묶음(계산 그대로, LLM 없음), 보내기 상태 `backend/.data/campaign_sends.db` |
+| `data_chat_send`·`list`·`get`·`close` | AI 대화방 직접 대화: 저장된 결과만 읽고 숫자로 설명(조회·설명만, 명령 거절, 답 숫자 검증, 마지막 줄 근거). 아래 "직접 대화" | 응답 캐시(`video_explorer`·`trend_popular`)·`insight_brief.db`·`video_performance.db`·보내기 상태·YouTube·LLM 장부(읽기만), LLM(답 한 번, 대화 하루 30회·80,000토큰), 대화 저장 `backend/.data/data_chat.db` |
 | 재무 기록용 값 (`campaign_result` 재무 묶음 `finance_record`) | 재무 `CampaignResultInput` 중 데이터가 아는 값만(기간·증가 매출·증가 주문·잰 값 그대로). 집행액은 없음 → 마케팅이 채워 재무에 보냄. 아래 "재무 기록용 값 (마케팅이 씀)" | `campaign_result` 매출 판정 그대로 |
 
 ### skill별 평가와 알려진 한계 (2026-11-03 기준)
@@ -401,6 +402,29 @@ key = f"{meta.context_id}:record_campaign_result:cmp_1"
 await call_agent("finance", AgentRequest(meta=meta.model_copy(update={"idempotency_key": key}),
                                          skill="record_campaign_result", input=body))
 ```
+
+### 직접 대화 (AI 대화방, `data_chat_*`)
+
+화면 AI 대화방의 데이터분석 AI. dashboard-api `/api/dashboard/data-chat` → data `data_chat_send`·`data_chat_list`·`data_chat_get`·`data_chat_close`. 마케팅·기획 대화와 같은 방식이다(`data_chat.py`, 저장 `data_chat_store.py`).
+
+- **조회·설명만.** grade read, 요청자는 dashboard-api만. 업무 상태를 바꾸지 않아 `execute()`를 부르지 않는다(대화 기록 저장은 업무 상태가 아님 → safety registry 항목 없음). `who`는 dashboard-api가 사람 토큰에서 채우고, 사람 말은 LLM 입력의 데이터 블록(untrusted)에만 넣는다.
+- **흐름.** 보내기는 저장하고 `answering`으로 바로 돌려준다. 답은 뒤에서 붙고 `talking`. 30분 말이 없으면 자동으로 끝난다. 열람: 본인은 원문, 남의 대화는 요약만(`restricted`), 남의 대화 쓰기는 `forbidden`.
+- **재료는 저장된 결과만.** 코드가 질문 낱말로 묶음을 고른다(최대 3개, 대화 중 새 수집·계산·YouTube 호출 없음).
+
+| 묶음 | 읽는 것 (마지막 저장분) | 근거 줄 |
+| --- | --- | --- |
+| 감지 | 응답 캐시의 `video_explorer`(화면 기본 조건: 전체·7일·숏·조회수순)·`trend_popular` 카테고리별 상위 3개 | 영상 탐색·지금 인기 · 계산 시각 |
+| 인사이트 | `insight_brief.db` 마지막 브리프: 주제·분류·한 줄·광고 재료·근거 숫자(최대 4)·지난번 결과 띠 문장, 기회 카드 수 | 인사이트 브리프 · 만든 시각 |
+| 성과 | `video_performance.db` 영상의 시점별 잰 시각·조회·좋아요·댓글·배수, 아직이면 잴 예정 시각, 판정, 캠페인별 보내기 상태. 매출 판정은 계산하지 않음(영상 성과 화면) | 영상 성과 · 마지막 잰 시각 |
+| 수집 상태 | YouTube 장부(기능별 단위·다음 초기화), LLM 장부(호출·토큰·%·대화 사용), 수집기 마지막 실행, 새 숏츠 추적 수 | 수집 장부 · 지금 |
+
+- 고객 ID·개인정보가 든 결과(`impact_analysis`·`fraud_score` 등)는 묶음에 없다. 재료 JSON은 4,000자 이내(긴 목록의 아래 순위부터 버림), 소수는 둘째 자리. 지난 대화는 최근 6개.
+- 못 고르면 "답할 수 있는 것" 안내, 저장 결과가 없으면 "아직 계산된 결과가 없어요. ○○ 화면에서 확인해 주세요"(둘 다 LLM 안 부름).
+- **답 검증.** 답에 재료에 없는 숫자가 있으면 고정 문장 "숫자를 확인하지 못했어요. ○○ 화면에서 보세요". 브리프 한 줄 검증(`explain._bad_numbers`)에 더해 반올림도 허용하지 않는다(1.79 → "2배"는 통과 못 함). 날짜·시각("11월 12일 13:55"), 쉼표("123,251"), 배수("1.79배"), %(비율 0.0057 → "0.57%")는 재료 값이면 통과. 마지막 줄 "근거: <이름> · <기준 시각>"은 서버가 붙인다.
+- **명령 거절.** 보내·전송·켜·꺼·수집·다시 계산·시작·삭제·지워·등록·승인 + 명령 어미는 LLM 없이 "그 일은 대화로 할 수 없어요. …". 질문("보냈어?", "꺼져 있어?")은 거절하지 않는다.
+- **LLM.** `DATA_LLM_*`(없으면 `LLM_*`), 둘 다 없으면 `llm_not_configured`. 장부 skill 이름 `data_chat`(#835 같은 요청 중복 막기도 그대로). 대화 하루 상한 30회 또는 80,000토큰(하루 LLM의 20%) 중 먼저 닿는 쪽(한국 0시 기준) → `chat_limit` "오늘 대화 한도를 다 썼어요. 내일 다시 물어봐 주세요." 하루 LLM 80%를 넘어도 대화는 허용(브리프처럼 `PRIORITY_SKILLS`), 100%면 멈춤.
+- 저장: `DATA_CHAT_DB`(기본 `backend/.data/data_chat.db`).
+- 평가: `eval/data_chat/`(묶음 고르기 20문항·숫자 검증·명령 거절·계산 0회·상한·개인정보, 관문 모두 1.0).
 
 ## 2. 실행 방법
 `docker compose -f infra/compose.yml up data` / 목 모드: `DATA_MOCK=1`
