@@ -85,7 +85,7 @@ def test_no_campaigns_means_an_empty_list(tmp_path: Path) -> None:
     brief = TrendInsightBriefOutput.model_validate(
         {"insights": [{"insight_id": "a", "rank": 1, "topic": "t", "line": "x"}]})
     out = past_results.attach_past(brief, got)
-    assert out.insights[0].past_results == [] and out.schema_version == "trend_insight_brief.v4"
+    assert out.insights[0].past_results == [] and out.schema_version == "trend_insight_brief.v5"
 
 
 def test_campaign_result_feeds_the_past_result_and_is_cached(tmp_path: Path) -> None:

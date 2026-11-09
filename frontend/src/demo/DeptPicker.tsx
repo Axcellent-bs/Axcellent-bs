@@ -1,15 +1,17 @@
 import { useState } from 'react'
 
-// 부서 고르기. 목록에 없으면 "직접 입력"으로 적는다. 회원가입·회원 연결·받은 요청 보내기가 같이 쓴다.
+// 부서 고르기(선택, 표시·조직도용). 목록에 없으면 "직접 입력"으로 적는다. 회원가입·회원·서버 관리가 같이 쓴다.
+// allowNone: 부서가 없는 소규모 회사를 위해 "부서 없음"을 고를 수 있게 한다.
 export const DEPTS = ['기획팀', '개발팀', '고객지원팀', '재무팀', '마케팅팀', '인사팀', '데이터분석팀', '인프라팀']
 const CUSTOM = '__custom'
 
-export function DeptPicker({ value, onChange, className = '', label = '부서', size = 'md' }: {
+export function DeptPicker({ value, onChange, className = '', label = '부서', size = 'md', allowNone = false }: {
   value: string
   onChange: (dept: string) => void
   className?: string
   label?: string
   size?: 'md' | 'sm'
+  allowNone?: boolean
 }) {
   const [custom, setCustom] = useState(() => !!value && !DEPTS.includes(value))
   const field = size === 'sm' ? 'field w-auto py-1.5 text-xs' : 'field'
@@ -26,7 +28,7 @@ export function DeptPicker({ value, onChange, className = '', label = '부서', 
             onChange(v)
           }
         }}>
-        <option value="" disabled>부서 선택</option>
+        {allowNone ? <option value="">부서 없음</option> : <option value="" disabled>부서 선택</option>}
         {DEPTS.map((d) => <option key={d} value={d}>{d}</option>)}
         <option value={CUSTOM}>직접 입력</option>
       </select>

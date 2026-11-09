@@ -11,7 +11,7 @@ import { useSession, type Account } from "@/demo/session";
 //
 // 열람 권한
 // - 본인: 자기 대화 원문 전부
-// - 그 AI 담당(담당 부서 회원·관리자): 다른 사람 대화는 요약(제목·메시지 수·시각·결과)만. 일이 생긴 대화(작업 시작)는 원문까지
+// - 관리자: 다른 사람 대화는 요약(제목·메시지 수·시각·결과)만. 일이 생긴 대화(작업 시작)는 원문까지
 // - 그 밖의 사람: 다른 사람 대화를 볼 수 없다
 // 데모 한계: 백엔드는 브라우저마다 같은 사람 토큰(공용)으로 대화를 받아 주인을 구분하지 못한다.
 // 그래서 대화 주인은 이 브라우저가 기억한다(OWNER_KEY). 서버가 가린 대화(restricted, 인사 AI)는 서버가 준 요약만 보여 준다.
@@ -55,25 +55,23 @@ const hrTalk: Talk = {
 export const DIRECT_PREFIX = "direct:";
 export interface DirectAgent {
   key: string; name: string; note: string; live: boolean
-  /** 이 AI를 맡은 부서. 그 부서 회원이 다른 사람 대화 요약을 본다 */
-  dept?: string
   talk?: Talk
 }
 export const DIRECT_AGENTS: DirectAgent[] = [
-  { key: "dev", name: "개발 AI", note: "고칠 것을 말하면 되묻고 계획을 세워요. 계획이 서면 코딩 작업(PR)을 시작해요.", live: true, dept: "개발팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/dev-chat" }, { closable: true }) },
-  { key: "hr", name: "인사 AI", note: "팀 인원·교대·인수인계 같은 인사 기록을 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, dept: "인사팀", talk: hrTalk },
-  { key: "planning", name: "기획 AI", note: "받은 요청·기획서·결정·제안 상태를 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, dept: "기획팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/planning-chat" }, { closable: true }) },
+  { key: "dev", name: "개발 AI", note: "고칠 것을 말하면 되묻고 계획을 세워요. 계획이 서면 코딩 작업(PR)을 시작해요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/dev-chat" }, { closable: true }) },
+  { key: "hr", name: "인사 AI", note: "팀 인원·교대·인수인계 같은 인사 기록을 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, talk: hrTalk },
+  { key: "planning", name: "기획 AI", note: "받은 요청·기획서·결정·제안 상태를 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/planning-chat" }, { closable: true }) },
   { key: "orchestrator", name: "총괄 AI", note: "지금 장애가 어디까지 왔는지, 어느 부서에서 오래 걸렸는지, 승인 대기가 있는지를 총괄 기록으로 읽고 설명해요. 대화로 승인하거나 상태를 바꾸지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/orchestrator-chat" }, { closable: true }) },
-  { key: "support", name: "고객지원 AI", note: "문의·클레임·후기 현황을 숫자로 읽고 설명해요. 고객 이름과 원문은 보지 않고, 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "고객지원팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/support-chat" }, { closable: true }) },
-  { key: "finance", name: "재무 AI", note: "손익·결산·판매자 정산·통장 대조·현금 흐름·캠페인 손익·장애 비용을 장부 숫자로 읽고 설명해요. 대화로 장부를 바꾸거나 비용을 승인하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "재무팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/finance-chat" }, { closable: true }) },
-  { key: "data", name: "데이터분석 AI", note: "트렌드·인사이트·영상 성과·캠페인 결과·수집 상태를 숫자로 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요. 개인정보·비밀은 적지 마세요.", live: true, dept: "데이터분석", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/data-chat" }, { closable: true }) },
-  { key: "marketing", name: "마케팅 AI", note: "마케팅 일을 물어보면 마케팅 AI가 답해요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "마케팅팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/marketing-chat" }) },
+  { key: "support", name: "고객지원 AI", note: "문의·클레임·후기 현황을 숫자로 읽고 설명해요. 고객 이름과 원문은 보지 않고, 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/support-chat" }, { closable: true }) },
+  { key: "finance", name: "재무 AI", note: "손익·결산·판매자 정산·통장 대조·현금 흐름·캠페인 손익·장애 비용을 장부 숫자로 읽고 설명해요. 대화로 장부를 바꾸거나 비용을 승인하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/finance-chat" }, { closable: true }) },
+  { key: "data", name: "데이터분석 AI", note: "트렌드·인사이트·영상 성과·캠페인 결과·수집 상태를 숫자로 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요. 개인정보·비밀은 적지 마세요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/data-chat" }, { closable: true }) },
+  { key: "marketing", name: "마케팅 AI", note: "마케팅 일을 물어보면 마케팅 AI가 답해요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/marketing-chat" }) },
 ];
 export const directAgentOf = (room: string) =>
   room.startsWith(DIRECT_PREFIX) ? DIRECT_AGENTS.find((a) => DIRECT_PREFIX + a.key === room) : undefined;
 
-/** 이 계정이 그 AI 담당인가: 관리자이거나 그 AI를 맡은 부서 회원 */
-const isKeeper = (account: Account, agent: DirectAgent) => !!account.admin || (!!agent.dept && account.dept === agent.dept);
+/** 다른 사람 대화 요약을 보는가: 관리자만 (회원 부서는 표시용이라 권한에 쓰지 않는다) */
+const isKeeper = (account: Account) => !!account.admin;
 
 // 대화 주인 (대화 id → 계정 id). 데모라 이 브라우저에만 저장한다
 const OWNER_KEY = "axcellent-direct-chat-owner";
@@ -126,7 +124,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
   const [closing, setClosing] = useState(false);
   const [owners, setOwners] = useState(loadOwners);
   const box = useRef<HTMLDivElement>(null);
-  const keeper = isKeeper(account, agent);
+  const keeper = isKeeper(account);
   const tkey = threadKey(agent.key, account.id);
 
   // 백엔드가 아직 없거나 LLM 키가 없으면 "준비 중", 403이면 입력을 막고 이유를 보여 준다
@@ -245,7 +243,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
         <div>
           <h3 className="text-xs font-semibold text-ink-700">다른 사람 대화</h3>
           {!keeper ? (
-            <p className="mt-2 text-xs text-ink-500">{agent.name} 담당({agent.dept ?? "담당 부서"}·관리자)만 요약을 볼 수 있어요.</p>
+            <p className="mt-2 text-xs text-ink-500">관리자만 요약을 볼 수 있어요.</p>
           ) : others.length === 0 ? <p className="mt-2 text-xs text-ink-500">아직 없어요.</p> : (
             <>
               <p className="mt-1 text-[11px] text-ink-500">다른 사람의 대화(요약만 보임). 담당이라 볼 수 있어요. 코딩 작업이 생긴 대화는 원문을 열 수 있어요.</p>

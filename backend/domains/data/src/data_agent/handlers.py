@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -53,6 +54,7 @@ from ax_contracts.schemas.data import (
     AccuracyReportInput,
     ActivityReportInput,
     AnomalyDetectionInput,
+    BriefRegenBlocked,
     CampaignEffectInput,
     ContentRecommendRequest,
     DataChatListInput,
@@ -70,6 +72,7 @@ from ax_contracts.schemas.data import (
     TrendAgeRequest,
     TrendCandidatesRequest,
     TrendHistoryRequest,
+    TrendInsightBriefOutput,
     TrendInsightBriefRequest,
     TrendPopularRequest,
     TrendScanRequest,
@@ -218,6 +221,7 @@ class TimedLLMClient(LLMClient):
         super().record_usage(context_id, model, input_tokens, output_tokens, success, tenant_id)
         skill, task = _LLM_TASK.get() or (self._skill(), "unknown")
         llm_budget.BUDGET.add(1, input_tokens + output_tokens, skill=skill, task=task)
+        llm_budget.count_tokens(input_tokens + output_tokens)  # 작업별 토큰 (브리프 한 판 등)
 
 
 # 지금 부르는 LLM의 (skill, 작업): 사용량 기록에 같이 남긴다
@@ -831,23 +835,96 @@ async def trend_insight_brief(request: AgentRequest) -> AgentResult:
 
 
 async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
-    from data_agent.skills import promo_concepts as promo
-    from data_agent.skills.product_link import read_catalog
-    from data_agent.skills.trend_insight_brief import cached_brief, make_brief
-    from data_agent.skills.trend_popular import popular
-    from data_agent.today_board import BOARD
+    from data_agent import brief_versions as bv
+    from data_agent.skills.trend_insight_brief import cached_brief
 
     data = _parse(request, TrendInsightBriefRequest)
     if isinstance(data, AgentResult):
         return data
     env = os.environ
-    # 오늘 저장된 브리프가 있으면 재료(지금 인기·숏츠·상품)를 계산하지 않고 바로 준다
+    if data.action == "status":  # 진행 상태만 (화면이 2초마다): 저장분만 읽고 본문은 비운다
+        out = bv.decorate(_stored_brief(env), env).model_copy(update={
+            "insights": [], "opportunities": [], "facts": [], "reason": "진행 상태만"})  # fmt: skip
+        return _result(request, TaskStatus.COMPLETED, outcome="status",
+                       output=out.model_dump(mode="json"))  # fmt: skip
+    if data.action == "regenerate_start":
+        return await _brief_regenerate(request, data, env)
+    if data.version is not None:  # 오늘 특정 판 (없는 번호면 최신)
+        out = bv.decorate(_stored_brief(env), env, version=data.version)
+        output = await _with_past(out, env)
+        output["llm_status"] = llm_halt.status(env).model_dump(mode="json")
+        return _result(request, TaskStatus.COMPLETED, outcome=out.status, output=output)
+    # 오늘 저장된 브리프(최신 판)가 있으면 재료(지금 인기·숏츠·상품)를 계산하지 않고 바로 준다
     if (hit := cached_brief(data, env)) is not None:
         note_cache("hit")
-        output = await _with_past(hit.output, env)
+        output = await _with_past(bv.decorate(hit.output, env), env)
         output["llm_status"] = llm_halt.status(env).model_dump(mode="json")  # 응답 시점 상태
         return _result(request, TaskStatus.COMPLETED, outcome=hit.output.status, output=output,
                        evidence=hit.evidence)  # fmt: skip
+    result = await _build_brief(request, data, env)
+    output = await _with_past(bv.decorate(result.output, env), env)
+    output["llm_status"] = llm_halt.status(env).model_dump(mode="json")  # 응답 시점 상태
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=output,
+        evidence=result.evidence,
+    )
+
+
+def _stored_brief(env: Mapping[str, str]) -> TrendInsightBriefOutput:
+    """오늘 저장된 최신 판 (계산하지 않음). 없으면 빈 브리프."""
+    from data_agent.skills import trend_insight_brief as tib
+
+    now = datetime.now(UTC)
+    day, rules = tib.today_kst(now), tib.rules_version(tib.load_config(env))
+    store = tib.BriefStore(env.get(tib.DB_ENV) or tib.DEFAULT_DB)
+    try:
+        hit = store.get(day, rules, now)
+    finally:
+        store.close()
+    return hit or tib.empty(day, rules, now, "오늘 만든 브리프가 아직 없음")
+
+
+async def _brief_regenerate(
+    request: AgentRequest, data: TrendInsightBriefRequest, env: Mapping[str, str]
+) -> AgentResult:
+    """다시 추천 시작: 막히면 blocked(이유), 아니면 바로 started.
+
+    만들기는 data 서버 안 백그라운드 (A2A 시간 제한에 안 걸림)."""
+    from data_agent import brief_versions as bv
+
+    context_id = f"ctx_brief_regen_{uuid.uuid4().hex[:12]}"
+
+    async def build(ctx: bv.BuildContext) -> None:
+        meta = request.meta.model_copy(update={"context_id": context_id})
+        again = request.model_copy(update={"meta": meta})
+        fresh = data.model_copy(update={"regenerate": True, "action": "read"})
+        with llm_failure.scope():
+            await _build_brief(again, fresh, env, ctx)
+
+    got = bv.start(env, data.requested_by, build)
+    out = bv.decorate(_stored_brief(env), env)
+    if got["status"] == "blocked":
+        out = out.model_copy(update={"regen_blocked": BriefRegenBlocked(**got["blocked"])})
+    return _result(request, TaskStatus.COMPLETED, outcome=got["status"],
+                   output=out.model_dump(mode="json"))  # fmt: skip
+
+
+async def _build_brief(
+    request: AgentRequest, data: TrendInsightBriefRequest, env: Mapping[str, str],
+    build: Any = None,
+) -> Any:  # fmt: skip
+    """재료(지금 인기·급상승·숏츠·상품·연령대·기회 카드)를 모아 브리프를 만든다 (`make_brief`).
+
+    `build`가 있으면 다시 추천 작업(잠금을 가진 채로), 없으면 자동 판."""
+    from data_agent.skills import promo_concepts as promo
+    from data_agent.skills.product_link import read_catalog
+    from data_agent.skills.trend_insight_brief import make_brief
+    from data_agent.skills.trend_popular import popular
+    from data_agent.today_board import BOARD
+
     llm = get_llm()
     popular_out = None
     popular_why: str | None = None
@@ -906,22 +983,13 @@ async def _trend_insight_brief(request: AgentRequest) -> AgentResult:
 
         return stored_info(env, datetime.now(UTC), ids)
 
-    result = await make_brief(
+    return await make_brief(
         data, llm, env=env, popular=popular_out, popular_reason=popular_why, rising=rising,
         age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
         category_cache=get_category_cache(), shorts=shorts_out,
         context_id=request.meta.context_id, opportunities_fn=opportunities,
-        video_info=video_info, warned=warned, same_targets=cand_same_targets(env),
+        video_info=video_info, warned=warned, same_targets=cand_same_targets(env), build=build,
     )  # fmt: skip
-    output = await _with_past(result.output, env)
-    output["llm_status"] = llm_halt.status(env).model_dump(mode="json")  # 응답 시점 상태
-    return _result(
-        request,
-        TaskStatus.COMPLETED,
-        outcome=result.output.status,
-        output=output,
-        evidence=result.evidence,
-    )
 
 
 async def content_recommend(request: AgentRequest) -> AgentResult:
