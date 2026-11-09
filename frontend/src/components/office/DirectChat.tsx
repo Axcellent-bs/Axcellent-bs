@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type Keyb
 import { PreparingChip } from "@/components/Preparing";
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { POLL_MS, classifyFailure, directChatApi, isAnswering } from "@/lib/directChat";
+import { loadOwners, loadThreadId, saveOwner, saveThreadId, threadKey } from "@/lib/directThreads";
 import type { ChatMessage, ChatStatus, ChatThread as BaseThread } from "@/lib/planningData";
 import { useSession, type Account } from "@/demo/session";
 
@@ -72,24 +73,6 @@ export const directAgentOf = (room: string) =>
 
 /** 다른 사람 대화 요약을 보는가: 관리자만 (회원 부서는 표시용이라 권한에 쓰지 않는다) */
 const isKeeper = (account: Account) => !!account.admin;
-
-// 대화 주인 (대화 id → 계정 id). 데모라 이 브라우저에만 저장한다
-const OWNER_KEY = "axcellent-direct-chat-owner";
-const loadOwners = (): Record<string, string> => {
-  try {
-    const v = JSON.parse(localStorage.getItem(OWNER_KEY) ?? "{}");
-    return v && typeof v === "object" ? (v as Record<string, string>) : {};
-  } catch { return {}; }
-};
-const saveOwner = (threadId: string, accountId: string) => {
-  try { localStorage.setItem(OWNER_KEY, JSON.stringify({ ...loadOwners(), [threadId]: accountId })); } catch { /* 저장이 막히면 새로고침 때 내 대화 목록에서 빠진다 */ }
-};
-// 이 계정이 이 탭에서 이어 가던 대화
-const threadKey = (agentKey: string, accountId: string) => `axcellent-direct-chat-${agentKey}:${accountId}`;
-const loadThreadId = (key: string) => { try { return sessionStorage.getItem(key); } catch { return null; } };
-const saveThreadId = (key: string, id: string | null) => {
-  try { if (id) sessionStorage.setItem(key, id); else sessionStorage.removeItem(key); } catch { /* 저장이 막히면 새로고침 때 새 대화 */ }
-};
 
 const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
 const when = (iso: string) => (iso ? new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");

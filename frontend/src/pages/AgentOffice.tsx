@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DIRECT_AGENTS } from "@/components/office/DirectChat";
 import { OfficeChat, type Typing } from "@/components/office/OfficeChat";
+import { useOfficeTalk } from "@/components/office/useOfficeTalk";
 import { PixelOffice } from "@/components/office/PixelOffice";
 import { ALL_ROOM, buildTimeline, incidentTitle, skillKo, type OrchIncident } from "@/lib/agentChat";
 import { api } from "@/lib/api";
 import { finance, type ExecutionRecord } from "@/lib/finance";
 import { Link, useSearchParams } from "@/lib/nav";
-import { DESKS, REPLAY_END, deriveOffice, replayIncident, type DeskState, type OfficeStatus } from "@/lib/office";
+import { DESKS, REPLAY_END, deriveOffice, replayIncident, type DeskKey, type DeskState, type OfficeStatus } from "@/lib/office";
 import { orchestrator } from "@/lib/orchestrator";
 import type { CommLine } from "@/lib/types";
 
@@ -101,11 +103,61 @@ export default function AgentOffice() {
   }, [items, mode]);
   useEffect(() => { seenRef.current = new Map(); }, [mode]);
 
-  const view = useMemo(() => deriveOffice(shownIncidents, items, seen, now), [shownIncidents, items, seen, now]);
-  const freshIds = useMemo(() => new Set(items.filter((it) => { const at = seen.get(it.id) ?? 0; return at > 0 && now - at < 1500; }).map((it) => it.id)), [items, seen, now]);
+  const baseView = useMemo(() => deriveOffice(shownIncidents, items, seen, now), [shownIncidents, items, seen, now]);
+
+  // ------------------------------------------------ 사람이 부서 AI에게 직접 말 걸기 (AI 대화방 직접 대화와 같은 대화)
+  const talk = useOfficeTalk();
+  // 답을 기다리는 부서가 놀고 있으면 자리에서 "작업 중"으로 (총괄 일로 바쁜 자리·걷기·상태는 그대로)
+  const busyStr = talk.busyKeys.join(",");
+  const view = useMemo(() => {
+    let v = baseView;
+    for (const key of busyStr ? busyStr.split(",") : []) {
+      const d = v.desks[key as DeskKey];
+      if (!d || d.state !== "idle") continue;
+      v = { ...v, desks: { ...v.desks, [key]: { ...d, state: "working", skill: "질문 답변", bubble: d.bubble ?? { text: "답하는 중", kind: "think" } } } };
+    }
+    return v;
+  }, [baseView, busyStr]);
+  // 단톡방: 실시간은 시각순으로 끼워 넣고(타임라인 순서는 그대로), 리플레이는 구분선 아래에 붙인다
+  const chatItems = useMemo(() => {
+    const human = talk.items;
+    if (human.length === 0) return items;
+    if (mode === "replay") {
+      return [...items, { kind: "separator" as const, id: "direct:replay-sep", at: human[0].at, room: ALL_ROOM, text: "여기부터 실제 대화 (리플레이와 별개)", variant: "topic" as const }, ...human];
+    }
+    const out: typeof items = [];
+    let h = 0;
+    for (const t of items) {
+      if (t.at) {
+        const at = Date.parse(t.at);
+        while (h < human.length && Date.parse(human[h].at) < at) out.push(human[h++]);
+      }
+      out.push(t);
+    }
+    while (h < human.length) out.push(human[h++]);
+    return out;
+  }, [items, talk.items, mode]);
+  // 사람 대화의 처음 본 시각 (기존 seenRef·deriveOffice 입력과 따로). 처음 불러온 지난 대화는 0 = 애니메이션 없음
+  const humanSeenRef = useRef(new Map<string, number>());
+  const humanSeen = useMemo(() => {
+    const m = humanSeenRef.current;
+    for (const it of talk.items) if (!m.has(it.id)) m.set(it.id, talk.quiet.has(it.id) ? 0 : Date.now());
+    return m;
+  }, [talk.items, talk.quiet]);
+
+  const freshIds = useMemo(() => {
+    const fresh = (m: ReadonlyMap<string, number>, id: string) => { const at = m.get(id) ?? 0; return at > 0 && now - at < 1500; };
+    return new Set([...items.filter((it) => fresh(seen, it.id)), ...talk.items.filter((it) => fresh(humanSeen, it.id))].map((it) => it.id));
+  }, [items, seen, talk.items, humanSeen, now]);
   const typing: Typing[] = DESKS.filter((d) => view.desks[d.key].state === "working").map((d) => ({
     key: d.key, name: d.key === "orchestrator" ? "총괄" : `${d.label} Agent`, what: skillKo(view.desks[d.key].skill) || "작업",
   }));
+  // 총괄 일로 이미 바빠서 덮어쓰지 못한 부서가 답을 기다리면 그때만 줄을 하나 더
+  for (const key of talk.busyKeys) {
+    if (baseView.desks[key as DeskKey]?.state === "idle" || typing.some((t) => t.key === `${key}:talk`)) continue;
+    const agent = DIRECT_AGENTS.find((a) => a.key === key);
+    if (agent) typing.push({ key: `${key}:talk`, name: agent.name, what: "질문에 답하는" });
+  }
 
   const inc = view.incident;
   const statusText = {
@@ -122,6 +174,7 @@ export default function AgentOffice() {
           <p className="mt-1 text-sm text-ink-500">
             부서 AI가 지금 무슨 일을 하는지 사무실로 봅니다. 총괄이 일을 맡기면 그 부서로 걸어가고, 사람 승인이 필요하면 🚩 승인 대기로 깜빡입니다.
             기록과 문장은 <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">AI 대화방</Link>과 같습니다.
+            {" "}단톡방에서 부서 AI에게 바로 물어볼 수 있고, 그 대화는 AI 대화방에도 같이 남습니다.
           </p>
           {mode === "live" && (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -188,11 +241,12 @@ export default function AgentOffice() {
         </section>
 
         <OfficeChat
-          items={items.slice(-80)}
+          items={chatItems.slice(-80)}
           typing={typing}
           freshIds={freshIds}
           title="부서 단톡방"
           sub={mode === "replay" ? "SCN-A 리플레이" : inc ? `${incidentTitle(inc)} 외 전체 기록` : "전체 기록"}
+          talk={talk}
         />
       </div>
     </div>

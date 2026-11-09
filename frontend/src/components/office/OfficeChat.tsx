@@ -1,4 +1,6 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import type { OfficeTalk } from "@/components/office/useOfficeTalk";
+import { TALK_KEYS, TALK_LABEL } from "@/components/office/useOfficeTalk";
 import type { ChatItem, Tone } from "@/lib/agentChat";
 import { Link } from "@/lib/nav";
 
@@ -9,6 +11,7 @@ const AVATAR: Record<string, string> = {
   planning: "bg-brand-500 text-white", marketing: "bg-accent text-white", support: "bg-emerald-700 text-white dark:text-app",
   finance: "bg-amber-700 text-white dark:text-app", hr: "bg-red-700 text-white dark:text-app",
   safety: "bg-brand-strong text-white", orchestrator: "bg-brand-strong text-white",
+  human: "bg-teal-700 text-white",
 };
 const TONE_ICON: Record<Tone, string> = { request: "", ok: "✓ ", warn: "⏸ ", fail: "✕ ", muted: "" };
 const TONE_EDGE: Record<Tone, string> = {
@@ -18,9 +21,15 @@ const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", {
 
 export interface Typing { key: string; name: string; what: string }
 
-export function OfficeChat({ items, typing, freshIds, title, sub }: { items: ChatItem[]; typing: Typing[]; freshIds: ReadonlySet<string>; title: string; sub: string }) {
+export function OfficeChat({ items, typing, freshIds, title, sub, talk }: { items: ChatItem[]; typing: Typing[]; freshIds: ReadonlySet<string>; title: string; sub: string; talk?: OfficeTalk }) {
   const box = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  // 내가 보내면 맨 아래로 (붙어 있던 위치와 상관없이)
+  const toBottom = () => {
+    pinned.current = true;
+    const el = box.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
   useLayoutEffect(() => {
     const el = box.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
@@ -49,7 +58,7 @@ export function OfficeChat({ items, typing, freshIds, title, sub }: { items: Cha
         <ul aria-label="작업 중인 부서" className="flex flex-col gap-1.5 border-t border-ink-100 bg-surface-2 px-3 py-2.5">
           {typing.map((ty) => (
             <li key={ty.key} className="flex items-center gap-2 text-xs text-ink-500">
-              <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ${AVATAR[ty.key] ?? "bg-ink-500 text-white"}`}>{ty.name.slice(0, 1)}</span>
+              <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ${AVATAR[ty.key.split(":")[0]] ?? "bg-ink-500 text-white"}`}>{ty.name.slice(0, 1)}</span>
               <span className="flex gap-0.5" aria-hidden="true">
                 {[0, 1, 2].map((i) => <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-500" style={{ animationDelay: `${i * 120}ms` }} />)}
               </span>
@@ -58,7 +67,80 @@ export function OfficeChat({ items, typing, freshIds, title, sub }: { items: Cha
           ))}
         </ul>
       )}
+      {talk && <TalkBox talk={talk} onSent={toBottom} />}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------- 입력창: 부서 AI에게 직접 말 걸기
+
+const TAG_KEY: Record<string, string> = Object.fromEntries(TALK_KEYS.map((k) => [TALK_LABEL[k], k]));
+
+/** 맨 앞 "@부서"(뒤에 AI가 붙어도 됨)를 떼고 받는 곳을 고른다. 태그가 없으면 key null */
+function parseTag(text: string): { key: string | null; bad: boolean; body: string } {
+  const m = text.match(/^@(\S+)\s*/);
+  if (!m) return { key: null, bad: false, body: text };
+  let name = m[1];
+  let rest = text.slice(m[0].length);
+  if (name.endsWith("AI") && name.length > 2) name = name.slice(0, -2);
+  else if (/^AI(\s|$)/.test(rest)) rest = rest.replace(/^AI\s*/, "");
+  const key = TAG_KEY[name] ?? null;
+  return { key, bad: !key, body: rest.trim() };
+}
+
+function TalkBox({ talk, onSent }: { talk: OfficeTalk; onSent: () => void }) {
+  const [to, setTo] = useState<string>("data");
+  const [text, setText] = useState("");
+  const [warn, setWarn] = useState<string | null>(null);
+  if (!talk.account) {
+    return <p className="border-t border-ink-100 px-4 py-3 text-sm text-ink-500">로그인하면 부서 AI에게 말을 걸 수 있어요</p>;
+  }
+  const chip = talk.chips.find((c) => c.key === to);
+  const label = TALK_LABEL[to] ?? to;
+  const go = async () => {
+    const raw = text.trim();
+    if (!raw) return;
+    const tag = parseTag(raw);
+    if (tag.bad) { setWarn("그 부서는 아직 말을 받을 수 없어요"); return; }
+    const key = tag.key ?? to;
+    const target = talk.chips.find((c) => c.key === key);
+    if (!target || target.disabled) { setWarn("그 부서는 아직 말을 받을 수 없어요"); return; }
+    if (!tag.body) return;
+    if (talk.busy(key)) return;
+    setWarn(null);
+    setTo(key);
+    setText("");
+    onSent();
+    const ok = await talk.send(key, tag.body);
+    if (!ok) setText(raw);
+    else onSent();
+  };
+  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void go(); }
+  };
+  return (
+    <div className="space-y-2 border-t border-ink-100 px-3 py-3">
+      <div role="radiogroup" aria-label="받는 곳" className="flex flex-wrap gap-1.5">
+        {talk.chips.map((c) => (
+          <button key={c.key} type="button" role="radio" aria-checked={to === c.key} disabled={c.disabled} title={c.reason ?? undefined}
+            onClick={() => { setTo(c.key); setWarn(null); }}
+            className={`chip py-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-50 ${to === c.key ? "bg-brand-600 text-white" : "bg-ink-50 text-ink-700 ring-1 ring-ink-100 hover:bg-ink-100"}`}>
+            {c.label}
+          </button>
+        ))}
+      </div>
+      <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void go(); }}>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} rows={2}
+          aria-label={`${label} AI에게 보낼 말`} placeholder={`${label} AI에게 물어보세요 (@부서로도 고를 수 있어요)`}
+          className="field min-h-[44px] flex-1 resize-none text-sm" />
+        <button type="submit" className="btn-primary px-3 py-2 text-sm" disabled={!text.trim() || talk.busy(to) || !!chip?.disabled}>보내기</button>
+      </form>
+      {warn && <p role="alert" className="text-xs text-amber-800">{warn}</p>}
+      <p className="text-[11px] text-ink-500">
+        AI 대화방의 {label} AI 대화로 이어져요. 하루 상한도 같이 세요.{" "}
+        <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">AI 대화방에서 보기</Link>
+      </p>
+    </div>
   );
 }
 
@@ -91,7 +173,10 @@ function Row({ it, fresh }: { it: ChatItem; fresh: boolean }) {
       </li>
     );
   }
-  const right = it.central;
+  const right = it.central || !!it.human;
+  // 직접 대화(내 말·부서 답)는 줄바꿈을 그대로 (데이터 답의 "근거:" 줄)
+  const direct = it.id.startsWith("direct:");
+  const bubble = it.human ? "rounded-tr-md bg-teal-700 text-white" : right ? "rounded-tr-md bg-brand-600 text-white" : `rounded-tl-md bg-surface ${TONE_EDGE[it.tone]}`;
   return (
     <li className={`flex gap-2 ${right ? "flex-row-reverse" : ""} ${pop}`}>
       <span aria-hidden="true" className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] text-xs font-semibold ${AVATAR[it.fromKey] ?? "bg-ink-500 text-white"}`}>
@@ -100,8 +185,8 @@ function Row({ it, fresh }: { it: ChatItem; fresh: boolean }) {
       <div className={`flex min-w-0 max-w-[85%] flex-col ${right ? "items-end" : "items-start"}`}>
         <span className="text-[11px] text-ink-700">{it.from} <span className="text-ink-500">→ {it.to}</span></span>
         <div className={`mt-0.5 flex items-end gap-1.5 ${right ? "flex-row-reverse" : ""}`}>
-          <div title={it.raw} className={`rounded-2xl px-3 py-1.5 text-[13px] leading-relaxed ${right ? "rounded-tr-md bg-brand-600 text-white" : `rounded-tl-md bg-surface ${TONE_EDGE[it.tone]}`}`}>
-            <p>{right ? "" : TONE_ICON[it.tone]}{it.text}</p>
+          <div title={it.raw} className={`rounded-2xl px-3 py-1.5 text-[13px] leading-relaxed ${bubble}`}>
+            <p className={direct ? "whitespace-pre-wrap break-words" : undefined}>{right ? "" : TONE_ICON[it.tone]}{it.text}</p>
             {it.facts.length > 0 && (
               <dl className="mt-1 flex flex-wrap gap-1">
                 {it.facts.map((f) => (
