@@ -7,7 +7,7 @@ import { AgeBars } from "@/components/data/AgeBars";
 import { useCompany } from "@/demo/company";
 import { useSession } from "@/demo/session";
 import { CopyId, FoldRow, RestFacts, ShortsCard, TileRow, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
-import { DATA_SERVER, dataAi, kpiLive, type DataFact, type InsightPastResult, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
+import { DATA_SERVER, dataAi, kpiLive, type DataFact, type HeldBack, type InsightPastResult, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
 // 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프 (v2 시안 ② 보드). trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
 // - 카드 틀은 ShortsCard: 판정 칩 · 제목 · 한 문장(서버 line) · 숫자 타일 · 연결 상품 · 오른쪽 근거 숏츠 썸네일(최대 3) · "근거 전체 보기" 접힘 하나
@@ -20,6 +20,8 @@ import { DATA_SERVER, dataAi, kpiLive, type DataFact, type InsightPastResult, ty
 // - 순서: 회사 관련·기회(기회 가설 카드 → 회사 관련 인사이트) → 상품이 연결된 그 밖의 인사이트 → 맨 아래 접힘 "상품 연결 없는 화제 N개"
 //   → 참고용 예시(기존 기획안 카드) 접힘
 // - 응답에 없는 칸(null·빈 목록)은 그리지 않는다. 이유가 오면 접힘 안에 이유만
+// - 브리프 v6: 맨 위 "홍보 영상 아이디어"(kind promo) 카드, 그 아래 "근거 부족이라 넘기지 않은 것"(held_back) 접힘.
+//   책에서 뜨는 주제는 기준을 넘은 것만(없으면 칸을 숨김). 숫자는 응답 값 그대로 (화면에서 새로 계산하지 않음)
 
 const NO_REASON = "서버가 이유를 주지 않았어요";
 const num = (v: number, digits = 0) => v.toLocaleString("ko-KR", { maximumFractionDigits: digits });
@@ -357,6 +359,89 @@ function RegenConfirm({ head, onCancel, onOk }: { head: TrendInsightBriefOutput;
   );
 }
 
+// ---------------------------------------------------------------- 홍보 영상 아이디어 (브리프 v6, kind promo)
+const PROMO_SOURCE = "YouTube 숏츠 통계 (인기 영상 상위·조회수 순 검색 표본)";
+
+function PromoCard({ i, facts }: { i: TrendInsight; facts: DataFact[] }) {
+  const days = i.promo_recent_days ?? 3;
+  const at = when(i.shorts_format_at ?? i.evidence.youtube_at ?? null);
+  const naverAt = i.evidence.naver_until ?? null;
+  const mine = facts.filter((f) => f.about === i.insight_id || (i.fact_ids ?? []).includes(f.fact_id));
+  const rows: { label: string; value: string; source: string }[] = [];
+  if (i.promo_views_per_hour_ratio != null) {
+    rows.push({ label: "같은 형식 숏츠 1시간 조회", value: `전체 숏츠의 ${num(i.promo_views_per_hour_ratio, 2)}배`, source: `${PROMO_SOURCE}${at ? ` · ${at} 기준` : ""}` });
+  }
+  if (i.promo_recent_count != null) {
+    rows.push({ label: `최근 ${days}일 새로 뜬 같은 형식`, value: `${num(i.promo_recent_count)}개`, source: `${PROMO_SOURCE}${at ? ` · ${at} 기준` : ""}` });
+  }
+  if (i.evidence.naver_ratio != null) {
+    const age = i.target_age && i.target_age_ratio != null ? ` · ${i.target_age} ${num(i.target_age_ratio, 2)}배` : "";
+    rows.push({ label: "네이버 검색 (같은 형식 주제)", value: `${times(i.evidence.naver_ratio)}${age}`, source: `네이버 데이터랩${naverAt ? ` · ${naverAt}까지` : ""}` });
+  }
+  return (
+    <li className="card space-y-3 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Chip label="홍보 영상" tone={TONE.info} />
+        {i.promo_views_per_hour_ratio != null && <Chip label={`1시간 조회 ${num(i.promo_views_per_hour_ratio, 2)}배`} tone={TONE.ok} />}
+        {i.promo_recent_count != null && <Chip label={`최근 ${days}일 ${num(i.promo_recent_count)}개`} tone={TONE.ok} />}
+      </div>
+      <h4 className="text-lg font-bold text-ink-900">{i.topic}</h4>
+      {rows.length > 0 && (
+        <table className="w-full text-sm">
+          <caption className="sr-only">{i.topic} 근거</caption>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label} className="border-t border-ink-100 align-top">
+                <th scope="row" className="py-1.5 pr-3 text-left font-medium text-ink-700">{r.label}</th>
+                <td className="py-1.5 pr-3 font-semibold tabular-nums text-ink-900">{r.value}</td>
+                <td className="py-1.5 text-xs text-ink-500">{r.source}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="rounded-xl bg-brand-50 px-3 py-2">
+        <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-brand-700">
+          캣북스 홍보 아이디어
+          {i.promo_idea_fallback && <span className="chip bg-surface px-1.5 py-0 text-[11px] font-normal text-ink-500" title="LLM 문장을 쓰지 못해 코드가 만든 고정 틀 문장이에요">고정 틀</span>}
+        </p>
+        <p className="mt-1 text-sm text-ink-900">{i.promo_idea ?? i.line}</p>
+      </div>
+      {i.caution_note && <p className="text-xs text-ink-500">{i.caution_note}</p>}
+      <details className="text-xs text-ink-700">
+        <summary className="cursor-pointer font-medium text-brand-700">근거 보기</summary>
+        <div className="mt-2 space-y-1">
+          {i.gate_reason && <p><b className="font-semibold">기획에 넘긴 기준:</b> {i.gate_reason}</p>}
+          {mine.length > 0 && (
+            <ul className="list-disc space-y-0.5 pl-4">
+              {mine.map((f) => <li key={f.fact_id}>{f.label}: {num(f.value, 2)}{f.unit ? ` ${f.unit}` : ""}{f.period ? ` (${f.period})` : ""}</li>)}
+            </ul>
+          )}
+          {i.limits.length > 0 && <ul className="list-disc space-y-0.5 pl-4 text-ink-500">{i.limits.map((l) => <li key={l}>{l}</li>)}</ul>}
+          <CopyId id={i.insight_id} />
+        </div>
+      </details>
+    </li>
+  );
+}
+
+function HeldBackList({ items }: { items: HeldBack[] }) {
+  if (items.length === 0) return null;
+  return (
+    <details className="card p-4">
+      <summary className="cursor-pointer text-sm font-semibold text-ink-900">근거 부족이라 넘기지 않은 것 {items.length}개</summary>
+      <ul className="mt-3 space-y-1.5 text-sm">
+        {items.map((h) => (
+          <li key={`${h.topic}:${h.reason}`} className="flex flex-wrap gap-x-2">
+            <span className="font-medium text-ink-900">{h.topic}</span>
+            <span className="text-ink-500">{h.reason}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function InsightBrief({ state, examples, examplesCount }: {
   state: SkillState<TrendInsightBriefOutput>; examples: ReactNode; examplesCount: number | null;
 }) {
@@ -403,9 +488,13 @@ export function InsightBrief({ state, examples, examplesCount }: {
   // ① 책에서 뜨는 주제 = 기회 가설 카드 + direct·domain 인사이트 ② 빌려 쓸 요즘 유행 = format
   // 맨 아래 접힘: 참고용(reference_only — 연결할 책 없음·광고 재료 아님·분류 대기). 기획에 넘기지 않는다
   const passed = (i: TrendInsight) => !i.reference_only && i.classification_pending !== true;
-  const bookOnes = all.filter((i) => passed(i) && i.company_relevance !== "format");
+  // v6: 홍보 영상(kind promo)은 맨 위 따로. 기획에 넘기는 기준을 못 넘은 것은 held_back 접힘
+  const promos = all.filter((i) => i.kind === "promo");
+  const bookOnes = all.filter((i) => passed(i) && i.kind !== "promo" && i.company_relevance !== "format");
   const borrowed = all.filter((i) => passed(i) && i.company_relevance === "format");
-  const unlinked = all.filter((i) => !passed(i));
+  const unlinked = all.filter((i) => !passed(i) && i.kind !== "promo");
+  const held = out?.held_back ?? [];
+  const v6 = out?.held_back !== undefined;
   const name = company?.name ?? "회사";
   // 형식 빌리기가 0개면 서버가 limits에 남긴 이유 (첫 줄: 예시 아이디어가 고른 트렌드)
   const noBorrow = out?.limits.find((l) => l.startsWith("형식 빌리기 0개")) ?? null;
@@ -414,7 +503,11 @@ export function InsightBrief({ state, examples, examplesCount }: {
       <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
         <div className="min-w-0 space-y-1">
           <h2 id="data-trend-insight-title" className="text-2xl font-bold text-ink-900">기획팀에 넘길 인사이트</h2>
-          <p className="text-sm text-ink-500">두 가지예요. {name} 책에서 뜨는 주제, 그리고 책 숏츠에 빌려 쓸 수 있는 요즘 유행. 숫자는 모두 데이터 근거예요.</p>
+          <p className="text-sm text-ink-500">
+            {v6
+              ? "요즘 실제로 오르는 트렌드의 형식만 빌려 캣북스 홍보 영상을 만들어요. 다른 회사·연예인 이름과 로고는 쓰지 않아요. 아래 기준을 넘은 것만 기획에 넘겨요."
+              : `두 가지예요. ${name} 책에서 뜨는 주제, 그리고 책 숏츠에 빌려 쓸 수 있는 요즘 유행. 숫자는 모두 데이터 근거예요.`}
+          </p>
         </div>
         {out && <BriefWhen out={out} />}
         {/* 예전 서버(v5 전)는 판·다시 추천 칸이 없어 버튼을 숨긴다 */}
@@ -431,27 +524,49 @@ export function InsightBrief({ state, examples, examplesCount }: {
           <>
             <LlmStatusLine s={out.llm_status} />
             {(out.status === "unknown" || all.length === 0) && <Empty>{out.reason ?? "오늘 인사이트가 없어요."}</Empty>}
-            <section aria-labelledby="data-trend-insight-books" className="space-y-3">
-              <h3 id="data-trend-insight-books" className="text-lg font-bold text-ink-900">{name} 책에서 뜨는 주제</h3>
-              <ul className="space-y-4">
-                <OpportunityCards list={out.opportunities} reason={out.opportunities_reason} facts={out.facts} />
-                {bookOnes.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}
-              </ul>
-            </section>
-            <section aria-labelledby="data-trend-insight-borrow" className="space-y-3">
+            {v6 && (
+              <section aria-labelledby="data-trend-insight-promo" className="space-y-3">
+                <h3 id="data-trend-insight-promo" className="text-lg font-bold text-ink-900">
+                  홍보 영상 아이디어 <span className="text-sm font-normal text-ink-500">형식만 빌려요 · 기준: 같은 형식 숏츠 1시간 조회 또는 검색이 오르고, 최근 며칠 새 같은 형식 숏츠가 여러 개</span>
+                </h3>
+                {promos.length > 0
+                  ? <ul className="space-y-4">{promos.map((i) => <PromoCard key={i.insight_id} i={i} facts={out.facts ?? []} />)}</ul>
+                  : <p className="card p-4 text-sm text-ink-500">지금 기준을 넘은 홍보 영상 형식이 없어요.{out.limits.find((l) => l.startsWith("홍보 영상 0개")) ? ` ${out.limits.find((l) => l.startsWith("홍보 영상 0개"))}` : ""}</p>}
+              </section>
+            )}
+            <HeldBackList items={held} />
+            {/* v6: 기준을 넘은 것만, 없으면 칸을 숨긴다 (기회 가설 카드는 아래 참고용 접힘으로) */}
+            {(!v6 || bookOnes.length > 0) && (
+              <section aria-labelledby="data-trend-insight-books" className="space-y-3">
+                <h3 id="data-trend-insight-books" className="text-lg font-bold text-ink-900">{name} 책에서 뜨는 주제</h3>
+                <ul className="space-y-4">
+                  {!v6 && <OpportunityCards list={out.opportunities} reason={out.opportunities_reason} facts={out.facts} />}
+                  {bookOnes.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}
+                </ul>
+              </section>
+            )}
+            {(!v6 || borrowed.length > 0) && <section aria-labelledby="data-trend-insight-borrow" className="space-y-3">
               <h3 id="data-trend-insight-borrow" className="text-lg font-bold text-ink-900">
                 책 숏츠에 빌려 쓸 요즘 유행 <span className="text-sm font-normal text-ink-500">이름·로고는 안 쓰고 형식만 빌려요</span>
               </h3>
               {borrowed.length > 0
                 ? <ul className="space-y-4">{borrowed.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}</ul>
                 : <p className="card p-4 text-sm text-ink-500">지금 빌려 쓸 유행이 없어요.{noBorrow ? ` ${noBorrow}` : ""}</p>}
-            </section>
+            </section>}
             {unlinked.length > 0 && (
               <details className="card p-4">
                 <summary className="cursor-pointer text-sm font-semibold text-ink-900">
                   연결할 책이 없는 화제 (참고용) {unlinked.length}개
                 </summary>
                 <ul className="mt-4 space-y-4">{unlinked.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}</ul>
+              </details>
+            )}
+            {v6 && (out.opportunities?.length ?? 0) > 0 && (
+              <details className="card p-4">
+                <summary className="cursor-pointer text-sm font-semibold text-ink-900">
+                  기회 가설 카드 (참고용) {out.opportunities?.length}개
+                </summary>
+                <ul className="mt-4 space-y-4"><OpportunityCards list={out.opportunities} reason={out.opportunities_reason} facts={out.facts} /></ul>
               </details>
             )}
             <details className="card p-4">

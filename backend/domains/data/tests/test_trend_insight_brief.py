@@ -127,7 +127,9 @@ def _env(tmp_path: Path, extra: str = "", none_max: int = 7) -> dict[str, str]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     cfg = tmp_path / "trends.toml"
     # extra에 같은 키가 있으면 기본 줄을 쓰지 않는다 (TOML은 같은 키 두 번이면 읽기 실패)
-    base = {"max_insights": "3", "none_max": str(none_max)}
+    # gate_recent_min = 0: 이 파일의 예전 시험은 숏츠 통계 없이 몫·회사 연결을 본다 (기획에 넘기는
+    # 기준의 "최근 N일 같은 형식 수"만 끈다. 기준 자체는 test_promo_video.py에서 본다)
+    base = {"max_insights": "3", "none_max": str(none_max), "gate_recent_min": "0"}
     lines = [f"{k} = {v}\n" for k, v in base.items() if f"{k} =" not in extra]
     cfg.write_text("[brief]\n" + "".join(lines) + extra, encoding="utf-8")
     return {"DATA_TREND_CONFIG": str(cfg), "DATA_INSIGHT_BRIEF_DB": str(tmp_path / "brief.db")}
@@ -584,8 +586,9 @@ def test_general_topics_without_company_link_become_reference_only(tmp_path: Pat
 
     popular = TrendPopularOutput(items=[
         _topic("골프", 1, "연예·스포츠", youtube_videos=8),  # 일반 스포츠 화제
-        _topic("무지 노트 꾸미기", 2, "IT", youtube_videos=6),  # 연결 상품 (노트)
-        _topic("문구 하울", 3, "IT", youtube_videos=5),  # 도메인 키워드 '문구'
+        # 연결 상품 (노트). 검색 상승 1.5배: 기획에 넘기는 기준(검색 1.3배)을 넘는다
+        _topic("무지 노트 꾸미기", 2, "IT", youtube_videos=6, rising_ratio=1.5),
+        _topic("문구 하울", 3, "IT", youtube_videos=5, rising_ratio=1.5),  # 도메인 키워드 '문구'
     ])  # fmt: skip
     card = DomainOpportunity(opportunity_id="opp_1", subtopic="그림책 낭독", line="x",
                              company_relevance="domain")  # fmt: skip
@@ -784,3 +787,37 @@ def test_format_matches_an_idea_trend_through_the_same_target_group() -> None:
     assert "같은 대상: 리그오브레전드" in (linked.company_relevance_reason or "")
     assert [p.product_id for p in linked.borrow_products] == ["p2"]
     assert brief.same_target(["골프"], groups) == {"골프"}  # 묶음에 없으면 자기 이름만
+
+
+def test_promo_videos_come_first_and_weak_insights_are_held_back(tmp_path: Path) -> None:
+    """v6: 실제로 오르는 숏츠 형식을 빌린 홍보 영상이 맨 위, 기준을 못 넘은 것은 held_back."""
+    from ax_contracts.schemas.data import ShortsGroup, ShortsStatsOutput
+
+    shorts = ShortsStatsOutput(
+        status="known", snapshot_at=NOW, median_views_per_hour=100.0, recent_days=3,
+        by_format=[
+            ShortsGroup(name="챌린지", count=12, median_views_per_hour=180.0, recent_count=7),
+            ShortsGroup(name="리액션", count=12, median_views_per_hour=160.0, recent_count=2),
+        ],
+    )  # fmt: skip
+    env = _env(tmp_path)
+    env.pop("DATA_TREND_CONFIG")  # 기본 기준 (최근 3일 5개 포함)
+    out = asyncio.run(
+        brief.make_brief(
+            TrendInsightBriefRequest(), BriefLLM(), env=env, popular=POPULAR, popular_reason=None,
+            rising=[_rising("다이어리", 3.0)], age_fn=_ages([]), promo=None, catalog=CATALOG,
+            now=NOW, shorts=shorts,
+        )
+    ).output  # fmt: skip
+    assert out.schema_version == "trend_insight_brief.v6"
+    first = out.insights[0]
+    assert first.kind == "promo" and first.topic == "챌린지" and first.rank == 1
+    assert first.promo_views_per_hour_ratio == 1.8 and first.promo_recent_count == 7
+    assert first.promo_idea and first.line == first.promo_idea and not first.reference_only
+    assert [i.kind for i in out.insights].count("promo") == 1
+    held = {h.topic: h.reason for h in out.held_back}
+    assert held["홍보 영상 · 리액션"] == "최근 3일 같은 형식 숏츠 2개 (기준 5개, 반짝)"
+    # 기획이 읽는 목록(참고용 아님)에는 기준을 넘은 것만
+    assert all(i.kind == "promo" or i.gate_reason for i in out.insights if not i.reference_only)
+    facts = {f.label for f in out.facts if f.about == first.insight_id}
+    assert "같은 형식 숏츠 시간당 조회 배수 (전체 숏츠 중앙값 대비)" in facts

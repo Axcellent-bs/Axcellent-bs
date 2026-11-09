@@ -19,7 +19,7 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
@@ -428,6 +428,28 @@ def lookback_hours(env: Mapping[str, str] | None = None) -> float:
         return max(1.0, float(raw)) if raw else DEFAULT_LOOKBACK_HOURS
     except ValueError:
         return DEFAULT_LOOKBACK_HOURS
+
+
+def first_collected(path: str | Path, ids: Sequence[str]) -> dict[str, datetime]:
+    """영상 id → 스냅샷에 처음 들어온 수집 시각 (UTC). 파일이 없으면 빈 목록. 읽기 전용."""
+    if not ids or (str(path) != ":memory:" and not Path(path).is_file()):
+        return {}
+    conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+    out: dict[str, datetime] = {}
+    try:
+        for i in range(0, len(ids), 500):
+            part = list(ids[i : i + 500])
+            marks = ",".join("?" * len(part))
+            for vid, at in conn.execute(
+                f"SELECT video_id, MIN(collected_at) FROM snapshots WHERE video_id IN ({marks})"  # noqa: S608
+                " GROUP BY video_id",
+                part,
+            ):
+                parsed = datetime.fromisoformat(at)
+                out[vid] = parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    finally:
+        conn.close()
+    return out
 
 
 def recent_snapshots(path: str | Path, count: int = 3) -> list[StoredSnapshot]:

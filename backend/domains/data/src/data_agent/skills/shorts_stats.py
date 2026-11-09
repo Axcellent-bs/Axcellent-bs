@@ -62,6 +62,7 @@ from data_agent.video_links import video_url
 from data_agent.youtube_store import (
     DB_ENV,
     DEFAULT_DB,
+    first_collected,
     latest_popular,
     recent_snapshots,
     video_details,
@@ -110,6 +111,8 @@ class ShortsConfig:
     screen_videos: int = 10
     # 화면 카드 구독자 대비: channels.list 하루 호출 상한 (한 번 = 채널 50개·1단위)
     channel_calls: int = 2
+    # 형식 그룹 recent_count: 우리 수집에 처음 잡힌 지 이 일수 안인 숏츠 수 (반짝 1개인지 보려고)
+    recent_days: int = 3
 
 
 def load_config(env: Mapping[str, str]) -> ShortsConfig:
@@ -135,6 +138,7 @@ def load_config(env: Mapping[str, str]) -> ShortsConfig:
             ),
             screen_videos=max(0, int(raw.get("screen_videos", base.screen_videos))),
             channel_calls=max(0, int(raw.get("channel_calls", base.channel_calls))),
+            recent_days=max(1, int(raw.get("recent_days", base.recent_days))),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return ShortsConfig()
@@ -266,6 +270,32 @@ class ShortsStore:
                 list(ids),
             ).fetchall()
         return {vid: url for vid, url in rows if url}
+
+    def first_seen(self, ids: Sequence[str]) -> dict[str, datetime]:
+        """영상 id → 이 저장소에서 처음 본 시각 (검색한 날 0시 KST·다시 조회한 시각 중 이른 것)."""
+        out: dict[str, datetime] = {}
+        for i in range(0, len(ids), 500):
+            part = list(ids[i : i + 500])
+            marks = ",".join("?" * len(part))
+            with self._lock:
+                days = self._conn.execute(
+                    f"SELECT video_id, MIN(day) FROM searched_videos WHERE video_id IN ({marks})"  # noqa: S608
+                    " GROUP BY video_id",
+                    part,
+                ).fetchall()
+                seen = self._conn.execute(
+                    f"SELECT video_id, MIN(at) FROM views WHERE video_id IN ({marks})"  # noqa: S608
+                    " GROUP BY video_id",
+                    part,
+                ).fetchall()
+            for vid, day in days:
+                at = datetime.combine(date.fromisoformat(day), datetime.min.time(), KST)
+                out[vid] = min(out.get(vid, at), at)
+            for vid, raw in seen:
+                at = datetime.fromisoformat(raw)
+                at = at if at.tzinfo else at.replace(tzinfo=UTC)
+                out[vid] = min(out.get(vid, at), at)
+        return out
 
     def view_history(self, ids: Sequence[str]) -> dict[str, list[tuple[datetime, int]]]:
         """영상 id → [(본 시각, 조회수)] (시각 순)."""
@@ -497,6 +527,13 @@ def group_stats(
                 f"측정 중 {measuring}개 (다시 본 간격 {config.min_recheck_minutes}분 미만)"
             )
         velocity_reason = ", ".join(notes) or None
+        # 형식 그룹만: 우리 수집에 처음 잡힌 지 recent_days일 안인 수 (처음 본 시각을 모르면 None)
+        known_seen = [s for s in mine if "recent" in s.extra]
+        recent = (
+            sum(1 for s in known_seen if s.extra["recent"])
+            if key == "format" and known_seen
+            else None
+        )
         top = sorted((s for s in mine if s.views is not None), key=lambda s: -(s.views or 0))
         # 카테고리 그룹만: 화면 카드 (조회수 순, 조회수를 모르는 숏츠는 뒤). 표본 부족 칸도 준다
         screen = (
@@ -525,6 +562,7 @@ def group_stats(
                     velocity_measuring=measuring,
                     formats=formats,
                     videos=screen,
+                    recent_count=recent,
                 )
             )
             continue
@@ -543,6 +581,7 @@ def group_stats(
                 median_views_per_hour=round(statistics.median(speeds), 1) if speeds else None,
                 top=[_video(s) for s in top[: config.top_videos]],
                 videos=screen,
+                recent_count=recent,
             )
         )
     # 대표값은 중앙값 (몇 개의 큰 영상이 평균을 끌어올리는 것을 막는다). 평균은 보조 칸
@@ -753,12 +792,26 @@ async def _run(
     # 4. 계산
     from data_agent.skills.topic_category import TOPIC_CATEGORIES
 
+    # 처음 잡힌 시각: 인기 스냅샷에 처음 나온 시각, 검색한 날, 다시 조회한 시각 중 가장 이른 것
+    seen_at = store.first_seen([s.video_id for s in items])
+    for vid, at in first_collected(db, [s.video_id for s in items]).items():
+        seen_at[vid] = min(seen_at.get(vid, at), at)
+    recent_since = now - timedelta(days=config.recent_days)
+    for s in items:
+        if s.video_id in seen_at:
+            s.extra["recent"] = seen_at[s.video_id] >= recent_since
+    out.recent_days = config.recent_days
+
     out.by_category = group_stats(items, "category", [*TOPIC_CATEGORIES, UNKNOWN], config)
     out.by_format = group_stats(items, "format", [*SHORTS_FORMATS, UNKNOWN], config)
     # 전체 숏츠 조회수 중앙값 (카테고리·하위 주제 배수의 분모)
     all_views = [s.views for s in items if s.views is not None]
     out.median_views = round(statistics.median(all_views), 1) if all_views else None
     out.median_views_count = len(all_views)
+    # 전체 숏츠 시간당 조회 증가 중앙값 (형식별 시간당 조회 배수의 분모)
+    all_speeds = [s.views_per_hour for s in items if s.views_per_hour is not None]
+    out.median_views_per_hour = round(statistics.median(all_speeds), 1) if all_speeds else None
+    out.median_views_per_hour_count = len(all_speeds)
     out.status = "known" if items else "unknown"
     if not items:
         out.reason = f"길이 {config.max_seconds}초 이하인 숏츠가 없음"

@@ -1384,6 +1384,9 @@ class ShortsGroup(AxModel):
     # 아래는 예전 응답은 없다. 카테고리 그룹만: 화면 카드용 숏츠 (조회수 순, 설정 개수까지).
     # 이미 모은 숏츠 안에서만 고르고(더 검색하지 않음), 표본 부족 칸도 준다. 통계 칸과 무관
     videos: list[ShortsVideo] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 형식 그룹만: 이 형식 숏츠 중 우리 수집에 처음 잡힌 지
+    # `ShortsStatsOutput.recent_days`일 안인 수 (반짝 1개인지 보려고). 모르면 None
+    recent_count: int | None = Field(default=None, ge=0)
 
 
 class ShortsSearch(AxModel):
@@ -1427,6 +1430,11 @@ class ShortsStatsOutput(AxModel):
     # 아래는 예전 응답은 없다. 하위 주제 검색(domain_subtopics)으로 이미 모은 숏츠 중
     # 표본에 더한 수 (같은 영상은 한 번만, 추가 검색 없음)
     subtopic_shorts: int = Field(default=0, ge=0)
+    # 아래는 예전 응답은 없다. 전체 숏츠 시간당 조회 증가 중앙값과 그 표본 수
+    # (형식별 시간당 조회 배수의 분모), 형식 그룹 recent_count를 센 기간(일)
+    median_views_per_hour: float | None = None
+    median_views_per_hour_count: int = Field(default=0, ge=0)
+    recent_days: int | None = Field(default=None, ge=1)
 
 
 # --------------------------------------------------------------- video_explorer (영상 탐색)
@@ -2030,6 +2038,25 @@ class TrendInsight(AxModel):
     # (campaign_result), 최근 3개까지 최신순. 없으면 []. 인사이트 판정·순서는 바꾸지 않는다
     # (응답할 때 붙임)
     past_results: list[InsightPastResult] = Field(default_factory=list, max_length=3)
+    # 아래는 예전 응답은 없다 (브리프 v6). 인사이트 종류: trend = 트렌드 주제(기존),
+    # promo = 실제로 오르는 숏츠 형식만 빌린 캣북스 홍보 영상 아이디어 (topic은 형식 이름)
+    kind: Literal["trend", "promo"] = "trend"
+    promo_format: str | None = None  # promo: 빌리는 숏츠 형식
+    promo_idea: str | None = None  # promo: 캣북스 홍보 아이디어 한 줄 (60자 이내)
+    promo_idea_fallback: bool = False  # promo: LLM 대신 고정 틀 문장이면 true
+    # promo 근거: 같은 형식 숏츠 시간당 조회 ÷ 전체 숏츠 중앙값, 최근 N일 새로 잡힌 같은 형식 수
+    promo_views_per_hour_ratio: float | None = Field(default=None, ge=0)
+    promo_recent_count: int | None = Field(default=None, ge=0)
+    promo_recent_days: int | None = Field(default=None, ge=1)
+    # 기획에 넘기는 기준을 통과한 근거 한 줄 (기준을 보는 인사이트만)
+    gate_reason: str | None = None
+
+
+class HeldBack(AxModel):
+    """근거가 모자라 기획에 넘기지 않은 주제·형식과 이유 (브리프 v6)."""
+
+    topic: str
+    reason: str
 
 
 # ------------------------------------------------ 기회 가설 카드 (trend_insight_brief 선택 칸)
@@ -2157,6 +2184,8 @@ class TrendInsightBriefOutput(AxModel):
     llm_pct_now: float | None = Field(default=None, ge=0)  # 지금 LLM 오늘 사용 %
     # 지금 있는 최신 감지 데이터 시각 (다시 추천이 쓸 것, 확인 상자 제목)
     detect_latest_at: UtcDatetime | None = None
+    # 아래는 예전 응답은 없다 (v6). 기준(트렌드 근거)을 넘지 못해 기획에 넘기지 않은 것
+    held_back: list[HeldBack] = Field(default_factory=list)
 
 
 BriefTrigger = Literal["auto", "manual"]
