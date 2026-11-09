@@ -22,8 +22,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-MAX_BYTES = 5_000_000
-MAX_ROWS = 20_000
+MAX_BYTES = 40_000_000  # 하루 수만 건 결제의 며칠 치(2026-11-09 로컬: 사흘 76,111줄 ≈ 5MB)
+MAX_ROWS = 600_000
 HEADER_SCAN_ROWS = 10
 INBOX_SUFFIXES = (".csv", ".txt")
 
@@ -80,7 +80,7 @@ def _day(value: str) -> str:
 def read_rows(body: bytes, filename: str = "") -> tuple[list[dict[str, Any]], list[str]]:
     """파일 바이트 → (쓸 줄, 버린 이유). 머리줄을 못 찾으면 `PgFileError`."""
     if len(body) > MAX_BYTES:
-        raise PgFileError("파일이 너무 큽니다(5MB까지).")
+        raise PgFileError("파일이 너무 큽니다(40MB까지).")
     if filename and not filename.lower().endswith(INBOX_SUFFIXES):
         raise PgFileError("PG 정산 파일은 CSV로 올려 주세요.")
     lines = [r for r in csv.reader(io.StringIO(_decode(body))) if any(c.strip() for c in r)]

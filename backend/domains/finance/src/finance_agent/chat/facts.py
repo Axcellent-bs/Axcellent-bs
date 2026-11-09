@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -270,11 +269,11 @@ def _books_id() -> int | None:
 
 
 def _records_key() -> str:
-    """사람 기록 전체의 지문. 파일에 남기는 내용과 같은 것(`persist._text`)의 해시다."""
+    """사람 기록 전체의 지문(`persist.fingerprint`, 파일에 남기는 내용의 해시)."""
     from finance_agent import persist
     from finance_agent.handlers import state
 
-    return hashlib.sha1(persist._text(state()).encode("utf-8")).hexdigest()
+    return persist.fingerprint(state())
 
 
 def _start() -> asyncio.Task[dict[str, Any]]:
