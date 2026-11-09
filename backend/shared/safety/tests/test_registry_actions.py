@@ -720,7 +720,7 @@ async def test_change_proposal_actions_are_a_for_support_only(gate: Gate, act, a
     assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
 
 
-# ---------------------------------------------------------------- 캠페인 예산 (재무 브레이크)
+# ------------------------------------------------ 캠페인 예산 (재무는 의견만, 금액은 안전 규칙)
 def _campaign(act, key: str, budget: int = 100_000, **over: Any):
     params = {
         "campaign_id": "cmp_1",
@@ -732,25 +732,38 @@ def _campaign(act, key: str, budget: int = 100_000, **over: Any):
 
 
 @pytest.mark.asyncio
-async def test_campaign_within_finance_limit_runs(gate: Gate, verifier: Any, act) -> None:
+async def test_small_campaign_runs_on_safety_rules_without_asking_finance(
+    gate: Gate, verifier: Any, act
+) -> None:
+    """재무는 비용을 승인·반려하지 않는다. 작은 예산은 안전 규칙만 통과하면 B로 실행된다."""
     decision = await gate.execute(_campaign(act, "c1"))
-    assert (decision.grade, decision.status, decision.verifier) == ("B", "executed", "finance")
-    assert verifier.tasks[0].skill == "verify_campaign_budget"
-    assert verifier.tasks[0].input["computed_amount"] == 100_000
+    assert (decision.grade, decision.status, decision.verifier) == ("B", "executed", "safety")
+    assert verifier.tasks == []  # 재무 검증을 부르지 않는다
 
 
 @pytest.mark.asyncio
-async def test_finance_rejection_stops_the_campaign(gate: Gate, verifier: Any, act) -> None:
-    verifier.result = "rejected"
-    stopped = await gate.execute(_campaign(act, "c1"))
-    assert (stopped.status, stopped.hold_reason) == ("rejected", HoldReason.VERIFY_REJECTED)
+async def test_finance_cannot_stop_a_campaign_even_if_it_would_reject(
+    gate: Gate, verifier: Any, act
+) -> None:
+    verifier.result = "rejected"  # 재무가 불려도 거절할 상황
+    decision = await gate.execute(_campaign(act, "c1"))
+    assert decision.status == "executed" and verifier.tasks == []
 
 
 @pytest.mark.asyncio
-async def test_finance_silence_is_not_approval(gate: Gate, verifier: Any, act) -> None:
-    verifier.result = "raise"
-    held = await gate.execute(_campaign(act, "c1"))
-    assert (held.status, held.hold_reason) == ("held", HoldReason.VERIFY_TIMEOUT)
+async def test_campaigns_split_small_still_reach_a_person_by_daily_total(gate: Gate, act) -> None:
+    """작게 쪼개 하루에 여러 번 시작해도 하루 합계 100만 원부터는 사람이 본다."""
+    for i in range(3):
+        ok = await gate.execute(_campaign(act, f"d{i}", budget=300_000, campaign_id=f"cmp_d{i}"))
+        assert (ok.grade, ok.status) == ("B", "executed")
+    held = await gate.execute(_campaign(act, "d3", budget=300_000, campaign_id="cmp_d3"))
+    assert (held.grade, held.status) == ("C", "held")
+
+
+@pytest.mark.asyncio
+async def test_zero_budget_campaign_needs_a_person(gate: Gate, act) -> None:
+    held = await gate.execute(_campaign(act, "z1", budget=0))
+    assert (held.grade, held.status) == ("C", "held")
 
 
 @pytest.mark.asyncio

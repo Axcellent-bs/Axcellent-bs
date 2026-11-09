@@ -14,7 +14,7 @@ from ax_safety.rules import ActionSpec, Rule, ThresholdTable, load_registry, loa
 
 def test_rule_files_load_and_match_agreed_values() -> None:
     registry, table = load_registry(), load_thresholds()
-    assert table.version == 7
+    assert table.version == 8
     assert table.review_timeout_seconds == 600  # 데모 10분 자동 거절
     values = {rule.key: rule.value for rule in table.rules if rule.metric != "param"}
     values.pop("pr_allowed_paths")
@@ -44,6 +44,8 @@ def test_rule_files_load_and_match_agreed_values() -> None:
         "media_cost_daily": 10_000,
         "media_cost_zero": 1,
         "campaign_budget_single": 500_000,
+        "campaign_budget_daily": 1_000_000,
+        "campaign_budget_zero": 1,
     }
     issue = registry.get("issue_coupon")
     assert issue is not None and (issue.base_grade, issue.verifier) == ("A", None)
@@ -61,8 +63,11 @@ def test_no_action_is_routed_to_finance_verify_amount() -> None:
     """재무 재설계: verify_amount skill은 없어졌으니 레지스트리에서 부르는 액션도 없어야 한다."""
     registry = load_registry()
     assert [s.action for s in registry.actions if s.verify_skill == "verify_amount"] == []
-    # 재무 검증은 캠페인 예산 하나뿐이다. 쿠폰·환불을 재무가 검증하지 않는다
-    assert [s.action for s in registry.actions if s.verifier == "finance"] == ["start_campaign"]
+    # 재무는 비용을 승인·반려하지 않는다(멘토 피드백). 재무가 검증하는 액션은 없다.
+    # 캠페인 예산은 안전 레이어 금액 규칙이 보고, 쿠폰·환불도 재무가 검증하지 않는다
+    assert [s.action for s in registry.actions if s.verifier == "finance"] == []
+    campaign = registry.get("start_campaign")
+    assert campaign is not None and (campaign.verifier, campaign.verify_skill) == ("safety", None)
     settle = registry.get("confirm_settlement")
     assert settle is not None and (settle.owner, settle.base_grade) == ("finance", "C")
 

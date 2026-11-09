@@ -13,7 +13,7 @@
 # - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 7
+version = 8
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
@@ -596,13 +596,30 @@ field = "duration_s"
 op = ">"
 value = 8
 
-# ---- 캠페인 예산. 값은 시작값. 월 예산(재무 finance_rules.toml, 임시 100만 원)의 절반 이상은 사람이 본다
+# ---- 캠페인 예산. 값은 시작값. 재무는 승인하지 않으므로 금액 기준은 이 표가 맡는다.
+# 월 예산(재무 finance_rules.toml, 임시 100만 원)의 절반 이상은 사람이 본다
 [[rules]]
 key = "campaign_budget_single"
 action = "start_campaign"
 metric = "amount"
 op = ">="
 value = 500000
+
+# 하루에 시작하는 캠페인 예산 합계가 월 예산 이상이면 사람이 본다 (작게 쪼개 여러 번 시작하는 것을 막는다)
+[[rules]]
+key = "campaign_budget_daily"
+action = "start_campaign"
+metric = "daily_total"
+op = ">="
+value = 1000000
+
+# 예산 0원 이하 시작은 계산이 잘못된 것이다
+[[rules]]
+key = "campaign_budget_zero"
+action = "start_campaign"
+metric = "amount"
+op = "<"
+value = 1
 
 # ---- 보유기간 지난 개인정보 지우기 (고객지원, #736). 기본 A(매일 도는 법정 파기)지만 되돌릴 수 없다.
 # 한 번에 지우는 건수가 평소보다 많으면 날짜 계산·설정이 잘못됐을 수 있어 사람이 본다.

@@ -661,12 +661,25 @@ async def review_budget(data: CampaignBudgetReviewInput, context_id: str) -> dic
 
 
 def _review_output(review: dict[str, Any]) -> dict[str, Any]:
-    fields = CampaignBudgetReviewOutput.model_fields
-    return CampaignBudgetReviewOutput(**{k: review[k] for k in fields}).model_dump(mode="json")
+    """재무는 의견만 낸다. 요청 쪽이 막지 않게 decision은 approved·한도는 요청액으로 주고,
+    재무 의견은 opinion·suggested_krw·reasons·recommendation에 담는다(계약 `advisory`)."""
+    return CampaignBudgetReviewOutput(
+        review_id=review["review_id"],
+        campaign_id=review["campaign_id"],
+        decision="approved",
+        requested_krw=review["requested_krw"],
+        approved_limit_krw=review["requested_krw"],
+        reasons=review["reasons"],
+        recommendation=review["recommendation"],
+        applied_rules=review["applied_rules"],
+        advisory=True,
+        opinion=cp.OPINION_OF[review["decision"]],
+        suggested_krw=review["approved_limit_krw"],
+    ).model_dump(mode="json")
 
 
 async def review_campaign_budget(request: AgentRequest) -> AgentResult:
-    """마케팅의 캠페인 예산 요청을 판단한다. 쿠폰 발급·환불은 대상이 아니다."""
+    """마케팅의 캠페인 예산 요청에 재무 의견을 낸다. 막지 않는다. 쿠폰 발급·환불은 대상이 아니다."""
     data = _parse(request, CampaignBudgetReviewInput)
     if isinstance(data, AgentResult):
         return data
@@ -674,7 +687,7 @@ async def review_campaign_budget(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        outcome=review["decision"],
+        outcome=cp.OPINION_OF[review["decision"]],
         output=_review_output(review),
         evidence=_evidence(
             ["finance.campaigns", "finance.lessons", "finance:cashflow"],
@@ -685,7 +698,10 @@ async def review_campaign_budget(request: AgentRequest) -> AgentResult:
 
 
 async def verify_campaign_budget(request: AgentRequest) -> AgentResult:
-    """관문의 `start_campaign` 검증. 금액이 재무 승인 한도 안이면 승인, 넘으면 거절(사람에게 감)."""
+    """예전 관문 검증 skill. 재무는 비용을 승인·반려하지 않으므로 관문은 더 부르지 않는다.
+
+    계약상 skill은 남겨 두고, 불리면 막지 않고(approved) 재무 의견을 근거로 돌려준다.
+    """
     data = _parse(request, VerifyAmountInput)
     if isinstance(data, AgentResult):
         return data
@@ -706,25 +722,16 @@ async def verify_campaign_budget(request: AgentRequest) -> AgentResult:
         )
     # 먼저 받은 판단은 그사이 다른 캠페인이 시작했으면 틀릴 수 있어 시작 직전에 다시 판단한다
     review = await review_budget(ask, request.meta.context_id)
-    ok = review["decision"] != "rejected" and ask.requested_krw <= review["approved_limit_krw"]
-    first_rule = next(
-        (
-            r["rule_id"]
-            for r in review["applied_rules"]
-            if r["detail"]
-            and any(r["detail"] in why or why in r["detail"] for why in review["reasons"])
-        ),
-        "over_approved_limit",
-    )
     return _result(
         request,
         TaskStatus.COMPLETED,
-        outcome="approved" if ok else "rejected",
+        outcome="approved",
         output={
-            "decision": "approved" if ok else "rejected",
-            "reason_code": "within_limit" if ok else first_rule,
+            "decision": "approved",
+            "reason_code": "finance_advisory_only",
             "review_id": review["review_id"],
-            "approved_limit_krw": review["approved_limit_krw"],
+            "opinion": cp.OPINION_OF[review["decision"]],
+            "suggested_krw": review["approved_limit_krw"],
             "reasons": review["reasons"],
         },
         evidence=_evidence(

@@ -2,7 +2,7 @@ import { finance, krw, signedKrw, type BudgetDecision, type CampaignVerdict } fr
 import { shortDateTime } from "@/lib/format";
 import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
-// ⑥ 캠페인 재무: 마케팅이 보낸 성과를 수수료 기준 손익으로 적고, 예산 요청을 판단한다.
+// ⑥ 캠페인 재무: 마케팅이 보낸 성과를 수수료 기준 손익으로 적고, 예산 요청에 의견을 낸다(승인·반려는 하지 않는다).
 // 쿠폰 발급과 환불은 판단하지 않는다. 끝난 쿠폰 금액을 비용에 적을 뿐이다.
 // 숫자는 서버가 계산한 값 그대로다. 마케팅 연결 전에는 기록이 없어 비어 있다.
 
@@ -12,9 +12,9 @@ const VERDICT: Record<CampaignVerdict, { label: string; tone: string }> = {
   bad: { label: "나쁨", tone: TONE.bad },
 };
 const DECISION: Record<BudgetDecision, { label: string; tone: string }> = {
-  approved: { label: "승인", tone: TONE.ok },
-  conditional: { label: "조건부 승인", tone: TONE.warn },
-  rejected: { label: "거절", tone: TONE.bad },
+  approved: { label: "권장", tone: TONE.ok },
+  conditional: { label: "줄여서 권장", tone: TONE.warn },
+  rejected: { label: "권하지 않음", tone: TONE.bad },
 };
 const pct = (v: number | null) => (v === null ? "-" : `${(v * 100).toFixed(1)}%`);
 
@@ -77,8 +77,8 @@ export function CampaignsSection({ tick }: { tick: number }) {
         </ResourceBody>
       </Panel>
 
-      <Panel id="campaign-reviews" title="예산 판단 (재무 브레이크)"
-        hint="마케팅의 캠페인 예산 요청을 남은 예산, 연속 적자, 이달 손실, 현금 흐름, 실패 이력으로 판단합니다. 거절하면 안전 장치가 집행을 막습니다. 쿠폰과 환불은 판단하지 않습니다.">
+      <Panel id="campaign-reviews" title="예산 의견 (재무)"
+        hint="재무는 비용을 승인하거나 반려하지 않습니다. 마케팅의 캠페인 예산 요청에 남은 예산, 연속 적자, 이달 손실, 현금 흐름, 실패 이력을 근거로 의견만 냅니다. 집행 여부는 안전 장치의 금액 기준(건당·하루 합계)과 사람이 정합니다. 쿠폰과 환불은 보지 않습니다.">
         <ResourceBody res={view}>
           {(v) => v.reviews.length === 0 ? <Empty>아직 예산 요청이 없습니다.</Empty> : (
             <ul className="space-y-3">
@@ -87,7 +87,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
                   <div className="flex flex-wrap items-center gap-2">
                     <b className="text-ink-900">{r.campaign_name}</b>
                     <Chip label={DECISION[r.decision].label} tone={DECISION[r.decision].tone} />
-                    <span className="text-sm tabular-nums text-ink-700">요청 {krw(r.requested_krw)} → 한도 {krw(r.approved_limit_krw)}</span>
+                    <span className="text-sm tabular-nums text-ink-700">요청 {krw(r.requested_krw)} → 재무 권장 {krw(r.approved_limit_krw)}</span>
                     <span className="ml-auto text-sm text-ink-500">{shortDateTime(r.reviewed_at)}</span>
                   </div>
                   <ul className="mt-1 list-disc pl-5 text-sm text-ink-700">{r.reasons.map((why) => <li key={why}>{why}</li>)}</ul>
@@ -100,7 +100,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
         </ResourceBody>
       </Panel>
 
-      <Panel id="campaign-lessons" title="실패 교훈" hint="적자 캠페인은 교훈으로 남아 그 채널의 다음 예산 한도를 줄입니다. 효율 좋음이 나오면 풀립니다.">
+      <Panel id="campaign-lessons" title="실패 교훈" hint="적자 캠페인은 교훈으로 남아 그 채널의 다음 권장 금액을 줄입니다. 효율 좋음이 나오면 풀립니다.">
         <ResourceBody res={view}>
           {(v) => v.lessons.length === 0 ? <Empty>남은 교훈이 없습니다.</Empty> : (
             <ul className="space-y-1 text-sm text-ink-700">
