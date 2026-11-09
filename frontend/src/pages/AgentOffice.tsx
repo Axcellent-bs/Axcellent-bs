@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DIRECT_AGENTS } from "@/components/office/DirectChat";
 import { OfficeChat, type Typing } from "@/components/office/OfficeChat";
 import { useOfficeTalk } from "@/components/office/useOfficeTalk";
-import { DEFAULT_SCENE, PixelOffice, SCENES, type SceneKey } from "@/components/office/PixelOffice";
+import { PixelOffice } from "@/components/office/PixelOffice";
 import { ALL_ROOM, buildTimeline, incidentTitle, skillKo, type OrchIncident } from "@/lib/agentChat";
 import { api } from "@/lib/api";
 import { finance, type ExecutionRecord } from "@/lib/finance";
@@ -24,37 +24,11 @@ const STATE_DOT: Record<DeskState, string> = { idle: "bg-ink-300", working: "bg-
 const STATUS_LOOK: Record<OfficeStatus, string> = {
   ok: "bg-ink-100 text-ink-500", alert: "bg-red-50 text-red-700", resolved: "bg-emerald-50 text-emerald-700", degraded: "bg-amber-50 text-amber-700",
 };
-const SCENE_KEY = "axcellent-office-scene";
-const SCENE_KEYS = Object.keys(SCENES) as SceneKey[];
-const loadScene = (): SceneKey => {
-  try {
-    const v = localStorage.getItem(SCENE_KEY);
-    return v && v in SCENES ? (v as SceneKey) : DEFAULT_SCENE;
-  } catch { return DEFAULT_SCENE; }
-};
-const saveScene = (k: SceneKey) => { try { localStorage.setItem(SCENE_KEY, k); } catch { /* 저장이 막히면 새로고침 때 기본 장면 */ } };
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 export default function AgentOffice() {
   const params = useSearchParams();
   const [mode, setMode] = useState<Mode>(params.has("replay") ? "replay" : "live");
-
-  // ------------------------------------------------ 사무실 장면 (기본·서울). 고른 값은 이 브라우저에 기억한다
-  const [scene, setScene] = useState<SceneKey>(loadScene);
-  const [missing, setMissing] = useState<SceneKey[]>([]);
-  const markMissing = useCallback((k: SceneKey) => setMissing((m) => (m.includes(k) ? m : [...m, k])), []);
-  // 배경을 못 불러오는 장면은 고를 수 없게 미리 본다 (기본 장면은 PixelOffice가 알려 준다)
-  useEffect(() => {
-    for (const k of SCENE_KEYS) {
-      if (k === DEFAULT_SCENE) continue;
-      const img = new Image();
-      img.onerror = () => markMissing(k);
-      img.src = SCENES[k].bg;
-    }
-  }, [markMissing]);
-  // 저장된 선택이 서울이어도 그 배경이 없으면 기본 장면으로 그린다
-  const shownScene: SceneKey = missing.includes(scene) ? DEFAULT_SCENE : scene;
-  const pickScene = (k: SceneKey) => { setScene(k); saveScene(k); };
   const [autoNote, setAutoNote] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -246,21 +220,12 @@ export default function AgentOffice() {
           <div className="flex items-center gap-2">
             <h2 className="card-title">부서 AI 사무실</h2>
             <span className="text-xs text-ink-500">9자리 · 총괄 포함</span>
-            <div role="radiogroup" aria-label="사무실 장면" className="ml-auto flex rounded-full bg-ink-100 p-0.5">
-              {SCENE_KEYS.map((k) => (
-                <button key={k} type="button" role="radio" aria-checked={shownScene === k} disabled={missing.includes(k)}
-                  title={missing.includes(k) ? "빈 사무실 그림을 기다리는 중" : undefined} onClick={() => pickScene(k)}
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${shownScene === k ? "bg-surface text-ink-900 shadow-sm" : "text-ink-500 hover:text-ink-900"}`}>
-                  {SCENES[k].label}
-                </button>
-              ))}
-            </div>
-            <span className={`chip ${STATUS_LOOK[view.status]}`}>
+            <span className={`chip ml-auto ${STATUS_LOOK[view.status]}`}>
               <span className={`h-1.5 w-1.5 rounded-full bg-current ${view.status === "alert" ? "animate-pulse" : ""}`} aria-hidden="true" />
               {liveReady ? statusText : "불러오는 중…"}
             </span>
           </div>
-          <PixelOffice view={view} label={officeLabel} scene={shownScene} onSceneMissing={markMissing} />
+          <PixelOffice view={view} label={officeLabel} />
           <ul className="flex flex-wrap gap-1.5" aria-label="부서별 상태">
             {DESKS.map((d) => {
               const st = view.desks[d.key].state;
