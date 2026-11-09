@@ -253,6 +253,8 @@ SERVICES: tuple[Service, ...] = (
             "receive_dev_result",
             "receive_planning_answer",
             "request_release_check",
+            # 마케팅 게시(published)·데이터분석 성과(result)를 제안에 기록
+            "receive_campaign_update",
             # 사람과 직접 대화 (dashboard-api /api/dashboard/planning-chat)
             "planning_chat_send",
             "planning_chat_list",
