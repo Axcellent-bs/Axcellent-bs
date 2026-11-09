@@ -26,6 +26,7 @@ from hr_agent.org import headcount as org_headcount
 from hr_agent.org import parse as org_parse
 from hr_agent.planning_check import service as planning_check
 from hr_agent.results import failed
+from hr_agent.roster import presence
 from hr_agent.roster import service as roster
 from hr_agent.services import get_services
 from hr_agent.views import service as views
@@ -73,6 +74,14 @@ async def parse_org_change_text(request: AgentRequest) -> AgentResult:
 
 async def describe_org_change(request: AgentRequest) -> AgentResult:
     return await org_describe.describe_org_change(get_services(), request)
+
+
+async def record_leave(request: AgentRequest) -> AgentResult:
+    return await presence.record_leave(get_services(), request)
+
+
+async def get_presence(request: AgentRequest) -> AgentResult:
+    return await presence.get_presence(get_services(), request)
 
 
 async def set_org_roster_complete(request: AgentRequest) -> AgentResult:
@@ -137,6 +146,8 @@ _HANDLERS = {
     "decide_org_change": decide_org_change,
     "list_org_changes": list_org_changes,
     "set_org_roster_complete": set_org_roster_complete,
+    "record_leave": record_leave,
+    "get_presence": get_presence,
     "find_org_change_basis": find_org_change_basis,
     "parse_org_change_text": parse_org_change_text,
     "describe_org_change": describe_org_change,

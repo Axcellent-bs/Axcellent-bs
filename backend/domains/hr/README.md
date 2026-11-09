@@ -27,6 +27,8 @@ Agent Card: `agent-card.json` (`/.well-known/agent-card.json`으로 공개). 입
 | `decide_org_change` | A | 인사 담당자가 초안을 확정·반려. 확정하면 그때부터 `team_headcount`에 센다 | dashboard-api |
 | `list_org_changes` | 조회 | 조직 변동 기록 목록(초안·확정·반려)과 명부 등록 상태 | dashboard-api |
 | `set_org_roster_complete` | A | 인사 담당자가 "전 직원 등록 완료"를 표시(확정 명부가 전체 직원 수일 때만). 표시해야 `team_headcount`가 확정 기록으로 센다 | dashboard-api |
+| `record_leave` | A | 휴가 기간(서울 날짜)만 기록한다. 사유·종류는 받지 않는다. 사람 토큰으로 들어온 요청만 | dashboard-api |
+| `get_presence` | 조회 | 교대 명부와 휴가를 합친 상태(근무 중·교대 외·휴가 중). 휴가 기간·입력자는 상세 요청일 때만 | dashboard-api |
 | `start_handover` | A | 인수인계 초안, 빈 자리 질문, 완성도(코드 계산) | orchestrator |
 | `answer_handover_question` | A | 인계자 답변 반영, 같은 답은 한 번만 | orchestrator·dashboard-api |
 | `confirm_handover` | B(planning 검증) / 완성도 미달 C | 인수인계 확정 | orchestrator |
@@ -66,3 +68,10 @@ Agent Card: `agent-card.json` (`/.well-known/agent-card.json`으로 공개). 입
 - 답에 쓰는 사실은 코드가 모은다(`chat/facts.py`: 이번 달·다음 달 팀 인원, 최근 확정 발령(종류·팀·날짜), 최근 결정 카드 제목). 직원 이름·번호는 넣지 않는다. 사실과 대화 글은 LLM의 데이터 블록으로만 들어간다.
 - LLM 설정(`HR_LLM_*`·`LLM_*`)이 없으면 409 `LLM_NOT_CONFIGURED`. 저장은 hr SQLite의 `hr_chat_threads`(처음 쓸 때 만든다).
 - 한계: LLM이 쓴 문장 속 숫자를 코드가 다시 검증하지는 않는다(사실에 있는 값만 쓰게 지시하고, 실제 모드에서 팀 인원이 화면과 같은 것을 확인했다). 결정 카드는 제목 위주라 세부 질문은 결정 기록 화면을 안내한다.
+
+## 근무 상태·휴가 (`roster/presence.py`)
+
+- 휴가는 `leaves` 표에 기간만 저장한다(사유·종류·출퇴근 시각 없음). 감사 로그에는 휴가 ID만 남는다.
+- 상태 계산: 휴가 기간(서울 날짜, 양 끝 포함)이면 휴가 중, 아니면 교대 안이면 근무 중, 아니면 교대 외.
+- 보유 기간은 3년(`HR_LEAVE_RETENTION_DAYS`, 늘리는 것만). 지금은 지울 건수만 센다
+  (`roster/leave_retention.py`). 실제 삭제는 안전 관문에 새 액션을 등록한 뒤 켠다.

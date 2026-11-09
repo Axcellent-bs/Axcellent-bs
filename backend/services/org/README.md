@@ -9,6 +9,11 @@
 | `decide_org_change` | A |
 | `list_org_changes` | read |
 | `set_org_roster_complete` | A |
+| `record_leave` | A |
+| `get_presence` | read |
+| `find_org_change_basis` | read |
+| `parse_org_change_text` | read |
+| `describe_org_change` | read |
 
 - 실행: `uv run --package ax-svc-org uvicorn svc_org.main:app --port 8124`
   (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
