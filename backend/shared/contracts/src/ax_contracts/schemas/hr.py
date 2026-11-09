@@ -34,6 +34,8 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `describe_org_change` | 읽기 | 발령 요약 설명문(숫자는 코드, 문장만 LLM) |
 | `set_org_roster_complete` | A | 인사 담당자가 "전 직원 등록 완료"를 표시 (요청자 dashboard-api) |
 | `team_headcount` | 읽기 | 그 달 1일 기준 팀별 인원수 (이름·직원 ID 없음, 요청자 finance 팀 예산) |
+| `record_leave` | A | 휴가 기간 기록(사유·종류 없음, 요청자 인사 서비스, 사람 토큰만) |
+| `get_presence` | 읽기 | 교대 명부와 휴가를 합친 상태. 휴가 기간·입력자는 상세 요청일 때만 |
 
 `RecordCaseOutput`은 모델만 추가했고, hr의 출력 전환은 hr 담당 PR에서 한다.
 
@@ -978,4 +980,72 @@ class EvaluateAgentsOutput(AxModel):
     events: list[EvaluatedEvent] = Field(default_factory=list)  # 새로운 이벤트부터
     agents: list[AgentSummary] = Field(default_factory=list)
     trend: list[DailyTrend] = Field(default_factory=list)
+    collected_at: UtcDatetime
+
+
+# ---- 근무 상태 · 휴가 (AI 사무실 머리 위 표시, 2026-11-09 팀 합의) --------------------------
+# 상태는 3가지뿐이다. 출퇴근 시각·접속 중 표시는 만들지 않는다.
+# 휴가는 기간만 받고 사유·종류는 받지 않는다.
+# 상태 코드(근무 중 · 교대 외 · 휴가 중)는 모두에게 보이고, 휴가 기간·입력자는 `details`에만 담는다.
+
+PresenceStatus = Literal["working", "off_shift", "on_leave"]  # 근무 중 · 교대 외 · 휴가 중
+
+
+class RecordLeaveInput(AxModel):
+    """`record_leave` 입력(등급 A, 요청자 인사 서비스, 사람 토큰만). 사유·종류 칸은 없다."""
+
+    member_id: str = Field(min_length=1, max_length=64)
+    start_date: str = Date  # 서울 날짜, 포함
+    end_date: str = Date  # 서울 날짜, 포함
+    recorded_by: str = Field(
+        min_length=1, max_length=64
+    )  # 입력한 사람. dashboard-api가 로그인에서 채운다
+
+    @model_validator(mode="after")
+    def _end_not_before_start(self) -> RecordLeaveInput:
+        if self.end_date < self.start_date:
+            raise ValueError("휴가 끝 날짜가 시작 날짜보다 빠르다")
+        return self
+
+
+class LeaveView(AxModel):
+    """휴가 기록 한 건. 사유·종류는 없다. 기간은 서울 날짜(포함)다."""
+
+    leave_id: str
+    member_id: str
+    start_date: str = Date
+    end_date: str = Date
+    recorded_by: str  # 입력한 사람(사람 토큰의 주체)
+    recorded_at: UtcDatetime
+
+
+class RecordLeaveOutput(AxModel):
+    leave: LeaveView
+
+
+class GetPresenceInput(AxModel):
+    """`get_presence` 입력. `at`이 없으면 지금. `include_details`는 관리자 요청일 때만 true."""
+
+    area: str | None = None
+    at: UtcDatetime | None = None
+    include_details: bool = False
+
+
+class PresenceEntry(AxModel):
+    """사람(담당) 한 명의 상태. 상태 코드만 담는다."""
+
+    area: str
+    role: str
+    member_id: str
+    status: PresenceStatus
+
+
+class GetPresenceOutput(AxModel):
+    """교대 명부와 휴가를 합쳐 계산한 상태. 휴가가 교대보다 먼저다(휴가 중이면 휴가 중).
+
+    `leaves`는 `include_details`가 true일 때만 채운다(휴가 기간·입력자).
+    """
+
+    entries: list[PresenceEntry] = Field(default_factory=list)
+    leaves: list[LeaveView] = Field(default_factory=list)
     collected_at: UtcDatetime
