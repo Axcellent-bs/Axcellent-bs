@@ -9,6 +9,13 @@
 Windows의 venv python.exe는 런처라서 실제 python이 자식으로 하나 더 뜬다. 그래서 pid 하나만 끄지
 않고 자식까지 끄고, 끈 뒤에는 표식으로 다시 찾아 남은 것이 없는지 본다(기록에 없는 옛 프로세스도
 여기서 드러난다).
+
+같은 서버에서 도커 컨테이너가 같은 앱(`/app/.venv/bin/uvicorn ax_memory...`)을 돌리면
+호스트 `ps`에도 보이므로, 표식만으로는 컨테이너 프로세스를 우리 것으로 착각한다
+(251: 시작 거부, stop 실패). 그래서 Linux에서는 표식에 더해 (1) 소유자가 지금 사용자이고
+(2) 작업 폴더(/proc/<pid>/cwd)가 이 체크아웃의 backend 아래인 프로세스만 "우리 것"으로 본다
+(run_all.sh는 backend로 cd해서 띄운다). cwd를 못 읽으면(다른 사용자·root 소유 컨테이너)
+우리 것이 아니다. Windows는 컨테이너가 같은 프로세스 표에 없어 표식만 쓴다.
 """
 
 from __future__ import annotations
@@ -29,7 +36,11 @@ class Proc:
     pid: int
     ppid: int
     cmd: str
+    uid: int | None = None  # 소유자 (알 수 없으면 None: Windows)
+    cwd: str | None = None  # 작업 폴더. None은 확인 안 함(Windows·/proc 없음), ""는 못 읽음
 
+
+BACKEND = Path(__file__).resolve().parents[1]
 
 Lister = Callable[[], list[Proc]]
 Killer = Callable[[int], None]
@@ -57,13 +68,26 @@ def list_processes() -> list[Proc]:
         ]
     out = subprocess.run(
         # -ww: 명령줄을 자르지 않는다 (터미널이 아니면 80칸에서 잘려 끝의 표식이 사라짐)
-        ["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True, check=False
+        ["ps", "-ww", "-eo", "pid=,ppid=,uid=,args="],
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout
+    has_proc = Path("/proc/self/cwd").exists()
     procs = []
     for line in out.splitlines():
-        parts = line.split(None, 2)
-        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
-            procs.append(Proc(int(parts[0]), int(parts[1]), parts[2] if len(parts) > 2 else ""))
+        parts = line.split(None, 3)
+        if len(parts) >= 3 and all(x.isdigit() for x in parts[:3]):
+            pid = int(parts[0])
+            cwd: str | None = None
+            if has_proc:
+                try:
+                    cwd = os.readlink(f"/proc/{pid}/cwd")
+                except OSError:
+                    cwd = ""  # 다른 사용자·컨테이너(root) 프로세스는 읽을 수 없다
+            procs.append(
+                Proc(pid, int(parts[1]), parts[3] if len(parts) > 3 else "", int(parts[2]), cwd)
+            )
     return procs
 
 
@@ -78,13 +102,39 @@ def kill_process(pid: int) -> None:
         pass
 
 
-def matching(procs: Iterable[Proc], markers: Sequence[str]) -> list[Proc]:
-    """명령줄에 표식이 들어 있는 프로세스. 이 스크립트(표식을 인자로 받음)와 그 런처는 뺀다."""
+def is_ours(p: Proc, root: Path = BACKEND, uid: int | None = None) -> bool:
+    """이 체크아웃(root=backend)이 띄운 프로세스인가. 소유자와 작업 폴더를 모두 본다(AND).
+
+    알 수 없는 값(None)은 걸러내지 않는다(Windows).
+    Linux에서 cwd를 못 읽었으면("") 우리 것이 아니다.
+    """
+    if uid is None and hasattr(os, "getuid"):
+        uid = os.getuid()
+    if p.uid is not None and uid is not None and p.uid != uid:
+        return False
+    if p.cwd is None:
+        return True
+    if not p.cwd:
+        return False
+    try:
+        Path(p.cwd).resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def matching(
+    procs: Iterable[Proc], markers: Sequence[str], root: Path = BACKEND, uid: int | None = None
+) -> list[Proc]:
+    """명령줄에 표식이 들어 있고 이 체크아웃이 띄운 프로세스. 이 스크립트와 그 런처는 뺀다."""
     me = os.getpid()
     return [
         p
         for p in procs
-        if p.pid != me and "procs.py" not in p.cmd and any(m in p.cmd for m in markers)
+        if p.pid != me
+        and "procs.py" not in p.cmd
+        and any(m in p.cmd for m in markers)
+        and is_ours(p, root, uid)
     ]
 
 

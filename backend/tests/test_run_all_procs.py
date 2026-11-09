@@ -130,7 +130,10 @@ def test_lock_pid_reused_by_another_program_is_not_killed(tmp_path: Path) -> Non
 def test_real_fake_process_is_found_then_stopped_with_zero_left() -> None:
     """진짜 프로세스(표식만 가짜)로: 찾고, 기록한 pid로 끄면(자식까지) 남은 것 0개."""
     marker = "ax-procs-test-marker-7f3a"
-    child = subprocess.Popen([sys.executable, "-c", f"import time; time.sleep(60)  # {marker}"])
+    child = subprocess.Popen(
+        [sys.executable, "-c", f"import time; time.sleep(60)  # {marker}"],
+        cwd=BACKEND,  # run_all.sh는 backend에서 띄운다 (우리 것 판정은 작업 폴더를 본다)
+    )
     try:
         deadline = time.monotonic() + 15
         while not procs.running([marker]) and time.monotonic() < deadline:
@@ -141,6 +144,52 @@ def test_real_fake_process_is_found_then_stopped_with_zero_left() -> None:
         if child.poll() is None:
             child.kill()
         child.wait(timeout=10)
+
+
+UVICORN = "uvicorn ax_memory.main:app"
+CONTAINER = P(900, 880, f"/app/.venv/bin/{UVICORN} --host 0.0.0.0 --port 8002", uid=0, cwd="")
+MINE = P(100, 1, f".venv/bin/python -m {UVICORN} --port 8002", uid=1000, cwd=str(BACKEND))
+
+
+def test_container_process_is_not_counted_as_already_running(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """251: 컨테이너 안 uvicorn이 호스트 ps에 보여도 시작을 막지 않는다."""
+    inner = P(901, 1, f"/app/.venv/bin/python -m {UVICORN}", uid=0, cwd="/app")
+    table = FakeTable([CONTAINER, inner])
+    monkeypatch.setattr(procs, "list_processes", table.list)
+    monkeypatch.setattr(procs.os, "getuid", lambda: 1000, raising=False)
+    assert procs.main(["running", UVICORN]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_container_process_is_never_a_stop_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(procs.os, "getuid", lambda: 1000, raising=False)
+    # 같은 사용자여도 cwd가 이 체크아웃 밖이면 제외
+    root_cwd_visible = P(902, 1, f"/app/.venv/bin/{UVICORN}", uid=1000, cwd="/app")
+    table = FakeTable([CONTAINER, root_cwd_visible, MINE])
+    left = procs.stop([100], [], [UVICORN], lister=table.list, killer=table.kill, wait=0)
+    assert left == []
+    assert table.killed == [100]  # 컨테이너 프로세스(900·902)는 건드리지 않는다
+    assert {r.pid for r in table.rows} == {900, 902}
+
+
+def test_container_root_cwd_is_not_ours_even_when_we_run_as_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(procs.os, "getuid", lambda: 0, raising=False)
+    assert procs.matching([CONTAINER], [UVICORN]) == []
+    visible = P(903, 880, f"/app/.venv/bin/{UVICORN}", uid=0, cwd="/app")
+    assert procs.matching([visible], [UVICORN]) == []
+
+
+def test_this_checkouts_process_is_still_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(procs.os, "getuid", lambda: 1000, raising=False)
+    sub = P(101, 100, f"python -m {UVICORN}", uid=1000, cwd=str(BACKEND / "services"))
+    assert procs.matching([CONTAINER, MINE, sub], [UVICORN]) == [MINE, sub]
+    other_user = P(104, 1, f".venv/bin/python -m {UVICORN}", uid=1001, cwd=str(BACKEND))
+    other_checkout = P(105, 1, f"python -m {UVICORN}", uid=1000, cwd="/home/x/other/backend")
+    assert procs.matching([other_user, other_checkout], [UVICORN]) == []
 
 
 def test_run_all_checks_running_before_start_and_no_longer_restarts_silently() -> None:
