@@ -9,6 +9,15 @@ const PRESETS = [
   { label: "강한 항의", subject: "소비자원에 신고할 겁니다", message: "환불이 계속 거절돼서 어이없네요!! 소비자원에 신고하겠습니다." },
 ];
 
+/** 연결할 주문을 읽는 기간. 주문이 많은 구매자는 전부 읽으면 느려서 기본은 최근 30일이다 */
+const ORDER_PERIODS = [
+  { id: "30", label: "최근 30일" },
+  { id: "90", label: "최근 90일" },
+  { id: "all", label: "전체 기간" },
+] as const;
+type OrderPeriod = (typeof ORDER_PERIODS)[number]["id"];
+const DAY_MS = 86_400_000;
+
 export function NewInquiryModal({ onClose, onCreate }: {
   onClose: () => void; onCreate: (b: { user_id: number; subject: string; message: string; order_id?: string | null }) => Promise<void>;
 }) {
@@ -17,13 +26,26 @@ export function NewInquiryModal({ onClose, onCreate }: {
   const [orders, setOrders] = useState<{ id: number; order_no: string; status_ko: string; title: string }[]>([]);
   // support는 shop-api 주문 ID(`ord_0216`)로 주문을 찾는다. 숫자 ID를 보내면 주문이 연결되지 않는다.
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [period, setPeriod] = useState<OrderPeriod>("30");
+  const [ordersBusy, setOrdersBusy] = useState(false);
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { api.users().then((u) => { setUsers(u); setUserId(u[0]?.id ?? null); }).catch(() => setError("고객 목록을 불러오지 못했습니다.")); }, []);
-  useEffect(() => { setOrderId(null); if (userId) api.admin.orders(userId).then(setOrders).catch(() => setOrders([])); }, [userId]);
+  useEffect(() => {
+    setOrderId(null);
+    if (!userId) return;
+    let alive = true; // 고객·기간을 빨리 바꿀 때 늦게 온 옛 응답은 버린다
+    const since = period === "all" ? undefined : new Date(Date.now() - Number(period) * DAY_MS).toISOString();
+    setOrdersBusy(true);
+    api.admin.orders(userId, since)
+      .then((o) => alive && setOrders(o))
+      .catch(() => alive && setOrders([]))
+      .finally(() => alive && setOrdersBusy(false));
+    return () => { alive = false; };
+  }, [userId, period]);
 
   async function submit() {
     if (!userId) return;
@@ -46,6 +68,13 @@ export function NewInquiryModal({ onClose, onCreate }: {
             <select className="field" value={orderId ?? ""} onChange={(e) => setOrderId(e.target.value || null)} aria-label="연결할 주문">
               <option value="">주문 연결 안 함</option>{orders.map((o) => <option key={o.id} value={o.order_no}>{o.order_no} · {o.status_ko} · {o.title.slice(0, 12)}</option>)}
             </select>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-ink-500">
+            <label htmlFor="new-inquiry-order-period">주문 기간</label>
+            <select id="new-inquiry-order-period" className="field w-auto py-1 text-xs" value={period} onChange={(e) => setPeriod(e.target.value as OrderPeriod)}>
+              {ORDER_PERIODS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+            <span aria-live="polite">{ordersBusy ? "주문 읽는 중…" : `주문 ${orders.length}건`}</span>
           </div>
           <input className="field" placeholder="제목" value={subject} onChange={(e) => setSubject(e.target.value)} />
           <textarea className="field h-32 resize-none" placeholder="고객 메시지" value={message} onChange={(e) => setMessage(e.target.value)} />
