@@ -4,6 +4,7 @@ import { OfficeChat, type Typing } from "@/components/office/OfficeChat";
 import { useOfficeTalk } from "@/components/office/useOfficeTalk";
 import { PixelOffice } from "@/components/office/PixelOffice";
 import { ALL_ROOM, buildTimeline, incidentTitle, skillKo, type OrchIncident } from "@/lib/agentChat";
+import { mergeTalk } from "@/lib/officeTalk";
 import { api } from "@/lib/api";
 import { finance, type ExecutionRecord } from "@/lib/finance";
 import { Link, useSearchParams } from "@/lib/nav";
@@ -118,25 +119,8 @@ export default function AgentOffice() {
     }
     return v;
   }, [baseView, busyStr]);
-  // 단톡방: 실시간은 시각순으로 끼워 넣고(타임라인 순서는 그대로), 리플레이는 구분선 아래에 붙인다
-  const chatItems = useMemo(() => {
-    const human = talk.items;
-    if (human.length === 0) return items;
-    if (mode === "replay") {
-      return [...items, { kind: "separator" as const, id: "direct:replay-sep", at: human[0].at, room: ALL_ROOM, text: "여기부터 실제 대화 (리플레이와 별개)", variant: "topic" as const }, ...human];
-    }
-    const out: typeof items = [];
-    let h = 0;
-    for (const t of items) {
-      if (t.at) {
-        const at = Date.parse(t.at);
-        while (h < human.length && Date.parse(human[h].at) < at) out.push(human[h++]);
-      }
-      out.push(t);
-    }
-    while (h < human.length) out.push(human[h++]);
-    return out;
-  }, [items, talk.items, mode]);
+  // 단톡방: 실시간은 시각순으로 끼워 넣고(타임라인 순서는 그대로), 리플레이는 구분선 아래에 붙인다 (AI 대화방 전체 대화방과 같은 함수)
+  const chatItems = useMemo(() => mergeTalk(items, talk.items, mode === "replay"), [items, talk.items, mode]);
   // 사람 대화의 처음 본 시각 (기존 seenRef·deriveOffice 입력과 따로). 처음 불러온 지난 대화는 0 = 애니메이션 없음
   const humanSeenRef = useRef(new Map<string, number>());
   const humanSeen = useMemo(() => {

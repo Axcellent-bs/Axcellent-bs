@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { PreparingChip } from "@/components/Preparing";
+import { HandoffLine, PlanCard, PROCEED_TEXT } from "@/components/office/DevCards";
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { POLL_MS, classifyFailure, directChatApi, isAnswering } from "@/lib/directChat";
 import { loadOwners, loadThreadId, saveOwner, saveThreadId, threadKey } from "@/lib/directThreads";
@@ -159,12 +160,12 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
     if (el) el.scrollTop = el.scrollHeight;
   }, [thread, sending]);
 
-  const send = async (e?: FormEvent) => {
+  const send = async (e?: FormEvent, said?: string) => {
     e?.preventDefault();
-    const message = text.trim();
+    const message = (said ?? text).trim();
     if (!message || sending || readOnly || prep || locked) return;
     setSending(message);
-    setText("");
+    if (said === undefined) setText("");
     setError(null);
     try {
       const next = await api.send({ ...(thread ? { thread_id: thread.id } : {}), message });
@@ -173,7 +174,7 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
       saveThreadId(tkey, next.id);
     } catch (err) {
       if (!failed(err)) setError(errText(err, agent.name));
-      setText(message);
+      if (said === undefined) setText(message);
     } finally {
       setSending(null);
     }
@@ -206,6 +207,10 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
     api.get(t.id).then((x) => { setThread(x); if (owners[x.id] === account.id) saveThreadId(tkey, x.id); }).catch((err) => { if (!failed(err)) setError(errText(err, agent.name)); });
   };
   const messages = thread?.messages ?? [];
+  // "이대로 진행": 마지막 계획 메시지에만, 이야기 중(talking)인 내 대화일 때만 (개발 화면과 같은 규칙)
+  const last = messages[messages.length - 1];
+  const goId = !readOnly && thread?.status === "talking" && last?.role === "assistant" && last.kind === "plan" && last.plan ? last.id : null;
+  const goBusy = !!sending || isAnswering(thread) || prep || !!locked;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -270,7 +275,8 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
             <p className="py-12 text-center text-sm text-ink-500">{agent.name}에게 하고 싶은 말을 적어 보세요.</p>
           ) : (
             <ol role="log" aria-live="polite" aria-label={`${agent.name}와 나눈 대화`} className="flex flex-col gap-3">
-              {messages.map((m) => <Bubble key={m.id} m={m} name={agent.name} me={!readOnly} />)}
+              {messages.map((m) => <Bubble key={m.id} m={m} name={agent.name} me={!readOnly} requestId={thread?.requestId ?? null}
+                onGo={m.id === goId ? () => void send(undefined, PROCEED_TEXT) : undefined} goBusy={goBusy} />)}
               {isAnswering(thread) && !sending && <li className="animate-pulse px-1 text-xs text-ink-500">{agent.name}가 답하는 중…</li>}
               {sending && (
                 <>
@@ -309,21 +315,15 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
   );
 }
 
-function Bubble({ m, name, me }: { m: ChatMessage; name: string; me: boolean }) {
+function Bubble({ m, name, me, requestId = null, onGo, goBusy = false }: { m: ChatMessage; name: string; me: boolean; requestId?: string | null; onGo?: () => void; goBusy?: boolean }) {
   const mine = m.role === "user";
   return (
     <li className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
       <span className="mb-1 px-1 text-[11px] text-ink-500">{mine ? (me ? "나" : "말한 사람") : name}{m.at ? ` · ${hhmm(m.at)}` : ""}</span>
       <div className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm ${mine ? "bg-brand-600 text-white" : m.kind === "error" ? "bg-red-50 text-red-800" : "bg-ink-100 text-ink-900"}`}>
         {m.text}
-        {m.plan && (
-          <div className="mt-2 rounded-xl bg-surface-2 p-3 text-ink-900">
-            <p className="font-semibold">계획: {m.plan.title}</p>
-            {m.plan.done.length > 0 && (
-              <ul className="mt-1 list-disc pl-4 text-xs text-ink-700">{m.plan.done.map((d) => <li key={d}>{d}</li>)}</ul>
-            )}
-          </div>
-        )}
+        {m.plan && <PlanCard plan={m.plan} onGo={onGo} disabled={goBusy} />}
+        {m.kind === "handoff" && <HandoffLine requestId={requestId} />}
         {m.kind === "started" && <p className="mt-1 text-xs opacity-80">코딩 작업을 시작했어요. 개발 AI 작업 현황에서 볼 수 있어요.</p>}
       </div>
     </li>

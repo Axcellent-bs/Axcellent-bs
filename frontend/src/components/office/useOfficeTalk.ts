@@ -1,35 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DIRECT_AGENTS, type DirectAgent } from "@/components/office/DirectChat";
+import { PROCEED_TEXT } from "@/components/office/DevCards";
 import { ALL_ROOM, type ChatItem } from "@/lib/agentChat";
 import { POLL_MS, classifyFailure, isAnswering } from "@/lib/directChat";
 import { loadOwners, loadThreadId, saveOwner, saveThreadId, threadKey } from "@/lib/directThreads";
 import { useSession, type Account } from "@/demo/session";
 
-// AI 오피스 단톡방에서 부서 AI에게 직접 말 걸기.
+// 부서 AI에게 직접 말 걸기. AI 오피스 단톡방과 AI 대화방 전체 대화방이 같이 쓴다.
 // AI 대화방 직접 대화(DirectChat)와 같은 창구·같은 대화(이 탭의 sessionStorage 대화 번호, 주인 기억)를 잇는다.
 // 열람 규칙도 같다: 서버가 가린 대화(restricted)나 이 브라우저가 기억한 주인이 내가 아닌 대화는 보여 주지 않는다.
-// 개발 AI는 대화에서 코딩 작업(PR)을 시작할 수 있어 AI 대화방에서만 쓴다. 총괄·인프라는 여기서 "준비 중".
+// 이어 보내기도 직접 대화와 같다: 끝난 대화(closed)만 새 대화로 시작하고, 기획에 넘긴 대화(handed)는 같은 대화에 잇는다.
 
 type Talk = NonNullable<DirectAgent["talk"]>;
 type Thread = Awaited<ReturnType<Talk["get"]>>;
 
-/**
- * 단톡방에서 말을 거는 부서 (받는 곳 칩 순서, 서버를 부르는 대상은 이 목록뿐).
- * dev(개발 AI)는 넣지 않는다: 대화에서 코딩 작업(PR)을 시작할 수 있어, 작업 시작 전 사람 확인 규칙이
- * 서버에 생기면 여기에 "dev"를 더해 켠다(그 전까지 칩은 DEV_OFF로 "준비 중").
- */
-export const OFFICE_TALK_KEYS = ["data", "support", "finance", "planning", "marketing", "hr"] as const;
+/** 받는 곳 칩 순서 (서버를 부르는 대상은 이 목록뿐) */
+export const OFFICE_TALK_KEYS = ["dev", "data", "support", "finance", "planning", "marketing", "hr", "infra", "orchestrator"] as const;
 export const TALK_KEYS = OFFICE_TALK_KEYS;
 export type TalkKey = (typeof OFFICE_TALK_KEYS)[number];
 /** 칩 이름 (사무실 자리 이름과 같다) */
 export const TALK_LABEL: Record<string, string> = {
   dev: "개발", data: "데이터분석", support: "고객지원", finance: "재무", planning: "기획", marketing: "마케팅", hr: "인사", orchestrator: "총괄", infra: "인프라",
 };
-/** 말을 받을 수 없는 자리 (칩만 비활성으로 보인다) */
-export const TALK_OFF = ["orchestrator", "infra"] as const;
-/** 개발 칩: 맨 앞에 비활성으로만 둔다 */
-export const DEV_OFF = { key: "dev", reason: "작업 시작 전 사람 확인 규칙이 생기면 켜져요" } as const;
-export const DEV_TAG_TEXT = "개발 AI는 아직 단톡방에서 받을 수 없어요. AI 대화방에서 이야기해 주세요";
 
 export interface TalkChip { key: string; label: string; disabled: boolean; reason: string | null }
 export interface OfficeTalk {
@@ -40,7 +32,7 @@ export interface OfficeTalk {
   busyKeys: string[];
   /** 보내기. 성공하면 true (실패면 입력창에 글을 되돌린다) */
   send: (key: string, message: string) => Promise<boolean>;
-  /** 단톡방에 섞을 사람 대화·시스템 줄 (시각순) */
+  /** 섞을 사람 대화·시스템 줄 (시각순) */
   items: ChatItem[];
   /** 처음 불러온 지난 대화 id (말풍선 애니메이션 없이 보인다) */
   quiet: ReadonlySet<string>;
@@ -55,7 +47,8 @@ export function useOfficeTalk(): OfficeTalk {
   const { account } = useSession();
   const agents = useMemo(agentsOf, []);
   const [threads, setThreads] = useState<Record<string, Thread | null>>({});
-  const [sending, setSending] = useState<Record<string, boolean>>({});
+  // 보내는 중인 말 (서버 답이 오기 전에 내 말풍선을 바로 붙인다)
+  const [sending, setSending] = useState<Record<string, { text: string; at: string } | null>>({});
   const [prep, setPrep] = useState<Record<string, boolean>>({});
   const [locked, setLocked] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<ChatItem[]>([]);
@@ -123,7 +116,7 @@ export function useOfficeTalk(): OfficeTalk {
     const cur = threads[key] ?? null;
     const keep = cur && cur.status !== "closed";
     if (cur && !keep) note("지난 대화가 끝나서 새 대화로 시작했어요");
-    setSending((s) => ({ ...s, [key]: true }));
+    setSending((s) => ({ ...s, [key]: { text: message, at: new Date().toISOString() } }));
     try {
       const next = await a.talk.send({ ...(keep ? { thread_id: cur.id } : {}), message });
       // DirectChat.send와 같은 순서: 새 대화면 주인 기억 → 대화 → 이 탭의 대화 번호
@@ -136,40 +129,56 @@ export function useOfficeTalk(): OfficeTalk {
       note(`${a.name}에 보내지 못했어요: ${errText(err, a.name)}`);
       return false;
     } finally {
-      setSending((s) => ({ ...s, [key]: false }));
+      setSending((s) => ({ ...s, [key]: null }));
     }
   }, [account, agents, failed, note, sending, threads]);
 
   const busy = useCallback((key: string) => !!sending[key] || isAnswering(threads[key]), [sending, threads]);
   const busyKeys = useMemo(() => agents.map((a) => a.key).filter(busy), [agents, busy]);
 
-  const chips = useMemo<TalkChip[]>(() => [
-    { key: DEV_OFF.key, label: `${TALK_LABEL.dev}(준비 중)`, disabled: true, reason: DEV_OFF.reason },
-    ...OFFICE_TALK_KEYS.map((key) => {
-      const a = agents.find((x) => x.key === key);
-      const reason = !a ? "준비 중" : prep[key] ? "준비 중" : locked[key] ?? null;
-      return { key, label: TALK_LABEL[key], disabled: !!reason, reason };
-    }),
-    ...TALK_OFF.map((key) => ({ key, label: `${TALK_LABEL[key]}(준비 중)`, disabled: true, reason: "준비 중: 단톡방에서 말을 받는 창구가 없어요" })),
-  ], [agents, prep, locked]);
+  const chips = useMemo<TalkChip[]>(() => OFFICE_TALK_KEYS.map((key) => {
+    const a = agents.find((x) => x.key === key);
+    const reason = !a ? "준비 중" : prep[key] ? "준비 중" : locked[key] ?? null;
+    return { key, label: TALK_LABEL[key], disabled: !!reason, reason };
+  }), [agents, prep, locked]);
 
-  // 사람 대화 → 단톡방 말풍선 (내 대화만, 시각순)
+  // 사람 대화 → 말풍선 (내 대화만, 시각순)
   const items = useMemo(() => {
     if (!account) return [] as ChatItem[];
     const me = account.name || "나";
     const out: ChatItem[] = [...notes];
     for (const a of agents) {
       const t = threads[a.key];
-      if (!t || !mine(t, account)) continue;
-      for (const m of t.messages) {
-        const at = m.at || t.updatedAt;
-        out.push(m.role === "user"
-          ? { kind: "msg", id: `direct:${a.key}:${m.id}`, at, room: ALL_ROOM, from: me, to: a.name, fromKey: "human", central: false, human: true, text: m.text, tone: "request", facts: [] }
-          : { kind: "msg", id: `direct:${a.key}:${m.id}`, at, room: ALL_ROOM, from: a.name, to: me, fromKey: a.key, central: false, text: m.text, tone: m.kind === "error" ? "fail" : "request", facts: [] });
+      const pending = sending[a.key];
+      if (t && mine(t, account)) {
+        // "이대로 진행"은 마지막 계획 메시지에만, 대화가 아직 이야기 중(talking)일 때만 (개발 화면과 같은 규칙)
+        const last = t.messages[t.messages.length - 1];
+        const goId = t.status === "talking" && last?.role === "assistant" && last.kind === "plan" && last.plan ? last.id : null;
+        for (const m of t.messages) {
+          const at = m.at || t.updatedAt;
+          const id = `direct:${a.key}:${m.id}`;
+          if (m.role === "user") {
+            out.push({ kind: "msg", id, at, room: ALL_ROOM, from: me, to: a.name, fromKey: "human", central: false, human: true, text: m.text, tone: "request", facts: [] });
+            continue;
+          }
+          out.push({
+            kind: "msg", id, at, room: ALL_ROOM, from: a.name, to: me, fromKey: a.key, central: false, text: m.text, tone: m.kind === "error" ? "fail" : "request", facts: [],
+            ...(m.plan ? { plan: { title: m.plan.title, done: m.plan.done } } : {}),
+            ...(m.kind === "handoff" ? { handoff: { requestId: t.requestId ?? null } } : {}),
+            ...(m.id === goId ? { goKey: a.key } : {}),
+          });
+        }
+      }
+      // 서버 답이 오기 전에도 내 말풍선을 바로 붙인다 (보내기가 끝나면 서버 대화의 같은 말로 바뀐다)
+      if (pending) {
+        out.push({ kind: "msg", id: `direct:${a.key}:sending`, at: pending.at, room: ALL_ROOM, from: me, to: a.name, fromKey: "human", central: false, human: true, text: pending.text, tone: "request", facts: [] });
       }
     }
     return out.sort(byAt);
-  }, [account, agents, mine, notes, threads]);
+  }, [account, agents, mine, notes, sending, threads]);
 
   return { account: account ?? null, chips, busy, busyKeys, send, items, quiet: quiet.current };
 }
+
+/** 계획 카드의 "이대로 진행": 같은 대화에 "진행해"를 보낸다 */
+export const proceed = (talk: OfficeTalk, key: string) => talk.send(key, PROCEED_TEXT);

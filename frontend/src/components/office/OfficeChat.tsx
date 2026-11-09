@@ -1,6 +1,7 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { OfficeTalk } from "@/components/office/useOfficeTalk";
-import { DEV_OFF, DEV_TAG_TEXT, TALK_KEYS, TALK_LABEL } from "@/components/office/useOfficeTalk";
+import { useLayoutEffect, useRef } from "react";
+import { HandoffLine, PlanCard } from "@/components/office/DevCards";
+import { TalkInput } from "@/components/office/TalkInput";
+import { proceed, type OfficeTalk } from "@/components/office/useOfficeTalk";
 import type { ChatItem, Tone } from "@/lib/agentChat";
 import { Link } from "@/lib/nav";
 
@@ -51,7 +52,7 @@ export function OfficeChat({ items, typing, freshIds, title, sub, talk }: { item
           <p className="py-16 text-center text-sm text-ink-500">아직 주고받은 말이 없습니다.</p>
         ) : (
           <ol role="log" aria-live="polite" aria-relevant="additions" className="flex flex-col gap-3">
-            {items.map((it) => <Row key={it.id} it={it} fresh={freshIds.has(it.id)} />)}
+            {items.map((it) => <Row key={it.id} it={it} fresh={freshIds.has(it.id)} talk={talk} />)}
           </ol>
         )}
       </div>
@@ -68,85 +69,12 @@ export function OfficeChat({ items, typing, freshIds, title, sub, talk }: { item
           ))}
         </ul>
       )}
-      {talk && <TalkBox talk={talk} onSent={toBottom} />}
+      {talk && <TalkInput talk={talk} onSent={toBottom} where="office" />}
     </section>
   );
 }
 
-// ---------------------------------------------------------------- 입력창: 부서 AI에게 직접 말 걸기
-
-const TAG_KEY: Record<string, string> = Object.fromEntries(TALK_KEYS.map((k) => [TALK_LABEL[k], k]));
-
-/** 맨 앞 "@부서"(뒤에 AI가 붙어도 됨)를 떼고 받는 곳을 고른다. 태그가 없으면 key null */
-function parseTag(text: string): { key: string | null; bad: boolean; body: string } {
-  const m = text.match(/^@(\S+)\s*/);
-  if (!m) return { key: null, bad: false, body: text };
-  let name = m[1];
-  let rest = text.slice(m[0].length);
-  if (name.endsWith("AI") && name.length > 2) name = name.slice(0, -2);
-  else if (/^AI(\s|$)/.test(rest)) rest = rest.replace(/^AI\s*/, "");
-  const key = TAG_KEY[name] ?? (name === TALK_LABEL.dev ? DEV_OFF.key : null);
-  return { key, bad: !key, body: rest.trim() };
-}
-
-function TalkBox({ talk, onSent }: { talk: OfficeTalk; onSent: () => void }) {
-  const [to, setTo] = useState<string>("data");
-  const [text, setText] = useState("");
-  const [warn, setWarn] = useState<string | null>(null);
-  if (!talk.account) {
-    return <p className="border-t border-ink-100 px-4 py-3 text-sm text-ink-500">로그인하면 부서 AI에게 말을 걸 수 있어요</p>;
-  }
-  const chip = talk.chips.find((c) => c.key === to);
-  const label = TALK_LABEL[to] ?? to;
-  const go = async () => {
-    const raw = text.trim();
-    if (!raw) return;
-    const tag = parseTag(raw);
-    if (tag.bad) { setWarn("그 부서는 아직 말을 받을 수 없어요"); return; }
-    if (tag.key === DEV_OFF.key) { setWarn(DEV_TAG_TEXT); return; }
-    const key = tag.key ?? to;
-    const target = talk.chips.find((c) => c.key === key);
-    if (!target || target.disabled) { setWarn("그 부서는 아직 말을 받을 수 없어요"); return; }
-    if (!tag.body) return;
-    if (talk.busy(key)) return;
-    setWarn(null);
-    setTo(key);
-    setText("");
-    onSent();
-    const ok = await talk.send(key, tag.body);
-    if (!ok) setText(raw);
-    else onSent();
-  };
-  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void go(); }
-  };
-  return (
-    <div className="space-y-2 border-t border-ink-100 px-3 py-3">
-      <div role="radiogroup" aria-label="받는 곳" className="flex flex-wrap gap-1.5">
-        {talk.chips.map((c) => (
-          <button key={c.key} type="button" role="radio" aria-checked={to === c.key} disabled={c.disabled} title={c.reason ?? undefined}
-            onClick={() => { setTo(c.key); setWarn(null); }}
-            className={`chip py-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-50 ${to === c.key ? "bg-brand-600 text-white" : "bg-ink-50 text-ink-700 ring-1 ring-ink-100 hover:bg-ink-100"}`}>
-            {c.label}
-          </button>
-        ))}
-      </div>
-      <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void go(); }}>
-        <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} rows={2}
-          aria-label={`${label} AI에게 보낼 말`} placeholder={`${label} AI에게 물어보세요 (@부서로도 고를 수 있어요)`}
-          className="field min-h-[44px] flex-1 resize-none text-sm" />
-        <button type="submit" className="btn-primary px-3 py-2 text-sm" disabled={!text.trim() || talk.busy(to) || !!chip?.disabled}>보내기</button>
-      </form>
-      {warn && <p role="alert" className="text-xs text-amber-800">{warn}</p>}
-      <p className="text-[11px] text-ink-500">
-        AI 대화방의 {label} AI 대화로 이어져요. 하루 상한도 같이 세요.{" "}
-        <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">AI 대화방에서 보기</Link>
-      </p>
-    </div>
-  );
-}
-
-function Row({ it, fresh }: { it: ChatItem; fresh: boolean }) {
+function Row({ it, fresh, talk }: { it: ChatItem; fresh: boolean; talk?: OfficeTalk }) {
   const pop = fresh ? "animate-[officePop_.28s_ease-out]" : "";
   if (it.kind === "system") {
     return (
@@ -198,6 +126,11 @@ function Row({ it, fresh }: { it: ChatItem; fresh: boolean }) {
                 ))}
               </dl>
             )}
+            {it.plan && (
+              <PlanCard plan={it.plan} disabled={!talk || !it.goKey || talk.busy(it.goKey)}
+                onGo={talk && it.goKey ? () => { void proceed(talk, it.goKey as string); } : undefined} />
+            )}
+            {it.handoff && <HandoffLine requestId={it.handoff.requestId} />}
             {it.tag && <p className={`mt-0.5 text-[10.5px] ${right ? "text-white/70" : "text-ink-500"}`}>{it.tag}</p>}
           </div>
           <time dateTime={it.at} className="shrink-0 pb-0.5 text-[10px] tabular-nums text-ink-500">{hhmm(it.at)}</time>

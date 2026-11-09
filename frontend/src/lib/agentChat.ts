@@ -176,7 +176,9 @@ export type Tone = "request" | "ok" | "warn" | "fail" | "muted";
 export interface Fact { label: string; value: string }
 
 export type ChatItem =
-  | { kind: "msg"; id: string; at: string; room: string; from: string; to: string; fromKey: string; central: boolean; text: string; tag?: string; raw?: string; tone: Tone; facts: Fact[]; repeat?: number; lastAt?: string; human?: boolean }
+  | { kind: "msg"; id: string; at: string; room: string; from: string; to: string; fromKey: string; central: boolean; text: string; tag?: string; raw?: string; tone: Tone; facts: Fact[]; repeat?: number; lastAt?: string; human?: boolean
+      /** 사람과 부서 AI 직접 대화에서만: 개발 AI 계획 카드, 기획에 넘김 줄, "이대로 진행"을 보낼 받는 곳 */
+      plan?: { title: string; done: string[] }; handoff?: { requestId: string | null }; goKey?: string }
   | { kind: "system"; id: string; at: string; room: string; text: string }
   | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string; decideAt?: string }
   | { kind: "separator"; id: string; at: string; room: string; text: string; raw?: string; variant: "day" | "topic" };
