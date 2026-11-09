@@ -5,7 +5,7 @@
 - 발령·퇴직: `assignment_changes`
 - 조직 변동 기록: `org_changes`(초안 → 확정·반려), `org_state`(전 직원 등록 완료 표시)
 - 명부·교대: `roster_entries`, `shifts`
-- 휴가: `leaves`(기간만, 사유·종류 없음)
+- 휴가: `leaves`(기간만, 사유·종류 없음. 취소는 지우지 않고 `cancelled_by`·`cancelled_at`만 남김)
 - 공통: `audit_logs`, `idempotency`, `records`(결정이 없어 기록만 남긴 것)
 - 목 전용(실제에서는 다른 서비스가 가진다): `mock_cards`(memory), `gate_decisions`(안전 레이어)
 
@@ -193,7 +193,9 @@ CREATE TABLE IF NOT EXISTS leaves (
   start_date TEXT NOT NULL,
   end_date TEXT NOT NULL,
   recorded_by TEXT NOT NULL,
-  recorded_at TEXT NOT NULL
+  recorded_at TEXT NOT NULL,
+  cancelled_by TEXT,
+  cancelled_at TEXT
 );
 CREATE TABLE IF NOT EXISTS members (
   member_id TEXT PRIMARY KEY,
@@ -220,6 +222,7 @@ class Store:
             self._add_missing_columns(
                 "org_changes", {"basis_card_id": "TEXT", "basis_title": "TEXT"}
             )
+            self._add_missing_columns("leaves", {"cancelled_by": "TEXT", "cancelled_at": "TEXT"})
 
     def _add_missing_columns(self, table: str, columns: dict[str, str]) -> None:
         """이미 만들어진 DB에 뒤늦게 생긴 칸을 더한다(`IF NOT EXISTS`는 칸을 더하지 않는다)."""

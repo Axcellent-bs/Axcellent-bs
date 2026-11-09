@@ -343,6 +343,18 @@
       "priority": "recommended"
     },
     {
+      "id": "cancel_leave",
+      "description": "휴가 기록을 지우지 않고 취소한 사람·시각만 남긴다(수정은 취소 + 새 기록). 취소한 기록은 get_presence와 같은 기간 중복 확인에서 빠진다. 이미 취소된 기록을 다시 취소하면 같은 기록을 성공으로 돌려주고, 없는 ID는 거절한다. 사람 토큰으로 들어온 dashboard-api 요청만 받는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#CancelLeaveInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#CancelLeaveOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "get_presence",
       "description": "교대 명부와 휴가를 합쳐 담당별 상태(근무 중·교대 외·휴가 중)를 계산한다(조회 전용). 휴가가 교대보다 먼저다. 휴가 기간·입력자는 상세를 요청했을 때만 담는다. 출퇴근 시각·접속 표시는 없다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#GetPresenceInput",

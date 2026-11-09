@@ -82,6 +82,27 @@ def test_send_returns_answering_then_answer_arrives_with_finance_facts() -> None
     asyncio.run(run())
 
 
+def test_designated_viewers_read_others_but_cannot_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    """지정 열람자(`FINANCE_CHAT_VIEWERS`)는 남의 대화 원문을 보지만 쓰지는 못한다."""
+
+    async def run() -> None:
+        svc = _service(FakeLLM())
+        tid = svc.send("taeyoon", None, "이번 달 결산")["id"]
+        await svc.wait_idle()
+        monkeypatch.setenv("FINANCE_CHAT_VIEWERS", " auditor , cfo ")
+        seen = svc.get("cfo", tid)
+        assert not seen["restricted"] and len(seen["messages"]) == 2
+        assert svc.list("auditor", 10)[0]["restricted"] is False
+        assert svc.get("reviewer", tid)["restricted"]  # 명단 밖은 그대로 요약만
+        with pytest.raises(ChatRefused) as other:
+            svc.send("cfo", tid, "끼어들기")
+        assert other.value.status == 403
+        monkeypatch.setenv("FINANCE_CHAT_VIEWERS", "")
+        assert svc.get("cfo", tid)["restricted"]  # 비우면 본인만
+
+    asyncio.run(run())
+
+
 def test_busy_closed_and_other_people() -> None:
     async def run() -> None:
         svc = _service(FakeLLM())

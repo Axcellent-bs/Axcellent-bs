@@ -453,3 +453,30 @@ def test_상세는_요청이_있어야_담기는_모양이다() -> None:
         recorded_at=T0,
     )
     assert GetPresenceOutput(collected_at=T0, leaves=[leave]).leaves[0].leave_id == "lv_1"
+
+
+def test_취소는_휴가_id와_취소한_사람만_받고_사유_칸이_없다() -> None:
+    from ax_contracts.schemas import CancelLeaveInput
+
+    ok = CancelLeaveInput(leave_id="lv_1", cancelled_by="emp_hr")
+    assert ok.leave_id == "lv_1"
+    for bad in ({"leave_id": ""}, {"cancelled_by": ""}, {"reason": "실수"}):
+        with pytest.raises(ValidationError):
+            CancelLeaveInput(**({"leave_id": "lv_1", "cancelled_by": "emp_hr"} | bad))
+
+
+def test_취소한_기록에만_취소_표시가_있다() -> None:
+    from ax_contracts.schemas import CancelLeaveOutput, LeaveView
+
+    base = {
+        "leave_id": "lv_1",
+        "member_id": "emp_1",
+        "start_date": "2026-11-10",
+        "end_date": "2026-11-12",
+        "recorded_by": "emp_hr",
+        "recorded_at": T0,
+    }
+    live = LeaveView(**base)
+    assert live.cancelled_by is None and live.cancelled_at is None
+    gone = LeaveView(**base, cancelled_by="emp_hr", cancelled_at=T1)
+    assert CancelLeaveOutput(leave=gone).leave.cancelled_by == "emp_hr"

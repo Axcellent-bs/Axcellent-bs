@@ -5,6 +5,9 @@ AI 사무실 머리 위 표시(근무 중 · 교대 외 · 휴가 중)의 재료
 
 - `record_leave`: 휴가 기간(서울 날짜, 끝 날짜 포함)만 저장한다. 안전 관문(`execute()`)을 거치고,
   요청자는 dashboard-api(사람 토큰)뿐이다. 같은 사람·같은 기간을 다시 접수하면 처음 것을 돌려준다.
+- `cancel_leave`: 지우지 않고 `cancelled_by`·`cancelled_at`만 남긴다(수정은 취소 + 새 기록). 이미
+  취소된 기록을 다시 취소하면 성공(`duplicate`), 없는 ID는 거절한다. 취소한 기록은 상태 계산과 같은
+  기간 중복 확인에서 뺀다. 안전 관문(`execute()`), 요청자는 dashboard-api(사람 토큰)뿐이다.
 - `get_presence`: 교대 명부와 휴가를 합쳐 상태를 계산한다. 휴가가 먼저다(휴가 기간이면 교대
   안이어도 휴가 중). 교대 안이면 근무 중, 아니면 교대 외. 휴가 기간·입력자는 `include_details`일
   때만 담는다(보여 줄 사람을 정하는 것은 dashboard-api다).
@@ -20,6 +23,8 @@ from pydantic import ValidationError
 from ax_contracts.schemas import (
     AgentRequest,
     AgentResult,
+    CancelLeaveInput,
+    CancelLeaveOutput,
     GetPresenceInput,
     GetPresenceOutput,
     LeaveView,
@@ -51,9 +56,9 @@ def _view(row: dict[str, Any]) -> LeaveView:
 
 
 def leaves_on(svc: Services, day: str) -> list[dict[str, Any]]:
-    """그 서울 날짜가 기간 안에 드는 휴가(양 끝 포함)."""
+    """그 서울 날짜가 기간 안에 드는 휴가(양 끝 포함). 취소한 기록은 뺀다."""
     return svc.store.all(
-        "SELECT * FROM leaves WHERE start_date <= ? AND end_date >= ?"
+        "SELECT * FROM leaves WHERE start_date <= ? AND end_date >= ? AND cancelled_at IS NULL"
         " ORDER BY start_date, member_id, leave_id",
         (day, day),
     )
@@ -82,11 +87,12 @@ async def record_leave(svc: Services, request: AgentRequest) -> AgentResult:
     leave_id = stable_id("lv_", request.meta.idempotency_key)
     existing = svc.store.one("SELECT * FROM leaves WHERE leave_id = ?", (leave_id,)) or (
         svc.store.one(
-            "SELECT * FROM leaves WHERE member_id = ? AND start_date = ? AND end_date = ?",
+            "SELECT * FROM leaves WHERE member_id = ? AND start_date = ? AND end_date = ?"
+            " AND cancelled_at IS NULL",
             (params.member_id, params.start_date, params.end_date),
         )
     )
-    if existing is not None:  # 같은 요청이거나 같은 기간이 이미 기록돼 있다
+    if existing is not None:  # 같은 요청이거나, 취소하지 않은 같은 기간이 이미 기록돼 있다
         svc.audit.record(request.meta.context_id, "leave.duplicate", {"id": existing["leave_id"]})
         return completed(
             request,
@@ -125,6 +131,52 @@ async def record_leave(svc: Services, request: AgentRequest) -> AgentResult:
     assert row is not None
     return completed(
         request, RecordLeaveOutput(leave=_view(row)), outcome="recorded", evidence=evidence
+    )
+
+
+async def cancel_leave(svc: Services, request: AgentRequest) -> AgentResult:
+    try:
+        params = CancelLeaveInput.model_validate(request.input)
+    except ValidationError as exc:
+        return invalid_input(request, exc)
+    if not request.meta.idempotency_key:
+        return invalid_input(
+            request, "같은 요청을 두 번 처리하지 않도록 요청 번호(idempotency_key)가 필요해요"
+        )
+    row = svc.store.one("SELECT * FROM leaves WHERE leave_id = ?", (params.leave_id,))
+    if row is None:
+        return refused(request, "UNKNOWN_LEAVE", "찾을 수 없는 휴가 기록이에요")
+    if row["cancelled_at"] is not None:  # 이미 취소됐다
+        svc.audit.record(request.meta.context_id, "leave.cancel_duplicate", {"id": params.leave_id})
+        return completed(
+            request,
+            CancelLeaveOutput(leave=_view(row)),
+            outcome="duplicate",
+            evidence=make_evidence(svc.clock, "이미 취소된 휴가", [params.leave_id]),
+        )
+
+    summary = "휴가 기록 취소"
+    evidence = make_evidence(svc.clock, summary, [params.leave_id])
+    decision = await svc.gate.execute(
+        "cancel_leave",
+        {"leave_id": params.leave_id, "summary": summary, "target": params.leave_id},
+        with_key(request.meta, f"cancel_leave:{params.leave_id}"),
+        evidence,
+    )
+    if decision.status != "executed":
+        return gate_blocked(request, decision)
+
+    svc.store.execute(
+        "UPDATE leaves SET cancelled_by = ?, cancelled_at = ?"
+        " WHERE leave_id = ? AND cancelled_at IS NULL",
+        (params.cancelled_by, svc.clock().isoformat(), params.leave_id),
+    )
+    # 누구의 휴가인지·기간은 감사 로그에 남기지 않는다(휴가 ID만)
+    svc.audit.record(request.meta.context_id, "leave.cancelled", {"id": params.leave_id})
+    updated = svc.store.one("SELECT * FROM leaves WHERE leave_id = ?", (params.leave_id,))
+    assert updated is not None
+    return completed(
+        request, CancelLeaveOutput(leave=_view(updated)), outcome="cancelled", evidence=evidence
     )
 
 

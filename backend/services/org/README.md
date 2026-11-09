@@ -10,6 +10,7 @@
 | `list_org_changes` | read |
 | `set_org_roster_complete` | A |
 | `record_leave` | A |
+| `cancel_leave` | A |
 | `get_presence` | read |
 | `find_org_change_basis` | read |
 | `parse_org_change_text` | read |
