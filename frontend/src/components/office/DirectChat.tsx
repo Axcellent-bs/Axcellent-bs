@@ -66,7 +66,7 @@ export const DIRECT_AGENTS: DirectAgent[] = [
   { key: "orchestrator", name: "총괄 AI", note: "", live: false },
   { key: "support", name: "고객지원 AI", note: "문의·클레임·후기 현황을 숫자로 읽고 설명해요. 고객 이름과 원문은 보지 않고, 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "고객지원팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/support-chat" }, { closable: true }) },
   { key: "finance", name: "재무 AI", note: "손익·결산·판매자 정산·통장 대조·현금 흐름·캠페인 손익·장애 비용을 장부 숫자로 읽고 설명해요. 대화로 장부를 바꾸거나 비용을 승인하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "재무팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/finance-chat" }, { closable: true }) },
-  { key: "data", name: "데이터분석 AI", note: "", live: false },
+  { key: "data", name: "데이터분석 AI", note: "트렌드·인사이트·영상 성과·캠페인 결과·수집 상태를 숫자로 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요. 개인정보·비밀은 적지 마세요.", live: true, dept: "데이터분석", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/data-chat" }, { closable: true }) },
   { key: "marketing", name: "마케팅 AI", note: "마케팅 일을 물어보면 마케팅 AI가 답해요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "마케팅팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/marketing-chat" }) },
 ];
 export const directAgentOf = (room: string) =>
