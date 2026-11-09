@@ -94,7 +94,7 @@
       "allowed_requesters": [
         "orchestrator"
       ],
-      "verifier": "planning",
+      "verifier": "dev",
       "priority": "recommended"
     },
     {

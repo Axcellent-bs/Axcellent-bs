@@ -18,7 +18,8 @@ DEPARTMENT_KO: dict[str, str] = {
     "finance": "재무",
     "data": "데이터분석",
     "hr": "인사",
-    "planning": "기획·개발",
+    "planning": "기획",
+    "dev": "개발",
     "infra": "인프라",
 }
 

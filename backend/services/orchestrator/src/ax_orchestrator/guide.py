@@ -17,7 +17,7 @@ from ax_orchestrator.models import Incident
 from ax_orchestrator.plans.scenario_a import scenario_a
 from ax_orchestrator.registry import Registry
 
-DEPTS = ["infra", "data", "planning", "marketing", "support", "finance", "hr"]
+DEPTS = ["infra", "data", "planning", "dev", "marketing", "support", "finance", "hr"]
 FIXED_AT = datetime(2026, 10, 16, 1, 0, 0, tzinfo=UTC)
 
 HEADER = """# 부서별 연동 안내서 (총괄이 내 skill을 부르는 방식)

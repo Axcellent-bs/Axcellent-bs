@@ -5,7 +5,7 @@ from ax_orchestrator.mock.fake_departments import FakeDepartments
 from ax_orchestrator.models import Incident
 from ax_orchestrator.registry import Registry
 
-DEPTS = ["infra", "data", "planning", "marketing", "support", "finance", "hr"]
+DEPTS = ["infra", "data", "planning", "dev", "marketing", "support", "finance", "hr"]
 
 
 class Harness:

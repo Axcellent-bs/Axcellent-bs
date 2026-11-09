@@ -238,7 +238,7 @@ async def test_hold_human_reject_is_final(harness) -> None:
 
 @pytest.mark.asyncio
 async def test_dept_input_is_relayed(harness) -> None:
-    harness.fakes.script("planning", "find_related_prs", "dept_input")
+    harness.fakes.script("dev", "find_related_prs", "dept_input")
     inc = await run(harness)
     assert inc.status == "resolved"
     skills = [r.skill for _, r in harness.fakes.calls]

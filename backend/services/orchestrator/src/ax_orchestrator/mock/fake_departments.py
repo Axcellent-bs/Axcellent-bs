@@ -1,6 +1,6 @@
 """가짜 부서 하네스 (목 모드·테스트 공용).
 
-실제 부서 에이전트 없이 총괄을 끝까지 돌리기 위한 가짜 부서 7곳이다. 모든 값은 지어낸
+실제 부서 에이전트 없이 총괄을 끝까지 돌리기 위한 가짜 부서 8곳이다. 모든 값은 지어낸
 목 데이터이며 화면에도 목으로 표시된다. 각 (부서, skill)마다 동작을 스크립트로 지정할 수 있다:
 `ok` `fail` `timeout`(마감 초과) `forbidden`(소관 아님) `hold`(C 등급 보류) `dept_input`,
 그리고 갈림길용 `undetermined`(원인 미확정)·`not_recovered`(복구 확인 실패).
@@ -26,7 +26,7 @@ from ax_contracts.schemas import (
 CARDS: dict[str, list[tuple[str, str, str | None]]] = {
     "infra": [
         ("diagnose_incident", "read", None),
-        ("rollback_deployment", "B", "planning"),
+        ("rollback_deployment", "B", "dev"),
         ("verify_recovery", "read", None),
     ],
     "data": [
@@ -35,11 +35,11 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("kpi_summary", "read", None),
         ("root_cause_hypotheses", "read", None),
     ],
-    "planning": [
+    "planning": [("create_ticket", "A", None)],
+    "dev": [
         ("find_related_prs", "read", None),
         ("link_incident", "A", None),
         ("verify_rollback_target", "read", None),
-        ("create_ticket", "A", None),
     ],
     "marketing": [("draft_notice", "read", None), ("publish_notice", "A", None)],
     "support": [
@@ -64,6 +64,7 @@ OWNERS = {
     "infra": "예진",
     "data": "재현",
     "planning": "예진",
+    "dev": "예진",
     "marketing": "재헌",
     "support": "병환",
     "finance": "태윤",
@@ -138,7 +139,7 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
             {
                 "fact_id": "f2",
                 "kind": "deploy",
-                "source": "planning.find_related_prs",
+                "source": "dev.find_related_prs",
                 "ref": "pr:412",
                 "summary": "PR #412 병합·배포",
             },

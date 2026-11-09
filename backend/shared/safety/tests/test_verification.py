@@ -92,19 +92,19 @@ async def test_rollback_rejection_goes_to_human_hold(gate: Gate, sent: Any, act)
     from ax_safety.gate import VerifyOutcome
 
     async def reject(task: Any) -> VerifyOutcome:
-        assert (task.verifier, task.skill) == ("planning", "verify_rollback_target")
+        assert (task.verifier, task.skill) == ("dev", "verify_rollback_target")
         return VerifyOutcome("rejected", {"status": "completed", "reason_code": "target_unsafe"})
 
     gate._verifier = reject
     decision = await gate.execute(_rollback(act))
     assert (decision.grade, decision.status) == ("C", "held")
     assert decision.hold_reason == HoldReason.VERIFY_REJECTED
-    assert decision.verifier == "planning"
+    assert decision.verifier == "dev"
     reviews = gate.store.list_reviews("pending")
     assert [r.review_id for r in reviews] == [decision.review_id]
     report = reviews[0].report
     assert report["hold_reason"] == "verify_rejected"
-    assert report["verification"]["verifier"] == "planning"
+    assert report["verification"]["verifier"] == "dev"
     assert report["verification"]["result"] == "rejected"
     assert report["verification"]["detail"]["reason_code"] == "target_unsafe"
     assert report["summary"] == "결제 오류 급증, 직전 배포 롤백"

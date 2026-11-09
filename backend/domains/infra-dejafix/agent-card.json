@@ -26,7 +26,7 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/execute.py#ExecuteDecision",
       "grade": "B",
       "allowed_requesters": ["orchestrator"],
-      "verifier": "planning",
+      "verifier": "dev",
       "priority": "required"
     },
     {

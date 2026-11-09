@@ -36,7 +36,7 @@ HR_ACTIONS: dict[str, ActionSpec] = {
     "record_case": ActionSpec("A"),
     "start_handover": ActionSpec("A"),
     "answer_handover_question": ActionSpec("A"),
-    "confirm_handover": ActionSpec("B", verifier="planning"),
+    "confirm_handover": ActionSpec("B", verifier="dev"),
     "record_org_change": ActionSpec("A"),  # 발령 초안 저장(인원에 세지 않는다)
     "decide_org_change": ActionSpec("A"),
     "set_org_roster_complete": ActionSpec(

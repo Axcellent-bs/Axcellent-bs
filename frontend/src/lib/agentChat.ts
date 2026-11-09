@@ -72,7 +72,7 @@ export const DEPT_KO: Record<string, string> = {
 // 백엔드는 서비스 단위로 나뉘어 있다(backend/README.md). 서비스 이름 → 화면 메뉴의 AI 이름
 const SERVICE_DEPT: Record<string, string> = {
   inquiry: "support", claims: "support", reviews: "support", coupon: "marketing", decisions: "hr",
-  dev: "planning", incident: "infra",
+  incident: "infra",
 };
 const SERVICE_KO: Record<string, string> = {
   inquiry: "고객 문의", claims: "클레임·보상", reviews: "리뷰·지식", coupon: "공지·쿠폰", decisions: "결정 기록",

@@ -16,7 +16,7 @@ from ax_agent_template.client import call_agent
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, RequestMeta, TaskStatus
 from ax_contracts.schemas.planning import FindRelatedPrsInput, FindRelatedPrsOutput
 
-PLANNING_AGENT = "planning"
+PLANNING_AGENT = "dev"  # 관련 PR은 개발 AI가 맡는다
 SKILL_ID = "find_related_prs"
 # 보조 근거라서 오래 기다리지 않는다
 DEFAULT_TIMEOUT_SECONDS = 5.0
@@ -33,7 +33,7 @@ async def find_related_prs(
     send: SendFn = call_agent,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> FindRelatedPrsOutput | None:
-    """planning에 관련 PR 후보를 묻는다. 타임아웃·실패·거부면 None."""
+    """개발(dev)에 관련 PR 후보를 묻는다. 타임아웃·실패·거부면 None."""
     short_deadline = datetime.now(UTC) + timedelta(seconds=timeout_seconds)
     request_meta = meta.model_copy(update={"deadline": min(meta.deadline, short_deadline)})
     payload = FindRelatedPrsInput(window_from=window_from, window_to=window_to, component=component)

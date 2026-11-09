@@ -43,9 +43,9 @@ async def test_hr_record_actions_are_a(gate: Gate, act, action: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_confirm_handover_is_verified_by_planning(gate: Gate, verifier: Any, act) -> None:
+async def test_confirm_handover_is_verified_by_dev(gate: Gate, verifier: Any, act) -> None:
     ok = await gate.execute(act("confirm_handover", "hr", "ho-1", completeness_percent=80))
-    assert (ok.grade, ok.status, ok.verifier) == ("B", "executed", "planning")
+    assert (ok.grade, ok.status, ok.verifier) == ("B", "executed", "dev")
     assert verifier.tasks[-1].skill == "verify_handover"
 
     verifier.result = "rejected"

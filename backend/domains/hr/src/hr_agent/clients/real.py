@@ -45,14 +45,14 @@ class ServiceDisabledError(UpstreamError):
 
     def __init__(self, service: str) -> None:
         self.reason = f"확인할 수 없음 ({service} 서비스가 꺼져 있음)"
-        super().__init__("planning", self.reason)
+        super().__init__("dev", self.reason)
 
 
 class A2APlanningClient:
-    """planning에 `list_in_progress`·`verify_handover`를 A2A로 요청한다(둘 다 조회·검증이다)."""
+    """개발(dev)에 `list_in_progress`·`verify_handover`를 A2A로 요청한다(둘 다 조회·검증이다)."""
 
     def __init__(
-        self, target: str = "planning", http_client: httpx.AsyncClient | None = None
+        self, target: str = "dev", http_client: httpx.AsyncClient | None = None
     ) -> None:
         self._target = target
         self._http = http_client
@@ -60,7 +60,7 @@ class A2APlanningClient:
     async def _call(self, skill: str, payload: dict[str, Any]) -> dict[str, Any]:
         base = current_meta()
         if base is None:
-            raise UpstreamError("planning", "처리 중인 요청의 메타가 없다")
+            raise UpstreamError("dev", "처리 중인 요청의 메타가 없다")
         deadline = min(base.deadline, datetime.now(UTC) + timedelta(seconds=CALL_TIMEOUT_SECONDS))
         meta = RequestMeta(
             context_id=base.context_id,
@@ -93,14 +93,14 @@ class A2APlanningClient:
         try:
             return ListInProgressOutput.model_validate(raw)
         except ValidationError as exc:
-            raise UpstreamError("planning", "list_in_progress 응답 형식 오류") from exc
+            raise UpstreamError("dev", "list_in_progress 응답 형식 오류") from exc
 
     async def verify_handover(self, query: VerifyHandoverInput) -> VerifyHandoverOutput:
         raw = await self._call("verify_handover", query.model_dump(mode="json"))
         try:
             return VerifyHandoverOutput.model_validate(raw)
         except ValidationError as exc:
-            raise UpstreamError("planning", "verify_handover 응답 형식 오류") from exc
+            raise UpstreamError("dev", "verify_handover 응답 형식 오류") from exc
 
 
 class HttpMemoryClient:

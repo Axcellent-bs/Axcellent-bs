@@ -33,7 +33,7 @@ def test_registry_lists_exactly_the_external_write_actions() -> None:
 @pytest.mark.parametrize("action", EXTERNAL)
 @pytest.mark.parametrize("params", [{}, {"connection_id": ""}, {"connection_id": 7}])
 async def test_missing_connection_is_held(gate: Gate, act: Any, action: str, params: dict) -> None:
-    decision = await gate.execute(act(action, "planning", f"{action}-no-conn", **params))
+    decision = await gate.execute(act(action, "dev", f"{action}-no-conn", **params))
     assert (decision.grade, decision.status) == ("C", "held")
     assert decision.hold_reason == HoldReason.SCHEMA_INVALID
 
@@ -41,12 +41,12 @@ async def test_missing_connection_is_held(gate: Gate, act: Any, action: str, par
 @pytest.mark.asyncio
 async def test_connection_passes_on_to_the_usual_rules(gate: Gate, act: Any) -> None:
     """연결 id는 통과 조건이 아니다. 뒤의 코드 규칙은 그대로 본다."""
-    ok = await gate.execute(act("review_pr", "planning", "review-ok", connection_id="mock"))
+    ok = await gate.execute(act("review_pr", "dev", "review-ok", connection_id="mock"))
     assert (ok.grade, ok.status) == ("A", "executed")
     big = await gate.execute(
         act(
             "generate_pr",
-            "planning",
+            "dev",
             "pr-big",
             connection_id="conn-1",
             changed_lines=99999,
@@ -68,7 +68,7 @@ async def test_other_actions_do_not_need_a_connection(gate: Gate, act: Any) -> N
 @pytest.mark.asyncio
 async def test_a_person_can_release_the_hold(gate: Gate, act: Any) -> None:
     """보류는 거절이 아니다. 사람이 승인하면 같은 키로 다시 불렀을 때 실행된다."""
-    request = act("repo_comment", "planning", "comment-no-conn")
+    request = act("repo_comment", "dev", "comment-no-conn")
     held = await gate.execute(request)
     assert held.status == "held" and held.review_id is not None
     await gate.decide_review(held.review_id, "approved", "taeyoon", None)

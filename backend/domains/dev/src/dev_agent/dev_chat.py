@@ -574,7 +574,7 @@ TicketSender = Callable[[AgentRequest], Awaitable[AgentResult]]
 
 
 async def _send_ticket(req: AgentRequest) -> AgentResult:
-    """기획 부서 이름으로 부르면 `call_agent`가 create_ticket을 맡은 기획 서비스로 보낸다."""
+    """기획(planning)의 create_ticket으로 보낸다. 개발은 기획 부서가 아니라 접수 권한만 받았다."""
     from ax_agent_template.client import call_agent
 
     return await call_agent("planning", req)

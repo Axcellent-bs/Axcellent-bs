@@ -119,7 +119,7 @@ const SCN_A: ReplayStep[] = [
   { id: "s1", skill: "diagnose_incident", label: "원인 진단 (infra)", dept: "infra", grade: null, start: 1.4, end: 3.6, output: { severity: "critical", impact_scope: "payment" } },
   { id: "s2", skill: "anomaly_detection", label: "이상 탐지 (data)", dept: "data", grade: null, start: 4.0, end: 6.6, output: { failed_order_count: 1284, affected_customer_count: 412 } },
   { id: "s3", skill: "impact_analysis", label: "영향 분석 (data)", dept: "data", grade: null, start: 7.0, end: 8.8, output: { damage_amount: 38420000, impact_scope: "payment" } },
-  { id: "s4", skill: "find_related_prs", label: "관련 코드 변경 찾기 (planning)", dept: "planning", grade: null, start: 9.2, end: 11.0, output: { candidates: [{ number: 231 }] } },
+  { id: "s4", skill: "find_related_prs", label: "관련 코드 변경 찾기 (dev)", dept: "dev", grade: null, start: 9.2, end: 11.0, output: { candidates: [{ number: 231 }] } },
   { id: "s5", skill: "rollback_deployment", label: "배포 되돌리기 (infra)", dept: "infra", grade: "C", start: 11.4, end: 17.6, output: { rolled_back_to: "v2.4.1", status: "rolled_back" }, hold: { at: 12.2, approve: 15.8 } },
   { id: "s6", skill: "verify_recovery", label: "복구 확인 (infra)", dept: "infra", grade: null, start: 18.0, end: 19.6, output: { recovered: true, infra_metrics_ok: true } },
   { id: "s7", skill: "draft_notice", label: "공지 초안 작성 (marketing)", dept: "marketing", grade: "A", start: 20.0, end: 21.4, output: { state: "draft" } },

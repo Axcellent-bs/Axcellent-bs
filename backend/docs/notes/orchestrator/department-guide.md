@@ -67,10 +67,14 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 
 ## planning
 
+총괄이 부르는 skill이 없다.
+
+## dev
+
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
-| `find_related_prs` | read | 관련 코드 변경 찾기 (planning) | diagnose, impact | 아니오 | `{"component": "payment", "window_from": "2026-10-16T00:45:00Z", "window_to": "2026-10-16T01:15:00Z"}` |
-| `link_incident` | A | 이벤트에 코드 변경 연결 (planning) | related_prs | 아니오 | `{"incident_context_id": "ctx_inc_guide", "pr_numbers": [412, 418]}` |
+| `find_related_prs` | read | 관련 코드 변경 찾기 (dev) | diagnose, impact | 아니오 | `{"component": "payment", "window_from": "2026-10-16T00:45:00Z", "window_to": "2026-10-16T01:15:00Z"}` |
+| `link_incident` | A | 이벤트에 코드 변경 연결 (dev) | related_prs | 아니오 | `{"incident_context_id": "ctx_inc_guide", "pr_numbers": [412, 418]}` |
 
 ## marketing
 
