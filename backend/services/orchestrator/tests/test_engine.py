@@ -4,7 +4,7 @@ from datetime import timedelta
 import pytest
 
 from ax_orchestrator.mock.harness import new_incident
-from ax_orchestrator.models import Plan, Step
+from ax_orchestrator.models import Plan, Step, iso
 from ax_orchestrator.plans.scenario_a import scenario_a
 
 
@@ -32,7 +32,7 @@ async def test_scenario_a_completes(harness) -> None:
     assert (check.status, check.reason_code) == ("skipped", "cause_confident")
     assert all(s.status == "completed" for k, s in inc.steps.items() if k != "cause_check")
     assert harness.events == ["incident.opened", "incident.resolved"]
-    assert inc.metrics["steps_total"] == 17
+    assert inc.metrics["steps_total"] == 18  # + 재무 장애 비용 장부 기록
     assert inc.metrics["auto_rate"] == 1.0
 
 
@@ -46,6 +46,24 @@ async def test_calls_carry_context_and_unique_idempotency_keys(harness) -> None:
         assert "orchestrator" in req.meta.path and len(req.meta.path) <= 3
     keys = [r.meta.idempotency_key for _, r in harness.fakes.calls]
     assert len(keys) == len(set(keys))
+
+
+@pytest.mark.asyncio
+async def test_finance_records_the_incident_after_compensation_and_recovery(harness) -> None:
+    """재무 장부 기록은 보상·복구 확인이 끝난 뒤, 데이터 영향 숫자를 그대로 옮겨 부른다."""
+    inc = await run(harness)
+    order = [r.skill for _, r in harness.fakes.calls]
+    at = order.index("record_incident_finance")
+    assert at > order.index("request_incident_compensation")
+    assert at > order.index("verify_recovery")
+    assert at < order.index("record_case")  # 인사 이벤트 기록이 재무 기록을 기다린다
+    req = next(r for _, r in harness.fakes.calls if r.skill == "record_incident_finance")
+    impact = inc.outputs["impact"]
+    assert req.input["damage_amount"] == impact["damage_amount"]
+    assert req.input["affected_customer_ids"] == impact["affected_customer_ids"]
+    start, end = inc.impact_window()
+    assert (req.input["window_from"], req.input["window_to"]) == (iso(start), iso(end))
+    assert inc.steps["finance_record"].dept == "finance"
 
 
 @pytest.mark.asyncio

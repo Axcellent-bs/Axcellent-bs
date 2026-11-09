@@ -50,6 +50,7 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
     "finance": [
         ("loss_aggregation", "read", None),
         ("record_support_cost", "read", None),
+        ("record_incident_finance", "read", None),
     ],
     "hr": [
         ("record_case", "A", None),
