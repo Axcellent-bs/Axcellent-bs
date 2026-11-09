@@ -39,6 +39,7 @@ HR_ACTIONS: dict[str, ActionSpec] = {
     "confirm_handover": ActionSpec("B", verifier="dev"),
     "record_org_change": ActionSpec("A"),  # 발령 초안 저장(인원에 세지 않는다)
     "decide_org_change": ActionSpec("A"),
+    "record_leave": ActionSpec("A"),  # 휴가 기간 기록(사유·종류 없음, 사람 토큰으로만)
     "set_org_roster_complete": ActionSpec(
         "A"
     ),  # 전 직원 등록 완료 표시  # 인사 담당자가 사람 토큰으로 확정·반려
