@@ -561,7 +561,8 @@ async def receive_request_pause(request: AgentRequest) -> AgentResult:
 
 # ---- 개발 AI 직접 대화 (dashboard-api /api/dashboard/dev-chat → dev_chat.py)
 # 말한 사람(`who`)은 dashboard-api가 사람 토큰에서만 채운다. 메시지마다 관문 dev_chat(A)을 타고,
-# 계획이 서면 작업 띄우기는 dev_task_create로 따로 관문을 탄다. 거절은 FAILED + outcome(소문자 코드)
+# 대화는 작업을 띄우지 않고 "진행해"면 기획 create_ticket으로 넘긴다 (작업은 기획 확정 뒤
+# start_dev). 거절은 FAILED + outcome(소문자 코드)
 
 
 def _chat_done(request: AgentRequest, skill: str, output: dict[str, Any]) -> AgentResult:

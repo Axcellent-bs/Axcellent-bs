@@ -49,6 +49,7 @@ def test_agent_card_format_and_served() -> None:
         "data",
         "finance",
         "orchestrator",
+        "dev",  # 개발 AI 대화가 계획을 기획에 넘긴다 (11/09)
     ]
     assert skills["receive_dev_result"].allowed_requesters == ["dev"]
     reads = {"planning_chat_list", "planning_chat_get"}  # 대화 목록·읽기만 read

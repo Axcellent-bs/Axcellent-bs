@@ -91,6 +91,7 @@ from ax_workflow.core import (
     GateRefused,
 )
 from ax_workflow.dev_handoff import (
+    DEV_CHAT_REF,
     RECEIVE_DEV_RESULT,
     START_DEV,
     DevSender,
@@ -746,7 +747,10 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         # 자동 기획·PR로 넘기지 않는다.
         # 자동으로 돌리면 원인을 아무도 안 봤는데 문서 PR이 머지되고 '완료'가 됐다 (10/30)
         investigate = not dup_id and (source_ref or "").startswith("ctx_inc_")
-        auto = None if dup_id or investigate else check_simple(title, s.auto_policy)
+        # 개발 AI 대화에서 넘어온 요청은 대화가 개발을 직접 띄우지 않게 하려는 길이라,
+        # 간단 요청 자동 처리·자동 확정 없이 사람이 기획서를 확정해야 개발로 간다 (11/09 예진)
+        human_only = not dup_id and not investigate and (source_ref or "").startswith(DEV_CHAT_REF)
+        auto = None if dup_id or investigate or human_only else check_simple(title, s.auto_policy)
         text = (
             f'"{title}" → 같은 요청 {dup_id}에 연결 (linked_duplicate)'
             if dup_id
@@ -780,6 +784,22 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
             self._pre_related.add(req.id)
             if req.duplicate_of:
                 dup_id, ctx_req, investigate, auto = req.duplicate_of, req.context_id, False, None
+                human_only = False
+        if human_only:
+            s.activity.append(
+                self._act(
+                    t,
+                    ctx_req,
+                    "planning",
+                    frm,
+                    "get_request_status",
+                    "A2A",
+                    f"{req_id} 개발 AI 대화에서 접수 → 자동 처리 없이 사람이 기획서 확정",
+                    "read",
+                    seq,
+                )
+            )
+            return ActionResult(output={"request_id": req_id, "auto": False})
         if investigate:
             s.activity.append(
                 self._act(
@@ -1341,8 +1361,10 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
             m = 20 + seq
             while f"REQ-{m}" in used_ids:
                 m += 1
-            # 서비스 이름(inquiry 등)으로 와도 부서는 원래 부서로 남기고, 서비스 id는 따로 둔다
-            dept = department_of(requester)
+            # 서비스 이름(inquiry 등)으로 와도 부서는 원래 부서로 남기고, 서비스 id는 따로 둔다.
+            # 개발 서비스(dev)는 서비스 표에서 기획 부서 소속이지만, 개발 AI 대화에서 온 요청은
+            # 기획이 스스로 낸 요청과 섞이지 않게 "dev"로 남긴다 (11/09)
+            dept = "dev" if requester == "dev" else department_of(requester)
             frm = dept if dept in DEPT_NAME else "orchestrator"
             result = await self._register_ticket(
                 s,

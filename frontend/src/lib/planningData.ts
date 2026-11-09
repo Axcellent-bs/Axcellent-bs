@@ -329,9 +329,10 @@ export interface State {
   proposals?: Proposal[] // 기획 제안 (데이터분석·마케팅 인사이트 → 제안 → 마케팅)
 }
 
-// ---- AI와 대화: 개발 에이전트와 대화하다 필요한 것이 모이면 코딩 작업을 시작한다
-export type ChatStatus = 'talking' | 'started' | 'blocked' | 'waiting' | 'answering' | 'closed'
-export type ChatKind = 'text' | 'question' | 'plan' | 'started' | 'waiting' | 'error'
+// ---- AI와 대화: 개발 에이전트와 대화로 계획을 세우고, "진행해"면 기획에 요청으로 넘긴다.
+// 대화는 개발 작업을 직접 띄우지 않는다. 기획에서 사람이 기획서를 확정하면 개발로 간다 (11/09)
+export type ChatStatus = 'talking' | 'handed' | 'started' | 'blocked' | 'waiting' | 'answering' | 'closed'
+export type ChatKind = 'text' | 'question' | 'plan' | 'started' | 'waiting' | 'handoff' | 'error'
 export interface ChatPlan { title: string; plan: string; done: string[]; paths: string[] }
 export interface ChatMessage {
   id: string
@@ -348,6 +349,7 @@ export interface ChatThread {
   status: ChatStatus
   messages: ChatMessage[]
   taskId: string | null
+  requestId?: string | null // 기획에 넘긴 요청 (REQ-…)
   connection: string | null
   waitingFor?: string[] // 끝나기를 기다리는 요청 (충돌하는 요청이 끝나면 시작)
   mode?: CodingMode // 이 대화가 띄울 작업을 누가 코딩하나
