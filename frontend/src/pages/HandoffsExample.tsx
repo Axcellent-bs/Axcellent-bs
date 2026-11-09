@@ -42,7 +42,7 @@ const ITEMS: ExItem[] = [
   { id: "ex-4", from: "마케팅", category: "쿠폰 발급", kind: "사람 확인 요청", title: "쿠폰 500장 발급 확인",
     reason: "발급 수량 평소의 5배 · 10% 할인", status: "waiting", minutesAgo: 70, href: "/marketing", hrefLabel: "공지·쿠폰" },
   { id: "ex-5", from: "인프라", category: "롤백 승인", kind: "사람 확인 요청", title: "결제 서버 롤백 승인",
-    reason: "배포 뒤 결제 오류율 4.2% · 직전 버전으로 되돌림", risky: true, status: "waiting", minutesAgo: 180, href: "/infra", hrefLabel: "장애 대응" },
+    reason: "배포 뒤 결제 오류율 4.2% · 직전 버전으로 되돌림", risky: true, status: "waiting", minutesAgo: 180, href: "/infra", hrefLabel: "인프라 AI" },
   { id: "ex-6", from: "데이터분석", category: "지표 이상 확인", kind: "사람 확인 요청", title: "주간 매출 지표 급감 확인",
     reason: "지난주 대비 매출 -38% · 집계 누락 의심", status: "waiting", minutesAgo: 20, href: "/data", hrefLabel: "데이터 분석", },
   { id: "ex-7", from: "인사", category: "법인카드 한도", kind: "사람 확인 요청", title: "법인카드 한도 변경 확인",

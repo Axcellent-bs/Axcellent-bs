@@ -48,6 +48,7 @@ from ax_dashboard_api import (
     dev_chat,
     finance_chat,
     hr_client,
+    infra_chat,
     live_views,
     marketing_client,
     mock_actions,
@@ -1084,6 +1085,46 @@ async def data_chat_send(body: DataChatSendBody, request: Request) -> dict:
 async def data_chat_close(thread_id: str, request: Request) -> dict:
     who = human_from_authorization(request.headers.get("authorization"))
     out = await data_chat.call("data_chat_close", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+# ---- 인프라 AI 직접 대화 (→ incident `infra_chat_*`). 재무·기획 AI 대화와 같은 모양이다.
+# 조회·설명만 한다(롤백·장애 넣기·빼기는 하지 않는다). 사람 토큰이 필요하다
+class InfraChatSendBody(BaseModel):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/infra-chat")
+async def infra_chat_list(request: Request) -> dict:
+    """인프라 AI 대화 목록. 남의 대화는 원문 없이 요약만(`restricted`)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await infra_chat.call("infra_chat_list", {"who": who})
+    return ok(out.get("threads", []))
+
+
+@router.get("/infra-chat/{thread_id}")
+async def infra_chat_get(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await infra_chat.call("infra_chat_get", {"who": who, "thread_id": thread_id})
+    return ok(out["thread"])
+
+
+@router.post("/infra-chat")
+async def infra_chat_send(body: InfraChatSendBody, request: Request) -> dict:
+    """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"who": who, "message": body.message} | (
+        {"thread_id": body.thread_id} if body.thread_id else {}
+    )
+    out = await infra_chat.call("infra_chat_send", payload)
+    return ok(out["thread"])
+
+
+@router.post("/infra-chat/{thread_id}/close")
+async def infra_chat_close(thread_id: str, request: Request) -> dict:
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await infra_chat.call("infra_chat_close", {"who": who, "thread_id": thread_id})
     return ok(out["thread"])
 
 

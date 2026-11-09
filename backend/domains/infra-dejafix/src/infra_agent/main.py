@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
+from infra_agent.chat.a2a import CHAT_HANDLERS
 from infra_agent.handlers import HANDLERS
 
 
@@ -32,4 +33,5 @@ def load_card() -> AgentCard:
     return AgentCard.model_validate_json(_card_path().read_text(encoding="utf-8"))
 
 
-app = create_agent_app(load_card(), HANDLERS)
+# 사람과 직접 대화 skill(`infra_chat_*`)은 조회·설명만 한다
+app = create_agent_app(load_card(), {**HANDLERS, **CHAT_HANDLERS})

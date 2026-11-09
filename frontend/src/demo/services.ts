@@ -59,8 +59,8 @@ const DEJAFIX_LOGO = `${import.meta.env.BASE_URL}dejafix-logo.png`
 
 export const SERVICES: Service[] = [
   {
-    id: 'incident', family: 'infra', name: '장애 대응', by: 'DejaFix', Icon: IconBox, logo: DEJAFIX_LOGO, entry: '/infra', paths: ['/infra'],
-    desc: '지금 진행 중인 서버 장애와 가장 급한 장애·요약·시간대별 분포를 DejaFix에서 받아 보여 줍니다.',
+    id: 'incident', family: 'infra', name: '인프라 AI', by: 'DejaFix', Icon: IconBox, logo: DEJAFIX_LOGO, entry: '/infra', paths: ['/infra'],
+    desc: '장애가 나면 원인 배포를 진단하고 롤백·복구 확인을 합니다. 지금 진행 중인 서버 장애와 요약은 DejaFix에서 받아 보여 줍니다.',
   },
   {
     id: 'hosts', family: 'infra', name: 'PC·서버 연결', by: 'DejaFix', Icon: IconBox, logo: DEJAFIX_LOGO, entry: '/hosts', paths: ['/hosts'],
