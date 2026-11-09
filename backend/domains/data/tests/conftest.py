@@ -40,3 +40,12 @@ def _reset_llm_halt(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(llm_halt, "HALT", llm_halt.HaltStore(None))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_llm_inflight(monkeypatch: pytest.MonkeyPatch):
+    """LLM "계산 중" 표시도 테스트마다 메모리로 새로 (실제 장부 파일에 쓰지 않게)."""
+    from data_agent import llm_inflight
+
+    monkeypatch.setattr(llm_inflight, "INFLIGHT", llm_inflight.Inflight(None))
+    yield

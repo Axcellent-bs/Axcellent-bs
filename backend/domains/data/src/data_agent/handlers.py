@@ -31,6 +31,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
@@ -70,7 +71,7 @@ from ax_contracts.schemas.data import (
     YouTubeVelocityRequest,
 )
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
-from data_agent import llm_budget, llm_failure, llm_halt
+from data_agent import llm_budget, llm_failure, llm_halt, llm_inflight
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import (
@@ -154,6 +155,22 @@ class TimedLLMClient(LLMClient):
                                        message=message)  # fmt: skip
 
     async def structured(self, *args: Any, **kwargs: Any) -> Any:
+        """같은 요청이 다른 곳(이 프로세스·수집기)에서 계산 중이면 기다렸다 그 답 (llm_inflight)."""
+        bound = inspect.signature(LLMClient.structured).bind(self, *args, **kwargs).arguments
+        schema = bound.get("schema")
+        # 이미지 요청, 답을 되살릴 수 없는 응답 형식(pydantic 모델이 아님)은 묶지 않는다
+        if bound.get("images") or not hasattr(schema, "model_validate"):
+            return await self._structured(*args, **kwargs)
+        key = llm_inflight.request_key(self.settings.model, schema, bound.get("prompt", ""),
+                                       bound.get("untrusted"))  # fmt: skip
+        return await llm_inflight.INFLIGHT.run(
+            key,
+            lambda: self._structured(*args, **kwargs),
+            dump=lambda result: result.model_dump(mode="json"),
+            load=schema.model_validate,
+        )
+
+    async def _structured(self, *args: Any, **kwargs: Any) -> Any:
         schema = args[1] if len(args) > 1 else kwargs.get("schema")
         model = self.settings.model
         request = llm_halt.request_key(model, getattr(schema, "__name__", "unknown"))

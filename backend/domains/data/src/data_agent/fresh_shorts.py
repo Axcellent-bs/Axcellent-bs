@@ -37,6 +37,7 @@ from ax_contracts.schemas.data import FreshTrackStatus
 from data_agent import youtube_quota
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import QuotaRefused
+from data_agent.stage_timing import recording
 
 CALLER = "fresh_shorts"
 SOURCE = "fresh_track"
@@ -282,7 +283,9 @@ async def _llm_classify(stats: Sequence[Any], env: Mapping[str, str]) -> dict[st
             if s.video_id not in known
         ]
         if todo:
-            got = await classify_formats(todo, get_llm(), None)
+            # 장부(skill별 사용량)에 "unknown"이 아니라 fresh_shorts로 남게 단계 기록 이름을 단다
+            with recording(CALLER):
+                got = await classify_formats(todo, get_llm(), None)
             store.save_formats(datetime.now(UTC), got)
             known |= {k: f for k, (f, _) in got.items() if f != UNKNOWN}
         return known

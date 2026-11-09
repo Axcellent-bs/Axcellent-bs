@@ -6,7 +6,7 @@
 - 서버·수집기(서로 다른 프로세스)에서도 같은 요청은 1회
 - 수집기 새 숏츠 형식 분류는 장부에 skill "fresh_shorts" ("unknown" 아님)
 - 각 케이스는 별도 프로세스(`worker.py`)로 실제 TimedLLMClient + 가짜 LLM 서버. 실제 LLM은 안 부름
-- 관문은 코드 PR에서 켬 (이 평가 정의 PR은 관찰만)
+- 관문 켬 (평가 정의 PR #833은 관찰만: dev 0.2 / 0.8 / 0.0)
 """
 
 from __future__ import annotations
@@ -124,10 +124,13 @@ def observe(tmp_path: Path) -> tuple[dict[str, float], dict[str, dict | None]]:
     return score.score(cases, got), got
 
 
-def test_llm_dedup_observe(tmp_path: Path) -> None:
-    """관찰만: 지표를 출력하고 모양만 본다 (관문은 코드 PR에서 켬)."""
+GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (평가 정의 PR #833 dev: 0.2 / 0.8 / 0.0)
+
+
+def test_llm_dedup_passes_the_gates(tmp_path: Path) -> None:
     metrics, got = observe(tmp_path)
     print("llm_dedup eval:", json.dumps(metrics, ensure_ascii=False))
     print("llm_dedup cases:", json.dumps(got, ensure_ascii=False))
     assert set(metrics) == set(score.METRICS)
-    assert all(0.0 <= v <= 1.0 for v in metrics.values())
+    for name, gate in GATES.items():
+        assert metrics[name] >= gate, (name, metrics[name], got)
