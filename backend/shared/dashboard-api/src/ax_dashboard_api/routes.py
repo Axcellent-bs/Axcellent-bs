@@ -7,6 +7,7 @@ dashboard-web 옛 경로와의 대응은 README "엔드포인트" 표를 본다.
 from __future__ import annotations
 
 import hashlib
+import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -27,6 +28,7 @@ from ax_contracts.schemas.hr import (
     EvaluateAgentsOutput,
     FindOrgChangeBasisInput,
     FindOrgChangeBasisOutput,
+    GetPresenceOutput,
     GetRosterOutput,
     HandoverAnswerRequest,
     HandoverQuestion,
@@ -35,6 +37,7 @@ from ax_contracts.schemas.hr import (
     ListOrgChangesOutput,
     ParseOrgChangeTextInput,
     ParseOrgChangeTextOutput,
+    RecordLeaveOutput,
     RecordOrgChangeInput,
     RecordOrgChangeOutput,
     RecordResolutionOutput,
@@ -1176,6 +1179,61 @@ async def set_org_roster_complete(body: OrgRosterCompleteBody) -> dict:
         "set_org_roster_complete", {"complete": body.complete}, target=f"org-roster:{body.complete}"
     )
     return ok(SetOrgRosterCompleteOutput.model_validate(out))
+
+
+# ------------------------------------------------------- 근무 상태·휴가 (AI 사무실 표시)
+PRESENCE_SWITCH = "DASHBOARD_PRESENCE_ENABLED"
+DATE_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$"
+
+
+def _presence_on() -> None:
+    """끄는 스위치. 기본은 꺼짐이고, `1`일 때만 켠다(251은 시범 팀만 켠다)."""
+    if (os.getenv(PRESENCE_SWITCH) or "").strip() != "1":
+        raise ApiError(404, "PRESENCE_DISABLED", "근무 상태 표시는 아직 켜지지 않았다")
+    if is_mock():
+        raise ApiError(501, "NOT_IMPLEMENTED", "목 모드에는 근무 상태가 없다")
+
+
+class LeaveBody(BaseModel):
+    """휴가 기간만 받는다. 사유·종류 칸은 없다(보내면 422)."""
+
+    model_config = {"extra": "forbid"}
+
+    member_id: str = Field(min_length=1, max_length=64)
+    start_date: str = Field(pattern=DATE_PATTERN)
+    end_date: str = Field(pattern=DATE_PATTERN)
+
+
+@router.get("/presence")
+async def presence(request: Request, area: str | None = None) -> dict:
+    """담당별 상태(근무 중·교대 외·휴가 중). 상태 코드는 모두에게 보인다.
+
+    휴가 기간·입력자는 사람 토큰이 있는 요청에만 담는다(사람별 로그인이 생기기 전까지 관리자만).
+    """
+    _presence_on()
+    try:
+        human_from_authorization(request.headers.get("authorization"))
+        details = True
+    except ApiError:
+        details = False
+    payload: dict = {"include_details": details}
+    if area:
+        payload["area"] = area
+    out = await hr_client.call("get_presence", payload)
+    return ok(GetPresenceOutput.model_validate(out))
+
+
+@router.post("/presence/leaves")
+async def record_leave(body: LeaveBody, request: Request) -> dict:
+    """휴가 기간 기록(사람 토큰 필요). 입력자는 토큰의 이름이다. 같은 기간은 성공으로 돌려준다."""
+    _presence_on()
+    who = human_from_authorization(request.headers.get("authorization"))
+    out = await hr_client.call(
+        "record_leave",
+        body.model_dump() | {"recorded_by": who},
+        target=f"leave:{body.member_id}:{body.start_date}:{body.end_date}",
+    )
+    return ok(RecordLeaveOutput.model_validate(out))
 
 
 @router.get("/org-headcount")
