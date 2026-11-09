@@ -69,20 +69,27 @@ export const DEPT_KO: Record<string, string> = {
   finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전 관문", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
   "dashboard-api": "AXcellent 화면", operator: "운영자(사람)",
 };
-// 백엔드는 서비스 단위로 나뉘어 있다(backend/README.md). 서비스 이름 → 화면 메뉴의 AI 이름
+// 백엔드는 서비스 단위로 나뉘어 있다(backend/README.md). 서비스 이름 → 부서.
+// backend/shared/agent-template/src/ax_agent_template/services.py의 SERVICES(서비스 id → 부서)와 같게 둔다.
+// 서비스 id와 부서 이름이 같은 것(orchestrator·finance·data·planning·dev)은 넣지 않는다
 const SERVICE_DEPT: Record<string, string> = {
-  inquiry: "support", claims: "support", reviews: "support", coupon: "marketing", decisions: "hr",
-  incident: "infra",
+  inquiry: "support", claims: "support", reviews: "support", coupon: "marketing",
+  handover: "hr", decisions: "hr", org: "hr",
+  incident: "infra", hosts: "infra",
 };
+/** 서비스 이름 → 부서 (서비스가 아니면 그대로). AI 대화방 이름과 AI 오피스 자리가 같은 규칙을 쓴다 */
+export const deptOf = (name: string): string => SERVICE_DEPT[name] ?? name;
+// 서비스 설명(마우스를 올리면 보이는 이름). services.py 마지막 칸(화면 이름)과 같다
 const SERVICE_KO: Record<string, string> = {
-  inquiry: "고객 문의", claims: "클레임·보상", reviews: "리뷰·지식", coupon: "공지·쿠폰", decisions: "결정 기록",
-  dev: "개발·배포", planning: "요청·기획서", incident: "인프라",
+  inquiry: "고객 문의", claims: "클레임·보상", reviews: "리뷰·지식", coupon: "공지·쿠폰",
+  handover: "인수인계", decisions: "결정 기록", org: "조직 변동",
+  dev: "개발·배포", planning: "요청·기획서", incident: "인프라", hosts: "PC·서버 연결",
 };
 const NOT_AGENT = new Set(["orchestrator", "safety", "memory", "shop-api", "dashboard-api", "operator"]);
 /** 말하는 쪽 이름. 부서·서비스는 "{부서} AI", 총괄·안전 관문 등은 그대로 */
 export function speaker(dept: string | null | undefined): string {
   if (!dept) return "담당 미정";
-  const key = SERVICE_DEPT[dept] ?? dept;
+  const key = deptOf(dept);
   const ko = DEPT_KO[key] ?? dept;
   return NOT_AGENT.has(key) || key === "infra" ? ko : `${ko} AI`;
 }
