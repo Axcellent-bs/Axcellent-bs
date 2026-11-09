@@ -130,12 +130,18 @@ def test_pg_settlements_follow_toss_shape_with_injected_discrepancies(fixed_now)
             assert (rec["amount"], rec["fee"]) == (p["amount"], fc.rate_amount(p["amount"], rate))
 
 
-def test_live_overrides_are_deterministic() -> None:
-    ids = [f"pay_{n:04d}" for n in range(20, 0, -1)]
-    plan = bk._live_overrides(ids)
-    assert plan == bk._live_overrides(list(reversed(ids)))
-    assert {v["kind"] for v in plan.values()} == {"mismatch", "missing", "fee"}
-    assert bk._live_overrides(["pay_1", "pay_2"]) == {}
+def test_live_pg_settlements_do_not_invent_mismatches() -> None:
+    """실제 모드 PG 정산은 결제 기록 그대로다. 데모용 불일치를 지어내지 않는다(목 모드에만 있다)."""
+    seed = bk.seed_books()
+    live = bk.Books(orders=seed.orders, sellers=seed.sellers, mock=False, source="shop-api")
+    today = fc.today()
+    records = bk.pg_settlements(live, today)
+    rate = fc.load_config().pg.fee_rate
+    paid = [p for p in live.payments()]
+    assert len(records) == len(paid) and len(paid) >= 14  # 예전에는 4·8·12·14번째에 불일치를 넣었다
+    for p in paid:
+        rec = records[p["payment_id"]]
+        assert (rec["amount"], rec["fee"]) == (p["amount"], fc.rate_amount(p["amount"], rate))
 
 
 # ---------------------------------------------------------------- 실제 모드 (shop-api, safety)

@@ -57,13 +57,8 @@ from finance_agent.settlement import statements  # noqa: E402
 from finance_agent.tax import income_tax_amount, vat_pack  # noqa: E402
 
 HOLDOUT_SEED = "20261109_02"
-# 실제 모드 PG 목이 일부러 넣는 불일치 (books._live_overrides 문서: 정산된 결제 번호 순서의 자리)
-LIVE_PLAN = {
-    3: {"kind": "mismatch", "delta": -2000},
-    7: {"kind": "missing"},
-    11: {"kind": "fee", "fee_rate": 0.035},
-    13: {"kind": "mismatch", "delta": 1000},
-}
+# 실제 모드 PG 목은 불일치를 넣지 않는다(2026-11-09, 지어낸 데이터 제거). 그래서 빈 계획이다
+LIVE_PLAN: dict[int, dict[str, Any]] = {}
 # 시드 상품은 가격이 딱 떨어져서 끝자리 있는 상품을 shop-api 상품 등록 코드로 더한다
 EXTRA_PRODUCTS = [
     ("sel_0001", "문고판 고전", "book", 12_345),
