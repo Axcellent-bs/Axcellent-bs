@@ -10,6 +10,7 @@ import { Linked, LinkedLines, Ref, convoHref, go, hrefOf, idText, prSlug, review
 import { RepoTag } from '@/components/planning-common/repo'
 import { Flow, Head, Layout, ListPane, Side, Step, mergedLabel, prStatus, specStatus } from '@/components/planning-common/flow'
 import { RETURN_DEPT, devDiscarded, pendingReturns } from '@/lib/returned'
+import { humanizePlanIds } from '@/lib/format'
 
 // 프로젝트 = 원본 요청 (같은 요청으로 연결만 한 것은 원본에 붙인다)
 export const projectsOf = (s: S) => s.requests.filter((r) => r.state !== '중복 연결')
@@ -57,12 +58,12 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
   return (
     <Layout
       list={<ListPane groups={groups} />}
-      head={<Head kicker={<><a href={toPath('requests')} className="plain-link proj-back">‹ 요청 목록</a>{idText(r.id)} · {DEPT_NAME[r.from]}</>} title={r.title} side={<>{stateOf(r)}{r.paused && !dropped(r) && <Tag tone="amber">중단됨</Tag>}{r.state !== '완료' && r.state !== '기각' && (dropped(r) ? null : <Button size="small" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</Button>)}{g.spec ? <Button size="small" onClick={() => go(toPath(`work/specs/${g.spec!.id}`))}>기획서 보기</Button> : r.state !== '기각' && r.state !== '중복 연결' && <Button size="small" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${r.id} 기획서로 저장`); go(toPath('work/specs')) }}>기획서로 저장</Button>}</>} />}
+      head={<Head kicker={<><a href={toPath('requests')} className="plain-link proj-back">‹ 요청 목록</a>{idText(r.id)} · {DEPT_NAME[r.from]}</>} title={r.title} side={<>{stateOf(r)}{r.paused && !dropped(r) && <Tag tone="amber">중단됨</Tag>}{r.state !== '완료' && r.state !== '기각' && (dropped(r) ? null : <Button size="small" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${idText(r.id)} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</Button>)}{g.spec ? <Button size="small" onClick={() => go(toPath(`work/specs/${g.spec!.id}`))}>기획서 보기</Button> : r.state !== '기각' && r.state !== '중복 연결' && <Button size="small" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${idText(r.id)} 기획서로 저장`); go(toPath('work/specs')) }}>기획서로 저장</Button>}</>} />}
       side={
         <>
           <Side title="소통" href={g.threads[0] ? toPath(`talk/${g.threads[0].id}`) : convoHref(r.ctx)} sum={`대화 ${talks} · 결정 ${g.decisions.length}`}>
             {g.threads.flatMap((t) => t.messages.slice(-2).map((m, i) => <p key={`${t.id}-${i}`} className="pside-msg"><b>{m.who}</b> <Linked s={s} text={m.text} /></p>))}
-            {g.decisions.map((x) => <p key={x.id} className="pside-msg"><Ref s={s} id={x.id} /> {x.text}</p>)}
+            {g.decisions.map((x) => <p key={x.id} className="pside-msg"><Ref s={s} id={x.id} /> {humanizePlanIds(x.text)}</p>)}
             <a href={convoHref(r.ctx)} className="pside-link">에이전트 대화 {g.activity.length}</a>
           </Side>
         </>
@@ -93,7 +94,7 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
                     <a href={toPath(`work/specs/${g.spec!.id}/${p.id}`)} className="plain-link">{p.id} {p.text}</a>
                     {p.warn && <> <Tag tone="amber">경고 {p.warn.card}</Tag></>}
                     {p.incident && <> <Tag tone="amber">장애 {p.incident}</Tag></>}
-                    {ts.map((x) => <div key={x.id} className="muted">{x.id} · {x.state}</div>)}
+                    {ts.map((x) => <div key={x.id} className="muted" title={x.id}>{idText(x.id)} · {x.state}</div>)}
                   </li>
                 )
               })}
@@ -110,7 +111,7 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
                 return (
                   <li key={p.id}>
                     <a href={toPath(`work/prs/${prSlug(p.id)}`)} className="plain-link">{p.title.replace(/^[A-Z]\d+: /, '')}</a>
-                    <div className="muted">{p.id} · 검수 {p.reviews[p.reviews.length - 1]} · {xr ? `${xr.lane === 'human' ? '사람 확인' : '교차검증'} 대기 ${xr.id}` : mergedLabel(p)} · {p.gate.lines}줄 {p.gate.files}파일 <RepoTag p={p} /></div>
+                    <div className="muted">{p.id} · 검수 {p.reviews[p.reviews.length - 1]} · {xr ? `${xr.lane === 'human' ? '사람 확인' : '교차검증'} 대기 ${idText(xr.id)}` : mergedLabel(p)} · {p.gate.lines}줄 {p.gate.files}파일 <RepoTag p={p} /></div>
                   </li>
                 )
               })}
@@ -156,12 +157,12 @@ function ReturnedBox({ s, d, spec }: { s: S; d: Dispatch<Action>; spec: string }
       {t.coding?.returnedReason && <p className="returned-why">{t.coding.returnedReason}</p>}
       {redev === null ? (
         <div className="returned-acts">
-          <Button size="small" variant="primary" onClick={() => { d({ type: 'returnedToMarketing', task: t.id }); toast.show(`${t.id} → 마케팅`) }}>마케팅으로 보내기</Button>
+          <Button size="small" variant="primary" onClick={() => { d({ type: 'returnedToMarketing', task: t.id }); toast.show(`${idText(t.id)} → 마케팅`) }}>마케팅으로 보내기</Button>
           <Button size="small" onClick={() => setRedev('')}>개발로 다시 보내기</Button>
-          <Button size="small" onClick={() => { d({ type: 'dismissReturned', task: t.id }); toast.show(`${t.id} 닫음`) }}>닫기</Button>
+          <Button size="small" onClick={() => { d({ type: 'dismissReturned', task: t.id }); toast.show(`${idText(t.id)} 닫음`) }}>닫기</Button>
         </div>
       ) : (
-        <form className="returned-acts" onSubmit={(e) => { e.preventDefault(); if (!redev.trim()) return; d({ type: 'returnedToDev', task: t.id, reason: redev.trim() }); setRedev(null); toast.show(`${t.id} → 개발`) }}>
+        <form className="returned-acts" onSubmit={(e) => { e.preventDefault(); if (!redev.trim()) return; d({ type: 'returnedToDev', task: t.id, reason: redev.trim() }); setRedev(null); toast.show(`${idText(t.id)} → 개발`) }}>
           <input className="input" autoFocus placeholder="개발로 다시 보내는 이유" aria-label="개발로 다시 보내는 이유" value={redev} onChange={(e) => setRedev(e.target.value)} />
           <Button size="small" variant="primary" type="submit" disabled={!redev.trim()}>보내기</Button>
           <Button size="small" onClick={() => setRedev(null)}>취소</Button>

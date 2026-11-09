@@ -61,5 +61,38 @@ export function humanizeIds(text: string, sellers?: Record<string, string>): str
   });
 }
 
+// ---------------------------------------------------------------- 기획·개발 번호 → 쉬운 말
+// 기획·개발 서버가 붙이는 번호(REQ-35, SPEC-21, T-25 …)를 "요청 35", "기획서 21", "작업 25"처럼 보여 준다.
+// 데이터·API의 번호는 그대로 두고 화면에 보일 때만 바꾼다. 원래 번호는 title(마우스를 올리면 보임)에 둔다.
+
+const PLAN_WORD: Record<string, string> = {
+  REQ: "요청", SPEC: "기획서", T: "작업", PROP: "제안", DOC: "문서", DEP: "배포", RC: "배포 전 확인",
+  AR: "자동 머지 기준", XR: "교차검증", D: "결정", DC: "결정 카드", TH: "대화",
+};
+/** 문장 속에서 바꾸는 번호. `D-3`처럼 날짜 셈(D-day)과 헷갈리는 짧은 접두어는 문장에서는 바꾸지 않는다.
+ * 앞 낱말(요청·작업 …)도 같이 잡아 "작업 T-25"가 "작업 작업 25"가 되지 않게 한다 */
+const PLAN_TEXT_RE =
+  /(?:(요청|기획서|작업|제안|문서|배포|배포 전 확인|자동 머지 기준|교차검증|결정 카드|대화) )?(?:\bQ-REQ-(\d+)-(\d+)\b|\b(REQ|SPEC|PROP|DOC|DEP|RC|AR|XR|DC|TH|T)-([A-Z]?\d+)\b)/g;
+
+/** 번호 하나를 쉬운 말로. "REQ-35" → "요청 35", "Q-REQ-35-1" → "요청 35 질문 1". 모르는 모양이면 그대로 */
+export function planId(id: string | null | undefined): string {
+  if (!id) return "";
+  const q = /^Q-REQ-(\d+)-(\d+)$/.exec(id);
+  if (q) return `요청 ${q[1]} 질문 ${q[2]}`;
+  const m = /^([A-Z]+)-(\S.*)$/.exec(id);
+  return m && m[1] in PLAN_WORD ? `${PLAN_WORD[m[1]]} ${m[2]}` : id;
+}
+
+/** 문장 속 기획·개발 번호를 모두 쉬운 말로 바꾼다 (서버가 쓴 활동 기록·메모 등) */
+export function humanizePlanIds(text: string | null | undefined): string {
+  if (!text) return "";
+  return text.replace(PLAN_TEXT_RE, (_all, before?: string, qReq?: string, qNo?: string, prefix?: string, no?: string) => {
+    const word = qReq ? `요청 ${qReq} 질문 ${qNo}` : `${PLAN_WORD[prefix as string]} ${no}`;
+    // "작업 T-25" → "작업 25" ("작업 작업 25"가 되지 않게)
+    if (!before || word.startsWith(`${before} `)) return word;
+    return `${before} ${word}`;
+  });
+}
+
 /** 쉬운 말로 바꿀 수 있는 기록 번호인지 (바꿔도 같으면 false) */
 export const isKnownId = (id: string) => humanId(id) !== id;

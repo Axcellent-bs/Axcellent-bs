@@ -4,6 +4,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import type { RepoFile } from '@/lib/planning'
+import { humanizePlanIds } from '@/lib/format'
 
 export const FILE_STATUS: Record<string, string> = { added: '추가', removed: '삭제', modified: '수정', renamed: '이름 바꿈', copied: '복사', changed: '수정' }
 
@@ -183,7 +184,7 @@ function FileBlock({ f, anchor, open, onToggle, viewed, onViewed, split, editabl
         </button>
         <span className="tag">{FILE_STATUS[f.status] ?? f.status}</span>
         {f.truncated && <span className="tag tag-amber">잘림</span>}
-        {edit && <span className="tag tag-amber" title={`${edit.message} · ${edit.at}`}>직접 수정 · 레포 반영 전</span>}
+        {edit && <span className="tag tag-amber" title={`${humanizePlanIds(edit.message)} · ${edit.at}`}>직접 수정 · 레포 반영 전</span>}
         <span className="rp-tree-n"><span className="rp-add">+{f.additions}</span> <span className="rp-del">−{f.deletions}</span></span>
         {editable && f.status !== 'removed' && !editing && (
           <button type="button" className="df-icon" title="이 파일 직접 편집" aria-label={`${f.path} 직접 편집`} onClick={() => { setEditing(true); setText(edit?.text ?? base) }}>
@@ -212,7 +213,7 @@ function FileBlock({ f, anchor, open, onToggle, viewed, onViewed, split, editabl
       {open && !editing && edit && (
         <div className="df-mine">
           <div className="df-mine-h">
-            <b>내 수정</b> <span className="mono small">{edit.message}</span> <span className="muted small">{edit.at}</span> {NOT_SENT}
+            <b>내 수정</b> <span className="mono small">{humanizePlanIds(edit.message)}</span> <span className="muted small">{edit.at}</span> {NOT_SENT}
             <span className="df-mine-act">
               <Button size="small" onClick={() => setEditing(true)}>다시 편집</Button>
               <Button size="small" onClick={undo}>수정 지우기</Button>
@@ -248,7 +249,7 @@ function Rows({ rows, split, path, comments, editable, update, truncated }: {
         {here.map((c) => (
           <div key={c.id} className="df-cmt">
             <div className="df-cmt-h"><b>나</b> <span className="muted small">{c.at}</span> {NOT_SENT} <button type="button" className="df-x" onClick={() => del(c.id)} aria-label="코멘트 지우기">×</button></div>
-            <p>{c.body}</p>
+            <p>{humanizePlanIds(c.body)}</p>
           </div>
         ))}
         {open && <CommentForm onCancel={() => setAt(null)} onAdd={(b) => add(side, line, b)} />}
@@ -268,7 +269,7 @@ function Rows({ rows, split, path, comments, editable, update, truncated }: {
                 <span className="rp-no" role="cell">{r.old ?? ''}</span>
                 <span className="rp-no" role="cell">{r.new ?? ''}</span>
                 <span className="rp-sign" role="cell">{r.kind === 'hunk' || r.kind === 'note' ? '' : plus(side, line) ?? (r.kind === 'add' ? '+' : r.kind === 'del' ? '−' : '')}</span>
-                <span className="rp-txt" role="cell">{r.text}</span>
+                <span className="rp-txt" role="cell">{humanizePlanIds(r.text)}</span>
               </div>
               {r.kind !== 'hunk' && r.kind !== 'note' && after(side, line)}
             </div>

@@ -10,6 +10,7 @@ import { Markdown } from '@/components/planning-common/markdown'
 import { PROPOSAL_ORIGIN, handoffFailed, handoffRetrying, proposalReady, type Proposal } from '@/lib/proposals'
 import { TEMPLATES, TEMPLATE_NAME, templateOf, type Section } from '@/lib/specTemplate'
 import { notionApi, previewFill, previewSuggest, useAllReleaseChecks, useReleaseChecks, type NotionHit, type ReleaseCheck } from '@/lib/planning'
+import { humanizePlanIds } from '@/lib/format'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -23,11 +24,11 @@ function ReviewDecide({ d, spec, xr }: { d: Dispatch<Action>; spec: Spec; xr: No
       <div className="xr-decide">
         <span>{human ? `사람 확인 · 되돌릴 수 없음 ${xr.irreversible}` : `교차검증 · ${xr.routeWhy.join(', ')}`} <span className="mono idc" title={xr.id}>{idText(xr.id)}</span></span>
         <span style={{ flex: 1 }} />
-        <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: xr.id, ok: true }); toast.show(`${spec.id} 승인`) }}>승인</Button>
+        <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: xr.id, ok: true }); toast.show(`${idText(spec.id)} 승인`) }}>승인</Button>
         <Button onClick={() => setReason(reason === null ? '' : null)}>거절</Button>
       </div>
       {reason !== null && (
-        <form className="xr-decide" onSubmit={(e) => { e.preventDefault(); if (!reason.trim()) return; d({ type: 'rejectSpec', spec: spec.id, reason: reason.trim() }); setReason(null); toast.show(`${spec.id} 거절`) }}>
+        <form className="xr-decide" onSubmit={(e) => { e.preventDefault(); if (!reason.trim()) return; d({ type: 'rejectSpec', spec: spec.id, reason: reason.trim() }); setReason(null); toast.show(`${idText(spec.id)} 거절`) }}>
           <input className="input" style={{ flex: 1 }} autoFocus placeholder="거절 이유" value={reason} onChange={(e) => setReason(e.target.value)} />
           <Button variant="primary" type="submit" disabled={!reason.trim()}>거절 보내기</Button>
         </form>
@@ -83,10 +84,10 @@ function ReleaseCheckBox({ d, spec }: { d: Dispatch<Action>; spec: string }) {
       <div className="xr-decide">
         <b>배포 전 확인</b>
         <Tag tone={st.tone} title={st.title}>{st.label}</Tag>
-        <span className="muted small">{rc.env} · PR {rc.pr_numbers.map((n) => `#${n}`).join(', ')} · {rc.check_id}</span>
+        <span className="muted small">{rc.env} · PR {rc.pr_numbers.map((n) => `#${n}`).join(', ')} · {idText(rc.check_id)}</span>
         <span style={{ flex: 1 }} />
         {rc.verdict === 'needs_human' && !rc.order_sent && (
-          <Button variant="primary" onClick={() => { d({ type: 'sendReleaseOrder', check: rc.check_id }); toast.show(`${rc.check_id} 배포 지시`) }}>확인하고 배포 지시</Button>
+          <Button variant="primary" onClick={() => { d({ type: 'sendReleaseOrder', check: rc.check_id }); toast.show(`${idText(rc.check_id)} 배포 지시`) }}>확인하고 배포 지시</Button>
         )}
       </div>
       {(blocks.length > 0 || ok.length > 0) && (
@@ -253,7 +254,7 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
                     {r.to && <span className={`rq-dept d-${r.to}`} title="기획안을 넘긴 부서">→ {DEPT_NAME[r.to]}</span>}
                     <span className="mono idc sl-id" title={r.id}>{idText(r.id)}</span>
                     <b title={r.title}>{r.title}</b>
-                    {r.kind === 'spec' && r.note && <Tag tone="amber">{r.note}</Tag>}
+                    {r.kind === 'spec' && r.note && <Tag tone="amber">{humanizePlanIds(r.note)}</Tag>}
                     {r.tail && <Tag tone={r.tail.tone} title={r.tail.title}>{r.tail.label}</Tag>}
                   </span>
                   <span className="muted small">{r.size}</span>
@@ -292,8 +293,8 @@ function PlanHandoff({ s, d, spec }: P & { spec: Spec }) {
             : p.handoff && !p.handoff.ok
             ? <span className="plan-fail" title={p.handoff.reason}>마케팅 전달 실패{p.handoff.reason ? ` · ${p.handoff.reason}` : ''}</span>
             : <span className="muted small">이 기획안을</span>}
-          <Button size="small" variant={mk ? 'primary' : undefined} onClick={() => { flush(); d({ type: 'approveProposal', proposal: p.id }); toast.show(`${spec.id} → 마케팅`) }}>{handoffRetrying(p) ? '지금 다시 보내기' : p.handoff && !p.handoff.ok ? '마케팅에 다시 보내기' : '마케팅으로 넘기기'}</Button>
-          <Button size="small" variant={mk ? undefined : 'primary'} onClick={() => { flush(); d({ type: 'proposalToRequest', proposal: p.id }); toast.show(`${spec.id} → 개발`) }}>개발로 넘기기</Button>
+          <Button size="small" variant={mk ? 'primary' : undefined} onClick={() => { flush(); d({ type: 'approveProposal', proposal: p.id }); toast.show(`${idText(spec.id)} → 마케팅`) }}>{handoffRetrying(p) ? '지금 다시 보내기' : p.handoff && !p.handoff.ok ? '마케팅에 다시 보내기' : '마케팅으로 넘기기'}</Button>
+          <Button size="small" variant={mk ? undefined : 'primary'} onClick={() => { flush(); d({ type: 'proposalToRequest', proposal: p.id }); toast.show(`${idText(spec.id)} → 개발`) }}>개발로 넘기기</Button>
         </>
       ) : p.status === '기획서로' ? <span className="small">개발로 넘김 · 작업 {s.tasks.filter((t) => t.spec === spec.id).length}개</span>
         : p.handoff ? <span className="small">마케팅 {p.handoff.ok ? `받음${p.handoff.campaign ? ` · ${p.handoff.campaign}` : ''}` : '전달 실패'} · <a href={toPath(`proposals/${p.id}`)}>{p.status}</a></span>
@@ -581,9 +582,9 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; examp
 
   const deletable = !locked && !s.tasks.some((t) => t.spec === spec.id)
   const removeSpec = () => {
-    if (!window.confirm(`${spec.id} "${spec.title}" 기획서를 지울까요? 요청은 남고 접수 상태로 돌아가요.`)) return
+    if (!window.confirm(`${idText(spec.id)} "${spec.title}" 기획서를 지울까요? 요청은 남고 접수 상태로 돌아가요.`)) return
     d({ type: 'deleteSpec', spec: spec.id })
-    toast.show(`${spec.id} 삭제`)
+    toast.show(`${idText(spec.id)} 삭제`)
     go(toPath('work/specs'))
   }
   const [answer, setAnswer] = useState('')
@@ -643,7 +644,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; examp
           {spec.question && (
             <button type="button" className={`sp-question${answerFound ? ' answered' : ''}`} onClick={() => jump('sec-question')}>
               <span className="sp-q-label">{answerFound ? '질문 답 찾음 · 저장하면 보내요' : '답할 질문'}</span>
-              <span className="sp-q-text">{spec.question}</span>
+              <span className="sp-q-text">{humanizePlanIds(spec.question)}</span>
               {answerFound && <span className="sp-q-answer">{answerFound}</span>}
             </button>
           )}
@@ -656,7 +657,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; examp
             <summary>결정 기록 {decisions.length}건</summary>
             {decisions.length ? (
               <ul>
-                {decisions.map((x) => <li key={x.id}><span className="sp-pid">{x.id}</span><span>{x.text}<HrRecord d={x} /></span></li>)}
+                {decisions.map((x) => <li key={x.id}><span className="sp-pid" title={x.id}>{idText(x.id)}</span><span>{humanizePlanIds(x.text)}<HrRecord d={x} /></span></li>)}
               </ul>
             ) : <p className="sp-empty">아직 없음</p>}
           </details>
@@ -695,8 +696,8 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; examp
         {spec.question && (
           <div className="question" id="sec-question">
             <b className="question-label">답할 질문</b>
-            <p className="question-text">{spec.question}</p>
-            <form className="spec-answer" onSubmit={(e) => { e.preventDefault(); if (!answer.trim()) return; d({ type: 'answerQuestion', spec: spec.id, text: answer.trim() }); setAnswer(''); toast.show(`${spec.id} 질문에 답함`) }}>
+            <p className="question-text">{humanizePlanIds(spec.question)}</p>
+            <form className="spec-answer" onSubmit={(e) => { e.preventDefault(); if (!answer.trim()) return; d({ type: 'answerQuestion', spec: spec.id, text: answer.trim() }); setAnswer(''); toast.show(`${idText(spec.id)} 질문에 답함`) }}>
               <input className="field" value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="답 적기" aria-label="질문에 답" />
               <Button size="small" variant="primary" type="submit" disabled={!answer.trim()}>답하기</Button>
             </form>
@@ -719,7 +720,7 @@ function SpecPara({ p, on, onPick, s, spec, editable, onSave }: { p: S['specs'][
   return (
     <div id={`para-${p.id}`} className={`spec-blk${on ? ' on' : ''}`}>
       <div className="blk">
-        {onPick ? <button type="button" className="pid spec-pid" onClick={onPick} title={`${p.id}에 연결된 작업·PR 보기`}>{p.id}</button> : <span className="pid spec-pid">{p.id}</span>}
+        {onPick ? <button type="button" className="pid spec-pid" onClick={onPick} title={`${idText(p.id)}에 연결된 작업·PR 보기`}>{p.id}</button> : <span className="pid spec-pid">{p.id}</span>}
         <textarea className="blk-p" defaultValue={p.text} readOnly={!editable} rows={Math.max(1, Math.ceil(p.text.length / 70))} aria-label={`${p.id} 내용`}
           onBlur={(e) => editable && onSave(e.target.value)} />
       </div>
@@ -727,7 +728,7 @@ function SpecPara({ p, on, onPick, s, spec, editable, onSave }: { p: S['specs'][
       {p.incident && <div className="incline">장애 표시 · {p.incident} (link_incident)</div>}
       {(tasks.length > 0 || done) && (
         <span className="tags spec-tags">
-          {tasks.map((t) => <Tag key={t.id}>{t.id}</Tag>)}
+          {tasks.map((t) => <Tag key={t.id} title={t.id}>{idText(t.id)}</Tag>)}
           {prs.map((x) => <Tag key={x.id}>{x.id}</Tag>)}
           {done && <Tag tone="green">구현됨</Tag>}
         </span>

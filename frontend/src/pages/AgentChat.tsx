@@ -14,6 +14,7 @@ import { mergeTalk } from "@/lib/officeTalk";
 import { orchestrator } from "@/lib/orchestrator";
 import { shopFaults, type FaultState } from "@/lib/shopFaults";
 import type { CommLine } from "@/lib/types";
+import { humanizePlanIds } from "@/lib/format"
 
 // AI 대화방. 부서 AI들이 A2A로 주고받은 일을 메신저처럼 보여 준다.
 // 맨 위 "전체 대화방"은 사람과 부서 AI가 함께 쓰는 곳이다: 모든 부서 기록(AI 오피스 단톡방과 같은 규칙)에 사람 대화를 섞고, 아래 입력창으로 부서 AI에게 바로 말을 건다.
@@ -96,7 +97,7 @@ function Message({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: Of
           {m.repeat && <span className="chip bg-brand-50 px-1.5 py-0 text-[10px] font-semibold text-brand-700" title="같은 내용을 여러 번 주고받아 하나로 묶었습니다">×{m.repeat}</span>}
         </div>
         <div title={m.raw} className={`mt-1 rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${right ? "rounded-tr-md" : "rounded-tl-md"} ${look.bubble} ${right ? "" : TONE_MARK[m.tone]}`}>
-          <p className={direct ? "whitespace-pre-wrap break-words" : undefined}>{right ? "" : TONE_ICON[m.tone]}{m.text}</p>
+          <p className={direct ? "whitespace-pre-wrap break-words" : undefined}>{right ? "" : TONE_ICON[m.tone]}{humanizePlanIds(m.text)}</p>
           {m.plan && (
             <PlanCard plan={m.plan} disabled={!talk || !m.goKey || talk.busy(m.goKey)}
               onGo={talk && m.goKey ? () => { void proceed(talk, m.goKey as string); } : undefined} />
@@ -152,7 +153,7 @@ function HoldBanner({ h, busy, canDecide, orchMock, onDecide }: {
         )}
       </div>
       <p className="mt-1 text-[11px] opacity-75">
-        {h.detail}
+        {humanizePlanIds(h.detail)}
         {showButtons && h.state === "pending" && " · 목 모드 데모 전용 버튼입니다. 총괄 AI는 스스로 승인하지 않고, 여기서 누른 결정을 그대로 전달합니다."}
         {orchHold && !orchMock && h.state === "pending" && " · 실제 모드에서는 C 등급 보류를 안전 관문 보류 큐 한 곳에서만 결정합니다 (이 화면의 총괄 결정 경로는 사람 확인이 없어 목 모드에서만 씁니다)."}
       </p>
@@ -170,18 +171,18 @@ function Item({ it, busyHold, orchOn, orchMock, onDecide, talk }: { it: ChatItem
       return (
         <li className="flex justify-center">
           <p className="max-w-[90%] rounded-full bg-ink-50 px-3 py-1 text-center text-[11px] text-ink-500 ring-1 ring-ink-100">
-            {it.text} <time dateTime={it.at} className="ml-1 tabular-nums">{hhmm(it.at)}</time>
+            {humanizePlanIds(it.text)} <time dateTime={it.at} className="ml-1 tabular-nums">{hhmm(it.at)}</time>
           </p>
         </li>
       );
     case "separator":
       return it.variant === "day" ? (
         <li role="separator" className="flex items-center gap-3 pt-2 text-[11px] font-medium text-ink-500">
-          <span className="h-px flex-1 bg-ink-100" /><span title={it.raw} className={it.raw ? "cursor-help" : undefined}>{it.text}</span><span className="h-px flex-1 bg-ink-100" />
+          <span className="h-px flex-1 bg-ink-100" /><span title={it.raw} className={it.raw ? "cursor-help" : undefined}>{humanizePlanIds(it.text)}</span><span className="h-px flex-1 bg-ink-100" />
         </li>
       ) : (
         <li role="separator" className="pt-1">
-          <p title={it.raw} className={`text-center text-xs font-semibold text-ink-700 ${it.raw ? "cursor-help" : ""}`}>{it.text}</p>
+          <p title={it.raw} className={`text-center text-xs font-semibold text-ink-700 ${it.raw ? "cursor-help" : ""}`}>{humanizePlanIds(it.text)}</p>
         </li>
       );
   }

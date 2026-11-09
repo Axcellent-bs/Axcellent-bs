@@ -3,6 +3,7 @@ import { Link } from '@/lib/nav'
 import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingStep, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
 import { UsageBar } from '@/components/dev/coding'
 import { NotionConnect } from '@/components/planning/notion'
+import { humanizePlanIds } from '@/lib/format'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
 // 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.
@@ -689,7 +690,7 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
                       <div className="sm:col-span-2 lg:col-span-4">
                         <dt className="text-xs text-ink-500">마지막 확인</dt>
                         <dd className={`mt-0.5 ${t.ok ? 'text-emerald-700' : 'text-red-700'}`}>
-                          {t.message}{t.code ? ` (${t.code})` : ''} · {new Date(t.checked_at).toLocaleTimeString('ko-KR')}
+                          {humanizePlanIds(t.message)}{t.code ? ` (${t.code})` : ''} · {new Date(t.checked_at).toLocaleTimeString('ko-KR')}
                         </dd>
                       </div>
                     )}

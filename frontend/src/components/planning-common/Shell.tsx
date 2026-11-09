@@ -11,6 +11,7 @@ import { ACTION_ERROR_EVENT, useSharedStore, apiBase } from '@/lib/planning'
 import { TODAY, initialState, reducer, type Action, type State } from '@/lib/planningData'
 import { Dep, Point } from '@/components/planning-common/parts'
 import { convoHref, go, setPlanningNav, toPath } from '@/components/planning-common/links'
+import { humanizePlanIds } from '@/lib/format'
 
 type IconName = NonNullable<NavItem['icon']>
 // hidden: 메뉴에는 안 보이지만 주소로는 열린다 (소통은 부서 공용 탭으로 뺄 때까지 숨김)
@@ -210,7 +211,7 @@ function Frame({ part, title, desc, home, sections, tabCount, tools, actions, ch
               {recentIn.map((x, i) => (
                 <span key={x.seq ?? i} className={`live-item${(x.seq ?? 0) > highlightFrom.current ? ' fresh' : ''}`}>
                   <a href={convoHref(x.ctx)} className="live-link">
-                    <Dep d={x.from} /> <Point>{x.point}</Point> <span className="muted small">{x.text}</span>
+                    <Dep d={x.from} /> <Point>{x.point}</Point> <span className="muted small">{humanizePlanIds(x.text)}</span>
                   </a>
                   <button type="button" className="live-x" aria-label="알림 닫기" title="닫기" onClick={() => dismiss(x.seq ?? -1)}>×</button>
                 </span>
