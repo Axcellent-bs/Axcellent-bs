@@ -27,6 +27,7 @@ import json
 import sqlite3
 import threading
 import tomllib
+import uuid
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -186,7 +187,8 @@ def category_insight_id(tenant: str, topic: str, category: str | None) -> str:
     return "ins_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
-SCHEMA_VERSION = "trend_insight_brief.v4"  # 응답 모양 버전 (v4: past_results를 응답 때 붙임)
+# 응답 모양 버전 (v4: past_results를 응답 때 붙임, v5: 같은 날 판·다시 추천 칸)
+SCHEMA_VERSION = "trend_insight_brief.v5"
 
 
 def tenant_of(env: Mapping[str, str]) -> str:
@@ -198,11 +200,16 @@ def tenant_of(env: Mapping[str, str]) -> str:
 
 class BriefStore:
     """하루 캐시: (날짜, 규칙 버전) → 브리프 JSON. LLM 하루 상한으로 덜 만든 브리프는 만료 시각
-    (`expires_at`)까지만 쓴다 (상한이 풀리면 다음 미리 계산에서 다시 만든다)."""
+    (`expires_at`)까지만 쓴다 (상한이 풀리면 다음 미리 계산에서 다시 만든다).
+
+    v5(11/9): 같은 날 판을 지우지 않고 `brief_versions`에 쌓는다 (자동·다시 추천).
+    `briefs` 표에는 지금처럼 그날 최신 판을 쓴다 (수집기·데이터분석 AI 대화가 읽는다).
+    "만드는 중" 잠금(`brief_lock`)과 다시 추천 작업(`brief_jobs`)도 같은 파일 (서버·수집기 공용).
+    """
 
     def __init__(self, path: str | Path) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=10.0)
         self._lock = threading.Lock()
         with self._lock, self._conn:
             self._conn.execute(
@@ -212,6 +219,126 @@ class BriefStore:
             cols = [r[1] for r in self._conn.execute("PRAGMA table_info(briefs)")]
             if "expires_at" not in cols:  # 예전 파일: 만료 칸 (NULL = 하루 캐시)
                 self._conn.execute("ALTER TABLE briefs ADD COLUMN expires_at TEXT")
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS brief_versions (day TEXT NOT NULL, rules TEXT NOT NULL,"
+                " version INTEGER NOT NULL, created_at TEXT NOT NULL, trigger TEXT NOT NULL,"
+                " requested_by TEXT, detect_as_of TEXT, detect_key TEXT, snapshot_id TEXT,"
+                " tokens INTEGER, output TEXT NOT NULL, PRIMARY KEY (day, rules, version))"
+            )
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS brief_lock (id INTEGER PRIMARY KEY CHECK (id = 1),"
+                " token TEXT NOT NULL, who TEXT NOT NULL, trigger TEXT NOT NULL,"
+                " started_at TEXT NOT NULL, until TEXT NOT NULL)"
+            )
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS brief_jobs (job_id TEXT PRIMARY KEY, day TEXT NOT NULL,"
+                " rules TEXT NOT NULL, state TEXT NOT NULL, requested_by TEXT,"
+                " started_at TEXT NOT NULL, finished_at TEXT, version INTEGER, tokens INTEGER,"
+                " reason TEXT)"
+            )
+
+    # ---- 판 ----------------------------------------------------------------------
+
+    _VERSION_COLS = ("version", "created_at", "trigger", "requested_by", "detect_as_of",
+                     "detect_key", "snapshot_id", "tokens")  # fmt: skip
+
+    def versions(self, day: date, rules: str) -> list[dict[str, Any]]:
+        """그날·규칙 버전의 판 목록 (오래된 순, 출력 JSON 없이)."""
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT {', '.join(self._VERSION_COLS)} FROM brief_versions"
+                " WHERE day = ? AND rules = ? ORDER BY version",
+                (day.isoformat(), rules),
+            ).fetchall()
+        return [dict(zip(self._VERSION_COLS, r, strict=True)) for r in rows]
+
+    def version(self, day: date, rules: str, n: int) -> TrendInsightBriefOutput | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT output FROM brief_versions WHERE day = ? AND rules = ? AND version = ?",
+                (day.isoformat(), rules, n),
+            ).fetchone()
+        return TrendInsightBriefOutput.model_validate_json(row[0]) if row else None
+
+    def manual_tokens(self, limit: int = 10) -> list[int]:
+        """최근 다시 추천 판들의 실제 토큰 (날짜 상관없이, 최근 순)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT tokens FROM brief_versions WHERE trigger = 'manual' AND tokens IS NOT NULL"
+                " ORDER BY created_at DESC LIMIT ?", (limit,),
+            ).fetchall()  # fmt: skip
+        return [int(r[0]) for r in rows]
+
+    # ---- "만드는 중" 잠금 (sqlite, 서버·수집기 공용. 만든 프로세스가 죽어도 만료되면 풀림) ----
+
+    def claim_build(self, who: str, trigger: str, now: datetime,
+                    lease: float | None = None) -> str | None:  # fmt: skip
+        """잠금을 건다. 다른 쪽의 살아 있는 잠금이 있으면 None. 만료된 잠금은 넘겨받는다."""
+        from data_agent.brief_versions import lock_seconds
+
+        token = uuid.uuid4().hex
+        until = now + timedelta(seconds=lease if lease is not None else lock_seconds())
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute("SELECT until FROM brief_lock WHERE id = 1").fetchone()
+                if row is not None and datetime.fromisoformat(row[0]) >= now:
+                    self._conn.rollback()
+                    return None
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO brief_lock VALUES (1, ?, ?, ?, ?, ?)",
+                    (token, who, trigger, now.isoformat(), until.isoformat()),
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        return token
+
+    def release_build(self, token: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM brief_lock WHERE id = 1 AND token = ?", (token,))
+
+    def building(self, now: datetime) -> dict[str, Any] | None:
+        """지금 살아 있는 잠금 (누가·무엇으로·언제). 없거나 만료면 None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT who, trigger, started_at, until FROM brief_lock WHERE id = 1"
+            ).fetchone()
+        if row is None or datetime.fromisoformat(row[3]) < now:
+            return None
+        return {"who": row[0], "trigger": row[1], "started_at": datetime.fromisoformat(row[2])}
+
+    # ---- 다시 추천 작업 -------------------------------------------------------------
+
+    _JOB_COLS = ("job_id", "state", "requested_by", "started_at", "finished_at", "version",
+                 "tokens", "reason")  # fmt: skip
+
+    def job_start(self, job_id: str, day: date, rules: str, who: str | None,
+                  at: datetime) -> None:  # fmt: skip
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO brief_jobs (job_id, day, rules, state, requested_by, started_at)"
+                " VALUES (?, ?, ?, 'running', ?, ?)",
+                (job_id, day.isoformat(), rules, who, at.isoformat()),
+            )
+
+    def job_finish(self, job_id: str, state: str, at: datetime, *, version: int | None = None,
+                   tokens: int | None = None, reason: str | None = None) -> None:  # fmt: skip
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE brief_jobs SET state = ?, finished_at = ?, version = ?, tokens = ?,"
+                " reason = ? WHERE job_id = ?",
+                (state, at.isoformat(), version, tokens, reason, job_id),
+            )
+
+    def last_job(self, day: date, rules: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT {', '.join(self._JOB_COLS)} FROM brief_jobs WHERE day = ? AND rules = ?"
+                " ORDER BY started_at DESC LIMIT 1", (day.isoformat(), rules),
+            ).fetchone()  # fmt: skip
+        return dict(zip(self._JOB_COLS, row, strict=True)) if row else None
 
     def close(self) -> None:
         self._conn.close()
@@ -231,19 +358,34 @@ class BriefStore:
         return TrendInsightBriefOutput.model_validate_json(row[0])
 
     def put(self, day: date, rules: str, out: TrendInsightBriefOutput, at: datetime,
-            expires_at: datetime | None = None) -> None:  # fmt: skip
+            expires_at: datetime | None = None, *, trigger: str = "auto",
+            requested_by: str | None = None, detect_as_of: datetime | None = None,
+            detect_key: str | None = None, tokens: int | None = None) -> int:  # fmt: skip
+        """새 판으로 저장하고 판 번호를 돌려준다. `briefs` 표(그날 최신 판)도 같이 바꾼다."""
         with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM brief_versions WHERE day = ? AND rules = ?",
+                (day.isoformat(), rules),
+            ).fetchone()
+            n = int(row[0]) + 1
+            out = out.model_copy(update={
+                "version": n, "latest_version": n, "created_at": at, "trigger": trigger,
+                "requested_by": requested_by, "detect_as_of": detect_as_of,
+            })  # fmt: skip
+            body = out.model_dump_json()
             self._conn.execute(
                 "INSERT OR REPLACE INTO briefs (day, rules, created_at, output, expires_at)"
                 " VALUES (?,?,?,?,?)",
-                (
-                    day.isoformat(),
-                    rules,
-                    at.isoformat(),
-                    out.model_dump_json(),
-                    expires_at.isoformat() if expires_at else None,
-                ),
-            )
+                (day.isoformat(), rules, at.isoformat(), body,
+                 expires_at.isoformat() if expires_at else None),
+            )  # fmt: skip
+            self._conn.execute(
+                "INSERT INTO brief_versions VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (day.isoformat(), rules, n, at.isoformat(), trigger, requested_by,
+                 detect_as_of.isoformat() if detect_as_of else None, detect_key,
+                 out.snapshot_id, tokens, body),
+            )  # fmt: skip
+        return n
 
 
 # ------------------------------------------------------------------ 후보
@@ -1233,8 +1375,19 @@ async def make_brief(
     video_info: Any = None,
     warned: Warned | None = None,
     same_targets: Mapping[str, Sequence[str]] | None = None,
+    build: Any = None,
 ) -> BriefResult:
-    """기존 skill 결과를 묶어 인사이트 3~7개 (하루 캐시). 상태를 바꾸지 않는다(브리프 기록만)."""
+    """기존 skill 결과를 묶어 인사이트 3~7개 (하루 캐시). 상태를 바꾸지 않는다(브리프 기록만).
+
+    `build`(`brief_versions.BuildContext`): 다시 추천 작업이 "만드는 중" 잠금을 이미 가진 채로
+    부를 때.
+    없으면 자동 판: 같은 잠금을 걸고(서버·수집기 공용), 다른 쪽이 만드는 중이면 끝나기를 기다렸다가
+    저장된 판을 준다. 저장할 때 판 정보(trigger·누른 사람·감지 시각·토큰)를 같이 남긴다.
+    """
+    from contextlib import ExitStack
+
+    from data_agent import llm_budget
+    from data_agent.brief_versions import detect_stamp
     from data_agent.skills.content_recommend import load_config as load_recommend
     from data_agent.skills.product_link import pick_links, similarities, topic_text
 
@@ -1245,12 +1398,39 @@ async def make_brief(
     own = store is None
     store = store or BriefStore(env.get(DB_ENV) or DEFAULT_DB)
     queries: list[str] = []
+    stack = ExitStack()
+    token: str | None = None
     try:
         if not request.regenerate and (hit := store.get(day, rules, now)) is not None:
             out = hit.model_copy(update={"cached": True})
             return BriefResult(
                 out, as_evidence(out, [f"trend_insight_brief cache rules={rules}"], now)
             )
+        if build is None:  # 자동 판: 같은 "만드는 중" 잠금
+            token = store.claim_build("자동", "auto", now)
+            if token is None:
+                waited = await _wait_build(store, day, rules)
+                if waited is not None:
+                    out = waited.model_copy(update={"cached": True})
+                    return BriefResult(out, as_evidence(out, ["trend_insight_brief waited"], now))
+                why = "다른 곳에서 브리프를 만드는 중이라 잠시 뒤 다시 읽어 주세요"
+                out = empty(day, rules, now, why)
+                return BriefResult(out, as_evidence(out, queries, now))
+            detect = detect_stamp(env)
+        else:
+            detect = build.detect
+        box = stack.enter_context(llm_budget.counting())
+
+        def save(out: TrendInsightBriefOutput, expires_at: datetime | None = None) -> None:
+            version = store.put(
+                day, rules, out, now, expires_at,
+                trigger="auto" if build is None else build.trigger,
+                requested_by=None if build is None else build.requested_by,
+                detect_as_of=detect.as_of, detect_key=detect.key, tokens=box[0],
+            )  # fmt: skip
+            if build is not None:
+                build.version, build.tokens = version, box[0]
+
         n = request.max_insights or config.max_insights
         cands = candidates(popular, rising, aliases)
         if not cands:
@@ -1446,10 +1626,25 @@ async def make_brief(
                 f"LLM 하루 상한에 닿아 덜 만든 브리프라 {int(ttl.total_seconds() // 60)}분만 저장"
                 " (상한이 풀리면 다음 미리 계산에서 다시 만든다)"
             )
-            store.put(day, rules, out, now, expires_at=now + ttl)
+            save(out, expires_at=now + ttl)
         else:
-            store.put(day, rules, out, now)
+            save(out)
         return BriefResult(out, as_evidence(out, queries, now))
     finally:
+        stack.close()
+        if token is not None:
+            store.release_build(token)
         if own:
             store.close()
+
+
+async def _wait_build(store: BriefStore, day: date, rules: str,
+                      seconds: float = 90.0) -> TrendInsightBriefOutput | None:  # fmt: skip
+    """다른 쪽이 만드는 중이면 끝나기를 기다렸다가 저장된 판 (못 기다리면 None)."""
+    import asyncio
+
+    waited = 0.0
+    while store.building(now_utc()) is not None and waited < seconds:
+        await asyncio.sleep(1.0)
+        waited += 1.0
+    return store.get(day, rules, now_utc())

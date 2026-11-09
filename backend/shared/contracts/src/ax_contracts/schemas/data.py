@@ -1872,6 +1872,12 @@ class TrendAgeOutput(AxModel):
 class TrendInsightBriefRequest(AxModel):
     max_insights: int | None = Field(default=None, ge=3, le=7)  # 비우면 회사 설정
     regenerate: bool = False  # 하루 캐시를 쓰지 않고 새로 묶는다
+    # 아래는 예전 요청은 없다 (v5). read = 판 읽기(version 없으면 최신),
+    # regenerate_start = 다시 추천 시작(백그라운드, 바로 started/blocked),
+    # status = 진행 상태만 (화면이 2초마다 읽음)
+    action: Literal["read", "regenerate_start", "status"] = "read"
+    version: int | None = Field(default=None, ge=1)  # 오늘 판 번호 (없으면 최신)
+    requested_by: str | None = Field(default=None, max_length=40)  # 화면 계정 표시 이름 (기록용)
 
 
 class InsightEvidence(AxModel):
@@ -2129,6 +2135,71 @@ class TrendInsightBriefOutput(AxModel):
     snapshot_id: str | None = None
     # 아래는 예전 응답은 없다. 지금 data LLM 상태 (오류 원인·중단). 저장분을 줄 때도 응답 시점 값
     llm_status: LlmStatus | None = None
+    # 아래는 예전 응답은 없다 (v5, 11/9). 같은 날 판(자동·다시 추천)과 다시 추천 상태.
+    # 문장은 서버 값
+    version: int | None = Field(default=None, ge=1)  # 이 응답의 판 번호 (그날·규칙 버전 안에서)
+    latest_version: int | None = Field(default=None, ge=1)  # 오늘 최신 판 번호
+    version_label: str | None = None  # "00:27 자동" · "11:16 다시 추천"
+    created_at: UtcDatetime | None = None  # 이 판을 저장한 시각
+    trigger: BriefTrigger | None = None
+    requested_by: str | None = None  # 다시 추천을 누른 사람 (표시용, 인증에 쓰지 않음)
+    detect_as_of: UtcDatetime | None = None  # 이 판이 쓴 감지 데이터 시각
+    versions: list[BriefVersionInfo] = Field(default_factory=list)  # 오늘 판 목록 (오래된 순)
+    regen_used: int = Field(default=0, ge=0)  # 오늘 다시 추천 횟수 (자동 판·막힘·실패는 안 셈)
+    regen_limit: int = Field(default=3, ge=0)
+    regen_blocked: BriefRegenBlocked | None = None  # 지금 누르면 막히는 이유 (없으면 None)
+    regen_job: BriefRegenJob | None = None  # 오늘 마지막 다시 추천 작업 (만드는 중·끝·실패)
+    building: BriefBuilding | None = None  # 지금 누가 만드는 중이면 (자동 포함)
+    diff_from_previous: BriefDiff | None = None  # 바로 앞 판 대비 주제 변화
+    estimated_llm_pct: float | None = Field(default=None, ge=0)  # 다시 추천 한 번에 드는 LLM %
+    estimated_llm_basis: str | None = None  # 어떻게 셌는지 (최근 다시 추천 중앙값 / "추정")
+    estimated: bool = False  # 다시 추천 기록이 없어 첫 자동 브리프 토큰으로 추정했으면 true
+    llm_pct_now: float | None = Field(default=None, ge=0)  # 지금 LLM 오늘 사용 %
+
+
+BriefTrigger = Literal["auto", "manual"]
+BriefRegenCode = Literal["daily_limit", "cooldown", "llm_budget", "in_progress", "no_new_data"]
+
+
+class BriefVersionInfo(AxModel):
+    version: int = Field(ge=1)
+    label: str  # "00:27 자동" · "11:16 다시 추천"
+    created_at: UtcDatetime
+    trigger: BriefTrigger
+    requested_by: str | None = None
+    detect_as_of: UtcDatetime | None = None
+
+
+class BriefRegenBlocked(AxModel):
+    code: BriefRegenCode
+    text: str  # 화면 칩 문장 (서버 값 그대로)
+
+
+class BriefRegenJob(AxModel):
+    job_id: str
+    state: Literal["running", "done", "failed"]
+    requested_by: str | None = None
+    started_at: UtcDatetime
+    finished_at: UtcDatetime | None = None
+    version: int | None = Field(default=None, ge=1)  # 끝나면 새 판 번호
+    tokens: int | None = Field(default=None, ge=0)  # 이 다시 추천에 든 LLM 토큰
+    reason: str | None = None  # 실패 이유
+
+
+class BriefBuilding(AxModel):
+    who: str  # 누른 사람 또는 "자동"
+    trigger: BriefTrigger
+    started_at: UtcDatetime
+    text: str  # "만드는 중… (시작 HH:MM)"
+
+
+class BriefDiff(AxModel):
+    from_version: int = Field(ge=1)
+    from_label: str
+    new_topics: list[str] = Field(default_factory=list)
+    gone_topics: list[str] = Field(default_factory=list)
+    new_count: int = Field(default=0, ge=0)
+    gone_count: int = Field(default=0, ge=0)
 
 
 # ------------------------------------------------ 도메인 프로필 (domain_profile)

@@ -19,12 +19,36 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 
 from ax_agent_template.llm import LLMNotConfiguredError
+
+# 한 작업(브리프 한 판 등)이 쓴 LLM 토큰을 세는 칸. `counting()` 안에서 부른 LLM 요청(같은 asyncio
+# 문맥)의 토큰을 더한다. 다른 곳에서 같은 요청을 계산 중이라 기다려 받은 답(#835)은 0이다
+_SINK: ContextVar[list[int] | None] = ContextVar("data_llm_token_sink", default=None)
+
+
+@contextmanager
+def counting() -> Iterator[list[int]]:
+    """`with counting() as box:` 동안 쓴 토큰 합이 `box[0]`."""
+    box = [0]
+    token = _SINK.set(box)
+    try:
+        yield box
+    finally:
+        _SINK.reset(token)
+
+
+def count_tokens(tokens: int) -> None:
+    box = _SINK.get()
+    if box is not None:
+        box[0] += tokens
+
 
 DB_ENV = "DATA_LLM_BUDGET_DB"
 CALLS_ENV = "DATA_LLM_DAILY_CALLS"
