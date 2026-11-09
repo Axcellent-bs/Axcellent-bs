@@ -3,10 +3,10 @@
 대화 자체(저장·답·요약·열람 규칙)는 support의 `chat_*` skill이 한다 (`domains/support/.../chat.py`).
 여기서는 두 가지만 한다.
 
-1. **보는 사람**(`viewer_of`): 요청의 `Authorization`에서 사람 토큰 이름과 자격(member·staff·
-   admin)을 정한다. 읽기(GET)에도 사람 토큰이 필요하다(없으면 401, 모르면 403). 담당(staff)은
-   조직도(`AX_ORG_CONFIG`)에서 고객지원 서비스(inquiry·claims·reviews)의 담당자 이름 +
-   `SUPPORT_CHAT_STAFF`(쉼표로 이름을 더함)다. 관리자는 에이전트 토큰 명부의 `admin` 토큰이다.
+1. **보는 사람**(`viewer_of`): 요청의 `Authorization`에서 사람 토큰 이름과 자격(member·admin)을
+   정한다. 읽기(GET)에도 사람 토큰이 필요하다(없으면 401, 모르면 403). 고객지원에는 따로 지정하는
+   담당자가 없다(예진님 2026-11-09: 경계 없이 모두 열람, 인사·재무만 담당 지정). 관리자는 에이전트
+   토큰 명부의 `admin` 토큰이다.
    지금은 모든 요청이 같은 사람("공용")이라 서버가 사람별로 가를 수 없다. 토큰을 사람별로 나눈
    뒤부터 가려진다.
 2. **대화가 읽는 집계**(`snapshot`): 문의 현황·클레임 현황·후기 통계를 support 읽기 skill로 받아
@@ -15,30 +15,16 @@
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
 from typing import Any
 
-from ax_agent_template.routing import assignment_for
 from ax_agent_template.server import verify_token
 from ax_dashboard_api import support_client
 from ax_dashboard_api.auth import bearer, human_from_authorization
 from ax_dashboard_api.envelope import ApiError, or_unavailable
 
-STAFF_ENV = "SUPPORT_CHAT_STAFF"
-SUPPORT_SERVICES = ("inquiry", "claims", "reviews")  # 고객지원 AI의 서비스 3개 (services.py)
 ADMIN_AGENT = "admin"
 UNKNOWN = "확인할 수 없음"
-
-
-def staff_names() -> set[str]:
-    """고객지원 담당자: 조직도의 서비스별 담당자 + 환경 변수로 더한 이름."""
-    names = {n.strip() for n in os.getenv(STAFF_ENV, "").split(",") if n.strip()}
-    for service in SUPPORT_SERVICES:
-        assignment = assignment_for(service, "support_chat_list")
-        if assignment is not None and assignment.assignee:
-            names.add(assignment.assignee)
-    return names
 
 
 def viewer_of(authorization: str | None) -> tuple[str, str]:
@@ -57,7 +43,7 @@ def viewer_of(authorization: str | None) -> tuple[str, str]:
             except PermissionError:
                 pass
         raise
-    return name, "staff" if name in staff_names() else "member"
+    return name, "member"
 
 
 # ---------------------------------------------------------------- 대화가 읽는 집계

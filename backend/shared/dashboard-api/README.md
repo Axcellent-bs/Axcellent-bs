@@ -165,5 +165,5 @@ ax-contracts, ax-agent-template
 - 목 모드에서는 `human:<이름>`도 받는다. 에이전트 토큰(`mock:`)은 항상 거부한다.
 - 실패는 `{error: {code, message}}`: 토큰 없음 401 `AUTH_REQUIRED`, 에이전트 토큰 403 `HUMAN_TOKEN_REQUIRED`, 모르는 토큰 403 `HUMAN_TOKEN_INVALID`.
 - 토큰이 설정되지 않았고 목 모드도 아니면 쓰기는 모두 거부된다 (fail-closed).
-- 직접 대화(`/support-chat`)는 예외로 **읽기에도 사람 토큰이 필요하다** (없으면 401, 모르는 토큰이면 403). 다른 사람 대화는 `messages: []` + `summary` + `restricted: true`로만 오고 거기에 쓰면 403이다. 담당(staff)은 조직도(`AX_ORG_CONFIG`)에서 고객지원 서비스(inquiry·claims·reviews)의 담당자 이름과 `SUPPORT_CHAT_STAFF`(쉼표로 이름을 더함)다. 관리자는 에이전트 토큰 명부의 `admin` 토큰이다. 지금은 모든 요청이 같은 사람("공용")이라 서버가 사람별로 가를 수 없다.
+- 직접 대화(`/support-chat`)는 예외로 **읽기에도 사람 토큰이 필요하다** (없으면 401, 모르는 토큰이면 403). 다른 사람 대화는 `messages: []` + `summary` + `restricted: true`로만 오고 거기에 쓰면 403이다. 다른 사람 대화의 요약(제목·메시지 수·시각·결과)은 로그인한 사람 모두 보고, 원문은 본인만 본다(관리자는 일이 생긴 대화만). 고객지원에는 따로 지정하는 담당자가 없다(예진님 2026-11-09, 예전 `staff`·`SUPPORT_CHAT_STAFF`는 없어졌다). 관리자는 에이전트 토큰 명부의 `admin` 토큰이다. 지금은 모든 요청이 같은 사람("공용")이라 서버가 사람별로 가를 수 없다.
 - 확인한 사람 이름은 요청마다 `request.state.human`에 담긴다 (A2A 요청자는 여전히 서비스 토큰).

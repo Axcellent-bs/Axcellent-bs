@@ -5,14 +5,22 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import Field
+from pydantic import BeforeValidator, Field
 
 from ax_contracts.schemas.common import AxModel
 from support_agent.chat import Role
 
 MAX_CONTEXT_CHARS = 8000  # 화면 API가 만든 집계(숫자)의 JSON 길이 상한
+
+
+def _legacy_staff_is_member(value: Any) -> Any:
+    """예전 화면 API가 보내던 `staff`는 없어졌다. 재시작 중 어긋나도 member로 읽어 막지 않는다."""
+    return "member" if value == "staff" else value
+
+
+ViewerRole = Annotated[Role, BeforeValidator(_legacy_staff_is_member)]
 
 
 class ChatSendInput(AxModel):
@@ -29,16 +37,16 @@ class ChatSendInput(AxModel):
 
 class ChatListInput(AxModel):
     viewer: str | None = Field(default=None, max_length=60)  # 사람 토큰 이름 (없으면 모르는 사람)
-    role: Role = "member"
+    role: ViewerRole = "member"
 
 
 class ChatGetInput(AxModel):
     thread_id: str = Field(min_length=1, max_length=40)
     viewer: str | None = Field(default=None, max_length=60)
-    role: Role = "member"
+    role: ViewerRole = "member"
 
 
 class ChatCloseInput(AxModel):
     thread_id: str = Field(min_length=1, max_length=40)
     viewer: str = Field(min_length=1, max_length=60)
-    role: Role = "member"
+    role: ViewerRole = "member"

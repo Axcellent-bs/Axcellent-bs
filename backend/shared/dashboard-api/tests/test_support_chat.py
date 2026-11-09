@@ -12,7 +12,7 @@ from ax_dashboard_api.main import app
 
 BASE = "/api/dashboard/support-chat"
 HUMAN = {"Authorization": "Bearer tok-gongyong"}  # 이름: 공용
-STAFF = {"Authorization": "Bearer tok-damdang"}  # 이름: 담당자
+OTHER = {"Authorization": "Bearer tok-damdang"}  # 이름: 담당자 (다른 사람)
 
 
 class Fake:
@@ -41,7 +41,6 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> Fake:
     monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
     monkeypatch.setenv("DASHBOARD_API_TOKEN", "test-token")
     monkeypatch.setenv("DASHBOARD_HUMAN_TOKENS", "공용:tok-gongyong,담당자:tok-damdang")
-    monkeypatch.setenv(support_chat.STAFF_ENV, "담당자")
     monkeypatch.delenv("AX_ORG_CONFIG", raising=False)
     fake = Fake()
     fake.outputs = {
@@ -152,11 +151,11 @@ def test_an_unreadable_source_is_unavailable_not_invented(
 def test_reads_pass_the_viewer_name_and_role(client: TestClient, fake: Fake) -> None:
     client.get(BASE, headers=HUMAN)
     assert fake.last("support_chat_list").input == {"viewer": "공용", "role": "member"}
-    client.get(BASE + "/chat-1", headers=STAFF)
+    client.get(BASE + "/chat-1", headers=OTHER)
     assert fake.last("support_chat_get").input == {
         "thread_id": "chat-1",
         "viewer": "담당자",
-        "role": "staff",
+        "role": "member",  # 고객지원에는 따로 지정하는 담당자가 없다
     }
 
 
@@ -199,12 +198,12 @@ def test_busy_thread_is_409(client: TestClient, fake: Fake) -> None:
 
 
 def test_close_uses_the_token_name_and_role(client: TestClient, fake: Fake) -> None:
-    res = client.post(BASE + "/chat-1/close", headers=STAFF)
+    res = client.post(BASE + "/chat-1/close", headers=OTHER)
     assert res.status_code == 200 and res.json()["data"]["status"] == "closed"
     assert fake.last("support_chat_close").input == {
         "thread_id": "chat-1",
         "viewer": "담당자",
-        "role": "staff",
+        "role": "member",
     }
     client.headers.pop("authorization")
     assert client.post(BASE + "/chat-1/close").status_code == 401
@@ -213,10 +212,9 @@ def test_close_uses_the_token_name_and_role(client: TestClient, fake: Fake) -> N
 # ---------------------------------------------------------------- 보는 사람
 def test_viewer_roles(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_HUMAN_TOKENS", "공용:tok-a,담당자:tok-b")
-    monkeypatch.setenv(support_chat.STAFF_ENV, " 담당자 , ")
     monkeypatch.delenv("AX_ORG_CONFIG", raising=False)
     assert support_chat.viewer_of("Bearer tok-a") == ("공용", "member")
-    assert support_chat.viewer_of("Bearer tok-b") == ("담당자", "staff")
+    assert support_chat.viewer_of("Bearer tok-b") == ("담당자", "member")
     with pytest.raises(ApiError) as missing:
         support_chat.viewer_of(None)
     assert missing.value.status_code == 401
@@ -240,7 +238,10 @@ def test_the_admin_agent_token_is_an_admin_viewer(monkeypatch: pytest.MonkeyPatc
     assert refused.value.status_code == 403
 
 
-def test_staff_also_come_from_the_org_chart(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+def test_the_org_chart_assignee_is_not_a_special_viewer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """고객지원에는 따로 지정하는 담당자가 없다: 조직도의 담당자도 다른 사람과 같은 자격이다."""
     org = tmp_path / "org.yaml"
     org.write_text(
         "assignments:\n"
@@ -249,10 +250,9 @@ def test_staff_also_come_from_the_org_chart(monkeypatch: pytest.MonkeyPatch, tmp
         encoding="utf-8",
     )
     monkeypatch.setenv("AX_ORG_CONFIG", str(org))
-    monkeypatch.delenv(support_chat.STAFF_ENV, raising=False)
+    monkeypatch.setenv("SUPPORT_CHAT_STAFF", "조직도담당")  # 예전 설정이 남아 있어도 읽지 않는다
     monkeypatch.setenv("DASHBOARD_HUMAN_TOKENS", "조직도담당:tok-c,기획담당:tok-d")
-    assert support_chat.staff_names() == {"조직도담당"}  # 다른 부서 담당자는 아니다
-    assert support_chat.viewer_of("Bearer tok-c") == ("조직도담당", "staff")
+    assert support_chat.viewer_of("Bearer tok-c") == ("조직도담당", "member")
     assert support_chat.viewer_of("Bearer tok-d") == ("기획담당", "member")
 
 

@@ -7,10 +7,11 @@
 - 대화마다 말한 사람(`who`, 사람 토큰 이름)을 저장한다. 지금은 모든 요청이 같은 사람("공용")이다.
 - 대화가 끝나면(사람이 닫거나 30분 동안 말이 없으면) 한두 줄 요약(`summary`)을 저장한다.
 
-열람 권한 (`access_of`, 인사 AI 직접 대화와 같은 규칙):
+열람 권한 (`access_of`, 예진님 결정 2026-11-09: 경계 없이 모두 열람, 인사·재무만 담당 지정):
 - 본인: 자기 대화 원문 전부.
-- 다른 사람 대화: `messages: []` + `summary` + `restricted: true`만. 다른 사람 대화에는 쓸 수 없다.
-- 담당(고객지원 담당자)·관리자: 다른 사람 대화도 일이 생긴 대화(`task_ids`)는 원문까지 본다.
+- 다른 사람 대화: 로그인한 사람 모두 `messages: []` + `summary` + `restricted: true`(제목·메시지 수·
+  시각·결과)만 본다. 다른 사람 대화에는 쓸 수 없다. 고객지원에는 따로 지정하는 담당자가 없다.
+- 관리자: 다른 사람 대화도 일이 생긴 대화(`task_ids`)는 원문까지 본다.
 
 서버 메모리가 기본이고 `SUPPORT_PG_DSN`이 있으면 `persistence`가 DB에도 쓴다.
 """
@@ -27,7 +28,7 @@ from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel
 from support_agent.store import now_iso
 
 ThreadStatus = Literal["talking", "answering", "closed"]
-Role = Literal["member", "staff", "admin"]  # 보는 사람의 자격 (화면 API가 토큰으로 정한다)
+Role = Literal["member", "admin"]  # 보는 사람의 자격 (화면 API가 토큰으로 정한다)
 Access = Literal["full", "summary"]
 
 MAX_MESSAGE_CHARS = 4000
@@ -88,11 +89,11 @@ def fallback_summary(thread: ChatThread) -> str:
 def access_of(thread: ChatThread, viewer: str | None, role: Role) -> Access:
     """이 사람이 이 대화를 어디까지 보나.
 
-    본인은 원문 전부. 본인이 아니면 요약만 보고, 담당·관리자는 일이 생긴 대화(`task_ids`)만 원문까지
-    본다 (인사 AI 직접 대화와 같은 규칙, 예진님 2026-11-05)."""
+    본인은 원문 전부. 본인이 아니면 요약만 보고, 관리자만 일이 생긴 대화(`task_ids`)의 원문까지
+    본다 (예진님 2026-11-09)."""
     if viewer is not None and viewer == thread.who:
         return "full"
-    if role in ("staff", "admin") and thread.task_ids:
+    if role == "admin" and thread.task_ids:
         return "full"
     return "summary"
 
