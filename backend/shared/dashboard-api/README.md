@@ -21,10 +21,17 @@
 | `/kpis` | `/admin/kpi` |
 | `/kb-chunks` | `/admin/kb` |
 | `/conversations`, `/conversations/{id}` | `/admin/conversations`, `/admin/conversations/{id}` |
-| `/orders?user_id` | `/admin/orders?user_id` |
+| `/orders?user_id&since&until`, `/orders/{order_no}` | `/admin/orders?user_id` (뒤의 기간·상세는 새로 생김) |
 | `/claims?status`, `/claims/stats`, `/claims/{id}` | `/admin/claims...` |
 | `/queue-entries` | `/admin/queue` |
 | `/reviews` | `/admin/reviews` |
+
+### 주문 내역 (읽기 전용, #798)
+상담 콘솔 "AI 처리 내역 > 주문 내역" 탭이 쓴다. 판매 서버(shop-api)의 주문을 그대로 맞춰 줄 뿐 쓰지 않는다(취소·환불은 클레임 흐름).
+- `GET /orders?user_id&since&until`: 구매자의 주문, **최신순**. `since` 이상·`until` 미만(주문 시각, ISO 8601, 시간대 없으면 UTC)이고 둘 다 없으면 전체다. 잘못된 시각은 400 `INVALID_PERIOD`. 칸: `id`·`order_no`·`status`·`status_ko`·`title`에 `created_at`·`total_amount`(실제 결제 금액)·`refunded_amount`·`item_count`를 더했다(기존 칸 그대로).
+- `GET /orders/{order_no}`: 주문 한 건(`items`·`payments`, 배송 시각들). 없는 주문은 404 `NOT_FOUND`. 구매자·쿠폰·결제·상품 ID는 싣지 않는다.
+- 판매 서버가 주지 않은 값은 `null`이다(0·빈 문자열로 채우지 않는다). 판매 서버에 연결하지 못하면 빈 목록 대신 502 `UPSTREAM_UNAVAILABLE`이다.
+- shop-api 목록은 페이지가 없어 구매자의 주문을 한 번에 다 읽는다(로컬 측정: 2,000건 약 0.5초, 5,000건 약 1.2초). 그래서 화면은 기본 최근 30일만 읽는다.
 
 ### 엔드포인트 (POST, 목 모드)
 | 경로 (`/api/dashboard` 아래) | 동작 |

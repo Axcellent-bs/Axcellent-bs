@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { AtRisk } from "@/components/support/AtRisk";
 import { IncidentResponse } from "@/components/support/IncidentResponse";
 import { InquiryCheck } from "@/components/support/InquiryCheck";
+import { OrderHistory } from "@/components/support/OrderHistory";
 import { SurgeChanges } from "@/components/support/SurgeChanges";
 import { CompanyName } from "@/demo/CompanyName";
 
@@ -12,10 +13,11 @@ import { CompanyName } from "@/demo/CompanyName";
 
 const REFRESH_MS = 30_000;
 
-type Mode = "risk" | "inquiry" | "surge" | "response";
+type Mode = "risk" | "inquiry" | "orders" | "surge" | "response";
 const MODES: { id: Mode; label: string; hash: string }[] = [
   { id: "risk", label: "위험 고객", hash: "" },
   { id: "inquiry", label: "문의 진단", hash: "#inquiry" },
+  { id: "orders", label: "주문 내역", hash: "#orders" },
   { id: "surge", label: "급증·변경 요청", hash: "#surge" },
   { id: "response", label: "사건 대응 기록", hash: "#response" },
 ];
@@ -34,6 +36,8 @@ export default function SupportPage() {
   }, [navigate, location.search]);
   /** 고른 고객·문의는 주소에 남겨 새로고침해도 같은 것을 본다 */
   const openBuyer = useCallback((id: string) => navigate({ search: `?buyer=${encodeURIComponent(id)}`, hash: "" }, { replace: true }), [navigate]);
+  /** 주문 내역 탭에서 구매자를 고르면 탭은 그대로 두고 주소의 구매자만 바꾼다 */
+  const openOrderBuyer = useCallback((id: string) => navigate({ search: `?buyer=${encodeURIComponent(id)}`, hash: "#orders" }, { replace: true }), [navigate]);
   const openInquiry = useCallback((id: number) => navigate({ search: `?inquiry=${id}`, hash: "#inquiry" }, { replace: true }), [navigate]);
 
   // 30초마다 모두 새로 받는다
@@ -71,6 +75,7 @@ export default function SupportPage() {
       <div role="tabpanel" id={`support-mode-panel-${mode}`} aria-labelledby={`support-mode-${mode}`}>
         {mode === "risk" && <AtRisk tick={tick} selected={buyer} onSelect={openBuyer} />}
         {mode === "inquiry" && <InquiryCheck tick={tick} selected={inquiry} onSelect={openInquiry} />}
+        {mode === "orders" && <OrderHistory tick={tick} buyer={buyer} onBuyer={openOrderBuyer} />}
         {mode === "surge" && <SurgeChanges tick={tick} />}
         {mode === "response" && <IncidentResponse tick={tick} />}
       </div>

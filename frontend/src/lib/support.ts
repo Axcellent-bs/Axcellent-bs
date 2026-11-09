@@ -175,6 +175,39 @@ export interface IncidentCompensationDecision {
   notes: string[];
 }
 
+// ---------------------------------------------------------------- 주문 내역 (읽기 전용, 판매 서버 주문을 그대로)
+// 판매 서버가 주지 않은 값은 null이다. 0이나 빈 문자열로 채우지 않고 화면에서 "—"로 보여 준다.
+export interface OrderRow {
+  id: number;
+  order_no: string;
+  status: string;
+  status_ko: string;
+  title: string;
+  created_at: string | null;
+  /** 실제 결제(현금) 금액 */
+  total_amount: number | null;
+  refunded_amount: number | null;
+  item_count: number | null;
+}
+export interface OrderLine { title: string | null; qty: number | null; unit_price: number | null; paid_amount: number | null }
+export interface OrderPayment { amount: number | null; method_code: string | null; status: string | null; failure_code: string | null; created_at: string | null }
+export interface OrderDetail {
+  order_no: string;
+  status: string;
+  status_ko: string;
+  created_at: string | null;
+  total_amount: number | null;
+  refunded_amount: number | null;
+  shipping_fee: number | null;
+  points_used: number | null;
+  coupon_discount: number | null;
+  promised_delivery_at: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  items: OrderLine[];
+  payments: OrderPayment[];
+}
+
 // ---------------------------------------------------------------- 호출
 async function get<T>(path: string): Promise<Envelope<T> & { meta: { total?: number } }> {
   let res: Response;
@@ -201,6 +234,10 @@ const qs = (p: Record<string, string | number | undefined>) => {
 
 const BASE = "/api/dashboard";
 export const support = {
+  /** 구매자의 주문, 최신순. since 이상·until 미만(주문 시각, ISO 8601) */
+  orders: (userId: number, since?: string, until?: string) =>
+    get<OrderRow[]>(`${BASE}/orders${qs({ user_id: userId, since, until })}`),
+  order: (orderNo: string) => get<OrderDetail>(`${BASE}/orders/${encodeURIComponent(orderNo)}`),
   atRisk: (minLevel: "medium" | "high" = "medium", limit = 20) =>
     get<CustomerSignals[]>(`${BASE}/customers/at-risk${qs({ min_level: minLevel, limit })}`),
   signals: (buyerId: string) => get<CustomerSignals>(`${BASE}/customers/${encodeURIComponent(buyerId)}/signals`),

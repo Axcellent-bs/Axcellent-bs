@@ -30,6 +30,9 @@ from ax_dashboard_api.schemas import (
     Kpi,
     Me,
     Message,
+    OrderDetail,
+    OrderLine,
+    OrderPayment,
     OrderSummary,
     QueueEntry,
     QueueItemLine,
@@ -73,12 +76,83 @@ ORDERS = [
         status="delivered",
         status_ko="배송 완료",
         title="고양이의 하루 외 1권",
+        created_at="2026-11-01T10:00:00Z",
+        total_amount=36000,
+        refunded_amount=0,
+        item_count=2,
     ),
     OrderSummary(
-        id=102, order_no="ORD-2026-0102", status="shipped", status_ko="배송 중", title="탁상 달력"
+        id=102,
+        order_no="ORD-2026-0102",
+        status="shipped",
+        status_ko="배송 중",
+        title="탁상 달력",
+        created_at="2026-10-01T09:30:00Z",
+        total_amount=12000,
+        refunded_amount=None,
+        item_count=1,
     ),
 ]
 ORDERS_BY_USER = {1: [ORDERS[0]], 2: [ORDERS[1]]}
+
+# 주문 상세(테스트 전용). 두 번째 주문은 아직 도착 전이라 도착·환불 시각이 없다
+ORDER_DETAILS = {
+    "ORD-2026-0101": OrderDetail(
+        order_no="ORD-2026-0101",
+        status="delivered",
+        status_ko="배송 완료",
+        created_at="2026-11-01T10:00:00Z",
+        total_amount=36000,
+        refunded_amount=0,
+        shipping_fee=3000,
+        points_used=0,
+        coupon_discount=0,
+        promised_delivery_at="2026-11-04T10:00:00Z",
+        shipped_at="2026-11-02T09:00:00Z",
+        delivered_at="2026-11-03T15:00:00Z",
+        items=[
+            OrderLine(title="고양이의 하루", qty=1, unit_price=18000, paid_amount=18000),
+            OrderLine(title="탁상 달력", qty=1, unit_price=15000, paid_amount=15000),
+        ],
+        payments=[
+            OrderPayment(
+                amount=36000,
+                method_code="card",
+                status="succeeded",
+                created_at="2026-11-01T10:01:00Z",
+            )
+        ],
+    ),
+    "ORD-2026-0102": OrderDetail(
+        order_no="ORD-2026-0102",
+        status="shipped",
+        status_ko="배송 중",
+        created_at="2026-10-01T09:30:00Z",
+        total_amount=12000,
+        shipping_fee=3000,
+        shipped_at="2026-10-02T09:00:00Z",
+        items=[OrderLine(title="탁상 달력", qty=1, unit_price=9000, paid_amount=9000)],
+        payments=[
+            OrderPayment(
+                amount=12000,
+                method_code="card",
+                status="succeeded",
+                created_at="2026-10-01T09:31:00Z",
+            )
+        ],
+    ),
+}
+
+
+def orders_for(user_id: int, since: str | None, until: str | None) -> list[OrderSummary]:
+    """구매자의 주문, 최신순. `since` 이상·`until` 미만(문자열 비교, 테스트 전용)."""
+    found = []
+    for o in ORDERS_BY_USER.get(user_id, []):
+        at = o.created_at or ""
+        if (not since or at >= since) and (not until or at < until):
+            found.append(o)
+    return sorted(found, key=lambda o: o.created_at or "", reverse=True)
+
 
 _PASSED = Validation(passed=True, findings=[])
 _WARNED = Validation(

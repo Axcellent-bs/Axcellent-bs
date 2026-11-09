@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from ax_contracts.schemas.hr import (
@@ -129,12 +129,24 @@ def kb_chunks() -> dict:
 
 
 @mock_only.get("/orders")
-async def orders(user_id: int) -> dict:
+async def orders(user_id: int, since: str | None = None, until: str | None = None) -> dict:
+    """구매자의 주문 목록(최신순). `since`·`until`(ISO 8601)은 주문 시각 구간이고, 없으면 전체다."""
     if is_mock():
-        items = mock_data.ORDERS_BY_USER.get(user_id, [])
+        items = mock_data.orders_for(user_id, since, until)
     else:
-        items = await live_views.orders(user_id)
+        items = await live_views.orders(user_id, since, until)
     return ok(items, total=len(items))
+
+
+@mock_only.get("/orders/{order_no}")
+async def order_detail(order_no: str = Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")) -> dict:
+    """주문 한 건(읽기 전용). 실제 모드는 판매 서버(shop-api)의 주문을 그대로 맞춰 준다."""
+    if is_mock():
+        found = mock_data.ORDER_DETAILS.get(order_no)
+        if found is None:
+            raise ApiError(404, "NOT_FOUND", "주문을 찾을 수 없다")
+        return ok(found)
+    return ok(await live_views.order_detail(order_no))
 
 
 @mock_only.get("/reviews")
