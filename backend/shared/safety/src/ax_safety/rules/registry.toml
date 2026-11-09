@@ -33,14 +33,14 @@ action = "publish_sns"
 owner = "marketing"
 base_grade = "C"
 
-# 캠페인 예산 집행. 재무가 남은 예산·실패 이력·현금으로 검증한다. 거절하면 집행하지 않는다.
-# 재무 검증은 이 캠페인 예산에만 쓴다. 쿠폰·환불은 재무가 검증하지 않는다(재무 재설계 원칙)
+# 캠페인 예산 집행. 재무는 비용을 승인·반려하지 않는다(멘토 피드백, 2026-11-06).
+# 재무는 남은 예산·실패 이력·현금으로 의견만 내고(마케팅이 근거로 붙인다), 집행 여부는 금액 규칙과 사람이 정한다.
+# 안전 레이어 코드 규칙(건당·하루 누적, thresholds.toml)을 통과하면 B로 실행하고, 넘으면 C로 사람이 본다
 [[actions]]
 action = "start_campaign"
 owner = "marketing"
 base_grade = "B"
-verifier = "finance"
-verify_skill = "verify_campaign_budget"
+verifier = "safety"
 amount = { amount_field = "budget_krw" }
 
 # 이미지·영상 생성 (#487, #677). 유료 API라 안전 레이어 코드 규칙이 비용·길이를 본다.
@@ -209,6 +209,18 @@ base_grade = "A"
 [[actions]]
 action = "planning_chat_close"
 owner = "planning"
+base_grade = "A"
+
+# 사람과 재무 AI의 직접 대화(finance chat/turn.py). 대화 글을 저장하고 닫을 뿐 장부·결산·정산은
+# 건드리지 않는다 (그런 일은 재무 화면에서 사람 토큰으로 한다). 기획·고객지원 대화와 같은 A
+[[actions]]
+action = "finance_chat_send"
+owner = "finance"
+base_grade = "A"
+
+[[actions]]
+action = "finance_chat_close"
+owner = "finance"
 base_grade = "A"
 
 # 사람과 개발 AI의 직접 대화(dev dev_chat.py). 메시지 하나는 dev_chat(A)으로 기록하고, 계획이 서서

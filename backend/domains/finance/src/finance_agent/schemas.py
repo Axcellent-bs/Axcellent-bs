@@ -61,6 +61,42 @@ class ClosingReportOutput(AxModel):
     applied_rules: list[dict[str, Any]] = Field(default_factory=list)  # 적용한 규칙과 근거
 
 
+# ------------------------------- record_incident_finance (orchestrator → finance, 읽기·기록)
+class IncidentFinanceInput(AxModel):
+    """장애 이벤트의 구간과 데이터 영향 분석 결과 (총괄이 옮겨 준 값 그대로).
+
+    context_id는 요청 meta의 장애 이벤트 번호(`ctx_inc_`)다. 영향 숫자를 모르면 비운다(None).
+    """
+
+    component: str | None = Field(default=None, max_length=80)
+    window_from: dt.datetime
+    window_to: dt.datetime
+    failed_order_count: int | None = Field(default=None, ge=0)
+    affected_customer_count: int | None = Field(default=None, ge=0)
+    damage_amount: int | None = Field(default=None, ge=0)
+    affected_customer_ids: list[str] = Field(default_factory=list, max_length=20000)
+
+
+class IncidentFinanceOutput(AxModel):
+    """장애 이벤트 재무 기록. 모르는 금액은 0이 아니라 null이고 `unavailable`에 이름이 있다."""
+
+    damage_amount: int | None  # 데이터 영향 분석의 피해 금액 그대로
+    compensation_total: int | None  # 이 이벤트로 나간 보상 쿠폰 합계 (재무 장부)
+    refund_total: int | None  # 장애 구간에 영향 고객에게 나간 환불 합계
+    money_out_total: int | None  # 보상 + 환불 (둘 중 하나라도 모르면 null)
+    compensation_coupon_count: int | None
+    failed_orders: int | None
+    affected_customers: int | None
+    context_id: str
+    component: str | None
+    window_from: str
+    window_to: str
+    ledger_source: str | None
+    unavailable: list[str]
+    recorded: bool
+    recorded_at: str
+
+
 # ------------------------------- record_support_cost (orchestrator → finance, 읽기·기록)
 class SupportCostInput(AxModel):
     """고객지원이 닫은 문의의 처리 결과 (`support.inquiry_resolved` 이벤트의 사실 필드)."""

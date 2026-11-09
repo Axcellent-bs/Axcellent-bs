@@ -91,6 +91,10 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 
 ## finance
 
+| skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
+|---|---|---|---|---|---|
+| `record_incident_finance` | read | 장애 비용 장부 기록 (finance) | compensation(끝나면), recovery(끝나면) | 아니오 | `{"affected_customer_count": 87, "affected_customer_ids": ["buy_0001", "buy_0002", "buy_0003", "buy_0004", "buy_0005", "buy_0006", "buy_0007", "buy_0008", "buy_0009", "buy_0010", "buy_0011", "buy_0012", "buy_0013", "buy_0014", "buy_0015", "buy_0016", "buy_0017"` |
+
 > 총괄은 고객지원이 문의를 닫으면 재무를 불러(`record_support_cost`) 장부에 기록하게 한다. 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에 기록된다.
 
 ## hr
@@ -98,5 +102,5 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
 | `find_similar_cases` | read | 비슷한 과거 이벤트 찾기 (hr) | 없음 (이벤트 시작 즉시) | 아니오 | `{"event_type": null, "limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
-| `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), link_incident(끝나면), compensation(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["원인 확인 요청: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 원인 확인 요청", "event_type": null, "kind": "incident", "source_refs": ["step:diagnose", "step:similar_cases", "st` |
+| `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["원인 확인 요청: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 원인 확인 요청", "event_type": null, "kind": "incident", "source_refs": ["step:diagnose", "step:similar_cases", "st` |
 | `record_resolution` | A | 해결 내용 기록 (hr) | record(끝나면) | 아니오 | `{"action": "배포 이전 버전으로 되돌림", "context_id": "ctx_inc_guide", "minutes_to_resolve": 0, "outcome": "resolved", "root_cause": "PR #412 배포가 원인일 수 있음"}` |

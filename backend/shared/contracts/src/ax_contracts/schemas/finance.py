@@ -133,6 +133,14 @@ class CampaignBudgetReviewInput(AxModel):
 
 
 class CampaignBudgetReviewOutput(AxModel):
+    """재무의 캠페인 예산 판단.
+
+    `advisory`가 참이면 재무는 의견만 낸다(재무는 비용을 승인·반려하지 않는다, 2026-11-06).
+    그때 `decision`은 늘 "approved", `approved_limit_krw`는 요청액으로 와서 요청 쪽이 막지 않고,
+    재무의 실제 의견은 `opinion`·`suggested_krw`·`reasons`·`recommendation`에 있다.
+    집행 여부는 안전 관문의 금액 규칙과 사람이 정한다.
+    """
+
     review_id: str
     campaign_id: str
     decision: Literal["approved", "conditional", "rejected"]
@@ -141,6 +149,10 @@ class CampaignBudgetReviewOutput(AxModel):
     reasons: list[str]
     recommendation: str
     applied_rules: list[dict[str, Any]]
+    advisory: bool = False
+    # recommend: 그대로 권함, reduce: 줄이기를 권함, not_recommended: 권하지 않음
+    opinion: Literal["recommend", "reduce", "not_recommended"] | None = None
+    suggested_krw: int | None = None  # 재무가 권하는 금액 (권하지 않으면 0)
 
 
 class CampaignCancelInput(AxModel):
@@ -148,3 +160,34 @@ class CampaignCancelInput(AxModel):
 
     campaign_id: str
     reason: str = Field(min_length=1)
+
+
+# ---------------------------------------------------------------- 재무 AI 직접 대화 (11/9)
+# dashboard-api `/api/dashboard/finance-chat` → finance `finance_chat_*`.
+# 기획 AI 대화와 같은 모양이다. 대화로는 조회·설명만 한다(장부·결산·정산을 바꾸지 않는다).
+# who는 dashboard-api가 사람 토큰에서 채운다.
+FINANCE_CHAT_MESSAGE_MAX = 2000
+
+
+class FinanceChatSendInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str | None = Field(default=None, min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=FINANCE_CHAT_MESSAGE_MAX)
+
+
+class FinanceChatListInput(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class FinanceChatRef(AxModel):
+    who: str = Field(min_length=1, max_length=80)
+    thread_id: str = Field(min_length=1, max_length=64)
+
+
+class FinanceChatThreadOutput(AxModel):
+    thread: dict[str, Any]
+
+
+class FinanceChatListOutput(AxModel):
+    threads: list[dict[str, Any]]

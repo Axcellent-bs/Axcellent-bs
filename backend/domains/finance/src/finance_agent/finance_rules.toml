@@ -4,8 +4,8 @@
 # - review: "expert"는 전문가가 확인한 규칙, "pending"은 전문가 확인 전이다
 # - 세법 조항과 회계 기준은 공개 자료로 찾아 적었다. 신고와 판단의 최종 책임은 세무사·담당자에게 있다
 
-version = 8
-updated = "2026-11-06"
+version = 9
+updated = "2026-11-09"
 
 # 세무사·회계사에게 먼저 물을 질문. 묶음의 expert-review-checklist.docx에 들어간다
 expert_questions = [
@@ -323,7 +323,7 @@ review = "pending"
 id = "BRK-001"
 area = "brake"
 title = "남은 예산"
-statement = "월 예산은 직전 달 영업 결과의 일정 비율이다. 그 달 결산이 확정됐으면 확정 숫자를 쓰고, 판매일이 적으면 임시값으로 표시한다. 쓴 돈은 안전 관문 실행 기록과 기록된 결과로 센다. 요청이 남은 예산을 넘으면 남은 금액까지만 조건부 승인하고, 남은 금액이 최소액보다 적으면 거절한다. 직전 달이 적자면 예산이 0이다."
+statement = "월 예산은 직전 달 영업 결과의 일정 비율이다. 그 달 결산이 확정됐으면 확정 숫자를 쓰고, 판매일이 적으면 임시값으로 표시한다. 쓴 돈은 안전 관문 실행 기록과 기록된 결과로 센다. 요청이 남은 예산을 넘으면 남은 금액까지만 권하고, 남은 금액이 최소액보다 적으면 권하지 않는다. 직전 달이 적자면 예산이 0이다."
 basis = "내부 기준, [brake] budget_ratio_of_last_month, monthly_budget_krw, min_viable_krw"
 review = "pending"
 
@@ -331,7 +331,7 @@ review = "pending"
 id = "BRK-002"
 area = "brake"
 title = "연속 적자"
-statement = "같은 채널이 연속으로 정해진 횟수만큼 적자면 거절한다."
+statement = "같은 채널이 연속으로 정해진 횟수만큼 적자면 권하지 않는다."
 basis = "내부 기준, [brake] loss_streak_reject"
 review = "pending"
 
@@ -339,7 +339,7 @@ review = "pending"
 id = "BRK-003"
 area = "brake"
 title = "이달 손실 누적"
-statement = "이달 캠페인 손실 합계가 한도 이상이면 거절한다."
+statement = "이달 캠페인 손실 합계가 한도 이상이면 권하지 않는다."
 basis = "내부 기준, [brake] loss_limit_krw"
 review = "pending"
 
@@ -347,15 +347,15 @@ review = "pending"
 id = "BRK-004"
 area = "brake"
 title = "현금 흐름"
-statement = "앞으로 몇 주의 누적 순현금이 요청 금액보다 적으면 그 금액까지만 조건부 승인하고, 0 이하면 거절한다. 확인할 수 없으면 최소 금액까지만 승인한다."
+statement = "앞으로 몇 주의 누적 순현금이 요청 금액보다 적으면 그 금액까지만 권하고, 0 이하면 권하지 않는다. 확인할 수 없으면 최소 금액까지만 권한다."
 basis = "내부 기준, [brake] cash_lookahead_weeks, 13주 현금 흐름 예측"
 review = "pending"
 
 [[rules]]
 id = "BRK-005"
 area = "brake"
-title = "관문이 판단을 강제함"
-statement = "재무가 거절하거나 한도를 넘으면 안전 관문이 집행을 막는다. 건당 기준 금액 이상은 사람이 정한다. 쿠폰 발급과 환불은 이 규칙의 대상이 아니다."
+title = "재무는 의견만 냄"
+statement = "재무는 비용을 승인·반려하지 않고 의견만 낸다. 집행은 안전 관문의 금액 규칙(건당·하루 합계)과 사람이 정한다. 쿠폰 발급과 환불은 이 규칙의 대상이 아니다."
 basis = "shared/safety rules/registry.toml start_campaign, 재무 재설계의 건별 승인 제외 원칙"
 review = "expert"
 
@@ -364,7 +364,7 @@ review = "expert"
 id = "LRN-001"
 area = "lesson"
 title = "실패 이력으로 한도 축소"
-statement = "그 채널의 적자 캠페인이 교훈으로 남아 있으면 실패한 집행액에 건마다 limit_factor를 곱한 금액이 승인 한도다. floor_factor 아래로는 내리지 않는다."
+statement = "그 채널의 적자 캠페인이 교훈으로 남아 있으면 실패한 집행액에 건마다 limit_factor를 곱한 금액까지만 권한다. floor_factor 아래로는 내리지 않는다."
 basis = "내부 기준, [lessons]"
 review = "pending"
 
