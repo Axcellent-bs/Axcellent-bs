@@ -1,4 +1,4 @@
-import { skillKo, type ChatItem, type OrchIncident, type OrchStep } from "./agentChat";
+import { deptOf, skillKo, type ChatItem, type OrchIncident, type OrchStep } from "./agentChat";
 
 // AI 오피스: AI 대화방과 같은 기록(총괄 사건·안전 관문·공통 로그)을 픽셀 사무실 상태로 바꾼다.
 // 상태는 기록된 값(단계 status·말풍선 문장·facts)으로만 정하고, 화면 없는 순수 함수만 둔다.
@@ -23,8 +23,10 @@ export const DESKS: DeskDef[] = [
 ];
 
 /** 기록의 부서 이름 → 자리. 회사 기억(memory)은 데이터 부서 담당이라 데이터 자리에 앉힌다 */
-export function deskOf(dept: string | null | undefined): DeskKey | null {
-  if (!dept) return null;
+export function deskOf(name: string | null | undefined): DeskKey | null {
+  if (!name) return null;
+  // 서비스 이름(inquiry·coupon·org 등)은 먼저 부서로 (AI 대화방 이름과 같은 규칙)
+  const dept = deptOf(name);
   if (dept === "memory") return "data";
   if (dept === "safety") return "finance";
   return DESKS.some((d) => d.key === dept) ? (dept as DeskKey) : null;
