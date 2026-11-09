@@ -133,6 +133,32 @@ def test_two_stores_on_one_file_call_once(tmp_path: Path, monkeypatch: pytest.Mo
     assert fake.calls == 1
 
 
+def test_owner_finishing_between_answer_check_and_claim_is_not_called_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CI(#835 첫 실행)에서 본 틈: 기다리던 쪽이 답 없음을 본 직후 먼저 부른 쪽이 끝나면,
+    비어 있는 표시를 넘겨받아 다시 불렀다. 표시를 남긴 뒤 답을 한 번 더 본다."""
+    key = llm_inflight.request_key("test-model", Answer, "분류", None)
+
+    class Racy(llm_inflight.Inflight):
+        other: str | None = None
+        checks = 0
+
+        def answer_of(self, key: str, owners):  # noqa: ANN001, ANN201
+            got = super().answer_of(key, owners)
+            self.checks += 1
+            if self.checks == 1 and self.other:  # 확인 직후 먼저 부른 쪽이 끝남
+                self.release(key, self.other, {"x": 7})
+            return got
+
+    store = Racy(None, poll=0.01)
+    store.other = store.claim(key)  # 다른 쪽이 먼저 부르는 중
+    monkeypatch.setattr(llm_inflight, "INFLIGHT", store)
+    fake = FakeLLM(latency=0.0)
+    assert asyncio.run(_ask(_client(fake))) == 7
+    assert fake.calls == 0
+
+
 def test_lease_default_and_setting() -> None:
     assert llm_inflight.lease_seconds({}) == 120.0
     assert llm_inflight.lease_seconds({llm_inflight.LEASE_ENV: "30"}) == 30.0

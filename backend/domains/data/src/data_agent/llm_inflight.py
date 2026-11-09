@@ -4,9 +4,13 @@
 
 - 같은 요청 = 모델·응답 형식(스키마)·프롬프트·데이터 블록이 같음 (`request_key`). 이미지가
   붙은 요청은 묶지 않는다
-- 먼저 온 쪽이 표시를 남기고(`claim`) LLM을 부른다. 끝나면 답을 남기고 표시를 지운다
-- 표시를 본 요청은 직접 부르지 않고 기다렸다가, **기다리기 시작한 뒤에 남은 답**을 받는다
-  (끝난 뒤에 따로 온 같은 요청은 예전처럼 새로 부른다. 저장 재사용은 각 skill의 저장분이 맡는다)
+- 먼저 온 쪽이 표시(주인 이름 포함)를 남기고(`claim`) LLM을 부른다. 끝나면 답을 주인 이름과 같이
+  남기고 표시를 지운다 (한 번에)
+- 표시를 본 요청은 직접 부르지 않고 기다렸다가, **기다리면서 본 주인이 남긴 답**을 받는다.
+  시각으로 가르지 않는다 (Windows 시계는 15ms 단위라 끝난 직후에 따로 온 요청과 구별이 안 됨)
+  - 끝난 뒤에 따로 온 같은 요청은 주인을 본 적이 없으니 예전처럼 새로 부른다
+    (저장 재사용은 각 skill의 저장분이 맡는다)
+  - 답을 확인한 직후 주인이 끝나 표시가 비면, 표시를 남긴 뒤 그 주인의 답을 한 번 더 본다
 - 먼저 부른 쪽이 실패하면 답 없이 표시만 지운다 → 기다리던 쪽 하나가 표시를 남기고 대신 부른다
 - 표시를 남긴 프로세스가 죽으면 표시가 만료(`DATA_LLM_INFLIGHT_SECONDS`, 기본 120초)된 뒤
   대신 부른다
@@ -29,7 +33,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +73,7 @@ class Inflight:
         self.poll = poll
         self._lock = threading.Lock()
         self._marks: dict[str, tuple[str, float]] = {}
-        self._answers: dict[str, tuple[float, str]] = {}
+        self._answers: dict[str, tuple[str, float, str]] = {}
         self._conn: sqlite3.Connection | None = None
         if path is not None:
             if str(path) != ":memory:":
@@ -81,53 +85,59 @@ class Inflight:
                 self._conn.execute("CREATE TABLE IF NOT EXISTS llm_inflight (key TEXT PRIMARY KEY,"
                                    " owner TEXT NOT NULL, until REAL NOT NULL)")  # fmt: skip
                 self._conn.execute("CREATE TABLE IF NOT EXISTS llm_answers (key TEXT PRIMARY KEY,"
-                                   " at REAL NOT NULL, value TEXT NOT NULL)")  # fmt: skip
+                                   " owner TEXT NOT NULL, at REAL NOT NULL,"
+                                   " value TEXT NOT NULL)")  # fmt: skip
 
-    def claim(self, key: str, now: float | None = None) -> str | None:
-        """표시를 남긴다. 다른 쪽의 살아 있는 표시가 있으면 None. 만료된 표시는 넘겨받는다."""
+    def try_claim(self, key: str, now: float | None = None) -> tuple[str | None, str | None]:
+        """(내 주인 이름, 지금 주인 이름). 다른 쪽의 살아 있는 표시가 있으면 (None, 그 주인).
+        만료된 표시는 넘겨받는다."""
         now = time.time() if now is None else now
         owner = f"{os.getpid()}:{uuid.uuid4().hex[:12]}"
         with self._lock:
             if self._conn is None:
                 mark = self._marks.get(key)
                 if mark is not None and mark[1] >= now:
-                    return None
+                    return None, mark[0]
                 self._marks[key] = (owner, now + self.lease)
-                return owner
+                return owner, owner
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 row = self._conn.execute(
-                    "SELECT until FROM llm_inflight WHERE key = ?", (key,)
+                    "SELECT owner, until FROM llm_inflight WHERE key = ?", (key,)
                 ).fetchone()
-                if row is not None and row[0] >= now:
+                if row is not None and row[1] >= now:
                     self._conn.execute("COMMIT")
-                    return None
+                    return None, row[0]
                 self._conn.execute("INSERT OR REPLACE INTO llm_inflight VALUES (?, ?, ?)",
                                    (key, owner, now + self.lease))  # fmt: skip
                 self._conn.execute("COMMIT")
             except BaseException:
                 self._conn.execute("ROLLBACK")
                 raise
-            return owner
+            return owner, owner
+
+    def claim(self, key: str, now: float | None = None) -> str | None:
+        """표시를 남기고 내 주인 이름. 다른 쪽의 살아 있는 표시가 있으면 None."""
+        return self.try_claim(key, now)[0]
 
     def release(self, key: str, owner: str, value: Any = None) -> None:
-        """표시를 지운다. 성공했으면(`value`) 기다리던 쪽이 읽을 답을 먼저 남긴다."""
+        """표시를 지운다. 성공했으면(`value`) 기다리던 쪽이 읽을 답을 같이 남긴다 (한 번에)."""
         now = time.time()
         body = None if value is None else json.dumps(value, ensure_ascii=False, default=str)
         with self._lock:
             if self._conn is None:
                 if body is not None:
-                    self._answers[key] = (now, body)
+                    self._answers[key] = (owner, now, body)
                 if self._marks.get(key, ("",))[0] == owner:
                     del self._marks[key]
-                for k in [k for k, (at, _) in self._answers.items() if at < now - KEEP_SECONDS]:
+                for k in [k for k, (_, at, _) in self._answers.items() if at < now - KEEP_SECONDS]:
                     del self._answers[k]
                 return
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 if body is not None:
-                    self._conn.execute("INSERT OR REPLACE INTO llm_answers VALUES (?, ?, ?)",
-                                       (key, now, body))  # fmt: skip
+                    self._conn.execute("INSERT OR REPLACE INTO llm_answers VALUES (?, ?, ?, ?)",
+                                       (key, owner, now, body))  # fmt: skip
                 self._conn.execute("DELETE FROM llm_inflight WHERE key = ? AND owner = ?",
                                    (key, owner))  # fmt: skip
                 self._conn.execute("DELETE FROM llm_answers WHERE at < ?", (now - KEEP_SECONDS,))
@@ -136,17 +146,20 @@ class Inflight:
                 self._conn.execute("ROLLBACK")
                 raise
 
-    def answer_since(self, key: str, since: float) -> Any | None:
-        """`since` 뒤에 남은 답 (기다리기 시작한 뒤에 끝난 계산). 없으면 None."""
+    def answer_of(self, key: str, owners: Collection[str]) -> Any | None:
+        """`owners`(기다리면서 본 주인) 중 하나가 남긴 답. 없으면 None."""
+        if not owners:
+            return None
         with self._lock:
             if self._conn is None:
                 got = self._answers.get(key)
-                row = got if got is not None and got[0] >= since else None
+                body = got[2] if got is not None and got[0] in owners else None
             else:
                 row = self._conn.execute(
-                    "SELECT at, value FROM llm_answers WHERE key = ? AND at >= ?", (key, since)
+                    "SELECT owner, value FROM llm_answers WHERE key = ?", (key,)
                 ).fetchone()
-        return json.loads(row[1]) if row else None
+                body = row[1] if row is not None and row[0] in owners else None
+        return json.loads(body) if body is not None else None
 
     async def run[T](
         self,
@@ -156,19 +169,26 @@ class Inflight:
         load: Callable[[Any], T],
     ) -> T:
         """같은 요청이 계산 중이면 기다렸다 그 답, 아니면 표시를 남기고 `call`."""
-        since = time.time()
+        seen: set[str] = set()  # 기다리면서 본 주인
         while True:
-            owner = self.claim(key)
-            if owner is not None:
+            mine, holder = self.try_claim(key)
+            if mine is not None:
+                # 답 확인 직후 주인이 끝나 표시가 비었을 수 있다 (답 남기기·표시 지우기는 한 번에
+                # 하므로 표시를 남긴 뒤에는 그 답이 보인다) → 다시 부르지 않음
+                if (value := self.answer_of(key, seen)) is not None:
+                    self.release(key, mine)
+                    return load(value)
                 try:
                     result = await call()
                 except BaseException:
-                    self.release(key, owner)  # 답 없이 지움 → 기다리던 쪽이 대신 부른다
+                    self.release(key, mine)  # 답 없이 지움 → 기다리던 쪽이 대신 부른다
                     raise
-                self.release(key, owner, dump(result))
+                self.release(key, mine, dump(result))
                 return result
+            if holder is not None:
+                seen.add(holder)
             await asyncio.sleep(self.poll)
-            if (value := self.answer_since(key, since)) is not None:
+            if (value := self.answer_of(key, seen)) is not None:
                 return load(value)
 
 
