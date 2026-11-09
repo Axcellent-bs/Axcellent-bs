@@ -6,7 +6,7 @@
 //   - 기획서: 질문 없음 + 인사 기각 경고 없음 + 근거 있음 → 자동 확정. 아니면 AI 교차검증 대기열.
 //   - PR: 검수 통과 + 학습된 기준(경로·줄·파일·경고 없음) 안 → 자동 머지. 아니면 AI 교차검증 대기열.
 //   - 교차검증은 기획·개발이 아닌 쪽(안전 레이어가 다른 부서로 보냄)이 판단한다. 기획·개발은 자기 건을 승인하지 않는다.
-//   - 교차검증 뒤 머지 → 관찰 기간 장애·revert 없음 → 같은 경로 N건이면 기준 제안·백테스트 → 안전 장치 안 재무 AI, 밖 사람(태윤) 승인 → 정식.
+//   - 교차검증 뒤 머지 → 관찰 기간 장애·revert 없음 → 같은 경로 N건이면 기준 제안·백테스트 → 안전 장치 안 안전 관문(코드 규칙), 밖 사람(태윤) 승인 → 정식.
 //   - 되돌릴 수 없는 일(IRREVERSIBLE)은 교차검증 대신 항상 사람이 확인한다.
 //   - 사람은 사후 감사 화면에서 AI가 스스로 승인한 건을 보고, 기준을 바로 끌 수 있다.
 import { PROPOSAL_ACTIONS, PROPOSAL_ORIGIN, SEED_PROPOSALS, proposalOpen, proposalReady, reduceProposals, type Proposal, type ProposalAction } from './proposals'
@@ -265,8 +265,8 @@ export const RULE_LABEL: Record<string, string> = {
 export const CROSS_CHECK_TIMEOUT_MIN = 10
 
 // ---- 학습된 자동 처리 기준 (#191, 재현·태윤 조건). 학습 근거는 검토자 승인이 아니라 "머지 뒤 장애·revert 없음 + 관찰 기간".
-// 같은 범위에서 관찰을 통과한 머지가 OBSERVE_N건 모이면 기준을 제안하고, 넓히는 쪽은 safety 안전 장치 안이면 재무 AI
-// (review_threshold_change, #124), 밖이면 사람(태윤)이 승인한다. 좁히는 쪽(해제)은 장애·revert 연결 즉시 자동.
+// 같은 범위에서 관찰을 통과한 머지가 OBSERVE_N건 모이면 기준을 제안하고, 넓히는 쪽은 safety 안전 장치 안이면 안전 관문(코드 규칙)
+// (execute(auto_policy_update), 재무는 의견만 낸다), 밖이면 사람(태윤)이 승인한다. 좁히는 쪽(해제)은 장애·revert 연결 즉시 자동.
 export interface AutoRule {
   id: string // AR-n
   action: ReviewTarget
@@ -275,7 +275,7 @@ export interface AutoRule {
   files: number // 변경 파일 상한
   noWarn: boolean // 인사 기각 경고가 없는 문단만
   status: '승인 대기' | '정식' | '거절' | '해제됨'
-  approver: '재무 AI' | '사람 (태윤)' // 넓히기 승인 주체
+  approver: '안전 관문' | '사람 (태윤)' // 넓히기 승인 주체. 재무는 의견만 내고 승인하지 않는다
   basis: string[] // 관찰을 통과한 머지 PR
   backtest: Backtest
   runs: { pr: string; result: '정상' | '장애 연결' }[] // 이 기준으로 자동 머지한 건
@@ -288,7 +288,7 @@ export interface AutoRule {
 // 시연값. 실제 N건·관찰 기간은 safety 기준표(사람 전용 파일, #202)에 둔다
 export const OBSERVE_MIN = 2 // 머지 뒤 관찰 기간 (분)
 export const OBSERVE_N = 2 // 관찰을 통과한 머지 몇 건이면 기준 제안
-export const GUARD = { lines: 100, files: 5 } // safety 안전 장치: 이 안이면 재무 AI가, 밖이면 사람이 승인
+export const GUARD = { lines: 100, files: 5 } // safety 안전 장치: 이 안이면 안전 관문(코드 규칙)이, 밖이면 사람이 승인
 // safety 보호 경로 (#203 merge_protected_paths, 시연 경로 포함). 닿으면 항상 사람 확인이고 학습으로도 풀 수 없다
 export const PROTECTED_PATHS = ['shop-web/checkout/', 'shop-web/auth/', 'shop-web/api/', 'shop-api/db/', 'shop-api/service/', 'shop-api/promotions/', 'shop-api/payment/', '.github/', 'safety/', 'contracts/']
 export const protectedOf = (path: string) => PROTECTED_PATHS.find((x) => path.startsWith(x))
@@ -298,7 +298,7 @@ export interface AutoPolicy {
   rules: AutoRule[]
   observing: Observation[] // 교차검증 뒤 머지된 PR의 관찰 (학습 근거 후보)
   history: AutoRun[]
-  log: { t: string; text: string; by: '사람' | '자동' | '재무 AI' }[]
+  log: { t: string; text: string; by: '사람' | '자동' | '안전 관문' }[]
 }
 
 // ---- 사후 감사: AI가 스스로 승인·자동 처리한 건 (사람이 나중에 본다)
@@ -561,7 +561,7 @@ export const initialState: State = {
     { t: '10-22 08:40', ctx: 'ctx_req_0005', kind: '교차검증 승인', ref: 'PR #26', what: 'R1: 공지 배너 문구 2줄 수정', basis: '기준 밖(2파일) · 데이터분석 근거: 같은 경로 최근 30일 장애 0건', verifier: '데이터분석 + 총괄 (둘 다 승인)', result: '머지 · 관찰 시작' },
     { t: '10-22 09:30', ctx: 'ctx_req_0010', kind: '교차검증 거절', ref: 'PR #31', what: 'R2: 쿠폰 적용 순서 변경', basis: '쿠폰 지급 로직(promotions.py) 보호 경로 · 데이터분석: 같은 경로 최근 24시간 쿠폰 주문 이상', verifier: '총괄 + 데이터분석 근거 → 사람 확인', result: '거절 → 작업 반려, 사람 확인' },
     { t: '10-22 11:10', ctx: 'ctx_req_0005', kind: '관찰 통과', ref: 'PR #26', what: '공지 배너 문구 2줄 수정', basis: '머지 뒤 관찰 2분 · 장애·revert 0건', verifier: '안전 레이어 관찰 기록', result: '학습 근거 1건 추가' },
-    { t: '10-22 11:15', ctx: 'ctx_req_0005', kind: '기준 제안', ref: 'AR-2', what: 'shop-web/notice/ 40줄·3파일 이하 자동 머지', rule: 'AR-2', basis: '관찰 통과 머지 2건(PR #24·#26) · 백테스트 장애 0건', verifier: '재무 AI review_threshold_change (안전 장치 안)', result: '승인 대기' },
+    { t: '10-22 11:15', ctx: 'ctx_req_0005', kind: '기준 제안', ref: 'AR-2', what: 'shop-web/notice/ 40줄·3파일 이하 자동 머지', rule: 'AR-2', basis: '관찰 통과 머지 2건(PR #24·#26) · 백테스트 장애 0건', verifier: '안전 관문 코드 규칙 (안전 장치 안)', result: '승인 대기' },
     { t: '10-22 13:02', ctx: 'ctx_inc_0001', kind: '기준 해제', ref: 'AR-1', what: '자동 머지 기준 AR-1 끔', rule: 'AR-1', basis: '이 기준으로 머지한 경로에서 장애 연결 (ctx_inc_0001)', verifier: '안전 레이어 자동 축소', result: '해제 → 같은 경로는 다시 교차검증' },
   ],
   draftsIn: 2,
@@ -571,7 +571,7 @@ export const initialState: State = {
   autoPolicy: {
     rules: [
       {
-        id: 'AR-1', action: 'merge_pr', path: 'shop-web/', lines: 30, files: 2, noWarn: true, status: '정식', approver: '재무 AI',
+        id: 'AR-1', action: 'merge_pr', path: 'shop-web/', lines: 30, files: 2, noWarn: true, status: '정식', approver: '안전 관문',
         basis: ['PR #24', 'PR #25'], backtest: { checked: 5, covered: 3, conflicts: [] },
         runs: [{ pr: 'PR #26', result: '정상' }, { pr: 'PR #27', result: '정상' }],
         t: '10-20 16:10', decidedAt: '10-20 16:11', decideWhy: '안전 장치(100줄·5파일) 안 · 백테스트 충돌 0건',
@@ -584,7 +584,7 @@ export const initialState: State = {
     ],
     log: [
       { t: '10-20 16:10', text: 'PR #24·PR #25 관찰 기간 장애·revert 없음 → 기준 AR-1(shop-web/ 30줄·2파일 이하 · 경고 없음) 제안, 백테스트 충돌 0건', by: '자동' },
-      { t: '10-20 16:11', text: 'AR-1 안전 장치 안 → 재무 AI review_threshold_change 승인 → 정식', by: '재무 AI' },
+      { t: '10-20 16:11', text: 'AR-1 안전 장치 안 → 안전 관문 코드 규칙 승인 → 정식', by: '안전 관문' },
     ],
   },
 }
@@ -637,7 +637,7 @@ export type Action =
   | { type: 'mergePr'; pr: string } // 사람 머지 (서버 액션, 누구나)
   | { type: 'humanDecide'; review: string; ok: boolean } // 되돌릴 수 없는 일만
   | { type: 'disableRule'; rule: string } // 기준 끄기 (승인 없이 바로)
-  | { type: 'decideRule'; rule: string; ok: boolean } // 기준 넓히기 판단 (재무 AI 또는 사람, 시뮬레이터가 보낸다)
+  | { type: 'decideRule'; rule: string; ok: boolean } // 기준 넓히기 판단 (안전 관문 또는 사람, 시뮬레이터가 보낸다)
   // 소통
   | { type: 'postMessage'; thread: string; text: string }
   | { type: 'deptChat'; from: Dept }
@@ -990,7 +990,7 @@ function observeStep(s: State): State {
   }
 }
 
-// 같은 경로에서 관찰을 통과한 머지가 OBSERVE_N건 모이면 기준을 제안한다 (백테스트 → 안전 장치 안이면 재무 AI, 밖이면 사람)
+// 같은 경로에서 관찰을 통과한 머지가 OBSERVE_N건 모이면 기준을 제안한다 (백테스트 → 안전 장치 안이면 안전 관문, 밖이면 사람)
 function proposeStep(s: State): State {
   const pol = s.autoPolicy
   const used = new Set(pol.rules.flatMap((r) => r.basis))
@@ -1006,7 +1006,7 @@ function proposeStep(s: State): State {
   const conflicts = covered.filter((x) => x.result !== '정상')
   const backtest: Backtest = { checked: records.length, covered: covered.length, conflicts: conflicts.map((x) => `${x.pr} ${x.result}`) }
   const inGuard = cand.lines <= GUARD.lines && cand.files <= GUARD.files
-  const approver: AutoRule['approver'] = inGuard ? '재무 AI' : '사람 (태윤)'
+  const approver: AutoRule['approver'] = inGuard ? '안전 관문' : '사람 (태윤)'
   const id = `AR-${nextNum(pol.rules.map((x) => x.id))}`
   const t = now()
   const basis = group.map((x) => x.pr)
@@ -1014,7 +1014,7 @@ function proposeStep(s: State): State {
   const rule: AutoRule = { id, action: 'merge_pr', ...cand, status: refused ? '거절' : '승인 대기', approver, basis, backtest, runs: [], t, ...(refused ? { decidedAt: t, decideWhy: refused } : {}) }
   const head = `${basis.join('·')} 관찰 통과 → 기준 ${id}(${ruleText(cand)}) 제안 · 과거 ${backtest.checked}건 대조`
   const ask: Activity = inGuard
-    ? { t, ctx: 'auto_policy', from: 'planning', to: 'finance', point: 'review_threshold_change', kind: 'A2A', grade: 'B', text: `기준 ${id}(${ruleText(cand)}) 넓히기 요청 · 근거 ${basis.join(', ')} 관찰 통과 · 안전 장치(${GUARD.lines}줄·${GUARD.files}파일) 안` }
+    ? { t, ctx: 'auto_policy', from: 'planning', to: 'safety', point: 'execute(auto_policy_update)', kind: 'execute', grade: 'B', text: `기준 ${id}(${ruleText(cand)}) 넓히기 요청 · 근거 ${basis.join(', ')} 관찰 통과 · 안전 장치(${GUARD.lines}줄·${GUARD.files}파일) 안` }
     : { t, ctx: 'auto_policy', from: 'planning', to: 'safety', point: 'threshold_change.request', kind: 'A2A', grade: 'C', text: `기준 ${id}(${ruleText(cand)}) 넓히기 요청 · 안전 장치 밖이라 사람(태윤) 승인` }
   return {
     ...s,
@@ -1024,18 +1024,18 @@ function proposeStep(s: State): State {
   }
 }
 
-// 기준 넓히기 판단: 재무 AI(안전 장치 안) 또는 사람(태윤, 밖). 다른 부서 시뮬레이터가 보낸다
+// 기준 넓히기 판단: 안전 관문(안전 장치 안, 코드 규칙) 또는 사람(태윤, 밖). 다른 부서 시뮬레이터가 보낸다
 function decideRule(s: State, ruleId: string, ok: boolean): State {
   const r = s.autoPolicy.rules.find((x) => x.id === ruleId)
   if (!r || r.status !== '승인 대기') return s
   const t = now()
-  const ai = r.approver === '재무 AI'
+  const ai = r.approver === '안전 관문'
   const why = ok ? (ai ? `안전 장치(${GUARD.lines}줄·${GUARD.files}파일) 안 · 백테스트 충돌 0건` : '사람(태윤) 확인') : '넓히지 않음'
   return {
     ...s,
-    autoPolicy: { ...s.autoPolicy, rules: s.autoPolicy.rules.map((x) => (x.id === ruleId ? { ...x, status: ok ? '정식' : '거절', decidedAt: t, decideWhy: why } : x)), log: [...s.autoPolicy.log, { t, text: `${ruleId} ${r.approver} ${ok ? '승인 → 정식' : '거절'} (${why})`, by: ai ? '재무 AI' : '사람' }] },
-    audit: [...s.audit, { t, ctx: 'auto_policy', kind: ok ? '기준 정식' : '학습 거부', ref: ruleId, what: `PR 머지 · ${ruleText(r)}`, rule: ruleId, basis: r.basis.join(', '), verifier: ai ? '재무 review_threshold_change' : '사람 (태윤)', result: ok ? '정식' : '거절' }],
-    activity: [...s.activity, { t, ctx: 'auto_policy', from: ai ? 'finance' : 'human', to: 'planning', point: ai ? 'review_threshold_change' : '사람 확인', kind: ai ? 'A2A' : '사람', text: `기준 ${ruleId} ${ok ? '승인' : '거절'} (${why})` }],
+    autoPolicy: { ...s.autoPolicy, rules: s.autoPolicy.rules.map((x) => (x.id === ruleId ? { ...x, status: ok ? '정식' : '거절', decidedAt: t, decideWhy: why } : x)), log: [...s.autoPolicy.log, { t, text: `${ruleId} ${r.approver} ${ok ? '승인 → 정식' : '거절'} (${why})`, by: ai ? '안전 관문' : '사람' }] },
+    audit: [...s.audit, { t, ctx: 'auto_policy', kind: ok ? '기준 정식' : '학습 거부', ref: ruleId, what: `PR 머지 · ${ruleText(r)}`, rule: ruleId, basis: r.basis.join(', '), verifier: ai ? '안전 관문 코드 규칙' : '사람 (태윤)', result: ok ? '정식' : '거절' }],
+    activity: [...s.activity, { t, ctx: 'auto_policy', from: ai ? 'safety' : 'human', to: 'planning', point: ai ? 'execute(auto_policy_update)' : '사람 확인', kind: ai ? 'execute' : '사람', text: `기준 ${ruleId} ${ok ? '승인' : '거절'} (${why})` }],
   }
 }
 
