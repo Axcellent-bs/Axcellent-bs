@@ -18,6 +18,7 @@
       "allowed_requesters": [
         "orchestrator",
         "planning",
+        "dev",
         "support",
         "marketing",
         "finance",

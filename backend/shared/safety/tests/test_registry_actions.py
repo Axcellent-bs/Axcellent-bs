@@ -807,3 +807,23 @@ async def test_planning_and_dev_do_not_share_actions(gate: Gate, act, action: st
     """기획과 개발은 다른 부서다. 서로의 액션을 부서 이름으로 빌려 쓰지 못한다."""
     decision = await gate.execute(act(action, requester, f"cross-{action}-{requester}"))
     assert (decision.status, decision.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["hr", "planning", "dev"])
+async def test_record_case_is_a_for_hr_planning_and_dev(gate: Gate, act, requester: str) -> None:
+    """기획·개발은 PR 머지·요청 완료를 인사에 보내기 전에 record_case 관문을 거친다 (#881)."""
+    ok = await gate.execute(act("record_case", requester, f"rc-{requester}"))
+    assert (ok.grade, ok.status) == ("A", "executed")
+    other = await gate.execute(act("record_case", "support", "rc-support"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["planning", "dev"])
+async def test_create_ticket_is_a_for_planning_and_dev(gate: Gate, act, requester: str) -> None:
+    """재발 방지 요청 접수: 개발도 사건 연결(link_incident, follow_up_title)에서 직접 접수한다."""
+    ok = await gate.execute(act("create_ticket", requester, f"tkt-{requester}"))
+    assert (ok.grade, ok.status) == ("A", "executed")
+    other = await gate.execute(act("create_ticket", "support", "tkt-support"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
