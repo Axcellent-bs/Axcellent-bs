@@ -153,3 +153,59 @@ def test_starting_the_server_prepares_the_first_screens(monkeypatch: pytest.Monk
             assert first.headers["x-finance-cache"] == "hit"
 
     asyncio.run(run())
+
+
+def _a2a_body(skill: str = "finance_chat_list") -> dict:
+    from datetime import UTC, datetime, timedelta
+
+    return {
+        "meta": {
+            "context_id": "ctx_cache_a2a",
+            "token": "mock:dashboard-api",
+            "path": [],
+            "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
+        },
+        "skill": skill,
+        "input": {"who": "taeyoon"},
+    }
+
+
+def test_a2a_that_changes_nothing_keeps_remembered_screens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """대화방은 2초마다 A2A로 대화를 다시 읽는다. 그때마다 화면 기억을 버리면 화면이 늘 느리다."""
+    monkeypatch.setattr(sc, "_records_fingerprint", lambda: "same")
+
+    async def run() -> None:
+        async with _client() as c:
+            await c.get("/api/finance/variance")
+            await c.post("/a2a", json=_a2a_body())
+            assert sc.CACHE.entries
+            again = await c.get("/api/finance/variance")
+            assert again.headers["x-finance-cache"] == "hit"
+
+    asyncio.run(run())
+
+
+def test_a2a_that_changes_records_drops_remembered_screens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marks = iter(["before", "after"])
+    monkeypatch.setattr(sc, "_records_fingerprint", lambda: next(marks))
+
+    async def run() -> None:
+        async with _client() as c:
+            await c.get("/api/finance/variance")
+            await c.post("/a2a", json=_a2a_body())
+            assert not sc.CACHE.entries
+
+    asyncio.run(run())
+
+
+def test_records_fingerprint_follows_finance_records() -> None:
+    from finance_agent import persist
+
+    before = persist.fingerprint(handlers.state())
+    assert persist.fingerprint(handlers.state()) == before
+    handlers.state().records.recon_notes["pay_x"] = "확인함"
+    assert persist.fingerprint(handlers.state()) != before

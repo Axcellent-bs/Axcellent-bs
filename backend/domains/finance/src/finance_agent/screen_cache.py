@@ -10,7 +10,9 @@
   만든다. `MAX_STALE_SECONDS`가 지난 응답은 주지 않고 새로 만든다. 언제 모은 자료인지는
   응답의 `meta.collected_at`에 그대로 있다
 - 새 장부가 모이면 최근 `WARM_WINDOW_SECONDS` 안에 누가 본 화면을 뒤에서 미리 다시 만든다
-- GET이 아닌 요청(사람 결정·A2A)이 오면 기억한 응답을 모두 버린다. 결정한 뒤 화면은 새로 계산한다
+- GET이 아닌 요청(사람 결정)이 오면 기억한 응답을 모두 버린다. 결정한 뒤 화면은 새로 계산한다
+- A2A(`/a2a`)는 재무 기록(`persist.fingerprint`)이 바뀐 경우에만 버린다. 대화방 읽기·보내기·
+  조회 skill은 기록을 바꾸지 않아 기억한 화면을 그대로 둔다
 """
 
 from __future__ import annotations
@@ -142,6 +144,13 @@ def _books_id() -> int | None:
     return id(cached[1]) if cached else None
 
 
+def _records_fingerprint() -> str:
+    from finance_agent import persist
+    from finance_agent.handlers import state
+
+    return persist.fingerprint(state())
+
+
 def _key(request: Request) -> str:
     query = sorted(request.query_params.multi_items())
     return request.url.path + ("?" + "&".join(f"{k}={v}" for k, v in query) if query else "")
@@ -187,8 +196,16 @@ def add_screen_cache(app: FastAPI) -> None:
     @app.middleware("http")
     async def screen_cache(request: Request, call_next: Any) -> Response:
         if request.method not in ("GET", "HEAD", "OPTIONS"):
+            if request.url.path == "/a2a" and enabled():
+                # A2A는 대화 읽기·보내기처럼 기록을 바꾸지 않는 요청이 대부분이다(대화방은 2초마다
+                # 대화를 다시 읽는다). 재무 기록이 실제로 바뀐 경우에만 버린다
+                before = _records_fingerprint()
+                response = await call_next(request)
+                if _records_fingerprint() != before:
+                    CACHE.clear()
+                return response
             response = await call_next(request)
-            CACHE.clear()  # 사람 결정·A2A 뒤 화면은 새로 계산한다
+            CACHE.clear()  # 사람 결정 뒤 화면은 새로 계산한다
             return response
         if request.url.path not in CACHED or not enabled():
             return await call_next(request)
