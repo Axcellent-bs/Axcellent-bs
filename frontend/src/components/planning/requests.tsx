@@ -270,7 +270,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
                   {row.dups.map((x) => (
                     <span key={x.id} className="rq-dup">
                       같은 요청 <Ref s={s} id={x.id} /> {DEPT_NAME[x.from]}
-                      <button type="button" className="rq-unlink" title={`${x.id}을 따로 기획`} onClick={() => { d({ type: 'unlinkDuplicate', request: x.id }); toast.show(`${x.id} 따로 기획`) }}>풀기</button>
+                      <button type="button" className="rq-unlink" title={`${idText(x.id)}을 따로 기획`} onClick={() => { d({ type: 'unlinkDuplicate', request: x.id }); toast.show(`${idText(x.id)} 따로 기획`) }}>풀기</button>
                     </span>
                   ))}
                   {byRelation(r.related).slice(0, 2).map((x) => (
@@ -289,12 +289,12 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
               <td className="rq-td-time" title={row.born ? `접수 ${row.born}` : undefined}>{row.minutes > 0 ? duration(row.minutes) : ''}</td>
               <td className="rq-td-next">
                 {!row.finished && !dropped && (
-                  <button type="button" className="rq-stop" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${r.id} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</button>
+                  <button type="button" className="rq-stop" onClick={() => { d({ type: r.paused ? 'resumeRequest' : 'pauseRequest', request: r.id }); toast.show(`${idText(r.id)} ${r.paused ? '재개' : '중단'}`) }}>{r.paused ? '재개' : '중단'}</button>
                 )}
                 {draft && (r.from === 'hr' || r.from === 'data') && r.state === '접수' ? (
-                  <Button size="small" variant="primary" onClick={() => { d({ type: 'acceptDraft', request: r.id }); toast.show(`${r.id} 채택 · 기획서 초안`) }}>채택 · 초안</Button>
+                  <Button size="small" variant="primary" onClick={() => { d({ type: 'acceptDraft', request: r.id }); toast.show(`${idText(r.id)} 채택 · 기획서 초안`) }}>채택 · 초안</Button>
                 ) : draft ? (
-                  <Button size="small" variant="primary" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${r.id} 기획서 초안`) }}>기획서 초안</Button>
+                  <Button size="small" variant="primary" onClick={() => { d({ type: 'writeSpec', request: r.id }); toast.show(`${idText(r.id)} 기획서 초안`) }}>기획서 초안</Button>
                 ) : (
                   <a href={href} className={row.finished || dropped ? 'rq-go muted' : 'rq-go'}>{(row.finished || dropped ? '진행 기록' : next.label).replace(/\s*\(.*\)$/, '')} ›</a>
                 )}

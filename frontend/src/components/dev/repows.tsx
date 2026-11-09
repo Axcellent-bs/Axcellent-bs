@@ -10,6 +10,7 @@ import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type
 import { layoutGraph, laneColor, type GraphRow } from '@/components/dev/graphlayout'
 import { prSlug, toPath, go, idText } from '@/components/planning-common/links'
 import { Work } from '@/components/dev/work'
+import { humanizePlanIds } from '@/lib/format'
 
 // ---------------------------------------------------------------- 공용
 
@@ -66,7 +67,7 @@ function Branches({ head, base }: { head: string; base: string }) {
   return <span className="rp-br"><code>{head}</code><span aria-hidden>→</span><code>{base}</code></span>
 }
 function AiTag({ id }: { id: string }) {
-  return <a href={toPath(`work/prs/${prSlug(id)}`)} className="grade rp-ai" title={`내부 ${id}`}>AI · {id}</a>
+  return <a href={toPath(`work/prs/${prSlug(id)}`)} className="grade rp-ai" title={`내부 ${idText(id)}`}>AI · {id}</a>
 }
 
 /** 지우기·머지 같은 되돌리기 어려운 일 확인 창. 내용은 라벨·값 줄로만 */
@@ -205,7 +206,7 @@ function ExampleBoard({ s, repo }: { s: S; repo: string }) {
                 <span className="rp-main">
                   <span className="rp-title">
                     {p.title.replace(/^[A-Z]\d+: /, '')}
-                    <span className="grade rp-ai">AI · {p.task}</span>
+                    <span className="grade rp-ai" title={p.task}>AI · {idText(p.task)}</span>
                     {p.target?.status === 'proposed' && <span className="tag">레포 승인 대기</span>}
                   </span>
                   <span className="rp-meta">
@@ -413,7 +414,7 @@ function IssueView({ conn, number }: { conn: string; number: number }) {
           {x.comments.map((c) => (
             <article key={c.id} className="rp-cmt-box">
               <div className="rp-cmt-h"><b>{c.author || '-'}</b><span>{ago(c.at)}</span></div>
-              <div className="rp-cmt-body">{c.body}</div>
+              <div className="rp-cmt-body">{humanizePlanIds(c.body)}</div>
             </article>
           ))}
           {!x.read_only && (
@@ -576,7 +577,7 @@ function Talk({ x, api, readOnly, onDone }: { x: RepoPrDetail; api: ReturnType<t
       {x.comments.map((c) => (
         <article key={c.id} className="rp-cmt-box">
           <div className="rp-cmt-h"><b>{c.author || '-'}</b><span>{ago(c.at)}</span></div>
-          <div className="rp-cmt-body">{c.body}</div>
+          <div className="rp-cmt-body">{humanizePlanIds(c.body)}</div>
         </article>
       ))}
       {!readOnly && (
@@ -599,7 +600,7 @@ function Commits({ x }: { x: RepoPrDetail }) {
         return (
           <li key={c.sha}>
             <div className="rp-commit-main">
-              <b>{first}</b>
+              <b>{humanizePlanIds(first)}</b>
               {rest.join('\n').trim() && <span className="muted small">…</span>}
               <span className="rp-meta">{c.author && <span>{c.author}</span>}<span>{ago(c.at)}</span></span>
             </div>
@@ -796,7 +797,7 @@ function GraphView({ conn, sel }: { conn: string; sel?: string }) {
                     <td className="rg-msg">
                       <span className="rg-msg-in">
                         <Labels c={c} base={base} />
-                        <span className="rg-text" title={c.message}>{c.message.split('\n')[0]}</span>
+                        <span className="rg-text" title={c.message}>{humanizePlanIds(c.message.split('\n')[0])}</span>
                       </span>
                     </td>
                     <td className="rg-author">{c.author || '-'}</td>

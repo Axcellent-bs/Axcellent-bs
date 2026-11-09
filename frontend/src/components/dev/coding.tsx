@@ -7,7 +7,8 @@ import { DEV_API, PlanningApiError, approveReview, devTaskApi, planningApi, useC
 import { State, Tag } from '@/components/planning-common/parts'
 import { Step } from '@/components/planning-common/flow'
 import './usage.css'
-import { Ref } from '@/components/planning-common/links'
+import { Ref, idText } from '@/components/planning-common/links'
+import { humanizePlanIds } from '@/lib/format'
 
 const api = devTaskApi(DEV_API)
 const actions = planningApi(DEV_API)
@@ -67,7 +68,7 @@ export function ReturnButton({ task }: { task: Task }) {
     setBusy(true)
     try {
       await api.returnToPlanning(task.id, to, reason.trim())
-      toast.show(`${task.id} 기획에 돌려보냄`)
+      toast.show(`${idText(task.id)} 기획에 돌려보냄`)
       setOpen(false)
       setReason('')
     } catch (x) {
@@ -94,11 +95,11 @@ export function DiscardButton({ task }: { task: Task }) {
   const [busy, setBusy] = useState(false)
   if (!canDiscard(task)) return null
   const discard = async () => {
-    if (!window.confirm(`${task.id} 작업을 폐기할까요? 다시 돌릴 수 없어요.`)) return
+    if (!window.confirm(`${idText(task.id)} 작업을 폐기할까요? 다시 돌릴 수 없어요.`)) return
     setBusy(true)
     try {
       await api.discard(task.id)
-      toast.show(`${task.id} 폐기`)
+      toast.show(`${idText(task.id)} 폐기`)
     } catch (x) {
       toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
     } finally {
@@ -114,11 +115,11 @@ export function CancelButton({ taskId, status }: { taskId: string; status?: Codi
   const [busy, setBusy] = useState(false)
   if (!canCancel(status)) return null
   const cancel = async () => {
-    if (!window.confirm(`${taskId} 작업을 중단할까요? 열린 PR은 닫고 브랜치를 지워요.`)) return
+    if (!window.confirm(`${idText(taskId)} 작업을 중단할까요? 열린 PR은 닫고 브랜치를 지워요.`)) return
     setBusy(true)
     try {
       await api.cancel(taskId)
-      toast.show(`${taskId} 중단`)
+      toast.show(`${idText(taskId)} 중단`)
     } catch (x) {
       toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
     } finally {
@@ -137,7 +138,7 @@ export function ResumeButton({ taskId, status, discarded }: { taskId: string; st
     setBusy(true)
     try {
       await api.retry(taskId)
-      toast.show(`${taskId} 재개`)
+      toast.show(`${idText(taskId)} 재개`)
     } catch (x) {
       toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
     } finally {
@@ -229,7 +230,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
     if (note.trim() && await act(() => api.revise(task.id, note.trim()), `${c.pr} 추가 지시 보냄`)) setNote('')
   }
   const merge = () => {
-    if (c.pr && window.confirm(`${c.pr}를 머지할까요? 자동 머지 기준 밖이라 사람이 머지한 것으로 기록돼요.`)) {
+    if (c.pr && window.confirm(`${idText(c.pr)}를 머지할까요? 자동 머지 기준 밖이라 사람이 머지한 것으로 기록돼요.`)) {
       void act(() => actions.action({ type: 'mergePr', pr: c.pr! }), `${c.pr} 머지`)
     }
   }
@@ -240,7 +241,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
     setBusy(true)
     try {
       await api.retry(task.id)
-      toast.show(`${task.id} 다시 시작`)
+      toast.show(`${idText(task.id)} 다시 시작`)
     } catch (x) {
       toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
     } finally {
@@ -254,14 +255,14 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
   const warns = c.textWarnings ?? []
   const textHeld = c.mode === 'subscription' && c.status === 'queued' && warns.length > 0 && !c.textOkBy
   const textOk = () => {
-    if (window.confirm(`${task.id} 작업 글을 확인했나요? 경고: ${warns.join(', ')}`)) {
+    if (window.confirm(`${idText(task.id)} 작업 글을 확인했나요? 경고: ${warns.join(', ')}`)) {
       void act(() => api.textOk(task.id), `${task.id} 작업 글 확인함`)
     }
   }
   // 바뀐 내용이 없어 멈춤: 앞 작업이 이미 반영했으면 사람이 PR 없이 완료로 닫는다
   const noChange = !c.pr && (c.status === 'failed' || c.status === 'waiting_human') && (c.error ?? '').includes('바뀐 내용이 없음')
   const closeCovered = () => {
-    if (window.confirm(`${task.id}를 앞 작업이 이미 반영한 것으로 닫을까요? PR 없이 완료돼요.`)) {
+    if (window.confirm(`${idText(task.id)}를 앞 작업이 이미 반영한 것으로 닫을까요? PR 없이 완료돼요.`)) {
       void act(() => api.closeCovered(task.id), `${task.id} 이미 반영됨으로 닫음`)
     }
   }
@@ -298,7 +299,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
         )}
         {c.status === 'covered' && <Tag tone="green">PR 없음 · {c.coveredBy?.length ? `${c.coveredBy.join(', ')}가 반영` : '앞 작업에 이미 들어감'}</Tag>}
       </span>
-      {c.summary && <p>{c.summary}</p>}
+      {c.summary && <p>{humanizePlanIds(c.summary)}</p>}
       {c.mode === 'subscription' && c.progress && <p className="muted pre-line">{c.progress}</p>}
       {!!files.length && (
         <div className="table-wrap">
@@ -309,7 +310,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
                 <tr key={x.path}>
                   <td className="mono path-cell">{x.path}</td>
                   <td className="num mono"><span className="tag-green">+{x.additions}</span> <span className="tag-amber">−{x.deletions}</span></td>
-                  <td className="small why-cell">{x.reason}</td>
+                  <td className="small why-cell">{humanizePlanIds(x.reason)}</td>
                 </tr>
               ))}
             </tbody>

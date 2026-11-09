@@ -2,6 +2,7 @@
 // 모든 연결은 문단 id로 이어져 있어서 코드 규칙으로만 따라간다 (LLM 없음).
 import type { PR, State } from '@/lib/planningData'
 import { toPath } from '@/components/planning-common/links'
+import { humanizePlanIds } from '@/lib/format'
 
 export interface CodeLine { path: string; line: number; text: string }
 export interface TraceStep { kind: '코드' | 'PR' | '작업' | '문단' | '결정' | '기각 이력' | '기획서' | '요청' | '근거' | '장애'; title: string; detail?: string; href?: string }
@@ -61,5 +62,5 @@ export function traceText(steps: TraceStep[]): string {
   if (dec.length) parts.push(`관련 결정은 ${dec.map((d) => `${d.title} (${d.detail})`).join(', ')}입니다.`)
   const req = pick('요청')[0]
   if (req) parts.push(`출발점은 ${req.title}이고 근거는 ${req.detail?.split(' · ')[1] ?? '기록 없음'}입니다.`)
-  return parts.join(' ')
+  return humanizePlanIds(parts.join(' '))
 }

@@ -10,6 +10,7 @@ import { Linked, Ref, convoHref, hrefOf, prFromSlug, prName, prSlug, repoPrHref,
 import { Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from '@/components/planning-common/flow'
 import { RepoTargetBlock } from '@/components/planning-common/repo'
 import { CodingLabel, CodingStep, OriginTag, RelatedTags, codingState, isRunning } from '@/components/dev/coding'
+import { humanizePlanIds } from '@/lib/format'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -93,8 +94,8 @@ function Waiting({ s, d, r }: P & { r: CrossReview }) {
       ]} />
       {!!r.evidence?.length && <EvidenceList lines={r.evidence} />}
       <div className="actions">
-        <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: r.id, ok: true }); toast.show(`${r.ref} 진행`) }}>확인하고 진행</Button>
-        {r.lane === 'human' && <Button onClick={() => { d({ type: 'humanDecide', review: r.id, ok: false }); toast.show(`${r.ref} 보류`) }}>보류</Button>}
+        <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: r.id, ok: true }); toast.show(`${idText(r.ref)} 진행`) }}>확인하고 진행</Button>
+        {r.lane === 'human' && <Button onClick={() => { d({ type: 'humanDecide', review: r.id, ok: false }); toast.show(`${idText(r.ref)} 보류`) }}>보류</Button>}
         {prHref && <a href={prHref} className="btn-quiet px-3 py-1">{r.target === 'merge_pr' ? 'PR에서 수정 요청' : '기획서 보기'}</a>}
       </div>
     </>
@@ -160,7 +161,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
     >
       <Flow>
         <Step name="작업" on href={task ? toPath(`work/specs/${task.spec}/${task.para}`) : undefined} title={task ? <><span className="mono idc" title={task.id}>{idText(task.id)}</span> <span className="mono idc" title={task.spec}>{idText(task.spec)} {task.para}</span></> : '-'}>
-          {para && <p>{para.text}</p>}
+          {para && <p>{humanizePlanIds(para.text)}</p>}
           {para?.warn && <Tag tone="amber">경고 {para.warn.card}</Tag>}
           {para?.incident && <Tag tone="amber">장애 {para.incident}</Tag>}
         </Step>
@@ -183,7 +184,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
             </Step>
           )
         })()}
-        <Step name="머지" on={sel.merged} href={sel.url || (xr ? toPath(`work/reviews/${xr.id}`) : undefined)} title={sel.merged ? mergedLabel(sel) : xr ? `${waitLabel(xr)} · ${xr.id}` : rejected ? '검증자 거절' : '머지 기다림'}>
+        <Step name="머지" on={sel.merged} href={sel.url || (xr ? toPath(`work/reviews/${xr.id}`) : undefined)} title={sel.merged ? mergedLabel(sel) : xr ? `${waitLabel(xr)} · ${idText(xr.id)}` : rejected ? '검증자 거절' : '머지 기다림'}>
           {xr && <p className="muted">{xr.verifier}</p>}
         </Step>
       </Flow>
@@ -192,7 +193,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
 }
 
 /** 글 안의 코드 번호(T-·SPEC-·REQ-·PR #)만 칩으로. 링크 안에서도 쓸 수 있게 링크는 만들지 않는다 */
-const CODE_RE = /(REQ-\d+|SPEC-[A-Z]?\d+(?: R\d+)?|T-[A-Z]?\d+|PR #\d+|PROP-\d+)/
+const CODE_RE = /(REQ-\d+|SPEC-[A-Z]?\d+(?: R\d+)?|T-[A-Z]?\d+|PR #\d+|PROP-\d+|DOC-\d+|DEP-\d+|XR-\d+|AR-\d+)/
 /** 줄바꿈(\n)과 " · "로 이어 붙인 항목(문제: … · 목표: …)을 줄로 나눠 보여 준다 */
 export const Lines = ({ text }: { text: string }) => <>{text.split(/\n|\s+·\s+/).filter(Boolean).map((x, i) => <span key={i} className="dev-line"><Chipped text={x} /></span>)}</>
 const Chipped = ({ text }: { text: string }) => <>{text.split(CODE_RE).map((x, i) => (i % 2 ? <span key={i} className="mono idc" title={x}>{idText(x)}</span> : x))}</>
@@ -284,11 +285,11 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
           const o = s.autoPolicy.observing.find((x) => x.pr === r.ref)
           const rule = s.autoPolicy.rules.find((x) => x.basis.includes(r.ref))
           return (
-            <Step name="머지 뒤 지켜보기" on={o?.result === '정상'} href={rule ? hrefOf(s, rule.id) : undefined} title={!o ? '-' : rule ? `${rule.id} ${rule.status}` : o.result}>
+            <Step name="머지 뒤 지켜보기" on={o?.result === '정상'} href={rule ? hrefOf(s, rule.id) : undefined} title={!o ? '-' : rule ? `${idText(rule.id)} ${rule.status}` : o.result}>
               {o && (
                 <Pairs items={[
                   ['머지', o.mergedAt],
-                  ['지켜본 시간', `${OBSERVE_MIN}분 · ${o.result}`],
+                  ['지켜본 시간', `${OBSERVE_MIN}분 · ${humanizePlanIds(o.result)}`],
                   ...(rule ? [['기준', <Ref key="r" s={s} id={rule.id} />] as [string, ReactNode]] : []),
                 ]} />
               )}

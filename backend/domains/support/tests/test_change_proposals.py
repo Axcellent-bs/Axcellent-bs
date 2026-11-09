@@ -6,11 +6,11 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from support_agent import guard, handlers, proposal_rules
+from support_agent import guard, handlers, insights, proposal_rules
 from support_agent.change_requests import ChangeRequestStore
 from support_agent.insight_schemas import SurgeReport, TopicSurge
 from support_agent.main import ALL_HANDLERS, app, load_card
-from support_agent.schemas import Analysis, Classification
+from support_agent.schemas import Analysis, Classification, Triage
 from support_agent.store import InquiryStore
 
 NOW = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
@@ -122,6 +122,79 @@ def test_titles_and_evidence_always_pass_the_request_change_pii_check() -> None:
         assert len(p.title) <= 200 and len(p.evidence) <= 500 and len(p.evidence_ids) <= 20
 
 
+def test_the_causes_the_agents_named_are_added_to_the_evidence() -> None:
+    labels = {"shipping": [("택배사 연동 오류", 4), ("주소 입력 화면 오류", 2)]}
+    out = proposal_rules.build(
+        report(surge()), has_request=never, labels_for=lambda t: labels.get(t, [])
+    )
+    evidence = out.proposals[0].evidence
+    assert evidence.startswith("최근 60분 배송 문의 7건")  # 기존 근거는 그대로 앞에 있다
+    assert evidence.endswith("상담원이 정한 원인: 택배사 연동 오류 4건, 주소 입력 화면 오류 2건")
+
+
+def test_without_named_causes_the_evidence_is_unchanged() -> None:
+    plain = proposal_rules.build(report(surge()), has_request=never).proposals[0].evidence
+    other = (
+        proposal_rules.build(report(surge()), has_request=never, labels_for=lambda _t: [])
+        .proposals[0]
+        .evidence
+    )
+    assert other == plain and "상담원이 정한 원인" not in plain
+
+
+def test_a_cause_name_that_would_break_the_limits_is_left_out_not_sent() -> None:
+    too_long = [("가" * 200, 1), ("나" * 200, 1), ("다" * 200, 1)]
+    out = proposal_rules.build(report(surge()), has_request=never, labels_for=lambda _t: too_long)
+    assert "상담원이 정한 원인" not in out.proposals[0].evidence  # 500자를 넘으면 붙이지 않는다
+    pii = proposal_rules.build(
+        report(surge()), has_request=never, labels_for=lambda _t: [("010-1234-5678 번호", 1)]
+    )
+    assert "상담원이 정한 원인" not in pii.proposals[0].evidence  # 개인정보가 있으면 붙이지 않는다
+    for p in (*out.proposals, *pii.proposals):
+        assert len(p.evidence) <= 500 and not guard.find_pii(p.evidence)
+
+
+def _name(store: InquiryStore, inquiry_id: int, label: str | None, state: str = "done") -> None:
+    if label is None:
+        return
+    store.set_triage(
+        inquiry_id,
+        Triage(
+            state=state,  # type: ignore[arg-type]
+            reason="unclassified",
+            marked_by="auto",
+            marked_at=iso(1),
+            label=label,
+            decided_at=iso(1) if state == "done" else None,
+        ),
+    )
+
+
+def test_cause_names_are_counted_like_the_surge_and_only_once_per_inquiry() -> None:
+    store = InquiryStore()
+    in_window = [add(store, "shipping", 5) for _ in range(4)]
+    _name(store, in_window[0], "택배사 연동 오류")
+    _name(store, in_window[1], "택배사 연동 오류")
+    _name(store, in_window[2], "주소 입력 화면 오류")
+    _name(store, in_window[3], "아직 정하는 중", state="needed")  # 마치지 않은 것은 세지 않는다
+    old = add(store, "shipping", 600)  # 창 밖
+    _name(store, old, "오래된 원인")
+    other_topic = add(store, "payment", 5)  # 다른 분류
+    _name(store, other_topic, "결제창 오류")
+    got = insights.triage_label_counts(store, "shipping", NOW, window_minutes=60)
+    assert got == [("택배사 연동 오류", 2), ("주소 입력 화면 오류", 1)]
+    assert insights.triage_label_counts(store, "refund", NOW, window_minutes=60) == []
+
+
+def test_only_the_top_causes_are_returned() -> None:
+    store = InquiryStore()
+    for n, label in enumerate(["가", "나", "다", "라", "마"]):
+        for _ in range(5 - n):
+            _name(store, add(store, "shipping", 5), label)
+    got = insights.triage_label_counts(store, "shipping", NOW, window_minutes=60)
+    assert [name for name, _ in got] == ["가", "나", "다"]  # 상위 3개, 많은 순
+
+
 # ---------------------------------------------------------------- skill
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
@@ -176,6 +249,21 @@ def test_the_skill_proposes_from_the_inquiry_records_without_original_text(
     assert proposals[0]["inquiry_id"] == min(c.id for c in handlers.STORE.all())
     dumped = str(result["output"])
     assert "김하늘" not in dumped and "고객이 쓴 본문" not in dumped and "문의 제목" not in dumped
+
+
+def test_the_skill_puts_the_named_causes_into_the_proposal_evidence(client: TestClient) -> None:
+    now = datetime.now(UTC)
+    ids = [add(handlers.STORE, "shipping", 5) for _ in range(6)]
+    for conversation in handlers.STORE.all():
+        conversation.messages[0].created_at = (now - timedelta(minutes=5)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+    for i in ids[:3]:
+        _name(handlers.STORE, i, "택배사 연동 오류")
+    result = call(client, "propose_change_requests")
+    evidence = result["output"]["proposals"][0]["evidence"]
+    assert evidence.endswith("상담원이 정한 원인: 택배사 연동 오류 3건")
+    assert "김하늘" not in str(result["output"]) and "고객이 쓴 본문" not in str(result["output"])
 
 
 def test_proposing_sends_and_stores_nothing(

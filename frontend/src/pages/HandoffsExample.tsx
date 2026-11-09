@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { customerAccounts, useSession } from "@/demo/session";
-import { ago, shortDateTime } from "@/lib/format";
+import { ago, shortDateTime, humanizePlanIds } from "@/lib/format";
 import { RESULT_MAX } from "@/lib/handoffs";
 import { useMediaQuery } from "@/lib/useMediaQuery";
 
@@ -250,7 +250,7 @@ function Detail({ v, now, me, approver, onClaim, onRelease, onClose }: {
 
       <div className="space-y-1">
         <h3 className="text-sm font-semibold text-ink-700">이유</h3>
-        <p className="text-sm text-ink-900">{v.reason}</p>
+        <p className="text-sm text-ink-900">{humanizePlanIds(v.reason)}</p>
       </div>
 
       {v.escalated && <EscalatedChip />}
@@ -287,7 +287,7 @@ function Detail({ v, now, me, approver, onClaim, onRelease, onClose }: {
       {(v.status === "done" || v.status === "rejected") && (
         <div className="space-y-1 border-t border-ink-100 pt-4">
           <h3 className="text-sm font-semibold text-ink-700">{v.status === "done" ? "처리 결과" : "반려 이유"}</h3>
-          <p className="whitespace-pre-wrap text-sm text-ink-900">{v.result}</p>
+          <p className="whitespace-pre-wrap text-sm text-ink-900">{humanizePlanIds(v.result)}</p>
           <p className="text-xs text-ink-500">
             {v.claimedBy}{v.closedMinutesAgo !== undefined && ` · ${ago(minAgo(v.closedMinutesAgo, now))}`}
           </p>

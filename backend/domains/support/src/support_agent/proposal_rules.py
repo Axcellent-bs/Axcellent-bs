@@ -28,6 +28,7 @@ TOPIC_KO: dict[str, str] = {
     "general": "일반",
 }
 FALLBACK_LABEL = "기타"
+EVIDENCE_LIMIT = 500  # `request_change`의 근거 글자 수 상한 (change_schemas)
 
 
 def _label(topic_code: str) -> str:
@@ -44,12 +45,22 @@ def _no_decision(_topic: str, _inquiry_id: int) -> ProposalDecision | None:
     return None
 
 
+def _no_labels(_topic: str) -> list[tuple[str, int]]:
+    return []
+
+
+def _cause_names(labels: list[tuple[str, int]]) -> str:
+    """상담원이 정한 원인 이름과 건수 (예: "상담원이 정한 원인: 장바구니 화면 오류 3건")."""
+    return "상담원이 정한 원인: " + ", ".join(f"{name} {count}건" for name, count in labels)
+
+
 def propose_one(
     surge: TopicSurge,
     report: SurgeReport,
     *,
     has_request: Callable[[int], bool],
     decision_for: Callable[[str, int], ProposalDecision | None] = _no_decision,
+    labels_for: Callable[[str], list[tuple[str, int]]] = _no_labels,
 ) -> ChangeProposal | None:
     """급증 하나를 변경 요청안으로 바꾼다. 샘플 문의가 없으면 대표 문의를 정할 수 없어 None."""
     ids = sorted(set(surge.sample_inquiry_ids))
@@ -62,6 +73,11 @@ def propose_one(
         f"최근 {report.window_minutes}분 {label} 문의 {surge.count}건 "
         f"({_times(surge.ratio, surge.baseline_per_window)})"
     )
+    labels = labels_for(surge.topic_code)
+    if labels:  # 상담원이 "분류 필요"에서 정한 원인 이름이 있으면 근거에 붙인다 (이름과 건수만)
+        with_causes = f"{evidence} · {_cause_names(labels)}"
+        if len(with_causes) <= EVIDENCE_LIMIT and not guard.find_pii(with_causes):
+            evidence = with_causes
     # 보내기 단계에서 `request_change`가 개인정보를 거부하므로, 만들 때 미리 걸러 둔다
     if guard.find_pii(title) or guard.find_pii(evidence):
         return None
@@ -85,11 +101,20 @@ def build(
     *,
     has_request: Callable[[int], bool],
     decision_for: Callable[[str, int], ProposalDecision | None] = _no_decision,
+    labels_for: Callable[[str], list[tuple[str, int]]] = _no_labels,
 ) -> ProposeChangesReport:
     proposals = [
         p
         for s in report.surges
-        if (p := propose_one(s, report, has_request=has_request, decision_for=decision_for))
+        if (
+            p := propose_one(
+                s,
+                report,
+                has_request=has_request,
+                decision_for=decision_for,
+                labels_for=labels_for,
+            )
+        )
     ]
     return ProposeChangesReport(
         window_minutes=report.window_minutes,

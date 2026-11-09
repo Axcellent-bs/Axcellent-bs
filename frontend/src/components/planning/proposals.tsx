@@ -9,6 +9,7 @@ import { Tag } from '@/components/planning-common/parts'
 import { LinkedLines, go, idText, toPath } from '@/components/planning-common/links'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { Markdown } from '@/components/planning-common/markdown'
+import { humanizePlanIds } from '@/lib/format'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -23,8 +24,8 @@ export function ProposalActions({ s, d, item }: P & { item?: string }) {
   const p = item ? (s.proposals ?? []).find((x) => x.id === item) : undefined
   if (!p) return null
   const remove = () => {
-    if (!window.confirm(`${p.id} "${p.title}" 제안을 지울까요?${p.spec ? ` 기획안 ${p.spec}와 요청도 같이 지워져요.` : ''}`)) return
-    d({ type: 'deleteProposal', proposal: p.id }); toast.show(`${p.id} 삭제`); go(toPath('proposals'))
+    if (!window.confirm(`${idText(p.id)} "${p.title}" 제안을 지울까요?${p.spec ? ` 기획안 ${p.spec}와 요청도 같이 지워져요.` : ''}`)) return
+    d({ type: 'deleteProposal', proposal: p.id }); toast.show(`${idText(p.id)} 삭제`); go(toPath('proposals'))
   }
   const reqSpec = s.requests.find((r) => r.id === p.request)?.spec
   // 다른 부서로 넘어간 제안은 지우지 않는다: 마케팅 전달 성공 · 개발 작업이 나감 (서버도 막는다)
@@ -33,7 +34,7 @@ export function ProposalActions({ s, d, item }: P & { item?: string }) {
   const nextSpec = `SPEC-${Math.max(0, ...s.specs.map((x) => Number(x.id.split('-')[1]) || 0)) + 1}`
   if (reason !== null) {
     return (
-      <form className="pp-head-reject" onSubmit={(e) => { e.preventDefault(); if (!reason.trim()) return; d({ type: 'rejectProposal', proposal: p.id, reason: reason.trim() }); setReason(null); toast.show(`${p.id} 폐기`) }}>
+      <form className="pp-head-reject" onSubmit={(e) => { e.preventDefault(); if (!reason.trim()) return; d({ type: 'rejectProposal', proposal: p.id, reason: reason.trim() }); setReason(null); toast.show(`${idText(p.id)} 폐기`) }}>
         <input className="input" autoFocus placeholder="폐기 이유" aria-label="폐기 이유" value={reason} onChange={(e) => setReason(e.target.value)} />
         <Button variant="primary" type="submit" disabled={!reason.trim()}>폐기</Button>
         <Button onClick={() => setReason(null)}>취소</Button>
@@ -42,7 +43,7 @@ export function ProposalActions({ s, d, item }: P & { item?: string }) {
   }
   return (
     <>
-      <Button variant="primary" onClick={() => { d({ type: 'makePlan', proposal: p.id }); toast.show(`${p.id} 기획안으로 만듦`); go(toPath(`work/specs/${nextSpec}`)) }}>기획안으로 만들기</Button>
+      <Button variant="primary" onClick={() => { d({ type: 'makePlan', proposal: p.id }); toast.show(`${idText(p.id)} 기획안으로 만듦`); go(toPath(`work/specs/${nextSpec}`)) }}>기획안으로 만들기</Button>
       <Button onClick={() => setReason('')}>폐기</Button>
     </>
   )
@@ -64,7 +65,7 @@ function ProposalList({ d, s }: P) {
   const [q, setQ] = useState('')
   const [from, setFrom] = useState('')
   const froms = [...new Set(xs.map((p) => p.from))]
-  const hit = (p: Proposal) => (!from || p.from === from) && (!q.trim() || `${p.id} ${idText(p.id)} ${p.title} ${p.idea}`.toLowerCase().includes(q.trim().toLowerCase()))
+  const hit = (p: Proposal) => (!from || p.from === from) && (!q.trim() || `${p.id} ${idText(p.id)} ${p.title} ${humanizePlanIds(p.idea)}`.toLowerCase().includes(q.trim().toLowerCase()))
   const rows = (stage === null ? xs : xs.filter((p) => proposalStage(p) === stage)).filter(hit)
   const pg = usePage(rows, 12)
   useEffect(() => pg.setPage(0), [q, from]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -125,7 +126,7 @@ function ProposalCard({ p }: { p: Proposal }) {
         <span className="mono idc" title={p.id}>{idText(p.id)}</span>
       </span>
       <b className="inc-card-title">{p.title}</b>
-      <span className="pp-idea">{p.idea}</span>
+      <span className="pp-idea">{humanizePlanIds(p.idea)}</span>
       <Steps p={p} />
       <span className="inc-card-meta pp-meta">
         <Tag tone={STATUS_TONE[p.status]}>{p.status}</Tag>
@@ -263,9 +264,9 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
       {!open && (
         <aside className="pp-side">
           <dl className="pp-out">
-            {p.spec && <><dt>기획안</dt><dd><a href={toPath(`work/specs/${p.spec}`)}>{p.spec}</a> <span className="muted small">{s.specs.find((x) => x.id === p.spec)?.status ?? ''}</span></dd></>}
+            {p.spec && <><dt>기획안</dt><dd><a href={toPath(`work/specs/${p.spec}`)} title={p.spec}>{idText(p.spec)}</a> <span className="muted small">{s.specs.find((x) => x.id === p.spec)?.status ?? ''}</span></dd></>}
             {p.handoff && <><dt>마케팅</dt><dd>{p.handoff.ok ? <Tag title={p.handoff.campaign ? `캠페인 ${p.handoff.campaign}` : undefined}>마케팅이 받음</Tag> : handoffRetrying(p) ? <Tag title={p.handoff.reason}>자동 재전송 중 · {handoffRetrying(p)}번째</Tag> : <Tag tone="amber" title={p.handoff.reason}>전달 실패</Tag>}{p.handoff.at && <span className="muted small"> {p.handoff.at}</span>}{!p.handoff.ok && p.handoff.reason && <div className="muted small"><LinkedLines text={p.handoff.reason} /></div>}</dd></>}
-            {p.request && p.status === '기획서로' && <><dt>개발</dt><dd><a href={toPath(`projects/${p.request}`)}>{p.request}</a>{req && <span className="muted small"> {req.state}</span>}</dd></>}
+            {p.request && p.status === '기획서로' && <><dt>개발</dt><dd><a href={toPath(`projects/${p.request}`)} title={p.request}>{idText(p.request)}</a>{req && <span className="muted small"> {req.state}</span>}</dd></>}
             {p.result && (
               <>
                 <dt>성과</dt>
@@ -277,9 +278,9 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
                 </dd>
               </>
             )}
-            {p.note && <><dt>{p.status === '폐기' ? '폐기 이유' : '메모'}</dt><dd>{p.note}</dd></>}
+            {p.note && <><dt>{p.status === '폐기' ? '폐기 이유' : '메모'}</dt><dd>{humanizePlanIds(p.note)}</dd></>}
             {p.handoff?.campaign && (
-              <><dt /><dd><Button size="small" onClick={() => { d({ type: 'measureProposal', proposal: p.id }); toast.show(`${p.id} 성과 가져오는 중`) }}>{p.result ? '성과 다시 가져오기' : '성과 가져오기'}</Button></dd></>
+              <><dt /><dd><Button size="small" onClick={() => { d({ type: 'measureProposal', proposal: p.id }); toast.show(`${idText(p.id)} 성과 가져오는 중`) }}>{p.result ? '성과 다시 가져오기' : '성과 가져오기'}</Button></dd></>
             )}
           </dl>
         </aside>

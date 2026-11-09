@@ -43,6 +43,41 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 3) if denominator else None
 
 
+TRIAGE_LABEL_LIMIT = 3  # 근거에 싣는 원인 이름 수 (많이 나온 순)
+
+
+def triage_label_counts(
+    store: InquiryStore,
+    topic_code: str,
+    now: datetime,
+    *,
+    window_minutes: int,
+) -> list[tuple[str, int]]:
+    """급증 창에 들어온 이 분류 문의 중, 상담원이 "분류 필요"에서 원인 이름을 정한 것의 이름별 건수.
+
+    급증 감지와 같은 기준(고객 메시지의 분류·시각)으로 문의를 고르고, 문의마다 한 번만 센다.
+    이름은 상담원이 정하고 개인정보 검사를 거친 값이다. 많이 나온 순(같으면 이름 순) 상위만 준다."""
+    recent_from = now - timedelta(minutes=window_minutes)
+    counted: set[int] = set()
+    labels: Counter[str] = Counter()
+    for conversation, message in _customer_messages(store.all()):
+        if not (message.analysis and message.analysis.classification):
+            continue
+        if message.analysis.classification.category != topic_code:
+            continue
+        if not (recent_from < parse_time(message.created_at) <= now):
+            continue
+        triage = conversation.triage
+        if triage is None or triage.state != "done" or not triage.label:
+            continue
+        if conversation.id in counted:
+            continue
+        counted.add(conversation.id)
+        labels[triage.label] += 1
+    ranked = sorted(labels.items(), key=lambda item: (-item[1], item[0]))
+    return ranked[:TRIAGE_LABEL_LIMIT]
+
+
 def kpis(store: InquiryStore) -> InquiryKpis:
     conversations = store.all()
     customer = _customer_messages(conversations)

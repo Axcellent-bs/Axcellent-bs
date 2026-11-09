@@ -30,9 +30,10 @@ async def propose_change_requests(request: AgentRequest) -> AgentResult:
     parsed = h._parse(request, ProposeChangesInput)
     if isinstance(parsed, AgentResult):
         return parsed
+    now = datetime.now(UTC)  # 급증 감지와 원인 이름 세기가 같은 시각을 쓴다
     report = insights.detect_surge(
         h.STORE,
-        datetime.now(UTC),
+        now,
         window_minutes=parsed.window_minutes,
         baseline_hours=parsed.baseline_hours,
         min_count=parsed.min_count,
@@ -43,6 +44,9 @@ async def propose_change_requests(request: AgentRequest) -> AgentResult:
         report,
         has_request=lambda i: bool(h.CHANGES.for_inquiry(i)),
         decision_for=h.DECISIONS.get,
+        labels_for=lambda topic: insights.triage_label_counts(
+            h.STORE, topic, now, window_minutes=parsed.window_minutes
+        ),
     )
     return h._done(request, out.model_dump(mode="json"))
 
