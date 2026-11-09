@@ -185,9 +185,13 @@ export interface Fact { label: string; value: string }
 export type ChatItem =
   | { kind: "msg"; id: string; at: string; room: string; from: string; to: string; fromKey: string; central: boolean; text: string; tag?: string; raw?: string; tone: Tone; facts: Fact[]; repeat?: number; lastAt?: string; human?: boolean
       /** 사람과 부서 AI 직접 대화에서만: 개발 AI 계획 카드, 기획에 넘김 줄, "이대로 진행"을 보낼 받는 곳 */
-      plan?: { title: string; done: string[] }; handoff?: { requestId: string | null }; goKey?: string }
+      plan?: { title: string; done: string[] }; handoff?: { requestId: string | null }; goKey?: string
+      /** 받는 쪽 원래 이름(공통 로그 to_agent). AI 오피스가 부서끼리 걸어가는 데 쓴다 */
+      toKey?: string }
   | { kind: "system"; id: string; at: string; room: string; text: string }
-  | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string; decideAt?: string }
+  | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string; decideAt?: string
+      /** 결정을 기다리는 부서 (리플레이처럼 사건 단계가 없을 때만) */
+      dept?: string }
   | { kind: "separator"; id: string; at: string; room: string; text: string; raw?: string; variant: "day" | "topic" };
 
 export const SAFETY_ROOM = "safety";
@@ -513,7 +517,7 @@ export function commItem(line: CommLine, room: string, safetyIds: ReadonlySet<st
   return {
     kind: "msg", id: `log:${line.log_id}`, at: line.occurred_at, room,
     from: speaker(line.from_agent), to: line.to_agent ? speaker(line.to_agent) : "받는 쪽 미기록",
-    fromKey: line.from_agent, central: line.from_agent === CENTRAL,
+    fromKey: line.from_agent, central: line.from_agent === CENTRAL, ...(line.to_agent ? { toKey: line.to_agent } : {}),
     text: `${commSentence(line.skill ? skillKo(line.skill) : skill, line.outcome, label, line.from_agent)}${holdHint}`, tag, raw, tone: COMM_TONE[line.outcome] ?? "muted", facts: [], dupOf,
   };
 }

@@ -8,16 +8,18 @@ import { mergeTalk } from "@/lib/officeTalk";
 import { api } from "@/lib/api";
 import { finance, type ExecutionRecord } from "@/lib/finance";
 import { Link, useSearchParams } from "@/lib/nav";
-import { DESKS, REPLAY_END, deriveOffice, replayIncident, type DeskKey, type DeskState, type OfficeStatus } from "@/lib/office";
+import { CAMPAIGN_END, DESKS, REPLAY_END, deriveOffice, replayCampaign, replayIncident, type DeskKey, type DeskState, type OfficeStatus } from "@/lib/office";
 import { orchestrator } from "@/lib/orchestrator";
 import type { CommLine } from "@/lib/types";
 
 // AI 오피스. 부서 AI가 지금 무엇을 하는지 픽셀 사무실로 보여 주고, 옆에 단톡방을 둔다.
 // 데이터는 AI 대화방(/agents/chat)과 같은 세 곳(총괄·안전 관문·공통 로그)과 같은 buildTimeline을 쓴다.
 // 총괄이 꺼져 있으면 SCN-A 리플레이(총괄 응답 모양으로 만든 예시 사건)를 보여 준다.
+// 캠페인 리플레이는 데이터 → 기획 → 사람 확인 → 마케팅 → 재무로 이어지는 예시 흐름을 공통 로그 줄 모양으로 화면 안에서만 만든다.
 
 const POLL_MS = 3000;
-type Mode = "live" | "replay";
+type Mode = "live" | "replay" | "campaign";
+const MODE_LABEL: Record<Mode, string> = { live: "실시간", replay: "장애 리플레이(SCN-A)", campaign: "캠페인 리플레이" };
 type Conn = "unknown" | "on" | "off";
 
 const STATE_KO: Record<DeskState, string> = { idle: "대기", working: "작업 중", waiting: "승인 대기" };
@@ -29,7 +31,8 @@ const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${St
 
 export default function AgentOffice() {
   const params = useSearchParams();
-  const [mode, setMode] = useState<Mode>(params.has("replay") ? "replay" : "live");
+  const [mode, setMode] = useState<Mode>(params.has("campaign") ? "campaign" : params.has("replay") ? "replay" : "live");
+  const isReplay = mode !== "live";
   const [autoNote, setAutoNote] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -68,15 +71,16 @@ export default function AgentOffice() {
   // ------------------------------------------------ 리플레이
   const [replayBase, setReplayBase] = useState(() => Date.now() + 600);
   const [frozenAt, setFrozenAt] = useState<number | null>(null);
-  const replayT = Math.max(0, Math.min(REPLAY_END, ((frozenAt ?? now) - replayBase) / 1000));
-  const replayDone = replayT >= REPLAY_END;
+  const replayEnd = mode === "campaign" ? CAMPAIGN_END : REPLAY_END;
+  const replayT = Math.max(0, Math.min(replayEnd, ((frozenAt ?? now) - replayBase) / 1000));
+  const replayDone = replayT >= replayEnd;
   const restart = () => { setFrozenAt(null); setReplayBase(Date.now() + 400); seenRef.current = new Map(); };
   const togglePlay = () => {
     if (replayDone) restart();
     else if (frozenAt === null) setFrozenAt(Date.now());
     else { setReplayBase((b) => b + Date.now() - frozenAt); setFrozenAt(null); }
   };
-  useEffect(() => { if (mode === "replay") restart(); }, [mode]);
+  useEffect(() => { if (mode !== "live") restart(); }, [mode]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 150);
@@ -85,30 +89,38 @@ export default function AgentOffice() {
 
   // ------------------------------------------------ 타임라인 → 사무실
   const shownIncidents = useMemo(
-    () => (mode === "live" ? incidents : replayT >= 0.6 ? [replayIncident(replayT, replayBase)] : []),
+    () => (mode === "live" ? incidents : mode === "replay" && replayT >= 0.6 ? [replayIncident(replayT, replayBase)] : []),
     [mode, incidents, replayT, replayBase],
   );
+  const campaign = useMemo(() => (mode === "campaign" ? replayCampaign(replayT, replayBase) : null), [mode, replayT, replayBase]);
   const items = useMemo(
-    () => buildTimeline(shownIncidents, mode === "live" ? executions : [], mode === "live" ? comms : [], ALL_ROOM),
-    [shownIncidents, executions, comms, mode],
+    () => campaign ? campaign.items : buildTimeline(shownIncidents, mode === "live" ? executions : [], mode === "live" ? comms : [], ALL_ROOM),
+    [campaign, shownIncidents, executions, comms, mode],
   );
 
   // 말풍선 id → 처음 본 시각. 실시간은 연결 직후 이미 있던 기록을 0(말풍선 없음)으로 둔다
   const seenRef = useRef(new Map<string, number>());
-  const liveReady = mode === "replay" || orchConn !== "unknown";
+  const liveReady = isReplay || orchConn !== "unknown";
   const seen = useMemo(() => {
     const m = seenRef.current;
     const first = m.size === 0 && mode === "live";
-    for (const it of items) if (!m.has(it.id)) m.set(it.id, first ? 0 : Date.now());
+    for (const it of items) {
+      if (!m.has(it.id)) m.set(it.id, first ? 0 : Date.now());
+      // 보류 카드는 승인돼도 id가 같아서 승인을 처음 본 시각을 따로 둔다 ("👤 승인")
+      if (it.kind === "hold" && it.state === "approved" && !m.has(`${it.id}:approved`)) m.set(`${it.id}:approved`, first ? 0 : Date.now());
+    }
     return m;
   }, [items, mode]);
   useEffect(() => { seenRef.current = new Map(); }, [mode]);
 
-  const baseView = useMemo(() => deriveOffice(shownIncidents, items, seen, now), [shownIncidents, items, seen, now]);
+  const baseView = useMemo(
+    () => deriveOffice(shownIncidents, items, seen, now, campaign ? { desks: campaign.desks, board: campaign.board, overlay: campaign.overlay } : {}),
+    [shownIncidents, items, seen, now, campaign],
+  );
 
   // ------------------------------------------------ 사람이 부서 AI에게 직접 말 걸기 (AI 대화방 직접 대화와 같은 대화)
   const talk = useOfficeTalk();
-  // 답을 기다리는 부서가 놀고 있으면 자리에서 "작업 중"으로 (총괄 일로 바쁜 자리·걷기·상태는 그대로)
+  // 답을 기다리는 부서가 놀고 있으면 자리에서 "작업 중"으로 (총괄 일로 바쁜 자리·상태는 그대로). 걷지는 않고 불꽃만 켜진다
   const busyStr = talk.busyKeys.join(",");
   const view = useMemo(() => {
     let v = baseView;
@@ -120,7 +132,7 @@ export default function AgentOffice() {
     return v;
   }, [baseView, busyStr]);
   // 단톡방: 실시간은 시각순으로 끼워 넣고(타임라인 순서는 그대로), 리플레이는 구분선 아래에 붙인다 (AI 대화방 전체 대화방과 같은 함수)
-  const chatItems = useMemo(() => mergeTalk(items, talk.items, mode === "replay"), [items, talk.items, mode]);
+  const chatItems = useMemo(() => mergeTalk(items, talk.items, isReplay), [items, talk.items, isReplay]);
   // 사람 대화의 처음 본 시각 (기존 seenRef·deriveOffice 입력과 따로). 처음 불러온 지난 대화는 0 = 애니메이션 없음
   const humanSeenRef = useRef(new Map<string, number>());
   const humanSeen = useMemo(() => {
@@ -144,7 +156,7 @@ export default function AgentOffice() {
   }
 
   const inc = view.incident;
-  const statusText = {
+  const statusText = mode === "campaign" ? (replayDone ? "캠페인 리플레이 끝" : "캠페인 리플레이 진행 중") : {
     ok: "정상 운영", alert: inc ? `${incidentTitle(inc)} 대응 중` : "대응 중", resolved: "장애 해결", degraded: "일부 미완료로 종료",
   }[view.status];
   const officeLabel = `부서 AI 사무실. ${statusText}. ` + DESKS.map((d) => `${d.label} ${STATE_KO[view.desks[d.key].state]}`).join(", ");
@@ -156,7 +168,7 @@ export default function AgentOffice() {
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold tracking-tight">AI 오피스</h1>
           <p className="mt-1 text-sm text-ink-500">
-            부서 AI가 지금 무슨 일을 하는지 사무실로 봅니다. 총괄이 일을 맡기면 그 부서로 걸어가고, 사람 승인이 필요하면 🚩 승인 대기로 깜빡입니다.
+            부서 AI가 지금 무슨 일을 하는지 사무실로 봅니다. 총괄이 일을 맡기면 그 부서가 총괄에게 와서 받아 가고, 일하는 동안 불꽃이 일어납니다. 사람 승인이 필요하면 🚩 승인 대기로 깜빡입니다.
             기록과 문장은 <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">AI 대화방</Link>과 같습니다.
             {" "}단톡방에서 부서 AI에게 바로 물어볼 수 있고, 그 대화는 AI 대화방에도 같이 남습니다.
           </p>
@@ -171,19 +183,19 @@ export default function AgentOffice() {
         </div>
         <div className="flex flex-col items-end gap-2">
           <div role="radiogroup" aria-label="보기 방식" className="flex rounded-full bg-ink-100 p-1">
-            {(["live", "replay"] as const).map((m) => (
+            {(["live", "replay", "campaign"] as const).map((m) => (
               <button key={m} role="radio" aria-checked={mode === m} onClick={() => { setAutoNote(false); setMode(m); }}
                 className={`rounded-full px-3.5 py-1 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${mode === m ? "bg-surface text-ink-900 shadow-sm" : "text-ink-500 hover:text-ink-900"}`}>
-                {m === "live" ? "실시간" : "SCN-A 리플레이"}
+                {MODE_LABEL[m]}
               </button>
             ))}
           </div>
-          {mode === "replay" && (
+          {isReplay && (
             <div className="flex items-center gap-2 text-xs text-ink-500">
               <div className="h-1.5 w-36 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
-                <div className="h-full bg-brand-500" style={{ width: `${(replayT / REPLAY_END) * 100}%` }} />
+                <div className="h-full bg-brand-500" style={{ width: `${(replayT / replayEnd) * 100}%` }} />
               </div>
-              <span className="w-[84px] tabular-nums">{mmss(replayT)} / {mmss(REPLAY_END)}</span>
+              <span className="w-[84px] tabular-nums">{mmss(replayT)} / {mmss(replayEnd)}</span>
               <button className="btn-ghost px-3 py-1 text-xs" onClick={togglePlay}>
                 {replayDone ? "다시 재생" : frozenAt === null ? "일시정지" : "계속"}
               </button>
@@ -196,6 +208,11 @@ export default function AgentOffice() {
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
           {autoNote ? "중앙 Agent(총괄)에 연결할 수 없어 리플레이를 보여 줍니다. " : ""}
           리플레이는 결제 장애(시나리오 A, 롤백 C 등급 보류)를 총괄 응답 모양으로 만든 <b>예시 사건</b>입니다. 숫자는 시연용 값입니다.
+        </p>
+      )}
+      {mode === "campaign" && (
+        <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          캠페인 리플레이는 <b>예시 흐름</b>입니다. 숫자는 시연용 값입니다. (데이터 → 기획 → 사람 확인 → 마케팅 → 재무 → 데이터 → 기획 → 재무)
         </p>
       )}
 
@@ -229,7 +246,7 @@ export default function AgentOffice() {
           typing={typing}
           freshIds={freshIds}
           title="부서 단톡방"
-          sub={mode === "replay" ? "SCN-A 리플레이" : inc ? `${incidentTitle(inc)} 외 전체 기록` : "전체 기록"}
+          sub={mode === "replay" ? "SCN-A 리플레이" : mode === "campaign" ? "캠페인 리플레이" : inc ? `${incidentTitle(inc)} 외 전체 기록` : "전체 기록"}
           talk={talk}
         />
       </div>
