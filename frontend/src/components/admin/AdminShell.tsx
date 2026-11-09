@@ -70,12 +70,12 @@ const CONTROL_NAV: NavItem[] = [
 ];
 
 // 고객사 시스템 관리자의 관리 화면은 "시스템 관리" 탭 하나 아래에 모은다.
-// PC·서버 연결(DejaFix)은 기본 시스템으로 보고 여기 고정으로 둔다 (서비스 메뉴에서는 뺌)
+// 회원·서버 관리: 회원(연결·부서·확인 권한)과 PC·서버 연결(DejaFix), 접속 허용 IP를 한 화면 탭으로 묶는다.
+// PC·서버 연결은 기본 시스템으로 보고 여기 고정으로 둔다 (서비스 메뉴에서는 뺌)
 const SYSTEM_MENU: SubItem[] = [
   { href: "/system/connect", label: "회사 연결" },
   { href: "/system/services", label: "서비스 고르기" },
-  { href: "/system/members", label: "회원 연결" },
-  { href: "/system/hosts", label: "PC·서버 연결" },
+  { href: "/system/members", label: "회원·서버 관리" },
 ];
 const systemNav = (menu: SubItem[]): NavItem => ({ href: menu[0].href, label: "시스템 관리", Icon: IconGear, children: subNav(menu), match: ["/system"] });
 

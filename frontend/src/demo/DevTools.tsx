@@ -46,7 +46,7 @@ export function tokenUrl(a: RepoAddr): string {
 const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'linked' | 'planned'; to?: string }[] = [
   { name: 'CI 결과', tools: 'GitHub Actions · GitLab CI · Jenkins', state: 'with-vcs' },
   { name: '배포', tools: 'GitHub Actions · Jenkins · Argo CD', state: 'planned' },
-  { name: '배포 후 확인', tools: 'DejaFix (Zabbix)', state: 'linked', to: '/system/hosts' },
+  { name: '배포 후 확인', tools: 'DejaFix (Zabbix)', state: 'linked', to: '/system/members?tab=pcs' },
   { name: '요청 가져오기', tools: 'Jira · Linear · 노션 DB', state: 'planned' },
   { name: '알림', tools: '슬랙 · Teams · 잔디', state: 'planned' },
 ]
