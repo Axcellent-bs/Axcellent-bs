@@ -348,6 +348,31 @@ class SupportInquiryResolvedData(AxModel):
     refund_amount: int | None = Field(default=None, ge=0)
 
 
+class SupportInquirySurgeData(AxModel):
+    """`support.inquiry_surge`. 고객지원이 한 분류의 문의가 짧은 시간에 몰렸다고 판단할 때 발행한다.
+
+    알리기만 한다. 장애 후보로 열지, 어디에 붙일지는 받는 쪽(총괄)이 정한다. 모니터링 증거(Zabbix·
+    결제 감시) 없이 고객 문의만으로 만든 신호라 확신이 낮다. 코드 값만 담고 고객 이름·원문과
+    분류 이름 같은 사람이 쓴 글은 담지 않는다.
+    `topic_code`는 문의 분류 코드(예: `payment`), `count`는 최근 창(`window_minutes`분,
+    `window_start`부터)에 들어온 그 분류 문의 수, `baseline_per_window`는 평소 같은 길이 창의
+    건수(평균 또는 중앙값)다. 평소가 0이면 `ratio`는 None이다. `inquiry_ids`는 대표 문의 번호
+    목록으로 최대 20개다. `triage_reason`은 "분류 필요"에 올라간 문의의 급증일 때만 채운다
+    (`no_error_code`: 오류 코드 없는 결제 문의, `unclassified`: 분류가 안 맞는 문의).
+    멱등 키는 `<source>:support.inquiry_surge:<topic_code>:<window_start>`라 같은 창의 같은 급증은
+    한 번만 나간다.
+    """
+
+    topic_code: str = Field(min_length=1, max_length=40)
+    count: int = Field(ge=1)
+    window_minutes: int = Field(ge=1)
+    window_start: UtcDatetime
+    baseline_per_window: float = Field(ge=0)
+    ratio: float | None = Field(default=None, ge=0)
+    inquiry_ids: list[int] = Field(default_factory=list, max_length=20)
+    triage_reason: Literal["no_error_code", "unclassified"] | None = None
+
+
 class HandoffCompletedData(AxModel):
     """`handoff.completed`. 사람이 할 일함의 일을 끝내면 dashboard-api가 한 번 발행한다.
 
@@ -389,5 +414,6 @@ EVENT_DATA_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.SAFETY_REVIEW_DECIDED: SafetyReviewDecidedData,
     EventType.SUPPORT_INQUIRY_RECEIVED: SupportInquiryReceivedData,
     EventType.SUPPORT_INQUIRY_RESOLVED: SupportInquiryResolvedData,
+    EventType.SUPPORT_INQUIRY_SURGE: SupportInquirySurgeData,
     EventType.HANDOFF_COMPLETED: HandoffCompletedData,
 }
