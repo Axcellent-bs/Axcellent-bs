@@ -530,12 +530,32 @@ function commSentence(what: string, outcome: string, label: string, from?: strin
 // 대화 창구 읽기(목록·상세)는 화면이 다시 읽을 때마다 남아서 기록에서 뺀다. 원본 공통 로그는 그대로
 export const CHAT_READ_SKILL = /_chat_(list|get)$/;
 
+// 화면(dashboard-api)이 데이터를 읽어 오는 기록은 화면이 열려 있는 동안 계속 쌓여서 기록에서 뺀다. 원본 공통 로그는 그대로
+const SCREEN = "dashboard-api";
+/** 사람이 화면에서 보낸 대화(보내기·닫기)는 남긴다 */
+const SCREEN_CHAT_ACTION = /_chat_(send|close)$/;
+/**
+ * 화면이 부르는 skill 중 상태를 바꾸는 것 (로컬 공통 로그에서 이름으로 골랐다). 읽기가 아니라서 기록에 남긴다.
+ * - purge_expired_inquiries · purge_expired_claims: dashboard-api가 하루 한 번 보관 기간이 지난 문의·클레임을 지운다
+ */
+export const SCREEN_ACTION_SKILLS: ReadonlySet<string> = new Set(["purge_expired_inquiries", "purge_expired_claims"]);
+/** 실패·보류·거절·사람 확인은 읽기여도 남긴다 */
+const SCREEN_KEEP_OUTCOMES: ReadonlySet<string> = new Set(["failed", "rejected", "held", "needs_human"]);
+
+/** 화면이 데이터를 읽어 온 기록인가 (숨길 줄) */
+export function isScreenRead(line: CommLine): boolean {
+  if (line.from_agent !== SCREEN && line.to_agent !== SCREEN) return false;
+  const skill = line.skill ?? "";
+  if (SCREEN_CHAT_ACTION.test(skill) || SCREEN_ACTION_SKILLS.has(skill)) return false;
+  return !SCREEN_KEEP_OUTCOMES.has(line.outcome);
+}
+
 export function commItems(comms: CommLine[], incidents: OrchIncident[], executions: ExecutionRecord[]) {
   const byId = new Map(incidents.map((i) => [i.context_id, i]));
   const ids = new Set(byId.keys());
   const safetyIds = new Set(executions.map((e) => e.execution_id));
   return comms
-    .filter((line) => !CHAT_READ_SKILL.test(line.skill ?? ""))
+    .filter((line) => !CHAT_READ_SKILL.test(line.skill ?? "") && !isScreenRead(line))
     .map((line) => ({ line, room: commRoom(line, ids) }))
     .filter(({ line, room }) => !coveredByIncident(line, byId.get(room)))
     .map(({ line, room }) => commItem(line, room, safetyIds));
