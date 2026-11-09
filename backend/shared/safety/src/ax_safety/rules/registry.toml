@@ -205,6 +205,18 @@ action = "planning_chat_close"
 owner = "planning"
 base_grade = "A"
 
+# 사람과 재무 AI의 직접 대화(finance chat/turn.py). 대화 글을 저장하고 닫을 뿐 장부·결산·정산은
+# 건드리지 않는다 (그런 일은 재무 화면에서 사람 토큰으로 한다). 기획·고객지원 대화와 같은 A
+[[actions]]
+action = "finance_chat_send"
+owner = "finance"
+base_grade = "A"
+
+[[actions]]
+action = "finance_chat_close"
+owner = "finance"
+base_grade = "A"
+
 # 사람과 개발 AI의 직접 대화(dev dev_chat.py). 메시지 하나는 dev_chat(A)으로 기록하고, 계획이 서서
 # 코딩 작업을 띄우는 건 dev_task_create가 따로 관문을 탄다. 끝내기는 대화 상태만 바꾼다 (주인은 dev_chat과 같게)
 [[actions]]

@@ -12,7 +12,10 @@
 - 반복 장애: 이벤트가 열리면 인사 `find_similar_cases`로 비슷한 과거 이벤트와 그때 해결 내용을 찾아
   보여 준다(참고만, 다른 단계를 바꾸지 않는다). 이벤트 기록 뒤 인사 `record_resolution`으로 이번
   해결 내용을 카드에 남겨 다음 이벤트가 찾게 한다. 값이 없으면 지어내지 않고 비운다.
-- 이 plan에 재무 단계는 없다. 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에 기록된다.
+- 재무 장부 기록: 보상·복구 확인이 끝나면 재무 `record_incident_finance`로 이 이벤트를 장부에 남긴다
+  (구간·부품, 데이터 영향 숫자 그대로). 재무는 장부의 보상 쿠폰과 구간 안 환불 합계를 더해 답한다.
+  재무는 기록만 하고 보상·환불을 결정하지 않는다. 재무가 꺼져 있거나 실패해도 다른 단계는 그대로다.
+  장애 때 나간 쿠폰·환불 하나하나는 지금처럼 이벤트로 재무 장부에 들어간다.
   문의가 닫히면 `support_resolved` plan에서 총괄이 재무를 불러 장부에 기록한다.
 """
 
@@ -237,6 +240,22 @@ def _cause_check(inc: Incident) -> dict[str, Any]:
     }
 
 
+def _finance_record(inc: Incident) -> dict[str, Any]:
+    """재무 장부 기록 입력. 구간은 영향 분석과 같고, 영향 숫자는 데이터 결과를 그대로 옮긴다."""
+    impact = _out(inc, "impact")
+    start, end = inc.impact_window()
+    body: dict[str, Any] = {
+        "component": inc.component,
+        "window_from": iso(start),
+        "window_to": iso(end),
+        "affected_customer_ids": list(impact.get("affected_customer_ids") or []),
+    }
+    for key in ("failed_order_count", "affected_customer_count", "damage_amount"):
+        if isinstance(impact.get(key), int):
+            body[key] = impact[key]
+    return body
+
+
 def _kpi(inc: Incident) -> dict[str, Any]:
     return {"context_ids": [inc.context_id]}
 
@@ -376,6 +395,15 @@ def scenario_a() -> Plan:
                 keep={"notice_id": "recovered_notice_id"},
             ),
             Step(
+                "finance_record",
+                "record_incident_finance",
+                "장애 비용 장부 기록 (finance)",
+                # 보상이 끝나야 쿠폰 합계가 맞고, 복구 확인 뒤라야 구간이 닫힌다. 실패해도 이어 간다
+                also_after=("compensation", "recovery"),
+                build=_finance_record,
+                required=False,
+            ),
+            Step(
                 "kpi",
                 "kpi_summary",
                 "처리 시간 요약 (data)",
@@ -391,6 +419,7 @@ def scenario_a() -> Plan:
                     "recovered_notice",
                     "link_incident",
                     "compensation",
+                    "finance_record",
                     "kpi",
                     "root_cause",
                 ),

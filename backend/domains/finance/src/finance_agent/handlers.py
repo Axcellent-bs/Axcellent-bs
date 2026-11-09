@@ -84,6 +84,8 @@ class Ledger:
         # context_id → 사건 구간·부품. 총괄 사건 목록은 재시작하면 비워져서 받았을 때 남겨 둔다
         self.incident_windows: dict[str, dict[str, Any]] = {}
         self.coupon_events: dict[str, list[dict[str, Any]]] = {}  # context_id → 보상 쿠폰 이벤트
+        # context_id → 총괄이 장애 이벤트 때 부른 재무 장부 기록 (`record_incident_finance`)
+        self.incident_reports: dict[str, dict[str, Any]] = {}
 
     def compensation(self, context_id: str) -> dict[str, int]:
         return self.coupons.get(context_id, {"count": 0, "total": 0})

@@ -43,6 +43,7 @@ def dump(s: State) -> dict[str, Any]:
             "support_costs": {str(k): v for k, v in ledger.support_costs.items()},
             "coupon_events": ledger.coupon_events,
             "incident_windows": ledger.incident_windows,
+            "incident_reports": ledger.incident_reports,
         },
         "records": {
             "closings": [[p, d, v] for (p, d), v in records.closings.items()],
@@ -81,6 +82,7 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.ledger.support_costs = {int(k): v for k, v in led["support_costs"].items()}
     s.ledger.coupon_events = {k: list(v) for k, v in led["coupon_events"].items()}
     s.ledger.incident_windows = {k: dict(v) for k, v in led.get("incident_windows", {}).items()}
+    s.ledger.incident_reports = {k: dict(v) for k, v in led.get("incident_reports", {}).items()}
     s.records.closings = {(p, d): v for p, d, v in rec["closings"]}
     s.records.closing_cancels = [dict(r) for r in rec.get("closing_cancels", [])]
     s.records.other_pnl = {k: dict(v) for k, v in rec.get("other_pnl", {}).items()}

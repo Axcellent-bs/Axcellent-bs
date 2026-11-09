@@ -6,7 +6,7 @@ import type { ChatMessage, ChatStatus, ChatThread as BaseThread } from "@/lib/pl
 import { useSession, type Account } from "@/demo/session";
 
 // AI 대화방의 직접 대화. 사람이 부서 AI 하나를 골라 바로 말을 건다.
-// 사람 말을 바로 받는 창구: 개발 AI(dashboard-api /api/dashboard/dev-chat), 인사 AI(/api/hr/chat), 기획 AI(dashboard-api /api/dashboard/planning-chat), 마케팅 AI(dashboard-api /api/dashboard/marketing-chat). 나머지 AI는 창구가 생길 때까지 "준비 중"으로 둔다.
+// 사람 말을 바로 받는 창구: 개발 AI(dashboard-api /api/dashboard/dev-chat), 인사 AI(/api/hr/chat), 기획 AI(dashboard-api /api/dashboard/planning-chat), 마케팅 AI(dashboard-api /api/dashboard/marketing-chat), 재무 AI(dashboard-api /api/dashboard/finance-chat). 나머지 AI는 창구가 생길 때까지 "준비 중"으로 둔다.
 // 창구는 모두 같은 대화 모양(id·title·status·messages[]·who·시각)을 돌려준다.
 //
 // 열람 권한
@@ -65,7 +65,7 @@ export const DIRECT_AGENTS: DirectAgent[] = [
   { key: "planning", name: "기획 AI", note: "받은 요청·기획서·결정·제안 상태를 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요.", live: true, dept: "기획팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/planning-chat" }, { closable: true }) },
   { key: "orchestrator", name: "총괄 AI", note: "", live: false },
   { key: "support", name: "고객지원 AI", note: "문의·클레임·후기 현황을 숫자로 읽고 설명해요. 고객 이름과 원문은 보지 않고, 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "고객지원팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/support-chat" }, { closable: true }) },
-  { key: "finance", name: "재무 AI", note: "", live: false },
+  { key: "finance", name: "재무 AI", note: "손익·결산·판매자 정산·통장 대조·현금 흐름·캠페인 손익·장애 비용을 장부 숫자로 읽고 설명해요. 대화로 장부를 바꾸거나 비용을 승인하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "재무팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/finance-chat" }, { closable: true }) },
   { key: "data", name: "데이터분석 AI", note: "트렌드·인사이트·영상 성과·캠페인 결과·수집 상태를 숫자로 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요. 개인정보·비밀은 적지 마세요.", live: true, dept: "데이터분석", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/data-chat" }, { closable: true }) },
   { key: "marketing", name: "마케팅 AI", note: "마케팅 일을 물어보면 마케팅 AI가 답해요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, dept: "마케팅팀", talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/marketing-chat" }) },
 ];

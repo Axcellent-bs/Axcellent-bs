@@ -153,7 +153,7 @@ const ACTION_KO: Record<string, string> = {
   get_inquiry: "문의 조회", inquiry_overview: "문의 현황 조회", list_claims: "클레임 목록 조회", claim_stats: "클레임 통계",
   claim_queue: "보상 대기열 조회", process_claim_queue: "보상 대기열 처리", customer_signals: "고객 이상 신호 조회",
   release_fault_injection: "쇼핑몰 장애 해제", receive_change_result: "변경 결과 받기",
-  ledger_record: "장부에 기록", closing_report: "기간 손익 정리",
+  ledger_record: "장부에 기록", closing_report: "기간 손익 정리", record_incident_finance: "장애 비용 장부 기록",
 };
 export const actionKo = (a: string) => ACTION_KO[a] ?? a;
 /** 코드 이름 → 사람이 읽는 이름. 모르는 이름은 밑줄을 띄어 쓴다 */
@@ -197,6 +197,7 @@ const FIELD_KO: Record<string, string> = {
   kind: "종류", incidents: "이벤트", auto_handled_rate: "자동 처리율", escalation_count: "사람에게 넘김", count: "건수",
   requested: "요청", unit_value: "1건 금액", reason_code: "사유", coupon_count: "쿠폰", outcome: "결과",
   avg_handle_seconds: "평균 처리 시간(초)", related_prs: "관련 PR", by_category: "분류별",
+  refund_total: "환불 합계", money_out_total: "빠져나간 돈",
 };
 /** 코드 값 → 사람이 읽는 말 */
 const VALUE_KO: Record<string, string> = {
