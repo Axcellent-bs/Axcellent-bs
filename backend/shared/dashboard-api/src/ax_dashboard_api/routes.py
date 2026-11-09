@@ -617,7 +617,11 @@ async def conversation_triage(conversation_id: int, body: TriageBody) -> dict:
     out = await support_client.call(
         "set_triage",
         {"inquiry_id": conversation_id, "action": body.action, "label": body.label},
-        target=f"inquiry:{conversation_id}:triage:{body.action}:{body.label or ''}",
+        # 분류 이름 원문은 멱등 키에 남기지 않고 해시만 쓴다 (이름이 다르면 다른 요청)
+        target=(
+            f"inquiry:{conversation_id}:triage:{body.action}:"
+            f"{hashlib.sha1((body.label or '').encode()).hexdigest()[:8]}"
+        ),
     )
     if "id" not in out:  # 문의가 아닌 응답(분류 필요로 올린 문의만 정할 수 있음 등)은 성공이 아니다
         raise ApiError(409, "INVALID_STATE", out.get("message", "지금은 할 수 없다"))

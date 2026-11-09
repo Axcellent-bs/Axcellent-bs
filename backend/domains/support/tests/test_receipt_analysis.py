@@ -337,6 +337,19 @@ def test_receipt_input_errors(_fresh: InquiryStore) -> None:
     )
     empty = call("analyze_receipt", {"inquiry_id": inquiry(_fresh)})
     assert empty["status"] == "failed" and empty["outcome"] == "invalid_input"
+
+
+def test_an_order_the_shop_cannot_find_is_not_reported_as_a_missing_inquiry(
+    _fresh: InquiryStore,
+) -> None:
+    """문의는 있는데 붙은 주문이 없을 때, 안내가 '문의를 못 찾음'으로 읽히지 않게 주문을 말한다."""
+    lost = inquiry(_fresh, order_id="no-such-order")
+    result = call("analyze_receipt", {"inquiry_id": lost}, {"receipt_text": RECEIPT})
+    assert result["outcome"] == "not_found"
+    message = result["output"]["message"]
+    assert "no-such-order" in message and "주문" in message
+    gone = call("analyze_receipt", {"inquiry_id": 99}, {"receipt_text": "x"})
+    assert "주문" not in gone["output"]["message"]  # 진짜로 없는 문의는 그대로 문의를 말한다
     other = call(
         "analyze_receipt",
         {"inquiry_id": inquiry(_fresh), "order_id": "102"},

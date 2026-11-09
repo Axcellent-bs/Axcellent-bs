@@ -378,6 +378,19 @@ def test_triage_route_calls_set_triage_with_execute_target_key(
     assert ":set_triage:" in sent.meta.idempotency_key or ":triage:" in sent.meta.idempotency_key
 
 
+def test_triage_idempotency_key_never_carries_the_label_text(
+    client: TestClient, fake: Fake
+) -> None:
+    """분류 이름 원문은 멱등 키에 들어가지 않고, 이름이 다르면 키도 다르다."""
+    fake.output = {**ITEM, "triage": None}
+    for label in ("장바구니 화면 오류", "결제창 오류"):
+        client.post(BASE + "/conversations/7/triage", json={"action": "decide", "label": label})
+    first, second = (r.meta.idempotency_key for r in fake.sent)
+    assert "장바구니" not in first and "결제창" not in second
+    assert first != second
+    assert ":triage:decide:" in first
+
+
 def test_triage_route_reports_a_refused_step_as_conflict(client: TestClient, fake: Fake) -> None:
     fake.output = {"message": "분류 필요로 올린 문의만 분류를 정할 수 있다"}
     response = client.post(

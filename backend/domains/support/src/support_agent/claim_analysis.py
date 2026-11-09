@@ -169,8 +169,12 @@ async def _inquiry_order(
         order = await shop_client.load_order(inquiry.order_id)
     except shop_client.ShopError as exc:
         return error_result(request.meta, TaskStatus.FAILED, "shop_unavailable", str(exc))
-    if order is None:
-        return h._not_found(request, inquiry_id)
+    if order is None:  # 문의는 있는데 붙은 주문을 판매 서버에서 못 찾았다
+        return h._done(
+            request,
+            {"message": f"문의 {inquiry_id}에 붙은 주문 {inquiry.order_id}을 찾을 수 없다"},
+            outcome="not_found",
+        )
     return inquiry, order
 
 
