@@ -258,6 +258,7 @@ SERVICES: tuple[Service, ...] = (
             "list_org_changes",
             "set_org_roster_complete",
             "record_leave",
+            "cancel_leave",
             "get_presence",
             "find_org_change_basis",
             "parse_org_change_text",
