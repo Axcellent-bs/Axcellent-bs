@@ -1022,7 +1022,34 @@ export interface TrendInsightBriefOutput {
   snapshot_id?: string | null;
   /** 지금 data LLM 상태 (오류 원인·중단). 저장된 브리프를 줄 때도 응답 시점 값. 예전 응답은 없다 */
   llm_status?: LlmStatus | null;
+  // 아래는 v5 (같은 날 판·다시 추천, 계약 trend_insight_brief.v5). 예전 응답은 없다. 문장은 서버 값
+  version?: number | null;
+  latest_version?: number | null;
+  /** "00:27 자동" · "11:16 다시 추천" */
+  version_label?: string | null;
+  created_at?: string | null;
+  trigger?: BriefTrigger | null;
+  requested_by?: string | null;
+  detect_as_of?: string | null;
+  versions?: BriefVersionInfo[];
+  regen_used?: number;
+  regen_limit?: number;
+  regen_blocked?: BriefRegenBlocked | null;
+  regen_job?: BriefRegenJob | null;
+  building?: BriefBuilding | null;
+  diff_from_previous?: BriefDiff | null;
+  estimated_llm_pct?: number | null;
+  estimated_llm_basis?: string | null;
+  estimated?: boolean;
+  llm_pct_now?: number | null;
+  detect_latest_at?: string | null;
 }
+export type BriefTrigger = "auto" | "manual";
+export interface BriefVersionInfo { version: number; label: string; created_at: string; trigger: BriefTrigger; requested_by: string | null; detect_as_of: string | null }
+export interface BriefRegenBlocked { code: "daily_limit" | "cooldown" | "llm_budget" | "in_progress" | "no_new_data"; text: string }
+export interface BriefRegenJob { job_id: string; state: "running" | "done" | "failed"; requested_by: string | null; started_at: string; finished_at: string | null; version: number | null; tokens: number | null; reason: string | null }
+export interface BriefBuilding { who: string; trigger: BriefTrigger; started_at: string; text: string }
+export interface BriefDiff { from_version: number; from_label: string; new_topics: string[]; gone_topics: string[]; new_count: number; gone_count: number }
 /**
  * data LLM 오류 원인과 중단 상태 (계약 LlmStatus). 문구는 서버 문장 그대로.
  * key_error 빨강(401·403, 그날 중단) · provider_limit 노랑(429) · our_cap 파랑(우리 하루 상한).
@@ -1741,6 +1768,15 @@ export const dataAi = {
     askData<VideoExplorerOutput>("video_explorer", "영상 탐색", q, TREND_DEADLINE_MS),
   /** 인사이트 브리프 (2단계). 서버 하루 캐시. 브리프 안에서 trend_age·임베딩·한 줄 문장(LLM)을 부른다 */
   trendInsightBrief: () => askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 브리프", {}, RECOMMEND_DEADLINE_MS),
+  /** 오늘 특정 판 (version 없으면 최신 판). 저장된 판을 읽기만 한다 */
+  trendInsightBriefVersion: (version?: number) =>
+    askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 브리프", version ? { version } : {}, RECOMMEND_DEADLINE_MS),
+  /** 다시 추천 시작: 서버가 막는 조건을 보고 바로 started/blocked (만들기는 서버 백그라운드). requested_by는 표시·기록용 */
+  trendInsightBriefRegenerate: (requestedBy: string) =>
+    askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 다시 추천", { action: "regenerate_start", requested_by: requestedBy }),
+  /** 다시 추천 진행 상태 (본문 없이 판 목록·만드는 중·작업 상태만). 화면이 2초마다 */
+  trendInsightBriefStatus: () =>
+    askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 다시 추천 상태", { action: "status" }),
   /** 회사 도메인 프로필 (업종·상품군·고객 축·질문·씨앗 키워드). 서버가 저장해 두고 카탈로그가 바뀌면 다시 만든다 */
   domainProfile: () => askData<DomainProfileOutput>("domain_profile", "회사 도메인 프로필", {}, RECOMMEND_DEADLINE_MS),
   /** 데이터 출처 목록 (능력·키 상태·승인). 키 값은 응답에 없다 */
