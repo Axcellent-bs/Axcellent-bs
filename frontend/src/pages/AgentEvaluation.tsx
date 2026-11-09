@@ -62,14 +62,10 @@ function AgentCard({ a, onPick }: { a: AgentSummary; onPick: (ctx: string) => vo
           {counts.map(([v, n]) => <span key={v} className={`chip ${VERDICT[v].chip}`}>{VERDICT[v].label} {n}</span>)}
         </p>
       )}
-      {a.handed_off > 0 && <p className="mt-3 text-xs text-ink-500">사람에게 넘김은 원인을 확정하지 못하는 등 사람의 확인이 필요해서 넘긴 것으로, 실패나 지연이 아니에요.</p>}
+      {a.handed_off > 0 && <p className="mt-3 text-xs text-ink-500">사람에게 넘김은 실패나 지연이 아니에요.</p>}
       {lastLate?.reason && <p className="mt-3 text-xs text-ink-600">가장 최근 확인이 필요했던 이유: {lastLate.reason}</p>}
-      {(a.avg_work_seconds != null || a.repeats.length > 0) && (
+      {a.repeats.length > 0 && (
         <ul className="mt-3 space-y-1 text-xs text-ink-500">
-          {a.avg_work_seconds != null && <li>단계 하나에 평균 {secondsKo(a.avg_work_seconds)}, 가장 오래 걸린 단계는 {secondsKo(a.max_work_seconds)}</li>}
-          {a.check > 0 && (a.retried > 0 || a.slow > 0) && (
-            <li>확인이 필요했던 {a.check}건 중 다시 시도 {a.retried}건, 기준 시간 초과 {a.slow}건</li>
-          )}
           {a.repeats.map((x) => <li key={x.event_type}>같은 유형의 이벤트에서 {x.count}번 확인이 필요했어요: {x.title}</li>)}
         </ul>
       )}
@@ -77,7 +73,7 @@ function AgentCard({ a, onPick }: { a: AgentSummary; onPick: (ctx: string) => vo
   );
 }
 
-/** 날짜별로 이벤트 수와, 그중 확인이 필요했던 에이전트가 있던 이벤트 수 */
+/** 날짜별 이벤트 수와, 그중 확인이 필요했던 이벤트 수 */
 function Trend({ data }: { data: DailyTrend[] }) {
   if (data.length === 0) return <p className="text-sm text-ink-500">날짜별로 볼 이벤트가 아직 없어요.</p>;
   const top = Math.max(1, ...data.map((d) => d.events));
@@ -103,7 +99,7 @@ function Trend({ data }: { data: DailyTrend[] }) {
       </svg>
       <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-ink-500">
         <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-emerald-200" />이벤트 수</span>
-        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" />그중 확인이 필요했던 에이전트가 있던 이벤트</span>
+        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" />확인이 필요했던 이벤트</span>
       </p>
     </div>
   );
@@ -117,7 +113,8 @@ function StepRow({ s, scale }: { s: EvaluatedStep; scale: number }) {
     { key: "appr", label: "승인 대기", sec: s.approval_wait_seconds, cls: "bg-amber-400" },
     { key: "human", label: "사람 할 일함 대기", sec: s.human_wait_seconds, cls: "bg-ink-300" },
   ];
-  const text = parts.filter((p) => p.sec != null && p.sec > 0).map((p) => `${p.label} ${secondsKo(p.sec)}`).join(" · ") || "시간 기록 없음";
+  const timed = parts.filter((p) => p.sec != null && p.sec > 0).map((p) => `${p.label} ${secondsKo(p.sec)}`).join(" · ");
+  const text = timed || s.reason || "시간 기록 없음";
   return (
     <li className="grid gap-1 py-3 sm:grid-cols-[13rem_1fr] sm:gap-4">
       <div className="min-w-0">
@@ -131,7 +128,7 @@ function StepRow({ s, scale }: { s: EvaluatedStep; scale: number }) {
         <div className="flex h-3.5 overflow-hidden rounded-full bg-ink-100" role="img" aria-label={text}>
           {parts.map((p) => (p.sec && p.sec > 0 ? <div key={p.key} className={p.cls} style={{ width: `${Math.max(1.5, (p.sec / scale) * 100)}%` }} /> : null))}
         </div>
-        <p className="mt-1 text-xs text-ink-600">{text}{s.reason ? ` — ${s.reason}` : ""}</p>
+        <p className="mt-1 text-xs text-ink-600">{timed ? `${timed}${s.reason ? ` — ${s.reason}` : ""}` : text}</p>
       </div>
     </li>
   );
@@ -145,19 +142,18 @@ function EventTimeline({ ev }: { ev: EvaluatedEvent }) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-ink-700">
-        {look.length === 0 ? "확인이 필요한 단계는 없어요." : `확인이 필요한 단계가 ${look.length}개 있어요: ${look.map((s) => s.label).join(", ")}.`}
-        {handed.length > 0 && ` 사람에게 넘긴 단계는 ${handed.length}개예요(실패나 지연이 아니에요): ${handed.map((s) => s.label).join(", ")}.`}
-        {skipped.length > 0 && ` 시간 기록이 없는 단계는 ${skipped.length}개예요(앞 단계가 끝나지 않아 건너뛴 경우 등): ${skipped.map((s) => s.label).join(", ")}.`}
+        {look.length === 0 ? "확인이 필요한 단계는 없어요." : `확인이 필요한 단계: ${look.map((s) => s.label).join(", ")}.`}
+        {handed.length > 0 && ` 사람에게 넘긴 단계(실패나 지연이 아니에요): ${handed.map((s) => s.label).join(", ")}.`}
+        {skipped.length > 0 && ` 시간 기록이 없는 단계: ${skipped.map((s) => s.label).join(", ")}.`}
       </p>
       <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100 px-4">
         {ev.steps.map((s) => <StepRow key={s.step_id} s={s} scale={scale} />)}
       </ul>
       <p className="flex flex-wrap gap-x-4 text-xs text-ink-500">
         <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-brand-500" />일한 시간 (평가에 쓰는 시간)</span>
-        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" />승인 대기</span>
-        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-ink-300" />사람 할 일함 대기</span>
+        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" />승인 대기 (사람을 기다린 시간, 평가 제외)</span>
+        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-ink-300" />사람 할 일함 대기 (평가 제외)</span>
       </p>
-      <p className="text-xs text-ink-500">승인 대기와 사람 할 일함 대기는 에이전트가 늦은 것이 아니라 사람을 기다린 시간이라 평가에 넣지 않아요.</p>
     </div>
   );
 }
@@ -192,7 +188,7 @@ export default function AgentEvaluationPage() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">에이전트 평가</h1>
-          <p className="mt-1 text-sm text-ink-500">장애가 났을 때 각 에이전트가 맡은 일을 제때 끝냈는지 봅니다. 점수나 순위는 매기지 않고, 늦었다면 이유를 함께 보여 줘요.</p>
+          <p className="mt-1 text-sm text-ink-500">장애가 났을 때 각 에이전트가 맡은 일을 제때 끝냈는지 봅니다. 점수나 순위는 없고, 늦었다면 이유를 함께 보여 줘요.</p>
         </div>
         <div className="ml-auto text-xs text-ink-500">{shortDateTime(data.collected_at)} 기준</div>
       </header>
@@ -201,19 +197,19 @@ export default function AgentEvaluationPage() {
 
       <section aria-label="평가 기준" className="rounded-2xl bg-ink-50 px-5 py-4 text-sm text-ink-700">
         <p>
-          <b>기준: 임시 설정값 (v{data.criteria_version}{data.criteria_updated ? `, ${data.criteria_updated}` : ""})</b> — 에이전트가 일한 시간이
-          {" "}<b>{data.normal_max_seconds}초 이하</b>이고 다시 시도하지 않았으면 제때 끝낸 것으로, 그 밖에는 확인이 필요한 것으로 봅니다.
+          <b>기준: 임시 기준 {data.criteria_version}판{data.criteria_updated ? ` (${data.criteria_updated})` : ""}</b> — 일한 시간이 <b>{data.normal_max_seconds}초 이하</b>이고
+          {" "}다시 시도하지 않았으면 제때 끝낸 것, 그 밖에는 확인이 필요한 것으로 봅니다.
         </p>
-        <p className="mt-1 text-xs text-ink-500">시간만 본 결과이며 일의 품질을 평가한 것이 아니에요. 확인이 필요하다는 건 사람이 한 번 살펴보라는 뜻이고, 잘못했다는 뜻이 아닙니다.</p>
+        <p className="mt-1 text-xs text-ink-500">시간만 본 결과예요. 일의 품질을 평가한 것이 아니고, 확인이 필요하다는 건 잘못했다는 뜻이 아니라 한 번 살펴보라는 뜻이에요.</p>
       </section>
 
       {data.events.length === 0 ? (
         <Section title="아직 평가할 이벤트가 없어요">
-          <p className="text-sm text-ink-600">장애 이벤트가 끝나고 총괄 AI가 단계별 시간을 보내오면 여기에 나타납니다.</p>
+          <p className="text-sm text-ink-600">장애 이벤트가 끝나면 여기에 나타나요.</p>
         </Section>
       ) : (
         <>
-          <Section title="에이전트별 현황" desc={few ? `평가한 이벤트가 ${data.events.length}건이라 아직 판단하기 이릅니다. ${MIN_EVENTS}건이 넘으면 문장으로 요약해 드려요.` : "점을 누르면 그 이벤트의 단계별 시간으로 이동합니다. 가장 최근 이벤트가 왼쪽입니다."}>
+          <Section title="에이전트별 현황" desc={few ? `이벤트가 ${MIN_EVENTS}건 이상 쌓이면 문장으로 요약해 드려요.` : "점을 누르면 그 이벤트의 단계별 시간으로 이동해요. 왼쪽이 가장 최근이에요."}>
             <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               {data.agents.map((a) => <AgentCard key={a.dept} a={a} onPick={(ctx) => { setPicked(ctx); document.getElementById("event-steps")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} />)}
             </div>
@@ -224,19 +220,19 @@ export default function AgentEvaluationPage() {
             </p>
           </Section>
 
-          <Section title="날짜별 흐름" desc="하루에 이벤트가 몇 건이었고, 그중 확인이 필요한 에이전트가 있었던 이벤트가 몇 건이었는지 봅니다.">
+          <Section title="날짜별 흐름" desc="하루 이벤트 수와, 그중 확인이 필요했던 이벤트 수예요.">
             <Trend data={data.trend} />
           </Section>
 
           <div id="event-steps" className="scroll-mt-4">
-            <Section title="이벤트별 단계 시간" desc="이벤트를 고르면 단계마다 일한 시간, 승인 대기, 사람 할 일함 대기를 나눠서 볼 수 있어요.">
+            <Section title="이벤트별 단계 시간" desc="이벤트를 고르면 단계마다 시간을 나눠서 볼 수 있어요.">
               <select className="field" aria-label="이벤트 고르기" value={current?.context_id ?? ""} onChange={(e) => setPicked(e.target.value)}>
                 {data.events.map((e) => <option key={e.context_id} value={e.context_id}>{e.title}{e.at ? ` (${shortDateTime(e.at)})` : ""}</option>)}
               </select>
               {current && (
                 <>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
-                    <span>그때 기준: 임시 설정값 v{current.criteria_version}</span>
+                    {current.criteria_version !== data.criteria_version && <span>그때 기준: 임시 기준 {current.criteria_version}판</span>}
                     <Link href={`/ops?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">결정 기록에서 보기 →</Link>
                     <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">총괄 이벤트에서 보기 →</Link>
                   </div>
