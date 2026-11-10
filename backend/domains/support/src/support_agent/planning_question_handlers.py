@@ -14,18 +14,31 @@ from support_agent.planning_question_schemas import (
 )
 
 
+def _remember_unanswered(
+    q: AnswerPlanningQuestionInput, status: str, request: AgentRequest
+) -> None:
+    """기록으로 답하지 못한 질문(`needs_human`)만 사람이 나중에 답할 수 있게 적어 둔다.
+
+    **이것이 이 skill이 하는 유일한 쓰기다.** 받은 질문을 적는 기록이고(같은 질문은 한 번만,
+    개인정보는 가림) 사업 상태를 바꾸지 않아 `execute()`를 거치지 않는다. 기획은 기다리지 않는다.
+    """
+    if status == "needs_human":
+        h.PLANNING_QUESTIONS.record(q, request.meta.tenant_id, request.meta.context_id)
+
+
 async def answer_planning_question(request: AgentRequest) -> AgentResult:
-    """기획이 되묻는 근거 질문에 문의 서비스가 보낸 요청의 기록으로 답한다 (grade read)."""
+    """기획이 되묻는 근거 질문에 기록으로 답한다 (grade read).
+
+    사업 상태는 바꾸지 않는다. 다만 기록으로 답하지 못하면(`needs_human`) 받은 질문을 적어 둔다
+    (`_remember_unanswered`, 이 skill의 유일한 쓰기).
+    """
     parsed = h._parse(request, AnswerPlanningQuestionInput)
     if isinstance(parsed, AgentResult):
         return parsed
     out = planning_questions.answer_question(
         parsed, request.meta.tenant_id, request.meta.context_id, h.CHANGES
     )
-    if (
-        out.status == "needs_human"
-    ):  # 사람이 나중에 답할 수 있게 받은 질문을 적어 둔다(기획은 기다리지 않는다)
-        h.PLANNING_QUESTIONS.record(parsed, request.meta.tenant_id, request.meta.context_id)
+    _remember_unanswered(parsed, out.status, request)
     return h._done(
         request,
         out.model_dump(mode="json"),
