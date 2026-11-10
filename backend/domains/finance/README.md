@@ -1,4 +1,4 @@
-# agents/finance
+# domains/finance
 담당: 태윤 · 포트: 8105
 ## 1. 역할
 **재무팀** 에이전트 (재무 재설계 2026-10-23, `docs/notes/finance/2026-10-23-finance-redesign.md`).
@@ -37,7 +37,7 @@
 혼자 띄우기(목 모드, 레포 루트): `FINANCE_MOCK=1 uv run uvicorn finance_agent.main:app --port 8105`
 (정산 묶음을 실제 safety 보류 큐로 보내려면 `AX_SAFETY_URL=http://localhost:8001`. 없으면 템플릿 목 execute가 바로 `executed`를 돌려준다)
 
-테스트: `uv run pytest agents/finance`
+테스트: `uv run pytest domains/finance` (`backend/`에서)
 
 ```bash
 # 결산 리포트 (목 모드, orchestrator로 요청)
@@ -47,7 +47,7 @@ uv run ax-test-call --agent http://localhost:8105 --skill closing_report --input
 ```
 
 ### 가짜 데이터로 돌려 보기 (목 모드)
-safety·finance를 목 모드로 띄운 뒤 `uv run python agents/finance/demo/seed_demo.py`를 실행하면 마케팅·고객지원·통합 에이전트인 척 가짜 요청을 보낸다(공지·기록, 보상 쿠폰, 환불, 정산 확정). 결과는 대시보드 `http://localhost:3001/finance`에서 본다. 가짜 데이터는 `src/finance_agent/mock_seed.json`이다.
+safety·finance를 목 모드로 띄운 뒤 `uv run python domains/finance/demo/seed_demo.py`를 실행하면 마케팅·고객지원·통합 에이전트인 척 가짜 요청을 보낸다(공지·기록, 보상 쿠폰, 환불, 정산 확정). 결과는 AXcellent 화면 `http://localhost:3090/finance/daily`에서 본다. 가짜 데이터는 `src/finance_agent/mock_seed.json`이다.
 
 관리자 사용법(화면 보는 법, 결정 기준): `docs/notes/finance/admin-guide.md`
 
@@ -67,7 +67,7 @@ safety·finance를 목 모드로 띄운 뒤 `uv run python agents/finance/demo/s
 - 재무 AI 테스트 자동 실행: 서버가 켜지고 5초 뒤 한 번, 그다음 `FINANCE_SELF_TEST_SECONDS`(기본 600초, 0이면 끔)마다 서버 안에서 돌려 `/self-test/last`에 남긴다. 테스트(`tests/conftest.py`)는 0으로 끈다
 - 매일 결산 자동 실행(①): 서버가 켜지고 10초 뒤 한 번, 그다음 `FINANCE_DAILY_CLOSING_SECONDS`(기본 86400초=하루, 0이면 끔)마다 **전날** 하루 결산을 계산해 `GET /api/finance/closing/last`에 남긴다(`data.date`·`data.report`·`data.trigger`=`auto`|`manual`·`data.ran_at`, `meta.interval_seconds`·`meta.next_run_at`). 조회만 한다 — 확정(`closing/confirm`)은 사람이 대시보드에서 누른다. 테스트는 0으로 끈다
 - 사람 토큰: 안전 관문과 같은 형식 `Authorization: Bearer human:<이름>`(목 모드) 또는 `FINANCE_HUMAN_TOKENS`/`SAFETY_HUMAN_TOKENS`의 토큰 (`human.py`)
-- CORS: `FINANCE_CORS_ORIGINS`(기본 `http://localhost:3001,http://127.0.0.1:3001`). 사람 결정 경로 3개만 POST·Authorization 허용, 나머지는 GET만
+- CORS: `FINANCE_CORS_ORIGINS`(`run_all.sh`가 화면 주소로 넣는다. 설정이 없을 때 코드 기본값은 옛 대시보드 `http://localhost:3001`). 사람 결정 경로 3개만 POST·Authorization 허용, 나머지는 GET만
 - 구독 이벤트: `coupon.issued`(보상 쿠폰 지급 누적), `payment.refunded`(환불 누적). 실제 모드는 `REDIS_URL`이 있어야 받는다. 보상 쿠폰 장부는 safety `GET /api/safety/executions`(읽기)에 기록이 있으면 그것을 먼저 쓴다
 - 부르는 것: data `impact_analysis`(`failed_order_count`·`affected_customer_count`·`damage_amount` + 영향 고객 ID `affected_customer_ids`), data `fraud_score`(`risk_score` 0~100), safety `execute()`(판매자 승인·정산 보류·정산 묶음 `confirm_settlement`), shop-api·safety 조회 API(장부)
 
