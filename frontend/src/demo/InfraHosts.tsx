@@ -5,6 +5,7 @@ import { useCompany } from './company'
 import { useProfiles } from './members'
 import { customerAccounts } from './session'
 import { newId, now, privateIp, useHosts, type Host } from './store'
+import { PageHead, SectionHead, StatusChip, type Tone } from '@/components/connect/parts'
 
 // 사내 PC 연결 (시스템 관리자 회원·서버 관리 /system/members?tab=pcs, DejaFix 서비스 /hosts 같은 화면).
 // PC를 IP로 등록하면 Zabbix에 호스트 등록 → 에이전트 응답 확인 → DejaFix가 그 호스트를 읽기 시작하는 순서로 연결된다.
@@ -16,10 +17,10 @@ const FLOW = [
   { title: '연결 완료', note: 'CPU·메모리·디스크 감시 시작, 장애가 나면 DejaFix 장애 대응으로' },
 ] as const
 const FLOW_MS = 1200
-const STATUS: Record<Host['status'], { label: string; tone: string; dot: string }> = {
-  online: { label: '연결됨', tone: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
-  offline: { label: '응답 없음', tone: 'bg-red-50 text-red-700', dot: 'bg-red-500' },
-  pending: { label: '연결 확인 중', tone: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500' },
+const STATUS: Record<Host['status'], { label: string; tone: Tone; dot: string }> = {
+  online: { label: '연결됨', tone: 'ok', dot: 'bg-emerald-700' },
+  offline: { label: '응답 없음', tone: 'bad', dot: 'bg-red-700' },
+  pending: { label: '연결 확인 중', tone: 'wait', dot: 'bg-amber-700' },
 }
 
 /** embedded: 회원·서버 관리(/system/members)의 PC·서버 탭 안에 넣을 때. 페이지 제목 없이 내용만 그린다 */
@@ -71,44 +72,43 @@ export default function InfraHosts({ embedded = false }: { embedded?: boolean })
   }, [flow]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className={embedded ? 'space-y-6' : 'space-y-6 px-8 py-8'}>
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          {!embedded && <p className="text-sm text-ink-500">{asAdmin ? '시스템 관리' : 'DejaFix'}</p>}
-          {!embedded && <h1 className="text-2xl font-semibold">PC·서버 연결</h1>}
-          <p className={`${embedded ? '' : 'mt-1 '}text-sm text-ink-500`}>회사 PC와 서버를 사내 IP로 연결하고 연결 상태를 챙깁니다.</p>
-        </div>
-        <div className="flex flex-wrap gap-2 text-xs">
-          {company && <span className="chip bg-ink-100 text-ink-700">사내망 {company.network}</span>}
-          <span className="chip bg-emerald-50 text-emerald-700">외부 접근 차단</span>
-          <span className="chip bg-brand-50 text-brand-700">연결 {online}/{hosts.length}대</span>
-        </div>
-      </header>
+    <div className={embedded ? 'space-y-8' : 'space-y-8 px-4 py-8 sm:px-8'}>
+      {!embedded && (
+        <PageHead where={asAdmin ? '시스템 관리' : 'DejaFix'} title="PC·서버 연결">회사 PC와 서버를 사내 IP로 연결하고 연결 상태를 챙겨요.</PageHead>
+      )}
 
-      <section className="card p-6">
-        <div className="flex flex-col items-center gap-5">
-          <div className="rounded-2xl bg-brand-600 px-6 py-3 text-center text-white">
-            <p className="font-semibold">DejaFix</p>
-            <p className="text-xs text-white/70">{company ? `${company.name} 사내 서버` : '연결된 고객사 없음'}</p>
+      <section className="space-y-4">
+        <SectionHead title="PC·서버" desc="DejaFix가 감시하는 회사 PC와 서버예요. 사내 IP만 받아서 회사 밖에서는 열리지 않아요."
+          right={<>
+            <StatusChip tone={hosts.length === 0 ? 'off' : online === hosts.length ? 'ok' : 'wait'}>연결 {online} / {hosts.length}대</StatusChip>
+            {company && <span className="text-xs text-ink-500">사내망 <span className="font-mono">{company.network}</span></span>}
+          </>} />
+        <div className="card p-6">
+          <div className="flex flex-col items-center gap-4">
+            <div className="bg-brand-600 px-6 py-3 text-center text-white">
+              <p className="font-semibold">DejaFix</p>
+              <p className="text-xs text-white/70">{company ? `${company.name} 사내 서버` : '연결된 고객사 없음'}</p>
+            </div>
+            <div className="h-5 w-px bg-ink-300" aria-hidden="true" />
+            <ul className="grid w-full grid-cols-2 gap-px border border-ink-100 bg-ink-100 md:grid-cols-3 lg:grid-cols-4">
+              {hosts.map((h) => (
+                <li key={h.id} className="bg-surface px-4 py-3 text-sm">
+                  <p className="flex items-center gap-1.5 font-medium">
+                    <span className={`h-2 w-2 ${STATUS[h.status].dot}`} aria-hidden="true" />
+                    {h.dept}
+                  </p>
+                  <p className="mt-1 font-mono text-xs text-ink-500">{h.ip}</p>
+                </li>
+              ))}
+            </ul>
           </div>
-          <div className="h-5 w-px bg-ink-300" aria-hidden="true" />
-          <ul className="grid w-full grid-cols-2 gap-3 md:grid-cols-3">
-            {hosts.map((h) => (
-              <li key={h.id} className="rounded-2xl border border-ink-100 bg-app p-3 text-sm">
-                <p className="flex items-center gap-1.5 font-medium">
-                  <span className={`h-2 w-2 rounded-full ${STATUS[h.status].dot}`} aria-hidden="true" />
-                  {h.dept}
-                </p>
-                <p className="mt-1 font-mono text-xs text-ink-500">{h.ip}</p>
-              </li>
-            ))}
-          </ul>
         </div>
       </section>
 
-      <section className="card p-6">
-        <h2 className="card-title">PC 추가</h2>
-        <div className="mt-3 space-y-1 rounded-2xl bg-app p-4 text-sm">
+      <section className="space-y-4">
+        <SectionHead title="PC 추가" desc="그 PC에 Zabbix agent 2를 설치한 뒤, PC 이름과 IP를 넣으면 Zabbix 등록부터 DejaFix 연결까지 이어서 해요." />
+        <div className="card p-6">
+        <div className="space-y-1 bg-ink-50 p-4 text-sm">
           <p className="font-medium text-ink-900">1. 그 PC에 Zabbix agent 2를 설치해요</p>
           <p className="break-all rounded-xl bg-[#1d1d3a] px-3 py-2 font-mono text-xs text-[#e4e4f4]">
             msiexec /i zabbix_agent2-7.0-windows-amd64.msi /qn SERVER={zabbixHost} SERVERACTIVE={zabbixHost} HOSTNAME={form.hostname.trim() || '<PC 이름>'}
@@ -126,7 +126,8 @@ export default function InfraHosts({ embedded = false }: { embedded?: boolean })
           <input className="field font-mono" placeholder="사내 IP (예: 192.168.10.42)" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} aria-label="IP" />
           <button className="btn-primary" disabled={!!flow}>연결</button>
         </form>
-        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+        </div>
       </section>
 
       {flow && (
@@ -148,7 +149,9 @@ export default function InfraHosts({ embedded = false }: { embedded?: boolean })
         </section>
       )}
 
-      <section className="card overflow-x-auto">
+      <section className="space-y-4">
+      <SectionHead title="연결한 PC" desc="PC마다 쓰는 사람을 고르면 회원 탭의 쓰는 PC에 나와요." />
+      <div className="card overflow-x-auto">
         <table className="w-full whitespace-nowrap text-sm">
           <thead className="bg-app text-left text-xs text-ink-500">
             <tr>
@@ -177,7 +180,7 @@ export default function InfraHosts({ embedded = false }: { embedded?: boolean })
                 </td>
                 <td className="px-3 py-3 font-mono text-xs">{h.ip}</td>
                 <td className="px-3 py-3 text-ink-700">{h.agent}</td>
-                <td className="px-3 py-3"><span className={`chip ${STATUS[h.status].tone}`}>{STATUS[h.status].label}</span></td>
+                <td className="px-3 py-3"><StatusChip tone={STATUS[h.status].tone}>{STATUS[h.status].label}</StatusChip></td>
                 <td className="px-3 py-3 text-ink-500">{ago(h.lastSeen)}</td>
                 <td className="px-6 py-3 text-right">
                   <div className="flex justify-end gap-1">
@@ -189,6 +192,7 @@ export default function InfraHosts({ embedded = false }: { embedded?: boolean })
             ))}
           </tbody>
         </table>
+      </div>
       </section>
     </div>
   )
