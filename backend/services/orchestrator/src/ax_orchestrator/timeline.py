@@ -106,7 +106,9 @@ def past_hint(inc: Incident) -> str | None:
         return None
     pct = round((rec.get("similarity") or 0) * 100)
     minutes = rec.get("minutes_to_resolve")
-    took = f", 정상화까지 {minutes}분" if isinstance(minutes, int) else ""
+    took = ""
+    if isinstance(minutes, int):
+        took = ", 1분 안에 정상화" if minutes < 1 else f", 정상화까지 {minutes}분"
     return (
         f"같은 유형의 과거 이벤트(비슷한 정도 {pct}%)에서는 "
         f"원인 {rec.get('root_cause') or '확인할 수 없음'}, "

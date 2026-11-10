@@ -128,6 +128,8 @@ def test_a_same_type_past_case_becomes_the_hint_and_the_repeat_marker() -> None:
     assert "정상화까지" not in hint  # 걸린 시간이 없으면 쓰지 않는다
     inc.outputs["similar_cases"]["cases"][0]["resolution"]["minutes_to_resolve"] = 3
     assert "정상화까지 3분" in (past_hint(inc) or "")
+    inc.outputs["similar_cases"]["cases"][0]["resolution"]["minutes_to_resolve"] = 0
+    assert "1분 안에 정상화" in (past_hint(inc) or "")
 
 
 @pytest.mark.asyncio

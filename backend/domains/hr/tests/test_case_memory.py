@@ -282,6 +282,25 @@ async def test_finds_the_past_incident_with_its_resolution(svc, tmp_path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_a_resolved_case_is_not_cut_off_by_many_identical_unresolved_ones(
+    svc, tmp_path
+) -> None:
+    """제목이 같은 미해결 카드가 많아도 해결 기록이 있는 카드가 상위 결과에 남는다."""
+    _dense(svc, tmp_path)
+    for n in range(6):
+        ctx = f"ctx_inc_u{n}"
+        await _incident(svc, ctx=ctx)
+        unresolved = {"context_id": ctx, "outcome": "unresolved"}
+        await record_resolution(svc, _req("record_resolution", unresolved, ctx=ctx, key=ctx))
+    solved = await _incident(svc, ctx="ctx_inc_s")
+    done = _resolution(context_id="ctx_inc_s", root_cause=None, action="장애 상태 해제")
+    await record_resolution(svc, _req("record_resolution", done, ctx="ctx_inc_s", key="s"))
+    out = await _search(svc, PAYMENT, limit=3)
+    assert len(out.cases) == 3 and out.cases[0].card_id == solved
+    assert out.cases[0].resolution.action == "장애 상태 해제"
+
+
+@pytest.mark.asyncio
 async def test_unresolved_cases_are_listed_but_flagged(svc, tmp_path) -> None:
     _dense(svc, tmp_path)
     await _incident(svc)
