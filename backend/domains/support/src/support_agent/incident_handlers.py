@@ -4,6 +4,8 @@ SCN-A 8단계. 영향 고객(데이터분석 영향 분석)은 문의를 안 낸
 `request_compensation`(문의가 있어야 한다)으로는 보낼 수 없다. 총괄만 사건(`ctx_inc_`) 안에서
 부를 수 있고, 단가·건수 상한은 정책표가 정한다. 고객 한 명마다 마케팅 `issue_coupon`(A 등급,
 안전 관문의 한도 검사, 초과는 C 보류)에 한 건씩 직렬로 요청하며, 지급은 마케팅이 한다.
+마감(`meta.deadline`)이 가까워지면(`DEADLINE_MARGIN_SECONDS`) 새 고객을 보내지 않고 멈춘다.
+남은 고객은 `skipped`로 돌려주고, 같은 요청을 다시 보내면 이미 한 고객은 건너뛰고 이어서 보낸다.
 같은 사건·구매자·사유는 한 번만 요청한다 (`request_compensation`과 같은 키라 문의 경로로
 이미 보상한 고객은 다시 보내지 않는다).
 
@@ -15,6 +17,7 @@ SCN-A 8단계. 영향 고객(데이터분석 영향 분석)은 문의를 안 낸
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime, timedelta
 
 from ax_agent_template import routing
 from ax_agent_template.server import error_result
@@ -43,6 +46,17 @@ from support_agent.incident_schemas import (
 INCIDENT_CONTEXT_PREFIX = "ctx_inc_"
 NOT_REACHED = ("failed", "canceled")  # 마케팅이 응답하지 않으면(output 없음) 남은 요청을 멈춘다
 # 마케팅이 요청 자체를 거부(`rejected`, 예: SEQUENCE_GAP)해도 멈춘다
+# 마감까지 이 시간(초)보다 적게 남으면 새 고객을 보내지 않는다. 한 건이 느려도 마감을 넘지 않게 한다
+DEADLINE_MARGIN_SECONDS = 5
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _out_of_time(request: AgentRequest) -> bool:
+    """요청 마감까지 남은 시간이 여유(`DEADLINE_MARGIN_SECONDS`)보다 적다."""
+    return request.meta.deadline - _now() < timedelta(seconds=DEADLINE_MARGIN_SECONDS)
 
 
 def clean_buyers(values: list[str]) -> list[str] | None:
@@ -116,11 +130,14 @@ async def request_incident_compensation(request: AgentRequest) -> AgentResult:
         return await _hand_off_batch(request, parsed.reason_code, buyers, decision, evidence)
 
     results: list[IncidentCouponResult] = []
-    stopped = limit_reached = False
+    stopped = limit_reached = timed_out = False
     async with h.LEDGER.lock(context_id):  # 같은 사건의 요청은 한 건씩 (sequence가 이어지게)
         issued_buyers, issued_total = issued_in_incident(context_id)
         added_buyers = added_total = 0  # 이번 호출에서 새로 요청한 몫 (보류 포함)
         for buyer in buyers:
+            if not stopped and _out_of_time(request):
+                # 마감이 가까워 새 고객을 보내지 않는다 (같은 요청을 다시 보내면 이어 보낸다)
+                stopped = timed_out = True
             if stopped:
                 results.append(IncidentCouponResult(buyer_id=buyer, status="skipped"))
                 continue
@@ -176,6 +193,10 @@ async def request_incident_compensation(request: AgentRequest) -> AgentResult:
         notes.append(
             f"사건당 상한(최대 {compensation.MAX_INCIDENT_BUYERS}명, "
             f"{compensation.MAX_INCIDENT_TOTAL}원)에 닿아 남은 고객은 보내지 않았다"
+        )
+    if timed_out:
+        notes.append(
+            "요청 마감이 가까워 남은 고객은 보내지 않았다. 같은 요청을 다시 보내면 이어서 요청한다"
         )
     body = IncidentCompensationOutput(
         reason_code=parsed.reason_code,
