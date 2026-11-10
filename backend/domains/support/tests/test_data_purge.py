@@ -14,7 +14,8 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import events as bus
 from ax_contracts.schemas import AgentRequest, AgentResult, ExecuteDecision, TaskStatus
-from support_agent import claim_handlers, handlers, retention
+from support_agent import claim_handlers, claim_retention, handlers, retention
+from support_agent.claim_schemas import Claim
 from support_agent.claims import ClaimStore
 from support_agent.main import app
 from support_agent.schemas import Analysis
@@ -271,6 +272,44 @@ def test_customer_request_retained_until_follows_the_claim_deadline(env: Inquiry
     until = datetime.fromisoformat(items[claimed]["retained_until"])
     received = retention.received_at(env.get(claimed))
     assert (until - received.replace(tzinfo=None)).days in (1824, 1825, 1826)  # 클레임 5년
+
+
+def test_the_claim_deadline_counts_from_the_day_the_claim_was_made(
+    env: InquiryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """클레임 기록은 클레임을 만든 날부터 5년이다. 문의는 그 클레임의 근거라 같은 날까지 남긴다."""
+    monkeypatch.setenv(retention.ENV_INQUIRY_APPLY, "1")
+    linked = _make(env)
+    _age(env, linked, 5.0)  # 받은 지 5년이 막 지났다
+    env.log_activity(linked, kind="claim_created", title="클레임", ref="claim:7")
+    received = retention.received_at(env.get(linked))
+    claims = ClaimStore()
+    stamp = (received + timedelta(days=30)).isoformat()
+    claims._claims[7] = Claim(
+        id=7,
+        context_id="ctx_1",
+        order_id="ord_1",
+        order_no="ORD-1",
+        buyer_id="buy_0001",
+        customer="홍길동",
+        type="cancel",
+        reason="change_of_mind",
+        status="completed",
+        created_at=stamp,
+        updated_at=stamp,
+        outcome="approved",
+        resolution="환불",
+        requires_return=False,
+        expected_refund=21000,
+        refund_paid=21000,
+    )
+    plans = retention.plan_expired(env, datetime.now(UTC), True, "s", claims=claims)
+    (plan,) = [p for p in plans if p.inquiry_id == linked]
+    assert plan.action == "blocked" and plan.reasons == ["claim_linked"]
+    assert plan.retained_until == (
+        (received + timedelta(days=30 + claim_retention.retention_days())).date().isoformat()
+    )
+    assert not env.get(linked).purged_at
 
 
 # ---------------------------------------------------------------- 고객 요청 삭제
