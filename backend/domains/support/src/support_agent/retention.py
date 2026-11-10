@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from support_agent import claim_retention, persistence, privacy_audit
+from support_agent.claim_schemas import Claim
 from support_agent.claims import ClaimStore
 from support_agent.schemas import Conversation
 from support_agent.store import InquiryStore
@@ -94,20 +95,36 @@ def inquiry_apply_enabled() -> bool:
     return (os.getenv(ENV_INQUIRY_APPLY) or "").strip() == "1"
 
 
-def claim_deadline(conversation: Conversation) -> datetime | None:
-    """클레임이 이어진 문의를 지우는 날: 받은 날 + 클레임 기록 보유 일수(팀 기준, 기본 5년)."""
-    received = received_at(conversation)
-    if received is None:
+def claim_deadline(
+    conversation: Conversation, linked_claims: Sequence[Claim] = ()
+) -> datetime | None:
+    """클레임이 이어진 문의를 지우는 날: 클레임 기록 보유 일수(팀 기준, 기본 5년)가 끝나는 날.
+
+    클레임 기록은 클레임을 만든 날(`created_at`)부터 센다. 문의는 그 클레임의 근거라 같은 날까지
+    남기므로, 이어진 클레임이 있으면 문의를 받은 날과 가장 나중 클레임을 만든 날 중 늦은 쪽을
+    기준으로 잡는다. 클레임 기록을 읽지 못했거나(다른 프로세스에서 문의 번호만 받은 경우) 만든 날을
+    못 읽으면 받은 날을 기준으로 한다.
+    """
+    start = received_at(conversation)
+    if start is None:
         return None
-    return received + timedelta(days=claim_retention.retention_days())
+    created = [t for c in linked_claims if (t := _parse_time(c.created_at)) is not None]
+    for t in created:
+        if t.tzinfo is None and start.tzinfo is not None:
+            t = t.replace(tzinfo=start.tzinfo)
+        if t > start:
+            start = t
+    return start + timedelta(days=claim_retention.retention_days())
 
 
-def effective_deadline(conversation: Conversation, claimed: bool) -> datetime | None:
+def effective_deadline(
+    conversation: Conversation, claimed: bool, linked_claims: Sequence[Claim] = ()
+) -> datetime | None:
     """이 문의를 지워야 하는 날. 클레임이 이어졌으면 클레임 기록의 보유기간(5년)을 따른다."""
     own = retention_deadline(conversation)
     if not claimed:
         return own
-    linked = claim_deadline(conversation)
+    linked = claim_deadline(conversation, linked_claims)
     if own is None or linked is None:
         return own or linked
     return max(own, linked)  # 문의 자신의 3년보다 일찍 지우지 않는다
@@ -134,6 +151,14 @@ def _linked_claims(conversation: Conversation, claims: ClaimStore) -> list[int]:
     if conversation.order_id is not None:
         ids.update(c.id for c in claims.list() if c.order_id == conversation.order_id)
     return sorted(ids)
+
+
+def _claim_records(conversation: Conversation, claims: ClaimStore | None) -> list[Claim]:
+    """이 문의에 이어진 클레임 기록 (이 프로세스가 가진 것만)."""
+    if claims is None:
+        return []
+    wanted = set(_linked_claims(conversation, claims))
+    return [c for c in claims.list() if c.id in wanted]
 
 
 def blockers(conversation: Conversation, claims: ClaimStore) -> list[str]:
@@ -316,7 +341,7 @@ def plan_expired(
             claims is not None and bool(_linked_claims(conversation, claims))
         )
         if claimed:
-            limit = effective_deadline(conversation, True)
+            limit = effective_deadline(conversation, True, _claim_records(conversation, claims))
             if limit is not None and now < limit:
                 plans.append(
                     Plan(
@@ -366,7 +391,9 @@ def plan_customer_request(
         if conversation.id in claimed_ids or _linked_claims(conversation, claims):
             reasons.append("claim_linked")
         if reasons:
-            deadline = effective_deadline(conversation, "claim_linked" in reasons)
+            deadline = effective_deadline(
+                conversation, "claim_linked" in reasons, _claim_records(conversation, claims)
+            )
             until = deadline.date().isoformat() if deadline else None
             plans.append(Plan(conversation.id, "blocked", reasons, retained_until=until))
             continue

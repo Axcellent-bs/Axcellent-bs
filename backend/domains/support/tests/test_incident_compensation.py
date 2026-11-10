@@ -120,7 +120,9 @@ def test_every_affected_buyer_gets_one_coupon_request_in_order(sent: Sent) -> No
     }
     assert first.meta.context_id == CTX
     refs = result["evidence"]["ref_ids"]
-    assert "impact:ctx_inc_0001" in refs and "buyer:buy_0004" in refs
+    assert "impact:ctx_inc_0001" in refs
+    assert not any("buy_" in ref for ref in refs)  # 근거에 구매자 ID를 싣지 않는다
+    assert "4명" in result["evidence"]["data_summary"]  # 사람 수는 남는다
 
 
 def test_buyers_who_never_wrote_an_inquiry_are_compensated_too(sent: Sent) -> None:
