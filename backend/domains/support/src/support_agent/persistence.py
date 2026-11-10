@@ -29,6 +29,7 @@ from support_agent.claim_schemas import Claim
 from support_agent.claims import ClaimStore
 from support_agent.compensation import SequenceLedger
 from support_agent.incident_queue import IncidentQueueStore, QueueItem
+from support_agent.planning_question_inbox import PlanningQuestionInbox, PlanningQuestionRecord
 from support_agent.proposal_decisions import ProposalDecision, ProposalDecisionStore
 from support_agent.schemas import Conversation
 from support_agent.store import InquiryStore
@@ -62,6 +63,7 @@ TABLES: tuple[Table, ...] = (
         ("tenant_id", "context_id", "buyer_id", "reason_code"),
         ("status",),
     ),
+    Table("planning_questions", ("tenant_id", "question_id"), ("context_id", "status")),
     Table("support_chats", ("tenant_id", "chat_id"), ("context_id", "who", "status")),
     Table("compensation_sequences", ("tenant_id", "context_id")),
     Table("compensation_results", ("tenant_id", "idempotency_key"), ("context_id",)),
@@ -457,6 +459,30 @@ class PersistentIncidentQueueStore(IncidentQueueStore):
         return super()._put(item)  # DB 쓰기에 성공한 뒤에 캐시에 넣는다
 
 
+class PersistentPlanningQuestionInbox(PlanningQuestionInbox):
+    """기획이 되물은 질문을 DB에 둔다. `_put` 한 곳에서만 쓰면 된다."""
+
+    def __init__(self, repo: Repo) -> None:
+        super().__init__()
+        self._repo = repo
+        for doc in repo.load("planning_questions"):
+            record = PlanningQuestionRecord.model_validate(doc)
+            self._items[f"{record.tenant_id}:{record.question_id}"] = record
+
+    def _put(self, record: PlanningQuestionRecord) -> PlanningQuestionRecord:
+        self._repo.upsert(
+            "planning_questions",
+            {
+                "tenant_id": record.tenant_id,
+                "question_id": record.question_id,
+                "context_id": record.context_id,
+                "status": record.status,
+            },
+            record.model_dump(mode="json"),
+        )
+        return super()._put(record)  # DB 쓰기에 성공한 뒤에 캐시에 넣는다
+
+
 class PersistentChatStore(ChatStore):
     """고객지원 AI와 사람의 직접 대화 (chat.py)."""
 
@@ -535,6 +561,11 @@ def build_sequence_ledger() -> SequenceLedger:
 def build_incident_queue_store() -> IncidentQueueStore:
     repo = get_repo()
     return PersistentIncidentQueueStore(repo) if repo else IncidentQueueStore()
+
+
+def build_planning_question_inbox() -> PlanningQuestionInbox:
+    repo = get_repo()
+    return PersistentPlanningQuestionInbox(repo) if repo else PlanningQuestionInbox()
 
 
 def build_chat_store() -> ChatStore:
