@@ -56,3 +56,5 @@ uv run python domains/support/eval/holdout.py --n 200 --holdout  # holdout seed 
 - 하네스는 dev seed로만 고친다. holdout seed는 한 번 돌려 숫자만 보고, 틀린 입력 내용은 열지 않는다(`--show`가 holdout에선 꺼진다).
 - 평가 정의(입력 만들기·정답·비교)를 바꾸는 PR과 고객지원 코드를 고치는 PR은 나눈다.
 - holdout을 다시 만들 때는 seed를 바꾸고 이유를 위 표에 적는다. seed는 만든 날 `YYYYMMDD_nn`.
+- **holdout 말뭉치는 이 하네스 파일에 커밋되어 머지 뒤에는 누구나 볼 수 있다.** 그래서 이 말뭉치와 seed `20261110_01`은 더 이상 "처음 보는 입력"이 아니다. 다음 holdout은 새 seed와 새 말뭉치로 만들어 돌린다(예진 님 #929 리뷰 참고).
+- 위 표의 숫자는 #927(언어 판별 15종)이 들어간 `dev`에서 돌린 것이다(하네스가 `detect_detail`을 부른다). `dev`를 다시 받아 같은 seed로 돌려도 숫자가 같음을 확인했다(전체 1,039/1,040, 이탈리아어 5/6).
