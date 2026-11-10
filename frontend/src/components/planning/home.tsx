@@ -1,10 +1,10 @@
-// 기획 홈: 받은 요청·제안 최근 20개(메일함처럼 안 연 것은 밝게, 사람이 눌러야 할 것은 표시) + 그 아래 최근 활동 피드 + 오른쪽 두 흐름 단계별 개수
+// 기획 홈: 맨 위 '지금 확인할 것'(사람이 눌러야 하는 요청·제안 카드) → 최근 받은 것(메일함처럼 안 연 것은 밝게) → 최근 활동 피드 + 오른쪽 두 흐름 단계별 개수
 import { useEffect, useState } from 'react'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { DEPT_NAME, TODAY, type Dept, type State as S } from '@/lib/planningData'
 import { PROPOSAL_STAGES, PROPOSAL_SKILL_LABEL, proposalEnded, proposalOpen, proposalStage } from '@/lib/proposals'
 import { useAllReleaseChecks } from '@/lib/planning'
-import { Grade, Point, Tag, rowNav } from '@/components/planning-common/parts'
+import { Grade, Point, rowNav } from '@/components/planning-common/parts'
 import { LinkedLines, convoHref, idText, toPath } from '@/components/planning-common/links'
 import { STAGES, pipeline, sortRows } from './requests'
 
@@ -33,13 +33,15 @@ export function Home({ s }: { s: S }) {
       wait: proposalOpen(p), label: proposalOpen(p) ? `${PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill} · 근거 ${p.facts.length}` : p.status, at: p.created ?? '',
     })),
   ].sort((a, b) => (a.at === b.at ? b.id.localeCompare(a.id, undefined, { numeric: true }) : a.at < b.at ? 1 : -1)).slice(0, 20)
-  const waiting = todos.filter((x) => x.wait).length
 
   const [seen, setSeen] = useState<Set<string>>(() => loadSeen() ?? new Set())
   useEffect(() => { if (loadSeen() === null) { const init = new Set(todos.filter((x) => !x.wait).map((x) => x.key)); setSeen(init); saveSeen(init) } }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const markSeen = (keys: string[]) => { const next = new Set([...seen, ...keys]); setSeen(next); saveSeen(next) }
   const unread = todos.filter((x) => !seen.has(x.key))
-  const pg = usePage(todos, 10)
+  // 위: 사람이 눌러야 하는 것(카드) · 아래: 나머지 받은 것(목록). 같은 것을 두 번 보이지 않는다
+  const acts = todos.filter((x) => x.wait)
+  const rest = todos.filter((x) => !x.wait)
+  const pg = usePage(rest, 10)
 
   const reqCount = STAGES.map((_, i) => rows.filter((x) => !x.finished && x.stage === i).length)
   reqCount[STAGES.length - 1] = rows.filter((x) => x.finished).length
@@ -47,14 +49,38 @@ export function Home({ s }: { s: S }) {
 
   return (
     <div className="home-wrap">
+      <section className="home-act" aria-label="지금 확인할 것">
+        <h3>지금 확인할 것 {acts.length > 0 && <span className="home-n">{acts.length}</span>}</h3>
+        {!acts.length ? <div className="home-calm">사람이 확인할 것이 없어요</div> : (
+          <ol className="home-cards">
+            {acts.map((t) => {
+              const nav = rowNav(toPath(t.href), `${t.id} 열기`)
+              const { onClick, onKeyDown } = nav
+              return (
+                <li key={t.key} {...nav} onClick={(e) => { markSeen([t.key]); onClick?.(e) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') markSeen([t.key]); onKeyDown?.(e) }}
+                  className={`home-card ${nav.className ?? ''}`}>
+                  <span className="home-card-top">
+                    <span className="home-id" title={t.id}>{idText(t.id)}</span>
+                    <span className={`rq-dept d-${t.from}`}>{DEPT_NAME[t.from]}</span>
+                    <span className="home-card-at">{t.at}</span>
+                  </span>
+                  <b className="home-card-title" title={t.title}>{t.title}</b>
+                  <span className="home-card-foot"><span className="home-card-need">{t.label}</span><span className="home-card-go">열기 ›</span></span>
+                </li>
+              )
+            })}
+          </ol>
+        )}
+      </section>
+
       <section className="home-todo">
         <h3>
-          받은 요청·제안
+          최근 받은 요청·제안
           {unread.length > 0 && <span className="home-new">새로 {unread.length}</span>}
-          {waiting > 0 && <span className="home-n" title="사람이 확인해야 하는 것">확인할 것 {waiting}</span>}
           {unread.length > 0 && <button type="button" className="home-readall" onClick={() => markSeen(unread.map((x) => x.key))}>모두 읽음</button>}
         </h3>
-        {!todos.length ? <div className="empty"><b>없음</b></div> : (
+        {!rest.length ? <div className="empty"><b>없음</b></div> : (
           <ol className="sl-list">
             {pg.rows.map((t) => {
               const nav = rowNav(toPath(t.href), `${t.id} 열기`)
@@ -64,14 +90,13 @@ export function Home({ s }: { s: S }) {
                 <li key={t.key} {...nav} onClick={(e) => { markSeen([t.key]); onClick?.(e) }}
                   onKeyDown={(e) => { if (e.key === 'Enter') markSeen([t.key]); onKeyDown?.(e) }}
                   className={`sl-item home-item${isNew ? ' is-new' : ''} ${nav.className ?? ''}`}>
-                  <span><Tag tone={t.kind === '제안' ? 'green' : 'neutral'}>{t.kind}</Tag></span>
-                  <span className="sl-title">
+                  <span className="home-id" title={t.id}>{idText(t.id)}</span>
+                  <span className="home-item-main">
                     {isNew && <span className="home-dot" aria-label="새로 옴" />}
-                    <span className={`rq-dept d-${t.from}`}>{DEPT_NAME[t.from]}</span>
-                    <span className="mono idc sl-id" title={t.id}>{idText(t.id)}</span>
                     <b title={t.title}>{t.title}</b>
+                    <span className={`rq-dept d-${t.from}`}>{DEPT_NAME[t.from]}</span>
                   </span>
-                  <span>{t.wait ? <Tag tone="amber">{t.label}</Tag> : <span className="muted small">{t.label}</span>}</span>
+                  <span className="home-item-state">{t.label}</span>
                   <span className="muted small home-at">{t.at}</span>
                 </li>
               )

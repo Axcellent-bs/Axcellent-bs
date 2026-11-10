@@ -835,3 +835,35 @@ def test_receive_insight_a2a_handler_completes() -> None:
     res = asyncio.run(handlers.receive_insight(req))
     assert res.status == TaskStatus.COMPLETED and res.outcome == "created"
     assert res.evidence.ref_ids == [f"proposal:{res.output['proposal_id']}", "insight:ins-a2a"]
+
+
+@pytest.mark.role("planning")
+def test_brief_body_does_not_repeat_line_or_limits() -> None:
+    """기획서 본문에 같은 인사이트 문장·같은 한계가 두 번 나오지 않는다 (11/10 기획서 화면)."""
+    lines = [
+        "평가셋 없음",
+        "네이버 값은 상대값이라 비교 안 함",
+        "평가셋 없음",
+        "네이버 값은 상대값이다",
+        "확정은 기획",
+    ]
+    assert proposals._dedupe(lines) == [
+        "평가셋 없음",
+        "네이버 값은 상대값이라 비교 안 함",
+        "확정은 기획",
+    ]
+    assert proposals._plain("주제 '명상' (기회 카드 opp_20261109_e4b16a31)") == "주제 '명상'"
+
+
+@pytest.mark.role("planning")
+def test_background_keeps_insight_once() -> None:
+    """이유가 인사이트를 되풀이하면 배경에 이유만, 아니면 인사이트 + 이유."""
+    from planning_agent.domain.proposal_actions import _background
+
+    class P:
+        insight = "숏츠 조회 중앙값이 전체 대비 1.77배로, 정보·팁 형식이 잘 통한다."
+        why = "데이터분석상 숏츠 조회 중앙값이 전체 대비 1.77배라 정보·팁 형식이 잘 통한다."
+
+    assert _background(P()) == P.why  # type: ignore[arg-type]
+    P.why = "독서 검색이 평균의 1.6배다."
+    assert _background(P()).startswith(P.insight)  # type: ignore[arg-type]

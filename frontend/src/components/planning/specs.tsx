@@ -132,6 +132,8 @@ function SpecPending({ item, waiting }: { item: string; waiting: boolean }) {
 type ListKind = 'all' | 'spec' | 'doc'
 type ListRow = { key: string; kind: 'spec' | 'plan' | 'doc'; href: string; id: string; title: string; from?: S['requests'][number]['from']; to?: 'marketing' | 'dev'; state: string; size: string; tail?: { label: string; tone: 'green' | 'amber'; title?: string }; note?: string; origin?: '요청' | '제안' }
 // 문서·기획서 목록 (탭 첫 화면). 기획서(요청에서 나온 것)와 사람이 쓴 문서를 한 목록에, 최근 것이 위
+const NEED_STATES = ['기획안', '사람 확인 대기', '교차검증 대기']
+
 function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
   const checks = useAllReleaseChecks()
   const [kind, setKind] = useState<ListKind>('all')
@@ -157,7 +159,7 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
     const todos = x.blocks.filter((b) => b.kind === 'todo')
     return {
       key: x.id, kind: 'doc', href: toPath(`docs/${x.id}`), id: x.id, title: x.title || '제목 없는 문서', from: s.requests.find((r) => r.id === x.about)?.from,
-      state: '문서', size: todos.length ? `할 일 ${todos.filter((b) => b.done).length}/${todos.length}` : `블록 ${x.blocks.length}`, note: x.updated,
+      state: '문서', size: todos.length ? `할 일 ${todos.filter((b) => b.done).length}/${todos.length}` : `단락 ${x.blocks.length}`, note: x.updated,
     }
   })
   // 작성일 최신순: 문서는 만든 시각(예전 문서는 고친 시각), 기획서는 그 기획서가 처음 나온 활동 시각 ("MM-DD HH:mm")
@@ -174,6 +176,9 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
   const [q, setQ] = useState('')
   const hit = (r: ListRow) => !q.trim() || `${r.id} ${idText(r.id)} ${r.title}`.toLowerCase().includes(q.trim().toLowerCase())
   const all = newest(kind === 'spec' ? [...specRows, ...planRows] : kind === 'doc' ? plainDocs : [...specRows, ...docRows]).filter(hit)
+  // 사람이 볼 차례인 기획서: 마케팅·개발 중 고를 기획안, 사람·교차검증 확인 대기, 답 안 된 질문
+  const needOf = (r: ListRow) => r.kind === 'spec' && (NEED_STATES.includes(r.state) || !!r.note)
+  const needN = specRows.filter(needOf).length
   const pg = usePage(all, 10)
   useEffect(() => pg.setPage(0), [q]) // eslint-disable-line react-hooks/exhaustive-deps
   const newDoc = () => { d({ type: 'newDoc', title: '' }); go(toPath(`docs/${nextDocId(s)}`)) }
@@ -208,6 +213,7 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
           ))}
         </div>
         <input type="search" className="rq-search" placeholder="제목·번호로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="문서·기획서 찾기" />
+        {needN > 0 && <span className="sp-need-n" title="마케팅·개발 중 고르거나 확인할 기획서">확인할 것 {needN}</span>}
         <span style={{ flex: 1 }} />
         {notion === null ? (
           <Button size="small" onClick={() => setNotion('')}>노션에서 가져오기</Button>
@@ -240,23 +246,24 @@ function SpecList({ s, d }: { s: S; d: Dispatch<Action> }) {
         </div>
       )}
       {!pg.rows.length ? <div className="empty"><b>없음</b></div> : (
-        <div className="sl">
-          <div className="sl-head" aria-hidden><span>상태</span><span>제목</span><span>내용</span><span>작성일</span></div>
+        <div className="sl sp-list">
+          <div className="sl-head" aria-hidden><span>번호</span><span>제목</span><span>상태</span><span>내용</span><span>작성일</span></div>
           <ol className="sl-list">
             {pg.rows.map((r) => {
               const nav = rowNav(r.href, `${r.id} 열기`)
               return (
-                <li key={r.key} {...nav} className={`sl-item ${nav.className ?? ''}`}>
-                  <span>{r.kind === 'doc' ? <Tag>문서</Tag> : <State v={r.state} />}</span>
-                  <span className="sl-title">
-                    {r.origin && <span className={`sl-origin${r.origin === '제안' ? ' prop' : ''}`} title={r.origin === '제안' ? '기획 제안에서 만든 기획서' : '요청에서 만든 기획서'}>{r.origin}</span>}
-                    {r.from && <span className={`rq-dept d-${r.from}`} title="요청한 부서">{DEPT_NAME[r.from]}</span>}
-                    {r.to && <span className={`rq-dept d-${r.to}`} title="기획안을 넘긴 부서">→ {DEPT_NAME[r.to]}</span>}
-                    <span className="mono idc sl-id" title={r.id}>{idText(r.id)}</span>
+                <li key={r.key} {...nav} className={`sl-item${needOf(r) ? ' need' : ''}${r.kind === 'spec' && r.state === '확정' ? ' done' : ''} ${nav.className ?? ''}`}>
+                  {/* 번호가 말머리 (기획서·문서가 이름에 들어 있음) */}
+                  <span className="sp-id" title={r.id}>{idText(r.id)}</span>
+                  <span className="sl-title sp-main">
                     <b title={r.title}>{r.title}</b>
+                    {r.from && <span className={`rq-dept d-${r.from}`} title="요청한 부서">{DEPT_NAME[r.from]}</span>}
+                    {!r.from && r.origin === '제안' && <span className="sp-origin" title="기획 제안에서 만든 기획서">제안에서</span>}
+                    {r.to && <span className="sp-to" title="기획안을 넘긴 부서">→ {DEPT_NAME[r.to]}</span>}
                     {r.kind === 'spec' && r.note && <Tag tone="amber">{humanizePlanIds(r.note)}</Tag>}
                     {r.tail && <Tag tone={r.tail.tone} title={r.tail.title}>{r.tail.label}</Tag>}
                   </span>
+                  <span>{r.kind === 'doc' ? <span className="sp-none">—</span> : <State v={r.state} tone={needOf(r) ? 'amber' : r.state === '확정' ? 'gray' : undefined} />}</span>
                   <span className="muted small">{r.size}</span>
                   <span className="muted small">{timeOf(r) || '—'}</span>
                 </li>
@@ -282,8 +289,7 @@ function PlanHandoff({ s, d, spec }: P & { spec: Spec }) {
   const mk = marketingFirst(p)
   return (
     <div className="plan-handoff">
-      <span className="sl-origin prop">제안</span>
-      <a className="mono idc" href={toPath(`proposals/${p.id}`)} title={p.id}>{idText(p.id)}</a>
+      <a className="sp-ref" href={toPath(`proposals/${p.id}`)} title={p.id}>{idText(p.id)}</a>
       {p.target && <span className="small">목표 <b>{p.target.value}</b> {p.target.label}</span>}
       <span style={{ flex: 1 }} />
       {proposalReady(p) ? (
@@ -297,7 +303,7 @@ function PlanHandoff({ s, d, spec }: P & { spec: Spec }) {
           <Button size="small" variant={mk ? undefined : 'primary'} onClick={() => { flush(); d({ type: 'proposalToRequest', proposal: p.id }); toast.show(`${idText(spec.id)} → 개발`) }}>개발로 넘기기</Button>
         </>
       ) : p.status === '기획서로' ? <span className="small">개발로 넘김 · 작업 {s.tasks.filter((t) => t.spec === spec.id).length}개</span>
-        : p.handoff ? <span className="small">마케팅 {p.handoff.ok ? `받음${p.handoff.campaign ? ` · ${p.handoff.campaign}` : ''}` : '전달 실패'} · <a href={toPath(`proposals/${p.id}`)}>{p.status}</a></span>
+        : p.handoff ? <span className="small" title={p.handoff.campaign ? `캠페인 ${p.handoff.campaign}` : undefined}>{p.handoff.ok ? '마케팅이 받음' : '마케팅 전달 실패'}{p.status !== '마케팅 전달' && <> · <a href={toPath(`proposals/${p.id}`)}>{p.status}</a></>}</span>
         : <span className="muted small">{p.status}</span>}
     </div>
   )
@@ -630,10 +636,10 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; examp
           <header className="sp-props-head">
             <h2>{TEMPLATE_NAME[tpl]} 항목</h2>
           </header>
-          <div className="sp-fill">
+          {editing && <div className="sp-fill">
             <button type="button" className="sp-fill-btn" disabled={!hasFree || filling} title={hasFree ? 'AI가 자유 작성을 읽고 필수 항목을 다시 써요 (저장 전까지 반영 안 됨, 취소로 되돌림)' : '가운데 자유 작성을 먼저 써 주세요'}
               onClick={() => void autoFill()}>{filling ? '읽는 중…' : '✦ 자동 채우기'}</button>
-          </div>
+          </div>}
           {(suggesting || suggCount > 0) && (
             <div className="sp-sugg-bar">
               <span>{suggesting ? '빈 칸 제안 만드는 중…' : `빈 칸 AI 제안 ${suggCount}`}</span>
@@ -687,7 +693,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; examp
         <div className="doc-head" style={{ marginTop: 4 }}>
           <State v={xr ? (xr.lane === 'human' ? '사람 확인 대기' : '교차검증 대기') : spec.status} />
           {spec.confirmedBy && <Tag>{CONFIRMED_BY[spec.confirmedBy]}</Tag>}
-          <span className="muted small">요청 <Ref s={s} id={spec.request} /> · <a href={toPath(`projects/${spec.request}`)}>프로젝트 보기</a></span>
+          <span className="muted small"><Ref s={s} id={spec.request} className="sp-ref" /> · <a href={toPath(`projects/${spec.request}`)}>프로젝트 보기</a></span>
         </div>
         {xr && <ReviewDecide d={d} spec={spec} xr={xr} />}
         <PlanHandoff s={s} d={d} spec={spec} />
