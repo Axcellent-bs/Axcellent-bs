@@ -77,6 +77,14 @@ CREATE TABLE IF NOT EXISTS coupons (
   idempotency_key TEXT NOT NULL UNIQUE, tenant_id TEXT NOT NULL, context_id TEXT,
   created_at TEXT NOT NULL, expires_at TEXT
 );
+-- 토스 결제 시도(시도마다 새 toss_order_id). 금액은 준비할 때의 주문 합계이고 승인 요청 금액과
+-- 비교한다. payment_id는 승인 결과가 남긴 결제 행(끝난 시도를 다시 승인하면 그 결과를 돌려준다).
+-- order_id에 외래키를 걸지 않는다: 보유기간 삭제(retention)가 주문을 지울 때 막히지 않게
+CREATE TABLE IF NOT EXISTS payment_attempts (
+  toss_order_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, amount INTEGER NOT NULL,
+  status TEXT NOT NULL, payment_id TEXT, tenant_id TEXT NOT NULL, context_id TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS retention_daily_stats (
   stat_date TEXT NOT NULL, kind TEXT NOT NULL, rows_count INTEGER NOT NULL,
   amount_sum INTEGER, tenant_id TEXT NOT NULL,
@@ -113,6 +121,12 @@ _ADDED_COLUMNS = {
         ("coupon_share", "INTEGER NOT NULL DEFAULT 0"),
     ),
     "coupons": (("expires_at", "TEXT"),),
+    # 결제사(fake·toss_test), 토스 paymentKey, 결제사 오류 코드. 옛 결제 행은 provider=fake
+    "payments": (
+        ("provider", "TEXT NOT NULL DEFAULT 'fake'"),
+        ("pg_payment_key", "TEXT"),
+        ("failure_detail", "TEXT"),
+    ),
 }
 
 # 새 열에 거는 인덱스는 열이 붙은 뒤에 만든다(옛 DB 파일에서는 `SCHEMA`를 돌릴 때 열이 아직 없다)
