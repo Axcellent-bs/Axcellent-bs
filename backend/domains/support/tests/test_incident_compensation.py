@@ -465,3 +465,73 @@ async def test_a_single_coupon_handed_to_a_human_is_waiting_not_completed(sent: 
     assert result.output["buyer_id"] == "buy_0001"
     assert handlers.LEDGER.peek(CTX) == 1  # 번호를 쓰지 않았다
     assert key not in handlers.LEDGER.results  # 지급 기록으로 남기지 않는다
+
+
+# ---- 마감이 가까워지면 멈추고, 다시 보내면 이어서 보낸다 ---------------------------------------
+def _clock(monkeypatch: pytest.MonkeyPatch, step: float) -> None:
+    """부를 때마다 `step`초씩 흐르는 시계. 마케팅 한 건이 그만큼 걸리는 것처럼 보이게 한다."""
+    from support_agent import incident_handlers
+
+    now = [datetime.now(UTC)]
+
+    def tick() -> datetime:
+        now[0] += timedelta(seconds=step)
+        return now[0]
+
+    monkeypatch.setattr(incident_handlers, "_now", tick)
+
+
+def test_when_the_deadline_is_near_the_rest_are_not_sent(
+    sent: Sent, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clock(monkeypatch, 10)  # 고객 한 명 확인마다 10초가 지난다. 마감 30초, 여유 5초
+    out = call(FOUR)["output"]
+    assert [r["status"] for r in out["results"]] == ["requested", "requested", "skipped", "skipped"]
+    assert out["requested"] == 2 and out["stopped_early"] is True
+    assert len(sent) == 2
+    assert any("마감" in note for note in out["notes"])
+
+
+def test_resending_after_a_deadline_stop_continues_with_the_rest(
+    sent: Sent, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from support_agent import incident_handlers
+
+    real_now = incident_handlers._now
+    _clock(monkeypatch, 10)
+    first = call(FOUR)
+    assert first["outcome"] == "partial" and len(sent) == 2
+    monkeypatch.setattr(incident_handlers, "_now", real_now)  # 두 번째 요청은 시간이 충분하다
+    again = call(FOUR)["output"]
+    assert [r["status"] for r in again["results"]] == [
+        "duplicate",
+        "duplicate",
+        "requested",
+        "requested",
+    ]
+    assert again["requested"] == 2 and again["stopped_early"] is False
+    assert len(sent) == 4  # 이미 보낸 고객은 다시 보내지 않았다
+    assert [r["sequence"] for r in again["results"]][2:] == [3, 4]  # 번호가 이어진다
+
+
+def test_a_far_deadline_sends_every_buyer_as_before(sent: Sent) -> None:
+    out = call(FOUR)["output"]
+    assert out["requested"] == 4 and out["stopped_early"] is False
+    assert not any("마감" in note for note in out["notes"])
+
+
+def test_already_sent_buyers_are_duplicates_even_when_time_is_short(
+    sent: Sent, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from support_agent import incident_handlers
+
+    real_now = incident_handlers._now
+    call(FOUR[:2])  # 앞의 두 명은 이미 보냈다 (시간이 넉넉할 때)
+    assert len(sent) == 2
+    _clock(monkeypatch, 26)  # 새 고객을 확인하는 첫 순간 마감까지 5초가 안 남는다
+    out = call(FOUR)["output"]
+    assert [r["status"] for r in out["results"]] == ["duplicate", "duplicate", "skipped", "skipped"]
+    assert (
+        out["stopped_early"] is True and len(sent) == 2
+    )  # 이미 보낸 고객은 마케팅을 다시 부르지 않는다
+    monkeypatch.setattr(incident_handlers, "_now", real_now)
