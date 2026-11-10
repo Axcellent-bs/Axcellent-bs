@@ -265,9 +265,37 @@ def _similar(inc: Incident) -> dict[str, Any]:
     return {"query": inc.title, "event_type": inc.event_type, "limit": 3}
 
 
+# 쇼핑몰 복구 신호(`shop.recovered`)가 알려 준 "어떻게 풀렸는지" → 조치 문장. 사실만 옮긴다
+RECOVERY_ACTION = {
+    ("fault_released", "admin"): "사람(쇼핑몰 운영자)이 결제 장애 상태를 해제해 정상화",
+    ("fault_released", "infra"): "인프라 AI가 결제 장애 상태를 해제해 정상화",
+    ("metrics_normal", None): "따로 조치한 기록 없이 결제 지표가 정상으로 돌아옴",
+}
+
+
+def recovery_action(inc: Incident) -> str | None:
+    """사람에게 넘긴 뒤 풀린 장애의 조치. 복구 신호에 풀린 방법이 없으면 None(지어내지 않는다)."""
+    how = inc.shared.get("recovery")
+    if not isinstance(how, dict):
+        return None
+    recovery, by = how.get("recovery"), how.get("released_by")
+    if recovery == "fault_released" and by not in ("admin", "infra"):
+        return (
+            "결제 장애 상태를 해제해 정상화"
+            if by is None
+            else f"{by}이(가) 결제 장애 상태를 해제해 정상화"
+        )
+    return RECOVERY_ACTION.get((recovery, by if recovery == "fault_released" else None))
+
+
 def _resolution(inc: Incident) -> dict[str, Any]:
-    """이번 이벤트의 해결 내용. 단계 결과에 있는 사실만 옮기고 없으면 비운다."""
-    recovered = inc.steps["recovery"].status == "completed"
+    """이번 이벤트의 해결 내용. 단계 결과에 있는 사실만 옮기고 없으면 비운다.
+
+    자동 복구 확인이 끝나지 않았어도(사람에게 넘김) 쇼핑몰 복구 신호를 받았으면 해결로 남기고,
+    조치는 복구 신호가 알려 준 풀린 방법, 시간은 열린 시각부터 복구 신호까지다.
+    """
+    auto = inc.steps["recovery"].status == "completed"
+    recovered = auto or inc.recovered_at is not None
     rollback = inc.steps["rollback"]
     action = None
     if rollback.status == "completed":
@@ -277,9 +305,12 @@ def _resolution(inc: Incident) -> dict[str, Any]:
         action = f"{service} 이전 버전으로 되돌림" + (
             f" ({before} → {after})" if before and after else ""
         )
+    elif not auto and recovered:
+        action = recovery_action(inc)
     found = _out(inc, "root_cause")
     top = next((h for h in found.get("hypotheses") or [] if h.get("confidence") == "high"), None)
-    minutes = max(int((now() - inc.opened_at).total_seconds() // 60), 0)
+    end = now() if auto or inc.recovered_at is None else inc.recovered_at
+    minutes = max(int((end - inc.opened_at).total_seconds() // 60), 0)
     return {
         "context_id": inc.context_id,
         "outcome": "resolved" if recovered else "unresolved",

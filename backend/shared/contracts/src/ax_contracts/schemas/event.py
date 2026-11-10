@@ -94,6 +94,12 @@ class ShopDegradedData(AxModel):
     threshold: float | None = None
     # 기준을 넘기 시작한 첫 표본의 시각 (UTC). 영향 분석이 이번 장애 구간만 세도록 총괄이 쓴다
     since: UtcDatetime | None = None
+    # `shop.recovered`에만: 어떻게 정상으로 돌아왔는지. `fault_released`(장애 상태를 해제함),
+    # `metrics_normal`(따로 해제하지 않았는데 지표가 정상으로 돌아옴). 모르면 비운다
+    recovery: Literal["fault_released", "metrics_normal"] | None = None
+    # `fault_released`일 때 해제한 쪽(쇼핑몰 서버 토큰 이름).
+    # `infra`=인프라 AI 롤백, `admin`=사람 운영자
+    released_by: str | None = None
 
 
 class PaymentFailedData(AxModel):

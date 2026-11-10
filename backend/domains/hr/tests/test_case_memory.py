@@ -112,6 +112,29 @@ async def test_resolution_is_written_into_the_card_extra_and_body(svc) -> None:
 
 
 @pytest.mark.asyncio
+async def test_only_if_unresolved_fills_an_unresolved_card_but_keeps_a_resolved_one(svc) -> None:
+    """나중에 풀린 장애를 자동으로 남길 때: 미해결은 채우고, 이미 있는 해결 기록은 덮지 않는다."""
+    card_id = await _incident(svc)
+    first = _resolution(outcome="unresolved", root_cause=None, action=None, minutes_to_resolve=None)
+    await record_resolution(svc, _req("record_resolution", first, key="a"))
+    later = _resolution(
+        action="사람이 결제 장애 상태를 해제함", root_cause=None, only_if_unresolved=True
+    )
+    out = await record_resolution(svc, _req("record_resolution", later, key="b"))
+    assert out.output["outcome"] == "recorded"
+    card = await svc.memory.get_card(card_id)
+    assert card.extra["resolution"]["action"] == "사람이 결제 장애 상태를 해제함"
+
+    person = _resolution(action="결제 설정을 고침", draft_source="written_by_person")
+    await record_resolution(svc, _req("record_resolution", person, key="c"))
+    again = _resolution(action="자동 기록", only_if_unresolved=True)
+    kept = await record_resolution(svc, _req("record_resolution", again, key="d"))
+    assert kept.output["outcome"] == "duplicate"
+    card = await svc.memory.get_card(card_id)
+    assert card.extra["resolution"]["action"] == "결제 설정을 고침"  # 사람이 적은 기록 그대로
+
+
+@pytest.mark.asyncio
 async def test_missing_values_are_not_invented(svc) -> None:
     card_id = await _incident(svc)
     await record_resolution(

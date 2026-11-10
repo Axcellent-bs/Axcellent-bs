@@ -83,6 +83,8 @@ class Monitor:
         value: float | None,
         threshold: float | None,
         since: float | None = None,
+        recovery: str | None = None,
+        released_by: str | None = None,
     ) -> None:
         data = ShopDegradedData(
             component=COMPONENT,
@@ -90,6 +92,8 @@ class Monitor:
             value=value,
             threshold=threshold,
             since=datetime.fromtimestamp(since, UTC) if since is not None else None,
+            recovery=recovery,
+            released_by=released_by,
         )
         with self.db.tx() as conn:
             if event_type == EventType.SHOP_DEGRADED:
@@ -115,7 +119,13 @@ class Monitor:
                 self._breach_since = None
                 if self.degraded:
                     self.degraded = False
-                    self._enqueue(EventType.SHOP_RECOVERED, self._metric_code or "", None, None)
+                    self._enqueue(
+                        EventType.SHOP_RECOVERED,
+                        self._metric_code or "",
+                        None,
+                        None,
+                        recovery="metrics_normal",
+                    )
             return
         if self._breach_since is None:
             slow = self.thresholds.p95_latency_ms
@@ -126,13 +136,21 @@ class Monitor:
             self._metric_code = breach[0]
             self._enqueue(EventType.SHOP_DEGRADED, *breach, since=self._breach_since)
 
-    def reset(self) -> None:
+    def reset(self, released_by: str | None = None) -> None:
         """장애를 해제할 때: 지난 표본을 버리고, 장애 상태였다면 `shop.recovered`를 발행한다.
 
         복구 직후에는 새 측정값이 없으므로 `value`·`threshold`는 비운다(확인할 수 없음).
+        해제로 풀렸다는 것(`recovery=fault_released`)과 해제한 쪽(`released_by`)을 싣는다.
         """
         self._samples.clear()
         self._breach_since = None
         if self.degraded:
             self.degraded = False
-            self._enqueue(EventType.SHOP_RECOVERED, self._metric_code or "", None, None)
+            self._enqueue(
+                EventType.SHOP_RECOVERED,
+                self._metric_code or "",
+                None,
+                None,
+                recovery="fault_released",
+                released_by=released_by,
+            )

@@ -132,6 +132,20 @@ async def record_resolution(svc: Services, request: AgentRequest) -> AgentResult
             evidence=make_evidence(svc.clock, "해결 내용을 기록할 카드가 없음: 확인할 수 없음", []),
         )
     card = max(cards, key=lambda c: c.created_at)
+    current = resolution_of(card)
+    if params.only_if_unresolved and current is not None and current.outcome != "unresolved":
+        # 이미 해결 기록이 있다(사람이 적었거나 자동 경로가 남겼다): 덮지 않는다
+        svc.audit.record(params.context_id, "record_resolution.kept", {"card_id": card.card_id})
+        return completed(
+            request,
+            RecordResolutionOutput(outcome="duplicate", card_id=card.card_id),
+            outcome="duplicate",
+            evidence=make_evidence(
+                svc.clock,
+                f"이미 해결 기록이 있어 바꾸지 않음: 이벤트 {params.context_id}",
+                [card.card_id],
+            ),
+        )
     resolved_at = params.resolved_at or svc.clock()
     minutes = params.minutes_to_resolve
     if params.opened_at is not None:

@@ -757,13 +757,17 @@ class RecordResolutionInput(AxModel):
     prior_case_id: str | None = None  # 이 사건을 시작할 때 근거로 보여 준 과거 사건 카드
     # 사람이 직접 적었는지, AI 초안을 그대로 썼는지·고쳤는지. 초안은 사람이 확인해야 저장된다
     draft_source: Literal["written_by_person", "ai_draft_kept", "ai_draft_edited"] | None = None
+    # True면 카드에 이미 해결 기록(결과가 미해결이 아닌 것)이 있을 때 바꾸지 않는다(`duplicate`).
+    # 총괄이 장애가 나중에 풀린 것을 자동으로 남길 때 쓴다. 사람이 적은 기록을 덮지 않게 한다
+    only_if_unresolved: bool = False
 
 
 class RecordResolutionOutput(AxModel):
     """`record_resolution` 결과.
 
     - `recorded`: 사건의 카드에 해결 내용을 채웠다.
-    - `duplicate`: 같은 내용이 이미 기록되어 있다.
+    - `duplicate`: 같은 내용이 이미 기록되어 있다. `only_if_unresolved`인데 이미 해결 기록이
+      있어 바꾸지 않은 때도 이 값이다.
     - `no_card`: 그 사건에서 만든 카드가 없어 기록할 곳이 없다.
     """
 
