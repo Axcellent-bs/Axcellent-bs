@@ -7,8 +7,8 @@
   이 목록은 상담원이 답해야 할 질문을 보여 주는 용도다.
 - 같은 질문(`question_id`)이 다시 오면 새 줄을 만들지 않고, 처음 받은 시각을 그대로 둔다.
 - 질문 문구는 기획이 쓴 글이지만 개인정보가 섞일 수 있어 저장 전에 가린다(`guard.mask_pii`).
-- 지금은 메모리에만 둔다(재시작하면 비워진다). DB 저장은 후속이다.
-  사람이 답하는 skill과 화면도 후속이다.
+- 서버 메모리가 기본이고 `SUPPORT_PG_DSN`이 있으면 `persistence`가 DB에도 써서,
+  재시작해도 사람이 답하지 못한 질문이 남는다.
 - 이 저장소는 받은 질문을 적어 두는 기록이다. 사업 상태를 바꾸는 일(답을 기획에 보내는 일)은 여기서
   하지 않는다. 그 일은 `execute()`를 거치는 별도 skill이 한다.
 """
@@ -66,7 +66,11 @@ class PlanningQuestionInbox:
             options=[guard.mask_pii(option)[0] for option in q.options],
             received_at=now_iso(),
         )
-        self._items[key] = record
+        return self._put(record)
+
+    def _put(self, record: PlanningQuestionRecord) -> PlanningQuestionRecord:
+        """저장 지점. 영속 저장소가 여기서 DB에도 쓴다."""
+        self._items[_key(record.tenant_id, record.question_id)] = record
         return record
 
     def mark_answered(
@@ -80,8 +84,7 @@ class PlanningQuestionInbox:
         closed = found.model_copy(
             update={"status": "answered", "answered_at": now_iso(), "answered_by": author}
         )
-        self._items[key] = closed
-        return closed
+        return self._put(closed)
 
     def get(self, tenant_id: str, question_id: str) -> PlanningQuestionRecord | None:
         return self._items.get(_key(tenant_id, question_id))

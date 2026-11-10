@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
+from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from support_agent import claim_handlers, compensation, handlers, persistence
 from support_agent.claims import ClaimStore
 from support_agent.main import app
@@ -61,6 +62,9 @@ def boot(monkeypatch: pytest.MonkeyPatch, repo: Any) -> None:
     monkeypatch.setattr(handlers, "STORE", PersistentInquiryStore(repo))
     monkeypatch.setattr(handlers, "LEDGER", PersistentSequenceLedger(repo))
     monkeypatch.setattr(claim_handlers, "CLAIMS", PersistentClaimStore(repo))
+    monkeypatch.setattr(
+        handlers, "PLANNING_QUESTIONS", persistence.PersistentPlanningQuestionInbox(repo)
+    )
 
 
 # ---------------------------------------------------------------- 스키마·선택
@@ -72,6 +76,41 @@ def test_every_table_is_plural_snake_case_with_tenant_and_context() -> None:
         assert {"tenant_id", "context_id"} <= columns, table.name
         assert f"CREATE TABLE IF NOT EXISTS {table.name}" in sql
     assert sql.count("doc jsonb NOT NULL") == len(TABLES)
+
+
+def test_planning_questions_survive_a_restart(memory_repo: type) -> None:
+    """사람이 답하지 못한 기획 질문은 재시작해도 남고, 닫힌 질문은 닫힌 채로 남는다."""
+    repo = memory_repo()
+    inbox = persistence.PersistentPlanningQuestionInbox(repo)
+    q = AnswerPlanningQuestionInput(
+        request_id="REQ-1",
+        question_id="Q-REQ-1-1",
+        spec_id="SPEC-1",
+        about="done",
+        question="완료 기준은 무엇인가요? 연락처 010-1234-5678",
+        options=["가", "나"],
+    )
+    inbox.record(q, "tenant-a", "ctx_req_0001")
+    inbox.record(q.model_copy(update={"question_id": "Q-REQ-1-2"}), "tenant-a", "ctx_req_0001")
+    inbox.mark_answered("tenant-a", "Q-REQ-1-2", "kim")
+
+    again = persistence.PersistentPlanningQuestionInbox(repo)  # 재시작
+    assert [r.question_id for r in again.open("tenant-a")] == ["Q-REQ-1-1"]
+    first = again.get("tenant-a", "Q-REQ-1-1")
+    assert first is not None and "010-1234-5678" not in first.question  # 가린 채로 저장
+    closed = again.get("tenant-a", "Q-REQ-1-2")
+    assert closed is not None and closed.status == "answered" and closed.answered_by == "kim"
+    assert again.record(q, "tenant-a", "ctx_req_0001").received_at == first.received_at  # 멱등
+
+
+def test_a_failed_db_write_does_not_leave_a_planning_question_in_memory(memory_repo: type) -> None:
+    repo = memory_repo()
+    inbox = persistence.PersistentPlanningQuestionInbox(repo)
+    repo.fail = True
+    q = AnswerPlanningQuestionInput(request_id="REQ-1", question_id="Q-REQ-1-1", question="질문")
+    with pytest.raises(RuntimeError):
+        inbox.record(q, "tenant-a", "ctx_req_0001")
+    assert inbox.all() == []
 
 
 def test_without_dsn_stores_are_plain_memory() -> None:
