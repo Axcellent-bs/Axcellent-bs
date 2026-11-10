@@ -423,6 +423,16 @@
       "priority": "recommended"
     },
     {
+      "id": "list_planning_questions",
+      "description": "기획이 되물었는데 기록으로 답하지 못해(needs_human) 사람이 답해야 하는 질문 목록을 돌려준다(읽기). 질문 번호·요청 번호·사건·묻는 칸·질문 문구(개인정보는 가림)·받은 시각을 담고, 기본은 아직 답하지 못한 질문(open)만이다. 요청한 회사의 질문만 보이고 open_count는 거르기 전 그 회사의 열린 질문 수다. 지금은 메모리에만 있어 재시작하면 비워진다. 사람이 답해 기획에 보내는 skill과 화면은 후속이다.",
+      "input_schema": "agents/support/src/support_agent/planning_question_schemas.py#ListPlanningQuestionsInput",
+      "output_schema": "agents/support/src/support_agent/planning_question_schemas.py#ListPlanningQuestionsOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "planning"],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "list_change_requests",
       "description": "문의와 기획 변경 요청의 연결 목록 (문의·사건·상태로 거름).",
       "input_schema": "agents/support/src/support_agent/change_schemas.py#ListChangeRequestsInput",

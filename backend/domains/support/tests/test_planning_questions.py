@@ -11,6 +11,7 @@ from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from support_agent import handlers, planning_questions
 from support_agent.change_requests import ChangeRequestStore
 from support_agent.main import ALL_HANDLERS, app, load_card
+from support_agent.planning_question_inbox import PlanningQuestionInbox
 from support_agent.schemas import Analysis
 from support_agent.store import InquiryStore
 
@@ -152,6 +153,7 @@ def _fresh(monkeypatch: pytest.MonkeyPatch) -> Sent:
         )
     monkeypatch.setattr(handlers, "STORE", inquiries)
     monkeypatch.setattr(handlers, "CHANGES", ChangeRequestStore())
+    monkeypatch.setattr(handlers, "PLANNING_QUESTIONS", PlanningQuestionInbox())
     sent = Sent()
 
     async def fake_send(target: str, req: AgentRequest) -> AgentResult:
@@ -249,3 +251,65 @@ def test_answering_changes_nothing_and_sends_nothing(
         call("answer_planning_question", {**ASK, "about": about})
     assert [link.model_dump() for link in handlers.CHANGES.all()] == before_links
     assert handlers.STORE.results == before_results and len(_fresh) == sent_before
+
+
+# -------------------------------------------------------- 답하지 못한 질문 모으기 (needs_human)
+def test_a_question_we_could_not_answer_waits_for_a_person(_fresh: Sent) -> None:
+    call("request_change", SEND, requester="dashboard-api", context_id="ctx_ui_0001")
+    asked = {**ASK, "about": "done", "question": "완료 기준을 알려 주세요"}
+    assert call("answer_planning_question", asked)["outcome"] == "needs_human"
+    listed = call("list_planning_questions", {}, requester="dashboard-api")
+    assert listed["status"] == "completed"
+    out = listed["output"]
+    assert out["open_count"] == 1 and [i["question_id"] for i in out["items"]] == ["Q-REQ-1-1"]
+    item = out["items"][0]
+    assert item["status"] == "open" and item["about"] == "done" and item["context_id"] == CTX
+    assert item["question"] == "완료 기준을 알려 주세요" and item["tenant_id"] == TENANT
+
+
+def test_answered_and_unknown_questions_are_not_collected(_fresh: Sent) -> None:
+    assert call("answer_planning_question", ASK)["outcome"] == "unknown"  # 우리 요청이 아님
+    call("request_change", SEND, requester="dashboard-api", context_id="ctx_ui_0001")
+    assert call("answer_planning_question", ASK)["outcome"] == "answered"  # 기록으로 답함
+    out = call("list_planning_questions", {}, requester="dashboard-api")["output"]
+    assert out["items"] == [] and out["open_count"] == 0
+
+
+def test_the_same_question_asked_again_is_kept_once(_fresh: Sent) -> None:
+    call("request_change", SEND, requester="dashboard-api", context_id="ctx_ui_0001")
+    asked = {**ASK, "about": "done"}
+    for _ in range(3):
+        call("answer_planning_question", asked)
+    first = handlers.PLANNING_QUESTIONS.all()[0].received_at
+    out = call("list_planning_questions", {}, requester="dashboard-api")["output"]
+    assert out["open_count"] == 1 and len(out["items"]) == 1
+    assert out["items"][0]["received_at"] == first  # 처음 받은 시각 그대로
+
+
+def test_personal_data_in_the_question_text_is_masked_before_it_is_kept(_fresh: Sent) -> None:
+    call("request_change", SEND, requester="dashboard-api", context_id="ctx_ui_0001")
+    asked = {**ASK, "about": "done", "question": "010-1234-5678 고객 사례를 알려 주세요"}
+    call("answer_planning_question", asked)
+    item = handlers.PLANNING_QUESTIONS.all()[0]
+    assert "010-1234-5678" not in item.question and "[전화번호]" in item.question
+
+
+def test_only_the_asking_company_sees_its_questions(_fresh: Sent) -> None:
+    call("request_change", SEND, requester="dashboard-api", context_id="ctx_ui_0001")
+    call("answer_planning_question", {**ASK, "about": "done"})
+    assert len(handlers.PLANNING_QUESTIONS.open(TENANT)) == 1
+    assert handlers.PLANNING_QUESTIONS.open("other-shop") == []
+
+
+def test_listing_filters_and_is_read_only(_fresh: Sent) -> None:
+    call("request_change", SEND, requester="dashboard-api", context_id="ctx_ui_0001")
+    call("answer_planning_question", {**ASK, "about": "done"})
+    none = call("list_planning_questions", {"status": "answered"}, requester="dashboard-api")
+    assert none["output"]["items"] == [] and none["output"]["open_count"] == 1
+    other = call("list_planning_questions", {"request_id": "REQ-9"}, requester="dashboard-api")
+    assert other["output"]["items"] == []
+    skill = {s.id: s for s in load_card().skills}["list_planning_questions"]
+    assert skill.grade == "read" and "list_planning_questions" in ALL_HANDLERS
+    assert set(skill.allowed_requesters) == {"dashboard-api", "orchestrator", "planning"}
+    result = call("list_planning_questions", {}, requester="data")
+    assert result["status"] != "completed"  # 허용하지 않은 부서는 읽지 못한다

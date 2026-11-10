@@ -8,6 +8,10 @@ from ax_contracts.schemas import AgentRequest, AgentResult, Evidence
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from support_agent import handlers as h
 from support_agent import planning_questions
+from support_agent.planning_question_schemas import (
+    ListPlanningQuestionsInput,
+    ListPlanningQuestionsOutput,
+)
 
 
 async def answer_planning_question(request: AgentRequest) -> AgentResult:
@@ -18,6 +22,10 @@ async def answer_planning_question(request: AgentRequest) -> AgentResult:
     out = planning_questions.answer_question(
         parsed, request.meta.tenant_id, request.meta.context_id, h.CHANGES
     )
+    if (
+        out.status == "needs_human"
+    ):  # 사람이 나중에 답할 수 있게 받은 질문을 적어 둔다(기획은 기다리지 않는다)
+        h.PLANNING_QUESTIONS.record(parsed, request.meta.tenant_id, request.meta.context_id)
     return h._done(
         request,
         out.model_dump(mode="json"),
@@ -31,4 +39,25 @@ async def answer_planning_question(request: AgentRequest) -> AgentResult:
     )
 
 
-PLANNING_QUESTION_HANDLERS = {"answer_planning_question": answer_planning_question}
+async def list_planning_questions(request: AgentRequest) -> AgentResult:
+    """사람이 아직 답하지 못한 기획 질문 목록 (grade read, 요청한 회사의 질문만)."""
+    parsed = h._parse(request, ListPlanningQuestionsInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    tenant = request.meta.tenant_id
+    items = h.PLANNING_QUESTIONS.all(tenant)
+    open_count = sum(1 for r in items if r.status == "open")
+    if parsed.status is not None:
+        items = [r for r in items if r.status == parsed.status]
+    if parsed.request_id is not None:
+        items = [r for r in items if r.request_id == parsed.request_id]
+    return h._done(
+        request,
+        ListPlanningQuestionsOutput(items=items, open_count=open_count).model_dump(mode="json"),
+    )
+
+
+PLANNING_QUESTION_HANDLERS = {
+    "answer_planning_question": answer_planning_question,
+    "list_planning_questions": list_planning_questions,
+}
