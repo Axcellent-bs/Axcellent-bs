@@ -4,16 +4,27 @@
 
 부모가 `DATA_INSIGHT_BRIEF_DB`(브리프·판·잠금 파일)를 준다. `start_at`(epoch초)까지 기다렸다가
 다시 추천을 시작하고, 만들기는 1초 걸린 뒤 판 하나를 저장한다. 출력(마지막 줄 JSON): status.
+
+`BRIEF_REGEN_EVAL_NOW`(ISO 시각)를 주면 그 시각으로 판을 저장한다. 시험이 고정 시각(NOW)의 날짜로
+판을 세므로, 실제 날짜가 달라도 같은 날짜에 저장되게 한다. 없으면 실제 시각.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+
+NOW_ENV = "BRIEF_REGEN_EVAL_NOW"
+
+
+def eval_now() -> datetime | None:
+    raw = os.environ.get(NOW_ENV, "").strip()
+    return datetime.fromisoformat(raw) if raw else None
 
 
 async def main(spec: dict) -> dict:
@@ -23,17 +34,19 @@ async def main(spec: dict) -> dict:
         return {"unsupported": True}
     from ax_contracts.schemas.data import TrendInsight, TrendInsightBriefOutput
 
+    now = eval_now()  # None이면 실제 시각 (bv.start가 저장하는 순간의 시각을 쓴다)
+
     async def build(ctx) -> None:  # noqa: ANN001
         await asyncio.sleep(1.0)
         out = TrendInsightBriefOutput(
-            status="known", generated_at=datetime.now(UTC),
+            status="known", generated_at=now or datetime.now(UTC),
             insights=[TrendInsight(insight_id="i-x", rank=1, topic=spec["name"], line="x")],
         )  # fmt: skip
         ctx.save(out, tokens=1000)
 
     await asyncio.sleep(max(0.0, float(spec["start_at"]) - time.time()))
-    detect = bv.Detect(as_of=datetime.now(UTC), key=f"k-{spec['name']}")
-    got = bv.start({**spec["env"]}, spec["name"], build, llm_share=0.1, detect=detect)
+    detect = bv.Detect(as_of=now or datetime.now(UTC), key=f"k-{spec['name']}")
+    got = bv.start({**spec["env"]}, spec["name"], build, now=now, llm_share=0.1, detect=detect)
     await bv.wait_all()
     return {"status": got["status"], "blocked": (got.get("blocked") or {}).get("code")}
 
