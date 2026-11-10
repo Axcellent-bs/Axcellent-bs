@@ -41,7 +41,7 @@ function Group({ g, onDone }: { g: DuplicateGroup; onDone: () => void }) {
         <label className="text-xs font-semibold text-ink-500" htmlFor={`dup-title-${g.group_id}`}>대표 제목</label>
         <input id={`dup-title-${g.group_id}`} className="field min-w-[16rem] flex-1" maxLength={80} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="비워 두면 지금 제목 그대로" />
       </div>
-      {g.suggested_title && <p className="text-xs text-ink-500">대표 제목은 AI가 이 카드들의 내용만 보고 제안한 것이고, 확인한 뒤 합쳐집니다.</p>}
+      {g.suggested_title && <p className="text-xs text-ink-500">대표 제목은 AI가 제안한 것입니다. 확인한 뒤 합쳐집니다.</p>}
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn-primary" disabled={busy} onClick={() => act("merge")}>{busy ? "처리 중…" : "하나로 합치기"}</button>
         <button type="button" className="btn-ghost" disabled={busy} onClick={() => act("dismiss")}>그대로 두기</button>
@@ -78,7 +78,7 @@ export default function DuplicateGroups() {
     <section className="card space-y-4 p-6">
       <div>
         <h2 className="text-lg font-semibold">겹치는 결정 정리</h2>
-        <p className="mt-1 text-xs text-ink-500">같은 결정을 다른 말로 다시 쓴 카드를 묶습니다. 거의 확실한 것(비슷한 정도와 AI 판정이 모두 기준 이상)은 AI가 합치고, 애매한 것은 아래에서 사람이 정합니다. 합쳐도 옛 카드는 지워지지 않고 되돌릴 수 있습니다. 장애 대응 카드(이벤트 기록)는 대상이 아닙니다.</p>
+        <p className="mt-1 text-xs text-ink-500">같은 결정을 다른 말로 다시 쓴 카드를 묶습니다. 거의 확실한 것은 AI가 합치고, 애매한 것은 아래에서 사람이 정합니다. 합쳐도 옛 카드는 지워지지 않고 되돌릴 수 있습니다. 장애 대응 카드는 대상이 아닙니다.</p>
       </div>
       {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
       {!view ? (!err && <p className="text-xs text-ink-500">불러오는 중…</p>) : (

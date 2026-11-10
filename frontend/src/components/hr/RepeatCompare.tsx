@@ -47,7 +47,7 @@ export default function RepeatCompare() {
     <section className="card space-y-3 p-6">
       <div>
         <h2 className="text-lg font-semibold">처음과 반복의 해결 시간</h2>
-        <p className="mt-1 text-xs text-ink-500">시간은 이벤트를 감지한 때부터 쇼핑몰이 정상 복귀를 알린 때까지이고, 시스템이 쟀습니다. 정상 복귀가 기록된 이벤트만 셉니다. 건수가 적어 통계로 보지 말고 사례를 견주는 용도로만 보세요. 시연에서는 장애를 해제한 시각이 복귀 시각이라 시연하는 사람의 속도입니다.</p>
+        <p className="mt-1 text-xs text-ink-500">시간은 이벤트를 감지한 때부터 쇼핑몰이 정상 복귀를 알린 때까지이고, 시스템이 쟀습니다. 정상 복귀가 기록된 이벤트만 셉니다. 건수가 적으니 사례를 견주는 용도로만 보세요. 시연에서는 장애를 푼 때가 복귀 시각이라 시연하는 사람의 속도로 정해집니다.</p>
       </div>
       {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
       {!rows ? (!err && <p className="text-xs text-ink-500">불러오는 중…</p>) : (

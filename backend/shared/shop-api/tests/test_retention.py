@@ -66,7 +66,9 @@ def order(db: Db, order_id: str, buyer_id: str, created: str, amount: int = 1000
 def payment(db: Db, pay_id: str, order_id: str, created: str, amount: int = 1000) -> None:
     with db.tx() as c:
         c.execute(
-            "INSERT INTO payments VALUES (?, ?, ?, 'card', 'succeeded', NULL, ?, NULL, ?)",
+            "INSERT INTO payments (payment_id, order_id, amount, method_code, status, "
+            "failure_code, tenant_id, context_id, created_at) "
+            "VALUES (?, ?, ?, 'card', 'succeeded', NULL, ?, NULL, ?)",
             (pay_id, order_id, amount, TENANT_ID, created),
         )
 

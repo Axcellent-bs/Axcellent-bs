@@ -101,7 +101,7 @@ export default function IncidentCompensationQueue() {
       </p>
       {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
       {notice && <p role="status" className="mt-3 rounded-xl bg-brand-50 px-4 py-2 text-xs font-medium text-brand-700">{notice}</p>}
-      {!humanTokenSet && waiting > 0 && <p className="mt-3 text-xs text-amber-800">결정 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
+      {!humanTokenSet && waiting > 0 && <p className="mt-3 text-xs text-amber-800">이 계정에는 결정 권한이 없어 승인·거절 버튼이 꺼져 있습니다. 결정 권한이 있는 담당자 계정으로 들어오면 켜집니다.</p>}
 
       {incidents.map((i) => {
         const chosen = picked[i.context_id] ?? new Set<string>();

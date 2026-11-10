@@ -124,7 +124,7 @@ export const SERVICES: Service[] = [
   },
   {
     id: 'org', agent: 'hr', family: 'backoffice', name: '조직 변동', by: 'AXcellent', Icon: IconOffice, entry: '/org', paths: ['/org'],
-    desc: '팀 이동·입사·퇴사를 기록하고 확정합니다. 확정한 기록으로 센 팀별 인원이 재무 AI의 팀 예산에 쓰입니다.',
+    desc: '팀 이동·입사·퇴사를 기록하고 확정합니다. 확정한 내용으로 센 팀별 인원이 재무 AI의 팀 예산에 쓰입니다.',
   },
   {
     id: 'planning', agent: 'planning', family: 'product', name: '요청·기획서', by: 'AXcellent', Icon: IconPlan, entry: '/planning/home', paths: ['/planning'],
