@@ -69,6 +69,9 @@ def dump(s: State) -> dict[str, Any]:
             "opinions": records.opinions,
             "exports": records.exports,
             "bank_imports": records.bank_imports,
+            "pg_rows": records.pg_rows,
+            "pg_periods": records.pg_periods,
+            "pg_imports": records.pg_imports,
         },
     }
 
@@ -106,6 +109,10 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.opinions = [dict(r) for r in rec.get("opinions", [])]
     s.records.exports = {k: dict(v) for k, v in rec.get("exports", {}).items()}
     s.records.bank_imports = [dict(r) for r in rec.get("bank_imports", [])]
+    s.records.pg_rows = {k: dict(v) for k, v in rec.get("pg_rows", {}).items()}
+    s.records.pg_periods = [dict(p) for p in rec.get("pg_periods", [])]
+    s.records.pg_imports = [dict(r) for r in rec.get("pg_imports", [])]
+    s.records.pg_version += 1
 
 
 def _text(s: State) -> str:
@@ -113,8 +120,19 @@ def _text(s: State) -> str:
 
 
 def fingerprint(s: State) -> str:
-    """사람 기록·장부 기록 전체의 지문. 파일에 남기는 내용과 같은 것의 해시다(바뀌었는지만 본다)."""
-    return hashlib.sha1(_text(s).encode("utf-8")).hexdigest()
+    """사람 기록·장부 기록 전체의 지문(바뀌었는지만 본다). 파일에 남기는 내용의 해시다.
+
+    올린 PG 정산 줄(`pg_rows`)은 수만 줄이라 매번 글로 바꾸면 느리다(A2A 요청마다 부른다).
+    줄 대신 줄 수와 판(`pg_version`, 올리기·빼기·불러오기마다 하나씩)을 넣는다. 줄이 바뀌면 판도
+    바뀌므로 지문도 바뀐다.
+    """
+    data = dump(s)
+    data["records"]["pg_rows"] = {
+        "count": len(s.records.pg_rows),
+        "version": s.records.pg_version,
+    }
+    text = json.dumps(data, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
 
 def load(s: State, path: Path) -> bool:
@@ -134,14 +152,18 @@ def load(s: State, path: Path) -> bool:
 
 
 def save(s: State, path: Path, last: str | None = None) -> str:
-    """바뀌었으면 쓴다. 쓴(또는 그대로인) 내용을 돌려준다."""
-    text = _text(s)
-    if text != last:
+    """바뀌었으면 쓴다. 쓴(또는 그대로인) 기록의 지문(`fingerprint`)을 돌려준다.
+
+    5초마다 부르므로 가벼운 지문으로 먼저 비교하고, 바뀐 경우에만 전체를 글로 바꿔 쓴다
+    (올린 PG 정산 줄이 수만 줄이어도 바뀌지 않은 동안은 다시 쓰지 않는다).
+    """
+    mark = fingerprint(s)
+    if mark != last:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
+        tmp.write_text(_text(s), encoding="utf-8")
         tmp.replace(path)
-    return text
+    return mark
 
 
 async def save_loop(get_state: Any, path: Path, last: str | None) -> None:

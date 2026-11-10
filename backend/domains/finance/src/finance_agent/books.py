@@ -684,27 +684,63 @@ async def load_books(fresh: bool = False) -> Books:
     return await cached_live_books(fresh)
 
 
-# ---------------------------------------------------------------- 목 PG 정산 (토스 정산 형식)
-def pg_settlements(books: Books, today: date | None = None) -> dict[str, dict[str, Any]]:
-    """결제별 목 PG 정산 기록. PG에 없는 결제는 키가 없다.
+# ---------------------------------------------------------------- PG 정산 (올린 파일 + 모의 자료)
+# 올린 PG 정산 파일(`pg_file.py`)을 장부 밖(재무 기록)에서 건네받는다. (판, 결제 번호 → 줄, 기간)
+PgUpload = tuple[object, dict[str, dict[str, Any]], list[dict[str, str]]]
+_PG_UPLOAD: Callable[[], PgUpload] | None = None
 
-    - `sold_date` = 결제일, `paid_out_date` = 판매일 + `payout_days`(지급 예정일)
-    - 지급 예정일이 오늘 이후면 아직 정산 전(`paid_out_date`는 예정일, `settled` False)
-    - 같은 장부·같은 날이면 한 번만 만든다(결산·대사·현금 흐름이 같은 요청 안에서 여러 번 부른다).
-      돌려준 값은 읽기만 한다
+
+def set_pg_upload(provider: Callable[[], PgUpload] | None) -> None:
+    """재무 기록이 올린 PG 정산 자료를 알려 줄 함수를 건다(`handlers.State`)."""
+    global _PG_UPLOAD
+    _PG_UPLOAD = provider
+
+
+def pg_upload(books: Books) -> PgUpload:
+    """이 장부에 쓸 올린 PG 자료. 실제 장부만 쓴다.
+
+    자기 테스트·정확도 평가·시드처럼 따로 만든 장부(`mock`)는 실제 PG 파일과 섞지 않는다.
+    """
+    if books.mock or _PG_UPLOAD is None:
+        return (0, {}, [])
+    return _PG_UPLOAD()
+
+
+def pg_settlements(books: Books, today: date | None = None) -> dict[str, dict[str, Any]]:
+    """결제별 PG 정산 기록. PG에 없는 결제는 키가 없다.
+
+    - 올린 PG 정산 파일이 덮는 판매일이면 그 파일 줄을 쓴다(`basis: uploaded`). 파일에 없는
+      결제는 키가 없다(대사에서 "PG에 없음"). 지급일이 오늘 이후면 정산 전
+    - 그 밖의 날은 결제 기록으로 만든 모의 자료(`basis: generated`, 토스 정산 형식)
+      - `sold_date` = 결제일, `paid_out_date` = 판매일 + `payout_days`(지급 예정일)
+      - 지급 예정일이 오늘 이후면 아직 정산 전(`paid_out_date`는 예정일, `settled` False)
+    - 같은 장부·같은 날·같은 올린 자료면 한 번만 만든다(결산·대사·현금 흐름이 같은 요청 안에서
+      여러 번 부른다). 돌려준 값은 읽기만 한다
     """
     cfg = fc.load_config().pg
     today = today or fc.today()
-    return books.memo(("pg", today, id(cfg)), lambda: _pg_settlements(books, today, cfg))
+    upload = pg_upload(books)
+    return books.memo(
+        ("pg", today, id(cfg), upload[0]),
+        lambda: _pg_settlements(books, today, cfg, upload),
+    )
 
 
-def _pg_settlements(books: Books, today: date, cfg: Any) -> dict[str, dict[str, Any]]:
+def _pg_settlements(
+    books: Books, today: date, cfg: Any, upload: PgUpload = (0, {}, [])
+) -> dict[str, dict[str, Any]]:
     payments = books.payments()
     # 데모용 불일치는 목 모드(시드·시험)에만 있다. 실제 모드는 결제 기록 그대로 만든다
     overrides = books.pg_overrides if books.mock else {}
+    _, uploaded, periods = upload
     out: dict[str, dict[str, Any]] = {}
     for p in payments:
         sold = p["created_at"].date()
+        if any(per["from"] <= sold.isoformat() <= per["to"] for per in periods):
+            row = uploaded.get(p["payment_id"])
+            if row is not None:
+                out[p["payment_id"]] = _uploaded_record(p, row, today, cfg)
+            continue
         payout = sold + timedelta(days=cfg.payout_days)
         settled = payout <= today
         spec = overrides.get(p["payment_id"], {}) if settled else {}
@@ -725,5 +761,27 @@ def _pg_settlements(books: Books, today: date, cfg: Any) -> dict[str, dict[str, 
             "sold_date": sold.isoformat(),
             "paid_out_date": payout.isoformat(),
             "settled": settled,
+            "basis": "generated",
         }
     return out
+
+
+def _uploaded_record(
+    payment: dict[str, Any], row: dict[str, Any], today: date, cfg: Any
+) -> dict[str, Any]:
+    """올린 파일의 한 줄. 지급일이 비어 있으면 판매일 + `payout_days`를 예정일로 본다."""
+    payout = (
+        row.get("paid_out_date")
+        or (date.fromisoformat(row["sold_date"]) + timedelta(days=cfg.payout_days)).isoformat()
+    )
+    return {
+        "payment_id": payment["payment_id"],
+        "order_id": row.get("order_id") or payment["order"]["order_id"],
+        "amount": row["amount"],
+        "fee": row["fee"],
+        "pay_out_amount": row["amount"] - row["fee"],
+        "sold_date": row["sold_date"],
+        "paid_out_date": payout,
+        "settled": payout <= today.isoformat(),
+        "basis": "uploaded",
+    }

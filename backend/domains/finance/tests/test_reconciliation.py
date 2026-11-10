@@ -71,7 +71,9 @@ def test_seed_has_every_status_and_injected_items_are_flagged() -> None:
         "status",
         "reason",
         "note",
+        "pg_basis",
     }
+    assert {i["pg_basis"] for i in result["items"]} == {"generated"}  # 올린 PG 파일이 없으면
 
 
 def test_totals_add_up() -> None:
