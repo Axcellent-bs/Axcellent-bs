@@ -5,8 +5,10 @@ import { humanTokenSet } from "@/lib/finance";
 import { support, type PlanningQuestion } from "@/lib/support";
 
 // 기획이 되물은 질문 중 고객지원이 기록으로 답하지 못한 것(사람이 답해야 하는 질문)을 모아 보여 주고,
-// 상담원이 답하면 고객지원이 안전 관문을 거쳐 기획으로 보낸다. 기획은 답을 기다리느라 멈추지 않고
-// 기획서에 "질문 대기"로 표시만 하므로 천천히 답해도 된다. 답에 개인정보를 쓰면 보내지 않는다.
+// 상담원이 답하면 고객지원이 안전 관문을 거쳐 기획으로 보낸다. 기획은 멈추지 않고 기획서를 이어 쓰지만
+// 질문이 열려 있는 동안 그 기획서는 확정되지 않고 "답 대기"로 남아 개발로 넘어가지 못한다(기획 자동 확정 규칙).
+// 그래서 되도록 빨리 답해야 한다. 한 번 보낸 답은 고칠 수 없다(같은 질문은 한 번만 처리).
+// 답에 개인정보를 쓰면 보내지 않는다.
 
 const ABOUT_KO: Record<string, string> = { evidence: "근거", done: "완료 기준" };
 const OUTCOME_KO: Record<string, string> = {
@@ -72,8 +74,8 @@ export default function PlanningQuestions({ onCount }: { onCount?: (n: number) =
         </p>
       </div>
       <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
-        기획이 변경 요청의 근거를 되물었는데 고객지원이 보낸 기록으로는 답할 수 없는 질문입니다. 기획은 기다리지 않고 기획서를 이어 쓰며 "질문 대기"로만 표시하니 천천히 답해도 됩니다.
-        답에는 전화번호·이메일 같은 개인정보를 쓰지 마세요(쓰면 보내지 않습니다).
+        기획이 변경 요청의 근거를 되물었는데 고객지원이 보낸 기록으로는 답할 수 없는 질문입니다. 답이 와야 그 기획서가 확정되고 개발로 넘어가니, 되도록 빨리 답해 주세요.
+        답에는 전화번호·이메일 같은 개인정보를 쓰지 마세요(쓰면 보내지 않습니다). 한 번 보낸 답은 고칠 수 없습니다.
       </p>
       {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
       {notice && <p role="status" className="mt-3 rounded-xl bg-emerald-50 px-4 py-2 text-xs font-medium text-emerald-800">{notice}</p>}
@@ -104,7 +106,7 @@ export default function PlanningQuestions({ onCount }: { onCount?: (n: number) =
                   <button className="btn-primary text-xs" disabled={!humanTokenSet || !text.trim() || busy !== null} onClick={() => send(q)}>
                     {busy === q.question_id ? "보내는 중…" : "기획에 답 보내기"}
                   </button>
-                  <span className="text-[11px] text-ink-500">{text.length}/1000자 · 보내면 되돌릴 수 없습니다</span>
+                  <span className="text-[11px] text-ink-500">{text.length}/1000자 · 보낸 답은 고칠 수 없습니다</span>
                 </div>
               </li>
             );
