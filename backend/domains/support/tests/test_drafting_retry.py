@@ -116,3 +116,26 @@ def test_단계별_시간이_따로_남는다(monkeypatch: pytest.MonkeyPatch) -
     assert t is not None
     assert {"classify", "classify_llm", "retrieve", "draft"} <= set(t)
     assert t["classify_llm"] <= t["classify"] and t["retrieve"] <= t["classify"]
+
+
+def test_분류_뒤_검색이_실패하면_먼저_쓰던_초안_작업을_남기지_않는다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(drafting.ENV_SPECULATIVE, "on")
+    calls: list[str] = []
+
+    async def retrieve(query: str):  # noqa: ANN202
+        calls.append(query)
+        if query != CLASSIFIED.search_query:  # 먼저 쓰기용 검색(고객 글)은 성공하고
+            return []
+        raise RuntimeError("검색 실패")  # 분류 뒤 진짜 검색(분류 모델의 검색어)이 실패한다
+
+    monkeypatch.setattr(drafting, "get_llm", lambda: Flaky([]))
+
+    async def go() -> None:
+        with pytest.raises(RuntimeError):
+            await drafting.analyze("결제 버튼이 안 눌려요", "결제", retrieve=retrieve)
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        assert pending == []  # 먼저 쓰던 초안 작업이 끝까지 돌며 남지 않는다
+
+    asyncio.run(go())

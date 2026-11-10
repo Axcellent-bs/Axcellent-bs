@@ -339,48 +339,55 @@ async def analyze(
         )
 
     try:
-        classified = await _structured(
-            llm,
-            "고객 메시지의 의도, 분야, 감정, 긴급도를 분류하고 정책 문서 검색 질의를 만들어라. "
-            "category는 다음 코드 중 하나만 쓰고 다른 이름을 만들지 않는다: "
-            f"{categories.PROMPT_HINT}. "
-            "정책 문서는 한국어이므로 search_query는 고객 언어와 관계없이 한국어로 쓴다. "
-            "keywords에는 고객 메시지의 핵심 단어를 최대 5개 넣고 개인정보는 넣지 않는다. "
-            "고객 메시지가 한국어가 아니면 message_ko에 뜻을 바꾸지 않은 한국어 번역을 쓰고, "
-            "한국어이면 message_ko는 빈 문자열로 둔다. 번역에 약속·설명·의견을 더하지 않는다. "
-            "request_points_ko에는 고객이 바라는 핵심 요청을 한국어 짧은 문장으로 최대 3개 쓴다.",
-            LLMClassification,
-            untrusted=untrusted,
-        )
-    except Exception:
-        logger.warning("분류 LLM 실패, 키워드 분류로 대체한다", exc_info=True)
-        classified = keyword_classification(masked)
-        fallback = True
+        try:
+            classified = await _structured(
+                llm,
+                "고객 메시지의 의도, 분야, 감정, 긴급도를 분류하고 정책 문서 검색 질의를 만들어라. "
+                "category는 다음 코드 중 하나만 쓰고 다른 이름을 만들지 않는다: "
+                f"{categories.PROMPT_HINT}. "
+                "정책 문서는 한국어이므로 search_query는 고객 언어와 관계없이 한국어로 쓴다. "
+                "keywords에는 고객 메시지의 핵심 단어를 최대 5개 넣고 개인정보는 넣지 않는다. "
+                "고객 메시지가 한국어가 아니면 message_ko에 뜻을 바꾸지 않은 한국어 번역을 쓰고, "
+                "한국어이면 message_ko는 빈 문자열로 둔다. 번역에 약속·설명·의견을 더하지 않는다. "
+                "request_points_ko에는 고객이 바라는 핵심 요청을 "
+                "한국어 짧은 문장으로 최대 3개 쓴다.",
+                LLMClassification,
+                untrusted=untrusted,
+            )
+        except Exception:
+            logger.warning("분류 LLM 실패, 키워드 분류로 대체한다", exc_info=True)
+            classified = keyword_classification(masked)
+            fallback = True
 
-    classify_llm_ms = int((time.perf_counter() - started) * 1000)
-    classified_data = classified.model_dump()
-    if privacy_rules.is_deletion_request(masked):  # LLM이 틀려도 코드가 바로잡는다 (#430)
-        classified_data["category"] = privacy_rules.CATEGORY
-    message_ko, request_points = _translation(
-        language,
-        classified_data.pop("message_ko", ""),
-        classified_data.pop("request_points_ko", []),
-    )
-    keywords = clean_keywords(classified_data.pop("keywords", []))
-    if not keywords:  # LLM이 키워드를 못 줬으면 규칙으로 찾은 것을 쓴다
-        keywords = keyword_classification(masked).keywords
-    classification = Classification(
-        **classified_data,
-        pii_masked=pii_kinds,
-        language=language,
-        keywords=keywords,
-        message_ko=message_ko,
-        request_points_ko=request_points,
-    )
-    query = classification.search_query or masked
-    retrieve_started = time.perf_counter()
-    found = await retrieve(query) if retrieve is not None else kb.search(query)
-    retrieve_ms = int((time.perf_counter() - retrieve_started) * 1000)
+        classify_llm_ms = int((time.perf_counter() - started) * 1000)
+        classified_data = classified.model_dump()
+        if privacy_rules.is_deletion_request(masked):  # LLM이 틀려도 코드가 바로잡는다 (#430)
+            classified_data["category"] = privacy_rules.CATEGORY
+        message_ko, request_points = _translation(
+            language,
+            classified_data.pop("message_ko", ""),
+            classified_data.pop("request_points_ko", []),
+        )
+        keywords = clean_keywords(classified_data.pop("keywords", []))
+        if not keywords:  # LLM이 키워드를 못 줬으면 규칙으로 찾은 것을 쓴다
+            keywords = keyword_classification(masked).keywords
+        classification = Classification(
+            **classified_data,
+            pii_masked=pii_kinds,
+            language=language,
+            keywords=keywords,
+            message_ko=message_ko,
+            request_points_ko=request_points,
+        )
+        query = classification.search_query or masked
+        retrieve_started = time.perf_counter()
+        found = await retrieve(query) if retrieve is not None else kb.search(query)
+        retrieve_ms = int((time.perf_counter() - retrieve_started) * 1000)
+    except BaseException:
+        # 중간에 예외로 나가면 먼저 쓰던 초안 작업을 아무도 안 가져가고 끝까지 돈다
+        if spec is not None:
+            await spec.drop()
+        raise
     sources = [*(extra_sources or []), *found]
     classify_ms = int((time.perf_counter() - started) * 1000)
 
