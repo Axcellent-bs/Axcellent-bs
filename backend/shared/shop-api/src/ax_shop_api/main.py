@@ -19,6 +19,8 @@ from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import Depends, FastAPI, Header, Path, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, Field
@@ -185,7 +187,9 @@ class InquiryImageIn(BaseModel):
 
     ref: str = Field(max_length=200)
     media_type: Literal["image/jpeg", "image/png", "image/webp"] = "image/jpeg"
-    data_base64: str = Field(max_length=inquiries.MAX_IMAGE_BASE64)
+    data_base64: (
+        str  # 크기는 `inquiries.clean_images`가 확인한다(413, 사진 값은 오류에 싣지 않는다)
+    )
 
 
 class InquiryIn(BaseModel):
@@ -382,6 +386,12 @@ def create_app(
     inquiry_limiter = inquiries.InquiryRateLimiter()
     app.state.inquiry_limiter = inquiry_limiter
     feedback_limiter = inquiries.InquiryRateLimiter()  # 문의 접수와 한도를 따로 센다
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_: Request, error: RequestValidationError) -> JSONResponse:
+        """422 본문에서 `input`(요청이 보낸 값)을 뺀다. 사진·본문이 오류로 되돌아가지 않게."""
+        errors = [{k: v for k, v in e.items() if k != "input"} for e in error.errors()]
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
 
     @app.exception_handler(ShopError)
     async def _shop_error(_: Request, error: ShopError) -> JSONResponse:

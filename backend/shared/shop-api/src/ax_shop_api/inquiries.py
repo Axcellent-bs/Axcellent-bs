@@ -77,12 +77,17 @@ def digest(
 
 
 def clean_images(images: list[dict]) -> list[dict]:
-    """사진 개수·크기·base64 형식을 확인한다. 오류 메시지에 사진 내용을 싣지 않는다."""
+    """사진 개수·크기·base64 형식을 확인한다. 오류 메시지에 사진 내용을 싣지 않는다.
+
+    한 장 한도도 여기서 확인한다(모델의 `max_length`로 두면 422에 사진 값이 실려 나간다).
+    """
     if len(images) > MAX_IMAGES:
         raise ShopError("TOO_MANY_IMAGES", f"사진은 최대 {MAX_IMAGES}장까지 보낼 수 있다", 400)
     total = 0
     for item in images:
         data = item["data_base64"]
+        if len(data) > MAX_IMAGE_BASE64:  # 해독하기 전에 막는다
+            raise ShopError("IMAGE_TOO_LARGE", "사진 한 장의 크기가 너무 크다", 413)
         total += len(data)
         try:
             base64.b64decode(data, validate=True)
