@@ -118,22 +118,22 @@ function Steps({ p }: { p: Proposal }) {
 function ProposalCard({ p }: { p: Proposal }) {
   const wait = proposalOpen(p)
   return (
-    <a href={toPath(`proposals/${p.id}`)} className={`inc-card rq-card${wait ? ' wait' : ''}${proposalEnded(p) ? ' fin' : ''}`}>
+    <a href={toPath(`proposals/${p.id}`)} className={`inc-card rq-card pp-card${wait ? ' wait' : ''}${proposalEnded(p) ? ' fin' : ''}`}>
       <span className="inc-card-top">
         <span className={`rq-dept d-${p.from}`}>{DEPT_NAME[p.from]}</span>
-        <Tag>{PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill}</Tag>
+        <span className="pp-card-skill">{PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill}</span>
         {p.followOf && <Tag tone="green" title={`${p.followOf} 캠페인을 이어 가는 후속 기획`}>후속</Tag>}
         <span className="mono idc" title={p.id}>{idText(p.id)}</span>
       </span>
+      <span className="pp-card-status"><Tag tone={STATUS_TONE[p.status]}>{p.status}</Tag></span>
       <b className="inc-card-title">{p.title}</b>
       <span className="pp-idea">{humanizePlanIds(p.idea)}</span>
       <Steps p={p} />
-      <span className="inc-card-meta pp-meta">
-        <Tag tone={STATUS_TONE[p.status]}>{p.status}</Tag>
-        {p.target && <span className="pp-target-chip">목표 {p.target.value}</span>}
-        {p.warnings.length > 0 && <Tag tone="amber">근거 없는 숫자 {p.warnings.length}</Tag>}
-        <span className="muted small">근거 {p.facts.length}{p.result ? ` · ${p.result.direction}` : ''}</span>
-      </span>
+      <dl className="pp-card-facts">
+        <div><dt>목표</dt><dd title={p.target?.value}>{p.target ? p.target.value : '—'}</dd></div>
+        <div><dt>근거</dt><dd>{p.facts.length}개{p.result ? ` · ${p.result.direction}` : ''}</dd></div>
+        <div className={p.warnings.length ? 'warn' : undefined}><dt>근거 없는 숫자</dt><dd>{p.warnings.length}개</dd></div>
+      </dl>
     </a>
   )
 }

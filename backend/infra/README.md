@@ -32,6 +32,8 @@ docker compose -f infra/compose.yml -f infra/compose.server.yml up -d --build
 - gateway 이미지는 ax-frontend의 `nginx/Dockerfile`로 만든다. 두 레포를 같은 폴더에 나란히 clone하거나 `AX_FRONTEND_DIR`로 위치를 준다
 - 브라우저는 `/api/`(dashboard-api)와 `/shop-api/`(shop-api)만 부른다. 총괄·safety·부서 에이전트는 외부에 열리지 않는다
 - `down -v`는 공통 로그·DB 볼륨을 지우므로 서버 PC에서는 쓰지 않는다
+- 토스 테스트 결제를 켜려면 `backend/.env`에 `PAYMENT_PROVIDER=toss_test`와 `TOSS_SECRET_KEY`(결제위젯 시크릿 키)를 넣고, compose를 실행하는 셸이나 `--env-file`로 `VITE_TOSS_CLIENT_KEY`(결제위젯 클라이언트 키)를 넘긴다. 클라이언트 키가 비어 있으면 쇼핑몰은 데모 결제로 동작한다
+- 키를 바꾸면 gateway는 `--build`로 다시 만들어야 화면에 반영된다(클라이언트 키는 빌드할 때 화면에 들어간다)
 
 ## 포트
 

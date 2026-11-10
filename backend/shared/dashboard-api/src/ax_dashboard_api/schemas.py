@@ -97,6 +97,24 @@ class OrderSummary(BaseModel):
     item_count: int | None = None
 
 
+class OrderListRow(OrderSummary):
+    """주문 관리 화면(/orders) 목록 한 줄.
+
+    판매자가 누구 주문인지 봐야 해서 구매자 가명 ID를 싣는다(상세에는 싣지 않는다).
+    """
+
+    buyer_id: str | None = None
+    shipped_at: str | None = None
+    delivered_at: str | None = None
+
+
+class OrderRefund(BaseModel):
+    """환불 한 건. 환불·결제 ID는 화면에 내보내지 않는다."""
+
+    amount: int | None = None
+    created_at: str | None = None
+
+
 class OrderLine(BaseModel):
     title: str | None = None
     qty: int | None = None
@@ -131,6 +149,8 @@ class OrderDetail(BaseModel):
     delivered_at: str | None = None
     items: list[OrderLine] = []
     payments: list[OrderPayment] = []
+    # 환불 기록(시각 오름차순). 판매 서버가 환불 목록을 주지 않으면 None(빈 목록과 다르다)
+    refunds: list[OrderRefund] | None = None
 
 
 # ---------------------------------------------------------------- 클레임
@@ -727,6 +747,14 @@ class IncidentCompensationDecideBody(BaseModel):
     incident_id: str = Field(pattern=r"^ctx_inc_[A-Za-z0-9]+$")
     approve_buyer_ids: list[str] = Field(default_factory=list, max_length=100)
     reject_buyer_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+class PlanningAnswerBody(BaseModel):
+    """사람이 기획 질문에 답한다. 답한 사람은 받지 않는다(사람 토큰에서 채운다)."""
+
+    question_id: str = Field(pattern=r"^Q-[A-Za-z0-9_-]+$", max_length=80)
+    answer: str = Field(min_length=1, max_length=1000)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
 class ResolutionNoteBody(BaseModel):

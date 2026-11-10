@@ -25,7 +25,9 @@ from ax_dashboard_api.schemas import (
     Me,
     OrderDetail,
     OrderLine,
+    OrderListRow,
     OrderPayment,
+    OrderRefund,
     OrderSummary,
 )
 
@@ -131,6 +133,99 @@ async def orders(
     return out
 
 
+ORDER_TABS = (
+    "pending_payment",
+    "paid",
+    "partial_refund",
+    "full_refund",
+    "cancelled",
+    "payment_failed",
+)
+
+
+# 기간 안 주문을 한 번에 받아 나누는 상한. 넘으면 기간을 줄여 달라고 한다
+MAX_ORDERS = 20_000
+
+
+def _title(lines: list[dict[str, Any]]) -> str:
+    first = lines[0].get("title") if lines else None
+    return (first or "상품") + (f" 외 {len(lines) - 1}건" if len(lines) > 1 else "")
+
+
+def _row(o: dict[str, Any]) -> OrderListRow:
+    return OrderListRow(
+        id=_number(o["order_id"]),
+        order_no=o["order_id"],
+        status=o["status"],
+        status_ko=STATUS_KO.get(o["status"], o["status"]),
+        title=_title(o.get("items") or []),
+        created_at=o.get("created_at"),
+        total_amount=o.get("total_amount"),
+        refunded_amount=o.get("refunded_amount"),
+        item_count=len(o.get("items") or []),
+        buyer_id=o.get("buyer_id"),
+        shipped_at=o.get("shipped_at"),
+        delivered_at=o.get("delivered_at"),
+    )
+
+
+def order_tab(o: dict[str, Any]) -> str:
+    """주문 관리 탭. 환불이 있으면 상태 대신 환불 합계로 나눈다.
+
+    결제액 이상이면 전체 환불, 그보다 적으면 부분 환불이다. 환불이 없으면 판매 서버 상태 그대로다.
+    """
+    refunded = o.get("refunded_amount") or 0
+    total = o.get("total_amount")
+    if refunded > 0 and total is not None:
+        return "full_refund" if refunded >= total else "partial_refund"
+    return str(o.get("status") or "")
+
+
+async def order_page(
+    *,
+    status: str | None,
+    since: str | None,
+    until: str | None,
+    q: str | None,
+    buyer: str | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[OrderListRow], int, dict[str, int]]:
+    """주문 관리 화면의 한 페이지(최신순)와 전체 건수·탭별 건수. 읽기만 한다.
+
+    판매 서버에 원래 있는 기간 목록(`GET /api/shop/orders`)만 쓴다. 판매 서버는 고치지 않고,
+    최신순 정렬·탭 나누기·주문 번호 검색·페이지는 여기서 한다.
+    기간 안 주문이 `MAX_ORDERS`를 넘으면 나누지 않고 422로 기간을 줄여 달라고 한다.
+    """
+    params: dict[str, Any] = {}
+    if buyer:
+        params["buyer_id"] = buyer
+    if start := _period(since, "since"):
+        params["since"] = start
+    if end := _period(until, "until"):
+        params["until"] = end
+    items = await _shop_get("/api/shop/orders", params) or []
+    if not isinstance(items, list):
+        raise ApiError(502, "UPSTREAM_ERROR", "shop-api가 목록 모양이 아닌 응답을 돌려줬다")
+    if len(items) > MAX_ORDERS:
+        raise ApiError(
+            422,
+            "PERIOD_TOO_LARGE",
+            f"이 기간 주문이 {len(items):,}건이라 한 번에 볼 수 없다. 기간을 줄여 주세요",
+        )
+    needle = (q or "").strip().lower()
+    found = [o for o in items if not needle or needle in str(o.get("order_id", "")).lower()]
+    counts: dict[str, int] = {"all": len(found)}
+    for o in found:
+        tab = order_tab(o)
+        if tab in ORDER_TABS:
+            counts[tab] = counts.get(tab, 0) + 1
+    picked = [o for o in found if not status or order_tab(o) == status]
+    # 최신순, 같은 시각이면 주문 번호 역순
+    picked.sort(key=lambda o: (o.get("created_at") or "", o.get("order_id") or ""), reverse=True)
+    return [_row(o) for o in picked[offset : offset + limit]], len(picked), counts
+
+
 async def order_detail(order_no: str) -> OrderDetail:
     """판매 서버의 주문 한 건을 화면 모델로 맞춘다. 없는 값은 None이다."""
     o = await _shop_get(f"/api/shop/orders/{order_no}", not_found="주문을 찾을 수 없다")
@@ -169,6 +264,14 @@ async def order_detail(order_no: str) -> OrderDetail:
             )
             for p in o.get("payments") or []
         ],
+        refunds=(
+            None
+            if not isinstance(o.get("refunds"), list)
+            else [
+                OrderRefund(amount=r.get("amount"), created_at=r.get("created_at"))
+                for r in o["refunds"]
+            ]
+        ),
     )
 
 

@@ -244,7 +244,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
       {rows.length > 0 && (
       <table className="data rq-table">
         <thead>
-          <tr><th>번호</th><th>제목</th><th>요청 부서</th><th>진행 단계</th><th>상태</th><th>경과</th><th className="rq-th-next">다음 할 일</th></tr>
+          <tr><th>번호</th><th>제목</th><th>진행</th><th>경과</th><th className="rq-th-next">다음 할 일</th></tr>
         </thead>
         <tbody>
         {pg.rows.map((row) => {
@@ -261,31 +261,37 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
           return (
             <Fragment key={r.id}>
             <tr id={`req-${r.id}`} tabIndex={0} aria-expanded={isOpen} onClick={onRow} onKeyDown={onKey}
-              className={`rq-tr${isOpen ? ' open' : ''}${row.finished ? ' fin' : ''}${dropped ? ' dropped' : ''}${focus === r.id ? ' hl' : ''}${isFresh(r.id) ? ' fresh' : ''}`}>
-              <td className="rq-td-id"><Ref s={s} id={r.id} /></td>
+              className={`rq-tr${isOpen ? ' open' : ''}${row.finished ? ' fin' : ''}${(row.wait || draft) && !row.finished && !dropped ? ' need' : ''}${dropped ? ' dropped' : ''}${focus === r.id ? ' hl' : ''}${isFresh(r.id) ? ' fresh' : ''}`}>
+              <td className="rq-td-id"><Ref s={s} id={r.id} className="rq-id" /></td>
               <td className="rq-td-title">
-                <a href={toPath(`projects/${r.id}`)} className="rq-name plain-link">{r.title}</a>
+                <span className="rq-titleline">
+                  <a href={toPath(`projects/${r.id}`)} className="rq-name plain-link">{r.title}</a>
+                  <span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span>
+                </span>
                 <span className="rq-meta">
                   {isFollowUp(r) && <Tag tone="amber">후속</Tag>}
                   {row.dups.map((x) => (
                     <span key={x.id} className="rq-dup">
-                      같은 요청 <Ref s={s} id={x.id} /> {DEPT_NAME[x.from]}
+                      같은 요청 <Ref s={s} id={x.id} className="rq-ref" /> {DEPT_NAME[x.from]}
                       <button type="button" className="rq-unlink" title={`${idText(x.id)}을 따로 기획`} onClick={() => { d({ type: 'unlinkDuplicate', request: x.id }); toast.show(`${idText(x.id)} 따로 기획`) }}>풀기</button>
                     </span>
                   ))}
-                  {byRelation(r.related).slice(0, 2).map((x) => (
-                    <span key={x.id} title={x.reason}>{RELATION_LABEL[x.relation]} <Ref s={s} id={x.id} /></span>
+                  {/* 같은 관계(비슷함·충돌 등)는 한 번만 쓰고 번호를 이어 쓴다 */}
+                  {[...new Set(byRelation(r.related).slice(0, 2).map((x) => x.relation))].map((rel) => (
+                    <span key={rel}>{RELATION_LABEL[rel]}{' '}
+                      {byRelation(r.related).slice(0, 2).filter((x) => x.relation === rel).map((x, i) => (
+                        <Fragment key={x.id}>{i > 0 && ' · '}<span title={x.reason}><Ref s={s} id={x.id} className="rq-ref" /></span></Fragment>
+                      ))}
+                    </span>
                   ))}
                 </span>
               </td>
-              <td><span className={`rq-dept d-${r.from}`}>{DEPT_NAME[r.from]}</span></td>
               <td className="rq-td-steps">
                 <span className={`rq-mini${dropped ? ' dropped' : ''}`} aria-label={`진행 단계 ${STAGES[at]}`}>
                   {STAGES.map((x, i) => <i key={x} className={i < at || row.finished ? 'on' : i === at ? 'now' : undefined} title={x} />)}
                 </span>
-                <span className="rq-mini-l">{STAGES[at]}</span>
+                <span className={`rq-prog ${status.tone}`} title={`진행 단계 ${STAGES[at]}`}>{status.label}</span>
               </td>
-              <td><span className={`rq-st ${status.tone}`}>{status.label}</span></td>
               <td className="rq-td-time" title={row.born ? `접수 ${row.born}` : undefined}>{row.minutes > 0 ? duration(row.minutes) : ''}</td>
               <td className="rq-td-next">
                 {!row.finished && !dropped && (
@@ -303,7 +309,7 @@ export function Requests({ s, d, filter, item }: { s: S; d: Dispatch<Action>; fi
             {isOpen && (
               <tr className="rq-detail">
                 <td />
-                <td colSpan={6}>
+                <td colSpan={4}>
                   <ol className="rq-steps-detail">
                     {row.cells.map((c, i) => (
                       <li key={i} className={`${c.kind}${c.warn ? ' warn' : ''}`}>

@@ -24,6 +24,7 @@ from ax_contracts.schemas import (
     SellerRegisteredData,
     ShipmentDelayedData,
     ShopDegradedData,
+    SupportIncidentCompensationData,
     SupportInquiryReceivedData,
     SupportInquiryResolvedData,
     SupportInquirySurgeData,
@@ -65,13 +66,14 @@ def test_unknown_event_type_is_rejected() -> None:
 
 def test_event_type_catalog() -> None:
     values = {t.value for t in EventType}
-    assert len(values) == 27
+    assert len(values) == 28
     for expected in (
         "order.created",
         "payment.failed",
         "shop.recovered",
         "support.inquiry_received",
         "support.inquiry_resolved",
+        "support.incident_compensation_decided",
         "metric.anomaly",
         "infra.anomaly_detected",
         "finance.anomaly_detected",
@@ -400,3 +402,30 @@ def test_shop_event_models_reject_bad_values() -> None:
         ReturnReceivedData.model_validate(
             {**SHOP_EVENT_SAMPLES[EventType.RETURN_RECEIVED], "claim_id": "clm_1"}
         )
+
+
+def test_support_incident_compensation_data() -> None:
+    assert (
+        EVENT_DATA_MODELS[EventType.SUPPORT_INCIDENT_COMPENSATION_DECIDED]
+        is SupportIncidentCompensationData
+    )
+    data = SupportIncidentCompensationData(
+        incident_context_id="ctx_inc_0001",
+        pending=2,
+        approved=0,
+        held=1,
+        sent=4,
+        rejected=1,
+        remaining=3,
+        coupons_sent=4,
+        sent_value=12000,
+    )
+    assert data.remaining == data.pending + data.approved + data.held
+    for bad in (
+        {"incident_context_id": "ctx_req_0001"},  # 사건(ctx_inc_)만 받는다
+        {"pending": -1},
+        {"buyer_ids": ["buy_0001"]},  # 고객별 값은 담지 않는다
+        {"decided_by": "김하늘"},  # 사람 이름도 담지 않는다
+    ):
+        with pytest.raises(ValidationError):
+            SupportIncidentCompensationData(**{**data.model_dump(), **bad})

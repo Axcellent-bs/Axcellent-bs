@@ -95,6 +95,7 @@ from ax_dashboard_api.schemas import (
     OnboardingStepBody,
     OrgChangeDecisionBody,
     OrgRosterCompleteBody,
+    PlanningAnswerBody,
     QueueProcessBody,
     ReceiptAnalysisBody,
     ResolutionBody,
@@ -146,6 +147,44 @@ async def orders(user_id: int, since: str | None = None, until: str | None = Non
     else:
         items = await live_views.orders(user_id, since, until)
     return ok(items, total=len(items))
+
+
+@mock_only.get("/orders/page")
+async def order_page(
+    status: Literal[
+        "pending_payment", "paid", "partial_refund", "full_refund", "cancelled", "payment_failed"
+    ]
+    | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    q: str | None = Query(None, max_length=64),
+    buyer_id: str | None = Query(None, pattern=r"^[A-Za-z0-9_-]{1,64}$"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=1_000_000),
+) -> dict:
+    """주문 관리 화면(/orders)의 한 페이지, 주문 시각 최신순(읽기 전용).
+
+    `meta.total`은 고른 탭의 건수, `meta.counts`는 탭별 건수(`all` 포함).
+    판매 서버의 기존 주문 목록을 받아 여기서 나눈다(판매 서버는 고치지 않는다).
+    부분·전체 환불은 환불 합계로 나눈다.
+    목 모드는 데이터가 없어 빈 목록이다(지어내지 않는다).
+    """
+    if is_mock():
+        body = ok([], total=0)
+        body["meta"]["counts"] = {"all": 0}
+        return body
+    rows, total, counts = await live_views.order_page(
+        status=status,
+        since=since,
+        until=until,
+        q=(q or "").strip() or None,
+        buyer=buyer_id,
+        limit=limit,
+        offset=offset,
+    )
+    body = ok(rows, total=total)
+    body["meta"]["counts"] = counts
+    return body
 
 
 @mock_only.get("/orders/{order_no}")
@@ -1557,6 +1596,38 @@ async def decide_incident_compensation(
             "author": request.state.human,
         },
         key=f"incident-compensation-decide:{body.incident_id}:{digest}",
+    )
+    return ok(out)
+
+
+@router.get("/planning-questions")
+async def planning_questions(
+    status: str = Query(default="open", pattern=r"^(open|answered)$"),
+) -> dict:
+    """기획이 되물었는데 기록으로 답하지 못해 사람이 답해야 하는 질문 (읽기)."""
+    if is_mock():
+        return ok({"items": [], "open_count": 0})
+    return ok(await support_client.call("list_planning_questions", {"status": status}))
+
+
+@router.post("/planning-questions/answer", status_code=201)
+async def answer_planning_question(body: PlanningAnswerBody, request: Request) -> dict:
+    """사람이 기획 질문에 답한다. 사람 토큰이 필요하다 (라우터 전체에 걸려 있다).
+
+    고객지원이 안전 관문을 거쳐 기획으로 보낸다. 답한 사람은 사람 토큰에서만 채운다.
+    같은 질문은 호출 사이에 변하지 않는 키를 써서 여러 번 눌러도 한 번만 처리된다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "기획 질문 답하기는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "send_planning_answer",
+        {
+            "question_id": body.question_id,
+            "answer": body.answer,
+            "evidence_ids": body.evidence_ids,
+            "author": request.state.human,
+        },
+        key=f"planning-answer:{body.question_id}",
     )
     return ok(out)
 

@@ -156,6 +156,20 @@ def _find(s: State, pid: str) -> Proposal | None:
     return next((x for x in s.proposals if x.id == pid), None)
 
 
+# 이유가 인사이트 두 글자 묶음을 이만큼 이상 담고 있으면 인사이트를 되풀이한 것으로 본다
+WHY_REPEATS = 0.6
+
+
+def _background(p: Proposal) -> str:
+    """기획서 "배경" = 인사이트 + 이유.
+
+    이유가 인사이트를 되풀이하면 이유만 쓴다 (같은 문장 두 번 방지)."""
+    ins, why = _bigrams(p.insight), _bigrams(p.why or "")
+    if ins and why and len(ins & why) / len(ins) >= WHY_REPEATS:
+        return p.why.strip()[:300]
+    return f"{p.insight} {p.why}".strip()[:300]
+
+
 def _same_insight(s: State, ref: str, frm: str) -> Proposal | None:
     """같은 인사이트로 만든 제안 중 가장 최근 것 (후속 제안이 있으면 그것)."""
     xs = [p for p in s.proposals if p.insight_id == ref and p.from_ == frm]
@@ -439,7 +453,7 @@ class ProposalMixin:
         s.specs.append(
             Spec(
                 id=spec_id, title=p.title, request=req_id, status="초안",
-                problem=f"{p.insight} {p.why}".strip()[:300],  # 제안서 양식에서는 "배경"
+                problem=_background(p),  # 제안서 양식에서는 "배경"
                 goal=p.target and f"{p.target.label} {p.target.value}" or p.idea, paras=paras,
                 basis=basis, origin=PROPOSAL_ORIGIN, body_md="\n".join(body),
                 extra={k: v for k, v in (("audience", p.audience or ""),) if v},

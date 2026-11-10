@@ -381,7 +381,10 @@ while read -r name port module; do
     done
   fi
   echo "$START_LINE" > "$LOGS/$name.log"
-  "$PY" -m uvicorn "$module" --host 127.0.0.1 --port "$port" >> "$LOGS/$name.log" 2>&1 &
+  # shop-api만 바인드 주소를 바꿀 수 있다(AX_SHOP_API_HOST, 기본 127.0.0.1). 나머지는 127.0.0.1
+  host=127.0.0.1
+  [ "$name" = "shop-api" ] && host="${AX_SHOP_API_HOST:-127.0.0.1}"
+  "$PY" -m uvicorn "$module" --host "$host" --port "$port" >> "$LOGS/$name.log" 2>&1 &
   winpid_of $! > "$LOGS/$name.pid"
   started=$((started + 1))
 done <<< "$RUN_APPS"

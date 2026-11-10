@@ -42,7 +42,7 @@ const TITLE = "결정 기록";
 const DESC = "회사의 결정을 기록으로 남기고, 새 계획이 예전에 채택되지 않은 안과 겹치는지 확인합니다.";
 const GUIDE: ReactNode[] = [
   <>맨 위 <b>지금 사람이 할 일</b>에서 AI가 확신하지 못해 확정을 미뤄 둔 기록을 봅니다.</>,
-  <>내용을 읽고 <b>기록으로 확정</b> 또는 <b>폐기</b>를 누릅니다. 애매하면 폐기하세요. 필요하면 기록을 요청한 AI가 근거를 보강해 다시 올립니다.</>,
+  <>내용을 읽고 <b>기록으로 확정</b> 또는 <b>폐기</b>를 누릅니다. 애매하면 폐기하세요. 필요하면 AI가 근거를 보강해 다시 올립니다.</>,
 ];
 
 export default function HrPage() {
@@ -76,7 +76,7 @@ export default function HrPage() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{TITLE}</h1>
-          <p className="mt-1 text-sm text-ink-500">{DESC} 겹치는지 여부는 AI의 추측이 아니라 정해진 기준으로 계산합니다.</p>
+          <p className="mt-1 text-sm text-ink-500">{DESC} 겹치는지는 AI 추측이 아니라 정해진 기준으로 가려냅니다.</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <Chip label={`${TITLE} ${up ? "켜짐" : "꺼짐"}`} tone={up ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"} />
@@ -100,10 +100,10 @@ export default function HrPage() {
             <p className={`mt-1 text-4xl font-bold tabular-nums ${tone}`}>{todo ? `${todo}건` : "없음"}</p>
           </div>
           <p className={`ml-auto max-w-sm pb-1 text-xs ${tone}`}>
-            대부분의 기록은 AI가 바로 남깁니다. 근거가 부족해 AI가 확신하지 못한 기록만 여기서 사람이 확인합니다.
+            대부분의 기록은 AI가 바로 남깁니다. AI가 확신하지 못한 기록만 여기서 확인합니다.
           </p>
         </div>
-        {!HUMAN_TOKEN_SET && todo > 0 && <p className="mt-3 text-xs text-amber-800">담당자 권한이 설정되지 않아 버튼을 쓸 수 없습니다. (개발자 설정: VITE_SAFETY_HUMAN_TOKEN)</p>}
+        {!HUMAN_TOKEN_SET && todo > 0 && <p className="mt-3 text-xs text-amber-800">담당자 권한이 설정되지 않아 버튼을 쓸 수 없습니다. 개발자에게 문의해 주세요.</p>}
         {todo > 0 && (
           <div className="mt-5 space-y-3">
             <Candidates cards={cards} onChanged={load} />

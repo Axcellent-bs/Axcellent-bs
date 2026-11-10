@@ -1,14 +1,20 @@
+import { Link } from "@/lib/nav";
 import type { ReactNode } from "react";
 import { BLOCKER_KO, CLAIM_STATUS_KO, CLAIM_STATUS_TONE } from "@/lib/labels";
 
-export function Stat({ label, value, sub, tone = "" }: { label: string; value: ReactNode; sub?: string; tone?: string }) {
-  return (
-    <div className="card flex min-w-[130px] flex-1 flex-col px-4 py-3 leading-tight">
+/** 핵심 숫자 카드. `href`가 있으면 카드 전체가 그 화면으로 가는 링크가 된다 */
+export function Stat({ label, value, sub, tone = "", href }: { label: string; value: ReactNode; sub?: string; tone?: string; href?: string }) {
+  const body = (
+    <>
       <span className="text-[11px] text-ink-500">{label}</span>
       <span className={`mt-0.5 text-xl font-semibold tabular-nums ${tone}`}>{value}</span>
       {sub && <span className="mt-0.5 text-[11px] text-ink-500">{sub}</span>}
-    </div>
+    </>
   );
+  const box = "card flex min-w-[130px] flex-1 flex-col px-4 py-3 leading-tight";
+  return href
+    ? <Link href={href} className={`${box} transition hover:ring-1 hover:ring-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500`}>{body}</Link>
+    : <div className={box}>{body}</div>;
 }
 
 export function StatusChip({ status }: { status: string }) {

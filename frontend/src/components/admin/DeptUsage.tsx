@@ -113,6 +113,7 @@ export function DeptUsage() {
   const [meta, setMeta] = useState<DepartmentsMeta>({});
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   const load = useCallback(async () => {
     if (!relayEnabled) return;
@@ -129,6 +130,8 @@ export function DeptUsage() {
 
   if (!relayEnabled) return null;
   const windowMin = meta.window_seconds ? Math.round(meta.window_seconds / 60) : null;
+  // 부서 카드를 모두 읽었고 모두 호출 0건이면(카드를 못 읽은 부서가 있으면 숨기지 않는다) 빈 카드 9장 대신 한 줄로 접는다(호출이 하나라도 있으면 카드로 보인다)
+  const quiet = !!depts?.length && depts.every((d) => d.available && d.usage.calls === 0);
   return (
     <section aria-labelledby="dept-usage">
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3">
@@ -138,7 +141,21 @@ export function DeptUsage() {
       </div>
       {error && <p role="alert" className="mb-3 rounded-xl bg-amber-50 px-4 py-2 text-xs text-amber-800">{error}</p>}
       {!depts && !error && <p className="text-xs text-ink-500">불러오는 중…</p>}
-      {depts && (
+      {depts && quiet && !showAll && (
+        <div className="card space-y-3 p-4">
+          <p className="text-sm"><b>{windowMin ? `최근 ${windowMin}분` : "지금"} 총괄이 부른 기록이 없습니다.</b> <span className="text-ink-500">연결된 부서 {depts.length}곳은 모두 조용합니다.</span></p>
+          <ul className="flex flex-wrap gap-2 text-xs">
+            {depts.map((d) => (
+              <li key={d.name} className="chip bg-ink-50 text-ink-700">
+                <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${d.mode === "real" ? "bg-emerald-500" : "bg-brand-400"}`} aria-hidden="true" />
+                {deptKo(d.name)}<span className="ml-1 text-ink-500">{d.owner ?? UNKNOWN}</span>
+              </li>
+            ))}
+          </ul>
+          <button className="btn-ghost text-xs" onClick={() => setShowAll(true)}>부서별 카드로 자세히 보기</button>
+        </div>
+      )}
+      {depts && (!quiet || showAll) && (
         <div className="grid gap-4 xl:grid-cols-2">
           {depts.map((d) => <DeptCard key={d.name} d={d} open={open === d.name} onToggle={() => setOpen(open === d.name ? null : d.name)} />)}
         </div>

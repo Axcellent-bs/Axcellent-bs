@@ -3,6 +3,8 @@
 - 가격·총액은 DB 값으로 코드가 계산한다(요청 값을 믿지 않는다).
 - 주문·결제·outbox 이벤트는 한 트랜잭션에 저장한다.
 - 가짜 결제는 `Gateway`가 성공·실패를 정한다. 장애 주입(SHOP-06)은 이 자리에 붙는다.
+- 토스페이먼츠 테스트 결제는 시도(`payment_attempts`)를 만들고(`toss_prepare`), 승인 결과를
+  가짜 결제와 같은 기록 함수(`_record_payment`)로 남긴다. 토스 호출은 `toss.py`가 한다.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import re
 import sqlite3
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -102,6 +104,22 @@ class PaymentOutcome:
     failure_code: str | None = None
     latency_ms: float = 0.0
     server_error: bool = False  # 카드 거절(PG_DECLINED)은 5xx가 아니다
+    method_code: str | None = None  # 결제사가 알려 준 결제 수단(토스). 없으면 요청 값
+    failure_detail: str | None = None  # 결제사 오류 코드 등(토스). 가짜 결제는 None
+
+
+ATTEMPT_PREPARED, ATTEMPT_CONFIRMED, ATTEMPT_FAILED = "prepared", "confirmed", "failed"
+ORDER_NAME_MAX = 100  # 토스 orderName 상한
+
+
+@dataclass(frozen=True)
+class AttemptStart:
+    """토스 승인 시작 판단. `replay`면 처음 결과(주문)를 그대로 돌려주고 토스를 부르지 않는다."""
+
+    toss_order_id: str
+    order_id: str
+    amount: int
+    replay: dict[str, Any] | None = None
 
 
 # 배송비: 품목 합계(포인트 차감 전)가 기준 미만이면 부과한다(시연용 값, 고객지원 시드와 같다)
@@ -544,57 +562,157 @@ class Shop:
             )
         return self.get_order(order_id), False
 
+    @staticmethod
+    def _payable_order(conn: sqlite3.Connection, order_id: str) -> sqlite3.Row:
+        order = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
+        if order is None:
+            raise ShopError("ORDER_NOT_FOUND", "주문을 찾을 수 없다", 404)
+        if order["status"] not in CANCELLABLE:  # pending_payment·payment_failed만 결제한다
+            raise ShopError("ORDER_NOT_PAYABLE", "결제할 수 없는 주문 상태다", 409)
+        return order
+
+    def _record_payment(
+        self,
+        conn: sqlite3.Connection,
+        order: sqlite3.Row,
+        outcome: PaymentOutcome,
+        method_code: str,
+        provider: str = "fake",
+        pg_payment_key: str | None = None,
+    ) -> str:
+        """결제 결과 하나를 남긴다(가짜·토스 공통): 모니터 표본, `payments` 행, 주문 상태,
+        `payment.succeeded`/`payment.failed` outbox. 호출하는 쪽의 트랜잭션 안에서 부른다."""
+        self.monitor.record(self.clock(), outcome.latency_ms, outcome.server_error)
+        order_id, amount = order["order_id"], order["total_amount"]
+        payment_id = self.db.next_id(conn, "payment", "pay_")
+        now = _now()
+        method = outcome.method_code or method_code
+        conn.execute(
+            "INSERT INTO payments (payment_id, order_id, amount, method_code, status, "
+            "failure_code, tenant_id, context_id, created_at, provider, pg_payment_key, "
+            "failure_detail) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)",
+            (payment_id, order_id, amount, method, "succeeded" if outcome.ok else "failed",
+             outcome.failure_code, TENANT_ID, now, provider, pg_payment_key,
+             outcome.failure_detail),
+        )  # fmt: skip
+        conn.execute(
+            "UPDATE orders SET status = ?, updated_at = ? WHERE order_id = ?",
+            ("paid" if outcome.ok else "payment_failed", now, order_id),
+        )
+        if outcome.ok:
+            promised = datetime.now(UTC) + timedelta(days=PROMISED_DELIVERY_DAYS)
+            conn.execute(
+                "UPDATE orders SET promised_delivery_at = ? WHERE order_id = ?",
+                (promised.strftime("%Y-%m-%dT%H:%M:%SZ"), order_id),
+            )
+            data = {
+                "payment_id": payment_id,
+                "order_id": order_id,
+                "amount": amount,
+                "method_code": method,
+            }
+            outbox.enqueue(
+                conn, EventType.PAYMENT_SUCCEEDED, data, f"payment.succeeded:{payment_id}"
+            )
+        else:
+            failed = PaymentFailedData(
+                payment_id=payment_id,
+                order_id=order_id,
+                amount=amount,
+                failure_code=outcome.failure_code or "UNKNOWN",
+            )
+            outbox.enqueue(
+                conn,
+                EventType.PAYMENT_FAILED,
+                failed.model_dump(mode="json"),
+                f"payment.failed:{payment_id}",
+            )
+        return payment_id
+
     def pay(self, order_id: str, method_code: str, simulate: str | None) -> dict[str, Any]:
         with self.db.tx() as conn:
-            order = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
-            if order is None:
-                raise ShopError("ORDER_NOT_FOUND", "주문을 찾을 수 없다", 404)
-            if order["status"] not in ("pending_payment", "payment_failed"):
-                raise ShopError("ORDER_NOT_PAYABLE", "결제할 수 없는 주문 상태다", 409)
+            order = self._payable_order(conn, order_id)
             outcome = self.gateway.attempt(simulate)
-            self.monitor.record(self.clock(), outcome.latency_ms, outcome.server_error)
-            payment_id = self.db.next_id(conn, "payment", "pay_")
-            now = _now()
-            amount = order["total_amount"]
-            status = "succeeded" if outcome.ok else "failed"
-            conn.execute(
-                "INSERT INTO payments VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)",
-                (payment_id, order_id, amount, method_code, status, outcome.failure_code,
-                 TENANT_ID, now),
-            )  # fmt: skip
-            conn.execute(
-                "UPDATE orders SET status = ?, updated_at = ? WHERE order_id = ?",
-                ("paid" if outcome.ok else "payment_failed", now, order_id),
-            )
-            if outcome.ok:
-                promised = datetime.now(UTC) + timedelta(days=PROMISED_DELIVERY_DAYS)
-                conn.execute(
-                    "UPDATE orders SET promised_delivery_at = ? WHERE order_id = ?",
-                    (promised.strftime("%Y-%m-%dT%H:%M:%SZ"), order_id),
-                )
-                data = {
-                    "payment_id": payment_id,
-                    "order_id": order_id,
-                    "amount": amount,
-                    "method_code": method_code,
-                }
-                outbox.enqueue(
-                    conn, EventType.PAYMENT_SUCCEEDED, data, f"payment.succeeded:{payment_id}"
-                )
-            else:
-                failed = PaymentFailedData(
-                    payment_id=payment_id,
-                    order_id=order_id,
-                    amount=amount,
-                    failure_code=outcome.failure_code or "UNKNOWN",
-                )
-                outbox.enqueue(
-                    conn,
-                    EventType.PAYMENT_FAILED,
-                    failed.model_dump(mode="json"),
-                    f"payment.failed:{payment_id}",
-                )
+            self._record_payment(conn, order, outcome, method_code)
         return self.get_order(order_id)
+
+    # --- 토스페이먼츠 테스트 결제 (사람이 화면에서 결제할 때) ----------------------
+    def toss_prepare(self, order_id: str) -> dict[str, Any]:
+        """결제 시도 하나를 만든다. 금액은 DB 주문 합계(배송비 포함)이고 요청 값을 받지 않는다.
+
+        `toss_order_id` = `{order_id}-a{시도 번호}`(토스 규칙: 6~64자, 영문·숫자·`-`·`_`).
+        """
+        with self.db.tx() as conn:
+            order = self._payable_order(conn, order_id)
+            count = conn.execute(
+                "SELECT COUNT(*) FROM payment_attempts WHERE order_id = ?", (order_id,)
+            ).fetchone()[0]
+            toss_order_id = f"{order_id}-a{count + 1}"
+            titles = [
+                r["title"]
+                for r in conn.execute(
+                    "SELECT COALESCE(i.title, p.name) AS title FROM order_items i "
+                    "LEFT JOIN products p ON p.product_id = i.product_id "
+                    "WHERE i.order_id = ? ORDER BY i.rowid",
+                    (order_id,),
+                )
+            ]
+            first = (titles[0] if titles else "") or order_id
+            rest = f" 외 {len(titles) - 1}건" if len(titles) > 1 else ""
+            order_name = first[: ORDER_NAME_MAX - len(rest)] + rest
+            now = _now()
+            conn.execute(
+                "INSERT INTO payment_attempts (toss_order_id, order_id, amount, status, "
+                "payment_id, tenant_id, context_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)",
+                (toss_order_id, order_id, order["total_amount"], ATTEMPT_PREPARED, TENANT_ID,
+                 now, now),
+            )  # fmt: skip
+        return {
+            "toss_order_id": toss_order_id,
+            "amount": order["total_amount"],
+            "order_name": order_name,
+        }
+
+    def toss_start(self, toss_order_id: str, amount: int) -> AttemptStart:
+        """승인 전에 확인한다. 끝난 시도는 처음 결과를, 금액이 다르면 400을 돌려준다."""
+        with self.db.tx() as conn:
+            attempt = conn.execute(
+                "SELECT * FROM payment_attempts WHERE toss_order_id = ?", (toss_order_id,)
+            ).fetchone()
+            if attempt is None:
+                raise ShopError("PAYMENT_ATTEMPT_NOT_FOUND", "결제 시도를 찾을 수 없다", 404)
+            if amount != attempt["amount"]:
+                raise ShopError("AMOUNT_MISMATCH", "결제 금액이 주문 금액과 다르다", 400)
+            start = AttemptStart(toss_order_id, attempt["order_id"], attempt["amount"])
+            if attempt["status"] != ATTEMPT_PREPARED:  # 성공 화면 새로고침 등: 다시 보내지 않는다
+                return replace(start, replay=self._order(conn, start.order_id))
+            self._payable_order(conn, start.order_id)
+            return start
+
+    def toss_finish(
+        self, start: AttemptStart, outcome: PaymentOutcome, payment_key: str
+    ) -> dict[str, Any]:
+        """토스 승인 결과를 가짜 결제와 같은 길(`_record_payment`)로 남기고 시도를 닫는다."""
+        with self.db.tx() as conn:
+            attempt = conn.execute(
+                "SELECT status FROM payment_attempts WHERE toss_order_id = ?",
+                (start.toss_order_id,),
+            ).fetchone()
+            if attempt["status"] == ATTEMPT_PREPARED:
+                order = conn.execute(
+                    "SELECT * FROM orders WHERE order_id = ?", (start.order_id,)
+                ).fetchone()
+                payment_id = self._record_payment(
+                    conn, order, outcome, "other", provider="toss_test", pg_payment_key=payment_key
+                )
+                conn.execute(
+                    "UPDATE payment_attempts SET status = ?, payment_id = ?, updated_at = ? "
+                    "WHERE toss_order_id = ?",
+                    (ATTEMPT_CONFIRMED if outcome.ok else ATTEMPT_FAILED, payment_id, _now(),
+                     start.toss_order_id),
+                )  # fmt: skip
+            return self._order(conn, start.order_id)
 
     def mark_delivered(self, order_id: str, delivered_at: datetime | None = None) -> dict[str, Any]:
         """배송 완료 시각을 적는다(시연·시드용 관리 API). 상태는 바꾸지 않고 이벤트도 내지 않는다.

@@ -11,6 +11,7 @@ import { Projects } from '@/components/planning/projects'
 import { ProposalActions, Proposals } from '@/components/planning/proposals'
 import { Requests } from '@/components/planning/requests'
 import { Specs } from '@/components/planning/specs'
+import '@/components/planning/planning-ui.css'
 
 const SECTIONS: Record<string, Section> = {
   home: { label: '홈', icon: 'dashboard', tabs: [], head: { // 확인할 것 + 두 흐름 개수
@@ -34,6 +35,8 @@ const SECTIONS: Record<string, Section> = {
 
 export default function PlanningPage() {
   return (
+    // pl-ui: 기획 화면에만 쓰는 시각 계층 (planning-ui.css). 틀은 개발 화면과 같이 쓰므로 범위를 여기서 나눈다
+    <div className="pl-ui">
     <PlanningShell
       part="planning"
       title="요청·기획서"
@@ -58,5 +61,6 @@ export default function PlanningPage() {
         </>
       )}
     </PlanningShell>
+    </div>
   )
 }

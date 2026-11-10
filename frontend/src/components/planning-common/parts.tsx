@@ -129,12 +129,13 @@ export function Sec({ title, sub, children }: { title: ReactNode; sub?: ReactNod
 }
 
 // 숫자 몇 개를 한 줄로. 큰 숫자 카드 대신 쓴다
-export function Stats({ items }: { items: { label: string; value: ReactNode; hint?: string; href?: string }[] }) {
+export function Stats({ items }: { items: { label: string; value: ReactNode; hint?: string; href?: string; tone?: 'alert' | 'quiet' }[] }) {
   return (
     <div className="stats">
       {items.map((x) => {
         const inner = <><span className="stats-label">{x.label}</span><b>{x.value}</b>{x.hint && <span className="stats-hint">{x.hint}</span>}</>
-        return x.href ? <a key={x.label} href={toPath(x.href)} className="stats-item">{inner}</a> : <div key={x.label} className="stats-item">{inner}</div>
+        const cls = `stats-item${x.tone ? ` ${x.tone}` : ''}`
+        return x.href ? <a key={x.label} href={toPath(x.href)} className={cls}>{inner}</a> : <div key={x.label} className={cls}>{inner}</div>
       })}
     </div>
   )

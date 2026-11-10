@@ -33,6 +33,11 @@ class InquiryKpis(AxModel):
     by_urgency: dict[str, int] = Field(default_factory=dict)
     by_sentiment: dict[str, int] = Field(default_factory=dict)
     by_language: dict[str, int] = Field(default_factory=dict)  # 문의별 마지막 고객 메시지 언어
+    # "분류 필요": 오류 코드가 없거나 분류가 안 맞아 상담원이 원인 이름을 정해야 하는 문의.
+    # 원인 이름은 상담원이 쓴 글이라 세지 않고 건수만 센다(사유 코드별 건수는 아직 못 마친 것만)
+    triage_needed: int = 0
+    triage_done: int = 0
+    triage_by_reason: dict[str, int] = Field(default_factory=dict)
     top_keywords: list[KeywordCount] = Field(default_factory=list)  # 많이 나온 순, 최대 10개
 
 

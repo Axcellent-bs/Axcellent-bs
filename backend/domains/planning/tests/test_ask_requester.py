@@ -202,3 +202,39 @@ def test_a2a_receive_planning_answer(a2a_body) -> None:
         .json()
     )
     assert no_key["status"] != "completed"
+
+
+def test_second_question_on_same_request_gets_new_number() -> None:
+    """같은 요청에서 기획서를 다시 쓰다 또 되물으면 번호가 -2로 늘고, 두 질문이 따로 열려
+    각각 맞는 기획서로 답이 간다 (요청 서비스 받은 질문함이 question_id로 한 번만 적음, #941)."""
+    svc = Svc("needs_human")
+    service = _service(svc)
+    req, sp1 = _ticket(service)
+    assert sp1.question_id == f"Q-{req.id}-1"
+
+    # 같은 요청의 기획서를 다시 써서 또 묻는다 (앞 질문은 아직 열려 있음)
+    sp2 = sp1.model_copy(update={"id": "SPEC-RE", "question": None, "question_id": None})
+    service.state.specs.append(sp2)
+    run(service._ask_requester(service.state, sp2, req))
+    sp2 = next(x for x in service.state.specs if x.id == "SPEC-RE")
+    assert sp2.question_id == f"Q-{req.id}-2"
+    asked = [r.input["question_id"] for _, r in svc.asked]
+    assert asked == [f"Q-{req.id}-1", f"Q-{req.id}-2"]
+
+    def answer(qid: str, key: str):
+        return run(
+            service.receive_planning_answer(
+                question_id=qid, request_id=req.id, answer=f"{qid} 답", answered_by="human",
+                evidence_ids=[], idempotency_key=key,
+            )
+        ).output  # fmt: skip
+
+    assert answer(f"Q-{req.id}-2", "k2") == {"outcome": "applied", "spec_id": "SPEC-RE"}
+    assert answer(f"Q-{req.id}-1", "k1") == {"outcome": "applied", "spec_id": sp1.id}
+    froms = [d.from_ for d in service.state.decisions if d.from_.startswith("되묻기")]
+    assert froms[-2:] == [f"되묻기 Q-{req.id}-2", f"되묻기 Q-{req.id}-1"]
+    # 답한 뒤 또 물어도 쓴 번호를 피한다 (결정 기록에서 찾음)
+    sp3 = sp1.model_copy(update={"id": "SPEC-RE2", "question": None, "question_id": None})
+    service.state.specs.append(sp3)
+    run(service._ask_requester(service.state, sp3, req))
+    assert next(x for x in service.state.specs if x.id == "SPEC-RE2").question_id == f"Q-{req.id}-3"

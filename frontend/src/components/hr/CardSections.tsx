@@ -50,7 +50,7 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
     return (
       <section className="card p-6">
         <h2 className="text-lg font-semibold">확정된 카드</h2>
-        <p className="mt-2 text-xs text-amber-800">확정 카드 목록을 받지 못했습니다. 서버가 이 기능을 아직 지원하지 않을 수 있습니다.</p>
+        <p className="mt-2 text-xs text-amber-800">확정된 카드를 불러오지 못했습니다.</p>
       </section>
     );
   }

@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel
 from support_agent.store import now_iso
@@ -116,6 +116,18 @@ class IncidentQueueStore:
 
     def decide(self, item: QueueItem, status: Status, decided_by: str) -> QueueItem:
         return self.update(item, status=status, decided_by=decided_by, decided_at=now_iso())
+
+    def summary(self, context_id: str) -> dict[str, int]:
+        """사건 큐의 지금 상태를 상태별 고객 수와 나간 쿠폰으로 센다 (고객별 값은 없다)."""
+        rows = self.list(context_id)
+        count = {s: sum(1 for i in rows if i.status == s) for s in get_args(Status)}
+        sent = [i for i in rows if i.status == "sent"]
+        return {
+            **count,
+            "remaining": count["pending"] + count["approved"] + count["held"],
+            "coupons_sent": sum(i.count for i in sent),
+            "sent_value": sum(i.total_value for i in sent),
+        }
 
     def totals(self, context_id: str, statuses: tuple[str, ...]) -> tuple[int, int]:
         """사건의 (줄 수, 합계 원). 고른 상태만 센다."""

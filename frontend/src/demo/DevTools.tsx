@@ -4,6 +4,7 @@ import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingStep, type Coding
 import { UsageBar } from '@/components/dev/coding'
 import { NotionConnect } from '@/components/planning/notion'
 import { humanizePlanIds } from '@/lib/format'
+import { PageHead, SectionHead, StatusChip } from '@/components/connect/parts'
 
 // 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
 // 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.
@@ -346,18 +347,26 @@ function CodingModeSection({ part }: { part: AiPart }) {
   }
   if (part === 'all') {
     return (
-      <div className="space-y-4">
+      <div className="space-y-8">
+        <SectionHead title="AI 연결" desc="기획에서 넘어온 요청 작업을 누가 코딩할지 정하고, 서버 AI가 쓸 키·예산·모델과 개발자 PC의 AI 도구를 이어요."
+          right={cfg && <StatusChip tone="ok">지금 {cfg.resolved === 'agent' ? '서버 AI' : '내 Claude'}가 코딩</StatusChip>} />
         <CodingModeSection part="mode" />
-        {cfg ? <CompanyKeyBudget cfg={cfg} onSaved={setCfg} /> : <Loading error={error} />}
-        {cfg && <StepModels cfg={cfg} onSaved={setCfg} />}
-        <ClaudeConnect connected={cfg?.agents_connected ?? []} />
+        <div className="space-y-3">
+          <SectionHead as="h3" title="서버 AI 설정" desc="서버 AI가 코딩할 때만 써요. 비워 두면 서버 기본값을 써요." />
+          {cfg ? <CompanyKeyBudget cfg={cfg} onSaved={setCfg} /> : <Loading error={error} />}
+          {cfg && <StepModels cfg={cfg} onSaved={setCfg} />}
+        </div>
+        <div className="space-y-3">
+          <SectionHead as="h3" title="개발자 PC의 AI 도구" desc="개발자가 자기 PC의 Claude Code·Codex·Cursor로 작업 목록에서 작업을 가져가게 해요." />
+          <ClaudeConnect connected={cfg?.agents_connected ?? []} />
+        </div>
       </div>
     )
   }
   return (
-    <section className="space-y-4 rounded-lg border border-ink-100 p-4">
+    <section className="space-y-4 border border-brand-100 bg-brand-50/30 p-5">
       <div className="flex flex-wrap items-center gap-3">
-        <h3 className="font-medium">요청 작업 코딩</h3>
+        <h3 className="text-[15px] font-semibold">누가 코딩하나</h3>
         {cfg && <span className={`chip ${cfg.resolved === 'agent' ? TONE.none : TONE.ok}`}>지금: {cfg.resolved === 'agent' ? '서버 AI' : '내 Claude'}</span>}
         {error && <span className="chip bg-amber-50 text-amber-700">{error}</span>}
       </div>
@@ -624,12 +633,16 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
         {PANEL_GROUPS.map((g) => (
           <div key={g.label} className="mb-3 last:mb-0">
             <div className="px-2 pb-1 text-xs text-ink-500">{g.label}</div>
-            {g.items.map((it) => (
-              <button key={it.id} type="button" aria-current={tab === it.id ? 'page' : undefined} onClick={() => pickTab(it.id)}
-                className={`block w-full rounded-md px-2 py-1.5 text-left text-sm ${tab === it.id ? 'bg-ink-100 font-medium text-ink-900' : 'text-ink-700 hover:bg-ink-50'}`}>
-                {it.label}
-              </button>
-            ))}
+            {g.items.map((it) => {
+              const hint = it.id === 'repos' && list ? (list.length ? `${list.length}개` : '없음') : ''
+              return (
+                <button key={it.id} type="button" aria-current={tab === it.id ? 'page' : undefined} onClick={() => pickTab(it.id)}
+                  className={`flex w-full items-center justify-between gap-2 border-l-2 px-2 py-1.5 text-left text-sm ${tab === it.id ? 'border-brand-600 bg-ink-100 font-medium text-ink-900' : 'border-transparent text-ink-700 hover:bg-ink-50'}`}>
+                  {it.label}
+                  {hint && <span className="text-xs font-normal text-ink-500">{hint}</span>}
+                </button>
+              )
+            })}
           </div>
         ))}
       </nav>
@@ -637,19 +650,25 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
       {onClose && <button className="btn-quiet absolute right-3 top-3 px-2 py-1" onClick={onClose} aria-label="닫기">✕</button>}
       {tab === 'notion' ? <NotionConnect /> : tab === 'ai' ? <CodingModeSection part="all" /> : tab === 'repos' ? (
       <section className="space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 className="card-title text-lg">레포 연결</h2>
-          {list && <span className={`chip ${connected ? TONE.none : TONE.wait}`}>레포 {list.length}</span>}
-          {list && list.length > 1 && <span className="chip bg-ink-100 text-ink-700">PR마다 AI 제안 · 사람 승인</span>}
-          {offline && <span className="chip bg-amber-50 text-amber-700">개발·배포 AI에 연결할 수 없음</span>}
-          {!!list?.length && <button type="button" className="btn-ghost ml-auto" onClick={checkAll} disabled={checking || offline}>{checking ? '점검 중…' : '보안 점검'}</button>}
-          <button type="button" className={`btn-primary px-4 ${list?.length ? '' : 'ml-auto'}`} disabled={offline || (!!form && !form.id)}
-            onClick={() => { setForm({ ...EMPTY }); setError(null) }}>레포 연결</button>
-        </div>
+        <SectionHead title="레포 연결"
+          desc={list && list.length > 1
+            ? '개발 AI가 코드를 읽고 PR을 올리는 레포예요. 레포가 여럿이면 PR마다 AI가 대상 레포를 제안하고 사람이 승인해요.'
+            : '개발 AI가 코드를 읽고 PR을 올리는 레포예요. 레포마다 접근 토큰이나 GitHub App으로 연결해요.'}
+          right={<>
+            {offline && <StatusChip tone="wait">개발·배포 AI에 연결할 수 없음</StatusChip>}
+            {!!list?.length && <button type="button" className="btn-ghost" onClick={checkAll} disabled={checking || offline}>{checking ? '점검 중…' : '보안 점검'}</button>}
+            <button type="button" className="btn-primary px-4" disabled={offline || (!!form && !form.id)}
+              onClick={() => { setForm({ ...EMPTY }); setError(null) }}>레포 연결</button>
+          </>} />
 
         {form && !form.id && formEl}
 
-        {list && !list.length && !form && <p className="border-t border-ink-100 pt-4 text-sm text-ink-500">연결 없음 · 시연 데이터</p>}
+        {list && !list.length && !form && (
+          <div className="border border-dashed border-ink-300 px-6 py-8 text-center">
+            <p className="font-medium">연결한 레포가 없어요</p>
+            <p className="mt-1 text-sm text-ink-500">지금 개발 화면은 시연 데이터를 보여 줘요. 위의 레포 연결로 첫 레포를 이어 주세요.</p>
+          </div>
+        )}
 
         {!!list?.length && (
           <ul className="space-y-3">
@@ -659,10 +678,9 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
               return (
                 <li key={c.id} className={`rounded-xl border p-4 ${form?.id === c.id ? 'border-ink-400' : 'border-ink-100'}`}>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{c.repo}</span>
-                    <span className="chip bg-ink-100 text-ink-700">{KIND_LABEL[c.kind] ?? c.kind}</span>
+                    <span className="text-base font-semibold">{c.repo}</span>
                     <span className={`chip ${st.tone}`}>{st.label}</span>
-                    <span className="chip bg-ink-100 text-ink-500">{SOURCE[c.source] ?? c.source}</span>
+                    <span className="text-xs text-ink-500">{KIND_LABEL[c.kind] ?? c.kind} · {SOURCE[c.source] ?? c.source}</span>
                     <div className="ml-auto flex gap-1.5">
                       <button type="button" className="btn-ghost" onClick={() => runTest(c.id)} disabled={!!testing || offline}>연결 확인</button>
                       <button type="button" className="btn-ghost" onClick={() => { setForm(toForm(c)); setError(null) }}>수정</button>
@@ -706,7 +724,7 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
       </section>
       ) : (
       <section>
-        <h2 className="card-title">다른 개발 도구</h2>
+        <SectionHead title="다른 개발 도구" desc="CI·배포·이슈 도구예요. 형상관리와 함께 읽거나, 사내 PC 연결로 이어요." />
         <ul className="mt-3 divide-y divide-ink-100">
           {OTHERS.map((o) => (
             <li key={o.name} className="grid grid-cols-[120px_1fr_auto] items-center gap-3 py-3 text-sm">
@@ -732,8 +750,8 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
 /** 연결 페이지(/connections): 사이드바 AI 오피스 아래. 형상관리 · AI(코딩 방식·키·모델·AI 도구) */
 export default function DevTools() {
   return (
-    <div className="space-y-6 px-8 py-8">
-      <h1 className="text-2xl font-semibold">연결</h1>
+    <div className="space-y-6 px-4 py-8 sm:px-8">
+      <PageHead title="연결">개발 AI와 기획 AI가 쓰는 바깥 도구를 이어요. 레포·노션·AI 키는 서버에만 저장되고 화면에는 끝 4자리만 보여요.</PageHead>
       <DevToolsPanel />
     </div>
   )

@@ -3,7 +3,7 @@
 // 화면은 예전 캣북스 대시보드의 AI 화면을 옮겨 온 것이다. paths가 그 서비스에 속한 화면 주소, agent가 맡은 AI다.
 import { useSyncExternalStore, type ComponentType } from 'react'
 import {
-  IconBolt, IconBook, IconBox, IconChart, IconClock, IconCode, IconMegaphone, IconOffice, IconPlan, IconReceipt, IconShield, IconStar, IconUser, IconUsers,
+  IconBolt, IconBook, IconBox, IconCart, IconChart, IconClock, IconCode, IconMegaphone, IconOffice, IconPlan, IconReceipt, IconShield, IconStar, IconUser, IconUsers,
 } from '@/components/icons'
 
 export type SubItem = { href: string; label: string; soon?: boolean }
@@ -76,6 +76,10 @@ export const SERVICES: Service[] = [
     ],
   },
   {
+    id: 'orders', agent: 'support', family: 'customer', name: '주문 관리', by: 'AXcellent', Icon: IconCart, entry: '/orders', paths: ['/orders'],
+    desc: '판매 서버의 주문을 최신순으로 보고, 취소·부분 환불·전체 환불을 따로 걸러 봅니다. 쇼핑몰이 아닌 회사는 꺼 두면 됩니다.',
+  },
+  {
     id: 'claims', agent: 'support', family: 'customer', name: '클레임·보상', by: 'AXcellent', Icon: IconReceipt, entry: '/claims', paths: ['/claims', '/queue'],
     desc: '환불·교환 신청을 확인하고 보상을 규칙대로 처리합니다.',
     children: [
@@ -124,7 +128,7 @@ export const SERVICES: Service[] = [
   },
   {
     id: 'org', agent: 'hr', family: 'backoffice', name: '조직 변동', by: 'AXcellent', Icon: IconOffice, entry: '/org', paths: ['/org'],
-    desc: '팀 이동·입사·퇴사를 기록하고 확정합니다. 확정한 기록으로 센 팀별 인원이 재무 AI의 팀 예산에 쓰입니다.',
+    desc: '팀 이동·입사·퇴사를 기록하고 확정합니다. 확정한 내용으로 센 팀별 인원이 재무 AI의 팀 예산에 쓰입니다.',
   },
   {
     id: 'planning', agent: 'planning', family: 'product', name: '요청·기획서', by: 'AXcellent', Icon: IconPlan, entry: '/planning/home', paths: ['/planning'],
@@ -175,7 +179,7 @@ const KEY = 'axcellent-demo-services'
 // "끈 것"이 아니라 "새로 생긴 것"으로 알아보고 켜 둘 수 있다
 const KNOWN_KEY = 'axcellent-demo-services-known'
 // 위 목록을 남기기 전에 선택을 저장해 둔 브라우저를 위해, 그 뒤에 새로 생긴 서비스를 적어 둔다
-const ADDED_BEFORE_KNOWN_LIST = ['agent-eval']
+const ADDED_BEFORE_KNOWN_LIST = ['agent-eval', 'orders']
 const ALL = SERVICES.map((s) => s.id)
 // 필수 서비스: 회사가 끌 수 없고 카탈로그에서 내릴 수도 없다. 다른 AI가 장애 기록(총괄 사건·고객지원 장애 확인·
 // 재무 장애 비용·인사 대응 시간)을 쓰므로 장애 대응과 그 감시 대상인 PC·서버 연결은 늘 켜 둔다
