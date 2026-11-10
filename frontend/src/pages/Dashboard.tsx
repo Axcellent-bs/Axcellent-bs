@@ -14,7 +14,12 @@ const GUARD_KO: Record<string, string> = {
   greeting: "인사말 없음", closing: "맺음 인사 없음", unsupported_promise: "근거 없는 약속", contradicts_decision: "판정과 모순된 약속",
   premature_promise: "확인 전 결과 약속", internal_info_leak: "내부 정보 노출", pii: "개인정보", absolute_wording: "단정적 표현",
   conditional_policy: "조건부 정책", review_bargaining: "후기 거래 제안", ungrounded_citation: "근거 없는 인용", length: "길이 초과",
+  // 답변 가드(guard.py)가 실제로 내는 코드
+  promise_refund: "환불·보상 단정", pii_in_reply: "개인정보 포함", link_in_reply: "링크 포함", too_long: "너무 긴 답변", empty_reply: "빈 답변",
+  unsupported_language: "자동 검사 불가 언어", language_not_verified: "언어 확인 필요", no_evidence_reply: "근거 없는 답변",
 };
+// 클레임 사유(배송 지연 등)와 규칙 이름을 함께 풀어 쓴다: 실제 모드는 사유 코드를 보내서 영문 코드가 그대로 보이던 것을 고친다
+const REASON_LABELS: Record<string, string> = { ...RULE_KO, ...CLAIM_REASON_KO };
 
 export default function DashboardPage() {
   const [days, setDays] = useState(14);
@@ -58,8 +63,8 @@ export default function DashboardPage() {
 
         <section className="grid gap-6 md:grid-cols-2">
           <div>
-            <h2 className="mb-3 text-base font-semibold">자주 걸리는 규칙</h2>
-            <Bars data={d.claim_reasons} labels={RULE_KO} />
+            <h2 className="mb-3 text-base font-semibold">클레임 사유</h2>
+            <Bars data={d.claim_reasons} labels={REASON_LABELS} />
           </div>
           <div>
             <h2 className="mb-3 text-base font-semibold">문의 분류</h2>
