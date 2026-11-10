@@ -61,6 +61,14 @@ def step(inc: dict[str, Any], step_id: str) -> dict[str, Any]:
     return next((s for s in inc["steps"] if s["step_id"] == step_id), {})
 
 
+def _seconds(start: str | None, end: str | None) -> float | None:
+    if not start or not end:
+        return None
+    a = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    b = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    return round((b - a).total_seconds(), 1)
+
+
 def summarize(inc: dict[str, Any]) -> dict[str, Any]:
     sim = step(inc, "similar_cases")
     cases = (sim.get("output") or {}).get("cases") or []
@@ -98,6 +106,11 @@ def summarize(inc: dict[str, Any]) -> dict[str, Any]:
         "draft_source": draft.get("source"),
         "late_resolution": (inc.get("shared") or {}).get("late_resolution"),
         "timeline": inc.get("timeline"),
+        # 장애 감지(이벤트가 열린 시각)부터 쇼핑몰 정상 복귀 신호까지
+        "detect_to_recover_s": _seconds(
+            (inc.get("timeline") or {}).get("detected_at"),
+            (inc.get("timeline") or {}).get("recovered_at"),
+        ),
     }
 
 
@@ -173,7 +186,7 @@ def main() -> int:
             results.append(r)
             print(json.dumps({k: r.get(k) for k in (
                 "run", "kind", "event_type", "diagnose", "past_fix", "rollback", "similar_found",
-                "similar_usable", "recommendation", "human_fixed", "recovered_after_s", "error",
+                "similar_usable", "recommendation", "human_fixed", "detect_to_recover_s", "error",
             )}, ensure_ascii=False), flush=True)  # fmt: skip
             args.out.write_text(
                 json.dumps({"started": started, "runs": results}, ensure_ascii=False, indent=1),
