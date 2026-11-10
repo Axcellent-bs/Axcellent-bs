@@ -63,6 +63,14 @@ async def _shop_get(
     path: str, params: dict[str, Any] | None = None, *, not_found: str | None = None
 ) -> Any:
     """`not_found`를 주면 판매 서버의 404를 그 문구의 404로 돌려준다(502로 안 보이게)."""
+    data, _ = await _shop_get_page(path, params, not_found=not_found)
+    return data
+
+
+async def _shop_get_page(
+    path: str, params: dict[str, Any] | None = None, *, not_found: str | None = None
+) -> tuple[Any, dict[str, Any]]:
+    """판매 서버 응답의 `(data, meta)`. 페이지를 넘기는 목록(`meta.next_cursor`)에 쓴다."""
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             res = await client.get(f"{_shop_url()}{path}", params=params)
@@ -74,7 +82,33 @@ async def _shop_get(
         raise ApiError(
             502, "UPSTREAM_ERROR", f"판매 서버에서 오류가 났습니다 (HTTP {res.status_code})"
         )
-    return res.json().get("data")
+    body = res.json()
+    meta = body.get("meta")
+    return body.get("data"), meta if isinstance(meta, dict) else {}
+
+
+# 판매 서버 주문 목록 한 페이지(최대 1000). 더 있으면 meta.next_cursor로 넘긴다
+ORDERS_PAGE = 1000
+
+
+async def _shop_orders(params: dict[str, Any], max_rows: int) -> list[dict[str, Any]]:
+    """`GET /api/shop/orders`를 cursor로 끝까지 넘겨 모은다. `max_rows`를 넘으면 거기서 멈춘다.
+
+    멈췄을 때는 `max_rows + 1`건 이상을 돌려주므로 부르는 쪽이 "너무 많다"를 알 수 있다.
+    """
+    query = {**params, "limit": ORDERS_PAGE}
+    found: list[dict[str, Any]] = []
+    while True:
+        items, meta = await _shop_get_page("/api/shop/orders", query)
+        if items is None:
+            items = []
+        if not isinstance(items, list):
+            raise ApiError(502, "UPSTREAM_ERROR", "판매 서버가 주문 목록이 아닌 응답을 보냈습니다")
+        found.extend(items)
+        cursor = meta.get("next_cursor")
+        if not cursor or len(found) > max_rows:
+            return found
+        query = {**query, "cursor": cursor}
 
 
 def _number(identifier: str) -> int:
@@ -121,7 +155,8 @@ async def orders(
         params["since"] = start
     if end := _period(until, "until"):
         params["until"] = end
-    items = await _shop_get("/api/shop/orders", params) or []
+    # 한 구매자의 주문이라 기간이 없어도("전체") 페이지를 넘겨 다 읽는다. 상한은 주문 관리와 같다
+    items = (await _shop_orders(params, MAX_ORDERS))[:MAX_ORDERS]
     out: list[OrderSummary] = []
     for o in items:
         lines = o.get("items") or []
@@ -216,14 +251,13 @@ async def order_page(
         params["since"] = start
     if end := _period(until, "until"):
         params["until"] = end
-    items = await _shop_get("/api/shop/orders", params) or []
-    if not isinstance(items, list):
-        raise ApiError(502, "UPSTREAM_ERROR", "판매 서버가 주문 목록이 아닌 응답을 보냈습니다")
+    # cursor로 넘기다 MAX_ORDERS를 넘으면 거기서 멈춘다(25만 건을 다 읽지 않는다)
+    items = await _shop_orders(params, MAX_ORDERS)
     if len(items) > MAX_ORDERS:
         raise ApiError(
             422,
             "PERIOD_TOO_LARGE",
-            f"이 기간 주문이 {len(items):,}건이라 한 번에 볼 수 없다. 기간을 줄여 주세요",
+            f"이 기간 주문이 {MAX_ORDERS:,}건을 넘어 한 번에 볼 수 없다. 기간을 줄여 주세요",
         )
     needle = (q or "").strip().lower()
     found = [o for o in items if not needle or needle in str(o.get("order_id", "")).lower()]

@@ -45,9 +45,9 @@ def _fake_shop(monkeypatch: pytest.MonkeyPatch, data: Any) -> list[tuple[str, di
 
     async def fake(path: str, params: dict | None = None, **_: Any) -> Any:
         calls.append((path, params))
-        return data
+        return data, {}  # 한 페이지로 끝(next_cursor 없음)
 
-    monkeypatch.setattr(live_views, "_shop_get", fake)
+    monkeypatch.setattr(live_views, "_shop_get_page", fake)
     return calls
 
 
@@ -96,7 +96,10 @@ def test_live_list_sorts_newest_first_and_maps_columns(
     assert newest["status_ko"] == "결제 완료"
     # 구매자·기간을 판매 서버에 그대로 넘긴다(until은 안 줬으니 없다)
     assert calls == [
-        ("/api/shop/orders", {"buyer_id": "buy_0001", "since": "2026-09-01T00:00:00Z"})
+        (
+            "/api/shop/orders",
+            {"buyer_id": "buy_0001", "since": "2026-09-01T00:00:00Z", "limit": 1000},
+        )
     ]
 
 

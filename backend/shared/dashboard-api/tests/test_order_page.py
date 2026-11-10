@@ -60,9 +60,9 @@ def _shop(monkeypatch: pytest.MonkeyPatch, data: Any) -> list[tuple[str, dict | 
 
     async def fake(path: str, params: dict | None = None, **_: Any) -> Any:
         calls.append((path, params))
-        return data
+        return data, {}  # 한 페이지로 끝(next_cursor 없음)
 
-    monkeypatch.setattr(live_views, "_shop_get", fake)
+    monkeypatch.setattr(live_views, "_shop_get_page", fake)
     return calls
 
 
@@ -77,8 +77,45 @@ def test_reads_only_the_existing_order_list(
     live_client.get(PAGE, params={"since": "2026-11-01T00:00:00Z", "buyer_id": "buy_0007"})
     # 판매 서버에 새 경로를 묻지 않고, 원래 있는 기간 목록만 같은 기간·구매자로 부른다
     assert calls == [
-        ("/api/shop/orders", {"buyer_id": "buy_0007", "since": "2026-11-01T00:00:00Z"})
+        (
+            "/api/shop/orders",
+            {"buyer_id": "buy_0007", "since": "2026-11-01T00:00:00Z", "limit": 1000},
+        )
     ]
+
+
+def test_follows_cursor_until_the_last_page(
+    live_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """판매 서버가 한 페이지씩 주면 next_cursor로 끝까지 넘겨 모두 센다."""
+    pages = {None: (ORDERS[:2], {"next_cursor": "ord_0002"}), "ord_0002": (ORDERS[2:], {})}
+    calls: list[dict] = []
+
+    async def fake(path: str, params: dict | None = None, **_: Any) -> Any:
+        calls.append(dict(params or {}))
+        return pages[(params or {}).get("cursor")]
+
+    monkeypatch.setattr(live_views, "_shop_get_page", fake)
+    body = live_client.get(PAGE).json()
+    assert body["meta"]["total"] == 5
+    assert [c.get("cursor") for c in calls] == [None, "ord_0002"]
+
+
+def test_stops_paging_once_past_the_limit(
+    live_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """상한을 넘으면 남은 페이지를 더 읽지 않고 기간을 줄여 달라고 한다."""
+    monkeypatch.setattr(live_views, "MAX_ORDERS", 3)
+    calls: list[dict] = []
+
+    async def fake(path: str, params: dict | None = None, **_: Any) -> Any:
+        calls.append(dict(params or {}))
+        return ORDERS, {"next_cursor": "ord_0005"}  # 끝없이 다음 페이지가 있다
+
+    monkeypatch.setattr(live_views, "_shop_get_page", fake)
+    res = live_client.get(PAGE)
+    assert res.status_code == 422
+    assert len(calls) == 1
 
 
 def test_newest_first_with_counts_per_tab(

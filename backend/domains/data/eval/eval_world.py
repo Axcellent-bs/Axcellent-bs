@@ -129,6 +129,7 @@ class World:
         def handle(request: httpx.Request) -> httpx.Response:
             params = request.url.params
             path = request.url.path
+            meta: dict[str, object] = {}
             if path.endswith("/failed-orders"):
                 query = ShopFailedOrdersQuery(
                     from_=parse(params["from"]),
@@ -150,8 +151,12 @@ class World:
                     params.get("buyer_id"), params.get("purpose_code"), params.get("campaign_id")
                 )
             elif path.endswith("/orders"):  # shop-api `GET /api/shop/orders` (캠페인 매출 평가)
-                data = service.Shop(self.db).list_orders(
-                    params.get("buyer_id"), params.get("since"), params.get("until")
+                data, meta["next_cursor"] = service.Shop(self.db).list_orders(
+                    params.get("buyer_id"),
+                    params.get("since"),
+                    params.get("until"),
+                    int(params.get("limit", service.ORDER_PAGE_DEFAULT)),
+                    params.get("cursor"),
                 )
             elif path.endswith("/orders/attributed"):  # shop-api 유입 주문 조회 (유입경로 평가)
                 data = lookups.attributed_orders(
@@ -164,7 +169,7 @@ class World:
                 )
             else:
                 return httpx.Response(404, json={"error": {"code": "NOT_FOUND"}})
-            return httpx.Response(200, content=json.dumps({"data": data, "meta": {}}))
+            return httpx.Response(200, content=json.dumps({"data": data, "meta": meta}))
 
         return httpx.MockTransport(handle)
 

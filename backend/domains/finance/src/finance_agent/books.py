@@ -34,7 +34,6 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from importlib import resources
 from typing import Any
-from urllib.parse import urlencode
 
 import httpx
 
@@ -47,6 +46,8 @@ CALL_SECONDS = 5.0
 # 주문은 전체를 한 번에 읽어서 쌓일수록 오래 걸린다 (#421: 33,850건 22MB에 8초).
 # 부르는 쪽이 먼저 끊어도 끝까지 모아 캐시에 두므로(`cached_live_books`) 다음 요청은 값을 받는다
 ORDERS_CALL_SECONDS = 30.0
+# 주문 목록 한 페이지(shop-api 최대 1000). 더 있으면 meta.next_cursor로 넘긴다
+ORDERS_PAGE = 1000
 LIVE_CACHE_SECONDS = 30.0
 # 캐시가 지나도 이 시간 안이면 조회는 직전 장부를 바로 주고 뒤에서 새로 읽는다
 LIVE_STALE_SECONDS = 300.0
@@ -308,6 +309,41 @@ async def _get(
     return body.get("data") if isinstance(body, dict) else None
 
 
+async def _get_orders(
+    client: httpx.AsyncClient, shop: str, since: datetime | None
+) -> list[dict[str, Any]] | None:
+    """`GET /api/shop/orders`를 `ORDERS_PAGE`건씩 `meta.next_cursor`로 끝까지 넘겨 모은다.
+
+    shop-api는 한 번에 최대 1000건만 준다. 한 페이지라도 실패하면 None(빠진 장부를 만들지 않는다).
+    """
+    params: dict[str, Any] = {"limit": ORDERS_PAGE}
+    if since is not None:
+        params["since"] = fc.iso(since)
+    orders: list[dict[str, Any]] = []
+    while True:
+        try:
+            response = await client.get(
+                f"{shop}/api/shop/orders", params=params, timeout=ORDERS_CALL_SECONDS
+            )
+        except httpx.HTTPError:
+            return None
+        if response.status_code != 200:
+            return None
+        try:
+            body = response.json()
+        except ValueError:
+            return None
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, list):
+            return None
+        orders.extend(data)
+        meta = body.get("meta")
+        cursor = meta.get("next_cursor") if isinstance(meta, dict) else None
+        if not cursor:
+            return orders
+        params = {**params, "cursor": cursor}
+
+
 def normalize_order(raw: dict[str, Any], categories: dict[str, str]) -> dict[str, Any] | None:
     """shop-api 주문 응답 → 장부 주문. 형식이 다르면 None (그 주문은 빼고 unavailable에 적는다)."""
     created = fc.parse_dt(raw.get("created_at"))
@@ -541,10 +577,7 @@ async def _live_books(
     since = store.since(full)
     try:
         shop, safety = agent_url("shop-api"), agent_url("safety")
-        query = "" if since is None else "?" + urlencode({"since": fc.iso(since)})
-        orders_raw = await _get(
-            client, f"{shop}/api/shop/orders{query}", timeout=ORDERS_CALL_SECONDS
-        )
+        orders_raw = await _get_orders(client, shop, since)
         products = await _get(client, f"{shop}/api/shop/products")
         sellers = await _get(client, f"{shop}/api/shop/sellers")
         try:

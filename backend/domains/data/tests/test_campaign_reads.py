@@ -50,6 +50,26 @@ def test_orders_are_read_one_hour_at_a_time_and_counted_once() -> None:
     assert sorted(o.order_id for o in got) == ["o14", "o15", "o16", "same"]
 
 
+def test_orders_follow_the_cursor_inside_one_hour() -> None:
+    """한 시간 조각에 한 페이지보다 많으면 meta.next_cursor로 끝까지 넘긴다(빠짐·중복 없음)."""
+    rows = [_row(f"ord_{n:04d}", START) for n in range(5)]
+    seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        p = dict(request.url.params)
+        seen.append(p)
+        after = p.get("cursor")
+        rest = [r for r in rows if after is None or r["order_id"] > after][:2]
+        more = rest and rest[-1]["order_id"] != rows[-1]["order_id"]
+        meta = {"next_cursor": rest[-1]["order_id"] if more else None}
+        return httpx.Response(200, json={"data": rest, "meta": meta})
+
+    got = asyncio.run(_connector(handler).orders(START, START + timedelta(hours=1)))
+    assert sorted(o.order_id for o in got) == [r["order_id"] for r in rows]
+    assert [p.get("cursor") for p in seen] == [None, "ord_0001", "ord_0003"]
+    assert all(p["limit"] == "1000" for p in seen)
+
+
 def test_a_timeout_says_why_instead_of_unavailable() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("slow", request=request)

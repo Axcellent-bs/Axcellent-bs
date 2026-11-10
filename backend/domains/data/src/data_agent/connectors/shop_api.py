@@ -44,6 +44,8 @@ SERIES_CHUNK = timedelta(days=1)
 # 주문 목록은 한 시간씩 나눠 읽는다. 주문이 많은 구간(수만 건)을 한 번에 받으면 shop-api가 그동안
 # 묶여 같이 부른 상품·유입 조회가 제한 시간을 넘긴다 (#705)
 ORDERS_CHUNK = timedelta(hours=1)
+# 주문 목록 한 페이지 (shop-api 최대 1000). 한 구간에 더 있으면 meta.next_cursor로 넘긴다
+ORDERS_PAGE = 1000
 FAILED_ORDERS_LIMIT = EVENTS_LIMIT  # shop-api `/failed-orders`의 최대 limit
 TRANSACTIONS_METRIC = "payment_count"  # 거래 시도 수 = 결제 시도 수
 
@@ -94,6 +96,11 @@ class ShopApi:
 
     async def get(self, path: str, params: dict[str, Any]) -> Any:
         """`GET /api/shop{path}`의 `data`를 돌려준다. 200이 아니면 `ShopUnavailable`."""
+        data, _ = await self.get_page(path, params)
+        return data
+
+    async def get_page(self, path: str, params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        """`GET /api/shop{path}`의 `(data, meta)`. 페이지를 넘기는 목록(meta.next_cursor)용."""
         headers = self._headers()
         client = self._client or _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
         try:
@@ -115,8 +122,10 @@ class ShopApi:
         if response.status_code != 200:
             raise _error(response)
         try:
-            return response.json()["data"]
-        except (ValueError, KeyError, TypeError) as exc:
+            body = response.json()
+            meta = body.get("meta")
+            return body["data"], meta if isinstance(meta, dict) else {}
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
             raise ShopUnavailable("BAD_RESPONSE", "shop-api 응답에 data가 없다") from exc
 
 
@@ -215,19 +224,30 @@ class ShopApiConnector:
     async def orders(self, window_from: datetime, window_to: datetime) -> list[ShopOrder]:
         """접수 시각이 [from, to)인 주문 (`GET /api/shop/orders?since&until`). 금액·결제·쿠폰 칸.
 
-        구간을 `ORDERS_CHUNK`(한 시간)씩 나눠 차례로 읽는다. 같은 주문 번호는 한 번만 센다.
+        구간을 `ORDERS_CHUNK`(한 시간)씩 나눠 차례로 읽고, 한 구간 안에서는 `meta.next_cursor`로
+        `ORDERS_PAGE`건씩 끝까지 넘긴다. 같은 주문 번호는 한 번만 센다.
         """
         found: dict[str, ShopOrder] = {}
         start = window_from
         while start < window_to:
             end = min(start + ORDERS_CHUNK, window_to)
-            data = await self.api.get("/orders", {"since": _iso(start), "until": _iso(end)})
-            try:
-                for item in data:
-                    order = ShopOrder.model_validate(item)
-                    found.setdefault(order.order_id, order)
-            except (ValidationError, TypeError) as exc:
-                raise ShopUnavailable("BAD_RESPONSE", "주문 응답 형식이 예상과 다르다") from exc
+            params: dict[str, Any] = {
+                "since": _iso(start),
+                "until": _iso(end),
+                "limit": ORDERS_PAGE,
+            }
+            while True:
+                data, meta = await self.api.get_page("/orders", params)
+                try:
+                    for item in data:
+                        order = ShopOrder.model_validate(item)
+                        found.setdefault(order.order_id, order)
+                except (ValidationError, TypeError) as exc:
+                    raise ShopUnavailable("BAD_RESPONSE", "주문 응답 형식이 예상과 다르다") from exc
+                cursor = meta.get("next_cursor")
+                if not cursor:
+                    break
+                params = {**params, "cursor": cursor}
             start = end
         return list(found.values())
 
