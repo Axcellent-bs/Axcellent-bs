@@ -241,6 +241,71 @@ class Shop:
             refunds = self._refunds_by_order(conn, ids)
             return [self._order(conn, order_id, refunds) for order_id in ids]
 
+    def order_page(
+        self,
+        *,
+        tab: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        q: str | None = None,
+        buyer_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """주문 관리 화면의 한 페이지: 주문 시각 최신순, 탭별 건수와 함께.
+
+        탭은 주문 상태(`pending_payment`·`paid`·`cancelled`·`payment_failed`)이고, 환불이 있으면
+        상태 대신 환불 합계로 나눈다(결제액 이상이면 `full_refund`, 그보다 적으면 `partial_refund`).
+        기간·구매자·주문 번호(일부) 거르기는 건수에도 같이 적용하고, 탭은 목록에만 적용한다.
+        """
+        where, args = [], []
+        if buyer_id:
+            where.append("o.buyer_id = ?")
+            args.append(buyer_id)
+        if since:
+            where.append("o.created_at >= ?")
+            args.append(_period_bound(since))
+        if until:
+            where.append("o.created_at < ?")
+            args.append(_period_bound(until))
+        if q:
+            escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            where.append("o.order_id LIKE ? ESCAPE '\\'")
+            args.append(f"%{escaped}%")
+        base = (
+            "WITH r AS (SELECT order_id, SUM(amount) AS refunded FROM refunds GROUP BY order_id), "
+            "base AS (SELECT o.order_id, o.created_at, CASE "
+            "WHEN COALESCE(r.refunded, 0) > 0 AND r.refunded >= o.total_amount THEN 'full_refund' "
+            "WHEN COALESCE(r.refunded, 0) > 0 THEN 'partial_refund' "
+            "ELSE o.status END AS tab "
+            "FROM orders o LEFT JOIN r ON r.order_id = o.order_id"
+            + (" WHERE " + " AND ".join(where) if where else "")
+            + ") "
+        )
+        with self.db.tx() as conn:
+            counts = {
+                row["tab"]: row["n"]
+                for row in conn.execute(
+                    base + "SELECT tab, COUNT(*) AS n FROM base GROUP BY tab", args
+                )
+            }
+            counts["all"] = sum(counts.values())
+            picked = " WHERE tab = ?" if tab else ""
+            ids = [
+                row["order_id"]
+                for row in conn.execute(
+                    base
+                    + "SELECT order_id FROM base"
+                    + picked
+                    + " ORDER BY created_at DESC, order_id DESC LIMIT ? OFFSET ?",
+                    [*args, *([tab] if tab else []), limit, offset],
+                )
+            ]
+            refunds = self._refunds_by_order(conn, ids)
+            items = [self._order(conn, order_id, refunds) for order_id in ids]
+        total = counts["all"] if not tab else counts.get(tab, 0)
+        return {"items": items, "total": total, "counts": counts}
+
     @staticmethod
     def _refunds_by_order(
         conn: sqlite3.Connection, order_ids: list[str]

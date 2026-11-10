@@ -25,7 +25,9 @@ from ax_dashboard_api.schemas import (
     Me,
     OrderDetail,
     OrderLine,
+    OrderListRow,
     OrderPayment,
+    OrderRefund,
     OrderSummary,
 )
 
@@ -131,6 +133,87 @@ async def orders(
     return out
 
 
+ORDER_TABS = (
+    "pending_payment",
+    "paid",
+    "partial_refund",
+    "full_refund",
+    "cancelled",
+    "payment_failed",
+)
+
+
+def _title(lines: list[dict[str, Any]]) -> str:
+    first = lines[0].get("title") if lines else None
+    return (first or "상품") + (f" 외 {len(lines) - 1}건" if len(lines) > 1 else "")
+
+
+async def order_page(
+    *,
+    status: str | None,
+    since: str | None,
+    until: str | None,
+    q: str | None,
+    buyer: str | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[OrderListRow], int, dict[str, int]]:
+    """주문 관리 화면의 한 페이지(최신순)와 전체 건수·탭별 건수.
+
+    판매 서버의 `GET /api/shop/orders/page`를 그대로 맞춘다. 그 경로가 없는 판매 서버는
+    (`/orders/{id}`로 읽혀) 404를 내므로 `ORDER_LIST_UNSUPPORTED` 404로 알린다.
+    """
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+    if status:
+        params["status"] = status
+    if start := _period(since, "since"):
+        params["since"] = start
+    if end := _period(until, "until"):
+        params["until"] = end
+    if q:
+        params["q"] = q
+    if buyer:
+        params["buyer_id"] = buyer
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+            res = await client.get(f"{_shop_url()}/api/shop/orders/page", params=params)
+    except httpx.HTTPError as error:
+        raise ApiError(
+            502, "UPSTREAM_UNAVAILABLE", f"shop-api에 연결할 수 없다 ({error})"
+        ) from error
+    if res.status_code == 404:
+        raise ApiError(
+            404, "ORDER_LIST_UNSUPPORTED", "이 판매 서버는 주문 페이지 목록을 주지 않는다"
+        )
+    if res.status_code >= 400:
+        raise ApiError(502, "UPSTREAM_ERROR", f"shop-api 오류 (HTTP {res.status_code})")
+    body = res.json()
+    items = body.get("data")
+    meta = body.get("meta") or {}
+    if not isinstance(items, list):
+        raise ApiError(502, "UPSTREAM_ERROR", "shop-api가 목록 모양이 아닌 응답을 돌려줬다")
+    rows = [
+        OrderListRow(
+            id=_number(o["order_id"]),
+            order_no=o["order_id"],
+            status=o["status"],
+            status_ko=STATUS_KO.get(o["status"], o["status"]),
+            title=_title(o.get("items") or []),
+            created_at=o.get("created_at"),
+            total_amount=o.get("total_amount"),
+            refunded_amount=o.get("refunded_amount"),
+            item_count=len(o.get("items") or []),
+            buyer_id=o.get("buyer_id"),
+            shipped_at=o.get("shipped_at"),
+            delivered_at=o.get("delivered_at"),
+        )
+        for o in items
+    ]
+    raw_counts = meta.get("counts") or {}
+    counts = {k: int(v) for k, v in raw_counts.items() if k == "all" or k in ORDER_TABS}
+    return rows, int(meta.get("total", len(rows))), counts
+
+
 async def order_detail(order_no: str) -> OrderDetail:
     """판매 서버의 주문 한 건을 화면 모델로 맞춘다. 없는 값은 None이다."""
     o = await _shop_get(f"/api/shop/orders/{order_no}", not_found="주문을 찾을 수 없다")
@@ -169,6 +252,14 @@ async def order_detail(order_no: str) -> OrderDetail:
             )
             for p in o.get("payments") or []
         ],
+        refunds=(
+            None
+            if not isinstance(o.get("refunds"), list)
+            else [
+                OrderRefund(amount=r.get("amount"), created_at=r.get("created_at"))
+                for r in o["refunds"]
+            ]
+        ),
     )
 
 

@@ -148,6 +148,43 @@ async def orders(user_id: int, since: str | None = None, until: str | None = Non
     return ok(items, total=len(items))
 
 
+@mock_only.get("/orders/page")
+async def order_page(
+    status: Literal[
+        "pending_payment", "paid", "partial_refund", "full_refund", "cancelled", "payment_failed"
+    ]
+    | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    q: str | None = Query(None, max_length=64),
+    buyer_id: str | None = Query(None, pattern=r"^[A-Za-z0-9_-]{1,64}$"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=1_000_000),
+) -> dict:
+    """주문 관리 화면(/orders)의 한 페이지, 주문 시각 최신순(읽기 전용).
+
+    `meta.total`은 고른 탭의 건수, `meta.counts`는 탭별 건수(`all` 포함).
+    부분·전체 환불은 판매 서버가 환불 합계로 나눈다.
+    목 모드는 데이터가 없어 빈 목록이다(지어내지 않는다).
+    """
+    if is_mock():
+        body = ok([], total=0)
+        body["meta"]["counts"] = {"all": 0}
+        return body
+    rows, total, counts = await live_views.order_page(
+        status=status,
+        since=since,
+        until=until,
+        q=(q or "").strip() or None,
+        buyer=buyer_id,
+        limit=limit,
+        offset=offset,
+    )
+    body = ok(rows, total=total)
+    body["meta"]["counts"] = counts
+    return body
+
+
 @mock_only.get("/orders/{order_no}")
 async def order_detail(order_no: str = Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")) -> dict:
     """주문 한 건(읽기 전용). 실제 모드는 판매 서버(shop-api)의 주문을 그대로 맞춰 준다."""

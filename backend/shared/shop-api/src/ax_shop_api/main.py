@@ -459,6 +459,37 @@ def create_app(
         return _ok(shop.list_orders(buyer_id, since, until))
 
     # 고정 경로는 `{order_id}` 경로보다 먼저 등록해야 가로채이지 않는다
+    @app.get("/api/shop/orders/page")
+    async def order_page(
+        status: Literal[
+            "pending_payment",
+            "paid",
+            "partial_refund",
+            "full_refund",
+            "cancelled",
+            "payment_failed",
+        ]
+        | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        q: Annotated[str | None, Query(max_length=64)] = None,
+        buyer_id: Annotated[str | None, Query(max_length=64)] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0,
+    ) -> dict:
+        """주문 관리 화면의 한 페이지(주문 시각 최신순). `meta.total`은 고른 탭의 건수,
+        `meta.counts`는 탭별 건수(`all` 포함). 환불이 있으면 상태 대신 부분·전체 환불로 센다."""
+        page = shop.order_page(
+            tab=status,
+            since=since,
+            until=until,
+            q=(q or "").strip() or None,
+            buyer_id=buyer_id,
+            limit=limit,
+            offset=offset,
+        )
+        return _ok(page["items"], total=page["total"], counts=page["counts"])
+
     @app.get("/api/shop/orders/attributed")
     async def attributed_orders(
         from_: Annotated[datetime, Query(alias="from")],

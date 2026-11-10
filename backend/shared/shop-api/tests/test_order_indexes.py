@@ -12,7 +12,12 @@ LOOKUPS = {
     "refunds": "SELECT COALESCE(SUM(amount), 0) FROM refunds WHERE order_id = ?",
 }
 
-ADDED = ("idx_order_items_order_id", "idx_payments_order_id", "idx_refunds_order_id")
+ADDED = (
+    "idx_order_items_order_id",
+    "idx_payments_order_id",
+    "idx_refunds_order_id",
+    "idx_orders_created_at",  # 주문 관리 페이지 목록(최신순·기간)
+)
 # 나중에 열과 함께 붙은 인덱스(주문 멱등 키, 쿠폰별 사용 장수)
 LATER = ("idx_orders_buyer_idempotency", "idx_orders_coupon_id", "idx_orders_src_campaign")
 
