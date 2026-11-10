@@ -32,7 +32,8 @@ def _remember_unanswered(
     """기록으로 답하지 못한 질문(`needs_human`)만 사람이 나중에 답할 수 있게 적어 둔다.
 
     **이것이 이 skill이 하는 유일한 쓰기다.** 받은 질문을 적는 기록이고(같은 질문은 한 번만,
-    개인정보는 가림) 사업 상태를 바꾸지 않아 `execute()`를 거치지 않는다. 기획은 기다리지 않는다.
+    개인정보는 가림) 사업 상태를 바꾸지 않아 `execute()`를 거치지 않는다. 기획은 멈추지 않지만
+    질문이 열려 있는 동안 그 기획서는 확정하지 않는다("답 대기").
     """
     if status == "needs_human":
         h.PLANNING_QUESTIONS.record(q, request.meta.tenant_id, request.meta.context_id)
