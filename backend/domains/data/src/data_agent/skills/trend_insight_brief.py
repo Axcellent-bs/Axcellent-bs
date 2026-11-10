@@ -43,6 +43,7 @@ from ax_contracts.schemas.data import (
     AGE_NOTE,
     AgeTopic,
     BorrowFormat,
+    BriefGate,
     DomainOpportunity,
     InsightEvidence,
     InsightProduct,
@@ -65,6 +66,13 @@ from data_agent.skills import evidence_highlights as hl
 from data_agent.skills.ad_material import AdRules, judge, load_rules
 from data_agent.skills.brief_facts import insight_facts
 from data_agent.skills.code_version import source_hash
+from data_agent.skills.promo_video import (
+    Gate,
+    apply_gate,
+    build_promos,
+    format_signals,
+    write_ideas,
+)
 from data_agent.skills.topic_category import CategoryResult, TopicInput, classify_topics
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 from data_agent.video_links import video_url
@@ -75,12 +83,12 @@ DB_ENV = "DATA_INSIGHT_BRIEF_DB"
 # 코드가 바뀌면 규칙 버전이 바뀌어 오늘 캐시를 다음 요청에서 다시 묶는다
 CODE_VERSION = source_hash(
     "trend_insight_brief", "domain_opportunity", "domain_subtopics", "domain_profile",
-    "source_plan", "data_sources", "code_version", "brief_facts",
+    "source_plan", "data_sources", "code_version", "brief_facts", "promo_video",
 )  # fmt: skip
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "insight_brief.db"  # backend/.data
 REFERENCE = "참고용"
 # 브리프 칸 모양이 바뀌면 올린다 (오늘 캐시를 새 모양으로 다시 묶게)
-SHAPE = "shorts-source,age-bands,opportunities,evidence-highlights"
+SHAPE = "shorts-source,age-bands,opportunities,evidence-highlights,promo,held-back"
 BRIEF_LIMITS = (
     "평가셋이 없어 인사이트가 맞는지 재지 않는다",
     "네이버 값은 요청마다 최댓값이 100인 상대값이다",
@@ -125,9 +133,55 @@ class BriefConfig:
     # 연결 없음(none, 분류 대기 포함)은 최대 이만큼
     domain_min: int = 3
     none_max: int = 2
+    # 기획에 넘기는 기준 (근거 없으면 안 넘김, promo_video.judge): 숏츠 전체 대비 배수(이 형식
+    # 1시간 조회 중앙값 ÷ 전체 숏츠 1시간 조회 중앙값, 둘 다 하위 주제 숏츠를 뺀 같은 모집단)
+    # 이상, 또는 (네이버 검색 배수 이상 그리고 숏츠 전체 대비 gate_naver_min_format_ratio 이상),
+    # 그리고 최근 N일 안에 게시된 같은 형식 숏츠 수 이상 (게시 시각을 모르는 숏츠는 세지 않음).
+    # `[brief]` 설정 또는 환경 변수 DATA_BRIEF_GATE_* 로 바꾼다 (환경 변수가 이긴다)
+    gate_format_vs_all_ratio: float = 1.5
+    gate_naver_ratio: float = 1.3
+    gate_naver_min_format_ratio: float = 1.0
+    gate_recent_min: int = 5
+    promo_max: int = 3  # 홍보 영상 인사이트 최대 수
+
+
+GATE_ENV = {
+    "gate_format_vs_all_ratio": "DATA_BRIEF_GATE_FORMAT_VS_ALL_RATIO",
+    "gate_naver_ratio": "DATA_BRIEF_GATE_NAVER_RATIO",
+    "gate_naver_min_format_ratio": "DATA_BRIEF_GATE_NAVER_MIN_FORMAT_RATIO",
+    "gate_recent_min": "DATA_BRIEF_GATE_RECENT_MIN",
+    "promo_max": "DATA_BRIEF_PROMO_MAX",
+}
+
+
+def gate_of(config: BriefConfig) -> Gate:
+    return Gate(config.gate_format_vs_all_ratio, config.gate_naver_ratio, config.gate_recent_min,
+                config.promo_max, config.highlight_max_ratio,
+                config.gate_naver_min_format_ratio)  # fmt: skip
+
+
+def _with_gate_env(config: BriefConfig, env: Mapping[str, str]) -> BriefConfig:
+    """기준 값만 환경 변수로 덮는다 (잘못된 값이면 그 칸은 그대로)."""
+    values: dict[str, Any] = {}
+    for name, key in GATE_ENV.items():
+        raw = env.get(key)
+        if raw is None or not str(raw).strip():
+            continue
+        try:
+            kind = type(getattr(config, name))
+            values[name] = max(0, kind(float(raw)) if kind is int else kind(raw))
+        except (TypeError, ValueError):
+            continue
+    if "promo_max" in values:
+        values["promo_max"] = min(7, values["promo_max"])
+    return dataclasses.replace(config, **values) if values else config
 
 
 def load_config(env: Mapping[str, str]) -> BriefConfig:
+    return _with_gate_env(_load_toml(env), env)
+
+
+def _load_toml(env: Mapping[str, str]) -> BriefConfig:
     path = env.get(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return BriefConfig()
@@ -187,8 +241,9 @@ def category_insight_id(tenant: str, topic: str, category: str | None) -> str:
     return "ins_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
-# 응답 모양 버전 (v4: past_results를 응답 때 붙임, v5: 같은 날 판·다시 추천 칸)
-SCHEMA_VERSION = "trend_insight_brief.v5"
+# 응답 모양 버전 (v4: past_results를 응답 때 붙임, v5: 같은 날 판·다시 추천 칸,
+# v6: 홍보 영상 인사이트 kind promo·기준을 못 넘은 held_back)
+SCHEMA_VERSION = "trend_insight_brief.v6"
 
 
 def tenant_of(env: Mapping[str, str]) -> str:
@@ -1616,11 +1671,45 @@ async def make_brief(
                       for c in out.opportunities]  # fmt: skip
         out.insights, notes = fill_quota(out.insights, from_cards, config, n)
         out.limits += notes
+        # 기준(근거 없으면 안 넘김): 기획용 트렌드 인사이트도 같은 기준,
+        # 못 넘으면 참고용 + held_back.
+        # 그다음 실제로 오르는 숏츠 형식을 빌린 캣북스 홍보 영상(promo)
+        gate = gate_of(config)
+        signals = format_signals(shorts)
+        price_only = {
+            c.insight_id: any(e.status == "known" for e in card.consumption)
+            and not any(e.status == "known" for e in card.search_interest)
+            for c, card in zip(from_cards, out.opportunities, strict=True)
+        }  # fmt: skip
+        held = apply_gate(out.insights, signals, gate, not_sold=warned.has, price_only=price_only)
+        trends = [i for i in out.insights if not i.classification_pending]
+        promos, promo_held = build_promos(
+            signals, trends, gate, insight_id=lambda t: stable_insight_id(tenant, t)
+        )
+        book = ("책", "독서", "서점", "캣북스")
+        banned = sorted({x for i in out.insights for x in [i.topic, *i.aliases, *i.entity_names]
+                         if x and not any(w in x for w in book)})  # fmt: skip
+        await write_ideas(promos, llm, context_id, queries, banned)
+        out.held_back = [*promo_held, *held]
+        out.gate = BriefGate(
+            vs_all_ratio=gate.vs_all_ratio, naver_ratio=gate.naver_ratio,
+            naver_min_format_ratio=gate.naver_min_format_ratio, recent_min=gate.recent_min,
+            max_ratio=gate.max_ratio,
+        )  # fmt: skip
+        if not signals:
+            out.limits.append("홍보 영상 0개: 숏츠 통계가 없어 형식별 근거를 볼 수 없음")
+        elif not promos:
+            out.limits.append(
+                f"홍보 영상 0개: 기준을 넘은 숏츠 형식 없음 (넘기지 않은 것 {len(promo_held)}개)"
+            )
         card_ids = {id(i): c.fact_ids for i, c in zip(from_cards, out.opportunities, strict=True)}
         # 순서: 회사 상품·도메인(direct·domain) → 형식 빌리기(format) → 참고용(none)
+        # 홍보 영상(promo, 최대 promo_max개)이 맨 위, 그다음 기준을 넘은 상품 연결, 참고용은 아래
         out.insights.sort(key=lambda i: (
-            i.classification_pending, RELEVANCE_ORDER.get(i.company_relevance or "none", 2),
-            i.reference_only, i.company_related, -i.score))  # fmt: skip
+            i.classification_pending, i.reference_only,
+            RELEVANCE_ORDER.get(i.company_relevance or "none", 2), i.company_related,
+            -i.score))  # fmt: skip
+        out.insights = [*promos, *out.insights]
         for n, i in enumerate(out.insights, start=1):
             i.rank = n
         out.summary = summary(out)
