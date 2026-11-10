@@ -174,7 +174,9 @@ def _run(case: dict, tmp: Path) -> dict | None:  # noqa: C901, PLR0911, PLR0912,
                 spec.write_text(json.dumps({"name": who, "start_at": at, "env": env}), "utf-8")
                 procs.append(subprocess.Popen(
                     [sys.executable, str(HERE / "worker.py"), str(spec)],
-                    env={**os.environ, **env, "PYTHONIOENCODING": "utf-8"},
+                    # 워커도 시험의 NOW로 판을 저장한다 (실제 날짜가 NOW와 달라도 같은 날짜로 센다)
+                    env={**os.environ, **env, "PYTHONIOENCODING": "utf-8",
+                         "BRIEF_REGEN_EVAL_NOW": NOW.isoformat()},
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
                 ))  # fmt: skip
             outs = []
