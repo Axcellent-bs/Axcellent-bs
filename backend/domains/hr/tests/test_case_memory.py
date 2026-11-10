@@ -637,3 +637,27 @@ async def test_similar_cases_carry_the_timeline(svc, tmp_path) -> None:
     )
     out = await _search(svc, "결제가 서버 오류로 실패해요")
     assert out.cases[0].timeline is not None and out.cases[0].timeline.recovered_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_case_with_a_replayable_action_comes_before_other_resolved_ones(
+    svc, tmp_path
+) -> None:
+    """해결 기록이 여럿이면 AI가 다시 할 수 있는 처리 방식이 남은 카드가 먼저다."""
+    _dense(svc, tmp_path)
+    for n in range(4):
+        ctx = f"ctx_inc_r{n}"
+        await _incident(svc, ctx=ctx)
+        plain = _resolution(context_id=ctx, root_cause=None, action="사람이 처리함")
+        await record_resolution(svc, _req("record_resolution", plain, ctx=ctx, key=ctx))
+    coded = await _incident(svc, ctx="ctx_inc_code")
+    done = _resolution(
+        context_id="ctx_inc_code",
+        root_cause=None,
+        action="장애 상태 해제",
+        action_code="release_fault",
+    )
+    await record_resolution(svc, _req("record_resolution", done, ctx="ctx_inc_code", key="code"))
+    out = await _search(svc, PAYMENT, limit=3)
+    assert out.cases[0].card_id == coded
+    assert out.cases[0].resolution.action_code == "release_fault"

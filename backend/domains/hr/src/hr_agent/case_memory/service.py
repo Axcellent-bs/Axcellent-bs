@@ -94,6 +94,12 @@ TIMES = (
 )
 
 
+def _replayable(card: Card) -> bool:
+    """해결 기록에 AI가 다시 할 수 있는 처리 방식(`action_code`)이 있다."""
+    res = resolution_of(card)
+    return bool(res is not None and res.outcome in ("resolved", "workaround") and res.action_code)
+
+
 def _usable(card: Card) -> bool:
     """다음 장애에 내밀 수 있는 해결 기록: 해결·임시 조치이고 원인이나 조치가 적혀 있다."""
     res = resolution_of(card)
@@ -405,12 +411,14 @@ async def find_similar_cases(svc: Services, request: AgentRequest) -> AgentResul
         ]
     # 자를 때 같은 유형·해결 기록(원인 또는 조치)이 있는 카드를 앞에 둔다. 제목이 같은 미해결
     # 카드가 많으면 유사도가 거의 같아 해결된 카드가 잘려 나가 해결 내용을 내밀지 못했다.
-    # 같은 그룹 안의 순서는 유사도 그대로다(정렬이 안정적)
+    # 해결 기록 중에서도 다시 할 수 있는 처리 방식(`action_code`)이 남은 카드를 앞에 둔다(총괄이
+    # 같은 처리를 바로 다시 한다). 같은 그룹 안의 순서는 유사도 그대로다(정렬이 안정적)
     pairs = sorted(
         pairs,
         key=lambda pair: (
             _same_type(params.event_type, _type_of(pair[0])) is False,
             not _usable(pair[0]),
+            not _replayable(pair[0]),
         ),
     )[: params.limit]
 
