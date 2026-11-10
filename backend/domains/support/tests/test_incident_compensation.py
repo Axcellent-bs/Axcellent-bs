@@ -518,3 +518,20 @@ def test_a_far_deadline_sends_every_buyer_as_before(sent: Sent) -> None:
     out = call(FOUR)["output"]
     assert out["requested"] == 4 and out["stopped_early"] is False
     assert not any("마감" in note for note in out["notes"])
+
+
+def test_already_sent_buyers_are_duplicates_even_when_time_is_short(
+    sent: Sent, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from support_agent import incident_handlers
+
+    real_now = incident_handlers._now
+    call(FOUR[:2])  # 앞의 두 명은 이미 보냈다 (시간이 넉넉할 때)
+    assert len(sent) == 2
+    _clock(monkeypatch, 26)  # 새 고객을 확인하는 첫 순간 마감까지 5초가 안 남는다
+    out = call(FOUR)["output"]
+    assert [r["status"] for r in out["results"]] == ["duplicate", "duplicate", "skipped", "skipped"]
+    assert (
+        out["stopped_early"] is True and len(sent) == 2
+    )  # 이미 보낸 고객은 마케팅을 다시 부르지 않는다
+    monkeypatch.setattr(incident_handlers, "_now", real_now)

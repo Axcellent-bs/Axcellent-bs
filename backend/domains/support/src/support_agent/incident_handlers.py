@@ -135,14 +135,15 @@ async def request_incident_compensation(request: AgentRequest) -> AgentResult:
         issued_buyers, issued_total = issued_in_incident(context_id)
         added_buyers = added_total = 0  # 이번 호출에서 새로 요청한 몫 (보류 포함)
         for buyer in buyers:
-            if not stopped and _out_of_time(request):
-                # 마감이 가까워 새 고객을 보내지 않는다 (같은 요청을 다시 보내면 이어 보낸다)
+            key = _key(context_id, buyer, parsed.reason_code)
+            known = key in h.LEDGER.results
+            if not stopped and not known and _out_of_time(request):
+                # 마감이 가까워 새 고객을 보내지 않는다 (같은 요청을 다시 보내면 이어 보낸다).
+                # 이미 보낸 고객은 마케팅을 다시 부르지 않고 원장에서 돌려주므로 마감과 상관없다
                 stopped = timed_out = True
             if stopped:
                 results.append(IncidentCouponResult(buyer_id=buyer, status="skipped"))
                 continue
-            key = _key(context_id, buyer, parsed.reason_code)
-            known = key in h.LEDGER.results
             if not known and (
                 issued_buyers + added_buyers + 1 > compensation.MAX_INCIDENT_BUYERS
                 or issued_total + added_total + decision.total_value
