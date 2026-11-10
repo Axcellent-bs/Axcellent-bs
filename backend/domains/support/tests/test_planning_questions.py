@@ -8,8 +8,9 @@ from fastapi.testclient import TestClient
 
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
-from support_agent import handlers, planning_questions
+from support_agent import chat, chat_handlers, handlers, planning_questions
 from support_agent.change_requests import ChangeRequestStore
+from support_agent.chat import ChatStore
 from support_agent.main import ALL_HANDLERS, app, load_card
 from support_agent.planning_question_inbox import PlanningQuestionInbox
 from support_agent.schemas import Analysis
@@ -154,6 +155,7 @@ def _fresh(monkeypatch: pytest.MonkeyPatch) -> Sent:
     monkeypatch.setattr(handlers, "STORE", inquiries)
     monkeypatch.setattr(handlers, "CHANGES", ChangeRequestStore())
     monkeypatch.setattr(handlers, "PLANNING_QUESTIONS", PlanningQuestionInbox())
+    monkeypatch.setattr(chat_handlers, "CHATS", ChatStore())
     sent = Sent()
 
     async def fake_send(target: str, req: AgentRequest) -> AgentResult:
@@ -461,3 +463,64 @@ def test_the_gate_not_executing_sends_nothing_and_keeps_the_question_open(
     result = answer_by_person()
     assert result["outcome"] == "not_executed_held" and not waiting
     assert handlers.PLANNING_QUESTIONS.get(TENANT, "Q-REQ-1-1").status == "open"
+
+
+# ------------------------------------------------ 고객지원 AI 대화방에 남기기 (예진님 형식)
+def chat_of(question_id: str = "Q-REQ-1-1") -> Any:
+    return chat_handlers.CHATS.find_by_ref(f"planning-question:{TENANT}:{question_id}")
+
+
+def test_a_question_waiting_for_a_person_is_noted_in_the_support_chat(waiting: Received) -> None:
+    thread = chat_of()
+    assert thread is not None and thread.status == "closed" and thread.who == "고객지원 AI"
+    (message,) = thread.messages
+    assert message.text == (
+        "Q-REQ-1-1 고객지원에 근거 질문 → 사람 답 대기 (요청 REQ-1, 묻는 칸 done)"
+    )
+    assert thread.summary == message.text
+
+
+def test_the_same_question_asked_again_is_noted_once(_fresh: Sent) -> None:
+    call("request_change", SEND, requester="dashboard-api", context_id="ctx_ui_0001")
+    for _ in range(2):
+        assert (
+            call("answer_planning_question", {**ASK, "about": "done"})["outcome"] == "needs_human"
+        )
+    assert len(chat_handlers.CHATS.all()) == 1
+
+
+def test_a_person_answer_is_noted_without_the_answer_text(waiting: Received) -> None:
+    answer_by_person()
+    thread = chat_of()
+    assert [m.text for m in thread.messages][1] == "Q-REQ-1-1 → 답 받음 (답한 쪽: 사람)"
+    assert thread.summary == "Q-REQ-1-1 사람 답 대기 → 답 받음 (답한 쪽: 사람)"
+    everything = " ".join([thread.title, thread.summary, *(m.text for m in thread.messages)])
+    assert HUMAN["answer"] not in everything and ASK["question"] not in everything
+
+
+def test_answers_noted_once_and_a_failed_send_is_not_noted(waiting: Received) -> None:
+    waiting.fail = True
+    assert answer_by_person()["status"] == "failed"
+    assert len(chat_of().messages) == 1  # 못 보냈으면 답 받음을 남기지 않는다
+    waiting.fail = False
+    answer_by_person()
+    answer_by_person(question_id="Q-REQ-1-1")  # 이미 닫힌 질문
+    assert len(chat_of().messages) == 2
+
+
+def test_others_only_see_the_summary_of_the_note(waiting: Received) -> None:
+    thread = chat_of()
+    shown = chat.view(thread, chat.access_of(thread, "상담원B", "member"))
+    assert shown["restricted"] is True and shown["messages"] == [] and "ref" not in shown
+    assert shown["title"].startswith("Q-REQ-1-1")
+
+
+def test_a_chat_failure_never_stops_the_question_or_the_answer(
+    waiting: Received, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("chat down")
+
+    monkeypatch.setattr(chat_handlers.CHATS, "find_by_ref", boom)
+    result = answer_by_person()
+    assert result["outcome"] == "applied" and result["output"]["status"] == "answered"

@@ -63,6 +63,7 @@ class ChatThread(AxModel):
     who: str  # 대화를 연 사람 (사람 토큰 이름, 본문 값이 아니다)
     summary: str | None = None  # 끝난 대화의 한두 줄 요약
     task_ids: list[str] = Field(default_factory=list)  # 대화 때문에 생긴 일 id
+    ref: str | None = None  # 사람이 연 대화가 아니라 일어난 일을 남긴 기록이면 그 일의 키
     created_at: str
     updated_at: str
     closed_at: str | None = None
@@ -100,7 +101,7 @@ def access_of(thread: ChatThread, viewer: str | None, role: Role) -> Access:
 
 def view(thread: ChatThread, access: Access) -> dict[str, Any]:
     """화면에 줄 대화. `summary` 접근은 원문(제목·메시지)을 빼고 요약만 싣는다(`restricted`)."""
-    data = thread.model_dump(mode="json", exclude={"tenant_id", "context_id", "seq"})
+    data = thread.model_dump(mode="json", exclude={"tenant_id", "context_id", "seq", "ref"})
     data["restricted"] = access != "full"
     data["task_id"] = thread.task_ids[0] if thread.task_ids else None  # 개발 AI 모양 (첫 일)
     if access == "summary":
@@ -143,7 +144,12 @@ class ChatStore:
     def all(self) -> list[ChatThread]:
         return sorted(self._threads.values(), key=lambda t: (t.updated_at, t.seq), reverse=True)
 
-    def create(self, who: str, first_text: str, context_id: str) -> ChatThread:
+    def find_by_ref(self, ref: str) -> ChatThread | None:
+        return next((t for t in self._threads.values() if t.ref == ref), None)
+
+    def create(
+        self, who: str, first_text: str, context_id: str, ref: str | None = None
+    ) -> ChatThread:
         seq = max((t.seq for t in self._threads.values()), default=0) + 1
         now = now_iso()
         thread = ChatThread(
@@ -151,6 +157,7 @@ class ChatStore:
             id=f"chat-{seq}",
             title=title_of(first_text),
             who=who,
+            ref=ref,
             created_at=now,
             updated_at=now,
             seq=seq,
