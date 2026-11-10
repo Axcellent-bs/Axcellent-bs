@@ -356,6 +356,9 @@ def scenario_a() -> Plan:
                 "rollback_deployment",
                 "문제 배포를 이전 버전으로 되돌리기 (B)",
                 after=("diagnose", "impact"),
+                # 사람에게 넘길 때 같은 유형 과거 장애의 조치를 붙이려면 찾기가 먼저 끝나야 한다
+                # (찾기는 필수가 아니라 실패해도 기다리기만 하고 막지 않는다)
+                also_after=("similar_cases",),
                 build=_rollback,
                 gate=_rollback_gate,
             ),

@@ -63,3 +63,16 @@ async def test_unknown_cause_and_action_are_left_empty(harness) -> None:
     await run(harness)
     sent = called(harness, "record_resolution")[0].input
     assert sent["root_cause"] is None and sent["action"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_handover_waits_for_the_past_case_so_the_hint_is_never_missed(harness) -> None:
+    """원인 미확정으로 넘길 때 과거 조치 한 줄이 붙으려면 찾기가 먼저 끝나 있어야 한다."""
+    harness.fakes.script("infra", "diagnose_incident", "undetermined")
+    inc = await run(harness)
+    rollback, similar = inc.steps["rollback"], inc.steps["similar_cases"]
+    assert rollback.status == "transfer_queued"
+    assert similar.finished_at is not None and rollback.started_at >= similar.finished_at
+    step = next(s for s in scenario_a().steps if s.id == "rollback")
+    assert "similar_cases" in step.also_after  # 필수 선행(after)이 아니라 끝나기만 기다린다
+    assert "similar_cases" not in step.after
