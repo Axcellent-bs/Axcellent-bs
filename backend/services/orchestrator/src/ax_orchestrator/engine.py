@@ -32,6 +32,7 @@ from ax_contracts.schemas import (
 from ax_orchestrator.models import (
     NOT_INTERVENTION,
     TERMINAL,
+    WAITING_RECOVERY,
     Incident,
     Plan,
     Step,
@@ -311,6 +312,32 @@ class Engine:
         if added:
             await self._queue_late(inc, plan, added)
         return True
+
+    async def rerun_after_recovery(self, inc: Incident, plan: Plan) -> list[str]:
+        """복구 신호를 기다리느라 건너뛴 단계(`rerun_on_recovery`)를 신호가 온 뒤 다시 돌린다.
+
+        이벤트가 닫힐 때 복구 신호가 아직 없어서 건너뛴 단계만 대상이다(다른 이유로 건너뛰었거나
+        이미 돌았거나 실패한 단계는 건드리지 않는다). 돌린 단계 번호를 돌려준다. 단계가 실패해도
+        예외로 올리지 않고 단계 결과에 남긴다(복구 처리를 막지 않는다).
+        """
+        ran: list[str] = []
+        for step in plan.steps:
+            run = inc.steps.get(step.id)
+            if not step.rerun_on_recovery or run is None:
+                continue
+            if run.status != "skipped" or run.reason_code != WAITING_RECOVERY:
+                continue
+            fresh = StepRun(step.id, step.skill, step.label)
+            inc.steps[step.id] = fresh
+            try:
+                await self._run_step(inc, step)
+            except Exception as exc:  # noqa: BLE001 - 사후 정리 실패가 복구 처리를 막지 않게 한다
+                self._fail(inc, fresh, f"{type(exc).__name__}")
+            ran.append(step.id)
+        if ran and inc.closed_at is not None:
+            inc.summary = [self._summary_line(r) for r in inc.steps.values()]
+            inc.metrics = incident_metrics(inc)
+        return ran
 
     async def record_late_resolution(self, inc: Incident, plan: Plan) -> bool:
         """사람에게 넘긴 뒤 풀린 장애의 해결 내용을 인사 카드에 다시 남긴다.

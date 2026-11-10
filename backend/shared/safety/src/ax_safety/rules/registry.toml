@@ -19,6 +19,13 @@ action = "publish_notice"
 owner = "marketing"
 base_grade = "A"
 
+# 정상화 공지 없이 닫힌 이벤트의 장애 배너 내리기. 총괄이 복구 신호를 받은 뒤 마케팅을 부르고,
+# 마케팅이 execute()로 관문을 거친다(요청자는 owner인 마케팅). 배너를 다시 올릴 수 있어 A다
+[[actions]]
+action = "end_incident_notice"
+owner = "marketing"
+base_grade = "A"
+
 # 기획이 확정해 넘긴 기획안 받기 (#552). 마케팅이 자기 보관함에 쓰는 일이라 요청자는 owner(마케팅)다.
 # 기획은 A2A로 이 skill을 부를 뿐 관문에 직접 요청하지 않는다. 누가 부를지는 Agent Card가 막는다
 [[actions]]

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { finance, humanTokenSet } from "@/lib/finance";
+import { shortDateTime } from "@/lib/format";
 import { Empty, Panel, ResourceBody, useResource } from "./bits";
 
 // 재무 → 기획 개선 요청: 사람이 정한 요청만 보낸다. 기획이 근거를 되물으면 재무 AI가 보낸 근거로 답한다.
@@ -57,7 +58,7 @@ export function PlanningRequestsSection({ tick }: { tick: number }) {
                       <b className="text-ink-900">{r.title}</b>
                       <code className="font-mono text-ink-500">{r.request_id}</code>
                     </div>
-                    <div className="text-ink-500">{r.by} · {r.at.slice(0, 16).replace("T", " ")} · 근거 {r.facts.length}줄</div>
+                    <div className="text-ink-500">{r.by} · {shortDateTime(r.at)} · 근거 {r.facts.length}줄</div>
                   </li>
                 ))}
               </ul>

@@ -115,7 +115,9 @@ async def request_incident_compensation(request: AgentRequest) -> AgentResult:
             request, {"eligible": False, "reason": decision.reason}, outcome="not_eligible"
         )
 
-    ref_ids = [f"buyer:{b}" for b in buyers]
+    # 구매자 ID는 근거(결과·보류 기록)에 싣지 않는다. 사람 수는 data_summary에 있고, 누구에게
+    # 보냈는지는 보상 기록(멱등 장부·사건 큐)에 남고, 근거는 영향 분석 참조(impact_ref)로 따라간다.
+    ref_ids: list[str] = []
     if parsed.impact_ref:
         ref_ids.append(parsed.impact_ref)
     evidence = Evidence(

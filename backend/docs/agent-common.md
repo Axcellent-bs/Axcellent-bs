@@ -323,7 +323,7 @@ C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`s
 | infra (예진) | `diagnose_incident`, `rollback_deployment`(B), `verify_recovery` | `restart_service` |
 | data (재현) | `anomaly_detection`, `impact_analysis` | `fraud_score`, `kpi_summary` |
 | planning (예진) | `find_related_prs`, `link_incident` | `create_ticket` 등 권장, 기획서→PR 파이프라인 선택 |
-| marketing (재헌) | `draft_notice`, `publish_notice`, `get_notice`, `issue_coupon`(compensation, 직렬) | `draft_campaign`, `campaign_report`, `notice_check` 연동 |
+| marketing (재헌) | `draft_notice`, `publish_notice`, `end_incident_notice`, `get_notice`, `issue_coupon`(compensation, 직렬) | `draft_campaign`, `campaign_report`, `notice_check` 연동 |
 | support (병환) | `inquiry_draft`, `reply_send`, `compensation_request`, 문의 위젯 이벤트 | `claim_evaluate`·보상 큐(불량·반품 흐름), `refund_request`, `support.inquiry_surge`, `notice_check` |
 | finance (태윤) | 장부 기록: 장애 중 나간 보상 쿠폰·환불은 이벤트로, 문의 처리 결과는 총괄 호출(`record_support_cost`)로 장부에 기록 | 장부·결산(`closing_report`), 일일 대사, 판매자 정산 |
 | hr (준하) | `record_case` → memory에 사건 카드 저장 | 인수인계, 발령·교대, 온보딩, 계획 비교 |

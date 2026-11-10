@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 from ax_orchestrator.draft import kst_text
-from ax_orchestrator.models import Incident, Plan, Step, iso, now
+from ax_orchestrator.models import WAITING_RECOVERY, Incident, Plan, Step, iso, now
 from ax_orchestrator.naming import plain_terms
 from ax_orchestrator.recommend import recommend
 from ax_orchestrator.timeline import past_hint
@@ -106,6 +106,30 @@ def _recovered_draft(inc: Incident) -> dict[str, Any]:
 
 
 RECOVERY_TIMEOUT_SECONDS = 180.0  # 인프라가 30초 간격 최대 5회 다시 확인하는 시간을 기다려 준다
+
+
+def _end_notice(inc: Incident) -> dict[str, Any]:
+    return {"reason": "recovery_not_announced"}
+
+
+def _end_notice_gate(inc: Incident) -> tuple[str, str, str] | None:
+    """정상화 공지 없이 대응이 끝났는데 쇼핑몰이 복구됐으면, 남은 장애 배너를 내린다.
+
+    - 정상화 공지가 나갔으면 마케팅이 그때 장애 배너를 내렸다(정상화 배너까지 내리면 안 된다).
+    - 올린 장애 공지가 없으면 내릴 것이 없다.
+    - 복구 신호를 아직 못 받았으면 장애가 계속 중일 수 있어 내리지 않는다. 신호가 이벤트가
+      닫힌 뒤 오면 총괄이 이 단계를 다시 판단한다(`rerun_on_recovery`).
+    """
+    recovered = inc.steps.get("recovered_notice")
+    if (recovered is not None and recovered.status == "completed") or inc.shared.get(
+        "recovered_notice_id"
+    ):
+        return ("skipped", "notice_already_ended", "정상화 공지로 장애 배너를 이미 내림")
+    if not inc.shared.get("notice_id"):
+        return ("skipped", "no_incident_notice", "올린 장애 공지가 없음")
+    if inc.recovered_at is None:
+        return ("skipped", WAITING_RECOVERY, "정상 복귀 신호를 받으면 장애 배너를 내림")
+    return None
 
 
 # 같은 유형 과거 장애의 처리 방식을 다시 할 때 필요한 유사도 하한
@@ -511,6 +535,18 @@ def scenario_a() -> Plan:
                 keep={"notice_id": "recovered_notice_id"},
             ),
             Step(
+                "end_notice",
+                "end_incident_notice",
+                "장애 공지 배너 내리기 (marketing)",
+                # 정상화 공지가 나갔거나 건너뛴 뒤에 판단한다. 정상화 공지 없이 닫혀도 복구 신호를
+                # 받았다면 장애 배너가 남지 않게 한다. 실패해도 이벤트 결과는 그대로다
+                also_after=("publish_notice", "recovered_notice"),
+                build=_end_notice,
+                gate=_end_notice_gate,
+                required=False,
+                rerun_on_recovery=True,
+            ),
+            Step(
                 "finance_record",
                 "record_incident_finance",
                 "장애 비용 장부 기록 (finance)",
@@ -533,6 +569,7 @@ def scenario_a() -> Plan:
                 "이벤트 기록 (hr)",
                 also_after=(
                     "recovered_notice",
+                    "end_notice",
                     "link_incident",
                     "compensation",
                     "finance_record",

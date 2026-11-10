@@ -36,7 +36,7 @@ async def customer_signals_skill(request: AgentRequest) -> AgentResult:
         queries=["inquiry_store", "claim_store"],
         ref_ids=[f"inquiry:{c.id}" for c in conversations[:20]]
         + [f"claim:{c.id}" for c in claims[:20]],
-        data_summary=f"{buyer}: {result.level} ({result.score}점)",
+        data_summary=f"고객 신호: {result.level} ({result.score}점)",
     )
     outcome = result.level if conversations or claims else "no_history"
     return h._done(request, result.model_dump(mode="json"), outcome=outcome, evidence=evidence)
