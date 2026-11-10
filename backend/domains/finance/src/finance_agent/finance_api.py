@@ -14,6 +14,8 @@
 | `POST /api/finance/reconciliation/{payment_id}/note` | ② 불일치 처리 메모 | **사람** |
 | `POST /api/finance/pg/file?name=` | ② PG 정산 파일(CSV) 올리기. 그 기간은 파일과 대사 | **사람** |
 | `GET /api/finance/pg/imports` | ② 올린 PG 정산 파일 기록·기간 | 없음 |
+| `POST /api/finance/planning-requests` | 재무 개선 요청을 기획(`create_ticket`)에 보냄 | **사람** |
+| `GET /api/finance/planning-requests` | 기획에 보낸 개선 요청 기록 | 없음 |
 | `POST /api/finance/pg/clear` | ② 올린 PG 정산 자료 모두 빼기(이유 필수, 기록은 남김) | **사람** |
 | `GET /api/finance/settlements?period=YYYY-Www` | ③ 판매자 정산 내역서 (생략 = 지난주) | 없음 |
 | `POST /api/finance/settlements/batch` | ③ 묶음 → `execute(confirm_settlement)` | 선택 |
@@ -59,9 +61,11 @@ import httpx
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse, Response
 
+from ax_agent_template import call_agent
 from ax_agent_template.config import agent_name_scope, agent_url, is_mock
 from ax_agent_template.execute import execute
-from ax_contracts.schemas import Evidence, RequestMeta
+from ax_contracts.schemas import AgentRequest, Evidence, RequestMeta, TaskStatus
+from ax_contracts.schemas.planning import CreateTicketOutput
 from finance_agent import (
     bank,
     bank_file,
@@ -92,6 +96,7 @@ from finance_agent.handlers import (
     team_budget_data,
 )
 from finance_agent.human import human_from_authorization
+from finance_agent.planning_questions import record_sent_request
 from finance_agent.rules import load_rules
 
 TODO_ITEMS = 10  # 할 일 카드에 바로 보여 줄 건수
@@ -1097,6 +1102,98 @@ def add_finance_api(app: FastAPI) -> None:
         if record["status"] != "imported":
             return error(400, "invalid_file", record["reason"])
         return ok(record, {"uploaded_by": person})
+
+    @app.post("/api/finance/planning-requests", response_model=None)
+    async def send_planning_request(
+        request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """사람이 정한 재무 개선 요청을 기획 `create_ticket`으로 보낸다.
+
+        안전 관문(`finance_request_change`)을 먼저 거치고, 실행되지 않으면 아무것도 보내지 않는다.
+        보낸 근거(`evidence` 줄)는 기록해 두고, 기획이 되물으면(`answer_planning_question`)
+        그 기록으로 답한다. 재무는 요청만 보내고 기획서를 쓰거나 우선순위를 정하지 않는다.
+        """
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        title, evidence = body.get("title"), body.get("evidence")
+        ids = body.get("evidence_ids") or []
+        if not isinstance(title, str) or not 1 <= len(title.strip()) <= 120:
+            return error(400, "invalid_request", "title은 1~120자 문자열")
+        if not isinstance(evidence, str) or not 1 <= len(evidence.strip()) <= 2000:
+            return error(400, "invalid_request", "evidence는 1~2000자 문자열")
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids) or len(ids) > 20:
+            return error(400, "invalid_request", "evidence_ids는 문자열 20개까지")
+        records = state().records
+        number = len(records.planning_requests) + 1
+        source_ref = f"fin_req_{number:04d}"
+        context_id = f"ctx_req_finance_{number:04d}"
+        meta_req = RequestMeta(
+            context_id=context_id,
+            token="finance-dashboard",
+            deadline=fc.now() + timedelta(seconds=40),
+            idempotency_key=f"{context_id}:finance_request_change",
+        )
+        decision = await execute(
+            "finance_request_change",
+            {"source_ref": source_ref, "evidence_count": len(ids)},
+            meta_req,
+            Evidence(
+                data_summary=f"재무 개선 요청: {title.strip()[:80]}",
+                collected_at=fc.now(),
+                ref_ids=[source_ref, *ids],
+            ),
+        )
+        if decision.status != "executed":
+            return error(409, "not_executed", f"안전 관문이 실행하지 않았다({decision.status})")
+        reply = await call_agent(
+            "planning",
+            AgentRequest(
+                meta=meta_req,
+                skill="create_ticket",
+                input={
+                    "title": title.strip(),
+                    "evidence": evidence.strip(),
+                    "source_ref": source_ref,
+                    "evidence_ids": ids,
+                },
+            ),
+        )
+        if reply.status != TaskStatus.COMPLETED or reply.outcome not in (
+            "created",
+            "linked_duplicate",
+        ):
+            return error(
+                502,
+                "planning_unavailable",
+                f"기획이 요청을 받지 못했다({reply.outcome or reply.status.value})",
+            )
+        ticket = CreateTicketOutput.model_validate(reply.output)
+        facts = [line.strip() for line in evidence.splitlines() if line.strip()]
+        row = {
+            "source_ref": source_ref,
+            "title": title.strip(),
+            "facts": facts,
+            "evidence_ids": ids,
+            "request_id": ticket.request_id,
+            "context_id": ticket.context_id,
+            "outcome": ticket.outcome,
+            "duplicate_of": ticket.duplicate_of,
+            "tenant_id": meta_req.tenant_id,
+            "by": person,
+            "at": fc.iso(fc.now()),
+        }
+        records.planning_requests.append(row)
+        record_sent_request(
+            meta_req.tenant_id, ticket.context_id, ticket.request_id, facts=facts, evidence_ids=ids
+        )
+        return ok(row, {"sent_by": person})
+
+    @app.get("/api/finance/planning-requests")
+    async def list_planning_requests() -> dict:
+        return ok({"requests": list(reversed(state().records.planning_requests))}, {})
 
     @app.get("/api/finance/pg/imports")
     async def pg_imports() -> dict:
