@@ -119,7 +119,47 @@ export default function OrdersPage() {
 
   const page = list.env?.data;
   const last = page ? Math.max(1, Math.ceil(page.total / PAGE_SIZE)) : 1;
-  const submit = (e: FormEvent) => { e.preventDefault(); setQuery({ q: search.trim() }); };
+
+  // 구매자 찾기: 이름 일부·구매자 번호(buy_0007)·숫자(7) 중 무엇이든. 구매자가 많아도 목록을 넘기지 않게 검색으로 고른다
+  const people = useMemo(() => (users.env?.data ?? []).map((u) => ({ id: buyerKey(u.id), name: u.name })), [users.env]);
+  const label = (id: string) => {
+    const p = people.find((x) => x.id === id);
+    return p ? `${p.name} (${p.id})` : id;
+  };
+  const [buyerText, setBuyerText] = useState(buyer ? label(buyer) : "");
+  const [buyerError, setBuyerError] = useState<string | null>(null);
+  useEffect(() => { if (buyer) setBuyerText(label(buyer)); }, [buyer, people]); // eslint-disable-line react-hooks/exhaustive-deps
+  const needle = buyerText.trim().toLowerCase();
+  const suggestions = needle ? people.filter((p) => p.name.toLowerCase().includes(needle) || p.id.includes(needle)).slice(0, 30) : [];
+
+  const resolveBuyer = (raw: string): string | { error: string } => {
+    const text = raw.trim();
+    if (!text) return "";
+    const byId = /buy_\d+/i.exec(text)?.[0].toLowerCase();
+    if (byId) return byId;
+    if (/^\d+$/.test(text)) return buyerKey(Number(text));
+    const lower = text.toLowerCase();
+    const exact = people.filter((p) => p.name.toLowerCase() === lower);
+    if (exact.length === 1) return exact[0].id;
+    const partial = people.filter((p) => p.name.toLowerCase().includes(lower));
+    if (partial.length === 1) return partial[0].id;
+    if (!partial.length) return { error: `"${text}"에 맞는 구매자가 없어요.` };
+    return { error: `"${text}"에 맞는 구매자가 ${partial.length}명이에요. 아래 목록에서 한 명을 고르거나 구매자 번호로 찾아 주세요.` };
+  };
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const found = resolveBuyer(buyerText);
+    if (typeof found !== "string") return setBuyerError(found.error);
+    setBuyerError(null);
+    setQuery({ q: search.trim(), buyer: found });
+  };
+  const clearSearch = () => {
+    setBuyerText("");
+    setSearch("");
+    setBuyerError(null);
+    setQuery({ q: "", buyer: "" });
+  };
 
   return (
     <div className="w-full space-y-6 px-4 pb-12 pt-2 sm:px-8">
@@ -161,23 +201,27 @@ export default function OrdersPage() {
               <label className="text-xs font-medium text-ink-700">끝일<input type="date" className="field mt-1 block" value={to} min={from || undefined} onChange={(e) => { setTo(e.target.value); setQuery({}); }} /></label>
             </div>
           )}
-          <label className="text-xs font-medium text-ink-700">
-            구매자
-            <select className="field mt-1 block min-w-[12rem]" value={buyer} onChange={(e) => setQuery({ buyer: e.target.value })}>
-              <option value="">모든 구매자</option>
-              {(users.env?.data ?? []).map((u) => <option key={u.id} value={buyerKey(u.id)}>{u.name} ({buyerKey(u.id)})</option>)}
-            </select>
-          </label>
-          <form onSubmit={submit} className="flex items-end gap-2" role="search">
+          <form onSubmit={submit} className="flex flex-wrap items-end gap-2" role="search">
+            <label className="text-xs font-medium text-ink-700">
+              구매자
+              <input type="search" className="field mt-1 block w-56" value={buyerText} list="order-buyer-suggest" autoComplete="off"
+                placeholder="이름이나 구매자 번호" onChange={(e) => { setBuyerText(e.target.value); setBuyerError(null); }} />
+              <datalist id="order-buyer-suggest">
+                {suggestions.map((p) => <option key={p.id} value={`${p.name} (${p.id})`} />)}
+              </datalist>
+            </label>
             <label className="text-xs font-medium text-ink-700">
               주문 번호
               <input type="search" className="field mt-1 block w-44" value={search} placeholder="예: ord_2156" onChange={(e) => setSearch(e.target.value)} />
             </label>
-            <button type="submit" className="btn-ghost text-xs">찾기</button>
+            <button type="submit" className="btn-primary text-xs">찾기</button>
+            {(buyer || q) && <button type="button" className="btn-quiet text-xs" onClick={clearSearch}>검색 지우기</button>}
           </form>
         </div>
 
-        {users.error && <ErrorBox message={`구매자 목록을 받지 못했습니다. ${users.error}`} onRetry={users.reload} />}
+        {buyerError && <p role="alert" className="text-sm text-red-700">{buyerError}</p>}
+        {buyer && !buyerError && <p className="text-xs text-ink-500">구매자 <span className="font-medium text-ink-900">{label(buyer)}</span>의 주문만 보고 있어요.</p>}
+        {users.error && <ErrorBox message={`구매자 이름을 받지 못했습니다. 구매자 번호로는 찾을 수 있어요. ${users.error}`} onRetry={users.reload} />}
 
         {unsupported ? (
           <PreparingNotice what="전체 주문" source="판매 서버의 주문 페이지 목록" />

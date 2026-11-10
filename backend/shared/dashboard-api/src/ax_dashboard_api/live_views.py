@@ -143,9 +143,43 @@ ORDER_TABS = (
 )
 
 
+# 페이지 목록이 없는 판매 서버에서 기간 목록을 통째로 받아 나눌 때의 상한.
+# 넘으면 기간을 줄여 달라고 한다
+FALLBACK_MAX_ORDERS = 20_000
+
+
 def _title(lines: list[dict[str, Any]]) -> str:
     first = lines[0].get("title") if lines else None
     return (first or "상품") + (f" 외 {len(lines) - 1}건" if len(lines) > 1 else "")
+
+
+def _row(o: dict[str, Any]) -> OrderListRow:
+    return OrderListRow(
+        id=_number(o["order_id"]),
+        order_no=o["order_id"],
+        status=o["status"],
+        status_ko=STATUS_KO.get(o["status"], o["status"]),
+        title=_title(o.get("items") or []),
+        created_at=o.get("created_at"),
+        total_amount=o.get("total_amount"),
+        refunded_amount=o.get("refunded_amount"),
+        item_count=len(o.get("items") or []),
+        buyer_id=o.get("buyer_id"),
+        shipped_at=o.get("shipped_at"),
+        delivered_at=o.get("delivered_at"),
+    )
+
+
+def order_tab(o: dict[str, Any]) -> str:
+    """판매 서버(`ShopService.order_page`)와 같은 규칙.
+
+    환불이 있으면 상태 대신 환불 합계로 나눈다(결제액 이상이면 전체 환불, 미만이면 부분 환불).
+    """
+    refunded = o.get("refunded_amount") or 0
+    total = o.get("total_amount")
+    if refunded > 0 and total is not None:
+        return "full_refund" if refunded >= total else "partial_refund"
+    return str(o.get("status") or "")
 
 
 async def order_page(
@@ -160,15 +194,18 @@ async def order_page(
 ) -> tuple[list[OrderListRow], int, dict[str, int]]:
     """주문 관리 화면의 한 페이지(최신순)와 전체 건수·탭별 건수.
 
-    판매 서버의 `GET /api/shop/orders/page`를 그대로 맞춘다. 그 경로가 없는 판매 서버는
-    (`/orders/{id}`로 읽혀) 404를 내므로 `ORDER_LIST_UNSUPPORTED` 404로 알린다.
+    판매 서버의 `GET /api/shop/orders/page`를 그대로 맞춘다. 그 경로가 없는 판매 서버
+    (예전 코드라 `/orders/{id}`로 읽혀 404)는 기존 기간 목록(`GET /api/shop/orders`)을
+    받아 여기서 나눈다.
     """
+    start = _period(since, "since")
+    end = _period(until, "until")
     params: dict[str, Any] = {"limit": limit, "offset": offset}
     if status:
         params["status"] = status
-    if start := _period(since, "since"):
+    if start:
         params["since"] = start
-    if end := _period(until, "until"):
+    if end:
         params["until"] = end
     if q:
         params["q"] = q
@@ -182,8 +219,8 @@ async def order_page(
             502, "UPSTREAM_UNAVAILABLE", f"shop-api에 연결할 수 없다 ({error})"
         ) from error
     if res.status_code == 404:
-        raise ApiError(
-            404, "ORDER_LIST_UNSUPPORTED", "이 판매 서버는 주문 페이지 목록을 주지 않는다"
+        return await _order_page_from_list(
+            status=status, start=start, end=end, q=q, buyer=buyer, limit=limit, offset=offset
         )
     if res.status_code >= 400:
         raise ApiError(502, "UPSTREAM_ERROR", f"shop-api 오류 (HTTP {res.status_code})")
@@ -192,26 +229,52 @@ async def order_page(
     meta = body.get("meta") or {}
     if not isinstance(items, list):
         raise ApiError(502, "UPSTREAM_ERROR", "shop-api가 목록 모양이 아닌 응답을 돌려줬다")
-    rows = [
-        OrderListRow(
-            id=_number(o["order_id"]),
-            order_no=o["order_id"],
-            status=o["status"],
-            status_ko=STATUS_KO.get(o["status"], o["status"]),
-            title=_title(o.get("items") or []),
-            created_at=o.get("created_at"),
-            total_amount=o.get("total_amount"),
-            refunded_amount=o.get("refunded_amount"),
-            item_count=len(o.get("items") or []),
-            buyer_id=o.get("buyer_id"),
-            shipped_at=o.get("shipped_at"),
-            delivered_at=o.get("delivered_at"),
-        )
-        for o in items
-    ]
     raw_counts = meta.get("counts") or {}
     counts = {k: int(v) for k, v in raw_counts.items() if k == "all" or k in ORDER_TABS}
-    return rows, int(meta.get("total", len(rows))), counts
+    return [_row(o) for o in items], int(meta.get("total", len(items))), counts
+
+
+async def _order_page_from_list(
+    *,
+    status: str | None,
+    start: str | None,
+    end: str | None,
+    q: str | None,
+    buyer: str | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[OrderListRow], int, dict[str, int]]:
+    """페이지 목록이 없는 판매 서버: 기간 목록을 통째로 받아 최신순·탭·검색·페이지를 여기서 나눈다.
+
+    받은 주문이 `FALLBACK_MAX_ORDERS`를 넘으면 나누지 않고 422로 기간을 줄여 달라고 한다.
+    """
+    params: dict[str, Any] = {}
+    if buyer:
+        params["buyer_id"] = buyer
+    if start:
+        params["since"] = start
+    if end:
+        params["until"] = end
+    items = await _shop_get("/api/shop/orders", params) or []
+    if not isinstance(items, list):
+        raise ApiError(502, "UPSTREAM_ERROR", "shop-api가 목록 모양이 아닌 응답을 돌려줬다")
+    if len(items) > FALLBACK_MAX_ORDERS:
+        raise ApiError(
+            422,
+            "PERIOD_TOO_LARGE",
+            f"이 기간 주문이 {len(items):,}건이라 한 번에 나눌 수 없다. 기간을 줄여 주세요",
+        )
+    needle = (q or "").strip().lower()
+    found = [o for o in items if not needle or needle in str(o.get("order_id", "")).lower()]
+    counts: dict[str, int] = {"all": len(found)}
+    for o in found:
+        tab = order_tab(o)
+        if tab in ORDER_TABS:
+            counts[tab] = counts.get(tab, 0) + 1
+    picked = [o for o in found if not status or order_tab(o) == status]
+    # 최신순, 같은 시각이면 주문 번호 역순 (판매 서버 페이지 목록과 같은 순서)
+    picked.sort(key=lambda o: (o.get("created_at") or "", o.get("order_id") or ""), reverse=True)
+    return [_row(o) for o in picked[offset : offset + limit]], len(picked), counts
 
 
 async def order_detail(order_no: str) -> OrderDetail:
