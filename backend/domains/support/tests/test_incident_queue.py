@@ -6,8 +6,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from ax_contracts.schemas import AgentRequest, AgentResult, ExecuteDecision, TaskStatus
-from support_agent import compensation, handlers, incident_queue_handlers
+from ax_agent_template import events as bus
+from ax_contracts.schemas import (
+    AgentRequest,
+    AgentResult,
+    EventType,
+    ExecuteDecision,
+    TaskStatus,
+)
+from ax_contracts.schemas.event import SupportIncidentCompensationData
+from support_agent import compensation, events, handlers, incident_queue_handlers
 from support_agent.incident_queue import IncidentQueueStore
 from support_agent.main import app, load_card
 from support_agent.persistence import TABLES, PersistentIncidentQueueStore
@@ -31,6 +39,7 @@ def sent(monkeypatch: pytest.MonkeyPatch) -> Sent:
     monkeypatch.setattr(handlers, "STORE", InquiryStore())
     monkeypatch.setattr(handlers, "LEDGER", compensation.SequenceLedger())
     monkeypatch.setattr(handlers, "INCIDENT_QUEUE", IncidentQueueStore())
+    bus.reset_mock_bus()
     record = Sent()
 
     async def fake_send(target: str, req: AgentRequest) -> AgentResult:
@@ -373,3 +382,116 @@ def test_module_exports_the_three_handlers() -> None:
         "decide_incident_compensation",
         "list_incident_queue",
     }
+
+
+# ------------------------------------------------------- 사건 큐 상태 이벤트 (총괄에 알리기만)
+def announced() -> list[Any]:
+    return [
+        e for e in bus.MOCK_PUBLISHED if e.type == EventType.SUPPORT_INCIDENT_COMPENSATION_DECIDED
+    ]
+
+
+def test_a_decision_announces_the_incident_queue_state_once(sent: Sent) -> None:
+    propose()
+    decide(approve=["buy_0003", "buy_0006"], reject=["buy_0004"])
+    (event,) = announced()
+    data = SupportIncidentCompensationData.model_validate(event.data)
+    assert (data.sent, data.rejected, data.pending, data.approved, data.held) == (2, 1, 0, 0, 0)
+    assert data.remaining == data.pending + data.approved + data.held == 0
+    assert (
+        data.coupons_sent == 2
+        and data.sent_value == handlers.INCIDENT_QUEUE.summary(CTX)["sent_value"]
+    )
+    assert event.context_id == CTX and event.source == "support"  # 사건 번호로 붙는다
+    assert event.idempotency_key.startswith(f"support:support.incident_compensation_decided:{CTX}:")
+
+
+def test_the_event_carries_no_per_customer_value(sent: Sent) -> None:
+    propose()
+    decide(approve=["buy_0003"], reject=["buy_0004"], author="김하늘")
+    dumped = announced()[0].model_dump_json()
+    for secret in ("buy_0003", "buy_0004", "buy_0006", "김하늘", "cpn_"):
+        assert secret not in dumped
+    assert announced()[0].untrusted == {}
+
+
+def test_remaining_counts_what_a_person_still_has_to_handle(sent: Sent) -> None:
+    propose()
+    decide(approve=["buy_0003"])  # 한 명만 처리, 둘은 아직 대기
+    data = SupportIncidentCompensationData.model_validate(announced()[0].data)
+    assert (data.sent, data.pending, data.remaining) == (1, 2, 2)
+
+
+def test_a_marketing_hold_keeps_the_line_in_remaining(sent: Sent) -> None:
+    propose(["buy_0003"])
+    sent.replies.append(
+        marketing_reply(TaskStatus.INPUT_REQUIRED, {"review_id": "rev_9"}, "held", "human_input")
+    )
+    decide(approve=["buy_0003"])
+    data = SupportIncidentCompensationData.model_validate(announced()[0].data)
+    assert (data.held, data.sent, data.remaining, data.coupons_sent) == (1, 0, 1, 0)
+
+
+def test_the_same_state_has_the_same_key_and_a_new_state_a_new_one(sent: Sent) -> None:
+    propose()
+    decide(approve=["buy_0003"])
+    first = announced()[0]
+    again = events.build_incident_compensation_decided(
+        AgentRequest.model_validate(
+            {
+                "meta": {
+                    "context_id": "ctx_ui_0001",
+                    "token": "mock:dashboard-api",
+                    "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
+                },
+                "skill": "decide_incident_compensation",
+            }
+        ),
+        SupportIncidentCompensationData.model_validate(first.data),
+        datetime.now(UTC),
+    )
+    assert again.idempotency_key == first.idempotency_key and again.event_id == first.event_id
+    decide(approve=["buy_0004"])  # 상태가 바뀜 → 새 이벤트
+    assert len(announced()) == 2 and announced()[1].event_id != first.event_id
+
+
+def test_nothing_is_announced_when_nothing_changed(sent: Sent) -> None:
+    propose(["buy_0003"])
+    decide(approve=["buy_0003"])
+    before = len(announced())
+    decide(approve=["buy_0003"])  # 이미 보낸 고객: 바뀐 것이 없다
+    assert len(announced()) == before
+    decide(reject=["buy_9999"])  # 큐에 없는 고객
+    assert len(announced()) == before
+
+
+def test_a_gate_that_does_not_execute_announces_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    propose(["buy_0003"])
+    held_gate(monkeypatch)
+    decide(approve=["buy_0003"])
+    assert announced() == []
+
+
+def test_a_failed_publish_does_not_undo_the_decision(
+    sent: Sent, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def boom(*_: Any, **__: Any) -> None:
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(events, "publish", boom)
+    propose(["buy_0003"])
+    result = decide(approve=["buy_0003"])
+    assert result["status"] == "completed" and result["output"]["sent"] == 1
+    assert handlers.INCIDENT_QUEUE.find_buyer(CTX, "buy_0003").status == "sent"
+
+
+def test_the_summary_counts_by_status_and_sums_only_what_was_sent(sent: Sent) -> None:
+    propose()
+    decide(approve=["buy_0003"], reject=["buy_0004"])
+    summary = handlers.INCIDENT_QUEUE.summary(CTX)
+    assert (summary["sent"], summary["rejected"], summary["pending"]) == (1, 1, 1)
+    assert summary["remaining"] == summary["pending"] + summary["approved"] + summary["held"]
+    sent_rows = handlers.INCIDENT_QUEUE.list(CTX, ("sent",))
+    assert summary["coupons_sent"] == sum(r.count for r in sent_rows)
+    assert summary["sent_value"] == sum(r.total_value for r in sent_rows)
+    assert handlers.INCIDENT_QUEUE.summary("ctx_inc_9999")["remaining"] == 0
