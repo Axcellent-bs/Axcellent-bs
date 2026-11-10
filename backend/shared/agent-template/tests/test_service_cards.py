@@ -28,3 +28,24 @@ def test_no_skill_is_listed_by_two_services_of_one_department() -> None:
         for skill in service.skills:
             owners.setdefault((service.department, skill), []).append(service.id)
     assert {key: ids for key, ids in owners.items() if len(ids) > 1} == {}
+
+
+@pytest.mark.parametrize(
+    ("department", "folder"),
+    [
+        ("support", "support"),
+        ("marketing", "marketing"),
+        ("finance", "finance"),
+        ("data", "data"),
+        ("hr", "hr"),
+        ("planning", "planning"),
+        ("dev", "dev"),
+        ("infra", "infra-dejafix"),
+    ],
+)
+def test_every_department_skill_is_served_by_some_service(department: str, folder: str) -> None:
+    """부서 카드에 skill을 더하고 서비스 대응표에 빼먹으면 실제 모드(서비스를 나눠 띄움)에서만
+    `FORBIDDEN_SKILL`로 거부된다. 단위 테스트는 부서 카드로 돌아서 통과해 버린다."""
+    card = json.loads((ROOT / "domains" / folder / "agent-card.json").read_text("utf-8"))
+    served = {skill for s in SERVICES if s.department == department for skill in s.skills}
+    assert {s["id"] for s in card["skills"]} - served == set()
