@@ -8,7 +8,7 @@ import {
   type OrgBasis, type OrgChange, type OrgChangeInput, type OrgChangeKind, type OrgDescription, type OrgParse, type OrgChanges, type OrgChangeStatus, type OrgHeadcount,
 } from "@/lib/hr";
 
-// 조직 변동(발령) 화면: ① 지금 사람이 할 일(확정 대기 초안) → ② 명부 등록 현황 → ③ 처음 명부 등록(일괄)
+// 조직 변동(발령) 화면: ① 지금 사람이 할 일(확정 대기 초안) → ② 명부 등록 현황 → ③ 처음 직원 등록(일괄)
 // → ④ 발령 입력 → ⑤ 팀 인원 미리 보기 → ⑥ 발령 기록.
 // 초안은 승인 없이 저장되고 인사 담당자가 확정해야 인원에 센다. "전 직원 등록 완료"를 표시해야 재무에는
 // 확정 기록 기준 인원이 나간다(그 전에는 예시 인원). 인원·반영 월은 hr이 계산한 값을 그대로 보여 준다.
@@ -87,7 +87,7 @@ export default function OrgChangesPage() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">조직 변동</h1>
-          <p className="mt-1 text-sm text-ink-500">팀 이동·입사·퇴사를 기록합니다. 확정한 기록으로 팀별 인원을 세고, 그 인원이 재무 AI가 팀 예산을 계산할 때 쓰입니다.</p>
+          <p className="mt-1 text-sm text-ink-500">팀 이동·입사·퇴사를 기록합니다. 확정한 내용으로 팀별 인원을 세고, 재무 AI가 팀 예산을 계산할 때 이 인원을 씁니다.</p>
         </div>
         <div className="ml-auto text-xs text-ink-500">{shortDateTime(data.collected_at)} 기준</div>
       </header>
@@ -96,15 +96,15 @@ export default function OrgChangesPage() {
         <summary className="cursor-pointer font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">처음이라면: 관리 순서</summary>
         <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-ink-700">
           <li><b>처음 직원 등록</b>에서 팀별 인원을 넣고 초안을 만든 뒤 <b>모두 확정</b>합니다.</li>
-          <li>전체 직원 {data.expected_members}명이 모두 확정되면 <b>전 직원 등록 완료</b>를 표시합니다. 그때부터 재무 AI에 확정한 기록 기준 인원이 전달됩니다.</li>
+          <li>전체 직원 {data.expected_members}명이 모두 확정되면 <b>전 직원 등록 완료</b>를 표시합니다. 그때부터 재무 AI에 확정한 내용 기준 인원이 전달됩니다.</li>
           <li>이후 팀 이동·입사·퇴사는 <b>발령 입력</b>으로 초안을 저장하고, 확인한 뒤 확정합니다.</li>
-          <li>발령일이 1일이면 그 달부터, 아니면 다음 달 1일부터 인원에 셉니다. 파견은 세지 않습니다.</li>
+          <li>발령일이 1일이면 그 달부터, 아니면 다음 달 1일부터 인원에 셉니다. 파견 나간 사람은 세지 않습니다.</li>
         </ol>
       </details>
 
       {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">{error}</p>}
       {msg && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">{msg}</p>}
-      {!HUMAN_TOKEN_SET && <p className="rounded-xl bg-amber-50 px-4 py-2 text-xs text-amber-800">담당자 권한이 설정되지 않아 저장·확정 버튼을 쓸 수 없습니다. (개발자 설정: VITE_SAFETY_HUMAN_TOKEN)</p>}
+      {!HUMAN_TOKEN_SET && <p className="rounded-xl bg-amber-50 px-4 py-2 text-xs text-amber-800">담당자 권한이 설정되지 않아 저장·확정 버튼을 쓸 수 없습니다. 개발자에게 설정을 요청하세요.</p>}
 
       {/* ① 지금 사람이 할 일 */}
       <section aria-labelledby="org-todo" className={`rounded-[28px] p-6 ring-1 ${drafts.length ? "bg-amber-50 ring-amber-100" : "bg-emerald-50 ring-emerald-100"}`}>
@@ -132,7 +132,7 @@ export default function OrgChangesPage() {
                     <span className="text-sm text-ink-700">{describe(c)}</span>
                   </div>
                   <p className="text-xs text-ink-500">발령일 {c.effective_date} · 인원에는 {monthMark(c.counts_from_month)}부터 셉니다{c.note ? ` · ${showEmp(c.note)}` : ""}</p>
-                  <p className="text-xs text-ink-500">{c.basis_title ? `참고한 결정 카드: ${c.basis_title}` : "참고한 결정 카드 없음"}</p>
+                  <p className="text-xs text-ink-500">{c.basis_title ? `참고한 결정: ${c.basis_title}` : "참고한 결정 없음"}</p>
                   <Describe changeId={c.change_id} />
                 </div>
                 <div className="flex gap-2">
@@ -157,7 +157,7 @@ export default function OrgChangesPage() {
               ? <Chip label="전 직원 등록 완료" tone="bg-emerald-50 text-emerald-700" />
               : <Chip label="등록 중" tone="bg-amber-50 text-amber-700" />}
             <p className="text-xs text-ink-500">
-              {data.roster_complete ? "재무 AI에는 확정한 발령 기록으로 센 인원이 전달됩니다." : "등록이 끝나기 전까지 재무 AI에는 예시 인원이 전달되고, 재무에서는 예산을 확정할 수 없습니다."}
+              {data.roster_complete ? "재무 AI에는 확정한 발령으로 센 인원이 전달됩니다." : "등록이 끝나기 전에는 재무 AI에 예시 인원이 전달되고, 예산을 확정할 수 없습니다."}
             </p>
           </div>
           <div className="ml-auto">
@@ -185,7 +185,7 @@ export default function OrgChangesPage() {
           ? (
             <>
               <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
-                {preview.example ? <Chip label="예시 인원" tone="bg-amber-50 text-amber-700" /> : <Chip label="확정한 기록 기준" tone="bg-emerald-50 text-emerald-700" />}
+                {preview.example ? <Chip label="예시 인원" tone="bg-amber-50 text-amber-700" /> : <Chip label="확정한 내용 기준" tone="bg-emerald-50 text-emerald-700" />}
                 <span>{preview.basis}</span>
               </div>
               <div className="overflow-x-auto">
@@ -203,7 +203,7 @@ export default function OrgChangesPage() {
       </Section>
 
       {/* ⑥ 발령 기록 */}
-      <Section title="발령 기록" desc="최근 순입니다. 확정된 기록만 팀 인원에 세고, 초안과 반려된 기록은 세지 않습니다.">
+      <Section title="발령 기록" desc="최근 순입니다. 확정된 것만 팀 인원에 세고, 초안과 반려는 세지 않습니다.">
         {data.changes.length === 0
           ? <p className="py-6 text-center text-sm text-ink-500">아직 발령 기록이 없습니다.</p>
           : (
@@ -258,7 +258,7 @@ function Describe({ changeId }: { changeId: string }) {
   );
 }
 
-// ---------------------------------------------------------------- 처음 명부 등록
+// ---------------------------------------------------------------- 처음 직원 등록
 function BulkRegister({ teams, remaining, startNumber, busy, onSave }: {
   teams: string[]; remaining: number; startNumber: number; busy: boolean;
   onSave: (items: { member_id: string; kind: "join"; to_team: string; effective_date: string }[]) => void;
@@ -276,7 +276,7 @@ function BulkRegister({ teams, remaining, startNumber, busy, onSave }: {
     if (items.length) { onSave(items); setCounts({}); }
   }
   return (
-    <Section title="처음 직원 등록" desc={`팀별 인원을 넣으면 입사 초안이 한꺼번에 만들어집니다. 아직 등록할 인원: ${remaining}명. 직원 이름은 받지 않고 번호(e1, e2처럼)만 붙입니다.`}>
+    <Section title="처음 직원 등록" desc={`팀별 인원을 넣으면 입사 초안이 한꺼번에 만들어집니다. 아직 등록할 인원: ${remaining}명. 직원 이름은 받지 않고 번호만 붙입니다.`}>
       {remaining === 0
         ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">전체 직원 수만큼 초안이 만들어졌습니다. 위에서 모두 확정한 뒤 등록 완료로 표시하세요.</p>
         : (
@@ -367,7 +367,7 @@ function ChangeForm({ teams, busy, onSave }: {
     setMember(""); setNote(""); setSentence(""); setParse(null); setReason(""); setBasis(null); setBasisId("");
   }
   return (
-    <Section title="발령 입력" desc="초안으로 저장됩니다. 확정하기 전에는 인원에 세지 않습니다. 문장으로 채우기와 근거 찾기는 제안일 뿐이고, 아래 저장 버튼을 눌러야 저장됩니다.">
+    <Section title="발령 입력" desc="초안으로 저장됩니다. 확정하기 전에는 인원에 세지 않습니다. 문장으로 채우기와 결정 찾기는 제안일 뿐이며, 저장 버튼을 눌러야 저장됩니다.">
       <div className="space-y-2 rounded-2xl bg-ink-50 p-4">
         <label className="block text-sm font-medium" htmlFor="org-sentence">발령 문장으로 채우기 (직원 번호로 적어 주세요)</label>
         <div className="flex flex-wrap gap-2">
@@ -378,7 +378,7 @@ function ChangeForm({ teams, busy, onSave }: {
         {parse && !parse.available && <p className="rounded-xl bg-white px-3 py-2 text-sm text-ink-700">{parse.message ?? "문장 정리를 쓸 수 없습니다. 직접 입력해 주세요."}</p>}
         {parse?.available && (
           <div className="rounded-xl bg-white px-3 py-2 text-sm">
-            <p className="text-xs text-ink-500">아래 칸을 채웠습니다. 내용을 확인하고 고친 뒤 저장하세요.{parse.suggestion?.from_team_from_roster ? " 원래 팀은 확정된 직원 명단의 현재 소속입니다." : ""}</p>
+            <p className="text-xs text-ink-500">아래 칸을 채웠습니다. 내용을 확인하고 고친 뒤 저장하세요.{parse.suggestion?.from_team_from_roster ? " 이전 팀은 확정된 직원의 현재 팀입니다." : ""}</p>
             {parse.warnings.length > 0 && <ul className="mt-1 list-disc space-y-0.5 pl-5 text-amber-800">{parse.warnings.map((w) => <li key={w}>{showEmp(w)}</li>)}</ul>}
           </div>
         )}
@@ -403,21 +403,21 @@ function ChangeForm({ teams, busy, onSave }: {
         </label>
 
         <div className="space-y-2 sm:col-span-2 lg:col-span-3">
-          <label className="block text-xs text-ink-500" htmlFor="org-reason">발령 사유 (선택): 비슷한 과거 결정 카드를 근거 후보로 찾아 줍니다</label>
+          <label className="block text-xs text-ink-500" htmlFor="org-reason">발령 사유 (선택): 비슷한 과거 결정 카드를 찾아 줍니다</label>
           <div className="flex flex-wrap gap-2">
             <input id="org-reason" className={`${INPUT} min-w-[16rem] flex-1`} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="개발팀 인력 부족으로 기획팀 인원을 이동" maxLength={500} />
-            <button type="button" className="btn-ghost" disabled={finding || reason.trim().length < 2} onClick={findBasis}>{finding ? "찾는 중…" : "근거 후보 찾기"}</button>
+            <button type="button" className="btn-ghost" disabled={finding || reason.trim().length < 2} onClick={findBasis}>{finding ? "찾는 중…" : "참고할 결정 찾기"}</button>
           </div>
-          {basis && basis.candidates.length === 0 && <p className="rounded-xl bg-ink-50 px-3 py-2 text-sm text-ink-700">참고할 만한 결정 카드가 없습니다. 근거 없이도 저장할 수 있습니다.</p>}
+          {basis && basis.candidates.length === 0 && <p className="rounded-xl bg-ink-50 px-3 py-2 text-sm text-ink-700">참고할 결정 카드가 없습니다. 없어도 저장할 수 있습니다.</p>}
           {basis && basis.candidates.length > 0 && (
             <fieldset className="space-y-2">
-              <legend className="text-xs text-ink-500">근거로 연결할 카드를 고르세요. 고르지 않으면 연결하지 않습니다.</legend>
+              <legend className="text-xs text-ink-500">참고할 결정 카드를 고르세요. 고르지 않으면 연결하지 않습니다.</legend>
               {basis.candidates.map((c) => (
                 <label key={c.card_id} className="flex cursor-pointer gap-2 rounded-xl bg-ink-50 px-3 py-2 text-sm">
                   <input type="radio" name="org-basis" className="mt-1" checked={basisId === c.card_id} onChange={() => setBasisId(c.card_id)} />
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-center gap-2"><b>{c.title}</b><Chip label={`비슷한 정도 ${Math.round(c.similarity * 100)}%`} tone="bg-ink-100 text-ink-500" />
-                      {c.rejected && <Chip label="예전에 채택되지 않은 안" tone="bg-red-50 text-red-700" />}</span>
+                      {c.rejected && <Chip label="예전에 채택하지 않은 안" tone="bg-red-50 text-red-700" />}</span>
                     <span className="block text-xs text-ink-500">{c.summary}</span>
                   </span>
                 </label>
