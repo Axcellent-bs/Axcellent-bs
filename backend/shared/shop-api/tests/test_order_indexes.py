@@ -19,6 +19,9 @@ ADDED = (
     # 주문 목록 페이지(기간·구매자)
     "idx_orders_created_at",
     "idx_orders_buyer_id",
+    # 결제 지표 시계열·실패 주문(기간, 상태 + 기간)
+    "idx_payments_created_at",
+    "idx_payments_status_created_at",
 )
 # 나중에 열과 함께 붙은 인덱스(주문 멱등 키, 쿠폰별 사용 장수)
 LATER = ("idx_orders_buyer_idempotency", "idx_orders_coupon_id", "idx_orders_src_campaign")
