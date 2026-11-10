@@ -219,8 +219,8 @@ def test_unsupported_language_is_answered_in_english(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(drafting, "get_llm", lambda: Down())
     analysis, _ = analyze("Книга пришла порванной, хочу вернуть деньги")
-    assert analysis.classification.language == "other"
-    assert all(d.language == "en" and d.validation.passed for d in analysis.drafts)
+    assert analysis.classification.language == "ru"  # 화면에는 러시아어로 보이고
+    assert all(d.language == "en" and d.validation.passed for d in analysis.drafts)  # 답은 영어
 
 
 def test_korean_inquiry_keeps_the_existing_behavior() -> None:
@@ -302,3 +302,41 @@ def test_translation_is_empty_when_the_model_gave_none(monkeypatch: pytest.Monke
     monkeypatch.setattr(drafting, "get_llm", lambda: fake_llm(ENGLISH))
     c = analyze("My book arrived damaged")[0].classification
     assert (c.message_ko, c.request_points_ko) == ("", [])
+
+
+DETAIL_CASES = [
+    ("es", "Qué mierda de página, me cobraron dos veces por mi pedido. Devuélvanme el dinero ya."),
+    ("fr", "Votre site m'a facturé deux fois pour ma commande. Remboursez-moi tout de suite."),
+    (
+        "de",
+        "Eure Seite hat mich für meine Bestellung zweimal belastet. Erstattet mir sofort das Geld.",
+    ),
+    ("pt", "Meu pedido não chegou e quero o reembolso, muito obrigado"),
+    ("it", "Il mio ordine non è arrivato, voglio il rimborso, grazie"),
+    ("ru", "Ваш сайт списал с меня деньги дважды за заказ. Верните деньги немедленно."),
+    ("uk", "Ваш сайт списав гроші двічі за замовлення. Поверніть їх, будь ласка, їжак"),
+    ("ar", "تم خصم المبلغ مرتين من حسابي، أريد استرداد المال"),
+    ("th", "ถูกเรียกเก็บเงินสองครั้ง ขอคืนเงินด้วย"),
+    ("hi", "मेरे ऑर्डर का पैसा दो बार कट गया, रिफंड चाहिए"),
+    ("en", "I was charged twice for my order, please refund the extra charge."),
+    ("en", "Hello, could you check the status of my order please?"),
+]
+
+
+@pytest.mark.parametrize(("language", "text"), DETAIL_CASES)
+def test_the_screen_shows_the_real_language(language: str, text: str) -> None:
+    assert languages.detect_detail(text) == language
+
+
+def test_detail_never_changes_the_reply_language_rules() -> None:
+    """화면 표시만 나뉜다: 거친 판별(가드·답변 언어)은 그대로이고 모르는 언어는 영어로 답한다."""
+    for _language, text in DETAIL_CASES:
+        coarse = languages.detect(text)
+        assert coarse in {"en", "other"}
+        assert languages.reply_language(languages.detect_detail(text)) == "en"
+
+
+def test_softening_asks_for_one_language_only() -> None:
+    from support_agent import abuse_soften
+
+    assert "항상 한국어" in abuse_soften.PROMPT and "섞지 않는다" in abuse_soften.PROMPT
