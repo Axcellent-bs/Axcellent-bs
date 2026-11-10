@@ -2,7 +2,9 @@
 
 - `answer_planning_question`이 `needs_human`으로 답한 질문만 쌓는다.
   `answered`·`unknown`은 쌓지 않는다.
-  기획은 기다리지 않고 기획서를 이어 쓰므로, 이 목록은 상담원이 나중에 답할 질문을 보여 주는 용도다.
+  기획은 멈추지 않고 기획서를 이어 쓰지만 질문이 열려 있는 동안 그 기획서를 확정하지 않는다
+  ("답 대기").
+  이 목록은 상담원이 답해야 할 질문을 보여 주는 용도다.
 - 같은 질문(`question_id`)이 다시 오면 새 줄을 만들지 않고, 처음 받은 시각을 그대로 둔다.
 - 질문 문구는 기획이 쓴 글이지만 개인정보가 섞일 수 있어 저장 전에 가린다(`guard.mask_pii`).
 - 지금은 메모리에만 둔다(재시작하면 비워진다). DB 저장은 후속이다.
@@ -37,6 +39,8 @@ class PlanningQuestionRecord(AxModel):
     options: list[str] = Field(default_factory=list)  # 고를 답이 있으면
     status: QuestionStatus = "open"
     received_at: str
+    answered_at: str | None = None  # 사람이 답해 기획이 받은 시각
+    answered_by: str | None = None  # 답한 사람(사람 토큰의 이름, 본문 값이 아니다)
 
 
 class PlanningQuestionInbox:
@@ -64,6 +68,20 @@ class PlanningQuestionInbox:
         )
         self._items[key] = record
         return record
+
+    def mark_answered(
+        self, tenant_id: str, question_id: str, author: str
+    ) -> PlanningQuestionRecord | None:
+        """기획이 사람의 답을 받았으면 질문을 닫는다. 이미 닫혔으면 처음 닫은 기록을 그대로 둔다."""
+        key = _key(tenant_id, question_id)
+        found = self._items.get(key)
+        if found is None or found.status == "answered":
+            return found
+        closed = found.model_copy(
+            update={"status": "answered", "answered_at": now_iso(), "answered_by": author}
+        )
+        self._items[key] = closed
+        return closed
 
     def get(self, tenant_id: str, question_id: str) -> PlanningQuestionRecord | None:
         return self._items.get(_key(tenant_id, question_id))

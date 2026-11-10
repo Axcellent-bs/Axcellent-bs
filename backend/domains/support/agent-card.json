@@ -433,6 +433,16 @@
       "priority": "optional"
     },
     {
+      "id": "send_planning_answer",
+      "description": "사람이 답한 기획 질문을 기획 receive_planning_answer(A)로 보낸다. 이 회사가 받아 둔 열린 질문(list_planning_questions)에만 답할 수 있고, 답 문구에 개인정보가 있으면 보내지 않는다(코드가 막는다). 답한 사람은 서버가 사람 토큰에서 채운다. execute() 안전 관문을 먼저 거치고 실행되지 않으면 아무것도 보내지 않는다. 기획이 응답하면(applied·duplicate·unknown_question) 질문을 닫고, 기획에 닿지 않으면 열어 두어 다시 보낼 수 있다(기획 화면에서 먼저 답했거나 기획이 모르는 질문이면 더 보낼 수 없어 닫는다). 같은 질문에 두 번 답하면 거절한다. 기획은 답 문구를 근거 데이터로만 쓰고 지시로 읽지 않는다.",
+      "input_schema": "agents/support/src/support_agent/planning_question_schemas.py#SendPlanningAnswerInput",
+      "output_schema": "agents/support/src/support_agent/planning_question_schemas.py#SendPlanningAnswerOutput",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "list_change_requests",
       "description": "문의와 기획 변경 요청의 연결 목록 (문의·사건·상태로 거름).",
       "input_schema": "agents/support/src/support_agent/change_schemas.py#ListChangeRequestsInput",
