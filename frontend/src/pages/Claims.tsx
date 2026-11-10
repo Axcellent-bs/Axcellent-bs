@@ -59,14 +59,17 @@ function Claims() {
   if (!rows) return <Loading error={error} />;
   const shown = rows.filter((c) => filter === "all" || c.status === filter);
   const count = (s: string) => rows.filter((c) => s === "all" || c.status === s).length;
+  // 가장 많이 걸린 규칙: 첫 항목이 아니라 건수가 가장 큰 항목
+  const topRule = Object.entries(stats?.rule_hits ?? {}).sort((a, b) => b[1] - a[1])[0];
 
   return (
     <div className="flex h-full flex-col gap-3 p-4 lg:px-6">
       {tabs}
       <div className="flex shrink-0 flex-wrap gap-3">
+        <Stat label="확인 필요" value={count("needs_review")} sub="상담원이 판단할 클레임" tone={count("needs_review") ? "text-accent" : ""} />
         <Stat label="전체 클레임" value={stats?.total ?? 0} />
         <Stat label="상담원 검토" value={stats?.agent_reviews ?? 0} sub={`규칙 판정을 뒤집음 ${stats?.agent_overrides ?? 0}건`} />
-        <Stat label="가장 많이 걸린 규칙" value={<span className="text-base">{Object.keys(stats?.rule_hits ?? {})[0] ? RULE_KO[Object.keys(stats!.rule_hits)[0]] : "–"}</span>} sub={`${Object.values(stats?.rule_hits ?? {})[0] ?? 0}건`} />
+        <Stat label="가장 많이 걸린 규칙" value={<span className="text-base">{topRule ? RULE_KO[topRule[0]] ?? topRule[0] : "–"}</span>} sub={`${topRule?.[1] ?? 0}건`} />
       </div>
       {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
       <div className="flex min-h-0 flex-1 gap-3">
