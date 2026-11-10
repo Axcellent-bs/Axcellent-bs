@@ -30,10 +30,10 @@ export function Autonomy({ s, d, item }: P & { item?: string }) {
     <>
       <Lead>머지 → {OBSERVE_MIN}분 지켜보기(장애·되돌림 없음) → 같은 경로 {OBSERVE_N}건 → 기준 제안·과거 PR로 시험 → 승인({GUARD.lines}줄·{GUARD.files}파일 안은 재무 AI, 넘으면 사람) → 적용. 장애가 나거나 사람이 끄면 바로 꺼짐.</Lead>
       <Stats items={[
+        { label: '승인 대기', value: by('승인 대기'), hint: '재무 AI · 사람', tone: by('승인 대기') ? 'alert' : 'quiet' },
         { label: '적용 중인 기준', value: by('정식') },
-        { label: '지켜보는 중', value: pol.observing.filter((o) => o.result === '관찰 중').length, hint: `머지 뒤 ${OBSERVE_MIN}분` },
-        { label: '승인 대기', value: by('승인 대기'), hint: '재무 AI · 사람' },
-        { label: '꺼진 기준', value: by('해제됨') },
+        { label: '지켜보는 중', value: pol.observing.filter((o) => o.result === '관찰 중').length, hint: `머지 뒤 ${OBSERVE_MIN}분`, tone: pol.observing.some((o) => o.result === '관찰 중') ? undefined : 'quiet' },
+        { label: '꺼진 기준', value: by('해제됨'), tone: by('해제됨') ? undefined : 'quiet' },
         { label: '자동 머지 / 그중 장애', value: `${pol.history.length} / ${linked}`, hint: '건' },
       ]} />
       <Card as="section" title="자동 머지 기준" sub="이 범위의 PR은 리뷰를 통과하면 사람 확인 없이 머지">

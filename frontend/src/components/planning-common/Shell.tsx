@@ -81,7 +81,7 @@ function useInnerLinks() {
 export function PlanningShell(props: ShellProps) {
   const onLinks = useInnerLinks()
   return (
-    <div className="planning-scope" data-theme="light" onClick={onLinks}>
+    <div className="planning-scope" data-theme="light" data-part={props.part} onClick={onLinks}>
       <ToastProvider>
         <Frame key={props.part} {...props} />
       </ToastProvider>

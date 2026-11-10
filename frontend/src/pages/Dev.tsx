@@ -13,10 +13,11 @@ import { Aftercare, Ops } from '@/components/dev/ops'
 import { PrsTab } from '@/components/dev/repows'
 import { TaskBoard } from '@/components/dev/board'
 import { Reviews } from '@/components/dev/work'
+import '@/components/dev/hier.css'
 
 const SECTIONS: Record<string, Section> = {
-  tasks: { label: '작업 현황', icon: 'menu', tabs: [] }, // 사람 확인·진행 중·머지됨·중단은 화면 안 필터 (tasks/<필터>)
-  work: { label: '작업', icon: 'plan', tabs: [
+  tasks: { label: '작업 현황', icon: 'menu', tabs: [], head: { title: '작업 현황', desc: '개발 작업이 지금 어느 단계에 있는지 봐요.' } }, // 사람 확인·진행 중·머지됨·중단은 화면 안 필터 (tasks/<필터>)
+  work: { label: '작업', icon: 'plan', head: { title: '작업', desc: '작업·PR, 교차검증, 배포, 장애 대응을 다뤄요.' }, tabs: [
     { id: 'prs', label: '작업·PR' },
     { id: 'reviews', label: 'AI 교차검증' },
     { id: 'ops', label: '배포' },
@@ -24,7 +25,7 @@ const SECTIONS: Record<string, Section> = {
   ] },
   agents: { label: '에이전트 대화', icon: 'send', tabs: [], hidden: true },  // 메뉴에서 뺌 (주소로만 연다)
   talk: { label: '소통', icon: 'send', tabs: [], hidden: true },
-  metrics: { label: '지표', icon: 'dashboard', tabs: [
+  metrics: { label: '지표', icon: 'dashboard', head: { title: '지표', desc: '자동 머지 기준과 AI가 혼자 처리한 일을 봐요.' }, tabs: [
     { id: 'autonomy', label: '자동 머지 기준' },
     { id: 'audit', label: 'AI 단독 처리' },
     { id: 'activity', label: '에이전트 활동' },
@@ -69,10 +70,10 @@ export default function DevPage() {
       tabCount={(v, section, tab) => (section === 'work' && tab === 'reviews' ? v.state.reviews.filter((x) => !x.result).length : 0)}
       tools={(v) => <DevTools v={v} />}
     >
-      {({ state: s, dispatch: d, section, sub, tab, rest, item }) => (
+      {({ state: s, dispatch: d, section, sub, tab, rest, item, example }) => (
         <>
           {section === 'tasks' && <TaskBoard s={s} filter={sub} />}
-          {section === 'work' && tab === 'prs' && <PrsTab s={s} d={d} parts={rest.map((x) => decodeURIComponent(x))} />}
+          {section === 'work' && tab === 'prs' && <PrsTab s={s} d={d} example={example} parts={rest.map((x) => decodeURIComponent(x))} />}
           {section === 'work' && tab === 'reviews' && <Reviews s={s} d={d} item={item} />}
           {section === 'work' && tab === 'ops' && <Ops s={s} item={item} />}
           {section === 'work' && tab === 'aftercare' && <Aftercare s={s} item={item} />}
