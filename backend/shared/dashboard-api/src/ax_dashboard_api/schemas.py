@@ -97,6 +97,24 @@ class OrderSummary(BaseModel):
     item_count: int | None = None
 
 
+class OrderListRow(OrderSummary):
+    """주문 관리 화면(/orders) 목록 한 줄.
+
+    판매자가 누구 주문인지 봐야 해서 구매자 가명 ID를 싣는다(상세에는 싣지 않는다).
+    """
+
+    buyer_id: str | None = None
+    shipped_at: str | None = None
+    delivered_at: str | None = None
+
+
+class OrderRefund(BaseModel):
+    """환불 한 건. 환불·결제 ID는 화면에 내보내지 않는다."""
+
+    amount: int | None = None
+    created_at: str | None = None
+
+
 class OrderLine(BaseModel):
     title: str | None = None
     qty: int | None = None
@@ -131,6 +149,8 @@ class OrderDetail(BaseModel):
     delivered_at: str | None = None
     items: list[OrderLine] = []
     payments: list[OrderPayment] = []
+    # 환불 기록(시각 오름차순). 판매 서버가 환불 목록을 주지 않으면 None(빈 목록과 다르다)
+    refunds: list[OrderRefund] | None = None
 
 
 # ---------------------------------------------------------------- 클레임

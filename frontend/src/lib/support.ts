@@ -206,7 +206,10 @@ export interface OrderDetail {
   delivered_at: string | null;
   items: OrderLine[];
   payments: OrderPayment[];
+  /** 환불 기록, 시각 오름차순. 판매 서버가 환불 목록을 주지 않으면 null(또는 없음) */
+  refunds?: OrderRefund[] | null;
 }
+export interface OrderRefund { amount: number | null; created_at: string | null }
 
 // ---------------------------------------------------------------- 호출
 async function get<T>(path: string): Promise<Envelope<T> & { meta: { total?: number } }> {
