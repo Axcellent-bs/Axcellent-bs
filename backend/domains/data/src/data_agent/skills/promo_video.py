@@ -5,9 +5,11 @@
   캣북스 홍보 영상 아이디어를 만든다
   (회사 상품은 없어도 된다, 다른 회사·인물·작품 이름은 쓰지 않는다)
 - 기준(코드): 숏츠 전체 대비 배수(이 형식 1시간 조회 중앙값 ÷ 전체 숏츠 1시간 조회 중앙값,
-  같은 형식의 지난 기간 대비 상승률이 아님) ≥ `gate_format_vs_all_ratio` 또는 네이버 검색 배수 ≥
-  `gate_naver_ratio`, 그리고 최근 N일(N = 숏츠 검색 `[shorts] search_days`, 검색과 같은 창) 안에
-  게시된(snippet.publishedAt) 같은 형식
+  같은 형식의 지난 기간 대비 상승률이 아님. 분자·분모 모두 하위 주제 숏츠를 뺀 같은 모집단,
+  어느 쪽이든 표본이 min_sample 미만이면 배수 없음) ≥ `gate_format_vs_all_ratio`, 또는 (네이버 검색
+  배수 ≥ `gate_naver_ratio` 그리고 숏츠 전체 대비 ≥ `gate_naver_min_format_ratio`), 그리고
+  최근 N일(N = 숏츠 검색 `[shorts] search_days`, 검색과 같은 창) 안에 게시된(snippet.publishedAt)
+  같은 형식
   숏츠 ≥ `gate_recent_min`개 (게시 시각을 모르는 숏츠는 세지 않는다).
   가격·줄어든 배수(1.0 미만)·표본 부족·경고로 뺀 상품군은 근거로 치지 않는다
 - 기준을 못 넘은 것은 기획에 넘기지 않고 `held_back`(주제·이유)에 남긴다
@@ -78,6 +80,9 @@ class Gate:
     # 배수가 이보다 크면 평소 값이 너무 작은 것(표본 적음)이라 근거로 치지 않는다
     # (브리프 근거 요약 `highlight_max_ratio`와 같은 기본값)
     max_ratio: float = 10.0
+    # 검색만으로 넘길 때도 숏츠 전체 대비 배수가 이 이상이어야 한다 (조회가 전체보다 낮은 형식은
+    # 검색이 올라도 넘기지 않음)
+    naver_min_format_ratio: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -93,22 +98,36 @@ class FormatSignal:
     median_views: float | None
     at: datetime | None
     short_sample: str | None  # 표본 부족이면 이유
+    subtopic_excluded: int = 0  # 분자·분모에서 뺀 하위 주제 숏츠 수 (응답 전체)
+    base_samples: int = 0  # 분모(전체 숏츠 1시간 조회 중앙값)에 쓴 표본 수
 
 
 def format_signals(shorts: ShortsStatsOutput | None) -> dict[str, FormatSignal]:
+    """형식마다 "숏츠 전체 대비" 배수 = 하위 주제 숏츠를 뺀 같은 모집단의 중앙값끼리 나눈 값.
+
+    분모·분자 어느 쪽이든 표본이 min_sample 미만이면 배수를 내지 않고 표본 부족 이유를 남긴다.
+    """
     if shorts is None or shorts.status != "known":
         return {}
     base = shorts.median_views_per_hour
     out: dict[str, FormatSignal] = {}
     for g in shorts.by_format:
         ratio = None
-        if g.status == "known" and base and g.median_views_per_hour is not None:
-            ratio = round(g.median_views_per_hour / base, 2)
+        short = None
+        if g.status != "known":
+            short = g.reason or "표본 부족"
+        elif base is None:
+            short = f"전체 1시간 조회 {shorts.median_views_per_hour_reason or '표본 부족'}"
+        elif g.promo_median_views_per_hour is None:
+            short = f"1시간 조회 {g.promo_reason or '표본 부족'}"
+        elif base > 0:
+            ratio = round(g.promo_median_views_per_hour / base, 2)
         out[g.name] = FormatSignal(
             name=g.name, vs_all_ratio=ratio, recent=g.recent_count, recent_days=shorts.recent_days,
             recent_unknown=g.recent_unknown,
             samples=g.count, median_views=g.median_views, at=shorts.snapshot_at,
-            short_sample=None if g.status == "known" else (g.reason or "표본 부족"),
+            short_sample=short, subtopic_excluded=shorts.subtopic_shorts,
+            base_samples=shorts.median_views_per_hour_count,
         )  # fmt: skip
     return out
 
@@ -151,11 +170,29 @@ def judge(
     if search_ratio is not None and search_ratio > gate.max_ratio:
         small.append(f"검색 {_x(search_ratio)}배")
         search_ratio = None
+    # 통과: 숏츠 전체 대비 ≥ vs_all_ratio, 또는 (검색 ≥ naver_ratio 그리고 숏츠 전체 대비 ≥
+    # naver_min_format_ratio). 검색만 올라도 이 형식 조회가 전체보다 낮으면 넘기지 않는다
     v_ok = vs_all_ratio is not None and vs_all_ratio >= gate.vs_all_ratio
-    s_ok = search_ratio is not None and search_ratio >= gate.naver_ratio
+    s_up = search_ratio is not None and search_ratio >= gate.naver_ratio
+    # naver_min_format_ratio가 0이면 이 확인을 끈다 (회사 설정, recent_min 0과 같은 규칙)
+    s_ok = s_up and (gate.naver_min_format_ratio <= 0 or (
+        vs_all_ratio is not None and vs_all_ratio >= gate.naver_min_format_ratio))
     if not v_ok and not s_ok:
         if search_ratio is not None and search_ratio < 1.0:
             return False, f"{search_label} {_x(search_ratio)}배(줄어듦)"
+        if s_up and vs_all_ratio is not None:  # 검색은 올랐지만 숏츠 조회가 낮음
+            low = (
+                f"숏츠 조회가 전체보다 낮음({_x(vs_all_ratio)}배)"
+                if gate.naver_min_format_ratio == 1.0
+                else f"숏츠 조회가 기준보다 낮음 (숏츠 전체 대비 {_x(vs_all_ratio)}배 < "
+                f"{_x(gate.naver_min_format_ratio)}배)"
+            )
+            return False, f"{low} · 검색 {_x(search_ratio or 0)}배만으로는 넘기지 않음"
+        if s_up and vs_all_ratio is None:  # 검색은 올랐지만 숏츠 조회 근거가 없음
+            why = (f"{', '.join(small)}는 비교 값이 너무 작아 근거로 안 씀"
+                   if small else f"숏츠 {short_sample}" if short_sample
+                   else "숏츠 전체 대비 배수를 모름")  # fmt: skip
+            return False, f"검색 {_x(search_ratio or 0)}배지만 숏츠 조회 근거 없음 ({why})"
         if vs_all_ratio is None and search_ratio is None:
             if small:
                 what = ", ".join(small)
@@ -344,6 +381,7 @@ def build_promos(
             kind="promo", promo_format=name,
             promo_views_per_hour_ratio=sig.vs_all_ratio, promo_recent_count=sig.recent,
             promo_recent_days=sig.recent_days, promo_recent_unknown=sig.recent_unknown,
+            promo_subtopic_excluded=sig.subtopic_excluded,
             gate_reason=why,
             ad_material=True, ad_material_reason=PROMO_NOTE, reference_only=False,
             evidence=ev,
@@ -385,6 +423,7 @@ def apply_gate(
             search_label=label, recent=sig.recent if sig else None,
             recent_days=sig.recent_days if sig else None,
             recent_unknown=sig.recent_unknown if sig else None,
+            short_sample=sig.short_sample if sig else None,
             price_only=bool((price_only or {}).get(i.insight_id)),
             not_sold=bool(not_sold(i.topic)),
         )  # fmt: skip

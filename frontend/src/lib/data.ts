@@ -1014,11 +1014,21 @@ export interface TrendInsight {
   promo_recent_count?: number | null;
   promo_recent_days?: number | null;
   promo_recent_unknown?: number | null;
+  /** 분자·분모에서 뺀 하위 주제 숏츠 수 */
+  promo_subtopic_excluded?: number | null;
   /** 기획에 넘기는 기준을 통과한 근거 한 줄 */
   gate_reason?: string | null;
 }
 /** 근거가 모자라 기획에 넘기지 않은 주제·형식과 이유 (브리프 v6) */
 export interface HeldBack { topic: string; reason: string }
+/** 이 판에 쓴 기획에 넘기는 기준 값 (서버 설정 그대로) */
+export interface BriefGate {
+  vs_all_ratio: number;
+  naver_ratio: number;
+  naver_min_format_ratio: number;
+  recent_min: number;
+  max_ratio: number;
+}
 export interface TrendInsightBriefOutput {
   status: "known" | "unknown";
   reason: string | null;
@@ -1064,6 +1074,7 @@ export interface TrendInsightBriefOutput {
   detect_latest_at?: string | null;
   /** v6: 기준(트렌드 근거)을 넘지 못해 기획에 넘기지 않은 것 (예전 응답은 없다) */
   held_back?: HeldBack[];
+  gate?: BriefGate | null;
 }
 export type BriefTrigger = "auto" | "manual";
 export interface BriefVersionInfo { version: number; label: string; created_at: string; trigger: BriefTrigger; requested_by: string | null; detect_as_of: string | null }

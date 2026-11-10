@@ -14,7 +14,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.skills import promo_video as pv
 from data_agent.skills import trend_insight_brief as brief
-from data_agent.skills.shorts_stats import ShortsConfig, _Short, group_stats
+from data_agent.skills.shorts_stats import ShortsConfig, _Short, group_stats, overall_promo_median
 
 AT = datetime(2026, 11, 9, 6, 0, tzinfo=UTC)
 GATE = pv.Gate()
@@ -28,8 +28,13 @@ def _shorts(*groups: ShortsGroup, base: float = 100.0) -> ShortsStatsOutput:
 
 def _group(name: str, vph: float | None, recent: int | None, status: str = "known") -> ShortsGroup:
     reason = None if status == "known" else "표본 부족 (3개, 기준 5개)"
+    # 분자는 하위 주제 숏츠를 뺀 중앙값(promo_median_views_per_hour).
+    # 이 입력엔 하위 주제 숏츠가 없어 전체 중앙값과 같다
     return ShortsGroup(name=name, status=status, count=12, median_views=5000.0,  # type: ignore[arg-type]
-                       median_views_per_hour=vph, recent_count=recent, reason=reason)  # fmt: skip
+                       median_views_per_hour=vph, recent_count=recent, reason=reason,
+                       promo_median_views_per_hour=vph if status == "known" else None,
+                       promo_velocity_videos=12 if status == "known" else 3,
+                       promo_reason=None if status == "known" else reason)  # fmt: skip
 
 
 def _trend(topic: str, *, fmt: str | None = None, naver: float | None = None,
@@ -49,9 +54,20 @@ def test_gate_passes_rising_views_with_enough_new_shorts() -> None:
     assert "평소" not in why  # 숏츠 전체 대비 값이다 (지난 기간 대비가 아님)
 
 
-def test_gate_naver_alone_is_enough_when_new_shorts_are_there() -> None:
+def test_gate_naver_passes_when_shorts_views_are_at_least_the_whole() -> None:
     ok, why = pv.judge(GATE, vs_all_ratio=1.1, search_ratio=1.4, recent=5, recent_days=3)
     assert ok and "네이버 검색이 평소의 1.4배" in why
+
+
+def test_gate_naver_does_not_pass_when_shorts_views_are_below_the_whole() -> None:
+    """조회 0.05배 + 네이버 4배: 검색만 올라서는 넘기지 않는다 (숫자는 그대로)."""
+    ok, why = pv.judge(GATE, vs_all_ratio=0.05, search_ratio=4.1, recent=8, recent_days=3)
+    assert not ok
+    assert why == "숏츠 조회가 전체보다 낮음(0.05배) · 검색 4.1배만으로는 넘기지 않음"
+    ok, why = pv.judge(GATE, vs_all_ratio=None, search_ratio=4.1, recent=8, recent_days=3,
+                       short_sample="전체 숏츠 1시간 조회 표본 부족 (3개, 기준 5개)")  # fmt: skip
+    assert not ok and why.startswith("검색 4.1배지만 숏츠 조회 근거 없음")
+    assert pv.Gate().naver_min_format_ratio == 1.0
 
 
 def test_gate_holds_back_a_one_off_spike() -> None:
@@ -110,7 +126,9 @@ def test_gate_values_come_from_config_and_env(tmp_path) -> None:  # noqa: ANN001
     env2 = {"DATA_BRIEF_GATE_FORMAT_VS_ALL_RATIO": "1.8"}
     assert brief.gate_of(brief.load_config(env2)).vs_all_ratio == 1.8
     assert gate.max_ratio == 10.0  # 브리프 highlight_max_ratio와 같은 값
-    assert brief.gate_of(brief.load_config({})) == pv.Gate()  # 기본 1.5·1.3·5·3
+    assert brief.gate_of(brief.load_config({})) == pv.Gate()  # 기본 1.5·1.3·5·3·1.0
+    env3 = {"DATA_BRIEF_GATE_NAVER_MIN_FORMAT_RATIO": "1.2"}
+    assert brief.gate_of(brief.load_config(env3)).naver_min_format_ratio == 1.2
 
 
 # ------------------------------------------------------------------ 형식 근거·promo
@@ -235,6 +253,50 @@ def test_group_stats_counts_recent_shorts_per_format() -> None:
     assert groups["리액션"].recent_count == 4 and groups["리액션"].recent_unknown == 1
     assert groups["챌린지"].recent_count == 0 and groups["챌린지"].recent_unknown == 1
     assert groups["챌린지"].status == "unknown"
+
+
+def test_subtopic_shorts_are_not_in_the_vs_all_ratio() -> None:
+    """하위 주제 숏츠는 형식 분자·전체 분모 둘 다에서 빠진다 (실제: 정보·팁 0.3회/시간 138개)."""
+    items = [_Short(f"m{n}", "t", None, 100, 1000.0 + n, (), "search", format="브이로그")
+             for n in range(6)]  # fmt: skip
+    items += [_Short(f"c{n}", "t", None, 100, 500.0 + n, (), "search", format="챌린지")
+              for n in range(6)]  # fmt: skip
+    # 하위 주제 숏츠: 조회가 아주 낮고 수가 많다 (섞이면 분모가 0.3 근처로 떨어진다)
+    items += [_Short(f"s{n}", "t", None, 1, 0.3, (), "subtopic", format="정보·팁")
+              for n in range(40)]  # fmt: skip
+    items += [_Short(f"t{n}", "t", None, 1, 0.3, (), "subtopic", format="브이로그")
+              for n in range(10)]  # fmt: skip
+    groups = {g.name: g for g in group_stats(items, "format", ["브이로그", "챌린지", "정보·팁"],
+                                             ShortsConfig())}  # fmt: skip
+    # 분모: 하위 주제 숏츠 50개(0.3회/시간)는 빼고 12개만
+    assert overall_promo_median(items, ShortsConfig()) == (752.5, None, 12)
+    vlog = groups["브이로그"]
+    assert vlog.promo_median_views_per_hour == 1002.5 and vlog.promo_velocity_videos == 6
+    assert vlog.median_views_per_hour == 0.3  # 예전 칸(하위 주제 포함)은 그대로
+    tip = groups["정보·팁"]  # 하위 주제 숏츠만 있는 형식: 분자 표본 0 → 배수 없음
+    assert tip.promo_median_views_per_hour is None
+    assert tip.promo_reason == "표본 부족 (0개, 기준 5개)"
+    shorts = ShortsStatsOutput(status="known", by_format=list(groups.values()), recent_days=3,
+                               median_views_per_hour=752.5, median_views_per_hour_count=12,
+                               subtopic_shorts=50)  # fmt: skip
+    sig = pv.format_signals(shorts)
+    assert sig["브이로그"].vs_all_ratio == round(1002.5 / 752.5, 2)
+    assert sig["정보·팁"].vs_all_ratio is None
+    assert "표본 부족" in (sig["정보·팁"].short_sample or "")
+    assert sig["브이로그"].subtopic_excluded == 50
+
+
+def test_vs_all_ratio_needs_enough_shorts_in_the_denominator() -> None:
+    g = _group("브이로그", 300.0, 9)
+    few = ShortsStatsOutput(status="known", by_format=[g], recent_days=3,
+                            median_views_per_hour=None, median_views_per_hour_count=3,
+                            median_views_per_hour_reason="표본 부족 (3개, 기준 5개)")  # fmt: skip
+    sig = pv.format_signals(few)["브이로그"]
+    assert sig.vs_all_ratio is None
+    assert sig.short_sample == "전체 1시간 조회 표본 부족 (3개, 기준 5개)"
+    ok, why = pv.judge(GATE, vs_all_ratio=sig.vs_all_ratio, search_ratio=None, recent=9,
+                       recent_days=3, short_sample=sig.short_sample)  # fmt: skip
+    assert not ok and why == "트렌드 근거 없음 (숏츠 전체 1시간 조회 표본 부족 (3개, 기준 5개))"
 
 
 def test_publish_times_come_from_snippet_published_at(tmp_path) -> None:  # noqa: ANN001

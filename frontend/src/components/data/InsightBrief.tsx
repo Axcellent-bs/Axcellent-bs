@@ -7,7 +7,7 @@ import { AgeBars } from "@/components/data/AgeBars";
 import { useCompany } from "@/demo/company";
 import { useSession } from "@/demo/session";
 import { CopyId, FoldRow, RestFacts, ShortsCard, TileRow, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
-import { DATA_SERVER, dataAi, kpiLive, type DataFact, type HeldBack, type InsightPastResult, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
+import { DATA_SERVER, dataAi, kpiLive, type BriefGate, type DataFact, type HeldBack, type InsightPastResult, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
 
 // 트렌드 2단계(인사이트): 기획팀이 가져갈 인사이트 브리프 (v2 시안 ② 보드). trend_insight_brief(계약 TrendInsightBriefOutput) 응답 그대로.
 // - 카드 틀은 ShortsCard: 판정 칩 · 제목 · 한 문장(서버 line) · 숫자 타일 · 연결 상품 · 오른쪽 근거 숏츠 썸네일(최대 3) · "근거 전체 보기" 접힘 하나
@@ -362,7 +362,13 @@ function RegenConfirm({ head, onCancel, onOk }: { head: TrendInsightBriefOutput;
 // ---------------------------------------------------------------- 홍보 영상 아이디어 (브리프 v6, kind promo)
 const PROMO_SOURCE = "YouTube 숏츠 통계 (인기 영상 상위·조회수 순 검색 표본)";
 
-function PromoCard({ i, facts }: { i: TrendInsight; facts: DataFact[] }) {
+// 칩 색: 그 지표가 자기 기준(서버 gate 값)을 넘었을 때만 통과 색, 아니면 기본 색.
+// 카드가 통과했는지(다른 지표 덕분일 수 있음)로 칩 색을 정하지 않는다. 기준 값이 없으면 기본 색
+function chipTone(value: number | null | undefined, min: number | null | undefined): string {
+  return value != null && min != null && value >= min ? TONE.ok : TONE.muted;
+}
+
+function PromoCard({ i, facts, gate }: { i: TrendInsight; facts: DataFact[]; gate: BriefGate | null }) {
   // 기간은 서버 값(= 숏츠 검색 search_days). 없으면 숫자를 지어내지 않는다
   const days = i.promo_recent_days ? `최근 ${i.promo_recent_days}일` : "최근 검색 기간";
   const at = when(i.shorts_format_at ?? i.evidence.youtube_at ?? null);
@@ -384,8 +390,8 @@ function PromoCard({ i, facts }: { i: TrendInsight; facts: DataFact[] }) {
     <li className="card space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Chip label="홍보 영상" tone={TONE.info} />
-        {i.promo_views_per_hour_ratio != null && <Chip label={`숏츠 전체 대비 ${num(i.promo_views_per_hour_ratio, 2)}배`} tone={TONE.ok} />}
-        {i.promo_recent_count != null && <Chip label={`${days} 게시 ${num(i.promo_recent_count)}개`} tone={TONE.ok} />}
+        {i.promo_views_per_hour_ratio != null && <Chip label={`숏츠 전체 대비 ${num(i.promo_views_per_hour_ratio, 2)}배`} tone={chipTone(i.promo_views_per_hour_ratio, gate?.vs_all_ratio)} />}
+        {i.promo_recent_count != null && <Chip label={`${days} 게시 ${num(i.promo_recent_count)}개`} tone={chipTone(i.promo_recent_count, gate?.recent_min)} />}
       </div>
       <h4 className="text-lg font-bold text-ink-900">{i.topic}</h4>
       {rows.length > 0 && (
@@ -533,7 +539,7 @@ export function InsightBrief({ state, examples, examplesCount }: {
                   홍보 영상 아이디어 <span className="text-sm font-normal text-ink-500">형식만 빌려요 · 기준: 이 형식 1시간 조회가 숏츠 전체 대비 높거나 검색이 오르고, 숏츠 검색 기간 안에 게시된 같은 형식 숏츠가 여러 개</span>
                 </h3>
                 {promos.length > 0
-                  ? <ul className="space-y-4">{promos.map((i) => <PromoCard key={i.insight_id} i={i} facts={out.facts ?? []} />)}</ul>
+                  ? <ul className="space-y-4">{promos.map((i) => <PromoCard key={i.insight_id} i={i} facts={out.facts ?? []} gate={out.gate ?? null} />)}</ul>
                   : <p className="card p-4 text-sm text-ink-500">지금 기준을 넘은 홍보 영상 형식이 없어요.{held.length > 0 ? " 넘기지 않은 것과 이유는 바로 아래에 있어요." : ""}{out.limits.find((l) => l.startsWith("홍보 영상 0개")) ? ` ${out.limits.find((l) => l.startsWith("홍보 영상 0개"))}` : ""}</p>}
               </section>
             )}
