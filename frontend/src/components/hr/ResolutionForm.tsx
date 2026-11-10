@@ -74,7 +74,7 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
     <section className="card space-y-3 p-6">
       <div>
         <h2 className="text-lg font-semibold">이 이벤트의 해결 내용 확인하고 남기기</h2>
-        <p className="mt-1 text-xs text-ink-500">원인을 확인하고 고친 사람이 확인해 남깁니다. 비워 두면 "확인할 수 없음"으로 남습니다. 시간은 여기서 재지 않고, 시스템이 감지부터 정상 복귀까지 위 타임라인에서 잽니다.</p>
+        <p className="mt-1 text-xs text-ink-500">원인을 확인하고 고친 사람이 확인해 남깁니다. 비워 두면 "확인할 수 없음"으로 남습니다. 시간은 사람이 적지 않고 시스템이 위 타임라인에서 잽니다.</p>
       </div>
       {draft && (
         <div className="rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-900">
