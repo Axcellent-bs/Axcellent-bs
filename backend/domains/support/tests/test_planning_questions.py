@@ -414,11 +414,15 @@ def test_when_planning_cannot_be_reached_the_question_stays_open_for_a_retry(
     assert answer_by_person()["output"]["status"] == "answered"  # 다시 보내면 이어서 간다
 
 
-def test_planning_saying_it_does_not_know_the_question_keeps_it_open(waiting: Received) -> None:
+def test_planning_saying_it_does_not_know_the_question_closes_it(waiting: Received) -> None:
+    """기획이 모르는 질문은 더 보낼 수 없으니 목록에 열려 있지 않게 닫는다(예진 님)."""
     waiting.outcome = "unknown_question"
     result = answer_by_person()
-    assert result["outcome"] == "unknown_question" and result["output"]["status"] == "open"
-    assert handlers.PLANNING_QUESTIONS.get(TENANT, "Q-REQ-1-1").status == "open"
+    assert result["outcome"] == "unknown_question" and result["output"]["status"] == "answered"
+    assert handlers.PLANNING_QUESTIONS.get(TENANT, "Q-REQ-1-1").status == "answered"
+    assert (
+        call("list_planning_questions", {}, requester="dashboard-api")["output"]["open_count"] == 0
+    )
 
 
 def test_a_duplicate_answer_from_planning_still_closes_the_question(waiting: Received) -> None:

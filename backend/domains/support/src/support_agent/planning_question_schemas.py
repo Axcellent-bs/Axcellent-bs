@@ -28,6 +28,7 @@ class SendPlanningAnswerOutput(AxModel):
     question_id: str
     request_id: str
     # applied: 기획이 받아 반영 / duplicate: 이미 받은 답 / unknown_question: 기획이 모르는 질문
+    # 셋 모두 이 질문은 닫는다(더 보낼 수 없거나 보낼 필요가 없다)
     planning_outcome: Literal["applied", "duplicate", "unknown_question"]
     status: QuestionStatus  # 이 질문의 지금 상태 (기획이 받았으면 answered)
     spec_id: str | None = None

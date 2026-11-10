@@ -88,7 +88,8 @@ async def send_planning_answer(request: AgentRequest) -> AgentResult:
     - 이 회사가 받아 둔 열린 질문에만 답할 수 있다. 모르는 질문·이미 닫힌 질문은 보내지 않는다.
     - 답 문구에 개인정보가 있으면 보내지 않는다(기획 기록에 남지 않게 코드가 막는다).
     - 안전 관문을 먼저 거치고, 실행되지 않으면(보류·검증 중·거부) 아무것도 보내지 않는다.
-    - 기획이 답을 받으면(`applied`·`duplicate`) 질문을 닫는다. 못 받으면 열어 두어 다시 보낸다.
+    - 기획이 응답하면(`applied`·`duplicate`·`unknown_question`) 질문을 닫는다. 기획 화면에서
+      먼저 답했거나 기획이 모르는 질문이라 더 보낼 수 없어서다(예진 님). 기획에 닿지 않으면 열어 둔다.
     - 기획은 답 문구를 근거 데이터로만 쓰고 지시로 읽지 않는다.
     """
     parsed = h._parse(request, SendPlanningAnswerInput)
@@ -157,7 +158,7 @@ async def send_planning_answer(request: AgentRequest) -> AgentResult:
     except ValidationError as exc:
         return error_result(request.meta, TaskStatus.FAILED, "invalid_output", str(exc)[:200])
     closed = record
-    if received.outcome in ("applied", "duplicate"):
+    if received.outcome in ("applied", "duplicate", "unknown_question"):
         closed = (
             h.PLANNING_QUESTIONS.mark_answered(tenant, record.question_id, parsed.author) or record
         )
