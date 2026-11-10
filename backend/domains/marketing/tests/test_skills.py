@@ -918,3 +918,105 @@ def test_end_incident_notice_in_memory_mode_ends_the_remembered_notice() -> None
 def test_end_incident_notice_is_only_for_the_orchestrator() -> None:
     denied = _call("end_incident_notice", {}, token=SUPPORT)
     assert (denied["status"], denied["outcome"]) == ("rejected", "FORBIDDEN_SKILL")
+
+
+# --- 같은 문구의 장애 배너는 하나만 (사건이 둘로 잡혀도) ---------------------------------------
+
+OTHER = "ctx_inc_0002"
+
+
+def _open_banner(context_id: str, **overrides) -> dict:  # noqa: ANN003
+    data = {**DRAFT_INPUT, "kind": "incident_opened"} | overrides
+    draft_id = _call("draft_notice", data, context_id=context_id)["output"]["draft_id"]
+    return _call("publish_notice", {"draft_id": draft_id}, context_id=context_id)
+
+
+def _posts(seen: list[httpx.Request]) -> list[str]:
+    return [json.loads(r.content)["notice_id"] for r in seen if r.method == "POST"]
+
+
+def _deletes(seen: list[httpx.Request]) -> list[str]:
+    return [r.url.path.rsplit("/", 1)[-1] for r in seen if r.method == "DELETE"]
+
+
+def test_same_incident_banner_from_a_second_event_is_not_posted_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """같은 결제 장애가 사건 두 개로 잡혀도 쇼핑몰 배너는 하나만 올린다. 둘째는 같은 번호를 쓴다."""
+    _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    first = _open_banner(CTX)
+    second = _open_banner(OTHER)
+    assert first["status"] == second["status"] == "completed"
+    assert second["output"]["notice_id"] == first["output"]["notice_id"]
+    assert _posts(seen) == [first["output"]["notice_id"]]
+    assert _call("list_active_notices", {})["output"]["total"] == 1
+    again = _call(
+        "publish_notice",
+        {"draft_id": _call("draft_notice", DRAFT_INPUT, context_id=OTHER)["output"]["draft_id"]},
+        context_id=OTHER,
+    )
+    assert again["output"]["notice_id"] == first["output"]["notice_id"]
+    assert len(_posts(seen)) == 1
+
+
+def test_different_incident_text_still_gets_its_own_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    first = _open_banner(CTX)
+    second = _open_banner(OTHER, facts={"component": "db"})
+    assert first["output"]["notice_id"] != second["output"]["notice_id"]
+    assert len(_posts(seen)) == 2
+
+
+def test_shared_banner_stays_until_every_event_using_it_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """먼저 끝난 사건이 같이 쓰는 배너를 내리지 않는다. 마지막 사건이 끝날 때 내린다."""
+    _fake_execute(monkeypatch, _decision())
+    deleted: list[str] = []
+    banners: list[dict] = []
+    _banner_shop(monkeypatch, _banners_api(banners, deleted))
+    shared = _open_banner(CTX)["output"]["notice_id"]
+    banners.append(_banner(shared))
+    assert _open_banner(OTHER)["output"]["notice_id"] == shared
+
+    first_end = _call("end_incident_notice", {})
+    assert first_end["output"] == {"ended_notice_ids": [], "status": "none_open"}
+    assert deleted == []
+    assert _call("list_active_notices", {})["output"]["total"] == 1
+
+    last_end = _call("end_incident_notice", {}, context_id=OTHER)
+    assert last_end["output"] == {"ended_notice_ids": [shared], "status": "ended"}
+    assert deleted == [shared]
+    assert _call("list_active_notices", {})["output"]["total"] == 0
+
+
+def test_resolved_notice_of_one_event_keeps_the_shared_banner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """한 사건의 정상화 공지는 다른 사건이 같이 쓰는 장애 배너를 내리지 않는다."""
+    _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    shared = _open_banner(CTX)["output"]["notice_id"]
+    _open_banner(OTHER)
+    _call("publish_notice", {"draft_id": _draft("incident_resolved")})
+    assert _deletes(seen) == []
+    resolved_other = _call(
+        "draft_notice", {**DRAFT_INPUT, "kind": "incident_resolved"}, context_id=OTHER
+    )["output"]["draft_id"]
+    _call("publish_notice", {"draft_id": resolved_other}, context_id=OTHER)
+    assert _deletes(seen) == [shared]
+
+
+def test_ended_banner_text_can_be_posted_again_for_a_new_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """같은 문구라도 앞 배너가 이미 내려갔으면 새 사건은 새 배너를 올린다."""
+    _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    first = _open_banner(CTX)["output"]["notice_id"]
+    _call("publish_notice", {"draft_id": _draft("incident_resolved")})
+    second = _open_banner(OTHER)["output"]["notice_id"]
+    assert second != first
+    assert first in _posts(seen) and second in _posts(seen)

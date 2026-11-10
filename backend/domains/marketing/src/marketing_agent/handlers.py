@@ -67,6 +67,7 @@ from marketing_agent.schemas import (
     IssueCouponInput,
     IssuedCoupon,
     ListActiveNoticesInput,
+    NoticeDraft,
     PublishedNotice,
     PublishNoticeInput,
 )
@@ -277,6 +278,23 @@ async def publish_notice(request: AgentRequest) -> AgentResult:
     if blocked:
         return blocked
 
+    shared = await _same_incident_banner(draft, to_shop)
+    if shared is not None:
+        # 같은 문구의 장애 배너가 이미 떠 있으면 새로 올리지 않고 그 배너를 같이 쓴다.
+        # 같이 쓰는 사건이 모두 끝나야 배너가 내려간다
+        notice_id = STATE.notices.join(request.meta.context_id, draft, shared)
+        published = PublishedNotice(notice_id=notice_id, channel_code=draft.channel_code)
+        return _result(
+            request,
+            TaskStatus.COMPLETED,
+            output=published.model_dump(mode="json"),
+            evidence=_evidence(
+                ["publish_notice"],
+                "같은 문구의 장애 배너가 떠 있어 새로 올리지 않고 같이 씀",
+                [notice_id, decision.execution_id],
+            ),
+        )
+
     notice_id = None
     if to_shop:
         # 쇼핑몰 배너 번호는 초안에서 만든다(같은 초안은 같은 번호라
@@ -295,7 +313,8 @@ async def publish_notice(request: AgentRequest) -> AgentResult:
                 draft.kind == "incident_resolved"
             ):  # 복구 공지가 나가면 같은 사건의 장애 배너를 내린다
                 for earlier in STATE.notices.open_incident_notice_ids(request.meta.context_id):
-                    await shop_client.end_banner(earlier)
+                    if STATE.notices.can_end(request.meta.context_id, earlier):
+                        await shop_client.end_banner(earlier)
         except shop_client.ShopError as exc:
             return _result(request, TaskStatus.FAILED, outcome=f"shop_banner_failed:{exc.code}")
     notice_id = STATE.notices.publish(request.meta.context_id, draft, notice_id)
@@ -314,6 +333,22 @@ async def publish_notice(request: AgentRequest) -> AgentResult:
         output=published.model_dump(mode="json"),
         evidence=_evidence(["publish_notice"], "게시 완료", [notice_id, decision.execution_id]),
     )
+
+
+async def _same_incident_banner(draft: NoticeDraft, to_shop: bool) -> str | None:
+    """올리려는 장애 배너와 같은 문구로 이미 쇼핑몰에 떠 있는 배너 번호. 없으면 `None`.
+
+    사건이 둘로 잡혀도(예: 같은 결제 장애가 몇 분 간격으로 두 번) 쇼핑몰에 같은 줄이 두 번
+    뜨지 않게 한다. 쇼핑몰로 올리는 배너만 본다. 마케팅이 다시 켜지면 예전 배너를 잊어서
+    그 뒤 첫 장애 배너는 막지 못한다. 이미 게시한 초안의 재요청은 원래 길로 보낸다.
+    """
+    if not to_shop or draft.kind != "incident_opened":
+        return None
+    own = f"ntc_{draft.draft_id.removeprefix('drf_')}"
+    earlier = STATE.notices.published_id(draft.draft_id)
+    if earlier is not None:  # 재요청: 같이 쓰던 배너면 그대로, 아니면 원래 길(같은 번호)로
+        return earlier if earlier != own else None
+    return STATE.notices.open_incident_by_text(draft.public_text)
 
 
 async def end_incident_notice(request: AgentRequest) -> AgentResult:
@@ -342,7 +377,11 @@ async def end_incident_notice(request: AgentRequest) -> AgentResult:
     if blocked:
         return blocked
 
-    remembered = STATE.notices.open_incident_notice_ids(context_id)
+    remembered = [
+        notice_id
+        for notice_id in STATE.notices.open_incident_notice_ids(context_id)
+        if STATE.notices.can_end(context_id, notice_id)
+    ]
     to_end = list(remembered)
     if shop_client.notice_source() == "shop-api":
         try:
@@ -355,6 +394,7 @@ async def end_incident_notice(request: AgentRequest) -> AgentResult:
                     and notice_id not in to_end
                 ):
                     to_end.append(notice_id)
+            to_end = [n for n in to_end if STATE.notices.can_end(context_id, n)]
             for notice_id in to_end:
                 await shop_client.end_banner(notice_id)
         except shop_client.ShopError as exc:
