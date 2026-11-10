@@ -23,6 +23,9 @@
 | `POST /api/shop/orders` | 주문. 가격·총액은 DB 값으로 계산하고 재고를 차감한다. 선택 `points_used`(원, 품목 합계 이하)를 받는다. 선택 `coupon_id`와 `coupon_units`(기본 1)로 **본인의 쿠폰 한 건**을 쓴다(`campaign`·`compensation` 모두). 할인은 `min(장수×unit_value, 상품 합계)`로 배송비는 할인하지 않고, 적립금은 쿠폰을 뺀 상품 금액을 넘을 수 없다. 다른 구매자의 쿠폰은 403 `COUPON_NOT_YOURS`, 없는 쿠폰은 404 `COUPON_NOT_FOUND`, 만료는 409 `COUPON_EXPIRED`, 남은 장수 초과는 409 `COUPON_UNITS_EXCEEDED`다. 응답에 `coupon_id`·`coupon_units`·`coupon_discount`, 품목에 `coupon_share`(할인을 품목 금액 비율로 나눈 몫)가 있고 `paid_amount` = 단가×수량 − `points_share` − `coupon_share`다. 선택 `idempotency_key`(1~128자)를 주면 같은 구매자의 같은 키는 주문 하나다: 다시 오면 재고와 쿠폰 장수를 건드리지 않고 처음 주문을 200으로 돌려주고(`meta.replayed: true`, 새로 만들면 201), 상품·수량·포인트·쿠폰이 다르면 409 `IDEMPOTENCY_MISMATCH`다. 키는 주문 한 건당 하나를 만들어 재시도에만 다시 보낸다(매번 새 키를 보내면 보호가 안 되고, 새 주문에 같은 키를 쓰면 처음 주문이 돌아온다). 키가 없으면 매번 새 주문이다. `total_amount` = 품목 합계 − 포인트 + `shipping_fee`(품목 합계 5만 원 미만 3,000원, 이상 0원)로 **실제 결제(현금) 금액**이고 결제 `amount`와 같다 |
 | `GET /api/shop/orders[?buyer_id]`, `GET /api/shop/orders/{id}` | 주문 조회. 주문 필드 `shipping_fee`·`points_used`·`delivered_at`(배송 전 null), 품목 필드 `order_item_id`(`oit_`)·`title`(주문 당시 이름)·`points_share`(포인트를 품목 금액 비율로 나눈 몫, 남는 1원 단위는 뒤 품목부터)·`paid_amount`(= 단가×수량 − `points_share`), 결제 필드 `created_at`. 항상 `total_amount` = Σ`paid_amount` + `shipping_fee`. 환불 기록 목록 `refunds`(`refund_id`·`payment_id`·`amount`·`created_at`, `created_at` 오름차순, 없으면 `[]`)가 `refunded_amount`(합계)와 함께 온다 — 환불을 실제 환불 시각으로 잡는 근거. 목록 조회는 환불을 주문 묶음으로 한 번에 읽는다 |
 | `POST /api/shop/orders/{id}/payments` | 가짜 결제. `simulate`: `success`·`failure`. `pending_payment`·`payment_failed` 주문만 결제할 수 있고(그 밖은 409 `ORDER_NOT_PAYABLE`), 실패한 주문을 다시 부르면 새 결제 기록이 쌓이며 성공하면 `paid`가 된다. 상태 확인·결제 기록·상태 변경은 한 트랜잭션이라 동시에 들어와도 성공 결제는 1건이고 나머지는 `ORDER_NOT_PAYABLE`이다. 실패 코드(`PG_UNAVAILABLE` 서버 문제 / `PG_DECLINED` 거절)는 응답의 `payments[].failure_code`와 `payment.failed` 이벤트 `failure_code`에 그대로 담긴다 |
+| `GET /api/shop/payment-config` | 화면이 결제 방식을 고르는 값 `{provider: "fake" \| "toss_test"}`. 키는 담지 않는다(아래 4-2) |
+| `POST /api/shop/orders/{id}/payments/toss/prepare` | 토스 테스트 결제 시도 만들기 → `{toss_order_id, amount, order_name}`. `pending_payment`·`payment_failed` 주문만(그 밖 409 `ORDER_NOT_PAYABLE`), 금액은 DB 주문 합계(배송비 포함, 요청 값 없음). `toss_order_id` = `{order_id}-a{시도 번호}`로 시도마다 새로, `order_name`은 "첫 상품명 외 N건". 가짜 결제 모드면 409 `TOSS_DISABLED` |
+| `POST /api/shop/payments/toss/confirm` | 토스 승인. 본문 `{toss_order_id, payment_key, amount}`(결제위젯 성공 리다이렉트 값). 없는 시도 404 `PAYMENT_ATTEMPT_NOT_FOUND`, 금액이 시도 금액과 다르면 400 `AMOUNT_MISMATCH`(토스 호출 안 함). 이미 끝난 시도는 처음 결과를 200으로 돌려준다(`meta.replayed: true`, 토스에 다시 보내지 않음). 응답 `data`는 주문(`GET /orders/{id}`와 같은 모양). 가짜 결제 모드면 409 `TOSS_DISABLED` |
 | `POST /api/shop/admin/orders/{id}/shipped` | 발송 시각 기록(시연·시드용). `admin` 토큰만, 결제된 주문만(409 `ORDER_NOT_PAID`), 본문 `shipped_at`(시간대 있는 시각, 비우면 지금), 이미 있으면 처음 값을 유지한다. 이미 도착한 주문이면 도착 시각보다 늦을 수 없다(409 `INVALID_TIME`). 주문 상태는 바꾸지 않고 이벤트도 내지 않는다. 주문 응답에는 `shipped_at`과 **약속 배송일 `promised_delivery_at`**(결제 성공 시각 + 3일, 결제 전·옛 주문은 null)이 있다 — 고객지원이 '약속한 날보다 늦었나'를 코드로 판정하는 근거 |
 | `POST /api/shop/admin/orders/{id}/delivered` | 배송 완료 시각 기록(시연·시드용). `admin` 토큰만, 결제된 주문만(409 `ORDER_NOT_PAID`), 본문 `delivered_at`(시간대 있는 시각, 비우면 지금), 이미 있으면 처음 값을 유지한다. 주문 상태는 바꾸지 않고 `order.delivered` 이벤트도 내지 않는다 |
 | `POST /api/shop/claims` | 고객 반품·환불 신청(토큰 없음, 주문 구매자만). 고객지원 `create_claim`을 A2A로 부른다(요청자 `shop-api`, 사건 ID `ctx_shop_<hex>`). 금액은 받지 않고, 사유 문장 `description`은 `untrusted`로만 넘긴다. 응답 `data`는 고객지원의 클레임이고 `meta.context_id`가 사건 ID다. 구매자가 다르면 403 `BUYER_MISMATCH`, 고객지원 거부·타임아웃·오류는 403·504·502 |
@@ -91,9 +94,32 @@ python -m ax_shop_api.retention purge-buyer <buyer_id> [--apply] [--include-reta
   - `--include-retained`: 그 구매자의 주문·품목·결제·환불·반품·쿠폰까지 지운다(프로젝트 종료 또는 법적 보존 비적용이 확정됐을 때만).
   - 시드 구매자는 거부(종료 코드 2), 없는 구매자는 종료 코드 1.
 - 종료 코드 2: `:memory:` DB에서는 실행하지 않는다.
+## 4-2. 토스페이먼츠 테스트 결제 (`toss.py`)
+사람이 쇼핑몰 화면에서 결제할 때만 토스 테스트 결제를 쓴다. 자동 트래픽(`scripts/shop_traffic.py`)과 `POST /orders/{id}/payments`는 그대로 가짜 결제다. 화면(shop-web)은 다른 레포다.
+
+| 환경변수 | 기본값 | 뜻 |
+| --- | --- | --- |
+| `PAYMENT_PROVIDER` | `fake` | `fake` 또는 `toss_test` |
+| `TOSS_SECRET_KEY` | (없음) | 토스 **테스트** 시크릿 키. `backend/.env`에만 둔다(`run_all.sh`가 넘긴다). 커밋·출력 금지 |
+
+- `toss_test`인데 키가 없거나 `test_`로 시작하지 않으면(라이브 키 `live_…` 포함) **가짜 결제로 동작**하고 시작할 때 경고 한 줄을 남긴다. 키 값은 응답·로그·경고 어디에도 나가지 않는다(앞 몇 글자도).
+- 흐름: 화면이 `payment-config`로 방식을 보고 → `prepare`로 `toss_order_id`·금액·주문명을 받아 토스 결제위젯을 연다 → 위젯 성공 리다이렉트의 `paymentKey`·`orderId`·`amount`로 `confirm`을 부른다 → 서버가 금액을 시도 금액과 비교한 뒤 토스 승인 API(`POST https://api.tosspayments.com/v1/payments/confirm`, Basic 인증 `시크릿키:`, `Idempotency-Key` = `toss_order_id`, 타임아웃 10초)를 부른다.
+- 결과 기록은 가짜 결제와 같은 함수(`Shop._record_payment`)다: `payments` 행, 주문 상태(`paid`/`payment_failed`), `payment.succeeded`/`payment.failed` 이벤트, 결제 모니터 표본.
+  - 200 → 성공. 토스 `method`를 `method_code`로: 카드 `card`, 계좌이체 `transfer`, 간편결제 `easy_pay`, 휴대폰 `phone`, 그 밖 `other`.
+  - 4xx → `PG_DECLINED`(5xx로 세지 않음), 토스 `code`는 `failure_detail`.
+  - 5xx·타임아웃·연결 실패 → `PG_UNAVAILABLE`(5xx로 셈), `failure_detail`은 토스 `code` 또는 `TIMEOUT`·`CONNECT_ERROR`.
+  - 걸린 시간은 실제로 재서 지연 표본(`latency_ms`)으로 쓴다.
+- 장애 주입(SHOP-06): `failure`면 **토스를 부르지 않고** `PG_UNAVAILABLE`(5xx, `failure_detail` `FAULT_INJECTED`)로 실패시켜 `shop.degraded`(5xx 비율)에 들어간다. `latency`는 가짜 결제처럼 값으로만 더한다(실제로 기다리지 않음).
+- 같은 시도를 동시에 두 번 승인해도 토스는 한 번만 부른다(프로세스 안 잠금 + 토스 `Idempotency-Key`).
+- 표: `payment_attempts`(새 표: `toss_order_id`·`order_id`·`amount`·`status` `prepared`/`confirmed`/`failed`·`payment_id`·`created_at`·`updated_at`), `payments`에 `provider`(`fake`·`toss_test`, 옛 행은 `fake`)·`pg_payment_key`·`failure_detail` 칸 추가(시작할 때 `ADD COLUMN`).
+
 ## 5. 하지 않는 것
 - 판단·분석 문장을 만들지 않는다 (이벤트에는 사실만 담는다)
 - 다른 서비스의 DB를 읽지 않는다. 판매 사이트 DB를 다른 서비스가 직접 읽게 하지 않는다 (API로만)
 - 별도 HTTP 이벤트 엔드포인트를 만들지 않는다 (`events.publish`만)
 - 결제된 주문을 환불 API 없이 취소하지 않는다
 - 개인정보를 저장하지 않는다 (구매자는 가명 ID만)
+## 6. 다음 단계
+- 토스 결제 환불·취소 API 연동. 지금 환불(`POST /payments/{id}/refund`)은 토스 결제여도 장부 기록만 한다.
+- 토스 웹훅. 서버(251)가 사내망이라 토스가 부를 수 없어 받지 않는다(승인 결과는 `confirm` 응답으로만 안다).
+- 보유기간 삭제(retention)가 `payment_attempts`를 아직 지우지 않는다(금액·주문 번호만 있고 개인정보는 없다).
