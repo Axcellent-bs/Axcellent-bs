@@ -7,6 +7,7 @@ import { AUDIT_KO, CLAIM_REASON_KO, CLAIM_STATUS_KO, CLAIM_TYPE_KO, INSPECTION_K
 import type { Claim, ClaimDetail, ClaimStats } from "@/lib/types";
 import { useRouter, useSearchParams } from "@/lib/nav";
 import { TriagePanel } from "@/components/support/TriagePanel";
+import PlanningQuestions, { usePlanningQuestionCount } from "@/components/support/PlanningQuestions";
 
 const FILTERS = ["all", "needs_review", "needs_info", "awaiting_return", "return_received", "completed", "rejected"] as const;
 const LEVEL: Record<string, string> = { block: "bg-red-50 text-red-800", review: "bg-violet-50 text-violet-700", warn: "bg-amber-50 text-amber-800", info: "bg-ink-100 text-ink-700" };
@@ -28,9 +29,13 @@ function Claims() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // "분류 필요": 로그·오류 코드로 원인을 모르는 문의를 따로 모은 화면. 클레임 목록 옆의 두 번째 보기다
-  const view = params.get("view") === "triage" ? "triage" : "claims";
+  const view = params.get("view") === "triage" ? "triage" : params.get("view") === "planning" ? "planning" : "claims";
   const [triageCount, setTriageCount] = useState<number | null>(null);
   useEffect(() => { api.admin.list().then((l) => setTriageCount(l.filter((c) => c.triage?.state === "needed").length)).catch(() => {}); }, []);
+  // "기획 질문": 기획이 되물었는데 기록으로 답하지 못해 사람이 답해야 하는 질문
+  const firstPlanningCount = usePlanningQuestionCount();
+  const [planningCount, setPlanningCount] = useState<number | null>(null);
+  const planningShown = planningCount ?? firstPlanningCount;
 
   const load = useCallback(async () => {
     try {
@@ -52,9 +57,11 @@ function Claims() {
     <div role="tablist" aria-label="보기" className="flex shrink-0 gap-2">
       <button role="tab" aria-selected={view === "claims"} onClick={() => router.push("/claims")} className={`chip py-1.5 text-sm ${view === "claims" ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700"}`}>클레임</button>
       <button role="tab" aria-selected={view === "triage"} onClick={() => router.push("/claims?view=triage")} className={`chip py-1.5 text-sm ${view === "triage" ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700"}`}>분류 필요{triageCount ? ` ${triageCount}` : ""}</button>
+      <button role="tab" aria-selected={view === "planning"} onClick={() => router.push("/claims?view=planning")} className={`chip py-1.5 text-sm ${view === "planning" ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700"}`}>기획 질문{planningShown ? ` ${planningShown}` : ""}</button>
     </div>
   );
   if (view === "triage") return <div className="flex h-full flex-col gap-3 p-4 lg:px-6">{tabs}<TriagePanel onCount={setTriageCount} /></div>;
+  if (view === "planning") return <div className="flex h-full flex-col gap-3 overflow-y-auto p-4 lg:px-6">{tabs}<PlanningQuestions onCount={setPlanningCount} /></div>;
 
   if (!rows) return <Loading error={error} />;
   const shown = rows.filter((c) => filter === "all" || c.status === filter);
