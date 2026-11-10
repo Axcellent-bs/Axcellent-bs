@@ -12,7 +12,7 @@ const ABOUT_KO: Record<string, string> = { evidence: "근거", done: "완료 기
 const OUTCOME_KO: Record<string, string> = {
   applied: "기획이 답을 받아 기획서에 반영했습니다.",
   duplicate: "기획이 이미 받은 답이라 그대로 닫았습니다.",
-  unknown_question: "기획이 이 질문을 찾지 못했습니다. 질문은 열려 있어 다시 보낼 수 있습니다.",
+  unknown_question: "기획이 이 질문을 찾지 못해(기획 화면에서 먼저 답했거나 닫힌 질문) 더 보낼 수 없어 질문을 닫았습니다.",
 };
 const aboutOf = (q: PlanningQuestion) => (q.about ? ABOUT_KO[q.about] ?? q.about : "질문");
 
