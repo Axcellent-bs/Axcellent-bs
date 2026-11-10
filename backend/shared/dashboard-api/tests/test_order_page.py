@@ -156,9 +156,7 @@ def test_bad_values_are_rejected_before_calling_shop(
     assert calls == []
 
 
-def test_shop_down_is_502_not_empty(
-    live_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _shop_raises(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
     class Down:
         def __init__(self, *_: Any, **__: Any) -> None: ...
 
@@ -168,12 +166,37 @@ def test_shop_down_is_502_not_empty(
         async def __aexit__(self, *_: Any) -> None: ...
 
         async def get(self, *_: Any, **__: Any) -> httpx.Response:
-            raise httpx.ConnectError("refused")
+            raise error
 
     monkeypatch.setattr(live_views.httpx, "AsyncClient", Down)
+
+
+def test_shop_down_is_502_not_empty(
+    live_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _shop_raises(monkeypatch, httpx.ConnectError("refused"))
     res = live_client.get(PAGE)
     assert res.status_code == 502
-    assert res.json()["error"]["code"] == "UPSTREAM_UNAVAILABLE"
+    error = res.json()["error"]
+    assert error["code"] == "UPSTREAM_UNAVAILABLE"
+    assert error["message"].startswith("판매 서버에 연결하지 못했습니다")
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (httpx.ReadTimeout(""), "판매 서버가 10초 안에 응답하지 않았습니다"),  # 문구가 빈 예외
+        (httpx.ConnectTimeout(""), "판매 서버가 10초 안에 응답하지 않았습니다"),
+        (httpx.RemoteProtocolError(""), "판매 서버와 통신하지 못했습니다(RemoteProtocolError)"),
+    ],
+)
+def test_unreachable_message_is_plain_words_and_never_empty(
+    live_client: TestClient, monkeypatch: pytest.MonkeyPatch, error: Exception, expected: str
+) -> None:
+    _shop_raises(monkeypatch, error)
+    message = live_client.get(PAGE).json()["error"]["message"]
+    assert message == expected
+    assert "shop-api" not in message and "()" not in message
 
 
 def test_mock_page_is_empty_not_made_up(mock_client: TestClient) -> None:
