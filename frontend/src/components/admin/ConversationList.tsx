@@ -14,7 +14,9 @@ export function ConversationList({ items, selectedId, onSelect, onNew }: {
   const test: Record<Filter, (c: ConversationListItem) => boolean> = {
     all: () => true, waiting: (c) => c.awaiting_reply && c.status === "open", escalated: (c) => c.status === "escalated",
   };
-  const [lang, setLang] = useState<LangFilter>("all");
+  const [picked, setLang] = useState<LangFilter>("all");
+  // 고른 언어의 문의가 모두 사라져 칩이 없어졌으면 "모든 언어"로 돌아간다(빈 목록에 갇히지 않게)
+  const lang = picked === "all" || items.some((c) => langOf(c) === picked) ? picked : "all";
   const byLang = (c: ConversationListItem) => lang === "all" || langOf(c) === lang;
   const shown = items.filter(byLang).filter(test[filter]);
   const langCount = (l: LangFilter) => items.filter((c) => l === "all" || langOf(c) === l).length;

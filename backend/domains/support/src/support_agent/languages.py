@@ -90,7 +90,9 @@ _MARKERS: dict[str, tuple[frozenset[str], re.Pattern[str]]] = {
             "il lo gli un una di del che per con mio mia ma molto grazie ciao due volte ordine "
             "soldi rimborso voi sono non è".split()
         ),
-        re.compile(r"$^"),
+        re.compile(
+            r"$^"
+        ),  # 이탈리아어는 고유 악센트 글자가 없어(아무것도 안 잡는 패턴) 낱말 목록으로만 판별한다
     ),
 }
 
