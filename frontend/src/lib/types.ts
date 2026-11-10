@@ -143,7 +143,7 @@ export interface ConversationListItem {
   urgency: "low" | "medium" | "high" | null; status: "open" | "resolved" | "escalated"; order_id: number | null;
   updated_at: string; preview: string; awaiting_reply: boolean;
   /** 고객이 마지막으로 쓴 언어. 옛 응답에는 없을 수 있다 */
-  language?: "ko" | "en" | "ja" | "zh" | "other";
+  language?: string;
   /** 어느 회사(고객사)의 문의인지. 옛 응답에는 없을 수 있다 */
   tenant_id?: string;
   /** 로그·오류 코드로 원인을 모르는 문의를 따로 모은 "분류 필요" 표시. 없으면 일반 문의 */

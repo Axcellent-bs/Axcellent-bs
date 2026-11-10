@@ -6,7 +6,7 @@ import type { ConversationListItem } from "@/lib/types";
 //  - 재생: 같은 목록을 처음부터 처리하는 모습으로 다시 보여 준다 (영상·설명용)
 
 export type Stage = "new" | "drafting" | "review" | "sent" | "resolved" | "escalated";
-export type Lang = "ko" | "en" | "ja" | "zh" | "other";
+export type Lang = string; // ko·en·ja·zh·es·fr·de·pt·it·ru·uk·ar·he·th·hi·other
 
 export interface BoardCard {
   id: string;

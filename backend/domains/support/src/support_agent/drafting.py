@@ -219,7 +219,7 @@ async def analyze(
     started = time.perf_counter()
     masked, pii_kinds = guard.mask_pii(text)
     # 언어는 코드가 문자 종류로 판별한다. 답변은 가드가 검사할 수 있는 언어(ko·en·ja·zh)로만 쓴다
-    language = languages.detect(f"{subject} {text}")
+    language = languages.detect_detail(f"{subject} {text}")  # 화면 표시용으로 더 나눈 언어
     reply_language = languages.reply_language(language)
     untrusted: dict[str, Any] = {"subject": guard.mask_pii(subject)[0], "customer_message": masked}
     llm = get_llm()
