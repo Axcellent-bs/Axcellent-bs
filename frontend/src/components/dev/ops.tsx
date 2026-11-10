@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Notice, useToast } from '@dejafix/common-frontend'
 import { type State as S } from '@/lib/planningData'
 import { ActivityList, Grade, State, Stats } from '@/components/planning-common/parts'
-import { Ref, convoHref, go, hrefOf, prSlug, toPath, idText } from '@/components/planning-common/links'
+import { Ref, convoHref, go, hrefOf, prName, prSlug, toPath, idText } from '@/components/planning-common/links'
 import { Flow, Pairs, Step, mergedLabel } from '@/components/planning-common/flow'
 import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from '@/lib/planning'
 
@@ -17,21 +17,31 @@ export function Ops({ s, item }: { s: S; item?: string }) {
   const open = prs.filter((p) => !p.merged)
   const incidentOf = (pr: string) => s.incidents.find((i) => i.candidates.some((c) => c.pr === pr))
   const mergedAt = (id: string) => s.activity.filter((a) => a.text.startsWith(`${id} `) && (a.point === 'github_merge_pull' || a.point === 'execute(merge_pr)')).pop()?.t ?? s.incidents.flatMap((i) => i.candidates).find((c) => c.pr === id)?.mergedAt ?? '-'
+  // 머지 시각: 활동 기록은 "MM-DD HH:MM", 사건 기록은 ISO라 한 모양("MM-DD HH:MM")으로 맞춘다
+  const shownAt = (t: string) => (t === '-' ? '-' : /\d{4}-\d{2}-\d{2}T/.test(t) ? kst(t) : t)
   return (
     <div className="flow-col">
       {req && <Notice icon="bell"><Ref s={s} id={req.id} /> {req.title} · <a href={toPath('work/ops')}>전체</a> · <a href={toPath(`projects/${req.id}`)}>프로젝트</a></Notice>}
-      <Stats items={[
-        { label: '배포된 PR', value: merged.length },
-        { label: '자동 머지', value: merged.filter((p) => p.auto).length },
-        { label: '사람 머지', value: merged.filter((p) => !p.auto).length },
-        { label: '머지 전', value: open.length, href: toPath('work/prs') },
-        { label: '장애 난 PR', value: merged.filter((p) => incidentOf(p.id)).length, href: toPath('work/aftercare') },
-      ]} />
+      {(() => {
+        // 장애는 사건 단위로 센다 (장애 대응 탭과 같은 단위). 아직 처리 중인 사건만 빨갛게
+        const broken = merged.filter((p) => incidentOf(p.id)).length
+        const openInc = s.incidents.filter((i) => !i.linked).length
+        const q = (n: number) => (n ? undefined : 'quiet' as const)
+        return (
+          <Stats items={[
+            { label: '처리 중인 장애', value: openInc, hint: `지난 장애 ${s.incidents.length}건 · 원인 PR ${broken}건`, href: toPath('work/aftercare'), tone: openInc ? 'alert' : 'quiet' },
+            { label: '머지 전', value: open.length, href: toPath('work/prs'), tone: q(open.length) },
+            { label: '배포된 PR', value: merged.length, tone: q(merged.length) },
+            { label: '자동 머지', value: merged.filter((p) => p.auto).length, tone: 'quiet' },
+            { label: '사람 머지', value: merged.filter((p) => !p.auto).length, tone: 'quiet' },
+          ]} />
+        )
+      })()}
       <Flow label="배포 이력">
         {merged.slice().reverse().map((p) => {
           const i = incidentOf(p.id)
           return (
-            <Step key={p.id} name={mergedAt(p.id).slice(6) || '-'} on={!i} href={toPath(`work/prs/${prSlug(p.id)}`)} title={<><span className="mono idc" title={p.id}>{idText(p.id)}</span> {p.title.replace(/^[A-Z]\d+: /, '')}</>}>
+            <Step key={p.id} name={shownAt(mergedAt(p.id))} on={!i} href={toPath(`work/prs/${prSlug(p.id)}`)} title={<><span className="mono idc" title={p.id}>{prName(p)}</span> {p.title.replace(/^[A-Z]\d+: /, '')}</>}>
               <Pairs items={[
                 ['머지', mergedLabel(p)],
                 ['범위 점검', <>{p.gate.result} · {p.gate.lines}줄·{p.gate.files}파일 · <span className="mono">{p.gate.paths}</span></>],

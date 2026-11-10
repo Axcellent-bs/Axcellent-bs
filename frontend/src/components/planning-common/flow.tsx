@@ -28,9 +28,10 @@ export function prStatus(s: S, prs: PR[]): string {
 
 // 전체 틀: 왼쪽 목록 + 가운데(머리·흐름) + 오른쪽 곁 블록
 export function Layout({ list, head, side, children, below }: { list: ReactNode; head?: ReactNode; side?: ReactNode; children: ReactNode; below?: ReactNode }) {
+  // list가 null이면 왼쪽 목록 칸 없이 한 칸으로 (목록을 오른쪽 칸에 넣는 화면)
   return (
-    <div className="proj">
-      <aside className="col-left proj-list">{list}</aside>
+    <div className={list === null ? 'proj solo' : 'proj'}>
+      {list !== null && <aside className="col-left proj-list">{list}</aside>}
       <section className="proj-main">
         {head}
         <div className={side ? 'proj-body' : undefined}>
