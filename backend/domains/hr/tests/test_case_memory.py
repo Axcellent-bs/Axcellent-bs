@@ -287,7 +287,7 @@ async def test_a_resolved_case_is_not_cut_off_by_many_identical_unresolved_ones(
 ) -> None:
     """제목이 같은 미해결 카드가 많아도 해결 기록이 있는 카드가 상위 결과에 남는다."""
     _dense(svc, tmp_path)
-    for n in range(6):
+    for n in range(8):  # 의미 검색이 예전에 먼저 받던 후보 수(5)보다 많게
         ctx = f"ctx_inc_u{n}"
         await _incident(svc, ctx=ctx)
         unresolved = {"context_id": ctx, "outcome": "unresolved"}

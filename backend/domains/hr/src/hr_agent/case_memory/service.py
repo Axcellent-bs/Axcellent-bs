@@ -49,6 +49,7 @@ KINDS = (
     "decision",
     "case",
 )  # 이벤트·결정·사례 카드만 찾는다(공지·정책·사기 카드는 제외)
+DENSE_CANDIDATES = 50  # 의미 검색으로 먼저 받아 오는 후보 수(하한을 넘는 것만). 자르기는 그 뒤
 BLOCK = "\n[해결 기록]"  # 카드 본문에서 해결 내용을 시작하는 표시
 OUTCOME_KO = {"resolved": "해결됨", "workaround": "임시 조치", "unresolved": "미해결"}
 
@@ -362,8 +363,13 @@ async def _dense(
     if svc.dense is None:
         return None
     try:
+        # 넉넉히 받아 온 뒤 자른다: 제목이 같은 미해결 카드가 많으면 상위 몇 장이 모두 미해결이라
+        # 해결 기록이 있는 카드가 아예 후보에 들지 못했다(자르는 순서는 `find_similar_cases`)
         found = await svc.dense.search(
-            query, cards, k=max(limit, 5), min_cosine=svc.settings.dense_min_cosine
+            query,
+            cards,
+            k=max(limit, DENSE_CANDIDATES),
+            min_cosine=svc.settings.dense_min_cosine,
         )
     except Exception:  # noqa: BLE001 - 임베딩 실패가 조회를 막지 않게 Dice로 대체한다
         return None
