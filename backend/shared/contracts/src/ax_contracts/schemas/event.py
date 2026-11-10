@@ -360,7 +360,8 @@ class SupportInquirySurgeData(AxModel):
     목록으로 최대 20개다. `triage_reason`은 "분류 필요"에 올라간 문의의 급증일 때만 채운다
     (`no_error_code`: 오류 코드 없는 결제 문의, `unclassified`: 분류가 안 맞는 문의).
     멱등 키는 `<source>:support.inquiry_surge:<topic_code>:<window_start>`라 같은 창의 같은 급증은
-    한 번만 나간다.
+    한 번만 나간다. `window_start`는 멱등용 고정 구간(창 길이로 나눈 구간)의 시작이라, 실제로 센
+    범위(확인한 시각까지 최근 창)의 시작과는 최대 창 길이만큼 다를 수 있다.
     """
 
     topic_code: str = Field(min_length=1, max_length=40)
