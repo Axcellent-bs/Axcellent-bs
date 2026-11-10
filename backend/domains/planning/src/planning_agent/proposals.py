@@ -366,6 +366,32 @@ def brief_facts(t: TrendInsight) -> list[InsightFact]:
     return out[:12]
 
 
+# 데이터분석 내부 참조 (기회 카드 id 등)는 사람이 읽는 설명에서 뺀다
+_INTERNAL_REF = re.compile(r"\s*\((?:기회 카드|opp)[^)]*\)")
+
+
+def _plain(text: str) -> str:
+    return _INTERNAL_REF.sub("", text).strip()
+
+
+def _dedupe(lines: list[str]) -> list[str]:
+    """같은 문장과, 다른 줄의 앞부분일 뿐인 짧은 문장을 뺀다 (인사이트별 한계와 전체 한계가 겹친다).
+    순서는 처음 나온 대로 둔다."""
+    norm = [" ".join(x.split()).rstrip(" .").removesuffix("다") for x in lines]
+    out: list[str] = []
+    seen: set[str] = set()
+    for i, x in enumerate(lines):
+        n = norm[i]
+        if not n or n in seen:
+            continue
+        longer = (m for j, m in enumerate(norm) if j != i and len(m) > len(n))
+        if any(m.startswith(n) for m in longer):
+            continue  # 더 긴 줄이 같은 말로 시작하면 긴 줄만 남긴다
+        seen.add(n)
+        out.append(" ".join(x.split()))
+    return out
+
+
 def from_brief(out: TrendInsightBriefOutput) -> list[ReceiveInsightInput]:
     """trend_insight_brief 응답 → 기획 입력. 참고용·분류 대기·근거 없는 인사이트는 뺀다.
     한 줄 인사이트(line)는 데이터분석 문장 그대로,
@@ -377,14 +403,17 @@ def from_brief(out: TrendInsightBriefOutput) -> list[ReceiveInsightInput]:
         facts = brief_facts(t)
         if not facts:
             continue
-        body = [f"## 데이터분석 인사이트 #{t.rank}", t.line]
-        if t.company_reason:
-            body.append(f"- 회사 관련: {t.company_reason}")
-        body += [f"- 상품 {p.name}: {p.reason}" for p in t.products]
+        # 인사이트 한 줄(t.line)은 summary로 따로 간다(화면·기획서에 이미 나옴). 설명엔 다시 안 쓴다
+        body: list[str] = []
+        why_rows = [f"- 회사 관련: {_plain(t.company_reason)}"] if t.company_reason else []
+        why_rows += [f"- 상품 {p.name}: {p.reason}" for p in t.products]
+        if why_rows:
+            body += [f"## 데이터분석 인사이트 #{t.rank} 근거", *why_rows]
         if t.example_ideas:
             body += ["", "## 예시 아이디어 (참고)", *[f"- {x}" for x in t.example_ideas]]
-        if t.limits or out.limits:
-            body += ["", "## 한계", *[f"- {x}" for x in [*t.limits, *out.limits]]]
+        limits = _dedupe([*t.limits, *out.limits])
+        if limits:
+            body += ["", "## 한계", *[f"- {x}" for x in limits]]
         if t.real_entity and t.entity_names:
             body += ["", f"> 실존 이름 주의: {', '.join(t.entity_names)}"]
         items.append(
