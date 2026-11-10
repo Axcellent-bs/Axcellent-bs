@@ -38,6 +38,9 @@ class Runtime:
     incident_opened_at: Callable[[str], Awaitable[str | None]] = orchestrator_opened_at
     diagnoses: dict[str, Diagnosis] = field(default_factory=dict)  # context_id → 마지막 진단
     rollbacks: dict[str, dict[str, Any]] = field(default_factory=dict)  # idempotency_key → 결과
+    releases: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )  # 과거 처리 방식 다시 하기 결과
 
     def executed_rollbacks(self, context_id: str) -> int:
         return sum(

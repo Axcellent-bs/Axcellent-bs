@@ -4,7 +4,7 @@
 ## 1. 역할
 통합 에이전트(총괄). 이벤트를 받아 이벤트로 열지 판단하고(`ctx_inc_` 발급), Agent Card 레지스트리로 부서를 골라 plan대로 순차·병렬로 맡기고, 끝나면 닫으면서 hr에 기록을 요청한다. 인터페이스 기준은 `docs/notes/orchestrator/interface.md`.
 
-- **이벤트 판단** (`manager.py`, 규칙 코드): 쇼핑몰 장애(`shop.degraded`), 인프라 이상(`infra.anomaly_detected`), 심각도 high 이상의 지표 이상(`metric.anomaly`)은 이벤트로 열어 시나리오 A plan을 돌린다. 문의 처리 결과(`support.inquiry_resolved`)는 문의마다 열어 `support_resolved` plan을 돌린다. 같은 구성요소에 열린 이벤트가 있으면 합친다. 문의 접수·급증과 낮은 심각도의 지표 이상은 기록만 하고, 복구 신호(`shop.recovered`)는 해당 이벤트에 붙인다. 같은 `event_id`는 한 번만 처리한다.
+- **이벤트 판단** (`manager.py`, 규칙 코드): 쇼핑몰 장애(`shop.degraded`), 인프라 이상(`infra.anomaly_detected`), 심각도 high 이상의 지표 이상(`metric.anomaly`)은 이벤트로 열어 시나리오 A plan을 돌린다. 문의 처리 결과(`support.inquiry_resolved`)는 문의마다 열어 `support_resolved` plan을 돌린다. 같은 구성요소에 열린 이벤트가 있으면 합친다. 문의 접수·급증과 낮은 심각도의 지표 이상은 기록만 하고, 복구 신호(`shop.recovered`)는 해당 이벤트에 붙인다. 사람에게 넘겨 "미해결"로 닫힌 이벤트가 나중에 풀리면, 복구 신호가 알려 준 풀린 방법(`recovery`·`released_by`)과 걸린 시간으로 인사 `record_resolution`을 한 번 더 보낸다(`only_if_unresolved`, 사람이 적은 기록은 덮지 않는다). 그래야 다음 같은 유형 장애에서 과거 이벤트 찾기가 그 조치를 내민다. 같은 `event_id`는 한 번만 처리한다.
 - **plan 실행** (`engine.py`): 단계마다 부서와 skill을 정한 plan을 돌린다. 실패는 재시도하고(실패 2번, 마감 초과 1번), 소관이 아니면 **이관**한다. 이관은 같은 skill을 가진 다른 부서로 규칙으로 넘기고, 찾지 못하면 "이관 큐로 넘김"으로 남겨 사람이 본다(6장).
 - **`input-required` 중계**: 부서끼리 물어봐야 하면 질의를 중계하고, 꺼진 서비스의 일은 사람 할 일함으로 넘어가 사람이 끝낼 때까지 기다린다(`handoff.completed`).
 - **C 등급 승인 대기**: 부서가 안전 관문 보류를 돌려주면(`review_id` 포함) 승인 대기로 두고, 안전 관문의 사람 결정 이벤트(`safety.review_decided`)로 잇는다. 승인이면 같은 요청을 다시 보내 이어 가고, 거절·만료면 거절로 끝낸다. 이벤트를 믿지 않고 **안전 관문에 되물어 승인으로 기록된 경우에만** 인정하며, 마감(`ORCHESTRATOR_HOLD_TIMEOUT`) 때도 한 번 더 되묻는다. 총괄이 승인하지는 않는다.

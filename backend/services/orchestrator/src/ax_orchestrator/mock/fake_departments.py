@@ -28,6 +28,7 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("diagnose_incident", "read", None),
         ("rollback_deployment", "B", "dev"),
         ("verify_recovery", "read", None),
+        ("release_fault", "A", None),
     ],
     "data": [
         ("anomaly_detection", "read", None),
@@ -166,6 +167,12 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
         summary="목 데이터",
     ),
     "verify_recovery": lambda r: _ok(recovered=True, infra_metrics_ok=True),
+    "release_fault": lambda r: _ok(
+        fault_released=True,
+        post_check_ok=True,
+        past_case_id=r.input.get("past_case_id"),
+        path="auto",
+    ),
     "record_case": lambda r: _ok(card_id="card_mock01"),
     "find_similar_cases": lambda r: _ok(
         cases=[], max_similarity=0.0, method="dense", collected_at="2026-10-29T06:00:00Z"
@@ -252,10 +259,36 @@ ALT_OUTPUTS: dict[tuple[str, str], Callable[[AgentRequest], dict[str, Any]]] = {
     ("diagnose_incident", "undetermined"): lambda r: _ok(
         status="undetermined", suspects=[], impact_scope=["payment"]
     ),
+    # 같은 유형 과거 장애가 장애 상태 해제로 풀렸다(유사도 0.92, low는 0.80)
+    ("find_similar_cases", "past_release"): lambda r: _past_release(0.92),
+    ("find_similar_cases", "past_release_low"): lambda r: _past_release(0.80),
     ("verify_recovery", "not_recovered"): lambda r: _ok(
         recovered=False, infra_metrics_ok=False, business_metrics_ok=None
     ),
 }
+
+
+def _past_release(similarity: float) -> dict[str, Any]:
+    return _ok(
+        cases=[
+            {
+                "card_id": "card_past_release",
+                "title": "[이벤트] payment 장애",
+                "similarity": similarity,
+                "same_type": True,
+                "resolution": {
+                    "outcome": "resolved",
+                    "root_cause": None,
+                    "action": "사람(쇼핑몰 운영자)이 결제 장애 상태를 해제해 정상화",
+                    "minutes_to_resolve": 3,
+                    "action_code": "release_fault",
+                },
+            }
+        ],
+        max_similarity=similarity,
+        method="dense",
+        collected_at="2026-10-29T06:00:00Z",
+    )
 
 
 class FakeDepartments:

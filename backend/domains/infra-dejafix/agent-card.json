@@ -30,6 +30,16 @@
       "priority": "required"
     },
     {
+      "id": "release_fault",
+      "description": "같은 유형 과거 장애를 푼 처리 방식(결제 장애 상태 해제)을 다시 한다. 총괄이 원인 미확정 장애에서 같은 유형·해결된 과거 사건 카드(past_case_id, similarity)를 근거로 부른다. 지금 결제 서버가 이상(실패·감시 이상)일 때만 execute(release_fault)를 거쳐 쇼핑몰 장애 상태를 해제하고, 서버가 정상이면 not_needed로 아무것도 하지 않는다. 등급은 safety 기준표가 정한다(보류면 input-required, 승인 뒤 같은 요청을 다시 보내면 실행). 같은 사건에서 한 번만 실행한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#ReleaseFaultParams",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#ReleaseFaultOutput",
+      "grade": "A",
+      "allowed_requesters": ["orchestrator"],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
       "id": "verify_recovery",
       "description": "component와 since(사건 시작)를 받아 서버 지표(판매 사이트 장애·감시 상태)와 데이터분석 anomaly_detection의 결제 실패율을 함께 확인한다. 둘 다 정상이어야 recovered=true. 정상이 아니면 30초 간격으로 최대 5번 다시 확인하고(마감 안에서), 그래도 아니면 recovered=false로 돌려준다. 데이터 결과를 못 받으면 business_metrics_ok=null이고 복구로 보지 않는다. 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#VerifyRecoveryInput",

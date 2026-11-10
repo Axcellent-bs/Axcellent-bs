@@ -555,8 +555,8 @@ def create_app(
         return _ok(shop.inject_fault(body.kind, body.delay_ms))
 
     @app.delete("/api/shop/admin/faults")
-    async def release_fault(_: str = Depends(_caller(RELEASE_ALLOWED))) -> dict:
-        state = shop.release_fault()
+    async def release_fault(caller: str = Depends(_caller(RELEASE_ALLOWED))) -> dict:
+        state = shop.release_fault(released_by=caller)  # 복구 신호에 누가 풀었는지 싣는다
         await outbox.flush(database)
         return _ok(state)
 

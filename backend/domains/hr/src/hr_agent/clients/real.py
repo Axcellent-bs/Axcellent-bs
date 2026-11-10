@@ -51,9 +51,7 @@ class ServiceDisabledError(UpstreamError):
 class A2APlanningClient:
     """개발(dev)에 `list_in_progress`·`verify_handover`를 A2A로 요청한다(둘 다 조회·검증이다)."""
 
-    def __init__(
-        self, target: str = "dev", http_client: httpx.AsyncClient | None = None
-    ) -> None:
+    def __init__(self, target: str = "dev", http_client: httpx.AsyncClient | None = None) -> None:
         self._target = target
         self._http = http_client
 

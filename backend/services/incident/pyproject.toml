@@ -1,7 +1,7 @@
 [project]
 name = "ax-svc-incident"
 version = "0.1.0"
-description = "services/incident — 장애 대응 (domains/infra-dejafix)"
+description = "services/incident — 인프라 AI (domains/infra-dejafix)"
 requires-python = ">=3.12"
 dependencies = ["ax-agent-infra"]
 

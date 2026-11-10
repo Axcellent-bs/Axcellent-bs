@@ -1,4 +1,4 @@
-"""장애 대응 서비스 에이전트 (incident, 8107).
+"""인프라 AI 서비스 에이전트 (incident, 8107).
 
 업무 로직은 `domains/infra-dejafix`(infra_agent)를 그대로 쓰고,
 이 폴더의 `agent-card.json`에 올린 skill만 받는다.

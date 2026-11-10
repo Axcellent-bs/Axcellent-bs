@@ -63,3 +63,54 @@ async def test_unknown_cause_and_action_are_left_empty(harness) -> None:
     await run(harness)
     sent = called(harness, "record_resolution")[0].input
     assert sent["root_cause"] is None and sent["action"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_handover_waits_for_the_past_case_so_the_hint_is_never_missed(harness) -> None:
+    """원인 미확정으로 넘길 때 과거 조치 한 줄이 붙으려면 찾기가 먼저 끝나 있어야 한다."""
+    harness.fakes.script("infra", "diagnose_incident", "undetermined")
+    inc = await run(harness)
+    rollback, similar = inc.steps["rollback"], inc.steps["similar_cases"]
+    assert rollback.status == "transfer_queued"
+    assert similar.finished_at is not None and rollback.started_at >= similar.finished_at
+    step = next(s for s in scenario_a().steps if s.id == "rollback")
+    assert "similar_cases" in step.also_after  # 필수 선행(after)이 아니라 끝나기만 기다린다
+    assert "similar_cases" not in step.after
+
+
+@pytest.mark.asyncio
+async def test_a_repeat_incident_is_fixed_the_same_way_right_away(harness) -> None:
+    """원인 미확정이어도 같은 유형 과거 장애가 장애 상태 해제로 풀렸으면 바로 같은 처리를 한다."""
+    harness.fakes.script("infra", "diagnose_incident", "undetermined")
+    harness.fakes.script("hr", "find_similar_cases", "past_release")
+    inc = await run(harness)
+    fix = called(harness, "release_fault")
+    assert len(fix) == 1 and fix[0].input["past_case_id"] == "card_past_release"
+    assert inc.steps["past_fix"].status == "completed"
+    rollback = inc.steps["rollback"]
+    assert (rollback.status, rollback.reason_code) == ("skipped", "past_fix_applied")
+    assert inc.steps["recovery"].status == "completed"
+    assert inc.status == "resolved"  # 사람에게 넘기지 않았다
+    sent = called(harness, "record_resolution")[0].input
+    assert sent["outcome"] == "resolved" and sent["action_code"] == "release_fault"
+
+
+@pytest.mark.asyncio
+async def test_a_less_similar_past_case_is_not_replayed(harness) -> None:
+    harness.fakes.script("infra", "diagnose_incident", "undetermined")
+    harness.fakes.script("hr", "find_similar_cases", "past_release_low")
+    inc = await run(harness)
+    assert called(harness, "release_fault") == []
+    past = inc.steps["past_fix"]
+    assert (past.status, past.reason_code) == ("skipped", "not_similar_enough")
+    assert inc.steps["rollback"].status == "transfer_queued"  # 지금처럼 사람에게 넘긴다
+
+
+@pytest.mark.asyncio
+async def test_without_a_past_case_the_incident_goes_to_a_person_as_before(harness) -> None:
+    harness.fakes.script("infra", "diagnose_incident", "undetermined")
+    inc = await run(harness)
+    assert called(harness, "release_fault") == []
+    assert inc.steps["past_fix"].reason_code == "no_past_case"
+    assert inc.steps["rollback"].status == "transfer_queued"
+    assert inc.status == "degraded"

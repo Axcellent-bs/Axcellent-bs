@@ -112,6 +112,29 @@ async def test_resolution_is_written_into_the_card_extra_and_body(svc) -> None:
 
 
 @pytest.mark.asyncio
+async def test_only_if_unresolved_fills_an_unresolved_card_but_keeps_a_resolved_one(svc) -> None:
+    """나중에 풀린 장애를 자동으로 남길 때: 미해결은 채우고, 이미 있는 해결 기록은 덮지 않는다."""
+    card_id = await _incident(svc)
+    first = _resolution(outcome="unresolved", root_cause=None, action=None, minutes_to_resolve=None)
+    await record_resolution(svc, _req("record_resolution", first, key="a"))
+    later = _resolution(
+        action="사람이 결제 장애 상태를 해제함", root_cause=None, only_if_unresolved=True
+    )
+    out = await record_resolution(svc, _req("record_resolution", later, key="b"))
+    assert out.output["outcome"] == "recorded"
+    card = await svc.memory.get_card(card_id)
+    assert card.extra["resolution"]["action"] == "사람이 결제 장애 상태를 해제함"
+
+    person = _resolution(action="결제 설정을 고침", draft_source="written_by_person")
+    await record_resolution(svc, _req("record_resolution", person, key="c"))
+    again = _resolution(action="자동 기록", only_if_unresolved=True)
+    kept = await record_resolution(svc, _req("record_resolution", again, key="d"))
+    assert kept.output["outcome"] == "duplicate"
+    card = await svc.memory.get_card(card_id)
+    assert card.extra["resolution"]["action"] == "결제 설정을 고침"  # 사람이 적은 기록 그대로
+
+
+@pytest.mark.asyncio
 async def test_missing_values_are_not_invented(svc) -> None:
     card_id = await _incident(svc)
     await record_resolution(
@@ -256,6 +279,25 @@ async def test_finds_the_past_incident_with_its_resolution(svc, tmp_path) -> Non
     assert case.resolved and case.resolution.action == "직전 버전으로 롤백"
     assert case.resolution.minutes_to_resolve == 14
     assert 0 < out.max_similarity <= 1
+
+
+@pytest.mark.asyncio
+async def test_a_resolved_case_is_not_cut_off_by_many_identical_unresolved_ones(
+    svc, tmp_path
+) -> None:
+    """제목이 같은 미해결 카드가 많아도 해결 기록이 있는 카드가 상위 결과에 남는다."""
+    _dense(svc, tmp_path)
+    for n in range(8):  # 의미 검색이 예전에 먼저 받던 후보 수(5)보다 많게
+        ctx = f"ctx_inc_u{n}"
+        await _incident(svc, ctx=ctx)
+        unresolved = {"context_id": ctx, "outcome": "unresolved"}
+        await record_resolution(svc, _req("record_resolution", unresolved, ctx=ctx, key=ctx))
+    solved = await _incident(svc, ctx="ctx_inc_s")
+    done = _resolution(context_id="ctx_inc_s", root_cause=None, action="장애 상태 해제")
+    await record_resolution(svc, _req("record_resolution", done, ctx="ctx_inc_s", key="s"))
+    out = await _search(svc, PAYMENT, limit=3)
+    assert len(out.cases) == 3 and out.cases[0].card_id == solved
+    assert out.cases[0].resolution.action == "장애 상태 해제"
 
 
 @pytest.mark.asyncio
@@ -595,3 +637,27 @@ async def test_similar_cases_carry_the_timeline(svc, tmp_path) -> None:
     )
     out = await _search(svc, "결제가 서버 오류로 실패해요")
     assert out.cases[0].timeline is not None and out.cases[0].timeline.recovered_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_case_with_a_replayable_action_comes_before_other_resolved_ones(
+    svc, tmp_path
+) -> None:
+    """해결 기록이 여럿이면 AI가 다시 할 수 있는 처리 방식이 남은 카드가 먼저다."""
+    _dense(svc, tmp_path)
+    for n in range(4):
+        ctx = f"ctx_inc_r{n}"
+        await _incident(svc, ctx=ctx)
+        plain = _resolution(context_id=ctx, root_cause=None, action="사람이 처리함")
+        await record_resolution(svc, _req("record_resolution", plain, ctx=ctx, key=ctx))
+    coded = await _incident(svc, ctx="ctx_inc_code")
+    done = _resolution(
+        context_id="ctx_inc_code",
+        root_cause=None,
+        action="장애 상태 해제",
+        action_code="release_fault",
+    )
+    await record_resolution(svc, _req("record_resolution", done, ctx="ctx_inc_code", key="code"))
+    out = await _search(svc, PAYMENT, limit=3)
+    assert out.cases[0].card_id == coded
+    assert out.cases[0].resolution.action_code == "release_fault"

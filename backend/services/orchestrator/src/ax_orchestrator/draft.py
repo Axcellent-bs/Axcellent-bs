@@ -50,7 +50,15 @@ def _this_event(inc: Incident) -> tuple[str | None, str | None, list[str]]:
         basis.append(f"원인은 데이터분석 AI가 낸 원인 후보 중 가장 확실한 것(확신도 {level})")
     action = None
     rollback = inc.steps.get("rollback")
-    if rollback is not None and rollback.status == "completed":
+    past_fix = inc.steps.get("past_fix")
+    if (
+        past_fix is not None
+        and past_fix.status == "completed"
+        and (inc.outputs.get("past_fix") or {}).get("fault_released")
+    ):
+        action = "과거 같은 장애의 처리 방식대로 인프라 AI가 결제 장애 상태를 해제해 정상화"
+        basis.append("조치는 총괄이 과거 같은 장애의 처리 방식으로 끝낸 '장애 상태 해제'")
+    elif rollback is not None and rollback.status == "completed":
         out = inc.outputs.get("rollback") or {}
         service = plain_terms(str(out.get("service") or "배포"))
         before, after = out.get("from_version"), out.get("to_version")

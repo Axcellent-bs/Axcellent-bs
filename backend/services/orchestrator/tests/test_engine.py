@@ -30,9 +30,13 @@ async def test_scenario_a_completes(harness) -> None:
     # 원인 후보에 확신도 high가 있으면 원인 확인 요청만 건너뛴다 (사람 개입 아님)
     check = inc.steps["cause_check"]
     assert (check.status, check.reason_code) == ("skipped", "cause_confident")
-    assert all(s.status == "completed" for k, s in inc.steps.items() if k != "cause_check")
+    # 원인 배포를 찾았으니 과거 처리 방식 다시 하기 대신 되돌리기로 처리한다
+    past = inc.steps["past_fix"]
+    assert (past.status, past.reason_code) == ("skipped", "cause_found")
+    skipped = ("cause_check", "past_fix")
+    assert all(s.status == "completed" for k, s in inc.steps.items() if k not in skipped)
     assert harness.events == ["incident.opened", "incident.resolved"]
-    assert inc.metrics["steps_total"] == 18  # + 재무 장애 비용 장부 기록
+    assert inc.metrics["steps_total"] == 19  # + 과거 같은 장애의 처리 방식 다시 하기
     assert inc.metrics["auto_rate"] == 1.0
 
 

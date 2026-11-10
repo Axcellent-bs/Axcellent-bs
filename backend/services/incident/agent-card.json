@@ -48,12 +48,26 @@
       "priority": "required"
     },
     {
+      "id": "release_fault",
+      "description": "같은 유형 과거 장애를 푼 처리 방식(결제 장애 상태 해제)을 다시 한다. 총괄이 원인 미확정 장애에서 같은 유형·해결된 과거 사건 카드(past_case_id, similarity)를 근거로 부른다. 지금 결제 서버가 이상(실패·감시 이상)일 때만 execute(release_fault)를 거쳐 쇼핑몰 장애 상태를 해제하고, 서버가 정상이면 not_needed로 아무것도 하지 않는다. 등급은 safety 기준표가 정한다(보류면 input-required, 승인 뒤 같은 요청을 다시 보내면 실행). 같은 사건에서 한 번만 실행한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#ReleaseFaultParams",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#ReleaseFaultOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
       "id": "infra_chat_send",
       "description": "말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 infra_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. LLM은 코드가 모은 인프라 사실(최근 배포, 쇼핑몰 결제 서버 상태, 최근 진단, 총괄 사건의 인프라 단계)만 풀어 쓴다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy. 인프라 AI 직접 대화(dashboard-api /api/dashboard/infra-chat). 조회·설명만 하고 배포·롤백·장애의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#InfraChatSendInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#InfraChatThreadOutput",
       "grade": "A",
-      "allowed_requesters": ["dashboard-api"],
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
       "verifier": null,
       "priority": "required"
     },
@@ -63,7 +77,9 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#InfraChatListInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#InfraChatListOutput",
       "grade": "read",
-      "allowed_requesters": ["dashboard-api"],
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
       "verifier": null,
       "priority": "required"
     },
@@ -73,7 +89,9 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#InfraChatRef",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#InfraChatThreadOutput",
       "grade": "read",
-      "allowed_requesters": ["dashboard-api"],
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
       "verifier": null,
       "priority": "required"
     },
@@ -83,7 +101,9 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#InfraChatRef",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#InfraChatThreadOutput",
       "grade": "A",
-      "allowed_requesters": ["dashboard-api"],
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
       "verifier": null,
       "priority": "required"
     }

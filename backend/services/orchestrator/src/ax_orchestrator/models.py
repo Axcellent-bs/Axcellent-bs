@@ -109,7 +109,17 @@ WAITING = {"held", "waiting_human"}
 # 사유 코드가 있어도 사람이 개입한 일로 세지 않는 것 (자동 처리율)
 # - service_disabled: 꺼진 서비스라 건너뛴 조회
 # - cause_confident: 확신도 높은 원인 후보가 있어 원인 확인 요청을 하지 않음
-NOT_INTERVENTION = {"service_disabled", "cause_confident"}
+NOT_INTERVENTION = {
+    "service_disabled",
+    "cause_confident",
+    # 과거 같은 장애의 처리 방식 다시 하기(past_fix)를 하지 않은 이유와, 그걸로 풀어 되돌리기를
+    # 하지 않은 것. 사람이 개입한 일이 아니다
+    "cause_found",
+    "no_past_case",
+    "not_replayable",
+    "not_similar_enough",
+    "past_fix_applied",
+}
 
 
 @dataclass

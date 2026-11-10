@@ -209,5 +209,28 @@ def test_inject_degrade_and_release_by_infra(client: TestClient, clock: Clock) -
     assert [t for t in _types() if t.startswith("shop.")] == ["shop.degraded", "shop.recovered"]
     recovered = events.MOCK_PUBLISHED[-1]
     assert ShopDegradedData.model_validate(recovered.data).value is None  # 새 측정값 없음
+    # 해제로 풀렸고 인프라 AI가 풀었다는 것을 싣는다 (총괄이 해결 내용으로 남긴다)
+    how = (recovered.data["recovery"], recovered.data["released_by"])
+    assert how == ("fault_released", "infra")
     assert degraded[0].idempotency_key.split(":")[1] == recovered.idempotency_key.split(":")[1]
     assert all(e.context_id is None for e in events.MOCK_PUBLISHED)  # 사건 번호는 통합 에이전트 몫
+
+
+def test_recovered_says_how_it_recovered() -> None:
+    """해제로 풀리면 해제한 쪽을, 해제 없이 지표가 돌아오면 `metrics_normal`을 싣는다."""
+    released, db = _monitor()
+    _trip_degraded(released)
+    released.reset(released_by="admin")
+    data = _outbox(db)[-1]["data"]
+    assert (data["recovery"], data["released_by"]) == ("fault_released", "admin")
+
+    natural, db2 = _monitor()
+    for second in range(0, 61, 5):
+        natural.record(float(second), 1500.0, False)
+        natural.evaluate(float(second))
+    for second in range(61, 200, 5):
+        natural.record(float(second), 100.0, False)
+        natural.evaluate(float(second))
+    last = _outbox(db2)[-1]
+    assert last["type"] == "shop.recovered"
+    assert (last["data"]["recovery"], last["data"]["released_by"]) == ("metrics_normal", None)
