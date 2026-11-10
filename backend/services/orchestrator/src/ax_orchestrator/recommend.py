@@ -3,7 +3,8 @@
 인사 `find_similar_cases` 결과(`inc.outputs["similar_cases"]`)만 쓰는 읽기 전용 계산이다.
 해결 내용(원인·조치)이 있는 과거 이벤트 중 유사도가 가장 높은 것 하나를 고른다.
 없으면 근거 없음으로 둔다.
-추천은 화면에 보여 줄 뿐 어떤 단계도 바꾸거나 실행하지 않는다(안전 관문과 사람 판단은 그대로).
+추천 자체는 아무것도 실행하지 않는다. 처리 방식(`action_code`)이 있으면 시나리오 A의
+`past_fix` 단계가 같은 처리를 안전 관문을 거쳐 다시 한다(`plans/scenario_a.py`).
 """
 
 from __future__ import annotations
@@ -35,7 +36,11 @@ def recommend(similar: dict[str, Any] | None) -> dict[str, Any] | None:
         else:
             reason = "비슷한 과거 이벤트는 있으나 해결된 기록(원인·조치)이 없음"
         return {"status": "no_evidence", "reason": reason}
-    best = max(usable, key=lambda c: c.get("similarity") or 0.0)
+    # 다시 할 수 있는 처리 방식(action_code)이 남은 사례를 먼저, 그다음 유사도 순
+    best = max(
+        usable,
+        key=lambda c: (bool(c["resolution"].get("action_code")), c.get("similarity") or 0.0),
+    )
     resolution = best["resolution"]
     return {
         "status": "found",
@@ -46,5 +51,6 @@ def recommend(similar: dict[str, Any] | None) -> dict[str, Any] | None:
         "root_cause": resolution.get("root_cause"),
         "action": resolution.get("action"),
         "minutes_to_resolve": resolution.get("minutes_to_resolve"),
+        "action_code": resolution.get("action_code"),
         "caveat": CAVEAT,
     }

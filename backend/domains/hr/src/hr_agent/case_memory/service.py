@@ -173,6 +173,7 @@ async def record_resolution(svc: Services, request: AgentRequest) -> AgentResult
         opened_at=params.opened_at,
         prior_case_id=params.prior_case_id,
         draft_source=params.draft_source,
+        action_code=params.action_code,
     )
     key = f"record_resolution:{card.card_id}:{_payload_hash(resolution)}"
     evidence = make_evidence(

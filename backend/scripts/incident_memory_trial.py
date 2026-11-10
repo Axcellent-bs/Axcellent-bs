@@ -81,6 +81,8 @@ def summarize(inc: dict[str, Any]) -> dict[str, Any]:
         "status": inc["status"],
         "diagnose": step(inc, "diagnose").get("note"),
         "rollback": rollback.get("status"),
+        "past_fix": step(inc, "past_fix").get("status"),
+        "past_fix_reason": step(inc, "past_fix").get("reason_code"),
         "similar_status": sim.get("status"),
         "similar_found": len(cases),
         "similar_same_type": len(same),
@@ -170,8 +172,8 @@ def main() -> int:
                 c.delete(f"{SHOP}/api/shop/admin/faults", headers=auth, timeout=30)
             results.append(r)
             print(json.dumps({k: r.get(k) for k in (
-                "run", "kind", "deploy", "event_type", "diagnose", "rollback", "similar_found",
-                "similar_usable", "recommendation", "hint_in_handoff", "recovered_after_s", "error",
+                "run", "kind", "event_type", "diagnose", "past_fix", "rollback", "similar_found",
+                "similar_usable", "recommendation", "human_fixed", "recovered_after_s", "error",
             )}, ensure_ascii=False), flush=True)  # fmt: skip
             args.out.write_text(
                 json.dumps({"started": started, "runs": results}, ensure_ascii=False, indent=1),

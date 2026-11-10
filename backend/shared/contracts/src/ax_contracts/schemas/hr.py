@@ -680,6 +680,9 @@ class CaseResolution(AxModel):
     prior_case_id: str | None = None  # 이 사건을 시작할 때 근거로 보여 준 과거 사건 카드(반복 장애)
     # 사람이 직접 적었는지, AI 초안을 그대로 썼는지·고쳤는지. 초안은 사람이 확인해야 저장된다
     draft_source: Literal["written_by_person", "ai_draft_kept", "ai_draft_edited"] | None = None
+    # 처리 방식을 AI가 다시 할 수 있는 이름으로: `rollback_deployment`(이전 버전으로 되돌림),
+    # `release_fault`(장애 상태 해제). 같은 유형 장애가 다시 나면 총괄이 이 값으로 같은 처리를 한다
+    action_code: str | None = None
 
 
 class EventTimeline(AxModel):
@@ -760,6 +763,7 @@ class RecordResolutionInput(AxModel):
     # True면 카드에 이미 해결 기록(결과가 미해결이 아닌 것)이 있을 때 바꾸지 않는다(`duplicate`).
     # 총괄이 장애가 나중에 풀린 것을 자동으로 남길 때 쓴다. 사람이 적은 기록을 덮지 않게 한다
     only_if_unresolved: bool = False
+    action_code: str | None = None  # `CaseResolution.action_code`와 같다
 
 
 class RecordResolutionOutput(AxModel):

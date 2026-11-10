@@ -26,6 +26,7 @@ from typing import Any
 from ax_orchestrator.draft import kst_text
 from ax_orchestrator.models import Incident, Plan, Step, iso, now
 from ax_orchestrator.naming import plain_terms
+from ax_orchestrator.recommend import recommend
 from ax_orchestrator.timeline import past_hint
 
 # 고객지원 `request_incident_compensation`이 한 호출에 받는 구매자 수 상한
@@ -107,14 +108,74 @@ def _recovered_draft(inc: Incident) -> dict[str, Any]:
 RECOVERY_TIMEOUT_SECONDS = 180.0  # 인프라가 30초 간격 최대 5회 다시 확인하는 시간을 기다려 준다
 
 
+# 같은 유형 과거 장애의 처리 방식을 다시 할 때 필요한 유사도 하한
+PAST_FIX_MIN_SIMILARITY = 0.85
+# 다시 할 수 있는 처리 방식 → 인프라 skill. 이전 버전으로 되돌리기는 원인 배포가 있어야 해서
+# 진단이 원인 배포를 찾은 경우(아래 rollback 단계)에만 한다
+REPLAYABLE = {"release_fault"}
+
+
+def _past_fix_gate(inc: Incident) -> tuple[str, str, str] | None:
+    """같은 유형 과거 장애가 같은 처리 방식으로 풀렸을 때만 그 방식을 바로 다시 한다.
+
+    원인 배포를 찾았으면 지금처럼 되돌리기로 처리하고, 과거 사례가 없거나 처리 방식을 다시 할 수
+    없거나 덜 비슷하면 하지 않는다(사람에게 넘기는 글에는 과거 조치가 참고로 붙는다).
+    """
+    if _out(inc, "diagnose").get("status") == "suspected":
+        return ("skipped", "cause_found", "원인 배포를 찾아 되돌리기로 처리")
+    rec = recommend(inc.outputs.get("similar_cases")) or {}
+    if rec.get("status") != "found":
+        return ("skipped", "no_past_case", "같은 유형 과거 장애의 해결 기록 없음")
+    if rec.get("action_code") not in REPLAYABLE:
+        return ("skipped", "not_replayable", "과거 처리 방식을 AI가 다시 할 수 없음")
+    if (rec.get("similarity") or 0) < PAST_FIX_MIN_SIMILARITY:
+        pct = round((rec.get("similarity") or 0) * 100)
+        return ("skipped", "not_similar_enough", f"과거 장애와 덜 비슷함({pct}%)")
+    return None
+
+
+def _past_fix(inc: Incident) -> dict[str, Any]:
+    rec = recommend(inc.outputs.get("similar_cases")) or {}
+    return {
+        "component": inc.component,
+        "past_case_id": rec.get("card_id"),
+        "similarity": rec.get("similarity") or 0.0,
+    }
+
+
+def _past_fix_done(inc: Incident) -> bool:
+    run = inc.steps.get("past_fix")
+    return (
+        run is not None
+        and run.status == "completed"
+        and bool(_out(inc, "past_fix").get("fault_released"))
+    )
+
+
 def _rollback_gate(inc: Incident) -> tuple[str, str, str] | None:
-    """원인이 정해지지 않았으면 롤백하지 않는다. 사람이 원인을 확인하게 이관 큐로 넘긴다."""
+    """원인이 정해지지 않았으면 롤백하지 않는다. 사람이 원인을 확인하게 이관 큐로 넘긴다.
+
+    같은 유형 과거 장애의 처리 방식으로 이미 풀었으면 되돌리지 않는다.
+    """
+    if _past_fix_done(inc):
+        return (
+            "skipped",
+            "past_fix_applied",
+            "과거 같은 장애의 처리 방식으로 처리해 되돌리지 않음",
+        )
     diagnosis = _out(inc, "diagnose")
     if diagnosis.get("status") == "suspected" and diagnosis.get("suspects"):
         return None
     note = "원인을 아직 모르므로 되돌리지 않고, 사람이 원인을 확인하도록 넘김"
     hint = past_hint(inc)  # 같은 유형의 과거 이벤트가 있으면 사람이 먼저 볼 수 있게 붙인다(참고용)
     return ("transfer_queued", "no_rollback_target", f"{note}. {hint}" if hint else note)
+
+
+def _recovery_gate(inc: Incident) -> tuple[str, str, str] | None:
+    """되돌리기나 과거 처리 방식 다시 하기 중 하나가 끝났을 때만 복구를 검증한다."""
+    if inc.steps["rollback"].status == "completed" or _past_fix_done(inc):
+        return None
+    return ("skipped", "no_fix_applied", "선행 단계 미완료(rollback)")
 
 
 def _recovery_verdict(output: dict[str, Any]) -> tuple[str, str] | None:
@@ -298,7 +359,12 @@ def _resolution(inc: Incident) -> dict[str, Any]:
     recovered = auto or inc.recovered_at is not None
     rollback = inc.steps["rollback"]
     action = None
-    if rollback.status == "completed":
+    action_code = None
+    if _past_fix_done(inc):
+        action = "과거 같은 장애의 처리 방식대로 인프라 AI가 결제 장애 상태를 해제해 정상화"
+        action_code = "release_fault"
+    elif rollback.status == "completed":
+        action_code = "rollback_deployment"
         out = _out(inc, "rollback")
         service = plain_terms(str(out.get("service") or "배포"))
         before, after = out.get("from_version"), out.get("to_version")
@@ -307,6 +373,9 @@ def _resolution(inc: Incident) -> dict[str, Any]:
         )
     elif not auto and recovered:
         action = recovery_action(inc)
+        how = inc.shared.get("recovery") or {}
+        if isinstance(how, dict) and how.get("recovery") == "fault_released":
+            action_code = "release_fault"
     found = _out(inc, "root_cause")
     top = next((h for h in found.get("hypotheses") or [] if h.get("confidence") == "high"), None)
     end = now() if auto or inc.recovered_at is None else inc.recovered_at
@@ -317,6 +386,7 @@ def _resolution(inc: Incident) -> dict[str, Any]:
         "root_cause": kst_text(str(top["explanation"])) if top and top.get("explanation") else None,
         "action": action,
         "minutes_to_resolve": minutes if recovered else None,
+        "action_code": action_code if recovered else None,
     }
 
 
@@ -330,6 +400,15 @@ def scenario_a() -> Plan:
                 "find_similar_cases",
                 "비슷한 과거 이벤트 찾기 (hr)",
                 build=_similar,
+                required=False,
+            ),
+            Step(
+                "past_fix",
+                "release_fault",
+                "과거 같은 장애의 처리 방식 다시 하기 (infra)",
+                after=("diagnose", "similar_cases"),
+                build=_past_fix,
+                gate=_past_fix_gate,
                 required=False,
             ),
             Step("impact", "impact_analysis", "영향 분석 (data)", build=_impact),
@@ -356,11 +435,13 @@ def scenario_a() -> Plan:
                 "rollback_deployment",
                 "문제 배포를 이전 버전으로 되돌리기 (B)",
                 after=("diagnose", "impact"),
-                # 사람에게 넘길 때 같은 유형 과거 장애의 조치를 붙이려면 찾기가 먼저 끝나야 한다
-                # (찾기는 필수가 아니라 실패해도 기다리기만 하고 막지 않는다)
-                also_after=("similar_cases",),
+                # 사람에게 넘길 때 같은 유형 과거 장애의 조치를 붙이려면 찾기가 먼저 끝나야 한다.
+                # 과거 처리 방식으로 이미 풀었으면 되돌리지 않는다(둘 다 기다리기만 한다)
+                also_after=("similar_cases", "past_fix"),
                 build=_rollback,
                 gate=_rollback_gate,
+                # 풀렸는지는 복구 검증(필수)이 정한다. 과거 처리 방식으로 풀면 되돌리기는 없다
+                required=False,
             ),
             Step(
                 "related_prs",
@@ -408,8 +489,9 @@ def scenario_a() -> Plan:
                 "recovery",
                 "verify_recovery",
                 "복구 검증 (infra)",
-                after=("rollback",),
+                also_after=("rollback", "past_fix"),
                 build=_recovery,
+                gate=_recovery_gate,
                 verdict=_recovery_verdict,
                 timeout=RECOVERY_TIMEOUT_SECONDS,
             ),
