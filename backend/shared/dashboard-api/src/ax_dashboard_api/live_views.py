@@ -47,6 +47,18 @@ def _shop_url() -> str:
     return agent_url("shop-api")
 
 
+def unreachable_reason(error: httpx.HTTPError) -> str:
+    """판매 서버에 닿지 못한 이유를 화면에 보일 말로.
+
+    시간 초과 예외는 문구가 비어 있어서 예외 종류로 고른다.
+    """
+    if isinstance(error, httpx.TimeoutException):
+        return f"판매 서버가 {TIMEOUT_SECONDS:g}초 안에 응답하지 않았습니다"
+    if isinstance(error, httpx.ConnectError):
+        return "판매 서버에 연결하지 못했습니다(꺼져 있거나 회사 연결의 주소가 다를 수 있습니다)"
+    return f"판매 서버와 통신하지 못했습니다({type(error).__name__})"
+
+
 async def _shop_get(
     path: str, params: dict[str, Any] | None = None, *, not_found: str | None = None
 ) -> Any:
@@ -55,13 +67,13 @@ async def _shop_get(
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             res = await client.get(f"{_shop_url()}{path}", params=params)
     except httpx.HTTPError as error:
-        raise ApiError(
-            502, "UPSTREAM_UNAVAILABLE", f"shop-api에 연결할 수 없다 ({error})"
-        ) from error
+        raise ApiError(502, "UPSTREAM_UNAVAILABLE", unreachable_reason(error)) from error
     if res.status_code == 404 and not_found:
         raise ApiError(404, "NOT_FOUND", not_found)
     if res.status_code >= 400:
-        raise ApiError(502, "UPSTREAM_ERROR", f"shop-api 오류 (HTTP {res.status_code})")
+        raise ApiError(
+            502, "UPSTREAM_ERROR", f"판매 서버에서 오류가 났습니다 (HTTP {res.status_code})"
+        )
     return res.json().get("data")
 
 
@@ -206,7 +218,7 @@ async def order_page(
         params["until"] = end
     items = await _shop_get("/api/shop/orders", params) or []
     if not isinstance(items, list):
-        raise ApiError(502, "UPSTREAM_ERROR", "shop-api가 목록 모양이 아닌 응답을 돌려줬다")
+        raise ApiError(502, "UPSTREAM_ERROR", "판매 서버가 주문 목록이 아닌 응답을 보냈습니다")
     if len(items) > MAX_ORDERS:
         raise ApiError(
             422,
@@ -230,7 +242,7 @@ async def order_detail(order_no: str) -> OrderDetail:
     """판매 서버의 주문 한 건을 화면 모델로 맞춘다. 없는 값은 None이다."""
     o = await _shop_get(f"/api/shop/orders/{order_no}", not_found="주문을 찾을 수 없다")
     if not isinstance(o, dict) or "order_id" not in o:
-        raise ApiError(502, "UPSTREAM_ERROR", "shop-api가 주문 모양이 아닌 응답을 돌려줬다")
+        raise ApiError(502, "UPSTREAM_ERROR", "판매 서버가 주문이 아닌 응답을 보냈습니다")
     status = str(o.get("status") or "")
     return OrderDetail(
         order_no=o["order_id"],
