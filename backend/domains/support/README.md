@@ -56,6 +56,9 @@
 | `answer_planning_question` | read | planning | 기획이 문의에서 보낸 변경 요청의 근거를 되물으면 **문의 서비스가 보낸 요청의 기록**(보낼 때 남긴 근거 요약·근거 문의 ID)으로만 코드 규칙으로 답한다(#264, LLM 없음). 사건·요청 번호·테넌트가 맞는 기록이 없으면 `unknown`, 근거 질문이고 기록이 있으면 `answered`, 우리 요청이지만 기록으로 답할 수 없으면 `needs_human`. 시각은 요청을 보낸 시각이다. 사업 상태는 바꾸지 않지만 `needs_human`이면 받은 질문을 메모리에 적어 둔다(이 skill의 유일한 쓰기, `list_planning_questions`로 읽음). 사람이 답하는 화면과 `receive_planning_answer`는 후속 |
 | `list_planning_questions` | read | dashboard-api, orchestrator, planning | 기획이 되물었는데 기록으로 답하지 못해(`needs_human`) 사람이 답해야 하는 질문 목록(기본은 열린 것만, 요청한 회사의 질문만). `SUPPORT_PG_DSN`이 있으면 DB(`planning_questions`)에도 남아 재시작해도 이어지고, 없으면 메모리에만 있다. 사람이 답해 기획 `receive_planning_answer`로 보내는 skill·화면은 후속 |
 | `send_planning_answer` | A | dashboard-api | 사람이 답한 기획 질문을 기획 `receive_planning_answer`(A)로 보낸다. 이 회사가 받아 둔 열린 질문에만 답할 수 있고 답에 개인정보가 있으면 보내지 않는다. 답한 사람은 사람 토큰에서 채운다. 안전 관문을 먼저 거치고, 기획이 응답하면(`applied`·`duplicate`·`unknown_question`) 질문을 닫고 기획에 닿지 않으면 열어 둔다. 같은 질문의 재요청은 처음 결과를 돌려준다 |
+| `submit_idea` | A | dashboard-api, shop-api | 고객이 "이런 걸 해 주면 좋겠다"는 아이디어(이벤트·혜택 요청, 새 기능, 개선, 상품 제안)를 **문의·불만과 따로** 남긴다. 글은 `untrusted.text`로만 받아 개인정보를 가려 저장하고, 영역(배송·결제·상품·쿠폰/적립/이벤트·사이트 사용성)은 단어 규칙으로 코드가 붙인다. 환불·취소·불량 같은 문제는 받지 않고 문의로 안내하며(`use_inquiry`), 광고·링크(`spam`)·너무 짧은 글(`too_short`)·하루 5건 초과(`rate_limited`)도 받지 않는다. 같은 고객의 같은 글은 한 번만 쌓는다 |
+| `list_ideas` | read | dashboard-api, orchestrator, planning | 아이디어 목록(종류·영역·상태)과 아직 안 넘긴 새 아이디어를 (종류, 영역)으로 묶은 현황(건수·고객 수·기간·많이 나온 단어·넘길 만큼 쌓였는지). 고객 번호는 내보내지 않는다 |
+| `send_idea_digest` | A | dashboard-api | 쌓인 묶음을 기획 `create_ticket`으로 넘긴다(이벤트 요청·향후 방안 기획의 재료). 기준 건수(기본 3)에 못 미친 묶음은 남겨 두고, 안전 관문을 한 번 거친 뒤 묶음마다 기획에 요청 한 건을 만든다. 요청 글에는 **고객 원문 없이** 건수·고객 수·기간·많이 나온 단어만 싣는다. 기획에 닿은 묶음만 `sent`로 바꾸고 닿지 못한 묶음은 `new`로 남아 다시 누르면 이어진다. 넘긴 사람은 사람 토큰에서 채운다 |
 | `create_claim` | A | dashboard-api, shop-api, orchestrator | 취소·반품·교환 접수 + 규칙 판정 |
 | `decide_claim` | A | dashboard-api | 사람 확인이 필요한 클레임 승인·거절. 안전 장치가 환불을 닫은 입고 클레임은 사유와 함께 거절로 종료하고(같은 품목 재접수도 막는다), 만료(`review_timeout`)로 닫힌 것만 `retry_refund`로 새 시도 키(`…:retry<n>`)로 다시 요청한다 |
 | `receive_return`, `inspect_return` | A | dashboard-api (입고는 shop-api도) | 반품 입고, 검수 결과 기록 |
@@ -209,3 +212,9 @@ ax-contracts, ax-agent-template
 - 보유기간은 태윤 님 결정(#819)을 따른다: 문의 원문 3년, 클레임 기록 5년(방침 제4조 ⑥, 줄이지 못함). 클레임이 이어진 문의는 클레임 기록이 끝나는 날까지 남긴다 — 클레임을 만든 날(`created_at`)부터 5년, 클레임 기록을 읽지 못하면(다른 프로세스에서 문의 번호만 받은 경우) 문의를 받은 날부터 5년이다. 법적 근거 확인은 법무 몫이다(#819).
 - 구매자 ID: 기록(근거 `ref_ids`·`data_summary`)에는 싣지 않는다 — 장애 보상 요청의 `buyer:<ID>` 목록과 고객 신호의 `data_summary` 구매자 ID를 뺐다. **남아 있는 것**: 장애 보상 멱등 키(`<사건>:request_compensation:<구매자>:<사유>`)가 마케팅 요청의 `idempotency_key`로 공통 로그 `request_received`에 남고, 마케팅이 내는 `coupon.issued`의 `buyer_id`는 재무 장부용 계약 필드다. 키 모양을 바꾸면 이미 지급한 기록의 중복 방지가 끊겨 쿠폰이 다시 나갈 수 있고 해시도 가명정보일 수 있어, 이관 방법과 법무 확인이 정해지기 전에는 바꾸지 않는다.
 - 아직 없는 것: 화면 버튼, 시험 문의 정리(`[시험]` 제목) skill(기존 운영자 CLI `retention`은 그대로).
+
+### 고객 아이디어 창구 (2026-11-10)
+- 쇼핑몰 `POST /api/shop/ideas`(shop-api) → `submit_idea` → 아이디어 저장소(`ideas.py`, `SUPPORT_PG_DSN`이 있으면 `ideas` 테이블). 문의(`create_inquiry`)와 저장소·통계·접수 한도가 모두 따로다. 아이디어가 상담 대기열이나 문의 급증 감지에 섞이지 않는다.
+- 상담 화면은 dashboard-api `GET /ideas`(목록·묶음 현황)와 `POST /ideas/digest`(기획에 넘기기, 사람 토큰 필요)를 쓴다. 이 화면(AXcellent 쪽)은 후속이다.
+- 기획으로는 `create_ticket`(제목 `[고객 아이디어] 이벤트·혜택 요청 · 쿠폰·적립·이벤트 N건`)만 보낸다. 기획이 이벤트 요청이나 향후 방안 기획서로 잇고, 개발에 넘기는 일은 기획의 기존 흐름이다.
+- 한계: 영역은 단어 규칙이라 놓치거나 `기타`가 될 수 있고, "많이 나온 말"은 조사만 뗀 단어 세기라 형태소 분석이 아니다. 고객 원문은 기획에 보내지 않으므로 기획이 더 알고 싶으면 상담 화면의 목록을 봐야 한다.

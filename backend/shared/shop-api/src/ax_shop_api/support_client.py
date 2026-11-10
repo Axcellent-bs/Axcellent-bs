@@ -43,6 +43,12 @@ def unwrap(result: AgentResult) -> dict[str, Any]:
         raise ShopError("NOT_FOUND", message or "찾을 수 없다", 404)
     if outcome == "duplicate_claim":
         raise ShopError("DUPLICATE_CLAIM", message or "이미 접수된 클레임이 있다", 409)
+    if outcome == "use_inquiry":
+        raise ShopError("USE_INQUIRY", message or "문제는 문의로 접수해 달라", 422)
+    if outcome in ("too_short", "spam"):
+        raise ShopError("INVALID_IDEA", message or "받을 수 없는 글이다", 422)
+    if outcome == "rate_limited":
+        raise ShopError("RATE_LIMITED", message or "잠시 후 다시 시도해 달라", 429)
     if outcome == "invalid_state":
         raise ShopError("INVALID_STATE", message or "현재 상태에서는 할 수 없다", 409)
     if outcome.startswith("not_executed_"):

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import hmac
 import logging
 import os
@@ -206,6 +207,16 @@ class InquiryIn(BaseModel):
     )  # 영수증 사진. 서버가 개수·크기를 확인
 
 
+class IdeaIn(BaseModel):
+    """고객 아이디어. 문의·불만과 따로 받는다. 글은 `untrusted`로만 넘긴다."""
+
+    model_config = {"extra": "forbid"}
+
+    buyer_id: str
+    kind: Literal["event", "feature", "improvement", "product", "other"]
+    text: str = Field(min_length=1, max_length=500)
+
+
 class InquiryFeedbackIn(BaseModel):
     """해결된 문의에 고객이 남기는 평가. 후기 글은 `untrusted`로만 넘긴다."""
 
@@ -386,6 +397,7 @@ def create_app(
     inquiry_limiter = inquiries.InquiryRateLimiter()
     app.state.inquiry_limiter = inquiry_limiter
     feedback_limiter = inquiries.InquiryRateLimiter()  # 문의 접수와 한도를 따로 센다
+    idea_limiter = inquiries.InquiryRateLimiter()  # 아이디어도 문의와 따로 센다
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error(_: Request, error: RequestValidationError) -> JSONResponse:
@@ -728,6 +740,26 @@ def create_app(
         if "id" not in out:  # 문의가 아닌 응답은 성공으로 내보내지 않는다
             raise ShopError("UPSTREAM_ERROR", "고객지원 응답이 문의 형식이 아니다", 502)
         return _ok(inquiries.customer_view(out))
+
+    # --- 고객 아이디어(의견): 쇼핑몰 → 고객지원 `submit_idea`. 문의·불만과 따로 쌓는다 ----------
+    @app.post("/api/shop/ideas", status_code=201)
+    async def submit_idea(body: IdeaIn) -> dict:
+        user_id = inquiries.buyer_number(body.buyer_id)
+        idea_limiter.hit(body.buyer_id)
+        text = " ".join(body.text.split())
+        digest = hashlib.sha1(f"{body.kind}|{text}".encode()).hexdigest()[:12]
+        context_id = support_client.new_context_id()
+        done = await support_client.call(
+            "submit_idea",
+            context_id,
+            {"kind": body.kind, "user_id": user_id},
+            {"text": text},
+            target=f"user:{user_id}:{digest}",
+        )
+        if "idea_id" not in done:  # 아이디어 접수 결과가 아닌 응답은 성공으로 내보내지 않는다
+            raise ShopError("UPSTREAM_ERROR", "고객지원 응답이 아이디어 형식이 아니다", 502)
+        # 고객에게는 접수 사실만 돌려준다 (영역·묶음 같은 내부 분류는 보이지 않는다)
+        return _ok({"idea_id": done["idea_id"], "received": True}, context_id=context_id)
 
     # --- 해결 결과 평가: 쇼핑몰 → 고객지원 `submit_feedback` -----------------------------
     @app.post("/api/shop/inquiries/{inquiry_id}/feedback", status_code=201)

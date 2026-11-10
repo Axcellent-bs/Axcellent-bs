@@ -139,6 +139,19 @@ action = "submit_feedback"
 owner = "support"
 base_grade = "A"
 
+# 고객이 쇼핑몰에서 아이디어(의견)를 남기기. 문의·불만과 따로 쌓고 돈은 움직이지 않는다
+[[actions]]
+action = "submit_idea"
+owner = "support"
+base_grade = "A"
+
+# 사람이 쌓인 아이디어를 묶음별로 기획 create_ticket에 넘기기. 기획에 요청 한 건이 생길 뿐이다
+# (고객지원 request_change와 같은 A). 요청 글에는 고객 원문 없이 건수·단어만 싣는다
+[[actions]]
+action = "send_idea_digest"
+owner = "support"
+base_grade = "A"
+
 [[actions]]
 action = "set_feedback_status"
 owner = "support"

@@ -170,6 +170,36 @@
       "priority": "recommended"
     },
     {
+      "id": "submit_idea",
+      "description": "고객이 쇼핑몰에서 '이런 걸 해 주면 좋겠다'는 아이디어(이벤트·혜택 요청, 새 기능, 개선, 상품 제안)를 문의·불만과 따로 남긴다. 글은 untrusted.text로만 받고 개인정보는 가려 저장하며, 영역(배송·결제·상품·쿠폰/적립/이벤트·사이트 사용성)은 단어 규칙으로 코드가 붙인다. 환불·취소·불량 같은 문제는 받지 않고 문의로 안내하며(use_inquiry), 광고·링크(spam)·너무 짧은 글(too_short)·하루 5건 초과(rate_limited)도 받지 않는다. 같은 고객의 같은 글은 한 번만 쌓는다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/idea_handlers.py#SubmitIdeaInput",
+      "output_schema": "agents/support/src/support_agent/idea_handlers.py#SubmitIdeaOutput",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api", "shop-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_ideas",
+      "description": "고객 아이디어 목록(종류·영역·상태로 거름)과 아직 기획에 넘기지 않은 새 아이디어를 (종류, 영역)으로 묶은 현황(건수·고객 수·기간·많이 나온 단어·넘길 만큼 쌓였는지). 읽기만 한다. 고객 번호는 내보내지 않는다.",
+      "input_schema": "agents/support/src/support_agent/idea_handlers.py#ListIdeasInput",
+      "output_schema": "agents/support/src/support_agent/idea_handlers.py#ListIdeasOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "planning"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "send_idea_digest",
+      "description": "쌓인 새 아이디어를 (종류, 영역) 묶음마다 기획 create_ticket으로 넘긴다(이벤트 요청·향후 방안 기획의 재료). 기준 건수(min_ideas, 기본 3)에 못 미친 묶음은 남겨 두고, 넘길 묶음이 없으면 안전 관문도 부르지 않는다(nothing_to_send). 기획에 보내는 제목·근거 요약에는 고객 원문 없이 건수·고객 수·기간·많이 나온 단어만 싣는다. 기획에 닿은 묶음만 sent로 바꾸고 닿지 못한 묶음은 new로 남아 다시 누르면 이어진다. 넘긴 사람은 사람 토큰에서 채운다. 상태 변경이라 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/idea_handlers.py#SendIdeaDigestInput",
+      "output_schema": "agents/support/src/support_agent/idea_handlers.py#SendIdeaDigestOutput",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "set_feedback_status",
       "description": "후기를 공개 또는 숨김으로 정한다 (확인 대기 후기의 결정). 상태 변경이라 execute()를 거친다.",
       "input_schema": "agents/support/src/support_agent/schemas.py#SetFeedbackStatusInput",

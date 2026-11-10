@@ -23,7 +23,7 @@
 | --- | --- | --- |
 | 장애 대응 (현재 장애만, DejaFix 데이터) | DejaFix | `/infra` |
 | PC·서버 연결 | DejaFix | `/hosts` |
-| 고객 문의 | AXcellent | `/inquiry`, `/console`, `/support` |
+| 고객 문의 | AXcellent | `/inquiry`, `/console`, `/support`, `/voice`(고객의 소리: 고객 아이디어를 모아 기획에 넘김) |
 | 클레임·보상 | AXcellent | `/claims`, `/queue` |
 | 리뷰·지식 | AXcellent | `/reviews`, `/kb` |
 | 공지·쿠폰 | AXcellent | `/marketing` |

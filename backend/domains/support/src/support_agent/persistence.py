@@ -28,6 +28,7 @@ from support_agent.chat import ChatStore, ChatThread
 from support_agent.claim_schemas import Claim
 from support_agent.claims import ClaimStore
 from support_agent.compensation import SequenceLedger
+from support_agent.ideas import Idea, IdeaStore
 from support_agent.incident_queue import IncidentQueueStore, QueueItem
 from support_agent.planning_question_inbox import PlanningQuestionInbox, PlanningQuestionRecord
 from support_agent.proposal_decisions import ProposalDecision, ProposalDecisionStore
@@ -64,6 +65,7 @@ TABLES: tuple[Table, ...] = (
         ("status",),
     ),
     Table("planning_questions", ("tenant_id", "question_id"), ("context_id", "status")),
+    Table("ideas", ("tenant_id", "idea_id"), ("context_id", "status", "kind")),
     Table("support_chats", ("tenant_id", "chat_id"), ("context_id", "who", "status")),
     Table("compensation_sequences", ("tenant_id", "context_id")),
     Table("compensation_results", ("tenant_id", "idempotency_key"), ("context_id",)),
@@ -561,6 +563,36 @@ def build_sequence_ledger() -> SequenceLedger:
 def build_incident_queue_store() -> IncidentQueueStore:
     repo = get_repo()
     return PersistentIncidentQueueStore(repo) if repo else IncidentQueueStore()
+
+
+class PersistentIdeaStore(IdeaStore):
+    """고객 아이디어를 DB에 둔다. `_put` 한 곳에서만 쓰면 된다."""
+
+    def __init__(self, repo: Repo) -> None:
+        super().__init__()
+        self._repo = repo
+        for doc in repo.load("ideas"):
+            idea = Idea.model_validate(doc)
+            self._items[f"{idea.tenant_id}:{idea.idea_id}"] = idea
+
+    def _put(self, idea: Idea) -> Idea:
+        self._repo.upsert(
+            "ideas",
+            {
+                "tenant_id": idea.tenant_id,
+                "idea_id": idea.idea_id,
+                "context_id": idea.context_id,
+                "status": idea.status,
+                "kind": idea.kind,
+            },
+            idea.model_dump(mode="json"),
+        )
+        return super()._put(idea)  # DB 쓰기에 성공한 뒤에 캐시에 넣는다
+
+
+def build_idea_store() -> IdeaStore:
+    repo = get_repo()
+    return PersistentIdeaStore(repo) if repo else IdeaStore()
 
 
 def build_planning_question_inbox() -> PlanningQuestionInbox:

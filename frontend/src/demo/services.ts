@@ -67,12 +67,13 @@ export const SERVICES: Service[] = [
     desc: '회사 PC와 서버를 사내 IP로 등록하고 연결 상태를 확인합니다.',
   },
   {
-    id: 'inquiry', agent: 'support', family: 'customer', name: '고객 문의', by: 'AXcellent', Icon: IconUser, entry: '/inquiry', paths: ['/inquiry', '/console', '/support'],
+    id: 'inquiry', agent: 'support', family: 'customer', name: '고객 문의', by: 'AXcellent', Icon: IconUser, entry: '/inquiry', paths: ['/inquiry', '/console', '/support', '/voice'],
     desc: '문의를 분류하고 답변 초안을 쓰며, 상담원은 콘솔에서 확인해 보냅니다.',
     children: [
       { href: '/inquiry', label: '문의 현황' },
       { href: '/console', label: '상담 콘솔' },
       { href: '/support', label: 'AI 처리 내역' },
+      { href: '/voice', label: '고객의 소리' },
     ],
   },
   {

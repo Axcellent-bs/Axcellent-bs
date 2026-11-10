@@ -77,6 +77,8 @@ LEDGER = persistence.build_sequence_ledger()
 CHANGES = persistence.build_change_request_store()
 # needs_human으로 답한 기획 질문 (사람이 답할 때까지)
 PLANNING_QUESTIONS = persistence.build_planning_question_inbox()
+# 고객이 낸 아이디어(의견). 문의·불만과 따로 쌓는다 (idea_handlers.py)
+IDEAS = persistence.build_idea_store()
 # 보내지 않기로 한 변경 요청 제안의 기록 (이유만 남긴다). 제안은 proposal_handlers.py
 DECISIONS = persistence.build_proposal_decision_store()
 # 장애 보상의 대기 → 사람 승인 → 발송 큐 (incident_queue.py, 사건 보상 요청은 incident_handlers.py)

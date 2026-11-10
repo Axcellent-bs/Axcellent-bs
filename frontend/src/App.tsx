@@ -23,6 +23,7 @@ import PlanningPage from '@/pages/Planning'
 import DevPage from '@/pages/Dev'
 import Queue from '@/pages/Queue'
 import Reviews from '@/pages/Reviews'
+import Voice from '@/pages/Voice'
 import Support from '@/pages/Support'
 import Orders from '@/pages/Orders'
 import InfraHosts from '@/demo/InfraHosts'
@@ -78,6 +79,7 @@ function Pages() {
           <Route path="/claims" element={<Claims />} />
           <Route path="/queue" element={<Queue />} />
           <Route path="/reviews" element={<Reviews />} />
+          <Route path="/voice" element={<Voice />} />
           <Route path="/kb" element={<Kb />} />
           <Route path="/finance" element={<Finance />} />
           <Route path="/finance/daily" element={<Finance />} />
