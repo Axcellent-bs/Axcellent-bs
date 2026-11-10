@@ -116,3 +116,42 @@ def test_photo_content_is_never_logged(
         _post(client, [PHOTO])
         _post(client, [{**PHOTO, "data_base64": "bad !!"}])
     assert "QUJDREVGRw" not in caplog.text and "bad !!" not in caplog.text
+
+
+# ---- 한 장 한도 (413, 사진 값은 오류에 싣지 않는다) -----------------------------------------
+LIMIT = inquiries.MAX_IMAGE_BASE64
+
+
+def _big(size: int) -> dict:
+    return {"ref": "img_big", "media_type": "image/jpeg", "data_base64": "A" * size}
+
+
+def test_한_장이_한도를_넘으면_413이고_응답에_사진이_없다(
+    client: TestClient, support: FakeSupport
+) -> None:
+    res = _post(client, [_big(LIMIT + 1)])
+    assert res.status_code == 413
+    assert res.json() == {
+        "error": {"code": "IMAGE_TOO_LARGE", "message": "사진 한 장의 크기가 너무 크다"}
+    }
+    assert len(res.text) < 500 and "AAAA" not in res.text
+    assert support.calls == []
+
+
+def test_한도_그대로는_접수된다(client: TestClient, support: FakeSupport) -> None:
+    assert _post(client, [_big(LIMIT)]).status_code == 201
+
+
+def test_422_응답에도_요청이_보낸_값이_실리지_않는다(
+    client: TestClient, support: FakeSupport
+) -> None:
+    secret = "QUJDREVGRw=="  # ref가 없는 사진: 오류가 사진이 든 항목을 되돌려 주던 경우
+    res = _post(
+        client, [{"media_type": "image/jpeg", "data_base64": secret}], body="비밀 본문 내용"
+    )
+    assert res.status_code == 422
+    assert secret not in res.text and "비밀 본문 내용" not in res.text
+    detail = res.json()["detail"]
+    assert detail and all("input" not in item for item in detail)  # 어느 필드가 틀렸는지는 남는다
+    assert detail[0]["loc"][-1] == "ref"
+    assert support.calls == []
