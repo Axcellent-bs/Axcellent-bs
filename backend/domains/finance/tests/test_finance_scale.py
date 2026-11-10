@@ -119,6 +119,52 @@ def test_live_books_without_a_store_read_everything(monkeypatch: pytest.MonkeyPa
     assert queries == [None, None]
 
 
+def test_live_books_follow_the_cursor_to_the_last_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """shop-api가 한 페이지씩 주면 next_cursor로 끝까지 넘겨 장부에 모두 넣는다."""
+    monkeypatch.setenv("AX_SHOP_API_URL", "http://shop")
+    monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
+    now = fc.now()
+    rows = [_order(f"ord_{n:04d}", now - timedelta(hours=1 + n)) for n in range(5)]
+    cursors: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/api/shop/orders":
+            return httpx.Response(200, json={"data": [], "meta": {}})
+        params = request.url.params
+        assert params["limit"] == str(bk.ORDERS_PAGE)
+        after = params.get("cursor")
+        cursors.append(after)
+        rest = [r for r in rows if after is None or r["order_id"] > after][:2]
+        more = bool(rest) and rest[-1]["order_id"] != rows[-1]["order_id"]
+        meta = {"next_cursor": rest[-1]["order_id"] if more else None}
+        return httpx.Response(200, json={"data": rest, "meta": meta})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    books = asyncio.run(bk.live_books(client))
+    assert cursors == [None, "ord_0001", "ord_0003"]
+    assert {o["order_id"] for o in books.orders} == {r["order_id"] for r in rows}
+    assert "orders" not in books.unavailable
+
+
+def test_live_books_drop_orders_if_a_later_page_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """중간 페이지가 실패하면 앞 페이지만으로 장부를 만들지 않고 못 받은 자료로 적는다."""
+    monkeypatch.setenv("AX_SHOP_API_URL", "http://shop")
+    monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
+    first = _order("ord_0001", fc.now() - timedelta(hours=1))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/api/shop/orders":
+            return httpx.Response(200, json={"data": [], "meta": {}})
+        if request.url.params.get("cursor"):
+            return httpx.Response(503, json={"error": {"code": "BUSY"}})
+        return httpx.Response(200, json={"data": [first], "meta": {"next_cursor": "ord_0001"}})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    books = asyncio.run(bk.live_books(client))
+    assert "orders" in books.unavailable
+    assert books.orders == []
+
+
 def test_sold_between_picks_the_same_orders_as_a_full_scan() -> None:
     books = bk.seed_books()
     books.mock = False  # 실제 모드처럼 계산 결과를 기억하게 한다

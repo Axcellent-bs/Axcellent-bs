@@ -171,6 +171,39 @@ def test_delivery_marks_only_arrived_orders_once(client: TestClient) -> None:
     assert traffic.delivery_plan(order_id, created) == (shipped, arrived)  # 늘 같은 값
 
 
+def test_delivery_follows_the_cursor_within_a_window(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """한 구간에 한 페이지보다 많은 주문이 있어도 next_cursor로 넘겨 모두 표시한다."""
+    from datetime import UTC, datetime, timedelta
+
+    monkeypatch.setattr(traffic, "ORDERS_PAGE", 2)
+    ids = {_paid_order(client) for _ in range(5)}
+    pages: list[str] = []
+    call = _caller(client)
+
+    def counting(method, path, body=None, token=None):
+        if method == "GET" and path.startswith("/api/shop/orders?"):
+            pages.append(path)
+        return call(method, path, body, token)
+
+    delivery = traffic.Delivery(
+        counting,
+        token="adm-token",
+        log=lambda _: None,
+        clock=lambda: datetime.now(UTC) + timedelta(days=4),
+        window_hours=24 * 40,  # 한 구간에 다 들어오게
+    )
+    assert delivery.sweep()["delivered"] == 5
+    assert len(pages) == 3 and "cursor=" in pages[1]  # 2 + 2 + 1
+    delivered = {
+        o["order_id"]
+        for o in client.get("/api/shop/orders", params={"limit": 1000}).json()["data"]
+        if o["delivered_at"]
+    }
+    assert ids <= delivered
+
+
 def test_delivery_without_token_does_nothing(client: TestClient) -> None:
     order_id = _paid_order(client)
     delivery = traffic.Delivery(_caller(client), token="", log=lambda _: None)

@@ -196,6 +196,7 @@ def _print(line: str) -> None:
 SHIP_HOURS = (12, 30)  # 결제 → 발송
 TRANSIT_HOURS = (24, 48)  # 발송 → 도착
 LAST_ARRIVAL = timedelta(hours=SHIP_HOURS[1] + TRANSIT_HOURS[1])  # 이보다 오래된 주문은 다 도착
+ORDERS_PAGE = 1000  # 주문 목록 한 페이지(shop-api 최대). 더 있으면 meta.next_cursor로 넘긴다
 
 
 def _iso(moment: datetime) -> str:
@@ -248,13 +249,8 @@ class Delivery:
         start = self.cursor or (now - self.lookback)
         while start < ready:
             end = min(start + self.window, ready)
-            query = urllib.parse.urlencode({"since": _iso(start), "until": _iso(end)})
-            status, body = self.call("GET", f"/api/shop/orders?{query}")
-            if status != 200:
-                self.log(f"{now_text()} 경고: 배송 표시용 주문 조회 실패 {status}")
-                break
-            for order in body.get("data", []):
-                self._deliver(order, now, done)
+            if not self._sweep_window(start, end, now, done):
+                break  # 이 구간은 다음 sweep에서 처음부터 다시 읽는다
             start = self.cursor = end
         if done["delivered"] or done["failed"]:
             self.log(
@@ -262,6 +258,25 @@ class Delivery:
                 + (f", 실패 {done['failed']}건" if done["failed"] else "")
             )
         return done
+
+    def _sweep_window(
+        self, start: datetime, end: datetime, now: datetime, done: dict[str, int]
+    ) -> bool:
+        """한 구간의 주문을 `ORDERS_PAGE`건씩 `meta.next_cursor`로 끝까지 넘기며 표시한다."""
+        params = {"since": _iso(start), "until": _iso(end), "limit": ORDERS_PAGE}
+        while True:
+            query = urllib.parse.urlencode(params)
+            status, body = self.call("GET", f"/api/shop/orders?{query}")
+            if status != 200:
+                self.log(f"{now_text()} 경고: 배송 표시용 주문 조회 실패 {status}")
+                return False
+            for order in body.get("data", []):
+                self._deliver(order, now, done)
+            meta = body.get("meta")
+            cursor = meta.get("next_cursor") if isinstance(meta, dict) else None
+            if not cursor:
+                return True
+            params = {**params, "cursor": cursor}
 
     def _deliver(self, order: dict, now: datetime, done: dict[str, int]) -> None:
         if order.get("status") != "paid" or order.get("delivered_at"):

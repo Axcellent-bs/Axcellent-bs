@@ -64,15 +64,27 @@ def human_token() -> str:
     )
 
 
+def _orders_since(since: str) -> list[dict[str, Any]]:
+    """`since` 이후 주문 전부. shop-api는 한 번에 최대 1000건이라 next_cursor로 끝까지 넘긴다."""
+    params: dict[str, Any] = {"since": since, "limit": 1000}
+    orders: list[dict[str, Any]] = []
+    while True:
+        r = httpx.get(f"{SHOP}/api/shop/orders?{urlencode(params)}", timeout=120)
+        r.raise_for_status()
+        body = r.json()
+        orders.extend(body.get("data") or [])
+        cursor = (body.get("meta") or {}).get("next_cursor")
+        if not cursor:
+            return orders
+        params = {**params, "cursor": cursor}
+
+
 def settled_payments() -> tuple[list[dict[str, Any]], str, str]:
     cfg = fc.load_config().pg
     today = fc.today()
     lo, hi = today - timedelta(days=6), today - timedelta(days=cfg.payout_days)
-    query = urlencode({"since": fc.iso(fc.day_start(lo))})
-    r = httpx.get(f"{SHOP}/api/shop/orders?{query}", timeout=120)
-    r.raise_for_status()
     rows = []
-    for order in r.json().get("data") or []:
+    for order in _orders_since(fc.iso(fc.day_start(lo))):
         for p in order.get("payments") or []:
             at = fc.parse_dt(p.get("created_at"))
             if p.get("status") != "succeeded" or at is None or not isinstance(p.get("amount"), int):

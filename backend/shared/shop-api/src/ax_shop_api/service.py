@@ -44,6 +44,11 @@ def clean_source_tag(value: str | None) -> str | None:
 
 
 _REFUND_CHUNK = 500  # IN (...) 한 번에 넣는 주문 수(SQLite 변수 상한 안쪽)
+# 주문 목록 한 페이지. 전체를 한 번에 읽으면 25만 건에서 서버가 멈춘다(2026-11-10 251 서버)
+ORDER_PAGE_DEFAULT = 200
+ORDER_PAGE_MAX = 1000
+# 주문 응답의 결제 항목(순서 그대로)
+_PAYMENT_KEYS = ("payment_id", "amount", "method_code", "status", "failure_code", "created_at")
 
 
 def _now() -> str:
@@ -222,9 +227,20 @@ class Shop:
             return self._order(conn, order_id)
 
     def list_orders(
-        self, buyer_id: str | None = None, since: str | None = None, until: str | None = None
-    ) -> list[dict[str, Any]]:
-        """접수 시각(created_at)이 `since` 이상, `until` 미만인 주문. 둘 다 없으면 전체."""
+        self,
+        buyer_id: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = ORDER_PAGE_DEFAULT,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """접수 시각(created_at)이 `since` 이상, `until` 미만인 주문을 order_id 순으로 한 페이지.
+
+        한 페이지는 `limit`건(최대 `ORDER_PAGE_MAX`). `cursor`는 앞 페이지의 마지막 order_id이고,
+        돌려주는 두 번째 값이 다음 페이지 cursor다(마지막 페이지면 None). 품목·결제·환불은
+        페이지 안 주문을 묶어 한 번에 읽는다.
+        """
+        limit = max(1, min(limit, ORDER_PAGE_MAX))
         where, args = [], []
         if buyer_id:
             where.append("buyer_id = ?")
@@ -235,62 +251,96 @@ class Shop:
         if until:
             where.append("created_at < ?")
             args.append(_period_bound(until))
+        if cursor:
+            where.append("order_id > ?")
+            args.append(cursor)
+        sql = "SELECT * FROM orders" + (" WHERE " + " AND ".join(where) if where else "")
         with self.db.tx() as conn:
-            sql = "SELECT order_id FROM orders" + (" WHERE " + " AND ".join(where) if where else "")
-            ids = [r["order_id"] for r in conn.execute(sql + " ORDER BY order_id", args)]
-            refunds = self._refunds_by_order(conn, ids)
-            return [self._order(conn, order_id, refunds) for order_id in ids]
+            rows = conn.execute(sql + " ORDER BY order_id LIMIT ?", [*args, limit + 1]).fetchall()
+            page = rows[:limit]
+            orders = self._orders_view(conn, page)
+        next_cursor = page[-1]["order_id"] if len(rows) > limit else None
+        return orders, next_cursor
+
+    def _orders_view(
+        self, conn: sqlite3.Connection, orders: list[sqlite3.Row]
+    ) -> list[dict[str, Any]]:
+        """주문 행 묶음에 품목·결제·환불을 붙인다. 표마다 쿼리 몇 번(주문마다 읽지 않는다)."""
+        ids = [o["order_id"] for o in orders]
+        items = self._by_order(
+            conn,
+            ids,
+            "SELECT i.order_id, i.rowid AS item_rowid, i.product_id, i.seller_id, i.qty, "
+            "i.unit_price, i.points_share, i.coupon_share, COALESCE(i.title, p.name) AS title "
+            "FROM order_items i LEFT JOIN products p ON p.product_id = i.product_id "
+            "WHERE i.order_id IN ({marks}) ORDER BY i.rowid",
+        )
+        payments = self._by_order(
+            conn,
+            ids,
+            "SELECT order_id, payment_id, amount, method_code, status, failure_code, created_at "
+            "FROM payments WHERE order_id IN ({marks}) ORDER BY rowid",
+        )
+        refunds = self._refunds_by_order(conn, ids)
+        return [
+            self._order_view(
+                o,
+                items.get(o["order_id"], []),
+                payments.get(o["order_id"], []),
+                refunds.get(o["order_id"], []),
+            )
+            for o in orders
+        ]
 
     @staticmethod
-    def _refunds_by_order(
-        conn: sqlite3.Connection, order_ids: list[str]
-    ) -> dict[str, list[dict[str, Any]]]:
-        """주문 id 묶음의 환불 기록을 쿼리 몇 번으로 읽는다(주문마다 읽지 않는다). 시각 오름차순."""
-        found: dict[str, list[dict[str, Any]]] = {}
+    def _by_order(
+        conn: sqlite3.Connection, order_ids: list[str], sql: str
+    ) -> dict[str, list[sqlite3.Row]]:
+        """`sql`(`{marks}` 자리에 IN 목록)을 주문 id 묶음으로 돌려 order_id별로 모은다."""
+        found: dict[str, list[sqlite3.Row]] = {}
         for start in range(0, len(order_ids), _REFUND_CHUNK):
             chunk = order_ids[start : start + _REFUND_CHUNK]
-            marks = ",".join("?" * len(chunk))
-            rows = conn.execute(
-                "SELECT order_id, refund_id, payment_id, amount, created_at FROM refunds "
-                f"WHERE order_id IN ({marks}) ORDER BY created_at, rowid",
-                chunk,
-            )
-            for r in rows:
-                found.setdefault(r["order_id"], []).append(
-                    {
-                        "refund_id": r["refund_id"],
-                        "payment_id": r["payment_id"],
-                        "amount": r["amount"],
-                        "created_at": r["created_at"],
-                    }
-                )
+            for r in conn.execute(sql.format(marks=",".join("?" * len(chunk))), chunk):
+                found.setdefault(r["order_id"], []).append(r)
         return found
 
-    def _order(
-        self,
-        conn: sqlite3.Connection,
-        order_id: str,
-        refunds: dict[str, list[dict[str, Any]]] | None = None,
-    ) -> dict[str, Any]:
-        """`refunds`는 목록 조회가 미리 읽어 온 묶음. 없으면(단건) 이 주문 것만 읽는다."""
+    @classmethod
+    def _refunds_by_order(
+        cls, conn: sqlite3.Connection, order_ids: list[str]
+    ) -> dict[str, list[dict[str, Any]]]:
+        """주문 id 묶음의 환불 기록을 쿼리 몇 번으로 읽는다(주문마다 읽지 않는다). 시각 오름차순."""
+        rows = cls._by_order(
+            conn,
+            order_ids,
+            "SELECT order_id, refund_id, payment_id, amount, created_at FROM refunds "
+            "WHERE order_id IN ({marks}) ORDER BY created_at, rowid",
+        )
+        return {
+            order_id: [
+                {
+                    "refund_id": r["refund_id"],
+                    "payment_id": r["payment_id"],
+                    "amount": r["amount"],
+                    "created_at": r["created_at"],
+                }
+                for r in found
+            ]
+            for order_id, found in rows.items()
+        }
+
+    def _order(self, conn: sqlite3.Connection, order_id: str) -> dict[str, Any]:
         order = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
         if order is None:
             raise ShopError("ORDER_NOT_FOUND", "주문을 찾을 수 없다", 404)
-        items = conn.execute(
-            "SELECT i.rowid AS item_rowid, i.product_id, i.seller_id, i.qty, i.unit_price, "
-            "i.points_share, i.coupon_share, COALESCE(i.title, p.name) AS title FROM order_items i "
-            "LEFT JOIN products p ON p.product_id = i.product_id "
-            "WHERE i.order_id = ? ORDER BY i.rowid",
-            (order_id,),
-        ).fetchall()
-        payments = conn.execute(
-            "SELECT payment_id, amount, method_code, status, failure_code, created_at "
-            "FROM payments WHERE order_id = ? ORDER BY rowid",
-            (order_id,),
-        ).fetchall()
-        if refunds is None:
-            refunds = self._refunds_by_order(conn, [order_id])
-        refund_list = refunds.get(order_id, [])
+        return self._orders_view(conn, [order])[0]
+
+    @staticmethod
+    def _order_view(
+        order: sqlite3.Row,
+        items: list[sqlite3.Row],
+        payments: list[sqlite3.Row],
+        refund_list: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         refunded = sum(r["amount"] for r in refund_list)
         return {
             "order_id": order["order_id"],
@@ -324,7 +374,7 @@ class Shop:
                 }
                 for i in items
             ],
-            "payments": [dict(p) for p in payments],
+            "payments": [{key: p[key] for key in _PAYMENT_KEYS} for p in payments],
         }
 
     # --- 판매자 입점 --------------------------------------------------------

@@ -96,6 +96,9 @@ CREATE TABLE IF NOT EXISTS retention_daily_stats (
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
 CREATE INDEX IF NOT EXISTS idx_refunds_order_id ON refunds(order_id);
+-- 주문 목록 페이지: 기간(since·until)과 구매자별 조회
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_orders_buyer_id ON orders(buyer_id);
 """
 
 # 이미 만들어진 DB 파일에 뒤늦게 붙은 열(`CREATE TABLE IF NOT EXISTS`는 열을 더하지 않는다)

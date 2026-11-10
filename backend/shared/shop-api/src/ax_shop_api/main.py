@@ -46,7 +46,7 @@ from ax_shop_api.lookups import Lookups
 from ax_shop_api.promotions import Promotions
 from ax_shop_api.refunds import Refunds
 from ax_shop_api.seed import seed
-from ax_shop_api.service import Shop, ShopError
+from ax_shop_api.service import ORDER_PAGE_DEFAULT, ORDER_PAGE_MAX, Shop, ShopError
 from ax_shop_api.storefront import Storefront
 
 
@@ -462,11 +462,20 @@ def create_app(
     ) -> dict:
         return _ok(shop.update_product(product_id, body.model_dump(exclude_none=True)))
 
+    # 동기 핸들러: FastAPI가 스레드에서 돌려 DB를 읽는 동안 이벤트 루프(/health 등)를 막지 않는다.
+    # Db는 연결 하나를 RLock으로 감싸고(check_same_thread=False) sqlite는 직렬 모드라
+    # 스레드에서 써도 된다
     @app.get("/api/shop/orders")
-    async def list_orders(
-        buyer_id: str | None = None, since: str | None = None, until: str | None = None
+    def list_orders(
+        buyer_id: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=ORDER_PAGE_MAX)] = ORDER_PAGE_DEFAULT,
+        cursor: Annotated[str | None, Query(pattern=r"^[A-Za-z0-9_-]{1,64}$")] = None,
     ) -> dict:
-        return _ok(shop.list_orders(buyer_id, since, until))
+        """order_id 순 한 페이지. 다음 페이지는 `meta.next_cursor`를 cursor로 준다(끝이면 null)."""
+        orders, next_cursor = shop.list_orders(buyer_id, since, until, limit, cursor)
+        return _ok(orders, next_cursor=next_cursor)
 
     # 고정 경로는 `{order_id}` 경로보다 먼저 등록해야 가로채이지 않는다
     @app.get("/api/shop/orders/attributed")
