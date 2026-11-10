@@ -34,6 +34,18 @@
       "priority": "required"
     },
     {
+      "id": "end_incident_notice",
+      "description": "정상화 공지 없이 대응이 끝난 이벤트(context_id)의 장애 배너를 내린다. 쇼핑몰 배너 목록에서 같은 이벤트 번호의 게시 중 배너를 찾아 내리고 메모리에 남은 장애 공지도 끝낸다. 내릴 것이 없으면 빈 목록으로 성공한다(다시 불러도 같다). 정상화 공지가 이미 나간 이벤트에는 부르지 않는다.",
+      "input_schema": "agents/marketing/src/marketing_agent/schemas.py#EndIncidentNoticeInput",
+      "output_schema": "agents/marketing/src/marketing_agent/schemas.py#EndedNotices",
+      "grade": "A",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "get_notice",
       "description": "게시된 공지의 사실·약속·기간·공개 문구를 돌려준다. 게시되지 않았거나 없으면 '확인할 수 없음'으로 답한다. 상태를 바꾸지 않는다.",
       "input_schema": "agents/marketing/src/marketing_agent/schemas.py#GetNoticeInput",

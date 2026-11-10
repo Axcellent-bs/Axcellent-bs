@@ -127,6 +127,7 @@ SERVICES: tuple[Service, ...] = (
         (
             "draft_notice",
             "publish_notice",
+            "end_incident_notice",
             "get_notice",
             "list_active_notices",
             "receive_campaign_brief",

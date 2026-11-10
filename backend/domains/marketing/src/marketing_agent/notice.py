@@ -78,6 +78,15 @@ class NoticeStore:
             and notice_id not in self._ended
         ]
 
+    def end_incident_notices(self, context_id: str) -> list[str]:
+        """같은 사건의 열린 장애 공지를 모두 끝낸 것으로 하고 그 번호를 돌려준다.
+
+        복구 공지 없이 장애 공지를 내릴 때 쓴다(복구 공지를 게시하면 `publish`가 같은 일을 한다).
+        """
+        ended = self.open_incident_notice_ids(context_id)
+        self._ended.update(ended)
+        return ended
+
     def publish(self, context_id: str, draft: NoticeDraft, notice_id: str | None = None) -> str:
         """게시한다. `notice_id`를 주면 그 번호를 쓴다(쇼핑몰 배너 번호라 겹치면 안 된다)."""
         if draft.draft_id in self._by_draft:

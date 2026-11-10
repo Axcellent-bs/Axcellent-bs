@@ -81,11 +81,12 @@ const STEP_NAME: Record<string, string> = {
   diagnose: "원인 진단", impact: "영향 분석", similar_cases: "비슷한 과거 이벤트 찾기", root_cause: "원인 후보 추정",
   cause_check: "원인 확인 요청", rollback: "문제 배포를 이전 버전으로 되돌리기", related_prs: "관련 PR 찾기",
   link_incident: "이벤트에 PR 연결", notice: "점검 공지 초안", notice_publish: "점검 공지 게시", publish_notice: "점검 공지 게시",
-  recovered_notice: "정상화 공지", kpi: "처리 시간 요약", record: "이벤트 기록", resolution: "해결 내용 기록",
+  recovered_notice: "정상화 공지", end_notice: "장애 배너 내리기", kpi: "처리 시간 요약", record: "이벤트 기록", resolution: "해결 내용 기록",
 };
 const REASON_CODE: Record<string, string> = {
   gate_rejected: "안전 확인 단계에서 막힘", metric_not_supported: "아직 분석하지 못하는 항목", service_disabled: "해당 서비스가 꺼져 있음",
   human_input: "사람 확인이 필요함", cause_confident: "원인이 충분히 뚜렷함", undetermined: "원인을 특정하지 못함",
+  notice_already_ended: "정상화 공지로 이미 내림", no_incident_notice: "올린 장애 공지가 없음", waiting_recovery: "복구 신호를 기다리는 중",
 };
 const DEPT_NAME: Record<string, string> = {
   infra: "인프라 AI", data: "데이터분석 AI", planning: "기획 AI", dev: "개발 AI", marketing: "마케팅 AI",

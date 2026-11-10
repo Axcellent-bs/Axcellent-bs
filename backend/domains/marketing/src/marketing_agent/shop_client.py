@@ -66,8 +66,8 @@ def _error(response: httpx.Response) -> ShopError:
         return ShopError("UNAVAILABLE", f"shop-api 응답 오류 ({response.status_code})")
 
 
-async def _send(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-    """shop-api를 부르고 응답의 `data`를 돌려준다. 거절이나 무응답은 `ShopError`."""
+async def _send_data(method: str, path: str, **kwargs: Any) -> Any:
+    """shop-api를 부르고 응답 `data`(딕셔너리나 리스트)를 그대로 돌려준다. 실패는 `ShopError`."""
     url = f"{config.agent_url('shop-api')}/api/shop{path}"
     headers = {"Authorization": f"Bearer {config.agent_token('marketing')}"}
     client = _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
@@ -84,6 +84,12 @@ async def _send(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         data = response.json()["data"]
     except (ValueError, KeyError, TypeError):
         raise ShopError("UNAVAILABLE", "shop-api 응답에 데이터가 없다") from None
+    return data
+
+
+async def _send(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    """`_send_data`인데 응답 `data`가 딕셔너리여야 한다. 아니면 `ShopError`."""
+    data = await _send_data(method, path, **kwargs)
     if not isinstance(data, dict):
         raise ShopError("UNAVAILABLE", "shop-api 응답 모양이 다르다")
     return data
@@ -132,6 +138,14 @@ async def post_banner(
         "context_id": context_id,
     }
     return await _send("POST", "/banners", json=body)
+
+
+async def list_banners() -> list[dict[str, Any]]:
+    """지금 게시 중인 배너 목록(`notice_id`, `context_id` 등). 응답이 목록이 아니면 `ShopError`."""
+    data = await _send_data("GET", "/banners")
+    if not isinstance(data, list):
+        raise ShopError("UNAVAILABLE", "shop-api 응답 모양이 다르다")
+    return [item for item in data if isinstance(item, dict)]
 
 
 async def end_banner(notice_id: str) -> dict[str, Any] | None:

@@ -90,7 +90,7 @@ export const SKILL_KO: Record<string, string> = {
   inspect_return: "반품 검수", process_claim_queue: "보상 큐 처리", suggest_compensation: "보상안 제안",
   request_incident_compensation: "장애 보상 요청", analyze_receipt: "영수증 분석", analyze_claim_request: "클레임 신청 분석",
   customer_signals: "고객 신호 보기", list_at_risk_customers: "이탈 위험 고객 보기",
-  draft_notice: "공지 초안 쓰기", publish_notice: "공지 올리기", get_notice: "공지 보기", list_active_notices: "게시 중인 공지 보기",
+  draft_notice: "공지 초안 쓰기", publish_notice: "공지 올리기", end_incident_notice: "장애 배너 내리기", get_notice: "공지 보기", list_active_notices: "게시 중인 공지 보기",
   issue_coupon: "쿠폰 발급",
   closing_report: "결산 보고서",
   anomaly_detection: "이상 징후 찾기", impact_analysis: "영향 분석", fraud_score: "부정 거래 점수", kpi_summary: "지표 요약",

@@ -69,6 +69,7 @@ ORCHESTRATOR_STEPS = {
     "recovery",
     "recovered_draft",
     "recovered_notice",
+    "end_notice",
     "finance_record",
     "kpi",
     "record",
@@ -156,7 +157,9 @@ def test_every_orchestrator_step_is_either_assigned_or_excluded() -> None:
 def test_planning_check_and_recovery_verification_are_excluded() -> None:
     assert isinstance(STAGES["cause_check"], Excluded)
     assert isinstance(STAGES["recovery"], Excluded)
+    assert isinstance(STAGES["end_notice"], Excluded)  # 복구 신호 뒤에 도는 사후 정리
     assert stage_of("cause_check") is None and stage_of("recovery") is None
+    assert stage_of("end_notice") is None
 
 
 def test_dev_steps_are_counted_as_dev_even_though_the_plan_says_planning() -> None:

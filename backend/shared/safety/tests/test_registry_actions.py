@@ -856,3 +856,21 @@ async def test_send_message_is_a_for_planning_and_dev(gate: Gate, act, requester
     assert (ok.grade, ok.status) == ("A", "executed")
     other = await gate.execute(act("send_message", "support", "msg-support"))
     assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["marketing", "coupon"])
+async def test_end_incident_notice_is_a_for_marketing(gate: Gate, act, requester: str) -> None:
+    """장애 배너 내리기: 관문 요청자는 execute()를 부르는 마케팅이다(서비스 이름 coupon도 된다)."""
+    decision = await gate.execute(act("end_incident_notice", requester, f"end-{requester}"))
+    assert (decision.grade, decision.status) == ("A", "executed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["orchestrator", "planning", "finance"])
+async def test_end_incident_notice_refuses_other_requesters(
+    gate: Gate, act, requester: str
+) -> None:
+    """총괄은 마케팅 skill을 A2A로 부를 뿐 관문에 직접 요청하지 않는다."""
+    decision = await gate.execute(act("end_incident_notice", requester, f"end-{requester}"))
+    assert (decision.status, decision.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)

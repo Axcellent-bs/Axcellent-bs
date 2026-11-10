@@ -42,7 +42,11 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("link_incident", "A", None),
         ("verify_rollback_target", "read", None),
     ],
-    "marketing": [("draft_notice", "read", None), ("publish_notice", "A", None)],
+    "marketing": [
+        ("draft_notice", "read", None),
+        ("publish_notice", "A", None),
+        ("end_incident_notice", "A", None),
+    ],
     "support": [
         ("send_reply", "A", None),
         ("request_incident_compensation", "A", None),
@@ -156,6 +160,7 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
         channel_code="banner",
         status="published",
     ),
+    "end_incident_notice": lambda r: _ok(ended_notice_ids=["ntc_incident_opened"], status="ended"),
     # 실제 재무 `LossReport` 모양(받지 못한 값은 None = 확인할 수 없음)
     "loss_aggregation": lambda r: _ok(
         failed_orders=128,

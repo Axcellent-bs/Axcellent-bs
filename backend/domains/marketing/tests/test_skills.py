@@ -767,3 +767,154 @@ def test_banner_and_email_still_publish_after_the_sns_guard(
     assert banner["status"] == "completed" and email["status"] == "completed"
     assert [e["action"] for e in seen_exec] == ["publish_notice", "publish_notice"]
     assert [r.url.path for r in seen] == ["/api/shop/banners"]
+
+
+# --- end_incident_notice: 정상화 공지 없이 닫힌 이벤트의 장애 배너 내리기 -----------------------
+
+
+def _banner(notice_id: str, context_id: str = CTX, status: str = "active") -> dict:
+    return {"notice_id": notice_id, "context_id": context_id, "status": status, "text": "t"}
+
+
+def _banners_api(banners: list[dict], deleted: list[str] | None = None):  # noqa: ANN202
+    """GET /banners는 `banners`를 돌려주고, DELETE는 번호를 기록하고, POST는 올린 것으로 답한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": banners, "meta": {}})
+        if request.method == "DELETE":
+            if deleted is not None:
+                deleted.append(request.url.path.rsplit("/", 1)[-1])
+            return httpx.Response(200, json={"data": {"status": "ended"}, "meta": {}})
+        body = json.loads(request.content)
+        return httpx.Response(201, json={"data": {"notice_id": body["notice_id"]}, "meta": {}})
+
+    return handler
+
+
+def test_end_incident_notice_takes_down_the_banner_without_a_resolved_notice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """정상화 공지 없이도 같은 이벤트의 장애 배너를 내리고, 메모리의 장애 공지도 끝낸다."""
+    seen_exec = _fake_execute(monkeypatch, _decision())
+    deleted: list[str] = []
+    banners: list[dict] = []
+    _banner_shop(monkeypatch, _banners_api(banners, deleted))
+    opened = _call("publish_notice", {"draft_id": _draft("incident_opened")})["output"]["notice_id"]
+    banners.append(_banner(opened))
+    result = _call("end_incident_notice", {})
+    assert result["status"] == "completed"
+    assert result["output"] == {"ended_notice_ids": [opened], "status": "ended"}
+    assert deleted == [opened]
+    assert _call("list_active_notices", {})["output"]["total"] == 0
+    assert seen_exec[-1]["action"] == "end_incident_notice"
+    assert seen_exec[-1]["key"] == f"{CTX}:end_incident_notice"
+
+
+def test_end_incident_notice_finds_banners_by_event_when_memory_lost_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """마케팅이 번호를 잊어도 쇼핑몰 배너 목록의 이벤트 번호로 찾는다. 남의 이벤트 배너는 둔다."""
+    _fake_execute(monkeypatch, _decision())
+    deleted: list[str] = []
+    banners = [
+        _banner("ntc_mine"),
+        _banner("ntc_other", "ctx_inc_9999"),
+        _banner("ntc_old", status="ended"),
+    ]
+    _banner_shop(monkeypatch, _banners_api(banners, deleted))
+    result = _call("end_incident_notice", {})
+    assert result["output"] == {"ended_notice_ids": ["ntc_mine"], "status": "ended"}
+    assert deleted == ["ntc_mine"]
+
+
+def test_end_incident_notice_with_nothing_open_succeeds_without_deleting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_execute(monkeypatch, _decision())
+    deleted: list[str] = []
+    _banner_shop(monkeypatch, _banners_api([_banner("ntc_other", "ctx_inc_9999")], deleted))
+    result = _call("end_incident_notice", {})
+    assert result["status"] == "completed"
+    assert result["output"] == {"ended_notice_ids": [], "status": "none_open"}
+    assert deleted == []
+
+
+def test_end_incident_notice_is_safe_to_call_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """두 번째 호출은 내릴 것이 없어 빈 목록으로 성공하고 다시 지우지 않는다."""
+    _fake_execute(monkeypatch, _decision())
+    deleted: list[str] = []
+    banners: list[dict] = []
+    _banner_shop(monkeypatch, _banners_api(banners, deleted))
+    opened = _call("publish_notice", {"draft_id": _draft("incident_opened")})["output"]["notice_id"]
+    banners.append(_banner(opened))
+    first = _call("end_incident_notice", {})
+    banners.clear()  # 쇼핑몰은 내린 배너를 게시 중 목록에서 뺀다
+    second = _call("end_incident_notice", {})
+    assert first["output"]["ended_notice_ids"] == [opened]
+    assert second["output"] == {"ended_notice_ids": [], "status": "none_open"}
+    assert deleted == [opened]
+
+
+def test_end_incident_notice_does_nothing_unless_executed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_execute(
+        monkeypatch, _decision(status="held", hold_reason="over_threshold", review_id="r")
+    )
+    seen = _banner_shop(monkeypatch, _banners_api([_banner("ntc_mine")]))
+    result = _call("end_incident_notice", {})
+    assert result["outcome"] == "held"
+    assert seen == []
+
+
+def test_end_incident_notice_failure_leaves_the_banner_and_can_be_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """쇼핑몰 목록을 못 읽으면 실패로 남기고(아무것도 내리지 않음), 다시 부르면 내린다."""
+    _fake_execute(monkeypatch, _decision())
+    deleted: list[str] = []
+    ok = _banners_api([_banner("ntc_mine")], deleted)
+    state = {"down": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and state["down"]:
+            return httpx.Response(503, text="down")
+        return ok(request)
+
+    _banner_shop(monkeypatch, handler)
+    failed = _call("end_incident_notice", {})
+    assert (failed["status"], failed["outcome"]) == ("failed", "shop_banner_failed:UNAVAILABLE")
+    assert deleted == []
+    state["down"] = False
+    retried = _call("end_incident_notice", {})
+    assert retried["output"]["ended_notice_ids"] == ["ntc_mine"] and deleted == ["ntc_mine"]
+
+
+def test_end_incident_notice_rejects_a_list_that_is_not_a_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """쇼핑몰이 목록 대신 다른 모양을 주면 지어내지 않고 실패로 남긴다."""
+    _fake_execute(monkeypatch, _decision())
+    deleted: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": {"unexpected": True}, "meta": {}})
+        deleted.append(request.url.path)
+        return httpx.Response(200, json={"data": {}, "meta": {}})
+
+    _banner_shop(monkeypatch, handler)
+    result = _call("end_incident_notice", {})
+    assert (result["status"], result["outcome"]) == ("failed", "shop_banner_failed:UNAVAILABLE")
+    assert deleted == []
+
+
+def test_end_incident_notice_in_memory_mode_ends_the_remembered_notice() -> None:
+    opened = _publish_notice()
+    result = _call("end_incident_notice", {})
+    assert result["output"] == {"ended_notice_ids": [opened], "status": "ended"}
+    assert _call("list_active_notices", {})["output"]["total"] == 0
+
+
+def test_end_incident_notice_is_only_for_the_orchestrator() -> None:
+    denied = _call("end_incident_notice", {}, token=SUPPORT)
+    assert (denied["status"], denied["outcome"]) == ("rejected", "FORBIDDEN_SKILL")
