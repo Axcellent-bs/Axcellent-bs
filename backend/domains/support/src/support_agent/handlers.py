@@ -48,7 +48,9 @@ from support_agent import (
     privacy_audit,
     secure_transfer,
     shop_client,
+    surge_events,
 )
+from support_agent.planning_question_inbox import PlanningQuestionInbox
 from support_agent.schemas import (
     AddCustomerMessageInput,
     Analysis,
@@ -74,6 +76,9 @@ STORE = persistence.build_inquiry_store()
 LEDGER = persistence.build_sequence_ledger()
 # 문의와 기획 변경 요청의 연결. 요청은 change_handlers.py, 결과 통지는 계약이 정해진 뒤 붙인다
 CHANGES = persistence.build_change_request_store()
+PLANNING_QUESTIONS = (
+    PlanningQuestionInbox()
+)  # needs_human으로 답한 기획 질문 (메모리, 사람이 답할 때까지)
 # 보내지 않기로 한 변경 요청 제안의 기록 (이유만 남긴다). 제안은 proposal_handlers.py
 DECISIONS = persistence.build_proposal_decision_store()
 # 장애 보상의 대기 → 사람 승인 → 발송 큐 (incident_queue.py, 사건 보상 요청은 incident_handlers.py)
@@ -510,6 +515,7 @@ async def create_inquiry(request: AgentRequest) -> AgentResult:
         from support_agent import triage  # 순환 import를 피해 쓸 때 가져온다
 
         await triage.mark_automatically(conversation)  # 오류 코드가 없는 문의는 분류 필요로 모은다
+        await surge_events.check_and_emit(request, STORE)  # 같은 분류가 몰렸으면 총괄에 알린다
         return _view(STORE.get(conversation.id) or conversation), fallback
 
     return await _write(
@@ -548,6 +554,7 @@ async def add_customer_message(request: AgentRequest) -> AgentResult:
         updated = await _refine_abuse(updated, analysis, early)
         _log_abuse(updated)
         log_activity(parsed.inquiry_id, **_analysis_entry(analysis, fallback=fallback, first=False))
+        await surge_events.check_and_emit(request, STORE)
         return _view(updated), fallback
 
     return await _write(

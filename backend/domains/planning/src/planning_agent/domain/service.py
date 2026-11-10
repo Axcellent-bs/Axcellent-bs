@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal, get_args
@@ -945,7 +946,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         if need is None:
             return
         about, question = need
-        qid = f"Q-{req.id}-1"
+        qid = _next_question_id(s, req.id)
         q = AnswerPlanningQuestionInput(
             question_id=qid, request_id=req.id, spec_id=sp.id, question=question, about=about
         )
@@ -2621,3 +2622,18 @@ __all__ = [
     "PlanningService",
     "action_name",
 ]
+
+
+def _next_question_id(s: State, req_id: str) -> str:
+    """같은 요청 안에서 되묻기 번호를 늘린다 (`Q-<REQ>-1`, `-2`, …).
+
+    이미 쓴 번호는 그 요청의 기획서(열린 질문)·결정 기록(`되묻기 Q-…`)·되묻기 활동 문구에서 찾는다.
+    기획서를 다시 쓰다 또 물어도 앞 질문과 번호가 겹치지 않아, 요청 서비스의 받은 질문함과
+    `receive_planning_answer`가 질문을 헷갈리지 않는다.
+    """
+    pat = re.compile(r"(?<![\w-])Q-" + re.escape(req_id) + r"-(\d+)(?!\d)")
+    texts = [x.question_id or "" for x in s.specs if x.request == req_id]
+    texts += [d.from_ for d in s.decisions]
+    texts += [a.text for a in s.activity if a.point == "answer_planning_question"]
+    used = [int(m) for t in texts for m in pat.findall(t)]
+    return f"Q-{req_id}-{max(used, default=0) + 1}"

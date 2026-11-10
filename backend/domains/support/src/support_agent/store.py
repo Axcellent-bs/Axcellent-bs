@@ -226,7 +226,7 @@ class InquiryStore:
             )
         )
         if role == "customer":  # 목록의 언어는 고객이 마지막으로 쓴 언어다
-            conversation.language = languages.detect(text)
+            conversation.language = languages.detect_detail(text)
         conversation.updated_at = stamp
         conversation.preview = _preview(shown)
         conversation.awaiting_reply = role == "customer"

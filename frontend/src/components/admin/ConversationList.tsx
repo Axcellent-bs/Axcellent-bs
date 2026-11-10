@@ -2,9 +2,9 @@ import { useState } from "react";
 import { CATEGORY_KO, LANGUAGE_KO, STATUS_KO, URGENCY_DOT } from "@/lib/labels";
 import type { ConversationListItem } from "@/lib/types";
 
-type Filter = "all" | "waiting" | "escalated";
-type LangFilter = "all" | "ko" | "en" | "ja" | "zh" | "other";
-const LANGS: LangFilter[] = ["all", "ko", "en", "ja", "zh", "other"];
+type Filter = "all" | "waiting" | "triage" | "escalated";
+type LangFilter = string; // "all" 또는 언어 코드
+const BASE_LANGS: LangFilter[] = ["all", "ko", "en", "ja", "zh"];
 const langOf = (c: ConversationListItem) => c.language ?? "ko";
 
 export function ConversationList({ items, selectedId, onSelect, onNew }: {
@@ -12,13 +12,18 @@ export function ConversationList({ items, selectedId, onSelect, onNew }: {
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const test: Record<Filter, (c: ConversationListItem) => boolean> = {
-    all: () => true, waiting: (c) => c.awaiting_reply && c.status === "open", escalated: (c) => c.status === "escalated",
+    all: () => true, waiting: (c) => c.awaiting_reply && c.status === "open", triage: (c) => c.triage?.state === "needed", escalated: (c) => c.status === "escalated",
   };
-  const [lang, setLang] = useState<LangFilter>("all");
+  const [picked, setLang] = useState<LangFilter>("all");
+  // 고른 언어의 문의가 모두 사라져 칩이 없어졌으면 "모든 언어"로 돌아간다(빈 목록에 갇히지 않게)
+  const lang = picked === "all" || items.some((c) => langOf(c) === picked) ? picked : "all";
   const byLang = (c: ConversationListItem) => lang === "all" || langOf(c) === lang;
   const shown = items.filter(byLang).filter(test[filter]);
   const langCount = (l: LangFilter) => items.filter((c) => l === "all" || langOf(c) === l).length;
-  const label: Record<Filter, string> = { all: "전체", waiting: "답변 대기", escalated: "이관" };
+  const label: Record<Filter, string> = { all: "전체", waiting: "답변 대기", triage: "분류 필요", escalated: "이관" };
+  // 기본 언어 칩 뒤에, 지금 문의함에 실제로 있는 그 밖의 언어(스페인어·러시아어 등)를 붙인다
+  const extra = [...new Set(items.map(langOf))].filter((l) => !BASE_LANGS.includes(l)).sort();
+  const LANGS: LangFilter[] = [...BASE_LANGS, ...extra];
 
   return (
     <aside className="card flex w-72 shrink-0 flex-col overflow-hidden" aria-label="문의함">
@@ -35,10 +40,10 @@ export function ConversationList({ items, selectedId, onSelect, onNew }: {
         ))}
       </div>
       <div className="mx-4 mb-2 flex flex-wrap gap-1 text-xs" role="group" aria-label="언어별 보기">
-        {LANGS.filter((l) => l === "all" || l !== "other" || langCount(l) > 0).map((l) => (
+        {LANGS.map((l) => (
           <button key={l} onClick={() => setLang(l)} aria-pressed={lang === l}
             className={`chip ${lang === l ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700"}`}>
-            {l === "all" ? "모든 언어" : LANGUAGE_KO[l]}<span className="ml-1 opacity-70">{langCount(l)}</span>
+            {l === "all" ? "모든 언어" : LANGUAGE_KO[l] ?? LANGUAGE_KO.other}<span className="ml-1 opacity-70">{langCount(l)}</span>
           </button>
         ))}
       </div>
@@ -57,6 +62,7 @@ export function ConversationList({ items, selectedId, onSelect, onNew }: {
                 {langOf(c) !== "ko" && <span className="chip bg-amber-50 text-amber-700">{LANGUAGE_KO[langOf(c)] ?? LANGUAGE_KO.other}</span>}
                 {c.category && <span className="chip bg-brand-50 text-brand-700">{CATEGORY_KO[c.category] ?? c.category}</span>}
                 {c.awaiting_reply && c.status === "open" && <span className="chip bg-red-50 text-red-700">답변 대기</span>}
+                {c.triage?.state === "needed" && <span className="chip bg-amber-50 text-amber-800">분류 필요</span>}
                 {c.status !== "open" && <span className="chip bg-ink-100 text-ink-500">{STATUS_KO[c.status]}</span>}
               </div>
             </button>

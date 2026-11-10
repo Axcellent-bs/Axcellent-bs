@@ -8,6 +8,7 @@ import { prName, prSlug, reviewOf, toPath, idText } from '@/components/planning-
 import { duration, shortTime, toMin, type Cell } from '@/components/planning/requests'
 import { OriginTag, UsageBar, codingState, originLabel, pctOf, tokens } from '@/components/dev/coding'
 import { useCodingLimits } from '@/lib/planning'
+import './hier.css'
 
 // ---------------------------------------------------------------- 필터
 type Group = 'stuck' | 'running' | 'done' | 'stopped'
@@ -110,9 +111,12 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
   const rows = sorted.slice(cur * PAGE_SIZE, (cur + 1) * PAGE_SIZE)
   const calls = s.tasks.reduce((n, t) => n + (t.coding?.llmCalls ?? 0), 0)
   const used = s.tasks.reduce((n, t) => n + (t.coding?.llmTokens ?? 0), 0)
+  // 사람이 볼 작업: 전체 보기 첫 페이지 위에 모아 둔다 (필터와 상관없이 무엇을 먼저 할지)
+  const todo = sortTaskRows(all.filter((x) => x.group === 'stuck'))
+  const why = (row: TaskRow) => row.cells.find((c) => c.warn)?.meta ?? '확인 필요'
 
   return (
-    <div className="rq">
+    <div className="rq dev-board">
       <nav className="rq-filter" aria-label="작업 거르기">
         {TASK_FILTERS.map((x) => {
           const n = x.id === 'all' ? all.length : all.filter((r) => r.group === x.id).length
@@ -130,6 +134,22 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
         {calls > 0 && <span className="rq-usage"><UsageBar used={used} limit={lim.trial} label={`AI ${calls}회 · 서버 AI 체험`} title="모든 작업이 쓴 토큰 / 서버 AI 체험 한도" /></span>}
       </nav>
 
+      {f === 'all' && cur === 0 && todo.length > 0 && (
+        <section className="dev-todo" aria-label="내가 볼 작업">
+          <h2 className="dev-todo-h"><b>내가 볼 작업 {todo.length}건</b><span>사람이 판단해야 다음 단계로 가요</span></h2>
+          <ol>
+            {todo.slice(0, 5).map((row) => (
+              <li key={row.t.id}>
+                <a href={row.next.href} className="t plain-link" title={row.t.title}>{row.t.title}</a>
+                <span className="why">{why(row)}</span>
+                <a href={row.next.href} className="dev-go">{row.next.label}</a>
+              </li>
+            ))}
+          </ol>
+          {todo.length > 5 && <a href={toPath('tasks/stuck')} className="plain-link text-sm">확인 필요 {todo.length}건 모두 보기</a>}
+        </section>
+      )}
+
       <div className="rq-head" aria-hidden>
         {TASK_STAGES.map((x) => <span key={x}>{x}</span>)}
         <span>다음</span>
@@ -142,7 +162,7 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
           const nav = rowNav(row.next.href, row.next.label)
           const fin = row.group === 'done' || row.group === 'stopped'
           return (
-            <li key={t.id} {...nav} className={`rq-item ${nav.className ?? ''}${fin ? ' fin' : ''}`}>
+            <li key={t.id} {...nav} className={`rq-item ${nav.className ?? ''}${fin ? ' fin' : ''}${row.group === 'stuck' ? ' dev-stuck' : ''}`}>
               <div className="rq-title">
                 <a href={row.next.href} className="rq-name plain-link">{t.title}</a>
                 <span className="rq-meta">

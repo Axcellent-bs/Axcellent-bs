@@ -11,11 +11,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hmac
+import logging
 import os
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
+import httpx
 from fastapi import Depends, FastAPI, Header, Path, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -37,6 +39,7 @@ from ax_shop_api import (
     outbox,
     retention,
     support_client,
+    toss,
 )
 from ax_shop_api.db import Db
 from ax_shop_api.lookups import Lookups
@@ -123,6 +126,14 @@ class PaymentIn(BaseModel):
     method_code: str = "card"
     # 가짜 결제 서버에 성공·실패를 요청한다. 장애 주입은 이후 PR에서 게이트웨이가 정한다
     simulate: Literal["success", "failure"] | None = None
+
+
+class TossConfirmIn(BaseModel):
+    """토스 결제위젯 성공 리다이렉트의 값 그대로. 금액은 시도 금액과 비교만 한다(믿지 않는다)."""
+
+    toss_order_id: str = Field(pattern=r"^[A-Za-z0-9_-]{6,64}$")
+    payment_key: str = Field(min_length=1, max_length=200)
+    amount: int = Field(ge=0)
 
 
 class CancelIn(BaseModel):
@@ -314,12 +325,24 @@ def _query(model: type[BaseModel], **values: Any) -> Any:
         ) from error
 
 
-def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
+def create_app(
+    db: Db | None = None,
+    seed_data: bool = True,
+    toss_transport: httpx.AsyncBaseTransport | None = None,  # 시험용(토스 흉내)
+) -> FastAPI:
     set_agent_name("shop")  # SHOP_MOCK=1로 목 모드(환경변수 접두사 SHOP)
     database = db or Db()
     if seed_data:
         seed(database)
     shop = Shop(database)
+    payment_config = toss.load_config()
+    if payment_config.warning:  # 키 값은 담지 않는다
+        logging.getLogger(__name__).warning(payment_config.warning)
+    toss_payments = (
+        toss.TossPayments(shop, toss.TossClient(payment_config.secret_key, toss_transport))
+        if payment_config.provider == toss.TOSS_TEST and payment_config.secret_key
+        else None
+    )
     promotions = Promotions(database)
     lookups = Lookups(database)
     refunds = Refunds(database)
@@ -331,7 +354,7 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
         while True:
             await asyncio.sleep(interval)
             shop.evaluate_monitor()
-            await outbox.flush(database)
+            await outbox.drain(database)  # 쌓인 미발행은 여기서 묶음씩 비운다
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -487,6 +510,23 @@ def create_app(db: Db | None = None, seed_data: bool = True) -> FastAPI:
         shop.evaluate_monitor()
         await outbox.flush(database)
         return _ok(order)
+
+    @app.get("/api/shop/payment-config")
+    def payment_config_view() -> dict:
+        return _ok({"provider": payment_config.provider})  # 키는 담지 않는다
+
+    @app.post("/api/shop/orders/{order_id}/payments/toss/prepare")
+    def toss_prepare(order_id: str) -> dict:
+        toss.require(toss_payments)
+        return _ok(shop.toss_prepare(order_id))
+
+    @app.post("/api/shop/payments/toss/confirm")
+    async def toss_confirm(body: TossConfirmIn) -> dict:
+        payments = toss.require(toss_payments)
+        order, replayed = await payments.confirm(body.toss_order_id, body.payment_key, body.amount)
+        shop.evaluate_monitor()
+        await outbox.flush(database)
+        return _ok(order, replayed=replayed, toss_order_id=body.toss_order_id)
 
     @app.post("/api/shop/orders/{order_id}/cancel")
     async def cancel(order_id: str, body: CancelIn) -> dict:

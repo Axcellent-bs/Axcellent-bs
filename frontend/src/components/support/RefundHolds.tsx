@@ -63,7 +63,7 @@ export default function RefundHolds({ onDecided }: { onDecided?: () => void }) {
         환불 한 건 금액이 기준을 넘거나 적어 낸 금액이 계산과 다르면 안전 장치가 멈춰 사람의 결정을 기다립니다. 승인한 뒤 위의 처리 버튼을 다시 누르면 같은 건이 지급됩니다.
       </p>
       {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
-      {!humanTokenSet && pending.length > 0 && <p className="mt-3 text-xs text-amber-800">결정 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
+      {!humanTokenSet && pending.length > 0 && <p className="mt-3 text-xs text-amber-800">이 계정에는 결정 권한이 없어 승인·거절 버튼이 꺼져 있습니다. 결정 권한이 있는 담당자 계정으로 들어오면 켜집니다.</p>}
 
       {pending.length > 0 && (
         <ul className="mt-4 space-y-3">

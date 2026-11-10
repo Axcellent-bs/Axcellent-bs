@@ -108,7 +108,12 @@ export const SKILL_KO: Record<string, string> = {
 export const skillLabel = (skill: string) => SKILL_KO[skill] ?? skill;
 
 /** 문의 언어 이름표 (목록의 언어별 보기·배지). 모르는 값은 기타로 본다 */
-export const LANGUAGE_KO: Record<string, string> = { ko: "한국어", en: "English", ja: "日本語", zh: "中文", other: "기타" };
+export const LANGUAGE_KO: Record<string, string> = {
+  ko: "한국어", en: "English", ja: "日本語", zh: "中文",
+  es: "Español", fr: "Français", de: "Deutsch", pt: "Português", it: "Italiano",
+  ru: "Русский", uk: "Українська", ar: "العربية", he: "עברית", th: "ไทย", hi: "हिन्दी",
+  other: "기타",
+};
 
 /** 개인정보 삭제에서 지우지 않고 남기는 이유 코드 */
 export const PURGE_REASON_KO: Record<string, string> = {

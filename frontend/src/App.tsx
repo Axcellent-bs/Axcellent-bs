@@ -24,6 +24,7 @@ import DevPage from '@/pages/Dev'
 import Queue from '@/pages/Queue'
 import Reviews from '@/pages/Reviews'
 import Support from '@/pages/Support'
+import Orders from '@/pages/Orders'
 import InfraHosts from '@/demo/InfraHosts'
 import DevTools from '@/demo/DevTools'
 import LoginPage from '@/demo/LoginPage'
@@ -93,6 +94,7 @@ function Pages() {
           <Route path="/agents/chat" element={<AgentChat />} />
           <Route path="/agents/office" element={<AgentOffice />} />
           <Route path="/support" element={<Support />} />
+          <Route path="/orders" element={<Orders />} />
           <Route path="/hosts" element={<InfraHosts />} />
           <Route path="/infra/hosts" element={<Navigate to="/hosts" replace />} />
           <Route path="/infra" element={<Incidents />} />

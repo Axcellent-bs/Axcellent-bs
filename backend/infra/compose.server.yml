@@ -91,6 +91,9 @@ services:
     build:
       context: ${AX_FRONTEND_DIR:-../../ax-frontend}
       dockerfile: nginx/Dockerfile
+      args:
+        # 토스 결제위젯 클라이언트 키(테스트). 비어 있으면 쇼핑몰은 데모 결제. 키 값은 이 파일에 쓰지 않는다
+        VITE_TOSS_CLIENT_KEY: ${VITE_TOSS_CLIENT_KEY:-}
     ports:
       - "${AX_GATEWAY_PORT:-8080}:80"
     depends_on:

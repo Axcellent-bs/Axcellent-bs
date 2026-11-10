@@ -102,11 +102,23 @@ function useNav(): NavItem[] {
   return customerNav(account, enabled);
 }
 
+const INFRA_ID = "incident";
+
+/** 인프라 AI는 AI 묶음의 일원이다: 구분선 아래로 떨어지지 않게 기획 AI 바로 밑(개발 AI 앞)에 둔다 */
+function withInfra(agents: NavItem[], services: Service[]): NavItem[] {
+  const infra = services.find((s) => s.id === INFRA_ID);
+  if (!infra) return agents;
+  const planning = AGENTS.find((g) => g.id === "planning");
+  const at = agents.findIndex((a) => a.label === planning?.name);
+  const item = serviceNav(infra);
+  return at < 0 ? [...agents, item] : [...agents.slice(0, at + 1), item, ...agents.slice(at + 1)];
+}
+
 /** 회사에 연결된 고객사 계정의 메뉴 */
 function customerNav(account: Account, enabled: string[]): NavItem[] {
   const services = servicesOf(account, enabled);
-  const agents = agentNav(services);
-  const others = services.filter((s) => !s.agent && !(account.admin && s.id === "hosts"));
+  const agents = withInfra(agentNav(services), services);
+  const others = services.filter((s) => !s.agent && s.id !== INFRA_ID && !(account.admin && s.id === "hosts"));
   const rest = [...others.map(serviceNav), ...SHARED_NAV];
   if (agents.length) rest[0] = { ...rest[0], divider: true };
   // 고객사 시스템 관리자는 관리 메뉴를 맨 위에

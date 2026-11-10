@@ -30,7 +30,7 @@ const STEP_KO: Record<string, string> = {
   cost: "처리 결과 장부에 기록", record: "처리 결과 기록", verify: "인사 기록 읽어 확인",
 };
 const NOTE_KO: Record<string, string> = {
-  suspected: "최근 배포가 원인으로 의심됨", linked_duplicate: "이미 있는 같은 요청에 연결함", verify_timeout: "자동 교차검증이 제때 끝나지 않아 사람 승인으로 넘김",
+  suspected: "최근 배포가 원인으로 의심됨", linked_duplicate: "이미 있는 같은 요청에 연결함", verify_timeout: "다른 AI의 확인이 제때 끝나지 않아 사람 승인으로 넘김",
   undetermined: "원인을 특정하지 못함", requested: "보상을 요청함", card_created: "기록을 남김",
   listed: "인사 기록에서 확인함", partial: "일부만 확인함", candidate: "후보 기록으로 저장함 (사람 확인 대기)",
   found: "비슷한 과거 이벤트를 찾음", none: "비슷한 과거 이벤트 없음", recorded: "해결 내용을 남김", duplicate: "이미 남긴 해결 내용",
@@ -43,7 +43,7 @@ const STATUS_SAY: Record<string, string> = { degraded: "사람 확인 필요", r
 function noteKo(note: string): string {
   if (!note) return "–";
   if (NOTE_KO[note]) return NOTE_KO[note];
-  return note.replace(/\(([a-z_]+)\)/g, (_, k: string) => `(${STEP_KO[k] ?? k})`);
+  return note.replace(/\(([a-z_]+)\)/g, (_, k: string) => `(${STEP_KO[k] ?? k})`).replace(/이관 큐로 넘김/g, "사람에게 넘김");
 }
 
 /** 진행 기록 한 줄 */
@@ -57,8 +57,13 @@ function eventKo(message: string, inc: Incident): string {
   // 괄호 속 단계 코드는 먼저 이름으로 바꾼다 (stepLabel이 영어 꼬리표로 보고 지우지 않게)
   const named = message
     .replace(/notice_id 보관 \([^)]*\)/, "게시한 공지 번호를 기록함")
+    .replace(/안전 관문 결정 수신: (승인|거절)(?: \([^)]*\))? — rev_\w+(?: \(evt_\w+\))?/, "안전 확인에서 $1 결정을 받음")
+    .replace(/정상 복귀 신호 받음 \(shop-api, [^)]*\)/, "정상 복귀 신호를 받음 (쇼핑몰)")
+    .replace(/[A-C] 등급 보류 — 승인 대기열에 올림/, "사람 승인이 필요해 승인 대기함에 올림")
+    .replace(/사람이 (승인|거절)\(공용\) — 재개/, "사람이 $1함, 이어서 진행")
+    .replace(/사람이 (승인|거절)\(공용\)/, "사람이 $1함")
     .replace(/미완료\(([a-z_]+)\)/g, (_, k: string) => `미완료: ${STEP_KO[k] ?? k}`);
-  return stepLabel(named.replace("이관 큐로 넘김", "사람에게 넘김"))
+  return stepLabel(named.replace(/이관 큐로 넘김/g, "사람에게 넘김"))
     .replace(/\s+:/g, ":")
     .replace(/(\w+)에 요청/, (_, d: string) => `${DEPT_SAY[d] ?? d}에게 맡김`);
 }
@@ -84,7 +89,7 @@ export default function OrchestratorPage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  if (!relayEnabled) return <Loading error="총괄 읽기 연결이 꺼져 있습니다. 화면을 볼 수 있는 권한(VITE_SHOP_VIEWER_TOKEN 또는 VITE_SHOP_ADMIN_TOKEN)이 설정되지 않았습니다. 화면을 bash backend/scripts/run_web.sh 로 다시 켜 주세요(run_all.sh가 만든 backend/.data/web.env 값을 넘깁니다)." />;
+  if (!relayEnabled) return <Loading error="총괄 정보를 읽어 올 수 없습니다. 화면을 볼 수 있는 권한이 설정되지 않았습니다. 화면을 다시 켜 주세요(run_web.sh)." />;
   if (!incidents) return <Loading error={error} what="총괄 이벤트를 불러오는 중…" />;
 
   const list = [...incidents].reverse();
@@ -98,7 +103,7 @@ export default function OrchestratorPage() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">총괄·이벤트</h1>
-          <p className="mt-1 text-sm text-ink-500"><CompanyName />에서 문제가 터지면 총괄 에이전트가 이벤트 하나로 묶고, 7개 부서에 일을 나눠 맡깁니다. 사람 승인이 필요한 일만 사람에게 올립니다. 이 화면은 읽기 전용입니다.</p>
+          <p className="mt-1 text-sm text-ink-500"><CompanyName />에서 문제가 생기면 총괄 AI가 이벤트 하나로 묶고, 7개 부서에 일을 나눠 맡깁니다. 사람 승인이 필요한 일만 사람에게 올립니다. 이 화면은 보기만 할 수 있습니다.</p>
         </div>
         <div className="ml-auto flex items-center gap-2 text-xs">
           <button className="btn-ghost" onClick={load}>새로고침{updatedAt ? ` · ${clock(updatedAt.toISOString())}` : ""}</button>
@@ -118,7 +123,7 @@ export default function OrchestratorPage() {
             <div><dt className="text-xs opacity-80">전체 이벤트</dt><dd className="text-lg font-semibold tabular-nums">{incidents.length}건</dd></div>
             <div><dt className="text-xs opacity-80">진행 중</dt><dd className="text-lg font-semibold tabular-nums">{open}건</dd></div>
           </dl>
-          <p className={`ml-auto max-w-sm pb-1 text-xs ${tone}`}>승인·거절은 총괄이 하지 않고 사람이 직접 합니다(승인 대기함). 대부분의 단계는 총괄이 규칙대로 부서에 맡겨 끝냅니다.</p>
+          <p className={`ml-auto max-w-sm pb-1 text-xs ${tone}`}>승인·거절은 사람이 승인 대기함에서 직접 합니다. 나머지 단계는 총괄 AI가 정해진 규칙대로 부서에 맡겨 끝냅니다.</p>
         </div>
       </section>
 
@@ -263,7 +268,7 @@ function HoldNotice({ holds }: { holds: Incident["pending_holds"] }) {
           );
         })}
       </ul>
-      <p className="mt-2 text-xs opacity-80">승인·거절은 사람이 승인 대기함에서 합니다. 이 화면에서는 결정하지 않습니다. 마감이 지나면 자동으로 거절됩니다.</p>
+      <p className="mt-2 text-xs opacity-80">승인·거절은 승인 대기함에서 사람이 합니다. 이 화면에서는 할 수 없습니다. 마감이 지나면 자동으로 거절됩니다.</p>
     </div>
   );
 }
@@ -289,7 +294,7 @@ function IncidentDetail({ incident }: { incident: Incident }) {
           <ul className="flex flex-wrap gap-2 text-sm">
             {shared.map(([key, value]) => (
               <li key={key} className="chip bg-emerald-50 text-emerald-700" title={`${key} = ${String(value)}`}>
-                {key === "notice_id" ? "점검 공지를 쇼핑몰에 게시함" : key === "recovered_notice_id" ? "정상화 공지를 쇼핑몰에 게시함" : key}
+                {key === "notice_id" ? "점검 공지를 쇼핑몰에 게시함" : key === "recovered_notice_id" ? "정상화 공지를 쇼핑몰에 게시함" : "그 밖의 기록"}
               </li>
             ))}
           </ul>
@@ -304,7 +309,7 @@ function IncidentDetail({ incident }: { incident: Incident }) {
         <h3 className="mb-3 text-[15px] font-semibold">단계</h3>
         <table className="w-full text-left text-sm">
           <thead className="text-xs text-ink-500">
-            <tr><th className="py-1 pr-3 font-medium">단계</th><th className="pr-3 font-medium">맡은 AI</th><th className="pr-3 font-medium">상태</th><th className="pr-3 font-medium">시도</th><th className="font-medium">메모</th></tr>
+            <tr><th className="py-1 pr-3 font-medium">단계</th><th className="pr-3 font-medium">맡은 AI</th><th className="pr-3 font-medium">상태</th><th className="pr-3 font-medium">시도 횟수</th><th className="font-medium">메모</th></tr>
           </thead>
           <tbody>
             {incident.steps.map((s) => (

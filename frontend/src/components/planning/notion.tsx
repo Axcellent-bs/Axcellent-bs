@@ -3,8 +3,8 @@
 // 토큰은 기획 서버에만 저장되고 화면에는 끝 4자리와 확인한 워크스페이스 이름만 보인다.
 import { useEffect, useState, type FormEvent } from 'react'
 import { notionApi, type NotionConnection } from '@/lib/planning'
+import { SectionHead, StatusChip, type Tone } from '@/components/connect/parts'
 
-const TONE = { ok: 'bg-emerald-50 text-emerald-700', none: 'bg-ink-100 text-ink-700', wait: 'bg-amber-50 text-amber-700' }
 const BACK: Record<string, string> = {
   ok: '노션 계정을 연결했어요.',
   denied: '노션에서 연결을 취소했어요.',
@@ -55,29 +55,30 @@ export function NotionConnect() {
   }
 
   const status = !conn ? null
-    : conn.source === 'saved' ? { label: `연결됨 ${conn.hint}`, tone: TONE.ok }
-    : conn.source === 'env' ? { label: `서버 설정 ${conn.hint}`, tone: TONE.ok }
-    : { label: '연결 안 됨', tone: TONE.none }
+    : conn.source === 'saved' ? { label: `연결됨 ${conn.hint}`, tone: 'ok' as Tone }
+    : conn.source === 'env' ? { label: `서버 설정 ${conn.hint}`, tone: 'ok' as Tone }
+    : { label: '연결 안 됨', tone: 'off' as Tone }
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="card-title text-lg">노션</h2>
-        {status && <span className={`chip ${status.tone}`}>{status.label}</span>}
-        {conn?.workspace && <span className="chip bg-ink-100 text-ink-700">{conn.workspace}</span>}
-        {offline && <span className={`chip ${TONE.wait}`}>기획 AI에 연결할 수 없음</span>}
-        {conn?.connected && (
-          <div className="ml-auto flex gap-1.5">
-            <button type="button" className="btn-ghost" disabled={busy} onClick={() => void act(() => notionApi.check())}>연결 확인</button>
-            {conn.source === 'saved' && (
-              <button type="button" className="btn-quiet" disabled={busy}
-                onClick={() => { if (window.confirm('노션 토큰을 지울까요? 기획의 "노션에서 가져오기"가 멈춰요.')) void act(() => notionApi.remove()) }}>지우기</button>
-            )}
-          </div>
-        )}
-      </div>
+      <SectionHead title="노션" desc={'기획의 "노션에서 가져오기"가 읽는 곳이에요. 공유한 페이지를 읽기만 해요.'}
+        right={<>
+          {offline && <StatusChip tone="wait">기획 AI에 연결할 수 없음</StatusChip>}
+          {status && <StatusChip tone={status.tone}>{status.label}</StatusChip>}
+          {conn?.connected && <button type="button" className="btn-ghost" disabled={busy} onClick={() => void act(() => notionApi.check())}>연결 확인</button>}
+          {conn?.connected && conn.source === 'saved' && (
+            <button type="button" className="btn-quiet" disabled={busy}
+              onClick={() => { if (window.confirm('노션 토큰을 지울까요? 기획의 "노션에서 가져오기"가 멈춰요.')) void act(() => notionApi.remove()) }}>지우기</button>
+          )}
+        </>} />
+      {conn?.workspace && (
+        <div>
+          <p className="text-xs text-ink-500">연결된 워크스페이스</p>
+          <p className="mt-0.5 text-2xl font-semibold tracking-tight">{conn.workspace}</p>
+        </div>
+      )}
 
-      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+      <dl className="grid gap-x-6 gap-y-2 border-t border-ink-100 pt-4 text-sm sm:grid-cols-3">
         <div><dt className="text-xs text-ink-500">쓰는 곳</dt><dd className="mt-0.5">요청·기획서 › 문서·기획서 › 노션에서 가져오기</dd></div>
         <div><dt className="text-xs text-ink-500">권한</dt><dd className="mt-0.5">읽기만 (공유한 페이지)</dd></div>
         <div><dt className="text-xs text-ink-500">마지막 확인</dt><dd className="mt-0.5">{kst(conn?.checked_at ?? null) || '—'}</dd></div>

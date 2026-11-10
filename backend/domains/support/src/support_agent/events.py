@@ -17,6 +17,18 @@
   문의를 닫은 뒤 환불이 끝나면 `refund_amount`를 채워 한 번 더 보낸다 (`emit_refund_completed`).
   이때 멱등 키는 `...:<문의번호>:refund:<클레임번호>`라 같은 환불은 한 번만 나가고,
   받는 쪽은 같은 문의의 기록에 금액을 갱신하면 된다.
+`support.incident_compensation_decided`: 사람이 장애 보상 대기 고객을 승인·거절한 뒤 그 사건 큐의
+지금 상태를 한 번 알린다 (`incident_queue_handlers.decide_incident_compensation`).
+- `data`는 사건 단위 요약만 담는다 (`SupportIncidentCompensationData`). 고객별 목록·구매자 ID·결정한
+  사람 이름은 싣지 않는다. 봉투 시각은 사람이 결정한 시각이고 `context_id`는 사건 번호다.
+- 멱등 키는 `support:support.incident_compensation_decided:<사건 번호>:<상태 지문>`이라
+  같은 상태는 한 번만 전달되고 상태가 바뀌면 새 이벤트가 된다.
+  알리기만 하고 `execute()`를 거치지 않는다.
+`support.inquiry_surge`: 한 분류의 문의가 짧은 시간에 몰리면 내보낸다 (`surge_events.py`).
+- `data`는 코드 값만 담는다 (`SupportInquirySurgeData`). 고객 원문·이름·분류 이름은 싣지 않는다.
+- 멱등 키는 `support:support.inquiry_surge:<분류 코드>:<창 시작>`이라 같은 창의 같은 급증은 한 번만
+  전달된다. 알리기만 하고 상태를 바꾸지 않아 안전 관문(`execute()`)을 거치지 않는다.
+
 """
 
 from __future__ import annotations
@@ -28,7 +40,12 @@ from datetime import UTC, datetime
 from ax_agent_template.events import publish
 from ax_agent_template.logging import log_event
 from ax_contracts.schemas import AgentRequest, EventEnvelope, EventType
-from ax_contracts.schemas.event import SupportInquiryReceivedData, SupportInquiryResolvedData
+from ax_contracts.schemas.event import (
+    SupportIncidentCompensationData,
+    SupportInquiryReceivedData,
+    SupportInquiryResolvedData,
+    SupportInquirySurgeData,
+)
 from support_agent import guard
 from support_agent.claim_schemas import Claim
 from support_agent.schemas import Conversation
@@ -158,6 +175,74 @@ async def _publish(request: AgentRequest, envelope: EventEnvelope) -> None:
         )
     except Exception:
         logger.warning("%s 발행 실패", envelope.type.value, exc_info=True)
+
+
+def inquiry_surge_key(topic_code: str, window_start: datetime) -> str:
+    return f"{SOURCE}:{EventType.SUPPORT_INQUIRY_SURGE.value}:{topic_code}:" + (
+        window_start.strftime("%Y-%m-%dT%H:%MZ")
+    )
+
+
+def build_inquiry_surge(request: AgentRequest, data: SupportInquirySurgeData) -> EventEnvelope:
+    """급증 한 건의 이벤트 봉투. 같은 분류·같은 창 시작이면 같은 키라서 한 번만 전달된다."""
+    key = inquiry_surge_key(data.topic_code, data.window_start)
+    return EventEnvelope(
+        event_id=f"evt_{hashlib.sha256(key.encode()).hexdigest()[:12]}",
+        type=EventType.SUPPORT_INQUIRY_SURGE,
+        occurred_at=datetime.now(UTC),
+        tenant_id=request.meta.tenant_id,
+        context_id=request.meta.context_id,
+        source=SOURCE,
+        idempotency_key=key,
+        data=data.model_dump(mode="json"),
+    )
+
+
+def incident_compensation_key(data: SupportIncidentCompensationData) -> str:
+    """사건 번호 + 상태 지문. 같은 상태는 같은 키라 한 번만 처리되고, 바뀌면 새 이벤트다."""
+    fingerprint = ":".join(
+        str(getattr(data, name))
+        for name in (
+            "pending",
+            "approved",
+            "held",
+            "sent",
+            "rejected",
+            "coupons_sent",
+            "sent_value",
+        )
+    )
+    digest = hashlib.sha256(fingerprint.encode()).hexdigest()[:12]
+    kind = EventType.SUPPORT_INCIDENT_COMPENSATION_DECIDED.value
+    return f"{SOURCE}:{kind}:{data.incident_context_id}:{digest}"
+
+
+def build_incident_compensation_decided(
+    request: AgentRequest, data: SupportIncidentCompensationData, decided_at: datetime
+) -> EventEnvelope:
+    """사건 보상 큐 상태 이벤트 봉투. 봉투 시각은 사람이 결정한 시각이고, 사건 타임라인에 붙는다."""
+    key = incident_compensation_key(data)
+    return EventEnvelope(
+        event_id=f"evt_{hashlib.sha256(key.encode()).hexdigest()[:12]}",
+        type=EventType.SUPPORT_INCIDENT_COMPENSATION_DECIDED,
+        occurred_at=decided_at,
+        tenant_id=request.meta.tenant_id,
+        context_id=data.incident_context_id,
+        source=SOURCE,
+        idempotency_key=key,
+        data=data.model_dump(mode="json"),
+    )
+
+
+async def emit_incident_compensation_decided(
+    request: AgentRequest, data: SupportIncidentCompensationData, decided_at: datetime
+) -> None:
+    """알리기만 한다(`execute()`를 거치지 않는다). 발행 실패는 결정을 막지 않는다."""
+    await _publish(request, build_incident_compensation_decided(request, data, decided_at))
+
+
+async def emit_inquiry_surge(request: AgentRequest, data: SupportInquirySurgeData) -> None:
+    await _publish(request, build_inquiry_surge(request, data))
 
 
 async def emit_inquiry_received(request: AgentRequest, conversation: Conversation) -> None:
