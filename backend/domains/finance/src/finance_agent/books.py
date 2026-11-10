@@ -64,6 +64,7 @@ class Books:
 
     orders: list[dict[str, Any]] = field(default_factory=list)
     sellers: list[dict[str, Any]] = field(default_factory=list)
+    products: list[dict[str, Any]] = field(default_factory=list)  # shop-api 상품 (이름 찾기용)
     refunds: list[dict[str, Any]] = field(default_factory=list)
     coupons: list[dict[str, Any]] = field(default_factory=list)
     executions: list[dict[str, Any]] | None = None
@@ -95,6 +96,16 @@ class Books:
             if s.get("seller_id") == seller_id:
                 return str(s.get("name") or seller_id)
         return seller_id
+
+    def product_name(self, product_id: str, item: dict[str, Any] | None = None) -> str:
+        """품목에 적힌 이름 → 쇼핑몰 상품 목록 이름 → 상품 번호 순으로 찾는다."""
+        named = (item or {}).get("title") or (item or {}).get("name")
+        if named:
+            return str(named)
+        for p in self.products:
+            if p.get("product_id") == product_id:
+                return str(p.get("name") or product_id)
+        return product_id
 
     def order(self, order_id: str) -> dict[str, Any] | None:
         return next((o for o in self.orders if o["order_id"] == order_id), None)
@@ -586,6 +597,7 @@ async def _live_books(
     return Books(
         orders=orders,
         sellers=sellers if isinstance(sellers, list) else [],
+        products=[p for p in products if isinstance(p, dict)] if isinstance(products, list) else [],
         refunds=refunds,
         coupons=coupons,
         executions=executions,
