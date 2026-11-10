@@ -25,6 +25,16 @@ export default function DashboardPage() {
   const [days, setDays] = useState(14);
   const [d, setD] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // "분류 필요": 상담원이 원인 이름을 정해야 하는 문의. 목록의 표시를 그대로 센다(값을 지어내지 않는다)
+  const [triage, setTriage] = useState<{ needed: number; done: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.admin.list().then((l) => {
+      if (!alive) return;
+      setTriage({ needed: l.filter((c) => c.triage?.state === "needed").length, done: l.filter((c) => c.triage?.state === "done").length });
+    }).catch(() => { if (alive) setTriage(null); });
+    return () => { alive = false; };
+  }, []);
   useEffect(() => { api.admin.dashboard(days).then((x) => { setD(x); setError(null); }).catch(() => setError(OFFLINE)); }, [days]);
   if (!d) return <Loading error={error} what="문의 현황을 불러오는 중…" />;
   const t = d.totals;
@@ -34,9 +44,10 @@ export default function DashboardPage() {
     <div className="flex min-h-full flex-col xl:flex-row">
       <div className="min-w-0 flex-1 space-y-8 px-8 pb-8 pt-2">
         <section aria-label="핵심 지표" className="flex flex-wrap gap-3">
-          <Stat label="답변 대기 문의" value={t.open_waiting} sub={`긴급 ${t.high_waiting}건`} tone={t.high_waiting ? "text-accent" : ""} />
-          <Stat label="상담원 확인 대기 클레임" value={t.needs_review} />
-          <Stat label="보상 큐 (준비/대기)" value={`${t.queue_ready} / ${t.queue_waiting}`} sub={`입고 대기 ${t.awaiting_return}건`} />
+          <Stat label="답변 대기 문의" value={t.open_waiting} sub={`긴급 ${t.high_waiting}건`} tone={t.high_waiting ? "text-accent" : ""} href="/console" />
+          {triage && <Stat label="분류 필요 문의" value={triage.needed} sub={`원인 이름을 정할 문의 · 마친 ${triage.done}건`} tone={triage.needed ? "text-accent" : ""} href="/claims?view=triage" />}
+          <Stat label="상담원 확인 대기 클레임" value={t.needs_review} href="/claims" />
+          <Stat label="보상 큐 (준비/대기)" value={`${t.queue_ready} / ${t.queue_waiting}`} sub={`입고 대기 ${t.awaiting_return}건`} href="/queue" />
           <Stat label="자동 처리율" value={pct(t.auto_rate)} sub={`기간 내 클레임 ${t.claims}건`} />
         </section>
 
