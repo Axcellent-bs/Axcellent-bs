@@ -95,6 +95,7 @@ from ax_dashboard_api.schemas import (
     OnboardingStepBody,
     OrgChangeDecisionBody,
     OrgRosterCompleteBody,
+    PlanningAnswerBody,
     QueueProcessBody,
     ReceiptAnalysisBody,
     ResolutionBody,
@@ -1557,6 +1558,38 @@ async def decide_incident_compensation(
             "author": request.state.human,
         },
         key=f"incident-compensation-decide:{body.incident_id}:{digest}",
+    )
+    return ok(out)
+
+
+@router.get("/planning-questions")
+async def planning_questions(
+    status: str = Query(default="open", pattern=r"^(open|answered)$"),
+) -> dict:
+    """기획이 되물었는데 기록으로 답하지 못해 사람이 답해야 하는 질문 (읽기)."""
+    if is_mock():
+        return ok({"items": [], "open_count": 0})
+    return ok(await support_client.call("list_planning_questions", {"status": status}))
+
+
+@router.post("/planning-questions/answer", status_code=201)
+async def answer_planning_question(body: PlanningAnswerBody, request: Request) -> dict:
+    """사람이 기획 질문에 답한다. 사람 토큰이 필요하다 (라우터 전체에 걸려 있다).
+
+    고객지원이 안전 관문을 거쳐 기획으로 보낸다. 답한 사람은 사람 토큰에서만 채운다.
+    같은 질문은 호출 사이에 변하지 않는 키를 써서 여러 번 눌러도 한 번만 처리된다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "기획 질문 답하기는 실제 모드에서만 된다")
+    out = await support_client.call(
+        "send_planning_answer",
+        {
+            "question_id": body.question_id,
+            "answer": body.answer,
+            "evidence_ids": body.evidence_ids,
+            "author": request.state.human,
+        },
+        key=f"planning-answer:{body.question_id}",
     )
     return ok(out)
 

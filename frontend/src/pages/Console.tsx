@@ -9,6 +9,8 @@ import { SummaryCard } from "@/components/admin/SummaryCard";
 import { Thread } from "@/components/admin/Thread";
 import { ORIGINAL_OPENED } from "@/lib/useOriginal";
 import { OFFLINE } from "@/components/admin/bits";
+import { usePlanningQuestionCount } from "@/components/support/PlanningQuestions";
+import { Link } from "@/lib/nav";
 import { api } from "@/lib/api";
 import { STATUS_KO, tenantName } from "@/lib/labels";
 import type { Conversation, ConversationListItem, Kpi } from "@/lib/types";
@@ -28,6 +30,7 @@ function Console() {
   const [followUp, setFollowUp] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const planningWaiting = usePlanningQuestionCount();
 
   const refresh = useCallback(async () => {
     const [l, k] = await Promise.all([api.admin.list(), api.admin.kpi()]);
@@ -79,6 +82,11 @@ function Console() {
   return (
     <div className="flex h-full flex-col gap-3 p-4 lg:px-6">
       <KpiStrip kpi={kpi} />
+      {!!planningWaiting && (
+        <Link href="/claims?view=planning" className="flex shrink-0 items-center gap-2 rounded-xl bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800 ring-1 ring-amber-100">
+          기획이 답을 기다리는 질문 {planningWaiting}건이 있습니다. 근거를 아는 상담원이 답해 주세요 ›
+        </Link>
+      )}
       {error && <div role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</div>}
       <div className="flex min-h-0 flex-1 gap-3">
         <ConversationList items={list} selectedId={conv?.id ?? null} onSelect={open} onNew={() => setShowNew(true)} />

@@ -729,6 +729,14 @@ class IncidentCompensationDecideBody(BaseModel):
     reject_buyer_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
+class PlanningAnswerBody(BaseModel):
+    """사람이 기획 질문에 답한다. 답한 사람은 받지 않는다(사람 토큰에서 채운다)."""
+
+    question_id: str = Field(pattern=r"^Q-[A-Za-z0-9_-]+$", max_length=80)
+    answer: str = Field(min_length=1, max_length=1000)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
 class ResolutionNoteBody(BaseModel):
     """해결 메모 본문. 작성자는 받지 않는다(서버가 사람 토큰에서 채운다). 셋 다 비면 422."""
 

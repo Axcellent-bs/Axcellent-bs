@@ -398,3 +398,58 @@ def test_deciding_needs_a_human_token(fake: Fake) -> None:
     )
     assert response.status_code in (401, 403)
     assert not [r for r in fake.sent if r.skill == "decide_incident_compensation"]
+
+
+# ---------------------------------------------------------------- 기획 질문 답하기
+def test_planning_questions_are_read_from_support(fake: Fake) -> None:
+    fake.outputs["list_planning_questions"] = {"items": [], "open_count": 0}
+    response = TestClient(app).get(BASE + "/planning-questions")
+    assert response.status_code == 200
+    sent = next(r for r in fake.sent if r.skill == "list_planning_questions")
+    assert sent.input == {"status": "open"}
+
+
+def test_a_bad_status_is_a_422_when_reading_planning_questions(fake: Fake) -> None:
+    assert (
+        TestClient(app).get(BASE + "/planning-questions", params={"status": "x"}).status_code == 422
+    )
+    assert fake.sent == []
+
+
+def test_answering_sends_the_answer_with_the_author_from_the_token(fake: Fake) -> None:
+    fake.outputs["send_planning_answer"] = {"status": "answered", "planning_outcome": "applied"}
+    response = TestClient(app).post(
+        BASE + "/planning-questions/answer",
+        json={
+            "question_id": "Q-REQ-1-1",
+            "answer": "완료 기준은 안내 문구가 보이는 것입니다",
+            "evidence_ids": ["inq_1"],
+            "author": "남이 보낸 이름",  # 본문의 작성자는 쓰지 않는다
+        },
+    )
+    assert response.status_code == 201
+    sent = next(r for r in fake.sent if r.skill == "send_planning_answer")
+    assert sent.input == {
+        "question_id": "Q-REQ-1-1",
+        "answer": "완료 기준은 안내 문구가 보이는 것입니다",
+        "evidence_ids": ["inq_1"],
+        "author": "tester",  # 사람 토큰의 이름
+    }
+    assert sent.meta.idempotency_key == "planning-answer:Q-REQ-1-1"  # 여러 번 눌러도 한 번
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"question_id": "REQ-1"},
+        {"answer": ""},
+        {"answer": "가" * 1001},
+        {"evidence_ids": ["x"] * 21},
+    ],
+)
+def test_a_bad_planning_answer_is_a_422_and_sends_nothing(
+    fake: Fake, changes: dict[str, object]
+) -> None:
+    body = {"question_id": "Q-REQ-1-1", "answer": "답", **changes}
+    assert TestClient(app).post(BASE + "/planning-questions/answer", json=body).status_code == 422
+    assert not [r for r in fake.sent if r.skill == "send_planning_answer"]

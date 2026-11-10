@@ -165,6 +165,17 @@ export interface QueueRow {
 }
 export interface IncidentQueue { context_id: string; pending_buyers: number; pending_total: number; rows: QueueRow[] }
 export interface IncidentQueueList { incidents: IncidentQueue[]; notes: string[] }
+/** 기획이 되물었는데 기록으로 답하지 못해 사람이 답해야 하는 질문 (고객지원이 받아 둔 것) */
+export interface PlanningQuestion {
+  question_id: string; request_id: string; context_id: string; tenant_id: string;
+  spec_id: string | null; about: string | null; question: string; options: string[];
+  status: "open" | "answered"; received_at: string; answered_at: string | null; answered_by: string | null;
+}
+export interface PlanningQuestionList { items: PlanningQuestion[]; open_count: number }
+export interface PlanningAnswerResult {
+  question_id: string; request_id: string;
+  planning_outcome: "applied" | "duplicate" | "unknown_question"; status: "open" | "answered"; spec_id: string | null;
+}
 export interface IncidentCompensationDecision {
   incident_context_id: string;
   results: { buyer_id: string; status: "sent" | "held" | "approved" | "rejected" | "not_found" | "not_pending" | "failed"; coupon_id: string | null; total_value: number }[];
@@ -250,6 +261,9 @@ export const support = {
   /** 장애 보상 대기·승인·보류 목록 (사건을 주면 그 사건만) */
   incidentQueue: (incidentId?: string) =>
     get<IncidentQueueList>(`${BASE}/incident-compensation-queue${qs({ incident_id: incidentId })}`),
+  /** 사람이 답해야 하는 기획 질문 (기본은 아직 답하지 못한 것만) */
+  planningQuestions: (status: "open" | "answered" = "open") =>
+    get<PlanningQuestionList>(`${BASE}/planning-questions${qs({ status })}`),
   changeProposals: () => get<ChangeProposals>(`${BASE}/change-proposals`),
   /** 한 사건 번호로 기록된 처리(안전 관문 실행 기록) */
   executions: (contextId: string) => get<ExecutionRow[]>(`${BASE}/executions${qs({ context_id: contextId })}`),
