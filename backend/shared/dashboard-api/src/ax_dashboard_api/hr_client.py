@@ -34,6 +34,7 @@ NOT_FOUND_OUTCOMES = frozenset(
         "UNKNOWN_HANDOVER",
         "UNKNOWN_CHANGE",
         "UNKNOWN_MEMBER",
+        "UNKNOWN_LEAVE",
         "UNKNOWN_AREA",
     }
 )

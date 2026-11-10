@@ -155,3 +155,52 @@ def test_없는_사람은_404_같은_기간_기록은_그대로_성공(
 def test_목_모드에는_근무_상태가_없다(client: TestClient, on: None, monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_MOCK", "1")
     assert client.get(BASE + "/presence").status_code == 501
+
+
+# ---- 취소 (cancel_leave) ---------------------------------------------------------------
+CANCELLED = LEAVE | {"cancelled_by": "tester", "cancelled_at": NOW}
+
+
+def test_취소는_사람_토큰이_필요하고_취소한_사람은_토큰의_이름이다(
+    client: TestClient, fake: Fake, on: None
+) -> None:
+    fake.outputs["cancel_leave"] = {"leave": CANCELLED}
+    url = BASE + "/presence/leaves/lv_1/cancel"
+    assert _anonymous(client).post(url).status_code == 401
+    client.headers["authorization"] = "Bearer mock:finance"
+    assert client.post(url).status_code == 403
+    assert fake.sent == []
+
+    client.headers["authorization"] = "Bearer test-human-token"
+    res = client.post(url)
+    assert res.status_code == 200
+    assert res.json()["data"]["leave"]["cancelled_by"] == "tester"
+    sent = fake.last("cancel_leave")
+    assert sent.input == {"leave_id": "lv_1", "cancelled_by": "tester"}
+    assert sent.meta.idempotency_key and sent.meta.idempotency_key.endswith(
+        ":cancel_leave:leave-cancel:lv_1"
+    )
+
+
+def test_없는_휴가는_404_이미_취소된_기록은_성공(client: TestClient, fake: Fake, on: None) -> None:
+    url = BASE + "/presence/leaves/lv_nope/cancel"
+    fake.overrides["cancel_leave"] = {"outcome": "UNKNOWN_LEAVE", "output": {"message": "없다"}}
+    assert client.post(url).status_code == 404
+    fake.overrides["cancel_leave"] = {"outcome": "duplicate"}
+    fake.outputs["cancel_leave"] = {"leave": CANCELLED}
+    assert client.post(BASE + "/presence/leaves/lv_1/cancel").status_code == 200
+
+
+def test_취소도_스위치가_꺼져_있으면_닫혀_있다(client: TestClient, fake: Fake, monkeypatch) -> None:
+    monkeypatch.delenv("DASHBOARD_PRESENCE_ENABLED", raising=False)
+    res = client.post(BASE + "/presence/leaves/lv_1/cancel")
+    assert (res.status_code, res.json()["error"]["code"]) == (404, "PRESENCE_DISABLED")
+    assert fake.sent == []
+
+
+def test_취소는_본문을_받지_않고_너무_긴_ID는_거절한다(
+    client: TestClient, fake: Fake, on: None
+) -> None:
+    fake.outputs["cancel_leave"] = {"leave": CANCELLED}
+    assert client.post(BASE + "/presence/leaves/" + "x" * 65 + "/cancel").status_code == 422
+    assert fake.sent == []
