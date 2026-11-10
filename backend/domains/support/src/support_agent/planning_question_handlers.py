@@ -89,7 +89,8 @@ async def send_planning_answer(request: AgentRequest) -> AgentResult:
     - 답 문구에 개인정보가 있으면 보내지 않는다(기획 기록에 남지 않게 코드가 막는다).
     - 안전 관문을 먼저 거치고, 실행되지 않으면(보류·검증 중·거부) 아무것도 보내지 않는다.
     - 기획이 응답하면(`applied`·`duplicate`·`unknown_question`) 질문을 닫는다. 기획 화면에서
-      먼저 답했거나 기획이 모르는 질문이라 더 보낼 수 없어서다(예진 님). 기획에 닿지 않으면 열어 둔다.
+      먼저 답했거나 기획이 모르는 질문이라 더 보낼 수 없어서다(예진 님).
+      기획에 닿지 않으면 열어 둔다.
     - 기획은 답 문구를 근거 데이터로만 쓰고 지시로 읽지 않는다.
     """
     parsed = h._parse(request, SendPlanningAnswerInput)
