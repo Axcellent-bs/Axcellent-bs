@@ -757,6 +757,19 @@ class PlanningAnswerBody(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
+class IdeaDigestBody(BaseModel):
+    """쌓인 고객 아이디어를 기획에 넘긴다. 종류·영역을 비우면 기준을 넘은 묶음 전부.
+
+    넘긴 사람은 받지 않는다(사람 토큰에서 채운다).
+    """
+
+    kind: str | None = Field(default=None, pattern=r"^(event|feature|improvement|product|other)$")
+    area: str | None = Field(
+        default=None, pattern=r"^(shipping|payment|product|benefit|usability|other)$"
+    )
+    min_ideas: int = Field(default=3, ge=1, le=100)
+
+
 class ResolutionNoteBody(BaseModel):
     """해결 메모 본문. 작성자는 받지 않는다(서버가 사람 토큰에서 채운다). 셋 다 비면 422."""
 

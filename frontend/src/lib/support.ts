@@ -171,6 +171,25 @@ export interface PlanningQuestion {
   spec_id: string | null; about: string | null; question: string; options: string[];
   status: "open" | "answered"; received_at: string; answered_at: string | null; answered_by: string | null;
 }
+// 고객 아이디어(고객의 소리). 문의·불만과 따로 쌓이고, 묶음 현황과 숫자는 고객지원이 코드로 센 값이다
+export type IdeaKind = "event" | "feature" | "improvement" | "product" | "other";
+export type IdeaArea = "shipping" | "payment" | "product" | "benefit" | "usability" | "other";
+export interface IdeaItem {
+  idea_id: string; kind: IdeaKind; area: IdeaArea; kind_label: string; area_label: string;
+  text: string; status: "new" | "sent"; created_at: string;
+  sent_at: string | null; request_id: string | null; sent_by: string | null;
+}
+export interface IdeaGroup {
+  kind: IdeaKind; area: IdeaArea; kind_label: string; area_label: string;
+  idea_count: number; customer_count: number; first_at: string; last_at: string;
+  top_words: { word: string; count: number }[]; idea_ids: string[]; ready: boolean;
+}
+export interface IdeaList { items: IdeaItem[]; total: number; new_count: number; groups: IdeaGroup[] }
+export interface IdeaDigestRow {
+  kind: IdeaKind; area: IdeaArea; idea_count: number; customer_count: number;
+  request_id?: string; outcome?: "created" | "linked_duplicate"; duplicate_of?: string | null; error?: string;
+}
+export interface IdeaDigestResult { sent: IdeaDigestRow[]; failed?: number; message?: string }
 export interface PlanningQuestionList { items: PlanningQuestion[]; open_count: number }
 export interface PlanningAnswerResult {
   question_id: string; request_id: string;
@@ -267,6 +286,9 @@ export const support = {
   /** 사람이 답해야 하는 기획 질문 (기본은 아직 답하지 못한 것만) */
   planningQuestions: (status: "open" | "answered" = "open") =>
     get<PlanningQuestionList>(`${BASE}/planning-questions${qs({ status })}`),
+  /** 고객이 낸 아이디어 목록과 기획에 넘길 묶음 현황 */
+  ideas: (q: { status?: "new" | "sent"; minIdeas?: number } = {}) =>
+    get<IdeaList>(`${BASE}/ideas${qs({ status: q.status, min_ideas: q.minIdeas })}`),
   changeProposals: () => get<ChangeProposals>(`${BASE}/change-proposals`),
   /** 한 사건 번호로 기록된 처리(안전 관문 실행 기록) */
   executions: (contextId: string) => get<ExecutionRow[]>(`${BASE}/executions${qs({ context_id: contextId })}`),

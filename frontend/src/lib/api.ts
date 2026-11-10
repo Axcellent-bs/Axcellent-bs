@@ -1,5 +1,5 @@
 import { ApiError } from "./apiError";
-import type { ChangeProposalSent, DeclineReason, IncidentCompensationDecision, PlanningAnswerResult } from "./support";
+import type { ChangeProposalSent, DeclineReason, IdeaArea, IdeaDigestResult, IdeaKind, IncidentCompensationDecision, PlanningAnswerResult } from "./support";
 import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, FeedbackItem, FeedbackOverview, FeedbackStatus, Health, Kpi, Me, PurgeReport, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
 
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
@@ -115,6 +115,9 @@ export const api = {
     // 기획이 되물은 질문에 사람이 답한다 (사람 토큰 필요). 고객지원이 안전 관문을 거쳐 기획으로 보낸다
     answerPlanningQuestion: (b: { question_id: string; answer: string; evidence_ids?: string[] }) =>
       post<PlanningAnswerResult>(`/api/dashboard/planning-questions/answer`, b),
+    // 쌓인 고객 아이디어를 묶음별로 기획에 넘긴다 (사람 토큰 필요). 종류·영역을 비우면 기준을 넘은 묶음 전부
+    sendIdeaDigest: (b: { kind?: IdeaKind; area?: IdeaArea; min_ideas?: number }) =>
+      post<IdeaDigestResult>(`/api/dashboard/ideas/digest`, b),
     revealOriginal: (id: number, messageId: number) =>
       post<{ message_id: number; text: string }>(`/api/dashboard/conversations/${id}/messages/${messageId}/original`),
     claimSuggestion: (id: number) => post<ClaimSuggestion>(`/api/dashboard/conversations/${id}/claim-suggestion`),

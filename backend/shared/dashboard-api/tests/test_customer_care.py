@@ -453,3 +453,28 @@ def test_a_bad_planning_answer_is_a_422_and_sends_nothing(
     body = {"question_id": "Q-REQ-1-1", "answer": "답", **changes}
     assert TestClient(app).post(BASE + "/planning-questions/answer", json=body).status_code == 422
     assert not [r for r in fake.sent if r.skill == "send_planning_answer"]
+
+
+# ---------------------------------------------------------------- 고객 아이디어
+def test_ideas_are_read_from_support(fake: Fake) -> None:
+    fake.outputs["list_ideas"] = {"items": [], "total": 0, "new_count": 0, "groups": []}
+    response = TestClient(app).get(BASE + "/ideas", params={"kind": "event", "min_ideas": 2})
+    assert response.status_code == 200
+    sent = next(r for r in fake.sent if r.skill == "list_ideas")
+    assert sent.input == {"kind": "event", "min_ideas": 2}
+
+
+@pytest.mark.parametrize("params", [{"kind": "x"}, {"area": "x"}, {"status": "x"}])
+def test_a_bad_idea_filter_is_a_422(fake: Fake, params: dict[str, str]) -> None:
+    assert TestClient(app).get(BASE + "/ideas", params=params).status_code == 422
+    assert fake.sent == []
+
+
+def test_sending_the_idea_digest_uses_the_author_from_the_token(fake: Fake) -> None:
+    fake.outputs["send_idea_digest"] = {"sent": [], "failed": 0}
+    response = TestClient(app).post(
+        BASE + "/ideas/digest", json={"kind": "event", "author": "남이 보낸 이름"}
+    )
+    assert response.status_code == 201
+    sent = next(r for r in fake.sent if r.skill == "send_idea_digest")
+    assert sent.input == {"kind": "event", "min_ideas": 3, "author": "tester"}

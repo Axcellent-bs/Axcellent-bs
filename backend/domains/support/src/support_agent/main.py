@@ -17,6 +17,7 @@ from support_agent.feedback_handlers import FEEDBACK_HANDLERS
 from support_agent.gap_handlers import GAP_HANDLERS
 from support_agent.handlers import HANDLERS
 from support_agent.handoff_handlers import HANDOFF_HANDLERS
+from support_agent.idea_handlers import IDEA_HANDLERS
 from support_agent.incident_handlers import INCIDENT_HANDLERS
 from support_agent.incident_queue_handlers import INCIDENT_QUEUE_HANDLERS
 from support_agent.insight_handlers import INSIGHT_HANDLERS
@@ -60,6 +61,7 @@ ALL_HANDLERS = {
     **INSIGHT_HANDLERS,
     **PROPOSAL_HANDLERS,
     **PLANNING_QUESTION_HANDLERS,
+    **IDEA_HANDLERS,
     **CHANGE_HANDLERS,
     **ANALYSIS_HANDLERS,
     **SUGGEST_HANDLERS,

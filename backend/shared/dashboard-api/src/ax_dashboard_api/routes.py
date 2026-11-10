@@ -88,6 +88,7 @@ from ax_dashboard_api.schemas import (
     FeedbackItem,
     FeedbackOverview,
     FeedbackStatusBody,
+    IdeaDigestBody,
     IncidentCompensationDecideBody,
     InspectionBody,
     Kpi,
@@ -1630,6 +1631,40 @@ async def answer_planning_question(body: PlanningAnswerBody, request: Request) -
         key=f"planning-answer:{body.question_id}",
     )
     return ok(out)
+
+
+@router.get("/ideas")
+async def customer_ideas(
+    status: str | None = Query(default=None, pattern=r"^(new|sent)$"),
+    kind: str | None = Query(default=None, pattern=r"^(event|feature|improvement|product|other)$"),
+    area: str | None = Query(
+        default=None, pattern=r"^(shipping|payment|product|benefit|usability|other)$"
+    ),
+    min_ideas: int = Query(default=3, ge=1, le=100),
+) -> dict:
+    """고객이 낸 아이디어 목록과 기획에 넘길 묶음 현황 (읽기). 문의·불만과 따로 쌓인다."""
+    if is_mock():
+        return ok({"items": [], "total": 0, "new_count": 0, "groups": []})
+    payload = {k: v for k, v in (("status", status), ("kind", kind), ("area", area)) if v}
+    return ok(await support_client.call("list_ideas", {**payload, "min_ideas": min_ideas}))
+
+
+@router.post("/ideas/digest", status_code=201)
+async def send_idea_digest(body: IdeaDigestBody, request: Request) -> dict:
+    """쌓인 아이디어를 묶음별로 기획에 넘긴다. 사람 토큰이 필요하다 (라우터 전체에 걸려 있다).
+
+    고객지원이 안전 관문을 거쳐 기획 `create_ticket`으로 보낸다. 넘긴 사람은 사람 토큰에서만 채운다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "아이디어 넘기기는 실제 모드에서만 된다")
+    payload = {k: v for k, v in (("kind", body.kind), ("area", body.area)) if v}
+    return ok(
+        await support_client.call(
+            "send_idea_digest",
+            {**payload, "min_ideas": body.min_ideas, "author": request.state.human},
+            target=f"{body.kind}:{body.area}:{body.min_ideas}",
+        )
+    )
 
 
 @router.get("/incident-compensation")
