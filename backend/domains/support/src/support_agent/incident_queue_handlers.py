@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from typing import Any
 
 from ax_agent_template.server import error_result
@@ -22,7 +23,8 @@ from ax_contracts.schemas import (
     Evidence,
     TaskStatus,
 )
-from support_agent import compensation
+from ax_contracts.schemas.event import SupportIncidentCompensationData
+from support_agent import compensation, events
 from support_agent import handlers as h
 from support_agent.incident_handlers import (
     INCIDENT_CONTEXT_PREFIX,
@@ -45,6 +47,17 @@ from support_agent.incident_schemas import (
     QueueRow,
 )
 from support_agent.store import now_iso
+
+SUMMARY_FIELDS = (
+    "pending",
+    "approved",
+    "held",
+    "sent",
+    "rejected",
+    "remaining",
+    "coupons_sent",
+    "sent_value",
+)
 
 QUEUE_NOTES = [
     "대기에 올린 고객은 사람이 승인하기 전에는 쿠폰을 요청하지 않는다",
@@ -207,6 +220,23 @@ async def _send_approved(
     return decided, stopped
 
 
+async def _announce(request: AgentRequest, context_id: str, rows: list[DecidedBuyer]) -> None:
+    """이번 결정으로 줄이 바뀌었으면 사건 큐의 지금 상태를 총괄에 한 번 알린다.
+
+    알리기만 하고 발행이 실패해도 결정은 그대로다.
+
+    바뀐 것이 없으면(`not_found`·`not_pending`뿐) 알리지 않는다. 고객별 값은 싣지 않는다.
+    """
+    if not any(r.status in ("approved", "rejected", "sent", "held") for r in rows):
+        return
+    summary = h.INCIDENT_QUEUE.summary(context_id)
+    data = SupportIncidentCompensationData(
+        incident_context_id=context_id,
+        **{name: summary[name] for name in SUMMARY_FIELDS},
+    )
+    await events.emit_incident_compensation_decided(request, data, datetime.now(UTC))
+
+
 async def decide_incident_compensation(request: AgentRequest) -> AgentResult:
     """사람이 대기 고객을 고객별로 승인·거절한다. 승인된 고객만 마케팅에 쿠폰을 요청한다."""
     parsed = h._parse(request, DecideIncidentCompensationInput)
@@ -285,6 +315,7 @@ async def decide_incident_compensation(request: AgentRequest) -> AgentResult:
     notes = list(QUEUE_NOTES)
     if stopped:
         notes.append("마케팅에 닿지 않은 고객은 승인 상태로 남았다. 다시 승인하면 이어서 보낸다")
+    await _announce(request, context_id, rows)
     body = DecideIncidentCompensationOutput(
         incident_context_id=context_id,
         results=rows,
