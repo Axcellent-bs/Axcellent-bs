@@ -24,7 +24,7 @@
 | --- | --- | --- | --- | --- |
 | `closing_report` | read | orchestrator, data | optional | 기간 손익 요약 (`ClosingReportInput`·`ClosingReportOutput`) |
 | `record_support_cost` | read | orchestrator | recommended | 고객지원이 끝낸 처리 결과(환불 금액·쿠폰)를 받아 주문 배송비와 함께 장부에 적음(환불 여부는 확인하지 않음). 경비를 쓰지 않은 문의도 처리 결과를 기록, 같은 문의는 한 번만 (`SupportCostInput`·`SupportCostOutput`) |
-| `answer_planning_question` | read | planning | recommended | 기획이 근거를 되물으면 재무가 보낸 요청의 기록으로만 답한다. 기록에 없으면 `unknown`. 지금은 재무에서 요청을 보내는 코드가 없어 모든 질문이 `unknown`이다. |
+| `answer_planning_question` | read | planning | recommended | 기획이 근거를 되물으면 재무가 보낸 요청(`POST /api/finance/planning-requests`)의 근거로만 답한다. 기록에 없으면 `unknown` |
 
 없앤 것: `loss_aggregation`(손실 집계 skill), `/api/finance/loss-reports`. 장애 비용은 평상시 장부 → `closing_report`에서 드러난다. 총괄은 고객지원이 문의를 닫으면 재무를 불러(`record_support_cost`) 처리 결과를 장부에 기록하게 한다.
 화면 호환으로 한 단계 남겨 뒀던 키(사건 상세 `steps`, 목록 `loss_total`)도 지웠다 — 화면 정리(ax-company-hq/ax-frontend#61)가 끝나 읽는 쪽이 없다.
@@ -86,6 +86,9 @@ ax-contracts, ax-agent-template, data 에이전트(`impact_analysis`, `fraud_sco
 
 - 규칙과 근거: `finance_rules.toml`. 값을 바꾸면 version을 올린다. 결과마다 `applied_rules`가 붙는다
 - 캠페인: `record_campaign_result`, `review_campaign_budget`, `verify_campaign_budget`, `finance_insights`. 쿠폰·환불은 판단하지 않는다
+  - `verify_campaign_budget`은 지금 아무도 부르지 않는다. 캠페인 시작(`start_campaign`)의 교차검증자는 안전 장치 자체이고(기준표), 재무는 비용을 승인·반려하지 않고 의견만 낸다(BRK-005). 검증자로 쓰지 않기로 한 상태다
+  - `finance_insights`는 총괄이 부를 수 있게 열어 두었지만 아직 부르는 곳이 없다
+- 기획 개선 요청: 재무 화면(④ 팀 예산 탭)에서 사람이 바꿀 내용과 근거를 적어 보내면 안전 관문(`finance_request_change`, A)을 거쳐 기획 `create_ticket`으로 간다. 보낸 근거는 재무 기록에 남아(`FINANCE_STATE_FILE`) 다시 켜도 기획의 되묻기에 답한다
 - 시뮬레이션: `uv run python -m finance_agent.simulation`. 가정은 `backend/docs/notes/finance/simulation-assumptions.md`
 - 파일 자동화 환경변수: `FINANCE_EXPORT_DIR`, `FINANCE_BANK_INBOX`, `FINANCE_EXPORT_SECONDS`
 - 은행 거래내역: 재무 담당자가 화면(② 매출·PG 대사 → 은행 입금 대조)에서 은행 파일(CSV·xlsx)을 그대로 올린다

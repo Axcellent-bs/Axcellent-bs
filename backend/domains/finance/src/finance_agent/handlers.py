@@ -153,6 +153,9 @@ class FinanceRecords:
         self.vat_filing_cancels: list[dict[str, Any]] = []
         self.recon_notes: dict[str, str] = {}  # payment_id → 처리 메모
         self.recon_note_log: list[dict[str, Any]] = []
+        # 사람이 재무 화면에서 기획에 보낸 개선 요청 (`POST /api/finance/planning-requests`).
+        # 기획이 되물으면(`answer_planning_question`) 이 기록의 근거로 답한다
+        self.planning_requests: list[dict[str, Any]] = []
         self.batches: dict[str, dict[str, Any]] = {}  # 정산 기간 → 묶음 요청 상태
         # 없앤 예산·한도 경보의 확인 메모. 쓰지 않지만 사람이 쓴 기록이라 저장 파일에 그대로 둔다
         self.policy_acks: dict[str, dict[str, Any]] = {}

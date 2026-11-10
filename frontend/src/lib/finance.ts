@@ -162,6 +162,8 @@ export interface ReconItem {
 }
 /** 대사 기간의 건이 어느 PG 자료와 맞춰졌는지와 올린 파일이 덮는 판매일 기간 */
 export interface PgCoverage { uploaded: number; generated: number; periods: { from: string; to: string }[] }
+/** 재무가 기획에 보낸 개선 요청 */
+export interface PlanningRequest { source_ref: string; title: string; facts: string[]; request_id: string; context_id: string; outcome: "created" | "linked_duplicate"; duplicate_of: string | null; by: string; at: string }
 export interface PgImport {
   file: string | null;
   at: string;
@@ -648,6 +650,10 @@ export const finance = {
     fin<Envelope<PgImport>>(`/api/finance/pg/file${query({ name: file.name })}`, { method: "POST", raw: file, human: true }),
   pgImports: () => fin<Envelope<{ imports: PgImport[]; periods: { from: string; to: string }[]; rows: number; inbox_enabled: boolean }>>("/api/finance/pg/imports"),
   clearPg: (reason: string) => fin<Envelope<PgImport>>("/api/finance/pg/clear", { method: "POST", body: { reason }, human: true }),
+  /** 재무 → 기획 개선 요청 (사람이 정해 보낸다. 기획이 되물으면 보낸 근거로 답한다) */
+  planningRequests: () => fin<Envelope<{ requests: PlanningRequest[] }>>("/api/finance/planning-requests"),
+  sendPlanningRequest: (title: string, evidence: string) =>
+    fin<Envelope<PlanningRequest>>("/api/finance/planning-requests", { method: "POST", body: { title, evidence }, human: true }),
   bankOutflows: () => fin<Envelope<BankOutflows>>("/api/finance/bank/outflows"),
   noteBankOutflow: (rowId: string, note: string) =>
     fin<Envelope<BankOutflows>>(`/api/finance/bank/outflows/${encodeURIComponent(rowId)}/note`, { method: "POST", body: { note }, human: true }),
