@@ -9,13 +9,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+import os
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ax_agent_template.config import is_mock
-from ax_agent_template.llm import LLMClient, MockLLMClient
+from ax_agent_template.llm import LLMClient, LLMResponseError, MockLLMClient
 from support_agent import abuse_rules, categories, guard, kb, languages, privacy_rules
 from support_agent.schemas import (
     STYLES,
@@ -110,6 +113,10 @@ _CATEGORY_KEYWORDS = {
 _CATEGORY_QUERY = {"refund": "환불 교환 반품", "shipping": "배송 지연 도착"}
 MAX_KEYWORDS = 5
 MAX_KEYWORD_LENGTH = 30
+RETRY_DELAY = 1.0  # 모델이 잠깐 바쁠 때(429·5xx) 한 번만 다시 부른다
+BUSY_STATUS = frozenset({429, 500, 502, 503, 504})
+ENV_SPECULATIVE = "SUPPORT_SPECULATIVE_DRAFT"  # `off`·`0`·`false`면 끈다(기본 켜짐)
+SPECULATIVE_QUERY_CHARS = 200
 
 
 def get_llm() -> LLMClient:
@@ -205,6 +212,99 @@ def _translation(language: str, message_ko: Any, points: Any) -> tuple[str, list
     return _clean_ko(message_ko, MAX_TRANSLATION), [p for p in cleaned if p]
 
 
+async def _structured(
+    llm: LLMClient, prompt: str, schema: type[Any], *, untrusted: dict[str, Any]
+) -> Any:
+    """`llm.structured`를 부른다. 모델이 잠깐 바쁘면(429·5xx) 한 번만 다시 부른다.
+
+    바쁜 모델 때문에 분류가 키워드 대체로 떨어지면 분류가 틀리고("결제 버튼이 안 눌려요"가
+    일반 문의로 간다) 분류 필요 표시도 달라진다. 시간 초과·형식 오류는 다시 부르지 않는다.
+    """
+    try:
+        return await llm.structured(prompt, schema, untrusted=untrusted)
+    except LLMResponseError as exc:
+        if exc.status_code not in BUSY_STATUS:
+            raise
+        logger.info("LLM이 바빠서(%s) 한 번 다시 부른다", exc.status_code)
+        await asyncio.sleep(RETRY_DELAY)
+        return await llm.structured(prompt, schema, untrusted=untrusted)
+
+
+def speculative_enabled() -> bool:
+    return (os.getenv(ENV_SPECULATIVE) or "").strip().lower() not in ("off", "0", "false")
+
+
+def _draft_prompt(policy: str, reply_language: str) -> str:
+    return (
+        "아래 정책 문서에 근거해 고객 답변 초안을 empathetic, concise, step_by_step 세 가지 "
+        "스타일로 쓴다. 환불·보상을 약속하지 않고 개인정보를 적지 않는다. "
+        f"reply는 {languages.NAMES[reply_language]}로 쓴다. 한국어가 아니면 상담원이 읽을 "
+        "한국어 번역을 reply_ko에 함께 넣는다.\n\n"
+        f"정책 문서:\n{policy or '(근거 없음)'}"
+    )
+
+
+def _policy_text(sources: list[Source]) -> str:
+    return "\n".join(f"[{s.id}] {s.title} {s.section}: {s.text}" for s in sources)
+
+
+class _Speculation:
+    """분류 모델을 기다리는 동안 먼저 쓰는 초안(한국어 문의만).
+
+    초안은 정책 근거에 따라 달라지는데, 근거는 분류 모델이 쓴 검색어로 찾는다. 그 검색어를 기다리지
+    않고 고객 글로 먼저 근거를 찾아 초안을 쓰기 시작한다. 분류가 끝나 진짜 검색어로 찾은 근거가
+    같으면(문서 번호가 같은 집합) 이 초안을 쓰고, 다르면 버리고 지금처럼 다시 쓴다. 그래서 초안의
+    질은 예전과 같고, 맞을 때만 접수가 빨라진다.
+    """
+
+    def __init__(self) -> None:
+        self.found: asyncio.Future[list[Source]] = asyncio.get_running_loop().create_future()
+        self.task: asyncio.Task[Any] | None = None
+
+    async def run(
+        self,
+        llm: LLMClient,
+        query: str,
+        extra: list[Source],
+        retrieve: Callable[[str], Awaitable[list[Source]]] | None,
+        reply_language: str,
+        untrusted: dict[str, Any],
+    ) -> list[StyleReply]:
+        try:
+            found = await retrieve(query) if retrieve is not None else kb.search(query)
+        except BaseException as exc:
+            if not self.found.done():
+                self.found.set_exception(exc if isinstance(exc, Exception) else RuntimeError())
+            raise
+        self.found.set_result(found)
+        drafted = await _structured(
+            llm,
+            _draft_prompt(_policy_text([*extra, *found]), reply_language),
+            LLMDrafts,
+            untrusted=untrusted,
+        )
+        return drafted.replies
+
+    async def take(self, real_found: list[Source]) -> list[StyleReply] | None:
+        """진짜 근거가 먼저 찾은 근거와 같으면 초안을 돌려주고, 아니면(또는 실패하면) None이다."""
+        try:
+            early = await self.found
+            if {s.id for s in early} != {s.id for s in real_found} or self.task is None:
+                return None
+            return await self.task
+        except Exception:  # noqa: BLE001 - 먼저 쓴 초안은 덤이다. 실패하면 지금처럼 다시 쓴다
+            return None
+
+    async def drop(self) -> None:
+        if self.task is not None and not self.task.done():
+            self.task.cancel()
+        if self.task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self.task
+        if self.found.done() and not self.found.cancelled():
+            self.found.exception()  # 가져가지 않은 오류가 남아 경고가 뜨지 않게 한다
+
+
 async def analyze(
     text: str,
     subject: str = "",
@@ -224,66 +324,94 @@ async def analyze(
     untrusted: dict[str, Any] = {"subject": guard.mask_pii(subject)[0], "customer_message": masked}
     llm = get_llm()
     fallback = False
+    spec: _Speculation | None = None
+    if language == "ko" and speculative_enabled() and masked.strip():
+        spec = _Speculation()
+        spec.task = asyncio.create_task(
+            spec.run(
+                llm,
+                masked[:SPECULATIVE_QUERY_CHARS],
+                list(extra_sources or []),
+                retrieve,
+                reply_language,
+                untrusted,
+            )
+        )
 
     try:
-        classified = await llm.structured(
-            "고객 메시지의 의도, 분야, 감정, 긴급도를 분류하고 정책 문서 검색 질의를 만들어라. "
-            "category는 다음 코드 중 하나만 쓰고 다른 이름을 만들지 않는다: "
-            f"{categories.PROMPT_HINT}. "
-            "정책 문서는 한국어이므로 search_query는 고객 언어와 관계없이 한국어로 쓴다. "
-            "keywords에는 고객 메시지의 핵심 단어를 최대 5개 넣고 개인정보는 넣지 않는다. "
-            "고객 메시지가 한국어가 아니면 message_ko에 뜻을 바꾸지 않은 한국어 번역을 쓰고, "
-            "한국어이면 message_ko는 빈 문자열로 둔다. 번역에 약속·설명·의견을 더하지 않는다. "
-            "request_points_ko에는 고객이 바라는 핵심 요청을 한국어 짧은 문장으로 최대 3개 쓴다.",
-            LLMClassification,
-            untrusted=untrusted,
-        )
-    except Exception:
-        logger.warning("분류 LLM 실패, 키워드 분류로 대체한다", exc_info=True)
-        classified = keyword_classification(masked)
-        fallback = True
+        try:
+            classified = await _structured(
+                llm,
+                "고객 메시지의 의도, 분야, 감정, 긴급도를 분류하고 정책 문서 검색 질의를 만들어라. "
+                "category는 다음 코드 중 하나만 쓰고 다른 이름을 만들지 않는다: "
+                f"{categories.PROMPT_HINT}. "
+                "정책 문서는 한국어이므로 search_query는 고객 언어와 관계없이 한국어로 쓴다. "
+                "keywords에는 고객 메시지의 핵심 단어를 최대 5개 넣고 개인정보는 넣지 않는다. "
+                "고객 메시지가 한국어가 아니면 message_ko에 뜻을 바꾸지 않은 한국어 번역을 쓰고, "
+                "한국어이면 message_ko는 빈 문자열로 둔다. 번역에 약속·설명·의견을 더하지 않는다. "
+                "request_points_ko에는 고객이 바라는 핵심 요청을 "
+                "한국어 짧은 문장으로 최대 3개 쓴다.",
+                LLMClassification,
+                untrusted=untrusted,
+            )
+        except Exception:
+            logger.warning("분류 LLM 실패, 키워드 분류로 대체한다", exc_info=True)
+            classified = keyword_classification(masked)
+            fallback = True
 
-    classified_data = classified.model_dump()
-    if privacy_rules.is_deletion_request(masked):  # LLM이 틀려도 코드가 바로잡는다 (#430)
-        classified_data["category"] = privacy_rules.CATEGORY
-    message_ko, request_points = _translation(
-        language,
-        classified_data.pop("message_ko", ""),
-        classified_data.pop("request_points_ko", []),
-    )
-    keywords = clean_keywords(classified_data.pop("keywords", []))
-    if not keywords:  # LLM이 키워드를 못 줬으면 규칙으로 찾은 것을 쓴다
-        keywords = keyword_classification(masked).keywords
-    classification = Classification(
-        **classified_data,
-        pii_masked=pii_kinds,
-        language=language,
-        keywords=keywords,
-        message_ko=message_ko,
-        request_points_ko=request_points,
-    )
-    query = classification.search_query or masked
-    found = await retrieve(query) if retrieve is not None else kb.search(query)
+        classify_llm_ms = int((time.perf_counter() - started) * 1000)
+        classified_data = classified.model_dump()
+        if privacy_rules.is_deletion_request(masked):  # LLM이 틀려도 코드가 바로잡는다 (#430)
+            classified_data["category"] = privacy_rules.CATEGORY
+        message_ko, request_points = _translation(
+            language,
+            classified_data.pop("message_ko", ""),
+            classified_data.pop("request_points_ko", []),
+        )
+        keywords = clean_keywords(classified_data.pop("keywords", []))
+        if not keywords:  # LLM이 키워드를 못 줬으면 규칙으로 찾은 것을 쓴다
+            keywords = keyword_classification(masked).keywords
+        classification = Classification(
+            **classified_data,
+            pii_masked=pii_kinds,
+            language=language,
+            keywords=keywords,
+            message_ko=message_ko,
+            request_points_ko=request_points,
+        )
+        query = classification.search_query or masked
+        retrieve_started = time.perf_counter()
+        found = await retrieve(query) if retrieve is not None else kb.search(query)
+        retrieve_ms = int((time.perf_counter() - retrieve_started) * 1000)
+    except BaseException:
+        # 중간에 예외로 나가면 먼저 쓰던 초안 작업을 아무도 안 가져가고 끝까지 돈다
+        if spec is not None:
+            await spec.drop()
+        raise
     sources = [*(extra_sources or []), *found]
     classify_ms = int((time.perf_counter() - started) * 1000)
 
     drafting_started = time.perf_counter()
-    try:
-        policy = "\n".join(f"[{s.id}] {s.title} {s.section}: {s.text}" for s in sources)
-        drafted = await llm.structured(
-            "아래 정책 문서에 근거해 고객 답변 초안을 empathetic, concise, step_by_step 세 가지 "
-            "스타일로 쓴다. 환불·보상을 약속하지 않고 개인정보를 적지 않는다. "
-            f"reply는 {languages.NAMES[reply_language]}로 쓴다. 한국어가 아니면 상담원이 읽을 "
-            "한국어 번역을 reply_ko에 함께 넣는다.\n\n"
-            f"정책 문서:\n{policy or '(근거 없음)'}",
-            LLMDrafts,
-            untrusted=untrusted,
-        )
-        replies = drafted.replies
-    except Exception:
-        logger.warning("초안 LLM 실패, 고정 템플릿으로 대체한다", exc_info=True)
-        replies = []
-        fallback = True
+    replies: list[StyleReply] | None = None
+    reused = False
+    if spec is not None:
+        replies = await spec.take(found)
+        reused = replies is not None
+        if not reused:
+            await spec.drop()
+    if replies is None:
+        try:
+            drafted = await _structured(
+                llm,
+                _draft_prompt(_policy_text(sources), reply_language),
+                LLMDrafts,
+                untrusted=untrusted,
+            )
+            replies = drafted.replies
+        except Exception:
+            logger.warning("초안 LLM 실패, 고정 템플릿으로 대체한다", exc_info=True)
+            replies = []
+            fallback = True
 
     drafts = _validated_drafts(replies, sources, reply_language)
     analysis = Analysis(
@@ -291,8 +419,11 @@ async def analyze(
         sources=sources,
         drafts=drafts,
         timings_ms={
-            "classify": classify_ms,
+            "classify": classify_ms,  # 분류 호출 + 근거 검색 (예전과 같은 합계)
+            "classify_llm": classify_llm_ms,  # 그중 분류 모델 호출
+            "retrieve": retrieve_ms,  # 그중 정책 근거 검색
             "draft": int((time.perf_counter() - drafting_started) * 1000),
+            "draft_reused": int(reused),  # 1이면 분류를 기다리는 동안 먼저 쓴 초안을 썼다
         },
         validation=guard.check_reply(masked),
     )
