@@ -75,6 +75,15 @@ def test_gate_holds_back_a_one_off_spike() -> None:
     assert not ok and why == "최근 3일 같은 형식 숏츠 2개 (기준 5개, 반짝)"
 
 
+def test_gate_period_text_comes_from_the_window_value() -> None:
+    """기간 문구는 숏츠 통계가 준 값(= 검색 기간). 모르면 숫자를 쓰지 않는다."""
+    ok, why = pv.judge(GATE, vs_all_ratio=1.6, search_ratio=None, recent=2, recent_days=7)
+    assert not ok and why == "최근 7일 같은 형식 숏츠 2개 (기준 5개, 반짝)"
+    ok, why = pv.judge(GATE, vs_all_ratio=1.6, search_ratio=None, recent=2, recent_days=None)
+    assert not ok and why == "최근 검색 기간 같은 형식 숏츠 2개 (기준 5개, 반짝)"
+    assert pv.recent_period(7) == "최근 7일" and pv.recent_period(None) == "최근 검색 기간"
+
+
 def test_gate_says_how_many_shorts_had_no_publish_time() -> None:
     ok, why = pv.judge(GATE, vs_all_ratio=1.6, search_ratio=None, recent=2, recent_days=3,
                        recent_unknown=3)  # fmt: skip

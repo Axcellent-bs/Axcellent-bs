@@ -227,3 +227,15 @@ def test_category_and_ad_caution_per_video(tmp_path: Path) -> None:
     plain = videos["s20_8"]
     assert plain.category == "게임" and plain.ad_usable is True and plain.caution_types == []
     assert plain.thumbnail_url and plain.video_url
+
+
+def test_recent_window_is_the_search_window(tmp_path: Path) -> None:
+    """홍보 영상 최근 기간 = 숏츠 검색 기간(search_days). 게시 시각(하루 전)으로 센다."""
+    out = run_scenario(tmp_path, "search_days = 10\n")
+    assert out.recent_days == 10
+    groups = [g for g in out.by_format if g.count]
+    assert groups
+    for g in groups:
+        assert (g.recent_count or 0) + (g.recent_unknown or 0) == g.count
+    assert sum(g.recent_count or 0 for g in groups) > 0  # 하루 전 게시분은 10일 안
+    assert run_scenario(tmp_path / "default").recent_days == 7  # 기본 search_days

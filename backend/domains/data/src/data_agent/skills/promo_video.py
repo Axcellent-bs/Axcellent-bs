@@ -8,7 +8,8 @@
   같은 형식의 지난 기간 대비 상승률이 아님. 분자·분모 모두 하위 주제 숏츠를 뺀 같은 모집단,
   어느 쪽이든 표본이 min_sample 미만이면 배수 없음) ≥ `gate_format_vs_all_ratio`, 또는 (네이버 검색
   배수 ≥ `gate_naver_ratio` 그리고 숏츠 전체 대비 ≥ `gate_naver_min_format_ratio`), 그리고
-  최근 `recent_days`일 안에 게시된(snippet.publishedAt) 같은 형식
+  최근 N일(N = 숏츠 검색 `[shorts] search_days`, 검색과 같은 창) 안에 게시된(snippet.publishedAt)
+  같은 형식
   숏츠 ≥ `gate_recent_min`개 (게시 시각을 모르는 숏츠는 세지 않는다).
   가격·줄어든 배수(1.0 미만)·표본 부족·경고로 뺀 상품군은 근거로 치지 않는다
 - 기준을 못 넘은 것은 기획에 넘기지 않고 `held_back`(주제·이유)에 남긴다
@@ -131,6 +132,11 @@ def format_signals(shorts: ShortsStatsOutput | None) -> dict[str, FormatSignal]:
     return out
 
 
+def recent_period(days: int | None) -> str:
+    """최근 기간 문구. 숏츠 통계가 준 기간(= 숏츠 검색 search_days), 모르면 숫자를 쓰지 않는다."""
+    return f"최근 {days}일" if days else "최근 검색 기간"
+
+
 def _x(v: float) -> str:
     return f"{v:g}"
 
@@ -154,7 +160,7 @@ def judge(
     recent는 최근 recent_days일 안에 게시된 같은 형식 숏츠 수, recent_unknown은 게시 시각을
     몰라 세지 않은 수.
     """
-    days = recent_days or 3
+    days = recent_period(recent_days)
     if not_sold:
         return False, NOT_SOLD
     small: list[str] = []  # 분모가 너무 작아 근거로 치지 않은 배수
@@ -202,10 +208,10 @@ def judge(
         return False, "오름 근거가 기준 미만 (" + ", ".join(parts) + ")"
     unknown = f", 게시 시각 모름 {recent_unknown}개 제외" if recent_unknown else ""
     if gate.recent_min > 0 and recent is None:  # 0이면 이 확인을 끈다 (회사 설정)
-        return False, f"최근 {days}일 같은 형식 숏츠 수를 모름"
+        return False, f"{days} 같은 형식 숏츠 수를 모름"
     if recent is not None and recent < gate.recent_min:
         return False, (
-            f"최근 {days}일 같은 형식 숏츠 {recent}개 (기준 {gate.recent_min}개"
+            f"{days} 같은 형식 숏츠 {recent}개 (기준 {gate.recent_min}개"
             + (unknown if unknown else ", 반짝")
             + ")"
         )
@@ -215,7 +221,7 @@ def judge(
     if s_ok:
         why.append(f"{search_label} {_x(search_ratio or 0)}배")
     if recent is not None:
-        why.append(f"최근 {days}일 게시된 같은 형식 숏츠 {recent}개" + (
+        why.append(f"{days} 게시된 같은 형식 숏츠 {recent}개" + (
             f" (게시 시각 모름 {recent_unknown}개 제외)" if recent_unknown else ""))
     return True, " · ".join(why)
 
@@ -278,7 +284,7 @@ def idea_facts(i: TrendInsight) -> dict[str, int | float | str]:
     if i.promo_views_per_hour_ratio is not None:
         out["이 형식 1시간 조회 (숏츠 전체 대비 배수)"] = i.promo_views_per_hour_ratio
     if i.promo_recent_count is not None:
-        out[f"최근 {i.promo_recent_days or 3}일 게시된 같은 형식 숏츠 수"] = i.promo_recent_count
+        out[f"{recent_period(i.promo_recent_days)} 게시된 같은 형식 숏츠 수"] = i.promo_recent_count
     if i.evidence.naver_ratio is not None:
         out["네이버 검색 배수"] = round(i.evidence.naver_ratio, 2)
     if i.target_age and i.target_age_ratio is not None:

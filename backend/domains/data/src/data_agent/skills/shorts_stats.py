@@ -111,8 +111,8 @@ class ShortsConfig:
     screen_videos: int = 10
     # 화면 카드 구독자 대비: channels.list 하루 호출 상한 (한 번 = 채널 50개·1단위)
     channel_calls: int = 2
-    # 형식 그룹 recent_count: 게시된 지(snippet.publishedAt) 이 일수 안인 숏츠 수 (반짝 1개인지)
-    recent_days: int = 3
+    # 형식 그룹 recent_count는 게시된 지(snippet.publishedAt) search_days일 안인 숏츠 수다.
+    # 검색이 최근 search_days일 게시분만 받으므로 같은 기간으로 센다 (따로 설정하지 않음)
 
 
 def load_config(env: Mapping[str, str]) -> ShortsConfig:
@@ -138,7 +138,6 @@ def load_config(env: Mapping[str, str]) -> ShortsConfig:
             ),
             screen_videos=max(0, int(raw.get("screen_videos", base.screen_videos))),
             channel_calls=max(0, int(raw.get("channel_calls", base.channel_calls))),
-            recent_days=max(1, int(raw.get("recent_days", base.recent_days))),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return ShortsConfig()
@@ -547,7 +546,7 @@ def group_stats(
             )
         velocity_reason = ", ".join(notes) or None
         # 형식 그룹만 (홍보 영상 근거): 하위 주제 숏츠를 뺀 모집단(분모 전체 중앙값과 같음).
-        # 게시된 지 recent_days일 안인 수, 게시 시각을 모르는 수, 시간당 조회 중앙값
+        # 게시된 지 search_days일 안인 수, 게시 시각을 모르는 수, 시간당 조회 중앙값
         # (표본 부족이면 None)
         main = [s for s in mine if s.source != SUBTOPIC]
         known_pub = [s for s in main if "recent" in s.extra]
@@ -824,11 +823,12 @@ async def _run(
     # 둘 다 없으면 recent를 두지 않는다 (세지 않고 "게시 시각 모름"으로 센다)
     ids_all = [s.video_id for s in items]
     published = {**published_times(db, ids_all), **store.published(ids_all)}
-    recent_since = now - timedelta(days=config.recent_days)
+    # 기간 = 검색 기간(search_days): 검색이 최근 search_days일 게시분만 받으므로 같은 창으로 센다
+    recent_since = now - timedelta(days=config.search_days)
     for s in items:
         if s.video_id in published:
             s.extra["recent"] = published[s.video_id] >= recent_since
-    out.recent_days = config.recent_days
+    out.recent_days = config.search_days
 
     out.by_category = group_stats(items, "category", [*TOPIC_CATEGORIES, UNKNOWN], config)
     out.by_format = group_stats(items, "format", [*SHORTS_FORMATS, UNKNOWN], config)

@@ -97,14 +97,15 @@ def insight_facts(i: TrendInsight) -> list[DataFact]:
         f.add("이 분류 숏츠 표본 수", s.samples, "개", "shorts_stats", period=at)
     # 홍보 영상(promo) 근거: 숏츠 전체 대비 배수(이 형식 ÷ 전체 숏츠, 1시간 조회 중앙값),
     # 최근 N일 안에 게시된 같은 형식 수, 게시 시각을 몰라 뺀 수
-    days = i.promo_recent_days or 3
+    # 기간은 숏츠 통계가 준 값(= 숏츠 검색 search_days). 모르면 숫자를 쓰지 않는다
+    days = f"최근 {i.promo_recent_days}일" if i.promo_recent_days else "최근 검색 기간"
     f.add("이 형식 1시간 조회 중앙값, 숏츠 전체 대비", i.promo_views_per_hour_ratio,
           "배", "shorts_stats", period=_at(i.shorts_format_at),
           sample=i.shorts_format_samples)  # fmt: skip
-    f.add(f"최근 {days}일 게시된 같은 형식 숏츠", i.promo_recent_count, "개",
+    f.add(f"{days} 게시된 같은 형식 숏츠", i.promo_recent_count, "개",
           "shorts_stats", period=_at(i.shorts_format_at))  # fmt: skip
     if i.promo_recent_unknown:
-        f.add(f"게시 시각 모름으로 제외한 같은 형식 숏츠 (최근 {days}일 수에 안 셈)",
+        f.add(f"게시 시각 모름으로 제외한 같은 형식 숏츠 ({days} 수에 안 셈)",
               i.promo_recent_unknown, "개", "shorts_stats",
               period=_at(i.shorts_format_at))  # fmt: skip
     if i.promo_subtopic_excluded:
