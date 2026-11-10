@@ -37,6 +37,8 @@ class PlanningQuestionRecord(AxModel):
     options: list[str] = Field(default_factory=list)  # 고를 답이 있으면
     status: QuestionStatus = "open"
     received_at: str
+    answered_at: str | None = None  # 사람이 답해 기획이 받은 시각
+    answered_by: str | None = None  # 답한 사람(사람 토큰의 이름, 본문 값이 아니다)
 
 
 class PlanningQuestionInbox:
@@ -64,6 +66,20 @@ class PlanningQuestionInbox:
         )
         self._items[key] = record
         return record
+
+    def mark_answered(
+        self, tenant_id: str, question_id: str, author: str
+    ) -> PlanningQuestionRecord | None:
+        """기획이 사람의 답을 받았으면 질문을 닫는다. 이미 닫혔으면 처음 닫은 기록을 그대로 둔다."""
+        key = _key(tenant_id, question_id)
+        found = self._items.get(key)
+        if found is None or found.status == "answered":
+            return found
+        closed = found.model_copy(
+            update={"status": "answered", "answered_at": now_iso(), "answered_by": author}
+        )
+        self._items[key] = closed
+        return closed
 
     def get(self, tenant_id: str, question_id: str) -> PlanningQuestionRecord | None:
         return self._items.get(_key(tenant_id, question_id))

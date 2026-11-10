@@ -181,6 +181,13 @@ action = "decide_incident_compensation"
 owner = "support"
 base_grade = "A"
 
+# 사람이 기획의 되묻기 질문에 답해 기획 receive_planning_answer로 보내기. 돈은 움직이지 않는다.
+# 답 문구는 개인정보가 있으면 코드가 막고, 기획은 답을 근거 데이터로만 쓴다
+[[actions]]
+action = "send_planning_answer"
+owner = "support"
+base_grade = "A"
+
 # 욕설로 가린 고객 메시지의 원문 열기. 돈은 움직이지 않고 "누가 열었는지"를 내력에 남긴다
 [[actions]]
 action = "reveal_original"
