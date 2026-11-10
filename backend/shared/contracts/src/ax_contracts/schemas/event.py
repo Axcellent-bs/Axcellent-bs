@@ -40,6 +40,7 @@ class EventType(StrEnum):
     SUPPORT_INQUIRY_RECEIVED = "support.inquiry_received"
     SUPPORT_INQUIRY_RESOLVED = "support.inquiry_resolved"
     SUPPORT_INQUIRY_SURGE = "support.inquiry_surge"
+    SUPPORT_INCIDENT_COMPENSATION_DECIDED = "support.incident_compensation_decided"
     # 데이터분석
     METRIC_ANOMALY = "metric.anomaly"
     # 인프라(DejaFix 어댑터)
@@ -374,6 +375,34 @@ class SupportInquirySurgeData(AxModel):
     triage_reason: Literal["no_error_code", "unclassified"] | None = None
 
 
+class SupportIncidentCompensationData(AxModel):
+    """`support.incident_compensation_decided`. 사람이 사건(장애) 보상 대기 고객을 승인·거절한 뒤,
+    그 사건의 보상 큐가 지금 어디까지 왔는지를 한 번 알린다.
+
+    알리기만 한다. 총괄은 타임라인 기록과 단계 상태 표시만 하고 승인은 하지 않는다.
+    사건(`ctx_inc_…`) 단위 요약이라 고객별 목록·구매자 ID·결정한 사람의 이름·고객 원문은
+    담지 않는다.
+    `pending`은 아직 사람이 보지 못한 고객, `approved`는 승인했지만 마케팅에 아직 못 보낸 고객,
+    `held`는 마케팅 한도 초과로 사람 승인을 기다리는 고객, `sent`는 쿠폰이 나간 고객,
+    `rejected`는 거절한 고객 수다(이 사건 큐 전체의 지금 상태).
+    `coupons_sent`는 나간 쿠폰 수, `sent_value`는 그 합계(원·적립금 합)이다.
+    `remaining`은 아직 끝나지 않은 고객 수(`pending`+`approved`+`held`)로, 0이 아니면 사람이 더
+    처리해야 한다. 멱등 키는
+    `<source>:support.incident_compensation_decided:<사건 번호>:<상태 지문>`이라 같은 상태를 다시
+    알려도 한 번만 처리되고, 상태가 바뀌면 새 이벤트가 된다.
+    """
+
+    incident_context_id: str = Field(pattern=r"^ctx_inc_", min_length=9, max_length=80)
+    pending: int = Field(ge=0)
+    approved: int = Field(ge=0)
+    held: int = Field(ge=0)
+    sent: int = Field(ge=0)
+    rejected: int = Field(ge=0)
+    remaining: int = Field(ge=0)
+    coupons_sent: int = Field(ge=0)
+    sent_value: int = Field(ge=0)
+
+
 class HandoffCompletedData(AxModel):
     """`handoff.completed`. 사람이 할 일함의 일을 끝내면 dashboard-api가 한 번 발행한다.
 
@@ -416,5 +445,6 @@ EVENT_DATA_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.SUPPORT_INQUIRY_RECEIVED: SupportInquiryReceivedData,
     EventType.SUPPORT_INQUIRY_RESOLVED: SupportInquiryResolvedData,
     EventType.SUPPORT_INQUIRY_SURGE: SupportInquirySurgeData,
+    EventType.SUPPORT_INCIDENT_COMPENSATION_DECIDED: SupportIncidentCompensationData,
     EventType.HANDOFF_COMPLETED: HandoffCompletedData,
 }
