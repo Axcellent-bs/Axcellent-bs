@@ -49,6 +49,7 @@ KINDS = (
     "decision",
     "case",
 )  # 이벤트·결정·사례 카드만 찾는다(공지·정책·사기 카드는 제외)
+DENSE_CANDIDATES = 50  # 의미 검색으로 먼저 받아 오는 후보 수(하한을 넘는 것만). 자르기는 그 뒤
 BLOCK = "\n[해결 기록]"  # 카드 본문에서 해결 내용을 시작하는 표시
 OUTCOME_KO = {"resolved": "해결됨", "workaround": "임시 조치", "unresolved": "미해결"}
 
@@ -93,6 +94,22 @@ TIMES = (
 )
 
 
+def _replayable(card: Card) -> bool:
+    """해결 기록에 AI가 다시 할 수 있는 처리 방식(`action_code`)이 있다."""
+    res = resolution_of(card)
+    return bool(res is not None and res.outcome in ("resolved", "workaround") and res.action_code)
+
+
+def _usable(card: Card) -> bool:
+    """다음 장애에 내밀 수 있는 해결 기록: 해결·임시 조치이고 원인이나 조치가 적혀 있다."""
+    res = resolution_of(card)
+    return bool(
+        res is not None
+        and res.outcome in ("resolved", "workaround")
+        and (res.root_cause or res.action)
+    )
+
+
 def timeline_of(card: Card) -> EventTimeline | None:
     raw = card.extra.get("timeline")
     if not isinstance(raw, dict):
@@ -132,6 +149,20 @@ async def record_resolution(svc: Services, request: AgentRequest) -> AgentResult
             evidence=make_evidence(svc.clock, "해결 내용을 기록할 카드가 없음: 확인할 수 없음", []),
         )
     card = max(cards, key=lambda c: c.created_at)
+    current = resolution_of(card)
+    if params.only_if_unresolved and current is not None and current.outcome != "unresolved":
+        # 이미 해결 기록이 있다(사람이 적었거나 자동 경로가 남겼다): 덮지 않는다
+        svc.audit.record(params.context_id, "record_resolution.kept", {"card_id": card.card_id})
+        return completed(
+            request,
+            RecordResolutionOutput(outcome="duplicate", card_id=card.card_id),
+            outcome="duplicate",
+            evidence=make_evidence(
+                svc.clock,
+                f"이미 해결 기록이 있어 바꾸지 않음: 이벤트 {params.context_id}",
+                [card.card_id],
+            ),
+        )
     resolved_at = params.resolved_at or svc.clock()
     minutes = params.minutes_to_resolve
     if params.opened_at is not None:
@@ -148,6 +179,7 @@ async def record_resolution(svc: Services, request: AgentRequest) -> AgentResult
         opened_at=params.opened_at,
         prior_case_id=params.prior_case_id,
         draft_source=params.draft_source,
+        action_code=params.action_code,
     )
     key = f"record_resolution:{card.card_id}:{_payload_hash(resolution)}"
     evidence = make_evidence(
@@ -338,8 +370,13 @@ async def _dense(
     if svc.dense is None:
         return None
     try:
+        # 넉넉히 받아 온 뒤 자른다: 제목이 같은 미해결 카드가 많으면 상위 몇 장이 모두 미해결이라
+        # 해결 기록이 있는 카드가 아예 후보에 들지 못했다(자르는 순서는 `find_similar_cases`)
         found = await svc.dense.search(
-            query, cards, k=max(limit, 5), min_cosine=svc.settings.dense_min_cosine
+            query,
+            cards,
+            k=max(limit, DENSE_CANDIDATES),
+            min_cosine=svc.settings.dense_min_cosine,
         )
     except Exception:  # noqa: BLE001 - 임베딩 실패가 조회를 막지 않게 Dice로 대체한다
         return None
@@ -372,7 +409,18 @@ async def find_similar_cases(svc: Services, request: AgentRequest) -> AgentResul
             for h in hits
             if h.card.card_id in allowed and h.score >= svc.settings.similarity_threshold
         ]
-    pairs = pairs[: params.limit]
+    # 자를 때 같은 유형·해결 기록(원인 또는 조치)이 있는 카드를 앞에 둔다. 제목이 같은 미해결
+    # 카드가 많으면 유사도가 거의 같아 해결된 카드가 잘려 나가 해결 내용을 내밀지 못했다.
+    # 해결 기록 중에서도 다시 할 수 있는 처리 방식(`action_code`)이 남은 카드를 앞에 둔다(총괄이
+    # 같은 처리를 바로 다시 한다). 같은 그룹 안의 순서는 유사도 그대로다(정렬이 안정적)
+    pairs = sorted(
+        pairs,
+        key=lambda pair: (
+            _same_type(params.event_type, _type_of(pair[0])) is False,
+            not _usable(pair[0]),
+            not _replayable(pair[0]),
+        ),
+    )[: params.limit]
 
     cases = [
         SimilarCase(

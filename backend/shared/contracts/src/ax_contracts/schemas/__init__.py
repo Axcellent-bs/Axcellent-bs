@@ -352,6 +352,8 @@ from ax_contracts.schemas.ids import ContextPrefix, IdPrefix
 from ax_contracts.schemas.infra import (
     DiagnoseIncidentInput,
     DiagnoseIncidentOutput,
+    ReleaseFaultOutput,
+    ReleaseFaultParams,
     RollbackDeploymentParams,
     SuspectDeployment,
     VerifyRecoveryInput,
@@ -571,6 +573,8 @@ __all__ = [
     "UtcDatetime",
     "DiagnoseIncidentInput",
     "DiagnoseIncidentOutput",
+    "ReleaseFaultOutput",
+    "ReleaseFaultParams",
     "RollbackDeploymentParams",
     "SuspectDeployment",
     "VerifyHandoverInput",

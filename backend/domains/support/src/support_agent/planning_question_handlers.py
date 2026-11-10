@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
@@ -14,7 +15,7 @@ from ax_contracts.schemas.planning import (
     ReceivePlanningAnswerInput,
     ReceivePlanningAnswerOutput,
 )
-from support_agent import guard, planning_questions
+from support_agent import chat_handlers, chat_records, guard, planning_questions
 from support_agent import handlers as h
 from support_agent.planning_question_schemas import (
     ListPlanningQuestionsInput,
@@ -24,6 +25,7 @@ from support_agent.planning_question_schemas import (
 )
 
 PLANNING = "planning"
+logger = logging.getLogger("ax.support.planning_questions")
 
 
 def _remember_unanswered(
@@ -36,7 +38,11 @@ def _remember_unanswered(
     질문이 열려 있는 동안 그 기획서는 확정하지 않는다("답 대기").
     """
     if status == "needs_human":
-        h.PLANNING_QUESTIONS.record(q, request.meta.tenant_id, request.meta.context_id)
+        record = h.PLANNING_QUESTIONS.record(q, request.meta.tenant_id, request.meta.context_id)
+        try:  # 대화방 기록은 덧붙이는 것이라 실패해도 질문 받기는 멈추지 않는다
+            chat_records.planning_question_received(chat_handlers.CHATS, record)
+        except Exception:
+            logger.warning("planning question %s not recorded in chat", record.question_id)
 
 
 async def answer_planning_question(request: AgentRequest) -> AgentResult:
@@ -164,6 +170,11 @@ async def send_planning_answer(request: AgentRequest) -> AgentResult:
         closed = (
             h.PLANNING_QUESTIONS.mark_answered(tenant, record.question_id, parsed.author) or record
         )
+    if closed.status == "answered":
+        try:  # 대화방 기록은 덧붙이는 것이라 실패해도 답 보내기는 멈추지 않는다
+            chat_records.planning_question_answered(chat_handlers.CHATS, closed, received.outcome)
+        except Exception:
+            logger.warning("planning answer %s not recorded in chat", record.question_id)
     output = SendPlanningAnswerOutput(
         question_id=record.question_id,
         request_id=record.request_id,

@@ -339,6 +339,44 @@ class Engine:
             inc.metrics = incident_metrics(inc)
         return ran
 
+    async def record_late_resolution(self, inc: Incident, plan: Plan) -> bool:
+        """사람에게 넘긴 뒤 풀린 장애의 해결 내용을 인사 카드에 다시 남긴다.
+
+        이벤트가 닫힐 때는 아직 풀리지 않아 "미해결"로 남았다. 쇼핑몰 복구 신호를 받으면 같은
+        해결 기록 단계를 한 번 더 보내 해결·조치(풀린 방법)·걸린 시간을 채운다. 그래야 다음에
+        같은 유형 장애가 오면 비슷한 과거 이벤트 찾기가 이 조치를 내밀 수 있다.
+        사람이 이미 적은 해결 기록은 덮지 않는다(`only_if_unresolved`). 실패해도 이벤트는 그대로다.
+        """
+        run = inc.steps.get("resolution")
+        step = next((s for s in plan.steps if s.id == "resolution"), None)
+        recovery = inc.steps.get("recovery")
+        if run is None or step is None or run.status != "completed":
+            return False
+        if recovery is not None and recovery.status == "completed":
+            return False  # 자동 복구 확인으로 이미 해결로 남겼다
+        entry = self.registry.find(step.skill)
+        if entry is None or not entry.callable_by_orchestrator or step.build is None:
+            return False
+        payload = {**step.build(inc), "only_if_unresolved": True}
+        if payload.get("outcome") != "resolved":
+            return False
+        again = replace(step, id="resolution_recovered")  # 멱등 키가 첫 기록과 달라야 한다
+        try:
+            result = await self._send(inc, again, step.skill, payload, entry.dept)
+        except Exception as exc:  # noqa: BLE001 - 참고 기록 실패가 이벤트 처리를 막지 않게 한다
+            inc.log(f"복구 뒤 해결 내용 기록 실패: {type(exc).__name__}")
+            return False
+        outcome = (result.output or {}).get("outcome")
+        if result.status != TaskStatus.COMPLETED:
+            inc.log(f"복구 뒤 해결 내용 기록 못 함: {result.outcome or result.status}")
+            return False
+        inc.shared["late_resolution"] = payload
+        inc.log(
+            "복구 뒤 해결 내용 기록: "
+            + ("이미 해결 기록이 있어 그대로 둠" if outcome == "duplicate" else "해결로 채움")
+        )
+        return outcome == "recorded"
+
     async def _queue_late(self, inc: Incident, plan: Plan, added: list[str]) -> None:
         """새로 잡힌 고객을 고객지원 보상 "대기"에 올린다. 쿠폰은 상담원이 승인한 뒤에만 나간다.
 

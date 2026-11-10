@@ -43,6 +43,17 @@ def _since(env: EventEnvelope) -> datetime | None:
         return None
 
 
+def _keep_recovery(inc: Incident, data: dict[str, Any]) -> None:
+    """복구 신호가 알려 준 풀린 방법(`recovery`·`released_by`)을 해결 기록에 쓰려고 남긴다."""
+    recovery = data.get("recovery")
+    if recovery in ("fault_released", "metrics_normal"):
+        by = data.get("released_by")
+        inc.shared["recovery"] = {
+            "recovery": recovery,
+            "released_by": by if isinstance(by, str) and by else None,
+        }
+
+
 LOOKBACK = timedelta(minutes=15)  # 이벤트가 열리기 직전 실패 주문·문의도 같은 이벤트로 본다
 INCIDENT_EVENTS = {
     EventType.SHOP_DEGRADED,
@@ -234,15 +245,18 @@ class IncidentManager:
             target = self._latest_unrecovered(self._component(env), env.occurred_at)
             if target is not None:
                 target.recovered_at = env.occurred_at
+                _keep_recovery(target, env.data)
                 target.settle_after_recovery()
                 target.refresh_mttr()
                 target.log(f"정상 복귀 신호 받음 ({env.source}, {iso(env.occurred_at)})")
-                await self.engine.refresh_impact(target, self.plan_factory())
+                plan = self.plan_factory()
+                await self.engine.refresh_impact(target, plan)
                 if target.closed_at is not None:
                     # 닫힌 이벤트는 복구 신호를 기다리던 단계(장애 배너 내리기)를 이제 돌린다
-                    await self.engine.rerun_after_recovery(target, self.plan_factory())
+                    await self.engine.rerun_after_recovery(target, plan)
                 if target.closed_at is not None:  # 열려 있으면 이벤트가 닫힐 때 함께 남긴다
                     await self.engine.sync_times(target)
+                    await self.engine.record_late_resolution(target, plan)
                 self._persist(target)
                 return "noted", target
         verdict = self.judge(env)

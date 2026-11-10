@@ -25,6 +25,8 @@ def test_agent_card_format_and_served() -> None:
         "diagnose_incident",
         "rollback_deployment",
         "verify_recovery",
+        # 같은 유형 과거 장애의 처리 방식(장애 상태 해제) 다시 하기
+        "release_fault",
         # 사람과 직접 대화 (dashboard-api 전용, 조회·설명만)
         "infra_chat_send",
         "infra_chat_list",
@@ -37,6 +39,7 @@ def test_agent_card_format_and_served() -> None:
     assert skills["rollback_deployment"].verifier == "dev"
     assert skills["rollback_deployment"].allowed_requesters == ["orchestrator"]
     assert skills["verify_recovery"].allowed_requesters == ["orchestrator"]
+    assert skills["release_fault"].allowed_requesters == ["orchestrator"]
     assert "orchestrator" in skills["diagnose_incident"].allowed_requesters
     for skill in card.skills:
         assert skill.priority == "required"

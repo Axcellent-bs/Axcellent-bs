@@ -52,8 +52,8 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
 | `diagnose_incident` | read | 원인 진단 (infra) | 없음 (이벤트 시작 즉시) | 예 | `{"component": "payment"}` |
-| `rollback_deployment` | B | 문제 배포를 이전 버전으로 되돌리기 (B) | diagnose, impact | 예 | `{"from_version": "v2.4.1", "release_fault_injection": true, "service": "payment-api", "to_version": "v2.4.0"}` |
-| `verify_recovery` | read | 복구 검증 (infra) | rollback | 예 | `{"component": "payment", "since": "2026-10-16T01:00:00Z"}` |
+| `rollback_deployment` | B | 문제 배포를 이전 버전으로 되돌리기 (B) | diagnose, impact, similar_cases(끝나면), past_fix(끝나면) | 아니오 | `{"from_version": "v2.4.1", "release_fault_injection": true, "service": "payment-api", "to_version": "v2.4.0"}` |
+| `verify_recovery` | read | 복구 검증 (infra) | rollback(끝나면), past_fix(끝나면) | 예 | `{"component": "payment", "since": "2026-10-16T01:00:00Z"}` |
 
 > 확인 필요: `rollback_deployment`의 `to_version`은 진단 결과(`SuspectDeployment`)에 이전 버전이 없어 출처가 정해지지 않았다. 지금 목은 `previous_version`을 가정한다. infra가 어디서 정할지 알려 주세요.
 
@@ -106,5 +106,5 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
 | `find_similar_cases` | read | 비슷한 과거 이벤트 찾기 (hr) | 없음 (이벤트 시작 즉시) | 아니오 | `{"event_type": null, "limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
-| `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), end_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["원인 확인 요청: 건너뜀", "장애 공지 배너 내리기: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 원인 확인 요청, 장애 공지 배너 내리기", "event_type": null, "kind": "incident", "source_refs": ["step:d` |
-| `record_resolution` | A | 해결 내용 기록 (hr) | record(끝나면) | 아니오 | `{"action": "배포 이전 버전으로 되돌림", "context_id": "ctx_inc_guide", "minutes_to_resolve": 0, "outcome": "resolved", "root_cause": "PR #412 배포가 원인일 수 있음"}` |
+| `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), end_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["과거 같은 장애의 처리 방식 다시 하기: 건너뜀", "원인 확인 요청: 건너뜀", "장애 공지 배너 내리기: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 과거 같은 장애의 처리 방식 다시 하기, 원인 확인 요청, 장애 공지 배너 내리기", "event_typ` |
+| `record_resolution` | A | 해결 내용 기록 (hr) | record(끝나면) | 아니오 | `{"action": "배포 이전 버전으로 되돌림", "action_code": "rollback_deployment", "context_id": "ctx_inc_guide", "minutes_to_resolve": 0, "outcome": "resolved", "root_cause": "PR #412 배포가 원인일 수 있음"}` |

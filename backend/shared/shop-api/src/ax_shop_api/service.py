@@ -804,10 +804,13 @@ class Shop:
         self.gateway.inject(kind, delay_ms)
         return self.fault_state()
 
-    def release_fault(self) -> dict[str, Any]:
-        """장애를 해제한다. 장애 상태였다면 `shop.recovered`가 outbox에 들어간다."""
+    def release_fault(self, released_by: str | None = None) -> dict[str, Any]:
+        """장애를 해제한다. 장애 상태였다면 `shop.recovered`가 outbox에 들어간다.
+
+        복구 신호에는 해제로 풀렸다는 것(`recovery=fault_released`)과 해제한 쪽을 싣는다.
+        """
         self.gateway.release()
-        self.monitor.reset()
+        self.monitor.reset(released_by=released_by)
         return self.fault_state()
 
     def evaluate_monitor(self) -> None:

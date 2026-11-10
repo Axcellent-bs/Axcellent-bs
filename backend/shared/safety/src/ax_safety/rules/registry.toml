@@ -385,6 +385,22 @@ base_grade = "B"
 verifier = "data"
 verify_skill = "anomaly_detection"
 
+# 같은 유형 과거 장애의 처리 방식 다시 하기: 결제 장애 상태 해제(시연 환경의 장애 주입 해제).
+# 총괄은 원인 미확정 장애에서 같은 유형이고 이 방식으로 해결된 과거 사건 카드(유사도 0.85 이상)가
+# 있을 때만 요청하고, 인프라는 지금 결제 서버가 이상일 때만 올린다(코드 조건). 해제는 되돌릴 수 있고
+# 뒤에 복구 검증이 돌아 실패하면 사람에게 넘긴다. 반복 장애를 사람 확인 없이 바로 풀려고 A
+[[actions]]
+action = "release_fault"
+owner = "infra"
+base_grade = "A"
+
+# 재무 화면에서 사람이 정한 개선 요청을 기획 create_ticket으로 보내기. 돈은 움직이지 않고 기획에 요청 한 건이
+# 생길 뿐이다(고객지원 request_change와 같은 A). 요청자는 사람 토큰을 받은 재무 화면 API다
+[[actions]]
+action = "finance_request_change"
+owner = "finance"
+base_grade = "A"
+
 # ---- 재무 (태윤). 재무가 재무를 검증하지 않도록 정산 확정은 항상 C
 [[actions]]
 action = "confirm_settlement"

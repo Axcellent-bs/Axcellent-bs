@@ -1,4 +1,5 @@
-"""infra skill 핸들러 3개: diagnose_incident(read), rollback_deployment(B), verify_recovery(read).
+"""infra skill 핸들러 4개: diagnose_incident(read), rollback_deployment(B), verify_recovery(read),
+release_fault(같은 유형 과거 장애의 처리 방식 다시 하기: 장애 상태 해제, 관문 등급은 기준표).
 
 숫자·판정은 모두 코드가 한다(LLM 없음). 결과에는 근거(evidence)를 붙이고, 모르는 값은 만들지 않는다.
 """
@@ -23,6 +24,8 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.infra import (
     DiagnoseIncidentInput,
+    ReleaseFaultOutput,
+    ReleaseFaultParams,
     RollbackDeploymentParams,
     VerifyRecoveryInput,
     VerifyRecoveryOutput,
@@ -304,6 +307,111 @@ def _path_label(decision: ExecuteDecision) -> str:
     return "human_approved" if decision.grade == "C" else "auto"
 
 
+# ---------- release_fault ----------
+
+RELEASE_ACTION = "release_fault"
+
+
+async def release_fault(request: AgentRequest) -> AgentResult:
+    """같은 유형 과거 장애를 푼 처리 방식(장애 상태 해제)을 다시 한다.
+
+    총괄이 원인 미확정 장애에서 과거 사건 카드를 근거로 부른다. 지금 결제 서버가 이상일 때만
+    관문(`execute("release_fault")`)에 올리고, 실행되면 쇼핑몰 장애 상태를 해제한다.
+    등급은 safety 기준표가 정한다(미등록이면 C, 사람 승인 뒤 같은 요청을 다시 보내면 실행).
+    """
+    try:
+        inp = ReleaseFaultParams.model_validate(request.input)
+    except ValidationError as exc:
+        return _failed(request, "invalid_input", str(exc))
+    rt = get_runtime()
+    key = f"{request.meta.context_id}:{RELEASE_ACTION}:{inp.component}"
+    if (done := rt.releases.get(key)) and done["status"] == "executed":
+        return done["result"].model_copy(update={"meta": request.meta})
+    try:
+        state = await rt.shop.fault_state()
+    except Exception as exc:  # noqa: BLE001 - 상태를 모르면 해제하지 않는다(fail-closed)
+        return _failed(
+            request, "server_unknown", f"판매 사이트 상태 조회 실패: {type(exc).__name__}"
+        )
+    if server_state(state) != "fault":
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.COMPLETED,
+            outcome="not_needed",
+            output={
+                "message": "결제 서버가 지금 이상이 아니라 해제하지 않았다",
+                "fault_state": state,
+            },
+        )
+    params = inp.model_dump(mode="json")
+    evidence = Evidence(
+        queries=["GET shop-api /api/shop/admin/faults", f"hr card {inp.past_case_id}"],
+        data_summary=(
+            f"{inp.component} 결제 서버 이상(실패 {state.get('failing')}, 감시 이상 "
+            f"{state.get('degraded')}). 같은 유형 과거 장애 {inp.past_case_id}"
+            f"(비슷한 정도 {round(inp.similarity * 100)}%)는 장애 상태 해제로 풀렸다"
+        ),
+        collected_at=rt.clock(),
+        ref_ids=[f"card:{inp.past_case_id}"],
+    )
+    decision = await execute(
+        RELEASE_ACTION, params, request.meta.model_copy(update={"idempotency_key": key}), evidence
+    )
+    reason = f"과거 같은 장애({inp.past_case_id})의 처리 방식대로 결제 장애 상태 해제"
+    if decision.status == "executed":
+        try:
+            after = await rt.shop.release_fault()
+        except Exception as exc:  # 관문은 통과했지만 실제 조치가 실패했다
+            return _failed(request, "release_failed", f"장애 해제 호출 실패: {type(exc).__name__}")
+        output = ReleaseFaultOutput(
+            fault_released=True,
+            post_check_ok=not after.get("active", False),
+            past_case_id=inp.past_case_id,
+            execution_id=decision.execution_id,
+            grade=decision.grade,
+        )
+        result = AgentResult(
+            meta=request.meta,
+            status=TaskStatus.COMPLETED,
+            output={**output.model_dump(mode="json"), "path": _path_label(decision)},
+            evidence=evidence,
+            decision_reason=reason,
+            alternatives_considered=[
+                "사람에게 원인 확인을 넘김",
+                "이전 버전으로 되돌리기(원인 배포 없음)",
+            ],
+        )
+        rt.releases[key] = {
+            "context_id": request.meta.context_id,
+            "status": "executed",
+            "result": result,
+        }
+        return result
+    if decision.status == "held":
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.INPUT_REQUIRED,
+            reason_code=InputReason.HUMAN_INPUT,
+            outcome="held",
+            output={
+                "review_id": decision.review_id,
+                "hold_reason": decision.hold_reason.value if decision.hold_reason else None,
+                "message": "사람 승인 대기. 승인 뒤 같은 요청을 다시 보내면 실행한다",
+            },
+            evidence=evidence,
+            decision_reason=reason,
+        )
+    if decision.status == "rejected" and decision.execution_id != "exe_unavailable":
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.COMPLETED,
+            outcome="rejected",
+            output={"hold_reason": decision.hold_reason.value if decision.hold_reason else None},
+            evidence=evidence,
+        )
+    return _failed(request, "safety_unavailable", "실행하지 않았다 (fail-closed)")
+
+
 # ---------- verify_recovery ----------
 
 
@@ -371,4 +479,5 @@ HANDLERS = {
     "diagnose_incident": diagnose_incident,
     "rollback_deployment": rollback_deployment,
     "verify_recovery": verify_recovery,
+    "release_fault": release_fault,
 }

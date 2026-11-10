@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ax_contracts.schemas import TENANT_ID_DEFAULT
 from finance_agent.handlers import State
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ def dump(s: State) -> dict[str, Any]:
             "vat_filing_cancels": records.vat_filing_cancels,
             "recon_notes": records.recon_notes,
             "recon_note_log": records.recon_note_log,
+            "planning_requests": records.planning_requests,
             "batches": records.batches,
             "policy_acks": records.policy_acks,
             "bank_rows": records.bank_rows,
@@ -76,6 +78,21 @@ def dump(s: State) -> dict[str, Any]:
     }
 
 
+def _remember_sent(rows: list[dict[str, Any]]) -> None:
+    """다시 켜도 기획의 되묻기에 답할 수 있게 보낸 요청 기록을 되살린다."""
+    from finance_agent.planning_questions import record_sent_request
+
+    for r in rows:
+        if r.get("request_id") and r.get("context_id"):
+            record_sent_request(
+                r.get("tenant_id") or TENANT_ID_DEFAULT,
+                r["context_id"],
+                r["request_id"],
+                facts=list(r.get("facts") or []),
+                evidence_ids=list(r.get("evidence_ids") or []),
+            )
+
+
 def restore(s: State, data: dict[str, Any]) -> None:
     if data.get("version") != VERSION:
         raise ValueError(f"모르는 재무 기록 버전: {data.get('version')}")
@@ -94,6 +111,8 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.vat_filing_cancels = [dict(r) for r in rec.get("vat_filing_cancels", [])]
     s.records.recon_notes = dict(rec["recon_notes"])
     s.records.recon_note_log = list(rec["recon_note_log"])
+    s.records.planning_requests = [dict(r) for r in rec.get("planning_requests", [])]
+    _remember_sent(s.records.planning_requests)
     s.records.batches = dict(rec["batches"])
     s.records.policy_acks = {k: dict(v) for k, v in rec.get("policy_acks", {}).items()}
     s.records.bank_rows = [dict(r) for r in rec.get("bank_rows", [])]

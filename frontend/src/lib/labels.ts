@@ -103,6 +103,7 @@ export const SKILL_KO: Record<string, string> = {
   find_related_prs: "관련 PR 찾기", link_incident: "이벤트 연결", verify_rollback_target: "롤백 대상 확인",
   list_in_progress: "진행 중인 작업 보기", verify_handover: "인계 확인",
   diagnose_incident: "장애 진단", rollback_deployment: "배포 롤백", verify_recovery: "복구 확인",
+  release_fault: "과거 장애 처리 방식 다시 하기",
 };
 
 export const skillLabel = (skill: string) => SKILL_KO[skill] ?? skill;

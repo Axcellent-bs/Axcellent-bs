@@ -250,6 +250,12 @@ def test_invalid_inputs_are_refused() -> None:
     assert call("customer_signals", {})["status"] == "failed"
 
 
+def test_the_evidence_summary_does_not_carry_the_buyer_id() -> None:
+    add_inquiry(hours_since_update=30)
+    evidence = call("customer_signals", {"buyer_id": "buy_0001"})["evidence"]
+    assert "buy_0001" not in evidence["data_summary"]
+
+
 def test_evidence_names_the_records_that_were_counted() -> None:
     inquiry_id = add_inquiry(hours_since_update=30)
     refs = call("customer_signals", {"buyer_id": "buy_0001"})["evidence"]["ref_ids"]

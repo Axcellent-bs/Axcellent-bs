@@ -118,6 +118,13 @@ WAITING_RECOVERY = "waiting_recovery"
 NOT_INTERVENTION = {
     "service_disabled",
     "cause_confident",
+    # 과거 같은 장애의 처리 방식 다시 하기(past_fix)를 하지 않은 이유와, 그걸로 풀어 되돌리기를
+    # 하지 않은 것. 사람이 개입한 일이 아니다
+    "cause_found",
+    "no_past_case",
+    "not_replayable",
+    "not_similar_enough",
+    "past_fix_applied",
     "notice_already_ended",
     "no_incident_notice",
     WAITING_RECOVERY,

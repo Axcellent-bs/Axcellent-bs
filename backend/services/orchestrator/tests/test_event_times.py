@@ -125,6 +125,11 @@ def test_a_same_type_past_case_becomes_the_hint_and_the_repeat_marker() -> None:
     assert prior_case_of(inc) == "card_old"
     hint = past_hint(inc)
     assert hint and "85%" in hint and "대행사 지연" in hint and "참고용" in hint
+    assert "정상화까지" not in hint  # 걸린 시간이 없으면 쓰지 않는다
+    inc.outputs["similar_cases"]["cases"][0]["resolution"]["minutes_to_resolve"] = 3
+    assert "정상화까지 3분" in (past_hint(inc) or "")
+    inc.outputs["similar_cases"]["cases"][0]["resolution"]["minutes_to_resolve"] = 0
+    assert "1분 안에 정상화" in (past_hint(inc) or "")
 
 
 @pytest.mark.asyncio
@@ -255,3 +260,59 @@ async def test_recovery_without_new_customers_queues_nothing(harness) -> None:
     at = inc.opened_at + timedelta(seconds=40)
     await manager.process(event(EventType.SHOP_RECOVERED, "evt_rec_2", at=at))
     assert not [1 for _, r in harness.fakes.calls if r.skill == "propose_incident_compensation"]
+
+
+def resolution_calls(harness) -> list[dict]:
+    return [r.input for _, r in harness.fakes.calls if r.skill == "record_resolution"]
+
+
+def recovered(event_id: str, at, **how) -> EventEnvelope:
+    env = event(EventType.SHOP_RECOVERED, event_id, at=at)
+    return env.model_copy(update={"data": {**env.data, **how}})
+
+
+@pytest.mark.asyncio
+async def test_a_handed_over_incident_is_recorded_as_resolved_when_the_shop_recovers(
+    harness,
+) -> None:
+    """원인 미확정으로 사람에게 넘긴 장애가 나중에 풀리면 해결·조치·걸린 시간을 다시 남긴다."""
+    engine = await harness.start()
+    harness.fakes.script("infra", "diagnose_incident", "undetermined")
+    manager = IncidentManager(engine, scenario_a)
+    inc = await manager.handle(event(EventType.SHOP_DEGRADED, "evt_deg_h"))
+    await manager.wait(inc.context_id)
+    first = resolution_calls(harness)
+    assert [c["outcome"] for c in first] == ["unresolved"] and first[0]["action"] is None
+
+    at = inc.opened_at + timedelta(minutes=4)
+    how = {"recovery": "fault_released", "released_by": "admin"}
+    await manager.process(recovered("evt_rec_h", at, **how))
+    later = resolution_calls(harness)[1]
+    assert later["outcome"] == "resolved" and later["only_if_unresolved"] is True
+    assert later["action"] == "사람(쇼핑몰 운영자)이 결제 장애 상태를 해제해 정상화"
+    assert later["minutes_to_resolve"] == 4
+    await manager.process(recovered("evt_rec_h2", at, **how))  # 같은 복구가 다시 와도 한 번
+    assert len(resolution_calls(harness)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_recovery_without_how_it_recovered_does_not_invent_an_action(harness) -> None:
+    engine = await harness.start()
+    harness.fakes.script("infra", "diagnose_incident", "undetermined")
+    manager = IncidentManager(engine, scenario_a)
+    inc = await manager.handle(event(EventType.SHOP_DEGRADED, "evt_deg_n"))
+    await manager.wait(inc.context_id)
+    await manager.process(recovered("evt_rec_n", inc.opened_at + timedelta(minutes=2)))
+    later = resolution_calls(harness)[-1]
+    assert later["outcome"] == "resolved" and later["action"] is None  # 모르면 비운다
+
+
+@pytest.mark.asyncio
+async def test_an_incident_the_ai_rolled_back_is_not_recorded_again(harness) -> None:
+    engine = await harness.start()
+    manager = IncidentManager(engine, scenario_a)
+    inc = await manager.handle(event(EventType.SHOP_DEGRADED, "evt_deg_a"))
+    await manager.wait(inc.context_id)
+    how = {"recovery": "fault_released", "released_by": "infra"}
+    await manager.process(recovered("evt_rec_a", now(), **how))
+    assert [c["outcome"] for c in resolution_calls(harness)] == ["resolved"]  # 자동 복구 때 한 번

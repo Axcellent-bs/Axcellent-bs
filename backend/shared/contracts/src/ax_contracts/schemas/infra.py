@@ -42,6 +42,27 @@ class RollbackDeploymentParams(AxModel):
     release_fault_injection: bool = True  # 데모: 롤백 = shop-api 장애 주입 해제 호출
 
 
+class ReleaseFaultParams(AxModel):
+    """`release_fault` 입력: 같은 유형 과거 장애를 푼 처리 방식(장애 상태 해제)을 다시 한다.
+
+    총괄이 원인 미확정 장애에서 과거 사건 카드를 근거로 요청한다. 근거 카드와 유사도를 함께 보낸다.
+    """
+
+    component: str
+    past_case_id: str
+    similarity: float = Field(ge=0, le=1)
+
+
+class ReleaseFaultOutput(AxModel):
+    """`release_fault` 결과. 해제 뒤 장애 상태가 꺼졌으면 `post_check_ok`."""
+
+    fault_released: bool
+    post_check_ok: bool
+    past_case_id: str
+    execution_id: str | None = None
+    grade: str | None = None
+
+
 class VerifyRecoveryInput(AxModel):
     component: str
     since: UtcDatetime
