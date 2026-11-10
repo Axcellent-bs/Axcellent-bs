@@ -1,8 +1,9 @@
 import { useState } from "react";
 import {
   FinanceApiError, SAFETY_SERVER, batchOf, finance, krw, percent, periodKo, readyPayout,
-  type BatchStatus, type SettlementBatch, type StatementStatus,
+  type BatchStatus, type SettlementBatch, type StatementProduct, type StatementStatus,
 } from "@/lib/finance";
+import { SHOP_WEB_URL } from "@/lib/env";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
 // ③ 판매자 정산: 판매자별로 줄 돈을 계산하고, 보류 없는 판매자만 묶어 지급 승인을 요청한다.
@@ -15,6 +16,29 @@ const STATUS_KO: Record<StatementStatus, { label: string; tone: string }> = {
   approved: { label: "승인됨", tone: TONE.ok },
   rejected: { label: "거절됨", tone: TONE.bad },
 };
+// 쇼핑몰 판매자·상품과 잇기: 번호는 shop-api 것 그대로라 쇼핑몰 상품 화면의 "판매자 sel_…"과 같다
+function SoldProducts({ products }: { products?: StatementProduct[] }) {
+  if (!products?.length) return null;
+  return (
+    <details className="mt-1 text-sm">
+      <summary className="cursor-pointer text-ink-500">판매 상품 {products.length}개</summary>
+      <ul className="mt-1 space-y-0.5">
+        {products.map((p) => (
+          <li key={p.product_id} className="flex items-baseline justify-between gap-3">
+            <span className="min-w-0">
+              {SHOP_WEB_URL
+                ? <a className="text-brand-600 hover:underline" href={`${SHOP_WEB_URL}/products/${encodeURIComponent(p.product_id)}`} target="_blank" rel="noreferrer">{p.name}</a>
+                : <span className="text-ink-700">{p.name}</span>}{" "}
+              <code className="font-mono text-ink-500">{p.product_id}</code>
+            </span>
+            <span className="shrink-0 tabular-nums text-ink-500">{p.qty.toLocaleString("ko-KR")}개 · {krw(p.gross)}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 const BATCH_KO: Record<BatchStatus, string> = {
   none: "아직 지급 승인을 요청하지 않았습니다.",
   requested: "지급 승인을 요청했습니다. 안전 장치 보류 큐에서 사람이 승인하기를 기다립니다.",
@@ -82,7 +106,7 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
                     <tbody>
                       {s.statements.map((x) => (
                         <tr key={x.seller_id} className="border-t border-ink-100 align-top">
-                          <td className="py-2"><b className="text-ink-900">{x.name}</b><div className="text-sm text-ink-500">주문 {x.orders}건 <code className="font-mono text-sm">{x.seller_id}</code></div></td>
+                          <td className="py-2"><b className="text-ink-900">{x.name}</b><div className="text-sm text-ink-500">주문 {x.orders}건 <code className="font-mono text-sm">{x.seller_id}</code></div><SoldProducts products={x.products} /></td>
                           <td className="py-2 text-right tabular-nums">{krw(x.gross)}</td>
                           <td className="py-2 text-right tabular-nums">{minus(x.commission)}<div className="text-sm text-ink-500">{percent(x.commission_rate)}</div></td>
                           <td className="py-2 text-right tabular-nums">{minus(x.seller_coupon)}</td>

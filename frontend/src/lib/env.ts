@@ -8,6 +8,8 @@ export const DASHBOARD_API_URL = import.meta.env.VITE_DASHBOARD_API_URL ?? 'http
 /** 재무 AI: 안전 레이어(safety, 8001)와 재무 에이전트(finance, 8105) 조회 API */
 export const SAFETY_API_URL = import.meta.env.VITE_SAFETY_API_URL ?? 'http://localhost:8001'
 export const FINANCE_AGENT_URL = import.meta.env.VITE_FINANCE_AGENT_URL ?? 'http://localhost:8105'
+/** 캣북스 쇼핑몰 화면 주소. 재무 판매자 정산의 상품을 쇼핑몰 상품 화면(`/products/<번호>`)으로 잇는다. 비어 있으면 링크 없이 번호만 */
+export const SHOP_WEB_URL = (import.meta.env.VITE_SHOP_WEB_URL ?? '').trim().replace(/\/+$/, '')
 /** C 보류 결정·할 일함 완료 등 쓰기에 쓰는 사람 토큰. 비어 있으면 쓰기 버튼을 끈다 */
 export const SAFETY_HUMAN_TOKEN = import.meta.env.VITE_SAFETY_HUMAN_TOKEN ?? ''
 /** 총괄(orchestrator, 8000). 총괄은 CORS가 없어 기본값은 Vite 개발 프록시(/orch → vite.config.ts) */

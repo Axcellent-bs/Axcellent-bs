@@ -187,6 +187,8 @@ export interface Reconciliation {
 export type StatementStatus = "ready" | "held" | "requested" | "approved" | "rejected";
 export type BatchStatus = "none" | "requested" | "approved" | "rejected";
 export interface HoldReason { code: string; label: string }
+/** 이번 기간에 그 판매자가 판 쇼핑몰 상품. 번호는 shop-api 상품 번호 그대로 */
+export interface StatementProduct { product_id: string; name: string; qty: number; gross: number }
 export interface SellerStatement {
   seller_id: string;
   name: string;
@@ -200,6 +202,7 @@ export interface SellerStatement {
   hold_reasons: HoldReason[];
   status: StatementStatus;
   review_id: string | null;
+  products?: StatementProduct[];
 }
 export interface SettlementBatch { status: BatchStatus; review_id: string | null; execution_id: string | null; total_payout: number; seller_ids: string[] }
 export interface Settlements { period: string; from: string; to: string; pay_date: string | null; statements: SellerStatement[]; batch: SettlementBatch }
