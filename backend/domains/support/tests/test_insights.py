@@ -230,3 +230,53 @@ def test_send_reply_records_edit_ratio(client: TestClient) -> None:
     event = handlers.STORE.draft_events[0]
     assert event["result"] == "edited"
     assert 0 < event["edit_ratio"] < 1
+
+
+# -------------------------------------------------------- 분류 필요 건수 (대화방 AI가 읽는다)
+def test_kpis_count_triage_needed_done_and_reasons() -> None:
+    from support_agent.schemas import Triage
+
+    store = InquiryStore()
+    a = add(store, "payment", 5)
+    b = add(store, "payment", 5)
+    c = add(store, "general", 5)
+    d = add(store, "shipping", 5)  # 분류 필요가 아닌 문의
+    stamp = "2026-10-22T12:00:00Z"
+    store.set_triage(
+        a, Triage(state="needed", reason="no_error_code", marked_by="auto", marked_at=stamp)
+    )
+    store.set_triage(
+        b, Triage(state="needed", reason="no_error_code", marked_by="auto", marked_at=stamp)
+    )
+    store.set_triage(
+        c, Triage(state="needed", reason="unclassified", marked_by="auto", marked_at=stamp)
+    )
+    store.set_triage(
+        d,
+        Triage(
+            state="done",
+            reason="manual",
+            marked_by="agent",
+            marked_at=stamp,
+            label="장바구니 화면 오류",
+            decided_at=stamp,
+        ),
+    )
+    kpis = insights.kpis(store)
+    assert (kpis.triage_needed, kpis.triage_done) == (3, 1)
+    assert kpis.triage_by_reason == {"no_error_code": 2, "unclassified": 1}  # 마친 것은 뺀다
+    assert "장바구니" not in kpis.model_dump_json()  # 상담원이 쓴 원인 이름은 세지도 싣지도 않는다
+
+
+def test_kpis_triage_counts_are_zero_without_any_mark() -> None:
+    store = InquiryStore()
+    add(store, "refund", 5)
+    kpis = insights.kpis(store)
+    assert (kpis.triage_needed, kpis.triage_done, kpis.triage_by_reason) == (0, 0, {})
+
+
+def test_chat_prompt_explains_the_triage_numbers() -> None:
+    from support_agent import chat_handlers
+
+    for word in ("triage_needed", "triage_done", "triage_by_reason", "분류 필요"):
+        assert word in chat_handlers.REPLY_PROMPT

@@ -45,7 +45,14 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> Fake:
     fake = Fake()
     fake.outputs = {
         "inquiry_overview": {
-            "kpis": {"conversations": 8, "by_status": {"open": 6}, "draft_adoption_rate": None},
+            "kpis": {
+                "conversations": 8,
+                "by_status": {"open": 6},
+                "draft_adoption_rate": None,
+                "triage_needed": 3,
+                "triage_done": 1,
+                "triage_by_reason": {"no_error_code": 2, "unclassified": 1},
+            },
             "waiting": [
                 {
                     "id": 1,
@@ -122,7 +129,13 @@ def test_the_context_has_numbers_only(client: TestClient, fake: Fake) -> None:
         "by_category": {"refund": 1, "shipping": 1},
         "longest_minutes": 25,
     }
-    assert context["inquiries"]["kpis"] == {"conversations": 8, "by_status": {"open": 6}}
+    assert context["inquiries"]["kpis"] == {
+        "conversations": 8,
+        "by_status": {"open": 6},
+        "triage_needed": 3,
+        "triage_done": 1,  # 분류 필요 건수도 대화방 AI가 읽는다
+        "triage_by_reason": {"no_error_code": 2, "unclassified": 1},
+    }
     assert context["claims"]["stats"]["total"] == 3
     assert context["feedback"]["overview"] == {"total": 4, "average_rating": 4.5}
     flat = str(context)

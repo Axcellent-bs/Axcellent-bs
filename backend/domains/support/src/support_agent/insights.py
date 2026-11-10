@@ -104,6 +104,11 @@ def kpis(store: InquiryStore) -> InquiryKpis:
         ]
         if classified:
             by_language[classified[-1].language] += 1
+    triage_reasons: Counter[str] = Counter(
+        c.triage.reason
+        for c in conversations
+        if c.triage is not None and c.triage.state == "needed"
+    )
     keyword_counts: Counter[str] = Counter()
     for analysis in analyses:
         if analysis.classification:  # 한 메시지에서 같은 키워드는 한 번만 센다 (대소문자 무시)
@@ -129,6 +134,11 @@ def kpis(store: InquiryStore) -> InquiryKpis:
         by_urgency=dict(Counter(c.urgency for c in conversations if c.urgency)),
         by_sentiment=dict(Counter(c.sentiment for c in conversations if c.sentiment)),
         by_language=dict(by_language),
+        triage_needed=sum(triage_reasons.values()),
+        triage_done=sum(
+            1 for c in conversations if c.triage is not None and c.triage.state == "done"
+        ),
+        triage_by_reason=dict(triage_reasons),
         top_keywords=top_keywords,
     )
 
