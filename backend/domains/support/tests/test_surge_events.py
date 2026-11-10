@@ -177,3 +177,13 @@ def test_발행이_실패해도_문의_접수를_막지_않는다(monkeypatch: p
     for k in range(5):
         add(store, "payment", k + 1)
     assert fire(store) == ["payment"]  # 알리지 못해도 예외 없이 끝난다
+
+
+def test_재시작해도_같은_구간이면_분이_바뀌어도_같은_멱등_키다() -> None:
+    store = InquiryStore()
+    for k in range(5):
+        add(store, "payment", k + 1)
+    assert fire(store) == ["payment"]
+    surge_events.reset()  # 재시작: 메모리 기록이 지워진다
+    assert fire(store, NOW + timedelta(minutes=3)) == ["payment"]  # 같은 10분 구간(09:30~09:40)
+    assert len(surges()) == 1  # 같은 구간이라 같은 멱등 키 → 받는 쪽(버스)이 한 번만 받는다

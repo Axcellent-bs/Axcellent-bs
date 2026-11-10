@@ -2,7 +2,9 @@
 
 - 급증 판정은 `insights.detect_surge`(코드, LLM 없음). 기준은 `surge_settings` 한 곳이다.
 - 같은 분류는 창 길이 동안 한 번만 내보낸다(문의가 더 들어와도 다시 내보내지 않는다). 상태는
-  프로세스 메모리라 재시작하면 지워지지만, 같은 창이면 멱등 키가 같아 받는 쪽에서 한 번만 처리된다.
+  프로세스 메모리라 재시작하면 지워진다. 멱등 키의 `window_start`는 창 길이로 나눈 고정 구간의
+  시작(`floor(epoch / 창)`)이라, 같은 구간 안에서는 재시작 뒤에도 키가 같아 받는 쪽이 한 번만
+  처리한다. 구간이 바뀌면(창 길이가 지나면) 같은 급증이 이어져도 새 알림이다.
 - 알리기만 한다. 발행이 실패해도 문의 접수는 막지 않는다.
 """
 
@@ -48,7 +50,8 @@ async def _check(request: AgentRequest, store: InquiryStore, now: datetime) -> l
         ratio=surge_settings.RATIO,
         baseline_method=surge_settings.BASELINE_METHOD,  # type: ignore[arg-type]
     )
-    window_start = (now - timedelta(minutes=window)).replace(second=0, microsecond=0)
+    window_seconds = window * 60
+    window_start = datetime.fromtimestamp(now.timestamp() // window_seconds * window_seconds, UTC)
     emitted: list[str] = []
     for surge in report.surges:
         slot = (request.meta.tenant_id, surge.topic_code)
