@@ -1,0 +1,94 @@
+{
+  "seed": "20261110_02",
+  "n": 1400,
+  "correct": 1400,
+  "areas": {
+    "access": {
+      "label": "요청자 권한 (allowed_requesters)",
+      "n": 200,
+      "correct": 200,
+      "accuracy": 1.0,
+      "fails": [],
+      "mix": {
+        "거부": 157,
+        "허용": 43
+      }
+    },
+    "create_ticket": {
+      "label": "변경 요청 접수 · 중복 묶기",
+      "n": 200,
+      "correct": 200,
+      "accuracy": 1.0,
+      "fails": [],
+      "mix": {
+        "묶음": 73,
+        "새 요청": 99,
+        "재전송": 19,
+        "키 없음": 9
+      }
+    },
+    "request_release_check": {
+      "label": "배포 전 기획서 대조",
+      "n": 200,
+      "correct": 200,
+      "accuracy": 1.0,
+      "fails": [],
+      "mix": {
+        "hold": 101,
+        "needs_human": 50,
+        "ready": 49
+      }
+    },
+    "receive_insight": {
+      "label": "인사이트 → 제안 · 숫자 경고",
+      "n": 200,
+      "correct": 200,
+      "accuracy": 1.0,
+      "fails": [],
+      "mix": {
+        "근거 없음": 12,
+        "새 제안": 101,
+        "새 제안·경고": 70,
+        "재전송": 17
+      }
+    },
+    "receive_campaign_update": {
+      "label": "캠페인 진행 · 성과 받기",
+      "n": 200,
+      "correct": 200,
+      "accuracy": 1.0,
+      "fails": [],
+      "mix": {
+        "published applied": 33,
+        "published duplicate": 59,
+        "published unknown_proposal": 8,
+        "result applied": 67,
+        "result duplicate": 22,
+        "result unknown_proposal": 11
+      }
+    },
+    "receive_planning_answer": {
+      "label": "되물은 질문 답 받기",
+      "n": 200,
+      "correct": 200,
+      "accuracy": 1.0,
+      "fails": [],
+      "mix": {
+        "applied": 85,
+        "duplicate": 40,
+        "unknown_question": 75
+      }
+    },
+    "receive_dev_result": {
+      "label": "개발 결과 받기 · 멱등성",
+      "n": 200,
+      "correct": 200,
+      "accuracy": 1.0,
+      "fails": [],
+      "mix": {
+        "재전송 포함": 93,
+        "한 번": 107
+      }
+    }
+  }
+}

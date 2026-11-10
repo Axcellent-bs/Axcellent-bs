@@ -236,7 +236,7 @@ async def receive_insight(request: AgentRequest) -> AgentResult:
         output=out.model_dump(mode="json"),
         evidence=Evidence(
             data_summary=f"{out.proposal_id} {out.outcome} · {inp.skill} 근거 {len(inp.facts)}개",
-            ref_ids=[f"proposal:{out.proposal_id}"] + ([inp.ref] if inp.ref else []),
+            ref_ids=[f"proposal:{out.proposal_id}", f"insight:{inp.insight_id}"],
         ),
     )
 
