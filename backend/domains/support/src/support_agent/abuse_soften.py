@@ -97,14 +97,26 @@ def valid(original_masked: str, softened: str) -> bool:
     return set(_PLACEHOLDER.findall(original_masked)) <= set(_PLACEHOLDER.findall(text))
 
 
-async def soften(text: str, rule_level: AbuseLevel) -> tuple[str, AbuseLevel] | None:
-    """(순화문, 단계)를 돌려준다. 실패하거나 검사에 걸리면 None (1단계 결과를 그대로 쓴다)."""
-    masked = guard.mask_pii(text)[0]
-    result = None
+_HANGUL = re.compile(r"[가-힣]")
+_LETTER = re.compile(r"[A-Za-zÀ-ɏЀ-ӿ֐-ۿ฀-๿ऀ-ॿ぀-ヿ一-鿿]")
+KOREAN_SHARE = 0.5  # 글자 중 한글이 이 비율 이상이면 한국어 순화문으로 본다
+LANGUAGE_REMINDER = (
+    " softened_text는 반드시 한국어로만 쓴다. 고객 메시지가 다른 언어여도 한국어로 옮긴다."
+)
+
+
+def is_korean(text: str) -> bool:
+    """순화문이 한국어인지 글자 종류로 가볍게 본다(한글 비율). 글자가 없으면 한국어로 친다."""
+    hangul = len(_HANGUL.findall(text))
+    other = len(_LETTER.findall(text))
+    return hangul + other == 0 or hangul / (hangul + other) >= KOREAN_SHARE
+
+
+async def _ask(masked: str, prompt: str) -> SoftenResult | None:
+    """모델에 한 번 묻는다. 바쁘면(429·5xx) 한 번 더 부르고, 실패하면 None."""
     for attempt in range(2):
         try:
-            result = await _llm().structured(PROMPT, SoftenResult, untrusted={"message": masked})
-            break
+            return await _llm().structured(prompt, SoftenResult, untrusted={"message": masked})
         except LLMResponseError as exc:
             # 시간 초과는 다시 부르지 않는다 (접수가 더 늘어진다)
             if attempt == 0 and _BUSY.search(str(exc)):
@@ -116,8 +128,23 @@ async def soften(text: str, rule_level: AbuseLevel) -> tuple[str, AbuseLevel] | 
         except Exception:  # noqa: BLE001 - 순화는 부가 기능이다
             logger.warning("욕설 순화 LLM 실패, 규칙 결과를 쓴다", exc_info=True)
             return None
+    return None
+
+
+async def soften(text: str, rule_level: AbuseLevel) -> tuple[str, AbuseLevel] | None:
+    """(순화문, 단계)를 돌려준다. 실패하거나 검사에 걸리면 None (1단계 결과를 그대로 쓴다)."""
+    masked = guard.mask_pii(text)[0]
+    result = await _ask(masked, PROMPT)
     if result is None:
         return None
+    # 순화문은 상담원이 읽는 글이라 한국어 한 가지여야 한다. 한국어가 아니면 한 번만 다시 시키고,
+    # 그래도 아니면 버리지 않고 그대로 쓴다(버리면 욕설이 그대로 보인다)
+    if result.softened_text.strip() and not is_korean(result.softened_text):
+        again = await _ask(masked, PROMPT + LANGUAGE_REMINDER)
+        if again is not None and again.softened_text.strip() and is_korean(again.softened_text):
+            result = again
+        else:
+            logger.info("순화문이 한국어가 아니지만 그대로 쓴다")
     level: AbuseLevel = max((rule_level, result.abuse_level), key=lambda lv: LEVEL_ORDER[lv])
     if level == "none" or not valid(masked, result.softened_text):
         if level != "none":

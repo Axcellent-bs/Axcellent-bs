@@ -367,3 +367,65 @@ def test_the_same_intake_sent_while_the_first_is_running_creates_one_inquiry(
     first, second = asyncio.run(run())
     assert len(handlers.STORE.list(None, None)) == 1
     assert first["id"] == second["id"]
+
+
+# ---- 순화문은 한국어 한 가지 (상담원이 읽는 글) --------------------------------------------
+class SequenceLLM:
+    """부를 때마다 정해 둔 순화문을 차례로 돌려주고, 받은 프롬프트를 적어 둔다."""
+
+    def __init__(self, texts: list[str]) -> None:
+        self.texts = texts
+        self.prompts: list[str] = []
+
+    async def structured(self, prompt: str, model: Any, untrusted: dict[str, Any]) -> Any:
+        self.prompts.append(prompt)
+        text = self.texts[min(len(self.prompts) - 1, len(self.texts) - 1)]
+        return SoftenResult(abuse_level="profanity", softened_text=text)
+
+
+def _sequence(monkeypatch: pytest.MonkeyPatch, texts: list[str]) -> SequenceLLM:
+    fake = SequenceLLM(texts)
+    monkeypatch.setattr(abuse_soften, "_llm", lambda: fake)
+    return fake
+
+
+@pytest.mark.parametrize(
+    ("text", "korean"),
+    [
+        ("주문 ORD-1 12,000원 환불을 요청합니다.", True),
+        ("[전화번호]로 연락 바랍니다 ORD-1", True),
+        ("Please refund order ORD-1 for 12,000.", False),
+        ("Пожалуйста, верните деньги за заказ.", False),
+        ("12,000 [카드번호]", True),  # 글자가 거의 없으면 한국어로 친다
+        ("환불 refund 요청합니다 부탁드립니다", True),  # 한글이 더 많다
+    ],
+)
+def test_the_korean_check_looks_at_letter_kinds(text: str, korean: bool) -> None:
+    assert abuse_soften.is_korean(text) is korean
+
+
+def test_a_non_korean_softened_text_is_asked_again_in_korean(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _sequence(
+        monkeypatch, ["Please refund ORD-1 12,000.", "주문 ORD-1 12,000원 환불을 요청합니다."]
+    )
+    result = asyncio.run(abuse_soften.soften(ORIGINAL_TEXT, "profanity"))
+    assert result is not None and result[0].endswith("환불을 요청합니다.")
+    assert len(fake.prompts) == 2 and fake.prompts[1].endswith(abuse_soften.LANGUAGE_REMINDER)
+
+
+def test_a_softened_text_that_stays_non_korean_is_still_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """한국어로 다시 시켜도 아니면 버리지 않는다: 버리면 욕설이 그대로 보인다."""
+    fake = _sequence(monkeypatch, ["Please refund ORD-1 12,000."])
+    result = asyncio.run(abuse_soften.soften(ORIGINAL_TEXT, "profanity"))
+    assert result is not None and result[0].endswith("Please refund ORD-1 12,000.")
+    assert len(fake.prompts) == 2  # 다시 시키는 것은 한 번까지
+
+
+def test_a_korean_softened_text_is_asked_only_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _sequence(monkeypatch, ["주문 ORD-1 12,000원 환불을 요청합니다."])
+    assert asyncio.run(abuse_soften.soften(ORIGINAL_TEXT, "profanity")) is not None
+    assert len(fake.prompts) == 1
