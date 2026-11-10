@@ -1384,6 +1384,18 @@ class ShortsGroup(AxModel):
     # 아래는 예전 응답은 없다. 카테고리 그룹만: 화면 카드용 숏츠 (조회수 순, 설정 개수까지).
     # 이미 모은 숏츠 안에서만 고르고(더 검색하지 않음), 표본 부족 칸도 준다. 통계 칸과 무관
     videos: list[ShortsVideo] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 형식 그룹만: 이 형식 숏츠 중 게시된 지(YouTube snippet.publishedAt)
+    # `ShortsStatsOutput.recent_days`일(= 숏츠 검색 기간 search_days) 안인 수 (반짝 1개인지 보려고).
+    # 게시 시각을 모르는 숏츠는 세지 않고 그 수를 recent_unknown에 둔다
+    recent_count: int | None = Field(default=None, ge=0)
+    recent_unknown: int | None = Field(default=None, ge=0)
+    # 아래는 예전 응답은 없다. 형식 그룹만: 하위 주제 숏츠를 뺀 이 형식 숏츠의 시간당 조회 중앙값과
+    # 그 표본 수 ("숏츠 전체 대비" 배수의 분자, 분모 ShortsStatsOutput.median_views_per_hour와 같은
+    # 모집단). 표본이 [shorts] min_sample 미만이면 None + promo_reason.
+    # recent_count·recent_unknown도 같은 모집단으로 센다
+    promo_median_views_per_hour: float | None = None
+    promo_velocity_videos: int = Field(default=0, ge=0)
+    promo_reason: str | None = None
 
 
 class ShortsSearch(AxModel):
@@ -1427,6 +1439,16 @@ class ShortsStatsOutput(AxModel):
     # 아래는 예전 응답은 없다. 하위 주제 검색(domain_subtopics)으로 이미 모은 숏츠 중
     # 표본에 더한 수 (같은 영상은 한 번만, 추가 검색 없음)
     subtopic_shorts: int = Field(default=0, ge=0)
+    # 아래는 예전 응답은 없다. 전체 숏츠 시간당 조회 증가 중앙값과 그 표본 수
+    # (형식별 "숏츠 전체 대비" 배수의 분모), 형식 그룹 recent_count를 센 기간
+    # (게시 후 일, = 숏츠 검색 search_days).
+    # 하위 주제 숏츠(subtopic_shorts)는 넣지 않는다 (형식 분자 promo_median_views_per_hour와 같은
+    # 모집단). 표본이 [shorts] min_sample 미만이면 중앙값은 None이고 이유는
+    # median_views_per_hour_reason
+    median_views_per_hour: float | None = None
+    median_views_per_hour_count: int = Field(default=0, ge=0)
+    recent_days: int | None = Field(default=None, ge=1)
+    median_views_per_hour_reason: str | None = None
 
 
 # --------------------------------------------------------------- video_explorer (영상 탐색)
@@ -2030,6 +2052,41 @@ class TrendInsight(AxModel):
     # (campaign_result), 최근 3개까지 최신순. 없으면 []. 인사이트 판정·순서는 바꾸지 않는다
     # (응답할 때 붙임)
     past_results: list[InsightPastResult] = Field(default_factory=list, max_length=3)
+    # 아래는 예전 응답은 없다 (브리프 v6). 인사이트 종류: trend = 트렌드 주제(기존),
+    # promo = 실제로 오르는 숏츠 형식만 빌린 캣북스 홍보 영상 아이디어 (topic은 형식 이름)
+    kind: Literal["trend", "promo"] = "trend"
+    promo_format: str | None = None  # promo: 빌리는 숏츠 형식
+    promo_idea: str | None = None  # promo: 캣북스 홍보 아이디어 한 줄 (60자 이내)
+    promo_idea_fallback: bool = False  # promo: LLM 대신 고정 틀 문장이면 true
+    # promo 근거: 숏츠 전체 대비 배수 = 이 형식 1시간 조회 중앙값 ÷ 전체 숏츠 1시간 조회 중앙값
+    # (같은 형식의 지난 기간 대비 상승률이 아님), 최근 N일 안에 게시된 같은 형식 숏츠 수와
+    # 게시 시각을 몰라 세지 않은 수
+    promo_views_per_hour_ratio: float | None = Field(default=None, ge=0)
+    promo_recent_count: int | None = Field(default=None, ge=0)
+    promo_recent_days: int | None = Field(default=None, ge=1)
+    promo_recent_unknown: int | None = Field(default=None, ge=0)
+    # promo: 분자·분모에서 뺀 하위 주제 숏츠 수 (같은 모집단으로 맞추려고)
+    promo_subtopic_excluded: int | None = Field(default=None, ge=0)
+    # 기획에 넘기는 기준을 통과한 근거 한 줄 (기준을 보는 인사이트만)
+    gate_reason: str | None = None
+
+
+class BriefGate(AxModel):
+    """기획에 넘기는 기준 값 (브리프 v6, 설정·환경 변수 그대로)."""
+
+    vs_all_ratio: float  # 숏츠 전체 대비 배수 이상이면 통과
+    # 또는 네이버 검색 배수 이상 그리고 숏츠 전체 대비 naver_min_format_ratio 이상
+    naver_ratio: float
+    naver_min_format_ratio: float
+    recent_min: int  # 그리고 최근 N일 게시된 같은 형식 숏츠 수 이상
+    max_ratio: float  # 이보다 큰 배수는 근거로 치지 않음
+
+
+class HeldBack(AxModel):
+    """근거가 모자라 기획에 넘기지 않은 주제·형식과 이유 (브리프 v6)."""
+
+    topic: str
+    reason: str
 
 
 # ------------------------------------------------ 기회 가설 카드 (trend_insight_brief 선택 칸)
@@ -2157,6 +2214,11 @@ class TrendInsightBriefOutput(AxModel):
     llm_pct_now: float | None = Field(default=None, ge=0)  # 지금 LLM 오늘 사용 %
     # 지금 있는 최신 감지 데이터 시각 (다시 추천이 쓸 것, 확인 상자 제목)
     detect_latest_at: UtcDatetime | None = None
+    # 아래는 예전 응답은 없다 (v6). 기준(트렌드 근거)을 넘지 못해 기획에 넘기지 않은 것
+    held_back: list[HeldBack] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 이 판에 쓴 기획에 넘기는 기준 값
+    # (화면 칩이 지표마다 기준을 넘었는지 본다)
+    gate: BriefGate | None = None
 
 
 BriefTrigger = Literal["auto", "manual"]

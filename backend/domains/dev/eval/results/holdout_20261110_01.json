@@ -1,0 +1,51 @@
+{
+  "seed": "20261110_01",
+  "worlds": 100,
+  "cases": 1200,
+  "accuracy": 0.95,
+  "by_skill": {
+    "find_related_prs": {
+      "cases": 300,
+      "correct": 300,
+      "accuracy": 1.0,
+      "wrong_fields": {}
+    },
+    "link_incident": {
+      "cases": 100,
+      "correct": 100,
+      "accuracy": 1.0,
+      "wrong_fields": {}
+    },
+    "list_dev_outcomes": {
+      "cases": 100,
+      "correct": 100,
+      "accuracy": 1.0,
+      "wrong_fields": {}
+    },
+    "list_in_progress": {
+      "cases": 200,
+      "correct": 179,
+      "accuracy": 0.895,
+      "wrong_fields": {
+        "items": 21
+      }
+    },
+    "verify_handover": {
+      "cases": 200,
+      "correct": 161,
+      "accuracy": 0.805,
+      "wrong_fields": {
+        "stale_item_ids": 11,
+        "approved": 20,
+        "missing": 8
+      }
+    },
+    "verify_rollback_target": {
+      "cases": 300,
+      "correct": 300,
+      "accuracy": 1.0,
+      "wrong_fields": {}
+    }
+  },
+  "samples": []
+}

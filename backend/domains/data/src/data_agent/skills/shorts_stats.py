@@ -63,6 +63,7 @@ from data_agent.youtube_store import (
     DB_ENV,
     DEFAULT_DB,
     latest_popular,
+    published_times,
     recent_snapshots,
     video_details,
     video_thumbnails,
@@ -110,6 +111,8 @@ class ShortsConfig:
     screen_videos: int = 10
     # 화면 카드 구독자 대비: channels.list 하루 호출 상한 (한 번 = 채널 50개·1단위)
     channel_calls: int = 2
+    # 형식 그룹 recent_count는 게시된 지(snippet.publishedAt) search_days일 안인 숏츠 수다.
+    # 검색이 최근 search_days일 게시분만 받으므로 같은 기간으로 센다 (따로 설정하지 않음)
 
 
 def load_config(env: Mapping[str, str]) -> ShortsConfig:
@@ -168,6 +171,9 @@ class ShortsStore:
                 # 받은 응답(검색·다시 조회)에 있던 채널 id (구독자 대비를 위해 더 부르지 않음)
                 "CREATE TABLE IF NOT EXISTS video_channels (video_id TEXT PRIMARY KEY,"
                 " channel_id TEXT NOT NULL, at TEXT NOT NULL);"
+                # 받은 응답(검색·다시 조회)에 있던 게시 시각 snippet.publishedAt (UTC)
+                "CREATE TABLE IF NOT EXISTS published (video_id TEXT PRIMARY KEY,"
+                " published_at TEXT NOT NULL, at TEXT NOT NULL);"
             )
             for table in ("searches", "searched_videos"):
                 cols = [r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")]
@@ -237,10 +243,16 @@ class ShortsStore:
             for v in videos
             if (cid := getattr(v, "channel_id", None))
         ]
+        published = [
+            (v.video_id, p.astimezone(UTC).isoformat(), at.isoformat())
+            for v in videos
+            if isinstance(p := getattr(v, "published_at", None), datetime)
+        ]
         with self._lock, self._conn:
             self._conn.executemany("INSERT OR REPLACE INTO views VALUES (?,?,?)", rows)
             self._conn.executemany("INSERT OR REPLACE INTO thumbnails VALUES (?,?,?)", thumbs)
             self._conn.executemany("INSERT OR REPLACE INTO video_channels VALUES (?,?,?)", channels)
+            self._conn.executemany("INSERT OR REPLACE INTO published VALUES (?,?,?)", published)
         return len(rows)
 
     def channels(self, ids: Sequence[str]) -> dict[str, str]:
@@ -266,6 +278,22 @@ class ShortsStore:
                 list(ids),
             ).fetchall()
         return {vid: url for vid, url in rows if url}
+
+    def published(self, ids: Sequence[str]) -> dict[str, datetime]:
+        """영상 id → 저장된 게시 시각 (응답의 snippet.publishedAt, UTC). 없으면 빠진다."""
+        out: dict[str, datetime] = {}
+        for i in range(0, len(ids), 500):
+            part = list(ids[i : i + 500])
+            marks = ",".join("?" * len(part))
+            with self._lock:
+                rows = self._conn.execute(
+                    f"SELECT video_id, published_at FROM published WHERE video_id IN ({marks})",  # noqa: S608
+                    part,
+                ).fetchall()
+            for vid, raw in rows:
+                at = datetime.fromisoformat(raw)
+                out[vid] = at if at.tzinfo else at.replace(tzinfo=UTC)
+        return out
 
     def view_history(self, ids: Sequence[str]) -> dict[str, list[tuple[datetime, int]]]:
         """영상 id → [(본 시각, 조회수)] (시각 순)."""
@@ -473,6 +501,26 @@ def _screen_video(s: _Short) -> ShortsVideo:
     )
 
 
+SUBTOPIC = "subtopic"  # 하위 주제 검색(domain_subtopics)으로 모은 숏츠의 source
+
+
+def _promo_median(speeds: Sequence[float], config: ShortsConfig) -> tuple[float | None, str | None]:
+    """홍보 영상 근거용 시간당 조회 중앙값. 표본이 min_sample 미만이면 (None, 표본 부족)."""
+    if len(speeds) < config.min_sample:
+        return None, f"표본 부족 ({len(speeds)}개, 기준 {config.min_sample}개)"
+    return round(statistics.median(speeds), 1), None
+
+
+def overall_promo_median(
+    items: Sequence[_Short], config: ShortsConfig
+) -> tuple[float | None, str | None, int]:
+    """숏츠 전체 대비 배수의 분모: 하위 주제 숏츠를 뺀 시간당 조회 중앙값 (값, 이유, 표본 수)."""
+    speeds = [s.views_per_hour for s in items
+              if s.views_per_hour is not None and s.source != SUBTOPIC]  # fmt: skip
+    value, reason = _promo_median(speeds, config)
+    return value, reason, len(speeds)
+
+
 def group_stats(
     shorts: Sequence[_Short], key: str, names: Sequence[str], config: ShortsConfig
 ) -> list[ShortsGroup]:
@@ -497,6 +545,22 @@ def group_stats(
                 f"측정 중 {measuring}개 (다시 본 간격 {config.min_recheck_minutes}분 미만)"
             )
         velocity_reason = ", ".join(notes) or None
+        # 형식 그룹만 (홍보 영상 근거): 하위 주제 숏츠를 뺀 모집단(분모 전체 중앙값과 같음).
+        # 게시된 지 search_days일 안인 수, 게시 시각을 모르는 수, 시간당 조회 중앙값
+        # (표본 부족이면 None)
+        main = [s for s in mine if s.source != SUBTOPIC]
+        known_pub = [s for s in main if "recent" in s.extra]
+        recent = sum(1 for s in known_pub if s.extra["recent"]) if key == "format" else None
+        recent_unknown = len(main) - len(known_pub) if key == "format" else None
+        main_speeds = [s.views_per_hour for s in main if s.views_per_hour is not None]
+        promo_median, promo_reason = _promo_median(main_speeds, config) if key == "format" else (
+            None, None)  # fmt: skip
+        promo = {
+            "recent_count": recent, "recent_unknown": recent_unknown,
+            "promo_median_views_per_hour": promo_median,
+            "promo_velocity_videos": len(main_speeds) if key == "format" else 0,
+            "promo_reason": promo_reason,
+        }  # fmt: skip
         top = sorted((s for s in mine if s.views is not None), key=lambda s: -(s.views or 0))
         # 카테고리 그룹만: 화면 카드 (조회수 순, 조회수를 모르는 숏츠는 뒤). 표본 부족 칸도 준다
         screen = (
@@ -525,6 +589,7 @@ def group_stats(
                     velocity_measuring=measuring,
                     formats=formats,
                     videos=screen,
+                    **promo,
                 )
             )
             continue
@@ -543,6 +608,7 @@ def group_stats(
                 median_views_per_hour=round(statistics.median(speeds), 1) if speeds else None,
                 top=[_video(s) for s in top[: config.top_videos]],
                 videos=screen,
+                **promo,
             )
         )
     # 대표값은 중앙값 (몇 개의 큰 영상이 평균을 끌어올리는 것을 막는다). 평균은 보조 칸
@@ -753,12 +819,27 @@ async def _run(
     # 4. 계산
     from data_agent.skills.topic_category import TOPIC_CATEGORIES
 
+    # 게시 시각(snippet.publishedAt): 인기 스냅샷 표 published_at, 검색·다시 조회 응답에서 남긴 값.
+    # 둘 다 없으면 recent를 두지 않는다 (세지 않고 "게시 시각 모름"으로 센다)
+    ids_all = [s.video_id for s in items]
+    published = {**published_times(db, ids_all), **store.published(ids_all)}
+    # 기간 = 검색 기간(search_days): 검색이 최근 search_days일 게시분만 받으므로 같은 창으로 센다
+    recent_since = now - timedelta(days=config.search_days)
+    for s in items:
+        if s.video_id in published:
+            s.extra["recent"] = published[s.video_id] >= recent_since
+    out.recent_days = config.search_days
+
     out.by_category = group_stats(items, "category", [*TOPIC_CATEGORIES, UNKNOWN], config)
     out.by_format = group_stats(items, "format", [*SHORTS_FORMATS, UNKNOWN], config)
     # 전체 숏츠 조회수 중앙값 (카테고리·하위 주제 배수의 분모)
     all_views = [s.views for s in items if s.views is not None]
     out.median_views = round(statistics.median(all_views), 1) if all_views else None
     out.median_views_count = len(all_views)
+    # 전체 숏츠 시간당 조회 증가 중앙값 ("숏츠 전체 대비" 배수의 분모). 형식 분자
+    # (promo_median_views_per_hour)와 같은 모집단: 하위 주제 숏츠는 뺀다(빠진 수는 subtopic_shorts)
+    (out.median_views_per_hour, out.median_views_per_hour_reason,
+     out.median_views_per_hour_count) = overall_promo_median(items, config)  # fmt: skip
     out.status = "known" if items else "unknown"
     if not items:
         out.reason = f"길이 {config.max_seconds}초 이하인 숏츠가 없음"

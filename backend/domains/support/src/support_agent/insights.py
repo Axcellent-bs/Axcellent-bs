@@ -164,6 +164,42 @@ def overview(store: InquiryStore, now: datetime | None = None) -> InquiryOvervie
     return InquiryOverview(kpis=kpis(store), waiting=waiting)
 
 
+def triage_reason_in_window(
+    store: InquiryStore,
+    topic_code: str,
+    now: datetime,
+    *,
+    window_minutes: int,
+) -> str | None:
+    """급증 창의 이 분류 문의 중 절반 이상이 "분류 필요"에 올라간 같은 사유면 그 사유를 돌려준다.
+
+    `no_error_code`(오류 코드 없는 결제 문의)·`unclassified`(분류 안 맞음)만 본다. 문의마다 한 번만
+    세고, 절반에 못 미치거나 사유가 갈리면(같은 수) None이다."""
+    recent_from = now - timedelta(minutes=window_minutes)
+    seen: set[int] = set()
+    reasons: Counter[str] = Counter()
+    for conversation, message in _customer_messages(store.all()):
+        if not (message.analysis and message.analysis.classification):
+            continue
+        if message.analysis.classification.category != topic_code:
+            continue
+        if not (recent_from < parse_time(message.created_at) <= now):
+            continue
+        if conversation.id in seen:
+            continue
+        seen.add(conversation.id)
+        triage = conversation.triage
+        if triage is not None and triage.reason in ("no_error_code", "unclassified"):
+            reasons[triage.reason] += 1
+    if not reasons or not seen:
+        return None
+    ranked = reasons.most_common()
+    top, count = ranked[0]
+    if len(ranked) > 1 and ranked[1][1] == count:
+        return None
+    return top if count * 2 >= len(seen) else None
+
+
 def detect_surge(
     store: InquiryStore,
     now: datetime,

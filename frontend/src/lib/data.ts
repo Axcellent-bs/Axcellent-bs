@@ -1000,6 +1000,34 @@ export interface TrendInsight {
   /** 근거 요약 최대 3개·근거 숏츠 최대 3개 (#710, 예전 응답은 없다) */
   evidence_highlights?: EvidenceHighlight[];
   evidence_shorts?: VideoLink[];
+  /**
+   * 브리프 v6 (예전 응답은 없다). trend = 트렌드 주제, promo = 실제로 오르는 숏츠 형식만 빌린 캣북스 홍보 영상 아이디어
+   * (topic = 형식 이름). promo 근거: 숏츠 전체 대비 배수(이 형식 1시간 조회 중앙값 ÷ 전체 숏츠 1시간 조회 중앙값),
+   * 최근 N일 안에 게시된 같은 형식 수, 게시 시각을 몰라 세지 않은 수
+   */
+  kind?: "trend" | "promo";
+  promo_format?: string | null;
+  promo_idea?: string | null;
+  /** 아이디어가 LLM 대신 고정 틀 문장이면 true */
+  promo_idea_fallback?: boolean;
+  promo_views_per_hour_ratio?: number | null;
+  promo_recent_count?: number | null;
+  promo_recent_days?: number | null;
+  promo_recent_unknown?: number | null;
+  /** 분자·분모에서 뺀 하위 주제 숏츠 수 */
+  promo_subtopic_excluded?: number | null;
+  /** 기획에 넘기는 기준을 통과한 근거 한 줄 */
+  gate_reason?: string | null;
+}
+/** 근거가 모자라 기획에 넘기지 않은 주제·형식과 이유 (브리프 v6) */
+export interface HeldBack { topic: string; reason: string }
+/** 이 판에 쓴 기획에 넘기는 기준 값 (서버 설정 그대로) */
+export interface BriefGate {
+  vs_all_ratio: number;
+  naver_ratio: number;
+  naver_min_format_ratio: number;
+  recent_min: number;
+  max_ratio: number;
 }
 export interface TrendInsightBriefOutput {
   status: "known" | "unknown";
@@ -1044,6 +1072,9 @@ export interface TrendInsightBriefOutput {
   estimated?: boolean;
   llm_pct_now?: number | null;
   detect_latest_at?: string | null;
+  /** v6: 기준(트렌드 근거)을 넘지 못해 기획에 넘기지 않은 것 (예전 응답은 없다) */
+  held_back?: HeldBack[];
+  gate?: BriefGate | null;
 }
 export type BriefTrigger = "auto" | "manual";
 export interface BriefVersionInfo { version: number; label: string; created_at: string; trigger: BriefTrigger; requested_by: string | null; detect_as_of: string | null }

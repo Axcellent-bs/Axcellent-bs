@@ -1,0 +1,51 @@
+{
+  "seed": "dev",
+  "worlds": 100,
+  "cases": 1200,
+  "accuracy": 0.9542,
+  "by_skill": {
+    "find_related_prs": {
+      "cases": 300,
+      "correct": 300,
+      "accuracy": 1.0,
+      "wrong_fields": {}
+    },
+    "link_incident": {
+      "cases": 100,
+      "correct": 100,
+      "accuracy": 1.0,
+      "wrong_fields": {}
+    },
+    "list_dev_outcomes": {
+      "cases": 100,
+      "correct": 100,
+      "accuracy": 1.0,
+      "wrong_fields": {}
+    },
+    "list_in_progress": {
+      "cases": 200,
+      "correct": 185,
+      "accuracy": 0.925,
+      "wrong_fields": {
+        "items": 15
+      }
+    },
+    "verify_handover": {
+      "cases": 200,
+      "correct": 160,
+      "accuracy": 0.8,
+      "wrong_fields": {
+        "missing": 11,
+        "stale_item_ids": 10,
+        "approved": 19
+      }
+    },
+    "verify_rollback_target": {
+      "cases": 300,
+      "correct": 300,
+      "accuracy": 1.0,
+      "wrong_fields": {}
+    }
+  },
+  "samples": []
+}

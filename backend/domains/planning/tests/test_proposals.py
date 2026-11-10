@@ -813,3 +813,25 @@ def test_follow_up_proposal_continues_the_same_campaign() -> None:
     asyncio.run(send())
     _, sent, _ = brief.sent[-1]
     assert sent.continue_campaign == "CMP-1"
+
+
+@pytest.mark.role("planning")
+def test_receive_insight_a2a_handler_completes() -> None:
+    """A2A 핸들러로 받아도 끝까지 응답한다 (11/10 holdout에서 찾은 `inp.ref` 오류)."""
+    from datetime import UTC, datetime, timedelta
+
+    from ax_contracts.schemas import AgentRequest
+    from planning_agent import handlers
+    from planning_agent.runtime import set_service
+
+    set_service(PlanningService(gate=_gate, relater=None, insights=None, marketing=None,
+                                proposal_writer=None))  # fmt: skip
+    deadline = (datetime.now(UTC) + timedelta(minutes=1)).isoformat()
+    req = AgentRequest.model_validate({
+        "skill": "receive_insight", "input": _insight("ins-a2a").model_dump(mode="json"),
+        "meta": {"context_id": "ctx_a2a", "token": "", "deadline": deadline,
+                 "idempotency_key": "ctx_a2a:receive_insight:ins-a2a", "requester": "data"},
+    })  # fmt: skip
+    res = asyncio.run(handlers.receive_insight(req))
+    assert res.status == TaskStatus.COMPLETED and res.outcome == "created"
+    assert res.evidence.ref_ids == [f"proposal:{res.output['proposal_id']}", "insight:ins-a2a"]

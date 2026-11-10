@@ -41,7 +41,9 @@ class Classification(AxModel):
     urgency: Urgency
     search_query: str
     pii_masked: list[str] = Field(default_factory=list)
-    language: str = "ko"  # 고객 메시지의 언어 (`languages.detect`, 코드가 판별: ko·en·ja·zh·other)
+    language: str = (
+        "ko"  # 고객 메시지의 언어 (`languages.detect_detail`: ko·en·ja·zh·es·fr·de·…·other)
+    )
     keywords: list[str] = Field(default_factory=list)  # 핵심 단어 최대 5개 (개인정보 제거)
     # 한국어가 아닌 문의일 때만: 상담원이 읽을 한국어 번역과 핵심 요청 (개인정보·욕설은 가린다)
     message_ko: str = ""

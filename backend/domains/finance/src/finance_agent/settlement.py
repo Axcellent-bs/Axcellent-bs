@@ -11,6 +11,9 @@
 - `unconfirmed_purchase`: 기간 안 주문 중 아직 배송 완료 전 (구매 미확정)
 - `negative_payout`: 정산금이 0원 이하
 
+내역서마다 이번 기간에 판 쇼핑몰 상품(`products`: 상품 번호·이름·수량·판매액)을 붙인다.
+판매자 번호(`seller_id`)와 상품 번호(`product_id`)는 쇼핑몰(shop-api)의 것 그대로다.
+
 지급 확정은 재무가 하지 않는다. 묶음을 `execute("confirm_settlement")`로 요청하면 안전 관문이
 항상 C로 보류하고 사람이 승인한다 (`settlement_batch.py`의 API 쪽).
 """
@@ -23,6 +26,13 @@ from typing import Any
 from finance_agent import finance_config as fc
 from finance_agent.books import Books, in_range, item_gross
 from finance_agent.rules import applied_many
+
+MAX_PRODUCTS = 20  # 판매자 한 곳에 보여 줄 상품 수
+
+
+def _qty(item: dict[str, Any]) -> int:
+    q = item.get("qty")
+    return q if isinstance(q, int) and not isinstance(q, bool) else 0
 
 
 def _paid_at(order: dict[str, Any]):
@@ -53,6 +63,7 @@ def statements(
         order_ids: set[str] = set()
         rates: set[float] = set()
         unconfirmed: set[str] = set()
+        by_product: dict[str, dict[str, Any]] = {}
         for o in sold:
             mine = [i for i in o["items"] if i.get("seller_id") == seller_id]
             if not mine:
@@ -66,6 +77,19 @@ def statements(
                 rates.add(rate)
                 gross += g
                 commission += fc.rate_amount(g, rate)
+                pid = str(i.get("product_id") or "")
+                if pid:
+                    row = by_product.setdefault(
+                        pid,
+                        {
+                            "product_id": pid,
+                            "name": books.product_name(pid, i),
+                            "qty": 0,
+                            "gross": 0,
+                        },
+                    )
+                    row["qty"] += _qty(i)
+                    row["gross"] += g
         seller_coupon = sum(
             c["total_value"]
             for c in books.coupons
@@ -110,6 +134,10 @@ def statements(
                 "hold_reasons": reasons,
                 "status": "held" if reasons else "ready",
                 "review_id": None,
+                # 이번 기간에 판 쇼핑몰 상품 (판매액 큰 순). 쇼핑몰 상품 화면과 잇는 열쇠
+                "products": sorted(
+                    by_product.values(), key=lambda r: (-r["gross"], r["product_id"])
+                )[:MAX_PRODUCTS],
             }
         )
     pay_date = sunday + timedelta(days=cfg.settlement.pay_days_after_period_end)

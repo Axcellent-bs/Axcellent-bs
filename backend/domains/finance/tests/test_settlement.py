@@ -37,6 +37,7 @@ def test_seed_last_week_statements(fixed_now) -> None:
             "hold_reasons",
             "status",
             "review_id",
+            "products",
         }
     assert {r["status"] for r in rows.values()} == {"ready"}
     assert all(r["hold_reasons"] == [] for r in rows.values())
@@ -119,3 +120,26 @@ def test_apply_batch(fixed_now) -> None:
     assert date.fromisoformat(shown["pay_date"]).weekday() == 5
 
 
+def test_statement_lists_the_shop_products_the_seller_sold(fixed_now) -> None:
+    """내역서의 상품은 쇼핑몰 상품 번호 그대로이고, 상품 판매액 합이 판매액과 같다."""
+    books = bk.seed_books()
+    books.products = [{"product_id": "prd_x", "name": "쇼핑몰 이름"}]
+    for r in st.statements(books, None)["statements"]:
+        assert r["products"], r["seller_id"]
+        assert sum(p["gross"] for p in r["products"]) == r["gross"]
+        assert [p["gross"] for p in r["products"]] == sorted(
+            (p["gross"] for p in r["products"]), reverse=True
+        )
+        for p in r["products"]:
+            assert p["product_id"].startswith("prd_") and p["qty"] > 0 and p["name"]
+            sold_by = {
+                i["seller_id"]
+                for o in books.orders
+                for i in o["items"]
+                if i.get("product_id") == p["product_id"]
+            }
+            assert sold_by == {r["seller_id"]}
+    # 품목에 이름이 없으면 쇼핑몰 상품 목록 이름, 그것도 없으면 상품 번호
+    assert books.product_name("prd_x", {}) == "쇼핑몰 이름"
+    assert books.product_name("prd_none", {}) == "prd_none"
+    assert books.product_name("prd_x", {"title": "품목 이름"}) == "품목 이름"
