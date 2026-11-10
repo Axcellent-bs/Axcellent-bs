@@ -403,7 +403,7 @@
     },
     {
       "id": "answer_planning_question",
-      "description": "기획이 문의에서 보낸 변경 요청(create_ticket)의 근거를 되물으면, 문의 서비스가 보낸 요청의 기록(보낼 때 코드가 정리한 근거 요약·근거 문의 ID)으로만 답한다 (#264, LLM 없음). 이 사건(ctx_req_)·요청 번호(REQ-n)·테넌트가 모두 맞는 기록이 없으면 unknown, 근거(about: evidence) 질문이고 고를 답(options)이 없고 보낸 근거 요약이 있으면 answered(근거 요약·대표 문의·보낸 시각 + 근거 ID), 우리 요청이지만 기록으로 답할 수 없으면(다른 칸을 묻거나 고를 답이 있거나 보낸 근거가 없는 예전 기록, 답에 개인정보가 섞일 때) needs_human. 질문 문구는 판단에 쓰지 않는다. 시각은 요청을 보낸 시각이고 문의가 몰린 시각이 아니다. 상태를 바꾸지 않는 read skill이라 execute()를 거치지 않는다. 사람이 답하는 화면과 receive_planning_answer 전송은 후속이다.",
+      "description": "기획이 문의에서 보낸 변경 요청(create_ticket)의 근거를 되물으면, 문의 서비스가 보낸 요청의 기록(보낼 때 코드가 정리한 근거 요약·근거 문의 ID)으로만 답한다 (#264, LLM 없음). 이 사건(ctx_req_)·요청 번호(REQ-n)·테넌트가 모두 맞는 기록이 없으면 unknown, 근거(about: evidence) 질문이고 고를 답(options)이 없고 보낸 근거 요약이 있으면 answered(근거 요약·대표 문의·보낸 시각 + 근거 ID), 우리 요청이지만 기록으로 답할 수 없으면(다른 칸을 묻거나 고를 답이 있거나 보낸 근거가 없는 예전 기록, 답에 개인정보가 섞일 때) needs_human. 질문 문구는 판단에 쓰지 않는다. 시각은 요청을 보낸 시각이고 문의가 몰린 시각이 아니다. 사업 상태를 바꾸지 않는 read skill이라 execute()를 거치지 않는다. 다만 needs_human이면 받은 질문을 메모리에 적어 둔다(이 skill의 유일한 쓰기, list_planning_questions로 읽는다). 사람이 답하는 화면과 receive_planning_answer 전송은 후속이다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionOutput",
       "grade": "read",
@@ -421,6 +421,16 @@
       "allowed_requesters": ["dashboard-api", "orchestrator"],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "list_planning_questions",
+      "description": "기획이 되물었는데 기록으로 답하지 못해(needs_human) 사람이 답해야 하는 질문 목록을 돌려준다(읽기). 질문 번호·요청 번호·사건·묻는 칸·질문 문구(개인정보는 가림)·받은 시각을 담고, 기본은 아직 답하지 못한 질문(open)만이다. 요청한 회사의 질문만 보이고 open_count는 거르기 전 그 회사의 열린 질문 수다. 지금은 메모리에만 있어 재시작하면 비워진다. 사람이 답해 기획에 보내는 skill과 화면은 후속이다.",
+      "input_schema": "agents/support/src/support_agent/planning_question_schemas.py#ListPlanningQuestionsInput",
+      "output_schema": "agents/support/src/support_agent/planning_question_schemas.py#ListPlanningQuestionsOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "planning"],
+      "verifier": null,
+      "priority": "optional"
     },
     {
       "id": "list_change_requests",
