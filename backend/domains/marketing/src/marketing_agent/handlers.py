@@ -61,6 +61,8 @@ from marketing_agent.notice import NoticeStore, make_draft
 from marketing_agent.schemas import (
     ActiveNotices,
     DraftNoticeInput,
+    EndedNotices,
+    EndIncidentNoticeInput,
     GetNoticeInput,
     IssueCouponInput,
     IssuedCoupon,
@@ -311,6 +313,60 @@ async def publish_notice(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=published.model_dump(mode="json"),
         evidence=_evidence(["publish_notice"], "게시 완료", [notice_id, decision.execution_id]),
+    )
+
+
+async def end_incident_notice(request: AgentRequest) -> AgentResult:
+    """정상화 공지 없이 대응이 끝난 이벤트의 장애 배너를 내린다 (총괄이 복구 신호를 받은 뒤 부른다).
+
+    쇼핑몰 배너 목록에서 같은 이벤트(`context_id`)의 게시 중 배너를 찾아 내리고, 메모리에 남은
+    장애 공지도 끝낸다. 배너 번호를 메모리에만 두면 재시작 뒤 못 찾기 때문에 목록으로 찾는다.
+    내릴 것이 없으면 빈 목록으로 성공한다(다시 불러도 같다). 정상화 공지가 이미 나간 이벤트에는
+    부르지 않는다(그 배너까지 내리지 않게 총괄이 막는다).
+    """
+    data = _parse(request, EndIncidentNoticeInput)
+    if isinstance(data, AgentResult):
+        return data
+    context_id = request.meta.context_id
+    key = f"{context_id}:end_incident_notice"
+    evidence = _evidence(
+        ["end_incident_notice"], "정상화 공지 없이 닫힌 이벤트의 장애 배너 내리기", [context_id]
+    )
+    decision = await execute(
+        "end_incident_notice",
+        {"context_id": context_id, "reason": data.reason},
+        request.meta.model_copy(update={"idempotency_key": key}),
+        evidence,
+    )
+    blocked = _from_decision(request, decision, evidence)
+    if blocked:
+        return blocked
+
+    remembered = STATE.notices.open_incident_notice_ids(context_id)
+    to_end = list(remembered)
+    if shop_client.notice_source() == "shop-api":
+        try:
+            for banner in await shop_client.list_banners():
+                notice_id = banner.get("notice_id")
+                if (
+                    banner.get("context_id") == context_id
+                    and banner.get("status") == "active"
+                    and isinstance(notice_id, str)
+                    and notice_id not in to_end
+                ):
+                    to_end.append(notice_id)
+            for notice_id in to_end:
+                await shop_client.end_banner(notice_id)
+        except shop_client.ShopError as exc:
+            return _result(request, TaskStatus.FAILED, outcome=f"shop_banner_failed:{exc.code}")
+    STATE.notices.end_incident_notices(context_id)
+    ended = EndedNotices(ended_notice_ids=to_end, status="ended" if to_end else "none_open")
+    summary = f"장애 배너 {len(to_end)}개를 내림" if to_end else "내릴 장애 배너가 없음"
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=ended.model_dump(mode="json"),
+        evidence=_evidence(["end_incident_notice"], summary, [context_id, *to_end]),
     )
 
 
@@ -712,6 +768,7 @@ async def marketing_chat_close(request: AgentRequest) -> AgentResult:
 HANDLERS = {
     "draft_notice": draft_notice,
     "publish_notice": publish_notice,
+    "end_incident_notice": end_incident_notice,
     "get_notice": get_notice,
     "list_active_notices": list_active_notices,
     "receive_campaign_brief": receive_campaign_brief,

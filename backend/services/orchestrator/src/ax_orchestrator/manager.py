@@ -238,6 +238,9 @@ class IncidentManager:
                 target.refresh_mttr()
                 target.log(f"정상 복귀 신호 받음 ({env.source}, {iso(env.occurred_at)})")
                 await self.engine.refresh_impact(target, self.plan_factory())
+                if target.closed_at is not None:
+                    # 닫힌 이벤트는 복구 신호를 기다리던 단계(장애 배너 내리기)를 이제 돌린다
+                    await self.engine.rerun_after_recovery(target, self.plan_factory())
                 if target.closed_at is not None:  # 열려 있으면 이벤트가 닫힐 때 함께 남긴다
                     await self.engine.sync_times(target)
                 self._persist(target)

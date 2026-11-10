@@ -45,6 +45,7 @@ STAGES: dict[str, Stage | Excluded] = {
     "recovery": Excluded("복구 검증: 쇼핑몰 복구 시점에 달려 결과 지표로만 본다"),
     "recovered_draft": Stage("marketing", NOTICE),
     "recovered_notice": Stage("marketing", NOTICE),
+    "end_notice": Excluded("장애 배너 내리기: 복구 신호 뒤에 도는 사후 정리라 평가하지 않는다"),
     "finance_record": Stage("finance", NOTICE),
     "kpi": Stage("data", LOOKUP),
     "record": Stage("hr", NOTICE),

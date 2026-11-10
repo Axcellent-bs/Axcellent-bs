@@ -60,6 +60,7 @@ SKILL_KO: dict[str, str] = {
     "list_at_risk_customers": "이탈 위험 고객 보기",
     "draft_notice": "공지 초안 쓰기",
     "publish_notice": "공지 올리기",
+    "end_incident_notice": "장애 배너 내리기",
     "get_notice": "공지 보기",
     "list_active_notices": "게시 중인 공지 보기",
     "issue_coupon": "쿠폰 발급",

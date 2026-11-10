@@ -44,6 +44,9 @@ class Step:
     split: tuple[str, int] | None = None
     # 나눠 부른 결과들을 하나로 합친다. 없으면 첫 결과에 `batches`만 붙인다.
     merge: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None
+    # 복구 신호(shop.recovered)를 기다리느라 건너뛴 단계(사유 `WAITING_RECOVERY`)를, 이벤트가 이미
+    # 닫힌 뒤 신호가 오면 다시 판단해 돌린다
+    rerun_on_recovery: bool = False
 
 
 @dataclass
@@ -109,7 +112,16 @@ WAITING = {"held", "waiting_human"}
 # 사유 코드가 있어도 사람이 개입한 일로 세지 않는 것 (자동 처리율)
 # - service_disabled: 꺼진 서비스라 건너뛴 조회
 # - cause_confident: 확신도 높은 원인 후보가 있어 원인 확인 요청을 하지 않음
-NOT_INTERVENTION = {"service_disabled", "cause_confident"}
+# - notice_already_ended·no_incident_notice·waiting_recovery: 장애 배너를 내릴 필요가 없거나
+#   복구 신호를 기다리는 중이라 건너뜀(정상 이벤트마다 생기는 건너뜀이라 세지 않는다)
+WAITING_RECOVERY = "waiting_recovery"
+NOT_INTERVENTION = {
+    "service_disabled",
+    "cause_confident",
+    "notice_already_ended",
+    "no_incident_notice",
+    WAITING_RECOVERY,
+}
 
 
 @dataclass

@@ -57,6 +57,19 @@ class PublishedNotice(AxModel):
     status: Literal["published"] = "published"
 
 
+class EndIncidentNoticeInput(AxModel):
+    """`end_incident_notice` 입력. 대상 이벤트는 요청의 `context_id`다."""
+
+    reason: Literal["recovery_not_announced"] = "recovery_not_announced"
+
+
+class EndedNotices(AxModel):
+    """`end_incident_notice` 응답. 내릴 것이 없으면 `none_open`과 빈 목록이다(실패가 아니다)."""
+
+    ended_notice_ids: list[str]
+    status: Literal["ended", "none_open"]
+
+
 class GetNoticeInput(AxModel):
     notice_id: str
 

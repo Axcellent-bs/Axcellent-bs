@@ -6,6 +6,7 @@
 | --- | --- |
 | `draft_notice` | read |
 | `publish_notice` | A |
+| `end_incident_notice` | A |
 | `get_notice` | read |
 | `list_active_notices` | read |
 | `receive_campaign_brief` | A |

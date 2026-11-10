@@ -106,5 +106,5 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
 | `find_similar_cases` | read | 비슷한 과거 이벤트 찾기 (hr) | 없음 (이벤트 시작 즉시) | 아니오 | `{"event_type": null, "limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
-| `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["원인 확인 요청: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 원인 확인 요청", "event_type": null, "kind": "incident", "source_refs": ["step:diagnose", "step:similar_cases", "st` |
+| `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), end_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["원인 확인 요청: 건너뜀", "장애 공지 배너 내리기: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 원인 확인 요청, 장애 공지 배너 내리기", "event_type": null, "kind": "incident", "source_refs": ["step:d` |
 | `record_resolution` | A | 해결 내용 기록 (hr) | record(끝나면) | 아니오 | `{"action": "배포 이전 버전으로 되돌림", "context_id": "ctx_inc_guide", "minutes_to_resolve": 0, "outcome": "resolved", "root_cause": "PR #412 배포가 원인일 수 있음"}` |

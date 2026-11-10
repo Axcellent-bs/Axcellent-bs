@@ -30,9 +30,13 @@ async def test_scenario_a_completes(harness) -> None:
     # 원인 후보에 확신도 high가 있으면 원인 확인 요청만 건너뛴다 (사람 개입 아님)
     check = inc.steps["cause_check"]
     assert (check.status, check.reason_code) == ("skipped", "cause_confident")
-    assert all(s.status == "completed" for k, s in inc.steps.items() if k != "cause_check")
+    # 정상화 공지가 장애 배너를 이미 내려서 배너 내리기 단계는 건너뛴다(사람이 개입한 일이 아니다)
+    ended = inc.steps["end_notice"]
+    assert (ended.status, ended.reason_code) == ("skipped", "notice_already_ended")
+    others = {k: s for k, s in inc.steps.items() if k not in ("cause_check", "end_notice")}
+    assert all(s.status == "completed" for s in others.values())
     assert harness.events == ["incident.opened", "incident.resolved"]
-    assert inc.metrics["steps_total"] == 18  # + 재무 장애 비용 장부 기록
+    assert inc.metrics["steps_total"] == 19  # + 재무 장애 비용 장부 기록, 장애 배너 내리기
     assert inc.metrics["auto_rate"] == 1.0
 
 
