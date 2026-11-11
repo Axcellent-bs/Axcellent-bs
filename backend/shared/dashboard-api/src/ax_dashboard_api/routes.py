@@ -1633,6 +1633,14 @@ async def answer_planning_question(body: PlanningAnswerBody, request: Request) -
     return ok(out)
 
 
+@router.get("/inquiry-pull")
+async def inquiry_pull_status() -> dict:
+    """판매 서버 문의함을 마지막으로 읽은 결과 (읽기). 연결이 끊겼는지 바로 알 수 있다."""
+    if is_mock():
+        return ok({"enabled": False, "connected": None, "pending": None, "last_error": None})
+    return ok(await support_client.call("inquiry_pull_status", {}))
+
+
 @router.get("/ideas")
 async def customer_ideas(
     status: str | None = Query(default=None, pattern=r"^(new|sent)$"),

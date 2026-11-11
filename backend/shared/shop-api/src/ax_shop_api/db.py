@@ -85,6 +85,29 @@ CREATE TABLE IF NOT EXISTS payment_attempts (
   status TEXT NOT NULL, payment_id TEXT, tenant_id TEXT NOT NULL, context_id TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+-- 문의함: 고객 문의를 이 서버에 저장하고 AXcellent 고객지원이 읽어 간다(inbox.py). 읽어 간 문의는
+-- synced_at이 차고 사진(images)은 지운다. 같은 접수는 digest가 같아 한 건이다
+CREATE TABLE IF NOT EXISTS inquiry_inbox (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, digest TEXT NOT NULL UNIQUE, context_id TEXT NOT NULL,
+  buyer_id TEXT NOT NULL, customer_name TEXT NOT NULL, order_id TEXT NOT NULL,
+  subject TEXT NOT NULL, message TEXT NOT NULL, images TEXT, tenant_id TEXT NOT NULL,
+  created_at TEXT NOT NULL, synced_at TEXT, support_inquiry_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_inquiry_inbox_pending ON inquiry_inbox(seq) WHERE synced_at IS NULL;
+-- 클레임함: 고객의 취소·반품·교환 신청을 이 서버에 저장하고 AXcellent 고객지원이 읽어 가서
+-- 판정한 뒤 결과(result)를 되돌려 쓴다(claim_inbox.py).
+-- 처음 status는 received, 결과를 적으면 synced_at이 찬다(클레임이 안 만들어진 신청은 번호 없음)
+CREATE TABLE IF NOT EXISTS claim_inbox (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, digest TEXT NOT NULL UNIQUE, context_id TEXT NOT NULL,
+  buyer_id TEXT NOT NULL, customer_name TEXT NOT NULL, order_id TEXT NOT NULL,
+  claim_type TEXT NOT NULL, reason TEXT NOT NULL, items TEXT, unsealed INTEGER NOT NULL DEFAULT 0,
+  evidence_count INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL, result TEXT, support_claim_id INTEGER, synced_at TEXT,
+  tenant_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_claim_inbox_unread ON claim_inbox(seq)
+  WHERE synced_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_claim_inbox_buyer ON claim_inbox(buyer_id, order_id);
 CREATE TABLE IF NOT EXISTS retention_daily_stats (
   stat_date TEXT NOT NULL, kind TEXT NOT NULL, rows_count INTEGER NOT NULL,
   amount_sum INTEGER, tenant_id TEXT NOT NULL,
