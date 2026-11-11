@@ -1076,6 +1076,98 @@ def test_the_status_says_whether_this_install_is_read_only(monkeypatch: pytest.M
     assert inquiry_pull.status()["read_only"] is True
 
 
+# ----------------------------------------------- 판매 서버 연결 키(AX_SHOP_CLIENT_KEYS)
+
+
+@pytest.fixture(autouse=True)
+def _forget_read_only_key() -> None:
+    shop_client._KEY_IS_READ_ONLY["seen"] = False
+    yield
+    shop_client._KEY_IS_READ_ONLY["seen"] = False
+
+
+def _auth_of(requests: list[httpx.Request]) -> list[str]:
+    return [r.headers["authorization"] for r in requests]
+
+
+def test_the_keys_are_read_by_service_name_and_bad_entries_are_skipped(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv(
+        shop_client.ENV_KEYS, "inquiry:sk_aaa, claims:sk_bbb ,broken,:nokey,reviews:"
+    )
+    with caplog.at_level("WARNING"):
+        keys = shop_client.client_keys()
+    assert keys == {"inquiry": "sk_aaa", "claims": "sk_bbb"}
+    assert "sk_aaa" not in caplog.text  # 키 값은 로그에 싣지 않는다
+    monkeypatch.delenv(shop_client.ENV_KEYS)
+    assert shop_client.client_keys() == {}
+
+
+def test_the_service_name_comes_from_the_env_or_the_service_card_folder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(shop_client.ENV_SERVICE, raising=False)
+    monkeypatch.delenv("SUPPORT_AGENT_CARD", raising=False)
+    assert shop_client.service_name() == "support"
+    monkeypatch.setenv("SUPPORT_AGENT_CARD", "/x/services/claims/agent-card.json")
+    assert shop_client.service_name() == "claims"
+    monkeypatch.setenv(shop_client.ENV_SERVICE, "reviews")
+    assert shop_client.service_name() == "reviews"
+
+
+@pytest.mark.asyncio
+async def test_a_service_sends_its_own_key_and_never_falls_back_when_keys_are_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(shop_client.ENV_KEYS, "inquiry:sk_inq,claims:sk_clm")
+    requests: list[httpx.Request] = []
+    shop_client.use_client(_recording_shop(requests))
+    try:
+        monkeypatch.setenv(shop_client.ENV_SERVICE, "claims")
+        await shop_client.fetch_claim_inbox()
+        monkeypatch.setenv(shop_client.ENV_SERVICE, "reviews")  # 이 서비스의 키는 없다(오타 등)
+        with pytest.raises(shop_client.ShopError) as caught:
+            await shop_client.fetch_idea_inbox()
+        monkeypatch.delenv(shop_client.ENV_KEYS)  # 키 목록이 아예 없다(옛 설치)
+        monkeypatch.setenv(shop_client.ENV_SERVICE, "claims")
+        await shop_client.fetch_claim_inbox()
+    finally:
+        shop_client.use_client(None)
+    own, no_keys = _auth_of(requests)  # 키가 없는 서비스의 요청은 아예 나가지 않았다
+    assert own == "Bearer sk_clm"  # 자기 서비스 이름의 키
+    assert caught.value.code == "NO_SERVICE_KEY"
+    assert no_keys == "Bearer " + shop_client.config.agent_token("support")  # 키 목록이 없을 때만
+
+
+@pytest.mark.asyncio
+async def test_a_read_key_refused_write_turns_the_install_into_an_observer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": [], "meta": {}})
+        body = {"error": {"code": "READ_ONLY_KEY", "message": "읽기 전용 키다"}}
+        return httpx.Response(403, json=body)
+
+    shop_client.use_client(httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    try:
+        assert shop_client.read_only() is False
+        await shop_client.mark_inquiry_synced(1, 5)  # 403 READ_ONLY_KEY를 받아도 오류 없이 넘어간다
+        assert shop_client.read_only() is True and inquiry_pull.status()["read_only"] is True
+        assert inquiry_pull.status()["read_only_reason"] == "key"  # 스위치가 아니라 키 때문이다
+        await shop_client.mark_inquiry_synced(2, 6)  # 이제는 판매 서버에 보내지도 않는다
+        with pytest.raises(shop_client.ShopError) as caught:
+            await shop_client.refund("pay_1", 1000, "k", "ctx_shop_x")
+        assert caught.value.code == "READ_ONLY"
+    finally:
+        shop_client.use_client(None)
+    assert [r.method for r in requests] == ["POST"]  # 쓰기 요청은 처음 한 번뿐이다
+
+
 @pytest.mark.asyncio
 async def test_a_read_only_install_counts_only_newly_seen_items(
     monkeypatch: pytest.MonkeyPatch,
@@ -1358,3 +1450,19 @@ async def test_the_claims_server_status_says_when_it_is_read_only(
     assert _a2a("claim_pull_status", {})["output"]["read_only"] is False
     monkeypatch.setenv(shop_client.ENV_MODE, "read")
     assert _a2a("claim_pull_status", {})["output"]["read_only"] is True
+
+
+def test_a_missing_service_key_is_logged_without_any_key_value(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv(shop_client.ENV_KEYS, "inquiry:sk_secret")
+    monkeypatch.setenv(shop_client.ENV_SERVICE, "claims")
+    with caplog.at_level("ERROR"), pytest.raises(shop_client.ShopError):
+        shop_client._headers()
+    assert "claims" in caplog.text and "sk_secret" not in caplog.text
+
+
+def test_the_read_only_reason_is_config_for_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert shop_client.read_only_reason() is None
+    monkeypatch.setenv(shop_client.ENV_MODE, "read")
+    assert shop_client.read_only_reason() == "config"
