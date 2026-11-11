@@ -425,6 +425,46 @@ async def test_protected_paths_fail_closed(
         assert hits[key] == {"key": key, "invalid": "changed_paths"}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "clean"),
+    [("generate_pr", _PR_CLEAN), ("merge_pr", _MERGE_CLEAN), ("repo_revert_pr", _REVERT_CLEAN)],
+)
+async def test_split_shop_repo_paths_are_allowed_and_protected(
+    gate: Gate, act, action: str, clean: dict[str, int]
+) -> None:
+    """판매 서버 레포(Catbooks-demo/catbooks-demo)는 frontend/·backend/ 아래에 같은 파일을 둔다.
+
+    새 경로도 허용 경로로 받고, 같은 보호 파일·계약은 새 경로에서도 C로 막는다.
+    그 밖의 backend/ 경로는 허용 경로가 아니다.
+    """
+    ok = await gate.execute(
+        act(
+            action,
+            "dev",
+            f"split-{action}-ok",
+            changed_paths=["backend/shop-api/src/ax_shop_api/lookups.py", "frontend/shop-web/a.ts"],
+            **clean,
+        )
+    )
+    assert (ok.grade, ok.status) == ("B", "executed")
+    for n, path in enumerate(
+        [
+            "backend/shop-api/src/ax_shop_api/service.py",
+            "frontend/shop-web/src/pages/Checkout.tsx",
+            "backend/contracts/openapi/shop-api.json",
+        ]
+    ):
+        held = await gate.execute(
+            act(action, "dev", f"split-{action}-hit-{n}", changed_paths=[path], **clean)
+        )
+        assert (held.grade, held.status) == ("C", "held"), path
+    outside = await gate.execute(
+        act(action, "dev", f"split-{action}-out", changed_paths=["backend/other/a.py"], **clean)
+    )
+    assert outside.status == "held"
+
+
 _AGENT_CONFIG_ACTIONS = [
     ("generate_pr", "pr_agent_config_paths", _PR_CLEAN),
     ("merge_pr", "merge_agent_config_paths", _MERGE_CLEAN),

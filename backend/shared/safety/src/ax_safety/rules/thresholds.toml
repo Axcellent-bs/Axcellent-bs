@@ -13,7 +13,7 @@
 # - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 9
+version = 10
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
@@ -87,11 +87,13 @@ key = "pr_allowed_paths"
 action = "generate_pr"
 metric = "paths_within"
 field = "changed_paths"
-allowed = ["shop-api/", "shop-web/", "docs/"]
+allowed = ["shop-api/", "shop-web/", "backend/shop-api/", "frontend/shop-web/", "docs/"]
 
 # 보호 경로 (#169, 안전 담당). 결제·인증·데이터에 닿는 변경은 허용 경로·크기 안이어도
 # planning이 보낸 irreversible_count와 상관없이 항상 C. 값은 제안값.
 # 경로는 ax-backend·ax-frontend 저장소 루트 기준. 같은 경로이거나 그 접두사로 시작하면 걸린다.
+# 판매 서버 레포 분리(Catbooks-demo/catbooks-demo)로 같은 파일이 frontend/·backend/ 아래에도 있어
+# 두 경로를 다 둔다. 허용 경로도 같다(옛 경로는 분리가 끝나면 뺀다).
 # 필드가 없거나 문자열 목록이 아니면 걸린 것으로 본다(fail-closed).
 [[rules]]
 key = "pr_protected_paths"
@@ -109,10 +111,20 @@ protected = [
   "shop-api/src/ax_shop_api/service.py",
   "shop-api/src/ax_shop_api/promotions.py",
   "shop-api/src/ax_shop_api/seed.py",
+  # 같은 파일의 Catbooks-demo/catbooks-demo 경로 (판매 서버 레포 분리, frontend/·backend/ 아래)
+  "frontend/shop-web/src/pages/Checkout.tsx",
+  "frontend/shop-web/src/lib/auth.tsx",
+  "frontend/shop-web/src/lib/api.ts",
+  "frontend/shop-web/src/lib/env.ts",
+  "backend/shop-api/src/ax_shop_api/db.py",
+  "backend/shop-api/src/ax_shop_api/service.py",
+  "backend/shop-api/src/ax_shop_api/promotions.py",
+  "backend/shop-api/src/ax_shop_api/seed.py",
   # 관문 규칙·CI·계약. 허용 경로 밖이지만 허용 목록이 넓어져도 막히도록 같이 둔다
   ".github/",
   "safety/",
   "contracts/",
+  "backend/contracts/",
 ]
 
 # 에이전트 설정·훅·설치 스크립트 (#506). 머지되면 이 레포를 여는 개발자의 Claude Code·Codex·에디터나
@@ -219,7 +231,7 @@ key = "merge_allowed_paths"
 action = "merge_pr"
 metric = "paths_within"
 field = "changed_paths"
-allowed = ["shop-api/", "shop-web/", "docs/"]
+allowed = ["shop-api/", "shop-web/", "backend/shop-api/", "frontend/shop-web/", "docs/"]
 
 # 보호 경로: pr_protected_paths와 같은 목록. 값은 제안값
 [[rules]]
@@ -238,10 +250,20 @@ protected = [
   "shop-api/src/ax_shop_api/service.py",
   "shop-api/src/ax_shop_api/promotions.py",
   "shop-api/src/ax_shop_api/seed.py",
+  # 같은 파일의 Catbooks-demo/catbooks-demo 경로 (판매 서버 레포 분리, frontend/·backend/ 아래)
+  "frontend/shop-web/src/pages/Checkout.tsx",
+  "frontend/shop-web/src/lib/auth.tsx",
+  "frontend/shop-web/src/lib/api.ts",
+  "frontend/shop-web/src/lib/env.ts",
+  "backend/shop-api/src/ax_shop_api/db.py",
+  "backend/shop-api/src/ax_shop_api/service.py",
+  "backend/shop-api/src/ax_shop_api/promotions.py",
+  "backend/shop-api/src/ax_shop_api/seed.py",
   # 관문 규칙·CI·계약. 허용 경로 밖이지만 허용 목록이 넓어져도 막히도록 같이 둔다
   ".github/",
   "safety/",
   "contracts/",
+  "backend/contracts/",
 ]
 
 # 에이전트 설정·훅·설치 스크립트: pr_agent_config_paths와 같은 목록
@@ -393,7 +415,7 @@ key = "revert_allowed_paths"
 action = "repo_revert_pr"
 metric = "paths_within"
 field = "changed_paths"
-allowed = ["shop-api/", "shop-web/", "docs/"]
+allowed = ["shop-api/", "shop-web/", "backend/shop-api/", "frontend/shop-web/", "docs/"]
 
 [[rules]]
 key = "revert_protected_paths"
@@ -411,10 +433,20 @@ protected = [
   "shop-api/src/ax_shop_api/service.py",
   "shop-api/src/ax_shop_api/promotions.py",
   "shop-api/src/ax_shop_api/seed.py",
+  # 같은 파일의 Catbooks-demo/catbooks-demo 경로 (판매 서버 레포 분리, frontend/·backend/ 아래)
+  "frontend/shop-web/src/pages/Checkout.tsx",
+  "frontend/shop-web/src/lib/auth.tsx",
+  "frontend/shop-web/src/lib/api.ts",
+  "frontend/shop-web/src/lib/env.ts",
+  "backend/shop-api/src/ax_shop_api/db.py",
+  "backend/shop-api/src/ax_shop_api/service.py",
+  "backend/shop-api/src/ax_shop_api/promotions.py",
+  "backend/shop-api/src/ax_shop_api/seed.py",
   # 관문 규칙·CI·계약. 허용 경로 밖이지만 허용 목록이 넓어져도 막히도록 같이 둔다
   ".github/",
   "safety/",
   "contracts/",
+  "backend/contracts/",
 ]
 
 # 에이전트 설정·훅·설치 스크립트: pr_agent_config_paths와 같은 목록
