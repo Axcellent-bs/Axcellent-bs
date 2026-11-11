@@ -491,3 +491,24 @@ def test_inquiry_pull_status_is_read_from_support(fake: Fake) -> None:
 def test_inquiry_pull_status_in_mock_mode_is_empty(mock_client: TestClient) -> None:
     data = mock_client.get(BASE + "/inquiry-pull").json()["data"]
     assert data["enabled"] is False and data["connected"] is None
+
+
+def test_stuck_intake_is_listed_and_retried_through_support(fake: Fake) -> None:
+    fake.outputs["list_stuck_intake"] = {
+        "items": [{"kind": "claim", "seq": 3, "reason": "INGEST_FAILED", "attempts": 6}],
+        "total": 1,
+    }
+    fake.outputs["retry_stuck_intake"] = {"kind": "claim", "seq": 3, "requeued": True}
+    client = TestClient(app)
+    assert client.get(BASE + "/inquiry-pull/stuck").json()["data"]["total"] == 1
+    done = client.post(BASE + "/inquiry-pull/stuck/claim/3/retry")
+    assert done.status_code == 200 and done.json()["data"]["requeued"] is True
+    sent = next(r for r in fake.sent if r.skill == "retry_stuck_intake")
+    assert sent.input == {"kind": "claim", "seq": 3}
+    assert client.post(BASE + "/inquiry-pull/stuck/other/3/retry").status_code == 422
+    assert client.post(BASE + "/inquiry-pull/stuck/claim/0/retry").status_code == 422
+
+
+def test_stuck_intake_in_mock_mode(mock_client: TestClient) -> None:
+    assert mock_client.get(BASE + "/inquiry-pull/stuck").json()["data"] == {"items": [], "total": 0}
+    assert mock_client.post(BASE + "/inquiry-pull/stuck/claim/1/retry").status_code == 501

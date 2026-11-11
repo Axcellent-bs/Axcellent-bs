@@ -10,6 +10,7 @@ from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskSta
 from ax_shop_api import inquiries, support_client
 from ax_shop_api.db import Db
 from ax_shop_api.main import create_app
+from ax_shop_api.service import ShopError
 
 SECRET = "내 전화번호는 010-1234-5678 입니다"
 META = {"context_id": "ctx_shop_x", "token": "t", "deadline": "2030-01-01T00:00:00Z"}
@@ -154,3 +155,67 @@ def test_같은_접수는_한_건이고_다른_내용은_새_건이다(client: T
     items = client.get("/api/shop/admin/inquiries", headers=SUPPORT).json()["data"]
     assert [i["seq"] for i in items] == [first, other["data"]["id"]]
     assert items[0]["customer_name"] == "데모 구매자 0001"
+
+
+# 접수 입력 검사와 속도 제한: 새 접수 방식(문의함 저장)에서도 그대로 막는다
+@pytest.mark.parametrize(
+    ("patch", "code"),
+    [
+        ({"buyer_id": "buyer7"}, "INVALID_BUYER_ID"),
+        ({"buyer_id": "buy_٠٠٠٧"}, "INVALID_BUYER_ID"),
+        ({"order_id": "ORD-1"}, "INVALID_ORDER_ID"),
+        ({"order_id": "ord_"}, "INVALID_ORDER_ID"),
+        ({"body": "   "}, "EMPTY_BODY"),
+        ({"body": "가" * 2001}, "BODY_TOO_LONG"),
+        ({"subject": "가" * 101}, "SUBJECT_TOO_LONG"),
+    ],
+)
+def test_형식_오류와_빈_본문_길이_초과는_400(
+    client: TestClient, support: FakeSupport, patch: dict, code: str
+) -> None:
+    order_id = _order(client)
+    response = client.post("/api/shop/inquiries", json=_body(order_id) | patch)
+    assert (response.status_code, response.json()["error"]["code"]) == (400, code)
+    assert support.calls == []
+
+
+def test_주문_번호가_없거나_모르는_필드면_422(client: TestClient, support: FakeSupport) -> None:
+    missing = client.post("/api/shop/inquiries", json={"buyer_id": "buy_0001", "body": "x"})
+    assert missing.status_code == 422
+    order_id = _order(client)
+    assert client.post("/api/shop/inquiries", json=_body(order_id, amount=1)).status_code == 422
+    assert support.calls == []
+
+
+def test_구매자별_속도_제한(
+    client: TestClient, support: FakeSupport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SHOP_INQUIRY_RATE_PER_BUYER", "2")
+    order_id = _order(client)
+    codes = [client.post("/api/shop/inquiries", json=_body(order_id)).status_code for _ in range(3)]
+    assert codes == [201, 201, 429]
+    assert support.calls == []
+    other = _order(client, "buy_0002")  # 다른 구매자는 영향이 없다
+    ok = client.post("/api/shop/inquiries", json=_body(other, buyer_id="buy_0002"))
+    assert ok.status_code == 201
+
+
+def test_전체_속도_제한(
+    client: TestClient, support: FakeSupport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SHOP_INQUIRY_RATE_GLOBAL", "1")
+    first, second = _order(client), _order(client, "buy_0002")
+    assert client.post("/api/shop/inquiries", json=_body(first)).status_code == 201
+    blocked = client.post("/api/shop/inquiries", json=_body(second, buyer_id="buy_0002"))
+    assert (blocked.status_code, blocked.json()["error"]["code"]) == (429, "RATE_LIMITED")
+
+
+def test_속도_제한은_1분이_지나면_풀린다(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SHOP_INQUIRY_RATE_PER_BUYER", "1")
+    now = [0.0]
+    limiter = inquiries.InquiryRateLimiter(clock=lambda: now[0])
+    limiter.hit("buy_0001")
+    with pytest.raises(ShopError):
+        limiter.hit("buy_0001")
+    now[0] = 61.0
+    limiter.hit("buy_0001")

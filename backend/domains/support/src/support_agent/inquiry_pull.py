@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import re
@@ -46,7 +48,9 @@ STATE: dict[str, Any] = {
     "pending": None,  # 판매 서버 문의함에 아직 남은 문의 수(마지막으로 읽었을 때)
     "ingested_total": 0,
     "failed_total": 0,
+    "inbox_failed": None,  # 판매 서버 문의함에서 실패로 빼 둔 문의 수
     "claims_pending": None,  # 판매 서버 클레임함에 아직 남은 신청 수
+    "claims_inbox_failed": None,  # 판매 서버 클레임함에서 실패로 빼 둔 신청 수
     "claims_ingested_total": 0,
     "claims_failed_total": 0,
 }
@@ -91,7 +95,9 @@ def reset_state() -> None:
         pending=None,
         ingested_total=0,
         failed_total=0,
+        inbox_failed=None,
         claims_pending=None,
+        claims_inbox_failed=None,
         claims_ingested_total=0,
         claims_failed_total=0,
     )
@@ -111,7 +117,7 @@ def _request(item: dict[str, Any]) -> AgentRequest | None:
             tenant_id=os.getenv(ENV_TENANT, "").strip() or TENANT_ID_DEFAULT,
             token=config.agent_token("support"),
             deadline=datetime.now(UTC) + DEADLINE,
-            idempotency_key=f"shop-inquiry:{item['seq']}",
+            idempotency_key=f"shop-inquiry:{item.get('key') or item['seq']}",
         ),
         skill="create_inquiry",
         input={
@@ -123,16 +129,32 @@ def _request(item: dict[str, Any]) -> AgentRequest | None:
     )
 
 
+async def _report_failed(kind: str, item: dict[str, Any], reason: str) -> None:
+    """처리하지 못한 접수를 판매 서버에 알린다 (다시 읽는 시각을 늦추고 횟수를 넘기면 실패로 뺀다).
+
+    알리지 못해도(판매 서버에 닿지 않음) 그냥 둔다. 다음 주기에 다시 읽혀 다시 시도한다.
+    """
+    try:
+        if kind == "claim":
+            await shop_client.report_claim_failed(int(item["seq"]), reason)
+        else:
+            await shop_client.report_inquiry_failed(int(item["seq"]), reason)
+    except shop_client.ShopError:
+        logger.warning("%s %s: 실패를 판매 서버에 알리지 못함", kind, item.get("seq"))
+
+
 async def _ingest(item: dict[str, Any]) -> bool:
-    """문의 한 건을 처리하고 읽었다고 알린다. 처리됐으면 True."""
+    """문의 한 건을 처리하고 읽었다고 알린다. 처리됐으면 True, 못 했으면 실패를 알리고 False."""
     request = _request(item)
     if request is None:
         logger.warning("문의함 %s: 구매자 ID 형식이 달라 건너뜀", item.get("seq"))
+        await _report_failed("inquiry", item, "BAD_BUYER_ID")
         return False
     result = await h.create_inquiry(request)
     created = result.output.get("id") if result.status == TaskStatus.COMPLETED else None
     if not isinstance(created, int):
         logger.warning("문의함 %s: 처리되지 않음 (%s)", item.get("seq"), result.outcome)
+        await _report_failed("inquiry", item, str(result.outcome or "NOT_PROCESSED")[:40])
         return False
     await shop_client.mark_inquiry_synced(int(item["seq"]), created)
     return True
@@ -153,6 +175,12 @@ def customer_claim(claim: dict[str, Any]) -> dict[str, Any]:
     return {k: claim[k] for k in CUSTOMER_CLAIM_FIELDS if k in claim}
 
 
+def claim_digest(view: dict[str, Any]) -> str:
+    """판매 서버가 적어 둔 결과와 견주는 지문. 판매 서버의 `result_digest`와 같은 방식이다."""
+    text = json.dumps(view, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(text.encode()).hexdigest()[:16]
+
+
 NOT_ACCEPTED = ("not_found", "duplicate_claim")  # 클레임으로 받지 않은 이유(고객에게 이유만 적는다)
 
 
@@ -164,7 +192,7 @@ def _claim_request(item: dict[str, Any]) -> AgentRequest:
             tenant_id=os.getenv(ENV_TENANT, "").strip() or TENANT_ID_DEFAULT,
             token=config.agent_token("support"),
             deadline=datetime.now(UTC) + DEADLINE,
-            idempotency_key=f"shop-claim:{item['seq']}",
+            idempotency_key=f"shop-claim:{item.get('key') or item['seq']}",
         ),
         skill="create_claim",
         input={
@@ -185,8 +213,8 @@ async def _ingest_claim(item: dict[str, Any]) -> bool:
     """신청 한 건을 판정하고 결과를 판매 서버에 적는다. 적었으면 True.
 
     클레임이 만들어졌으면 그 클레임을, 클레임으로 받지 않았으면(없는 주문·진행 중인 같은 품목)
-    이유만 적어 더 읽지 않게 한다. 연결·보류·오류는 읽지 않은 채로 둔다
-    (다음 주기에 같은 키로 다시 시도한다).
+    이유만 적어 더 읽지 않게 한다. 연결·보류·오류는 실패를 알려 다시 읽는 시각을 늦춘다
+    (같은 키로 다시 시도하고, 횟수를 넘기면 판매 서버가 고객에게 접수하지 못했다고 닫는다).
     """
     result = await claim_handlers.create_claim(_claim_request(item))
     seq = int(item["seq"])
@@ -201,25 +229,61 @@ async def _ingest_claim(item: dict[str, Any]) -> bool:
         await shop_client.write_claim_result(seq, None, "not_accepted", reason)
         return True
     logger.warning("클레임함 %s: 처리되지 않음 (%s)", item.get("seq"), result.outcome)
+    await _report_failed("claim", item, str(result.outcome or "NOT_PROCESSED")[:40])
     return False
 
 
 async def _refresh_claims() -> None:
-    """끝나지 않은 신청의 상태가 바뀌었으면 판매 서버에 다시 적는다 (바뀐 것만)."""
-    for open_item in await shop_client.fetch_open_claims():
-        claim = claim_handlers.CLAIMS.get(int(open_item["support_claim_id"]))
-        if claim is None or claim.status == open_item["status"]:
-            continue
-        await shop_client.write_claim_result(
-            int(open_item["seq"]),
-            claim.id,
-            claim.status,
-            customer_claim(claim.model_dump(mode="json")),
-        )
+    """끝나지 않은 신청의 결과가 달라졌으면 판매 서버에 다시 적는다 (달라진 것만).
+
+    상태가 그대로여도 환불 완료액·처리 시각처럼 고객이 보는 값이 바뀌면 지문이 달라 다시 쓴다.
+    진행 중인 신청이 한 쪽(100건)을 넘으면 다음 쪽을 이어서 읽는다.
+    """
+    after = 0
+    while True:
+        page, next_after = await shop_client.fetch_open_claims(after)
+        for open_item in page:
+            claim = claim_handlers.CLAIMS.get(int(open_item["support_claim_id"]))
+            if claim is None:
+                continue
+            view = customer_claim(claim.model_dump(mode="json"))
+            if claim.status == open_item["status"] and claim_digest(view) == open_item.get(
+                "result_digest"
+            ):
+                continue
+            await shop_client.write_claim_result(
+                int(open_item["seq"]), claim.id, claim.status, view
+            )
+        if next_after is None:
+            return
+        after = next_after
 
 
-async def _pull_claims(limit: int) -> None:
-    items, total = await shop_client.fetch_claim_inbox(limit)
+async def _pull_inquiries(limit: int) -> dict[str, int]:
+    """문의함을 한 번 읽어 새 문의를 처리한다. 판매 서버에 닿지 못하면 `ShopError`를 올린다."""
+    items, total, failed_in_inbox = await shop_client.fetch_inquiry_inbox(limit)
+    done = failed = 0
+    for item in items:
+        try:
+            ok = await _ingest(item)
+        except shop_client.ShopError:
+            raise
+        except Exception:  # noqa: BLE001 - 한 건이 실패해도 나머지는 계속 처리한다
+            logger.warning("문의함 %s 처리 중 오류", item.get("seq"), exc_info=True)
+            await _report_failed("inquiry", item, "ERROR")
+            ok = False
+        done += ok
+        failed += not ok
+    STATE["pending"] = max(0, total - done)
+    STATE["inbox_failed"] = failed_in_inbox
+    STATE["ingested_total"] += done
+    STATE["failed_total"] += failed
+    return {"read": len(items), "ingested": done, "failed": failed}
+
+
+async def _pull_claims(limit: int) -> dict[str, int]:
+    """클레임함을 한 번 읽어 새 신청을 판정하고, 끝나지 않은 신청의 달라진 결과를 다시 적는다."""
+    items, total, failed_in_inbox = await shop_client.fetch_claim_inbox(limit)
     done = failed = 0
     for item in items:
         try:
@@ -228,52 +292,42 @@ async def _pull_claims(limit: int) -> None:
             raise
         except Exception:  # noqa: BLE001 - 한 건이 실패해도 나머지는 계속 처리한다
             logger.warning("클레임함 %s 처리 중 오류", item.get("seq"), exc_info=True)
+            await _report_failed("claim", item, "ERROR")
             ok = False
         done += ok
         failed += not ok
     STATE["claims_pending"] = max(0, total - done)
+    STATE["claims_inbox_failed"] = failed_in_inbox
     STATE["claims_ingested_total"] += done
     STATE["claims_failed_total"] += failed
-    if failed:
-        raise RuntimeError("INGEST_FAILED")
     await _refresh_claims()
+    return {"read": len(items), "ingested": done, "failed": failed}
 
 
 async def pull_once(limit: int = READ_LIMIT) -> dict[str, int]:
-    """문의함을 한 번 읽어 새 문의를 처리한다. 읽은 수·처리 수·실패 수를 돌려준다.
+    """문의함과 클레임함을 한 번씩 읽는다. 읽은 수·처리 수·실패 수(두 함의 합)를 돌려준다.
 
-    판매 서버에 닿지 못하면 `last_error`만 남기고 끝난다 (다음 주기에 다시 읽는다).
+    한쪽이 실패해도 다른 쪽은 그 주기에 계속 읽는다. 판매 서버에 닿지 못하거나 처리하지 못한
+    접수가 있으면 `last_error`에 남고 다음 주기에 다시 읽는다.
     """
     async with _LOCK:
         STATE["last_attempt_at"] = _now()
-        try:
-            items, total = await shop_client.fetch_inquiry_inbox(limit)
-        except shop_client.ShopError as error:
-            STATE["last_error"] = error.code
-            return {"read": 0, "ingested": 0, "failed": 0}
-        done = failed = 0
-        for item in items:
+        total = {"read": 0, "ingested": 0, "failed": 0}
+        error: str | None = None
+        for pull in (_pull_inquiries, _pull_claims):
             try:
-                ok = await _ingest(item)
-            except Exception:  # noqa: BLE001 - 한 건이 실패해도 나머지는 계속 처리한다
-                logger.warning("문의함 %s 처리 중 오류", item.get("seq"), exc_info=True)
-                ok = False
-            done += ok
-            failed += not ok
-        STATE["pending"] = max(0, total - done)
-        STATE["ingested_total"] += done
-        STATE["failed_total"] += failed
-        error = "INGEST_FAILED" if failed else None
-        try:  # 클레임함도 같은 주기에 읽는다 (문의가 실패해도 클레임은 계속 읽는다)
-            await _pull_claims(limit)
-        except shop_client.ShopError as exc:
-            error = error or exc.code
-        except RuntimeError:
-            error = "INGEST_FAILED"
+                got = await pull(limit)
+            except shop_client.ShopError as exc:
+                error = error or exc.code
+                continue
+            for key, value in got.items():
+                total[key] += value
+            if got["failed"]:
+                error = error or "INGEST_FAILED"
         STATE["last_error"] = error
         if error is None:
             STATE["last_ok_at"] = _now()
-        return {"read": len(items), "ingested": done, "failed": failed}
+        return total
 
 
 async def _loop() -> None:

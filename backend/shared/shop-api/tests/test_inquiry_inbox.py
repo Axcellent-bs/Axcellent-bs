@@ -49,11 +49,13 @@ def test_pending_inquiries_are_read_oldest_first_with_the_total(client: TestClie
     body = res.json()
     assert [i["message"] for i in body["data"]] == ["문의 0", "문의 1"]
     assert body["meta"]["total"] == 3  # 읽어 간 것이 아니라 남은 전체 수
+    assert body["meta"]["failed"] == 0
     item = body["data"][0]
     assert set(item) == {
-        "seq", "context_id", "buyer_id", "customer_name", "order_id",
-        "subject", "message", "images", "created_at",
+        "seq", "key", "context_id", "buyer_id", "customer_name", "order_id",
+        "subject", "message", "images", "attempts", "created_at",
     }  # fmt: skip
+    assert item["key"] and item["attempts"] == 0  # 멱등 키로 쓰는 접수 지문
     assert item["buyer_id"] == "buy_0001" and item["context_id"].startswith("ctx_shop_")
 
 
@@ -100,10 +102,12 @@ def test_only_support_and_admin_may_read_the_inbox(client: TestClient) -> None:
     assert synced.status_code == 403
 
 
-def test_the_customer_list_never_shows_inbox_text(client: TestClient) -> None:
+def test_the_customer_list_shows_only_the_buyers_own_inbox_text(client: TestClient) -> None:
     _inquire(client, "내 원문 문의")
-    res = client.get("/api/shop/inquiries", params={"buyer_id": "buy_0001"})
-    assert "내 원문 문의" not in res.text  # 고객 목록은 고객지원이 처리한 문의만 보여 준다
+    mine = client.get("/api/shop/inquiries", params={"buyer_id": "buy_0001"})
+    assert "내 원문 문의" in mine.text  # 본인이 쓴 글의 앞부분은 처리 전에도 보인다
+    other = client.get("/api/shop/inquiries", params={"buyer_id": "buy_0002"})
+    assert "내 원문 문의" not in other.text
 
 
 def test_synced_inquiries_drop_their_photos_but_keep_the_text() -> None:

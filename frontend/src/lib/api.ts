@@ -99,6 +99,9 @@ export const api = {
     feedbackStats: () => request<FeedbackOverview | null>("/api/dashboard/feedback/stats"),
     setFeedbackStatus: (inquiryId: number, status: "visible" | "hidden") =>
       post<FeedbackItem>(`/api/dashboard/feedback/${inquiryId}/status`, { status }),
+    /** 실패로 빼 둔 문의·클레임 접수를 다시 읽는 차례로 돌린다 (사람 토큰) */
+    retryStuckIntake: (kind: "inquiry" | "claim", seq: number) =>
+      post<{ kind: string; seq: number; requeued: boolean; error?: string }>(`/api/dashboard/inquiry-pull/stuck/${kind}/${seq}/retry`),
     submitFeedback: (id: number, b: { rating: number; resolved: boolean; comment: string }) =>
       post<Conversation>(`/api/dashboard/conversations/${id}/feedback`, b),
     addResolutionNote: (id: number, b: { root_cause: string; action_taken: string; result: string }) =>

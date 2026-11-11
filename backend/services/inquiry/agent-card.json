@@ -210,6 +210,26 @@
       "priority": "recommended"
     },
     {
+      "id": "list_stuck_intake",
+      "description": "판매 서버가 여러 번 읽지 못해 실패로 빼 둔 문의·클레임 접수 목록을 알려 준다(번호 seq, 종류 kind, 사유 코드 reason, 시도 횟수, 실패 시각). 고객이 쓴 글은 싣지 않는다. 사람이 확인하고 다시 시도하는 데 쓴다. 읽기만 한다.",
+      "input_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#StuckIntakeInput",
+      "output_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#StuckIntake",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "retry_stuck_intake",
+      "description": "실패로 빼 둔 접수(kind=inquiry|claim, seq)를 판매 서버에서 다시 읽는 차례로 돌린다. 클레임은 고객 화면에도 다시 접수됨으로 보인다. 판매 서버의 접수 상태를 바꾸므로 execute()를 거친다.",
+      "input_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#RetryStuckIntakeInput",
+      "output_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#RetryStuckIntake",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "set_feedback_status",
       "description": "후기를 공개 또는 숨김으로 정한다 (확인 대기 후기의 결정). 상태 변경이라 execute()를 거친다.",
       "input_schema": "agents/support/src/support_agent/schemas.py#SetFeedbackStatusInput",

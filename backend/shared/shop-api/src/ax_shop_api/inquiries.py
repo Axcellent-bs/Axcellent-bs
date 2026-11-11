@@ -24,6 +24,7 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Callable
 
+from ax_shop_api.inbox import PREVIEW_CHARS
 from ax_shop_api.service import ShopError
 
 BUYER_ID = re.compile(r"^buy_([0-9]{4,9})$")  # ASCII 숫자만(\d는 유니코드 숫자도 받는다)
@@ -141,6 +142,32 @@ def customer_view(item: dict) -> dict:
     view["can_rate"] = item.get("status") == "resolved" and item.get("rated") is False
     if isinstance(item.get("messages"), list):
         view["messages"] = [{k: m.get(k) for k in MESSAGE_FIELDS} for m in item["messages"]]
+    return view
+
+
+def own_view(own: dict, item: dict | None = None, *, with_messages: bool = False) -> dict:
+    """고객이 받은 번호(접수 번호 seq)로 보이는 문의. 고객지원이 읽어 간 문의는 그쪽 값을 고객용으로
+    좁혀 쓰고(번호만 접수 번호로 바꾼다), 아직 읽어 가지 않은 문의는 접수한 내용만으로 만든다.
+    """
+    if item is not None:
+        view = customer_view(item)
+        view["id"] = own["seq"]
+        return view
+    view = {
+        "id": own["seq"],
+        "subject": own["subject"],
+        "status": "open",
+        "order_id": own["order_id"],
+        "updated_at": own["created_at"],
+        "rated": False,
+        "can_rate": False,
+    }
+    if with_messages:
+        view["messages"] = [
+            {"id": 1, "role": "customer", "text": own["message"], "created_at": own["created_at"]}
+        ]
+    else:
+        view["preview"] = own["message"][:PREVIEW_CHARS]
     return view
 
 

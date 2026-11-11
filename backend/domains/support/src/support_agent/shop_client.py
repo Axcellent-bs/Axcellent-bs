@@ -165,17 +165,22 @@ async def refund(
     return response.json()["data"]
 
 
-async def fetch_inquiry_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int]:
-    """판매 서버 문의함에서 아직 읽어 가지 않은 문의를 접수 순서로 읽는다 (`support` 토큰).
-
-    문의 원문과 사진이 들어 있다. 돌려주는 것은 (문의 목록, 남은 전체 수)다.
-    연결 실패·거절은 `ShopError`다.
-    """
-    response = await _send("GET", "/admin/inquiries", params={"limit": limit})
+async def _read_inbox(path: str, limit: int) -> tuple[list[dict[str, Any]], int, int]:
+    response = await _send("GET", path, params={"state": "new", "limit": limit})
     if response.status_code != 200:
         raise _error(response)
     body = response.json()
-    return body["data"], int(body.get("meta", {}).get("total", len(body["data"])))
+    meta = body.get("meta", {})
+    return body["data"], int(meta.get("total", len(body["data"]))), int(meta.get("failed", 0))
+
+
+async def fetch_inquiry_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int, int]:
+    """판매 서버 문의함에서 읽을 차례가 된 문의를 읽는다 (`support` 토큰).
+
+    문의 원문과 사진이 들어 있다. 돌려주는 것은 (문의 목록, 읽기를 기다리는 전체 수,
+    판매 서버가 실패로 빼 둔 수)다. 연결 실패·거절은 `ShopError`다.
+    """
+    return await _read_inbox("/admin/inquiries", limit)
 
 
 async def mark_inquiry_synced(seq: int, support_inquiry_id: int) -> None:
@@ -187,24 +192,34 @@ async def mark_inquiry_synced(seq: int, support_inquiry_id: int) -> None:
         raise _error(response)
 
 
-async def fetch_claim_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int]:
-    """판매 서버 클레임함에서 아직 읽어 가지 않은 신청을 접수 순서로 읽는다 (`support` 토큰).
+async def report_inquiry_failed(seq: int, reason: str) -> None:
+    """이 문의를 처리하지 못했다고 알린다 (판매 서버가 다시 읽는 시각을 늦추고 횟수를 센다)."""
+    response = await _send("POST", f"/admin/inquiries/{seq}/failed", json={"reason": reason})
+    if response.status_code != 200:
+        raise _error(response)
 
-    돌려주는 것은 (신청 목록, 남은 전체 수)다. 연결 실패·거절은 `ShopError`다.
+
+async def fetch_claim_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int, int]:
+    """판매 서버 클레임함에서 읽을 차례가 된 신청을 읽는다 (`support` 토큰).
+
+    돌려주는 것은 (신청 목록, 읽기를 기다리는 전체 수, 판매 서버가 실패로 빼 둔 수)다.
+    연결 실패·거절은 `ShopError`다.
     """
-    response = await _send("GET", "/admin/claims", params={"state": "new", "limit": limit})
+    return await _read_inbox("/admin/claims", limit)
+
+
+async def fetch_open_claims(after: int = 0) -> tuple[list[dict[str, Any]], int | None]:
+    """읽어 갔지만 아직 끝나지 않은 신청 한 쪽(`seq`·`support_claim_id`·`status`·`result_digest`).
+
+    `after` 뒤부터 읽고, 돌려주는 두 번째 값이 다음 쪽의 `after`다(더 없으면 None).
+    """
+    response = await _send(
+        "GET", "/admin/claims", params={"state": "open", "after": after, "limit": 100}
+    )
     if response.status_code != 200:
         raise _error(response)
     body = response.json()
-    return body["data"], int(body.get("meta", {}).get("total", len(body["data"])))
-
-
-async def fetch_open_claims() -> list[dict[str, Any]]:
-    """읽어 갔지만 아직 끝나지 않은 신청(`seq`·`support_claim_id`·`status`). 상태를 다시 적는다."""
-    response = await _send("GET", "/admin/claims", params={"state": "open"})
-    if response.status_code != 200:
-        raise _error(response)
-    return response.json()["data"]
+    return body["data"], body.get("meta", {}).get("next_after")
 
 
 async def write_claim_result(
@@ -218,3 +233,27 @@ async def write_claim_result(
     )
     if response.status_code != 200:
         raise _error(response)
+
+
+async def report_claim_failed(seq: int, reason: str) -> None:
+    """이 신청을 처리하지 못했다고 알린다 (횟수를 넘기면 판매 서버가 접수 불가로 닫는다)."""
+    response = await _send("POST", f"/admin/claims/{seq}/failed", json={"reason": reason})
+    if response.status_code != 200:
+        raise _error(response)
+
+
+async def fetch_stuck_intake() -> list[dict[str, Any]]:
+    """판매 서버가 실패로 빼 둔 문의·클레임 접수(번호·사유·횟수·시각, 고객 글 없음)."""
+    response = await _send("GET", "/admin/intake/stuck")
+    if response.status_code != 200:
+        raise _error(response)
+    return response.json()["data"]
+
+
+async def retry_stuck_intake(kind: str, seq: int) -> dict[str, Any]:
+    """실패로 뺀 접수를 다시 읽는 차례로 돌린다 (`kind`는 inquiry·claim)."""
+    path = f"/admin/{'inquiries' if kind == 'inquiry' else 'claims'}/{seq}/retry"
+    response = await _send("POST", path)
+    if response.status_code != 200:
+        raise _error(response)
+    return response.json()["data"]
