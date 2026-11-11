@@ -262,3 +262,26 @@ def test_refund_cannot_exceed_the_payment_or_hit_unpaid_payments(client: TestCli
         headers=SUPPORT,
     )
     assert zero.status_code == 422
+
+
+def test_a_return_support_gave_up_on_can_be_put_back_by_a_person(client: TestClient) -> None:
+    order = _paid_order(client)
+    _claim_for_return(client, order)
+    client.post(
+        "/api/shop/admin/claims/7/return-received",
+        json={"order_id": order["order_id"], "inspection": "pass"},
+        headers=ADMIN,
+    )
+    read = "/api/shop/admin/returns"
+    client.post(f"{read}/7/synced", json={"outcome": "gave_up"}, headers=SUPPORT)
+    assert client.get(read, headers=SUPPORT).json()["data"] == []
+    done = client.post(f"{read}/7/requeue", headers=SUPPORT)
+    assert done.status_code == 200 and done.json()["data"]["requeued"] is True
+    assert [r["claim_id"] for r in client.get(read, headers=SUPPORT).json()["data"]] == [7]
+    assert (
+        sum(e.type == EventType.RETURN_RECEIVED for e in events.MOCK_PUBLISHED) == 1
+    )  # 이벤트는 한 번
+    assert client.post(f"{read}/99/requeue", headers=SUPPORT).status_code == 404
+    assert client.post(f"{read}/7/requeue", headers=MARKETING).status_code == 403
+    notice = {"outcome": "received", "notice": "안내"}
+    assert client.post(f"{read}/7/synced", json=notice, headers=SUPPORT).status_code == 422

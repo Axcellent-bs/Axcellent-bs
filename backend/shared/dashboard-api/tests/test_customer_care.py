@@ -492,6 +492,8 @@ def test_idea_trends_are_read_from_support(fake: Fake) -> None:
 def test_a_bad_idea_trend_query_is_a_422(fake: Fake, params: dict[str, object]) -> None:
     assert TestClient(app).get(BASE + "/ideas/trends", params=params).status_code == 422
     assert fake.sent == []
+
+
 def test_inquiry_pull_status_is_read_from_support(fake: Fake) -> None:
     fake.outputs["inquiry_pull_status"] = {"enabled": True, "connected": False, "pending": 2}
     response = TestClient(app).get(BASE + "/inquiry-pull")
@@ -524,3 +526,21 @@ def test_stuck_intake_is_listed_and_retried_through_support(fake: Fake) -> None:
 def test_stuck_intake_in_mock_mode(mock_client: TestClient) -> None:
     assert mock_client.get(BASE + "/inquiry-pull/stuck").json()["data"] == {"items": [], "total": 0}
     assert mock_client.post(BASE + "/inquiry-pull/stuck/claim/1/retry").status_code == 501
+
+
+def test_rating_an_already_rated_inquiry_from_the_console_is_a_409_not_a_success(
+    fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def send(target: str, req: AgentRequest) -> AgentResult:
+        return AgentResult(
+            meta=req.meta,
+            status=TaskStatus.COMPLETED,
+            outcome="already_rated",
+            output={"message": "이미 평가를 남긴 문의다"},
+        )
+
+    monkeypatch.setattr(support_client, "SEND", send)
+    res = TestClient(app).post(
+        BASE + "/conversations/1/feedback", json={"rating": 4, "resolved": True, "comment": ""}
+    )
+    assert res.status_code == 409 and res.json()["error"]["code"] == "INVALID_STATE"

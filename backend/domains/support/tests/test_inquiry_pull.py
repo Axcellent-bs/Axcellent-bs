@@ -91,7 +91,9 @@ class FakeShop:
         self.synced.append((seq, support_id))
 
     # --- 나머지 접수: 문의 값 되돌려 쓰기, 평가, 아이디어, 반품 입고 ---
-    async def fetch_open_views(self, after: int = 0) -> tuple[list[dict[str, Any]], int | None]:
+    async def fetch_open_views(
+        self, after: int = 0, sweep: bool = False
+    ) -> tuple[list[dict[str, Any]], int | None]:
         rows = [o for o in self.open_views if o["seq"] > after]
         return rows, None
 
@@ -1110,3 +1112,38 @@ async def test_each_refused_idea_gets_a_customer_sentence_not_the_internal_one(
         await inquiry_pull.pull_once()
         notice = shop.idea_notices[1]
         assert notice and "받지 않는다" not in notice  # 내부 문장이 고객에게 가지 않는다
+
+
+@pytest.mark.asyncio
+async def test_the_real_purge_path_tells_the_shop_and_a_sweep_runs_now_and_then(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from support_agent import retention, shop_pull_more
+
+    told: list[int] = []
+
+    async def tell(inquiry_id: int) -> None:
+        told.append(inquiry_id)
+
+    monkeypatch.setattr(shop_client, "mark_inquiry_gone_by_support", tell)
+    inquiry_id = add_inquiry("지울 문의")
+    plan = retention._do_purge(
+        handlers.STORE, handlers.STORE.get(inquiry_id), True, "2026-11-11T00:00:00Z", "test", "t"
+    )
+    await asyncio.gather(*retention._PENDING)
+    assert plan.action == "purge" and told == [inquiry_id]  # 실제 삭제 경로가 알린다
+
+    sweeps: list[bool] = []
+
+    async def fetch(after: int = 0, sweep: bool = False):  # noqa: ANN202
+        sweeps.append(sweep)
+        return [], None
+
+    monkeypatch.setattr(shop_client, "fetch_open_inquiry_views", fetch)
+    monkeypatch.setenv("SUPPORT_VIEW_SWEEP_CYCLES", "3")
+    shop_pull_more.reset_counts()
+    for _ in range(4):
+        await shop_pull_more.refresh_views()
+    assert sweeps == [True, False, False, True]  # 3번에 한 번은 끝난 문의까지 훑는다

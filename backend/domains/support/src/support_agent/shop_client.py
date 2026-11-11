@@ -277,10 +277,16 @@ async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def fetch_open_inquiry_views(
-    after: int = 0,
+    after: int = 0, sweep: bool = False
 ) -> tuple[list[dict[str, Any]], int | None]:
-    """읽어 갔지만 고객 화면 값이 아직 끝나지 않은 문의 한 쪽(seq·번호·view_digest)."""
-    items, meta = await _get_list("/admin/inquiries/open", {"after": after, "limit": 100})
+    """읽어 갔지만 고객 화면 값이 아직 끝나지 않은 문의 한 쪽(seq·번호·view_digest).
+
+    sweep이면 해결·평가가 끝난 문의까지 고객 화면에 남은 문의를 모두 준다(가끔 한 번, 삭제 반영용).
+    """
+    params: dict[str, Any] = {"after": after, "limit": 100}
+    if sweep:
+        params["sweep"] = "true"
+    items, meta = await _get_list("/admin/inquiries/open", params)
     return items, meta.get("next_after")
 
 

@@ -342,6 +342,7 @@ def _do_purge(
     kept = {"messages": len(redacted.messages), "activity": len(redacted.activity), "claims": 0}
     if apply:
         store.replace(redacted)
+        _tell_shop_gone(conversation.id)  # 실제 삭제 경로: 판매 서버 사본도 그 자리에서 뺀다
         privacy_audit.record_retention_purge(
             store, redacted, criterion=criterion, purged=purged, kept=kept, executor_role=role
         )

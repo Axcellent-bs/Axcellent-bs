@@ -43,6 +43,14 @@ def add(
             (digest, context_id, buyer_id, kind, text, TENANT_ID, _now()),
         )
         row = conn.execute("SELECT * FROM idea_inbox WHERE digest = ?", (digest,)).fetchone()
+        if row["outcome"] == "rate_limited":
+            # 하루 한도로 못 받은 같은 글을 다시 내면 새로 처리한다(안내대로 다시 남길 수 있다)
+            conn.execute(
+                "UPDATE idea_inbox SET synced_at = NULL, outcome = NULL, notice = NULL, text = ?,"
+                " created_at = ? WHERE seq = ?",
+                (text, _now(), row["seq"]),
+            )
+            row = conn.execute("SELECT * FROM idea_inbox WHERE seq = ?", (row["seq"],)).fetchone()
     return {"seq": row["seq"], "context_id": row["context_id"], "created_at": row["created_at"]}
 
 

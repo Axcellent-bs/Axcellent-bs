@@ -352,3 +352,16 @@ def test_support_can_take_an_inquiry_off_by_its_own_number_right_when_it_purges(
     )
     assert client.post(url).status_code == 401
     assert client.post(url, headers=MARKETING).status_code == 403
+
+
+def test_a_sweep_lists_resolved_and_rated_inquiries_too_so_a_late_deletion_is_not_missed(
+    client: TestClient, db: Db
+) -> None:
+    seq = seed(db, support_id=5)
+    write_view(client, seq, _view("resolved", True), "d-final")  # 평가까지 끝나 보통은 안 읽는다
+    read = "/api/shop/admin/inquiries/open"
+    assert client.get(read, headers=SUPPORT).json()["data"] == []
+    swept = client.get(read, params={"sweep": "true"}, headers=SUPPORT).json()["data"]
+    assert [i["seq"] for i in swept] == [seq]
+    client.post(f"/api/shop/admin/inquiries/{seq}/gone", headers=SUPPORT)
+    assert client.get(read, params={"sweep": "true"}, headers=SUPPORT).json()["data"] == []

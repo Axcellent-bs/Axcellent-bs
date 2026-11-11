@@ -174,3 +174,24 @@ def test_the_synced_paths_of_returns_and_ratings_do_not_take_a_notice(client: Te
         client.post("/api/shop/admin/returns/7/synced", json=body, headers=SUPPORT).status_code
         == 422
     )
+
+
+def test_an_idea_refused_for_the_daily_limit_can_be_sent_again_as_the_notice_says(
+    client: TestClient,
+) -> None:
+    client.post(URL, json=_body())
+    body = {"outcome": "rate_limited", "notice": "하루 한도를 넘었어요"}
+    client.post(f"{READ}/1/synced", json=body, headers=SUPPORT)
+    again = client.post(URL, json=_body())  # 같은 글을 다시 낸다
+    assert again.json()["data"]["idea_id"] == 1
+    (item,) = client.get(READ, headers=SUPPORT).json()["data"]  # 다시 읽을 차례에 올라온다
+    assert item["seq"] == 1
+    (mine,) = client.get(MY, params={"buyer_id": "buy_0001"}).json()["data"]
+    assert mine["status"] == "pending" and mine["notice"] is None
+
+
+def test_a_closed_idea_other_than_a_daily_limit_one_is_not_reopened(client: TestClient) -> None:
+    client.post(URL, json=_body())
+    client.post(f"{READ}/1/synced", json={"outcome": "use_inquiry"}, headers=SUPPORT)
+    client.post(URL, json=_body())
+    assert client.get(READ, headers=SUPPORT).json()["data"] == []
