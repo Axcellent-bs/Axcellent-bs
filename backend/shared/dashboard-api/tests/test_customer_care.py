@@ -492,6 +492,8 @@ def test_idea_trends_are_read_from_support(fake: Fake) -> None:
 def test_a_bad_idea_trend_query_is_a_422(fake: Fake, params: dict[str, object]) -> None:
     assert TestClient(app).get(BASE + "/ideas/trends", params=params).status_code == 422
     assert fake.sent == []
+
+
 def test_inquiry_pull_status_is_read_from_support(fake: Fake) -> None:
     fake.outputs["inquiry_pull_status"] = {"enabled": True, "connected": False, "pending": 2}
     response = TestClient(app).get(BASE + "/inquiry-pull")
@@ -524,3 +526,90 @@ def test_stuck_intake_is_listed_and_retried_through_support(fake: Fake) -> None:
 def test_stuck_intake_in_mock_mode(mock_client: TestClient) -> None:
     assert mock_client.get(BASE + "/inquiry-pull/stuck").json()["data"] == {"items": [], "total": 0}
     assert mock_client.post(BASE + "/inquiry-pull/stuck/claim/1/retry").status_code == 501
+
+
+def test_rating_an_already_rated_inquiry_from_the_console_is_a_409_not_a_success(
+    fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def send(target: str, req: AgentRequest) -> AgentResult:
+        return AgentResult(
+            meta=req.meta,
+            status=TaskStatus.COMPLETED,
+            outcome="already_rated",
+            output={"message": "이미 평가를 남긴 문의다"},
+        )
+
+    monkeypatch.setattr(support_client, "SEND", send)
+    res = TestClient(app).post(
+        BASE + "/conversations/1/feedback", json={"rating": 4, "resolved": True, "comment": ""}
+    )
+    assert res.status_code == 409 and res.json()["error"]["code"] == "INVALID_STATE"
+
+
+def test_inquiry_pull_status_takes_the_claim_numbers_from_the_claims_server(fake: Fake) -> None:
+    fake.outputs["inquiry_pull_status"] = {
+        "enabled": True,
+        "connected": True,
+        "pending": 2,
+        "claims_pending": 0,
+        "last_error": None,
+    }
+    fake.outputs["claim_pull_status"] = {
+        "connected": False,
+        "last_error": "UNAVAILABLE",
+        "claims_pending": 7,
+        "claims_ingested_total": 3,
+        "returns_ingested_total": 1,
+    }
+    data = TestClient(app).get(BASE + "/inquiry-pull").json()["data"]
+    assert data["pending"] == 2 and data["claims_pending"] == 7  # 문의는 문의 서버, 클레임은 claims
+    assert data["claims_ingested_total"] == 3 and data["returns_ingested_total"] == 1
+    assert data["connected"] is False and data["last_error"] == "UNAVAILABLE"
+
+
+def test_inquiry_pull_shows_read_only_when_only_the_claims_server_is_an_observer(
+    fake: Fake,
+) -> None:
+    fake.outputs["inquiry_pull_status"] = {"enabled": True, "connected": True, "read_only": False}
+    fake.outputs["claim_pull_status"] = {"connected": True, "read_only": True}
+    data = TestClient(app).get(BASE + "/inquiry-pull").json()["data"]
+    assert data["read_only"] is True and data["claims_read_only"] is True
+
+
+def test_inquiry_pull_still_answers_when_the_claims_server_is_down(
+    fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ax_dashboard_api.envelope import ApiError
+
+    fake.outputs["inquiry_pull_status"] = {
+        "enabled": True, "connected": True, "pending": 2, "claims_pending": None,
+        "claims_ingested_total": 0, "returns_ingested_total": 0,
+    }  # fmt: skip
+
+    async def send(target: str, req: AgentRequest) -> AgentResult:
+        if req.skill == "claim_pull_status":
+            raise ApiError(504, "TIMEOUT", "claims가 느리다")
+        return AgentResult(
+            meta=req.meta, status=TaskStatus.COMPLETED, output=fake.outputs[req.skill]
+        )
+
+    monkeypatch.setattr(support_client, "SEND", send)
+    res = TestClient(app).get(BASE + "/inquiry-pull")
+    assert res.status_code == 200  # 문의 값은 그대로 보여 준다
+    assert res.json()["data"]["pending"] == 2 and res.json()["data"]["claims_unavailable"] is True
+    # 문의 서버의 빈 claims_*·returns_* 칸은 "0건"으로 읽히니 싣지 않는다
+    assert not [k for k in res.json()["data"] if k.startswith(("claims_p", "claims_i", "returns_"))]
+
+
+def test_inquiry_pull_shows_both_servers_errors_and_times_apart(fake: Fake) -> None:
+    fake.outputs["inquiry_pull_status"] = {
+        "enabled": True, "connected": False, "last_error": "UNAVAILABLE",
+        "last_attempt_at": "t-inquiry", "last_ok_at": "t-inquiry-ok",
+    }  # fmt: skip
+    fake.outputs["claim_pull_status"] = {
+        "connected": False, "last_error": "INGEST_FAILED", "last_attempt_at": "t-claims",
+        "last_ok_at": None,
+    }  # fmt: skip
+    data = TestClient(app).get(BASE + "/inquiry-pull").json()["data"]
+    assert data["last_error"] == "UNAVAILABLE" and data["claims_last_error"] == "INGEST_FAILED"
+    assert data["last_attempt_at"] == "t-inquiry" and data["claims_last_attempt_at"] == "t-claims"

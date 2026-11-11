@@ -307,3 +307,61 @@ def test_an_inquiry_set_aside_after_repeated_failures_tells_the_customer(
     assert "끝내 처리되지 않는" not in row["preview"]
     detail = client.get(f"/api/shop/inquiries/{seq}", params={"buyer_id": "buy_0001"}).json()
     assert "고객센터" in detail["data"]["notice"]
+
+
+def test_a_resolved_inquiry_is_not_refreshed_after_the_resolved_period(
+    client: TestClient, db: Db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seq = seed(db, support_id=5)
+    write_view(client, seq, _view("resolved", False), "d-res")
+    read = "/api/shop/admin/inquiries/open"
+    assert [i["seq"] for i in client.get(read, headers=SUPPORT).json()["data"]] == [seq]
+    with db.tx() as conn:  # 해결된 지 8일이 지났다
+        conn.execute(
+            "UPDATE inquiry_inbox SET view_at = '2026-01-01T00:00:00Z' WHERE seq = ?", (seq,)
+        )
+    assert client.get(read, headers=SUPPORT).json()["data"] == []
+    open_one = seed(db, support_id=6, text="열린 문의")
+    write_view(client, open_one, _view("open", False), "d-open")
+    with db.tx() as conn:  # 열린 문의는 오래돼도 계속 본다
+        conn.execute(
+            "UPDATE inquiry_inbox SET view_at = '2026-01-01T00:00:00Z' WHERE seq = ?", (open_one,)
+        )
+    assert [i["seq"] for i in client.get(read, headers=SUPPORT).json()["data"]] == [open_one]
+
+
+def test_support_can_take_an_inquiry_off_by_its_own_number_right_when_it_purges(
+    client: TestClient, db: Db
+) -> None:
+    kept, gone = seed(db, support_id=5, text="a"), seed(db, support_id=6, text="b")
+    for seq in (kept, gone):
+        write_view(client, seq, _view("open", False, preview="원문 미리보기"))
+    url = "/api/shop/admin/inquiries/by-support/6/gone"
+    assert client.post(url, headers=SUPPORT).status_code == 200
+    body = client.get("/api/shop/inquiries", params={"buyer_id": "buy_0001"}).json()
+    assert [i["id"] for i in body["data"]] == [kept]
+    with db.tx() as conn:  # 되돌려 쓴 값(고객 원문)도 함께 지운다
+        row = conn.execute(
+            "SELECT view, message FROM inquiry_inbox WHERE seq = ?", (gone,)
+        ).fetchone()
+    assert row["view"] is None and row["message"] == ""
+    assert client.post(url, headers=SUPPORT).status_code == 200  # 다시 불러도 같다
+    assert (
+        client.post("/api/shop/admin/inquiries/by-support/99/gone", headers=SUPPORT).status_code
+        == 404
+    )
+    assert client.post(url).status_code == 401
+    assert client.post(url, headers=MARKETING).status_code == 403
+
+
+def test_a_sweep_lists_resolved_and_rated_inquiries_too_so_a_late_deletion_is_not_missed(
+    client: TestClient, db: Db
+) -> None:
+    seq = seed(db, support_id=5)
+    write_view(client, seq, _view("resolved", True), "d-final")  # 평가까지 끝나 보통은 안 읽는다
+    read = "/api/shop/admin/inquiries/open"
+    assert client.get(read, headers=SUPPORT).json()["data"] == []
+    swept = client.get(read, params={"sweep": "true"}, headers=SUPPORT).json()["data"]
+    assert [i["seq"] for i in swept] == [seq]
+    client.post(f"/api/shop/admin/inquiries/{seq}/gone", headers=SUPPORT)
+    assert client.get(read, params={"sweep": "true"}, headers=SUPPORT).json()["data"] == []

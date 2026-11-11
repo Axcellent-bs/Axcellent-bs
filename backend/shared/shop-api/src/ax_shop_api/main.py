@@ -252,6 +252,8 @@ class IntakeSyncedIn(BaseModel):
 
     outcome: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.:-]+$")
     ref: str | None = Field(default=None, max_length=64)
+    # 아이디어에서만 쓴다(받지 않은 아이디어에 붙일 고객용 안내 한 줄). 다른 경로는 받으면 422다
+    notice: str | None = Field(default=None, max_length=idea_inbox.NOTICE_CHARS)
 
 
 class IdeaIn(BaseModel):
@@ -920,9 +922,10 @@ def create_app(
     async def read_open_inquiry_views(
         after: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=inbox.READ_LIMIT_MAX)] = inbox.READ_LIMIT_MAX,
+        sweep: bool = False,
         _: str = Depends(_caller(INQUIRY_READERS)),
     ) -> dict:
-        items, next_after = await asyncio.to_thread(inbox.open_views, database, after, limit)
+        items, next_after = await asyncio.to_thread(inbox.open_views, database, after, limit, sweep)
         return _ok(items, next_after=next_after)
 
     @app.post("/api/shop/admin/inquiries/{seq}/view")
@@ -935,6 +938,17 @@ def create_app(
         done = await asyncio.to_thread(inbox.set_view, database, seq, view, body.view_digest)
         if done is None:
             raise ShopError("INQUIRY_NOT_FOUND", "문의함에 없는 접수 번호다", 404)
+        return _ok(done)
+
+    @app.post("/api/shop/admin/inquiries/by-support/{support_inquiry_id}/gone")
+    async def mark_inquiry_gone_by_support(
+        support_inquiry_id: Annotated[int, Path(ge=1)],
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        """고객지원이 문의를 지운 그 자리에서 알려 고객 화면에서 빼고 되돌려 쓴 값을 지운다."""
+        done = await asyncio.to_thread(inbox.mark_gone_by_support_id, database, support_inquiry_id)
+        if done is None:
+            raise ShopError("INQUIRY_NOT_FOUND", "이 번호로 읽어 간 문의가 없다", 404)
         return _ok(done)
 
     @app.post("/api/shop/admin/inquiries/{seq}/gone")
@@ -966,6 +980,13 @@ def create_app(
         # 고객에게는 접수 사실만 돌려준다 (영역·묶음 같은 내부 분류는 보이지 않는다)
         return _ok({"idea_id": saved["seq"], "received": True}, context_id=saved["context_id"])
 
+    @app.get("/api/shop/ideas")
+    async def list_my_ideas(buyer_id: str, limit: Annotated[int, Query(ge=1, le=100)] = 50) -> dict:
+        """내 아이디어 내역(토큰 없음, 읽기): 접수 번호·종류·앞부분·처리 상태·안내 한 줄."""
+        inquiries.buyer_number(buyer_id)
+        items = await asyncio.to_thread(idea_inbox.for_buyer, database, buyer_id, limit)
+        return _ok(items, total=len(items))
+
     @app.get("/api/shop/admin/ideas")
     async def read_idea_inbox(
         limit: Annotated[int, Query(ge=1, le=idea_inbox.READ_LIMIT_MAX)] = (
@@ -983,7 +1004,7 @@ def create_app(
         _: str = Depends(_caller(INQUIRY_READERS)),
     ) -> dict:
         done = await asyncio.to_thread(
-            idea_inbox.mark_synced, database, seq, body.outcome, body.ref
+            idea_inbox.mark_synced, database, seq, body.outcome, body.ref, body.notice
         )
         if done is None:
             raise ShopError("IDEA_NOT_FOUND", "아이디어함에 없는 접수 번호다", 404)
@@ -1036,6 +1057,8 @@ def create_app(
         body: IntakeSyncedIn,
         _: str = Depends(_caller(INQUIRY_READERS)),
     ) -> dict:
+        if body.notice is not None:
+            raise ShopError("INVALID_INPUT", "notice는 아이디어에서만 쓴다", 422)
         done = await asyncio.to_thread(inbox.mark_feedback_synced, database, seq, body.outcome)
         if done is None:
             raise ShopError("FEEDBACK_NOT_FOUND", "평가가 없는 접수 번호다", 404)
@@ -1050,6 +1073,17 @@ def create_app(
         if done is not None:  # 이미 입고 처리했다: 다시 기록하지 않는다
             return _ok(done, replayed=True)
         shop.get_order(body.order_id)
+        # 이 서버의 클레임 신청 기록으로 확인한다: 모르는 클레임·다른 주문·
+        # 아직 입고 단계가 아닌 클레임은 기록하지 않고 이벤트도 내지 않는다
+        claim = await asyncio.to_thread(claim_inbox.find_by_support_id, database, claim_id)
+        if claim is None:
+            raise ShopError("CLAIM_NOT_FOUND", "클레임을 찾을 수 없다", 404)
+        if claim["order_id"] != body.order_id:
+            raise ShopError("ORDER_MISMATCH", "클레임의 주문과 다르다", 409)
+        if claim["status"] != "awaiting_return":
+            raise ShopError(
+                "INVALID_STATE", "입고를 받을 상태가 아니다(상태 반영은 최대 10초 걸린다)", 409
+            )
         recorded, _replayed = refunds.record_return(
             claim_id, body.order_id, body.inspection, support_client.new_context_id()
         )
@@ -1070,7 +1104,17 @@ def create_app(
         body: IntakeSyncedIn,
         _: str = Depends(_caller(INQUIRY_READERS)),
     ) -> dict:
+        if body.notice is not None:
+            raise ShopError("INVALID_INPUT", "notice는 아이디어에서만 쓴다", 422)
         done = await asyncio.to_thread(refunds.mark_return_synced, claim_id, body.outcome)
+        if done is None:
+            raise ShopError("RETURN_NOT_FOUND", "입고 기록에 없는 클레임 번호다", 404)
+        return _ok(done)
+
+    @app.post("/api/shop/admin/returns/{claim_id}/requeue")
+    async def requeue_return(claim_id: int, _: str = Depends(_caller(INQUIRY_READERS))) -> dict:
+        """처리를 포기(gave_up)했거나 잘못 닫은 입고를 다시 읽는 차례로 돌린다(사람이 확인한 뒤)."""
+        done = await asyncio.to_thread(refunds.requeue_return, claim_id)
         if done is None:
             raise ShopError("RETURN_NOT_FOUND", "입고 기록에 없는 클레임 번호다", 404)
         return _ok(done)

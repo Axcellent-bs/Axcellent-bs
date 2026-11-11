@@ -148,7 +148,7 @@ def test_a_resolved_inquiry_can_be_rated_once(client: TestClient) -> None:
     assert "감사합니다" not in str(got["activity"])  # 후기 글은 내력에 싣지 않는다
 
     again = rate(client, inquiry_id, 1, False, key="fb-again")
-    assert again["outcome"] == "invalid_state"
+    assert again["outcome"] == "already_rated"  # 해결 전(invalid_state)과 구별한다
     assert (
         call(client, "get_inquiry", {"inquiry_id": inquiry_id})["output"]["feedback"]["rating"] == 5
     )

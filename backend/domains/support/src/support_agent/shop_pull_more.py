@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -40,6 +41,8 @@ COUNTS: dict[str, int] = {
 
 
 def reset_counts() -> None:
+    _RETRIES.clear()
+    _CYCLE["n"] = 0
     for key in COUNTS:
         COUNTS[key] = 0
 
@@ -84,60 +87,141 @@ def customer_inquiry_view(inquiry_id: int) -> dict[str, Any] | None:
     conversation = h.STORE.get(inquiry_id)
     if conversation is None or h._is_purged(conversation.id):
         return None
-    view = h.customer_inquiry(h._view(conversation))
+    view = h.customer_inquiry(conversation.model_dump(mode="json"))  # 클레임 목록은 필요 없다
     view["preview"] = conversation.preview
     return view
 
 
+SWEEP_CYCLES_DEFAULT = 60  # 이 주기마다 한 번 해결·평가가 끝난 문의까지 모두 훑는다(기본 10분)
+_CYCLE = {"n": 0}
+
+
+def sweep_cycles() -> int:
+    try:
+        value = int(os.getenv("SUPPORT_VIEW_SWEEP_CYCLES") or SWEEP_CYCLES_DEFAULT)
+    except ValueError:
+        return SWEEP_CYCLES_DEFAULT
+    return value if value > 0 else SWEEP_CYCLES_DEFAULT
+
+
 async def refresh_views() -> dict[str, int]:
-    """읽어 간 문의 가운데 고객 화면 값이 달라졌으면 판매 서버에 다시 쓴다 (달라진 것만)."""
+    """읽어 간 문의 가운데 고객 화면 값이 달라졌으면 판매 서버에 다시 쓴다 (달라진 것만).
+
+    한 건에서 판매 서버 오류가 나도 나머지는 계속 처리하고, 주기 끝에 오류를 올린다.
+    """
     after = written = 0
+    shop_error: shop_client.ShopError | None = None
+    sweep = _CYCLE["n"] % sweep_cycles() == 0  # 가끔 한 번은 끝난 문의도 훑어 삭제를 놓치지 않는다
+    _CYCLE["n"] += 1
     while True:
-        page, next_after = await shop_client.fetch_open_inquiry_views(after)
+        page, next_after = await shop_client.fetch_open_inquiry_views(after, sweep)
         for item in page:
-            conversation = h.STORE.get(int(item["support_inquiry_id"]))
-            if conversation is None:
-                continue  # 다시 시작해 비었을 수 있다: 판매 서버의 마지막 값을 그대로 둔다
-            if h._is_purged(conversation.id):  # 개인정보로 지웠다: 고객 화면에서 뺀다
-                await shop_client.mark_inquiry_gone(int(item["seq"]))
-                written += 1
-                continue
-            view = customer_inquiry_view(conversation.id)
-            if view is None:
-                continue
-            digest = view_digest(view)
-            if digest == item.get("view_digest"):
-                continue
-            await shop_client.write_inquiry_view(int(item["seq"]), view, digest)
-            written += 1
+            try:
+                written += await _refresh_one(item)
+            except shop_client.ShopError as exc:
+                shop_error = shop_error or exc
         if next_after is None:
             break
         after = next_after
     COUNTS["views_written_total"] += written
+    if shop_error is not None:
+        raise shop_error
     return {"read": 0, "ingested": written, "failed": 0}
 
 
-def _done_outcome(result: AgentResult) -> str | None:
+async def _refresh_one(item: dict[str, Any]) -> int:
+    conversation = h.STORE.get(int(item["support_inquiry_id"]))
+    if conversation is None:
+        return 0  # 다시 시작해 비었을 수 있다: 판매 서버의 마지막 값을 그대로 둔다
+    if h._is_purged(conversation.id):  # 개인정보로 지웠다: 고객 화면에서 뺀다
+        await shop_client.mark_inquiry_gone(int(item["seq"]))
+        return 1
+    view = customer_inquiry_view(conversation.id)
+    if view is None:
+        return 0
+    digest = view_digest(view)
+    if digest == item.get("view_digest"):
+        return 0
+    await shop_client.write_inquiry_view(int(item["seq"]), view, digest)
+    return 1
+
+
+# 고객에게 보여 줄 아이디어 안내(고객지원 내부 문장이 아니라 고객용 문장)
+IDEA_NOTICES = {
+    "use_inquiry": "환불·취소·불량 같은 문제는 1:1 문의로 남겨 주세요.",
+    "spam": "광고나 링크가 들어 있어 받지 못했어요.",
+    "too_short": "조금 더 자세히 적어 주세요.",
+    "rate_limited": "하루에 남길 수 있는 의견 수를 넘었어요. 나중에 다시 남겨 주세요.",
+}
+RETRY_LIMIT_DEFAULT = 6
+# 다시 읽는 결과(not_found·invalid_state)를 몇 번째 주기째 보는 중인지. 재시작하면 처음부터 센다
+_RETRIES: dict[str, int] = {}
+
+
+def retry_limit() -> int:
+    try:
+        value = int(os.getenv("SUPPORT_PULL_RETRY_LIMIT") or RETRY_LIMIT_DEFAULT)
+    except ValueError:
+        return RETRY_LIMIT_DEFAULT
+    return value if value > 0 else RETRY_LIMIT_DEFAULT
+
+
+def _gave_up(key: str) -> bool:
+    """시점 결과를 한도만큼 다시 읽었으면 True(더 읽지 않고 닫는다). 계속 다시 읽는 것을 끝낸다."""
+    _RETRIES[key] = _RETRIES.get(key, 0) + 1
+    return _RETRIES[key] >= retry_limit()
+
+
+# 시점 때문에 생길 수 있는 결과(클레임이 아직 입고 단계가 아니다, 고객지원이 다시 시작해 비었다):
+# 최종 결과로 닫지 않고 다음 주기에 다시 읽는다
+RETRY_OUTCOMES = frozenset({"not_found", "invalid_state"})
+
+
+def _done_outcome(result: AgentResult, retry: frozenset[str] = frozenset()) -> str | None:
     """처리가 끝난 결과면 짧은 결과 코드, 연결·보류·오류처럼 다시 해 봐야 하면 None."""
     if result.status != TaskStatus.COMPLETED:
         return None
     outcome = str(result.outcome or "")
-    if outcome.startswith("not_executed"):
+    if outcome.startswith("not_executed") or outcome in retry:
         return None
     return outcome or "done"
+
+
+async def _each(
+    items: list[dict[str, Any]], handle: Callable[[dict[str, Any]], Awaitable[bool]]
+) -> tuple[int, int, shop_client.ShopError | None]:
+    """접수를 하나씩 처리한다. 한 건에서 판매 서버 오류가 나도 나머지는 계속 처리한다."""
+    done = failed = 0
+    shop_error: shop_client.ShopError | None = None
+    for item in items:
+        try:
+            ok = await handle(item)
+        except shop_client.ShopError as exc:
+            shop_error = shop_error or exc
+            ok = False
+        done += ok
+        failed += not ok
+    return done, failed, shop_error
+
+
+def _result(
+    read: int, done: int, failed: int, error: shop_client.ShopError | None
+) -> dict[str, int]:
+    if error is not None:
+        raise error
+    return {"read": read, "ingested": done, "failed": failed}
 
 
 async def pull_feedback(limit: int) -> dict[str, int]:
     """저장된 평가를 읽어 submit_feedback으로 후기로 남긴다."""
     items, _total = await shop_client.fetch_feedback_inbox(limit)
-    done = failed = 0
-    for item in items:
+
+    async def handle(item: dict[str, Any]) -> bool:
         seq, key = int(item["seq"]), str(item["key"])
         user_id = _buyer_number(str(item["buyer_id"]))
         if user_id is None:
             await shop_client.mark_feedback_synced(seq, "bad_buyer_id")
-            done += 1
-            continue
+            return True
         request = _request(
             "submit_feedback",
             "shop-feedback:" + key,
@@ -152,30 +236,36 @@ async def pull_feedback(limit: int) -> dict[str, int]:
             {"comment": item.get("comment") or ""},
         )
         result = await feedback_handlers.submit_feedback(request)
-        outcome = _done_outcome(result)
+        outcome = _done_outcome(result, RETRY_OUTCOMES)
         if outcome is None:
+            if result.outcome in RETRY_OUTCOMES and _gave_up("feedback:" + key):
+                # 한도만큼 다시 읽어도 안 받는다: 닫는다(고객은 평가를 다시 남길 수 있다)
+                _RETRIES.pop("feedback:" + key, None)
+                await shop_client.mark_feedback_synced(seq, "gave_up")
+                return True
             logger.warning("평가 %s: 처리되지 않음 (%s)", seq, result.outcome)
-            failed += 1
-            continue
+            return False
+        _RETRIES.pop("feedback:" + key, None)
         if outcome == "done":
             outcome = "rated" if result.output.get("rated") is True else "already_rated"
         await shop_client.mark_feedback_synced(seq, outcome)
-        done += 1
+        return True
+
+    done, failed, error = await _each(items, handle)
     COUNTS["feedback_ingested_total"] += done
-    return {"read": len(items), "ingested": done, "failed": failed}
+    return _result(len(items), done, failed, error)
 
 
 async def pull_ideas(limit: int) -> dict[str, int]:
-    """저장된 아이디어를 읽어 submit_idea로 처리한다 (환불류·광고·짧은 글은 받지 않고 표시만)."""
+    """저장된 아이디어를 읽어 submit_idea로 처리한다. 받지 않은 건 안내 한 줄을 되돌려 쓴다."""
     items, _total = await shop_client.fetch_idea_inbox(limit)
-    done = failed = 0
-    for item in items:
+
+    async def handle(item: dict[str, Any]) -> bool:
         seq, key = int(item["seq"]), str(item["key"])
         user_id = _buyer_number(str(item["buyer_id"]))
         if user_id is None:
             await shop_client.mark_idea_synced(seq, "bad_buyer_id")
-            done += 1
-            continue
+            return True
         request = _request(
             "submit_idea",
             "shop-idea:" + key,
@@ -187,28 +277,34 @@ async def pull_ideas(limit: int) -> dict[str, int]:
         outcome = _done_outcome(result)
         if outcome is None:
             logger.warning("아이디어 %s: 처리되지 않음 (%s)", seq, result.outcome)
-            failed += 1
-            continue
+            return False
         idea_id = result.output.get("idea_id")
-        label = "received" if outcome == "done" else outcome
-        await shop_client.mark_idea_synced(seq, label, str(idea_id) if idea_id else None)
-        done += 1
+        if outcome == "done":
+            await shop_client.mark_idea_synced(seq, "received", str(idea_id) if idea_id else None)
+        else:  # 받지 않았다(환불류·광고·짧은 글·한도): 고객에게 보여 줄 안내 한 줄을 함께 적는다
+            await shop_client.mark_idea_synced(seq, outcome, None, IDEA_NOTICES.get(outcome))
+        return True
+
+    done, failed, error = await _each(items, handle)
     COUNTS["ideas_ingested_total"] += done
-    return {"read": len(items), "ingested": done, "failed": failed}
+    return _result(len(items), done, failed, error)
 
 
 async def pull_returns(limit: int) -> dict[str, int]:
     """기록된 반품 입고를 읽어 receive_return으로 클레임을 입고 처리한다."""
     items, _total = await shop_client.fetch_return_inbox(limit)
-    done = failed = 0
-    for item in items:
+
+    async def handle(item: dict[str, Any]) -> bool:
         claim_id = int(item["claim_id"])
         claim = claim_handlers.CLAIMS.get(claim_id)
         if claim is not None and str(claim.order_id) != str(item["order_id"]):
             # 판매 서버가 기록한 주문과 클레임의 주문이 다르면 처리하지 않고 표시만 한다
             await shop_client.mark_return_synced(claim_id, "order_mismatch")
-            done += 1
-            continue
+            return True
+        if claim is not None and claim.return_received_at:
+            # 입고는 처리됐는데 표시만 못 한 경우: 상태 확인보다 먼저 같은 결과로 닫는다
+            await shop_client.mark_return_synced(claim_id, "received")
+            return True
         request = _request(
             "receive_return",
             "shop-return:" + str(claim_id),
@@ -216,13 +312,18 @@ async def pull_returns(limit: int) -> dict[str, int]:
             {"claim_id": claim_id, "inspection": item.get("inspection")},
         )
         result = await claim_handlers.receive_return(request)
-        outcome = _done_outcome(result)
+        outcome = _done_outcome(result, RETRY_OUTCOMES)
         if outcome is None:
+            if result.outcome in RETRY_OUTCOMES and _gave_up("return:" + str(claim_id)):
+                _RETRIES.pop("return:" + str(claim_id), None)
+                await shop_client.mark_return_synced(claim_id, "gave_up")
+                return True
             logger.warning("반품 입고 %s: 처리되지 않음 (%s)", claim_id, result.outcome)
-            failed += 1
-            continue
-        label = "received" if outcome == "done" else outcome
-        await shop_client.mark_return_synced(claim_id, label)
-        done += 1
+            return False
+        _RETRIES.pop("return:" + str(claim_id), None)
+        await shop_client.mark_return_synced(claim_id, "received" if outcome == "done" else outcome)
+        return True
+
+    done, failed, error = await _each(items, handle)
     COUNTS["returns_ingested_total"] += done
-    return {"read": len(items), "ingested": done, "failed": failed}
+    return _result(len(items), done, failed, error)

@@ -56,7 +56,7 @@ async def submit_feedback(request: AgentRequest) -> AgentResult:
     if conversation.status != "resolved":
         return _invalid_state(request, "해결된 문의에만 평가를 남길 수 있다")
     if conversation.feedback is not None:
-        return _invalid_state(request, "이미 평가를 남긴 문의다")
+        return h._done(request, {"message": "이미 평가를 남긴 문의다"}, outcome="already_rated")
     raw = request.untrusted.get("comment")
     comment = raw if isinstance(raw, str) else ""
     # 고객 화면이 보낸 요청은 늘 고객이 남긴 평가다. 시험용 표시는 상담 화면만 쓸 수 있다
