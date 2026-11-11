@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -941,3 +942,73 @@ def test_the_service_cards_split_the_pull_between_inquiry_and_claims() -> None:
     assert {"create_claim", "receive_return"} <= claims
     assert not {"create_claim", "receive_return"} & inquiry
     assert not {"create_inquiry", "submit_feedback", "submit_idea"} & claims
+
+
+# ---------------------------------------------------------------- 관찰 모드(읽기 전용 설치)
+
+
+def _recording_shop(requests: list[httpx.Request]) -> httpx.AsyncClient:
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"data": [], "meta": {"total": 0, "failed": 0}})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handle))
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_install_reads_but_never_writes_to_the_shop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(shop_client.ENV_MODE, "read")
+    requests: list[httpx.Request] = []
+    shop_client.use_client(_recording_shop(requests))
+    try:
+        await shop_client.fetch_inquiry_inbox()  # 읽기는 그대로 한다
+        await shop_client.mark_inquiry_synced(1, 5)  # 읽은 표시
+        await shop_client.report_inquiry_failed(1, "ERROR")  # 실패 알림
+        await shop_client.write_claim_result(1, 7, "approved", {})  # 결과 되돌려 쓰기
+        await shop_client.write_inquiry_view(1, {}, "d")  # 문의 값 되돌려 쓰기
+        await shop_client.mark_feedback_synced(1, "rated")
+        await shop_client.mark_idea_synced(1, "received")
+        await shop_client.mark_return_synced(7, "received")
+    finally:
+        shop_client.use_client(None)
+    assert [r.method for r in requests] == ["GET"]  # 쓰기 요청은 판매 서버에 가지 않았다
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_install_cannot_refund(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(shop_client.ENV_MODE, "read")
+    requests: list[httpx.Request] = []
+    shop_client.use_client(_recording_shop(requests))
+    try:
+        with pytest.raises(shop_client.ShopError) as caught:
+            await shop_client.refund("pay_1", 1000, "k", "ctx_shop_x")
+    finally:
+        shop_client.use_client(None)
+    assert caught.value.code == "READ_ONLY" and requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_install_still_processes_what_it_reads_without_marking_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_mark = shop_client.mark_inquiry_synced
+    monkeypatch.setenv(shop_client.ENV_MODE, "read")
+    requests: list[httpx.Request] = []
+    shop_client.use_client(_recording_shop(requests))
+    shop = FakeShop([item(1)])
+    seen = wire(monkeypatch, shop)  # 읽기는 대역, 읽은 표시는 실제 코드(관찰 모드)로 돌린다
+    monkeypatch.setattr(shop_client, "mark_inquiry_synced", real_mark)
+    try:
+        result = await inquiry_pull.pull_once()
+    finally:
+        shop_client.use_client(None)
+    assert result["ingested"] == 1 and len(seen) == 1  # 이 설치에서는 문의가 만들어진다
+    assert [r for r in requests if r.method != "GET"] == []  # 판매 서버에는 쓰지 않았다
+
+
+def test_the_status_says_whether_this_install_is_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert inquiry_pull.status()["read_only"] is False
+    monkeypatch.setenv(shop_client.ENV_MODE, "read")
+    assert inquiry_pull.status()["read_only"] is True

@@ -8,6 +8,9 @@
   읽었다는 표시가 실패해도 다음 주기에 같은 문의를 다시 읽어 표시만 이어서 한다.
 - 처리가 안 된 문의(보류·오류)는 판매 서버에 읽지 않은 채로 남아 다음 주기에 다시 시도한다.
 - 한 번에 한 주기만 돈다. 문의는 접수 순서대로 하나씩 처리한다.
+- 읽기 전용 설치(관찰 모드, `SUPPORT_SHOP_MODE=read`)는 같은 접수를 읽어 처리하되 판매 서버에
+  읽은 표시·되돌려 쓰기·실패 알림을 하지 않는다(환불 같은 쓰기는 `READ_ONLY`로 막힌다). 쓰기 권한이
+  있는 설치만 처리 상태를 쥐므로 두 설치가 접수를 나눠 가져가지 않는다.
 - 켜고 끄는 스위치 `SUPPORT_INQUIRY_PULL`(`on`·`off`): 비우면 실제 모드는 켜짐,
   목 모드(시험)는 꺼짐. 간격은 `SUPPORT_INQUIRY_PULL_SECONDS`(기본 10초).
 """
@@ -85,6 +88,7 @@ def status() -> dict[str, Any]:
         **STATE,
         **more.COUNTS,
         "enabled": enabled(),
+        "read_only": shop_client.read_only(),
         "interval_seconds": interval_seconds(),
         "connected": (STATE["last_error"] is None) if attempted else None,
     }

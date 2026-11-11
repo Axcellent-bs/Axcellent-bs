@@ -58,7 +58,21 @@ def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {config.agent_token('support')}"}
 
 
+ENV_MODE = "SUPPORT_SHOP_MODE"  # write(기본)·read(읽기 전용 설치, 관찰 모드)
+
+
+def read_only() -> bool:
+    """읽기 전용 설치(관찰 모드)면 True. 판매 서버를 읽기만 하고 아무것도 쓰지 않는다."""
+    return os.getenv(ENV_MODE, "").strip().lower() in ("read", "readonly", "observe")
+
+
 async def _send(method: str, path: str, **kwargs: Any) -> httpx.Response:
+    if method.upper() != "GET" and read_only():
+        if path.startswith("/admin/"):
+            # 읽어 가기의 읽은 표시·되돌려 쓰기·실패 알림: 쓰지 않고 아무 일도 안 한다.
+            # 그래서 쓰기 권한이 있는 설치(251)가 처리 상태를 그대로 쥔다
+            return httpx.Response(200, json={"data": {}, "meta": {}})
+        raise ShopError("READ_ONLY", "읽기 전용 설치라 판매 서버에 쓰지 않는다")
     client = _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
     try:
         return await client.request(method, _url(path), headers=_headers(), **kwargs)
