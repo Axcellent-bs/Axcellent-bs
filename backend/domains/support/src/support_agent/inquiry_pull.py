@@ -38,6 +38,15 @@ FIRST_DELAY_SECONDS = 5.0
 DEFAULT_SECONDS = 10.0
 READ_LIMIT = 20
 DEADLINE = timedelta(minutes=3)  # 문의 하나를 처리하는 데 주는 시간 (분류 모델이 느릴 수 있다)
+# 읽어 갈 종류와 그 종류를 처리하는 skill. 서비스 카드에 이 skill이 있는 서버만 그 종류를 읽는다
+PULL_SKILLS = {
+    "inquiries": "create_inquiry",
+    "claims": "create_claim",
+    "views": "create_inquiry",
+    "feedback": "submit_feedback",
+    "ideas": "submit_idea",
+    "returns": "receive_return",
+}
 BUYER_ID = re.compile(r"^buy_([0-9]{4,9})$")
 
 # 마지막으로 읽어 본 결과. 화면(연결 끊김 표시)이 읽는다. 재시작하면 비워진다
@@ -324,27 +333,14 @@ async def _pull_claims(limit: int) -> dict[str, int]:
     return {"read": len(items), "ingested": done, "failed": failed}
 
 
-def _owned_skills() -> set[str]:
-    """이 서버가 받는 skill 이름(서비스 카드 기준). 카드를 못 읽으면 모두 받는 것으로 본다."""
-    try:
-        from support_agent.main import load_card
-
-        return {skill.id for skill in load_card().skills}
-    except Exception:  # noqa: BLE001 - 카드를 못 읽어도 읽기는 멈추지 않는다
-        return {
-            "create_inquiry",
-            "create_claim",
-            "submit_feedback",
-            "submit_idea",
-            "receive_return",
-        }
-
-
-async def pull_once(limit: int = READ_LIMIT) -> dict[str, int]:
+async def pull_once(limit: int = READ_LIMIT, owned: frozenset[str] | None = None) -> dict[str, int]:
     """문의함과 클레임함을 한 번씩 읽는다. 읽은 수·처리 수·실패 수(두 함의 합)를 돌려준다.
 
     한쪽이 실패해도 다른 쪽은 그 주기에 계속 읽는다. 판매 서버에 닿지 못하거나 처리하지 못한
     접수가 있으면 `last_error`에 남고 다음 주기에 다시 읽는다.
+
+    `owned`는 이 서버가 받는 skill 이름이다(서비스 카드). 이 skill로 처리하는 종류만 읽고, None이면
+    모두 읽는다(서비스로 나뉘지 않은 단독 실행·시험).
     """
     async with _LOCK:
         STATE["last_attempt_at"] = _now()
@@ -356,16 +352,15 @@ async def pull_once(limit: int = READ_LIMIT) -> dict[str, int]:
         # 서비스마다 저장소가 따로다(inquiry·claims·reviews가 같은 앱을 각자 띄운다). 이 서버가
         # 받는 skill의 종류만 읽는다. 안 그러면 여러 서버가 같은 접수를 각자 처리하고, 고객이
         # 보는 값을 서로 덮어쓴다.
-        owned = _owned_skills()
         candidates = (
-            ("create_inquiry", _pull_inquiries),
-            ("create_claim", _pull_claims),
-            ("create_inquiry", lambda _limit: more.refresh_views()),
-            ("submit_feedback", more.pull_feedback),
-            ("submit_idea", more.pull_ideas),
-            ("receive_return", more.pull_returns),
+            (PULL_SKILLS["inquiries"], _pull_inquiries),
+            (PULL_SKILLS["claims"], _pull_claims),
+            (PULL_SKILLS["views"], lambda _limit: more.refresh_views()),
+            (PULL_SKILLS["feedback"], more.pull_feedback),
+            (PULL_SKILLS["ideas"], more.pull_ideas),
+            (PULL_SKILLS["returns"], more.pull_returns),
         )
-        pulls = [pull for skill, pull in candidates if skill in owned]
+        pulls = [pull for skill, pull in candidates if owned is None or skill in owned]
         for pull in pulls:
             try:
                 got = await pull(limit)
@@ -382,19 +377,28 @@ async def pull_once(limit: int = READ_LIMIT) -> dict[str, int]:
         return total
 
 
-async def _loop() -> None:
+async def _loop(owned: frozenset[str] | None) -> None:
     await asyncio.sleep(FIRST_DELAY_SECONDS)
     while True:
         try:
-            await pull_once()
+            await pull_once(owned=owned)
         except Exception:  # noqa: BLE001 - 서버는 계속 돈다
             logger.warning("문의함 읽기 중 오류", exc_info=True)
         await asyncio.sleep(interval_seconds())
 
 
-def start() -> asyncio.Task[None] | None:
-    """읽기 루프를 시작한다. 꺼져 있으면 시작하지 않는다."""
-    return asyncio.create_task(_loop()) if enabled() else None
+def start(owned: frozenset[str] | None = None) -> asyncio.Task[None] | None:
+    """읽기 루프를 시작한다. 꺼져 있거나 이 서버가 읽을 종류가 하나도 없으면 시작하지 않는다.
+
+    `owned`는 이 서버가 받는 skill 이름이다. 서비스 카드에서 한 번 정해 넘기므로 매 주기 카드를
+    다시 읽지 않는다. 받는 종류가 없는 서버(reviews)가 돌면서 연결됨 표시만 갱신하지 않게 한다.
+    """
+    if not enabled():
+        return None
+    if owned is not None and not owned & set(PULL_SKILLS.values()):
+        logger.info("이 서버는 읽어 갈 접수 종류를 맡지 않아 읽기 루프를 켜지 않는다")
+        return None
+    return asyncio.create_task(_loop(owned))
 
 
 def stop(task: asyncio.Task[None] | None) -> None:

@@ -492,6 +492,8 @@ def test_idea_trends_are_read_from_support(fake: Fake) -> None:
 def test_a_bad_idea_trend_query_is_a_422(fake: Fake, params: dict[str, object]) -> None:
     assert TestClient(app).get(BASE + "/ideas/trends", params=params).status_code == 422
     assert fake.sent == []
+
+
 def test_inquiry_pull_status_is_read_from_support(fake: Fake) -> None:
     fake.outputs["inquiry_pull_status"] = {"enabled": True, "connected": False, "pending": 2}
     response = TestClient(app).get(BASE + "/inquiry-pull")
@@ -524,3 +526,24 @@ def test_stuck_intake_is_listed_and_retried_through_support(fake: Fake) -> None:
 def test_stuck_intake_in_mock_mode(mock_client: TestClient) -> None:
     assert mock_client.get(BASE + "/inquiry-pull/stuck").json()["data"] == {"items": [], "total": 0}
     assert mock_client.post(BASE + "/inquiry-pull/stuck/claim/1/retry").status_code == 501
+
+
+def test_inquiry_pull_status_takes_the_claim_numbers_from_the_claims_server(fake: Fake) -> None:
+    fake.outputs["inquiry_pull_status"] = {
+        "enabled": True,
+        "connected": True,
+        "pending": 2,
+        "claims_pending": 0,
+        "last_error": None,
+    }
+    fake.outputs["claim_pull_status"] = {
+        "connected": False,
+        "last_error": "UNAVAILABLE",
+        "claims_pending": 7,
+        "claims_ingested_total": 3,
+        "returns_ingested_total": 1,
+    }
+    data = TestClient(app).get(BASE + "/inquiry-pull").json()["data"]
+    assert data["pending"] == 2 and data["claims_pending"] == 7  # 문의는 문의 서버, 클레임은 claims
+    assert data["claims_ingested_total"] == 3 and data["returns_ingested_total"] == 1
+    assert data["connected"] is False and data["last_error"] == "UNAVAILABLE"
