@@ -19,6 +19,11 @@
 #   인스타 피드 이미지는 가로세로비 4:5~1.91:1이라 1024x1536(2:3)은 게시할 수 없다. 단가만 적어 둔다.
 # gemini-omni-1.1-flash: 1M 토큰당 USD 입력 1.50, 영상 출력 17.50, 720p 초당 5,792 출력 토큰.
 #   max_duration_s 8은 safety 기준표(video_duration)와 맞춘 값. 8초 720p 약 0.81 USD (입력 제외).
+#   [주의] 가격 페이지 공지: 2026-12-03부터 gemini-omni-1.1-flash 요청은 gemini-omni-1.2-flash로
+#   자동 라우팅되고 1.2 요금(입력 1.50, 영상 출력 12.00 USD/백만 토큰)이 적용된다. 그날 이후 이 항목의
+#   영상 출력 단가는 실제보다 높게(보수적으로) 잡힌다. 모델 설정·단가표를 1.2로 바꿀지는 사람이 정한다.
+#   thinking 토큰은 출력 단가에 포함돼 청구된다(가격 페이지). 추정은 초당 토큰 x 초라 실제 정산과
+#   어긋날 수 있다.
 
 version = 1
 
@@ -140,7 +145,7 @@ output_usd_per_mtok = 17.50
 output_tokens_per_second = 5792
 max_duration_s = 8
 source = "https://aistudio.google.com/docs/pricing , https://aistudio.google.com/docs/omni"
-checked_on = "2026-11-05"
+checked_on = "2026-11-11"
 
 [[price]]
 provider = "gemini"
