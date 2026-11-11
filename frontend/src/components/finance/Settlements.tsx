@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
-  FinanceApiError, SAFETY_SERVER, batchOf, finance, krw, percent, periodKo, readyPayout,
+  FinanceApiError, SAFETY_SERVER, batchOf, finance, isoWeekOf, krw, percent, periodKo, readyPayout, shiftWeek,
   type BatchStatus, type SettlementBatch, type StatementProduct, type StatementStatus,
 } from "@/lib/finance";
 import { SHOP_WEB_URL } from "@/lib/env";
@@ -48,7 +48,11 @@ const BATCH_KO: Record<BatchStatus, string> = {
 /** 빼는 금액: 54000 → "−54,000원", 0 → "0원", 없음 → "확인할 수 없음" */
 const minus = (n: number | null) => (n ? `−${krw(n)}` : krw(n));
 export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: number; onChanged: () => void; onGoToQueue: (reviewId: string | null) => void }) {
-  const res = useResource("settlements", () => finance.settlements(), tick);
+  // 보는 정산 주. null이면 서버 기본(지난주). 지난주보다 앞선 주에 못 준 정산이 있으면 그 주를 열어 요청한다
+  const [period, setPeriod] = useState<string | null>(null);
+  const latest = useRef<string | null>(null); // 서버 기본 주(지난주)
+  const res = useResource(`settlements:${period ?? ""}`, () => finance.settlements(period), tick);
+  const deadlines = useResource("settlement-deadlines", () => finance.deadlines(), tick);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<SettlementBatch | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -81,12 +85,41 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
           const readyCount = s.statements.filter((x) => x.status === "ready").length;
           const inFlight = s.batch.status === "requested" || s.batch.status === "approved";
           const canRequest = readyCount > 0 && !inFlight && !sending;
+          // 기한 점검에서 아직 지급되지 않은(예정일이 지난) 판매 대금이 걸린 주 중 지금 보는 주가 아닌 주
+          const unpaidWeeks = new Map<string, string[]>();
+          for (const d of deadlines.env?.data.sellers ?? []) {
+            if (d.status === "ok" || d.expected_pay_date) continue;
+            const week = isoWeekOf(d.oldest_confirmed);
+            if (!week || week === s.period) continue;
+            unpaidWeeks.set(week, [...(unpaidWeeks.get(week) ?? []), d.name]);
+          }
+          const goTo = (p: string | null) => { setSent(null); setProblem(null); setPeriod(p); };
+          const prev = shiftWeek(s.period, -1);
+          if (period === null) latest.current = s.period;
+          // 지난주보다 뒤(아직 끝나지 않은 이번 주)는 열지 않는다
+          const next = shiftWeek(s.period, 1);
+          const nextOk = !!next && !!latest.current && next <= latest.current;
           return (
             <div className="space-y-4">
-              <p className="text-sm text-ink-700">
-                정산 기간 <b>{periodKo(s.period)}</b>{s.from && s.to && <span className="text-ink-500"> ({s.from.slice(0, 10)} ~ {s.to.slice(0, 10)})</span>}
-                {s.pay_date && <> · 지급 예정일 <b>{s.pay_date}</b></>}
-              </p>
+              {[...unpaidWeeks].sort(([a], [b]) => a.localeCompare(b)).map(([week, names]) => (
+                <div key={week} role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-100">
+                  <span className="min-w-0 flex-1">
+                    <b>{periodKo(week)}</b> 정산이 아직 지급되지 않았습니다 ({names.join(", ")}). 지급 예정일이 지나 기한을 넘길 위험이 있습니다. 그 주를 열어 지급 승인을 요청하세요.
+                  </span>
+                  <button type="button" className="btn-ghost" onClick={() => goTo(week)}>{periodKo(week)} 열기</button>
+                </div>
+              ))}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <p className="text-sm text-ink-700">
+                  정산 기간 <b>{periodKo(s.period)}</b>{s.from && s.to && <span className="text-ink-500"> ({s.from.slice(0, 10)} ~ {s.to.slice(0, 10)})</span>}
+                  {s.pay_date && <> · 지급 예정일 <b>{s.pay_date}</b></>}
+                </p>
+                <div className="ml-auto flex gap-2">
+                  <button type="button" className="btn-ghost" disabled={!prev} onClick={() => goTo(prev)}>← 이전 주</button>
+                  {period !== null && <button type="button" className="btn-ghost" onClick={() => goTo(null)}>지난주로</button>}
+                  <button type="button" className="btn-ghost" disabled={!nextOk} onClick={() => goTo(next)}>다음 주 →</button>
+                </div>
+              </div>
 
               {s.statements.length ? (
                 <div className="overflow-x-auto">

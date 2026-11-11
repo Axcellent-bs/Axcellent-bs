@@ -856,6 +856,29 @@ export function periodKo(p: string): string {
   return m ? `${m[1]}년 ${Number(m[2])}주차` : p;
 }
 
+/** 날짜("2026-10-26")가 속한 ISO 주 → "2026-W44". 정산 주와 같은 계산 */
+export function isoWeekOf(day: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(day);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  const weekday = d.getUTCDay() || 7; // 월=1 … 일=7
+  d.setUTCDate(d.getUTCDate() + 4 - weekday); // 그 주 목요일의 해가 ISO 주의 해다
+  const yearStart = Date.UTC(d.getUTCFullYear(), 0, 1);
+  const week = Math.ceil(((d.getTime() - yearStart) / 86_400_000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+/** "2026-W44"를 n주 옮긴다. 형식이 다르면 null */
+export function shiftWeek(period: string, n: number): string | null {
+  const m = /^(\d{4})-W(\d{1,2})$/.exec(period);
+  if (!m) return null;
+  // ISO 1주차의 월요일 = 1월 4일이 든 주의 월요일
+  const jan4 = new Date(Date.UTC(Number(m[1]), 0, 4));
+  const monday = jan4.getTime() - ((jan4.getUTCDay() || 7) - 1) * 86_400_000;
+  const day = new Date(monday + ((Number(m[2]) - 1 + n) * 7) * 86_400_000);
+  return isoWeekOf(day.toISOString().slice(0, 10));
+}
+
 /**
  * 서버가 보낸 문장을 화면용으로: 기록 번호 → 쉬운 말, 남아 있는 개발자 말·코드 → 한국어.
  * (예전 서버가 보낸 "출처 seed", "data 영향 고객" 같은 문장도 고친다)
