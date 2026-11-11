@@ -217,7 +217,7 @@ ax-contracts, ax-agent-template
 - 아직 없는 것: 화면 버튼, 시험 문의 정리(`[시험]` 제목) skill(기존 운영자 CLI `retention`은 그대로).
 
 ### 고객 아이디어 창구 (2026-11-10)
-- 쇼핑몰 `POST /api/shop/ideas`(shop-api) → `submit_idea` → 아이디어 저장소(`ideas.py`, `SUPPORT_PG_DSN`이 있으면 `ideas` 테이블). 문의(`create_inquiry`)와 저장소·통계·접수 한도가 모두 따로다. 아이디어가 상담 대기열이나 문의 급증 감지에 섞이지 않는다.
+- 쇼핑몰 `POST /api/shop/ideas`(shop-api가 저장만 함) → 고객지원이 읽어 가 `submit_idea` → 아이디어 저장소(`ideas.py`, `SUPPORT_PG_DSN`이 있으면 `ideas` 테이블). 문의(`create_inquiry`)와 저장소·통계·접수 한도가 모두 따로다. 아이디어가 상담 대기열이나 문의 급증 감지에 섞이지 않는다.
 - 상담 화면은 dashboard-api `GET /ideas`(목록·묶음 현황)와 `POST /ideas/digest`(기획에 넘기기, 사람 토큰 필요)를 쓴다. 이 화면(AXcellent 쪽)은 후속이다.
 - 기획으로는 `create_ticket`(제목 `[고객 아이디어] 이벤트·혜택 요청 · 쿠폰·적립·이벤트 N건`)만 보낸다. 기획이 이벤트 요청이나 향후 방안 기획서로 잇고, 개발에 넘기는 일은 기획의 기존 흐름이다.
 - 한계: 영역은 단어 규칙이라 놓치거나 `기타`가 될 수 있고, "많이 나온 말"은 조사만 뗀 단어 세기라 형태소 분석이 아니다. 고객 원문은 기획에 보내지 않으므로 기획이 더 알고 싶으면 상담 화면의 목록을 봐야 한다.

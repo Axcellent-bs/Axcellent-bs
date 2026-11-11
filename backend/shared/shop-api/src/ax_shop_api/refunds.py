@@ -147,6 +147,34 @@ class Refunds:
             row = conn.execute("SELECT * FROM returns WHERE return_id = ?", (return_id,)).fetchone()
             return self._return_view(row), False
 
+    def pending_returns(self, limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+        """고객지원이 아직 읽어 가지 않은 반품 입고(입고 순서)와 남은 전체 수."""
+        where = "FROM returns r LEFT JOIN return_sync s ON s.claim_id = r.claim_id"
+        with self.db.tx() as conn:
+            rows = conn.execute(
+                f"SELECT r.* {where} WHERE s.claim_id IS NULL"  # noqa: S608
+                " ORDER BY r.created_at, r.claim_id LIMIT ?",
+                (max(1, min(limit, 100)),),
+            ).fetchall()
+            total = conn.execute(
+                f"SELECT COUNT(*) AS n {where} WHERE s.claim_id IS NULL"  # noqa: S608
+            ).fetchone()["n"]
+        return [self._return_view(r) for r in rows], total
+
+    def mark_return_synced(self, claim_id: int, outcome: str) -> dict[str, Any] | None:
+        """고객지원이 입고를 읽어 처리했다고 표시한다(결과 코드와 함께). 없는 번호면 None."""
+        with self.db.tx() as conn:
+            if not conn.execute("SELECT 1 FROM returns WHERE claim_id = ?", (claim_id,)).fetchone():
+                return None
+            conn.execute(
+                "INSERT OR IGNORE INTO return_sync(claim_id, synced_at, outcome) VALUES (?, ?, ?)",
+                (claim_id, _iso(self.now()), outcome[:40]),
+            )
+            row = conn.execute(
+                "SELECT * FROM return_sync WHERE claim_id = ?", (claim_id,)
+            ).fetchone()
+        return {"claim_id": claim_id, "synced_at": row["synced_at"], "outcome": row["outcome"]}
+
     def get_return(self, claim_id: int) -> dict[str, Any] | None:
         with self.db.tx() as conn:
             row = conn.execute("SELECT * FROM returns WHERE claim_id = ?", (claim_id,)).fetchone()

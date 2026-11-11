@@ -70,6 +70,10 @@ CREATE TABLE IF NOT EXISTS returns (
   order_id TEXT NOT NULL REFERENCES orders(order_id), inspection TEXT,
   received_at TEXT NOT NULL, tenant_id TEXT NOT NULL, context_id TEXT, created_at TEXT NOT NULL
 );
+-- 반품 입고를 AXcellent가 읽어 처리했다는 표시(returns 표는 그대로 둔다). 처리 결과 코드가 남는다
+CREATE TABLE IF NOT EXISTS return_sync (
+  claim_id INTEGER PRIMARY KEY, synced_at TEXT NOT NULL, outcome TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS coupons (
   coupon_id TEXT PRIMARY KEY, buyer_id TEXT NOT NULL REFERENCES buyers(buyer_id),
   purpose_code TEXT NOT NULL, campaign_id TEXT, count INTEGER NOT NULL CHECK (count > 0),
@@ -111,6 +115,14 @@ CREATE TABLE IF NOT EXISTS claim_inbox (
 CREATE INDEX IF NOT EXISTS idx_claim_inbox_unread ON claim_inbox(seq)
   WHERE synced_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_claim_inbox_buyer ON claim_inbox(buyer_id, order_id);
+-- 아이디어함: 고객 아이디어를 이 서버에 저장하고 AXcellent 고객지원이 읽어 간다(idea_inbox.py).
+-- 읽어 처리하면 synced_at이 차고 처리 결과 코드(outcome)가 남는다. 같은 구매자·종류·글은 한 건이다
+CREATE TABLE IF NOT EXISTS idea_inbox (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, digest TEXT NOT NULL UNIQUE, context_id TEXT NOT NULL,
+  buyer_id TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, tenant_id TEXT NOT NULL,
+  created_at TEXT NOT NULL, synced_at TEXT, support_idea_id TEXT, outcome TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_idea_inbox_unread ON idea_inbox(seq) WHERE synced_at IS NULL;
 CREATE TABLE IF NOT EXISTS retention_daily_stats (
   stat_date TEXT NOT NULL, kind TEXT NOT NULL, rows_count INTEGER NOT NULL,
   amount_sum INTEGER, tenant_id TEXT NOT NULL,
@@ -159,7 +171,16 @@ _ADDED_COLUMNS = {
         ("retry_after", "TEXT"),
         ("failed_at", "TEXT"),
         ("last_error", "TEXT"),
+        ("view", "TEXT"),
+        ("view_digest", "TEXT"),
+        ("view_final", "INTEGER NOT NULL DEFAULT 0"),
+        ("feedback", "TEXT"),
+        ("feedback_at", "TEXT"),
+        ("feedback_synced_at", "TEXT"),
+        ("feedback_outcome", "TEXT"),
+        ("gone_at", "TEXT"),  # 고객지원에서 찾을 수 없어(삭제·재시작) 고객 화면에서 뺀 시각
     ),
+    # 고객이 보는 문의 상태(고객지원이 되돌려 쓴 값)와 평가(저장 → 고객지원이 읽어 감)
     "claim_inbox": (
         ("attempts", "INTEGER NOT NULL DEFAULT 0"),
         ("retry_after", "TEXT"),

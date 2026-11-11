@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import hmac
 import json
 import logging
@@ -36,6 +35,7 @@ from ax_contracts.data_access.shop_seller_prices import ShopSellerPricesQuery
 from ax_contracts.data_access.shop_seller_profile import ShopSellerProfileQuery
 from ax_shop_api import (
     claim_inbox,
+    idea_inbox,
     inbox,
     inquiries,
     marketing_client,
@@ -234,6 +234,24 @@ class IntakeFailedIn(BaseModel):
     model_config = {"extra": "forbid"}
 
     reason: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
+class InquiryViewIn(BaseModel):
+    """고객지원이 정한 고객용 문의 값. 이 서버가 허용한 키만 남기고 값은 고치지 않는다."""
+
+    model_config = {"extra": "forbid"}
+
+    view: dict
+    view_digest: str = Field(min_length=1, max_length=64)
+
+
+class IntakeSyncedIn(BaseModel):
+    """읽어 간 쪽의 처리 결과: 짧은 코드(outcome)와 고객지원 쪽 번호(ref, 있을 때)."""
+
+    model_config = {"extra": "forbid"}
+
+    outcome: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.:-]+$")
+    ref: str | None = Field(default=None, max_length=64)
 
 
 class IdeaIn(BaseModel):
@@ -877,126 +895,185 @@ def create_app(
             raise ShopError("INQUIRY_NOT_FOUND", "문의함에 없는 접수 번호다", 404)
         return _ok(done)
 
-    # --- 내 문의 목록·상태: 쇼핑몰 → 고객지원 `list_inquiries`·`get_inquiry` (읽기) --------
-    # 고객지원이 `user_id`로 본인 문의만 골라 고객용으로 줄여 주고, 여기서 한 번 더 좁힌다.
+    # --- 내 문의 목록·상태: 이 서버가 저장한 값만 읽는다 (고객지원을 부르지 않는다) -------------
+    # 고객지원이 읽어 간 뒤 고객이 보는 값(상태·답변)을 되돌려 쓰면
+    # (`POST /admin/inquiries/{seq}/view`) 여기서 읽는다. 아직 안 쓴 문의는 접수한 내용만 보여 준다.
     @app.get("/api/shop/inquiries")
     async def list_my_inquiries(
         buyer_id: str, limit: Annotated[int, Query(ge=1, le=100)] = 50
     ) -> dict:
-        user_id = inquiries.buyer_number(buyer_id)
-        # 고객이 받은 번호는 이 서버의 접수 번호다. 고객지원이 아직 읽어 가지 않은 문의도 보여 준다
+        inquiries.buyer_number(buyer_id)  # 형식 확인
         own = await asyncio.to_thread(inbox.for_buyer, database, buyer_id)
-        found: dict[int, dict] = {}
-        if any(o["synced"] for o in own):
-            out = await support_client.call(
-                "list_inquiries", support_client.new_context_id(), {"user_id": user_id}
-            )
-            found = {i["id"]: i for i in out.get("items") or [] if isinstance(i.get("id"), int)}
-        # 읽어 갔는데 고객지원에서 찾을 수 없는 문의(개인정보로 지웠거나 고객지원이 다시 시작함)는
-        # 원문을 다시 보여 주지 않도록 목록에서 뺀다
-        shown = [
-            o for o in own if not o["synced"] or found.get(o["support_inquiry_id"]) is not None
-        ]
-        items = [inquiries.own_view(o, found.get(o["support_inquiry_id"])) for o in shown]
+        items = [inquiries.own_view(o) for o in own]
         return _ok(items[:limit], total=len(items))
 
     @app.get("/api/shop/inquiries/{inquiry_id}")
     async def get_my_inquiry(inquiry_id: Annotated[int, Path(ge=1)], buyer_id: str) -> dict:
-        user_id = inquiries.buyer_number(buyer_id)
+        inquiries.buyer_number(buyer_id)
         # 번호는 이 서버의 접수 번호다. 본인 접수가 아니면 없는 번호와 똑같이 404다
         own = await asyncio.to_thread(inbox.get_for_buyer, database, inquiry_id, buyer_id)
         if own is None:
             raise ShopError("NOT_FOUND", "문의를 찾을 수 없다", 404)
-        if not own["synced"]:  # 고객지원이 아직 읽어 가지 않았다: 접수한 내용만 보여 준다
-            return _ok(inquiries.own_view(own, None, with_messages=True))
-        out = await support_client.call(
-            "get_inquiry",
-            support_client.new_context_id(),
-            {"inquiry_id": own["support_inquiry_id"], "user_id": user_id},
-        )
-        if "id" not in out:  # 문의가 아닌 응답은 성공으로 내보내지 않는다
-            raise ShopError("UPSTREAM_ERROR", "고객지원 응답이 문의 형식이 아니다", 502)
-        return _ok(inquiries.own_view(own, out))
+        return _ok(inquiries.own_view(own, with_messages=True))
 
-    # --- 고객 아이디어(의견): 쇼핑몰 → 고객지원 `submit_idea`. 문의·불만과 따로 쌓는다 ----------
+    @app.get("/api/shop/admin/inquiries/open")
+    async def read_open_inquiry_views(
+        after: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=inbox.READ_LIMIT_MAX)] = inbox.READ_LIMIT_MAX,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        items, next_after = await asyncio.to_thread(inbox.open_views, database, after, limit)
+        return _ok(items, next_after=next_after)
+
+    @app.post("/api/shop/admin/inquiries/{seq}/view")
+    async def write_inquiry_view(
+        seq: Annotated[int, Path(ge=1)],
+        body: InquiryViewIn,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        view = inquiries.customer_view(body.view)  # 허용한 키만 남긴다
+        done = await asyncio.to_thread(inbox.set_view, database, seq, view, body.view_digest)
+        if done is None:
+            raise ShopError("INQUIRY_NOT_FOUND", "문의함에 없는 접수 번호다", 404)
+        return _ok(done)
+
+    @app.post("/api/shop/admin/inquiries/{seq}/gone")
+    async def mark_inquiry_gone(
+        seq: Annotated[int, Path(ge=1)], _: str = Depends(_caller(INQUIRY_READERS))
+    ) -> dict:
+        """고객지원에서 찾을 수 없는 문의를 고객 화면에서 뺀다(개인정보 삭제·고객지원 재시작)."""
+        done = await asyncio.to_thread(inbox.mark_gone, database, seq)
+        if done is None:
+            raise ShopError("INQUIRY_NOT_FOUND", "문의함에 없는 접수 번호다", 404)
+        return _ok(done)
+
+    # --- 고객 아이디어(의견): 저장만 한다. AXcellent가 읽어 가 분류·기획 전달을 한다 ------------
     @app.post("/api/shop/ideas", status_code=201)
     async def submit_idea(body: IdeaIn) -> dict:
-        user_id = inquiries.buyer_number(body.buyer_id)
+        inquiries.buyer_number(body.buyer_id)  # 형식 확인(저장은 구매자 ID 그대로)
         idea_limiter.hit(body.buyer_id)
         text = " ".join(body.text.split())
-        digest = hashlib.sha1(f"{body.kind}|{text}".encode()).hexdigest()[:12]
-        context_id = support_client.new_context_id()
-        done = await support_client.call(
-            "submit_idea",
-            context_id,
-            {"kind": body.kind, "user_id": user_id},
-            {"text": text},
-            target=f"user:{user_id}:{digest}",
+        key = idea_inbox.digest(body.buyer_id, body.kind, text)
+        saved = await asyncio.to_thread(
+            idea_inbox.add,
+            database,
+            digest=key,
+            context_id=support_client.new_context_id(),
+            buyer_id=body.buyer_id,
+            kind=body.kind,
+            text=text,
         )
-        if "idea_id" not in done:  # 아이디어 접수 결과가 아닌 응답은 성공으로 내보내지 않는다
-            raise ShopError("UPSTREAM_ERROR", "고객지원 응답이 아이디어 형식이 아니다", 502)
         # 고객에게는 접수 사실만 돌려준다 (영역·묶음 같은 내부 분류는 보이지 않는다)
-        return _ok({"idea_id": done["idea_id"], "received": True}, context_id=context_id)
+        return _ok({"idea_id": saved["seq"], "received": True}, context_id=saved["context_id"])
 
-    # --- 해결 결과 평가: 쇼핑몰 → 고객지원 `submit_feedback` -----------------------------
+    @app.get("/api/shop/admin/ideas")
+    async def read_idea_inbox(
+        limit: Annotated[int, Query(ge=1, le=idea_inbox.READ_LIMIT_MAX)] = (
+            idea_inbox.READ_LIMIT_DEFAULT
+        ),
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        items, total = await asyncio.to_thread(idea_inbox.pending, database, limit)
+        return _ok(items, total=total)
+
+    @app.post("/api/shop/admin/ideas/{seq}/synced")
+    async def mark_idea_synced(
+        seq: Annotated[int, Path(ge=1)],
+        body: IntakeSyncedIn,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        done = await asyncio.to_thread(
+            idea_inbox.mark_synced, database, seq, body.outcome, body.ref
+        )
+        if done is None:
+            raise ShopError("IDEA_NOT_FOUND", "아이디어함에 없는 접수 번호다", 404)
+        return _ok(done)
+
+    # --- 해결 결과 평가: 저장만 한다. AXcellent가 읽어 가 후기로 처리한다 -----------------------
     @app.post("/api/shop/inquiries/{inquiry_id}/feedback", status_code=201)
     async def submit_inquiry_feedback(
         inquiry_id: Annotated[int, Path(ge=1)], body: InquiryFeedbackIn
     ) -> dict:
-        user_id = inquiries.buyer_number(body.buyer_id)
+        inquiries.buyer_number(body.buyer_id)
         feedback_limiter.hit(body.buyer_id)
-        context_id = support_client.new_context_id()
         # 번호는 이 서버의 접수 번호다. 본인 접수가 아니면 없는 번호와 똑같이 404다
         own = await asyncio.to_thread(inbox.get_for_buyer, database, inquiry_id, body.buyer_id)
         if own is None:
             raise ShopError("NOT_FOUND", "문의를 찾을 수 없다", 404)
-        if not own["synced"]:  # 고객지원이 읽어 가기 전에는 평가할 수 없다(해결된 문의도 아니다)
+        view = own["view"]
+        if view is None:  # 고객지원이 읽어 가기 전에는 평가할 수 없다(해결된 문의도 아니다)
             raise ShopError("INVALID_STATE", "아직 고객지원이 확인하기 전인 문의다", 409)
-        support_id = own["support_inquiry_id"]
-        done = await support_client.call(
-            "submit_feedback",
-            context_id,
-            {
-                "inquiry_id": support_id,
-                "rating": body.rating,
-                "resolved": body.resolved,
-                "user_id": user_id,
-            },
-            {"comment": body.comment},
-            target=f"inquiry:{support_id}",
+        if view.get("status") != "resolved":
+            raise ShopError("INVALID_STATE", "해결된 문의만 평가할 수 있다", 409)
+        if view.get("rated") is True:
+            raise ShopError("INVALID_STATE", "이미 평가를 남긴 문의다", 409)
+        saved = await asyncio.to_thread(
+            inbox.save_feedback,
+            database,
+            inquiry_id,
+            body.buyer_id,
+            body.rating,
+            body.resolved,
+            body.comment,
         )
-        if done.get("rated") is not True:  # 먼저 들어온 요청이 이미 남겼다
+        if saved != "saved":  # 먼저 들어온 요청이 이미 남겼다
             raise ShopError("INVALID_STATE", "이미 평가를 남긴 문의다", 409)
         # 고객에게는 접수 사실만 돌려준다(공개·숨김 같은 내부 판단은 보이지 않는다)
-        receipt = {
-            "inquiry_id": inquiry_id,
-            "rated": done.get("rated"),
-            "rating": done.get("rating"),
-        }
-        return _ok(receipt, context_id=context_id)
+        receipt = {"inquiry_id": inquiry_id, "rated": True, "rating": body.rating}
+        return _ok(receipt)
 
+    @app.get("/api/shop/admin/feedback")
+    async def read_feedback_inbox(
+        limit: Annotated[int, Query(ge=1, le=inbox.READ_LIMIT_MAX)] = inbox.READ_LIMIT_DEFAULT,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        items, total = await asyncio.to_thread(inbox.pending_feedback, database, limit)
+        return _ok(items, total=total)
+
+    @app.post("/api/shop/admin/inquiries/{seq}/feedback-synced")
+    async def mark_feedback_synced(
+        seq: Annotated[int, Path(ge=1)],
+        body: IntakeSyncedIn,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        done = await asyncio.to_thread(inbox.mark_feedback_synced, database, seq, body.outcome)
+        if done is None:
+            raise ShopError("FEEDBACK_NOT_FOUND", "평가가 없는 접수 번호다", 404)
+        return _ok(done)
+
+    # --- 반품 입고: 이 서버에 기록만 한다. AXcellent가 읽어 가 클레임을 입고 처리한다 -----------
     @app.post("/api/shop/admin/claims/{claim_id}/return-received")
     async def return_received(
         claim_id: int, body: ReturnReceivedIn, _: str = Depends(_caller(INJECT_ALLOWED))
     ) -> dict:
         done = refunds.get_return(claim_id)
-        if done is not None:  # 이미 입고 처리했다: 고객지원도 이벤트도 다시 부르지 않는다
+        if done is not None:  # 이미 입고 처리했다: 다시 기록하지 않는다
             return _ok(done, replayed=True)
         shop.get_order(body.order_id)
-        context_id = support_client.new_context_id()
-        claim = await support_client.call(
-            "receive_return",
-            context_id,
-            {"claim_id": claim_id, "inspection": body.inspection},
-            target=str(claim_id),
-        )
-        if str(claim.get("order_id")) != body.order_id:
-            raise ShopError("ORDER_MISMATCH", "클레임의 주문과 다르다", 409)
         recorded, _replayed = refunds.record_return(
-            claim_id, body.order_id, body.inspection, context_id
+            claim_id, body.order_id, body.inspection, support_client.new_context_id()
         )
         await outbox.flush(database)
-        return _ok(recorded | {"claim": claim})
+        return _ok(recorded)
+
+    @app.get("/api/shop/admin/returns")
+    async def read_return_inbox(
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        items, total = await asyncio.to_thread(refunds.pending_returns, limit)
+        return _ok(items, total=total)
+
+    @app.post("/api/shop/admin/returns/{claim_id}/synced")
+    async def mark_return_synced(
+        claim_id: int,
+        body: IntakeSyncedIn,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        done = await asyncio.to_thread(refunds.mark_return_synced, claim_id, body.outcome)
+        if done is None:
+            raise ShopError("RETURN_NOT_FOUND", "입고 기록에 없는 클레임 번호다", 404)
+        return _ok(done)
 
     @app.post("/api/shop/payments/{payment_id}/refund", status_code=201)
     async def refund_payment(

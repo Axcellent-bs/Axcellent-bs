@@ -84,7 +84,7 @@ def _claim_body(order: dict, **extra) -> dict:  # noqa: ANN003
 # --- 반품 입고 ---------------------------------------------------------------
 
 
-def test_return_received_calls_support_once_and_publishes_return_received(
+def test_return_received_is_recorded_without_calling_support_and_publishes_the_event(
     client: TestClient, support: FakeSupport
 ) -> None:
     order = _paid_order(client)
@@ -94,8 +94,7 @@ def test_return_received_calls_support_once_and_publishes_return_received(
     assert done.status_code == 200
     data = done.json()["data"]
     assert data["return_id"].startswith("ret_") and data["claim_id"] == 7
-    ((_, sent),) = support.calls
-    assert (sent.skill, sent.input) == ("receive_return", {"claim_id": 7, "inspection": "pass"})
+    assert support.calls == []  # 판매 서버는 고객지원을 부르지 않는다(고객지원이 읽어 간다)
     event = events.MOCK_PUBLISHED[-1]
     assert event.type == EventType.RETURN_RECEIVED
     received = ReturnReceivedData.model_validate(event.data)
@@ -103,11 +102,10 @@ def test_return_received_calls_support_once_and_publishes_return_received(
     again = client.post(url, json=body, headers=ADMIN)
     assert again.json()["meta"]["replayed"] is True
     assert again.json()["data"]["return_id"] == data["return_id"]
-    assert len(support.calls) == 1  # 두 번째는 고객지원을 다시 부르지 않는다
     assert sum(e.type == EventType.RETURN_RECEIVED for e in events.MOCK_PUBLISHED) == 1
 
 
-def test_return_received_is_admin_only_and_checks_the_claim_order(
+def test_return_received_is_admin_only_and_needs_a_known_order(
     client: TestClient, support: FakeSupport
 ) -> None:
     order = _paid_order(client)
@@ -116,14 +114,33 @@ def test_return_received_is_admin_only_and_checks_the_claim_order(
     assert client.post(url, json=body).status_code == 401
     for caller in (SUPPORT, MARKETING):
         assert client.post(url, json=body, headers=caller).status_code == 403
-    support.result = AgentResult(
-        meta=RequestMeta(context_id="ctx_shop_x", token="t", deadline="2030-01-01T00:00:00Z"),
-        status=TaskStatus.COMPLETED,
-        output={"id": 7, "order_id": "ord_0099"},
-    )
-    mismatch = client.post(url, json=body, headers=ADMIN)
-    assert (mismatch.status_code, mismatch.json()["error"]["code"]) == (409, "ORDER_MISMATCH")
+    missing = client.post(url, json={"order_id": "ord_9999"}, headers=ADMIN)
+    assert missing.status_code == 404
     assert not [e for e in events.MOCK_PUBLISHED if e.type == EventType.RETURN_RECEIVED]
+
+
+def test_support_reads_new_returns_and_marks_them_with_an_outcome(client: TestClient) -> None:
+    order = _paid_order(client)
+    for claim_id in (7, 8):
+        client.post(
+            f"/api/shop/admin/claims/{claim_id}/return-received",
+            json={"order_id": order["order_id"], "inspection": "pass"},
+            headers=ADMIN,
+        )
+    read = "/api/shop/admin/returns"
+    res = client.get(read, params={"limit": 1}, headers=SUPPORT)
+    (item,) = res.json()["data"]
+    assert res.json()["meta"]["total"] == 2 and item["claim_id"] == 7
+    assert item["order_id"] == order["order_id"] and item["inspection"] == "pass"
+    done = client.post(f"{read}/7/synced", json={"outcome": "received"}, headers=SUPPORT)
+    assert done.status_code == 200 and done.json()["data"]["outcome"] == "received"
+    again = client.post(f"{read}/7/synced", json={"outcome": "other"}, headers=SUPPORT)
+    assert again.json()["data"]["outcome"] == "received"  # 이미 표시한 건 바뀌지 않는다
+    assert [r["claim_id"] for r in client.get(read, headers=SUPPORT).json()["data"]] == [8]
+    unknown = client.post(f"{read}/99/synced", json={"outcome": "x"}, headers=SUPPORT)
+    assert unknown.status_code == 404
+    assert client.get(read).status_code == 401
+    assert client.get(read, headers=MARKETING).status_code == 403
 
 
 # --- 환불 (SHOP-12) -----------------------------------------------------------
@@ -190,5 +207,3 @@ def test_refund_cannot_exceed_the_payment_or_hit_unpaid_payments(client: TestCli
         headers=SUPPORT,
     )
     assert zero.status_code == 422
-
-

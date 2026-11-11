@@ -32,6 +32,10 @@ class InquiryPullStatus(AxModel):
     claims_pending: int | None = None  # 판매 서버 클레임함에 아직 남은 신청 수
     claims_ingested_total: int = 0
     claims_failed_total: int = 0
+    views_written_total: int = 0  # 고객이 보는 문의 값을 판매 서버에 되돌려 쓴 수
+    feedback_ingested_total: int = 0  # 판매 서버에 저장된 평가를 읽어 처리한 수
+    ideas_ingested_total: int = 0  # 판매 서버 아이디어함을 읽어 처리한 수
+    returns_ingested_total: int = 0  # 판매 서버에 기록된 반품 입고를 읽어 처리한 수
     enabled: bool = False
     interval_seconds: float = 0
     connected: bool | None = None  # 마지막 시도가 성공했는지 (한 번도 안 읽었으면 None)
