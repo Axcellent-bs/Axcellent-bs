@@ -41,6 +41,7 @@
 - `allowed_requesters`에 `orchestrator`가 없는 skill은 호출하지 않는다.
 - 병렬 가능한 단계(선행이 끝난 것)는 동시에 호출한다. 같은 `serial_group`은 한 줄로(`sequence` 부여).
 - 재시도: `failed` 2회, `canceled`(마감 안 지났을 때) 1회, `rejected`는 재시도하지 않고 이관 큐로.
+- 나중 재시도: 정리 단계(`late_retry`, 지금은 장애 배너 내리기 `end_notice`)가 위 재시도까지 모두 실패하면 1분·3분·10분 뒤 다시 돌린다(엔진 `late_retry_delays`). 매번 게이트를 다시 보므로 그 사이 배너가 내려갔으면 부르지 않는다.
 - `input-required`:
   - `dept_input`: 결과의 `output.question`(`skill`, `input`)을 맞는 부서에 묻고, 답을 `input.answers`에 담아 같은 `context_id`로 다시 호출
   - `human_input`: 단계를 `held`로 두고 승인 대기열에 노출. 총괄은 승인하지 않는다. 마감(`hold_timeout`, 데모 기준 10분) 지나면 자동 거절로 처리

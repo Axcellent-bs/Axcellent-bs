@@ -52,6 +52,9 @@ class Step:
     # 않음). 복구 검증: 원인을 못 찾아 사람에게 넘긴 장애를 사람이 풀면, 롤백 때처럼 복구 검증 →
     # 정상화 공지 → 재무 → 인사 기록으로 이어진다
     wait_for_release: Callable[[Incident], bool] | None = None
+    # 정리 단계(예: 장애 배너 내리기)가 재시도까지 모두 실패하면, 엔진 `late_retry_delays` 간격으로
+    # 나중에 다시 돌린다. 받는 서버가 잠깐 불안정해 실패한 정리가 그대로 남지 않게 한다
+    late_retry: bool = False
 
 
 @dataclass

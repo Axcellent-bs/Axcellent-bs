@@ -179,8 +179,12 @@ class Engine:
         persist: Persister | None = None,
         review_check: ReviewChecker | None = None,
         release_wait: float = 0.0,
+        late_retry_delays: tuple[float, ...] = (),
     ) -> None:
         self.registry = registry
+        # `Step.late_retry` 단계가 실패하면 이 간격(초)으로 다시 돌린다. 비우면 다시 돌리지 않는다
+        self.late_retry_delays = late_retry_delays
+        self._late_tasks: set[asyncio.Task[None]] = set()
         # 사람이 장애를 해제하길 기다리는 시간(초, `Step.wait_for_release`). 0이면 기다리지 않는다
         self.release_wait = release_wait
         self._released: dict[str, asyncio.Event] = {}
@@ -290,6 +294,47 @@ class Engine:
             await self._call_and_handle(inc, step, run, entry.dept, payload)
         self._judge(inc, step, run)
         self._keep(inc, step, run)
+        if step.late_retry and run.status == "failed" and self.late_retry_delays:
+            task = asyncio.create_task(self._late_retry(inc, step))
+            self._late_tasks.add(task)
+            task.add_done_callback(self._late_tasks.discard)
+
+    async def _late_retry(self, inc: Incident, step: Step) -> None:
+        """실패한 정리 단계를 `late_retry_delays` 간격으로 다시 돌린다.
+
+        성공하거나 게이트에 막히면 멈춘다.
+
+        예: 판매 서버가 잠깐 멈춘 동안 장애 배너 내리기가 세 번 모두 실패하면, 서버가 돌아온 뒤
+        배너가 그대로 남았다(복구 신호 뒤 다시 돌리기는 '기다리느라 건너뛴' 단계만 대상이다).
+        게이트를 매번 다시 보므로 그 사이 정상화 공지로 배너가 내려갔으면 부르지 않는다.
+        """
+        for delay in self.late_retry_delays:
+            await asyncio.sleep(delay)
+            current = inc.steps.get(step.id)
+            if current is None or current.status != "failed":
+                return  # 다른 경로(복구 신호 뒤 다시 돌리기 등)로 이미 끝났다
+            fresh = StepRun(step.id, step.skill, step.label)
+            fresh.attempts = current.attempts
+            inc.steps[step.id] = fresh
+            inc.log(f"{step.label}: 실패해서 {delay:g}초 뒤 다시 시도")
+            try:
+                await self._run_step_once(inc, step)
+            except Exception as exc:  # noqa: BLE001 - 사후 정리 실패가 다른 처리를 막지 않게 한다
+                self._fail(inc, fresh, f"{type(exc).__name__}")
+            if inc.closed_at is not None:
+                inc.summary = [self._summary_line(r) for r in inc.steps.values()]
+                inc.metrics = incident_metrics(inc)
+            self._save(inc)
+            if fresh.status != "failed":
+                return
+
+    async def _run_step_once(self, inc: Incident, step: Step) -> None:
+        """나중 재시도용: 다시 실패해도 또 예약하지 않는다(간격 목록이 끝나면 멈춘다)."""
+        late, step.late_retry = step.late_retry, False
+        try:
+            await self._run_step(inc, step)
+        finally:
+            step.late_retry = late
 
     async def refresh_impact(self, inc: Incident, plan: Plan) -> bool:
         """복구 신호를 받은 뒤 영향 분석을 같은 구간(복구 시각까지)으로 다시 돌려 결과를 갱신한다.

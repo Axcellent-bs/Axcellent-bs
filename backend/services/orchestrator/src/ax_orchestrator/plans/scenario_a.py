@@ -590,6 +590,8 @@ def scenario_a() -> Plan:
                 gate=_end_notice_gate,
                 required=False,
                 rerun_on_recovery=True,
+                # 판매 서버가 잠깐 멈춰 세 번 다 실패해도 배너가 남지 않게 나중에 다시 시도한다
+                late_retry=True,
             ),
             Step(
                 "finance_record",

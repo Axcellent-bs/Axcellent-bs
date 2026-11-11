@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from ax_contracts.schemas import EventEnvelope, EventType
@@ -157,3 +159,51 @@ async def test_a_failure_after_the_recovery_signal_does_not_break_recovery_handl
     assert (outcome, target) == ("noted", inc)
     assert inc.steps["end_notice"].status == "failed"
     assert inc.recovered_at is not None and inc.status == "resolved"
+
+
+# --- 실패한 배너 내리기는 나중에 다시 시도한다 -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_failed_banner_end_is_retried_later_and_succeeds(harness) -> None:
+    """판매 서버가 잠깐 멈춰 세 번 다 실패해도, 나중 재시도에서 배너를 내린다."""
+    engine = await harness.start()
+    engine.late_retry_delays = (0.01, 0.01)
+    harness.fakes.script("infra", "verify_recovery", "not_recovered")
+    harness.fakes.script("marketing", "end_incident_notice", "fail", "fail", "fail")
+    inc = new_incident()
+    inc.recovered_at = now()
+    await engine.run(inc, scenario_a())
+    await asyncio.sleep(0.1)
+    step = inc.steps["end_notice"]
+    assert step.status == "completed"
+    assert len(end_calls(harness)) == 4  # 처음 세 번 + 나중 한 번
+    assert any("다시 시도" in m for m in [e["message"] for e in inc.events])
+
+
+@pytest.mark.asyncio
+async def test_late_retry_stops_after_the_listed_delays(harness) -> None:
+    engine = await harness.start()
+    engine.late_retry_delays = (0.01, 0.01)
+    harness.fakes.script("infra", "verify_recovery", "not_recovered")
+    harness.fakes.script("marketing", "end_incident_notice", *(["fail"] * 20))
+    inc = new_incident()
+    inc.recovered_at = now()
+    await engine.run(inc, scenario_a())
+    await asyncio.sleep(0.2)
+    assert inc.steps["end_notice"].status == "failed"
+    assert len(end_calls(harness)) == 3 * 3  # 처음 + 나중 두 번, 매번 재시도 포함 세 번
+
+
+@pytest.mark.asyncio
+async def test_without_late_delays_a_failed_banner_end_stays_failed(harness) -> None:
+    """기본값(간격 없음)이면 지금처럼 다시 시도하지 않는다."""
+    engine = await harness.start()
+    harness.fakes.script("infra", "verify_recovery", "not_recovered")
+    harness.fakes.script("marketing", "end_incident_notice", "fail", "fail", "fail")
+    inc = new_incident()
+    inc.recovered_at = now()
+    await engine.run(inc, scenario_a())
+    await asyncio.sleep(0.05)
+    assert inc.steps["end_notice"].status == "failed"
+    assert len(end_calls(harness)) == 3
