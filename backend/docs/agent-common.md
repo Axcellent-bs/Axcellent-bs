@@ -165,6 +165,8 @@ C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`s
 
 `shop.degraded`·`shop.recovered`는 시연에서 장애 주입과 바로 이어지도록 shop-api가 직접 측정해 발행하고, Zabbix(DejaFix)는 보조 신호다. `metric_code`는 `p95_latency_ms`·`error_rate_5xx`, 기준값 초안은 **p95 1,000ms 초과 또는 5xx 2% 초과가 1분 지속**(시연용, 평소 p95 180ms·5xx 0.3% 기준). 기준값은 shop-api 설정으로 둔다 (예진 답변).
 
+판매 서버(고객사, shop-api)는 이벤트 버스에 직접 넣지 않는다. 위 표의 shop-api 이벤트는 AXcellent의 알림 받는 주소(웹훅, `POST /api/dashboard/events`, `Authorization: Bearer <회사 키>`)로 보내고, dashboard-api가 회사 키·회사(`tenant_id`)·종류(판매 서버 이벤트만)·`source`·`data` 형식을 확인한 뒤 이벤트 버스에 넣는다. 구독하는 쪽은 그대로 버스를 구독한다. 같은 `event_id`는 버스가 한 번만 쌓고, 버스에 넣지 못하면 503을 돌려 판매 서버 outbox가 다시 보낸다. 회사 키는 `AX_COMPANY_KEYS`(`.env`, 회사마다 하나).
+
 공지 본문·사실 필드·약속(`promises[{type, amount, condition_code, condition}]`)은 이벤트가 아니라 마케팅 `get_notice` 응답으로만 준다 (마케팅 v3·고객지원 합의). `promises.type`은 `points`·`coupon`, `condition_code`는 고객지원 정책표 코드(`LATE_3D`, `DEFECT_RETURN_OK` 등)이고, 목록에 없는 약속은 응대·보상에 쓰지 않는다. 문의는 양 급증은 data(`metric.anomaly`), 분류·정책 패턴은 support(`support.inquiry_surge`)로 나눈다. 단계: 1차 = 시나리오 A에 필요, 2차 = 불량·반품 흐름과 시나리오 B 이후.
 
 ## 7. 상태 변경과 안전 레이어
@@ -365,7 +367,7 @@ C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`s
 
 | # | 안건 | 결정 | 관련 |
 | --- | --- | --- | --- |
-| 17 | `shop.degraded` 신호 원천 | shop-api가 직접 측정·발행, Zabbix는 보조. `p95_latency_ms`·`error_rate_5xx`, 기준 초안 p95 1,000ms 또는 5xx 2%가 1분 지속 (6장) | 예진 → 재헌 |
+| 17 | `shop.degraded` 신호 원천 | shop-api가 직접 측정해 알림 받는 주소(웹훅 + 회사 키)로 보냄(dashboard-api가 이벤트 버스에 넣음), Zabbix는 보조. `p95_latency_ms`·`error_rate_5xx`, 기준 초안 p95 1,000ms 또는 5xx 2%가 1분 지속 (6장) | 예진 → 재헌 |
 | 18 | DejaFix 조치 레지스트리 | `rollback_deployment` B·검증자 planning, `restart_service` B·검증자 data, 서버 재부팅·파일 삭제는 미등록(C) (7장) | 예진 → 태윤 |
 | 19 | `record_case` kind | `spec_confirmed`·`pr_merged`·`rollback_executed`에 `decision_extracted`·`request_closed`를 더한다. `rollback_executed`는 infra가, 나머지는 planning이 보낸다 | 예진 → 준하 |
 | 20 | planning 요청·조회 skill 이름 | 요청 등록 `create_ticket`, 진행 중 조회 `list_in_progress` 하나로 유지 (둘 다 시나리오 A 범위 밖) | 예진 → 병환·준하 |

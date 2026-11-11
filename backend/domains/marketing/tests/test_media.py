@@ -284,14 +284,15 @@ async def test_combination_missing_from_price_table_is_refused(
 def test_shipped_price_table_has_no_entry_for_unconfirmed_combinations() -> None:
     table = pricing.load_table()
     assert table and all(e.source.startswith("https://") and e.checked_on for e in table)
-    with pytest.raises(PriceNotFound):  # Omni 1080p는 공식 단가가 없다
-        pricing.find_entry(
-            provider="gemini",
-            model="gemini-omni-1.1-flash",
-            kind="video",
-            resolution="1080p",
-            quality=None,
-        )
+    for model in ("gemini-omni-1.1-flash", "gemini-omni-1.2-flash"):
+        with pytest.raises(PriceNotFound):  # Omni 9:16 1080p는 문서 확인 전이라 단가표에 없다
+            pricing.find_entry(
+                provider="gemini",
+                model=model,
+                kind="video",
+                resolution="1080p",
+                quality=None,
+            )
     with pytest.raises(PriceNotFound):  # 8초를 넘는 영상
         entry = pricing.find_entry(
             provider="gemini",

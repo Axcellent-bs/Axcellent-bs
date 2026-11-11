@@ -63,7 +63,7 @@ Oct 21, 2026 · @재현
 | SHOP-02 | 주문·결제(가짜) | 장바구니 없이 바로 주문, 결제는 가짜 결제 API로 성공/실패 응답 | 재헌 | 필수 |
 | SHOP-03 | 고객 화면 | 상품 목록, 주문, 주문 내역, 공지 배너 영역 | 재헌 | 필수 |
 | SHOP-04 | 관리자·판매자 화면 | 판매자 등록, 판매자 상품 관리, 정산 내역 조회 | 재헌 | 권장 |
-| SHOP-05 | 이벤트 발행 | 1차: shop.degraded·shop.recovered·payment.\*·order.created·order.cancelled, 2차: order.delivered·shipment.delayed·payment.refunded·return.received(불량·반품 흐름), seller.registered·product.created, items\[\].seller\_id·취소 금액을 공통 봉투로 이벤트 버스(Redis Streams)에 발행. 스키마는 1차에 모두 정의 | 재헌 | 필수 |
+| SHOP-05 | 이벤트 발행 | 1차: shop.degraded·shop.recovered·payment.\*·order.created·order.cancelled, 2차: order.delivered·shipment.delayed·payment.refunded·return.received(불량·반품 흐름), seller.registered·product.created, items\[\].seller\_id·취소 금액을 공통 봉투로 AXcellent 알림 받는 주소(웹훅 + 회사 키, `POST /api/dashboard/events`)에 보냄. dashboard-api가 확인한 뒤 이벤트 버스(Redis Streams)에 넣음. 스키마는 1차에 모두 정의 | 재헌 | 필수 |
 | SHOP-06 | 장애 주입 | 관리자 버튼/API로 결제 API 지연·실패를 발생시킴. 해제 API는 infra 롤백이 관문 경유로 호출해 shop.recovered 발행 (사람 조작 없이 복구) | 재헌 | 필수 |
 | SHOP-07 | 더미 데이터 | 고객·판매자·상품·주문 시드 데이터 (영향 분석이 의미 있을 규모) | 재헌 | 필수 |
 | SHOP-08 | 공지 배너 API | 마케팅 에이전트가 호출해 점검/정상화 공지를 게시·해제 | 재헌 | 필수 |

@@ -1,7 +1,9 @@
 """이벤트 발행·구독 (Redis Streams).
 
-모든 서비스(shop-api 포함)는 `publish`로만 이벤트를 발행한다. 별도 HTTP 이벤트 엔드포인트를
-만들지 않는다. 받는 쪽은 같은 `event_id`를 두 번 처리하지 않고, 발행 쪽은 outbox로 재전송한다
+AXcellent 서비스는 `publish`로만 이벤트를 발행한다. 고객사 판매 서버(shop-api)는 버스에 직접 넣지
+않고 dashboard-api의 알림 받는 주소(`POST /api/dashboard/events`, 회사 키)로 보내며, dashboard-api가
+확인한 뒤 `publish`한다. 그 밖의 HTTP 이벤트 엔드포인트는 만들지 않는다.
+받는 쪽은 같은 `event_id`를 두 번 처리하지 않고, 발행 쪽은 outbox로 재전송한다
 (최소 한 번 전달). 이벤트에는 사실만 담고 판단 문장은 넣지 않는다.
 
 두 가지 모드가 있다.
