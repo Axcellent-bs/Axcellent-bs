@@ -20,6 +20,7 @@ from ax_contracts.schemas import AgentCard, RequestMeta
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from data_agent import campaign_update
 from data_agent.clients.log_client import get_log_source
+from data_agent.connectors.shop_api import close_shared_client
 from data_agent.handlers import HANDLERS
 from data_agent.monitor import run_snapshots_forever
 from data_agent.report_store import Snapshot, get_report_store
@@ -110,6 +111,7 @@ def build_app() -> FastAPI:
                 if task:
                     task.cancel()
                 sends.cancel()
+                await close_shared_client()  # 판매 서버 공용 HTTP 클라이언트 (#909)
 
     app.router.lifespan_context = lifespan
     app.router.routes = [r for r in app.router.routes if getattr(r, "path", None) != "/health"]

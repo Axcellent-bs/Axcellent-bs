@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, get_args
@@ -56,9 +57,38 @@ _client: httpx.AsyncClient | None = None  # 테스트가 `use_client`로 바꿔 
 
 
 def use_client(client: httpx.AsyncClient | None) -> None:
-    """HTTP 클라이언트를 바꿔 끼운다 (테스트용). None이면 호출마다 새로 만든다."""
+    """HTTP 클라이언트를 바꿔 끼운다 (테스트용). None이면 프로세스 공용 클라이언트를 쓴다."""
     global _client
     _client = client
+
+
+# 프로세스 공용 클라이언트와 그것을 만든 이벤트 루프. 요청마다 새로 만들면 만들고 닫는 데만
+# 한 번에 약 0.3초가 들어, 판정 한 번(요청 약 40번)이 20초 가까이 걸렸다 (#909)
+_shared: tuple[asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None
+
+
+def _new_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
+
+
+def _shared_client() -> httpx.AsyncClient:
+    """공용 클라이언트. 이벤트 루프가 바뀌었거나(테스트의 `asyncio.run` 등) 닫혔으면 새로 만든다."""
+    global _shared
+    loop = asyncio.get_running_loop()
+    if _shared is None or _shared[0] is not loop or _shared[1].is_closed:
+        _shared = (loop, _new_client())
+    return _shared[1]
+
+
+async def close_shared_client() -> None:
+    """공용 클라이언트를 닫는다 (서버 종료 때). 다음 요청은 새로 만든다."""
+    global _shared
+    if _shared is None:
+        return
+    loop, client = _shared
+    _shared = None
+    if loop is asyncio.get_running_loop():
+        await client.aclose()
 
 
 def _iso(value: datetime) -> str:
@@ -102,7 +132,7 @@ class ShopApi:
     async def get_page(self, path: str, params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
         """`GET /api/shop{path}`의 `(data, meta)`. 페이지를 넘기는 목록(meta.next_cursor)용."""
         headers = self._headers()
-        client = self._client or _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
+        client = self._client or _client or _shared_client()
         try:
             response = await client.get(
                 f"{self.base_url}/api/shop{path}", params=params, headers=headers
@@ -116,9 +146,6 @@ class ShopApi:
             raise ShopUnavailable(
                 "UNAVAILABLE", f"shop-api에 연결할 수 없다 ({type(exc).__name__})"
             ) from exc
-        finally:
-            if client is not self._client and client is not _client:
-                await client.aclose()
         if response.status_code != 200:
             raise _error(response)
         try:
