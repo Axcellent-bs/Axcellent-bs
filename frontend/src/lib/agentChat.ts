@@ -556,12 +556,22 @@ export function isScreenRead(line: CommLine): boolean {
   return !SCREEN_KEEP_OUTCOMES.has(line.outcome);
 }
 
+// 부서끼리 조회(skill 등급 read)만 주고받은 줄도 뺀다: 화면 탭을 열 때마다 재무 → 인사 팀 인원, 문의 → 기억 카드 검색 같은 줄이
+// 쌓여서다. 사건(ctx_inc_)·변경 요청(ctx_req_) 안의 조회는 일의 흐름이라 남기고, 실패·보류·거절·사람 확인도 남긴다. 원본 공통 로그는 그대로
+const WORK_CONTEXT = /^ctx_(inc|req)_/;
+
+/** 일과 상관없는 조회 줄인가 (사건·요청 밖, 성공·진행 중) */
+export function isBackgroundRead(line: CommLine): boolean {
+  if (line.grade !== "read" || SCREEN_KEEP_OUTCOMES.has(line.outcome)) return false;
+  return !WORK_CONTEXT.test(line.context_id ?? "");
+}
+
 export function commItems(comms: CommLine[], incidents: OrchIncident[], executions: ExecutionRecord[]) {
   const byId = new Map(incidents.map((i) => [i.context_id, i]));
   const ids = new Set(byId.keys());
   const safetyIds = new Set(executions.map((e) => e.execution_id));
   return comms
-    .filter((line) => !CHAT_READ_SKILL.test(line.skill ?? "") && !isScreenRead(line))
+    .filter((line) => !CHAT_READ_SKILL.test(line.skill ?? "") && !isScreenRead(line) && !isBackgroundRead(line))
     .map((line) => ({ line, room: commRoom(line, ids) }))
     .filter(({ line, room }) => !coveredByIncident(line, byId.get(room)))
     .map(({ line, room }) => commItem(line, room, safetyIds));

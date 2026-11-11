@@ -223,6 +223,8 @@ export type CommOutcome = "completed" | "rejected" | "held" | "needs_human" | "i
 export interface CommLine {
   log_id: string; occurred_at: string; from_agent: string; to_agent: string | null; skill: string | null;
   outcome: CommOutcome; context_id: string | null; execution_id: string | null;
+  /** skill 등급 (`read`는 조회만). 서버가 모르면 없거나 null */
+  grade?: "read" | "A" | "B" | "C" | null;
 }
 export interface CommMeta { total: number; truncated: boolean }
 
