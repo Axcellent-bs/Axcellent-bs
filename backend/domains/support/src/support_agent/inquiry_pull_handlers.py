@@ -74,6 +74,31 @@ class RetryStuckIntake(AxModel):
     requeued: bool
 
 
+class ClaimPullStatusInput(AxModel):
+    """입력은 없다."""
+
+
+class ClaimPullStatus(AxModel):
+    """클레임·반품 입고를 읽는 서버(claims)의 읽기 상태(문의를 읽는 서버와 따로 센다)."""
+
+    last_attempt_at: str | None = None
+    last_ok_at: str | None = None
+    last_error: str | None = None
+    claims_pending: int | None = None
+    claims_inbox_failed: int | None = None
+    claims_ingested_total: int = 0
+    claims_failed_total: int = 0
+    returns_ingested_total: int = 0
+    enabled: bool = False
+    connected: bool | None = None
+
+
+async def claim_pull_status(request: AgentRequest) -> AgentResult:
+    status = inquiry_pull.status()
+    keys = ClaimPullStatus.model_fields
+    return h._done(request, {k: status[k] for k in keys if k in status})
+
+
 def _unavailable(request: AgentRequest, exc: shop_client.ShopError) -> AgentResult:
     return h._done(
         request, {"message": "판매 서버에 닿지 못했다", "code": exc.code}, outcome="unavailable"
@@ -121,6 +146,7 @@ async def retry_stuck_intake(request: AgentRequest) -> AgentResult:
 
 INQUIRY_PULL_HANDLERS = {
     "inquiry_pull_status": inquiry_pull_status,
+    "claim_pull_status": claim_pull_status,
     "list_stuck_intake": list_stuck_intake,
     "retry_stuck_intake": retry_stuck_intake,
 }
