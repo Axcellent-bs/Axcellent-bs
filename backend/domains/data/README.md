@@ -495,6 +495,9 @@ ORCHESTRATOR_REAL_DEPTS=data uv run --package ax-orchestrator python -m ax_orche
   - 평가 규칙: `eval/README.md`
 - shop-api 응답 없음·401·403·5xx·형식 오류면 숫자를 0으로 내지 않고 `failed`·`unavailable`과 "확인할 수 없음" 근거로 답한다.
 
+### root_cause_hypotheses 마감
+LLM에는 요청 마감까지 남은 시간만 준다. LLM 마감 = 요청 `meta.deadline` − `DATA_ROOT_CAUSE_MARGIN_S`(기본 5초, 0 이상)이고, 요청 마감이 없으면 지금 + `DATA_ROOT_CAUSE_DEADLINE_S`(기본 25초, 0보다 커야 함). 잘못된 값은 기본값을 쓴다. 다른 부서에서 사실을 모은 뒤 남은 시간이 3초 미만이면 LLM을 부르지 않고, 남은 시간 안에 답하지 않으면 끊는다(HTTP 연결은 LLM 클라이언트가 닫는다). 둘 다 LLM 실패와 같이 시간 순서 규칙 후보(`fallback=True`)를 내고, 요약은 "LLM 응답 지연으로 시간 순서 규칙으로 고름", 근거에는 남은 초를 적는다. 총괄 단계 마감(30초)보다 LLM 대기(60초·재시도 1번)가 길어 결과가 아예 남지 않던 것을 막는다.
+
 ### fraud_score (판매자 사기 위험 점수)
 - **현재 호출하는 부서 없음. 마켓운영 담당이 정해지면 연결.** 재무에서 마켓운영(판매자 점검)이 빠져 `allowed_requesters`는 총괄(`orchestrator`)만 남겼다. skill과 평가(판매자 24명)는 그대로다.
 - **가중치: 재무 확정 (#99, 2026-10-29). 사업자 중복·유사 사기 카드 자료가 생기면 다시 잰다** (`metrics/fraud.py` `WEIGHTS`). 점수는 판단 재료이고 승인·보류는 정하지 않는다(grade read, 재무·정산이 정한다).
