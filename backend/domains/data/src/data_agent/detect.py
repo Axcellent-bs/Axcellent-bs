@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import weakref
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -244,6 +245,35 @@ async def _fault_history(
     return out
 
 
+# 지표 시계열을 한 번에 몇 개까지 같이 읽는지 (판매 서버에 한꺼번에 몰리지 않게)
+SERIES_CONCURRENCY = 4
+
+
+async def _read_series(
+    source: object, metrics: list[str], denominators: list[str], start: datetime, end: datetime
+) -> dict[str, dict]:
+    """지표 시계열을 동시에 읽는다(최대 `SERIES_CONCURRENCY`개).
+
+    하나라도 못 읽으면 나머지를 멈추고 그 오류를 그대로 낸다(차례로 읽을 때와 같은 오류).
+    """
+    gate = asyncio.Semaphore(SERIES_CONCURRENCY)
+
+    async def read(metric: str) -> dict:
+        async with gate:
+            reader = _transactions if metric in denominators else _series
+            return await reader(source, metric, start, end)
+
+    tasks = [asyncio.ensure_future(read(m)) for m in metrics]
+    try:
+        values = await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+    return dict(zip(metrics, values, strict=True))
+
+
 async def judge_window(
     source: MetricSource,
     window_from: datetime,
@@ -263,12 +293,7 @@ async def judge_window(
     rates = catalog.rate_metric_ids()
     denominators = [m.denominator for m in cat.metrics if m.denominator]
     needed = list(dict.fromkeys([*metrics, *filter(None, [volume_metric]), *denominators]))
-    series = {
-        m: await (_transactions if m in denominators else _series)(
-            source, m, history_from, window_to
-        )
-        for m in needed
-    }
+    series = await _read_series(source, needed, denominators, history_from, window_to)
     window = window_buckets(window_from, window_to)
     with_faults = any((m := catalog.metric(x)) and m.fault_codes for x in metrics)
     faults = await _faults(source, start, window_to) if with_faults else None
