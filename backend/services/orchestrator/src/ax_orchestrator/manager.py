@@ -246,6 +246,8 @@ class IncidentManager:
             if target is not None:
                 target.recovered_at = env.occurred_at
                 _keep_recovery(target, env.data)
+                # 사람이 해제하길 기다리던 복구 검증이 있으면 이어서 돈다 (#909)
+                self.engine.notify_recovered(target)
                 target.settle_after_recovery()
                 target.refresh_mttr()
                 target.log(f"정상 복귀 신호 받음 ({env.source}, {iso(env.occurred_at)})")

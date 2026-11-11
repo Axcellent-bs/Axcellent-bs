@@ -136,6 +136,9 @@ class A2AData:
                 "window_from": since.isoformat(),
                 "window_to": now.isoformat(),
                 "metrics": PAYMENT_METRICS,
+                # 조치가 끝난 뒤(since)부터 지금까지를 한 구간으로 센다. 5분 칸 판정은 조치 직후
+                # 칸이 비어 판정 불가가 나오고, 사건 시작부터 세면 장애 구간이 섞인다 (#909)
+                "mode": "recovery",
             },
         )
         result = await call_agent("data", request)

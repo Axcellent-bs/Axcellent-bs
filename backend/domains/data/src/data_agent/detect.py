@@ -23,13 +23,16 @@ from data_agent.connectors import (
 from data_agent.metrics.anomaly import Agg
 from data_agent.metrics.judge import (
     BASELINE_DAYS,
+    BUCKET,
     FAULT_LAMBDA_SPAN,
     Judgement,
     Settings,
     empty_window,
     fault_buckets,
+    fault_lambda,
     judge_count,
     judge_payment,
+    poisson_upper,
     to_buckets,
     window_buckets,
 )
@@ -338,4 +341,131 @@ async def judge_window(
         empty=empty,
         queried=needed,
         fault_codes_read=faults is not None,
+    )
+
+
+# ---------- 복구 확인 (mode="recovery") ----------
+
+
+async def _payments_in(source: object, start: datetime, end: datetime) -> int | None:
+    """[start, end)에 시도한 결제 수. 못 읽으면 None.
+
+    커넥터가 정확한 시각으로 세 주면(`transactions_count`, 캣북스 shop-api) 그것을 쓴다. 아니면
+    5분 칸 거래량 중 `start` 이후에 시작한 칸만 더한다(앞 칸에 섞인 조치 전 결제를 세지 않는다).
+    """
+    conn = as_connector(source)
+    try:
+        counter = getattr(conn, "transactions_count", None)
+        if callable(counter):
+            return int(await counter(start, end))
+        denominators = [m.denominator for m in catalog.current().metrics if m.denominator]
+        if not denominators:
+            return None
+        volume = await _transactions(source, denominators[0], start, end)
+    except ConnectorUnavailable:
+        return None
+    return int(sum(v for bucket, v in volume.items() if bucket >= start))
+
+
+async def _volume_history(
+    source: object, metric: str, start: datetime, end: datetime
+) -> dict[datetime, float]:
+    """λ가 보는 지난 7일 같은 시각 ±1시간의 거래량 (자료가 있는 5분 칸을 알려고)."""
+    days = [
+        (start - timedelta(days=d) - FAULT_LAMBDA_SPAN, end - timedelta(days=d) + FAULT_LAMBDA_SPAN)
+        for d in range(1, BASELINE_DAYS + 1)
+    ]
+    out: dict[datetime, float] = {}
+    for part in await asyncio.gather(*(_series(source, metric, a, b) for a, b in days)):
+        out.update(part)
+    return out
+
+
+def _recovery_judgements(metrics: list[str], status: str, note: str, **values) -> list[Judgement]:
+    return [
+        Judgement(
+            metric=m,
+            status=status,  # type: ignore[arg-type]
+            observed=values.get("observed", 0.0),
+            baseline=values.get("baseline", 0.0),
+            ratio=None,
+            direction="up" if status == "anomaly" else None,
+            p_value=values.get("p_value"),
+            severity=values.get("severity"),
+            note=note,
+        )
+        for m in metrics
+    ]
+
+
+async def judge_recovery(
+    source: MetricSource,
+    since: datetime,
+    until: datetime,
+    metrics: list[str] | None,
+    settings: Settings,
+) -> WindowJudgement:
+    """복구 확인: 조치가 끝난 시각 `since`부터 `until`까지를 한 구간으로 센다(5분 칸 아님).
+
+    - 장애 쪽 실패(카탈로그 `fault_codes`)가 평소보다 드물게 많으면(p < `fault_p_anomaly`) 이상.
+      평소 수준 λ는 주기 판정과 같은 `fault_lambda`(지난 7일 같은 시각 ±1시간 5분 평균, 하한
+      `fault_lambda_floor`)이고, 구간 길이만큼 늘린다(5분보다 짧으면 5분으로 본다).
+    - 이상이 아닌데 결제가 `min_payments`건 미만이면 unknown(아직 판단하지 못함).
+    - 결제가 충분하고 장애 쪽 실패가 평소 수준이면 normal. 실패·지난 7일 기록을 못 읽으면 unknown.
+    부른 지표마다 같은 판정을 싣는다(구간 전체 하나의 판정).
+    """
+    cat = catalog.current()
+    metrics = list(dict.fromkeys(metrics or [])) or [name for name, _ in watched_metrics()]
+    start = _floor_5m(since)
+    queried = list(dict.fromkeys([*metrics, *filter(None, [cat.volume_metric])]))
+    payments, events, history, volume = await asyncio.gather(
+        _payments_in(source, since, until),
+        _events(source, since, until),
+        _fault_history(source, start, until),
+        _volume_history(source, cat.volume_metric, start, until)
+        if cat.volume_metric
+        else asyncio.sleep(0, result={}),
+    )
+    word = catalog.denominator_label()
+    if payments is None or events is None or history is None:
+        reason = "조치 뒤 결제·실패 기록을 읽지 못함"
+        return WindowJudgement(
+            _recovery_judgements(metrics, "unknown", f"확인할 수 없음: {reason}"),
+            empty=False,
+            queried=queried,
+            fault_codes_read=events is not None,
+        )
+    faults = int(sum(fault_buckets([e for e in events if since <= e.at < until]).values()))
+    lam, _ = fault_lambda(start, history, volume, settings.fault_lambda_floor)
+    if lam is None:
+        note = "확인할 수 없음: 지난 7일 같은 시간대 기록이 없어 평소 장애 실패 수준을 모름"
+        return WindowJudgement(
+            _recovery_judgements(metrics, "unknown", note, observed=float(faults)),
+            empty=payments == 0,
+            queried=queried,
+            fault_codes_read=True,
+        )
+    span = max(until - since, BUCKET)
+    expected = lam * (span / BUCKET)
+    p = poisson_upper(faults, expected) if faults > 0 else 1.0
+    seconds = int((until - since).total_seconds())
+    basis = (
+        f"조치 뒤 {seconds}초: {word} {payments}건, 장애 쪽 실패 {faults}건 "
+        f"(평소 {expected:.2f}건, p={p:.2g})"
+    )
+    values = {"observed": float(faults), "baseline": expected, "p_value": p}
+    if p < settings.fault_p_anomaly:
+        status, note = "anomaly", f"{basis} → 장애 쪽 실패가 평소보다 많음"
+        values["severity"] = "high" if p < settings.fault_p_anomaly / 1000 else "mid"
+    elif payments < settings.min_payments:
+        status = "unknown"
+        short = f"{word} {settings.min_payments}건 미만이라 아직 판단하지 못함"
+        note = f"확인할 수 없음: {basis}, {short}"
+    else:
+        status, note = "normal", f"{basis} → 평소 수준"
+    return WindowJudgement(
+        _recovery_judgements(metrics, status, note, **values),
+        empty=payments == 0,
+        queried=queried,
+        fault_codes_read=True,
     )

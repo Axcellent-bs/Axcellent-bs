@@ -47,6 +47,11 @@ class Step:
     # 복구 신호(shop.recovered)를 기다리느라 건너뛴 단계(사유 `WAITING_RECOVERY`)를, 이벤트가 이미
     # 닫힌 뒤 신호가 오면 다시 판단해 돌린다
     rerun_on_recovery: bool = False
+    # 게이트에 막혔을 때 이 함수가 True면(예: 사람에게 넘긴 장애) 사람이 장애를 해제했다는
+    # 신호(shop.recovered)를 기다렸다가 게이트를 다시 본다(엔진 `release_wait`초까지, 0이면 기다리지
+    # 않음). 복구 검증: 원인을 못 찾아 사람에게 넘긴 장애를 사람이 풀면, 롤백 때처럼 복구 검증 →
+    # 정상화 공지 → 재무 → 인사 기록으로 이어진다
+    wait_for_release: Callable[[Incident], bool] | None = None
 
 
 @dataclass

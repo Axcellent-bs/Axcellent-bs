@@ -111,14 +111,17 @@ def _example(value: object) -> str:
 
 
 async def render() -> str:
+    import ax_orchestrator.engine as engine
     import ax_orchestrator.plans.scenario_a as scenario
 
-    original_now = scenario.now
+    original_now, original_engine_now = scenario.now, engine.now
     scenario.now = lambda: FIXED_AT  # 정상화 공지의 resolved_at을 고정
+    # 단계가 끝난 시각도 고정 (복구 검증의 since = 롤백이 끝난 시각, 문서가 매번 바뀌지 않게)
+    engine.now = lambda: FIXED_AT
     try:
         inc, fakes, steps = await _run()
     finally:
-        scenario.now = original_now
+        scenario.now, engine.now = original_now, original_engine_now
     key_to_step = {s.id: s for s in steps}
     sections: dict[str, list[str]] = defaultdict(list)
     for step_id, run in inc.steps.items():

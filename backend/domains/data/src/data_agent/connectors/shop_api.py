@@ -240,6 +240,20 @@ class ShopApiConnector:
     ) -> list[Point] | None:
         return await self.metric_series(TRANSACTIONS_METRIC, window_from, window_to)
 
+    async def transactions_count(self, window_from: datetime, window_to: datetime) -> int:
+        """[from, to)에 시도한 결제 수 (정확한 시각, 복구 확인용).
+
+        `metric-series`는 5분 칸이라 칸 앞부분(조치 전) 결제가 섞인다. 그 구간에 접수한 주문의
+        결제 중 시도 시각이 구간 안인 것만 센다(구간 전에 접수해 구간 안에 결제한 주문은 빠진다).
+        """
+        orders = await self.orders(window_from, window_to)
+        return sum(
+            1
+            for order in orders
+            for payment in order.payments
+            if payment.created_at is not None and window_from <= payment.created_at < window_to
+        )
+
     async def campaign_coupons(self, campaign_id: str) -> list[CampaignCoupon]:
         """그 캠페인 쿠폰 목록 (발급 장수·조회 시점 사용 장수). 없으면 빈 목록."""
         data = await self.api.get("/coupons", {"campaign_id": campaign_id})
@@ -342,6 +356,7 @@ class ShopOrderPayment(BaseModel):
     model_config = ConfigDict(extra="ignore")
     amount: int = Field(ge=0)
     status: str  # succeeded | failed
+    created_at: datetime | None = None  # 결제 시도 시각 (복구 확인이 조치 뒤 결제만 센다)
 
 
 class ShopOrder(BaseModel):
