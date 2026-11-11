@@ -324,6 +324,22 @@ async def _pull_claims(limit: int) -> dict[str, int]:
     return {"read": len(items), "ingested": done, "failed": failed}
 
 
+def _owned_skills() -> set[str]:
+    """이 서버가 받는 skill 이름(서비스 카드 기준). 카드를 못 읽으면 모두 받는 것으로 본다."""
+    try:
+        from support_agent.main import load_card
+
+        return {skill.id for skill in load_card().skills}
+    except Exception:  # noqa: BLE001 - 카드를 못 읽어도 읽기는 멈추지 않는다
+        return {
+            "create_inquiry",
+            "create_claim",
+            "submit_feedback",
+            "submit_idea",
+            "receive_return",
+        }
+
+
 async def pull_once(limit: int = READ_LIMIT) -> dict[str, int]:
     """문의함과 클레임함을 한 번씩 읽는다. 읽은 수·처리 수·실패 수(두 함의 합)를 돌려준다.
 
@@ -337,14 +353,19 @@ async def pull_once(limit: int = READ_LIMIT) -> dict[str, int]:
         # 나머지 접수(평가·아이디어·반품 입고)와 문의 값 되돌려 쓰기는 같은 방식이라 별도 모듈이다
         from support_agent import shop_pull_more as more
 
-        pulls = (
-            _pull_inquiries,
-            _pull_claims,
-            lambda _limit: more.refresh_views(),
-            more.pull_feedback,
-            more.pull_ideas,
-            more.pull_returns,
+        # 서비스마다 저장소가 따로다(inquiry·claims·reviews가 같은 앱을 각자 띄운다). 이 서버가
+        # 받는 skill의 종류만 읽는다. 안 그러면 여러 서버가 같은 접수를 각자 처리하고, 고객이
+        # 보는 값을 서로 덮어쓴다.
+        owned = _owned_skills()
+        candidates = (
+            ("create_inquiry", _pull_inquiries),
+            ("create_claim", _pull_claims),
+            ("create_inquiry", lambda _limit: more.refresh_views()),
+            ("submit_feedback", more.pull_feedback),
+            ("submit_idea", more.pull_ideas),
+            ("receive_return", more.pull_returns),
         )
+        pulls = [pull for skill, pull in candidates if skill in owned]
         for pull in pulls:
             try:
                 got = await pull(limit)
