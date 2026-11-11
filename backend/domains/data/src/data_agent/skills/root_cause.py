@@ -6,15 +6,23 @@
   설명에 사실에 없는 숫자·시각이 있으면 그 후보를 버린다.
 - LLM이 실패하거나 남는 후보가 없으면 시간 순서 규칙으로 대체한다(fallback=True):
   이상 직전 배포가 1순위(mid), 그 밖의 사실은 low.
+- LLM에는 마감까지 남은 시간만 준다(`llm_deadline`): 요청 마감(meta.deadline) − 여유
+  `DATA_ROOT_CAUSE_MARGIN_S`(기본 5초). 사실을 모은 뒤 남은 시간이 3초 미만이면 부르지 않고,
+  넘기면 끊고 규칙으로 대체한다(요약에 "LLM 응답 지연"). 총괄 단계 마감(30초)보다 LLM 대기
+  (60초·재시도 1번)가 길어 결과가 아예 남지 않던 것을 막는다.
 - 확신도 high 후보가 없으면 "확인 필요"(needs_confirmation)다.
 - 근거가 될 사실이 하나도 없으면 후보 없이 "확인할 수 없음"이다.
 """
 
 from __future__ import annotations
 
+import asyncio
+import math
+import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel
@@ -31,6 +39,14 @@ from data_agent.clients import fact_sources
 from data_agent.clients.fact_sources import RawFact, SendFn
 
 MAX_HYPOTHESES = 3
+# LLM 마감: 요청 마감(meta.deadline)에서 이만큼 앞. 응답을 만들어 돌려보낼 여유
+MARGIN_ENV = "DATA_ROOT_CAUSE_MARGIN_S"
+DEFAULT_MARGIN_S = 5.0
+# 요청 마감이 없을 때 LLM 마감 = 지금 + 이 값
+DEADLINE_ENV = "DATA_ROOT_CAUSE_DEADLINE_S"
+DEFAULT_DEADLINE_S = 25.0
+# 남은 시간이 이보다 짧으면 LLM을 부르지 않는다(답을 받을 수 없어서)
+MIN_LLM_SECONDS = 3.0
 NO_FACTS = (
     "확인할 수 없음 (원인 후보를 고를 사실이 없음: "
     "배포·공지·문의 급증·지난 사건 모두 없거나 확인할 수 없음)"
@@ -71,6 +87,33 @@ class RootCauseResult:
 
 def _iso(at: datetime) -> str:
     return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _seconds(env: Mapping[str, str], name: str, default: float, *, positive: bool) -> float:
+    """설정값(초). 없거나 숫자가 아니거나 음수(마감은 0 이하)이면 기본값."""
+    try:
+        value = float(env.get(name) or default)
+    except ValueError:
+        return default
+    if not math.isfinite(value) or value < 0 or (positive and value == 0):
+        return default
+    return value
+
+
+def llm_deadline(
+    meta: RequestMeta | object, now: datetime, env: Mapping[str, str] = os.environ
+) -> datetime:
+    """LLM 답을 기다릴 마지막 시각 (실제 시계 기준).
+
+    요청 마감(meta.deadline)이 있으면 거기서 `DATA_ROOT_CAUSE_MARGIN_S`(기본 5초) 앞,
+    없으면 `now` + `DATA_ROOT_CAUSE_DEADLINE_S`(기본 25초).
+    """
+    deadline = getattr(meta, "deadline", None)
+    if deadline is None:
+        wait = _seconds(env, DEADLINE_ENV, DEFAULT_DEADLINE_S, positive=True)
+        return now + timedelta(seconds=wait)
+    margin = _seconds(env, MARGIN_ENV, DEFAULT_MARGIN_S, positive=False)
+    return deadline - timedelta(seconds=margin)
 
 
 def _times(text: str) -> set[tuple[int, int]]:
@@ -221,13 +264,19 @@ def order_by_proximity(
     return sorted(hypotheses, key=lambda h: (_RANK[h.confidence], _distance(h, by_id, start)))
 
 
-def _summary(hypotheses: list[CauseHypothesis], facts: list[CauseFact], fallback: bool) -> str:
+def _summary(
+    hypotheses: list[CauseHypothesis],
+    facts: list[CauseFact],
+    fallback: bool,
+    late: bool = False,
+) -> str:
     if not _evidence_ids(facts):
         return NO_FACTS
     usable = len(_evidence_ids(facts))
     head = f"원인 후보 {len(hypotheses)}개 (근거 사실 {usable}개)"
     if fallback:
-        head += " · 시간 순서 규칙으로 고름"
+        reason = "LLM 응답 지연으로 " if late else ""
+        head += f" · {reason}시간 순서 규칙으로 고름"
     if not any(h.confidence == "high" for h in hypotheses):
         head += " · 사람 확인 필요"
     return head
@@ -241,23 +290,37 @@ async def estimate_root_cause(
     send: SendFn | None = None,
     now: datetime | None = None,
 ) -> RootCauseResult:
+    # 마감은 실제 시계로 잰다(`now`는 사실을 모을 때 쓰는 시연 시계일 수 있다)
+    deadline = llm_deadline(meta, datetime.now(UTC))
     raw = await fact_sources.collect(data, meta, send=send, now=now)
     facts = _number([_anomaly_fact(data), *raw])
 
     fallback = False
+    late = False
+    llm_note = ""
     hypotheses: list[CauseHypothesis] = []
     if _evidence_ids(facts):
-        try:
-            hypotheses = validate(await _ask_llm(facts, llm, data.context_id), facts)
-        except Exception:  # LLM 미설정·타임아웃·검증 실패는 규칙으로 대체한다
-            hypotheses = []
-            fallback = True
+        left = (deadline - datetime.now(UTC)).total_seconds()
+        if left < MIN_LLM_SECONDS:
+            late = True
+            llm_note = f"LLM 마감까지 {max(left, 0):.1f}초뿐이라 부르지 않음"
+        else:
+            try:
+                candidates = await asyncio.wait_for(
+                    _ask_llm(facts, llm, data.context_id), timeout=left
+                )
+                hypotheses = validate(candidates, facts)
+            except TimeoutError:  # 마감을 넘김: 끊고(HTTP 연결은 LLM 클라이언트가 닫는다) 대체
+                late = True
+                llm_note = f"LLM이 {left:.1f}초 안에 답하지 않아 끊음"
+            except Exception:  # LLM 미설정·오류·검증 실패는 규칙으로 대체한다
+                hypotheses = []
         if not hypotheses:
             hypotheses = rule_based(facts, data)
             fallback = True
     hypotheses = order_by_proximity(hypotheses, facts, data.window_from)[:MAX_HYPOTHESES]
 
-    summary = _summary(hypotheses, facts, fallback)
+    summary = _summary(hypotheses, facts, fallback, late)
     output = RootCauseOutput(
         hypotheses=hypotheses,
         needs_confirmation=not any(h.confidence == "high" for h in hypotheses),
@@ -266,7 +329,8 @@ async def estimate_root_cause(
     )
     evidence = Evidence(
         queries=sorted({f.source for f in facts if f.source != "input"}),
-        data_summary=f"{summary}\n{ORDER_RULE} (이상 시작 {_iso(data.window_from)})",
+        data_summary=f"{summary}\n{ORDER_RULE} (이상 시작 {_iso(data.window_from)})"
+        + (f"\n{llm_note}" if llm_note else ""),
         collected_at=datetime.now(UTC),
         ref_ids=[f.ref for f in facts if f.ref and f.kind not in ("anomaly", "unavailable")],
     )
