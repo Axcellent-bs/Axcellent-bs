@@ -1,14 +1,15 @@
 """재무 AI holdout 평가 (처음 보는 실제 모양 데이터): uv run python domains/finance/eval/holdout.py
 
 `run.py`(`finance_agent.accuracy`)와 다른 점
-- 장부를 손으로 만들지 않는다. **shop-api 실제 코드**(`Shop.place_order`·`pay`·`mark_delivered`,
-  `Refunds.refund`, `Promotions.issue_coupon`, 장애 주입 `inject_fault`)로 쇼핑몰 DB를 만든다.
-- 재무는 **실서버와 같은 경로**로 읽는다: shop-api FastAPI 앱(`create_app`)에
-  `GET /api/shop/orders`·`/products`·`/sellers`·`/coupons`(재무 토큰)를 보내고,
-  `books.live_books`가 장부로 바꾼다(정규화·환불 기록 만들기·실제 모드 PG 목 포함).
-- 정답은 재무 코드가 아니라 **shop-api DB 표**(orders·order_items·payments·refunds·coupons·
-  products)를
-  SQL로 읽어 정책대로 계산한다.
+- 장부를 손으로 만들지 않는다. **가짜 판매 서버**(`fake_shop.py`)에 주문·결제(가끔 실패·장애)·
+  배송 완료·환불·쿠폰 발급을 판매 서버와 같은 규칙으로 넣는다. 판매 서버 코드(`ax_shop_api`)는
+  import하지 않는다(판매 서버는 `Catbooks-demo/catbooks-demo`로 분리).
+- 재무는 **실서버와 같은 경로**로 읽는다: `GET /api/shop/orders`·`/products`·`/sellers`·
+  `/coupons`(재무 토큰)를 HTTP로 보내고, `books.live_books`가 장부로 바꾼다(정규화·환불 기록
+  만들기·실제 모드 PG 목 포함). 가짜 판매 서버 응답이 판매 서버 계약(OpenAPI 고정본)과 맞는지는
+  `tests/test_holdout_fake_shop.py`가 잰다.
+- 정답은 재무 코드가 아니라 **판매 서버 표**(orders·order_items·payments·refunds·coupons)를
+  직접 읽어 정책대로 계산한다.
 - 환불 시각: shop-api 주문 응답에는 환불 시각이 없어서 재무는 환불을 주문 시각에 둔다
   (`notes.refund_basis`, 문서화된 한계). 그래서 결산·정산은 두 기준으로 잰다.
   - `actual`: 환불이 실제로 난 시각 기준 (현실 정답)
@@ -37,16 +38,10 @@ sys.path.insert(0, str(HERE))
 EVAL_TOKEN = "finance-holdout-eval"  # 이 프로세스 안에서만 쓰는 평가용 토큰 (비밀값 아님)
 os.environ["AX_AGENT_TOKENS"] = f"finance={EVAL_TOKEN}"
 os.environ["FINANCE_TOKEN"] = EVAL_TOKEN
-os.environ.setdefault("SHOP_MONITOR_INTERVAL_S", "0")
 
 import httpx  # noqa: E402
+from fake_shop import FakeShop, FakeShopTransport  # noqa: E402
 
-from ax_shop_api import service  # noqa: E402
-from ax_shop_api.db import Db  # noqa: E402
-from ax_shop_api.main import create_app  # noqa: E402
-from ax_shop_api.promotions import Promotions  # noqa: E402
-from ax_shop_api.refunds import Refunds  # noqa: E402
-from ax_shop_api.seed import seed  # noqa: E402
 from finance_agent import accuracy as base  # noqa: E402
 from finance_agent import finance_config as fc  # noqa: E402
 from finance_agent.bank import match as bank_match  # noqa: E402
@@ -59,7 +54,7 @@ from finance_agent.tax import income_tax_amount, vat_pack  # noqa: E402
 HOLDOUT_SEED = "20261109_02"
 # 실제 모드 PG 목은 불일치를 넣지 않는다(2026-11-09, 지어낸 데이터 제거). 그래서 빈 계획이다
 LIVE_PLAN: dict[int, dict[str, Any]] = {}
-# 시드 상품은 가격이 딱 떨어져서 끝자리 있는 상품을 shop-api 상품 등록 코드로 더한다
+# 시드 상품은 가격이 딱 떨어져서 끝자리 있는 상품을 더한다
 EXTRA_PRODUCTS = [
     ("sel_0001", "문고판 고전", "book", 12_345),
     ("sel_0002", "포스트잇 묶음", "stationery", 8_750),
@@ -82,35 +77,20 @@ def day0(d: date) -> datetime:
 
 @contextmanager
 def shop_clock():
-    original = service._now
-    now = [datetime(2026, 1, 1, tzinfo=UTC)]
-    service._now = lambda: iso(now[0])
-    try:
-        yield now
-    finally:
-        service._now = original
+    yield [datetime(2026, 1, 1, tzinfo=UTC)]
 
 
 class World:
-    """shop-api 코드로 만든 쇼핑몰 하나."""
+    """가짜 판매 서버로 만든 쇼핑몰 하나."""
 
     def __init__(self, rng: random.Random, clock: list[datetime]) -> None:
         self.rng, self.clock = rng, clock
-        self.db = Db(":memory:")
-        seed(self.db)
-        with self.db.tx() as conn:
-            conn.execute("UPDATE products SET stock = 1000000")
-        self.shop = service.Shop(self.db)
-        self.refunds = Refunds(self.db, now=lambda: self.clock[0])
-        self.promo = Promotions(self.db, now=lambda: self.clock[0])
+        self.shop = FakeShop(now=lambda: self.clock[0])
         self.real_now = datetime.now(UTC) - timedelta(minutes=5)
         for seller, name, cat, price in EXTRA_PRODUCTS:
             self.shop.create_product(seller, name, cat, price, 1_000_000)
-        with self.db.tx() as conn:
-            self.products = [
-                r["product_id"] for r in conn.execute("SELECT product_id FROM products")
-            ]
-            self.buyers = [r["buyer_id"] for r in conn.execute("SELECT buyer_id FROM buyers")]
+        self.products = [p["product_id"] for p in self.shop.products]
+        self.buyers = list(self.shop.buyers)
         self.coupons: dict[str, list[Any]] = {}
         self.n = 0
 
@@ -122,10 +102,9 @@ class World:
         buyer = self.rng.choice(self.buyers)
         self.n += 1
         units = self.rng.randint(1, 3)
-        c, _ = self.promo.issue_coupon(
-            f"eval-cpn-{self.n}", "campaign", buyer, units,
-            self.rng.choice([1_000, 2_000, 3_000, 5_000]), "cmp_eval",
-        )  # fmt: skip
+        c = self.shop.issue_coupon(
+            buyer, units, self.rng.choice([1_000, 2_000, 3_000, 5_000]), "cmp_eval"
+        )
         self.coupons[buyer] = [c["coupon_id"], units]
 
     def sale(self, t: datetime) -> None:
@@ -136,10 +115,10 @@ class World:
         lines = [(p, rng.randint(1, 3)) for p in rng.sample(self.products, rng.randint(1, 3))]
         held = self.coupons.get(buyer)
         if held and held[1] > 0 and rng.random() < 0.7:
-            order = self.shop.place_order(buyer, lines, coupon_id=held[0])[0]
+            order = self.shop.place_order(buyer, lines, coupon_id=held[0])
             held[1] -= 1
         else:
-            order = self.shop.create_order(buyer, lines)
+            order = self.shop.place_order(buyer, lines)
         oid = order["order_id"]
         pay_at = t + timedelta(seconds=rng.randint(5, 600))
         r = rng.random()
@@ -153,7 +132,7 @@ class World:
             self.at(when)
             if kind == "fault":
                 self.shop.inject_fault("failure")
-            got = self.shop.pay(oid, "card", "failure" if kind == "decline" else None)
+            got = self.shop.pay(oid, decline=kind == "decline")
             if kind == "fault":
                 self.shop.release_fault()
             if got["status"] == "paid":
@@ -168,17 +147,13 @@ class World:
         if rng.random() < 0.18:
             refund_at = paid + timedelta(days=rng.randint(0, 6), hours=rng.randint(0, 20))
             if refund_at <= self.real_now:
-                with self.db.tx() as conn:
-                    pay = conn.execute(
-                        "SELECT payment_id, amount FROM payments WHERE order_id = ? AND "
-                        "status = 'succeeded'",
-                        (oid,),
-                    ).fetchone()
+                pay = self.shop.succeeded_payment(oid)
+                assert pay is not None
                 full = rng.random() < 0.4
                 amount = pay["amount"] if full else rng.randint(1, pay["amount"])
                 self.at(refund_at)
                 self.n += 1
-                self.refunds.refund(pay["payment_id"], amount, f"eval-rfd-{self.n}", None)
+                self.shop.refund(pay["payment_id"], amount)
 
     def traffic(self, first: date, last: date, per_day: float) -> None:
         """first~last 하루마다 포아송 주문. 시각 순으로 넣는다."""
@@ -198,38 +173,14 @@ class World:
         for t, kind in sorted(events):
             self.issue_coupon(t) if kind == "coupon" else self.sale(t)
 
-    # ---- 정답용 표 (SQL로 직접)
+    # ---- 정답용 표 (판매 서버 표를 직접)
     def tables(self) -> dict[str, Any]:
-        with self.db.tx() as conn:
-            q = lambda sql: [dict(r) for r in conn.execute(sql)]  # noqa: E731
-            return {
-                "orders": {r["order_id"]: r for r in q("SELECT * FROM orders")},
-                "items": q(
-                    "SELECT i.rowid AS rid, i.*, p.category_code FROM order_items i "
-                    "JOIN products p ON p.product_id = i.product_id ORDER BY i.rowid"
-                ),
-                "payments": q("SELECT * FROM payments ORDER BY rowid"),
-                "refunds": q("SELECT * FROM refunds"),
-                "coupons": q("SELECT * FROM coupons"),
-            }
+        return self.shop.tables()
 
     async def finance_books(self):
-        app = create_app(self.db, seed_data=False)
-        transport = SafetyStub(httpx.ASGITransport(app=app))
+        transport = FakeShopTransport(self.shop)
         async with httpx.AsyncClient(transport=transport) as client:
             return await live_books(http_client=client, store=OrderStore(), full=True)
-
-
-class SafetyStub(httpx.AsyncBaseTransport):
-    """shop-api 요청은 실제 앱으로, safety 실행 기록 요청은 빈 목록으로 답한다."""
-
-    def __init__(self, inner: httpx.AsyncBaseTransport) -> None:
-        self.inner = inner
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        if request.url.path.startswith("/api/safety/"):
-            return httpx.Response(200, json={"data": [], "meta": {}})
-        return await self.inner.handle_async_request(request)
 
 
 def poisson(rng: random.Random, mean: float) -> int:
@@ -243,7 +194,7 @@ def poisson(rng: random.Random, mean: float) -> int:
         k += 1
 
 
-# ---------------------------------------------------------------- 정답 (shop-api 표 → 정책)
+# ---------------------------------------------------------------- 정답 (판매 서버 표 → 정책)
 class Truth:
     def __init__(self, tb: dict[str, Any], today: date) -> None:
         self.tb, self.today = tb, today
