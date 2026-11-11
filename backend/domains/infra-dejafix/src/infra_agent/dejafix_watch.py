@@ -8,6 +8,10 @@ DejaFix 레포는 고치지 않는다. DejaFix 읽기 전용 프록시(`dejafix-
 
 같은 장애는 한 번만 보낸다(`idempotency_key`가 DejaFix 장애 id). 주기 실행이라 LLM을 부르지 않는다.
 `INFRA_DEJAFIX_URL`이 없으면 켜지 않는다.
+
+`INFRA_DEJAFIX_COMPONENTS`(쉼표로 구분, 예: `payment`)를 주면 그 부위만 보낸다. Zabbix 기본
+템플릿(Windows·Linux)이 PC·호스트 트리거에도 `component=memory`·`cpu` 같은 태그를 달아서, 거르지
+않으면 팀원 PC 경고가 총괄 사건으로 열린다. 비우면 `component` 태그가 있는 장애를 모두 보낸다.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ logger = logging.getLogger("ax.infra.dejafix_watch")
 
 URL_ENV = "INFRA_DEJAFIX_URL"
 INTERVAL_ENV = "INFRA_DEJAFIX_POLL_SECONDS"
+COMPONENTS_ENV = "INFRA_DEJAFIX_COMPONENTS"
 DEFAULT_INTERVAL_SECONDS = 30
 MIN_INTERVAL_SECONDS = 5
 TIMEOUT_SECONDS = 10.0
@@ -58,6 +63,13 @@ def interval_seconds(env: Mapping[str, str] | None = None) -> int:
         return max(MIN_INTERVAL_SECONDS, int(raw))
     except ValueError:
         return DEFAULT_INTERVAL_SECONDS
+
+
+def allowed_components(env: Mapping[str, str] | None = None) -> frozenset[str] | None:
+    """총괄에 보낼 부위 목록. 비우면 None(모든 부위)."""
+    raw = (os.environ if env is None else env).get(COMPONENTS_ENV, "")
+    names = frozenset(p.strip() for p in raw.split(",") if p.strip())
+    return names or None
 
 
 async def fetch_problems(url: str, client: httpx.AsyncClient | None = None) -> list[dict[str, Any]]:
@@ -118,14 +130,19 @@ def envelope_for(incident: Mapping[str, Any], component: str, now: datetime) -> 
 
 
 async def run_once(
-    url: str, now: datetime, client: httpx.AsyncClient | None = None
+    url: str,
+    now: datetime,
+    client: httpx.AsyncClient | None = None,
+    components: frozenset[str] | None = None,
 ) -> list[EventEnvelope]:
-    """한 번 읽어 새로 보낸 이벤트를 돌려준다."""
+    """한 번 읽어 새로 보낸 이벤트를 돌려준다. `components`를 주면 그 부위만 보낸다."""
     emitted: list[EventEnvelope] = []
     for incident in await fetch_problems(url, client):
         component = component_of(incident)
         if component is None:
             continue
+        if components is not None and component not in components:
+            continue  # 고른 부위가 아니면(예: 팀원 PC의 memory) 총괄에 알리지 않는다
         env = envelope_for(incident, component, now.astimezone(UTC))
         if env.idempotency_key in _published_keys:
             continue
@@ -139,11 +156,12 @@ async def run_forever(
     url: str,
     interval: int = DEFAULT_INTERVAL_SECONDS,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    components: frozenset[str] | None = None,
 ) -> None:
     """`interval`초마다 `run_once`. 한 번 실패해도 다음 주기에 다시 읽는다."""
     while True:
         try:
-            sent = await run_once(url, clock())
+            sent = await run_once(url, clock(), components=components)
             for env in sent:
                 logger.info("DejaFix 장애를 총괄에 알림: %s", env.idempotency_key)
         except Exception:  # noqa: BLE001 - DejaFix가 잠깐 안 돼도 감시는 이어 간다
@@ -156,4 +174,6 @@ def start(env: Mapping[str, str] | None = None) -> asyncio.Task | None:
     url = base_url(env)
     if url is None:
         return None
-    return asyncio.create_task(run_forever(url, interval_seconds(env)))
+    return asyncio.create_task(
+        run_forever(url, interval_seconds(env), components=allowed_components(env))
+    )
