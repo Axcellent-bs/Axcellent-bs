@@ -72,7 +72,7 @@ function StuckIntakeList({ count }: { count: number }) {
     setBusy(key); setNote(null);
     try {
       const r = await api.admin.retryStuckIntake(it.kind, it.seq);
-      setNote(r.requeued ? `${STUCK_KIND_KO[it.kind]} #${it.seq}을 다시 읽는 차례로 돌렸습니다.` : `${STUCK_KIND_KO[it.kind]} #${it.seq}을 다시 올리지 못했습니다${r.error ? ` (${r.error})` : ""}.`);
+      setNote(r.requeued ? `${STUCK_KIND_KO[it.kind]} #${it.seq}을 다시 읽는 차례로 돌렸습니다.` : `${STUCK_KIND_KO[it.kind]} #${it.seq}을 다시 올리지 못했습니다${r.error === "READ_ONLY" ? " — 읽기 전용(관찰 모드) 설치라 판매 서버를 바꾸지 않습니다" : r.error ? ` (${r.error})` : ""}.`);
       await load();
     } catch { setNote("다시 시도하지 못했습니다. 잠시 뒤 다시 눌러 주세요."); }
     finally { setBusy(null); }
