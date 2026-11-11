@@ -12,16 +12,8 @@ from pathlib import Path
 from marketing_agent.media.base import MediaKind
 
 PRICES_PATH = Path(__file__).with_name("prices.toml")
-_REQUIRED = (
-    "provider",
-    "model",
-    "kind",
-    "resolution",
-    "input_usd_per_mtok",
-    "output_usd_per_mtok",
-    "source",
-    "checked_on",
-)
+_REQUIRED = ("provider", "model", "kind", "resolution", "source", "checked_on")
+_REQUIRED_TOKEN = ("input_usd_per_mtok", "output_usd_per_mtok")
 PER_MTOK = Decimal(1_000_000)
 
 
@@ -47,6 +39,19 @@ class PriceEntry:
     max_duration_s: int | None
     source: str
     checked_on: str
+    per_item_usd: Decimal | None = None  # 오디오: 곡(클립)당 고정 가격. 토큰 단가는 0
+
+
+def _per_item(item: dict) -> Decimal:
+    if "per_item_usd" not in item:
+        raise PriceTableError(f"곡당 가격(per_item_usd)이 없다: {item['model']}")
+    try:
+        value = Decimal(str(item["per_item_usd"]))
+    except ArithmeticError:
+        raise PriceTableError(f"per_item_usd가 숫자가 아니다: {item['model']}") from None
+    if not value.is_finite() or value <= 0:
+        raise PriceTableError(f"per_item_usd는 0보다 커야 한다: {item['model']}")
+    return value
 
 
 def load_table(path: Path = PRICES_PATH) -> list[PriceEntry]:
@@ -59,8 +64,31 @@ def load_table(path: Path = PRICES_PATH) -> list[PriceEntry]:
         missing = [k for k in _REQUIRED if k not in item]
         if missing:
             raise PriceTableError(f"단가표 항목에 {missing}가 없다: {item.get('model')}")
-        if item["kind"] not in ("image", "video"):
-            raise PriceTableError(f"kind가 image·video가 아니다: {item['kind']}")
+        if item["kind"] not in ("image", "video", "audio"):
+            raise PriceTableError(f"kind가 image·video·audio가 아니다: {item['kind']}")
+        if item["kind"] == "audio":
+            per_item = _per_item(item)
+            entries.append(
+                PriceEntry(
+                    provider=item["provider"],
+                    model=item["model"],
+                    kind="audio",
+                    resolution=item["resolution"],
+                    quality=item.get("quality"),
+                    input_usd_per_mtok=Decimal(0),
+                    output_usd_per_mtok=Decimal(0),
+                    output_tokens=None,
+                    output_tokens_per_second=None,
+                    max_duration_s=item.get("max_duration_s"),
+                    source=item["source"],
+                    checked_on=item["checked_on"],
+                    per_item_usd=per_item,
+                )
+            )
+            continue
+        missing = [k for k in _REQUIRED_TOKEN if k not in item]
+        if missing:
+            raise PriceTableError(f"단가표 항목에 {missing}가 없다: {item.get('model')}")
         has_tokens = (item["kind"] == "image" and "output_tokens" in item) or (
             item["kind"] == "video" and "output_tokens_per_second" in item
         )
@@ -107,6 +135,8 @@ def find_entry(
 
 
 def output_tokens_for(entry: PriceEntry, duration_s: int | None) -> int:
+    if entry.kind == "audio":
+        return 0  # 곡당 고정 가격이라 토큰을 세지 않는다
     if entry.kind == "image":
         return int(entry.output_tokens or 0)
     if duration_s is None or duration_s < 1:
@@ -122,6 +152,8 @@ def input_tokens_estimate(prompt: str) -> int:
 
 
 def usd_for(entry: PriceEntry, *, input_tokens: int, output_tokens: int) -> Decimal:
+    if entry.per_item_usd is not None:
+        return entry.per_item_usd
     return (
         Decimal(input_tokens) * entry.input_usd_per_mtok
         + Decimal(output_tokens) * entry.output_usd_per_mtok

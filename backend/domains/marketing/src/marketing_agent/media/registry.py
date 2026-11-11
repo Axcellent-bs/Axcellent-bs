@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from marketing_agent.media.base import MediaProvider, MediaRequest, MediaResult
+from marketing_agent.media.gemini_audio import GeminiAudioProvider
 from marketing_agent.media.gemini_image import NAME as GEMINI_NAME
 from marketing_agent.media.gemini_image import GeminiImageProvider
 from marketing_agent.media.gemini_video import GeminiVideoProvider
@@ -22,10 +23,13 @@ class GeminiProvider(GeminiImageProvider):
     def __init__(self) -> None:
         super().__init__()
         self._video = GeminiVideoProvider()
+        self._audio = GeminiAudioProvider()
 
     def generate(self, request: MediaRequest) -> MediaResult:
         if request.media_kind == "video":
             return self._video.generate(request)
+        if request.media_kind == "audio":
+            return self._audio.generate(request)
         return super().generate(request)
 
 
