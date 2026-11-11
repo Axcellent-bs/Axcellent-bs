@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 로컬에서 백엔드 전체(공통 5개 + 서비스 11개 + 총괄)를 실제 모드로 띄운다. 목 모드는 없다(*_MOCK은 테스트 전용).
-#   bash backend/scripts/run_all.sh          # 실제 LLM·실제 토큰·Redis·파일 DB (캣북스 가상 주문은 SHOP_TRAFFIC=on일 때만)
+#   bash backend/scripts/run_all.sh          # 실제 LLM·실제 토큰·Redis·파일 DB (캣북스 가상 주문은 SHOP_TRAFFIC=on일 때만, 배송 표시는 늘)
 #                                            # 이미 떠 있으면 켜지 않는다 ("이미 실행 중 (pid …), 먼저 stop")
 #   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기 (자식까지, 끝에 "남은 프로세스 0개" 확인)
 #   bash backend/scripts/run_all.sh reset    # 끄고 테스트로 쌓인 기록(.data·이벤트 버스)을 지운다
@@ -405,24 +405,25 @@ while read -r name port module; do
 done <<< "$RUN_APPS"
 
 # >>> 주문 트래픽 스위치 (tests/test_run_all_procs.py가 이 부분만 실행한다)
-# 캣북스 가상 주문(scripts/shop_traffic.py)은 .env의 SHOP_TRAFFIC=on일 때만 띄운다(기본 꺼짐).
-# 끄면 사람이 사이트에서 하는 주문만 들어온다. 결제 장애 감지는 결제 표본(60초에 최소 5건)이 있어야
-# 해서, 장애 시연 때는 on으로 켠다
-SHOP_TRAFFIC_ON=0
+# 캣북스 가상 주문(scripts/shop_traffic.py)은 .env의 SHOP_TRAFFIC=on일 때만 넣는다(기본 꺼짐).
+# 꺼도 같은 스크립트가 발송·도착 표시와 재고 보충은 계속 한다(SHOP_TRAFFIC_ORDERS=0). 발송·도착이
+# 안 적히면 사람이 사이트에서 한 주문도 재무 판매자 정산에서 보류된다. 결제 장애 감지는 결제
+# 표본(60초에 최소 5건)이 있어야 해서 장애 시연 때는 on으로 켠다
+SHOP_TRAFFIC_ORDERS=0
 case "${SHOP_TRAFFIC:-off}" in
-  on | 1 | true) SHOP_TRAFFIC_ON=1 ;;
+  on | 1 | true) SHOP_TRAFFIC_ORDERS=1 ;;
 esac
-if [ "$SHOP_TRAFFIC_ON" != 1 ] && echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
-  echo "캣북스 주문 트래픽 안 띄움(SHOP_TRAFFIC=on이면 띄움)"
+if [ "$SHOP_TRAFFIC_ORDERS" != 1 ] && echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
+  echo "캣북스 가상 주문 꺼짐(배송 표시·재고 보충만, SHOP_TRAFFIC=on이면 주문도 넣음)"
 fi
 # <<< 주문 트래픽 스위치
 
-# 캣북스 고객 주문 트래픽 (SHOP_TRAFFIC=on이고 shop-api를 띄웠을 때만)
-if [ "$SHOP_TRAFFIC_ON" = 1 ] && echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
+# 캣북스 주문 트래픽·배송 표시 (shop-api를 띄웠을 때만. 가상 주문은 위 스위치가 정한다)
+if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
   # 재고가 0이 되면 주문이 조용히 멈춰 장애가 안 잡히는 것처럼 보인다. 자동 보충을 기본으로 켠다
   # (끄려면 SHOP_TRAFFIC_REFILL=0). 보충에는 위에서 만든 admin 토큰을 쓴다
   echo "$START_LINE" > "$LOGS/shop-traffic.log"
-  SHOP_API_URL=http://127.0.0.1:8010 SHOP_TRAFFIC_REFILL="${SHOP_TRAFFIC_REFILL:-1}" \
+  SHOP_API_URL=http://127.0.0.1:8010 SHOP_TRAFFIC_REFILL="${SHOP_TRAFFIC_REFILL:-1}" SHOP_TRAFFIC_ORDERS="$SHOP_TRAFFIC_ORDERS" \
     "$PY" scripts/shop_traffic.py >> "$LOGS/shop-traffic.log" 2>&1 &
   winpid_of $! > "$LOGS/shop-traffic.pid"
 fi

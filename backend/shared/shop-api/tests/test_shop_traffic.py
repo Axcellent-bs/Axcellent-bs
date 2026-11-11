@@ -223,3 +223,10 @@ def test_delivery_with_wrong_token_counts_failures(client: TestClient) -> None:
         clock=lambda: datetime.now(UTC) + timedelta(days=4),
     )
     assert delivery.sweep()["failed"] == 1 and any("실패 1건" in line for line in logs)
+
+
+def test_orders_are_placed_unless_switched_off() -> None:
+    """`SHOP_TRAFFIC_ORDERS=0`이면 가상 주문을 넣지 않는다(배송 표시·재고 보충만)."""
+    assert traffic.orders_enabled({}) is True
+    assert traffic.orders_enabled({"SHOP_TRAFFIC_ORDERS": "1"}) is True
+    assert traffic.orders_enabled({"SHOP_TRAFFIC_ORDERS": "0"}) is False
