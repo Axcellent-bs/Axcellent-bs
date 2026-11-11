@@ -91,9 +91,22 @@ def service_name() -> str:
 
 
 def _headers() -> dict[str, str]:
-    """이 서비스의 연결 키가 있으면 그것을, 없으면 내부 토큰을 보낸다(전환 기간에는 둘 다)."""
-    token = client_keys().get(service_name()) or config.agent_token("support")
-    return {"Authorization": f"Bearer {token}"}
+    """이 서비스의 연결 키를 보낸다. 키 목록이 없을 때만(옛 설치) 내부 토큰을 쓴다.
+
+    키 목록은 있는데 이 서비스 이름의 키가 없으면(이름 오타 등) 내부 토큰으로 돌아가지 않는다.
+    돌아가면 관찰만 하려던 설치가 쓰기 권한으로 돌거나, 분리 뒤 외부 판매 서버에 내부 토큰이 나간다.
+    """
+    keys = client_keys()
+    if keys:
+        key = keys.get(service_name())
+        if not key:
+            logger.error(
+                "%s에 서비스 %r의 키가 없다(설정된 서비스: %s). 요청을 보내지 않는다",
+                ENV_KEYS, service_name(), ", ".join(sorted(keys)),
+            )  # 키 값은 싣지 않는다
+            raise ShopError("NO_SERVICE_KEY", "이 서비스의 판매 서버 연결 키가 설정돼 있지 않다")
+        return {"Authorization": f"Bearer {key}"}
+    return {"Authorization": f"Bearer {config.agent_token('support')}"}
 
 
 ENV_MODE = "SUPPORT_SHOP_MODE"  # write(기본)·read(읽기 전용 설치, 관찰 모드)
@@ -111,6 +124,13 @@ def read_only() -> bool:
     if _KEY_IS_READ_ONLY["seen"]:
         return True
     return os.getenv(ENV_MODE, "").strip().lower() in ("read", "readonly", "observe")
+
+
+def read_only_reason() -> str | None:
+    """관찰 모드인 까닭: config(스위치)·key(판매 서버가 read 키라고 알려 옴)·None(쓰기 가능)."""
+    if _KEY_IS_READ_ONLY["seen"]:
+        return "key"
+    return "config" if read_only() else None
 
 
 async def _send(method: str, path: str, **kwargs: Any) -> httpx.Response:

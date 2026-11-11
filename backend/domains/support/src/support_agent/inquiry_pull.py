@@ -89,6 +89,7 @@ def status() -> dict[str, Any]:
         **more.COUNTS,
         "enabled": enabled(),
         "read_only": shop_client.read_only(),
+        "read_only_reason": shop_client.read_only_reason(),
         "interval_seconds": interval_seconds(),
         "connected": (STATE["last_error"] is None) if attempted else None,
     }

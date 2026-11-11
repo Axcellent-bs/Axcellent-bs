@@ -89,7 +89,9 @@ AXcellent가 정해진 간격으로 읽어 간다. 실제 고객사 기준에서
   251 서버 담당(이재헌 님)이 한다.
 - AXcellent 쪽: `.env`의 `AX_SHOP_CLIENT_KEYS="inquiry:<키>,claims:<키>,reviews:<키>"`을 읽어, 서비스가 자기 이름의
   키를 `Authorization: Bearer`로 보낸다. 서비스 이름은 `AX_SERVICE_NAME` 또는 서비스 카드 폴더 이름이다.
-  그 서비스의 키가 없으면 지금처럼 내부 토큰을 보낸다(251이 아직 Axcellent-bs 판매 서버라 전환 기간에는 둘 다 돼야 한다).
+  키 목록이 아예 없으면(옛 설치) 지금처럼 내부 토큰을 보낸다(251이 아직 Axcellent-bs 판매 서버라 전환 기간에는 둘 다 돼야 한다).
+  키 목록은 있는데 이 서비스의 키가 없으면(서비스 이름 오타 등) 내부 토큰으로 돌아가지 않고 `NO_SERVICE_KEY`로 요청을 보내지 않는다(키 값 없이 로그에 서비스 이름만 남긴다).
+  판매 서버가 쓰기에 `READ_ONLY_KEY`를 돌려줘 관찰 모드가 되면 상태의 `read_only_reason`이 `key`이고 대시보드가 주의로 보여 준다.
 - `read` 키로 쓰기를 보내면 판매 서버가 403 `READ_ONLY_KEY`로 막는다. 고객지원은 이를 받으면 자동으로 관찰 모드가
   되어(`SUPPORT_SHOP_MODE=read`와 같다) 이후 쓰기를 보내지 않고, 읽은 표시·되돌려 쓰기는 조용히 건너뛴다.
 - Axcellent-bs의 `shop-api`는 이 키 검사를 하지 않는다(곧 레포 분리로 빠진다). 키 시험은 catbooks-demo 판매 서버를

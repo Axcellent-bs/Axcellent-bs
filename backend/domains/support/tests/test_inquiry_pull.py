@@ -1055,7 +1055,7 @@ def test_the_service_name_comes_from_the_env_or_the_service_card_folder(
 
 
 @pytest.mark.asyncio
-async def test_a_service_sends_its_own_key_and_falls_back_to_the_internal_token(
+async def test_a_service_sends_its_own_key_and_never_falls_back_when_keys_are_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(shop_client.ENV_KEYS, "inquiry:sk_inq,claims:sk_clm")
@@ -1064,19 +1064,18 @@ async def test_a_service_sends_its_own_key_and_falls_back_to_the_internal_token(
     try:
         monkeypatch.setenv(shop_client.ENV_SERVICE, "claims")
         await shop_client.fetch_claim_inbox()
-        monkeypatch.setenv(shop_client.ENV_SERVICE, "reviews")  # 이 서비스의 키는 없다
-        await shop_client.fetch_idea_inbox()
-        monkeypatch.delenv(shop_client.ENV_KEYS)  # 키가 아예 없다
+        monkeypatch.setenv(shop_client.ENV_SERVICE, "reviews")  # 이 서비스의 키는 없다(오타 등)
+        with pytest.raises(shop_client.ShopError) as caught:
+            await shop_client.fetch_idea_inbox()
+        monkeypatch.delenv(shop_client.ENV_KEYS)  # 키 목록이 아예 없다(옛 설치)
         monkeypatch.setenv(shop_client.ENV_SERVICE, "claims")
         await shop_client.fetch_claim_inbox()
     finally:
         shop_client.use_client(None)
-    own, no_key_for_service, no_keys = _auth_of(requests)
+    own, no_keys = _auth_of(requests)  # 키가 없는 서비스의 요청은 아예 나가지 않았다
     assert own == "Bearer sk_clm"  # 자기 서비스 이름의 키
-    expected = "Bearer " + shop_client.config.agent_token("support")
-    assert (
-        no_key_for_service == expected and no_keys == expected
-    )  # 내부 토큰으로 전환 기간을 잇는다
+    assert caught.value.code == "NO_SERVICE_KEY"
+    assert no_keys == "Bearer " + shop_client.config.agent_token("support")  # 키 목록이 없을 때만
 
 
 @pytest.mark.asyncio
@@ -1097,6 +1096,7 @@ async def test_a_read_key_refused_write_turns_the_install_into_an_observer(
         assert shop_client.read_only() is False
         await shop_client.mark_inquiry_synced(1, 5)  # 403 READ_ONLY_KEY를 받아도 오류 없이 넘어간다
         assert shop_client.read_only() is True and inquiry_pull.status()["read_only"] is True
+        assert inquiry_pull.status()["read_only_reason"] == "key"  # 스위치가 아니라 키 때문이다
         await shop_client.mark_inquiry_synced(2, 6)  # 이제는 판매 서버에 보내지도 않는다
         with pytest.raises(shop_client.ShopError) as caught:
             await shop_client.refund("pay_1", 1000, "k", "ctx_shop_x")
@@ -1131,3 +1131,19 @@ async def test_retrying_a_stuck_intake_says_read_only_instead_of_failing_silentl
     finally:
         shop_client.use_client(None)
     assert caught.value.code == "READ_ONLY" and requests == []
+
+
+def test_a_missing_service_key_is_logged_without_any_key_value(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv(shop_client.ENV_KEYS, "inquiry:sk_secret")
+    monkeypatch.setenv(shop_client.ENV_SERVICE, "claims")
+    with caplog.at_level("ERROR"), pytest.raises(shop_client.ShopError):
+        shop_client._headers()
+    assert "claims" in caplog.text and "sk_secret" not in caplog.text
+
+
+def test_the_read_only_reason_is_config_for_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert shop_client.read_only_reason() is None
+    monkeypatch.setenv(shop_client.ENV_MODE, "read")
+    assert shop_client.read_only_reason() == "config"

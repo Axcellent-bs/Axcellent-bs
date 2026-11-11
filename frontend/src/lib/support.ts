@@ -207,6 +207,7 @@ export interface InquiryPullStatus {
   inbox_failed: number | null; claims_inbox_failed: number | null;
   // 읽기 전용 설치(관찰 모드): 판매 서버를 읽기만 하고 읽은 표시·되돌려 쓰기는 하지 않는다
   read_only?: boolean;
+  read_only_reason?: "config" | "key" | null;  // key: 스위치가 아니라 판매 서버가 read 키라고 알려 옴
 }
 // 실패로 빼 둔 접수 한 건: 번호·사유 코드·시도 횟수만 있고 고객이 쓴 글은 없다
 export interface StuckIntakeItem {
