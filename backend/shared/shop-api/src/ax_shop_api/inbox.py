@@ -11,7 +11,7 @@
   `support_inquiry_id`로 고객지원 문의에 이어지고, 고객용 목록·상세·평가는 늘 `seq`로 열어
   이 값으로 바꿔 부른다.
 - 처리에 실패한 접수는 읽는 쪽이 `report_failure`로 알린다. 실패할 때마다 다시 읽는 시각을
-  늦추고(1분부터 두 배, 최대 30분) 정해진 횟수(`SHOP_INBOX_MAX_ATTEMPTS`, 기본 6)를 넘기면
+  늦추고(1분부터 두 배, 최대 30분) 정해진 횟수(`SHOP_INBOX_MAX_ATTEMPTS`, 기본 6)에 닿으면
   실패로 빼 둔다. 그래서 계속 실패하는 접수가 문의함 앞을 막지 않는다.
 - 원문은 로그·오류 메시지에 싣지 않는다.
 """
@@ -19,39 +19,17 @@
 from __future__ import annotations
 
 import json
-import os
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from ax_shop_api import intake_common
 from ax_shop_api.db import TENANT_ID, Db
+from ax_shop_api.intake_common import backoff_seconds, max_attempts  # noqa: F401 (밖에서 쓴다)
+from ax_shop_api.intake_common import now as _now
 
 READ_LIMIT_DEFAULT = 20
 READ_LIMIT_MAX = 100
-MAX_ATTEMPTS_DEFAULT = 6
-BACKOFF_BASE_SECONDS = 60
-BACKOFF_MAX_SECONDS = 1800
 PREVIEW_CHARS = 80  # 아직 처리 전인 문의의 고객용 미리보기(본인이 쓴 글의 앞부분)
-
-
-def _stamp(moment: datetime) -> str:
-    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _now() -> str:
-    return _stamp(datetime.now(UTC))
-
-
-def max_attempts() -> int:
-    try:
-        value = int(os.getenv("SHOP_INBOX_MAX_ATTEMPTS") or MAX_ATTEMPTS_DEFAULT)
-    except ValueError:
-        return MAX_ATTEMPTS_DEFAULT
-    return value if value > 0 else MAX_ATTEMPTS_DEFAULT
-
-
-def backoff_seconds(attempts: int) -> int:
-    """실패 `attempts`번째 뒤 기다리는 초. 1분, 2분, 4분… 최대 30분."""
-    return min(BACKOFF_BASE_SECONDS * 2 ** max(attempts - 1, 0), BACKOFF_MAX_SECONDS)
+STUCK_WHERE = "failed_at IS NOT NULL AND synced_at IS NULL"  # 막힌 접수(목록·건수 공통)
 
 
 def add(
@@ -114,8 +92,7 @@ def pending(db: Db, limit: int = READ_LIMIT_DEFAULT) -> tuple[list[dict[str, Any
             "SELECT COUNT(*) AS n FROM inquiry_inbox WHERE synced_at IS NULL AND failed_at IS NULL"
         ).fetchone()["n"]
         failed = conn.execute(
-            "SELECT COUNT(*) AS n FROM inquiry_inbox WHERE synced_at IS NULL"
-            " AND failed_at IS NOT NULL"
+            f"SELECT COUNT(*) AS n FROM inquiry_inbox WHERE {STUCK_WHERE}"  # noqa: S608
         ).fetchone()["n"]
     items = [
         {
@@ -137,7 +114,7 @@ def pending(db: Db, limit: int = READ_LIMIT_DEFAULT) -> tuple[list[dict[str, Any
 
 
 def mark_synced(db: Db, seq: int, support_inquiry_id: int) -> dict[str, Any] | None:
-    """AXcellent가 읽어 처리했다고 표시하고 사진을 지운다. 이미 표시했으면 그대로 돌려준다.
+    """AXcellent가 읽어 처리했다고 표시하고 사진과 본문 사본을 지운다. 이미 표시했으면 그대로 둔다.
 
     없는 번호면 None이다.
     """
@@ -148,7 +125,7 @@ def mark_synced(db: Db, seq: int, support_inquiry_id: int) -> dict[str, Any] | N
         if row["synced_at"] is None:
             conn.execute(
                 "UPDATE inquiry_inbox SET synced_at = ?, support_inquiry_id = ?, images = NULL,"
-                " retry_after = NULL, failed_at = NULL WHERE seq = ?",
+                " message = '', retry_after = NULL, failed_at = NULL WHERE seq = ?",
                 (_now(), support_inquiry_id, seq),
             )
             row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
@@ -160,36 +137,8 @@ def mark_synced(db: Db, seq: int, support_inquiry_id: int) -> dict[str, Any] | N
 
 
 def report_failure(db: Db, seq: int, reason: str) -> dict[str, Any] | None:
-    """읽어 간 쪽이 처리하지 못했다고 알린다. 다시 읽는 시각을 늦추고 횟수를 넘기면 실패로 뺀다.
-
-    이미 처리된(`synced`) 문의는 그대로 둔다. 없는 번호면 None이다. `reason`은 짧은 코드다.
-    """
-    with db.tx() as conn:
-        row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
-        if row is None:
-            return None
-        if row["synced_at"] is None and row["failed_at"] is None:
-            attempts = row["attempts"] + 1
-            if attempts >= max_attempts():
-                conn.execute(
-                    "UPDATE inquiry_inbox SET attempts = ?, failed_at = ?, retry_after = NULL,"
-                    " last_error = ? WHERE seq = ?",
-                    (attempts, _now(), reason[:40], seq),
-                )
-            else:
-                later = _stamp(datetime.now(UTC) + timedelta(seconds=backoff_seconds(attempts)))
-                conn.execute(
-                    "UPDATE inquiry_inbox SET attempts = ?, retry_after = ?, last_error = ?"
-                    " WHERE seq = ?",
-                    (attempts, later, reason[:40], seq),
-                )
-            row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
-    return {
-        "seq": row["seq"],
-        "attempts": row["attempts"],
-        "failed": row["failed_at"] is not None,
-        "retry_after": row["retry_after"],
-    }
+    """읽어 간 쪽이 처리하지 못했다고 알린다 (재시도 간격·상한은 intake_common에 있다)."""
+    return intake_common.report_failure(db, "inquiry_inbox", seq, reason)
 
 
 def for_buyer(db: Db, buyer_id: str) -> list[dict[str, Any]]:
@@ -225,35 +174,10 @@ def _own(row: Any) -> dict[str, Any]:
 
 def stuck(db: Db) -> list[dict[str, Any]]:
     """실패로 빼 둔 문의(사람이 봐야 한다). 고객이 쓴 글은 싣지 않고 번호·사유·횟수만 돌려준다."""
-    with db.tx() as conn:
-        rows = conn.execute(
-            "SELECT seq, attempts, last_error, failed_at, created_at FROM inquiry_inbox"
-            " WHERE failed_at IS NOT NULL AND synced_at IS NULL ORDER BY seq"
-        ).fetchall()
-    return [
-        {
-            "kind": "inquiry",
-            "seq": r["seq"],
-            "reason": r["last_error"],
-            "attempts": r["attempts"],
-            "failed_at": r["failed_at"],
-            "created_at": r["created_at"],
-        }
-        for r in rows
-    ]
+    rows = intake_common.stuck_rows(db, "inquiry_inbox", "inquiry", STUCK_WHERE)
+    return [{k: v for k, v in row.items() if k != "digest"} for row in rows]
 
 
 def retry(db: Db, seq: int) -> dict[str, Any] | None:
     """실패로 뺀 문의를 다시 읽는 차례로 돌린다. 실패가 아니면 그대로 두고, 없는 번호면 None."""
-    with db.tx() as conn:
-        row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
-        if row is None:
-            return None
-        stuck_now = row["failed_at"] is not None and row["synced_at"] is None
-        if stuck_now:
-            conn.execute(
-                "UPDATE inquiry_inbox SET attempts = 0, failed_at = NULL, retry_after = NULL"
-                " WHERE seq = ?",
-                (seq,),
-            )
-    return {"seq": seq, "requeued": stuck_now}
+    return intake_common.requeue(db, "inquiry_inbox", seq, STUCK_WHERE, {}, lambda _row: True)

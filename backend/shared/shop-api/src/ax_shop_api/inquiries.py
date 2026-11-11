@@ -129,6 +129,7 @@ def clean_text(subject: str | None, body: str, order_id: str) -> tuple[str, str]
     return title, text
 
 
+INTAKE_FAILED_NOTICE = "접수를 처리하지 못했습니다. 고객센터로 문의해 주세요."
 CUSTOMER_FIELDS = ("id", "subject", "status", "order_id", "updated_at", "rated", "preview")
 MESSAGE_FIELDS = ("id", "role", "text", "created_at")
 
@@ -162,12 +163,17 @@ def own_view(own: dict, item: dict | None = None, *, with_messages: bool = False
         "rated": False,
         "can_rate": False,
     }
+    if own.get("failed"):  # 여러 번 처리하지 못해 따로 빼 둔 접수: 계속 처리 중으로 두지 않는다
+        view["intake_failed"] = True
+        view["notice"] = INTAKE_FAILED_NOTICE
     if with_messages:
         view["messages"] = [
             {"id": 1, "role": "customer", "text": own["message"], "created_at": own["created_at"]}
         ]
     else:
-        view["preview"] = own["message"][:PREVIEW_CHARS]
+        view["preview"] = (
+            INTAKE_FAILED_NOTICE if own.get("failed") else own["message"][:PREVIEW_CHARS]
+        )
     return view
 
 

@@ -612,3 +612,26 @@ def test_an_unreachable_shop_is_reported_not_hidden(monkeypatch: pytest.MonkeyPa
     assert _a2a("list_stuck_intake", {})["outcome"] == "unavailable"
     out = _a2a("retry_stuck_intake", {"kind": "inquiry", "seq": 2}, key="k-retry-down")["output"]
     assert out["requeued"] is False and out["error"] == "UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_a_shop_error_on_one_item_does_not_stop_the_rest_of_the_cycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """읽음 표시가 한 건에서 실패해도 뒤 건은 그 주기에 처리하고 상태 숫자도 갱신한다."""
+    shop = FakeShop([item(1), item(2), item(3)])
+    wire(monkeypatch, shop)
+    real_mark = shop.mark
+
+    async def flaky(seq: int, support_id: int) -> None:
+        if seq == 2:
+            raise shop_client.ShopError("UNAVAILABLE", "500")
+        await real_mark(seq, support_id)
+
+    monkeypatch.setattr(shop_client, "mark_inquiry_synced", flaky)
+    await inquiry_pull.pull_once()
+    assert [s for s, _ in shop.synced] == [1, 3]  # 2번 때문에 3번이 멈추지 않았다
+    state = inquiry_pull.status()
+    assert state["ingested_total"] == 2 and state["failed_total"] == 1
+    assert state["pending"] == 1 and state["connected"] is False
+    assert shop.failed == []  # 처리는 됐으니 실패 횟수는 세지 않는다
