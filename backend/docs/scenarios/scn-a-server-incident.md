@@ -217,6 +217,8 @@
 | ② DejaFix (Zabbix) | 서버 지표 | Zabbix 트리거 | `infra.anomaly_detected` (근거 = Zabbix 이벤트 ID) | 🆕 DJF-02 |
 | ③ 데이터 이상 탐지 | 결제 실패율 (업무 지표) | 지난 7일 같은 시각 대비 3배 또는 표준편차 3, severity high | `metric.anomaly` | ✅ |
 
+①은 판매 서버가 이벤트 버스에 직접 넣지 않고 AXcellent 알림 받는 주소(웹훅 + 회사 키, `POST /api/dashboard/events`)로 보낸다. dashboard-api가 확인한 뒤 버스에 넣으므로 총괄은 그대로 구독한다.
+
 **총괄 규칙 (✅ 코드에 있음)**
 - `shop.degraded`, `infra.anomaly_detected` → 사건 열기
 - `metric.anomaly`는 high일 때만 사건 열기, 아니면 메모

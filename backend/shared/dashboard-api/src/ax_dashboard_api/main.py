@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ax_dashboard_api import company_connection, handoffs, support_client
+from ax_dashboard_api import company_connection, handoffs, shop_events, support_client
 from ax_dashboard_api.envelope import install_error_handlers, is_mock
 from ax_dashboard_api.routes import router
 
@@ -92,6 +92,8 @@ app.include_router(handoffs.intake)
 app.include_router(handoffs.inbox)
 # 시스템 관리 > 회사 연결 (고객사 판매 서버 주소, 쓰기는 사람 토큰)
 app.include_router(company_connection.router)
+# 알림 받는 주소: 고객사 판매 서버가 회사 키로 이벤트를 보낸다 (사람 토큰 대신 회사 키)
+app.include_router(shop_events.router)
 
 
 @app.get("/health")
