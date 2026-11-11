@@ -136,8 +136,8 @@ def test_support_reads_new_claims_oldest_first_with_everything_it_needs(
     assert item["seq"] == 1 and item["description"] == SAID  # 읽는 쪽은 설명을 받아 판정한다
     assert item["items"] == [{"order_item_id": "oi_1", "qty": 1}] and item["unsealed"] is True
     assert set(item) == {
-        "seq", "context_id", "buyer_id", "customer_name", "order_id", "type", "reason",
-        "items", "unsealed", "evidence_count", "description", "created_at",
+        "seq", "key", "context_id", "buyer_id", "customer_name", "order_id", "type", "reason",
+        "items", "unsealed", "evidence_count", "description", "attempts", "created_at",
     }  # fmt: skip
 
 
@@ -179,7 +179,8 @@ def test_open_claims_are_listed_until_they_reach_a_final_status(client: TestClie
     assert client.get(READ, params={"state": "open"}, headers=SUPPORT).json()["data"] == []
     _result(client, seq)
     (open_one,) = client.get(READ, params={"state": "open"}, headers=SUPPORT).json()["data"]
-    assert open_one == {"seq": seq, "support_claim_id": 7, "status": "needs_review"}
+    assert open_one["status"] == "needs_review" and open_one["support_claim_id"] == 7
+    assert open_one["seq"] == seq and open_one["result_digest"]  # 읽는 쪽이 달라졌는지 견준다
     _result(client, seq, status="completed", result=RESULT | {"status": "completed"})
     assert client.get(READ, params={"state": "open"}, headers=SUPPORT).json()["data"] == []
     (row,) = client.get("/api/shop/claims", params={"buyer_id": "buy_0001"}).json()["data"]

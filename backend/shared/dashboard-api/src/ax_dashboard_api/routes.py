@@ -1641,6 +1641,26 @@ async def inquiry_pull_status() -> dict:
     return ok(await support_client.call("inquiry_pull_status", {}))
 
 
+@router.get("/inquiry-pull/stuck")
+async def stuck_intake() -> dict:
+    """판매 서버가 실패로 빼 둔 문의·클레임 접수 (읽기). 번호·사유·횟수만 있고 고객 글은 없다."""
+    if is_mock():
+        return ok({"items": [], "total": 0})
+    return ok(await support_client.call("list_stuck_intake", {}))
+
+
+@router.post("/inquiry-pull/stuck/{kind}/{seq}/retry")
+async def retry_stuck_intake(kind: Literal["inquiry", "claim"], seq: int = Path(ge=1)) -> dict:
+    """실패로 빼 둔 접수를 다시 읽는 차례로 돌린다. 사람이 확인한 뒤 누른다 (사람 토큰 필요)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "접수 다시 시도는 실제 모드에서만 된다")
+    return ok(
+        await support_client.call(
+            "retry_stuck_intake", {"kind": kind, "seq": seq}, target=f"{kind}:{seq}"
+        )
+    )
+
+
 @router.get("/ideas")
 async def customer_ideas(
     status: str | None = Query(default=None, pattern=r"^(new|sent)$"),

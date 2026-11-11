@@ -1,17 +1,19 @@
-"""해결 결과 평가 중계(shop-api → 고객지원 submit_feedback): 입력 검증, 본인 문의, 오류 변환."""
+"""해결 결과 평가 중계: 고객이 받은 번호(판매 서버 접수 번호)를 고객지원 문의 번호로 바꿔
+(shop-api → 고객지원 submit_feedback) 입력 검증, 본인 문의, 오류 변환을 본다."""
 
 import pytest
 from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
-from ax_shop_api import support_client
+from ax_shop_api import inbox, support_client
 from ax_shop_api.db import Db
 from ax_shop_api.main import create_app
 
 META = {"context_id": "ctx_shop_x", "token": "t", "deadline": "2030-01-01T00:00:00Z"}
 COMMENT = "연락은 010-1234-5678 로 주세요"
-URL = "/api/shop/inquiries/11/feedback"
+SUPPORT_ID = 11  # 고객지원이 읽어 만든 문의 번호 (접수 번호와 다르다)
+URL = "/api/shop/inquiries/1/feedback"  # 고객이 받은 번호 = 접수 번호 1
 
 
 @pytest.fixture(autouse=True)
@@ -48,8 +50,36 @@ def support(monkeypatch: pytest.MonkeyPatch) -> FakeSupport:
 
 
 @pytest.fixture
-def client() -> TestClient:
-    return TestClient(create_app(Db(":memory:")))
+def db() -> Db:
+    return Db(":memory:")
+
+
+@pytest.fixture
+def client(db: Db) -> TestClient:
+    return TestClient(create_app(db))
+
+
+def seed(db: Db, buyer: str = "buy_0001", *, synced: bool = True) -> int:
+    """접수를 넣고 고객지원이 읽어 갔으면(`SUPPORT_ID`) 그 번호를 잇는다. 접수 번호를 준다."""
+    saved = inbox.add(
+        db,
+        digest=f"{buyer}-{synced}",
+        context_id="ctx_shop_aaaaaaaaaaaa",
+        buyer_id=buyer,
+        customer_name="김하늘",
+        order_id="ord_0001",
+        subject="문의",
+        message="원문",
+        images=None,
+    )
+    if synced:
+        inbox.mark_synced(db, saved["seq"], SUPPORT_ID)
+    return saved["seq"]
+
+
+@pytest.fixture(autouse=True)
+def _own_inquiry(db: Db) -> None:
+    seed(db)  # 접수 번호 1 = 고객지원 문의 11, 구매자 buy_0001
 
 
 def _body(**extra) -> dict:  # noqa: ANN003
@@ -62,21 +92,22 @@ def _result(status: TaskStatus, outcome: str | None = None, output: dict | None 
     )
 
 
-def test_정상_평가는_정수_user_id와_후기를_untrusted로_넘기고_접수_사실만_돌려준다(
+def test_정상_평가는_접수_번호를_고객지원_번호로_바꿔_넘기고_접수_사실만_돌려준다(
     client: TestClient, support: FakeSupport
 ) -> None:
     response = client.post(URL, json=_body(rating=4))
     assert response.status_code == 201
     body = response.json()
-    assert body["data"] == {"inquiry_id": 11, "rated": True, "rating": 4}  # 내부 판단은 없다
+    # 고객이 받은 번호(1)로 돌려주고 내부 판단은 없다
+    assert body["data"] == {"inquiry_id": 1, "rated": True, "rating": 4}
     assert body["meta"]["context_id"].startswith("ctx_shop_")
     target, request = support.calls[0]
     assert (target, request.skill) == ("support", "submit_feedback")
     assert request.meta.token == "mock:shop-api"
-    assert request.input == {"inquiry_id": 11, "rating": 4, "resolved": True, "user_id": 1}
+    assert request.input == {"inquiry_id": SUPPORT_ID, "rating": 4, "resolved": True, "user_id": 1}
     assert request.untrusted == {"comment": COMMENT}
     assert COMMENT not in str(request.input)
-    assert request.meta.idempotency_key.endswith(":submit_feedback:inquiry:11")
+    assert request.meta.idempotency_key.endswith(f":submit_feedback:inquiry:{SUPPORT_ID}")
 
 
 def test_후기_글은_없어도_된다(client: TestClient, support: FakeSupport) -> None:
@@ -119,13 +150,25 @@ def test_구매자_ID_형식이_틀리면_400이고_문의_번호는_1_이상이
     assert support.calls == []
 
 
-def test_남의_문의나_없는_문의는_같은_404(client: TestClient, support: FakeSupport) -> None:
-    support.result = _result(
-        TaskStatus.COMPLETED, "not_found", {"message": "문의 11를 찾을 수 없다"}
+def test_남의_문의나_없는_문의는_같은_404이고_고객지원을_부르지_않는다(
+    client: TestClient, support: FakeSupport
+) -> None:
+    other = client.post(URL, json=_body(buyer_id="buy_0002"))  # 접수 1은 buy_0001의 것
+    missing = client.post("/api/shop/inquiries/99/feedback", json=_body(buyer_id="buy_0002"))
+    assert (other.status_code, other.json()["error"]["code"]) == (404, "NOT_FOUND")
+    assert other.json() == missing.json()
+    assert support.calls == []
+
+
+def test_고객지원이_아직_읽어_가지_않은_문의는_평가할_수_없다(
+    client: TestClient, db: Db, support: FakeSupport
+) -> None:
+    pending = seed(db, "buy_0003", synced=False)
+    response = client.post(
+        f"/api/shop/inquiries/{pending}/feedback", json=_body(buyer_id="buy_0003")
     )
-    response = client.post(URL, json=_body(buyer_id="buy_0002"))
-    assert (response.status_code, response.json()["error"]["code"]) == (404, "NOT_FOUND")
-    assert support.calls[0][1].input["user_id"] == 2  # 요청한 구매자의 번호로 확인시킨다
+    assert (response.status_code, response.json()["error"]["code"]) == (409, "INVALID_STATE")
+    assert support.calls == []
 
 
 def test_해결되지_않은_문의와_이미_남긴_문의는_409(
@@ -160,13 +203,16 @@ def test_고객지원_오류는_상태와_코드로_바뀐다(
 
 
 def test_속도_제한은_문의_접수와_따로_센다(
-    client: TestClient, support: FakeSupport, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, db: Db, support: FakeSupport, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("SHOP_INQUIRY_RATE_PER_BUYER", "2")
     codes = [client.post(URL, json=_body()).status_code for _ in range(3)]
     assert codes == [201, 201, 429]
     assert len(support.calls) == 2
-    other = client.post(URL, json=_body(buyer_id="buy_0002"))  # 다른 구매자는 영향이 없다
+    other_seq = seed(db, "buy_0002")  # 다른 구매자는 영향이 없다
+    other = client.post(
+        f"/api/shop/inquiries/{other_seq}/feedback", json=_body(buyer_id="buy_0002")
+    )
     assert other.status_code == 201
     order = client.post(
         "/api/shop/orders",

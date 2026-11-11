@@ -36,26 +36,40 @@ class FakeShop:
         self.items = items
         self.claims = claims or []
         self.open: list[dict[str, Any]] = []
+        self.open_calls: list[int] = []
         self.results: list[tuple[int, int | None, str, dict[str, Any]]] = []
         self.synced: list[tuple[int, int]] = []
+        self.failed: list[tuple[str, int, str]] = []  # (종류, 접수 번호, 사유)
+        self.next_after: int | None = None
+        self.inbox_failed = 0
         self.down = False
+        self.inquiry_down = False  # 문의함만 닿지 않는다
         self.sync_down = False
 
-    async def fetch(self, limit: int = 20) -> tuple[list[dict[str, Any]], int]:
-        if self.down:
+    async def fetch(self, limit: int = 20) -> tuple[list[dict[str, Any]], int, int]:
+        if self.down or self.inquiry_down:
             raise shop_client.ShopError("UNAVAILABLE", "연결할 수 없다")
         pending = [i for i in self.items if i["seq"] not in {s for s, _ in self.synced}]
-        return pending[:limit], len(pending)
+        return pending[:limit], len(pending), self.inbox_failed
 
-    async def fetch_claims(self, limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+    async def fetch_claims(self, limit: int = 20) -> tuple[list[dict[str, Any]], int, int]:
         if self.down:
             raise shop_client.ShopError("UNAVAILABLE", "연결할 수 없다")
         done = {r[0] for r in self.results}
         pending = [c for c in self.claims if c["seq"] not in done]
-        return pending[:limit], len(pending)
+        return pending[:limit], len(pending), self.inbox_failed
 
-    async def fetch_open(self) -> list[dict[str, Any]]:
-        return self.open
+    async def fetch_open(self, after: int = 0) -> tuple[list[dict[str, Any]], int | None]:
+        self.open_calls.append(after)
+        page = [o for o in self.open if o["seq"] > after][:2]  # 쪽 크기 2
+        more = len([o for o in self.open if o["seq"] > after]) > 2
+        return page, (page[-1]["seq"] if more else None)
+
+    async def report_inquiry_failed(self, seq: int, reason: str) -> None:
+        self.failed.append(("inquiry", seq, reason))
+
+    async def report_claim_failed(self, seq: int, reason: str) -> None:
+        self.failed.append(("claim", seq, reason))
 
     async def write_result(
         self, seq: int, claim_id: int | None, status: str, result: dict[str, Any]
@@ -91,6 +105,8 @@ def wire(monkeypatch: pytest.MonkeyPatch, shop: FakeShop) -> list[Any]:
     monkeypatch.setattr(shop_client, "fetch_claim_inbox", shop.fetch_claims)
     monkeypatch.setattr(shop_client, "fetch_open_claims", shop.fetch_open)
     monkeypatch.setattr(shop_client, "write_claim_result", shop.write_result)
+    monkeypatch.setattr(shop_client, "report_inquiry_failed", shop.report_inquiry_failed)
+    monkeypatch.setattr(shop_client, "report_claim_failed", shop.report_claim_failed)
     monkeypatch.setattr(handlers, "create_inquiry", fake_create)
     return seen
 
@@ -138,16 +154,16 @@ async def test_a_read_inquiry_is_not_processed_again(monkeypatch: pytest.MonkeyP
 async def test_when_the_read_mark_fails_the_same_key_is_retried(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    shop = FakeShop([item(1)])
+    shop = FakeShop([item(1, key="k-aaa")])
     seen = wire(monkeypatch, shop)
     shop.sync_down = True
-    first = await inquiry_pull.pull_once()
-    assert first["failed"] == 1 and shop.synced == []
+    await inquiry_pull.pull_once()
+    assert shop.synced == [] and inquiry_pull.status()["last_error"] == "UNAVAILABLE"
     shop.sync_down = False
     second = await inquiry_pull.pull_once()
     assert second["ingested"] == 1 and shop.synced == [(1, 102)]
     # 다시 읽어도 같은 멱등 키라 문의는 하나다 (create_inquiry가 같은 키는 한 번만 만든다)
-    assert {r.meta.idempotency_key for r in seen} == {"shop-inquiry:1"}
+    assert {r.meta.idempotency_key for r in seen} == {"shop-inquiry:k-aaa"}
 
 
 @pytest.mark.asyncio
@@ -347,37 +363,56 @@ async def test_a_claim_that_could_not_be_judged_stays_unread(
 
 
 @pytest.mark.asyncio
-async def test_an_open_claim_whose_status_changed_is_written_again(
+async def test_an_open_claim_is_written_again_only_when_what_the_customer_sees_changed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from support_agent.claim_schemas import Claim
 
-    shop = FakeShop([])
-    shop.open = [
-        {"seq": 1, "support_claim_id": 5, "status": "needs_review"},  # 바뀜
-        {"seq": 2, "support_claim_id": 6, "status": "approved"},  # 같음
-        {"seq": 3, "support_claim_id": 99, "status": "approved"},  # 이 서버에 없는 클레임
-    ]
-    wire(monkeypatch, shop)
-    wire_claims(monkeypatch)
-    store = ClaimStore()
-
-    def claim(cid: int, status: str) -> Claim:
+    def claim(cid: int, status: str, refund_paid: int = 0) -> Claim:
         return Claim.model_validate(
             {
                 "id": cid, "context_id": "ctx_x", "order_id": "ord_1", "order_no": "ORD-1",
                 "buyer_id": "buy_0007", "customer": "홍", "type": "return", "reason": "defect",
                 "status": status, "created_at": "2026-11-11T00:00:00Z",
                 "updated_at": "2026-11-11T00:00:00Z", "outcome": "x", "resolution": "x",
-                "requires_return": False, "expected_refund": 100, "refund_paid": 0,
+                "requires_return": False, "expected_refund": 100, "refund_paid": refund_paid,
             }
         )  # fmt: skip
 
-    store._claims[5] = claim(5, "approved")
-    store._claims[6] = claim(6, "approved")
+    def shown(c: Claim) -> str:
+        return inquiry_pull.claim_digest(inquiry_pull.customer_claim(c.model_dump(mode="json")))
+
+    store = ClaimStore()
+    store._claims[5] = claim(5, "approved")  # 상태가 바뀜(needs_review → approved)
+    store._claims[6] = claim(6, "approved", refund_paid=100)  # 상태는 그대로, 환불 완료액이 바뀜
+    store._claims[7] = claim(7, "approved")  # 아무것도 안 바뀜
+    shop = FakeShop([])
+    shop.open = [
+        {"seq": 1, "support_claim_id": 5, "status": "needs_review", "result_digest": "x"},
+        {
+            "seq": 2,
+            "support_claim_id": 6,
+            "status": "approved",
+            "result_digest": shown(claim(6, "approved")),
+        },
+        {
+            "seq": 3,
+            "support_claim_id": 7,
+            "status": "approved",
+            "result_digest": shown(store._claims[7]),
+        },
+        {
+            "seq": 4,
+            "support_claim_id": 99,
+            "status": "approved",
+            "result_digest": None,
+        },  # 이 서버에 없는 클레임
+    ]
+    wire(monkeypatch, shop)
+    wire_claims(monkeypatch)
     monkeypatch.setattr(claim_handlers, "CLAIMS", store)
     await inquiry_pull.pull_once()
-    assert [(r[0], r[1], r[2]) for r in shop.results] == [(1, 5, "approved")]
+    assert [(r[0], r[1], r[2]) for r in shop.results] == [(1, 5, "approved"), (2, 6, "approved")]
 
 
 @pytest.mark.asyncio
@@ -409,3 +444,171 @@ def test_only_customer_visible_claim_fields_are_written_back() -> None:
     }  # fmt: skip
     for hidden in ("abuse_score", "audit", "agent_note", "execution_id", "decided_by"):
         assert hidden not in shown
+
+
+# --- 후속(#964 리뷰): 실패 접수 알리기, 쪽 나누기, 문의함이 막혀도 클레임은 읽기, 안정된 키
+
+
+@pytest.mark.asyncio
+async def test_an_unprocessed_inquiry_is_reported_as_failed_to_the_shop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop = FakeShop([item(1), item(2, buyer_id="buyer7")])
+    wire(monkeypatch, shop)
+
+    async def hold(request: Any) -> AgentResult:
+        return AgentResult(
+            meta=request.meta, status=TaskStatus.COMPLETED, outcome="not_executed_held", output={}
+        )
+
+    monkeypatch.setattr(handlers, "create_inquiry", hold)
+    result = await inquiry_pull.pull_once()
+    assert result["failed"] == 2 and shop.synced == []
+    # 처리하지 못한 접수는 판매 서버에 알려 다시 읽는 시각을 늦추게 한다 (앞을 막지 않게)
+    assert shop.failed == [("inquiry", 1, "not_executed_held"), ("inquiry", 2, "BAD_BUYER_ID")]
+
+
+@pytest.mark.asyncio
+async def test_a_claim_that_could_not_be_judged_is_reported_as_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop = FakeShop([], claims=[claim_item(1)])
+    wire(monkeypatch, shop)
+    wire_claims(monkeypatch, dict(status=TaskStatus.FAILED, outcome="shop_unavailable", output={}))
+    await inquiry_pull.pull_once()
+    assert shop.failed == [("claim", 1, "shop_unavailable")] and shop.results == []
+
+
+@pytest.mark.asyncio
+async def test_a_crash_is_reported_with_a_short_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    shop = FakeShop([item(1)])
+    wire(monkeypatch, shop)
+
+    async def boom(request: Any) -> AgentResult:
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(handlers, "create_inquiry", boom)
+    await inquiry_pull.pull_once()
+    assert shop.failed == [("inquiry", 1, "ERROR")]
+
+
+@pytest.mark.asyncio
+async def test_stuck_items_set_aside_by_the_shop_are_counted_in_the_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop = FakeShop([item(1)], claims=[claim_item(1)])
+    shop.inbox_failed = 3
+    wire(monkeypatch, shop)
+    wire_claims(monkeypatch)
+    await inquiry_pull.pull_once()
+    status = inquiry_pull.status()
+    assert status["inbox_failed"] == 3 and status["claims_inbox_failed"] == 3
+
+
+@pytest.mark.asyncio
+async def test_claims_are_read_even_when_the_inquiry_inbox_cannot_be_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop = FakeShop([item(1)], claims=[claim_item(1)])
+    shop.inquiry_down = True
+    wire(monkeypatch, shop)
+    wire_claims(monkeypatch)
+    await inquiry_pull.pull_once()
+    assert len(shop.results) == 1  # 그 주기의 클레임도 처리됐다
+    status = inquiry_pull.status()
+    assert status["connected"] is False and status["last_error"] == "UNAVAILABLE"
+    assert status["claims_ingested_total"] == 1 and status["pending"] is None
+
+
+@pytest.mark.asyncio
+async def test_open_claims_are_refreshed_page_by_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    from support_agent.claim_schemas import Claim
+
+    store = ClaimStore()
+    shop = FakeShop([])
+    for n in range(1, 6):  # 5건이 쪽 크기 2에 걸쳐 있다
+        store._claims[n] = Claim.model_validate(
+            {
+                "id": n, "context_id": "ctx_x", "order_id": f"ord_{n}", "order_no": f"ORD-{n}",
+                "buyer_id": "buy_0007", "customer": "홍", "type": "return", "reason": "defect",
+                "status": "approved", "created_at": "2026-11-11T00:00:00Z",
+                "updated_at": "2026-11-11T00:00:00Z", "outcome": "x", "resolution": "x",
+                "requires_return": False, "expected_refund": 100, "refund_paid": 0,
+            }
+        )  # fmt: skip
+        shop.open.append({"seq": n, "support_claim_id": n, "status": "needs_review"})
+    wire(monkeypatch, shop)
+    wire_claims(monkeypatch)
+    monkeypatch.setattr(claim_handlers, "CLAIMS", store)
+    await inquiry_pull.pull_once()
+    assert shop.open_calls == [0, 2, 4]  # 끝날 때까지 다음 쪽을 이어서 읽는다
+    assert [r[0] for r in shop.results] == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.asyncio
+async def test_the_idempotency_key_comes_from_the_shop_key_so_a_new_database_does_not_clash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop = FakeShop([item(1, key="digest-aaaa")], claims=[claim_item(1, key="digest-cccc#2")])
+    seen = wire(monkeypatch, shop)
+    seen_claims = wire_claims(monkeypatch)
+    await inquiry_pull.pull_once()
+    assert seen[0].meta.idempotency_key == "shop-inquiry:digest-aaaa"
+    assert seen_claims[0].meta.idempotency_key == "shop-claim:digest-cccc#2"
+
+
+# ---------------------------------------------------------------- 막힌 접수 목록·다시 시도
+
+
+def _a2a(skill: str, payload: dict[str, Any], key: str | None = None) -> dict[str, Any]:
+    body = {
+        "meta": {
+            "context_id": "ctx_ui_stuck0000001",
+            "token": "mock:dashboard-api",
+            "path": [],
+            "deadline": "2030-01-01T00:00:00Z",
+            "idempotency_key": key,
+        },
+        "skill": skill,
+        "input": payload,
+    }
+    return TestClient(app).post("/a2a", json=body).json()
+
+
+def test_stuck_intake_skills_are_on_the_card_with_the_right_grades() -> None:
+    grades = {s.id: s.grade for s in load_card().skills}
+    assert grades["list_stuck_intake"] == "read" and grades["retry_stuck_intake"] == "A"
+    assert {"list_stuck_intake", "retry_stuck_intake"} <= set(ALL_HANDLERS)
+
+
+def test_the_stuck_list_comes_from_the_shop_and_a_retry_is_sent_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [{"kind": "claim", "seq": 4, "reason": "INGEST_FAILED", "attempts": 6}]
+    sent: list[tuple[str, int]] = []
+
+    async def fetch() -> list[dict[str, Any]]:
+        return rows
+
+    async def retry(kind: str, seq: int) -> dict[str, Any]:
+        sent.append((kind, seq))
+        return {"seq": seq, "requeued": True}
+
+    monkeypatch.setattr(shop_client, "fetch_stuck_intake", fetch)
+    monkeypatch.setattr(shop_client, "retry_stuck_intake", retry)
+    listed = _a2a("list_stuck_intake", {})["output"]
+    assert listed["total"] == 1 and listed["items"][0]["seq"] == 4
+    done = _a2a("retry_stuck_intake", {"kind": "claim", "seq": 4}, key="k-retry-claim-4")
+    assert done["status"] == "completed" and done["output"]["requeued"] is True
+    assert sent == [("claim", 4)]
+
+
+def test_an_unreachable_shop_is_reported_not_hidden(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def down(*_: Any) -> Any:
+        raise shop_client.ShopError("UNAVAILABLE", "연결할 수 없다")
+
+    monkeypatch.setattr(shop_client, "fetch_stuck_intake", down)
+    monkeypatch.setattr(shop_client, "retry_stuck_intake", down)
+    assert _a2a("list_stuck_intake", {})["outcome"] == "unavailable"
+    out = _a2a("retry_stuck_intake", {"kind": "inquiry", "seq": 2}, key="k-retry-down")["output"]
+    assert out["requeued"] is False and out["error"] == "UNAVAILABLE"

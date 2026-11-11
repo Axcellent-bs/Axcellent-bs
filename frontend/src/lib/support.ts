@@ -202,7 +202,16 @@ export interface InquiryPullStatus {
   enabled: boolean; connected: boolean | null; interval_seconds: number;
   last_attempt_at: string | null; last_ok_at: string | null; last_error: string | null;
   pending: number | null; ingested_total: number; failed_total: number;
+  // 클레임함과 실패로 빼 둔 접수(판매 서버가 여러 번 실패한 접수는 읽지 않고 따로 둔다)
+  claims_pending: number | null; claims_ingested_total: number; claims_failed_total: number;
+  inbox_failed: number | null; claims_inbox_failed: number | null;
 }
+// 실패로 빼 둔 접수 한 건: 번호·사유 코드·시도 횟수만 있고 고객이 쓴 글은 없다
+export interface StuckIntakeItem {
+  kind: "inquiry" | "claim"; seq: number; reason: string | null; attempts: number;
+  failed_at: string | null; created_at: string | null;
+}
+export interface StuckIntakeList { items: StuckIntakeItem[]; total: number }
 export interface PlanningQuestionList { items: PlanningQuestion[]; open_count: number }
 export interface PlanningAnswerResult {
   question_id: string; request_id: string;
@@ -307,6 +316,8 @@ export const support = {
     get<IdeaTrends>(`${BASE}/ideas/trends${qs({ period, buckets, top })}`),
   /** 판매 서버 문의함 읽기 상태: 연결이 끊겼는지, 남은 문의가 몇 건인지 */
   inquiryPull: () => get<InquiryPullStatus>(`${BASE}/inquiry-pull`),
+  /** 판매 서버가 실패로 빼 둔 문의·클레임 접수 목록 */
+  stuckIntake: () => get<StuckIntakeList>(`${BASE}/inquiry-pull/stuck`),
   changeProposals: () => get<ChangeProposals>(`${BASE}/change-proposals`),
   /** 한 사건 번호로 기록된 처리(안전 관문 실행 기록) */
   executions: (contextId: string) => get<ExecutionRow[]>(`${BASE}/executions${qs({ context_id: contextId })}`),

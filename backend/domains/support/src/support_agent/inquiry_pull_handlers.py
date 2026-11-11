@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 from ax_contracts.schemas import AgentRequest, AgentResult
 from ax_contracts.schemas.common import AxModel
 from support_agent import handlers as h
-from support_agent import inquiry_pull
+from support_agent import inquiry_pull, shop_client
 
 
 class InquiryPullStatusInput(AxModel):
@@ -25,6 +27,8 @@ class InquiryPullStatus(AxModel):
     pending: int | None = None  # 판매 서버 문의함에 아직 남은 문의 수(마지막으로 읽었을 때)
     ingested_total: int = 0
     failed_total: int = 0
+    inbox_failed: int | None = None  # 판매 서버 문의함에서 실패로 빼 둔 문의 수
+    claims_inbox_failed: int | None = None  # 판매 서버 클레임함에서 실패로 빼 둔 신청 수
     claims_pending: int | None = None  # 판매 서버 클레임함에 아직 남은 신청 수
     claims_ingested_total: int = 0
     claims_failed_total: int = 0
@@ -37,4 +41,82 @@ async def inquiry_pull_status(request: AgentRequest) -> AgentResult:
     return h._done(request, inquiry_pull.status())
 
 
-INQUIRY_PULL_HANDLERS = {"inquiry_pull_status": inquiry_pull_status}
+class StuckIntakeInput(AxModel):
+    """입력은 없다."""
+
+
+class StuckIntakeItem(AxModel):
+    kind: Literal["inquiry", "claim"]
+    seq: int  # 고객이 받은 접수 번호
+    reason: str | None = None  # 처리하지 못한 사유 코드 (고객 글은 싣지 않는다)
+    attempts: int = 0
+    failed_at: str | None = None
+    created_at: str | None = None
+
+
+class StuckIntake(AxModel):
+    items: list[StuckIntakeItem]
+    total: int
+
+
+class RetryStuckIntakeInput(AxModel):
+    kind: Literal["inquiry", "claim"]
+    seq: int
+
+
+class RetryStuckIntake(AxModel):
+    kind: Literal["inquiry", "claim"]
+    seq: int
+    requeued: bool
+
+
+def _unavailable(request: AgentRequest, exc: shop_client.ShopError) -> AgentResult:
+    return h._done(
+        request, {"message": "판매 서버에 닿지 못했다", "code": exc.code}, outcome="unavailable"
+    )
+
+
+async def list_stuck_intake(request: AgentRequest) -> AgentResult:
+    try:
+        items = await shop_client.fetch_stuck_intake()
+    except shop_client.ShopError as exc:
+        return _unavailable(request, exc)
+    return h._done(request, {"items": items, "total": len(items)})
+
+
+@h._caller_meta
+async def retry_stuck_intake(request: AgentRequest) -> AgentResult:
+    parsed = h._parse(request, RetryStuckIntakeInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+
+    async def apply() -> tuple[dict[str, Any], bool]:
+        try:
+            done = await shop_client.retry_stuck_intake(parsed.kind, parsed.seq)
+        except shop_client.ShopError as exc:
+            return {
+                "kind": parsed.kind,
+                "seq": parsed.seq,
+                "requeued": False,
+                "error": exc.code,
+            }, True
+        return {
+            "kind": parsed.kind,
+            "seq": parsed.seq,
+            "requeued": bool(done.get("requeued")),
+        }, False
+
+    return await h._write(
+        request,
+        "retry_stuck_intake",
+        f"{parsed.kind}:{parsed.seq}",
+        {"kind": parsed.kind, "seq": parsed.seq},
+        apply,
+    )
+
+
+INQUIRY_PULL_HANDLERS = {
+    "inquiry_pull_status": inquiry_pull_status,
+    "list_stuck_intake": list_stuck_intake,
+    "retry_stuck_intake": retry_stuck_intake,
+}

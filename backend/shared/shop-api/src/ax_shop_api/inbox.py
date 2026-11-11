@@ -7,23 +7,51 @@
 
 - 같은 구매자의 같은 접수(주문·제목·본문·사진, 같은 시간 창)는 `digest`가 같아 한 건이다.
 - 읽어 간 문의(`synced_at`)는 사진을 지운다. 사진은 읽어 갈 때까지만 보관한다.
+- 고객이 받는 문의 번호는 이 서버의 접수 번호(`seq`)다. 고객지원이 읽어 간 뒤에는
+  `support_inquiry_id`로 고객지원 문의에 이어지고, 고객용 목록·상세·평가는 늘 `seq`로 열어
+  이 값으로 바꿔 부른다.
+- 처리에 실패한 접수는 읽는 쪽이 `report_failure`로 알린다. 실패할 때마다 다시 읽는 시각을
+  늦추고(1분부터 두 배, 최대 30분) 정해진 횟수(`SHOP_INBOX_MAX_ATTEMPTS`, 기본 6)를 넘기면
+  실패로 빼 둔다. 그래서 계속 실패하는 접수가 문의함 앞을 막지 않는다.
 - 원문은 로그·오류 메시지에 싣지 않는다.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+import os
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ax_shop_api.db import TENANT_ID, Db
 
 READ_LIMIT_DEFAULT = 20
 READ_LIMIT_MAX = 100
+MAX_ATTEMPTS_DEFAULT = 6
+BACKOFF_BASE_SECONDS = 60
+BACKOFF_MAX_SECONDS = 1800
+PREVIEW_CHARS = 80  # 아직 처리 전인 문의의 고객용 미리보기(본인이 쓴 글의 앞부분)
+
+
+def _stamp(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _now() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _stamp(datetime.now(UTC))
+
+
+def max_attempts() -> int:
+    try:
+        value = int(os.getenv("SHOP_INBOX_MAX_ATTEMPTS") or MAX_ATTEMPTS_DEFAULT)
+    except ValueError:
+        return MAX_ATTEMPTS_DEFAULT
+    return value if value > 0 else MAX_ATTEMPTS_DEFAULT
+
+
+def backoff_seconds(attempts: int) -> int:
+    """실패 `attempts`번째 뒤 기다리는 초. 1분, 2분, 4분… 최대 30분."""
+    return min(BACKOFF_BASE_SECONDS * 2 ** max(attempts - 1, 0), BACKOFF_MAX_SECONDS)
 
 
 def add(
@@ -69,19 +97,30 @@ def add(
     }
 
 
-def pending(db: Db, limit: int = READ_LIMIT_DEFAULT) -> tuple[list[dict[str, Any]], int]:
-    """아직 읽어 가지 않은 문의를 접수 순서(오래된 것이 앞)로 `limit`건까지, 그리고 남은 전체 수."""
+def pending(db: Db, limit: int = READ_LIMIT_DEFAULT) -> tuple[list[dict[str, Any]], int, int]:
+    """읽을 차례가 된 문의를 `limit`건까지(실패가 적은 것·오래된 것 먼저), 읽기를 기다리는 전체 수,
+    실패로 빼 둔 수.
+
+    다시 읽을 시각이 아직 안 된 문의는 이번에 건너뛴다(전체 수에는 센다).
+    """
     limit = max(1, min(limit, READ_LIMIT_MAX))
     with db.tx() as conn:
         rows = conn.execute(
-            "SELECT * FROM inquiry_inbox WHERE synced_at IS NULL ORDER BY seq LIMIT ?", (limit,)
+            "SELECT * FROM inquiry_inbox WHERE synced_at IS NULL AND failed_at IS NULL"
+            " AND (retry_after IS NULL OR retry_after <= ?) ORDER BY attempts, seq LIMIT ?",
+            (_now(), limit),
         ).fetchall()
         total = conn.execute(
+            "SELECT COUNT(*) AS n FROM inquiry_inbox WHERE synced_at IS NULL AND failed_at IS NULL"
+        ).fetchone()["n"]
+        failed = conn.execute(
             "SELECT COUNT(*) AS n FROM inquiry_inbox WHERE synced_at IS NULL"
+            " AND failed_at IS NOT NULL"
         ).fetchone()["n"]
     items = [
         {
             "seq": r["seq"],
+            "key": r["digest"],  # 고객지원이 멱등 키로 쓴다 (접수 번호는 DB를 새로 만들면 겹친다)
             "context_id": r["context_id"],
             "buyer_id": r["buyer_id"],
             "customer_name": r["customer_name"],
@@ -89,11 +128,12 @@ def pending(db: Db, limit: int = READ_LIMIT_DEFAULT) -> tuple[list[dict[str, Any
             "subject": r["subject"],
             "message": r["message"],
             "images": json.loads(r["images"]) if r["images"] else None,
+            "attempts": r["attempts"],
             "created_at": r["created_at"],
         }
         for r in rows
     ]
-    return items, total
+    return items, total, failed
 
 
 def mark_synced(db: Db, seq: int, support_inquiry_id: int) -> dict[str, Any] | None:
@@ -107,8 +147,8 @@ def mark_synced(db: Db, seq: int, support_inquiry_id: int) -> dict[str, Any] | N
             return None
         if row["synced_at"] is None:
             conn.execute(
-                "UPDATE inquiry_inbox SET synced_at = ?, support_inquiry_id = ?, images = NULL"
-                " WHERE seq = ?",
+                "UPDATE inquiry_inbox SET synced_at = ?, support_inquiry_id = ?, images = NULL,"
+                " retry_after = NULL, failed_at = NULL WHERE seq = ?",
                 (_now(), support_inquiry_id, seq),
             )
             row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
@@ -117,3 +157,103 @@ def mark_synced(db: Db, seq: int, support_inquiry_id: int) -> dict[str, Any] | N
         "synced_at": row["synced_at"],
         "support_inquiry_id": row["support_inquiry_id"],
     }
+
+
+def report_failure(db: Db, seq: int, reason: str) -> dict[str, Any] | None:
+    """읽어 간 쪽이 처리하지 못했다고 알린다. 다시 읽는 시각을 늦추고 횟수를 넘기면 실패로 뺀다.
+
+    이미 처리된(`synced`) 문의는 그대로 둔다. 없는 번호면 None이다. `reason`은 짧은 코드다.
+    """
+    with db.tx() as conn:
+        row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
+        if row is None:
+            return None
+        if row["synced_at"] is None and row["failed_at"] is None:
+            attempts = row["attempts"] + 1
+            if attempts >= max_attempts():
+                conn.execute(
+                    "UPDATE inquiry_inbox SET attempts = ?, failed_at = ?, retry_after = NULL,"
+                    " last_error = ? WHERE seq = ?",
+                    (attempts, _now(), reason[:40], seq),
+                )
+            else:
+                later = _stamp(datetime.now(UTC) + timedelta(seconds=backoff_seconds(attempts)))
+                conn.execute(
+                    "UPDATE inquiry_inbox SET attempts = ?, retry_after = ?, last_error = ?"
+                    " WHERE seq = ?",
+                    (attempts, later, reason[:40], seq),
+                )
+            row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
+    return {
+        "seq": row["seq"],
+        "attempts": row["attempts"],
+        "failed": row["failed_at"] is not None,
+        "retry_after": row["retry_after"],
+    }
+
+
+def for_buyer(db: Db, buyer_id: str) -> list[dict[str, Any]]:
+    """고객 본인의 접수 목록(최근 순). 고객용 목록이 처리 전 문의도 보여 주는 데 쓴다."""
+    with db.tx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM inquiry_inbox WHERE buyer_id = ? ORDER BY seq DESC", (buyer_id,)
+        ).fetchall()
+    return [_own(r) for r in rows]
+
+
+def get_for_buyer(db: Db, seq: int, buyer_id: str) -> dict[str, Any] | None:
+    """본인의 접수 하나. 없는 번호와 남의 접수는 똑같이 None이다."""
+    with db.tx() as conn:
+        row = conn.execute(
+            "SELECT * FROM inquiry_inbox WHERE seq = ? AND buyer_id = ?", (seq, buyer_id)
+        ).fetchone()
+    return _own(row) if row is not None else None
+
+
+def _own(row: Any) -> dict[str, Any]:
+    return {
+        "seq": row["seq"],
+        "order_id": row["order_id"],
+        "subject": row["subject"],
+        "message": row["message"],
+        "created_at": row["created_at"],
+        "support_inquiry_id": row["support_inquiry_id"],
+        "synced": row["synced_at"] is not None,
+        "failed": row["failed_at"] is not None and row["synced_at"] is None,
+    }
+
+
+def stuck(db: Db) -> list[dict[str, Any]]:
+    """실패로 빼 둔 문의(사람이 봐야 한다). 고객이 쓴 글은 싣지 않고 번호·사유·횟수만 돌려준다."""
+    with db.tx() as conn:
+        rows = conn.execute(
+            "SELECT seq, attempts, last_error, failed_at, created_at FROM inquiry_inbox"
+            " WHERE failed_at IS NOT NULL AND synced_at IS NULL ORDER BY seq"
+        ).fetchall()
+    return [
+        {
+            "kind": "inquiry",
+            "seq": r["seq"],
+            "reason": r["last_error"],
+            "attempts": r["attempts"],
+            "failed_at": r["failed_at"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+
+def retry(db: Db, seq: int) -> dict[str, Any] | None:
+    """실패로 뺀 문의를 다시 읽는 차례로 돌린다. 실패가 아니면 그대로 두고, 없는 번호면 None."""
+    with db.tx() as conn:
+        row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
+        if row is None:
+            return None
+        stuck_now = row["failed_at"] is not None and row["synced_at"] is None
+        if stuck_now:
+            conn.execute(
+                "UPDATE inquiry_inbox SET attempts = 0, failed_at = NULL, retry_after = NULL"
+                " WHERE seq = ?",
+                (seq,),
+            )
+    return {"seq": seq, "requeued": stuck_now}

@@ -6,7 +6,7 @@ import { SupportBoard } from "@/components/support/SupportBoard";
 import { ChartWithTable, Legend, LineChart, RingMeter, TableView } from "@/components/charts";
 import { IconBolt, IconChevronRight } from "@/components/icons";
 import { api } from "@/lib/api";
-import { support, type InquiryPullStatus } from "@/lib/support";
+import { support, type InquiryPullStatus, type StuckIntakeItem } from "@/lib/support";
 import { ago, pct, shortDate, shortDateTime, won } from "@/lib/format";
 import { CATEGORY_KO, CLAIM_REASON_KO, CLAIM_TYPE_KO, RULE_KO } from "@/lib/labels";
 import type { Dashboard } from "@/lib/types";
@@ -39,14 +39,61 @@ function InquiryPullBanner() {
   }, []);
   if (!s || !s.enabled) return null;
   const down = s.connected === false;
+  const left = (s.pending ?? 0) + (s.claims_pending ?? 0);
+  const stuck = (s.inbox_failed ?? 0) + (s.claims_inbox_failed ?? 0);
+  const alert = down || stuck > 0;
   return (
-    <p role={down ? "alert" : "status"} className={`rounded-xl px-4 py-2 text-xs font-medium ${down ? "bg-red-50 text-red-800" : "bg-surface text-ink-700 ring-1 ring-ink-100"}`}>
+    <>
+    <p role={alert ? "alert" : "status"} className={`rounded-xl px-4 py-2 text-xs font-medium ${alert ? "bg-red-50 text-red-800" : "bg-surface text-ink-700 ring-1 ring-ink-100"}`}>
       {s.connected === null
-        ? "판매 서버 문의함을 아직 읽지 않았습니다."
+        ? "판매 서버 문의함·클레임함을 아직 읽지 않았습니다."
         : down
-          ? `판매 서버 문의 연결 끊김: ${PULL_ERROR_KO[s.last_error ?? ""] ?? s.last_error ?? "원인을 알 수 없습니다"}.${s.pending ? ` 문의함에 ${s.pending}건이 남아 있습니다.` : ""} 새 문의가 늦게 들어올 수 있습니다.`
-          : `판매 서버 문의함 연결 정상 · ${s.interval_seconds}초마다 읽습니다${s.pending ? ` · 남은 문의 ${s.pending}건` : ""}.`}
+          ? `판매 서버 문의·클레임 연결 끊김: ${PULL_ERROR_KO[s.last_error ?? ""] ?? s.last_error ?? "원인을 알 수 없습니다"}.${left ? ` 판매 서버에 문의 ${s.pending ?? 0}건·클레임 ${s.claims_pending ?? 0}건이 남아 있습니다.` : ""} 새 접수가 늦게 들어올 수 있습니다.`
+          : `판매 서버 문의함·클레임함 연결 정상 · ${s.interval_seconds}초마다 읽습니다${left ? ` · 남은 문의 ${s.pending ?? 0}건·클레임 ${s.claims_pending ?? 0}건` : ""}.`}
+      {stuck > 0 && ` 여러 번 처리에 실패해 따로 빼 둔 접수가 ${stuck}건 있습니다 (문의 ${s.inbox_failed ?? 0}·클레임 ${s.claims_inbox_failed ?? 0}). 아래 목록에서 확인하고 다시 시도해 주세요.`}
     </p>
+    <StuckIntakeList count={stuck} />
+    </>
+  );
+}
+
+const STUCK_KIND_KO = { inquiry: "문의", claim: "클레임" } as const;
+
+// 여러 번 읽지 못해 따로 빼 둔 접수: 놓치지 않게 번호·사유를 보여 주고, 사람이 확인한 뒤 다시 시도한다
+function StuckIntakeList({ count }: { count: number }) {
+  const [items, setItems] = useState<StuckIntakeItem[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const load = () => support.stuckIntake().then((e) => setItems(e.data.items)).catch(() => setItems([]));
+  useEffect(() => { void load(); }, [count]);
+  if (count === 0 && items.length === 0) return null;
+  const retry = async (it: StuckIntakeItem) => {
+    const key = `${it.kind}:${it.seq}`;
+    setBusy(key); setNote(null);
+    try {
+      const r = await api.admin.retryStuckIntake(it.kind, it.seq);
+      setNote(r.requeued ? `${STUCK_KIND_KO[it.kind]} #${it.seq}을 다시 읽는 차례로 돌렸습니다.` : `${STUCK_KIND_KO[it.kind]} #${it.seq}을 다시 올리지 못했습니다${r.error ? ` (${r.error})` : ""}.`);
+      await load();
+    } catch { setNote("다시 시도하지 못했습니다. 잠시 뒤 다시 눌러 주세요."); }
+    finally { setBusy(null); }
+  };
+  return (
+    <section aria-label="막힌 접수" className="card space-y-2 p-4">
+      <h2 className="text-sm font-semibold">막힌 접수 {items.length}건</h2>
+      <ul className="divide-y divide-ink-100 text-sm">
+        {items.map((it) => (
+          <li key={`${it.kind}:${it.seq}`} className="flex flex-wrap items-center gap-2 py-2">
+            <span className="chip">{STUCK_KIND_KO[it.kind]}</span>
+            <span className="font-medium">접수 번호 #{it.seq}</span>
+            <span className="text-xs text-ink-500">사유 {PULL_ERROR_KO[it.reason ?? ""] ?? it.reason ?? "알 수 없음"} · {it.attempts}회 시도{it.failed_at ? ` · ${shortDateTime(it.failed_at)}` : ""}</span>
+            <button type="button" className="btn-ghost ml-auto" disabled={busy !== null} onClick={() => void retry(it)}>
+              {busy === `${it.kind}:${it.seq}` ? "다시 올리는 중…" : "다시 시도"}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {note && <p role="status" className="text-xs text-ink-700">{note}</p>}
+    </section>
   );
 }
 

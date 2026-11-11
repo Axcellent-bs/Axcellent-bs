@@ -228,6 +228,14 @@ class InquirySyncedIn(BaseModel):
     support_inquiry_id: int = Field(ge=1)
 
 
+class IntakeFailedIn(BaseModel):
+    """읽어 간 쪽이 접수를 처리하지 못했다는 알림. 사유는 짧은 코드다(원문을 싣지 않는다)."""
+
+    model_config = {"extra": "forbid"}
+
+    reason: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
 class IdeaIn(BaseModel):
     """고객 아이디어. 문의·불만과 따로 받는다. 글은 `untrusted`로만 넘긴다."""
 
@@ -726,13 +734,27 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=claim_inbox.READ_LIMIT_MAX)] = (
             claim_inbox.READ_LIMIT_DEFAULT
         ),
+        after: Annotated[int, Query(ge=0)] = 0,
         _: str = Depends(_caller(INQUIRY_READERS)),
     ) -> dict:
         if state == "open":  # 읽어 갔지만 아직 끝나지 않은 신청(상태를 다시 적을 수 있다)
-            open_items = await asyncio.to_thread(claim_inbox.open_claims, database, limit)
-            return _ok(open_items, total=len(open_items))
-        items, total = await asyncio.to_thread(claim_inbox.pending, database, limit)
-        return _ok(items, total=total)
+            open_items, next_after = await asyncio.to_thread(
+                claim_inbox.open_claims, database, after, limit
+            )
+            return _ok(open_items, next_after=next_after)
+        items, total, failed = await asyncio.to_thread(claim_inbox.pending, database, limit)
+        return _ok(items, total=total, failed=failed)
+
+    @app.post("/api/shop/admin/claims/{seq}/failed")
+    async def report_claim_failed(
+        seq: Annotated[int, Path(ge=1)],
+        body: IntakeFailedIn,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        done = await asyncio.to_thread(claim_inbox.report_failure, database, seq, body.reason)
+        if done is None:
+            raise ShopError("CLAIM_NOT_FOUND", "클레임함에 없는 접수 번호다", 404)
+        return _ok(done)
 
     @app.post("/api/shop/admin/claims/{seq}/result")
     async def write_claim_result(
@@ -804,8 +826,45 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=inbox.READ_LIMIT_MAX)] = inbox.READ_LIMIT_DEFAULT,
         _: str = Depends(_caller(INQUIRY_READERS)),
     ) -> dict:
-        items, total = await asyncio.to_thread(inbox.pending, database, limit)
-        return _ok(items, total=total)
+        items, total, failed = await asyncio.to_thread(inbox.pending, database, limit)
+        return _ok(items, total=total, failed=failed)
+
+    @app.post("/api/shop/admin/inquiries/{seq}/failed")
+    async def report_inquiry_failed(
+        seq: Annotated[int, Path(ge=1)],
+        body: IntakeFailedIn,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        done = await asyncio.to_thread(inbox.report_failure, database, seq, body.reason)
+        if done is None:
+            raise ShopError("INQUIRY_NOT_FOUND", "문의함에 없는 접수 번호다", 404)
+        return _ok(done)
+
+    @app.get("/api/shop/admin/intake/stuck")
+    async def list_stuck_intake(_: str = Depends(_caller(INQUIRY_READERS))) -> dict:
+        """실패로 빼 둔 문의·클레임 접수(번호·사유·횟수만). 사람이 확인하고 다시 시도한다."""
+        a = await asyncio.to_thread(inbox.stuck, database)
+        b = await asyncio.to_thread(claim_inbox.stuck, database)
+        items = sorted(a + b, key=lambda i: (i["failed_at"] or "", i["seq"]))
+        return _ok(items, total=len(items))
+
+    @app.post("/api/shop/admin/inquiries/{seq}/retry")
+    async def retry_inquiry(
+        seq: Annotated[int, Path(ge=1)], _: str = Depends(_caller(INQUIRY_READERS))
+    ) -> dict:
+        done = await asyncio.to_thread(inbox.retry, database, seq)
+        if done is None:
+            raise ShopError("INQUIRY_NOT_FOUND", "문의함에 없는 접수 번호다", 404)
+        return _ok(done)
+
+    @app.post("/api/shop/admin/claims/{seq}/retry")
+    async def retry_claim(
+        seq: Annotated[int, Path(ge=1)], _: str = Depends(_caller(INQUIRY_READERS))
+    ) -> dict:
+        done = await asyncio.to_thread(claim_inbox.retry, database, seq)
+        if done is None:
+            raise ShopError("CLAIM_NOT_FOUND", "클레임함에 없는 접수 번호다", 404)
+        return _ok(done)
 
     @app.post("/api/shop/admin/inquiries/{seq}/synced")
     async def mark_inquiry_synced(
@@ -825,23 +884,34 @@ def create_app(
         buyer_id: str, limit: Annotated[int, Query(ge=1, le=100)] = 50
     ) -> dict:
         user_id = inquiries.buyer_number(buyer_id)
-        out = await support_client.call(
-            "list_inquiries", support_client.new_context_id(), {"user_id": user_id}
-        )
-        items = [inquiries.customer_view(i) for i in out.get("items") or []]
+        # 고객이 받은 번호는 이 서버의 접수 번호다. 고객지원이 아직 읽어 가지 않은 문의도 보여 준다
+        own = await asyncio.to_thread(inbox.for_buyer, database, buyer_id)
+        found: dict[int, dict] = {}
+        if any(o["synced"] for o in own):
+            out = await support_client.call(
+                "list_inquiries", support_client.new_context_id(), {"user_id": user_id}
+            )
+            found = {i["id"]: i for i in out.get("items") or [] if isinstance(i.get("id"), int)}
+        items = [inquiries.own_view(o, found.get(o["support_inquiry_id"])) for o in own]
         return _ok(items[:limit], total=len(items))
 
     @app.get("/api/shop/inquiries/{inquiry_id}")
     async def get_my_inquiry(inquiry_id: Annotated[int, Path(ge=1)], buyer_id: str) -> dict:
         user_id = inquiries.buyer_number(buyer_id)
+        # 번호는 이 서버의 접수 번호다. 본인 접수가 아니면 없는 번호와 똑같이 404다
+        own = await asyncio.to_thread(inbox.get_for_buyer, database, inquiry_id, buyer_id)
+        if own is None:
+            raise ShopError("NOT_FOUND", "문의를 찾을 수 없다", 404)
+        if not own["synced"]:  # 고객지원이 아직 읽어 가지 않았다: 접수한 내용만 보여 준다
+            return _ok(inquiries.own_view(own, None, with_messages=True))
         out = await support_client.call(
             "get_inquiry",
             support_client.new_context_id(),
-            {"inquiry_id": inquiry_id, "user_id": user_id},
+            {"inquiry_id": own["support_inquiry_id"], "user_id": user_id},
         )
         if "id" not in out:  # 문의가 아닌 응답은 성공으로 내보내지 않는다
             raise ShopError("UPSTREAM_ERROR", "고객지원 응답이 문의 형식이 아니다", 502)
-        return _ok(inquiries.customer_view(out))
+        return _ok(inquiries.own_view(own, out))
 
     # --- 고객 아이디어(의견): 쇼핑몰 → 고객지원 `submit_idea`. 문의·불만과 따로 쌓는다 ----------
     @app.post("/api/shop/ideas", status_code=201)
@@ -871,23 +941,33 @@ def create_app(
         user_id = inquiries.buyer_number(body.buyer_id)
         feedback_limiter.hit(body.buyer_id)
         context_id = support_client.new_context_id()
-        # 본인 문의인지는 고객지원이 `user_id`로 확인한다. 남의 문의도 없는 문의와 같은 404다
+        # 번호는 이 서버의 접수 번호다. 본인 접수가 아니면 없는 번호와 똑같이 404다
+        own = await asyncio.to_thread(inbox.get_for_buyer, database, inquiry_id, body.buyer_id)
+        if own is None:
+            raise ShopError("NOT_FOUND", "문의를 찾을 수 없다", 404)
+        if not own["synced"]:  # 고객지원이 읽어 가기 전에는 평가할 수 없다(해결된 문의도 아니다)
+            raise ShopError("INVALID_STATE", "아직 고객지원이 확인하기 전인 문의다", 409)
+        support_id = own["support_inquiry_id"]
         done = await support_client.call(
             "submit_feedback",
             context_id,
             {
-                "inquiry_id": inquiry_id,
+                "inquiry_id": support_id,
                 "rating": body.rating,
                 "resolved": body.resolved,
                 "user_id": user_id,
             },
             {"comment": body.comment},
-            target=f"inquiry:{inquiry_id}",
+            target=f"inquiry:{support_id}",
         )
         if done.get("rated") is not True:  # 먼저 들어온 요청이 이미 남겼다
             raise ShopError("INVALID_STATE", "이미 평가를 남긴 문의다", 409)
         # 고객에게는 접수 사실만 돌려준다(공개·숨김 같은 내부 판단은 보이지 않는다)
-        receipt = {k: done.get(k) for k in ("inquiry_id", "rated", "rating")}
+        receipt = {
+            "inquiry_id": inquiry_id,
+            "rated": done.get("rated"),
+            "rating": done.get("rating"),
+        }
         return _ok(receipt, context_id=context_id)
 
     @app.post("/api/shop/admin/claims/{claim_id}/return-received")

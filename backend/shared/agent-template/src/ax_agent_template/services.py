@@ -61,6 +61,8 @@ SERVICES: tuple[Service, ...] = (
             "record_claim_activity",
             "submit_feedback",
             "inquiry_pull_status",
+            "list_stuck_intake",
+            "retry_stuck_intake",
             "submit_idea",
             "list_ideas",
             "send_idea_digest",

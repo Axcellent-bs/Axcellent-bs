@@ -29,6 +29,7 @@ LATER = (
     "idx_orders_coupon_id",
     "idx_orders_src_campaign",
     "idx_inquiry_inbox_pending",  # 문의함(읽어 가지 않은 문의)
+    "idx_inquiry_inbox_buyer",
     "idx_claim_inbox_unread",  # 클레임함(읽어 가지 않은 신청)
     "idx_claim_inbox_buyer",
 )
