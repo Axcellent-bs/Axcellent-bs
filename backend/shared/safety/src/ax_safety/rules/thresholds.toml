@@ -125,6 +125,7 @@ protected = [
   "safety/",
   "contracts/",
   "backend/contracts/",
+  "backend/safety/",
 ]
 
 # 에이전트 설정·훅·설치 스크립트 (#506). 머지되면 이 레포를 여는 개발자의 Claude Code·Codex·에디터나
@@ -264,6 +265,7 @@ protected = [
   "safety/",
   "contracts/",
   "backend/contracts/",
+  "backend/safety/",
 ]
 
 # 에이전트 설정·훅·설치 스크립트: pr_agent_config_paths와 같은 목록
@@ -447,6 +449,7 @@ protected = [
   "safety/",
   "contracts/",
   "backend/contracts/",
+  "backend/safety/",
 ]
 
 # 에이전트 설정·훅·설치 스크립트: pr_agent_config_paths와 같은 목록

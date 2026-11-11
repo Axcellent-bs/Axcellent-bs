@@ -453,6 +453,7 @@ async def test_split_shop_repo_paths_are_allowed_and_protected(
             "backend/shop-api/src/ax_shop_api/service.py",
             "frontend/shop-web/src/pages/Checkout.tsx",
             "backend/contracts/openapi/shop-api.json",
+            "backend/safety/rules/thresholds.toml",
         ]
     ):
         held = await gate.execute(
