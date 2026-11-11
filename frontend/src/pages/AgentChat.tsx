@@ -305,7 +305,7 @@ export default function AgentChat() {
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVis); };
   }, [refresh]);
 
-  // ------------------------------------------------ 사람이 부서 AI에게 직접 말 걸기 (AI 오피스·직접 대화와 같은 대화)
+  // ------------------------------------------------ 사람이 부서 AI에게 말 걸기 (AI 오피스 단톡방과 같은 대화, 모두에게 보인다. 1:1 직접 대화와는 따로)
   const talk = useOfficeTalk();
 
   const counts = useMemo(() => {
