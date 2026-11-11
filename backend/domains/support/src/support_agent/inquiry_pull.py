@@ -334,7 +334,7 @@ async def _pull_claims(limit: int) -> dict[str, int]:
     return {"read": len(items), "ingested": done, "failed": failed}
 
 
-async def pull_once(limit: int = READ_LIMIT, owned: frozenset[str] | None = None) -> dict[str, int]:
+async def pull_once(limit: int = READ_LIMIT, *, owned: frozenset[str]) -> dict[str, int]:
     """문의함과 클레임함을 한 번씩 읽는다. 읽은 수·처리 수·실패 수(두 함의 합)를 돌려준다.
 
     한쪽이 실패해도 다른 쪽은 그 주기에 계속 읽는다. 판매 서버에 닿지 못하거나 처리하지 못한

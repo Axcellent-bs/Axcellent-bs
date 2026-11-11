@@ -554,7 +554,10 @@ def test_inquiry_pull_still_answers_when_the_claims_server_is_down(
 ) -> None:
     from ax_dashboard_api.envelope import ApiError
 
-    fake.outputs["inquiry_pull_status"] = {"enabled": True, "connected": True, "pending": 2}
+    fake.outputs["inquiry_pull_status"] = {
+        "enabled": True, "connected": True, "pending": 2, "claims_pending": None,
+        "claims_ingested_total": 0, "returns_ingested_total": 0,
+    }  # fmt: skip
 
     async def send(target: str, req: AgentRequest) -> AgentResult:
         if req.skill == "claim_pull_status":
@@ -567,6 +570,8 @@ def test_inquiry_pull_still_answers_when_the_claims_server_is_down(
     res = TestClient(app).get(BASE + "/inquiry-pull")
     assert res.status_code == 200  # 문의 값은 그대로 보여 준다
     assert res.json()["data"]["pending"] == 2 and res.json()["data"]["claims_unavailable"] is True
+    # 문의 서버의 빈 claims_*·returns_* 칸은 "0건"으로 읽히니 싣지 않는다
+    assert not [k for k in res.json()["data"] if k.startswith(("claims_p", "claims_i", "returns_"))]
 
 
 def test_inquiry_pull_shows_both_servers_errors_and_times_apart(fake: Fake) -> None:

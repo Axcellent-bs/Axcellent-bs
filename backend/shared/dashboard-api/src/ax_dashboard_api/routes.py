@@ -1650,7 +1650,9 @@ async def inquiry_pull_status() -> dict:
     if isinstance(claims, BaseException):
         if not isinstance(claims, ApiError):
             raise claims
-        return ok({**inquiry, "claims_unavailable": True})
+        # 문의 서버 상태의 claims_*·returns_* 칸은 비어 있어 그대로 두면 "클레임 0건"으로 읽힌다
+        kept = {k: v for k, v in inquiry.items() if not k.startswith(("claims_", "returns_"))}
+        return ok({**kept, "claims_unavailable": True})
     merged = {
         **inquiry,
         **{k: v for k, v in claims.items() if k.startswith(("claims_", "returns_"))},
