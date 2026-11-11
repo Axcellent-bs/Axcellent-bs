@@ -289,3 +289,39 @@ def test_health_check_uses_healthz_for_dejafix_proxy() -> None:
     assert text.count('"$(health_url "$n" "$p")"') == 1  # 총괄 전 대기
     assert text.count('"$(health_url "$name" "$port")"') == 1  # 마지막 상태 출력
     assert ':$p/health"' not in text and ':$port/health"' not in text  # 예전 직접 주소가 없다
+
+
+# --- 캣북스 가상 주문 트래픽: SHOP_TRAFFIC=on일 때만 띄운다(기본 꺼짐) ----------------------------
+
+TRAFFIC_BLOCK = ("# >>> 주문 트래픽 스위치", "# <<< 주문 트래픽 스위치")
+SHOP_LINE = "shop-api 8010 ax_shop_api.main:app"
+
+
+@pytest.mark.parametrize(
+    ("value", "on"),
+    [(None, False), ("", False), ("off", False), ("0", False), ("on", True), ("1", True)],
+)
+def test_shop_traffic_runs_only_when_switched_on(value: str | None, on: bool) -> None:
+    block = _between(*TRAFFIC_BLOCK)
+    env = {"RUN_APPS": SHOP_LINE} | ({} if value is None else {"SHOP_TRAFFIC": value})
+    out = _run(f'{block}\necho "on=$SHOP_TRAFFIC_ON"', env)
+    if on:
+        assert out.splitlines() == ["on=1"]
+    else:
+        assert out.splitlines() == ["캣북스 주문 트래픽 안 띄움(SHOP_TRAFFIC=on이면 띄움)", "on=0"]
+
+
+def test_shop_traffic_switch_is_quiet_without_shop_api() -> None:
+    """--only로 shop-api를 안 띄우면 꺼짐 안내도 찍지 않는다."""
+    out = _run(
+        f'{_between(*TRAFFIC_BLOCK)}\necho "on=$SHOP_TRAFFIC_ON"',
+        {"RUN_APPS": "data 8106 svc_data.main:app"},
+    )
+    assert out.splitlines() == ["on=0"]
+
+
+def test_shop_traffic_launch_waits_for_the_switch() -> None:
+    text = RUN_ALL.read_text(encoding="utf-8")
+    launch = text[text.index(TRAFFIC_BLOCK[1]) :]
+    guard = launch[: launch.index("scripts/shop_traffic.py")]
+    assert '[ "$SHOP_TRAFFIC_ON" = 1 ]' in guard

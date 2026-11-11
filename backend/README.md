@@ -52,7 +52,7 @@ AXcellent 에이전트들이 캣북스의 실제 주문·결제 데이터로 A2A
 cd backend
 uv sync --all-packages
 cp .env.example .env            # LLM_MODEL·LLM_BASE_URL·LLM_API_KEY(·EMBED_MODEL)를 채운다. 커밋하지 않는다. 이미지를 읽는 모델이면 영수증 사진 대조도 켜진다
-bash scripts/run_all.sh         # 16개 서버(DejaFix 계정이 있으면 17개) + 캣북스 고객 주문 트래픽. 로그 backend/.logs/, 데이터 backend/.data/
+bash scripts/run_all.sh         # 16개 서버(DejaFix 계정이 있으면 17개) (+ SHOP_TRAFFIC=on이면 캣북스 가상 주문 트래픽). 로그 backend/.logs/, 데이터 backend/.data/
 bash scripts/run_web.sh         # 다른 터미널: 화면(frontend 3090)을 실제 모드 토큰으로 켠다
 bash scripts/run_all.sh stop
 ```
@@ -73,7 +73,7 @@ bash scripts/run_all.sh stop
   ```
   - 시작할 때 `띄운 서버 N개: …, 안 띄움: …`을 출력한다. 모르는 이름이면 목록을 보여 주고 멈춘다.
   - 안 띄운 서비스는 `AX_ENABLED_SERVICES`에서도 자동으로 빠진다. 그래서 라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다. 이미 `AX_ENABLED_SERVICES`를 줬으면 둘의 교집합이고, 남는 서비스가 없으면 `none`(모두 끔)이다.
-  - 캣북스 주문 트래픽은 shop-api를 띄웠을 때만 돈다. `stop`은 지금처럼 전체 포트를 끈다.
+  - 캣북스 가상 주문 트래픽은 `.env`에 `SHOP_TRAFFIC=on`이 있고 shop-api를 띄웠을 때만 돈다(기본 꺼짐, 끄면 `캣북스 주문 트래픽 안 띄움` 한 줄). 결제 장애 감지는 60초에 결제 표본 5건 이상이 필요해서 장애 시연 때는 켠다. `stop`은 지금처럼 전체 포트를 끈다.
   - shop-api의 바인드 주소는 `AX_SHOP_API_HOST`로 바꾼다(기본 `127.0.0.1`, 다른 서버는 늘 `127.0.0.1`). 예: 같은 망의 다른 PC에서 부르려면 `AX_SHOP_API_HOST=0.0.0.0 bash scripts/run_all.sh`. 이때 8010이 외부에 열리니 방화벽을 확인한다.
   - DejaFix 읽기 전용 프록시(`dejafix-proxy`, 8030)는 `.env`에 `DEJAFIX_USERNAME`이 있을 때만 run_all이 같이 띄운다(없으면 `dejafix-proxy 안 띄움(DEJAFIX_USERNAME 없음)` 한 줄). 인프라 AI가 DejaFix 장애를 읽게 하려면 `.env`에 `INFRA_DEJAFIX_URL=http://127.0.0.1:8030`(예시)을 둔다.
   - 메모리(전용 메모리, Windows 로컬 측정): 전체 16개 서버 + 트래픽은 프로세스 36개·약 940MB, `data-demo`는 26개·약 680MB다.
@@ -85,7 +85,7 @@ bash scripts/run_all.sh stop
   쓰기·그 밖의 관리 API는 모두 403이다. 에이전트 토큰 명부와 따로 두어 다른 서버(총괄 등)로는 통하지 않는다.
   켤 때마다 바뀌는 에이전트 토큰과 달리 고정 값이라 정적 빌드에 넣어도 재시작에 깨지지 않는다.
 - 캣북스 데이터(`.data/shop.db`)·공통 로그(`.data/common_log.db`)·인사(`.data/hr.db`)는 파일이라 다시 켜도 남는다.
-- `scripts/shop_traffic.py`가 3초마다 캣북스 고객 주문·결제를 넣는다. 결제 성공·실패는 쇼핑몰이 정한다.
+- `SHOP_TRAFFIC=on`이면 `scripts/shop_traffic.py`가 3초마다 캣북스 고객 주문·결제를 넣는다. 결제 성공·실패는 쇼핑몰이 정한다.
   결제가 실패한 고객 일부(30%)는 쇼핑몰 문의 창구로 그 주문에 대해 문의를 남긴다 → 고객지원 AI가 받아 답변 초안을 쓴다.
 - 장애 넣기·빼기는 운영자 명령이다: `bash scripts/shop_fault.sh failure|latency|clear|status`. 테스트 기록을 지우려면 `bash scripts/run_all.sh reset`.
 - 캣북스 쇼핑몰 화면(고객이 보는 곳)은 ax-frontend의 shop-web이다. 같은 shop-api(8010)에 붙여 띄우면 장애 때 결제 화면에
