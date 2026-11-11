@@ -42,8 +42,13 @@ from support_agent.triage_handlers import TRIAGE_HANDLERS
 def _card_path() -> Path:
     """`agents/support/agent-card.json`을 찾는다. 컨테이너와 레포 루트 실행 모두에서 동작한다."""
     override = os.getenv("SUPPORT_AGENT_CARD")
+    if override:
+        # 서비스 카드를 지정했는데 없으면 공용 카드(전부 맡음)로 떨어지지 않고 서버를 띄우지 않는다
+        path = Path(override)
+        if not path.is_file():
+            raise FileNotFoundError(f"SUPPORT_AGENT_CARD가 가리키는 카드가 없다: {override}")
+        return path
     candidates = [
-        Path(override) if override else None,
         Path.cwd() / "domains" / "support" / "agent-card.json",
         Path(__file__).resolve().parents[2] / "agent-card.json",
     ]
@@ -86,7 +91,9 @@ ALL_HANDLERS = {
 }
 # 영수증 사진 분석기: 이미지를 읽을 모델이 설정돼 있을 때만 꽂는다(목 모드·미설정이면 꽂지 않는다)
 receipt_vision.connect()
-app = create_agent_app(load_card(), ALL_HANDLERS)
+_CARD = load_card()
+app = create_agent_app(_CARD, ALL_HANDLERS)
+_OWNED_SKILLS = frozenset(skill.id for skill in _CARD.skills)  # 이 서버가 받는 skill
 
 # 판매 서버 문의함을 정해진 간격으로 읽는 루프를 앱 시작·종료에 맞춰 돌린다 (꺼져 있으면 안 돈다)
 _app_lifespan = app.router.lifespan_context
@@ -95,7 +102,7 @@ _app_lifespan = app.router.lifespan_context
 @asynccontextmanager
 async def _lifespan_with_inquiry_pull(application: FastAPI) -> AsyncIterator[None]:
     async with _app_lifespan(application):
-        task = inquiry_pull.start()
+        task = inquiry_pull.start(_OWNED_SKILLS)
         try:
             yield
         finally:

@@ -6,6 +6,7 @@ dashboard-web 옛 경로와의 대응은 README "엔드포인트" 표를 본다.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import uuid
@@ -1638,7 +1639,32 @@ async def inquiry_pull_status() -> dict:
     """판매 서버 문의함을 마지막으로 읽은 결과 (읽기). 연결이 끊겼는지 바로 알 수 있다."""
     if is_mock():
         return ok({"enabled": False, "connected": None, "pending": None, "last_error": None})
-    return ok(await support_client.call("inquiry_pull_status", {}))
+    inquiry, claims = await asyncio.gather(
+        support_client.call("inquiry_pull_status", {}),
+        support_client.call("claim_pull_status", {}),
+        return_exceptions=True,
+    )
+    if isinstance(inquiry, BaseException):
+        raise inquiry
+    # 클레임·반품 입고는 claims 서버가 읽는다(상태도 따로다). 꺼졌거나 느려도 문의 값은 보여 준다
+    if isinstance(claims, BaseException):
+        if not isinstance(claims, ApiError):
+            raise claims
+        # 문의 서버 상태의 claims_*·returns_* 칸은 비어 있어 그대로 두면 "클레임 0건"으로 읽힌다
+        kept = {k: v for k, v in inquiry.items() if not k.startswith(("claims_", "returns_"))}
+        return ok({**kept, "claims_unavailable": True})
+    merged = {
+        **inquiry,
+        **{k: v for k, v in claims.items() if k.startswith(("claims_", "returns_"))},
+    }
+    merged["claims_connected"] = claims.get("connected")
+    for key in ("last_error", "last_attempt_at", "last_ok_at"):
+        merged["claims_" + key] = claims.get(key)  # 시각·오류는 서버별로 나눠 싣는다
+    errors = [e for e in (inquiry.get("last_error"), claims.get("last_error")) if e]
+    merged["last_error"] = errors[0] if errors else None
+    states = [c for c in (inquiry.get("connected"), claims.get("connected")) if c is not None]
+    merged["connected"] = all(states) if states else None
+    return ok(merged)
 
 
 @router.get("/inquiry-pull/stuck")
