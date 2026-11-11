@@ -32,4 +32,5 @@ DejaFix 응답을 상태 코드·본문 그대로 돌려준다. 이 서비스가
 
 ## 5. 실행·테스트
 - 서버: `docker compose -f infra/compose.yml up dejafix-proxy`, 또는 `uv run uvicorn ax_dejafix_proxy.main:app --port 8030`
+- 로컬: `bash scripts/run_all.sh`가 같이 띄운다. `.env`에 `DEJAFIX_USERNAME`이 있을 때만(없으면 띄우지 않고 한 줄만 찍는다). 인프라 AI용 주소 예시: `INFRA_DEJAFIX_URL=http://127.0.0.1:8030`
 - 테스트: `uv run pytest shared/dejafix-proxy` (DejaFix는 가짜 응답으로 대체, 실제 DejaFix 불필요)

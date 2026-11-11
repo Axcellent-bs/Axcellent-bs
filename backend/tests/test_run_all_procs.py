@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -203,3 +205,87 @@ def test_run_all_checks_running_before_start_and_no_longer_restarts_silently() -
     assert body.count("winpid_of $! >") == 4  # 서버·주문 트래픽·수집기 2개
     assert body.count('echo "$START_LINE" > "$LOGS/') == 4
     assert "export AX_GIT_COMMIT" in text
+
+
+# --- dejafix-proxy (8030): DejaFix 계정이 있을 때만 run_all이 같이 띄운다 ---------------------
+
+RUN_ALL = BACKEND / "scripts" / "run_all.sh"
+DEJAFIX_LINE = "dejafix-proxy 8030 ax_dejafix_proxy.main:app"
+
+
+def _apps() -> list[str]:
+    text = RUN_ALL.read_text(encoding="utf-8")
+    block = text[text.index('APPS="') + len('APPS="') :]
+    return [line for line in block[: block.index('"')].splitlines() if line.strip()]
+
+
+def _bash() -> str:
+    found = shutil.which("bash")
+    if found is None or "system32" in found.lower():  # Windows의 WSL bash는 쓰지 않는다
+        pytest.skip("bash 없음")
+    return found
+
+
+def _run(snippet: str, env: dict[str, str]) -> str:
+    result = subprocess.run(
+        [_bash(), "-c", snippet],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={"PATH": os.environ.get("PATH", ""), **env},
+        timeout=30,
+        check=True,
+    )
+    return result.stdout
+
+
+def _between(start: str, end: str) -> str:
+    text = RUN_ALL.read_text(encoding="utf-8")
+    return text[text.index(start) : text.index(end)]
+
+
+def test_dejafix_proxy_is_in_apps_before_orchestrator() -> None:
+    apps = _apps()
+    names = [line.split()[0] for line in apps]
+    assert DEJAFIX_LINE in apps
+    assert names.index("dejafix-proxy") < names.index("orchestrator")
+    assert names[-1] == "orchestrator"  # 총괄은 여전히 맨 뒤 (부서 카드를 모은다)
+
+
+@pytest.mark.parametrize(
+    ("username", "started"),
+    [(None, False), ("", False), ("viewer-test", True)],
+)
+def test_dejafix_proxy_starts_only_with_a_username(username: str | None, started: bool) -> None:
+    """DEJAFIX_USERNAME이 없으면 띄울 목록에서 빼고 한 줄만 찍는다. 값은 출력하지 않는다."""
+    block = _between("# >>> dejafix-proxy 계정 확인", "# <<< dejafix-proxy 계정 확인")
+    apps = "\n".join(_apps())
+    env = {"RUN_APPS": apps} | ({} if username is None else {"DEJAFIX_USERNAME": username})
+    out = _run(f'{block}\nprintf "%s\\n" "$RUN_APPS" | awk "NF {{print \\$1}}"', env)
+    lines = out.splitlines()
+    others = [line.split()[0] for line in _apps() if not line.startswith("dejafix-proxy ")]
+    if started:
+        assert lines == [line.split()[0] for line in _apps()]
+    else:
+        assert lines[0] == "dejafix-proxy 안 띄움(DEJAFIX_USERNAME 없음)"
+        assert lines[1:] == others
+    if username:
+        assert username not in out
+
+
+def test_dejafix_proxy_block_keeps_only_list_without_it() -> None:
+    """--only로 고른 목록에 dejafix-proxy가 없으면 아무것도 찍지 않는다."""
+    block = _between("# >>> dejafix-proxy 계정 확인", "# <<< dejafix-proxy 계정 확인")
+    out = _run(f'{block}\nprintf "%s\\n" "$RUN_APPS"', {"RUN_APPS": "data 8106 svc_data.main:app"})
+    assert out.splitlines() == ["data 8106 svc_data.main:app"]
+
+
+def test_health_check_uses_healthz_for_dejafix_proxy() -> None:
+    """총괄 대기(띄운 서버 수 세기)와 마지막 상태 출력이 dejafix-proxy는 /healthz를 본다."""
+    func = _between("health_url() {", "# bash의 $!는")
+    out = _run(f"{func}\nhealth_url dejafix-proxy 8030\nhealth_url data 8106", {})
+    assert out.splitlines() == ["http://127.0.0.1:8030/healthz", "http://127.0.0.1:8106/health"]
+    text = RUN_ALL.read_text(encoding="utf-8")
+    assert text.count('"$(health_url "$n" "$p")"') == 1  # 총괄 전 대기
+    assert text.count('"$(health_url "$name" "$port")"') == 1  # 마지막 상태 출력
+    assert ':$p/health"' not in text and ':$port/health"' not in text  # 예전 직접 주소가 없다

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 로컬에서 백엔드 전체(공통 4개 + 서비스 11개 + 총괄)를 실제 모드로 띄운다. 목 모드는 없다(*_MOCK은 테스트 전용).
+# 로컬에서 백엔드 전체(공통 5개 + 서비스 11개 + 총괄)를 실제 모드로 띄운다. 목 모드는 없다(*_MOCK은 테스트 전용).
 #   bash backend/scripts/run_all.sh          # 실제 LLM·실제 토큰·Redis·파일 DB, 캣북스 고객 주문 트래픽
 #                                            # 이미 떠 있으면 켜지 않는다 ("이미 실행 중 (pid …), 먼저 stop")
 #   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기 (자식까지, 끝에 "남은 프로세스 0개" 확인)
@@ -30,6 +30,7 @@ safety 8001 ax_safety.main:app
 memory 8002 ax_memory.main:app
 shop-api 8010 ax_shop_api.main:app
 dashboard-api 8020 ax_dashboard_api.main:app
+dejafix-proxy 8030 ax_dejafix_proxy.main:app
 planning 8101 svc_planning.main:app
 dev 8111 svc_dev.main:app
 inquiry 8102 svc_inquiry.main:app
@@ -94,6 +95,11 @@ if [ -n "$ONLY" ]; then
   RUN_APPS=$(echo "$APPS" | awk -v w="$wanted" 'NF && index(w, "," $1 ",")')
   SKIPPED=$(echo "$APPS" | awk -v w="$wanted" 'NF && !index(w, "," $1 ",") {print $1}' | tr '\n' ' ' | sed 's/ $//')
 fi
+
+# 상태 확인 주소 (dejafix-proxy만 /healthz, 나머지는 /health)
+health_url() {
+  if [ "$1" = "dejafix-proxy" ]; then echo "http://127.0.0.1:$2/healthz"; else echo "http://127.0.0.1:$2/health"; fi
+}
 
 # bash의 $!는 Windows 프로세스 번호가 아니다. .pid에는 Windows 번호(/proc/<pid>/winpid)를 적는다
 winpid_of() { cat "/proc/$1/winpid" 2>/dev/null || echo "$1"; }
@@ -268,6 +274,15 @@ for v in LLM_MODEL LLM_BASE_URL LLM_API_KEY; do
 done
 [ -n "${EMBED_MODEL:-}" ] || echo "경고: EMBED_MODEL 이 없습니다. 회사 기억(memory) 검색이 실패합니다 (예: gemini-embedding-001)." >&2
 
+# >>> dejafix-proxy 계정 확인 (tests/test_run_all_procs.py가 이 부분만 실행한다)
+# DejaFix 계정(.env의 DEJAFIX_USERNAME)이 없으면 띄우지 않는다. 띄우면 DejaFix가 없는 PC에서
+# 로그인 실패만 쌓인다. 계정·비밀번호 값은 출력하지 않는다
+if [ -z "${DEJAFIX_USERNAME:-}" ] && echo "$RUN_APPS" | awk '$1 == "dejafix-proxy" {found=1} END {exit !found}'; then
+  RUN_APPS=$(echo "$RUN_APPS" | awk 'NF && $1 != "dejafix-proxy"')
+  echo "dejafix-proxy 안 띄움(DEJAFIX_USERNAME 없음)"
+fi
+# <<< dejafix-proxy 계정 확인
+
 # 안 띄운 서비스는 켠 서비스에서도 뺀다 (라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다).
 # --only로 뺀 서비스와 접어 둔 서비스(FOLDED)가 대상이다. 이미 AX_ENABLED_SERVICES를 줬으면 둘의 교집합이다
 svc_ids=" $("$PY" -c "from ax_agent_template.services import SERVICES; print(' '.join(s.id for s in SERVICES))") "
@@ -374,7 +389,7 @@ while read -r name port module; do
       up=0
       while read -r n p _; do
         [ -n "$n" ] && [ "$n" != "orchestrator" ] || continue
-        [ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$p/health" || true)" = "200" ] && up=$((up + 1))
+        [ "$(curl -s -o /dev/null -w "%{http_code}" "$(health_url "$n" "$p")" || true)" = "200" ] && up=$((up + 1))
       done <<< "$RUN_APPS"
       [ "$up" -ge "$started" ] && break
       sleep 1
@@ -425,7 +440,7 @@ if [ -f "$AX_COMPANY_CONNECTION_FILE" ]; then
 fi
 while read -r name port _; do
   [ -n "$name" ] || continue
-  code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" || true)
+  code=$(curl -s -o /dev/null -w "%{http_code}" "$(health_url "$name" "$port")" || true)
   printf "%-14s %s  %s\n" "$name" "$port" "$code"
 done <<< "$RUN_APPS"
 [ -z "$SKIPPED" ] || echo "안 띄움: $SKIPPED"
