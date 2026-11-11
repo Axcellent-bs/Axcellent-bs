@@ -912,3 +912,32 @@ async def test_a_purged_inquiry_is_taken_off_the_screen_but_a_missing_one_is_lef
     monkeypatch.setattr(shop_client, "mark_inquiry_gone", mark_gone)
     assert (await inquiry_pull.pull_once())["failed"] == 0
     assert gone == [4] and shop.written_views == []
+
+
+@pytest.mark.asyncio
+async def test_each_service_only_pulls_the_kinds_it_owns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """inquiry·claims·reviews가 같은 앱을 각자 띄운다. 받지 않는 skill의 접수는 읽지 않는다."""
+    shop = FakeShop([item(1)], claims=[claim_item(1)])
+    shop.ideas = [stored_idea(1, "ik", "아이디어 내용입니다")]
+    seen = wire(monkeypatch, shop)
+    seen_claims = wire_claims(monkeypatch)
+    monkeypatch.setattr(inquiry_pull, "_owned_skills", lambda: {"create_claim", "receive_return"})
+    await inquiry_pull.pull_once()
+    assert seen == [] and shop.synced == [] and shop.idea_synced == {}  # 문의·아이디어는 안 읽는다
+    assert len(seen_claims) == 1 and len(shop.results) == 1  # 클레임은 읽는다
+
+
+def test_the_service_cards_split_the_pull_between_inquiry_and_claims() -> None:
+    from pathlib import Path
+
+    from ax_contracts.schemas import AgentCard
+
+    def owned(service: str) -> set[str]:
+        path = Path(__file__).resolve().parents[3] / "services" / service / "agent-card.json"
+        return {s.id for s in AgentCard.model_validate_json(path.read_text("utf-8")).skills}
+
+    inquiry, claims = owned("inquiry"), owned("claims")
+    assert {"create_inquiry", "submit_feedback", "submit_idea"} <= inquiry
+    assert {"create_claim", "receive_return"} <= claims
+    assert not {"create_claim", "receive_return"} & inquiry
+    assert not {"create_inquiry", "submit_feedback", "submit_idea"} & claims
