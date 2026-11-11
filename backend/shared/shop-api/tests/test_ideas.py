@@ -166,3 +166,11 @@ def test_the_notice_is_short_and_text_only(client: TestClient) -> None:
     client.post(URL, json=_body())
     long = {"outcome": "use_inquiry", "notice": "가" * 121}
     assert client.post(f"{READ}/1/synced", json=long, headers=SUPPORT).status_code == 422
+
+
+def test_the_synced_paths_of_returns_and_ratings_do_not_take_a_notice(client: TestClient) -> None:
+    body = {"outcome": "received", "notice": "안내"}
+    assert (
+        client.post("/api/shop/admin/returns/7/synced", json=body, headers=SUPPORT).status_code
+        == 422
+    )

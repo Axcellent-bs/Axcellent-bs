@@ -267,3 +267,30 @@ def test_a_rating_of_an_inquiry_taken_off_the_screen_is_not_read(client: TestCli
     client.post(URL, json=_body())
     client.post("/api/shop/admin/inquiries/1/gone", headers=SUPPORT)
     assert client.get(READ, headers=SUPPORT).json()["data"] == []
+
+
+def test_a_new_rating_after_a_refused_one_is_read_again(client: TestClient) -> None:
+    client.post(URL, json=_body(rating=2))
+    sync = "/api/shop/admin/inquiries/1/feedback-synced"
+    assert client.post(sync, json={"outcome": "invalid_state"}, headers=SUPPORT).status_code == 200
+    assert client.post(URL, json=_body(rating=5)).status_code == 201  # 고객이 다시 남긴다
+    (item,) = client.get(READ, headers=SUPPORT).json()["data"]
+    assert item["rating"] == 5  # 새 평가가 고객지원에 간다(읽음 표시가 남아 묻히지 않는다)
+
+
+def test_marking_a_refused_rating_twice_gives_the_same_answer(client: TestClient) -> None:
+    client.post(URL, json=_body())
+    sync = "/api/shop/admin/inquiries/1/feedback-synced"
+    first = client.post(sync, json={"outcome": "invalid_state"}, headers=SUPPORT)
+    again = client.post(
+        sync, json={"outcome": "invalid_state"}, headers=SUPPORT
+    )  # 응답 유실 재시도
+    assert first.status_code == again.status_code == 200
+    assert again.json()["data"]["outcome"] == "invalid_state"
+
+
+def test_only_ideas_take_a_notice(client: TestClient) -> None:
+    client.post(URL, json=_body())
+    sync = "/api/shop/admin/inquiries/1/feedback-synced"
+    body = {"outcome": "rated", "notice": "안내"}
+    assert client.post(sync, json=body, headers=SUPPORT).status_code == 422

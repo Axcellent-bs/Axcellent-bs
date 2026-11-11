@@ -420,6 +420,48 @@
         "title": "IdeaIn",
         "type": "object"
       },
+      "IdeaSyncedIn": {
+        "additionalProperties": false,
+        "description": "아이디어 처리 결과. 받지 않은 아이디어에는 고객에게 보여 줄 안내 한 줄(notice)을 붙인다.",
+        "properties": {
+          "notice": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "outcome": {
+            "maxLength": 40,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.:-]+$",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "IdeaSyncedIn",
+        "type": "object"
+      },
       "InquiryFeedbackIn": {
         "additionalProperties": false,
         "description": "해결된 문의에 고객이 남기는 평가. 후기 글은 `untrusted`로만 넘긴다.",
@@ -588,18 +630,6 @@
         "additionalProperties": false,
         "description": "읽어 간 쪽의 처리 결과: 짧은 코드(outcome)와 고객지원 쪽 번호(ref, 있을 때).",
         "properties": {
-          "notice": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notice"
-          },
           "outcome": {
             "maxLength": 40,
             "minLength": 1,
@@ -1729,7 +1759,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IntakeSyncedIn"
+                "$ref": "#/components/schemas/IdeaSyncedIn"
               }
             }
           },

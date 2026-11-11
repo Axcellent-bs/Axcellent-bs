@@ -282,7 +282,8 @@ def save_feedback(
         if row["feedback"] is not None:
             return "exists"
         conn.execute(
-            "UPDATE inquiry_inbox SET feedback = ?, feedback_at = ? WHERE seq = ?",
+            "UPDATE inquiry_inbox SET feedback = ?, feedback_at = ?, feedback_outcome = NULL"
+            " WHERE seq = ?",
             (payload, _now(), seq),
         )
     return "saved"
@@ -325,8 +326,13 @@ def mark_feedback_synced(db: Db, seq: int, outcome: str) -> dict[str, Any] | Non
     """고객지원이 평가를 읽어 처리했다고 표시한다(결과 코드와 함께). 없는 번호면 None."""
     with db.tx() as conn:
         row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
-        if row is None or row["feedback"] is None:
+        if row is None:
             return None
+        if row["feedback"] is None:
+            if row["feedback_outcome"] is None:
+                return None  # 평가를 남긴 적이 없다
+            # 거절 결과로 평가를 이미 비운 뒤 같은 표시가 다시 온 경우(응답 유실): 같은 결과
+            return {"seq": seq, "synced_at": None, "outcome": row["feedback_outcome"]}
         if row["feedback_synced_at"] is None:
             conn.execute(
                 "UPDATE inquiry_inbox SET feedback_synced_at = ?, feedback_outcome = ?"
@@ -334,8 +340,10 @@ def mark_feedback_synced(db: Db, seq: int, outcome: str) -> dict[str, Any] | Non
                 (_now(), outcome[:40], seq),
             )
             if outcome not in RATED_OUTCOMES:  # 고객지원이 받지 않은 평가: 고객이 다시 남길 수 있다
+                # 읽음 표시도 함께 비워야 고객이 새로 남긴 평가가 다시 읽힌다
                 conn.execute(
-                    "UPDATE inquiry_inbox SET feedback = NULL, feedback_at = NULL WHERE seq = ?",
+                    "UPDATE inquiry_inbox SET feedback = NULL, feedback_at = NULL,"
+                    " feedback_synced_at = NULL WHERE seq = ?",
                     (seq,),
                 )
             row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()

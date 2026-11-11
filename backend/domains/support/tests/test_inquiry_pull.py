@@ -1002,13 +1002,13 @@ async def test_a_refused_idea_writes_back_the_notice_for_the_customer(
     shop = FakeShop([])
     shop.ideas = [stored_idea(1, "ik1", "환불해 주세요 지금 바로", "other")]
     wire(monkeypatch, shop)
-    message = "환불·취소·불량 같은 문제는 문의로 접수해 주세요"
+    message = "환불·취소·불량 같은 문제는 1:1 문의로 남겨 주세요."  # 고객용 문장(내부 문장이 아님)
     fake_skill(
         monkeypatch,
         idea_handlers,
         "submit_idea",
         outcome="use_inquiry",
-        output={"message": message},
+        output={"message": "내부 문장"},
     )
     await inquiry_pull.pull_once()
     assert shop.idea_synced[1] == ("use_inquiry", None)
@@ -1046,3 +1046,67 @@ def test_purging_outside_a_service_does_not_try_to_tell_the_shop() -> None:
     from support_agent import retention
 
     retention._tell_shop_gone(43)  # 실행 중인 이벤트 루프가 없으면(CLI) 아무 일도 하지 않는다
+
+
+@pytest.mark.asyncio
+async def test_an_already_received_return_is_closed_without_asking_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """입고는 처리됐는데 표시만 못 했으면 계속 재시도하지 않고 같은 결과로 닫는다."""
+    from support_agent.claims import Claim
+
+    shop = FakeShop([])
+    shop.returns = [stored_return(7)]
+    wire(monkeypatch, shop)
+    seen = fake_skill(monkeypatch, claim_handlers, "receive_return", outcome="invalid_state")
+    done = Claim.model_construct(
+        id=7, order_id="ord_0001", return_received_at="2026-11-11T00:00:00Z"
+    )
+    monkeypatch.setattr(claim_handlers.CLAIMS, "get", lambda cid: done)
+    await inquiry_pull.pull_once()
+    assert seen == [] and shop.return_synced == {7: "received"}
+
+
+@pytest.mark.asyncio
+async def test_a_timing_result_is_retried_a_few_times_and_then_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """고객지원이 비어 not_found가 계속 나는 평가·입고가 읽기 맨 앞을 영영 차지하지 않게 한다."""
+    from support_agent import feedback_handlers
+
+    monkeypatch.setenv("SUPPORT_PULL_RETRY_LIMIT", "3")
+    shop = FakeShop([])
+    shop.feedbacks = [stored_rating(1, "k1")]
+    shop.returns = [stored_return(7)]
+    wire(monkeypatch, shop)
+    fake_skill(monkeypatch, feedback_handlers, "submit_feedback", outcome="not_found")
+    fake_skill(monkeypatch, claim_handlers, "receive_return", outcome="not_found")
+    for _ in range(2):
+        await inquiry_pull.pull_once()
+        assert shop.feedback_synced == {} and shop.return_synced == {}  # 아직 다시 읽는다
+    await inquiry_pull.pull_once()
+    assert shop.feedback_synced == {1: "gave_up"} and shop.return_synced == {7: "gave_up"}
+
+
+@pytest.mark.asyncio
+async def test_each_refused_idea_gets_a_customer_sentence_not_the_internal_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from support_agent import idea_handlers
+
+    shop = FakeShop([])
+    shop.ideas = [stored_idea(n, f"k{n}", "아이디어 내용입니다") for n in (1, 2, 3)]
+    wire(monkeypatch, shop)
+    for outcome in ("spam", "too_short", "rate_limited"):
+        shop.idea_synced.clear()
+        shop.ideas = [stored_idea(1, "k" + outcome, "아이디어 내용입니다")]
+        fake_skill(
+            monkeypatch,
+            idea_handlers,
+            "submit_idea",
+            outcome=outcome,
+            output={"message": "광고·링크가 있는 글은 받지 않는다"},  # 내부 문장
+        )
+        await inquiry_pull.pull_once()
+        notice = shop.idea_notices[1]
+        assert notice and "받지 않는다" not in notice  # 내부 문장이 고객에게 가지 않는다

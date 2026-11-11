@@ -252,6 +252,11 @@ class IntakeSyncedIn(BaseModel):
 
     outcome: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.:-]+$")
     ref: str | None = Field(default=None, max_length=64)
+
+
+class IdeaSyncedIn(IntakeSyncedIn):
+    """아이디어 처리 결과. 받지 않은 아이디어에는 고객에게 보여 줄 안내 한 줄(notice)을 붙인다."""
+
     notice: str | None = Field(default=None, max_length=idea_inbox.NOTICE_CHARS)
 
 
@@ -998,7 +1003,7 @@ def create_app(
     @app.post("/api/shop/admin/ideas/{seq}/synced")
     async def mark_idea_synced(
         seq: Annotated[int, Path(ge=1)],
-        body: IntakeSyncedIn,
+        body: IdeaSyncedIn,
         _: str = Depends(_caller(INQUIRY_READERS)),
     ) -> dict:
         done = await asyncio.to_thread(
@@ -1077,7 +1082,9 @@ def create_app(
         if claim["order_id"] != body.order_id:
             raise ShopError("ORDER_MISMATCH", "클레임의 주문과 다르다", 409)
         if claim["status"] != "awaiting_return":
-            raise ShopError("INVALID_STATE", "반품 입고를 받을 수 있는 클레임이 아니다", 409)
+            raise ShopError(
+                "INVALID_STATE", "입고를 받을 상태가 아니다(상태 반영은 최대 10초 걸린다)", 409
+            )
         recorded, _replayed = refunds.record_return(
             claim_id, body.order_id, body.inspection, support_client.new_context_id()
         )
