@@ -37,7 +37,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent import catalog
 from data_agent.clients.shop_client import get_connector
-from data_agent.detect import EMPTY_WINDOW, MetricSource, judge_window
+from data_agent.detect import EMPTY_WINDOW, MetricSource, judge_recovery, judge_window
 from data_agent.explain import explain
 from data_agent.metrics.judge import BASELINE_DAYS, Judgement, Settings, settings_for
 from data_agent.seed_metrics import MockMetricSource
@@ -100,10 +100,11 @@ async def detect_anomalies(
     campaigns: CampaignLookup | None = None,
 ) -> AnomalyResult:
     settings = settings or Settings()
-    # 판정은 주기 감시(monitor)와 같은 함수다 (`detect.judge_window`)
-    judged = await judge_window(
-        source, data.window_from, data.window_to, list(data.metrics), settings
-    )
+    # 판정은 주기 감시(monitor)와 같은 함수다 (`detect.judge_window`). 복구 확인(mode="recovery")은
+    # 조치가 끝난 뒤 구간 전체를 한 번에 센다 (`detect.judge_recovery`)
+    recovery = data.mode == "recovery"
+    judge = judge_recovery if recovery else judge_window
+    judged = await judge(source, data.window_from, data.window_to, list(data.metrics), settings)
     judgements = judged.judgements
     needed = judged.queried
 
@@ -158,19 +159,31 @@ async def detect_anomalies(
         + (f" ({', '.join(j.metric for j in abnormal)})" if abnormal else ""),
         *(f"{j.metric}: {j.note}" for j in judgements),
         *notes,
-        f"판정 설정: 5분 {catalog.denominator_label()} {settings.min_payments}건 이상만 "
-        "실패율 판정, "
-        f"유의수준 {settings.alpha}, 장애 쪽 실패는 평소 이 시각에 그만큼 날 확률이 "
-        f"{settings.fault_p_anomaly:g}보다 작으면 이상(이어진 두 구간은 곱, "
-        f"{settings.fault_p_low:g}보다 작으면 low 기록, 평소 5분 실패 하한 "
-        f"{settings.fault_lambda_floor:g}건)"
-        + ("" if judged.fault_codes_read else " (실패 코드를 읽지 못해 이 규칙은 쓰지 않음)"),
+        (
+            f"판정 설정(복구 확인): 조치 뒤 구간 전체에서 {catalog.denominator_label()} "
+            f"{settings.min_payments}건 이상이고, 장애 쪽 실패가 평소 수준(그만큼 날 확률이 "
+            f"{settings.fault_p_anomaly:g} 이상, 평소 5분 실패 하한 "
+            f"{settings.fault_lambda_floor:g}건)이면 정상"
+        )
+        if recovery
+        else (
+            f"판정 설정: 5분 {catalog.denominator_label()} {settings.min_payments}건 이상만 "
+            "실패율 판정, "
+            f"유의수준 {settings.alpha}, 장애 쪽 실패는 평소 이 시각에 그만큼 날 확률이 "
+            f"{settings.fault_p_anomaly:g}보다 작으면 이상(이어진 두 구간은 곱, "
+            f"{settings.fault_p_low:g}보다 작으면 low 기록, 평소 5분 실패 하한 "
+            f"{settings.fault_lambda_floor:g}건)"
+            + ("" if judged.fault_codes_read else " (실패 코드를 읽지 못해 이 규칙은 쓰지 않음)")
+        ),
     ]
     if explained is not None and (note := explained.note()):
         lines.append(note)
     evidence = Evidence(
         queries=[
-            f"metric_series metrics={','.join(needed)} "
+            f"recovery orders·failure_events from={data.window_from.isoformat()} "
+            f"to={data.window_to.isoformat()}, fault_history baseline_days={BASELINE_DAYS}"
+            if recovery
+            else f"metric_series metrics={','.join(needed)} "
             f"from={data.window_from.isoformat()} to={data.window_to.isoformat()} "
             f"baseline_days={BASELINE_DAYS}"
         ],

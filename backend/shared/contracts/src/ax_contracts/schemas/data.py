@@ -59,6 +59,10 @@ class AnomalyDetectionInput(AxModel):
     window_from: UtcDatetime
     window_to: UtcDatetime
     metrics: list[BusinessMetric] = Field(default_factory=list)  # 비면 전부
+    # 판정 방식 (2026-11-11 추가). `window`(기본): 5분 칸마다 지난 7일 같은 시간대와 비교.
+    # `recovery`: 복구 확인용. window_from(조치가 끝난 시각)부터 window_to까지를 한 구간으로 세어
+    # 결제가 충분하고 장애 쪽 실패가 평소 수준이면 normal, 결제가 모자라면 unknown이다
+    mode: Literal["window", "recovery"] = "window"
 
 
 class MetricVerdict(AxModel):

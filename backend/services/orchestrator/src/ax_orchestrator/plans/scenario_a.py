@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from ax_orchestrator.draft import kst_text
@@ -86,8 +87,26 @@ def _publish_notice(inc: Incident) -> dict[str, Any]:
     return {"draft_id": _out(inc, "notice").get("draft_id")}
 
 
+def fixed_at(inc: Incident) -> datetime:
+    """복구 확인을 셀 시작 시각 = 조치가 끝난 시각 (#909).
+
+    사건 열린 시각부터 세면 장애 동안의 실패가 늘 섞여 복구로 판정되지 않는다. 조치 순서대로
+    과거 처리 재사용(release_fault) 완료, 롤백 완료, 사람이 장애를 해제한 시각(`shop.recovered`의
+    `recovery=fault_released`를 받은 시각)이고, 셋 다 없으면 지금처럼 사건 열린 시각이다.
+    """
+    past = inc.steps.get("past_fix")
+    if _past_fix_done(inc) and past is not None and past.finished_at is not None:
+        return past.finished_at
+    rollback = inc.steps.get("rollback")
+    if rollback is not None and rollback.status == "completed" and rollback.finished_at:
+        return rollback.finished_at
+    if _human_released(inc) and inc.recovered_at is not None:
+        return inc.recovered_at
+    return inc.opened_at
+
+
 def _recovery(inc: Incident) -> dict[str, Any]:
-    return {"component": inc.component, "since": iso(inc.opened_at)}
+    return {"component": inc.component, "since": iso(fixed_at(inc))}
 
 
 def _recovered_notice(inc: Incident) -> dict[str, Any]:
@@ -195,9 +214,32 @@ def _rollback_gate(inc: Incident) -> tuple[str, str, str] | None:
     return ("transfer_queued", "no_rollback_target", f"{note}. {hint}" if hint else note)
 
 
+def _human_released(inc: Incident) -> bool:
+    """사람이 장애 상태를 해제했다는 신호(shop.recovered, recovery=fault_released)를 받았는지."""
+    how = inc.shared.get("recovery")
+    return (
+        inc.recovered_at is not None
+        and isinstance(how, dict)
+        and how.get("recovery") == "fault_released"
+    )
+
+
+def _handed_to_person(inc: Incident) -> bool:
+    """롤백을 사람에게 넘겼거나(이관 큐) 사람이 거절했다 = 사람이 장애를 직접 풀 수 있다.
+
+    부서 호출 실패 등으로 롤백까지 가지 못한 경우는 기다리지 않는다(예전처럼 바로 건너뜀).
+    """
+    return inc.steps["rollback"].status in ("transfer_queued", "rejected_by_human")
+
+
 def _recovery_gate(inc: Incident) -> tuple[str, str, str] | None:
-    """되돌리기나 과거 처리 방식 다시 하기 중 하나가 끝났을 때만 복구를 검증한다."""
+    """되돌리기·과거 처리 방식 다시 하기가 끝났거나 사람이 장애를 해제했을 때만 복구를 검증한다.
+
+    원인을 못 찾아 사람에게 넘긴 장애는 사람이 해제하길 기다린다(`wait_for_release`, #909).
+    """
     if inc.steps["rollback"].status == "completed" or _past_fix_done(inc):
+        return None
+    if _human_released(inc):
         return None
     return ("skipped", "no_fix_applied", "선행 단계 미완료(rollback)")
 
@@ -395,7 +437,9 @@ def _resolution(inc: Incident) -> dict[str, Any]:
         action = f"{service} 이전 버전으로 되돌림" + (
             f" ({before} → {after})" if before and after else ""
         )
-    elif not auto and recovered:
+    elif recovered:
+        # 사람에게 넘긴 뒤 풀림: 사람이 해제하고 복구 검증까지 끝났거나(auto), 복구 신호만 받음.
+        # 해제로 풀렸으면 release_fault (다음 같은 장애에서 과거 처리 재사용의 근거)
         action = recovery_action(inc)
         how = inc.shared.get("recovery") or {}
         if isinstance(how, dict) and how.get("recovery") == "fault_released":
@@ -518,6 +562,7 @@ def scenario_a() -> Plan:
                 gate=_recovery_gate,
                 verdict=_recovery_verdict,
                 timeout=RECOVERY_TIMEOUT_SECONDS,
+                wait_for_release=_handed_to_person,
             ),
             Step(
                 "recovered_draft",

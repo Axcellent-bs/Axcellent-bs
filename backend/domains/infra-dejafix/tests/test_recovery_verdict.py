@@ -122,6 +122,25 @@ def _verify(a2a_body) -> dict[str, Any]:
     return TestClient(app).post("/a2a", json=a2a_body("verify_recovery", RECOVERY)).json()
 
 
+def test_verify_asks_data_for_the_recovery_judgement_from_since(
+    a2a_body, monkeypatch: pytest.MonkeyPatch, runtime
+) -> None:
+    """data를 mode="recovery"로, 구간 시작은 총괄이 준 since(조치가 끝난 시각)로 부른다 (#909)."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_call_agent(dept: str, request) -> SimpleNamespace:
+        sent.append(dict(request.input))
+        return SimpleNamespace(status=TaskStatus.COMPLETED, outcome="ok", output=NORMAL)
+
+    monkeypatch.setattr(clients, "call_agent", fake_call_agent)
+    runtime.data = A2AData()
+    runtime.shop.state = {"active": False, "degraded": False}
+    assert _verify(a2a_body)["outcome"] == "recovered"
+    assert sent[0]["mode"] == "recovery"
+    assert sent[0]["window_from"].startswith("2026-10-21T05:04:00")
+    assert sent[0]["metrics"] == ["payment_fail_rate", "order_fail_count"]
+
+
 def test_verify_normal_is_recovered(a2a_body, data_says, runtime) -> None:
     data_says(NORMAL)
     result = _verify(a2a_body)
