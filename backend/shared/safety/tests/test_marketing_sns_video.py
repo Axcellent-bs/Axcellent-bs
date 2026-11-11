@@ -195,7 +195,7 @@ async def test_image_has_no_length_and_its_own_cost_limit(gate: Gate, verifier: 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", [None, "audio"])
+@pytest.mark.parametrize("kind", [None, "music"])
 async def test_unknown_media_kind_is_held(gate: Gate, act, kind: str | None) -> None:
     held = await gate.execute(act("generate_media", "marketing", "m1", **_image(media_kind=kind)))
     assert held.status == "held"
@@ -223,3 +223,17 @@ async def test_marketing_chat_is_a_and_only_marketing_asks(gate: Gate, act, acti
     assert (ok.grade, ok.status) == ("A", "executed")
     other = await gate.execute(act(action, "support", "c2", thread_id="t1"))
     assert other.hold_reason == HoldReason.UNREGISTERED_ACTION
+
+
+@pytest.mark.asyncio
+async def test_bgm_audio_has_its_own_cost_limit(gate: Gate, act) -> None:
+    """영상에 입히는 AI 연주곡 BGM(audio): 곡당 66·132원은 B로 실행, 200원 이상이면 사람이 본다."""
+    for n, cost in enumerate((66, 132)):
+        ok = await gate.execute(
+            act("generate_media", "marketing", f"a{n}", **_image(media_kind="audio", cost_krw=cost))
+        )
+        assert (ok.grade, ok.status) == ("B", "executed")
+    held = await gate.execute(
+        act("generate_media", "marketing", "a9", **_image(media_kind="audio", cost_krw=200))
+    )
+    assert _rule_keys(gate, held.review_id) == {"audio_cost_single"}

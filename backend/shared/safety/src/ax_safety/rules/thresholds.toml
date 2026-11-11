@@ -13,7 +13,7 @@
 # - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 8
+version = 9
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
@@ -545,13 +545,14 @@ allowed = ["banner", "email"]
 when = { channel_code = "sns" }
 
 # 영상 건당 비용. 1건 약 1,300원의 1.5배. 더 비싼 모델·길이로 바뀌면 사람이 본다
-# 매체 종류가 image·video가 아니거나 없으면 어느 상한을 쓸지 알 수 없어 C
+# 매체 종류가 image·video·audio가 아니거나 없으면 어느 상한을 쓸지 알 수 없어 C
+# audio는 영상에 입히는 AI 연주곡 BGM이다(구글 영상 오디오는 상업 이용이 명시되지 않아 지우고 BGM만 쓴다)
 [[rules]]
 key = "media_kind_known"
 action = "generate_media"
 metric = "param_in"
 field = "media_kind"
-allowed = ["image", "video"]
+allowed = ["image", "video", "audio"]
 
 # 영상 8초 720p 약 0.81 USD(약 1,150원). 2,000원 이상이면 단가표·환율이 이상한 것이라 사람이 본다
 [[rules]]
@@ -571,7 +572,18 @@ metric = "amount"
 op = ">="
 value = 400
 
-# 하루 누적은 이미지·영상을 합쳐 본다 (같은 생성 예산)
+# BGM 1곡: 짧은 곡 0.04 USD(약 66원), 긴 곡 0.08 USD(약 132원, 환율 1,500·여유 10%).
+# 긴 곡의 1.5배인 200원 이상이면 단가표·모델이 바뀐 것이라 사람이 본다. 길이 상한은 두지 않는다
+# (곡 길이는 모델이 정하고 금액이 곡당 고정이라 비용은 이 상한이 막는다)
+[[rules]]
+key = "audio_cost_single"
+action = "generate_media"
+when = { media_kind = "audio" }
+metric = "amount"
+op = ">="
+value = 200
+
+# 하루 누적은 이미지·영상·BGM을 합쳐 본다 (같은 생성 예산)
 [[rules]]
 key = "media_cost_daily"
 action = "generate_media"
