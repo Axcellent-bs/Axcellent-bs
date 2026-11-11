@@ -110,7 +110,7 @@ def test_the_customer_list_shows_only_the_buyers_own_inbox_text(client: TestClie
     assert "내 원문 문의" not in other.text
 
 
-def test_synced_inquiries_drop_their_photos_but_keep_the_text() -> None:
+def test_synced_inquiries_drop_their_photos_and_the_text_copy() -> None:
     database = Db(":memory:")
     client = TestClient(create_app(database))
     seq = _inquire(client, "사진 문의", images=[PHOTO])["id"]
@@ -120,7 +120,7 @@ def test_synced_inquiries_drop_their_photos_but_keep_the_text() -> None:
         row = conn.execute(
             "SELECT images, message FROM inquiry_inbox WHERE seq = ?", (seq,)
         ).fetchone()
-    assert row["images"] is None and row["message"] == "사진 문의"
+    assert row["images"] is None and row["message"] == ""  # 읽어 간 뒤에는 본문 사본도 지운다
 
 
 def test_inquiries_survive_a_restart(tmp_path: Path) -> None:

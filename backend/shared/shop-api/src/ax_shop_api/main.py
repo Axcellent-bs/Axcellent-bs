@@ -892,7 +892,12 @@ def create_app(
                 "list_inquiries", support_client.new_context_id(), {"user_id": user_id}
             )
             found = {i["id"]: i for i in out.get("items") or [] if isinstance(i.get("id"), int)}
-        items = [inquiries.own_view(o, found.get(o["support_inquiry_id"])) for o in own]
+        # 읽어 갔는데 고객지원에서 찾을 수 없는 문의(개인정보로 지웠거나 고객지원이 다시 시작함)는
+        # 원문을 다시 보여 주지 않도록 목록에서 뺀다
+        shown = [
+            o for o in own if not o["synced"] or found.get(o["support_inquiry_id"]) is not None
+        ]
+        items = [inquiries.own_view(o, found.get(o["support_inquiry_id"])) for o in shown]
         return _ok(items[:limit], total=len(items))
 
     @app.get("/api/shop/inquiries/{inquiry_id}")

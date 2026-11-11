@@ -202,19 +202,16 @@ def _write(client: TestClient, seq: int, status: str, claim_id: int = 7, **resul
     return client.post(f"{READ_C}/{seq}/result", json=body, headers=SUPPORT)
 
 
-def test_a_claim_filed_again_after_a_rejection_is_a_new_request(client: TestClient) -> None:
+def test_a_claim_filed_again_after_a_rejection_is_the_same_request(client: TestClient) -> None:
+    """고객지원은 같은 품목에 반려된 클레임이 있으면 새 클레임을 막는다(duplicate_claim).
+    그래서 반려 뒤 같은 내용을 다시 내도 새 접수를 만들지 않고 처음 접수를 돌려준다."""
     order = _order(client)
     first = _claim(client, order)
     assert _claim(client, order) == first  # 진행 중이면 같은 접수
     _write(client, first, "rejected")
-    second = _claim(client, order)
-    assert second != first
-    keys = {c["seq"]: c["key"] for c in client.get(READ_C, headers=SUPPORT).json()["data"]}
-    assert list(keys) == [second]  # 새 접수가 읽을 차례에 들어온다
-    assert keys[second].startswith(
-        claim_inbox.digest("buy_0001", order, "return", "defect", None, False, "찢어짐")
-    )
-    assert _claim(client, order) == second  # 새 접수도 진행 중이면 다시 새로 만들지 않는다
+    assert _claim(client, order) == first  # 반려 뒤에도 새 접수가 아니다
+    assert client.get(READ_C, headers=SUPPORT).json()["data"] == []  # 다시 읽을 접수도 없다
+    assert _claim(client, order, reason="damaged") != first  # 내용이 다르면 새 신청이다
 
 
 def test_a_request_support_did_not_accept_can_be_filed_again(client: TestClient) -> None:
@@ -358,3 +355,56 @@ def test_retry_leaves_items_that_are_not_stuck_and_checks_numbers_and_tokens(
     assert client.get(STUCK).status_code == 401
     assert client.get(STUCK, headers=MARKETING).status_code == 403
     assert client.post(f"{READ_I}/{i}/retry", headers=MARKETING).status_code == 403
+
+
+# ------------------------------------------------------- 리뷰 2차(#974): 막힌 접수·지문 조회
+
+
+def _stuck_now(client: TestClient) -> list[tuple[str, int]]:
+    items = client.get("/api/shop/admin/intake/stuck", headers=SUPPORT).json()["data"]
+    return [(i["kind"], i["seq"]) for i in items]
+
+
+def test_a_stuck_claim_the_customer_filed_again_is_not_listed_or_retried(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SHOP_INBOX_MAX_ATTEMPTS", "1")
+    order = _order(client)
+    first = _claim(client, order)
+    _fail(client, "claims", first)  # 접수 불가로 닫힌다
+    assert _stuck_now(client) == [("claim", first)]
+    second = _claim(client, order)  # 고객이 같은 내용을 다시 낸다
+    assert second != first
+    assert _stuck_now(client) == []  # 옛 접수는 막힌 접수에서 빠진다
+    again = client.post(f"{READ_C}/{first}/retry", headers=SUPPORT).json()["data"]
+    assert again["requeued"] is False  # 같은 요청을 두 번 처리하지 않는다
+    assert [c["seq"] for c in client.get(READ_C, headers=SUPPORT).json()["data"]] == [second]
+
+
+def test_the_failed_count_and_the_stuck_list_agree_for_both_boxes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SHOP_INBOX_MAX_ATTEMPTS", "1")
+    order = _order(client)
+    inquiry = _inquire(client, order, "문의 하나")
+    claim = _claim(client, order)
+    _fail(client, "inquiries", inquiry)
+    _fail(client, "claims", claim)
+    failed_i = client.get(READ_I, headers=SUPPORT).json()["meta"]["failed"]
+    failed_c = client.get(READ_C, headers=SUPPORT).json()["meta"]["failed"]
+    assert (failed_i, failed_c) == (1, 1)
+    assert sorted(_stuck_now(client)) == [("claim", claim), ("inquiry", inquiry)]
+
+
+def test_a_claim_is_found_by_its_digest_with_the_unique_index(db: Db) -> None:
+    key = "a" * 64
+    with db.tx() as conn:
+        plan = " ".join(
+            str(tuple(r))
+            for r in conn.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM claim_inbox WHERE digest = ? UNION ALL"
+                " SELECT * FROM claim_inbox WHERE digest >= ? AND digest < ?",
+                (key, key + "#", key + "$"),
+            )
+        )
+    assert "SCAN claim_inbox" not in plan and "USING" in plan  # 표 전체를 훑지 않는다
