@@ -9,8 +9,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
+from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
@@ -63,6 +66,9 @@ class CommunicationLine(BaseModel):
     # `message`는 A2A 요청·응답 한 줄, `event`는 발행된 이벤트 한 줄(종류만 담고 내용은 없다)
     kind: Literal["message", "event"] = "message"
     event_type: str | None = None
+    # skill 등급(`read`·A·B·C). 로그에 적힌 값, 없으면 Agent Card의 값. 모르면 None.
+    # 화면은 이 값으로 조회(`read`)만 한 줄을 단톡방에서 뺀다
+    grade: Literal["read", "A", "B", "C"] | None = None
 
 
 _reader: LogReader | None = None
@@ -196,7 +202,35 @@ def _line(r: LogRecord) -> CommunicationLine:
         outcome=_outcome(r),
         context_id=r.context_id,
         execution_id=execution_id if isinstance(execution_id, str) else None,
+        grade=r.grade or (skill_grades().get(r.skill) if r.skill else None),
     )
+
+
+# Agent Card 위치: backend/services/<id>/, backend/shared/<이름>/(memory)의 agent-card.json
+_BACKEND = Path(__file__).resolve().parents[4]
+_CARD_GLOBS = ("services/*/agent-card.json", "shared/*/agent-card.json")
+_GRADES = ("read", "A", "B", "C")
+
+
+@lru_cache(maxsize=1)
+def skill_grades() -> dict[str, str]:
+    """skill id → 등급. 카드끼리 등급이 다른 skill은 넣지 않는다(모름).
+
+    카드를 못 읽으면 건너뛴다.
+    """
+    seen: dict[str, set[str]] = {}
+    for pattern in _CARD_GLOBS:
+        for path in sorted(_BACKEND.glob(pattern)):
+            try:
+                skills = json.loads(path.read_text(encoding="utf-8")).get("skills", [])
+            except (OSError, ValueError, AttributeError):
+                continue
+            for s in skills if isinstance(skills, list) else []:
+                if not isinstance(s, dict) or not isinstance(s.get("id"), str):
+                    continue
+                if s.get("grade") in _GRADES:
+                    seen.setdefault(s["id"], set()).add(s["grade"])
+    return {skill: next(iter(g)) for skill, g in seen.items() if len(g) == 1}
 
 
 def list_communications(

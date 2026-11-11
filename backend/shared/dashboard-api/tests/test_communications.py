@@ -36,6 +36,7 @@ def test_mock_lists_lines_with_code_fields_only(monkeypatch):
         "execution_id",
         "kind",
         "event_type",
+        "grade",
     }
     assert (data[0]["kind"], data[0]["event_type"]) == ("message", None)
     assert (data[0]["from_agent"], data[0]["to_agent"]) == ("orchestrator", "support")
