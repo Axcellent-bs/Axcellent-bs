@@ -1,0 +1,4 @@
+# 서버(리눅스)에서 그대로 실행되는 파일이라 줄바꿈을 LF 로 고정한다.
+*.sh text eol=lf
+*.py text eol=lf
+*.toml text eol=lf
