@@ -422,10 +422,11 @@
     {
       "id": "claim_pull_status",
       "description": "판매 서버 클레임함·반품 입고를 읽는 서버(claims)의 읽기 상태를 알려 준다: 연결됨·끊김(connected, last_error), 클레임함에 남은 수(claims_pending)·실패로 뺀 수(claims_inbox_failed), 읽어 처리한 수·실패 수, 반품 입고 처리 수. 문의를 읽는 서버와 저장소가 따로라 따로 센다. 읽기만 한다.",
-      "input_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#StuckIntakeInput",
+      "input_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#ClaimPullStatusInput",
       "output_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#ClaimPullStatus",
       "grade": "read",
       "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "handoff": false,
       "verifier": null,
       "priority": "recommended"
     },

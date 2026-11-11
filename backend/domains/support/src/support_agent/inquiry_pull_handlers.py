@@ -74,6 +74,10 @@ class RetryStuckIntake(AxModel):
     requeued: bool
 
 
+class ClaimPullStatusInput(AxModel):
+    """입력은 없다."""
+
+
 class ClaimPullStatus(AxModel):
     """클레임·반품 입고를 읽는 서버(claims)의 읽기 상태(문의를 읽는 서버와 따로 센다)."""
 

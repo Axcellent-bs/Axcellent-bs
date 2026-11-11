@@ -47,6 +47,7 @@ PULL_SKILLS = {
     "ideas": "submit_idea",
     "returns": "receive_return",
 }
+ALL_PULL = frozenset(PULL_SKILLS.values())  # 모든 종류를 읽는다(단독 실행·시험에서 명시해 쓴다)
 BUYER_ID = re.compile(r"^buy_([0-9]{4,9})$")
 
 # 마지막으로 읽어 본 결과. 화면(연결 끊김 표시)이 읽는다. 재시작하면 비워진다
@@ -339,8 +340,8 @@ async def pull_once(limit: int = READ_LIMIT, owned: frozenset[str] | None = None
     한쪽이 실패해도 다른 쪽은 그 주기에 계속 읽는다. 판매 서버에 닿지 못하거나 처리하지 못한
     접수가 있으면 `last_error`에 남고 다음 주기에 다시 읽는다.
 
-    `owned`는 이 서버가 받는 skill 이름이다(서비스 카드). 이 skill로 처리하는 종류만 읽고, None이면
-    모두 읽는다(서비스로 나뉘지 않은 단독 실행·시험).
+    `owned`는 이 서버가 받는 skill 이름이다(서비스 카드). 이 skill로 처리하는 종류만 읽는다.
+    모두 읽으려면 ALL_PULL을 명시한다(빠뜨려서 세 서버가 모두 읽는 일이 없게 필수다).
     """
     async with _LOCK:
         STATE["last_attempt_at"] = _now()
@@ -360,7 +361,7 @@ async def pull_once(limit: int = READ_LIMIT, owned: frozenset[str] | None = None
             (PULL_SKILLS["ideas"], more.pull_ideas),
             (PULL_SKILLS["returns"], more.pull_returns),
         )
-        pulls = [pull for skill, pull in candidates if owned is None or skill in owned]
+        pulls = [pull for skill, pull in candidates if skill in owned]
         for pull in pulls:
             try:
                 got = await pull(limit)
@@ -377,7 +378,7 @@ async def pull_once(limit: int = READ_LIMIT, owned: frozenset[str] | None = None
         return total
 
 
-async def _loop(owned: frozenset[str] | None) -> None:
+async def _loop(owned: frozenset[str]) -> None:
     await asyncio.sleep(FIRST_DELAY_SECONDS)
     while True:
         try:
@@ -387,7 +388,7 @@ async def _loop(owned: frozenset[str] | None) -> None:
         await asyncio.sleep(interval_seconds())
 
 
-def start(owned: frozenset[str] | None = None) -> asyncio.Task[None] | None:
+def start(owned: frozenset[str]) -> asyncio.Task[None] | None:
     """읽기 루프를 시작한다. 꺼져 있거나 이 서버가 읽을 종류가 하나도 없으면 시작하지 않는다.
 
     `owned`는 이 서버가 받는 skill 이름이다. 서비스 카드에서 한 번 정해 넘기므로 매 주기 카드를
@@ -395,7 +396,7 @@ def start(owned: frozenset[str] | None = None) -> asyncio.Task[None] | None:
     """
     if not enabled():
         return None
-    if owned is not None and not owned & set(PULL_SKILLS.values()):
+    if not owned & ALL_PULL:
         logger.info("이 서버는 읽어 갈 접수 종류를 맡지 않아 읽기 루프를 켜지 않는다")
         return None
     return asyncio.create_task(_loop(owned))

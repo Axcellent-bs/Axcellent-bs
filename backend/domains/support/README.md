@@ -62,6 +62,7 @@
 | `send_idea_report` | A | dashboard-api | 하루치(회사 시간대, 비우면 어제) 이벤트·혜택 요청 아이디어를 같은 뜻끼리 묶어 데이터 `receive_idea_report`로 넘긴다. 고객 원문 없이 대표 말·건수·고객 수만 싣는다. 그날 아이디어가 없으면 보내지 않고(`no_ideas`), 데이터가 이미 받았으면 `duplicate`, 닿지 못하면 `data_unavailable`(같은 날을 다시 보내면 이어진다). 대시보드가 하루 한 번 어제부터 3일치를 부른다 |
 | `list_idea_trends` | read | dashboard-api, orchestrator, planning | 데이터가 받아 둔 일일 보고를 기간(day·week·month·year)별로 더한 요청 순위를 읽어 그대로 돌려준다. 합산은 데이터가 한다 |
 | `inquiry_pull_status` | read | dashboard-api, orchestrator | 판매 서버 문의함을 고객지원이 마지막으로 읽은 결과: 연결됨·끊김(`connected`·`last_error`), 마지막 시도·성공 시각, 문의함에 남은 수(`pending`), 읽어 처리한 수·실패 수. 읽기 루프가 센 값이고 재시작하면 비워진다 |
+| `claim_pull_status` | read | dashboard-api, orchestrator | 클레임·반품 입고를 읽는 서버(claims)의 읽기 상태: 연결됨·끊김, 클레임함에 남은 수·실패로 뺀 수, 처리한 수, 반품 입고 처리 수. 문의를 읽는 서버와 저장소가 따로라 따로 센다(대시보드 `/inquiry-pull`이 두 값을 합쳐 보여 준다) |
 | `create_claim` | A | dashboard-api, shop-api, orchestrator | 취소·반품·교환 접수 + 규칙 판정 |
 | `decide_claim` | A | dashboard-api | 사람 확인이 필요한 클레임 승인·거절. 안전 장치가 환불을 닫은 입고 클레임은 사유와 함께 거절로 종료하고(같은 품목 재접수도 막는다), 만료(`review_timeout`)로 닫힌 것만 `retry_refund`로 새 시도 키(`…:retry<n>`)로 다시 요청한다 |
 | `receive_return`, `inspect_return` | A | dashboard-api (입고는 shop-api도) | 반품 입고, 검수 결과 기록 |

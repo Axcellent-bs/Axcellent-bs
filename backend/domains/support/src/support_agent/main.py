@@ -42,8 +42,13 @@ from support_agent.triage_handlers import TRIAGE_HANDLERS
 def _card_path() -> Path:
     """`agents/support/agent-card.json`을 찾는다. 컨테이너와 레포 루트 실행 모두에서 동작한다."""
     override = os.getenv("SUPPORT_AGENT_CARD")
+    if override:
+        # 서비스 카드를 지정했는데 없으면 공용 카드(전부 맡음)로 떨어지지 않고 서버를 띄우지 않는다
+        path = Path(override)
+        if not path.is_file():
+            raise FileNotFoundError(f"SUPPORT_AGENT_CARD가 가리키는 카드가 없다: {override}")
+        return path
     candidates = [
-        Path(override) if override else None,
         Path.cwd() / "domains" / "support" / "agent-card.json",
         Path(__file__).resolve().parents[2] / "agent-card.json",
     ]
