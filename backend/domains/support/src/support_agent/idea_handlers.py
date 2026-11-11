@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from pydantic import Field, ValidationError
@@ -23,12 +24,19 @@ from ax_agent_template.execute import execute
 from ax_agent_template.server import error_result
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel
+from ax_contracts.schemas.idea import (
+    IdeaPeriod,
+    IdeaReportInput,
+    IdeaReportOutput,
+    IdeaTrendList,
+)
 from ax_contracts.schemas.planning import CreateTicketOutput
 from support_agent import handlers as h
 from support_agent import ideas
 from support_agent.ideas import AREA_KO, KIND_KO, IdeaArea, IdeaKind, IdeaStatus
 
 PLANNING = "planning"
+DATA = "data"
 logger = logging.getLogger("ax.support.ideas")
 TICKET_EVIDENCE_IDS = 20  # 기획에 근거로 붙이는 아이디어 번호 수 (나머지는 건수로만)
 DEFAULT_MIN_IDEAS = 3  # 이만큼 쌓인 묶음부터 "넘길 만하다"로 표시한다
@@ -74,6 +82,26 @@ class ListIdeasOutput(AxModel):
 class SendIdeaDigestOutput(AxModel):
     sent: list[dict[str, Any]] = Field(default_factory=list)  # 묶음마다 request_id 또는 error
     failed: int = 0
+
+
+class SendIdeaReportInput(AxModel):
+    """하루치 이벤트·혜택 요청 보고를 데이터에 넘긴다. 날짜를 비우면 어제(회사 시간대)."""
+
+    report_date: date | None = None
+
+
+class SendIdeaReportOutput(AxModel):
+    report_date: date
+    total_ideas: int = 0
+    clusters: int = 0
+    outcome: str  # accepted | duplicate | no_ideas | rejected | data_unavailable
+    reason_code: str | None = None
+
+
+class ListIdeaTrendsInput(AxModel):
+    period: IdeaPeriod = "week"
+    buckets: int = Field(default=8, ge=1, le=60)
+    top: int = Field(default=5, ge=1, le=20)
 
 
 def _item(idea: ideas.Idea) -> dict[str, Any]:
@@ -280,8 +308,93 @@ async def _send_group(
     }
 
 
+async def send_idea_report(request: AgentRequest) -> AgentResult:
+    """하루치 이벤트·혜택 요청을 같은 뜻끼리 묶어 데이터 `receive_idea_report`로 넘긴다 (grade A).
+
+    - 그날 받은 해당 종류 아이디어가 없으면 아무것도 보내지 않는다 (`no_ideas`).
+    - 데이터가 같은 날 보고를 이미 받았으면 `duplicate`로 끝난다 (여러 번 불러도 한 번만 받는다).
+    - 보고에는 고객 원문 없이 대표 말·건수·고객 수만 싣는다. 데이터에 닿지 못하면
+      `data_unavailable`이고 다음 주기에 같은 날을 다시 보내면 이어진다.
+    - 데이터는 자기 기록만 쌓고 여기서도 상태를 바꾸지 않아 관문을 거치지 않는다.
+    """
+    parsed = h._parse(request, SendIdeaReportInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    tenant = request.meta.tenant_id
+    day = parsed.report_date or (datetime.now(ideas.report_tz()).date() - timedelta(days=1))
+    total, clusters = ideas.daily_report(h.IDEAS.all(tenant), day)
+
+    def done(outcome: str, reason: str | None = None) -> AgentResult:
+        out = SendIdeaReportOutput(
+            report_date=day,
+            total_ideas=total,
+            clusters=len(clusters),
+            outcome=outcome,
+            reason_code=reason,
+        )
+        return h._done(
+            request,
+            out.model_dump(mode="json"),
+            evidence=Evidence(data_summary=f"고객 아이디어 보고 {day} {outcome}"),
+        )
+
+    if total == 0:
+        return done("no_ideas")
+    report = IdeaReportInput(
+        report_date=day,
+        total_ideas=total,
+        clusters=[c.model_dump() for c in clusters],  # type: ignore[arg-type]
+    )
+    send = AgentRequest(
+        meta=request.meta.model_copy(
+            update={"idempotency_key": f"{request.meta.context_id}:send_idea_report:{tenant}:{day}"}
+        ),
+        skill="receive_idea_report",
+        input=report.model_dump(mode="json"),
+    )
+    try:
+        reply = await h.SEND(DATA, send)
+    except Exception:
+        logger.warning("idea report %s not sent to data", day)
+        return done("data_unavailable")
+    if reply.status != TaskStatus.COMPLETED:
+        return done("data_unavailable")
+    try:
+        received = IdeaReportOutput.model_validate(reply.output)
+    except ValidationError:
+        return done("data_unavailable")
+    return done(received.outcome, received.reason_code)
+
+
+async def list_idea_trends(request: AgentRequest) -> AgentResult:
+    """데이터가 받아 둔 일일 보고를 기간(일·주·월·연)별로 더한 요청 순위 (읽기).
+
+    합산은 데이터가 한다. 여기서는 데이터에서 읽어 그대로 돌려줄 뿐 숫자를 만들지 않는다.
+    데이터에 닿지 못하면 빈 결과와 이유를 돌려준다.
+    """
+    parsed = h._parse(request, ListIdeaTrendsInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    ask = AgentRequest(
+        meta=request.meta.model_copy(update={"idempotency_key": None}),
+        skill="list_idea_reports",
+        input=parsed.model_dump(mode="json"),
+    )
+    try:
+        reply = await h.SEND(DATA, ask)
+        listing = IdeaTrendList.model_validate(reply.output)
+        if reply.status != TaskStatus.COMPLETED:
+            raise ValueError(reply.status)
+    except Exception:
+        logger.warning("idea trends not read from data")
+        listing = IdeaTrendList(period=parsed.period, unknown_reason="데이터에 닿지 못함")
+    return h._done(request, listing.model_dump(mode="json"))
+
+
 IDEA_HANDLERS = {
     "submit_idea": h.for_customer_gateway(submit_idea, needs_user=True),
     "list_ideas": list_ideas,
     "send_idea_digest": send_idea_digest,
+    "send_idea_report": send_idea_report,
+    "list_idea_trends": list_idea_trends,
 }

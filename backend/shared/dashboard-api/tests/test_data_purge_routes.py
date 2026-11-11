@@ -1,6 +1,6 @@
 """개인정보 삭제 API: 미리보기, 고객 요청 삭제(사람 승인), 하루 한 번 도는 3년 삭제."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -121,3 +121,19 @@ async def test_the_daily_sweep_calls_the_expiry_skill_with_a_per_day_key(fake: F
 async def test_a_failing_sweep_does_not_raise(fake: Fake) -> None:
     fake.fail = True
     assert await main.retention_sweep_once() is False  # 다음 주기에 다시 부른다
+
+
+@pytest.mark.asyncio
+async def test_the_daily_sweep_sends_the_idea_reports_for_the_last_days(fake: Fake) -> None:
+    assert await main.retention_sweep_once() is True
+    today = datetime.now(UTC).date()
+    sent = [r for r in fake.sent if r.skill == "send_idea_report"]
+    days = [(today - timedelta(days=back)).isoformat() for back in range(1, 4)]
+    assert [r.input["report_date"] for r in sent] == days  # 어제부터 거꾸로
+    assert [r.meta.idempotency_key for r in sent] == [f"idea-report:{d}" for d in days]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_idea_report_does_not_stop_the_sweep(fake: Fake) -> None:
+    fake.fail = True
+    await main.idea_report_sweep_once()  # 예외 없이 끝난다 (다음 주기에 같은 날을 다시 보낸다)

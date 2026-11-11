@@ -5,7 +5,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,10 +30,28 @@ async def retention_sweep_once() -> bool:
         await support_client.call("purge_expired_inquiries", {}, key=f"retention-expire:{today}")
         # 클레임 기록은 팀 기준(5년)이고 사람이 켜기 전에는 건수만 센다 (support가 정한다)
         await support_client.call("purge_expired_claims", {}, key=f"claim-retention:{today}")
+        await idea_report_sweep_once()
         return True
     except Exception:  # noqa: BLE001 - 못 불러도 서버는 계속 돈다. 다음 주기에 다시 부른다
         logger.warning("3년 보유기간 삭제를 부르지 못했다", exc_info=True)
         return False
+
+
+# 어제부터 거꾸로 이만큼의 날을 보낸다 (놓친 날을 메우고, 받은 날은 마케팅이 건너뛴다)
+IDEA_REPORT_DAYS = 3
+
+
+async def idea_report_sweep_once() -> None:
+    """고객 아이디어 일일 보고를 마케팅에 넘기는 skill을 부른다. 못 불러도 다른 일은 계속된다."""
+    today = datetime.now(UTC).date()
+    for back in range(1, IDEA_REPORT_DAYS + 1):
+        day = (today - timedelta(days=back)).isoformat()
+        try:
+            await support_client.call(
+                "send_idea_report", {"report_date": day}, key=f"idea-report:{day}"
+            )
+        except Exception:  # noqa: BLE001 - 다음 주기에 같은 날을 다시 보낸다
+            logger.warning("고객 아이디어 일일 보고를 부르지 못했다 (%s)", day, exc_info=True)
 
 
 async def _retention_loop() -> None:

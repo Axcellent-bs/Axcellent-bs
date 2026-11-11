@@ -3,7 +3,7 @@ import { Loading, OFFLINE, Stat } from "@/components/admin/bits";
 import { api } from "@/lib/api";
 import { dateStr } from "@/lib/format";
 import { humanTokenSet } from "@/lib/finance";
-import { support, type IdeaDigestResult, type IdeaGroup, type IdeaItem, type IdeaList } from "@/lib/support";
+import { support, type IdeaDigestResult, type IdeaGroup, type IdeaItem, type IdeaList, type IdeaPeriod, type IdeaTrends } from "@/lib/support";
 
 // 고객의 소리 = 고객이 "이런 걸 해 주면 좋겠다"고 보낸 아이디어를 모으는 곳. 불만·문의와 따로 쌓이고
 // (환불·취소·불량 같은 문제는 아이디어로 받지 않고 문의로 안내한다), 개인정보는 가려서 저장된다.
@@ -22,6 +22,68 @@ const KIND_TONE: Record<string, string> = {
   event: "bg-amber-50 text-amber-700", feature: "bg-brand-50 text-brand-700", improvement: "bg-emerald-50 text-emerald-700",
   product: "bg-sky-50 text-sky-700", other: "bg-ink-100 text-ink-700",
 };
+const PERIODS: { id: IdeaPeriod; label: string; unit: string }[] = [
+  { id: "week", label: "주별", unit: "주" }, { id: "month", label: "월별", unit: "월" }, { id: "year", label: "연별", unit: "연" },
+];
+const bucketTitle = (period: IdeaPeriod, start: string) =>
+  period === "year" ? `${start.slice(0, 4)}년` : period === "month" ? `${start.slice(0, 4)}년 ${Number(start.slice(5, 7))}월` : `${dateStr(start)} 주`;
+
+// 이벤트·혜택 요청을 하루 단위로 같은 뜻끼리 묶어 데이터에 넘긴 보고를 주·월·연으로 더한 순위.
+// 합산은 데이터가 한 값이고 화면이 새로 계산하지 않는다. 보고에는 고객 원문이 없다.
+function Trends() {
+  const [period, setPeriod] = useState<IdeaPeriod>("week");
+  const [data, setData] = useState<IdeaTrends | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setData(null);
+    support.ideaTrends(period).then((env) => { if (live) { setData(env.data); setError(null); } })
+      .catch((e: Error) => { if (live) setError(e.message || OFFLINE); });
+    return () => { live = false; };
+  }, [period]);
+  return (
+    <section className="card p-4" aria-label="이벤트·혜택 요청 순위">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-[13px] font-semibold">이벤트·혜택 요청 순위</h2>
+        <div className="flex gap-1.5" role="group" aria-label="기간">
+          {PERIODS.map((p) => (
+            <button key={p.id} type="button" aria-pressed={period === p.id} onClick={() => setPeriod(p.id)}
+              className={`chip py-1 ${period === p.id ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700"}`}>{p.label}</button>
+          ))}
+        </div>
+      </div>
+      <p className="mt-1 text-xs text-ink-500">
+        날마다 고객지원이 같은 뜻으로 겹친 요청을 묶어 데이터 담당에게 넘기고, 데이터가 받은 보고를 기간별로 더한 순위입니다. 고객 원문은 넘어가지 않습니다.
+      </p>
+      {error && <p role="alert" className="mt-2 text-xs text-red-800">{error}</p>}
+      {!error && !data && <p className="mt-3 text-xs text-ink-500">불러오는 중…</p>}
+      {data && data.buckets.length === 0 && <p className="mt-3 text-xs text-ink-500">{data.unknown_reason ?? "아직 받은 일일 보고가 없습니다."} 일일 보고는 하루가 지난 뒤 자동으로 넘어갑니다.</p>}
+      {data && data.buckets.length > 0 && (
+        <ul className="mt-3 grid gap-3 md:grid-cols-2">
+          {data.buckets.map((b) => (
+            <li key={b.start} className="rounded-xl bg-surface p-4 ring-1 ring-ink-100">
+              <p className="text-sm font-semibold">{bucketTitle(period, b.start)}</p>
+              <p className="mt-0.5 text-[11px] text-ink-500">{dateStr(b.start)} ~ {dateStr(b.end)} · 보고 {b.report_days}일 · 이벤트·혜택 요청 {b.total_ideas}건</p>
+              {b.top.length === 0 ? <p className="mt-2 text-xs text-ink-500">겹친 요청이 없습니다.</p> : (
+                <ol className="mt-2 space-y-1.5 text-xs">
+                  {b.top.map((r, i) => (
+                    <li key={r.key} className="flex items-center gap-2">
+                      <span className="w-4 shrink-0 text-ink-500 tabular-nums">{i + 1}</span>
+                      <span className="min-w-0 flex-1 truncate font-medium">{r.label}</span>
+                      <span className="tabular-nums text-ink-700">{r.count}건</span>
+                      <span className="w-24 shrink-0 text-right text-[11px] text-ink-500">{r.days}일 · 고객 {r.customer_count}명</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 const groupKey = (g: { kind: string; area: string }) => `${g.kind}:${g.area}`;
 
 function rowMessage(r: IdeaDigestResult["sent"][number]): string {
@@ -84,6 +146,8 @@ export default function VoicePage() {
         <Stat label="넘길 만한 묶음" value={ready.length} tone={ready.length ? "text-amber-700" : ""} sub={`같은 묶음에 ${min}건 이상`} />
         <Stat label="기획에 넘긴 아이디어" value={sentCount} sub="현재 목록에서 센 값" />
       </div>
+
+      <Trends />
 
       <section className="card p-4" aria-label="기획에 넘길 묶음">
         <div className="flex flex-wrap items-center gap-3">

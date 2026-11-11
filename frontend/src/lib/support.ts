@@ -184,6 +184,13 @@ export interface IdeaGroup {
   idea_count: number; customer_count: number; first_at: string; last_at: string;
   top_words: { word: string; count: number }[]; idea_ids: string[]; ready: boolean;
 }
+// 데이터가 받은 일일 보고를 기간별로 더한 이벤트·혜택 요청 순위. 합산은 데이터가 한 값이다
+export type IdeaPeriod = "week" | "month" | "year";
+export interface IdeaTrendRow { key: string; label: string; count: number; customer_count: number; days: number }
+export interface IdeaTrendBucket {
+  period: IdeaPeriod | "day"; start: string; end: string; report_days: number; total_ideas: number; top: IdeaTrendRow[];
+}
+export interface IdeaTrends { period: IdeaPeriod | "day"; buckets: IdeaTrendBucket[]; unknown_reason: string | null }
 export interface IdeaList { items: IdeaItem[]; total: number; new_count: number; groups: IdeaGroup[] }
 export interface IdeaDigestRow {
   kind: IdeaKind; area: IdeaArea; idea_count: number; customer_count: number;
@@ -289,6 +296,9 @@ export const support = {
   /** 고객이 낸 아이디어 목록과 기획에 넘길 묶음 현황 */
   ideas: (q: { status?: "new" | "sent"; minIdeas?: number } = {}) =>
     get<IdeaList>(`${BASE}/ideas${qs({ status: q.status, min_ideas: q.minIdeas })}`),
+  /** 이벤트·혜택 요청을 주·월·연으로 더한 순위 (데이터가 받은 일일 보고) */
+  ideaTrends: (period: IdeaPeriod, buckets = 8, top = 5) =>
+    get<IdeaTrends>(`${BASE}/ideas/trends${qs({ period, buckets, top })}`),
   changeProposals: () => get<ChangeProposals>(`${BASE}/change-proposals`),
   /** 한 사건 번호로 기록된 처리(안전 관문 실행 기록) */
   executions: (contextId: string) => get<ExecutionRow[]>(`${BASE}/executions${qs({ context_id: contextId })}`),

@@ -1649,6 +1649,22 @@ async def customer_ideas(
     return ok(await support_client.call("list_ideas", {**payload, "min_ideas": min_ideas}))
 
 
+@router.get("/ideas/trends")
+async def customer_idea_trends(
+    period: str = Query(default="week", pattern=r"^(day|week|month|year)$"),
+    buckets: int = Query(default=8, ge=1, le=60),
+    top: int = Query(default=5, ge=1, le=20),
+) -> dict:
+    """마케팅이 받은 일일 보고를 주·월·연별로 더한, 많이 겹친 이벤트·혜택 요청 순위 (읽기)."""
+    if is_mock():
+        return ok({"period": period, "buckets": [], "unknown_reason": "목 모드"})
+    return ok(
+        await support_client.call(
+            "list_idea_trends", {"period": period, "buckets": buckets, "top": top}
+        )
+    )
+
+
 @router.post("/ideas/digest", status_code=201)
 async def send_idea_digest(body: IdeaDigestBody, request: Request) -> dict:
     """쌓인 아이디어를 묶음별로 기획에 넘긴다. 사람 토큰이 필요하다 (라우터 전체에 걸려 있다).
