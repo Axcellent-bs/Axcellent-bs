@@ -309,6 +309,41 @@ def test_write_failure_is_not_swallowed(memory_repo) -> None:
     assert "k" not in store.results  # 저장에 실패한 결과는 캐시에도 넣지 않는다
 
 
+# ---------------------------------------------------------------- 동시 시작
+def test_schema_is_created_under_an_advisory_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """빈 DB에서 여러 서비스가 동시에 켜져도 부딪히지 않게 스키마는 잠금을 잡고 만든다."""
+    calls: list[tuple[str, Any]] = []
+
+    class FakeConn:
+        closed = False
+
+        def transaction(self):
+            conn = self
+
+            class Tx:
+                def __enter__(self):
+                    calls.append(("begin", None))
+                    return conn
+
+                def __exit__(self, *exc):
+                    calls.append(("commit", None))
+                    return False
+
+            return Tx()
+
+        def execute(self, sql: str, params: Any = None):
+            calls.append((sql, params))
+
+    monkeypatch.setattr(PgRepo, "_connect", lambda self: FakeConn())
+    PgRepo("postgresql://unused")
+    assert calls == [
+        ("begin", None),
+        ("SELECT pg_advisory_xact_lock(%s)", [persistence.SCHEMA_LOCK_KEY]),
+        (schema_sql(), None),
+        ("commit", None),
+    ]
+
+
 # ---------------------------------------------------------------- 실제 PostgreSQL (DSN 있을 때만)
 DSN = os.environ.get(persistence.DSN_ENV)
 needs_db = pytest.mark.skipif(not DSN, reason="SUPPORT_PG_DSN 없음 (DB 테스트 건너뜀)")
@@ -462,3 +497,20 @@ def test_pg_migrates_a_legacy_claims_table_with_numeric_ids() -> None:
     )
     assert PersistentClaimStore(repo).get(2).order_id == "ord_0201"  # type: ignore[union-attr]
     repo.close()
+
+
+@needs_db
+def test_pg_services_starting_together_on_an_empty_db_all_come_up() -> None:
+    """여러 서비스(문의·클레임·리뷰)가 빈 DB에서 동시에 시작해도 모두 뜬다 (11/11 251 재시작)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import psycopg
+
+    assert DSN
+    with psycopg.connect(DSN, autocommit=True) as conn:
+        for table in TABLES:
+            conn.execute(f"DROP TABLE IF EXISTS {table.name}")
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        repos = list(pool.map(lambda _: PgRepo(DSN), range(6)))
+    for repo in repos:
+        repo.close()

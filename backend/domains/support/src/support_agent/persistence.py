@@ -38,6 +38,10 @@ from support_agent.store import InquiryStore
 logger = logging.getLogger("ax.support.persistence")
 
 DSN_ENV = "SUPPORT_PG_DSN"
+# 스키마를 만드는 동안 잡는 PostgreSQL advisory lock 번호. 문의·클레임·리뷰 서비스가 빈 DB에서
+# 동시에 켜지면 CREATE TABLE IF NOT EXISTS끼리 부딪혀(UniqueViolation pg_type_typname_nsp_index)
+# 일부가 죽는다. 같은 번호로 잠그면 한 서비스씩 차례로 만들고, 뒤 서비스는 있는 테이블을 지나간다.
+SCHEMA_LOCK_KEY = 0x5F5550504F5254  # "_SUPPORT"
 
 
 @dataclass(frozen=True)
@@ -151,6 +155,13 @@ def _upsert_sql(table: Table) -> str:
     )
 
 
+def _create_schema(conn: Any) -> None:
+    """한 트랜잭션 안에서 advisory lock을 잡고 스키마를 만든다. 잠금은 트랜잭션이 끝나면 풀린다."""
+    with conn.transaction():
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", [SCHEMA_LOCK_KEY])
+        conn.execute(schema_sql())
+
+
 class PgRepo:
     """psycopg로 PostgreSQL에 쓰고 읽는다. 연결이 끊기면 한 번 다시 연결해 재시도한다."""
 
@@ -159,7 +170,7 @@ class PgRepo:
         self._lock = threading.RLock()
         self._conn: Any = None
         self._upserts = {t.name: _upsert_sql(t) for t in TABLES}
-        self._run(lambda conn: conn.execute(schema_sql()))  # type: ignore[arg-type]
+        self._run(_create_schema)
 
     def _connect(self) -> Any:
         import psycopg
