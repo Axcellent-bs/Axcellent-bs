@@ -27,6 +27,10 @@ IRREVERSIBLE_PREFIXES: dict[str, str] = {
     "shop-api/payment/migrations/": "결제 데이터 삭제·변경 마이그레이션",
     "shop-api/accounts/pii/": "개인정보 필드",
     "shop-api/settlement/payout/": "실제 송금·정산 연동",
+    # 캣북스 새 레포(Catbooks-demo/catbooks-demo) 구조: backend/shop-api/
+    "backend/shop-api/payment/migrations/": "결제 데이터 삭제·변경 마이그레이션",
+    "backend/shop-api/accounts/pii/": "개인정보 필드",
+    "backend/shop-api/settlement/payout/": "실제 송금·정산 연동",
 }
 
 # ---- 머지 위험 경로 (#200). shop-web/이 허용 경로에 들어가면서(safety #201) 결제·개인정보
@@ -49,6 +53,21 @@ MERGE_RISK_PREFIXES: dict[str, str] = {
     ".github/": "CI (safety 보호 경로)",
     "safety/": "관문 규칙 (safety 보호 경로)",
     "contracts/": "부서 간 계약 (safety 보호 경로)",
+    # 캣북스 새 레포(Catbooks-demo/catbooks-demo) 구조: frontend/shop-web/, backend/shop-api/.
+    # 예전 구조와 같은 파일이라 같은 이유로 막는다. 허용 경로(PR_ALLOWED_PATHS)는 safety
+    # thresholds.toml과 같은 값이라 safety 변경과 함께 바꾼다
+    "frontend/shop-web/checkout/": "결제 화면 (결제 요청·금액·실패 안내)",
+    "frontend/shop-web/payment/": "결제 수단 입력 화면",
+    "frontend/shop-web/account/": "회원·개인정보 화면",
+    "frontend/shop-web/src/pages/Checkout.tsx": "결제 화면 (safety 보호 경로)",
+    "frontend/shop-web/src/lib/auth.tsx": "로그인·인증 (safety 보호 경로)",
+    "frontend/shop-web/src/lib/api.ts": "API 클라이언트 (safety 보호 경로)",
+    "frontend/shop-web/src/lib/env.ts": "환경값 (safety 보호 경로)",
+    "backend/shop-api/src/ax_shop_api/db.py": "DB 스키마 (safety 보호 경로)",
+    "backend/shop-api/src/ax_shop_api/service.py": "주문·결제 로직 (safety 보호 경로)",
+    "backend/shop-api/src/ax_shop_api/promotions.py": "쿠폰 지급 로직 (safety 보호 경로)",
+    "backend/shop-api/src/ax_shop_api/seed.py": "시드 데이터 (safety 보호 경로)",
+    "backend/contracts/": "판매 서버 API 계약 고정본 (새 레포)",
 }
 
 # ---- #171 thresholds.toml merge_pr 규칙 (제안값, generate_pr와 같은 크기·경로 기준)
