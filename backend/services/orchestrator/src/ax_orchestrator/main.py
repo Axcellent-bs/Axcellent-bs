@@ -63,6 +63,10 @@ class AppState:
         self.hold_timeout = float(os.getenv("ORCHESTRATOR_HOLD_TIMEOUT", "600"))
         # 사람 할 일함 처리를 기다리는 시간(초). 넘으면 그 단계는 rejected_by_human (기본 하루)
         self.handoff_timeout = float(os.getenv("ORCHESTRATOR_HANDOFF_TIMEOUT", "86400"))
+        # 원인을 못 찾아 사람에게 넘긴 장애를 사람이 해제하길 기다리는 시간(초, 기본 20분, 목 0).
+        # 그 안에 풀리면 복구 검증 → 정상화 공지로 이어지고, 넘으면 예전처럼 복구 검증을 건너뛴다
+        default_wait = "0" if self.mock else "1200"
+        self.release_wait = float(os.getenv("ORCHESTRATOR_RELEASE_WAIT", default_wait))
         self.latency = float(os.getenv("ORCHESTRATOR_MOCK_LATENCY", "0.7"))
         self.registry = Registry()
         self.fakes: FakeDepartments | None = None
@@ -108,6 +112,7 @@ class AppState:
             publish=self._publish,
             hold_timeout=self.hold_timeout,
             handoff_timeout=self.handoff_timeout,
+            release_wait=self.release_wait,
             retry_delay=0.2,
             persist=self.store.save,
             # 안전 관문의 사람 결정을 되물어 확인한다. 목 모드는 AX_SAFETY_URL을 줄 때만 부른다

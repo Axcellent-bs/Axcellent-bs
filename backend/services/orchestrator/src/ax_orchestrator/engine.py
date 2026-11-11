@@ -178,8 +178,12 @@ class Engine:
         author: str = "orchestrator",
         persist: Persister | None = None,
         review_check: ReviewChecker | None = None,
+        release_wait: float = 0.0,
     ) -> None:
         self.registry = registry
+        # 사람이 장애를 해제하길 기다리는 시간(초, `Step.wait_for_release`). 0이면 기다리지 않는다
+        self.release_wait = release_wait
+        self._released: dict[str, asyncio.Event] = {}
         self.caller = caller
         self.publish = publish
         self.hold_timeout = hold_timeout
@@ -258,6 +262,13 @@ class Engine:
         blocked = step.gate(inc)
         if (
             blocked is not None
+            and step.wait_for_release is not None
+            and self.release_wait > 0
+            and step.wait_for_release(inc)
+        ):
+            blocked = await self._wait_release(inc, step)
+        if (
+            blocked is not None
         ):  # 앞 단계 결과로 보아 지금은 부르지 않는다(지어내지 않고 이유를 남김)
             run.status, run.reason_code, run.note = blocked
             run.finished_at = now()
@@ -312,6 +323,38 @@ class Engine:
         if added:
             await self._queue_late(inc, plan, added)
         return True
+
+    async def _wait_release(self, inc: Incident, step: Step) -> tuple[str, str, str] | None:
+        """사람이 장애를 해제했다는 신호를 `release_wait`초까지 기다린 뒤 게이트를 다시 본다.
+
+        신호(`notify_recovered`)가 와도 게이트가 막으면(예: 해제가 아닌 지표 정상 복귀) 다시
+        기다리고, 시간이 다 되면 마지막 게이트 결과(건너뜀 이유)를 돌려준다.
+        """
+        minutes = self.release_wait / 60
+        inc.log(f"{step.label}: 사람이 장애를 해제하길 기다림 (최대 {minutes:g}분)")
+        event = self._released.setdefault(inc.context_id, asyncio.Event())
+        deadline = asyncio.get_running_loop().time() + self.release_wait
+        blocked = step.gate(inc)
+        while blocked is not None:
+            left = deadline - asyncio.get_running_loop().time()
+            if left <= 0:
+                break
+            try:
+                await asyncio.wait_for(event.wait(), timeout=left)
+            except TimeoutError:
+                break
+            event.clear()
+            blocked = step.gate(inc)
+        self._released.pop(inc.context_id, None)
+        if blocked is None:
+            inc.log(f"{step.label}: 사람이 장애를 해제함 — 이어서 진행")
+        return blocked
+
+    def notify_recovered(self, inc: Incident) -> None:
+        """복구 신호(shop.recovered)를 받았다. 해제를 기다리는 단계가 있으면 게이트를 다시 본다."""
+        event = self._released.get(inc.context_id)
+        if event is not None:
+            event.set()
 
     async def rerun_after_recovery(self, inc: Incident, plan: Plan) -> list[str]:
         """복구 신호를 기다리느라 건너뛴 단계(`rerun_on_recovery`)를 신호가 온 뒤 다시 돌린다.
