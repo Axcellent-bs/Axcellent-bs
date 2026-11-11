@@ -39,9 +39,10 @@ function InquiryPullBanner() {
   }, []);
   if (!s || !s.enabled) return null;
   const down = s.connected === false;
+  const claimsDown = s.claims_unavailable === true;
   const left = (s.pending ?? 0) + (s.claims_pending ?? 0);
   const stuck = (s.inbox_failed ?? 0) + (s.claims_inbox_failed ?? 0);
-  const alert = down || stuck > 0;
+  const alert = down || claimsDown || stuck > 0;
   return (
     <>
     <p role={alert ? "alert" : "status"} className={`rounded-xl px-4 py-2 text-xs font-medium ${alert ? "bg-red-50 text-red-800" : "bg-surface text-ink-700 ring-1 ring-ink-100"}`}>
@@ -49,6 +50,8 @@ function InquiryPullBanner() {
         ? "판매 서버 문의함·클레임함을 아직 읽지 않았습니다."
         : down
           ? `판매 서버 문의·클레임 연결 끊김: ${PULL_ERROR_KO[s.last_error ?? ""] ?? s.last_error ?? "원인을 알 수 없습니다"}.${left ? ` 판매 서버에 문의 ${s.pending ?? 0}건·클레임 ${s.claims_pending ?? 0}건이 남아 있습니다.` : ""} 새 접수가 늦게 들어올 수 있습니다.`
+          : claimsDown
+            ? `판매 서버 문의함 연결 정상 · ${s.read_only ? "관찰 모드(읽기만 하고 판매 서버에는 쓰지 않습니다) · " : ""}${s.interval_seconds}초마다 읽습니다. 클레임 서버에 닿지 못해 클레임함·반품 입고 상태를 알 수 없습니다(0건이 아닙니다). 클레임이 쌓여도 여기서 보이지 않으니 클레임 서버를 확인해 주세요.`
           : `판매 서버 문의함·클레임함 연결 정상 · ${s.read_only ? "관찰 모드(읽기만 하고 판매 서버에는 쓰지 않습니다) · " : ""}${s.interval_seconds}초마다 읽습니다${left ? ` · 남은 문의 ${s.pending ?? 0}건·클레임 ${s.claims_pending ?? 0}건` : ""}.`}
       {stuck > 0 && ` 여러 번 처리에 실패해 따로 빼 둔 접수가 ${stuck}건 있습니다 (문의 ${s.inbox_failed ?? 0}·클레임 ${s.claims_inbox_failed ?? 0}). 아래 목록에서 확인하고 다시 시도해 주세요.`}
     </p>

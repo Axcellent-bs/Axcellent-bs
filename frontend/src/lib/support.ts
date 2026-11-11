@@ -207,6 +207,11 @@ export interface InquiryPullStatus {
   inbox_failed: number | null; claims_inbox_failed: number | null;
   // 읽기 전용 설치(관찰 모드): 판매 서버를 읽기만 하고 읽은 표시·되돌려 쓰기는 하지 않는다
   read_only?: boolean;
+  claims_read_only?: boolean;  // claims 서버가 관찰 모드(read_only는 둘 중 하나라도 관찰 모드면 true)
+
+
+  // 클레임 서버(claims)에 닿지 못했다. true면 claims_* 값은 없다(0건이 아니라 모름)
+  claims_unavailable?: boolean;
 }
 // 실패로 빼 둔 접수 한 건: 번호·사유 코드·시도 횟수만 있고 고객이 쓴 글은 없다
 export interface StuckIntakeItem {

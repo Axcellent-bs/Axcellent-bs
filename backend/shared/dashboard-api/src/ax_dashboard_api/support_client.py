@@ -56,7 +56,7 @@ def unwrap(result: AgentResult) -> dict[str, Any]:
         raise ApiError(403, "FORBIDDEN", str(result.output.get("message", "할 수 없다")))
     if outcome == "duplicate_claim":
         raise ApiError(409, "DUPLICATE_CLAIM", str(result.output.get("message", "이미 접수됐다")))
-    if outcome == "invalid_state":
+    if outcome in ("invalid_state", "already_rated"):
         raise ApiError(
             409, "INVALID_STATE", str(result.output.get("message", "현재 상태에서는 할 수 없다"))
         )

@@ -84,10 +84,37 @@ def _claim_body(order: dict, **extra) -> dict:  # noqa: ANN003
 # --- 반품 입고 ---------------------------------------------------------------
 
 
+def _claim_for_return(
+    client: TestClient, order: dict, claim_id: int = 7, status: str = "awaiting_return"
+) -> int:
+    """고객이 신청한 클레임을 고객지원이 읽어 가 판정했다(support_claim_id=claim_id)고 흉내 낸다."""
+    body = {
+        "buyer_id": order["buyer_id"],
+        "customer_name": "홍길동",
+        "order_id": order["order_id"],
+        "type": "return",
+        "reason": "defect",
+        "description": f"표지가 찢어져 있어요 {claim_id}",
+    }
+    seq = client.post("/api/shop/claims", json=body).json()["data"]["id"]
+    done = client.post(
+        f"/api/shop/admin/claims/{seq}/result",
+        json={
+            "support_claim_id": claim_id,
+            "status": status,
+            "result": {"id": claim_id, "status": status},
+        },
+        headers=SUPPORT,
+    )
+    assert done.status_code == 200
+    return seq
+
+
 def test_return_received_is_recorded_without_calling_support_and_publishes_the_event(
     client: TestClient, support: FakeSupport
 ) -> None:
     order = _paid_order(client)
+    _claim_for_return(client, order)
     url = "/api/shop/admin/claims/7/return-received"
     body = {"order_id": order["order_id"], "inspection": "pass"}
     done = client.post(url, json=body, headers=ADMIN)
@@ -109,6 +136,7 @@ def test_return_received_is_admin_only_and_needs_a_known_order(
     client: TestClient, support: FakeSupport
 ) -> None:
     order = _paid_order(client)
+    _claim_for_return(client, order)
     url = "/api/shop/admin/claims/7/return-received"
     body = {"order_id": order["order_id"]}
     assert client.post(url, json=body).status_code == 401
@@ -119,9 +147,36 @@ def test_return_received_is_admin_only_and_needs_a_known_order(
     assert not [e for e in events.MOCK_PUBLISHED if e.type == EventType.RETURN_RECEIVED]
 
 
+def test_a_return_for_another_order_is_refused_and_publishes_nothing(
+    client: TestClient, support: FakeSupport
+) -> None:
+    order, other = _paid_order(client), _paid_order(client)
+    _claim_for_return(client, order)
+    url = "/api/shop/admin/claims/7/return-received"
+    mismatch = client.post(url, json={"order_id": other["order_id"]}, headers=ADMIN)
+    assert (mismatch.status_code, mismatch.json()["error"]["code"]) == (409, "ORDER_MISMATCH")
+    assert not [e for e in events.MOCK_PUBLISHED if e.type == EventType.RETURN_RECEIVED]
+    assert client.get("/api/shop/admin/returns", headers=SUPPORT).json()["data"] == []
+
+
+def test_an_unknown_claim_or_one_not_waiting_for_a_return_is_refused(
+    client: TestClient, support: FakeSupport
+) -> None:
+    order = _paid_order(client)
+    body = {"order_id": order["order_id"]}
+    unknown = client.post("/api/shop/admin/claims/55/return-received", json=body, headers=ADMIN)
+    assert (unknown.status_code, unknown.json()["error"]["code"]) == (404, "CLAIM_NOT_FOUND")
+    _claim_for_return(client, order, claim_id=8, status="approved")  # 아직 입고 단계가 아니다
+    early = client.post("/api/shop/admin/claims/8/return-received", json=body, headers=ADMIN)
+    assert (early.status_code, early.json()["error"]["code"]) == (409, "INVALID_STATE")
+    assert not [e for e in events.MOCK_PUBLISHED if e.type == EventType.RETURN_RECEIVED]
+    assert client.get("/api/shop/admin/returns", headers=SUPPORT).json()["data"] == []
+
+
 def test_support_reads_new_returns_and_marks_them_with_an_outcome(client: TestClient) -> None:
     order = _paid_order(client)
     for claim_id in (7, 8):
+        _claim_for_return(client, order, claim_id=claim_id)
         client.post(
             f"/api/shop/admin/claims/{claim_id}/return-received",
             json={"order_id": order["order_id"], "inspection": "pass"},
@@ -207,3 +262,26 @@ def test_refund_cannot_exceed_the_payment_or_hit_unpaid_payments(client: TestCli
         headers=SUPPORT,
     )
     assert zero.status_code == 422
+
+
+def test_a_return_support_gave_up_on_can_be_put_back_by_a_person(client: TestClient) -> None:
+    order = _paid_order(client)
+    _claim_for_return(client, order)
+    client.post(
+        "/api/shop/admin/claims/7/return-received",
+        json={"order_id": order["order_id"], "inspection": "pass"},
+        headers=ADMIN,
+    )
+    read = "/api/shop/admin/returns"
+    client.post(f"{read}/7/synced", json={"outcome": "gave_up"}, headers=SUPPORT)
+    assert client.get(read, headers=SUPPORT).json()["data"] == []
+    done = client.post(f"{read}/7/requeue", headers=SUPPORT)
+    assert done.status_code == 200 and done.json()["data"]["requeued"] is True
+    assert [r["claim_id"] for r in client.get(read, headers=SUPPORT).json()["data"]] == [7]
+    assert (
+        sum(e.type == EventType.RETURN_RECEIVED for e in events.MOCK_PUBLISHED) == 1
+    )  # 이벤트는 한 번
+    assert client.post(f"{read}/99/requeue", headers=SUPPORT).status_code == 404
+    assert client.post(f"{read}/7/requeue", headers=MARKETING).status_code == 403
+    notice = {"outcome": "received", "notice": "안내"}
+    assert client.post(f"{read}/7/synced", json=notice, headers=SUPPORT).status_code == 422

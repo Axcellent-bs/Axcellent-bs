@@ -330,3 +330,13 @@ def retry(db: Db, seq: int) -> dict[str, Any] | None:
 
     sets = {"status": RECEIVED, "result": None, "synced_at": None, "updated_at": _now()}
     return intake_common.requeue(db, "claim_inbox", seq, STUCK_WHERE, sets, not_replaced)
+
+
+def find_by_support_id(db: Db, support_claim_id: int) -> dict[str, Any] | None:
+    """고객지원 클레임 번호로 이 서버의 신청(주문·마지막 상태)을 찾는다. 없으면 None."""
+    with db.tx() as conn:
+        row = conn.execute(
+            "SELECT seq, order_id, status FROM claim_inbox WHERE support_claim_id = ?",
+            (support_claim_id,),
+        ).fetchone()
+    return None if row is None else {k: row[k] for k in ("seq", "order_id", "status")}
