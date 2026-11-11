@@ -140,6 +140,27 @@ class Books:
         times, orders = self.sold()
         return orders[bisect.bisect_left(times, start) : bisect.bisect_left(times, end)]
 
+    def confirmed(self) -> tuple[list[datetime], list[dict[str, Any]]]:
+        """구매가 확정된(배송 완료) 팔린 주문을 확정 시각 순으로. (시각 목록, 주문 목록)."""
+        return self.memo("confirmed", self._confirmed)
+
+    def _confirmed(self) -> tuple[list[datetime], list[dict[str, Any]]]:
+        _, orders = self.sold()
+        rows = [(o["delivered_at"], o) for o in orders if o.get("delivered_at") is not None]
+        rows.sort(key=lambda r: r[0])
+        return [r[0] for r in rows], [r[1] for r in rows]
+
+    def confirmed_between(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
+        """구매 확정(배송 완료) 시각이 [start, end)인 팔린 주문. 판매자 정산의 기준이다."""
+        times, orders = self.confirmed()
+        return orders[bisect.bisect_left(times, start) : bisect.bisect_left(times, end)]
+
+    def unconfirmed_until(self, end: datetime) -> list[dict[str, Any]]:
+        """`end` 전에 팔렸지만 아직 구매가 확정되지 않은 주문 (다음 정산으로 넘어간다)."""
+        times, orders = self.sold()
+        upto = orders[: bisect.bisect_left(times, end)]
+        return [o for o in upto if o.get("delivered_at") is None]
+
     def unavailable_core(self) -> bool:
         """주문·쿠폰처럼 숫자를 내는 데 꼭 필요한 자료를 못 받았는가."""
         return any(name in self.unavailable for name in ("orders", "coupons"))

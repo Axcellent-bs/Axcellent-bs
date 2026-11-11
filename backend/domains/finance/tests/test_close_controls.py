@@ -54,20 +54,26 @@ def test_recent_sale_paid_on_time_is_ok_and_undelivered_waits(kit) -> None:
     assert report["waiting_orders"] == 1
 
 
-def test_held_week_puts_the_deadline_at_risk(kit) -> None:
-    """같은 주에 배송 전 주문이 있으면 판매자 정산이 보류돼 확정된 주문도 예정일이 없다."""
+def test_an_unconfirmed_order_does_not_hold_the_confirmed_ones(kit) -> None:
+    """배송 전 주문이 같은 주에 있어도 확정된 주문은 그 주 정산에 들어가 예정일이 있다.
+
+    예전에는 한 건만 확정 전이어도 판매자 정산 전체가 보류돼 지급 예정일이 사라졌다.
+    확정 전 주문은 기한이 시작되지 않은 것으로 센다(`waiting_orders`).
+    """
     orders = [
         kit.order("ord_1", kit.at("2026-10-14"), [("sel_a", "book", 1, 10000)]),
         kit.order("ord_2", kit.at("2026-10-15"), [("sel_a", "book", 1, 5000)], delivered=False),
     ]
-    row = _rows(deadline.deadline_report(kit.books(orders=orders), {}, TODAY))["sel_a"]
-    assert (row["status"], row["expected_pay_date"]) == ("at_risk", None)
-    assert [h["code"] for h in row["hold_reasons"]] == ["unconfirmed_purchase"]
+    report = deadline.deadline_report(kit.books(orders=orders), {}, TODAY)
+    row = _rows(report)["sel_a"]
+    assert row["expected_pay_date"] is not None and row["hold_reasons"] == []
+    assert row["orders"] == 1
 
 
 def test_approved_batch_counts_as_paid(kit) -> None:
+    # 수요일 결제·다음 날 배송 완료: 구매 확정 주도 W38 (정산은 구매 확정일 기준)
     books = kit.books(
-        orders=[kit.order("ord_1", kit.at("2026-09-20"), [("sel_a", "book", 1, 10000)])]
+        orders=[kit.order("ord_1", kit.at("2026-09-16"), [("sel_a", "book", 1, 10000)])]
     )
     batches = {"2026-W38": {"status": "approved", "seller_ids": ["sel_a"]}}
     assert deadline.deadline_report(books, batches, TODAY)["sellers"] == []

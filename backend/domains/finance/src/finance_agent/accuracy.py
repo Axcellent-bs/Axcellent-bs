@@ -409,17 +409,25 @@ def case_settlement(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
         for r in res["statements"]
     }
     want = {}
-    sold = [o for o in orders if inside(paid_at(o), start, end)]
+    # 정산은 구매 확정(배송 완료)일 기준. 확정 전 주문은 다음 정산으로 넘어간다(보류 사유가 아니다)
+    sold = [
+        o
+        for o in orders
+        if paid_at(o) is not None and o["delivered_at"] and inside(o["delivered_at"], start, end)
+    ]
+    waiting = [
+        o
+        for o in orders
+        if paid_at(o) is not None and paid_at(o) < end and o["delivered_at"] is None
+    ]
     for s in sellers:
         gross = com = 0
         ids: set[str] = set()
-        unconfirmed = False
         for o in sold:
             mine = [i for i in o["items"] if i["seller_id"] == s]
             if not mine:
                 continue
             ids.add(o["order_id"])
-            unconfirmed |= o["delivered_at"] is None
             for i in mine:
                 gr = i["qty"] * i["unit_price"]
                 gross += gr
@@ -436,10 +444,12 @@ def case_settlement(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
             for r in refunds
             if r["seller_id"] == s and inside(r["created_at"], start, end)
         )
-        if not ids and not cp and not rf:
+        pending = any(i["seller_id"] == s for o in waiting for i in o["items"])
+        if not ids and not cp and not rf and not pending:
             continue
         payout = gross - com - cp - rf
-        held = unconfirmed or (bool(ids) and payout <= 0)
+        # 0원 이하 정산금이거나, 확정 주문 없이 확정 대기만 있어 줄 돈이 없으면 보류
+        held = (bool(ids) or pending) and payout <= 0
         want[s] = (gross, com, cp, rf, payout, "held" if held else "ready")
     return got, want, {"week_monday": monday.isoformat(), "sellers": len(sellers)}
 
