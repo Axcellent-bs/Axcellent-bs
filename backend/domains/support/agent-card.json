@@ -160,6 +160,26 @@
       "priority": "recommended"
     },
     {
+      "id": "send_idea_report",
+      "description": "하루치(회사 시간대, 비우면 어제) 이벤트·혜택 요청 아이디어를 같은 뜻끼리 묶어 데이터 receive_idea_report로 넘긴다. 보고에는 고객 원문 없이 대표 말·건수·고객 수만 싣는다. 그날 받은 아이디어가 없으면 보내지 않고(no_ideas), 데이터가 같은 날 보고를 이미 받았으면 duplicate로 끝나며, 데이터에 닿지 못하면 data_unavailable이라 같은 날을 다시 보내면 이어진다. support는 자기 상태를 바꾸지 않고 받는 쪽(데이터)도 자기 기록만 쌓는다. 대시보드가 하루 한 번 부른다.",
+      "input_schema": "agents/support/src/support_agent/idea_handlers.py#SendIdeaReportInput",
+      "output_schema": "agents/support/src/support_agent/idea_handlers.py#SendIdeaReportOutput",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_idea_trends",
+      "description": "데이터가 받아 둔 일일 고객 아이디어 보고를 기간(day·week·month·year)별로 더한 요청 순위를 읽어 그대로 돌려준다(주는 월요일 시작, 최근 기간이 앞). 합산은 데이터가 하고 여기서는 숫자를 만들지 않는다. 데이터에 닿지 못하면 빈 결과와 이유를 돌려준다. 읽기만 한다.",
+      "input_schema": "agents/support/src/support_agent/idea_handlers.py#ListIdeaTrendsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/idea.py#IdeaTrendList",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "planning"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "inquiry_pull_status",
       "description": "판매 서버 문의함을 AXcellent 고객지원이 마지막으로 읽은 결과를 알려 준다: 연결됨·끊김(connected, last_error), 마지막 시도·성공 시각, 문의함에 남은 문의 수(pending), 읽어 처리한 수·실패 수(ingested_total·failed_total), 읽기 켜짐 여부와 간격. 숫자는 읽기 루프가 센 값이고 재시작하면 비워진다. 읽기만 한다.",
       "input_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#InquiryPullStatusInput",

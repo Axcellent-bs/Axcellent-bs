@@ -480,6 +480,18 @@ def test_sending_the_idea_digest_uses_the_author_from_the_token(fake: Fake) -> N
     assert sent.input == {"kind": "event", "min_ideas": 3, "author": "tester"}
 
 
+def test_idea_trends_are_read_from_support(fake: Fake) -> None:
+    fake.outputs["list_idea_trends"] = {"period": "month", "buckets": []}
+    response = TestClient(app).get(BASE + "/ideas/trends", params={"period": "month", "top": 3})
+    assert response.status_code == 200
+    sent = next(r for r in fake.sent if r.skill == "list_idea_trends")
+    assert sent.input == {"period": "month", "buckets": 8, "top": 3}
+
+
+@pytest.mark.parametrize("params", [{"period": "x"}, {"buckets": 0}, {"top": 99}])
+def test_a_bad_idea_trend_query_is_a_422(fake: Fake, params: dict[str, object]) -> None:
+    assert TestClient(app).get(BASE + "/ideas/trends", params=params).status_code == 422
+    assert fake.sent == []
 def test_inquiry_pull_status_is_read_from_support(fake: Fake) -> None:
     fake.outputs["inquiry_pull_status"] = {"enabled": True, "connected": False, "pending": 2}
     response = TestClient(app).get(BASE + "/inquiry-pull")

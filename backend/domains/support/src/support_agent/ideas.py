@@ -17,10 +17,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import Field
 
@@ -281,3 +283,86 @@ def _key(tenant_id: str, idea_id: str) -> str:
 
 def _parse(stamp: str) -> datetime:
     return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+# ---------------------------------------------------------------- 일일 보고: 같은 뜻끼리 묶기
+REPORT_TZ_ENV = "SUPPORT_REPORT_TZ"
+REPORT_TZ_DEFAULT = "Asia/Seoul"  # 접수일은 회사 시간대로 센다
+CLUSTER_SHARED_MIN = 2  # 말 조각이 이만큼 겹치거나
+CLUSTER_JACCARD_MIN = 0.5  # 이만큼 비슷하면 같은 요청으로 본다
+LABEL_WORDS = 3
+MAX_CLUSTERS = 20
+
+
+class Cluster(AxModel):
+    """같은 뜻으로 겹쳐 들어온 요청. 고객 원문은 담지 않는다."""
+
+    key: str
+    label: str
+    count: int
+    customer_count: int
+
+
+def report_tz() -> ZoneInfo:
+    return ZoneInfo(os.getenv(REPORT_TZ_ENV, "").strip() or REPORT_TZ_DEFAULT)
+
+
+def local_date(stamp: str) -> date:
+    return _parse(stamp).astimezone(report_tz()).date()
+
+
+# 이벤트 요청이면 거의 모든 글에 나오는 말이라 같은 뜻을 가르는 데 쓰지 않는다
+# (다른 말이 없으면 쓴다)
+GENERIC_WORDS = frozenset({"이벤트", "혜택"})
+
+
+def _stems(text: str) -> frozenset[str]:
+    words = {w for w in map(_stem, WORD.findall(text)) if w not in STOPWORDS}
+    return frozenset(words - GENERIC_WORDS or words)
+
+
+def _similar(a: frozenset[str], b: frozenset[str]) -> bool:
+    shared = len(a & b)
+    if shared == 0:
+        return False
+    return shared >= CLUSTER_SHARED_MIN or shared / len(a | b) >= CLUSTER_JACCARD_MIN
+
+
+def cluster_ideas(items: list[Idea]) -> list[Cluster]:
+    """같은 요청끼리 묶어 많이 겹친 순으로 돌려준다. 말 조각이 하나도 없는 글은 묶지 않는다."""
+    groups: list[tuple[set[str], list[Idea]]] = []
+    for idea in sorted(items, key=lambda i: (i.created_at, i.idea_id)):
+        stems = _stems(idea.text)
+        if not stems:
+            continue
+        for core, members in groups:
+            if _similar(frozenset(core), stems):
+                core |= stems
+                members.append(idea)
+                break
+        else:
+            groups.append((set(stems), [idea]))
+    clusters: list[Cluster] = []
+    for _, members in groups:
+        seen: Counter[str] = Counter()
+        for m in members:
+            seen.update(_stems(m.text))
+        by_use = sorted(seen.items(), key=lambda p: (-p[1], -len(p[0]), p[0]))
+        ranked = by_use[:LABEL_WORDS]
+        words = [w for w, _ in ranked]
+        clusters.append(
+            Cluster(
+                key=" ".join(sorted(words)),
+                label=" ".join(words),
+                count=len(members),
+                customer_count=len({m.user_id for m in members}),
+            )
+        )
+    clusters.sort(key=lambda c: (-c.count, -c.customer_count, c.key))
+    return clusters[:MAX_CLUSTERS]
+
+
+def daily_report(items: list[Idea], day: date, kind: str = "event") -> tuple[int, list[Cluster]]:
+    """그 날(회사 시간대) 받은 해당 종류 아이디어 수와 묶음 순위."""
+    todays = [i for i in items if i.kind == kind and local_date(i.created_at) == day]
+    return len(todays), cluster_ideas(todays)

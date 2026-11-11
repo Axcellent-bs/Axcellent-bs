@@ -36,7 +36,7 @@ import os
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -78,8 +78,9 @@ from ax_contracts.schemas.data import (
     TrendScanRequest,
     YouTubeVelocityRequest,
 )
+from ax_contracts.schemas.idea import IdeaReportInput
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
-from data_agent import data_chat, llm_budget, llm_failure, llm_halt, llm_inflight
+from data_agent import data_chat, idea_reports, llm_budget, llm_failure, llm_halt, llm_inflight
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import (
@@ -1356,6 +1357,79 @@ def _stored_shorts() -> Any:
     return None
 
 
+_IDEA_STORE: idea_reports.IdeaReportStore | None = None
+
+
+def get_idea_report_store() -> idea_reports.IdeaReportStore:
+    """고객 아이디어 일일 보고 저장소. 처음 쓸 때 연다 (`DATA_IDEA_REPORTS_DB`, 없으면 메모리)."""
+    global _IDEA_STORE
+    if _IDEA_STORE is None:
+        _IDEA_STORE = idea_reports.IdeaReportStore()
+    return _IDEA_STORE
+
+
+def reset_idea_report_store() -> None:
+    """테스트가 저장소를 비운다."""
+    global _IDEA_STORE
+    if _IDEA_STORE is not None:
+        _IDEA_STORE.close()
+    _IDEA_STORE = None
+
+
+def _idea_storage_failed(request: AgentRequest) -> AgentResult:
+    return _result(request, TaskStatus.FAILED, outcome="storage_error")
+
+
+async def receive_idea_report(request: AgentRequest) -> AgentResult:
+    """고객지원의 하루치 이벤트·혜택 요청 보고를 받아 보관한다 (grade read, 데이터 쪽 기록만).
+
+    같은 회사·같은 날 보고는 한 번만 받고 다시 오면 `duplicate`(보관본 그대로)다.
+    회사 시간대가 한국이라 UTC 오늘보다 하루 앞선 날까지 받는다.
+    """
+    data = _parse(request, IdeaReportInput)
+    if isinstance(data, AgentResult):
+        return data
+    tenant = request.meta.tenant_id
+    reason = idea_reports.rejection_reason(data, datetime.now(UTC).date() + timedelta(days=1))
+    day = data.report_date.isoformat()
+    if reason is not None:
+        out = idea_reports.IdeaReportOutput(outcome="rejected", reason_code=reason)
+        summary = f"고객 아이디어 보고 {day} 거절 {reason}"
+    else:
+        try:
+            out = get_idea_report_store().add(tenant, data, datetime.now(UTC))
+        except idea_reports.IdeaReportStorageError:
+            return _idea_storage_failed(request)
+        summary = f"고객 아이디어 보고 {day} {out.outcome}"
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        outcome=out.outcome,
+        evidence=Evidence(queries=["receive_idea_report"], data_summary=summary),
+    )
+
+
+async def list_idea_reports(request: AgentRequest) -> AgentResult:
+    """받은 일일 보고를 기간(일·주·월·연)별로 더한 요청 순위 (grade read, 추정 없이 합산만)."""
+    data = _parse(request, idea_reports.ListIdeaReportsInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        listing = get_idea_report_store().trends(request.meta.tenant_id, data)
+    except idea_reports.IdeaReportStorageError:
+        return _idea_storage_failed(request)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=listing.model_dump(mode="json"),
+        evidence=Evidence(
+            queries=["list_idea_reports"],
+            data_summary=f"고객 아이디어 {data.period}별 순위 {len(listing.buckets)}개 기간",
+        ),
+    )
+
+
 async def campaign_result(request: AgentRequest) -> AgentResult:
     """성과 결과 1건 (campaign_id 기준): 영상 성과 + 매출 효과 판정 + 알림. grade read, LLM 없음."""
     from ax_contracts.schemas.data import CampaignResultRequest
@@ -1458,6 +1532,8 @@ HANDLERS = {
     "data_chat_get": data_chat_get,
     "data_chat_close": data_chat_close,
     "impact_analysis": impact_analysis,
+    "receive_idea_report": receive_idea_report,
+    "list_idea_reports": list_idea_reports,
     "anomaly_detection": anomaly_detection,
     "fraud_score": fraud_score,
     "kpi_summary": kpi_summary,
