@@ -329,6 +329,8 @@ async def fetch_stuck_intake() -> list[dict[str, Any]]:
 
 async def retry_stuck_intake(kind: str, seq: int) -> dict[str, Any]:
     """실패로 뺀 접수를 다시 읽는 차례로 돌린다 (`kind`는 inquiry·claim)."""
+    if read_only():  # 쓰기 없이 가짜 200으로 받으면 "이유 없는 실패"로 보인다. 이유를 분명히 낸다
+        raise ShopError("READ_ONLY", "읽기 전용 설치라 판매 서버의 접수를 다시 돌리지 않는다")
     path = f"/admin/{'inquiries' if kind == 'inquiry' else 'claims'}/{seq}/retry"
     response = await _send("POST", path)
     if response.status_code != 200:

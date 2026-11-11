@@ -98,6 +98,8 @@ def reset_state() -> None:
     from support_agent import shop_pull_more as more
 
     more.reset_counts()
+    for seen in _SEEN.values():
+        seen.clear()
     STATE.update(
         last_attempt_at=None,
         last_ok_at=None,
@@ -269,10 +271,23 @@ async def _refresh_claims() -> None:
         after = next_after
 
 
+# 관찰 모드는 읽음 표시를 안 해서 같은 접수를 매 주기 다시 읽는다. 누적 건수는 새로 본 것만 센다
+_SEEN: dict[str, set[int]] = {"inquiry": set(), "claim": set()}
+
+
+def _is_new(kind: str, seq: Any) -> bool:
+    if not shop_client.read_only():
+        return True
+    if seq in _SEEN[kind]:
+        return False
+    _SEEN[kind].add(seq)
+    return True
+
+
 async def _pull_inquiries(limit: int) -> dict[str, int]:
     """문의함을 한 번 읽어 새 문의를 처리한다. 판매 서버에 닿지 못하면 `ShopError`를 올린다."""
     items, total, failed_in_inbox = await shop_client.fetch_inquiry_inbox(limit)
-    done = failed = 0
+    done = failed = fresh = 0
     shop_error: shop_client.ShopError | None = None
     for item in items:
         try:
@@ -287,10 +302,12 @@ async def _pull_inquiries(limit: int) -> dict[str, int]:
             await _report_failed("inquiry", item, "ERROR")
             ok = False
         done += ok
+        fresh += ok and _is_new("inquiry", item.get("seq"))
         failed += not ok
+    _SEEN["inquiry"] &= {i.get("seq") for i in items}
     STATE["pending"] = max(0, total - done)
     STATE["inbox_failed"] = failed_in_inbox
-    STATE["ingested_total"] += done
+    STATE["ingested_total"] += fresh
     STATE["failed_total"] += failed
     if shop_error is not None:  # 건별 오류는 나머지를 멈추지 않고, 주기 끝에 연결 문제로 알린다
         raise shop_error
@@ -300,7 +317,7 @@ async def _pull_inquiries(limit: int) -> dict[str, int]:
 async def _pull_claims(limit: int) -> dict[str, int]:
     """클레임함을 한 번 읽어 새 신청을 판정하고, 끝나지 않은 신청의 달라진 결과를 다시 적는다."""
     items, total, failed_in_inbox = await shop_client.fetch_claim_inbox(limit)
-    done = failed = 0
+    done = failed = fresh = 0
     shop_error: shop_client.ShopError | None = None
     for item in items:
         try:
@@ -314,10 +331,12 @@ async def _pull_claims(limit: int) -> dict[str, int]:
             await _report_failed("claim", item, "ERROR")
             ok = False
         done += ok
+        fresh += ok and _is_new("claim", item.get("seq"))
         failed += not ok
+    _SEEN["claim"] &= {i.get("seq") for i in items}
     STATE["claims_pending"] = max(0, total - done)
     STATE["claims_inbox_failed"] = failed_in_inbox
-    STATE["claims_ingested_total"] += done
+    STATE["claims_ingested_total"] += fresh
     STATE["claims_failed_total"] += failed
     try:
         await _refresh_claims()

@@ -1104,3 +1104,30 @@ async def test_a_read_key_refused_write_turns_the_install_into_an_observer(
     finally:
         shop_client.use_client(None)
     assert [r.method for r in requests] == ["POST"]  # 쓰기 요청은 처음 한 번뿐이다
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_install_counts_only_newly_seen_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(shop_client.ENV_MODE, "read")
+    shop = FakeShop([item(1)])
+    wire(monkeypatch, shop)
+    await inquiry_pull.pull_once()
+    await inquiry_pull.pull_once()  # 읽음 표시가 없어 같은 접수가 다시 읽힌다
+    assert inquiry_pull.status()["ingested_total"] == 1  # 건수는 부풀지 않는다
+
+
+@pytest.mark.asyncio
+async def test_retrying_a_stuck_intake_says_read_only_instead_of_failing_silently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(shop_client.ENV_MODE, "read")
+    requests: list[httpx.Request] = []
+    shop_client.use_client(_recording_shop(requests))
+    try:
+        with pytest.raises(shop_client.ShopError) as caught:
+            await shop_client.retry_stuck_intake("claim", 3)
+    finally:
+        shop_client.use_client(None)
+    assert caught.value.code == "READ_ONLY" and requests == []
