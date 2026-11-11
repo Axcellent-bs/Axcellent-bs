@@ -138,6 +138,21 @@ async def _ingest(item: dict[str, Any]) -> bool:
     return True
 
 
+# 판매 서버에 되돌려 쓰는 클레임은 고객이 볼 수 있는 값만 남긴다. 남용 점수·내부 내력·상담원 메모·
+# 안전 관문 실행 번호·결정한 사람 이름은 판매 서버에 가지 않는다.
+CUSTOMER_CLAIM_FIELDS = (
+    "id", "context_id", "order_id", "order_no", "buyer_id", "type", "reason", "status",
+    "created_at", "updated_at", "outcome", "resolution", "requires_return", "evidence_count",
+    "unsealed", "reasons", "lines", "shipping_refund", "expected_refund", "points_back",
+    "refund_paid", "processed_at",
+)  # fmt: skip
+
+
+def customer_claim(claim: dict[str, Any]) -> dict[str, Any]:
+    """고객에게 보여 줄 클레임. `CUSTOMER_CLAIM_FIELDS`만 남기고 없는 값은 만들지 않는다."""
+    return {k: claim[k] for k in CUSTOMER_CLAIM_FIELDS if k in claim}
+
+
 NOT_ACCEPTED = ("not_found", "duplicate_claim")  # 클레임으로 받지 않은 이유(고객에게 이유만 적는다)
 
 
@@ -177,7 +192,9 @@ async def _ingest_claim(item: dict[str, Any]) -> bool:
     seq = int(item["seq"])
     if result.status == TaskStatus.COMPLETED and isinstance(result.output.get("id"), int):
         claim = result.output
-        await shop_client.write_claim_result(seq, claim["id"], str(claim["status"]), claim)
+        await shop_client.write_claim_result(
+            seq, claim["id"], str(claim["status"]), customer_claim(claim)
+        )
         return True
     if result.status == TaskStatus.COMPLETED and result.outcome in NOT_ACCEPTED:
         reason = {"message": result.output.get("message", ""), "outcome": result.outcome}
@@ -194,7 +211,10 @@ async def _refresh_claims() -> None:
         if claim is None or claim.status == open_item["status"]:
             continue
         await shop_client.write_claim_result(
-            int(open_item["seq"]), claim.id, claim.status, claim.model_dump(mode="json")
+            int(open_item["seq"]),
+            claim.id,
+            claim.status,
+            customer_claim(claim.model_dump(mode="json")),
         )
 
 

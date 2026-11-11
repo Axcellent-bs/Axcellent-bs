@@ -395,3 +395,17 @@ async def test_claims_are_read_even_when_an_inquiry_failed(monkeypatch: pytest.M
     await inquiry_pull.pull_once()
     assert len(shop.results) == 1  # 문의가 보류돼도 클레임은 처리됐다
     assert inquiry_pull.status()["last_error"] == "INGEST_FAILED"
+
+
+def test_only_customer_visible_claim_fields_are_written_back() -> None:
+    internal = {
+        "id": 1, "status": "approved", "expected_refund": 100, "reasons": [], "lines": [],
+        "abuse_score": 3, "audit": [{"actor": "x"}], "agent_note": "메모", "execution_id": "exe_1",
+        "decided_by": "상담원", "inspection_note": "내부", "conversation_id": 9, "deductions": [],
+    }  # fmt: skip
+    shown = inquiry_pull.customer_claim(internal)
+    assert shown == {
+        "id": 1, "status": "approved", "expected_refund": 100, "reasons": [], "lines": [],
+    }  # fmt: skip
+    for hidden in ("abuse_score", "audit", "agent_note", "execution_id", "decided_by"):
+        assert hidden not in shown
