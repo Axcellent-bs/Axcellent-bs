@@ -6,6 +6,11 @@
 
 - 상태를 바꾸는 일(돈이 나가는 외부 호출)은 관문이 `executed`를 돌려준 뒤에만 한다.
 - 모든 결과에 `ai_generated: true`를 남긴다. 영상은 무음(오디오 제거)으로만 받는다.
+  예외는 `MARKETING_AUDIO_MODE=bgm_overlay`일 때 `bgm_flow`가
+  `keep_source_audio=True`로 부르는 경우뿐이다
+  (받은 영상의 오디오는 쓰지 않고 `audio_mix`가 버린다). 기본(off)은 이전과 같다.
+- 오디오(BGM, `media_kind="audio"`)는 `bgm_overlay`일 때만 받는다. 이미지·영상과 같은 순서로
+  단가표·상한·장부·`execute()` 관문을 거치며, 관문이 보류하면 공급자를 부르지 않는다(fail-closed).
 - 글자는 모델이 그리지 않는다(프롬프트 규칙). 제목·가격·AI 라벨 오버레이는 다른 단계가 맡는다.
 - 멱등 키: `<context_id>:generate_media:<post_draft_id>:<request_sha[:10]>`.
   `request_sha`는 프롬프트와 종류·해상도·품질·길이·무음 여부를 함께 해시한 값이라
@@ -54,12 +59,12 @@ class GenerateMediaInput(AxModel):
     """프롬프트 문장은 받지 않는다. 템플릿 id와 화이트리스트 필드 값만 받는다."""
 
     post_draft_id: str = Field(min_length=1, max_length=64)
-    media_kind: Literal["image", "video"]
+    media_kind: Literal["image", "video", "audio"]
     scene_template_id: str = Field(min_length=1)
     fields: dict[str, Any] = Field(default_factory=dict)
     resolution: str | None = Field(default=None, pattern=r"^(\d{3,4}x\d{3,4}|\d{3,4}p)$")
     quality: Literal["low", "medium", "high"] | None = None  # 이미지만
-    duration_s: StrictInt | None = Field(default=None, ge=1, le=60)  # 영상만
+    duration_s: StrictInt | None = Field(default=None, ge=1, le=60)  # 영상만(오디오는 받지 않는다)
     claimed_cost_krw: StrictInt | None = Field(default=None, ge=0)  # 요청 쪽 추정값(다르면 C)
 
 
@@ -67,7 +72,7 @@ class GeneratedMedia(AxModel):
     """생성 결과. 비용·사용량 출처와 AI 생성 사실(`ai_generated`, 항상 true)을 함께 남긴다."""
 
     media_id: str
-    media_kind: Literal["image", "video"]
+    media_kind: Literal["image", "video", "audio"]
     asset_ref: str
     sha256: str
     provider: str
@@ -75,7 +80,7 @@ class GeneratedMedia(AxModel):
     resolution: str
     quality: str | None = None
     duration_s: int | None = None
-    muted: bool | None = None  # 영상은 true(무음), 이미지는 None
+    muted: bool | None = None  # 영상은 true(무음), 이미지·오디오는 None
     cost_krw: int  # 확정액(정수 원)
     cost_est_krw: int  # 호출 전 추정액
     usd_actual: str | None = None
@@ -115,7 +120,9 @@ async def generate_media(
     settings: MediaSettings | None = None,
     prices_path: Path | None = None,
     templates_path: Path | None = None,
+    keep_source_audio: bool = False,
 ) -> AgentResult:
+    """`keep_source_audio`는 `bgm_flow` 전용이다. 영상에 오디오가 있어도 실패시키지 않고 받는다."""
     settings = settings or MediaSettings.from_env()
     try:
         data = GenerateMediaInput.model_validate(request.input)
@@ -127,6 +134,11 @@ async def generate_media(
         )
     if not _DRAFT_ID.fullmatch(data.post_draft_id):
         return _fail(request, "invalid_input", errors=["post_draft_id: invalid_format"])
+    if data.media_kind == "audio" and settings.audio_mode != "bgm_overlay":
+        # 기본(off)에서는 audio가 입력 검증에서 막히던 때와 같은 결과다
+        return _fail(request, "invalid_input", errors=["media_kind: audio_mode_off"])
+    if keep_source_audio and data.media_kind != "video":
+        return _fail(request, "invalid_input", errors=["keep_source_audio: video_only"])
 
     # --- 프롬프트 (자유 입력 금지) ---
     try:
@@ -141,15 +153,22 @@ async def generate_media(
     resolution = data.resolution or template.resolution
     quality = (data.quality or template.quality) if kind == "image" else None
     duration_s = (data.duration_s or template.duration_s) if kind == "video" else None
-    if (kind == "image" and (data.duration_s is not None or not _is_image_size(resolution))) or (
-        kind == "video" and (data.quality is not None or _is_image_size(resolution))
+    if (
+        kind == "audio"
+    ):  # 클립 길이는 모델이 정하고(템플릿 resolution), 영상 길이에 맞추는 건 ffmpeg가 한다
+        resolution = template.resolution
+    if (
+        (kind == "image" and (data.duration_s is not None or not _is_image_size(resolution)))
+        or (kind == "video" and (data.quality is not None or _is_image_size(resolution)))
+        or (kind == "audio" and (data.resolution or data.quality or data.duration_s is not None))
     ):
         return _fail(
             request, "invalid_input", errors=["resolution/quality/duration_s: kind_mismatch"]
         )
 
     prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
-    request_sha = _sha(prompt_sha, kind, resolution, quality, duration_s, "muted")
+    audio_marker = "src_audio_overlay" if keep_source_audio else "muted"
+    request_sha = _sha(prompt_sha, kind, resolution, quality, duration_s, audio_marker)
     media_id = f"med_{request_sha[:12]}"
     key = f"{request.meta.context_id}:{ACTION}:{data.post_draft_id}:{request_sha[:10]}"
 
@@ -273,7 +292,7 @@ async def generate_media(
         resolution=resolution,
         quality=quality,
         duration_s=duration_s,
-        remove_audio=True,
+        remove_audio=not keep_source_audio,
         model="" if provider_name == MOCK else model,
         output_dir=out_dir,
     )
@@ -301,7 +320,7 @@ async def generate_media(
         "resolution": resolution,
         "quality": quality,
         "duration_s": duration_s,
-        "muted": True if kind == "video" else None,
+        "muted": (not keep_source_audio) if kind == "video" else None,
         "cost_krw": krw_actual,
         "cost_est_krw": krw_est,
         "usd_actual": str(usd_actual) if usd_actual is not None else None,
