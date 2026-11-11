@@ -175,6 +175,14 @@ class Refunds:
             ).fetchone()
         return {"claim_id": claim_id, "synced_at": row["synced_at"], "outcome": row["outcome"]}
 
+    def requeue_return(self, claim_id: int) -> dict[str, Any] | None:
+        """읽어 간 표시를 지워 입고를 다시 읽게 한다(기록·이벤트는 그대로다)."""
+        with self.db.tx() as conn:
+            if not conn.execute("SELECT 1 FROM returns WHERE claim_id = ?", (claim_id,)).fetchone():
+                return None
+            conn.execute("DELETE FROM return_sync WHERE claim_id = ?", (claim_id,))
+        return {"claim_id": claim_id, "requeued": True}
+
     def get_return(self, claim_id: int) -> dict[str, Any] | None:
         with self.db.tx() as conn:
             row = conn.execute("SELECT * FROM returns WHERE claim_id = ?", (claim_id,)).fetchone()

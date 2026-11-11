@@ -528,6 +528,24 @@ def test_stuck_intake_in_mock_mode(mock_client: TestClient) -> None:
     assert mock_client.post(BASE + "/inquiry-pull/stuck/claim/1/retry").status_code == 501
 
 
+def test_rating_an_already_rated_inquiry_from_the_console_is_a_409_not_a_success(
+    fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def send(target: str, req: AgentRequest) -> AgentResult:
+        return AgentResult(
+            meta=req.meta,
+            status=TaskStatus.COMPLETED,
+            outcome="already_rated",
+            output={"message": "이미 평가를 남긴 문의다"},
+        )
+
+    monkeypatch.setattr(support_client, "SEND", send)
+    res = TestClient(app).post(
+        BASE + "/conversations/1/feedback", json={"rating": 4, "resolved": True, "comment": ""}
+    )
+    assert res.status_code == 409 and res.json()["error"]["code"] == "INVALID_STATE"
+
+
 def test_inquiry_pull_status_takes_the_claim_numbers_from_the_claims_server(fake: Fake) -> None:
     fake.outputs["inquiry_pull_status"] = {
         "enabled": True,
