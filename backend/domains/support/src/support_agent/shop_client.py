@@ -12,8 +12,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -54,15 +56,60 @@ def _url(path: str) -> str:
     return f"{config.agent_url('shop-api')}/api/shop{path}"
 
 
+ENV_KEYS = (
+    "AX_SHOP_CLIENT_KEYS"  # "inquiry:<키>,claims:<키>,reviews:<키>" 서비스 이름 : 판매 서버 연결 키
+)
+ENV_SERVICE = "AX_SERVICE_NAME"  # 서비스 이름(없으면 서비스 카드 폴더 이름)
+logger = logging.getLogger("ax.support.shop_client")
+
+
+def client_keys() -> dict[str, str]:
+    """AX_SHOP_CLIENT_KEYS를 서비스 이름별 키로 읽는다. 형식이 틀린 항목은 건너뛰고 경고만 남긴다.
+
+    키 값은 로그·오류에 싣지 않는다. 판매 서버(고객사)가 발급하고 설치마다 .env에만 둔다.
+    """
+    keys: dict[str, str] = {}
+    for part in os.getenv(ENV_KEYS, "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        name, sep, key = part.partition(":")
+        if not (sep and name.strip() and key.strip()):
+            logger.warning("%s의 항목 하나가 서비스:키 형식이 아니라 건너뛴다", ENV_KEYS)
+            continue
+        keys[name.strip()] = key.strip()
+    return keys
+
+
+def service_name() -> str:
+    """이 서버의 서비스 이름(inquiry·claims·reviews…). 연결 키를 고르는 데 쓴다."""
+    explicit = os.getenv(ENV_SERVICE, "").strip()
+    if explicit:
+        return explicit
+    card = os.getenv("SUPPORT_AGENT_CARD", "").strip()
+    return Path(card).parent.name if card else "support"
+
+
 def _headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {config.agent_token('support')}"}
+    """이 서비스의 연결 키가 있으면 그것을, 없으면 내부 토큰을 보낸다(전환 기간에는 둘 다)."""
+    token = client_keys().get(service_name()) or config.agent_token("support")
+    return {"Authorization": f"Bearer {token}"}
 
 
 ENV_MODE = "SUPPORT_SHOP_MODE"  # write(기본)·read(읽기 전용 설치, 관찰 모드)
 
 
+_KEY_IS_READ_ONLY = {"seen": False}  # 판매 서버가 read 키라고 알려 준 적이 있다(403 READ_ONLY_KEY)
+
+
 def read_only() -> bool:
-    """읽기 전용 설치(관찰 모드)면 True. 판매 서버를 읽기만 하고 아무것도 쓰지 않는다."""
+    """읽기 전용 설치(관찰 모드)면 True. 판매 서버를 읽기만 하고 아무것도 쓰지 않는다.
+
+    스위치(SUPPORT_SHOP_MODE=read)를 켰거나, 판매 서버가 이 설치의 키를 read 키로 알려 주면(쓰기에
+    403 READ_ONLY_KEY) 자동으로 관찰 모드가 된다.
+    """
+    if _KEY_IS_READ_ONLY["seen"]:
+        return True
     return os.getenv(ENV_MODE, "").strip().lower() in ("read", "readonly", "observe")
 
 
@@ -75,12 +122,28 @@ async def _send(method: str, path: str, **kwargs: Any) -> httpx.Response:
         raise ShopError("READ_ONLY", "읽기 전용 설치라 판매 서버에 쓰지 않는다")
     client = _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
     try:
-        return await client.request(method, _url(path), headers=_headers(), **kwargs)
+        response = await client.request(method, _url(path), headers=_headers(), **kwargs)
+        if method.upper() != "GET" and _read_only_key_refused(response):
+            _KEY_IS_READ_ONLY["seen"] = True  # 이 설치의 키는 read 키다: 이후 쓰기는 보내지 않는다
+            logger.warning("판매 서버가 이 설치의 연결 키를 read 키로 알려 와 관찰 모드로 바뀐다")
+            if path.startswith("/admin/"):
+                return httpx.Response(200, json={"data": {}, "meta": {}})
+            raise ShopError("READ_ONLY", "읽기 전용 키라 판매 서버에 쓰지 않는다")
+        return response
     except httpx.HTTPError as exc:
         raise ShopError("UNAVAILABLE", f"shop-api에 연결할 수 없다 ({type(exc).__name__})") from exc
     finally:
         if _client is None:
             await client.aclose()
+
+
+def _read_only_key_refused(response: httpx.Response) -> bool:
+    if response.status_code != 403:
+        return False
+    try:
+        return response.json()["error"]["code"] == "READ_ONLY_KEY"
+    except (ValueError, KeyError, TypeError):
+        return False
 
 
 def _error(response: httpx.Response) -> ShopError:
