@@ -86,7 +86,9 @@ ALL_HANDLERS = {
 }
 # 영수증 사진 분석기: 이미지를 읽을 모델이 설정돼 있을 때만 꽂는다(목 모드·미설정이면 꽂지 않는다)
 receipt_vision.connect()
-app = create_agent_app(load_card(), ALL_HANDLERS)
+_CARD = load_card()
+app = create_agent_app(_CARD, ALL_HANDLERS)
+_OWNED_SKILLS = frozenset(skill.id for skill in _CARD.skills)  # 이 서버가 받는 skill
 
 # 판매 서버 문의함을 정해진 간격으로 읽는 루프를 앱 시작·종료에 맞춰 돌린다 (꺼져 있으면 안 돈다)
 _app_lifespan = app.router.lifespan_context
@@ -95,7 +97,7 @@ _app_lifespan = app.router.lifespan_context
 @asynccontextmanager
 async def _lifespan_with_inquiry_pull(application: FastAPI) -> AsyncIterator[None]:
     async with _app_lifespan(application):
-        task = inquiry_pull.start()
+        task = inquiry_pull.start(_OWNED_SKILLS)
         try:
             yield
         finally:

@@ -921,23 +921,89 @@ async def test_each_service_only_pulls_the_kinds_it_owns(monkeypatch: pytest.Mon
     shop.ideas = [stored_idea(1, "ik", "아이디어 내용입니다")]
     seen = wire(monkeypatch, shop)
     seen_claims = wire_claims(monkeypatch)
-    monkeypatch.setattr(inquiry_pull, "_owned_skills", lambda: {"create_claim", "receive_return"})
-    await inquiry_pull.pull_once()
+    await inquiry_pull.pull_once(owned=frozenset({"create_claim", "receive_return"}))
     assert seen == [] and shop.synced == [] and shop.idea_synced == {}  # 문의·아이디어는 안 읽는다
     assert len(seen_claims) == 1 and len(shop.results) == 1  # 클레임은 읽는다
 
 
-def test_the_service_cards_split_the_pull_between_inquiry_and_claims() -> None:
+def _service_cards() -> dict[str, set[str]]:
     from pathlib import Path
 
     from ax_contracts.schemas import AgentCard
 
-    def owned(service: str) -> set[str]:
-        path = Path(__file__).resolve().parents[3] / "services" / service / "agent-card.json"
-        return {s.id for s in AgentCard.model_validate_json(path.read_text("utf-8")).skills}
+    root = Path(__file__).resolve().parents[3] / "services"
+    cards = {}
+    for path in sorted(root.glob("*/agent-card.json")):
+        card = AgentCard.model_validate_json(path.read_text("utf-8"))
+        cards[path.parent.name] = {skill.id for skill in card.skills}
+    return cards
 
-    inquiry, claims = owned("inquiry"), owned("claims")
+
+def test_the_service_cards_split_the_pull_between_inquiry_and_claims() -> None:
+    cards = _service_cards()
+    inquiry, claims = cards["inquiry"], cards["claims"]
     assert {"create_inquiry", "submit_feedback", "submit_idea"} <= inquiry
     assert {"create_claim", "receive_return"} <= claims
     assert not {"create_claim", "receive_return"} & inquiry
     assert not {"create_inquiry", "submit_feedback", "submit_idea"} & claims
+    assert "claim_pull_status" in claims and "claim_pull_status" not in inquiry
+
+
+def test_no_pull_skill_is_in_two_service_cards_and_reviews_owns_none() -> None:
+    """한 종류를 두 서버가 맡으면 세 번 처리 버그가 돌아온다. reviews는 아무것도 맡지 않는다."""
+    pull = set(inquiry_pull.PULL_SKILLS.values())
+    cards = _service_cards()
+    for skill in pull:
+        owners = [name for name, skills in cards.items() if skill in skills]
+        assert len(owners) == 1, f"{skill}: {owners}"
+    assert not pull & cards["reviews"]
+
+
+def test_the_loop_is_not_started_for_a_server_that_owns_no_pull_skill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    monkeypatch.setenv(inquiry_pull.ENV_SWITCH, "on")
+    reviews = frozenset(_service_cards()["reviews"])
+    assert inquiry_pull.start(reviews) is None  # 연결됨 표시만 갱신하는 헛도는 루프를 만들지 않는다
+
+    async def run() -> None:
+        task = inquiry_pull.start(frozenset({"create_claim"}))
+        assert task is not None
+        inquiry_pull.stop(task)
+
+    asyncio.run(run())
+
+
+def test_the_card_a_server_loads_decides_what_it_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pathlib import Path
+
+    claims_card = Path(__file__).resolve().parents[3] / "services" / "claims" / "agent-card.json"
+    monkeypatch.setenv("SUPPORT_AGENT_CARD", str(claims_card))
+    owned = frozenset(skill.id for skill in load_card().skills)
+    assert "create_claim" in owned and "create_inquiry" not in owned
+
+
+@pytest.mark.asyncio
+async def test_a_server_that_does_not_own_inquiries_does_not_read_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop = FakeShop([item(1)], claims=[claim_item(1)])
+    seen = wire(monkeypatch, shop)
+    wire_claims(monkeypatch)
+    await inquiry_pull.pull_once(owned=frozenset({"create_claim"}))
+    assert seen == [] and shop.synced == [] and len(shop.results) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_claims_server_reports_its_own_pull_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop = FakeShop([], claims=[claim_item(1)])
+    wire(monkeypatch, shop)
+    wire_claims(monkeypatch)
+    await inquiry_pull.pull_once(owned=frozenset({"create_claim", "receive_return"}))
+    out = _a2a("claim_pull_status", {})["output"]
+    assert out["claims_ingested_total"] == 1 and out["connected"] is True
+    assert "ingested_total" not in out  # 문의 쪽 숫자는 싣지 않는다

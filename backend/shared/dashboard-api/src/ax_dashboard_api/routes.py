@@ -1638,7 +1638,20 @@ async def inquiry_pull_status() -> dict:
     """판매 서버 문의함을 마지막으로 읽은 결과 (읽기). 연결이 끊겼는지 바로 알 수 있다."""
     if is_mock():
         return ok({"enabled": False, "connected": None, "pending": None, "last_error": None})
-    return ok(await support_client.call("inquiry_pull_status", {}))
+    inquiry = await support_client.call("inquiry_pull_status", {})
+    # 클레임·반품 입고는 claims 서버가 읽는다(상태도 따로다). 그쪽 값으로 덮어 합친다
+    claims = await or_unavailable(support_client.call("claim_pull_status", {}), None)
+    if not claims:
+        return ok(inquiry)
+    merged = {
+        **inquiry,
+        **{k: v for k, v in claims.items() if k.startswith(("claims_", "returns_"))},
+    }
+    errors = [e for e in (inquiry.get("last_error"), claims.get("last_error")) if e]
+    merged["last_error"] = errors[0] if errors else None
+    states = [c for c in (inquiry.get("connected"), claims.get("connected")) if c is not None]
+    merged["connected"] = all(states) if states else None
+    return ok(merged)
 
 
 @router.get("/inquiry-pull/stuck")
