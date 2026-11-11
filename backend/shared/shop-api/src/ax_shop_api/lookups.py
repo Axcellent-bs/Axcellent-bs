@@ -50,6 +50,9 @@ BUCKET = timedelta(minutes=5)
 LISTING_WINDOW = timedelta(hours=24)  # 판매자 정보의 "최근 등록" 구간
 MAX_ATTRIBUTION_DAYS = 31  # 유입 출처 주문 조회의 기간 상한
 MAX_POINTS = 2016  # 5분 버킷 7일치. 넘으면 잘라서 `truncated`로 알린다
+# 지표 시계열 한 번의 기간 상한. 넓은 기간은 결제·주문을 통째로 읽어 서버를 붙잡는다(2026-11-10).
+# 더 긴 기간은 부르는 쪽이 하루씩 나눠 부른다(data 커넥터 SERIES_CHUNK = 1일)
+MAX_SERIES_SPAN = timedelta(hours=24)
 
 # 주문 금액·쿠폰 지표는 `orders`에서 계산한다. 접수 시각(created_at)이 속한 버킷에 센다.
 # - order_amount(매출): 결제가 끝난 주문의 total_amount. 결제 대기·결제 실패·취소는 뺀다
@@ -213,6 +216,10 @@ class Lookups:
     def metric_series(self, query: ShopMetricSeriesQuery) -> ShopMetricSeriesResult:
         if query.to <= query.from_:
             raise ShopError("INVALID_RANGE", "to는 from보다 뒤여야 한다")
+        if query.to - query.from_ > MAX_SERIES_SPAN:
+            raise ShopError(
+                "RANGE_TOO_LONG", "기간은 24시간을 넘을 수 없다(하루씩 나눠 부른다)", 422
+            )
         start = _floor(query.from_)
         with self.db.tx() as conn:
             if query.metric == "order_count":

@@ -6,6 +6,7 @@ import { SupportBoard } from "@/components/support/SupportBoard";
 import { ChartWithTable, Legend, LineChart, RingMeter, TableView } from "@/components/charts";
 import { IconBolt, IconChevronRight } from "@/components/icons";
 import { api } from "@/lib/api";
+import { support, type InquiryPullStatus } from "@/lib/support";
 import { ago, pct, shortDate, shortDateTime, won } from "@/lib/format";
 import { CATEGORY_KO, CLAIM_REASON_KO, CLAIM_TYPE_KO, RULE_KO } from "@/lib/labels";
 import type { Dashboard } from "@/lib/types";
@@ -20,6 +21,34 @@ const GUARD_KO: Record<string, string> = {
 };
 // 클레임 사유(배송 지연 등)와 규칙 이름을 함께 풀어 쓴다: 실제 모드는 사유 코드를 보내서 영문 코드가 그대로 보이던 것을 고친다
 const REASON_LABELS: Record<string, string> = { ...RULE_KO, ...CLAIM_REASON_KO };
+
+const PULL_REFRESH_MS = 15_000;
+const PULL_ERROR_KO: Record<string, string> = {
+  UNAVAILABLE: "판매 서버에 연결할 수 없습니다", INGEST_FAILED: "읽어 온 문의를 처리하지 못한 건이 있습니다",
+};
+
+// 고객 문의는 판매 서버(문의함)에 저장되고 고객지원이 정해진 간격으로 읽어 옵니다. 못 읽으면 조용히 비지 않고 여기에 보입니다.
+function InquiryPullBanner() {
+  const [s, setS] = useState<InquiryPullStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => support.inquiryPull().then((e) => { if (alive) setS(e.data); }).catch(() => { if (alive) setS(null); });
+    void load();
+    const t = setInterval(load, PULL_REFRESH_MS);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  if (!s || !s.enabled) return null;
+  const down = s.connected === false;
+  return (
+    <p role={down ? "alert" : "status"} className={`rounded-xl px-4 py-2 text-xs font-medium ${down ? "bg-red-50 text-red-800" : "bg-surface text-ink-700 ring-1 ring-ink-100"}`}>
+      {s.connected === null
+        ? "판매 서버 문의함을 아직 읽지 않았습니다."
+        : down
+          ? `판매 서버 문의 연결 끊김: ${PULL_ERROR_KO[s.last_error ?? ""] ?? s.last_error ?? "원인을 알 수 없습니다"}.${s.pending ? ` 문의함에 ${s.pending}건이 남아 있습니다.` : ""} 새 문의가 늦게 들어올 수 있습니다.`
+          : `판매 서버 문의함 연결 정상 · ${s.interval_seconds}초마다 읽습니다${s.pending ? ` · 남은 문의 ${s.pending}건` : ""}.`}
+    </p>
+  );
+}
 
 export default function DashboardPage() {
   const [days, setDays] = useState(14);
@@ -43,6 +72,8 @@ export default function DashboardPage() {
   return (
     <div className="flex min-h-full flex-col xl:flex-row">
       <div className="min-w-0 flex-1 space-y-8 px-8 pb-8 pt-2">
+        <InquiryPullBanner />
+
         <section aria-label="핵심 지표" className="flex flex-wrap gap-3">
           <Stat label="답변 대기 문의" value={t.open_waiting} sub={`긴급 ${t.high_waiting}건`} tone={t.high_waiting ? "text-accent" : ""} href="/console" />
           {triage && <Stat label="분류 필요 문의" value={triage.needed} sub={`원인 이름을 정할 문의 · 마친 ${triage.done}건`} tone={triage.needed ? "text-accent" : ""} href="/claims?view=triage" />}

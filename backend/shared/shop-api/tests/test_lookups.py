@@ -168,7 +168,7 @@ def test_payment_fail_rate_omits_buckets_without_attempts(client: TestClient, db
     ]
 
 
-def test_series_start_is_floored_to_the_bucket_and_long_ranges_are_cut(
+def test_series_start_is_floored_to_the_bucket_and_ranges_stop_at_24_hours(
     client: TestClient,
 ) -> None:
     middle = {"from": _iso(T0 + timedelta(minutes=2)), "to": _iso(T0 + timedelta(minutes=12))}
@@ -176,8 +176,53 @@ def test_series_start_is_floored_to_the_bucket_and_long_ranges_are_cut(
         "/api/shop/metric-series", params=middle | {"metric": "order_count"}, headers=DATA
     ).json()["data"]
     assert [p["ts"][11:16] for p in response["points"]] == ["06:00", "06:05", "06:10"]
-    long = {"from": _iso(T0), "to": _iso(T0 + timedelta(days=9))}
-    cut = client.get(
-        "/api/shop/metric-series", params=long | {"metric": "order_count"}, headers=DATA
-    ).json()["data"]
-    assert len(cut["points"]) == 2016 and cut["truncated"] is True
+    # 24시간까지는 된다(하루 288점, 잘리지 않음). 넘으면 422로 나눠 불러 달라고 한다
+    day = {"from": _iso(T0), "to": _iso(T0 + timedelta(hours=24))}
+    whole = client.get(
+        "/api/shop/metric-series", params=day | {"metric": "order_count"}, headers=DATA
+    )
+    assert whole.status_code == 200 and whole.json()["data"]["truncated"] is False
+    for span in (timedelta(hours=24, seconds=1), timedelta(days=9)):
+        long = {"from": _iso(T0), "to": _iso(T0 + span)}
+        cut = client.get(
+            "/api/shop/metric-series", params=long | {"metric": "order_count"}, headers=DATA
+        )
+        assert cut.status_code == 422
+        assert cut.json()["error"]["code"] == "RANGE_TOO_LONG"
+
+
+@pytest.mark.parametrize("path", ["/api/shop/metric-series", "/api/shop/failed-orders"])
+def test_heavy_reads_run_off_the_event_loop(db: Db, path: str) -> None:
+    """동기 핸들러라 FastAPI가 스레드에서 돌린다(읽는 동안 /health가 막히지 않는다, #959와 같다)."""
+    import inspect
+
+    app = create_app(db)
+    route = next(r for r in app.routes if getattr(r, "path", None) == path)
+    assert not inspect.iscoroutinefunction(route.endpoint)
+
+
+@pytest.mark.parametrize(
+    ("sql", "index"),
+    [
+        # 결제 지표 시계열(payment_count 등)
+        (
+            "SELECT created_at FROM payments WHERE tenant_id = ? AND created_at >= ?"
+            " AND created_at < ?",
+            "idx_payments_created_at",
+        ),
+        # 실패 주문: 상태 + 기간으로 찾고 시각 순으로 읽다 LIMIT에서 멈춘다
+        (
+            "SELECT p.order_id FROM payments p JOIN orders o ON o.order_id = p.order_id"
+            " WHERE p.status = 'failed' AND p.tenant_id = ? AND p.created_at >= ?"
+            " AND p.created_at < ? ORDER BY p.created_at, p.payment_id LIMIT 1001",
+            "idx_payments_status_created_at",
+        ),
+    ],
+)
+def test_lookup_queries_use_payment_indexes(db: Db, sql: str, index: str) -> None:
+    with db.tx() as conn:
+        plan = " | ".join(
+            str(r["detail"]) for r in conn.execute("EXPLAIN QUERY PLAN " + sql, ("t", "a", "b"))
+        )
+    assert index in plan, plan
+    assert "SCAN p" not in plan and "SCAN payments" not in plan, plan

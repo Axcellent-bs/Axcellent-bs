@@ -492,3 +492,14 @@ def test_idea_trends_are_read_from_support(fake: Fake) -> None:
 def test_a_bad_idea_trend_query_is_a_422(fake: Fake, params: dict[str, object]) -> None:
     assert TestClient(app).get(BASE + "/ideas/trends", params=params).status_code == 422
     assert fake.sent == []
+def test_inquiry_pull_status_is_read_from_support(fake: Fake) -> None:
+    fake.outputs["inquiry_pull_status"] = {"enabled": True, "connected": False, "pending": 2}
+    response = TestClient(app).get(BASE + "/inquiry-pull")
+    assert response.status_code == 200
+    assert response.json()["data"]["connected"] is False
+    assert next(r for r in fake.sent if r.skill == "inquiry_pull_status").input == {}
+
+
+def test_inquiry_pull_status_in_mock_mode_is_empty(mock_client: TestClient) -> None:
+    data = mock_client.get(BASE + "/inquiry-pull").json()["data"]
+    assert data["enabled"] is False and data["connected"] is None

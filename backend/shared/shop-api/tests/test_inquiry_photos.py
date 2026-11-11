@@ -1,4 +1,4 @@
-"""문의 접수에 영수증 사진(images)을 붙이면 검사해서 고객지원에 untrusted로만 넘긴다."""
+"""문의 접수에 영수증 사진(images)을 붙이면 검사해서 문의함에 저장하고, 읽어 가면 지운다."""
 
 import logging
 
@@ -12,6 +12,7 @@ from ax_shop_api.db import Db
 from ax_shop_api.main import create_app
 from ax_shop_api.service import ShopError
 
+SUPPORT = {"Authorization": "Bearer mock:support"}
 PHOTO = {"ref": "img_1", "media_type": "image/jpeg", "data_base64": "QUJDREVGRw=="}
 
 
@@ -60,18 +61,26 @@ def _post(client: TestClient, images: list | None, body: str = "영수증 확인
     return client.post("/api/shop/inquiries", json=payload)
 
 
-def test_photos_are_passed_to_support_as_untrusted(
+def test_photos_are_kept_in_the_inbox_until_support_reads_them(
     client: TestClient, support: FakeSupport
 ) -> None:
     assert _post(client, [PHOTO]).status_code == 201
-    sent = support.calls[0]
-    assert sent.untrusted["images"] == [PHOTO]
-    assert "images" not in sent.input  # 신뢰 입력에 섞지 않는다
+    item = client.get("/api/shop/admin/inquiries", headers=SUPPORT).json()["data"][0]
+    assert item["images"] == [PHOTO]
+    assert support.calls == []  # 판매 서버는 고객지원을 부르지 않는다
+    done = client.post(
+        f"/api/shop/admin/inquiries/{item['seq']}/synced",
+        json={"support_inquiry_id": 11},
+        headers=SUPPORT,
+    )
+    assert done.status_code == 200
+    assert client.get("/api/shop/admin/inquiries", headers=SUPPORT).json()["data"] == []
 
 
-def test_no_photos_keeps_the_old_request_shape(client: TestClient, support: FakeSupport) -> None:
+def test_no_photos_means_no_images_field_content(client: TestClient) -> None:
     assert _post(client, None).status_code == 201
-    assert "images" not in support.calls[0].untrusted
+    item = client.get("/api/shop/admin/inquiries", headers=SUPPORT).json()["data"][0]
+    assert item["images"] is None
 
 
 def test_more_than_four_photos_is_rejected(client: TestClient, support: FakeSupport) -> None:

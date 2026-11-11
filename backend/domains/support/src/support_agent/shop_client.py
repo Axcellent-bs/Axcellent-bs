@@ -163,3 +163,58 @@ async def refund(
     if response.status_code not in (200, 201):
         raise _error(response)
     return response.json()["data"]
+
+
+async def fetch_inquiry_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+    """판매 서버 문의함에서 아직 읽어 가지 않은 문의를 접수 순서로 읽는다 (`support` 토큰).
+
+    문의 원문과 사진이 들어 있다. 돌려주는 것은 (문의 목록, 남은 전체 수)다.
+    연결 실패·거절은 `ShopError`다.
+    """
+    response = await _send("GET", "/admin/inquiries", params={"limit": limit})
+    if response.status_code != 200:
+        raise _error(response)
+    body = response.json()
+    return body["data"], int(body.get("meta", {}).get("total", len(body["data"])))
+
+
+async def mark_inquiry_synced(seq: int, support_inquiry_id: int) -> None:
+    """고객지원이 이 문의를 받았다고 판매 서버 문의함에 알린다 (사진은 판매 서버가 지운다)."""
+    response = await _send(
+        "POST", f"/admin/inquiries/{seq}/synced", json={"support_inquiry_id": support_inquiry_id}
+    )
+    if response.status_code != 200:
+        raise _error(response)
+
+
+async def fetch_claim_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+    """판매 서버 클레임함에서 아직 읽어 가지 않은 신청을 접수 순서로 읽는다 (`support` 토큰).
+
+    돌려주는 것은 (신청 목록, 남은 전체 수)다. 연결 실패·거절은 `ShopError`다.
+    """
+    response = await _send("GET", "/admin/claims", params={"state": "new", "limit": limit})
+    if response.status_code != 200:
+        raise _error(response)
+    body = response.json()
+    return body["data"], int(body.get("meta", {}).get("total", len(body["data"])))
+
+
+async def fetch_open_claims() -> list[dict[str, Any]]:
+    """읽어 갔지만 아직 끝나지 않은 신청(`seq`·`support_claim_id`·`status`). 상태를 다시 적는다."""
+    response = await _send("GET", "/admin/claims", params={"state": "open"})
+    if response.status_code != 200:
+        raise _error(response)
+    return response.json()["data"]
+
+
+async def write_claim_result(
+    seq: int, support_claim_id: int | None, status: str, result: dict[str, Any]
+) -> None:
+    """고객지원이 판정한 결과를 판매 서버 클레임함에 적는다 (고객은 판매 서버에서 읽는다)."""
+    response = await _send(
+        "POST",
+        f"/admin/claims/{seq}/result",
+        json={"support_claim_id": support_claim_id, "status": status, "result": result},
+    )
+    if response.status_code != 200:
+        raise _error(response)
