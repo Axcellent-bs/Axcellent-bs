@@ -190,6 +190,12 @@ export interface IdeaDigestRow {
   request_id?: string; outcome?: "created" | "linked_duplicate"; duplicate_of?: string | null; error?: string;
 }
 export interface IdeaDigestResult { sent: IdeaDigestRow[]; failed?: number; message?: string }
+// 판매 서버 문의함을 고객지원이 마지막으로 읽은 결과 (읽기 루프가 센 값, 재시작하면 비워진다)
+export interface InquiryPullStatus {
+  enabled: boolean; connected: boolean | null; interval_seconds: number;
+  last_attempt_at: string | null; last_ok_at: string | null; last_error: string | null;
+  pending: number | null; ingested_total: number; failed_total: number;
+}
 export interface PlanningQuestionList { items: PlanningQuestion[]; open_count: number }
 export interface PlanningAnswerResult {
   question_id: string; request_id: string;
@@ -289,6 +295,8 @@ export const support = {
   /** 고객이 낸 아이디어 목록과 기획에 넘길 묶음 현황 */
   ideas: (q: { status?: "new" | "sent"; minIdeas?: number } = {}) =>
     get<IdeaList>(`${BASE}/ideas${qs({ status: q.status, min_ideas: q.minIdeas })}`),
+  /** 판매 서버 문의함 읽기 상태: 연결이 끊겼는지, 남은 문의가 몇 건인지 */
+  inquiryPull: () => get<InquiryPullStatus>(`${BASE}/inquiry-pull`),
   changeProposals: () => get<ChangeProposals>(`${BASE}/change-proposals`),
   /** 한 사건 번호로 기록된 처리(안전 관문 실행 기록) */
   executions: (contextId: string) => get<ExecutionRow[]>(`${BASE}/executions${qs({ context_id: contextId })}`),

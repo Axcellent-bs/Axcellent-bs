@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import hashlib
 import hmac
+import json
 import logging
 import os
 from collections.abc import AsyncIterator, Callable
@@ -34,6 +35,8 @@ from ax_contracts.data_access.shop_metric_series import ShopMetricSeriesQuery
 from ax_contracts.data_access.shop_seller_prices import ShopSellerPricesQuery
 from ax_contracts.data_access.shop_seller_profile import ShopSellerProfileQuery
 from ax_shop_api import (
+    claim_inbox,
+    inbox,
     inquiries,
     marketing_client,
     orchestrator_relay,
@@ -207,6 +210,24 @@ class InquiryIn(BaseModel):
     )  # 영수증 사진. 서버가 개수·크기를 확인
 
 
+class ClaimResultIn(BaseModel):
+    """고객지원이 판정한 클레임 결과를 되돌려 쓴다. `result`는 고객지원이 돌려준 클레임 그대로다."""
+
+    model_config = {"extra": "forbid"}
+
+    support_claim_id: int | None = Field(default=None, ge=1)  # 클레임이 안 만들어졌으면 비운다
+    status: str = Field(min_length=1, max_length=40)
+    result: dict
+
+
+class InquirySyncedIn(BaseModel):
+    """AXcellent가 문의를 읽어 처리했다는 표시. 고객지원이 만든 문의 번호를 함께 보낸다."""
+
+    model_config = {"extra": "forbid"}
+
+    support_inquiry_id: int = Field(ge=1)
+
+
 class IdeaIn(BaseModel):
     """고객 아이디어. 문의·불만과 따로 받는다. 글은 `untrusted`로만 넘긴다."""
 
@@ -269,6 +290,8 @@ COUPON_READERS = {"marketing", "support", "finance", "orchestrator", "data"}
 ATTRIBUTION_READERS = {"data"}
 # 현금 환불(SHOP-12)은 고객지원 관문 토큰만(마케팅 토큰 거부)
 REFUND_ALLOWED = {"support"}
+# 문의함 읽기·읽음 표시는 AXcellent 고객지원(과 운영자)만. 문의 원문과 사진이 들어 있다
+INQUIRY_READERS = {"support", "admin"}
 # 데이터 조회(읽기 전용)는 분석을 하는 data와 관리자만
 DATA_READERS = {"data", "admin"}
 # 총괄 사건 읽기 중계는 관리자와 읽기 전용 열람자(`viewer`)만.
@@ -658,31 +681,88 @@ def create_app(
         order = shop.get_order(body.order_id)
         if order["buyer_id"] != body.buyer_id:
             raise ShopError("BUYER_MISMATCH", "주문의 구매자가 아니다", 403)
-        context_id = support_client.new_context_id()
-        claim = await support_client.call(
-            "create_claim",
-            context_id,
-            {
-                "buyer_id": body.buyer_id,
-                "customer_name": body.customer_name,
-                "order_id": body.order_id,
-                "type": body.type,
-                "reason": body.reason,
-                "items": [item.model_dump() for item in body.items] if body.items else None,
-                "unsealed": body.unsealed,
-                "evidence_count": body.evidence_count,
-            },
-            {"description": body.description},
-            target=body.order_id,
+        items = [item.model_dump() for item in body.items] if body.items else None
+        claim_digest = claim_inbox.digest(
+            body.buyer_id,
+            body.order_id,
+            body.type,
+            body.reason,
+            items,
+            body.unsealed,
+            body.description,
         )
-        if "id" not in claim:  # 클레임이 아닌 응답은 성공으로 내보내지 않는다
-            raise ShopError("UPSTREAM_ERROR", "고객지원 응답이 클레임 형식이 아니다", 502)
-        return _ok(claim, context_id=context_id)
+        # 고객지원을 부르지 않고 이 서버에 "접수됨"으로 저장한다.
+        # AXcellent가 읽어 가 판정하고 결과를 적는다
+        receipt = await asyncio.to_thread(
+            claim_inbox.add,
+            database,
+            digest=claim_digest,
+            context_id=f"{support_client.CLAIM_CONTEXT_PREFIX}{claim_digest[:12]}",
+            buyer_id=body.buyer_id,
+            customer_name=body.customer_name,
+            order_id=body.order_id,
+            type_=body.type,
+            reason=body.reason,
+            items=items,
+            unsealed=body.unsealed,
+            evidence_count=body.evidence_count,
+            description=body.description,
+        )
+        return _ok(receipt, context_id=receipt["context_id"])
+
+    # --- 내 클레임 목록·결과: 이 서버에 저장된 신청과 AXcellent가 적어 준 결과 (읽기) ----
+    @app.get("/api/shop/claims")
+    async def list_my_claims(buyer_id: str, order_id: str | None = None) -> dict:
+        inquiries.buyer_number(buyer_id)
+        if order_id is not None:
+            inquiries.check_order_id(order_id)
+        items = await asyncio.to_thread(claim_inbox.for_customer, database, buyer_id, order_id)
+        return _ok(items, total=len(items))
+
+    # --- 클레임함 읽기: AXcellent 고객지원이 새 신청을 읽어 가고 판정 결과를 적는다 ------
+    @app.get("/api/shop/admin/claims")
+    async def read_claim_inbox(
+        state: Annotated[str, Query(pattern=r"^(new|open)$")] = "new",
+        limit: Annotated[int, Query(ge=1, le=claim_inbox.READ_LIMIT_MAX)] = (
+            claim_inbox.READ_LIMIT_DEFAULT
+        ),
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        if state == "open":  # 읽어 갔지만 아직 끝나지 않은 신청(상태를 다시 적을 수 있다)
+            open_items = await asyncio.to_thread(claim_inbox.open_claims, database, limit)
+            return _ok(open_items, total=len(open_items))
+        items, total = await asyncio.to_thread(claim_inbox.pending, database, limit)
+        return _ok(items, total=total)
+
+    @app.post("/api/shop/admin/claims/{seq}/result")
+    async def write_claim_result(
+        seq: Annotated[int, Path(ge=1)],
+        body: ClaimResultIn,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        if len(json.dumps(body.result, ensure_ascii=False)) > claim_inbox.MAX_RESULT_CHARS:
+            raise ShopError("RESULT_TOO_LARGE", "결과가 너무 크다", 413)
+        try:
+            done = await asyncio.to_thread(
+                claim_inbox.write_result,
+                database,
+                seq,
+                body.support_claim_id,
+                body.status,
+                body.result,
+            )
+        except ValueError as error:
+            raise ShopError(
+                "CLAIM_MISMATCH", "이 신청에는 다른 클레임 번호가 적혀 있다", 409
+            ) from error
+        if done is None:
+            raise ShopError("CLAIM_NOT_FOUND", "클레임함에 없는 접수 번호다", 404)
+        return _ok(done)
 
     # --- 고객 문의 접수 (#385 B안): 쇼핑몰 → 고객지원 `create_inquiry` ---------------------
     @app.post("/api/shop/inquiries", status_code=201)
     async def create_inquiry(body: InquiryIn) -> dict:
-        user_id = inquiries.buyer_number(body.buyer_id)
+        inquiries.buyer_number(body.buyer_id)  # 형식 확인(저장은 구매자 ID 그대로)
         inquiries.check_order_id(body.order_id)
         subject, message = inquiries.clean_text(body.subject, body.body, body.order_id)
         photos = inquiries.clean_images([i.model_dump() for i in body.images])
@@ -696,25 +776,47 @@ def create_app(
         context_id = (
             f"{support_client.CLAIM_CONTEXT_PREFIX}{digest[:12]}"  # 같은 접수는 같은 사건·키
         )
-        untrusted: dict = {"subject": subject, "message": message}
-        if photos:
-            untrusted["images"] = photos
-        inquiry = await support_client.call(
-            "create_inquiry",
-            context_id,
-            {
-                "user_id": user_id,
-                "customer_name": storefront.get_user(body.buyer_id)["display_name"],
-                "order_id": body.order_id,
-            },
-            untrusted,
-            target=f"user:{user_id}:{digest}",
+        # 고객지원을 부르지 않고 이 서버에 저장한다. AXcellent가 정해진 간격으로 읽어 간다
+        saved = await asyncio.to_thread(
+            inbox.add,
+            database,
+            digest=digest,
+            context_id=context_id,
+            buyer_id=body.buyer_id,
+            customer_name=storefront.get_user(body.buyer_id)["display_name"],
+            order_id=body.order_id,
+            subject=subject,
+            message=message,
+            images=photos or None,
         )
-        if "id" not in inquiry:  # 문의가 아닌 응답은 성공으로 내보내지 않는다
-            raise ShopError("UPSTREAM_ERROR", "고객지원 응답이 문의 형식이 아니다", 502)
-        # 응답은 가공하지 않고 접수 결과만 돌려준다
-        receipt = {k: inquiry.get(k) for k in ("id", "status", "order_id", "updated_at")}
-        return _ok(receipt, context_id=context_id)
+        # 고객에게는 접수 사실만 돌려준다. 문의 번호는 이 서버의 접수 번호다
+        receipt = {
+            "id": saved["seq"],
+            "status": "open",
+            "order_id": saved["order_id"],
+            "updated_at": saved["created_at"],
+        }
+        return _ok(receipt, context_id=saved["context_id"])
+
+    # --- 문의함 읽기: AXcellent 고객지원이 새 문의를 읽어 가고 읽었다고 알린다 ------------------
+    @app.get("/api/shop/admin/inquiries")
+    async def read_inquiry_inbox(
+        limit: Annotated[int, Query(ge=1, le=inbox.READ_LIMIT_MAX)] = inbox.READ_LIMIT_DEFAULT,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        items, total = await asyncio.to_thread(inbox.pending, database, limit)
+        return _ok(items, total=total)
+
+    @app.post("/api/shop/admin/inquiries/{seq}/synced")
+    async def mark_inquiry_synced(
+        seq: Annotated[int, Path(ge=1)],
+        body: InquirySyncedIn,
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        done = await asyncio.to_thread(inbox.mark_synced, database, seq, body.support_inquiry_id)
+        if done is None:
+            raise ShopError("INQUIRY_NOT_FOUND", "문의함에 없는 접수 번호다", 404)
+        return _ok(done)
 
     # --- 내 문의 목록·상태: 쇼핑몰 → 고객지원 `list_inquiries`·`get_inquiry` (읽기) --------
     # 고객지원이 `user_id`로 본인 문의만 골라 고객용으로 줄여 주고, 여기서 한 번 더 좁힌다.

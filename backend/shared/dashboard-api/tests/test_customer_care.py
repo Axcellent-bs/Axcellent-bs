@@ -478,3 +478,16 @@ def test_sending_the_idea_digest_uses_the_author_from_the_token(fake: Fake) -> N
     assert response.status_code == 201
     sent = next(r for r in fake.sent if r.skill == "send_idea_digest")
     assert sent.input == {"kind": "event", "min_ideas": 3, "author": "tester"}
+
+
+def test_inquiry_pull_status_is_read_from_support(fake: Fake) -> None:
+    fake.outputs["inquiry_pull_status"] = {"enabled": True, "connected": False, "pending": 2}
+    response = TestClient(app).get(BASE + "/inquiry-pull")
+    assert response.status_code == 200
+    assert response.json()["data"]["connected"] is False
+    assert next(r for r in fake.sent if r.skill == "inquiry_pull_status").input == {}
+
+
+def test_inquiry_pull_status_in_mock_mode_is_empty(mock_client: TestClient) -> None:
+    data = mock_client.get(BASE + "/inquiry-pull").json()["data"]
+    assert data["enabled"] is False and data["connected"] is None

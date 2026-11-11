@@ -200,6 +200,16 @@
       "priority": "recommended"
     },
     {
+      "id": "inquiry_pull_status",
+      "description": "판매 서버 문의함을 AXcellent 고객지원이 마지막으로 읽은 결과를 알려 준다: 연결됨·끊김(connected, last_error), 마지막 시도·성공 시각, 문의함에 남은 문의 수(pending), 읽어 처리한 수·실패 수(ingested_total·failed_total), 읽기 켜짐 여부와 간격. 숫자는 읽기 루프가 센 값이고 재시작하면 비워진다. 읽기만 한다.",
+      "input_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#InquiryPullStatusInput",
+      "output_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#InquiryPullStatus",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "set_feedback_status",
       "description": "후기를 공개 또는 숨김으로 정한다 (확인 대기 후기의 결정). 상태 변경이라 execute()를 거친다.",
       "input_schema": "agents/support/src/support_agent/schemas.py#SetFeedbackStatusInput",

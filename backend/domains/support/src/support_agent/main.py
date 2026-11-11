@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
+
+from fastapi import FastAPI
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from support_agent import receipt_vision
+from support_agent import inquiry_pull, receipt_vision
 from support_agent.audit_handlers import AUDIT_HANDLERS
 from support_agent.change_handlers import CHANGE_HANDLERS
 from support_agent.chat_handlers import CHAT_HANDLERS
@@ -20,6 +24,7 @@ from support_agent.handoff_handlers import HANDOFF_HANDLERS
 from support_agent.idea_handlers import IDEA_HANDLERS
 from support_agent.incident_handlers import INCIDENT_HANDLERS
 from support_agent.incident_queue_handlers import INCIDENT_QUEUE_HANDLERS
+from support_agent.inquiry_pull_handlers import INQUIRY_PULL_HANDLERS
 from support_agent.insight_handlers import INSIGHT_HANDLERS
 from support_agent.original_handlers import ORIGINAL_HANDLERS
 from support_agent.payment_handlers import PAYMENT_HANDLERS
@@ -61,6 +66,7 @@ ALL_HANDLERS = {
     **INSIGHT_HANDLERS,
     **PROPOSAL_HANDLERS,
     **PLANNING_QUESTION_HANDLERS,
+    **INQUIRY_PULL_HANDLERS,
     **IDEA_HANDLERS,
     **CHANGE_HANDLERS,
     **ANALYSIS_HANDLERS,
@@ -81,3 +87,19 @@ ALL_HANDLERS = {
 # 영수증 사진 분석기: 이미지를 읽을 모델이 설정돼 있을 때만 꽂는다(목 모드·미설정이면 꽂지 않는다)
 receipt_vision.connect()
 app = create_agent_app(load_card(), ALL_HANDLERS)
+
+# 판매 서버 문의함을 정해진 간격으로 읽는 루프를 앱 시작·종료에 맞춰 돌린다 (꺼져 있으면 안 돈다)
+_app_lifespan = app.router.lifespan_context
+
+
+@asynccontextmanager
+async def _lifespan_with_inquiry_pull(application: FastAPI) -> AsyncIterator[None]:
+    async with _app_lifespan(application):
+        task = inquiry_pull.start()
+        try:
+            yield
+        finally:
+            inquiry_pull.stop(task)
+
+
+app.router.lifespan_context = _lifespan_with_inquiry_pull

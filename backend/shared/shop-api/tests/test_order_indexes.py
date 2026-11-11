@@ -24,7 +24,14 @@ ADDED = (
     "idx_payments_status_created_at",
 )
 # 나중에 열과 함께 붙은 인덱스(주문 멱등 키, 쿠폰별 사용 장수)
-LATER = ("idx_orders_buyer_idempotency", "idx_orders_coupon_id", "idx_orders_src_campaign")
+LATER = (
+    "idx_orders_buyer_idempotency",
+    "idx_orders_coupon_id",
+    "idx_orders_src_campaign",
+    "idx_inquiry_inbox_pending",  # 문의함(읽어 가지 않은 문의)
+    "idx_claim_inbox_unread",  # 클레임함(읽어 가지 않은 신청)
+    "idx_claim_inbox_buyer",
+)
 
 
 def _plan(db: Db, sql: str) -> str:
