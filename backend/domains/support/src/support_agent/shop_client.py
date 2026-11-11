@@ -324,3 +324,10 @@ async def mark_return_synced(claim_id: int, outcome: str) -> None:
 async def mark_inquiry_gone(seq: int) -> None:
     """고객지원에서 찾을 수 없는 문의를 고객 화면에서 빼 달라고 판매 서버에 알린다."""
     await _post(f"/admin/inquiries/{seq}/gone", {})
+
+
+async def mark_inquiry_gone_by_support(support_inquiry_id: int) -> None:
+    """고객지원이 지운 문의를 고객 화면에서 바로 빼 달라고 판매 서버에 알린다 (없는 번호는 무시)."""
+    response = await _send("POST", f"/admin/inquiries/by-support/{support_inquiry_id}/gone")
+    if response.status_code not in (200, 404):
+        raise _error(response)

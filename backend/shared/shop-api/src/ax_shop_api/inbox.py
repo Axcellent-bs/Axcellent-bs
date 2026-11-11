@@ -362,3 +362,19 @@ def mark_gone(db: Db, seq: int) -> dict[str, Any] | None:
                 (_now(), seq),
             )
     return {"seq": seq}
+
+
+def mark_gone_by_support_id(db: Db, support_inquiry_id: int) -> dict[str, Any] | None:
+    """고객지원 문의 번호로 문의를 고객 화면에서 뺀다(고객지원이 지우는 그 자리에서 알린다).
+
+    없는 번호면 None이다. 같은 고객지원 번호로 이어진 접수는 모두 뺀다.
+    """
+    with db.tx() as conn:
+        rows = conn.execute(
+            "SELECT seq FROM inquiry_inbox WHERE support_inquiry_id = ?", (support_inquiry_id,)
+        ).fetchall()
+    if not rows:
+        return None
+    for row in rows:
+        mark_gone(db, int(row["seq"]))
+    return {"count": len(rows)}

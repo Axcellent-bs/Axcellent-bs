@@ -27,17 +27,22 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import logging
 import os
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from support_agent import claim_retention, persistence, privacy_audit
+from support_agent import claim_retention, persistence, privacy_audit, shop_client
 from support_agent.claim_schemas import Claim
 from support_agent.claims import ClaimStore
 from support_agent.schemas import Conversation
 from support_agent.store import InquiryStore
+
+logger = logging.getLogger("ax.support.retention")
+_PENDING: set[asyncio.Task[None]] = set()  # 알리는 작업이 중간에 치워지지 않게 붙들어 둔다
 
 PURGED = "[삭제됨]"
 TEST_MARKERS = ("[시험]", "[test]")
@@ -279,6 +284,7 @@ def plan_one(
     kept = {"messages": len(redacted.messages), "activity": len(redacted.activity), "claims": 0}
     if apply:
         store.replace(redacted)
+        _tell_shop_gone(conversation.id)
         privacy_audit.record_retention_purge(
             store,
             redacted,
@@ -299,6 +305,29 @@ def run(
 ) -> list[Plan]:
     stamp = (now or datetime.now(UTC)).isoformat(timespec="seconds").replace("+00:00", "Z")
     return [plan_one(store, claims, i, apply, stamp) for i in dict.fromkeys(inquiry_ids)]
+
+
+def _tell_shop_gone(inquiry_id: int) -> None:
+    """지운 문의를 판매 서버 고객 화면에서도 그 자리에서 뺀다(서비스 안에서만, 실패해도 계속).
+
+    못 보내면(연결 끊김) 읽어 가기 루프가 다음 주기에 purged_at을 보고 뺀다.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # 별도 프로세스(retention CLI)는 서비스가 아니라 알리지 않는다
+
+    async def tell() -> None:
+        try:
+            await shop_client.mark_inquiry_gone_by_support(inquiry_id)
+        except shop_client.ShopError:
+            logger.warning(
+                "판매 서버에 지운 문의 %s를 알리지 못함 (다음 주기에 이어서)", inquiry_id
+            )
+
+    task = loop.create_task(tell())
+    _PENDING.add(task)
+    task.add_done_callback(_PENDING.discard)
 
 
 def _do_purge(

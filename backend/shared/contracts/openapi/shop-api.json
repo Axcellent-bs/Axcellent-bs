@@ -1822,6 +1822,65 @@
         "summary": "Read Inquiry Inbox"
       }
     },
+    "/api/shop/admin/inquiries/by-support/{support_inquiry_id}/gone": {
+      "post": {
+        "description": "고객지원이 문의를 지운 그 자리에서 알려 고객 화면에서 빼고 되돌려 쓴 값을 지운다.",
+        "operationId": "mark_inquiry_gone_by_support_api_shop_admin_inquiries_by_support__support_inquiry_id__gone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_inquiry_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Support Inquiry Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Mark Inquiry Gone By Support Api Shop Admin Inquiries By Support  Support Inquiry Id  Gone Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Inquiry Gone By Support"
+      }
+    },
     "/api/shop/admin/inquiries/open": {
       "get": {
         "operationId": "read_open_inquiry_views_api_shop_admin_inquiries_open_get",

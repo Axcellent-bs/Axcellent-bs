@@ -48,6 +48,7 @@
 | `GET /api/shop/admin/inquiries/open?after&limit` | 읽어 갔지만 고객이 보는 값이 아직 끝나지 않은 문의(`seq`·`support_inquiry_id`·`view_digest`)를 쪽 나눠 준다(`meta.next_after`). 해결되고 평가까지 끝난 문의, 해결된 지 `SHOP_VIEW_RESOLVED_DAYS`(기본 7)일이 지난 문의는 뺀다. `support`·`admin`만 |
 | `POST /api/shop/admin/inquiries/{seq}/view` | 고객지원이 정한 고객용 문의 값을 되돌려 쓴다. 요청 `{view, view_digest}`. 허용한 키(`CUSTOMER_FIELDS`·메시지 네 칸)만 남기고 같은 지문이면 그대로 둔다. `support`·`admin`만, 없는 번호 404 |
 | `POST /api/shop/admin/inquiries/{seq}/gone` | 고객지원에서 찾을 수 없는 문의(개인정보 삭제·고객지원 재시작)를 고객 화면에서 빼고 되돌려 쓴 값을 지운다. 이미 뺀 문의는 그대로, 없는 번호는 404. `support`·`admin`만 |
+| `POST /api/shop/admin/inquiries/by-support/{support_inquiry_id}/gone` | 위와 같은데 고객지원 문의 번호로 부른다. 고객지원이 문의를 지우는 그 자리에서 알려 고객 화면에서 빼고 되돌려 쓴 값·원문 사본을 지운다(못 알리면 읽어 가기가 다음 주기에 이어서 한다). 이미 뺀 문의도 200, 읽어 간 적 없는 번호는 404. `support`·`admin`만 |
 | `GET /api/shop/admin/ideas?limit` · `POST /api/shop/admin/ideas/{seq}/synced` | 아이디어함 읽기(접수 순서, `meta.total`)와 처리 표시. 표시 요청 `{outcome(짧은 코드), ref?, notice?(120자)}`. 이미 표시한 건 바뀌지 않는다. `support`·`admin`만 |
 | `GET /api/shop/admin/feedback?limit` · `POST /api/shop/admin/inquiries/{seq}/feedback-synced` | 읽어 가지 않은 평가 읽기와 처리 표시(`{outcome}`). 평가 글(`comment`)은 읽는 쪽이 `untrusted`로만 다룬다. 고객지원이 받지 않은 평가(`rated`·`already_rated`가 아닌 결과)는 지워서 고객이 다시 남길 수 있다. `support`·`admin`만 |
 | `GET /api/shop/admin/returns?limit` · `POST /api/shop/admin/returns/{claim_id}/synced` | 기록된 반품 입고 읽기(입고 순서, `meta.total`)와 처리 표시(`{outcome}`). `support`·`admin`만 |

@@ -328,3 +328,27 @@ def test_a_resolved_inquiry_is_not_refreshed_after_the_resolved_period(
             "UPDATE inquiry_inbox SET view_at = '2026-01-01T00:00:00Z' WHERE seq = ?", (open_one,)
         )
     assert [i["seq"] for i in client.get(read, headers=SUPPORT).json()["data"]] == [open_one]
+
+
+def test_support_can_take_an_inquiry_off_by_its_own_number_right_when_it_purges(
+    client: TestClient, db: Db
+) -> None:
+    kept, gone = seed(db, support_id=5, text="a"), seed(db, support_id=6, text="b")
+    for seq in (kept, gone):
+        write_view(client, seq, _view("open", False, preview="원문 미리보기"))
+    url = "/api/shop/admin/inquiries/by-support/6/gone"
+    assert client.post(url, headers=SUPPORT).status_code == 200
+    body = client.get("/api/shop/inquiries", params={"buyer_id": "buy_0001"}).json()
+    assert [i["id"] for i in body["data"]] == [kept]
+    with db.tx() as conn:  # 되돌려 쓴 값(고객 원문)도 함께 지운다
+        row = conn.execute(
+            "SELECT view, message FROM inquiry_inbox WHERE seq = ?", (gone,)
+        ).fetchone()
+    assert row["view"] is None and row["message"] == ""
+    assert client.post(url, headers=SUPPORT).status_code == 200  # 다시 불러도 같다
+    assert (
+        client.post("/api/shop/admin/inquiries/by-support/99/gone", headers=SUPPORT).status_code
+        == 404
+    )
+    assert client.post(url).status_code == 401
+    assert client.post(url, headers=MARKETING).status_code == 403

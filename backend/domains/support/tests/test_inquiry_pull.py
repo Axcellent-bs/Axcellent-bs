@@ -1013,3 +1013,36 @@ async def test_a_refused_idea_writes_back_the_notice_for_the_customer(
     await inquiry_pull.pull_once()
     assert shop.idea_synced[1] == ("use_inquiry", None)
     assert shop.idea_notices[1] == message
+
+
+@pytest.mark.asyncio
+async def test_purging_an_inquiry_tells_the_shop_right_away_and_keeps_going_if_it_cannot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from support_agent import retention
+
+    told: list[int] = []
+
+    async def tell(inquiry_id: int) -> None:
+        told.append(inquiry_id)
+
+    monkeypatch.setattr(shop_client, "mark_inquiry_gone_by_support", tell)
+    retention._tell_shop_gone(41)
+    await asyncio.sleep(0)
+    await asyncio.gather(*retention._PENDING)
+    assert told == [41]
+
+    async def down(_: int) -> None:
+        raise shop_client.ShopError("UNAVAILABLE", "연결할 수 없다")
+
+    monkeypatch.setattr(shop_client, "mark_inquiry_gone_by_support", down)
+    retention._tell_shop_gone(42)  # 못 보내도 예외 없이 끝난다(다음 주기에 이어서 뺀다)
+    await asyncio.gather(*retention._PENDING)
+
+
+def test_purging_outside_a_service_does_not_try_to_tell_the_shop() -> None:
+    from support_agent import retention
+
+    retention._tell_shop_gone(43)  # 실행 중인 이벤트 루프가 없으면(CLI) 아무 일도 하지 않는다

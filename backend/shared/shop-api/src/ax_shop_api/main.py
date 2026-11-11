@@ -938,6 +938,17 @@ def create_app(
             raise ShopError("INQUIRY_NOT_FOUND", "문의함에 없는 접수 번호다", 404)
         return _ok(done)
 
+    @app.post("/api/shop/admin/inquiries/by-support/{support_inquiry_id}/gone")
+    async def mark_inquiry_gone_by_support(
+        support_inquiry_id: Annotated[int, Path(ge=1)],
+        _: str = Depends(_caller(INQUIRY_READERS)),
+    ) -> dict:
+        """고객지원이 문의를 지운 그 자리에서 알려 고객 화면에서 빼고 되돌려 쓴 값을 지운다."""
+        done = await asyncio.to_thread(inbox.mark_gone_by_support_id, database, support_inquiry_id)
+        if done is None:
+            raise ShopError("INQUIRY_NOT_FOUND", "이 번호로 읽어 간 문의가 없다", 404)
+        return _ok(done)
+
     @app.post("/api/shop/admin/inquiries/{seq}/gone")
     async def mark_inquiry_gone(
         seq: Annotated[int, Path(ge=1)], _: str = Depends(_caller(INQUIRY_READERS))
