@@ -2,7 +2,7 @@
 
 새 레포(Catbooks-demo/catbooks-demo)는 `backend/shop-api/`·`frontend/shop-web/` 구조다. 예전 구조
 (`shop-api/`·`shop-web/`)와 새 구조 둘 다에서 되돌릴 수 없는 영역·머지 위험 경로가 같이 걸려야 한다.
-허용 경로(`PR_ALLOWED_PATHS`)는 safety `thresholds.toml`과 같은 값이라 safety 변경과 함께 바꾼다.
+허용 경로(`PR_ALLOWED_PATHS`)와 보호 경로는 safety `thresholds.toml`(#990)과 같은 값이다.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import pytest
 from ax_workflow.autocheck import (
     IRREVERSIBLE_PREFIXES,
     MERGE_RISK_PREFIXES,
+    PR_ALLOWED_PATHS,
     irreversible_paths,
     merge_risk_paths,
 )
@@ -60,3 +61,27 @@ def test_ordinary_new_layout_files_are_not_flagged() -> None:
     paths = ["backend/shop-api/src/ax_shop_api/inbox.py", "frontend/shop-web/src/pages/Home.tsx"]
     assert irreversible_paths(paths) == []
     assert merge_risk_paths(paths) == []
+
+
+def test_the_new_repo_layout_is_an_allowed_path() -> None:
+    for prefix in ("backend/shop-api/", "frontend/shop-web/"):
+        assert prefix in PR_ALLOWED_PATHS
+
+
+def test_a_safety_folder_inside_the_new_repo_is_a_merge_risk() -> None:
+    path = "backend/safety/rules/thresholds.toml"
+    assert merge_risk_paths([path]) == [path]
+
+
+def test_allowed_and_protected_paths_match_safety_rules() -> None:
+    """safety thresholds.toml(merge_pr)의 허용·보호 경로와 어긋나지 않는다."""
+    import tomllib
+    from pathlib import Path
+
+    rules = Path(__file__).resolve().parents[2] / "safety/src/ax_safety/rules/thresholds.toml"
+    text = tomllib.loads(rules.read_text(encoding="utf-8"))
+    found = repr(text)
+    for prefix in PR_ALLOWED_PATHS:
+        assert repr(prefix) in found, prefix
+    for prefix in ("backend/safety/", "backend/contracts/", "frontend/shop-web/src/lib/api.ts"):
+        assert prefix in MERGE_RISK_PREFIXES and repr(prefix) in found, prefix
