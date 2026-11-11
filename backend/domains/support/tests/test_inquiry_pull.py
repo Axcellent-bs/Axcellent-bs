@@ -45,6 +45,14 @@ class FakeShop:
         self.down = False
         self.inquiry_down = False  # 문의함만 닿지 않는다
         self.sync_down = False
+        self.open_views: list[dict[str, Any]] = []
+        self.written_views: list[tuple[int, dict[str, Any], str]] = []
+        self.feedbacks: list[dict[str, Any]] = []
+        self.feedback_synced: dict[int, str] = {}
+        self.ideas: list[dict[str, Any]] = []
+        self.idea_synced: dict[int, tuple[str, str | None]] = {}
+        self.returns: list[dict[str, Any]] = []
+        self.return_synced: dict[int, str] = {}
 
     async def fetch(self, limit: int = 20) -> tuple[list[dict[str, Any]], int, int]:
         if self.down or self.inquiry_down:
@@ -81,6 +89,38 @@ class FakeShop:
             raise shop_client.ShopError("UNAVAILABLE", "연결할 수 없다")
         self.synced.append((seq, support_id))
 
+    # --- 나머지 접수: 문의 값 되돌려 쓰기, 평가, 아이디어, 반품 입고 ---
+    async def fetch_open_views(self, after: int = 0) -> tuple[list[dict[str, Any]], int | None]:
+        rows = [o for o in self.open_views if o["seq"] > after]
+        return rows, None
+
+    async def write_view(self, seq: int, view: dict[str, Any], digest: str) -> None:
+        self.written_views.append((seq, view, digest))
+        for row in self.open_views:
+            if row["seq"] == seq:
+                row["view_digest"] = digest
+
+    async def fetch_feedback(self, limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+        rows = [f for f in self.feedbacks if f["seq"] not in self.feedback_synced]
+        return rows[:limit], len(rows)
+
+    async def mark_feedback(self, seq: int, outcome: str) -> None:
+        self.feedback_synced[seq] = outcome
+
+    async def fetch_ideas(self, limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+        rows = [i for i in self.ideas if i["seq"] not in self.idea_synced]
+        return rows[:limit], len(rows)
+
+    async def mark_idea(self, seq: int, outcome: str, ref: str | None = None) -> None:
+        self.idea_synced[seq] = (outcome, ref)
+
+    async def fetch_returns(self, limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+        rows = [r for r in self.returns if r["claim_id"] not in self.return_synced]
+        return rows[:limit], len(rows)
+
+    async def mark_return(self, claim_id: int, outcome: str) -> None:
+        self.return_synced[claim_id] = outcome
+
 
 @pytest.fixture(autouse=True)
 def _fresh(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,6 +147,14 @@ def wire(monkeypatch: pytest.MonkeyPatch, shop: FakeShop) -> list[Any]:
     monkeypatch.setattr(shop_client, "write_claim_result", shop.write_result)
     monkeypatch.setattr(shop_client, "report_inquiry_failed", shop.report_inquiry_failed)
     monkeypatch.setattr(shop_client, "report_claim_failed", shop.report_claim_failed)
+    monkeypatch.setattr(shop_client, "fetch_open_inquiry_views", shop.fetch_open_views)
+    monkeypatch.setattr(shop_client, "write_inquiry_view", shop.write_view)
+    monkeypatch.setattr(shop_client, "fetch_feedback_inbox", shop.fetch_feedback)
+    monkeypatch.setattr(shop_client, "mark_feedback_synced", shop.mark_feedback)
+    monkeypatch.setattr(shop_client, "fetch_idea_inbox", shop.fetch_ideas)
+    monkeypatch.setattr(shop_client, "mark_idea_synced", shop.mark_idea)
+    monkeypatch.setattr(shop_client, "fetch_return_inbox", shop.fetch_returns)
+    monkeypatch.setattr(shop_client, "mark_return_synced", shop.mark_return)
     monkeypatch.setattr(handlers, "create_inquiry", fake_create)
     return seen
 
@@ -635,3 +683,232 @@ async def test_a_shop_error_on_one_item_does_not_stop_the_rest_of_the_cycle(
     assert state["ingested_total"] == 2 and state["failed_total"] == 1
     assert state["pending"] == 1 and state["connected"] is False
     assert shop.failed == []  # 처리는 됐으니 실패 횟수는 세지 않는다
+
+
+# ------------------------------------------------ 나머지 접수: 되돌려 쓰기·평가·아이디어·입고
+
+
+def add_inquiry(subject: str = "배송이 늦어요") -> int:
+    from support_agent.schemas import Analysis, Classification
+
+    conversation = handlers.STORE.create(
+        context_id="ctx_shop_aaaa00000001",
+        tenant_id="shop-demo",
+        user_id=7,
+        customer_name="김하늘",
+        subject=subject,
+        order_id="ord_0001",
+        order_no=None,
+        first_message="주문한 책이 아직 안 왔어요",
+        analysis=Analysis(
+            classification=Classification(
+                intent_ko="문의",
+                category="shipping_delay",
+                sentiment="calm",
+                urgency="medium",
+                search_query="배송",
+            ),
+            drafts=[],
+        ),
+    )
+    return conversation.id
+
+
+@pytest.mark.asyncio
+async def test_the_customer_view_is_written_back_only_when_it_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inquiry_id = add_inquiry()
+    shop = FakeShop([])
+    shop.open_views = [{"seq": 3, "support_inquiry_id": inquiry_id, "view_digest": None}]
+    wire(monkeypatch, shop)
+    await inquiry_pull.pull_once()
+    ((seq, view, digest),) = shop.written_views
+    assert seq == 3 and view["id"] == inquiry_id and view["status"] == "open"
+    assert view["preview"] and view["messages"][0]["text"] == "주문한 책이 아직 안 왔어요"
+    assert view["rated"] is False
+    # 내부 분석·초안·분류·상담원 메모는 판매 서버에 가지 않는다
+    assert {"analysis", "drafts", "category", "classification", "activity"}.isdisjoint(view)
+    await inquiry_pull.pull_once()
+    assert len(shop.written_views) == 1  # 지문이 같으면 다시 쓰지 않는다
+    handlers.STORE.add_agent_message(inquiry_id, "곧 도착합니다")
+    await inquiry_pull.pull_once()
+    assert len(shop.written_views) == 2 and shop.written_views[1][2] != digest
+    assert inquiry_pull.status()["views_written_total"] == 2
+
+
+def fake_skill(monkeypatch: pytest.MonkeyPatch, module: Any, name: str, **kw: Any) -> list[Any]:
+    """처리 skill을 가짜로 바꿔 받은 요청을 모은다 (실제 처리는 각 skill의 시험이 본다)."""
+    seen: list[Any] = []
+
+    async def fake(request: Any) -> AgentResult:
+        seen.append(request)
+        return AgentResult(
+            meta=request.meta,
+            status=kw.get("status", TaskStatus.COMPLETED),
+            outcome=kw.get("outcome"),
+            output=kw.get("output", {}),
+        )
+
+    monkeypatch.setattr(module, name, fake)
+    return seen
+
+
+def stored_rating(seq: int, key: str, buyer: str = "buy_0007", support_id: int = 21) -> dict:
+    return {
+        "seq": seq,
+        "key": key,
+        "buyer_id": buyer,
+        "support_inquiry_id": support_id,
+        "rating": 4,
+        "resolved": True,
+        "comment": "고맙습니다",
+        "created_at": "t",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_stored_rating_is_read_and_sent_as_a_customer_rating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from support_agent import feedback_handlers
+
+    shop = FakeShop([])
+    shop.feedbacks = [stored_rating(4, "abcdef0123456789")]
+    wire(monkeypatch, shop)
+    seen = fake_skill(monkeypatch, feedback_handlers, "submit_feedback", output={"rated": True})
+    await inquiry_pull.pull_once()
+    request = seen[0]
+    assert request.skill == "submit_feedback"
+    assert request.input == {
+        "inquiry_id": 21,
+        "rating": 4,
+        "resolved": True,
+        "user_id": 7,
+        "source": "customer",
+    }
+    assert request.untrusted == {"comment": "고맙습니다"}
+    assert request.meta.idempotency_key == "shop-feedback:abcdef0123456789"
+    assert shop.feedback_synced == {4: "rated"}
+    await inquiry_pull.pull_once()
+    assert len(seen) == 1  # 표시했으니 다시 읽지 않는다
+
+
+@pytest.mark.asyncio
+async def test_a_refused_rating_is_marked_but_a_held_one_is_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from support_agent import feedback_handlers
+
+    shop = FakeShop([])
+    shop.feedbacks = [stored_rating(1, "k1"), stored_rating(2, "k2", "buy_0008", 22)]
+    wire(monkeypatch, shop)
+    fake_skill(monkeypatch, feedback_handlers, "submit_feedback", outcome="invalid_state")
+    result = await inquiry_pull.pull_once()
+    assert result["failed"] == 0
+    assert shop.feedback_synced == {1: "invalid_state", 2: "invalid_state"}
+    shop.feedback_synced.clear()
+    fake_skill(monkeypatch, feedback_handlers, "submit_feedback", outcome="not_executed_pending")
+    held = await inquiry_pull.pull_once()
+    assert held["failed"] == 2 and shop.feedback_synced == {}  # 표시하지 않아 다시 읽는다
+    assert inquiry_pull.status()["last_error"] == "INGEST_FAILED"
+
+
+def stored_idea(
+    seq: int, key: str, text: str, kind: str = "event", buyer: str = "buy_0007"
+) -> dict:
+    return {
+        "seq": seq,
+        "key": key,
+        "context_id": f"ctx_shop_idea{seq:08d}",
+        "buyer_id": buyer,
+        "kind": kind,
+        "text": text,
+        "created_at": "t",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_stored_idea_is_read_with_its_text_as_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from support_agent import idea_handlers
+
+    shop = FakeShop([])
+    shop.ideas = [stored_idea(1, "ik1", "생일 쿠폰 이벤트를 열어 주세요")]
+    wire(monkeypatch, shop)
+    seen = fake_skill(monkeypatch, idea_handlers, "submit_idea", output={"idea_id": "IDEA-9"})
+    await inquiry_pull.pull_once()
+    first = seen[0]
+    assert first.input == {"kind": "event", "user_id": 7}
+    assert first.untrusted == {"text": "생일 쿠폰 이벤트를 열어 주세요"}
+    assert first.meta.idempotency_key == "shop-idea:ik1"
+    assert shop.idea_synced[1] == ("received", "IDEA-9")
+    fake_skill(monkeypatch, idea_handlers, "submit_idea", outcome="use_inquiry")
+    shop.ideas = [stored_idea(2, "ik2", "환불해 주세요 지금 바로", "other")]
+    await inquiry_pull.pull_once()
+    assert shop.idea_synced[2][0] == "use_inquiry"  # 받지 않은 아이디어도 처리한 것으로 표시한다
+
+
+@pytest.mark.asyncio
+async def test_a_bad_buyer_id_is_marked_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    shop = FakeShop([])
+    shop.ideas = [stored_idea(1, "k", "아이디어", buyer="nope")]
+    wire(monkeypatch, shop)
+    assert (await inquiry_pull.pull_once())["failed"] == 0
+    assert shop.idea_synced == {1: ("bad_buyer_id", None)}
+
+
+def stored_return(claim_id: int, order_id: str = "ord_0001", inspection: str | None = "pass"):  # noqa: ANN202
+    return {
+        "return_id": f"ret_{claim_id}",
+        "claim_id": claim_id,
+        "order_id": order_id,
+        "inspection": inspection,
+        "received_at": "t",
+        "context_id": f"ctx_shop_ret{claim_id:09d}",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_return_is_received_and_a_wrong_order_is_not_processed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from support_agent.claims import Claim
+
+    shop = FakeShop([])
+    shop.returns = [stored_return(7), stored_return(8)]
+    wire(monkeypatch, shop)
+    seen = fake_skill(monkeypatch, claim_handlers, "receive_return", output={"id": 7})
+    other = Claim.model_construct(id=8, order_id="ord_0099")
+    monkeypatch.setattr(claim_handlers.CLAIMS, "get", lambda cid: other if cid == 8 else None)
+    await inquiry_pull.pull_once()
+    assert len(seen) == 1  # 주문이 다른 입고는 처리하지 않는다
+    request = seen[0]
+    assert request.skill == "receive_return" and request.meta.idempotency_key == "shop-return:7"
+    assert request.input == {"claim_id": 7, "inspection": "pass"}
+    assert shop.return_synced == {7: "received", 8: "order_mismatch"}
+
+
+@pytest.mark.asyncio
+async def test_a_purged_inquiry_is_taken_off_the_screen_but_a_missing_one_is_left_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """개인정보로 지운 문의는 고객 화면에서 빼지만, 고객지원이 다시 시작해 비어서 없는 문의는
+    판매 서버에 남은 마지막 값을 그대로 둔다(재시작으로 고객 목록이 비면 안 된다)."""
+    purged = add_inquiry("지운 문의")
+    handlers.STORE.get(purged).purged_at = "2026-11-11T00:00:00Z"
+    shop = FakeShop([])
+    shop.open_views = [
+        {"seq": 4, "support_inquiry_id": purged, "view_digest": None},
+        {"seq": 5, "support_inquiry_id": 999, "view_digest": None},  # 고객지원에 없다
+    ]
+    wire(monkeypatch, shop)
+    gone: list[int] = []
+
+    async def mark_gone(seq: int) -> None:
+        gone.append(seq)
+
+    monkeypatch.setattr(shop_client, "mark_inquiry_gone", mark_gone)
+    assert (await inquiry_pull.pull_once())["failed"] == 0
+    assert gone == [4] and shop.written_views == []

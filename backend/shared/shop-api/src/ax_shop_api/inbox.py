@@ -145,7 +145,8 @@ def for_buyer(db: Db, buyer_id: str) -> list[dict[str, Any]]:
     """고객 본인의 접수 목록(최근 순). 고객용 목록이 처리 전 문의도 보여 주는 데 쓴다."""
     with db.tx() as conn:
         rows = conn.execute(
-            "SELECT * FROM inquiry_inbox WHERE buyer_id = ? ORDER BY seq DESC", (buyer_id,)
+            "SELECT * FROM inquiry_inbox WHERE buyer_id = ? AND gone_at IS NULL ORDER BY seq DESC",
+            (buyer_id,),
         ).fetchall()
     return [_own(r) for r in rows]
 
@@ -154,7 +155,8 @@ def get_for_buyer(db: Db, seq: int, buyer_id: str) -> dict[str, Any] | None:
     """본인의 접수 하나. 없는 번호와 남의 접수는 똑같이 None이다."""
     with db.tx() as conn:
         row = conn.execute(
-            "SELECT * FROM inquiry_inbox WHERE seq = ? AND buyer_id = ?", (seq, buyer_id)
+            "SELECT * FROM inquiry_inbox WHERE seq = ? AND buyer_id = ? AND gone_at IS NULL",
+            (seq, buyer_id),
         ).fetchone()
     return _own(row) if row is not None else None
 
@@ -169,6 +171,8 @@ def _own(row: Any) -> dict[str, Any]:
         "support_inquiry_id": row["support_inquiry_id"],
         "synced": row["synced_at"] is not None,
         "failed": row["failed_at"] is not None and row["synced_at"] is None,
+        "view": json.loads(row["view"]) if row["view"] else None,
+        "feedback": json.loads(row["feedback"]) if row["feedback"] else None,
     }
 
 
@@ -181,3 +185,150 @@ def stuck(db: Db) -> list[dict[str, Any]]:
 def retry(db: Db, seq: int) -> dict[str, Any] | None:
     """실패로 뺀 문의를 다시 읽는 차례로 돌린다. 실패가 아니면 그대로 두고, 없는 번호면 None."""
     return intake_common.requeue(db, "inquiry_inbox", seq, STUCK_WHERE, {}, lambda _row: True)
+
+
+# ------------------------------------------------------------ 고객이 보는 문의 상태 (되돌려 쓰기)
+
+
+def open_views(
+    db: Db, after: int = 0, limit: int = READ_LIMIT_MAX
+) -> tuple[list[dict[str, Any]], int | None]:
+    """고객지원이 읽어 갔지만 고객 화면 값이 아직 끝나지 않은 문의 한 쪽.
+
+    `seq`·`support_inquiry_id`·`view_digest`(마지막으로 적은 값의 지문)를 접수 번호 순으로 준다.
+    돌려주는 두 번째 값이 다음 쪽의 `after`이고, 더 없으면 None이다. 해결되어 평가까지 끝난
+    문의는 더 바뀌지 않아 뺀다.
+    """
+    limit = max(1, min(limit, READ_LIMIT_MAX))
+    with db.tx() as conn:
+        rows = conn.execute(
+            "SELECT seq, support_inquiry_id, view_digest FROM inquiry_inbox"
+            " WHERE synced_at IS NOT NULL AND support_inquiry_id IS NOT NULL AND view_final = 0"
+            " AND gone_at IS NULL"
+            " AND seq > ? ORDER BY seq LIMIT ?",
+            (after, limit + 1),
+        ).fetchall()
+    more = len(rows) > limit
+    items = [
+        {
+            "seq": r["seq"],
+            "support_inquiry_id": r["support_inquiry_id"],
+            "view_digest": r["view_digest"],
+        }
+        for r in rows[:limit]
+    ]
+    return items, (items[-1]["seq"] if more and items else None)
+
+
+def set_view(db: Db, seq: int, view: dict[str, Any], view_digest: str) -> dict[str, Any] | None:
+    """고객지원이 정한 고객용 문의 값을 적는다. 같은 지문이면 그대로 두고, 없는 번호면 None.
+
+    해결(`resolved`)이고 평가가 끝난(`rated`) 문의는 더 바뀌지 않아 `view_final`을 켠다.
+    """
+    final = 1 if view.get("status") == "resolved" and view.get("rated") is True else 0
+    with db.tx() as conn:
+        row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
+        if row is None:
+            return None
+        if row["view_digest"] != view_digest or row["view"] is None:
+            conn.execute(
+                "UPDATE inquiry_inbox SET view = ?, view_digest = ?, view_final = ? WHERE seq = ?",
+                (json.dumps(view, ensure_ascii=False, sort_keys=True), view_digest, final, seq),
+            )
+    return {"seq": seq, "view_digest": view_digest}
+
+
+# ------------------------------------------------------------ 해결 결과 평가 (저장 → 읽어 가기)
+
+
+def save_feedback(
+    db: Db, seq: int, buyer_id: str, rating: int, resolved: bool, comment: str
+) -> str:
+    """본인 문의에 평가를 저장한다. `saved`, 이미 있으면 `exists`, 없는 문의·남의 문의면 `missing`.
+
+    평가 글(comment)은 읽어 가는 쪽이 `untrusted`로만 다룬다. 이 서버는 값을 고치지 않는다.
+    """
+    payload = json.dumps(
+        {"rating": rating, "resolved": resolved, "comment": comment}, ensure_ascii=False
+    )
+    with db.tx() as conn:
+        row = conn.execute(
+            "SELECT feedback FROM inquiry_inbox WHERE seq = ? AND buyer_id = ?", (seq, buyer_id)
+        ).fetchone()
+        if row is None:
+            return "missing"
+        if row["feedback"] is not None:
+            return "exists"
+        conn.execute(
+            "UPDATE inquiry_inbox SET feedback = ?, feedback_at = ? WHERE seq = ?",
+            (payload, _now(), seq),
+        )
+    return "saved"
+
+
+def pending_feedback(db: Db, limit: int = READ_LIMIT_DEFAULT) -> tuple[list[dict[str, Any]], int]:
+    """아직 읽어 가지 않은 평가를 저장 순서로 `limit`건까지, 그리고 남은 전체 수."""
+    limit = max(1, min(limit, READ_LIMIT_MAX))
+    where = "feedback IS NOT NULL AND feedback_synced_at IS NULL AND support_inquiry_id IS NOT NULL"
+    with db.tx() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM inquiry_inbox WHERE {where} ORDER BY feedback_at, seq LIMIT ?",  # noqa: S608
+            (limit,),
+        ).fetchall()
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM inquiry_inbox WHERE {where}"  # noqa: S608
+        ).fetchone()["n"]
+    items = []
+    for r in rows:
+        fb = json.loads(r["feedback"])
+        items.append(
+            {
+                "seq": r["seq"],
+                "key": r["digest"],
+                "buyer_id": r["buyer_id"],
+                "support_inquiry_id": r["support_inquiry_id"],
+                "rating": fb["rating"],
+                "resolved": fb["resolved"],
+                "comment": fb.get("comment", ""),
+                "created_at": r["feedback_at"],
+            }
+        )
+    return items, total
+
+
+def mark_feedback_synced(db: Db, seq: int, outcome: str) -> dict[str, Any] | None:
+    """고객지원이 평가를 읽어 처리했다고 표시한다(결과 코드와 함께). 없는 번호면 None."""
+    with db.tx() as conn:
+        row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
+        if row is None or row["feedback"] is None:
+            return None
+        if row["feedback_synced_at"] is None:
+            conn.execute(
+                "UPDATE inquiry_inbox SET feedback_synced_at = ?, feedback_outcome = ?"
+                " WHERE seq = ?",
+                (_now(), outcome[:40], seq),
+            )
+            row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
+    return {
+        "seq": seq,
+        "synced_at": row["feedback_synced_at"],
+        "outcome": row["feedback_outcome"],
+    }
+
+
+def mark_gone(db: Db, seq: int) -> dict[str, Any] | None:
+    """고객지원에서 찾을 수 없는 문의(삭제·재시작)를 고객 화면에서 뺀다. 저장한 값도 지운다.
+
+    이미 뺀 문의는 그대로 둔다. 없는 번호면 None이다.
+    """
+    with db.tx() as conn:
+        row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
+        if row is None:
+            return None
+        if row["gone_at"] is None:
+            conn.execute(
+                "UPDATE inquiry_inbox SET gone_at = ?, view = NULL, view_final = 1, message = ''"
+                " WHERE seq = ?",
+                (_now(), seq),
+            )
+    return {"seq": seq}

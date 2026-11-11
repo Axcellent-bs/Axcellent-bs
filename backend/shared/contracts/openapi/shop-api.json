@@ -543,6 +543,29 @@
         "title": "InquirySyncedIn",
         "type": "object"
       },
+      "InquiryViewIn": {
+        "additionalProperties": false,
+        "description": "고객지원이 정한 고객용 문의 값. 이 서버가 허용한 키만 남기고 값은 고치지 않는다.",
+        "properties": {
+          "view": {
+            "additionalProperties": true,
+            "title": "View",
+            "type": "object"
+          },
+          "view_digest": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "View Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "view",
+          "view_digest"
+        ],
+        "title": "InquiryViewIn",
+        "type": "object"
+      },
       "IntakeFailedIn": {
         "additionalProperties": false,
         "description": "읽어 간 쪽이 접수를 처리하지 못했다는 알림. 사유는 짧은 코드다(원문을 싣지 않는다).",
@@ -559,6 +582,36 @@
           "reason"
         ],
         "title": "IntakeFailedIn",
+        "type": "object"
+      },
+      "IntakeSyncedIn": {
+        "additionalProperties": false,
+        "description": "읽어 간 쪽의 처리 결과: 짧은 코드(outcome)와 고객지원 쪽 번호(ref, 있을 때).",
+        "properties": {
+          "outcome": {
+            "maxLength": 40,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.:-]+$",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "IntakeSyncedIn",
         "type": "object"
       },
       "OrderIn": {
@@ -1509,6 +1562,194 @@
         "summary": "Inject Fault"
       }
     },
+    "/api/shop/admin/feedback": {
+      "get": {
+        "operationId": "read_feedback_inbox_api_shop_admin_feedback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Feedback Inbox Api Shop Admin Feedback Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Feedback Inbox"
+      }
+    },
+    "/api/shop/admin/ideas": {
+      "get": {
+        "operationId": "read_idea_inbox_api_shop_admin_ideas_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Idea Inbox Api Shop Admin Ideas Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Idea Inbox"
+      }
+    },
+    "/api/shop/admin/ideas/{seq}/synced": {
+      "post": {
+        "operationId": "mark_idea_synced_api_shop_admin_ideas__seq__synced_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "seq",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Seq",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeSyncedIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Mark Idea Synced Api Shop Admin Ideas  Seq  Synced Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Idea Synced"
+      }
+    },
     "/api/shop/admin/inquiries": {
       "get": {
         "operationId": "read_inquiry_inbox_api_shop_admin_inquiries_get",
@@ -1567,6 +1808,77 @@
           }
         },
         "summary": "Read Inquiry Inbox"
+      }
+    },
+    "/api/shop/admin/inquiries/open": {
+      "get": {
+        "operationId": "read_open_inquiry_views_api_shop_admin_inquiries_open_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Open Inquiry Views Api Shop Admin Inquiries Open Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Open Inquiry Views"
       }
     },
     "/api/shop/admin/inquiries/{seq}/failed": {
@@ -1635,6 +1947,133 @@
           }
         },
         "summary": "Report Inquiry Failed"
+      }
+    },
+    "/api/shop/admin/inquiries/{seq}/feedback-synced": {
+      "post": {
+        "operationId": "mark_feedback_synced_api_shop_admin_inquiries__seq__feedback_synced_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "seq",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Seq",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeSyncedIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Mark Feedback Synced Api Shop Admin Inquiries  Seq  Feedback Synced Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Feedback Synced"
+      }
+    },
+    "/api/shop/admin/inquiries/{seq}/gone": {
+      "post": {
+        "description": "고객지원에서 찾을 수 없는 문의를 고객 화면에서 뺀다(개인정보 삭제·고객지원 재시작).",
+        "operationId": "mark_inquiry_gone_api_shop_admin_inquiries__seq__gone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "seq",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Seq",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Mark Inquiry Gone Api Shop Admin Inquiries  Seq  Gone Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Inquiry Gone"
       }
     },
     "/api/shop/admin/inquiries/{seq}/retry": {
@@ -1761,6 +2200,74 @@
           }
         },
         "summary": "Mark Inquiry Synced"
+      }
+    },
+    "/api/shop/admin/inquiries/{seq}/view": {
+      "post": {
+        "operationId": "write_inquiry_view_api_shop_admin_inquiries__seq__view_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "seq",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Seq",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InquiryViewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Write Inquiry View Api Shop Admin Inquiries  Seq  View Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Write Inquiry View"
       }
     },
     "/api/shop/admin/intake/stuck": {
@@ -2212,6 +2719,133 @@
           }
         },
         "summary": "Mark Shipped"
+      }
+    },
+    "/api/shop/admin/returns": {
+      "get": {
+        "operationId": "read_return_inbox_api_shop_admin_returns_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Return Inbox Api Shop Admin Returns Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Return Inbox"
+      }
+    },
+    "/api/shop/admin/returns/{claim_id}/synced": {
+      "post": {
+        "operationId": "mark_return_synced_api_shop_admin_returns__claim_id__synced_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeSyncedIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Mark Return Synced Api Shop Admin Returns  Claim Id  Synced Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Return Synced"
       }
     },
     "/api/shop/banners": {

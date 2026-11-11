@@ -146,13 +146,21 @@ def customer_view(item: dict) -> dict:
     return view
 
 
-def own_view(own: dict, item: dict | None = None, *, with_messages: bool = False) -> dict:
-    """고객이 받은 번호(접수 번호 seq)로 보이는 문의. 고객지원이 읽어 간 문의는 그쪽 값을 고객용으로
-    좁혀 쓰고(번호만 접수 번호로 바꾼다), 아직 읽어 가지 않은 문의는 접수한 내용만으로 만든다.
+def own_view(own: dict, *, with_messages: bool = False) -> dict:
+    """고객이 받은 번호(접수 번호 seq)로 보이는 문의.
+
+    고객지원이 되돌려 쓴 값(`own["view"]`)이 있으면 그것을 고객용으로 좁혀 쓰고(번호만 접수 번호로
+    바꾼다), 아직 없으면 접수한 내용만으로 만든다. 평가를 남겼으면(읽어 가기 전이라도)
+    평가한 것으로 보여 준다. 고객지원을 부르지 않고 이 서버의 저장값만 쓴다.
     """
-    if item is not None:
-        view = customer_view(item)
+    stored = own.get("view")
+    if stored is not None:
+        view = customer_view(stored)
         view["id"] = own["seq"]
+        if own.get("feedback") is not None:
+            view["rated"], view["can_rate"] = True, False
+        if not with_messages:
+            view.pop("messages", None)
         return view
     view = {
         "id": own["seq"],
@@ -166,7 +174,12 @@ def own_view(own: dict, item: dict | None = None, *, with_messages: bool = False
     if own.get("failed"):  # 여러 번 처리하지 못해 따로 빼 둔 접수: 계속 처리 중으로 두지 않는다
         view["intake_failed"] = True
         view["notice"] = INTAKE_FAILED_NOTICE
-    if with_messages:
+    if own.get("synced"):  # 읽어 갔고 고객지원이 값을 되돌려 쓰기 전: 본문 사본은 이미 지웠다
+        if with_messages:
+            view["messages"] = []
+        else:
+            view["preview"] = ""
+    elif with_messages:
         view["messages"] = [
             {"id": 1, "role": "customer", "text": own["message"], "created_at": own["created_at"]}
         ]

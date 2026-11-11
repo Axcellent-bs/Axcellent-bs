@@ -257,3 +257,68 @@ async def retry_stuck_intake(kind: str, seq: int) -> dict[str, Any]:
     if response.status_code != 200:
         raise _error(response)
     return response.json()["data"]
+
+
+async def _get_list(
+    path: str, params: dict[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    response = await _send("GET", path, params=params)
+    if response.status_code != 200:
+        raise _error(response)
+    body = response.json()
+    return body["data"], body.get("meta", {})
+
+
+async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    response = await _send("POST", path, json=payload)
+    if response.status_code != 200:
+        raise _error(response)
+    return response.json()["data"]
+
+
+async def fetch_open_inquiry_views(
+    after: int = 0,
+) -> tuple[list[dict[str, Any]], int | None]:
+    """읽어 갔지만 고객 화면 값이 아직 끝나지 않은 문의 한 쪽(seq·번호·view_digest)."""
+    items, meta = await _get_list("/admin/inquiries/open", {"after": after, "limit": 100})
+    return items, meta.get("next_after")
+
+
+async def write_inquiry_view(seq: int, view: dict[str, Any], view_digest: str) -> None:
+    """고객이 볼 문의 값(상태·답변)을 판매 서버에 되돌려 쓴다 (고객은 판매 서버에서 읽는다)."""
+    await _post(f"/admin/inquiries/{seq}/view", {"view": view, "view_digest": view_digest})
+
+
+async def fetch_feedback_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+    """판매 서버에 저장된, 아직 읽어 가지 않은 문의 평가와 남은 전체 수."""
+    items, meta = await _get_list("/admin/feedback", {"limit": limit})
+    return items, int(meta.get("total", len(items)))
+
+
+async def mark_feedback_synced(seq: int, outcome: str) -> None:
+    await _post(f"/admin/inquiries/{seq}/feedback-synced", {"outcome": outcome})
+
+
+async def fetch_idea_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+    """판매 서버 아이디어함에서 아직 읽어 가지 않은 아이디어와 남은 전체 수."""
+    items, meta = await _get_list("/admin/ideas", {"limit": limit})
+    return items, int(meta.get("total", len(items)))
+
+
+async def mark_idea_synced(seq: int, outcome: str, ref: str | None = None) -> None:
+    await _post(f"/admin/ideas/{seq}/synced", {"outcome": outcome, "ref": ref})
+
+
+async def fetch_return_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+    """판매 서버에 기록된, 아직 읽어 가지 않은 반품 입고와 남은 전체 수."""
+    items, meta = await _get_list("/admin/returns", {"limit": limit})
+    return items, int(meta.get("total", len(items)))
+
+
+async def mark_return_synced(claim_id: int, outcome: str) -> None:
+    await _post(f"/admin/returns/{claim_id}/synced", {"outcome": outcome})
+
+
+async def mark_inquiry_gone(seq: int) -> None:
+    """고객지원에서 찾을 수 없는 문의를 고객 화면에서 빼 달라고 판매 서버에 알린다."""
+    await _post(f"/admin/inquiries/{seq}/gone", {})

@@ -78,9 +78,12 @@ def interval_seconds() -> float:
 
 def status() -> dict[str, Any]:
     """읽기 상태. `connected`는 마지막 시도가 성공했는지다 (한 번도 안 읽었으면 None)."""
+    from support_agent import shop_pull_more as more
+
     attempted = STATE["last_attempt_at"] is not None
     return {
         **STATE,
+        **more.COUNTS,
         "enabled": enabled(),
         "interval_seconds": interval_seconds(),
         "connected": (STATE["last_error"] is None) if attempted else None,
@@ -88,6 +91,9 @@ def status() -> dict[str, Any]:
 
 
 def reset_state() -> None:
+    from support_agent import shop_pull_more as more
+
+    more.reset_counts()
     STATE.update(
         last_attempt_at=None,
         last_ok_at=None,
@@ -328,7 +334,18 @@ async def pull_once(limit: int = READ_LIMIT) -> dict[str, int]:
         STATE["last_attempt_at"] = _now()
         total = {"read": 0, "ingested": 0, "failed": 0}
         error: str | None = None
-        for pull in (_pull_inquiries, _pull_claims):
+        # 나머지 접수(평가·아이디어·반품 입고)와 문의 값 되돌려 쓰기는 같은 방식이라 별도 모듈이다
+        from support_agent import shop_pull_more as more
+
+        pulls = (
+            _pull_inquiries,
+            _pull_claims,
+            lambda _limit: more.refresh_views(),
+            more.pull_feedback,
+            more.pull_ideas,
+            more.pull_returns,
+        )
+        for pull in pulls:
             try:
                 got = await pull(limit)
             except shop_client.ShopError as exc:

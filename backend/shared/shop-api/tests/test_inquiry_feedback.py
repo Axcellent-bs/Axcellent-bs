@@ -1,19 +1,25 @@
-"""해결 결과 평가 중계: 고객이 받은 번호(판매 서버 접수 번호)를 고객지원 문의 번호로 바꿔
-(shop-api → 고객지원 submit_feedback) 입력 검증, 본인 문의, 오류 변환을 본다."""
+"""해결 결과 평가: 평가는 이 서버에 저장하고(고객지원을 부르지 않음) AXcellent가 읽어 간다.
+
+평가는 고객지원이 되돌려 쓴 문의 값이 해결(resolved)이고 아직 평가하지 않았을 때만 받는다.
+"""
+
+import json
 
 import pytest
 from fastapi.testclient import TestClient
 
 from ax_agent_template import events
-from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
+from ax_contracts.schemas import AgentRequest, AgentResult
 from ax_shop_api import inbox, support_client
 from ax_shop_api.db import Db
 from ax_shop_api.main import create_app
 
-META = {"context_id": "ctx_shop_x", "token": "t", "deadline": "2030-01-01T00:00:00Z"}
 COMMENT = "연락은 010-1234-5678 로 주세요"
 SUPPORT_ID = 11  # 고객지원이 읽어 만든 문의 번호 (접수 번호와 다르다)
 URL = "/api/shop/inquiries/1/feedback"  # 고객이 받은 번호 = 접수 번호 1
+READ = "/api/shop/admin/feedback"
+SUPPORT = {"Authorization": "Bearer mock:support"}
+MARKETING = {"Authorization": "Bearer mock:marketing"}
 
 
 @pytest.fixture(autouse=True)
@@ -23,28 +29,20 @@ def _mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     events.reset_mock_bus()
 
 
-class FakeSupport:
+class NoCalls:
+    """평가 접수가 고객지원을 부르면 이 대역이 기록한다 (부르면 안 된다)."""
+
     def __init__(self) -> None:
-        self.calls: list[tuple[str, AgentRequest]] = []
-        self.result: AgentResult | None = None
+        self.calls: list[AgentRequest] = []
 
     async def __call__(self, target: str, request: AgentRequest) -> AgentResult:
-        self.calls.append((target, request))
-        if self.result is not None:
-            return self.result
-        output = {
-            "inquiry_id": request.input.get("inquiry_id"),
-            "rated": True,
-            "rating": request.input.get("rating"),
-            "execution_id": "exe_1",  # 내부 값은 고객에게 나가지 않아야 한다
-            "status": "flagged",
-        }
-        return AgentResult(meta=request.meta, status=TaskStatus.COMPLETED, output=output)
+        self.calls.append(request)
+        raise AssertionError("판매 서버가 고객지원을 불렀다")
 
 
 @pytest.fixture
-def support(monkeypatch: pytest.MonkeyPatch) -> FakeSupport:
-    fake = FakeSupport()
+def support(monkeypatch: pytest.MonkeyPatch) -> NoCalls:
+    fake = NoCalls()
     monkeypatch.setattr(support_client, "SEND", fake)
     return fake
 
@@ -59,11 +57,11 @@ def client(db: Db) -> TestClient:
     return TestClient(create_app(db))
 
 
-def seed(db: Db, buyer: str = "buy_0001", *, synced: bool = True) -> int:
-    """접수를 넣고 고객지원이 읽어 갔으면(`SUPPORT_ID`) 그 번호를 잇는다. 접수 번호를 준다."""
+def seed(db: Db, buyer: str = "buy_0001", *, status: str | None = "resolved") -> int:
+    """접수를 넣고 고객지원이 읽어 갔으면(SUPPORT_ID) 그 번호와 고객용 값(status)을 잇는다."""
     saved = inbox.add(
         db,
-        digest=f"{buyer}-{synced}",
+        digest=f"{buyer}-{status}",
         context_id="ctx_shop_aaaaaaaaaaaa",
         buyer_id=buyer,
         customer_name="김하늘",
@@ -72,48 +70,43 @@ def seed(db: Db, buyer: str = "buy_0001", *, synced: bool = True) -> int:
         message="원문",
         images=None,
     )
-    if synced:
+    if status is not None:
         inbox.mark_synced(db, saved["seq"], SUPPORT_ID)
+        view = {"id": SUPPORT_ID, "subject": "문의", "status": status, "rated": False}
+        inbox.set_view(db, saved["seq"], view, f"d-{status}")
     return saved["seq"]
 
 
 @pytest.fixture(autouse=True)
 def _own_inquiry(db: Db) -> None:
-    seed(db)  # 접수 번호 1 = 고객지원 문의 11, 구매자 buy_0001
+    seed(db)  # 접수 번호 1 = 고객지원 문의 11, 구매자 buy_0001, 해결됨
 
 
 def _body(**extra) -> dict:  # noqa: ANN003
     return {"buyer_id": "buy_0001", "rating": 5, "resolved": True, "comment": COMMENT} | extra
 
 
-def _result(status: TaskStatus, outcome: str | None = None, output: dict | None = None):  # noqa: ANN202
-    return AgentResult(
-        meta=RequestMeta(**META), status=status, outcome=outcome, output=output or {}
-    )
-
-
-def test_정상_평가는_접수_번호를_고객지원_번호로_바꿔_넘기고_접수_사실만_돌려준다(
-    client: TestClient, support: FakeSupport
+def test_a_rating_is_saved_and_only_the_receipt_is_returned(
+    client: TestClient, support: NoCalls
 ) -> None:
     response = client.post(URL, json=_body(rating=4))
     assert response.status_code == 201
-    body = response.json()
     # 고객이 받은 번호(1)로 돌려주고 내부 판단은 없다
-    assert body["data"] == {"inquiry_id": 1, "rated": True, "rating": 4}
-    assert body["meta"]["context_id"].startswith("ctx_shop_")
-    target, request = support.calls[0]
-    assert (target, request.skill) == ("support", "submit_feedback")
-    assert request.meta.token == "mock:shop-api"
-    assert request.input == {"inquiry_id": SUPPORT_ID, "rating": 4, "resolved": True, "user_id": 1}
-    assert request.untrusted == {"comment": COMMENT}
-    assert COMMENT not in str(request.input)
-    assert request.meta.idempotency_key.endswith(f":submit_feedback:inquiry:{SUPPORT_ID}")
+    assert response.json()["data"] == {"inquiry_id": 1, "rated": True, "rating": 4}
+    assert support.calls == []
 
 
-def test_후기_글은_없어도_된다(client: TestClient, support: FakeSupport) -> None:
+def test_the_customer_sees_it_as_rated_right_away(client: TestClient) -> None:
+    client.post(URL, json=_body())
+    data = client.get("/api/shop/inquiries/1", params={"buyer_id": "buy_0001"}).json()["data"]
+    assert data["rated"] is True and data["can_rate"] is False
+
+
+def test_the_comment_is_optional(client: TestClient) -> None:
     payload = {"buyer_id": "buy_0001", "rating": 3, "resolved": False}
     assert client.post(URL, json=payload).status_code == 201
-    assert support.calls[0][1].untrusted == {"comment": ""}
+    (item,) = client.get(READ, headers=SUPPORT).json()["data"]
+    assert item["comment"] == "" and item["rating"] == 3 and item["resolved"] is False
 
 
 @pytest.mark.parametrize(
@@ -127,88 +120,55 @@ def test_후기_글은_없어도_된다(client: TestClient, support: FakeSupport
         {"user_id": 2},  # 다른 사람 번호를 직접 정할 수 없다
     ],
 )
-def test_잘못된_본문은_422이고_고객지원을_부르지_않는다(
-    client: TestClient, support: FakeSupport, patch: dict
-) -> None:
+def test_a_bad_body_is_422_and_nothing_is_saved(client: TestClient, patch: dict) -> None:
     assert client.post(URL, json=_body(**patch)).status_code == 422
-    assert support.calls == []
+    assert client.get(READ, headers=SUPPORT).json()["data"] == []
 
 
-def test_필수_값이_없으면_422(client: TestClient, support: FakeSupport) -> None:
+def test_required_values_are_checked(client: TestClient) -> None:
     assert client.post(URL, json={"buyer_id": "buy_0001", "rating": 5}).status_code == 422
     assert client.post(URL, json={"rating": 5, "resolved": True}).status_code == 422
-    assert support.calls == []
 
 
-def test_구매자_ID_형식이_틀리면_400이고_문의_번호는_1_이상이어야_한다(
-    client: TestClient, support: FakeSupport
-) -> None:
+def test_the_buyer_id_format_and_the_inquiry_number_are_checked(client: TestClient) -> None:
     bad_buyer = client.post(URL, json=_body(buyer_id="buy_1"))
     assert (bad_buyer.status_code, bad_buyer.json()["error"]["code"]) == (400, "INVALID_BUYER_ID")
     assert client.post("/api/shop/inquiries/0/feedback", json=_body()).status_code == 422
     assert client.post("/api/shop/inquiries/abc/feedback", json=_body()).status_code == 422
-    assert support.calls == []
 
 
-def test_남의_문의나_없는_문의는_같은_404이고_고객지원을_부르지_않는다(
-    client: TestClient, support: FakeSupport
-) -> None:
+def test_someone_elses_and_missing_inquiries_are_the_same_404(client: TestClient) -> None:
     other = client.post(URL, json=_body(buyer_id="buy_0002"))  # 접수 1은 buy_0001의 것
     missing = client.post("/api/shop/inquiries/99/feedback", json=_body(buyer_id="buy_0002"))
     assert (other.status_code, other.json()["error"]["code"]) == (404, "NOT_FOUND")
     assert other.json() == missing.json()
-    assert support.calls == []
 
 
-def test_고객지원이_아직_읽어_가지_않은_문의는_평가할_수_없다(
-    client: TestClient, db: Db, support: FakeSupport
+def test_an_inquiry_support_has_not_read_or_not_resolved_cannot_be_rated(
+    client: TestClient, db: Db
 ) -> None:
-    pending = seed(db, "buy_0003", synced=False)
-    response = client.post(
-        f"/api/shop/inquiries/{pending}/feedback", json=_body(buyer_id="buy_0003")
-    )
-    assert (response.status_code, response.json()["error"]["code"]) == (409, "INVALID_STATE")
-    assert support.calls == []
+    unread = seed(db, "buy_0003", status=None)
+    open_one = seed(db, "buy_0004", status="open")
+    for seq, buyer in ((unread, "buy_0003"), (open_one, "buy_0004")):
+        response = client.post(f"/api/shop/inquiries/{seq}/feedback", json=_body(buyer_id=buyer))
+        assert (response.status_code, response.json()["error"]["code"]) == (409, "INVALID_STATE")
+    assert client.get(READ, headers=SUPPORT).json()["data"] == []
 
 
-def test_해결되지_않은_문의와_이미_남긴_문의는_409(
-    client: TestClient, support: FakeSupport
-) -> None:
-    support.result = _result(
-        TaskStatus.COMPLETED, "invalid_state", {"message": "해결된 문의에만 평가를 남길 수 있다"}
-    )
-    first = client.post(URL, json=_body())
-    assert (first.status_code, first.json()["error"]["code"]) == (409, "INVALID_STATE")
-    # 먼저 들어온 요청이 남겨서 이번 요청은 저장되지 않은 경우도 같은 409다
-    support.result = _result(TaskStatus.COMPLETED, None, {"inquiry_id": 11, "rated": False})
-    second = client.post(URL, json=_body())
+def test_a_second_rating_is_a_409_and_the_first_stays(client: TestClient) -> None:
+    assert client.post(URL, json=_body(rating=5)).status_code == 201
+    second = client.post(URL, json=_body(rating=1))
     assert (second.status_code, second.json()["error"]["code"]) == (409, "INVALID_STATE")
+    (item,) = client.get(READ, headers=SUPPORT).json()["data"]
+    assert item["rating"] == 5
 
 
-@pytest.mark.parametrize(
-    ("status", "outcome", "http", "code"),
-    [
-        (TaskStatus.CANCELED, None, 504, "UPSTREAM_TIMEOUT"),
-        (TaskStatus.REJECTED, "FORBIDDEN_SKILL", 403, "UPSTREAM_REJECTED"),
-        (TaskStatus.FAILED, "invalid_input", 502, "UPSTREAM_ERROR"),
-        (TaskStatus.COMPLETED, "not_executed_pending", 409, "NOT_EXECUTED"),
-    ],
-)
-def test_고객지원_오류는_상태와_코드로_바뀐다(
-    client: TestClient, support: FakeSupport, status: TaskStatus, outcome: str, http: int, code: str
-) -> None:
-    support.result = _result(status, outcome)
-    response = client.post(URL, json=_body())
-    assert (response.status_code, response.json()["error"]["code"]) == (http, code)
-
-
-def test_속도_제한은_문의_접수와_따로_센다(
-    client: TestClient, db: Db, support: FakeSupport, monkeypatch: pytest.MonkeyPatch
+def test_the_rate_limit_is_counted_apart_from_inquiries(
+    client: TestClient, db: Db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("SHOP_INQUIRY_RATE_PER_BUYER", "2")
     codes = [client.post(URL, json=_body()).status_code for _ in range(3)]
-    assert codes == [201, 201, 429]
-    assert len(support.calls) == 2
+    assert codes == [201, 409, 429]  # 처음만 저장되고 둘째는 이미 평가함, 셋째는 한도
     other_seq = seed(db, "buy_0002")  # 다른 구매자는 영향이 없다
     other = client.post(
         f"/api/shop/inquiries/{other_seq}/feedback", json=_body(buyer_id="buy_0002")
@@ -224,11 +184,52 @@ def test_속도_제한은_문의_접수와_따로_센다(
     assert inquiry.status_code != 429  # 평가가 문의 접수 한도를 쓰지 않는다
 
 
-def test_후기_글은_오류_응답과_로그에_싣지_않는다(
-    client: TestClient, support: FakeSupport, caplog: pytest.LogCaptureFixture
+def test_support_reads_ratings_and_marks_them(client: TestClient) -> None:
+    client.post(URL, json=_body(rating=4))
+    res = client.get(READ, headers=SUPPORT)
+    (item,) = res.json()["data"]
+    assert res.json()["meta"]["total"] == 1
+    assert set(item) == {
+        "seq", "key", "buyer_id", "support_inquiry_id", "rating", "resolved", "comment",
+        "created_at",
+    }  # fmt: skip
+    assert (item["seq"], item["support_inquiry_id"], item["comment"]) == (1, SUPPORT_ID, COMMENT)
+    done = client.post(
+        "/api/shop/admin/inquiries/1/feedback-synced", json={"outcome": "rated"}, headers=SUPPORT
+    )
+    assert done.status_code == 200 and done.json()["data"]["outcome"] == "rated"
+    again = client.post(
+        "/api/shop/admin/inquiries/1/feedback-synced", json={"outcome": "x"}, headers=SUPPORT
+    )
+    assert again.json()["data"]["outcome"] == "rated"  # 이미 표시한 건 바뀌지 않는다
+    assert client.get(READ, headers=SUPPORT).json()["data"] == []
+
+
+def test_only_support_and_admin_may_read_and_mark_ratings(client: TestClient) -> None:
+    client.post(URL, json=_body())
+    mark = "/api/shop/admin/inquiries/1/feedback-synced"
+    assert client.get(READ).status_code == 401
+    assert client.get(READ, headers=MARKETING).status_code == 403
+    assert client.post(mark, json={"outcome": "rated"}).status_code == 401
+    assert client.post(mark, json={"outcome": "rated"}, headers=MARKETING).status_code == 403
+    assert (
+        client.post(
+            "/api/shop/admin/inquiries/99/feedback-synced",
+            json={"outcome": "rated"},
+            headers=SUPPORT,
+        ).status_code
+        == 404
+    )
+    assert client.post(mark, json={"outcome": ""}, headers=SUPPORT).status_code == 422
+
+
+def test_the_comment_is_not_in_error_responses_or_logs(
+    client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
-    support.result = _result(TaskStatus.FAILED, "invalid_input")
     with caplog.at_level("DEBUG"):
-        response = client.post(URL, json=_body())
-    assert COMMENT not in response.text
+        bad = client.post(URL, json=_body(rating=9))
+        ok = client.post(URL, json=_body())
+        again = client.post(URL, json=_body())
+    assert COMMENT not in bad.text and COMMENT not in again.text and ok.status_code == 201
     assert COMMENT not in caplog.text
+    assert json.loads(again.text)["error"]["code"] == "INVALID_STATE"
