@@ -114,6 +114,8 @@ class AppState:
             handoff_timeout=self.handoff_timeout,
             release_wait=self.release_wait,
             retry_delay=0.2,
+            # 장애 배너 내리기처럼 정리 단계가 모두 실패하면 1분·3분·10분 뒤 다시 시도한다
+            late_retry_delays=(60.0, 180.0, 600.0),
             persist=self.store.save,
             # 안전 관문의 사람 결정을 되물어 확인한다. 목 모드는 AX_SAFETY_URL을 줄 때만 부른다
             review_check=(
