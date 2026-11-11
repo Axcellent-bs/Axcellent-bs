@@ -88,6 +88,7 @@ HELD_MESSAGE = {
     "rejected": "실행이 거부됨",
     "failed": "실행에 실패함",
     "shop_refund_failed": "shop-api 환불 실패 (다시 처리하면 같은 키로 재시도)",
+    "shop_refund_read_only": "관찰 모드(읽기 전용)라 환불을 내지 않음 (쓰기 권한 설치에서 처리)",
 }
 
 
@@ -430,16 +431,18 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
                 )
             except shop_client.ShopError as exc:
                 held += 1
+                # 관찰 설치는 환불이 늘 막힌다. 재시도 안내 대신 이유를 적는다
+                kind = "shop_refund_read_only" if exc.code == "READ_ONLY" else "shop_refund_failed"
                 results.append(
                     QueueRunResult(
                         claim_id=claim.id,
                         result="held",
-                        detail=f"shop_refund_failed:{exc.code}",
+                        detail=f"{kind}:{exc.code}",
                         blockers=[
                             ClaimReasonHit(
                                 code="ON_HOLD",
                                 level="block",
-                                message=f"{HELD_MESSAGE['shop_refund_failed']} ({exc.code})",
+                                message=f"{HELD_MESSAGE[kind]} ({exc.code})",
                             )
                         ],
                     )

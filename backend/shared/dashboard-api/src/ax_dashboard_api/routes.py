@@ -1658,6 +1658,8 @@ async def inquiry_pull_status() -> dict:
         **{k: v for k, v in claims.items() if k.startswith(("claims_", "returns_"))},
     }
     merged["claims_connected"] = claims.get("connected")
+    merged["claims_read_only"] = bool(claims.get("read_only"))
+    merged["read_only"] = bool(inquiry.get("read_only")) or merged["claims_read_only"]
     for key in ("last_error", "last_attempt_at", "last_ok_at"):
         merged["claims_" + key] = claims.get(key)  # 시각·오류는 서버별로 나눠 싣는다
     errors = [e for e in (inquiry.get("last_error"), claims.get("last_error")) if e]

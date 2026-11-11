@@ -567,6 +567,15 @@ def test_inquiry_pull_status_takes_the_claim_numbers_from_the_claims_server(fake
     assert data["connected"] is False and data["last_error"] == "UNAVAILABLE"
 
 
+def test_inquiry_pull_shows_read_only_when_only_the_claims_server_is_an_observer(
+    fake: Fake,
+) -> None:
+    fake.outputs["inquiry_pull_status"] = {"enabled": True, "connected": True, "read_only": False}
+    fake.outputs["claim_pull_status"] = {"connected": True, "read_only": True}
+    data = TestClient(app).get(BASE + "/inquiry-pull").json()["data"]
+    assert data["read_only"] is True and data["claims_read_only"] is True
+
+
 def test_inquiry_pull_still_answers_when_the_claims_server_is_down(
     fake: Fake, monkeypatch: pytest.MonkeyPatch
 ) -> None:

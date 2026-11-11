@@ -37,6 +37,7 @@ class InquiryPullStatus(AxModel):
     ideas_ingested_total: int = 0  # 판매 서버 아이디어함을 읽어 처리한 수
     returns_ingested_total: int = 0  # 판매 서버에 기록된 반품 입고를 읽어 처리한 수
     enabled: bool = False
+    read_only: bool = False  # 읽기 전용 설치(관찰 모드): 판매 서버에 쓰지 않는다
     interval_seconds: float = 0
     connected: bool | None = None  # 마지막 시도가 성공했는지 (한 번도 안 읽었으면 None)
 
@@ -90,6 +91,7 @@ class ClaimPullStatus(AxModel):
     claims_failed_total: int = 0
     returns_ingested_total: int = 0
     enabled: bool = False
+    read_only: bool = False  # claims 서버만 관찰 모드일 수 있다(서버마다 키가 다르다)
     connected: bool | None = None
 
 

@@ -205,6 +205,11 @@ export interface InquiryPullStatus {
   // 클레임함과 실패로 빼 둔 접수(판매 서버가 여러 번 실패한 접수는 읽지 않고 따로 둔다)
   claims_pending: number | null; claims_ingested_total: number; claims_failed_total: number;
   inbox_failed: number | null; claims_inbox_failed: number | null;
+  // 읽기 전용 설치(관찰 모드): 판매 서버를 읽기만 하고 읽은 표시·되돌려 쓰기는 하지 않는다
+  read_only?: boolean;
+  claims_read_only?: boolean;  // claims 서버가 관찰 모드(read_only는 둘 중 하나라도 관찰 모드면 true)
+
+
   // 클레임 서버(claims)에 닿지 못했다. true면 claims_* 값은 없다(0건이 아니라 모름)
   claims_unavailable?: boolean;
 }
