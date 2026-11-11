@@ -14,7 +14,7 @@ from ax_safety.rules import ActionSpec, Rule, ThresholdTable, load_registry, loa
 
 def test_rule_files_load_and_match_agreed_values() -> None:
     registry, table = load_registry(), load_thresholds()
-    assert table.version == 8
+    assert table.version == 9
     assert table.review_timeout_seconds == 600  # 데모 10분 자동 거절
     values = {rule.key: rule.value for rule in table.rules if rule.metric != "param"}
     values.pop("pr_allowed_paths")
@@ -29,7 +29,7 @@ def test_rule_files_load_and_match_agreed_values() -> None:
     values.pop("merge_cross_data_verdict")
     values.pop("auto_policy_shrink_only")
     kinds = next(r for r in table.rules if r.key == "media_kind_known")
-    assert values.pop("media_kind_known") == 0 and kinds.allowed == ["image", "video"]
+    assert values.pop("media_kind_known") == 0 and kinds.allowed == ["image", "video", "audio"]
     values.pop("notice_sns_channel")
     assert values == {
         "coupon_total": 300_000,
@@ -41,6 +41,7 @@ def test_rule_files_load_and_match_agreed_values() -> None:
         "sns_daily_posts": 3,
         "video_cost_single": 2_000,
         "image_cost_single": 400,
+        "audio_cost_single": 200,
         "media_cost_daily": 10_000,
         "media_cost_zero": 1,
         "campaign_budget_single": 500_000,
