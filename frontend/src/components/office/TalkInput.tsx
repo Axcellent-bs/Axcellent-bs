@@ -73,11 +73,11 @@ export function TalkInput({ talk, onSent, where }: { talk: OfficeTalk; onSent: (
       <p className="text-[11px] text-ink-500">
         {where === "office" ? (
           <>
-            단톡방 대화는 회사 사람 모두에게 보여요. 혼자 볼 대화는 1:1 직접 대화로 하세요. 하루 상한은 같이 세요.{" "}
+            단톡방 대화는 회사 사람 모두에게 보여요. 1:1 직접 대화는 이 브라우저에만 목록이 남아요(서버 기록은 팀이 같이 써요). 하루 상한은 같이 세요.{" "}
             <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">AI 대화방에서 보기</Link>
           </>
         ) : (
-          <>전체 대화방 대화는 AI 오피스 단톡방과 같고 회사 사람 모두에게 보여요. 혼자 볼 대화는 1:1 직접 대화로 하세요. 하루 상한은 같이 세요.</>
+          <>전체 대화방 대화는 AI 오피스 단톡방과 같고 회사 사람 모두에게 보여요. 1:1 직접 대화는 이 브라우저에만 목록이 남아요(서버 기록은 팀이 같이 써요). 하루 상한은 같이 세요.</>
         )}
       </p>
     </div>
