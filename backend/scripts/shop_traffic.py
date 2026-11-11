@@ -26,6 +26,10 @@
 
 `SHOP_TRAFFIC_ORDERS_PER_MIN`이 없으면 예전 설정 `SHOP_TRAFFIC_INTERVAL_S`(기본 3초)를 쓴다.
 
+`SHOP_TRAFFIC_ORDERS=0`이면 가상 주문은 넣지 않고 발송·도착 표시와 재고 보충만 한다.
+`run_all.sh`가 `SHOP_TRAFFIC=on`이 아닐 때 이렇게 띄운다. 사이트에서 사람이 한 주문도
+발송·도착이 적혀야 재무 판매자 정산이 보류되지 않기 때문이다.
+
 발송·도착 (택배 흉내, `SHOP_TRAFFIC_DELIVERY=0`이면 끔):
 실제 쇼핑몰은 결제 뒤 판매자가 보내고 택배가 도착해야 구매가 확정된다. 이 기록이 없으면
 재무의 판매자 정산이 모든 주문을 "구매 미확정"으로 보류해 정산이 한 번도 나가지 않는다.
@@ -321,6 +325,14 @@ def _delivery_loop(delivery: Delivery, every_s: float) -> None:
         time.sleep(wait)
 
 
+STOCK_CHECK_EVERY_S = 60.0  # 주문을 넣지 않을 때 재고를 보는 간격
+
+
+def orders_enabled(env: dict[str, str] | None = None) -> bool:
+    """가상 주문을 넣을지. `SHOP_TRAFFIC_ORDERS=0`이면 배송 표시·재고 보충만 한다."""
+    return (os.environ if env is None else env).get("SHOP_TRAFFIC_ORDERS", "1") != "0"
+
+
 def main() -> int:
     rng = random.Random()
     interval = interval_s()
@@ -333,7 +345,11 @@ def main() -> int:
         log=_print,
     )
     refill = "켜짐" if watch.refill else "꺼짐"
-    _print(f"{now()} 주문 트래픽 시작: 분당 {60 / interval:g}건, 자동 보충 {refill}")
+    placing = orders_enabled()
+    if placing:
+        _print(f"{now()} 주문 트래픽 시작: 분당 {60 / interval:g}건, 자동 보충 {refill}")
+    else:
+        _print(f"{now()} 가상 주문 꺼짐: 배송 표시·재고 확인만 한다(자동 보충 {refill})")
     if os.getenv("SHOP_TRAFFIC_DELIVERY", "1") != "0":
         if watch.token:
             delivery = Delivery(
@@ -349,6 +365,13 @@ def main() -> int:
             _print(
                 f"{now()} 경고: 관리자 토큰이 없어 배송 표시를 하지 않는다(판매자 정산이 보류된다)"
             )
+    while not placing:  # 주문은 넣지 않고 재고만 본다(배송 표시는 위 스레드가 한다)
+        try:
+            _, products = call("GET", "/api/shop/products")
+            watch.check(products.get("data", []))
+        except (urllib.error.URLError, OSError, KeyError, ValueError) as error:
+            print(f"{now()} 재고 확인 오류: {error}", file=sys.stderr, flush=True)
+        time.sleep(STOCK_CHECK_EVERY_S)
     while True:
         try:
             _, users = call("GET", "/api/shop/users")
