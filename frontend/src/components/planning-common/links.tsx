@@ -140,6 +140,8 @@ export function Linked({ s, text }: { s: State; text: string }) {
 export function splitLines(text: string): string[] {
   // 문장을 만드는 쪽이 줄을 나눴으면(\n) 그대로 따른다. 옛 문장만 아래 규칙으로 나눈다
   if (text.includes('\n')) return text.split('\n').map((x) => x.trim()).filter(Boolean)
+  // 에이전트가 항목을 ' / '로 이어 보낸 글(원인 확인 요청의 요약·후보 등)도 항목마다 한 줄
+  if (text.includes(' / ')) return text.split(' / ').map((x) => x.trim()).filter(Boolean)
   const out: string[] = []
   for (const x of text.split(/(?<=\.)\s+(?=\S)|\s+·\s+/)) {
     const t = x.trim()

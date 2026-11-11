@@ -79,7 +79,7 @@ export function Projects({ s, d, sel }: { s: S; d: Dispatch<Action>; sel?: strin
       {g.spec && <ReturnedBox s={s} d={d} spec={g.spec.id} />}
       <Flow>
         <Step name="요청" on href={hrefOf(s, r.id)} title={DEPT_NAME[r.from]}>
-          <p><Linked s={s} text={r.evidence} /></p>
+          <p><LinkedLines s={s} text={r.evidence} /></p>
           <p className="muted" title={r.via}>{pointLabel(r.via.split(' ')[0])}{r.auto?.ok ? ' · 간단 요청' : ''}</p>
           {g.dups.map((x) => <p key={x.id} className="muted">같은 요청 <Ref s={s} id={x.id} /> · {DEPT_NAME[x.from]}</p>)}
         </Step>
