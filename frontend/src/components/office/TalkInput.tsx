@@ -3,7 +3,7 @@ import { TALK_KEYS, TALK_LABEL, type OfficeTalk } from "@/components/office/useO
 import { Link } from "@/lib/nav";
 
 // 부서 AI에게 직접 말 거는 입력창 (받는 곳 칩 · @태그 · 안내 줄).
-// AI 오피스 단톡방과 AI 대화방 전체 대화방이 같이 쓴다. 대화는 useOfficeTalk가 직접 대화와 같은 대화로 잇는다.
+// AI 오피스 단톡방과 AI 대화방 전체 대화방이 같이 쓴다. 단톡방 대화는 모두에게 보이고, 1:1 직접 대화와는 따로 잇는다(useOfficeTalk).
 
 const TAG_KEY: Record<string, string> = Object.fromEntries(TALK_KEYS.map((k) => [TALK_LABEL[k], k]));
 const DEV_NOTE = "개발 AI는 '진행해'를 받으면 기획에 요청으로 넘겨요. 기획에서 사람이 기획서를 확정해야 개발이 시작돼요.";
@@ -73,11 +73,11 @@ export function TalkInput({ talk, onSent, where }: { talk: OfficeTalk; onSent: (
       <p className="text-[11px] text-ink-500">
         {where === "office" ? (
           <>
-            AI 대화방의 {label} AI 대화로 이어져요. 하루 상한도 같이 세요.{" "}
+            단톡방 대화는 회사 사람 모두에게 보여요. 혼자 볼 대화는 1:1 직접 대화로 하세요. 하루 상한은 같이 세요.{" "}
             <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">AI 대화방에서 보기</Link>
           </>
         ) : (
-          <>직접 대화의 {label} AI 대화와 AI 오피스 단톡방으로 이어져요. 하루 상한도 같이 세요.</>
+          <>전체 대화방 대화는 AI 오피스 단톡방과 같고 회사 사람 모두에게 보여요. 혼자 볼 대화는 1:1 직접 대화로 하세요. 하루 상한은 같이 세요.</>
         )}
       </p>
     </div>

@@ -118,7 +118,7 @@ export default function AgentOffice() {
     [shownIncidents, items, seen, now, campaign],
   );
 
-  // ------------------------------------------------ 사람이 부서 AI에게 직접 말 걸기 (AI 대화방 직접 대화와 같은 대화)
+  // ------------------------------------------------ 사람이 부서 AI에게 말 걸기 (단톡방 대화는 모두에게 보인다. 1:1 직접 대화와는 따로)
   const talk = useOfficeTalk();
   // 답을 기다리는 부서가 놀고 있으면 자리에서 "작업 중"으로 (총괄 일로 바쁜 자리·상태는 그대로). 걷지는 않고 불꽃만 켜진다
   const busyStr = talk.busyKeys.join(",");
