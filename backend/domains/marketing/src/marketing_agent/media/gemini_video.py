@@ -11,7 +11,11 @@
   (`.../v1beta/files/<id>:download?alt=media`). `uri`면 `GET /v1beta/files/<id>`의 `state`가
   `ACTIVE`가 될 때까지 폴링(`FAILED`면 실패)한 뒤 `:download?alt=media`로 받는다.
   폴링 간격·총 대기 상한은 생성자 인자이며, 상한을 넘으면 실패한다.
-- 길이 3~8초(문서 하한 3초, 단가표 `max_duration_s` 8), 해상도 `720p`만, 종횡비 9:16 고정.
+- 규격은 '릴스·쇼츠 통합 9:16' 한 가지다: 종횡비 9:16, 해상도 `720p`, 길이 3~8초
+  (문서 하한 3초·상한 15초, 단가표 `max_duration_s` 8). 허용 조합은 단가표에 있는 것만이다.
+  1080p는 문서가 9:16 해상도를 밝히지 않아 단가표에 없고, 업스케일(ffmpeg)은 여기서 하지 않는다.
+- 모델 ID는 코드에 두지 않는다. `MARKETING_VIDEO_MODEL`로 gemini-omni-1.1-flash·1.2-flash 중
+  단가표에 있는 것을 고른다(2026-12-03부터 1.1 요청은 1.2로 라우팅·청구된다).
 - 무음: 문서에 오디오 끄기 옵션이 없다(기본으로 오디오 생성). `remove_audio=True`인데 받은 mp4에
   오디오 트랙이 있으면 파일을 쓰지 않고 실패시킨다(오디오를 쓰지 않는다).
 - 키는 `MARKETING_VIDEO_API_KEY`에서만 읽고 로그·예외·결과에 내지 않는다. 키는 Google API
@@ -41,8 +45,9 @@ API_HOST = "generativelanguage.googleapis.com"
 ENDPOINT = f"https://{API_HOST}/v1beta/interactions"
 FILES_ENDPOINT = f"https://{API_HOST}/v1beta/files"
 API_REVISION = "2026-05-20"
-RESOLUTION = "720p"
-ASPECT_RATIO = "9:16"
+ALLOWED_RESOLUTIONS = ("720p",)  # 단가표에 있는 9:16 해상도만
+RESOLUTION = ALLOWED_RESOLUTIONS[0]
+ASPECT_RATIO = "9:16"  # 릴스·쇼츠 통합 규격 한 가지
 MIN_DURATION_S = 3  # 문서: duration 3s~15s
 MAX_DURATION_S = 8  # 단가표 max_duration_s·safety 기준
 REQUEST_TIMEOUT_S = 300.0  # 동기 생성 1회
@@ -119,7 +124,7 @@ class GeminiVideoProvider:
     def generate(self, request: MediaRequest) -> MediaResult:
         if request.media_kind != "video":
             raise GeminiVideoError("unsupported_media_kind")
-        if request.resolution != RESOLUTION:
+        if request.resolution not in ALLOWED_RESOLUTIONS:
             raise GeminiVideoError(f"unsupported_resolution: {request.resolution}")
         duration = request.duration_s
         if duration is None or not MIN_DURATION_S <= duration <= MAX_DURATION_S:

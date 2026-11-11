@@ -4,7 +4,12 @@
 # 단가는 변동 가능하다. 한 달에 한 번 사람이 공급자 콘솔과 대조한다.
 #
 # [확인 필요]로 남겨 이 표에 넣지 않은 조합(= 호출 거부):
-#   - gemini-omni-1.1-flash 1080p·4K: 공식 페이지에 단가 없음
+#   - gemini-omni-1.2-flash 1080p 9:16: 가격 페이지에 1080p 초당 8,688 출력 토큰(업샘플링 포함)이 있으나,
+#     omni 문서는 1080p를 "upscaled"로만 적고 9:16에서 어떤 해상도가 되는지·픽셀 크기(예 1080x1920)를
+#     밝히지 않는다. 9:16 1080p 단가·지원 여부는 [확인 필요]라 넣지 않는다(호출 거부)
+#   - gemini-omni-1.2-flash 360p·4K: 영상은 9:16 통합 규격(720p)만 쓰므로 넣지 않음
+#   - gemini-omni-1.1-flash·1.2-flash 720x1280 등 9:16 픽셀 크기 표기: 문서에서 확인하지 못함 [확인 필요]
+#   - gemini-omni-1.2-flash 9초 이상 영상: 문서는 최대 15초이나 safety 기준(video_duration) 8초로 제한
 #   - gpt-image-2 1024x1280(4:5, 인스타 피드 규격): 장당 토큰 표에 없는 크기(계산기로 확인 필요).
 #     4:5 이미지는 gemini-nano-banana-2.1 928x1152로 해소됨(파일 끝 gemini 항목)
 #   - gemini-nano-banana-2.1 세 해상도 밖(2K·4K, 다른 종횡비): 이번 범위 밖이라 넣지 않음
@@ -17,11 +22,14 @@
 #   1024x1536, 1536x1024 low 0.005 -> 167, medium 0.041 -> 1367, high 0.165 -> 5500
 #   가이드 표는 정사각이 세로형보다 비싸게 적혀 있어 이상해 보인다 [확인 필요: 계산기]. 표 값을 그대로 쓴다.
 #   인스타 피드 이미지는 가로세로비 4:5~1.91:1이라 1024x1536(2:3)은 게시할 수 없다. 단가만 적어 둔다.
+# 영상 규격: 릴스·쇼츠 통합 = 9:16 한 가지(해상도 720p, 길이 3~8초). 이 표에 있는 조합만 호출한다.
+# gemini-omni-1.2-flash(현재 문서의 모델 ID): 1M 토큰당 USD 입력 1.50, 영상 출력 12.00, 720p 초당 5,792
+#   출력 토큰(가격 페이지, 2026-11-11 확인). 8초 720p 약 0.56 USD (입력 제외).
 # gemini-omni-1.1-flash: 1M 토큰당 USD 입력 1.50, 영상 출력 17.50, 720p 초당 5,792 출력 토큰.
 #   max_duration_s 8은 safety 기준표(video_duration)와 맞춘 값. 8초 720p 약 0.81 USD (입력 제외).
-#   [주의] 가격 페이지 공지: 2026-12-03부터 gemini-omni-1.1-flash 요청은 gemini-omni-1.2-flash로
-#   자동 라우팅되고 1.2 요금(입력 1.50, 영상 출력 12.00 USD/백만 토큰)이 적용된다. 그날 이후 이 항목의
-#   영상 출력 단가는 실제보다 높게(보수적으로) 잡힌다. 모델 설정·단가표를 1.2로 바꿀지는 사람이 정한다.
+#   [주의] 2026-12-03부터 gemini-omni-1.1-flash 요청은 gemini-omni-1.2-flash로 자동 라우팅되고,
+#   그 뒤 청구는 1.2 기준(영상 출력 12.00)이다. 이 1.1 항목은 삭제하지 않고 남기되(그 전 설정·기록 조회용),
+#   2026-12-03 이후에는 MARKETING_VIDEO_MODEL을 gemini-omni-1.2-flash로 쓴다.
 #   thinking 토큰은 출력 단가에 포함돼 청구된다(가격 페이지). 추정은 초당 토큰 x 초라 실제 정산과
 #   어긋날 수 있다.
 
@@ -145,6 +153,18 @@ output_usd_per_mtok = 17.50
 output_tokens_per_second = 5792
 max_duration_s = 8
 source = "https://aistudio.google.com/docs/pricing , https://aistudio.google.com/docs/omni"
+checked_on = "2026-11-11"
+
+[[price]]
+provider = "gemini"
+model = "gemini-omni-1.2-flash"
+kind = "video"
+resolution = "720p"
+input_usd_per_mtok = 1.50
+output_usd_per_mtok = 12.00
+output_tokens_per_second = 5792
+max_duration_s = 8
+source = "https://aistudio.google.com/docs/pricing , https://aistudio.google.com/docs/omni , https://aistudio.google.com/docs/video"
 checked_on = "2026-11-11"
 
 [[price]]

@@ -339,6 +339,54 @@ def test_supported_request_matches_price_table() -> None:
         pricing.output_tokens_for(entry, MAX_DURATION_S + 1)
 
 
+def test_omni_12_price_entry_and_both_models_selectable() -> None:
+    new = pricing.find_entry(
+        provider="gemini",
+        model="gemini-omni-1.2-flash",
+        kind="video",
+        resolution="720p",
+        quality=None,
+    )
+    old = pricing.find_entry(
+        provider="gemini",
+        model="gemini-omni-1.1-flash",
+        kind="video",
+        resolution="720p",
+        quality=None,
+    )
+    assert str(new.output_usd_per_mtok) == "12.0" and str(new.input_usd_per_mtok) == "1.5"
+    assert new.output_tokens_per_second == 5792 and new.max_duration_s == MAX_DURATION_S
+    assert new.checked_on == "2026-11-11" and new.source.startswith("https://")
+    assert str(old.output_usd_per_mtok) == "17.5"  # 1.1 항목은 남겨 둔다
+    assert pricing.output_tokens_for(new, 8) == 46_336
+
+
+@pytest.mark.parametrize("model", ["gemini-omni-1.1-flash", "gemini-omni-1.2-flash"])
+def test_either_configured_model_is_sent_as_is(tmp_path: Path, model: str) -> None:
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(req.content)["model"])
+        return httpx.Response(200, json=_body(_inline()))
+
+    _provider(handler).generate(_request(tmp_path, model=model))
+    assert seen == [model]
+
+
+def test_video_spec_is_single_vertical_format() -> None:
+    from marketing_agent.media import gemini_video
+
+    assert gemini_video.ASPECT_RATIO == "9:16"
+    assert gemini_video.ALLOWED_RESOLUTIONS == ("720p",)
+
+
+def test_1080p_rejected_before_call(tmp_path: Path) -> None:
+    with pytest.raises(GeminiVideoError, match="unsupported_resolution"):
+        _provider(lambda req: pytest.fail("호출하면 안 된다")).generate(
+            _request(tmp_path, resolution="1080p")
+        )
+
+
 def test_registry_routes_by_kind(tmp_path: Path) -> None:
     adapter = registry.get_adapter("gemini")
     assert isinstance(adapter, GeminiImageProvider)
