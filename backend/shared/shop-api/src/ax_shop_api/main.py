@@ -827,8 +827,10 @@ def create_app(
         return _ok(refund, replayed=replayed)
 
     # --- 데이터 조회(contracts/data-access): data 에이전트가 읽는 읽기 전용 API -----------
+    # 아래 두 조회는 동기 핸들러: FastAPI가 스레드에서 돌려 DB를 읽는 동안 이벤트 루프를 막지 않는다
+    # (주문 목록과 같은 이유, #959)
     @app.get("/api/shop/failed-orders")
-    async def failed_orders(
+    def failed_orders(
         from_: Annotated[datetime, Query(alias="from")],
         to: datetime,
         category: str | None = None,
@@ -840,7 +842,7 @@ def create_app(
         return _ok(result.model_dump(mode="json"))
 
     @app.get("/api/shop/metric-series")
-    async def metric_series(
+    def metric_series(
         metric: str,
         from_: Annotated[datetime, Query(alias="from")],
         to: datetime,
