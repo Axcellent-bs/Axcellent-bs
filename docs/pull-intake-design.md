@@ -85,7 +85,8 @@ AXcellent가 정해진 간격으로 읽어 간다. 실제 고객사 기준에서
 ### 판매 서버 연결 키 (예진 님 설계, catbooks-demo #4)
 - 판매 서버(고객사)가 설치·서비스마다 연결 키를 발급한다(`SHOP_CLIENT_KEYS="<설치>/<서비스>:<키>:<read|write>"`).
   고객지원은 서비스마다 하나씩 받는다(`inquiry`·`claims`·`reviews`). 키는 판매 서버 운영자가 만들어(`sk_` +
-  `secrets.token_urlsafe(32)`) 각 설치의 `.env`에만 넣고 Slack·PR에는 올리지 않는다.
+  `secrets.token_urlsafe(32)`) 각 설치의 `.env`에만 넣고 Slack·PR에는 올리지 않는다. 251의 키 발급·`.env` 반영은
+  251 서버 담당(이재헌 님)이 한다.
 - AXcellent 쪽: `.env`의 `AX_SHOP_CLIENT_KEYS="inquiry:<키>,claims:<키>,reviews:<키>"`을 읽어, 서비스가 자기 이름의
   키를 `Authorization: Bearer`로 보낸다. 서비스 이름은 `AX_SERVICE_NAME` 또는 서비스 카드 폴더 이름이다.
   그 서비스의 키가 없으면 지금처럼 내부 토큰을 보낸다(251이 아직 Axcellent-bs 판매 서버라 전환 기간에는 둘 다 돼야 한다).
