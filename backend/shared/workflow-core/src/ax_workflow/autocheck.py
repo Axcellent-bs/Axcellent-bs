@@ -54,8 +54,7 @@ MERGE_RISK_PREFIXES: dict[str, str] = {
     "safety/": "관문 규칙 (safety 보호 경로)",
     "contracts/": "부서 간 계약 (safety 보호 경로)",
     # 캣북스 새 레포(Catbooks-demo/catbooks-demo) 구조: frontend/shop-web/, backend/shop-api/.
-    # 예전 구조와 같은 파일이라 같은 이유로 막는다. 허용 경로(PR_ALLOWED_PATHS)는 safety
-    # thresholds.toml과 같은 값이라 safety 변경과 함께 바꾼다
+    # 예전 구조와 같은 파일이라 같은 이유로 막는다 (safety #990 merge_protected_paths와 같은 값)
     "frontend/shop-web/checkout/": "결제 화면 (결제 요청·금액·실패 안내)",
     "frontend/shop-web/payment/": "결제 수단 입력 화면",
     "frontend/shop-web/account/": "회원·개인정보 화면",
@@ -68,13 +67,21 @@ MERGE_RISK_PREFIXES: dict[str, str] = {
     "backend/shop-api/src/ax_shop_api/promotions.py": "쿠폰 지급 로직 (safety 보호 경로)",
     "backend/shop-api/src/ax_shop_api/seed.py": "시드 데이터 (safety 보호 경로)",
     "backend/contracts/": "판매 서버 API 계약 고정본 (새 레포)",
+    "backend/safety/": "관문 규칙 (새 레포 하위 경로, safety 보호 경로)",
 }
 
 # ---- #171 thresholds.toml merge_pr 규칙 (제안값, generate_pr와 같은 크기·경로 기준)
 PR_MAX_LINES = 300  # pr_changed_lines: changed_lines > 300
 PR_MAX_FILES = 20  # pr_changed_files: changed_files > 20
 # pr_allowed_paths·merge_allowed_paths (safety #201과 같은 값)
-PR_ALLOWED_PATHS: tuple[str, ...] = ("shop-api/", "shop-web/", "docs/")
+# 캣북스 새 레포 구조(backend/shop-api/·frontend/shop-web/)도 허용한다 (safety #990과 같은 값)
+PR_ALLOWED_PATHS: tuple[str, ...] = (
+    "shop-api/",
+    "shop-web/",
+    "backend/shop-api/",
+    "frontend/shop-web/",
+    "docs/",
+)
 REVIEW_MISMATCH_LIMIT = 2  # pr_review_mismatch: review_mismatch_count >= 2
 
 WAIT_ANSWER = "답 대기"
