@@ -12,7 +12,7 @@ from marketing_agent.media.base import MediaRequest, MediaResult
 NAME = "mock"
 MODEL_ID = "mock-media"
 # 고정 비용(원). 0원은 safety 규칙(`media_cost_zero`)이 보류하므로 0이 아닌 값으로 둔다
-MOCK_COST_KRW = {"image": 100, "video": 1000}
+MOCK_COST_KRW = {"image": 100, "video": 1000, "audio": 100}
 
 
 def _tiny_png() -> bytes:
@@ -35,6 +35,8 @@ class MockProvider:
     def generate(self, request: MediaRequest) -> MediaResult:
         if request.media_kind == "image":
             data, suffix = _tiny_png(), "png"
+        elif request.media_kind == "audio":  # MP3 자리표시(ID3 머리말만 있다)
+            data, suffix = b"ID3\x04\x00\x00\x00\x00\x00\x00MOCK-BGM-PLACEHOLDER\n", "mp3"
         else:  # 영상 자리표시. 유효한 mp4가 아니다(오버레이 시험은 자체 샘플을 쓴다)
             data, suffix = b"MOCK-VIDEO-PLACEHOLDER\n", "mp4"
         path = request.output_dir / f"asset.{suffix}"

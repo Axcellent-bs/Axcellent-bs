@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
-MediaKind = Literal["image", "video"]
+MediaKind = Literal["image", "video", "audio"]
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ class MediaRequest:
     media_kind: MediaKind
     prompt: str
     prompt_sha256: str
-    resolution: str  # 이미지 "1024x1024", 영상 "720p"
+    resolution: str  # 이미지 "1024x1024", 영상 "720p", 오디오 "30s"(클립)
     quality: str | None  # 이미지만
     duration_s: int | None  # 영상만
     remove_audio: bool  # 영상: True(기본)면 무음으로 받는다. 오디오는 쓰지 않는다

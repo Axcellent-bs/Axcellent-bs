@@ -57,3 +57,17 @@ resolution = "720p"
 duration_s = 8
 fields = ["season", "color_theme", "category"]
 sentence = "A short vertical animated clip of a friendly cartoon cat mascot walking through a cozy independent bookstore and pulling a book from a shelf, {season} atmosphere, {color_theme} color palette, a small display themed around {category}. Gentle camera movement, original character design. No text, no letters, no numbers, no logos, no real people, no real brands, no readable book covers."
+
+# ---- 오디오(BGM) 템플릿. 연주곡만: 목소리·가사·효과음 없음. 실제 곡·아티스트·브랜드 이름은 넣지 않는다.
+# 어댑터(gemini_audio)도 연주곡 제한 문구가 빠져 있으면 항상 덧붙인다.
+[field.bgm_mood]
+values = ["calm", "cozy", "cheerful", "dreamy", "warm", "playful"]
+
+[field.bgm_genre]
+values = ["lo-fi", "acoustic guitar", "soft piano", "light jazz", "ambient", "ukulele"]
+
+[template.cat_bookstore_bgm]
+kind = "audio"
+resolution = "30s"
+fields = ["bgm_mood", "bgm_genre"]
+sentence = "A {bgm_mood} {bgm_genre} background track for a short vertical video about a cozy independent bookstore, steady gentle tempo, loop-friendly. Instrumental only, no vocals, no lyrics, no spoken words, no sound effects. Original composition."

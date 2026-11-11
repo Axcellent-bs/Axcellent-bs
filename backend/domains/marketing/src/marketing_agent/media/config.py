@@ -2,9 +2,12 @@
 
 - 공급자·모델: `MARKETING_IMAGE_PROVIDER/MODEL`, `MARKETING_VIDEO_PROVIDER/MODEL`.
   공급자 기본은 `mock`, 모델 기본은 비움.
-- 키: `MARKETING_IMAGE_API_KEY`, `MARKETING_VIDEO_API_KEY`. 이 모듈은 이름만 정의하고,
-  설정돼 있는지만 `has_api_key`로 알려 준다. 값은 돌려주지도 로그에 내지도 않는다
-  (실제 어댑터가 직접 읽는다).
+- 오디오(BGM): `MARKETING_AUDIO_PROVIDER/MODEL/API_KEY`(영상·이미지와 별개),
+  모드 `MARKETING_AUDIO_MODE`(`off` 기본 | `bgm_overlay`, 모르는 값은 off),
+  ffmpeg 경로 `MARKETING_FFMPEG_BIN`(기본 `ffmpeg`).
+- 키: `MARKETING_IMAGE_API_KEY`, `MARKETING_VIDEO_API_KEY`, `MARKETING_AUDIO_API_KEY`.
+  이 모듈은 이름만 정의하고, 설정돼 있는지만 `has_api_key`로 알려 준다.
+  값은 돌려주지도 로그에 내지도 않는다 (실제 어댑터가 직접 읽는다).
 - 비용: 환율 `MARKETING_FX_USD_KRW`·기준일 `MARKETING_FX_AS_OF`·
   허용 경과일 `MARKETING_FX_MAX_AGE_DAYS`·여유 `MARKETING_COST_SAFETY_MARGIN_PCT`,
   건당 상한 `MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM`, 월 상한 `MARKETING_MEDIA_MONTHLY_BUDGET_KRW`.
@@ -25,7 +28,14 @@ from marketing_agent.media.base import MediaKind
 MOCK = "mock"
 LEDGER_DB_ENV = "MARKETING_MEDIA_LEDGER_DB"
 MEDIA_DIR_ENV = "MARKETING_MEDIA_DIR"
-API_KEY_ENVS = {"image": "MARKETING_IMAGE_API_KEY", "video": "MARKETING_VIDEO_API_KEY"}
+API_KEY_ENVS = {
+    "image": "MARKETING_IMAGE_API_KEY",
+    "video": "MARKETING_VIDEO_API_KEY",
+    "audio": "MARKETING_AUDIO_API_KEY",
+}
+FFMPEG_BIN_ENV = "MARKETING_FFMPEG_BIN"
+AUDIO_MODE_ENV = "MARKETING_AUDIO_MODE"
+AUDIO_MODES = ("off", "bgm_overlay")
 
 
 def _text(name: str) -> str:
@@ -55,6 +65,17 @@ def _date(name: str) -> date | None:
         return None
 
 
+def audio_mode_from_env() -> str:
+    """`off`(기본) 또는 `bgm_overlay`. 모르는 값은 안전하게 off로 본다."""
+    mode = _text(AUDIO_MODE_ENV).lower()
+    return mode if mode in AUDIO_MODES else "off"
+
+
+def ffmpeg_bin() -> str:
+    """ffmpeg 실행 파일 경로. 설정이 없으면 PATH의 `ffmpeg`."""
+    return _text(FFMPEG_BIN_ENV) or "ffmpeg"
+
+
 @dataclass(frozen=True)
 class MediaSettings:
     image_provider: str
@@ -68,6 +89,9 @@ class MediaSettings:
     max_cost_krw_per_item: int | None
     monthly_budget_krw: int | None
     media_dir: Path
+    audio_provider: str = MOCK
+    audio_model: str = ""
+    audio_mode: str = "off"
 
     @classmethod
     def from_env(cls) -> MediaSettings:
@@ -83,13 +107,20 @@ class MediaSettings:
             margin_pct=_decimal("MARKETING_COST_SAFETY_MARGIN_PCT"),
             max_cost_krw_per_item=_integer("MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM"),
             monthly_budget_krw=_integer("MARKETING_MEDIA_MONTHLY_BUDGET_KRW"),
+            audio_provider=_text("MARKETING_AUDIO_PROVIDER").lower() or MOCK,
+            audio_model=_text("MARKETING_AUDIO_MODEL"),
+            audio_mode=audio_mode_from_env(),
             media_dir=Path(_text(MEDIA_DIR_ENV) or Path(tempfile.gettempdir()) / "marketing_media"),
         )
 
     def provider(self, kind: MediaKind) -> str:
+        if kind == "audio":
+            return self.audio_provider
         return self.image_provider if kind == "image" else self.video_provider
 
     def model(self, kind: MediaKind) -> str:
+        if kind == "audio":
+            return self.audio_model
         return self.image_model if kind == "image" else self.video_model
 
     def fx_problem(self, today: date) -> str | None:

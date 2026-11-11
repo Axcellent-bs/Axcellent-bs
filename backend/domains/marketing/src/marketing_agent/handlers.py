@@ -55,8 +55,8 @@ from marketing_agent.chat import (
 from marketing_agent.chat_store import ChatStorageError, ChatStore
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.links import BuildCampaignLinkInput, CampaignLink, build_campaign_link
+from marketing_agent.media.bgm_flow import generate_media_flow
 from marketing_agent.media.ledger import MediaLedger
-from marketing_agent.media.skill import generate_media
 from marketing_agent.notice import NoticeStore, make_draft
 from marketing_agent.schemas import (
     ActiveNotices,
@@ -728,7 +728,9 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
 
 
 async def generate_media_skill(request: AgentRequest) -> AgentResult:
-    return await generate_media(request, ledger=STATE.media_ledger, from_decision=_from_decision)
+    return await generate_media_flow(
+        request, ledger=STATE.media_ledger, from_decision=_from_decision
+    )
 
 
 async def publish_sns_skill(request: AgentRequest) -> AgentResult:
