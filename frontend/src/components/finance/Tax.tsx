@@ -115,20 +115,16 @@ export function TaxSection({ tick }: { tick: number }) {
           {(r) => (
             <div className="space-y-3">
               <p className="text-sm text-ink-700"><b className="text-ink-900">{r.quarter}</b> · 제출 기한 <b>{r.due}</b></p>
-              {r.missing.includes("business_no") && (
-                <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">판매 사이트에 판매자 사업자등록번호가 없어 그 칸은 "자료 없음"입니다. 제출 전에 판매자 정보에서 채워야 합니다.</p>
-              )}
               {r.rows.length ? (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[640px] text-sm">
                     <thead className="text-left text-sm text-ink-500">
-                      <tr><th className="pb-1 font-medium">판매자</th><th className="pb-1 font-medium">사업자번호</th><th className="pb-1 font-medium">월</th><th className="pb-1 text-right font-medium">판매금액</th><th className="pb-1 pl-6 font-medium">결제수단</th><th className="pb-1 pl-4 font-medium">면세·과세</th></tr>
+                      <tr><th className="pb-1 font-medium">판매자</th><th className="pb-1 font-medium">월</th><th className="pb-1 text-right font-medium">판매금액</th><th className="pb-1 pl-6 font-medium">결제수단</th><th className="pb-1 pl-4 font-medium">면세·과세</th></tr>
                     </thead>
                     <tbody>
                       {r.rows.map((x) => (
                         <tr key={`${x.seller_id}-${x.month}`} className="border-t border-ink-100">
                           <td className="py-1.5">{x.name}</td>
-                          <td className="py-1.5">{x.business_no ?? <Chip label="자료 없음" tone={TONE.warn} />}</td>
                           <td className="py-1.5 tabular-nums">{x.month}</td>
                           <td className="py-1.5 text-right font-medium tabular-nums text-ink-900">{krw(x.total)}</td>
                           <td className="py-1.5 pl-6 text-sm tabular-nums text-ink-500">{Object.entries(x.by_method).map(([k, v]) => `${k} ${krw(v)}`).join(", ")}</td>
