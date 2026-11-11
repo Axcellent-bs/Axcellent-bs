@@ -263,11 +263,15 @@ async def _pull_inquiries(limit: int) -> dict[str, int]:
     """문의함을 한 번 읽어 새 문의를 처리한다. 판매 서버에 닿지 못하면 `ShopError`를 올린다."""
     items, total, failed_in_inbox = await shop_client.fetch_inquiry_inbox(limit)
     done = failed = 0
+    shop_error: shop_client.ShopError | None = None
     for item in items:
         try:
             ok = await _ingest(item)
-        except shop_client.ShopError:
-            raise
+        except shop_client.ShopError as exc:
+            # 이 건만 실패로 남긴다(처리는 됐는데 읽음 표시만 안 된 경우라 실패 횟수는 세지 않는다)
+            logger.warning("문의함 %s: 판매 서버 오류 (%s)", item.get("seq"), exc.code)
+            shop_error = shop_error or exc
+            ok = False
         except Exception:  # noqa: BLE001 - 한 건이 실패해도 나머지는 계속 처리한다
             logger.warning("문의함 %s 처리 중 오류", item.get("seq"), exc_info=True)
             await _report_failed("inquiry", item, "ERROR")
@@ -278,6 +282,8 @@ async def _pull_inquiries(limit: int) -> dict[str, int]:
     STATE["inbox_failed"] = failed_in_inbox
     STATE["ingested_total"] += done
     STATE["failed_total"] += failed
+    if shop_error is not None:  # 건별 오류는 나머지를 멈추지 않고, 주기 끝에 연결 문제로 알린다
+        raise shop_error
     return {"read": len(items), "ingested": done, "failed": failed}
 
 
@@ -285,11 +291,14 @@ async def _pull_claims(limit: int) -> dict[str, int]:
     """클레임함을 한 번 읽어 새 신청을 판정하고, 끝나지 않은 신청의 달라진 결과를 다시 적는다."""
     items, total, failed_in_inbox = await shop_client.fetch_claim_inbox(limit)
     done = failed = 0
+    shop_error: shop_client.ShopError | None = None
     for item in items:
         try:
             ok = await _ingest_claim(item)
-        except shop_client.ShopError:
-            raise
+        except shop_client.ShopError as exc:
+            logger.warning("클레임함 %s: 판매 서버 오류 (%s)", item.get("seq"), exc.code)
+            shop_error = shop_error or exc
+            ok = False
         except Exception:  # noqa: BLE001 - 한 건이 실패해도 나머지는 계속 처리한다
             logger.warning("클레임함 %s 처리 중 오류", item.get("seq"), exc_info=True)
             await _report_failed("claim", item, "ERROR")
@@ -300,7 +309,12 @@ async def _pull_claims(limit: int) -> dict[str, int]:
     STATE["claims_inbox_failed"] = failed_in_inbox
     STATE["claims_ingested_total"] += done
     STATE["claims_failed_total"] += failed
-    await _refresh_claims()
+    try:
+        await _refresh_claims()
+    except shop_client.ShopError as exc:
+        shop_error = shop_error or exc
+    if shop_error is not None:
+        raise shop_error
     return {"read": len(items), "ingested": done, "failed": failed}
 
 

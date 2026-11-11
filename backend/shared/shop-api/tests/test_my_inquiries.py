@@ -240,3 +240,35 @@ def test_고객지원_오류는_상태와_코드로_바뀐다(
     support.status = status
     response = client.get("/api/shop/inquiries", params={"buyer_id": "buy_0001"})
     assert (response.status_code, response.json()["error"]["code"]) == (http, code)
+
+
+def test_a_read_inquiry_support_no_longer_has_is_not_listed_again(
+    client: TestClient, db: Db, support: FakeSupport
+) -> None:
+    """개인정보로 지웠거나 고객지원이 다시 시작해 찾을 수 없는 문의는 원문을 다시 안 보여 준다."""
+    kept = seed(db, support_id=5, text="남아 있는 문의")
+    seed(db, support_id=6, text="지워진 문의 원문")
+    support.output = {"items": [_item(5, "open", False)]}  # 6은 고객지원 목록에 없다
+    body = client.get("/api/shop/inquiries", params={"buyer_id": "buy_0001"}).json()
+    assert [i["id"] for i in body["data"]] == [kept] and body["meta"]["total"] == 1
+    assert "지워진 문의 원문" not in str(body)
+
+
+def test_a_synced_inquiry_no_longer_keeps_the_text_copy_in_the_shop(db: Db) -> None:
+    seq = seed(db, support_id=5, text="읽어 간 뒤에는 지운다")
+    with db.tx() as conn:
+        row = conn.execute("SELECT message FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
+    assert row["message"] == ""
+
+
+def test_an_inquiry_set_aside_after_repeated_failures_tells_the_customer(
+    client: TestClient, db: Db, support: FakeSupport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SHOP_INBOX_MAX_ATTEMPTS", "1")
+    seq = seed(db, text="끝내 처리되지 않는 문의")
+    inbox.report_failure(db, seq, "INGEST_FAILED")
+    (row,) = client.get("/api/shop/inquiries", params={"buyer_id": "buy_0001"}).json()["data"]
+    assert row["intake_failed"] is True and "고객센터" in row["preview"]
+    assert "끝내 처리되지 않는" not in row["preview"]
+    detail = client.get(f"/api/shop/inquiries/{seq}", params={"buyer_id": "buy_0001"}).json()
+    assert "고객센터" in detail["data"]["notice"]

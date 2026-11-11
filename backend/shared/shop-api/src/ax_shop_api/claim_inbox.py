@@ -14,7 +14,7 @@
 - `status`는 처음 `received`이고, 되돌려 쓸 때마다 고객지원이 정한 상태로 바뀐다.
   `result`는 고객지원이 돌려준 클레임(고객이 볼 수 있는 항목만) 그대로이며
   이 서버는 값을 만들거나 고치지 않는다.
-- 처리에 실패한 접수는 문의함처럼 다시 읽는 시각을 늦추다가(`report_failure`) 횟수를 넘기면
+- 처리에 실패한 접수는 문의함처럼 다시 읽는 시각을 늦추다가(`report_failure`) 횟수에 닿으면
   고객에게 "접수하지 못했다"로 닫는다.
 - 끝나지 않은 신청(`open_claims`)에는 반려된 지 얼마 안 된 신청도 들어간다. 검토 시간 초과로 반려된
   건은 다시 진행될 수 있어서다.
@@ -29,15 +29,18 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from ax_shop_api import intake_common
 from ax_shop_api.db import TENANT_ID, Db
-from ax_shop_api.inbox import _now, _stamp, backoff_seconds, max_attempts
+from ax_shop_api.intake_common import now as _now
 
 READ_LIMIT_DEFAULT = 20
 READ_LIMIT_MAX = 100
 RECEIVED = "received"
 NOT_ACCEPTED = "not_accepted"  # 고객지원이 클레임으로 받지 않았다(없는 주문·같은 품목 진행 중 등)
 FINAL = ("completed", NOT_ACCEPTED)  # 더 바뀌지 않는 상태
-RESUBMITTABLE = ("rejected", NOT_ACCEPTED)  # 같은 내용으로 다시 내면 새 신청이 되는 상태
+RESUBMITTABLE = (
+    NOT_ACCEPTED,
+)  # 같은 내용으로 다시 내면 새 신청이 되는 상태(반려는 고객지원이 막는다)
 REJECTED_RECHECK_DAYS = 7  # 반려된 신청도 이 기간은 상태를 다시 적을 수 있게 둔다
 MAX_RESULT_CHARS = 100_000
 INTAKE_FAILED = {
@@ -100,9 +103,12 @@ def add(
 ) -> dict[str, Any]:
     """신청을 저장한다. 같은 지문의 가장 최근 신청이 반려·접수 불가가 아니면 그것을 돌려준다."""
     with db.tx() as conn:
+        # 같은 지문과 그 재신청(지문#n)을 UNIQUE 인덱스로 찾는다(LIKE는 표 전체를 훑는다). '#'의
+        # 다음 글자가 '$'라 [지문#, 지문$) 범위가 지문#n 전부다
         same = conn.execute(
-            "SELECT * FROM claim_inbox WHERE digest = ? OR digest LIKE ? ORDER BY seq DESC",
-            (digest, digest + "#%"),
+            "SELECT * FROM claim_inbox WHERE digest = ? UNION ALL"
+            " SELECT * FROM claim_inbox WHERE digest >= ? AND digest < ? ORDER BY seq DESC",
+            (digest, digest + "#", digest + "$"),
         ).fetchall()
         if same and same[0]["status"] not in RESUBMITTABLE:
             return _receipt(same[0])
@@ -162,6 +168,7 @@ def pending(db: Db, limit: int = READ_LIMIT_DEFAULT) -> tuple[list[dict[str, Any
         ).fetchone()["n"]
         failed = conn.execute(
             "SELECT COUNT(*) AS n FROM claim_inbox WHERE failed_at IS NOT NULL"
+            " AND support_claim_id IS NULL"
         ).fetchone()["n"]
     items = [
         {
@@ -196,7 +203,7 @@ def open_claims(
     """
     limit = max(1, min(limit, READ_LIMIT_MAX))
     final = ", ".join("?" for _ in FINAL)
-    recent = _stamp(datetime.now(UTC) - timedelta(days=REJECTED_RECHECK_DAYS))
+    recent = intake_common.stamp(datetime.now(UTC) - timedelta(days=REJECTED_RECHECK_DAYS))
     with db.tx() as conn:
         rows = conn.execute(
             "SELECT seq, support_claim_id, status, result FROM claim_inbox"
@@ -251,45 +258,19 @@ def write_result(
     }
 
 
-def report_failure(db: Db, seq: int, reason: str) -> dict[str, Any] | None:
-    """읽어 간 쪽이 처리하지 못했다고 알린다. 다시 읽는 시각을 늦추고, 횟수를 넘기면 실패로 빼면서
-    고객에게는 "접수하지 못했다"로 닫는다. 이미 결과가 적힌 신청은 그대로 둔다. 없는 번호면 None."""
-    with db.tx() as conn:
-        row = conn.execute("SELECT * FROM claim_inbox WHERE seq = ?", (seq,)).fetchone()
-        if row is None:
-            return None
-        if row["synced_at"] is None and row["failed_at"] is None:
-            attempts = row["attempts"] + 1
-            if attempts >= max_attempts():
-                conn.execute(
-                    "UPDATE claim_inbox SET attempts = ?, failed_at = ?, retry_after = NULL,"
-                    " last_error = ?, status = ?, result = ?, synced_at = ?, updated_at = ?"
-                    " WHERE seq = ?",
-                    (
-                        attempts,
-                        _now(),
-                        reason[:40],
-                        NOT_ACCEPTED,
-                        canonical(INTAKE_FAILED),
-                        _now(),
-                        _now(),
-                        seq,
-                    ),
-                )
-            else:
-                later = _stamp(datetime.now(UTC) + timedelta(seconds=backoff_seconds(attempts)))
-                conn.execute(
-                    "UPDATE claim_inbox SET attempts = ?, retry_after = ?, last_error = ?"
-                    " WHERE seq = ?",
-                    (attempts, later, reason[:40], seq),
-                )
-            row = conn.execute("SELECT * FROM claim_inbox WHERE seq = ?", (seq,)).fetchone()
+def _exhausted(moment: str) -> dict[str, Any]:
+    """실패로 뺄 때 고객에게는 접수하지 못했다고 닫는다."""
     return {
-        "seq": row["seq"],
-        "attempts": row["attempts"],
-        "failed": row["failed_at"] is not None,
-        "retry_after": row["retry_after"],
+        "status": NOT_ACCEPTED,
+        "result": canonical(INTAKE_FAILED),
+        "synced_at": moment,
+        "updated_at": moment,
     }
+
+
+def report_failure(db: Db, seq: int, reason: str) -> dict[str, Any] | None:
+    """읽어 간 쪽이 처리하지 못했다고 알린다 (재시도 간격·상한은 intake_common에 있다)."""
+    return intake_common.report_failure(db, "claim_inbox", seq, reason, _exhausted)
 
 
 def for_customer(db: Db, buyer_id: str, order_id: str | None = None) -> list[dict[str, Any]]:
@@ -311,40 +292,41 @@ def for_customer(db: Db, buyer_id: str, order_id: str | None = None) -> list[dic
     ]
 
 
+STUCK_WHERE = "failed_at IS NOT NULL AND support_claim_id IS NULL"  # 막힌 접수(목록·건수 공통)
+
+
+def _base(digest: str) -> str:
+    return digest.split("#", 1)[0]
+
+
 def stuck(db: Db) -> list[dict[str, Any]]:
-    """실패로 닫은 신청(사람이 봐야 한다). 고객이 쓴 글은 싣지 않고 번호·사유·횟수만 돌려준다."""
+    """실패로 닫은 신청(사람이 봐야 한다). 고객이 이미 다시 신청한 것은 뺀다(이중 처리 방지)."""
+    rows = intake_common.stuck_rows(db, "claim_inbox", "claim", STUCK_WHERE)
     with db.tx() as conn:
-        rows = conn.execute(
-            "SELECT seq, attempts, last_error, failed_at, created_at FROM claim_inbox"
-            " WHERE failed_at IS NOT NULL AND support_claim_id IS NULL ORDER BY seq"
-        ).fetchall()
-    return [
-        {
-            "kind": "claim",
-            "seq": r["seq"],
-            "reason": r["last_error"],
-            "attempts": r["attempts"],
-            "failed_at": r["failed_at"],
-            "created_at": r["created_at"],
+        newest = {
+            r["base"]: r["seq"]
+            for r in conn.execute("SELECT digest, seq FROM claim_inbox ORDER BY seq").fetchall()
+            for r in [{"base": _base(r["digest"]), "seq": r["seq"]}]
         }
-        for r in rows
+    return [
+        {k: v for k, v in row.items() if k != "digest"}
+        for row in rows
+        if newest.get(_base(row["digest"])) == row["seq"]
     ]
 
 
 def retry(db: Db, seq: int) -> dict[str, Any] | None:
     """실패로 닫은 신청을 다시 "접수됨"으로 돌려 읽는 차례에 올린다(고객 화면에도 다시 접수됨).
 
-    실패로 닫힌 것이 아니면 그대로 두고, 없는 번호면 None이다.
+    실패로 닫힌 것이 아니거나 고객이 이미 다시 신청했으면 그대로 두고, 없는 번호면 None이다.
     """
-    with db.tx() as conn:
-        row = conn.execute("SELECT * FROM claim_inbox WHERE seq = ?", (seq,)).fetchone()
-        if row is None:
-            return None
-        stuck_now = row["failed_at"] is not None and row["support_claim_id"] is None
-        if stuck_now:
-            conn.execute(
-                "UPDATE claim_inbox SET attempts = 0, failed_at = NULL, retry_after = NULL,"
-                " status = ?, result = NULL, synced_at = NULL, updated_at = ? WHERE seq = ?",
-                (RECEIVED, _now(), seq),
-            )
-    return {"seq": seq, "requeued": stuck_now}
+
+    def not_replaced(row: Any) -> bool:
+        with db.tx() as conn:
+            newer = conn.execute(
+                "SELECT digest FROM claim_inbox WHERE seq > ?", (row["seq"],)
+            ).fetchall()
+        return all(_base(n["digest"]) != _base(row["digest"]) for n in newer)
+
+    sets = {"status": RECEIVED, "result": None, "synced_at": None, "updated_at": _now()}
+    return intake_common.requeue(db, "claim_inbox", seq, STUCK_WHERE, sets, not_replaced)
