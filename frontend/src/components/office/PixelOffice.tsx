@@ -236,8 +236,9 @@ function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number,
   }
 
   boardCard(ctx, v);
-  // 이름표는 자리에 앉아 있을 때만 (걷는 동안 숨긴다)
+  // 이름표: 앉은 사람 먼저, 걷거나 서 있는 사람은 발밑에 따라다니며 맨 위에 그린다 (다른 자리 이름표에 가리지 않게)
   for (const { key, p, mode } of people) if (mode === "sit") nameTag(ctx, key, p);
+  for (const { key, p, mode } of people) if (mode !== "sit") nameTag(ctx, key, p);
 
   // 말풍선: 앉은 자리는 자리마다 정한 방향, 걷는 사람은 머리 위. 옆 자리에 도착해 서 있으면 전할 말
   const tops = new Map<DeskKey, number>();
