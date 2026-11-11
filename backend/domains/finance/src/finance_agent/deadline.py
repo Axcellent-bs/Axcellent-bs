@@ -7,6 +7,7 @@
 - 기산점: 구매 확정. 판매 사이트에 구매확정 시각이 따로 없어 배송 완료 시각을 쓴다
   (배송 전 주문은 기한이 아직 시작되지 않은 것으로 센다)
 - 지급 완료: 그 주 정산 묶음이 안전 장치에서 승인된 판매자. 실제 이체 결과는 연동돼 있지 않다
+- 정산 주: 구매 확정일이 속한 주(판매자 정산과 같다)
 - 지급 예정일: 정산 기간(월~일) 마지막 날 + `pay_days_after_period_end`.
   보류 사유가 있으면 예정일이 없다
 - 상태: `overdue`(기한 지남) · `at_risk`(보류로 예정일이 없거나 예정일이 기한 뒤)
@@ -20,7 +21,7 @@ from typing import Any
 
 from finance_agent import finance_config as fc
 from finance_agent import settlement
-from finance_agent.books import Books, item_gross, paid_at
+from finance_agent.books import Books, item_gross
 
 STATUS_ORDER = {"overdue": 0, "at_risk": 1, "due_soon": 2, "ok": 3}
 STATUS_KO = {
@@ -53,9 +54,13 @@ def deadline_report(
 
     sellers: dict[str, dict[str, Any]] = {}
     waiting = 0  # 배송 전이라 기한이 아직 시작되지 않은 주문
-    weeks: dict[date, tuple[str, set[str], date]] = {}  # 결제일 → (주, 지급한 판매자, 지급일)
+    weeks: dict[date, tuple[str, set[str], date]] = {}  # 확정일 → (정산 주, 지급한 판매자, 지급일)
     for o in books.sold_between(fc.day_start(since), datetime.max.replace(tzinfo=UTC)):
-        paid_day = paid_at(o).date()
+        if o.get("delivered_at") is None:  # 구매 확정 전: 기한이 아직 시작되지 않았다
+            waiting += sum(1 for item in o["items"] if item.get("seller_id"))
+            continue
+        # 정산은 구매 확정일이 속한 주에 한다(settlement.py)
+        paid_day = o["delivered_at"].date()
         if paid_day not in weeks:
             week = _week_of(paid_day)
             batch = batches.get(week) or {}
@@ -70,9 +75,6 @@ def deadline_report(
         for item in o["items"]:
             seller_id = item.get("seller_id")
             if not seller_id or seller_id in paid_sellers:
-                continue
-            if o.get("delivered_at") is None:
-                waiting += 1
                 continue
             confirmed = o["delivered_at"].date()
             deadline = confirmed + timedelta(days=s.deadline_days)

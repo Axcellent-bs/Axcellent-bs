@@ -74,7 +74,7 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
 
   return (
     <Panel id="settlements" title="③ 판매자 정산" titleHidden meta={res.env?.meta}
-      hint="판매자에게 줄 돈(정산금) = 판매액 − 판매 수수료 − 판매자가 부담한 쿠폰 − 환불. 구매가 확정되지 않았거나 정산금이 0원 이하인 판매자는 자동으로 보류하고, 나머지만 묶어 지급 승인을 요청합니다.">
+      hint="판매자에게 줄 돈(정산금) = 판매액 − 판매 수수료 − 판매자가 부담한 쿠폰 − 환불. 오픈마켓처럼 구매가 확정된(배송 완료) 주문만 그 확정일이 속한 주에 정산하고, 아직 확정되지 않은 주문은 확정되는 주의 정산으로 넘깁니다. 정산금이 0원 이하인 판매자만 보류하고, 나머지를 묶어 지급 승인을 요청합니다.">
       <ResourceBody res={res}>
         {(s) => {
           const total = readyPayout(s.statements);
@@ -116,6 +116,11 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
                             {x.hold_reasons.length
                               ? <div className="flex flex-wrap gap-1">{x.hold_reasons.map((h) => <Chip key={h.code} label={h.label} tone={TONE.warn} />)}</div>
                               : <span className="text-sm text-ink-500">없음</span>}
+                            {x.pending_confirmation && x.pending_confirmation.orders > 0 && (
+                              <div className="mt-1 text-sm text-ink-500" title="아직 구매가 확정되지 않은 주문은 이번 정산금에 들지 않고, 확정되는 주의 정산으로 넘어갑니다">
+                                다음 정산으로 넘김 {x.pending_confirmation.orders.toLocaleString("ko-KR")}건 · {krw(x.pending_confirmation.gross)}
+                              </div>
+                            )}
                           </td>
                           <td className="py-2"><Chip label={STATUS_KO[x.status]?.label ?? "확인 필요"} tone={STATUS_KO[x.status]?.tone ?? TONE.muted} /></td>
                         </tr>

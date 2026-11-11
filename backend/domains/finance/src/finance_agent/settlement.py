@@ -3,13 +3,19 @@
 정산금 `payout` = 판매액 `gross` − 판매 수수료 `commission` − 판매자 부담 쿠폰 `seller_coupon`
 − 환불 `refunds`. 기간은 주 단위(월~일), 기본은 지난주.
 
-- 판매액·수수료: 기간 안에 결제된 주문의 그 판매자 품목 (수수료는 카테고리 수수료율, 품목별 반올림)
+- 판매액·수수료: 기간 안에 **구매가 확정된**(배송 완료) 주문의 그 판매자 품목
+  (수수료는 카테고리 수수료율, 품목별 반올림). 오픈마켓처럼 구매 확정일 기준으로 정산한다
 - 판매자 부담 쿠폰: 기간 안에 발급된 `funded_by="seller"` 쿠폰
 - 환불: 기간 안 환불 중 그 판매자 몫
+- 구매 확정 대기(`pending_confirmation`): 기간 끝 전에 팔렸지만 아직 확정되지 않은 주문.
+  이번 정산에 넣지 않고, 확정되는 주의 정산으로 넘어간다(보류 사유가 아니다)
 
-보류 사유 (하나라도 있으면 `held`, 정산 묶음에서 빠진다):
-- `unconfirmed_purchase`: 기간 안 주문 중 아직 배송 완료 전 (구매 미확정)
+보류 사유 (있으면 `held`, 정산 묶음에서 빠진다):
 - `negative_payout`: 정산금이 0원 이하
+- `no_confirmed_orders`: 이번 주에 확정된 주문이 없고 확정 대기 주문만 있다(줄 돈이 없다)
+
+예전에는 확정되지 않은 주문이 한 건만 있어도 그 판매자의 한 주 정산 전체를 보류했다
+(`unconfirmed_purchase`). 주문이 계속 들어오면 판매자가 영영 지급받지 못해서 바꿨다.
 
 내역서마다 이번 기간에 판 쇼핑몰 상품(`products`: 상품 번호·이름·수량·판매액)을 붙인다.
 판매자 번호(`seller_id`)와 상품 번호(`product_id`)는 쇼핑몰(shop-api)의 것 그대로다.
@@ -56,21 +62,19 @@ def statements(
             if i.get("seller_id") and i["seller_id"] not in sellers:
                 sellers.append(i["seller_id"])
 
-    sold = books.sold_between(start, end)
+    sold = books.confirmed_between(start, end)
+    waiting = books.unconfirmed_until(end)
     rows = []
     for seller_id in sellers:
         gross = commission = 0
         order_ids: set[str] = set()
         rates: set[float] = set()
-        unconfirmed: set[str] = set()
         by_product: dict[str, dict[str, Any]] = {}
         for o in sold:
             mine = [i for i in o["items"] if i.get("seller_id") == seller_id]
             if not mine:
                 continue
             order_ids.add(o["order_id"])
-            if o.get("delivered_at") is None:
-                unconfirmed.add(o["order_id"])
             for i in mine:
                 g = item_gross(i)
                 rate = cfg.commission.rate_for(i.get("category_code"))
@@ -110,15 +114,25 @@ def statements(
         else:
             rate_shown = cfg.commission.default_rate
 
+        pending_orders, pending_gross = 0, 0
+        for o in waiting:
+            mine = [i for i in o["items"] if i.get("seller_id") == seller_id]
+            if mine:
+                pending_orders += 1
+                pending_gross += sum(item_gross(i) for i in mine)
+
         reasons = []
-        if unconfirmed:
+        if not order_ids and pending_orders and payout <= 0:
             reasons.append(
-                {"code": "unconfirmed_purchase", "label": f"구매 미확정 주문 {len(unconfirmed)}건"}
+                {
+                    "code": "no_confirmed_orders",
+                    "label": f"이번 주 확정 주문 없음 (확정 대기 {pending_orders}건은 다음 정산)",
+                }
             )
         if order_ids and payout <= 0:
             reasons.append({"code": "negative_payout", "label": "정산금이 0원 이하"})
 
-        if not order_ids and not seller_coupon and not refunds:
+        if not order_ids and not seller_coupon and not refunds and not pending_orders:
             continue  # 이번 기간 거래가 없는 판매자는 내역서를 만들지 않는다
         rows.append(
             {
@@ -134,6 +148,8 @@ def statements(
                 "hold_reasons": reasons,
                 "status": "held" if reasons else "ready",
                 "review_id": None,
+                # 다음 정산으로 넘어가는 구매 확정 대기 주문 (이번 정산금에 들지 않는다)
+                "pending_confirmation": {"orders": pending_orders, "gross": pending_gross},
                 # 이번 기간에 판 쇼핑몰 상품 (판매액 큰 순). 쇼핑몰 상품 화면과 잇는 열쇠
                 "products": sorted(
                     by_product.values(), key=lambda r: (-r["gross"], r["product_id"])
@@ -170,9 +186,12 @@ def apply_batch(result: dict[str, Any], batch: dict[str, Any] | None) -> dict[st
 
 
 def ready(result: dict[str, Any]) -> list[dict[str, Any]]:
-    """묶음에 넣을 판매자: 보류 사유가 없고 아직 요청·승인되지 않음 (거절된 묶음은 다시 넣는다)."""
+    """묶음에 넣을 판매자: 보류 사유가 없고 줄 돈이 있으며 아직 요청·승인되지 않음.
+
+    거절된 묶음은 다시 넣는다. 확정 대기 주문만 있어 이번 정산금이 0원인 판매자는 넣지 않는다.
+    """
     return [
         r
         for r in result["statements"]
-        if not r["hold_reasons"] and r["status"] in ("ready", "rejected")
+        if not r["hold_reasons"] and r["status"] in ("ready", "rejected") and (r["payout"] or 0) > 0
     ]

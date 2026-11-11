@@ -273,6 +273,25 @@ class Truth:
     def sold(self, start: datetime, end: datetime) -> list[str]:
         return [o for o in self.tb["orders"] if base.inside(self.paid_at(o), start, end)]
 
+    def delivered(self, oid: str) -> datetime | None:
+        return fc.parse_dt(self.tb["orders"][oid]["delivered_at"])
+
+    def confirmed(self, start: datetime, end: datetime) -> list[str]:
+        """판매자 정산 기준: 팔렸고 구매 확정(배송 완료) 시각이 [start, end)인 주문."""
+        return [
+            o
+            for o in self.tb["orders"]
+            if self.paid_at(o) is not None and base.inside(self.delivered(o), start, end)
+        ]
+
+    def waiting(self, end: datetime) -> list[str]:
+        """`end` 전에 팔렸지만 아직 구매가 확정되지 않은 주문."""
+        return [
+            o
+            for o in self.tb["orders"]
+            if (t := self.paid_at(o)) is not None and t < end and self.delivered(o) is None
+        ]
+
     def item_paid(self, i: dict[str, Any]) -> int:
         return i["qty"] * i["unit_price"] - i["points_share"] - i["coupon_share"]
 
@@ -381,7 +400,8 @@ async def case_settlement(rng, clock, today):
                             r["payout"], r["status"]) for r in res["statements"]}  # fmt: skip
     truth = Truth(w.tables(), today)
     start, end = day0(monday), day0(monday + timedelta(days=7))
-    sold = truth.sold(start, end)
+    sold = truth.confirmed(start, end)
+    waiting = truth.waiting(end)
     wants = {}
     for basis in ("actual", "documented"):
         refunds: dict[str, int] = defaultdict(int)
@@ -392,22 +412,22 @@ async def case_settlement(rng, clock, today):
         sellers = sorted({i["seller_id"] for i in truth.tb["items"]} | set(refunds))
         for s in sellers:
             gross = com = 0
-            ids, unconfirmed = set(), False
+            ids = set()
             for oid in sold:
                 mine = [i for i in truth.items_of[oid] if i["seller_id"] == s]
                 if not mine:
                     continue
                 ids.add(oid)
-                unconfirmed |= truth.tb["orders"][oid]["delivered_at"] is None
                 for i in mine:
                     g = i["qty"] * i["unit_price"]
                     gross += g
                     com += base.half_up(g, base.rate_of(i["category_code"]))
             rf = refunds.get(s, 0)
-            if not ids and not rf:
+            pending = any(i["seller_id"] == s for oid in waiting for i in truth.items_of[oid])
+            if not ids and not rf and not pending:
                 continue
             payout = gross - com - rf
-            held = unconfirmed or (bool(ids) and payout <= 0)
+            held = (bool(ids) or pending) and payout <= 0
             want[s] = (gross, com, 0, rf, payout, "held" if held else "ready")
         wants[basis] = want
     return got, wants, {"week_monday": monday.isoformat()}

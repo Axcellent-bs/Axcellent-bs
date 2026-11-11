@@ -205,6 +205,8 @@ export interface SellerStatement {
   status: StatementStatus;
   review_id: string | null;
   products?: StatementProduct[];
+  /** 아직 구매가 확정되지 않아 다음 정산으로 넘어가는 주문 (이번 정산금에 들지 않는다) */
+  pending_confirmation?: { orders: number; gross: number };
 }
 export interface SettlementBatch { status: BatchStatus; review_id: string | null; execution_id: string | null; total_payout: number; seller_ids: string[] }
 export interface Settlements { period: string; from: string; to: string; pay_date: string | null; statements: SellerStatement[]; batch: SettlementBatch }

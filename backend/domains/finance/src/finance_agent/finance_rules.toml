@@ -4,7 +4,7 @@
 # - review: "expert"는 전문가가 확인한 규칙, "pending"은 전문가 확인 전이다
 # - 세법 조항과 회계 기준은 공개 자료로 찾아 적었다. 신고와 판단의 최종 책임은 세무사·담당자에게 있다
 
-version = 9
+version = 10
 updated = "2026-11-09"
 
 # 세무사·회계사에게 먼저 물을 질문. 묶음의 expert-review-checklist.docx에 들어간다
@@ -198,7 +198,7 @@ review = "pending"
 id = "SET-001"
 area = "settlement"
 title = "판매자 정산금 계산"
-statement = "정산금 = 판매액 − 판매 수수료 − 판매자 부담 쿠폰 − 환불."
+statement = "정산금 = 판매액 − 판매 수수료 − 판매자 부담 쿠폰 − 환불. 판매액은 그 주에 구매가 확정된(배송 완료) 주문으로 센다. 확정 전 주문은 확정되는 주의 정산으로 넘긴다."
 basis = "내부 정산 기준 (재무 재설계 2026-10-23). 판매자 약관 확인 필요"
 review = "pending"
 
