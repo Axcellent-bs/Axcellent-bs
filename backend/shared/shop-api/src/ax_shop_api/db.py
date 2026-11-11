@@ -178,6 +178,8 @@ _ADDED_COLUMNS = {
         ("feedback_at", "TEXT"),
         ("feedback_synced_at", "TEXT"),
         ("feedback_outcome", "TEXT"),
+        ("view_status", "TEXT"),  # 되돌려 쓴 값의 상태(오래된 해결 문의를 더 읽지 않는 데 쓴다)
+        ("view_at", "TEXT"),
         ("gone_at", "TEXT"),  # 고객지원에서 찾을 수 없어(삭제·재시작) 고객 화면에서 뺀 시각
     ),
     # 고객이 보는 문의 상태(고객지원이 되돌려 쓴 값)와 평가(저장 → 고객지원이 읽어 감)
@@ -187,6 +189,8 @@ _ADDED_COLUMNS = {
         ("failed_at", "TEXT"),
         ("last_error", "TEXT"),
     ),
+    # 고객에게 보여 줄 처리 결과 안내 한 줄(아이디어를 읽어 간 뒤 분류 결과)
+    "idea_inbox": (("notice", "TEXT"),),
     # 결제사(fake·toss_test), 토스 paymentKey, 결제사 오류 코드. 옛 결제 행은 provider=fake
     "payments": (
         ("provider", "TEXT NOT NULL DEFAULT 'fake'"),

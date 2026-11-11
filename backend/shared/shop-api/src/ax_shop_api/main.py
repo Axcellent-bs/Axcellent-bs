@@ -252,6 +252,7 @@ class IntakeSyncedIn(BaseModel):
 
     outcome: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.:-]+$")
     ref: str | None = Field(default=None, max_length=64)
+    notice: str | None = Field(default=None, max_length=idea_inbox.NOTICE_CHARS)
 
 
 class IdeaIn(BaseModel):
@@ -966,6 +967,13 @@ def create_app(
         # 고객에게는 접수 사실만 돌려준다 (영역·묶음 같은 내부 분류는 보이지 않는다)
         return _ok({"idea_id": saved["seq"], "received": True}, context_id=saved["context_id"])
 
+    @app.get("/api/shop/ideas")
+    async def list_my_ideas(buyer_id: str, limit: Annotated[int, Query(ge=1, le=100)] = 50) -> dict:
+        """내 아이디어 내역(토큰 없음, 읽기): 접수 번호·종류·앞부분·처리 상태·안내 한 줄."""
+        inquiries.buyer_number(buyer_id)
+        items = await asyncio.to_thread(idea_inbox.for_buyer, database, buyer_id, limit)
+        return _ok(items, total=len(items))
+
     @app.get("/api/shop/admin/ideas")
     async def read_idea_inbox(
         limit: Annotated[int, Query(ge=1, le=idea_inbox.READ_LIMIT_MAX)] = (
@@ -983,7 +991,7 @@ def create_app(
         _: str = Depends(_caller(INQUIRY_READERS)),
     ) -> dict:
         done = await asyncio.to_thread(
-            idea_inbox.mark_synced, database, seq, body.outcome, body.ref
+            idea_inbox.mark_synced, database, seq, body.outcome, body.ref, body.notice
         )
         if done is None:
             raise ShopError("IDEA_NOT_FOUND", "아이디어함에 없는 접수 번호다", 404)
@@ -1050,6 +1058,15 @@ def create_app(
         if done is not None:  # 이미 입고 처리했다: 다시 기록하지 않는다
             return _ok(done, replayed=True)
         shop.get_order(body.order_id)
+        # 이 서버의 클레임 신청 기록으로 확인한다: 모르는 클레임·다른 주문·
+        # 아직 입고 단계가 아닌 클레임은 기록하지 않고 이벤트도 내지 않는다
+        claim = await asyncio.to_thread(claim_inbox.find_by_support_id, database, claim_id)
+        if claim is None:
+            raise ShopError("CLAIM_NOT_FOUND", "클레임을 찾을 수 없다", 404)
+        if claim["order_id"] != body.order_id:
+            raise ShopError("ORDER_MISMATCH", "클레임의 주문과 다르다", 409)
+        if claim["status"] != "awaiting_return":
+            raise ShopError("INVALID_STATE", "반품 입고를 받을 수 있는 클레임이 아니다", 409)
         recorded, _replayed = refunds.record_return(
             claim_id, body.order_id, body.inspection, support_client.new_context_id()
         )

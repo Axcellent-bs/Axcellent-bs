@@ -19,17 +19,30 @@
 from __future__ import annotations
 
 import json
+import os
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ax_shop_api import intake_common
 from ax_shop_api.db import TENANT_ID, Db
 from ax_shop_api.intake_common import backoff_seconds, max_attempts  # noqa: F401 (밖에서 쓴다)
 from ax_shop_api.intake_common import now as _now
+from ax_shop_api.intake_common import stamp as _stamp
 
 READ_LIMIT_DEFAULT = 20
 READ_LIMIT_MAX = 100
 PREVIEW_CHARS = 80  # 아직 처리 전인 문의의 고객용 미리보기(본인이 쓴 글의 앞부분)
+RATED_OUTCOMES = ("rated", "already_rated")  # 평가가 후기로 남은 결과 코드
+VIEW_RESOLVED_DAYS = 7  # 해결된 문의는 이 기간이 지나면 되돌려 쓴 값을 더 갱신하지 않는다
 STUCK_WHERE = "failed_at IS NOT NULL AND synced_at IS NULL"  # 막힌 접수(목록·건수 공통)
+
+
+def resolved_days() -> int:
+    try:
+        value = int(os.getenv("SHOP_VIEW_RESOLVED_DAYS") or VIEW_RESOLVED_DAYS)
+    except ValueError:
+        return VIEW_RESOLVED_DAYS
+    return value if value > 0 else VIEW_RESOLVED_DAYS
 
 
 def add(
@@ -205,8 +218,9 @@ def open_views(
             "SELECT seq, support_inquiry_id, view_digest FROM inquiry_inbox"
             " WHERE synced_at IS NOT NULL AND support_inquiry_id IS NOT NULL AND view_final = 0"
             " AND gone_at IS NULL"
+            " AND (view_status IS NULL OR view_status != 'resolved' OR view_at >= ?)"
             " AND seq > ? ORDER BY seq LIMIT ?",
-            (after, limit + 1),
+            (_stamp(datetime.now(UTC) - timedelta(days=resolved_days())), after, limit + 1),
         ).fetchall()
     more = len(rows) > limit
     items = [
@@ -232,8 +246,16 @@ def set_view(db: Db, seq: int, view: dict[str, Any], view_digest: str) -> dict[s
             return None
         if row["view_digest"] != view_digest or row["view"] is None:
             conn.execute(
-                "UPDATE inquiry_inbox SET view = ?, view_digest = ?, view_final = ? WHERE seq = ?",
-                (json.dumps(view, ensure_ascii=False, sort_keys=True), view_digest, final, seq),
+                "UPDATE inquiry_inbox SET view = ?, view_digest = ?, view_final = ?,"
+                " view_status = ?, view_at = ? WHERE seq = ?",
+                (
+                    json.dumps(view, ensure_ascii=False, sort_keys=True),
+                    view_digest,
+                    final,
+                    view.get("status"),
+                    _now(),
+                    seq,
+                ),
             )
     return {"seq": seq, "view_digest": view_digest}
 
@@ -269,7 +291,10 @@ def save_feedback(
 def pending_feedback(db: Db, limit: int = READ_LIMIT_DEFAULT) -> tuple[list[dict[str, Any]], int]:
     """아직 읽어 가지 않은 평가를 저장 순서로 `limit`건까지, 그리고 남은 전체 수."""
     limit = max(1, min(limit, READ_LIMIT_MAX))
-    where = "feedback IS NOT NULL AND feedback_synced_at IS NULL AND support_inquiry_id IS NOT NULL"
+    where = (
+        "feedback IS NOT NULL AND feedback_synced_at IS NULL AND support_inquiry_id IS NOT NULL"
+        " AND gone_at IS NULL"
+    )
     with db.tx() as conn:
         rows = conn.execute(
             f"SELECT * FROM inquiry_inbox WHERE {where} ORDER BY feedback_at, seq LIMIT ?",  # noqa: S608
@@ -308,6 +333,11 @@ def mark_feedback_synced(db: Db, seq: int, outcome: str) -> dict[str, Any] | Non
                 " WHERE seq = ?",
                 (_now(), outcome[:40], seq),
             )
+            if outcome not in RATED_OUTCOMES:  # 고객지원이 받지 않은 평가: 고객이 다시 남길 수 있다
+                conn.execute(
+                    "UPDATE inquiry_inbox SET feedback = NULL, feedback_at = NULL WHERE seq = ?",
+                    (seq,),
+                )
             row = conn.execute("SELECT * FROM inquiry_inbox WHERE seq = ?", (seq,)).fetchone()
     return {
         "seq": seq,

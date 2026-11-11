@@ -233,3 +233,37 @@ def test_the_comment_is_not_in_error_responses_or_logs(
     assert COMMENT not in bad.text and COMMENT not in again.text and ok.status_code == 201
     assert COMMENT not in caplog.text
     assert json.loads(again.text)["error"]["code"] == "INVALID_STATE"
+
+
+def test_a_rating_support_refused_is_cleared_so_the_customer_can_rate_again(
+    client: TestClient,
+) -> None:
+    client.post(URL, json=_body(rating=2))
+    refused = client.post(
+        "/api/shop/admin/inquiries/1/feedback-synced",
+        json={"outcome": "invalid_state"},
+        headers=SUPPORT,
+    )
+    assert refused.status_code == 200
+    data = client.get("/api/shop/inquiries/1", params={"buyer_id": "buy_0001"}).json()["data"]
+    assert data["rated"] is False and data["can_rate"] is True  # 다시 평가할 수 있다
+    assert client.get(READ, headers=SUPPORT).json()["data"] == []  # 거절된 평가는 더 읽지 않는다
+    assert client.post(URL, json=_body(rating=5)).status_code == 201
+
+
+def test_a_rated_outcome_keeps_the_rating(client: TestClient) -> None:
+    client.post(URL, json=_body())
+    for outcome in ("rated", "already_rated"):
+        client.post(
+            "/api/shop/admin/inquiries/1/feedback-synced",
+            json={"outcome": outcome},
+            headers=SUPPORT,
+        )
+    data = client.get("/api/shop/inquiries/1", params={"buyer_id": "buy_0001"}).json()["data"]
+    assert data["rated"] is True and data["can_rate"] is False
+
+
+def test_a_rating_of_an_inquiry_taken_off_the_screen_is_not_read(client: TestClient) -> None:
+    client.post(URL, json=_body())
+    client.post("/api/shop/admin/inquiries/1/gone", headers=SUPPORT)
+    assert client.get(READ, headers=SUPPORT).json()["data"] == []

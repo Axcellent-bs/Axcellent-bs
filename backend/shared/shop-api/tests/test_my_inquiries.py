@@ -307,3 +307,24 @@ def test_an_inquiry_set_aside_after_repeated_failures_tells_the_customer(
     assert "끝내 처리되지 않는" not in row["preview"]
     detail = client.get(f"/api/shop/inquiries/{seq}", params={"buyer_id": "buy_0001"}).json()
     assert "고객센터" in detail["data"]["notice"]
+
+
+def test_a_resolved_inquiry_is_not_refreshed_after_the_resolved_period(
+    client: TestClient, db: Db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seq = seed(db, support_id=5)
+    write_view(client, seq, _view("resolved", False), "d-res")
+    read = "/api/shop/admin/inquiries/open"
+    assert [i["seq"] for i in client.get(read, headers=SUPPORT).json()["data"]] == [seq]
+    with db.tx() as conn:  # 해결된 지 8일이 지났다
+        conn.execute(
+            "UPDATE inquiry_inbox SET view_at = '2026-01-01T00:00:00Z' WHERE seq = ?", (seq,)
+        )
+    assert client.get(read, headers=SUPPORT).json()["data"] == []
+    open_one = seed(db, support_id=6, text="열린 문의")
+    write_view(client, open_one, _view("open", False), "d-open")
+    with db.tx() as conn:  # 열린 문의는 오래돼도 계속 본다
+        conn.execute(
+            "UPDATE inquiry_inbox SET view_at = '2026-01-01T00:00:00Z' WHERE seq = ?", (open_one,)
+        )
+    assert [i["seq"] for i in client.get(read, headers=SUPPORT).json()["data"]] == [open_one]

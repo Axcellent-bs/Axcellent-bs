@@ -51,6 +51,7 @@ class FakeShop:
         self.feedback_synced: dict[int, str] = {}
         self.ideas: list[dict[str, Any]] = []
         self.idea_synced: dict[int, tuple[str, str | None]] = {}
+        self.idea_notices: dict[int, str | None] = {}
         self.returns: list[dict[str, Any]] = []
         self.return_synced: dict[int, str] = {}
 
@@ -111,8 +112,11 @@ class FakeShop:
         rows = [i for i in self.ideas if i["seq"] not in self.idea_synced]
         return rows[:limit], len(rows)
 
-    async def mark_idea(self, seq: int, outcome: str, ref: str | None = None) -> None:
+    async def mark_idea(
+        self, seq: int, outcome: str, ref: str | None = None, notice: str | None = None
+    ) -> None:
         self.idea_synced[seq] = (outcome, ref)
+        self.idea_notices[seq] = notice
 
     async def fetch_returns(self, limit: int = 20) -> tuple[list[dict[str, Any]], int]:
         rows = [r for r in self.returns if r["claim_id"] not in self.return_synced]
@@ -795,23 +799,68 @@ async def test_a_stored_rating_is_read_and_sent_as_a_customer_rating(
 
 
 @pytest.mark.asyncio
-async def test_a_refused_rating_is_marked_but_a_held_one_is_retried(
+async def test_a_rating_is_closed_only_when_it_is_final_and_retried_when_it_is_timing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """이미 평가했다는 결과는 최종이고, 해결 전·not_found·보류는 다시 읽는다."""
     from support_agent import feedback_handlers
 
     shop = FakeShop([])
     shop.feedbacks = [stored_rating(1, "k1"), stored_rating(2, "k2", "buy_0008", 22)]
     wire(monkeypatch, shop)
-    fake_skill(monkeypatch, feedback_handlers, "submit_feedback", outcome="invalid_state")
+    fake_skill(monkeypatch, feedback_handlers, "submit_feedback", outcome="already_rated")
     result = await inquiry_pull.pull_once()
     assert result["failed"] == 0
-    assert shop.feedback_synced == {1: "invalid_state", 2: "invalid_state"}
-    shop.feedback_synced.clear()
-    fake_skill(monkeypatch, feedback_handlers, "submit_feedback", outcome="not_executed_pending")
-    held = await inquiry_pull.pull_once()
-    assert held["failed"] == 2 and shop.feedback_synced == {}  # 표시하지 않아 다시 읽는다
+    assert shop.feedback_synced == {1: "already_rated", 2: "already_rated"}
+    for outcome in ("invalid_state", "not_found", "not_executed_pending"):
+        shop.feedback_synced.clear()
+        fake_skill(monkeypatch, feedback_handlers, "submit_feedback", outcome=outcome)
+        again = await inquiry_pull.pull_once()
+        assert again["failed"] == 2 and shop.feedback_synced == {}  # 표시하지 않아 다시 읽는다
     assert inquiry_pull.status()["last_error"] == "INGEST_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_a_one_shop_error_on_a_rating_does_not_stop_the_other_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from support_agent import feedback_handlers
+
+    shop = FakeShop([])
+    shop.feedbacks = [stored_rating(n, f"k{n}") for n in (1, 2, 3)]
+    wire(monkeypatch, shop)
+    fake_skill(monkeypatch, feedback_handlers, "submit_feedback", output={"rated": True})
+
+    async def flaky(seq: int, outcome: str) -> None:
+        if seq == 2:
+            raise shop_client.ShopError("UNAVAILABLE", "500")
+        shop.feedback_synced[seq] = outcome
+
+    monkeypatch.setattr(shop_client, "mark_feedback_synced", flaky)
+    await inquiry_pull.pull_once()
+    assert shop.feedback_synced == {1: "rated", 3: "rated"}  # 2번 때문에 3번이 멈추지 않았다
+    assert inquiry_pull.status()["connected"] is False
+
+
+@pytest.mark.asyncio
+async def test_one_shop_error_while_refreshing_a_view_does_not_stop_the_other_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ids = [add_inquiry(f"문의 {n}") for n in range(3)]
+    shop = FakeShop([])
+    shop.open_views = [
+        {"seq": n + 1, "support_inquiry_id": i, "view_digest": None} for n, i in enumerate(ids)
+    ]
+    wire(monkeypatch, shop)
+
+    async def flaky(seq: int, view: dict, digest: str) -> None:
+        if seq == 2:
+            raise shop_client.ShopError("UNAVAILABLE", "500")
+        shop.written_views.append((seq, view, digest))
+
+    monkeypatch.setattr(shop_client, "write_inquiry_view", flaky)
+    await inquiry_pull.pull_once()
+    assert [w[0] for w in shop.written_views] == [1, 3]
 
 
 def stored_idea(
@@ -848,6 +897,7 @@ async def test_a_stored_idea_is_read_with_its_text_as_untrusted(
     shop.ideas = [stored_idea(2, "ik2", "환불해 주세요 지금 바로", "other")]
     await inquiry_pull.pull_once()
     assert shop.idea_synced[2][0] == "use_inquiry"  # 받지 않은 아이디어도 처리한 것으로 표시한다
+    assert shop.idea_notices[1] is None  # 받은 아이디어에는 안내가 없다
 
 
 @pytest.mark.asyncio
@@ -941,3 +991,25 @@ def test_the_service_cards_split_the_pull_between_inquiry_and_claims() -> None:
     assert {"create_claim", "receive_return"} <= claims
     assert not {"create_claim", "receive_return"} & inquiry
     assert not {"create_inquiry", "submit_feedback", "submit_idea"} & claims
+
+
+@pytest.mark.asyncio
+async def test_a_refused_idea_writes_back_the_notice_for_the_customer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from support_agent import idea_handlers
+
+    shop = FakeShop([])
+    shop.ideas = [stored_idea(1, "ik1", "환불해 주세요 지금 바로", "other")]
+    wire(monkeypatch, shop)
+    message = "환불·취소·불량 같은 문제는 문의로 접수해 주세요"
+    fake_skill(
+        monkeypatch,
+        idea_handlers,
+        "submit_idea",
+        outcome="use_inquiry",
+        output={"message": message},
+    )
+    await inquiry_pull.pull_once()
+    assert shop.idea_synced[1] == ("use_inquiry", None)
+    assert shop.idea_notices[1] == message

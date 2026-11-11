@@ -305,8 +305,10 @@ async def fetch_idea_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int]:
     return items, int(meta.get("total", len(items)))
 
 
-async def mark_idea_synced(seq: int, outcome: str, ref: str | None = None) -> None:
-    await _post(f"/admin/ideas/{seq}/synced", {"outcome": outcome, "ref": ref})
+async def mark_idea_synced(
+    seq: int, outcome: str, ref: str | None = None, notice: str | None = None
+) -> None:
+    await _post(f"/admin/ideas/{seq}/synced", {"outcome": outcome, "ref": ref, "notice": notice})
 
 
 async def fetch_return_inbox(limit: int = 20) -> tuple[list[dict[str, Any]], int]:

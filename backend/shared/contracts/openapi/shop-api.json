@@ -588,6 +588,18 @@
         "additionalProperties": false,
         "description": "읽어 간 쪽의 처리 결과: 짧은 코드(outcome)와 고객지원 쪽 번호(ref, 있을 때).",
         "properties": {
+          "notice": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
           "outcome": {
             "maxLength": 40,
             "minLength": 1,
@@ -3442,6 +3454,58 @@
       }
     },
     "/api/shop/ideas": {
+      "get": {
+        "description": "내 아이디어 내역(토큰 없음, 읽기): 접수 번호·종류·앞부분·처리 상태·안내 한 줄.",
+        "operationId": "list_my_ideas_api_shop_ideas_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "buyer_id",
+            "required": true,
+            "schema": {
+              "title": "Buyer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List My Ideas Api Shop Ideas Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List My Ideas"
+      },
       "post": {
         "operationId": "submit_idea_api_shop_ideas_post",
         "requestBody": {
