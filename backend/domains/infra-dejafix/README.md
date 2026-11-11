@@ -12,7 +12,7 @@
   - 경로 판정용 정수 4개를 코드로 계산해 params에 넣는다: `suspect_count`·`low_confidence`·`irreversible_count`·`prior_rollbacks`. safety 기준표에서 하나라도 걸리면 C(사람 승인)
   - `execute(rollback_deployment)` → safety가 planning `verify_rollback_target`으로 교차검증 → `executed`면 자동 경로(`path: auto`), `held`면 `input-required` + `review_id`. 사람이 승인한 뒤 같은 요청을 다시 보내면 같은 `idempotency_key`로 `executed`를 받아 실행한다(`path: human_approved`)
   - 시연의 "롤백"은 shop-api 장애 주입 해제(`DELETE /api/shop/admin/faults`)다
-- 장애 감시(`dejafix_watch.py`): `INFRA_DEJAFIX_URL`(DejaFix 읽기 전용 프록시 주소)이 있으면 `INFRA_DEJAFIX_POLL_SECONDS`(기본 30초)마다 DejaFix `GET /api/incidents?status=problem`을 읽는다. `component` 태그가 붙은 장애만 총괄에 `infra.anomaly_detected`로 알린다(`metric` 태그 → `metric_code`, 없으면 `zabbix_problem`). 태그가 없는 PC·호스트 장애는 DejaFix만 맡는다. 같은 장애는 한 번만 보낸다. Zabbix 쪽에서 감시 트리거에 `component=<부위>` 태그를 달아야 한다(DJF-02)
+- 장애 감시(`dejafix_watch.py`): `INFRA_DEJAFIX_URL`(DejaFix 읽기 전용 프록시 주소)이 있으면 `INFRA_DEJAFIX_POLL_SECONDS`(기본 30초)마다 DejaFix `GET /api/incidents?status=problem`을 읽는다. `component` 태그가 붙은 장애만 총괄에 `infra.anomaly_detected`로 알린다(`metric` 태그 → `metric_code`, 없으면 `zabbix_problem`). 태그가 없는 PC·호스트 장애는 DejaFix만 맡는다. 같은 장애는 한 번만 보낸다. Zabbix 쪽에서 감시 트리거에 `component=<부위>` 태그를 달아야 한다(DJF-02). `INFRA_DEJAFIX_COMPONENTS`(쉼표 구분, 예: `payment`)를 주면 그 부위만 보낸다. Zabbix 기본 Windows·Linux 템플릿이 PC 트리거에도 `component=memory`·`cpu` 태그를 달기 때문에, 시연처럼 결제 장애만 받을 때는 `payment`로 둔다(비우면 모든 부위)
 - 복구 확인(`verify_recovery`): 30초 간격 최대 5회(`INFRA_RECOVERY_ATTEMPTS`·`INFRA_RECOVERY_INTERVAL_S`). 인프라 지표(shop-api 장애 상태)와 업무 지표(data `anomaly_detection`: `payment_fail_rate`·`order_fail_count`)가 둘 다 정상이어야 `recovered`. 업무 지표를 못 받으면(`null`) 복구로 보지 않는다. 마감(`deadline`) 전에 멈춘다
 
 코드 구성 (`src/infra_agent/`):

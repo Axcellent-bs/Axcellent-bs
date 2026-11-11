@@ -59,10 +59,14 @@ def _reset():
     dejafix_watch.reset_published()
 
 
-def _run(rows: list[dict], seen: list[str] | None = None):
+def _run(
+    rows: list[dict],
+    seen: list[str] | None = None,
+    components: frozenset[str] | None = None,
+):
     async def go():
         async with _client(rows, seen) as client:
-            return await dejafix_watch.run_once(URL, NOW, client)
+            return await dejafix_watch.run_once(URL, NOW, client, components=components)
 
     return asyncio.run(go())
 
@@ -104,6 +108,34 @@ def test_same_problem_is_sent_once() -> None:
     # 새 장애는 다시 보낸다. metric 태그가 없으면 기본 metric_code
     [env] = _run(rows + [_incident(2, tags=[{"tag": "component", "value": "payment"}])])
     assert env.data["metric_code"] == "zabbix_problem"
+
+
+MEMORY = [{"tag": "class", "value": "os"}, {"tag": "component", "value": "memory"}]
+
+
+def test_only_chosen_components_are_sent() -> None:
+    """Zabbix 기본 템플릿이 PC 트리거에 다는 `component=memory`는 고른 부위가 아니면 안 보낸다."""
+    rows = [_incident(1, tags=MEMORY), _incident(2, tags=PAYMENT)]
+    [env] = _run(rows, components=frozenset({"payment"}))
+    assert env.data["component"] == "payment"
+    assert events.MOCK_PUBLISHED == [env]
+    # 걸러 낸 장애는 보낸 것으로 치지 않는다: 나중에 부위를 넓히면 그때 보낸다
+    [later] = _run(rows, components=frozenset({"payment", "memory"}))
+    assert later.data["component"] == "memory"
+
+
+def test_without_a_component_list_every_tagged_problem_is_sent() -> None:
+    rows = [_incident(1, tags=MEMORY), _incident(2, tags=PAYMENT)]
+    sent = _run(rows)
+    assert sorted(e.data["component"] for e in sent) == ["memory", "payment"]
+
+
+def test_component_list_comes_from_env() -> None:
+    assert dejafix_watch.allowed_components({}) is None
+    assert dejafix_watch.allowed_components({"INFRA_DEJAFIX_COMPONENTS": " , "}) is None
+    assert dejafix_watch.allowed_components(
+        {"INFRA_DEJAFIX_COMPONENTS": "payment, checkout"}
+    ) == frozenset({"payment", "checkout"})
 
 
 def test_without_url_the_watch_stays_off() -> None:
