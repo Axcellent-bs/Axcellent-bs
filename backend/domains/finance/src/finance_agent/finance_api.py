@@ -98,7 +98,7 @@ from finance_agent.handlers import (
     state,
     team_budget_data,
 )
-from finance_agent.human import human_from_authorization
+from finance_agent.human import human_from_authorization, label_fields
 from finance_agent.planning_questions import record_sent_request
 from finance_agent.rules import load_rules
 
@@ -123,6 +123,11 @@ def ok(data: Any, meta: dict[str, Any]) -> dict[str, Any]:
 
 def error(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
+
+
+def _with_label(report: dict[str, Any], confirmation: dict[str, Any] | None) -> dict[str, Any]:
+    """결산 보고에 누가 확정했나 표시(`confirmed_by_label`)를 더한다. 보고 계약은 그대로 둔다."""
+    return report | {"confirmed_by_label": (confirmation or {}).get("by_label")}
 
 
 async def _body(request: Request) -> dict[str, Any]:
@@ -168,10 +173,19 @@ async def run_export_cycle(trigger: str = "auto") -> dict[str, Any]:
         }
 
 
-def import_pg(records: Any, body: bytes, name: str, source: str, by: str | None) -> dict:
-    """PG 정산 파일 하나를 기록에 더한다(화면 올리기·폴더 같이). 실패도 기록에 남긴다."""
+def import_pg(
+    records: Any,
+    body: bytes,
+    name: str,
+    source: str,
+    by: str | None,
+    by_label: dict[str, str] | None = None,
+) -> dict:
+    """PG 정산 파일 하나를 기록에 더한다(화면 올리기·폴더 같이). 실패도 기록에 남긴다.
+
+    `by_label`: 공용 토큰일 때 누가 했나 표시(`human.label_fields`)."""
     record: dict[str, Any] = {"file": (name.strip() or "올린 파일")[:120], "at": fc.iso(fc.now())}
-    record |= {"source": source} | ({"by": by} if by else {})
+    record |= {"source": source} | ({"by": by} if by else {}) | (by_label or {})
     try:
         record |= pg_file.import_file(body, name, records.pg_rows, records.pg_periods)
         records.pg_version += 1
@@ -466,7 +480,7 @@ def add_finance_api(app: FastAPI) -> None:
         report = await closing.closing_report(  # type: ignore[arg-type]
             books, period, d, confirmation, state().records.closings
         )
-        return ok(report, books.meta())
+        return ok(_with_label(report, confirmation), books.meta())
 
     @app.get("/api/finance/statements", response_model=None)
     async def get_statements(
@@ -556,11 +570,12 @@ def add_finance_api(app: FastAPI) -> None:
             )
             records[key] = {
                 "by": person,
+                **label_fields(person, request),
                 "at": fc.iso(fc.now()),
                 "snapshot": closing.snapshot_of(draft, books, column),
             }
         report = await closing.closing_report(books, period, d, records[key], records)
-        return ok(report, books.meta())
+        return ok(_with_label(report, records[key]), books.meta())
 
     @app.post("/api/finance/closing/cancel", response_model=None)
     async def cancel_closing(
@@ -591,16 +606,23 @@ def add_finance_api(app: FastAPI) -> None:
                 "period": key[0],
                 "date": key[1],
                 "confirmed_by": confirmed["by"],
+                **(
+                    {"confirmed_by_label": confirmed["by_label"]}
+                    if confirmed.get("by_label")
+                    else {}
+                ),
                 "confirmed_at": confirmed["at"],
                 "snapshot": confirmed.get("snapshot"),
                 "canceled_by": person,
+                **label_fields(person, request, "canceled_by_label"),
                 "canceled_at": fc.iso(fc.now()),
                 "reason": reason.strip()[:300],
             }
         )
         del records.closings[key]
         books = await state().fresh_books()
-        return ok(await closing.closing_report(books, period, d, None), books.meta())
+        report = await closing.closing_report(books, period, d, None)
+        return ok(_with_label(report, None), books.meta())
 
     @app.get("/api/finance/other-pnl", response_model=None)
     def get_other_pnl(month: str) -> dict | JSONResponse:
@@ -653,6 +675,7 @@ def add_finance_api(app: FastAPI) -> None:
             "income_tax": tax_value,
             "memo": str(body.get("memo") or "")[:300],
             "by": person,
+            **label_fields(person, request),
             "at": fc.iso(fc.now()),
             "history": history,
         }
@@ -697,13 +720,13 @@ def add_finance_api(app: FastAPI) -> None:
                 "lines": report["drift"],
                 "journal": proposal["journal"],
                 "by": person,
+                **label_fields(person, request),
                 "at": fc.iso(fc.now()),
                 "reason": reason.strip()[:300],
             }
         )
-        return ok(
-            await closing.closing_report(books, "month", d, confirmation, records), books.meta()
-        )
+        report = await closing.closing_report(books, "month", d, confirmation, records)
+        return ok(_with_label(report, confirmation), books.meta())
 
     @app.post("/api/finance/tax/vat/confirm", response_model=None)
     async def confirm_vat(
@@ -736,6 +759,7 @@ def add_finance_api(app: FastAPI) -> None:
                 )
             filings[key] = {
                 "by": person,
+                **label_fields(person, request),
                 "at": fc.iso(fc.now()),
                 "pack": tax.vat_pack(books, d),
                 "seller_report": tax.seller_report(books, d),
@@ -767,6 +791,7 @@ def add_finance_api(app: FastAPI) -> None:
             filing
             | {
                 "canceled_by": person,
+                **label_fields(person, request, "canceled_by_label"),
                 "canceled_at": fc.iso(fc.now()),
                 "reason": reason.strip()[:300],
             }
@@ -820,11 +845,20 @@ def add_finance_api(app: FastAPI) -> None:
         records = state().records
         records.recon_notes[payment_id] = note.strip()
         records.recon_note_log.append(
-            {"payment_id": payment_id, "note": note.strip(), "by": person, "at": fc.iso(fc.now())}
+            {
+                "payment_id": payment_id,
+                "note": note.strip(),
+                "by": person,
+                **label_fields(person, request),
+                "at": fc.iso(fc.now()),
+            }
         )
         result = reconciliation.reconcile(books, payment["created_at"].date(), records.recon_notes)
         item = next(i for i in result["items"] if i["payment_id"] == payment_id)
-        return ok(item, books.meta() | {"noted_by": person})
+        return ok(
+            item,
+            books.meta() | {"noted_by": person} | label_fields(person, request, "noted_by_label"),
+        )
 
     @app.get("/api/finance/settlements", response_model=None)
     async def get_settlements(period: str | None = None) -> dict | JSONResponse:
@@ -894,6 +928,7 @@ def add_finance_api(app: FastAPI) -> None:
                 409, "stale", "그사이 인원이나 단가가 바뀌었다. 다시 불러와 확인하고 확정한다"
             )
         record = team_budget.approval(data, person, fc.iso(fc.now()), (note or "").strip() or None)
+        record |= label_fields(person, request)
         state().records.team_budgets[m] = record
         data, missing = await team_budget_data(m)
         return ok(data, _team_budget_meta(missing) | {"approved_by": person})
@@ -958,6 +993,7 @@ def add_finance_api(app: FastAPI) -> None:
                 "at": fc.iso(fc.now()),
                 "source": "upload",
                 "by": person,
+                **label_fields(person, request),
                 "status": "imported",
                 "import_id": import_id,
                 "added": added,
@@ -1001,6 +1037,7 @@ def add_finance_api(app: FastAPI) -> None:
             "at": fc.iso(fc.now()),
             "source": "upload",
             "by": person,
+            **label_fields(person, request),
         }
         try:
             record |= exports.import_statement(
@@ -1040,7 +1077,9 @@ def add_finance_api(app: FastAPI) -> None:
         body = await request.body()
         if not body:
             return error(400, "invalid_request", "파일 내용이 비어 있습니다.")
-        record = import_pg(state().records, body, name, "upload", person)
+        record = import_pg(
+            state().records, body, name, "upload", person, label_fields(person, request)
+        )
         if record["status"] != "imported":
             return error(400, "invalid_file", record["reason"])
         return ok(record, {"uploaded_by": person})
@@ -1125,6 +1164,7 @@ def add_finance_api(app: FastAPI) -> None:
             "duplicate_of": ticket.duplicate_of,
             "tenant_id": meta_req.tenant_id,
             "by": person,
+            **label_fields(person, request),
             "at": fc.iso(fc.now()),
         }
         records.planning_requests.append(row)
@@ -1171,6 +1211,7 @@ def add_finance_api(app: FastAPI) -> None:
             "at": fc.iso(fc.now()),
             "source": "clear",
             "by": person,
+            **label_fields(person, request),
             "status": "cleared",
             "rows": len(records.pg_rows),
             "periods": len(records.pg_periods),
@@ -1208,6 +1249,7 @@ def add_finance_api(app: FastAPI) -> None:
                 import_id,
                 person,
                 reason,
+                by_label=label_fields(person, request).get("by_label"),
             )
         except exports.RemoveError as exc:
             return error(404 if exc.code == "not_found" else 409, exc.code, str(exc))
@@ -1235,7 +1277,12 @@ def add_finance_api(app: FastAPI) -> None:
         if row_id not in {u["id"] for u in view["unexplained"]}:
             return error(404, "not_found", "설명 없는 출금 목록에 없는 거래다")
         records = state().records
-        entry = {"note": note.strip(), "by": person, "at": fc.iso(fc.now())}
+        entry = {
+            "note": note.strip(),
+            "by": person,
+            **label_fields(person, request),
+            "at": fc.iso(fc.now()),
+        }
         records.bank_notes[row_id] = entry
         records.bank_note_log.append({"row_id": row_id, **entry})
         return ok(await outflows_view(books), books.meta() | {"noted_by": person})

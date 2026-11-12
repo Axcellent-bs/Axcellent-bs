@@ -207,6 +207,7 @@ def vat_view(
         | {
             "filing_status": "confirmed",
             "confirmed_by": filing["by"],
+            "confirmed_by_label": filing.get("by_label"),
             "confirmed_at": filing["at"],
             "drift": filing_drift(filing["pack"], now),
         }

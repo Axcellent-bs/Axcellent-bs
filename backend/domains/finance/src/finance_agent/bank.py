@@ -317,6 +317,7 @@ def outflows(
                     "memo": r["memo"],
                     "note": (note or {}).get("note"),
                     "noted_by": (note or {}).get("by"),
+                    "noted_by_label": (note or {}).get("by_label"),
                 }
             )
 

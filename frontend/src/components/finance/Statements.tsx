@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { actorText } from "@/lib/actor";
 import { finance, humanTokenSet, signedKrw, type OtherPnlInput, type StatementPeriod } from "@/lib/finance";
 import { AppliedRules, Panel, ResourceBody, useResource } from "./bits";
 
@@ -139,7 +140,7 @@ function OtherPnlForm({ month, onSaved }: { month: string; onSaved: () => void }
       const entry = r.data.entry;
       setValues(Object.fromEntries(OTHER_FIELDS.map((f) => [f.key, entry?.[f.key] == null ? "" : String(entry[f.key])])));
       setLocked(r.data.locked);
-      setInfo(entry ? `${entry.by} 입력` : null);
+      setInfo(entry ? `${actorText(entry.by_label, entry.by)} 입력` : null);
     }).catch(() => { if (live) setProblem("입력값을 읽지 못했습니다."); });
     return () => { live = false; };
   }, [month]);
@@ -155,7 +156,7 @@ function OtherPnlForm({ month, onSaved }: { month: string; onSaved: () => void }
     };
     try {
       const r = await finance.saveOtherPnl(body);
-      setInfo(r.data.entry ? `${r.data.entry.by} 입력` : null);
+      setInfo(r.data.entry ? `${actorText(r.data.entry.by_label, r.data.entry.by)} 입력` : null);
       onSaved();
     } catch (e) { setProblem((e as Error).message); }
     finally { setBusy(false); }

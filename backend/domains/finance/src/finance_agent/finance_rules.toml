@@ -186,6 +186,14 @@ basis = "내부통제 기준. 중요한 오류의 소급 수정 여부는 K-IFRS
 review = "pending"
 
 [[rules]]
+id = "CLS-005"
+area = "closing"
+title = "월 마감 체크리스트 기한"
+statement = "월 마감 체크리스트의 항목마다 기한을 두고, 끝나지 않은 채 기한이 지나면 '기한 지남'으로 보여 준다. 일 결산 확정은 다음 날, 매출·PG 대사 메모·은행 입금 대조·은행 출금 대조는 다음 달 3일, 판매자 정산 지급 승인은 그 주 지급 예정일(정산 기간 끝 + 6일), 판매자 미지급금 롤포워드와 월 결산 확정은 다음 달 5일이다. 기한은 알림이고 확정을 막지 않는다."
+basis = "내부통제 기준, finance_policy.toml [closing] *_due_day, daily_closing_due_days, settlement_pay_after_days. 지급일은 고객지원 정산 정책을 따른다"
+review = "pending"
+
+[[rules]]
 id = "VAT-006"
 area = "vat"
 title = "신고 숫자 고정"

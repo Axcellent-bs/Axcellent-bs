@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "@/lib/nav";
 import { shortDateTime } from "@/lib/format";
+import { actorText } from "@/lib/actor";
 import { finance, humanTokenSet, krw, plainText, signedKrw, type BankImport, type BankUnexplained, type BankOutflows } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, Stat, TONE, useResource } from "./bits";
 
@@ -15,6 +16,13 @@ const CHECK_TONE = { done: TONE.ok, pending: TONE.warn, unknown: TONE.muted } as
 const CHECK_KO = { done: "끝남", pending: "남음", unknown: "확인 불가" } as const;
 /** 체크 항목 → 바로 내려갈 섹션 앵커. 서버 link(탭 id)보다 한 칸 더 정확하다. 없으면 서버 link 탭을 연다 */
 const CHECK_ANCHOR: Record<string, string> = { bank: "bank", bank_out: "bank-outflows", payables: "payables" };
+
+const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
+/** "2026-12-03" → "12-03(목)". 날짜만 있는 값이라 시간대 없이 그 날짜 그대로 읽는다 */
+function dueText(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${iso.slice(5)}(${WEEKDAY_KO[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]})`;
+}
 
 /** `onOpen`: 탭 id 또는 섹션 앵커(#없이) */
 export function ChecklistSection({ tick, onOpen }: { tick: number; onOpen: (target: string) => void }) {
@@ -43,6 +51,11 @@ export function ChecklistSection({ tick, onOpen }: { tick: number; onOpen: (targ
                     <Chip label={CHECK_KO[i.status]} tone={CHECK_TONE[i.status]} />
                     <span className={done ? "text-ink-700" : "font-medium text-ink-900"}>{i.label}</span>
                     <span className="min-w-0 flex-1 text-sm text-ink-500">{i.detail}</span>
+                    {i.due && (done
+                      ? <span className="text-sm tabular-nums text-ink-500">기한 {dueText(i.due)}</span>
+                      : i.overdue
+                        ? <Chip label={`기한 지남 · ${dueText(i.due)}`} tone={TONE.bad} />
+                        : <span className="text-sm tabular-nums text-ink-700">기한 {dueText(i.due)}</span>)}
                     {!done && <button type="button" className="text-sm font-medium text-brand-700 hover:underline" onClick={() => onOpen(CHECK_ANCHOR[i.key] ?? i.link)}>하러 가기 →</button>}
                   </li>
                 );
@@ -207,7 +220,7 @@ export function BankOutSection({ tick }: { tick: number }) {
                       <span className="tabular-nums text-ink-700">{u.date}</span>
                       <span className="tabular-nums font-medium text-ink-900">{krw(u.amount)}</span>
                       <span className="min-w-[8rem] text-ink-500">{plainText(u.memo) || "(적요 없음)"}</span>
-                      {u.note && <span className="w-full text-ink-500">메모: {plainText(u.note)}{u.noted_by ? ` · ${u.noted_by}` : ""}</span>}
+                      {u.note && <span className="w-full text-ink-500">메모: {plainText(u.note)}{u.noted_by ? ` · ${actorText(u.noted_by_label, u.noted_by)}` : ""}</span>}
                       <OutNote item={u} onSaved={(next) => res.set((env) => (env ? { ...env, data: next } : env))} />
                     </li>
                   ))}
@@ -266,10 +279,10 @@ export function SellerTransfersSection({ tick }: { tick: number }) {
 
 /** 은행 내역 기록 한 줄: 누가·어디서 · 파일 · 결과 */
 function bankImportLine(b: BankImport): string {
-  if (b.status === "removed") return `${b.by ?? "사람"}님이 뺌 · ${b.file ?? ""} · ${b.rows ?? 0}줄 뺌 · 이유: ${b.reason ?? ""}`;
-  const who = b.source === "upload" ? `${b.by ?? "사람"}님이 올림` : "폴더";
+  if (b.status === "removed") return `${actorText(b.by_label, b.by)}님이 뺌 · ${b.file ?? ""} · ${b.rows ?? 0}줄 뺌 · 이유: ${b.reason ?? ""}`;
+  const who = b.source === "upload" ? `${actorText(b.by_label, b.by)}님이 올림` : "폴더";
   if (b.status === "failed") return `${who} · ${b.file} · 읽지 못함: ${b.reason}`;
-  const removed = b.removed ? ` · ${b.removed.by}님이 ${shortDateTime(b.removed.at)}에 뺌` : "";
+  const removed = b.removed ? ` · ${actorText(b.removed.by_label, b.removed.by)}님이 ${shortDateTime(b.removed.at)}에 뺌` : "";
   return `${who} · ${b.file} · 새로 ${b.added}줄 더함${removed}`;
 }
 

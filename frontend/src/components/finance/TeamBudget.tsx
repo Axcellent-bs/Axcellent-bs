@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { actorText } from "@/lib/actor";
 import { finance, humanTokenSet, krw, plainText, signedKrw, todayKst, type TeamBudget } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
@@ -112,7 +113,7 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
 
               {b.approved && (
                 <p className="text-sm text-ink-500">
-                  {b.approved.by}님이 {new Date(b.approved.at).toLocaleString("ko-KR")}에 합계 {krw(b.approved.total)}(인당 {krw(b.approved.per_head_monthly)})로 확정함
+                  {actorText(b.approved.by_label, b.approved.by)}님이 {new Date(b.approved.at).toLocaleString("ko-KR")}에 합계 {krw(b.approved.total)}(인당 {krw(b.approved.per_head_monthly)})로 확정함
                   {b.approved.note && ` · 메모: ${plainText(b.approved.note)}`}
                 </p>
               )}

@@ -1,5 +1,6 @@
 import { ApiError } from "./apiError";
 import { FINANCE_AGENT_URL, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
+import { actorHeaders } from "./actor";
 import { humanizeIds, incidentNo } from "./format";
 import { ExampleMissing, exampleCall, exampleOn } from "./financeExample";
 
@@ -90,8 +91,10 @@ export interface ExportPackage {
  */
 export interface BankImport {
   file: string | null; at: string; status: "imported" | "failed" | "removed"; source?: "upload" | "folder" | "remove"; by?: string;
+  /** 공용 토큰일 때 "<화면 계정 이름>(<IP>)" */
+  by_label?: string;
   import_id?: string; added?: number; rows?: number; withdrawals?: number; skipped?: number; reason?: string;
-  removed?: { by: string; at: string; reason: string; rows: number };
+  removed?: { by: string; by_label?: string; at: string; reason: string; rows: number };
 }
 export interface ExportsView { packages: ExportPackage[]; bank_imports: BankImport[] }
 
@@ -129,7 +132,7 @@ export interface OtherPnlInput {
   month: string; salary: number; rent: number; other_sga: number;
   non_operating_income: number; non_operating_expense: number; income_tax: number | null; memo?: string;
 }
-export interface OtherPnlView { month: string; locked: boolean; entry: (OtherPnlInput & { by: string; at: string }) | null }
+export interface OtherPnlView { month: string; locked: boolean; entry: (OtherPnlInput & { by: string; by_label?: string; at: string }) | null }
 
 export interface ClosingReport {
   applied_rules?: AppliedRule[];
@@ -138,7 +141,7 @@ export interface ClosingReport {
   drift?: { code: string; label: string; confirmed: number; current: number; diff: number }[];
   close_warnings?: { code: string; message: string }[];
   adjustment_proposal?: { journal: { account: string; debit: number; credit: number; memo: string }[]; net: number; signature: string } | null;
-  adjustments?: { reason: string; by: string; at: string; posted_month: string }[];
+  adjustments?: { reason: string; by: string; by_label?: string; at: string; posted_month: string }[];
   prior_adjustments?: { for_month: string; reason: string; lines: { code: string; diff: number }[] }[];
   net_after_adjustments?: number | null;
   period: ClosingPeriod;
@@ -151,6 +154,8 @@ export interface ClosingReport {
   commentary_source: "llm" | "template";
   status: "draft" | "confirmed";
   confirmed_by: string | null;
+  /** 공용 토큰일 때 "<화면 계정 이름>(<IP>)" */
+  confirmed_by_label?: string | null;
   confirmed_at: string | null;
 }
 
@@ -175,12 +180,13 @@ export interface ReconItem {
 /** 대사 기간의 건이 어느 PG 자료와 맞춰졌는지와 올린 파일이 덮는 판매일 기간 */
 export interface PgCoverage { uploaded: number; generated: number; periods: { from: string; to: string }[] }
 /** 재무가 기획에 보낸 개선 요청 */
-export interface PlanningRequest { source_ref: string; title: string; facts: string[]; request_id: string; context_id: string; outcome: "created" | "linked_duplicate"; duplicate_of: string | null; by: string; at: string }
+export interface PlanningRequest { source_ref: string; title: string; facts: string[]; request_id: string; context_id: string; outcome: "created" | "linked_duplicate"; duplicate_of: string | null; by: string; by_label?: string; at: string }
 export interface PgImport {
   file: string | null;
   at: string;
   source: "upload" | "folder" | "clear";
   by?: string;
+  by_label?: string;
   status: "imported" | "failed" | "cleared";
   rows?: number;
   period?: { from: string; to: string };
@@ -283,7 +289,7 @@ export interface BankTransfer {
   status: TransferStatus; status_label: string; bank_date: string | null; bulk: boolean;
 }
 export interface BankOutRow { category: string; bank: number; book: number | null; book_source: string | null; diff: number | null; judged: boolean; comparable: boolean }
-export interface BankUnexplained { id: string; date: string; amount: number; memo: string; note: string | null; noted_by: string | null }
+export interface BankUnexplained { id: string; date: string; amount: number; memo: string; note: string | null; noted_by: string | null; noted_by_label?: string | null }
 export interface BankOutflows {
   uploaded: boolean;
   covered: { from: string; to: string }[];
@@ -310,12 +316,13 @@ export interface Cashflow {
   short_weeks?: string[];
   note: string;
 }
-export interface CloseItem { key: string; label: string; status: "done" | "pending" | "unknown"; detail: string; link: string }
+/** `due`: 기한(YYYY-MM-DD, finance_policy.toml [closing]). `overdue`: 안 끝났는데 기한이 지남 */
+export interface CloseItem { key: string; label: string; status: "done" | "pending" | "unknown"; detail: string; link: string; due?: string; overdue?: boolean }
 export interface CloseChecklist { month: string; items: CloseItem[]; done: number; total: number; ready: boolean; closed: boolean }
 
 // ---------------------------------------------------------------- ④ 팀 예산 (인사 ↔ 재무)
 export interface TeamBudgetRow { team: string; headcount: number; budget: number; prev_headcount: number | null; prev_budget: number | null; change: number | null }
-export interface TeamBudgetApproval { month: string; per_head_monthly: number; total: number; signature: string; by: string; at: string; note: string | null; rows: { team: string; headcount: number; budget: number }[] }
+export interface TeamBudgetApproval { month: string; per_head_monthly: number; total: number; signature: string; by: string; by_label?: string; at: string; note: string | null; rows: { team: string; headcount: number; budget: number }[] }
 export interface TeamBudget {
   month: string;
   prev_month: string;
@@ -343,6 +350,7 @@ export interface VatPack {
   closable?: boolean;
   filing_status?: "draft" | "confirmed";
   confirmed_by?: string;
+  confirmed_by_label?: string | null;
   confirmed_at?: string;
   drift?: { code: string; label: string; confirmed: number; current: number; diff: number }[];
   quarter: string;
@@ -573,6 +581,8 @@ async function call(base: string, server: string, path: string, opts: CallOption
   if (opts.raw !== undefined) headers["Content-Type"] = "application/octet-stream";
   else if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.human && SAFETY_HUMAN_TOKEN) headers.Authorization = `Bearer ${SAFETY_HUMAN_TOKEN}`;
+  // 재무 서버만: 공용 토큰이라 누가 했나를 화면 계정 이름으로 같이 보낸다 (안전 장치 서버는 이 머리를 받지 않는다)
+  if (opts.human && base === FINANCE_AGENT_URL) Object.assign(headers, actorHeaders());
   let res: Response;
   try {
     res = await fetch(`${base}${path}`, {

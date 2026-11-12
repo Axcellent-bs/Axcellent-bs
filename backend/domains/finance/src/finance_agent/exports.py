@@ -286,6 +286,8 @@ def remove_import(
     import_id: str,
     by: str,
     reason: str,
+    *,
+    by_label: str | None = None,
 ) -> dict[str, Any]:
     """은행 내역 기록 하나와 그 기록으로 더한 줄·출금 대조 기간을 뺀다. 뺀 기록을 돌려준다.
 
@@ -329,12 +331,14 @@ def remove_import(
     bank_rows[:] = kept
     out_periods[:] = kept_periods
     at = fc.iso(fc.now())
-    target["removed"] = {"by": by, "at": at, "reason": reason, "rows": removed_rows}
+    label = {"by_label": by_label} if by_label else {}  # 공용 토큰일 때 누가 했나 (human.py)
+    target["removed"] = {"by": by, **label, "at": at, "reason": reason, "rows": removed_rows}
     record = {
         "file": target.get("file"),
         "at": at,
         "source": "remove",
         "by": by,
+        **label,
         "status": "removed",
         "import_id": import_id,
         "rows": removed_rows,
