@@ -76,6 +76,7 @@ class LabelConfig:
     ffmpeg_timeout_s: int
     source: str = ""
     sha256: str = ""
+    font_bundled: str = ""  # 패키지 폴더 기준 상대 경로(번들 글꼴)
 
     def text_for(self, kind: str) -> str:
         return self.text_image if kind == "image" else self.text_video
@@ -109,6 +110,7 @@ def load_config(path: str | Path | None = None) -> LabelConfig:
             display_time=str(display["time"]),
             font_file=str(font.get("file", "")).strip(),
             font_candidates=tuple(str(c) for c in font.get("candidates", [])),
+            font_bundled=str(font.get("bundled", "")).strip(),
             jpeg_quality=int(output["jpeg_quality"]),
             video_crf=int(output["video_crf"]),
             video_preset=str(output["video_preset"]),
@@ -153,12 +155,25 @@ def _validate(c: LabelConfig) -> None:
         raise LabelError("config_invalid", ",".join(problems))
 
 
+def bundled_font(config: LabelConfig) -> Path | None:
+    """번들 글꼴(Pretendard Std Bold, OFL 1.1). 패키지 폴더 밖 경로는 쓰지 않는다."""
+    if not config.font_bundled:
+        return None
+    base = Path(__file__).resolve().parent
+    path = (base / config.font_bundled).resolve()
+    return path if path.is_relative_to(base) and path.is_file() else None
+
+
 def find_font(config: LabelConfig) -> str:
+    """글꼴 순서: 환경변수 → toml `file` → 번들 → 시스템 후보. 없으면 거절한다(fail-closed)."""
     explicit = os.getenv(FONT_ENV, "").strip() or config.font_file
     if explicit:
         if not Path(explicit).is_file():
             raise LabelError("font_not_found", "설정한 글꼴 파일이 없다")
         return explicit
+    bundled = bundled_font(config)
+    if bundled is not None:
+        return str(bundled)
     for candidate in config.font_candidates:
         if Path(candidate).is_file():
             return candidate

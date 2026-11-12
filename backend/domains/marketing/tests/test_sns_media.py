@@ -355,7 +355,9 @@ def test_overlay_without_tools_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 def test_overlay_without_font_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     src = make_jpeg(tmp_path / "src.jpg", 1080, 1350)
-    cfg = dataclasses.replace(sns_label.load_config(), font_file="", font_candidates=())
+    cfg = dataclasses.replace(
+        sns_label.load_config(), font_file="", font_bundled="", font_candidates=()
+    )
     with pytest.raises(sns_label.LabelError) as caught:
         sns_label.apply_label(src, tmp_path / "out", generator_model="m", config=cfg)
     assert caught.value.code == "font_not_found"

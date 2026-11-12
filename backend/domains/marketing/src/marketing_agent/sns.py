@@ -22,6 +22,7 @@ import os
 import re
 import sqlite3
 import threading
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -259,6 +260,65 @@ def _coupon_body(facts: SnsCouponFacts) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class SourceParts:
+    """초안 본문의 출처(공지 또는 쿠폰 사실)에서 뽑은 값."""
+
+    kind: Literal["notice", "coupon"]
+    ref: str
+    body: str
+    required: list[str]
+    constraints: list[CouponConstraint]
+
+
+def source_parts(
+    request: AgentRequest, data: DraftSnsPostInput, notices: NoticeStore
+) -> SourceParts | AgentResult:
+    """출처를 확인해 본문 재료를 돌려준다. 쓸 수 없는 출처면 결과 Task를 돌려준다(저장하지 않는다).
+
+    `prepare_sns_post_from_media`가 돈이 드는 미디어 생성 전에 같은 검사를 먼저 하려고 쓴다.
+    """
+    if data.notice_id is not None:
+        view = notices.view(data.notice_id)
+        if not view.found or view.public_text is None:
+            return _result(request, TaskStatus.FAILED, outcome="notice_not_found")
+        if view.status != "published":  # 끝난 공지를 다시 올리지 않는다
+            return _result(request, TaskStatus.FAILED, outcome="notice_not_active")
+        body = view.public_text
+        return SourceParts("notice", data.notice_id, body, [body, DEMO_TEXT, TERMS_TEXT], [])
+    assert data.coupon is not None
+    facts = data.coupon
+    have = {c.code for c in facts.constraints}
+    missing = [code for code in CONSTRAINT_LABELS if code not in have]
+    if missing:  # 제약 사항이 없는 쿠폰 계획은 만들지 않는다(체크리스트 1절)
+        return _result(
+            request,
+            TaskStatus.COMPLETED,
+            outcome="rejected_constraint_missing",
+            output={"missing_constraints": missing},
+            evidence=_evidence(["draft_sns_post"], "쿠폰 제약 사항 누락", [facts.campaign_id]),
+        )
+    return SourceParts(
+        "coupon",
+        facts.campaign_id,
+        _coupon_body(facts),
+        [f"{facts.unit_value:,}원 쿠폰", DEMO_TEXT, TERMS_TEXT],
+        facts.constraints,
+    )
+
+
+def preflight_draft(
+    request: AgentRequest, data: DraftSnsPostInput, notices: NoticeStore
+) -> AgentResult | None:
+    """초안을 만들 수 있는지 미리 본다(출처·캡션 길이). 만들 수 있으면 None."""
+    parts = source_parts(request, data, notices)
+    if isinstance(parts, AgentResult):
+        return parts
+    if len(_compose(parts.body, data.media_kind)) > CAPTION_MAX:
+        return _result(request, TaskStatus.FAILED, outcome="caption_too_long")
+    return None
+
+
 async def draft_sns_post(
     request: AgentRequest, notices: NoticeStore, store: SnsStore
 ) -> AgentResult:
@@ -274,35 +334,11 @@ async def draft_sns_post(
             },
         )
 
-    constraints: list[CouponConstraint] = []
-    if data.notice_id is not None:
-        view = notices.view(data.notice_id)
-        if not view.found or view.public_text is None:
-            return _result(request, TaskStatus.FAILED, outcome="notice_not_found")
-        if view.status != "published":  # 끝난 공지를 다시 올리지 않는다
-            return _result(request, TaskStatus.FAILED, outcome="notice_not_active")
-        source_kind: Literal["notice", "coupon"] = "notice"
-        source_ref = data.notice_id
-        body = view.public_text
-        required = [body, DEMO_TEXT, TERMS_TEXT]
-    else:
-        assert data.coupon is not None
-        facts = data.coupon
-        have = {c.code for c in facts.constraints}
-        missing = [code for code in CONSTRAINT_LABELS if code not in have]
-        if missing:  # 제약 사항이 없는 쿠폰 계획은 만들지 않는다(체크리스트 1절)
-            return _result(
-                request,
-                TaskStatus.COMPLETED,
-                outcome="rejected_constraint_missing",
-                output={"missing_constraints": missing},
-                evidence=_evidence(["draft_sns_post"], "쿠폰 제약 사항 누락", [facts.campaign_id]),
-            )
-        source_kind = "coupon"
-        source_ref = facts.campaign_id
-        body = _coupon_body(facts)
-        required = [f"{facts.unit_value:,}원 쿠폰", DEMO_TEXT, TERMS_TEXT]
-        constraints = facts.constraints
+    parts = source_parts(request, data, notices)
+    if isinstance(parts, AgentResult):
+        return parts
+    source_kind, source_ref, body = parts.kind, parts.ref, parts.body
+    required, constraints = parts.required, parts.constraints
 
     caption = _compose(body, data.media_kind)
     if len(caption) > CAPTION_MAX:
