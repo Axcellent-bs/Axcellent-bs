@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -122,3 +123,84 @@ def test_file_store_survives_reopen(
     client.post(BASE, json=_body(), headers=HUMAN)
     office_room.reset_store()
     assert [r["thread_id"] for r in client.get(BASE).json()["data"]] == ["th_1"]
+
+
+# ---------- 방(room_id): 전체 대화방 all, 장애·이슈 방은 총괄 사건 context_id ----------
+
+
+def test_room_defaults_to_all(client: TestClient) -> None:
+    row = client.post(BASE, json=_body(), headers=HUMAN).json()["data"]
+    assert row["room_id"] == "all"
+    assert client.get(BASE).json()["data"][0]["room_id"] == "all"
+
+
+def test_room_id_is_saved_and_returned(client: TestClient) -> None:
+    room = "ctx_inc_066ff5360ab5"
+    row = client.post(BASE, json=_body(room_id=room), headers=HUMAN).json()["data"]
+    assert row["room_id"] == room
+    assert [r["room_id"] for r in client.get(BASE).json()["data"]] == [room]
+
+
+def test_room_filter(client: TestClient) -> None:
+    room = "ctx_inc_066ff5360ab5"
+    client.post(BASE, json=_body(), headers=HUMAN)
+    client.post(BASE, json=_body(thread_id="th_2", room_id=room), headers=HUMAN)
+    client.post(BASE, json=_body(agent="data", thread_id="th_3", room_id=room), headers=HUMAN)
+    in_room = client.get(BASE, params={"room": room}).json()
+    assert {r["thread_id"] for r in in_room["data"]} == {"th_2", "th_3"}
+    assert in_room["meta"]["total"] == 2
+    assert [r["thread_id"] for r in client.get(BASE, params={"room": "all"}).json()["data"]] == [
+        "th_1"
+    ]
+    assert client.get(BASE, params={"room": "ctx_inc_none"}).json()["data"] == []
+    assert len(client.get(BASE).json()["data"]) == 3  # 거르지 않으면 모든 방
+    assert client.get(BASE, params={"room": ""}).status_code in (400, 422)
+
+
+def test_first_room_is_kept(client: TestClient) -> None:
+    room = "ctx_inc_066ff5360ab5"
+    client.post(BASE, json=_body(room_id=room), headers=HUMAN)
+    again = client.post(BASE, json=_body(room_id="all"), headers=HUMAN).json()["data"]
+    assert again["room_id"] == room  # 대화가 방을 옮겨 다니지 않는다
+    assert client.get(BASE, params={"room": "all"}).json()["data"] == []
+
+
+@pytest.mark.parametrize("bad", ["", "r" * 65])
+def test_bad_room_id_is_rejected(client: TestClient, bad: str) -> None:
+    assert client.post(BASE, json=_body(room_id=bad), headers=HUMAN).status_code in (400, 422)
+
+
+def test_old_db_file_without_room_column_opens(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """room_id 칸이 생기기 전 파일: 열 때 칸을 붙이고, 있던 대화는 전체 대화방(all)이 된다."""
+    path = tmp_path / "office_room.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        """
+        CREATE TABLE office_threads (
+            agent TEXT NOT NULL, thread_id TEXT NOT NULL, from_id TEXT NOT NULL,
+            from_name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            PRIMARY KEY (agent, thread_id)
+        );
+        """
+    )
+    now = datetime.now(UTC).isoformat()
+    old.execute(
+        "INSERT INTO office_threads VALUES (?,?,?,?,?,?)",
+        ("dev", "th_old", "acc_a", "재현", now, now),
+    )
+    old.commit()
+    old.close()
+
+    monkeypatch.setenv(office_room.DB_ENV, str(path))
+    rows = client.get(BASE).json()["data"]
+    assert [(r["thread_id"], r["room_id"]) for r in rows] == [("th_old", "all")]
+    client.post(BASE, json=_body(thread_id="th_new", room_id="ctx_inc_1"), headers=HUMAN)
+
+    # 다시 켜도(칸이 이미 있음) 그대로 열린다
+    office_room.reset_store()
+    office_room.get_store()
+    office_room.reset_store()
+    rows = client.get(BASE, params={"room": "ctx_inc_1"}).json()["data"]
+    assert [r["thread_id"] for r in rows] == ["th_new"]

@@ -182,8 +182,11 @@ AI 오피스 단톡방·AI 대화방 전체 대화방에서 부서 AI에게 건 
 
 | 경로 | 하는 일 |
 | --- | --- |
-| `GET /api/dashboard/office-room?hours=` | 최근 `hours`시간(기본 24, 1~168) 안에 말이 오간 대화. 최근 것이 먼저, 최대 200줄. 부서 AI를 부르지 않아 공통 로그에 줄이 쌓이지 않는다 |
-| `POST /api/dashboard/office-room` | `{agent, thread_id, from_id, from_name}`. 단톡방에서 보낼 때마다 화면이 올린다(사람 토큰 필요). 같은 대화면 `updated_at`만 바뀐다 |
+| `GET /api/dashboard/office-room?hours=&room=` | 최근 `hours`시간(기본 24, 1~168) 안에 말이 오간 대화. 최근 것이 먼저, 최대 200줄. `room`(선택)을 주면 그 방 대화만. 부서 AI를 부르지 않아 공통 로그에 줄이 쌓이지 않는다 |
+| `POST /api/dashboard/office-room` | `{agent, thread_id, from_id, from_name, room_id?}`. 단톡방에서 보낼 때마다 화면이 올린다(사람 토큰 필요). 같은 대화면 `updated_at`만 바뀐다 |
+
+- 방(`room_id`, 1~64자): 전체 대화방은 `all`(기본값), 장애·이슈 방은 총괄 사건 `context_id`. 같은 대화를 다른 방으로 다시 올려도 처음 방 그대로다. 응답 줄마다 `room_id`가 있다.
+- `room_id` 칸이 없는 예전 파일은 열 때 칸을 붙이고(있던 대화는 `all`), 이미 있으면 그대로 연다.
 
 - 보낸 사람(`from_id`·`from_name`)은 화면 로그인 계정이다. 화면이 공용 사람 토큰을 같이 쓰므로 토큰으로는 사람을 가르지 못한다.
 - 화면은 4초마다 목록을 읽고, 새로 오르거나 시각이 바뀐 대화와 답을 기다리는 대화만 부서 창구에서 다시 읽는다.
