@@ -1826,14 +1826,27 @@ async def change_requests(
 
 @router.get("/communications")
 def communications(
-    dept: str | None = None, context_id: str | None = None, include_events: bool = False
+    dept: str | None = None,
+    context_id: str | None = None,
+    include_events: bool = False,
+    from_agent: str | None = None,
+    to_agent: str | None = None,
+    message_type: communication_log.MessageType | None = None,
 ) -> dict:
     """부서별 소통 탭. 공통 로그의 A2A 요청·응답을 한 줄씩 보여 준다 (코드가 만든 필드만).
 
     `include_events=true`면 발행된 이벤트 줄(`kind="event"`, 종류만)도 함께 보여 준다.
+    `from_agent`·`to_agent`·`message_type`(`request`|`reply`)은 읽기 전용 거르개다.
+    재무 화면 "총괄이 재무에 맡긴 일"이
+    `from_agent=orchestrator&to_agent=finance&message_type=request`로 쓴다.
     """
     lines, truncated = communication_log.list_communications(
-        dept, context_id, include_events=include_events
+        dept,
+        context_id,
+        include_events=include_events,
+        from_agent=from_agent,
+        to_agent=to_agent,
+        message_type=message_type,
     )
     body = ok(lines, total=len(lines))
     body["meta"]["truncated"] = truncated
