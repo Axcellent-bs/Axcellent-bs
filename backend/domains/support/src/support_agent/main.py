@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from ax_agent_template import config
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from support_agent import inquiry_pull, receipt_vision, settlement_books
+from support_agent import inquiry_pull, receipt_vision, settlement_auto, settlement_books
 from support_agent.audit_handlers import AUDIT_HANDLERS
 from support_agent.change_handlers import CHANGE_HANDLERS
 from support_agent.chat_handlers import CHAT_HANDLERS
@@ -111,10 +111,13 @@ async def _lifespan_with_inquiry_pull(application: FastAPI) -> AsyncIterator[Non
         # 함)
         if "seller_settlement" in _OWNED_SKILLS and not config.is_mock("support"):
             settlement_books.prime()
+        # 고객지원 AI가 지급일이 된 주의 정산 지급 승인을 스스로 요청한다 (목 모드·off면 안 돈다)
+        auto = settlement_auto.start(_OWNED_SKILLS)
         try:
             yield
         finally:
             inquiry_pull.stop(task)
+            settlement_auto.stop(auto)
 
 
 app.router.lifespan_context = _lifespan_with_inquiry_pull

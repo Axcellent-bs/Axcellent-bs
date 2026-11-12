@@ -4,6 +4,7 @@
 `SAFETY_REGISTRY_PATH`·`SAFETY_THRESHOLDS_PATH`로 다른 파일을 쓸 수 있다(테스트용).
 `SAFETY_REVIEW_TIMEOUT_SECONDS`가 있으면 기준표의 `review_timeout_seconds`(데모 10분)를 덮어쓴다
 (운영 24시간 = 86400). 값이 정수가 아니거나 범위 밖이면 시작할 때 실패한다.
+기준표 `[review_timeout_by_action]`에 적은 액션은 그 기한을 따로 쓴다(환경변수가 덮어쓰지 않는다).
 """
 
 from __future__ import annotations
@@ -183,6 +184,9 @@ class ThresholdTable(_Strict):
     version: int = Field(ge=1)
     verify_timeout_seconds: float = Field(gt=0)
     review_timeout_seconds: float = Field(gt=0)
+    # 액션별 사람 확인 기한(초). 여기 있는 액션은 `review_timeout_seconds`(와 그 환경변수) 대신
+    # 이 값을 쓴다. 예: 판매자 정산 지급 승인(`confirm_settlement`)은 24시간 (2026-11-12)
+    review_timeout_by_action: dict[str, float] = Field(default_factory=dict)
     rules: list[Rule] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -194,8 +198,20 @@ class ThresholdTable(_Strict):
             seen.add(rule.key)
         return self
 
+    @model_validator(mode="after")
+    def _action_timeouts_in_range(self) -> ThresholdTable:
+        for action, seconds in self.review_timeout_by_action.items():
+            if not REVIEW_TIMEOUT_MIN <= seconds <= REVIEW_TIMEOUT_MAX:
+                allowed = f"{REVIEW_TIMEOUT_MIN}~{REVIEW_TIMEOUT_MAX}초"
+                raise ValueError(f"{action}의 사람 확인 기한은 {allowed}여야 한다: {seconds}")
+        return self
+
     def rules_for(self, action: str) -> list[Rule]:
         return [rule for rule in self.rules if rule.action == action]
+
+    def review_timeout_for(self, action: str) -> float:
+        """이 액션의 C 보류 건 자동 거절까지 시간(초). 액션별 값이 있으면 그 값."""
+        return self.review_timeout_by_action.get(action, self.review_timeout_seconds)
 
 
 class Registry(_Strict):

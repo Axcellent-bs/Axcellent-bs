@@ -190,6 +190,8 @@ def test_an_already_requested_week_is_not_requested_again(client: TestClient, fa
     ("outcome", "status", "code"),
     [
         ("nothing_to_settle", 409, "NOTHING_TO_SETTLE"),
+        ("period_not_closed", 409, "PERIOD_NOT_CLOSED"),
+        ("orders_partial", 503, "ORDERS_PARTIAL"),
         ("safety_unavailable", 503, "SAFETY_UNAVAILABLE"),
         ("invalid_input", 400, "INVALID_INPUT"),
     ],

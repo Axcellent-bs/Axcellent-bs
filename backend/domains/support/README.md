@@ -181,7 +181,7 @@ ax-contracts, ax-agent-template
 | `seller_settlement_weeks` | read | 여러 주(최대 30주) 정산서. 재무 현금 흐름·마감 점검용 |
 | `seller_settlement_batches` | read | 주마다 지급 묶음 기록(상태·판매자별 지급액·승인 시각). 재무 미지급금·은행 출금 대조용 |
 | `seller_settlement_deadlines` | read | 구매가 확정된 판매 대금을 기한(구매 확정일+20일) 안에 줄 수 있는지 점검 |
-| `request_seller_settlement` | A | 사람이 누른 묶음 지급 승인 요청 → `execute("confirm_settlement")` → 안전 장치 C 보류 → 사람 승인 |
+| `request_seller_settlement` | A | 사람이 누른 묶음 지급 승인 요청 → `execute("confirm_settlement")` → 안전 장치 C 보류 → 고객지원 담당 승인. 평소에는 고객지원 AI가 같은 길로 스스로 요청한다(아래) |
 
 - 정산금 = 판매액 − 판매 수수료 − 판매자 부담 쿠폰 − 환불. 판매액은 구매가 확정된(배송 완료) 주에 넣는다. 환불은 환불 시각과 구매 확정 시각 중 늦은 주에 빼고, 끝내 확정되지 않은 주문(배송 전 취소 등)의 환불은 빼지 않는다. 수수료율·지급일·기한은 `settlement_policy.toml`(재무 `finance_policy.toml`의 수수료율과 같게 둔다)
 - 서비스: `settlement`(포트 8126, `services/settlement`). 처음에는 `claims` 안에 있었는데 주문 30만 건 장부를 읽고 계산하는 동안 클레임 처리가 느려져 따로 띄운다. 다른 쪽은 `support`로 부르면 `route_target`이 이 서비스로 보낸다. 켠 서비스 목록에서는 `claims`를 따른다
@@ -189,8 +189,11 @@ ax-contracts, ax-agent-template
 - 조회는 저장된 장부로 바로 답하고, 새로 읽기는 뒤에서 하나만 돈다. 서버를 켜면 뒤에서 첫 장부를 모으고 주별 정산서를 미리 계산한다. 첫 장부가 아직이면 5초만 기다리고 `settlement_preparing`으로 답한다(재무·dashboard-api는 503 "준비 중")
 - 지급 요청은 60초 안에 모은 장부로 정산서를 새로 계산한다. 오래됐으면 전체가 아니라 최근 주문만 다시 읽는다(오래된 주문의 바뀐 점은 10분마다 도는 전체 읽기가 맞춘다)
 - 계산(`settlement.py`): 정산서는 확정 주문·대기 주문·환불·쿠폰을 한 번씩만 훑어 판매자별로 모은다. 같은 장부·같은 주의 정산서와 지급 기한 점검은 한 번 계산해 다시 쓰고, 같은 계산이 돌고 있으면 기다린다(`SettlementBooks.computed`). 지급 기한 점검은 주마다 정산서를 한 번만 쓴다
-- 지급 요청은 사람이 누른 것만 받는다(`requested_by` 필수, 대시보드 API가 사람 토큰에서 꺼내 넣는다). 요청한 사람은 승인하지 못한다(안전 관문). 같은 주가 요청 중·승인됨이면 다시 요청하지 않는다
-- 요청 중인 묶음은 읽을 때마다 안전 장치 보류 건 상태를 다시 읽는다. 안전 장치가 그 보류 건을 모르면(404, 재시작으로 보류 큐가 비워짐) `rejected`(`closed_reason: review_missing`)로 바꿔 다시 요청할 수 있게 한다. 승인된 적이 없으니 두 번 지급되지 않는다
+- **고객지원 AI가 요청하고 고객지원 담당이 승인한다** (2026-11-12 팀장 결정, `settlement_auto.py`). settlement 서비스가 장부를 모은 뒤 10분마다 지급 예정일이 된 지난 주(지급 기한 점검 범위 안)를 보고, 보류 없이 줄 판매자가 있으면 `requested_by: "support-ai"`로 요청한다. 요청자가 사람이 아니므로 병환을 포함한 어느 고객지원 담당이든 `/settlements` 보류 큐에서 승인한다. 시간 초과·보류 건 잃음인 주는 다시 요청하고, 담당이 거절한 주는 다시 올리지 않는다. 스위치 `SUPPORT_SETTLEMENT_AUTO_REQUEST=on|off`(비우면 실제 모드에서 켜짐, 목 모드에서 꺼짐), 간격 `SUPPORT_SETTLEMENT_AUTO_REQUEST_SECONDS`(기본 600)
+- 사람 버튼 요청도 그대로 받는다(`requested_by` 필수, 대시보드 API가 사람 토큰에서 꺼내 넣는다). 요청한 사람은 승인하지 못한다(안전 관문). 같은 주가 요청 중·승인됨이면 다시 요청하지 않는다. 사람 버튼과 AI가 동시에 요청하지 않게 한 번에 하나만 요청한다
+- 요청을 막는 경우: 기간이 아직 끝나지 않은 주(`period_not_closed`), 판매 서버 주문 일부를 못 읽음(`orders_partial`, 조회는 보여 준다), 보류 없이 줄 판매자 없음(`nothing_to_settle`). 확정 매출 없이 환불만 있는 판매자는 정산금 0원 이하라 보류(`negative_payout`)
+- 안전 장치 보류 기한: `confirm_settlement`만 24시간(안전 장치 기준표 v11 `[review_timeout_by_action]`). 다른 액션은 그대로
+- 요청 중인 묶음은 읽을 때마다 안전 장치 보류 건 상태를 다시 읽는다. 안전 장치가 그 보류 건을 모르면(404, 재시작으로 보류 큐가 비워짐) 먼저 실행 기록(`/api/safety/executions`)을 보고 같은 주의 `confirm_settlement`가 실행됐으면 approved, 없을 때만 `rejected`(`closed_reason: review_missing`)로 바꿔 다시 요청할 수 있게 한다. 실행 기록을 못 읽으면 요청 중으로 둔다. 승인된 묶음은 되돌리지 않는다. 다시 요청하기 전에도 실행 기록을 한 번 더 봐서 두 번 요청하지 않는다
 - 묶음 기록은 `SUPPORT_SETTLEMENT_FILE`(JSON)에 남는다. 이 파일이 없고 `SUPPORT_SETTLEMENT_IMPORT_FILE`(재무 `finance_state.json`)이 있으면 처음 한 번 재무가 남긴 묶음 기록을 가져온다(`run_all.sh`가 둘 다 설정)
 - 실제 송금은 하지 않는다. 승인 = 지급 기록이다
 

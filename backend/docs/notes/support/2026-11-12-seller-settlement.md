@@ -14,10 +14,11 @@
                                                                         │
 판매 서버(주문·배송 완료·환불·쿠폰) ─────────────────────────────────────┤
                                                                         ▼
-                         고객지원(claims): 판매자별 정산금 계산 · 지급 기한 점검
-                                                                        │ 사람이 "지급 승인 요청" 누름
+                         고객지원(settlement): 판매자별 정산금 계산 · 지급 기한 점검
+                                                                        │ 고객지원 AI가 지급일이 된 주를 스스로 요청
+                                                                        │ (사람이 버튼으로 먼저 올릴 수도 있다)
                                                                         ▼
-                         execute(confirm_settlement) ─▶ 안전 장치 C 보류 ─▶ 사람이 승인
+                         execute(confirm_settlement) ─▶ 안전 장치 C 보류(24시간) ─▶ 고객지원 담당이 승인
                                                                         │
                          재무: seller_settlement* 읽기 skill로 결과를 받아
                                화면 표시 · 미지급금 롤포워드 · 13주 현금 흐름 · 은행 출금 대조 · 마감 점검
@@ -26,8 +27,8 @@
 | 일 | 전 | 후 |
 | --- | --- | --- |
 | 정산금 계산 (판매액 − 수수료 − 판매자 부담 쿠폰 − 환불) | 재무 | 고객지원 |
-| 지급 승인 요청 (`confirm_settlement`) | 재무 | 고객지원 (레지스트리 owner `support`, 여전히 C) |
-| 지급 승인 | 사람 (안전 장치 보류 큐) | 그대로 |
+| 지급 승인 요청 (`confirm_settlement`) | 재무 | 고객지원 AI 자동 요청 (레지스트리 owner `support`, 여전히 C) |
+| 지급 승인 | 사람 (안전 장치 보류 큐) | 고객지원 담당 (고객지원 > 판매자 정산 보류 큐) |
 | 묶음 상태 기록 | 재무 `finance_state.json` | 고객지원 `support_settlement.json` |
 | 지급 기한 점검 | 재무 | 고객지원 |
 | 정산 화면 | 재무 탭 ③ (요청 버튼 있음) | 고객지원 화면 (요청 버튼), 재무 탭 ③은 읽기 전용 |
@@ -37,7 +38,7 @@
 
 - 판매액은 구매가 확정된(배송 완료) 주에 정산한다. 확정 전 주문은 확정되는 주로 넘긴다.
 - 환불은 환불 시각과 구매 확정 시각 중 늦은 주에 뺀다. 끝내 확정되지 않은 주문의 환불은 빼지 않는다(#1003).
-- 정산금 0원 이하면 보류(`negative_payout`), 확정 대기만 있으면 보류(`no_confirmed_orders`).
+- 정산금 0원 이하면 보류(`negative_payout`, 확정 매출 없이 환불·쿠폰만 있는 판매자 포함), 확정 대기만 있으면 보류(`no_confirmed_orders`).
 - 수수료율은 재무 매출 계산과 같아야 한다. 고객지원 `settlement_policy.toml`과 재무 `finance_policy.toml`의 `[commission]`을 같이 바꾼다.
 
 ## 옮기기
@@ -50,3 +51,28 @@
 
 - 고객지원 `tests/test_seller_settlement.py`: 정산 공식·보류 사유·환불 시점·상품 목록·무작위 장부 150개 독립 계산 대조(재무 `accuracy.case_settlement`에서 옮김)·지급 기한·판매 서버 읽기·skill(요청·404 재요청·연결 실패·승인 반영·안전 장치 꺼짐·줄 판매자 없음)·저장과 옮기기
 - 안전 장치: `confirm_settlement` owner가 `support`이고 C인지, 재무가 요청하면 미등록 요청으로 보류되는지
+
+## 고객지원 AI가 요청하고 고객지원 담당이 승인 (2026-11-12 오후)
+
+팀장(태윤) 결정. 재무는 지급을 승인하지 않는다. 예전 흐름은 사람(고객지원 담당 병환)이 "정산 묶음 지급 승인 요청"을 누르면 안전 관문이 요청한 사람의 승인을 막아 고객지원 밖의 사람(태윤)이 승인해야 했고, 보류 기한 10분이 지나 W44 요청이 그냥 만료됐다.
+
+- **고객지원 AI가 요청한다** (`settlement_auto.py`): settlement 서비스가 장부를 다 모은 뒤 10분마다(`SUPPORT_SETTLEMENT_AUTO_REQUEST_SECONDS`) 지급 기한 점검 범위(70일) 안에서 기간이 끝났고 지급 예정일(일요일 + 6일)이 된 주를 오래된 주부터 본다. 보류 없이 줄 판매자가 있고 묶음이 요청 중·승인됨이 아니면 사람 버튼과 같은 길(`settlement_handlers.request_week`)로 요청한다. 요청자는 `requested_by: "support-ai"`
+- 스위치 `SUPPORT_SETTLEMENT_AUTO_REQUEST=on|off`. 비우면 목 모드(테스트)는 끄고 실제 모드는 켠다. `run_all.sh`는 `on`
+- 같은 주를 두 번 요청하지 않는다: 요청 중·승인됨이면 건너뛰고, 멱등 키는 `ctx_req_settlement_{주}:confirm_settlement:{주}:{시도}` 그대로. 사람 버튼과 AI가 동시에 요청하지 않게 요청은 한 번에 하나만 한다
+- 다시 요청: 시간 초과(`expired`)·보류 건 잃음(`review_missing`)인 주만. 고객지원 담당이 거절한 주는 AI가 다시 올리지 않는다(사람이 버튼으로 다시 요청할 수 있다)
+- **승인은 고객지원 담당**: 안전 관문은 "사람이고 요청한 사람이 아님"만 본다(그대로). AI 요청은 사람이 요청한 게 아니므로 병환을 포함한 어느 담당이든 고객지원 > 판매자 정산(`/settlements`) 보류 큐에서 승인한다. 사람이 버튼으로 올린 요청은 다른 담당이 승인한다
+- **보류 기한 24시간**: 안전 장치 기준표 v11에 액션별 기한(`[review_timeout_by_action]`)을 더해 `confirm_settlement`만 86400초. 다른 액션은 그대로(데모 10분, `SAFETY_REVIEW_TIMEOUT_SECONDS`로 덮어쓰기). 액션별 값은 환경변수가 덮어쓰지 않는다
+
+### 병환 #1013 리뷰 반영
+
+- 기간이 끝나지 않은 주는 요청하지 않는다: `period_not_closed` (dashboard-api 409 `PERIOD_NOT_CLOSED`, 화면 안내)
+- 판매 서버 주문 일부를 못 읽었으면(`orders_partial`) 지급 요청을 막는다(dashboard-api 503 `ORDERS_PARTIAL`). 조회는 "받지 못한 값" 표시와 함께 보여 준다
+- 보류 건 404: `requested`인 묶음만 본다(승인된 묶음은 되돌리지 않는다). 안전 장치 실행 기록(`GET /api/safety/executions?context_id=ctx_req_settlement_{주}`)에 같은 주의 `confirm_settlement`가 실행됐으면 approved, 기록도 없을 때만 `rejected`(`review_missing`). 실행 기록을 못 읽으면 요청 중으로 둔다. `review_missing` 뒤 다시 요청하기 전에도 실행 기록을 보고, 실행됐으면 요청하지 않고 approved로 둔다(못 읽으면 `safety_unavailable`)
+- 확정 매출 없이 환불만 있는 판매자(정산금 0원 이하)는 "지급 준비됨"이 아니라 보류(`negative_payout`, 문구 "확정 매출 없이 환불·쿠폰만 있어 정산금이 0원 이하")
+- 금액 공식과 더하는 순서는 바꾸지 않았다. 예전 계산과 같은지 대조하는 테스트(무작위 장부 150개)는 보류 사유만 같은 규칙으로 맞췄다
+
+### 올릴 때
+
+- 다시 띄울 서비스: 안전 장치(기준표 v11), settlement(자동 요청 루프), dashboard-api(오류 코드), 화면
+- 환경변수: `SUPPORT_SETTLEMENT_AUTO_REQUEST=on`(실제 모드는 비워도 켜진다), 필요하면 `SUPPORT_SETTLEMENT_AUTO_REQUEST_SECONDS`
+- 안전 장치 보류 큐는 메모리라 다시 띄우면 요청 중인 묶음은 `review_missing`이 되고, AI가 다음 확인 때 새 시도 번호로 다시 요청한다
