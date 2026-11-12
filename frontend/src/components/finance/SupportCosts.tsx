@@ -22,12 +22,13 @@ function Row({ r }: { r: SupportCostRecord }) {
         {RESOLUTION_KO[r.resolution] ?? r.resolution}
         {r.claim_decision && <span className="text-ink-500"> ({DECISION_KO[r.claim_decision] ?? r.claim_decision})</span>}
       </td>
-      <td className="py-2 pr-3 text-ink-700">{r.order_id ?? "–"}</td>
+      <td className="py-2 pr-3 text-ink-700">{r.order_id ? <Link href={`/orders?q=${encodeURIComponent(r.order_id)}`} className="font-medium text-brand-700 underline">{r.order_id}</Link> : "–"}</td>
       <td className="py-2 pr-3 tabular-nums text-ink-700">{r.shipping_fee == null ? <span className="text-ink-500">확인할 수 없음</span> : krw(r.shipping_fee)}</td>
       <td className="py-2 pr-3"><Chip label={spent} tone={r.expense_used ? TONE.warn : TONE.muted} /></td>
       <td className="py-2 pr-3 whitespace-nowrap text-ink-500">{shortDateTime(r.recorded_at)}</td>
       <td className="py-2">
         <Link href={`/orchestrator?ctx=${encodeURIComponent(r.context_id)}`} className="whitespace-nowrap text-sm font-medium text-brand-700 underline">총괄 이벤트 →</Link>
+        <Link href={`/support?inquiry=${r.inquiry_id}#inquiry`} className="ml-3 whitespace-nowrap text-sm font-medium text-brand-700 underline">고객지원 문의 →</Link>
       </td>
     </tr>
   );
