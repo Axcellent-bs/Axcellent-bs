@@ -3,26 +3,18 @@ import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/comp
 import { won } from "@/lib/format";
 import {
   DATA_SERVER, UNKNOWN, dataAi, kpiLive,
-  type A2AResult, type ActivityOutcomes, type ActivityPeriod, type ActivityReportOutput,
-  type CompanyFigure, type DepartmentActivity, type DepartmentReport, type UnknownSection, type UnusedHandoff,
+  type A2AResult, type ActivityPeriod, type ActivityReportOutput, type CompanyFigure, type UnknownSection,
 } from "@/lib/data";
 
-// 부서별 AI 업무 리포트: 데이터 AI(8106) activity_report 출력을 그대로 보여 준다.
+// 회사 현황 리포트: 데이터 AI(8106) activity_report 출력 중 회사 숫자와 달라진 점을 보여 준다.
+// 부서별 AI 업무·부서 간 협업(departments·collaboration)은 AI끼리 일한 기록이라 데이터 분석 탭에서 뺐다.
+// 서버는 그대로 계산해 보내고, 화면만 그리지 않는다.
 // 숫자는 모두 서버 값이다. 화면은 단위만 바꾼다(ms → 초, 원 콤마, 비율 → %).
 // 직전 기간 대비는 화살표(늘었음·줄었음·같음)와 직전 값만 보여 주고, 차이를 따로 계산하지 않는다.
 // 서버가 셀 수 없다고 한 칸(unknown_sections)은 그 칸에 "확인할 수 없음 · 이유"로 보여 준다. null은 0으로 그리지 않는다.
 
 const PERIOD_LABEL: Record<ActivityPeriod, string> = { day: "일간", week: "주간", month: "월간" };
 const NOTHING_NOTABLE = "특이사항 없음";
-
-const OUTCOMES: { key: keyof ActivityOutcomes; label: string; color: string }[] = [
-  { key: "auto_completed", label: "자동 완료", color: "bg-emerald-500" },
-  { key: "human_approved", label: "사람 확인 후 실행", color: "bg-brand-500" },
-  { key: "held", label: "보류", color: "bg-amber-400" },
-  { key: "rejected", label: "거절", color: "bg-red-500" },
-  { key: "unknown", label: UNKNOWN, color: "bg-ink-300" },
-  { key: "failed", label: "실패", color: "bg-red-800" },
-];
 
 /** 한국 시간 어제 날짜 (YYYY-MM-DD). 입력 기본값 */
 function yesterdayKst(): string {
@@ -33,8 +25,6 @@ function yesterdayKst(): string {
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const plain = (v: number | null | undefined, unit = "") => (isNum(v) ? `${v.toLocaleString("ko-KR")}${unit}` : null);
 const percent = (v: number | null | undefined) => (isNum(v) ? `${(v * 100).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%` : null);
-const seconds = (ms: number | null | undefined) => (isNum(ms) ? `${(ms / 1000).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}초` : null);
-const minutesText = (m: number | null | undefined) => (isNum(m) ? `${m.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}분` : null);
 
 /** 이 칸(section)과 그 아래 칸의 "확인할 수 없음" 이유 */
 function reasonsFor(unknown: UnknownSection[], ...sections: string[]): string[] {
@@ -116,7 +106,7 @@ function Highlights({ res }: { res: A2AResult<ActivityReportOutput> }) {
       <section className="card flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
         <p className="text-2xl font-bold text-ink-900">{NOTHING_NOTABLE}</p>
         <p className="max-w-md text-sm text-ink-500">
-          {o.period === "day" ? "어제와 비교해" : "직전 기간과 비교해"} 크게 달라진 숫자가 없어요. 아래 부서별 숫자는 그대로 볼 수 있습니다.
+          {o.period === "day" ? "어제와 비교해" : "직전 기간과 비교해"} 크게 달라진 숫자가 없어요. 위 회사 현황 숫자는 그대로 볼 수 있습니다.
         </p>
       </section>
     );
@@ -143,159 +133,6 @@ function Highlights({ res }: { res: A2AResult<ActivityReportOutput> }) {
       <div className="rounded-2xl bg-brand-50 px-4 py-3 text-sm leading-relaxed text-brand-700">
         {o.summary.split("\n").filter(Boolean).map((line, i) => <p key={i}>{line}</p>)}
       </div>
-    </Panel>
-  );
-}
-
-// ------------------------------------------------------------------- 부서 카드
-function OutcomeBar({ outcomes, reasons }: { outcomes: ActivityOutcomes; reasons: string[] }) {
-  const total = outcomes.auto_completed.total;
-  const small = OUTCOMES.some(({ key }) => outcomes[key].rate == null);
-  return (
-    <div>
-      <p className="mb-1 text-xs font-medium text-ink-700">결과 비율</p>
-      {total === 0 ? (
-        <p className="text-[11px] text-ink-500">처리한 요청이 없어 비율이 없습니다.</p>
-      ) : small ? (
-        <p className="text-[11px] text-amber-700">요청 {total}건 · {outcomes.auto_completed.note ?? "표본 부족"}이라 비율을 그리지 않습니다.</p>
-      ) : (
-        <div className="flex h-3 w-full overflow-hidden rounded-full bg-ink-100" role="img"
-          aria-label={OUTCOMES.map(({ key, label }) => `${label} ${percent(outcomes[key].rate)}`).join(", ")}>
-          {OUTCOMES.map(({ key, color }) => (
-            <span key={key} className={color} style={{ width: `${(outcomes[key].rate ?? 0) * 100}%` }} />
-          ))}
-        </div>
-      )}
-      <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-ink-700">
-        {OUTCOMES.map(({ key, label, color }) => (
-          <li key={key} className="flex items-center gap-1.5">
-            <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} aria-hidden="true" />
-            <span className="min-w-0 flex-1">{label}</span>
-            <span className="tabular-nums">{outcomes[key].count}건{percent(outcomes[key].rate) ? ` · ${percent(outcomes[key].rate)}` : ""}</span>
-          </li>
-        ))}
-      </ul>
-      <Unknown reasons={reasons} />
-    </div>
-  );
-}
-
-function Row({ label, now, before, show, reasons = [], previousReasons = [] }: {
-  label: string; now: number | null; before: number | null; show: (v: number | null) => string | null; reasons?: string[]; previousReasons?: string[];
-}) {
-  const text = show(now);
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-2 border-t border-ink-100 py-1.5 first:border-t-0">
-      <dt className="min-w-0 flex-1 text-xs text-ink-700">{label}</dt>
-      <dd className="text-sm font-semibold tabular-nums text-ink-900">{text ?? <span className="text-ink-500">–</span>}</dd>
-      <dd className="w-full text-right"><Trend now={now} before={before} text={show(before)} previousReasons={previousReasons} /></dd>
-      {text == null && !reasons.length && <dd className="w-full text-right text-[11px] text-amber-700">{UNKNOWN}</dd>}
-      {reasons.length > 0 && <dd className="w-full text-right"><Unknown reasons={reasons} /></dd>}
-    </div>
-  );
-}
-
-function Department({ d, unknown }: { d: DepartmentReport; unknown: UnknownSection[] }) {
-  const p: DepartmentActivity = d.previous_period;
-  const base = `departments.${d.department}`;
-  const prevBase = `departments.previous_period.${d.department}`;
-  const own = unknown.filter((u) => u.section === base).map((u) => u.reason);
-  const sub = (key: string) => reasonsFor(unknown, `${base}.${key}`);
-  const prevSub = (key: string) => reasonsFor(unknown, `${prevBase}.${key}`);
-  const count = (unit: string) => (v: number | null) => plain(v, unit);
-  const reasons = Object.entries(d.quality.fallback_reasons);
-  return (
-    <article className="card p-4">
-      <header className="flex flex-wrap items-center gap-2">
-        <h3 className="text-base font-semibold text-ink-900">{d.label}</h3>
-        {d.owners.length > 0 && <span className="text-xs text-ink-500">담당 {d.owners.join(", ")}</span>}
-        {!d.enabled && <Chip label="서비스 꺼짐" tone={TONE.muted} />}
-      </header>
-      <Unknown reasons={own} />
-      <div className="mt-3 flex items-baseline gap-2">
-        <p className="text-2xl font-bold tabular-nums text-ink-900">{d.requests.total.toLocaleString("ko-KR")}건</p>
-        <p className="text-xs text-ink-500">처리한 요청</p>
-        <span className="ml-auto"><Trend now={d.requests.total} before={p.requests.total} text={plain(p.requests.total, "건")} /></span>
-      </div>
-      {d.requests.top_skills.length > 0 && (
-        <p className="mt-1 text-[11px] leading-relaxed text-ink-500">
-          많이 한 일: {d.requests.top_skills.map((s) => `${s.label} ${s.count}건`).join(" · ")}
-        </p>
-      )}
-      <div className="mt-3"><OutcomeBar outcomes={d.outcomes} reasons={[...sub("outcomes"), ...prevSub("outcomes").map((r) => `직전 기간: ${r}`)]} /></div>
-      <dl className="mt-3">
-        <Row label="사람에게 넘긴 일" now={d.handoffs.handed} before={p.handoffs.handed} show={count("건")} reasons={sub("handoffs")} previousReasons={prevSub("handoffs")} />
-        <Row label="└ 사람이 처리" now={d.handoffs.done} before={p.handoffs.done} show={count("건")} />
-        <Row label="└ 사람이 반려" now={d.handoffs.rejected} before={p.handoffs.rejected} show={count("건")} />
-        <Row label="└ 평균 처리 시간" now={d.handoffs.avg_close_minutes} before={p.handoffs.avg_close_minutes} show={minutesText} />
-        <Row label="템플릿 대체 비율" now={d.quality.fallback.rate} before={p.quality.fallback.rate} show={percent}
-          reasons={d.quality.fallback.rate == null && d.quality.fallback.note ? [`${d.quality.fallback.note} (완료 응답 ${d.quality.fallback.total}건)`] : sub("quality")} previousReasons={prevSub("quality")} />
-        <Row label="평균 응답 시간" now={d.quality.avg_response_ms} before={p.quality.avg_response_ms} show={seconds} />
-        <Row label="참여한 사건" now={d.incidents.count} before={p.incidents.count} show={count("건")} reasons={sub("incidents")} previousReasons={prevSub("incidents")} />
-      </dl>
-      {reasons.length > 0 && (
-        <p className="mt-1 text-[11px] text-ink-500">템플릿 대체 이유: {reasons.map(([k, n]) => `${k} ${n}건`).join(" · ")}</p>
-      )}
-      {d.incidents.mttr_median_minutes != null && (
-        <p className="mt-1 text-[11px] text-ink-500">참여한 사건 복구 시간 중앙값 {minutesText(d.incidents.mttr_median_minutes)}</p>
-      )}
-    </article>
-  );
-}
-
-/** AI를 쓰지 않는 부서로 넘긴 일: 부서별 건수와 업무 상위 3개. 예측 문구·숫자는 넣지 않는다 */
-function UnusedHandoffs({ items }: { items: UnusedHandoff[] }) {
-  if (!items.length) return null;
-  return (
-    <div className="mt-4 rounded-2xl bg-surface-2 px-4 py-3">
-      <p className="text-xs font-medium text-ink-700">AI를 쓰지 않는 부서로 넘긴 일</p>
-      <ul className="mt-1 space-y-0.5 text-[11px] text-ink-700">
-        {items.map((u) => (
-          <li key={u.department}>
-            <span className="font-medium">{u.label}</span> {u.count.toLocaleString("ko-KR")}건
-            {u.top_skills.length > 0 && <span className="text-ink-500"> · {u.top_skills.map((s) => `${s.label} ${s.count}건`).join(" · ")}</span>}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function Departments({ o }: { o: ActivityReportOutput }) {
-  const general = o.unknown_sections.filter((u) => u.section === "departments" || u.section === "departments.previous_period");
-  return (
-    <Panel id="data-report-departments" title="부서별 AI 업무"
-      hint="AI를 거친 일만 셉니다. 사람이 직접 한 일(기록에 없는 일)은 들어가지 않습니다. 각 숫자 아래는 직전 기간 값입니다.">
-      <Unknown reasons={general.map((u) => u.reason)} />
-      {o.departments.length === 0 ? <Empty>보여 줄 부서가 없습니다.</Empty> : (
-        <div className="mt-2 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {o.departments.map((d) => <Department key={d.department} d={d} unknown={o.unknown_sections} />)}
-        </div>
-      )}
-      <UnusedHandoffs items={o.unused_handoffs ?? []} />
-    </Panel>
-  );
-}
-
-function Collaboration({ o }: { o: ActivityReportOutput }) {
-  return (
-    <Panel id="data-report-collab" title="부서 간 협업" hint="한 부서 AI가 다른 부서 AI에게 일을 요청한 횟수입니다 (많은 순).">
-      {o.collaboration.length === 0 ? <Empty>이 기간에 부서 사이 요청 기록이 없어요.</Empty> : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="text-left text-xs text-ink-500"><th className="py-2 pr-4 font-medium">요청한 부서</th><th className="py-2 pr-4 font-medium">받은 부서</th><th className="py-2 text-right font-medium">횟수</th></tr></thead>
-            <tbody>
-              {o.collaboration.map((e) => (
-                <tr key={`${e.from_department}-${e.to_department}`} className="border-t border-ink-100">
-                  <td className="py-2 pr-4">{e.from_label}</td>
-                  <td className="py-2 pr-4"><span aria-hidden="true" className="mr-1 text-ink-300">→</span>{e.to_label}</td>
-                  <td className="py-2 text-right tabular-nums">{e.count.toLocaleString("ko-KR")}회</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </Panel>
   );
 }
@@ -329,8 +166,6 @@ function Report({ res }: { res: A2AResult<ActivityReportOutput> }) {
       </p>
       <Company o={o} />
       <Highlights res={res} />
-      <Departments o={o} />
-      <Collaboration o={o} />
     </div>
   );
 }
@@ -348,7 +183,7 @@ export function ActivityReport({ tick }: { tick: number }) {
 
   if (!kpiLive) {
     return (
-      <Panel id="data-report" title="부서별 AI 업무 리포트">
+      <Panel id="data-report" title="회사 현황 리포트">
         <Empty>데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 리포트를 받지 않아요. backend/의 scripts/run_web.sh로 화면을 켜면 토큰이 들어갑니다.</Empty>
       </Panel>
     );
