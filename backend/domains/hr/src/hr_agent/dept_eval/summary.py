@@ -55,6 +55,21 @@ def _seconds(value: float | None) -> str:
     return f"{value:.0f}초" if value is not None else "알 수 없음"
 
 
+def _duration(value: float | None) -> str:
+    """42초 · 2분 5초 · 3분 · 1시간 20분. 몇 시간짜리 긴 작업도 읽을 수 있게 단위를 바꾼다."""
+    if value is None:
+        return "알 수 없음"
+    total = round(value)
+    if total < 60:
+        return f"{total}초"
+    if total < 3600:
+        m, s = divmod(total, 60)
+        return f"{m}분" if s == 0 else f"{m}분 {s}초"
+    h, rest = divmod(total, 3600)
+    m = rest // 60
+    return f"{h}시간" if m == 0 else f"{h}시간 {m}분"
+
+
 def reason_of(item: dict[str, Any]) -> str | None:
     """판정 이유를 쉬운 말로. 정상이면 None."""
     verdict = item["verdict"]
@@ -64,11 +79,16 @@ def reason_of(item: dict[str, Any]) -> str | None:
             parts.append(f"다시 시도 {item['attempts'] - 1}회")
         work = item.get("work_seconds")
         if work is not None and work > item["limit_seconds"]:
-            parts.append(f"{_seconds(work)} 걸림(기준 {_seconds(item['limit_seconds'])})")
+            if item.get("promised"):  # 단계의 약속 시간(기준값 v2부터)
+                parts.append(
+                    f"예상 {_duration(item['limit_seconds'])}인데 {_duration(work)} 걸렸어요"
+                )
+            else:
+                parts.append(f"{_seconds(work)} 걸림(기준 {_seconds(item['limit_seconds'])})")
         return " · ".join(parts) or "기준을 넘음"
     if verdict == "silent":
         gap = item.get("max_silence_seconds")
-        spoken = f"{_seconds(gap)} 동안" if gap is not None else "오랫동안"
+        spoken = f"{_duration(gap)} 동안" if gap is not None else "오랫동안"
         return f"긴 작업 중 부서의 응답이 {spoken} 끊김 (일을 못한 것이 아니라 소식이 없었어요)"
     if verdict == "blocked":
         return {
@@ -138,6 +158,7 @@ def _event(card: Any) -> EvaluatedEvent:
                 human_wait_seconds=timing.get("human_wait_seconds"),
                 attempts=item["attempts"],
                 limit_seconds=item["limit_seconds"],
+                promised=bool(item.get("promised")),
                 max_silence_seconds=item.get("max_silence_seconds"),
                 reason=reason_of(item),
             )
@@ -249,6 +270,8 @@ async def evaluate_agents(svc: Services, request: AgentRequest) -> AgentResult:
         criteria_updated=criteria.updated,
         normal_max_seconds=criteria.default.normal_max_seconds,
         normal_max_attempts=criteria.default.normal_max_attempts,
+        use_promised=criteria.default.use_promised,
+        max_silence_seconds=criteria.default.max_silence_seconds,
         events=events,
         agents=[_summary(d, events) for d in depts],
         trend=_trend(events),

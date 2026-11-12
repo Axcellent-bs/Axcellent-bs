@@ -318,3 +318,46 @@ async def test_a_silent_task_outweighs_a_late_one_in_the_dot_and_repeats_count(s
     data = _agent(await _run(svc), "data")
     assert [d.verdict for d in data.recent] == ["silent", "silent"]
     assert [(r.event_type, r.count) for r in data.repeats] == [("payment_failure", 2)]
+
+
+def test_a_promised_time_is_told_as_expected_versus_actual() -> None:
+    base = {"attempts": 1, "limit_seconds": 180.0, "promised": True}
+    slow = {**base, "verdict": "check", "work_seconds": 252.0}
+    assert reason_of(slow) == "예상 3분인데 4분 12초 걸렸어요"
+    retried = {**slow, "attempts": 2}
+    assert reason_of(retried) == "다시 시도 1회 · 예상 3분인데 4분 12초 걸렸어요"
+    # 약속이 없는 단계(기본 30초)는 옛 문장 그대로다
+    plain = {"attempts": 1, "limit_seconds": 30.0, "verdict": "check", "work_seconds": 42.0}
+    assert reason_of(plain) == "42초 걸림(기준 30초)"
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [
+        (0, "0초"),
+        (42, "42초"),
+        (60, "1분"),
+        (125, "2분 5초"),
+        (3600, "1시간"),
+        (4800, "1시간 20분"),
+        (None, "알 수 없음"),
+    ],
+)
+def test_durations_switch_units_so_hours_long_tasks_read_well(seconds, text) -> None:
+    from hr_agent.dept_eval.summary import _duration
+
+    assert _duration(seconds) == text
+
+
+@pytest.mark.asyncio
+async def test_the_screen_is_told_where_each_limit_came_from(svc) -> None:
+    rows = [
+        _t("impact", "data", work_seconds=45.0, promised_seconds=60.0),
+        _t("diagnose", "infra", work_seconds=3.0),
+    ]
+    await _event(svc, "a", rows)
+    out = await _run(svc)
+    steps = {s.step_id: s for s in out.events[0].steps}
+    assert (steps["impact"].promised, steps["impact"].limit_seconds) == (True, 60.0)
+    assert (steps["diagnose"].promised, steps["diagnose"].limit_seconds) == (False, 30.0)
+    assert out.use_promised is True and out.max_silence_seconds == 300.0

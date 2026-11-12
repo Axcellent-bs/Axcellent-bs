@@ -41,6 +41,8 @@ export interface EvaluatedStep {
   human_wait_seconds: number | null;
   attempts: number;
   limit_seconds: number;
+  /** 기준 시간이 단계의 약속 시간에서 왔는지(true), 기본값(30초)에서 왔는지(false) */
+  promised: boolean;
   max_silence_seconds: number | null;
   reason: string | null;
 }
@@ -58,6 +60,10 @@ export interface AgentEvaluation {
   criteria_updated: string;
   normal_max_seconds: number;
   normal_max_attempts: number;
+  /** 단계의 약속 시간을 기준으로 삼는지(기준값 2판부터) */
+  use_promised: boolean;
+  /** 긴 작업에서 응답이 이 시간(초)보다 길게 비면 끊김으로 본다(기준값 3판부터) */
+  max_silence_seconds: number;
   events: EvaluatedEvent[];
   agents: AgentSummary[];
   trend: DailyTrend[];
@@ -126,12 +132,17 @@ export const TONE_TEXT: Record<Tone, string> = {
   none: "text-ink-600",
 };
 
-/** 3.5초 · 42초 · 2분 5초 */
+/** 3.5초 · 42초 · 2분 5초 · 1시간 20분 */
 export function secondsKo(s: number | null | undefined): string {
   if (s == null) return "–";
   if (s < 10) return `${s.toFixed(1)}초`;
   const r = Math.round(s);
   if (r < 60) return `${r}초`;
+  if (r >= 3600) {
+    const h = Math.floor(r / 3600);
+    const rest = Math.floor((r % 3600) / 60);
+    return rest === 0 ? `${h}시간` : `${h}시간 ${rest}분`;
+  }
   const m = Math.floor(r / 60);
   return r % 60 === 0 ? `${m}분` : `${m}분 ${r % 60}초`;
 }

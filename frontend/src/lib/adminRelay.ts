@@ -21,6 +21,18 @@ export interface Step {
   finished_at: string | null;
   transferred_to: string | null;
   reason_code: string | null;
+  /** 승인 대기·사람 할 일함 대기(초). 단계 전체 시간에서 빼면 부서가 일한 시간이다 */
+  approval_wait_seconds?: number | null;
+  human_wait_seconds?: number | null;
+  /** 이 단계가 보통 걸리는 시간(약속, 초). 지금 값은 임시다. 없으면 기본 30초 */
+  promised_seconds?: number | null;
+  /** 긴 작업(비동기): 마지막으로 응답한 시각, 진행 알림 횟수, 응답 사이가 가장 길게 비었던 시간(초), 마지막 진행률·메모 */
+  last_response_at?: string | null;
+  heartbeats?: number;
+  max_silence_seconds?: number | null;
+  progress_percent?: number | null;
+  progress_note?: string | null;
+  async_task_id?: string | null;
   /** 단계 결과. 스킬마다 모양이 다르다(예: 비슷한 과거 이벤트 찾기의 cases) */
   output?: Record<string, unknown>;
 }
