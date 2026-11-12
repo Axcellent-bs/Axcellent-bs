@@ -1,8 +1,8 @@
-"""단계별 약속 시간: 단계가 보통 걸리는 시간을 기록에 남기고, 호출 마감을 약속에서 계산한다.
+"""단계별 기준 시간: 단계가 보통 걸리는 시간을 기록에 남기고, 호출 마감을 기준 시간에서 계산한다.
 
 멘토 피드백: 모든 단계를 30초 하나로 재면 쉬운 일을 많이 처리한 쪽에 유리하고 오래 걸리는 일에
 불리하다. 총괄은 부서를 한 번 부를 때 30초에서 끊고 다시 시도했기 때문에, 일이 큰 단계(영향 분석)는
-일을 못해서가 아니라 마감이 짧아서 재시도로 기록됐다. 약속이 없는 단계는 지금처럼 30초다.
+일을 못해서가 아니라 마감이 짧아서 재시도로 기록됐다. 기준 시간이 없는 단계는 지금처럼 30초다.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ async def test_a_long_step_waits_for_a_multiple_of_its_promise(harness) -> None:
 
 @pytest.mark.asyncio
 async def test_a_short_promise_never_shortens_the_default_deadline(harness) -> None:
-    """10초 약속이라고 20초에 끊으면 기존 동작보다 나빠진다. 기본 마감 밑으로는 내리지 않는다."""
+    """기준 시간이 10초라고 20초에 끊으면 기존보다 나빠진다. 기본 마감 밑으로는 내리지 않는다."""
     engine = await harness.start()
     assert engine.deadline_seconds(_step(expected_seconds=10.0)) == engine.step_timeout
 
@@ -67,14 +67,14 @@ async def test_the_promise_is_recorded_on_each_step_run(harness) -> None:
     await engine.run(inc, scenario_a())
     assert inc.steps["impact"].promised_seconds == PROMISED_SECONDS["impact"]
     assert inc.steps["diagnose"].promised_seconds == PROMISED_SECONDS["diagnose"]
-    # 약속을 적지 않은 단계(복구 검증, 원인 확인 요청)는 비어 있다
+    # 기준 시간을 적지 않은 단계(복구 검증, 원인 확인 요청)는 비어 있다
     assert inc.steps["recovery"].promised_seconds is None
     assert inc.steps["cause_check"].promised_seconds is None
 
 
 @pytest.mark.asyncio
 async def test_the_request_deadline_follows_the_promise(harness) -> None:
-    """영향 분석은 30초가 아니라 약속의 2배(120초)를 기다린다. 나머지는 그대로 30초다."""
+    """영향 분석은 30초가 아니라 기준 시간의 2배(120초)를 기다린다. 나머지는 그대로 30초다."""
     engine = await harness.start()
     inc = new_incident()
     await engine.run(inc, scenario_a())
@@ -109,11 +109,11 @@ def test_the_view_shows_the_promise() -> None:
     assert StepRun("a", "b", "c", promised_seconds=10.0).view()["promised_seconds"] == 10.0
 
 
-# ---- 약속 표 ---------------------------------------------------------------------------------
+# ---- 기준 시간 표 -----------------------------------------------------------------------------
 
 
 def test_every_promise_belongs_to_a_real_step() -> None:
-    """단계 번호를 바꾸거나 지웠는데 약속 표만 남으면 조용히 어긋난다."""
+    """단계 번호를 바꾸거나 지웠는데 기준 시간 표만 남으면 조용히 어긋난다."""
     plan = scenario_a()
     ids = {s.id for s in plan.steps} | {s.id for s in plan.late_steps}
     assert set(PROMISED_SECONDS) <= ids

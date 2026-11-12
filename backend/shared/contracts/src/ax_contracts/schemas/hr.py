@@ -719,7 +719,7 @@ class StepTiming(AxModel):
     human_wait_seconds: float | None = Field(default=None, ge=0)
     attempts: int = Field(default=0, ge=0)
     reason_code: str | None = None
-    # 이 단계가 보통 걸리는 시간(약속, 초). 총괄이 단계 정의에서 가져와 같이 보낸다. 없으면 None이고
+    # 이 단계가 보통 걸리는 시간(기준 시간, 초). 총괄이 단계 정의에서 가져와 보낸다. 없으면 None이고
     # 평가는 기본 기준(30초)으로 판정한다
     promised_seconds: float | None = Field(default=None, gt=0)
     # 긴 작업(비동기)에서 부서의 응답(접수·진행 알림·완료) 사이가 가장 길게 비었던 시간(초). 아직
@@ -971,7 +971,7 @@ class EvaluatedStep(AxModel):
     human_wait_seconds: float | None = None
     attempts: int = Field(default=0, ge=0)
     limit_seconds: float
-    # 기준 시간(`limit_seconds`)이 단계의 약속 시간에서 왔는지(True), 기본값(30초)에서 왔는지(False)
+    # 기준 시간(`limit_seconds`)이 단계별로 정한 값에서 왔는지(True), 기본값(30초)에서 왔는지(False)
     promised: bool = False
     max_silence_seconds: float | None = None
     reason: str | None = None
@@ -997,7 +997,7 @@ class EvaluateAgentsOutput(AxModel):
     criteria_updated: str
     normal_max_seconds: float
     normal_max_attempts: int = Field(ge=1)
-    # 단계의 약속 시간을 기준으로 삼는지(기준값 v2부터)와, 응답이 이 시간(초)보다
+    # 단계별 기준 시간을 쓰는지(기준값 v2부터)와, 응답이 이 시간(초)보다
     # 길게 비면 끊김으로 보는 기준(v3부터)
     use_promised: bool = False
     max_silence_seconds: float = Field(default=300.0, gt=0)

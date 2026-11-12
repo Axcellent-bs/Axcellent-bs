@@ -97,7 +97,7 @@ def test_default_criteria_file_is_version_3_with_one_rule() -> None:
     assert criteria.version == 3
     assert criteria.default.max_silence_seconds == 300.0  # 응답 끊김 기준
     assert (criteria.default.normal_max_seconds, criteria.default.normal_max_attempts) == (30, 1)
-    assert criteria.default.use_promised is True  # 단계의 약속 시간을 기준으로 삼는다
+    assert criteria.default.use_promised is True  # 단계의 기준 시간을 기준으로 삼는다
     assert criteria.groups == {}  # 모든 단계가 같은 기준이다
 
 
@@ -255,7 +255,7 @@ def test_judge_timings_carries_the_version_and_drops_excluded_steps() -> None:
     assert [item["step_id"] for item in out["items"]] == ["diagnose"]
 
 
-# ---- 단계별 약속 시간(기준값 v2) ----------------------------------------------------------------
+# ---- 단계별 기준 시간(기준값 v2) ----------------------------------------------------------------
 
 
 def test_the_promised_time_is_the_limit_when_the_step_has_one() -> None:

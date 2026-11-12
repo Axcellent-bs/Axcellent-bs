@@ -1,8 +1,8 @@
 """단계별 판정: 시간이 아닌 상태를 먼저 가르고, 일한 시간만 기준과 비교한다. LLM은 쓰지 않는다.
 
 판정 값:
-- normal: 일한 시간이 기준 이하이고 재시도도 기준 이내. 기준 시간은 단계의 약속 시간(총괄이 같이
-  보낸 `promised_seconds`, 기준값 v2)이고, 약속이 없으면 기본값(30초)이다
+- normal: 일한 시간이 기준 이하이고 재시도도 기준 이내. 기준 시간은 단계마다 정한 값(총괄이 같이
+  보낸 `promised_seconds`, 기준값 v2)이고, 기준 시간이 없으면 기본값(30초)이다
 - check: 기준을 넘었거나 재시도가 있었다 (시도 횟수를 같이 남긴다)
 - silent: 긴 작업(비동기) 중 부서의 응답(접수·진행 알림·완료) 사이가 기준(기본 300초)보다 길게
   비었거나, 총괄이 응답 끊김으로 단계를 끝냈다(사유 코드 `no_response`). 총 시간이 길어도 알림이
@@ -73,7 +73,7 @@ def judge_step(timing: dict[str, Any], criteria: Criteria) -> dict[str, Any] | N
         "work_seconds": work,
         "attempts": attempts,
         "limit_seconds": limit,
-        # 기준 시간이 단계의 약속에서 왔는지(True), 기본값에서 왔는지(False)
+        # 기준 시간이 단계별로 정한 값에서 왔는지(True), 기본값에서 왔는지(False)
         "promised": has_promise,
         "max_silence_seconds": silence if isinstance(silence, int | float) else None,
         "reason_code": reason,

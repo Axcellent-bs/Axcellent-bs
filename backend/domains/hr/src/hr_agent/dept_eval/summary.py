@@ -79,7 +79,7 @@ def reason_of(item: dict[str, Any]) -> str | None:
             parts.append(f"다시 시도 {item['attempts'] - 1}회")
         work = item.get("work_seconds")
         if work is not None and work > item["limit_seconds"]:
-            if item.get("promised"):  # 단계의 약속 시간(기준값 v2부터)
+            if item.get("promised"):  # 단계의 기준 시간(기준값 v2부터)
                 parts.append(
                     f"예상 {_duration(item['limit_seconds'])}인데 {_duration(work)} 걸렸어요"
                 )

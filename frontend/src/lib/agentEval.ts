@@ -41,7 +41,7 @@ export interface EvaluatedStep {
   human_wait_seconds: number | null;
   attempts: number;
   limit_seconds: number;
-  /** 기준 시간이 단계의 약속 시간에서 왔는지(true), 기본값(30초)에서 왔는지(false) */
+  /** 기준 시간이 단계별로 정한 값에서 왔는지(true), 기본값(30초)에서 왔는지(false) */
   promised: boolean;
   max_silence_seconds: number | null;
   reason: string | null;
@@ -60,7 +60,7 @@ export interface AgentEvaluation {
   criteria_updated: string;
   normal_max_seconds: number;
   normal_max_attempts: number;
-  /** 단계의 약속 시간을 기준으로 삼는지(기준값 2판부터) */
+  /** 단계별 기준 시간을 쓰는지(기준값 2판부터) */
   use_promised: boolean;
   /** 긴 작업에서 응답이 이 시간(초)보다 길게 비면 끊김으로 본다(기준값 3판부터) */
   max_silence_seconds: number;

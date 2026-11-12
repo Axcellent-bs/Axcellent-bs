@@ -326,7 +326,7 @@ def test_a_promised_time_is_told_as_expected_versus_actual() -> None:
     assert reason_of(slow) == "예상 3분인데 4분 12초 걸렸어요"
     retried = {**slow, "attempts": 2}
     assert reason_of(retried) == "다시 시도 1회 · 예상 3분인데 4분 12초 걸렸어요"
-    # 약속이 없는 단계(기본 30초)는 옛 문장 그대로다
+    # 기준 시간이 없는 단계(기본 30초)는 옛 문장 그대로다
     plain = {"attempts": 1, "limit_seconds": 30.0, "verdict": "check", "work_seconds": 42.0}
     assert reason_of(plain) == "42초 걸림(기준 30초)"
 

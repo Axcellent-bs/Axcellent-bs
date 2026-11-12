@@ -63,10 +63,10 @@ TRANSFER_CODES = {ErrorCode.FORBIDDEN_SKILL.value, ErrorCode.HOP_LIMIT.value, "n
 MAX_FAILED_RETRIES = 2
 MAX_CANCELED_RETRIES = 1
 MAX_EARLY_REVIEWS = 200  # 대기로 오르기 전에 먼저 온 안전 관문 결정을 담는 상한
-DEADLINE_FACTOR = 2.0  # 약속 시간(`Step.expected_seconds`)의 몇 배까지 기다릴지
-MAX_DEADLINE_SECONDS = 300.0  # 약속으로 늘리는 호출 마감의 상한(초)
+DEADLINE_FACTOR = 2.0  # 기준 시간(`Step.expected_seconds`)의 몇 배까지 기다릴지
+MAX_DEADLINE_SECONDS = 300.0  # 기준 시간으로 늘리는 호출 마감의 상한(초)
 ASYNC_HEARTBEAT_SECONDS = 300.0  # 긴 작업: 마지막 응답 뒤 이만큼 소식이 없으면 응답 끊김
-ASYNC_TOTAL_SECONDS = 1800.0  # 긴 작업: 약속 시간이 없을 때 전체 대기 상한
+ASYNC_TOTAL_SECONDS = 1800.0  # 긴 작업: 기준 시간이 없을 때 전체 대기 상한
 MAX_ASYNC_SECONDS = 86400.0  # 긴 작업 전체 대기의 절대 상한(사람 할 일함 대기와 같은 24시간)
 MAX_EARLY_ASYNC = 200  # 대기에 오르기 전에 먼저 온 긴 작업 알림을 담는 상한
 
@@ -254,8 +254,8 @@ class Engine:
     ) -> None:
         self.registry = registry
         # 긴 작업(비동기): 부서가 마지막으로 응답한 뒤 이 시간(초)이 지나도록 소식이 없으면 응답이
-        # 끊긴 것으로 보고 단계를 실패로 끝낸다. 전체 대기는 약속 시간의 `DEADLINE_FACTOR`배
-        # (약속이 없으면 `async_total_timeout`)이고 `MAX_ASYNC_SECONDS`를 넘지 않는다
+        # 끊긴 것으로 보고 단계를 실패로 끝낸다. 전체 대기는 기준 시간의 `DEADLINE_FACTOR`배
+        # (기준 시간이 없으면 `async_total_timeout`)이고 `MAX_ASYNC_SECONDS`를 넘지 않는다
         self.async_heartbeat_timeout = async_heartbeat_timeout
         self.async_total_timeout = async_total_timeout
         # `Step.late_retry` 단계가 실패하면 이 간격(초)으로 다시 돌린다. 비우면 다시 돌리지 않는다
@@ -636,7 +636,7 @@ class Engine:
         """부서를 한 번 부를 때 기다리는 시간(초).
 
         - 단계에 마감(`timeout`)이 따로 있으면 그대로 쓴다.
-        - 약속 시간(`expected_seconds`)이 있으면 약속의 `DEADLINE_FACTOR`배로 하되, 기본 마감보다
+        - 기준 시간(`expected_seconds`)이 있으면 그 `DEADLINE_FACTOR`배로 하되, 기본 마감보다
           짧아지지 않게 하고 `MAX_DEADLINE_SECONDS`를 넘기지 않는다. 일이 큰 단계가 30초에 끊겨
           다시 시도되는 것을 막는다. 부서가 멈췄을 때 기다리는 시간도 늘어나서 상한을 둔다.
         - 둘 다 없으면 기본 마감이다.
@@ -910,7 +910,7 @@ class Engine:
 
     # ---------- 긴 작업(비동기) ----------
     def _async_total(self, expected: float | None) -> float:
-        """긴 작업을 기다리는 전체 시간(초). 약속이 있으면 약속의 배수, 없으면 기본값."""
+        """긴 작업을 기다리는 전체 시간(초). 기준 시간이 있으면 기준 시간의 배수, 없으면 기본값."""
         if expected:
             return min(expected * DEADLINE_FACTOR, MAX_ASYNC_SECONDS)
         return min(self.async_total_timeout, MAX_ASYNC_SECONDS)

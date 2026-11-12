@@ -40,7 +40,7 @@ class Step:
     # 성공한 결과를 보고 사람이 봐야 하면 이관 큐로 돌린다: (사유 코드, 메모) 또는 None
     verdict: Callable[[dict[str, Any]], tuple[str, str] | None] = lambda output: None
     timeout: float | None = None  # 이 단계만 마감을 길게 줄 때(예: 복구 확인 재시도) 초
-    # 이 단계가 보통 걸리는 시간(약속, 초). 없으면 기본 마감(30초)만 쓴다. 인사 에이전트 평가가
+    # 이 단계가 보통 걸리는 시간(기준 시간, 초). 없으면 기본 마감(30초)만 쓴다. 인사 에이전트 평가가
     # 이 값과 실제 시간을 비교하고, 호출 마감도 여기서 계산한다(`Engine.deadline_seconds`).
     # 지금 값은 로컬 이벤트 기록으로 잡은 임시값이다(plans/scenario_a.py `PROMISED_SECONDS`)
     expected_seconds: float | None = None
@@ -94,7 +94,7 @@ class StepRun:
     # 복구 뒤 영향 분석을 같은 구간으로 다시 계산한 시각. 단계 시간(started_at~finished_at)은
     # 첫 분석의 것이라, 다시 계산한 시각을 finished_at에 덮어쓰지 않는다(몇 분 뒤라서 부풀려진다)
     refreshed_at: datetime | None = None
-    # 이 단계에 걸어 둔 약속 시간(초, `Step.expected_seconds`). 없으면 None(기본 30초 기준)
+    # 이 단계에 걸어 둔 기준 시간(초, `Step.expected_seconds`). 없으면 None(기본 30초 기준)
     promised_seconds: float | None = None
     # 긴 작업(비동기): 부서가 접수한 작업 번호, 마지막으로 응답(접수·진행 알림)한 시각,
     # 진행 알림 횟수, 응답 사이가 가장 길게 비었던 시간(초), 마지막 진행률·메모(화면용)
