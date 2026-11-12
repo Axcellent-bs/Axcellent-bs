@@ -13,6 +13,11 @@
 - 삭제 API(`delete_media`)는 이 로그인 경로에 없다. 잘못 올린 게시물은 사람이 앱에서 지운다.
 - 상태 `ERROR`에서 사유 코드를 주는 필드는 `status`(문자열)뿐일 수 있어 코드는 None일 수 있다.
   모르는 코드는 재시도하지 않고 실패한다(`classify`).
+- 캐러셀(이미지 2~10장): 자식 컨테이너(`is_carousel_item`) → 부모 컨테이너(`media_type=CAROUSEL`,
+  `children`) → `media_publish`. AI 표시는 부모에만 보낸다(자식에 넣으면 오류, 설계 문서 6절).
+  [확인 필요] 자식·부모 필드 이름(`is_carousel_item`·`media_type=CAROUSEL`·`children`)은 이 레포의
+  Meta 공식 문서 대조 기록(sns-design.md)에 없다. 그래서 `MARKETING_IG_CAROUSEL_ENABLED=true`로
+  사람이 켜기 전에는 `supports_carousel=False`라 `publish_sns`가 승인 요청 전에 거부한다.
 - 응답 유실: 타임아웃·연결 끊김은 `IgResponseLost`로 올린다. 게시 호출은 같은 컨테이너로
   다시 보내지 않는 책임이 퍼블리셔에 있다.
 """
@@ -29,6 +34,7 @@ from marketing_agent import sns_media
 from marketing_agent.sns_publish.instagram import (
     TOKEN_ENV,
     USER_ID_ENV,
+    CarouselRequest,
     ContainerRequest,
     ContainerState,
     ContainerStatus,
@@ -46,6 +52,7 @@ MEDIA_BASE_URL_ENV = "MARKETING_IG_MEDIA_BASE_URL"
 API_BASE_ENV = "MARKETING_IG_API_BASE_URL"
 API_VERSION_ENV = "MARKETING_IG_API_VERSION"
 TIMEOUT_ENV = "MARKETING_IG_TIMEOUT_S"
+CAROUSEL_ENV = "MARKETING_IG_CAROUSEL_ENABLED"  # 필드 이름 확인 뒤 사람이 켠다
 
 DEFAULT_API_BASE = "https://graph.instagram.com"
 JPEG_MAX_BYTES = 8 * 1024 * 1024
@@ -75,7 +82,9 @@ class GraphInstagramAdapter:
         timeout_s: float = 30.0,
         client: httpx.AsyncClient | None = None,
         media_host: S3MediaHost | None = None,
+        carousel_enabled: bool = False,
     ) -> None:
+        self.supports_carousel = carousel_enabled
         self._media_host = media_host
         self._token = access_token
         self._user_id = user_id
@@ -110,6 +119,8 @@ class GraphInstagramAdapter:
             api_version=(os.getenv(API_VERSION_ENV) or "").strip(),
             timeout_s=timeout if timeout > 0 else 30.0,
             client=client,
+            carousel_enabled=(os.getenv(CAROUSEL_ENV) or "").strip().lower()
+            in ("1", "true", "yes"),
         )
 
     # ---- 미디어 주소·규격 ----
@@ -216,6 +227,40 @@ class GraphInstagramAdapter:
             params["media_type"] = "REELS"
             params["video_url"] = self.public_media_url(request.media_ref)
             params["share_to_feed"] = "true" if request.share_to_feed else "false"
+        body = await self._request("POST", f"{self._user_id}/media", params=params)
+        container_id = body.get("id")
+        if not isinstance(container_id, str) or not container_id:
+            raise IgApiError(-1, None)
+        return container_id
+
+    async def _image_url(self, media_ref: str) -> str:
+        if self._uses_media_host(media_ref):
+            return await self._hosted_image_url(media_ref)
+        self.check_local_image(media_ref)
+        return self.public_media_url(media_ref)
+
+    async def create_carousel_item(self, media_ref: str) -> str:
+        if not self.supports_carousel:
+            raise IgApiError(*_MEDIA_FORMAT)  # 켜지 않았다. 호출하지 않는다
+        params: dict[str, Any] = {  # is_ai_generated는 자식에 넣지 않는다
+            "image_url": await self._image_url(media_ref),
+            "is_carousel_item": "true",
+        }
+        body = await self._request("POST", f"{self._user_id}/media", params=params)
+        container_id = body.get("id")
+        if not isinstance(container_id, str) or not container_id:
+            raise IgApiError(-1, None)
+        return container_id
+
+    async def create_carousel_container(self, request: CarouselRequest) -> str:
+        if not self.supports_carousel:
+            raise IgApiError(*_MEDIA_FORMAT)
+        params: dict[str, Any] = {
+            "media_type": "CAROUSEL",
+            "children": ",".join(request.child_ids),
+            "caption": request.caption,
+            "is_ai_generated": "true" if request.is_ai_generated else "false",
+        }
         body = await self._request("POST", f"{self._user_id}/media", params=params)
         container_id = body.get("id")
         if not isinstance(container_id, str) or not container_id:

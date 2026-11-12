@@ -16,6 +16,8 @@ import os
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from marketing_agent.sns_media import CAROUSEL_MAX, CAROUSEL_MIN  # noqa: F401  (캐러셀 2~10장)
+
 # 값은 사람이 .env에 넣는다. 코드·로그·출력에 값을 내지 않는다.
 SECRET_ENV_NAMES = (
     "MARKETING_IG_ACCESS_TOKEN",
@@ -26,7 +28,7 @@ TOKEN_ENV, USER_ID_ENV = SECRET_ENV_NAMES[0], SECRET_ENV_NAMES[1]  # 이름을 �
 PROVIDER_ENV = "MARKETING_SNS_PROVIDER"
 PROVIDER_MOCK = "mock"
 
-MediaKind = Literal["image", "reel"]
+MediaKind = Literal["image", "reel", "carousel"]
 ContainerState = Literal["IN_PROGRESS", "FINISHED", "ERROR", "EXPIRED", "PUBLISHED"]
 
 
@@ -57,6 +59,18 @@ class ContainerRequest:
 
 
 @dataclass(frozen=True)
+class CarouselRequest:
+    """캐러셀 부모 컨테이너. 자식은 이미 만든 컨테이너 id다.
+
+    AI 표시(`is_ai_generated`)는 부모에만 보낸다(자식에 넣으면 오류, 설계 문서 6절 공식 확인).
+    """
+
+    child_ids: tuple[str, ...]
+    caption: str
+    is_ai_generated: bool
+
+
+@dataclass(frozen=True)
 class ContainerStatus:
     status_code: ContainerState
     error_code: int | None = None
@@ -75,8 +89,18 @@ class MediaInfo:
 
 class InstagramAdapter(Protocol):
     name: str
+    # 캐러셀 호출을 쓸 수 있는가. 필드 이름이 공식 문서로 확인되기 전의 실제 어댑터는 False다
+    supports_carousel: bool
 
     async def create_container(self, request: ContainerRequest) -> str: ...
+
+    async def create_carousel_item(self, media_ref: str) -> str:
+        """캐러셀 자식(이미지 1장) 컨테이너. `is_ai_generated`는 보내지 않는다."""
+        ...
+
+    async def create_carousel_container(self, request: CarouselRequest) -> str:
+        """자식 컨테이너들을 묶는 부모 컨테이너. 이 id로 `media_publish`를 1회 부른다."""
+        ...
 
     async def get_container_status(self, container_id: str) -> ContainerStatus: ...
 

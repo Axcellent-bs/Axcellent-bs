@@ -25,6 +25,7 @@ import hashlib
 import json
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -423,3 +424,100 @@ def _completed(
         output=output | {"replayed": replayed},
         evidence=evidence.model_copy(update={"ref_ids": ref_ids}),
     )
+
+
+# --- 여러 건을 한 번에 만들기 전의 비용 미리 계산 (캐러셀) ---
+
+
+@dataclass(frozen=True)
+class CostPlan:
+    """생성 한 건의 호출 전 비용. `settled`면 장부에 이미 끝난 키라 다시 비용이 나지 않는다."""
+
+    key: str
+    krw_est: int
+    settled: bool
+
+
+def plan_cost(
+    request: AgentRequest,
+    *,
+    ledger: MediaLedger,
+    settings: MediaSettings,
+    prices_path: Path | None = None,
+    templates_path: Path | None = None,
+) -> CostPlan | AgentResult:
+    """`generate_media`(이미지)와 같은 규칙으로 호출 없이 비용만 계산한다. 막히면 결과 Task.
+
+    입력 검증·프롬프트 검사·공급자 어댑터·환율·단가표(fail-closed)·건당 상한은 `generate_media`와
+    같은 규칙·결과 코드다. 월 상한과 장부 예약은 하지 않는다(부르는 쪽이 합계로 본다).
+    같은 키가 이미 확정이면 `settled=True`(재생이라 비용이 다시 나지 않는다).
+    """
+    try:
+        data = GenerateMediaInput.model_validate(request.input)
+    except ValidationError as error:
+        return _fail(
+            request,
+            "invalid_input",
+            errors=[f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()],
+        )
+    if not _DRAFT_ID.fullmatch(data.post_draft_id) or data.media_kind != "image":
+        return _fail(request, "invalid_input", errors=["media_kind/post_draft_id: invalid"])
+    try:
+        template = get_template(data.scene_template_id, templates_path)
+        if template.kind != "image":
+            return _fail(request, "invalid_input", errors=["scene_template_id: kind_mismatch"])
+        prompt = render_prompt(data.scene_template_id, data.fields, templates_path)
+    except PromptRejected as rejected:
+        return _fail(request, "prompt_rejected", reason_code=rejected.code, field=rejected.field)
+    resolution = data.resolution or template.resolution
+    quality = data.quality or template.quality
+    if data.duration_s is not None or not _is_image_size(resolution):
+        return _fail(
+            request, "invalid_input", errors=["resolution/quality/duration_s: kind_mismatch"]
+        )
+    prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
+    request_sha = _sha(prompt_sha, "image", resolution, quality, None, "muted")
+    key = f"{request.meta.context_id}:{ACTION}:{data.post_draft_id}:{request_sha[:10]}"
+    try:
+        previous = ledger.settled_for(key)
+    except LedgerError:
+        return _fail(request, "storage_error")
+    if previous is not None and previous.result_json:
+        return CostPlan(key, previous.krw_actual or previous.krw_est, True)
+
+    provider_name = settings.provider("image")
+    if get_adapter(provider_name) is None:
+        return _fail(request, "provider_adapter_missing", provider=provider_name)
+    if provider_name == MOCK:
+        krw_est = MOCK_COST_KRW["image"]
+    else:
+        model = settings.model("image")
+        if not model:
+            return _fail(request, "model_not_configured", provider=provider_name)
+        problem = settings.fx_problem(_now().date())
+        if problem is not None:
+            return _fail(request, problem)
+        if settings.max_cost_krw_per_item is None or settings.monthly_budget_krw is None:
+            return _fail(request, "cost_limit_not_configured")
+        try:
+            entry = pricing.find_entry(
+                provider=provider_name,
+                model=model,
+                kind="image",
+                resolution=resolution,
+                quality=quality,
+                path=prices_path,
+            )
+            usd_est = pricing.estimate_usd(entry, prompt=prompt, duration_s=None)
+        except PriceNotFound:
+            return _fail(request, "price_not_found", provider=provider_name, resolution=resolution)
+        assert settings.fx_usd_krw is not None and settings.margin_pct is not None  # noqa: S101
+        krw_est = pricing.krw_estimate(usd_est, settings.fx_usd_krw, settings.margin_pct)
+    if settings.max_cost_krw_per_item is not None and krw_est > settings.max_cost_krw_per_item:
+        return _fail(
+            request,
+            "cost_over_single",
+            cost_krw=krw_est,
+            limit_krw=settings.max_cost_krw_per_item,
+        )
+    return CostPlan(key, krw_est, False)

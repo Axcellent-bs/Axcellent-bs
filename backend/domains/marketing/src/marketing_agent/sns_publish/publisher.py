@@ -24,10 +24,10 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
-from pydantic import Field, StrictBool, ValidationError
+from pydantic import Field, StrictBool, ValidationError, model_validator
 
 from ax_agent_template import events
 from ax_agent_template.config import agent_token, agent_url, get_agent_name
@@ -45,9 +45,11 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from ax_contracts.schemas.common import AxModel
+from marketing_agent import sns_media
 from marketing_agent.sns_publish.config import SnsConfig
 from marketing_agent.sns_publish.instagram import (
     AdapterUnavailable,
+    CarouselRequest,
     ContainerRequest,
     IgApiError,
     IgResponseLost,
@@ -72,18 +74,42 @@ SOURCE = "marketing"
 CAPTION_MAX = 2200
 _log = logging.getLogger("ax.marketing.sns_publish")
 
-MediaKind = Literal["image", "reel"]
+MediaKind = Literal["image", "reel", "carousel"]
+_SHA = r"^[0-9a-f]{64}$"
 
 
 class PublishSnsInput(AxModel):
     post_draft_id: str = Field(min_length=1)
-    asset_ref: str = Field(min_length=1)  # 내용 주소 참조(경로·ID). 서명 URL은 어댑터가 만든다
-    asset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # 내용 주소 참조(경로·ID). 서명 URL은 어댑터가 만든다. 캐러셀은 아래 asset_refs를 쓴다
+    asset_ref: str | None = Field(default=None, min_length=1)
+    asset_sha256: str | None = Field(default=None, pattern=_SHA)
+    # 캐러셀(이미지 2~10장): 각 장의 참조와 해시. 순서가 게시 순서이고 장마다 라벨을 입힌 파일이다
+    asset_refs: list[str] | None = None
+    asset_sha256s: list[Annotated[str, Field(pattern=_SHA)]] | None = None
     caption: str = Field(min_length=1, max_length=CAPTION_MAX)
     media_kind: MediaKind = "image"
     share_to_feed: StrictBool = True  # 릴스 전용이지만 항상 명시한다(기본값이 문서에 없음)
     is_ai_generated: Literal[True] = True  # 라벨은 끌 수 없다
     summary: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def _media_shape(self) -> PublishSnsInput:
+        if self.media_kind == "carousel":
+            refs, shas = self.asset_refs or [], self.asset_sha256s or []
+            if self.asset_ref is not None or self.asset_sha256 is not None:
+                raise ValueError("carousel은 asset_refs·asset_sha256s만 쓴다")
+            if not sns_media.CAROUSEL_MIN <= len(refs) <= sns_media.CAROUSEL_MAX:
+                raise ValueError("carousel_item_count_out_of_range")
+            if len(refs) != len(shas):
+                raise ValueError("carousel_refs_shas_mismatch")
+            if len(set(refs)) != len(refs) or not all(refs):
+                raise ValueError("carousel_duplicate_or_empty_asset")
+        else:
+            if self.asset_ref is None or self.asset_sha256 is None:
+                raise ValueError("asset_ref·asset_sha256 필요")
+            if self.asset_refs is not None or self.asset_sha256s is not None:
+                raise ValueError("asset_refs는 carousel만 쓴다")
+        return self
 
 
 class PublishSnsOutput(AxModel):
@@ -98,6 +124,8 @@ class PublishSnsOutput(AxModel):
     is_ai_generated_response: bool | None = None
     ai_label_confirmed: bool | None = None
     provider: str | None = None
+    item_count: int | None = None  # 캐러셀 장수
+    asset_refs: list[str] | None = None  # 캐러셀 각 장의 참조(게시 순서)
 
 
 # -- 내용 해시·멱등 키
@@ -136,8 +164,23 @@ def idempotency_key(context_id: str, post_draft_id: str, sha: str) -> str:
 ContentResolver = Callable[[PendingPost], dict[str, Any]]
 
 
+def _carousel_resolver(current: dict[str, Any]) -> dict[str, Any]:
+    """캐러셀: 각 장의 지금 해시를 다시 계산해 전체 해시를 새로 만든다(읽을 수 없으면 저장값)."""
+    shas = list(current.get("asset_sha256s", []))
+    for index, ref in enumerate(current.get("asset_refs", [])):
+        try:
+            shas[index] = sns_media.sha256_file(sns_media.resolve_asset(ref))
+        except (sns_media.MediaPathError, OSError):
+            continue  # 어댑터 호출 때 실패한다
+    current["asset_sha256s"] = shas
+    current["asset_sha256"] = sns_media.carousel_sha256(shas)
+    return current
+
+
 def default_resolver(row: PendingPost) -> dict[str, Any]:
     current = dict(row.params)
+    if current.get("media_kind") == "carousel":
+        return _carousel_resolver(current)
     path = Path(str(current.get("asset_ref", "")))
     try:
         if path.is_file():
@@ -208,7 +251,29 @@ def _meta(row: PendingPost) -> RequestMeta:
     )
 
 
+def _short_ref(ref: str) -> str:
+    """승인 대기 큐 요약용 짧은 참조: 미디어 폴더 이름(`med_` 접두어 제외)."""
+    parts = ref.replace("\\", "/").rstrip("/").split("/")
+    name = parts[-2] if len(parts) >= 2 else parts[-1]
+    return name.removeprefix("med_")[:16]
+
+
+def _summary(params: dict[str, Any]) -> str:
+    if params["media_kind"] == "carousel":
+        refs = [_short_ref(r) for r in params["asset_refs"]]
+        return (
+            f"SNS 캐러셀 게시 요청({len(refs)}장): {params['post_draft_id']} → instagram "
+            f"[{', '.join(refs)}]"
+        )
+    return f"SNS 게시 요청: {params['post_draft_id']} → instagram/{params['media_kind']}"
+
+
 def _safety_params(params: dict[str, Any], counts: dict[str, int]) -> dict[str, Any]:
+    carousel = (
+        {"item_count": len(params["asset_refs"]), "asset_refs": list(params["asset_refs"])}
+        if params["media_kind"] == "carousel"
+        else {}
+    )
     return {
         "platform": "instagram",
         "media_kind": params["media_kind"],
@@ -217,8 +282,8 @@ def _safety_params(params: dict[str, Any], counts: dict[str, int]) -> dict[str, 
         "caption_sha256": hashlib.sha256(params["caption"].encode()).hexdigest(),
         "share_to_feed": params["share_to_feed"],
         "is_ai_generated": params["is_ai_generated"],
-        "summary": params.get("summary")
-        or f"SNS 게시 요청: {params['post_draft_id']} → instagram/{params['media_kind']}",
+        "summary": params.get("summary") or _summary(params),
+        **carousel,
         **counts,
     }
 
@@ -239,6 +304,8 @@ def _output(row: PendingPost) -> dict[str, Any]:
         is_ai_generated_response=info.get("is_ai_generated_response"),
         ai_label_confirmed=info.get("ai_label_confirmed"),
         provider=info.get("provider"),
+        item_count=len(row.params["asset_refs"]) if row.params.get("asset_refs") else None,
+        asset_refs=row.params.get("asset_refs") or None,
     ).model_dump(exclude_none=True)
 
 
@@ -314,11 +381,28 @@ def _counts(params: dict[str, Any], sns_store: Any | None) -> dict[str, int]:
         }
     mismatch = sum(1 for t in draft.required_text if t not in params["caption"])
     constraints = sum(1 for c in draft.constraints if c.text not in params["caption"])
+    if params["media_kind"] == "carousel":  # 장마다 라벨·규격·승인한 초안과의 일치를 센다
+        no_label, changed, _ = _carousel_check(params, draft)
+        missing_label += no_label
+        mismatch += changed
     return {
         "ai_label_missing_count": missing_label,
         "text_mismatch_count": mismatch,
         "constraint_missing_count": constraints,
     }
+
+
+def _carousel_check(params: dict[str, Any], draft: Any) -> tuple[int, int, list[str]]:
+    """(라벨 누락 장 수, 초안과 어긋난 항목 수, 문제 코드). 모두 0이어야 게시할 수 있다."""
+    from marketing_agent import sns
+
+    pairs = list(zip(params["asset_refs"], params["asset_sha256s"], strict=True))
+    if draft.media_kind != "carousel" or pairs != [
+        (a.asset_ref, a.asset_sha256) for a in draft.assets
+    ]:
+        return 0, 1, ["carousel_differs_from_draft"]
+    media = sns._check_carousel(draft)  # noqa: SLF001 - 점검 규칙을 한 곳에 둔다
+    return media.overlay_missing, media.asset_changed, media.problems
 
 
 async def publish_sns(request: AgentRequest, sns_store: Any | None = None) -> AgentResult:
@@ -334,12 +418,15 @@ async def publish_sns(request: AgentRequest, sns_store: Any | None = None) -> Ag
             },
         )
     params = data.model_dump()
+    if data.media_kind == "carousel":  # 전체 해시가 내용 해시·멱등 키·안전 관문 값에 들어간다
+        params["asset_sha256"] = sns_media.carousel_sha256(list(data.asset_sha256s or []))
+        params["asset_ref"] = ""
     sha = params_sha(params)
     key = idempotency_key(request.meta.context_id, data.post_draft_id, sha)
 
     # 실제 어댑터가 없으면 승인을 받으러 가기 전에 거부한다(받아도 게시할 수 없다)
     try:
-        get_adapter()
+        adapter = get_adapter()
     except AdapterUnavailable:
         return AgentResult(
             meta=request.meta,
@@ -349,6 +436,26 @@ async def publish_sns(request: AgentRequest, sns_store: Any | None = None) -> Ag
                 "reason": "Instagram 어댑터 설정이 없다 (MARKETING_SNS_PROVIDER, MARKETING_IG_*)"
             },
         )
+    if data.media_kind == "carousel":
+        if not getattr(adapter, "supports_carousel", False):
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.FAILED,
+                outcome="carousel_unsupported",
+                output={
+                    "reason": "이 어댑터는 캐러셀을 켜지 않았다 (MARKETING_IG_CAROUSEL_ENABLED)"
+                },
+            )
+        # 승인을 받으러 가기 전에, 모든 장이 라벨·규격을 통과한 초안과 같은지 본다(fail-closed)
+        draft = sns_store.get(data.post_draft_id) if sns_store is not None else None
+        problems = ["draft_unavailable"] if draft is None else _carousel_check(params, draft)[2]
+        if problems:
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.FAILED,
+                outcome="carousel_not_publishable",
+                output={"problems": problems[:20]},
+            )
 
     try:
         existing = store().get(key)
@@ -617,8 +724,53 @@ async def _wait_finished(row: PendingPost, adapter: InstagramAdapter, container_
     raise _Fail("container_not_ready_timeout")
 
 
+async def _prepare_carousel(row: PendingPost, adapter: InstagramAdapter) -> str:
+    """자식(이미지)마다 컨테이너 → 모두 FINISHED → 부모 컨테이너 → FINISHED. 부모 id를 돌려준다.
+
+    부모 컨테이너 id를 `container_id`에 남기는 것이 게시 중복 방지의 열쇠다: 이후는 단일 게시와
+    같아서 `media_publish`는 부모에 1회만 보내고, 재시작 복구는 부모 상태로 판정한다.
+    자식 id는 `result.children`에 남긴다(어느 단계까지 갔는지 사람이 볼 수 있다).
+    """
+    p = row.params
+    new_container_budget = 1
+    while True:
+        try:
+            children: list[str] = []
+            for ref in p["asset_refs"]:
+                child = await _retrying(
+                    row, "create_carousel_item", lambda ref=ref: adapter.create_carousel_item(ref)
+                )
+                children.append(child)
+                store().update(row.idempotency_key, result={"children": list(children)})
+            for child in children:
+                await _wait_finished(row, adapter, child)
+            parent_request = CarouselRequest(
+                child_ids=tuple(children), caption=p["caption"], is_ai_generated=True
+            )
+            container_id = await _retrying(
+                row,
+                "create_carousel_container",
+                lambda req=parent_request: adapter.create_carousel_container(req),
+            )
+            store().update(row.idempotency_key, container_id=container_id)
+            _row_log(
+                row,
+                "sns_publish_attempt",
+                {"op": "create_carousel_container", "container_id": container_id,
+                 "item_count": len(children)},
+            )  # fmt: skip
+            await _wait_finished(row, adapter, container_id)
+            return container_id
+        except _NewContainer as again:
+            if new_container_budget <= 0:
+                raise _Fail(again.code) from again
+            new_container_budget -= 1
+
+
 async def _prepare_container(row: PendingPost, adapter: InstagramAdapter) -> str:
     p = row.params
+    if p["media_kind"] == "carousel":
+        return await _prepare_carousel(row, adapter)
     request = ContainerRequest(
         media_ref=p["asset_ref"],
         media_kind=p["media_kind"],
@@ -695,6 +847,9 @@ async def _verify(
     row: PendingPost, adapter: InstagramAdapter, media_id: str | None
 ) -> dict[str, Any]:
     result: dict[str, Any] = {"provider": adapter.name, "container_id": row.container_id}
+    if row.result.get("children"):  # 캐러셀: 자식 컨테이너 id를 결과에 남긴다
+        result["children"] = row.result["children"]
+        result["item_count"] = len(row.result["children"])
     if media_id is None:
         return result | {"media_id_unresolved": True}
     try:

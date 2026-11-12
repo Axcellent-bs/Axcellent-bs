@@ -40,7 +40,8 @@ DEFAULT_CONFIG = Path(__file__).with_name("sns_label.toml")
 IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".bmp"})
 VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv"})
 _SAFE = re.compile(r"[A-Za-z0-9#_.]+")
-_POSITIONS = ("top", "center", "bottom")
+_POSITIONS = ("top", "center", "bottom")  # 세로 위치
+_ALIGNS = ("left", "center", "right")  # 가로 위치
 
 
 class LabelError(Exception):
@@ -59,7 +60,10 @@ class LabelConfig:
     text_image: str
     text_unknown: str
     position: str
+    align: str
     margin_ratio: float
+    margin_ratio_tall: float
+    tall_aspect_below: float
     side_margin_ratio: float
     font_size_ratio: float
     min_font_px: int
@@ -105,7 +109,10 @@ def load_config(path: str | Path | None = None) -> LabelConfig:
             text_image=str(text["image"]).strip(),
             text_unknown=str(text["unknown"]).strip(),
             position=str(layout["position"]),
+            align=str(layout.get("align", "right")),
             margin_ratio=float(layout["margin_ratio"]),
+            margin_ratio_tall=float(layout.get("margin_ratio_tall", layout["margin_ratio"])),
+            tall_aspect_below=float(layout.get("tall_aspect_below", 0.7)),
             side_margin_ratio=float(layout["side_margin_ratio"]),
             font_size_ratio=float(layout["font_size_ratio"]),
             min_font_px=int(layout["min_font_px"]),
@@ -138,9 +145,18 @@ def _validate(c: LabelConfig) -> None:
         problems.append("text_empty")
     if c.position not in _POSITIONS:
         problems.append("position")
+    if c.align not in _ALIGNS:
+        problems.append("align")
     if c.display_time != "full":
         problems.append("display_time(only 'full')")
-    for name in ("margin_ratio", "side_margin_ratio", "font_size_ratio", "char_width_factor"):
+    for name in (
+        "margin_ratio",
+        "margin_ratio_tall",
+        "side_margin_ratio",
+        "font_size_ratio",
+        "char_width_factor",
+        "tall_aspect_below",
+    ):
         if not 0 < getattr(c, name) < 1 + (name == "char_width_factor"):
             problems.append(name)
     if not 0 <= c.box_opacity <= 1:
@@ -252,11 +268,15 @@ def media_kind_of(path: Path) -> str:
     raise LabelError("unsupported_media_type", suffix)
 
 
-def wrap_text(text: str, width_px: int, font_px: int, config: LabelConfig) -> str:
-    """글자 폭을 `char_width_factor`로 어림해 줄을 나눈다(나눌 자리는 공백 우선)."""
-    per_line = max(
-        4, int(width_px * (1 - 2 * config.side_margin_ratio) / (font_px * config.char_width_factor))
-    )
+def wrap_text(
+    text: str, width_px: int, font_px: int, config: LabelConfig, border_px: int = 0
+) -> str:
+    """글자 폭을 `char_width_factor`로 어림해 줄을 나눈다(나눌 자리는 공백 우선).
+
+    배경 상자의 안쪽 여백(`border_px`, 양쪽)까지 좌우 여백 안에 들어오게 줄 수를 정한다.
+    """
+    usable = width_px * (1 - 2 * config.side_margin_ratio) - 2 * border_px
+    per_line = max(4, int(usable / (font_px * config.char_width_factor)))
     lines: list[str] = []
     current = ""
     for word in text.split(" "):
@@ -280,22 +300,46 @@ def _escape_filter_path(path: str) -> str:
     return path.replace("\\", "/").replace(":", r"\:").replace("'", r"'\''")
 
 
+def label_box(config: LabelConfig, width: int, height: int) -> dict[str, int]:
+    """라벨 크기·여백(px). 세로로 긴 화면(9:16 등)은 `margin_ratio_tall`로 하단 안전영역을 둔다."""
+    font_px = max(config.min_font_px, round(height * config.font_size_ratio))
+    tall = width / height < config.tall_aspect_below
+    margin = round(height * (config.margin_ratio_tall if tall else config.margin_ratio))
+    return {
+        "font_px": font_px,
+        "border": max(1, round(font_px * config.box_border_ratio)),
+        "margin_y": margin,
+        "margin_x": round(width * config.side_margin_ratio),
+    }
+
+
 def build_drawtext(
     config: LabelConfig, font: str, width: int, height: int, textfile: str, text: str
 ) -> str:
-    font_px = max(config.min_font_px, round(height * config.font_size_ratio))
-    wrapped = wrap_text(text, width, font_px, config)
+    """drawtext 필터. 위치는 설정(`position` 세로 x `align` 가로)이고 기본은 오른쪽 하단이다.
+
+    배경 상자(`boxborderw`)가 글자 바깥으로 `border`만큼 나오므로 여백은 상자 가장자리 기준이다.
+    그래서 글자 위치에 `border`를 더해 상자가 화면 밖으로 잘리지 않게 한다.
+    """
+    box = label_box(config, width, height)
+    font_px, border, margin, side = box["font_px"], box["border"], box["margin_y"], box["margin_x"]
+    wrapped = wrap_text(text, width, font_px, config, border)
     Path(textfile).write_text(wrapped, encoding="utf-8")
-    margin = round(height * config.margin_ratio)
-    y = {"top": str(margin), "center": "(h-text_h)/2", "bottom": f"h-text_h-{margin}"}[
-        config.position
-    ]
-    border = max(1, round(font_px * config.box_border_ratio))
+    y = {
+        "top": str(margin + border),
+        "center": "(h-text_h)/2",
+        "bottom": f"h-text_h-{margin + border}",
+    }[config.position]
+    x = {
+        "left": str(side + border),
+        "center": "(w-text_w)/2",
+        "right": f"w-text_w-{side + border}",
+    }[config.align]
     return (
         f"drawtext=fontfile='{_escape_filter_path(font)}':textfile={Path(textfile).name}"
         ":expansion=none"  # 문구의 `%{...}`·`\`를 ffmpeg가 해석하지 않게 한다
         f":fontsize={font_px}:fontcolor={config.font_color}:line_spacing={config.line_spacing_px}"
-        f":x=(w-text_w)/2:y={y}"
+        f":x={x}:y={y}"
         f":box=1:boxcolor={config.box_color}@{config.box_opacity}:boxborderw={border}"
     )
 

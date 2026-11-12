@@ -16,8 +16,13 @@ video = "생성형 AI로 만든 영상"
 unknown = "생성형 AI로 만든 이미지/영상"
 
 [layout]
-position = "bottom"        # top | center | bottom
-margin_ratio = 0.06        # 위·아래 여백 = 높이 x 이 값
+# 위치: 세로 position x 가로 align. 기본은 오른쪽 하단(재헌 확정 2026-11-12, 각 미디어의 오른쪽 하단).
+# 여백은 배경 상자 가장자리 기준이라 상자가 화면 밖으로 잘리지 않는다. 회사별로 이 값만 바꾼다.
+position = "bottom"        # 세로: top | center | bottom
+align = "right"            # 가로: left | center | right
+margin_ratio = 0.06        # 위·아래 여백 = 높이 x 이 값 (4:5·1:1 등)
+margin_ratio_tall = 0.15   # 세로로 긴 화면(너비/높이가 아래 값 미만, 9:16 등)의 위·아래 여백. 릴스 하단 UI 안전영역
+tall_aspect_below = 0.7    # 이 값보다 너비/높이가 작으면 위의 tall 여백을 쓴다 (9:16 = 0.5625, 4:5 = 0.8)
 side_margin_ratio = 0.05   # 좌우 여백 = 너비 x 이 값
 font_size_ratio = 0.032    # 글자 크기 = 높이 x 이 값
 min_font_px = 16

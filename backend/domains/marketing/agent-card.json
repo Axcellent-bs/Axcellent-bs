@@ -191,7 +191,7 @@
     },
     {
       "id": "publish_sns",
-      "description": "내용이 확정된 SNS 게시(post_draft_id, asset_ref, asset_sha256, caption, media_kind)를 Instagram에 올린다. C 등급이라 항상 사람 승인이 필요하다: 멱등 키는 내용 해시(content_sha)를 포함하고, held면 input-required로 돌려준다. 승인(safety.review_decided 구독, 대비책 폴링) 뒤 같은 키로 execute()를 다시 불러 executed를 받은 뒤에만 어댑터를 부른다. 상태 held→approved→publishing→published/failed, media_publish는 1회, 내용이 바뀌면 content_changed. 지금은 목 어댑터만 있고 실제 모드는 adapter_unavailable로 거부한다.",
+      "description": "내용이 확정된 SNS 게시(post_draft_id, asset_ref, asset_sha256, caption, media_kind)를 Instagram에 올린다. C 등급이라 항상 사람 승인이 필요하다: 멱등 키는 내용 해시(content_sha)를 포함하고, held면 input-required로 돌려준다. 승인(safety.review_decided 구독, 대비책 폴링) 뒤 같은 키로 execute()를 다시 불러 executed를 받은 뒤에만 어댑터를 부른다. 상태 held→approved→publishing→published/failed, media_publish는 1회, 내용이 바뀌면 content_changed. media_kind=carousel이면 이미지 2~10장(asset_refs·asset_sha256s, 장마다 AI 라벨·규격 점검을 통과한 초안과 같아야 하고 아니면 승인 요청 전에 carousel_not_publishable): 자식 컨테이너 → 부모 컨테이너(AI 표시는 부모에만) → media_publish 1회이며, 승인 대기 큐 요약과 결과에 장수·각 참조가 남고 재시작 복구는 부모 컨테이너 상태로 판정해 두 번 올리지 않는다. 실제 어댑터의 캐러셀은 MARKETING_IG_CAROUSEL_ENABLED를 켜기 전에는 carousel_unsupported로 거부한다. 지금은 목 어댑터만 있고 실제 모드는 adapter_unavailable로 거부한다.",
       "input_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsInput",
       "output_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsOutput",
       "grade": "C",
@@ -276,7 +276,7 @@
     },
     {
       "id": "prepare_sns_post_from_media",
-      "description": "생성(generate_media: B등급 안전 관문·건당/월 상한 그대로) → Instagram 규격 변환(이미지 JPEG·비율 4:5~1.91:1·너비 320~1440, 영상은 필요할 때만 재인코딩) → AI 라벨 오버레이·기계판독 표시(sns_label) → draft_sns_post → check_sns_post를 한 번에 잇는다. 출처는 게시된 공지(notice_id) 또는 공개 쿠폰 사실 중 하나. 출처·미디어 폴더·ffmpeg·글꼴은 생성 전에 확인해 막히면 비용이 나지 않는다. 결과에 점검 결과와 publish_sns 입력값(publish_input)을 담지만 게시하지 않는다: 게시는 C등급 publish_sns를 사람이 승인해야 한다. 같은 입력을 다시 부르면 생성은 장부에서 재생된다.",
+      "description": "생성(generate_media: B등급 안전 관문·건당/월 상한 그대로) → Instagram 규격 변환(이미지 JPEG·비율 4:5~1.91:1·너비 320~1440, 영상은 필요할 때만 재인코딩) → AI 라벨 오버레이·기계판독 표시(sns_label) → draft_sns_post → check_sns_post를 한 번에 잇는다. 출처는 게시된 공지(notice_id) 또는 공개 쿠폰 사실 중 하나. 출처·미디어 폴더·ffmpeg·글꼴은 생성 전에 확인해 막히면 비용이 나지 않는다. 결과에 점검 결과와 publish_sns 입력값(publish_input)을 담지만 게시하지 않는다: 게시는 C등급 publish_sns를 사람이 승인해야 한다. 같은 입력을 다시 부르면 생성은 장부에서 재생된다. carousel_items(이미지 2~10장, 영상 섞기 없음)를 주면 장마다 같은 단계를 거치되 생성 전에 장수만큼 비용을 더해(건당 상한·단가표 fail-closed) 월 상한을 넘으면 한 장도 만들지 않고 거절한다. AI 표시 라벨은 이미지·영상 모두 오른쪽 하단(sns_label.toml의 position·align·margin)에 입힌다.",
       "input_schema": "agents/marketing/src/marketing_agent/sns_prepare.py#PrepareSnsPostInput",
       "output_schema": "agents/marketing/src/marketing_agent/sns.py#SnsPostCheck",
       "grade": "B",
