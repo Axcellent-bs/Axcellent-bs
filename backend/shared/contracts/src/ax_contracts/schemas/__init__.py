@@ -4,6 +4,7 @@
 """
 
 from ax_contracts.schemas.agent_card import AgentCard, Capabilities, Skill
+from ax_contracts.schemas.async_task import ACCEPTED_ASYNC, AsyncAcceptedOutput
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
 from ax_contracts.schemas.data import (
     AccuracyMiss,
@@ -208,6 +209,8 @@ from ax_contracts.schemas.event import (
     SupportInquiryReceivedData,
     SupportInquiryResolvedData,
     SupportInquirySurgeData,
+    TaskCompletedData,
+    TaskProgressData,
 )
 from ax_contracts.schemas.execute import (
     ConnectionHoldNotice,
@@ -470,8 +473,12 @@ __all__ = [
     "CouponIssuedData",
     "Escalation",
     "HandedToHumanOutput",
+    "ACCEPTED_ASYNC",
+    "AsyncAcceptedOutput",
     "HandoffCompleteBody",
     "HandoffCompletedData",
+    "TaskCompletedData",
+    "TaskProgressData",
     "HandoffCreate",
     "HandoffStatus",
     "HandoffTask",

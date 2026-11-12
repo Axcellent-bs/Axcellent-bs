@@ -26,6 +26,8 @@ class Rule:
     # True면 총괄이 단계에 붙여 보낸 약속 시간(`promised_seconds`)을 기준으로 삼고, 약속이 없는
     # 단계만 `normal_max_seconds`를 쓴다
     use_promised: bool = False
+    # 긴 작업(비동기)에서 부서의 응답 사이가 이 시간(초)보다 길게 비면 "응답 끊김"으로 본다
+    max_silence_seconds: float = 300.0
 
 
 @dataclass(frozen=True)
@@ -51,7 +53,10 @@ def _rule(raw: object, base: Rule | None, where: str) -> Rule:
     promised = raw.get("use_promised", base.use_promised if base else False)
     if not isinstance(promised, bool):
         raise CriteriaError(f"{where}: use_promised는 true 또는 false여야 한다")
-    return Rule(float(seconds), attempts, promised)
+    silence = raw.get("max_silence_seconds", base.max_silence_seconds if base else 300.0)
+    if isinstance(silence, bool) or not isinstance(silence, int | float) or silence <= 0:
+        raise CriteriaError(f"{where}: max_silence_seconds는 0보다 큰 숫자여야 한다")
+    return Rule(float(seconds), attempts, promised, float(silence))
 
 
 def parse_criteria(data: dict) -> Criteria:

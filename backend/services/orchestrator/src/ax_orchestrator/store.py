@@ -69,6 +69,12 @@ def step_to_dict(run: StepRun) -> dict[str, Any]:
         "human_wait_seconds": run.human_wait_seconds,
         "refreshed_at": _dt(run.refreshed_at),
         "promised_seconds": run.promised_seconds,
+        "async_task_id": run.async_task_id,
+        "last_response_at": _dt(run.last_response_at),
+        "heartbeats": run.heartbeats,
+        "max_silence_seconds": run.max_silence_seconds,
+        "progress_percent": run.progress_percent,
+        "progress_note": run.progress_note,
     }
 
 
@@ -92,6 +98,12 @@ def step_from_dict(raw: dict[str, Any]) -> StepRun:
         human_wait_seconds=raw.get("human_wait_seconds"),
         refreshed_at=_parse(raw.get("refreshed_at")),
         promised_seconds=raw.get("promised_seconds"),
+        async_task_id=raw.get("async_task_id"),
+        last_response_at=_parse(raw.get("last_response_at")),
+        heartbeats=raw.get("heartbeats", 0),
+        max_silence_seconds=raw.get("max_silence_seconds"),
+        progress_percent=raw.get("progress_percent"),
+        progress_note=raw.get("progress_note"),
     )
 
 

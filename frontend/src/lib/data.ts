@@ -92,6 +92,7 @@ export const STEP_STATUS_KO: Record<string, { label: string; tone: "ok" | "warn"
   pending: { label: "기다리는 중", tone: "muted" },
   held: { label: "사람 승인 기다림", tone: "warn" },
   waiting_human: { label: "담당 부서 처리 기다림", tone: "info" },
+  waiting_async: { label: "긴 작업 진행 중", tone: "info" },
   failed: { label: "실패", tone: "bad" },
   rejected_by_human: { label: "사람이 거절", tone: "warn" },
   skipped: { label: "건너뜀", tone: "muted" },

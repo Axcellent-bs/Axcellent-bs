@@ -120,12 +120,27 @@ Oct 21, 2026 · @재현
 | 상태 | 쓰는 경우 | 주의 |
 | --- | --- | --- |
 | `submitted` | 접수 직후 |  |
-| `working` | 처리 중, 대기 중(반품 입고 대기 등) |  |
+| `working` | 처리 중, 대기 중(반품 입고 대기 등). 긴 작업을 접수만 알릴 때는 `outcome: accepted_async` + `output.task_id` | 아래 "긴 작업(비동기)" 참고 |
 | `input-required` | 다른 판단이 필요할 때. `reason_code`로 구분: `dept_input`(다른 부서), `customer_input`(고객 자료), `human_input`(사람 확정·승인) | 긴 대기는 Task를 쪼개 단계마다 마감을 둔다 |
 | `completed` | 정상 처리. 결과가 거절이어도 정책상 거절이면 여기 (`outcome: auto_rejected`, `linked_duplicate` 등) |  |
 | `rejected` | 에이전트가 요청 자체를 거부: 권한·형식·루프·토큰 위반 | 정책 거절과 섞으면 이관률·실패율 지표가 오염된다 |
 | `canceled` | 마감 초과 |  |
 | `failed` | 실행 오류 (외부 API 실패 등) |  |
+
+### 긴 작업(비동기)
+
+몇 분에서 몇 시간 걸리는 일은 총괄이 응답을 붙잡고 기다리지 않는다(총괄의 호출 마감은 기본 30초, 약속 시간이 있는 단계는 최대 300초). 부서가 **접수만** 알리고 일하는 동안 **진행 알림**을 보내며 끝나면 **완료 이벤트**를 보낸다. 규약은 `shared/contracts/.../schemas/async_task.py`, 부서가 쓰는 도구는 `ax_agent_template.async_task`다.
+
+1. 접수: `AgentResult(status=working, outcome="accepted_async", output={"task_id": …, "expected_seconds": …(선택)})` → `async_task.accepted(request, task_id)`
+2. 진행 알림: `task.progress` 이벤트를 주기적으로 발행(`report_progress`). 총괄은 마지막 응답 뒤 **300초 넘게 소식이 없으면 "응답 끊김"** 으로 단계를 실패로 끝낸다(사유 코드 `no_response`). 알림은 그보다 자주 보낸다.
+3. 완료: `task.completed` 이벤트를 한 번 발행(`report_completed`). `done`이면 `output`이 단계의 결과가 되고 `failed`면 단계가 실패로 끝난다.
+
+- 이벤트의 `source`는 총괄이 일을 맡긴 부서의 id, `skill`은 맡긴 skill이어야 한다. 다르면 무시한다(위조 방지).
+- 같은 `task_id`의 완료는 한 번만 반영하고, 끝난 뒤 온 알림은 무시한다.
+- 전체 대기 시간은 단계의 약속 시간(또는 접수 응답의 `expected_seconds`)의 2배이고 24시간을 넘지 않는다.
+- 총괄이 재시작하면 기다리던 단계는 이어 가지 않고 "재시작으로 중단됨"으로 남는다.
+- 기본은 지금처럼 동기다. 부서가 `working`으로 답할 때만 이 방식이 돈다. 상태를 바꾸는 일은 여전히 `execute()`(안전 관문)로만 한다.
+- 인사 에이전트 평가는 부서의 응답(접수·진행 알림·완료) 사이가 길게 빈 것을 "응답 끊김"으로 따로 센다. 총 시간이 길어도 알림이 계속 왔으면 끊김이 아니다.
 
 C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`status: held`)로 표현하고, 요청한 Task는 `input-required`(`reason_code: human_input`)로 둔다.
 
@@ -161,6 +176,7 @@ C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`s
 | `campaign.created` | marketing | campaign\_id, target\_codes, starts\_at, ends\_at, `promises[]` | support, finance | 2차 |
 | `coupon.issued` | marketing | coupon\_id, campaign\_id(보상이면 null), `purpose_code`, count, total\_value | support, finance | 1차 |
 | `safety.action_executed`, `safety.action_held`, `safety.review_decided` | safety | 실행 ID, 액션, 요청자, 등급, 계산 금액, 기준표 버전 | dashboard-api, memory | 1차 |
+| `task.progress`, `task.completed` | 긴 작업을 접수한 부서 | task\_id, skill, (진행) percent·note, (완료) status·output | orchestrator | 긴 작업(비동기) |
 | `reconciliation.*`, `settlement.*` | finance | 대사·정산 결과 | memory, dashboard-api | 2차 |
 
 `shop.degraded`·`shop.recovered`는 시연에서 장애 주입과 바로 이어지도록 shop-api가 직접 측정해 발행하고, Zabbix(DejaFix)는 보조 신호다. `metric_code`는 `p95_latency_ms`·`error_rate_5xx`, 기준값 초안은 **p95 1,000ms 초과 또는 5xx 2% 초과가 1분 지속**(시연용, 평소 p95 180ms·5xx 0.3% 기준). 기준값은 shop-api 설정으로 둔다 (예진 답변).

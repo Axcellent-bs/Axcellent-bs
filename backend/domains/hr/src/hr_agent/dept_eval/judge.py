@@ -4,6 +4,9 @@
 - normal: 일한 시간이 기준 이하이고 재시도도 기준 이내. 기준 시간은 단계의 약속 시간(총괄이 같이
   보낸 `promised_seconds`, 기준값 v2)이고, 약속이 없으면 기본값(30초)이다
 - check: 기준을 넘었거나 재시도가 있었다 (시도 횟수를 같이 남긴다)
+- silent: 긴 작업(비동기) 중 부서의 응답(접수·진행 알림·완료) 사이가 기준(기본 300초)보다 길게
+  비었거나, 총괄이 응답 끊김으로 단계를 끝냈다(사유 코드 `no_response`). 총 시간이 길어도 알림이
+  계속 왔으면 끊김이 아니다
 - no_record: 시간 기록이 없다(건너뜀·시작이나 끝 시각을 모름). 지연으로 세지 않는다
 - blocked: 실패했거나 사람이 거절했다 (실패·막힘)
 - handed_off: 스스로 끝내지 않고 사람이 보도록 넘겼다(원인을 확정하지 못함 등). 설계된 동작이라
@@ -22,9 +25,10 @@ from hr_agent.dept_eval.criteria import Criteria
 from hr_agent.dept_eval.stages import stage_of
 
 REVIEW_TIMEOUT = "review_timeout"
+NO_RESPONSE = "no_response"  # 총괄이 긴 작업의 응답 끊김으로 단계를 끝낸 사유 코드
 BLOCKED_STATUSES = ("failed", "rejected_by_human")
 HANDED_OFF_STATUSES = ("transfer_queued", "waiting_human")
-OPEN_STATUSES = ("pending", "running")
+OPEN_STATUSES = ("pending", "running", "waiting_async")
 
 
 def judge_step(timing: dict[str, Any], criteria: Criteria) -> dict[str, Any] | None:
@@ -42,8 +46,12 @@ def judge_step(timing: dict[str, Any], criteria: Criteria) -> dict[str, Any] | N
     has_promise = rule.use_promised and isinstance(promised, int | float) and promised > 0
     limit = float(promised) if has_promise else rule.normal_max_seconds
 
+    silence = timing.get("max_silence_seconds")
+    went_silent = isinstance(silence, int | float) and silence > rule.max_silence_seconds
     if reason == REVIEW_TIMEOUT:
         verdict = "approval_expired"
+    elif reason == NO_RESPONSE or (went_silent and status in ("completed", *OPEN_STATUSES)):
+        verdict = "silent"
     elif status in HANDED_OFF_STATUSES:
         verdict = "handed_off"
     elif status in BLOCKED_STATUSES:
@@ -67,6 +75,7 @@ def judge_step(timing: dict[str, Any], criteria: Criteria) -> dict[str, Any] | N
         "limit_seconds": limit,
         # 기준 시간이 단계의 약속에서 왔는지(True), 기본값에서 왔는지(False)
         "promised": has_promise,
+        "max_silence_seconds": silence if isinstance(silence, int | float) else None,
         "reason_code": reason,
     }
 

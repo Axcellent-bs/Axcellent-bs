@@ -30,6 +30,7 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from ax_orchestrator.models import (
+    NO_RESPONSE,
     NOT_INTERVENTION,
     TERMINAL,
     WAITING_RECOVERY,
@@ -63,6 +64,10 @@ MAX_CANCELED_RETRIES = 1
 MAX_EARLY_REVIEWS = 200  # 대기로 오르기 전에 먼저 온 안전 관문 결정을 담는 상한
 DEADLINE_FACTOR = 2.0  # 약속 시간(`Step.expected_seconds`)의 몇 배까지 기다릴지
 MAX_DEADLINE_SECONDS = 300.0  # 약속으로 늘리는 호출 마감의 상한(초)
+ASYNC_HEARTBEAT_SECONDS = 300.0  # 긴 작업: 마지막 응답 뒤 이만큼 소식이 없으면 응답 끊김
+ASYNC_TOTAL_SECONDS = 1800.0  # 긴 작업: 약속 시간이 없을 때 전체 대기 상한
+MAX_ASYNC_SECONDS = 86400.0  # 긴 작업 전체 대기의 절대 상한(사람 할 일함 대기와 같은 24시간)
+MAX_EARLY_ASYNC = 200  # 대기에 오르기 전에 먼저 온 긴 작업 알림을 담는 상한
 
 
 class Hold:
@@ -134,6 +139,7 @@ STATUS_KO = {
     "rejected_by_human": "보류 후 거절",
     "transfer_queued": "이관 큐로 넘김",
     "waiting_human": "사람 처리 대기",
+    "waiting_async": "긴 작업 진행 중",
 }
 
 
@@ -165,6 +171,66 @@ class HandoffWait:
         return True
 
 
+class AsyncWait:
+    """부서가 접수한 긴 작업(`working` + `task_id`). 진행 알림과 완료 이벤트로 이어진다.
+
+    - 접수한 때부터 응답(진행 알림)이 올 때마다 `last_response_at`이 갱신된다. 응답 사이가 가장
+      길게 비었던 시간을 `max_silence`로 남겨 인사 에이전트 평가가 "응답 끊김"을 본다.
+    - 끝나는 방법은 넷이다: done·failed(부서가 알림), silent(응답이 끊김), timeout(전체 시간 초과).
+      한 번 끝난 일은 다시 바뀌지 않는다(같은 이벤트가 두 번 와도 한 번만 반영).
+    """
+
+    def __init__(self, task_id: str, dept: str, skill: str) -> None:
+        self.task_id = task_id
+        self.dept = dept
+        self.skill = skill
+        self.pending = True
+        self.status: str | None = None  # done | failed | silent | timeout
+        self.started_at = now()
+        self.last_response_at = self.started_at
+        self.heartbeats = 0
+        self.max_silence = 0.0
+        self.percent: int | None = None
+        self.note: str | None = None
+        self.output: dict[str, Any] = {}
+        self.finished_at: datetime | None = None
+        self.wake = asyncio.Event()
+
+    def silent_for(self) -> float:
+        """마지막 응답 이후 지금까지 아무 소식이 없던 시간(초)."""
+        return (now() - self.last_response_at).total_seconds()
+
+    def beat(self, percent: int | None, note: str | None) -> bool:
+        """진행 알림. 끝난 일이면 False."""
+        if not self.pending:
+            return False
+        at = now()
+        self.max_silence = max(self.max_silence, (at - self.last_response_at).total_seconds())
+        self.last_response_at = at
+        self.heartbeats += 1
+        self.percent = percent if percent is not None else self.percent
+        self.note = note if note is not None else self.note
+        self.wake.set()
+        return True
+
+    def finish(self, status: str, output: dict[str, Any] | None, note: str | None = None) -> bool:
+        if not self.pending:
+            return False
+        at = now()
+        if status in ("done", "failed"):  # 부서의 응답이다. 끊김·시간 초과는 응답이 아니다
+            self.max_silence = max(self.max_silence, (at - self.last_response_at).total_seconds())
+            self.last_response_at = at
+        else:
+            self.max_silence = max(self.max_silence, self.silent_for())
+        self.pending = False
+        self.finished_at = at
+        self.status = status
+        self.output = dict(output or {})
+        self.note = note if note is not None else self.note
+        self.wake.set()
+        return True
+
+
 class Engine:
     def __init__(
         self,
@@ -182,8 +248,15 @@ class Engine:
         review_check: ReviewChecker | None = None,
         release_wait: float = 0.0,
         late_retry_delays: tuple[float, ...] = (),
+        async_heartbeat_timeout: float = ASYNC_HEARTBEAT_SECONDS,
+        async_total_timeout: float = ASYNC_TOTAL_SECONDS,
     ) -> None:
         self.registry = registry
+        # 긴 작업(비동기): 부서가 마지막으로 응답한 뒤 이 시간(초)이 지나도록 소식이 없으면 응답이
+        # 끊긴 것으로 보고 단계를 실패로 끝낸다. 전체 대기는 약속 시간의 `DEADLINE_FACTOR`배
+        # (약속이 없으면 `async_total_timeout`)이고 `MAX_ASYNC_SECONDS`를 넘지 않는다
+        self.async_heartbeat_timeout = async_heartbeat_timeout
+        self.async_total_timeout = async_total_timeout
         # `Step.late_retry` 단계가 실패하면 이 간격(초)으로 다시 돌린다. 비우면 다시 돌리지 않는다
         self.late_retry_delays = late_retry_delays
         self._late_tasks: set[asyncio.Task[None]] = set()
@@ -204,6 +277,8 @@ class Engine:
         self._sequence: dict[str, int] = {}
         # 사람이 대기 상태보다 먼저 끝낸 결과: (context_id, task_id) → (status, 결과)
         self._early_handoffs: dict[tuple[str, str], tuple[str, str | None]] = {}
+        # 긴 작업이 대기 상태에 오르기 전에 먼저 온 알림: (context_id, task_id) → 보관한 알림들
+        self._early_async: dict[tuple[str, str], list[tuple[str, str, dict[str, Any]]]] = {}
         # 대기에 오르기 전에 먼저 온 안전 관문 결정: review_id → 결정
         self._early_reviews: dict[str, ReviewOutcome] = {}
 
@@ -619,6 +694,11 @@ class Engine:
                     return
                 payload = continue_payload
                 continue
+            if (
+                status == TaskStatus.WORKING
+            ):  # 긴 작업: 접수만 하고 진행 알림·완료 이벤트로 이어 간다
+                await self._wait_async(inc, step, run, dept, result)
+                return
             if status == TaskStatus.REJECTED and outcome == ErrorCode.SERVICE_DISABLED.value:
                 # 받는 서비스가 꺼져 있고 조회라 사람에게도 넘기지 않았다
                 # → 실패가 아니라 "확인할 수 없음"으로 건너뛴다
@@ -826,6 +906,143 @@ class Engine:
             )
         inc.log(f"{run.label}: {run.note}")
         return True
+
+    # ---------- 긴 작업(비동기) ----------
+    def _async_total(self, expected: float | None) -> float:
+        """긴 작업을 기다리는 전체 시간(초). 약속이 있으면 약속의 배수, 없으면 기본값."""
+        if expected:
+            return min(expected * DEADLINE_FACTOR, MAX_ASYNC_SECONDS)
+        return min(self.async_total_timeout, MAX_ASYNC_SECONDS)
+
+    async def _wait_async(
+        self, inc: Incident, step: Step, run: StepRun, dept: str, result: AgentResult
+    ) -> None:
+        """부서가 접수한 긴 작업(`working` + `task_id`)을 진행 알림과 완료 이벤트로 이어 간다.
+
+        이벤트는 열린 채로, 이 단계에 기대지 않는 단계는 계속 돈다.
+        - done: 부서가 알린 결과를 이 단계의 결과로 넣고 완료 → 뒤 단계가 이어진다
+        - failed: 부서가 실패를 알림. 단계 실패
+        - 응답 끊김: 마지막 응답 뒤 `async_heartbeat_timeout` 동안 소식이 없음. 단계 실패
+          (사유 코드 `no_response`)
+        - 시간 초과: 전체 대기 시간(`_async_total`)이 지남. 단계 실패(`async_timeout`)
+        """
+        output = dict(result.output)
+        task_id = output.get("task_id")
+        if not isinstance(task_id, str) or not task_id:
+            self._fail(inc, run, "긴 작업을 접수했다는데 작업 번호(task_id)가 없음")
+            return
+        said = output.get("expected_seconds")
+        expected = said if isinstance(said, int | float) and said > 0 else step.expected_seconds
+        total = self._async_total(expected)
+        wait = AsyncWait(task_id, dept, step.skill)
+        inc.async_waits[step.id] = wait
+        run.status = "waiting_async"
+        run.async_task_id = task_id
+        run.last_response_at = wait.last_response_at
+        run.note = f"{dept}가 긴 작업을 접수해 진행 중 ({task_id})"
+        inc.log(f"{run.label}: {run.note}")
+        self._save(inc)
+        for kind, source, data in self._early_async.pop((inc.context_id, task_id), []):
+            self._apply_async(inc, step.id, wait, kind, source, data)
+        while wait.pending:
+            elapsed = (now() - wait.started_at).total_seconds()
+            if elapsed >= total:
+                wait.finish("timeout", None)
+                break
+            silent = wait.silent_for()
+            if silent >= self.async_heartbeat_timeout:
+                wait.finish("silent", None)
+                break
+            wait.wake.clear()
+            left = min(total - elapsed, self.async_heartbeat_timeout - silent)
+            try:
+                await asyncio.wait_for(wait.wake.wait(), timeout=max(left, 0.001))
+            except TimeoutError:
+                pass
+        self._finish_async(inc, run, wait)
+
+    def _finish_async(self, inc: Incident, run: StepRun, wait: AsyncWait) -> None:
+        run.last_response_at = wait.last_response_at
+        run.heartbeats = wait.heartbeats
+        run.max_silence_seconds = round(wait.max_silence, 3)
+        run.progress_percent, run.progress_note = wait.percent, wait.note
+        if wait.status == "done":
+            run.status = "completed"
+            run.output = dict(wait.output)
+            run.note = f"긴 작업 완료 ({wait.task_id}, 진행 알림 {wait.heartbeats}회)"
+            run.finished_at = wait.finished_at or now()
+            inc.outputs[run.step_id] = run.output
+            inc.log(f"{run.label}: 완료 — {run.note}")
+            return
+        if wait.status == "failed":
+            reason, note = (
+                "async_failed",
+                f"부서가 긴 작업 실패를 알림 ({wait.note or '사유 없음'})",
+            )
+        elif wait.status == "silent":
+            reason = NO_RESPONSE
+            note = (
+                f"진행 알림이 {self.async_heartbeat_timeout:.0f}초 넘게 없어 응답 끊김으로 끝냄 "
+                f"({wait.task_id})"
+            )
+        else:
+            reason, note = (
+                "async_timeout",
+                f"긴 작업이 정해진 시간 안에 끝나지 않음 ({wait.task_id})",
+            )
+        self._fail(inc, run, note)
+        run.reason_code = reason
+        run.finished_at = wait.finished_at or run.finished_at
+
+    def _apply_async(
+        self,
+        inc: Incident,
+        step_id: str,
+        wait: AsyncWait,
+        kind: str,
+        source: str,
+        data: dict[str, Any],
+    ) -> bool:
+        """진행 알림·완료를 대기에 반영한다. 보낸 곳이나 skill이 다르면 무시한다."""
+        if source != wait.dept or data.get("skill") != wait.skill:
+            return False
+        if kind == "progress":
+            applied = wait.beat(data.get("percent"), data.get("note"))
+        else:
+            status = "done" if data.get("status") == "done" else "failed"
+            applied = wait.finish(status, data.get("output"), data.get("note"))
+        run = inc.steps[step_id]
+        run.last_response_at = wait.last_response_at
+        run.heartbeats = wait.heartbeats
+        run.max_silence_seconds = round(wait.max_silence, 3)
+        run.progress_percent, run.progress_note = wait.percent, wait.note
+        return applied
+
+    def receive_async(self, inc: Incident, kind: str, source: str, data: dict[str, Any]) -> str:
+        """`task.progress`·`task.completed`를 긴 작업 단계에 반영한다. 결과를 문자열로 돌려준다.
+
+        - applied: 반영함 · ignored: 보낸 곳이나 skill이 일을 맡긴 부서와 달라 무시함(위조 방지)
+        - kept: 기다리는 단계가 아직 없어 보관함(대기에 오르면 이어 받는다)
+        - unmatched: 이미 끝났거나 맞는 단계가 없음
+        """
+        task_id = data.get("task_id")
+        for step_id, wait in inc.async_waits.items():
+            if wait.task_id == task_id:
+                if source != wait.dept or data.get("skill") != wait.skill:
+                    return "ignored"
+                return (
+                    "applied"
+                    if self._apply_async(inc, step_id, wait, kind, source, data)
+                    else ("unmatched")
+                )
+        if not isinstance(task_id, str):
+            return "unmatched"
+        key = (inc.context_id, task_id)
+        kept = self._early_async.setdefault(key, [])
+        if len(self._early_async) > MAX_EARLY_ASYNC or len(kept) >= 20:
+            return "unmatched"
+        kept.append((kind, source, data))
+        return "kept"
 
     def complete_handoff(
         self, inc: Incident, task_id: str, status: str, result: str | None
@@ -1035,6 +1252,7 @@ class Engine:
             "rejected_by_human": f"보류 후 거절 ({run.note})",
             "transfer_queued": f"이관 큐로 넘김 ({run.note})",
             "waiting_human": f"사람 처리 대기 ({run.note})",
+            "waiting_async": f"긴 작업 진행 중 ({run.note})",
         }.get(run.status, run.status)
         return f"{run.label} [{who}] {text}"
 

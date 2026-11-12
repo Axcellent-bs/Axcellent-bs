@@ -40,13 +40,14 @@ AGENT_ORDER = ("infra", "data", "dev", "support", "marketing", "finance", "hr")
 WORST_FIRST = (
     "approval_expired",
     "blocked",
+    "silent",
     "check",
     "handed_off",
     "in_progress",
     "normal",
     "no_record",
 )
-NEEDS_LOOK = ("check", "blocked", "approval_expired")
+NEEDS_LOOK = ("check", "blocked", "approval_expired", "silent")
 KST = timedelta(hours=9)
 
 
@@ -65,6 +66,10 @@ def reason_of(item: dict[str, Any]) -> str | None:
         if work is not None and work > item["limit_seconds"]:
             parts.append(f"{_seconds(work)} 걸림(기준 {_seconds(item['limit_seconds'])})")
         return " · ".join(parts) or "기준을 넘음"
+    if verdict == "silent":
+        gap = item.get("max_silence_seconds")
+        spoken = f"{_seconds(gap)} 동안" if gap is not None else "오랫동안"
+        return f"긴 작업 중 부서의 응답이 {spoken} 끊김 (일을 못한 것이 아니라 소식이 없었어요)"
     if verdict == "blocked":
         return {
             "rejected_by_human": "사람이 거절해서 끝내지 못함",
@@ -133,6 +138,7 @@ def _event(card: Any) -> EvaluatedEvent:
                 human_wait_seconds=timing.get("human_wait_seconds"),
                 attempts=item["attempts"],
                 limit_seconds=item["limit_seconds"],
+                max_silence_seconds=item.get("max_silence_seconds"),
                 reason=reason_of(item),
             )
         )
@@ -202,6 +208,7 @@ def _summary(dept: str, events: list[EvaluatedEvent]) -> AgentSummary:
         blocked=counts["blocked"],
         handed_off=counts["handed_off"],
         approval_expired=counts["approval_expired"],
+        silent=counts["silent"],
         in_progress=counts["in_progress"],
         retried=len(retried & {d.context_id for d in joined if d.verdict == "check"}),
         slow=len(slow & {d.context_id for d in joined if d.verdict == "check"}),

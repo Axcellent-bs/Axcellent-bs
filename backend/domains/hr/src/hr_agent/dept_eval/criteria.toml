@@ -17,14 +17,18 @@
 # (`promised_seconds`)을 기준 시간으로 쓰고, 약속이 없는 단계만 아래 normal_max_seconds(30초)를 쓴다.
 # 약속은 총괄이 단계 정의(plans/scenario_a.py `PROMISED_SECONDS`)에 임시값으로 두며 운영 기준이 아니다.
 # 이미 저장된 판정(v1)은 그대로 두고 판정마다 기준값 버전이 남는다.
+# v3 (2026-11-12): 긴 작업(비동기)의 "응답 끊김". 부서의 응답(접수·진행 알림·완료) 사이가
+# max_silence_seconds(초)보다 길게 비면 끊김으로 판정한다. 총 시간이 길어도 알림이 계속 오면
+# 끊김이 아니다. 총괄이 응답 끊김으로 단계를 끝낸 경우(사유 코드 no_response)도 같다.
 
-version = 2
+version = 3
 updated = "2026-11-12"
 
 [default]
 normal_max_seconds = 30
 normal_max_attempts = 1
 use_promised = true
+max_silence_seconds = 300
 
 # 부서·묶음별로 다르게 해야 할 때만 아래처럼 덧붙인다. 지금은 모든 단계가 같은 기준이다.
 # 묶음 이름은 stages.py의 group 값이다.

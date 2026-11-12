@@ -60,6 +60,9 @@ class EventType(StrEnum):
     SAFETY_REVIEW_DECIDED = "safety.review_decided"
     # 사람 할 일함 (dashboard-api, 업무 요청 라우터)
     HANDOFF_COMPLETED = "handoff.completed"
+    # 부서 AI의 긴 작업(비동기). 접수한 부서가 진행 중·끝남을 알린다 (`schemas/async_task.py`)
+    TASK_PROGRESS = "task.progress"
+    TASK_COMPLETED = "task.completed"
 
 
 class EventEnvelope(AxModel):
@@ -424,6 +427,36 @@ class HandoffCompletedData(AxModel):
     skill: str
 
 
+class TaskProgressData(AxModel):
+    """`task.progress`. 긴 작업을 접수한 부서가 일하는 동안 주기적으로 알린다(생존 신호).
+
+    - `source`는 그 일을 접수한 부서의 id여야 한다(총괄이 호출한 부서와 다르면 무시한다).
+    - 총괄은 마지막 알림 뒤 정해진 시간(기본 300초) 동안 아무 알림이 없으면 "응답 끊김"으로
+      단계를 끝낸다. 부서는 그보다 자주 알린다.
+    - `percent`·`note`는 화면에 보이는 참고용이다. 판정에는 알림이 왔다는 사실만 쓴다.
+    """
+
+    task_id: str
+    skill: str
+    percent: int | None = Field(default=None, ge=0, le=100)
+    note: str | None = Field(default=None, max_length=200)
+
+
+class TaskCompletedData(AxModel):
+    """`task.completed`. 긴 작업이 끝났을 때 한 번 알린다. 멱등 키는 `task.completed:<task_id>`.
+
+    `status`가 `done`이면 `output`이 그 skill의 결과(동기 호출의 `AgentResult.output`과 같은
+    모양)이고, `failed`면 `note`에 이유를 적는다. 결과는 사실 필드라 `data`로 보낸다
+    (외부 텍스트는 넣지 않는다).
+    """
+
+    task_id: str
+    skill: str
+    status: Literal["done", "failed"]
+    output: dict[str, Any] = Field(default_factory=dict)
+    note: str | None = Field(default=None, max_length=200)
+
+
 # 이벤트 종류 → data 모델. 발행 담당이 새 data 모델을 추가할 때 여기에 한 줄 더한다.
 EVENT_DATA_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.SHOP_DEGRADED: ShopDegradedData,
@@ -453,4 +486,6 @@ EVENT_DATA_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.SUPPORT_INQUIRY_SURGE: SupportInquirySurgeData,
     EventType.SUPPORT_INCIDENT_COMPENSATION_DECIDED: SupportIncidentCompensationData,
     EventType.HANDOFF_COMPLETED: HandoffCompletedData,
+    EventType.TASK_PROGRESS: TaskProgressData,
+    EventType.TASK_COMPLETED: TaskCompletedData,
 }

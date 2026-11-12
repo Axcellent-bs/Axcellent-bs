@@ -13,7 +13,13 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-from ax_contracts.schemas import EventEnvelope, EventType, SafetyReviewDecidedData
+from ax_contracts.schemas import (
+    EventEnvelope,
+    EventType,
+    SafetyReviewDecidedData,
+    TaskCompletedData,
+    TaskProgressData,
+)
 from ax_orchestrator.engine import Engine, ReviewOutcome, incident_metrics
 from ax_orchestrator.finance_opinions import FinanceOpinions
 from ax_orchestrator.models import Incident, Plan, iso, now
@@ -80,11 +86,14 @@ SUBSCRIBED = [
     EventType.HANDOFF_COMPLETED,
     # 안전 관문의 사람 결정(승인·거절·만료) → 승인 대기 단계를 잇는다
     EventType.SAFETY_REVIEW_DECIDED,
+    # 부서의 긴 작업(비동기): 진행 알림과 완료 → 진행 중인 단계를 잇는다
+    EventType.TASK_PROGRESS,
+    EventType.TASK_COMPLETED,
 ]
 
 
 # 다시 켜질 때 진행 중이던 단계의 상태: 이어 가지 않고 이 상태로 남긴다
-UNFINISHED = {"pending", "running", "held", "waiting_human"}
+UNFINISHED = {"pending", "running", "held", "waiting_human", "waiting_async"}
 INTERRUPTED_NOTE = "재시작으로 중단됨 (사람이 확인 필요)"
 
 
@@ -241,6 +250,8 @@ class IncidentManager:
             return await self._resume_handoff(env)
         if env.type == EventType.SAFETY_REVIEW_DECIDED:
             return await self._resume_review(env)
+        if env.type in (EventType.TASK_PROGRESS, EventType.TASK_COMPLETED):
+            return await self._resume_async(env)
         if env.type == EventType.SHOP_RECOVERED:
             target = self._latest_unrecovered(self._component(env), env.occurred_at)
             if target is not None:
@@ -325,6 +336,36 @@ class IncidentManager:
         inc.log(f"사람 할 일함 처리 결과 수신: {task_id} ({status}, {env.event_id})")
         await self.engine.sync_times(inc)
         return "resumed", inc
+
+    async def _resume_async(self, env: EventEnvelope) -> tuple[str, Incident | None]:
+        """부서의 긴 작업 알림(`task.progress`·`task.completed`)을 같은 이벤트의 단계에 반영한다.
+
+        일을 맡긴 부서(`source`)와 skill이 같은 알림만 받는다. 위조된 알림은 무시한다.
+        완료가 반영되면 단계가 이어지고, 진행 알림은 마지막 응답 시각만 갱신한다.
+        """
+        inc = self.incidents.get(env.context_id or "")
+        if inc is None:
+            return "unmatched", None
+        kind = "progress" if env.type == EventType.TASK_PROGRESS else "completed"
+        model = TaskProgressData if kind == "progress" else TaskCompletedData
+        try:
+            data = model.model_validate(env.data).model_dump(mode="json")
+        except ValueError:
+            return "unmatched", inc
+        outcome = self.engine.receive_async(inc, kind, env.source, data)
+        if outcome == "ignored":
+            log.warning("긴 작업 알림의 보낸 곳이 맡긴 부서와 달라 무시: %s", env.source)
+            return "ignored", inc
+        if outcome == "applied" and kind == "completed":
+            inc.log(f"긴 작업 완료 알림 수신: {data['task_id']} ({data['status']}, {env.event_id})")
+            await self.engine.sync_times(inc)
+            return "resumed", inc
+        if outcome == "applied":
+            return "progressed", inc
+        if outcome == "kept":
+            inc.log(f"긴 작업 알림을 먼저 받아 보관: {data['task_id']} ({kind}, {env.event_id})")
+            return "kept", inc
+        return "unmatched", inc
 
     async def _resume_review(self, env: EventEnvelope) -> tuple[str, Incident | None]:
         """안전 관문의 사람 결정으로 승인 대기 단계를 잇는다 (`review_id`로 맞춘다).

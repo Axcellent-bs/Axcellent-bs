@@ -722,6 +722,9 @@ class StepTiming(AxModel):
     # 이 단계가 보통 걸리는 시간(약속, 초). 총괄이 단계 정의에서 가져와 같이 보낸다. 없으면 None이고
     # 평가는 기본 기준(30초)으로 판정한다
     promised_seconds: float | None = Field(default=None, gt=0)
+    # 긴 작업(비동기)에서 부서의 응답(접수·진행 알림·완료) 사이가 가장 길게 비었던 시간(초). 아직
+    # 진행 중이면 마지막 응답 이후 지금까지의 시간도 센다. 동기로 끝난 단계는 None
+    max_silence_seconds: float | None = Field(default=None, ge=0)
 
 
 class RecordEventTimesInput(EventTimeline):
@@ -908,6 +911,7 @@ AgentVerdict = Literal[
     "no_record",
     "blocked",
     "approval_expired",
+    "silent",  # 긴 작업 중 부서의 응답이 정해진 시간 넘게 끊김
     "in_progress",
     "absent",
     "handed_off",  # 스스로 끝내지 않고 사람이 보도록 넘김. 실패도 지연도 아니다
@@ -946,6 +950,7 @@ class AgentSummary(AxModel):
     blocked: int = Field(ge=0)
     handed_off: int = Field(default=0, ge=0)
     approval_expired: int = Field(ge=0)
+    silent: int = Field(default=0, ge=0)
     in_progress: int = Field(ge=0)
     retried: int = Field(ge=0)  # 확인 필요 중 다시 시도가 있었던 이벤트 수
     slow: int = Field(ge=0)  # 확인 필요 중 기준 시간을 넘긴 이벤트 수
@@ -966,6 +971,7 @@ class EvaluatedStep(AxModel):
     human_wait_seconds: float | None = None
     attempts: int = Field(default=0, ge=0)
     limit_seconds: float
+    max_silence_seconds: float | None = None
     reason: str | None = None
 
 

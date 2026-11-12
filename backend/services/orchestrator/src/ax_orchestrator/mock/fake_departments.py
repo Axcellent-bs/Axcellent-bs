@@ -3,7 +3,9 @@
 실제 부서 에이전트 없이 총괄을 끝까지 돌리기 위한 가짜 부서 8곳이다. 모든 값은 지어낸
 목 데이터이며 화면에도 목으로 표시된다. 각 (부서, skill)마다 동작을 스크립트로 지정할 수 있다:
 `ok` `fail` `timeout`(마감 초과) `forbidden`(소관 아님) `hold`(C 등급 보류) `dept_input`,
-그리고 갈림길용 `undetermined`(원인 미확정)·`not_recovered`(복구 확인 실패).
+그리고 갈림길용 `undetermined`(원인 미확정)·`not_recovered`(복구 확인 실패),
+긴 작업(비동기)용 `async`(접수만 하고 `task_event`로 만든 진행 알림·완료를 테스트가 보낸다)와
+`async_long`(예상 소요 시간 1시간을 함께 알린다). 테스트 전용 가짜 장기 부서다.
 스크립트는 호출 순서대로 하나씩 소비되고, 비면 `ok`다.
 """
 
@@ -12,12 +14,16 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict, deque
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from ax_contracts.schemas import (
+    ACCEPTED_ASYNC,
     AgentRequest,
     AgentResult,
     ErrorCode,
+    EventEnvelope,
+    EventType,
     InputReason,
     TaskStatus,
 )
@@ -306,6 +312,9 @@ class FakeDepartments:
         self.empty_cards: set[str] = set()
         self._scripts: dict[tuple[str, str], deque[str]] = defaultdict(deque)
         self._seen_keys: dict[str, AgentResult] = {}
+        # 접수만 하고 끝낸 긴 작업: (부서, 요청, 작업 번호)
+        self.async_tasks: list[tuple[str, AgentRequest, str]] = []
+        self._event_count = 0
 
     def script(self, dept: str, skill: str, *behaviors: str) -> None:
         self._scripts[(dept, skill)].extend(behaviors)
@@ -345,6 +354,15 @@ class FakeDepartments:
                 outcome=ErrorCode.SERVICE_DISABLED,
                 output={"to_service": dept},
             )
+        if behavior in ("async", "async_long"):  # 긴 작업: 접수만 알린다
+            task_id = f"tsk_{dept}_{len(self.async_tasks) + 1}"
+            self.async_tasks.append((dept, req, task_id))
+            output: dict[str, Any] = {"task_id": task_id}
+            if behavior == "async_long":
+                output["expected_seconds"] = 3600.0
+            return AgentResult(
+                meta=meta, status=TaskStatus.WORKING, outcome=ACCEPTED_ASYNC, output=output
+            )
         if behavior == "forbidden":
             return AgentResult(
                 meta=meta, status=TaskStatus.REJECTED, outcome=ErrorCode.FORBIDDEN_SKILL
@@ -371,3 +389,39 @@ class FakeDepartments:
             req.skill, lambda r: {}
         )
         return AgentResult(meta=meta, status=TaskStatus.COMPLETED, output=build(req))
+
+    def task_event(
+        self,
+        kind: str,
+        task_id: str,
+        *,
+        percent: int | None = None,
+        status: str = "done",
+        output: dict[str, Any] | None = None,
+        note: str | None = None,
+        source: str | None = None,
+        skill: str | None = None,
+    ) -> EventEnvelope:
+        """접수한 긴 작업의 진행 알림(`progress`)이나 완료(`completed`) 이벤트를 만든다.
+
+        `source`·`skill`을 주지 않으면 일을 접수한 부서와 skill을 쓴다(위조 시험은 따로 준다).
+        """
+        dept, req, _ = next(item for item in self.async_tasks if item[2] == task_id)
+        data: dict[str, Any] = {"task_id": task_id, "skill": skill or req.skill}
+        if kind == "progress":
+            data.update(percent=percent, note=note)
+            event_type = EventType.TASK_PROGRESS
+        else:
+            data.update(status=status, output=output or {}, note=note)
+            event_type = EventType.TASK_COMPLETED
+        self._event_count += 1
+        key = f"{event_type.value}:{task_id}:{self._event_count}"
+        return EventEnvelope(
+            event_id=f"evt_{key}",
+            type=event_type,
+            occurred_at=datetime.now(UTC),
+            context_id=req.meta.context_id,
+            source=source or dept,
+            idempotency_key=key,
+            data=data,
+        )

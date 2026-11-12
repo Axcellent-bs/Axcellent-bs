@@ -14,8 +14,8 @@ import { Link, useSearchParams } from "@/lib/nav";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : "불러오지 못했습니다");
 const RECENT_DOTS = 12;
-type Counted = "normal" | "check" | "blocked" | "handed_off" | "approval_expired" | "no_record" | "in_progress";
-const ORDER: Counted[] = ["normal", "check", "handed_off", "blocked", "approval_expired", "no_record", "in_progress"];
+type Counted = "normal" | "check" | "silent" | "blocked" | "handed_off" | "approval_expired" | "no_record" | "in_progress";
+const ORDER: Counted[] = ["normal", "check", "silent", "handed_off", "blocked", "approval_expired", "no_record", "in_progress"];
 
 function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
   return (
@@ -44,7 +44,7 @@ function Dot({ d, onPick }: { d: AgentSummary["recent"][number]; onPick: () => v
 function AgentCard({ a, onPick }: { a: AgentSummary; onPick: (ctx: string) => void }) {
   const r = readout(a);
   const counts = ORDER.map((v) => [v, a[v]] as const).filter(([, n]) => n > 0);
-  const lastLate = a.recent.find((d) => d.verdict === "check" || d.verdict === "blocked" || d.verdict === "approval_expired");
+  const lastLate = a.recent.find((d) => d.verdict === "check" || d.verdict === "silent" || d.verdict === "blocked" || d.verdict === "approval_expired");
   return (
     <article className="rounded-2xl border border-ink-100 bg-surface p-5">
       <header className="flex flex-wrap items-baseline gap-2">
@@ -136,7 +136,7 @@ function StepRow({ s, scale }: { s: EvaluatedStep; scale: number }) {
 
 function EventTimeline({ ev }: { ev: EvaluatedEvent }) {
   const scale = Math.max(1, ...ev.steps.map((s) => (s.work_seconds ?? 0) + (s.approval_wait_seconds ?? 0) + (s.human_wait_seconds ?? 0)));
-  const look = ev.steps.filter((s) => s.verdict === "check" || s.verdict === "blocked" || s.verdict === "approval_expired");
+  const look = ev.steps.filter((s) => s.verdict === "check" || s.verdict === "silent" || s.verdict === "blocked" || s.verdict === "approval_expired");
   const skipped = ev.steps.filter((s) => s.verdict === "no_record");
   const handed = ev.steps.filter((s) => s.verdict === "handed_off");
   return (
@@ -214,7 +214,7 @@ export default function AgentEvaluationPage() {
               {data.agents.map((a) => <AgentCard key={a.dept} a={a} onPick={(ctx) => { setPicked(ctx); document.getElementById("event-steps")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} />)}
             </div>
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-500">
-              {(["normal", "check", "handed_off", "blocked", "no_record", "absent"] as Verdict[]).map((v) => (
+              {(["normal", "check", "silent", "handed_off", "blocked", "no_record", "absent"] as Verdict[]).map((v) => (
                 <span key={v}><b className={VERDICT[v].dot}>{VERDICT[v].mark}</b> {VERDICT[v].label}</span>
               ))}
             </p>

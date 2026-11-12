@@ -92,9 +92,10 @@ def _verdict(timing: dict, criteria=None) -> str:
 # ---- 기준값 파일 ----------------------------------------------------------------------------
 
 
-def test_default_criteria_file_is_version_2_with_one_rule() -> None:
+def test_default_criteria_file_is_version_3_with_one_rule() -> None:
     criteria = load_criteria()
-    assert criteria.version == 2
+    assert criteria.version == 3
+    assert criteria.default.max_silence_seconds == 300.0  # 응답 끊김 기준
     assert (criteria.default.normal_max_seconds, criteria.default.normal_max_attempts) == (30, 1)
     assert criteria.default.use_promised is True  # 단계의 약속 시간을 기준으로 삼는다
     assert criteria.groups == {}  # 모든 단계가 같은 기준이다
@@ -104,7 +105,7 @@ def test_changing_only_the_file_values_changes_the_verdict(tmp_path: Path) -> No
     source = DEFAULT_PATH.read_text(encoding="utf-8")
     loose = tmp_path / "criteria.toml"
     loose.write_text(
-        source.replace("version = 2", "version = 3").replace(
+        source.replace("version = 3", "version = 4").replace(
             "normal_max_seconds = 30", "normal_max_seconds = 60"
         ),
         encoding="utf-8",
@@ -112,7 +113,7 @@ def test_changing_only_the_file_values_changes_the_verdict(tmp_path: Path) -> No
     timing = _t(work_seconds=45.0)
     assert _verdict(timing) == "check"
     assert _verdict(timing, load_criteria(loose)) == "normal"
-    assert load_criteria(loose).version == 3
+    assert load_criteria(loose).version == 4
 
 
 def test_a_group_rule_overrides_only_that_group() -> None:
@@ -250,7 +251,7 @@ def test_judge_timings_carries_the_version_and_drops_excluded_steps() -> None:
     out = judge_timings(
         [_t("diagnose"), _t("cause_check"), _t("recovery"), _t("cost")], load_criteria()
     )
-    assert out["criteria_version"] == 2
+    assert out["criteria_version"] == 3
     assert [item["step_id"] for item in out["items"]] == ["diagnose"]
 
 
@@ -326,6 +327,61 @@ async def test_the_promise_travels_from_the_timings_to_the_saved_judgment(svc) -
     assert (item["verdict"], item["limit_seconds"], item["promised"]) == ("normal", 60.0, True)
 
 
+# ---- 긴 작업의 응답 끊김(기준값 v3) ---------------------------------------------------------
+
+
+def test_a_long_task_with_steady_notices_is_not_silent_however_long_it_took() -> None:
+    """총 시간이 길어도 응답 사이가 기준(300초)보다 짧았으면 끊김이 아니다."""
+    timing = _t("impact", work_seconds=7200.0, promised_seconds=9000.0, max_silence_seconds=120.0)
+    assert _verdict(timing) == "normal"
+
+
+def test_a_gap_longer_than_the_limit_is_silent_even_when_the_task_finished_on_time() -> None:
+    timing = _t("impact", work_seconds=600.0, promised_seconds=900.0, max_silence_seconds=301.0)
+    assert _verdict(timing) == "silent"
+    ok = _t("impact", work_seconds=600.0, promised_seconds=900.0, max_silence_seconds=300.0)
+    assert _verdict(ok) == "normal"  # 기준 정확히는 이하
+
+
+def test_the_orchestrator_cutting_a_silent_step_is_silent_not_a_plain_failure() -> None:
+    cut = _t("impact", status="failed", reason_code="no_response", max_silence_seconds=301.0)
+    assert _verdict(cut) == "silent"
+    plain = _t("impact", status="failed")
+    assert _verdict(plain) == "blocked"  # 끊김이 아니라 그냥 실패
+
+
+def test_a_running_long_task_that_went_silent_is_flagged_before_it_ends() -> None:
+    running = _t("impact", status="waiting_async", work_seconds=None, max_silence_seconds=400.0)
+    assert _verdict(running) == "silent"
+    quiet = _t("impact", status="waiting_async", work_seconds=None, max_silence_seconds=30.0)
+    assert _verdict(quiet) == "in_progress"
+
+
+def test_a_step_without_long_task_data_is_judged_by_time_alone() -> None:
+    assert _verdict(_t("impact", work_seconds=10.0)) == "normal"
+    assert _verdict(_t("impact", work_seconds=10.0, max_silence_seconds=None)) == "normal"
+
+
+def test_the_silence_is_kept_with_the_verdict() -> None:
+    out = judge_step(_t("impact", work_seconds=5.0, max_silence_seconds=42.0), load_criteria())
+    assert out is not None and out["max_silence_seconds"] == 42.0
+
+
+def test_the_silence_limit_must_be_a_positive_number() -> None:
+    for bad in (0, -1, "300", True):
+        with pytest.raises(CriteriaError):
+            parse_criteria(
+                {
+                    "version": 3,
+                    "default": {
+                        "normal_max_seconds": 30,
+                        "normal_max_attempts": 1,
+                        "max_silence_seconds": bad,
+                    },
+                }
+            )
+
+
 # ---- 카드에 저장 ------------------------------------------------------------------------------
 
 
@@ -342,7 +398,7 @@ async def test_judgments_are_saved_on_the_card_with_the_criteria_version(svc) ->
     )
     assert result.output["outcome"] == "recorded"
     saved = (await svc.memory.get_card(card_id)).extra["step_judgments"]
-    assert saved["criteria_version"] == 2
+    assert saved["criteria_version"] == 3
     verdicts = {item["step_id"]: item["verdict"] for item in saved["items"]}
     assert verdicts == {"diagnose": "normal", "rollback": "check"}  # 복구 검증은 빠진다
 
