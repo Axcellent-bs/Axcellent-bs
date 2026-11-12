@@ -376,15 +376,19 @@ def _config_text() -> str:
 
 def test_default_config_is_marked_provisional() -> None:
     cfg = sns_label.load_config()
-    assert "확인 필요" in cfg.text_status
-    assert "AI로 만들었습니다" in cfg.text_video
+    assert "재헌 확정(2026-11-12)" in cfg.text_status
+    assert "확인 필요" in cfg.text_status  # 서면 보관은 [확인 필요]
+    assert "승인" not in cfg.text_status
+    assert cfg.text_image == "생성형 AI로 만든 이미지"
+    assert cfg.text_video == "생성형 AI로 만든 영상"
+    assert cfg.text_unknown == "생성형 AI로 만든 이미지/영상"
     assert cfg.display_time == "full"
     assert len(cfg.sha256) == 64
 
 
 def test_config_file_controls_text_and_position(tmp_path: Path) -> None:
     path = tmp_path / "label.toml"
-    label = "이 영상과 글은 AI로 만들었습니다 · 캣북스는 시연용 가상 서비스입니다"
+    label = "생성형 AI로 만든 영상"
     text = _config_text().replace('position = "bottom"', 'position = "top"')
     text = text.replace("font_size_ratio = 0.032", "font_size_ratio = 0.05")
     path.write_text(text.replace(label, "CUSTOM LABEL"), encoding="utf-8")
@@ -432,11 +436,48 @@ def test_invalid_config_is_rejected(tmp_path: Path, old: str, new: str) -> None:
 
 def test_wrap_text_keeps_lines_inside_width() -> None:
     cfg = sns_label.load_config()
-    wrapped = sns_label.wrap_text(cfg.text_video, 270, 20, cfg)
+    long_text = ("생성형 AI로 만든 영상 " * 3).strip()
+    wrapped = sns_label.wrap_text(long_text, 270, 20, cfg)
     assert "\n" in wrapped
-    assert wrapped.replace("\n", " ") == cfg.text_video
+    assert wrapped.replace("\n", " ") == long_text
     per_line = int(270 * (1 - 2 * cfg.side_margin_ratio) / 20)
     assert all(len(line) <= per_line for line in wrapped.split("\n"))
+
+
+def test_text_for_picks_text_by_kind() -> None:
+    cfg = sns_label.load_config()
+    assert cfg.text_for("image") == "생성형 AI로 만든 이미지"
+    assert cfg.text_for("video") == "생성형 AI로 만든 영상"
+    assert cfg.text_for("unknown") == "생성형 AI로 만든 이미지/영상"
+    assert cfg.text_for("something-else") == cfg.text_unknown
+
+
+def test_config_text_per_kind_and_empty_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "label.toml"
+    path.write_text(
+        _config_text().replace("생성형 AI로 만든 이미지/영상", "KIND UNKNOWN"), encoding="utf-8"
+    )
+    assert sns_label.load_config(path).text_unknown == "KIND UNKNOWN"
+    path.write_text(
+        _config_text().replace('unknown = "생성형 AI로 만든 이미지/영상"', 'unknown = ""'),
+        encoding="utf-8",
+    )
+    with pytest.raises(sns_label.LabelError) as caught:
+        sns_label.load_config(path)
+    assert caught.value.code == "config_invalid"
+
+
+def test_drawtext_text_goes_via_file_so_slash_and_colon_are_safe(tmp_path: Path) -> None:
+    cfg = sns_label.load_config()
+    textfile = tmp_path / "t.txt"
+    label = "생성형 AI로 만든 이미지/영상: 100% \\ %{n}"
+    font = "C:\\f\\a'b.ttf"
+    draw = sns_label.build_drawtext(cfg, font, 1000, 2000, str(textfile), label)
+    written = textfile.read_text(encoding="utf-8").replace(chr(10), " ")
+    assert written == label  # 문구는 필터 문자열에 들어가지 않는다
+    assert "생성형" not in draw and "/영상" not in draw
+    assert "expansion=none" in draw  # `%{n}`을 해석하지 않는다
+    assert "fontfile='C\\:/f/a'\\''b.ttf'" in draw  # 콜론·역슬래시·작은따옴표 이스케이프
 
 
 def test_machine_mark_xmp_roundtrip(tmp_path: Path) -> None:
@@ -495,6 +536,9 @@ def test_overlay_image_end_to_end(tmp_path: Path) -> None:
         "2026-11-05T00:00:00Z",
     )
     assert "확인 필요" in meta["text_status"]
+    assert meta["text"] == "AI generated image - demo service"
+    xmp = sns_media.jpeg_xmp(labeled) or ""
+    assert 'ai_label_text="AI generated image - demo service"' in xmp
     assert sns_media.read_machine_mark(labeled, "image")["ai_generated"] == "true"
 
     checked = _check(_draft(labeled))
@@ -530,6 +574,7 @@ def test_overlay_video_end_to_end(tmp_path: Path) -> None:
     assert report.problems == [], report.problems
     assert report.details["tags"]["ai_generated"] == "true"
     assert report.details["tags"]["ai_generator_model"] == "gemini-x"
+    assert report.details["tags"]["description"] == "AI generated video - demo service"
     assert report.details["duration_s"] == pytest.approx(3.5, abs=0.3)  # 전 구간 유지
 
     draft = _draft(labeled, media_kind="reel")
@@ -574,3 +619,57 @@ def test_reel_spec_violations(tmp_path: Path) -> None:
     )  # fmt: skip
     probe_problems = sns_media.check_reel(webm).problems
     assert "video_container_unsupported" in probe_problems
+
+
+@needs_ffmpeg
+def test_overlay_default_korean_text_with_system_font(tmp_path: Path) -> None:
+    """기본 문구(슬래시 포함)를 한글 글꼴로 실제로 그려 파일이 만들어지고 메타가 같다."""
+    cfg = dataclasses.replace(sns_label.load_config(), font_file=ANY_FONT or "")
+    if sns_label.missing_glyphs(ANY_FONT or "", cfg.text_unknown):
+        pytest.skip("로컬 글꼴에 한글이 없다")
+    src = tmp_path / "src.png"
+    _ffmpeg("-f", "lavfi", "-i", "testsrc=size=720x900:rate=1", "-frames:v", "1", str(src))
+    result = sns_label.apply_label(src, tmp_path / "o", generator_model="m", config=cfg)
+    assert result.text == "생성형 AI로 만든 이미지"
+    assert "생성형 AI로 만든 이미지" in (sns_media.jpeg_xmp(result.labeled_path) or "")
+    unknown_cfg = dataclasses.replace(cfg, text_image=cfg.text_unknown)
+    again = sns_label.apply_label(src, tmp_path / "o2", generator_model="m", config=unknown_cfg)
+    assert again.text == "생성형 AI로 만든 이미지/영상"
+    assert again.labeled_path.stat().st_size > 0
+
+
+def test_missing_glyphs_detects_font_without_hangul(tmp_path: Path) -> None:
+    assert (
+        sns_label.missing_glyphs(str(tmp_path / "nope.ttf"), "생성형") == ""
+    )  # 읽지 못하면 건너뜀
+    bad = tmp_path / "bad.ttf"
+    bad.write_bytes(b"not a font")
+    assert sns_label.missing_glyphs(str(bad), "생성형") == ""
+
+
+@needs_ffmpeg
+def test_apply_label_refuses_font_without_glyphs(tmp_path: Path) -> None:
+    """한글이 없는 글꼴이면 네모로 그린 라벨을 만들지 않고 거절한다."""
+    bundled = sns_label.bundled_font(sns_label.load_config())
+    assert bundled is not None
+    if not sns_label.missing_glyphs(str(bundled), "생성형"):
+        pytest.skip("번들 글꼴에 한글이 있다(아래 xfail 시험이 통과하는 때)")
+    cfg = dataclasses.replace(sns_label.load_config(), font_file=str(bundled))
+    src = tmp_path / "src.png"
+    _ffmpeg("-f", "lavfi", "-i", "testsrc=size=720x900:rate=1", "-frames:v", "1", str(src))
+    with pytest.raises(sns_label.LabelError) as caught:
+        sns_label.apply_label(src, tmp_path / "o", generator_model="m", config=cfg)
+    assert caught.value.code == "font_glyph_missing"
+    assert not (tmp_path / "o" / "labeled.jpg").exists()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="번들 PretendardStd-Bold.ttf에 한글 글리프가 없다. 한글 포함 글꼴로 바꾸면 통과한다",
+)
+def test_bundled_font_covers_default_label_texts() -> None:
+    cfg = sns_label.load_config()
+    bundled = sns_label.bundled_font(cfg)
+    assert bundled is not None
+    for kind in ("image", "video", "unknown"):
+        assert sns_label.missing_glyphs(str(bundled), cfg.text_for(kind)) == ""
