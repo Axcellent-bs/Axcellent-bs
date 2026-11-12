@@ -358,6 +358,11 @@ async def wait_idle() -> None:
         await asyncio.gather(*list(_running), return_exceptions=True)
 
 
+def _account_ok(th: ChatThread, origin: str | None, account: str | None) -> bool:
+    # 계정은 개발 화면(screen) 대화만 가린다. 대시보드 대화방은 사람 토큰(who)으로 가린다
+    return origin != "screen" or th.account == account
+
+
 def _owner_ok(th: ChatThread, who: str | None) -> bool:
     return who is None or th.who is None or th.who == who
 
@@ -372,6 +377,11 @@ def seen_from(th: ChatThread, origin: str | None) -> bool:
     return th.origin in (None, origin)
 
 
+def of_account(th: ChatThread, account: str | None) -> bool:
+    """개발 화면에서 이 계정이 연 대화인가. 계정이 다르면 없는 대화로 본다."""
+    return th.account == account
+
+
 def _prepare(
     svc: DevService,
     thread_id: str | None,
@@ -380,6 +390,7 @@ def _prepare(
     mode: str | None,
     who: str | None,
     origin: str | None = None,
+    account: str | None = None,
 ) -> tuple[Any, str, list[vcs.Connection], str]:
     """보내기 전 확인. (LLM, 글, 연결, 지금 상태)를 준다. 거절은 `ActionError`."""
     llm = get_llm()
@@ -395,7 +406,7 @@ def _prepare(
     prev = "talking"
     if thread_id is not None:
         th = svc.chat_of(thread_id)
-        if th is None or not seen_from(th, origin):
+        if th is None or not seen_from(th, origin) or not _account_ok(th, origin, account):
             raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
         if not _owner_ok(th, who):
             raise ActionError("FORBIDDEN", f"대화 {thread_id}는 {th.who}의 대화다")
@@ -420,6 +431,7 @@ async def send(
     mode: str | None = None,
     who: str | None = None,
     origin: str | None = None,
+    account: str | None = None,
 ) -> ChatThread:
     """사용자 메시지를 적고 `answering`인 대화를 바로 돌려준다. 답은 뒤에서 붙는다.
 
@@ -427,7 +439,9 @@ async def send(
     `mode`는 작업을 누가 코딩하나 (agent 서버 AI · subscription 본인 Claude). 주면 대화에 남긴다.
     오류(입력·없음·설정·바쁨·끝남·남의 대화)는 `ActionError`.
     LLM·작업 띄우기 오류는 대화에 답으로 남긴다."""
-    llm, text, conns, prev = _prepare(svc, thread_id, message, connection, mode, who, origin)
+    llm, text, conns, prev = _prepare(
+        svc, thread_id, message, connection, mode, who, origin, account
+    )
     th = await svc.chat_add(
         thread_id,
         "user",
@@ -437,6 +451,7 @@ async def send(
         mode=mode,
         who=who,
         origin=origin,
+        account=account,
         status="answering",
     )
     if not BACKGROUND:
@@ -455,9 +470,12 @@ async def turn(
     mode: str | None = None,
     who: str | None = None,
     origin: str | None = None,
+    account: str | None = None,
 ) -> ChatThread:
     """보내고 답까지 기다린다 (`send` + 답). 바뀐 대화를 돌려준다."""
-    llm, text, conns, prev = _prepare(svc, thread_id, message, connection, mode, who, origin)
+    llm, text, conns, prev = _prepare(
+        svc, thread_id, message, connection, mode, who, origin, account
+    )
     th = await svc.chat_add(
         thread_id,
         "user",
@@ -467,6 +485,7 @@ async def turn(
         mode=mode,
         who=who,
         origin=origin,
+        account=account,
         status="answering",
     )
     return await _answer(svc, llm, th.id, text, conns, prev)
@@ -868,11 +887,15 @@ async def _revise(svc: DevService, llm: Any, th: ChatThread, text: str) -> ChatT
 
 
 async def close(
-    svc: DevService, thread_id: str, who: str | None = None, origin: str | None = None
+    svc: DevService,
+    thread_id: str,
+    who: str | None = None,
+    origin: str | None = None,
+    account: str | None = None,
 ) -> ChatThread:
     """대화를 끝낸다 (`closed`). 띄운 작업은 그대로 돈다. 앞 요청 기다리기는 그만둔다."""
     th = svc.chat_of(thread_id)
-    if th is None or not seen_from(th, origin):
+    if th is None or not seen_from(th, origin) or not _account_ok(th, origin, account):
         raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
     if not _owner_ok(th, who):
         raise ActionError("FORBIDDEN", f"대화 {thread_id}는 {th.who}의 대화다")

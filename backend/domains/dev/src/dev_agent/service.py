@@ -2400,10 +2400,11 @@ class DevService(PlanningCore):
         mode: str | None = None,
         who: str | None = None,
         origin: str | None = None,
+        account: str | None = None,
     ) -> ChatThread:
         """대화에 메시지 하나를 더한다. thread_id가 없으면 새 대화(`chat-n`)를 연다.
 
-        `origin`(screen·dashboard)은 새 대화에만 남긴다."""
+        `origin`(screen·dashboard)·`account`(개발 화면 계정)는 새 대화에만 남긴다."""
 
         async def run(s: State) -> ActionResult:
             t = self.clock()
@@ -2413,6 +2414,7 @@ class DevService(PlanningCore):
                     id=f"chat-{max(nums, default=0) + 1}",
                     title=title or "새 대화",
                     origin=origin,  # type: ignore[arg-type]
+                    account=account,
                     created_at=t,
                     updated_at=t,
                 )
