@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { actorText } from "@/lib/actor";
 import { finance, humanTokenSet, krw, type FinanceRule } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
 import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
@@ -52,7 +53,7 @@ export function TaxSection({ tick }: { tick: number }) {
                 <button className="btn-ghost" onClick={() => setQuarterDate(previousQuarter(p.from))}>앞 분기 보기</button>
                 {quarterDate && <button className="btn-ghost" onClick={() => setQuarterDate(null)}>이번 분기로</button>}
                 {p.filing_status === "confirmed"
-                  ? <Chip label={`숫자 확정 · ${p.confirmed_by ?? ""}`} tone={TONE.ok} />
+                  ? <Chip label={`숫자 확정 · ${actorText(p.confirmed_by_label, p.confirmed_by, "")}`} tone={TONE.ok} />
                   : <button className="btn-primary" disabled={!humanTokenSet || confirming || p.closable === false} onClick={() => confirmVat(p.to)}>이 분기 숫자 확정</button>}
                 {p.closable === false && <span className="text-sm text-ink-500">분기가 끝난 뒤 확정할 수 있습니다.</span>}
               </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { shortDateTime } from "@/lib/format";
+import { actorText } from "@/lib/actor";
 import { finance, humanTokenSet, krw, plainText, signedKrw, type ClosingPeriod, type ClosingReport } from "@/lib/finance";
 import { AppliedRules, Chip, EmphasizedNumbers, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
@@ -89,7 +90,7 @@ export function ClosingSection({ tick, onChanged, focus }: {
                 ? <Chip label="확정됨" tone={TONE.ok} />
                 : <Chip label="확정 전" tone={TONE.warn} />}
               {r.status === "confirmed" && (
-                <span className="text-sm text-ink-500">{r.confirmed_by ? `${r.confirmed_by}님이 ` : ""}{shortDateTime(r.confirmed_at)}에 확정</span>
+                <span className="text-sm text-ink-500">{r.confirmed_by ? `${actorText(r.confirmed_by_label, r.confirmed_by)}님이 ` : ""}{shortDateTime(r.confirmed_at)}에 확정</span>
               )}
               {res.loading && <span className="text-sm text-ink-500">새로 받는 중…</span>}
             </div>
@@ -159,7 +160,7 @@ export function ClosingSection({ tick, onChanged, focus }: {
                   <p className="whitespace-pre-line leading-relaxed text-ink-700">{plainText(r.commentary) ? <EmphasizedNumbers text={plainText(r.commentary)} /> : "설명이 없습니다."}</p>
                   <p className="mt-2 text-xs text-ink-500">{r.commentary_source === "llm" ? "AI가 쓴 문장 · 숫자는 표가 기준" : "정해진 문장 틀 · 숫자는 표가 기준"}</p>
                 </div>
-                {(r.adjustments ?? []).map((a) => <p key={a.at} className="mt-2 text-sm text-ink-700">{a.posted_month}에 조정 반영 · {a.by} · {a.reason}</p>)}
+                {(r.adjustments ?? []).map((a) => <p key={a.at} className="mt-2 text-sm text-ink-700">{a.posted_month}에 조정 반영 · {actorText(a.by_label, a.by)} · {a.reason}</p>)}
                 {(r.prior_adjustments ?? []).length > 0 && (
                   <div className="mt-2 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-700">
                     <p className="font-medium text-ink-900">이번 달에 반영한 전기 조정</p>

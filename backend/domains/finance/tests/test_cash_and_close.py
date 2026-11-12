@@ -276,3 +276,81 @@ def test_cashflow_and_checklist_apis_prefetch_from_support(support) -> None:
     assert status["settlement"] == "done" and status["payables"] == "done"
     skills = {skill for skill, _ in support.calls}
     assert skills == {"seller_settlement_weeks", "seller_settlement_batches"}
+
+
+# ---------------------------------------------------------------- 마감 기한 (CLS-005)
+def _items(r) -> dict:
+    return {i["key"]: i for i in r["items"]}
+
+
+def test_checklist_items_have_due_and_overdue(kit) -> None:
+    """기한은 finance_policy.toml [closing]. 안 끝났는데 오늘(10-23)이 기한 뒤면 overdue."""
+    books, rec = _bank_books(kit), handlers.FinanceRecords()
+    rows = [{"seller_id": "sel_a", "payout": 9000}]
+    w41 = kit.statement("2026-W41", rows)  # 지급일 10-17, 승인 안 됨
+    feed = {"settlements": _month_weeks(kit, **{"2026-W41": w41}), "batches": {}}
+    items = _items(close_checklist.checklist(books, rec, TODAY, TODAY, **feed))
+    due = {k: (i["due"], i["overdue"]) for k, i in items.items()}
+    assert due == {
+        "daily_closing": ("2026-10-02", True),  # 가장 이른 남은 날(10-01)의 다음 날
+        "reconciliation": ("2026-11-03", False),
+        "bank": ("2026-11-03", False),
+        "settlement": ("2026-10-17", True),  # 승인 안 된 주(W41)의 지급 예정일
+        "bank_out": ("2026-11-03", False),
+        "payables": ("2026-11-05", False),
+        "month_closing": ("2026-11-05", False),
+    }
+    # 다 끝난 항목은 기한이 지나도 overdue가 아니다. 정산은 그 달 마지막 지급 예정일을 보여 준다
+    for k in range(22):
+        rec.closings[("day", (date(2026, 10, 1) + timedelta(days=k)).isoformat())] = {"by": "t"}
+    w41_ok = w41 | {"batch": w41["batch"] | {"status": "approved", "seller_ids": ["sel_a"]}}
+    feed["settlements"] = _month_weeks(kit, **{"2026-W41": w41_ok})
+    items = _items(close_checklist.checklist(books, rec, TODAY, TODAY, **feed))
+    assert (items["daily_closing"]["due"], items["daily_closing"]["overdue"]) == (
+        "2026-11-01",
+        False,
+    )
+    assert items["settlement"]["status"] == "done"
+    assert (items["settlement"]["due"], items["settlement"]["overdue"]) == ("2026-10-31", False)
+    # 한 달 뒤에 보면 남은 일은 모두 기한 지남
+    late = _items(close_checklist.checklist(books, rec, TODAY, date(2026, 11, 6), **feed))
+    assert late["month_closing"]["overdue"] is True and late["bank"]["overdue"] is True
+
+
+def test_checklist_due_without_support_uses_policy_pay_date(kit) -> None:
+    """고객지원 내역서가 없으면 지급 예정일은 정산 기간 끝(일요일) + 6일로 잡는다."""
+    items = _items(
+        close_checklist.checklist(_bank_books(kit), handlers.FinanceRecords(), TODAY, TODAY)
+    )
+    assert items["settlement"]["status"] == "unknown"
+    assert (items["settlement"]["due"], items["settlement"]["overdue"]) == ("2026-10-31", False)
+
+
+def test_checklist_daily_text_and_bank_hint(kit) -> None:
+    books, rec = _bank_books(kit), handlers.FinanceRecords()
+    items = _items(close_checklist.checklist(books, rec, TODAY, TODAY))
+    assert items["daily_closing"]["detail"] == (
+        "22일 중 0일 확정 · 남은 날 22일: 10-01, 10-02, 10-03, 10-04, 10-05 외 17일"
+    )
+    hint = "(② 매출·PG 대사 > 은행 거래내역 파일 올리기)"
+    assert items["bank"]["detail"] == f"이 달 은행 거래내역 파일을 올리면 대조합니다{hint}"
+    assert items["bank_out"]["detail"] == (
+        f"이 달 출금 열이 있는 은행 거래내역 파일을 올리면 대조합니다{hint}"
+    )
+    assert items["bank"]["status"] == items["bank_out"]["status"] == "pending"  # 끝났다고 하지 않음
+    assert items["bank"]["link"] == items["bank_out"]["link"] == "reconciliation"
+
+    for k in range(17):
+        rec.closings[("day", (date(2026, 10, 1) + timedelta(days=k)).isoformat())] = {"by": "t"}
+    items = _items(close_checklist.checklist(books, rec, TODAY, TODAY))
+    assert items["daily_closing"]["detail"] == (
+        "22일 중 17일 확정 · 남은 날 5일: 10-18, 10-19, 10-20, 10-21, 10-22"
+    )
+    assert items["daily_closing"]["due"] == "2026-10-19"
+    first = _items(close_checklist.checklist(books, rec, date(2026, 10, 1), date(2026, 10, 1)))
+    assert first["daily_closing"]["detail"] == "확정할 지난 날 없음"
+
+
+def test_checklist_api_returns_due(kit) -> None:
+    body = TestClient(app).get("/api/finance/close-checklist").json()["data"]
+    assert all(len(i["due"]) == 10 and isinstance(i["overdue"], bool) for i in body["items"])

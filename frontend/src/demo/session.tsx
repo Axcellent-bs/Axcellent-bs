@@ -8,6 +8,7 @@ import { SERVICES, SHARED_PATHS, getEnabled, matchPath } from './services'
 import { getCompany } from './company'
 import { memberLinked, useProfiles, withProfile, type ReaderArea } from './members'
 import { endSupport, getSupport, supportActive } from './support'
+import { setActorName } from '@/lib/actor'
 
 export type Account = {
   id: string
@@ -175,6 +176,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // 관리자가 부서·확인 권한을 바꾸면 로그인한 계정에도 바로 보인다
   const profiles = useProfiles()
   const current = useMemo(() => (account ? withProfile(account, profiles) : null), [account, profiles])
+  // 사람 결정 요청에 같이 보낼 계정 이름 (재무 기록의 "관리자(IP)" 표시용, lib/actor.ts). 같은 값을 다시 넣을 뿐이라 렌더 중에 둔다
+  setActorName(current?.name)
   const value = useMemo(() => ({ account: current, signIn, signOut }), [current, signIn, signOut])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

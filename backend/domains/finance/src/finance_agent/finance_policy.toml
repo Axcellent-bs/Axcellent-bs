@@ -51,3 +51,14 @@ flag_min_amount = 10000             # 변동액이 1만 원 이상이면 "크게
 # 팀 예산 = 그달 1일 팀 인원(인사 AI team_headcount) × 인당 월 단가. 파견은 세지 않는다(원래 팀)
 # 회사마다 다르면 회사 폴더 tenant.toml [finance] per_head_monthly 로 덮는다
 per_head_monthly = 100000
+
+[closing]
+# 월 마감 체크리스트(close_checklist.py)의 항목별 기한. 화면에 "기한 12-03(수)"로, 지나면 "기한 지남"으로 보인다.
+# 규칙은 CLS-005(finance_rules.toml). 일은 늦어도 이 날까지 끝낸다(그날 포함)
+daily_closing_due_days = 1          # 일 결산 확정: 그날 + 1일(다음 날). 남은 날이 있으면 가장 이른 남은 날 기준
+reconciliation_due_day = 3          # 매출·PG 대사 메모: 다음 달 3일
+bank_due_day = 3                    # 은행 입금 대조: 다음 달 3일
+settlement_pay_after_days = 6       # 판매자 정산 지급 승인: 그 주 지급 예정일(정산 기간 끝 + 6일). 고객지원 내역서에 지급일이 있으면 그 날
+bank_out_due_day = 3                # 은행 출금 대조: 다음 달 3일
+payables_due_day = 5                # 판매자 미지급금 롤포워드: 다음 달 5일
+month_closing_due_day = 5           # 월 결산 확정: 다음 달 5일

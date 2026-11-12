@@ -68,6 +68,22 @@ class TeamBudgetConfig(_Strict):
     per_head_monthly: int = Field(default=100000, ge=0)
 
 
+class ClosingConfig(_Strict):
+    """월 마감 체크리스트 항목별 기한 (`finance_policy.toml [closing]`, 규칙 CLS-005).
+
+    `*_due_day`는 다음 달 며칠까지, `daily_closing_due_days`는 그날부터 며칠 뒤까지,
+    `settlement_pay_after_days`는 정산 기간 끝(일요일)부터 지급 예정일까지 날 수다.
+    """
+
+    daily_closing_due_days: int = Field(default=1, ge=0, le=10)
+    reconciliation_due_day: int = Field(default=3, ge=1, le=28)
+    bank_due_day: int = Field(default=3, ge=1, le=28)
+    settlement_pay_after_days: int = Field(default=6, ge=0, le=31)
+    bank_out_due_day: int = Field(default=3, ge=1, le=28)
+    payables_due_day: int = Field(default=5, ge=1, le=28)
+    month_closing_due_day: int = Field(default=5, ge=1, le=28)
+
+
 class FinanceConfig(_Strict):
     commission: CommissionConfig
     pg: PgConfig
@@ -76,6 +92,7 @@ class FinanceConfig(_Strict):
     tax: TaxConfig = TaxConfig()
     cashflow: CashflowConfig = CashflowConfig()
     team_budget: TeamBudgetConfig = TeamBudgetConfig()
+    closing: ClosingConfig = ClosingConfig()
 
 
 @lru_cache(maxsize=1)

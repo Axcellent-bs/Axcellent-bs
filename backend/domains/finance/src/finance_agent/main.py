@@ -283,7 +283,8 @@ class DashboardCORS:
             app,
             allow_origins=origins,
             allow_methods=["GET", "POST"],
-            allow_headers=["Authorization", "Content-Type"],
+            # X-Ax-Actor-Name: 공용 토큰일 때 누가 했나 표시용 화면 계정 이름 (human.py)
+            allow_headers=["Authorization", "Content-Type", "X-Ax-Actor-Name"],
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
