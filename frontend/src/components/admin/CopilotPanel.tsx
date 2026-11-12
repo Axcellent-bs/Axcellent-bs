@@ -76,7 +76,7 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated, 
   const gap = a ? policyGap(a.sources) : null;
 
   return (
-    <aside className="scroll-thin flex w-[380px] shrink-0 flex-col gap-4 overflow-y-auto rounded-3xl bg-surface-2 p-4" aria-label="상담 코파일럿">
+    <aside className="scroll-thin flex w-[320px] shrink-0 flex-col gap-4 overflow-y-auto rounded-3xl xl:w-[380px] bg-surface-2 p-4" aria-label="상담 코파일럿">
       {cls && (
         <section>
           <h3 className="panel-title mb-2">문의 분석</h3>
