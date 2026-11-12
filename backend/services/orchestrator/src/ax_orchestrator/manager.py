@@ -19,6 +19,7 @@ from ax_orchestrator.finance_opinions import FinanceOpinions
 from ax_orchestrator.models import Incident, Plan, iso, now
 from ax_orchestrator.naming import event_title, event_type
 from ax_orchestrator.plans.support_resolved import support_resolved
+from ax_orchestrator.resolved_log import log_resolved
 from ax_orchestrator.store import IncidentStore
 
 log = logging.getLogger("orchestrator.manager")
@@ -159,6 +160,7 @@ class IncidentManager:
         inc.summary = [Engine._summary_line(run) for run in inc.steps.values()]
         inc.metrics = incident_metrics(inc)
         inc.log(f"총괄이 다시 켜져 진행 중이던 이벤트를 이어 가지 않았다: {INTERRUPTED_NOTE}")
+        log_resolved(inc)  # 열려 있는 동안 복구 신호를 받아 해결로 바뀐 경우만 남는다
 
     def judge(self, env: EventEnvelope) -> str:
         """`open` | `note` | `ignore`."""
@@ -267,6 +269,8 @@ class IncidentManager:
                 target.settle_after_recovery()
                 target.refresh_mttr()
                 target.log(f"정상 복귀 신호 받음 ({env.source}, {iso(env.occurred_at)})")
+                # degraded로 닫혔던 이벤트가 이제 풀렸으면 남긴다. 열려 있으면 닫힐 때 남긴다
+                log_resolved(target)
                 plan = self.plan_factory()
                 await self.engine.refresh_impact(target, plan)
                 if target.closed_at is not None:
@@ -317,6 +321,7 @@ class IncidentManager:
                 inc.settle_after_recovery()
                 inc.refresh_mttr()
                 inc.log(f"복구 신호 수신 ({iso(at)})")
+                log_resolved(inc)
                 self._persist(inc)
 
     async def _resume_handoff(self, env: EventEnvelope) -> tuple[str, Incident | None]:
