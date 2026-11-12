@@ -84,6 +84,7 @@ def step_timings(inc: Incident) -> list[dict[str, Any]]:
                 "human_wait_seconds": _round(run.human_wait_seconds),
                 "attempts": run.attempts,
                 "reason_code": run.reason_code,
+                "promised_seconds": _round(run.promised_seconds),
             }
         )
     return out

@@ -1,7 +1,8 @@
 """단계별 판정: 시간이 아닌 상태를 먼저 가르고, 일한 시간만 기준과 비교한다. LLM은 쓰지 않는다.
 
 판정 값:
-- normal: 일한 시간이 기준 이하이고 재시도도 기준 이내
+- normal: 일한 시간이 기준 이하이고 재시도도 기준 이내. 기준 시간은 단계의 약속 시간(총괄이 같이
+  보낸 `promised_seconds`, 기준값 v2)이고, 약속이 없으면 기본값(30초)이다
 - check: 기준을 넘었거나 재시도가 있었다 (시도 횟수를 같이 남긴다)
 - no_record: 시간 기록이 없다(건너뜀·시작이나 끝 시각을 모름). 지연으로 세지 않는다
 - blocked: 실패했거나 사람이 거절했다 (실패·막힘)
@@ -37,6 +38,9 @@ def judge_step(timing: dict[str, Any], criteria: Criteria) -> dict[str, Any] | N
     attempts = int(timing.get("attempts") or 0)
     reason = timing.get("reason_code")
     rule = criteria.rule_for(stage.group)
+    promised = timing.get("promised_seconds")
+    has_promise = rule.use_promised and isinstance(promised, int | float) and promised > 0
+    limit = float(promised) if has_promise else rule.normal_max_seconds
 
     if reason == REVIEW_TIMEOUT:
         verdict = "approval_expired"
@@ -48,7 +52,7 @@ def judge_step(timing: dict[str, Any], criteria: Criteria) -> dict[str, Any] | N
         verdict = "in_progress"
     elif status != "completed" or work is None:
         verdict = "no_record"
-    elif work <= rule.normal_max_seconds and attempts <= rule.normal_max_attempts:
+    elif work <= limit and attempts <= rule.normal_max_attempts:
         verdict = "normal"
     else:
         verdict = "check"
@@ -60,7 +64,9 @@ def judge_step(timing: dict[str, Any], criteria: Criteria) -> dict[str, Any] | N
         "status": status,
         "work_seconds": work,
         "attempts": attempts,
-        "limit_seconds": rule.normal_max_seconds,
+        "limit_seconds": limit,
+        # 기준 시간이 단계의 약속에서 왔는지(True), 기본값에서 왔는지(False)
+        "promised": has_promise,
         "reason_code": reason,
     }
 

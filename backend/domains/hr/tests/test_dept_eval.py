@@ -92,10 +92,11 @@ def _verdict(timing: dict, criteria=None) -> str:
 # ---- 기준값 파일 ----------------------------------------------------------------------------
 
 
-def test_default_criteria_file_is_version_1_with_one_rule() -> None:
+def test_default_criteria_file_is_version_2_with_one_rule() -> None:
     criteria = load_criteria()
-    assert criteria.version == 1
+    assert criteria.version == 2
     assert (criteria.default.normal_max_seconds, criteria.default.normal_max_attempts) == (30, 1)
+    assert criteria.default.use_promised is True  # 단계의 약속 시간을 기준으로 삼는다
     assert criteria.groups == {}  # 모든 단계가 같은 기준이다
 
 
@@ -103,7 +104,7 @@ def test_changing_only_the_file_values_changes_the_verdict(tmp_path: Path) -> No
     source = DEFAULT_PATH.read_text(encoding="utf-8")
     loose = tmp_path / "criteria.toml"
     loose.write_text(
-        source.replace("version = 1", "version = 2").replace(
+        source.replace("version = 2", "version = 3").replace(
             "normal_max_seconds = 30", "normal_max_seconds = 60"
         ),
         encoding="utf-8",
@@ -111,7 +112,7 @@ def test_changing_only_the_file_values_changes_the_verdict(tmp_path: Path) -> No
     timing = _t(work_seconds=45.0)
     assert _verdict(timing) == "check"
     assert _verdict(timing, load_criteria(loose)) == "normal"
-    assert load_criteria(loose).version == 2
+    assert load_criteria(loose).version == 3
 
 
 def test_a_group_rule_overrides_only_that_group() -> None:
@@ -249,8 +250,80 @@ def test_judge_timings_carries_the_version_and_drops_excluded_steps() -> None:
     out = judge_timings(
         [_t("diagnose"), _t("cause_check"), _t("recovery"), _t("cost")], load_criteria()
     )
-    assert out["criteria_version"] == 1
+    assert out["criteria_version"] == 2
     assert [item["step_id"] for item in out["items"]] == ["diagnose"]
+
+
+# ---- 단계별 약속 시간(기준값 v2) ----------------------------------------------------------------
+
+
+def test_the_promised_time_is_the_limit_when_the_step_has_one() -> None:
+    """짧은 일은 더 엄하게, 긴 일은 더 넉넉하게 잰다. 30초 하나로 재지 않는다."""
+    assert _verdict(_t("diagnose", work_seconds=12.0, promised_seconds=10.0)) == "check"
+    assert _verdict(_t("diagnose", work_seconds=10.0, promised_seconds=10.0)) == "normal"
+    assert _verdict(_t("impact", work_seconds=45.0, promised_seconds=60.0)) == "normal"
+    assert _verdict(_t("impact", work_seconds=61.0, promised_seconds=60.0)) == "check"
+
+
+def test_a_step_without_a_promise_keeps_the_default_30_seconds() -> None:
+    assert _verdict(_t("impact", work_seconds=29.0)) == "normal"
+    assert _verdict(_t("impact", work_seconds=31.0)) == "check"
+    assert _verdict(_t("impact", work_seconds=31.0, promised_seconds=None)) == "check"
+
+
+@pytest.mark.parametrize("bad", [0, -5, 0.0])
+def test_a_nonsense_promise_is_ignored_not_trusted(bad: float) -> None:
+    out = judge_step(_t("impact", work_seconds=40.0, promised_seconds=bad), load_criteria())
+    assert out is not None
+    assert (out["verdict"], out["limit_seconds"], out["promised"]) == ("check", 30.0, False)
+
+
+def test_a_retry_is_still_a_check_even_within_the_promised_time() -> None:
+    assert _verdict(_t("impact", work_seconds=40.0, attempts=2, promised_seconds=60.0)) == "check"
+
+
+def test_the_limit_and_where_it_came_from_are_kept_with_the_verdict() -> None:
+    kept = judge_step(_t("impact", work_seconds=45.0, promised_seconds=60.0), load_criteria())
+    assert kept is not None
+    assert (kept["limit_seconds"], kept["promised"]) == (60.0, True)
+    plain = judge_step(_t("impact", work_seconds=45.0), load_criteria())
+    assert plain is not None
+    assert (plain["limit_seconds"], plain["promised"]) == (30.0, False)
+
+
+def test_version_1_style_criteria_ignore_the_promise(tmp_path: Path) -> None:
+    """use_promised를 끄면 옛 방식(모든 단계 30초)으로 판정한다."""
+    source = DEFAULT_PATH.read_text(encoding="utf-8")
+    old = tmp_path / "criteria.toml"
+    old.write_text(source.replace("use_promised = true", "use_promised = false"), encoding="utf-8")
+    timing = _t("impact", work_seconds=45.0, promised_seconds=60.0)
+    assert _verdict(timing) == "normal"
+    assert _verdict(timing, load_criteria(old)) == "check"
+
+
+def test_use_promised_must_be_true_or_false() -> None:
+    with pytest.raises(CriteriaError):
+        parse_criteria(
+            {
+                "version": 2,
+                "default": {
+                    "normal_max_seconds": 30,
+                    "normal_max_attempts": 1,
+                    "use_promised": "yes",
+                },
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_promise_travels_from_the_timings_to_the_saved_judgment(svc) -> None:
+    card_id = await _incident(svc)
+    rows = [_t("impact", dept="data", work_seconds=45.0, promised_seconds=60.0)]
+    await record_event_times(svc, _req("record_event_times", _times(step_timings=rows), key="p"))
+    card = await svc.memory.get_card(card_id)
+    assert card.extra["step_timings"][0]["promised_seconds"] == 60.0
+    (item,) = card.extra["step_judgments"]["items"]
+    assert (item["verdict"], item["limit_seconds"], item["promised"]) == ("normal", 60.0, True)
 
 
 # ---- 카드에 저장 ------------------------------------------------------------------------------
@@ -269,7 +342,7 @@ async def test_judgments_are_saved_on_the_card_with_the_criteria_version(svc) ->
     )
     assert result.output["outcome"] == "recorded"
     saved = (await svc.memory.get_card(card_id)).extra["step_judgments"]
-    assert saved["criteria_version"] == 1
+    assert saved["criteria_version"] == 2
     verdicts = {item["step_id"]: item["verdict"] for item in saved["items"]}
     assert verdicts == {"diagnose": "normal", "rollback": "check"}  # 복구 검증은 빠진다
 

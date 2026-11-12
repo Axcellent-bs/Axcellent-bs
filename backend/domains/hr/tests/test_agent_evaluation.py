@@ -91,7 +91,7 @@ async def test_no_evaluated_events_still_lists_every_agent_with_nothing(svc) -> 
     assert [a.dept for a in out.agents] == list(AGENT_ORDER)
     assert out.events == [] and out.trend == []
     assert all(a.events == 0 and a.recent == [] for a in out.agents)
-    assert (out.criteria_version, out.normal_max_seconds, out.normal_max_attempts) == (1, 30, 1)
+    assert (out.criteria_version, out.normal_max_seconds, out.normal_max_attempts) == (2, 30, 1)
 
 
 @pytest.mark.asyncio

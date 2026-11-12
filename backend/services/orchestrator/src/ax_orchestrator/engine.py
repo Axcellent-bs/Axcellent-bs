@@ -61,6 +61,8 @@ TRANSFER_CODES = {ErrorCode.FORBIDDEN_SKILL.value, ErrorCode.HOP_LIMIT.value, "n
 MAX_FAILED_RETRIES = 2
 MAX_CANCELED_RETRIES = 1
 MAX_EARLY_REVIEWS = 200  # 대기로 오르기 전에 먼저 온 안전 관문 결정을 담는 상한
+DEADLINE_FACTOR = 2.0  # 약속 시간(`Step.expected_seconds`)의 몇 배까지 기다릴지
+MAX_DEADLINE_SECONDS = 300.0  # 약속으로 늘리는 호출 마감의 상한(초)
 
 
 class Hold:
@@ -260,6 +262,7 @@ class Engine:
         run = inc.steps[step.id]
         run.started_at = now()
         run.status = "running"
+        run.promised_seconds = step.expected_seconds
         if step.kind == "record":
             await self._record(inc, step, run)
             return
@@ -553,6 +556,22 @@ class Engine:
         inc.log(f"{run.label}: 건너뜀 — {note}")
 
     # ---------- 호출·재시도·이관·중계 ----------
+    def deadline_seconds(self, step: Step) -> float:
+        """부서를 한 번 부를 때 기다리는 시간(초).
+
+        - 단계에 마감(`timeout`)이 따로 있으면 그대로 쓴다.
+        - 약속 시간(`expected_seconds`)이 있으면 약속의 `DEADLINE_FACTOR`배로 하되, 기본 마감보다
+          짧아지지 않게 하고 `MAX_DEADLINE_SECONDS`를 넘기지 않는다. 일이 큰 단계가 30초에 끊겨
+          다시 시도되는 것을 막는다. 부서가 멈췄을 때 기다리는 시간도 늘어나서 상한을 둔다.
+        - 둘 다 없으면 기본 마감이다.
+        """
+        if step.timeout:
+            return step.timeout
+        if step.expected_seconds:
+            wanted = step.expected_seconds * DEADLINE_FACTOR
+            return min(max(wanted, self.step_timeout), max(MAX_DEADLINE_SECONDS, self.step_timeout))
+        return self.step_timeout
+
     def _request(
         self, inc: Incident, step: Step, skill: str, payload: dict[str, Any], dept: str
     ) -> AgentRequest:
@@ -564,7 +583,7 @@ class Engine:
             context_id=inc.context_id,
             token="orchestrator",
             path=["orchestrator"],
-            deadline=now() + timedelta(seconds=step.timeout or self.step_timeout),
+            deadline=now() + timedelta(seconds=self.deadline_seconds(step)),
             idempotency_key=f"{inc.context_id}:{skill}:{step.id}",
         )
         return AgentRequest(meta=meta, skill=skill, input=payload, sequence=sequence)
