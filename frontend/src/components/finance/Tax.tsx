@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { finance, humanTokenSet, krw, type BankImport } from "@/lib/finance";
+import { finance, humanTokenSet, krw, type FinanceRule } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
 import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
-// ⑤ 세무 지원: 부가세 신고 보조 집계와 판매자별 판매 명세(부가가치세법 제75조 초안).
+// ⑤ 세무 지원: 부가세 신고 보조 집계, 판매자별 판매 명세(부가가치세법 제75조 초안), 법인세 참고 추정,
+// 세무사에게 넘길 자동으로 만든 파일, 회계 기준 확인 목록.
 // 재무 AI는 신고·제출을 하지 않는다. 세무 담당이 홈택스에서 신고할 때 쓸 숫자와 파일만 만든다.
 // 세무사 확인 전인 설정(수수료 부가세 별도/포함, 쿠폰 공제 구조, 배송비 공급자)은 화면에 그대로 드러낸다.
 
@@ -143,6 +144,7 @@ export function TaxSection({ tick }: { tick: number }) {
       </Panel>
       <IncomeEstimatePanel tick={tick} />
       <ExportsPanel tick={tick} />
+      <RulesPanel tick={tick} />
     </div>
   );
 }
@@ -190,7 +192,7 @@ function ExportsPanel({ tick }: { tick: number }) {
   }
 
   return (
-    <Panel id="tax-exports" title="자동으로 만든 파일" meta={view.env?.meta}
+    <Panel id="tax-exports" title="자동으로 만든 파일 (세무사 전달용)" meta={view.env?.meta}
       hint="지난달 손익계산서를 AI가 만들어 보관합니다. 부가세·판매자 자료는 분기가 끝난 달에 함께 만듭니다. 내려받아 세무사에게 전달해 주세요. 전문가 확인 목록도 들어 있습니다. AI는 외부로 보내거나 신고하지 않습니다."
       tools={<button className="btn-ghost" disabled={busy || !humanTokenSet} onClick={() => act(() => finance.runExports())}>{busy ? "처리 중" : "지금 만들기"}</button>}>
       {problem && <p role="alert" className="mb-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{problem}</p>}
@@ -219,44 +221,11 @@ function ExportsPanel({ tick }: { tick: number }) {
                 ))}
               </ul>
             )}
-            <div>
-              <h3 className="text-sm font-semibold text-ink-900">은행 거래내역 읽은 기록</h3>
-              <p className="mt-1 text-sm text-ink-500">
-                은행 거래내역은 ② 매출·PG 대사 탭의 '은행 거래내역 파일 올리기'로 올립니다.
-                {(view.env?.meta as { inbox_enabled?: boolean } | undefined)?.inbox_enabled ? " 서버의 은행 내역 폴더에 넣은 파일도 자동으로 읽습니다." : ""}
-              </p>
-              {v.bank_imports.length === 0 ? <p className="mt-1 text-sm text-ink-500">아직 읽은 은행 거래내역이 없습니다.</p> : (
-                <ul className="mt-1 space-y-1 text-sm text-ink-700">
-                  {v.bank_imports.slice(0, 5).map((b) => (
-                    <li key={`${b.import_id ?? b.file}-${b.at}-${b.status}`} className="flex flex-wrap items-center gap-2 break-all">
-                      <span>{shortDateTime(b.at)} · {bankImportLine(b)}</span>
-                      {b.status === "imported" && b.import_id && !b.removed && humanTokenSet && (
-                        <button type="button" className="btn-quiet py-0.5 text-sm" disabled={busy}
-                          onClick={() => {
-                            if (window.confirm(`${b.file ?? "이 기록"}으로 더한 은행 거래 줄을 뺄까요? 기록은 남습니다.`)) {
-                              void act(() => finance.removeBankImport(b.import_id!, "화면에서 잘못 올린 은행 내역 빼기"));
-                            }
-                          }}>이 내역 빼기</button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
           </div>
         )}
       </ResourceBody>
     </Panel>
   );
-}
-
-/** 은행 내역 기록 한 줄: 누가·어디서 · 파일 · 결과 */
-function bankImportLine(b: BankImport): string {
-  if (b.status === "removed") return `${b.by ?? "사람"}님이 뺌 · ${b.file ?? ""} · ${b.rows ?? 0}줄 뺌 · 이유: ${b.reason ?? ""}`;
-  const who = b.source === "upload" ? `${b.by ?? "사람"}님이 올림` : "폴더";
-  if (b.status === "failed") return `${who} · ${b.file} · 읽지 못함: ${b.reason}`;
-  const removed = b.removed ? ` · ${b.removed.by}님이 ${shortDateTime(b.removed.at)}에 뺌` : "";
-  return `${who} · ${b.file} · 새로 ${b.added}줄 더함${removed}`;
 }
 
 function VatTable({ title, rows }: { title: string; rows: { code: string; label: string; supply: number; vat: number }[] }) {
@@ -277,6 +246,68 @@ function VatTable({ title, rows }: { title: string; rows: { code: string; label:
           </tbody>
         </table>
       ) : <p className="mt-2 text-sm text-ink-500">확인할 수 없음 (주문 자료를 받지 못함)</p>}
+    </div>
+  );
+}
+
+const AREA_KO: Record<string, string> = {
+  revenue: "매출", expense: "비용", settlement: "판매자 정산", vat: "부가세", income_tax: "법인세", closing: "결산",
+};
+
+/** 회계 기준 확인 목록: 재무 AI가 계산에 쓰는 규칙 전체. 숫자 옆 "이 숫자를 계산한 회계 기준"을 한곳에 모았다 */
+function RulesPanel({ tick }: { tick: number }) {
+  const res = useResource("tax-rules", () => finance.rules(), tick);
+  return (
+    <Panel id="tax-rules" title="회계 기준 확인 목록"
+      hint="재무 AI가 숫자를 계산할 때 쓰는 기준입니다. 세무사·회계사가 아직 확인하지 않은 기준을 먼저 보여 줍니다. 기준을 바꾸려면 규칙 파일(finance_rules.toml)을 고칩니다. 같은 목록이 '자동으로 만든 파일'의 전문가 확인 목록(expert-review-checklist.docx)에도 들어 있습니다.">
+      <ResourceBody res={res}>
+        {(book) => {
+          // 결산·세무에 쓰는 기준만 전문가 확인 대상이다. 캠페인 브레이크·교훈 같은 내부 기준은 재무 담당이 정해 여기서 뺀다
+          const rules = book.rules.filter((r) => r.area in AREA_KO);
+          const pending = rules.filter((r) => r.review === "pending");
+          const checked = rules.filter((r) => r.review !== "pending");
+          return (
+            <div className="space-y-4">
+              <p className="text-sm text-ink-500">규칙 {book.version}판 · {book.updated} 고침 · 기준 {rules.length}개 중 확인 전 {pending.length}개</p>
+              {book.expert_questions.length > 0 && (
+                <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <b>세무사·회계사에게 먼저 물을 것</b>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">{book.expert_questions.map((q) => <li key={q}>{q}</li>)}</ul>
+                </div>
+              )}
+              {pending.length > 0 ? <RuleList title={`확인 전 ${pending.length}개`} rules={pending} /> : <Empty>확인 전 기준이 없습니다.</Empty>}
+              {checked.length > 0 && (
+                <details className="rounded-2xl border border-ink-100 px-4 py-2 text-sm">
+                  <summary className="cursor-pointer font-medium text-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">확인된 기준 {checked.length}개</summary>
+                  <div className="mt-2"><RuleList rules={checked} /></div>
+                </details>
+              )}
+            </div>
+          );
+        }}
+      </ResourceBody>
+    </Panel>
+  );
+}
+
+function RuleList({ title, rules }: { title?: string; rules: FinanceRule[] }) {
+  return (
+    <div>
+      {title && <h3 className="text-sm font-semibold text-ink-900">{title}</h3>}
+      <ul className="mt-2 space-y-2 text-sm">
+        {rules.map((r) => (
+          <li key={r.id} className="rounded-xl border border-ink-100 px-3 py-2">
+            <p className="flex flex-wrap items-center gap-2 font-medium text-ink-900">
+              {r.title}
+              <Chip label={AREA_KO[r.area] ?? r.area} tone={TONE.muted} />
+              <Chip label={r.id} tone={TONE.muted} />
+              {r.review === "pending" && <Chip label="세무사·회계사 확인 전" tone={TONE.warn} />}
+            </p>
+            <p className="mt-0.5 text-ink-700">{r.statement}</p>
+            <p className="text-ink-500">근거: {r.basis}</p>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
