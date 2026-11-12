@@ -215,7 +215,8 @@
       "output_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsOutput",
       "grade": "C",
       "allowed_requesters": [
-        "orchestrator"
+        "orchestrator",
+        "dashboard-api"
       ],
       "verifier": null,
       "priority": "optional"
@@ -300,7 +301,8 @@
       "output_schema": "agents/marketing/src/marketing_agent/sns.py#SnsPostCheck",
       "grade": "B",
       "allowed_requesters": [
-        "orchestrator"
+        "orchestrator",
+        "dashboard-api"
       ],
       "verifier": "safety",
       "priority": "optional"
