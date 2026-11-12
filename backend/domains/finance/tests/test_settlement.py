@@ -86,6 +86,41 @@ def test_hold_reasons(kit, fixed_now) -> None:
     assert all(r["status"] == "held" for r in rows.values())
 
 
+def test_refund_follows_purchase_confirmation(kit, fixed_now) -> None:
+    """환불은 환불 시각과 구매 확정 시각 중 늦은 주에 뺀다. 확정 안 된 주문의 환불은 빼지 않는다."""
+    w42 = kit.at("2026-10-14")
+    settled = kit.order("ord_1", kit.at("2026-10-06"), [("sel_a", "book", 1, 30000)])
+    early = kit.order("ord_2", w42, [("sel_a", "book", 1, 20000)], delivered=False)
+    early["delivered_at"] = kit.at("2026-10-21")  # W42에 환불, W43에 확정
+    cancelled = kit.order("ord_3", w42, [("sel_b", "book", 1, 10000)], delivered=False)
+    keep = kit.order("ord_4", w42, [("sel_b", "book", 1, 50000)])
+
+    def refund(rid: str, order_id: str, seller: str, amount: int, when) -> dict:
+        return {
+            "refund_id": rid,
+            "order_id": order_id,
+            "seller_id": seller,
+            "amount": amount,
+            "created_at": when,
+        }
+
+    refunds = [
+        refund("rfd_1", "ord_1", "sel_a", 3000, w42),  # 이미 정산한 주문 → 환불한 주(W42)
+        refund("rfd_2", "ord_2", "sel_a", 5000, w42),  # 확정 전 환불 → 확정되는 주(W43)
+        refund("rfd_3", "ord_3", "sel_b", 10000, w42),  # 배송 전 취소 → 빼지 않음
+    ]
+    books = kit.books(orders=[settled, early, cancelled, keep], refunds=refunds)
+    w42_rows = {r["seller_id"]: r for r in st.statements(books, "2026-W42")["statements"]}
+    w43_rows = {r["seller_id"]: r for r in st.statements(books, "2026-W43")["statements"]}
+    assert w42_rows["sel_a"]["refunds"] == 3000
+    assert w42_rows["sel_b"]["refunds"] == 0
+    assert w42_rows["sel_b"]["payout"] == 50000 - 5000
+    assert (w43_rows["sel_a"]["gross"], w43_rows["sel_a"]["refunds"]) == (20000, 5000)
+    assert w43_rows.get("sel_b", {"refunds": 0})["refunds"] == 0
+    total = sum(r["refunds"] for wk in (w42_rows, w43_rows) for r in wk.values())
+    assert total == 8000  # 판매자가 받은 판매액에 대한 환불만 뺀다
+
+
 def test_period_parameter_and_quiet_sellers(kit, fixed_now) -> None:
     books = kit.books(
         orders=[kit.order("ord_1", kit.at("2026-10-20"), [("sel_a", "book", 1, 1000)])]

@@ -420,6 +420,7 @@ def case_settlement(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
         for o in orders
         if paid_at(o) is not None and paid_at(o) < end and o["delivered_at"] is None
     ]
+    delivered_of = {o["order_id"]: o["delivered_at"] for o in orders}
     for s in sellers:
         gross = com = 0
         ids: set[str] = set()
@@ -439,10 +440,13 @@ def case_settlement(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
             and c["seller_id"] == s
             and inside(c["created_at"], start, end)
         )
+        # 환불은 환불 시각과 구매 확정 시각 중 늦은 주에 뺀다. 확정 안 된 주문의 환불은 빼지 않는다
         rf = sum(
             r["amount"]
             for r in refunds
-            if r["seller_id"] == s and inside(r["created_at"], start, end)
+            if r["seller_id"] == s
+            and delivered_of[r["order_id"]] is not None
+            and inside(max(r["created_at"], delivered_of[r["order_id"]]), start, end)
         )
         pending = any(i["seller_id"] == s for o in waiting for i in o["items"])
         if not ids and not cp and not rf and not pending:

@@ -6,7 +6,11 @@
 - 판매액·수수료: 기간 안에 **구매가 확정된**(배송 완료) 주문의 그 판매자 품목
   (수수료는 카테고리 수수료율, 품목별 반올림). 오픈마켓처럼 구매 확정일 기준으로 정산한다
 - 판매자 부담 쿠폰: 기간 안에 발급된 `funded_by="seller"` 쿠폰
-- 환불: 기간 안 환불 중 그 판매자 몫
+- 환불: 그 판매자 몫 환불을, 환불 시각과 그 주문의 구매 확정 시각 중 **늦은 쪽**이 기간 안이면 뺀다.
+  확정된(판매액을 이미 정산한) 주문의 환불은 환불한 주에 빼고(역정산),
+  확정 전 환불은 그 주문이 확정되는 주에 판매액과 같이 뺀다.
+  끝내 확정되지 않은 주문(배송 전 취소 등)의 환불은 판매자가 받은 돈이 없으니 빼지 않는다.
+  고객지원이 환불하면(`refund_request` → shop-api) 재무는 그 결과를 shop-api 주문에서 읽어 반영한다
 - 구매 확정 대기(`pending_confirmation`): 기간 끝 전에 팔렸지만 아직 확정되지 않은 주문.
   이번 정산에 넣지 않고, 확정되는 주의 정산으로 넘어간다(보류 사유가 아니다)
 
@@ -46,6 +50,21 @@ def _paid_at(order: dict[str, Any]):
     return min(times) if times else None
 
 
+def _refund_settles_at(refund: dict[str, Any], confirmed_at: dict[str, Any]) -> Any:
+    """환불을 정산에서 빼는 시각: 환불 시각과 주문 구매 확정 시각 중 늦은 쪽.
+
+    주문이 확정되지 않았으면 None(빼지 않는다). 주문을 모르는 환불(예전 자료)은 환불 시각.
+    """
+    at = refund.get("created_at")
+    order_id = refund.get("order_id")
+    if order_id not in confirmed_at:
+        return at
+    done = confirmed_at[order_id]
+    if done is None or at is None:
+        return None
+    return max(at, done)
+
+
 def statements(
     books: Books,
     period: str | None,
@@ -64,6 +83,7 @@ def statements(
 
     sold = books.confirmed_between(start, end)
     waiting = books.unconfirmed_until(end)
+    confirmed_at = {o["order_id"]: o.get("delivered_at") for o in books.orders}
     rows = []
     for seller_id in sellers:
         gross = commission = 0
@@ -104,7 +124,8 @@ def statements(
         refunds = sum(
             r["amount"]
             for r in books.refunds
-            if r.get("seller_id") == seller_id and in_range(r.get("created_at"), start, end)
+            if r.get("seller_id") == seller_id
+            and in_range(_refund_settles_at(r, confirmed_at), start, end)
         )
         payout = gross - commission - seller_coupon - refunds
         if len(rates) == 1:
