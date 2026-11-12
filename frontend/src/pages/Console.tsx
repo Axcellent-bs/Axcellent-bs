@@ -93,12 +93,12 @@ function Console() {
         {conv ? (
           <>
             <main className="card flex min-w-0 flex-1 flex-col overflow-hidden">
-              <div className="flex shrink-0 items-center gap-3 border-b border-ink-100 bg-surface px-6 py-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2"><h1 className="truncate text-base font-semibold">{conv.customer_name}</h1><span className="chip bg-ink-100 text-ink-500">{STATUS_KO[conv.status]}</span><span className="chip bg-indigo-50 text-indigo-800">{tenantName(conv.tenant_id)}</span>{conv.triage && <span className="chip bg-amber-50 text-amber-800">{conv.triage.state === "done" ? `분류 완료${conv.triage.label ? ` · ${conv.triage.label}` : ""}` : "분류 필요"}</span>}</div>
+              <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink-100 bg-surface px-6 py-3">
+                <div className="min-w-[16rem] flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><h1 className="truncate text-base font-semibold">{conv.customer_name}</h1><span className="chip bg-ink-100 text-ink-500">{STATUS_KO[conv.status]}</span><span className="chip bg-indigo-50 text-indigo-800">{tenantName(conv.tenant_id)}</span>{conv.triage && <span className="chip bg-amber-50 text-amber-800">{conv.triage.state === "done" ? `분류 완료${conv.triage.label ? ` · ${conv.triage.label}` : ""}` : "분류 필요"}</span>}</div>
                   <p className="truncate text-xs text-ink-500">{conv.subject_display ?? conv.subject}{conv.order_no && ` · 주문 ${conv.order_no}`} · 문의 #{conv.id}</p>
                 </div>
-                <div className="ml-auto flex gap-2">
+                <div className="ml-auto flex flex-wrap gap-2">
                   <button className="btn-ghost whitespace-nowrap text-xs" disabled={busy !== null} onClick={() => run("summary", async () => { await api.admin.summary(conv.id); await reload(conv.id); setShowSummary(true); })}>{busy === "summary" ? "정리 중…" : "상담 기록 정리"}</button>
                   {!conv.triage && <button className="btn-ghost whitespace-nowrap text-xs" disabled={busy !== null} onClick={() => run("triage", async () => { await api.admin.setTriage(conv.id, { action: "send" }); await reload(conv.id); })}>분류 필요로 보내기</button>}
                   {conv.status === "open"
