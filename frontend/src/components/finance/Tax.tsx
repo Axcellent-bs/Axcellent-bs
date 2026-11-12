@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { finance, humanTokenSet, krw } from "@/lib/finance";
+import { finance, humanTokenSet, krw, type BankImport } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
 import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
@@ -204,6 +204,7 @@ function ExportsPanel({ tick }: { tick: number }) {
                     <div className="flex flex-wrap items-center gap-2">
                       <b className="text-ink-900">{p.month}</b>
                       <span className="text-sm text-ink-500">{p.version}번째 판 · {shortDateTime(p.generated_at)}</span>
+                      {p.closing_confirmed === false && <Chip label="확정 전 숫자(결산 미확정)" tone={TONE.warn} />}
                       <button className="btn-primary ml-auto" disabled={busy} onClick={() => act(() => finance.downloadBundle(p.package_id))}>전체 내려받기 (zip)</button>
                     </div>
                     <ul className="mt-2 flex flex-wrap gap-2">
@@ -213,6 +214,7 @@ function ExportsPanel({ tick }: { tick: number }) {
                         </li>
                       ))}
                     </ul>
+                    {p.closing_confirmed === false && <p className="mt-2 text-sm text-ink-500">{p.month} 결산을 아직 확정하지 않아 파일 맨 위에 "확정 전 숫자(결산 미확정)"라고 적혀 있습니다. ① 결산에서 확정하면 다음 만들기 때 확정 숫자로 새 판이 나옵니다.</p>}
                   </li>
                 ))}
               </ul>
@@ -226,8 +228,16 @@ function ExportsPanel({ tick }: { tick: number }) {
               {v.bank_imports.length === 0 ? <p className="mt-1 text-sm text-ink-500">아직 읽은 은행 거래내역이 없습니다.</p> : (
                 <ul className="mt-1 space-y-1 text-sm text-ink-700">
                   {v.bank_imports.slice(0, 5).map((b) => (
-                    <li key={`${b.file}-${b.at}`} className="break-all">
-                      {shortDateTime(b.at)} · {b.source === "upload" ? `${b.by ?? "사람"}님이 올림` : "폴더"} · {b.file} · {b.status === "imported" ? `새로 ${b.added}줄 더함` : `읽지 못함: ${b.reason}`}
+                    <li key={`${b.import_id ?? b.file}-${b.at}-${b.status}`} className="flex flex-wrap items-center gap-2 break-all">
+                      <span>{shortDateTime(b.at)} · {bankImportLine(b)}</span>
+                      {b.status === "imported" && b.import_id && !b.removed && humanTokenSet && (
+                        <button type="button" className="btn-quiet py-0.5 text-sm" disabled={busy}
+                          onClick={() => {
+                            if (window.confirm(`${b.file ?? "이 기록"}으로 더한 은행 거래 줄을 뺄까요? 기록은 남습니다.`)) {
+                              void act(() => finance.removeBankImport(b.import_id!, "화면에서 잘못 올린 은행 내역 빼기"));
+                            }
+                          }}>이 내역 빼기</button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -238,6 +248,15 @@ function ExportsPanel({ tick }: { tick: number }) {
       </ResourceBody>
     </Panel>
   );
+}
+
+/** 은행 내역 기록 한 줄: 누가·어디서 · 파일 · 결과 */
+function bankImportLine(b: BankImport): string {
+  if (b.status === "removed") return `${b.by ?? "사람"}님이 뺌 · ${b.file ?? ""} · ${b.rows ?? 0}줄 뺌 · 이유: ${b.reason ?? ""}`;
+  const who = b.source === "upload" ? `${b.by ?? "사람"}님이 올림` : "폴더";
+  if (b.status === "failed") return `${who} · ${b.file} · 읽지 못함: ${b.reason}`;
+  const removed = b.removed ? ` · ${b.removed.by}님이 ${shortDateTime(b.removed.at)}에 뺌` : "";
+  return `${who} · ${b.file} · 새로 ${b.added}줄 더함${removed}`;
 }
 
 function VatTable({ title, rows }: { title: string; rows: { code: string; label: string; supply: number; vat: number }[] }) {

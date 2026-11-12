@@ -4,7 +4,7 @@ import { humanizeIds, incidentNo } from "./format";
 import { ExampleMissing, exampleCall, exampleOn } from "./financeExample";
 
 // 재무 화면 → finance(8105) · safety(8001) API. 응답은 ax-backend 규약 {data, meta} / {error: {code, message}}.
-// 재무 AI = 고객사의 재무팀 (결산·대사·판매자 정산·팀 예산·쿠폰·환불 장부).
+// 재무 AI = 고객사의 재무팀 (결산·대사·팀 예산·쿠폰·환불 장부). 판매자 정산은 고객지원이 하고 재무는 결과를 받아 보여 준다.
 // 형식 기준: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md §11·§12-1. 필드 이름을 바꾸지 않는다.
 
 // ---------------------------------------------------------------- 공통 봉투
@@ -78,9 +78,18 @@ export interface IncomeEstimate {
 export interface ExportFile { name: string; bytes: number; sha256: string }
 export interface ExportPackage {
   package_id: string; month: string; version: number; generated_at: string; files: ExportFile[]; mock: boolean;
+  /** 그 달 결산을 확정했나. false면 파일 맨 위에 "확정 전 숫자(결산 미확정)"가 붙어 있다. 예전 묶음은 없음 */
+  closing_confirmed?: boolean;
 }
-/** 은행 거래내역 파일을 읽은 기록. `source`: 화면에서 올림(`upload`, `by`가 올린 사람) / 서버 폴더(`folder`) */
-export interface BankImport { file: string; at: string; status: "imported" | "failed"; source?: "upload" | "folder"; by?: string; added?: number; rows?: number; withdrawals?: number; skipped?: number; reason?: string }
+/**
+ * 은행 거래내역 파일을 읽은 기록. `source`: 화면에서 올림(`upload`, `by`가 올린 사람) / 서버 폴더(`folder`) / 사람이 뺌(`remove`)
+ * `import_id`로 그 기록 하나와 더한 줄을 뺄 수 있다. 뺀 기록에는 `removed`(누가·언제·이유)가 붙는다
+ */
+export interface BankImport {
+  file: string | null; at: string; status: "imported" | "failed" | "removed"; source?: "upload" | "folder" | "remove"; by?: string;
+  import_id?: string; added?: number; rows?: number; withdrawals?: number; skipped?: number; reason?: string;
+  removed?: { by: string; at: string; reason: string; rows: number };
+}
 export interface ExportsView { packages: ExportPackage[]; bank_imports: BankImport[] }
 
 // 캠페인 재무: 손익 기록, 예산 판단, 실패 교훈, 총괄에 낸 의견
@@ -686,6 +695,9 @@ export const finance = {
   /** 자동으로 만든 파일과 은행 폴더 기록 */
   exports: () => fin<Envelope<ExportsView>>("/api/finance/exports"),
   runExports: () => fin<Envelope<unknown>>("/api/finance/exports/run", { method: "POST", body: {}, human: true }),
+  /** 잘못(시험으로) 올린 은행 내역 하나와 그 줄을 뺀다. 사람 토큰만, 이유 필수. 기록은 남는다 */
+  removeBankImport: (importId: string, reason: string) =>
+    fin<Envelope<BankImport>>(`/api/finance/bank/imports/${encodeURIComponent(importId)}/remove`, { method: "POST", body: { reason }, human: true }),
   downloadBundle: (packageId: string) =>
     download(`/api/finance/exports/${encodeURIComponent(packageId)}/bundle`, `${packageId}.zip`),
   downloadExport: (packageId: string, name: string) =>

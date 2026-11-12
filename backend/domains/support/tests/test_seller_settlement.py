@@ -739,6 +739,42 @@ async def test_approved_review_is_reflected_in_batches(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
+async def test_approved_at_is_the_safety_decision_time_not_the_refresh_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """승인 시각은 다시 읽은 때가 아니라 사람이 승인한 때다 (재무 출금 대조 기준)."""
+    _use_books(_week_books())
+    decided = {"status": "approved", "decided_at": "2026-10-20T03:04:05+00:00"}
+    _safety_review(monkeypatch, lambda r: httpx.Response(200, json={"data": decided}))
+    batches_mod.STORE.put(
+        "2026-W42", {"status": "requested", "review_id": "rev_9", "seller_ids": [], "attempt": 1}
+    )
+    out = (await sh.seller_settlement_batches(_request("seller_settlement_batches", {}))).output
+    assert out["batches"]["2026-W42"]["approved_at"] == "2026-10-20T03:04:05Z"
+
+
+@pytest.mark.asyncio
+async def test_lost_review_uses_the_execution_time_and_keeps_an_existing_approved_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_books(_week_books())
+    executed = _executed("2026-W42", 1) | {"created_at": "2026-10-19T09:00:00Z"}
+    answer = {
+        "r": httpx.Response(404, json={"error": {"code": "NOT_FOUND"}}),
+        "executions": httpx.Response(200, json={"data": [executed]}),
+    }
+    _safety_review(monkeypatch, lambda r: _answer(answer, r))
+    requested = {"status": "requested", "review_id": "rev_9", "seller_ids": [], "attempt": 1}
+    batches_mod.STORE.put("2026-W42", dict(requested))
+    out = (await sh.seller_settlement_batches(_request("seller_settlement_batches", {}))).output
+    assert out["batches"]["2026-W42"]["approved_at"] == "2026-10-19T09:00:00Z"
+    # 이미 승인 시각이 있으면(가져온 기록 등) 절대 덮어쓰지 않는다
+    batches_mod.STORE.put("2026-W42", requested | {"approved_at": "2026-10-18T00:00:00Z"})
+    out = (await sh.seller_settlement_batches(_request("seller_settlement_batches", {}))).output
+    assert out["batches"]["2026-W42"]["approved_at"] == "2026-10-18T00:00:00Z"
+
+
+@pytest.mark.asyncio
 async def test_safety_down_and_nothing_to_settle(monkeypatch: pytest.MonkeyPatch) -> None:
     _use_books(_week_books())
     down = ExecuteDecision(execution_id="exe_unavailable", grade="C", status="rejected")

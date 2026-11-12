@@ -420,8 +420,11 @@ def seller_report_csv(report: dict[str, Any]) -> str:
     return "﻿" + buf.getvalue()
 
 
-def seller_report_xlsx(report: dict[str, Any]) -> bytes:
-    """내려받기용 엑셀. CSV와 같은 내용이고, 숫자는 숫자 칸으로 넣는다."""
+def seller_report_xlsx(report: dict[str, Any], note: str | None = None) -> bytes:
+    """내려받기용 엑셀. CSV와 같은 내용이고, 숫자는 숫자 칸으로 넣는다.
+
+    `note`(예: 확정 전 숫자)가 있으면 맨 위에 한 줄 넣고 표를 한 줄 내린다.
+    """
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
@@ -437,20 +440,24 @@ def seller_report_xlsx(report: dict[str, Any]) -> bytes:
         cell.data_type = "s"  # "="로 시작해도 수식으로 실행되지 않게 글자로 넣는다
         return cell
 
+    top = 1
+    if note:
+        text(1, 1, note).font = Font(bold=True, color="B45309")
+        top = 2
     for col, name in enumerate(head, start=1):
-        text(1, col, name).font = Font(bold=True)
-    for r, row in enumerate(rows, start=2):
+        text(top, col, name).font = Font(bold=True)
+    for r, row in enumerate(rows, start=top + 1):
         for col, value in enumerate(row, start=1):
             if isinstance(value, int) and not isinstance(value, bool):
                 ws.cell(row=r, column=col, value=value).number_format = "#,##0"
             else:
                 text(r, col, value)
-    last = len(rows) + 3
+    last = len(rows) + top + 2
     text(last, 1, "작성 기준")
     text(last, 2, report["basis"])
     text(last + 1, 1, "제출 기한")
     text(last + 1, 2, report["due"])
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = f"A{top + 1}"
     for col, width in enumerate((14, 22, 16, 10, 8, 14, 14, 12, 10, 14, 14), start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
     buf = io.BytesIO()

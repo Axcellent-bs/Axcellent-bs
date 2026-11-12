@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -142,12 +143,35 @@ async def executed_in_safety(period: str, execution_id: str | None = None) -> di
     return None
 
 
+def decided_time(value: Any) -> str | None:
+    """안전 장치가 준 결정·실행 시각(ISO)을 `...Z` 형식으로. 없거나 못 읽으면 None."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    dt = dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def set_approved_at(batch: dict[str, Any], decided: Any) -> None:
+    """승인 시각을 남긴다. 이미 있으면 절대 바꾸지 않는다.
+
+    안전 장치가 결정한 시각(보류 건 `decided_at`, 없으면 실행 기록 `created_at`)을 쓰고, 모를 때만
+    지금 시각을 쓴다. 다시 읽은 시각을 쓰면 재무 은행 출금 대조(승인일부터 이체를 찾음)가 어긋난다.
+    """
+    if batch.get("approved_at"):
+        return
+    batch["approved_at"] = decided_time(decided) or sc.iso(sc.now())
+
+
 def mark_approved(batch: dict[str, Any], record: dict[str, Any]) -> None:
     """안전 장치 실행 기록으로 승인을 반영한다 (보류 건을 잃은 뒤에도 두 번 요청하지 않게)."""
     batch["status"] = "approved"
     batch.pop("closed_reason", None)
     batch["execution_id"] = record.get("execution_id") or batch.get("execution_id")
-    batch.setdefault("approved_at", sc.iso(sc.now()))
+    set_approved_at(batch, record.get("created_at"))
 
 
 async def refresh(batch: dict[str, Any], period: str) -> bool:
@@ -165,12 +189,13 @@ async def refresh(batch: dict[str, Any], period: str) -> bool:
             response = await client.get(url, timeout=REVIEW_CHECK_SECONDS)
         if response.status_code == 404:
             return await _review_gone(batch, period)
-        status = response.json()["data"]["status"] if response.status_code == 200 else None
+        data = response.json()["data"] if response.status_code == 200 else {}
+        status = data["status"] if data else None
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return False
     if status == "approved":
         batch["status"] = "approved"
-        batch.setdefault("approved_at", sc.iso(sc.now()))
+        set_approved_at(batch, data.get("decided_at"))
         return True
     if status in ("rejected", "expired"):
         batch["status"] = "rejected"

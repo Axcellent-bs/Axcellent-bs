@@ -151,7 +151,9 @@ def row_id(r: dict[str, Any]) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
 
 
-def add_out_period(periods: list[dict[str, str]], rows: list[dict[str, Any]]) -> None:
+def add_out_period(
+    periods: list[dict[str, str]], rows: list[dict[str, Any]], import_id: str | None = None
+) -> None:
     """출금 열이 있는 내역을 올렸을 때 그 기간을 출금 대조 기간으로 남긴다.
 
     입금만 있던 예전 내역은 출금이 없어서가 아니라 출금 열이 없었던 것이라
@@ -159,7 +161,8 @@ def add_out_period(periods: list[dict[str, str]], rows: list[dict[str, Any]]) ->
     """
     if rows:
         dates = sorted(r["date"] for r in rows)
-        periods.append({"from": dates[0], "to": dates[-1]})
+        period = {"from": dates[0], "to": dates[-1]}
+        periods.append(period | ({"import_id": import_id} if import_id else {}))
 
 
 def _covered(periods: list[dict[str, str]], d: str) -> bool:

@@ -125,5 +125,5 @@ def test_sent_requests_survive_a_restart(monkeypatch: pytest.MonkeyPatch, tmp_pa
 def test_the_endpoint_is_open_to_the_screen_for_posts() -> None:
     from finance_agent.main import DECISION_PATHS
 
-    for path in ("planning-requests", "pg/file", "pg/clear"):
+    for path in ("planning-requests", "pg/file", "pg/clear", "bank/imports/bimp_1/remove"):
         assert DECISION_PATHS.match(f"/api/finance/{path}")

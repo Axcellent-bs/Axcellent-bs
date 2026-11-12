@@ -24,6 +24,7 @@
 | `GET /api/finance/bank` | ② 은행 입금 대조 (올린 거래내역 기간만) | 없음 |
 | `POST /api/finance/bank/statement` | ② 은행 거래내역 올리기 (출금은 음수) | **사람** |
 | `POST /api/finance/bank/file?name=` | ② 은행 거래내역 파일(CSV·xlsx)을 서버가 읽기 | **사람** |
+| `POST /api/finance/bank/imports/{import_id}/remove` | ② 은행 내역 하나 빼기 | **사람** |
 | `GET /api/finance/bank/outflows` | ② 은행 출금 대조 (판매자 이체·항목별·설명 없는 출금) | 없음 |
 | `POST /api/finance/bank/outflows/{row_id}/note` | ② 설명 없는 출금 메모 | **사람** |
 | `GET /api/finance/cashflow` | ③ 13주 현금 흐름 (확정 + 추정, 통장 잔액 기초) | 없음 |
@@ -945,10 +946,28 @@ def add_finance_api(app: FastAPI) -> None:
         if problems and not rows:
             return error(400, "invalid_request", "; ".join(problems[:5]))
         records = state().records
+        import_id = exports.new_import_id()
+        rows = [r | {"import_id": import_id} for r in rows]  # 이 기록으로 더한 줄 (빼기용)
         added = bank.merge_rows(records.bank_rows, rows)
         with_out = body.get("has_withdrawals") is True
         if with_out:
-            bank.add_out_period(records.bank_out_periods, rows)
+            bank.add_out_period(records.bank_out_periods, rows, import_id)
+        records.bank_imports.append(
+            {
+                "file": "직접 입력",
+                "at": fc.iso(fc.now()),
+                "source": "upload",
+                "by": person,
+                "status": "imported",
+                "import_id": import_id,
+                "added": added,
+                "rows": len(rows),
+                "withdrawals": sum(1 for r in rows if r["amount"] < 0),
+                "has_withdrawals": with_out,
+                "skipped": len(problems),
+            }
+        )
+        del records.bank_imports[:-100]
         books = await state().books()
         result = bank.match(books, records.bank_rows)
         meta = books.meta() | {
@@ -1163,6 +1182,36 @@ def add_finance_api(app: FastAPI) -> None:
         records.pg_imports.append(record)
         del records.pg_imports[:-100]
         return ok(record, {"cleared_by": person})
+
+    @app.post("/api/finance/bank/imports/{import_id}/remove", response_model=None)
+    async def remove_bank_import(
+        import_id: str, request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """잘못(시험으로) 올린 은행 거래내역 하나를 뺀다. 그 기록으로 더한 줄·출금 대조 기간도 뺀다.
+
+        PG `clear`와 같이 이유가 꼭 있어야 하고, 뺀 사람·시각·이유·줄 수를 `bank_imports`에 남긴다.
+        원래 기록도 지우지 않고 `removed`를 붙인다.
+        """
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        reason = str((await _body(request)).get("reason") or "").strip()[:200]
+        if not reason:
+            return error(400, "invalid_request", "빼는 이유(reason)가 필요합니다.")
+        records = state().records
+        try:
+            record = exports.remove_import(
+                records.bank_imports,
+                records.bank_rows,
+                records.bank_out_periods,
+                import_id,
+                person,
+                reason,
+            )
+        except exports.RemoveError as exc:
+            return error(404 if exc.code == "not_found" else 409, exc.code, str(exc))
+        return ok(record, {"removed_by": person})
 
     @app.get("/api/finance/bank/outflows")
     async def get_bank_outflows() -> dict:

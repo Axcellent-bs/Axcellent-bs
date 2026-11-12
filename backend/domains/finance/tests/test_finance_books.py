@@ -64,8 +64,9 @@ def test_config_values() -> None:
     assert cfg.commission.rate_for("book") == 0.10
     assert cfg.commission.rate_for("stationery") == 0.08
     assert cfg.commission.rate_for(None) == cfg.commission.default_rate == 0.10
-    assert (cfg.pg.fee_rate, cfg.pg.payout_days, cfg.settlement.cycle) == (0.031, 2, "weekly")
-    assert cfg.settlement.pay_days_after_period_end == 6
+    assert (cfg.pg.fee_rate, cfg.pg.payout_days) == (0.031, 2)
+    # 판매자 정산 주기·지급일은 고객지원 설정으로 옮겼다(2026-11-12). 재무 설정에 남지 않는다
+    assert not hasattr(cfg, "settlement")
 
 
 # ---------------------------------------------------------------- 목 시드

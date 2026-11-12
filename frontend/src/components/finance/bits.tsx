@@ -76,19 +76,24 @@ export function RefList({ refs, sellers, label = "기록 번호 보기" }: { ref
  * 섹션 틀: 제목·설명·오른쪽 도구 + 본문.
  * `titleHidden`: 바로 위 탭 이름과 같은 제목이면 화면에서는 숨기고(읽기 프로그램에는 남김) 한 번만 보이게 한다.
  */
-/** 이 숫자와 판단에 쓴 규칙과 근거. 전문가 확인 전인 규칙은 표시한다 */
+/** 이 숫자를 계산한 회계 기준. 세무사·회계사가 아직 확인하지 않은 기준은 표시한다. 길어서 접어 둔다 */
 export function AppliedRules({ rules }: { rules?: AppliedRule[] }) {
   if (!rules?.length) return null;
+  const pending = rules.filter((r) => r.review === "pending").length;
   return (
     <details className="rounded-2xl border border-ink-100 px-4 py-2 text-sm">
-      <summary className="cursor-pointer font-medium text-ink-700">적용한 규칙과 근거 {rules.length}개</summary>
+      <summary className="cursor-pointer font-medium text-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+        이 숫자를 계산한 회계 기준 {rules.length}개
+        {pending > 0 && <span className="font-normal text-ink-500"> (세무사·회계사 확인 전 {pending}개)</span>}
+      </summary>
+      <p className="mt-2 text-ink-500">재무 AI가 이 기준대로 계산했어요. 아직 세무사·회계사가 확인하지 않은 기준은 '확인 전'으로 표시해요.</p>
       <ul className="mt-2 space-y-2">
         {rules.map((r) => (
           <li key={r.rule_id}>
             <p className="flex flex-wrap items-center gap-2 font-medium text-ink-900">
               {r.title}
               <Chip label={r.rule_id} tone={TONE.muted} />
-              {r.review === "pending" && <Chip label="전문가 확인 전" tone={TONE.warn} />}
+              {r.review === "pending" && <Chip label="세무사·회계사 확인 전" tone={TONE.warn} />}
             </p>
             <p className="text-ink-700">{r.statement}</p>
             {r.detail && <p className="text-ink-700">이번 판단: {r.detail}</p>}
@@ -98,6 +103,26 @@ export function AppliedRules({ rules }: { rules?: AppliedRule[] }) {
       </ul>
     </details>
   );
+}
+
+// 금액·건수 같은 숫자(단위 포함)와 바로 앞 낱말. 예: "매출 80,533,700원", "주문 3,248건", "12.5%"
+const AMOUNT = /(\S+\s)?([−+-]?\d[\d,]*(?:\.\d+)?\s?(?:억\s?)?(?:만\s?)?(?:원|건|%|개|명|배))/g;
+
+/** AI가 쓴 문장은 그대로 두고 숫자와 그 앞 낱말만 진하게 보여 준다 (숫자는 표가 기준) */
+export function EmphasizedNumbers({ text }: { text: string }) {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(AMOUNT)) {
+    const at = m.index ?? 0;
+    if (at > last) parts.push(text.slice(last, at));
+    const [, label, amount] = m;
+    // 앞 숫자 바로 뒤에 붙은 조사("원이고,")는 낱말이 아니라서 진하게 하지 않는다
+    if (label) parts.push(at === last && at > 0 ? label : <span key={`l${at}`} className="font-medium text-ink-900">{label}</span>);
+    parts.push(<span key={`n${at}`} className="font-semibold tabular-nums text-ink-900">{amount}</span>);
+    last = at + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
 }
 
 export function Panel({ id, title, titleHidden, hint, meta, tools, children }: { id?: string; title: string; titleHidden?: boolean; hint?: ReactNode; meta?: FinanceMeta | null; tools?: ReactNode; children: ReactNode }) {
