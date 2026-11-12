@@ -40,9 +40,12 @@ CREATE TABLE IF NOT EXISTS marketing_chat_threads (
     summary    TEXT NOT NULL DEFAULT '',
     messages   TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    removed_at TEXT,
+    removed_by TEXT
 );
 """
+_REMOVED_COLUMNS = ("removed_at", "removed_by")  # 숨김 처리 열: 예전 DB에는 없어서 시작 때 덧붙인다
 
 
 class ChatStorageError(Exception):
@@ -70,6 +73,13 @@ class ChatStore:
             self._conn.row_factory = sqlite3.Row
             with self._lock, self._conn:
                 self._conn.execute(_SCHEMA)
+                info = self._conn.execute("PRAGMA table_info(marketing_chat_threads)")
+                have = {r["name"] for r in info}
+                for col in _REMOVED_COLUMNS:
+                    if col not in have:
+                        self._conn.execute(
+                            f"ALTER TABLE marketing_chat_threads ADD COLUMN {col} TEXT"
+                        )
         except sqlite3.Error as error:
             raise ChatStorageError(f"대화 저장소를 열 수 없다: {type(error).__name__}") from error
         self.recover_orphans()
@@ -102,12 +112,16 @@ class ChatStore:
             raise ChatStorageError(f"대화를 읽을 수 없다: {type(error).__name__}") from error
 
     def get(self, thread_id: str) -> dict[str, Any] | None:
-        rows = self._query("SELECT * FROM marketing_chat_threads WHERE id = ?", (thread_id,))
+        rows = self._query(
+            "SELECT * FROM marketing_chat_threads WHERE id = ? AND removed_at IS NULL",
+            (thread_id,),
+        )
         return self._view(rows[0]) if rows else None
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
         rows = self._query(
-            "SELECT * FROM marketing_chat_threads ORDER BY updated_at DESC, seq DESC LIMIT ?",
+            "SELECT * FROM marketing_chat_threads WHERE removed_at IS NULL"
+            " ORDER BY updated_at DESC, seq DESC LIMIT ?",
             (limit,),
         )
         return [self._view(r) for r in rows]
@@ -164,7 +178,8 @@ class ChatStore:
         try:
             with self._lock, self._conn:
                 row = self._conn.execute(
-                    "SELECT * FROM marketing_chat_threads WHERE id = ?", (thread_id,)
+                    "SELECT * FROM marketing_chat_threads WHERE id = ? AND removed_at IS NULL",
+                    (thread_id,),
                 ).fetchone()
                 if row is None:
                     return None
@@ -233,9 +248,18 @@ class ChatStore:
 
         return self._update(thread_id, mutate)
 
-    def delete(self, thread_id: str) -> bool:
-        """대화를 저장소에서 지운다(메시지 포함). 지웠으면 True, 없었으면 False."""
-        return self._write("DELETE FROM marketing_chat_threads WHERE id = ?", (thread_id,)) > 0
+    def hide(self, thread_id: str, by: str) -> bool:
+        """대화를 숨긴다(행은 지우지 않고 `removed_at`·`removed_by`만 적는다).
+
+        숨겼으면 True. 없거나 이미 숨긴 대화면 False이고 먼저 적힌 기록은 그대로 둔다."""
+        return (
+            self._write(
+                "UPDATE marketing_chat_threads SET removed_at = ?, removed_by = ?"
+                " WHERE id = ? AND removed_at IS NULL",
+                (self.now().isoformat(), by, thread_id),
+            )
+            > 0
+        )
 
     @staticmethod
     def _first_question(msgs: list[dict[str, Any]]) -> str:
@@ -269,7 +293,10 @@ class ChatStore:
     def recover_orphans(self) -> None:
         """다시 시작하면 답을 만들던 일은 사라졌으니 `answering`을 풀어 준다."""
         try:
-            rows = self._query("SELECT id FROM marketing_chat_threads WHERE status = 'answering'")
+            rows = self._query(
+                "SELECT id FROM marketing_chat_threads"
+                " WHERE status = 'answering' AND removed_at IS NULL"
+            )
         except ChatStorageError:
             raise
         for row in rows:

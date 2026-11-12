@@ -67,6 +67,9 @@ class ChatThread(AxModel):
     created_at: str
     updated_at: str
     closed_at: str | None = None
+    # 숨김 처리: 행은 지우지 않고 시각·사람만 남긴다 (예전 저장분은 둘 다 없어 None)
+    removed_at: str | None = None
+    removed_by: str | None = None
     seq: int
 
 
@@ -131,27 +134,32 @@ def is_stuck(thread: ChatThread, now: datetime | None = None) -> bool:
 
 class ChatStore:
     def __init__(self) -> None:
+        # 숨긴 대화도 행은 남는다. 번호는 숨긴 대화까지 포함한 최댓값 + 1이라 다시 쓰이지 않는다
         self._threads: dict[str, ChatThread] = {}
-        self._deleted_seq = 0  # 지운 대화 번호는 다시 쓰지 않는다 (늦은 답이 새 대화에 붙지 않게)
 
     def _put(self, thread: ChatThread) -> ChatThread:
         """저장 지점. 영속 저장소가 여기서 DB에도 쓴다."""
         self._threads[thread.id] = thread
         return thread
 
+    def _visible(self) -> list[ChatThread]:
+        return [t for t in self._threads.values() if t.removed_at is None]
+
     def get(self, thread_id: str) -> ChatThread | None:
-        return self._threads.get(thread_id)
+        """숨긴 대화는 없는 것과 같다."""
+        thread = self._threads.get(thread_id)
+        return None if thread is None or thread.removed_at is not None else thread
 
     def all(self) -> list[ChatThread]:
-        return sorted(self._threads.values(), key=lambda t: (t.updated_at, t.seq), reverse=True)
+        return sorted(self._visible(), key=lambda t: (t.updated_at, t.seq), reverse=True)
 
     def find_by_ref(self, ref: str) -> ChatThread | None:
-        return next((t for t in self._threads.values() if t.ref == ref), None)
+        return next((t for t in self._visible() if t.ref == ref), None)
 
     def create(
         self, who: str, first_text: str, context_id: str, ref: str | None = None
     ) -> ChatThread:
-        seq = max([self._deleted_seq, *(t.seq for t in self._threads.values())]) + 1
+        seq = max((t.seq for t in self._threads.values()), default=0) + 1
         now = now_iso()
         thread = ChatThread(
             context_id=context_id,
@@ -201,13 +209,14 @@ class ChatStore:
             )
         )
 
-    def delete(self, thread_id: str) -> bool:
-        """대화와 메시지를 저장소에서 지운다. 있었으면 True."""
-        thread = self._threads.get(thread_id)
+    def remove(self, thread_id: str, by: str) -> bool:
+        """대화를 숨긴다 (행은 지우지 않고 `removed_at`·`removed_by`만 남긴다).
+
+        보이는 대화를 숨겼으면 True. 없거나 이미 숨겼으면 False이고 먼저 남긴 기록은 그대로다."""
+        thread = self.get(thread_id)
         if thread is None:
             return False
-        self._deleted_seq = max(self._deleted_seq, thread.seq)
-        del self._threads[thread_id]
+        self._put(thread.model_copy(update={"removed_at": now_iso(), "removed_by": by}))
         return True
 
     def set_summary(self, thread_id: str, summary: str) -> ChatThread:

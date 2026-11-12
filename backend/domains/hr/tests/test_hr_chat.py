@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from hr_agent.chat import facts
+from hr_agent.chat import facts, threads
 from hr_agent.chat.turn import ChatOut
 from hr_agent.config import ManualClock
 from hr_agent.main import app
@@ -115,6 +115,61 @@ def test_remove_own_thread_deletes_it(client: TestClient) -> None:
     assert client.get(f"/api/hr/chat/{th['id']}", headers=A).status_code == 404
     assert client.get("/api/hr/chat", headers=A).json()["data"] == []
     assert client.post(url, headers=A).status_code == 404  # 이미 지워졌다
+
+
+def _removal(svc: Services, tid: str) -> tuple[str | None, str | None]:
+    row = svc.store.one("SELECT removed_at, removed_by FROM hr_chat_threads WHERE id = ?", (tid,))
+    assert row is not None  # 행은 남아 있다
+    return row["removed_at"], row["removed_by"]
+
+
+def test_removed_thread_keeps_its_row_with_who_and_when(client: TestClient, svc: Services) -> None:
+    th = post(client, "조직 변동 알려 줘").json()["data"]
+    assert client.post(f"/api/hr/chat/{th['id']}/remove", headers=A).status_code == 200
+    at, by = _removal(svc, th["id"])
+    assert at and by == "gaon"
+    assert threads.get(svc, th["id"]) is None and threads.list_all(svc) == []
+    fresh = post(client, "다시").json()["data"]
+    assert fresh["id"] != th["id"]  # 숨긴 번호를 다시 쓰지 않는다
+
+
+def test_removing_twice_is_404_and_keeps_the_first_record(
+    client: TestClient, svc: Services
+) -> None:
+    th = post(client, "안녕").json()["data"]
+    url = f"/api/hr/chat/{th['id']}/remove"
+    assert client.post(url, headers=A).status_code == 200
+    first = _removal(svc, th["id"])
+    assert client.post(url, headers=A).status_code == 404
+    assert client.post(url, headers=B).status_code == 404
+    assert _removal(svc, th["id"]) == first
+
+
+def test_late_answer_after_removal_does_not_revive_the_thread(svc: Services) -> None:
+    th = threads.create(svc, "질문", "gaon")
+    assert threads.remove(svc, th["id"], "gaon") is True
+    with pytest.raises(KeyError):
+        threads.append(svc, th["id"], "assistant", "늦은 답")
+    assert threads.get(svc, th["id"]) is None
+    assert _removal(svc, th["id"])[0] is not None
+
+
+def test_old_table_without_removed_columns_is_upgraded(svc: Services) -> None:
+    svc.store.execute("DROP TABLE IF EXISTS hr_chat_threads")
+    svc.store.execute(
+        "CREATE TABLE hr_chat_threads (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL DEFAULT 't',"
+        " seq INTEGER NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, who TEXT,"
+        " summary TEXT NOT NULL DEFAULT '', messages TEXT NOT NULL, created_at TEXT NOT NULL,"
+        " updated_at TEXT NOT NULL)"
+    )
+    svc.store.execute(
+        "INSERT INTO hr_chat_threads VALUES"
+        " ('hrchat-1', 't', 1, '옛 질문', 'talking', 'gaon', '', '[]', '2026-11-01', '2026-11-01')"
+    )
+    assert [t["id"] for t in threads.list_all(svc)] == ["hrchat-1"]
+    assert [t["id"] for t in threads.list_all(svc)] == ["hrchat-1"]  # 다시 열어도 안전하다
+    assert threads.remove(svc, "hrchat-1", "gaon") is True
+    assert threads.list_all(svc) == [] and _removal(svc, "hrchat-1")[1] == "gaon"
 
 
 def test_remove_someone_elses_thread_is_403_and_keeps_it(client: TestClient) -> None:

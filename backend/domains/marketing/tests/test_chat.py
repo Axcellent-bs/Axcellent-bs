@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import json
+import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -389,6 +391,65 @@ async def test_removing_an_answering_thread_is_not_resurrected() -> None:
     await svc.wait_idle()  # 늦게 끝난 답이 대화를 다시 만들지 않는다
     assert svc.store.get(th["id"]) is None
     assert svc.list(GAON, 10) == []
+    row = svc.store._conn.execute(
+        "SELECT removed_at FROM marketing_chat_threads WHERE id = ?", (th["id"],)
+    ).fetchone()
+    assert row["removed_at"]  # 늦은 답이 숨김을 지우지 않는다
+
+
+def _raw(svc: ChatService, thread_id: str) -> Any:
+    return svc.store._conn.execute(
+        "SELECT * FROM marketing_chat_threads WHERE id = ?", (thread_id,)
+    ).fetchone()
+
+
+@aio
+async def test_removed_thread_is_hidden_but_the_row_stays() -> None:
+    svc, _ = make_service()
+    th = await say(svc, GAON, "안녕")
+    svc.remove(GAON, th["id"])
+    assert svc.list(GAON, 10) == []
+    with pytest.raises(ChatRefused) as err:
+        svc.get(GAON, th["id"])
+    assert err.value.outcome == "not_found"
+    row = _raw(svc, th["id"])
+    assert row is not None and row["removed_at"] and row["removed_by"] == GAON
+    assert len(json.loads(row["messages"])) == 2
+
+
+def test_removing_twice_is_not_found_and_keeps_the_first_record() -> None:
+    svc, _ = make_service()
+    th = svc.store.create("t", GAON)
+    svc.remove(GAON, th["id"])
+    first = _raw(svc, th["id"])
+    with pytest.raises(ChatRefused) as err:
+        svc.remove(GAON, th["id"])
+    assert err.value.outcome == "not_found"
+    again = _raw(svc, th["id"])
+    assert (again["removed_at"], again["removed_by"]) == (first["removed_at"], first["removed_by"])
+
+
+def test_old_db_without_removed_columns_gets_them_idempotently(tmp_path) -> None:  # noqa: ANN001
+    path = str(tmp_path / "old.db")
+    raw = sqlite3.connect(path)
+    raw.execute(
+        "CREATE TABLE marketing_chat_threads (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT"
+        " NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL, who TEXT, summary TEXT NOT NULL"
+        " DEFAULT '', messages TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    raw.execute(
+        "INSERT INTO marketing_chat_threads (id, title, status, who, messages, created_at,"
+        " updated_at) VALUES ('mktchat-1', '옛 대화', 'talking', ?, '[]', 't', 't')",
+        (GAON,),
+    )
+    raw.commit()
+    raw.close()
+    ChatStore(path).shutdown()
+    store = ChatStore(path)  # 두 번째 열기도 안전하다
+    assert [t["id"] for t in store.list()] == ["mktchat-1"]
+    assert store.hide("mktchat-1", GAON) is True
+    assert store.list() == [] and store.get("mktchat-1") is None
+    assert store.hide("mktchat-1", "other") is False
 
 
 def test_only_the_dashboard_may_chat() -> None:

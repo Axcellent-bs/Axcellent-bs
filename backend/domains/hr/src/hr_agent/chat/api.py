@@ -3,7 +3,8 @@
 
 - `POST /api/hr/chat` `{thread_id?, message}` → 바뀐 대화 전체. AI 답 하나까지 기다린다.
 - `GET /api/hr/chat` 목록, `GET /api/hr/chat/{id}` 하나.
-- `POST /api/hr/chat/{id}/remove` 본인 대화를 저장소에서 지운다(남의 대화 403, 없으면 404).
+- `POST /api/hr/chat/{id}/remove` 본인 대화를 숨긴다(지우지 않고 removed_at·removed_by 기록).
+  남의 대화 403, 없거나 이미 숨겼으면 404.
 - 모든 요청에 사람 토큰이 필요하다(인사 데이터를 다루는 대화라 읽기도 막는다).
 - 열람: 대화를 연 사람(who)은 원문 전부.
   다른 사람 대화는 `messages: []`와 요약만 준다(`restricted: true`).
@@ -121,7 +122,7 @@ def create_chat_router() -> APIRouter:
 
     @router.post("/chat/{thread_id}/remove", response_model=None)
     def remove_chat(thread_id: str, request: Request) -> dict | JSONResponse:
-        """본인 대화를 저장소에서 지운다 (POST만). 남의 대화는 403, 없으면 404."""
+        """본인 대화를 숨긴다 (POST만). 남의 대화는 403, 없거나 이미 숨겼으면 404."""
         try:
             who = human_name(request)
         except _AuthError as exc:
@@ -132,7 +133,8 @@ def create_chat_router() -> APIRouter:
             return _err(404, "NOT_FOUND", f"대화 {thread_id}가 없다")
         if th["who"] and th["who"] != who:
             return _err(403, "FORBIDDEN", "본인 대화만 삭제할 수 있어요")
-        threads.delete(svc, thread_id)
+        if not threads.remove(svc, thread_id, who):
+            return _err(404, "NOT_FOUND", f"대화 {thread_id}가 없다")
         return _ok({"thread_id": thread_id, "removed": True})
 
     return router

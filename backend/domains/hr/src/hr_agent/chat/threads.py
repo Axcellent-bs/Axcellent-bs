@@ -22,13 +22,22 @@ CREATE TABLE IF NOT EXISTS hr_chat_threads (
   summary TEXT NOT NULL DEFAULT '',
   messages TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  removed_at TEXT,
+  removed_by TEXT
 )
 """
+# 숨김 처리(지우지 않고 `removed_at`·`removed_by`만 남긴다)를 더하기 전에 만든 DB에 붙일 칸
+_ADDED_COLUMNS = ("removed_at", "removed_by")
+_LIVE = "removed_at IS NULL"  # 숨긴 대화는 모든 조회에서 뺀다
 
 
 def ensure(svc: Services) -> None:
     svc.store.execute(_DDL)
+    have = {r["name"] for r in svc.store.all("PRAGMA table_info(hr_chat_threads)")}
+    for column in _ADDED_COLUMNS:
+        if column not in have:
+            svc.store.execute(f"ALTER TABLE hr_chat_threads ADD COLUMN {column} TEXT")
 
 
 def _view(row: dict[str, Any]) -> dict[str, Any]:
@@ -48,24 +57,29 @@ def _view(row: dict[str, Any]) -> dict[str, Any]:
 
 def get(svc: Services, thread_id: str) -> dict[str, Any] | None:
     ensure(svc)
-    row = svc.store.one("SELECT * FROM hr_chat_threads WHERE id = ?", (thread_id,))
+    row = svc.store.one(f"SELECT * FROM hr_chat_threads WHERE id = ? AND {_LIVE}", (thread_id,))
     return _view(row) if row else None
 
 
 def list_all(svc: Services, limit: int = 100) -> list[dict[str, Any]]:
     ensure(svc)
     rows = svc.store.all(
-        "SELECT * FROM hr_chat_threads ORDER BY updated_at DESC, seq DESC LIMIT ?", (limit,)
+        f"SELECT * FROM hr_chat_threads WHERE {_LIVE} ORDER BY updated_at DESC, seq DESC LIMIT ?",
+        (limit,),
     )
     return [_view(r) for r in rows]
 
 
-def delete(svc: Services, thread_id: str) -> bool:
-    """대화와 메시지를 저장소에서 지운다. 있었으면 True."""
-    if get(svc, thread_id) is None:
-        return False
-    svc.store.execute("DELETE FROM hr_chat_threads WHERE id = ?", (thread_id,))
-    return True
+def remove(svc: Services, thread_id: str, by: str) -> bool:
+    """대화를 숨긴다(행은 지우지 않고 `removed_at`·`removed_by`만 남긴다).
+
+    보이는 대화를 숨겼으면 True. 없거나 이미 숨겼으면 False이고 먼저 남긴 기록은 그대로다."""
+    ensure(svc)
+    changed = svc.store.execute(
+        f"UPDATE hr_chat_threads SET removed_at = ?, removed_by = ? WHERE id = ? AND {_LIVE}",
+        (svc.clock().isoformat(), by, thread_id),
+    )
+    return changed > 0
 
 
 def create(svc: Services, title: str, who: str | None) -> dict[str, Any]:
@@ -105,7 +119,8 @@ def append(
     )
     msgs = msgs[-MAX_MESSAGES:]
     svc.store.execute(
-        "UPDATE hr_chat_threads SET messages = ?, summary = ?, updated_at = ? WHERE id = ?",
+        "UPDATE hr_chat_threads SET messages = ?, summary = ?, updated_at = ?"
+        f" WHERE id = ? AND {_LIVE}",
         (
             json.dumps(msgs, ensure_ascii=False),
             (summary if summary is not None else th["summary"])[:SUMMARY_CHARS],

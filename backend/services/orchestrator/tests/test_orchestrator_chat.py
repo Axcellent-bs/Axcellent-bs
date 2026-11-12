@@ -198,3 +198,71 @@ def test_a2a_remove_own_thread_then_get_is_not_found() -> None:
         await svc.wait_idle()
 
     asyncio.run(run())
+
+
+def _removal(store: threads.ChatStore, tid: str) -> tuple[str | None, str | None]:
+    row = store._db.execute(
+        "SELECT removed_at, removed_by FROM orchestrator_chat_threads WHERE id = ?", (tid,)
+    ).fetchone()
+    assert row is not None  # 행은 남아 있다
+    return row["removed_at"], row["removed_by"]
+
+
+def test_removed_thread_is_hidden_but_its_row_stays() -> None:
+    store = threads.ChatStore()
+    th = store.create("질문", "jun")
+    other = store.create("다른 질문", "jun")
+    assert store.remove(th["id"], "jun") is True
+    assert store.get(th["id"]) is None
+    assert [t["id"] for t in store.list_all()] == [other["id"]]
+    at, by = _removal(store, th["id"])
+    assert at and by == "jun"
+    assert store.create("새 질문", "jun")["id"] == "orchchat-3"  # 숨긴 번호를 다시 쓰지 않는다
+
+
+def test_removing_twice_keeps_the_first_record() -> None:
+    ticks = iter(datetime(2026, 11, 1, tzinfo=UTC) + timedelta(minutes=i) for i in range(20))
+    store = threads.ChatStore(clock=lambda: next(ticks))
+    svc = ChatService(lambda: store, lambda: None, lambda: FakeLLM())
+    th = store.create("질문", "jun")
+    svc.remove("jun", th["id"])
+    first = _removal(store, th["id"])
+    with pytest.raises(ChatRefused) as exc:
+        svc.remove("jun", th["id"])
+    assert exc.value.outcome == "not_found"
+    assert store.remove(th["id"], "mina") is False
+    assert _removal(store, th["id"]) == first and first[1] == "jun"
+
+
+def test_late_answer_does_not_revive_a_removed_thread() -> None:
+    store = threads.ChatStore()
+    th = store.create("질문", "jun")
+    store.begin_turn(th["id"], "안녕")
+    store.remove(th["id"], "jun")
+    assert store.finish_turn(th["id"], "늦은 답") is None
+    assert store.get(th["id"]) is None
+    assert store.expire_idle(minutes=-1) == [] and store.recover_orphans() == []
+    assert _removal(store, th["id"])[0] is not None
+
+
+def test_old_database_gets_the_removed_columns(tmp_path) -> None:
+    import sqlite3
+
+    path = str(tmp_path / "old_chat.db")
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE orchestrator_chat_threads (id TEXT PRIMARY KEY, seq INTEGER NOT NULL,"
+        " title TEXT NOT NULL, status TEXT NOT NULL, who TEXT, summary TEXT NOT NULL DEFAULT '',"
+        " messages TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    old.execute(
+        "INSERT INTO orchestrator_chat_threads VALUES"
+        " ('orchchat-1', 1, '옛 질문', 'talking', 'jun', '', '[]', '2026-11-01', '2026-11-01')"
+    )
+    old.commit()
+    old.close()
+    threads.ChatStore(path)  # 처음 열 때 컬럼을 붙인다
+    store = threads.ChatStore(path)  # 두 번째 열어도 안전하다
+    assert [t["id"] for t in store.list_all()] == ["orchchat-1"]
+    assert store.remove("orchchat-1", "jun") is True
+    assert store.list_all() == [] and _removal(store, "orchchat-1")[1] == "jun"

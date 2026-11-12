@@ -1280,7 +1280,7 @@ class DevService(PlanningCore):
 
     def _kick_waiting(self) -> None:
         """충돌하는 요청이 끝나기를 기다리는 대화가 있으면 깨운다 (dev_chat.resume_waiting)."""
-        if self._resuming or not any(c.status == "waiting" for c in self.state.chats):
+        if self._resuming or not any(c.status == "waiting" for c in self.live_chats()):
             return
         from dev_agent import dev_chat
 
@@ -1313,7 +1313,7 @@ class DevService(PlanningCore):
         mine = {r.id for r in self.state.requests}
         return any(
             c.status == "waiting" and any(rid not in mine for rid in c.waiting_for)
-            for c in self.state.chats
+            for c in self.live_chats()
         )
 
     async def preview_conflicts(self, title: str, text: str) -> list[RelatedItem]:
@@ -2378,7 +2378,11 @@ class DevService(PlanningCore):
     # ---- 개발 AI 대화 (dev_chat.py). 메시지 하나 = 작은 액션 하나 (관문 dev_chat A)
 
     def chat_of(self, thread_id: str) -> ChatThread | None:
-        return next((c for c in self.state.chats if c.id == thread_id), None)
+        return next((c for c in self.live_chats() if c.id == thread_id), None)
+
+    def live_chats(self, s: State | None = None) -> list[ChatThread]:
+        """숨기지 않은 대화만 (숨긴 대화는 `state.chats`에 남지만 어디에도 보이지 않는다)."""
+        return [c for c in (s or self.state).chats if c.removed_at is None]
 
     @staticmethod
     def chat_ctx(thread_id: str) -> str:
@@ -2420,7 +2424,7 @@ class DevService(PlanningCore):
                 )
                 s.chats.append(th)
             else:
-                found = next((c for c in s.chats if c.id == thread_id), None)
+                found = next((c for c in self.live_chats(s) if c.id == thread_id), None)
                 if found is None:
                     raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
                 th = found
@@ -2468,7 +2472,7 @@ class DevService(PlanningCore):
         대화 기록일 뿐이라 관문을 다시 타지 않는다 (메시지는 chat_add가 dev_chat 관문을 탄다)."""
 
         async def run(s: State) -> ActionResult:
-            th = next((c for c in s.chats if c.id == thread_id), None)
+            th = next((c for c in self.live_chats(s) if c.id == thread_id), None)
             if th is None:
                 raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
             if status:
@@ -2483,16 +2487,18 @@ class DevService(PlanningCore):
         assert found is not None
         return found
 
-    async def chat_remove(self, thread_id: str) -> None:
-        """대화 기록(대화와 그 메시지)을 저장소에서 지운다. 띄운 작업·요청은 그대로 둔다.
+    async def chat_remove(self, thread_id: str, by: str | None = None) -> None:
+        """대화를 숨긴다. 기록은 `state.chats`에 남기고 `removed_at`·`removed_by`만 적는다.
 
+        띄운 작업·요청은 그대로 둔다. 이미 숨긴 대화는 NOT_FOUND이고 먼저 적힌 기록은 그대로다.
         대화 기록일 뿐이라 관문을 다시 타지 않는다 (chat_set과 같다)."""
 
         async def run(s: State) -> ActionResult:
-            th = next((c for c in s.chats if c.id == thread_id), None)
+            th = next((c for c in self.live_chats(s) if c.id == thread_id), None)
             if th is None:
                 raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
-            s.chats.remove(th)
+            th.removed_at = self.clock()
+            th.removed_by = by
             return ActionResult(outcome="chat", output={"thread_id": thread_id})
 
         await self._apply(run)

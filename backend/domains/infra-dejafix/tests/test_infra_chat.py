@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -111,6 +112,61 @@ def test_remove_own_thread_then_get_is_not_found() -> None:
         assert svc.list("yejin") == []
 
     asyncio.run(run())
+
+
+def test_removed_thread_is_hidden_not_deleted_and_late_answer_does_not_revive_it() -> None:
+    async def run() -> None:
+        svc = _service(FakeLLM())
+        tid = svc.send("yejin", None, "안녕")["id"]  # 아직 answering
+        assert svc.remove("yejin", tid) == tid
+        await svc.wait_idle()  # 뒤늦은 답이 붙어도 되살리지 않는다
+        with pytest.raises(ChatRefused) as gone:
+            svc.get("yejin", tid)
+        assert gone.value.outcome == "not_found"
+        assert svc.list("yejin") == []
+        rows = svc.store._db.execute(
+            "SELECT removed_at, removed_by FROM infra_chat_threads WHERE id = ?", (tid,)
+        ).fetchall()
+        assert len(rows) == 1  # 행은 남는다
+        assert rows[0]["removed_at"] and rows[0]["removed_by"] == "yejin"
+        # 번호는 이어진다(MAX(seq)가 그대로)
+        assert svc.store.create("다음", "yejin")["id"] == "infrachat-2"
+
+    asyncio.run(run())
+
+
+def test_removing_twice_is_not_found_and_keeps_first_removal_record() -> None:
+    svc = _service(FakeLLM())
+    tid = svc.store.create("제목", "yejin")["id"]
+    svc.remove("yejin", tid)
+    sql = "SELECT removed_at, removed_by FROM infra_chat_threads WHERE id = ?"
+    first = tuple(svc.store._db.execute(sql, (tid,)).fetchone())
+    with pytest.raises(ChatRefused) as again:
+        svc.remove("yejin", tid)
+    assert again.value.outcome == "not_found"
+    assert tuple(svc.store._db.execute(sql, (tid,)).fetchone()) == first
+
+
+def test_old_db_without_removed_columns_is_migrated_on_open(tmp_path) -> None:
+    path = str(tmp_path / "infra_chat.db")
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE infra_chat_threads (id TEXT PRIMARY KEY, seq INTEGER NOT NULL,"
+        " title TEXT NOT NULL, status TEXT NOT NULL, who TEXT,"
+        " summary TEXT NOT NULL DEFAULT '', messages TEXT NOT NULL,"
+        " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    old.execute(
+        "INSERT INTO infra_chat_threads VALUES"
+        " ('infrachat-1', 1, '옛 대화', 'talking', 'yejin', '', '[]', 't', 't')"
+    )
+    old.commit()
+    old.close()
+    threads.ChatStore(path)  # 한 번 열어 열을 붙이고
+    store = threads.ChatStore(path)  # 다시 열어도 탈 없다(멱등)
+    assert [t["id"] for t in store.list_all()] == ["infrachat-1"]
+    assert store.hide("infrachat-1", "yejin") is True
+    assert store.list_all() == [] and store.get("infrachat-1") is None
 
 
 def test_remove_others_thread_is_forbidden_and_unknown_is_not_found() -> None:

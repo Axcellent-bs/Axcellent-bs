@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -292,3 +293,57 @@ def test_removing_an_answering_thread_is_not_resurrected_by_the_late_answer() ->
 
     asyncio.run(run())
     assert service.list("재현", 10) == []
+
+
+def _raw(service: dc.DataChatService, thread_id: str) -> sqlite3.Row | None:
+    return service.store._conn.execute(
+        "SELECT * FROM data_chat_threads WHERE id = ?", (thread_id,)
+    ).fetchone()
+
+
+def test_removed_thread_is_hidden_but_the_row_stays() -> None:
+    service = _service(FakeLLM())
+    th = _talk(service, "V5 성과 알려줘", who="재현")
+    service.remove("재현", th["id"])
+    assert service.list("재현", 10) == []
+    with pytest.raises(dc.ChatRefused) as err:
+        service.get("재현", th["id"])
+    assert err.value.outcome == "not_found"
+    row = _raw(service, th["id"])
+    assert row is not None and row["removed_at"] and row["removed_by"] == "재현"
+    assert len(json.loads(row["messages"])) == 2  # 기록은 그대로
+
+
+def test_removing_twice_is_not_found_and_keeps_the_first_record() -> None:
+    service = _service(FakeLLM())
+    th = _talk(service, "V5 성과 알려줘", who="재현")
+    service.remove("재현", th["id"])
+    first = _raw(service, th["id"])
+    assert first is not None
+    with pytest.raises(dc.ChatRefused):
+        service.remove("재현", th["id"])
+    again = _raw(service, th["id"])
+    assert again is not None
+    assert (again["removed_at"], again["removed_by"]) == (first["removed_at"], first["removed_by"])
+
+
+def test_old_db_without_removed_columns_gets_them_idempotently(tmp_path: Path) -> None:
+    path = str(tmp_path / "old.db")
+    raw = sqlite3.connect(path)
+    raw.execute(
+        "CREATE TABLE data_chat_threads (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL"
+        " UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL, who TEXT, summary TEXT NOT NULL"
+        " DEFAULT '', messages TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    raw.execute(
+        "INSERT INTO data_chat_threads (id, title, status, who, messages, created_at, updated_at)"
+        " VALUES ('datachat-1', '옛 대화', 'talking', '재현', '[]', 't', 't')"
+    )
+    raw.commit()
+    raw.close()
+    DataChatStore(path).shutdown()
+    store = DataChatStore(path)  # 두 번째 열기도 안전하다
+    assert [t["id"] for t in store.list()] == ["datachat-1"]
+    assert store.hide("datachat-1", "재현") is True
+    assert store.list() == [] and store.get("datachat-1") is None
+    assert store.hide("datachat-1", "다른 사람") is False

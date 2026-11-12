@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { PreparingChip } from "@/components/Preparing";
 import { HandoffLine, PlanCard, PROCEED_TEXT } from "@/components/office/DevCards";
-import { ConfirmRemove } from "@/components/office/ConfirmRemove";
+import { ConfirmRemove, REMOVE_LABEL } from "@/components/office/ConfirmRemove";
 import { removeFailText, useToast } from "@/components/office/useToast";
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { DirectChatError, POLL_MS, classifyFailure, directChatApi, isAnswering } from "@/lib/directChat";
@@ -276,7 +276,7 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
                   </button>
                   {api.remove && (
                     <button type="button" className="btn-ghost shrink-0 px-1.5 py-0.5 text-[11px]" onClick={() => setAskDel(t)} disabled={!!sending}
-                      aria-label={`${t.title || "제목 없는 대화"} 삭제`}>삭제</button>
+                      title={REMOVE_LABEL} aria-label={`${t.title || "제목 없는 대화"} ${REMOVE_LABEL}`}>삭제</button>
                   )}
                 </li>
               ))}
@@ -362,8 +362,8 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
         )}
       </div>
       {askDel && (
-        <ConfirmRemove title="대화 기록 삭제" name={askDel.title || askDel.messages[0]?.text.slice(0, 30) || "제목 없는 대화"}
-          lines={[`${agent.name}와 나눈 이 1:1 대화(메시지 ${askDel.messageCount ?? askDel.messages.length}개)를 지웁니다.`]}
+        <ConfirmRemove title={`대화 기록 ${REMOVE_LABEL}`} name={askDel.title || askDel.messages[0]?.text.slice(0, 30) || "제목 없는 대화"}
+          lines={[`${agent.name}와 나눈 이 1:1 대화(메시지 ${askDel.messageCount ?? askDel.messages.length}개)를 목록에서 지웁니다. 기록은 서버에 보관됩니다.`]}
           onConfirm={() => removeThread(askDel)} onClose={() => setAskDel(null)} />
       )}
       {toast.node}

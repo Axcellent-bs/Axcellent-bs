@@ -2,11 +2,14 @@
 
 - `POST /api/dashboard/<부서>-chat/{thread_id}/remove` → 그 부서 `<부서>_chat_remove` (본인 대화만)
 - `POST /api/dashboard/office-room/{room_id}/remove` → 내가 만든 단톡방 대화를 office_room.db와
-  부서 대화 서버에서 지운다. 만든 사람 아님 403, 없는 방 404, 한 부서 실패해도 부서별 결과
+  부서 대화 서버에서 숨긴다(줄은 남기고 removed_at·removed_by). 만든 사람 아님 403, 없는 방 404,
+  한 부서 실패해도 부서별 결과
 """
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -180,3 +183,73 @@ def test_room_remove_needs_a_human_token_and_a_from_id(removed: list[tuple[str, 
     client.headers.pop("authorization", None)
     assert client.post(f"{POST}/{ROOM}/remove", json={"from_id": "acc_me"}).status_code == 401
     assert client.get(f"{POST}/{ROOM}/remove").status_code in (404, 405)  # POST 전용
+
+
+# ---------- 지우기는 숨김 처리: 줄은 남고 removed_at·removed_by가 적힌다 ----------
+
+
+def _stored(path: Path) -> list[dict[str, Any]]:
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        return [dict(r) for r in conn.execute("SELECT * FROM office_threads ORDER BY thread_id")]
+    finally:
+        conn.close()
+
+
+def test_removed_rows_stay_in_storage_hidden_from_lists(
+    removed: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db = tmp_path / "office_room.db"
+    monkeypatch.setenv(office_room.DB_ENV, str(db))
+    client = TestClient(app)
+    _talk(client, "dev", "c1", "acc_me")
+    _talk(client, "dev", "c2", "acc_other")
+    assert client.post(f"{POST}/{ROOM}/remove", json={"from_id": "acc_me"}).status_code == 200
+    assert [r["thread_id"] for r in client.get(POST).json()["data"]] == ["c2"]  # 목록에서 빠짐
+    rows = {r["thread_id"]: r for r in _stored(db)}
+    assert set(rows) == {"c1", "c2"}  # 저장소에는 남는다
+    assert rows["c1"]["removed_by"] == "acc_me" and rows["c1"]["removed_at"]
+    assert rows["c2"]["removed_at"] is None
+
+
+def test_removing_twice_is_safe(
+    removed: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db = tmp_path / "office_room.db"
+    monkeypatch.setenv(office_room.DB_ENV, str(db))
+    client = TestClient(app)
+    _talk(client, "dev", "c1", "acc_me")
+    assert client.post(f"{POST}/{ROOM}/remove", json={"from_id": "acc_me"}).status_code == 200
+    first = _stored(db)[0]["removed_at"]
+    again = client.post(f"{POST}/{ROOM}/remove", json={"from_id": "acc_me"})
+    assert again.status_code == 404  # 보이는 줄이 없는 방
+    assert _stored(db)[0]["removed_at"] == first  # 처음 숨긴 시각 그대로
+    assert removed == [("dev", "c1")]  # 부서에도 한 번만
+
+
+def test_old_db_without_removed_columns_opens_and_hides(
+    removed: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """room_id·removed_* 칸이 없던 예전 파일: 켤 때 칸을 붙인다(여러 번 켜도 안전)."""
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE office_threads (agent TEXT NOT NULL, thread_id TEXT NOT NULL,"
+        " from_id TEXT NOT NULL, from_name TEXT NOT NULL, created_at TEXT NOT NULL,"
+        " updated_at TEXT NOT NULL, PRIMARY KEY (agent, thread_id))"
+    )
+    now = "2099-01-01T00:00:00+00:00"
+    conn.execute(
+        "INSERT INTO office_threads VALUES (?,?,?,?,?,?)", ("dev", "c1", "acc_me", "나", now, now)
+    )
+    conn.commit()
+    conn.close()
+    for _ in range(2):  # 두 번 열어도 칸을 다시 붙이다 깨지지 않는다
+        office_room.OfficeRoomStore(str(db))
+    monkeypatch.setenv(office_room.DB_ENV, str(db))
+    client = TestClient(app)
+    assert [r["thread_id"] for r in client.get(POST).json()["data"]] == ["c1"]
+    assert client.post(f"{POST}/{ROOM}/remove", json={"from_id": "acc_me"}).status_code == 200
+    assert client.get(POST).json()["data"] == []
+    assert _stored(db)[0]["removed_by"] == "acc_me"

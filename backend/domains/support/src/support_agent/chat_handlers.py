@@ -4,8 +4,8 @@
   뒤에서 만들어 대화에 덧붙이고 `talking`으로 돌린다. 화면은 `answering`이면 대화를 다시 읽는다
   (`support_chat_get`). 답까지 기다리면 모델이 느릴 때 게이트웨이 시간 초과(504)가 나기 때문이다.
 - `support_chat_close`(쓰기): 대화를 끝내고 한두 줄 요약을 남긴다. 본인과 담당·관리자만 닫는다.
-- `support_chat_remove`(쓰기): 본인 대화를 저장소에서 지운다. 남의 대화는 `forbidden`, 없으면
-  `not_found`.
+- `support_chat_remove`(쓰기): 본인 대화를 숨긴다(지우지 않고 `removed_at`·`removed_by` 기록). 남의
+  대화는 `forbidden`, 없거나 이미 숨겼으면 `not_found`.
 - `support_chat_list`·`support_chat_get`(읽기): 열람 권한(`chat.access_of`)대로 원문 또는 요약만
   돌려준다. 다른 사람 대화에 쓰려 하면 `forbidden`(403)이다.
 - 30분(기본) 말이 없는 대화는 읽을 때 함께 끝낸다(`_sweep`). 대화 안에서만 쓰는 정리라 안전 관문을
@@ -350,10 +350,12 @@ async def chat_close(request: AgentRequest) -> AgentResult:
 
 
 async def chat_remove(request: AgentRequest) -> AgentResult:
-    """본인 대화를 저장소에서 지운다 (담당·관리자도 남의 대화는 못 지운다).
+    """본인 대화를 숨긴다 (담당·관리자도 남의 대화는 못 숨긴다). 행은 지우지 않고 `removed_at`·
+    `removed_by`만 남긴다.
 
-    대화 기록만 지우고 업무 상태는 바꾸지 않아 `_sweep`처럼 안전 관문을 거치지 않는다. 답을 만들던
-    중이어도 지운다: 뒤에서 도는 답·요약은 대화가 없으면 아무것도 쓰지 않고 끝난다."""
+    대화 기록만 숨기고 업무 상태는 바꾸지 않아 `_sweep`처럼 안전 관문을 거치지 않는다. 답을 만들던
+    중이어도 숨긴다: 뒤에서 도는 답·요약은 대화가 없으면 아무것도 쓰지 않고 끝난다. 이미 숨긴
+    대화는 없는 것과 같아 `not_found`이고 먼저 남긴 기록은 그대로다."""
     parsed = h._parse(request, ChatCloseInput)
     if isinstance(parsed, AgentResult):
         return parsed
@@ -362,7 +364,8 @@ async def chat_remove(request: AgentRequest) -> AgentResult:
         return _gone(request, parsed.thread_id)
     if thread.who != parsed.viewer:
         return _forbidden(request)
-    CHATS.delete(thread.id)
+    if not CHATS.remove(thread.id, parsed.viewer):
+        return _gone(request, parsed.thread_id)
     return h._done(
         request, ChatRemoveOutput(thread_id=thread.id, removed=True).model_dump(mode="json")
     )

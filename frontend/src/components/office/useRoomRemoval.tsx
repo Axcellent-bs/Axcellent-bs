@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { DIRECT_AGENTS } from "@/components/office/DirectChat";
-import { ConfirmRemove } from "@/components/office/ConfirmRemove";
+import { ConfirmRemove, REMOVE_LABEL } from "@/components/office/ConfirmRemove";
 import type { MenuItem } from "@/components/office/RoomMenu";
 import { removeFailText, type ToastApi } from "@/components/office/useToast";
 import { loadOwners, saveThreadId, threadKey, loadThreadId } from "@/lib/directThreads";
@@ -34,9 +34,12 @@ export function useRoomRemoval({ toast, onAllRemoved, onDirectRemoved }: {
   const askAll = () => {
     if (!accountId || !mine.n) return;
     setSpec({
-      title: "단톡방 대화 삭제",
+      title: `단톡방 대화 ${REMOVE_LABEL}`,
       name: "전체 대화방",
-      lines: [`전체 대화방에서 내가 부서 AI에게 건 대화 ${mine.n}건과 각 부서 대화 기록을 지웁니다. 다른 사람이 건 대화는 남습니다.`],
+      lines: [
+        `전체 대화방에서 내가 부서 AI에게 건 대화 ${mine.n}건을 모두의 목록에서 지웁니다. 각 부서 대화 창구에서도 안 보이게 됩니다.`,
+        "기록은 서버에 보관됩니다. 다른 사람이 건 대화는 그대로 남습니다.",
+      ],
       run: async () => {
         try {
           const r = await removeOfficeRoom(ROOM_ALL, accountId);
@@ -65,9 +68,12 @@ export function useRoomRemoval({ toast, onAllRemoved, onDirectRemoved }: {
       const ids = threads.filter((t) => !t.restricted && owners[t.id] === accountId && !inRoom.has(t.id)).map((t) => t.id);
       if (!ids.length) { toast.show("지울 1:1 대화가 없어요"); return; }
       setSpec({
-        title: "대화 기록 삭제",
+        title: `대화 기록 ${REMOVE_LABEL}`,
         name: `${agent.name} 1:1 대화`,
-        lines: [`${agent.name}와 나눈 내 1:1 대화 ${ids.length}건을 지웁니다.`, "단톡방에서 건 대화와 다른 사람의 대화는 남습니다."],
+        lines: [
+          `${agent.name}와 나눈 내 1:1 대화 ${ids.length}건을 목록에서 지웁니다. 기록은 서버에 보관됩니다.`,
+          "단톡방에서 건 대화와 다른 사람의 대화는 그대로 남습니다.",
+        ],
         run: async () => {
           const bad: string[] = [];
           for (const id of ids) {
@@ -91,11 +97,11 @@ export function useRoomRemoval({ toast, onAllRemoved, onDirectRemoved }: {
     if (kind === "incident") return [{ key: "rm", label: "삭제 없음", sub: "장애 기록은 감사용으로 남깁니다", disabled: true }];
     if (kind === "all") {
       const sub = mine.n === null ? (mine.err ? "단톡방 목록을 읽지 못했어요" : "확인 중…") : mine.n === 0 ? "만든 사람만 삭제할 수 있어요" : `내가 건 대화 ${mine.n}건`;
-      return [{ key: "rm", label: "단톡방 대화 삭제", sub, danger: true, disabled: !mine.n, onSelect: askAll }];
+      return [{ key: "rm", label: REMOVE_LABEL, sub, danger: true, disabled: !mine.n, onSelect: askAll }];
     }
     const agent = DIRECT_AGENTS.find((a) => a.key === agentKey);
     const can = !!agent?.live && !!agent.talk?.remove;
-    return [{ key: "rm", label: "대화 기록 삭제", sub: can ? "내 1:1 기록만 지움" : "이 부서는 아직 지울 수 없어요", danger: true, disabled: !can, onSelect: () => { if (agentKey) void askDirect(agentKey); } }];
+    return [{ key: "rm", label: REMOVE_LABEL, sub: can ? "내 1:1 기록만" : "이 부서는 아직 지울 수 없어요", danger: true, disabled: !can, onSelect: () => { if (agentKey) void askDirect(agentKey); } }];
   };
 
   const modal = spec ? <ConfirmRemove title={spec.title} name={spec.name} lines={spec.lines} onConfirm={spec.run} onClose={() => setSpec(null)} /> : null;

@@ -529,6 +529,9 @@ class ChatThread(DomainModel):
     account: str | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
+    # 숨김 처리: 대화는 지우지 않고 시각·사람만 남긴다. 예전 대화는 둘 다 없어 None으로 읽힌다
+    removed_at: UtcDatetime | None = None
+    removed_by: str | None = None
 
 
 # ---- 기획 제안: 데이터분석 인사이트(근거 수치) → 기획 판단(할 일·이유·목표) → 사람 확정·폐기

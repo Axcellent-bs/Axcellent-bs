@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-// 지우기 확인 창 (화면 안 모달). 되돌릴 수 없는 일이라 숨기기를 먼저 권한다.
+// 지우기 확인 창 (화면 안 모달). 지우기는 서버에서 숨김 처리다: 목록·조회에서 빠지고 기록은 보관된다
+// (removed_at·removed_by). 모두의 목록에서 빠지므로, 내 화면에서만 치우려면 숨기기를 먼저 권한다.
 // onConfirm은 실패해도 던지지 않는 함수여야 한다(실패 안내는 부르는 쪽이 알림으로 한다). 끝나면 창이 닫힌다.
+
+/** 메뉴·버튼에 쓰는 지우기 이름 */
+export const REMOVE_LABEL = "삭제(목록에서 지움 · 기록은 보관)";
 
 export function ConfirmRemove({ title, name, lines, onConfirm, onClose }: {
   title: string; name: string; lines: string[]; onConfirm: () => Promise<void>; onClose: () => void;
@@ -33,7 +37,9 @@ export function ConfirmRemove({ title, name, lines, onConfirm, onClose }: {
         <ul className="mt-3 space-y-1 text-xs leading-relaxed text-ink-700">
           {lines.map((l) => <li key={l}>{l}</li>)}
         </ul>
-        <p className="mt-3 text-xs font-semibold text-red-700">되돌릴 수 없습니다. 잠깐 안 보이게만 하려면 숨기기를 쓰세요</p>
+        <p className="mt-3 text-xs font-semibold text-red-700">
+          화면에서는 되돌릴 수 없습니다(기록은 서버에 보관돼 관리자가 되살릴 수 있어요). 내 화면에서만 잠깐 안 보이게 하려면 숨기기를 쓰세요
+        </p>
         <div className="mt-4 flex justify-end gap-2">
           <button ref={cancel} type="button" className="btn-ghost" onClick={onClose} disabled={running}>취소</button>
           <button ref={ok} type="button" onClick={() => void run()} disabled={running}
