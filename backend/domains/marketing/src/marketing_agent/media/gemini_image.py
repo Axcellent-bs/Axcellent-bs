@@ -5,9 +5,12 @@ Interactions API(`POST /v1beta/interactions`)로 부르게 한다. generateConte
 
 - 요청: 헤더 `x-goog-api-key`(키는 URL에 넣지 않는다), `Api-Revision`, 본문
   `{"model", "input": [{"type": "text", "text": ...}], "response_format": {"type": "image",
-  "mime_type", "aspect_ratio", "image_size": "1K"}}`.
+  "mime_type": "image/jpeg"(이 모델이 받는 유일한 값), "aspect_ratio", "image_size": "1K"}}`.
+  문자열 `input`(문서 예시)은 실호출 200을 확인했고, 이 배열 형태는 실호출 미확인이다.
+- 저장 파일은 응답 블록의 mime을 따르고(없으면 jpeg) jpeg면 `.jpg`다. 인스타는 JPEG만 받는다.
 - 응답: `steps[type=model_output].content[type=image].data`(base64), `usage.total_input_tokens` /
-  `total_output_tokens`, `id`.
+  `total_output_tokens`, `id`. 실제 응답엔 `total_thought_tokens`가 따로 있고
+  `total_tokens = input + output + thought`로 보인다. 어댑터는 thought를 읽지 않는다(장부 제외).
 - 해상도 표(1K, 출력 1120토큰): 1:1 1024x1024, 4:5 928x1152, 9:16 768x1376.
   그 밖은 호출 전에 거부한다.
 - 키는 `MARKETING_IMAGE_API_KEY`에서만 읽고 로그·예외·결과에 내지 않는다.
@@ -31,7 +34,8 @@ NAME = "gemini"
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"
 API_REVISION = "2026-05-20"
 IMAGE_SIZE = "1K"
-REQUEST_MIME = "image/png"
+# 실호출 확인(2026-11-12): 이 모델은 mime_type에 image/jpeg만 받는다(image/png는 HTTP 400).
+REQUEST_MIME = "image/jpeg"
 TIMEOUT_S = 120.0
 # 문서 표(Nano Banana 2.1, 1K): 해상도 -> 종횡비
 ASPECT_RATIOS = {"1024x1024": "1:1", "928x1152": "4:5", "768x1376": "9:16"}
