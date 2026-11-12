@@ -490,6 +490,8 @@ export interface Review {
   expires_at: string;
   status: "pending" | "approved" | "rejected" | "expired";
   decided_by: string | null;
+  /** 공용 토큰으로 결정할 때 적어 낸 승인자 이름 (자기 신고). 개인 토큰이면 null */
+  decided_as?: string | null;
   decided_at: string | null;
   note: string | null;
   report: { totals?: Record<string, number | null>; calculation?: string; computed_amount?: number | null; hold_reason?: string; rules?: RuleHit[]; claimed?: Record<string, number>; reason?: string; summary?: string };
@@ -716,9 +718,9 @@ export const finance = {
   lastSelfTest: () => fin<{ data: SelfTest | null; meta?: SelfTestLastMeta }>("/api/finance/self-test/last"),
   // 안전 장치 보류 큐 (정산 묶음 지급 승인 등 C 등급)
   reviews: (live = false) => data(saf<{ data: Review[] }>("/api/safety/reviews", { live })),
-  /** C 보류 결정. 사람 토큰만 받는다 (에이전트 토큰은 safety가 거부). */
-  decide: (reviewId: string, decision: "approved" | "rejected", note?: string, live = false) =>
-    data(saf<{ data: Review }>(`/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, { method: "POST", body: { decision, note: note || null }, human: true, live })),
+  /** C 보류 결정. 사람 토큰만 받는다 (에이전트 토큰은 safety가 거부). `decidedAs`: 공용 토큰일 때 승인자 이름 */
+  decide: (reviewId: string, decision: "approved" | "rejected", note?: string, live = false, decidedAs?: string | null) =>
+    data(saf<{ data: Review }>(`/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, { method: "POST", body: { decision, note: note || null, ...(decidedAs ? { decided_as: decidedAs } : {}) }, human: true, live })),
 };
 
 // ---------------------------------------------------------------- 표시 도우미 (쉬운 말)

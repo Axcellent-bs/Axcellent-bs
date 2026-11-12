@@ -6,7 +6,7 @@
 | `GET /api/safety/executions?context_id=` | 실행 기록 | 없음(조회) |
 | `GET /api/safety/reviews?status=pending` | C 보류 큐 | 없음(조회) |
 | `GET /api/safety/reviews/{review_id}` | 보류 건과 근거 리포트 | 없음(조회) |
-| `POST /api/safety/reviews/{review_id}/decision` | 승인·거절 | **사람만** |
+| `POST /api/safety/reviews/{review_id}/decision` | 승인·거절 (`decided_as` 선택) | **사람만** |
 | `GET /api/safety/audit-logs?context_id=` | 감사 로그 | 없음(조회) |
 | `GET /api/safety/thresholds`, `GET /api/safety/registry` | 기준표·레지스트리 | 없음(조회) |
 
@@ -20,12 +20,12 @@ import contextlib
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
 from ax_agent_template.config import set_agent_name
 from ax_agent_template.logging import log_event
@@ -33,7 +33,7 @@ from ax_contracts.schemas import ConnectionHoldNotice, ExecuteRequest
 from ax_safety.auth import agent_from_token, bearer, human_from_token
 from ax_safety.gate import Gate, Publisher, SelfApprovalError, Verifier
 from ax_safety.rules import load_registry, load_thresholds
-from ax_safety.store import Store
+from ax_safety.store import Store, StoreWriteError
 from ax_safety.verify import call_verifier, publish_safety_event
 
 logger = logging.getLogger("ax.safety")
@@ -54,6 +54,10 @@ class ReviewDecisionBody(BaseModel):
 
     decision: Literal["approved", "rejected"]
     note: str | None = None
+    # 공용 토큰으로 결정할 때 화면이 받은 승인자 이름(자기 신고). 개인 토큰이면 버린다
+    decided_as: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)] | None
+    ) = None
 
 
 def _ok(data: Any) -> dict[str, Any]:
@@ -217,11 +221,16 @@ def create_app(
         except PermissionError as exc:
             return _error(403, "HUMAN_ONLY", str(exc))
         try:
-            review = await gate.decide_review(review_id, body.decision, person, body.note)
+            review = await gate.decide_review(
+                review_id, body.decision, person, body.note, body.decided_as
+            )
         except KeyError:
             return _error(404, "NOT_FOUND", "보류 건이 없다")
         except SelfApprovalError as exc:
             return _error(403, "SELF_APPROVAL", str(exc))
+        except StoreWriteError as exc:
+            logger.exception("보류 결정 기록 실패: %s", review_id)
+            return _error(503, "STATE_UNAVAILABLE", str(exc))
         except ValueError as exc:
             return _error(409, "ALREADY_DECIDED", str(exc))
         # 사람 결정을 공통 로그에 남긴다 (data `kpi_summary`의 승인 거절률).

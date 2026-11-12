@@ -76,3 +76,5 @@
 - 다시 띄울 서비스: 안전 장치(기준표 v11), settlement(자동 요청 루프), dashboard-api(오류 코드), 화면
 - 환경변수: `SUPPORT_SETTLEMENT_AUTO_REQUEST=on`(실제 모드는 비워도 켜진다), 필요하면 `SUPPORT_SETTLEMENT_AUTO_REQUEST_SECONDS`
 - 안전 장치 보류 큐는 메모리라 다시 띄우면 요청 중인 묶음은 `review_missing`이 되고, AI가 다음 확인 때 새 시도 번호로 다시 요청한다
+- (추가) 안전 장치가 `SAFETY_STATE_DB`(`run_all.sh`는 `.data/safety_state.db`)에 실행 기록·멱등성 키·보류 큐·감사 로그를 남기게 되어, 다시 띄워도 요청 중인 묶음의 보류 건이 그대로 남고 원래 마감(24시간)도 유지된다. `executed_in_safety`의 실행 기록 확인도 재시작 뒤에 그대로 맞는다. 위 `review_missing` 재요청은 상태 파일을 쓰지 않을 때(값 없음)만 생긴다
+- (추가) 공용 토큰으로 결정하면 화면에서 받은 "승인자 이름"이 `decided_as`로 보류 건·감사 로그에 남는다(예: "결정: 병환 (공용 토큰)"). 그 이름이 `requested_by`와 같으면 스스로 승인으로 막는다. `support-ai`가 올린 요청은 그대로 승인할 수 있다

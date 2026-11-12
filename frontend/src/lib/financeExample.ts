@@ -124,7 +124,7 @@ async function safetyCall(method: string, path: string, body: Record<string, unk
   const review = decision && reviews.find((r) => r.review_id === decodeURIComponent(decision[1]));
   if (!review) throw new ExampleMissing("예시 데이터에 없는 보류 건입니다.");
   const approved = body.decision === "approved";
-  Object.assign(review, { status: approved ? "approved" : "rejected", decided_by: PERSON, decided_at: now(), note: (body.note as string | null) ?? null });
+  Object.assign(review, { status: approved ? "approved" : "rejected", decided_by: PERSON, decided_as: (body.decided_as as string | undefined) ?? null, decided_at: now(), note: (body.note as string | null) ?? null });
   return { data: review };
 }
 

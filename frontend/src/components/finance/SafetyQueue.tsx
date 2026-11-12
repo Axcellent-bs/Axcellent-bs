@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ago, shortDateTime, won } from "@/lib/format";
 import { ACTION_KO, SAFETY_SERVER, finance, humanTokenSet, krw, liveHumanTokenSet, type Review, type RuleHit } from "@/lib/finance";
 import { Chip, TONE } from "./bits";
+import { ApproverField, deciderText, useApproverName } from "./ApproverName";
 
 // 안전 장치 보류 큐: 사람만 정할 수 있는 일(C 등급). 결정은 safety에 사람 토큰으로 보낸다.
 // 재무 화면(SafetyQueue)에는 아직 담당 화면이 없는 일이 온다. 판매자 정산 묶음 지급 승인은 고객지원 판매자 정산 화면(ActionQueue)에서 결정한다.
@@ -31,7 +32,6 @@ const OP_KO: Record<string, string> = { ">": "초과", ">=": "이상", "<": "미
 const action = (a: string) => ACTION_KO[a] ?? "기타 작업";
 const who = (w: string) => WHO_KO[w] ?? "다른 AI";
 const num = (n: number) => n.toLocaleString("ko-KR");
-const decider = (by: string | null) => (by === "finance-ai" ? "재무 AI" : by === "auto-rule" ? "자동 규칙" : by ? `${by}님` : "사람");
 
 /** "3시간 20분", "45분", "30초" */
 function duration(sec: number): string {
@@ -87,13 +87,15 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
   const canDecide = live ? liveHumanTokenSet : humanTokenSet;
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [approver, setApprover, approverName] = useApproverName();
   const pending = (reviews ?? []).filter((r) => r.status === "pending").sort((a, b) => a.expires_at.localeCompare(b.expires_at));
   const recent = (reviews ?? []).filter((r) => r.status !== "pending").slice(-5).reverse();
 
   async function decide(id: string, decision: "approved" | "rejected") {
+    if (!approverName) { setProblem("승인자 이름을 먼저 적으세요."); return; }
     setBusy(id + decision);
     setProblem(null);
-    try { await finance.decide(id, decision, undefined, live); await reload(); }
+    try { await finance.decide(id, decision, undefined, live, approverName); await reload(); }
     catch (e) { setProblem((e as Error).message); }
     finally { setBusy(null); }
   }
@@ -111,6 +113,9 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
       {!canDecide && pending.length > 0 && <p className="mt-3 text-sm text-amber-800">결정 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
       {problem && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{problem}</p>}
 
+      {pending.length > 0 && canDecide && (
+        <div className="mt-3"><ApproverField id="safety-queue-approver" value={approver} onChange={setApprover} /></div>
+      )}
       {pending.length > 0 && (
         <ul className="mt-4 space-y-3">
           {pending.map((r) => {
@@ -139,8 +144,8 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
                   </p>
                 </div>
                 <div className="flex gap-2 sm:flex-col">
-                  <button className="btn-primary" disabled={!canDecide || busy !== null} onClick={() => decide(r.review_id, "approved")}>진행</button>
-                  <button className="btn-ghost" disabled={!canDecide || busy !== null} onClick={() => decide(r.review_id, "rejected")}>멈춤</button>
+                  <button className="btn-primary" disabled={!canDecide || !approverName || busy !== null} onClick={() => decide(r.review_id, "approved")}>진행</button>
+                  <button className="btn-ghost" disabled={!canDecide || !approverName || busy !== null} onClick={() => decide(r.review_id, "rejected")}>멈춤</button>
                 </div>
               </li>
             );
@@ -155,7 +160,7 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
               <li key={r.review_id} className="flex flex-wrap items-center gap-2 text-ink-700">
                 <Chip label={r.status === "approved" ? "진행" : r.status === "expired" ? "자동 취소" : "멈춤"} tone={r.status === "approved" ? TONE.ok : TONE.bad} />
                 <span>{action(r.action)} · {who(r.requester)}</span>
-                <span className="text-ink-500">{r.status === "expired" ? "기한이 지나 자동 취소" : `${decider(r.decided_by)} · ${shortDateTime(r.decided_at)}`}</span>
+                <span className="text-ink-500">{r.status === "expired" ? "기한이 지나 자동 취소" : `${deciderText(r)} · ${shortDateTime(r.decided_at)}`}</span>
               </li>
             ))}
           </ul>

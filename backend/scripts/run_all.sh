@@ -244,6 +244,8 @@ export FINANCE_PG_INBOX="${FINANCE_PG_INBOX:-$PWD/$DATA/finance_pg_inbox}"
 mkdir -p "$FINANCE_EXPORT_DIR" "$FINANCE_BANK_INBOX" "$FINANCE_PG_INBOX"
 # 외부 연결 쓰기 보류(긴급 취약). 다시 켜도 잊지 않게 파일에 둔다
 export SAFETY_CONNECTION_HOLDS_FILE="$PWD/$DATA/connection_holds.json"
+# 안전 관문 상태(실행 기록·멱등성 키·보류 큐·감사 로그). 다시 켜도 보류 건과 실행 기록이 남는다
+export SAFETY_STATE_DB="$PWD/$DATA/safety_state.db"
 
 # .env (LLM 설정 등). 값은 출력하지 않는다
 if [ -f .env ]; then
