@@ -74,6 +74,17 @@ body { @apply bg-canvas text-ink-900 antialiased; }
 
 /* common-frontend 모양: 모서리 0 (화면들이 쓰는 rounded-* 클래스도 함께 각지게), 얇은 테두리 카드 */
 *, *::before, *::after { border-radius: 0 !important; }
+/*
+  예외: 메신저형 대화창(.chat-round 안)의 말풍선·시스템 알약·아바타·안 읽은 배지만 둥글게 (AI 대화방 대화 기록·AI 오피스).
+  카드 말풍선(숫자 묶음·승인 대기)·버튼·패널·입력창·탭은 위 규칙대로 네모다.
+  위 전역 규칙이 !important라 같은 !important로만 덮을 수 있어서, 이 네 클래스에만 쓴다.
+*/
+.chat-round .chat-bubble { border-radius: 4px 14px 14px 14px !important; }
+.chat-round .chat-bubble.chat-mine { border-radius: 14px 4px 14px 14px !important; }
+.chat-round .chat-pill,
+.chat-round .chat-badge { border-radius: 9999px !important; }
+.chat-round .chat-avatar { border-radius: 13px !important; }
+
 .card {
   border: 1px solid rgb(var(--ink-100));
   box-shadow: 0 1px 2px rgb(35 35 69 / 0.05), 0 6px 18px rgb(35 35 69 / 0.05);

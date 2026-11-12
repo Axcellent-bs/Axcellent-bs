@@ -1,4 +1,6 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { DIRECT_AGENTS } from "@/components/office/DirectChat";
+import { roomPeople } from "@/lib/chatRooms";
 import { MessengerLog, PinNotice, StatusChip, TypingLines } from "@/components/office/Messenger";
 import { TalkInput } from "@/components/office/TalkInput";
 import type { OfficeTalk } from "@/components/office/useOfficeTalk";
@@ -10,8 +12,10 @@ import { Link } from "@/lib/nav";
 
 export interface Typing { key: string; name: string; what: string }
 
-export function OfficeChat({ items, typing, freshIds, title, sub, status, inc, room = ALL_ROOM, talk, tabs, big = true }: {
+export function OfficeChat({ items, typing, freshIds, title, sub, longTitle, status, inc, room = ALL_ROOM, talk, tabs, big = true }: {
   items: ChatItem[]; typing: Typing[]; freshIds: ReadonlySet<string>; title: string; sub?: string; status?: string;
+  /** 장애 방의 긴 문장 이름 (방 머리 아래 보조 줄) */
+  longTitle?: string;
   /** 장애 방이면 그 사건 (맨 위 고정 공지) */
   inc?: OrchIncident;
   /** 말을 거는 방 */
@@ -40,14 +44,22 @@ export function OfficeChat({ items, typing, freshIds, title, sub, status, inc, r
     if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   };
   const chatHref = `/agents/chat?room=${encodeURIComponent(room)}`;
+  const people = useMemo(() => roomPeople(items, DIRECT_AGENTS.map((a) => a.key)), [items]);
 
   return (
-    <section aria-label="부서 단톡방" className="card flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden bg-chat xl:w-[580px] xl:flex-none">
+    // chat-round: 이 안의 말풍선·알약·아바타·배지만 둥글게 (styles.css)
+    <section aria-label="부서 단톡방" className="chat-round card flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden bg-chat xl:w-[580px] xl:flex-none">
       {tabs}
       <header className="flex flex-wrap items-center gap-2 border-b border-ink-900/[.07] px-4 py-2.5">
-        <h2 className="min-w-0 truncate text-sm font-semibold">{title}</h2>
-        <StatusChip status={status} />
-        {sub && <span className="truncate text-xs text-ink-500">{sub}</span>}
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h2 className="min-w-0 truncate text-sm font-semibold">{title}</h2>
+            {people && <span className="text-xs text-ink-700">{people}</span>}
+            <StatusChip status={status} />
+            {sub && <span className="truncate text-xs text-ink-500">{sub}</span>}
+          </div>
+          {longTitle && <p className="mt-0.5 truncate text-xs text-ink-500">{longTitle}</p>}
+        </div>
         {big && <Link href={chatHref} className="btn-ghost ml-auto px-2.5 py-1 text-xs">대화 기록에서 크게 보기</Link>}
       </header>
       {inc && <PinNotice inc={inc} />}

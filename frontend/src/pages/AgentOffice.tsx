@@ -277,7 +277,7 @@ export default function AgentOffice() {
         </section>
 
         {direct ? (
-          <div className="card flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden xl:w-[580px] xl:flex-none">
+          <div className="chat-round card flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden xl:w-[580px] xl:flex-none">
             {tabs}
             <DirectChat agent={direct} narrow />
           </div>
@@ -289,6 +289,7 @@ export default function AgentOffice() {
             tabs={tabs}
             title={mode === "live" ? roomInfo?.title ?? "찾을 수 없는 방" : "부서 단톡방"}
             status={mode === "live" ? roomInfo?.status : undefined}
+            longTitle={mode === "live" ? roomInfo?.longTitle : undefined}
             sub={mode === "replay" ? "SCN-A 리플레이" : mode === "campaign" ? "캠페인 리플레이" : undefined}
             inc={roomInc}
             room={talkRoom}
@@ -313,7 +314,7 @@ function RoomTab({ on, onClick, label, unread, mark, dashed = false, onClose }: 
         className="flex max-w-[170px] items-center gap-1.5 rounded-full px-3 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
         {mark}
         <span className="truncate">{label}</span>
-        {!!unread && !on && <span className="rounded-full bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`안 읽은 메시지 ${unread}개`}>{unread}</span>}
+        {!!unread && !on && <span className="chat-badge bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`안 읽은 메시지 ${unread}개`}>{unread}</span>}
       </button>
       {onClose && (
         <button type="button" onClick={onClose} aria-label={`${label} 탭 닫기`} className="mr-1.5 rounded-full px-1 text-[11px] opacity-70 hover:opacity-100">×</button>

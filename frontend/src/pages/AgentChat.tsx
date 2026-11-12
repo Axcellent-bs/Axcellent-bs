@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ALL_ROOM, messageCount, type ChatItem, type OrchIncident } from "@/lib/agentChat";
-import { matchRoom, roomTime, type ChatRoom } from "@/lib/chatRooms";
+import { matchRoom, roomPeople, roomTime, type ChatRoom } from "@/lib/chatRooms";
 import { Link, useSearchParams } from "@/lib/nav";
 import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
 import { Avatar, MessengerLog, PinNotice, StatusChip, TypingLines } from "@/components/office/Messenger";
@@ -40,9 +40,9 @@ function ConnChip({ label, conn }: { label: string; conn: Conn }) {
 /** 방 아바타: 전체(보라) · 장애(진행 중 빨강, 끝나면 주황) · 1:1(부서 색) */
 function RoomAvatar({ room, agentKey, name }: { room?: ChatRoom; agentKey?: string; name?: string }) {
   if (agentKey) return <Avatar name={name ?? agentKey} k={agentKey} />;
-  if (room?.kind === "all") return <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] bg-brand-600 text-[11px] font-bold text-white">전체</span>;
+  if (room?.kind === "all") return <span aria-hidden="true" className="chat-avatar flex h-9 w-9 shrink-0 items-center justify-center bg-brand-600 text-[11px] font-bold text-white">전체</span>;
   const open = room?.status === "open";
-  return <span aria-hidden="true" className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] text-[11px] font-bold text-white ${open ? "bg-red-700" : "bg-amber-700"}`}>장애</span>;
+  return <span aria-hidden="true" className={`chat-avatar flex h-9 w-9 shrink-0 items-center justify-center text-[11px] font-bold text-white ${open ? "bg-red-700" : "bg-amber-700"}`}>장애</span>;
 }
 
 // ---------------------------------------------------------------- 채팅 목록
@@ -63,7 +63,7 @@ function RoomRow({ on, onClick, avatar, title, status, preview, time, unread }: 
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1">
           {time && <span className="text-[10px] tabular-nums text-ink-500">{time}</span>}
-          {!!unread && !on && <span className="rounded-full bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`안 읽은 메시지 ${unread}개`}>{unread}</span>}
+          {!!unread && !on && <span className="chat-badge bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`안 읽은 메시지 ${unread}개`}>{unread}</span>}
         </span>
       </button>
     </li>
@@ -194,7 +194,7 @@ export default function AgentChat() {
   const typing = primed.current && revealed < records.length;
 
   // 참여 부서: 이 방에서 말한 AI (사람 제외)
-  const deptCount = useMemo(() => new Set(items.filter((it) => it.kind === "msg" && it.fromKey && it.fromKey !== "human" && it.from !== "담당 미정").map((it) => (it as Extract<ChatItem, { kind: "msg" }>).fromKey)).size, [items]);
+  const people = useMemo(() => roomPeople(items, DIRECT_AGENTS.map((a) => a.key)), [items]);
 
   // ------------------------------------------------ 스크롤: 맨 아래에 붙어 있으면 따라가고, 위로 올렸으면 "새 메시지" 알약
   const scroller = useRef<HTMLDivElement>(null);
@@ -272,15 +272,21 @@ export default function AgentChat() {
 
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{error}</p>}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+      {/* chat-round: 이 안의 말풍선·알약·아바타·배지만 둥글게 (styles.css) */}
+      <div className="chat-round flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <RoomList all={all} incidents={incidentRooms} selected={room} unseen={data.unseen} onSelect={setRoom} />
 
         {direct ? <DirectChat agent={direct} /> : (
         <section aria-label={`${title} 대화`} className="card relative flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden bg-chat">
           <header className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-ink-900/[.07] px-4 py-3">
-            <h2 className="min-w-0 truncate text-[15px] font-semibold">{title}</h2>
-            {deptCount > 0 && <span className="text-xs text-ink-700">참여 부서 {deptCount}곳</span>}
-            <StatusChip status={roomInfo?.status} />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <h2 className="min-w-0 truncate text-[15px] font-semibold">{title}</h2>
+                {people && <span className="text-xs text-ink-700">{people}</span>}
+                <StatusChip status={roomInfo?.status} />
+              </div>
+              {roomInfo?.longTitle && <p className="mt-0.5 truncate text-xs text-ink-500">{roomInfo.longTitle}</p>}
+            </div>
             {!isAll && (
               <div className="ml-auto flex gap-1.5">
                 {inc && <Link href={`/orchestrator?ctx=${encodeURIComponent(inc.context_id)}`} className="btn-ghost px-2.5 py-1 text-xs">사건 자세히</Link>}
