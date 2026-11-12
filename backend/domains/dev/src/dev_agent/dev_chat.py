@@ -362,6 +362,11 @@ def _owner_ok(th: ChatThread, who: str | None) -> bool:
     return who is None or th.who is None or th.who == who
 
 
+def seen_from(th: ChatThread, origin: str | None) -> bool:
+    """이 창구(screen·dashboard)에서 보이는 대화인가. 나누기 전 대화(None)는 양쪽에 보인다."""
+    return origin is None or th.origin is None or th.origin == origin
+
+
 def _prepare(
     svc: DevService,
     thread_id: str | None,
@@ -369,6 +374,7 @@ def _prepare(
     connection: str | None,
     mode: str | None,
     who: str | None,
+    origin: str | None = None,
 ) -> tuple[Any, str, list[vcs.Connection], str]:
     """보내기 전 확인. (LLM, 글, 연결, 지금 상태)를 준다. 거절은 `ActionError`."""
     llm = get_llm()
@@ -384,7 +390,7 @@ def _prepare(
     prev = "talking"
     if thread_id is not None:
         th = svc.chat_of(thread_id)
-        if th is None:
+        if th is None or not seen_from(th, origin):
             raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
         if not _owner_ok(th, who):
             raise ActionError("FORBIDDEN", f"대화 {thread_id}는 {th.who}의 대화다")
@@ -408,6 +414,7 @@ async def send(
     connection: str | None = None,
     mode: str | None = None,
     who: str | None = None,
+    origin: str | None = None,
 ) -> ChatThread:
     """사용자 메시지를 적고 `answering`인 대화를 바로 돌려준다. 답은 뒤에서 붙는다.
 
@@ -415,7 +422,7 @@ async def send(
     `mode`는 작업을 누가 코딩하나 (agent 서버 AI · subscription 본인 Claude). 주면 대화에 남긴다.
     오류(입력·없음·설정·바쁨·끝남·남의 대화)는 `ActionError`.
     LLM·작업 띄우기 오류는 대화에 답으로 남긴다."""
-    llm, text, conns, prev = _prepare(svc, thread_id, message, connection, mode, who)
+    llm, text, conns, prev = _prepare(svc, thread_id, message, connection, mode, who, origin)
     th = await svc.chat_add(
         thread_id,
         "user",
@@ -424,6 +431,7 @@ async def send(
         title=title_of(text) if thread_id is None else None,
         mode=mode,
         who=who,
+        origin=origin,
         status="answering",
     )
     if not BACKGROUND:
@@ -441,9 +449,10 @@ async def turn(
     connection: str | None = None,
     mode: str | None = None,
     who: str | None = None,
+    origin: str | None = None,
 ) -> ChatThread:
     """보내고 답까지 기다린다 (`send` + 답). 바뀐 대화를 돌려준다."""
-    llm, text, conns, prev = _prepare(svc, thread_id, message, connection, mode, who)
+    llm, text, conns, prev = _prepare(svc, thread_id, message, connection, mode, who, origin)
     th = await svc.chat_add(
         thread_id,
         "user",
@@ -452,6 +461,7 @@ async def turn(
         title=title_of(text) if thread_id is None else None,
         mode=mode,
         who=who,
+        origin=origin,
         status="answering",
     )
     return await _answer(svc, llm, th.id, text, conns, prev)
@@ -852,10 +862,12 @@ async def _revise(svc: DevService, llm: Any, th: ChatThread, text: str) -> ChatT
 # ---------------------------------------------------------------- 끝내기 · 열람
 
 
-async def close(svc: DevService, thread_id: str, who: str | None = None) -> ChatThread:
+async def close(
+    svc: DevService, thread_id: str, who: str | None = None, origin: str | None = None
+) -> ChatThread:
     """대화를 끝낸다 (`closed`). 띄운 작업은 그대로 돈다. 앞 요청 기다리기는 그만둔다."""
     th = svc.chat_of(thread_id)
-    if th is None:
+    if th is None or not seen_from(th, origin):
         raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
     if not _owner_ok(th, who):
         raise ActionError("FORBIDDEN", f"대화 {thread_id}는 {th.who}의 대화다")
@@ -916,6 +928,9 @@ def view(th: ChatThread, who: str | None) -> dict[str, Any]:
     return data
 
 
-def listed(svc: DevService, who: str | None, limit: int = LIST_LIMIT) -> list[dict[str, Any]]:
-    rows = sorted(svc.state.chats, key=lambda c: c.updated_at, reverse=True)[:limit]
+def listed(
+    svc: DevService, who: str | None, limit: int = LIST_LIMIT, origin: str | None = None
+) -> list[dict[str, Any]]:
+    rows = [c for c in svc.state.chats if seen_from(c, origin)]
+    rows = sorted(rows, key=lambda c: c.updated_at, reverse=True)[:limit]
     return [view(c, who) for c in rows]

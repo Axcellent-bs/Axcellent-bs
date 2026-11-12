@@ -519,7 +519,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
     def list_dev_chats() -> dict:
         svc = get_service()
         rows = sorted(
-            svc.state.chats,
+            [c for c in svc.state.chats if dev_chat.seen_from(c, SCREEN)],
             key=lambda c: (c.updated_at, int(c.id.split("-")[-1] or 0)),
             reverse=True,
         )[:MAX_CHATS_LISTED]
@@ -529,7 +529,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
     def get_dev_chat(thread_id: str) -> dict | JSONResponse:
         svc = get_service()
         th = svc.chat_of(thread_id)
-        if th is None:
+        if th is None or not dev_chat.seen_from(th, SCREEN):
             return _err(404, "NOT_FOUND", f"대화 {thread_id}가 없다")
         return _ok(dump(th), svc)
 
@@ -570,7 +570,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         try:
             mode = body.get("mode")
             who = _person(request)
-            th = await dev_chat.send(svc, thread_id, message, connection or None, mode, who)
+            th = await dev_chat.send(svc, thread_id, message, connection or None, mode, who, SCREEN)
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:
@@ -582,7 +582,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         """대화를 끝낸다 (`closed`). 띄운 작업은 그대로 돈다."""
         svc = get_service()
         try:
-            th = await dev_chat.close(svc, thread_id, _person(request))
+            th = await dev_chat.close(svc, thread_id, _person(request), SCREEN)
         except ActionError as exc:
             return _coding_err(exc)
         return _ok(dump(th), svc)
@@ -650,6 +650,10 @@ def add_settings_routes(router: APIRouter, get_service: Callable[[], Any]) -> No
         except ActionError as exc:
             return _err(400, exc.code, exc.message)
         return _ok(result.output, svc)
+
+
+# 개발 화면 대화 패널에서 연 대화. 대시보드 AI 대화방(dashboard) 대화와 서로 보이지 않는다
+SCREEN = "screen"
 
 
 def _person(request: Request) -> str | None:
