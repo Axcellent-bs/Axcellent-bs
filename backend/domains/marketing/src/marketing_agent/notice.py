@@ -192,6 +192,7 @@ class NoticeStore:
         return NoticeView(
             found=True,
             notice_id=notice_id,
+            kind=draft.kind,
             context_id=context_id,
             published_at=self._published_at[notice_id],
             status=self._status(notice_id, draft, at),
