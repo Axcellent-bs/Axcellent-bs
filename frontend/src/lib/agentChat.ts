@@ -7,7 +7,7 @@ import type { CommLine, CommOutcome } from "./types";
 // 부서가 돌려준 자유 문장(summary·note·untrusted 등)은 화면에 옮기지 않는다. 화면 없는 순수 함수만 둔다.
 
 // ---------------------------------------------------------------- 총괄 JSON (ax-backend orchestrator models.py view())
-export type StepStatus = "pending" | "running" | "held" | "waiting_human" | "completed" | "failed" | "skipped" | "rejected_by_human";
+export type StepStatus = "pending" | "running" | "held" | "waiting_human" | "waiting_async" | "completed" | "failed" | "skipped" | "rejected_by_human";
 
 export interface OrchStep {
   step_id: string;
@@ -311,6 +311,8 @@ function resultLine(step: OrchStep): { text: string; tone: Tone } {
       return { text: "C 등급이라 사람 승인을 기다립니다. 보류 중입니다.", tone: "warn" };
     case "waiting_human":
       return { text: "담당 부서 사람의 처리를 기다립니다.", tone: "warn" };
+    case "waiting_async":
+      return { text: "부서가 긴 작업을 하는 중입니다. 진행 알림이 오면 이어 갑니다.", tone: "muted" };
     case "skipped":
       return { text: "건너뛰었습니다.", tone: "muted" };
     default:

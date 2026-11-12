@@ -91,7 +91,7 @@ async def test_no_evaluated_events_still_lists_every_agent_with_nothing(svc) -> 
     assert [a.dept for a in out.agents] == list(AGENT_ORDER)
     assert out.events == [] and out.trend == []
     assert all(a.events == 0 and a.recent == [] for a in out.agents)
-    assert (out.criteria_version, out.normal_max_seconds, out.normal_max_attempts) == (2, 30, 1)
+    assert (out.criteria_version, out.normal_max_seconds, out.normal_max_attempts) == (3, 30, 1)
 
 
 @pytest.mark.asyncio
@@ -270,3 +270,51 @@ def test_judgments_saved_before_handoffs_were_split_read_the_same_way() -> None:
     assert _readable(waiting)["verdict"] == "handed_off"
     failed = {"step_id": "rollback", "verdict": "blocked", "status": "failed"}
     assert _readable(failed)["verdict"] == "blocked"  # 진짜 실패는 그대로
+
+
+@pytest.mark.asyncio
+async def test_a_silent_long_task_is_its_own_verdict_with_a_plain_reason(svc) -> None:
+    """총 시간이 길어서가 아니라 응답이 끊겨서다. 일을 못한 것으로 말하지 않는다."""
+    rows = [
+        _t(
+            "impact",
+            "data",
+            work_seconds=1800.0,
+            promised_seconds=3600.0,
+            max_silence_seconds=700.0,
+        )
+    ]
+    await _event(svc, "a", rows)
+    out = await _run(svc)
+    data = _agent(out, "data")
+    dot = data.recent[0]
+    assert dot.verdict == "silent"
+    assert "응답이" in (dot.reason or "") and "끊김" in (dot.reason or "")
+    assert "일을 못한 것이 아니라" in (dot.reason or "")
+    assert (data.silent, data.blocked, data.check) == (1, 0, 0)
+    assert out.trend[0].with_check == 1  # 확인이 필요한 이벤트로 센다
+    step = out.events[0].steps[0]
+    assert (step.verdict, step.max_silence_seconds) == ("silent", 700.0)
+
+
+@pytest.mark.asyncio
+async def test_steady_notices_keep_a_long_task_normal_in_the_summary(svc) -> None:
+    rows = [
+        _t("impact", "data", work_seconds=1800.0, promised_seconds=3600.0, max_silence_seconds=60.0)
+    ]
+    await _event(svc, "a", rows)
+    data = _agent(await _run(svc), "data")
+    assert data.recent[0].verdict == "normal" and data.silent == 0
+
+
+@pytest.mark.asyncio
+async def test_a_silent_task_outweighs_a_late_one_in_the_dot_and_repeats_count(svc) -> None:
+    rows = [
+        _t("impact", "data", work_seconds=40.0, attempts=2),  # 늦음
+        _t("root_cause", "data", work_seconds=900.0, max_silence_seconds=800.0),  # 끊김
+    ]
+    await _event(svc, "a", rows, minutes_ago=20, event_type="payment_failure")
+    await _event(svc, "b", rows, minutes_ago=10, event_type="payment_failure")
+    data = _agent(await _run(svc), "data")
+    assert [d.verdict for d in data.recent] == ["silent", "silent"]
+    assert [(r.event_type, r.count) for r in data.repeats] == [("payment_failure", 2)]

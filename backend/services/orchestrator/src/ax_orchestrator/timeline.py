@@ -74,6 +74,10 @@ def step_timings(inc: Incident) -> list[dict[str, Any]]:
             total = (run.finished_at - run.started_at).total_seconds()
             waits = (run.approval_wait_seconds or 0.0) + (run.human_wait_seconds or 0.0)
             work = round(max(0.0, total - waits), 3)
+        silence = run.max_silence_seconds
+        wait = inc.async_waits.get(run.step_id)
+        if wait is not None and wait.pending:  # 아직 진행 중이면 지금까지 비어 있는 시간도 센다
+            silence = max(silence or 0.0, wait.silent_for())
         out.append(
             {
                 "step_id": run.step_id,
@@ -85,6 +89,7 @@ def step_timings(inc: Incident) -> list[dict[str, Any]]:
                 "attempts": run.attempts,
                 "reason_code": run.reason_code,
                 "promised_seconds": _round(run.promised_seconds),
+                "max_silence_seconds": _round(silence),
             }
         )
     return out

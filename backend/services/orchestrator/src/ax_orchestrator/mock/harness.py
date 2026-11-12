@@ -9,7 +9,15 @@ DEPTS = ["infra", "data", "planning", "dev", "marketing", "support", "finance", 
 
 
 class Harness:
-    def __init__(self, hold_timeout: float = 0.2) -> None:
+    def __init__(
+        self,
+        hold_timeout: float = 0.2,
+        async_heartbeat_timeout: float = 0.3,
+        async_total_timeout: float = 3.0,
+    ) -> None:
+        # 긴 작업(비동기) 시험은 실제 시간이 걸리지 않게 짧은 한계를 쓴다
+        self.async_heartbeat_timeout = async_heartbeat_timeout
+        self.async_total_timeout = async_total_timeout
         self.fakes = FakeDepartments()
         self.registry = Registry()
         self.events: list[str] = []
@@ -26,6 +34,8 @@ class Harness:
             self.fakes,
             publish=self.publish,
             hold_timeout=self.hold_timeout,
+            async_heartbeat_timeout=self.async_heartbeat_timeout,
+            async_total_timeout=self.async_total_timeout,
         )
         return self.engine
 

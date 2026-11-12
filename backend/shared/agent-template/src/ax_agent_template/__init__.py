@@ -10,6 +10,7 @@
 - `call_agent(target, req)`: 다른 에이전트 호출 (`client.py`)
 - `LLMClient`·`MockLLMClient`: LLM 호출 (`llm.py`)
 - `publish`·`subscribe`: 이벤트 버스 (`events.py`)
+- `async_task`: 긴 작업(비동기)을 접수·진행·완료로 알리는 도구 (`async_task.py`)
 """
 
 from ax_agent_template.client import call_agent

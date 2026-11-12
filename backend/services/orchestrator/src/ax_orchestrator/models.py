@@ -96,6 +96,14 @@ class StepRun:
     refreshed_at: datetime | None = None
     # 이 단계에 걸어 둔 약속 시간(초, `Step.expected_seconds`). 없으면 None(기본 30초 기준)
     promised_seconds: float | None = None
+    # 긴 작업(비동기): 부서가 접수한 작업 번호, 마지막으로 응답(접수·진행 알림)한 시각,
+    # 진행 알림 횟수, 응답 사이가 가장 길게 비었던 시간(초), 마지막 진행률·메모(화면용)
+    async_task_id: str | None = None
+    last_response_at: datetime | None = None
+    heartbeats: int = 0
+    max_silence_seconds: float | None = None
+    progress_percent: int | None = None
+    progress_note: str | None = None
 
     def view(self) -> dict[str, Any]:
         return {
@@ -116,20 +124,29 @@ class StepRun:
             "human_wait_seconds": self.human_wait_seconds,
             "refreshed_at": iso(self.refreshed_at),
             "promised_seconds": self.promised_seconds,
+            "async_task_id": self.async_task_id,
+            "last_response_at": iso(self.last_response_at),
+            "heartbeats": self.heartbeats,
+            "max_silence_seconds": self.max_silence_seconds,
+            "progress_percent": self.progress_percent,
+            "progress_note": self.progress_note,
             "output": self.output,
         }
 
 
 TERMINAL = {"completed", "failed", "skipped", "rejected_by_human", "transfer_queued"}
-# 끝나지 않은 대기 상태. C 등급 승인 대기(held)와
-# 사람 할 일함 처리 대기(waiting_human)는 다른 상태다
-WAITING = {"held", "waiting_human"}
+# 끝나지 않은 대기 상태. C 등급 승인 대기(held), 사람 할 일함 처리 대기(waiting_human),
+# 부서의 긴 작업 진행 중(waiting_async)은 서로 다른 상태다
+WAITING = {"held", "waiting_human", "waiting_async"}
 # 사유 코드가 있어도 사람이 개입한 일로 세지 않는 것 (자동 처리율)
 # - service_disabled: 꺼진 서비스라 건너뛴 조회
 # - cause_confident: 확신도 높은 원인 후보가 있어 원인 확인 요청을 하지 않음
 # - notice_already_ended·no_incident_notice·waiting_recovery: 장애 배너를 내릴 필요가 없거나
 #   복구 신호를 기다리는 중이라 건너뜀(정상 이벤트마다 생기는 건너뜀이라 세지 않는다)
 WAITING_RECOVERY = "waiting_recovery"
+# 긴 작업(비동기)에서 부서의 진행 알림이 끊겨 단계를 실패로 끝낸 사유 코드. 인사 에이전트 평가가
+# 이 코드를 "응답 끊김"으로 센다
+NO_RESPONSE = "no_response"
 NOT_INTERVENTION = {
     "service_disabled",
     "cause_confident",
@@ -167,6 +184,7 @@ class Incident:
     outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     holds: dict[str, Any] = field(default_factory=dict)  # step_id -> Hold
     handoffs: dict[str, Any] = field(default_factory=dict)  # step_id -> HandoffWait
+    async_waits: dict[str, Any] = field(default_factory=dict)  # step_id -> AsyncWait
     summary: list[str] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     shared: dict[str, Any] = field(default_factory=dict)  # 부서가 준 값 중 다른 부서에 넘길 것
