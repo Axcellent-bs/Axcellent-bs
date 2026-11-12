@@ -931,6 +931,25 @@ async def cancel_campaign(campaign_id: str, body: CampaignCancelBody) -> dict:
     )
 
 
+class BriefHandoffBody(BaseModel):
+    media_kind: Literal["image", "video"] = "image"
+
+
+@router.post("/marketing/briefs/{proposal_id}/sns-handoff")
+async def handoff_brief_to_sns(
+    body: BriefHandoffBody,
+    proposal_id: str = Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"),
+) -> dict:
+    """받은 기획안으로 SNS 글 초안과 미디어 요청 초안을 만든다. 같은 기획안은 다시 불러도 같은 결과.
+
+    미디어 생성(B 등급 비용)과 SNS 게시(C 등급 사람 승인)는 여기서 하지 않는다.
+    실패 이유(가격표 없음 등)는 오류가 아니라 결과의 `sns_handoff.reason_code`로 돌려준다.
+    """
+    _no_org_in_mock()
+    key = f"ui:sns-handoff:{proposal_id}:{body.media_kind}"
+    return ok(await marketing_client.handoff_call(proposal_id, body.media_kind, key))
+
+
 class MarketingChatSendBody(BaseModel):
     thread_id: str | None = Field(default=None, min_length=1, max_length=64)
     message: str = Field(min_length=1, max_length=2000)

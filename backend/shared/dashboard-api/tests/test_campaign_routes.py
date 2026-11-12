@@ -123,3 +123,37 @@ def test_cancel_needs_a_reason(client: TestClient, fake: Fake) -> None:
     assert client.post(url, json={"reason": ""}).status_code == 422
     assert client.post(url, json={"reason": "중단"}).status_code == 200
     assert fake.calls[0][1].skill == "cancel_campaign"
+
+
+HANDOFF = "/api/dashboard/marketing/briefs/PROP-1/sns-handoff"
+
+
+def test_sns_handoff_goes_to_marketing_with_a_stable_key(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "handed"
+    first = client.post(HANDOFF, json={})
+    again = client.post(HANDOFF, json={})
+    assert first.status_code == again.status_code == 200
+    assert first.json()["data"]["outcome"] == "handed"
+    target, request = fake.calls[0]
+    assert (target, request.skill) == ("marketing", "handoff_brief_to_sns")
+    assert request.input == {"proposal_id": "PROP-1", "media_kind": "image"}
+    assert fake.calls[0][1].meta.idempotency_key == fake.calls[1][1].meta.idempotency_key
+
+
+def test_sns_handoff_needs_a_person_and_valid_input(client: TestClient, fake: Fake) -> None:
+    bad = {"authorization": "Bearer nope"}
+    assert client.post(HANDOFF, json={}, headers=bad).status_code in (401, 403)
+    assert client.post(HANDOFF.replace("PROP-1", "a%20b"), json={}).status_code == 422
+    assert client.post(HANDOFF, json={"media_kind": "audio"}).status_code == 422
+    assert fake.calls == []
+
+
+def test_sns_handoff_failure_codes_use_the_error_envelope(client: TestClient, fake: Fake) -> None:
+    fake.status, fake.outcome = TaskStatus.FAILED, "brief_not_found"
+    response = client.post(HANDOFF, json={})
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
+    fake.status, fake.outcome = TaskStatus.REJECTED, "FORBIDDEN_SKILL"
+    assert client.post(HANDOFF, json={}).status_code == 403
+    fake.status, fake.outcome = TaskStatus.CANCELED, None
+    assert client.post(HANDOFF, json={}).status_code == 504

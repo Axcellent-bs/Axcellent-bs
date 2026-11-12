@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { ago, shortDateTime } from "@/lib/format";
-import { STATUS_STEPS, briefStatusKo, briefs, briefsError, briefsEnabled, safeLink, type BriefList, type StoredBrief } from "@/lib/briefs";
+import { HUMAN_TOKEN_SET } from "@/lib/env";
+import { STATUS_STEPS, briefStatusKo, briefs, briefsError, briefsEnabled, draftStateKo, handoffReasonKo, safeLink, type BriefList, type StoredBrief } from "@/lib/briefs";
 
 // 받은 기획안. 기획이 사람 확정을 거쳐 넘긴 기획안을 마케팅이 받은 그대로 보여 준다(읽기만).
 // 근거 수치는 데이터분석이 낸 값 그대로 인용하고 이 화면에서 다시 계산하지 않는다.
 // 캠페인 시작·거절 버튼은 다음 단계에서 붙인다(예산 입력과 쓰기 경로가 필요하다).
+// "SNS·미디어로 넘기기"만 쓰기다: 초안을 만들 뿐 미디어 생성·게시는 하지 않는다.
 
 const REFRESH_MS = 30_000;
 
@@ -21,7 +23,52 @@ function StatusSteps({ current }: { current: string }) {
   );
 }
 
-function Detail({ item }: { item: StoredBrief }) {
+function HandoffBox({ item, onDone }: { item: StoredBrief; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const h = item.sns_handoff;
+  const handed = h?.status === "handed";
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      await briefs.handoff(item.proposal_id);
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-ink-100 px-3 py-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs font-medium text-ink-700">SNS·미디어로 넘기기</p>
+        {h?.status === "handed" && <span className="chip bg-brand-50 text-brand-700">넘김</span>}
+        {h?.status === "failed" && <span className="chip bg-amber-50 text-amber-800">넘기지 못함</span>}
+        {(!h || h.status === "not_handed") && <span className="chip bg-ink-50 text-ink-700">아직 안 넘김</span>}
+        {!handed && (
+          <button className="btn-primary ml-auto text-xs" disabled={busy || !HUMAN_TOKEN_SET} onClick={() => void run()} title={HUMAN_TOKEN_SET ? undefined : "사람 토큰이 없어 쓸 수 없습니다"}>
+            {busy ? "넘기는 중" : h?.status === "failed" ? "다시 넘기기" : "SNS·미디어로 넘기기"}
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-ink-500">넘기면 SNS 글 초안과 미디어 요청 초안만 만듭니다. 이미지·영상 생성(비용)과 SNS 게시(사람 승인)는 자동으로 하지 않습니다. 초안과 게시물에는 AI 생성 표시가 들어갑니다.</p>
+      {!HUMAN_TOKEN_SET && <p className="text-xs text-ink-500">사람 토큰이 설정돼 있지 않아 넘길 수 없습니다.</p>}
+      {h?.status === "failed" && <p className="text-xs text-amber-800">{handoffReasonKo(h.reason_code)}</p>}
+      {handed && h && (
+        <p className="text-xs text-ink-700">
+          {shortDateTime(h.handed_at)} 넘김 · 초안 <span className="tabular-nums" title="SNS 게시 초안 번호">{h.draft_id}</span> · {draftStateKo(h.draft_state)} · 다음은 SNS·미디어 탭에서 이어갑니다.
+        </p>
+      )}
+      {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-800">{error}</p>}
+    </div>
+  );
+}
+
+function Detail({ item, onDone }: { item: StoredBrief; onDone: () => void }) {
   const b = item.brief;
   return (
     <article className="space-y-4 rounded-2xl border border-ink-100 p-5">
@@ -73,6 +120,8 @@ function Detail({ item }: { item: StoredBrief }) {
         <div className="flex gap-2"><dt className="text-xs text-ink-500">상품</dt><dd>{b.products.length ? b.products.join(", ") : "정하지 않음"}</dd></div>
       </dl>
       {b.note && <p className="rounded-lg bg-ink-50 px-3 py-2 text-xs"><span className="text-ink-500">메모 </span>{b.note}</p>}
+
+      <HandoffBox item={item} onDone={onDone} />
 
       {b.body_md && (
         <details className="rounded-lg border border-ink-100 px-3 py-2 text-xs">
@@ -145,7 +194,7 @@ export function ReceivedBriefs() {
               );
             })}
           </ul>
-          {current && <Detail item={current} />}
+          {current && <Detail item={current} onDone={() => void load()} />}
         </>
       )}
     </section>

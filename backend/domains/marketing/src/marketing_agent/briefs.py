@@ -15,6 +15,11 @@
   기획 쪽은 이미 넘겼다고(`handoff.ok`) 남기므로, 파일 없이 다시 시작하면 마케팅 목록과 어긋난다.
   저장은 마케팅 전용 파일이고 다른 부서 DB는 쓰지 않는다. 값은 받은 그대로(JSON) 넣고 고치지 않는다.
 
+- SNS·미디어로 넘긴 상태(`sns_handoff`)는 같은 파일의 별도 표 `brief_sns_handoffs`에 둔다
+  (기존 표·기존 파일 그대로 호환: `CREATE TABLE IF NOT EXISTS`만 추가).
+  받은 기획안 본문은 넘겨도 바뀌지 않는다.
+  넘기는 일은 `brief_handoff.py`가 한다.
+
 거절 이유 코드(`reason_code`, 닫힌 집합):
 - `unsupported_schema_version`: 마케팅이 읽을 수 없는 `schema_version`
 - `invalid_proposal_id`: `proposal_id`가 비었거나 영문·숫자·`_`·`-`(64자 이하)가 아님
@@ -80,12 +85,45 @@ class StoredBrief(AxModel):
     brief: CampaignBriefInput
 
 
+HandoffStatus = Literal["not_handed", "handed", "failed"]
+DraftState = Literal["caption_only", "media_attached", "missing"]
+
+
+class SnsHandoffRecord(AxModel):
+    """SNS·미디어로 넘긴 기록(저장본). 초안·미디어 요청 초안 번호만 담는다."""
+
+    proposal_id: str
+    status: Literal["handed", "failed"]
+    draft_id: str | None = None
+    media_request: dict | None = None
+    reason_code: str | None = None
+    handed_at: UtcDatetime | None = None  # 처음 넘긴 시각. 실패 기록은 없다
+    updated_at: UtcDatetime
+
+
+class SnsHandoffState(AxModel):
+    """화면·호출자가 보는 넘김 상태. 기록이 없으면 `not_handed`다(지어낸 값 없음)."""
+
+    status: HandoffStatus = "not_handed"
+    draft_id: str | None = None
+    media_request: dict | None = None
+    reason_code: str | None = None
+    handed_at: UtcDatetime | None = None
+    draft_state: DraftState | None = None  # 초안이 SNS 초안 저장소에 있는지·미디어가 붙었는지
+
+
+class StoredBriefView(StoredBrief):
+    """받은 기획안 + 넘김 상태. 목록·조회 출력에 쓴다(저장본 `StoredBrief`는 바뀌지 않는다)."""
+
+    sns_handoff: SnsHandoffState = Field(default_factory=SnsHandoffState)
+
+
 class ListCampaignBriefsInput(AxModel):
     limit: int = Field(default=LIST_LIMIT_DEFAULT, ge=1, le=LIST_LIMIT_MAX)
 
 
 class CampaignBriefList(AxModel):
-    items: list[StoredBrief]
+    items: list[StoredBriefView]
     total: int
     unknown_reason: str | None = None
 
@@ -97,7 +135,7 @@ class GetCampaignBriefInput(AxModel):
 
 class CampaignBriefView(AxModel):
     found: bool
-    item: StoredBrief | None = None
+    item: StoredBriefView | None = None
     unknown_reason: str | None = None
 
 
@@ -107,6 +145,14 @@ CREATE TABLE IF NOT EXISTS campaign_briefs (
     proposal_id TEXT NOT NULL UNIQUE,
     campaign_id TEXT NOT NULL UNIQUE,
     received_at TEXT NOT NULL,
+    payload     TEXT NOT NULL
+);
+"""
+_HANDOFF_SCHEMA = """
+CREATE TABLE IF NOT EXISTS brief_sns_handoffs (
+    proposal_id TEXT PRIMARY KEY,
+    status      TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
     payload     TEXT NOT NULL
 );
 """
@@ -127,6 +173,7 @@ class BriefStore:
             self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
             with self._lock, self._conn:
                 self._conn.execute(_SCHEMA)
+                self._conn.execute(_HANDOFF_SCHEMA)
         except sqlite3.Error as error:
             raise BriefStorageError(
                 f"기획안 저장소를 열 수 없다: {type(error).__name__}"
@@ -198,3 +245,39 @@ class BriefStore:
             return found
         found_list = self._rows("WHERE campaign_id = ?", (campaign_id or "",))
         return found_list[0] if found_list else None
+
+    # --- SNS·미디어 넘김 기록 -------------------------------------------------------
+
+    def handoff(self, proposal_id: str) -> SnsHandoffRecord | None:
+        try:
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT payload FROM brief_sns_handoffs WHERE proposal_id = ?", (proposal_id,)
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise BriefStorageError(f"넘김 기록을 읽을 수 없다: {type(error).__name__}") from error
+        if row is None:
+            return None
+        try:
+            return SnsHandoffRecord.model_validate_json(row[0])
+        except ValidationError:  # 읽을 수 없는 줄은 없는 것으로 본다(다시 넘기면 덮어쓴다)
+            return None
+
+    def save_handoff(self, record: SnsHandoffRecord) -> None:
+        """기획안당 한 줄. 다시 저장하면 덮어쓴다(실패 기록을 성공으로 바꾸는 경우)."""
+        try:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO brief_sns_handoffs"
+                    " (proposal_id, status, updated_at, payload) VALUES (?, ?, ?, ?)",
+                    (
+                        record.proposal_id,
+                        record.status,
+                        record.updated_at.isoformat(),
+                        record.model_dump_json(),
+                    ),
+                )
+        except sqlite3.Error as error:
+            raise BriefStorageError(
+                f"넘김 기록을 저장할 수 없다: {type(error).__name__}"
+            ) from error

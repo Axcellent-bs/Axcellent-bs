@@ -1,5 +1,6 @@
 import { ApiError } from "./apiError";
-import { RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
+import { writeAuth } from "./api";
+import { DASHBOARD_API_URL, RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
 
 // 마케팅이 기획에서 받은 기획안 읽기. 화면은 마케팅을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
 // 응답 모양은 ax-backend `marketing_agent/briefs.py`(`StoredBrief`)와 계약 `CampaignBriefInput` 기준이다.
@@ -23,8 +24,33 @@ export interface BriefBody {
   body_md: string | null;
 }
 
+/** 미디어 요청 초안. 생성은 사람이 시작하므로 `auto_generate`는 항상 false다 */
+export interface SnsMediaRequest {
+  media_kind: string;
+  scene_template_id: string;
+  resolution: string;
+  quality: string | null;
+  duration_s: number | null;
+  media_ref: string;
+  fields: Record<string, string>;
+  missing_fields: string[];
+  next_steps: string[];
+  auto_generate: boolean;
+}
+
+/** SNS·미디어로 넘긴 상태. 마케팅 서버가 알려 주는 값만 쓴다(옛 서버는 이 칸이 없을 수 있다) */
+export interface SnsHandoff {
+  status: "not_handed" | "handed" | "failed";
+  draft_id: string | null;
+  media_request: SnsMediaRequest | null;
+  reason_code: string | null;
+  handed_at: string | null;
+  draft_state: "caption_only" | "media_attached" | "missing" | null;
+}
+
 /** 받은 기획안. 지금 마케팅이 아는 상태는 `received`(받음)뿐이다 */
 export interface StoredBrief {
+  sns_handoff?: SnsHandoff;
   campaign_id: string;
   proposal_id: string;
   status: "received";
@@ -59,9 +85,43 @@ async function get<T>(path: string): Promise<T> {
   return body.data;
 }
 
+export interface HandoffAnswer { status: string; outcome: string | null; output: { outcome: string; sns_handoff: SnsHandoff; campaign_id: string | null } }
+
+/** 기획안을 SNS·미디어로 넘긴다(dashboard-api, 사람 토큰 필요). 미디어 생성·게시는 하지 않고 초안만 만든다 */
+async function handoff(proposalId: string): Promise<HandoffAnswer> {
+  const path = `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/sns-handoff`;
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    body: JSON.stringify({ media_kind: "image" }),
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(json?.error?.message ?? `요청 실패 (${res.status})`, res.status);
+  return json.data as HandoffAnswer;
+}
+
 export const briefs = {
   list: (limit = 50) => get<BriefList>(`/api/shop/admin/marketing/briefs?limit=${limit}`),
+  handoff,
 };
+
+export const HANDOFF_REASON_KO: Record<string, string> = {
+  price_not_found: "이미지 단가표에 없는 조합이라 넘기지 않았습니다",
+  model_not_configured: "이미지 모델이 설정되지 않아 넘기지 않았습니다",
+  price_table_error: "단가표를 읽을 수 없어 넘기지 않았습니다",
+  unknown_scene_template: "장면 템플릿을 찾을 수 없습니다",
+  caption_too_long: "캡션이 너무 길어 초안을 만들 수 없습니다",
+  forbidden_phrase: "참여를 조건으로 거는 말이 있어 초안을 만들 수 없습니다",
+};
+export const handoffReasonKo = (code: string | null) => (code ? HANDOFF_REASON_KO[code] ?? `넘기지 못했습니다 (${code})` : "");
+
+export const DRAFT_STATE_KO: Record<string, string> = {
+  caption_only: "캡션 초안만 있음 (미디어 없음)",
+  media_attached: "미디어가 붙은 초안",
+  missing: "초안 저장소에 없음 (다시 넘기면 복원)",
+};
+export const draftStateKo = (state: string | null) => (state ? DRAFT_STATE_KO[state] ?? state : "확인할 수 없음");
 
 /** 연결 오류를 화면 문구로 */
 export function briefsError(error: { status?: number; message: string }): string {

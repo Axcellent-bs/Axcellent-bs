@@ -32,6 +32,7 @@ from pydantic import Field, StrictBool, ValidationError, model_validator
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel
 from marketing_agent import sns_media
+from marketing_agent.briefs import BriefStorageError, BriefStore
 from marketing_agent.notice import NoticeStore
 from marketing_agent.schemas import NoticeKind
 
@@ -95,10 +96,15 @@ class PlatformOptions(AxModel):
 
 
 class DraftSnsPostInput(AxModel):
-    """`notice_id`(게시된 공지) 또는 `coupon`(공개 쿠폰 사실) 중 정확히 하나."""
+    """`notice_id`(게시된 공지), `coupon`(공개 쿠폰 사실), `proposal_id`(보관한 기획안) 중 하나.
+
+
+    기획안은 호출자가 글을 넘기지 않고 번호만 준다. 글은 마케팅이 보관한 기획안에서 읽는다.
+    """
 
     notice_id: str | None = None
     coupon: SnsCouponFacts | None = None
+    proposal_id: str | None = None
     platform: Literal["instagram"] = "instagram"
     media_kind: Literal["image", "reel", "carousel"] = "image"
     # `MARKETING_MEDIA_DIR` 안의 라벨 입힌 결과 파일(예: .../labeled.jpg).
@@ -110,8 +116,9 @@ class DraftSnsPostInput(AxModel):
 
     @model_validator(mode="after")
     def _exactly_one_source(self) -> DraftSnsPostInput:
-        if (self.notice_id is None) == (self.coupon is None):
-            raise ValueError("notice_id와 coupon 중 하나만 준다")
+        given = [x for x in (self.notice_id, self.coupon, self.proposal_id) if x is not None]
+        if len(given) != 1:
+            raise ValueError("notice_id, coupon, proposal_id 중 하나만 준다")
         if self.media_kind == "carousel":
             paths = self.asset_paths or []
             if self.asset_path is not None or not (
@@ -132,8 +139,8 @@ class CarouselAsset(AxModel):
 
 class SnsPostDraft(AxModel):
     post_draft_id: str
-    source_kind: Literal["notice", "coupon"]
-    source_ref: str  # notice_id 또는 campaign_id
+    source_kind: Literal["notice", "coupon", "brief"]
+    source_ref: str  # notice_id, campaign_id 또는 proposal_id
     notice_kind: NoticeKind | None = None  # 공지 출처의 종류. 없으면(쿠폰·옛 초안) 상품 홍보로 본다
     platform: Literal["instagram"]
     media_kind: Literal["image", "reel", "carousel"]
@@ -297,7 +304,7 @@ def _coupon_body(facts: SnsCouponFacts) -> str:
 class SourceParts:
     """초안 본문의 출처(공지 또는 쿠폰 사실)에서 뽑은 값."""
 
-    kind: Literal["notice", "coupon"]
+    kind: Literal["notice", "coupon", "brief"]
     ref: str
     body: str
     required: list[str]
@@ -305,8 +312,20 @@ class SourceParts:
     notice_kind: NoticeKind | None = None  # 공지 출처일 때 그 공지의 종류
 
 
+def _brief_body(stored: Any) -> str:
+    """보관된 기획안의 title·idea·why·facts를 받은 그대로 옮긴다. 숫자는 만들지 않는다."""
+    b = stored.brief
+    lines = [b.title.strip(), "", b.idea.strip(), "", b.why.strip()]
+    if b.facts:
+        lines += ["", "근거"] + [f"- {f.label.strip()}: {f.value.strip()}" for f in b.facts]
+    return "\n".join(lines)
+
+
 def source_parts(
-    request: AgentRequest, data: DraftSnsPostInput, notices: NoticeStore
+    request: AgentRequest,
+    data: DraftSnsPostInput,
+    notices: NoticeStore,
+    briefs: BriefStore | None = None,
 ) -> SourceParts | AgentResult:
     """출처를 확인해 본문 재료를 돌려준다. 쓸 수 없는 출처면 결과 Task를 돌려준다(저장하지 않는다).
 
@@ -322,6 +341,19 @@ def source_parts(
         return SourceParts(
             "notice", data.notice_id, body, [body, DEMO_TEXT, TERMS_TEXT], [], view.kind
         )
+    if data.proposal_id is not None:
+        if briefs is None:
+            return _result(request, TaskStatus.FAILED, outcome="brief_not_found")
+        try:
+            stored = briefs.existing(data.proposal_id)
+        except BriefStorageError:
+            return _result(request, TaskStatus.FAILED, outcome="storage_error")
+        if stored is None:
+            return _result(request, TaskStatus.FAILED, outcome="brief_not_found")
+        body = _brief_body(stored)
+        if any(phrase in body for phrase in FORBIDDEN_PHRASES):  # 참여 조건부 게시 금지
+            return _result(request, TaskStatus.FAILED, outcome="forbidden_phrase")
+        return SourceParts("brief", data.proposal_id, body, [body, DEMO_TEXT, TERMS_TEXT], [])
     assert data.coupon is not None
     facts = data.coupon
     have = {c.code for c in facts.constraints}
@@ -356,7 +388,10 @@ def preflight_draft(
 
 
 async def draft_sns_post(
-    request: AgentRequest, notices: NoticeStore, store: SnsStore
+    request: AgentRequest,
+    notices: NoticeStore,
+    store: SnsStore,
+    briefs: BriefStore | None = None,
 ) -> AgentResult:
     try:
         data = DraftSnsPostInput.model_validate(request.input)
@@ -370,7 +405,7 @@ async def draft_sns_post(
             },
         )
 
-    parts = source_parts(request, data, notices)
+    parts = source_parts(request, data, notices, briefs)
     if isinstance(parts, AgentResult):
         return parts
     source_kind, source_ref, body = parts.kind, parts.ref, parts.body
@@ -605,7 +640,10 @@ async def check_sns_post(request: AgentRequest, store: SnsStore) -> AgentResult:
     # 이 검사와 별개 규칙이다: 캡션이 초안과 같아야 하고(caption_differs_from_draft) 초안 문안에
     # 원인·영향을 적지 않는다(notice.py 템플릿)
     unverified = 0
-    if draft.source_kind == "notice" and is_product_promotion(draft):  # 쿠폰은 현행대로 제외
+    # 기획안 초안도 같은 규칙이다(본문이 required_text라 받은 그대로의 숫자만 통과한다)
+    if draft.source_kind in ("notice", "brief") and is_product_promotion(
+        draft
+    ):  # 쿠폰은 현행대로 제외
         rest = caption
         for fragment in [*draft.required_text, label_text, *draft.hashtags]:
             rest = rest.replace(fragment, "")

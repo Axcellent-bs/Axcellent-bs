@@ -119,6 +119,18 @@
       "priority": "recommended"
     },
     {
+      "id": "handoff_brief_to_sns",
+      "description": "받은 기획안(proposal_id 또는 campaign_id) 하나를 SNS·미디어 작업으로 넘긴다. 보관된 기획안의 title·idea·why·facts를 받은 그대로(숫자 계산 없음) 기존 draft_sns_post로 SNS 글 초안을 만들어 보관하고, 장면 템플릿 기반 미디어 요청 초안(media_kind image 기본·video, 템플릿 필드는 사람이 정할 때까지 비어 있음)을 함께 기록한다. 단가표(prices.toml)에 실제 공급자·모델 조합이 없으면 넘기지 않고 failed(price_not_found·model_not_configured·price_table_error, fail-closed). 미디어 생성(generate_media, B등급 비용)과 게시(publish_sns, C등급 사람 승인)는 부르지 않는다. 결과 outcome은 handed·already_handed(같은 기획안은 멱등, 보관본 그대로)·failed(reason_code), 없는 기획안은 brief_not_found. 넘김 상태(not_handed·handed·failed)는 기획안 저장소(MARKETING_BRIEFS_DB)에 남아 list_campaign_briefs·get_campaign_brief의 sns_handoff로 읽는다. 마케팅 전용 저장소만 쓰고 외부 호출·게시가 없어 execute()를 부르지 않는다.",
+      "input_schema": "agents/marketing/src/marketing_agent/brief_handoff.py#HandoffBriefToSnsInput",
+      "output_schema": "agents/marketing/src/marketing_agent/brief_handoff.py#HandoffBriefToSnsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "build_campaign_link",
       "description": "캠페인 링크(base_url)에 UTM 꼬리표(utm_source·utm_medium·utm_campaign)를 붙여 돌려준다. utm_campaign은 받은 기획안의 campaign_id(cmp_PROP-n)를 그대로 쓴다. source는 banner·notice·instagram·google·youtube, medium은 onsite·social·cpc 중 맞는 조합만 받고(banner·notice=onsite, instagram=social, google=cpc, youtube=social|cpc), base_url은 http/https만 받는다. 기존 쿼리·프래그먼트는 보존하고 같은 utm 키는 덮어쓴다. 어긋나면 invalid_input. 순수 계산이라 상태를 바꾸지 않는다.",
       "input_schema": "agents/marketing/src/marketing_agent/links.py#BuildCampaignLinkInput",
