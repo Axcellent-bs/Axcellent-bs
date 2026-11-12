@@ -3,10 +3,13 @@
 정의
 - 사건: `ctx_inc_` context_id의 기록 묶음. 입력 `context_ids`를 주면 그 context만 사건으로 본다.
   사건이 아닌 기록(context_id 없음, `ctx_req_` 등)은 사건 목록과 합계에서 뺀다.
-- detected_at: 사건의 가장 이른 기록 시각.
-- recovered_at: `event_published`(event_type=incident.resolved) 첫 시각. 총괄은 서버·업무 지표가
-  둘 다 정상일 때만 발행하므로 1순위다. 없으면 `verify_recovery` 완료(`result_sent`, completed)
-  첫 시각(복구 여부는 로그에 없어 미확인), 그것도 없으면 None.
+- detected_at: 총괄의 incident.resolved 기록에 `payload.detected_at`(이벤트를 연 시각)이 있으면
+  그 값, 없으면 사건의 가장 이른 기록 시각(예전 로그).
+- recovered_at: `event_published`(event_type=incident.resolved) 첫 기록. 총괄은 이벤트가 해결로
+  끝날 때 한 번 남기므로 1순위다. 그 기록에 `payload.recovered_at`이 있으면 그 값(총괄
+  `metrics.mttr_seconds`의 끝 시각), 없으면 기록 시각(예전 로그). 기록이 없으면
+  `verify_recovery` 완료(`result_sent`, completed) 첫 시각(복구 여부는 로그에 없어 미확인),
+  그것도 없으면 None.
 - resolved_notice_at: 두 번째로 완료된 `publish_notice`(정상화 공지) 시각. 없으면 None.
 - mttr_seconds: recovered_at − detected_at (정수 초). recovered_at이 없으면 None.
 - used_memory: 사건에 `memory_referenced` 기록이 있으면 True.
@@ -60,12 +63,37 @@ def _completed(skill: str) -> Callable[[LogRecord], bool]:
     return predicate
 
 
-def _recovery(records: list[LogRecord]) -> tuple[datetime | None, str | None]:
-    if resolved := _times(records, _is_resolved):
-        return resolved[0], RESOLVED_EVENT
+def _payload_time(r: LogRecord, key: str) -> datetime | None:
+    """incident.resolved 기록에 실린 시각(ISO). 없거나 읽을 수 없으면 None."""
+    raw = r.payload.get(key)
+    if not isinstance(raw, str):
+        return None
+    try:
+        at = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return at if at.tzinfo is not None else None  # 시간대 없는 값은 비교할 수 없어 쓰지 않는다
+
+
+def _recovery(
+    records: list[LogRecord],
+) -> tuple[datetime | None, str | None, datetime | None]:
+    """(복구 시각, 근거, 기록에 실린 감지 시각).
+
+    총괄이 남긴 incident.resolved 기록에 `recovered_at`·`detected_at`이 있으면 그 값을 쓴다
+    (총괄 `metrics.mttr_seconds`와 같은 기준). 없으면 예전처럼 기록 시각을 쓴다.
+    """
+    resolved = sorted((r for r in records if _is_resolved(r)), key=lambda r: r.occurred_at)
+    if resolved:
+        first = resolved[0]
+        recovered = _payload_time(first, "recovered_at")
+        detected = _payload_time(first, "detected_at")
+        if recovered is not None and detected is not None and recovered < detected:
+            recovered = detected = None  # 앞뒤가 바뀐 값은 믿지 않고 기록 시각으로 센다
+        return recovered or first.occurred_at, RESOLVED_EVENT, detected
     if verified := _times(records, _completed(RECOVERY_SKILL)):
-        return verified[0], RECOVERY_SKILL
-    return None, None
+        return verified[0], RECOVERY_SKILL, None
+    return None, None, None
 
 
 def _is_incident(context_id: str | None, explicit: set[str]) -> bool:
@@ -86,8 +114,8 @@ def compute_kpi(records: list[LogRecord], context_ids: list[str] | None = None) 
     basis: dict[str, str | None] = {}
     incidents: list[IncidentKpi] = []
     for context_id, recs in by_context.items():
-        detected_at = min(r.occurred_at for r in recs)
-        recovered_at, basis[context_id] = _recovery(recs)
+        recovered_at, basis[context_id], logged_detected = _recovery(recs)
+        detected_at = logged_detected or min(r.occurred_at for r in recs)
         notices = _times(recs, _completed(NOTICE_SKILL))
         notice_at = notices[1] if len(notices) >= 2 else None
         if basis[context_id] == RECOVERY_SKILL:

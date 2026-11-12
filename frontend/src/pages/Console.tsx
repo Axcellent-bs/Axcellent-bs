@@ -95,7 +95,7 @@ function Console() {
             <main className="card flex min-w-0 flex-1 flex-col overflow-hidden">
               <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink-100 bg-surface px-6 py-3">
                 <div className="min-w-[16rem] flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><h1 className="truncate text-base font-semibold">{conv.customer_name}</h1><span className="chip bg-ink-100 text-ink-500">{STATUS_KO[conv.status]}</span><span className="chip bg-indigo-50 text-indigo-800">{tenantName(conv.tenant_id)}</span>{conv.triage && <span className="chip bg-amber-50 text-amber-800">{conv.triage.state === "done" ? `분류 완료${conv.triage.label ? ` · ${conv.triage.label}` : ""}` : "분류 필요"}</span>}</div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><h1 className="truncate text-base font-semibold">{conv.customer_name}</h1><span className="chip whitespace-nowrap bg-ink-100 text-ink-500">{STATUS_KO[conv.status]}</span><span className="chip whitespace-nowrap bg-indigo-50 text-indigo-800">{tenantName(conv.tenant_id)}</span>{conv.triage && <span className="chip whitespace-nowrap bg-amber-50 text-amber-800">{conv.triage.state === "done" ? `분류 완료${conv.triage.label ? ` · ${conv.triage.label}` : ""}` : "분류 필요"}</span>}</div>
                   <p className="truncate text-xs text-ink-500">{conv.subject_display ?? conv.subject}{conv.order_no && ` · 주문 ${conv.order_no}`} · 문의 #{conv.id}</p>
                 </div>
                 <div className="ml-auto flex flex-wrap gap-2">
@@ -108,9 +108,9 @@ function Console() {
               </div>
               {conv.summary && showSummary && <SummaryCard s={conv.summary} onClose={() => setShowSummary(false)} />}
               <Thread conv={conv} />
-              <div className="flex shrink-0 items-center gap-2 border-t border-dashed border-ink-100 bg-surface-2 px-6 py-2">
-                <span className="text-[11px] font-medium text-ink-500">고객 후속 메시지 시뮬레이션</span>
-                <input className="field flex-1 py-1 text-xs" placeholder="예: 반품 보냈는데 환불은 언제 되나요?" value={followUp} aria-label="고객 후속 메시지"
+              <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-dashed border-ink-100 bg-surface-2 px-6 py-2">
+                <span className="whitespace-nowrap text-[11px] font-medium text-ink-500">고객 후속 메시지 시뮬레이션</span>
+                <input className="field min-w-[8rem] flex-1 py-1 text-xs" placeholder="예: 반품 보냈는데 환불은 언제 되나요?" value={followUp} aria-label="고객 후속 메시지"
                   onChange={(e) => setFollowUp(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && followUp.trim() && !busy) run("follow", async () => { await afterChange(await api.admin.customerMessage(conv.id, followUp)); setFollowUp(""); }); }} />
                 <button className="btn-ghost py-1 text-xs" disabled={!followUp.trim() || busy !== null} onClick={() => run("follow", async () => { await afterChange(await api.admin.customerMessage(conv.id, followUp)); setFollowUp(""); })}>{busy === "follow" ? "분석 중…" : "고객으로 보내기"}</button>

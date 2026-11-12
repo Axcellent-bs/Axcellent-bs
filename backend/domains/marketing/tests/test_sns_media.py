@@ -398,8 +398,11 @@ def test_config_file_controls_text_and_position(tmp_path: Path) -> None:
     textfile = tmp_path / "t.txt"
     top = sns_label.build_drawtext(cfg, "/f.ttf", 1000, 2000, str(textfile), cfg.text_video)
     bottom = sns_label.build_drawtext(base, "/f.ttf", 1000, 2000, str(textfile), cfg.text_video)
-    assert "y=120" in top  # 2000 x 0.06
-    assert "y=h-text_h-120" in bottom
+    # 여백은 상자 가장자리 기준이라 글자 위치에 상자 안쪽 여백(border)을 더한다.
+    # 1000x2000은 세로로 긴 화면이라 위·아래 여백이 2000 x 0.15 = 300이다
+    assert "y=320" in top  # 300 + border 20(글자 100px x 0.2)
+    assert "y=h-text_h-313" in bottom  # 300 + border 13(글자 64px x 0.2)
+    assert "x=w-text_w-63" in bottom  # 기본은 오른쪽: 좌우 여백 1000 x 0.05 = 50 + border 13
     assert "fontsize=100" in top and "fontsize=64" in bottom
     assert "enable" not in top  # 표시 시간 제한 없음 = 전 구간
     assert textfile.read_text(encoding="utf-8") == "CUSTOM LABEL"

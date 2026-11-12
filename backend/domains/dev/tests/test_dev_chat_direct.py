@@ -214,3 +214,31 @@ def test_rest_send_answers_later_and_close(service: PlanningService, adapter) ->
         again = c.post(URL, json={"thread_id": th["id"], "message": "다시"})
         assert again.status_code == 409 and again.json()["error"]["code"] == "THREAD_CLOSED"
         assert c.post(f"{URL}/chat-99/close").status_code == 404
+
+
+def test_dashboard_and_screen_chats_do_not_mix(service: PlanningService, adapter) -> None:
+    """대시보드 AI 대화방(A2A) 대화와 개발 화면 대화 패널(REST) 대화는 서로 보이지 않는다."""
+    dev_chat.set_llm(ChatLLM([ASK]))
+    with TestClient(app) as c:
+        screen = c.post(URL, json={"message": "화면에서 연 대화"}).json()["data"]
+        assert screen["origin"] == "screen"
+
+        async def from_dashboard() -> tuple[str, list[str]]:
+            sent = await handlers.dev_chat_send(
+                _req("dev_chat_send", {"who": "yejin", "message": "대화방에서 연 대화"})
+            )
+            await dev_chat.wait_idle()
+            listed = await handlers.dev_chat_list(_req("dev_chat_list", {"who": "yejin"}))
+            other = await handlers.dev_chat_get(
+                _req("dev_chat_get", {"who": "yejin", "thread_id": screen["id"]})
+            )
+            assert other.status == TaskStatus.FAILED and other.outcome == "not_found"
+            return sent.output["thread"]["id"], [t["id"] for t in listed.output["threads"]]
+
+        dash, dash_ids = asyncio.run(from_dashboard())
+        assert dash_ids == [dash]
+        assert service.chat_of(dash).origin == "dashboard"
+        assert [t["id"] for t in c.get(URL).json()["data"]] == [screen["id"]]
+        assert c.get(f"{URL}/{dash}").status_code == 404
+        assert c.post(URL, json={"thread_id": dash, "message": "끼어들기"}).status_code == 404
+        assert c.post(f"{URL}/{dash}/close").status_code == 404

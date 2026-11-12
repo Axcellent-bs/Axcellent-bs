@@ -76,7 +76,7 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated, 
   const gap = a ? policyGap(a.sources) : null;
 
   return (
-    <aside className="scroll-thin flex w-[380px] shrink-0 flex-col gap-4 overflow-y-auto rounded-3xl bg-surface-2 p-4" aria-label="상담 코파일럿">
+    <aside className="scroll-thin flex w-[320px] shrink-0 flex-col gap-4 overflow-y-auto rounded-3xl xl:w-[380px] bg-surface-2 p-4" aria-label="상담 코파일럿">
       {cls && (
         <section>
           <h3 className="panel-title mb-2">문의 분석</h3>
@@ -103,7 +103,7 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated, 
       {conv.category === "privacy_deletion" && <DataPurgeCard key={conv.id} conversationId={conv.id} />}
 
       {conv.order_id && (
-        <section>
+        <section key={conv.id}>
           <h3 className="panel-title mb-2">연결된 주문 · 클레임</h3>
           <div className="space-y-2">
             <p className="rounded-xl border border-ink-100 bg-surface px-3 py-2 text-xs">주문 <b>{conv.order_no ?? conv.order_id}</b> — 답변 초안은 이 영수증과 아래 판정을 근거로 만들어집니다.</p>

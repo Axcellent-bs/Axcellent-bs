@@ -39,7 +39,7 @@ from marketing_agent import sns, sns_label, sns_media
 from marketing_agent.media.audio_mix import AudioMixError, Runner, subprocess_runner
 from marketing_agent.media.bgm_flow import generate_media_flow
 from marketing_agent.media.config import MediaSettings, ffmpeg_bin
-from marketing_agent.media.skill import FromDecision
+from marketing_agent.media.skill import CostPlan, FromDecision, plan_cost
 from marketing_agent.notice import NoticeStore
 from marketing_agent.sns import PlatformOptions, SnsCouponFacts, SnsStore
 
@@ -63,13 +63,30 @@ class PrepareError(Exception):
         self.code = code
 
 
+class CarouselScene(AxModel):
+    """캐러셀 한 장의 `generate_media` 입력(자유 프롬프트 없음)."""
+
+    scene_template_id: str = Field(min_length=1)
+    fields: dict[str, Any] = Field(default_factory=dict)
+    resolution: str | None = Field(default=None, pattern=r"^\d{3,4}x\d{3,4}$")
+    quality: Literal["low", "medium", "high"] | None = None
+    claimed_cost_krw: StrictInt | None = Field(default=None, ge=0)
+
+    def identity(self) -> str:
+        return json.dumps(
+            [self.scene_template_id, self.fields, self.resolution, self.quality],
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+
+
 class PrepareSnsPostInput(AxModel):
     """`generate_media` 입력(자유 프롬프트 없음) + `draft_sns_post` 출처(정확히 하나)."""
 
     notice_id: str | None = None
     coupon: SnsCouponFacts | None = None
     media_kind: Literal["image", "video"] = "image"
-    scene_template_id: str = Field(min_length=1)
+    scene_template_id: str | None = Field(default=None, min_length=1)  # 캐러셀이면 비운다
     fields: dict[str, Any] = Field(default_factory=dict)
     resolution: str | None = Field(default=None, pattern=r"^(\d{3,4}x\d{3,4}|\d{3,4}p)$")
     quality: Literal["low", "medium", "high"] | None = None  # 이미지만
@@ -82,11 +99,27 @@ class PrepareSnsPostInput(AxModel):
     # 생성 장부·폴더의 묶음 id(`generate_media.post_draft_id`). 비우면 입력에서 정한다
     media_ref: str | None = Field(default=None, pattern=rf"^{_MEDIA_REF}$")
     platform_options: PlatformOptions = Field(default_factory=PlatformOptions)
+    # 캐러셀(이미지 2~10장): 장마다 장면 템플릿·필드를 준다. `scene_template_id`·`fields`는 비운다
+    # 영상 섞기는 이번 범위 밖이라 `media_kind="image"`만 된다
+    carousel_items: list[CarouselScene] | None = None
 
     @model_validator(mode="after")
     def _exactly_one_source(self) -> PrepareSnsPostInput:
         if (self.notice_id is None) == (self.coupon is None):
             raise ValueError("notice_id와 coupon 중 하나만 준다")
+        if self.carousel_items is None:
+            if self.scene_template_id is None:
+                raise ValueError("scene_template_id가 필요하다")
+            return self
+        if self.media_kind != "image" or self.scene_template_id is not None or self.fields:
+            raise ValueError("carousel_items는 image이고 scene_template_id·fields는 비운다")
+        if self.resolution or self.quality or self.duration_s or self.claimed_cost_krw is not None:
+            raise ValueError("carousel_items는 장마다 resolution·quality·claimed_cost_krw를 준다")
+        if not sns_media.CAROUSEL_MIN <= len(self.carousel_items) <= sns_media.CAROUSEL_MAX:
+            raise ValueError("carousel_item_count_out_of_range")
+        seen = {item.identity() for item in self.carousel_items}
+        if len(seen) != len(self.carousel_items):  # 같은 장면이 둘이면 같은 이미지가 두 번 들어간다
+            raise ValueError("carousel_duplicate_item")
         return self
 
     def reel(self) -> bool:
@@ -337,19 +370,18 @@ def _failed(request: AgentRequest, outcome: str, **output: Any) -> AgentResult:
 def _media_ref(data: PrepareSnsPostInput) -> str:
     if data.media_ref:
         return data.media_ref
-    seed = json.dumps(
-        [
-            data.notice_id,
-            data.coupon.campaign_id if data.coupon else None,
-            data.media_kind,
-            data.scene_template_id,
-            data.fields,
-            data.bgm_scene_template_id,
-            data.bgm_fields,
-        ],
-        sort_keys=True,
-        ensure_ascii=False,
-    )
+    parts: list[Any] = [
+        data.notice_id,
+        data.coupon.campaign_id if data.coupon else None,
+        data.media_kind,
+        data.scene_template_id,
+        data.fields,
+        data.bgm_scene_template_id,
+        data.bgm_fields,
+    ]
+    if data.carousel_items is not None:  # 단일 입력의 기존 id는 바뀌지 않는다
+        parts.append([item.model_dump(mode="json") for item in data.carousel_items])
+    seed = json.dumps(parts, sort_keys=True, ensure_ascii=False)
     return f"prep_{hashlib.sha256(seed.encode()).hexdigest()[:16]}"
 
 
@@ -394,6 +426,7 @@ async def prepare_sns_post_from_media(
     from_decision: FromDecision,
     settings: MediaSettings | None = None,
     runner: Runner = subprocess_runner,
+    prices_path: Path | None = None,
 ) -> AgentResult:
     try:
         data = PrepareSnsPostInput.model_validate(request.input)
@@ -404,6 +437,18 @@ async def prepare_sns_post_from_media(
             errors=[f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()],
         )
     settings = settings or MediaSettings.from_env()
+    if data.carousel_items is not None:
+        return await _prepare_carousel(
+            request,
+            data,
+            notices=notices,
+            store=store,
+            ledger=ledger,
+            from_decision=from_decision,
+            settings=settings,
+            runner=runner,
+            prices_path=prices_path,
+        )
     media_kind = "reel" if data.reel() else "image"
 
     # 0) 생성 전 확인. 여기서 막히면 비용이 나지 않는다
@@ -555,6 +600,244 @@ async def prepare_sns_post_from_media(
         output=output,
         evidence=evidence,
         fallback=True,  # 캡션은 LLM이 아니라 고정 템플릿이다(`draft_sns_post`와 같다)
+    )
+
+
+def _item_input(
+    data: PrepareSnsPostInput, item: CarouselScene, post_draft_id: str
+) -> dict[str, Any]:
+    raw = item.model_dump(mode="json", exclude_none=True)
+    return {"media_kind": "image", "post_draft_id": post_draft_id} | raw
+
+
+async def _prepare_carousel(
+    request: AgentRequest,
+    data: PrepareSnsPostInput,
+    *,
+    notices: NoticeStore,
+    store: SnsStore,
+    ledger: Any,
+    from_decision: FromDecision,
+    settings: MediaSettings,
+    runner: Runner,
+    prices_path: Path | None,
+) -> AgentResult:
+    """이미지 2~10장 캐러셀. 순서: 입력·출처·도구 확인 → 총비용 → 장마다 생성·변환·라벨 → 초안·점검.
+
+    - 총비용: 장마다 `plan_cost`(건당 상한·단가표 fail-closed)로 계산해 더하고, 이번 달 누적과 합쳐
+      월 상한을 넘으면 **한 장도 만들지 않고** 거절한다. 장부에 이미 끝난 장은 비용에 넣지 않는다.
+    - 생성은 장마다 `generate_media_flow`(B등급 안전 관문·장부 예약)를 그대로 거친다. 중간에 막히면
+      그 결과를 돌려주고, 같은 입력으로 다시 부르면 끝난 장은 재생된다.
+    - 장마다 규격 변환·AI 라벨 오버레이(오른쪽 하단)를 하고, 모든 장이 `check_sns_post`를 통과해야
+      `publishable`이다. 게시는 하지 않는다(`publish_sns`는 C등급 사람 승인).
+    """
+    assert data.carousel_items is not None
+    items = data.carousel_items
+    draft_in = sns.DraftSnsPostInput(
+        notice_id=data.notice_id,
+        coupon=data.coupon,
+        media_kind="image",  # 캡션 문구·길이 검사는 이미지와 같다
+        platform_options=data.platform_options,
+    )
+    blocked = sns.preflight_draft(request, draft_in, notices)
+    if blocked is not None:
+        return blocked
+    root = sns_media.media_root()
+    if root is None:
+        return _failed(request, "media_dir_not_configured", stage="preflight")
+    if not _is_inside(settings.media_dir, root):
+        return _failed(request, "media_dir_mismatch", stage="preflight")
+    missing_tool = preflight_tools()
+    if missing_tool is not None:
+        return _failed(request, "post_tools_unavailable", stage="preflight", reason=missing_tool)
+
+    media_ref = _media_ref(data)
+    item_ids = [f"{media_ref[:58]}-{index:02d}" for index in range(1, len(items) + 1)]
+
+    # 1) 총비용 미리 계산(돈이 나가기 전)
+    plans: list[CostPlan] = []
+    for index, (item, item_id) in enumerate(zip(items, item_ids, strict=True), 1):
+        gen_request = request.model_copy(
+            update={"skill": "generate_media", "input": _item_input(data, item, item_id)}
+        )
+        plan = plan_cost(gen_request, ledger=ledger, settings=settings, prices_path=prices_path)
+        if isinstance(plan, AgentResult):
+            return plan.model_copy(
+                update={
+                    "output": (plan.output or {}) | {"stage": "cost_preflight", "item_index": index}
+                }
+            )
+        plans.append(plan)
+    new_cost = sum(p.krw_est for p in plans if not p.settled)
+    total_est = sum(p.krw_est for p in plans)
+    if settings.monthly_budget_krw is not None:
+        try:
+            month_total = ledger.month_total(datetime.now(UTC).strftime("%Y-%m"))
+        except Exception:  # noqa: BLE001 - 장부를 못 읽으면 비용을 알 수 없다(fail-closed)
+            return _failed(request, "storage_error", stage="cost_preflight")
+        if month_total + new_cost > settings.monthly_budget_krw:
+            return _failed(
+                request,
+                "budget_exceeded",
+                stage="cost_preflight",
+                item_count=len(items),
+                cost_krw=new_cost,
+                month_total_krw=month_total,
+                limit_krw=settings.monthly_budget_krw,
+                note="장 수만큼 비용을 더해 월 상한을 넘는다. 한 장도 만들지 않았다",
+            )
+
+    # 2) 장마다 생성 → 변환·라벨
+    generations: list[dict[str, Any]] = []
+    labeled: list[sns_label.LabelResult] = []
+    item_details: list[dict[str, Any]] = []
+    for index, (item, item_id) in enumerate(zip(items, item_ids, strict=True), 1):
+        gen_request = request.model_copy(
+            update={"skill": "generate_media", "input": _item_input(data, item, item_id)}
+        )
+        generated = await generate_media_flow(
+            gen_request, ledger=ledger, from_decision=from_decision, settings=settings
+        )
+        if generated.outcome != "generated" or generated.output is None:
+            return generated.model_copy(
+                update={
+                    "output": (generated.output or {})
+                    | {
+                        "stage": "generate_media",
+                        "item_index": index,
+                        "completed_items": index - 1,
+                        "note": "끝난 장은 장부에 남았다. 같은 입력으로 다시 부르면 재생된다",
+                    }
+                }
+            )
+        gen = generated.output
+        asset = Path(gen["asset_ref"])
+        if not _is_inside(asset, root):
+            return _failed(request, "media_dir_mismatch", stage="generate_media", item_index=index)
+        try:
+            origin_sha = sns_media.sha256_file(asset)
+            converted, label, reused = await asyncio.to_thread(
+                _convert_and_label,
+                asset,
+                asset.parent,
+                "image",
+                gen["model_id"],
+                origin_sha,
+                runner,
+            )
+        except PrepareError as error:
+            return _failed(
+                request,
+                f"{error.stage}_failed",
+                stage=error.stage,
+                reason=error.code,
+                item_index=index,
+                media_id=gen["media_id"],
+                note="생성 비용은 이미 장부에 남았다. 같은 입력으로 다시 부르면 생성은 재생된다",
+            )
+        generations.append(gen)
+        labeled.append(label)
+        item_details.append(
+            {
+                "index": index,
+                "media_id": gen["media_id"],
+                "provider": gen["provider"],
+                "model_id": gen["model_id"],
+                "resolution": gen["resolution"],
+                "cost_krw": gen["cost_krw"],
+                "execution_id": gen["execution_id"],
+                "replayed": bool(gen.get("replayed")),
+                "conversion": converted.details,
+                "label": {
+                    "labeled_file": label.labeled_path.name,
+                    "labeled_sha256": label.labeled_sha256,
+                    "text": label.text,
+                    "reused": reused,
+                },
+            }
+        )
+
+    # 3) 초안 → 점검(모든 장)
+    drafted = await sns.draft_sns_post(
+        request.model_copy(
+            update={
+                "skill": "draft_sns_post",
+                "input": {
+                    **({"notice_id": data.notice_id} if data.notice_id else {}),
+                    **({"coupon": data.coupon.model_dump(mode="json")} if data.coupon else {}),
+                    "media_kind": "carousel",
+                    "asset_paths": [sns_media.asset_ref_for(r.labeled_path) for r in labeled],
+                    "platform_options": data.platform_options.model_dump(mode="json"),
+                },
+            }
+        ),
+        notices,
+        store,
+    )
+    if (
+        drafted.status != TaskStatus.COMPLETED
+        or drafted.output is None
+        or "caption" not in drafted.output
+    ):
+        return drafted.model_copy(
+            update={"output": (drafted.output or {}) | {"stage": "draft", "items": item_details}}
+        )
+    draft = drafted.output
+    checked = await sns.check_sns_post(
+        request.model_copy(
+            update={
+                "skill": "check_sns_post",
+                "input": {
+                    "post_draft_id": draft["post_draft_id"],
+                    "caption": draft["caption"],
+                    "is_ai_generated": True,
+                },
+            }
+        ),
+        store,
+    )
+    check = checked.output or {}
+    ready = check.get("verdict") == "approved" and check.get("publishable") is True
+    assets = draft["assets"]
+    total_cost = sum(g.get("total_cost_krw", g["cost_krw"]) for g in generations)
+    output = {
+        "stage": "draft_ready" if ready else "check_rejected",
+        "post_draft_id": draft["post_draft_id"],
+        "media_kind": "carousel",
+        "item_count": len(assets),
+        "assets": assets,
+        "asset_sha256": draft["asset_sha256"],
+        "caption": draft["caption"],
+        "items": item_details,
+        "cost": {
+            "estimated_krw": total_est,
+            "new_estimated_krw": new_cost,
+            "total_cost_krw": total_cost,
+        },
+        "check": check,
+        # 사람이 승인해 `publish_sns`(C등급)를 부를 때 쓸 값. 이 skill은 부르지 않는다
+        "publish_input": {
+            "post_draft_id": draft["post_draft_id"],
+            "media_kind": "carousel",
+            "asset_refs": [a["asset_ref"] for a in assets],
+            "asset_sha256s": [a["asset_sha256"] for a in assets],
+            "caption": draft["caption"],
+        },
+        "next_step": "publish_sns는 C등급이라 사람 승인이 필요하다. 이 skill은 게시하지 않는다.",
+    }
+    evidence = Evidence(
+        queries=[ACTION],
+        data_summary=f"캐러셀 {len(assets)}장 생성·라벨·초안·점검 ({'통과' if ready else '거절'})",
+        collected_at=datetime.now(UTC),
+        ref_ids=[draft["post_draft_id"], *[g["media_id"] for g in generations]],
+    )
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=None if ready else "rejected_by_check",
+        output=output,
+        evidence=evidence,
+        fallback=True,
     )
 
 

@@ -106,10 +106,12 @@ class DraftSnsPostInput(AxModel):
     coupon: SnsCouponFacts | None = None
     proposal_id: str | None = None
     platform: Literal["instagram"] = "instagram"
-    media_kind: Literal["image", "reel"] = "image"
+    media_kind: Literal["image", "reel", "carousel"] = "image"
     # `MARKETING_MEDIA_DIR` 안의 라벨 입힌 결과 파일(예: .../labeled.jpg).
     # 없으면 캡션만 있는 초안이다
     asset_path: str | None = None
+    # 캐러셀(`media_kind="carousel"`): 라벨 입힌 이미지 2~10장. 순서가 게시 순서다
+    asset_paths: list[str] | None = None
     platform_options: PlatformOptions = Field(default_factory=PlatformOptions)
 
     @model_validator(mode="after")
@@ -117,7 +119,22 @@ class DraftSnsPostInput(AxModel):
         given = [x for x in (self.notice_id, self.coupon, self.proposal_id) if x is not None]
         if len(given) != 1:
             raise ValueError("notice_id, coupon, proposal_id 중 하나만 준다")
+        if self.media_kind == "carousel":
+            paths = self.asset_paths or []
+            if self.asset_path is not None or not (
+                sns_media.CAROUSEL_MIN <= len(paths) <= sns_media.CAROUSEL_MAX
+            ):
+                raise ValueError("carousel_item_count_out_of_range")
+            if len(set(paths)) != len(paths):
+                raise ValueError("carousel_duplicate_asset")
+        elif self.asset_paths is not None:
+            raise ValueError("asset_paths는 carousel만 쓴다")
         return self
+
+
+class CarouselAsset(AxModel):
+    asset_ref: str  # 미디어 폴더 기준 상대 경로
+    asset_sha256: str
 
 
 class SnsPostDraft(AxModel):
@@ -126,7 +143,7 @@ class SnsPostDraft(AxModel):
     source_ref: str  # notice_id, campaign_id 또는 proposal_id
     notice_kind: NoticeKind | None = None  # 공지 출처의 종류. 없으면(쿠폰·옛 초안) 상품 홍보로 본다
     platform: Literal["instagram"]
-    media_kind: Literal["image", "reel"]
+    media_kind: Literal["image", "reel", "carousel"]
     caption: str
     hashtags: list[str]
     caption_sha256: str
@@ -135,7 +152,8 @@ class SnsPostDraft(AxModel):
     is_ai_generated: Literal[True] = True
     context_id: str
     asset_ref: str | None = None  # 미디어 폴더 기준 상대 경로
-    asset_sha256: str | None = None
+    asset_sha256: str | None = None  # 캐러셀이면 전체 해시(`carousel_sha256`)
+    assets: list[CarouselAsset] = Field(default_factory=list)  # 캐러셀의 각 장(게시 순서)
     platform_options: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -403,7 +421,21 @@ async def draft_sns_post(
         options["share_to_feed"] = True if share is None else share
     asset_ref: str | None = None
     asset_sha: str | None = None
-    if data.asset_path is not None:
+    carousel_assets: list[CarouselAsset] = []
+    if data.media_kind == "carousel":
+        for path in data.asset_paths or []:
+            try:
+                asset = sns_media.resolve_asset(path)
+            except sns_media.MediaPathError as error:
+                return _result(request, TaskStatus.FAILED, outcome=error.code)
+            carousel_assets.append(
+                CarouselAsset(
+                    asset_ref=sns_media.asset_ref_for(asset),
+                    asset_sha256=sns_media.sha256_file(asset),
+                )
+            )
+        asset_sha = sns_media.carousel_sha256([a.asset_sha256 for a in carousel_assets])
+    elif data.asset_path is not None:
         try:
             asset = sns_media.resolve_asset(data.asset_path)
         except sns_media.MediaPathError as error:
@@ -415,6 +447,7 @@ async def draft_sns_post(
         post_draft_id=content_id(caption_sha, asset_sha, data.media_kind, data.platform, options),
         asset_ref=asset_ref,
         asset_sha256=asset_sha,
+        assets=carousel_assets,
         platform_options=options,
         source_kind=source_kind,
         source_ref=source_ref,
@@ -469,7 +502,56 @@ def _overlay_recorded(asset: Path, asset_sha: str) -> bool:
     )
 
 
+def _check_carousel(draft: SnsPostDraft) -> _MediaOutcome:
+    """캐러셀의 모든 장을 하나씩 점검한다. 한 장이라도 라벨·규격이 어긋나면 전체가 거절이다."""
+    out = _MediaOutcome()
+    count = len(draft.assets)
+    items: list[dict[str, Any]] = []
+    out.details = {"item_count": count, "items": items}
+    if not sns_media.CAROUSEL_MIN <= count <= sns_media.CAROUSEL_MAX:
+        out.problems.append("carousel_item_count_out_of_range")
+        out.overlay_missing = 1
+        return out
+    if draft.asset_sha256 != sns_media.carousel_sha256([a.asset_sha256 for a in draft.assets]):
+        out.problems.append("asset_changed_after_draft")
+        out.asset_changed = 1
+    checked = True
+    marks: list[bool] = []
+    ratios: set[float] = set()
+    for index, item in enumerate(draft.assets, 1):
+        single = draft.model_copy(
+            update={
+                "media_kind": "image",
+                "asset_ref": item.asset_ref,
+                "asset_sha256": item.asset_sha256,
+                "assets": [],
+            }
+        )
+        part = _check_asset(single)
+        out.problems.extend(f"item_{index}:{p}" for p in part.problems)
+        out.warnings.extend(f"item_{index}:{w}" for w in part.warnings)
+        out.overlay_missing += part.overlay_missing
+        out.asset_changed += part.asset_changed
+        out.unavailable = out.unavailable or part.unavailable
+        checked = checked and part.checked
+        marks.append(part.machine_mark is True)
+        width, height = part.details.get("width"), part.details.get("height")
+        if isinstance(width, int) and isinstance(height, int) and height > 0:
+            ratios.add(round(width / height, 2))
+        items.append(
+            {"index": index, "asset_ref": item.asset_ref, "media_checked": part.checked}
+            | {k: v for k, v in part.details.items() if k in ("width", "height", "size_bytes")}
+        )
+    if len(ratios) > 1:  # 첫 장 비율로 잘릴 수 있다 [확인 필요: 공식 문서 대조 기록에 없다]
+        out.warnings.append("carousel_aspect_differs")
+    out.checked = checked
+    out.machine_mark = all(marks)
+    return out
+
+
 def _check_asset(draft: SnsPostDraft) -> _MediaOutcome:
+    if draft.media_kind == "carousel":
+        return _check_carousel(draft)
     out = _MediaOutcome()
     if draft.asset_ref is None or draft.asset_sha256 is None:
         out.warnings.append("media_not_attached")  # 캡션만 있는 초안: 게시할 수 없다

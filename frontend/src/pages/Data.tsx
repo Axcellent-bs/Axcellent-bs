@@ -11,7 +11,7 @@ import { useCompany } from "@/demo/company";
 
 // 데이터분석 AI 화면 = 고객사 데이터분석팀. 짜임은 재무 AI(/finance)와 같다.
 // 왼쪽 사이드바의 하위 탭 3개가 화면을 가른다(demo/services.ts data 서비스 children):
-// - /data 장애 영향 분석: 장애 사건 데이터(이상 감지 → 영향 분석 → 복구 확인 → 처리 시간 요약, ?incident=로 사건 고르기) + 그 아래 리포트(부서별 AI 업무 리포트 activity_report)
+// - /data 장애 영향 분석: 장애 사건 데이터(이상 감지 → 영향 분석 → 복구 확인 → 처리 시간 요약, ?incident=로 사건 고르기) + 그 아래 회사 현황 리포트(activity_report의 회사 숫자·달라진 점)
 // - /data/ops 운영 지표: 복구 속도 · AI 단독 처리율 · 평상시 지표 (components/data/LearningKpi.tsx)
 // - /data/trend 트렌드&콘텐츠: 감지 → 추천 → 넘김 → 성과 (components/data/TrendScan.tsx, 하위 탭은 #detect 등)
 // 옛 주소(/data#daily · #report · #trend · #trend/<단계>)는 새 주소로 옮긴다. 숫자는 서버가 계산한 값만 보여 주고, 없으면 빈 상태를 보여 준다(예시 숫자를 만들지 않는다).

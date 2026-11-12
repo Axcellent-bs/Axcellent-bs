@@ -606,7 +606,7 @@ def _draft_state(draft_id: str | None) -> DraftState | None:
     draft = STATE.sns.get(draft_id)
     if draft is None:
         return "missing"
-    return "media_attached" if draft.asset_ref else "caption_only"
+    return "media_attached" if (draft.asset_ref or draft.assets) else "caption_only"
 
 
 def _with_handoff(item: StoredBrief) -> StoredBriefView:

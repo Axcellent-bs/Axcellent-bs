@@ -16,6 +16,9 @@ from collections import Counter
 from dataclasses import dataclass
 
 from marketing_agent.sns_publish.instagram import (
+    CAROUSEL_MAX,
+    CAROUSEL_MIN,
+    CarouselRequest,
     ContainerRequest,
     ContainerStatus,
     IgApiError,
@@ -23,7 +26,15 @@ from marketing_agent.sns_publish.instagram import (
     MediaInfo,
 )
 
-OPS = ("create_container", "get_container_status", "media_publish", "get_media", "delete_media")
+OPS = (
+    "create_container",
+    "create_carousel_item",
+    "create_carousel_container",
+    "get_container_status",
+    "media_publish",
+    "get_media",
+    "delete_media",
+)
 
 
 @dataclass
@@ -38,10 +49,12 @@ class _Container:
     request: ContainerRequest
     polls: int = 0
     published_media_id: str | None = None
+    children: tuple[str, ...] = ()
 
 
 class MockInstagramAdapter:
     name = "mock"
+    supports_carousel = True
 
     def __init__(self, in_progress_polls: int = 0) -> None:
         self.in_progress_polls = in_progress_polls
@@ -49,6 +62,8 @@ class MockInstagramAdapter:
         self.containers: dict[str, _Container] = {}
         self.media: dict[str, MediaInfo] = {}
         self.create_requests: list[ContainerRequest] = []
+        self.carousel_item_refs: list[str] = []  # 자식으로 만든 media_ref(순서 그대로)
+        self.carousel_requests: list[CarouselRequest] = []
         self.report_ai_flag: bool | None = True  # get_media가 돌려줄 is_ai_generated
         self._failures: dict[str, list[_Failure]] = {}
         self._lose: dict[str, bool] = {}
@@ -84,6 +99,36 @@ class MockInstagramAdapter:
         container_id = f"mock_container_{self._seq}"
         self.containers[container_id] = _Container(request)
         self.create_requests.append(request)
+        return container_id
+
+    async def create_carousel_item(self, media_ref: str) -> str:
+        self.calls["create_carousel_item"] += 1
+        self._maybe_fail("create_carousel_item")
+        self._seq += 1
+        container_id = f"mock_child_{self._seq}"
+        # 자식은 AI 표시를 받지 않는다(is_ai_generated=False로 둔 이미지 컨테이너)
+        self.containers[container_id] = _Container(
+            ContainerRequest(media_ref, "image", "", False, False)
+        )
+        self.carousel_item_refs.append(media_ref)
+        return container_id
+
+    async def create_carousel_container(self, request: CarouselRequest) -> str:
+        self.calls["create_carousel_container"] += 1
+        self._maybe_fail("create_carousel_container")
+        if not CAROUSEL_MIN <= len(request.child_ids) <= CAROUSEL_MAX:
+            raise IgApiError(-1, None)  # 모르는 오류(2~10장이 아니다)
+        if any(child not in self.containers for child in request.child_ids):
+            raise IgApiError(24, 2207008)
+        self._seq += 1
+        container_id = f"mock_carousel_{self._seq}"
+        self.containers[container_id] = _Container(
+            ContainerRequest(
+                "carousel", "carousel", request.caption, request.is_ai_generated, False
+            ),
+            children=tuple(request.child_ids),
+        )
+        self.carousel_requests.append(request)
         return container_id
 
     async def get_container_status(self, container_id: str) -> ContainerStatus:
