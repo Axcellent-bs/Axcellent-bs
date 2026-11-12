@@ -164,7 +164,7 @@ def _validate(c: LabelConfig) -> None:
 
 
 def bundled_font(config: LabelConfig) -> Path | None:
-    """번들 글꼴(Pretendard Std Bold, OFL 1.1). 패키지 폴더 밖 경로는 쓰지 않는다."""
+    """번들 글꼴(Pretendard Bold, OFL 1.1). 패키지 폴더 밖 경로는 쓰지 않는다."""
     if not config.font_bundled:
         return None
     base = Path(__file__).resolve().parent

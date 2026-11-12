@@ -441,7 +441,7 @@ def test_font_order_env_then_bundled_then_system(
     config = sns_label.load_config()
     monkeypatch.delenv(sns_label.FONT_ENV, raising=False)
     bundled = sns_label.find_font(config)
-    assert bundled.endswith("PretendardStd-Bold.ttf") and Path(bundled).is_file()
+    assert bundled.endswith("Pretendard-Bold.ttf") and Path(bundled).is_file()
     system = tmp_path / "sys.ttf"  # 시스템 후보가 있어도 번들이 먼저다
     system.write_bytes(b"x")
     with_system = dataclasses.replace(config, font_candidates=(str(system),))
@@ -465,6 +465,6 @@ def test_no_font_anywhere_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_bundled_font_matches_recorded_hash_and_has_license() -> None:
     folder = Path(sns_label.__file__).parent / "assets" / "fonts"
-    digest = hashlib.sha256((folder / "PretendardStd-Bold.ttf").read_bytes()).hexdigest()
-    assert digest.startswith("d19618a699fa0ebb")
-    assert "SIL Open Font License" in (folder / "PretendardStd-OFL.txt").read_text("utf-8")
+    digest = hashlib.sha256((folder / "Pretendard-Bold.ttf").read_bytes()).hexdigest()
+    assert digest.startswith("c16b88c670d23e83")
+    assert "SIL Open Font License" in (folder / "Pretendard-OFL.txt").read_text("utf-8")

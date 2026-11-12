@@ -648,13 +648,14 @@ def test_missing_glyphs_detects_font_without_hangul(tmp_path: Path) -> None:
 
 
 @needs_ffmpeg
-def test_apply_label_refuses_font_without_glyphs(tmp_path: Path) -> None:
-    """한글이 없는 글꼴이면 네모로 그린 라벨을 만들지 않고 거절한다."""
+def test_apply_label_refuses_text_the_font_cannot_draw(tmp_path: Path) -> None:
+    """글꼴에 없는 글자가 문구에 있으면 네모로 그린 라벨을 만들지 않고 거절한다."""
     bundled = sns_label.bundled_font(sns_label.load_config())
     assert bundled is not None
-    if not sns_label.missing_glyphs(str(bundled), "생성형"):
-        pytest.skip("번들 글꼴에 한글이 있다(아래 xfail 시험이 통과하는 때)")
-    cfg = dataclasses.replace(sns_label.load_config(), font_file=str(bundled))
+    odd = "\U0001f600"  # 이모지: Pretendard에 없다
+    if not sns_label.missing_glyphs(str(bundled), odd):
+        pytest.skip("번들 글꼴에 시험용 글자가 있다")
+    cfg = dataclasses.replace(sns_label.load_config(), text_image=odd)
     src = tmp_path / "src.png"
     _ffmpeg("-f", "lavfi", "-i", "testsrc=size=720x900:rate=1", "-frames:v", "1", str(src))
     with pytest.raises(sns_label.LabelError) as caught:
@@ -663,13 +664,29 @@ def test_apply_label_refuses_font_without_glyphs(tmp_path: Path) -> None:
     assert not (tmp_path / "o" / "labeled.jpg").exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="번들 PretendardStd-Bold.ttf에 한글 글리프가 없다. 한글 포함 글꼴로 바꾸면 통과한다",
-)
 def test_bundled_font_covers_default_label_texts() -> None:
     cfg = sns_label.load_config()
     bundled = sns_label.bundled_font(cfg)
     assert bundled is not None
     for kind in ("image", "video", "unknown"):
         assert sns_label.missing_glyphs(str(bundled), cfg.text_for(kind)) == ""
+
+
+@needs_ffmpeg
+def test_default_labels_render_with_bundled_font(tmp_path: Path) -> None:
+    """번들 글꼴만으로(환경변수·toml file 없이) 이미지·영상 한글 라벨이 거절 없이 만들어진다."""
+    cfg = sns_label.load_config()
+    assert not cfg.font_file
+    src = tmp_path / "src.png"
+    _ffmpeg("-f", "lavfi", "-i", "testsrc=size=720x900:rate=1", "-frames:v", "1", str(src))
+    image = sns_label.apply_label(src, tmp_path / "i", generator_model="m", config=cfg)
+    assert image.text == "생성형 AI로 만든 이미지"
+    assert image.labeled_path.stat().st_size > 0
+    vid = tmp_path / "src.mp4"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc=size=270x480:rate=30:duration=3.5",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(vid),
+    )  # fmt: skip
+    video = sns_label.apply_label(vid, tmp_path / "v", generator_model="m", config=cfg)
+    assert video.text == "생성형 AI로 만든 영상"
+    assert video.labeled_path.stat().st_size > 0
