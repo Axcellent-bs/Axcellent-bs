@@ -23,6 +23,9 @@ class Rule:
 
     normal_max_seconds: float
     normal_max_attempts: int
+    # True면 총괄이 단계에 붙여 보낸 약속 시간(`promised_seconds`)을 기준으로 삼고, 약속이 없는
+    # 단계만 `normal_max_seconds`를 쓴다
+    use_promised: bool = False
 
 
 @dataclass(frozen=True)
@@ -45,7 +48,10 @@ def _rule(raw: object, base: Rule | None, where: str) -> Rule:
         raise CriteriaError(f"{where}: normal_max_seconds는 0보다 큰 숫자여야 한다")
     if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
         raise CriteriaError(f"{where}: normal_max_attempts는 1 이상의 정수여야 한다")
-    return Rule(float(seconds), attempts)
+    promised = raw.get("use_promised", base.use_promised if base else False)
+    if not isinstance(promised, bool):
+        raise CriteriaError(f"{where}: use_promised는 true 또는 false여야 한다")
+    return Rule(float(seconds), attempts, promised)
 
 
 def parse_criteria(data: dict) -> Criteria:

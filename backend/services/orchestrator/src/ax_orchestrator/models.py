@@ -40,6 +40,10 @@ class Step:
     # 성공한 결과를 보고 사람이 봐야 하면 이관 큐로 돌린다: (사유 코드, 메모) 또는 None
     verdict: Callable[[dict[str, Any]], tuple[str, str] | None] = lambda output: None
     timeout: float | None = None  # 이 단계만 마감을 길게 줄 때(예: 복구 확인 재시도) 초
+    # 이 단계가 보통 걸리는 시간(약속, 초). 없으면 기본 마감(30초)만 쓴다. 인사 에이전트 평가가
+    # 이 값과 실제 시간을 비교하고, 호출 마감도 여기서 계산한다(`Engine.deadline_seconds`).
+    # 지금 값은 로컬 이벤트 기록으로 잡은 임시값이다(plans/scenario_a.py `PROMISED_SECONDS`)
+    expected_seconds: float | None = None
     # 한 번에 받는 상한이 있는 부서용: (나눌 입력 필드, 한 번에 보낼 개수). 넘으면 나눠 부른다.
     split: tuple[str, int] | None = None
     # 나눠 부른 결과들을 하나로 합친다. 없으면 첫 결과에 `batches`만 붙인다.
@@ -90,6 +94,8 @@ class StepRun:
     # 복구 뒤 영향 분석을 같은 구간으로 다시 계산한 시각. 단계 시간(started_at~finished_at)은
     # 첫 분석의 것이라, 다시 계산한 시각을 finished_at에 덮어쓰지 않는다(몇 분 뒤라서 부풀려진다)
     refreshed_at: datetime | None = None
+    # 이 단계에 걸어 둔 약속 시간(초, `Step.expected_seconds`). 없으면 None(기본 30초 기준)
+    promised_seconds: float | None = None
 
     def view(self) -> dict[str, Any]:
         return {
@@ -109,6 +115,7 @@ class StepRun:
             "approval_wait_seconds": self.approval_wait_seconds,
             "human_wait_seconds": self.human_wait_seconds,
             "refreshed_at": iso(self.refreshed_at),
+            "promised_seconds": self.promised_seconds,
             "output": self.output,
         }
 

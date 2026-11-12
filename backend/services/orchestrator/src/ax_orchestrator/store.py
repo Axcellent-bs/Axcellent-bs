@@ -68,6 +68,7 @@ def step_to_dict(run: StepRun) -> dict[str, Any]:
         "approval_wait_seconds": run.approval_wait_seconds,
         "human_wait_seconds": run.human_wait_seconds,
         "refreshed_at": _dt(run.refreshed_at),
+        "promised_seconds": run.promised_seconds,
     }
 
 
@@ -90,6 +91,7 @@ def step_from_dict(raw: dict[str, Any]) -> StepRun:
         approval_wait_seconds=raw.get("approval_wait_seconds"),
         human_wait_seconds=raw.get("human_wait_seconds"),
         refreshed_at=_parse(raw.get("refreshed_at")),
+        promised_seconds=raw.get("promised_seconds"),
     )
 
 

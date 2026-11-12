@@ -719,6 +719,9 @@ class StepTiming(AxModel):
     human_wait_seconds: float | None = Field(default=None, ge=0)
     attempts: int = Field(default=0, ge=0)
     reason_code: str | None = None
+    # 이 단계가 보통 걸리는 시간(약속, 초). 총괄이 단계 정의에서 가져와 같이 보낸다. 없으면 None이고
+    # 평가는 기본 기준(30초)으로 판정한다
+    promised_seconds: float | None = Field(default=None, gt=0)
 
 
 class RecordEventTimesInput(EventTimeline):
