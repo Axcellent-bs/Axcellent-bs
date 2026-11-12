@@ -222,6 +222,27 @@ load_policy() {
     fi
     deny "policy-syntax" "${RC_CONFIG}" "정책 파일 ${n}번째 줄을 해석할 수 없다(전체 거부)"
   done < "${POLICY_FILE}"
+  validate_self_approve
+}
+
+# [self_approve] accounts: 제안자 본인이 자기 제안을 승인해도 되는 계정 목록(기본은 비어 있음 = 금지).
+# 키 오타·문자열이 아닌 값·[permissions] 에 없는 계정·형식이 틀린 계정은 정책 로드 실패(전체 거부)다.
+validate_self_approve() {
+  local k item
+  for k in "${!POLICY[@]}"; do
+    [[ "${k}" == self_approve.* ]] || continue
+    [[ "${k}" == "self_approve.accounts" ]] ||
+      deny "policy-value" "${RC_CONFIG}" "정책 [self_approve] 에 알 수 없는 키가 있다(전체 거부)"
+  done
+  [[ -n "${POLICY[self_approve.accounts]-}" ]] || return 0
+  # 한 줄 목록은 항목마다 줄바꿈으로 끝난다. 문자열·숫자·true 값은 그렇지 않다.
+  [[ "${POLICY[self_approve.accounts]}" == *$'\n' ]] ||
+    deny "policy-value" "${RC_CONFIG}" "정책 self_approve.accounts 는 문자열 목록이어야 한다"
+  while IFS= read -r item; do
+    [[ -n "${item}" ]] || continue
+    [[ "${item}" =~ ${RE_KEY} && -n "${POLICY[permissions.${item}]+x}" ]] ||
+      deny "policy-value" "${RC_CONFIG}" "정책 self_approve.accounts 의 계정이 형식에 안 맞거나 [permissions] 에 없다"
+  done <<< "${POLICY[self_approve.accounts]}"
 }
 
 # 목록 값에 항목이 있는가
@@ -982,7 +1003,7 @@ do_nginx_add_location() {
 
 # 승인: 제안자와 다른 권한자가 확인값을 대고 실행하면 그때 적용한다.
 do_nginx_approve_location() {
-  local name="${ARGS[0]}" digest="${ARGS[1]}" f rc=0 bname new stamp
+  local name="${ARGS[0]}" digest="${ARGS[1]}" f rc=0 bname new stamp SELF_APPROVED=0
   require_paths nginx_conf nginx_backup_dir
   f="${PENDING_DIR}/${name}.req"
   proposal_read "${f}" || rc=$?
@@ -994,8 +1015,18 @@ do_nginx_approve_location() {
   fi
   proposal_digest "${Q_NAME}" "${Q_METHOD}" "${Q_REGEX}" "${Q_PROPOSER}"
   [[ "${REPLY}" == "${digest}" ]] || step_fail "digest-mismatch" "${RC_USAGE}" "확인값이 제안 내용과 다르다(status 로 다시 확인)"
-  NOTE="proposer:${Q_PROPOSER},digest:${digest}"
-  [[ "${Q_PROPOSER}" != "${KEY}" ]] || step_fail "self-approval" "${RC_PERM}" "제안한 사람은 자기 제안을 승인할 수 없다(둘 이상 확인)"
+  NOTE="proposer:${Q_PROPOSER},digest:${digest},self-approve:no"
+  if [[ "${Q_PROPOSER}" == "${KEY}" ]]; then
+    # 기본은 금지. 정책 [self_approve] accounts 에 든 계정만 통과한다(그 밖의 검증은 전부 그대로).
+    policy_list_has self_approve.accounts "${KEY}" ||
+      step_fail "self-approval" "${RC_PERM}" "제안한 사람은 자기 제안을 승인할 수 없다(둘 이상 확인)"
+    SELF_APPROVED=1
+    NOTE="proposer:${Q_PROPOSER},digest:${digest},self-approve:yes"
+    say "셀프 승인(정책 허용 계정): ${KEY} — 제안자와 승인자가 같다. 다른 검증은 모두 그대로 적용한다"
+    if command -v logger >/dev/null 2>&1; then
+      logger -t ax-gate -- "셀프 승인(정책 허용 계정): user=${KEY} name=${name}" || true
+    fi
+  fi
   policy_list_has "permissions.${Q_PROPOSER}" "nginx-add-location" ||
     step_fail "proposer-not-permitted" "${RC_PERM}" "제안자에게 지금은 제안 권한이 없다"
   # 승인자와 제안자 둘 다 그 경로 접두 권한이 있어야 한다.
@@ -1025,6 +1056,7 @@ do_nginx_approve_location() {
   fi
   ops_copy_sync
   say "location ${name} 을 추가하고 reload 했다(제안 ${Q_PROPOSER}, 승인 ${KEY}). 되돌리려면: nginx-restore ${bname}"
+  (( SELF_APPROVED )) && say "이 적용은 셀프 승인(정책 허용 계정)이었다. 팀 채널 알림에 그 사실을 적는다"
   say "라우팅(허용 메서드와 그 밖의 응답 코드)을 직접 확인한다"
   pr_reminder "${bname}"
 }
