@@ -39,7 +39,7 @@ def status_of(inc: Incident, step_id: str) -> str | None:
 
 
 def slow_plan(**kw) -> Plan:
-    """긴 작업 단계 하나만 있는 계획. 약속 시간이 없어서 전체 대기는 엔진 기본값을 쓴다."""
+    """긴 작업 단계 하나만 있는 계획. 기준 시간이 없어서 전체 대기는 엔진 기본값을 쓴다."""
     return Plan("slow", [Step("slow", "impact_analysis", "긴 작업 (data)", **kw)])
 
 
@@ -251,7 +251,7 @@ async def test_a_working_answer_without_a_task_id_fails_the_step(harness) -> Non
 async def test_the_total_wait_follows_the_promise_or_the_department_estimate(harness) -> None:
     engine = await harness.start()
     assert engine._async_total(None) == engine.async_total_timeout
-    assert engine._async_total(600.0) == 1200.0  # 약속의 2배
+    assert engine._async_total(600.0) == 1200.0  # 기준 시간의 2배
     assert engine._async_total(10 * 3600.0) == 20 * 3600.0
     assert engine._async_total(30 * 3600.0) == MAX_ASYNC_SECONDS  # 24시간을 넘지 않는다
 

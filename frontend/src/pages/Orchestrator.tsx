@@ -321,14 +321,14 @@ function IncidentDetail({ incident }: { incident: Incident }) {
         <h3 className="mb-1 text-[15px] font-semibold">단계</h3>
         {(() => {
           const over = incident.steps.filter((s) => isOver(s, workedSeconds(s))).length;
-          return over > 0 ? <p className="mb-2 text-xs text-orange-700">약속한 시간을 넘긴 단계 {over}개</p> : <p className="mb-2 text-xs text-ink-500">걸린 시간은 부서가 일한 시간이에요(승인·사람 처리 대기는 뺌).</p>;
+          return over > 0 ? <p className="mb-2 text-xs text-orange-700">기준 시간을 넘긴 단계 {over}개</p> : <p className="mb-2 text-xs text-ink-500">걸린 시간은 부서가 일한 시간이에요(승인·사람 처리 대기는 뺌).</p>;
         })()}
         <table className="w-full min-w-[46rem] text-left text-sm">
           <thead className="text-xs text-ink-500">
             <tr>
               <th className="py-1 pr-3 font-medium">단계</th><th className="pr-3 font-medium">맡은 AI</th><th className="pr-3 font-medium">상태</th>
               <th className="pr-3 font-medium">걸린 시간</th>
-              <th className="pr-3 font-medium" title="단계마다 정한 예상 시간이에요. 지금 값은 로컬 이벤트 기록으로 잡은 임시 값이에요">약속(임시)</th>
+              <th className="pr-3 font-medium" title="단계마다 정한 기준 시간이에요. 지금 값은 로컬 이벤트 기록으로 잡은 임시 값이에요">기준 시간(임시)</th>
               <th className="pr-3 font-medium">시도 횟수</th><th className="font-medium">메모</th>
             </tr>
           </thead>
@@ -353,7 +353,7 @@ function IncidentDetail({ incident }: { incident: Incident }) {
                   )}
                 </td>
                 <td className="whitespace-nowrap py-2 pr-3 tabular-nums">
-                  {worked == null ? "–" : <span className={late ? "font-semibold text-orange-700" : ""} title={late ? `약속 ${secondsKo(s.promised_seconds)}을 넘김` : undefined}>{secondsKo(worked)}</span>}
+                  {worked == null ? "–" : <span className={late ? "font-semibold text-orange-700" : ""} title={late ? `기준 ${secondsKo(s.promised_seconds)}을 넘김` : undefined}>{secondsKo(worked)}</span>}
                 </td>
                 <td className="whitespace-nowrap py-2 pr-3 tabular-nums text-ink-500">{s.promised_seconds ? secondsKo(s.promised_seconds) : "–"}</td>
                 <td className="py-2 pr-3 tabular-nums">{s.attempts || "–"}</td>

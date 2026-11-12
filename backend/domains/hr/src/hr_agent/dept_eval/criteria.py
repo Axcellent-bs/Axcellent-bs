@@ -23,7 +23,7 @@ class Rule:
 
     normal_max_seconds: float
     normal_max_attempts: int
-    # True면 총괄이 단계에 붙여 보낸 약속 시간(`promised_seconds`)을 기준으로 삼고, 약속이 없는
+    # True면 총괄이 단계에 붙여 보낸 기준 시간(`promised_seconds`)을 쓰고, 기준 시간이 없는
     # 단계만 `normal_max_seconds`를 쓴다
     use_promised: bool = False
     # 긴 작업(비동기)에서 부서의 응답 사이가 이 시간(초)보다 길게 비면 "응답 끊김"으로 본다

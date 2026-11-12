@@ -105,7 +105,7 @@ function Trend({ data }: { data: DailyTrend[] }) {
   );
 }
 
-/** 단계 하나의 시간 막대: 일한 시간 · 승인 대기 · 사람 할 일함 대기를 색으로 나누고, 약속(기준) 시간에 눈금을 긋는다 */
+/** 단계 하나의 시간 막대: 일한 시간 · 승인 대기 · 사람 할 일함 대기를 색으로 나누고, 기준 시간에 눈금을 긋는다 */
 function StepRow({ s, scale, legacy }: { s: EvaluatedStep; scale: number; legacy: boolean }) {
   const v = VERDICT[s.verdict];
   const over = s.work_seconds != null && s.work_seconds > s.limit_seconds;
@@ -116,12 +116,12 @@ function StepRow({ s, scale, legacy }: { s: EvaluatedStep; scale: number; legacy
   ];
   const timed = parts.filter((p) => p.sec != null && p.sec > 0).map((p) => `${p.label} ${secondsKo(p.sec)}`).join(" · ");
   const text = timed || s.reason || "시간 기록 없음";
-  // 기준 시간이 어디서 왔는지: 이전 판정은 모든 단계 같은 시간, 새 판정은 단계의 약속 시간이다
+  // 기준 시간이 어디서 왔는지: 이전 판정은 모든 단계 같은 시간, 새 판정은 단계의 기준 시간이다
   const limitText = legacy
     ? `이전 기준(모든 단계 ${secondsKo(s.limit_seconds)})`
     : s.promised
-      ? `약속 ${secondsKo(s.limit_seconds)}`
-      : `약속 없음 · 기본 ${secondsKo(s.limit_seconds)} 적용`;
+      ? `기준 ${secondsKo(s.limit_seconds)}`
+      : `기준 시간 미지정 · 기본 ${secondsKo(s.limit_seconds)} 적용`;
   const silence = (s.verdict === "silent" || s.verdict === "in_progress") && (s.max_silence_seconds ?? 0) > 0
     ? `응답 사이가 가장 길게 비었던 시간 ${secondsKo(s.max_silence_seconds)}`
     : null;
@@ -150,7 +150,7 @@ function StepRow({ s, scale, legacy }: { s: EvaluatedStep; scale: number; legacy
 }
 
 function EventTimeline({ ev }: { ev: EvaluatedEvent }) {
-  // 약속 눈금이 막대 안에 들어오도록 약속 시간도 눈금 범위에 넣는다
+  // 눈금이 막대 안에 들어오도록 기준 시간도 눈금 범위에 넣는다
   const scale = Math.max(1, ...ev.steps.map((s) => Math.max(s.limit_seconds, (s.work_seconds ?? 0) + (s.approval_wait_seconds ?? 0) + (s.human_wait_seconds ?? 0))));
   const legacy = ev.criteria_version < 2;
   const look = ev.steps.filter((s) => s.verdict === "check" || s.verdict === "silent" || s.verdict === "blocked" || s.verdict === "approval_expired");
@@ -168,8 +168,8 @@ function EventTimeline({ ev }: { ev: EvaluatedEvent }) {
       </ul>
       <p className="flex flex-wrap gap-x-4 text-xs text-ink-500">
         <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-brand-500" />일한 시간 (평가에 쓰는 시간)</span>
-        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-orange-500" />약속·기준을 넘긴 일한 시간</span>
-        <span><i className="mr-1 inline-block h-3 w-0.5 bg-ink-900 align-middle" />약속(기준) 시간 눈금</span>
+        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-orange-500" />기준 시간을 넘긴 일한 시간</span>
+        <span><i className="mr-1 inline-block h-3 w-0.5 bg-ink-900 align-middle" />기준 시간 눈금</span>
         <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" />승인 대기 (사람을 기다린 시간, 평가 제외)</span>
         <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-ink-300" />사람 할 일함 대기 (평가 제외)</span>
       </p>
@@ -218,14 +218,14 @@ export default function AgentEvaluationPage() {
         <p>
           <b>기준: 임시 기준 {data.criteria_version}판{data.criteria_updated ? ` (${data.criteria_updated})` : ""}</b> —{" "}
           {data.use_promised ? (
-            <>단계마다 <b>약속한 시간</b> 안에 끝내고 다시 시도하지 않았으면 제때 끝낸 것, 그 밖에는 확인이 필요한 것으로 봅니다. 약속이 없는 단계는 일한 시간이 <b>{data.normal_max_seconds}초 이하</b>인지로 봅니다.</>
+            <>단계마다 정한 <b>기준 시간</b> 안에 끝내고 다시 시도하지 않았으면 제때 끝낸 것, 그 밖에는 확인이 필요한 것으로 봅니다. 기준 시간이 정해지지 않은 단계는 일한 시간이 <b>{data.normal_max_seconds}초 이하</b>인지로 봅니다.</>
           ) : (
             <>일한 시간이 <b>{data.normal_max_seconds}초 이하</b>이고 다시 시도하지 않았으면 제때 끝낸 것, 그 밖에는 확인이 필요한 것으로 봅니다.</>
           )}
         </p>
         {data.use_promised && (
           <p className="mt-1 text-xs text-ink-500">
-            약속 시간은 로컬 이벤트 기록으로 잡은 <b>임시 값</b>이에요. 몇십 분 걸리는 긴 작업은 총 시간이 아니라 부서의 응답이 <b>{secondsKo(data.max_silence_seconds)}</b> 넘게 끊겼는지를 봐요.
+            기준 시간은 로컬 이벤트 기록으로 잡은 <b>임시 값</b>이에요. 몇십 분 걸리는 긴 작업은 총 시간이 아니라 부서의 응답이 <b>{secondsKo(data.max_silence_seconds)}</b> 넘게 끊겼는지를 봐요.
           </p>
         )}
         <p className="mt-1 text-xs text-ink-500">시간만 본 결과예요. 일의 품질을 평가한 것이 아니고, 확인이 필요하다는 건 잘못했다는 뜻이 아니라 한 번 살펴보라는 뜻이에요.</p>
