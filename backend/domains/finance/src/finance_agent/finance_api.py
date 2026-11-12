@@ -219,6 +219,13 @@ async def refresh_batch(batch: dict[str, Any]) -> None:
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url, timeout=REVIEW_CHECK_SECONDS)
+        if response.status_code == 404:
+            # 안전 장치가 이 보류 건을 모른다(보류 큐는 메모리에만 있어 재시작하면 비워진다).
+            # 승인할 곳이 없으니 끝난 요청으로 보고, 사람이 다시 요청할 수 있게 한다.
+            # 지급은 승인으로만 기록되므로 다시 요청해도 두 번 지급되지 않는다
+            batch["status"] = "rejected"
+            batch["closed_reason"] = "review_missing"
+            return
         status = response.json()["data"]["status"] if response.status_code == 200 else None
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return
@@ -227,6 +234,7 @@ async def refresh_batch(batch: dict[str, Any]) -> None:
         batch.setdefault("approved_at", fc.iso(fc.now()))
     elif status in ("rejected", "expired"):
         batch["status"] = "rejected"
+        batch["closed_reason"] = status
 
 
 def _batch_status(decision_status: str) -> str:

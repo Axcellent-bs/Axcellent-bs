@@ -177,6 +177,10 @@ def apply_batch(result: dict[str, Any], batch: dict[str, Any] | None) -> dict[st
         "seller_ids": [],
     }
     shown = {k: batch.get(k, v) for k, v in empty.items()} if batch else empty
+    if batch and shown["status"] == "rejected" and batch.get("closed_reason"):
+        # 왜 끝났는지: rejected(사람이 멈춤) · expired(시간 초과)
+        # · review_missing(안전 장치에 기록 없음)
+        shown = shown | {"closed_reason": batch["closed_reason"]}
     if batch and shown["status"] != "none":
         for row in result["statements"]:
             if row["seller_id"] in shown["seller_ids"]:
