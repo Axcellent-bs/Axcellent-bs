@@ -91,19 +91,24 @@ const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", handed: "
 const madeWork = (t: ChatThread) => t.status === "started" || !!t.taskId;
 
 /** `narrow`: 좁은 칸(AI 오피스 1:1 탭)에서는 지난 대화 목록을 위에 짧게 두고 대화를 아래에 쌓는다 */
-export function DirectChat({ agent, narrow = false }: { agent: DirectAgent; narrow?: boolean }) {
+/**
+ * `bare`: 겉 카드·제목 없이 대화만 (대화 기록 나눠 보기의 1:1 칸이 칸 머리를 따로 그린다).
+ */
+export function DirectChat({ agent, narrow = false, bare = false }: { agent: DirectAgent; narrow?: boolean; bare?: boolean }) {
   const { account } = useSession();
+  const body = agent.talk && account ? <AgentTalk key={`${agent.key}:${account.id}`} agent={agent} talk={agent.talk} account={account} narrow={narrow} /> : (
+    <div className="mx-auto max-w-md py-16 text-center text-sm text-ink-500">
+      {agent.name}는 아직 사람 말을 바로 받는 창구가 없어요. 부서 AI에 대화 스킬이 생기면 여기서 바로 말을 걸 수 있어요.
+    </div>
+  );
+  if (bare) return <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface">{body}</div>;
   return (
     <section aria-label={`${agent.name}와 직접 대화`} className="card flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden">
       <header className="flex flex-wrap items-center gap-2 border-b border-ink-100 px-4 py-3 lg:px-6">
         <h2 className="card-title">{agent.name}와 직접 대화</h2>
         {!agent.live && <PreparingChip />}
       </header>
-      {agent.talk && account ? <AgentTalk key={`${agent.key}:${account.id}`} agent={agent} talk={agent.talk} account={account} narrow={narrow} /> : (
-        <div className="mx-auto max-w-md py-16 text-center text-sm text-ink-500">
-          {agent.name}는 아직 사람 말을 바로 받는 창구가 없어요. 부서 AI에 대화 스킬이 생기면 여기서 바로 말을 걸 수 있어요.
-        </div>
-      )}
+      {body}
     </section>
   );
 }

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { ALL_ROOM, messageCount, type ChatItem, type OrchIncident } from "@/lib/agentChat";
 import { matchRoom, roomPeople, roomTime, type ChatRoom } from "@/lib/chatRooms";
-import { Link, useSearchParams } from "@/lib/nav";
+import { Link, useRouter, useSearchParams } from "@/lib/nav";
 import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
 import { Avatar, MessengerLog, PinNotice, StatusChip, TypingLines } from "@/components/office/Messenger";
 import { TalkInput } from "@/components/office/TalkInput";
-import { useChatRooms, type Conn } from "@/components/office/useChatRooms";
+import { useChatRooms, type ChatRooms, type Conn } from "@/components/office/useChatRooms";
 import { orchestrator } from "@/lib/orchestrator";
 import { shopFaults, type FaultState } from "@/lib/shopFaults";
 import { humanizePlanIds } from "@/lib/format";
@@ -15,7 +15,12 @@ import { humanizePlanIds } from "@/lib/format";
 // AI 오피스와 같은 방 목록·같은 대화를 본다(lib/chatRooms.ts, components/office/useChatRooms.ts).
 // 말풍선 문장은 lib/agentChat.ts가 기록된 값으로만 만든다. 이 파일은 화면과 새로고침만 맡는다.
 // 장애는 이 화면에서 일으키지 않는다(사람이 요청하면 운영자가 캣북스에 넣는다). 화면은 캣북스 결제 상태만 읽어 보여 준다.
-// ?room=<방 id>로 들어오면 그 방을 연다 (AI 오피스 "대화 기록에서 크게 보기").
+//
+// 나눠 보기: 방을 최대 3칸까지 나란히 본다. 칸마다 따로 스크롤하고 자기 입력창이 있다(입력은 그 칸의 방으로).
+// - 보기 개수(1·2·3)는 이 브라우저에만 기억한다. 화면이 좁으면 1280px 미만 2칸, 900px 미만 1칸으로 줄이고,
+//   줄어든 칸의 방은 닫지 않고 두었다가 다시 넓어지면 보인다
+// - 주소: ?rooms=a,b,c (열린 방, 칸 순서). 예전 ?room=<방>은 1칸 보기로 연다 (AI 오피스 "대화 기록에서 크게 보기")
+// - 데이터는 useChatRooms 한 번만 읽는다(칸 수만큼 요청이 늘지 않는다). 안 읽은 수는 보이는 칸의 방만 읽음 처리
 
 const POLL_MS = 3000;
 // AI들은 1초 안에 수십 건을 주고받는다. 새로 도착한 메시지는 줄 세워 하나씩 보여 준다 (밀리면 조금 빠르게)
@@ -23,6 +28,39 @@ const REVEAL_MS = 600;
 const REVEAL_FAST_MS = 200;
 const FAST_BACKLOG = 20;
 const ORCH_CMD = "cd backend && bash scripts/run_all.sh";
+const MAX_PANES = 3;
+const COUNT_KEY = "axcellent-chat-split-count";
+const DRAG_TYPE = "text/x-ax-chat-room";
+
+type Count = 1 | 2 | 3;
+const readCount = (): Count => {
+  try {
+    const n = Number(localStorage.getItem(COUNT_KEY));
+    return n === 2 || n === 3 ? n : 1;
+  } catch { return 1; }
+};
+const saveCount = (n: Count) => { try { localStorage.setItem(COUNT_KEY, String(n)); } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ } };
+/** 화면 폭이 허락하는 칸 수: 1280px 미만 2칸, 900px 미만 1칸 */
+const widthLimit = (w: number): Count => (w < 900 ? 1 : w < 1280 ? 2 : 3);
+function useWidthLimit(): Count {
+  const [limit, setLimit] = useState<Count>(() => (typeof window === "undefined" ? 3 : widthLimit(window.innerWidth)));
+  useEffect(() => {
+    const on = () => setLimit(widthLimit(window.innerWidth));
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return limit;
+}
+/** 주소에서 열린 방: ?rooms=a,b,c 먼저, 없으면 예전 ?room= (1칸) */
+function roomsFromUrl(params: URLSearchParams): { rooms: string[]; one: boolean } | null {
+  const many = params.get("rooms");
+  if (many) {
+    const list = [...new Set(many.split(",").map((s) => s.trim()).filter(Boolean))].slice(0, MAX_PANES);
+    if (list.length) return { rooms: list, one: false };
+  }
+  const one = params.get("room");
+  return one ? { rooms: [one], one: true } : null;
+}
 
 // ---------------------------------------------------------------- 연결 칩
 function ConnChip({ label, conn }: { label: string; conn: Conn }) {
@@ -45,13 +83,29 @@ function RoomAvatar({ room, agentKey, name }: { room?: ChatRoom; agentKey?: stri
   return <span aria-hidden="true" className={`chat-avatar flex h-9 w-9 shrink-0 items-center justify-center text-[11px] font-bold text-white ${open ? "bg-red-700" : "bg-amber-700"}`}>장애</span>;
 }
 
+/** 칸 번호 배지 (목록 줄·칸 머리) */
+function PaneNo({ n }: { n: number }) {
+  return <span className="chat-avatar flex h-[18px] w-[18px] shrink-0 items-center justify-center bg-brand-600 text-[10px] font-bold text-white" aria-label={`${n}번 칸`}>{n}</span>;
+}
+
 // ---------------------------------------------------------------- 채팅 목록
-function RoomRow({ on, onClick, avatar, title, status, preview, time, unread }: {
-  on: boolean; onClick: () => void; avatar: ReactNode; title: string; status?: string; preview?: string; time?: string; unread?: number;
+interface RowActions {
+  /** 그 방이 열린 칸 번호 (1부터). 없으면 null */
+  paneOf: (id: string) => number | null;
+  /** ＋를 보일지 (열 수 있는 칸이 있을 때만) */
+  canAdd: (id: string) => boolean;
+  open: (id: string) => void;
+  add: (id: string) => void;
+}
+
+function RoomRow({ id, on, avatar, title, status, preview, time, unread, act }: {
+  id: string; on: boolean; avatar: ReactNode; title: string; status?: string; preview?: string; time?: string; unread?: number; act: RowActions;
 }) {
+  const pane = act.paneOf(id);
+  const onDrag = (e: DragEvent<HTMLLIElement>) => { e.dataTransfer.setData(DRAG_TYPE, id); e.dataTransfer.effectAllowed = "move"; };
   return (
-    <li>
-      <button type="button" onClick={onClick} aria-current={on ? "true" : undefined}
+    <li className="group relative" draggable onDragStart={onDrag}>
+      <button type="button" onClick={() => act.open(id)} aria-current={on ? "true" : undefined}
         className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-500 ${on ? "bg-brand-50" : "hover:bg-ink-50"}`}>
         {avatar}
         <span className="min-w-0 flex-1">
@@ -62,39 +116,45 @@ function RoomRow({ on, onClick, avatar, title, status, preview, time, unread }: 
           {preview && <span className="mt-0.5 block truncate text-xs text-ink-500">{humanizePlanIds(preview)}</span>}
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1">
-          {time && <span className="text-[10px] tabular-nums text-ink-500">{time}</span>}
+          {pane != null ? <PaneNo n={pane} /> : time && <span className="text-[10px] tabular-nums text-ink-500">{time}</span>}
           {!!unread && !on && <span className="chat-badge bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`안 읽은 메시지 ${unread}개`}>{unread}</span>}
         </span>
       </button>
+      {act.canAdd(id) && (
+        <button type="button" onClick={() => act.add(id)} title="빈 칸(없으면 선택된 칸)에 열기" aria-label={`${title} 칸에 열기`}
+          className="absolute right-2 top-1/2 -translate-y-1/2 border border-dashed border-brand-500 bg-surface px-1.5 text-[11px] font-bold text-brand-700 opacity-0 transition focus:opacity-100 group-hover:opacity-100">
+          ＋
+        </button>
+      )}
     </li>
   );
 }
 
-function RoomList({ all, incidents, selected, unseen, onSelect }: {
-  all: ChatRoom; incidents: ChatRoom[]; selected: string; unseen: Record<string, number>; onSelect: (id: string) => void;
+function RoomList({ all, incidents, unseen, act, focusedRoom, narrow }: {
+  all: ChatRoom; incidents: ChatRoom[]; unseen: Record<string, number>; act: RowActions; focusedRoom: string | null; narrow: boolean;
 }) {
   const [q, setQ] = useState("");
-  const shownIncidents = incidents.filter((r) => matchRoom(q, r.title));
+  const shownIncidents = incidents.filter((r) => matchRoom(q, r.title, r.longTitle));
   const shownDirect = DIRECT_AGENTS.filter((a) => matchRoom(q, a.name));
   const showAll = matchRoom(q, all.title, "전체");
   return (
-    <nav aria-label="채팅 목록" className="card flex shrink-0 flex-col overflow-hidden lg:w-80">
+    <nav aria-label="채팅 목록" className={`card flex shrink-0 flex-col overflow-hidden ${narrow ? "lg:w-64" : "lg:w-80"}`}>
       <div className="p-3">
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="대화방·부서 검색" aria-label="대화방·부서 검색" className="field w-full text-xs" />
       </div>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-2 lg:max-h-[calc(100vh-230px)]">
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-2 lg:max-h-[calc(100vh-270px)]">
         {showAll && (
           <ul>
-            <RoomRow on={selected === all.id} onClick={() => onSelect(all.id)} avatar={<RoomAvatar room={all} />} title={all.title}
-              preview={all.preview} time={roomTime(all.lastAt)} unread={unseen[all.id]} />
+            <RoomRow id={all.id} on={focusedRoom === all.id} avatar={<RoomAvatar room={all} />} title={all.title}
+              preview={all.preview} time={roomTime(all.lastAt)} unread={unseen[all.id]} act={act} />
           </ul>
         )}
         <h2 className="px-4 pb-1 pt-3 text-[11px] font-semibold text-ink-500">장애·이슈 방</h2>
         {shownIncidents.length === 0 ? <p className="px-4 py-1 text-xs text-ink-500">{q ? "찾는 방이 없어요" : "아직 장애·이슈 방이 없어요"}</p> : (
           <ul>
             {shownIncidents.map((r) => (
-              <RoomRow key={r.id} on={selected === r.id} onClick={() => onSelect(r.id)} avatar={<RoomAvatar room={r} />} title={r.title}
-                status={r.status} preview={r.preview} time={roomTime(r.lastAt)} unread={unseen[r.id]} />
+              <RoomRow key={r.id} id={r.id} on={focusedRoom === r.id} avatar={<RoomAvatar room={r} />} title={r.title}
+                status={r.status} preview={r.preview} time={roomTime(r.lastAt)} unread={unseen[r.id]} act={act} />
             ))}
           </ul>
         )}
@@ -104,8 +164,8 @@ function RoomList({ all, incidents, selected, unseen, onSelect }: {
             {shownDirect.map((a) => {
               const id = DIRECT_PREFIX + a.key;
               return (
-                <RoomRow key={a.key} on={selected === id} onClick={() => onSelect(id)} avatar={<RoomAvatar agentKey={a.key} name={a.name} />} title={a.name}
-                  preview={a.live ? undefined : "준비 중"} />
+                <RoomRow key={a.key} id={id} on={focusedRoom === id} avatar={<RoomAvatar agentKey={a.key} name={a.name} />} title={a.name}
+                  preview={a.live ? undefined : "준비 중"} act={act} />
               );
             })}
           </ul>
@@ -115,47 +175,85 @@ function RoomList({ all, incidents, selected, unseen, onSelect }: {
   );
 }
 
-// ---------------------------------------------------------------- 페이지
-export default function AgentChat() {
-  const params = useSearchParams();
-  const asked = params.get("room");
-  // 처음 열면 전체 대화방. ?room=이 있으면 그 방
-  const [room, setRoom] = useState<string>(asked || ALL_ROOM);
-  useEffect(() => { if (asked) setRoom(asked); }, [asked]);
+// ---------------------------------------------------------------- 칸 하나
+interface PaneProps {
+  room: string;
+  /** 칸 번호 (1부터) */
+  n: number;
+  /** 보이는 칸 수 */
+  total: number;
+  /** 칸이 좁다: 머리 버튼을 … 메뉴로 접고 참여 수·긴 이름을 숨긴다 (3칸, 또는 좁은 화면의 2칸) */
+  folded: boolean;
+  focused: boolean;
+  onFocus: () => void;
+  onClose?: () => void;
+  onDropRoom: (id: string) => void;
+  data: ChatRooms;
+  busyHold: string | null;
+  onDecide: (h: Extract<ChatItem, { kind: "hold" }>, approved: boolean) => void;
+  /** 새 사건 방을 처음부터 하나씩 보여 줄 방 (한 번 쓰면 비운다) */
+  replayRoom: { current: string | null };
+}
 
-  const data = useChatRooms({ room });
-  const { incidents, orchConn, safetyConn, commConn, commTruncated, orchMock, loaded, talk, all, incidentRooms } = data;
-  const [busyHold, setBusyHold] = useState<string | null>(null);
-  const [fault, setFault] = useState<FaultState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+const acceptsRoom = (e: DragEvent) => e.dataTransfer.types.includes(DRAG_TYPE);
 
-  // 캣북스 결제 상태 (실제 모드일 때만)
-  useEffect(() => {
-    if (orchConn !== "on" || orchMock) return;
-    let live = true;
-    const read = () => shopFaults.state().then((f) => { if (live) setFault(f); }, () => { if (live) setFault(null); });
-    read();
-    const t = setInterval(() => { if (!document.hidden) read(); }, POLL_MS);
-    return () => { live = false; clearInterval(t); };
-  }, [orchConn, orchMock]);
+/** 칸 테두리: 선택된 칸은 위쪽 브랜드 색 줄. 칸을 누르면 선택, 목록 줄을 끌어다 놓으면 이 칸에 연다 */
+function PaneFrame({ focused, multi, onFocus, onDropRoom, label, children }: {
+  focused: boolean; multi: boolean; onFocus: () => void; onDropRoom: (id: string) => void; label: string; children: ReactNode;
+}) {
+  const [over, setOver] = useState(false);
+  return (
+    <section aria-label={label} onMouseDownCapture={onFocus} onFocusCapture={onFocus}
+      onDragOver={(e) => { if (acceptsRoom(e)) { e.preventDefault(); setOver(true); } }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { setOver(false); const id = e.dataTransfer.getData(DRAG_TYPE); if (id) { e.preventDefault(); onDropRoom(id); } }}
+      className={`card relative flex min-h-[460px] min-w-0 flex-col overflow-hidden bg-chat ${multi && focused ? "shadow-[inset_0_3px_0_rgb(var(--brand-600))]" : ""} ${over ? "outline outline-2 -outline-offset-2 outline-brand-500" : ""}`}>
+      {children}
+    </section>
+  );
+}
 
+/** 빈 칸: 끌어다 놓거나 ＋로 연다 */
+function EmptyPane(props: Pick<PaneProps, "n" | "focused" | "onFocus" | "onDropRoom" | "total">) {
+  return (
+    <PaneFrame focused={props.focused} multi onFocus={props.onFocus} onDropRoom={props.onDropRoom} label={`${props.n}번 칸 (비어 있음)`}>
+      <header className="flex items-center gap-2 border-b border-ink-900/[.07] px-3 py-2.5">
+        <PaneNo n={props.n} /><span className="text-[13px] font-semibold text-ink-500">빈 칸</span>
+      </header>
+      <div className="m-3 flex flex-1 items-center justify-center border-2 border-dashed border-ink-300 p-4 text-center text-xs leading-relaxed text-ink-500">
+        왼쪽 목록에서 방을 끌어다 놓거나<br />목록 줄의 ＋를 누르세요
+      </div>
+    </PaneFrame>
+  );
+}
+
+/** 칸 머리 오른쪽 버튼. 3칸일 때는 … 메뉴로 접는다 */
+function PaneActions({ links, folded }: { links: { href: string; label: string }[]; folded: boolean }) {
+  if (!links.length) return null;
+  if (!folded) {
+    return <>{links.map((l) => <Link key={l.href} href={l.href} className="btn-ghost px-2 py-1 text-xs">{l.label}</Link>)}</>;
+  }
+  return (
+    <details className="relative">
+      <summary className="btn-ghost cursor-pointer list-none px-2 py-1 text-xs" aria-label="더 보기">…</summary>
+      <div className="absolute right-0 z-20 mt-1 flex w-40 flex-col border border-ink-100 bg-surface py-1 shadow-lg">
+        {links.map((l) => <Link key={l.href} href={l.href} className="px-3 py-1.5 text-xs hover:bg-ink-50">{l.label}</Link>)}
+      </div>
+    </details>
+  );
+}
+
+function RoomPane(p: PaneProps) {
+  const { room, data, total } = p;
+  const { incidents, orchConn, commConn, commTruncated, orchMock, loaded, talk, all, incidentRooms } = data;
+  const multi = total > 1;
+  const { folded } = p;
   const direct = directAgentOf(room);
   const inc: OrchIncident | undefined = incidents.find((i) => i.context_id === room);
   const roomInfo: ChatRoom | undefined = room === ALL_ROOM ? all : incidentRooms.find((r) => r.id === room);
   const items = useMemo(() => data.items[room] ?? [], [data.items, room]);
-
-  // ------------------------------------------------ 새 이벤트가 열리면 그 방으로 옮겨 처음부터 차례로 보여 준다
-  // 화면을 연 순간 이미 있던 이벤트는 옮기지 않는다. 1:1·전체 대화방(사람이 말을 거는 곳)에 있으면 옮기지 않는다
-  const knownIncidents = useRef<Set<string> | null>(null);
-  const replayRoom = useRef<string | null>(null);
-  useEffect(() => {
-    if (orchConn !== "on") return;
-    const ids = incidents.map((i) => i.context_id);
-    if (knownIncidents.current === null) { knownIncidents.current = new Set(ids); return; }
-    const opened = ids.find((id) => !knownIncidents.current?.has(id));
-    for (const id of ids) knownIncidents.current.add(id);
-    if (opened) { replayRoom.current = opened; setRoom((r) => (r.startsWith(DIRECT_PREFIX) || r === ALL_ROOM ? r : opened)); }
-  }, [incidents, orchConn]);
+  const isAll = room === ALL_ROOM;
+  const title = direct ? `🔒 ${direct.name}` : roomInfo?.title ?? (room.startsWith("ctx_") ? "찾을 수 없는 방" : room);
 
   // ------------------------------------------------ 하나씩 보여 주기
   // 방을 열 때 이미 있던 기록은 한 번에(지난 기록을 다시 재생하지 않음), 그 뒤에 도착한 부서 기록은 하나씩.
@@ -164,13 +262,14 @@ export default function AgentChat() {
   const human = useMemo(() => items.filter((it) => it.id.startsWith("direct:")), [items]);
   const [revealed, setRevealed] = useState(0);
   const primed = useRef(false);
+  const { replayRoom } = p;
   useLayoutEffect(() => { primed.current = false; }, [room]);
   useLayoutEffect(() => {
     if (primed.current || !loaded) return;
     primed.current = true;
     if (replayRoom.current === room) { replayRoom.current = null; setRevealed(0); return; }
     setRevealed(records.length);
-  }, [room, records.length, loaded]);
+  }, [room, records.length, loaded, replayRoom]);
   useEffect(() => {
     if (!primed.current || revealed >= records.length) return;
     const backlog = records.length - revealed;
@@ -180,7 +279,6 @@ export default function AgentChat() {
   const shown = useMemo(() => {
     const base = records.slice(0, Math.min(revealed, records.length));
     if (!human.length) return base;
-    // 시각순으로 끼워 넣기 (기록의 순서는 그대로)
     const out: ChatItem[] = [];
     let h = 0;
     for (const t of base) {
@@ -192,8 +290,6 @@ export default function AgentChat() {
     return out;
   }, [records, revealed, human]);
   const typing = primed.current && revealed < records.length;
-
-  // 참여 부서: 이 방에서 말한 AI (사람 제외)
   const people = useMemo(() => roomPeople(items, DIRECT_AGENTS.map((a) => a.key)), [items]);
 
   // ------------------------------------------------ 스크롤: 맨 아래에 붙어 있으면 따라가고, 위로 올렸으면 "새 메시지" 알약
@@ -227,6 +323,164 @@ export default function AgentChat() {
     if (pinned.current) setFresh(0);
   };
 
+  const links = [
+    ...(inc ? [{ href: `/orchestrator?ctx=${encodeURIComponent(inc.context_id)}`, label: "사건 자세히" }] : []),
+    ...(direct ? [] : [{ href: `/agents/office?room=${encodeURIComponent(room)}`, label: "AI 오피스에서 보기" }]),
+  ];
+  const head = (
+    <header className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-ink-900/[.07] px-3 py-2.5">
+      {multi && <PaneNo n={p.n} />}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <h2 className={`min-w-0 truncate font-semibold ${multi ? "text-[13px]" : "text-[15px]"}`}>{title}</h2>
+          {people && !folded && <span className="text-xs text-ink-700">{people}</span>}
+          <StatusChip status={roomInfo?.status} />
+        </div>
+        {roomInfo?.longTitle && !folded && <p className="mt-0.5 truncate text-xs text-ink-500">{roomInfo.longTitle}</p>}
+      </div>
+      <div className="ml-auto flex items-center gap-1.5">
+        <PaneActions links={links} folded={folded} />
+        {p.onClose && <button type="button" onClick={p.onClose} className="px-1.5 text-base leading-none text-ink-500 hover:text-ink-900" aria-label={`${p.n}번 칸 닫기`} title="칸 닫기">×</button>}
+      </div>
+    </header>
+  );
+
+  if (direct) {
+    return (
+      <PaneFrame focused={p.focused} multi={multi} onFocus={p.onFocus} onDropRoom={p.onDropRoom} label={`${title} 대화`}>
+        {head}
+        <DirectChat agent={direct} narrow={multi} bare />
+      </PaneFrame>
+    );
+  }
+
+  // 말을 걸 수 있는 방: 전체 대화방, 장애·이슈 방
+  const talkable = isAll || !!inc;
+  const answering = talkable ? DIRECT_AGENTS.filter((a) => talk.busyIn(room).includes(a.key)).map((a) => ({ key: a.key, name: a.name })) : [];
+  return (
+    <PaneFrame focused={p.focused} multi={multi} onFocus={p.onFocus} onDropRoom={p.onDropRoom} label={`${title} 대화`}>
+      {head}
+      {inc && <PinNotice inc={inc} />}
+      <div ref={scroller} onScroll={onScroll} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-4">
+        {shown.length === 0 && !typing ? (
+          <EmptyState orchConn={orchConn} known={isAll || !!inc} />
+        ) : (
+          <>
+            <CommNote conn={commConn} truncated={commTruncated} />
+            <MessengerLog items={shown} talk={talkable ? talk : undefined} label={`${title} 대화`}
+              hold={{ busyHold: p.busyHold, canDecide: orchConn === "on", orchMock, onDecide: p.onDecide }} />
+            {typing && <p className="mt-2 animate-pulse px-1 text-xs text-ink-500" aria-live="polite">AI들이 이야기하는 중… ({records.length - revealed}개 남음)</p>}
+          </>
+        )}
+      </div>
+      <TypingLines names={answering} />
+      {talkable && <TalkInput talk={talk} onSent={() => toBottom(true)} where="chat" room={room} roomName={inc ? title : undefined} />}
+      {fresh > 0 && (
+        <button onClick={() => toBottom(true)}
+          className="btn-primary absolute bottom-24 left-1/2 -translate-x-1/2 shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
+          새 메시지 {fresh}개 ↓
+        </button>
+      )}
+    </PaneFrame>
+  );
+}
+
+// ---------------------------------------------------------------- 페이지
+export default function AgentChat() {
+  const params = useSearchParams();
+  const router = useRouter();
+  const fromUrl = useMemo(() => roomsFromUrl(params), [params]);
+
+  // 열린 방(칸 순서). 처음 열면 전체 대화방 한 칸
+  const [rooms, setRooms] = useState<string[]>(() => fromUrl?.rooms ?? [ALL_ROOM]);
+  const [count, setCountState] = useState<Count>(() => {
+    const saved = readCount();
+    if (fromUrl?.one) return 1;
+    return fromUrl ? (Math.max(saved, fromUrl.rooms.length) as Count) : saved;
+  });
+  const setCount = (n: Count) => { setCountState(n); saveCount(n); };
+  const [focus, setFocus] = useState(0);
+  const limit = useWidthLimit();
+  const shownCount = Math.min(count, limit) as Count;
+  const visible = useMemo(() => rooms.slice(0, shownCount), [rooms, shownCount]);
+  const focusIdx = Math.min(focus, shownCount - 1);
+  const focusedRoom = visible[focusIdx] ?? null;
+
+  // 주소 ↔ 열린 방. 내가 쓴 주소는 다시 읽지 않는다
+  const written = useRef<string | null>(null);
+  useEffect(() => {
+    const key = params.toString();
+    if (key === written.current || !fromUrl) return;
+    setRooms(fromUrl.rooms);
+    if (fromUrl.one) setCountState(1);
+    setFocus(0);
+  }, [params, fromUrl]);
+  useEffect(() => {
+    if (params.get("rooms") === rooms.join(",") && !params.has("room")) return;
+    // 쉼표는 그대로 둔다 (?rooms=a,b,c 를 사람이 읽고 고칠 수 있게). 방 id에 쉼표는 없다
+    const next = `rooms=${rooms.map(encodeURIComponent).join(",")}`;
+    written.current = new URLSearchParams(next).toString();
+    router.replace(`/agents/chat?${next}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rooms]);
+
+  const data = useChatRooms({ rooms: visible });
+  const { incidents, orchConn, safetyConn, commConn, orchMock, all, incidentRooms } = data;
+  const [busyHold, setBusyHold] = useState<string | null>(null);
+  const [fault, setFault] = useState<FaultState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // 캣북스 결제 상태 (실제 모드일 때만)
+  useEffect(() => {
+    if (orchConn !== "on" || orchMock) return;
+    let live = true;
+    const read = () => shopFaults.state().then((f) => { if (live) setFault(f); }, () => { if (live) setFault(null); });
+    read();
+    const t = setInterval(() => { if (!document.hidden) read(); }, POLL_MS);
+    return () => { live = false; clearInterval(t); };
+  }, [orchConn, orchMock]);
+
+  // ------------------------------------------------ 칸에 방 열기
+  // 같은 방은 두 칸에 열지 않는다: 이미 보이는 칸에 있으면 그 칸을 선택만 한다
+  const openAt = useCallback((i: number, id: string) => {
+    const at = visible.indexOf(id);
+    if (at >= 0) { setFocus(at); return; }
+    const next = rooms.filter((r) => r !== id); // 줄어든 칸에 숨어 있던 같은 방은 뺀다
+    const pos = Math.min(i, next.length);
+    if (pos < next.length) next[pos] = id; else next.push(id);
+    setRooms(next.slice(0, MAX_PANES));
+    setFocus(pos);
+  }, [visible, rooms]);
+  const act: RowActions = {
+    paneOf: (id) => { const i = visible.indexOf(id); return shownCount > 1 && i >= 0 ? i + 1 : null; },
+    canAdd: (id) => shownCount > 1 && !visible.includes(id),
+    open: (id) => openAt(focusIdx, id),
+    // 빈 칸이 있으면 거기, 없으면 선택된 칸
+    add: (id) => openAt(visible.length < shownCount ? visible.length : focusIdx, id),
+  };
+  const close = (i: number) => {
+    setRooms((cur) => {
+      const next = cur.filter((_, k) => k !== i);
+      return next.length ? next : [ALL_ROOM];
+    });
+    setFocus((f) => Math.max(0, f >= i ? f - 1 : f));
+  };
+
+  // ------------------------------------------------ 새 이벤트가 열리면 선택된 칸이 장애 방일 때 그 방으로 옮겨 처음부터 차례로 보여 준다
+  // 화면을 연 순간 이미 있던 이벤트는 옮기지 않는다. 1:1·전체 대화방(사람이 말을 거는 곳)에 있으면 옮기지 않는다
+  const knownIncidents = useRef<Set<string> | null>(null);
+  const replayRoom = useRef<string | null>(null);
+  useEffect(() => {
+    if (orchConn !== "on") return;
+    const ids = incidents.map((i) => i.context_id);
+    if (knownIncidents.current === null) { knownIncidents.current = new Set(ids); return; }
+    const opened = ids.find((id) => !knownIncidents.current?.has(id));
+    for (const id of ids) knownIncidents.current.add(id);
+    if (!opened || !focusedRoom || focusedRoom.startsWith(DIRECT_PREFIX) || focusedRoom === ALL_ROOM) return;
+    replayRoom.current = opened;
+    openAt(focusIdx, opened);
+  }, [incidents, orchConn, focusedRoom, focusIdx, openAt]);
+
   async function decide(h: Extract<ChatItem, { kind: "hold" }>, approved: boolean) {
     if (!h.contextId || !h.stepId) return;
     setBusyHold(h.id);
@@ -242,11 +496,7 @@ export default function AgentChat() {
   }
 
   const orchOn = orchConn === "on";
-  const isAll = room === ALL_ROOM;
-  // 말을 걸 수 있는 방: 전체 대화방, 장애·이슈 방
-  const talkable = isAll || !!inc;
-  const answering = talkable ? DIRECT_AGENTS.filter((a) => talk.busyIn(room).includes(a.key)).map((a) => ({ key: a.key, name: a.name })) : [];
-  const title = roomInfo?.title ?? (room.startsWith("ctx_") ? "찾을 수 없는 방" : room);
+  const cols = shownCount === 3 ? "lg:grid-cols-3" : shownCount === 2 ? "lg:grid-cols-2" : "";
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 lg:p-6">
@@ -270,54 +520,41 @@ export default function AgentChat() {
         </div>
       </header>
 
+      {/* 나눠 보기: 한 번에 볼 칸 수 */}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
+        <span>한 번에 보기</span>
+        <div role="radiogroup" aria-label="한 번에 볼 방 개수" className="flex border border-ink-100 bg-surface">
+          {([1, 2, 3] as const).map((n) => (
+            <button key={n} type="button" role="radio" aria-checked={count === n} onClick={() => setCount(n)} disabled={n > limit}
+              title={n > limit ? `화면이 좁아 지금은 ${limit}개까지 보여요` : undefined}
+              className={`px-2.5 py-1 font-medium disabled:cursor-not-allowed disabled:opacity-40 ${count === n ? "bg-ink-900 text-app" : "text-ink-700 hover:bg-ink-50"}`}>
+              {n}개
+            </button>
+          ))}
+        </div>
+        {shownCount > 1
+          ? <span>목록 줄의 ＋를 누르거나 방을 칸으로 끌어다 놓아요. 그냥 누르면 선택된 칸의 방이 바뀌어요.</span>
+          : count > 1 && <span>화면이 좁아 지금은 {limit}개만 보여요. 넓히면 나머지 칸이 다시 보여요.</span>}
+      </div>
+
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{error}</p>}
 
       {/* chat-round: 이 안의 말풍선·알약·아바타·배지만 둥글게 (styles.css) */}
       <div className="chat-round flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <RoomList all={all} incidents={incidentRooms} selected={room} unseen={data.unseen} onSelect={setRoom} />
-
-        {direct ? <DirectChat agent={direct} /> : (
-        <section aria-label={`${title} 대화`} className="card relative flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden bg-chat">
-          <header className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-ink-900/[.07] px-4 py-3">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                <h2 className="min-w-0 truncate text-[15px] font-semibold">{title}</h2>
-                {people && <span className="text-xs text-ink-700">{people}</span>}
-                <StatusChip status={roomInfo?.status} />
-              </div>
-              {roomInfo?.longTitle && <p className="mt-0.5 truncate text-xs text-ink-500">{roomInfo.longTitle}</p>}
-            </div>
-            {!isAll && (
-              <div className="ml-auto flex gap-1.5">
-                {inc && <Link href={`/orchestrator?ctx=${encodeURIComponent(inc.context_id)}`} className="btn-ghost px-2.5 py-1 text-xs">사건 자세히</Link>}
-                <Link href={`/agents/office?room=${encodeURIComponent(room)}`} className="btn-ghost px-2.5 py-1 text-xs">AI 오피스에서 보기</Link>
-              </div>
-            )}
-            {isAll && <Link href={`/agents/office?room=${encodeURIComponent(room)}`} className="btn-ghost ml-auto px-2.5 py-1 text-xs">AI 오피스에서 보기</Link>}
-          </header>
-          {inc && <PinNotice inc={inc} />}
-          <div ref={scroller} onScroll={onScroll} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4">
-            {shown.length === 0 && !typing ? (
-              <EmptyState orchConn={orchConn} known={isAll || !!inc} />
-            ) : (
-              <>
-                <CommNote conn={commConn} truncated={commTruncated} />
-                <MessengerLog items={shown} talk={talkable ? talk : undefined} label={`${title} 대화`}
-                  hold={{ busyHold, canDecide: orchOn, orchMock, onDecide: decide }} />
-                {typing && <p className="mt-2 animate-pulse px-1 text-xs text-ink-500" aria-live="polite">AI들이 이야기하는 중… ({records.length - revealed}개 남음)</p>}
-              </>
-            )}
-          </div>
-          <TypingLines names={answering} />
-          {talkable && <TalkInput talk={talk} onSent={() => toBottom(true)} where="chat" room={room} roomName={inc ? title : undefined} />}
-          {fresh > 0 && (
-            <button onClick={() => toBottom(true)}
-              className="btn-primary absolute bottom-24 left-1/2 -translate-x-1/2 shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
-              새 메시지 {fresh}개 ↓
-            </button>
-          )}
-        </section>
-        )}
+        <RoomList all={all} incidents={incidentRooms} unseen={data.unseen} act={act} focusedRoom={focusedRoom} narrow={shownCount >= 3} />
+        <div className={`grid min-h-0 min-w-0 flex-1 gap-3 ${cols}`}>
+          {Array.from({ length: shownCount }, (_, i) => {
+            const id = visible[i];
+            const common = {
+              n: i + 1, total: shownCount, folded: shownCount >= 3 || (shownCount === 2 && limit < 3), focused: i === focusIdx, onFocus: () => setFocus(i), onDropRoom: (r: string) => openAt(i, r),
+            };
+            if (!id) return <EmptyPane key={`empty-${i}`} {...common} />;
+            return (
+              <RoomPane key={`${i}:${id}`} room={id} {...common} onClose={shownCount > 1 ? () => close(i) : undefined}
+                data={data} busyHold={busyHold} onDecide={decide} replayRoom={replayRoom} />
+            );
+          })}
+        </div>
       </div>
     </div>
   );

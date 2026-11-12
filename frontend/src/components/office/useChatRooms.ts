@@ -39,8 +39,11 @@ export interface ChatRooms {
   markSeen: (room: string) => void;
 }
 
-/** `enabled`가 false면(오피스 리플레이) 서버를 읽지 않는다. `room`은 지금 보고 있는 방(읽음 처리) */
-export function useChatRooms({ enabled = true, room }: { enabled?: boolean; room: string | null }): ChatRooms {
+/**
+ * `enabled`가 false면(오피스 리플레이) 서버를 읽지 않는다.
+ * `rooms`는 지금 화면에 보이는 방들(나눠 보기면 칸마다 하나). 이 방들만 읽음으로 센다
+ */
+export function useChatRooms({ enabled = true, rooms }: { enabled?: boolean; rooms: readonly string[] }): ChatRooms {
   const [incidents, setIncidents] = useState<OrchIncident[]>([]);
   const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
   const [comms, setComms] = useState<CommLine[]>([]);
@@ -101,7 +104,8 @@ export function useChatRooms({ enabled = true, room }: { enabled?: boolean; room
   const markSeen = useCallback((id: string) => {
     setSeen((s) => (s[id] === counts[id] ? s : { ...s, [id]: counts[id] ?? 0 }));
   }, [counts]);
-  useEffect(() => { if (room) markSeen(room); }, [room, markSeen]);
+  const shownKey = rooms.join(",");
+  useEffect(() => { for (const r of shownKey ? shownKey.split(",") : []) markSeen(r); }, [shownKey, markSeen]);
   const unseen = useMemo(
     () => Object.fromEntries(Object.entries(counts).map(([id, n]) => [id, seen[id] == null ? 0 : Math.max(0, n - seen[id])])),
     [counts, seen],

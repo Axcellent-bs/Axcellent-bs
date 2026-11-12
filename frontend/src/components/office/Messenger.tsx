@@ -181,7 +181,7 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label }: {
           <Avatar name="안전 관문" k="safety" />
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="text-xs text-ink-700">안전 관문</span>
-            <div className="flex items-end gap-1.5">
+            <div className="flex flex-wrap items-end gap-x-1.5 gap-y-0.5">
               <HoldCard h={it} hold={hold} />
               <time dateTime={it.at} className="shrink-0 pb-0.5 text-[10px] tabular-nums text-ink-500">{hhmm(it.at)}</time>
             </div>
@@ -199,7 +199,8 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label }: {
     const repeat = it.repeat ? <span className="shrink-0 pb-0.5 text-[10px] font-semibold text-brand-700" title="같은 내용을 여러 번 주고받아 하나로 묶었습니다">×{it.repeat}</span> : null;
     if (mine) {
       rows.push(
-        <li key={it.id} className={`flex max-w-[85%] flex-row-reverse items-end gap-1.5 self-end ${cont ? "-mt-1.5" : ""} ${pop}`}>
+        // 칸이 좁으면(나눠 보기) 시각·×N이 말풍선을 누르지 않고 아래 줄로 내려간다 (flex-wrap)
+        <li key={it.id} className={`flex max-w-[85%] flex-row-reverse flex-wrap items-end gap-x-1.5 gap-y-0.5 self-end ${cont ? "-mt-1.5" : ""} ${pop}`}>
           <Bubble m={it} talk={talk} />
           {repeat}{time}
         </li>,
@@ -211,7 +212,7 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label }: {
         {cont ? <span className="w-9 shrink-0" aria-hidden="true" /> : <Avatar name={it.from} k={it.fromKey} />}
         <div className="flex min-w-0 flex-col gap-0.5">
           {!cont && <span className="text-xs text-ink-700">{it.from}</span>}
-          <div className="flex items-end gap-1.5">
+          <div className="flex flex-wrap items-end gap-x-1.5 gap-y-0.5">
             <Bubble m={it} talk={talk} />
             {repeat}{time}
           </div>
