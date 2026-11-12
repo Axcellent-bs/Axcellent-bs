@@ -4,7 +4,7 @@
 2026-11-11 확인)가 말하는 호출 형태만 쓴다. 이미지 어댑터와 같은 Interactions API다.
 
 - 요청: `POST /v1beta/interactions`, 헤더 `x-goog-api-key`(URL에 키를 넣지 않는다), `Api-Revision`,
-  본문 `{"model", "input": <텍스트>, "background": false, "store": false, "stream": false,
+  본문 `{"model", "input": <텍스트>, "background": false, "store": true, "stream": false,
   "response_format": {"type": "video", "aspect_ratio", "resolution": "720p", "duration": "<N>s",
   "delivery": "uri"}}`. 문서는 동기 단발 생성(`background=false`)을 기본으로 설명한다.
 - 응답: `steps[type=model_output].content[type=video]`에 `data`(base64) 또는 `uri`
@@ -60,6 +60,23 @@ MAX_VIDEO_BYTES = 64 * 1024 * 1024
 MAX_REDIRECTS = 3
 _FILE_ID = re.compile(r"^/v1beta/files/([A-Za-z0-9_-]+)(?::download)?$")
 FFMPEG_TIMEOUT_S = 120
+
+
+_KEY_LIKE = re.compile(r"AIza[0-9A-Za-z_-]{20,}")
+
+
+def _http_error(response: httpx.Response, key: str) -> str:
+    """`http_<코드>`에 Google 오류 문구(`error.message`, 200자, 키 형태는 `***`)를 덧붙인다."""
+    code = f"http_{response.status_code}"
+    try:
+        message = response.json()["error"]["message"]
+    except (ValueError, KeyError, TypeError):
+        return code
+    if not isinstance(message, str) or not message.strip():
+        return code
+    message = message.replace(key, "***") if key else message
+    message = _KEY_LIKE.sub("***", message)
+    return f"{code}: {message[:200]}"
 
 
 class GeminiVideoError(Exception):
@@ -184,7 +201,9 @@ class GeminiVideoProvider:
             "model": request.model,
             "input": request.prompt,
             "background": False,
-            "store": False,
+            # delivery=uri 는 store=true 가 필수다. false 면 HTTP 400
+            # "store=true is required when response format has video delivery set to URI."
+            "store": True,
             "stream": False,
             "response_format": {
                 "type": "video",
@@ -203,7 +222,7 @@ class GeminiVideoProvider:
             with httpx.Client(timeout=REQUEST_TIMEOUT_S, transport=self._transport) as client:
                 response = client.post(ENDPOINT, json=payload, headers=headers)
                 if response.status_code != 200:
-                    raise GeminiVideoError(f"http_{response.status_code}")
+                    raise GeminiVideoError(_http_error(response, key))
                 body = _json(response)
                 if body.get("status") not in (None, "completed"):
                     raise GeminiVideoError(f"status_{body.get('status')}")

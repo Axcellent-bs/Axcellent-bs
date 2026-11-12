@@ -586,3 +586,17 @@ def test_card_lists_generate_media_and_a2a_runs_it(monkeypatch: pytest.MonkeyPat
     }
     out = client.post("/a2a", json=body).json()
     assert out["outcome"] == "generated" and out["output"]["ai_generated"] is True
+
+
+@pytest.mark.asyncio
+async def test_video_provider_error_detail_is_kept_without_secret(
+    gate: Gate, fake: FakeProvider, prices: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from marketing_agent.media.gemini_video import GeminiVideoError
+
+    _real_env(monkeypatch)
+    fake.error = GeminiVideoError("http_400: store=true is required")
+    result = await _run(MediaLedger(), prices)
+    assert result.outcome == "provider_failed"
+    assert result.output["error_type"] == "GeminiVideoError"
+    assert result.output["detail"] == "http_400: store=true is required"

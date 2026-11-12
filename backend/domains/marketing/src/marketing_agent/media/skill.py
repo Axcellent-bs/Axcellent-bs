@@ -46,6 +46,7 @@ from ax_contracts.schemas.common import AxModel
 from marketing_agent.media import pricing
 from marketing_agent.media.base import MediaKind, MediaRequest, MediaResult
 from marketing_agent.media.config import MOCK, MediaSettings, ffmpeg_bin
+from marketing_agent.media.gemini_video import GeminiVideoError
 from marketing_agent.media.ledger import LedgerError, MediaLedger
 from marketing_agent.media.mock import MOCK_COST_KRW
 from marketing_agent.media.pricing import PriceNotFound
@@ -313,7 +314,8 @@ async def generate_media(
             raise ValueError("asset_hash_mismatch")
     except Exception as error:  # 예외 내용에 비밀이 섞일 수 있어 종류만 남긴다
         _safe(lambda: ledger.mark_failed(seq, _now()))
-        return _fail(request, "provider_failed", error_type=type(error).__name__)
+        detail = {"detail": str(error)[:120]} if isinstance(error, GeminiVideoError) else {}
+        return _fail(request, "provider_failed", error_type=type(error).__name__, **detail)
 
     # --- 저장·사후 정산 ---
     usd_actual, krw_actual, source = _settle_amounts(
