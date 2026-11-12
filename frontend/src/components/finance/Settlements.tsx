@@ -1,13 +1,23 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
-  FinanceApiError, SAFETY_SERVER, batchOf, finance, isoWeekOf, krw, percent, periodKo, readyPayout, shiftWeek,
-  type BatchStatus, type SettlementBatch, type StatementProduct, type StatementStatus,
+  SAFETY_SERVER, isPayable, isoWeekOf, krw, percent, periodKo, readyPayout, shiftWeek,
+  type BatchStatus, type DeadlineReport, type Envelope, type SettlementBatch, type Settlements, type StatementProduct, type StatementStatus,
 } from "@/lib/finance";
 import { SHOP_WEB_URL } from "@/lib/env";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
-// ③ 판매자 정산: 판매자별로 줄 돈을 계산하고, 보류 없는 판매자만 묶어 지급 승인을 요청한다.
-// 요청은 안전 장치 보류 큐로 가고, 사람이 거기서 승인한다. 데모에서는 실제로 송금하지 않는다.
+// 판매자 정산 표: 판매자별로 줄 돈(정산금)과 보류 사유, 주 넘기기, 못 준 주 안내, 묶음 상태.
+// 판매자 정산은 고객지원이 한다. 고객지원 화면(pages/SellerSettlements.tsx)은 `request`를 넘겨
+// 보류 없는 판매자만 묶어 지급 승인을 요청하고(안전 장치 보류 큐 → 사람 승인), 재무 화면(③)은
+// `request` 없이 같은 표를 보기만 한다. 데모에서는 실제로 송금하지 않는다.
+
+/** 표를 어디서 받는지 (재무: finance 서버, 고객지원: dashboard-api → support) */
+export interface SettlementSource {
+  settlements: (period: string | null) => Promise<Envelope<Settlements>>;
+  deadlines: () => Promise<Envelope<DeadlineReport>>;
+}
+/** 묶음 요청 결과. 같은 주를 이미 요청했으면 `requested: false` */
+export interface SettlementRequestOutcome { settlement: Settlements; requested: boolean }
 
 const STATUS_KO: Record<StatementStatus, { label: string; tone: string }> = {
   ready: { label: "지급 준비됨", tone: TONE.ok },
@@ -58,44 +68,64 @@ function lastDay(to: string): string {
 }
 /** 빼는 금액: 54000 → "−54,000원", 0 → "0원", 없음 → "확인할 수 없음" */
 const minus = (n: number | null) => (n ? `−${krw(n)}` : krw(n));
-export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: number; onChanged: () => void; onGoToQueue: (reviewId: string | null) => void }) {
-  // 보는 정산 주. null이면 서버 기본(지난주). 지난주보다 앞선 주에 못 준 정산이 있으면 그 주를 열어 요청한다
+export function SettlementsSection({ tick, source, request, canRequest = true, onChanged, onGoToQueue, note, title = "③ 판매자 정산", titleHidden = true }: {
+  tick: number;
+  /** 섹션 제목. 재무는 바로 위 탭 이름과 같아 숨긴다 */
+  title?: string;
+  titleHidden?: boolean;
+  source: SettlementSource;
+  /** 없으면 보기만 한다(요청 버튼 없음) */
+  request?: (period: string) => Promise<SettlementRequestOutcome>;
+  /** 사람 토큰이 있어 요청 버튼을 켤 수 있는지 */
+  canRequest?: boolean;
+  onChanged?: () => void;
+  /** 보류 큐로 가기. 없으면 보류 큐 링크를 그리지 않는다 */
+  onGoToQueue?: (reviewId: string | null) => void;
+  /** 표 위 안내 (재무: 정산은 고객지원이 한다는 말) */
+  note?: ReactNode;
+}) {
+  // 보는 정산 주. null이면 서버 기본(지난주). 지난주보다 앞선 주에 못 준 정산이 있으면 그 주를 열어 본다
   const [period, setPeriod] = useState<string | null>(null);
   const latest = useRef<string | null>(null); // 서버 기본 주(지난주)
-  const res = useResource(`settlements:${period ?? ""}`, () => finance.settlements(period), tick);
-  const deadlines = useResource("settlement-deadlines", () => finance.deadlines(), tick);
+  const res = useResource(`settlements:${period ?? ""}`, () => source.settlements(period), tick);
+  const deadlines = useResource("settlement-deadlines", () => source.deadlines(), tick);
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState<SettlementBatch | null>(null);
+  const [sent, setSent] = useState<{ batch: SettlementBatch; requested: boolean } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
   async function requestBatch(period: string) {
+    if (!request) return;
     setSending(true);
     setProblem(null);
     setSent(null);
     try {
-      const out = await finance.requestSettlementBatch(period);
-      setSent(batchOf(out.data));
+      const out = await request(period);
+      setSent({ batch: out.settlement.batch, requested: out.requested });
+      res.set((cur) => ({ ...cur, data: out.settlement }));
       await res.reload();
-      onChanged();
+      onChanged?.();
     } catch (e) {
-      const err = e as FinanceApiError;
-      setProblem(err.code === "safety_unavailable" || err.status === 503
+      const err = e as Error & { code?: string | null };
+      const code = (err.code ?? "").toLowerCase();
+      setProblem(code === "safety_unavailable"
         ? `${SAFETY_SERVER}가 응답하지 않아 요청하지 않았습니다. 지급 기록도 남지 않았습니다. 안전 장치를 켠 뒤 다시 누르세요.`
-        : err.message);
+        : code === "nothing_to_settle" ? "보류 없이 지급할 판매자가 없어 요청하지 않았습니다."
+          : err.message);
     } finally {
       setSending(false);
     }
   }
 
   return (
-    <Panel id="settlements" title="③ 판매자 정산" titleHidden meta={res.env?.meta}
-      hint="판매자에게 줄 돈(정산금) = 판매액 − 판매 수수료 − 판매자가 부담한 쿠폰 − 환불. 오픈마켓처럼 구매가 확정된(배송 완료) 주문만 그 확정일이 속한 주에 정산하고, 아직 확정되지 않은 주문은 확정되는 주의 정산으로 넘깁니다. 환불은 고객지원이 처리한 결과를 판매 서버에서 받아, 이미 정산한 주문이면 환불한 주에, 확정 전 환불이면 그 주문이 확정되는 주에 뺍니다. 배송 전 취소처럼 끝내 확정되지 않은 주문의 환불은 판매자가 받은 돈이 없어 빼지 않습니다. 정산금이 0원 이하인 판매자만 보류하고, 나머지를 묶어 지급 승인을 요청합니다.">
+    <Panel id="settlements" title={title} titleHidden={titleHidden} meta={res.env?.meta}
+      hint="판매자에게 줄 돈(정산금) = 판매액 − 판매 수수료 − 판매자가 부담한 쿠폰 − 환불. 오픈마켓처럼 구매가 확정된(배송 완료) 주문만 그 확정일이 속한 주에 정산하고, 아직 확정되지 않은 주문은 확정되는 주의 정산으로 넘깁니다. 환불은 이미 정산한 주문이면 환불한 주에, 확정 전 환불이면 그 주문이 확정되는 주에 뺍니다. 배송 전 취소처럼 끝내 확정되지 않은 주문의 환불은 판매자가 받은 돈이 없어 빼지 않습니다. 정산금이 0원 이하인 판매자만 보류하고, 나머지를 묶어 지급 승인을 요청합니다.">
+      {note && <div className="mb-4">{note}</div>}
       <ResourceBody res={res}>
         {(s) => {
           const total = readyPayout(s.statements);
-          const readyCount = s.statements.filter((x) => x.status === "ready").length;
+          const readyCount = s.statements.filter(isPayable).length;
           const inFlight = s.batch.status === "requested" || s.batch.status === "approved";
-          const canRequest = readyCount > 0 && !inFlight && !sending;
+          const requestable = !!request && canRequest && readyCount > 0 && !inFlight && !sending;
           // 기한 점검에서 아직 지급되지 않은(예정일이 지난) 판매 대금이 걸린 주 중 지금 보는 주가 아닌 주
           const unpaidWeeks = new Map<string, string[]>();
           for (const d of deadlines.env?.data.sellers ?? []) {
@@ -115,7 +145,7 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
               {[...unpaidWeeks].sort(([a], [b]) => a.localeCompare(b)).map(([week, names]) => (
                 <div key={week} role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-100">
                   <span className="min-w-0 flex-1">
-                    <b>{periodKo(week)}</b> 정산이 아직 지급되지 않았습니다 ({names.join(", ")}). 지급 예정일이 지나 기한을 넘길 위험이 있습니다. 그 주를 열어 지급 승인을 요청하세요.
+                    <b>{periodKo(week)}</b> 정산이 아직 지급되지 않았습니다 ({names.join(", ")}). 지급 예정일이 지나 기한을 넘길 위험이 있습니다. {request ? "그 주를 열어 지급 승인을 요청하세요." : "고객지원이 그 주의 지급 승인을 요청해야 합니다."}
                   </span>
                   <button type="button" className="btn-ghost" onClick={() => goTo(week)}>{periodKo(week)} 열기</button>
                 </div>
@@ -185,38 +215,42 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
                     ) : (
                       <>
                         <p className="text-sm text-ink-500">지급 준비된 판매자 {readyCount}곳 정산금 합계</p>
-                        <p className={`text-2xl font-bold tabular-nums ${total == null ? "text-ink-500" : "text-ink-900"}`}>{krw(total)}</p>
+                        <p className="text-2xl font-bold tabular-nums text-ink-900">{krw(total)}</p>
                       </>
                     )}
                   </div>
-                  <div className="ml-auto flex flex-col items-start gap-1 sm:items-end">
-                    <button className="btn-primary" disabled={!canRequest} onClick={() => requestBatch(s.period)}>
-                      {sending ? "요청하는 중…" : "정산 묶음 지급 승인 요청"}
-                    </button>
-                    <span className="text-sm text-ink-500">
-                      {inFlight ? "이미 요청한 묶음이 있습니다." : readyCount === 0 ? "지급 준비된 판매자가 없습니다." : "누르면 안전 장치 보류 큐로 갑니다. 돈은 아직 나가지 않습니다."}
-                    </span>
-                  </div>
+                  {request && (
+                    <div className="ml-auto flex flex-col items-start gap-1 sm:items-end">
+                      <button className="btn-primary" disabled={!requestable} onClick={() => requestBatch(s.period)}>
+                        {sending ? "요청하는 중…" : "정산 묶음 지급 승인 요청"}
+                      </button>
+                      <span className="text-sm text-ink-500">
+                        {inFlight ? "이미 요청한 묶음이 있습니다." : readyCount === 0 ? "지급 준비된 판매자가 없습니다." : !canRequest ? "결정 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 버튼이 꺼져 있습니다." : "누르면 안전 장치 보류 큐로 갑니다. 돈은 아직 나가지 않습니다."}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <p className="mt-2 text-sm text-ink-700">{(s.batch.status === "rejected" && s.batch.closed_reason && CLOSED_KO[s.batch.closed_reason]) || BATCH_KO[s.batch.status] || "지급 상태를 확인할 수 없습니다."}</p>
                 {s.batch.review_id && (
                   <p className="mt-1 text-sm text-ink-500">
                     확인 번호 <code>{s.batch.review_id}</code> · 묶음 {s.batch.seller_ids.length}곳 {krw(s.batch.total_payout)}{" "}
-                    {s.batch.status === "requested" && <button type="button" className="font-medium text-brand-700 underline" onClick={() => onGoToQueue(s.batch.review_id)}>보류 큐에서 승인하기</button>}
+                    {s.batch.status === "requested" && onGoToQueue && <button type="button" className="font-medium text-brand-700 underline" onClick={() => onGoToQueue(s.batch.review_id)}>보류 큐에서 승인하기</button>}
                   </p>
                 )}
               </div>
 
-              {sent && (
+              {sent && (sent.requested ? (
                 <div aria-live="polite" className="rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-700">
                   <p className="font-semibold">안전 장치 보류 큐로 보냈습니다.</p>
                   <p className="mt-0.5">
-                    {sent.review_id ? <>확인 번호 <code>{sent.review_id}</code>. </> : ""}
+                    {sent.batch.review_id ? <>확인 번호 <code>{sent.batch.review_id}</code>. </> : ""}
                     아래 <b>안전 장치 보류 큐</b>에서 사람이 승인하면 지급이 기록됩니다. 정한 시간 안에 결정하지 않으면 자동으로 취소됩니다.
                   </p>
-                  <button type="button" className="mt-1 font-medium underline" onClick={() => onGoToQueue(sent.review_id)}>보류 큐로 가기</button>
+                  {onGoToQueue && <button type="button" className="mt-1 font-medium underline" onClick={() => onGoToQueue(sent.batch.review_id)}>보류 큐로 가기</button>}
                 </div>
-              )}
+              ) : (
+                <p aria-live="polite" className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink-700">이 주는 이미 지급 승인을 요청했거나 승인돼 다시 요청하지 않았습니다.</p>
+              ))}
               {problem && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">{problem}</p>}
 
             </div>

@@ -1,4 +1,7 @@
-"""③ 판매자 정산: 판매자별 정산 내역서와 보류 사유.
+"""판매자 정산 (고객지원): 판매자별 정산 내역서 · 보류 사유 · 지급 기한 점검.
+
+2026-11-12 팀장 결정으로 재무에서 옮겨 왔다. 판매자 정산은 고객지원이 하고, 재무는 결과를 받아
+화면에 보여 주고 회계(미지급금 롤포워드·현금 흐름·은행 출금 대조)에만 쓴다.
 
 정산금 `payout` = 판매액 `gross` − 판매 수수료 `commission` − 판매자 부담 쿠폰 `seller_coupon`
 − 환불 `refunds`. 기간은 주 단위(월~일), 기본은 지난주.
@@ -6,11 +9,11 @@
 - 판매액·수수료: 기간 안에 **구매가 확정된**(배송 완료) 주문의 그 판매자 품목
   (수수료는 카테고리 수수료율, 품목별 반올림). 오픈마켓처럼 구매 확정일 기준으로 정산한다
 - 판매자 부담 쿠폰: 기간 안에 발급된 `funded_by="seller"` 쿠폰
-- 환불: 그 판매자 몫 환불을, 환불 시각과 그 주문의 구매 확정 시각 중 **늦은 쪽**이 기간 안이면 뺀다.
+- 환불: 고객지원이 처리한 환불(`refund_request` → 판매 서버)을 판매 서버 주문에서 읽는다.
+  환불 시각과 그 주문의 구매 확정 시각 중 **늦은 쪽**이 기간 안이면 뺀다.
   확정된(판매액을 이미 정산한) 주문의 환불은 환불한 주에 빼고(역정산),
   확정 전 환불은 그 주문이 확정되는 주에 판매액과 같이 뺀다.
-  끝내 확정되지 않은 주문(배송 전 취소 등)의 환불은 판매자가 받은 돈이 없으니 빼지 않는다.
-  고객지원이 환불하면(`refund_request` → shop-api) 재무는 그 결과를 shop-api 주문에서 읽어 반영한다
+  끝내 확정되지 않은 주문(배송 전 취소 등)의 환불은 판매자가 받은 돈이 없으니 빼지 않는다
 - 구매 확정 대기(`pending_confirmation`): 기간 끝 전에 팔렸지만 아직 확정되지 않은 주문.
   이번 정산에 넣지 않고, 확정되는 주의 정산으로 넘어간다(보류 사유가 아니다)
 
@@ -18,24 +21,17 @@
 - `negative_payout`: 정산금이 0원 이하
 - `no_confirmed_orders`: 이번 주에 확정된 주문이 없고 확정 대기 주문만 있다(줄 돈이 없다)
 
-예전에는 확정되지 않은 주문이 한 건만 있어도 그 판매자의 한 주 정산 전체를 보류했다
-(`unconfirmed_purchase`). 주문이 계속 들어오면 판매자가 영영 지급받지 못해서 바꿨다.
-
-내역서마다 이번 기간에 판 쇼핑몰 상품(`products`: 상품 번호·이름·수량·판매액)을 붙인다.
-판매자 번호(`seller_id`)와 상품 번호(`product_id`)는 쇼핑몰(shop-api)의 것 그대로다.
-
-지급 확정은 재무가 하지 않는다. 묶음을 `execute("confirm_settlement")`로 요청하면 안전 관문이
-항상 C로 보류하고 사람이 승인한다 (`settlement_batch.py`의 API 쪽).
+지급은 고객지원도 확정하지 않는다. 묶음을 `execute("confirm_settlement")`로 요청하면 안전 관문이
+항상 C로 보류하고 사람이 승인한다(`settlement_batches.py`).
 """
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from finance_agent import finance_config as fc
-from finance_agent.books import Books, in_range, item_gross
-from finance_agent.rules import applied_many
+from support_agent import settlement_config as sc
+from support_agent.settlement_books import SettlementBooks, in_range, item_gross
 
 MAX_PRODUCTS = 20  # 판매자 한 곳에 보여 줄 상품 수
 
@@ -43,11 +39,6 @@ MAX_PRODUCTS = 20  # 판매자 한 곳에 보여 줄 상품 수
 def _qty(item: dict[str, Any]) -> int:
     q = item.get("qty")
     return q if isinstance(q, int) and not isinstance(q, bool) else 0
-
-
-def _paid_at(order: dict[str, Any]):
-    times = [p["created_at"] for p in order["payments"] if p.get("status") == "succeeded"]
-    return min(times) if times else None
 
 
 def _refund_settles_at(refund: dict[str, Any], confirmed_at: dict[str, Any]) -> Any:
@@ -66,14 +57,14 @@ def _refund_settles_at(refund: dict[str, Any], confirmed_at: dict[str, Any]) -> 
 
 
 def statements(
-    books: Books,
+    books: SettlementBooks,
     period: str | None,
     today: date | None = None,
 ) -> dict[str, Any]:
-    cfg = fc.load_config()
-    today = today or fc.today()
-    name, monday, sunday = fc.week_range(period, today)
-    start, end = fc.day_start(monday), fc.day_start(sunday + timedelta(days=1))
+    cfg = sc.load_policy()
+    today = today or sc.today()
+    name, monday, sunday = sc.week_range(period, today)
+    start, end = sc.day_start(monday), sc.day_start(sunday + timedelta(days=1))
 
     sellers = [s["seller_id"] for s in books.sellers if s.get("seller_id")]
     for o in books.orders:  # 판매자 목록에 없는 판매자의 품목도 빠뜨리지 않는다
@@ -100,7 +91,7 @@ def statements(
                 rate = cfg.commission.rate_for(i.get("category_code"))
                 rates.add(rate)
                 gross += g
-                commission += fc.rate_amount(g, rate)
+                commission += sc.rate_amount(g, rate)
                 pid = str(i.get("product_id") or "")
                 if pid:
                     row = by_product.setdefault(
@@ -180,11 +171,11 @@ def statements(
     pay_date = sunday + timedelta(days=cfg.settlement.pay_days_after_period_end)
     return {
         "period": name,
-        "from": fc.iso(start),
-        "to": fc.iso(end),
+        "from": sc.iso(start),
+        "to": sc.iso(end),
         "pay_date": pay_date.isoformat(),
         "statements": rows,
-        "applied_rules": applied_many("SET-001"),
+        "applied_rules": [sc.applied_rule()],
     }
 
 
@@ -220,3 +211,139 @@ def ready(result: dict[str, Any]) -> list[dict[str, Any]]:
         for r in result["statements"]
         if not r["hold_reasons"] and r["status"] in ("ready", "rejected") and (r["payout"] or 0) > 0
     ]
+
+
+# ---------------------------------------------------------------- 지급 기한 점검
+# 오픈마켓(통신판매중개)은 판매자에게 판매 대금을 정해진 날 안에 줘야 한다. 기한(일 수)과 기산점은
+# `settlement_policy.toml [settlement]`에 둔다. 경보만 내고, 지급은 정산 묶음 → 안전 장치 C 보류 →
+# 사람 승인으로만 한다.
+# - 기산점: 구매 확정(배송 완료 시각으로 대신). 배송 전 주문은 기한이 아직 시작되지 않았다
+# - 지급 완료: 그 주 정산 묶음이 안전 장치에서 승인된 판매자 (실제 이체 결과는 연동돼 있지 않다)
+# - 지급 예정일: 정산 기간 마지막 날 + `pay_days_after_period_end`. 보류 사유가 있으면 예정일이 없다
+# - 상태: overdue(기한 지남) · at_risk(예정일이 없거나 기한 뒤) · due_soon(임박) · ok
+STATUS_ORDER = {"overdue": 0, "at_risk": 1, "due_soon": 2, "ok": 3}
+STATUS_KO = {
+    "overdue": "기한 지남",
+    "at_risk": "기한 넘길 위험",
+    "due_soon": "기한 임박",
+    "ok": "정상",
+}
+
+
+def deadline_report(
+    books: SettlementBooks, batches: dict[str, dict[str, Any]], today: date | None = None
+) -> dict[str, Any]:
+    cfg = sc.load_policy()
+    s = cfg.settlement
+    today = today or sc.today()
+    since = today - timedelta(days=s.deadline_lookback_days)
+    by_week: dict[str, dict[str, Any]] = {}  # 주 → 판매자 → 정산서 행
+
+    def row_of(week: str, seller_id: str) -> dict[str, Any] | None:
+        if week not in by_week:
+            result = statements(books, week, today=today)
+            by_week[week] = {r["seller_id"]: r for r in result["statements"]}
+        return by_week[week].get(seller_id)
+
+    sellers: dict[str, dict[str, Any]] = {}
+    waiting = 0  # 배송 전이라 기한이 아직 시작되지 않은 주문
+    weeks: dict[date, tuple[str, set[str], date]] = {}  # 확정일 → (정산 주, 지급한 판매자, 지급일)
+    for o in books.sold_between(sc.day_start(since), datetime.max.replace(tzinfo=UTC)):
+        if o.get("delivered_at") is None:  # 구매 확정 전: 기한이 아직 시작되지 않았다
+            waiting += sum(1 for item in o["items"] if item.get("seller_id"))
+            continue
+        # 정산은 구매 확정일이 속한 주에 한다(settlement.py)
+        paid_day = o["delivered_at"].date()
+        if paid_day not in weeks:
+            week = sc.week_of(paid_day)
+            batch = batches.get(week) or {}
+            approved = batch.get("status") == "approved"
+            _, _, sunday = sc.week_range(week, today)
+            weeks[paid_day] = (
+                week,
+                set(batch.get("seller_ids") or []) if approved else set(),
+                sunday + timedelta(days=s.pay_days_after_period_end),
+            )
+        week, paid_sellers, pay_date = weeks[paid_day]
+        for item in o["items"]:
+            seller_id = item.get("seller_id")
+            if not seller_id or seller_id in paid_sellers:
+                continue
+            confirmed = o["delivered_at"].date()
+            deadline = confirmed + timedelta(days=s.deadline_days)
+            row = row_of(week, seller_id)
+            held = row is not None and bool(row["hold_reasons"])
+            expected = None if held or pay_date < today else pay_date
+            if today > deadline:
+                status = "overdue"
+            elif expected is None or expected > deadline:
+                status = "at_risk"
+            elif (deadline - today).days <= s.deadline_warn_days:
+                status = "due_soon"
+            else:
+                status = "ok"
+            rate = cfg.commission.rate_for(item.get("category_code"))
+            gross = item_gross(item)
+            amount = gross - sc.rate_amount(gross, rate)  # 판매자 몫 (쿠폰·환불 차감 전)
+            cur = sellers.setdefault(
+                seller_id,
+                {
+                    "seller_id": seller_id,
+                    "name": books.seller_name(seller_id),
+                    "orders": set(),
+                    "amount": 0,
+                    "oldest_confirmed": confirmed,
+                    "deadline": deadline,
+                    "expected_pay_date": expected,
+                    "status": status,
+                    "hold_reasons": [],
+                },
+            )
+            cur["orders"].add(o["order_id"])
+            cur["amount"] += amount
+            if deadline < cur["deadline"]:
+                cur.update(
+                    oldest_confirmed=confirmed, deadline=deadline, expected_pay_date=expected
+                )
+            if STATUS_ORDER[status] < STATUS_ORDER[cur["status"]]:
+                cur["status"] = status
+            if held and row is not None:
+                for reason in row["hold_reasons"]:
+                    if reason not in cur["hold_reasons"]:
+                        cur["hold_reasons"].append(reason)
+
+    rows = sorted(sellers.values(), key=lambda r: (STATUS_ORDER[r["status"]], r["deadline"]))
+    out = [
+        {
+            "seller_id": r["seller_id"],
+            "name": r["name"],
+            "orders": len(r["orders"]),
+            "amount": r["amount"],
+            "oldest_confirmed": r["oldest_confirmed"].isoformat(),
+            "deadline": r["deadline"].isoformat(),
+            "days_left": (r["deadline"] - today).days,
+            "expected_pay_date": r["expected_pay_date"].isoformat()
+            if r["expected_pay_date"]
+            else None,
+            "status": r["status"],
+            "status_label": STATUS_KO[r["status"]],
+            "hold_reasons": r["hold_reasons"],
+        }
+        for r in rows
+    ]
+    counts = {k: sum(1 for r in out if r["status"] == k) for k in STATUS_ORDER}
+    return {
+        "today": today.isoformat(),
+        "deadline_days": s.deadline_days,
+        "basis": s.deadline_basis,
+        "warn_days": s.deadline_warn_days,
+        "since": since.isoformat(),
+        "counts": counts,
+        "waiting_orders": waiting,
+        "sellers": out,
+    }
+
+
+def needs_attention(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """사람이 볼 판매자: 기한 지남·위험·임박."""
+    return [r for r in report["sellers"] if r["status"] != "ok"]

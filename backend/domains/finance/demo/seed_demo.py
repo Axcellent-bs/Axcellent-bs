@@ -104,12 +104,12 @@ def main() -> None:
         ),
     )
 
-    # 5) 정책상 항상 사람이 보는 일: 판매자 정산 확정
+    # 5) 정책상 항상 사람이 보는 일: 판매자 정산 확정 (정산은 고객지원이 요청한다, 2026-11-12)
     show(
         "판매자 sel_1 정산 확정(항상 사람 확인)",
         execute(
             s,
-            "finance",
+            "support",
             "confirm_settlement",
             "stl-sel_1",
             {"settlement_id": "stl_1", "seller_id": "sel_1"},

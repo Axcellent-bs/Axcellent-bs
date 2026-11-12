@@ -448,7 +448,10 @@ def test_failed_refresh_does_not_keep_serving_old_books(monkeypatch: pytest.Monk
 
 
 def test_decisions_that_move_or_fix_money_read_new_books(monkeypatch: pytest.MonkeyPatch) -> None:
-    """결산 확정과 정산 지급 요청은 직전 장부가 아니라 새 장부로 판단한다."""
+    """결산 확정은 직전 장부가 아니라 새 장부로 판단한다.
+
+    정산 지급 요청은 고객지원으로 옮겨 재무에 없다(고객지원 테스트에서 본다).
+    """
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
     monkeypatch.delenv("FINANCE_HUMAN_TOKENS", raising=False)
     monkeypatch.delenv("SAFETY_HUMAN_TOKENS", raising=False)
@@ -469,5 +472,3 @@ def test_decisions_that_move_or_fix_money_read_new_books(monkeypatch: pytest.Mon
         headers=human,
     )
     assert calls == ["fresh"]
-    client.post("/api/finance/settlements/batch", json={}, headers=human)
-    assert calls == ["fresh", "fresh"]

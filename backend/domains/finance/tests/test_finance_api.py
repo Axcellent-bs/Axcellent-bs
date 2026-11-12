@@ -5,15 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from ax_contracts.schemas import ExecuteDecision, HoldReason
-from finance_agent import books as bk
 from finance_agent import finance_api, handlers
-from finance_agent.books import Books
 from finance_agent.main import app
 from finance_agent.sources import MockSources
 
@@ -85,9 +82,9 @@ def test_overview_shape(client: TestClient) -> None:
     assert k["net_result"] == k["commission_revenue"] - k["coupon_cost"] - k["pg_fee"]
     assert all(isinstance(v, int) for v in k.values())
     kinds = [t["kind"] for t in data["todo"]]
+    # 판매자 정산은 고객지원이 한다. 재무 할 일에 지급 승인 요청·승인이 없다
+    # (고객지원이 꺼져 있으면 기한 알림도 지어내지 않는다)
     assert kinds == [
-        "settlement_batch",
-        "settlement_deadline",
         "closing_confirm",
         "recon_exception",
         "team_budget",  # 이번 달
@@ -98,7 +95,6 @@ def test_overview_shape(client: TestClient) -> None:
         assert t["count"] > 0
     # 할 일마다 사람이 바로 누를 결정이 붙는다
     actions = {t["kind"]: t["action"] for t in data["todo"]}
-    assert actions["settlement_batch"] == {"type": "settlement_request", "period": "2026-W42"}
     assert actions["closing_confirm"] == {
         "type": "closing_confirm",
         "period": "day",
@@ -111,9 +107,8 @@ def test_overview_shape(client: TestClient) -> None:
             assert t["items"] and all(
                 {"ref", "title", "detail", "amount"} <= set(i) for i in t["items"]
             )
-    batch = data["todo"][0]
-    assert (batch["count"], batch["link"]) == (3, "settlements")
-    assert batch["title"] == "판매자 정산 3곳 지급 승인 요청 대기"
+    gone = ("settlement_request", "review_decision")
+    assert not any(t["action"]["type"] in gone for t in data["todo"])
 
 
 def test_closing_shape_and_params(client: TestClient) -> None:
@@ -167,14 +162,93 @@ def test_reconciliation_sends_only_what_the_screen_shows(client: TestClient) -> 
         assert response.status_code == 400, bad
 
 
-def test_settlements_shapes(client: TestClient) -> None:
-    sett = _get(client, "/api/finance/settlements")["data"]
+# ---------------------------------------------------------- 판매자 정산 (고객지원 것을 받기만)
+def test_settlements_pass_through_support(client: TestClient, support, kit) -> None:
+    rows = [{"seller_id": "sel_0001", "payout": 13000}]
+    batch = {
+        "status": "requested",
+        "review_id": "rev_1",
+        "execution_id": "exe_1",
+        "total_payout": 13000,
+        "seller_ids": ["sel_0001"],
+    }
+    support.weeks["2026-W42"] = kit.statement("2026-W42", rows, batch=batch)
+    body = client.get("/api/finance/settlements").json()
+    sett, meta = body["data"], body["meta"]
     assert set(sett) == {"period", "from", "to", "pay_date", "statements", "batch", "applied_rules"}
-    assert sett["batch"]["status"] == "none"
-    assert (
-        _get(client, "/api/finance/settlements", period="2026-W41")["data"]["period"] == "2026-W41"
-    )
-    assert client.get("/api/finance/settlements", params={"period": "41"}).status_code == 400
+    assert sett == support.weeks["2026-W42"]  # 고객지원이 준 그대로 (meta만 뺌)
+    assert set(meta) >= META_KEYS and meta["provider"] == "support"
+    assert meta["source"] == "shop-api"  # 고객지원이 어디서 읽었는지
+    assert support.calls[-1] == ("seller_settlement", {"period": None})
+    w41 = client.get("/api/finance/settlements", params={"period": "2026-W41"}).json()
+    assert w41["data"]["period"] == "2026-W41"
+    bad = client.get("/api/finance/settlements", params={"period": "41"})
+    assert (bad.status_code, bad.json()["error"]["code"]) == (400, "invalid_request")
+
+
+def test_deadlines_pass_through_support(client: TestClient, support) -> None:
+    body = client.get("/api/finance/settlements/deadlines").json()
+    assert body["data"] == support.deadlines and body["meta"]["provider"] == "support"
+    assert support.calls == [("seller_settlement_deadlines", {})]
+
+
+@pytest.mark.parametrize("url", ["/api/finance/settlements", "/api/finance/settlements/deadlines"])
+def test_settlements_are_503_when_support_is_down(client: TestClient, url: str) -> None:
+    """고객지원에 닿지 않으면 재무가 정산을 계산해 채우지 않는다."""
+    response = client.get(url)
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "support_unavailable"
+
+
+def test_support_failure_is_503_too(client: TestClient, support) -> None:
+    support.down = True
+    response = client.get("/api/finance/settlements")
+    assert (response.status_code, response.json()["error"]["code"]) == (503, "support_unavailable")
+
+
+def test_settlement_feed_remembers_answers_briefly(client: TestClient, support) -> None:
+    for _ in range(3):
+        assert client.get("/api/finance/settlements").status_code == 200
+    assert len(support.calls) == 1  # 화면이 몇 초마다 불러도 고객지원에 다시 묻지 않는다
+
+
+def test_finance_no_longer_requests_payouts(client: TestClient, support, monkeypatch) -> None:
+    """정산 묶음 요청 경로가 없고, 어떤 화면도 `execute("confirm_settlement")`를 부르지 않는다."""
+    calls = _fake_safety(monkeypatch, HELD)
+    for body in ({}, {"period": "2026-W42"}):
+        response = client.post("/api/finance/settlements/batch", json=body, headers=HUMAN)
+        assert response.status_code in (404, 405)
+    for url in (
+        "/api/finance/overview",
+        "/api/finance/settlements",
+        "/api/finance/settlements/deadlines",
+        "/api/finance/payables",
+        "/api/finance/cashflow",
+        "/api/finance/close-checklist",
+        "/api/finance/bank/outflows",
+    ):
+        assert client.get(url).status_code == 200, url
+    assert calls == []
+    assert handlers.state().records.legacy_batches == {}  # 재무는 묶음을 기록하지 않는다
+
+
+def test_finance_code_never_asks_for_settlement_execution() -> None:
+    """재무 코드 어디에도 `execute("confirm_settlement", ...)` 호출이 없다 (설명 글은 빼고 본다)."""
+    import ast
+    from pathlib import Path
+
+    src = Path(finance_api.__file__).parent
+    for path in src.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text("utf-8"))):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            name = getattr(node.func, "id", getattr(node.func, "attr", None))
+            first = node.args[0]
+            assert not (
+                name == "execute"
+                and isinstance(first, ast.Constant)
+                and first.value == "confirm_settlement"
+            ), path.name
 
 
 def test_missing_sources_are_reported_in_meta(client: TestClient, kit) -> None:
@@ -187,7 +261,7 @@ def test_missing_sources_are_reported_in_meta(client: TestClient, kit) -> None:
         )
 
     handlers.state().books_loader = live_like
-    body = client.get("/api/finance/settlements").json()
+    body = client.get("/api/finance/payables").json()
     assert body["meta"]["unavailable"] == ["executions"]
     assert (body["meta"]["mock"], body["meta"]["source"]) == (False, "shop-api")
 
@@ -309,194 +383,6 @@ def test_reconciliation_note(client: TestClient) -> None:
     assert handlers.state().records.recon_note_log[0]["by"] == "taeyoon"
 
 
-# ---------------------------------------------------------------- 정산 묶음 (execute → safety C)
-def _hold_sel_0002() -> None:
-    """판매자 sel_0002의 주문을 구매 미확정으로 바꿔 그 판매자만 보류시킨다."""
-    books = bk.seed_books()
-    for order in books.orders:
-        if all(i.get("seller_id") == "sel_0002" for i in order["items"]):
-            order["delivered_at"] = None
-
-    async def load() -> Books:
-        return books
-
-    handlers.state().books_loader = load
-
-
-def test_batch_goes_through_execute_and_is_held(client: TestClient, monkeypatch) -> None:
-    calls = _fake_safety(monkeypatch, HELD)
-    _hold_sel_0002()
-    response = client.post("/api/finance/settlements/batch", json={"period": "2026-W42"})
-    assert response.status_code == 200, response.text
-    data = response.json()["data"]
-    assert data["batch"]["status"] == "requested"
-    assert (data["batch"]["review_id"], data["batch"]["execution_id"]) == ("rev_77", "exe_77")
-    assert data["batch"]["seller_ids"] == ["sel_0001", "sel_0003"]
-    rows = {r["seller_id"]: r for r in data["statements"]}
-    assert (rows["sel_0001"]["status"], rows["sel_0001"]["review_id"]) == ("requested", "rev_77")
-    assert rows["sel_0002"]["status"] == "held"  # 보류 판매자는 묶음에서 빠진다
-    total = rows["sel_0001"]["payout"] + rows["sel_0003"]["payout"]
-    assert data["batch"]["total_payout"] == total
-
-    [call] = calls
-    assert call["action"] == "confirm_settlement"
-    assert call["key"] == "ctx_req_settlement_2026-W42:confirm_settlement:2026-W42:1"
-    assert call["ctx"].context_id == "ctx_req_settlement_2026-W42"
-    params = call["params"]
-    assert (params["period"], params["seller_ids"], params["total_payout"]) == (
-        "2026-W42",
-        ["sel_0001", "sel_0003"],
-        total,
-    )
-    assert [s["payout"] for s in params["statements"]] == [
-        rows["sel_0001"]["payout"],
-        rows["sel_0003"]["payout"],
-    ]
-    assert "지급 승인 요청" in params["summary"] and params["pay_date"] == "2026-10-24"
-
-    again = client.post("/api/finance/settlements/batch", json={"period": "2026-W42"})
-    assert again.status_code == 200 and len(calls) == 1  # 같은 기간은 다시 요청하지 않는다
-    todo = client.get("/api/finance/overview").json()["data"]["todo"][0]
-    assert (todo["kind"], todo["amount"]) == ("settlement_batch", total)
-    assert "안전 장치" in todo["title"]
-
-
-def test_batch_returns_503_when_safety_is_down(client: TestClient, monkeypatch) -> None:
-    down = ExecuteDecision(execution_id="exe_unavailable", grade="C", status="rejected")
-    calls = _fake_safety(monkeypatch, down)
-    response = client.post("/api/finance/settlements/batch", json={})
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "safety_unavailable"
-    assert len(calls) == 1 and handlers.state().records.batches == {}  # 지급 기록 없음
-    after = client.get("/api/finance/settlements").json()["data"]
-    assert after["batch"]["status"] == "none"
-
-
-def test_batch_fails_closed_through_real_execute(client: TestClient, monkeypatch) -> None:
-    """agent-template execute()가 safety에 못 닿으면(예외) rejected → 재무는 503."""
-    monkeypatch.setenv("AX_SAFETY_URL", "http://safety.invalid")
-
-    async def boom(*args: Any, **kwargs: Any) -> Any:
-        raise httpx.ConnectError("down")
-
-    from ax_agent_template import execute as template_execute
-
-    monkeypatch.setattr(template_execute, "_send_to_safety", boom)
-    response = client.post("/api/finance/settlements/batch", json={})
-    assert (response.status_code, response.json()["error"]["code"]) == (503, "safety_unavailable")
-
-
-def test_batch_token_optional_but_must_be_human(client: TestClient, monkeypatch) -> None:
-    _fake_safety(monkeypatch, HELD)
-    bad = client.post(
-        "/api/finance/settlements/batch", json={}, headers={"Authorization": "Bearer mock:finance"}
-    )
-    assert bad.status_code == 401
-    ok = client.post("/api/finance/settlements/batch", json={}, headers=HUMAN)
-    assert ok.status_code == 200
-    assert handlers.state().records.batches["2026-W42"]["requested_by"] == "taeyoon"
-
-
-def test_batch_with_nothing_ready_is_409(client: TestClient, monkeypatch) -> None:
-    calls = _fake_safety(monkeypatch, HELD)
-    books = bk.seed_books()
-    for order in books.orders:  # 구매가 확정되지 않으면 모든 판매자가 보류된다
-        order["delivered_at"] = None
-
-    async def load() -> Books:
-        return books
-
-    handlers.state().books_loader = load
-    response = client.post("/api/finance/settlements/batch", json={})
-    assert (response.status_code, response.json()["error"]["code"]) == (409, "nothing_to_settle")
-    assert calls == []
-    rows = client.get("/api/finance/settlements").json()["data"]["statements"]
-    assert all(r["status"] == "held" for r in rows)
-    assert client.post("/api/finance/settlements/batch", json={"period": 42}).status_code == 400
-
-
-def test_rejected_batch_can_be_requested_again(client: TestClient, monkeypatch) -> None:
-    rejected = ExecuteDecision(
-        execution_id="exe_5", grade="C", status="rejected", hold_reason=HoldReason.REVIEW_TIMEOUT
-    )
-    calls = _fake_safety(monkeypatch, rejected)
-    first = client.post("/api/finance/settlements/batch", json={}).json()["data"]
-    assert first["batch"]["status"] == "rejected"
-    _fake_safety(monkeypatch, HELD)
-    second = client.post("/api/finance/settlements/batch", json={}).json()["data"]
-    assert second["batch"]["status"] == "requested"
-    assert calls[0]["key"].endswith(":1")
-
-
-def test_batch_status_follows_safety_review(client: TestClient, monkeypatch) -> None:
-    _fake_safety(monkeypatch, HELD)
-    _hold_sel_0002()
-    client.post("/api/finance/settlements/batch", json={})
-    monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
-    seen: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.path)
-        return httpx.Response(200, json={"data": {"review_id": "rev_77", "status": "approved"}})
-
-    real = httpx.AsyncClient
-    monkeypatch.setattr(
-        finance_api.httpx, "AsyncClient", lambda: real(transport=httpx.MockTransport(handler))
-    )
-    data = client.get("/api/finance/settlements").json()["data"]
-    assert data["batch"]["status"] == "approved" and seen == ["/api/safety/reviews/rev_77"]
-    rows = {r["seller_id"]: r["status"] for r in data["statements"]}
-    assert rows == {"sel_0001": "approved", "sel_0002": "held", "sel_0003": "approved"}
-
-
-def test_batch_reopens_when_safety_lost_the_review(client: TestClient, monkeypatch) -> None:
-    """안전 장치가 재시작돼 보류 건을 잃으면(404) 요청을 끝난 것으로 보고 다시 요청할 수 있다."""
-    calls = _fake_safety(monkeypatch, HELD)
-    client.post("/api/finance/settlements/batch", json={})
-    monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
-    missing = {"error": {"code": "NOT_FOUND", "message": "보류 건이 없다"}}
-    answers = [httpx.Response(404, json=missing)]
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return answers[0]
-
-    real = httpx.AsyncClient
-    monkeypatch.setattr(
-        finance_api.httpx, "AsyncClient", lambda: real(transport=httpx.MockTransport(handler))
-    )
-    data = client.get("/api/finance/settlements").json()["data"]
-    batch = data["batch"]
-    assert (batch["status"], batch["closed_reason"]) == ("rejected", "review_missing")
-    assert all(r["status"] == "rejected" for r in data["statements"])
-    todo = client.get("/api/finance/overview").json()["data"]["todo"]
-    assert any(t["action"]["type"] == "settlement_request" for t in todo if "action" in t)
-
-    answers[0] = httpx.Response(200, json={"data": {"review_id": "rev_77", "status": "pending"}})
-    again = client.post("/api/finance/settlements/batch", json={}).json()["data"]
-    assert again["batch"]["status"] == "requested" and "closed_reason" not in again["batch"]
-    assert [c["key"][-2:] for c in calls] == [":1", ":2"]  # 새 시도 번호로 다시 보낸다
-
-
-def test_batch_stays_requested_when_safety_is_unreachable(client: TestClient, monkeypatch) -> None:
-    """안전 장치가 응답하지 않으면(연결 실패·5xx) 요청 상태를 그대로 둔다.
-
-    404만 기록 없음으로 본다.
-    """
-    _fake_safety(monkeypatch, HELD)
-    client.post("/api/finance/settlements/batch", json={})
-    monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(503, json={"error": {"code": "unavailable", "message": "down"}})
-
-    real = httpx.AsyncClient
-    monkeypatch.setattr(
-        finance_api.httpx, "AsyncClient", lambda: real(transport=httpx.MockTransport(handler))
-    )
-    data = client.get("/api/finance/settlements").json()["data"]
-    assert data["batch"]["status"] == "requested" and "closed_reason" not in data["batch"]
-
-
 # ------------------------------------------------- CORS (대시보드가 브라우저에서 직접)
 
 
@@ -504,7 +390,6 @@ def test_dashboard_can_post_decisions_only_on_decision_paths(client: TestClient)
     for path in (
         "/api/finance/closing/confirm",
         "/api/finance/reconciliation/pay_1/note",
-        "/api/finance/settlements/batch",
     ):
         preflight = client.options(
             path,
@@ -521,6 +406,12 @@ def test_dashboard_can_post_decisions_only_on_decision_paths(client: TestClient)
     assert get.headers.get("access-control-allow-origin") == "http://localhost:3001"
     evil = client.get("/api/finance/overview", headers={"Origin": "http://evil.example"})
     assert "access-control-allow-origin" not in evil.headers
+    # 정산 묶음 요청은 고객지원으로 옮겨 재무 결정 경로가 아니다
+    gone = client.options(
+        "/api/finance/settlements/batch",
+        headers={"Origin": "http://localhost:3001", "Access-Control-Request-Method": "POST"},
+    )
+    assert gone.status_code == 400
     a2a = client.options(
         "/a2a",
         headers={"Origin": "http://localhost:3001", "Access-Control-Request-Method": "POST"},
@@ -953,27 +844,6 @@ def test_vat_numbers_stay_after_confirm_and_drift_shows(
     assert undone["filing_status"] == "draft"
     assert handlers.state().records.vat_filing_cancels[0]["reason"] == "재검토"
     assert client.post(url, json=body | {"reason": "r"}, headers=HUMAN).status_code == 404
-
-
-def test_settlement_request_records_who_asked(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    seen: list[dict] = []
-
-    async def fake(action: str, params: dict, context: Any, evidence: Any) -> Any:
-        seen.append(params)
-        return ExecuteDecision(
-            execution_id="exe_1",
-            grade="C",
-            status="held",
-            review_id="rev_1",
-            hold_reason="over_threshold",
-            threshold_version=1,
-        )
-
-    monkeypatch.setattr("finance_agent.finance_api.execute", fake)
-    client.post("/api/finance/settlements/batch", json={}, headers=HUMAN)
-    assert seen[0]["requested_by"] == "taeyoon"
 
 
 # ---------------------------------------------------------------- 장부 밖 손익

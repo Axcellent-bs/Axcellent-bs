@@ -1,18 +1,20 @@
-import { CATEGORY_KO, finance, krw, percent, plainText, signedKrw, type DeadlineStatus, type VarianceLine } from "@/lib/finance";
+import { CATEGORY_KO, finance, krw, percent, plainText, signedKrw, type DeadlineReport, type DeadlineStatus, type Envelope, type VarianceLine } from "@/lib/finance";
 import { Chip, Delta, Empty, Panel, ResourceBody, ShareBars, Stat, TONE, useResource } from "./bits";
 
 // 마감 통제 3종. 숫자는 모두 재무 AI 서버가 계산한 값을 그대로 보여 준다(화면에서 다시 계산하지 않음).
-// - 정산 기한 점검(③): 판매 대금을 법이 정한 날 안에 줄 수 있는지 미리 본다
+// - 정산 기한 점검(③, 고객지원 판매자 정산 화면도 씀): 판매 대금을 법이 정한 날 안에 줄 수 있는지 미리 본다
 // - 판매자 미지급금 롤포워드(③): 기초 + 발생 − 지급 = 기말이 맞는지 본다
 // - 월간 변동 분석(①): 이번 달 손익이 지난달과 왜 달라졌는지 나눠 본다
 
 const DEADLINE_TONE: Record<DeadlineStatus, string> = { overdue: TONE.bad, at_risk: TONE.bad, due_soon: TONE.warn, ok: TONE.ok };
 
-export function DeadlineSection({ tick }: { tick: number }) {
-  const res = useResource("deadlines", () => finance.deadlines(), tick);
+const DEADLINE_HINT = "구매가 확정된 판매 대금을 정해진 날 안에 판매자에게 줄 수 있는지 미리 봅니다. 기한 점검은 경보만 내고, 지급은 고객지원의 정산 묶음 요청 → 안전 장치 보류 큐 승인으로만 합니다.";
+
+/** `load`: 어디서 받는지 (기본 재무 서버. 고객지원 화면은 dashboard-api) */
+export function DeadlineSection({ tick, load = finance.deadlines, hint = DEADLINE_HINT }: { tick: number; load?: () => Promise<Envelope<DeadlineReport>>; hint?: string }) {
+  const res = useResource("deadlines", load, tick);
   return (
-    <Panel id="deadlines" title="판매 대금 지급 기한" meta={res.env?.meta}
-      hint="구매가 확정된 판매 대금을 정해진 날 안에 판매자에게 줄 수 있는지 미리 봅니다. 재무 AI는 경보만 내고, 지급은 정산 묶음 → 안전 장치 보류 큐 승인으로만 합니다.">
+    <Panel id="deadlines" title="판매 대금 지급 기한" meta={res.env?.meta} hint={hint}>
       <ResourceBody res={res}>
         {(r) => (
           <div className="space-y-3">

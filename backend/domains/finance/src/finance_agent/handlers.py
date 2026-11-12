@@ -18,8 +18,9 @@
 
 - 숫자는 전부 코드로 계산한다. 요청 쪽이 적은 총액·등급은 믿지 않는다.
 - 외부 입력(`request.untrusted`)은 읽지 않는다.
-- 마켓운영(판매자 입점 심사·정산 보류)은 재무 일이 아니라 없앴다(2026-10-30). 재무는 판매자 정산
-  내역을 계산만 하고, 판매자를 받거나 돈을 묶는 결정은 하지 않는다.
+- 마켓운영(판매자 입점 심사·정산 보류)은 재무 일이 아니라 없앴다(2026-10-30).
+- 판매자 정산(정산금 계산·지급 승인 요청·묶음 상태·지급 기한)은 고객지원이 한다(2026-11-12).
+  재무는 그 결과를 받아(`settlement_feed.py`) 보여 주고 회계에만 쓴다.
 - 기록은 메모리에 두고 `FINANCE_STATE_FILE`이 있으면 파일에도 남긴다
   (`persist.py`, 다시 켜도 이어짐).
 """
@@ -55,7 +56,7 @@ from ax_contracts.schemas.finance import (
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from finance_agent import books as bk
 from finance_agent import campaign as cp
-from finance_agent import cashflow, chat_log, closing, tax, team_budget
+from finance_agent import chat_log, closing, tax, team_budget
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
 from finance_agent.books import Books, load_books, off, set_pg_upload
@@ -156,7 +157,9 @@ class FinanceRecords:
         # 사람이 재무 화면에서 기획에 보낸 개선 요청 (`POST /api/finance/planning-requests`).
         # 기획이 되물으면(`answer_planning_question`) 이 기록의 근거로 답한다
         self.planning_requests: list[dict[str, Any]] = []
-        self.batches: dict[str, dict[str, Any]] = {}  # 정산 기간 → 묶음 요청 상태
+        # 예전 저장 파일의 정산 묶음(정산을 고객지원으로 옮기기 전 기록). 쓰지 않고, 옮기는
+        # 스크립트가 읽을 수 있게 저장 파일에 그대로 둔다. 지금 묶음 상태는 고객지원에서 받는다
+        self.legacy_batches: dict[str, dict[str, Any]] = {}
         # 없앤 예산·한도 경보의 확인 메모. 쓰지 않지만 사람이 쓴 기록이라 저장 파일에 그대로 둔다
         self.policy_acks: dict[str, dict[str, Any]] = {}
         self.bank_rows: list[dict[str, Any]] = []  # 사람이 올린 은행 거래내역 (출금은 음수)
@@ -601,8 +604,10 @@ async def cash_net_krw() -> int | None:
     books = await state().books()
     if "orders" in books.unavailable:
         return None
+    from finance_agent.finance_api import cashflow_view
+
     weeks = load_rules().brake.cash_lookahead_weeks
-    rows = (await off(cashflow.forecast, books, state().records.batches))["weeks"][:weeks]
+    rows = (await cashflow_view(books))["weeks"][:weeks]
     values = [r.get("net") for r in rows]
     if len(values) < weeks or any(v is None for v in values):
         return None

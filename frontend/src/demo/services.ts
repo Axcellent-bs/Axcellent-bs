@@ -81,11 +81,12 @@ export const SERVICES: Service[] = [
     desc: '판매 서버의 주문을 최신순으로 보고, 취소·부분 환불·전체 환불을 따로 걸러 봅니다. 쇼핑몰이 아닌 회사는 꺼 두면 됩니다.',
   },
   {
-    id: 'claims', agent: 'support', family: 'customer', name: '클레임·보상', by: 'AXcellent', Icon: IconReceipt, entry: '/claims', paths: ['/claims', '/queue'],
-    desc: '환불·교환 신청을 확인하고 보상을 규칙대로 처리합니다.',
+    id: 'claims', agent: 'support', family: 'customer', name: '클레임·보상', by: 'AXcellent', Icon: IconReceipt, entry: '/claims', paths: ['/claims', '/queue', '/settlements'],
+    desc: '환불·교환 신청을 확인하고 보상을 규칙대로 처리합니다. 판매자 정산(정산금 계산·지급 승인 요청)도 여기서 합니다.',
     children: [
       { href: '/claims', label: '클레임' },
       { href: '/queue', label: '보상 큐' },
+      { href: '/settlements', label: '판매자 정산' },
     ],
   },
   {

@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -41,9 +41,18 @@ def _meta(context_id: str, key: str | None) -> RequestMeta:
     )
 
 
-def unwrap(result: AgentResult) -> dict[str, Any]:
-    """결과를 출력 dict로 바꾸거나 API 오류로 올린다."""
+def unwrap(
+    result: AgentResult, errors: Mapping[str, tuple[int, str]] | None = None
+) -> dict[str, Any]:
+    """결과를 출력 dict로 바꾸거나 API 오류로 올린다.
+
+    `errors`: 이 skill만의 실패 코드(대소문자 무시) → (HTTP 상태, 오류 코드).
+    아래 공통 매핑보다 먼저 본다.
+    """
     outcome = str(result.outcome or "")
+    if errors and result.status != TaskStatus.COMPLETED and outcome.lower() in errors:
+        status_code, code = errors[outcome.lower()]
+        raise ApiError(status_code, code, str(result.output.get("message") or outcome))
     if result.status == TaskStatus.COMPLETED and not outcome:
         return result.output
     if outcome == "not_found":
@@ -81,11 +90,13 @@ async def call(
     *,
     target: str | None = None,
     key: str | None = None,
+    errors: Mapping[str, tuple[int, str]] | None = None,
 ) -> dict[str, Any]:
     """support skill을 부른다. 상태를 바꾸는 skill에는 `target`(대상)을 줘 멱등 키를 만든다.
 
     요청마다 새 사건 ID가 붙으므로 `target`으로 만든 키는 호출마다 다르다. 같은 요청을 여러 번
     눌러도 한 번만 처리돼야 하면 `key`로 호출 사이에 변하지 않는 키를 직접 준다.
+    `errors`는 이 skill만의 실패 코드 매핑이다 (`unwrap`).
     """
     context_id = f"{UI_CONTEXT_PREFIX}{uuid.uuid4().hex[:12]}"
     key = key or (f"{context_id}:{skill}:{target}" if target else None)
@@ -95,4 +106,4 @@ async def call(
         input=input or {},
         untrusted=untrusted or {},
     )
-    return unwrap(await SEND(TARGET, request))
+    return unwrap(await SEND(TARGET, request), errors)

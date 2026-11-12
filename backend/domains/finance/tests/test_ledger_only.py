@@ -16,7 +16,7 @@ from ax_agent_template import events
 from ax_contracts.schemas import EventEnvelope, EventType
 from finance_agent import books as bk
 from finance_agent import finance_config as fc
-from finance_agent import handlers, incidents, settlement
+from finance_agent import handlers, incidents
 from finance_agent.closing import compute_totals
 from finance_agent.main import app
 from finance_agent.sources import MockSources
@@ -102,15 +102,15 @@ def test_coupons_and_refunds_make_no_todo_or_alert(kit) -> None:
 
 
 def test_ledger_totals_stay_as_they_were(kit) -> None:
-    """결산의 쿠폰 비용·환불 합계와 정산의 판매자 부담 쿠폰·환불 차감은 그대로 장부에서 나온다."""
+    """결산의 쿠폰 비용·환불 합계는 그대로 장부에서 나온다.
+
+    정산의 판매자 부담 쿠폰·환불 차감은 고객지원이 계산한다(고객지원 테스트로 옮김).
+    """
     books = _suspicious_books(kit)
     day = kit.at("2026-10-22").date()
     totals = compute_totals(books, fc.day_start(day), fc.day_start(day + timedelta(days=1)))
     assert totals.refund_total == 190000
     assert totals.coupon_cost == 3 * 19900  # 회사 부담 쿠폰만 비용이다
-    [row] = settlement.statements(books, "2026-W43")["statements"]
-    assert (row["gross"], row["seller_coupon"], row["refunds"]) == (100000, 2000, 190000)
-    assert row["payout"] == 100000 - row["commission"] - 2000 - 190000
 
 
 def test_events_still_add_up_in_the_ledger(kit) -> None:
@@ -169,10 +169,3 @@ def test_incident_keeps_amounts_and_rows_without_limits_or_checks(kit) -> None:
     assert [c["buyer_id"] for c in comp["coupons"]] == ["buy_0999"]
     assert "in_impact" not in comp["coupons"][0]
     assert "limits" not in data and "checks" not in data and "limits" not in unavailable
-
-
-def test_settlement_does_not_ask_for_claims(kit) -> None:
-    books = _suspicious_books(kit)
-    assert not hasattr(books, "claims")
-    [row] = settlement.statements(books, "2026-W43")["statements"]
-    assert {h["code"] for h in row["hold_reasons"]}.isdisjoint({"open_claim", "claims_unknown"})

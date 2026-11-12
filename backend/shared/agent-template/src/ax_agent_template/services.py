@@ -125,6 +125,12 @@ SERVICES: tuple[Service, ...] = (
             "decide_incident_compensation",
             "list_incident_queue",
             "purge_expired_claims",
+            # 판매자 정산 (2026-11-12 재무에서 옮김)
+            "seller_settlement",
+            "seller_settlement_weeks",
+            "seller_settlement_batches",
+            "seller_settlement_deadlines",
+            "request_seller_settlement",
         ),
         "클레임·보상",
     ),

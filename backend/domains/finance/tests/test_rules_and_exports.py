@@ -86,7 +86,6 @@ def test_outputs_carry_applied_rules(client: TestClient) -> None:
         ("/api/finance/statements?period=month", "PL-002"),
         ("/api/finance/tax/vat", "VAT-003"),
         ("/api/finance/tax/seller-report", "VAT-005"),
-        ("/api/finance/settlements", "SET-001"),
         ("/api/finance/tax/income-estimate", "CIT-001"),
     ]:
         data = client.get(path).json()["data"]

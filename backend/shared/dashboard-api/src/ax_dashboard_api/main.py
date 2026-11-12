@@ -14,6 +14,7 @@ from ax_dashboard_api import (
     company_connection,
     handoffs,
     office_room,
+    settlements,
     shop_events,
     support_client,
 )
@@ -102,6 +103,8 @@ app.include_router(office_room.router)
 app.include_router(company_connection.router)
 # 알림 받는 주소: 고객사 판매 서버가 회사 키로 이벤트를 보낸다 (사람 토큰 대신 회사 키)
 app.include_router(shop_events.router)
+# 판매자 정산: 고객지원(support)이 계산·지급 승인 요청을 한다 (요청은 사람 토큰)
+app.include_router(settlements.router)
 
 
 @app.get("/health")

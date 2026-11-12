@@ -1,4 +1,7 @@
-"""은행 출금 대조(판매자 이체·항목별·설명 없는 출금), 통장 잔액, 잔액 기초 현금 흐름."""
+"""은행 출금 대조(판매자 이체·항목별·설명 없는 출금), 통장 잔액, 잔액 기초 현금 흐름.
+
+정산 묶음·내역서는 고객지원이 준다(`seller_settlement_batches`·`seller_settlement_weeks`).
+"""
 
 from __future__ import annotations
 
@@ -150,20 +153,22 @@ def test_cashflow_starts_from_bank_balance_and_subtracts_fixed_costs(kit) -> Non
         for k in range(52)
     ]
     books = kit.books(orders=orders)
-    plain = cashflow.forecast(books, {}, TODAY)
+    rows = [{"seller_id": "sel_a", "payout": 63000}]
+    weeks = {p: kit.statement(p, rows) for p in cashflow.settlement_periods(TODAY)}
+    plain = cashflow.forecast(books, weeks, TODAY)
     fixed = cashflow.fixed_costs(
         {"2026-09": {"salary": 1}, "2026-10": {"salary": 520_000, "rent": 0}}
     )
     assert fixed == {"month": "2026-10", "monthly": 520_000, "weekly": 120_000}
     opening = {"as_of": "2026-10-22", "balance": 50_000, "ordered": True}
-    r = cashflow.forecast(books, {}, TODAY, opening=opening, fixed=fixed)
+    r = cashflow.forecast(books, weeks, TODAY, opening=opening, fixed=fixed)
     for a, b in zip(plain["weeks"], r["weeks"], strict=True):
         assert b["fixed"] == 120_000 and b["net"] == a["net"] - 120_000
         assert b["balance"] == 50_000 + b["cumulative"]
     assert r["opening"]["stale"] is False and r["applied_rules"][0]["rule_id"] == "CSH-001"
     assert r["short_weeks"] == [w["week_start"] for w in r["weeks"] if w["balance"] < 0]
     assert plain["opening"] is None and all(w["balance"] is None for w in plain["weeks"])
-    old = cashflow.forecast(books, {}, TODAY, opening=opening | {"as_of": "2026-10-01"})
+    old = cashflow.forecast(books, weeks, TODAY, opening=opening | {"as_of": "2026-10-01"})
     assert old["opening"]["stale"] is True and "오래돼" in old["note"]
 
 
@@ -188,7 +193,8 @@ def test_upload_with_withdrawals_note_and_checklist(kit) -> None:
 
     rec = handlers.state().records
     status = {
-        i["key"]: i for i in close_checklist.checklist(kit.books(), rec, TODAY, TODAY)["items"]
+        i["key"]: i
+        for i in close_checklist.checklist(kit.books(), rec, TODAY, TODAY, batches={})["items"]
     }
     assert status["bank_out"]["status"] == "pending"
 
@@ -200,12 +206,32 @@ def test_upload_with_withdrawals_note_and_checklist(kit) -> None:
     done = client.post(url, json={"note": "현금 시재"}, headers=HUMAN).json()["data"]
     assert done["unexplained"][0]["note"] == "현금 시재" and done["counts"]["unexplained_open"] == 0
     status = {
-        i["key"]: i for i in close_checklist.checklist(kit.books(), rec, TODAY, TODAY)["items"]
+        i["key"]: i
+        for i in close_checklist.checklist(kit.books(), rec, TODAY, TODAY, batches={})["items"]
     }
     assert status["bank_out"]["status"] == "done"
 
     cash = client.get("/api/finance/cashflow").json()["data"]
     assert cash["opening"]["balance"] == 700 and cash["opening"]["as_of"] == "2026-10-21"
+
+
+def test_transfers_are_not_judged_without_support_batches() -> None:
+    """고객지원에서 정산 묶음을 못 받으면 이체를 "못 찾음"으로 보지 않고 못 받았다고 남긴다."""
+    v = bank.outflows([_out("2026-10-15", 5000, "이체")], OCT, None, seller_name=str, today=TODAY)
+    assert v["transfers"] == [] and v["unavailable"] == ["seller_settlement_batches"]
+    assert _view([])["unavailable"] == []
+
+
+def test_outflows_api_matches_support_batches(support) -> None:
+    support.batches = {"2026-W41": _batch("2026-10-14", {"sel_0001": 30000})}
+    client = TestClient(app)
+    rows = [{"date": "2026-10-15", "amount": -30000, "memo": "이체", "balance": 0}]
+    client.post(
+        "/api/finance/bank/statement", json={"rows": rows, "has_withdrawals": True}, headers=HUMAN
+    )
+    v = client.get("/api/finance/bank/outflows").json()["data"]
+    assert [(t["batch"], t["status"]) for t in v["transfers"]] == [("2026-W41", "paid")]
+    assert v["unexplained"] == [] and v["unavailable"] == []
 
 
 def test_upload_without_withdrawal_column_keeps_old_behavior() -> None:

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { PreparingChip } from "@/components/Preparing";
 import { finance, humanTokenSet, krw, plainText, signedKrw, todayKst, type TeamBudget } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
@@ -118,13 +117,6 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
                 </p>
               )}
 
-              {b.example && (
-                <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  인사 AI가 실제 명부가 아니라 가상 명부(예시) 인원을 보냈습니다. 계산과 증감만 보여 주고 팀 예산으로 확정하지 않습니다.
-                  실제 명부·발령 기록이 연결되면 확정할 수 있습니다.
-                </p>
-              )}
-
               {!b.example && (b.status === "pending" || b.status === "changed") && (
                 <div className="space-y-2 rounded-2xl border border-ink-100 px-4 py-3">
                   <p className="text-sm text-ink-500">
@@ -143,11 +135,6 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
                 </div>
               )}
               {problem && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{problem}</p>}
-
-              <div className="flex flex-wrap items-center gap-2 rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
-                <PreparingChip />
-                <span>예산 대비 실제 지출: 팀별 지출 자료가 아직 연결되지 않아 비교하지 않습니다. 지어낸 숫자로 채우지 않습니다.</span>
-              </div>
             </div>
           );
         }}

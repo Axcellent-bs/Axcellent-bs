@@ -2,6 +2,7 @@
 
 숫자는 여기서 코드가 모은다(오늘 손익, 월말 체크리스트, 통장 대조, 현금 예측, 정산 묶음,
 캠페인 손익, 인사이트, 장애 이벤트 재무 기록). LLM은 이것을 풀어 쓸 뿐이다.
+판매자 정산 묶음은 고객지원이 계산·요청한 것을 받아 넣는다(`settlement_feed`).
 하나를 못 읽어도 나머지는 넣고, 못 읽은 이름은 `unavailable`에 남긴다
 (모르는 숫자를 0으로 채우지 않는다).
 """
@@ -37,12 +38,11 @@ async def _overview() -> dict[str, Any]:
 
 
 async def _checklist() -> dict[str, Any]:
-    from finance_agent import close_checklist
-    from finance_agent.books import off
+    from finance_agent.finance_api import checklist_view
     from finance_agent.handlers import state
 
     books = await state().books()
-    out = await off(close_checklist.checklist, books, state().records)
+    out = await checklist_view(books)
     return {
         "month": out["month"],
         "items": [
@@ -55,20 +55,13 @@ async def _checklist() -> dict[str, Any]:
 async def _bank() -> dict[str, Any]:
     from finance_agent import bank
     from finance_agent.books import off
+    from finance_agent.finance_api import outflows_view
     from finance_agent.handlers import state
 
     books = await state().books()
     records = state().records
     deposits = await off(bank.match, books, records.bank_rows)
-    outs = bank.outflows(
-        records.bank_rows,
-        records.bank_out_periods,
-        records.batches,
-        seller_name=books.seller_name,
-        other_pnl=records.other_pnl,
-        campaigns=records.campaigns,
-        notes=records.bank_notes,
-    )
+    outs = await outflows_view(books)
     return {
         "deposits": {
             "uploaded": deposits["uploaded"],
@@ -89,25 +82,18 @@ async def _bank() -> dict[str, Any]:
                 for u in outs["unexplained"]
                 if not u.get("note")
             ][:RECENT],
+            "unavailable": outs.get("unavailable", []),
         },
         "latest_balance": bank.latest_balance(records.bank_rows),
     }
 
 
 async def _cash() -> dict[str, Any]:
-    from finance_agent import bank, cashflow
-    from finance_agent.books import off
+    from finance_agent.finance_api import cashflow_view
     from finance_agent.handlers import state
 
     books = await state().books()
-    records = state().records
-    out = await off(
-        cashflow.forecast,
-        books,
-        records.batches,
-        opening=bank.latest_balance(records.bank_rows),
-        fixed=cashflow.fixed_costs(records.other_pnl),
-    )
+    out = await cashflow_view(books)
     return {
         "opening": out.get("opening"),
         "fixed": out.get("fixed"),
@@ -116,6 +102,7 @@ async def _cash() -> dict[str, Any]:
             {k: w.get(k) for k in ("week", "inflow", "outflow", "fixed", "net", "balance")}
             for w in out["weeks"][:4]
         ],
+        "unavailable": out.get("unavailable", []),
     }
 
 
@@ -181,7 +168,8 @@ async def _incidents() -> list[dict[str, Any]]:
     return [{k: r.get(k) for k in keys} for r in rows[:RECENT]]
 
 
-def _closings() -> dict[str, Any]:
+async def _closings() -> dict[str, Any]:
+    from finance_agent import settlement_feed
     from finance_agent.handlers import state
 
     records = state().records
@@ -189,10 +177,16 @@ def _closings() -> dict[str, Any]:
         (f"{p}:{d}" for (p, d) in records.closings),
         reverse=True,
     )
-    batches = {
-        name: {"status": b.get("status"), "total_payout": b.get("total_payout")}
-        for name, b in sorted(records.batches.items(), reverse=True)[:RECENT]
-    }
+    # 정산 묶음은 고객지원 것. 못 받으면 None(묶음이 없다고 말하지 않는다)
+    got = await settlement_feed.batches()
+    batches = (
+        None
+        if got is None
+        else {
+            name: {"status": b.get("status"), "total_payout": b.get("total_payout")}
+            for name, b in sorted(got.items(), reverse=True)[:RECENT]
+        }
+    )
     return {
         "confirmed_closings": confirmed[:RECENT],
         "other_pnl_months": sorted(records.other_pnl)[-RECENT:],
@@ -218,7 +212,7 @@ async def _collect_now() -> dict[str, Any]:
             logger.warning("재무 대화 사실 %s를 읽지 못했다", name, exc_info=True)
             out["unavailable"].append(name)
     try:
-        out["records"] = _closings()
+        out["records"] = await _closings()
     except Exception:  # noqa: BLE001
         out["unavailable"].append("records")
     return out

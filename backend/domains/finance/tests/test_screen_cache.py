@@ -137,7 +137,11 @@ def test_mock_mode_never_remembers(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(run())
 
 
-def test_starting_the_server_prepares_the_first_screens(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_starting_the_server_prepares_the_first_screens(
+    monkeypatch: pytest.MonkeyPatch, support
+) -> None:
+    """정산 두 화면은 고객지원에서 받은 정산으로 만든다(`support`가 고객지원 응답을 흉내 낸다)."""
+
     async def loaded() -> bk.Books:
         return await handlers.state().books_loader()
 
@@ -148,6 +152,7 @@ def test_starting_the_server_prepares_the_first_screens(monkeypatch: pytest.Monk
         assert sc.CACHE.worker is not None
         await sc.CACHE.worker
         assert set(sc.FIRST_SCREENS) <= set(sc.CACHE.entries)
+        assert {"seller_settlement", "seller_settlement_deadlines"} <= {k for k, _ in support.calls}
         async with _client() as c:
             first = await c.get("/api/finance/overview")
             assert first.headers["x-finance-cache"] == "hit"

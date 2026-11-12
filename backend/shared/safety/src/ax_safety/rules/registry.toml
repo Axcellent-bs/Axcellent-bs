@@ -415,10 +415,11 @@ action = "finance_request_change"
 owner = "finance"
 base_grade = "A"
 
-# ---- 재무 (태윤). 재무가 재무를 검증하지 않도록 정산 확정은 항상 C
+# ---- 판매자 정산 (고객지원, 2026-11-12 재무에서 옮김). 판매자에게 돈을 내보내는 일이라 항상 C(사람 승인).
+# 고객지원(claims 서비스)이 정산금을 내고 묶음 지급 승인을 요청한다. 재무는 결과를 받아 보여 주기만 한다
 [[actions]]
 action = "confirm_settlement"
-owner = "finance"
+owner = "support"
 base_grade = "C"
 
 # ---- 회사 기억 (재현, #41). 카드 쓰기는 여러 부서가, 대체·폐기 연결은 hr만 요청한다

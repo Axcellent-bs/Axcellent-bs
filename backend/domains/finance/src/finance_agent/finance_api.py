@@ -17,9 +17,8 @@
 | `POST /api/finance/planning-requests` | 재무 개선 요청을 기획(`create_ticket`)에 보냄 | **사람** |
 | `GET /api/finance/planning-requests` | 기획에 보낸 개선 요청 기록 | 없음 |
 | `POST /api/finance/pg/clear` | ② 올린 PG 정산 자료 모두 빼기(이유 필수, 기록은 남김) | **사람** |
-| `GET /api/finance/settlements?period=YYYY-Www` | ③ 판매자 정산 내역서 (생략 = 지난주) | 없음 |
-| `POST /api/finance/settlements/batch` | ③ 묶음 → `execute(confirm_settlement)` | 선택 |
-| `GET /api/finance/settlements/deadlines` | ③ 판매 대금 지급 기한 점검 | 없음 |
+| `GET /api/finance/settlements?period=YYYY-Www` | ③ 판매자 정산 내역서 (고객지원 것) | 없음 |
+| `GET /api/finance/settlements/deadlines` | ③ 지급 기한 점검 (고객지원 것) | 없음 |
 | `GET /api/finance/payables?date=` | ③ 판매자 미지급금 롤포워드 (그 달) | 없음 |
 | `GET /api/finance/variance?date=` | ① 월간 변동 분석 (지난달·작년 같은 달 대비) | 없음 |
 | `GET /api/finance/bank` | ② 은행 입금 대조 (올린 거래내역 기간만) | 없음 |
@@ -46,8 +45,13 @@
 | `POST /api/finance/exports/run` | ⑤ 지금 만들기 | **사람** |
 
 `meta`: `mock`, `collected_at`, `source`(`seed`|`shop-api`), `unavailable`(못 받은 자료 이름).
-정산 묶음 지급은 안전 관문이 항상 C로 보류하고 사람이 승인한다. 안전 관문에 닿지 않으면 503
-`safety_unavailable`이고 아무것도 기록하지 않는다(fail-closed). 사람 결정 기록은 메모리(데모용)다.
+사람 결정 기록은 메모리(데모용)다.
+
+판매자 정산(정산금 계산 · 지급 승인 요청 · 묶음 상태 · 지급 기한)은 고객지원이 한다(2026-11-12).
+재무는 정산금을 계산하지 않고 지급 승인도 요청하지 않는다(`execute("confirm_settlement")`를
+부르지 않는다). 정산 두 조회는 고객지원 skill(`seller_settlement`·`seller_settlement_deadlines`)
+결과를 그대로 넘기고, 못 받으면 503 `support_unavailable`이다. 미지급금·현금 흐름·출금 대조·
+마감 점검은 받은 정산을 회계에만 쓴다(`settlement_feed.py`).
 """
 
 from __future__ import annotations
@@ -57,12 +61,11 @@ import os
 from datetime import timedelta
 from typing import Any
 
-import httpx
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse, Response
 
 from ax_agent_template import call_agent
-from ax_agent_template.config import agent_name_scope, agent_url, is_mock
+from ax_agent_template.config import is_mock
 from ax_agent_template.execute import execute
 from ax_contracts.schemas import AgentRequest, Evidence, RequestMeta, TaskStatus
 from ax_contracts.schemas.planning import CreateTicketOutput
@@ -72,12 +75,11 @@ from finance_agent import (
     cashflow,
     close_checklist,
     closing,
-    deadline,
     exports,
     payables,
     pg_file,
     reconciliation,
-    settlement,
+    settlement_feed,
     statements,
     tax,
     team_budget,
@@ -105,8 +107,6 @@ RECON_KO = {
     "missing_in_pg": "PG 정산에 없음",
     "fee_anomaly": "PG 수수료가 기준과 다름",
 }
-UNAVAILABLE_EXECUTION = "exe_unavailable"  # agent-template execute()가 safety에 못 닿았을 때
-REVIEW_CHECK_SECONDS = 3.0
 
 
 OTHER_PNL_FIELDS = ("salary", "rent", "other_sga", "non_operating_income", "non_operating_expense")
@@ -208,50 +208,66 @@ def scan_pg_inbox(records: Any) -> list[dict[str, Any]]:
     return done
 
 
-# ---------------------------------------------------------------- 정산 묶음 상태
-async def refresh_batch(batch: dict[str, Any]) -> None:
-    """요청 중인 묶음의 보류 건 결정을 안전 관문에서 읽어 반영한다. 못 읽으면 그대로 둔다."""
-    if batch.get("status") != "requested" or not batch.get("review_id"):
-        return
-    if is_mock("finance") and not os.getenv("AX_SAFETY_URL"):
-        return  # 목 모드에 safety가 없으면 물어볼 곳이 없다
-    url = f"{agent_url('safety')}/api/safety/reviews/{batch['review_id']}"
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=REVIEW_CHECK_SECONDS)
-        if response.status_code == 404:
-            # 안전 장치가 이 보류 건을 모른다(보류 큐는 메모리에만 있어 재시작하면 비워진다).
-            # 승인할 곳이 없으니 끝난 요청으로 보고, 사람이 다시 요청할 수 있게 한다.
-            # 지급은 승인으로만 기록되므로 다시 요청해도 두 번 지급되지 않는다
-            batch["status"] = "rejected"
-            batch["closed_reason"] = "review_missing"
-            return
-        status = response.json()["data"]["status"] if response.status_code == 200 else None
-    except (httpx.HTTPError, ValueError, KeyError, TypeError):
-        return
-    if status == "approved":
-        batch["status"] = "approved"
-        batch.setdefault("approved_at", fc.iso(fc.now()))
-    elif status in ("rejected", "expired"):
-        batch["status"] = "rejected"
-        batch["closed_reason"] = status
+# ---------------------------------------------------------------- 고객지원 정산 받기
+SUPPORT_DOWN = "고객지원에서 판매자 정산을 받지 못했다 (재무는 정산을 계산하지 않는다)"
 
 
-def _batch_status(decision_status: str) -> str:
-    return {"held": "requested", "verifying": "requested", "executed": "approved"}.get(
-        decision_status, "rejected"
+def support_meta(out: dict[str, Any]) -> dict[str, Any]:
+    """고객지원 응답의 `meta`를 재무 응답 `meta` 모양에 얹는다. 어디서 받았는지 `provider`."""
+    got = out.get("meta") if isinstance(out.get("meta"), dict) else {}
+    base = {
+        "mock": is_mock("finance"),
+        "collected_at": fc.iso(fc.now()),
+        "source": "support",
+        "unavailable": [],
+    }
+    return base | got | {"provider": "support"}
+
+
+def without_meta(out: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in out.items() if k != "meta"}
+
+
+async def cashflow_view(books: Any) -> dict[str, Any]:
+    """13주 현금 흐름. 판매자 정산 내역서는 고객지원에서 미리 받아 넘긴다."""
+    records = state().records
+    weeks = await settlement_feed.weeks(cashflow.settlement_periods(fc.today()))
+    return await off(
+        cashflow.forecast,
+        books,
+        weeks,
+        opening=bank.latest_balance(records.bank_rows),
+        fixed=cashflow.fixed_costs(records.other_pnl),
     )
 
 
-async def settlements_view(
-    period: str | None, fresh: bool = False
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    books = await (state().fresh_books() if fresh else state().books())
-    result = await off(settlement.statements, books, period)
-    batch = state().records.batches.get(result["period"])
-    if batch:
-        await refresh_batch(batch)
-    return settlement.apply_batch(result, batch), books.meta()
+async def checklist_view(books: Any, d: Any = None) -> dict[str, Any]:
+    """월 마감 체크리스트. 정산 내역서·묶음은 고객지원에서 미리 받아 넘긴다."""
+    d = d or fc.today()
+    weeks = await settlement_feed.weeks(close_checklist.settlement_periods(d))
+    batches = await settlement_feed.batches()
+    return await off(
+        close_checklist.checklist,
+        books,
+        state().records,
+        d,
+        settlements=weeks,
+        batches=batches,
+    )
+
+
+async def outflows_view(books: Any) -> dict[str, Any]:
+    """은행 출금 대조. 판매자 이체는 고객지원에서 받은 정산 묶음과 맞춘다."""
+    records = state().records
+    return bank.outflows(
+        records.bank_rows,
+        records.bank_out_periods,
+        await settlement_feed.batches(),
+        seller_name=books.seller_name,
+        other_pnl=records.other_pnl,
+        campaigns=records.campaigns,
+        notes=records.bank_notes,
+    )
 
 
 # ---------------------------------------------------------------- 사람이 할 일
@@ -264,58 +280,33 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
     unknown = await off(closing.unknown_codes, books)
     todo: list[dict[str, Any]] = []
 
-    sett, _ = await settlements_view(None)
-    batch = sett["batch"]
-    if batch["status"] == "requested":
-        todo.append(
-            {
-                "kind": "settlement_batch",
-                "title": f"판매자 정산 {len(batch['seller_ids'])}곳 지급 승인 대기 (안전 장치)",
-                "count": len(batch["seller_ids"]),
-                "amount": batch["total_payout"],
-                "link": "settlements",
-                # 사람이 안전 장치 보류 큐에서 진행·멈춤을 누른다
-                "action": {
-                    "type": "review_decision",
-                    "period": sett["period"],
-                    "review_id": batch["review_id"],
-                },
-            }
-        )
-    elif batch["status"] in ("none", "rejected"):
-        ready = settlement.ready(sett)
-        if ready:
-            todo.append(
-                {
-                    "kind": "settlement_batch",
-                    "title": f"판매자 정산 {len(ready)}곳 지급 승인 요청 대기",
-                    "count": len(ready),
-                    "amount": sum(r["payout"] for r in ready),
-                    "link": "settlements",
-                    # 사람이 묶음 지급 승인을 요청한다 (안전 장치가 C로 보류 → 승인)
-                    "action": {"type": "settlement_request", "period": sett["period"]},
-                }
-            )
-
-    report = await off(deadline.deadline_report, books, state().records.batches, today)
-    late = deadline.needs_attention(report)
+    # 판매자 정산은 고객지원이 한다. 재무 할 일에는 지급 승인 요청·승인이 없고, 기한을 넘길 판매자가
+    # 있으면 알려 주기만 한다(처리는 고객지원 화면). 못 받으면 할 일을 지어내지 않고 이름만 남긴다
+    missing: list[str] = []
+    report = await settlement_feed.deadlines()
+    late = settlement_feed.needs_attention(report) if report is not None else []
+    if report is None:
+        missing.append("seller_settlement_deadlines")
     if late:
         worst = late[0]
         todo.append(
             {
                 "kind": "settlement_deadline",
-                "title": f"정산 기한 확인 필요 판매자 {len(late)}곳 ({worst['status_label']} 포함)",
+                "title": (
+                    f"정산 기한 확인 필요 판매자 {len(late)}곳 ({worst.get('status_label')} 포함)."
+                    " 처리는 고객지원"
+                ),
                 "count": len(late),
-                "amount": sum(r["amount"] for r in late),
+                "amount": sum(r.get("amount") or 0 for r in late),
                 "link": "settlements",
-                # 보류 사유를 풀거나 이번 묶음에 넣어 기한 안에 지급되게 한다 (지급은 보류 큐 승인)
+                # 알림만 한다. 보류 해소·지급 승인 요청은 고객지원이 한다 (재무 탭은 읽기 전용)
                 "action": {"type": "open_tab"},
                 "items": [
                     {
-                        "ref": r["seller_id"],
-                        "title": f"{r['name']} · {r['status_label']}",
-                        "detail": f"기한 {r['deadline']} (D{r['days_left']:+d})",
-                        "amount": r["amount"],
+                        "ref": r.get("seller_id"),
+                        "title": f"{r.get('name')} · {r.get('status_label')}",
+                        "detail": f"기한 {r.get('deadline')} (D{r.get('days_left') or 0:+d})",
+                        "amount": r.get("amount"),
                     }
                     for r in late[:TODO_ITEMS]
                 ],
@@ -432,7 +423,10 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
                 ],
             }
         )
-    return {"date": today.isoformat(), "kpis": totals.as_kpis(unknown), "todo": todo}, books.meta()
+    meta = books.meta()
+    if missing:
+        meta = meta | {"unavailable": [*meta.get("unavailable", []), *missing]}
+    return {"date": today.isoformat(), "kpis": totals.as_kpis(unknown), "todo": todo}, meta
 
 
 def _team_budget_meta(missing: list[str]) -> dict[str, Any]:
@@ -830,103 +824,14 @@ def add_finance_api(app: FastAPI) -> None:
 
     @app.get("/api/finance/settlements", response_model=None)
     async def get_settlements(period: str | None = None) -> dict | JSONResponse:
+        """고객지원 `seller_settlement`를 그대로 넘긴다. 재무는 다시 계산하지 않는다."""
         try:
-            data, meta = await settlements_view(period)
-        except ValueError as exc:
+            out = await settlement_feed.settlement(period)
+        except settlement_feed.InvalidPeriod as exc:
             return error(400, "invalid_request", str(exc))
-        return ok(data, meta)
-
-    @app.post("/api/finance/settlements/batch", response_model=None)
-    async def request_batch(
-        request: Request, authorization: str | None = Header(default=None)
-    ) -> dict | JSONResponse:
-        requested_by = None
-        if authorization:  # 토큰은 선택. 보냈다면 사람 토큰이어야 한다
-            try:
-                requested_by = human_from_authorization(authorization)
-            except PermissionError as exc:
-                return error(401, "unauthorized", str(exc))
-        period = (await _body(request)).get("period")
-        if period is not None and not isinstance(period, str):
-            return error(400, "invalid_request", "period는 YYYY-Www 문자열")
-        try:
-            data, meta = await settlements_view(period, fresh=True)
-        except ValueError as exc:
-            return error(400, "invalid_request", str(exc))
-        name = data["period"]
-        batches = state().records.batches
-        current = batches.get(name)
-        if current and current["status"] in ("requested", "approved"):
-            return ok(data, meta)  # 같은 기간은 한 번만 요청한다
-        rows = settlement.ready(data)
-        if not rows:
-            return error(409, "nothing_to_settle", "보류 없이 지급할 판매자가 없다")
-
-        attempt = (current or {}).get("attempt", 0) + 1
-        seller_ids = [r["seller_id"] for r in rows]
-        total = sum(r["payout"] for r in rows)
-        summary = f"{name} 판매자 정산 {len(rows)}곳 {fc.won(total)} 지급 승인 요청"
-        params = {
-            "period": name,
-            "from": data["from"],
-            "to": data["to"],
-            "pay_date": data["pay_date"],
-            "seller_ids": seller_ids,
-            "total_payout": total,
-            "statements": [
-                {
-                    k: r[k]
-                    for k in (
-                        "seller_id",
-                        "name",
-                        "orders",
-                        "gross",
-                        "commission",
-                        "seller_coupon",
-                        "refunds",
-                        "payout",
-                    )
-                }
-                for r in rows
-            ],
-            "summary": summary,
-            "requested_by": requested_by,  # 요청한 사람은 승인하지 못한다 (안전 관문)
-        }
-        context_id = f"ctx_req_settlement_{name}"
-        meta_req = RequestMeta(
-            context_id=context_id,
-            token="finance-dashboard",
-            deadline=fc.now() + timedelta(seconds=40),
-            idempotency_key=f"{context_id}:confirm_settlement:{name}:{attempt}",
-        )
-        evidence = Evidence(
-            queries=["finance:settlements", "shop-api:/api/shop/orders"],
-            data_summary=summary,
-            collected_at=fc.now(),
-            ref_ids=seller_ids,
-        )
-        with agent_name_scope("finance"):
-            decision = await execute("confirm_settlement", params, meta_req, evidence)
-        if decision.execution_id == UNAVAILABLE_EXECUTION or decision.status == "failed":
-            return error(
-                503,
-                "safety_unavailable",
-                "안전 장치에 닿지 않아 정산 묶음을 요청하지 않았다 (지급 기록 없음)",
-            )
-        batches[name] = {
-            "status": _batch_status(decision.status),
-            "review_id": decision.review_id,
-            "execution_id": decision.execution_id,
-            "total_payout": total,
-            "seller_ids": seller_ids,
-            "payouts": {r["seller_id"]: r["payout"] for r in rows},
-            "attempt": attempt,
-            "requested_by": requested_by,
-            "requested_at": fc.iso(fc.now()),
-            **({"approved_at": fc.iso(fc.now())} if decision.status == "executed" else {}),
-        }
-        data, meta = await settlements_view(name)
-        return ok(data, meta)
+        if out is None:
+            return error(503, "support_unavailable", SUPPORT_DOWN)
+        return ok(without_meta(out), support_meta(out))
 
     @app.get("/api/finance/support-costs")
     async def get_support_costs() -> dict:
@@ -987,11 +892,13 @@ def add_finance_api(app: FastAPI) -> None:
         data, missing = await team_budget_data(m)
         return ok(data, _team_budget_meta(missing) | {"approved_by": person})
 
-    @app.get("/api/finance/settlements/deadlines")
-    async def get_deadlines() -> dict:
-        books = await state().books()
-        report = await off(deadline.deadline_report, books, state().records.batches)
-        return ok(report, books.meta())
+    @app.get("/api/finance/settlements/deadlines", response_model=None)
+    async def get_deadlines() -> dict | JSONResponse:
+        """고객지원 `seller_settlement_deadlines`를 그대로 넘긴다."""
+        out = await settlement_feed.deadlines()
+        if out is None:
+            return error(503, "support_unavailable", SUPPORT_DOWN)
+        return ok(without_meta(out), support_meta(out))
 
     @app.get("/api/finance/payables", response_model=None)
     async def get_payables(date: str | None = None) -> dict | JSONResponse:
@@ -1000,7 +907,8 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
-        return ok(await off(payables.rollforward, books, state().records.batches, d), books.meta())
+        batches = await settlement_feed.batches()
+        return ok(await off(payables.rollforward, books, batches, d), books.meta())
 
     @app.get("/api/finance/variance", response_model=None)
     async def get_variance(date: str | None = None) -> dict | JSONResponse:
@@ -1249,22 +1157,10 @@ def add_finance_api(app: FastAPI) -> None:
         del records.pg_imports[:-100]
         return ok(record, {"cleared_by": person})
 
-    def bank_outflows(books: Any) -> dict[str, Any]:
-        records = state().records
-        return bank.outflows(
-            records.bank_rows,
-            records.bank_out_periods,
-            records.batches,
-            seller_name=books.seller_name,
-            other_pnl=records.other_pnl,
-            campaigns=records.campaigns,
-            notes=records.bank_notes,
-        )
-
     @app.get("/api/finance/bank/outflows")
     async def get_bank_outflows() -> dict:
         books = await state().books()
-        return ok(bank_outflows(books), books.meta())
+        return ok(await outflows_view(books), books.meta())
 
     @app.post("/api/finance/bank/outflows/{row_id}/note", response_model=None)
     async def note_bank_outflow(
@@ -1279,14 +1175,14 @@ def add_finance_api(app: FastAPI) -> None:
         if not isinstance(note, str) or not note.strip() or len(note) > 500:
             return error(400, "invalid_request", "note는 1~500자 문자열")
         books = await state().books()
-        view = bank_outflows(books)
+        view = await outflows_view(books)
         if row_id not in {u["id"] for u in view["unexplained"]}:
             return error(404, "not_found", "설명 없는 출금 목록에 없는 거래다")
         records = state().records
         entry = {"note": note.strip(), "by": person, "at": fc.iso(fc.now())}
         records.bank_notes[row_id] = entry
         records.bank_note_log.append({"row_id": row_id, **entry})
-        return ok(bank_outflows(books), books.meta() | {"noted_by": person})
+        return ok(await outflows_view(books), books.meta() | {"noted_by": person})
 
     @app.get("/api/finance/bank")
     async def get_bank() -> dict:
@@ -1296,15 +1192,7 @@ def add_finance_api(app: FastAPI) -> None:
     @app.get("/api/finance/cashflow")
     async def get_cashflow() -> dict:
         books = await state().books()
-        records = state().records
-        forecast = await off(
-            cashflow.forecast,
-            books,
-            records.batches,
-            opening=bank.latest_balance(records.bank_rows),
-            fixed=cashflow.fixed_costs(records.other_pnl),
-        )
-        return ok(forecast, books.meta())
+        return ok(await cashflow_view(books), books.meta())
 
     @app.get("/api/finance/close-checklist", response_model=None)
     async def get_close_checklist(date: str | None = None) -> dict | JSONResponse:
@@ -1313,7 +1201,7 @@ def add_finance_api(app: FastAPI) -> None:
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
         books = await state().books()
-        return ok(await off(close_checklist.checklist, books, state().records, d), books.meta())
+        return ok(await checklist_view(books, d), books.meta())
 
     @app.get("/api/finance/campaigns")
     async def get_campaigns() -> dict:

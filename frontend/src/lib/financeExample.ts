@@ -1,10 +1,10 @@
 // 재무 화면 "예시 데이터" 모드. 서버 대신 화면 안의 예시 응답(financeExample.json)으로 재무 AI 흐름을 보여 준다.
 // 예시 응답은 재무 백엔드를 목 시드로 돌린 결과다(`backend/domains/finance/demo/export_example.py`로 다시 만든다).
-// 사람이 누른 결정(결산 확정·대사 메모·정산 요청·감사 처리·보류 큐 결정)은 이 브라우저 화면 안에서만
+// 사람이 누른 결정(결산 확정·대사 메모·감사 처리·보류 큐 결정)은 이 브라우저 화면 안에서만
 // 바뀌고 서버에는 아무것도 보내지 않는다. 새로고침하면 처음 예시로 돌아간다.
 import raw from "./financeExample.json";
 import type {
-  ClosingReport, FinanceOverview, FinanceTodo, Reconciliation, Review, Settlements, TeamBudget,
+  ClosingReport, FinanceOverview, FinanceTodo, Reconciliation, Review, TeamBudget,
 } from "./finance";
 
 const KEY = "axcellent-finance-example";
@@ -50,10 +50,6 @@ function dropTodoItem(kind: FinanceTodo["kind"], ref: string) {
   t.title = t.title.replace(/\d+건/, `${t.count}건`);
   if (!t.count) o.todo = o.todo.filter((x) => x !== t);
 }
-function dropTodo(kind: FinanceTodo["kind"]) {
-  const o = overview();
-  if (o) o.todo = o.todo.filter((x) => x.kind !== kind);
-}
 
 /** 기본 주소로 찾고, 없으면 날짜를 뺀 주소의 응답이 같은 날짜일 때 그것을 쓴다 */
 function lookup(path: string): Body {
@@ -98,30 +94,6 @@ async function financeCall(method: string, path: string, body: Record<string, un
     dropTodoItem("recon_exception", id);
     return { data: item, meta: { ...META, noted_by: PERSON } };
   }
-  if (path === "/api/finance/settlements/batch") {
-    const sett = store["/api/finance/settlements"];
-    const s = sett?.data as Settlements | undefined;
-    if (!s) throw new ExampleMissing("예시 데이터에 정산 내역이 없습니다.");
-    const ready = s.statements.filter((r) => !r.hold_reasons.length && (r.status === "ready" || r.status === "rejected"));
-    const reviewId = `rv_example_${s.period}`;
-    ready.forEach((r) => Object.assign(r, { status: "requested", review_id: reviewId }));
-    const total = ready.reduce((n, r) => n + (r.payout ?? 0), 0);
-    s.batch = { status: "requested", review_id: reviewId, execution_id: `exe_example_${s.period}`, total_payout: total, seller_ids: ready.map((r) => r.seller_id) };
-    const created = now();
-    reviews.unshift({
-      review_id: reviewId, execution_id: s.batch.execution_id ?? "", context_id: `ctx_req_settlement_${s.period}`,
-      action: "confirm_settlement", requester: "finance", created_at: created,
-      expires_at: new Date(Date.now() + 10 * 60_000).toISOString(), status: "pending",
-      decided_by: null, decided_at: null, note: null,
-      report: { hold_reason: "always_human", totals: { total_payout: total, sellers: ready.length } },
-    });
-    const t = overview()?.todo.find((x) => x.kind === "settlement_batch");
-    if (t) Object.assign(t, {
-      title: `판매자 정산 ${ready.length}곳 지급 승인 대기 (안전 장치)`,
-      action: { type: "review_decision", period: s.period, review_id: reviewId },
-    });
-    return sett;
-  }
   const team = /^\/api\/finance\/team-budget\/([^/]+)\/approve$/.exec(path);
   if (team) {
     const month = decodeURIComponent(team[1]);
@@ -153,16 +125,6 @@ async function safetyCall(method: string, path: string, body: Record<string, unk
   if (!review) throw new ExampleMissing("예시 데이터에 없는 보류 건입니다.");
   const approved = body.decision === "approved";
   Object.assign(review, { status: approved ? "approved" : "rejected", decided_by: PERSON, decided_at: now(), note: (body.note as string | null) ?? null });
-  const s = dataOf<Settlements>("/api/finance/settlements");
-  if (s && s.batch.review_id === review.review_id) {
-    s.batch.status = approved ? "approved" : "rejected";
-    s.statements.filter((r) => r.review_id === review.review_id).forEach((r) => { r.status = approved ? "approved" : "rejected"; });
-    if (approved) dropTodo("settlement_batch");
-    else {
-      const t = overview()?.todo.find((x) => x.kind === "settlement_batch");
-      if (t) Object.assign(t, { title: "판매자 정산 지급 요청이 멈춤. 다시 요청할 수 있음", action: { type: "settlement_request", period: s.period } });
-    }
-  }
   return { data: review };
 }
 
