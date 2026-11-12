@@ -70,6 +70,9 @@ export interface ClosingLine { code: string; label: string; amount: number | nul
 export interface JournalEntry { account: string; debit: number; credit: number; memo: string }
 /** 판단에 쓴 규칙과 근거 (finance_rules.toml) */
 export interface AppliedRule { rule_id: string; title: string; statement: string; basis: string; review: "expert" | "pending"; detail: string | null; rules_version: number }
+/** 재무·세무 규칙 책 (`GET /api/finance/rules`, finance_rules.toml). 화면은 규칙 목록과 전문가 질문만 쓴다 */
+export interface FinanceRule { id: string; area: string; title: string; statement: string; basis: string; review: "expert" | "pending" }
+export interface FinanceRuleBook { version: number; updated: string; expert_questions: string[]; rules: FinanceRule[] }
 export interface IncomeEstimate {
   year: number; from: string; to: string;
   operating_result: number | null; income_tax: number | null; local_income_tax: number | null; total: number | null;
@@ -692,6 +695,8 @@ export const finance = {
   saveOtherPnl: (body: OtherPnlInput) => fin<Envelope<OtherPnlView>>("/api/finance/other-pnl", { method: "POST", body, human: true }),
   /** 법인세 참고 추정. 신고에 쓰지 않는다 */
   incomeEstimate: () => fin<Envelope<IncomeEstimate>>("/api/finance/tax/income-estimate"),
+  /** 회계 기준 확인 목록: 재무 AI가 계산에 쓰는 규칙과 세무사·회계사 확인 여부 */
+  rules: () => fin<Envelope<FinanceRuleBook>>("/api/finance/rules"),
   /** 자동으로 만든 파일과 은행 폴더 기록 */
   exports: () => fin<Envelope<ExportsView>>("/api/finance/exports"),
   runExports: () => fin<Envelope<unknown>>("/api/finance/exports/run", { method: "POST", body: {}, human: true }),
@@ -789,18 +794,36 @@ export function todayKst(now = new Date()): string {
   return new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
-/** todo.link 또는 kind → 화면 탭 id */
-export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "tax" | "campaigns";
-export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "campaigns"];
+/** todo.link 또는 kind → 화면 탭 id. 탭 id는 주소 해시(#closing)라 바꾸지 않고 새 탭만 더한다 */
+export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "tax" | "campaigns" | "cash" | "requests";
+export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "campaigns", "cash", "requests"];
+/**
+ * 섹션 앵커(#cashflow 같은 Panel id) → 그 섹션이 있는 탭. 탭을 옮긴 섹션의 옛 링크도 새 탭으로 열고 그 섹션으로 내려간다.
+ * 섹션을 다른 탭으로 옮기면 여기도 고친다.
+ */
+export const FINANCE_SECTION_TAB: Record<string, FinanceTab> = {
+  "close-checklist": "closing", variance: "closing", statements: "closing",
+  bank: "reconciliation", "bank-imports": "reconciliation", "bank-outflows": "reconciliation",
+  deadlines: "settlements", payables: "settlements", "seller-transfers": "settlements",
+  "team-budget": "policy",
+  "tax-vat": "tax", "tax-seller-report": "tax", "tax-income": "tax", "tax-exports": "tax", "tax-rules": "tax",
+  "campaign-pnl": "campaigns", "campaign-reviews": "campaigns", "campaign-lessons": "campaigns", "campaign-insights": "campaigns", "campaign-opinions": "campaigns",
+  cashflow: "cash",
+  "planning-requests": "requests", "support-costs": "requests",
+};
+/** 주소 해시(# 없이) → 열 탭. 탭 id도 섹션 앵커도 아니면 null */
+export function financeHashTab(hash: string): FinanceTab | null {
+  const h = hash.replace(/^#/, "");
+  if ((FINANCE_TABS as string[]).includes(h)) return h as FinanceTab;
+  return FINANCE_SECTION_TAB[h] ?? null;
+}
 const TODO_TAB: Record<TodoKind, FinanceTab> = {
   closing_drift: "closing",
   vat_drift: "tax",
   settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", team_budget: "policy",
 };
 export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {
-  const link = (t.link ?? "").replace(/^#/, "");
-  if ((FINANCE_TABS as string[]).includes(link)) return link as FinanceTab;
-  return TODO_TAB[t.kind] ?? "closing";
+  return financeHashTab(t.link ?? "") ?? TODO_TAB[t.kind] ?? "closing";
 }
 
 // ---------------------------------------------------------------- 장애 이벤트 표시 도우미

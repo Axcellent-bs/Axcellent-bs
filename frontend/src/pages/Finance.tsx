@@ -3,7 +3,7 @@ import { Navigate, useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ClosingSection } from "@/components/finance/Closing";
 import { DeadlineSection, PayablesSection, VarianceSection } from "@/components/finance/CloseControls";
-import { BankSection, CashflowSection, ChecklistSection } from "@/components/finance/CashAndClose";
+import { BankSection, CashflowSection, ChecklistSection, SellerTransfersSection } from "@/components/finance/CashAndClose";
 import { CampaignsSection } from "@/components/finance/Campaigns";
 import { TaxSection } from "@/components/finance/Tax";
 import { StatementsSection } from "@/components/finance/Statements";
@@ -19,14 +19,14 @@ import { SupportCostsSection } from "@/components/finance/SupportCosts";
 import { TodoCard } from "@/components/finance/Todo";
 import { Link } from "@/lib/nav";
 import {
-  FINANCE_SERVER, FINANCE_TABS, NOT_FINANCE_ACTIONS, SAFETY_SERVER, SUPPORT_SETTLEMENT_PATH, exampleMode, finance, krw, sortIncidents, todoTab,
+  FINANCE_SERVER, FINANCE_TABS, NOT_FINANCE_ACTIONS, SAFETY_SERVER, SUPPORT_SETTLEMENT_PATH, exampleMode, finance, financeHashTab, krw, sortIncidents, todoTab,
   type FinanceKpis, type FinanceTab, type Review, type SelfTest, type SelfTestLastMeta,
 } from "@/lib/finance";
 import { CompanyName } from "@/demo/CompanyName";
 import { setExampleOn } from "@/lib/financeExample";
 
 // 재무 AI 화면 = 고객사 재무팀. 기본 화면은 시나리오 A(결제 장애)의 "장애 이벤트 재무"(이벤트별 쿠폰·환불 장부).
-// 평상시 업무(결산·대사·정산·팀 예산·보류 추이)는 두 번째 탭에 둔다. 재무 AI 테스트는 서버가 10분마다 자동으로 한다.
+// 평상시 업무(①~⑧ 업무 탭)는 두 번째 탭에 둔다. 재무 AI 테스트는 서버가 10분마다 자동으로 한다.
 // 재무는 쿠폰·환불의 끝난 금액을 장부에 적기만 한다.
 // 숫자는 서버가 계산한 값을 그대로 보여 주고, 말만 쉽게 바꾼다.
 // 기준: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md §8·§11·§12
@@ -42,6 +42,8 @@ const TAB_LABEL: Record<FinanceTab, string> = {
   policy: "④ 팀 예산",
   tax: "⑤ 세무 지원",
   campaigns: "⑥ 캠페인 재무",
+  cash: "⑦ 자금·현금 흐름",
+  requests: "⑧ 요청·기록",
 };
 
 const KPI: { key: keyof FinanceKpis; label: string; hint: string }[] = [
@@ -119,7 +121,8 @@ async function settle<T>(p: Promise<T>): Promise<[T | null, string | null]> {
 }
 
 /** 화면 전환은 왼쪽 사이드바의 하위 탭이 한다(demo/services.ts finance 서비스 children, 데이터 AI와 같은 짜임):
- *  /finance 장애 이벤트 재무 · /finance/daily 평상시 재무 업무(①~⑥ 업무 탭은 #closing 같은 해시).
+ *  /finance 장애 이벤트 재무 · /finance/daily 평상시 재무 업무(①~⑧ 업무 탭은 #closing 같은 해시).
+ *  섹션 앵커(#cashflow, #deadlines 등)는 그 섹션이 있는 탭을 열고 그 섹션으로 내려간다(FINANCE_SECTION_TAB).
  *  옛 주소(/finance#daily, /finance#closing 등)는 새 주소로 옮긴다 */
 type Mode = "incident" | "daily";
 const DAILY_PATH = "/finance/daily";
@@ -131,21 +134,33 @@ export default function FinancePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const hashTab = location.hash.replace(/^#/, "");
-  const isTab = (FINANCE_TABS as string[]).includes(hashTab);
+  const hashedTab = financeHashTab(hashTab);
+  const isTab = hashedTab != null;
   const mode: Mode = location.pathname.startsWith(DAILY_PATH) ? "daily" : "incident";
   const legacyDaily = mode === "incident" && (isTab || hashTab === "daily");
-  const tab: FinanceTab = isTab ? (hashTab as FinanceTab) : "closing";
+  const tab: FinanceTab = hashedTab ?? "closing";
+  // 탭 id가 아닌 해시(섹션 앵커, #safety-queue)는 그 자리로 내려간다
+  const anchor = hashTab && !(FINANCE_TABS as string[]).includes(hashTab) && (isTab || hashTab === "safety-queue") ? hashTab : null;
   const urlIncident = new URLSearchParams(location.search).get("incident");
   const [closingFocus, setClosingFocus] = useState<{ date: string } | null>(null);
   const openTab = useCallback((t: FinanceTab, scroll = false) => {
     navigate({ pathname: DAILY_PATH, search: location.search, hash: `#${t}` }, { replace: location.pathname.startsWith(DAILY_PATH) });
     if (scroll) scrollToId("finance-modules");
   }, [navigate, location.search, location.pathname]);
+  /** 탭 id면 그 탭을, 섹션 앵커(#bank-outflows 등)면 그 섹션이 있는 탭을 열고 섹션으로 내려간다 */
+  const openTarget = useCallback((target: string) => {
+    const t = financeHashTab(target);
+    if (!t || t === target) { openTab(t ?? "closing", true); return; }
+    navigate({ pathname: DAILY_PATH, search: location.search, hash: `#${target}` }, { replace: location.pathname.startsWith(DAILY_PATH) });
+    if (location.hash === `#${target}`) scrollToId(target);
+  }, [openTab, navigate, location.search, location.pathname, location.hash]);
   /** 이벤트 고르기: 주소(?incident=)에 남겨 새로고침해도 같은 이벤트를 본다 */
   const openIncident = useCallback((id: string, scroll = false) => {
     navigate({ pathname: INCIDENT_PATH, search: `?incident=${encodeURIComponent(id)}`, hash: "" }, { replace: location.pathname === INCIDENT_PATH });
     if (scroll) scrollToId("incident-finance");
   }, [navigate, location.pathname]);
+
+  useEffect(() => { if (anchor && !legacyDaily) scrollToId(anchor); }, [anchor, legacyDaily]);
 
   // 30초마다, 그리고 무언가를 바꾼 뒤 모든 섹션을 새로 받는다
   const [tick, setTick] = useState(0);
@@ -244,7 +259,7 @@ export default function FinancePage() {
           <li><b>이벤트 고르기</b>: <b>장애 이벤트 재무</b> 탭 위쪽 이벤트 탭에서 살펴볼 이벤트를 고릅니다. 가장 최근 이벤트가 먼저 열려 있고, 오래된 이벤트는 끝의 <b>이전 이벤트</b> 목록에 있습니다.</li>
           <li><b>장부 확인</b>: 피해(데이터 AI가 센 숫자), 보상 쿠폰, 환불로 빠져나간 돈을 봅니다.</li>
           <li><b>보류 큐 결정</b>: 재무가 정해야 하는 보류 건은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다. 판매자 정산 지급 승인은 <Link href={SUPPORT_SETTLEMENT_PATH} className="font-medium text-brand-700 underline">고객지원 &gt; 판매자 정산</Link>에서 합니다.</li>
-          <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정, 대사 메모, 팀 예산 확정을 하고 판매자 정산 결과를 봅니다.</li>
+          <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정(①), 대사 메모(②), 팀 예산 확정(④)을 하고 판매자 정산 결과(③)를 봅니다. 세무 자료는 ⑤, 현금 흐름은 ⑦, 기획 요청·고객지원 비용 기록은 ⑧에 있습니다.</li>
         </ol>
         <p className="mt-3 text-sm text-ink-500">
           단계별 설명과 자주 묻는 질문은 <Link href="/finance/guide" className="font-medium text-brand-700 underline">재무 AI 관리자 사용법</Link>에 있습니다.
@@ -344,7 +359,7 @@ export default function FinancePage() {
         ) : overview.error ? <ErrorBox message={overview.error} onRetry={overview.reload} /> : <Waiting />}
       </section>
 
-      {/* 재무팀 5개 모듈 */}
+      {/* 재무팀 업무 탭 ①~⑧. 어느 섹션이 어느 탭에 있는지는 lib/finance.ts FINANCE_SECTION_TAB과 같게 둔다 */}
       <div id="finance-modules" className="scroll-mt-4 space-y-4">
         <div role="tablist" aria-label="재무팀 업무" className="scroll-thin -mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
           {FINANCE_TABS.map((t) => (
@@ -355,24 +370,40 @@ export default function FinancePage() {
           ))}
         </div>
         <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-          {tab === "closing" && <div className="mb-4"><ChecklistSection tick={tick} onOpen={(t) => openTab(todoTab({ kind: "closing_confirm", link: t }), true)} /></div>}
-          {tab === "closing" && <ClosingSection tick={tick} onChanged={bump} focus={closingFocus} />}
-          {tab === "closing" && <div className="mt-4"><VarianceSection tick={tick} /></div>}
-          {tab === "closing" && <div className="mt-4"><StatementsSection tick={tick} /></div>}
-          {tab === "reconciliation" && <ReconciliationSection tick={tick} />}
-          {tab === "reconciliation" && <div className="mt-4"><BankSection tick={tick} /></div>}
-          {tab === "settlements" && <SettlementsSection tick={tick} source={FINANCE_SETTLEMENTS} note={<SettlementNote />} />}
-          {tab === "settlements" && <div className="mt-4"><DeadlineSection tick={tick} /></div>}
-          {tab === "settlements" && <div className="mt-4"><PayablesSection tick={tick} /></div>}
-          {tab === "settlements" && <div className="mt-4"><CashflowSection tick={tick} /></div>}
+          {tab === "closing" && (
+            <div className="space-y-4">
+              <ChecklistSection tick={tick} onOpen={openTarget} />
+              <ClosingSection tick={tick} onChanged={bump} focus={closingFocus} />
+              <VarianceSection tick={tick} />
+              <StatementsSection tick={tick} />
+            </div>
+          )}
+          {tab === "reconciliation" && (
+            <div className="space-y-4">
+              <ReconciliationSection tick={tick} />
+              <BankSection tick={tick} />
+            </div>
+          )}
+          {tab === "settlements" && (
+            <div className="space-y-4">
+              <SettlementsSection tick={tick} source={FINANCE_SETTLEMENTS} note={<SettlementNote />} />
+              <DeadlineSection tick={tick} />
+              <PayablesSection tick={tick} />
+              <SellerTransfersSection tick={tick} />
+            </div>
+          )}
           {tab === "policy" && <TeamBudgetSection tick={tick} />}
-          {tab === "policy" && <div className="mt-4"><PlanningRequestsSection tick={tick} /></div>}
           {tab === "tax" && <TaxSection tick={tick} />}
           {tab === "campaigns" && <CampaignsSection tick={tick} />}
+          {tab === "cash" && <CashflowSection tick={tick} />}
+          {tab === "requests" && (
+            <div className="space-y-4">
+              <PlanningRequestsSection tick={tick} />
+              <SupportCostsSection tick={tick} />
+            </div>
+          )}
         </div>
       </div>
-
-      <SupportCostsSection tick={tick} />
 
       </div>
       )}
