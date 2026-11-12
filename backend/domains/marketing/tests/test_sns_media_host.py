@@ -17,6 +17,7 @@ from marketing_agent.sns_publish.media_host import (
     ACCESS_KEY_ENV,
     BUCKET_ENV,
     SECRET_KEY_ENV,
+    VIDEO_MAX_BYTES,
     MediaHostConfigError,
     MediaHostError,
     S3MediaHost,
@@ -31,6 +32,9 @@ ACCESS = "test-access-not-real"
 SECRET = "test-secret-not-real"  # noqa: S105
 FIXED = datetime(2026, 11, 6, 9, 0, 0, tzinfo=UTC)
 JPEG = b"\xff\xd8\xff\xe0" + b"0" * 64
+
+
+MP4 = b"\x00\x00\x00\x20ftypisom" + b"0" * 64
 
 
 class Recorder:
@@ -301,3 +305,84 @@ def test_secret_names_live_only_in_media_host() -> None:
     )
     for name in media_host.SECRET_ENV_NAMES:
         assert name not in source  # 값을 읽는 코드가 이 파일 하나뿐이다
+
+
+# -- 영상(릴스)
+@pytest.mark.asyncio
+async def test_upload_video_uses_video_content_type_and_unique_media_id_key() -> None:
+    rec = Recorder(httpx.Response(200))
+    url = await _host(rec).upload_video(MP4, "med_abc123")
+    request = rec.requests[0]
+    assert request.method == "PUT" and request.content == MP4
+    assert request.headers["content-type"] == "video/mp4"
+    path = urlsplit(str(request.url)).path
+    assert "med_abc123" in path and "labeled" not in path and path.endswith(".mp4")
+    assert "/ig/video/" in path
+    assert url.split("?")[0] == str(request.url) and "X-Amz-Signature=" in url
+
+
+def test_video_key_differs_per_media_id_and_strips_unsafe_chars() -> None:
+    host = _host()
+    assert host.video_object_key(MP4, "med_a") != host.video_object_key(MP4, "med_b")
+    key = host.video_object_key(MP4, "../../x")
+    assert ".." not in key and key.count("/") == 2  # ig/video/<이름>.mp4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", [b"", b"x" * (VIDEO_MAX_BYTES + 1)])
+async def test_upload_video_rejects_empty_or_oversize_without_request(content: bytes) -> None:
+    rec = Recorder()
+    with pytest.raises(MediaHostError) as caught:
+        await _host(rec).upload_video(content, "med_a")
+    assert caught.value.code == "video_size" and rec.requests == []
+
+
+@pytest.mark.asyncio
+async def test_local_video_is_uploaded_and_signed_url_goes_to_graph_as_video_url(
+    media_dir: Path,
+) -> None:
+    folder = media_dir / "t" / "c" / "med_abc123"
+    folder.mkdir(parents=True)
+    (folder / "labeled.mp4").write_bytes(MP4)
+    s3 = Recorder(httpx.Response(200))
+    graph = Recorder(httpx.Response(200, json={"id": "c1"}))
+    ref = "t/c/med_abc123/labeled.mp4"
+    assert await _adapter(graph, _host(s3)).create_container(_request(ref, "video")) == "c1"
+    form = parse_qs(graph.requests[0].content.decode())
+    assert form["media_type"] == ["REELS"] and "image_url" not in form
+    assert form["video_url"][0].split("?")[0] == str(s3.requests[0].url)
+    assert "med_abc123" in str(s3.requests[0].url)
+    assert s3.requests[0].headers["content-type"] == "video/mp4"
+
+
+@pytest.mark.asyncio
+async def test_video_https_ref_and_no_host_keep_old_paths(media_dir: Path) -> None:
+    s3 = Recorder()
+    graph = Recorder(httpx.Response(200, json={"id": "c1"}))
+    await _adapter(graph, _host(s3)).create_container(
+        _request("https://cdn.example.test/a.mp4", "video")
+    )
+    assert s3.requests == []
+    assert parse_qs(graph.requests[0].content.decode())["video_url"] == [
+        "https://cdn.example.test/a.mp4"
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name,body,expected",
+    [
+        ("missing.mp4", None, (9004, 2207052)),
+        ("bad.mp4", b"not-an-mp4-file-at-all", (352, 2207026)),
+    ],
+)
+async def test_bad_video_is_rejected_before_any_request(
+    media_dir: Path, name: str, body: bytes | None, expected: tuple[int, int]
+) -> None:
+    if body is not None:
+        (media_dir / name).write_bytes(body)
+    s3, graph = Recorder(), Recorder()
+    with pytest.raises(IgApiError) as caught:
+        await _adapter(graph, _host(s3)).create_container(_request(name, "video"))
+    assert (caught.value.code, caught.value.subcode) == expected
+    assert s3.requests == [] and graph.requests == []

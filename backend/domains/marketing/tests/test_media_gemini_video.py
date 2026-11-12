@@ -3,6 +3,8 @@
 import base64
 import hashlib
 import json
+import shutil
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from marketing_agent.media.gemini_video import (
     GeminiVideoError,
     GeminiVideoProvider,
     has_audio_track,
+    strip_audio,
 )
 
 KEY = "test-key-SECRET-123"
@@ -225,16 +228,80 @@ def test_job_failure_status_raises(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
-def test_audio_track_is_not_used_when_muted_requested(tmp_path: Path) -> None:
+def test_audio_track_is_stripped_when_muted_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gemini는 오디오를 항상 넣어 보낸다. 무음 모드는 실패시키지 않고 ffmpeg로 제거한다."""
+    from marketing_agent.media import gemini_video
+
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_body(_inline(AUDIO_MP4)))
 
+    seen: list[list[str]] = []
+
+    def fake_strip(data: bytes, work_dir: Path, **_: object) -> bytes:
+        assert data == AUDIO_MP4
+        return MUTED_MP4
+
+    monkeypatch.setattr(gemini_video, "strip_audio", fake_strip)
     assert has_audio_track(AUDIO_MP4) and not has_audio_track(MUTED_MP4)
-    with pytest.raises(GeminiVideoError, match="audio_track_present"):
+    result = _provider(handler).generate(_request(tmp_path))
+    assert result.audio_stripped is True
+    assert result.asset_path.read_bytes() == MUTED_MP4 and not seen
+    muted = _provider(lambda r: httpx.Response(200, json=_body(_inline(MUTED_MP4))))
+    assert muted.generate(_request(tmp_path)).audio_stripped is False
+    kept = _provider(handler).generate(_request(tmp_path, remove_audio=False))
+    assert kept.asset_path.read_bytes() == AUDIO_MP4 and kept.audio_stripped is False
+
+
+def test_audio_strip_failure_keeps_rejecting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MARKETING_FFMPEG_BIN", str(tmp_path / "no-such-ffmpeg"))
+    handler = lambda req: httpx.Response(200, json=_body(_inline(AUDIO_MP4)))  # noqa: E731
+    with pytest.raises(GeminiVideoError, match="ffmpeg_not_found"):
         _provider(handler).generate(_request(tmp_path))
     assert list(tmp_path.iterdir()) == []
-    kept = _provider(handler).generate(_request(tmp_path, remove_audio=False))
-    assert kept.asset_path.read_bytes() == AUDIO_MP4
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg 없음")
+def test_real_ffmpeg_strips_audio_from_synthetic_mp4(tmp_path: Path) -> None:
+    src = tmp_path / "src.mp4"
+    done = subprocess.run(  # noqa: S603
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=64x64:d=1:r=10",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=1",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(src),
+        ],  # fmt: skip
+        capture_output=True,
+        check=False,
+    )
+    if done.returncode != 0:
+        pytest.skip("ffmpeg로 합성 mp4를 만들 수 없다")
+    data = src.read_bytes()
+    assert has_audio_track(data)
+    work = tmp_path / "work"
+    work.mkdir()
+    stripped = strip_audio(data, work)
+    assert not has_audio_track(stripped) and b"ftyp" in stripped[:16]
+    assert list(work.iterdir()) == []  # 임시 파일을 남기지 않는다
 
 
 @pytest.mark.parametrize(

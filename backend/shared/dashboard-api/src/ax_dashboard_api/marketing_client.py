@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -19,20 +22,27 @@ from ax_dashboard_api.envelope import ApiError
 AGENT_NAME = "dashboard-api"
 TARGET = "marketing"
 DEADLINE_SECONDS = 60
+VIDEO_TIMEOUT_ENV = "DASHBOARD_VIDEO_TIMEOUT_S"
+DEFAULT_VIDEO_TIMEOUT_S = 360  # 영상 생성은 동기로 길어질 수 있다
 
 SendFn = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 SEND: SendFn = call_agent  # 테스트에서 바꿀 수 있다
 
 
 async def call(
-    skill: str, payload: dict[str, Any], *, campaign_id: str, key: str
+    skill: str,
+    payload: dict[str, Any],
+    *,
+    campaign_id: str,
+    key: str,
+    deadline_s: float = DEADLINE_SECONDS,
 ) -> dict[str, Any]:
     config.set_agent_name(AGENT_NAME)
     request = AgentRequest(
         meta=RequestMeta(
             context_id=f"ctx_cmp_{campaign_id}",
             token=config.agent_token(AGENT_NAME),
-            deadline=datetime.now(UTC) + timedelta(seconds=DEADLINE_SECONDS),
+            deadline=datetime.now(UTC) + timedelta(seconds=deadline_s),
             idempotency_key=key,
         ),
         skill=skill,
@@ -66,6 +76,52 @@ async def handoff_call(proposal_id: str, media_kind: str, key: str) -> dict[str,
     if out["status"] == TaskStatus.FAILED.value:
         status, code = HANDOFF_FAILURES.get(out["outcome"] or "", (502, "UPSTREAM_FAILED"))
         raise ApiError(status, code, f"기획안을 넘기지 못했다 ({out['outcome']})")
+    return out
+
+
+def video_timeout_s() -> float:
+    try:
+        value = float((os.getenv(VIDEO_TIMEOUT_ENV) or "").strip() or DEFAULT_VIDEO_TIMEOUT_S)
+    except ValueError:
+        return float(DEFAULT_VIDEO_TIMEOUT_S)
+    return value if value > 0 else float(DEFAULT_VIDEO_TIMEOUT_S)
+
+
+def _digest(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+async def video_prepare_call(payload: dict[str, Any]) -> dict[str, Any]:
+    """영상 게시물 준비(`prepare_sns_post_from_media`). 생성 비용·승인은 마케팅 skill이 판단한다.
+
+    판단 결과(보류·실패 이유 등)는 오류가 아니라 그대로 돌려준다. 입력 거절만 400으로 바꾼다.
+    """
+    digest = _digest(payload)
+    out = await call(
+        "prepare_sns_post_from_media",
+        payload,
+        campaign_id=f"vid_{digest}",
+        key=f"ui:video-prepare:{digest}",
+        deadline_s=video_timeout_s(),
+    )
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] == "invalid_input":
+        raise ApiError(400, "INVALID_INPUT", "영상 준비 입력이 맞지 않는다 (invalid_input)")
+    return out
+
+
+async def video_publish_call(publish_input: dict[str, Any]) -> dict[str, Any]:
+    """영상 게시(`publish_sns`). C등급 승인 대기(`input-required`+review_id)를 그대로 돌려준다."""
+    digest = _digest(publish_input)
+    out = await call(
+        "publish_sns",
+        publish_input,
+        campaign_id=f"vid_{digest}",
+        key=f"ui:video-publish:{digest}",
+        deadline_s=video_timeout_s(),
+    )
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] == "invalid_input":
+        raise ApiError(400, "INVALID_INPUT", "게시 입력이 맞지 않는다 (invalid_input)")
     return out
 
 

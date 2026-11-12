@@ -47,6 +47,7 @@ class MediaResult:
     usage: Usage | None  # 응답에 없으면 None
     generated_at: datetime
     provider_job_id: str
+    audio_stripped: bool = False  # 영상: 받은 mp4의 오디오를 ffmpeg로 제거했는지
 
 
 class MediaProvider(Protocol):

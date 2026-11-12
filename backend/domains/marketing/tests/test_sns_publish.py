@@ -615,7 +615,7 @@ def test_state_machine_blocks_reentry_and_bad_transitions() -> None:
 def test_card_lists_publish_sns_as_c_grade() -> None:
     card = {s.id: s for s in load_card().skills}
     assert card["publish_sns"].grade == "C"
-    assert card["publish_sns"].allowed_requesters == ["orchestrator"]
+    assert card["publish_sns"].allowed_requesters == ["orchestrator", "dashboard-api"]
 
 
 def test_secret_env_names_are_names_only() -> None:
