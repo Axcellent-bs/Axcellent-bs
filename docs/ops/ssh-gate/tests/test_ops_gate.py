@@ -875,7 +875,7 @@ class NginxTwoPersonTests(GateCase):
         self.assertIn("approver=owner-c\n", text)
         self.assertIn(f"backup={bdir}\n", text)
         self.assertIn(f"user=owner-c\taction=nginx-approve-location\targs=card-decision {digest}\tmode=real\t"
-                      f"announced=yes\tpr=975\tnote=proposer:owner-b,digest:{digest}\tlayer=root\t"
+                      f"announced=yes\tpr=975\tnote=proposer:owner-b,digest:{digest},self-approve:no\tlayer=root\t"
                       f"result=applied:{bdir}", self.audit_text())
 
         # 같은 정규식을 다시 제안할 수 없다
@@ -895,6 +895,104 @@ class NginxTwoPersonTests(GateCase):
         self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
         self.assertEqual(self.pending(), ["card-decision.req"])
         self.assertNotIn("nginx", self.calls())
+
+    # --- 정책으로 지정한 계정만 셀프 승인 ([self_approve] accounts) ---
+    def set_self_approve(self, body):
+        write(self.policy, policy_text(self.root) + "\n[self_approve]\n" + body + "\n")
+
+    def approve_cmd(self, digest):
+        return f"nginx-approve-location card-decision {digest} --announced"
+
+    def test_self_approve_default_empty_list_still_refuses(self):
+        self.set_self_approve("accounts = []")
+        digest = self.propose(key="owner-b")
+        self.assertRc(self.gate("owner-b", self.approve_cmd(digest)), 3)
+        self.assertIn("result=fail:self-approval", self.audit_text())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertEqual(self.pending(), ["card-decision.req"])
+
+    def test_self_approve_account_outside_list_refused(self):
+        self.set_self_approve('accounts = ["owner-c"]')
+        digest = self.propose(key="owner-b")
+        self.assertRc(self.gate("owner-b", self.approve_cmd(digest)), 3)
+        self.assertIn("result=fail:self-approval", self.audit_text())
+        self.assertNotIn("nginx", self.calls())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+
+    def test_self_approve_listed_account_passes_with_all_checks_and_audit(self):
+        self.set_self_approve('accounts = ["owner-b", "owner-c"]')
+        digest = self.propose(key="owner-b")
+        p = self.gate("owner-b", self.approve_cmd(digest))
+        self.assertRc(p, 0)
+        self.assertIn("셀프 승인(정책 허용 계정)", p.stdout)
+        conf = self.conf.read_text(encoding="utf-8")
+        self.assertIn("location ~ " + GOOD_REGEX + " {", conf)
+        calls = self.calls()
+        self.assertLess(calls.index("nginx -t"), calls.index("systemctl reload nginx"))
+        (bdir,) = self.backup_dirs()
+        self.assertEqual((self.rootp / "etc/nginx/backup" / bdir / "site.conf").read_text(encoding="utf-8"),
+                         ORIG_CONF)
+        self.assertIn(f"note=proposer:owner-b,digest:{digest},self-approve:yes\tlayer=root\t"
+                      f"result=applied:{bdir}", self.audit_text())
+        self.assertEqual(self.pending(), [])
+
+    def test_self_approve_keeps_every_other_check(self):
+        self.set_self_approve('accounts = ["owner-b"]')
+        digest = self.propose(key="owner-b")
+        wrong = "0" * 12 if digest != "0" * 12 else "1" * 12
+        self.assertRc(self.gate("owner-b", self.approve_cmd(wrong)), 2)           # 확인값
+        self.assertIn("result=fail:digest-mismatch", self.audit_text())
+        p = self.gate("owner-b", f"nginx-approve-location card-decision {digest}")   # 알림 확인
+        self.assertNotEqual(p.returncode, 0)
+        req = self.rootp / "var/lib/ax-gate/pending/card-decision.req"
+        original = req.read_text(encoding="utf-8")
+        lines = [("created_epoch=1" if ln.startswith("created_epoch=") else ln) for ln in original.splitlines()]
+        write(req, "\n".join(lines) + "\n")                                         # 24시간 TTL
+        self.assertRc(self.gate("owner-b", self.approve_cmd(digest)), 2)
+        self.assertIn("result=fail:proposal-expired", self.audit_text())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertNotIn("nginx", self.calls())
+
+    def test_self_approve_does_not_widen_prefixes_or_validator(self):
+        self.set_self_approve('accounts = ["owner-b"]')
+        # owner-b 의 접두 밖 경로는 제안 단계에서 막힌다
+        p = self.gate("owner-b", "nginx-add-location wide POST ^/example-api/api/items/other/x$")
+        self.assertRc(p, 2)
+        self.assertEqual(self.pending(), [])
+
+    def test_second_person_approval_records_self_approve_no(self):
+        self.set_self_approve('accounts = ["owner-b"]')
+        digest = self.propose(key="owner-b")
+        p = self.gate("owner-c", self.approve_cmd(digest))
+        self.assertRc(p, 0)
+        self.assertNotIn("셀프 승인", p.stdout)
+        self.assertIn(f"note=proposer:owner-b,digest:{digest},self-approve:no\t", self.audit_text())
+        self.assertNotIn("self-approve:yes", self.audit_text())
+
+    def test_self_approve_bad_policy_fails_safe(self):
+        bad = [
+            'account = ["owner-b"]',                    # 키 오타
+            'accounts = "owner-b"',                     # 문자열(목록 아님)
+            'accounts = true',
+            'accounts = 5',
+            'accounts = ["ghost-user"]',                # [permissions] 에 없음
+            'accounts = ["Owner-B"]',                   # 계정 형식 틀림
+            'accounts = ["owner-b"]\naccounts = []',    # 중복 키
+            'accounts = ["owner-b", 7]',                # 문자열 아닌 항목
+        ]
+        for body in bad:
+            with self.subTest(body=body):
+                self.set_self_approve(body)
+                self.assertRc(self.gate("owner-b", "status"), 5)      # 정책 로드 실패 = 전체 거부
+                self.assertRc(self.gate("owner-b", self.approve_cmd("0" * 12)), 5)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertNotIn("nginx", self.calls())
+
+    def test_self_approve_section_typo_means_no_self_approval(self):
+        write(self.policy, policy_text(self.root) + '\n[self_aprove]\naccounts = ["owner-b"]\n')
+        digest = self.propose(key="owner-b")
+        self.assertRc(self.gate("owner-b", self.approve_cmd(digest)), 3)
+        self.assertIn("result=fail:self-approval", self.audit_text())
 
     def test_approval_needs_matching_digest_existing_and_fresh_proposal(self):
         digest = self.propose()
