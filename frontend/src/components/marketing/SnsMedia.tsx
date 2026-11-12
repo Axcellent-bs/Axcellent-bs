@@ -11,6 +11,11 @@ import { holdKo } from "@/lib/marketingLive";
 const REFRESH_MS = 15_000;
 const SNS_ACTIONS = ["publish_sns", "generate_media"] as const;
 const ACTION_NAME: Record<string, string> = { publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기" };
+// 캐러셀 게시 요청의 요약("SNS 캐러셀 게시 요청(N장): ...")에서 장수만 읽는다. 다른 요청이면 null이다.
+const carouselCount = (summary?: string): number | null => {
+  const m = /^SNS 캐러셀 게시 요청\((\d+)장\)/.exec(summary ?? "");
+  return m ? Number(m[1]) : null;
+};
 const fromMarketing = (requester: string) => requester === "coupon" || requester === "marketing";
 
 function Section({ title, desc, children }: { title: string; desc?: ReactNode; children: ReactNode }) {
@@ -92,9 +97,17 @@ export function SnsMedia() {
         </ol>
       </Section>
 
+      <Section title="여러 장 올리기 (캐러셀)" desc="Instagram 한 게시물에 이미지 2장에서 10장까지 묶어 올립니다. 영상을 섞는 것은 아직 지원하지 않습니다.">
+        <ul className="list-disc space-y-1 pl-5 text-sm text-ink-700">
+          <li>장마다 AI 표시 라벨(오른쪽 하단)을 입히고 규격을 검사합니다. 한 장이라도 빠지면 게시 대상이 되지 않습니다.</li>
+          <li>생성 비용은 장수만큼 더해 건당·월 상한 안에서만 만듭니다. 상한을 넘으면 한 장도 만들지 않습니다.</li>
+          <li>게시(publish_sns)는 여전히 사람 승인입니다. 아래 대기 목록에 장수와 각 이미지 참조가 함께 나옵니다.</li>
+        </ul>
+      </Section>
+
       <Section title="AI 표시 라벨 안내" desc="AI 기본법을 적용 대상으로 보고, AI가 만든 이미지·영상·캡션에는 항상 표시합니다.">
         <ul className="list-disc space-y-1 pl-5 text-sm text-ink-700">
-          <li>이미지·영상 위에 사람이 읽는 표시 문구를 넣고, 파일에도 기계가 읽는 표시를 함께 남깁니다.</li>
+          <li>이미지·영상 위(오른쪽 하단)에 사람이 읽는 표시 문구를 넣고, 파일에도 기계가 읽는 표시를 함께 남깁니다.</li>
           <li>캡션에도 AI 생성 안내 문구가 들어갑니다. 표시가 빠지면 검사 단계에서 막힙니다.</li>
           <li>계정 프로필 쪽 라벨은 사람이 따로 확인합니다.</li>
         </ul>
@@ -109,6 +122,7 @@ export function SnsMedia() {
                   <li key={r.review_id} className="space-y-1 px-4 py-2 text-xs" title={`보류 건 ${r.review_id}`}>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <span className="font-medium">{ACTION_NAME[r.action] ?? "기타 요청"}</span>
+                      {r.action === "publish_sns" && carouselCount(r.report.summary) != null && <span className="chip">캐러셀 {carouselCount(r.report.summary)}장</span>}
                       {r.report.computed_amount != null && <span className="tabular-nums">{won(r.report.computed_amount)}</span>}
                       {r.report.hold_reason && <span className="chip bg-amber-50 text-amber-800" title={r.report.hold_reason}>{holdKo(r.report.hold_reason)}</span>}
                       <span className="ml-auto text-ink-500">{shortDateTime(r.expires_at)}까지 결정</span>

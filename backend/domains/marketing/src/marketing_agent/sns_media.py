@@ -38,6 +38,10 @@ REEL_CONTAINERS = ("mp4", "mov")
 REEL_VIDEO_CODECS = ("h264", "hevc")
 REEL_AUDIO_CODECS = ("aac",)
 REEL_ASPECT = 9 / 16
+CAROUSEL_MIN = (
+    2  # 캐러셀 2~10장 [확인 필요: 공식 문서 대조 기록(sns-design.md)에 장수가 없다. 요청서 기준]
+)
+CAROUSEL_MAX = 10
 CAPTION_MAX = 2200
 HASHTAG_MAX = 30
 MENTION_MAX = 20
@@ -88,6 +92,12 @@ def asset_ref_for(path: Path) -> str:
     root = media_root()
     assert root is not None
     return path.resolve().relative_to(root).as_posix()
+
+
+def carousel_sha256(item_shas: list[str]) -> str:
+    """캐러셀 전체의 내용 해시. 장수·각 장의 해시·순서가 하나라도 다르면 다르다."""
+    canonical = f"carousel:{len(item_shas)}:" + ",".join(item_shas)
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def sha256_file(path: Path) -> str:
