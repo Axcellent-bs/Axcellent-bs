@@ -255,3 +255,14 @@ def test_lookup_flags_come_from_the_service_cards() -> None:
     assert routing.is_lookup("coupon", "draft_notice") is False  # read지만 일
     assert routing.is_lookup("coupon", "issue_coupon") is False  # 실행
     assert routing.is_lookup("coupon", "no_such_skill") is False
+
+
+def test_settlement_follows_claims_in_the_enabled_list(monkeypatch) -> None:
+    """판매자 정산은 화면 서비스 목록에 따로 없다. 켠 목록에 이름이 없어도 claims를 켰으면 켠 것."""
+    monkeypatch.delenv(routing.ENABLED_FILE_ENV, raising=False)
+    monkeypatch.setenv(routing.ENABLED_ENV, "inquiry, claims")
+    assert routing.is_enabled("settlement")
+    monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
+    assert not routing.is_enabled("settlement")
+    monkeypatch.setenv(routing.ENABLED_ENV, "inquiry, settlement")
+    assert routing.is_enabled("settlement") and not routing.is_enabled("claims")

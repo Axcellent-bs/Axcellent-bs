@@ -1,4 +1,4 @@
-"""판매자 정산 skill (claims 서비스).
+"""판매자 정산 skill (settlement 서비스).
 
 2026-11-12 팀장 결정으로 판매자 정산을 재무에서 고객지원으로 옮겼다. 고객지원이 환불·클레임을
 처리하고, 그 결과로 판매자 정산금을 내고 지급 승인을 요청한다. 재무는 아래 읽기 skill로 결과를 받아
@@ -10,11 +10,17 @@
 - `seller_settlement_deadlines` (read): 판매 대금 지급 기한 점검
 - `request_seller_settlement` (A): 사람이 누른 지급 승인 요청. `execute("confirm_settlement")`가
   안전 장치에서 항상 C로 보류되고, 사람이 보류 큐에서 승인한다
+
+정산은 클레임(claims)과 다른 프로세스(settlement 서비스)에서 돈다(2026-11-12). 주문 30만 건 장부를
+읽고 계산하는 동안 클레임 처리가 느려졌기 때문이다. 조회는 저장된 장부·계산 결과로 바로 답하고,
+첫 장부를 모으는 중이면 `settlement_preparing`으로 바로 답한다(화면은 "준비 중").
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
+import json
 from typing import Any
 
 from ax_agent_template.execute import execute
@@ -33,6 +39,19 @@ from support_agent.settlement_schemas import (
 )
 
 UNAVAILABLE_EXECUTION = "exe_unavailable"  # agent-template execute()가 safety에 못 닿았을 때
+PREPARING = "settlement_preparing"  # 첫 장부를 모으는 중 (부르는 쪽은 "준비 중"으로 보여 준다)
+
+
+async def _books(request: AgentRequest, fresh: bool = False) -> sb.SettlementBooks | AgentResult:
+    try:
+        return await sb.load_books(fresh)
+    except sb.Preparing:
+        return error_result(
+            request.meta,
+            TaskStatus.FAILED,
+            PREPARING,
+            "판매자 정산 장부를 모으는 중이다. 잠시 뒤 다시 본다",
+        )
 
 
 def _unavailable(request: AgentRequest, books: sb.SettlementBooks) -> AgentResult:
@@ -45,8 +64,22 @@ def _unavailable(request: AgentRequest, books: sb.SettlementBooks) -> AgentResul
     )
 
 
-async def _view(books: sb.SettlementBooks, period: str | None) -> dict[str, Any]:
-    result = await asyncio.to_thread(settlement.statements, books, period)
+async def _view(
+    books: sb.SettlementBooks, period: str | None, cached: bool = True
+) -> dict[str, Any]:
+    """정산서 + 묶음 상태. 조회는 같은 장부·같은 주의 계산을 다시 쓴다(같은 계산은 하나만 돈다).
+
+    지급 요청(`cached=False`)은 새로 계산한다. 묶음 상태를 덮어쓰므로 붙여 둔 결과는 복사해 쓴다.
+    """
+    today = sc.today()
+    if cached:
+        shared = await books.computed(
+            ("statements", *settlement.week_key(period, today)),
+            lambda: settlement.statements(books, period, today),
+        )
+        result = copy.deepcopy(shared)
+    else:
+        result = await asyncio.to_thread(settlement.statements, books, period, today)
     batch = await settlement_batches.refreshed(result["period"])
     return settlement.apply_batch(result, batch)
 
@@ -55,7 +88,9 @@ async def seller_settlement(request: AgentRequest) -> AgentResult:
     parsed = h._parse(request, SellerSettlementInput)
     if isinstance(parsed, AgentResult):
         return parsed
-    books = await sb.load_books()
+    books = await _books(request)
+    if isinstance(books, AgentResult):
+        return books
     if books.unavailable_core():
         return _unavailable(request, books)
     data = await _view(books, parsed.period)
@@ -71,7 +106,9 @@ async def seller_settlement_weeks(request: AgentRequest) -> AgentResult:
             sc.week_range(period, sc.today())
         except ValueError as exc:
             return error_result(request.meta, TaskStatus.FAILED, "invalid_input", str(exc))
-    books = await sb.load_books()
+    books = await _books(request)
+    if isinstance(books, AgentResult):
+        return books
     if books.unavailable_core():
         return _unavailable(request, books)
     weeks = {}
@@ -93,11 +130,18 @@ async def seller_settlement_deadlines(request: AgentRequest) -> AgentResult:
     parsed = h._parse(request, SellerSettlementDeadlinesInput)
     if isinstance(parsed, AgentResult):
         return parsed
-    books = await sb.load_books()
+    books = await _books(request)
+    if isinstance(books, AgentResult):
+        return books
     if books.unavailable_core():
         return _unavailable(request, books)
     batches = await settlement_batches.refreshed_all()
-    report = await asyncio.to_thread(settlement.deadline_report, books, batches)
+    today = sc.today()
+    report = await books.computed(
+        ("deadlines", today.isoformat(), json.dumps(batches, sort_keys=True, default=str)),
+        lambda: settlement.deadline_report(books, batches, today),
+    )
+    report = copy.deepcopy(report)
     return h._done(request, report | {"meta": books.meta()})
 
 
@@ -106,11 +150,14 @@ async def request_seller_settlement(request: AgentRequest) -> AgentResult:
     parsed = h._parse(request, RequestSellerSettlementInput)
     if isinstance(parsed, AgentResult):
         return parsed
-    books = await sb.load_books(fresh=True)  # 돈이 걸린 결정은 주문 전체를 새로 읽은 장부로
+    # 돈이 걸린 결정은 `FRESH_SECONDS` 안에 새로 읽은 장부로 새로 계산한다
+    books = await _books(request, fresh=True)
+    if isinstance(books, AgentResult):
+        return books
     if books.unavailable_core():
         return _unavailable(request, books)
     try:
-        data = await _view(books, parsed.period)
+        data = await _view(books, parsed.period, cached=False)
     except ValueError as exc:
         return error_result(request.meta, TaskStatus.FAILED, "invalid_input", str(exc))
     name = data["period"]

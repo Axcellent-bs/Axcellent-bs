@@ -9,9 +9,10 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from ax_agent_template import config
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from support_agent import inquiry_pull, receipt_vision
+from support_agent import inquiry_pull, receipt_vision, settlement_books
 from support_agent.audit_handlers import AUDIT_HANDLERS
 from support_agent.change_handlers import CHANGE_HANDLERS
 from support_agent.chat_handlers import CHAT_HANDLERS
@@ -105,6 +106,11 @@ _app_lifespan = app.router.lifespan_context
 async def _lifespan_with_inquiry_pull(application: FastAPI) -> AsyncIterator[None]:
     async with _app_lifespan(application):
         task = inquiry_pull.start(_OWNED_SKILLS)
+        # 판매자 정산을 맡은 서비스(settlement)는 켤 때 뒤에서 장부를 모으고 계산해 둔다(목 모드는
+        # 안
+        # 함)
+        if "seller_settlement" in _OWNED_SKILLS and not config.is_mock("support"):
+            settlement_books.prime()
         try:
             yield
         finally:

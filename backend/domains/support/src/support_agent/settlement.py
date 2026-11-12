@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -56,69 +57,161 @@ def _refund_settles_at(refund: dict[str, Any], confirmed_at: dict[str, Any]) -> 
     return max(at, done)
 
 
+def _sellers(books: SettlementBooks) -> list[Any]:
+    """정산서를 만들 판매자: 판매자 목록 순서, 그 뒤에 목록에 없는 품목 판매자(주문 순서)."""
+
+    def make() -> list[Any]:
+        sellers = [s["seller_id"] for s in books.sellers if s.get("seller_id")]
+        known = set(sellers)
+        for o in books.orders:  # 판매자 목록에 없는 판매자의 품목도 빠뜨리지 않는다
+            for i in o["items"]:
+                sid = i.get("seller_id")
+                if sid and sid not in known:
+                    known.add(sid)
+                    sellers.append(sid)
+        return sellers
+
+    return books.memo("sellers", make)
+
+
+def _confirmed_at(books: SettlementBooks) -> dict[str, Any]:
+    return books.memo(
+        "confirmed_at", lambda: {o["order_id"]: o.get("delivered_at") for o in books.orders}
+    )
+
+
+def _refunds_settling(books: SettlementBooks) -> list[tuple[Any, dict[str, Any]]]:
+    """환불마다 정산에서 빼는 시각을 장부마다 한 번만 계산해 둔다."""
+
+    def make() -> list[tuple[Any, dict[str, Any]]]:
+        confirmed_at = _confirmed_at(books)
+        return [(_refund_settles_at(r, confirmed_at), r) for r in books.refunds]
+
+    return books.memo("refunds_settling", make)
+
+
+def warm(books: SettlementBooks) -> None:
+    """장부를 새로 모은 직후 한 번: 정렬·판매자 목록·환불 시각을 미리 계산해 첫 조회가 덜
+    기다리게."""
+    books.sold()
+    books.confirmed()
+    books.unconfirmed_until(datetime.max.replace(tzinfo=UTC))
+    _sellers(books)
+    _refunds_settling(books)
+    cached_statements(books, None)  # 화면이 처음 여는 지난주
+
+
+def week_key(period: str | None, today: date | None = None) -> tuple[str, str]:
+    """같은 주를 가리키는 요청이 같은 계산 결과를 쓰게 하는 열쇠 (주 이름, 오늘)."""
+    today = today or sc.today()
+    name, _, _ = sc.week_range(period, today)
+    return name, today.isoformat()
+
+
+def cached_statements(
+    books: SettlementBooks, period: str | None, today: date | None = None
+) -> dict[str, Any]:
+    """같은 장부·같은 주면 한 번 계산한 정산서를 다시 쓴다(실제 장부만). 받은 쪽은 결과를 고치지
+    않는다."""
+    today = today or sc.today()
+    return books.memo(
+        ("statements", *week_key(period, today)), lambda: statements(books, period, today)
+    )
+
+
 def statements(
     books: SettlementBooks,
     period: str | None,
     today: date | None = None,
 ) -> dict[str, Any]:
+    """판매자별 정산서. 확정 주문·대기 주문·환불·쿠폰을 한 번씩만 훑어 판매자별로 모은다.
+
+    판매자마다 주문 전체를 다시 훑던 계산(판매자 200곳 × 주문 30만 건에서 8.8초)을 바꿨다.
+    공식은 그대로이고, 판매자별로 같은 주문 순서로 더한다.
+    """
     cfg = sc.load_policy()
     today = today or sc.today()
     name, monday, sunday = sc.week_range(period, today)
     start, end = sc.day_start(monday), sc.day_start(sunday + timedelta(days=1))
 
-    sellers = [s["seller_id"] for s in books.sellers if s.get("seller_id")]
-    for o in books.orders:  # 판매자 목록에 없는 판매자의 품목도 빠뜨리지 않는다
-        for i in o["items"]:
-            if i.get("seller_id") and i["seller_id"] not in sellers:
-                sellers.append(i["seller_id"])
-
+    sellers = _sellers(books)
+    seller_set = set(sellers)
     sold = books.confirmed_between(start, end)
     waiting = books.unconfirmed_until(end)
-    confirmed_at = {o["order_id"]: o.get("delivered_at") for o in books.orders}
+
+    # 판매자별 판매액·수수료·주문·수수료율·상품 (확정 주문을 순서대로 한 번 훑는다)
+    acc: dict[Any, dict[str, Any]] = {}
+    for o in sold:
+        for i in o["items"]:
+            seller_id = i.get("seller_id")
+            if not seller_id:
+                continue
+            a = acc.get(seller_id)
+            if a is None:
+                a = acc[seller_id] = {
+                    "gross": 0,
+                    "commission": 0,
+                    "order_ids": set(),
+                    "rates": set(),
+                    "by_product": {},
+                }
+            a["order_ids"].add(o["order_id"])
+            g = item_gross(i)
+            rate = cfg.commission.rate_for(i.get("category_code"))
+            a["rates"].add(rate)
+            a["gross"] += g
+            a["commission"] += sc.rate_amount(g, rate)
+            pid = str(i.get("product_id") or "")
+            if pid:
+                row = a["by_product"].get(pid)
+                if row is None:
+                    row = a["by_product"][pid] = {
+                        "product_id": pid,
+                        "name": books.product_name(pid, i),
+                        "qty": 0,
+                        "gross": 0,
+                    }
+                row["qty"] += _qty(i)
+                row["gross"] += g
+
+    seller_coupon: dict[Any, int] = {}
+    for c in books.coupons:
+        if c.get("funded_by") == "seller" and in_range(c.get("created_at"), start, end):
+            sid = c.get("seller_id")
+            if sid not in seller_set:
+                continue
+            seller_coupon[sid] = seller_coupon.get(sid, 0) + c["total_value"]
+
+    refunds: dict[Any, int] = {}
+    for settles_at, r in _refunds_settling(books):
+        if in_range(settles_at, start, end):
+            sid = r.get("seller_id")
+            if sid not in seller_set:
+                continue
+            refunds[sid] = refunds.get(sid, 0) + r["amount"]
+
+    pending: dict[Any, tuple[int, int]] = {}  # 판매자 → (확정 대기 주문 수, 판매액)
+    for o in waiting:
+        mine: dict[Any, int] = {}
+        for i in o["items"]:
+            sid = i.get("seller_id")
+            if sid:
+                mine[sid] = mine.get(sid, 0) + item_gross(i)
+        for sid, g in mine.items():
+            n, total = pending.get(sid, (0, 0))
+            pending[sid] = (n + 1, total + g)
+
     rows = []
     for seller_id in sellers:
-        gross = commission = 0
-        order_ids: set[str] = set()
-        rates: set[float] = set()
-        by_product: dict[str, dict[str, Any]] = {}
-        for o in sold:
-            mine = [i for i in o["items"] if i.get("seller_id") == seller_id]
-            if not mine:
-                continue
-            order_ids.add(o["order_id"])
-            for i in mine:
-                g = item_gross(i)
-                rate = cfg.commission.rate_for(i.get("category_code"))
-                rates.add(rate)
-                gross += g
-                commission += sc.rate_amount(g, rate)
-                pid = str(i.get("product_id") or "")
-                if pid:
-                    row = by_product.setdefault(
-                        pid,
-                        {
-                            "product_id": pid,
-                            "name": books.product_name(pid, i),
-                            "qty": 0,
-                            "gross": 0,
-                        },
-                    )
-                    row["qty"] += _qty(i)
-                    row["gross"] += g
-        seller_coupon = sum(
-            c["total_value"]
-            for c in books.coupons
-            if c.get("funded_by") == "seller"
-            and c.get("seller_id") == seller_id
-            and in_range(c.get("created_at"), start, end)
-        )
-        refunds = sum(
-            r["amount"]
-            for r in books.refunds
-            if r.get("seller_id") == seller_id
-            and in_range(_refund_settles_at(r, confirmed_at), start, end)
-        )
-        payout = gross - commission - seller_coupon - refunds
+        a = acc.get(seller_id)
+        gross = a["gross"] if a else 0
+        commission = a["commission"] if a else 0
+        order_ids: set[str] = a["order_ids"] if a else set()
+        rates: set[float] = set(a["rates"]) if a else set()
+        by_product: dict[str, dict[str, Any]] = a["by_product"] if a else {}
+        coupon = seller_coupon.get(seller_id, 0)
+        refund_sum = refunds.get(seller_id, 0)
+        payout = gross - commission - coupon - refund_sum
         if len(rates) == 1:
             rate_shown = rates.pop()
         elif gross:
@@ -126,12 +219,7 @@ def statements(
         else:
             rate_shown = cfg.commission.default_rate
 
-        pending_orders, pending_gross = 0, 0
-        for o in waiting:
-            mine = [i for i in o["items"] if i.get("seller_id") == seller_id]
-            if mine:
-                pending_orders += 1
-                pending_gross += sum(item_gross(i) for i in mine)
+        pending_orders, pending_gross = pending.get(seller_id, (0, 0))
 
         reasons = []
         if not order_ids and pending_orders and payout <= 0:
@@ -144,7 +232,7 @@ def statements(
         if order_ids and payout <= 0:
             reasons.append({"code": "negative_payout", "label": "정산금이 0원 이하"})
 
-        if not order_ids and not seller_coupon and not refunds and not pending_orders:
+        if not order_ids and not coupon and not refund_sum and not pending_orders:
             continue  # 이번 기간 거래가 없는 판매자는 내역서를 만들지 않는다
         rows.append(
             {
@@ -154,8 +242,8 @@ def statements(
                 "gross": gross,
                 "commission_rate": rate_shown,
                 "commission": commission,
-                "seller_coupon": seller_coupon,
-                "refunds": refunds,
+                "seller_coupon": coupon,
+                "refunds": refund_sum,
                 "payout": payout,
                 "hold_reasons": reasons,
                 "status": "held" if reasons else "ready",
@@ -163,9 +251,12 @@ def statements(
                 # 다음 정산으로 넘어가는 구매 확정 대기 주문 (이번 정산금에 들지 않는다)
                 "pending_confirmation": {"orders": pending_orders, "gross": pending_gross},
                 # 이번 기간에 판 쇼핑몰 상품 (판매액 큰 순). 쇼핑몰 상품 화면과 잇는 열쇠
-                "products": sorted(
-                    by_product.values(), key=lambda r: (-r["gross"], r["product_id"])
-                )[:MAX_PRODUCTS],
+                "products": [
+                    dict(r)
+                    for r in sorted(
+                        by_product.values(), key=lambda r: (-r["gross"], r["product_id"])
+                    )[:MAX_PRODUCTS]
+                ],
             }
         )
     pay_date = sunday + timedelta(days=cfg.settlement.pay_days_after_period_end)
@@ -231,7 +322,10 @@ STATUS_KO = {
 
 
 def deadline_report(
-    books: SettlementBooks, batches: dict[str, dict[str, Any]], today: date | None = None
+    books: SettlementBooks,
+    batches: dict[str, dict[str, Any]],
+    today: date | None = None,
+    statements_of: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     cfg = sc.load_policy()
     s = cfg.settlement
@@ -240,8 +334,8 @@ def deadline_report(
     by_week: dict[str, dict[str, Any]] = {}  # 주 → 판매자 → 정산서 행
 
     def row_of(week: str, seller_id: str) -> dict[str, Any] | None:
-        if week not in by_week:
-            result = statements(books, week, today=today)
+        if week not in by_week:  # 주마다 한 번만 (같은 장부면 조회에서 계산한 정산서를 다시 쓴다)
+            result = (statements_of or (lambda w: cached_statements(books, w, today)))(week)
             by_week[week] = {r["seller_id"]: r for r in result["statements"]}
         return by_week[week].get(seller_id)
 

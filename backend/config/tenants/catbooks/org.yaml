@@ -20,6 +20,7 @@ assignments:
   hosts: {unit: 서비스운영}
   inquiry: {unit: 고객지원}
   claims: {unit: 고객지원}
+  settlement: {unit: 고객지원}
   reviews: {unit: 고객지원}
   coupon: {unit: 마케팅}
   finance: {unit: 재무/정산}

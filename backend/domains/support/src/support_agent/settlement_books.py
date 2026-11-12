@@ -5,7 +5,12 @@
 - 주문은 `GET /api/shop/orders`를 1000건씩 `meta.next_cursor`로 끝까지 넘겨 모은다. 한 페이지라도
   실패하면 주문 전체를 "못 받음"으로 둔다(빠진 장부로 정산금을 내지 않는다)
 - 평소에는 최근 `RECENT_DAYS`일 주문만 다시 받아 끼우고, `FULL_REFRESH_SECONDS`마다 전체를 다시
-  읽어 오래된 주문의 바뀐 점(환불·배송 완료)을 맞춘다. 지급을 요청할 때는 전체를 새로 읽는다
+  읽어 오래된 주문의 바뀐 점(환불·배송 완료)을 맞춘다. 정규화한 주문과 그 주문의 환불 나눔은
+  모아 두고 다시 받은 주문만 새로 계산한다
+- 조회는 저장된 장부로 바로 답하고 새로 읽기는 뒤에서 한다. 서버를 켠 뒤 첫 읽기가 끝나기 전에는
+  기다리지 않고 "준비 중"(`Preparing`)으로 답한다. 한 번에 읽기 하나만 돈다
+- 지급을 요청할 때는 `FRESH_SECONDS`보다 오래된 장부를 쓰지 않는다. 전체가 아니라 최근 주문만 다시
+  읽는다(오래된 주문의 바뀐 점은 `FULL_REFRESH_SECONDS`마다 도는 전체 읽기로 맞춘다)
 - 환불은 주문 응답의 환불 기록(`refunds`)을 판매자별로 나눈다(품목 결제 금액 비율)
 - 금액은 정수 원, 시각은 UTC datetime
 """
@@ -33,9 +38,12 @@ CALL_SECONDS = 10.0
 ORDERS_CALL_SECONDS = 30.0
 ORDERS_PAGE = 1000  # shop-api 한 페이지 최대
 LIVE_CACHE_SECONDS = 30.0
-LIVE_STALE_SECONDS = 300.0  # 캐시가 지나도 이 안이면 직전 장부로 답하고 뒤에서 새로 읽는다
 RECENT_DAYS = 3
 FULL_REFRESH_SECONDS = 600.0
+FRESH_SECONDS = 60.0  # 지급 요청은 이보다 오래된 장부를 쓰지 않는다
+# 판매자 정산(settlement) 서비스에 판매 서버 연결 키가 따로 없으면 쿠폰 읽기에 이 서비스 키를 쓴다.
+# 정산은 클레임(claims) 서비스에 있다가 따로 나왔다(2026-11-12). 쿠폰 읽기는 읽기만 한다
+COUPON_KEY_FALLBACK = "claims"
 
 
 @dataclass
@@ -53,6 +61,9 @@ class SettlementBooks:
     unavailable: list[str] = field(default_factory=list)
     notes: dict[str, str] = field(default_factory=dict)
     _memo: dict[Any, Any] = field(default_factory=dict, repr=False, compare=False)
+    _running: dict[Any, asyncio.Future[Any]] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     def memo(self, key: Any, make: Callable[[], Any]) -> Any:
         """실제 장부는 모은 뒤 바뀌지 않으므로 계산 결과를 붙여 둔다(테스트 장부는 매번 계산)."""
@@ -63,21 +74,52 @@ class SettlementBooks:
             self._memo[k] = make()
         return self._memo[k]
 
+    async def computed(self, key: Any, make: Callable[[], Any]) -> Any:
+        """`make`를 스레드에서 돌린 결과. 실제 장부는 결과를 붙여 두고, 같은 계산이 돌고 있으면
+        기다린다.
+
+        스레드 계산은 부른 쪽이 시간 초과로 끊겨도 멈추지 않으므로 같은 열쇠의 계산을 두 번 띄우지
+        않는다.
+        """
+        if self.mock:
+            return await asyncio.to_thread(make)
+        k = (key, len(self.orders))
+        if k in self._memo:
+            return self._memo[k]
+        running = self._running.get(k)
+        if running is None:
+            running = asyncio.ensure_future(asyncio.to_thread(self.memo, key, make))
+            self._running[k] = running
+            running.add_done_callback(lambda _f: self._running.pop(k, None))
+        return await asyncio.shield(running)
+
     def seller_name(self, seller_id: str) -> str:
+        names = self.memo("seller_names", self._seller_names)
+        return names.get(seller_id, seller_id) if _hashable(seller_id) else seller_id
+
+    def _seller_names(self) -> dict[Any, str]:
+        names: dict[Any, str] = {}
         for s in self.sellers:
-            if s.get("seller_id") == seller_id:
-                return str(s.get("name") or seller_id)
-        return seller_id
+            sid = s.get("seller_id")
+            if _hashable(sid) and sid not in names:  # 같은 번호가 둘이면 앞의 것 (예전과 같다)
+                names[sid] = str(s.get("name") or sid)
+        return names
 
     def product_name(self, product_id: str, item: dict[str, Any] | None = None) -> str:
         """품목에 적힌 이름 → 쇼핑몰 상품 목록 이름 → 상품 번호 순으로 찾는다."""
         named = (item or {}).get("title") or (item or {}).get("name")
         if named:
             return str(named)
+        names = self.memo("product_names", self._product_names)
+        return names.get(product_id, product_id) if _hashable(product_id) else product_id
+
+    def _product_names(self) -> dict[Any, str]:
+        names: dict[Any, str] = {}
         for p in self.products:
-            if p.get("product_id") == product_id:
-                return str(p.get("name") or product_id)
-        return product_id
+            pid = p.get("product_id")
+            if _hashable(pid) and pid not in names:
+                names[pid] = str(p.get("name") or pid)
+        return names
 
     def sold(self) -> tuple[list[datetime], list[dict[str, Any]]]:
         """팔린 주문(성공한 결제가 있는 주문)을 첫 성공 결제 시각 순으로."""
@@ -109,9 +151,14 @@ class SettlementBooks:
 
     def unconfirmed_until(self, end: datetime) -> list[dict[str, Any]]:
         """`end` 전에 팔렸지만 아직 구매가 확정되지 않은 주문 (다음 정산으로 넘어간다)."""
+        times, orders = self.memo("unconfirmed", self._unconfirmed)
+        return orders[: bisect.bisect_left(times, end)]
+
+    def _unconfirmed(self) -> tuple[list[datetime], list[dict[str, Any]]]:
+        """팔린 주문 중 확정 전인 것만, 팔린 순서 그대로 (주마다 주문 전체를 다시 거르지 않게)."""
         times, orders = self.sold()
-        upto = orders[: bisect.bisect_left(times, end)]
-        return [o for o in upto if o.get("delivered_at") is None]
+        rows = [(t, o) for t, o in zip(times, orders, strict=True) if o.get("delivered_at") is None]
+        return [r[0] for r in rows], [r[1] for r in rows]
 
     def unavailable_core(self) -> bool:
         """정산금을 내는 데 꼭 필요한 자료(주문·쿠폰)를 못 받았는가."""
@@ -130,6 +177,14 @@ class SettlementBooks:
 
 
 # ---------------------------------------------------------------- 공통 변환
+def _hashable(value: Any) -> bool:
+    try:
+        hash(value)
+    except TypeError:
+        return False
+    return True
+
+
 def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
@@ -323,18 +378,23 @@ class OrderStore:
 
     def __init__(self) -> None:
         self.orders: dict[str, dict[str, Any]] = {}
+        self.refunds: dict[str, list[dict[str, Any]]] = {}  # 주문 → 그 주문의 판매자별 환불
         self.skipped = 0
         self.full_at: float | None = None
         self.lock = asyncio.Lock()
 
-    def since(self, full: bool) -> datetime | None:
-        if full or self.full_at is None or time.monotonic() - self.full_at >= FULL_REFRESH_SECONDS:
+    def since(self, full: bool, recent: bool = False) -> datetime | None:
+        """None이면 전체를 읽는다. `recent`면 전체 읽기 때가 지나도 최근 주문만(처음 한 번은
+        전체)."""
+        due = self.full_at is None or time.monotonic() - self.full_at >= FULL_REFRESH_SECONDS
+        if full or self.full_at is None or (due and not recent):
             return None
         return (sc.now() - timedelta(days=RECENT_DAYS)).replace(microsecond=0)
 
     def merge(
         self, raw: list[Any], categories: dict[str, str], since: datetime | None
     ) -> tuple[list[dict[str, Any]], int]:
+        """주문 목록과 건너뛴 수. 다시 받은 주문만 정규화하고 환불을 나눈다."""
         fresh: dict[str, dict[str, Any]] = {}
         skipped = 0
         for r in raw:
@@ -343,42 +403,62 @@ class OrderStore:
                 skipped += 1
             else:
                 fresh[norm["order_id"]] = norm
+        fresh_refunds = {k: refunds_from_orders([o]) for k, o in fresh.items()}
         if since is None:
             self.orders, self.skipped = fresh, skipped
+            self.refunds = fresh_refunds
             self.full_at = time.monotonic()
         else:
             kept = {k: o for k, o in self.orders.items() if o["created_at"] < since}
             self.orders = kept | fresh
+            self.refunds = {k: self.refunds.get(k) or [] for k in kept} | fresh_refunds
             self.skipped += skipped
         return list(self.orders.values()), self.skipped
 
+    def all_refunds(self) -> list[dict[str, Any]]:
+        """`refunds_from_orders(주문 목록)`과 같은 결과(같은 순서)를 모아 둔 나눔으로 만든다."""
+        return [row for k in self.orders for row in self.refunds.get(k, ())]
+
 
 _STORE = OrderStore()
+
+
+def coupon_headers() -> dict[str, str] | None:
+    """쿠폰 목록(읽기)에 보낼 판매 서버 연결 키. 없으면 None(쿠폰을 못 받은 장부가 된다).
+
+    키 목록(`AX_SHOP_CLIENT_KEYS`)에 이 서비스(settlement) 키가 없으면 `COUPON_KEY_FALLBACK`(claims)
+    키를 쓴다. 정산이 claims에서 나오면서 서버 설정을 바꾸지 않아도 되게 한다.
+    """
+    try:
+        return shop_client._headers()
+    except (shop_client.ShopError, RuntimeError):
+        pass
+    key = shop_client.client_keys().get(COUPON_KEY_FALLBACK)
+    return {"Authorization": f"Bearer {key}"} if key else None
 
 
 async def live_books(
     http_client: httpx.AsyncClient | None = None,
     store: OrderStore | None = None,
     full: bool = False,
+    recent: bool = False,
 ) -> SettlementBooks:
     """shop-api에서 정산 장부를 모은다.
 
-    `http_client`를 넘기면(테스트) 따로 모아 둔 주문 없이 읽는다.
+    `http_client`를 넘기면(테스트) 따로 모아 둔 주문 없이 읽는다. `recent`면 전체 읽기 때가 지났어도
+    최근 주문만 다시 읽는다(처음 한 번은 전체).
     """
     client = http_client or httpx.AsyncClient()
     if store is None:
         store = _STORE if http_client is None else OrderStore()
     async with store.lock:
-        since = store.since(full)
+        since = store.since(full, recent)
         shop = config.agent_url("shop-api")
         try:
             orders_raw = await _get_orders(client, shop, since)
             products = await _get(client, f"{shop}/api/shop/products")
             sellers = await _get(client, f"{shop}/api/shop/sellers")
-            try:
-                headers = shop_client._headers()
-            except (shop_client.ShopError, RuntimeError):
-                headers = None
+            headers = coupon_headers()
             coupons_raw = (
                 await _get(client, f"{shop}/api/shop/coupons", headers) if headers else None
             )
@@ -396,7 +476,7 @@ async def live_books(
         refunds: list[dict[str, Any]] = []
         if isinstance(orders_raw, list):
             orders, skipped = await asyncio.to_thread(store.merge, orders_raw, categories, since)
-            refunds = await asyncio.to_thread(refunds_from_orders, orders)
+            refunds = await asyncio.to_thread(store.all_refunds)
             if skipped:
                 unavailable.append("orders_partial")
         else:
@@ -434,6 +514,18 @@ async def live_books(
 
 
 # ---------------------------------------------------------------- 캐시
+# 조회는 저장된 장부로 바로 답한다(오래됐으면 뒤에서 새로 읽기를 하나만 띄운다). 서버를 켠 뒤 첫
+# 장부가
+# 아직 없으면 `PREPARING_WAIT_SECONDS`만 기다리고 `Preparing`을 낸다(화면은 "준비 중").
+# 판매자 200곳·주문 30만 건에서 첫 전체 읽기는 몇 분 걸릴 수 있다. 그동안 30초씩 붙잡지 않는다
+PREPARING_WAIT_SECONDS = 5.0
+FRESH_WAIT_SECONDS = 20.0  # 지급 요청이 새 장부를 기다리는 최대 시간
+
+
+class Preparing(Exception):
+    """첫 장부를 아직 모으는 중이다(또는 지급 요청에 쓸 새 장부가 아직 안 끝났다)."""
+
+
 _cache: tuple[float, SettlementBooks] | None = None
 _inflight: asyncio.Task[SettlementBooks] | None = None
 # 테스트가 장부를 바꿔 끼운다 (None이면 shop-api에서 읽는다)
@@ -445,10 +537,17 @@ def clear_cache() -> None:
     _cache, _inflight, _STORE = None, None, OrderStore()
 
 
-async def _collect(full: bool) -> SettlementBooks:
+async def _collect(recent: bool) -> SettlementBooks:
+    """장부를 모아 미리 정렬·계산해 두고, 다 되면 캐시를 바꾼다. 못 받으면 직전 장부를 그대로
+    둔다."""
     global _cache
-    books = await live_books(full=full)
-    _cache = None if books.unavailable_core() else (time.monotonic(), books)
+    books = await live_books(recent=recent)
+    if books.unavailable_core():
+        return books
+    from support_agent import settlement  # 순환 import를 피한다 (settlement가 이 모듈을 쓴다)
+
+    await asyncio.to_thread(settlement.warm, books)
+    _cache = (time.monotonic(), books)
     return books
 
 
@@ -457,22 +556,49 @@ def _log_failure(task: asyncio.Task[SettlementBooks]) -> None:
         logger.warning("정산 장부를 새로 읽지 못함: %s", type(task.exception()).__name__)
 
 
-async def load_books(fresh: bool = False) -> SettlementBooks:
-    """정산 장부. 조회는 캐시를 쓰고, 지급을 요청할 때(`fresh`)는 주문 전체를 새로 읽는다."""
+def _start(recent: bool) -> asyncio.Task[SettlementBooks]:
+    """새로 읽기를 띄운다. 이미 돌고 있으면 그것을 쓴다(한 번에 하나)."""
     global _inflight
+    if _inflight is None or _inflight.done():
+        _inflight = asyncio.create_task(_collect(recent))
+        _inflight.add_done_callback(_log_failure)
+    return _inflight
+
+
+def prime() -> asyncio.Task[SettlementBooks] | None:
+    """서버를 켤 때 한 번: 뒤에서 첫 장부를 모으고 미리 계산해 둔다. 테스트 장부면 띄우지 않는다."""
+    if LOADER is not None:
+        return None
+    return _start(recent=False)
+
+
+async def _wait(task: asyncio.Task[SettlementBooks], seconds: float) -> SettlementBooks:
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), seconds)
+    except TimeoutError as exc:
+        raise Preparing("판매자 정산 장부를 모으는 중이다") from exc
+
+
+async def load_books(fresh: bool = False) -> SettlementBooks:
+    """정산 장부.
+
+    - 조회: 저장된 장부로 바로 답하고, `LIVE_CACHE_SECONDS`가 지났으면 뒤에서 새로 읽는다.
+      첫 장부가 아직 없으면 잠깐 기다리고 `Preparing`
+    - 지급 요청(`fresh`): `FRESH_SECONDS` 안에 모은 장부만 쓴다. 오래됐으면 최근 주문만 다시 읽는다
+      (이미 돌고 있는 읽기가 있으면 그것을 기다린다)
+    """
     if LOADER is not None:
         return await LOADER(fresh)
-    if fresh:
-        _inflight = asyncio.create_task(_collect(full=True))
-        _inflight.add_done_callback(_log_failure)
-        return await asyncio.shield(_inflight)
     cached = _cache
     age = time.monotonic() - cached[0] if cached else None
-    if cached and age is not None and age < LIVE_CACHE_SECONDS:
+    if fresh:
+        if cached and age is not None and age < FRESH_SECONDS:
+            return cached[1]
+        return await _wait(_start(recent=True), FRESH_WAIT_SECONDS)
+    if cached:
+        if age is not None and age >= LIVE_CACHE_SECONDS:
+            _start(
+                recent=False
+            )  # 전체 읽기 때가 됐으면 전체, 아니면 최근 주문만 (OrderStore.since)
         return cached[1]
-    if _inflight is None or _inflight.done():
-        _inflight = asyncio.create_task(_collect(full=False))
-        _inflight.add_done_callback(_log_failure)
-    if cached and age is not None and age < LIVE_STALE_SECONDS:
-        return cached[1]
-    return await asyncio.shield(_inflight)
+    return await _wait(_start(recent=False), PREPARING_WAIT_SECONDS)

@@ -268,3 +268,11 @@ async def test_dev_deploy_actions_are_registered(gate: Gate, act, action: str) -
     prod·보호 경로의 사람 승인은 개발 배포 기록(requested → approve_deploy)이 맡는다."""
     decision = await gate.execute(act(action, "dev", f"k-{action}", env="prod"))
     assert (decision.grade, decision.status) == ("A", "executed")
+
+
+@pytest.mark.asyncio
+async def test_settlement_service_request_is_taken_as_support(gate: Gate, act) -> None:
+    """정산 서비스(settlement)가 자기 이름으로 요청해도 고객지원 요청으로 받는다(늘 C 보류)."""
+    decision = await gate.execute(act("confirm_settlement", "settlement", "k-set-svc", draft="s4"))
+    assert (decision.grade, decision.status) == ("C", "held")
+    assert decision.hold_reason == HoldReason.OVER_THRESHOLD  # 미등록 요청(UNREGISTERED)이 아니다

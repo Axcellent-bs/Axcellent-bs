@@ -29,9 +29,9 @@ const EXEC_STATE: Record<ExecutionRow["decision"]["status"], { state: Applied; l
 };
 const STATE_TONE: Record<Applied, string> = { applied: TONE.ok, waiting: TONE.warn, blocked: TONE.bad };
 // 안전 관문 기록의 요청자는 부서 이름이나 서비스 이름(inquiry·claims·coupon 등)으로 온다
-const SUPPORT_REQUESTERS = new Set(["support", "inquiry", "claims", "reviews"]);
+const SUPPORT_REQUESTERS = new Set(["support", "inquiry", "claims", "settlement", "reviews"]);
 const WHO: Record<string, string> = {
-  support: "고객지원 AI", inquiry: "고객지원 AI", claims: "고객지원 AI", reviews: "고객지원 AI",
+  support: "고객지원 AI", inquiry: "고객지원 AI", claims: "고객지원 AI", settlement: "고객지원 AI", reviews: "고객지원 AI",
   marketing: "마케팅 AI", coupon: "마케팅 AI", orchestrator: "총괄 AI", "dashboard-api": "상담원(화면)", finance: "재무 AI",
 };
 

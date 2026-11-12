@@ -1,4 +1,4 @@
-"""서비스 14개와 에이전트의 대응표.
+"""서비스 15개와 에이전트의 대응표.
 
 AXcellent는 부서가 아니라 서비스 단위로 판다(고객사가 필요한 서비스만 고른다).
 그래서 에이전트도 서비스마다 하나씩 띄운다. 업무 로직은 원래 부서 패키지
@@ -125,14 +125,25 @@ SERVICES: tuple[Service, ...] = (
             "decide_incident_compensation",
             "list_incident_queue",
             "purge_expired_claims",
-            # 판매자 정산 (2026-11-12 재무에서 옮김)
+        ),
+        "클레임·보상",
+    ),
+    # 판매자 정산 (2026-11-12 재무에서 옮김). 처음에는 claims 안에 있었는데, 주문 30만 건 장부를
+    # 읽고
+    # 계산하는 동안 같은 프로세스의 클레임 처리가 느려져 따로 띄운다. 화면은 클레임·보상 메뉴의
+    # `/settlements`이고, 켠 서비스 목록에서는 claims를 따른다(`ENABLED_WITH`)
+    Service(
+        "settlement",
+        "support",
+        8126,
+        (
             "seller_settlement",
             "seller_settlement_weeks",
             "seller_settlement_batches",
             "seller_settlement_deadlines",
             "request_seller_settlement",
         ),
-        "클레임·보상",
+        "판매자 정산",
     ),
     Service(
         "reviews", "support", 8122, ("customer_signals", "list_at_risk_customers"), "리뷰·지식"
@@ -354,6 +365,10 @@ SERVICES: tuple[Service, ...] = (
 )
 
 BY_ID: dict[str, Service] = {s.id: s for s in SERVICES}
+# 화면 서비스 목록(`services.ts`)에 따로 없고 다른 서비스를 따라 켜지는 서비스 (서비스 id → 따르는
+# id).
+# 판매자 정산은 화면에서 클레임·보상 메뉴 안에 있다
+ENABLED_WITH: dict[str, str] = {"settlement": "claims"}
 SERVICE_PORTS: dict[str, int] = {s.id: s.port for s in SERVICES}
 
 # (부서, skill) → 서비스 id

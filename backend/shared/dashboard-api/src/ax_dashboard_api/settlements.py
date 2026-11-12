@@ -1,7 +1,8 @@
 """판매자 정산 (고객지원 > 판매자 정산 화면).
 
-판매자 정산(정산금 계산 · 지급 승인 요청 · 묶음 상태 · 지급 기한 점검)은 고객지원(support, claims
-서비스)이 한다. 재무는 결과를 받아 보여 주기만 한다. 이 창구는 support skill을 A2A로 부른다.
+판매자 정산(정산금 계산 · 지급 승인 요청 · 묶음 상태 · 지급 기한 점검)은 고객지원(support,
+settlement 서비스)이 한다. 재무는 결과를 받아 보여 주기만 한다.
+이 창구는 support skill을 A2A로 부른다.
 
 - `GET /api/dashboard/settlements?period=YYYY-Www`: `seller_settlement` (생략하면 지난주)
 - `GET /api/dashboard/settlements/deadlines`: `seller_settlement_deadlines`
@@ -15,7 +16,8 @@
 지어내지 않는다).
 
 오류: `invalid_input`→400 `INVALID_INPUT`, `nothing_to_settle`→409 `NOTHING_TO_SETTLE`,
-`safety_unavailable`→503 `SAFETY_UNAVAILABLE`. 그 밖은 `support_client.unwrap`과 같다.
+`safety_unavailable`→503 `SAFETY_UNAVAILABLE`, `settlement_preparing`(서버를 켠 뒤 첫 장부를
+모으는 중)→503 `SETTLEMENT_PREPARING`. 그 밖은 `support_client.unwrap`과 같다.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ ERRORS: dict[str, tuple[int, str]] = {
     "invalid_input": (400, "INVALID_INPUT"),
     "nothing_to_settle": (409, "NOTHING_TO_SETTLE"),
     "safety_unavailable": (503, "SAFETY_UNAVAILABLE"),
+    "settlement_preparing": (503, "SETTLEMENT_PREPARING"),
 }
 # "2026-W45" 모양. 형식은 support가 확인하고, 여기서는 지나치게 긴 값만 막는다
 PERIOD_MAX = 16

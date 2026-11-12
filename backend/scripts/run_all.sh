@@ -35,6 +35,7 @@ planning 8101 svc_planning.main:app
 dev 8111 svc_dev.main:app
 inquiry 8102 svc_inquiry.main:app
 claims 8112 svc_claims.main:app
+settlement 8126 svc_settlement.main:app
 reviews 8122 svc_reviews.main:app
 coupon 8103 svc_coupon.main:app
 decisions 8114 svc_decisions.main:app
@@ -231,7 +232,7 @@ export AX_OFFICE_ROOM_DB="$PWD/$DATA/office_room.db"
 export ORCHESTRATOR_DB="$PWD/$DATA/orchestrator.db"
 # 재무 기록(판매자 심사·정산 보류·장부·사람 결정). 다시 켜도 이어진다
 export FINANCE_STATE_FILE="$PWD/$DATA/finance_state.json"
-# 판매자 정산 묶음 기록(고객지원, claims). 다시 켜도 이어진다. 처음 한 번 재무 기록의 묶음을 가져온다
+# 판매자 정산 묶음 기록(고객지원, settlement). 다시 켜도 이어진다. 처음 한 번 재무 기록의 묶음을 가져온다
 export SUPPORT_SETTLEMENT_FILE="$PWD/$DATA/support_settlement.json"
 export SUPPORT_SETTLEMENT_IMPORT_FILE="$FINANCE_STATE_FILE"
 export FINANCE_EXPORT_DIR="${FINANCE_EXPORT_DIR:-$PWD/$DATA/finance_exports}"

@@ -210,6 +210,9 @@ def scan_pg_inbox(records: Any) -> list[dict[str, Any]]:
 
 # ---------------------------------------------------------------- 고객지원 정산 받기
 SUPPORT_DOWN = "고객지원에서 판매자 정산을 받지 못했다 (재무는 정산을 계산하지 않는다)"
+SETTLEMENT_PREPARING = (
+    "고객지원이 판매자 정산 장부를 준비 중이다 (서버를 켠 뒤 처음 읽는 중). 잠시 뒤 다시 본다"
+)
 
 
 def support_meta(out: dict[str, Any]) -> dict[str, Any]:
@@ -829,6 +832,8 @@ def add_finance_api(app: FastAPI) -> None:
             out = await settlement_feed.settlement(period)
         except settlement_feed.InvalidPeriod as exc:
             return error(400, "invalid_request", str(exc))
+        if out is None and settlement_feed.preparing("seller_settlement"):
+            return error(503, "settlement_preparing", SETTLEMENT_PREPARING)
         if out is None:
             return error(503, "support_unavailable", SUPPORT_DOWN)
         return ok(without_meta(out), support_meta(out))
@@ -896,6 +901,8 @@ def add_finance_api(app: FastAPI) -> None:
     async def get_deadlines() -> dict | JSONResponse:
         """고객지원 `seller_settlement_deadlines`를 그대로 넘긴다."""
         out = await settlement_feed.deadlines()
+        if out is None and settlement_feed.preparing("seller_settlement_deadlines"):
+            return error(503, "settlement_preparing", SETTLEMENT_PREPARING)
         if out is None:
             return error(503, "support_unavailable", SUPPORT_DOWN)
         return ok(without_meta(out), support_meta(out))
