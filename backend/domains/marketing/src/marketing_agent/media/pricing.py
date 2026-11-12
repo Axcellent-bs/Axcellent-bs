@@ -128,9 +128,20 @@ def find_entry(
     path: Path | None = None,
 ) -> PriceEntry:
     wanted = (provider, model, kind, resolution, quality)
-    for entry in _cached(path or PRICES_PATH):
+    entries = _cached(path or PRICES_PATH)
+    for entry in entries:
         if (entry.provider, entry.model, entry.kind, entry.resolution, entry.quality) == wanted:
             return entry
+    # quality가 정의되지 않은 항목은 quality와 무관한 단가다. 이미지 장면 템플릿은 quality를 고정
+    # ("medium")하는데 gemini 이미지 API에는 quality 설정이 없고 단가표 항목도 quality가 없다
+    # (openai gpt-image-2만 quality별 항목). 정확히 맞는 항목이 없을 때만 이 항목을 쓰고,
+    # quality가 정의된 항목끼리는 계속 정확히 비교한다(없는 quality는 거부).
+    if quality is not None:
+        for entry in entries:
+            if (entry.provider, entry.model, entry.kind, entry.resolution) == wanted[:4] and (
+                entry.quality is None
+            ):
+                return entry
     raise PriceNotFound(f"{provider}/{model or '(모델 없음)'} {kind} {resolution} {quality or ''}")
 
 
