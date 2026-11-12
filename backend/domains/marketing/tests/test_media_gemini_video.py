@@ -120,6 +120,7 @@ def test_inline_request_shape_and_result(tmp_path: Path) -> None:
     body = json.loads(req.content)
     assert body["model"] == MODEL and body["input"] == "a cat on a book"
     assert body["background"] is False and body["stream"] is False
+    assert body["store"] is True  # delivery=uri 는 store=true 필수
     assert body["response_format"] == {
         "type": "video",
         "aspect_ratio": "9:16",
@@ -460,3 +461,25 @@ def test_registry_routes_by_kind(tmp_path: Path) -> None:
     # 영상 요청은 영상 어댑터로 간다: 이미지 키만 있고 영상 키가 없으면 영상 키 오류가 난다
     with pytest.raises(GeminiVideoError, match="model_not_configured"):
         adapter.generate(_request(tmp_path, model=""))
+
+
+def test_http_400_keeps_google_message_without_key(tmp_path: Path) -> None:
+    msg = "store=true is required when response format has video delivery set to URI."
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {"message": f"{msg} {KEY} AIza{'a' * 30}"}})
+
+    with pytest.raises(GeminiVideoError) as info:
+        _provider(handler).generate(_request(tmp_path))
+    text = str(info.value)
+    assert text.startswith("http_400: store=true is required")
+    assert KEY not in text and "AIza" not in text and "***" in text
+
+
+def test_http_error_message_is_cut_to_200_chars(tmp_path: Path) -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {"message": "x" * 500}})
+
+    with pytest.raises(GeminiVideoError) as info:
+        _provider(handler).generate(_request(tmp_path))
+    assert str(info.value) == "http_400: " + "x" * 200
