@@ -131,6 +131,7 @@ def incident_to_dict(inc: Incident) -> dict[str, Any]:
         "times_sent": inc.times_sent,
         "signal": inc.signal,
         "detected_by": inc.detected_by,
+        "resolved_logged": inc.resolved_logged,
     }
 
 
@@ -162,6 +163,8 @@ def incident_from_dict(raw: dict[str, Any]) -> Incident:
         times_sent=dict(raw.get("times_sent") or {}),
         signal=dict(raw.get("signal") or {}),
         detected_by=_detected_by(raw.get("detected_by")),
+        # 예전 저장분은 False: 아직 남기지 않은 것으로 보고, 해결로 바뀌는 때에 한 번 남긴다
+        resolved_logged=bool(raw.get("resolved_logged")),
     )
     inc.recovered_at = _parse(raw.get("recovered_at"))
     for item in raw.get("steps") or []:

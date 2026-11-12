@@ -201,10 +201,24 @@ class Incident:
     # 이벤트를 처음 연 신호의 출처: {"source": env.source, "event": env.type, "at": 감지 시각}.
     # 같은 이벤트에 합쳐진 신호는 바꾸지 않는다. 예전 저장분은 None
     detected_by: dict[str, str] | None = None
+    # 공통 로그에 incident.resolved를 남겼는지. 사건마다 한 번만 남긴다(저장·복원해도 유지)
+    resolved_logged: bool = False
 
     @staticmethod
     def new_context_id() -> str:
         return f"ctx_inc_{uuid.uuid4().hex[:12]}"
+
+    def recovery_end(self) -> datetime | None:
+        """복구 시간(mttr_seconds)의 끝 시각. 아직 정할 수 없으면 None.
+
+        degraded로 닫혔다가 복구 신호로 풀린 이벤트는 복구 신호 시각, 처음부터 resolved로 닫힌
+        이벤트는 닫힌 시각이다.
+        """
+        if self.status == "degraded":
+            return self.recovered_at
+        if self.settled_by_recovery and self.recovered_at is not None:
+            return self.recovered_at
+        return self.closed_at
 
     def mttr_seconds(self) -> float | None:
         """복구까지 걸린 초(이벤트를 연 때부터).
@@ -213,15 +227,10 @@ class Incident:
         None이다.
         그 전의 `closed_at`은 AI 대응이 끝난 시각일 뿐이라 복구 시간으로 쓰면 3초 같은 값이 나온다.
         """
-        if self.status == "degraded":
-            if self.recovered_at is None:
-                return None
-            return round((self.recovered_at - self.opened_at).total_seconds(), 2)
-        if self.settled_by_recovery and self.recovered_at is not None:
-            return round((self.recovered_at - self.opened_at).total_seconds(), 2)
-        if self.closed_at is None:
+        end = self.recovery_end()
+        if end is None:
             return None
-        return round((self.closed_at - self.opened_at).total_seconds(), 2)
+        return round((end - self.opened_at).total_seconds(), 2)
 
     def settle_after_recovery(self) -> None:
         """복구 신호가 오면 장애 중으로 남아 있던 이벤트(degraded)를 해결로 바꾼다.

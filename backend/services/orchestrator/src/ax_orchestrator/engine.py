@@ -43,6 +43,7 @@ from ax_orchestrator.models import (
 )
 from ax_orchestrator.naming import DEPT_KO, RESOLUTION_KO
 from ax_orchestrator.registry import Registry
+from ax_orchestrator.resolved_log import log_resolved
 from ax_orchestrator.timeline import prior_case_of, step_timings, times_of
 
 Caller = Callable[[str, AgentRequest], Awaitable[AgentResult]]
@@ -1238,6 +1239,7 @@ class Engine:
         inc.summary = [self._summary_line(r) for r in inc.steps.values()]
         inc.metrics = incident_metrics(inc)
         inc.log(f"이벤트 종료: {inc.status}")
+        log_resolved(inc)  # 해결로 닫히면 공통 로그에 복구 시각을 남긴다 (degraded는 남기지 않음)
         await self.sync_times(inc)
         self._save(inc)
         await self._publish("incident.resolved", inc)
