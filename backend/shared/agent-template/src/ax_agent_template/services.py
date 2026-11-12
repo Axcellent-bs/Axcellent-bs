@@ -161,6 +161,7 @@ SERVICES: tuple[Service, ...] = (
             "receive_campaign_brief",
             "list_campaign_briefs",
             "get_campaign_brief",
+            "handoff_brief_to_sns",
             "build_campaign_link",
             "marketing_chat_send",
             "marketing_chat_list",

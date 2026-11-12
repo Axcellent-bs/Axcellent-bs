@@ -12,6 +12,7 @@
 | `receive_campaign_brief` | A |
 | `list_campaign_briefs` | read |
 | `get_campaign_brief` | read |
+| `handoff_brief_to_sns` | read |
 | `marketing_chat_send` | read |
 | `marketing_chat_list` | read |
 | `marketing_chat_get` | read |
