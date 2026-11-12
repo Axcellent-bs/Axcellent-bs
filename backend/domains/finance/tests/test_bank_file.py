@@ -164,3 +164,71 @@ def test_empty_upload_is_invalid_request_and_good_file_still_passes() -> None:
     assert good.status_code == 200, good.text
     with pytest.raises(BankFileError, match="CSV로 읽을 수 없는"):
         read_statement(b"\x00" * 2_000_000, "probe.bin")
+
+
+# ---------------------------------------------------------------- 은행 내역 하나 빼기
+def test_people_remove_one_bank_import_and_its_rows_with_an_audit_record() -> None:
+    client = TestClient(app)
+    first = client.post(
+        "/api/finance/bank/file", params={"name": "test.csv"}, content=KB_LIKE, headers=HUMAN
+    ).json()["meta"]["import"]
+    other = "거래일자,적요,출금,입금액,잔액\n2026.10.25,PG정산,,1000,6000\n".encode("cp949")
+    second = client.post(
+        "/api/finance/bank/file", params={"name": "real.csv"}, content=other, headers=HUMAN
+    ).json()["meta"]["import"]
+    records = handlers.state().records
+    assert first["import_id"] != second["import_id"] and len(records.bank_rows) == 3
+    url = f"/api/finance/bank/imports/{first['import_id']}/remove"
+    assert client.post(url, json={"reason": "시험"}).status_code == 401  # 사람만
+    assert client.post(url, json={}, headers=HUMAN).status_code == 400  # 이유 필수
+    response = client.post(url, json={"reason": "시험으로 올린 파일"}, headers=HUMAN)
+    assert response.status_code == 200, response.text
+    removed = response.json()["data"]
+    assert (removed["status"], removed["by"], removed["rows"]) == ("removed", "taeyoon", 2)
+    assert removed["reason"] == "시험으로 올린 파일" and removed["at"]
+    # 그 기록으로 더한 줄과 출금 대조 기간만 빠지고 다른 기록의 줄은 남는다
+    assert [r["memo"] for r in records.bank_rows] == ["PG정산"]
+    assert all(p.get("import_id") != first["import_id"] for p in records.bank_out_periods)
+    # 원래 기록은 지우지 않고 누가·언제 뺐는지 붙인다
+    original = next(
+        r
+        for r in records.bank_imports
+        if r.get("import_id") == first["import_id"] and r["status"] == "imported"
+    )
+    assert original["removed"]["by"] == "taeyoon" and original["removed"]["rows"] == 2
+    again = client.post(url, json={"reason": "또"}, headers=HUMAN)
+    assert (again.status_code, again.json()["error"]["code"]) == (409, "already_removed")
+    missing = client.post(
+        "/api/finance/bank/imports/bimp_none/remove", json={"reason": "x"}, headers=HUMAN
+    )
+    assert missing.status_code == 404
+
+
+def test_an_import_from_before_ids_can_be_removed_only_when_it_is_the_only_one() -> None:
+    from finance_agent import exports, persist
+
+    records = handlers.state().records
+    records.bank_rows[:] = [{"date": "2026-10-05", "amount": 1000, "memo": "시험", "balance": None}]
+    records.bank_out_periods[:] = [{"from": "2026-10-05", "to": "2026-10-05"}]
+    old = {"file": "a.csv", "at": "2026-10-06T00:00:00Z", "source": "upload", "status": "imported"}
+    records.bank_imports[:] = [dict(old)]
+    persist.restore(handlers.state(), persist.dump(handlers.state()))
+    records = handlers.state().records
+    legacy_id = records.bank_imports[0]["import_id"]
+    assert legacy_id.startswith(exports.LEGACY_PREFIX)
+    client = TestClient(app)
+    url = f"/api/finance/bank/imports/{legacy_id}/remove"
+    response = client.post(url, json={"reason": "시험"}, headers=HUMAN)
+    assert response.status_code == 200 and response.json()["data"]["rows"] == 1
+    assert records.bank_rows == [] and records.bank_out_periods == []
+    # 예전 기록이 둘이면 어느 줄인지 몰라서 빼지 않는다
+    imports = [dict(old), dict(old, file="b.csv")]
+    exports.give_legacy_ids(imports)
+    rows = [{"date": "2026-10-05", "amount": 1, "memo": "", "balance": None}]
+    try:
+        exports.remove_import(imports, rows, [], imports[0]["import_id"], "taeyoon", "x")
+    except exports.RemoveError as exc:
+        assert exc.code == "legacy_ambiguous"
+    else:
+        raise AssertionError("예전 기록이 여럿이면 거절해야 한다")
+    assert len(rows) == 1

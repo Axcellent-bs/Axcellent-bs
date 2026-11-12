@@ -30,15 +30,6 @@ class CommissionConfig(_Strict):
         return self.category_rates.get(category or "", self.default_rate)
 
 
-class SettlementConfig(_Strict):
-    cycle: str = "weekly"
-    pay_days_after_period_end: int = Field(ge=0)
-    deadline_days: int = Field(default=20, ge=1)
-    deadline_basis: str = "구매 확정일부터"
-    deadline_warn_days: int = Field(default=5, ge=0)
-    deadline_lookback_days: int = Field(default=70, ge=7)
-
-
 class PgConfig(_Strict):
     fee_rate: float = Field(ge=0, le=1)
     payout_days: int = Field(ge=0)
@@ -79,7 +70,6 @@ class TeamBudgetConfig(_Strict):
 
 class FinanceConfig(_Strict):
     commission: CommissionConfig
-    settlement: SettlementConfig
     pg: PgConfig
     variance: VarianceConfig = VarianceConfig()
     bank: BankConfig = BankConfig()

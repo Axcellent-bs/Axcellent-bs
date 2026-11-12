@@ -19,6 +19,7 @@ import io
 import json
 import logging
 import os
+import uuid
 import zipfile
 from datetime import date, timedelta
 from pathlib import Path
@@ -52,6 +53,24 @@ def inbox_dir() -> Path | None:
 def _last_month(today: date) -> tuple[str, date]:
     last_day = today.replace(day=1) - timedelta(days=1)
     return last_day.isoformat()[:7], last_day
+
+
+VAT_DRAFT_NOTE = "확정 전 숫자(부가세 집계 미확정)"
+
+
+def csv_bytes(text: str) -> bytes:
+    """CSV 글을 UTF-8 바이트로. 엑셀에서 한글이 깨지지 않게 BOM을 꼭 하나만 붙인다.
+
+    `statements.to_csv`·`tax.seller_report_csv`는 이미 BOM을 붙여 돌려주므로 다시 붙이지 않는다.
+    """
+    return ("\ufeff" + text.lstrip("\ufeff")).encode("utf-8")
+
+
+def with_note(text: str, note: str | None) -> str:
+    """CSV 맨 위에 한 줄 표시를 붙인다 (BOM은 맨 앞에 둔다)."""
+    if not note:
+        return text
+    return "\ufeff" + note + "\r\n" + text.lstrip("\ufeff")
 
 
 def vat_csv(pack: dict[str, Any]) -> str:
@@ -91,8 +110,10 @@ def build_files(
     report = statements.income_statement(books, "month", last_day, closings, other_pnl)
     missing = list(books.unavailable)
     files = {
-        f"income-statement-{month}.csv": statements.to_csv(report, missing).encode("utf-8-sig"),
-        f"income-statement-{month}.xlsx": statements.to_xlsx(report, missing),
+        f"income-statement-{month}.csv": csv_bytes(
+            statements.to_csv(report, missing, mark_draft=True)
+        ),
+        f"income-statement-{month}.xlsx": statements.to_xlsx(report, missing, mark_draft=True),
         "expert-review-checklist.docx": review_checklist_docx(),
     }
     if last_day.month % 3 == 0:
@@ -100,10 +121,13 @@ def build_files(
         pack = filing["pack"] if filing else tax.vat_pack(books, last_day)
         seller = filing["seller_report"] if filing else tax.seller_report(books, last_day)
         quarter = f"{last_day.year}-Q{last_day.month // 3}"  # 파일 이름은 영문만
+        note = None if filing else VAT_DRAFT_NOTE  # 분기 숫자는 부가세 확정(`vat_filings`)이 기준
         files |= {
-            f"vat-summary-{quarter}.csv": vat_csv(pack).encode("utf-8-sig"),
-            f"seller-sales-{quarter}.csv": tax.seller_report_csv(seller).encode("utf-8-sig"),
-            f"seller-sales-{quarter}.xlsx": tax.seller_report_xlsx(seller),
+            f"vat-summary-{quarter}.csv": csv_bytes(with_note(vat_csv(pack), note)),
+            f"seller-sales-{quarter}.csv": csv_bytes(
+                with_note(tax.seller_report_csv(seller), note)
+            ),
+            f"seller-sales-{quarter}.xlsx": tax.seller_report_xlsx(seller, note),
         }
     return files
 
@@ -152,6 +176,8 @@ def make_package(
     for name, body in files.items():
         (folder / name).write_bytes(body)
     version = (current or {}).get("version", 0) + 1
+    # 그 달 결산을 확정했나. 아니면 파일 맨 위에 "확정 전 숫자(결산 미확정)"가 붙는다
+    closing_confirmed = statements.frozen_column(closings, last_day.replace(day=1)) is not None
     package = {
         "package_id": package_id,
         "month": month,
@@ -163,6 +189,7 @@ def make_package(
         "mock": books.mock,
         "rules_version": load_rules().version,
         "applied_rules": [applied("TAX-001")],
+        "closing_confirmed": closing_confirmed,
     }
     exports[package_id] = package
     return package
@@ -214,16 +241,109 @@ def import_statement(
     rows, problems = bank.parse_rows(raw)
     if not rows:
         raise bank_file.BankFileError("; ".join(problems[:3]) or "거래 줄이 없습니다.")
+    import_id = new_import_id()
+    rows = [r | {"import_id": import_id} for r in rows]  # 이 기록으로 더한 줄 (빼기용)
     if out_periods is not None and has_withdrawals:
-        bank.add_out_period(out_periods, rows)
+        bank.add_out_period(out_periods, rows, import_id)
     return {
         "status": "imported",
+        "import_id": import_id,
         "added": bank.merge_rows(bank_rows, rows),
         "rows": len(rows),
         "withdrawals": sum(1 for r in rows if r["amount"] < 0),
         "has_withdrawals": has_withdrawals,
         "skipped": len(problems),
     }
+
+
+def new_import_id() -> str:
+    return f"bimp_{uuid.uuid4().hex[:12]}"
+
+
+class RemoveError(Exception):
+    """은행 내역 기록을 뺄 수 없다. `code`는 API 오류 코드다."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+LEGACY_PREFIX = "bimp_legacy_"
+
+
+def give_legacy_ids(imports: list[dict[str, Any]]) -> None:
+    """id가 생기기 전에 읽은 기록에 id를 붙인다(읽을 때마다 같다). 그때 더한 줄에는 id가 없다."""
+    for record in imports:
+        if record.get("status") == "imported" and not record.get("import_id"):
+            raw = f"{record.get('file')}|{record.get('at')}|{record.get('source')}"
+            record["import_id"] = LEGACY_PREFIX + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+
+
+def remove_import(
+    imports: list[dict[str, Any]],
+    bank_rows: list[dict[str, Any]],
+    out_periods: list[dict[str, str]],
+    import_id: str,
+    by: str,
+    reason: str,
+) -> dict[str, Any]:
+    """은행 내역 기록 하나와 그 기록으로 더한 줄·출금 대조 기간을 뺀다. 뺀 기록을 돌려준다.
+
+    원래 기록은 지우지 않고 `removed`(누가·언제·이유)를 붙이고, 빼기 기록을 따로 하나 더 남긴다.
+    id가 생기기 전의 예전 기록은 어떤 줄을 더했는지 모른다. 예전 기록이 하나뿐일 때만 id 없는
+    줄을 그 기록 것으로 보고 빼고, 여럿이면 `legacy_ambiguous`로 거절한다.
+    """
+    target = next(
+        (r for r in imports if r.get("import_id") == import_id and r.get("status") == "imported"),
+        None,
+    )
+    if target is None:
+        raise RemoveError("not_found", "그 은행 내역 기록이 없습니다.")
+    if target.get("removed"):
+        raise RemoveError("already_removed", "이미 뺀 기록입니다.")
+    if import_id.startswith(LEGACY_PREFIX):
+        legacy = [
+            r
+            for r in imports
+            if str(r.get("import_id", "")).startswith(LEGACY_PREFIX)
+            and r.get("status") == "imported"
+            and not r.get("removed")
+        ]
+        if len(legacy) != 1:
+            raise RemoveError(
+                "legacy_ambiguous",
+                "예전에 읽은 기록이 여럿이라 이 기록이 더한 줄을 가려낼 수 없습니다.",
+            )
+
+        def mine(item: dict[str, Any]) -> bool:
+            return not item.get("import_id")
+    else:
+
+        def mine(item: dict[str, Any]) -> bool:
+            return item.get("import_id") == import_id
+
+    kept = [r for r in bank_rows if not mine(r)]
+    kept_periods = [p for p in out_periods if not mine(p)]
+    removed_rows = len(bank_rows) - len(kept)
+    removed_periods = len(out_periods) - len(kept_periods)
+    bank_rows[:] = kept
+    out_periods[:] = kept_periods
+    at = fc.iso(fc.now())
+    target["removed"] = {"by": by, "at": at, "reason": reason, "rows": removed_rows}
+    record = {
+        "file": target.get("file"),
+        "at": at,
+        "source": "remove",
+        "by": by,
+        "status": "removed",
+        "import_id": import_id,
+        "rows": removed_rows,
+        "periods": removed_periods,
+        "reason": reason,
+    }
+    imports.append(record)
+    del imports[:-100]
+    return record
 
 
 def scan_inbox(

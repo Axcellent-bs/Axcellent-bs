@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from ax_agent_template import config
 from ax_contracts.schemas import AgentResult, RequestMeta, TaskStatus
 from finance_agent import finance_config as fc
 from finance_agent import settlement_feed
@@ -205,6 +206,17 @@ class FakeSupport:
 
 async def _support_down(skill: str, payload: dict[str, Any]) -> AgentResult | None:
     return None  # 고객지원이 정산 skill을 맡지 않았거나 꺼짐
+
+
+@pytest.fixture(autouse=True)
+def _finance_agent_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """재무 화면 API(`execute()`·`call_agent`)의 요청자는 재무다.
+
+    프로세스 기본 이름은 `finance_agent.main`을 import할 때 한 번만 정해진다. 다른 부서 테스트
+    (`ax_agent_template.testing.reset_state`)가 먼저 돌면 그 이름이 지워지거나 바뀌므로 테스트마다
+    다시 정하고, 끝나면 원래대로 돌린다.
+    """
+    monkeypatch.setattr(config, "_agent_name", "finance")
 
 
 @pytest.fixture(autouse=True)

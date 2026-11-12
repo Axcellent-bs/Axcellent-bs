@@ -306,11 +306,14 @@ def test_inbox_reads_korean_bank_csv_and_moves_files(
     periods: list[dict[str, str]] = []
     done = exports.scan_inbox(rows, log, periods)
     assert {d["file"]: d["status"] for d in done} == {"a.csv": "imported", "bad.csv": "failed"}
+    import_id = next(d["import_id"] for d in done if d["status"] == "imported")
+    assert {r.pop("import_id") for r in rows} == {import_id}  # 읽은 기록의 id가 줄마다 붙는다
     assert rows == [
         {"date": "2026-10-05", "amount": 1000, "memo": "PG정산", "balance": 5000},
         {"date": "2026-10-06", "amount": -300, "memo": "이체", "balance": 4700},  # 출금은 음수
     ]
-    assert periods == [{"from": "2026-10-05", "to": "2026-10-06"}]  # 출금 열이 있던 기간
+    # 출금 열이 있던 기간. 줄과 기간에는 읽은 기록의 id가 붙는다(그 기록만 뺄 수 있게)
+    assert periods == [{"from": "2026-10-05", "to": "2026-10-06", "import_id": import_id}]
     assert len(list((tmp_path / "processed").iterdir())) == 1
     assert len(list((tmp_path / "failed").iterdir())) == 1
     assert not list(tmp_path.glob("*.csv"))
@@ -324,3 +327,82 @@ def test_inbox_reads_korean_bank_csv_and_moves_files(
 def test_inbox_is_off_without_a_folder(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FINANCE_BANK_INBOX", raising=False)
     assert exports.scan_inbox([], []) == []
+
+
+# ---------------------------------------------------------------- 파일 내용 (BOM·기간·확정 전)
+BOM = "\ufeff".encode()
+
+
+def _quarter_files(closings: Any = None, filings: Any = None) -> dict[str, bytes]:
+    async def run() -> dict[str, bytes]:
+        books = await state().books()
+        return exports.build_files(books, "2026-09", date(2026, 9, 30), closings, filings)
+
+    return asyncio.run(run())
+
+
+def test_every_csv_has_exactly_one_bom() -> None:
+    files = _quarter_files()
+    csvs = {n: b for n, b in files.items() if n.endswith(".csv")}
+    assert set(csvs) == {
+        "income-statement-2026-09.csv",
+        "vat-summary-2026-Q3.csv",
+        "seller-sales-2026-Q3.csv",
+    }
+    for name, body in csvs.items():
+        assert body.startswith(BOM) and not body.startswith(BOM + BOM), name
+        assert body.count(BOM) == 1, name
+
+
+def test_files_show_the_period_as_dates_ending_on_the_last_day() -> None:
+    from openpyxl import load_workbook
+
+    files = _quarter_files()
+    text = files["income-statement-2026-09.csv"].decode("utf-8-sig")
+    assert "2026-09-01 ~ 2026-09-30" in text and "2026-08-01 ~ 2026-08-31" in text
+    assert "T00:00:00Z" not in text
+    sheet = load_workbook(io.BytesIO(files["income-statement-2026-09.xlsx"])).active
+    cells = [str(c.value) for row in sheet.iter_rows() for c in row if c.value is not None]
+    assert "2026-09-01 ~ 2026-09-30" in cells and not any("T00:00:00Z" in c for c in cells)
+
+
+def test_unconfirmed_month_files_say_so_on_the_first_line() -> None:
+    from openpyxl import load_workbook
+
+    from finance_agent import finance_config as fc
+    from finance_agent import statements
+
+    files = _quarter_files()
+    note = "확정 전 숫자(결산 미확정)"
+    first = files["income-statement-2026-09.csv"].decode("utf-8-sig").splitlines()[0]
+    assert first == note
+    sheet = load_workbook(io.BytesIO(files["income-statement-2026-09.xlsx"])).active
+    assert sheet["A1"].value == note
+    vat_first = files["vat-summary-2026-Q3.csv"].decode("utf-8-sig").splitlines()[0]
+    assert vat_first == exports.VAT_DRAFT_NOTE  # 분기 숫자는 부가세 확정 전
+    seller = load_workbook(io.BytesIO(files["seller-sales-2026-Q3.xlsx"])).active
+    assert seller["A1"].value == exports.VAT_DRAFT_NOTE and seller["A2"].value == "판매자번호"
+
+    # 결산을 확정한 달은 표시가 없다
+    async def confirmed() -> dict[str, Any]:
+        books = await state().books()
+        start, end = date(2026, 9, 1), date(2026, 10, 1)
+        snap = statements.column(books, fc.day_start(start), fc.day_start(end))
+        return {("month", start.isoformat()): {"snapshot": {"statement": snap}}}
+
+    closings = asyncio.run(confirmed())
+    done = _quarter_files(closings)
+    text = done["income-statement-2026-09.csv"].decode("utf-8-sig")
+    assert note not in text and text.splitlines()[0] == "손익계산서"
+
+
+def test_package_says_whether_the_month_closing_is_confirmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FINANCE_EXPORT_DIR", str(tmp_path))
+
+    async def run() -> dict[str, Any]:
+        books = await state().books()
+        return exports.make_package(books, {}, date(2026, 11, 4))
+
+    assert asyncio.run(run())["closing_confirmed"] is False

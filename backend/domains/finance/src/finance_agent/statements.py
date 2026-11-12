@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 from finance_agent import closing
@@ -249,16 +249,41 @@ def _cell(value: int | None) -> str:
     return "자료 없음" if value is None else str(value)
 
 
-def to_csv(report: dict[str, Any], unavailable: list[str]) -> str:
-    """내려받기용 CSV. 엑셀에서 한글이 깨지지 않게 BOM을 붙인다."""
+DRAFT_NOTE = "확정 전 숫자(결산 미확정)"
+
+
+def date_range(start_iso: str, end_iso: str) -> str:
+    """`[시작, 끝)` 시각을 사람이 읽는 날짜 범위로 쓴다. 끝은 마지막 날(끝 시각의 전날)이다.
+
+    계산 기준(UTC 하루)은 그대로고 보이는 글자만 바꾼다. 예: `2026-10-01 ~ 2026-10-31`.
+    """
+    start, end = fc.parse_dt(start_iso), fc.parse_dt(end_iso)
+    if start is None or end is None:
+        return f"{start_iso} ~ {end_iso}"
+    return f"{start.date().isoformat()} ~ {(end - timedelta(microseconds=1)).date().isoformat()}"
+
+
+def draft_note(report: dict[str, Any]) -> str | None:
+    """당기에 결산을 확정하지 않은 달이 있으면 파일 맨 위에 붙일 표시."""
+    return None if (report.get("confirmed") or {}).get("current") else DRAFT_NOTE
+
+
+def to_csv(report: dict[str, Any], unavailable: list[str], mark_draft: bool = False) -> str:
+    """내려받기용 CSV. 엑셀에서 한글이 깨지지 않게 BOM을 붙인다.
+
+    `mark_draft`면(자동으로 만드는 세무사 전달 파일) 결산 미확정 달은 맨 위에 표시를 붙인다.
+    """
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\r\n")
     cur, prev = report["current"], report["previous"]
+    note = draft_note(report) if mark_draft else None
+    if note:
+        w.writerow([note])
     w.writerow([report["title"]])
     if report["company"]:
         w.writerow(["회사", report["company"]])
-    w.writerow(["당기", cur["name"], f"{cur['from']} ~ {cur['to']}"])
-    w.writerow(["전기", prev["name"], f"{prev['from']} ~ {prev['to']}"])
+    w.writerow(["당기", cur["name"], date_range(cur["from"], cur["to"])])
+    w.writerow(["전기", prev["name"], date_range(prev["from"], prev["to"])])
     w.writerow(["단위", report["unit"]])
     w.writerow([])
     w.writerow(["과목", f"당기 ({cur['name']})", f"전기 ({prev['name']})", "비고"])
@@ -276,7 +301,7 @@ def to_csv(report: dict[str, Any], unavailable: list[str]) -> str:
     return "﻿" + buf.getvalue()
 
 
-def to_xlsx(report: dict[str, Any], unavailable: list[str]) -> bytes:
+def to_xlsx(report: dict[str, Any], unavailable: list[str], mark_draft: bool = False) -> bytes:
     """내려받기용 엑셀. CSV와 같은 내용이고, 금액은 바로 계산할 수 있게 숫자 칸으로 넣는다."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -315,6 +340,10 @@ def to_xlsx(report: dict[str, Any], unavailable: list[str]) -> bytes:
         text(row, 4, line["note"])
 
     r = 1
+    note = draft_note(report) if mark_draft else None
+    if note:
+        text(r, 1, note, Font(bold=True, color="B45309"))
+        r += 1
     text(r, 1, report["title"], Font(bold=True, size=14))
     if report["company"]:
         r += 1
@@ -324,7 +353,7 @@ def to_xlsx(report: dict[str, Any], unavailable: list[str]) -> bytes:
         r += 1
         text(r, 1, name)
         text(r, 2, period["name"])
-        text(r, 3, f"{period['from']} ~ {period['to']}")
+        text(r, 3, date_range(period["from"], period["to"]))
     r += 1
     text(r, 1, "단위")
     text(r, 2, report["unit"])

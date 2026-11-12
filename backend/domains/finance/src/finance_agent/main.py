@@ -43,7 +43,8 @@ from finance_agent.selftest import SELF_TEST_TTL_HOURS, is_fresh, run_self_test
 DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
 DECISION_PATHS = re.compile(
     r"^/api/finance/(closing/confirm|closing/cancel|reconciliation/[^/]+/note"
-    r"|bank/statement|bank/file|bank/outflows/[^/]+/note|exports/run|closing/adjust"
+    r"|bank/statement|bank/file|bank/imports/[^/]+/remove|bank/outflows/[^/]+/note"
+    r"|exports/run|closing/adjust"
     r"|tax/vat/confirm|other-pnl|pg/file|pg/clear|planning-requests"
     r"|team-budget/[^/]+/approve)$"
 )

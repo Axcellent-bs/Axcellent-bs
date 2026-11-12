@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from ax_contracts.schemas import TENANT_ID_DEFAULT
+from finance_agent import exports
 from finance_agent.handlers import State
 
 logger = logging.getLogger(__name__)
@@ -129,6 +130,7 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.opinions = [dict(r) for r in rec.get("opinions", [])]
     s.records.exports = {k: dict(v) for k, v in rec.get("exports", {}).items()}
     s.records.bank_imports = [dict(r) for r in rec.get("bank_imports", [])]
+    exports.give_legacy_ids(s.records.bank_imports)  # id 전에 읽은 기록도 뺄 수 있게
     s.records.pg_rows = {k: dict(v) for k, v in rec.get("pg_rows", {}).items()}
     s.records.pg_periods = [dict(p) for p in rec.get("pg_periods", [])]
     s.records.pg_imports = [dict(r) for r in rec.get("pg_imports", [])]
