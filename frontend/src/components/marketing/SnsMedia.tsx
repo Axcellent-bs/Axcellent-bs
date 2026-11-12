@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { shortDateTime, won } from "@/lib/format";
 import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
+import { briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, type StoredBrief } from "@/lib/briefs";
 
 // SNS·미디어 탭. 이미지·영상 생성과 SNS 게시 흐름을 안내하고,
 // 안전 장치 보류 큐(finance.reviews)에서 읽을 수 있는 마케팅 항목(publish_sns, generate_media)만 읽기 전용으로 보여 준다.
@@ -29,7 +30,7 @@ const Empty = ({ children }: { children: ReactNode }) => <p className="py-6 text
 const NOT_WIRED = "아직 화면에 연결되지 않았습니다.";
 
 const PIPELINE: { step: string; who: string; note: string }[] = [
-  { step: "초안", who: "마케팅 AI", note: "게시된 공지나 공개 쿠폰 사실로 캡션 초안을 만듭니다(draft_sns_post). AI 생성 표시 문구가 들어갑니다." },
+  { step: "초안", who: "마케팅 AI", note: "게시된 공지, 공개 쿠폰 사실, 받은 기획안으로 캡션 초안을 만듭니다(draft_sns_post). AI 생성 표시 문구가 들어갑니다." },
   { step: "검사", who: "마케팅 AI", note: "AI 표시 누락·승인한 문구와의 차이·쿠폰 필수 안내 누락을 코드 규칙으로 점검합니다(check_sns_post)." },
   { step: "사람 승인", who: "사람", note: "SNS 게시(publish_sns)는 C 등급이라 항상 안전 장치 보류 큐에서 사람이 승인해야 합니다." },
   { step: "게시", who: "마케팅 AI", note: "승인을 받은 뒤에만 게시합니다. 마케팅 AI가 스스로 승인하는 길은 없습니다." },
@@ -39,9 +40,21 @@ export function SnsMedia() {
   const [holds, setHolds] = useState<Review[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [handed, setHanded] = useState<StoredBrief[] | null>(null);
+  const [handedError, setHandedError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    if (briefsEnabled) {
+      try {
+        const list = await briefs.list(200);
+        setHanded(list.items.filter((i) => i.sns_handoff && i.sns_handoff.status !== "not_handed"));
+        setHandedError(null);
+      } catch (e) {
+        const err = e as { status?: number; message?: string };
+        setHandedError(briefsError({ status: err.status, message: err.message ?? "알 수 없는 오류" }));
+      }
+    }
     try {
       const all = await finance.reviews(true);
       setHolds(all.filter((r) => r.status === "pending" && fromMarketing(r.requester) && (SNS_ACTIONS as readonly string[]).includes(r.action)));
@@ -78,6 +91,37 @@ export function SnsMedia() {
           <p className="text-xs font-medium text-ink-700">비용 장부 (오늘·이달 합계, 건당 상한)</p>
           <Empty>{NOT_WIRED}</Empty>
         </div>
+      </Section>
+
+      <Section title="받은 기획안에서 넘어온 작업" desc="받은 기획안 탭에서 SNS·미디어로 넘긴 기획안입니다. 넘기면 글 초안과 미디어 요청 초안까지만 만들고, 아래 다음 단계는 사람이 이어서 합니다.">
+        <ol className="flex flex-wrap items-center gap-1 text-xs text-ink-700" aria-label="다음 단계">
+          {["미디어 생성 (B 등급, 비용 상한 검사)", "초안 검사 (AI 표시·문구·숫자)", "사람 승인 게시 (C 등급)"].map((t, i) => (
+            <li key={t} className="flex items-center gap-1">{i > 0 && <span aria-hidden="true">›</span>}<span className="rounded-lg bg-ink-50 px-2 py-1">{i + 1}. {t}</span></li>
+          ))}
+        </ol>
+        {!briefsEnabled ? <Empty>받은 기획안 읽기 연결이 꺼져 있어 넘겨진 목록을 읽을 수 없습니다.</Empty>
+          : handedError ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{handedError}</p>
+            : handed === null ? <Empty>불러오는 중입니다.</Empty>
+              : handed.length === 0 ? <Empty>넘겨진 기획안이 없습니다.</Empty> : (
+                <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100" aria-label="넘겨진 기획안 목록">
+                  {handed.map((i) => {
+                    const h = i.sns_handoff!;
+                    return (
+                      <li key={i.proposal_id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-xs">
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{i.brief.title}</span>
+                        <span className="tabular-nums text-ink-500">{i.proposal_id}</span>
+                        {h.status === "handed" ? (
+                          <>
+                            <span className="text-ink-500">{shortDateTime(h.handed_at)} 넘김</span>
+                            <span className="chip bg-brand-50 text-brand-700" title={h.draft_id ?? undefined}>{draftStateKo(h.draft_state)}</span>
+                            {h.media_request && h.media_request.missing_fields.length > 0 && <span className="text-ink-500">미디어 요청 필드 미정 {h.media_request.missing_fields.length}개</span>}
+                          </>
+                        ) : <span className="chip bg-amber-50 text-amber-800">{handoffReasonKo(h.reason_code)}</span>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
       </Section>
 
       <Section title="SNS 게시 흐름" desc="초안에서 게시까지 네 단계입니다. 사람 승인 없이는 게시되지 않습니다.">

@@ -46,6 +46,29 @@ async def call(
     return {"status": result.status.value, "outcome": result.outcome, "output": result.output}
 
 
+# 기획안 넘기기 skill이 실패로 돌려주는 outcome → (HTTP 상태, 오류 코드).
+# `handed`·`already_handed`·`failed`(이유 코드는 output에)는 판단 결과라 오류가 아니다
+HANDOFF_FAILURES = {
+    "brief_not_found": (404, "NOT_FOUND"),
+    "invalid_input": (400, "INVALID_INPUT"),
+    "storage_error": (503, "STORAGE_ERROR"),
+}
+
+
+async def handoff_call(proposal_id: str, media_kind: str, key: str) -> dict[str, Any]:
+    """받은 기획안을 SNS·미디어로 넘긴다. 미디어 생성·게시는 하지 않는다(마케팅 skill 쪽 규칙)."""
+    out = await call(
+        "handoff_brief_to_sns",
+        {"proposal_id": proposal_id, "media_kind": media_kind},
+        campaign_id=f"cmp_{proposal_id}",
+        key=key,
+    )
+    if out["status"] == TaskStatus.FAILED.value:
+        status, code = HANDOFF_FAILURES.get(out["outcome"] or "", (502, "UPSTREAM_FAILED"))
+        raise ApiError(status, code, f"기획안을 넘기지 못했다 ({out['outcome']})")
+    return out
+
+
 CHAT_DEADLINE_SECONDS = 30
 # 마케팅 대화 skill이 거절할 때 돌려주는 outcome → (HTTP 상태, 오류 코드)
 CHAT_REFUSALS = {

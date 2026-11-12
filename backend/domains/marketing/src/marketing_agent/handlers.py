@@ -32,13 +32,26 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import shop_client
+from marketing_agent.brief_handoff import (
+    DRAFT_MEDIA_KIND,
+    HandoffBriefToSnsInput,
+    HandoffBriefToSnsOutput,
+    media_request_for,
+    price_problem,
+    state_of,
+    view_of,
+)
 from marketing_agent.briefs import (
     BriefStorageError,
     BriefStore,
     CampaignBriefList,
     CampaignBriefView,
+    DraftState,
     GetCampaignBriefInput,
     ListCampaignBriefsInput,
+    SnsHandoffRecord,
+    StoredBrief,
+    StoredBriefView,
     campaign_id_for,
     rejection_reason,
 )
@@ -56,7 +69,9 @@ from marketing_agent.chat_store import ChatStorageError, ChatStore
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.links import BuildCampaignLinkInput, CampaignLink, build_campaign_link
 from marketing_agent.media.bgm_flow import generate_media_flow
+from marketing_agent.media.config import MediaSettings
 from marketing_agent.media.ledger import MediaLedger
+from marketing_agent.media.prompts import PromptRejected
 from marketing_agent.notice import NoticeStore, make_draft
 from marketing_agent.schemas import (
     ActiveNotices,
@@ -535,7 +550,8 @@ async def list_campaign_briefs(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     try:
-        items, total = STATE.briefs.list(data.limit)
+        stored, total = STATE.briefs.list(data.limit)
+        items = [_with_handoff(i) for i in stored]
     except BriefStorageError:
         return _brief_storage_failed(request)
     listing = CampaignBriefList(
@@ -563,7 +579,8 @@ async def get_campaign_brief(request: AgentRequest) -> AgentResult:
             output={"errors": ["proposal_id|campaign_id: missing"]},
         )
     try:
-        item = STATE.briefs.get(data.proposal_id, data.campaign_id)
+        found = STATE.briefs.get(data.proposal_id, data.campaign_id)
+        item = _with_handoff(found) if found is not None else None
     except BriefStorageError:
         return _brief_storage_failed(request)
     view = CampaignBriefView(
@@ -581,6 +598,116 @@ async def get_campaign_brief(request: AgentRequest) -> AgentResult:
             [item.proposal_id] if item else [],
         ),
     )
+
+
+def _draft_state(draft_id: str | None) -> DraftState | None:
+    if draft_id is None:
+        return None
+    draft = STATE.sns.get(draft_id)
+    if draft is None:
+        return "missing"
+    return "media_attached" if draft.asset_ref else "caption_only"
+
+
+def _with_handoff(item: StoredBrief) -> StoredBriefView:
+    record = STATE.briefs.handoff(item.proposal_id)
+    return view_of(item, record, _draft_state(record.draft_id if record else None))
+
+
+def _handoff_done(
+    request: AgentRequest, outcome: str, record: SnsHandoffRecord, campaign_id: str
+) -> AgentResult:
+    out = HandoffBriefToSnsOutput(
+        outcome=outcome,
+        campaign_id=campaign_id,
+        sns_handoff=state_of(record, _draft_state(record.draft_id)),
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        outcome=outcome,
+        evidence=_evidence(
+            ["handoff_brief_to_sns"],
+            f"기획안 {record.proposal_id} SNS·미디어 넘김 {outcome}",
+            [record.proposal_id, *([record.draft_id] if record.draft_id else [])],
+        ),
+    )
+
+
+async def handoff_brief_to_sns(request: AgentRequest) -> AgentResult:
+    """받은 기획안으로 미디어 요청 초안과 SNS 글 초안을 만들어 보관한다.
+
+    미디어 생성(`generate_media`)·게시(`publish_sns`)는 부르지 않는다. 사람이 이어서 한다.
+    """
+    data = _parse(request, HandoffBriefToSnsInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.proposal_id is None and data.campaign_id is None:
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="invalid_input",
+            output={"errors": ["proposal_id|campaign_id: missing"]},
+        )
+    try:
+        item = STATE.briefs.get(data.proposal_id, data.campaign_id)
+        if item is None:
+            return _result(request, TaskStatus.FAILED, outcome="brief_not_found")
+        pid = item.proposal_id
+        record = STATE.briefs.handoff(pid)
+        now = _now()
+        draft_input = {"proposal_id": pid, "media_kind": DRAFT_MEDIA_KIND[data.media_kind]}
+        if record is not None and record.status == "handed":
+            # 멱등: 보관본 그대로. 초안만 사라졌다면 같은 내용으로 다시 저장한다(id는 내용 주소)
+            if STATE.sns.get(record.draft_id or "") is None:
+                await draft_sns_post(
+                    request.model_copy(update={"input": draft_input}),
+                    STATE.notices,
+                    STATE.sns,
+                    STATE.briefs,
+                )
+            return _handoff_done(request, "already_handed", record, item.campaign_id)
+
+        def failed(code: str, media: dict | None = None) -> AgentResult:
+            rec = SnsHandoffRecord(
+                proposal_id=pid,
+                status="failed",
+                media_request=media,
+                reason_code=code,
+                updated_at=now,
+            )
+            STATE.briefs.save_handoff(rec)
+            return _handoff_done(request, "failed", rec, item.campaign_id)
+
+        try:
+            media = media_request_for(pid, data.media_kind)
+        except (PromptRejected, KeyError):
+            return failed("unknown_scene_template")
+        media_dict = media.model_dump(mode="json")
+        problem = price_problem(media, MediaSettings.from_env())  # 가격표 fail-closed
+        if problem is not None:
+            return failed(problem, media_dict)
+        drafted = await draft_sns_post(
+            request.model_copy(update={"input": draft_input}),
+            STATE.notices,
+            STATE.sns,
+            STATE.briefs,
+        )
+        if drafted.status != TaskStatus.COMPLETED or not drafted.output:
+            return failed(drafted.outcome or "draft_failed", media_dict)
+        rec = SnsHandoffRecord(
+            proposal_id=pid,
+            status="handed",
+            draft_id=drafted.output["post_draft_id"],
+            media_request=media_dict,
+            handed_at=now,
+            updated_at=now,
+        )
+        STATE.briefs.save_handoff(rec)
+    except BriefStorageError:
+        return _brief_storage_failed(request)
+    return _handoff_done(request, "handed", rec, item.campaign_id)
 
 
 async def build_campaign_link_skill(request: AgentRequest) -> AgentResult:
@@ -721,7 +848,7 @@ async def issue_coupon(request: AgentRequest) -> AgentResult:
 
 
 async def draft_sns_post_skill(request: AgentRequest) -> AgentResult:
-    return await draft_sns_post(request, STATE.notices, STATE.sns)
+    return await draft_sns_post(request, STATE.notices, STATE.sns, STATE.briefs)
 
 
 async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
@@ -827,6 +954,7 @@ HANDLERS = {
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,
+    "handoff_brief_to_sns": handoff_brief_to_sns,
     "build_campaign_link": build_campaign_link_skill,
     "issue_coupon": issue_coupon,
     "start_campaign": start_campaign,
