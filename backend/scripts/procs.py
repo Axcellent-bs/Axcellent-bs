@@ -245,8 +245,11 @@ def main(argv: Sequence[str]) -> int:
             locks.append(item)
     left = stop(pids, locks, markers)
     if left:
+        # 기록(.pid·잠금)에 없는 프로세스는 끄지 않는다. 다른 실행이 띄웠을 수 있어 사람이 본다
         print(f"남은 프로세스 {len(left)}개 (끄지 못함):")
-        print(_describe(left))
+        for p in left:
+            print(f"  남아 있음: pid {p.pid} (부모 {p.ppid}): {p.cmd[:200]}")
+        print("  기록(.pid·잠금)에 없는 프로세스는 끄지 않는다. 띄운 곳을 확인한 뒤 직접 끈다")
         return 1
     print("남은 프로세스 0개")
     return 0
