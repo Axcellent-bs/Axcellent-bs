@@ -103,7 +103,7 @@ export function CopilotPanel({ conv, onUseDraft, onRejectDraft, onClaimCreated, 
       {conv.category === "privacy_deletion" && <DataPurgeCard key={conv.id} conversationId={conv.id} />}
 
       {conv.order_id && (
-        <section>
+        <section key={conv.id}>
           <h3 className="panel-title mb-2">연결된 주문 · 클레임</h3>
           <div className="space-y-2">
             <p className="rounded-xl border border-ink-100 bg-surface px-3 py-2 text-xs">주문 <b>{conv.order_no ?? conv.order_id}</b> — 답변 초안은 이 영수증과 아래 판정을 근거로 만들어집니다.</p>
