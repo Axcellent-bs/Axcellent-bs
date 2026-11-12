@@ -363,8 +363,13 @@ def _owner_ok(th: ChatThread, who: str | None) -> bool:
 
 
 def seen_from(th: ChatThread, origin: str | None) -> bool:
-    """이 창구(screen·dashboard)에서 보이는 대화인가. 나누기 전 대화(None)는 양쪽에 보인다."""
-    return origin is None or th.origin is None or th.origin == origin
+    """이 창구(screen·dashboard)에서 보이는 대화인가. 나누기 전 대화(None)는 어디서 열었는지
+    몰라 대시보드 대화방에만 둔다 (개발 화면 대화 패널에는 그 화면에서 연 대화만)."""
+    if origin is None:
+        return True
+    if origin == "screen":
+        return th.origin == "screen"
+    return th.origin in (None, origin)
 
 
 def _prepare(

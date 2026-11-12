@@ -242,3 +242,21 @@ def test_dashboard_and_screen_chats_do_not_mix(service: PlanningService, adapter
         assert c.get(f"{URL}/{dash}").status_code == 404
         assert c.post(URL, json={"thread_id": dash, "message": "끼어들기"}).status_code == 404
         assert c.post(f"{URL}/{dash}/close").status_code == 404
+
+
+def test_old_chats_without_origin_stay_in_the_dashboard(service: PlanningService, adapter) -> None:
+    """나누기 전 대화(origin 없음)는 어디서 열었는지 몰라 개발 화면에 보이지 않는다."""
+    dev_chat.set_llm(ChatLLM([ASK]))
+
+    async def old() -> str:
+        th = await dev_chat.send(service, None, "예전 대화", who="공용")
+        await dev_chat.wait_idle()
+        listed = await handlers.dev_chat_list(_req("dev_chat_list", {"who": "공용"}))
+        assert [t["id"] for t in listed.output["threads"]] == [th.id]
+        return th.id
+
+    tid = asyncio.run(old())
+    assert service.chat_of(tid).origin is None
+    with TestClient(app) as c:
+        assert c.get(URL).json()["data"] == []
+        assert c.get(f"{URL}/{tid}").status_code == 404
