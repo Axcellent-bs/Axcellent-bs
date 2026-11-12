@@ -107,6 +107,26 @@ health_url() {
 # bash의 $!는 Windows 프로세스 번호가 아니다. .pid에는 Windows 번호(/proc/<pid>/winpid)를 적는다
 winpid_of() { cat "/proc/$1/winpid" 2>/dev/null || echo "$1"; }
 
+# >>> 로그 보관
+# 켤 때 지난 로그를 덮어쓰지 않는다: .logs/<이름>.log를 .logs/prev/<이름>-<그 로그를 켠 시각>.log로 옮기고,
+# 이름마다 최근 KEEP_LOGS(기본 5)개만 남긴다(오래된 것부터 지움). 갑자기 꺼진 서버의 마지막 줄을 다음에 볼 수 있게
+KEEP_LOGS="${KEEP_LOGS:-5}"
+keep_log() {
+  local name="$1" file="$LOGS/$1.log" prev="$LOGS/prev" stamp target n=1
+  [ -s "$file" ] || return 0
+  mkdir -p "$prev"
+  # 첫 줄 "[start] … · 시작 2026-11-12 15:43:22 +0900"의 시각. 없으면 파일 수정 시각
+  stamp=$(sed -n '1s/.*시작 \([0-9]\{4\}\)-\([0-9]\{2\}\)-\([0-9]\{2\}\) \([0-9]\{2\}\):\([0-9]\{2\}\):\([0-9]\{2\}\).*/\1\2\3-\4\5\6/p' "$file")
+  [ -n "$stamp" ] || stamp=$(date -r "$file" '+%Y%m%d-%H%M%S' 2>/dev/null || date '+%Y%m%d-%H%M%S')
+  target="$prev/$name-$stamp.log"
+  while [ -e "$target" ]; do n=$((n + 1)); target="$prev/$name-$stamp-$n.log"; done
+  mv "$file" "$target"
+  # 이름 뒤가 숫자(시각)인 것만 센다 (shop-api와 shop-traffic처럼 앞이 같은 이름이 섞이지 않게)
+  # 새것부터 늘어놓고(수정 시각, mv는 시각을 바꾸지 않는다) KEEP_LOGS개 뒤부터 지운다
+  ls -1t "$prev/$name-"[0-9]*.log 2>/dev/null | tail -n "+$((KEEP_LOGS + 1))" | while read -r old; do rm -f "$old"; done
+}
+# <<< 로그 보관
+
 # 끄기: 포트를 쥔 프로세스 + 기록한 pid와 그 자식(venv 런처 밑 실제 python) + 수집기 잠금에 적힌 pid.
 # 끈 뒤 표식으로 다시 찾아 "남은 프로세스 0개"를 확인한다. 남으면 pid·명령줄을 보여 주고 실패(1)
 stop_all() {
@@ -407,6 +427,7 @@ while read -r name port module; do
       sleep 1
     done
   fi
+  keep_log "$name"
   echo "$START_LINE" > "$LOGS/$name.log"
   # shop-api만 바인드 주소를 바꿀 수 있다(AX_SHOP_API_HOST, 기본 127.0.0.1). 나머지는 127.0.0.1
   host=127.0.0.1
@@ -434,6 +455,7 @@ fi
 if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
   # 재고가 0이 되면 주문이 조용히 멈춰 장애가 안 잡히는 것처럼 보인다. 자동 보충을 기본으로 켠다
   # (끄려면 SHOP_TRAFFIC_REFILL=0). 보충에는 위에서 만든 admin 토큰을 쓴다
+  keep_log shop-traffic
   echo "$START_LINE" > "$LOGS/shop-traffic.log"
   rm -f "$TRAFFIC_PID_FILE"  # 지난번 번호가 남지 않게 (새로 뜬 shop_traffic.py가 다시 적는다)
   SHOP_TRAFFIC_PID_FILE="$TRAFFIC_PID_FILE" \
@@ -444,11 +466,13 @@ fi
 
 # data: Google 인기 검색어 스냅샷을 1시간마다 모은다 (data를 띄웠을 때만, 끄기는 stop이 .pid로 같이 끈다)
 if echo "$RUN_APPS" | awk '$1 == "data" {found=1} END {exit !found}'; then
+  keep_log trending-collect
   echo "$START_LINE" > "$LOGS/trending-collect.log"
   "$PY" -m data_agent.trending_collect --every 3600 >> "$LOGS/trending-collect.log" 2>&1 &
   winpid_of $! > "$LOGS/trending-collect.pid"
   # YouTube 스냅샷도 1시간마다 (수집 직후 감지 탭 결과를 미리 계산). 이미 다른 수집기가 돌면
   # 잠금(backend/.data/youtube_collect.lock)을 못 잡아 바로 끝난다 → 두 개가 같이 돌지 않는다
+  keep_log youtube-collect
   echo "$START_LINE" > "$LOGS/youtube-collect.log"
   "$PY" -m data_agent.youtube_collect --every 3600 >> "$LOGS/youtube-collect.log" 2>&1 &
   winpid_of $! > "$LOGS/youtube-collect.pid"
