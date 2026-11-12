@@ -14,12 +14,14 @@ from marketing_agent.media.base import MediaRequest
 from marketing_agent.media.gemini_image import (
     ASPECT_RATIOS,
     ENDPOINT,
+    REQUEST_MIME,
     GeminiImageError,
     GeminiImageProvider,
 )
 
 KEY = "test-key-SECRET-123"
 MODEL = "test-model-id"
+JPG = b"\xff\xd8\xff\xe0fake-image-bytes"
 PNG = b"\x89PNG\r\n\x1a\nfake-image-bytes"
 
 
@@ -37,7 +39,9 @@ def _request(tmp_path: Path, resolution: str = "928x1152", model: str = MODEL) -
     )
 
 
-def _ok_body(**extra: object) -> dict[str, object]:
+def _ok_body(
+    mime: str | None = "image/jpeg", data: bytes = JPG, **extra: object
+) -> dict[str, object]:
     body: dict[str, object] = {
         "id": "interaction_1",
         "status": "completed",
@@ -49,8 +53,8 @@ def _ok_body(**extra: object) -> dict[str, object]:
                     {"type": "text", "text": "done"},
                     {
                         "type": "image",
-                        "mime_type": "image/png",
-                        "data": base64.b64encode(PNG).decode(),
+                        **({"mime_type": mime} if mime else {}),
+                        "data": base64.b64encode(data).decode(),
                     },
                 ],
             },
@@ -87,8 +91,10 @@ def test_request_shape_and_result(tmp_path: Path) -> None:
     fmt = body["response_format"]
     assert fmt["type"] == "image" and fmt["aspect_ratio"] == "4:5" and fmt["image_size"] == "1K"
     assert KEY not in req.content.decode()
-    assert result.asset_path.read_bytes() == PNG
-    assert result.sha256 == hashlib.sha256(PNG).hexdigest()
+    assert fmt["mime_type"] == "image/jpeg"
+    assert result.asset_path.name == "asset.jpg"
+    assert result.asset_path.read_bytes() == JPG
+    assert result.sha256 == hashlib.sha256(JPG).hexdigest()
     assert result.provider == "gemini" and result.provider_job_id == "interaction_1"
     assert result.usage is not None
     assert (result.usage.input_tokens, result.usage.output_tokens) == (12, 1120)
@@ -179,3 +185,46 @@ def test_usage_missing_is_none(tmp_path: Path) -> None:
 def test_registered() -> None:
     assert isinstance(registry.get_adapter("gemini"), GeminiImageProvider)
     assert registry.get_adapter("mock") is not None
+
+
+def test_request_mime_is_jpeg_only() -> None:
+    assert REQUEST_MIME == "image/jpeg"
+
+
+def test_missing_response_mime_defaults_to_jpeg(tmp_path: Path) -> None:
+    result = _provider(lambda req: httpx.Response(200, json=_ok_body(mime=None))).generate(
+        _request(tmp_path)
+    )
+    assert result.asset_path.name == "asset.jpg"
+
+
+def test_response_block_mime_wins(tmp_path: Path) -> None:
+    body = _ok_body(mime="image/png", data=PNG)
+    result = _provider(lambda req: httpx.Response(200, json=body)).generate(_request(tmp_path))
+    assert result.asset_path.name == "asset.png"
+    assert result.sha256 == hashlib.sha256(PNG).hexdigest()
+
+
+def test_http_400_reports_kind_only_and_drops_body(tmp_path: Path) -> None:
+    text = f"The value 'image/png' is not supported for 'response_format.mime_type' {KEY}"
+
+    with pytest.raises(GeminiImageError) as info:
+        _provider(lambda req: httpx.Response(400, text=text)).generate(_request(tmp_path))
+    assert str(info.value) == "http_400"
+    assert "image/png" not in repr(info.value) and KEY not in repr(info.value)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_thought_tokens_are_not_read_into_usage(tmp_path: Path) -> None:
+    """현재 동작을 고정한다: total_thought_tokens는 Usage에 들어가지 않는다([확인 필요])."""
+    body = _ok_body(
+        usage={
+            "total_input_tokens": 17,
+            "total_output_tokens": 1440,
+            "total_thought_tokens": 1059,
+            "total_tokens": 2516,
+        }
+    )
+    result = _provider(lambda req: httpx.Response(200, json=body)).generate(_request(tmp_path))
+    assert result.usage is not None
+    assert (result.usage.input_tokens, result.usage.output_tokens) == (17, 1440)
