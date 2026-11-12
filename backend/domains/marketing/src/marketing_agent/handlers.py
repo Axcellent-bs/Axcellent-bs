@@ -868,6 +868,7 @@ async def prepare_sns_post_from_media_skill(request: AgentRequest) -> AgentResul
         store=STATE.sns,
         ledger=STATE.media_ledger,
         from_decision=_from_decision,
+        briefs=STATE.briefs,
     )
 
 

@@ -36,6 +36,7 @@ from pydantic import Field, StrictInt, ValidationError, model_validator
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel
 from marketing_agent import sns, sns_label, sns_media
+from marketing_agent.briefs import BriefStore
 from marketing_agent.media.audio_mix import AudioMixError, Runner, subprocess_runner
 from marketing_agent.media.bgm_flow import generate_media_flow
 from marketing_agent.media.config import MediaSettings, ffmpeg_bin
@@ -85,6 +86,7 @@ class PrepareSnsPostInput(AxModel):
 
     notice_id: str | None = None
     coupon: SnsCouponFacts | None = None
+    proposal_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     media_kind: Literal["image", "video"] = "image"
     scene_template_id: str | None = Field(default=None, min_length=1)  # 캐러셀이면 비운다
     fields: dict[str, Any] = Field(default_factory=dict)
@@ -105,8 +107,11 @@ class PrepareSnsPostInput(AxModel):
 
     @model_validator(mode="after")
     def _exactly_one_source(self) -> PrepareSnsPostInput:
-        if (self.notice_id is None) == (self.coupon is None):
-            raise ValueError("notice_id와 coupon 중 하나만 준다")
+        given = [x for x in (self.notice_id, self.coupon, self.proposal_id) if x is not None]
+        if len(given) != 1:
+            raise ValueError("notice_id, coupon, proposal_id 중 하나만 준다")
+        if self.proposal_id is not None and self.carousel_items is not None:
+            raise ValueError("proposal_id는 carousel_items와 함께 쓰지 않는다")
         if self.carousel_items is None:
             if self.scene_template_id is None:
                 raise ValueError("scene_template_id가 필요하다")
@@ -373,6 +378,7 @@ def _media_ref(data: PrepareSnsPostInput) -> str:
     parts: list[Any] = [
         data.notice_id,
         data.coupon.campaign_id if data.coupon else None,
+        data.proposal_id,
         data.media_kind,
         data.scene_template_id,
         data.fields,
@@ -427,6 +433,7 @@ async def prepare_sns_post_from_media(
     settings: MediaSettings | None = None,
     runner: Runner = subprocess_runner,
     prices_path: Path | None = None,
+    briefs: BriefStore | None = None,
 ) -> AgentResult:
     try:
         data = PrepareSnsPostInput.model_validate(request.input)
@@ -455,10 +462,11 @@ async def prepare_sns_post_from_media(
     draft_in = sns.DraftSnsPostInput(
         notice_id=data.notice_id,
         coupon=data.coupon,
+        proposal_id=data.proposal_id,
         media_kind=media_kind,
         platform_options=data.platform_options,
     )
-    blocked = sns.preflight_draft(request, draft_in, notices)
+    blocked = sns.preflight_draft(request, draft_in, notices, briefs)
     if blocked is not None:
         return blocked
     root = sns_media.media_root()
@@ -515,13 +523,14 @@ async def prepare_sns_post_from_media(
             "input": {
                 **({"notice_id": data.notice_id} if data.notice_id else {}),
                 **({"coupon": data.coupon.model_dump(mode="json")} if data.coupon else {}),
+                **({"proposal_id": data.proposal_id} if data.proposal_id else {}),
                 "media_kind": media_kind,
                 "asset_path": labeled_ref,
                 "platform_options": data.platform_options.model_dump(mode="json"),
             },
         }
     )
-    drafted = await sns.draft_sns_post(draft_request, notices, store)
+    drafted = await sns.draft_sns_post(draft_request, notices, store, briefs)
     if (
         drafted.status != TaskStatus.COMPLETED
         or drafted.output is None

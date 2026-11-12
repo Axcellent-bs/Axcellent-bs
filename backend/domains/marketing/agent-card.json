@@ -289,7 +289,7 @@
     },
     {
       "id": "prepare_sns_post_from_media",
-      "description": "생성(generate_media: B등급 안전 관문·건당/월 상한 그대로) → Instagram 규격 변환(이미지 JPEG·비율 4:5~1.91:1·너비 320~1440, 영상은 필요할 때만 재인코딩) → AI 라벨 오버레이·기계판독 표시(sns_label) → draft_sns_post → check_sns_post를 한 번에 잇는다. 출처는 게시된 공지(notice_id) 또는 공개 쿠폰 사실 중 하나. 출처·미디어 폴더·ffmpeg·글꼴은 생성 전에 확인해 막히면 비용이 나지 않는다. 결과에 점검 결과와 publish_sns 입력값(publish_input)을 담지만 게시하지 않는다: 게시는 C등급 publish_sns를 사람이 승인해야 한다. 같은 입력을 다시 부르면 생성은 장부에서 재생된다. carousel_items(이미지 2~10장, 영상 섞기 없음)를 주면 장마다 같은 단계를 거치되 생성 전에 장수만큼 비용을 더해(건당 상한·단가표 fail-closed) 월 상한을 넘으면 한 장도 만들지 않고 거절한다. AI 표시 라벨은 이미지·영상 모두 오른쪽 하단(sns_label.toml의 position·align·margin)에 입힌다.",
+      "description": "생성(generate_media: B등급 안전 관문·건당/월 상한 그대로) → Instagram 규격 변환(이미지 JPEG·비율 4:5~1.91:1·너비 320~1440, 영상은 필요할 때만 재인코딩) → AI 라벨 오버레이·기계판독 표시(sns_label) → draft_sns_post → check_sns_post를 한 번에 잇는다. 출처는 게시된 공지(notice_id), 공개 쿠폰 사실(coupon), 보관된 기획안(proposal_id) 중 정확히 하나(proposal_id는 carousel_items와 함께 못 쓴다. 글은 보관본의 title·idea·why·facts를 그대로 옮기고 금칙어를 거른다). 출처·미디어 폴더·ffmpeg·글꼴은 생성 전에 확인해 막히면 비용이 나지 않는다. 결과에 점검 결과와 publish_sns 입력값(publish_input)을 담지만 게시하지 않는다: 게시는 C등급 publish_sns를 사람이 승인해야 한다. 같은 입력을 다시 부르면 생성은 장부에서 재생된다. carousel_items(이미지 2~10장, 영상 섞기 없음)를 주면 장마다 같은 단계를 거치되 생성 전에 장수만큼 비용을 더해(건당 상한·단가표 fail-closed) 월 상한을 넘으면 한 장도 만들지 않고 거절한다. AI 표시 라벨은 이미지·영상 모두 오른쪽 하단(sns_label.toml의 position·align·margin)에 입힌다.",
       "input_schema": "agents/marketing/src/marketing_agent/sns_prepare.py#PrepareSnsPostInput",
       "output_schema": "agents/marketing/src/marketing_agent/sns.py#SnsPostCheck",
       "grade": "B",

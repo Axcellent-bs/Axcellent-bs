@@ -951,18 +951,22 @@ async def handoff_brief_to_sns(
 
 
 class VideoPostPrepareBody(BaseModel):
-    """영상 게시물 준비. 공지 또는 쿠폰 중 정확히 하나. 자유 프롬프트는 없다(장면 템플릿+필드)."""
+    """영상 게시물 준비. 공지·쿠폰·기획안(proposal_id) 중 정확히 하나. 자유 프롬프트 없음."""
 
     notice_id: str | None = Field(default=None, min_length=1, max_length=100)
     coupon: dict[str, Any] | None = None
+    proposal_id: str | None = Field(
+        default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", max_length=64
+    )
     media_kind: Literal["video"] = "video"
     scene_template_id: str = Field(min_length=1, max_length=100)
     fields: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _one_source(self) -> VideoPostPrepareBody:
-        if (self.notice_id is None) == (self.coupon is None):
-            raise ValueError("notice_id와 coupon 중 하나만 준다")
+        given = [x for x in (self.notice_id, self.coupon, self.proposal_id) if x is not None]
+        if len(given) != 1:
+            raise ValueError("notice_id, coupon, proposal_id 중 하나만 준다")
         return self
 
 

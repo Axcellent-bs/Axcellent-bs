@@ -218,6 +218,25 @@ def test_video_endpoints_need_a_person_and_valid_input(client: TestClient, fake:
     assert fake.calls == []
 
 
+def test_video_prepare_accepts_proposal_id_exactly_one_source(
+    client: TestClient, fake: Fake
+) -> None:
+    base = {k: v for k, v in VIDEO_BODY.items() if k != "notice_id"}
+    ok_body = base | {"proposal_id": "PROP-5"}
+    assert client.post(VIDEO_PREPARE, json=ok_body).status_code == 200
+    assert fake.calls[0][1].input["proposal_id"] == "PROP-5"
+    assert "notice_id" not in fake.calls[0][1].input
+    calls = len(fake.calls)
+    both = ok_body | {"notice_id": "ntc_1"}
+    assert client.post(VIDEO_PREPARE, json=both).status_code == 422
+    coupon = ok_body | {"coupon": {"campaign_id": "c", "unit_value": 1000}}
+    assert client.post(VIDEO_PREPARE, json=coupon).status_code == 422
+    assert client.post(VIDEO_PREPARE, json=base).status_code == 422  # 셋 다 없음
+    for bad in ("", "-x", "a b", "a" * 65):
+        assert client.post(VIDEO_PREPARE, json=base | {"proposal_id": bad}).status_code == 422
+    assert len(fake.calls) == calls
+
+
 def test_video_prepare_error_mapping(client: TestClient, fake: Fake) -> None:
     fake.status, fake.outcome = TaskStatus.FAILED, "invalid_input"
     assert client.post(VIDEO_PREPARE, json=VIDEO_BODY).status_code == 400
