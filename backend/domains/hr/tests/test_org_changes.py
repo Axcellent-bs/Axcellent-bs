@@ -312,12 +312,12 @@ def test_records_without_roster_complete_are_marked_example(client) -> None:
 def test_complete_needs_the_whole_roster_registered(client) -> None:
     confirm(client, "emp_a", "join", None, "기획팀", "2026-11-01")
     res = client.post("/a2a", json=_body("set_org_roster_complete", {})).json()
-    assert res["outcome"] == "ROSTER_COUNT_MISMATCH"  # 전체 직원 10명 중 1명뿐
+    assert res["outcome"] == "ROSTER_COUNT_MISMATCH"  # 전체 직원 6명 중 1명뿐
     assert TeamHeadcountOutput.model_validate(headcount(client)["output"]).example is True
 
 
-def test_ten_registered_members_can_be_marked_complete(client) -> None:
-    for n in range(1, 11):
+def test_all_six_registered_members_can_be_marked_complete(client) -> None:
+    for n in range(1, 7):
         team = ["기획팀", "개발팀", "재무/정산"][n % 3]
         confirm(client, f"emp_{n:02d}", "join", None, team, "2026-11-01")
     res = client.post("/a2a", json=_body("set_org_roster_complete", {})).json()
@@ -325,7 +325,7 @@ def test_ten_registered_members_can_be_marked_complete(client) -> None:
     again = client.post("/a2a", json=_body("set_org_roster_complete", {})).json()
     assert again["outcome"] == "duplicate"
     out = TeamHeadcountOutput.model_validate(headcount(client)["output"])
-    assert out.example is False and sum(r.headcount for r in out.rows) == 10
+    assert out.example is False and sum(r.headcount for r in out.rows) == 6
 
 
 def test_complete_can_be_reopened(client, monkeypatch) -> None:
@@ -351,10 +351,10 @@ def test_list_reports_the_roster_state(client, monkeypatch) -> None:
         out = client.post("/a2a", json=body).json()["output"]
         return out["registered_members"], out["expected_members"], out["roster_complete"]
 
-    assert state() == (0, 10, False)
+    assert state() == (0, 6, False)
     confirm(client, "emp_a", "join", None, "기획팀", "2026-11-01")
     draft(client, "emp_b", "join", None, "개발팀", "2026-11-01")  # 초안은 세지 않는다
-    assert state() == (1, 10, False)
+    assert state() == (1, 6, False)
     complete(client, monkeypatch, 1)
     assert state() == (1, 1, True)
 
@@ -373,6 +373,6 @@ def test_expected_member_count_comes_from_env(monkeypatch):
     assert roster._expected_member_count() == 27
     for bad in ("", "0", "-3", "abc"):
         monkeypatch.setenv("HR_EXPECTED_MEMBERS", bad)
-        assert roster._expected_member_count() == 10
+        assert roster._expected_member_count() == 6
     monkeypatch.delenv("HR_EXPECTED_MEMBERS")
-    assert roster._expected_member_count() == 10
+    assert roster._expected_member_count() == 6
