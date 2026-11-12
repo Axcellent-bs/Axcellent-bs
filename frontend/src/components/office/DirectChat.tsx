@@ -4,6 +4,7 @@ import { HandoffLine, PlanCard, PROCEED_TEXT } from "@/components/office/DevCard
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { POLL_MS, classifyFailure, directChatApi, isAnswering } from "@/lib/directChat";
 import { loadOwners, loadThreadId, saveOwner, saveThreadId, threadKey } from "@/lib/directThreads";
+import { OFFICE_ROOM_MAX_HOURS, listOfficeRoom } from "@/lib/officeRoom";
 import type { ChatMessage, ChatStatus, ChatThread as BaseThread } from "@/lib/planningData";
 import { READER_AREAS } from "@/demo/members";
 import { useSession, type Account } from "@/demo/session";
@@ -129,9 +130,25 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
     return false;
   };
 
+  // 단톡방(전체 대화방·장애 방)에서 이 부서에 건 대화 번호. 1:1 "내 지난 대화"에서는 뺀다(방이 어디든).
+  // 목록을 못 읽으면 지금처럼 다 보여 주고, 그 사실을 오류 줄로 알린다
+  const [roomThreads, setRoomThreads] = useState<ReadonlySet<string>>(new Set());
+  const [roomError, setRoomError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    listOfficeRoom({ hours: OFFICE_ROOM_MAX_HOURS }).then((rows) => {
+      if (!live) return;
+      setRoomThreads(new Set(rows.filter((r) => r.agent === agent.key).map((r) => r.threadId)));
+      setRoomError(null);
+    }).catch((err) => {
+      if (live) setRoomError(`단톡방 목록을 읽지 못해 단톡방에서 건 대화가 내 지난 대화에 섞여 보일 수 있어요: ${errText(err, "단톡방 목록")}`);
+    });
+    return () => { live = false; };
+  }, [agent.key, thread?.id]);
+
   // 서버가 남의 대화(restricted)로 알려 준 것은 원문 없이 요약만. 그 밖에는 이 브라우저가 기억한 주인으로 가른다
   const isMine = (t: ChatThread) => !t.restricted && owners[t.id] === account.id;
-  const mine = all.filter(isMine);
+  const mine = all.filter((t) => isMine(t) && !roomThreads.has(t.id));
   const others = all.filter((t) => !isMine(t));
   // 지금 연 대화가 남의 대화면 보기 전용 (관리자가 일이 생긴 대화 원문을 연 경우)
   const readOnly = !!thread && !isMine(thread);
@@ -290,6 +307,7 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
           )}
         </div>
         {error && <p role="alert" className="mx-4 mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800 lg:mx-6">{error}</p>}
+        {roomError && <p role="alert" className="mx-4 mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800 lg:mx-6">{roomError}</p>}
         {locked && <p role="alert" className="mx-4 mb-2 rounded-xl bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 lg:mx-6">쓸 수 없어요: {locked}</p>}
         {readOnly ? (
           <div className="border-t border-ink-100 px-4 py-3 text-right lg:px-6">

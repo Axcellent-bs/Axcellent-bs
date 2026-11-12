@@ -36,16 +36,19 @@ const toEntry = (x: Record<string, unknown>): OfficeEntry | null =>
       }
     : null;
 
-async function call(init?: RequestInit): Promise<unknown> {
-  const res = await fetch(URL, { cache: "no-store", ...init, headers: headers() });
+async function call(init?: RequestInit, query = ""): Promise<unknown> {
+  const res = await fetch(`${URL}${query}`, { cache: "no-store", ...init, headers: headers() });
   const body = (await res.json().catch(() => null)) as { data?: unknown; error?: { message?: string } } | null;
   if (!res.ok || !body) throw new Error(body?.error?.message ?? `단톡방 목록 서버 응답 ${res.status}`);
   return body.data;
 }
 
-/** 최근 24시간 안에 말이 오간 단톡방 대화 (최근 것이 먼저) */
-export async function listOfficeRoom(): Promise<OfficeEntry[]> {
-  const data = await call();
+/** 서버가 받는 가장 긴 기간(시간). dashboard-api office_room.MAX_HOURS */
+export const OFFICE_ROOM_MAX_HOURS = 168;
+
+/** 최근 24시간(`hours`로 바꿀 수 있음, 최대 168) 안에 말이 오간 단톡방 대화 (최근 것이 먼저) */
+export async function listOfficeRoom(opts: { hours?: number } = {}): Promise<OfficeEntry[]> {
+  const data = await call(undefined, opts.hours ? `?hours=${opts.hours}` : "");
   return Array.isArray(data) ? data.map((x) => toEntry(x as Record<string, unknown>)).filter((x): x is OfficeEntry => !!x) : [];
 }
 
