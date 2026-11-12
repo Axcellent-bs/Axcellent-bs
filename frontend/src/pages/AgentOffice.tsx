@@ -1,26 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DIRECT_AGENTS } from "@/components/office/DirectChat";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
 import { OfficeChat, type Typing } from "@/components/office/OfficeChat";
-import { useOfficeTalk } from "@/components/office/useOfficeTalk";
+import { useChatRooms, type Conn } from "@/components/office/useChatRooms";
 import { PixelOffice } from "@/components/office/PixelOffice";
-import { ALL_ROOM, buildTimeline, incidentTitle, skillKo, type OrchIncident } from "@/lib/agentChat";
+import { ALL_ROOM, buildTimeline, incidentTitle, skillKo, type ChatItem } from "@/lib/agentChat";
 import { mergeTalk } from "@/lib/officeTalk";
-import { api } from "@/lib/api";
-import { finance, type ExecutionRecord } from "@/lib/finance";
 import { Link, useSearchParams } from "@/lib/nav";
 import { CAMPAIGN_END, DESKS, REPLAY_END, deriveOffice, replayCampaign, replayIncident, type DeskKey, type DeskState, type OfficeStatus } from "@/lib/office";
-import { orchestrator } from "@/lib/orchestrator";
-import type { CommLine } from "@/lib/types";
 
-// AI 오피스. 부서 AI가 지금 무엇을 하는지 픽셀 사무실로 보여 주고, 옆에 단톡방을 둔다.
-// 데이터는 AI 대화방(/agents/chat)과 같은 세 곳(총괄·안전 관문·공통 로그)과 같은 buildTimeline을 쓴다.
-// 총괄이 꺼져 있으면 SCN-A 리플레이(총괄 응답 모양으로 만든 예시 사건)를 보여 준다.
-// 캠페인 리플레이는 데이터 → 기획 → 사람 확인 → 마케팅 → 재무로 이어지는 예시 흐름을 공통 로그 줄 모양으로 화면 안에서만 만든다.
+// AI 오피스. 부서 AI가 지금 무엇을 하는지 픽셀 사무실로 보여 주고, 옆에 부서 단톡방을 둔다.
+// 실시간은 대화 기록(/agents/chat)과 같은 방 목록·같은 대화를 본다(components/office/useChatRooms.ts):
+// 단톡방 위 방 탭(전체 + 장애·이슈 방 + 열어 둔 1:1 탭)에서 고른 방의 대화만 보이고, 사무실 말풍선도 그 방 대화만 쓴다.
+// 캐릭터를 누르면 그 부서 1:1 탭이 열린다(나만 보임). ?room=<방 id>로 들어오면 그 방 탭을 연다.
+// 총괄이 꺼져 있으면 SCN-A 리플레이(총괄 응답 모양으로 만든 예시 사건)를 보여 준다. 리플레이·캠페인 리플레이는 방 탭 없이 예전처럼.
 
 const POLL_MS = 3000;
 type Mode = "live" | "replay" | "campaign";
 const MODE_LABEL: Record<Mode, string> = { live: "실시간", replay: "장애 리플레이(SCN-A)", campaign: "캠페인 리플레이" };
-type Conn = "unknown" | "on" | "off";
 
 const STATE_KO: Record<DeskState, string> = { idle: "대기", working: "작업 중", waiting: "승인 대기" };
 const STATE_DOT: Record<DeskState, string> = { idle: "bg-ink-300", working: "bg-brand-500", waiting: "bg-amber-700" };
@@ -28,6 +24,7 @@ const STATUS_LOOK: Record<OfficeStatus, string> = {
   ok: "bg-ink-100 text-ink-500", alert: "bg-red-50 text-red-700", resolved: "bg-emerald-50 text-emerald-700", degraded: "bg-amber-50 text-amber-700",
 };
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+const isHuman = (it: ChatItem) => it.id.startsWith("direct:");
 
 export default function AgentOffice() {
   const params = useSearchParams();
@@ -36,27 +33,29 @@ export default function AgentOffice() {
   const [autoNote, setAutoNote] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
-  // ------------------------------------------------ 실시간: AI 대화방과 같은 세 출처
-  const [incidents, setIncidents] = useState<OrchIncident[]>([]);
-  const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
-  const [comms, setComms] = useState<CommLine[]>([]);
-  const [orchConn, setOrchConn] = useState<Conn>("unknown");
-  const [safetyConn, setSafetyConn] = useState<Conn>("unknown");
-  const [commConn, setCommConn] = useState<Conn>("unknown");
-
-  const refresh = useCallback(async () => {
-    const [inc, exe, com] = await Promise.allSettled([orchestrator.incidents(), finance.executions(), api.communications()]);
-    if (inc.status === "fulfilled") { setIncidents(inc.value.data); setOrchConn("on"); } else setOrchConn("off");
-    if (exe.status === "fulfilled") { setExecutions(exe.value); setSafetyConn("on"); } else setSafetyConn("off");
-    if (com.status === "fulfilled") { setComms(com.value.data); setCommConn("on"); } else { setComms([]); setCommConn("off"); }
-  }, []);
-
+  // ------------------------------------------------ 방: 전체 / 장애·이슈 방 / 1:1 탭(나만 보임)
+  const asked = params.get("room");
+  const [room, setRoom] = useState<string>(asked || ALL_ROOM);
+  const [openDirect, setOpenDirect] = useState<string[]>(() => (asked && directAgentOf(asked) ? [asked.slice(DIRECT_PREFIX.length)] : []));
   useEffect(() => {
-    if (mode !== "live") return;
-    refresh();
-    const t = setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
-    return () => clearInterval(t);
-  }, [mode, refresh]);
+    if (!asked) return;
+    setRoom(asked);
+    const d = directAgentOf(asked);
+    if (d) setOpenDirect((o) => (o.includes(d.key) ? o : [...o, d.key]));
+  }, [asked]);
+  const openTalk = (key: string) => {
+    if (!DIRECT_AGENTS.some((a) => a.key === key)) return;
+    setOpenDirect((o) => (o.includes(key) ? o : [...o, key]));
+    setRoom(DIRECT_PREFIX + key);
+  };
+  const closeTalk = (key: string) => {
+    setOpenDirect((o) => o.filter((k) => k !== key));
+    setRoom((r) => (r === DIRECT_PREFIX + key ? ALL_ROOM : r));
+  };
+
+  // ------------------------------------------------ 실시간: 대화 기록과 같은 방 데이터
+  const data = useChatRooms({ enabled: mode === "live", room: mode === "live" ? room : null });
+  const { incidents, orchConn, safetyConn, commConn, talk } = data;
 
   // 총괄이 꺼져 있으면 처음 한 번만 리플레이로 바꿔 준다
   const autoSwitched = useRef(false);
@@ -93,10 +92,14 @@ export default function AgentOffice() {
     [mode, incidents, replayT, replayBase],
   );
   const campaign = useMemo(() => (mode === "campaign" ? replayCampaign(replayT, replayBase) : null), [mode, replayT, replayBase]);
-  const items = useMemo(
-    () => campaign ? campaign.items : buildTimeline(shownIncidents, mode === "live" ? executions : [], mode === "live" ? comms : [], ALL_ROOM),
-    [campaign, shownIncidents, executions, comms, mode],
-  );
+  const direct = mode === "live" ? directAgentOf(room) : undefined;
+  // 실시간: 고른 방의 부서 기록만(사람 대화 제외) 사무실 말풍선에 쓴다. 1:1 탭이면 말풍선 없음
+  const items = useMemo(() => {
+    if (campaign) return campaign.items;
+    if (mode !== "live") return buildTimeline(shownIncidents, [], [], ALL_ROOM);
+    if (direct) return [] as ChatItem[];
+    return (data.items[room] ?? []).filter((it) => !isHuman(it));
+  }, [campaign, mode, shownIncidents, direct, data.items, room]);
 
   // 말풍선 id → 처음 본 시각. 실시간은 연결 직후 이미 있던 기록을 0(말풍선 없음)으로 둔다
   const seenRef = useRef(new Map<string, number>());
@@ -119,7 +122,6 @@ export default function AgentOffice() {
   );
 
   // ------------------------------------------------ 사람이 부서 AI에게 말 걸기 (단톡방 대화는 모두에게 보인다. 1:1 직접 대화와는 따로)
-  const talk = useOfficeTalk();
   // 답을 기다리는 부서가 놀고 있으면 자리에서 "작업 중"으로 (총괄 일로 바쁜 자리·상태는 그대로). 걷지는 않고 불꽃만 켜진다
   const busyStr = talk.busyKeys.join(",");
   const view = useMemo(() => {
@@ -131,8 +133,12 @@ export default function AgentOffice() {
     }
     return v;
   }, [baseView, busyStr]);
-  // 단톡방: 실시간은 시각순으로 끼워 넣고(타임라인 순서는 그대로), 리플레이는 구분선 아래에 붙인다 (AI 대화방 전체 대화방과 같은 함수)
-  const chatItems = useMemo(() => mergeTalk(items, talk.items, isReplay), [items, talk.items, isReplay]);
+  // 단톡방: 실시간은 고른 방의 대화(기록 + 그 방 사람 대화), 리플레이는 전체 대화방 사람 대화를 구분선 아래에 붙인다
+  const roomTalk = useMemo(() => talk.items.filter((it) => it.room === (mode === "live" ? room : ALL_ROOM)), [talk.items, mode, room]);
+  const chatItems = useMemo(
+    () => (mode === "live" ? data.items[room] ?? [] : mergeTalk(items, roomTalk, true)),
+    [mode, data.items, room, items, roomTalk],
+  );
   // 사람 대화의 처음 본 시각 (기존 seenRef·deriveOffice 입력과 따로). 처음 불러온 지난 대화는 0 = 애니메이션 없음
   const humanSeenRef = useRef(new Map<string, number>());
   const humanSeen = useMemo(() => {
@@ -148,11 +154,12 @@ export default function AgentOffice() {
   const typing: Typing[] = DESKS.filter((d) => view.desks[d.key].state === "working").map((d) => ({
     key: d.key, name: d.key === "orchestrator" ? "총괄" : `${d.label} Agent`, what: skillKo(view.desks[d.key].skill) || "작업",
   }));
-  // 총괄 일로 이미 바빠서 덮어쓰지 못한 부서가 답을 기다리면 그때만 줄을 하나 더
-  for (const key of talk.busyKeys) {
-    if (baseView.desks[key as DeskKey]?.state === "idle" || typing.some((t) => t.key === `${key}:talk`)) continue;
+  // 이 방에서 답을 기다리는 부서는 "답을 쓰는" 줄을 하나 더 (총괄 일로 이미 작업 중 줄이 있으면 그대로)
+  const talkRoom = mode === "live" ? room : ALL_ROOM;
+  for (const key of talk.busyIn(talkRoom)) {
+    if (typing.some((t) => t.key === key || t.key === `${key}:talk`)) continue;
     const agent = DIRECT_AGENTS.find((a) => a.key === key);
-    if (agent) typing.push({ key: `${key}:talk`, name: agent.name, what: "질문에 답하는" });
+    if (agent) typing.push({ key: `${key}:talk`, name: agent.name, what: "답을 쓰는" });
   }
 
   const inc = view.incident;
@@ -160,6 +167,29 @@ export default function AgentOffice() {
     ok: "정상 운영", alert: inc ? `${incidentTitle(inc)} 대응 중` : "대응 중", resolved: "장애 해결", degraded: "일부 미완료로 종료",
   }[view.status];
   const officeLabel = `부서 AI 사무실. ${statusText}. ` + DESKS.map((d) => `${d.label} ${STATE_KO[view.desks[d.key].state]}`).join(", ");
+
+  // 진행 중인 장애 방 (가장 최근에 열린 것). 사무실 오른쪽 위에 표시
+  const liveRoom = mode === "live" ? data.incidentRooms.find((r) => r.status === "open") : undefined;
+  const roomInfo = room === ALL_ROOM ? data.all : data.incidentRooms.find((r) => r.id === room);
+  const roomInc = mode === "live" ? incidents.find((i) => i.context_id === room) : undefined;
+
+  const tabs = mode === "live" ? (
+    <div role="tablist" aria-label="대화방" className="scroll-thin flex gap-1.5 overflow-x-auto border-b border-ink-100 bg-surface px-3 py-2.5">
+      <RoomTab on={room === ALL_ROOM} onClick={() => setRoom(ALL_ROOM)} label="전체" unread={data.unseen[ALL_ROOM]} />
+      {data.incidentRooms.map((r) => (
+        <RoomTab key={r.id} on={room === r.id} onClick={() => setRoom(r.id)} label={r.title} unread={data.unseen[r.id]}
+          mark={r.status === "open" ? <span className="h-1.5 w-1.5 rounded-full bg-red-700" aria-label="진행 중" /> : <span aria-label="끝남">✓</span>} />
+      ))}
+      {openDirect.map((key) => {
+        const a = DIRECT_AGENTS.find((x) => x.key === key);
+        if (!a) return null;
+        return (
+          <RoomTab key={key} on={room === DIRECT_PREFIX + key} onClick={() => setRoom(DIRECT_PREFIX + key)} label={`${a.name.replace(/\s*AI$/, "")} 1:1`} dashed
+            mark={<span aria-hidden="true">🔒</span>} onClose={() => closeTalk(key)} />
+        );
+      })}
+    </div>
+  ) : undefined;
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 lg:p-6">
@@ -169,8 +199,7 @@ export default function AgentOffice() {
           <h1 className="text-xl font-semibold tracking-tight">AI 오피스</h1>
           <p className="mt-1 text-sm text-ink-500">
             부서 AI가 지금 무슨 일을 하는지 사무실로 봅니다. 총괄이 일을 맡기면 그 부서가 총괄에게 와서 받아 가고, 일하는 동안 불꽃이 일어납니다. 사람 승인이 필요하면 🚩 승인 대기로 깜빡입니다.
-            기록과 문장은 <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">AI 대화방</Link>과 같습니다.
-            {" "}단톡방에서 부서 AI에게 바로 물어볼 수 있고, 그 대화는 AI 대화방에도 같이 남습니다.
+            {" "}오른쪽 단톡방은 <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">대화 기록</Link>과 같은 방이라 어디서 말해도 양쪽에 보입니다. 캐릭터를 누르면 그 부서와 1:1로 이야기합니다(나만 보임).
           </p>
           {mode === "live" && (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -218,15 +247,21 @@ export default function AgentOffice() {
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 xl:flex-row">
         <section aria-label="부서 AI 사무실" className="card flex min-w-0 shrink-0 flex-col gap-3 p-4 xl:flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="card-title">부서 AI 사무실</h2>
             <span className="text-xs text-ink-500">9자리 · 총괄 포함</span>
             <span className={`chip ml-auto ${STATUS_LOOK[view.status]}`}>
               <span className={`h-1.5 w-1.5 rounded-full bg-current ${view.status === "alert" ? "animate-pulse" : ""}`} aria-hidden="true" />
               {liveReady ? statusText : "불러오는 중…"}
             </span>
+            {liveRoom && (
+              <button type="button" onClick={() => setRoom(liveRoom.id)} title="이 방 대화 보기"
+                className="chip rounded-full bg-red-50 font-semibold text-red-700 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-700">
+                <span aria-hidden="true">●</span> {liveRoom.title} 진행 중
+              </button>
+            )}
           </div>
-          <PixelOffice view={view} label={officeLabel} />
+          <PixelOffice view={view} label={officeLabel} onPick={mode === "live" ? openTalk : undefined} />
           <ul className="flex flex-wrap gap-1.5" aria-label="부서별 상태">
             {DESKS.map((d) => {
               const st = view.desks[d.key].state;
@@ -241,20 +276,50 @@ export default function AgentOffice() {
           </ul>
         </section>
 
-        <OfficeChat
-          items={chatItems.slice(-80)}
-          typing={typing}
-          freshIds={freshIds}
-          title="부서 단톡방"
-          sub={mode === "replay" ? "SCN-A 리플레이" : mode === "campaign" ? "캠페인 리플레이" : inc ? `${incidentTitle(inc)} 외 전체 기록` : "전체 기록"}
-          talk={talk}
-        />
+        {direct ? (
+          <div className="card flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden xl:w-[580px] xl:flex-none">
+            {tabs}
+            <DirectChat agent={direct} />
+          </div>
+        ) : (
+          <OfficeChat
+            items={chatItems.slice(-80)}
+            typing={typing}
+            freshIds={freshIds}
+            tabs={tabs}
+            title={mode === "live" ? roomInfo?.title ?? "찾을 수 없는 방" : "부서 단톡방"}
+            status={mode === "live" ? roomInfo?.status : undefined}
+            sub={mode === "replay" ? "SCN-A 리플레이" : mode === "campaign" ? "캠페인 리플레이" : undefined}
+            inc={roomInc}
+            room={talkRoom}
+            talk={talk}
+            big={mode === "live"}
+          />
+        )}
       </div>
     </div>
   );
 }
 
+function RoomTab({ on, onClick, label, unread, mark, dashed = false, onClose }: {
+  on: boolean; onClick: () => void; label: string; unread?: number; mark?: ReactNode; dashed?: boolean; onClose?: () => void;
+}) {
+  return (
+    <span className={`flex shrink-0 items-center rounded-full border text-xs ${on ? "border-transparent bg-ink-900 text-app" : "border-transparent bg-ink-50 text-ink-700 hover:bg-ink-100"} ${dashed && !on ? "!border-dashed !border-ink-300" : ""}`}>
+      <button type="button" role="tab" aria-selected={on} onClick={onClick}
+        className="flex max-w-[220px] items-center gap-1.5 rounded-full px-3 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+        {mark}
+        <span className="truncate">{label}</span>
+        {!!unread && !on && <span className="rounded-full bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`안 읽은 메시지 ${unread}개`}>{unread}</span>}
+      </button>
+      {onClose && (
+        <button type="button" onClick={onClose} aria-label={`${label} 탭 닫기`} className="mr-1.5 rounded-full px-1 text-[11px] opacity-70 hover:opacity-100">×</button>
+      )}
+    </span>
+  );
+}
+
 function ConnChip({ label, conn }: { label: string; conn: Conn }) {
-  const tone = conn === "on" ? "bg-emerald-50 text-emerald-700" : conn === "off" ? "bg-red-50 text-red-700" : "bg-ink-100 text-ink-500";
-  return <span className={`chip ${tone}`}>{label} {{ on: "켜짐", off: "꺼짐", unknown: "확인 중" }[conn]}</span>;
+  const tone = conn === "on" ? "bg-emerald-50 text-emerald-700" : conn === "off" ? "bg-red-50 text-red-700" : conn === "unready" ? "bg-amber-50 text-amber-700" : "bg-ink-100 text-ink-500";
+  return <span className={`chip ${tone}`}>{label} {{ on: "켜짐", off: "꺼짐", unready: "준비 안 됨(503)", unknown: "확인 중" }[conn]}</span>;
 }

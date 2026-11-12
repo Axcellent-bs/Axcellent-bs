@@ -114,7 +114,8 @@ function loadImage(src: string): HTMLImageElement {
 const REDUCE = "(prefers-reduced-motion: reduce)";
 const reducedNow = () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(REDUCE).matches;
 
-export function PixelOffice({ view, label }: { view: OfficeView; label: string }) {
+/** `onPick`이 있으면 자리마다 누를 수 있는 투명 버튼을 얹는다 (그 부서와 1:1 대화 열기) */
+export function PixelOffice({ view, label, onPick }: { view: OfficeView; label: string; onPick?: (key: DeskKey) => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -199,9 +200,21 @@ export function PixelOffice({ view, label }: { view: OfficeView; label: string }
     return () => { cancelAnimationFrame(raf); mq?.removeEventListener?.("change", onMq); };
   }, []);
 
-  return (
+  const canvas = (
     <canvas ref={ref} width={W} height={H} role="img" aria-label={label}
       className="block h-auto w-full rounded-2xl [image-rendering:pixelated]" />
+  );
+  if (!onPick) return canvas;
+  return (
+    <div className="relative">
+      {canvas}
+      {DESKS.map((d) => (
+        <button key={d.key} type="button" onClick={() => onPick(d.key)}
+          aria-label={`${d.label} AI와 1:1 대화 열기`} title={`${d.label} AI와 1:1 대화 (나만 보임)`}
+          className="absolute h-[14%] w-[6%] -translate-x-1/2 -translate-y-full rounded-xl hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+          style={{ left: `${SEATS[d.key].fx * 100}%`, top: `${SEATS[d.key].fy * 100}%` }} />
+      ))}
+    </div>
   );
 }
 

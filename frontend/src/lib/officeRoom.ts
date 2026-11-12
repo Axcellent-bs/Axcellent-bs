@@ -10,7 +10,12 @@ export interface OfficeEntry {
   fromName: string;
   createdAt: string;
   updatedAt: string;
+  /** 대화가 오간 방: 전체 대화방 "all", 장애·이슈 방은 총괄 사건 context_id. 예전 서버(칸 없음)는 "all" */
+  roomId: string;
 }
+
+/** 전체 대화방 방 번호 (dashboard-api office_room.ALL_ROOM, lib/agentChat ALL_ROOM과 같은 값) */
+export const ROOM_ALL = "all";
 
 /** 목록을 다시 읽는 간격(ms). 목록 읽기는 부서 AI를 부르지 않는다 */
 export const ROOM_POLL_MS = 4000;
@@ -27,6 +32,7 @@ const toEntry = (x: Record<string, unknown>): OfficeEntry | null =>
         fromName: String(x.from_name ?? ""),
         createdAt: String(x.created_at ?? ""),
         updatedAt: String(x.updated_at ?? ""),
+        roomId: typeof x.room_id === "string" && x.room_id ? x.room_id : ROOM_ALL,
       }
     : null;
 
@@ -43,11 +49,11 @@ export async function listOfficeRoom(): Promise<OfficeEntry[]> {
   return Array.isArray(data) ? data.map((x) => toEntry(x as Record<string, unknown>)).filter((x): x is OfficeEntry => !!x) : [];
 }
 
-/** 단톡방에서 말을 보냈다고 올린다 (보낼 때마다. 처음이면 새 줄, 있으면 마지막 시각만 바뀐다) */
-export async function touchOfficeRoom(x: { agent: string; threadId: string; fromId: string; fromName: string }): Promise<OfficeEntry | null> {
+/** 단톡방에서 말을 보냈다고 올린다 (보낼 때마다. 처음이면 새 줄, 있으면 마지막 시각만 바뀐다. 방은 처음 올린 방 그대로) */
+export async function touchOfficeRoom(x: { agent: string; threadId: string; fromId: string; fromName: string; roomId: string }): Promise<OfficeEntry | null> {
   const data = await call({
     method: "POST",
-    body: JSON.stringify({ agent: x.agent, thread_id: x.threadId, from_id: x.fromId, from_name: x.fromName.slice(0, 40) || "이름 없음" }),
+    body: JSON.stringify({ agent: x.agent, thread_id: x.threadId, from_id: x.fromId, from_name: x.fromName.slice(0, 40) || "이름 없음", room_id: x.roomId }),
   });
   return data && typeof data === "object" ? toEntry(data as Record<string, unknown>) : null;
 }

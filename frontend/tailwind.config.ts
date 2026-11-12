@@ -16,6 +16,7 @@ const config: Config = {
       colors: {
         canvas: v('canvas'),
         app: v('app'),
+        chat: v('chat'),
         surface: { DEFAULT: v('surface'), 2: v('surface-2') },
         accent: { DEFAULT: v('accent'), 50: v('accent-50') },
         chart: { 1: v('chart-1'), 2: v('chart-2') },

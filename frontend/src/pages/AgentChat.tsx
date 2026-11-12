@@ -1,27 +1,21 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import {
-  ALL_ROOM, INCIDENT_STATUS_KO, SAFETY_ROOM, buildTimeline, incidentTitle, messageCount,
-  type ChatItem, type OrchIncident, type Tone,
-} from "@/lib/agentChat";
-import { api, ApiError } from "@/lib/api";
-import { finance, type ExecutionRecord } from "@/lib/finance";
-import { Link } from "@/lib/nav";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ALL_ROOM, messageCount, type ChatItem, type OrchIncident } from "@/lib/agentChat";
+import { matchRoom, roomTime, type ChatRoom } from "@/lib/chatRooms";
+import { Link, useSearchParams } from "@/lib/nav";
 import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
-import { HandoffLine, PlanCard } from "@/components/office/DevCards";
+import { Avatar, MessengerLog, PinNotice, StatusChip, TypingLines } from "@/components/office/Messenger";
 import { TalkInput } from "@/components/office/TalkInput";
-import { proceed, useOfficeTalk, type OfficeTalk } from "@/components/office/useOfficeTalk";
-import { mergeTalk } from "@/lib/officeTalk";
+import { useChatRooms, type Conn } from "@/components/office/useChatRooms";
 import { orchestrator } from "@/lib/orchestrator";
 import { shopFaults, type FaultState } from "@/lib/shopFaults";
-import type { CommLine } from "@/lib/types";
-import { humanizePlanIds } from "@/lib/format"
+import { humanizePlanIds } from "@/lib/format";
 
-// AI 대화방. 부서 AI들이 A2A로 주고받은 일을 메신저처럼 보여 준다.
-// 맨 위 "전체 대화방"은 사람과 부서 AI가 함께 쓰는 곳이다: 모든 부서 기록(AI 오피스 단톡방과 같은 규칙)에 사람 대화를 섞고, 아래 입력창으로 부서 AI에게 바로 말을 건다.
+// AI 대화방 · 대화 기록. 부서 AI들이 A2A로 주고받은 일과 사람이 건 말을 메신저처럼 보여 준다.
+// 방: 전체 대화방(처음 열면 여기) / 장애·이슈 방(총괄 사건 하나 = 방 하나) / 1:1 대화(나만 보임).
+// AI 오피스와 같은 방 목록·같은 대화를 본다(lib/chatRooms.ts, components/office/useChatRooms.ts).
 // 말풍선 문장은 lib/agentChat.ts가 기록된 값으로만 만든다. 이 파일은 화면과 새로고침만 맡는다.
-// 출처 세 곳: 총괄(이벤트·단계), 안전 관문(돈이 나가는 실행), dashboard-api 공통 로그(부서 간 소통).
-// 운영 환경에서는 총괄·안전 관문 기록도 dashboard-api를 거쳐 읽어야 한다 (지금은 개발용 직접 호출, 백엔드 후속 작업).
 // 장애는 이 화면에서 일으키지 않는다(사람이 요청하면 운영자가 캣북스에 넣는다). 화면은 캣북스 결제 상태만 읽어 보여 준다.
+// ?room=<방 id>로 들어오면 그 방을 연다 (AI 오피스 "대화 기록에서 크게 보기").
 
 const POLL_MS = 3000;
 // AI들은 1초 안에 수십 건을 주고받는다. 새로 도착한 메시지는 줄 세워 하나씩 보여 준다 (밀리면 조금 빠르게)
@@ -29,35 +23,6 @@ const REVEAL_MS = 600;
 const REVEAL_FAST_MS = 200;
 const FAST_BACKLOG = 20;
 const ORCH_CMD = "cd backend && bash scripts/run_all.sh";
-
-/** unready = 서버는 답했지만 503 (공통 로그 읽기가 아직 연결 안 됨) */
-type Conn = "unknown" | "on" | "off" | "unready";
-const PROD_NOTE = "운영 환경에서는 AXcellent가 총괄·안전 관문 기록도 dashboard-api를 거쳐 읽어야 합니다 (지금은 개발용으로 각 서버를 직접 부름).";
-
-const clock = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
-
-// ---------------------------------------------------------------- 부서별 말풍선 색 (디자인 토큰만 사용)
-const BUBBLE: Record<string, { bubble: string; avatar: string }> = {
-  infra: { bubble: "bg-ink-100", avatar: "bg-ink-700 text-app" },
-  data: { bubble: "bg-violet-50", avatar: "bg-violet-700 text-white dark:text-app" },
-  planning: { bubble: "bg-surface-2", avatar: "bg-brand-500 text-white" },
-  marketing: { bubble: "bg-accent-50", avatar: "bg-accent text-white" },
-  support: { bubble: "bg-emerald-50", avatar: "bg-emerald-700 text-white dark:text-app" },
-  finance: { bubble: "bg-amber-50", avatar: "bg-amber-700 text-white dark:text-app" },
-  hr: { bubble: "bg-red-50", avatar: "bg-red-700 text-white dark:text-app" },
-  dev: { bubble: "bg-sky-50", avatar: "bg-sky-700 text-white dark:text-app" },
-  human: { bubble: "bg-teal-700 text-white", avatar: "bg-teal-700 text-white" },
-  safety: { bubble: "bg-brand-600 text-white", avatar: "bg-brand-strong text-white" },
-  orchestrator: { bubble: "bg-brand-600 text-white", avatar: "bg-brand-strong text-white" },
-};
-const bubbleOf = (key: string) => BUBBLE[key] ?? { bubble: "bg-ink-100", avatar: "bg-ink-500 text-white" };
-
-const TONE_MARK: Record<Tone, string> = {
-  request: "", ok: "border-l-2 border-emerald-700/50", warn: "border-l-2 border-amber-700/60", fail: "border-l-2 border-red-700/60", muted: "opacity-80",
-};
-const TONE_ICON: Record<Tone, string> = { request: "", ok: "✓ ", warn: "⏸ ", fail: "✕ ", muted: "" };
-
-const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "");
 
 // ---------------------------------------------------------------- 연결 칩
 function ConnChip({ label, conn }: { label: string; conn: Conn }) {
@@ -72,288 +37,131 @@ function ConnChip({ label, conn }: { label: string; conn: Conn }) {
   );
 }
 
-// ---------------------------------------------------------------- 타임라인 항목
-function Avatar({ name, k, small = false }: { name: string; k: string; small?: boolean }) {
-  return (
-    <span aria-hidden="true" className={`flex ${small ? "h-5 w-5 text-[10px]" : "h-8 w-8"} shrink-0 items-center justify-center rounded-full text-xs font-semibold ${bubbleOf(k).avatar}`}>
-      {name.slice(0, 1)}
-    </span>
-  );
+/** 방 아바타: 전체(보라) · 장애(진행 중 빨강, 끝나면 주황) · 1:1(부서 색) */
+function RoomAvatar({ room, agentKey, name }: { room?: ChatRoom; agentKey?: string; name?: string }) {
+  if (agentKey) return <Avatar name={name ?? agentKey} k={agentKey} />;
+  if (room?.kind === "all") return <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] bg-brand-600 text-[11px] font-bold text-white">전체</span>;
+  const open = room?.status === "open";
+  return <span aria-hidden="true" className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] text-[11px] font-bold text-white ${open ? "bg-red-700" : "bg-amber-700"}`}>장애</span>;
 }
 
-function Message({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: OfficeTalk }) {
-  // 사람이 건 말은 오른쪽 청록 말풍선 (AI 오피스 단톡방과 같은 색), 직접 대화는 줄바꿈을 그대로
-  const right = m.central || !!m.human;
-  const direct = m.id.startsWith("direct:");
-  const look = bubbleOf(m.fromKey);
-  return (
-    <li className={`flex gap-2.5 ${right ? "flex-row-reverse" : ""}`}>
-      <Avatar name={m.from} k={m.fromKey} />
-      <div className={`flex min-w-0 max-w-[min(560px,85%)] flex-col ${right ? "items-end" : "items-start"}`}>
-        <div className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs ${right ? "justify-end" : ""}`}>
-          <span className="font-semibold text-ink-900">{m.from}</span>
-          <span className="chip bg-ink-100 px-1.5 py-0 text-[10px] text-ink-500">→ {m.to}</span>
-          <time dateTime={m.at} className="tabular-nums text-[11px] text-ink-500">{hhmm(m.at)}{m.repeat && m.lastAt ? ` ~ ${hhmm(m.lastAt)}` : ""}</time>
-          {m.repeat && <span className="chip bg-brand-50 px-1.5 py-0 text-[10px] font-semibold text-brand-700" title="같은 내용을 여러 번 주고받아 하나로 묶었습니다">×{m.repeat}</span>}
-        </div>
-        <div title={m.raw} className={`mt-1 rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${right ? "rounded-tr-md" : "rounded-tl-md"} ${look.bubble} ${right ? "" : TONE_MARK[m.tone]}`}>
-          <p className={direct ? "whitespace-pre-wrap break-words" : undefined}>{right ? "" : TONE_ICON[m.tone]}{humanizePlanIds(m.text)}</p>
-          {m.plan && (
-            <PlanCard plan={m.plan} disabled={!talk || !m.goKey || talk.busy(m.goKey)}
-              onGo={talk && m.goKey ? () => { void proceed(talk, m.goKey as string); } : undefined} />
-          )}
-          {m.handoff && <HandoffLine requestId={m.handoff.requestId} />}
-          {m.facts.length > 0 && (
-            <dl className="mt-1.5 flex flex-wrap gap-1.5">
-              {m.facts.map((f) => (
-                <div key={f.label} className="rounded-lg bg-surface/70 px-2 py-0.5 text-[11px] text-ink-700">
-                  <dt className="inline text-ink-500">{f.label} </dt>
-                  <dd className="inline font-medium tabular-nums">{f.value}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-          {m.tag && <p className={`mt-1 text-[11px] ${right ? "text-white/70" : "text-ink-500"}`}>{m.tag}</p>}
-        </div>
-      </div>
-    </li>
-  );
-}
-
-function HoldBanner({ h, busy, canDecide, orchMock, onDecide }: {
-  h: Extract<ChatItem, { kind: "hold" }>; busy: boolean; canDecide: boolean; orchMock: boolean; onDecide: (approved: boolean) => void;
+// ---------------------------------------------------------------- 채팅 목록
+function RoomRow({ on, onClick, avatar, title, status, preview, time, unread }: {
+  on: boolean; onClick: () => void; avatar: ReactNode; title: string; status?: string; preview?: string; time?: string; unread?: number;
 }) {
-  // 결정 경로는 하나: 실제 C 보류는 안전 관문 보류 큐에서만. 총괄 보류 버튼은 목 모드 데모일 때만 보인다
-  // (총괄의 POST /api/incidents/{ctx}/holds/{step}은 사람 토큰을 받지만 목 모드에서만 열린다 — DSH-03)
-  const orchHold = !h.link;
-  const showButtons = orchHold && orchMock;
-  const link = h.link ?? (orchMock ? undefined : h.decideAt ?? "/finance");
-  const outcome = { approved: "사람이 승인 → 다시 진행", rejected: "사람이 거절 → 진행하지 않음", timeout: "기한 안에 결정 없음 → 자동 거절", pending: "" }[h.state];
   return (
-    <li className="rounded-2xl bg-ink-900 px-4 py-3 text-app dark:bg-surface-2 dark:text-ink-900 dark:ring-1 dark:ring-amber-700/40">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <p className="text-sm font-semibold">
-          <span aria-hidden="true">🚩 </span>
-          {h.state === "pending" ? "사람 판단 필요" : "인간 판단"}: {h.title}
-        </p>
-        <time dateTime={h.at} className="tabular-nums text-[11px] opacity-70">{hhmm(h.at)}</time>
-        {h.state !== "pending" && <span className="chip ml-auto bg-white/15 text-current dark:bg-ink-100">{outcome}</span>}
-        {h.state === "pending" && link && (
-          <Link href={link} className="btn ml-auto bg-white/15 text-current hover:bg-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700 dark:bg-ink-100">
-            {orchHold ? `안전 관문 보류 큐에서 결정 (${link}) →` : "담당 화면에서 결정 →"}
-          </Link>
-        )}
-        {h.state === "pending" && showButtons && (
-          <div className="ml-auto flex gap-2">
-            <button className="btn bg-emerald-700 text-white hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 dark:text-app"
-              disabled={busy || !canDecide} onClick={() => onDecide(true)}>승인</button>
-            <button className="btn bg-white/15 text-current hover:bg-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 dark:bg-ink-100"
-              disabled={busy || !canDecide} onClick={() => onDecide(false)}>거절</button>
-          </div>
-        )}
-      </div>
-      <p className="mt-1 text-[11px] opacity-75">
-        {humanizePlanIds(h.detail)}
-        {showButtons && h.state === "pending" && " · 목 모드 데모 전용 버튼입니다. 총괄 AI는 스스로 승인하지 않고, 여기서 누른 결정을 그대로 전달합니다."}
-        {orchHold && !orchMock && h.state === "pending" && " · 실제 모드에서는 C 등급 보류를 안전 관문 보류 큐 한 곳에서만 결정합니다 (이 화면의 총괄 결정 경로는 사람 확인이 없어 목 모드에서만 씁니다)."}
-      </p>
+    <li>
+      <button type="button" onClick={onClick} aria-current={on ? "true" : undefined}
+        className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-500 ${on ? "bg-brand-50" : "hover:bg-ink-50"}`}>
+        {avatar}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className={`truncate text-[13px] font-semibold ${on ? "text-brand-700" : "text-ink-900"}`}>{title}</span>
+            <StatusChip status={status} />
+          </span>
+          {preview && <span className="mt-0.5 block truncate text-xs text-ink-500">{humanizePlanIds(preview)}</span>}
+        </span>
+        <span className="flex shrink-0 flex-col items-end gap-1">
+          {time && <span className="text-[10px] tabular-nums text-ink-500">{time}</span>}
+          {!!unread && !on && <span className="rounded-full bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`안 읽은 메시지 ${unread}개`}>{unread}</span>}
+        </span>
+      </button>
     </li>
   );
 }
 
-function Item({ it, busyHold, orchOn, orchMock, onDecide, talk }: { it: ChatItem; busyHold: string | null; orchOn: boolean; orchMock: boolean; onDecide: (h: Extract<ChatItem, { kind: "hold" }>, approved: boolean) => void; talk?: OfficeTalk }) {
-  switch (it.kind) {
-    case "msg":
-      return <Message m={it} talk={talk} />;
-    case "hold":
-      return <HoldBanner h={it} busy={busyHold === it.id} canDecide={orchOn} orchMock={orchMock} onDecide={(a) => onDecide(it, a)} />;
-    case "system":
-      return (
-        <li className="flex justify-center">
-          <p className="max-w-[90%] rounded-full bg-ink-50 px-3 py-1 text-center text-[11px] text-ink-500 ring-1 ring-ink-100">
-            {humanizePlanIds(it.text)} <time dateTime={it.at} className="ml-1 tabular-nums">{hhmm(it.at)}</time>
-          </p>
-        </li>
-      );
-    case "separator":
-      return it.variant === "day" ? (
-        <li role="separator" className="flex items-center gap-3 pt-2 text-[11px] font-medium text-ink-500">
-          <span className="h-px flex-1 bg-ink-100" /><span title={it.raw} className={it.raw ? "cursor-help" : undefined}>{humanizePlanIds(it.text)}</span><span className="h-px flex-1 bg-ink-100" />
-        </li>
-      ) : (
-        <li role="separator" className="pt-1">
-          <p title={it.raw} className={`text-center text-xs font-semibold text-ink-700 ${it.raw ? "cursor-help" : ""}`}>{humanizePlanIds(it.text)}</p>
-        </li>
-      );
-  }
-}
-
-// ---------------------------------------------------------------- 방 목록
-interface Room { id: string; title: string; sub?: string; status?: string; count: number }
-
-const STATUS_TONE: Record<string, string> = {
-  open: "bg-brand-50 text-brand-700", resolved: "bg-emerald-50 text-emerald-700", degraded: "bg-amber-50 text-amber-700",
-};
-
-function RoomList({ rooms, all, selected, unseen, onSelect }: { rooms: Room[]; all: Room; selected: string; unseen: Record<string, number>; onSelect: (id: string) => void }) {
-  const allOn = selected === all.id;
-  const allNew = unseen[all.id] ?? 0;
+function RoomList({ all, incidents, selected, unseen, onSelect }: {
+  all: ChatRoom; incidents: ChatRoom[]; selected: string; unseen: Record<string, number>; onSelect: (id: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const shownIncidents = incidents.filter((r) => matchRoom(q, r.title));
+  const shownDirect = DIRECT_AGENTS.filter((a) => matchRoom(q, a.name));
+  const showAll = matchRoom(q, all.title, "전체");
   return (
-    <nav aria-label="대화방 목록" className="card shrink-0 overflow-hidden lg:w-72">
-      <div className="px-2 pt-2">
-        <button onClick={() => onSelect(all.id)} aria-current={allOn ? "true" : undefined}
-          className={`w-full rounded-xl px-3 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${allOn ? "bg-brand-50" : "hover:bg-ink-50"}`}>
-          <div className="flex items-center gap-2">
-            <span className={`truncate text-sm font-semibold ${allOn ? "text-brand-700" : ""}`}><span aria-hidden="true">📌 </span>{all.title}</span>
-            <span className="ml-auto shrink-0 text-[11px] tabular-nums text-ink-500">{all.count}</span>
-            {allNew > 0 && !allOn && <span className="chip shrink-0 bg-accent px-1.5 text-white" aria-label={`새 메시지 ${allNew}개`}>{allNew}</span>}
-          </div>
-          <p className="mt-1 truncate text-[11px] text-ink-500">{all.sub}</p>
-        </button>
+    <nav aria-label="채팅 목록" className="card flex shrink-0 flex-col overflow-hidden lg:w-80">
+      <div className="p-3">
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="대화방·부서 검색" aria-label="대화방·부서 검색" className="field w-full text-xs" />
       </div>
-      <h2 className="px-4 pb-1 pt-3 text-sm font-semibold">직접 대화</h2>
-      <ul className="scroll-thin flex gap-1 overflow-x-auto px-2 pb-3 lg:flex-col lg:overflow-x-visible">
-        {DIRECT_AGENTS.map((a) => {
-          const id = DIRECT_PREFIX + a.key;
-          const on = id === selected;
-          return (
-            <li key={a.key} className="shrink-0 lg:shrink">
-              <button onClick={() => onSelect(id)} aria-current={on ? "true" : undefined}
-                className={`flex w-full min-w-[140px] items-center gap-2 rounded-xl px-3 py-2 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-50" : "hover:bg-ink-50"}`}>
-                <Avatar name={a.name} k={a.key} small />
-                <span className={`truncate text-sm ${on ? "font-semibold text-brand-700" : a.live ? "font-medium" : "text-ink-500"}`}>{a.name}</span>
-                {!a.live && <span className="ml-auto shrink-0 text-[11px] text-ink-500">준비 중</span>}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      <h2 className="border-t border-ink-100 px-4 pb-1 pt-4 text-sm font-semibold">대화방</h2>
-      <ul className="scroll-thin flex gap-1 overflow-x-auto px-2 pb-3 lg:max-h-[max(220px,calc(100vh-720px))] lg:flex-col lg:overflow-y-auto lg:overflow-x-visible">
-        {rooms.map((r) => {
-          const on = r.id === selected;
-          const n = unseen[r.id] ?? 0;
-          return (
-            <li key={r.id} className="shrink-0 lg:shrink">
-              <button onClick={() => onSelect(r.id)} aria-current={on ? "true" : undefined}
-                className={`w-full min-w-[180px] rounded-xl px-3 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-50" : "hover:bg-ink-50"}`}>
-                <div className="flex items-center gap-2">
-                  <span className={`truncate text-sm ${on ? "font-semibold text-brand-700" : "font-medium"}`}>{r.title}</span>
-                  <span className="ml-auto shrink-0 text-[11px] tabular-nums text-ink-500">{r.count}</span>
-                  {n > 0 && !on && <span className="chip shrink-0 bg-accent px-1.5 text-white" aria-label={`새 메시지 ${n}개`}>{n}</span>}
-                </div>
-                {(r.sub || r.status) && (
-                  <div className="mt-1 flex items-center gap-1.5">
-                    {r.status && <span className={`chip shrink-0 whitespace-nowrap ${STATUS_TONE[r.status] ?? "bg-ink-100 text-ink-500"}`}>{INCIDENT_STATUS_KO[r.status] ?? r.status}</span>}
-                    {r.sub && <span className="truncate text-[11px] text-ink-500">{r.sub}</span>}
-                  </div>
-                )}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-2 lg:max-h-[calc(100vh-230px)]">
+        {showAll && (
+          <ul>
+            <RoomRow on={selected === all.id} onClick={() => onSelect(all.id)} avatar={<RoomAvatar room={all} />} title={all.title}
+              preview={all.preview} time={roomTime(all.lastAt)} unread={unseen[all.id]} />
+          </ul>
+        )}
+        <h2 className="px-4 pb-1 pt-3 text-[11px] font-semibold text-ink-500">장애·이슈 방</h2>
+        {shownIncidents.length === 0 ? <p className="px-4 py-1 text-xs text-ink-500">{q ? "찾는 방이 없어요" : "아직 장애·이슈 방이 없어요"}</p> : (
+          <ul>
+            {shownIncidents.map((r) => (
+              <RoomRow key={r.id} on={selected === r.id} onClick={() => onSelect(r.id)} avatar={<RoomAvatar room={r} />} title={r.title}
+                status={r.status} preview={r.preview} time={roomTime(r.lastAt)} unread={unseen[r.id]} />
+            ))}
+          </ul>
+        )}
+        <h2 className="px-4 pb-1 pt-3 text-[11px] font-semibold text-ink-500">1:1 대화 · <span aria-hidden="true">🔒</span> 나만 보임</h2>
+        {shownDirect.length === 0 ? <p className="px-4 py-1 text-xs text-ink-500">찾는 부서가 없어요</p> : (
+          <ul>
+            {shownDirect.map((a) => {
+              const id = DIRECT_PREFIX + a.key;
+              return (
+                <RoomRow key={a.key} on={selected === id} onClick={() => onSelect(id)} avatar={<RoomAvatar agentKey={a.key} name={a.name} />} title={a.name}
+                  preview={a.live ? undefined : "준비 중"} />
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </nav>
   );
 }
 
 // ---------------------------------------------------------------- 페이지
 export default function AgentChat() {
-  const [incidents, setIncidents] = useState<OrchIncident[]>([]);
-  const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
-  const [orchConn, setOrchConn] = useState<Conn>("unknown");
-  const [safetyConn, setSafetyConn] = useState<Conn>("unknown");
-  const [comms, setComms] = useState<CommLine[]>([]);
-  const [commConn, setCommConn] = useState<Conn>("unknown");
-  const [commTruncated, setCommTruncated] = useState(false);
-  // 총괄이 목 모드라고 알려 줄 때만(GET /api/incidents의 meta.mock) 총괄 보류에 승인·거절 버튼을 보인다
-  const [orchMock, setOrchMock] = useState(false);
-  // 처음 열면 전체 대화방
-  const [room, setRoom] = useState<string>(ALL_ROOM);
-  const roomPicked = useRef(false);
-  const [seen, setSeen] = useState<Record<string, number>>({});
+  const params = useSearchParams();
+  const asked = params.get("room");
+  // 처음 열면 전체 대화방. ?room=이 있으면 그 방
+  const [room, setRoom] = useState<string>(asked || ALL_ROOM);
+  useEffect(() => { if (asked) setRoom(asked); }, [asked]);
+
+  const data = useChatRooms({ room });
+  const { incidents, orchConn, safetyConn, commConn, commTruncated, orchMock, loaded, talk, all, incidentRooms } = data;
   const [busyHold, setBusyHold] = useState<string | null>(null);
   const [fault, setFault] = useState<FaultState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
 
-  const refresh = useCallback(async () => {
-    const [inc, exe, com] = await Promise.allSettled([orchestrator.incidents(), finance.executions(), api.communications()]);
-    if (inc.status === "fulfilled") {
-      setIncidents(inc.value.data);
-      setOrchMock(inc.value.meta.mock === true);
-      setOrchConn("on");
-      if (inc.value.meta.mock !== true) shopFaults.state().then(setFault, () => setFault(null));
-    }
-    else { setOrchConn("off"); setOrchMock(false); }
-    if (exe.status === "fulfilled") { setExecutions(exe.value); setSafetyConn("on"); } else setSafetyConn("off");
-    if (com.status === "fulfilled") { setComms(com.value.data); setCommTruncated(com.value.meta?.truncated === true); setCommConn("on"); }
-    else {
-      setComms([]);
-      setCommTruncated(false);
-      setCommConn(com.reason instanceof ApiError && com.reason.status === 503 ? "unready" : "off");
-    }
-    setLoaded(true);
-  }, []);
-
-  // 3초마다 새로고침. 탭이 가려져 있으면 쉬고, 다시 보이면 바로 한 번
+  // 캣북스 결제 상태 (실제 모드일 때만)
   useEffect(() => {
-    refresh();
-    const t = setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
-    const onVis = () => { if (!document.hidden) refresh(); };
-    document.addEventListener("visibilitychange", onVis);
-    return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVis); };
-  }, [refresh]);
-
-  // ------------------------------------------------ 사람이 부서 AI에게 말 걸기 (AI 오피스 단톡방과 같은 대화, 모두에게 보인다. 1:1 직접 대화와는 따로)
-  const talk = useOfficeTalk();
-
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const id of [SAFETY_ROOM, ...incidents.map((i) => i.context_id)]) {
-      c[id] = messageCount(buildTimeline(incidents, executions, comms, id));
-    }
-    c[ALL_ROOM] = messageCount(mergeTalk(buildTimeline(incidents, executions, comms, ALL_ROOM), talk.items));
-    return c;
-  }, [incidents, executions, comms, talk.items]);
-  const allRoom: Room = useMemo(() => ({ id: ALL_ROOM, title: "전체 대화방", sub: "모든 부서 기록 · 여기서 부서에 말 걸기", count: counts[ALL_ROOM] ?? 0 }), [counts]);
-
-  const rooms: Room[] = useMemo(() => [
-    ...[...incidents].reverse().map((inc) => ({
-      id: inc.context_id,
-      title: incidentTitle(inc),
-      sub: `${clock(inc.opened_at)} 시작`,
-      status: inc.status,
-      count: counts[inc.context_id] ?? 0,
-    })),
-    { id: SAFETY_ROOM, title: "안전 관문(돈이 나가는 일)", sub: safetyConn === "off" ? "연결 안 됨" : undefined, count: counts[SAFETY_ROOM] ?? 0 },
-  ], [incidents, counts, safetyConn]);
-
-  // 지금 보고 있는 방은 읽음 처리
-  useEffect(() => { setSeen((s) => (s[room] === counts[room] ? s : { ...s, [room]: counts[room] ?? 0 })); }, [room, counts]);
-  const unseen = useMemo(() => Object.fromEntries([allRoom, ...rooms].map((r) => [r.id, seen[r.id] == null ? 0 : Math.max(0, r.count - seen[r.id])])), [allRoom, rooms, seen]);
+    if (orchConn !== "on" || orchMock) return;
+    let live = true;
+    const read = () => shopFaults.state().then((f) => { if (live) setFault(f); }, () => { if (live) setFault(null); });
+    read();
+    const t = setInterval(() => { if (!document.hidden) read(); }, POLL_MS);
+    return () => { live = false; clearInterval(t); };
+  }, [orchConn, orchMock]);
 
   const direct = directAgentOf(room);
-  const items = useMemo(() => buildTimeline(incidents, executions, comms, room), [incidents, executions, comms, room]);
+  const inc: OrchIncident | undefined = incidents.find((i) => i.context_id === room);
+  const roomInfo: ChatRoom | undefined = room === ALL_ROOM ? all : incidentRooms.find((r) => r.id === room);
+  const items = useMemo(() => data.items[room] ?? [], [data.items, room]);
 
   // ------------------------------------------------ 새 이벤트가 열리면 그 방으로 옮겨 처음부터 차례로 보여 준다
-  // 화면을 연 순간 이미 있던 이벤트는 옮기지 않는다
+  // 화면을 연 순간 이미 있던 이벤트는 옮기지 않는다. 1:1·전체 대화방(사람이 말을 거는 곳)에 있으면 옮기지 않는다
   const knownIncidents = useRef<Set<string> | null>(null);
   const replayRoom = useRef<string | null>(null);
   useEffect(() => {
     if (orchConn !== "on") return;
     const ids = incidents.map((i) => i.context_id);
-    // 처음 열면 전체 대화방에 머문다 (마지막 사건 방으로 옮기지 않는다)
-    if (!roomPicked.current) roomPicked.current = true;
     if (knownIncidents.current === null) { knownIncidents.current = new Set(ids); return; }
     const opened = ids.find((id) => !knownIncidents.current?.has(id));
     for (const id of ids) knownIncidents.current.add(id);
-    // 새 사건이 열리면 그 방으로 옮긴다. 직접 대화·전체 대화방(사람이 말을 거는 곳)에 있으면 옮기지 않는다
     if (opened) { replayRoom.current = opened; setRoom((r) => (r.startsWith(DIRECT_PREFIX) || r === ALL_ROOM ? r : opened)); }
   }, [incidents, orchConn]);
 
   // ------------------------------------------------ 하나씩 보여 주기
-  // 방을 열 때 이미 있던 기록은 한 번에(지난 기록을 다시 재생하지 않음), 그 뒤에 도착한 것은 하나씩
+  // 방을 열 때 이미 있던 기록은 한 번에(지난 기록을 다시 재생하지 않음), 그 뒤에 도착한 부서 기록은 하나씩.
+  // 사람 대화는 바로 시각순으로 끼워 넣는다 (내 말풍선이 바로 붙게)
+  const records = useMemo(() => items.filter((it) => !it.id.startsWith("direct:")), [items]);
+  const human = useMemo(() => items.filter((it) => it.id.startsWith("direct:")), [items]);
   const [revealed, setRevealed] = useState(0);
   const primed = useRef(false);
   useLayoutEffect(() => { primed.current = false; }, [room]);
@@ -361,39 +169,38 @@ export default function AgentChat() {
     if (primed.current || !loaded) return;
     primed.current = true;
     if (replayRoom.current === room) { replayRoom.current = null; setRevealed(0); return; }
-    setRevealed(items.length);
-  }, [room, items.length, loaded]);
+    setRevealed(records.length);
+  }, [room, records.length, loaded]);
   useEffect(() => {
-    if (!primed.current || revealed >= items.length) return;
-    const backlog = items.length - revealed;
+    if (!primed.current || revealed >= records.length) return;
+    const backlog = records.length - revealed;
     const t = setTimeout(() => setRevealed((r) => r + 1), backlog > FAST_BACKLOG ? REVEAL_FAST_MS : REVEAL_MS);
     return () => clearTimeout(t);
-  }, [revealed, items.length]);
-  // 전체 대화방: 하나씩 보여 주기는 부서 기록에만 쓰고, 사람 대화는 바로 시각순으로 끼워 넣는다 (내 말풍선이 바로 붙게)
-  const isAll = room === ALL_ROOM;
+  }, [revealed, records.length]);
   const shown = useMemo(() => {
-    const base = items.slice(0, Math.min(revealed, items.length));
-    return isAll ? mergeTalk(base, talk.items) : base;
-  }, [items, revealed, isAll, talk.items]);
-  const typing = primed.current && revealed < items.length;
-  // 참석자: 이 방에서 말한 쪽과 받은 쪽 (처음 등장한 순서)
-  const participants = useMemo(() => {
-    const seen = new Map<string, { key: string; name: string }>();
-    for (const it of items) {
-      if (it.kind !== "msg") continue;
-      // 맡은 AI가 없는 단계("담당 미정")·받는 쪽이 기록되지 않은 줄은 참석자가 아니다
-      if (it.from !== "담당 미정" && !seen.has(it.from)) seen.set(it.from, { key: it.fromKey, name: it.from });
-      if (it.to && it.to !== "받는 쪽 미기록" && it.to !== "담당 미정" && !seen.has(it.to)) seen.set(it.to, { key: it.to, name: it.to });
+    const base = records.slice(0, Math.min(revealed, records.length));
+    if (!human.length) return base;
+    // 시각순으로 끼워 넣기 (기록의 순서는 그대로)
+    const out: ChatItem[] = [];
+    let h = 0;
+    for (const t of base) {
+      const at = t.at ? Date.parse(t.at) : NaN;
+      while (!Number.isNaN(at) && h < human.length && Date.parse(human[h].at) < at) out.push(human[h++]);
+      out.push(t);
     }
-    return [...seen.values()];
-  }, [items]);
+    while (h < human.length) out.push(human[h++]);
+    return out;
+  }, [records, revealed, human]);
+  const typing = primed.current && revealed < records.length;
+
+  // 참여 부서: 이 방에서 말한 AI (사람 제외)
+  const deptCount = useMemo(() => new Set(items.filter((it) => it.kind === "msg" && it.fromKey && it.fromKey !== "human" && it.from !== "담당 미정").map((it) => (it as Extract<ChatItem, { kind: "msg" }>).fromKey)).size, [items]);
 
   // ------------------------------------------------ 스크롤: 맨 아래에 붙어 있으면 따라가고, 위로 올렸으면 "새 메시지" 알약
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const lastLen = useRef(0);
   const [fresh, setFresh] = useState(0);
-  // 화면이 스스로 내린 스크롤은 "사람이 위로 올림"으로 보지 않는다 (부드러운 스크롤 도중의 scroll 이벤트)
   const autoScrollAt = useRef(0);
   const toBottom = useCallback((smooth = false) => {
     const el = scroller.current;
@@ -426,7 +233,7 @@ export default function AgentChat() {
     setError(null);
     try {
       await orchestrator.decideHold(h.contextId, h.stepId, approved);
-      await refresh();
+      await data.refresh();
     } catch (e) {
       setError(`결정을 전달하지 못했습니다: ${(e as Error).message}`);
     } finally {
@@ -435,17 +242,19 @@ export default function AgentChat() {
   }
 
   const orchOn = orchConn === "on";
-  const roomEmpty = items.length === 0 && !(isAll && talk.items.length > 0);
-  // 전체 대화방: 답을 기다리는 부서 (AI 오피스 단톡방과 같은 문구)
-  const answering = isAll ? DIRECT_AGENTS.filter((a) => talk.busyKeys.includes(a.key)) : [];
+  const isAll = room === ALL_ROOM;
+  // 말을 걸 수 있는 방: 전체 대화방, 장애·이슈 방
+  const talkable = isAll || !!inc;
+  const answering = talkable ? DIRECT_AGENTS.filter((a) => talk.busyIn(room).includes(a.key)).map((a) => ({ key: a.key, name: a.name })) : [];
+  const title = roomInfo?.title ?? (room.startsWith("ctx_") ? "찾을 수 없는 방" : room);
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 lg:p-6">
       <header className="flex flex-wrap items-start gap-x-6 gap-y-3">
         <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-semibold tracking-tight">AI 대화방</h1>
+          <h1 className="text-xl font-semibold tracking-tight">AI 대화방 · 대화 기록</h1>
           <p className="mt-1 text-sm text-ink-500">
-            AI들이 서로 일을 부탁하고 결과를 알려 준 실제 기록입니다(A2A). 사람이 결정할 일은 🚩로 표시합니다.
+            AI들이 서로 일을 부탁하고 결과를 알려 준 실제 기록입니다(A2A). 장애·이슈가 생기면 방이 따로 열리고, AI 오피스 단톡방과 같은 방을 봅니다.
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <ConnChip label="총괄 AI" conn={orchConn} />
@@ -464,55 +273,40 @@ export default function AgentChat() {
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{error}</p>}
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <RoomList rooms={rooms} all={allRoom} selected={room} unseen={unseen} onSelect={setRoom} />
+        <RoomList all={all} incidents={incidentRooms} selected={room} unseen={data.unseen} onSelect={setRoom} />
 
         {direct ? <DirectChat agent={direct} /> : (
-        <section aria-label="대화 기록" className="card relative flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden">
-          {participants.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 border-b border-ink-100 px-4 py-2.5 lg:px-6" aria-label="참석자">
-              <span className="mr-1 text-xs font-semibold text-ink-700">참석자 {participants.length}</span>
-              {participants.map((p) => (
-                <span key={p.key} className="flex items-center gap-1.5 rounded-full bg-ink-50 py-0.5 pl-0.5 pr-2.5 text-xs text-ink-700 ring-1 ring-ink-100">
-                  <Avatar name={p.name} k={p.key} small />
-                  {p.name}
-                </span>
-              ))}
-            </div>
-          )}
-          <div ref={scroller} onScroll={onScroll} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">
-            {roomEmpty ? (
-              <EmptyState orchConn={orchConn} safetyConn={safetyConn} commConn={commConn} room={room} />
+        <section aria-label={`${title} 대화`} className="card relative flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden bg-chat">
+          <header className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-ink-900/[.07] px-4 py-3">
+            <h2 className="min-w-0 truncate text-[15px] font-semibold">{title}</h2>
+            {deptCount > 0 && <span className="text-xs text-ink-700">참여 부서 {deptCount}곳</span>}
+            <StatusChip status={roomInfo?.status} />
+            {!isAll && (
+              <div className="ml-auto flex gap-1.5">
+                {inc && <Link href={`/orchestrator?ctx=${encodeURIComponent(inc.context_id)}`} className="btn-ghost px-2.5 py-1 text-xs">사건 자세히</Link>}
+                <Link href={`/agents/office?room=${encodeURIComponent(room)}`} className="btn-ghost px-2.5 py-1 text-xs">AI 오피스에서 보기</Link>
+              </div>
+            )}
+            {isAll && <Link href={`/agents/office?room=${encodeURIComponent(room)}`} className="btn-ghost ml-auto px-2.5 py-1 text-xs">AI 오피스에서 보기</Link>}
+          </header>
+          {inc && <PinNotice inc={inc} />}
+          <div ref={scroller} onScroll={onScroll} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            {shown.length === 0 && !typing ? (
+              <EmptyState orchConn={orchConn} known={isAll || !!inc} />
             ) : (
               <>
-              {orchConn === "off" && room === SAFETY_ROOM && (
-                <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">총괄 AI가 꺼져 있어 안전 관문 기록만 보입니다. 켜는 방법: <code className="font-mono">{ORCH_CMD}</code></p>
-              )}
-              {room !== SAFETY_ROOM && <CommNote conn={commConn} truncated={commTruncated} />}
-              <ol role="log" aria-live="polite" aria-relevant="additions" aria-label="부서 AI 대화" className="flex flex-col gap-4">
-                {shown.map((it) => <Item key={it.id} it={it} busyHold={busyHold} orchOn={orchOn} orchMock={orchMock} onDecide={decide} talk={isAll ? talk : undefined} />)}
-                {typing && <p className="animate-pulse px-1 text-xs text-ink-500" aria-live="polite">AI들이 이야기하는 중… ({items.length - revealed}개 남음)</p>}
-              </ol>
-              <p className="mt-6 text-center text-[11px] text-ink-500">{PROD_NOTE}</p>
+                <CommNote conn={commConn} truncated={commTruncated} />
+                <MessengerLog items={shown} talk={talkable ? talk : undefined} label={`${title} 대화`}
+                  hold={{ busyHold, canDecide: orchOn, orchMock, onDecide: decide }} />
+                {typing && <p className="mt-2 animate-pulse px-1 text-xs text-ink-500" aria-live="polite">AI들이 이야기하는 중… ({records.length - revealed}개 남음)</p>}
               </>
             )}
           </div>
-          {answering.length > 0 && (
-            <ul aria-label="답하는 중인 부서" className="flex flex-col gap-1.5 border-t border-ink-100 px-4 py-2.5 lg:px-6">
-              {answering.map((a) => (
-                <li key={a.key} className="flex items-center gap-2 text-xs text-ink-500">
-                  <Avatar name={a.name} k={a.key} small />
-                  <span className="flex gap-0.5" aria-hidden="true">
-                    {[0, 1, 2].map((i) => <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-500" style={{ animationDelay: `${i * 120}ms` }} />)}
-                  </span>
-                  <span className="truncate"><b className="font-semibold text-ink-700">{a.name}</b> 질문에 답하는 중</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {isAll && <TalkInput talk={talk} onSent={() => toBottom(true)} where="chat" />}
+          <TypingLines names={answering} />
+          {talkable && <TalkInput talk={talk} onSent={() => toBottom(true)} where="chat" room={room} roomName={inc ? title : undefined} />}
           {fresh > 0 && (
             <button onClick={() => toBottom(true)}
-              className="btn-primary absolute bottom-4 left-1/2 -translate-x-1/2 shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
+              className="btn-primary absolute bottom-24 left-1/2 -translate-x-1/2 shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
               새 메시지 {fresh}개 ↓
             </button>
           )}
@@ -525,40 +319,25 @@ export default function AgentChat() {
 
 /** 공통 로그가 503이거나 꺼졌을 때 / 잘렸을 때 한 줄 안내 */
 function CommNote({ conn, truncated }: { conn: Conn; truncated: boolean }) {
-  if (conn === "unready") return <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">{COMM_503}</p>;
-  if (conn === "off") return <p className="mb-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">{COMM_OFF}</p>;
-  if (truncated) return <p className="mb-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">공통 로그가 많아 앞부분만 받았습니다 (최대 1000줄).</p>;
+  if (conn === "unready") return <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">{COMM_503}</p>;
+  if (conn === "off") return <p className="mb-3 rounded-xl bg-surface px-3 py-2 text-xs text-ink-500">{COMM_OFF}</p>;
+  if (truncated) return <p className="mb-3 rounded-xl bg-surface px-3 py-2 text-xs text-ink-500">공통 로그가 많아 앞부분만 받았습니다 (최대 1000줄).</p>;
   return null;
 }
-const COMM_503 = "공통 로그: 준비 안 됨(503) — dashboard-api에 공통 로그 읽기가 아직 연결되지 않았습니다 (ax-backend #249). 부서끼리 주고받은 대화는 연결 뒤에 보입니다.";
+const COMM_503 = "공통 로그: 준비 안 됨(503) — dashboard-api에 공통 로그 읽기가 아직 연결되지 않았습니다. 부서끼리 주고받은 대화는 연결 뒤에 보입니다.";
 const COMM_OFF = "공통 로그: dashboard-api(VITE_DASHBOARD_API_URL)에 연결할 수 없어 부서끼리 주고받은 대화를 불러오지 못했습니다.";
 
-function EmptyState({ orchConn, safetyConn, commConn, room }: { orchConn: Conn; safetyConn: Conn; commConn: Conn; room: string }) {
-  if (room === SAFETY_ROOM) {
-    return (
-      <div className="mx-auto max-w-md py-16 text-center text-sm text-ink-500">
-        {safetyConn === "off"
-          ? <>안전 관문(포트 8001)에 연결할 수 없습니다. ax-backend의 safety 서버를 켜 주세요.</>
-          : <>아직 안전 관문을 거친 실행 요청이 없습니다. 부서 AI가 돈이 나가는 일을 요청하면 여기에 쌓입니다.</>}
-      </div>
-    );
-  }
+/** 빈 방: 한 줄. 총괄이 꺼져 있으면 켜는 방법 */
+function EmptyState({ orchConn, known }: { orchConn: Conn; known: boolean }) {
   if (orchConn === "off") {
     return (
       <div className="mx-auto max-w-xl py-14 text-sm text-ink-700">
         <p className="font-semibold text-ink-900">총괄 AI가 꺼져 있습니다.</p>
         <p className="mt-1 text-ink-500">backend/에서 실제 모드로 켜면 캣북스 쇼핑몰 장애로 AI들이 함께 일하는 과정을 볼 수 있습니다.</p>
-        <pre className="mt-3 overflow-x-auto rounded-xl bg-ink-50 p-3 font-mono text-xs text-ink-700 ring-1 ring-ink-100"><code>{ORCH_CMD}</code></pre>
-        <p className="mt-2 text-xs text-ink-500">다른 포트에서 켰다면 루트 .env의 ORCHESTRATOR_PROXY_TARGET(개발 서버 프록시 대상)을 바꾸고 개발 서버를 다시 시작하세요.</p>
+        <pre className="mt-3 overflow-x-auto rounded-xl bg-surface p-3 font-mono text-xs text-ink-700"><code>{ORCH_CMD}</code></pre>
       </div>
     );
   }
   if (orchConn === "unknown") return <p className="py-16 text-center text-sm text-ink-500">불러오는 중…</p>;
-  return (
-    <div className="mx-auto max-w-md py-16 text-center text-sm text-ink-500">
-      아직 이벤트가 없습니다. 위의 <b className="text-ink-900">장애 시나리오 시작</b>을 눌러 보세요.
-      {commConn === "unready" && <p className="mt-4 text-xs">{COMM_503}</p>}
-      <p className="mt-4 text-[11px]">{PROD_NOTE}</p>
-    </div>
-  );
+  return <p className="py-16 text-center text-sm text-ink-500">{known ? "아직 이 방에서 주고받은 말이 없어요." : "이 방을 찾을 수 없어요. 왼쪽 목록에서 방을 골라 주세요."}</p>;
 }
