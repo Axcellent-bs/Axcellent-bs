@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { shortDateTime, won } from "@/lib/format";
 import { finance, humanTokenSet, SAFETY_SERVER, type ExecutionRecord, type Review } from "@/lib/finance";
+import { ApproverField, deciderText, useApproverName } from "@/components/finance/ApproverName";
 
 // 환불(refund_request) 안전 장치 보류: 환불은 고객지원 일이라 사람이 여기서 정한다.
 // 보류 큐 API는 재무 화면과 같은 안전 장치 서버를 쓰고, 환불 건만 걸러 보여 준다.
@@ -22,6 +23,7 @@ export default function RefundHolds({ onDecided }: { onDecided?: () => void }) {
   const [runs, setRuns] = useState<Record<string, ExecutionRecord>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [approver, setApprover, approverName] = useApproverName();
 
   const load = useCallback(async () => {
     try {
@@ -36,9 +38,10 @@ export default function RefundHolds({ onDecided }: { onDecided?: () => void }) {
   useEffect(() => { load(); }, [load]);
 
   async function decide(id: string, decision: "approved" | "rejected") {
+    if (!approverName) { setError("승인자 이름을 먼저 적으세요."); return; }
     setBusy(id + decision);
     try {
-      await finance.decide(id, decision);
+      await finance.decide(id, decision, undefined, false, approverName);
       await load();
       onDecided?.();
     } catch (e) {
@@ -65,6 +68,9 @@ export default function RefundHolds({ onDecided }: { onDecided?: () => void }) {
       {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
       {!humanTokenSet && pending.length > 0 && <p className="mt-3 text-xs text-amber-800">이 계정에는 결정 권한이 없어 승인·거절 버튼이 꺼져 있습니다. 결정 권한이 있는 담당자 계정으로 들어오면 켜집니다.</p>}
 
+      {pending.length > 0 && humanTokenSet && (
+        <div className="mt-3"><ApproverField id="refund-holds-approver" value={approver} onChange={setApprover} small /></div>
+      )}
       {pending.length > 0 && (
         <ul className="mt-4 space-y-3">
           {pending.map((r) => {
@@ -89,10 +95,10 @@ export default function RefundHolds({ onDecided }: { onDecided?: () => void }) {
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <button className="btn-primary py-1.5 text-xs" disabled={!humanTokenSet || busy !== null} onClick={() => decide(r.review_id, "approved")}>
+                  <button className="btn-primary py-1.5 text-xs" disabled={!humanTokenSet || !approverName || busy !== null} onClick={() => decide(r.review_id, "approved")}>
                     {busy === r.review_id + "approved" ? "처리 중…" : "승인"}
                   </button>
-                  <button className="btn-ghost py-1.5 text-xs" disabled={!humanTokenSet || busy !== null} onClick={() => decide(r.review_id, "rejected")}>
+                  <button className="btn-ghost py-1.5 text-xs" disabled={!humanTokenSet || !approverName || busy !== null} onClick={() => decide(r.review_id, "rejected")}>
                     {busy === r.review_id + "rejected" ? "처리 중…" : "거절"}
                   </button>
                 </div>
@@ -108,7 +114,7 @@ export default function RefundHolds({ onDecided }: { onDecided?: () => void }) {
           <ul className="mt-1 space-y-0.5">
             {recent.map((r) => (
               <li key={r.review_id}>
-                {STATUS_KO[r.status]} · {r.report.computed_amount != null ? won(r.report.computed_amount) : "금액 없음"} · {shortDateTime(r.decided_at ?? r.created_at)}
+                {STATUS_KO[r.status]} · {r.report.computed_amount != null ? won(r.report.computed_amount) : "금액 없음"} · {r.status !== "expired" && r.decided_by ? `${deciderText(r)} · ` : ""}{shortDateTime(r.decided_at ?? r.created_at)}
               </li>
             ))}
           </ul>

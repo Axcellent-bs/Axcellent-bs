@@ -34,7 +34,7 @@ from typing import Any, Literal
 from ax_agent_template.services import department_of
 from ax_contracts.schemas import ExecuteDecision, ExecuteRequest, HoldReason
 from ax_safety.rules import ActionSpec, Registry, ThresholdTable, higher
-from ax_safety.store import ExecutionRecord, Review, Store
+from ax_safety.store import ExecutionRecord, Review, Store, StoreWriteError
 
 logger = logging.getLogger("ax.safety.gate")
 
@@ -63,6 +63,12 @@ Publisher = Callable[[str, ExecuteRequest | Review, dict[str, Any]], Awaitable[N
 
 
 SHARED_HUMAN = "공용"  # scripts/run_all.sh의 공용 사람 토큰 이름
+
+
+def _same_person(a: str | None, b: str | None) -> bool:
+    if not a or not b:
+        return False
+    return a.strip().casefold() == b.strip().casefold()
 
 
 class SelfApprovalError(Exception):
@@ -133,11 +139,18 @@ class Gate:
         """`request.requester`는 호출한 쪽이 토큰에서 꺼낸 값으로 채워 넣어야 한다."""
         lock = self._locks.setdefault((request.tenant_id, request.action), asyncio.Lock())
         async with lock:
-            previous = self.store.by_key(request.tenant_id, request.idempotency_key)
-            if previous is not None:
-                self._audit(request, "idempotent_replay", previous.execution_id)
-                return previous.decision
-            return await self._decide(request)
+            try:
+                previous = self.store.by_key(request.tenant_id, request.idempotency_key)
+                if previous is not None:
+                    self._audit(request, "idempotent_replay", previous.execution_id)
+                    return previous.decision
+                return await self._decide(request)
+            except StoreWriteError:
+                # 기록을 못 남기면 실행하지 않는다(fail-closed). 다시 요청하면 처음부터 판정한다
+                logger.exception("상태 기록 실패, 실행하지 않는다: %s", request.idempotency_key)
+                return ExecuteDecision(
+                    execution_id=f"exe_{uuid.uuid4().hex[:12]}", grade="C", status="rejected"
+                )
 
     # ------------------------------------------------------------------ 판정
     async def _decide(self, request: ExecuteRequest) -> ExecuteDecision:
@@ -479,10 +492,9 @@ class Gate:
             hold_reason=reason,
             review_id=review_id,
         )
-        result = await self._finish(request, decision, customer, full_report, "safety.action_held")
-        if result.status == "held":
-            self.store.add_review(review)
-        return result
+        return await self._finish(
+            request, decision, customer, full_report, "safety.action_held", review=review
+        )
 
     async def _finish(
         self,
@@ -491,6 +503,8 @@ class Gate:
         customer: str | None,
         report: dict[str, Any],
         event_type: str | None,
+        *,
+        review: Review | None = None,
     ) -> ExecuteDecision:
         try:
             self._audit(
@@ -499,40 +513,62 @@ class Gate:
                 decision.execution_id,
                 decision.model_dump(mode="json", exclude_none=True),
             )
-        except Exception:
-            logger.exception("감사 로그 실패, 실행하지 않는다: %s", decision.execution_id)
-            return ExecuteDecision(execution_id=decision.execution_id, grade="C", status="rejected")
-        self.store.add_execution(
-            ExecutionRecord(
-                execution_id=decision.execution_id,
-                created_at=self._now(),
-                request=request,
-                decision=decision,
-                customer=customer,
-                report=report,
+            # 실행 기록·멱등성 키·보류 건을 한 번에 남긴다. 못 남기면 실행하지 않는다
+            self.store.add_execution(
+                ExecutionRecord(
+                    execution_id=decision.execution_id,
+                    created_at=self._now(),
+                    request=request,
+                    decision=decision,
+                    customer=customer,
+                    report=report,
+                ),
+                review,
             )
-        )
+        except Exception:
+            logger.exception("감사 로그·실행 기록 실패, 실행하지 않는다: %s", decision.execution_id)
+            return ExecuteDecision(execution_id=decision.execution_id, grade="C", status="rejected")
         if event_type:
             await self._emit(event_type, request, self._event_data(request, decision))
         return decision
 
     # ------------------------------------------------------------------ 보류 큐 결정
     async def decide_review(
-        self, review_id: str, decision: Literal["approved", "rejected"], by: str, note: str | None
+        self,
+        review_id: str,
+        decision: Literal["approved", "rejected"],
+        by: str,
+        note: str | None,
+        decided_as: str | None = None,
     ) -> Review:
-        """사람의 승인·거절. 이미 결정·만료된 건은 바꾸지 않고 ValueError."""
+        """사람의 승인·거절. 이미 결정·만료된 건은 바꾸지 않고 ValueError.
+
+        `decided_as`는 공용 토큰(`SHARED_HUMAN`)일 때만 받는 승인자 이름(자기 신고)이다.
+        개인 토큰이면 토큰이 곧 사람이라 버린다.
+        """
         await self.expire_reviews()
         review = self.store.get_review(review_id)
         if review is None:
             raise KeyError(review_id)
         if review.status != "pending":
             raise ValueError(f"이미 처리된 보류 건이다: {review.status}")
+        if by != SHARED_HUMAN:
+            decided_as = None
         record = self.store.get_execution(review.execution_id)
         asked_by = record.request.params.get("requested_by") if record else None
-        # 요청한 사람이 스스로 승인하지 못한다. 공용 토큰은 누구인지 몰라 기록만 남긴다
-        if decision == "approved" and asked_by == by and by != SHARED_HUMAN:
-            raise SelfApprovalError(f"{by}가 요청한 건은 다른 사람이 승인해야 한다")
-        self._close_review(review, decision, by, note)
+        asked_by = asked_by if isinstance(asked_by, str) else None
+        # 요청한 사람이 스스로 승인하지 못한다. 공용 토큰이면 적어 낸 승인자 이름과 견주고,
+        # 이름 없이 공용 토큰만 오면 누구인지 몰라 기록만 남긴다. AI가 올린 요청(support-ai 등)은
+        # 사람 이름과 겹치지 않아 그대로 승인할 수 있다
+        approver = decided_as if by == SHARED_HUMAN else by
+        if (
+            decision == "approved"
+            and approver != SHARED_HUMAN
+            and asked_by != SHARED_HUMAN
+            and _same_person(asked_by, approver)
+        ):
+            raise SelfApprovalError(f"{approver}가 요청한 건은 다른 사람이 승인해야 한다")
+        review = self._close_review(review, decision, by, note, decided_as)
         await self._emit_review(review)
         return review
 
@@ -540,10 +576,11 @@ class Gate:
         """마감이 지난 보류 건을 자동 거절한다(`review_timeout`)."""
         now = self._now()
         expired = [r for r in self.store.list_reviews("pending") if r.expires_at <= now]
+        closed: list[Review] = []
         for review in expired:
-            self._close_review(review, "expired", "system", None)
-            await self._emit_review(review)
-        return expired
+            closed.append(self._close_review(review, "expired", "system", None))
+            await self._emit_review(closed[-1])
+        return closed
 
     def _close_review(
         self,
@@ -551,11 +588,34 @@ class Gate:
         status: Literal["approved", "rejected", "expired"],
         by: str,
         note: str | None,
-    ) -> None:
-        review.status = status
-        review.decided_by = by
-        review.decided_at = self._now()
-        review.note = note
+        decided_as: str | None = None,
+    ) -> Review:
+        """결정을 남긴다. 순서: 감사 로그 → 보류 건 → 실행 판정.
+
+        중간에 상태 파일 쓰기가 실패하면 `StoreWriteError`가 나가고, 실행 판정은 아직 `held`라
+        같은 키로 다시 요청해도 실행되지 않는다(fail-closed).
+        """
+        detail: dict[str, Any] = {"review_id": review.review_id, "by": by, "note": note}
+        if decided_as is not None:
+            detail["decided_as"] = decided_as
+        self.store.append_audit(
+            self._now(),
+            review.context_id,
+            review.tenant_id,
+            f"review_{status}",
+            review.execution_id,
+            detail,
+        )
+        review = review.model_copy(
+            update={
+                "status": status,
+                "decided_by": by,
+                "decided_as": decided_as,
+                "decided_at": self._now(),
+                "note": note,
+            }
+        )
+        self.store.add_review(review)
         record = self.store.get_execution(review.execution_id)
         if record is not None:
             old = record.decision
@@ -565,14 +625,7 @@ class Gate:
                 reason = HoldReason.REVIEW_TIMEOUT if status == "expired" else old.hold_reason
                 new = old.model_copy(update={"status": "rejected", "hold_reason": reason})
             self.store.set_decision(review.execution_id, new)
-        self.store.append_audit(
-            self._now(),
-            review.context_id,
-            review.tenant_id,
-            f"review_{status}",
-            review.execution_id,
-            {"review_id": review.review_id, "by": by, "note": note},
-        )
+        return review
 
     async def _emit_review(self, review: Review) -> None:
         decision = "approved" if review.status == "approved" else "rejected"

@@ -153,3 +153,72 @@ async def test_ai_requested_settlement_can_be_approved_by_the_support_owner(gate
     held = await gate.execute(_settlement(act, "s-ai", "support-ai"))
     done = await gate.decide_review(held.review_id, "approved", "byunghwan", None)
     assert (done.status, done.decided_by) == ("approved", "byunghwan")
+
+
+# ---------------------------------------------------------- 공용 토큰의 승인자 이름 (decided_as)
+@pytest.mark.asyncio
+async def test_shared_token_records_the_named_approver(gate, act) -> None:
+    held = await gate.execute(_settlement(act, "n1", "support-ai"))
+    done = await gate.decide_review(held.review_id, "approved", "공용", "W44 확인", "병환")
+    assert (done.status, done.decided_by, done.decided_as) == ("approved", "공용", "병환")
+    audit = gate.store.list_audit()[-1]
+    assert audit.step == "review_approved"
+    assert (audit.detail["by"], audit.detail["decided_as"]) == ("공용", "병환")
+
+
+@pytest.mark.asyncio
+async def test_shared_token_cannot_self_approve_by_typing_own_name(gate, act) -> None:
+    from ax_safety.gate import SelfApprovalError
+
+    held = await gate.execute(_settlement(act, "n2", "태윤"))
+    with pytest.raises(SelfApprovalError):
+        await gate.decide_review(held.review_id, "approved", "공용", None, " 태윤 ")
+    assert gate.store.get_review(held.review_id).status == "pending"
+    done = await gate.decide_review(held.review_id, "approved", "공용", None, "병환")
+    assert (done.status, done.decided_as) == ("approved", "병환")
+
+
+@pytest.mark.asyncio
+async def test_personal_token_ignores_decided_as(gate, act) -> None:
+    from ax_safety.gate import SelfApprovalError
+
+    held = await gate.execute(_settlement(act, "n3", "태윤"))
+    with pytest.raises(SelfApprovalError):  # 다른 이름을 적어도 토큰이 곧 사람이다
+        await gate.decide_review(held.review_id, "approved", "태윤", None, "병환")
+    done = await gate.decide_review(held.review_id, "approved", "byunghwan", None, "아무개")
+    assert (done.decided_by, done.decided_as) == ("byunghwan", None)
+    assert "decided_as" not in gate.store.list_audit()[-1].detail
+
+
+def test_decided_as_over_http(client, act, gate, monkeypatch) -> None:
+    import asyncio
+
+    monkeypatch.setenv("SAFETY_HUMAN_TOKENS", "공용:shared-token")
+    held = asyncio.run(gate.execute(_settlement(act, "n4", "support-ai")))
+    url = f"/api/safety/reviews/{held.review_id}/decision"
+    shared = {"Authorization": "Bearer shared-token"}
+    for bad in ("", "   ", "가" * 41):
+        response = client.post(
+            url, json={"decision": "approved", "decided_as": bad}, headers=shared
+        )
+        assert response.status_code == 422
+    response = client.post(
+        url, json={"decision": "approved", "decided_as": "  병환 "}, headers=shared
+    )
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert (body["decided_by"], body["decided_as"]) == ("공용", "병환")
+
+
+def test_decided_as_self_approval_is_403_over_http(client, act, gate, monkeypatch) -> None:
+    import asyncio
+
+    monkeypatch.setenv("SAFETY_HUMAN_TOKENS", "공용:shared-token")
+    held = asyncio.run(gate.execute(_settlement(act, "n5", "태윤")))
+    response = client.post(
+        f"/api/safety/reviews/{held.review_id}/decision",
+        json={"decision": "approved", "decided_as": "태윤"},
+        headers={"Authorization": "Bearer shared-token"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "SELF_APPROVAL"

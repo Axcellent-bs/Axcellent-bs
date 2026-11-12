@@ -42,7 +42,7 @@ curl -X POST localhost:8001/api/safety/reviews/<review_id>/decision \
 | `GET /api/safety/executions?context_id=` | 실행 기록 | — |
 | `GET /api/safety/reviews?status=pending` | C 보류 큐 | — |
 | `GET /api/safety/reviews/{review_id}` | 보류 건과 근거 리포트 | — |
-| `POST /api/safety/reviews/{review_id}/decision` | `{decision: approved\|rejected, note}` | **사람만** |
+| `POST /api/safety/reviews/{review_id}/decision` | `{decision: approved\|rejected, note, decided_as?}`. `decided_as`(1~40자, 앞뒤 공백 제거)는 공용 토큰일 때만 남는다 | **사람만** |
 | `GET /api/safety/audit-logs?context_id=` | 감사 로그 | — |
 | `GET /api/safety/thresholds`, `GET /api/safety/registry` | 기준표·레지스트리 | — |
 | `POST /api/safety/connection-holds` | 연결 쓰기 보류·해제 (`ConnectionHoldNotice`). `SAFETY_CONNECTION_HOLDS_FILE`이 있으면 재시작해도 남는다 | 개발 서비스만 |
@@ -63,4 +63,16 @@ ax-contracts, ax-agent-template (`call_agent`, `publish`, 토큰 검증), 검증
 - 금액이 아닌 규칙(`param`·`paths_within`·`paths_avoid`): `pr_changed_lines`·`pr_changed_files`·`pr_allowed_paths`·`pr_protected_paths`(planning `generate_pr`, 검증자 = 안전 레이어 코드 규칙), `merge_changed_lines`·`merge_changed_files`·`merge_allowed_paths`·`merge_protected_paths`·`pr_review_mismatch`·`pr_linked_incident`·`merge_irreversible`(planning `merge_pr`), `seller_risk`(판매자 심사). 값은 제안값. 규칙 키는 파일 안에서 겹치면 로드를 거부한다
 - 보호 경로(`paths_avoid`, #169): `changed_paths` 중 하나라도 `protected` 목록의 경로와 같거나 그 아래면 걸려서 항상 C다. 결제 화면·로그인·API 클라이언트·환경값(shop-web), DB·주문/결제·쿠폰·시드(shop-api), `.github/`·`safety/`·`contracts/`. planning이 보낸 `irreversible_count`와 상관없이 안전 담당이 정한다. 필드가 없거나 문자열 목록이 아니면 걸린 것으로 본다(fail-closed)
 - 보호 이름(`paths_named`, #506): `pr_agent_config_paths`·`merge_agent_config_paths`·`revert_agent_config_paths`. 에이전트 설정·훅·CI·설치 스크립트·잠금 파일처럼 도구가 자동으로 읽고 실행하는 파일은 경로 깊이와 상관없이 항상 C다(`shop-web/CLAUDE.md`). 경로 조각 하나라도 `names`의 이름과 같으면 걸리고, 대소문자·`\`·`./`·끝의 `/`와 Windows가 무시하는 끝의 점·공백·`:스트림` 표기는 같은 이름으로 본다. 필드가 없거나 문자열 목록이 아니면 걸린 것으로 본다(fail-closed)
-- v0은 저장소가 메모리라 재시작하면 기록이 비워진다 (TODO: postgres)
+- `SAFETY_STATE_DB`가 없으면 저장소는 메모리라 재시작하면 기록이 비워진다 (테스트용. 운영 저장소는 TODO: postgres)
+
+## 6. 상태 저장 (`SAFETY_STATE_DB`)
+- 값(SQLite 파일 경로)이 있으면 실행 기록·멱등성 키·보류 건(상태·마감·결정)·감사 로그를 그 파일에 바로 쓴다(write-through). `scripts/run_all.sh`는 `.data/safety_state.db`를 쓴다
+- 켤 때 파일에서 읽어 온다. 기다리던 보류 건은 원래 `expires_at`을 지니고, 자동 거절(`expire_reviews`)도 그대로 돈다. 같은 멱등성 키로 다시 요청하면 재시작 전과 같은 판정을 받는다. 감사 로그 번호는 이어진다
+- fail-closed: 파일에 못 쓰면 메모리도 바꾸지 않는다. 실행 요청은 `rejected`(C)로 답하고 기록을 남기지 않는다(다시 요청하면 처음부터 판정). 사람 결정은 503 `STATE_UNAVAILABLE`이고 보류 건은 `pending`, 실행 판정은 `held`로 남는다. 결정 기록 순서는 감사 로그 → 보류 건 → 실행 판정이다
+- 값이 없으면 예전처럼 메모리에만 둔다(단위 테스트는 이쪽)
+
+## 7. 승인자 이름 (`decided_as`)
+- 화면은 모두가 같이 쓰는 공용 사람 토큰(`SAFETY_HUMAN_TOKENS`의 이름 `공용`, `scripts/run_all.sh`)으로 결정을 보낸다. 토큰만으로는 누가 눌렀는지 몰라, 화면이 받은 승인자 이름을 `decided_as`로 같이 보낸다
+- 공용 토큰이면 보류 건에 `decided_by: "공용"`과 `decided_as`(자기 신고)를 같이 남기고, 감사 로그 `review_*`의 `detail.decided_as`에도 남긴다. 개인 토큰이면 `decided_as`를 버린다(토큰이 곧 사람)
+- 스스로 승인 막기: 요청 `params.requested_by`와 승인자(공용 토큰이면 `decided_as`, 아니면 토큰 이름)가 같으면(앞뒤 공백·대소문자 무시) 403 `SELF_APPROVAL`. AI가 올린 요청(`requested_by: support-ai` 등)은 사람 이름과 겹치지 않아 승인할 수 있다. 이름 없이 공용 토큰만 오면 예전처럼 기록만 남긴다
+- `safety.review_decided` 이벤트와 공통 로그에는 이름을 더하지 않았다(계약 그대로)
