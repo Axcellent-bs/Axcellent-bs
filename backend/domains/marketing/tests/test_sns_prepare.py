@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import events
 from ax_contracts.schemas import ExecuteDecision
+from ax_contracts.schemas.planning import CampaignBriefInput
 from marketing_agent import handlers, sns, sns_label, sns_media, sns_prepare
 from marketing_agent.main import app, load_card
 from marketing_agent.media import registry, skill
@@ -468,3 +469,101 @@ def test_bundled_font_matches_recorded_hash_and_has_license() -> None:
     digest = hashlib.sha256((folder / "Pretendard-Bold.ttf").read_bytes()).hexdigest()
     assert digest.startswith("c16b88c670d23e83")
     assert "SIL Open Font License" in (folder / "Pretendard-OFL.txt").read_text("utf-8")
+
+
+# --- 보관된 기획안(proposal_id) 출처 ---------------------------------------------------
+
+
+def _add_brief(proposal_id: str = "PROP-5", **over) -> None:
+    data = {
+        "proposal_id": proposal_id,
+        "title": "봄 그림책 소개",
+        "idea": "신간 그림책 세 권을 소개한다",
+        "why": "봄 나들이 철에 읽기 좋다",
+        "approved_by": "gaon",
+    } | over
+    handlers.STATE.briefs.add(CampaignBriefInput(**data), datetime.now(UTC))
+
+
+def _brief_input(**over) -> dict:
+    return _image_input(coupon=None, proposal_id="PROP-5") | over
+
+
+def test_proposal_source_makes_draft_with_caption_from_brief(gate: Gate) -> None:
+    _add_brief()
+    out = _call(_brief_input())
+    assert out["outcome"] is None and out["status"] == "completed", out
+    result = out["output"]
+    assert result["stage"] == "draft_ready"
+    assert "봄 그림책 소개" in result["caption"] and "신간 그림책 세 권" in result["caption"]
+    assert result["publish_input"]["caption"] == result["caption"]
+    assert gate.seen == ["generate_media"]
+
+
+@needs_ffmpeg
+def test_proposal_source_video_reel(gate: Gate, monkeypatch: pytest.MonkeyPatch) -> None:
+    _add_brief()
+    _use_source(
+        monkeypatch,
+        _SourceProvider(
+            "video",
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=270x480:rate=30:duration=3.5",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+            ],  # fmt: skip
+            "mp4",
+        ),
+    )
+    result = _call(_brief_input(media_kind="video", scene_template_id="cat_bookstore_video"))[
+        "output"
+    ]
+    assert result["stage"] == "draft_ready" and result["media_kind"] == "reel"
+    assert "봄 그림책 소개" in result["publish_input"]["caption"]
+
+
+def test_proposal_source_rejects_zero_or_two_sources(gate: Gate) -> None:
+    none = _call({"scene_template_id": "cat_bookstore_image", "fields": FIELDS})
+    assert none["outcome"] == "invalid_input"
+    with_notice = _call(_brief_input(notice_id="ntc_x"))
+    with_coupon = _call(_brief_input(coupon=_coupon()))
+    assert with_notice["outcome"] == with_coupon["outcome"] == "invalid_input"
+    assert gate.seen == []
+
+
+def test_proposal_source_rejects_carousel(gate: Gate) -> None:
+    items = [{"scene_template_id": "cat_bookstore_image", "fields": FIELDS}] * 2
+    items[1] = {"scene_template_id": "cat_bookstore_image", "fields": FIELDS | {"season": "fall"}}
+    out = _call({"proposal_id": "PROP-5", "media_kind": "image", "carousel_items": items})
+    assert out["outcome"] == "invalid_input" and gate.seen == []
+
+
+def test_missing_proposal_stops_before_generation(gate: Gate, no_tools_check: None) -> None:
+    out = _call(_brief_input(proposal_id="PROP-none"))
+    assert out["outcome"] == "brief_not_found"
+    assert gate.seen == []
+
+
+def test_forbidden_phrase_in_brief_stops_before_generation(
+    gate: Gate, no_tools_check: None
+) -> None:
+    _add_brief(idea="팔로우하면 선물을 드린다")
+    out = _call(_brief_input())
+    assert out["outcome"] == "forbidden_phrase" and gate.seen == []
+
+
+def test_proposal_source_is_idempotent_and_keys_differ_by_source(gate: Gate) -> None:
+    _add_brief()
+    first = _call(_brief_input())["output"]
+    second = _call(_brief_input())["output"]
+    assert second["post_draft_id"] == first["post_draft_id"]
+    assert second["generation"]["replayed"] is True
+    a = sns_prepare.PrepareSnsPostInput.model_validate(_brief_input())
+    b = sns_prepare.PrepareSnsPostInput.model_validate(_brief_input(proposal_id="PROP-6"))
+    c = sns_prepare.PrepareSnsPostInput.model_validate(_image_input())
+    assert len({sns_prepare._media_ref(x) for x in (a, b, c)}) == 3

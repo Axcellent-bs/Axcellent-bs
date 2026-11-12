@@ -376,10 +376,13 @@ def source_parts(
 
 
 def preflight_draft(
-    request: AgentRequest, data: DraftSnsPostInput, notices: NoticeStore
+    request: AgentRequest,
+    data: DraftSnsPostInput,
+    notices: NoticeStore,
+    briefs: BriefStore | None = None,
 ) -> AgentResult | None:
     """초안을 만들 수 있는지 미리 본다(출처·캡션 길이). 만들 수 있으면 None."""
-    parts = source_parts(request, data, notices)
+    parts = source_parts(request, data, notices, briefs)
     if isinstance(parts, AgentResult):
         return parts
     if len(_compose(parts.body, data.media_kind)) > CAPTION_MAX:
