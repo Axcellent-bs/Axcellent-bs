@@ -441,8 +441,7 @@ export function incidentEventItems(inc: OrchIncident): ChatItem[] {
 }
 
 // ---------------------------------------------------------------- 안전 관문 실행 기록 → 메시지
-export function executionItems(rec: ExecutionRecord): ChatItem[] {
-  const room = SAFETY_ROOM;
+export function executionItems(rec: ExecutionRecord, room: string = SAFETY_ROOM): ChatItem[] {
   const d = rec.decision;
   const req = rec.request;
   const id = `exe:${rec.execution_id}`;
@@ -511,7 +510,7 @@ export function commItem(line: CommLine, room: string, safetyIds: ReadonlySet<st
   const skill = line.skill ?? "무슨 일인지 기록 없음";
   const label = COMM_OUTCOME_KO[line.outcome] ?? line.outcome;
   const dupOf = line.execution_id && safetyIds.has(line.execution_id) ? line.execution_id : undefined;
-  const tag = ["공통 로그 기록", dupOf ? "안전 관문 방에 같은 건이 있음" : null].filter(Boolean).join(" · ");
+  const tag = ["공통 로그 기록", dupOf ? "안전 관문 기록과 같은 건" : null].filter(Boolean).join(" · ");
   const raw = rawOf(
     line.skill ? `skill: ${line.skill}` : null,
     [line.from_agent, line.to_agent].filter(Boolean).join(" → "),
@@ -592,13 +591,16 @@ export function buildTimeline(incidents: OrchIncident[], executions: ExecutionRe
     if (room !== ALL_ROOM && room !== inc.context_id) continue;
     items.push(...incidentItems(inc), ...incidentEventItems(inc));
   }
-  if (room === ALL_ROOM || room === SAFETY_ROOM) {
-    const recs = [...executions].sort((a, b) => time(a.created_at) - time(b.created_at));
-    for (const rec of recs) items.push(...executionItems(rec));
-  }
+  // 안전 관문 실행 기록(사람 승인 대기 카드 포함): 전체 대화방·안전 관문 방은 모두, 장애·이슈 방은 그 사건 것만
+  const inIncident = room !== ALL_ROOM && room !== SAFETY_ROOM;
+  const recs = [...executions]
+    .filter((rec) => !inIncident || rec.request.context_id === room)
+    .sort((a, b) => time(a.created_at) - time(b.created_at));
+  for (const rec of recs) items.push(...executionItems(rec, room));
+  const shownExecs = new Set(recs.map((r) => r.execution_id));
   for (const c of commItems(comms, incidents, executions)) {
-    // ALL_ROOM(AI 오피스가 쓴다)에서는 안전 관문 기록과 같은 건(execution_id 일치)을 두 번 보이지 않는다
-    if (room === ALL_ROOM ? !c.dupOf : room === c.room) {
+    // 안전 관문 기록을 같이 보이는 방에서는 같은 건(execution_id 일치)을 두 번 보이지 않는다
+    if (room === ALL_ROOM ? !c.dupOf : room === c.room && !(c.dupOf && shownExecs.has(c.dupOf))) {
       const { dupOf: _dup, ...msg } = c;
       items.push(msg);
     }

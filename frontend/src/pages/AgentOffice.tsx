@@ -279,7 +279,7 @@ export default function AgentOffice() {
         {direct ? (
           <div className="card flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden xl:w-[580px] xl:flex-none">
             {tabs}
-            <DirectChat agent={direct} />
+            <DirectChat agent={direct} narrow />
           </div>
         ) : (
           <OfficeChat
@@ -304,10 +304,13 @@ export default function AgentOffice() {
 function RoomTab({ on, onClick, label, unread, mark, dashed = false, onClose }: {
   on: boolean; onClick: () => void; label: string; unread?: number; mark?: ReactNode; dashed?: boolean; onClose?: () => void;
 }) {
+  // 새로 고른 탭(캐릭터를 눌러 연 1:1 탭 등)이 탭 줄 밖에 있으면 보이게 옮긴다
+  const btn = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (on) btn.current?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [on]);
   return (
     <span className={`flex shrink-0 items-center rounded-full border text-xs ${on ? "border-transparent bg-ink-900 text-app" : "border-transparent bg-ink-50 text-ink-700 hover:bg-ink-100"} ${dashed && !on ? "!border-dashed !border-ink-300" : ""}`}>
-      <button type="button" role="tab" aria-selected={on} onClick={onClick}
-        className="flex max-w-[220px] items-center gap-1.5 rounded-full px-3 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+      <button type="button" role="tab" aria-selected={on} onClick={onClick} title={label} ref={btn}
+        className="flex max-w-[170px] items-center gap-1.5 rounded-full px-3 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
         {mark}
         <span className="truncate">{label}</span>
         {!!unread && !on && <span className="rounded-full bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`안 읽은 메시지 ${unread}개`}>{unread}</span>}

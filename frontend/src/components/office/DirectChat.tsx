@@ -89,7 +89,8 @@ const RESULT: Record<ChatStatus, string> = { talking: "대화만 함", handed: "
 /** 일이 생긴 대화: 관리자가 원문까지 본다 */
 const madeWork = (t: ChatThread) => t.status === "started" || !!t.taskId;
 
-export function DirectChat({ agent }: { agent: DirectAgent }) {
+/** `narrow`: 좁은 칸(AI 오피스 1:1 탭)에서는 지난 대화 목록을 위에 짧게 두고 대화를 아래에 쌓는다 */
+export function DirectChat({ agent, narrow = false }: { agent: DirectAgent; narrow?: boolean }) {
   const { account } = useSession();
   return (
     <section aria-label={`${agent.name}와 직접 대화`} className="card flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden">
@@ -97,7 +98,7 @@ export function DirectChat({ agent }: { agent: DirectAgent }) {
         <h2 className="card-title">{agent.name}와 직접 대화</h2>
         {!agent.live && <PreparingChip />}
       </header>
-      {agent.talk && account ? <AgentTalk key={`${agent.key}:${account.id}`} agent={agent} talk={agent.talk} account={account} /> : (
+      {agent.talk && account ? <AgentTalk key={`${agent.key}:${account.id}`} agent={agent} talk={agent.talk} account={account} narrow={narrow} /> : (
         <div className="mx-auto max-w-md py-16 text-center text-sm text-ink-500">
           {agent.name}는 아직 사람 말을 바로 받는 창구가 없어요. 부서 AI에 대화 스킬이 생기면 여기서 바로 말을 걸 수 있어요.
         </div>
@@ -106,7 +107,7 @@ export function DirectChat({ agent }: { agent: DirectAgent }) {
   );
 }
 
-function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Talk; account: Account }) {
+function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; talk: Talk; account: Account; narrow: boolean }) {
   const [thread, setThread] = useState<ChatThread | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState<string | null>(null);
@@ -214,8 +215,8 @@ function AgentTalk({ agent, talk: api, account }: { agent: DirectAgent; talk: Ta
   const goBusy = !!sending || isAnswering(thread) || prep || !!locked;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-      <aside aria-label="대화 목록" className="scroll-thin shrink-0 space-y-4 overflow-y-auto border-b border-ink-100 px-4 py-4 text-sm lg:w-64 lg:border-b-0 lg:border-r">
+    <div className={`flex min-h-0 flex-1 flex-col ${narrow ? "" : "lg:flex-row"}`}>
+      <aside aria-label="대화 목록" className={`scroll-thin shrink-0 space-y-4 overflow-y-auto border-b border-ink-100 px-4 py-4 text-sm ${narrow ? "max-h-40" : "lg:w-64 lg:border-b-0 lg:border-r"}`}>
         <div>
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-semibold text-ink-700">내 지난 대화</h3>
