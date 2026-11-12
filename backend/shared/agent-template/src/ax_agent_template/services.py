@@ -156,6 +156,7 @@ SERVICES: tuple[Service, ...] = (
             "check_sns_post",
             "publish_sns",
             "generate_media",
+            "prepare_sns_post_from_media",
             "cancel_campaign",
         ),
         "공지·쿠폰",

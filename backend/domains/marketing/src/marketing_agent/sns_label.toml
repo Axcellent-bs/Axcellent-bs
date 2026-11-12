@@ -30,9 +30,11 @@ box_border_ratio = 0.2     # 글자 뒤 배경 상자 안쪽 여백 = 글자 크
 time = "full"              # 영상은 전 구간 표시(방침). 다른 값은 아직 받지 않는다
 
 [font]
-# file이 비어 있지 않으면 그 글꼴만 쓴다(없으면 오류). 비어 있으면 아래 후보를 차례로 찾는다.
-# 환경변수 MARKETING_SNS_LABEL_FONT가 있으면 그것이 우선이다. 한글이 들어 있는 글꼴이어야 한다.
+# 선택 순서: 환경변수 MARKETING_SNS_LABEL_FONT -> file(비어 있지 않으면 그 글꼴만, 없으면 오류)
+#            -> bundled(레포에 넣은 Pretendard Std Bold, SIL OFL 1.1) -> 아래 시스템 후보.
+# 어느 것도 없으면 라벨 없는 파일을 만들지 않고 거절한다. 한글이 들어 있는 글꼴이어야 한다.
 file = ""
+bundled = "assets/fonts/PretendardStd-Bold.ttf"   # 패키지 폴더 기준. 비우면 번들을 쓰지 않는다
 candidates = [
   "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
   "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",

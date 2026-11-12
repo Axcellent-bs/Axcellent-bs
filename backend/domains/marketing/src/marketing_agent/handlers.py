@@ -72,6 +72,7 @@ from marketing_agent.schemas import (
     PublishNoticeInput,
 )
 from marketing_agent.sns import SnsStore, check_sns_post, draft_sns_post
+from marketing_agent.sns_prepare import prepare_sns_post_from_media
 from marketing_agent.sns_publish.publisher import publish_sns
 
 SOURCE = "marketing"
@@ -733,6 +734,16 @@ async def generate_media_skill(request: AgentRequest) -> AgentResult:
     )
 
 
+async def prepare_sns_post_from_media_skill(request: AgentRequest) -> AgentResult:
+    return await prepare_sns_post_from_media(
+        request,
+        notices=STATE.notices,
+        store=STATE.sns,
+        ledger=STATE.media_ledger,
+        from_decision=_from_decision,
+    )
+
+
 async def publish_sns_skill(request: AgentRequest) -> AgentResult:
     return await publish_sns(request, STATE.sns)
 
@@ -825,6 +836,7 @@ HANDLERS = {
     "publish_sns": publish_sns_skill,
     "cancel_campaign": cancel_campaign,
     "generate_media": generate_media_skill,
+    "prepare_sns_post_from_media": prepare_sns_post_from_media_skill,
     "marketing_chat_send": marketing_chat_send,
     "marketing_chat_list": marketing_chat_list,
     "marketing_chat_get": marketing_chat_get,
