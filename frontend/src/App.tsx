@@ -89,7 +89,7 @@ function Pages() {
           <Route path="/ops" element={<Hr />} />
           <Route path="/agent-eval" element={<AgentEvaluation />} />
           <Route path="/org" element={<OrgChanges />} />
-          <Route path="/marketing" element={<Marketing />} />
+          <Route path="/marketing/*" element={<Marketing />} />
           <Route path="/orchestrator" element={<Orchestrator />} />
           <Route path="/data/*" element={<Data />} />
           <Route path="/planning/*" element={<PlanningPage />} />
