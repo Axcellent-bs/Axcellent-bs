@@ -54,7 +54,8 @@ export default function AgentOffice() {
   };
 
   // ------------------------------------------------ 실시간: 대화 기록과 같은 방 데이터
-  const data = useChatRooms({ enabled: mode === "live", room: mode === "live" ? room : null });
+  const liveRooms = useMemo(() => (mode === "live" ? [room] : []), [mode, room]);
+  const data = useChatRooms({ enabled: mode === "live", rooms: liveRooms });
   const { incidents, orchConn, safetyConn, commConn, talk } = data;
 
   // 총괄이 꺼져 있으면 처음 한 번만 리플레이로 바꿔 준다
