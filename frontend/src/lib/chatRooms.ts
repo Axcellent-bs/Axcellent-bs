@@ -1,4 +1,4 @@
-import { ALL_ROOM, buildTimeline, incidentTitle, messageCount, type ChatItem, type OrchIncident } from "@/lib/agentChat";
+import { ALL_ROOM, buildTimeline, deptOf, incidentTitle, messageCount, type ChatItem, type OrchIncident } from "@/lib/agentChat";
 import type { ExecutionRecord } from "@/lib/finance";
 import { incidentNo } from "@/lib/format";
 import { mergeTalk } from "@/lib/officeTalk";
@@ -16,8 +16,10 @@ export type RoomKind = "all" | "incident" | "direct";
 export interface ChatRoom {
   id: string;
   kind: RoomKind;
-  /** 방 이름. 장애 방은 "사건 제목 #짧은번호" */
+  /** 방 이름. 장애 방은 "짧은 유형 #짧은번호" */
   title: string;
+  /** 장애 방의 긴 문장 이름 (방 머리 아래 보조 줄) */
+  longTitle?: string;
   /** 장애 방의 총괄 사건 상태 (open·resolved·degraded) */
   status?: string;
   /** 말풍선 수 (안 읽은 수 계산에 쓴다) */
@@ -38,8 +40,36 @@ export interface RoomSources {
 
 /** 장애 방 짧은 번호: 사건 번호 앞 4자리 ("#066f") */
 export const shortNo = (contextId: string) => `#${incidentNo(contextId).slice(0, 4)}`;
-/** 장애 방 이름: "결제가 서버 오류로 자꾸 실패해요 #066f" */
-export const incidentRoomTitle = (inc: Pick<OrchIncident, "title" | "component" | "context_id">) => `${incidentTitle(inc)} ${shortNo(inc.context_id)}`;
+
+/**
+ * 장애 방 짧은 유형. 총괄 사건의 event_type("구성요소:지표", 총괄 naming.event_type)으로 먼저 찾고,
+ * 없으면 구성요소만으로 찾는다. 둘 다 모르면 긴 제목 앞 12자 + "…".
+ * 구성요소·지표 코드는 총괄 naming.py(COMPONENT_KO·METRIC_KO)와 인프라 감시(dejafix_watch)가 쓰는 값이다.
+ */
+export const SHORT_KIND_BY_EVENT: Record<string, string> = {
+  "payment:error_rate_5xx": "결제 실패",
+  "payment:http_5xx": "결제 실패",
+  "payment:payment_fail_rate": "결제 실패",
+  "payment:p95_latency_ms": "결제 지연",
+  "payment:order_fail_rate": "주문 실패",
+  "api:error_rate_5xx": "쇼핑몰 오류",
+  "api:p95_latency_ms": "쇼핑몰 지연",
+};
+export const SHORT_KIND_BY_COMPONENT: Record<string, string> = {
+  payment: "결제 장애", api: "쇼핑몰 장애", db: "주문 DB 장애", search: "검색 장애", shipping: "배송 장애",
+};
+/** 총괄 제목 끝 "(지표)"에서 지표 코드 (예전 제목 형식). event_type이 없을 때만 쓴다 */
+const metricInTitle = (title: string) => /\(([a-z0-9_]+)\)\s*$/.exec(title)?.[1] ?? null;
+
+export function shortKind(inc: Pick<OrchIncident, "title" | "component" | "event_type">): string {
+  const eventType = inc.event_type ?? (metricInTitle(inc.title) ? `${inc.component}:${metricInTitle(inc.title)}` : null);
+  const known = (eventType && SHORT_KIND_BY_EVENT[eventType]) || SHORT_KIND_BY_COMPONENT[inc.component];
+  if (known) return known;
+  const long = incidentTitle(inc);
+  return long.length > 12 ? `${long.slice(0, 12)}…` : long;
+}
+/** 장애 방 이름(목록·탭·방 머리): "결제 실패 #066f". 긴 문장은 incidentTitle(방 머리 아래 보조 줄) */
+export const incidentRoomTitle = (inc: Pick<OrchIncident, "title" | "component" | "context_id" | "event_type">) => `${shortKind(inc)} ${shortNo(inc.context_id)}`;
 export const ALL_ROOM_TITLE = "전체 대화방";
 
 const isOpen = (inc: OrchIncident) => inc.status === "open";
@@ -77,11 +107,31 @@ export function buildRooms(src: RoomSources): { all: ChatRoom; incidents: ChatRo
     id: inc.context_id,
     kind: "incident",
     title: incidentRoomTitle(inc),
+    longTitle: incidentTitle(inc),
     status: inc.status,
     count: messageCount(items[inc.context_id]),
     ...lastLine(items[inc.context_id]),
   }));
   return { all, incidents, items };
+}
+
+/**
+ * 방 머리 참여 수: "부서 N곳" (+ 사람이 말했으면 " · 사람 M명").
+ * 부서는 `deptKeys`(부서 AI 목록, DIRECT_AGENTS 키)에 드는 쪽만 센다. 서비스 이름(coupon 등)은 그 부서로 묶는다.
+ * 안전 관문·회사 기억·공통 로그 같은 시스템 기록은 세지 않는다. 아무도 없으면 null
+ */
+export function roomPeople(items: ChatItem[], deptKeys: readonly string[]): string | null {
+  const known = new Set(deptKeys);
+  const depts = new Set<string>();
+  const people = new Set<string>();
+  for (const it of items) {
+    if (it.kind !== "msg") continue;
+    if (it.fromKey === "human") { people.add(it.from); continue; }
+    const dept = deptOf(it.fromKey);
+    if (known.has(dept)) depts.add(dept);
+  }
+  if (!depts.size && !people.size) return null;
+  return [depts.size ? `부서 ${depts.size}곳` : null, people.size ? `사람 ${people.size}명` : null].filter(Boolean).join(" · ");
 }
 
 /** 방 목록 시각: 오늘이면 "오후 4:53", 어제면 "어제", 그 전이면 "11월 10일" */

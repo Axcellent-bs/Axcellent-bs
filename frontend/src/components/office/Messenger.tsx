@@ -24,10 +24,8 @@ const AVATAR: Record<string, string> = {
 };
 export const avatarLook = (key: string) => AVATAR[key] ?? "bg-ink-500 text-white";
 
+// 성공·실패는 말풍선 앞 표시로만 (왼쪽 색 줄은 쓰지 않는다)
 const TONE_ICON: Record<Tone, string> = { request: "", ok: "✓ ", warn: "⏸ ", fail: "✕ ", muted: "" };
-const TONE_EDGE: Record<Tone, string> = {
-  request: "", ok: "border-l-2 border-emerald-700/50", warn: "border-l-2 border-amber-700/60", fail: "border-l-2 border-red-700/60", muted: "opacity-80",
-};
 
 const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
 const dayKey = (iso: string) => (iso ? new Date(iso).toLocaleDateString("sv-SE") : "");
@@ -37,7 +35,7 @@ const atName = (to: string) => `@${TALK_LABEL[to] ?? to.replace(/\s*AI$/, "")}`;
 
 export function Avatar({ name, k, size = "md" }: { name: string; k: string; size?: "sm" | "md" }) {
   return (
-    <span aria-hidden="true" className={`flex shrink-0 items-center justify-center font-semibold ${size === "sm" ? "h-6 w-6 rounded-lg text-[10px]" : "h-9 w-9 rounded-[13px] text-xs"} ${avatarLook(k)}`}>
+    <span aria-hidden="true" className={`chat-avatar flex shrink-0 items-center justify-center font-semibold ${size === "sm" ? "h-6 w-6 text-[10px]" : "h-9 w-9 text-xs"} ${avatarLook(k)}`}>
       {name.slice(0, 1)}
     </span>
   );
@@ -49,14 +47,14 @@ const STATUS_TONE: Record<string, string> = {
 };
 export function StatusChip({ status }: { status?: string }) {
   if (!status) return null;
-  return <span className={`chip shrink-0 whitespace-nowrap rounded-full ${STATUS_TONE[status] ?? "bg-ink-100 text-ink-500"}`}>{INCIDENT_STATUS_KO[status] ?? status}</span>;
+  return <span className={`chip shrink-0 whitespace-nowrap ${STATUS_TONE[status] ?? "bg-ink-100 text-ink-500"}`}>{INCIDENT_STATUS_KO[status] ?? status}</span>;
 }
 
 /** 시스템 알림·날짜 줄: 가운데 회색 알약 */
 function Pill({ children, title }: { children: ReactNode; title?: string }) {
   return (
     <li className="flex justify-center">
-      <p title={title} className="max-w-[85%] rounded-full bg-ink-900/[.07] px-3 py-1 text-center text-[11px] text-ink-700">{children}</p>
+      <p title={title} className="chat-pill max-w-[85%] bg-ink-900/[.07] px-3 py-1 text-center text-[11px] text-ink-700">{children}</p>
     </li>
   );
 }
@@ -82,7 +80,7 @@ function HoldCard({ h, hold }: { h: Extract<ChatItem, { kind: "hold" }>; hold: H
   const busy = hold.busyHold === h.id;
   const outcome = { approved: "사람이 승인 → 다시 진행", rejected: "사람이 거절 → 진행하지 않음", timeout: "기한 안에 결정 없음 → 자동 거절", pending: "" }[h.state];
   return (
-    <div className="min-w-[240px] max-w-full overflow-hidden rounded-[4px_14px_14px_14px] bg-surface text-ink-900 shadow-sm">
+    <div className="min-w-[240px] max-w-full overflow-hidden bg-surface text-ink-900 shadow-sm">
       <p className="bg-amber-50 px-3 py-2 text-[13px] font-semibold text-amber-800">
         <span aria-hidden="true">⏸ </span>{h.state === "pending" ? "사람 승인이 필요해요" : "사람이 판단했어요"} · {h.title}
       </p>
@@ -120,12 +118,14 @@ function Bubble({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: Off
   const mine = !!m.human;
   const direct = m.id.startsWith("direct:");
   const showTo = m.to && m.to !== "받는 쪽 미기록" && m.to !== "담당 미정";
+  // 숫자 묶음이 붙은 카드 말풍선은 네모, 글만 있는 말풍선은 둥글게(styles.css .chat-round .chat-bubble)
   const cardLike = m.facts.length > 0;
-  const look = mine
-    ? "rounded-[14px_4px_14px_14px] bg-brand-600 text-white"
-    : `rounded-[4px_14px_14px_14px] bg-surface text-ink-900 shadow-sm ${TONE_EDGE[m.tone]}`;
+  const shape = cardLike ? "min-w-[220px]" : `chat-bubble ${mine ? "chat-mine" : ""}`;
+  const look = mine ? "bg-brand-600 text-white" : "bg-surface text-ink-900 shadow-sm";
+  // 출처(공통 로그·안전 관문 기록 등)와 코드 정보는 툴팁으로만
+  const tip = [m.tag, m.raw].filter(Boolean).join(" · ") || undefined;
   return (
-    <div title={m.raw} className={`min-w-0 px-3 py-2 text-[13px] leading-relaxed ${look} ${cardLike ? "min-w-[220px]" : ""}`}>
+    <div title={tip} className={`min-w-0 px-3 py-2 text-[13px] leading-relaxed ${look} ${shape}`}>
       <p className={direct ? "whitespace-pre-wrap break-words" : "break-words"}>
         {showTo && <span className={`mr-1 text-[11px] font-bold ${mine ? "text-white/80" : "text-brand-700"}`}>{atName(m.to)}</span>}
         {mine ? "" : TONE_ICON[m.tone]}{humanizePlanIds(m.text)}
@@ -145,7 +145,6 @@ function Bubble({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: Off
           onGo={talk && m.goKey ? () => { void proceed(talk, m.goKey as string, m.room); } : undefined} />
       )}
       {m.handoff && <HandoffLine requestId={m.handoff.requestId} />}
-      {m.tag && <p className={`mt-0.5 text-[11px] ${mine ? "text-white/70" : "text-ink-500"}`}>{m.tag}</p>}
     </div>
   );
 }

@@ -32,6 +32,8 @@ export interface OrchIncident {
   kind: string;
   title: string;
   component: string;
+  /** 같은 유형인지 가르는 값 "구성요소:지표" (예: payment:error_rate_5xx). 지표를 모르면 null, 예전 응답은 없다 */
+  event_type?: string | null;
   status: "open" | "resolved" | "degraded" | string;
   opened_at: string | null;
   closed_at: string | null;
