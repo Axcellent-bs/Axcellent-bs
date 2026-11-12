@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import { SETTLEMENT_HOLD_ACTION, liveHumanTokenSet } from "@/lib/finance";
 
 // 고객지원 > 판매자 정산. 판매자 정산(정산금 계산 · 지급 승인 요청 · 묶음 상태 · 지급 기한 점검)은
-// 고객지원(claims 서비스)이 한다. 재무는 결과를 받아 재무 화면 ③에서 보여 주기만 한다.
+// 고객지원(settlement 서비스, 화면은 클레임·보상 메뉴 안)이 한다. 재무는 결과를 받아 재무 화면 ③에서 보여 주기만 한다.
 // 표와 기한 점검은 dashboard-api(`/api/dashboard/settlements...`)에서 받는다. 숫자는 서버가 계산한 값 그대로다.
 // 묶음 요청은 안전 장치 보류 큐로 가고(항상 사람), 아래 보류 큐에서 사람이 진행·멈춤을 누른다.
 

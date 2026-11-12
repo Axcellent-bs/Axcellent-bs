@@ -17,3 +17,19 @@ def test_dev_is_not_planning() -> None:
     assert route_target("planning", "find_related_prs") == "dev"
     assert route_target("planning", "create_ticket") == "planning"
     assert department_of("dev") != "planning"
+
+
+def test_settlement_service_speaks_for_support() -> None:
+    """판매자 정산은 claims에서 settlement 서비스로 나왔다(2026-11-12). 권한은 고객지원 그대로."""
+    from ax_agent_template.services import route_target
+
+    assert department_of("settlement") == "support"
+    for skill in (
+        "seller_settlement",
+        "seller_settlement_weeks",
+        "seller_settlement_batches",
+        "seller_settlement_deadlines",
+        "request_seller_settlement",
+    ):
+        assert route_target("support", skill) == "settlement"
+    assert route_target("support", "decide_claim") == "claims"

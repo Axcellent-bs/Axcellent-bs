@@ -1,4 +1,4 @@
-"""판매자 정산 받기: 고객지원(support, claims 서비스)이 계산한 정산을 A2A로 읽는다.
+"""판매자 정산 받기: 고객지원(support, settlement 서비스)이 계산한 정산을 A2A로 읽는다.
 
 판매자 정산(정산금 계산 · 지급 승인 요청 · 묶음 상태 · 지급 기한 점검)은 고객지원이 한다
 (2026-11-12 결정). 재무는 정산금을 계산하지 않고 지급 승인도 요청하지 않는다.
@@ -17,10 +17,15 @@
   (그대로 부르면 꺼진 서비스로 보고 사람 할 일함에 넘기기 때문이다. 인사 `team_headcount`와 같다)
 - 잘못된 기간이라고 답하면(`invalid_input`) `InvalidPeriod`를 낸다(화면은 400)
 - 화면이 몇 초마다 불러도 같은 요청을 반복하지 않게 잠깐 기억한다(실패는 더 짧게)
+- 같은 요청이 이미 가 있으면 새로 보내지 않고 그 답을 같이 기다린다(skill·입력마다 하나만).
+  고객지원 정산이 느릴 때 화면·마감 점검·할 일이 같은 요청을 겹쳐 쌓지 않게 한다
+- 고객지원이 첫 장부를 모으는 중(`settlement_preparing`)이면 None이고 `preparing()`이 True다
+  (화면은 503 "준비 중")
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -35,6 +40,7 @@ SUPPORT = "support"
 CALL_SECONDS = 10.0
 CACHE_SECONDS = 30.0
 FAILED_SECONDS = 10.0
+PREPARING = "settlement_preparing"  # 고객지원이 첫 장부를 모으는 중
 MAX_WEEKS = 30  # 고객지원 `seller_settlement_weeks`가 한 번에 받는 기간 수
 
 Caller = Callable[[str, dict[str, Any]], Awaitable[AgentResult | None]]
@@ -58,6 +64,8 @@ async def _call_support(skill: str, payload: dict[str, Any]) -> AgentResult | No
 
 _caller: Caller = _call_support
 _cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_inflight: dict[str, asyncio.Task[AgentResult | None]] = {}  # 가 있는 요청 (열쇠마다 하나)
+_preparing: dict[str, bool] = {}  # skill → 마지막 답이 "준비 중"이었는가
 
 
 def set_caller(caller: Caller | None) -> None:
@@ -70,6 +78,25 @@ def set_caller(caller: Caller | None) -> None:
 def forget() -> None:
     """기억해 둔 응답을 모두 버린다."""
     _cache.clear()
+    _inflight.clear()
+    _preparing.clear()
+
+
+def preparing(skill: str = "seller_settlement") -> bool:
+    """그 skill의 마지막 답이 "첫 장부를 모으는 중"이었는가 (None을 503 준비 중으로 보여 줄 때)."""
+    return _preparing.get(skill, False)
+
+
+async def _call_once(key: str, skill: str, payload: dict[str, Any]) -> AgentResult | None:
+    """같은 열쇠의 요청이 가 있으면 그 답을 같이 기다린다."""
+    task = _inflight.get(key)
+    if task is None or task.done():
+        task = asyncio.ensure_future(_caller(skill, payload))
+        _inflight[key] = task
+        task.add_done_callback(
+            lambda t: _inflight.pop(key, None) if _inflight.get(key) is t else None
+        )
+    return await asyncio.shield(task)
 
 
 async def _ask(
@@ -82,7 +109,7 @@ async def _ask(
     if hit is not None and now - hit[0] < (CACHE_SECONDS if hit[1] is not None else FAILED_SECONDS):
         return hit[1]
     try:
-        result = await _caller(skill, payload)
+        result = await _call_once(key, skill, payload)
     except Exception:  # noqa: BLE001 - 고객지원이 꺼져 있어도 재무 화면은 뜬다
         result = None
     output: dict[str, Any] | None = None
@@ -90,6 +117,7 @@ async def _ask(
         output = result.output if isinstance(result.output, dict) else None
     elif strict and result is not None and result.outcome == "invalid_input":
         raise InvalidPeriod(f"고객지원이 기간을 받지 않았다: {payload}")
+    _preparing[skill] = output is None and result is not None and result.outcome == PREPARING
     _cache[key] = (now, output)
     return output
 

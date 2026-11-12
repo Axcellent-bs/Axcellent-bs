@@ -35,7 +35,7 @@ from typing import Any
 
 import yaml
 
-from ax_agent_template.services import BY_ID
+from ax_agent_template.services import BY_ID, ENABLED_WITH
 
 ENABLED_ENV = "AX_ENABLED_SERVICES"
 ENABLED_FILE_ENV = "AX_ENABLED_SERVICES_FILE"
@@ -116,11 +116,18 @@ def enabled_services() -> frozenset[str] | None:
 
 
 def is_enabled(target: str) -> bool:
-    """받는 쪽이 켜져 있는지. 서비스 13개가 아닌 대상은 늘 켜져 있다."""
+    """받는 쪽이 켜져 있는지. 서비스 13개가 아닌 대상은 늘 켜져 있다.
+
+    `ENABLED_WITH`의 서비스(판매자 정산)는 따르는 서비스(claims)가 켜져 있어도 켠 것으로 본다.
+    화면 서비스 목록에 따로 없어서 켠 서비스 파일·환경변수에 이름이 없을 수 있다.
+    """
     if target not in BY_ID:
         return True
     enabled = enabled_services()
-    return enabled is None or target in enabled
+    if enabled is None or target in enabled:
+        return True
+    leader = ENABLED_WITH.get(target)
+    return leader is not None and leader in enabled
 
 
 # 조직도 파일은 바뀐 시각이 같으면 다시 읽지 않는다

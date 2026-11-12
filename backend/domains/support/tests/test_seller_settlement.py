@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import random
+import time
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -291,9 +294,8 @@ def _half_up(amount: int, rate: float) -> int:
     return int((Decimal(amount) * Decimal(str(rate))).quantize(Decimal("1"), ROUND_HALF_UP))
 
 
-@pytest.mark.parametrize("seed", range(150))
-def test_random_books_match_an_independent_calculation(seed: int) -> None:
-    """정산 공식을 따로 계산한 값과 맞춘다 (재무 `accuracy.case_settlement`에서 옮김)."""
+def _random_case(seed: int) -> dict[str, Any]:
+    """무작위 장부 하나 (정산 공식 대조·예전 계산과 같은지 대조에 같이 쓴다)."""
     rng = random.Random(seed)
     monday = TODAY - timedelta(days=TODAY.weekday() + 7)
     start = datetime.combine(monday, datetime.min.time(), tzinfo=UTC)
@@ -346,6 +348,24 @@ def test_random_books_match_an_independent_calculation(seed: int) -> None:
         coupons=coupons,
         sellers=[{"seller_id": s, "name": s} for s in sellers],
     )
+    return {
+        "books": bk,
+        "orders": orders,
+        "refunds": refunds,
+        "coupons": coupons,
+        "sellers": sellers,
+        "rates": rates,
+        "start": start,
+        "end": end,
+    }
+
+
+@pytest.mark.parametrize("seed", range(150))
+def test_random_books_match_an_independent_calculation(seed: int) -> None:
+    """정산 공식을 따로 계산한 값과 맞춘다 (재무 `accuracy.case_settlement`에서 옮김)."""
+    case = _random_case(seed)
+    bk, orders, refunds, coupons = case["books"], case["orders"], case["refunds"], case["coupons"]
+    sellers, rates, start, end = case["sellers"], case["rates"], case["start"], case["end"]
     got = {
         r["seller_id"]: (
             r["gross"],
@@ -768,3 +788,450 @@ def test_batches_are_imported_once_from_the_finance_state(tmp_path: Path) -> Non
 def test_execute_module_is_the_template_one() -> None:
     """지급 요청은 agent-template execute()(안전 관문)로만 한다."""
     assert sh.execute is template_execute.execute
+
+
+# ---------------------------------------------------------------- 계산을 가볍게 (2026-11-12)
+# 판매자마다 주문 전체를 다시 훑던 예전 계산(#1010)을 그대로 두고, 바꾼 계산과 같은 답인지 본다.
+# 재헌 측정(주문 298,365건·판매자 200곳): statements() 8.8초, deadline_report() 86.6초 → 504
+
+
+def _statements_before(
+    books: sb.SettlementBooks,
+    period: str | None,
+    today: date | None = None,
+) -> dict[str, Any]:
+    cfg = sc.load_policy()
+    today = today or sc.today()
+    name, monday, sunday = sc.week_range(period, today)
+    start, end = sc.day_start(monday), sc.day_start(sunday + timedelta(days=1))
+
+    sellers = [s["seller_id"] for s in books.sellers if s.get("seller_id")]
+    for o in books.orders:  # 판매자 목록에 없는 판매자의 품목도 빠뜨리지 않는다
+        for i in o["items"]:
+            if i.get("seller_id") and i["seller_id"] not in sellers:
+                sellers.append(i["seller_id"])
+
+    sold = books.confirmed_between(start, end)
+    waiting = books.unconfirmed_until(end)
+    confirmed_at = {o["order_id"]: o.get("delivered_at") for o in books.orders}
+    rows = []
+    for seller_id in sellers:
+        gross = commission = 0
+        order_ids: set[str] = set()
+        rates: set[float] = set()
+        by_product: dict[str, dict[str, Any]] = {}
+        for o in sold:
+            mine = [i for i in o["items"] if i.get("seller_id") == seller_id]
+            if not mine:
+                continue
+            order_ids.add(o["order_id"])
+            for i in mine:
+                g = sb.item_gross(i)
+                rate = cfg.commission.rate_for(i.get("category_code"))
+                rates.add(rate)
+                gross += g
+                commission += sc.rate_amount(g, rate)
+                pid = str(i.get("product_id") or "")
+                if pid:
+                    row = by_product.setdefault(
+                        pid,
+                        {
+                            "product_id": pid,
+                            "name": books.product_name(pid, i),
+                            "qty": 0,
+                            "gross": 0,
+                        },
+                    )
+                    row["qty"] += st._qty(i)
+                    row["gross"] += g
+        seller_coupon = sum(
+            c["total_value"]
+            for c in books.coupons
+            if c.get("funded_by") == "seller"
+            and c.get("seller_id") == seller_id
+            and sb.in_range(c.get("created_at"), start, end)
+        )
+        refunds = sum(
+            r["amount"]
+            for r in books.refunds
+            if r.get("seller_id") == seller_id
+            and sb.in_range(st._refund_settles_at(r, confirmed_at), start, end)
+        )
+        payout = gross - commission - seller_coupon - refunds
+        if len(rates) == 1:
+            rate_shown = rates.pop()
+        elif gross:
+            rate_shown = round(commission / gross, 4)
+        else:
+            rate_shown = cfg.commission.default_rate
+
+        pending_orders, pending_gross = 0, 0
+        for o in waiting:
+            mine = [i for i in o["items"] if i.get("seller_id") == seller_id]
+            if mine:
+                pending_orders += 1
+                pending_gross += sum(sb.item_gross(i) for i in mine)
+
+        reasons = []
+        if not order_ids and pending_orders and payout <= 0:
+            reasons.append(
+                {
+                    "code": "no_confirmed_orders",
+                    "label": f"이번 주 확정 주문 없음 (확정 대기 {pending_orders}건은 다음 정산)",
+                }
+            )
+        if order_ids and payout <= 0:
+            reasons.append({"code": "negative_payout", "label": "정산금이 0원 이하"})
+
+        if not order_ids and not seller_coupon and not refunds and not pending_orders:
+            continue  # 이번 기간 거래가 없는 판매자는 내역서를 만들지 않는다
+        rows.append(
+            {
+                "seller_id": seller_id,
+                "name": books.seller_name(seller_id),
+                "orders": len(order_ids),
+                "gross": gross,
+                "commission_rate": rate_shown,
+                "commission": commission,
+                "seller_coupon": seller_coupon,
+                "refunds": refunds,
+                "payout": payout,
+                "hold_reasons": reasons,
+                "status": "held" if reasons else "ready",
+                "review_id": None,
+                # 다음 정산으로 넘어가는 구매 확정 대기 주문 (이번 정산금에 들지 않는다)
+                "pending_confirmation": {"orders": pending_orders, "gross": pending_gross},
+                # 이번 기간에 판 쇼핑몰 상품 (판매액 큰 순). 쇼핑몰 상품 화면과 잇는 열쇠
+                "products": sorted(
+                    by_product.values(), key=lambda r: (-r["gross"], r["product_id"])
+                )[: st.MAX_PRODUCTS],
+            }
+        )
+    pay_date = sunday + timedelta(days=cfg.settlement.pay_days_after_period_end)
+    return {
+        "period": name,
+        "from": sc.iso(start),
+        "to": sc.iso(end),
+        "pay_date": pay_date.isoformat(),
+        "statements": rows,
+        "applied_rules": [sc.applied_rule()],
+    }
+
+
+def _richer(case: dict[str, Any], seed: int, *, live: bool) -> sb.SettlementBooks:
+    """무작위 장부에 목록에 없는 판매자·판매자 없는 품목·상품 이름을 더한다.
+
+    `live`면 실제 장부처럼 계산을 붙여 둔다.
+    """
+    rng = random.Random(seed + 1000)
+    orders = copy.deepcopy(case["orders"])
+    for o in orders:
+        for i in o["items"]:
+            if rng.random() < 0.1:
+                i["seller_id"] = "sel_unlisted"
+            elif rng.random() < 0.05:
+                i["seller_id"] = None
+            if rng.random() < 0.3:
+                i["title"] = f"책 {i['product_id']}"
+    products = [{"product_id": f"prd_{n}", "name": f"상품 {n}"} for n in range(2)]
+    return sb.SettlementBooks(
+        orders=orders,
+        refunds=copy.deepcopy(case["refunds"]),
+        coupons=copy.deepcopy(case["coupons"]),
+        sellers=[{"seller_id": s, "name": s.upper()} for s in case["sellers"]],
+        products=products,
+        mock=not live,
+    )
+
+
+@pytest.mark.parametrize("seed", range(150))
+def test_one_pass_statements_equal_the_previous_calculation(seed: int) -> None:
+    """같은 장부면 바꾼 계산(한 번 훑어 판매자별로 모음)이 예전 계산과 글자까지 같다."""
+    case = _random_case(seed)
+    for live in (False, True):
+        bk = _richer(case, seed, live=live)
+        for period in (None, "2026-W41", "2026-W43"):
+            assert st.statements(bk, period, TODAY) == _statements_before(bk, period, TODAY)
+        if live:
+            st.warm(bk)
+            assert st.cached_statements(bk, None, TODAY) == _statements_before(bk, None, TODAY)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_deadline_report_is_the_same_with_shared_week_results(seed: int) -> None:
+    case = _random_case(seed)
+    bk = _richer(case, seed, live=True)
+    before = st.deadline_report(
+        bk, {}, TODAY, statements_of=lambda w: _statements_before(bk, w, TODAY)
+    )
+    assert st.deadline_report(bk, {}, TODAY) == before
+
+
+def _scale_books(n_orders: int, n_sellers: int) -> sb.SettlementBooks:
+    """합성 장부: 주문 n건·판매자 n곳, 70일에 고르게. 배송 완료 85%·환불 5%·판매자 쿠폰 조금."""
+    rng = random.Random(7)
+    sellers = [{"seller_id": f"sel_{k:03d}", "name": f"가게{k}"} for k in range(n_sellers)]
+    first = FIXED_NOW - timedelta(days=70)
+    orders, refunds = [], []
+    for n in range(n_orders):
+        when = first + timedelta(seconds=rng.randrange(70 * 86400))
+        items = [
+            (sellers[rng.randrange(n_sellers)]["seller_id"], "book", 1, rng.randint(1, 30) * 1000)
+            for _ in range(rng.randint(1, 3))
+        ]
+        o = order(f"ord_{n}", when, items, delivered=rng.random() < 0.85)
+        orders.append(o)
+        if rng.random() < 0.05:
+            refunds.append(refund(f"rfd_{n}", o["order_id"], items[0][0], 1000, when))
+    coupons = [
+        {
+            "coupon_id": f"cpn_{k}",
+            "funded_by": "seller",
+            "seller_id": sellers[k % n_sellers]["seller_id"],
+            "total_value": 1000,
+            "created_at": first + timedelta(days=k % 70),
+        }
+        for k in range(500)
+    ]
+    return sb.SettlementBooks(
+        orders=orders, refunds=refunds, coupons=coupons, sellers=sellers, mock=False
+    )
+
+
+def test_statements_scale_and_deadlines_compute_each_week_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """주문 6만 건·판매자 200곳: 정산서는 넉넉히 잡아도 3초 안, 지급 기한 점검은 주마다 한 번만
+    계산한다.
+
+    서버(주문 30만 건)에서 예전 계산은 정산서 8.8초, 지급 기한 점검 86.6초였다(주마다 정산서를 다시
+    계산).
+    """
+    bk = _scale_books(60_000, 200)
+    started = time.perf_counter()
+    st.warm(bk)
+    result = st.statements(bk, None, TODAY)
+    assert time.perf_counter() - started < 3.0
+    assert len(result["statements"]) == 200
+
+    calls: list[str] = []
+    real = st.statements
+
+    def counted(books_: sb.SettlementBooks, period: str | None, today: date | None = None) -> Any:
+        calls.append(str(period))
+        return real(books_, period, today)
+
+    monkeypatch.setattr(st, "statements", counted)
+    st.cached_statements(bk, None, TODAY)  # 조회가 지난주를 먼저 계산해 둔 상태
+    report = st.deadline_report(bk, {}, TODAY)
+    assert report["sellers"]
+    assert len(calls) == len(set(calls))  # 주마다 한 번만, 조회에서 계산한 주는 다시 안 함
+    st.deadline_report(bk, {}, TODAY)
+    assert len(calls) == len(set(calls))  # 같은 장부로 다시 불러도 계산하지 않는다
+
+
+@pytest.mark.asyncio
+async def test_same_computation_runs_once_while_callers_wait() -> None:
+    """스레드 계산은 부른 쪽이 끊겨도 멈추지 않으므로, 같은 열쇠의 계산은 하나만 띄운다."""
+    bk = _week_books()
+    bk.mock = False
+    runs: list[int] = []
+
+    def slow() -> dict[str, Any]:
+        runs.append(1)
+        time.sleep(0.05)
+        return {"n": len(runs)}
+
+    got = await asyncio.gather(*(bk.computed("k", slow) for _ in range(5)))
+    assert runs == [1] and all(g == {"n": 1} for g in got)
+    assert await bk.computed("k", slow) == {"n": 1} and runs == [1]  # 붙여 둔 결과
+
+
+@pytest.mark.asyncio
+async def test_views_reuse_the_week_result_but_never_keep_batch_status() -> None:
+    """같은 장부·같은 주는 한 번 계산한 정산서를 쓴다. 묶음 상태는 붙여 둔 결과에 남지 않는다."""
+    bk = _week_books()
+    bk.mock = False
+    first = await sh._view(bk, "2026-W42")
+    batches_mod.STORE.put(
+        "2026-W42",
+        {
+            "status": "requested",
+            "review_id": "rev_1",
+            "seller_ids": ["sel_a"],
+            "total_payout": 9000,
+        },
+    )
+    second = await sh._view(bk, "2026-W42")
+    assert {r["seller_id"]: r["status"] for r in first["statements"]} == {
+        "sel_a": "ready",
+        "sel_b": "ready",
+    }
+    assert {r["seller_id"]: r["status"] for r in second["statements"]}["sel_a"] == "requested"
+    shared = st.cached_statements(bk, "2026-W42", TODAY)
+    assert {r["status"] for r in shared["statements"]} == {"ready"}
+
+
+# ----------------------------------------장부 읽기: 바로 답하고 뒤에서 새로 읽기
+class _FakeShop:
+    """`live_books` 대신: 부를 때마다 (전체?, 최근만?)을 적고 `gate`가 열릴 때까지 기다린다."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[bool, bool]] = []
+        self.gate = asyncio.Event()
+        self.gate.set()
+
+    async def __call__(
+        self, http_client: Any = None, store: Any = None, full: bool = False, recent: bool = False
+    ) -> sb.SettlementBooks:
+        self.calls.append((full, recent))
+        await self.gate.wait()
+        bk = _week_books()
+        bk.mock = False
+        return bk
+
+
+@pytest.fixture
+def fake_shop(monkeypatch: pytest.MonkeyPatch) -> _FakeShop:
+    fake = _FakeShop()
+    monkeypatch.setattr(sb, "live_books", fake)
+    sb.clear_cache()
+    yield fake
+    sb.clear_cache()
+
+
+@pytest.mark.asyncio
+async def test_first_load_answers_preparing_quickly(
+    fake_shop: _FakeShop, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """서버를 켠 뒤 첫 장부가 아직이면 오래 붙잡지 않고 "준비 중"으로 답한다(30초 504가 아니라)."""
+    monkeypatch.setattr(sb, "PREPARING_WAIT_SECONDS", 0.05)
+    fake_shop.gate.clear()
+    result = await sh.seller_settlement(_request("seller_settlement", {}))
+    assert (result.status, result.outcome) == (TaskStatus.FAILED, "settlement_preparing")
+    again = await sh.seller_settlement_deadlines(_request("seller_settlement_deadlines", {}))
+    assert again.outcome == "settlement_preparing"
+    assert len(fake_shop.calls) == 1  # 기다리는 동안 읽기를 겹쳐 띄우지 않는다
+    fake_shop.gate.set()
+    assert sb._inflight is not None
+    await sb._inflight
+    done = await sh.seller_settlement(_request("seller_settlement", {}))
+    assert done.status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_reads_answer_from_the_last_books_and_refresh_behind(
+    fake_shop: _FakeShop, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = await sb.load_books()
+    assert fake_shop.calls == [(False, False)]
+    # 장부가 오래돼도(10분 넘게) 조회는 기다리지 않고 직전 장부로 답한다. 새로 읽기는 하나만 뒤에서
+    stamp, books_ = sb._cache
+    sb._cache = (stamp - 3600, books_)
+    fake_shop.gate.clear()
+    got = await asyncio.wait_for(asyncio.gather(*(sb.load_books() for _ in range(5))), 0.5)
+    assert all(g is first for g in got)
+    assert fake_shop.calls == [(False, False), (False, False)]
+    fake_shop.gate.set()
+    assert sb._inflight is not None
+    await sb._inflight
+    assert sb._cache[1] is not first  # 뒤에서 읽은 새 장부로 바뀌었다
+
+
+@pytest.mark.asyncio
+async def test_payout_request_refreshes_only_recent_orders(fake_shop: _FakeShop) -> None:
+    """돈이 걸린 결정은 새로 읽은 장부로 하되, 매번 전체(30만 건)를 다시 읽지 않는다."""
+    first = await sb.load_books()
+    assert await sb.load_books(fresh=True) is first  # 60초 안에 모은 장부면 그대로
+    stamp, books_ = sb._cache
+    sb._cache = (stamp - sb.FRESH_SECONDS - 1, books_)
+    fresh = await sb.load_books(fresh=True)
+    assert fresh is not first
+    assert fake_shop.calls == [(False, False), (False, True)]  # 두 번째는 최근 주문만
+
+
+def test_store_reads_everything_first_then_recent_orders_even_when_a_full_read_is_due() -> None:
+    store = sb.OrderStore()
+    assert store.since(False, recent=True) is None  # 처음 한 번은 전체
+    store.full_at = time.monotonic()
+    assert store.since(False) is not None
+    store.full_at = time.monotonic() - sb.FULL_REFRESH_SECONDS - 1
+    assert store.since(False) is None  # 조회는 10분마다 전체
+    assert store.since(False, recent=True) is not None  # 지급 요청은 최근 주문만
+
+
+def _raw_order(n: int, created: str, *, refunded: int = 0, delivered: str | None = None) -> dict:
+    return {
+        "order_id": f"ord_{n}",
+        "created_at": created,
+        "delivered_at": delivered,
+        "total_amount": 30000,
+        "refunded_amount": refunded,
+        "items": [
+            {"product_id": "prd_1", "seller_id": "sel_a", "qty": 1, "unit_price": 20000},
+            {"product_id": "prd_2", "seller_id": "sel_b", "qty": 1, "unit_price": 10000},
+        ],
+        "payments": [
+            {
+                "payment_id": f"pay_{n}",
+                "status": "succeeded",
+                "amount": 30000,
+                "created_at": created,
+            }
+        ],
+        "refunds": [
+            {
+                "refund_id": f"rf_{n}",
+                "payment_id": f"pay_{n}",
+                "amount": refunded,
+                "created_at": created,
+            }
+        ]
+        if refunded
+        else [],
+    }
+
+
+def test_incremental_merge_gives_the_same_books_as_a_full_read() -> None:
+    """모아 둔 주문·환불 나눔에 최근 주문만 끼운 결과가 전체를 새로 읽은 결과와 같다."""
+    old = [
+        _raw_order(n, "2026-10-01T01:00:00Z", delivered="2026-10-02T01:00:00Z") for n in range(5)
+    ]
+    old.append(
+        _raw_order(9, "2026-10-01T01:00:00Z", refunded=3000, delivered="2026-10-02T01:00:00Z")
+    )
+    recent_before = [_raw_order(20, "2026-10-22T01:00:00Z")]
+    recent_after = [
+        _raw_order(20, "2026-10-22T01:00:00Z", refunded=6000, delivered="2026-10-23T01:00:00Z"),
+        _raw_order(21, "2026-10-23T01:00:00Z"),
+    ]
+    store = sb.OrderStore()
+    store.merge(old + recent_before, {}, None)
+    since = (FIXED_NOW - timedelta(days=sb.RECENT_DAYS)).replace(microsecond=0)
+    orders, skipped = store.merge(recent_after, {}, since)
+
+    whole = sb.OrderStore()
+    want_orders, want_skipped = whole.merge(old + recent_after, {}, None)
+    assert sorted(o["order_id"] for o in orders) == sorted(o["order_id"] for o in want_orders)
+    assert skipped == want_skipped == 0
+    assert store.all_refunds() == sb.refunds_from_orders(orders)
+    assert sorted(r["refund_id"] for r in store.all_refunds()) == sorted(
+        r["refund_id"] for r in whole.all_refunds()
+    )
+    a = sb.SettlementBooks(orders=orders, refunds=store.all_refunds(), sellers=[], mock=False)
+    b = sb.SettlementBooks(orders=want_orders, refunds=whole.all_refunds(), sellers=[], mock=False)
+    for period in ("2026-W40", "2026-W43"):
+        assert st.statements(a, period, TODAY) == st.statements(b, period, TODAY)
+
+
+def test_coupon_read_falls_back_to_the_claims_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """정산 서비스 키가 따로 없으면 쿠폰 읽기(읽기만)에 claims 키를 쓴다. 서버 설정을 안 바꿔도
+    된다."""
+    monkeypatch.setenv("SUPPORT_AGENT_CARD", "/x/settlement/agent-card.json")
+    monkeypatch.delenv("AX_SERVICE_NAME", raising=False)
+    monkeypatch.setenv("AX_SHOP_CLIENT_KEYS", "inquiry:k1,claims:k2")
+    assert sb.coupon_headers() == {"Authorization": "Bearer k2"}
+    monkeypatch.setenv("AX_SHOP_CLIENT_KEYS", "inquiry:k1,claims:k2,settlement:k3")
+    assert sb.coupon_headers() == {"Authorization": "Bearer k3"}  # 따로 있으면 그 키
+    monkeypatch.setenv("AX_SHOP_CLIENT_KEYS", "inquiry:k1")
+    assert sb.coupon_headers() is None  # 없으면 쿠폰을 못 받은 장부(정산금을 내지 않는다)

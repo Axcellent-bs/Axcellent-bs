@@ -32,6 +32,7 @@ members = [
     "ax-svc-org",
     "ax-svc-planning",
     "ax-svc-reviews",
+    "ax-svc-settlement",
     "ax-workflow-core",
     "ax-workflow-testing",
 ]
@@ -541,6 +542,17 @@ requires-dist = [{ name = "ax-agent-planning", editable = "domains/planning" }]
 name = "ax-svc-reviews"
 version = "0.1.0"
 source = { editable = "services/reviews" }
+dependencies = [
+    { name = "ax-agent-support" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "ax-agent-support", editable = "domains/support" }]
+
+[[package]]
+name = "ax-svc-settlement"
+version = "0.1.0"
+source = { editable = "services/settlement" }
 dependencies = [
     { name = "ax-agent-support" },
 ]

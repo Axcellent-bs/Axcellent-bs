@@ -65,3 +65,43 @@ def test_does_not_call_support_before_it_takes_the_skill(monkeypatch) -> None:
     monkeypatch.setattr(feed, "route_target", lambda target, skill: target)
     assert asyncio.run(feed.settlement(None)) is None
     assert called == []
+
+
+def test_same_request_in_flight_is_shared_not_repeated() -> None:
+    """고객지원이 느릴 때 화면·마감 점검·할 일이 같은 요청을 겹쳐 쌓지 않는다(열쇠마다 하나)."""
+    calls: list[str] = []
+    gate = asyncio.Event()
+
+    async def slow(skill: str, payload: dict[str, Any]) -> Any:
+        from ax_contracts.schemas import AgentResult, RequestMeta, TaskStatus
+
+        calls.append(skill)
+        await gate.wait()
+        meta = RequestMeta(context_id="c", token="t", deadline="2030-01-01T00:00:00Z")
+        return AgentResult(meta=meta, status=TaskStatus.COMPLETED, output={"batches": {}})
+
+    feed.set_caller(slow)
+
+    async def run() -> list[Any]:
+        waiting = [asyncio.ensure_future(feed.batches()) for _ in range(5)]
+        await asyncio.sleep(0)
+        gate.set()
+        return await asyncio.gather(*waiting)
+
+    assert asyncio.run(run()) == [{}] * 5
+    assert calls == ["seller_settlement_batches"]
+    feed.set_caller(None)
+
+
+def test_preparing_support_is_told_apart_from_a_down_one() -> None:
+    from ax_contracts.schemas import AgentResult, RequestMeta, TaskStatus
+
+    async def preparing(skill: str, payload: dict[str, Any]) -> Any:
+        meta = RequestMeta(context_id="c", token="t", deadline="2030-01-01T00:00:00Z")
+        return AgentResult(meta=meta, status=TaskStatus.FAILED, outcome="settlement_preparing")
+
+    feed.set_caller(preparing)
+    assert asyncio.run(feed.settlement(None)) is None
+    assert feed.preparing("seller_settlement") and not feed.preparing("seller_settlement_batches")
+    feed.set_caller(None)
+    assert not feed.preparing("seller_settlement")

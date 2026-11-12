@@ -239,56 +239,6 @@
       ],
       "verifier": null,
       "priority": "recommended"
-    },
-    {
-      "id": "seller_settlement",
-      "description": "판매자 정산: 한 주(기본 지난주)의 판매자별 정산서(판매액−수수료−판매자 부담 쿠폰−환불)와 지급 묶음 상태를 돌려준다. 판매액은 구매가 확정된 주에, 환불은 환불·확정 중 늦은 주에 센다. 상태를 바꾸지 않는다.",
-      "input_schema": "agents/support/src/support_agent/settlement_schemas.py#SellerSettlementInput",
-      "output_schema": "agents/support/src/support_agent/settlement_handlers.py#seller_settlement",
-      "grade": "read",
-      "allowed_requesters": ["dashboard-api", "finance", "orchestrator", "support"],
-      "verifier": null,
-      "priority": "recommended"
-    },
-    {
-      "id": "seller_settlement_weeks",
-      "description": "판매자 정산: 여러 주(최대 30주)의 정산서를 한 번에 돌려준다(재무 현금 흐름·마감 점검용). 상태를 바꾸지 않는다.",
-      "input_schema": "agents/support/src/support_agent/settlement_schemas.py#SellerSettlementWeeksInput",
-      "output_schema": "agents/support/src/support_agent/settlement_handlers.py#seller_settlement_weeks",
-      "grade": "read",
-      "allowed_requesters": ["dashboard-api", "finance", "orchestrator", "support"],
-      "verifier": null,
-      "priority": "recommended"
-    },
-    {
-      "id": "seller_settlement_batches",
-      "description": "판매자 정산: 주마다 지급 승인 요청 묶음의 기록(상태·판매자별 지급액·승인 시각)을 돌려준다. 요청 중인 묶음은 안전 장치 결정으로 맞춘 뒤 준다.",
-      "input_schema": "agents/support/src/support_agent/settlement_schemas.py#SellerSettlementBatchesInput",
-      "output_schema": "agents/support/src/support_agent/settlement_handlers.py#seller_settlement_batches",
-      "grade": "read",
-      "allowed_requesters": ["dashboard-api", "finance", "orchestrator", "support"],
-      "verifier": null,
-      "priority": "recommended"
-    },
-    {
-      "id": "seller_settlement_deadlines",
-      "description": "판매자 정산: 구매가 확정된 판매 대금을 기한(구매 확정일+20일) 안에 줄 수 있는지 판매자별로 점검한다. 경보만 내고 상태를 바꾸지 않는다.",
-      "input_schema": "agents/support/src/support_agent/settlement_schemas.py#SellerSettlementDeadlinesInput",
-      "output_schema": "agents/support/src/support_agent/settlement_handlers.py#seller_settlement_deadlines",
-      "grade": "read",
-      "allowed_requesters": ["dashboard-api", "finance", "orchestrator", "support"],
-      "verifier": null,
-      "priority": "recommended"
-    },
-    {
-      "id": "request_seller_settlement",
-      "description": "판매자 정산: 사람이 누른 묶음 지급 승인 요청. 보류 사유 없는 판매자를 묶어 execute(confirm_settlement)로 요청하고, 안전 장치가 항상 C로 보류해 사람이 승인한다. 실제 송금은 하지 않는다.",
-      "input_schema": "agents/support/src/support_agent/settlement_schemas.py#RequestSellerSettlementInput",
-      "output_schema": "agents/support/src/support_agent/settlement_handlers.py#request_seller_settlement",
-      "grade": "A",
-      "allowed_requesters": ["dashboard-api", "orchestrator"],
-      "verifier": null,
-      "priority": "recommended"
     }
   ]
 }

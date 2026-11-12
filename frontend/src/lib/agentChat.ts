@@ -73,7 +73,7 @@ export const DEPT_KO: Record<string, string> = {
 // backend/shared/agent-template/src/ax_agent_template/services.py의 SERVICES(서비스 id → 부서)와 같게 둔다.
 // 서비스 id와 부서 이름이 같은 것(orchestrator·finance·data·planning·dev)은 넣지 않는다
 const SERVICE_DEPT: Record<string, string> = {
-  inquiry: "support", claims: "support", reviews: "support", coupon: "marketing",
+  inquiry: "support", claims: "support", settlement: "support", reviews: "support", coupon: "marketing",
   handover: "hr", decisions: "hr", org: "hr",
   incident: "infra", hosts: "infra",
 };
@@ -81,7 +81,7 @@ const SERVICE_DEPT: Record<string, string> = {
 export const deptOf = (name: string): string => SERVICE_DEPT[name] ?? name;
 // 서비스 설명(마우스를 올리면 보이는 이름). services.py 마지막 칸(화면 이름)과 같다
 const SERVICE_KO: Record<string, string> = {
-  inquiry: "고객 문의", claims: "클레임·보상", reviews: "리뷰·지식", coupon: "공지·쿠폰",
+  inquiry: "고객 문의", claims: "클레임·보상", settlement: "판매자 정산", reviews: "리뷰·지식", coupon: "공지·쿠폰",
   handover: "인수인계", decisions: "결정 기록", org: "조직 변동",
   dev: "개발·배포", planning: "요청·기획서", incident: "인프라", hosts: "PC·서버 연결",
 };

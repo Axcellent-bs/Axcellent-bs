@@ -223,3 +223,12 @@ def test_reading_needs_no_token(client: TestClient, fake: Fake) -> None:
     client.headers.pop("authorization")
     fake.outputs["seller_settlement"] = deepcopy(SETTLEMENT)
     assert client.get(BASE).status_code == 200
+
+
+def test_preparing_books_are_a_503_preparing(client: TestClient, fake: Fake) -> None:
+    """정산 서비스가 켠 뒤 첫 장부를 모으는 중이면 30초 기다려 504가 아니라 바로 503 준비 중."""
+    fake.failures["seller_settlement"] = (TaskStatus.FAILED, "settlement_preparing")
+    fake.outputs["seller_settlement"] = {"message": "판매자 정산 장부를 모으는 중이다"}
+    response = client.get(BASE)
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "SETTLEMENT_PREPARING"
