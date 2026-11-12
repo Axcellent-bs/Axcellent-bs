@@ -5,6 +5,7 @@ import {
   GRADE, STEP_STATUS, adminRelay, clock, deptKo, holdLeft, incidentStatus, relayEnabled, relayError,
   type Incident,
 } from "@/lib/adminRelay";
+import { secondsKo } from "@/lib/agentEval";
 import { incidentTitle, stepLabel } from "@/lib/agentChat";
 import { durationKo, segmentsOf, type EventTimes } from "@/lib/duration";
 import { ago, humanizePlanIds } from "@/lib/format";
@@ -15,6 +16,17 @@ import { CompanyName } from "@/demo/CompanyName";
 // 총괄 화면 (재무 AI 화면과 같은 짜임): 머리말 → 요약 카드 → 이벤트 목록과 상세.
 // 고객사에서 문제가 터지면 총괄이 이벤트 하나로 묶고 부서에 나눠 맡긴다. 이 화면은 읽기 전용이다.
 const POLL_MS = 10_000;
+
+type StepRow = Incident["steps"][number];
+/** 부서가 일한 시간(초): 단계 전체 시간에서 승인 대기·사람 할 일함 대기를 뺀다. 아직 끝나지 않았으면 지금까지. 모르면 null */
+function workedSeconds(s: StepRow): number | null {
+  if (!s.started_at) return null;
+  const end = s.finished_at ? new Date(s.finished_at).getTime() : s.status === "running" || s.status === "waiting_async" ? Date.now() : null;
+  if (end == null) return null;
+  const total = (end - new Date(s.started_at).getTime()) / 1000;
+  return Math.max(0, total - (s.approval_wait_seconds ?? 0) - (s.human_wait_seconds ?? 0));
+}
+const isOver = (s: StepRow, worked: number | null) => worked != null && !!s.promised_seconds && worked > s.promised_seconds;
 
 // ---------------------------------------------------------------- 사람이 읽는 말
 // 총괄은 단계 이름·메모·진행 기록을 코드 섞인 문장으로 준다("원인 진단 (infra): infra에 요청"). 화면에서는 사람 말로 바꾸고
@@ -306,15 +318,27 @@ function IncidentDetail({ incident }: { incident: Incident }) {
       <PastRecommendation incident={incident} />
 
       <section className="card overflow-x-auto p-5">
-        <h3 className="mb-3 text-[15px] font-semibold">단계</h3>
-        <table className="w-full text-left text-sm">
+        <h3 className="mb-1 text-[15px] font-semibold">단계</h3>
+        {(() => {
+          const over = incident.steps.filter((s) => isOver(s, workedSeconds(s))).length;
+          return over > 0 ? <p className="mb-2 text-xs text-orange-700">약속한 시간을 넘긴 단계 {over}개</p> : <p className="mb-2 text-xs text-ink-500">걸린 시간은 부서가 일한 시간이에요(승인·사람 처리 대기는 뺌).</p>;
+        })()}
+        <table className="w-full min-w-[46rem] text-left text-sm">
           <thead className="text-xs text-ink-500">
-            <tr><th className="py-1 pr-3 font-medium">단계</th><th className="pr-3 font-medium">맡은 AI</th><th className="pr-3 font-medium">상태</th><th className="pr-3 font-medium">시도 횟수</th><th className="font-medium">메모</th></tr>
+            <tr>
+              <th className="py-1 pr-3 font-medium">단계</th><th className="pr-3 font-medium">맡은 AI</th><th className="pr-3 font-medium">상태</th>
+              <th className="pr-3 font-medium">걸린 시간</th>
+              <th className="pr-3 font-medium" title="단계마다 정한 예상 시간이에요. 지금 값은 로컬 이벤트 기록으로 잡은 임시 값이에요">약속(임시)</th>
+              <th className="pr-3 font-medium">시도 횟수</th><th className="font-medium">메모</th>
+            </tr>
           </thead>
           <tbody>
-            {incident.steps.map((s) => (
+            {incident.steps.map((s) => {
+              const worked = workedSeconds(s);
+              const late = isOver(s, worked);
+              return (
               <tr key={s.step_id} className="border-t border-ink-100 align-top">
-                <td className="py-2 pr-3"><span className="font-medium" title={s.skill}>{stepLabel(s.label)}</span></td>
+                <td className="min-w-[9rem] py-2 pr-3"><span className="font-medium" title={s.skill}>{stepLabel(s.label)}</span></td>
                 <td className="whitespace-nowrap py-2 pr-3">
                   {s.dept ? DEPT_SAY[s.dept] ?? deptKo(s.dept) : "–"}
                   {s.transferred_to && <span className="block text-xs text-ink-500">→ {DEPT_SAY[s.transferred_to] ?? deptKo(s.transferred_to)}에게 넘김</span>}
@@ -322,11 +346,21 @@ function IncidentDetail({ incident }: { incident: Incident }) {
                 <td className="whitespace-nowrap py-2 pr-3">
                   <span className={`chip ${(STEP_STATUS[s.status] ?? STEP_STATUS.pending).tone}`}>{(STEP_STATUS[s.status] ?? { label: s.status }).label}</span>
                   {s.grade && <span className="ml-1 text-[11px] text-ink-500">{GRADE[s.grade]?.label ?? s.grade}</span>}
+                  {s.status === "waiting_async" && s.last_response_at && (
+                    <span className="block text-[11px] text-ink-500" title={s.async_task_id ?? undefined}>
+                      마지막 응답 {ago(s.last_response_at)}{s.progress_percent != null ? ` · ${s.progress_percent}%` : ""}
+                    </span>
+                  )}
                 </td>
+                <td className="whitespace-nowrap py-2 pr-3 tabular-nums">
+                  {worked == null ? "–" : <span className={late ? "font-semibold text-orange-700" : ""} title={late ? `약속 ${secondsKo(s.promised_seconds)}을 넘김` : undefined}>{secondsKo(worked)}</span>}
+                </td>
+                <td className="whitespace-nowrap py-2 pr-3 tabular-nums text-ink-500">{s.promised_seconds ? secondsKo(s.promised_seconds) : "–"}</td>
                 <td className="py-2 pr-3 tabular-nums">{s.attempts || "–"}</td>
                 <td className="py-2 text-xs text-ink-500" title={s.note || undefined}>{noteKo(s.note)}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </section>

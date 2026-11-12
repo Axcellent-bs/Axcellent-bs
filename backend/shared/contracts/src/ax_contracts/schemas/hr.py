@@ -971,6 +971,8 @@ class EvaluatedStep(AxModel):
     human_wait_seconds: float | None = None
     attempts: int = Field(default=0, ge=0)
     limit_seconds: float
+    # 기준 시간(`limit_seconds`)이 단계의 약속 시간에서 왔는지(True), 기본값(30초)에서 왔는지(False)
+    promised: bool = False
     max_silence_seconds: float | None = None
     reason: str | None = None
 
@@ -995,6 +997,10 @@ class EvaluateAgentsOutput(AxModel):
     criteria_updated: str
     normal_max_seconds: float
     normal_max_attempts: int = Field(ge=1)
+    # 단계의 약속 시간을 기준으로 삼는지(기준값 v2부터)와, 응답이 이 시간(초)보다
+    # 길게 비면 끊김으로 보는 기준(v3부터)
+    use_promised: bool = False
+    max_silence_seconds: float = Field(default=300.0, gt=0)
     events: list[EvaluatedEvent] = Field(default_factory=list)  # 새로운 이벤트부터
     agents: list[AgentSummary] = Field(default_factory=list)
     trend: list[DailyTrend] = Field(default_factory=list)
