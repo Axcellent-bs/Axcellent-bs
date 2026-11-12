@@ -20,7 +20,7 @@ def _filled() -> State:
     s.records.closings[("day", "2026-10-28")] = {"by": "태윤", "at": "2026-10-29T00:00:00Z"}
     s.records.recon_notes["pay_1"] = "카드사 확인"
     s.records.recon_note_log.append({"payment_id": "pay_1"})
-    s.records.batches["2026-10"] = {"status": "requested"}
+    s.records.legacy_batches["2026-W42"] = {"status": "requested"}
     s.records.team_budgets["2026-11"] = {"total": 2700000, "signature": "abc", "by": "태윤"}
     return s
 
@@ -82,6 +82,36 @@ def test_old_suspicion_records_are_gone_after_a_restart(tmp_path) -> None:
     assert not hasattr(again.records, "anomalies")
     persist.save(again, path)
     assert "anomalies" not in json.loads(path.read_text("utf-8"))["records"]
+
+
+def test_an_old_state_file_with_settlement_batches_still_loads(tmp_path) -> None:
+    """정산을 고객지원으로 옮기기 전 파일(`batches` 있음)도 깨지지 않고 읽힌다.
+
+    재무는 그 묶음을 쓰지 않는다(묶음 상태는 고객지원에서 받는다). 고객지원으로 옮기는 스크립트가
+    읽을 수 있게 다음 저장 때도 파일에 그대로 남긴다.
+    """
+    path = tmp_path / "finance_state.json"
+    raw = persist.dump(State(MockSources()))
+    old = {
+        "2026-W41": {
+            "status": "approved",
+            "review_id": "rev_1",
+            "total_payout": 9000,
+            "seller_ids": ["sel_a"],
+            "payouts": {"sel_a": 9000},
+        }
+    }
+    raw["records"]["batches"] = old
+    path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    again = State(MockSources())
+    assert persist.load(again, path)
+    assert not hasattr(again.records, "batches")
+    assert again.records.legacy_batches == old
+    persist.save(again, path)
+    assert json.loads(path.read_text("utf-8"))["records"]["batches"] == old
+    del raw["records"]["batches"]  # 묶음이 없는 파일도 읽힌다
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    assert persist.load(State(MockSources()), path)
 
 
 def test_an_old_state_file_with_removed_policy_records_still_loads(tmp_path) -> None:

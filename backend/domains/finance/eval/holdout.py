@@ -11,9 +11,10 @@
 - 정답은 재무 코드가 아니라 **판매 서버 표**(orders·order_items·payments·refunds·coupons)를
   직접 읽어 정책대로 계산한다.
 - 환불 시각: shop-api 주문 응답에는 환불 시각이 없어서 재무는 환불을 주문 시각에 둔다
-  (`notes.refund_basis`, 문서화된 한계). 그래서 결산·정산은 두 기준으로 잰다.
+  (`notes.refund_basis`, 문서화된 한계). 그래서 결산은 두 기준으로 잰다.
   - `actual`: 환불이 실제로 난 시각 기준 (현실 정답)
   - `documented`: 재무 문서 기준 (환불 시각 = 주문 접수 시각)
+- 판매자 정산은 고객지원이 계산한다(2026-11-12). 정산 영역은 고객지원 테스트로 옮겼다.
 - 규칙: 하네스는 dev seed로만 고치고, holdout seed(`20261109_02`)는 한 번 돌려 숫자만 본다.
 """
 
@@ -48,7 +49,6 @@ from finance_agent.bank import match as bank_match  # noqa: E402
 from finance_agent.books import OrderStore, live_books  # noqa: E402
 from finance_agent.closing import compute_totals  # noqa: E402
 from finance_agent.reconciliation import reconcile  # noqa: E402
-from finance_agent.settlement import statements  # noqa: E402
 from finance_agent.tax import income_tax_amount, vat_pack  # noqa: E402
 
 HOLDOUT_SEED = "20261109_02"
@@ -341,49 +341,6 @@ async def case_reconciliation(rng, clock, today):
     return got, {"actual": want, "documented": want}, {"payment": p["payment_id"]}
 
 
-async def case_settlement(rng, clock, today):
-    monday = today - timedelta(days=today.weekday() + 7)
-    w = World(rng, clock)
-    w.traffic(monday - timedelta(days=4), monday + timedelta(days=8), rng.uniform(2, 8))
-    books = await w.finance_books()
-    res = statements(books, None, today)
-    got = {r["seller_id"]: (r["gross"], r["commission"], r["seller_coupon"], r["refunds"],
-                            r["payout"], r["status"]) for r in res["statements"]}  # fmt: skip
-    truth = Truth(w.tables(), today)
-    start, end = day0(monday), day0(monday + timedelta(days=7))
-    sold = truth.confirmed(start, end)
-    waiting = truth.waiting(end)
-    wants = {}
-    for basis in ("actual", "documented"):
-        refunds: dict[str, int] = defaultdict(int)
-        for oid, amount in truth.refunds_in(start, end, basis).items():
-            for s, share in truth.refund_split(oid, amount).items():
-                refunds[s] += share
-        want = {}
-        sellers = sorted({i["seller_id"] for i in truth.tb["items"]} | set(refunds))
-        for s in sellers:
-            gross = com = 0
-            ids = set()
-            for oid in sold:
-                mine = [i for i in truth.items_of[oid] if i["seller_id"] == s]
-                if not mine:
-                    continue
-                ids.add(oid)
-                for i in mine:
-                    g = i["qty"] * i["unit_price"]
-                    gross += g
-                    com += base.half_up(g, base.rate_of(i["category_code"]))
-            rf = refunds.get(s, 0)
-            pending = any(i["seller_id"] == s for oid in waiting for i in truth.items_of[oid])
-            if not ids and not rf and not pending:
-                continue
-            payout = gross - com - rf
-            held = (bool(ids) or pending) and payout <= 0
-            want[s] = (gross, com, 0, rf, payout, "held" if held else "ready")
-        wants[basis] = want
-    return got, wants, {"week_monday": monday.isoformat()}
-
-
 async def case_bank(rng, clock, today):
     w = World(rng, clock)
     w.traffic(today - timedelta(days=14), today, rng.uniform(2, 6))
@@ -494,7 +451,6 @@ async def case_income_tax(rng, clock, today):
 CASES = {
     "closing": case_closing,
     "reconciliation": case_reconciliation,
-    "settlement": case_settlement,
     "bank_deposit": case_bank,
     "vat": case_vat,
     "income_tax": case_income_tax,

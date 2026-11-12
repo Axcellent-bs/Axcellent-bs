@@ -7,7 +7,8 @@
 2. 매출·PG 대사: 그 달 불일치 건에 모두 확인 메모가 있나
 3. 은행 입금 대조: 그 달 날짜가 올린 거래내역에 들어 있고 차이가 없나 (안 올렸으면 `pending`)
 4. 판매자 정산: 그 달에 지급일이 있는 주의 정산 묶음이 모두 승인됐나
-   (지급할 판매자가 없는 주는 제외)
+   (지급할 판매자가 없는 주는 제외). 정산 내역서·묶음은 고객지원이 계산해 준 것을 읽기만 한다
+   (`settlement_feed`). 못 받았으면 `unknown`이다
    4-1. 은행 출금 대조: 승인한 이체가 통장에서 확인되고, 설명 없는 출금에 모두 메모가 있나
 5. 판매자 미지급금: 롤포워드가 맞고 더 준 판매자가 없나
 6. 월 결산 확정: 사람이 그 달 결산을 확정했나
@@ -18,7 +19,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from finance_agent import bank, payables, reconciliation, settlement
+from finance_agent import bank, payables, reconciliation
 from finance_agent import finance_config as fc
 from finance_agent.books import Books
 
@@ -28,12 +29,33 @@ def _item(key: str, label: str, done: bool | None, detail: str, link: str) -> di
     return {"key": key, "label": label, "status": status, "detail": detail, "link": link}
 
 
+def _weeks(d: date) -> list[tuple[str, date]]:
+    """지급일이 그 달에 들 수 있는 정산 주(월요일)들. 지급일은 내역서의 `pay_date`로 거른다."""
+    start, end = fc.month_range(d)
+    out = []
+    monday = start - timedelta(days=start.weekday() + 7)
+    while monday < end:
+        year, week, _ = monday.isocalendar()
+        out.append((f"{year}-W{week:02d}", monday))
+        monday += timedelta(days=7)
+    return out
+
+
+def settlement_periods(d: date | None = None) -> list[str]:
+    """`checklist`가 읽는 정산 주 (고객지원 `seller_settlement_weeks`로 미리 받는다)."""
+    return [name for name, _ in _weeks(d or fc.today())]
+
+
 def checklist(
     books: Books,
     records: Any,
     d: date | None = None,
     today: date | None = None,
+    *,
+    settlements: dict[str, dict[str, Any]] | None = None,
+    batches: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """`settlements`(기간 → 내역서)·`batches`(기간 → 묶음)는 고객지원에서 받은 것. 없으면 None."""
     today = today or fc.today()
     d = d or today
     start, end = fc.month_range(d)
@@ -104,28 +126,29 @@ def checklist(
             )
         )
 
-    # 4. 판매자 정산 묶음
+    # 4. 판매자 정산 묶음 (고객지원이 계산·요청한 것을 읽기만 한다)
     pending_weeks = []
-    monday = start - timedelta(days=start.weekday() + 7)
-    while monday < end:
-        name, _, sunday = fc.week_range(
-            f"{monday.isocalendar()[0]}-W{monday.isocalendar()[1]:02d}", today
-        )
-        pay = sunday + timedelta(days=fc.load_config().settlement.pay_days_after_period_end)
-        if start <= pay < end and pay <= today:
-            st = settlement.statements(books, name, today=today)
-            if any(not r["hold_reasons"] and (r["payout"] or 0) > 0 for r in st["statements"]):
-                if (records.batches.get(name) or {}).get("status") != "approved":
-                    pending_weeks.append(name)
-        monday += timedelta(days=7)
+    weeks_known = settlements is not None and all(name in settlements for name, _ in _weeks(d))
+    for name, _ in _weeks(d) if weeks_known and settlements is not None else []:
+        st = settlements[name]
+        pay = date.fromisoformat(st["pay_date"]) if st.get("pay_date") else None
+        if pay is None or not (start <= pay < end and pay <= today):
+            continue
+        if any(not r["hold_reasons"] and (r["payout"] or 0) > 0 for r in st["statements"]):
+            if (st.get("batch") or {}).get("status") != "approved":
+                pending_weeks.append(name)
     items.append(
         _item(
             "settlement",
-            "판매자 정산 지급 승인",
-            not pending_weeks,
-            f"승인 안 된 주: {', '.join(pending_weeks)}"
-            if pending_weeks
-            else "지급일이 지난 주는 모두 승인됨",
+            "판매자 정산 지급 승인 (고객지원)",
+            (not pending_weeks) if weeks_known else None,
+            (
+                "고객지원에서 판매자 정산을 받지 못해 확인할 수 없음"
+                if not weeks_known
+                else f"승인 안 된 주: {', '.join(pending_weeks)}"
+                if pending_weeks
+                else "지급일이 지난 주는 모두 승인됨"
+            ),
             "settlements",
         )
     )
@@ -143,11 +166,21 @@ def checklist(
                 "reconciliation",
             )
         )
+    elif batches is None:
+        items.append(
+            _item(
+                "bank_out",
+                "은행 출금 대조",
+                None,
+                "고객지원에서 정산 묶음을 받지 못해 판매자 이체를 확인할 수 없음",
+                "reconciliation",
+            )
+        )
     else:
         out = bank.outflows(
             records.bank_rows,
             periods,
-            records.batches,
+            batches,
             seller_name=books.seller_name,
             other_pnl=getattr(records, "other_pnl", {}),
             campaigns=getattr(records, "campaigns", {}),
@@ -167,7 +200,7 @@ def checklist(
         )
 
     # 5. 미지급금 롤포워드
-    p = payables.rollforward(books, records.batches, d)
+    p = payables.rollforward(books, batches, d)
     items.append(
         _item(
             "payables",

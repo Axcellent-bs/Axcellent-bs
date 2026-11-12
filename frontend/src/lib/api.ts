@@ -1,4 +1,5 @@
 import { ApiError } from "./apiError";
+import type { DeadlineReport, FinanceMeta, Settlements } from "./finance";
 import type { ChangeProposalSent, DeclineReason, IdeaArea, IdeaDigestResult, IdeaKind, IncidentCompensationDecision, PlanningAnswerResult } from "./support";
 import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, FeedbackItem, FeedbackOverview, FeedbackStatus, Health, Kpi, Me, PurgeReport, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
 
@@ -18,7 +19,7 @@ function unwrap<T>(body: unknown): T {
 /** 실패 본문 해석: ax-backend `{error: {code, message}}`와 FastAPI `{detail}` 둘 다 받는다. */
 function toError(body: unknown, status: number): ApiError {
   const b = (body ?? {}) as { error?: { code?: string; message?: string }; detail?: unknown };
-  if (b.error?.message) return new ApiError(b.error.message, status);
+  if (b.error?.message) return new ApiError(b.error.message, status, undefined, b.error.code);
   const detail = b.detail;
   if (detail && typeof detail === "object" && "validation" in detail) {
     const d = detail as { message: string; validation: Validation };
@@ -61,6 +62,22 @@ async function requestEnvelope<T, M>(path: string): Promise<{ data: T; meta: M }
   if (!res.ok) throw toError(body, res.status);
   return body as { data: T; meta: M };
 }
+
+/** 쓰기인데 `{data, meta}`를 그대로 받는다 (판매자 정산처럼 meta에 수집 시각이 있는 응답) */
+async function postEnvelope<T, M>(path: string, body: unknown): Promise<{ data: T; meta: M }> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  const json: unknown = await res.json().catch(() => undefined);
+  if (!res.ok) throw toError(json, res.status);
+  return json as { data: T; meta: M };
+}
+
+/** 판매자 정산 묶음 요청 결과. 같은 주를 이미 요청했으면 `requested: false` */
+export interface SettlementRequestResult { settlement: Settlements; requested: boolean }
 
 const post = <T>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
@@ -145,6 +162,13 @@ export const api = {
     queue: () => request<QueueView>("/api/dashboard/queue-entries"),
     processQueue: (b: { limit?: number; claim_ids?: number[] } = {}) => post<QueueRun>("/api/dashboard/queue-entries/process", b),
     reviews: () => request<AdminReview[]>("/api/dashboard/reviews"),
+    // 판매자 정산은 고객지원(claims 서비스)이 한다. 재무는 결과를 받아 보여 주기만 한다
+    settlements: (period?: string | null) =>
+      requestEnvelope<Settlements, FinanceMeta>(`/api/dashboard/settlements${period ? `?period=${encodeURIComponent(period)}` : ""}`),
+    settlementDeadlines: () => requestEnvelope<DeadlineReport, FinanceMeta>("/api/dashboard/settlements/deadlines"),
+    /** 보류 없는 판매자를 묶어 지급 승인 요청 → 안전 장치 보류 큐(항상 사람). 사람 토큰 필요, 돈은 움직이지 않는다 */
+    requestSettlementBatch: (period: string) =>
+      postEnvelope<SettlementRequestResult, FinanceMeta>("/api/dashboard/settlements/batch", { period }),
     setReview: (id: number, status: "visible" | "hidden") => post<AdminReview>(`/api/dashboard/reviews/${id}/status`, { status }),
   },
 };

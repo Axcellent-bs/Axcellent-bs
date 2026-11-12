@@ -89,7 +89,7 @@ async def test_decision_after_expiry_is_refused(gate: Gate, clock: Any, coupon) 
 
 # ---------------------------------------------------------------- 요청한 사람은 승인하지 못한다
 def _settlement(act, key: str, who: str | None):
-    return act("confirm_settlement", "finance", key, period="w", requested_by=who)
+    return act("confirm_settlement", "support", key, period="w", requested_by=who)
 
 
 @pytest.mark.asyncio

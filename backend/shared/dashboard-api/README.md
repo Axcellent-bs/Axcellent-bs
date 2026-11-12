@@ -98,6 +98,19 @@ support 출력은 `claim_mapping.py`에서 화면 모델로 바꾼다 (값을 �
 - support 클레임의 `order_id`·`order_item_id`·`buyer_id`는 문자열이다. 화면 모델은 주문·품목 ID를 숫자 또는 문자열로 받고, `user_id`는 `buyer_id`가 `buy_<4자리>`일 때만 그 숫자로 채운다(아니면 비움, `claim_mapping.buyer_id_for`가 반대 방향: 1 → `buy_0001`).
 - 비어 있는 값: `description`(고객 원문은 저장하지 않는다), `tracking`, `compensation`(보상 쿠폰은 `request_compensation`), `hold_reason`.
 - 지급 연동이 막힌 항목(안전 관문 보류·거부)은 `process` 결과에서 `held`와 `ON_HOLD` 이유로 보인다. 같은 큐를 다시 처리해도 지급 요청(`refund_request`)의 키는 support가 클레임을 접수한 사건 기준으로 고정하므로(`<claim.context_id>:refund_request:claim:<id>`), 보류 중인 건이나 승인된 보류 건을 다시 처리하면 같은 판정이 이어지고 중복 지급되지 않는다. dashboard-api 호출마다 새 `ctx_ui_`를 붙여도 상관없다.
+
+### 판매자 정산 (고객지원)
+판매자 정산(정산금 계산 · 지급 승인 요청 · 묶음 상태 · 지급 기한 점검)은 고객지원(support, claims 서비스)이 한다. 재무는 결과를 받아 보여 주기만 한다. 화면은 고객지원 > 판매자 정산(`/settlements`). 코드는 `settlements.py`.
+
+| 경로 (`/api/dashboard` 아래) | support skill |
+| --- | --- |
+| GET `/settlements?period=YYYY-Www` | `seller_settlement` (생략하면 지난주). 판매자별 내역서·묶음 상태 |
+| GET `/settlements/deadlines` | `seller_settlement_deadlines` (판매 대금 지급 기한 점검) |
+| POST `/settlements/batch` `{period}` | `request_seller_settlement` (사람 토큰 필요. `requested_by`는 토큰의 이름, 본문에서 받지 않는다). 보류 없는 판매자를 묶어 `execute("confirm_settlement")`로 지급 승인을 요청하고 안전 장치가 항상 사람에게 보류한다. 응답 `data`는 `{settlement, requested}`, 같은 주를 이미 요청했으면 `requested: false` |
+
+- `data`는 support 출력에서 `meta`를 뺀 것이고, support `meta`(수집 시각·출처·받지 못한 값)는 응답 `meta`에 합친다.
+- 오류: `invalid_input`→400 `INVALID_INPUT`, `nothing_to_settle`→409 `NOTHING_TO_SETTLE`, `safety_unavailable`→503 `SAFETY_UNAVAILABLE`(지급 기록 없음). support가 꺼져 있으면 빈 표 대신 503 `SERVICE_DISABLED`(정산할 판매자가 없다고 지어내지 않는다).
+- 목 데이터는 없다. 목 모드에서도 support를 부른다.
 - 감사 기록의 `agent_override`(상담원 승인) 라벨은 화면 표기에 맞춘 이름이다. `claim_stats.agent_overrides`는 자동 판정을 뒤집는 경우만 세는데 지금은 자동 판정을 바꿀 수 없어 항상 0이다.
 
 ### 인사 탭: 인수인계·후보 카드

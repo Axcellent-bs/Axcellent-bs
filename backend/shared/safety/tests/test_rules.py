@@ -70,7 +70,8 @@ def test_no_action_is_routed_to_finance_verify_amount() -> None:
     campaign = registry.get("start_campaign")
     assert campaign is not None and (campaign.verifier, campaign.verify_skill) == ("safety", None)
     settle = registry.get("confirm_settlement")
-    assert settle is not None and (settle.owner, settle.base_grade) == ("finance", "C")
+    # 판매자 정산은 고객지원이 요청한다(2026-11-12). 재무는 결과를 받아 보여 주기만 한다
+    assert settle is not None and (settle.owner, settle.base_grade) == ("support", "C")
 
 
 def test_review_timeout_env_overrides_table(monkeypatch: pytest.MonkeyPatch) -> None:

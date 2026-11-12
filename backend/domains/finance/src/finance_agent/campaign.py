@@ -13,8 +13,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 from finance_agent import finance_config as fc
-from finance_agent import settlement
-from finance_agent.books import Books, item_gross, order_sold
+from finance_agent.books import Books, item_gross, order_sold, paid_at
 from finance_agent.rules import applied, load_rules
 
 Verdict = Literal["good", "neutral", "bad"]
@@ -49,7 +48,7 @@ def repeat_estimate(books: Books, today: date) -> dict[str, Any] | None:
         buyer = order.get("buyer_id")
         if not buyer or not order_sold(order):
             continue
-        paid = settlement._paid_at(order)
+        paid = paid_at(order)
         if paid is None:
             continue
         gross = sum(item_gross(item) for item in order["items"])

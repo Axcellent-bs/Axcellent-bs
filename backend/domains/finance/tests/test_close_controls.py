@@ -1,4 +1,8 @@
-"""마감 통제 3종: 정산 기한 점검, 월간 변동 분석, 판매자 미지급금 롤포워드."""
+"""마감 통제: 월간 변동 분석, 판매자 미지급금 롤포워드, 정산 기한 알림.
+
+판매자 정산 기한 점검 계산은 고객지원이 한다(2026-11-12, 고객지원 테스트로 옮김).
+재무는 고객지원이 준 기한 점검을 그대로 보여 주고 할 일에 알리기만 한다.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,7 @@ from datetime import date
 import pytest
 from fastapi.testclient import TestClient
 
-from finance_agent import deadline, handlers, payables, variance
+from finance_agent import handlers, payables, variance
 from finance_agent.main import app
 from finance_agent.sources import MockSources
 
@@ -18,67 +22,6 @@ TODAY = date(2026, 10, 23)  # conftest FIXED_NOW
 def _env(monkeypatch: pytest.MonkeyPatch, fixed_now) -> None:
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
     handlers.reset_state(MockSources())
-
-
-# ---------------------------------------------------------------- 정산 기한
-def _rows(report):
-    return {r["seller_id"]: r for r in report["sellers"]}
-
-
-def test_old_unpaid_confirmed_sale_is_overdue(kit) -> None:
-    books = kit.books(
-        orders=[kit.order("ord_1", kit.at("2026-09-20"), [("sel_a", "book", 1, 10000)])]
-    )
-    report = deadline.deadline_report(books, {}, TODAY)
-    row = _rows(report)["sel_a"]
-    # 배송 완료(09-21) + 20일 = 10-11. 오늘(10-23) 지났다
-    assert (row["deadline"], row["status"], row["days_left"]) == ("2026-10-11", "overdue", -12)
-    assert row["amount"] == 9000  # 판매자 몫 (도서 수수료 10% 뺌)
-    assert deadline.needs_attention(report) == [row]
-
-
-def test_recent_sale_paid_on_time_is_ok_and_undelivered_waits(kit) -> None:
-    orders = [
-        kit.order("ord_1", kit.at("2026-10-14"), [("sel_a", "book", 1, 10000)]),
-        kit.order("ord_2", kit.at("2026-10-21"), [("sel_b", "book", 1, 10000)], delivered=False),
-    ]
-    report = deadline.deadline_report(kit.books(orders=orders), {}, TODAY)
-    row = _rows(report)["sel_a"]
-    # 2026-W42 지급 예정 10-24, 기한 10-15 + 20 = 11-04
-    assert (row["expected_pay_date"], row["deadline"], row["status"]) == (
-        "2026-10-24",
-        "2026-11-04",
-        "ok",
-    )
-    assert "sel_b" not in _rows(report)  # 배송 전이라 기한이 아직 시작되지 않았다
-    assert report["waiting_orders"] == 1
-
-
-def test_an_unconfirmed_order_does_not_hold_the_confirmed_ones(kit) -> None:
-    """배송 전 주문이 같은 주에 있어도 확정된 주문은 그 주 정산에 들어가 예정일이 있다.
-
-    예전에는 한 건만 확정 전이어도 판매자 정산 전체가 보류돼 지급 예정일이 사라졌다.
-    확정 전 주문은 기한이 시작되지 않은 것으로 센다(`waiting_orders`).
-    """
-    orders = [
-        kit.order("ord_1", kit.at("2026-10-14"), [("sel_a", "book", 1, 10000)]),
-        kit.order("ord_2", kit.at("2026-10-15"), [("sel_a", "book", 1, 5000)], delivered=False),
-    ]
-    report = deadline.deadline_report(kit.books(orders=orders), {}, TODAY)
-    row = _rows(report)["sel_a"]
-    assert row["expected_pay_date"] is not None and row["hold_reasons"] == []
-    assert row["orders"] == 1
-
-
-def test_approved_batch_counts_as_paid(kit) -> None:
-    # 수요일 결제·다음 날 배송 완료: 구매 확정 주도 W38 (정산은 구매 확정일 기준)
-    books = kit.books(
-        orders=[kit.order("ord_1", kit.at("2026-09-16"), [("sel_a", "book", 1, 10000)])]
-    )
-    batches = {"2026-W38": {"status": "approved", "seller_ids": ["sel_a"]}}
-    assert deadline.deadline_report(books, batches, TODAY)["sellers"] == []
-    requested = {"2026-W38": {"status": "requested", "seller_ids": ["sel_a"]}}
-    assert deadline.deadline_report(books, requested, TODAY)["sellers"]  # 승인 전은 미지급
 
 
 # ---------------------------------------------------------------- 미지급금 롤포워드
@@ -166,6 +109,15 @@ def test_rollforward_flags_overpaid_and_unallocated(kit) -> None:
     assert r["totals"]["paid"] == 50700
 
 
+def test_rollforward_is_unknown_without_support_batches(kit) -> None:
+    """고객지원에서 정산 묶음을 못 받으면 지급·기초·기말을 0원으로 두지 않는다."""
+    r = payables.rollforward(_payable_books(kit), None, TODAY)
+    assert r["balanced"] is None
+    assert r["totals"] == {"opening": None, "accrued": None, "paid": None, "closing": None}
+    assert all(row["paid"] is None and row["closing"] is None for row in r["sellers"])
+    assert r["unavailable"] == ["seller_settlement_batches"]
+
+
 def test_rollforward_is_unknown_without_orders(kit) -> None:
     books = _payable_books(kit)
     books.unavailable.append("orders")
@@ -238,7 +190,24 @@ def test_korean_particle_follows_the_last_syllable() -> None:
 
 
 # ---------------------------------------------------------------- API
-def test_close_control_apis_and_todo() -> None:
+def test_close_control_apis_and_todo(support) -> None:
+    late_row = {
+        "seller_id": "sel_0001",
+        "name": "가게1",
+        "orders": 1,
+        "amount": 9000,
+        "oldest_confirmed": "2026-09-21",
+        "deadline": "2026-10-11",
+        "days_left": -12,
+        "expected_pay_date": None,
+        "status": "overdue",
+        "status_label": "기한 지남",
+        "hold_reasons": [],
+    }
+    support.deadlines |= {
+        "sellers": [late_row],
+        "counts": support.deadlines["counts"] | {"overdue": 1},
+    }
     client = TestClient(app)
     dl = client.get("/api/finance/settlements/deadlines").json()["data"]
     assert dl["deadline_days"] == 20 and set(dl["counts"]) == {
@@ -247,12 +216,22 @@ def test_close_control_apis_and_todo() -> None:
         "due_soon",
         "ok",
     }
+    assert dl["sellers"] == [late_row]  # 고객지원이 준 것 그대로
     assert client.get("/api/finance/payables").json()["data"]["balanced"] is True
     assert client.get("/api/finance/variance").json()["data"]["month"] == "2026-10"
     assert client.get("/api/finance/variance", params={"date": "x"}).status_code == 400
     todo = client.get("/api/finance/overview").json()["data"]["todo"]
     late = next(t for t in todo if t["kind"] == "settlement_deadline")
     assert late["link"] == "settlements" and late["items"]
+    # 재무는 알리기만 한다. 지급 승인 요청·승인 할 일은 없다 (고객지원이 한다)
+    assert late["action"] == {"type": "open_tab"} and "고객지원" in late["title"]
+    assert late["items"][0]["detail"] == "기한 2026-10-11 (D-12)"
+    assert not any(t["kind"] == "settlement_batch" for t in todo)
+
+
+def test_payables_api_is_unknown_when_support_is_down() -> None:
+    data = TestClient(app).get("/api/finance/payables").json()["data"]
+    assert data["balanced"] is None and data["totals"]["paid"] is None
 
 
 def test_variance_summary_says_refunds_do_not_change_the_operating_result() -> None:

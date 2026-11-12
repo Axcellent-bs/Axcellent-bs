@@ -1,10 +1,11 @@
 import { useState, type ReactNode } from "react";
-import { batchOf, finance, humanTokenSet, krw, plainText, signedKrw, type FinanceTodo, type TodoItem } from "@/lib/finance";
+import { Link } from "@/lib/nav";
+import { SUPPORT_SETTLEMENT_PATH, finance, humanTokenSet, krw, plainText, signedKrw, type FinanceTodo, type TodoItem } from "@/lib/finance";
 import { Chip, TONE } from "./bits";
 
 // "지금 사람이 할 일" 한 줄. 보기만 하지 않고 그 자리에서 사람이 결정한다.
 // - 결산 확정: 숫자를 보고 확정 (돈은 움직이지 않음)
-// - 판매자 정산: 지급 승인 요청 → 안전 장치 보류 큐에서 승인 (요청과 승인을 한 사람이 바로 끝내지 않는다)
+// - 판매자 정산: 재무는 보여 주기만 한다. 지급 승인 요청과 보류 큐 승인은 고객지원 판매자 정산 화면에서 한다
 // - 대사 불일치·감사 의심: 건마다 확인 결과(메모)를 남기면 할 일에서 빠진다
 // 결정 기록은 재무 AI 서버에 남는다(누가·언제·메모). 예시 데이터 모드에서는 화면 안에서만 바뀐다.
 
@@ -31,16 +32,17 @@ type ItemActionType = keyof typeof ITEM_ACTION;
 
 const NO_TOKEN = "사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 결정 버튼이 꺼져 있습니다. bash scripts/run_web.sh로 화면을 띄우면 켜집니다.";
 
-export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
+export function TodoCard({ todo, onDone, onOpen }: {
   todo: FinanceTodo;
   onDone: () => void;
   onOpen: () => void;
-  onGoToQueue: (reviewId: string | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const kind = KIND[todo.kind] ?? { label: "할 일", tone: TONE.muted };
   const action = todo.action;
+  // 고객지원 화면으로 잇기만 하는 할 일은 사람 권한이 필요 없다
+  const needsToken = !!action && !["open_tab", "settlement_request", "review_decision"].includes(action.type);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -58,22 +60,12 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
           onClick={() => run(() => finance.confirmClosing("day", date))}>{busy ? "확정하는 중…" : `${date} 결산 확정`}</button>
       </Decision>
     );
-  } else if (action?.type === "settlement_request" && action.period) {
-    const period = action.period;
+  } else if (action?.type === "settlement_request" || action?.type === "review_decision") {
+    // 판매자 정산은 고객지원이 한다. 예전 서버가 이 결정을 보내도 여기서는 요청·승인하지 않고 고객지원 화면으로 잇는다
     decision = (
-      <Decision hint="보류 사유가 없는 판매자만 묶어 지급 승인을 요청합니다. 요청은 안전 장치 보류 큐로 가고, 거기서 사람이 한 번 더 승인해야 지급이 기록됩니다.">
+      <Decision hint="판매자 정산 지급 승인 요청과 보류 큐 승인은 고객지원이 합니다. 재무는 결과를 받아 보여 줍니다.">
         <button type="button" className="btn-ghost" onClick={onOpen}>판매자별 내역 보기</button>
-        <button type="button" className="btn-primary" disabled={!humanTokenSet || busy}
-          onClick={() => run(async () => { const res = await finance.requestSettlementBatch(period); onGoToQueue(batchOf(res.data).review_id); })}>
-          {busy ? "요청하는 중…" : "지급 승인 요청"}
-        </button>
-      </Decision>
-    );
-  } else if (action?.type === "review_decision") {
-    const reviewId = action.review_id ?? null;
-    decision = (
-      <Decision hint="지급 승인 요청이 안전 장치 보류 큐에서 기다립니다. 판매자·기간·금액이 정산 표와 같으면 진행을 누르세요.">
-        <button type="button" className="btn-primary" onClick={() => onGoToQueue(reviewId)}>보류 큐에서 승인하기</button>
+        <Link href={SUPPORT_SETTLEMENT_PATH} className="btn-primary">고객지원 판매자 정산 열기</Link>
       </Decision>
     );
   } else if (action?.type === "team_budget_approve" && action.month && action.signature) {
@@ -102,7 +94,7 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
   } else if (action?.type === "open_tab") {
     decision = (
       <div className="mt-3 space-y-2">
-        <p className="text-sm text-ink-500">판매 대금 지급 기한이 가까웠거나 지났습니다. 판매자 정산 탭에서 보류 사유를 풀거나 이번 지급 묶음에 넣으세요. 지급은 지금처럼 보류 큐 승인으로만 합니다.</p>
+        <p className="text-sm text-ink-500">판매 대금 지급 기한이 가까웠거나 지났습니다. 고객지원 판매자 정산에서 보류 사유를 풀거나 이번 지급 묶음에 넣어야 합니다. 지급은 지금처럼 보류 큐 승인으로만 합니다.</p>
         <ul className="space-y-1 text-sm">
           {(todo.items ?? []).map((item) => (
             <li key={item.ref} className="flex flex-wrap items-baseline gap-x-2 rounded-xl border border-ink-100 px-3 py-2">
@@ -112,7 +104,10 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
             </li>
           ))}
         </ul>
-        <button type="button" className="btn-primary" onClick={onOpen}>판매자 정산에서 처리하기</button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-ghost" onClick={onOpen}>판매자 정산 보기</button>
+          <Link href={SUPPORT_SETTLEMENT_PATH} className="btn-primary">고객지원 판매자 정산 열기</Link>
+        </div>
       </div>
     );
   } else if (action && action.type in ITEM_ACTION) {
@@ -142,7 +137,7 @@ export function TodoCard({ todo, onDone, onOpen, onGoToQueue }: {
         <button type="button" className="text-sm font-medium text-brand-700 hover:underline" onClick={onOpen}>탭에서 보기 →</button>
       </div>
       {decision}
-      {decision && action?.type !== "open_tab" && !humanTokenSet && <p className="mt-2 text-sm text-amber-800">{NO_TOKEN}</p>}
+      {decision && needsToken && !humanTokenSet && <p className="mt-2 text-sm text-amber-800">{NO_TOKEN}</p>}
       {problem && <p role="alert" className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{problem}</p>}
     </li>
   );

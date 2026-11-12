@@ -34,6 +34,7 @@ from support_agent.proposal_handlers import PROPOSAL_HANDLERS
 from support_agent.purge_handlers import PURGE_HANDLERS
 from support_agent.qa_handlers import QA_HANDLERS
 from support_agent.resolution_note_handlers import RESOLUTION_NOTE_HANDLERS
+from support_agent.settlement_handlers import SETTLEMENT_HANDLERS
 from support_agent.signal_handlers import SIGNAL_HANDLERS
 from support_agent.suggest_handlers import SUGGEST_HANDLERS
 from support_agent.triage_handlers import TRIAGE_HANDLERS
@@ -88,6 +89,7 @@ ALL_HANDLERS = {
     **SIGNAL_HANDLERS,
     **CHAT_HANDLERS,
     **PURGE_HANDLERS,
+    **SETTLEMENT_HANDLERS,
 }
 # 영수증 사진 분석기: 이미지를 읽을 모델이 설정돼 있을 때만 꽂는다(목 모드·미설정이면 꽂지 않는다)
 receipt_vision.connect()

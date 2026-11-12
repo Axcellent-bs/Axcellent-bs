@@ -52,7 +52,7 @@ async def _run(client: httpx.AsyncClient) -> dict[str, Any]:
 async def test_all_green_when_everything_is_up() -> None:
     result = await _run(_network({"safety", "shop-api", "data"}))
     assert result["result"] == "pass", [c for c in result["checks"] if not c["ok"]]
-    assert result["passed"] == result["total"] == 8
+    assert result["passed"] == result["total"] == 7
     names = {c["name"] for c in result["checks"]}
     assert "안전 장치 연결" in names
     # 쿠폰·환불 판단과 예산·한도는 재무 일이 아니라 점검하지 않는다
@@ -60,9 +60,10 @@ async def test_all_green_when_everything_is_up() -> None:
     assert {
         "결산 계산 공식",
         "대사 상태 나누기",
-        "판매자 정산 공식",
         "무작위 장부 계산 점검",
     } <= names
+    # 판매자 정산 공식은 고객지원이 계산해 고객지원 쪽에서 점검한다. 재무는 정산 확정 등급만 본다
+    assert "판매자 정산 공식" not in names and ROUTING in names
 
 
 @pytest.mark.asyncio
@@ -98,30 +99,27 @@ async def test_old_settlement_grade_or_missing_action_fails() -> None:
 
 @pytest.mark.asyncio
 async def test_module_checks_cover_every_new_module() -> None:
-    """결산·대사·정산 규칙 점검이 모두 통과한다(가짜 자료, 실제 기록 없음)."""
+    """결산·대사 규칙 점검이 모두 통과한다(가짜 자료, 실제 기록 없음)."""
     result = await _run(_network({"safety", "shop-api", "data"}))
     by = {c["name"]: c for c in result["checks"]}
     for name in (
         "결산 계산 공식",
         "대사 상태 나누기",
-        "판매자 정산 공식",
     ):
         assert by[name]["ok"], (name, by[name]["detail"])
-    assert "13,000원" in by["판매자 정산 공식"]["detail"]
 
 
 @pytest.mark.asyncio
 async def test_broken_calculation_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
     """계산 코드가 고장 나면 테스트가 빨간불을 켠다."""
 
-    def broken(*args: Any, **kwargs: Any) -> dict:
-        row = {"gross": 1, "commission": 0, "refunds": 0, "payout": 1, "status": "ready"}
-        return {"statements": [row]}
+    def broken(*args: Any, **kwargs: Any) -> tuple[str, None]:
+        return ("matched", None)  # 무엇이든 일치로 나누는 고장
 
-    monkeypatch.setattr(selftest, "statements", broken)
+    monkeypatch.setattr(selftest, "classify", broken)
     result = await _run(_network({"safety", "shop-api", "data"}))
     failed = {c["name"] for c in result["checks"] if not c["ok"]}
-    assert "판매자 정산 공식" in failed
+    assert "대사 상태 나누기" in failed
     assert result["result"] == "fail"
 
 
@@ -129,7 +127,7 @@ async def test_broken_calculation_is_caught(monkeypatch: pytest.MonkeyPatch) -> 
 async def test_self_test_leaves_no_trace_in_real_records() -> None:
     await _run(_network({"safety", "shop-api", "data"}))
     ledger, records = handlers.state().ledger, handlers.state().records
-    assert records.closings == {} and records.batches == {} and ledger.refunds == {}
+    assert records.closings == {} and records.legacy_batches == {} and ledger.refunds == {}
 
 
 def test_endpoints_run_and_remember_last(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,13 +289,13 @@ def test_lifespan_does_not_start_auto_test_when_disabled(monkeypatch: pytest.Mon
 async def test_random_books_check_passes_and_catches_rounding_bugs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """무작위 장부 70건 점검: 정책대로면 통과, 계산이 틀어지면(예: 법인세 1원) 그 영역을 짚는다."""
+    """무작위 장부 60건 점검: 정책대로면 통과, 계산이 틀어지면(예: 법인세 1원) 그 영역을 짚는다."""
     from finance_agent import accuracy
 
     result = await _run(_network({"safety", "shop-api", "data"}))
     by = {c["name"]: c for c in result["checks"]}
     assert by["무작위 장부 계산 점검"]["ok"], by["무작위 장부 계산 점검"]["detail"]
-    assert "70건 모두" in by["무작위 장부 계산 점검"]["detail"]
+    assert "60건 모두" in by["무작위 장부 계산 점검"]["detail"]
 
     real = accuracy.income_tax_amount
     monkeypatch.setattr(accuracy, "income_tax_amount", lambda base: real(base) + (base > 0))

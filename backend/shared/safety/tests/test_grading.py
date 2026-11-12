@@ -131,7 +131,7 @@ async def test_invalid_amount_fields_hold(gate: Gate, bad: object, coupon) -> No
 
 @pytest.mark.asyncio
 async def test_settlement_confirmation_is_always_held(gate: Gate, act) -> None:
-    decision = await gate.execute(act("confirm_settlement", "finance", "k-set", draft="s1"))
+    decision = await gate.execute(act("confirm_settlement", "support", "k-set", draft="s1"))
     assert (decision.grade, decision.status) == ("C", "held")
     # 금액 기준이 없는 C다. 사유는 `over_threshold`로 나가고(응답 enum을 늘리지 않는다),
     # 보고서 `rules`의 `base_grade` 표시로 "늘 사람이 정함"을 구분한다 (요청 #180·#431)
@@ -139,6 +139,13 @@ async def test_settlement_confirmation_is_always_held(gate: Gate, act) -> None:
     review = gate.store.get_review(decision.review_id or "")
     assert review is not None
     assert review.report["rules"] == [{"key": "base_grade", "value": "C"}]
+
+
+@pytest.mark.asyncio
+async def test_finance_can_no_longer_request_settlement(gate: Gate, act) -> None:
+    """판매자 정산은 고객지원으로 옮겼다(2026-11-12). 재무가 요청하면 미등록 요청으로 보류된다."""
+    decision = await gate.execute(act("confirm_settlement", "finance", "k-set-fin", draft="s3"))
+    assert (decision.status, decision.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
 
 
 @pytest.mark.asyncio
@@ -151,7 +158,7 @@ async def test_base_grade_c_is_told_apart_by_the_report_not_the_reason(
     응답 enum이 아니라 새 선택 필드로 더해야 한다 (`high_impact` 추가는 하위 호환이 깨진다).
     """
     over = await gate.execute(coupon(80, 5000, purpose_code="campaign"))  # 400,000원 = 기준 초과
-    always = await gate.execute(act("confirm_settlement", "finance", "k-set2", draft="s2"))
+    always = await gate.execute(act("confirm_settlement", "support", "k-set2", draft="s2"))
     assert (over.grade, always.grade) == ("C", "C")
     assert over.hold_reason == always.hold_reason == HoldReason.OVER_THRESHOLD
     over_rules = gate.store.get_review(over.review_id or "").report["rules"]

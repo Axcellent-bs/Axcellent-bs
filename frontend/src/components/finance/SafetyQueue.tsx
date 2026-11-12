@@ -4,7 +4,7 @@ import { ACTION_KO, SAFETY_SERVER, finance, humanTokenSet, krw, liveHumanTokenSe
 import { Chip, TONE } from "./bits";
 
 // 안전 장치 보류 큐: 사람만 정할 수 있는 일(C 등급). 결정은 safety에 사람 토큰으로 보낸다.
-// 재무 화면(SafetyQueue)에는 정산 묶음 지급 승인과 아직 담당 화면이 없는 일이 온다.
+// 재무 화면(SafetyQueue)에는 아직 담당 화면이 없는 일이 온다. 판매자 정산 묶음 지급 승인은 고객지원 판매자 정산 화면(ActionQueue)에서 결정한다.
 // 환불은 고객지원 보상 큐(RefundHolds), 마케팅 일(쿠폰·공지·SNS·영상)은 마케팅 화면(ActionQueue)에서 결정한다. 재무는 끝난 금액만 장부에 적는다.
 
 const WHO_KO: Record<string, string> = {
@@ -59,7 +59,7 @@ function ruleSentence(h: RuleHit): string {
 function tipOf(r: Review): string {
   if (r.report.rules?.some((h) => h.key === "connection_kev_hold")) return "서버를 패치하면 보류가 풀립니다. 그때까지는 멈추세요. 장애 복구처럼 급한 일이면 위험을 알고 진행하세요.";
   if (r.report.rules?.some((h) => h.named_hit)) return "머지되면 개발자 PC와 CI가 이 파일을 자동으로 읽고 실행합니다. 바뀐 내용을 직접 보고, 왜 바꿨는지 모르겠으면 멈추세요.";
-  if (r.action === "confirm_settlement") return "위 ③ 판매자 정산 표의 판매자·기간·금액과 같으면 진행하세요.";
+  if (r.action === "confirm_settlement") return "위 판매자 정산 표의 판매자·기간·금액과 같으면 진행하세요.";
   if (r.action === "start_campaign") return "재무 탭의 남은 예산과 실패 이력을 보고 금액이 맞으면 진행하세요. 진행하면 광고비가 나갑니다.";
   if (r.action === "publish_sns") return "글과 영상이 승인한 초안과 같고 AI 생성 표시가 있으면 진행하세요. 올리면 되돌리기 어렵습니다.";
   if (r.action === "generate_media") return "비용과 길이가 예상과 맞으면 진행하세요. 진행하면 비용이 나갑니다.";
@@ -73,7 +73,7 @@ function tipOf(r: Review): string {
   }
 }
 
-const FINANCE_INTRO = "판매자 정산 지급처럼 사람만 정할 수 있는 일이 여기 모입니다. ";
+const FINANCE_INTRO = "아직 담당 화면이 없는 일 가운데 사람만 정할 수 있는 일이 여기 모입니다. ";
 
 export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE_INTRO, live = false }: {
   reviews: Review[] | null;
@@ -168,7 +168,14 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
 const QUEUE_REFRESH_MS = 30_000;
 
 /** 재무 화면 밖에 두는 보류 큐: 한 가지 일의 보류 건만 스스로 받아 결정한다 */
-export function ActionQueue({ action, intro }: { action: string | readonly string[]; intro: string }) {
+export function ActionQueue({ action, intro, highlight = null, reloadKey = 0 }: {
+  action: string | readonly string[];
+  intro: string;
+  /** 표시할 보류 건 (방금 요청한 건) */
+  highlight?: string | null;
+  /** 바뀌면 다시 받는다 (방금 요청한 건을 바로 보이게) */
+  reloadKey?: number;
+}) {
   const names = (typeof action === "string" ? [action] : action).join(",");
   const [reviews, setReviews] = useState<Review[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -183,6 +190,6 @@ export function ActionQueue({ action, intro }: { action: string | readonly strin
     void load();
     const t = setInterval(() => void load(), QUEUE_REFRESH_MS);
     return () => clearInterval(t);
-  }, [load]);
-  return <SafetyQueue reviews={reviews} error={error} highlight={null} reload={load} intro={intro} live />;
+  }, [load, reloadKey]);
+  return <SafetyQueue reviews={reviews} error={error} highlight={highlight} reload={load} intro={intro} live />;
 }

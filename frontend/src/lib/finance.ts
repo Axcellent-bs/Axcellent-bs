@@ -632,10 +632,8 @@ export const finance = {
   /** 대사 불일치 건 처리 메모. 사람 토큰만 */
   reconNote: (paymentId: string, note: string) =>
     fin<Envelope<ReconItem>>(`/api/finance/reconciliation/${encodeURIComponent(paymentId)}/note`, { method: "POST", body: { note }, human: true }),
+  /** 판매자 정산 내역서 (보기만). 계산과 지급 승인 요청은 고객지원이 하고 재무는 받아 보여 준다 */
   settlements: (period?: string | null) => fin<Envelope<Settlements>>(`/api/finance/settlements${query({ period })}`),
-  /** 보류 없는 판매자를 묶어 지급 승인 요청 → 안전 장치 보류 큐(C). 돈은 움직이지 않는다 */
-  requestSettlementBatch: (period: string) =>
-    fin<Envelope<Settlements | SettlementBatch>>("/api/finance/settlements/batch", { method: "POST", body: { period }, human: true }),
   /** 판매 대금 지급 기한 점검 */
   deadlines: () => fin<Envelope<DeadlineReport>>("/api/finance/settlements/deadlines"),
   /** 판매자 미지급금 롤포워드 (그 달). 날짜가 없으면 이번 달 */
@@ -760,16 +758,14 @@ export const CATEGORY_KO: Record<string, string> = { book: "도서", books: "도
 export const RECON_ORDER: ReconStatus[] = ["mismatch", "missing_in_pg", "fee_anomaly", "pending", "matched"];
 export const DEFAULT_RECON_FILTER: ReconStatus[] = RECON_ORDER.filter((s) => s !== "matched" && s !== "pending");
 
-/** 지급 준비된(보류 없는) 판매자 정산금 합계. 값이 없는 판매자가 있으면 null */
-export function readyPayout(statements: SellerStatement[]): number | null {
-  const ready = statements.filter((s) => s.status === "ready");
-  if (ready.some((s) => s.payout == null)) return null;
-  return ready.reduce((n, s) => n + (s.payout ?? 0), 0);
+/** 묶음에 넣을 판매자: 백엔드 ready()와 같다. 보류 사유가 없고 줄 돈이 있으며, 아직 요청 전이거나 지난 요청이 거절·만료·분실된 판매자 */
+export function isPayable(s: SellerStatement): boolean {
+  return s.hold_reasons.length === 0 && (s.status === "ready" || s.status === "rejected") && (s.payout ?? 0) > 0;
 }
 
-/** 정산 묶음 요청 응답은 정산 전체이거나 batch만일 수 있어 batch를 꺼낸다 */
-export function batchOf(res: Settlements | SettlementBatch): SettlementBatch {
-  return "statements" in res ? res.batch : res;
+/** 지급 준비된 판매자 정산금 합계 */
+export function readyPayout(statements: SellerStatement[]): number {
+  return statements.filter(isPayable).reduce((n, s) => n + (s.payout ?? 0), 0);
 }
 
 /** 오늘 날짜(한국 시간) YYYY-MM-DD */
@@ -842,8 +838,12 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
 
 /** 마케팅 화면에서 결정하는 보류 건 */
 export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_media", "start_campaign"] as const;
-/** 재무 화면에서 결정하지 않는 보류 건. 환불은 고객지원 화면, 쿠폰·공지·SNS·영상은 마케팅 화면에서 결정한다 */
-export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", ...MARKETING_HOLD_ACTIONS]);
+/** 고객지원 판매자 정산 화면에서 결정하는 보류 건 (정산 묶음 지급 승인) */
+export const SETTLEMENT_HOLD_ACTION = "confirm_settlement";
+/** 고객지원 > 판매자 정산 화면 주소 (정산 묶음 요청·지급 승인은 거기서 한다) */
+export const SUPPORT_SETTLEMENT_PATH = "/settlements";
+/** 재무 화면에서 결정하지 않는 보류 건. 환불·판매자 정산 지급은 고객지원 화면, 쿠폰·공지·SNS·영상은 마케팅 화면에서 결정한다 */
+export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", SETTLEMENT_HOLD_ACTION, ...MARKETING_HOLD_ACTIONS]);
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",

@@ -156,6 +156,27 @@ def test_facts_keep_going_when_one_part_fails(monkeypatch: pytest.MonkeyPatch) -
     assert "overview" in got and "records" in got
 
 
+def test_facts_use_settlement_from_support(support, kit) -> None:
+    """정산 묶음·현금 흐름은 고객지원에서 받은 정산으로 채운다. 못 받으면 비우고 이름을 남긴다."""
+    support.batches = {"2026-W41": {"status": "approved", "total_payout": 9000}}
+    got = asyncio.run(facts.collect())
+    assert got["records"]["settlement_batches"] == {
+        "2026-W41": {"status": "approved", "total_payout": 9000}
+    }
+    assert got["cashflow"]["unavailable"] == []
+
+    support.down = True
+    from finance_agent import settlement_feed
+
+    settlement_feed.forget()
+    got = asyncio.run(facts.collect())
+    assert got["records"]["settlement_batches"] is None  # 묶음이 없다고 말하지 않는다
+    assert got["cashflow"]["unavailable"] == ["seller_settlement"]
+    assert got["bank"]["withdrawals"]["unavailable"] == ["seller_settlement_batches"]
+    items = {i["label"]: i["status"] for i in got["month_close_checklist"]["items"]}
+    assert items["판매자 정산 지급 승인 (고객지원)"] == "unknown"
+
+
 def test_facts_include_incident_finance_records() -> None:
     handlers.state().ledger.incident_reports["ctx_inc_x"] = {
         "context_id": "ctx_inc_x",

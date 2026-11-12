@@ -1,4 +1,7 @@
-"""은행 입금 대조, 13주 현금 흐름, 월 마감 체크리스트."""
+"""은행 입금 대조, 13주 현금 흐름, 월 마감 체크리스트.
+
+판매자 정산 내역서·묶음은 고객지원이 준다. 여기서는 고객지원 응답을 흉내 내 넣는다(`kit.statement`).
+"""
 
 from __future__ import annotations
 
@@ -106,6 +109,31 @@ def test_bank_upload_needs_a_person() -> None:
 
 
 # ---------------------------------------------------------------- 13주 현금 흐름
+WEEK_PAYOUT = 7 * 9000  # 하루 한 건 도서 10,000원 − 수수료 10%
+
+
+def _weeks(kit, payout: int = WEEK_PAYOUT, **by_period) -> dict:
+    """고객지원 `seller_settlement_weeks`가 줄 내역서 (현금 흐름이 읽는 주 전부)."""
+    rows = [{"seller_id": "sel_a", "payout": payout}]
+    return {
+        p: by_period.get(p) or kit.statement(p, rows) for p in cashflow.settlement_periods(TODAY)
+    }
+
+
+def test_cashflow_reads_this_and_last_weeks_and_trailing_weeks() -> None:
+    assert cashflow.settlement_periods(TODAY) == [
+        "2026-W35",
+        "2026-W36",
+        "2026-W37",
+        "2026-W38",
+        "2026-W39",
+        "2026-W40",
+        "2026-W41",
+        "2026-W42",
+        "2026-W43",
+    ]
+
+
 def test_cashflow_scheduled_weeks_and_estimate_from_full_weeks(kit) -> None:
     orders = [
         kit.order(
@@ -113,7 +141,8 @@ def test_cashflow_scheduled_weeks_and_estimate_from_full_weeks(kit) -> None:
         )
         for k in range(0, 52)
     ]
-    r = cashflow.forecast(kit.books(orders=orders), {}, TODAY)
+    r = cashflow.forecast(kit.books(orders=orders), _weeks(kit), TODAY)
+    assert r["unavailable"] == []
     weeks = r["weeks"]
     assert len(weeks) == 13 and weeks[0]["week_start"] == "2026-10-19"
     assert weeks[0]["basis"] == "scheduled" and weeks[0]["inflow"] > 0  # 아직 안 들어온 PG 정산
@@ -122,11 +151,38 @@ def test_cashflow_scheduled_weeks_and_estimate_from_full_weeks(kit) -> None:
     # 같은 주 결제 기준이라 들어옴(PG 지급액)이 나감(판매자 몫)보다 크다
     assert r["average"]["inflow"] > r["average"]["outflow"]
     assert all(w["net"] == w["inflow"] - w["outflow"] for w in weeks)
+    # 지난주(W42) 정산 지급 예정일 10-24 → 이번 주 나감
+    assert weeks[0]["outflow"] == WEEK_PAYOUT
+
+
+def test_cashflow_skips_approved_and_held_sellers(kit) -> None:
+    orders = [kit.order("ord_1", kit.at("2026-10-14"), [("sel_a", "book", 1, 10000)])]
+    rows = [
+        {"seller_id": "sel_a", "payout": 9000},
+        {"seller_id": "sel_b", "payout": 5000},
+        {"seller_id": "sel_c", "payout": 4000, "hold_reasons": [{"code": "x", "label": "x"}]},
+    ]
+    approved = {"status": "approved", "seller_ids": ["sel_b"]}
+    weeks = _weeks(kit, 0, **{"2026-W42": kit.statement("2026-W42", rows, batch=approved)})
+    r = cashflow.forecast(kit.books(orders=orders), weeks, TODAY)
+    assert r["weeks"][0]["outflow"] == 9000  # 승인된 sel_b는 이미 나감, 보류된 sel_c는 빠짐
+
+
+def test_cashflow_outflow_is_unknown_when_support_is_down(kit) -> None:
+    """고객지원에서 정산을 못 받으면 나감·순현금을 0으로 채우지 않는다. 들어옴은 그대로."""
+    orders = [kit.order("ord_1", kit.at("2026-10-22"), [("sel_a", "book", 1, 10000)])]
+    books = kit.books(orders=orders)
+    for missing in (None, {"2026-W42": kit.statement("2026-W42")}):
+        r = cashflow.forecast(books, missing, TODAY)
+        assert r["unavailable"] == ["seller_settlement"]
+        assert all(w["outflow"] is None and w["net"] is None for w in r["weeks"])
+        assert r["weeks"][0]["inflow"] > 0
+        assert "고객지원" in r["note"]
 
 
 def test_cashflow_does_not_estimate_without_full_weeks(kit) -> None:
     orders = [kit.order("ord_1", kit.at("2026-10-21"), [("sel_a", "book", 1, 10000)])]
-    r = cashflow.forecast(kit.books(orders=orders), {}, TODAY)
+    r = cashflow.forecast(kit.books(orders=orders), _weeks(kit), TODAY)
     assert r["average"] == {"inflow": None, "outflow": None}
     assert all(w["net"] is None for w in r["weeks"] if w["basis"] == "estimated")
 
@@ -134,14 +190,22 @@ def test_cashflow_does_not_estimate_without_full_weeks(kit) -> None:
 def test_cashflow_is_unknown_without_orders(kit) -> None:
     books = kit.books(orders=[])
     books.unavailable.append("orders")
-    assert all(w["inflow"] is None for w in cashflow.forecast(books, {}, TODAY)["weeks"])
+    weeks = cashflow.forecast(books, _weeks(kit), TODAY)["weeks"]
+    assert all(w["inflow"] is None for w in weeks)
 
 
 # ---------------------------------------------------------------- 월 마감 체크리스트
+def _month_weeks(kit, **by_period) -> dict:
+    return {
+        p: by_period.get(p) or kit.statement(p) for p in close_checklist.settlement_periods(TODAY)
+    }
+
+
 def test_checklist_items_follow_records(kit) -> None:
     books = _bank_books(kit)
     rec = handlers.FinanceRecords()
-    r = close_checklist.checklist(books, rec, TODAY, TODAY)
+    feed = {"settlements": _month_weeks(kit), "batches": {}}
+    r = close_checklist.checklist(books, rec, TODAY, TODAY, **feed)
     status = {i["key"]: i["status"] for i in r["items"]}
     assert r["month"] == "2026-10" and r["total"] == 7
     assert status["daily_closing"] == "pending" and status["bank"] == "pending"
@@ -151,13 +215,64 @@ def test_checklist_items_follow_records(kit) -> None:
     for k in range(22):
         rec.closings[("day", (date(2026, 10, 1) + timedelta(days=k)).isoformat())] = {"by": "t"}
     rec.closings[("month", "2026-10-01")] = {"by": "t"}
-    r = close_checklist.checklist(books, rec, TODAY, TODAY)
+    r = close_checklist.checklist(books, rec, TODAY, TODAY, **feed)
     status = {i["key"]: i["status"] for i in r["items"]}
     assert status["daily_closing"] == "done" and status["month_closing"] == "done"
     assert r["closed"] is True and r["ready"] is False
+
+
+def test_checklist_settlement_item_reads_support_batches(kit) -> None:
+    """지급일(고객지원 내역서의 `pay_date`)이 그 달·오늘 전인 주의 묶음이 승인됐는지만 본다."""
+    assert close_checklist.settlement_periods(TODAY) == [
+        "2026-W39",
+        "2026-W40",
+        "2026-W41",
+        "2026-W42",
+        "2026-W43",
+        "2026-W44",
+    ]
+    rows = [{"seller_id": "sel_a", "payout": 9000}]
+    w41 = kit.statement("2026-W41", rows)  # 지급일 10-17
+    w42 = kit.statement("2026-W42", rows)  # 지급일 10-24 (오늘 뒤라 아직 아님)
+    books, rec = _bank_books(kit), handlers.FinanceRecords()
+
+    def item(weeks, batches=None):
+        r = close_checklist.checklist(books, rec, TODAY, TODAY, settlements=weeks, batches=batches)
+        return next(i for i in r["items"] if i["key"] == "settlement")
+
+    pending = item(_month_weeks(kit, **{"2026-W41": w41, "2026-W42": w42}), {})
+    assert (pending["status"], pending["detail"]) == ("pending", "승인 안 된 주: 2026-W41")
+    w41_ok = w41 | {"batch": w41["batch"] | {"status": "approved", "seller_ids": ["sel_a"]}}
+    done = item(_month_weeks(kit, **{"2026-W41": w41_ok, "2026-W42": w42}), {})
+    assert done["status"] == "done"
+    unknown = item(None)
+    assert unknown["status"] == "unknown" and "고객지원" in unknown["detail"]
+
+
+def test_checklist_without_support_marks_settlement_items_unknown(kit) -> None:
+    """고객지원이 꺼져 있으면 정산·미지급금 항목은 "확인할 수 없음"이다(끝났다고 하지 않는다)."""
+    rec = handlers.FinanceRecords()
+    rec.bank_out_periods = [{"from": "2026-10-01", "to": "2026-10-22"}]
+    r = close_checklist.checklist(_bank_books(kit), rec, TODAY, TODAY)
+    status = {i["key"]: i["status"] for i in r["items"]}
+    assert status["settlement"] == status["payables"] == status["bank_out"] == "unknown"
+    assert r["ready"] is False
 
 
 def test_checklist_api() -> None:
     body = TestClient(app).get("/api/finance/close-checklist").json()["data"]
     assert body["month"] == "2026-10" and [i["key"] for i in body["items"]][-1] == "month_closing"
     assert TestClient(app).get("/api/finance/cashflow").json()["data"]["weeks"]
+
+
+def test_cashflow_and_checklist_apis_prefetch_from_support(support) -> None:
+    client = TestClient(app)
+    cash = client.get("/api/finance/cashflow").json()["data"]
+    assert cash["unavailable"] == []
+    asked = [p for skill, p in support.calls if skill == "seller_settlement_weeks"]
+    assert asked[0]["periods"] == cashflow.settlement_periods(TODAY)
+    checklist = client.get("/api/finance/close-checklist").json()["data"]
+    status = {i["key"]: i["status"] for i in checklist["items"]}
+    assert status["settlement"] == "done" and status["payables"] == "done"
+    skills = {skill for skill, _ in support.calls}
+    assert skills == {"seller_settlement_weeks", "seller_settlement_batches"}

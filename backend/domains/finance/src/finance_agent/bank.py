@@ -203,7 +203,7 @@ def _month_fully_covered(periods: list[dict[str, str]], month: str) -> bool:
 def outflows(
     bank_rows: list[dict[str, Any]],
     out_periods: list[dict[str, str]],
-    batches: dict[str, dict[str, Any]],
+    batches: dict[str, dict[str, Any]] | None,
     *,
     seller_name: Callable[[str], str],
     other_pnl: dict[str, dict[str, Any]] | None = None,
@@ -212,6 +212,9 @@ def outflows(
     today: date | None = None,
 ) -> dict[str, Any]:
     """통장 출금을 장부와 맞춘다. 장부를 바꾸지 않고 읽기만 한다.
+
+    `batches`는 고객지원에서 받은 정산 묶음(`seller_settlement_batches`)이다. 못 받았으면(None)
+    판매자 이체를 맞추지 않고 `unavailable`에 이름을 남긴다(이체를 "없음"으로 보지 않는다).
 
     1. 판매자 이체: 승인된 정산 묶음마다 승인일부터 `bank.transfer_days`일 안에 같은 금액 출금이
        있는지 본다. 묶음 합계 한 건(일괄 이체)이 먼저, 없으면 판매자별 금액을 하나씩 찾는다
@@ -237,6 +240,7 @@ def outflows(
             "counts": {},
             "transfer_days": cfg.transfer_days,
             "applied_rules": [applied("BNK-001"), applied("BNK-002")],
+            "unavailable": [] if batches is not None else ["seller_settlement_batches"],
         }
 
     def take(amount: int, lo: str, hi: str) -> dict[str, Any] | None:
@@ -247,7 +251,7 @@ def outflows(
         return None
 
     transfers = []
-    approved = [(name, b) for name, b in batches.items() if b.get("status") == "approved"]
+    approved = [(n, b) for n, b in (batches or {}).items() if b.get("status") == "approved"]
     approved.sort(key=lambda x: str(x[1].get("approved_at") or x[1].get("requested_at") or ""))
     for name, b in approved:
         at = fc.parse_dt(b.get("approved_at") or b.get("requested_at"))
@@ -365,6 +369,7 @@ def outflows(
             ),
             applied("BNK-002", f"설명 없는 출금 {len(unexplained)}건"),
         ],
+        "unavailable": [] if batches is not None else ["seller_settlement_batches"],
     }
 
 

@@ -171,6 +171,25 @@ ax-contracts, ax-agent-template
 - 정책 문서(KB)는 시드 조각이다. memory의 정책 문서 API가 생기면 교체한다.
 - 외부 API를 직접 호출해 상태를 바꾸지 않는다.
 
+## 판매자 정산 (`settlement*.py`) — 2026-11-12 재무에서 옮김
+
+팀장(태윤) 결정으로 판매자 정산을 재무에서 고객지원으로 옮겼다. 고객지원이 환불·클레임을 처리하고, 그 결과까지 넣어 판매자 정산금을 내고 지급 승인을 요청한다. 재무는 결과를 받아 화면에 보여 주고 회계(미지급금 롤포워드·13주 현금 흐름·은행 출금 대조·마감 점검)에만 쓴다. 설계와 옮긴 범위는 `docs/notes/support/2026-11-12-seller-settlement.md`.
+
+| skill | 등급 | 하는 일 |
+| --- | --- | --- |
+| `seller_settlement` | read | 한 주(기본 지난주)의 판매자별 정산서와 지급 묶음 상태 |
+| `seller_settlement_weeks` | read | 여러 주(최대 30주) 정산서. 재무 현금 흐름·마감 점검용 |
+| `seller_settlement_batches` | read | 주마다 지급 묶음 기록(상태·판매자별 지급액·승인 시각). 재무 미지급금·은행 출금 대조용 |
+| `seller_settlement_deadlines` | read | 구매가 확정된 판매 대금을 기한(구매 확정일+20일) 안에 줄 수 있는지 점검 |
+| `request_seller_settlement` | A | 사람이 누른 묶음 지급 승인 요청 → `execute("confirm_settlement")` → 안전 장치 C 보류 → 사람 승인 |
+
+- 정산금 = 판매액 − 판매 수수료 − 판매자 부담 쿠폰 − 환불. 판매액은 구매가 확정된(배송 완료) 주에 넣는다. 환불은 환불 시각과 구매 확정 시각 중 늦은 주에 빼고, 끝내 확정되지 않은 주문(배송 전 취소 등)의 환불은 빼지 않는다. 수수료율·지급일·기한은 `settlement_policy.toml`(재무 `finance_policy.toml`의 수수료율과 같게 둔다)
+- 자료는 판매 서버(shop-api)에서 읽는다(`settlement_books.py`): 주문은 1000건씩 끝까지, 평소에는 최근 3일만 다시 받아 끼우고 10분마다 전체를 다시 읽는다. 지급 요청 때는 전체를 새로 읽는다. 주문·쿠폰을 못 받으면 `shop_unavailable`로 답하고 0으로 채우지 않는다
+- 지급 요청은 사람이 누른 것만 받는다(`requested_by` 필수, 대시보드 API가 사람 토큰에서 꺼내 넣는다). 요청한 사람은 승인하지 못한다(안전 관문). 같은 주가 요청 중·승인됨이면 다시 요청하지 않는다
+- 요청 중인 묶음은 읽을 때마다 안전 장치 보류 건 상태를 다시 읽는다. 안전 장치가 그 보류 건을 모르면(404, 재시작으로 보류 큐가 비워짐) `rejected`(`closed_reason: review_missing`)로 바꿔 다시 요청할 수 있게 한다. 승인된 적이 없으니 두 번 지급되지 않는다
+- 묶음 기록은 `SUPPORT_SETTLEMENT_FILE`(JSON)에 남는다. 이 파일이 없고 `SUPPORT_SETTLEMENT_IMPORT_FILE`(재무 `finance_state.json`)이 있으면 처음 한 번 재무가 남긴 묶음 기록을 가져온다(`run_all.sh`가 둘 다 설정)
+- 실제 송금은 하지 않는다. 승인 = 지급 기록이다
+
 ## 직접 대화 (`chat.py`, `chat_handlers.py`) — 예진님 요청 2026-11-05
 
 사람이 고객지원 AI에게 문의·클레임·후기 현황을 묻고 설명을 듣는다. 응답 모양은 개발 AI `/dev-chat`과 같다

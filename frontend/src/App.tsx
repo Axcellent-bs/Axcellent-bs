@@ -25,6 +25,7 @@ import Queue from '@/pages/Queue'
 import Reviews from '@/pages/Reviews'
 import Voice from '@/pages/Voice'
 import Support from '@/pages/Support'
+import SellerSettlements from '@/pages/SellerSettlements'
 import Orders from '@/pages/Orders'
 import InfraHosts from '@/demo/InfraHosts'
 import DevTools from '@/demo/DevTools'
@@ -78,6 +79,7 @@ function Pages() {
           <Route path="/console" element={<Console />} />
           <Route path="/claims" element={<Claims />} />
           <Route path="/queue" element={<Queue />} />
+          <Route path="/settlements" element={<SellerSettlements />} />
           <Route path="/reviews" element={<Reviews />} />
           <Route path="/voice" element={<Voice />} />
           <Route path="/kb" element={<Kb />} />

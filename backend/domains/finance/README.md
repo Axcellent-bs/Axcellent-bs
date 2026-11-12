@@ -3,7 +3,9 @@
 ## 1. 역할
 **재무팀** 에이전트 (재무 재설계 2026-10-23, `docs/notes/finance/2026-10-23-finance-redesign.md`).
 마켓운영(판매자 입점 심사 `seller_review`·정산 보류 `settlement_hold`)은 재무 일이 아니라 2026-10-30에 없앴다.
-결산·리포트, 매출·PG 대사, 판매자 정산, 팀 예산, 세무 지원, 현금 흐름을 한다.
+결산·리포트, 매출·PG 대사, 팀 예산, 세무 지원, 현금 흐름을 한다.
+**판매자 정산(정산금 계산·지급 승인 요청·묶음 상태·지급 기한 점검)은 고객지원이 한다(2026-11-12).**
+재무는 고객지원이 준 정산을 받아 화면에 보여 주고, 회계(판매자 미지급금·13주 현금 흐름·은행 출금 대조·마감 점검·재무 대화)에만 쓴다. 정산금을 계산하거나 지급 승인을 요청하지 않는다.
 **재무는 쿠폰·환불의 끝난 금액을 장부에 기록만 한다.**
 건별 검사는 안전 관문 코드 규칙(금액 계산, `claimed_fields` 불일치, 기준표 한도)이 하고, 환불 여부는 고객지원, 쿠폰은 마케팅이 정한다.
 안전 장치가 보류한 환불은 고객지원 화면, 쿠폰은 마케팅 화면에서 사람이 결정한다.
@@ -14,7 +16,7 @@
 | 장부 자료 | `books.py` | 실제: shop-api 주문·상품·판매자·쿠폰 + safety 실행 기록. 목: `finance_books_seed.json`(오늘 기준 2주치). 토스 정산 형식 목 PG 정산(데모 불일치 포함). 실제 모드 장부는 30초 동안 다시 쓰고(동시 요청은 한 번 모은 결과를 같이 씀), 주문·쿠폰을 못 받은 장부는 캐시하지 않는다 |
 | ① 결산·리포트 | `closing.py` | 일·주·월 손익, 분개 미리보기, 설명 문장. 주문·쿠폰 자료를 못 받으면 그 숫자로 계산하는 줄은 0이 아니라 `null` |
 | ② 매출·PG 대사 | `reconciliation.py` | `matched`·`mismatch`·`missing_in_pg`·`pending`·`fee_anomaly` |
-| ③ 판매자 정산 | `settlement.py` | 정산금 = 판매액 − 수수료 − 판매자 부담 쿠폰 − 환불, 보류 사유. 묶음 지급은 `execute("confirm_settlement")`(항상 C) |
+| ③ 판매자 정산 받기 | `settlement_feed.py` | 고객지원 skill을 A2A로 읽는다: `seller_settlement`(내역서)·`seller_settlement_weeks`(여러 주)·`seller_settlement_batches`(묶음 상태)·`seller_settlement_deadlines`(지급 기한). 못 받으면 `null`이고 지어내지 않는다. 30초 기억(실패는 10초) |
 | ④ 팀 예산 | `team_budget.py` | 팀 예산 = 그달 1일 팀 인원(인사 `team_headcount`) × 인당 월 단가. 확정은 사람 |
 | 사건 보상 장부 | `ledger.py` | 쿠폰 업무는 재무가 맡지 않는다(마케팅·고객지원 합의). 지급은 마케팅(`issue_coupon`), 판정은 고객지원이 하고 재무는 **끝난 금액**만 사건별로 적는다(보류·거절 줄과 등급은 장부에 없다): safety 실행 기록(`safety_executions`)이 있으면 그것이 원본이라 이벤트를 더하지 않고, 없는 사건만 이벤트(`events`)로 적는다. 목 모드는 시드(`seed`). 둘 다 없으면 null |
 | 사건별 화면 | `incidents.py` | 사건 목록·상세: data 영향 그대로 + 보상 장부 + 환불 금액(`refunds`: 사건 구간·영향 고객으로 귀속, 금액·건수만) + 빠져나간 돈 합계(`money_out_total` = 보상 + 환불) (재설계 문서 12-1). 재무 단계는 #415로 없앴다 |
@@ -35,7 +37,6 @@
 `docker compose -f infra/compose.yml up finance` / 목 모드: `FINANCE_MOCK=1` (장부 시드 `src/finance_agent/finance_books_seed.json`, 영향 분석·심사 시드 `mock_seed.json`)
 
 혼자 띄우기(목 모드, 레포 루트): `FINANCE_MOCK=1 uv run uvicorn finance_agent.main:app --port 8105`
-(정산 묶음을 실제 safety 보류 큐로 보내려면 `AX_SAFETY_URL=http://localhost:8001`. 없으면 템플릿 목 execute가 바로 `executed`를 돌려준다)
 
 테스트: `uv run pytest domains/finance` (`backend/`에서)
 
@@ -56,12 +57,12 @@ safety·finance를 목 모드로 띄운 뒤 `uv run python domains/finance/demo/
 - 재무 대시보드 API (`{data, meta}`, `meta.mock`·`collected_at`·`source`·`unavailable`, 형식은 재설계 문서 11장, 구현 `finance_api.py`):
   `GET /api/finance/overview`, `GET /api/finance/closing?period=day|week|month&date=`, `POST /api/finance/closing/confirm`(사람 토큰, 확인할 수 없는 숫자가 있으면 409 `books_unavailable`),
   `GET /api/finance/reconciliation?date=`, `POST /api/finance/reconciliation/{payment_id}/note`(사람 토큰),
-  `GET /api/finance/settlements?period=YYYY-Www`, `POST /api/finance/settlements/batch`(토큰 선택, safety 없으면 503 `safety_unavailable`),
+  `GET /api/finance/settlements?period=YYYY-Www`·`GET /api/finance/settlements/deadlines`(고객지원 결과 그대로, `meta.provider`=`support`. 고객지원에 닿지 않으면 503 `support_unavailable`, 기간이 틀리면 400). 묶음 지급 요청(`POST /api/finance/settlements/batch`)은 없앴다 — 고객지원 `request_seller_settlement`가 한다,
   `GET /api/finance/team-budget?month=`
 - 사건별 API (시나리오 A, 재설계 문서 12-1, `incidents.py`): `GET /api/finance/incidents`(`meta.ledger_source`), `GET /api/finance/incidents/{context_id}`(없으면 404 `not_found`). 목 시드: `ctx_inc_scn_a_0001`(data 목과 같은 6건·4명·95,000원 + 보상 2,000원 × 4장)
 - 장애 구간(`window`)은 총괄 사건 목록 `GET /api/incidents`(8000)의 `opened_at`·`closed_at`을 **읽기 전용으로** 읽어서 안다 (계약 `contracts/src/ax_contracts/data_access/orchestrator_incidents.py`, [협업] #417 제안 A). 사건 **중**에 총괄을 부르는 것이 아니라 평상시 사건 조회에서만 읽는다. 주소는 `AX_ORCHESTRATOR_URL`(기본 `http://orchestrator:8000`). 못 읽거나 계약과 다르거나 아직 열린 사건이면 구간·영향 모두 `null`이고 data에 묻지 않는다(fail-closed). 목 모드는 장부 시드로 구간을 안다
 - 재무제표: `GET /api/finance/statements?period=month|quarter|year&date=&format=json|csv|xlsx` (K-IFRS 기능별 손익계산서, 당기·전기, `csv`·`xlsx`는 내려받기). 장부에 없는 항목은 `null`(자료 없음)
-- 지금 사람이 할 일(`GET /api/finance/overview`의 `todo`): 항목마다 `action`(결산 확정, 지급 승인 요청, 보류 큐 결정, 대사 메모, 팀 예산 확정)과 건별 `items`가 붙어 화면이 그 자리에서 결정 버튼을 띄운다. 쿠폰·환불은 할 일을 만들지 않는다
+- 지금 사람이 할 일(`GET /api/finance/overview`의 `todo`): 항목마다 `action`(결산 확정, 대사 메모, 팀 예산 확정)과 건별 `items`가 붙어 화면이 그 자리에서 결정 버튼을 띄운다. 쿠폰·환불은 할 일을 만들지 않는다. 판매자 정산은 지급 요청·승인 할 일이 없고, 고객지원이 기한을 넘길 판매자를 알려 주면 알림(`settlement_deadline`, `action.type`=`open_tab`, 처리는 고객지원)만 띄운다
 - 화면 예시 데이터: 재무 화면 [실제 데이터 | 예시 데이터] 전환의 예시 쪽은 `demo/export_example.py`가 목 시드로 만든 `frontend/src/lib/financeExample.json`이다. 시드나 계산이 바뀌면 다시 만든다
 - 기존 조회 API: `/api/finance/ledger`(사건별 보상 지급·주문별 환불 누적), `/api/finance/self-test`(재무 AI 테스트 버튼: 가짜 자료로 계산 규칙 점검 + 안전 장치·쇼핑몰·데이터 AI 연결 확인, 상태를 바꾸지 않음), `/api/finance/self-test/last`(마지막 결과, `data.trigger`=`auto`|`manual`, `meta.interval_seconds`·`meta.next_run_at`)
 - 재무 AI 테스트 자동 실행: 서버가 켜지고 5초 뒤 한 번, 그다음 `FINANCE_SELF_TEST_SECONDS`(기본 600초, 0이면 끔)마다 서버 안에서 돌려 `/self-test/last`에 남긴다. 테스트(`tests/conftest.py`)는 0으로 끈다
@@ -69,14 +70,14 @@ safety·finance를 목 모드로 띄운 뒤 `uv run python domains/finance/demo/
 - 사람 토큰: 안전 관문과 같은 형식 `Authorization: Bearer human:<이름>`(목 모드) 또는 `FINANCE_HUMAN_TOKENS`/`SAFETY_HUMAN_TOKENS`의 토큰 (`human.py`)
 - CORS: `FINANCE_CORS_ORIGINS`(`run_all.sh`가 화면 주소로 넣는다. 설정이 없을 때 코드 기본값은 옛 대시보드 `http://localhost:3001`). 사람 결정 경로 3개만 POST·Authorization 허용, 나머지는 GET만
 - 구독 이벤트: `coupon.issued`(보상 쿠폰 지급 누적), `payment.refunded`(환불 누적). 실제 모드는 `REDIS_URL`이 있어야 받는다. 보상 쿠폰 장부는 safety `GET /api/safety/executions`(읽기)에 기록이 있으면 그것을 먼저 쓴다
-- 부르는 것: data `impact_analysis`(`failed_order_count`·`affected_customer_count`·`damage_amount` + 영향 고객 ID `affected_customer_ids`), data `fraud_score`(`risk_score` 0~100), safety `execute()`(판매자 승인·정산 보류·정산 묶음 `confirm_settlement`), shop-api·safety 조회 API(장부)
+- 부르는 것: data `impact_analysis`(`failed_order_count`·`affected_customer_count`·`damage_amount` + 영향 고객 ID `affected_customer_ids`), data `fraud_score`(`risk_score` 0~100), 고객지원 판매자 정산 조회 skill 4개(읽기), safety `execute()`(재무 개선 요청 `finance_request_change`), shop-api·safety 조회 API(장부)
 
 ## 4. 의존
-ax-contracts, ax-agent-template, data 에이전트(`impact_analysis`, `fraud_score`), 인사(`team_headcount`), safety
+ax-contracts, ax-agent-template, data 에이전트(`impact_analysis`, `fraud_score`), 인사(`team_headcount`), 고객지원(판매자 정산 조회), safety
 
 ## 5. 하지 않는 것
 - 영향 숫자(실패 주문·영향 고객·피해 금액)를 다시 계산하지 않는다 (원천은 data)
-- 실제 송금·정산 확정을 하지 않는다 (정산 확정은 safety 레지스트리상 항상 C)
+- 실제 송금·정산 확정을 하지 않는다. 판매자 정산금을 계산하거나 지급 승인을 요청하지 않는다 (고객지원이 `confirm_settlement`로 요청하고 safety가 항상 C로 보류한다)
 - 판매 사이트 DB에 직접 붙지 않는다 (shop-api·data를 거친다)
 - 판매자 소개·구매자 메모 같은 `untrusted` 문장을 금액·심사 판단에 쓰지 않는다
 - 기준표를 읽거나 바꾸지 않는다 (사람이 safety 레포 설정을 PR로)

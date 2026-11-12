@@ -105,9 +105,10 @@ const METRIC_KO: Record<string, string> = {
   error_rate_5xx: "서버 오류로 자꾸 실패해요", p95_latency_ms: "응답이 느려졌어요", order_fail_rate: "주문 실패가 늘었어요", payment_fail_rate: "실패가 늘었어요",
 };
 const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
-/** 보류 건을 결정하는 화면. 환불은 고객지원, 쿠폰은 마케팅, 나머지는 재무 화면의 보류 큐다 */
+/** 보류 건을 결정하는 화면. 환불·판매자 정산 지급은 고객지원, 쿠폰은 마케팅, 나머지는 재무 화면의 보류 큐다 */
 export function holdPage(action: string | null | undefined): string {
   if (action === "refund_request") return "/queue";
+  if (action === "confirm_settlement") return "/settlements";
   if (action === "issue_coupon") return "/marketing";
   return "/finance";
 }

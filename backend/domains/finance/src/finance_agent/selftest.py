@@ -4,8 +4,9 @@
 
 - 규칙 점검은 **테스트 전용 가짜 자료**로 돌린다. 실제 기록(결산 확정, 대사 메모, 정산 묶음,
   환불 누적)에는 아무것도 남기지 않는다. 숫자는 실제 리포트와 같은 코드가 계산한다.
-  점검 대상: ① 결산 공식, ② 대사 상태 분류, ③ 정산 공식, ④ 무작위 장부 70건(`accuracy.py`,
+  점검 대상: ① 결산 공식, ② 대사 상태 분류, ③ 무작위 장부 60건(`accuracy.py`,
   날마다 다른 장부를 만들어 정책대로 따로 계산한 정답과 맞춘다).
+  판매자 정산 공식은 고객지원이 계산하므로(2026-11-12) 고객지원 쪽에서 점검한다.
 - 연결 점검은 실제 주소(`agent_url`)에 `GET`만 보낸다. 상태를 바꾸지 않는다.
 - 결과 수준: `fail`(계산이 틀리거나 안전 장치가 끊김 → 바로 확인 필요), `warn`(원천 데이터에 닿지
   않음 → 리포트 일부가 "확인할 수 없음"이 될 수 있음).
@@ -26,11 +27,10 @@ from finance_agent import finance_config as fc
 from finance_agent.books import Books
 from finance_agent.closing import compute_totals
 from finance_agent.reconciliation import classify
-from finance_agent.settlement import statements
 
 CALL_SECONDS = 3.0
 SELF_TEST_TTL_HOURS = 12  # 마지막 결과를 보여 주는 시간. 지나면 기록을 지우고 다시 테스트하게 한다
-RANDOM_CASES = 70  # 무작위 장부 점검 건수 (영역 7개 × 10건, 1초 안쪽)
+RANDOM_CASES = 60  # 무작위 장부 점검 건수 (영역 6개 × 10건, 1초 안쪽)
 
 
 def is_fresh(result: dict[str, Any], now: datetime | None = None) -> bool:
@@ -146,21 +146,6 @@ async def _module_checks() -> list[Check]:
             else f"예상 {expected}, 실제 {got}"
         )
 
-    async def settlement_formula() -> tuple[bool, str]:
-        row = statements(books, None)["statements"][0]
-        ok = (row["gross"], row["commission"], row["refunds"], row["payout"], row["status"]) == (
-            20000,
-            2000,
-            5000,
-            13000,
-            "ready",
-        )
-        return ok, (
-            "판매액 20,000원 − 수수료 2,000원 − 환불 5,000원 = 13,000원"
-            if ok
-            else f"실제 {row['gross']}/{row['commission']}/{row['refunds']}/{row['payout']}"
-        )
-
     async def random_cases() -> tuple[bool, str]:
         """고정 예시 3개로는 반올림·기간 경계 틀림을 못 잡는다. 날마다 다른 무작위 장부로 본다."""
         from finance_agent import accuracy
@@ -175,8 +160,7 @@ async def _module_checks() -> list[Check]:
         if not wrong:
             return (
                 True,
-                f"무작위 장부 {out['n']}건 모두 정책대로 계산됨 "
-                "(결산·대사·정산·입금·세금·캠페인 의견)",
+                f"무작위 장부 {out['n']}건 모두 정책대로 계산됨 (결산·대사·입금·세금·캠페인 의견)",
             )
         listed = ", ".join(f"{k} {v}건" for k, v in wrong.items())
         bad = sum(wrong.values())
@@ -185,7 +169,6 @@ async def _module_checks() -> list[Check]:
     for name, run in (
         ("결산 계산 공식", closing_formula),
         ("대사 상태 나누기", recon_classes),
-        ("판매자 정산 공식", settlement_formula),
         ("무작위 장부 계산 점검", random_cases),
     ):
         await _guard(name, run, checks)
@@ -213,7 +196,7 @@ async def _connection_checks(client: httpx.AsyncClient) -> list[Check]:
             status == 200,
             "안전 장치가 응답함"
             if status == 200
-            else "안전 장치에 닿지 않음. 정산 묶음 요청 등 돈이 나가는 일이 모두 멈춥니다",
+            else "안전 장치에 닿지 않음. 돈이 나가는 일(지급 승인 등)이 모두 멈춥니다",
         )
     )
 
@@ -235,7 +218,7 @@ async def _connection_checks(client: httpx.AsyncClient) -> list[Check]:
     )
 
     for name, target, why in (
-        ("쇼핑몰 연결", "shop-api", "주문·결제를 못 받아 결산·대사·정산이 비어 보일 수 있습니다"),
+        ("쇼핑몰 연결", "shop-api", "주문·결제를 못 받아 결산·대사가 비어 보일 수 있습니다"),
         ("데이터 AI 연결", "data", "이벤트 화면의 피해 숫자에 쓰는 영향 분석을 못 받습니다"),
     ):
         status, _ = await _get_json(client, f"{agent_url(target)}/health")

@@ -2,7 +2,9 @@
 
 판매자에게 줄 돈이 장부와 맞는지 보는 마감 통제다. 숫자는 정산 공식과 같은 방법으로 코드가 계산한다.
 - 발생: 그 달에 결제된 주문의 판매자 몫 − 판매자 부담 쿠폰 − 환불 (판매자 정산 내역서와 같은 공식)
-- 지급: 정산 묶음이 안전 장치에서 승인된 금액.
+- 지급: 정산 묶음이 안전 장치에서 승인된 금액. 묶음은 고객지원이 요청·관리하고 재무는
+  `seller_settlement_batches`로 받아 읽기만 한다(`settlement_feed`). 못 받았으면 지급·기초·기말은
+  `None`이다(0으로 두지 않는다).
   승인 시각(`approved_at`, 없으면 요청 시각)이 그 달인 것.
   실제 은행 이체 결과는 연동돼 있지 않아 "승인 = 지급"으로 본다
 - 기초: 그 달 이전의 발생 합 − 지급 합 (장부 처음부터 누적)
@@ -72,19 +74,20 @@ def _paid(
 
 
 def rollforward(
-    books: Books, batches: dict[str, dict[str, Any]], d: date | None = None
+    books: Books, batches: dict[str, dict[str, Any]] | None, d: date | None = None
 ) -> dict[str, Any]:
     d = d or fc.today()
     start_d, end_d = fc.month_range(d)
     start, end = fc.day_start(start_d), fc.day_start(end_d)
     orders_known = "gmv" not in closing.unknown_codes(books)
     coupons_known = "coupon_cost" not in closing.unknown_codes(books)
-    known = orders_known and coupons_known
+    paid_known = batches is not None
+    known = orders_known and coupons_known and paid_known
 
     acc_before = _accrual(books, None, start)
     acc_month = _accrual(books, start, end)
-    paid_before = _paid(batches, None, start)
-    paid_month = _paid(batches, start, end)
+    paid_before = _paid(batches or {}, None, start)
+    paid_month = _paid(batches or {}, start, end)
 
     sellers = sorted(set(acc_before) | set(acc_month) | set(paid_before) | set(paid_month))
     rows = []
@@ -99,7 +102,7 @@ def rollforward(
                 "name": "판매자 미배분 지급" if s == UNALLOCATED else books.seller_name(s),
                 "opening": opening if known else None,
                 "accrued": accrued if known else None,
-                "paid": paid,
+                "paid": paid if paid_known else None,
                 "closing": closing_bal if known else None,
                 "overpaid": known and closing_bal < 0 and s != UNALLOCATED,
             }
@@ -107,7 +110,7 @@ def rollforward(
     rows.sort(key=lambda r: -(r["closing"] or 0))
 
     def total(key: str) -> int | None:
-        if key != "paid" and not known:
+        if (key != "paid" and not known) or not paid_known:
             return None
         return sum(r[key] or 0 for r in rows)
 
@@ -125,5 +128,6 @@ def rollforward(
         "balanced": balanced,
         "overpaid": [r["seller_id"] for r in rows if r["overpaid"]],
         "sellers": rows,
-        "basis": "지급 = 안전 장치가 승인한 정산 묶음 (실제 이체 결과 미연동)",
+        "basis": "지급 = 안전 장치가 승인한 정산 묶음 (고객지원 정산, 실제 이체 결과 미연동)",
+        "unavailable": [] if paid_known else ["seller_settlement_batches"],
     }

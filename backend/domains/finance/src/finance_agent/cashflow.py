@@ -4,7 +4,9 @@
 그 주가 언제인지 미리 보는 표다. 숫자는 두 종류로 나눠 표시한다.
 - 확정(`scheduled`): 장부에 날짜가 정해진 돈
   · 들어옴: PG 정산 지급 예정(결제일 + `pg.payout_days`)인데 아직 안 들어온 것
-  · 나감: 판매자 정산 내역서의 지급 예정일(보류 없는 판매자). 승인된 묶음은 이미 나간 것으로 본다
+  · 나감: 판매자 정산 내역서의 지급 예정일(보류 없는 판매자). 승인된 묶음은 이미 나간 것으로 본다.
+    정산 내역서는 고객지원이 계산해 준 것(`settlement_feed.weeks`)이다. 재무는 다시 계산하지 않는다.
+    못 받았으면 나감·순현금·누적·잔액은 None이다(0으로 채우지 않는다)
 - 추정(`estimated`): 확정된 돈이 없는 뒤쪽 주는 최근 `cashflow.trailing_weeks`주
   (장부가 온전히 덮는 주만) 평균으로 채운다. 화면에 "추정"으로 표시하고,
   평균을 낼 주가 없으면 비운다(None)
@@ -23,7 +25,6 @@ from datetime import date, timedelta
 from typing import Any
 
 from finance_agent import finance_config as fc
-from finance_agent import settlement
 from finance_agent.books import Books, pg_settlements
 from finance_agent.rules import applied
 
@@ -48,9 +49,17 @@ def fixed_costs(other_pnl: dict[str, dict[str, Any]] | None) -> dict[str, Any] |
     return None
 
 
+def settlement_periods(today: date | None = None) -> list[str]:
+    """`forecast`가 읽는 정산 주. 지급 예정(지난주·이번 주)과 추정에 쓰는 최근 n주."""
+    today = today or fc.today()
+    refs = [today + timedelta(days=7)]
+    refs += [today - timedelta(days=7 * k) for k in range(fc.load_config().cashflow.trailing_weeks)]
+    return sorted({fc.week_range(None, ref)[0] for ref in refs})
+
+
 def forecast(
     books: Books,
-    batches: dict[str, dict[str, Any]],
+    settlements: dict[str, dict[str, Any]] | None,
     today: date | None = None,
     *,
     opening: dict[str, Any] | None = None,
@@ -64,6 +73,11 @@ def forecast(
     inflow = {w: 0 for w in weeks}
     outflow = {w: 0 for w in weeks}
     orders_known = "orders" not in books.unavailable
+    # 고객지원에서 받은 정산 내역서(기간 → 내역서). 읽을 주가 하나라도 없으면 나감을 모른다
+    weeks_known = settlements is not None and all(
+        p in settlements for p in settlement_periods(today)
+    )
+    sts = settlements if weeks_known and settlements is not None else {}
 
     # 들어옴: 아직 안 들어온 PG 정산
     for rec in pg_settlements(books, today).values():
@@ -78,10 +92,12 @@ def forecast(
     # 나감: 판매자 정산 지급 예정 (지난주·이번 주 정산서, 승인된 묶음은 이미 나감)
     for ref in (today, today + timedelta(days=7)):
         name, _, _ = fc.week_range(None, ref)
-        st = settlement.statements(books, name, today=today)
-        batch = batches.get(st["period"]) or {}
+        st = sts.get(name)
+        if st is None:
+            continue
+        batch = st.get("batch") or {}
         paid = set(batch.get("seller_ids") or []) if batch.get("status") == "approved" else set()
-        pay_date = date.fromisoformat(st["pay_date"]) if st["pay_date"] else None
+        pay_date = date.fromisoformat(st["pay_date"]) if st.get("pay_date") else None
         if pay_date is None or pay_date < today:
             continue
         for r in st["statements"]:
@@ -104,7 +120,7 @@ def forecast(
         name, mon, sun = fc.week_range(None, ref)
         if earliest is None or mon < earliest:
             break
-        st = settlement.statements(books, name, today=today)
+        st = sts.get(name) or {"statements": []}
         past_out.append(sum(max(r["payout"] or 0, 0) for r in st["statements"]))
         past_in.append(
             sum(
@@ -115,7 +131,7 @@ def forecast(
         )
     has_history = orders_known and bool(past_in)
     avg_in = round(sum(past_in) / len(past_in)) if has_history else None
-    avg_out = round(sum(past_out) / len(past_out)) if has_history else None
+    avg_out = round(sum(past_out) / len(past_out)) if has_history and weeks_known else None
     used_weeks = len(past_in)
 
     rows, running = [], 0
@@ -126,6 +142,8 @@ def forecast(
             i, o = inflow[w], outflow[w]
         else:
             i, o = avg_in, avg_out
+        if not weeks_known:
+            o = None
         net = None if i is None or o is None else i - o - (weekly_fixed or 0)
         if net is not None and running is not None:
             running += net
@@ -163,6 +181,8 @@ def forecast(
             note += f". 잔액이 {cfg.cashflow.stale_days}일보다 오래돼 그 뒤 거래가 빠져 있습니다"
     else:
         note = "통장 잔액을 올리지 않아 누적은 오늘을 0으로 둔 값입니다"
+    if not weeks_known:
+        note += ". 고객지원에서 판매자 정산을 받지 못해 나감을 알 수 없습니다"
     note += (
         f". 월 고정비는 {fixed['month']} 입력값 기준 추정입니다"
         if fixed
@@ -180,4 +200,6 @@ def forecast(
         "short_weeks": short,
         "note": note,
         "applied_rules": [applied("CSH-001")] if opening else [],
+        # 고객지원에서 정산 내역서를 못 받았으면 이름을 남긴다 (나감을 모름)
+        "unavailable": [] if weeks_known else ["seller_settlement"],
     }

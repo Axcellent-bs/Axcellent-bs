@@ -1,7 +1,8 @@
 """재무 AI 계산 정확도 평가 (정답 계산·무작위 장부). 평가 CLI `eval/run.py`·자기 테스트가 쓴다.
 
-- 무작위 장부를 만들고, 재무의 **실제 계산 코드**(결산·PG 대사·판매자 정산·은행 입금 대조·
+- 무작위 장부를 만들고, 재무의 **실제 계산 코드**(결산·PG 대사·은행 입금 대조·
   부가세·법인세·캠페인 예산 의견)로 돌린 값을 **정답**과 비교한다.
+- 판매자 정산은 고객지원이 계산한다(2026-11-12). 정산 정답 비교는 고객지원 테스트로 옮겼다.
 - 정답은 이 파일 안에서 정책(`finance_policy.toml`)·규칙(`finance_rules.toml`)과 문서(각 모듈
   docstring)대로 따로 계산한다. 계산 모듈의 함수를 정답 계산에 쓰지 않는다.
   - 원 단위 반올림은 정책대로 0.5 올림(`Decimal` ROUND_HALF_UP). 법인세는 원 미만 버림.
@@ -22,7 +23,6 @@ from finance_agent.bank import match as bank_match
 from finance_agent.books import Books
 from finance_agent.closing import compute_totals
 from finance_agent.reconciliation import reconcile
-from finance_agent.settlement import statements
 from finance_agent.tax import income_tax_amount, vat_pack
 
 # ---------------------------------------- 정책 (정답 계산용, 코드와 따로 적는다)
@@ -43,7 +43,6 @@ CATEGORIES = ["book", "stationery", "toy", None]
 SHARES = [
     ("closing", 0.18),
     ("reconciliation", 0.17),
-    ("settlement", 0.13),
     ("bank_deposit", 0.13),
     ("vat", 0.13),
     ("income_tax", 0.13),
@@ -57,7 +56,6 @@ LESSON_FACTOR, LESSON_FLOOR = Decimal("0.5"), Decimal("0.25")
 LABEL = {
     "closing": "결산 (총거래액·수수료·쿠폰·환불·PG 수수료·영업 결과)",
     "reconciliation": "PG 대사 상태 분류",
-    "settlement": "판매자 정산금·보류",
     "bank_deposit": "은행 입금 대조",
     "vat": "부가세 신고 보조 (매출·매입 세액, 낼 세액)",
     "income_tax": "법인세 누진 계산",
@@ -360,104 +358,6 @@ def case_reconciliation(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
     return got, want, {"paid": pay["created_at"].isoformat(), "amount": pay["amount"], "spec": spec}
 
 
-def case_settlement(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
-    today = g.today
-    monday = today - timedelta(days=today.weekday() + 7)
-    start, end = day0(monday), day0(monday + timedelta(days=7))
-    sellers = [g.uid("sel") for _ in range(g.rng.randint(1, 4))]
-    orders = [
-        g.order(
-            monday + timedelta(days=g.rng.randint(-2, 8)), sellers, delivered=g.rng.random() < 0.85
-        )
-        for _ in range(g.rng.randint(1, 8))
-    ]
-    refunds = []
-    for o in orders:
-        if g.rng.random() < 0.35:
-            item = g.rng.choice(o["items"])
-            big = g.rng.random() < 0.15  # 정산금이 0원 이하가 되는 큰 환불
-            refunds.append(
-                {
-                    "refund_id": g.uid("rfd"),
-                    "order_id": o["order_id"],
-                    "seller_id": item["seller_id"],
-                    "amount": o["total_amount"] * 2 if big else g.rng.randint(1, o["total_amount"]),
-                    "created_at": g.at(monday + timedelta(days=g.rng.randint(-1, 7))),
-                }
-            )
-    coupons = [
-        {
-            "coupon_id": g.uid("cpn"),
-            "funded_by": g.rng.choice(["seller", "company"]),
-            "seller_id": g.rng.choice(sellers),
-            "total_value": g.rng.randint(1, 20) * 1_000,
-            "created_at": g.at(monday + timedelta(days=g.rng.randint(-1, 7))),
-        }
-        for _ in range(g.rng.randint(0, 3))
-    ]
-    books = make_books(orders, refunds=refunds, coupons=coupons, sellers=sellers)
-    res = statements(books, None, today)
-    got = {
-        r["seller_id"]: (
-            r["gross"],
-            r["commission"],
-            r["seller_coupon"],
-            r["refunds"],
-            r["payout"],
-            r["status"],
-        )
-        for r in res["statements"]
-    }
-    want = {}
-    # 정산은 구매 확정(배송 완료)일 기준. 확정 전 주문은 다음 정산으로 넘어간다(보류 사유가 아니다)
-    sold = [
-        o
-        for o in orders
-        if paid_at(o) is not None and o["delivered_at"] and inside(o["delivered_at"], start, end)
-    ]
-    waiting = [
-        o
-        for o in orders
-        if paid_at(o) is not None and paid_at(o) < end and o["delivered_at"] is None
-    ]
-    delivered_of = {o["order_id"]: o["delivered_at"] for o in orders}
-    for s in sellers:
-        gross = com = 0
-        ids: set[str] = set()
-        for o in sold:
-            mine = [i for i in o["items"] if i["seller_id"] == s]
-            if not mine:
-                continue
-            ids.add(o["order_id"])
-            for i in mine:
-                gr = i["qty"] * i["unit_price"]
-                gross += gr
-                com += half_up(gr, rate_of(i["category_code"]))
-        cp = sum(
-            c["total_value"]
-            for c in coupons
-            if c["funded_by"] == "seller"
-            and c["seller_id"] == s
-            and inside(c["created_at"], start, end)
-        )
-        # 환불은 환불 시각과 구매 확정 시각 중 늦은 주에 뺀다. 확정 안 된 주문의 환불은 빼지 않는다
-        rf = sum(
-            r["amount"]
-            for r in refunds
-            if r["seller_id"] == s
-            and delivered_of[r["order_id"]] is not None
-            and inside(max(r["created_at"], delivered_of[r["order_id"]]), start, end)
-        )
-        pending = any(i["seller_id"] == s for o in waiting for i in o["items"])
-        if not ids and not cp and not rf and not pending:
-            continue
-        payout = gross - com - cp - rf
-        # 0원 이하 정산금이거나, 확정 주문 없이 확정 대기만 있어 줄 돈이 없으면 보류
-        held = (bool(ids) or pending) and payout <= 0
-        want[s] = (gross, com, cp, rf, payout, "held" if held else "ready")
-    return got, want, {"week_monday": monday.isoformat(), "sellers": len(sellers)}
-
-
 def case_bank(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
     today = g.today
     orders = [
@@ -712,7 +612,6 @@ def case_campaign_opinion(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
 CASES = {
     "closing": case_closing,
     "reconciliation": case_reconciliation,
-    "settlement": case_settlement,
     "bank_deposit": case_bank,
     "vat": case_vat,
     "income_tax": case_income_tax,
