@@ -402,8 +402,9 @@ export interface ChatSend { thread_id?: string; message: string; connection?: st
 // 대화 모양이 아닌 값(목의 {ok:true} 등)은 버린다
 const isThread = (x: unknown): x is Json => !!x && typeof x === 'object' && typeof (x as Json).id === 'string' && Array.isArray((x as Json).messages)
 const toThread = (x: Json): ChatThread => camelize(x) as ChatThread
-// 대시보드 AI 대화방에서 연 대화(origin dashboard)는 개발 화면 대화 패널에 넣지 않는다 (SSE 상태에는 같이 실려 온다)
-const onScreen = (x: Json) => x.origin !== 'dashboard'
+// 개발 화면 대화 패널에는 이 화면에서 연 대화(origin screen)만 넣는다. 대시보드 AI 대화방 대화와
+// 어디서 열었는지 모르는 예전 대화는 뺀다 (SSE 상태에는 같이 실려 온다)
+const onScreen = (x: Json) => x.origin === 'screen'
 export const toThreads = (d: unknown): ChatThread[] => (Array.isArray(d) ? d.filter(isThread).filter(onScreen).map(toThread) : [])
 
 export const chatApi = (base: string) => {
