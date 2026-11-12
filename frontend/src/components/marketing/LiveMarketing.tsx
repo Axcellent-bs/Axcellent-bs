@@ -1,6 +1,5 @@
 import { ActionQueue } from "@/components/finance/SafetyQueue";
 import { CampaignControl } from "./CampaignControl";
-import { ReceivedBriefs } from "./ReceivedBriefs";
 import { MARKETING_HOLD_ACTIONS } from "@/lib/finance";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ago, shortDateTime, won } from "@/lib/format";
@@ -45,7 +44,10 @@ function gradeChip(grade: string, status: string, hold: string | null) {
   return <Chip label={`${statusKo(status)}${hold ? ` · ${holdKo(hold)}` : ""}`} tone="bg-red-50 text-red-700" title={hold ?? undefined} />;
 }
 
-export default function LiveMarketing() {
+/** 마케팅 화면에서 이 컴포넌트가 그리는 탭. notice = 장애·공지, campaign = 캠페인·쿠폰 (pages/Marketing.tsx) */
+export type LiveView = "notice" | "campaign";
+
+export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) {
   const [live, setLive] = useState<MarketingLive | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -83,14 +85,12 @@ export default function LiveMarketing() {
 
       <ActionQueue action={MARKETING_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 쿠폰·공지·SNS 게시·영상 생성·캠페인 집행이 여기 모입니다." />
 
-      <CampaignControl />
-
-      <ReceivedBriefs />
+      {view === "campaign" && <CampaignControl />}
 
       {live?.errors.map((e) => <p key={e} className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{e}</p>)}
       {!live && <p className="text-sm text-ink-500">불러오는 중입니다.</p>}
 
-      {live && (
+      {live && view === "notice" && (
         <>
           <Section title="지표" desc="안전 장치 실행 기록으로 센 값입니다. 총액은 건수 x 단가를 안전 장치가 계산한 값입니다.">
             <div className="grid gap-3 sm:grid-cols-4">
@@ -143,6 +143,27 @@ export default function LiveMarketing() {
               )}
           </Section>
 
+          <Section title="사람 결정 대기" desc="기준에 걸리거나 계산이 맞지 않아 안전 장치가 멈춘 마케팅 작업입니다. 맨 위 보류 큐에서 결정합니다.">
+            {live.holds === null ? <Empty>보류 건을 읽지 못했습니다.</Empty>
+              : live.holds.length === 0 ? <Empty>기다리는 건이 없습니다.</Empty> : (
+                <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100">
+                  {live.holds.map((r) => (
+                    <li key={r.review_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-xs" title={`보류 건 ${r.review_id}`}>
+                      <span className="font-medium">{actionKo(r.action)}</span>
+                      <span title={r.context_id}>{incidentName(r.context_id, incidents)}</span>
+                      {r.report.computed_amount != null && <span className="tabular-nums">{won(r.report.computed_amount)}</span>}
+                      {r.report.hold_reason && <Chip label={holdKo(r.report.hold_reason)} tone="bg-amber-50 text-amber-800" title={r.report.hold_reason} />}
+                      <span className="ml-auto text-ink-500">{shortDateTime(r.expires_at)}까지 결정</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+          </Section>
+        </>
+      )}
+
+      {live && view === "campaign" && (
+        <>
           <Section title="쿠폰 발급" desc="사건과 목적별로 묶었습니다. 대상 고객과 단가는 고객지원 AI가 정하고, 마케팅 AI가 발급을 요청하면 안전 장치가 금액을 계산해 등급을 정합니다.">
             {live.coupons === null ? <Empty>쿠폰 발급 기록을 읽지 못했습니다.</Empty>
               : live.groups.length === 0 ? <Empty>아직 발급한 쿠폰이 없습니다.</Empty> : (
@@ -191,23 +212,6 @@ export default function LiveMarketing() {
                 </div>
               </details>
             )}
-          </Section>
-
-          <Section title="사람 결정 대기" desc="기준에 걸리거나 계산이 맞지 않아 안전 장치가 멈춘 마케팅 작업입니다. 맨 위 보류 큐에서 결정합니다.">
-            {live.holds === null ? <Empty>보류 건을 읽지 못했습니다.</Empty>
-              : live.holds.length === 0 ? <Empty>기다리는 건이 없습니다.</Empty> : (
-                <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100">
-                  {live.holds.map((r) => (
-                    <li key={r.review_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-xs" title={`보류 건 ${r.review_id}`}>
-                      <span className="font-medium">{actionKo(r.action)}</span>
-                      <span title={r.context_id}>{incidentName(r.context_id, incidents)}</span>
-                      {r.report.computed_amount != null && <span className="tabular-nums">{won(r.report.computed_amount)}</span>}
-                      {r.report.hold_reason && <Chip label={holdKo(r.report.hold_reason)} tone="bg-amber-50 text-amber-800" title={r.report.hold_reason} />}
-                      <span className="ml-auto text-ink-500">{shortDateTime(r.expires_at)}까지 결정</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
           </Section>
         </>
       )}

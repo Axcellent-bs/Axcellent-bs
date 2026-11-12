@@ -100,6 +100,13 @@ export const SERVICES: Service[] = [
   {
     id: 'coupon', agent: 'marketing', family: 'growth', name: '공지·쿠폰', by: 'AXcellent', Icon: IconMegaphone, entry: '/marketing', paths: ['/marketing'],
     desc: '공지 초안을 쓰고 쿠폰 발급을 기록·점검합니다.',
+    // 화면 안 전환(pages/Marketing.tsx)을 사이드바 하위 탭으로 연다. 옛 주소 /marketing 은 첫 탭이다
+    children: [
+      { href: '/marketing', label: '장애·공지' },
+      { href: '/marketing/campaign', label: '캠페인·쿠폰' },
+      { href: '/marketing/briefs', label: '받은 기획안' },
+      { href: '/marketing/sns', label: 'SNS·미디어' },
+    ],
   },
   {
     id: 'finance', agent: 'finance', family: 'backoffice', name: '재무 관리', by: 'AXcellent', Icon: IconShield, entry: '/finance', paths: ['/finance'],
