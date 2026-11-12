@@ -43,6 +43,22 @@ def _since(env: EventEnvelope) -> datetime | None:
         return None
 
 
+def _detected_by(env: EventEnvelope) -> dict[str, str]:
+    """이벤트를 연 신호의 출처·종류·감지 시각.
+
+    감지 시각은 신호가 알려 준 감지 시각(`data.detected_at`, 인프라 이상)이 있으면 그 값,
+    없으면 신호를 보낸 시각(`occurred_at`)이다.
+    """
+    at = env.occurred_at
+    raw = env.data.get("detected_at")
+    if raw:
+        try:
+            at = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return {"source": env.source, "event": env.type.value, "at": iso(at) or ""}
+
+
 def _keep_recovery(inc: Incident, data: dict[str, Any]) -> None:
     """복구 신호가 알려 준 풀린 방법(`recovery`·`released_by`)을 해결 기록에 쓰려고 남긴다."""
     recovery = data.get("recovery")
@@ -287,6 +303,7 @@ class IncidentManager:
         inc.log(f"이벤트 수신: {env.type.value} ({env.source}, {iso(env.occurred_at)})")
         self.incidents[inc.context_id] = inc
         inc.signal = dict(env.data)
+        inc.detected_by = _detected_by(env)
         plan = PLANS[env.type][1]() if env.type in PLANS else self.plan_factory()
         self._persist(inc)  # 단계가 돌기 전에 먼저 남긴다
         self._tasks[inc.context_id] = asyncio.create_task(self.engine.run(inc, plan))

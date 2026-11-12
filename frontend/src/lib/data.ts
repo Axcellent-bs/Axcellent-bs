@@ -21,13 +21,49 @@ export interface ImpactOutput {
 }
 export interface RecoveryOutput { recovered?: boolean | null; infra_metrics_ok?: boolean | null; business_metrics_ok?: boolean | null }
 
-/** 처리 흐름 4칸. 이상 감지는 따로 단계가 없어 복구 확인(recovery) 안에서 함께 실행된다 */
-export const FLOW: { key: string; label: string; stepId: string; note?: string }[] = [
-  { key: "anomaly", label: "이상 감지", stepId: "recovery", note: "복구 확인 중 함께 실행" },
+/** 데이터 AI가 총괄 요청을 받아 하는 일 4칸. 장애 감지는 쇼핑몰 모니터·Zabbix가 하고 데이터 AI 일이 아니다 */
+export const FLOW: { key: string; label: string; stepId: string }[] = [
   { key: "impact", label: "영향 분석", stepId: "impact" },
-  { key: "recovery", label: "복구 확인", stepId: "recovery" },
+  { key: "root_cause", label: "원인 후보", stepId: "root_cause" },
+  { key: "recovery", label: "복구 판정 지원", stepId: "recovery" },
   { key: "kpi", label: "처리 시간 요약", stepId: "kpi" },
 ];
+
+/** 사건을 처음 연 신호의 출처(총괄 detected_by.source) → 화면 이름. 표에 없으면 받은 값 그대로 */
+export const DETECTOR_KO: Record<string, string> = {
+  "shop-api": "쇼핑몰 모니터", // shop-api monitor.py가 보내는 shop.degraded
+  infra: "Zabbix", // infra-dejafix dejafix_watch.py가 DejaFix(Zabbix) 장애를 옮긴 infra.anomaly_detected
+  dejafix: "Zabbix",
+  data: "데이터 AI 지표 감시", // data monitor.py의 metric.anomaly (심각도 높음 이상만 사건을 연다)
+  support: "고객지원 AI",
+};
+export const detectorName = (source: string) => DETECTOR_KO[source] ?? (/^(infra|dejafix)/.test(source) ? "Zabbix" : source);
+
+/** 데이터 단계를 건너뛴 이유(총괄 reason_code) → 사람 말 한 줄 */
+export const SKIP_REASON_KO: Record<string, string> = {
+  no_fix_applied: "되돌리기 같은 조치가 끝나지 않아 복구 판정을 부르지 않았어요",
+  metric_not_supported: "이 지표는 데이터 AI가 아직 분석하지 못해 부르지 않았어요",
+  service_disabled: "데이터 AI 서비스가 꺼져 있어 부르지 않았어요",
+};
+/** 사유 코드 없이 메모만 남은 기록 (총괄 plans/scenario_a.py의 note 문구) */
+const SKIP_NOTE_KO: [RegExp, string][] = [
+  [/^선행 단계 미완료/, SKIP_REASON_KO.no_fix_applied],
+  [/지표는 아직 분석하지 못해/, SKIP_REASON_KO.metric_not_supported],
+  [/서비스가 꺼져 있음/, SKIP_REASON_KO.service_disabled],
+];
+export const SKIP_DEFAULT = "이번 사건에서는 실행하지 않음";
+export function skipReason(step: OrchStep): string {
+  if (step.reason_code && SKIP_REASON_KO[step.reason_code]) return SKIP_REASON_KO[step.reason_code];
+  return SKIP_NOTE_KO.find(([re]) => re.test(step.note ?? ""))?.[1] ?? SKIP_DEFAULT;
+}
+
+/** 시:분:초 (브라우저 시간대) */
+export function clock(at: string | null | undefined): string | null {
+  if (!at) return null;
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
 
 /** 원인 추정(root_cause_hypotheses). 사실은 코드가 모은 것, 후보는 그 사실 id만 근거로 한다 */
 export type CauseConfidence = "high" | "mid" | "low";
@@ -80,8 +116,6 @@ export function duration(sec: unknown): string {
   const m = Math.floor(s / 60), r = Math.round(s - m * 60);
   return r ? `${m}분 ${r}초` : `${m}분`;
 }
-/** 막대용 분 단위(소수 첫째 자리) */
-export const minutes = (sec: number) => Math.round(sec / 6) / 10;
 
 /** 쇼핑몰 카테고리 코드 → 화면 이름. 표에 없는 코드는 받은 그대로 보여 준다 (실서버 시드 코드: book, stationery) */
 export const CATEGORY_KO: Record<string, string> = { book: "도서", books: "도서", stationery: "문구", ebook: "전자책", ebooks: "전자책", goods: "굿즈" };
@@ -176,6 +210,35 @@ export const GRADE_KO: Record<string, string> = { A: "A · 바로 처리", B: "B
 export const BLOCK_KO: Record<string, string> = {
   UNAUTHORIZED: "권한 없음", FORBIDDEN_SKILL: "허용되지 않은 작업", INJECTION_SUSPECTED: "지시 끼워 넣기 의심",
 };
+
+/** kpi_summary 근거 줄의 내부 이름 → 화면 말 (data metrics/kpi.py·skills/kpi_summary.py의 문구) */
+export const KPI_NOTE_TERMS: [RegExp, string][] = [
+  [/^grade_counts:\s*/, "등급별 처리: "],
+  [/^blocked_counts:\s*/, "차단 사유별: "],
+  [/^escalation_count:\s*/, "사람에게 넘긴 건수: "],
+  [/^auto_handled_rate:\s*/, "AI 단독 처리율: "],
+  // 문장에 이미 "최근 기록만 반영됨"이 있으면 꼬리표만 지우고, 없으면 한국어로 바꾼다
+  [/(최근 기록만 반영됨)\s*\(truncated\)/, "$1"],
+  [/\s*\(truncated\)/, " (최근 기록만 반영)"],
+  [/incident\.resolved 발행·verify_recovery 완료 로그 없음/, "사건 해결 알림·복구 확인 기록 없음"],
+  [/\(verify 완료 기준\)/, "(복구 확인 기록 기준)"],
+  [/publish_notice 완료/, "공지 올리기"],
+  [/\s*\((execute_decided|rejected|escalated)\)/, ""],
+  [/해당 종류 로그 0건/, "기록 0건"],
+  [/MTTR/, "복구 시간"],
+];
+/** 근거 줄 하나를 화면 말로: 사건 번호는 humanId 모양(장애 #…), 내부 이름은 한국어 */
+export function kpiNote(line: string, humanId: (id: string) => string): string {
+  let out = line.replace(/ctx_inc_[0-9a-z]+/g, (id) => humanId(id));
+  for (const [re, ko] of KPI_NOTE_TERMS) out = out.replace(re, ko);
+  return out;
+}
+
+/** 복구 시간 막대 단위: 전부 60초 미만이면 초, 아니면 분(소수 첫째 자리) */
+export function mttrUnit(seconds: number[]): { unit: "초" | "분"; value: (s: number) => number } {
+  if (seconds.every((s) => s < 60)) return { unit: "초", value: (s) => Math.round(s * 10) / 10 };
+  return { unit: "분", value: (s) => Math.round(s / 6) / 10 };
+}
 
 /** 근거 요약: 첫 줄은 설명 한 줄, 나머지 줄은 "확인할 수 없음" 사유 */
 export function evidenceLines(summary: string | null | undefined): { headline: string | null; notes: string[] } {

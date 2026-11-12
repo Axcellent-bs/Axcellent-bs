@@ -45,6 +45,8 @@ export interface OrchIncident {
   /** 총괄이 이미 아는 사실로 만든 해결 내용 초안(저장 전). 아는 게 없으면 null */
   /** 시스템이 잰 이벤트 시각(감지·원인 후보 도착·사람에게 넘김·정상 복귀). 모르는 시각은 null */
   timeline?: import("./duration").EventTimes | null;
+  /** 이벤트를 처음 연 신호: 출처(shop-api·infra·data·support)·종류·감지 시각. 예전 사건은 없다 */
+  detected_by?: { source?: string; event?: string; at?: string } | null;
   resolution_draft?: {
     outcome: "resolved" | null; root_cause: string | null; action: string | null; basis: string[];
     /** past_case: 같은 유형의 과거 이벤트에서 가져옴(반복 장애), this_event: 이번 이벤트에서 알게 된 것 */

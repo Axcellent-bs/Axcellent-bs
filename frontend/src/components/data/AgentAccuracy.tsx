@@ -25,28 +25,49 @@ function EvalResult({ report }: { report: AccuracyReportOutput }) {
         <span className="tabular-nums">{report.generated_at ? shortDateTime(report.generated_at) : "시각 모름"}</span>
         <span>시나리오 {report.case_count ?? UNKNOWN}{report.case_count != null ? "개" : ""}</span>
       </div>
-      <dl className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {ACCURACY_METRICS.map((m) => {
-          const value = report.metrics[m.key];
-          return (
-            <div key={m.key} className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2">
-              <dt className="min-w-0 text-xs text-ink-700">{m.label}</dt>
-              <dd className={`shrink-0 text-sm font-semibold tabular-nums ${value == null ? "text-ink-500" : "text-ink-900"}`}>{formatMetric(value, m.unit)}</dd>
-            </div>
-          );
-        })}
-      </dl>
-      {report.misses.length > 0 && (
+      <MetricList report={report} metrics={MAIN} />
+      {(REST.length > 0 || report.misses.length > 0) && (
         <details className="rounded-xl bg-surface-2 px-3 py-2 text-xs">
-          <summary className="cursor-pointer font-medium text-ink-700">틀린 케이스 {report.misses.length}개 보기</summary>
-          <ul className="mt-2 space-y-1 text-ink-700">
-            {report.misses.map((m, i) => (
-              <li key={`${m.case_id}-${i}`} className="break-words"><span className="font-medium">[{m.area}]</span> {m.case_id}: {m.what}</li>
-            ))}
-          </ul>
+          <summary className="cursor-pointer font-medium text-ink-700">
+            다른 지표 {REST.length}개{report.misses.length > 0 && ` · 틀린 케이스 ${report.misses.length}개`} 보기
+          </summary>
+          <div className="mt-3 space-y-3">
+            <MetricList report={report} metrics={REST} />
+            {report.misses.length > 0 && (
+              <div>
+                <p className="mb-1 font-medium text-ink-700">틀린 케이스 {report.misses.length}개</p>
+                <ul className="space-y-1 text-ink-700">
+                  {report.misses.map((m, i) => (
+                    <li key={`${m.case_id}-${i}`} className="break-words"><span className="font-medium">[{m.area}]</span> {m.case_id}: {m.what}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </details>
       )}
     </div>
+  );
+}
+
+/** 기본으로 보이는 평가 지표 4개 (ACCURACY_METRICS의 key): 이상 탐지 맞춤 · 원인 1순위 적중 · 근거 없는 원인 후보 · 지어낸 숫자 */
+const MAIN_KEYS = ["anomaly.detection_rate", "root_cause.top1_rate", "root_cause.ungrounded_survived_rate", "llm.fabricated_number_rate"];
+const MAIN = MAIN_KEYS.map((k) => ACCURACY_METRICS.find((m) => m.key === k)).filter((m): m is (typeof ACCURACY_METRICS)[number] => !!m);
+const REST = ACCURACY_METRICS.filter((m) => !MAIN_KEYS.includes(m.key));
+
+function MetricList({ report, metrics }: { report: AccuracyReportOutput; metrics: typeof ACCURACY_METRICS }) {
+  return (
+    <dl className="grid gap-2 sm:grid-cols-2">
+      {metrics.map((m) => {
+        const value = report.metrics[m.key];
+        return (
+          <div key={m.key} className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2 ring-1 ring-ink-100">
+            <dt className="min-w-0 text-xs text-ink-700">{m.label}</dt>
+            <dd className={`shrink-0 text-sm font-semibold tabular-nums ${value == null ? "text-ink-500" : "text-ink-900"}`}>{formatMetric(value, m.unit)}</dd>
+          </div>
+        );
+      })}
+    </dl>
   );
 }
 

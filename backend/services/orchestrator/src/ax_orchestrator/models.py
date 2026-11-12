@@ -173,6 +173,9 @@ class Incident:
     times_sent: dict[str, str] = field(default_factory=dict)
     # 이벤트를 연 이벤트의 data (plan이 입력으로 쓴다)
     signal: dict[str, Any] = field(default_factory=dict)
+    # 이벤트를 처음 연 신호의 출처: {"source": env.source, "event": env.type, "at": 감지 시각}.
+    # 같은 이벤트에 합쳐진 신호는 바꾸지 않는다. 예전 저장분은 None
+    detected_by: dict[str, str] | None = None
 
     @staticmethod
     def new_context_id() -> str:
@@ -241,6 +244,7 @@ class Incident:
             "opened_at": iso(self.opened_at),
             "closed_at": iso(self.closed_at),
             "recovered_at": iso(self.recovered_at),
+            "detected_by": self.detected_by,
             **self._impact_window_view(),
             "steps": [s.view() for s in self.steps.values()],
             "events": self.events,
