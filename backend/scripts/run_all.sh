@@ -235,6 +235,8 @@ export FINANCE_STATE_FILE="$PWD/$DATA/finance_state.json"
 # 판매자 정산 묶음 기록(고객지원, settlement). 다시 켜도 이어진다. 처음 한 번 재무 기록의 묶음을 가져온다
 export SUPPORT_SETTLEMENT_FILE="$PWD/$DATA/support_settlement.json"
 export SUPPORT_SETTLEMENT_IMPORT_FILE="$FINANCE_STATE_FILE"
+# 고객지원 AI가 지급일이 된 주의 정산 지급 승인을 스스로 요청한다(10분마다 확인). 승인은 고객지원 담당
+export SUPPORT_SETTLEMENT_AUTO_REQUEST="${SUPPORT_SETTLEMENT_AUTO_REQUEST:-on}"
 export FINANCE_EXPORT_DIR="${FINANCE_EXPORT_DIR:-$PWD/$DATA/finance_exports}"
 export FINANCE_BANK_INBOX="${FINANCE_BANK_INBOX:-$PWD/$DATA/finance_bank_inbox}"
 # PG 정산 파일(CSV) 폴더. 넣으면 재무가 읽어 그 판매일 기간을 파일과 대사한다

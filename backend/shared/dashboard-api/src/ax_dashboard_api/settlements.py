@@ -9,13 +9,16 @@ settlement 서비스)이 한다. 재무는 결과를 받아 보여 주기만 한
 - `POST /api/dashboard/settlements/batch` `{period}`: `request_seller_settlement`. 사람 토큰이
   필요하고 요청한 사람(`requested_by`)은 토큰의 이름이다(본문에서 받지 않는다). support가
   `execute("confirm_settlement")`로 안전 장치에 지급 승인을 요청하고 안전 장치는 항상 사람에게
-  보류한다(C). 돈은 여기서 움직이지 않는다.
+  보류한다(C). 돈은 여기서 움직이지 않는다. 평소에는 고객지원 AI가 지급일이 된 주를 스스로 요청하고
+  (`settlement_auto.py`), 이 버튼은 사람이 먼저 올리고 싶을 때 쓴다. 승인은 고객지원 담당이 한다.
 
 응답: `data`는 support 출력에서 `meta`를 뺀 것, support의 `meta`(수집 시각·출처·받지 못한 값)는
 응답 `meta`에 합친다. 꺼진 서비스는 빈 값으로 바꾸지 않고 503을 그대로 낸다(정산할 판매자가 없다고
 지어내지 않는다).
 
 오류: `invalid_input`→400 `INVALID_INPUT`, `nothing_to_settle`→409 `NOTHING_TO_SETTLE`,
+`period_not_closed`(기간이 아직 끝나지 않은 주)→409 `PERIOD_NOT_CLOSED`,
+`orders_partial`(판매 서버 주문 일부를 못 읽음, 지급 요청만 막는다)→503 `ORDERS_PARTIAL`,
 `safety_unavailable`→503 `SAFETY_UNAVAILABLE`, `settlement_preparing`(서버를 켠 뒤 첫 장부를
 모으는 중)→503 `SETTLEMENT_PREPARING`. 그 밖은 `support_client.unwrap`과 같다.
 """
@@ -37,6 +40,8 @@ router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human_
 ERRORS: dict[str, tuple[int, str]] = {
     "invalid_input": (400, "INVALID_INPUT"),
     "nothing_to_settle": (409, "NOTHING_TO_SETTLE"),
+    "period_not_closed": (409, "PERIOD_NOT_CLOSED"),
+    "orders_partial": (503, "ORDERS_PARTIAL"),
     "safety_unavailable": (503, "SAFETY_UNAVAILABLE"),
     "settlement_preparing": (503, "SETTLEMENT_PREPARING"),
 }

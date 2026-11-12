@@ -6,9 +6,10 @@
 - 요청 중인 묶음은 읽을 때마다 안전 장치의 보류 건 상태를 다시 읽어 반영한다
   - 승인 → approved, 거절·시간 초과 → rejected(`closed_reason`)
   - 안전 장치가 그 보류 건을 모르면(404, 보류 큐는 메모리에만 있어 재시작하면 비워진다)
-    rejected(`closed_reason: review_missing`).
-    승인된 적이 없으니 다시 요청해도 두 번 지급되지 않는다
-  - 연결 실패·5xx는 그대로 둔다
+    먼저 실행 기록(`/api/safety/executions`)에서 같은 기간의 `confirm_settlement`가 실행됐는지
+    본다. 실행됐으면 approved, 기록도 없을 때만 rejected(`closed_reason: review_missing`).
+    `review_missing` 뒤 다시 요청하기 전에도 실행 기록을 한 번 더 본다(두 번 요청하지 않게)
+  - 승인된(approved) 묶음은 404가 나도 되돌리지 않는다. 연결 실패·5xx는 그대로 둔다
 - 묶음 기록은 `SUPPORT_SETTLEMENT_FILE`(JSON)에 남긴다. 비우면 메모리에만 둔다(테스트)
 - 옮기기(2026-11-12): 이 파일이 아직 없고 `SUPPORT_SETTLEMENT_IMPORT_FILE`(재무가 쓰던
   `finance_state.json`)이 있으면, 처음 한 번 거기 남은 묶음 기록(`records.batches`)을 가져온다.
@@ -92,8 +93,70 @@ def use_store(store: BatchStore) -> None:
     STORE = store
 
 
-async def refresh(batch: dict[str, Any]) -> bool:
-    """요청 중인 묶음의 보류 건 결정을 안전 장치에서 읽어 반영한다. 바뀌었으면 True."""
+def context_id_of(period: str) -> str:
+    """정산 기간 묶음 요청의 context_id.
+
+    시도마다 멱등 키는 `{context_id}:confirm_settlement:{기간}:{시도}`.
+    """
+    return f"ctx_req_settlement_{period}"
+
+
+def key_prefix(period: str) -> str:
+    return f"{context_id_of(period)}:confirm_settlement:{period}:"
+
+
+class SafetyUnreachable(Exception):
+    """안전 장치 실행 기록을 읽지 못했다. 모르는 채로 다시 요청하지 않는다."""
+
+
+async def executed_in_safety(period: str, execution_id: str | None = None) -> dict[str, Any] | None:
+    """안전 장치에 이 기간의 `confirm_settlement`가 실행(승인)된 기록이 있으면 그 기록.
+
+    보류 건을 잃었어도(404) 실행 기록이 남아 있으면 이미 승인된 것이다. 같은 기간의 멱등 키
+    접두사(어느 시도든)나 같은 `execution_id`로 찾는다. 읽지 못하면 `SafetyUnreachable`.
+    """
+    url = f"{agent_url('safety')}/api/safety/executions"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url, params={"context_id": context_id_of(period)}, timeout=REVIEW_CHECK_SECONDS
+            )
+        if response.status_code != 200:
+            raise SafetyUnreachable(f"HTTP {response.status_code}")
+        records = response.json()["data"]
+        if not isinstance(records, list):
+            raise SafetyUnreachable("실행 기록 모양이 아니다")
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise SafetyUnreachable(type(exc).__name__) from exc
+    prefix = key_prefix(period)
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        request = record.get("request") or {}
+        decision = record.get("decision") or {}
+        if request.get("action") != "confirm_settlement" or decision.get("status") != "executed":
+            continue
+        key = str(request.get("idempotency_key") or "")
+        if key.startswith(prefix) or (execution_id and record.get("execution_id") == execution_id):
+            return record
+    return None
+
+
+def mark_approved(batch: dict[str, Any], record: dict[str, Any]) -> None:
+    """안전 장치 실행 기록으로 승인을 반영한다 (보류 건을 잃은 뒤에도 두 번 요청하지 않게)."""
+    batch["status"] = "approved"
+    batch.pop("closed_reason", None)
+    batch["execution_id"] = record.get("execution_id") or batch.get("execution_id")
+    batch.setdefault("approved_at", sc.iso(sc.now()))
+
+
+async def refresh(batch: dict[str, Any], period: str) -> bool:
+    """요청 중인 묶음의 보류 건 결정을 안전 장치에서 읽어 반영한다. 바뀌었으면 True.
+
+    `requested`만 본다(승인된 묶음은 절대 되돌리지 않는다). 보류 건이 404면 실행 기록을 먼저
+    보고, 실행됐으면 approved, 기록도 없을 때만 rejected(`review_missing`). 실행 기록을 못 읽으면
+    그대로 둔다.
+    """
     if batch.get("status") != "requested" or not batch.get("review_id"):
         return False
     url = f"{agent_url('safety')}/api/safety/reviews/{batch['review_id']}"
@@ -101,9 +164,7 @@ async def refresh(batch: dict[str, Any]) -> bool:
         async with httpx.AsyncClient() as client:
             response = await client.get(url, timeout=REVIEW_CHECK_SECONDS)
         if response.status_code == 404:
-            batch["status"] = "rejected"
-            batch["closed_reason"] = "review_missing"
-            return True
+            return await _review_gone(batch, period)
         status = response.json()["data"]["status"] if response.status_code == 200 else None
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return False
@@ -118,18 +179,32 @@ async def refresh(batch: dict[str, Any]) -> bool:
     return False
 
 
+async def _review_gone(batch: dict[str, Any], period: str) -> bool:
+    """보류 건이 안전 장치에 없다(404). 실행 기록으로 승인됐는지 먼저 본다."""
+    try:
+        record = await executed_in_safety(period, batch.get("execution_id"))
+    except SafetyUnreachable:
+        return False  # 모르면 요청 중으로 둔다 (다시 요청하게 열지 않는다)
+    if record is not None:
+        mark_approved(batch, record)
+        return True
+    batch["status"] = "rejected"
+    batch["closed_reason"] = "review_missing"
+    return True
+
+
 async def refreshed(period: str) -> dict[str, Any] | None:
     """기간의 묶음을 안전 장치 상태로 맞춰 돌려준다."""
     batch = STORE.get(period)
-    if batch is not None and await refresh(batch):
+    if batch is not None and await refresh(batch, period):
         STORE.save()
     return batch
 
 
 async def refreshed_all() -> dict[str, dict[str, Any]]:
     changed = False
-    for batch in STORE.batches.values():
-        changed = await refresh(batch) or changed
+    for period, batch in STORE.batches.items():
+        changed = await refresh(batch, period) or changed
     if changed:
         STORE.save()
     return STORE.batches

@@ -466,7 +466,7 @@ class Gate:
             action=request.action,
             requester=request.requester,
             created_at=now,
-            expires_at=now + timedelta(seconds=self.thresholds.review_timeout_seconds),
+            expires_at=now + timedelta(seconds=self.thresholds.review_timeout_for(request.action)),
             report=full_report,
         )
         decision = ExecuteDecision(

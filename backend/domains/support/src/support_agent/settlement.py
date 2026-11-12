@@ -18,11 +18,12 @@
   이번 정산에 넣지 않고, 확정되는 주의 정산으로 넘어간다(보류 사유가 아니다)
 
 보류 사유 (있으면 `held`, 정산 묶음에서 빠진다):
-- `negative_payout`: 정산금이 0원 이하
+- `negative_payout`: 정산금이 0원 이하 (확정 매출 없이 환불·판매자 쿠폰만 있는 판매자 포함)
 - `no_confirmed_orders`: 이번 주에 확정된 주문이 없고 확정 대기 주문만 있다(줄 돈이 없다)
 
-지급은 고객지원도 확정하지 않는다. 묶음을 `execute("confirm_settlement")`로 요청하면 안전 관문이
-항상 C로 보류하고 사람이 승인한다(`settlement_batches.py`).
+지급은 고객지원 AI도 확정하지 않는다. 고객지원 AI가 지급일이 된 주의 묶음을
+`execute("confirm_settlement")`로 요청하면(`settlement_auto.py`, 사람이 버튼으로 요청할 수도 있다)
+안전 관문이 항상 C로 보류하고 고객지원 담당이 승인한다(`settlement_batches.py`).
 """
 
 from __future__ import annotations
@@ -229,8 +230,15 @@ def statements(
                     "label": f"이번 주 확정 주문 없음 (확정 대기 {pending_orders}건은 다음 정산)",
                 }
             )
-        if order_ids and payout <= 0:
-            reasons.append({"code": "negative_payout", "label": "정산금이 0원 이하"})
+        elif payout <= 0:
+            # 확정 매출 없이 환불·판매자 쿠폰만 있는 판매자도 줄 돈이 없으니 보류한다(#1013 리뷰).
+            # 예전에는 보류 사유 없이 "지급 준비됨"으로 보였다
+            label = (
+                "정산금이 0원 이하"
+                if order_ids
+                else "확정 매출 없이 환불·쿠폰만 있어 정산금이 0원 이하"
+            )
+            reasons.append({"code": "negative_payout", "label": label})
 
         if not order_ids and not coupon and not refund_sum and not pending_orders:
             continue  # 이번 기간 거래가 없는 판매자는 내역서를 만들지 않는다
@@ -270,6 +278,37 @@ def statements(
     }
 
 
+def period_closed(period: str | None, today: date | None = None) -> bool:
+    """정산 기간(주)이 끝났는지: 그 주 일요일이 지났다. 끝나지 않은 주는 지급을 요청하지 않는다
+    (#1013 리뷰: 아직 팔리고 환불되는 주를 묶으면 금액이 바뀐다)."""
+    today = today or sc.today()
+    _, _, sunday = sc.week_range(period, today)
+    return today > sunday
+
+
+def due_weeks(today: date | None = None) -> list[str]:
+    """고객지원 AI가 스스로 지급 승인을 요청할 주 (오래된 주부터).
+
+    지급 기한 점검 범위(`deadline_lookback_days`) 안에서 기간이 끝났고 지급 예정일(일요일 +
+    `pay_days_after_period_end`)이 된 주. 기한 점검에서 `at_risk`·`overdue`가 되는 미지급 주는
+    예정일이 지났거나 보류된 주라(보류된 판매자는 어차피 묶지 않는다) 이 조건에 이미 들어 있다.
+    """
+    s = sc.load_policy().settlement
+    today = today or sc.today()
+    _, monday, _ = sc.week_range(
+        sc.week_of(today - timedelta(days=s.deadline_lookback_days)), today
+    )
+    weeks = []
+    while True:
+        sunday = monday + timedelta(days=6)
+        if sunday >= today:  # 아직 끝나지 않은 주부터는 보지 않는다
+            break
+        if sunday + timedelta(days=s.pay_days_after_period_end) <= today:
+            weeks.append(sc.week_of(monday))
+        monday += timedelta(days=7)
+    return weeks
+
+
 def apply_batch(result: dict[str, Any], batch: dict[str, Any] | None) -> dict[str, Any]:
     """묶음 요청 상태를 내역서에 반영하고 `batch`를 붙인다."""
     empty = {
@@ -284,6 +323,9 @@ def apply_batch(result: dict[str, Any], batch: dict[str, Any] | None) -> dict[st
         # 왜 끝났는지: rejected(사람이 멈춤) · expired(시간 초과)
         # · review_missing(안전 장치에 기록 없음)
         shown = shown | {"closed_reason": batch["closed_reason"]}
+    if batch and batch.get("requested_by"):
+        # 누가 요청했는지: 사람 이름 또는 `support-ai`(고객지원 AI 자동 요청, 어느 담당이든 승인)
+        shown = shown | {"requested_by": batch["requested_by"]}
     if batch and shown["status"] != "none":
         for row in result["statements"]:
             if row["seller_id"] in shown["seller_ids"]:
@@ -307,7 +349,7 @@ def ready(result: dict[str, Any]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------- 지급 기한 점검
 # 오픈마켓(통신판매중개)은 판매자에게 판매 대금을 정해진 날 안에 줘야 한다. 기한(일 수)과 기산점은
 # `settlement_policy.toml [settlement]`에 둔다. 경보만 내고, 지급은 정산 묶음 → 안전 장치 C 보류 →
-# 사람 승인으로만 한다.
+# 고객지원 담당 승인으로만 한다.
 # - 기산점: 구매 확정(배송 완료 시각으로 대신). 배송 전 주문은 기한이 아직 시작되지 않았다
 # - 지급 완료: 그 주 정산 묶음이 안전 장치에서 승인된 판매자 (실제 이체 결과는 연동돼 있지 않다)
 # - 지급 예정일: 정산 기간 마지막 날 + `pay_days_after_period_end`. 보류 사유가 있으면 예정일이 없다

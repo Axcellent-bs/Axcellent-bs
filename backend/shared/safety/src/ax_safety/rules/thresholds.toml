@@ -13,13 +13,19 @@
 # - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 10
+version = 11
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
 
 # C 보류 건을 사람이 결정하지 않으면 자동 거절하는 시간(초). 데모 10분
 review_timeout_seconds = 600
+
+# 액션별 사람 확인 기한(초). 여기 적은 액션은 위 값(과 SAFETY_REVIEW_TIMEOUT_SECONDS) 대신 이 값을 쓴다.
+# 1분~7일만 받는다. v11(2026-11-12): 판매자 정산 지급 승인은 24시간. 10분이면 고객지원 담당이
+# 자리에 없을 때 W44 요청처럼 그냥 만료된다
+[review_timeout_by_action]
+confirm_settlement = 86400
 
 [[rules]]
 key = "coupon_total"

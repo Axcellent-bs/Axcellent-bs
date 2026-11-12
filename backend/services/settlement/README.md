@@ -8,7 +8,7 @@
 | `seller_settlement_weeks` | read |
 | `seller_settlement_batches` | read |
 | `seller_settlement_deadlines` | read |
-| `request_seller_settlement` | A |
+| `request_seller_settlement` | A (사람 버튼. 고객지원 AI도 같은 길로 지급일이 된 주를 10분마다 스스로 요청한다: `SUPPORT_SETTLEMENT_AUTO_REQUEST`) |
 
 - 실행: `uv run --package ax-svc-settlement uvicorn svc_settlement.main:app --port 8126` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
 - 다른 에이전트가 `support`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`). 재무(`settlement_feed.py`)·dashboard-api(`settlements.py`)는 `support`로 부른다.

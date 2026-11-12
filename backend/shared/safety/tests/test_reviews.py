@@ -128,3 +128,28 @@ def test_self_approval_is_403_over_http(client, act, gate) -> None:
     )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "SELF_APPROVAL"
+
+
+# ---------------------------------------------------------------- 판매자 정산 기한 24시간 (v11)
+@pytest.mark.asyncio
+async def test_settlement_hold_waits_24_hours_while_coupon_expires_in_10_minutes(
+    gate: Gate, clock: Any, act, coupon
+) -> None:
+    settle = await gate.execute(_settlement(act, "s24", "support-ai"))
+    other = await gate.execute(coupon(20, 20_000, purpose_code="campaign", key="c10"))
+    review = gate.store.get_review(settle.review_id or "")
+    assert review is not None
+    assert review.expires_at - review.created_at == timedelta(hours=24)
+    clock.advance(600)
+    assert [r.review_id for r in await gate.expire_reviews()] == [other.review_id]
+    assert gate.store.get_review(settle.review_id or "").status == "pending"  # type: ignore[union-attr]
+    clock.advance(24 * 3600 - 600)
+    assert [r.review_id for r in await gate.expire_reviews()] == [settle.review_id]
+
+
+@pytest.mark.asyncio
+async def test_ai_requested_settlement_can_be_approved_by_the_support_owner(gate, act) -> None:
+    """고객지원 AI가 올린 요청(`requested_by: support-ai`)은 고객지원 담당(병환)이 승인한다."""
+    held = await gate.execute(_settlement(act, "s-ai", "support-ai"))
+    done = await gate.decide_review(held.review_id, "approved", "byunghwan", None)
+    assert (done.status, done.decided_by) == ("approved", "byunghwan")

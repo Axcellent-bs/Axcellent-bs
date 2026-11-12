@@ -411,7 +411,8 @@ def test_random_books_match_an_independent_calculation(seed: int) -> None:
         if not ids and not cp and not rf and not pending:
             continue
         payout = gross - com - cp - rf
-        held = (bool(ids) or pending) and payout <= 0
+        # 줄 돈이 0원 이하면 보류한다. 확정 매출 없이 환불·쿠폰만 있는 판매자도 (#1013 리뷰)
+        held = payout <= 0
         want[s] = (gross, com, cp, rf, payout, "held" if held else "ready")
     assert got == want
 
@@ -672,6 +673,13 @@ async def test_request_goes_through_execute_and_is_held(monkeypatch: pytest.Monk
     assert again.output["requested"] is False and len(calls) == 1  # 같은 주는 한 번만
 
 
+def _answer(answer: dict[str, httpx.Response], request: httpx.Request) -> httpx.Response:
+    """보류 건 조회는 `r`, 실행 기록 조회는 `executions`(없으면 빈 목록)로 답한다."""
+    if request.url.path == "/api/safety/executions":
+        return answer.get("executions") or httpx.Response(200, json={"data": []})
+    return answer["r"]
+
+
 @pytest.mark.asyncio
 async def test_lost_review_reopens_and_can_be_requested_again(
     monkeypatch: pytest.MonkeyPatch,
@@ -681,10 +689,11 @@ async def test_lost_review_reopens_and_can_be_requested_again(
     calls = _fake_execute(monkeypatch, HELD)
     payload = {"period": "2026-W42", "requested_by": "taeyoon"}
     answer = {"r": httpx.Response(200, json={"data": {"status": "pending"}})}
-    _safety_review(monkeypatch, lambda r: answer["r"])
+    _safety_review(monkeypatch, lambda r: _answer(answer, r))
     await sh.request_seller_settlement(_request("request_seller_settlement", payload))
 
     answer["r"] = httpx.Response(404, json={"error": {"code": "NOT_FOUND"}})
+    answer["executions"] = httpx.Response(200, json={"data": []})
     view = (
         await sh.seller_settlement(_request("seller_settlement", {"period": "2026-W42"}))
     ).output
@@ -880,8 +889,13 @@ def _statements_before(
                     "label": f"이번 주 확정 주문 없음 (확정 대기 {pending_orders}건은 다음 정산)",
                 }
             )
-        if order_ids and payout <= 0:
-            reasons.append({"code": "negative_payout", "label": "정산금이 0원 이하"})
+        elif payout <= 0:  # 보류 사유만 #1013 리뷰대로 바꿨다 (환불·쿠폰만 있는 판매자)
+            label = (
+                "정산금이 0원 이하"
+                if order_ids
+                else "확정 매출 없이 환불·쿠폰만 있어 정산금이 0원 이하"
+            )
+            reasons.append({"code": "negative_payout", "label": label})
 
         if not order_ids and not seller_coupon and not refunds and not pending_orders:
             continue  # 이번 기간 거래가 없는 판매자는 내역서를 만들지 않는다
@@ -1235,3 +1249,254 @@ def test_coupon_read_falls_back_to_the_claims_key(monkeypatch: pytest.MonkeyPatc
     assert sb.coupon_headers() == {"Authorization": "Bearer k3"}  # 따로 있으면 그 키
     monkeypatch.setenv("AX_SHOP_CLIENT_KEYS", "inquiry:k1")
     assert sb.coupon_headers() is None  # 없으면 쿠폰을 못 받은 장부(정산금을 내지 않는다)
+
+
+# ------------------------------------------------- #1013 리뷰 · AI 자동 요청 (2026-11-12)
+def test_a_refund_only_seller_is_held_not_ready() -> None:
+    """확정 매출 없이 환불만 있는 판매자는 정산금이 0원 이하라 보류한다(예전엔 "지급 준비됨")."""
+    sold = order("ord_1", at("2026-10-06"), [("sel_a", "book", 1, 30000)])  # W41에 정산됨
+    keep = order("ord_2", at("2026-10-14"), [("sel_b", "book", 1, 10000)])
+    bk = books(
+        orders=[sold, keep], refunds=[refund("rfd_1", "ord_1", "sel_a", 5000, at("2026-10-14"))]
+    )
+    result = st.statements(bk, "2026-W42", TODAY)
+    rows = {r["seller_id"]: r for r in result["statements"]}
+    a = rows["sel_a"]
+    assert (a["orders"], a["gross"], a["refunds"], a["payout"]) == (0, 0, 5000, -5000)
+    assert a["status"] == "held"
+    assert [h["code"] for h in a["hold_reasons"]] == ["negative_payout"]
+    assert "환불" in a["hold_reasons"][0]["label"]
+    assert rows["sel_b"]["status"] == "ready"
+    assert [r["seller_id"] for r in st.ready(result)] == ["sel_b"]
+
+
+def test_period_closed_and_due_weeks() -> None:
+    """오늘 2026-10-23(금): W42(10-12~18)는 끝났지만 지급 예정일(10-24) 전, W41은 지급일이
+    지났다."""
+    assert st.period_closed("2026-W42", TODAY) and not st.period_closed("2026-W43", TODAY)
+    assert not st.period_closed("2026-W44", TODAY)
+    weeks = st.due_weeks(TODAY)
+    assert weeks[-1] == "2026-W41" and "2026-W42" not in weeks and "2026-W43" not in weeks
+    assert weeks == sorted(weeks)
+    # 지급 기한 점검 범위(70일) 안의 주만
+    since = TODAY - timedelta(days=sc.load_policy().settlement.deadline_lookback_days)
+    assert weeks[0] == sc.week_of(since)
+    assert "2026-W42" in st.due_weeks(date(2026, 10, 24))  # 지급 예정일이 되면 넣는다
+
+
+@pytest.mark.asyncio
+async def test_an_open_week_is_not_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    loads = _use_books(_week_books())
+    calls = _fake_execute(monkeypatch, HELD)
+    payload = {"period": "2026-W43", "requested_by": "byunghwan"}  # 이번 주 (아직 안 끝남)
+    result = await sh.request_seller_settlement(_request("request_seller_settlement", payload))
+    assert (result.status, result.outcome) == (TaskStatus.FAILED, "period_not_closed")
+    assert calls == [] and loads == [] and batches_mod.STORE.batches == {}
+
+
+@pytest.mark.asyncio
+async def test_partly_unreadable_orders_block_the_request_but_not_the_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bk = _week_books()
+    bk.unavailable = ["orders_partial"]
+    _use_books(bk)
+    calls = _fake_execute(monkeypatch, HELD)
+    view = await sh.seller_settlement(_request("seller_settlement", {"period": "2026-W42"}))
+    assert view.status == TaskStatus.COMPLETED
+    assert view.output["meta"]["unavailable"] == ["orders_partial"]  # 보여 주되 못 읽은 걸 알린다
+    payload = {"period": "2026-W42", "requested_by": "byunghwan"}
+    result = await sh.request_seller_settlement(_request("request_seller_settlement", payload))
+    assert (result.status, result.outcome) == (TaskStatus.FAILED, "orders_partial")
+    assert calls == [] and batches_mod.STORE.batches == {}
+
+
+def _executed(period: str, attempt: int, execution_id: str = "exe_77") -> dict[str, Any]:
+    return {
+        "execution_id": execution_id,
+        "request": {
+            "action": "confirm_settlement",
+            "idempotency_key": f"ctx_req_settlement_{period}:confirm_settlement:{period}:{attempt}",
+        },
+        "decision": {"status": "executed"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_lost_review_with_an_executed_record_becomes_approved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """보류 건은 잃었어도(404) 실행 기록이 있으면 승인된 것이다. review_missing으로 열지 않는다."""
+    _use_books(_week_books())
+    _fake_execute(monkeypatch, HELD)
+    answer = {"r": httpx.Response(200, json={"data": {"status": "pending"}})}
+    seen = _safety_review(monkeypatch, lambda r: _answer(answer, r))
+    payload = {"period": "2026-W42", "requested_by": "taeyoon"}
+    await sh.request_seller_settlement(_request("request_seller_settlement", payload))
+    answer["r"] = httpx.Response(404, json={"error": {"code": "NOT_FOUND"}})
+    answer["executions"] = httpx.Response(200, json={"data": [_executed("2026-W42", 1)]})
+    view = (
+        await sh.seller_settlement(_request("seller_settlement", {"period": "2026-W42"}))
+    ).output
+    assert view["batch"]["status"] == "approved" and "closed_reason" not in view["batch"]
+    assert "/api/safety/executions" in seen
+
+
+@pytest.mark.asyncio
+async def test_404_never_reopens_an_approved_batch_and_unknown_keeps_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_books(_week_books())
+    answer = {
+        "r": httpx.Response(404, json={"error": {"code": "NOT_FOUND"}}),
+        "executions": httpx.Response(503),
+    }
+    _safety_review(monkeypatch, lambda r: _answer(answer, r))
+    approved = {"status": "approved", "review_id": "rev_1", "seller_ids": ["sel_a"], "attempt": 1}
+    batches_mod.STORE.put("2026-W42", dict(approved))
+    out = (await sh.seller_settlement_batches(_request("seller_settlement_batches", {}))).output
+    assert out["batches"]["2026-W42"]["status"] == "approved"
+    # 요청 중인데 보류 건 404 + 실행 기록을 못 읽으면 모르는 채로 다시 열지 않는다
+    batches_mod.STORE.put("2026-W42", approved | {"status": "requested"})
+    out = (await sh.seller_settlement_batches(_request("seller_settlement_batches", {}))).output
+    assert out["batches"]["2026-W42"]["status"] == "requested"
+
+
+@pytest.mark.asyncio
+async def test_re_request_after_review_missing_checks_executions_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """review_missing 뒤 다시 요청하기 전에 실행 기록을 본다. 실행됐으면 요청하지 않고 승인으로
+    둔다."""
+    _use_books(_week_books())
+    calls = _fake_execute(monkeypatch, HELD)
+    answer = {"executions": httpx.Response(200, json={"data": [_executed("2026-W42", 1)]})}
+    _safety_review(monkeypatch, lambda r: _answer(answer, r))
+    batches_mod.STORE.put(
+        "2026-W42",
+        {
+            "status": "rejected",
+            "closed_reason": "review_missing",
+            "review_id": "rev_1",
+            "execution_id": "exe_77",
+            "seller_ids": ["sel_a", "sel_b"],
+            "attempt": 1,
+        },
+    )
+    payload = {"period": "2026-W42", "requested_by": "byunghwan"}
+    result = await sh.request_seller_settlement(_request("request_seller_settlement", payload))
+    assert result.status == TaskStatus.COMPLETED and result.output["requested"] is False
+    assert calls == []
+    assert batches_mod.STORE.get("2026-W42")["status"] == "approved"
+
+    # 실행 기록을 못 읽으면 다시 요청하지 않는다 (두 번 지급될 수 있다)
+    batches_mod.STORE.put(
+        "2026-W42",
+        {"status": "rejected", "closed_reason": "review_missing", "attempt": 1, "seller_ids": []},
+    )
+    answer["executions"] = httpx.Response(503)
+    result = await sh.request_seller_settlement(_request("request_seller_settlement", payload))
+    assert (result.status, result.outcome) == (TaskStatus.FAILED, "safety_unavailable")
+    assert calls == []
+
+
+def _due_books() -> sb.SettlementBooks:
+    """지급일이 지난 W41(10-05~11)에 줄 판매자 둘, W42는 아직 지급일 전."""
+    return books(
+        orders=[
+            order("ord_1", at("2026-10-06"), [("sel_a", "book", 1, 10000)]),
+            order("ord_2", at("2026-10-07"), [("sel_b", "book", 1, 20000)]),
+            order("ord_3", at("2026-10-14"), [("sel_a", "book", 1, 30000)]),
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_support_ai_requests_a_due_week_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from support_agent import settlement_auto as auto
+
+    _use_books(_due_books())
+    calls = _fake_execute(monkeypatch, HELD)
+    answer = {"r": httpx.Response(200, json={"data": {"status": "pending"}})}
+    _safety_review(monkeypatch, lambda r: _answer(answer, r))
+    results = await auto.run_once()
+    assert results["2026-W41"] == "requested"
+    assert "2026-W42" not in results  # 지급 예정일 전
+    [call] = calls
+    assert call["params"]["period"] == "2026-W41"
+    assert call["params"]["requested_by"] == "support-ai"  # 사람이 아니라 어느 담당이든 승인한다
+    assert call["key"] == "ctx_req_settlement_2026-W41:confirm_settlement:2026-W41:1"
+    assert "고객지원 AI" in call["params"]["summary"]
+    stored = batches_mod.STORE.get("2026-W41")
+    assert (stored["status"], stored["requested_by"]) == ("requested", "support-ai")
+    view = (
+        await sh.seller_settlement(_request("seller_settlement", {"period": "2026-W41"}))
+    ).output
+    assert view["batch"]["requested_by"] == "support-ai"  # 화면이 "고객지원 AI(자동)"로 보여 준다
+
+    # 다음 회차: 요청 중이면 다시 요청하지 않는다
+    again = await auto.run_once()
+    assert again["2026-W41"] == "requested" and len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_support_ai_re_requests_expired_but_not_human_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from support_agent import settlement_auto as auto
+
+    _use_books(_due_books())
+    second = HELD.model_copy(update={"execution_id": "exe_78", "review_id": "rev_78"})
+    calls = _fake_execute(monkeypatch, HELD, second)
+    status = {"rev_77": "pending", "rev_78": "pending"}
+
+    def review(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/safety/executions":
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(200, json={"data": {"status": status[request.url.path[-6:]]}})
+
+    _safety_review(monkeypatch, review)
+    await auto.run_once()
+    status["rev_77"] = "expired"  # 아무도 결정하지 않고 시간이 지났다
+    first = await auto.run_once()
+    assert first["2026-W41"] == "requested"
+    assert [c["key"][-2:] for c in calls] == [":1", ":2"]  # 시도 번호를 올려 다시 요청
+    assert batches_mod.STORE.get("2026-W41")["review_id"] == "rev_78"
+
+    status["rev_78"] = "rejected"  # 고객지원 담당이 멈췄다
+    later = await auto.run_once()
+    assert later["2026-W41"] == "rejected_by_human" and len(calls) == 2  # 사람이 멈춘 주는 그대로
+
+
+@pytest.mark.asyncio
+async def test_support_ai_skips_weeks_with_nothing_to_pay_and_waits_for_books(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from support_agent import settlement_auto as auto
+
+    _use_books(books(orders=[]))
+    calls = _fake_execute(monkeypatch, HELD)
+    results = await auto.run_once()
+    assert set(results.values()) == {"nothing_to_settle"} and calls == []
+
+    async def preparing(fresh: bool) -> sb.SettlementBooks:
+        raise sb.Preparing("모으는 중")
+
+    sb.LOADER = preparing
+    with pytest.raises(sb.Preparing):
+        await auto.run_once()
+
+
+def test_auto_request_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from support_agent import settlement_auto as auto
+
+    monkeypatch.delenv(auto.ENV_SWITCH, raising=False)
+    monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
+    assert auto.enabled() is False  # 테스트(목 모드)에서는 기본으로 끈다
+    monkeypatch.setenv(auto.ENV_SWITCH, "on")
+    assert auto.enabled() is True
+    monkeypatch.setenv(auto.ENV_SWITCH, "off")
+    assert auto.enabled() is False
+    assert auto.start(frozenset({"request_seller_settlement"})) is None  # 꺼져 있으면 안 돈다
+    monkeypatch.setenv(auto.ENV_SECONDS, "abc")
+    assert auto.interval_seconds() == auto.DEFAULT_SECONDS

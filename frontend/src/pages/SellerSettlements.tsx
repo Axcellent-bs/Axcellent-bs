@@ -10,7 +10,8 @@ import { SETTLEMENT_HOLD_ACTION, liveHumanTokenSet } from "@/lib/finance";
 // 고객지원 > 판매자 정산. 판매자 정산(정산금 계산 · 지급 승인 요청 · 묶음 상태 · 지급 기한 점검)은
 // 고객지원(settlement 서비스, 화면은 클레임·보상 메뉴 안)이 한다. 재무는 결과를 받아 재무 화면 ③에서 보여 주기만 한다.
 // 표와 기한 점검은 dashboard-api(`/api/dashboard/settlements...`)에서 받는다. 숫자는 서버가 계산한 값 그대로다.
-// 묶음 요청은 안전 장치 보류 큐로 가고(항상 사람), 아래 보류 큐에서 사람이 진행·멈춤을 누른다.
+// 묶음 요청은 지급 예정일이 된 주를 고객지원 AI가 스스로 올리고(사람이 버튼으로 먼저 올릴 수도 있다),
+// 안전 장치 보류 큐로 간다(항상 사람). 아래 보류 큐에서 고객지원 담당이 진행·멈춤을 누른다.
 
 const REFRESH_MS = 30_000;
 
@@ -22,7 +23,7 @@ const loadDeadlines = () => api.admin.settlementDeadlines();
 const request = async (period: string) => (await api.admin.requestSettlementBatch(period)).data;
 
 const DEADLINE_HINT = "구매가 확정된 판매 대금을 정해진 날 안에 판매자에게 줄 수 있는지 미리 봅니다. 기한이 가까운 판매자는 보류 사유를 풀거나 이번 지급 묶음에 넣으세요. 지급은 정산 묶음 요청 → 안전 장치 보류 큐 승인으로만 합니다.";
-const QUEUE_INTRO = "판매자 정산 묶음 지급 승인은 항상 사람이 정합니다. 위 정산 표의 판매자·기간·금액과 같은지 보고 결정하세요.";
+const QUEUE_INTRO = "판매자 정산 묶음 지급 승인은 고객지원 담당이 정합니다. 고객지원 AI가 올린 요청은 담당 누구나 승인할 수 있고, 사람이 직접 올린 요청은 올린 사람 말고 다른 담당이 승인합니다. 위 정산 표의 판매자·기간·금액과 같은지 보고 결정하세요. 24시간 안에 결정하지 않으면 자동으로 취소됩니다.";
 
 export default function SellerSettlementsPage() {
   const [tick, setTick] = useState(0);
@@ -46,8 +47,8 @@ export default function SellerSettlementsPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">판매자 정산</h1>
           <p className="mt-1 text-sm text-ink-500">
-            <CompanyName />의 고객지원팀이 판매자에게 줄 돈을 주마다 계산하고, 보류 없는 판매자만 묶어 지급 승인을 요청합니다.
-            요청은 안전 장치 보류 큐로 가고, 사람이 승인해야 지급이 기록됩니다. 재무는 이 결과를 받아 장부에 씁니다.
+            <CompanyName />의 고객지원 AI가 판매자에게 줄 돈을 주마다 계산하고, 지급 예정일이 되면 보류 없는 판매자만 묶어 지급 승인을 요청합니다.
+            요청은 안전 장치 보류 큐로 가고, 고객지원 담당이 승인해야 지급이 기록됩니다. 재무는 이 결과를 받아 장부에 씁니다.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm sm:ml-auto">

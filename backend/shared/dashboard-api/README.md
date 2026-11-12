@@ -106,10 +106,10 @@ support 출력은 `claim_mapping.py`에서 화면 모델로 바꾼다 (값을 �
 | --- | --- |
 | GET `/settlements?period=YYYY-Www` | `seller_settlement` (생략하면 지난주). 판매자별 내역서·묶음 상태 |
 | GET `/settlements/deadlines` | `seller_settlement_deadlines` (판매 대금 지급 기한 점검) |
-| POST `/settlements/batch` `{period}` | `request_seller_settlement` (사람 토큰 필요. `requested_by`는 토큰의 이름, 본문에서 받지 않는다). 보류 없는 판매자를 묶어 `execute("confirm_settlement")`로 지급 승인을 요청하고 안전 장치가 항상 사람에게 보류한다. 응답 `data`는 `{settlement, requested}`, 같은 주를 이미 요청했으면 `requested: false` |
+| POST `/settlements/batch` `{period}` | `request_seller_settlement` (사람 토큰 필요. `requested_by`는 토큰의 이름, 본문에서 받지 않는다). 보류 없는 판매자를 묶어 `execute("confirm_settlement")`로 지급 승인을 요청하고 안전 장치가 항상 사람에게 보류한다. 응답 `data`는 `{settlement, requested}`, 같은 주를 이미 요청했으면 `requested: false`. 평소에는 고객지원 AI가 지급일이 된 주를 스스로 요청하고(`requested_by: support-ai`), 승인은 고객지원 담당이 보류 큐에서 한다 |
 
 - `data`는 support 출력에서 `meta`를 뺀 것이고, support `meta`(수집 시각·출처·받지 못한 값)는 응답 `meta`에 합친다.
-- 오류: `invalid_input`→400 `INVALID_INPUT`, `nothing_to_settle`→409 `NOTHING_TO_SETTLE`, `safety_unavailable`→503 `SAFETY_UNAVAILABLE`(지급 기록 없음). support가 꺼져 있으면 빈 표 대신 503 `SERVICE_DISABLED`(정산할 판매자가 없다고 지어내지 않는다).
+- 오류: `invalid_input`→400 `INVALID_INPUT`, `nothing_to_settle`→409 `NOTHING_TO_SETTLE`, `period_not_closed`(기간이 아직 끝나지 않은 주)→409 `PERIOD_NOT_CLOSED`, `orders_partial`(판매 서버 주문 일부를 못 읽음)→503 `ORDERS_PARTIAL`, `safety_unavailable`→503 `SAFETY_UNAVAILABLE`(지급 기록 없음). support가 꺼져 있으면 빈 표 대신 503 `SERVICE_DISABLED`(정산할 판매자가 없다고 지어내지 않는다).
 - 목 데이터는 없다. 목 모드에서도 support를 부른다.
 - 감사 기록의 `agent_override`(상담원 승인) 라벨은 화면 표기에 맞춘 이름이다. `claim_stats.agent_overrides`는 자동 판정을 뒤집는 경우만 세는데 지금은 자동 판정을 바꿀 수 없어 항상 0이다.
 

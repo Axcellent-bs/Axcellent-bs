@@ -14,7 +14,7 @@ from ax_safety.rules import ActionSpec, Rule, ThresholdTable, load_registry, loa
 
 def test_rule_files_load_and_match_agreed_values() -> None:
     registry, table = load_registry(), load_thresholds()
-    assert table.version == 10
+    assert table.version == 11
     assert table.review_timeout_seconds == 600  # 데모 10분 자동 거절
     values = {rule.key: rule.value for rule in table.rules if rule.metric != "param"}
     values.pop("pr_allowed_paths")
@@ -304,3 +304,35 @@ def test_on_verify_reject_is_validated() -> None:
         on_verify_reject="hold",
     )
     assert spec.on_verify_reject == "hold"
+
+
+# ---------------------------------------------------------------- 액션별 사람 확인 기한 (v11)
+def test_settlement_review_timeout_is_24_hours_and_others_keep_the_default() -> None:
+    """판매자 정산 지급 승인만 24시간, 나머지 액션은 기준표 기본값(데모 10분)."""
+    table = load_thresholds()
+    assert table.review_timeout_by_action == {"confirm_settlement": 86_400}
+    assert table.review_timeout_for("confirm_settlement") == 86_400
+    assert table.review_timeout_for("issue_coupon") == 600
+    assert table.review_timeout_for("refund_request") == 600
+
+
+def test_env_review_timeout_does_not_shorten_the_settlement_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SAFETY_REVIEW_TIMEOUT_SECONDS", "3600")
+    table = load_thresholds()
+    assert table.review_timeout_for("issue_coupon") == 3600
+    assert table.review_timeout_for("confirm_settlement") == 86_400
+
+
+@pytest.mark.parametrize("seconds", [0, 59, 7 * 24 * 3600 + 1])
+def test_action_review_timeout_out_of_range_is_refused(seconds: int) -> None:
+    with pytest.raises(ValueError, match="confirm_settlement"):
+        ThresholdTable.model_validate(
+            {
+                "version": 1,
+                "verify_timeout_seconds": 30,
+                "review_timeout_seconds": 600,
+                "review_timeout_by_action": {"confirm_settlement": seconds},
+            }
+        )

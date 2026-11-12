@@ -209,7 +209,9 @@ export interface SellerStatement {
   pending_confirmation?: { orders: number; gross: number };
 }
 /** closed_reason: 거절된 묶음이 왜 끝났는지. rejected(사람이 멈춤)·expired(시간 초과)·review_missing(안전 장치에 기록 없음, 재시작 등) */
-export interface SettlementBatch { status: BatchStatus; review_id: string | null; execution_id: string | null; total_payout: number; seller_ids: string[]; closed_reason?: "rejected" | "expired" | "review_missing" }
+export interface SettlementBatch { status: BatchStatus; review_id: string | null; execution_id: string | null; total_payout: number; seller_ids: string[]; closed_reason?: "rejected" | "expired" | "review_missing";
+  /** 요청한 쪽: 사람 이름 또는 `support-ai`(고객지원 AI 자동 요청) */
+  requested_by?: string }
 export interface Settlements { period: string; from: string; to: string; pay_date: string | null; statements: SellerStatement[]; batch: SettlementBatch }
 
 // ---------------------------------------------------------------- ③ 정산 기한 · 미지급금 롤포워드
