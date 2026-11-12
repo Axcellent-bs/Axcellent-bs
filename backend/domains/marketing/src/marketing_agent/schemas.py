@@ -79,6 +79,7 @@ class NoticeView(AxModel):
 
     found: bool
     notice_id: str | None = None
+    kind: NoticeKind | None = None  # 공지 종류. SNS 게시 초안이 상품 홍보인지 가리는 데 쓴다
     status: Literal["published", "ended"] | None = None
     channel_code: ChannelCode | None = None
     public_text: str | None = None

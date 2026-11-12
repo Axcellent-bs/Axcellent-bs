@@ -184,8 +184,133 @@ def test_check_rejects_participation_condition_and_foreign_numbers() -> None:
     assert gated["forbidden_phrase_count"] >= 1
     assert gated["verdict"] == "rejected"
     impact = _check(draft, caption=draft["caption"] + "\n피해 1,234건")["output"]
-    assert impact["unverified_number_count"] >= 1
-    assert impact["verdict"] == "rejected"
+    assert impact["verdict"] == "rejected"  # 초안과 다른 캡션(장애 공지는 숫자 검사 대상이 아니다)
+    assert "caption_differs_from_draft" in impact["problems"]
+    product = _call("draft_sns_post", {"notice_id": _published("product_created")})["output"]
+    foreign = _check(product, caption=product["caption"] + "\n99% 할인")["output"]
+    assert foreign["unverified_number_count"] >= 1
+    assert "unverified_number" in foreign["problems"]
+    assert foreign["verdict"] == "rejected"
+
+
+def _published(kind: str, facts: dict | None = None, promises: list | None = None) -> str:
+    body = {"kind": kind, "facts": facts or {}} | ({"promises": promises} if promises else {})
+    draft = _call("draft_notice", body)["output"]["draft_id"]
+    return _call("publish_notice", {"draft_id": draft})["output"]["notice_id"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "facts"),
+    [
+        ("incident_opened", {"component": "payment"}),
+        ("incident_resolved", {"component": "payment"}),
+        ("product_created", {}),
+    ],
+)
+def test_every_published_notice_kind_goes_draft_check_publish_input(kind: str, facts: dict) -> None:
+    """장애 안내·정상화 안내·상품 공지 모두 초안 -> 점검 -> 게시 입력까지 간다(캡션만 있는 초안)."""
+    notice_id = _published(kind, facts)
+    result = _call("draft_sns_post", {"notice_id": notice_id})
+    assert result["status"] == "completed", result
+    draft = result["output"]
+    assert draft["notice_kind"] == kind
+    assert _call("get_notice", {"notice_id": notice_id})["output"]["kind"] == kind
+    checked = _check(draft)
+    assert checked["output"]["verdict"] == "approved"
+    assert checked["output"]["unverified_number_count"] == 0
+
+
+def test_incident_cause_numbers_are_rejected() -> None:
+    draft = _call(
+        "draft_sns_post", {"notice_id": _published("incident_opened", {"component": "db"})}
+    )["output"]
+    for extra in ("\n원인: 서버 3대 과부하", "\n피해 1,234건"):
+        out = _check(draft, caption=draft["caption"] + extra)["output"]
+        assert out["verdict"] == "rejected"
+        assert "caption_differs_from_draft" in out["problems"]
+
+
+def test_product_notice_with_promise_amount_is_approved_but_foreign_number_rejected() -> None:
+    promises = [
+        {"type": "coupon", "amount": 1000, "condition_code": "first", "condition": "첫 구매"}
+    ]
+    notice_id = _published("product_created", promises=promises)
+    draft = _call("draft_sns_post", {"notice_id": notice_id})["output"]
+    assert "1,000원" in draft["caption"]
+    assert _check(draft)["output"]["verdict"] == "approved"
+
+
+def _stored_draft(store: sns.SnsStore, kind: str | None, extra: str) -> sns.SnsPostDraft:
+    """초안 문안에 공지 밖 숫자(`extra`)가 들어 있는 초안을 직접 저장한다(점검 규칙만 시험)."""
+    body = "공지 문구입니다."
+    caption = sns._compose(body, "image") + extra
+    draft = sns.SnsPostDraft(
+        post_draft_id="spd_number",
+        source_kind="notice",
+        source_ref="ntc_1",
+        notice_kind=kind,  # type: ignore[arg-type]
+        platform="instagram",
+        media_kind="image",
+        caption=caption,
+        hashtags=list(sns.HASHTAGS),
+        caption_sha256=sns._sha(caption),
+        required_text=[body, sns.DEMO_TEXT, sns.TERMS_TEXT],
+        context_id=CTX,
+    )
+    store.save(draft)
+    return draft
+
+
+def _check_stored(store: sns.SnsStore, draft: sns.SnsPostDraft) -> dict:
+    import asyncio
+
+    from ax_contracts.schemas import AgentRequest
+
+    request = AgentRequest.model_validate(
+        {
+            "meta": {
+                "context_id": CTX,
+                "token": "mock:orchestrator",
+                "path": [],
+                "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
+            },
+            "skill": "check_sns_post",
+            "input": {
+                "post_draft_id": draft.post_draft_id,
+                "caption": draft.caption,
+                "is_ai_generated": True,
+            },
+        }
+    )
+    return asyncio.run(sns.check_sns_post(request, store)).output
+
+
+@pytest.mark.parametrize("kind", ["product_created", None])
+def test_product_promotion_keeps_unverified_number_rule(kind: str | None) -> None:
+    store = sns.SnsStore()
+    draft = _stored_draft(store, kind, "\n지금 99% 할인")
+    assert sns.is_product_promotion(draft)
+    out = _check_stored(store, draft)
+    assert out["unverified_number_count"] >= 1
+    assert "unverified_number" in out["problems"]
+    assert out["verdict"] == "rejected"
+
+
+@pytest.mark.parametrize("kind", ["incident_opened", "incident_resolved"])
+def test_non_product_skips_number_rule_but_keeps_other_checks(kind: str) -> None:
+    store = sns.SnsStore()
+    draft = _stored_draft(store, kind, "\n오전 9시 30분 기준")
+    assert not sns.is_product_promotion(draft)
+    out = _check_stored(store, draft)
+    assert out["unverified_number_count"] == 0
+    assert out["verdict"] == "approved"
+    # AI 라벨·금칙어는 비상품에도 그대로 적용된다
+    banned = _stored_draft(store, kind, "\n팔로우하면 쿠폰")
+    banned = banned.model_copy(update={"post_draft_id": "spd_banned"})
+    store.save(banned)
+    result = _check_stored(store, banned)
+    assert result["forbidden_phrase_count"] >= 1
+    assert result["verdict"] == "rejected"
 
 
 def test_check_rejects_too_long_caption() -> None:

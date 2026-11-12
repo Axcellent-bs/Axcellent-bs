@@ -33,6 +33,7 @@ from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel
 from marketing_agent import sns_media
 from marketing_agent.notice import NoticeStore
+from marketing_agent.schemas import NoticeKind
 
 DRAFT_DB_ENV = "MARKETING_SNS_DRAFT_DB"
 
@@ -116,6 +117,7 @@ class SnsPostDraft(AxModel):
     post_draft_id: str
     source_kind: Literal["notice", "coupon"]
     source_ref: str  # notice_id 또는 campaign_id
+    notice_kind: NoticeKind | None = None  # 공지 출처의 종류. 없으면(쿠폰·옛 초안) 상품 홍보로 본다
     platform: Literal["instagram"]
     media_kind: Literal["image", "reel"]
     caption: str
@@ -254,6 +256,19 @@ def _compose(body: str, media_kind: str) -> str:
     )
 
 
+PRODUCT_NOTICE_KINDS: frozenset[str] = frozenset({"product_created"})
+
+
+def is_product_promotion(draft: SnsPostDraft) -> bool:
+    """상품 홍보 초안인가. 쿠폰 사실, 공지 종류가 `product_created`, 종류를 모르는 옛 공지 초안이다.
+
+    장애 안내(`incident_opened`)·정상화 안내(`incident_resolved`)는 상품 홍보가 아니다.
+    """
+    if draft.source_kind == "coupon":
+        return True
+    return draft.notice_kind is None or draft.notice_kind in PRODUCT_NOTICE_KINDS
+
+
 def _coupon_body(facts: SnsCouponFacts) -> str:
     lines = [f"캣북스 공개 쿠폰 안내: {facts.unit_value:,}원 쿠폰", "", "제약 사항"]
     lines += [f"- {CONSTRAINT_LABELS[c.code]}: {c.text}" for c in facts.constraints]
@@ -269,6 +284,7 @@ class SourceParts:
     body: str
     required: list[str]
     constraints: list[CouponConstraint]
+    notice_kind: NoticeKind | None = None  # 공지 출처일 때 그 공지의 종류
 
 
 def source_parts(
@@ -285,7 +301,9 @@ def source_parts(
         if view.status != "published":  # 끝난 공지를 다시 올리지 않는다
             return _result(request, TaskStatus.FAILED, outcome="notice_not_active")
         body = view.public_text
-        return SourceParts("notice", data.notice_id, body, [body, DEMO_TEXT, TERMS_TEXT], [])
+        return SourceParts(
+            "notice", data.notice_id, body, [body, DEMO_TEXT, TERMS_TEXT], [], view.kind
+        )
     assert data.coupon is not None
     facts = data.coupon
     have = {c.code for c in facts.constraints}
@@ -365,6 +383,7 @@ async def draft_sns_post(
         platform_options=options,
         source_kind=source_kind,
         source_ref=source_ref,
+        notice_kind=parts.notice_kind,
         platform=data.platform,
         media_kind=data.media_kind,
         caption=caption,
@@ -499,9 +518,12 @@ async def check_sns_post(request: AgentRequest, store: SnsStore) -> AgentResult:
     if forbidden:
         problems.append("forbidden_phrase")
 
-    # 공지 게시물: 공지 문구 밖에 숫자가 있으면 출처를 알 수 없는 숫자다(원인·영향 숫자 금지)
+    # 상품 홍보(`product_created` 공지)는 공지 문구 밖에 숫자가 있으면 출처를 알 수 없는 숫자다.
+    # 장애 안내·정상화 안내 같은 비상품은 이 검사를 하지 않는다. 장애 원인·영향 숫자 금지는
+    # 이 검사와 별개 규칙이다: 캡션이 초안과 같아야 하고(caption_differs_from_draft) 초안 문안에
+    # 원인·영향을 적지 않는다(notice.py 템플릿)
     unverified = 0
-    if draft.source_kind == "notice":
+    if draft.source_kind == "notice" and is_product_promotion(draft):  # 쿠폰은 현행대로 제외
         rest = caption
         for fragment in [*draft.required_text, label_text, *draft.hashtags]:
             rest = rest.replace(fragment, "")
