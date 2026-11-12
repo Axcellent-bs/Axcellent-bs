@@ -8,7 +8,8 @@
   시작하면 그대로 쓰고, 로컬 경로면 `MARKETING_IG_MEDIA_BASE_URL`(공개 HTTPS 주소) 뒤에
   파일 이름을 붙인다. 파일을 그 주소에 올려 두는 일은 사람이 한다.
   `MARKETING_MEDIA_S3_BUCKET`이 있으면 대신 미디어 폴더의 JPEG를 S3 호환 버킷에 올리고
-  유효기간 있는 서명 URL을 쓴다(`media_host.py`). 이 경로는 이미지(JPEG)만 지원한다.
+  유효기간 있는 서명 URL을 쓴다(`media_host.py`). 릴스(영상)도 같은 호스트에 미디어 ID가 든
+  고유 키로 올려 서명 URL을 `video_url`로 쓴다(우선순위: S3 호스트 > base URL > https ref).
 - 이미지는 JPEG만 된다(공식 규격). 로컬 파일이면 호출 전에 JPEG 여부와 8MB 이하를 확인한다.
 - 삭제 API(`delete_media`)는 이 로그인 경로에 없다. 잘못 올린 게시물은 사람이 앱에서 지운다.
 - 상태 `ERROR`에서 사유 코드를 주는 필드는 `status`(문자열)뿐일 수 있어 코드는 None일 수 있다.
@@ -45,6 +46,7 @@ from marketing_agent.sns_publish.instagram import (
     PublishOutcome,
 )
 from marketing_agent.sns_publish.media_host import (
+    VIDEO_MAX_BYTES,
     MediaHostConfigError,
     MediaHostError,
     S3MediaHost,
@@ -179,6 +181,26 @@ class GraphInstagramAdapter:
         except MediaHostError:
             raise IgApiError(*_MEDIA_URL_UNREACHABLE) from None
 
+    async def _hosted_video_url(self, media_ref: str) -> str:
+        """폴더 안의 mp4를 버킷에 올려 서명 URL을 돌려준다. 실패하면 Graph를 안 부른다."""
+        assert self._media_host is not None
+        try:
+            path = sns_media.resolve_asset(media_ref)
+        except sns_media.MediaPathError:
+            raise IgApiError(*_MEDIA_URL_UNREACHABLE) from None
+        try:
+            if path.stat().st_size > VIDEO_MAX_BYTES:
+                raise IgApiError(*_MEDIA_FORMAT)
+            content = path.read_bytes()
+        except OSError:
+            raise IgApiError(*_MEDIA_URL_UNREACHABLE) from None
+        if content[4:8] != b"ftyp" or len(content) > VIDEO_MAX_BYTES:
+            raise IgApiError(*_MEDIA_FORMAT)
+        try:
+            return await self._media_host.upload_video(content, path.parent.name)
+        except MediaHostError:
+            raise IgApiError(*_MEDIA_URL_UNREACHABLE) from None
+
     def _uses_media_host(self, media_ref: str) -> bool:
         return self._media_host is not None and not media_ref.startswith(("https://", "http://"))
 
@@ -232,7 +254,10 @@ class GraphInstagramAdapter:
                 params["image_url"] = self.public_media_url(request.media_ref)
         else:
             params["media_type"] = "REELS"
-            params["video_url"] = self.public_media_url(request.media_ref)
+            if self._uses_media_host(request.media_ref):
+                params["video_url"] = await self._hosted_video_url(request.media_ref)
+            else:
+                params["video_url"] = self.public_media_url(request.media_ref)
             params["share_to_feed"] = "true" if request.share_to_feed else "false"
         body = await self._request("POST", f"{self._user_id}/media", params=params)
         container_id = body.get("id")

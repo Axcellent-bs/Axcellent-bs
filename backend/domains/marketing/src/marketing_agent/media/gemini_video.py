@@ -17,7 +17,8 @@
 - 모델 ID는 코드에 두지 않는다. `MARKETING_VIDEO_MODEL`로 gemini-omni-1.1-flash·1.2-flash 중
   단가표에 있는 것을 고른다(2026-12-03부터 1.1 요청은 1.2로 라우팅·청구된다).
 - 무음: 문서에 오디오 끄기 옵션이 없다(기본으로 오디오 생성). `remove_audio=True`인데 받은 mp4에
-  오디오 트랙이 있으면 파일을 쓰지 않고 실패시킨다(오디오를 쓰지 않는다).
+  오디오 트랙이 있으면 ffmpeg(`-an`, 영상 스트림 복사)로 제거하고 다시 검사한다. ffmpeg가 없거나
+  제거 뒤에도 오디오가 남으면 파일을 쓰지 않고 실패시킨다(오디오를 쓰지 않는다).
 - 키는 `MARKETING_VIDEO_API_KEY`에서만 읽고 로그·예외·결과에 내지 않는다. 키는 Google API
   호스트에만 보내고, 리다이렉트는 직접 따라가며 다른 호스트로는 키를 보내지 않는다.
 """
@@ -29,16 +30,18 @@ import binascii
 import hashlib
 import os
 import re
+import subprocess
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 
 from marketing_agent.media.base import MediaRequest, MediaResult, Usage
-from marketing_agent.media.config import API_KEY_ENVS
+from marketing_agent.media.config import API_KEY_ENVS, ffmpeg_bin
 
 NAME = "gemini"
 API_HOST = "generativelanguage.googleapis.com"
@@ -56,6 +59,7 @@ POLL_MAX_WAIT_S = 120.0
 MAX_VIDEO_BYTES = 64 * 1024 * 1024
 MAX_REDIRECTS = 3
 _FILE_ID = re.compile(r"^/v1beta/files/([A-Za-z0-9_-]+)(?::download)?$")
+FFMPEG_TIMEOUT_S = 120
 
 
 class GeminiVideoError(Exception):
@@ -75,6 +79,47 @@ def has_audio_track(mp4: bytes) -> bool:
             return True
         start = at + 4
     return False
+
+
+def strip_audio(
+    data: bytes,
+    work_dir: Path,
+    *,
+    ffmpeg: str | None = None,
+    timeout_s: int = FFMPEG_TIMEOUT_S,
+) -> bytes:
+    """mp4에서 오디오를 제거한다(`-an`, 영상 스트림 복사). 실패하면 GeminiVideoError.
+
+    임시 파일은 `work_dir` 안에 만들고 끝나면 지운다. ffmpeg는 인자 목록으로만 부른다.
+    """
+    binary = ffmpeg or ffmpeg_bin()
+    src, dst = work_dir / "_src_audio.mp4", work_dir / "_src_muted.mp4"
+    try:
+        src.write_bytes(data)
+        args = [
+            binary, "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(src), "-map", "0:v:0", "-an", "-c:v", "copy",
+            "-movflags", "+faststart", str(dst),
+        ]  # fmt: skip
+        try:
+            done = subprocess.run(  # noqa: S603 - 인자 목록으로만 부른다
+                args, capture_output=True, timeout=timeout_s, check=False
+            )
+        except FileNotFoundError:
+            raise GeminiVideoError("ffmpeg_not_found") from None
+        except subprocess.TimeoutExpired:
+            raise GeminiVideoError("audio_strip_timeout") from None
+        except OSError:
+            raise GeminiVideoError("audio_strip_failed") from None
+        if done.returncode != 0 or not dst.is_file():
+            raise GeminiVideoError("audio_strip_failed")
+        stripped = dst.read_bytes()
+    finally:
+        src.unlink(missing_ok=True)
+        dst.unlink(missing_ok=True)
+    if not stripped or len(stripped) > MAX_VIDEO_BYTES or has_audio_track(stripped):
+        raise GeminiVideoError("audio_track_present")
+    return stripped
 
 
 def _find_video(body: dict[str, Any]) -> dict[str, Any]:
@@ -168,8 +213,10 @@ class GeminiVideoProvider:
 
         if not data or len(data) > MAX_VIDEO_BYTES:
             raise GeminiVideoError("invalid_video_size")
+        audio_stripped = False
         if request.remove_audio and has_audio_track(data):
-            raise GeminiVideoError("audio_track_present")
+            data = strip_audio(data, request.output_dir)
+            audio_stripped = True
         path = request.output_dir / "asset.mp4"
         path.write_bytes(data)
         usage_raw = body.get("usage")
@@ -189,6 +236,7 @@ class GeminiVideoProvider:
             usage=usage,
             generated_at=datetime.now(UTC),
             provider_job_id=str(body.get("id") or f"gemini_{request.prompt_sha256[:12]}"),
+            audio_stripped=audio_stripped,
         )
 
     def _video_bytes(self, client: httpx.Client, block: dict[str, Any], key: str) -> bytes:

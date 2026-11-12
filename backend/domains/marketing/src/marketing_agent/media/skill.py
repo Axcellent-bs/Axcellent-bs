@@ -24,6 +24,7 @@ import asyncio
 import hashlib
 import json
 import re
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -44,7 +45,7 @@ from ax_contracts.schemas import (
 from ax_contracts.schemas.common import AxModel
 from marketing_agent.media import pricing
 from marketing_agent.media.base import MediaKind, MediaRequest, MediaResult
-from marketing_agent.media.config import MOCK, MediaSettings
+from marketing_agent.media.config import MOCK, MediaSettings, ffmpeg_bin
 from marketing_agent.media.ledger import LedgerError, MediaLedger
 from marketing_agent.media.mock import MOCK_COST_KRW
 from marketing_agent.media.pricing import PriceNotFound
@@ -186,6 +187,13 @@ async def generate_media(
     adapter = get_adapter(provider_name)
     if adapter is None:
         return _fail(request, "provider_adapter_missing", provider=provider_name)
+    if (
+        kind == "video"
+        and not keep_source_audio
+        and provider_name != MOCK
+        and shutil.which(ffmpeg_bin()) is None
+    ):  # 무음으로 받은 영상에 오디오가 섞여 오면 ffmpeg로 제거한다. 비용이 나기 전에 막는다
+        return _fail(request, "ffmpeg_not_found")
     today = _now().date()
     usd_est: Decimal | None = None
     entry = None
@@ -337,6 +345,8 @@ async def generate_media(
     }
     output = GeneratedMedia.model_validate(output).model_dump(mode="json", exclude={"replayed"})
     meta = output | {"prompt": prompt, "fields": data.fields, "idempotency_key": key}
+    if kind == "video":
+        meta["audio_stripped"] = result.audio_stripped
     try:
         (out_dir / "meta.json").write_text(
             json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"

@@ -11,10 +11,10 @@ import hashlib
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ax_contracts.schemas.hr import (
     AnswerHandoverQuestionOutput,
@@ -948,6 +948,41 @@ async def handoff_brief_to_sns(
     _no_org_in_mock()
     key = f"ui:sns-handoff:{proposal_id}:{body.media_kind}"
     return ok(await marketing_client.handoff_call(proposal_id, body.media_kind, key))
+
+
+class VideoPostPrepareBody(BaseModel):
+    """영상 게시물 준비. 공지 또는 쿠폰 중 정확히 하나. 자유 프롬프트는 없다(장면 템플릿+필드)."""
+
+    notice_id: str | None = Field(default=None, min_length=1, max_length=100)
+    coupon: dict[str, Any] | None = None
+    media_kind: Literal["video"] = "video"
+    scene_template_id: str = Field(min_length=1, max_length=100)
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _one_source(self) -> VideoPostPrepareBody:
+        if (self.notice_id is None) == (self.coupon is None):
+            raise ValueError("notice_id와 coupon 중 하나만 준다")
+        return self
+
+
+class VideoPostPublishBody(BaseModel):
+    publish_input: dict[str, Any]
+
+
+@router.post("/marketing/video-post/prepare")
+async def prepare_video_post(body: VideoPostPrepareBody) -> dict:
+    """영상 생성 + 게시 초안 준비(마케팅 `prepare_sns_post_from_media`). 길게 걸릴 수 있다."""
+    _no_org_in_mock()
+    payload = body.model_dump(exclude_none=True)
+    return ok(await marketing_client.video_prepare_call(payload))
+
+
+@router.post("/marketing/video-post/publish")
+async def publish_video_post(body: VideoPostPublishBody) -> dict:
+    """게시 요청(마케팅 `publish_sns`). C등급이라 `input-required`+`review_id`가 그대로 돌아온다."""
+    _no_org_in_mock()
+    return ok(await marketing_client.video_publish_call(body.publish_input))
 
 
 class MarketingChatSendBody(BaseModel):

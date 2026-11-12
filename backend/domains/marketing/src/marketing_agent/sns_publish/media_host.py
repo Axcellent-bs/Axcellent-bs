@@ -7,7 +7,8 @@ Meta는 게시 시점에 미디어를 **공개 HTTPS 주소**에서 직접 내�
 - 외부 라이브러리 없이 SigV4를 직접 서명한다(`httpx`만 쓴다). 새 의존성이 없다.
 - 오브젝트 이름은 파일 내용의 sha256 앞부분이라 같은 파일을 다시 올려도 같은 이름이다
   (올리기가 멱등). 원래 파일 이름은 버킷에 남기지 않는다.
-- 이미지(JPEG)만 다룬다. 릴스(영상)는 `https://` 주소를 직접 주어야 한다.
+- 이미지(JPEG)와 릴스용 영상(mp4)을 올린다. 영상 키는 고정 이름이 아니라 미디어 ID가 들어간
+  고유 키이고(`video/<미디어 ID>-<해시>.mp4`), Content-Type은 `video/mp4`다. 크기 상한 300MB.
 - 서명 URL에는 서명이 들어 있어 로그·예외·결과에 내지 않는다. 실패 원인도 닫힌 코드로만 올린다.
 - 키 값은 환경변수에서만 읽는다. 이 파일은 환경변수 **이름**만 정의한다.
 
@@ -30,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from urllib.parse import quote, urlsplit
@@ -51,6 +53,8 @@ DEFAULT_PREFIX = "ig/"
 DEFAULT_TTL_S = 3600
 MAX_TTL_S = 86400  # Instagram 컨테이너 유효 24시간을 넘길 이유가 없다
 KEY_HASH_CHARS = 24
+VIDEO_MAX_BYTES = 300 * 1024 * 1024  # Instagram Reels 파일 상한
+_VIDEO_ID_RE = re.compile(r"[^A-Za-z0-9_-]")
 _ALGORITHM = "AWS4-HMAC-SHA256"
 
 
@@ -150,6 +154,12 @@ class S3MediaHost:
         """내용 해시로 이름을 만든다(같은 파일 = 같은 이름). 원래 파일 이름은 남기지 않는다."""
         return f"{self._prefix}{hashlib.sha256(content).hexdigest()[:KEY_HASH_CHARS]}.jpg"
 
+    def video_object_key(self, content: bytes, media_id: str) -> str:
+        """미디어 ID + 내용 해시로 고유 키를 만든다. 고정 이름을 쓰지 않는다."""
+        safe_id = _VIDEO_ID_RE.sub("", media_id)[:64] or "media"
+        digest = hashlib.sha256(content).hexdigest()[:KEY_HASH_CHARS]
+        return f"{self._prefix}video/{safe_id}-{digest}.mp4"
+
     def _target(self, key: str) -> tuple[str, str]:
         """(host, 정규화된 경로). 경로는 서명에 그대로 들어간다."""
         encoded = quote(key, safe="/")
@@ -233,4 +243,12 @@ class S3MediaHost:
         """JPEG 바이트를 올리고 읽기 전용 서명 URL을 돌려준다. JPEG·크기 검사는 부르는 쪽이 한다."""
         key = self.object_key(content)
         await self.put_object(key, content)
+        return self.presign_get(key)
+
+    async def upload_video(self, content: bytes, media_id: str) -> str:
+        """mp4 바이트를 올리고 읽기 전용 서명 URL을 돌려준다. 크기를 넘으면 올리지 않는다."""
+        if not content or len(content) > VIDEO_MAX_BYTES:
+            raise MediaHostError("video_size")
+        key = self.video_object_key(content, media_id)
+        await self.put_object(key, content, content_type="video/mp4")
         return self.presign_get(key)
