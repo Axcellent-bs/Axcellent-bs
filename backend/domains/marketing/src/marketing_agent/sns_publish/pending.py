@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS sns_pending (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sns_halt (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    failure_code    TEXT NOT NULL,
+    idempotency_key TEXT,
+    created_at      TEXT NOT NULL
+);
 """
 _UPDATABLE = frozenset(
     {
@@ -132,7 +138,7 @@ class PendingStore:
         try:
             self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
             with self._lock, self._conn:
-                self._conn.execute(_SCHEMA)
+                self._conn.executescript(_SCHEMA)
         except sqlite3.Error as error:
             raise PendingStorageError(
                 f"게시 대기 저장소를 열 수 없다: {type(error).__name__}"
@@ -162,6 +168,48 @@ class PendingStore:
 
     def with_status(self, status: str) -> list[PendingPost]:
         return self._query("WHERE status = ? ORDER BY created_at", (status,))
+
+    def count_posts_since(self, since: datetime) -> int:
+        """`since` 이후 게시된(또는 `media_publish`를 보낸) 건수. 게시 여부가 불확실한 건도 센다."""
+        try:
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM sns_pending WHERE updated_at >= ?"
+                    " AND (status = ? OR publish_sent = 1)",
+                    (since.astimezone(UTC).isoformat(), PUBLISHED),
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise PendingStorageError(
+                f"게시 건수를 읽을 수 없다: {type(error).__name__}"
+            ) from error
+        return int(row[0])
+
+    def halt_set(self, failure_code: str, key: str | None = None) -> None:
+        """중단 기록을 남긴다(`publish_halted`). 해제는 설정 파일의 `halt_cleared_before`."""
+        try:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT INTO sns_halt (failure_code, idempotency_key, created_at)"
+                    " VALUES (?,?,?)",
+                    (failure_code, key, _now()),
+                )
+        except sqlite3.Error as error:
+            raise PendingStorageError(
+                f"중단 기록을 저장할 수 없다: {type(error).__name__}"
+            ) from error
+
+    def halt_latest(self) -> tuple[str, datetime] | None:
+        """가장 최근 중단 기록 (실패 코드, 시각). 없으면 None."""
+        try:
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT failure_code, created_at FROM sns_halt ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise PendingStorageError(
+                f"중단 기록을 읽을 수 없다: {type(error).__name__}"
+            ) from error
+        return (row[0], datetime.fromisoformat(row[1])) if row else None
 
     def create(self, post: PendingPost) -> bool:
         """같은 키가 이미 있으면 False(먼저 들어간 것이 이긴다)."""

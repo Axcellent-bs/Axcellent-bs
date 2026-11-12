@@ -41,6 +41,8 @@ from marketing_agent.sns_publish.instagram import (
     IgApiError,
     IgResponseLost,
     MediaInfo,
+    PublishingLimit,
+    PublishOutcome,
 )
 from marketing_agent.sns_publish.media_host import (
     MediaHostConfigError,
@@ -150,6 +152,9 @@ class GraphInstagramAdapter:
             return
         if head != b"\xff\xd8\xff" or size > JPEG_MAX_BYTES:
             raise IgApiError(*_MEDIA_FORMAT)
+        # 비율 4:5~1.91:1·너비 320~1440도 공식 규격표(sns_media)로 본다
+        if sns_media.check_image(path).problems:
+            raise IgApiError(*_MEDIA_FORMAT)
 
     async def _hosted_image_url(self, media_ref: str) -> str:
         """미디어 폴더 안의 JPEG를 S3 호환 버킷에 올리고 읽기 전용 서명 URL을 돌려준다.
@@ -166,6 +171,8 @@ class GraphInstagramAdapter:
         except OSError:
             raise IgApiError(*_MEDIA_URL_UNREACHABLE) from None
         if content[:3] != b"\xff\xd8\xff" or len(content) > JPEG_MAX_BYTES:
+            raise IgApiError(*_MEDIA_FORMAT)
+        if sns_media.check_image(path).problems:  # 비율·너비까지 호출 전에 거른다
             raise IgApiError(*_MEDIA_FORMAT)
         try:
             return await self._media_host.upload_jpeg(content)
@@ -274,14 +281,33 @@ class GraphInstagramAdapter:
             raise IgApiError(-1, None)
         return ContainerStatus(status_code=_state(state))
 
-    async def media_publish(self, container_id: str) -> str:
+    async def media_publish(self, container_id: str) -> str | PublishOutcome:
         body = await self._request(
             "POST", f"{self._user_id}/media_publish", params={"creation_id": container_id}
         )
         media_id = body.get("id")
         if not isinstance(media_id, str) or not media_id:
             raise IgApiError(-1, None)
-        return media_id
+        issue = _issue_text(body.get("config_issue"))
+        # 게시는 성공했어도 캡션 부착 실패 등이 올 수 있다. 새 호출 없이 응답 필드를 그대로 전한다
+        return PublishOutcome(media_id, issue) if issue else media_id
+
+    async def get_publishing_limit(self) -> PublishingLimit:
+        """`GET /{ig-id}/content_publishing_limit?fields=config,quota_usage`(읽기 전용)."""
+        body = await self._request(
+            "GET",
+            f"{self._user_id}/content_publishing_limit",
+            params={"fields": "config,quota_usage"},
+        )
+        data = body.get("data")
+        entry = data[0] if isinstance(data, list) and data else body
+        usage = entry.get("quota_usage") if isinstance(entry, dict) else None
+        config = entry.get("config") if isinstance(entry, dict) else None
+        total = config.get("quota_total") if isinstance(config, dict) else None
+        if not isinstance(usage, int) or isinstance(usage, bool) or usage < 0:
+            raise IgApiError(-1, None)
+        ok_total = isinstance(total, int) and not isinstance(total, bool) and total > 0
+        return PublishingLimit(usage, total if ok_total else None)
 
     async def get_media(self, media_id: str) -> MediaInfo:
         # `is_ai_generated` 필드는 요청하지 않는다(모르는 필드면 호출 전체가 실패할 수 있다).
@@ -302,6 +328,22 @@ class GraphInstagramAdapter:
 
 def _state(value: str) -> ContainerState:
     return value  # type: ignore[return-value]  # _STATES로 이미 걸렀다
+
+
+def _issue_text(value: Any) -> str | None:
+    """`config_issue` 응답을 짧은 글로. 문자열·객체·목록 어느 모양이어도 기록할 수 있게 한다."""
+    if value in (None, "", [], {}):
+        return None
+    if isinstance(value, str):
+        return value[:120]
+    if isinstance(value, dict):
+        for key in ("code", "type", "issue", "name"):
+            if isinstance(value.get(key), str) and value[key]:
+                return value[key][:120]
+    if isinstance(value, list):
+        parts = [_issue_text(v) for v in value]
+        return ",".join(p for p in parts if p)[:120] or "unknown_config_issue"
+    return "unknown_config_issue"
 
 
 def _text(value: Any) -> str | None:

@@ -25,7 +25,9 @@ from marketing_agent.sns_publish.instagram_graph import (
 TOKEN = "test-token-not-real"  # 시험용 자리표시. 진짜 값이 아니다
 USER_ID = "1784140000000000"
 MEDIA_BASE = "https://media.example.test/ig"
-JPEG = b"\xff\xd8\xff\xe0" + b"0" * 64
+# 규격 검사를 통과하는 최소 JPEG 머리(1080x1350 = 4:5)
+_SOF = b"\xff\xc0" + (11).to_bytes(2, "big") + b"\x08" + (1350).to_bytes(2, "big")
+JPEG = b"\xff\xd8" + _SOF + (1080).to_bytes(2, "big") + b"\x01\x01\x11\x00\xff\xd9" + b"0" * 64
 
 
 class Recorder:
@@ -281,3 +283,65 @@ def test_unknown_provider_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARKETING_SNS_PROVIDER", "tiktok")
     with pytest.raises(AdapterUnavailable):
         get_adapter()
+
+
+# -- 보강: config_issue, 계정 게시 한도(읽기), 로컬 이미지 규격
+@pytest.mark.asyncio
+async def test_media_publish_passes_config_issue_through_from_the_response() -> None:
+    rec = Recorder(_json({"id": "m1", "config_issue": "CAPTION_NOT_ATTACHED"}))
+    outcome = await _adapter(rec).media_publish("c1")
+    assert outcome.media_id == "m1" and outcome.config_issue == "CAPTION_NOT_ATTACHED"
+    assert len(rec.requests) == 1  # 새 외부 호출 없음
+
+
+@pytest.mark.asyncio
+async def test_media_publish_without_config_issue_still_returns_plain_id() -> None:
+    rec = Recorder(_json({"id": "m1"}))
+    assert await _adapter(rec).media_publish("c1") == "m1"
+
+
+@pytest.mark.asyncio
+async def test_publishing_limit_is_a_read_only_get_with_expected_fields() -> None:
+    rec = Recorder(_json({"data": [{"quota_usage": 7, "config": {"quota_total": 50}}]}))
+    limit = await _adapter(rec).get_publishing_limit()
+    assert (limit.quota_usage, limit.quota_total) == (7, 50)
+    request = rec.requests[0]
+    assert request.method == "GET"
+    assert request.url.path.endswith(f"/{USER_ID}/content_publishing_limit")
+    assert rec.form()["fields"] == "config,quota_usage"
+
+
+@pytest.mark.asyncio
+async def test_publishing_limit_rejects_malformed_response() -> None:
+    rec = Recorder(_json({"data": [{"config": {"quota_total": 50}}]}))
+    with pytest.raises(IgApiError):
+        await _adapter(rec).get_publishing_limit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [(1080, 1500), (1440, 600), (300, 375)],  # 4:5보다 길다 / 1.91:1보다 넓다 / 너비 320 미만
+)
+async def test_local_image_outside_aspect_or_width_is_rejected_before_any_request(
+    tmp_path: Path, width: int, height: int
+) -> None:
+    sof = b"\xff\xc0" + (11).to_bytes(2, "big") + b"\x08"
+    sof += height.to_bytes(2, "big") + width.to_bytes(2, "big") + b"\x01\x01\x11\x00"
+    asset = tmp_path / "bad.jpg"
+    asset.write_bytes(b"\xff\xd8" + sof + b"\xff\xd9")
+    rec = Recorder()
+    with pytest.raises(IgApiError) as caught:
+        await _adapter(rec).create_container(_req(ref=str(asset)))
+    assert classify(caught.value.code, caught.value.subcode)[0] == "ig_video_format"
+    assert rec.requests == []
+
+
+@pytest.mark.asyncio
+async def test_local_png_is_rejected_before_any_request(tmp_path: Path) -> None:
+    asset = tmp_path / "old.png"
+    asset.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+    rec = Recorder()
+    with pytest.raises(IgApiError):
+        await _adapter(rec).create_container(_req(ref=str(asset)))
+    assert rec.requests == []

@@ -423,11 +423,14 @@ async def draft_sns_post(
     asset_sha: str | None = None
     carousel_assets: list[CarouselAsset] = []
     if data.media_kind == "carousel":
+        draft_sizes: list[tuple[int, int]] = []
         for path in data.asset_paths or []:
             try:
                 asset = sns_media.resolve_asset(path)
             except sns_media.MediaPathError as error:
                 return _result(request, TaskStatus.FAILED, outcome=error.code)
+            if sns_media.is_jpeg(asset) and (size := sns_media.jpeg_size(asset)) is not None:
+                draft_sizes.append(size)
             carousel_assets.append(
                 CarouselAsset(
                     asset_ref=sns_media.asset_ref_for(asset),
@@ -435,6 +438,10 @@ async def draft_sns_post(
                 )
             )
         asset_sha = sns_media.carousel_sha256([a.asset_sha256 for a in carousel_assets])
+        if sns_media.carousel_aspect_mismatch(
+            draft_sizes
+        ):  # 초안 단계에서 거절(점검·게시도 같은 규칙)
+            return _result(request, TaskStatus.FAILED, outcome="carousel_aspect_mismatch")
     elif data.asset_path is not None:
         try:
             asset = sns_media.resolve_asset(data.asset_path)
@@ -517,7 +524,7 @@ def _check_carousel(draft: SnsPostDraft) -> _MediaOutcome:
         out.asset_changed = 1
     checked = True
     marks: list[bool] = []
-    ratios: set[float] = set()
+    sizes: list[tuple[int, int]] = []
     for index, item in enumerate(draft.assets, 1):
         single = draft.model_copy(
             update={
@@ -537,13 +544,15 @@ def _check_carousel(draft: SnsPostDraft) -> _MediaOutcome:
         marks.append(part.machine_mark is True)
         width, height = part.details.get("width"), part.details.get("height")
         if isinstance(width, int) and isinstance(height, int) and height > 0:
-            ratios.add(round(width / height, 2))
+            sizes.append((width, height))
         items.append(
             {"index": index, "asset_ref": item.asset_ref, "media_checked": part.checked}
             | {k: v for k, v in part.details.items() if k in ("width", "height", "size_bytes")}
         )
-    if len(ratios) > 1:  # 첫 장 비율로 잘릴 수 있다 [확인 필요: 공식 문서 대조 기록에 없다]
+    if sns_media.carousel_aspect_mismatch(sizes):
+        # 모든 장이 첫 장 비율로 잘린다(Meta 공식 문서). 경고 코드는 유지하고 게시 경로는 거절한다
         out.warnings.append("carousel_aspect_differs")
+        out.problems.append("carousel_aspect_mismatch")
     out.checked = checked
     out.machine_mark = all(marks)
     return out

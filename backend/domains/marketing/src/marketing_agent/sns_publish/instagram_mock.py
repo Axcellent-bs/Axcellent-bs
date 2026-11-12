@@ -24,6 +24,8 @@ from marketing_agent.sns_publish.instagram import (
     IgApiError,
     IgResponseLost,
     MediaInfo,
+    PublishingLimit,
+    PublishOutcome,
 )
 
 OPS = (
@@ -34,6 +36,7 @@ OPS = (
     "media_publish",
     "get_media",
     "delete_media",
+    "get_publishing_limit",
 )
 
 
@@ -48,6 +51,7 @@ class _Failure:
 class _Container:
     request: ContainerRequest
     polls: int = 0
+    finished: bool = False  # 상태 조회가 FINISHED를 돌려준 적이 있다
     published_media_id: str | None = None
     children: tuple[str, ...] = ()
 
@@ -65,6 +69,10 @@ class MockInstagramAdapter:
         self.carousel_item_refs: list[str] = []  # 자식으로 만든 media_ref(순서 그대로)
         self.carousel_requests: list[CarouselRequest] = []
         self.report_ai_flag: bool | None = True  # get_media가 돌려줄 is_ai_generated
+        self.config_issue: str | None = None  # media_publish 응답의 config_issue
+        self.limit_reads = 0
+        self.quota_usage = 0  # get_publishing_limit이 돌려줄 값
+        self.quota_total: int | None = 50
         self._failures: dict[str, list[_Failure]] = {}
         self._lose: dict[str, bool] = {}
         self._container_error: tuple[int, int | None] | None = None
@@ -120,6 +128,8 @@ class MockInstagramAdapter:
             raise IgApiError(-1, None)  # 모르는 오류(2~10장이 아니다)
         if any(child not in self.containers for child in request.child_ids):
             raise IgApiError(24, 2207008)
+        if any(not self.containers[child].finished for child in request.child_ids):
+            raise IgApiError(9007, 2207027)  # 자식이 아직 FINISHED가 아니다
         self._seq += 1
         container_id = f"mock_carousel_{self._seq}"
         self.containers[container_id] = _Container(
@@ -147,14 +157,17 @@ class MockInstagramAdapter:
         container.polls += 1
         if container.polls <= self.in_progress_polls:
             return ContainerStatus("IN_PROGRESS")
+        container.finished = True
         return ContainerStatus("FINISHED")
 
-    async def media_publish(self, container_id: str) -> str:
+    async def media_publish(self, container_id: str) -> str | PublishOutcome:
         self.calls["media_publish"] += 1
         self._maybe_fail("media_publish")
         container = self.containers.get(container_id)
         if container is None:
             raise IgApiError(24, 2207008)
+        if not container.finished and not container.published_media_id:
+            raise IgApiError(9007, 2207027)  # 부모가 FINISHED가 되기 전 게시
         if self._lose.get("media_publish") is False:
             raise IgResponseLost("media_publish")
         if container.published_media_id:  # 실제 API도 이미 게시한 컨테이너는 다시 게시하지 않는다
@@ -172,7 +185,14 @@ class MockInstagramAdapter:
         )
         if "media_publish" in self._lose:
             raise IgResponseLost("media_publish")
+        if self.config_issue:
+            return PublishOutcome(media_id, self.config_issue)
         return media_id
+
+    async def get_publishing_limit(self) -> PublishingLimit:
+        self.limit_reads += 1  # 읽기 전용이라 `calls`(쓰기 호출 횟수)에 넣지 않는다
+        self._maybe_fail("get_publishing_limit")
+        return PublishingLimit(self.quota_usage, self.quota_total)
 
     async def get_media(self, media_id: str) -> MediaInfo:
         self.calls["get_media"] += 1

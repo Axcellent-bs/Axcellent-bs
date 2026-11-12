@@ -46,14 +46,16 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.common import AxModel
 from marketing_agent import sns_media
-from marketing_agent.sns_publish.config import SnsConfig
+from marketing_agent.sns_publish.config import LimitsConfigError, SnsConfig
 from marketing_agent.sns_publish.instagram import (
+    HALT_FAILURES,
     AdapterUnavailable,
     CarouselRequest,
     ContainerRequest,
     IgApiError,
     IgResponseLost,
     InstagramAdapter,
+    PublishOutcome,
     classify,
     get_adapter,
 )
@@ -71,9 +73,12 @@ from marketing_agent.sns_publish.pending import (
 
 ACTION = "publish_sns"
 SOURCE = "marketing"
+NOT_READY = "ig_not_ready"  # 9007/2207027
+NOT_READY_RETRIES = 1
 CAPTION_MAX = 2200
 _log = logging.getLogger("ax.marketing.sns_publish")
 
+DAILY_WINDOW = timedelta(hours=24)  # 이동 24시간 창
 MediaKind = Literal["image", "reel", "carousel"]
 _SHA = r"^[0-9a-f]{64}$"
 
@@ -126,6 +131,10 @@ class PublishSnsOutput(AxModel):
     provider: str | None = None
     item_count: int | None = None  # 캐러셀 장수
     asset_refs: list[str] | None = None  # 캐러셀 각 장의 참조(게시 순서)
+    # 게시 성공 응답의 config_issue(CAPTION_NOT_ATTACHED 등). 있으면 사람이 앱에서 확인한다
+    config_issue: str | None = None
+    reconcile_needed: bool | None = None
+    limit_check_failed: bool | None = None  # 계정 한도 조회 실패(로컬 기록만으로 판단)
 
 
 # -- 내용 해시·멱등 키
@@ -233,9 +242,12 @@ def _now() -> datetime:
 
 
 def _evidence(row: PendingPost) -> Evidence:
+    note = ""
+    if row.result.get("reconcile_needed"):
+        note = f" - 게시됐지만 사람 확인 필요(reconcile_needed: {row.result.get('config_issue')})"
     return Evidence(
         queries=["publish_sns"],
-        data_summary=f"게시 대기 건 {row.post_draft_id} ({row.status})",
+        data_summary=f"게시 대기 건 {row.post_draft_id} ({row.status}){note}",
         collected_at=_now(),
         ref_ids=[r for r in (row.post_draft_id, row.execution_id, row.review_id) if r],
     )
@@ -306,6 +318,9 @@ def _output(row: PendingPost) -> dict[str, Any]:
         provider=info.get("provider"),
         item_count=len(row.params["asset_refs"]) if row.params.get("asset_refs") else None,
         asset_refs=row.params.get("asset_refs") or None,
+        config_issue=info.get("config_issue"),
+        reconcile_needed=info.get("reconcile_needed"),
+        limit_check_failed=info.get("limit_check_failed"),
     ).model_dump(exclude_none=True)
 
 
@@ -465,6 +480,14 @@ async def publish_sns(request: AgentRequest, sns_store: Any | None = None) -> Ag
                 existing = store().get(key) or existing
             return _result_for(request, existing)
 
+        refused, _flags = await _pre_gate(adapter)
+        if refused:  # 중단 중이거나 24시간 상한이다. 승인을 받으러 가지 않는다
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.FAILED,
+                outcome=refused,
+                output={"reason": refused, **_flags},
+            )
         meta = request.meta.model_copy(update={"idempotency_key": key})
         decision = await execute(
             ACTION,
@@ -672,9 +695,13 @@ async def review_poll_loop() -> None:
 
 # -- 게시 실행 (executed 뒤에만 들어온다)
 async def _retrying[T](row: PendingPost, op: str, call: Callable[[], Awaitable[T]]) -> T:
-    """일시 오류만 백오프로 다시 한다. 상한을 넘거나 재시도 대상이 아니면 실패로 올린다."""
+    """일시 오류만 백오프로 다시 한다. 상한을 넘거나 재시도 대상이 아니면 실패로 올린다.
+
+    2207027(아직 준비 안 됨)은 한 번만 기다렸다가(`status_poll_s`) 다시 한다.
+    """
     cfg = config()
     attempt = 0
+    not_ready_used = 0
     while True:
         try:
             return await call()
@@ -683,10 +710,16 @@ async def _retrying[T](row: PendingPost, op: str, call: Callable[[], Awaitable[T
         except IgApiError as error:
             code, action = classify(error.code, error.subcode)
         _row_log(row, "sns_publish_attempt", {"op": op, "failure": code, "attempt": attempt})
-        if action == "retry" and attempt < cfg.max_retries:
-            await RT.sleep(cfg.retry_base_s * (2**attempt))
-            attempt += 1
-            continue
+        if action == "retry":
+            if code == NOT_READY:
+                if not_ready_used < NOT_READY_RETRIES:
+                    not_ready_used += 1
+                    await RT.sleep(cfg.status_poll_s)
+                    continue
+            elif attempt < cfg.max_retries:
+                await RT.sleep(cfg.retry_base_s * (2**attempt))
+                attempt += 1
+                continue
         if action == "new_container":
             raise _NewContainer(code)
         raise _Fail(code)
@@ -714,10 +747,9 @@ async def _wait_finished(row: PendingPost, adapter: InstagramAdapter, container_
             await RT.sleep(cfg.status_poll_s)
             continue
         if status.status_code == "ERROR":
-            code, action = classify(status.error_code, status.error_subcode)
-            if action == "fail":
-                raise _Fail(code)
-            raise _NewContainer(code)  # 컨테이너가 깨졌으니 새 컨테이너 1회
+            # ERROR는 게시하지 않고 사유 코드로 닫는다. 다시 하려면 새 승인이 필요하다
+            code, _action = classify(status.error_code, status.error_subcode)
+            raise _Fail("ig_container_error" if code == "ig_unknown_error" else code)
         if status.status_code == "EXPIRED":
             raise _Fail("ig_container_expired")
         raise _Fail("container_already_published")  # 우리가 게시하기 전에 PUBLISHED: 사람이 확인
@@ -815,10 +847,12 @@ async def _resolve_lost(
 
 async def _publish_once(
     row: PendingPost, adapter: InstagramAdapter, container_id: str
-) -> str | None:
+) -> tuple[str | None, str | None]:
+    """(media_id, config_issue). 응답 필드만 쓰고 새 외부 호출은 하지 않는다."""
     store().update(row.idempotency_key, publish_sent=True)  # 보내기 전에 남긴다(복구가 본다)
     cfg = config()
     attempt = 0
+    not_ready_used = 0
     while True:
         _row_log(
             row,
@@ -826,21 +860,32 @@ async def _publish_once(
             {"op": "media_publish", "container_id": container_id, "attempt": attempt},
         )
         try:
-            return await adapter.media_publish(container_id)
+            outcome = await adapter.media_publish(container_id)
+            if isinstance(outcome, PublishOutcome):
+                return outcome.media_id, outcome.config_issue
+            return outcome, None
         except IgResponseLost:
-            return await _resolve_lost(row, adapter, container_id)
+            return await _resolve_lost(row, adapter, container_id), None
         except IgApiError as error:
             code, action = classify(error.code, error.subcode)
-            if action != "retry" or attempt >= cfg.max_retries:
+            if action != "retry":
                 raise _Fail(code) from error
-            # 에러 응답이 왔으므로 게시되지 않았다. 그래도 컨테이너가 이미 PUBLISHED인지 먼저 본다
-            await RT.sleep(cfg.retry_base_s * (2**attempt))
-            attempt += 1
+            if code == NOT_READY:  # 한 번만 기다렸다가 다시 보낸다
+                if not_ready_used >= NOT_READY_RETRIES:
+                    raise _Fail(code) from error
+                not_ready_used += 1
+                await RT.sleep(cfg.status_poll_s)
+            else:
+                if attempt >= cfg.max_retries:
+                    raise _Fail(code) from error
+                # 에러 응답이면 게시되지 않았다. 그래도 컨테이너가 이미 PUBLISHED인지 먼저 본다
+                await RT.sleep(cfg.retry_base_s * (2**attempt))
+                attempt += 1
             status = await _retrying(
                 row, "get_container_status", lambda: adapter.get_container_status(container_id)
             )
             if status.status_code == "PUBLISHED":
-                return status.media_id
+                return status.media_id, None
 
 
 async def _verify(
@@ -865,6 +910,50 @@ async def _verify(
     }
 
 
+def _halted() -> bool:
+    """`publish_halted`: 한도 초과·계정 제한·스팸 판정 이후 사람이 풀기 전까지 게시하지 않는다."""
+    latest = store().halt_latest()
+    if latest is None:
+        return False
+    cleared = config().halt_cleared_before
+    return cleared is None or latest[1] > cleared
+
+
+async def _limit_check(adapter: InstagramAdapter) -> tuple[str | None, dict[str, Any]]:
+    """24시간 게시 상한. (거절 코드 또는 None, 결과에 남길 표시).
+
+    로컬 게시 기록과 계정의 실제 사용량(`content_publishing_limit`, 읽기) 중 큰 쪽으로 본다.
+    계정 조회가 실패하면 로컬 기록만으로 판단하고 `limit_check_failed`를 남긴다.
+    """
+    cfg = config()
+    used = store().count_posts_since(_now() - DAILY_WINDOW)
+    cap = cfg.max_posts_per_24h
+    flags: dict[str, Any] = {}
+    reader = getattr(adapter, "get_publishing_limit", None)
+    if reader is not None:
+        try:
+            info = await reader()
+        except Exception:  # noqa: BLE001 - 어떤 실패든 로컬 기록으로만 판단한다
+            flags["limit_check_failed"] = True
+        else:
+            used = max(used, info.quota_usage)
+            if info.quota_total:
+                cap = min(cap, info.quota_total)
+    if used >= cap:
+        return "daily_limit_reached", flags
+    return None, flags
+
+
+async def _pre_gate(adapter: InstagramAdapter) -> tuple[str | None, dict[str, Any]]:
+    """승인 요청 전 점검: 중단 상태, 24시간 상한."""
+    try:
+        if _halted():
+            return "publish_halted", {}
+        return await _limit_check(adapter)
+    except LimitsConfigError:
+        return "limits_config_error", {}
+
+
 async def _run_publish(row: PendingPost) -> None:
     """`approved` 건을 게시한다. `execute()`가 `executed`를 돌려준 뒤에만 호출된다."""
     key = row.idempotency_key
@@ -876,18 +965,34 @@ async def _run_publish(row: PendingPost) -> None:
     if not store().transition(key, APPROVED, PUBLISHING):
         return  # 이미 다른 경로가 가져갔다(락)
     store().update(key, attempts=row.attempts + 1)
+    flags: dict[str, Any] = {}
     try:
+        if _halted():
+            raise _Fail("publish_halted")
         container_id = await _prepare_container(row, adapter)
-        media_id = await _publish_once(row, adapter, container_id)
+        refused, flags = await _limit_check(adapter)  # media_publish 직전 다시 본다
+        if refused:
+            raise _Fail(refused)
+        if _halted():
+            raise _Fail("publish_halted")
+        media_id, config_issue = await _publish_once(row, adapter, container_id)
     except (_Fail, _NewContainer) as failure:
-        _close(row, PUBLISHING, FAILED, failure.code)
+        if failure.code in HALT_FAILURES:
+            store().halt_set(failure.code, key)
+        _close(row, PUBLISHING, FAILED, failure.code, **({"result": flags} if flags else {}))
+        return
+    except LimitsConfigError:
+        _close(row, PUBLISHING, FAILED, "limits_config_error")
         return
     except Exception as error:  # noqa: BLE001
         _row_log(row, "sns_publish_attempt", {"op": "unexpected", "error": type(error).__name__})
         _close(row, PUBLISHING, FAILED, "unexpected_error")
         return
     fresh = store().get(key) or row
-    result = await _verify(fresh, adapter, media_id)
+    result = await _verify(fresh, adapter, media_id) | flags
+    if config_issue:  # 게시는 됐지만 캡션 부착 실패 등 → 사람이 확인(reconcile)
+        result |= {"config_issue": config_issue, "reconcile_needed": True}
+        _row_log(fresh, "sns_publish_attempt", {"op": "config_issue", "issue": config_issue})
     _close(fresh, PUBLISHING, PUBLISHED, None, media_id=media_id, result=result)
 
 
