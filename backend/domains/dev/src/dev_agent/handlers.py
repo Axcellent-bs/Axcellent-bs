@@ -565,6 +565,10 @@ async def receive_request_pause(request: AgentRequest) -> AgentResult:
 # start_dev). 거절은 FAILED + outcome(소문자 코드)
 
 
+# 대시보드 AI 대화방에서 연 대화. 개발 화면 대화 패널(screen)과 서로 보이지 않는다
+DASHBOARD = "dashboard"
+
+
 def _chat_done(request: AgentRequest, skill: str, output: dict[str, Any]) -> AgentResult:
     return AgentResult(
         meta=request.meta,
@@ -593,7 +597,9 @@ async def dev_chat_send(request: AgentRequest) -> AgentResult:
         return _invalid(request, exc)
     svc = get_service()
     try:
-        th = await dev_chat.send(svc, inp.thread_id, inp.message, inp.connection, inp.mode, inp.who)
+        th = await dev_chat.send(
+            svc, inp.thread_id, inp.message, inp.connection, inp.mode, inp.who, DASHBOARD
+        )
     except ActionError as exc:
         return _chat_refused(request, exc)
     except GateRefused as exc:
@@ -608,7 +614,7 @@ async def dev_chat_list(request: AgentRequest) -> AgentResult:
         return _invalid(request, exc)
     svc = get_service()
     await dev_chat.close_idle(svc)
-    threads = dev_chat.listed(svc, inp.who, inp.limit)
+    threads = dev_chat.listed(svc, inp.who, inp.limit, DASHBOARD)
     return _chat_done(request, "dev_chat_list", {"threads": threads})
 
 
@@ -620,7 +626,7 @@ async def dev_chat_get(request: AgentRequest) -> AgentResult:
     svc = get_service()
     await dev_chat.close_idle(svc)
     th = svc.chat_of(inp.thread_id)
-    if th is None:
+    if th is None or not dev_chat.seen_from(th, DASHBOARD):
         return _chat_refused(request, ActionError("NOT_FOUND", f"대화 {inp.thread_id}가 없다"))
     return _chat_done(request, "dev_chat_get", {"thread": dev_chat.view(th, inp.who)})
 
@@ -631,7 +637,7 @@ async def dev_chat_close(request: AgentRequest) -> AgentResult:
     except ValidationError as exc:
         return _invalid(request, exc)
     try:
-        th = await dev_chat.close(get_service(), inp.thread_id, inp.who)
+        th = await dev_chat.close(get_service(), inp.thread_id, inp.who, DASHBOARD)
     except ActionError as exc:
         return _chat_refused(request, exc)
     return _chat_done(request, "dev_chat_close", {"thread": dev_chat.view(th, inp.who)})

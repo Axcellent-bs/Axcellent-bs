@@ -522,6 +522,9 @@ class ChatThread(DomainModel):
     mode: Literal["agent", "subscription"] = "agent"
     # 대화를 연 사람 (사람 토큰 이름). 내 Claude 작업은 이 사람에게 맡긴다
     who: str | None = None
+    # 어디서 연 대화인가: screen(개발 화면 대화 패널) · dashboard(대시보드 AI 대화방, A2A).
+    # 서로의 대화는 보이지 않는다. None은 나누기 전 대화라 양쪽에 다 보인다
+    origin: Literal["screen", "dashboard"] | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
