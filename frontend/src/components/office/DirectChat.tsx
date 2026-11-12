@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { PreparingChip } from "@/components/Preparing";
 import { HandoffLine, PlanCard, PROCEED_TEXT } from "@/components/office/DevCards";
+import { ConfirmRemove } from "@/components/office/ConfirmRemove";
+import { removeFailText, useToast } from "@/components/office/useToast";
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "@/lib/env";
-import { POLL_MS, classifyFailure, directChatApi, isAnswering } from "@/lib/directChat";
+import { DirectChatError, POLL_MS, classifyFailure, directChatApi, isAnswering } from "@/lib/directChat";
 import { loadOwners, loadThreadId, saveOwner, saveThreadId, threadKey } from "@/lib/directThreads";
 import { OFFICE_ROOM_MAX_HOURS, listOfficeRoom } from "@/lib/officeRoom";
 import type { ChatMessage, ChatStatus, ChatThread as BaseThread } from "@/lib/planningData";
@@ -30,6 +32,8 @@ interface Talk {
   send: (x: { thread_id?: string; message: string }) => Promise<ChatThread>;
   /** 대화 끝내기. 이 창구가 지원할 때만 있다 (끝내면 서버가 한두 줄 요약을 남긴다) */
   close?: (id: string) => Promise<ChatThread>;
+  /** 대화 지우기 (본인 대화만, 서버가 확인). POST `<주소>/<id>/remove` */
+  remove?: (id: string) => Promise<void>;
 }
 
 // 인사 AI 대화 창구(decisions 8114 `/api/hr/chat`). CORS가 없어 기본값은 Vite 개발 프록시(/hr-api → vite.config.ts)
@@ -48,14 +52,18 @@ async function hrCall<T>(path: string, init: RequestInit = {}): Promise<T> {
     cache: "no-store",
     headers: { "Content-Type": "application/json", ...(SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {}) },
   });
-  const body = (await res.json().catch(() => null)) as { data?: T; error?: { message?: string } } | null;
-  if (!res.ok || !body || body.data === undefined) throw new Error(body?.error?.message ?? `인사 AI에 연결할 수 없어요 (${res.status})`);
+  const body = (await res.json().catch(() => null)) as { data?: T; error?: { code?: string; message?: string } } | null;
+  // 상태 코드를 같이 넘긴다 (지우기 실패 안내에 쓴다)
+  if (!res.ok || !body || body.data === undefined) {
+    throw new DirectChatError(body?.error?.message ?? `인사 AI에 연결할 수 없어요 (${res.status})`, res.status, body?.error?.code ?? `HTTP_${res.status}`);
+  }
   return body.data;
 }
 const hrTalk: Talk = {
   list: () => hrCall<Record<string, unknown>[]>("/chat").then((d) => (Array.isArray(d) ? d.map(toThread) : [])),
   get: (id) => hrCall<Record<string, unknown>>(`/chat/${encodeURIComponent(id)}`).then(toThread),
   send: (x) => hrCall<Record<string, unknown>>("/chat", { method: "POST", body: JSON.stringify(x) }).then(toThread),
+  remove: (id) => hrCall<Record<string, unknown>>(`/chat/${encodeURIComponent(id)}/remove`, { method: "POST", body: "{}" }).then(() => undefined),
 };
 
 export const DIRECT_PREFIX = "direct:";
@@ -121,6 +129,8 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
   const [all, setAll] = useState<ChatThread[]>([]);
   const [closing, setClosing] = useState(false);
   const [owners, setOwners] = useState(loadOwners);
+  const [askDel, setAskDel] = useState<ChatThread | null>(null);
+  const toast = useToast();
   const box = useRef<HTMLDivElement>(null);
   const seeOthers = canSeeOthers(agent.key, account);
   const tkey = threadKey(agent.key, account.id);
@@ -230,6 +240,17 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
     setError(null);
     api.get(t.id).then((x) => { setThread(x); if (owners[x.id] === account.id) saveThreadId(tkey, x.id); }).catch((err) => { if (!failed(err)) setError(errText(err, agent.name)); });
   };
+  const removeThread = async (t: ChatThread) => {
+    const name = t.title || t.messages[0]?.text.slice(0, 30) || "제목 없는 대화";
+    try {
+      await api.remove?.(t.id);
+      setAll((a) => a.filter((x) => x.id !== t.id));
+      if (thread?.id === t.id) reset();
+      toast.show(`"${name}" 삭제됨`);
+    } catch (err) {
+      toast.show(removeFailText(err), { ms: 6000 });
+    }
+  };
   const messages = thread?.messages ?? [];
   // "이대로 진행": 마지막 계획 메시지에만, 이야기 중(talking)인 내 대화일 때만 (개발 화면과 같은 규칙)
   const last = messages[messages.length - 1];
@@ -247,12 +268,16 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
           {mine.length === 0 ? <p className="mt-2 text-xs text-ink-500">아직 없어요.</p> : (
             <ul className="mt-2 space-y-1">
               {mine.map((t) => (
-                <li key={t.id}>
+                <li key={t.id} className="flex items-center gap-1">
                   <button type="button" onClick={() => open(t)} disabled={!!sending}
-                    className={`w-full rounded-lg px-2 py-1.5 text-left text-xs ${thread?.id === t.id ? "bg-brand-50 font-semibold text-brand-700" : "hover:bg-ink-50"}`}>
+                    className={`min-w-0 flex-1 rounded-lg px-2 py-1.5 text-left text-xs ${thread?.id === t.id ? "bg-brand-50 font-semibold text-brand-700" : "hover:bg-ink-50"}`}>
                     <span className="block truncate">{t.title || "제목 없는 대화"}</span>
                     <span className="text-[11px] text-ink-500">{when(t.updatedAt)} · {RESULT[t.status]}</span>
                   </button>
+                  {api.remove && (
+                    <button type="button" className="btn-ghost shrink-0 px-1.5 py-0.5 text-[11px]" onClick={() => setAskDel(t)} disabled={!!sending}
+                      aria-label={`${t.title || "제목 없는 대화"} 삭제`}>삭제</button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -336,6 +361,12 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
           )
         )}
       </div>
+      {askDel && (
+        <ConfirmRemove title="대화 기록 삭제" name={askDel.title || askDel.messages[0]?.text.slice(0, 30) || "제목 없는 대화"}
+          lines={[`${agent.name}와 나눈 이 1:1 대화(메시지 ${askDel.messageCount ?? askDel.messages.length}개)를 지웁니다.`]}
+          onConfirm={() => removeThread(askDel)} onClose={() => setAskDel(null)} />
+      )}
+      {toast.node}
     </div>
   );
 }

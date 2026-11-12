@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
+from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.planning import (
     DevChatListInput,
     DevChatRef,
@@ -643,6 +644,20 @@ async def dev_chat_close(request: AgentRequest) -> AgentResult:
     return _chat_done(request, "dev_chat_close", {"thread": dev_chat.view(th, inp.who)})
 
 
+async def dev_chat_remove(request: AgentRequest) -> AgentResult:
+    """본인 대화를 저장소에서 지운다 (대화 기록만, 업무 상태는 안 바꾼다)."""
+    try:
+        inp = DevChatRef.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    try:
+        thread_id = await dev_chat.remove(get_service(), inp.thread_id, inp.who, DASHBOARD)
+    except ActionError as exc:
+        return _chat_refused(request, exc)
+    out = ChatRemoveOutput(thread_id=thread_id, removed=True)
+    return _chat_done(request, "dev_chat_remove", out.model_dump(mode="json"))
+
+
 # 개발 서비스(dev 8111)가 받는 skill
 DEV_HANDLERS = {
     "find_related_prs": find_related_prs,
@@ -659,4 +674,5 @@ DEV_HANDLERS = {
     "dev_chat_list": dev_chat_list,
     "dev_chat_get": dev_chat_get,
     "dev_chat_close": dev_chat_close,
+    "dev_chat_remove": dev_chat_remove,
 }

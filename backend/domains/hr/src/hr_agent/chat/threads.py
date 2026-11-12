@@ -60,6 +60,14 @@ def list_all(svc: Services, limit: int = 100) -> list[dict[str, Any]]:
     return [_view(r) for r in rows]
 
 
+def delete(svc: Services, thread_id: str) -> bool:
+    """대화와 메시지를 저장소에서 지운다. 있었으면 True."""
+    if get(svc, thread_id) is None:
+        return False
+    svc.store.execute("DELETE FROM hr_chat_threads WHERE id = ?", (thread_id,))
+    return True
+
+
 def create(svc: Services, title: str, who: str | None) -> dict[str, Any]:
     ensure(svc)
     row = svc.store.one("SELECT COALESCE(MAX(seq), 0) AS n FROM hr_chat_threads")

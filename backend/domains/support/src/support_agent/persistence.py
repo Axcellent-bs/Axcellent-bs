@@ -144,6 +144,10 @@ class Repo(Protocol):
         """기본키(`pk` 순서)로 `doc` 한 건을 읽는다. 없으면 None."""
         ...
 
+    def delete(self, table: str, key: tuple[Any, ...]) -> None:
+        """기본키(`pk` 순서)로 한 건을 지운다. 없어도 오류가 아니다."""
+        ...
+
 
 def _upsert_sql(table: Table) -> str:
     columns = [*table.pk, *table.columns, "doc"]
@@ -209,6 +213,12 @@ class PgRepo:
         spec = BY_NAME[table]
         params = [values[c] for c in (*spec.pk, *spec.columns)] + [Jsonb(doc)]
         self._run(lambda conn: conn.execute(self._upserts[table], params))
+
+    def delete(self, table: str, key: tuple[Any, ...]) -> None:
+        spec = BY_NAME[table]
+        where = " AND ".join(f"{c} = %s" for c in spec.pk)
+        sql = f"DELETE FROM {spec.name} WHERE {where}"
+        self._run(lambda conn: conn.execute(sql, list(key)))
 
     def close(self) -> None:
         with self._lock:
@@ -519,6 +529,13 @@ class PersistentChatStore(ChatStore):
             thread.model_dump(mode="json"),
         )
         return super()._put(thread)  # DB 쓰기에 성공한 뒤에 캐시에 넣는다
+
+    def delete(self, thread_id: str) -> bool:
+        thread = self._threads.get(thread_id)
+        if thread is None:
+            return False
+        self._repo.delete("support_chats", (thread.tenant_id, thread.id))
+        return super().delete(thread_id)  # DB에서 지운 뒤에 캐시에서 지운다
 
 
 class PersistentSequenceLedger(SequenceLedger):

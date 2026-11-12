@@ -148,3 +148,53 @@ def test_a2a_skills_validate_and_close() -> None:
         assert closed.output["thread"]["status"] == "closed"
 
     asyncio.run(run())
+
+
+def test_a2a_remove_own_thread_then_get_is_not_found() -> None:
+    async def run() -> None:
+        svc = _service(FakeLLM(), _manager())
+        meta = RequestMeta(
+            context_id="c",
+            token="t",
+            deadline=datetime.now(UTC) + timedelta(seconds=30),
+            idempotency_key="k",
+        )
+
+        def req(skill: str, who: str, tid: str) -> AgentRequest:
+            return AgentRequest(meta=meta, skill=skill, input={"who": who, "thread_id": tid})
+
+        sent = await a2a.orchestrator_chat_send(
+            AgentRequest(
+                meta=meta, skill="orchestrator_chat_send", input={"who": "jun", "message": "안녕"}
+            )
+        )
+        tid = sent.output["thread"]["id"]
+
+        # 남의 대화는 forbidden, 그대로 남는다
+        other = await a2a.orchestrator_chat_remove(req("orchestrator_chat_remove", "mina", tid))
+        assert other.status == TaskStatus.FAILED and other.outcome == "forbidden"
+        assert svc.store.get(tid) is not None
+
+        # 없는 대화는 not_found
+        gone = await a2a.orchestrator_chat_remove(req("orchestrator_chat_remove", "jun", "nope"))
+        assert gone.status == TaskStatus.FAILED and gone.outcome == "not_found"
+
+        # 본인 대화는 답하는 중이어도 지워지고, 끝난 답이 대화를 되살리지 않는다
+        removed = await a2a.orchestrator_chat_remove(req("orchestrator_chat_remove", "jun", tid))
+        assert removed.status == TaskStatus.COMPLETED
+        assert removed.output == {"thread_id": tid, "removed": True}
+        await svc.wait_idle()
+        assert svc.store.get(tid) is None
+        after = await a2a.orchestrator_chat_get(req("orchestrator_chat_get", "jun", tid))
+        assert after.status == TaskStatus.FAILED and after.outcome == "not_found"
+
+        # 지운 번호는 다시 쓰지 않는다
+        again = await a2a.orchestrator_chat_send(
+            AgentRequest(
+                meta=meta, skill="orchestrator_chat_send", input={"who": "jun", "message": "다시"}
+            )
+        )
+        assert again.output["thread"]["id"] != tid
+        await svc.wait_idle()
+
+    asyncio.run(run())

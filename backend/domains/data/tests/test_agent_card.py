@@ -51,6 +51,7 @@ def test_card_validates(card: AgentCard) -> None:
         "data_chat_list",
         "data_chat_get",
         "data_chat_close",
+        "data_chat_remove",
     }
 
 
@@ -60,6 +61,10 @@ def test_data_chat_is_a_read_only_for_the_screen(card: AgentCard) -> None:
         skill = next(s for s in card.skills if s.id == sid)
         assert skill.grade == "read" and skill.allowed_requesters == ["dashboard-api"]
         assert "#DataChat" in skill.input_schema and "#DataChat" in skill.output_schema
+    remove = next(s for s in card.skills if s.id == "data_chat_remove")
+    assert remove.grade == "read" and remove.allowed_requesters == ["dashboard-api"]
+    assert remove.input_schema.endswith("#DataChatRef")
+    assert remove.output_schema.endswith("chat.py#ChatRemoveOutput")
 
 
 def test_video_explorer_is_a_read_for_screen_marketing_planning_and_orchestrator(

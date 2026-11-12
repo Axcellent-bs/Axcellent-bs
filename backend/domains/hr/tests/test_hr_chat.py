@@ -106,6 +106,36 @@ def test_other_peoples_threads_show_only_a_summary(client: TestClient) -> None:
     assert post(client, "끼어들기", headers=B, thread_id=th["id"]).status_code == 403
 
 
+def test_remove_own_thread_deletes_it(client: TestClient) -> None:
+    th = post(client, "조직 변동 알려 줘").json()["data"]
+    url = f"/api/hr/chat/{th['id']}/remove"
+    res = client.post(url, headers=A)
+    assert res.status_code == 200
+    assert res.json()["data"] == {"thread_id": th["id"], "removed": True}
+    assert client.get(f"/api/hr/chat/{th['id']}", headers=A).status_code == 404
+    assert client.get("/api/hr/chat", headers=A).json()["data"] == []
+    assert client.post(url, headers=A).status_code == 404  # 이미 지워졌다
+
+
+def test_remove_someone_elses_thread_is_403_and_keeps_it(client: TestClient) -> None:
+    th = post(client, "조직 변동 알려 줘").json()["data"]
+    res = client.post(f"/api/hr/chat/{th['id']}/remove", headers=B)
+    assert res.status_code == 403
+    assert res.json()["error"]["message"] == "본인 대화만 삭제할 수 있어요"
+    assert client.get(f"/api/hr/chat/{th['id']}", headers=A).json()["data"]["restricted"] is False
+
+
+def test_remove_needs_a_human_token_and_is_post_only(client: TestClient) -> None:
+    th = post(client, "안녕").json()["data"]
+    url = f"/api/hr/chat/{th['id']}/remove"
+    assert client.post(url).status_code == 401
+    assert client.post(url, headers={"Authorization": "Bearer mock:planning"}).status_code == 403
+    assert client.post("/api/hr/chat/hrchat-99/remove", headers=A).status_code == 404
+    assert client.get(url, headers=A).status_code in (404, 405)
+    assert client.delete(url, headers=A).status_code in (404, 405)
+    assert client.get(f"/api/hr/chat/{th['id']}", headers=A).status_code == 200  # 그대로 있다
+
+
 def test_validation_and_unknown_thread(client: TestClient) -> None:
     assert client.post("/api/hr/chat", json={"message": "  "}, headers=A).status_code == 400
     assert client.post("/api/hr/chat", json={"message": "x" * 2001}, headers=A).status_code == 400

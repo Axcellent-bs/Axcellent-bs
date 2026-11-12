@@ -12,6 +12,8 @@
   말이 오간 대화. 최근에 말이 오간 것이 먼저다(최대 200줄). `room`을 주면 그 방 대화만 준다.
   읽기는 다른 화면 읽기처럼 열려 있다. 이 읽기는 부서 AI를 부르지 않아 공통 로그에 줄이
   쌓이지 않는다.
+- `POST /api/dashboard/office-room/{room_id}/remove` `{from_id}`: 그 방에서 내가 만든 대화를 지운다
+  (office_room.db 줄 + 부서 대화 서버의 대화). 내가 만든 대화가 없으면 403, 없는 방이면 404.
 - `room_id`: 대화가 오간 방. 전체 대화방은 `all`(기본값), 장애·이슈 방은 총괄 사건 `context_id`다.
   같은 부서·같은 대화를 다른 방으로 다시 올려도 처음 방 그대로 둔다(대화가 방을 옮겨 다니지 않게).
 - `from_id`·`from_name`은 화면 로그인 계정(데모 계정)이다. 사람 토큰은 화면이 같이 쓰는 값이라
@@ -29,11 +31,12 @@ import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, Field
 
+from ax_dashboard_api import chat_remove
 from ax_dashboard_api.auth import require_human_for_writes
-from ax_dashboard_api.envelope import ok
+from ax_dashboard_api.envelope import ApiError, ok
 
 DB_ENV = "AX_OFFICE_ROOM_DB"
 DEFAULT_HOURS = 24
@@ -134,6 +137,25 @@ class OfficeRoomStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def in_room(self, room: str) -> list[dict[str, Any]]:
+        """그 방의 대화 줄 전부 (기간과 상관없이)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM office_threads WHERE room_id = ? ORDER BY created_at, rowid", (room,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def drop(self, room: str, keys: list[tuple[str, str]]) -> int:
+        """그 방에서 (부서, 대화 id) 줄을 지운다. 지운 줄 수."""
+        with self._lock, self._conn:
+            return sum(
+                self._conn.execute(
+                    "DELETE FROM office_threads WHERE room_id = ? AND agent = ? AND thread_id = ?",
+                    (room, agent, thread_id),
+                ).rowcount
+                for agent, thread_id in keys
+            )
+
 
 _store: OfficeRoomStore | None = None
 _store_key: str | None = None
@@ -178,3 +200,60 @@ def list_office_threads(
 ) -> dict[str, Any]:
     rows = get_store().recent(_now() - timedelta(hours=hours), room)
     return ok(rows, total=len(rows))
+
+
+class RemoveRoomBody(BaseModel):
+    """지우는 사람(화면 로그인 계정 id). 단톡방 줄에 저장한 보낸 사람(from_id)과 맞춰 본다."""
+
+    from_id: str = Field(min_length=1, max_length=64)
+
+
+FORBIDDEN_TEXT = "만든 사람만 삭제할 수 있어요"
+
+
+@router.post("/office-room/{room_id}/remove")
+async def remove_office_room(
+    body: RemoveRoomBody,
+    request: Request,
+    room_id: str = Path(min_length=1, max_length=64),
+) -> dict[str, Any]:
+    """단톡방에서 내가 만든(처음 보낸) 대화를 지운다. POST 전용.
+
+    1. 그 방 줄이 하나도 없으면 404, 내가 만든 줄이 없으면 403 "만든 사람만 삭제할 수 있어요"
+    2. 내가 만든 줄을 office_room.db에서 지운다 (다른 사람이 만든 줄은 그대로)
+    3. 각 줄의 부서 대화 서버에서 그 대화를 지운다(`<부서>_chat_remove`, 인사는 HTTP).
+       한 부서가 실패해도 나머지는 계속하고 부서별 결과를 돌려준다.
+       이미 없는 대화(404)는 지운 것으로 본다
+    다른 화면은 목록(GET)을 다시 읽을 때 사라진 것을 본다.
+    """
+    store = get_store()
+    rows = store.in_room(room_id)
+    if not rows:
+        raise ApiError(404, "NOT_FOUND", "없는 단톡방이에요")
+    mine = [r for r in rows if r["from_id"] == body.from_id]
+    if not mine:
+        raise ApiError(403, "FORBIDDEN", FORBIDDEN_TEXT)
+    removed = store.drop(room_id, [(r["agent"], r["thread_id"]) for r in mine])
+    results: list[dict[str, Any]] = []
+    for r in mine:
+        one: dict[str, Any] = {"agent": r["agent"], "thread_id": r["thread_id"]}
+        try:
+            await chat_remove.remove(r["agent"], r["thread_id"], request)
+            results.append(one | {"ok": True})
+        except ApiError as exc:
+            if exc.status_code == 404:  # 부서 쪽에 이미 없다 = 지워진 것
+                results.append(one | {"ok": True, "note": "이미 없음"})
+            else:
+                results.append(
+                    one | {"ok": False, "status": exc.status_code, "reason": exc.message}
+                )
+        except Exception as exc:  # noqa: BLE001 - 한 부서 실패가 나머지를 막지 않게 한다
+            results.append(one | {"ok": False, "status": 502, "reason": type(exc).__name__})
+    return ok(
+        {
+            "room_id": room_id,
+            "removed": removed,
+            "kept": len(rows) - len(mine),
+            "departments": results,
+        }
+    )

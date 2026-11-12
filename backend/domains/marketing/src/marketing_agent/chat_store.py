@@ -233,6 +233,10 @@ class ChatStore:
 
         return self._update(thread_id, mutate)
 
+    def delete(self, thread_id: str) -> bool:
+        """대화를 저장소에서 지운다(메시지 포함). 지웠으면 True, 없었으면 False."""
+        return self._write("DELETE FROM marketing_chat_threads WHERE id = ?", (thread_id,)) > 0
+
     @staticmethod
     def _first_question(msgs: list[dict[str, Any]]) -> str:
         first = next((m["text"] for m in msgs if m["role"] == "user"), "")

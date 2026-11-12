@@ -152,6 +152,12 @@ class ChatService:
         self._own(who, thread_id)
         return visible(self.store.close(thread_id) or {}, who)
 
+    def remove(self, who: str | None, thread_id: str) -> dict[str, Any]:
+        """본인 대화를 저장소에서 지운다(답하는 중이어도). 뒤에서 도는 답은 버려진다."""
+        self._own(who, thread_id)
+        self.store.delete(thread_id)
+        return {"thread_id": thread_id, "removed": True}
+
     def send(self, who: str | None, thread_id: str | None, message: str) -> dict[str, Any]:
         """글을 저장하고 `answering`으로 돌려준다. 답은 뒤에서 붙는다(이벤트 루프 안에서 부른다)."""
         message = message.strip()

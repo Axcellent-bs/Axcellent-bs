@@ -256,3 +256,39 @@ def test_handlers_send_and_refuse(monkeypatch: pytest.MonkeyPatch) -> None:
     assert sent.output["schema_version"] == "data_chat.v1"
     assert got.output["thread"]["status"] == "talking"
     assert (missing.status, missing.outcome) == (TaskStatus.FAILED, "not_found")
+
+
+def test_handler_remove_deletes_only_my_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _service(FakeLLM())
+    monkeypatch.setattr(handlers, "_CHAT", service)
+    th = _talk(service, "V5 성과 알려줘", who="재현")
+
+    def call(skill: str, who: str, thread_id: str):  # noqa: ANN202
+        return asyncio.run(
+            handlers.HANDLERS[skill](_request(skill, {"who": who, "thread_id": thread_id}))
+        )
+
+    denied = call("data_chat_remove", "태윤", th["id"])
+    assert (denied.status, denied.outcome) == (TaskStatus.FAILED, "forbidden")
+    assert service.store.get(th["id"]) is not None  # 남의 대화는 그대로
+    gone = call("data_chat_remove", "재현", th["id"])
+    assert gone.status == TaskStatus.COMPLETED
+    assert gone.output["thread_id"] == th["id"] and gone.output["removed"] is True
+    again = call("data_chat_get", "재현", th["id"])
+    assert (again.status, again.outcome) == (TaskStatus.FAILED, "not_found")
+    unknown = call("data_chat_remove", "재현", "datachat-99")
+    assert (unknown.status, unknown.outcome) == (TaskStatus.FAILED, "not_found")
+
+
+def test_removing_an_answering_thread_is_not_resurrected_by_the_late_answer() -> None:
+    service = _service(FakeLLM())
+
+    async def run() -> None:
+        th = service.send("재현", None, "V5 성과 알려줘")
+        assert th["status"] == "answering"
+        service.remove("재현", th["id"])
+        await service.wait_idle()  # 늦게 끝난 답은 아무것도 다시 만들지 않는다
+        assert service.store.get(th["id"]) is None
+
+    asyncio.run(run())
+    assert service.list("재현", 10) == []

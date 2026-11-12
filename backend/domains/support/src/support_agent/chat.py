@@ -132,6 +132,7 @@ def is_stuck(thread: ChatThread, now: datetime | None = None) -> bool:
 class ChatStore:
     def __init__(self) -> None:
         self._threads: dict[str, ChatThread] = {}
+        self._deleted_seq = 0  # 지운 대화 번호는 다시 쓰지 않는다 (늦은 답이 새 대화에 붙지 않게)
 
     def _put(self, thread: ChatThread) -> ChatThread:
         """저장 지점. 영속 저장소가 여기서 DB에도 쓴다."""
@@ -150,7 +151,7 @@ class ChatStore:
     def create(
         self, who: str, first_text: str, context_id: str, ref: str | None = None
     ) -> ChatThread:
-        seq = max((t.seq for t in self._threads.values()), default=0) + 1
+        seq = max([self._deleted_seq, *(t.seq for t in self._threads.values())]) + 1
         now = now_iso()
         thread = ChatThread(
             context_id=context_id,
@@ -199,6 +200,15 @@ class ChatStore:
                 update={"status": "closed", "summary": summary, "closed_at": now, "updated_at": now}
             )
         )
+
+    def delete(self, thread_id: str) -> bool:
+        """대화와 메시지를 저장소에서 지운다. 있었으면 True."""
+        thread = self._threads.get(thread_id)
+        if thread is None:
+            return False
+        self._deleted_seq = max(self._deleted_seq, thread.seq)
+        del self._threads[thread_id]
+        return True
 
     def set_summary(self, thread_id: str, summary: str) -> ChatThread:
         """닫힌 대화의 요약을 LLM이 만든 것으로 바꾼다 (닫은 시각은 그대로)."""

@@ -124,6 +124,53 @@ def test_busy_closed_and_other_people() -> None:
     asyncio.run(run())
 
 
+def test_remove_own_thread_then_get_is_not_found() -> None:
+    async def run() -> None:
+        svc = _service(FakeLLM())
+        tid = svc.send("taeyoon", None, "안녕")["id"]
+        await svc.wait_idle()
+        ref = {"who": "taeyoon", "thread_id": tid}
+        done = await a2a.finance_chat_remove(_req("finance_chat_remove", ref))
+        assert done.status == TaskStatus.COMPLETED
+        assert done.output == {"thread_id": tid, "removed": True}
+        gone = await a2a.finance_chat_get(_req("finance_chat_get", ref))
+        assert gone.status == TaskStatus.FAILED and gone.outcome == "not_found"
+        assert svc.list("taeyoon") == []
+
+    asyncio.run(run())
+
+
+def test_remove_others_thread_is_forbidden_and_unknown_is_not_found() -> None:
+    async def run() -> None:
+        svc = _service(FakeLLM())
+        tid = svc.send("taeyoon", None, "안녕")["id"]
+        await svc.wait_idle()
+        other = await a2a.finance_chat_remove(
+            _req("finance_chat_remove", {"who": "reviewer", "thread_id": tid})
+        )
+        assert other.status == TaskStatus.FAILED and other.outcome == "forbidden"
+        assert svc.get("taeyoon", tid)["id"] == tid  # 남은 그대로
+        unknown = await a2a.finance_chat_remove(
+            _req("finance_chat_remove", {"who": "taeyoon", "thread_id": "nope"})
+        )
+        assert unknown.status == TaskStatus.FAILED and unknown.outcome == "not_found"
+
+    asyncio.run(run())
+
+
+def test_remove_while_answering_does_not_resurrect() -> None:
+    async def run() -> None:
+        svc = _service(FakeLLM())
+        tid = svc.send("taeyoon", None, "안녕")["id"]  # 아직 answering
+        assert svc.remove("taeyoon", tid) == tid
+        await svc.wait_idle()  # 답이 뒤늦게 끝나도 되살아나지 않는다
+        with pytest.raises(ChatRefused) as gone:
+            svc.get("taeyoon", tid)
+        assert gone.value.outcome == "not_found"
+
+    asyncio.run(run())
+
+
 def test_llm_failure_says_why_and_idle_threads_close() -> None:
     async def run() -> None:
         clock = Clock()

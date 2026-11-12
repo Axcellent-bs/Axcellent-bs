@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
+from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.orchestrator_chat import (
     OrchestratorChatListInput,
     OrchestratorChatRef,
@@ -98,9 +99,28 @@ async def orchestrator_chat_close(request: AgentRequest) -> AgentResult:
     return _done(request, "orchestrator_chat_close", {"thread": thread})
 
 
+async def orchestrator_chat_remove(request: AgentRequest) -> AgentResult:
+    try:
+        inp = OrchestratorChatRef.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    try:
+        out = get_chat_service().remove(inp.who, inp.thread_id)
+    except ChatRefused as exc:
+        return _refused(request, exc)
+    return _done(
+        request,
+        "orchestrator_chat_remove",
+        ChatRemoveOutput(thread_id=out["thread_id"], removed=out["removed"]).model_dump(
+            mode="json"
+        ),
+    )
+
+
 CHAT_HANDLERS = {
     "orchestrator_chat_send": orchestrator_chat_send,
     "orchestrator_chat_list": orchestrator_chat_list,
     "orchestrator_chat_get": orchestrator_chat_get,
     "orchestrator_chat_close": orchestrator_chat_close,
+    "orchestrator_chat_remove": orchestrator_chat_remove,
 }

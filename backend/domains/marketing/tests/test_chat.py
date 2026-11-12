@@ -357,6 +357,40 @@ def test_skills_over_a2a() -> None:
         assert _call(client, "marketing_chat_send", ref)["outcome"] == "thread_closed"
 
 
+def test_remove_over_a2a_deletes_only_my_thread() -> None:
+    handlers.STATE.chat._llm = lambda: FakeLLM()
+    with TestClient(app) as client:
+        sent = _call(client, "marketing_chat_send", {"who": GAON, "message": "안녕"})
+        tid = sent["output"]["thread"]["id"]
+        for _ in range(200):  # 답이 붙을 때까지
+            got = _call(client, "marketing_chat_get", {"who": GAON, "thread_id": tid})
+            if got["output"]["thread"]["status"] == "talking":
+                break
+            time.sleep(0.02)
+        denied = _call(client, "marketing_chat_remove", {"who": NARAE, "thread_id": tid})
+        assert (denied["status"], denied["outcome"]) == ("failed", "forbidden")
+        still = _call(client, "marketing_chat_get", {"who": GAON, "thread_id": tid})
+        assert still["status"] == "completed"  # 남의 대화는 그대로
+        gone = _call(client, "marketing_chat_remove", {"who": GAON, "thread_id": tid})
+        assert gone["status"] == "completed"
+        assert gone["output"]["thread_id"] == tid and gone["output"]["removed"] is True
+        after = _call(client, "marketing_chat_get", {"who": GAON, "thread_id": tid})
+        assert (after["status"], after["outcome"]) == ("failed", "not_found")
+        unknown = _call(client, "marketing_chat_remove", {"who": GAON, "thread_id": "mktchat-99"})
+        assert (unknown["status"], unknown["outcome"]) == ("failed", "not_found")
+
+
+@aio
+async def test_removing_an_answering_thread_is_not_resurrected() -> None:
+    svc, _ = make_service()
+    th = svc.send(GAON, None, "안녕")
+    assert th["status"] == "answering"
+    svc.remove(GAON, th["id"])
+    await svc.wait_idle()  # 늦게 끝난 답이 대화를 다시 만들지 않는다
+    assert svc.store.get(th["id"]) is None
+    assert svc.list(GAON, 10) == []
+
+
 def test_only_the_dashboard_may_chat() -> None:
     with TestClient(app) as client:
         for caller in ("planning", "orchestrator", "support"):

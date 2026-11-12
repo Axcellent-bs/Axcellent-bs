@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ax_contracts.schemas import ExecuteDecision
+from ax_contracts.schemas import chat as chat_schemas
 from ax_contracts.schemas import execute as execute_schemas
 from ax_contracts.schemas import infra as infra_schemas
 from infra_agent import handlers
@@ -32,6 +33,7 @@ def test_agent_card_format_and_served() -> None:
         "infra_chat_list",
         "infra_chat_get",
         "infra_chat_close",
+        "infra_chat_remove",
     }
     assert skills["diagnose_incident"].grade == "read"
     assert skills["verify_recovery"].grade == "read"
@@ -48,6 +50,7 @@ def test_agent_card_format_and_served() -> None:
             module = {
                 "shared/contracts/src/ax_contracts/schemas/infra.py": infra_schemas,
                 "shared/contracts/src/ax_contracts/schemas/execute.py": execute_schemas,
+                "shared/contracts/src/ax_contracts/schemas/chat.py": chat_schemas,
             }[path]
             assert hasattr(module, name)
     served = TestClient(app).get("/.well-known/agent-card.json").json()

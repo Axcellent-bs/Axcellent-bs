@@ -456,7 +456,9 @@ async def send(
     )
     if not BACKGROUND:
         return await _answer(svc, llm, th.id, text, conns, prev)
-    job = asyncio.get_running_loop().create_task(_answer(svc, llm, th.id, text, conns, prev))
+    job = asyncio.get_running_loop().create_task(
+        _answer_background(svc, llm, th.id, text, conns, prev)
+    )
     _running.add(job)
     job.add_done_callback(_running.discard)
     return th
@@ -511,8 +513,19 @@ async def _answer(
     if th is not None and th.status == "answering":
         await svc.chat_set(tid, status=prev)
     found = svc.chat_of(tid)
-    assert found is not None
+    if found is None:  # 답하는 사이 사람이 대화를 지웠다
+        raise ActionError("NOT_FOUND", f"대화 {tid}가 없다")
     return found
+
+
+async def _answer_background(
+    svc: DevService, llm: Any, tid: str, text: str, conns: list[vcs.Connection], prev: str
+) -> None:
+    """뒤에서 도는 답. 그 사이 지워진 대화면 아무것도 다시 만들지 않고 조용히 끝낸다."""
+    try:
+        await _answer(svc, llm, tid, text, conns, prev)
+    except ActionError:
+        pass
 
 
 async def _reply(
@@ -904,6 +917,25 @@ async def close(
     if th.status == "closed":
         return th
     return await svc.chat_set(thread_id, status="closed", waiting_for=[])
+
+
+async def remove(
+    svc: DevService,
+    thread_id: str,
+    who: str | None = None,
+    origin: str | None = None,
+    account: str | None = None,
+) -> str:
+    """본인 대화를 저장소에서 지운다. 답하는 중이어도 지운다 (늦게 온 답은 버려진다).
+
+    없으면 NOT_FOUND, 남의 대화면 FORBIDDEN. 띄운 작업은 그대로 돈다."""
+    th = svc.chat_of(thread_id)
+    if th is None or not seen_from(th, origin) or not _account_ok(th, origin, account):
+        raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
+    if not _owner_ok(th, who):
+        raise ActionError("FORBIDDEN", f"대화 {thread_id}는 {th.who}의 대화다")
+    await svc.chat_remove(thread_id)
+    return thread_id
 
 
 def _idle_closable(svc: DevService, th: ChatThread) -> bool:

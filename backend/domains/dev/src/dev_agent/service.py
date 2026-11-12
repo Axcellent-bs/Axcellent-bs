@@ -2483,6 +2483,20 @@ class DevService(PlanningCore):
         assert found is not None
         return found
 
+    async def chat_remove(self, thread_id: str) -> None:
+        """대화 기록(대화와 그 메시지)을 저장소에서 지운다. 띄운 작업·요청은 그대로 둔다.
+
+        대화 기록일 뿐이라 관문을 다시 타지 않는다 (chat_set과 같다)."""
+
+        async def run(s: State) -> ActionResult:
+            th = next((c for c in s.chats if c.id == thread_id), None)
+            if th is None:
+                raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
+            s.chats.remove(th)
+            return ActionResult(outcome="chat", output={"thread_id": thread_id})
+
+        await self._apply(run)
+
     async def retry_dev_task(
         self, task_id: str, connection: str | None = None, approved: bool = False
     ) -> ActionResult:

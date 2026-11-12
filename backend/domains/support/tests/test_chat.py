@@ -289,6 +289,48 @@ def test_who_may_close(env: Spawned, llm: MockLLMClient) -> None:
     assert legacy["outcome"] == "forbidden"
 
 
+def test_remove_deletes_only_the_owners_thread(env: Spawned, llm: MockLLMClient) -> None:
+    send("공용", "질문")
+    env.run()
+    mine = call("support_chat_remove", {"thread_id": "chat-1", "viewer": "공용"})
+    assert mine["status"] == "completed" and not mine.get("outcome"), mine
+    assert mine["output"] == {"thread_id": "chat-1", "removed": True}
+    assert chat_handlers.CHATS.get("chat-1") is None
+    after = call("support_chat_get", {"thread_id": "chat-1", "viewer": "공용"})
+    assert after["outcome"] == "not_found"
+
+
+def test_remove_refuses_someone_elses_and_unknown(env: Spawned, llm: MockLLMClient) -> None:
+    send("공용", "질문")
+    env.run()
+    for role in ("member", "admin"):  # 관리자도 남의 대화는 못 지운다
+        nope = call("support_chat_remove", {"thread_id": "chat-1", "viewer": "병환", "role": role})
+        assert nope["outcome"] == "forbidden"
+    assert chat_handlers.CHATS.get("chat-1") is not None
+    unknown = call("support_chat_remove", {"thread_id": "chat-9", "viewer": "공용"})
+    assert unknown["outcome"] == "not_found"
+
+
+def test_removing_while_answering_does_not_bring_the_thread_back(
+    env: Spawned, llm: MockLLMClient
+) -> None:
+    send("공용", "질문")  # 답을 아직 안 돌렸다 (answering)
+    assert chat_handlers.CHATS.get("chat-1").status == "answering"
+    call("support_chat_remove", {"thread_id": "chat-1", "viewer": "공용"})
+    env.run()  # 늦은 답이 끝난다
+    assert chat_handlers.CHATS.get("chat-1") is None
+    fresh = thread_of(send("공용", "새 질문"))
+    assert fresh["id"] != "chat-1"  # 지운 번호를 다시 쓰지 않는다
+
+
+def test_remove_also_deletes_from_the_database(memory_repo: type) -> None:
+    repo = memory_repo()
+    store = PersistentChatStore(repo)
+    t = store.create("예진", "질문", CTX)
+    assert store.delete(t.id) is True and store.delete(t.id) is False
+    assert PersistentChatStore(repo).get(t.id) is None
+
+
 def test_closing_twice_returns_the_same_thread(env: Spawned, llm: MockLLMClient) -> None:
     thread_of(send("공용", "질문"))
     env.run()
@@ -539,6 +581,7 @@ def test_chat_skills_are_on_the_inquiry_card_and_gated() -> None:
     for skill, grade in (
         ("support_chat_send", "A"),
         ("support_chat_close", "A"),
+        ("support_chat_remove", "A"),
         ("support_chat_list", "read"),
         ("support_chat_get", "read"),
     ):

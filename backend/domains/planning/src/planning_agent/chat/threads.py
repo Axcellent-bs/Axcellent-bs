@@ -183,6 +183,13 @@ class ChatStore:
 
         return self._update(thread_id, mutate, summary)
 
+    def delete(self, thread_id: str) -> bool:
+        """대화를 저장소에서 지운다. 답하는 중이어도 지운다(뒤늦은 답은 `_update`가 무시한다)."""
+        with self._lock:
+            cur = self._db.execute("DELETE FROM planning_chat_threads WHERE id = ?", (thread_id,))
+            self._db.commit()
+            return cur.rowcount > 0
+
     @staticmethod
     def _first_question(msgs: list[dict[str, Any]]) -> str:
         first = next((m["text"] for m in msgs if m["role"] == "user"), "")

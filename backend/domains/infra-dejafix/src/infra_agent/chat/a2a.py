@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
+from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.infra import (
     InfraChatListInput,
     InfraChatRef,
@@ -98,9 +99,23 @@ async def infra_chat_close(request: AgentRequest) -> AgentResult:
     return _done(request, "infra_chat_close", {"thread": thread})
 
 
+async def infra_chat_remove(request: AgentRequest) -> AgentResult:
+    try:
+        inp = InfraChatRef.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    try:
+        thread_id = get_chat_service().remove(inp.who, inp.thread_id)
+    except ChatRefused as exc:
+        return _refused(request, exc)
+    out = ChatRemoveOutput(thread_id=thread_id, removed=True)
+    return _done(request, "infra_chat_remove", out.model_dump(mode="json"))
+
+
 CHAT_HANDLERS = {
     "infra_chat_send": infra_chat_send,
     "infra_chat_list": infra_chat_list,
     "infra_chat_get": infra_chat_get,
     "infra_chat_close": infra_chat_close,
+    "infra_chat_remove": infra_chat_remove,
 }

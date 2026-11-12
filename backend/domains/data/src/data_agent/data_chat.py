@@ -595,6 +595,11 @@ class DataChatService:
         self._own(who, thread_id)
         return visible(self.store.close(thread_id) or {}, who)
 
+    def remove(self, who: str, thread_id: str) -> None:
+        """본인 대화를 저장소에서 지운다. 답을 만드는 중이어도 지우며, 늦게 온 답은 버려진다."""
+        self._own(who, thread_id)
+        self.store.delete(thread_id)
+
     def send(self, who: str, thread_id: str | None, message: str) -> dict[str, Any]:
         """글을 저장하고 `answering`으로 돌려준다. 답은 백그라운드에서 붙는다."""
         message = message.strip()

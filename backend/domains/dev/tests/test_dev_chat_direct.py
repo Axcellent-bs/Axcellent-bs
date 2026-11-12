@@ -185,6 +185,52 @@ def test_a2a_skills_use_the_same_chats(service: PlanningService, adapter) -> Non
     asyncio.run(run())
 
 
+def test_a2a_remove_deletes_only_my_thread(service: PlanningService, adapter) -> None:
+    dev_chat.set_llm(ChatLLM([ASK]))
+
+    async def run() -> None:
+        sent = await handlers.dev_chat_send(
+            _req("dev_chat_send", {"who": "yejin", "message": "배너 바꿔 줘"})
+        )
+        await dev_chat.wait_idle()
+        tid = sent.output["thread"]["id"]
+        denied = await handlers.dev_chat_remove(
+            _req("dev_chat_remove", {"who": "jaehun", "thread_id": tid})
+        )
+        assert denied.status == TaskStatus.FAILED and denied.outcome == "forbidden"
+        assert service.chat_of(tid) is not None  # 남의 대화는 그대로
+        gone = await handlers.dev_chat_remove(
+            _req("dev_chat_remove", {"who": "yejin", "thread_id": tid})
+        )
+        assert gone.status == TaskStatus.COMPLETED
+        assert gone.output["thread_id"] == tid and gone.output["removed"] is True
+        assert service.chat_of(tid) is None
+        again = await handlers.dev_chat_get(
+            _req("dev_chat_get", {"who": "yejin", "thread_id": tid})
+        )
+        assert again.status == TaskStatus.FAILED and again.outcome == "not_found"
+        unknown = await handlers.dev_chat_remove(
+            _req("dev_chat_remove", {"who": "yejin", "thread_id": "chat-99"})
+        )
+        assert unknown.status == TaskStatus.FAILED and unknown.outcome == "not_found"
+
+    asyncio.run(run())
+
+
+def test_removing_an_answering_thread_is_not_resurrected(service: PlanningService, adapter) -> None:
+    dev_chat.set_llm(ChatLLM([ASK]))
+
+    async def run() -> None:
+        th = await dev_chat.send(service, None, "배너", who="yejin", origin="dashboard")
+        assert th.status == "answering"
+        await dev_chat.remove(service, th.id, "yejin", "dashboard")
+        await dev_chat.wait_idle()  # 늦게 끝난 답이 대화를 다시 만들거나 오류를 내지 않는다
+        assert service.chat_of(th.id) is None
+        assert all(c.id != th.id for c in service.state.chats)
+
+    asyncio.run(run())
+
+
 def test_without_llm_is_refused(service: PlanningService, adapter) -> None:
     dev_chat.set_llm(None)
 

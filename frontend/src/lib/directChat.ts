@@ -67,5 +67,7 @@ export const directChatApi = (ep: ChatEndpoint, opts: { closable?: boolean } = {
     get: (id: string) => request(ep, `/${encodeURIComponent(id)}`).then(one),
     send: (x: { thread_id?: string; message: string }) => request(ep, "", { method: "POST", body: JSON.stringify(x) }).then(one),
     ...(opts.closable ? { close: (id: string) => request(ep, `/${encodeURIComponent(id)}/close`, { method: "POST", body: "{}" }).then(one) } : {}),
+    // 대화 지우기 (본인 대화만, 서버가 확인). POST 전용 `<주소>/<id>/remove` (DELETE는 쓰지 않는다)
+    remove: (id: string) => request(ep, `/${encodeURIComponent(id)}/remove`, { method: "POST", body: "{}" }).then(() => undefined),
   };
 };

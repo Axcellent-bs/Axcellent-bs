@@ -376,7 +376,10 @@ async def incident_impact(
         context_id=context_id, token="finance-dashboard", deadline=_now() + timedelta(seconds=15)
     )
     impact = await state().sources.impact(
-        base.model_copy(update={"context_id": context_id}), context_id, window
+        base.model_copy(update={"context_id": context_id}),
+        context_id,
+        window,
+        final=bool(info.get("final")),  # 해결로 닫힌 사건은 한 번 받은 영향을 계속 쓴다
     )
     if impact is not None and info.get("window_exact") is False:
         impact = dataclasses.replace(impact, window_exact=False)

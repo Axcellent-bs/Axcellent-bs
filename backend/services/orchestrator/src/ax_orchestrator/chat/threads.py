@@ -50,6 +50,7 @@ class ChatStore:
     def __init__(self, path: str = "", clock: Callable[[], datetime] = _now) -> None:
         self.clock = clock
         self._lock = threading.RLock()
+        self._deleted_seq = 0
         self._db = sqlite3.connect(path or ":memory:", check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         with self._lock:
@@ -93,7 +94,7 @@ class ChatStore:
             row = self._db.execute(
                 "SELECT COALESCE(MAX(seq), 0) AS n FROM orchestrator_chat_threads"
             ).fetchone()
-            seq = int(row["n"]) + 1
+            seq = max(int(row["n"]), self._deleted_seq) + 1
             thread_id = f"orchchat-{seq}"
             self._db.execute(
                 "INSERT INTO orchestrator_chat_threads"
@@ -183,6 +184,20 @@ class ChatStore:
             return None if th["status"] == "closed" else "closed"
 
         return self._update(thread_id, mutate, summary)
+
+    def delete(self, thread_id: str) -> bool:
+        """대화와 메시지를 지운다. 있었으면 True. 대화 번호는 `AUTOINCREMENT`가 아니어서 지운 번호를
+        다시 쓰지 않게 `seq` 하한을 따로 둔다."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT seq FROM orchestrator_chat_threads WHERE id = ?", (thread_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            self._deleted_seq = max(self._deleted_seq, int(row["seq"]))
+            self._db.execute("DELETE FROM orchestrator_chat_threads WHERE id = ?", (thread_id,))
+            self._db.commit()
+            return True
 
     @staticmethod
     def _first_question(msgs: list[dict[str, Any]]) -> str:
