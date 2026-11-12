@@ -489,6 +489,7 @@ def _brief_input(**over) -> dict:
     return _image_input(coupon=None, proposal_id="PROP-5") | over
 
 
+@needs_ffmpeg
 def test_proposal_source_makes_draft_with_caption_from_brief(gate: Gate) -> None:
     _add_brief()
     out = _call(_brief_input())
@@ -557,12 +558,16 @@ def test_forbidden_phrase_in_brief_stops_before_generation(
     assert out["outcome"] == "forbidden_phrase" and gate.seen == []
 
 
+@needs_ffmpeg
 def test_proposal_source_is_idempotent_and_keys_differ_by_source(gate: Gate) -> None:
     _add_brief()
     first = _call(_brief_input())["output"]
     second = _call(_brief_input())["output"]
     assert second["post_draft_id"] == first["post_draft_id"]
     assert second["generation"]["replayed"] is True
+
+
+def test_media_ref_keys_differ_by_source() -> None:
     a = sns_prepare.PrepareSnsPostInput.model_validate(_brief_input())
     b = sns_prepare.PrepareSnsPostInput.model_validate(_brief_input(proposal_id="PROP-6"))
     c = sns_prepare.PrepareSnsPostInput.model_validate(_image_input())
