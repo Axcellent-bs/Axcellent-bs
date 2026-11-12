@@ -12,6 +12,7 @@ import { IncidentFinance } from "@/components/finance/Incident";
 import { SelfTestPanel } from "@/components/finance/Kept";
 import { TeamBudgetSection } from "@/components/finance/TeamBudget";
 import { PlanningRequestsSection } from "@/components/finance/PlanningRequests";
+import { OrchestratorRequestsSection } from "@/components/finance/OrchestratorRequests";
 import { ReconciliationSection } from "@/components/finance/Reconciliation";
 import { SafetyQueue } from "@/components/finance/SafetyQueue";
 import { SettlementsSection, type SettlementSource } from "@/components/finance/Settlements";
@@ -259,7 +260,7 @@ export default function FinancePage() {
           <li><b>이벤트 고르기</b>: <b>장애 이벤트 재무</b> 탭 위쪽 이벤트 탭에서 살펴볼 이벤트를 고릅니다. 가장 최근 이벤트가 먼저 열려 있고, 오래된 이벤트는 끝의 <b>이전 이벤트</b> 목록에 있습니다.</li>
           <li><b>장부 확인</b>: 피해(데이터 AI가 센 숫자), 보상 쿠폰, 환불로 빠져나간 돈을 봅니다.</li>
           <li><b>보류 큐 결정</b>: 재무가 정해야 하는 보류 건은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다. 판매자 정산 지급 승인은 <Link href={SUPPORT_SETTLEMENT_PATH} className="font-medium text-brand-700 underline">고객지원 &gt; 판매자 정산</Link>에서 합니다.</li>
-          <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정(①), 대사 메모(②), 팀 예산 확정(④)을 하고 판매자 정산 결과(③)를 봅니다. 세무 자료는 ⑤, 현금 흐름은 ⑦, 기획 요청·고객지원 비용 기록은 ⑧에 있습니다.</li>
+          <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정(①), 대사 메모(②), 팀 예산 확정(④)을 하고 판매자 정산 결과(③)를 봅니다. 세무 자료는 ⑤, 현금 흐름은 ⑦, 총괄이 재무에 맡긴 일·기획 요청·고객지원 비용 기록은 ⑧에 있습니다.</li>
         </ol>
         <p className="mt-3 text-sm text-ink-500">
           단계별 설명과 자주 묻는 질문은 <Link href="/finance/guide" className="font-medium text-brand-700 underline">재무 AI 관리자 사용법</Link>에 있습니다.
@@ -398,6 +399,7 @@ export default function FinancePage() {
           {tab === "cash" && <CashflowSection tick={tick} />}
           {tab === "requests" && (
             <div className="space-y-4">
+              <OrchestratorRequestsSection tick={tick} />
               <PlanningRequestsSection tick={tick} />
               <SupportCostsSection tick={tick} />
             </div>

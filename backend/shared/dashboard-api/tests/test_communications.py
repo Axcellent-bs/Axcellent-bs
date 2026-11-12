@@ -296,3 +296,52 @@ def test_a_log_reader_that_returns_other_kinds_cannot_add_hidden_lines(monkeypat
     )
     communications.set_reader(lambda q: CommonLogResult(records=[memory]))
     assert TestClient(app).get(URL, params={"include_events": "true"}).json()["data"] == []
+
+
+def test_from_to_and_message_type_filters(monkeypatch):
+    """총괄 → 재무 요청 줄만, 재무 → 총괄 응답 줄만 골라 받는다 (읽기 전용 거르개)."""
+    monkeypatch.delenv("DASHBOARD_MOCK", raising=False)
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    records = [
+        _record(
+            1,
+            source="finance",
+            kind="request_received",
+            skill="record_incident_finance",
+            task_status="working",
+        ),
+        _record(
+            2,
+            source="finance",
+            kind="result_sent",
+            skill="record_incident_finance",
+            task_status="completed",
+        ),
+        # 재무가 총괄에 보낸 요청과 총괄의 응답: 총괄 → 재무 방향이지만 요청이 아니다
+        _record(3, source="orchestrator", requester="finance", kind="request_received", skill="q"),
+        _record(
+            4,
+            source="orchestrator",
+            requester="finance",
+            kind="result_sent",
+            skill="q",
+            task_status="completed",
+        ),
+        _record(5, kind="request_received", skill="get_claim"),  # 총괄 → 고객지원
+        _record(6, source="finance", kind="event_published"),
+    ]
+    communications.set_reader(lambda q: CommonLogResult(records=records))
+    client = TestClient(app)
+
+    def ids(**params):
+        res = client.get(URL, params={"include_events": True, **params})
+        assert res.status_code == 200
+        return [x["log_id"] for x in res.json()["data"]]
+
+    assert ids(from_agent="orchestrator", to_agent="finance", message_type="request") == ["log_t1"]
+    assert ids(from_agent="finance", to_agent="orchestrator", message_type="reply") == ["log_t2"]
+    assert ids(from_agent="orchestrator", to_agent="finance") == ["log_t1", "log_t4"]
+    assert ids(message_type="request") == ["log_t1", "log_t3", "log_t5"]
+    assert ids(dept="finance", message_type="reply") == ["log_t2", "log_t4"]
+    assert ids() == [f"log_t{n}" for n in range(1, 7)]  # 거르개가 없으면 그대로
+    assert client.get(URL, params={"message_type": "x"}).status_code == 422

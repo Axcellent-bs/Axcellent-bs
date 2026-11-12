@@ -809,7 +809,7 @@ export const FINANCE_SECTION_TAB: Record<string, FinanceTab> = {
   "tax-vat": "tax", "tax-seller-report": "tax", "tax-income": "tax", "tax-exports": "tax", "tax-rules": "tax",
   "campaign-pnl": "campaigns", "campaign-reviews": "campaigns", "campaign-lessons": "campaigns", "campaign-insights": "campaigns", "campaign-opinions": "campaigns",
   cashflow: "cash",
-  "planning-requests": "requests", "support-costs": "requests",
+  "planning-requests": "requests", "support-costs": "requests", "orchestrator-requests": "requests",
 };
 /** 주소 해시(# 없이) → 열 탭. 탭 id도 섹션 앵커도 아니면 null */
 export function financeHashTab(hash: string): FinanceTab | null {

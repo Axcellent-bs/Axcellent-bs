@@ -86,8 +86,9 @@ export const api = {
   health: () => request<Health>("/api/dashboard/health"),
   // 새 문의 만들기에서 가상 고객 목록을 고른다
   users: () => request<Me[]>("/api/dashboard/users"),
-  /** 부서 간 A2A 소통 (공통 로그). 공통 로그 읽기가 꽂히기 전에는 503 (ax-backend #249) */
-  communications: (q: { dept?: string; context_id?: string } = {}) => {
+  /** 부서 간 A2A 소통 (공통 로그). 공통 로그 읽기가 꽂히기 전에는 503 (ax-backend #249).
+   *  `from_agent`·`to_agent`·`message_type`(request|reply)은 읽기 전용 거르개 (재무 "총괄이 재무에 맡긴 일") */
+  communications: (q: { dept?: string; context_id?: string; from_agent?: string; to_agent?: string; message_type?: "request" | "reply" } = {}) => {
     const qs = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]).toString();
     return requestEnvelope<CommLine[], CommMeta>(`/api/dashboard/communications${qs ? `?${qs}` : ""}`);
   },

@@ -233,15 +233,25 @@ def skill_grades() -> dict[str, str]:
     return {skill: next(iter(g)) for skill, g in seen.items() if len(g) == 1}
 
 
+MessageType = Literal["request", "reply"]
+# 요청 줄. 그 밖의 소통 종류(결과·상태·결정·이관·거절)는 응답 줄이다
+REQUEST_KIND = "request_received"
+
+
 def list_communications(
     dept: str | None,
     context_id: str | None,
     limit: int = MAX_LIMIT,
     include_events: bool = False,
+    from_agent: str | None = None,
+    to_agent: str | None = None,
+    message_type: MessageType | None = None,
 ) -> tuple[list[CommunicationLine], bool]:
     """(줄 목록 오름차순, 잘림 여부). `dept`가 보냈거나 받은 줄만 남긴다.
 
     `include_events`면 발행된 이벤트 줄(`kind="event"`)도 시간순으로 함께 보여 준다.
+    `from_agent`·`to_agent`는 보낸 쪽·받는 쪽을 정확히 맞춘다(부서 이름도 받는다).
+    `message_type`이 `request`면 요청 줄만, `reply`면 응답 줄만 남긴다(이벤트 줄은 빠진다).
     """
     kinds = [*COMM_KINDS, EVENT_KIND] if include_events else COMM_KINDS
     query = CommonLogQuery(
@@ -250,7 +260,16 @@ def list_communications(
         limit=min(max(limit, 1), MAX_LIMIT),
     )
     result = _read(query)
-    lines = [_line(r) for r in result.records if r.kind in kinds]
+    records = [r for r in result.records if r.kind in kinds]
+    if message_type == "request":
+        records = [r for r in records if r.kind == REQUEST_KIND]
+    elif message_type == "reply":
+        records = [r for r in records if r.kind not in (REQUEST_KIND, EVENT_KIND)]
+    lines = [_line(r) for r in records]
+    if from_agent:
+        lines = [x for x in lines if x.from_agent == agent_name(from_agent)]
+    if to_agent:
+        lines = [x for x in lines if x.to_agent == agent_name(to_agent)]
     if dept:
         wanted = agent_name(dept)
         lines = [x for x in lines if wanted in (x.from_agent, x.to_agent)]
