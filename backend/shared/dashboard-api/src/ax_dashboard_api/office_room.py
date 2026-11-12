@@ -8,9 +8,12 @@
 - `POST /api/dashboard/office-room`: 단톡방에서 말을 보낸 화면이 보낼 때마다 올린다.
   사람 토큰이 필요하다. 같은 부서·같은 대화를 다시 올리면 `updated_at`만 바뀐다
   (보낸 사람은 처음 올린 사람 그대로).
-- `GET /api/dashboard/office-room?hours=`: 최근 `hours`시간(기본 24, 최대 168) 안에 말이 오간 대화.
-  최근에 말이 오간 것이 먼저다(최대 200줄). 읽기는 다른 화면 읽기처럼 열려 있다.
-  이 읽기는 부서 AI를 부르지 않아 공통 로그에 줄이 쌓이지 않는다.
+- `GET /api/dashboard/office-room?hours=&room=`: 최근 `hours`시간(기본 24, 최대 168) 안에
+  말이 오간 대화. 최근에 말이 오간 것이 먼저다(최대 200줄). `room`을 주면 그 방 대화만 준다.
+  읽기는 다른 화면 읽기처럼 열려 있다. 이 읽기는 부서 AI를 부르지 않아 공통 로그에 줄이
+  쌓이지 않는다.
+- `room_id`: 대화가 오간 방. 전체 대화방은 `all`(기본값), 장애·이슈 방은 총괄 사건 `context_id`다.
+  같은 부서·같은 대화를 다른 방으로 다시 올려도 처음 방 그대로 둔다(대화가 방을 옮겨 다니지 않게).
 - `from_id`·`from_name`은 화면 로그인 계정(데모 계정)이다. 사람 토큰은 화면이 같이 쓰는 값이라
   보낸 사람을 가르지 못한다.
 
@@ -36,6 +39,7 @@ DB_ENV = "AX_OFFICE_ROOM_DB"
 DEFAULT_HOURS = 24
 MAX_HOURS = 168
 MAX_ROWS = 200
+ALL_ROOM = "all"  # 전체 대화방 (화면 ALL_ROOM). 장애·이슈 방은 총괄 사건 context_id
 
 # 단톡방에서 말을 걸 수 있는 부서 (화면 useOfficeTalk의 OFFICE_TALK_KEYS와 같다)
 Agent = Literal[
@@ -50,10 +54,13 @@ CREATE TABLE IF NOT EXISTS office_threads (
     from_name  TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    room_id    TEXT NOT NULL DEFAULT 'all',
     PRIMARY KEY (agent, thread_id)
 );
 CREATE INDEX IF NOT EXISTS idx_office_threads_updated ON office_threads (updated_at);
 """
+# room_id 칸이 생기기 전 파일에도 칸을 붙인 뒤 만든다
+_ROOM_INDEX = "CREATE INDEX IF NOT EXISTS idx_office_threads_room ON office_threads (room_id)"
 
 
 class OfficeThreadBody(BaseModel):
@@ -61,6 +68,7 @@ class OfficeThreadBody(BaseModel):
     thread_id: str = Field(min_length=1, max_length=64)
     from_id: str = Field(min_length=1, max_length=64)
     from_name: str = Field(min_length=1, max_length=40)
+    room_id: str = Field(default=ALL_ROOM, min_length=1, max_length=64)
 
 
 class OfficeRoomStore:
@@ -71,17 +79,40 @@ class OfficeRoomStore:
         if path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        self._add_room_column()
+
+    def _add_room_column(self) -> None:
+        """room_id 칸이 없는 예전 파일이면 붙인다.
+
+        이미 있으면 아무것도 하지 않는다(여러 번 켜도 안전).
+        """
+        with self._conn:
+            cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(office_threads)")}
+            if "room_id" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE office_threads"
+                    f" ADD COLUMN room_id TEXT NOT NULL DEFAULT '{ALL_ROOM}'"
+                )
+            self._conn.execute(_ROOM_INDEX)
 
     def touch(self, body: OfficeThreadBody, now: datetime) -> dict[str, Any]:
-        """처음이면 넣고, 있으면 마지막 시각만 바꾼다."""
+        """처음이면 넣고, 있으면 마지막 시각만 바꾼다(보낸 사람·방은 처음 그대로)."""
         at = now.isoformat()
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO office_threads"
-                " (agent, thread_id, from_id, from_name, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?)"
+                " (agent, thread_id, from_id, from_name, created_at, updated_at, room_id)"
+                " VALUES (?,?,?,?,?,?,?)"
                 " ON CONFLICT (agent, thread_id) DO UPDATE SET updated_at = excluded.updated_at",
-                (body.agent, body.thread_id, body.from_id, body.from_name, at, at),
+                (
+                    body.agent,
+                    body.thread_id,
+                    body.from_id,
+                    body.from_name,
+                    at,
+                    at,
+                    body.room_id,
+                ),
             )
             row = self._conn.execute(
                 "SELECT * FROM office_threads WHERE agent = ? AND thread_id = ?",
@@ -89,12 +120,17 @@ class OfficeRoomStore:
             ).fetchone()
         return dict(row)
 
-    def recent(self, since: datetime) -> list[dict[str, Any]]:
+    def recent(self, since: datetime, room: str | None = None) -> list[dict[str, Any]]:
+        """`since` 뒤에 말이 오간 대화. `room`을 주면 그 방만."""
+        where, args = "updated_at >= ?", [since.isoformat()]
+        if room is not None:
+            where += " AND room_id = ?"
+            args.append(room)
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM office_threads WHERE updated_at >= ?"
+                f"SELECT * FROM office_threads WHERE {where}"
                 " ORDER BY updated_at DESC, rowid DESC LIMIT ?",
-                (since.isoformat(), MAX_ROWS),
+                (*args, MAX_ROWS),
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -138,6 +174,7 @@ def touch_office_thread(body: OfficeThreadBody) -> dict[str, Any]:
 @router.get("/office-room")
 def list_office_threads(
     hours: int = Query(default=DEFAULT_HOURS, ge=1, le=MAX_HOURS),
+    room: str | None = Query(default=None, min_length=1, max_length=64),
 ) -> dict[str, Any]:
-    rows = get_store().recent(_now() - timedelta(hours=hours))
+    rows = get_store().recent(_now() - timedelta(hours=hours), room)
     return ok(rows, total=len(rows))
