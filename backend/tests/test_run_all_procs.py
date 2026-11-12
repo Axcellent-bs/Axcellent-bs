@@ -326,3 +326,62 @@ def test_traffic_script_still_starts_with_the_switch_off() -> None:
     launch = launch[: launch.index("scripts/shop_traffic.py")]
     assert 'SHOP_TRAFFIC_ORDERS="$SHOP_TRAFFIC_ORDERS"' in launch
     assert "SHOP_TRAFFIC_ON" not in text
+
+
+# --- 가상 주문(shop_traffic.py)도 stop으로 끈다 (2026-11-12: bash 껍데기 pid만 적혀 남았다) -----
+
+
+def _traffic_pair(launcher: int, child: int) -> list:
+    cmd = "python.exe scripts/shop_traffic.py"
+    return [P(launcher, 9999, f".venv\\Scripts\\{cmd}"), P(child, launcher, f"Python312\\{cmd}")]
+
+
+def test_traffic_is_stopped_by_its_own_pid_file_when_the_bash_pid_is_gone(tmp_path: Path) -> None:
+    """.pid의 bash 번호(9999)는 이미 없고, shop_traffic.py가 직접 적은 실제 번호(501)로 끈다."""
+    pid_file = tmp_path / "shop_traffic.pid.json"
+    pid_file.write_text(json.dumps({"pid": 501, "started_at": "2026-11-12T05:59:43+00:00"}) + "\n")
+    table = FakeTable([*_traffic_pair(500, 501), P(300, 1, "chrome.exe")])
+    left = procs.stop([9999], [pid_file], ["shop_traffic.py"], lister=table.list, killer=table.kill,
+                      wait=0)  # fmt: skip
+    assert left == []
+    assert set(table.killed) == {500, 501}  # 실제 python과 그 venv 런처
+    assert [r.pid for r in table.rows] == [300]
+
+
+def test_traffic_without_a_pid_file_is_left_and_reported(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """기록 없이 떠 있는 가상 주문은 끄지 않고 "남아 있음: pid N"으로 알린다."""
+    table = FakeTable(_traffic_pair(700, 701))
+    monkeypatch.setattr(procs, "list_processes", table.list)
+    monkeypatch.setattr(procs, "kill_process", table.kill)
+    monkeypatch.setattr(procs.time, "sleep", lambda _s: None)
+    code = procs.main(["stop", "--pids", "", "--locks", str(tmp_path / "none.json"),
+                       "--", "shop_traffic.py"])  # fmt: skip
+    out = capsys.readouterr().out
+    assert code == 1
+    assert table.killed == []
+    assert "남아 있음: pid 700" in out and "남아 있음: pid 701" in out
+
+
+def test_run_all_passes_the_traffic_pid_file_and_stop_reads_it() -> None:
+    text = RUN_ALL.read_text(encoding="utf-8")
+    assert 'TRAFFIC_PID_FILE="$DATA/shop_traffic.pid.json"' in text
+    locks = text[text.index("COLLECTOR_LOCKS=(") :].splitlines()[0]
+    assert '"$TRAFFIC_PID_FILE"' in locks  # stop_all이 procs.py --locks로 넘긴다
+    launch = text[text.index('rm -f "$TRAFFIC_PID_FILE"') :]
+    launch = launch[: launch.index("scripts/shop_traffic.py")]
+    assert 'SHOP_TRAFFIC_PID_FILE="$TRAFFIC_PID_FILE"' in launch
+
+
+def test_shop_traffic_writes_its_real_pid(tmp_path: Path) -> None:
+    script = BACKEND / "scripts" / "shop_traffic.py"
+    spec = importlib.util.spec_from_file_location("shop_traffic", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    path = tmp_path / "shop_traffic.pid.json"
+    module.write_pid_file(str(path))
+    assert procs.lock_pids([path]) == [os.getpid()]
+    module.write_pid_file(None)  # 값이 없으면 아무것도 하지 않는다
+    module.write_pid_file(str(tmp_path / "no" / "dir" / "x.json"))  # 적지 못해도 멈추지 않는다

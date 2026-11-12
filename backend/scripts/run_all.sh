@@ -54,7 +54,9 @@ while read -r _ _ module; do
   [ -n "${module:-}" ] && MARKERS+=("uvicorn $module")
 done <<< "$APPS"
 MARKERS+=("data_agent.trending_collect" "data_agent.youtube_collect" "shop_traffic.py")
-COLLECTOR_LOCKS=("$DATA/youtube_collect.lock" "$DATA/trending_collect.lock")
+# 가상 주문(shop_traffic.py)도 자기 실제 pid를 같은 모양으로 적는다 (.pid의 bash 번호만으로는 못 끌 때가 있어서)
+TRAFFIC_PID_FILE="$DATA/shop_traffic.pid.json"
+COLLECTOR_LOCKS=("$DATA/youtube_collect.lock" "$DATA/trending_collect.lock" "$TRAFFIC_PID_FILE")
 
 # --only 묶음 이름 (data-demo = core + data 업무 리포트가 부르는 서비스)
 GROUP_core="safety,memory,shop-api,dashboard-api,orchestrator"
@@ -433,6 +435,8 @@ if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
   # 재고가 0이 되면 주문이 조용히 멈춰 장애가 안 잡히는 것처럼 보인다. 자동 보충을 기본으로 켠다
   # (끄려면 SHOP_TRAFFIC_REFILL=0). 보충에는 위에서 만든 admin 토큰을 쓴다
   echo "$START_LINE" > "$LOGS/shop-traffic.log"
+  rm -f "$TRAFFIC_PID_FILE"  # 지난번 번호가 남지 않게 (새로 뜬 shop_traffic.py가 다시 적는다)
+  SHOP_TRAFFIC_PID_FILE="$TRAFFIC_PID_FILE" \
   SHOP_API_URL=http://127.0.0.1:8010 SHOP_TRAFFIC_REFILL="${SHOP_TRAFFIC_REFILL:-1}" SHOP_TRAFFIC_ORDERS="$SHOP_TRAFFIC_ORDERS" \
     "$PY" scripts/shop_traffic.py >> "$LOGS/shop-traffic.log" 2>&1 &
   winpid_of $! > "$LOGS/shop-traffic.pid"

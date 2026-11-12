@@ -333,7 +333,24 @@ def orders_enabled(env: dict[str, str] | None = None) -> bool:
     return (os.environ if env is None else env).get("SHOP_TRAFFIC_ORDERS", "1") != "0"
 
 
+def write_pid_file(path: str | None) -> None:
+    """run_all.sh stop이 끌 실제 python 번호를 적는다 (수집기 잠금과 같은 JSON 한 줄).
+
+    run_all.sh가 적는 `.pid`는 bash 쪽 껍데기 번호라, 그 껍데기가 먼저 끝나면 자식을 찾지 못한다.
+    적지 못해도 주문은 그대로 돈다(끄기만 수동).
+    """
+    if not path:
+        return
+    try:
+        line = json.dumps({"pid": os.getpid(), "started_at": datetime.now(UTC).isoformat()})
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError as error:
+        print(f"{now()} pid 파일을 적지 못함({path}): {error}", file=sys.stderr, flush=True)
+
+
 def main() -> int:
+    write_pid_file(os.getenv("SHOP_TRAFFIC_PID_FILE"))
     rng = random.Random()
     interval = interval_s()
     watch = StockWatch(
