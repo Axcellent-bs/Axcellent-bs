@@ -1,7 +1,8 @@
 """이미지·영상에 AI 라벨 문구를 입힌다(ffmpeg `drawtext`). SNS 설계 5절, D3 단계.
 
 - 문구·위치·크기·표시 시간·글꼴·화질은 `sns_label.toml` 한 곳에서만 읽는다(코드에 박지 않는다).
-  문구 기본값은 `[확인 필요 — 팀·변호사 승인]` 임시 문구이고 확정 문구가 아니다.
+  문구는 종류별(`image`·`video`·`unknown`)로 지정하고, 오버레이와 XMP·MP4 메타데이터 설명이
+  같은 값을 쓴다. 기본 문구는 재헌 확정(2026-11-12)이고, 팀·변호사 검토는 `[확인 필요]`다.
 - 결과는 `<out_dir>/labeled.jpg|mp4`와 `meta.json`이다. 원본은 `out_dir`에 그대로 두거나
   `raw.*`로 복사해
   보관하고 고치지 않는다.
@@ -56,6 +57,7 @@ class LabelConfig:
     text_status: str
     text_video: str
     text_image: str
+    text_unknown: str
     position: str
     margin_ratio: float
     side_margin_ratio: float
@@ -79,7 +81,12 @@ class LabelConfig:
     font_bundled: str = ""  # 패키지 폴더 기준 상대 경로(번들 글꼴)
 
     def text_for(self, kind: str) -> str:
-        return self.text_image if kind == "image" else self.text_video
+        """종류별 문구. 이미지·영상이 아니면(종류를 모르면) `unknown` 문구를 쓴다."""
+        if kind == "image":
+            return self.text_image
+        if kind == "video":
+            return self.text_video
+        return self.text_unknown
 
 
 def load_config(path: str | Path | None = None) -> LabelConfig:
@@ -96,6 +103,7 @@ def load_config(path: str | Path | None = None) -> LabelConfig:
             text_status=str(text["status"]),
             text_video=str(text["video"]).strip(),
             text_image=str(text["image"]).strip(),
+            text_unknown=str(text["unknown"]).strip(),
             position=str(layout["position"]),
             margin_ratio=float(layout["margin_ratio"]),
             side_margin_ratio=float(layout["side_margin_ratio"]),
@@ -126,7 +134,7 @@ def load_config(path: str | Path | None = None) -> LabelConfig:
 
 def _validate(c: LabelConfig) -> None:
     problems: list[str] = []
-    if not c.text_video or not c.text_image:
+    if not c.text_video or not c.text_image or not c.text_unknown:
         problems.append("text_empty")
     if c.position not in _POSITIONS:
         problems.append("position")
@@ -156,7 +164,7 @@ def _validate(c: LabelConfig) -> None:
 
 
 def bundled_font(config: LabelConfig) -> Path | None:
-    """번들 글꼴(Pretendard Std Bold, OFL 1.1). 패키지 폴더 밖 경로는 쓰지 않는다."""
+    """번들 글꼴(Pretendard Bold, OFL 1.1). 패키지 폴더 밖 경로는 쓰지 않는다."""
     if not config.font_bundled:
         return None
     base = Path(__file__).resolve().parent
@@ -178,6 +186,52 @@ def find_font(config: LabelConfig) -> str:
         if Path(candidate).is_file():
             return candidate
     raise LabelError("font_not_found", "한글 글꼴을 찾지 못했다(sns_label.toml [font])")
+
+
+def _cmap_codepoints(data: bytes) -> set[int] | None:
+    """TrueType(`.ttf`)의 cmap(형식 4·12)에서 글꼴이 가진 글자 집합. 읽지 못하면 `None`."""
+    try:
+        if data[:4] not in (b"\x00\x01\x00\x00", b"true", b"OTTO"):
+            return None
+        u16 = lambda o: int.from_bytes(data[o : o + 2], "big")  # noqa: E731
+        u32 = lambda o: int.from_bytes(data[o : o + 4], "big")  # noqa: E731
+        table = next(
+            (
+                u32(12 + 16 * i + 8)
+                for i in range(u16(4))
+                if data[12 + 16 * i : 16 + 16 * i] == b"cmap"
+            ),
+            None,
+        )
+        if table is None:
+            return None
+        points: set[int] = set()
+        for i in range(u16(table + 2)):
+            sub = table + u32(table + 4 + 8 * i + 4)
+            fmt = u16(sub)
+            if fmt == 4:
+                segs = u16(sub + 6) // 2
+                ends, starts = sub + 14, sub + 16 + 2 * segs
+                for k in range(segs):
+                    points.update(range(u16(starts + 2 * k), u16(ends + 2 * k) + 1))
+            elif fmt == 12:
+                for k in range(u32(sub + 12)):
+                    base = sub + 16 + 12 * k
+                    points.update(range(u32(base), u32(base + 4) + 1))
+        return points
+    except (IndexError, ValueError):
+        return None
+
+
+def missing_glyphs(font: str, text: str) -> str:
+    """글꼴에 없는 글자(공백 제외). 글꼴 표를 읽지 못하면(.ttc 등) 빈 문자열이라 검사를 건너뛴다."""
+    try:
+        points = _cmap_codepoints(Path(font).read_bytes())
+    except OSError:
+        return ""
+    if not points:
+        return ""
+    return "".join(sorted({c for c in text if not c.isspace() and ord(c) not in points}))
 
 
 def _tools() -> tuple[str, str]:
@@ -222,7 +276,8 @@ def wrap_text(text: str, width_px: int, font_px: int, config: LabelConfig) -> st
 
 
 def _escape_filter_path(path: str) -> str:
-    return path.replace("\\", "/").replace(":", r"\:").replace("'", "")
+    """필터 옵션 값(작은따옴표 안)용 경로 이스케이프. 문구는 `textfile`로 넘긴다."""
+    return path.replace("\\", "/").replace(":", r"\:").replace("'", r"'\''")
 
 
 def build_drawtext(
@@ -238,6 +293,7 @@ def build_drawtext(
     border = max(1, round(font_px * config.box_border_ratio))
     return (
         f"drawtext=fontfile='{_escape_filter_path(font)}':textfile={Path(textfile).name}"
+        ":expansion=none"  # 문구의 `%{...}`·`\`를 ffmpeg가 해석하지 않게 한다
         f":fontsize={font_px}:fontcolor={config.font_color}:line_spacing={config.line_spacing_px}"
         f":x=(w-text_w)/2:y={y}"
         f":box=1:boxcolor={config.box_color}@{config.box_opacity}:boxborderw={border}"
@@ -255,8 +311,10 @@ def machine_mark(model: str, at: datetime) -> dict[str, str]:
     }
 
 
-def build_xmp(mark: dict[str, str]) -> bytes:
+def build_xmp(mark: dict[str, str], label_text: str = "") -> bytes:
     attrs = " ".join(f"catbooks:{k}={quoteattr(v)}" for k, v in mark.items())
+    if label_text:  # 오버레이와 같은 문구(사람이 읽는 설명)
+        attrs += f" catbooks:ai_label_text={quoteattr(label_text)}"
     packet = (
         '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>'
         '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
@@ -272,12 +330,12 @@ def build_xmp(mark: dict[str, str]) -> bytes:
     return packet.encode("utf-8")
 
 
-def inject_xmp(jpeg: Path, mark: dict[str, str]) -> None:
+def inject_xmp(jpeg: Path, mark: dict[str, str], label_text: str = "") -> None:
     """JPEG에 XMP APP1 세그먼트를 넣는다(APP0 JFIF 뒤, 없으면 SOI 바로 뒤). 기존 XMP는 바꾼다."""
     data = jpeg.read_bytes()
     if data[:2] != b"\xff\xd8":
         raise LabelError("metadata_not_written", "JPEG가 아니다")
-    payload = b"http://ns.adobe.com/xap/1.0/\x00" + build_xmp(mark)
+    payload = b"http://ns.adobe.com/xap/1.0/\x00" + build_xmp(mark, label_text)
     if len(payload) + 2 > 0xFFFF:
         raise LabelError("metadata_not_written", "XMP가 너무 크다")
     segment = b"\xff\xe1" + (len(payload) + 2).to_bytes(2, "big") + payload
@@ -356,6 +414,8 @@ def apply_label(
     at = now or datetime.now(UTC)
     mark = machine_mark(generator_model.strip(), at)
     text = cfg.text_for(kind)
+    if missing_glyphs(font, text):  # 없는 글자는 네모로 그려진다. 깨진 라벨을 만들지 않는다
+        raise LabelError("font_glyph_missing", "글꼴에 문구의 글자가 없다(한글 글꼴 필요)")
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -386,28 +446,33 @@ def apply_label(
                 "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
                 "-movflags", "+faststart+use_metadata_tags",
                 *[a for k, v in mark.items() for a in ("-metadata", f"{k}={v}")],
+                "-metadata", f"description={text}",  # 오버레이와 같은 문구
                 str(tmp_out),
             ]  # fmt: skip
         _run_ffmpeg(args, work, cfg.ffmpeg_timeout_s)
         if kind == "image":
-            inject_xmp(tmp_out, mark)
+            inject_xmp(tmp_out, mark, text)
         shutil.move(str(tmp_out), final)
 
-    _verify_mark(final, kind, mark)
+    _verify_mark(final, kind, mark, text)
     labeled_sha = sha256_file(final)
     meta_path = out / "meta.json"
     _write_meta(meta_path, cfg, kind, keep, source_sha, final, labeled_sha, mark, text, at)
     return LabelResult(final, labeled_sha, keep, source_sha, meta_path, kind, mark, text)
 
 
-def _verify_mark(final: Path, kind: str, mark: dict[str, str]) -> None:
+def _verify_mark(final: Path, kind: str, mark: dict[str, str], text: str = "") -> None:
     if kind == "image":
         xmp = jpeg_xmp(final) or ""
         ok = 'catbooks:ai_generated="true"' in xmp
+        if text:
+            ok = ok and f"catbooks:ai_label_text={quoteattr(text)}" in xmp
     else:
         fmt = (run_ffprobe(final) or {}).get("format", {})
         tags = {str(k).lower(): str(v) for k, v in (fmt.get("tags") or {}).items()}
         ok = all(tags.get(k) == v for k, v in mark.items())
+        if text:
+            ok = ok and tags.get("description") == text
     if not ok:
         raise LabelError("metadata_not_written", "결과 파일에서 기계판독 표시를 읽지 못했다")
 
