@@ -42,6 +42,8 @@ CAROUSEL_MIN = (
     2  # 캐러셀 2~10장 [확인 필요: 공식 문서 대조 기록(sns-design.md)에 장수가 없다. 요청서 기준]
 )
 CAROUSEL_MAX = 10
+# 캐러셀은 모든 장이 첫 장 비율로 잘린다(공식 문서). 그래서 장마다 비율이 같아야 한다(상대 오차)
+CAROUSEL_ASPECT_TOLERANCE = 0.01
 CAPTION_MAX = 2200
 HASHTAG_MAX = 30
 MENTION_MAX = 20
@@ -142,6 +144,30 @@ def _jpeg_segments(path: Path):
             yield marker, body
 
 
+def carousel_aspect_mismatch(sizes: list[tuple[int, int]]) -> bool:
+    """장 크기((가로, 세로) 목록)의 비율이 첫 장과 허용 오차 밖으로 다르면 True."""
+    ratios = [w / h for w, h in sizes if h > 0]
+    if len(ratios) < 2:
+        return False
+    first = ratios[0]
+    return any(abs(r - first) / first > CAROUSEL_ASPECT_TOLERANCE for r in ratios[1:])
+
+
+def detected_format(path: Path) -> str:
+    """머리 바이트로 본 형식(`jpeg`·`png`·`webp`·`gif`·`unknown`)."""
+    with path.open("rb") as handle:
+        head = handle.read(12)
+    if head[:3] == b"\xff\xd8\xff":
+        return "jpeg"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp"
+    if head[:4] == b"GIF8":
+        return "gif"
+    return "unknown"
+
+
 def is_jpeg(path: Path) -> bool:
     with path.open("rb") as handle:
         return handle.read(3) == b"\xff\xd8\xff"
@@ -170,7 +196,9 @@ def check_image(path: Path) -> MediaReport:
     size_bytes = path.stat().st_size
     report.details["size_bytes"] = size_bytes
     if not is_jpeg(path):
+        # 옛 png 산출물 등은 조용히 통과시키지 않는다: 사유 코드와 감지한 형식을 남긴다
         report.problems.append("image_not_jpeg")
+        report.details["detected_format"] = detected_format(path)
         return report
     if size_bytes > IMAGE_MAX_BYTES:
         report.problems.append("image_too_large")

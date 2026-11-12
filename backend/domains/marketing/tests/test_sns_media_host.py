@@ -30,7 +30,9 @@ AWS_EXAMPLE_SIGNATURE = "aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d15775
 ACCESS = "test-access-not-real"
 SECRET = "test-secret-not-real"  # noqa: S105
 FIXED = datetime(2026, 11, 6, 9, 0, 0, tzinfo=UTC)
-JPEG = b"\xff\xd8\xff\xe0" + b"0" * 64
+# 규격 검사를 통과하는 최소 JPEG 머리(1080x1350 = 4:5)
+_SOF = b"\xff\xc0" + (11).to_bytes(2, "big") + b"\x08" + (1350).to_bytes(2, "big")
+JPEG = b"\xff\xd8" + _SOF + (1080).to_bytes(2, "big") + b"\x01\x01\x11\x00\xff\xd9" + b"0" * 64
 
 
 class Recorder:

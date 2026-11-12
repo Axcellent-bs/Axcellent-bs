@@ -87,6 +87,22 @@ class MediaInfo:
     is_ai_generated: bool | None  # 응답에 없으면 None
 
 
+@dataclass(frozen=True)
+class PublishOutcome:
+    """`media_publish` 응답. 성공이어도 `config_issue`(CAPTION_NOT_ATTACHED 등)가 올 수 있다."""
+
+    media_id: str
+    config_issue: str | None = None
+
+
+@dataclass(frozen=True)
+class PublishingLimit:
+    """`content_publishing_limit`(읽기 전용) 응답: 24시간 창의 사용량과 계정 한도."""
+
+    quota_usage: int
+    quota_total: int | None = None
+
+
 class InstagramAdapter(Protocol):
     name: str
     # 캐러셀 호출을 쓸 수 있는가. 필드 이름이 공식 문서로 확인되기 전의 실제 어댑터는 False다
@@ -104,7 +120,11 @@ class InstagramAdapter(Protocol):
 
     async def get_container_status(self, container_id: str) -> ContainerStatus: ...
 
-    async def media_publish(self, container_id: str) -> str: ...
+    async def media_publish(self, container_id: str) -> str | PublishOutcome: ...
+
+    async def get_publishing_limit(self) -> PublishingLimit:
+        """계정의 24시간 게시 사용량·한도(읽기). 없는 어댑터는 퍼블리셔가 건너뛴다."""
+        ...
 
     async def get_media(self, media_id: str) -> MediaInfo: ...
 
@@ -140,6 +160,8 @@ ERROR_RULES: tuple[ErrorRule, ...] = (
     ErrorRule(-1, 2207053, "ig_upload_failed", "retry"),
     ErrorRule(9007, 2207027, "ig_not_ready", "retry"),
 )
+# 이 실패 코드가 나면 이후 게시를 사람 확인 전까지 막는다(`publish_halted`)
+HALT_FAILURES = frozenset({"ig_daily_limit", "ig_spam_suspected", "ig_account_restricted"})
 TOKEN_ERROR_CODE = 190  # 공식 표에 없음 [확인 필요]. 사람이 토큰을 다시 발급한다
 
 

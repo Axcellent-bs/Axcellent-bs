@@ -577,6 +577,7 @@ async def test_recover_sent_publish_is_decided_by_container_status(
     from marketing_agent.sns_publish.instagram import ContainerRequest
 
     container = await adapter.create_container(ContainerRequest("a", "image", "c", True, True))
+    await adapter.get_container_status(container)
     media_id = await adapter.media_publish(container)
     _interrupted(True, container)
     await publisher.recover_interrupted()

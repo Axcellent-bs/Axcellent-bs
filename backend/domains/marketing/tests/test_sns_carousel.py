@@ -269,7 +269,7 @@ def test_item_changed_after_draft_is_rejected() -> None:
 
 def test_item_with_bad_spec_is_rejected_per_item() -> None:
     bad = _item(2)
-    _make_jpeg(sns_media.resolve_asset(bad), 200, 1350, 2)  # 너비 320 미만
+    _make_jpeg(sns_media.resolve_asset(bad), 240, 300, 2)  # 너비 320 미만(비율은 같다)
     check = _check(_draft([_item(1), bad]))
     assert check["verdict"] == "rejected"
     assert "item_2:image_width_out_of_range" in check["problems"]
@@ -504,9 +504,12 @@ def _interrupted(sent: bool, container: str | None, children: list[str]) -> None
 
 async def _build_carousel(adapter: MockInstagramAdapter) -> tuple[str, list[str]]:
     kids = [await adapter.create_carousel_item(f"ref{i}") for i in range(2)]
+    for kid in kids:
+        await adapter.get_container_status(kid)  # FINISHED가 된 뒤에만 부모를 만들 수 있다
     parent = await adapter.create_carousel_container(
         instagram.CarouselRequest(tuple(kids), "c", True)
     )
+    await adapter.get_container_status(parent)
     return parent, kids
 
 
@@ -616,3 +619,105 @@ def test_mock_rejects_out_of_range_parent_and_unknown_children() -> None:
             )
 
     asyncio.run(go())
+
+
+# --- 같은 비율 강제(첫 장 비율로 잘린다) / 부모 FINISHED 대기 / 건수 ---
+
+
+def _resize(ref: str, width: int, height: int) -> None:
+    _make_jpeg(sns_media.resolve_asset(ref), width, height, 7)
+
+
+def test_draft_rejects_different_aspect_ratios() -> None:
+    a, b = _item(1), _item(2)
+    _resize(b, 1080, 566)  # 1.91:1 (규격 안이지만 첫 장 4:5와 다르다)
+    out = _call(
+        "draft_sns_post", {"coupon": _coupon(), "media_kind": "carousel", "asset_paths": [a, b]}
+    )
+    assert out["status"] == "failed" and out["outcome"] == "carousel_aspect_mismatch"
+
+
+def test_draft_accepts_same_ratio_with_small_tolerance_and_different_pixels() -> None:
+    a, b = _item(1), _item(2)
+    _resize(b, 864, 1080)  # 4:5, 크기만 다르다
+    assert _draft([a, b])["media_kind"] == "carousel"
+    c = _item(3)
+    _resize(c, 1080, 1352)  # 0.15% 차이는 허용 오차 안
+    assert _draft([a, c])["media_kind"] == "carousel"
+
+
+def test_check_rejects_aspect_change_after_draft() -> None:
+    draft = _ready(2)
+    _resize(draft["assets"][1]["asset_ref"], 1080, 566)  # 초안 뒤에 비율이 달라졌다
+    check = _check(draft)
+    assert check["verdict"] == "rejected" and check["publishable"] is False
+    assert "carousel_aspect_mismatch" in check["problems"]
+    assert "carousel_aspect_differs" in check["warnings"]  # 경고 코드는 그대로 남는다
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_mixed_aspect_before_approval(
+    gate: FakeGate, adapter: MockInstagramAdapter
+) -> None:
+    draft = _ready(2)
+    _resize(draft["assets"][1]["asset_ref"], 1080, 566)
+    out = await publisher.publish_sns(_publish_request(draft), handlers.STATE.sns)
+    assert out.outcome == "carousel_not_publishable"
+    assert "carousel_aspect_mismatch" in out.output["problems"]
+    assert gate.calls == [] and sum(adapter.calls.values()) == 0
+
+
+@pytest.mark.asyncio
+async def test_children_and_parent_must_be_finished_before_publish(
+    gate: FakeGate, adapter: MockInstagramAdapter
+) -> None:
+    adapter.in_progress_polls = 1  # 모든 컨테이너가 처음 한 번은 IN_PROGRESS
+    draft = _ready(3)
+    await publisher.publish_sns(_publish_request(draft), handlers.STATE.sns)
+    gate.approve_all()
+    done = await publisher.publish_sns(_publish_request(draft), handlers.STATE.sns)
+    assert done.outcome == "published", done
+    # 자식 3 + 부모 1 컨테이너가 각각 IN_PROGRESS 1회 + FINISHED 1회
+    assert adapter.calls["get_container_status"] == 8
+    assert adapter.calls["media_publish"] == 1
+
+
+@pytest.mark.asyncio
+async def test_child_error_stops_before_parent(
+    gate: FakeGate, adapter: MockInstagramAdapter
+) -> None:
+    adapter.container_error(1, None)
+    draft = _ready(2)
+    await publisher.publish_sns(_publish_request(draft), handlers.STATE.sns)
+    gate.approve_all()
+    await publisher.publish_sns(_publish_request(draft), handlers.STATE.sns)
+    row = _row()
+    assert (row.status, row.failure_code) == (pending.FAILED, "ig_container_error")
+    assert adapter.calls["create_carousel_container"] == 0
+    assert adapter.calls["media_publish"] == 0
+
+
+@pytest.mark.asyncio
+async def test_carousel_counts_as_one_post_for_the_daily_limit(
+    gate: FakeGate, adapter: MockInstagramAdapter
+) -> None:
+    store = publisher.store()
+    stamp = datetime.now(UTC).isoformat()
+    for i in range(44):
+        key = f"seed-{i}"
+        row = pending.PendingPost(
+            key, TENANT, CTX, f"s{i}", "a" * 64, None, None, pending.PUBLISHED, {}
+        )
+        assert store.create(row)
+        store._conn.execute(  # noqa: SLF001
+            "UPDATE sns_pending SET updated_at = ?, publish_sent = 1 WHERE idempotency_key = ?",
+            (stamp, key),
+        )
+    draft = _ready(10)  # 10장이어도 1건
+    await publisher.publish_sns(_publish_request(draft), handlers.STATE.sns)
+    gate.approve_all()
+    done = await publisher.publish_sns(_publish_request(draft), handlers.STATE.sns)
+    assert done.outcome == "published"
+    assert store.count_posts_since(datetime.now(UTC) - timedelta(hours=24)) == 45
+    refused, _ = await publisher._pre_gate(adapter)  # noqa: SLF001
+    assert refused == "daily_limit_reached"
