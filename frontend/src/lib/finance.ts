@@ -208,7 +208,8 @@ export interface SellerStatement {
   /** 아직 구매가 확정되지 않아 다음 정산으로 넘어가는 주문 (이번 정산금에 들지 않는다) */
   pending_confirmation?: { orders: number; gross: number };
 }
-export interface SettlementBatch { status: BatchStatus; review_id: string | null; execution_id: string | null; total_payout: number; seller_ids: string[] }
+/** closed_reason: 거절된 묶음이 왜 끝났는지. rejected(사람이 멈춤)·expired(시간 초과)·review_missing(안전 장치에 기록 없음, 재시작 등) */
+export interface SettlementBatch { status: BatchStatus; review_id: string | null; execution_id: string | null; total_payout: number; seller_ids: string[]; closed_reason?: "rejected" | "expired" | "review_missing" }
 export interface Settlements { period: string; from: string; to: string; pay_date: string | null; statements: SellerStatement[]; batch: SettlementBatch }
 
 // ---------------------------------------------------------------- ③ 정산 기한 · 미지급금 롤포워드

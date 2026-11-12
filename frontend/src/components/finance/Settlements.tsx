@@ -45,6 +45,17 @@ const BATCH_KO: Record<BatchStatus, string> = {
   approved: "지급이 승인됐습니다. (데모에서는 기록만 하고 실제로 송금하지 않습니다)",
   rejected: "지급 요청이 거절됐습니다. 내용을 확인하고 다시 요청할 수 있습니다.",
 };
+// 거절된 묶음이 왜 끝났는지 (없으면 BATCH_KO.rejected)
+const CLOSED_KO: Record<string, string> = {
+  expired: "정한 시간 안에 아무도 결정하지 않아 지급 요청이 자동으로 멈췄습니다. 다시 요청할 수 있습니다.",
+  review_missing: "안전 장치에 이 요청 기록이 없습니다(안전 장치 재시작 등). 승인된 적이 없어 지급되지 않았으니 다시 요청하세요.",
+};
+/** 정산 기간 끝(다음 주 월요일 0시, 그날은 빠짐)을 그 주 일요일로 보여 준다: "2026-11-09…" → "2026-11-08" */
+function lastDay(to: string): string {
+  const d = new Date(`${to.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
 /** 빼는 금액: 54000 → "−54,000원", 0 → "0원", 없음 → "확인할 수 없음" */
 const minus = (n: number | null) => (n ? `−${krw(n)}` : krw(n));
 export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: number; onChanged: () => void; onGoToQueue: (reviewId: string | null) => void }) {
@@ -111,7 +122,7 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
               ))}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <p className="text-sm text-ink-700">
-                  정산 기간 <b>{periodKo(s.period)}</b>{s.from && s.to && <span className="text-ink-500"> ({s.from.slice(0, 10)} ~ {s.to.slice(0, 10)})</span>}
+                  정산 기간 <b>{periodKo(s.period)}</b>{s.from && s.to && <span className="text-ink-500"> ({s.from.slice(0, 10)} ~ {lastDay(s.to)})</span>}
                   {s.pay_date && <> · 지급 예정일 <b>{s.pay_date}</b></>}
                 </p>
                 <div className="ml-auto flex gap-2">
@@ -187,7 +198,7 @@ export function SettlementsSection({ tick, onChanged, onGoToQueue }: { tick: num
                     </span>
                   </div>
                 </div>
-                <p className="mt-2 text-sm text-ink-700">{BATCH_KO[s.batch.status] ?? "지급 상태를 확인할 수 없습니다."}</p>
+                <p className="mt-2 text-sm text-ink-700">{(s.batch.status === "rejected" && s.batch.closed_reason && CLOSED_KO[s.batch.closed_reason]) || BATCH_KO[s.batch.status] || "지급 상태를 확인할 수 없습니다."}</p>
                 {s.batch.review_id && (
                   <p className="mt-1 text-sm text-ink-500">
                     확인 번호 <code>{s.batch.review_id}</code> · 묶음 {s.batch.seller_ids.length}곳 {krw(s.batch.total_payout)}{" "}

@@ -449,6 +449,54 @@ def test_batch_status_follows_safety_review(client: TestClient, monkeypatch) -> 
     assert rows == {"sel_0001": "approved", "sel_0002": "held", "sel_0003": "approved"}
 
 
+def test_batch_reopens_when_safety_lost_the_review(client: TestClient, monkeypatch) -> None:
+    """안전 장치가 재시작돼 보류 건을 잃으면(404) 요청을 끝난 것으로 보고 다시 요청할 수 있다."""
+    calls = _fake_safety(monkeypatch, HELD)
+    client.post("/api/finance/settlements/batch", json={})
+    monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
+    missing = {"error": {"code": "NOT_FOUND", "message": "보류 건이 없다"}}
+    answers = [httpx.Response(404, json=missing)]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return answers[0]
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        finance_api.httpx, "AsyncClient", lambda: real(transport=httpx.MockTransport(handler))
+    )
+    data = client.get("/api/finance/settlements").json()["data"]
+    batch = data["batch"]
+    assert (batch["status"], batch["closed_reason"]) == ("rejected", "review_missing")
+    assert all(r["status"] == "rejected" for r in data["statements"])
+    todo = client.get("/api/finance/overview").json()["data"]["todo"]
+    assert any(t["action"]["type"] == "settlement_request" for t in todo if "action" in t)
+
+    answers[0] = httpx.Response(200, json={"data": {"review_id": "rev_77", "status": "pending"}})
+    again = client.post("/api/finance/settlements/batch", json={}).json()["data"]
+    assert again["batch"]["status"] == "requested" and "closed_reason" not in again["batch"]
+    assert [c["key"][-2:] for c in calls] == [":1", ":2"]  # 새 시도 번호로 다시 보낸다
+
+
+def test_batch_stays_requested_when_safety_is_unreachable(client: TestClient, monkeypatch) -> None:
+    """안전 장치가 응답하지 않으면(연결 실패·5xx) 요청 상태를 그대로 둔다.
+
+    404만 기록 없음으로 본다.
+    """
+    _fake_safety(monkeypatch, HELD)
+    client.post("/api/finance/settlements/batch", json={})
+    monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": {"code": "unavailable", "message": "down"}})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        finance_api.httpx, "AsyncClient", lambda: real(transport=httpx.MockTransport(handler))
+    )
+    data = client.get("/api/finance/settlements").json()["data"]
+    assert data["batch"]["status"] == "requested" and "closed_reason" not in data["batch"]
+
+
 # ------------------------------------------------- CORS (대시보드가 브라우저에서 직접)
 
 
