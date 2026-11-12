@@ -516,20 +516,25 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
     # ---- 개발 AI 대화 (dev_chat.py). 계획이 서면 코딩 작업을 띄운다. 대화는 상태 `chats`(SSE)
 
     @router.get("/dev-chat")
-    def list_dev_chats() -> dict:
+    def list_dev_chats(account: str | None = None) -> dict:
+        """`?account=` 개발 화면 계정이 연 대화만 준다."""
         svc = get_service()
         rows = sorted(
-            [c for c in svc.state.chats if dev_chat.seen_from(c, SCREEN)],
+            [
+                c
+                for c in svc.state.chats
+                if dev_chat.seen_from(c, SCREEN) and dev_chat.of_account(c, account)
+            ],
             key=lambda c: (c.updated_at, int(c.id.split("-")[-1] or 0)),
             reverse=True,
         )[:MAX_CHATS_LISTED]
         return _list(rows, svc)
 
     @router.get("/dev-chat/{thread_id}", response_model=None)
-    def get_dev_chat(thread_id: str) -> dict | JSONResponse:
+    def get_dev_chat(thread_id: str, account: str | None = None) -> dict | JSONResponse:
         svc = get_service()
         th = svc.chat_of(thread_id)
-        if th is None or not dev_chat.seen_from(th, SCREEN):
+        if th is None or not dev_chat.seen_from(th, SCREEN) or not dev_chat.of_account(th, account):
             return _err(404, "NOT_FOUND", f"대화 {thread_id}가 없다")
         return _ok(dump(th), svc)
 
@@ -567,10 +572,15 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _err(400, "INVALID_INPUT", f"message는 1~{limit}자 문자열이어야 한다")
         if connection is not None and not isinstance(connection, str):
             return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
+        account = body.get("account")
+        if account is not None and (not isinstance(account, str) or not 0 < len(account) <= 64):
+            return _err(400, "INVALID_INPUT", "account는 1~64자 문자열이어야 한다")
         try:
             mode = body.get("mode")
             who = _person(request)
-            th = await dev_chat.send(svc, thread_id, message, connection or None, mode, who, SCREEN)
+            th = await dev_chat.send(
+                svc, thread_id, message, connection or None, mode, who, SCREEN, account
+            )
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:
@@ -578,11 +588,13 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(dump(th), svc)
 
     @router.post("/dev-chat/{thread_id}/close", response_model=None, dependencies=CALLER)
-    async def close_dev_chat(thread_id: str, request: Request) -> dict | JSONResponse:
-        """대화를 끝낸다 (`closed`). 띄운 작업은 그대로 돈다."""
+    async def close_dev_chat(
+        thread_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
+        """대화를 끝낸다 (`closed`). 띄운 작업은 그대로 돈다. `?account=` 연 계정."""
         svc = get_service()
         try:
-            th = await dev_chat.close(svc, thread_id, _person(request), SCREEN)
+            th = await dev_chat.close(svc, thread_id, _person(request), SCREEN, account)
         except ActionError as exc:
             return _coding_err(exc)
         return _ok(dump(th), svc)

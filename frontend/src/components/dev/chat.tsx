@@ -10,6 +10,7 @@ import { State } from '@/components/planning-common/parts'
 import { go, toPath, idText } from '@/components/planning-common/links'
 import { Tag } from '@/components/planning-common/parts'
 import { humanizePlanIds } from '@/lib/format'
+import { useSession } from '@/demo/session'
 
 const api = chatApi(DEV_API)
 
@@ -50,19 +51,23 @@ function merge(a: ChatThread[], b: ChatThread[]): ChatThread[] {
   return [...m.values()].sort((x, y) => (y.updatedAt > x.updatedAt ? 1 : y.updatedAt < x.updatedAt ? -1 : 0))
 }
 
-/** 헤더 칩과 패널이 같이 쓰는 대화 상태. 패널을 닫았다 열어도 남는다 */
+/** 헤더 칩과 패널이 같이 쓰는 대화 상태. 패널을 닫았다 열어도 남는다.
+ *  지금 계정이 연 대화만 다룬다 (SSE 상태에는 모든 계정의 대화가 실려 와서 여기서 거른다) */
 export function useDevChat(s: S, on: boolean) {
+  const account = useSession().account?.id ?? 'guest'
   const [local, setLocal] = useState<ChatThread[]>([])
   const [curId, setCurId] = useState<string | null | undefined>(undefined) // undefined = 아직 안 고름(가장 최근 대화)
   const [draft, setDraft] = useState('')
   useEffect(() => {
-    if (on) api.list().then(setLocal).catch(() => undefined)
-  }, [on])
-  const threads = merge(s.chats ?? [], local)
+    setLocal([])
+    setCurId(undefined)
+    if (on) api.list(account).then(setLocal).catch(() => undefined)
+  }, [on, account])
+  const threads = merge(s.chats ?? [], local).filter((t) => t.account === account)
   const upsert = (t: ChatThread) => setLocal((prev) => [t, ...prev.filter((x) => x.id !== t.id)])
   const cur = curId === null ? undefined : threads.find((t) => t.id === (curId ?? threads[0]?.id))
   return {
-    threads, cur, upsert, draft, setDraft,
+    account, threads, cur, upsert, draft, setDraft,
     select: (id: string | null) => setCurId(id),
     live: !!s.chats,
     working: threads.filter((t) => running(s, t)).map((t) => t.id),
@@ -112,7 +117,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   useEffect(() => {
     if (!poll || !cur) return
     const id = cur.id
-    const t = setInterval(() => api.get(id).then(chat.upsert).catch(() => undefined), 2000)
+    const t = setInterval(() => api.get(id, chat.account).then(chat.upsert).catch(() => undefined), 2000)
     return () => clearInterval(t)
   }, [poll, cur?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -140,7 +145,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
     setErr(null)
     setDraft('')
     try {
-      const t = await api.send({ ...(cur ? { thread_id: cur.id } : {}), message, ...(repo ? { connection: repo } : {}), mode })
+      const t = await api.send({ ...(cur ? { thread_id: cur.id } : {}), message, ...(repo ? { connection: repo } : {}), mode, account: chat.account })
       chat.upsert(t)
       chat.select(t.id)
     } catch (x) {

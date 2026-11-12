@@ -525,6 +525,8 @@ class ChatThread(DomainModel):
     # 어디서 연 대화인가: screen(개발 화면 대화 패널) · dashboard(대시보드 AI 대화방, A2A).
     # 서로의 대화는 보이지 않는다. None은 나누기 전 대화라 대시보드 대화방에만 보인다
     origin: Literal["screen", "dashboard"] | None = None
+    # 개발 화면에서 대화를 연 계정 id. 개발 화면은 그 계정의 대화만 보여 준다
+    account: str | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
 

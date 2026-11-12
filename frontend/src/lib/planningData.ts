@@ -353,6 +353,7 @@ export interface ChatThread {
   connection: string | null
   waitingFor?: string[] // 끝나기를 기다리는 요청 (충돌하는 요청이 끝나면 시작)
   mode?: CodingMode // 이 대화가 띄울 작업을 누가 코딩하나
+  account?: string | null // 개발 화면에서 대화를 연 계정 id
   createdAt: string
   updatedAt: string
 }

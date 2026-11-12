@@ -260,3 +260,25 @@ def test_old_chats_without_origin_stay_in_the_dashboard(service: PlanningService
     with TestClient(app) as c:
         assert c.get(URL).json()["data"] == []
         assert c.get(f"{URL}/{tid}").status_code == 404
+
+
+def test_screen_chats_are_split_by_account(service: PlanningService, adapter) -> None:
+    """개발 화면은 계정마다 자기가 연 대화만 본다. 다른 계정 대화는 없는 대화다."""
+    dev_chat.set_llm(ChatLLM([ASK]))
+    with TestClient(app) as c:
+        mine = c.post(URL, json={"message": "내 대화", "account": "admin"}).json()["data"]
+        other = c.post(URL, json={"message": "남의 대화", "account": "member"}).json()["data"]
+        assert mine["account"] == "admin" and other["account"] == "member"
+        asyncio.run(dev_chat.wait_idle())
+        assert [t["id"] for t in c.get(URL, params={"account": "admin"}).json()["data"]] == [
+            mine["id"]
+        ]
+        assert c.get(URL).json()["data"] == []
+        oid = other["id"]
+        assert c.get(f"{URL}/{oid}", params={"account": "admin"}).status_code == 404
+        cut_in = {"thread_id": oid, "message": "끼어들기", "account": "admin"}
+        assert c.post(URL, json=cut_in).status_code == 404
+        assert c.post(f"{URL}/{oid}/close", params={"account": "admin"}).status_code == 404
+        assert c.get(f"{URL}/{oid}", params={"account": "member"}).status_code == 200
+        bad = c.post(URL, json={"message": "x", "account": ""})
+        assert bad.status_code == 400

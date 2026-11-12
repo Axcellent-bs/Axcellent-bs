@@ -397,7 +397,7 @@ export const devTaskApi = (base: string) => ({
 })
 
 // ---- AI와 대화 (dev 서비스 `/api/planning/dev-chat`). 답이 오면 바뀐 대화 전체를 돌려준다 (5~30초)
-export interface ChatSend { thread_id?: string; message: string; connection?: string; mode?: CodingMode }
+export interface ChatSend { thread_id?: string; message: string; connection?: string; mode?: CodingMode; account?: string }
 
 // 대화 모양이 아닌 값(목의 {ok:true} 등)은 버린다
 const isThread = (x: unknown): x is Json => !!x && typeof x === 'object' && typeof (x as Json).id === 'string' && Array.isArray((x as Json).messages)
@@ -413,8 +413,9 @@ export const chatApi = (base: string) => {
     return toThread(d)
   }
   return {
-    list: () => call<unknown>(base, '/dev-chat').then(toThreads),
-    get: (id: string) => call<unknown>(base, `/dev-chat/${encodeURIComponent(id)}`).then(one),
+    // account: 개발 화면 계정. 서버는 그 계정이 연 대화만 준다
+    list: (account: string) => call<unknown>(base, `/dev-chat?account=${encodeURIComponent(account)}`).then(toThreads),
+    get: (id: string, account: string) => call<unknown>(base, `/dev-chat/${encodeURIComponent(id)}?account=${encodeURIComponent(account)}`).then(one),
     send: (x: ChatSend) => call<unknown>(base, '/dev-chat', post(x)).then(one),
   }
 }
