@@ -294,6 +294,19 @@
       "priority": "recommended"
     },
     {
+      "id": "retire_request_cards",
+      "description": "부서가 기획에 보낸 요청을 거둬들일 때, 그 요청(context_id·request_id)과 기획서(spec_id, 있으면)에서 나온 업무 결정·요청 카드를 후보·확정 모두 retired로 내린다. 지우지 않고 상태만 바꿔 내력을 남기며, 이미 내려간 카드는 건드리지 않아 같은 요청을 다시 불러도 같은 결과다. 장애 사례 등 다른 종류의 카드는 대상이 아니다. 출력은 내린 카드 ID 목록이다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RetireRequestCardsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#RetireRequestCardsOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "answer_planning_question",
       "description": "기획 질문에 답한다. 기획이 인사가 보낸 요청(create_ticket)의 근거를 되물으면, 인사가 보낸 요청의 기록(보낼 때 코드가 만든 사실 문장·근거 ID)으로만 답한다. 근거 질문이고 기록에 사실이 있으면 answered, 인사가 보낸 요청이지만 기록으로 답할 수 없으면 needs_human(사람이 답하면 planning receive_planning_answer로 보낸다), 보낸 기록이 없으면 unknown. 지어내지 않는다. 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",

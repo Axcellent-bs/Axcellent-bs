@@ -284,6 +284,7 @@ SERVICES: tuple[Service, ...] = (
             "get_audit_timeline",
             "evaluate_agents",
             "decide_candidate_card",
+            "retire_request_cards",
             "answer_planning_question",
         ),
         "결정 기록",

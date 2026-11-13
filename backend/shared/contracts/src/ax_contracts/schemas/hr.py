@@ -554,6 +554,29 @@ class DecideCandidateCardOutput(AxModel):
     status: Literal["active", "retired"]
 
 
+class RetireRequestCardsInput(AxModel):
+    """부서가 기획에 보낸 요청을 거둬들일 때, 그 요청에서 나온 카드를 내린다.
+
+    - `context_id`: 요청 사건 번호(`ctx_req_…`). 이 사건에서 나온 카드가 대상이다.
+    - `request_id`: 요청 번호(`REQ-n`). 근거 참조에 이 번호가 있는 카드도 대상이다.
+    - `spec_id`: 기획서 번호(있으면). 근거 참조에 `spec:<번호>`가 있는 카드도 대상이다.
+    - `reason`: 내리는 이유. 감사 기록에 남는다.
+    """
+
+    context_id: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    spec_id: str | None = None
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class RetireRequestCardsOutput(AxModel):
+    """내린 카드 목록. 카드는 지우지 않고 `retired`로 내려 내력을 남긴다."""
+
+    retired_card_ids: list[str] = Field(default_factory=list)
+    # 이미 내려가 있어 건드리지 않은 카드(다시 불러도 같은 결과가 나오게 한다)
+    already_retired_card_ids: list[str] = Field(default_factory=list)
+
+
 # ---- 대시보드 인사 화면용 조회 ------------------------------------------------------------
 # 모두 상태를 바꾸지 않는다. 시각은 조회한 시각(`collected_at`)이고, 값은 저장된 그대로다.
 
