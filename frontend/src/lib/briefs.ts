@@ -101,8 +101,14 @@ async function handoff(proposalId: string): Promise<HandoffAnswer> {
   return json.data as HandoffAnswer;
 }
 
+/** shop-api 읽기 중계가 받는 목록 limit 상한(`ax_shop_api/marketing_client.py`의 `LIST_LIMIT_MAX`). 넘기면 400 "limit은 1~100이어야 한다" */
+export const BRIEFS_LIST_MAX = 100;
+/** 목록 limit을 중계가 받는 1~BRIEFS_LIST_MAX 정수로 맞춘다 */
+export const briefsListLimit = (limit: number): number =>
+  Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), BRIEFS_LIST_MAX) : BRIEFS_LIST_MAX;
+
 export const briefs = {
-  list: (limit = 50) => get<BriefList>(`/api/shop/admin/marketing/briefs?limit=${limit}`),
+  list: (limit = 50) => get<BriefList>(`/api/shop/admin/marketing/briefs?limit=${briefsListLimit(limit)}`),
   handoff,
 };
 
