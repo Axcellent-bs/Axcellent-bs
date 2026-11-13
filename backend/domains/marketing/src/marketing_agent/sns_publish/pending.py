@@ -173,6 +173,10 @@ class PendingStore:
         """같은 내용(content_sha)의 모든 대기 건(재요청 거부 판단용)."""
         return self._query("WHERE content_sha = ? ORDER BY created_at", (sha,))
 
+    def with_draft(self, post_draft_id: str) -> list[PendingPost]:
+        """이 초안으로 만든 모든 대기 건(승인 대기·게시 중·게시됨 포함)."""
+        return self._query("WHERE post_draft_id = ? ORDER BY created_at", (post_draft_id,))
+
     def set_review_expiry(self, key: str, expires_at: str) -> None:
         """held인 건에만 안전 관문 마감 시각을 `result.review_expires_at`에 적는다(상태 불변)."""
         try:

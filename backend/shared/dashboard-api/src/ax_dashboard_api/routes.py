@@ -1010,6 +1010,31 @@ async def request_brief_publish(
     return ok(await marketing_client.brief_publish_request_call(proposal_id, retry))
 
 
+class OutageSnsMergeBody(BaseModel):
+    dry_run: bool = True  # 기본은 저장 없는 미리보기. 실제 병합은 사람이 false로 보낸다
+    draft_ids: list[str] | None = Field(default=None, max_length=100)
+
+    @field_validator("draft_ids")
+    @classmethod
+    def _ids(cls, value: list[str] | None) -> list[str] | None:
+        for item in value or []:
+            if not 1 <= len(item) <= 64:
+                raise ValueError("draft_ids 값은 1~64자")
+        return value
+
+
+@router.post("/marketing/outage-sns-drafts/merge")
+async def merge_outage_sns_drafts(body: OutageSnsMergeBody) -> dict:
+    """장애 사과·보상 SNS 초안 중 거의 같은 것을 규칙으로 묶어 대표 1건만 남긴다(LLM 없음).
+
+    마케팅 `merge_outage_sns_drafts`. 초안 저장소의 병합 표시(메타데이터)만 바꾸고 캡션·게시·비용은
+    없다. 게시(C등급 사람 승인)는 건드리지 않는다. `dry_run=true`는 저장 없이 미리보기, 같은 병합을
+    다시 해도 결과가 같다. 사람 토큰이 필요하다(쓰기 POST).
+    """
+    _no_org_in_mock()
+    return ok(await marketing_client.outage_sns_merge_call(body.draft_ids, body.dry_run))
+
+
 class VideoPostPrepareBody(BaseModel):
     """영상 게시물 준비. 공지·쿠폰·기획안(proposal_id) 중 정확히 하나. 자유 프롬프트 없음."""
 

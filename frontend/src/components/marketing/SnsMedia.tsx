@@ -3,6 +3,8 @@ import { shortDateTime, won } from "@/lib/format";
 import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
 import { BriefMediaMaker } from "./BriefMediaMaker";
+import { ApiError } from "@/lib/apiError";
+import { mergeHttpErrorKo, mergeSummaryKo, previewDraftIds, skipReasonKo, type MergeAnswer } from "@/lib/outageMerge";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, outageTriggerKo, type OutageSnsDraft, type StoredBrief } from "@/lib/briefs";
 
 // SNS·미디어 탭. 이미지·영상 생성과 SNS 게시 흐름을 안내하고,
@@ -51,6 +53,13 @@ export function SnsMedia() {
   const [handedError, setHandedError] = useState<string | null>(null);
   const [outage, setOutage] = useState<OutageSnsDraft[] | null>(null);
   const [outageError, setOutageError] = useState<string | null>(null);
+  const [mergedTotal, setMergedTotal] = useState(0);
+  const [showMerged, setShowMerged] = useState(false);
+  // 유사 초안 병합: 미리보기(저장 없음) → 사람이 확인 → 저장. busy는 중복 클릭 잠금
+  const [mergePreview, setMergePreview] = useState<MergeAnswer | null>(null);
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+  const [mergeDone, setMergeDone] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,7 +75,9 @@ export function SnsMedia() {
     }
     if (briefsEnabled) {
       try {
-        setOutage((await briefs.outageSnsDrafts(20)).items);
+        const listed = await briefs.outageSnsDrafts(20, showMerged);
+        setOutage(listed.items);
+        setMergedTotal(listed.merged_total ?? 0);
         setOutageError(null);
       } catch (e) {
         const err = e as { status?: number; message?: string };
@@ -82,7 +93,29 @@ export function SnsMedia() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showMerged]);
+
+  const runMerge = async (confirm: boolean) => {
+    if (mergeBusy) return;
+    setMergeBusy(true);
+    setMergeError(null);
+    try {
+      if (!confirm) {
+        setMergeDone(null);
+        setMergePreview(await briefs.mergeOutageSnsDrafts(true));
+      } else if (mergePreview) {
+        const done = await briefs.mergeOutageSnsDrafts(false, previewDraftIds(mergePreview));
+        setMergePreview(null);
+        setMergeDone(mergeSummaryKo(done));
+        await load();
+      }
+    } catch (e) {
+      const err = e as ApiError;
+      setMergeError(mergeHttpErrorKo(err.status, err.code));
+    } finally {
+      setMergeBusy(false);
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -116,6 +149,42 @@ export function SnsMedia() {
           <li>원인은 확인된 경우에만 쉬운 말로 적고, 확인되지 않았으면 "원인 확인 중"이라고 적습니다.</li>
           <li>내부 용어·숫자·담당자 이름은 넣지 않고, AI 생성 표시와 시연용 가상 서비스 안내가 들어갑니다.</li>
         </ul>
+        {briefsEnabled && (
+          <div className="space-y-3 rounded-2xl border border-ink-100 p-4" aria-label="유사 초안 병합">
+            <div className="flex flex-wrap items-center gap-3">
+              <button className="btn-ghost text-xs" onClick={() => void runMerge(false)} disabled={mergeBusy || mergePreview !== null}>{mergeBusy && !mergePreview ? "확인하는 중" : "유사 초안 병합"}</button>
+              <p className="text-xs text-ink-500">거의 같은 초안을 대표 1건만 남기고 접습니다. 새 글을 만들지 않고, 접힌 초안은 지우지 않으며, 게시와 비용은 없습니다.</p>
+              {(mergedTotal > 0 || showMerged) && (
+                <label className="ml-auto flex items-center gap-2 text-xs text-ink-700">
+                  <input type="checkbox" checked={showMerged} onChange={(e) => setShowMerged(e.target.checked)} />
+                  병합됨 {mergedTotal}건 보기
+                </label>
+              )}
+            </div>
+            {mergeError && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{mergeError}</p>}
+            {mergeDone && <p role="status" className="rounded-xl bg-brand-50 px-4 py-2 text-sm text-brand-700">{mergeDone}</p>}
+            {mergePreview && (
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-ink-700">미리보기: {mergeSummaryKo(mergePreview)} 아직 저장하지 않았습니다.</p>
+                {mergePreview.groups.map((g) => (
+                  <div key={g.representative} className="space-y-1 rounded-xl bg-ink-50 p-3 text-xs">
+                    <p><span className="chip bg-brand-50 text-brand-700">남는 대표</span> <span className="tabular-nums text-ink-500">{g.representative}</span> · 접히는 초안 {g.merged_from.length}건 <span className="tabular-nums text-ink-500">({g.merged_from.join(", ")})</span></p>
+                    <p className="line-clamp-3 whitespace-pre-wrap text-ink-700">{g.representative_caption}</p>
+                  </div>
+                ))}
+                {mergePreview.skipped.length > 0 && (
+                  <ul className="list-disc space-y-0.5 pl-5 text-xs text-ink-500" aria-label="병합하지 않은 초안">
+                    {mergePreview.skipped.map((k) => <li key={k.id}><span className="tabular-nums">{k.id}</span>: {skipReasonKo(k.reason)}</li>)}
+                  </ul>
+                )}
+                <div className="flex gap-2">
+                  {mergePreview.groups.length > 0 && <button className="btn-primary text-xs" onClick={() => void runMerge(true)} disabled={mergeBusy}>{mergeBusy ? "병합하는 중" : `${mergePreview.merged_count}건 병합하기`}</button>}
+                  <button className="btn-ghost text-xs" onClick={() => setMergePreview(null)} disabled={mergeBusy}>{mergePreview.groups.length > 0 ? "취소" : "닫기"}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {!briefsEnabled ? <Empty>마케팅 읽기 연결이 꺼져 있어 초안 목록을 읽을 수 없습니다.</Empty>
           : outageError ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{outageError}</p>
             : outage === null ? <Empty>불러오는 중입니다.</Empty>
@@ -126,6 +195,8 @@ export function SnsMedia() {
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                         <span className="chip bg-brand-50 text-brand-700">{outageTriggerKo(d.trigger)}</span>
                         <span className="chip bg-amber-50 text-amber-800">초안 · 게시 안 됨</span>
+                        {d.status === "merged" && <span className="chip bg-ink-50 text-ink-700" title={d.merged_into ?? undefined}>병합됨 · 대표 초안 아래로 접힘</span>}
+                        {d.merged_from && d.merged_from.length > 0 && <span className="chip bg-ink-50 text-ink-700">비슷한 초안 {d.merged_from.length}건 병합</span>}
                         <span className="text-ink-500">{d.media_attached ? "미디어가 붙은 초안" : "캡션 초안만 있음 (미디어 없음)"}</span>
                         <span className="ml-auto tabular-nums text-ink-500" title={`초안 ${d.post_draft_id} · 이벤트 ${d.context_id}`}>{shortDateTime(d.created_at)} 만듦</span>
                       </div>

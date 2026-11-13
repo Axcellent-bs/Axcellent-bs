@@ -751,10 +751,15 @@ def create_app(
 
     @app.get("/api/shop/admin/marketing/outage-sns-drafts")
     async def marketing_outage_sns_drafts(
-        limit: int = 20, _: str = Depends(_caller(ORCHESTRATOR_VIEWERS))
+        limit: int = 20,
+        include_merged: bool = False,
+        _: str = Depends(_caller(ORCHESTRATOR_VIEWERS)),
     ) -> dict:
-        """장애 사과·보상 SNS 글 초안 읽기 중계. 초안만 보여 주고 게시하지 않는다."""
-        return _ok(await marketing_client.list_outage_sns_drafts(limit))
+        """장애 사과·보상 SNS 글 초안 읽기 중계. 초안만 보여 주고 게시하지 않는다.
+
+        `include_merged`(기본 false): 유사 초안 병합으로 접힌 원본(감사 기록)까지 본다.
+        """
+        return _ok(await marketing_client.list_outage_sns_drafts(limit, include_merged))
 
     # --- 공지 배너(SHOP-08): 고객 화면이 읽고, 마케팅 관문 토큰만 게시·해제한다 ---------
     @app.get("/api/shop/banners")

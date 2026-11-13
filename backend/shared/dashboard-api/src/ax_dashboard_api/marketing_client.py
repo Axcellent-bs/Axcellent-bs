@@ -189,6 +189,28 @@ async def brief_publish_request_call(proposal_id: str, retry: bool = False) -> d
     return out
 
 
+async def outage_sns_merge_call(draft_ids: list[str] | None, dry_run: bool) -> dict[str, Any]:
+    """장애 사과·보상 SNS 초안의 유사 초안 병합(`merge_outage_sns_drafts`).
+
+    마케팅 초안 저장소의 메타데이터(병합 표시)만 바꾼다. 캡션·게시·비용은 없다(read 등급).
+    `dry_run`이면 저장 없이 묶일 그룹만 돌려준다. 같은 병합을 다시 해도 결과가 같다.
+    """
+    payload: dict[str, Any] = {"dry_run": dry_run}
+    if draft_ids is not None:
+        payload["draft_ids"] = draft_ids
+    out = await call(
+        "merge_outage_sns_drafts",
+        payload,
+        campaign_id="outage_sns_merge",
+        key=f"ui:outage-sns-merge:{_digest(payload)}",
+    )
+    if out["status"] == TaskStatus.FAILED.value:
+        if out["outcome"] == "invalid_input":
+            raise ApiError(400, "INVALID_INPUT", "병합 입력이 맞지 않는다 (invalid_input)")
+        raise ApiError(502, "UPSTREAM_FAILED", f"초안을 병합하지 못했다 ({out['outcome']})")
+    return out
+
+
 async def brief_media_preview(proposal_id: str) -> tuple[Path, str]:
     """준비된 미디어 초안의 AI 라벨 입힌 파일(경로, Content-Type). 없으면 404.
 

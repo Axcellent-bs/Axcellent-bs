@@ -30,7 +30,7 @@ from typing import Any, Literal
 from pydantic import Field, StrictBool, ValidationError, model_validator
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
-from ax_contracts.schemas.common import AxModel
+from ax_contracts.schemas.common import AxModel, UtcDatetime
 from marketing_agent import sns_media
 from marketing_agent.briefs import BriefStorageError, BriefStore
 from marketing_agent.notice import NoticeStore
@@ -157,6 +157,12 @@ class SnsPostDraft(AxModel):
     platform_options: dict[str, Any] = Field(default_factory=dict)
     # 장애 사과·보상 초안(`source_kind="outage"`)이 만들어진 계기: apology_notice | compensation
     outage_trigger: str | None = None
+    # 유사 초안 병합(장애 초안만). 캡션은 건드리지 않고 이 메타데이터만 바꾼다.
+    # 옛 레코드는 기본값으로 읽는다
+    status: Literal["draft", "merged"] = "draft"
+    merged_into: str | None = None  # status="merged"인 원본이 가리키는 대표 초안 id
+    merged_from: list[str] = Field(default_factory=list)  # 대표 초안이 흡수한 원본 id들
+    merged_at: UtcDatetime | None = None
 
 
 class CheckSnsPostInput(AxModel):
@@ -236,11 +242,42 @@ class SnsStore:
 
     def save(self, draft: SnsPostDraft) -> None:
         with self._lock, self._conn:
+            if draft.status == "draft" and not draft.merged_from:
+                # 같은 내용의 초안을 다시 저장해도 병합 기록(흡수한 원본·병합 표시)은 지우지 않는다
+                row = self._conn.execute(
+                    "SELECT payload FROM sns_drafts WHERE post_draft_id = ?",
+                    (draft.post_draft_id,),
+                ).fetchone()
+                if row is not None:
+                    try:
+                        old = SnsPostDraft.model_validate_json(row[0])
+                    except ValidationError:
+                        old = None
+                    if old is not None and (old.status == "merged" or old.merged_from):
+                        draft = draft.model_copy(
+                            update={
+                                "status": old.status,
+                                "merged_into": old.merged_into,
+                                "merged_from": old.merged_from,
+                                "merged_at": old.merged_at,
+                            }
+                        )
             self._conn.execute(
                 "INSERT OR REPLACE INTO sns_drafts (post_draft_id, created_at, payload)"
                 " VALUES (?, ?, ?)",
                 (draft.post_draft_id, _now().isoformat(), draft.model_dump_json()),
             )
+
+    def update_meta(self, drafts: list[SnsPostDraft]) -> None:
+        """이미 있는 초안의 저장 내용만 바꾼다(저장 시각은 그대로). 모두 쓰거나 하나도 안 쓴다."""
+        with self._lock, self._conn:
+            for draft in drafts:
+                cursor = self._conn.execute(
+                    "UPDATE sns_drafts SET payload = ? WHERE post_draft_id = ?",
+                    (draft.model_dump_json(), draft.post_draft_id),
+                )
+                if cursor.rowcount != 1:
+                    raise KeyError(draft.post_draft_id)  # with 블록이 되돌린다
 
     def get(self, post_draft_id: str) -> SnsPostDraft | None:
         with self._lock:
@@ -255,18 +292,16 @@ class SnsStore:
             return None
 
     def list_by_source(
-        self, source_kind: str, limit: int
+        self, source_kind: str, limit: int | None, include_merged: bool = True
     ) -> tuple[list[tuple[SnsPostDraft, datetime]], int]:
-        """출처 종류가 같은 초안을 저장 시각이 늦은 순으로. (목록, 전체 수). 못 읽는 줄은 뺀다."""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT payload, created_at FROM sns_drafts"
-                " WHERE json_extract(payload, '$.source_kind') = ?"
-                " ORDER BY created_at DESC, post_draft_id",
-                (source_kind,),
-            ).fetchall()
+        """출처 종류가 같은 초안을 저장 시각이 늦은 순으로. (목록, 전체 수). 못 읽는 줄은 뺀다.
+
+        `include_merged=False`면 병합된 원본(`status="merged"`)을 목록과 전체 수에서 뺀다.
+        `limit=None`이면 자르지 않는다.
+        """
+        rows = self._rows_by_source(source_kind, include_merged)
         items: list[tuple[SnsPostDraft, datetime]] = []
-        for payload, created_at in rows[:limit]:
+        for payload, created_at in rows if limit is None else rows[:limit]:
             try:
                 items.append(
                     (SnsPostDraft.model_validate_json(payload), datetime.fromisoformat(created_at))
@@ -274,6 +309,22 @@ class SnsStore:
             except ValueError:
                 continue
         return items, len(rows)
+
+    def count_merged_by_source(self, source_kind: str) -> int:
+        return len(self._rows_by_source(source_kind, True)) - len(
+            self._rows_by_source(source_kind, False)
+        )
+
+    def _rows_by_source(self, source_kind: str, include_merged: bool) -> list[tuple[str, str]]:
+        where = "json_extract(payload, '$.source_kind') = ?"
+        if not include_merged:
+            where += " AND COALESCE(json_extract(payload, '$.status'), 'draft') != 'merged'"
+        with self._lock:
+            return self._conn.execute(
+                f"SELECT payload, created_at FROM sns_drafts WHERE {where}"  # noqa: S608
+                " ORDER BY created_at DESC, post_draft_id",
+                (source_kind,),
+            ).fetchall()
 
 
 def content_id(
