@@ -219,3 +219,38 @@ def test_shop_api_down_fails_without_a_suggestion() -> None:
     use_shop(None, down=True)
     result = call(add_inquiry("ord_0001"))
     assert result["status"] == "failed" and result["outcome"] == "shop_unavailable"
+
+
+def test_an_unpaid_order_is_not_eligible_instead_of_inquiry_not_found() -> None:
+    """결제가 끝나지 않은 주문은 문의가 있어도 404가 아니라 '보상 대상이 아님'으로 답한다."""
+    use_shop(
+        shop_order(
+            status="payment_failed",
+            payments=[
+                {
+                    "payment_id": "pay_1",
+                    "amount": 23000,
+                    "status": "failed",
+                    "created_at": "2026-10-16T01:00:05Z",
+                }
+            ],
+        )
+    )
+    result = call(add_inquiry("ord_0001"))
+    assert result["status"] == "completed" and result["outcome"] == "order_unpaid"
+    out = result["output"]
+    assert not out["eligible"] and out["request"] is None
+    assert "결제가 끝나지 않은 주문" in out["message"]
+    assert "order:ord_0001" in result["evidence"]["ref_ids"]
+
+
+def test_someone_elses_unpaid_order_is_still_not_found() -> None:
+    use_shop(shop_order(status="payment_failed", payments=[], buyer_id="buy_0002"))
+    assert call(add_inquiry("ord_0001"))["outcome"] == "not_found"
+
+
+def test_a_missing_order_is_still_not_found() -> None:
+    shop_client.use_client(
+        httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+    )
+    assert call(add_inquiry("ord_0001"))["outcome"] == "not_found"
