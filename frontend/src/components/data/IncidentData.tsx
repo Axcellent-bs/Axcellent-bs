@@ -1,12 +1,13 @@
 import { Bars, Stat } from "@/components/admin/bits";
 import { ChartWithTable, TableView } from "@/components/charts";
 import { Chip, Empty, ErrorBox, Panel, RefList, TONE, Waiting, type Resource } from "@/components/finance/bits";
-import { incidentTitle, type OrchIncident } from "@/lib/agentChat";
+import { incidentTitle, type OrchIncident, type OrchStep } from "@/lib/agentChat";
 import { krw } from "@/lib/finance";
 import { humanId, shortDateTime } from "@/lib/format";
 import {
-  CATEGORY_KO, CONFIDENCE_KO, FACT_KIND_KO, FACT_SOURCE_KO, FLOW, INCIDENT_STATUS_KO, ORCH_SERVER, STEP_STATUS_KO, UNKNOWN, bool, clock, count,
-  detectorName, duration, impactOf, num, recoveryOf, rootCauseOf, skipReason, stepOf, type CauseFact,
+  CATEGORY_KO, CONFIDENCE_KO, FACT_KIND_KO, FACT_SOURCE_KO, FLOW, INCIDENT_STATUS_KO, ORCH_SERVER, SKIP_DEFAULT, STEP_STATUS_KO, UNKNOWN, bool, clock, count,
+  detectorName, duration, impactOf, num, pickedByRule, recoveryEndOf, recoveryOf, rootCauseOf, skipReason, stepOf, verifiedAtOf, type CauseFact,
+  type RootCauseOutput,
 } from "@/lib/data";
 
 // 장애 사건 데이터 (결제 장애). 감지는 쇼핑몰 모니터·Zabbix가 하고, 총괄이 사건을 연 뒤 데이터 AI에 일을 맡긴다:
@@ -15,14 +16,17 @@ import {
 
 const NO_RECORD = "기록 없음";
 
-/** 감지 → 사건 열림 → 요청 받음 → 복구 확인. 시각이 없는 칸만 "기록 없음" */
+/** 감지 → 사건 열림 → 요청 받음 → 정상 복귀 → 복구 검증 끝. 시각이 없는 칸만 "기록 없음".
+ *  정상 복귀는 "복구까지 걸린 시간" 카드의 끝 시각과 같다. 복구 검증 끝은 인프라가 복구를 확인한 시각 */
 function DetectionLine({ inc }: { inc: OrchIncident }) {
   const by = inc.detected_by;
+  const verified = verifiedAtOf(inc);
   const cells: { label: string; who: string | null; at: string | null }[] = [
     { label: "감지", who: by?.source ? detectorName(by.source) : null, at: clock(by?.at) },
     { label: "사건 열림", who: "총괄", at: clock(inc.opened_at) },
     { label: "요청 받음", who: "데이터 AI", at: clock(stepOf(inc, "impact")?.started_at) },
-    { label: "복구 확인", who: null, at: clock(inc.timeline?.recovered_at) },
+    { label: "정상 복귀", who: null, at: clock(recoveryEndOf(inc)) },
+    ...(verified ? [{ label: "복구 검증 끝", who: "인프라 AI", at: clock(verified) }] : []),
   ];
   return (
     <ol aria-label="감지부터 복구까지" className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-2xl bg-surface-2 px-4 py-3 text-xs">
@@ -191,6 +195,66 @@ function FactItem({ fact }: { fact: CauseFact }) {
   );
 }
 
+interface Suspect { service?: string; version?: string; deployed_at?: string; confidence?: string }
+
+/** 두 시각 사이 초 (뒤 - 앞). 하나라도 없으면 null */
+function gapSeconds(from: string | null | undefined, to: string | null | undefined): number | null {
+  if (!from || !to) return null;
+  const s = (new Date(to).getTime() - new Date(from).getTime()) / 1000;
+  return Number.isFinite(s) ? s : null;
+}
+
+/** 되돌리기 단계의 실제 결과 한 줄 (되돌림 완료 · 전 v2 → 후 v1 등) */
+function rollbackLine(step: OrchStep | undefined): string | null {
+  if (!step) return null;
+  const out = step.output ?? {};
+  const pv = out.payment_version as { before?: string; after?: string } | undefined;
+  const before = pv?.before ?? (out.from_version as string | undefined);
+  const after = pv?.after ?? (out.to_version as string | undefined);
+  if (step.status === "completed") {
+    const check = out.post_check_ok === true ? " · 되돌린 뒤 확인 통과" : out.post_check_ok === false ? " · 되돌린 뒤 확인 실패" : "";
+    return `되돌림 완료 · 전 ${before ?? UNKNOWN} → 후 ${after ?? UNKNOWN}${check}`;
+  }
+  if (step.status === "held") return "되돌리기 사람 승인 기다림";
+  if (step.status === "transfer_queued") return "되돌리지 않고 사람에게 넘김";
+  if (step.status === "skipped") return `되돌리지 않음 (${step.note || SKIP_DEFAULT})`;
+  return STEP_STATUS_KO[step.status]?.label ?? step.status;
+}
+
+/** 인프라 진단(배포 기록만 봄)과 실제 조치. 데이터 원인 후보와 확신도가 다르면 왜 다른지 한 줄 */
+function InfraCheck({ inc, out }: { inc: OrchIncident; out: RootCauseOutput | null }) {
+  const diag = stepOf(inc, "diagnose");
+  if (!diag) return null;
+  const suspects = (Array.isArray(diag.output?.suspects) ? diag.output.suspects : []) as Suspect[];
+  const top = suspects[0];
+  const gap = gapSeconds(top?.deployed_at, inc.timeline?.detected_at ?? inc.opened_at);
+  const infraConf = top?.confidence ? CONFIDENCE_KO[top.confidence] ?? { label: top.confidence, tone: "muted" as const } : null;
+  const dataTop = (out?.hypotheses ?? []).find((h) => h && Array.isArray(h.fact_ids) && h.fact_ids.some((id) => out?.facts?.find((f) => f.fact_id === id)?.kind === "deploy"));
+  const differ = !!top?.confidence && !!dataTop && dataTop.confidence !== top.confidence;
+  const why = pickedByRule(out)
+    ? "데이터분석은 이번에 LLM 없이 시간 순서 규칙으로 골랐고, 규칙만으로는 '확신 높음'을 주지 않아요. 인프라는 의심 배포가 하나이고 배포 뒤 15분 안에 진단하면 '확신 높음'이에요."
+    : "데이터분석 AI는 배포 말고도 공지·문의·지난 사건을 함께 보고 확신도를 정하고, 인프라는 배포 기록만으로 정해요.";
+  const action = rollbackLine(stepOf(inc, "rollback"));
+  return (
+    <div className="space-y-2 rounded-2xl px-4 py-3 ring-1 ring-ink-100">
+      <p className="text-xs font-medium text-ink-700">인프라 진단과 실제 조치</p>
+      <div className="flex flex-wrap items-center gap-2 text-sm text-ink-900">
+        {diag.output?.status === "suspected" && top ? (
+          <>
+            <span>의심 배포 {suspects.length}개 · {[top.service, top.version].filter(Boolean).join(" ")}</span>
+            {gap != null && <span className="tabular-nums text-ink-500">배포 → 감지 {duration(gap)}</span>}
+            {infraConf && <Chip label={`인프라 ${infraConf.label}`} tone={TONE[infraConf.tone]} />}
+          </>
+        ) : (
+          <span className="text-ink-700">의심 배포 없음 (진단 구간 안에 결제를 바꾼 배포가 없음)</span>
+        )}
+      </div>
+      {action && <p className="text-sm text-ink-900">{action}</p>}
+      {differ && <p className="text-xs text-ink-500">확신도가 다른 이유: {why}</p>}
+    </div>
+  );
+}
+
 function RootCauseCard({ inc }: { inc: OrchIncident }) {
   const step = stepOf(inc, "root_cause");
   const check = stepOf(inc, "cause_check");
@@ -244,6 +308,7 @@ function RootCauseCard({ inc }: { inc: OrchIncident }) {
               <ul className="space-y-1.5">{unknown.map((f) => <FactItem key={f.fact_id} fact={f} />)}</ul>
             </div>
           )}
+          <InfraCheck inc={inc} out={out} />
           {action && (
             <p className="rounded-2xl bg-brand-50 px-4 py-3 text-sm text-brand-700"><span className="font-semibold">다음 조치</span> · {action}</p>
           )}

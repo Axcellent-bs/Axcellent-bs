@@ -103,6 +103,7 @@ def test_monitor_sees_the_real_wait_as_p95_and_recovers_after_pg_ok(
     degraded = next(e for e in events.MOCK_PUBLISHED if e.type == EventType.SHOP_DEGRADED)
     data = ShopDegradedData.model_validate(degraded.data)
     assert data.metric_code == "p95_latency_ms"
+    assert data.fault_kind == "pg_slow"
     assert data.value is not None and data.value >= 180 + PG_MS  # 실제로 기다린 지연이 들어간다
 
     client.delete(f"{FAULTS}/pg", headers=ADMIN)

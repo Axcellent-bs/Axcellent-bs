@@ -50,6 +50,14 @@ export interface OrchIncident {
   timeline?: import("./duration").EventTimes | null;
   /** 이벤트를 처음 연 신호: 출처(shop-api·infra·data·support)·종류·감지 시각. 예전 사건은 없다 */
   detected_by?: { source?: string; event?: string; at?: string } | null;
+  /** 쇼핑몰 복구 신호 시각 (총괄 recovered_at) */
+  recovered_at?: string | null;
+  /** 복구 시간(metrics.mttr_seconds)의 끝 시각, 초 아래까지. 예전 총괄은 없다 */
+  recovery_end_at?: string | null;
+  /** 사건을 연 쇼핑몰 신호의 시험·시연 장애 종류 (switch·pg_slow·payment_version). 예전 사건은 없다 */
+  fault_kind?: string | null;
+  /** 부서가 넘긴 값 중 다른 부서에 쓰는 것 (복구 방법 recovery 등) */
+  shared?: Record<string, unknown> | null;
   resolution_draft?: {
     outcome: "resolved" | null; root_cause: string | null; action: string | null; basis: string[];
     /** past_case: 같은 유형의 과거 이벤트에서 가져옴(반복 장애), this_event: 이번 이벤트에서 알게 된 것 */

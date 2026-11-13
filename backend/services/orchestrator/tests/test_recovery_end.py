@@ -104,6 +104,21 @@ def test_old_saved_incident_restores_with_the_same_end() -> None:
     assert incident_from_dict(incident_to_dict(with_signal)).mttr_seconds() == 1.34
 
 
+def test_view_carries_the_recovery_end_and_the_fault_kind() -> None:
+    """화면의 "정상 복귀"는 복구 시간 카드와 같은 끝점, 장애 종류는 쇼핑몰 신호에서."""
+    inc = _incident()
+    inc.recovered_at = SIGNAL
+    inc.signal = {"component": "payment", "fault_kind": "switch"}
+    view = inc.view()
+    assert view["recovery_end_at"] == "2026-11-12T05:26:25.119130Z"
+    assert view["fault_kind"] == "switch"
+    inc.signal = {"fault_kind": "아무거나"}  # 모르는 값은 싣지 않는다
+    assert inc.view()["fault_kind"] is None
+    degraded = _incident(recovered=False)
+    degraded.status = "degraded"
+    assert degraded.view()["recovery_end_at"] is None
+
+
 @pytest.fixture
 def logs(tmp_path) -> Iterator[SqliteLogStore]:
     store = SqliteLogStore(str(tmp_path / "common_log.db"))

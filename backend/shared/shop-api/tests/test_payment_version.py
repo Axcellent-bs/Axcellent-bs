@@ -79,7 +79,9 @@ def test_v2_payments_fail_as_server_errors_without_the_fault_switch(clock: Clock
     assert state["active"] is False and state["payment_version"] == "v2"
     assert state["degraded"] is True  # 결제 실패가 모니터 표본(5xx)에 잡혔다
     degraded = next(e for e in events.MOCK_PUBLISHED if e.type == EventType.SHOP_DEGRADED)
-    assert ShopDegradedData.model_validate(degraded.data).metric_code == "error_rate_5xx"
+    data = ShopDegradedData.model_validate(degraded.data)
+    assert data.metric_code == "error_rate_5xx"
+    assert data.fault_kind == "payment_version"  # 장애 종류를 신호에 싣는다
     # 장애 스위치 해제로는 안 풀린다
     released = client.delete("/api/shop/admin/faults", headers=INFRA).json()["data"]
     assert released["released"] is False and released["payment_version"] == "v2"

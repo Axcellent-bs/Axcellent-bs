@@ -111,7 +111,7 @@ export default function DataPage() {
           <ActivityReport tick={tick} />
         </div>
       )}
-      {mode === "ops" && <LearningKpi tick={tick} />}
+      {mode === "ops" && <LearningKpi tick={tick} incidents={list.env?.data ?? null} />}
       {mode === "trend" && <TrendScan dataUp={dataUp} company={company?.name ?? null} />}
     </div>
   );
