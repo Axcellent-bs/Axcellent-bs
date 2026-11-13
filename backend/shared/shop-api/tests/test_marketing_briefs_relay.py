@@ -115,3 +115,26 @@ def test_frontend_never_asks_more_than_relay_limit() -> None:
         for n in re.findall(r"\bbriefs\.list\((\d+)\)", path.read_text(encoding="utf-8"))
     ]
     assert [x for x in literals if not 1 <= x[1] <= marketing_client.LIST_LIMIT_MAX] == []
+
+
+def test_lists_outage_sns_drafts(client, monkeypatch) -> None:
+    out = {"items": [{"post_draft_id": "spd_1", "caption": "초안"}], "total": 1}
+    seen = _upstream(monkeypatch, output=out)
+    response = client.get("/api/shop/admin/marketing/outage-sns-drafts?limit=5", headers=ADMIN)
+    assert response.status_code == 200
+    assert response.json()["data"] == out
+    target, request = seen[0]
+    assert (target, request.skill, request.input) == (
+        "marketing",
+        "list_outage_sns_drafts",
+        {"limit": 5},
+    )
+
+
+def test_outage_sns_drafts_limit_and_role(client, monkeypatch) -> None:
+    seen = _upstream(monkeypatch, output={})
+    path = "/api/shop/admin/marketing/outage-sns-drafts"
+    assert client.get(f"{path}?limit=101", headers=ADMIN).status_code == 400
+    assert client.get(path, headers=INFRA).status_code == 403
+    assert client.get(path).status_code in (401, 403)
+    assert seen == []

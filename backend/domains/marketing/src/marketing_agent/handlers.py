@@ -74,6 +74,7 @@ from marketing_agent.media.config import MediaSettings
 from marketing_agent.media.ledger import MediaLedger
 from marketing_agent.media.prompts import PromptRejected
 from marketing_agent.notice import NoticeStore, make_draft
+from marketing_agent.outage_sns import draft_outage_sns_post, list_outage_sns_drafts
 from marketing_agent.schemas import (
     ActiveNotices,
     DraftNoticeInput,
@@ -852,6 +853,15 @@ async def draft_sns_post_skill(request: AgentRequest) -> AgentResult:
     return await draft_sns_post(request, STATE.notices, STATE.sns, STATE.briefs)
 
 
+async def draft_outage_sns_post_skill(request: AgentRequest) -> AgentResult:
+    """장애 사과·보상 SNS 글 초안만 만든다. 게시·미디어 생성은 부르지 않는다."""
+    return await draft_outage_sns_post(request, STATE.notices, STATE.sns)
+
+
+async def list_outage_sns_drafts_skill(request: AgentRequest) -> AgentResult:
+    return await list_outage_sns_drafts(request, STATE.sns)
+
+
 async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
     return await check_sns_post(request, STATE.sns)
 
@@ -976,6 +986,8 @@ HANDLERS = {
     "start_campaign": start_campaign,
     "record_campaign_result": record_campaign_result,
     "draft_sns_post": draft_sns_post_skill,
+    "draft_outage_sns_post": draft_outage_sns_post_skill,
+    "list_outage_sns_drafts": list_outage_sns_drafts_skill,
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,
     "cancel_campaign": cancel_campaign,

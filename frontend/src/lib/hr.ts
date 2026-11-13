@@ -78,6 +78,7 @@ export interface PlanDraft { title: string; summary: string; area: string; kind:
 const STEP_NAME: Record<string, string> = {
   compensation: "영향 고객 일괄 보상", recovery: "복구 검증", late_compensation: "복구 뒤 놓친 고객 보상 대기",
   recovered_draft: "정상화 공지 초안", cost: "처리 결과 장부에 기록",
+  compensation_sns_draft: "보상 안내 SNS 글 초안", apology_sns_draft: "사과 안내 SNS 글 초안",
   diagnose: "원인 진단", impact: "영향 분석", similar_cases: "비슷한 과거 이벤트 찾기", root_cause: "원인 후보 추정",
   cause_check: "원인 확인 요청", rollback: "문제 배포를 이전 버전으로 되돌리기", related_prs: "관련 PR 찾기",
   link_incident: "이벤트에 PR 연결", notice: "점검 공지 초안", notice_publish: "점검 공지 게시", publish_notice: "점검 공지 게시",

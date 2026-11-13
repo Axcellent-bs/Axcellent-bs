@@ -690,6 +690,13 @@ def create_app(
     ) -> dict:
         return _ok(await marketing_client.get_brief(proposal_id))
 
+    @app.get("/api/shop/admin/marketing/outage-sns-drafts")
+    async def marketing_outage_sns_drafts(
+        limit: int = 20, _: str = Depends(_caller(ORCHESTRATOR_VIEWERS))
+    ) -> dict:
+        """장애 사과·보상 SNS 글 초안 읽기 중계. 초안만 보여 주고 게시하지 않는다."""
+        return _ok(await marketing_client.list_outage_sns_drafts(limit))
+
     # --- 공지 배너(SHOP-08): 고객 화면이 읽고, 마케팅 관문 토큰만 게시·해제한다 ---------
     @app.get("/api/shop/banners")
     async def list_banners() -> dict:

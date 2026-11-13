@@ -1,7 +1,7 @@
 """마케팅(marketing) 받은 기획안 읽기 중계 (A2A). 관리자 화면(shop-web)이 shop-api만 부르게 한다.
 
-- 읽기 skill `list_campaign_briefs`·`get_campaign_brief`만 부른다(등급 read, 상태를 바꾸지 않는다).
-  요청자는 `shop-api`이고 두 skill의 요청 가능 목록에 들어 있다.
+- 읽기 skill `list_campaign_briefs`·`get_campaign_brief`·`list_outage_sns_drafts`만 부른다
+  (등급 read, 상태를 바꾸지 않는다). 요청자는 `shop-api`이고 세 skill의 요청 가능 목록에 들어 있다.
 - 요청마다 새 사건 ID `ctx_shop_<hex>`를 붙인다. 읽기라 멱등 키는 쓰지 않는다.
 - 마케팅이 꺼져 있거나 느려도 shop-api는 죽지 않고 `ShopError`로 답한다.
 - 기획안 내용은 마케팅이 보관한 그대로 전달한다(값을 만들거나 바꾸지 않는다).
@@ -69,3 +69,13 @@ async def get_brief(proposal_id: str) -> dict[str, Any]:
     if not view.get("found") or view.get("item") is None:
         raise ShopError("NOT_FOUND", "받은 기획안을 찾을 수 없다", 404)
     return view["item"]
+
+
+async def list_outage_sns_drafts(limit: int = 20) -> dict[str, Any]:
+    """장애 사과·보상 SNS 글 초안 목록(저장 시각 늦은 순). `{items, total, unknown_reason}`.
+
+    읽기만 한다. 초안을 만들거나 게시하지 않는다.
+    """
+    if not 1 <= limit <= LIST_LIMIT_MAX:
+        raise ShopError("INVALID_LIMIT", f"limit은 1~{LIST_LIMIT_MAX}이어야 한다", 400)
+    return await _call("list_outage_sns_drafts", {"limit": limit})
