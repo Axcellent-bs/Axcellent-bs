@@ -326,6 +326,7 @@ async def estimate_root_cause(
         needs_confirmation=not any(h.confidence == "high" for h in hypotheses),
         facts=facts,
         summary=summary,
+        method=("rule" if fallback else "llm") if hypotheses else None,
     )
     evidence = Evidence(
         queries=sorted({f.source for f in facts if f.source != "input"}),

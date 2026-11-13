@@ -69,7 +69,11 @@ export function clock(at: string | null | undefined): string | null {
 export type CauseConfidence = "high" | "mid" | "low";
 export interface CauseFact { fact_id: string; kind: string; at?: string | null; source: string; ref?: string | null; summary: string }
 export interface CauseHypothesis { explanation: string; fact_ids: string[]; confidence: CauseConfidence | string }
-export interface RootCauseOutput { hypotheses?: CauseHypothesis[] | null; needs_confirmation?: boolean | null; facts?: CauseFact[] | null; summary?: string | null }
+export interface RootCauseOutput {
+  hypotheses?: CauseHypothesis[] | null; needs_confirmation?: boolean | null; facts?: CauseFact[] | null; summary?: string | null;
+  /** 후보를 고른 방법: llm · rule(시간 순서 규칙, 규칙만으로는 high를 주지 않음). 예전 결과는 없다 */
+  method?: "llm" | "rule" | null;
+}
 
 export const CONFIDENCE_KO: Record<string, { label: string; tone: "ok" | "warn" | "muted" }> = {
   high: { label: "확신 높음", tone: "ok" },
@@ -98,6 +102,10 @@ export const stepOf = (inc: OrchIncident | null | undefined, stepId: string): Or
 export const rootCauseOf = (inc: OrchIncident | null | undefined) => (stepOf(inc, "root_cause")?.output ?? null) as RootCauseOutput | null;
 export const impactOf = (inc: OrchIncident | null | undefined) => (stepOf(inc, "impact")?.output ?? null) as ImpactOutput | null;
 export const recoveryOf = (inc: OrchIncident | null | undefined) => (stepOf(inc, "recovery")?.output ?? null) as RecoveryOutput | null;
+
+export {
+  EVENT_TYPE_KO, FAULT_KIND_KO, compareByType, compareLine, eventTypeName, faultKindOf, pickedByRule, recoveryEndOf, verifiedAtOf,
+} from "./incidentFacts";
 
 /** 숫자만 통과. 없거나 숫자가 아니면 null */
 export const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);

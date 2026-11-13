@@ -127,6 +127,13 @@ def test_degraded_only_after_the_breach_lasts_one_minute() -> None:
     assert _outbox_types(db) == ["shop.degraded"]
 
 
+def test_a_real_fault_has_no_fault_kind() -> None:
+    """시험·시연 장애가 아닌 실제 장애는 종류를 비운다(지어내지 않는다)."""
+    monitor, db = _monitor()
+    _trip_degraded(monitor)
+    assert _outbox(db)[0]["data"]["fault_kind"] is None
+
+
 def test_too_few_samples_do_not_trigger() -> None:
     monitor, db = _monitor()
     for second in (0.0, 30.0, 90.0):
@@ -234,6 +241,7 @@ def test_inject_degrade_and_release_by_infra(client: TestClient, clock: Clock) -
     data = ShopDegradedData.model_validate(degraded[0].data)
     assert (data.component, data.metric_code, data.threshold) == ("payment", "p95_latency_ms", 1000)
     assert data.value == 2180.0
+    assert data.fault_kind == "switch"
 
     released = client.delete("/api/shop/admin/faults", headers=INFRA).json()["data"]
     assert released["released"] is True and released["active"] is False

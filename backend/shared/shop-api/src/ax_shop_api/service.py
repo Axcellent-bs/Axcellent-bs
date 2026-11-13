@@ -21,7 +21,7 @@ from typing import Any
 from ax_contracts.schemas import EventType, PaymentFailedData
 from ax_shop_api import outbox
 from ax_shop_api.db import TENANT_ID, Db
-from ax_shop_api.monitor import Monitor
+from ax_shop_api.monitor import FaultKind, Monitor
 
 CANCELLABLE = ("pending_payment", "payment_failed")
 
@@ -244,6 +244,7 @@ class Shop:
         # 결제 설정 버전이 지금 값이 된 시각·바꾼 쪽 (켤 때는 v1, 바꾼 쪽 없음)
         self.payment_version_since = _now()
         self.payment_version_by: str | None = None
+        self.monitor.fault_kind = self._fault_kind  # shop.degraded에 켜져 있던 장애 종류를 싣는다
 
     # --- 조회 -------------------------------------------------------------
     def list_sellers(self) -> list[dict[str, Any]]:
@@ -1043,6 +1044,16 @@ class Shop:
         결제가 이어지면 모니터가 지표로 복구를 판정한다(`recovery=metrics_normal`)."""
         self.gateway.pg_ok()
         return self.fault_state()
+
+    def _fault_kind(self) -> FaultKind | None:
+        """지금 켜져 있는 시험·시연 장애 종류. 여럿이면 스위치 → 결제사 지연 → 잘못된 배포 순."""
+        if self.gateway.active:
+            return "switch"
+        if self.gateway.pg_delay_ms:
+            return "pg_slow"
+        if self.gateway.config_version == BAD_PAYMENT_VERSION:
+            return "payment_version"
+        return None
 
     # --- 결제 설정 버전 (시연용 "잘못된 배포") -------------------------------------
     def payment_version(self) -> dict[str, Any]:

@@ -104,6 +104,10 @@ class ShopDegradedData(AxModel):
     # `fault_released`일 때 해제한 쪽(쇼핑몰 서버 토큰 이름).
     # `infra`=인프라 AI 롤백, `admin`=사람 운영자
     released_by: str | None = None
+    # `shop.degraded`에만: 장애가 났을 때 쇼핑몰에 켜져 있던 시험·시연 장애 종류(쇼핑몰이 앎).
+    # `switch`=장애 스위치(failure·latency·lost), `pg_slow`=결제사 쪽 지연, `payment_version`=잘못된
+    # 결제 설정 배포(v2). 셋 다 아니면(실제 장애 등) 비운다
+    fault_kind: Literal["switch", "pg_slow", "payment_version"] | None = None
 
 
 class PaymentFailedData(AxModel):

@@ -283,6 +283,9 @@ class RootCauseOutput(AxModel):
     needs_confirmation: bool  # 확신도 high 후보가 없으면 true (사람이 원인을 확인)
     facts: list[CauseFact] = Field(default_factory=list)
     summary: str  # 사실이 하나도 없으면 "확인할 수 없음 …"
+    # 후보를 고른 방법: `llm`(LLM이 사실로 고름) · `rule`(시간 순서 규칙. 규칙만으로는 high를 주지
+    # 않는다) · 후보가 없으면 None. 예전 결과는 없다
+    method: Literal["llm", "rule"] | None = None
 
     @model_validator(mode="after")
     def _hypotheses_cite_facts(self) -> Self:

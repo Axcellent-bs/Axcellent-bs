@@ -21,6 +21,18 @@ def iso(value: datetime | None) -> str | None:
     return value.strftime("%Y-%m-%dT%H:%M:%SZ") if value else None
 
 
+def _precise(value: datetime | None) -> str | None:
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z") if value else None
+
+
+FAULT_KINDS = ("switch", "pg_slow", "payment_version")
+
+
+def _fault_kind(signal: dict[str, Any]) -> str | None:
+    kind = signal.get("fault_kind")
+    return kind if kind in FAULT_KINDS else None
+
+
 def _utc(value: Any) -> datetime | None:
     """부서가 준 ISO 시각. 시간대가 없거나 읽을 수 없으면 None(지어내지 않는다)."""
     if not isinstance(value, str):
@@ -323,7 +335,12 @@ class Incident:
             "opened_at": iso(self.opened_at),
             "closed_at": iso(self.closed_at),
             "recovered_at": iso(self.recovered_at),
+            # 복구 시간(mttr_seconds)의 끝 시각. 화면의 "정상 복귀"가 복구 시간 카드와 같은 값을
+            # 보게 초 아래까지 싣는다. 아직 모르면 None
+            "recovery_end_at": _precise(self.recovery_end()),
             "detected_by": self.detected_by,
+            # 사건을 연 쇼핑몰 신호가 알려 준 시험·시연 장애 종류(switch·pg_slow·payment_version)
+            "fault_kind": _fault_kind(self.signal),
             **self._impact_window_view(),
             "steps": [s.view() for s in self.steps.values()],
             "events": self.events,

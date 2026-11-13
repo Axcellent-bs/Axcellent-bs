@@ -173,6 +173,9 @@ async def test_llm_failure_falls_back_to_time_order_rule() -> None:
     assert result.fallback is True
     assert result.output.hypotheses
     assert "규칙" in result.output.summary
+    # 화면이 "규칙만으로는 high를 주지 않는다"를 알리게 고른 방법을 싣는다
+    assert result.output.method == "rule"
+    assert all(h.confidence != "high" for h in result.output.hypotheses)
 
 
 @pytest.mark.asyncio
@@ -195,6 +198,7 @@ async def test_llm_gets_only_facts_and_a_grounded_high_candidate_is_kept() -> No
     assert result.fallback is False
     assert [h.confidence for h in out.hypotheses] == ["high"]
     assert out.needs_confirmation is False
+    assert out.method == "llm"
 
 
 @pytest.mark.asyncio
@@ -253,6 +257,7 @@ async def test_no_facts_means_cannot_tell_without_candidates() -> None:
     assert out.hypotheses == []
     assert out.needs_confirmation is True
     assert out.summary.startswith("확인할 수 없음")
+    assert out.method is None
     assert llm.seen is None  # 사실이 없으면 LLM을 부르지 않는다
     assert [f.kind for f in out.facts] == ["anomaly"]
 

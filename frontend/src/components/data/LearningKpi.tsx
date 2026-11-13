@@ -3,10 +3,11 @@ import { Bars, Stat } from "@/components/admin/bits";
 import { AgentAccuracy } from "@/components/data/AgentAccuracy";
 import { ChartWithTable, RingMeter, TableView } from "@/components/charts";
 import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/finance/bits";
+import type { OrchIncident } from "@/lib/agentChat";
 import { humanId, shortDateTime } from "@/lib/format";
 import {
-  BLOCK_KO, DATA_SERVER, GRADE_KO, UNKNOWN, dataAi, duration, evidenceLines, kpiLive, kpiNote, mttrUnit, num,
-  type A2AResult, type KpiSummaryOutput,
+  BLOCK_KO, DATA_SERVER, GRADE_KO, UNKNOWN, compareByType, dataAi, duration, eventTypeName, evidenceLines, faultKindOf, kpiLive, kpiNote,
+  mttrUnit, num, type A2AResult, type KpiSummaryOutput,
 } from "@/lib/data";
 
 // 운영 지표: 복구 속도(회사 기억을 참조한 2차 사건이 1차보다 얼마나 빨리 복구됐는지) → AI 단독 처리율 → 평상시 지표.
@@ -26,14 +27,6 @@ function Notes({ notes }: { notes: string[] }) {
   );
 }
 
-/** 1차와 마지막 사건의 복구 시간 비교 한 줄 (화면 계산, 반올림 정수) */
-function compareLine(first: number, last: number): string {
-  if (first <= 0) return "1차 복구 시간이 0초라 비교할 수 없어요";
-  const pct = Math.round(((first - last) / first) * 100);
-  if (pct === 0) return "1차와 마지막 사건의 복구 시간이 같아요";
-  return pct > 0 ? `1차보다 마지막 사건이 ${pct}% 빨라졌어요` : `1차보다 마지막 사건이 ${-pct}% 느려졌어요`;
-}
-
 function sum(r: Record<string, number> | null | undefined) {
   return Object.values(r ?? {}).reduce((a, b) => a + (num(b) ?? 0), 0);
 }
@@ -48,16 +41,27 @@ function Group({ id, title, children }: { id: string; title: string; children: R
   );
 }
 
-function KpiBody({ res, accuracy }: { res: A2AResult<KpiSummaryOutput>; accuracy: ReactNode }) {
+/** 사건 줄의 장애 종류: 장애 스위치·결제사 지연·잘못된 배포, 모르면 지표 종류 */
+function kindLabel(inc: OrchIncident | undefined): string {
+  const fault = faultKindOf(inc);
+  const metric = eventTypeName(inc?.event_type);
+  return fault ? `${fault} · ${metric}` : `${metric} · 장애 종류 기록 없음`;
+}
+
+function KpiBody({ res, accuracy, incidents }: { res: A2AResult<KpiSummaryOutput>; accuracy: ReactNode; incidents: OrchIncident[] | null }) {
   const o = res.output;
   const { headline, notes } = evidenceLines(res.evidence?.data_summary);
   // 감지 시각 순서대로 1차, 2차 … (서버 값의 순서만 맞춘다)
   const incs = [...(o.incidents ?? [])].sort((a, b) => (a.detected_at ?? "").localeCompare(b.detected_at ?? ""));
   const order = new Map(incs.map((x, i) => [x.context_id, i]));
   const name = (id: string) => `${(order.get(id) ?? 0) + 1}차 · ${humanId(id)}`;
+  // 장애 종류는 총괄 사건 기록에서 (데이터 AI 요약에는 없다)
+  const byId = new Map((incidents ?? []).map((i) => [i.context_id, i]));
   // 복구 시간이 없는 사건은 막대·목록에서 뺀다 (막대와 목록이 어긋나지 않게)
   const timed = incs.filter((x) => num(x.mttr_seconds) != null);
   const secs = timed.map((x) => x.mttr_seconds as number);
+  // 같은 지표 종류끼리만 1차와 마지막을 비교한다 (종류가 하나뿐인 사건은 목록에만)
+  const lines = compareByType(timed, (id) => byId.get(id)?.event_type);
   const unit = mttrUnit(secs);
   const bars: Record<string, number> = {};
   for (const x of timed) bars[name(x.context_id)] = unit.value(x.mttr_seconds as number);
@@ -79,16 +83,19 @@ function KpiBody({ res, accuracy }: { res: A2AResult<KpiSummaryOutput>; accuracy
           <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-500">복구 시간이 기록된 사건이 아직 없어요</p>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm font-medium text-ink-900">
-              {timed.length >= 2 ? compareLine(secs[0], secs[secs.length - 1]) : "같은 종류 사건이 한 번 더 해결되면 비교가 나와요"}
-            </p>
+            {lines.length > 0 ? (
+              <ul className="space-y-1 text-sm font-medium text-ink-900">{lines.map((l) => <li key={l}>{l}</li>)}</ul>
+            ) : (
+              <p className="text-sm font-medium text-ink-900">같은 종류 사건이 한 번 더 해결되면 비교가 나와요</p>
+            )}
+            <p className="text-xs text-ink-500">비교는 같은 지표 종류(결제 오류·결제 응답 지연)끼리만 해요. 종류가 다른 장애는 복구 방법이 달라 빠르기를 견주지 않아요.</p>
             <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
               <div>
                 <p className="mb-2 text-xs font-medium text-ink-700">복구까지 걸린 시간 ({unit.unit})</p>
                 <ChartWithTable
                   chart={<Bars data={bars} />}
-                  table={<TableView columns={["사건", "감지", "복구", "복구까지 걸린 시간", "회사 기억"]}
-                    rows={timed.map((x) => [name(x.context_id), shortDateTime(x.detected_at), shortDateTime(x.recovered_at), duration(x.mttr_seconds), x.used_memory === true ? "참조함" : x.used_memory === false ? "참조 안 함" : UNKNOWN])} />}
+                  table={<TableView columns={["사건", "장애 종류", "감지", "복구", "복구까지 걸린 시간", "회사 기억"]}
+                    rows={timed.map((x) => [name(x.context_id), kindLabel(byId.get(x.context_id)), shortDateTime(x.detected_at), shortDateTime(x.recovered_at), duration(x.mttr_seconds), x.used_memory === true ? "참조함" : x.used_memory === false ? "참조 안 함" : UNKNOWN])} />}
                 />
               </div>
               <ul className="space-y-2">
@@ -96,6 +103,7 @@ function KpiBody({ res, accuracy }: { res: A2AResult<KpiSummaryOutput>; accuracy
                   <li key={x.context_id} className="flex flex-wrap items-center gap-2 rounded-2xl bg-surface-2 px-4 py-3">
                     <span className="text-sm font-semibold text-ink-900">{(order.get(x.context_id) ?? 0) + 1}차</span>
                     <span className="text-xs text-ink-500">{humanId(x.context_id)}</span>
+                    <Chip label={kindLabel(byId.get(x.context_id))} tone={TONE.muted} />
                     <span className="ml-auto text-sm font-semibold tabular-nums">{duration(x.mttr_seconds)}</span>
                     <Chip label={x.used_memory === true ? "회사 기억 참조" : x.used_memory === false ? "회사 기억 참조 안 함" : `회사 기억: ${UNKNOWN}`}
                       tone={x.used_memory === true ? TONE.info : TONE.muted} />
@@ -141,7 +149,7 @@ function KpiBody({ res, accuracy }: { res: A2AResult<KpiSummaryOutput>; accuracy
   );
 }
 
-function LiveKpi({ tick }: { tick: number }) {
+function LiveKpi({ tick, incidents }: { tick: number; incidents: OrchIncident[] | null }) {
   const res = useResource("kpi", () => dataAi.kpiSummary().then((r) => ({ data: r, meta: { mock: false } })), tick);
   if (!res.env) {
     if (!res.error) return <Waiting />;
@@ -155,12 +163,13 @@ function LiveKpi({ tick }: { tick: number }) {
   return (
     <>
       {res.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${res.error}`} onRetry={res.reload} /></div>}
-      <KpiBody res={res.env.data} accuracy={<AgentAccuracy tick={tick} feedback={res.env.data.output.human_feedback ?? null} />} />
+      <KpiBody res={res.env.data} incidents={incidents} accuracy={<AgentAccuracy tick={tick} feedback={res.env.data.output.human_feedback ?? null} />} />
     </>
   );
 }
 
-export function LearningKpi({ tick }: { tick: number }) {
+/** `incidents`: 총괄 사건 목록(장애 종류를 붙이는 데 쓴다). 못 받았으면 null이고 비교 문장은 나오지 않는다 */
+export function LearningKpi({ tick, incidents = null }: { tick: number; incidents?: OrchIncident[] | null }) {
   if (!kpiLive) {
     return (
       <div className="space-y-5">
@@ -171,5 +180,5 @@ export function LearningKpi({ tick }: { tick: number }) {
       </div>
     );
   }
-  return <LiveKpi tick={tick} />;
+  return <LiveKpi tick={tick} incidents={incidents} />;
 }

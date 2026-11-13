@@ -11,14 +11,18 @@ import math
 import os
 import uuid
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 
 from ax_contracts.schemas import EventType, ShopDegradedData
 from ax_shop_api import outbox
 from ax_shop_api.db import Db
 
 COMPONENT = "payment"
+# 시험·시연 장애 종류 (`ShopDegradedData.fault_kind`와 같은 값)
+FaultKind = Literal["switch", "pg_slow", "payment_version"]
 
 
 @dataclass(frozen=True)
@@ -61,6 +65,9 @@ class Monitor:
         self.degraded = False
         self._incident_key: str | None = None
         self._metric_code: str | None = None
+        # 장애가 났을 때 켜져 있던 시험·시연 장애 종류를 알려 주는 함수(쇼핑몰이 넣는다).
+        # `shop.degraded`의 `fault_kind`로 싣는다. 모르면 None
+        self.fault_kind: Callable[[], FaultKind | None] = lambda: None
 
     def record(self, now: float, latency_ms: float, server_error: bool) -> None:
         self._samples.append((now, latency_ms, server_error))
@@ -89,6 +96,7 @@ class Monitor:
         since: float | None = None,
         recovery: str | None = None,
         released_by: str | None = None,
+        fault_kind: FaultKind | None = None,
     ) -> None:
         data = ShopDegradedData(
             component=COMPONENT,
@@ -98,6 +106,7 @@ class Monitor:
             since=datetime.fromtimestamp(since, UTC) if since is not None else None,
             recovery=recovery,
             released_by=released_by,
+            fault_kind=fault_kind,
         )
         with self.db.tx() as conn:
             if event_type == EventType.SHOP_DEGRADED:
@@ -139,7 +148,10 @@ class Monitor:
         if not self.degraded and now - self._breach_since >= self.thresholds.sustain_s:
             self.degraded = True
             self._metric_code = breach[0]
-            self._enqueue(EventType.SHOP_DEGRADED, *breach, since=self._breach_since)
+            self._enqueue(
+                EventType.SHOP_DEGRADED, *breach, since=self._breach_since,
+                fault_kind=self.fault_kind(),
+            )  # fmt: skip
 
     def released(self, released_by: str | None = None) -> None:
         """켜져 있던 장애 스위치를 껐을 때: 스위치 때문에 쌓인 표본만 버리고 "해제됨"을 남긴다.
