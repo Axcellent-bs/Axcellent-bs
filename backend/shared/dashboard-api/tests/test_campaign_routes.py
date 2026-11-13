@@ -295,3 +295,94 @@ def test_video_publish_passes_input_required_with_review_id(client: TestClient, 
     target, request = fake.calls[0]
     assert (target, request.skill) == ("marketing", "publish_sns")
     assert request.input == publish_input
+
+
+BRIEF_MEDIA = "/api/dashboard/marketing/briefs/PROP-5/media"
+
+
+def test_brief_media_sends_only_the_proposal_id_with_a_stable_key(
+    client: TestClient, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(marketing_client.VIDEO_TIMEOUT_ENV, raising=False)
+    fake.outcome = None
+    first = client.post(BRIEF_MEDIA)
+    # 본문에 종류·필드를 실어도 마케팅으로 가지 않는다(보관된 요청 초안만 쓴다)
+    again = client.post(BRIEF_MEDIA, json={"media_kind": "image", "fields": {"season": "x"}})
+    assert first.status_code == again.status_code == 200
+    target, request = fake.calls[0]
+    assert (target, request.skill) == ("marketing", "prepare_brief_media")
+    assert request.input == fake.calls[1][1].input == {"proposal_id": "PROP-5"}
+    assert request.meta.idempotency_key == fake.calls[1][1].meta.idempotency_key
+    remaining = (request.meta.deadline - datetime.now(UTC)).total_seconds()
+    assert 300 < remaining <= marketing_client.DEFAULT_VIDEO_TIMEOUT_S  # 영상은 길게 걸린다
+    assert all(r.skill != "publish_sns" for _, r in fake.calls)
+
+
+def test_brief_media_needs_a_person_and_a_valid_id(client: TestClient, fake: Fake) -> None:
+    bad = {"authorization": "Bearer nope"}
+    assert client.post(BRIEF_MEDIA, headers=bad).status_code in (401, 403)
+    assert client.post(BRIEF_MEDIA.replace("PROP-5", "a%20b")).status_code == 422
+    assert fake.calls == []
+
+
+def test_brief_media_passes_judgements_and_maps_bad_requests(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.status, fake.outcome = TaskStatus.INPUT_REQUIRED, "held"  # 안전 장치 보류: 그대로 전달
+    held = client.post(BRIEF_MEDIA)
+    assert held.status_code == 200 and held.json()["data"]["output"]["review_id"] == "rev_1"
+    for outcome in ("budget_exceeded", "cost_over_single", "fields_missing", "in_progress"):
+        fake.status, fake.outcome = TaskStatus.FAILED, outcome
+        response = client.post(BRIEF_MEDIA)
+        assert response.status_code == 200 and response.json()["data"]["outcome"] == outcome
+    fake.status, fake.outcome = TaskStatus.FAILED, "brief_not_found"
+    assert client.post(BRIEF_MEDIA).status_code == 404
+    fake.status, fake.outcome = TaskStatus.FAILED, "invalid_input"
+    assert client.post(BRIEF_MEDIA).status_code == 400
+    fake.status, fake.outcome = TaskStatus.CANCELED, None
+    assert client.post(BRIEF_MEDIA).status_code == 504
+
+
+def _preview_setup(monkeypatch: pytest.MonkeyPatch, tmp_path, ref: str, sha: str | None) -> None:
+    async def send(target: str, request: AgentRequest) -> AgentResult:
+        assert (target, request.skill) == ("marketing", "get_campaign_brief")
+        prepared = None if sha is None else {"asset_ref": ref, "asset_sha256": sha}
+        item = {"sns_handoff": {"status": "handed", "prepared": prepared}}
+        return AgentResult(
+            meta=request.meta, status=TaskStatus.COMPLETED, output={"found": True, "item": item}
+        )
+
+    monkeypatch.setattr(marketing_client, "SEND", send)
+    monkeypatch.setenv(marketing_client.MEDIA_DIR_ENV, str(tmp_path / "media"))
+
+
+def test_brief_media_preview_serves_only_the_checked_labeled_file(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    import hashlib
+
+    folder = tmp_path / "media" / "t" / "ctx" / "med_1"
+    folder.mkdir(parents=True)
+    content = b"labeled-video-bytes"
+    (folder / "labeled.mp4").write_bytes(content)
+    (folder / "asset.mp4").write_bytes(content)  # 라벨을 입히기 전 원본
+    (tmp_path / "labeled.mp4").write_bytes(content)  # 미디어 폴더 밖
+    sha = hashlib.sha256(content).hexdigest()
+    url = BRIEF_MEDIA + "/preview"
+
+    _preview_setup(monkeypatch, tmp_path, "t/ctx/med_1/labeled.mp4", sha)
+    response = client.get(url)
+    assert response.status_code == 200 and response.content == content
+    assert response.headers["content-type"] == "video/mp4"
+
+    for ref, digest in (
+        ("t/ctx/med_1/asset.mp4", sha),  # AI 라벨이 없는 원본은 내주지 않는다
+        ("../labeled.mp4", sha),  # 미디어 폴더 밖
+        ("t/ctx/med_1/labeled.mp4", "0" * 64),  # 점검한 뒤 바뀐 파일
+        ("t/ctx/none/labeled.mp4", sha),  # 없는 파일
+        ("t/ctx/med_1/labeled.mp4", None),  # 준비된 초안이 없다
+    ):
+        _preview_setup(monkeypatch, tmp_path, ref, digest)
+        assert client.get(url).status_code == 404, ref
+    monkeypatch.delenv(marketing_client.MEDIA_DIR_ENV)
+    assert client.get(url).status_code == 404

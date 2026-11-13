@@ -457,8 +457,12 @@ def plan_cost(
     settings: MediaSettings,
     prices_path: Path | None = None,
     templates_path: Path | None = None,
+    allow_video: bool = False,
 ) -> CostPlan | AgentResult:
     """`generate_media`(이미지)와 같은 규칙으로 호출 없이 비용만 계산한다. 막히면 결과 Task.
+
+    `allow_video`면 무음 영상(`MARKETING_AUDIO_MODE=off`의 `generate_media`와 같은 키)도 계산한다.
+    기본은 이미지 전용이다(캐러셀).
 
     입력 검증·프롬프트 검사·공급자 어댑터·환율·단가표(fail-closed)·건당 상한은 `generate_media`와
     같은 규칙·결과 코드다. 월 상한과 장부 예약은 하지 않는다(부르는 쪽이 합계로 본다).
@@ -472,23 +476,29 @@ def plan_cost(
             "invalid_input",
             errors=[f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()],
         )
-    if not _DRAFT_ID.fullmatch(data.post_draft_id) or data.media_kind != "image":
+    kind: MediaKind = data.media_kind
+    if not _DRAFT_ID.fullmatch(data.post_draft_id) or kind not in (
+        ("image", "video") if allow_video else ("image",)
+    ):
         return _fail(request, "invalid_input", errors=["media_kind/post_draft_id: invalid"])
     try:
         template = get_template(data.scene_template_id, templates_path)
-        if template.kind != "image":
+        if template.kind != kind:
             return _fail(request, "invalid_input", errors=["scene_template_id: kind_mismatch"])
         prompt = render_prompt(data.scene_template_id, data.fields, templates_path)
     except PromptRejected as rejected:
         return _fail(request, "prompt_rejected", reason_code=rejected.code, field=rejected.field)
     resolution = data.resolution or template.resolution
-    quality = data.quality or template.quality
-    if data.duration_s is not None or not _is_image_size(resolution):
+    quality = (data.quality or template.quality) if kind == "image" else None
+    duration_s = (data.duration_s or template.duration_s) if kind == "video" else None
+    if (kind == "image" and (data.duration_s is not None or not _is_image_size(resolution))) or (
+        kind == "video" and (data.quality is not None or _is_image_size(resolution))
+    ):
         return _fail(
             request, "invalid_input", errors=["resolution/quality/duration_s: kind_mismatch"]
         )
     prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
-    request_sha = _sha(prompt_sha, "image", resolution, quality, None, "muted")
+    request_sha = _sha(prompt_sha, kind, resolution, quality, duration_s, "muted")
     key = f"{request.meta.context_id}:{ACTION}:{data.post_draft_id}:{request_sha[:10]}"
     try:
         previous = ledger.settled_for(key)
@@ -497,13 +507,13 @@ def plan_cost(
     if previous is not None and previous.result_json:
         return CostPlan(key, previous.krw_actual or previous.krw_est, True)
 
-    provider_name = settings.provider("image")
+    provider_name = settings.provider(kind)
     if get_adapter(provider_name) is None:
         return _fail(request, "provider_adapter_missing", provider=provider_name)
     if provider_name == MOCK:
-        krw_est = MOCK_COST_KRW["image"]
+        krw_est = MOCK_COST_KRW[kind]
     else:
-        model = settings.model("image")
+        model = settings.model(kind)
         if not model:
             return _fail(request, "model_not_configured", provider=provider_name)
         problem = settings.fx_problem(_now().date())
@@ -515,12 +525,12 @@ def plan_cost(
             entry = pricing.find_entry(
                 provider=provider_name,
                 model=model,
-                kind="image",
+                kind=kind,
                 resolution=resolution,
                 quality=quality,
                 path=prices_path,
             )
-            usd_est = pricing.estimate_usd(entry, prompt=prompt, duration_s=None)
+            usd_est = pricing.estimate_usd(entry, prompt=prompt, duration_s=duration_s)
         except PriceNotFound:
             return _fail(request, "price_not_found", provider=provider_name, resolution=resolution)
         assert settings.fx_usd_krw is not None and settings.margin_pct is not None  # noqa: S101

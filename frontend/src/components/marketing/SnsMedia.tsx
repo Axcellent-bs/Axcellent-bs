@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { shortDateTime, won } from "@/lib/format";
 import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
+import { BriefMediaMaker } from "./BriefMediaMaker";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, outageTriggerKo, type OutageSnsDraft, type StoredBrief } from "@/lib/briefs";
 
 // SNS·미디어 탭. 이미지·영상 생성과 SNS 게시 흐름을 안내하고,
+// 넘어온 기획안은 저장된 미디어 요청으로 미디어 초안을 만들 수 있다(BriefMediaMaker: 비용 확인 → 생성 → 초안·검사). 게시는 하지 않는다.
 // 안전 장치 보류 큐(finance.reviews)에서 읽을 수 있는 마케팅 항목(publish_sns, generate_media)만 읽기 전용으로 보여 준다.
 // 보류 결정은 장애·공지·캠페인 탭의 보류 큐에서 한다. 이 탭은 결정하지 않는다.
 // 비용 장부 숫자(오늘·이달 합계, 건당 상한)를 읽는 API는 화면에 연결돼 있지 않아 지어내지 않고 빈 상태로 둔다.
@@ -93,7 +95,7 @@ export function SnsMedia() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">SNS·미디어</h1>
-          <p className="mt-1 text-sm text-ink-500">마케팅 AI가 만드는 이미지·영상과 SNS 게시 흐름입니다. 이 탭은 읽기만 하고, 보류 결정은 장애·공지 또는 캠페인·쿠폰 탭의 보류 큐에서 합니다.</p>
+          <p className="mt-1 text-sm text-ink-500">마케팅 AI가 만드는 이미지·영상과 SNS 게시 흐름입니다. 이 탭에서는 넘어온 기획안의 미디어 초안을 만들 수 있고, 게시와 보류 결정은 하지 않습니다. 보류 결정은 장애·공지 또는 캠페인·쿠폰 탭의 보류 큐에서 합니다.</p>
         </div>
         <button className="btn-ghost ml-auto text-xs" onClick={() => void load()} disabled={loading}>{loading ? "불러오는 중" : "새로고침"}</button>
       </header>
@@ -134,7 +136,7 @@ export function SnsMedia() {
               )}
       </Section>
 
-      <Section title="받은 기획안에서 넘어온 작업" desc="받은 기획안 탭에서 SNS·미디어로 넘긴 기획안입니다. 넘기면 글 초안과 미디어 요청 초안까지만 만들고, 아래 다음 단계는 사람이 이어서 합니다. 미디어 종류와 필드는 마케팅 AI가 기획안에서 추천해 채우며, 받은 기획안 탭에서 바꿀 수 있습니다.">
+      <Section title="받은 기획안에서 넘어온 작업" desc="받은 기획안 탭에서 SNS·미디어로 넘긴 기획안입니다. 넘기면 글 초안과 미디어 요청 초안까지만 만들고, 아래 다음 단계는 사람이 이어서 합니다. '미디어 만들기'를 누르면 예상 비용을 확인한 뒤 저장된 종류·필드로 미디어를 만들고 초안 검사까지 합니다. 게시는 하지 않으며 사람 승인(C 등급)이 따로 필요합니다. 종류와 필드는 받은 기획안 탭에서 바꿀 수 있습니다.">
         <ol className="flex flex-wrap items-center gap-1 text-xs text-ink-700" aria-label="다음 단계">
           {["미디어 생성 (B 등급, 비용 상한 검사)", "초안 검사 (AI 표시·문구·숫자)", "사람 승인 게시 (C 등급)"].map((t, i) => (
             <li key={t} className="flex items-center gap-1">{i > 0 && <span aria-hidden="true">›</span>}<span className="rounded-lg bg-ink-50 px-2 py-1">{i + 1}. {t}</span></li>
@@ -155,7 +157,9 @@ export function SnsMedia() {
                         {h.status === "handed" ? (
                           <>
                             <span className="text-ink-500">{shortDateTime(h.handed_at)} 넘김</span>
-                            <span className="chip bg-brand-50 text-brand-700" title={h.draft_id ?? undefined}>{draftStateKo(h.draft_state)}</span>
+                            {h.prepared?.stage === "draft_ready"
+                              ? <span className="chip bg-brand-50 text-brand-700" title={h.prepared.post_draft_id ?? undefined}>초안 준비됨 · 사람 승인 대기</span>
+                              : <span className="chip bg-brand-50 text-brand-700" title={h.draft_id ?? undefined}>{draftStateKo(h.draft_state)}</span>}
                             {m && <span className="chip bg-ink-50 text-ink-700">{mediaKindKo(m.media_kind)}{m.kind_source ? ` · ${KIND_SOURCE_KO[m.kind_source] ?? m.kind_source}` : ""}</span>}
                             {m && m.missing_fields.length > 0 && <span className="text-ink-500">미디어 요청 필드 미정 {m.missing_fields.length}개</span>}
                           </>
@@ -168,6 +172,7 @@ export function SnsMedia() {
                             {m.missing_fields.length > 0 && ` · 미정: ${m.missing_fields.map(mediaFieldKo).join(", ")}`}
                           </p>
                         )}
+                        {m && <BriefMediaMaker item={i} onDone={() => void load()} />}
                       </li>
                     );
                   })}

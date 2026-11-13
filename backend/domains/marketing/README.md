@@ -70,6 +70,18 @@
 - 기계판독 표시: 이미지는 XMP(`ai_generated=true`, 생성 모델, 시각, IPTC `trainedAlgorithmicMedia`), 영상은 MP4 메타데이터 태그. 외부 모델이 넣은 SynthID·C2PA는 재저장(이 오버레이 포함)하면 사라질 수 있어 대신하지 않는다. 시행령 제23조의 "기계가 판독할 수 있는 방법"으로 인정되는지(표준 규격 포함)는 변호사 확인 필요.
 - 환경변수: `MARKETING_MEDIA_DIR`(미디어 폴더, 자산 경로는 이 안쪽만), `MARKETING_SNS_DRAFT_DB`(초안 SQLite 파일, 비우면 메모리).
 
+### 기획안 미디어 만들기 (`prepare_brief_media`, `brief_media.py`)
+
+화면 SNS·미디어 탭의 "미디어 만들기" 버튼이 부른다(dashboard-api `POST /api/dashboard/marketing/briefs/{proposal_id}/media`).
+
+- 입력은 기획안 번호뿐이다. 종류·장면 템플릿·필드·규격은 `handoff_brief_to_sns`가 보관한 미디어 요청 초안에서 읽어 기존 `prepare_sns_post_from_media`를 그대로 부른다(생성 B등급 관문·건당/월 상한·단가표 fail-closed → 규격 변환 → AI 라벨 → 초안 → 점검). 상한·단가·안전 규칙은 바꾸지 않는다.
+- 게시(`publish_sns`, C등급 사람 승인)는 부르지 않는다.
+- 비용 전에 거절: 넘기지 않음(`not_handed`), 미정 필드(`fields_missing`), 캐러셀(`carousel_items_undecided`: 장마다 장면을 사람이 정해야 한다), 배경음 모드의 영상(`bgm_fields_required`).
+- 멱등: `context_id`를 `ctx_brief_<기획안 번호>`로, 생성 묶음 id를 요청 초안의 `media_ref`로 고정해 같은 요청 초안은 누가 다시 불러도 생성 장부에서 재생된다. 준비된 초안이 있으면 `already_prepared`, 만드는 중이면 `in_progress`.
+- 결과는 넘김 기록의 `prepared`에 남고 `list_campaign_briefs`·`get_campaign_brief`의 `sns_handoff.prepared`로 읽는다. 요청 초안(종류·필드)이 바뀌면 보이지 않는다.
+- `sns_handoff.media_estimate`: 조회 때 `plan_cost`(=`generate_media`와 같은 단가표·환율·건당 상한 규칙)와 장부의 이달 누적으로 계산한 예상 비용·상한. 저장하지 않으며 계산할 수 없으면 이유 코드만 준다.
+- 미리보기는 dashboard-api `GET .../media/preview`가 `MARKETING_MEDIA_DIR`의 `labeled.jpg|mp4`(AI 라벨을 입히고 점검한 파일, sha256 일치)만 내준다. dashboard-api와 마케팅이 같은 `MARKETING_MEDIA_DIR`을 봐야 한다.
+
 ### 사람과 직접 대화 (`chat.py`, `chat_store.py`)
 - 화면 경로: dashboard-api `/api/dashboard/marketing-chat` (GET 목록, GET `/{id}`, POST `{thread_id?, message}`, POST `/{id}/close`). 사람 토큰(`Authorization: Bearer`)이 있어야 읽기도 된다.
 - 조회·설명만 한다. 읽는 값은 받은 기획안·게시 중인 공지·쿠폰 지급 건수뿐이고, 숫자는 저장소 값을 그대로 인용한다. 캠페인 시작·취소, 공지 게시, 쿠폰 지급을 하라는 말에는 "대화로는 못 한다"는 안내만 한다(모델을 부르지 않음). 대화로 일이 생기지 않으므로 `task_id`는 항상 `null`이다.

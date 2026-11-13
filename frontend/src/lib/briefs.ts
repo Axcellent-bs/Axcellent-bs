@@ -1,6 +1,7 @@
 import { ApiError } from "./apiError";
 import { writeAuth } from "./api";
 import { DASHBOARD_API_URL, RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
+import type { BriefMediaAnswer, MediaEstimate, PreparedMedia } from "./briefMedia";
 
 // 마케팅이 기획에서 받은 기획안 읽기. 화면은 마케팅을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
 // 응답 모양은 ax-backend `marketing_agent/briefs.py`(`StoredBrief`)와 계약 `CampaignBriefInput` 기준이다.
@@ -73,6 +74,10 @@ export interface SnsHandoff {
   reason_code: string | null;
   handed_at: string | null;
   draft_state: "caption_only" | "media_attached" | "missing" | null;
+  /** 지금 요청 초안으로 만들 때의 예상 비용·상한. 옛 서버는 이 칸이 없다 */
+  media_estimate?: MediaEstimate | null;
+  /** 지금 요청 초안으로 만든 미디어 초안. 없거나 요청 초안이 바뀌었으면 null */
+  prepared?: PreparedMedia | null;
 }
 
 /** 받은 기획안. 지금 마케팅이 아는 상태는 `received`(받음)뿐이다 */
@@ -149,6 +154,25 @@ async function handoff(proposalId: string, options: HandoffOptions = {}): Promis
   return json.data as HandoffAnswer;
 }
 
+const mediaPath = (proposalId: string) => `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/media`;
+
+/**
+ * 넘긴 기획안의 저장된 미디어 요청(종류·필드)으로 미디어 초안을 만든다(dashboard-api, 사람 토큰 필요).
+ * 종류·필드는 보내지 않는다(서버가 보관본에서 읽는다). 게시는 하지 않는다: 게시는 C 등급 사람 승인이다.
+ * 영상은 1분쯤 걸린다. 오류는 서버 문장 없이 상태 코드만 담아 던진다(문구는 `mediaHttpErrorKo`).
+ */
+async function makeMedia(proposalId: string): Promise<BriefMediaAnswer> {
+  const path = mediaPath(proposalId);
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data) throw new ApiError(`요청 실패 (${res.status})`, res.status);
+  return json.data as BriefMediaAnswer;
+}
+
+/** 준비된 미디어 초안의 미리보기 주소(AI 표시를 입힌 결과 파일). `version`은 파일이 바뀌면 새로 받게 하는 값이다 */
+export const mediaPreviewUrl = (proposalId: string, version: string | null) =>
+  `${DASHBOARD_API_URL}${mediaPath(proposalId)}/preview${version ? `?v=${encodeURIComponent(version.slice(0, 12))}` : ""}`;
+
 /** shop-api 읽기 중계가 받는 목록 limit 상한(`ax_shop_api/marketing_client.py`의 `LIST_LIMIT_MAX`). 넘기면 400 "limit은 1~100이어야 한다" */
 export const BRIEFS_LIST_MAX = 100;
 /** 목록 limit을 중계가 받는 1~BRIEFS_LIST_MAX 정수로 맞춘다 */
@@ -174,6 +198,7 @@ export const briefs = {
   list: (limit = 50) => get<BriefList>(`/api/shop/admin/marketing/briefs?limit=${briefsListLimit(limit)}`),
   outageSnsDrafts: (limit = 20) => get<OutageSnsDraftList>(`/api/shop/admin/marketing/outage-sns-drafts?limit=${briefsListLimit(limit)}`),
   handoff,
+  makeMedia,
 };
 
 export const HANDOFF_REASON_KO: Record<string, string> = {
