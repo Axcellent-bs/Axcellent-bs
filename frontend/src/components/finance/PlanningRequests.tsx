@@ -6,28 +6,7 @@ import { Empty, Panel, ResourceBody, useResource } from "./bits";
 
 // 재무 → 기획 개선 요청: 사람이 정한 요청만 보낸다. 기획이 근거를 되물으면 재무 AI가 보낸 근거로 답하고,
 // 기록으로 답하지 못한 질문은 사람이 여기서 답한다. 재무는 요청만 보내고 기획서·우선순위는 기획이 정한다.
-// 고칠 점은 어느 탭에서든 생기므로 탭 밖에 늘 펼쳐 둔다. 화면 위 버튼·"이걸로 개선 요청"은 이 섹션으로 내려간다.
-
-/** 진행 중(보낸 요청) 수와 사람이 답할 기획 질문 수. 화면 위 버튼 배지에 쓴다 */
-export function usePlanningCounts(tick: number) {
-  const requests = useResource("planning-requests", () => finance.planningRequests(), tick);
-  const questions = useResource("planning-questions", () => finance.planningQuestions(), tick);
-  return {
-    open: requests.env?.data.requests.length ?? null,
-    waiting: questions.env?.data.waiting ?? null,
-  };
-}
-
-/** 화면 위에 늘 보이는 "기획에 개선 요청" 버튼. 답할 질문이 있으면 눈에 띄게 한다 */
-export function PlanningButton({ tick, onOpen }: { tick: number; onOpen: () => void }) {
-  const { open, waiting } = usePlanningCounts(tick);
-  const label = [open ? `진행 중 ${open}` : null, waiting ? `답할 질문 ${waiting}` : null].filter(Boolean).join(" · ");
-  return (
-    <button type="button" onClick={onOpen} className={waiting ? "btn-primary" : "btn-ghost"}>
-      기획에 개선 요청{label && <span className="ml-1 tabular-nums">({label})</span>}
-    </button>
-  );
-}
+// 고칠 점은 어느 탭에서든 생기므로 탭 밖에 늘 펼쳐 둔다. 표 옆 "이걸로 개선 요청"은 이 섹션으로 올라가 근거를 채운다.
 
 /** 표 옆 "이걸로 개선 요청": 누르면 기획 요청 섹션으로 내려가 제목·근거를 미리 채운다 */
 export function PlanningAskLink({ title, evidence, className = "" }: PlanningAsk & { className?: string }) {
