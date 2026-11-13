@@ -42,6 +42,9 @@ MAX_FILES = 5  # 한 번에 고칠 파일 수
 MAX_TOTAL_LINES = 1500  # 바뀐 줄(더한 줄 + 지운 줄) 합
 MAX_FILE_LINES = 600  # 통째로 다시 쓸 수 있는 파일 길이
 MAX_LISTING = 400  # LLM에 보여 줄 파일 경로 수
+MAX_SCORED = 200  # 그중 작업 낱말로 고른 경로 수 (나머지는 폴더 구조를 보여 준다)
+MAX_PER_MENTION = 50  # 글에 적힌 폴더·파일 이름 하나가 당겨 올 경로 수
+ALL_FILES = 100_000  # 레포 파일 목록을 받을 때 한도 (자르지 않고 다 받는다)
 MAX_PLAN_CHARS = 8000
 MAX_DONE_LINES = 20
 MAX_ATTEMPTS = 2  # 첫 작성 + 리뷰 불일치 뒤 수정 1번
@@ -129,7 +132,7 @@ PLAN_PROMPT = (
     "공용 스타일·같은 값을 쓰는 곳)도 넣는다.\n"
     "- 있는 파일을 고치면 action modify, 경로는 files 목록에 있는 값을 그대로 쓴다.\n"
     "- 새 파일이면 action create.\n"
-    "- path_hints가 있으면 그 경로를 먼저 본다.\n"
+    "- mentioned(작업 글에 적힌, 레포에 있는 경로)와 path_hints가 있으면 그 경로를 먼저 본다.\n"
     "- reason은 그 파일을 고치는 이유 한 줄, summary는 바꿀 내용 한 줄 요약이다.\n"
     "- 기획이 이 레포의 코드를 바꾸는 일이 아니면(SNS 게시, 쿠폰 발행, 캠페인·광고 집행, 환불 "
     "처리처럼 다른 부서가 운영으로 하는 일) files를 비우고 not_code에 이유 한 줄과 맞는 부서"
@@ -445,12 +448,88 @@ def _under(path: str, prefix: str) -> bool:
     return path == base or path.startswith(base + "/")
 
 
-def listing_for(paths: list[str], hints: tuple[str, ...] = ()) -> list[str]:
-    """LLM에 보여 줄 파일 경로: 뺄 것을 빼고, 힌트 경로 안을 앞에 두고, 400개까지."""
+# 글 속 경로: 확장자가 있는 이름(NoticeBanners.tsx) 또는 /가 들어간 경로(shop-web/src).
+# 한글이 바로 붙어도("…tsx에서") 끊기게 ASCII만 본다
+_PATH_RE = re.compile(
+    r"[A-Za-z0-9_.\-/]*[A-Za-z0-9_\-]\.[A-Za-z0-9]{1,8}"  # 이름.확장자 (앞에 폴더가 붙어도 됨)
+    r"|[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+"  # 폴더/경로
+)
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{2,}")
+# 어느 경로에나 들어 있어 점수에 도움이 안 되는 낱말
+_STOP_WORDS = {
+    "src", "lib", "app", "the", "and", "for", "with", "from", "this", "that", "http", "https",
+    "www", "com", "tsx", "jsx", "py", "md", "json", "index", "main", "file", "files", "code",
+    "test", "tests", "components",
+}  # fmt: skip
+
+
+def job_text(job: Job) -> str:
+    """파일을 찾을 때 볼 작업 글 (제목·기획·완료 기준)."""
+    return "\n".join([job.title, job.plan, *job.done])
+
+
+def mentioned(text: str, rows: list[str]) -> list[str]:
+    """글에 적힌 경로·파일 이름 중 목록에 있는 것. 폴더면 그 아래, 이름만 있으면 같은 이름 파일."""
+    out: list[str] = []
+    for tok in _PATH_RE.findall(text or ""):
+        t = tok
+        while t.startswith("./"):
+            t = t[2:]
+        t = t.rstrip("./").lstrip("/")
+        if not t:
+            continue
+        if "/" in t:
+            hits = [p for p in rows if _under(p, t) or p.endswith("/" + t)]
+        else:
+            hits = [p for p in rows if p.rsplit("/", 1)[-1] == t]
+        out += [p for p in hits[:MAX_PER_MENTION] if p not in out]
+    return out
+
+
+def _words(text: str) -> set[str]:
+    return {w.lower() for w in _WORD_RE.findall(text or "")} - _STOP_WORDS
+
+
+def scored(text: str, rows: list[str]) -> list[str]:
+    """작업 낱말이 경로에 많이 들어 있는 순서. 파일 이름에 든 낱말은 두 배로 친다."""
+    words = _words(text)
+    if not words:
+        return []
+    ranked: list[tuple[int, str]] = []
+    for p in rows:
+        low = p.lower()
+        name = low.rsplit("/", 1)[-1]
+        score = sum(2 if w in name else 1 for w in words if w in low)
+        if score:
+            ranked.append((-score, p))
+    ranked.sort()
+    return [p for _, p in ranked[:MAX_SCORED]]
+
+
+def by_folder(rows: list[str]) -> list[str]:
+    """최상위 폴더마다 번갈아 하나씩. 이름순으로 자르면 앞 폴더가 목록을 다 차지한다."""
+    groups: dict[str, list[str]] = {}
+    for p in rows:
+        groups.setdefault(p.split("/", 1)[0] if "/" in p else "", []).append(p)
+    out: list[str] = []
+    queues = list(groups.values())
+    while queues:
+        out += [q.pop(0) for q in queues]
+        queues = [q for q in queues if q]
+    return out
+
+
+def listing_for(paths: list[str], hints: tuple[str, ...] = (), text: str = "") -> list[str]:
+    """LLM에 보여 줄 파일 경로 400개까지. 뺄 것을 빼고 이 순서로 채운다:
+    글에 적힌 경로 → 힌트 경로 안 → 작업 낱말이 맞는 경로 → 나머지(폴더마다 번갈아)."""
     rows = [p for p in paths if not skip_path(p)]
-    hinted = [p for p in rows if any(_under(p, h) for h in hints)]
-    rest = [p for p in rows if p not in set(hinted)]
-    return (hinted + rest)[:MAX_LISTING]
+    first = mentioned(text, rows)
+    first += [p for p in rows if any(_under(p, h) for h in hints)]
+    first += scored(text, rows)
+    out = list(dict.fromkeys(first))
+    taken = set(out)
+    out += by_folder([p for p in rows if p not in taken])
+    return out[:MAX_LISTING]
 
 
 def clean_path(raw: str) -> str | None:
@@ -795,7 +874,7 @@ async def _fix_targets(
     extra = [p for p in flagged if p not in known][: max(0, MAX_FILES - len(picks))]
     if extra:
         adapter = _adapter(job.connection)
-        existing = set(await _vcs("파일 목록", adapter.list_files()))
+        existing = set(await _vcs("파일 목록", adapter.list_files(limit=ALL_FILES)))
         why = "리뷰 지적: " + (notes[0] if notes else "추가로 고칠 파일")
         added = [
             FilePick(path=p, action="modify" if p in existing else "create", reason=why[:200])
@@ -1032,16 +1111,20 @@ async def _run(svc: DevService, job: Job) -> None:
 
     # 1. 읽기
     await svc.coding_step(job, "reading")
-    listed = await _vcs("파일 목록", adapter.list_files())
-    listing = listing_for(listed, job.hints)
+    listed = await _vcs("파일 목록", adapter.list_files(limit=ALL_FILES))
+    text = job_text(job)
+    named = mentioned(text, [p for p in listed if not skip_path(p)])
+    listing = listing_for(listed, job.hints, text)
     await svc.coding_step(job, "reading", point="code.read", text=f"파일 {len(listing)}개 읽음")
 
     # 2. 고칠 파일 고르기: 이름으로 후보 → 후보 내용(미리보기)을 보고 확정
-    data = {**_base(job), "path_hints": list(job.hints), "files": listing}
+    data = {**_base(job), "path_hints": list(job.hints), "mentioned": named, "files": listing}
     first = await _ask(llm, "후보 고르기", PLAN_PROMPT, CodePlan, data, job.ctx)
     candidates = check_picks(first.files, set(listed))[0][:MAX_CANDIDATES]
     if first.not_code is not None and not job.keep_dev:
-        raise not_code_stop(job, first.not_code, bool(candidates), hinted(job.hints, listed))
+        raise not_code_stop(
+            job, first.not_code, bool(candidates), bool(named) or hinted(job.hints, listed)
+        )
     bodies = await _read_all(adapter, [p.path for p in candidates if p.action == "modify"])
     plan = first
     if bodies:
