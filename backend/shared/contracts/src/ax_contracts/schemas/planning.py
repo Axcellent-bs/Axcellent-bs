@@ -78,7 +78,7 @@ class RevertMergedPrInput(AxModel):
 
 
 class RevertMergedPrOutput(AxModel):
-    revert_pr_number: int
+    revert_pr_number: int | None = None  # 관문이 되돌리기 PR 열기부터 막으면(held) None
     merged: bool
     merge_sha: str | None = None
     status: Literal["merged", "auto_merge_scheduled", "held"]

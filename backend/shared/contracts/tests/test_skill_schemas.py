@@ -418,5 +418,7 @@ def test_revert_merged_pr() -> None:
         {"revert_pr_number": 43, "merged": False, "status": "auto_merge_scheduled"}
     )
     assert out.merge_sha is None
+    held = RevertMergedPrOutput.model_validate({"merged": False, "status": "held"})
+    assert held.revert_pr_number is None
     with pytest.raises(ValidationError):
         RevertMergedPrOutput.model_validate({"revert_pr_number": 43, "merged": True, "status": "x"})
