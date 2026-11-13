@@ -116,6 +116,39 @@ def test_rollback_of_unknown_pr_is_refused(runtime, a2a_body) -> None:
     assert out["outcome"] == "invalid_input"
 
 
+@pytest.mark.usefixtures("real_mode")
+@pytest.mark.parametrize("value", ["off", "0", "false", "NO"])
+def test_switch_off_skips_pr_suspects(runtime, a2a_body, monkeypatch, value: str) -> None:
+    """INFRA_PR_SUSPECTS=off: 개발 AI에 PR을 묻지 않아 원인 미확정 → 사람 이관 그대로."""
+    monkeypatch.setenv("INFRA_PR_SUSPECTS", value)
+    runtime.dev = FakeDev([BUG])
+    res = _call(a2a_body, "diagnose_incident", {"component": "payment"})
+    assert res["outcome"] == "undetermined" and res["output"]["suspects"] == []
+
+
+@pytest.mark.usefixtures("real_mode")
+def test_switch_off_refuses_a_pr_revert_even_after_diagnosis(
+    runtime, a2a_body, monkeypatch
+) -> None:
+    """켜진 채 진단했어도, 되돌리기 때 꺼져 있으면 실제 레포 PR을 되돌리지 않는다."""
+    runtime.dev = FakeDev([BUG])
+    _call(a2a_body, "diagnose_incident", {"component": "payment"})
+    monkeypatch.setenv("INFRA_PR_SUSPECTS", "off")
+    out = _call(
+        a2a_body, "rollback_deployment", {"service": "repo:conn-1", "from_version": "pr-77"}
+    )
+    assert (out["status"], out["outcome"]) == ("failed", "invalid_input")
+    assert runtime.dev.reverted == []
+
+
+@pytest.mark.usefixtures("real_mode")
+def test_switch_is_on_by_default(runtime, a2a_body, monkeypatch) -> None:
+    monkeypatch.delenv("INFRA_PR_SUSPECTS", raising=False)
+    runtime.dev = FakeDev([BUG])
+    res = _call(a2a_body, "diagnose_incident", {"component": "payment"})
+    assert res["outcome"] == "suspected"
+
+
 def test_candidates_without_repo_are_ignored() -> None:
     rows = {
         "candidates": [

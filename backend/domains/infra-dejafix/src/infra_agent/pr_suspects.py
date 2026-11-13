@@ -8,10 +8,15 @@
 - 진단 결과에서 원인 PR은 서비스 `repo:<연결 id 또는 레포>`, 버전 `pr-<번호>`로 표시한다.
   기존 계약(`SuspectDeployment`)을 바꾸지 않고, 롤백 요청(`service`·`from_version`)으로
   그대로 돌아온다.
+- `INFRA_PR_SUSPECTS=off`(또는 0·false·no)면 이 경로 전체를 끈다: 진단이 개발 AI에 PR을 묻지
+  않고(배포 기록만으로 진단, 없으면 원인 미확정 → 사람 이관), 원인 PR 되돌리기 요청도 거절한다.
+  장애 시연·시험 중 실제 레포의 무관한 PR이 원인으로 잡혀 되돌리기 PR이 열리지 않게 한다.
+  기본은 켜짐(예전 동작 그대로). 부를 때마다 읽는다(바꾸면 인프라를 다시 켠다).
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -45,6 +50,15 @@ class PrSuspect:
 
 def is_pr_service(service: str) -> bool:
     return service.startswith(SERVICE_PREFIX)
+
+
+SWITCH_ENV = "INFRA_PR_SUSPECTS"
+_OFF = {"off", "0", "false", "no"}
+
+
+def enabled() -> bool:
+    """실제 레포 PR을 원인으로 보고 되돌리는 경로가 켜져 있나 (`INFRA_PR_SUSPECTS`, 기본 켜짐)."""
+    return (os.getenv(SWITCH_ENV) or "on").strip().lower() not in _OFF
 
 
 def _time(value: Any) -> datetime | None:

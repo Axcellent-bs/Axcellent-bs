@@ -39,6 +39,7 @@ from infra_agent.diagnosis import (
     server_state,
     with_pr_suspects,
 )
+from infra_agent.pr_suspects import enabled as pr_suspects_enabled
 from infra_agent.pr_suspects import is_pr_service
 from infra_agent.runtime import get_runtime
 
@@ -103,8 +104,9 @@ async def diagnose_incident(request: AgentRequest) -> AgentResult:
     mock = is_mock("infra")
     now = rt.clock()
     diag = diagnose(rt.history, inp.component, now, mock=mock)
-    if not mock and diag.output.status == "undetermined":
+    if not mock and diag.output.status == "undetermined" and pr_suspects_enabled():
         # 배포 기록에 원인이 없으면 연결된 실제 레포에서 구간 안에 머지된 PR을 후보로 본다
+        # (INFRA_PR_SUSPECTS=off면 묻지 않는다)
         try:
             prs = await rt.dev.related_prs(request.meta, inp.component, now - lookback(), now)
         except Exception:  # noqa: BLE001 - 못 물으면 지금처럼 원인 미확정
@@ -373,6 +375,12 @@ async def _rollback_pr(request: AgentRequest, rt: Any, inp: RollbackInput, key: 
     총괄이 사람 승인 뒤 같은 요청을 다시 보내게 한다. 재배포는 고객사 자동 배포가 맡는다.
     """
     context_id = request.meta.context_id
+    if not pr_suspects_enabled():
+        return _failed(
+            request,
+            "invalid_input",
+            "원인 PR 되돌리기가 꺼져 있다 (INFRA_PR_SUSPECTS=off): 실제 레포 PR을 되돌리지 않는다",
+        )
     suspect = rt.pr_suspects.get(context_id, {}).get((inp.service, inp.from_version))
     if suspect is None:
         return _failed(
