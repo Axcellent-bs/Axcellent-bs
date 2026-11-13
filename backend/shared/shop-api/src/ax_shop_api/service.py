@@ -145,6 +145,7 @@ FREE_SHIPPING_FROM = 50000
 PROMISED_DELIVERY_DAYS = 3
 
 BASELINE_LATENCY_MS = 180.0  # 평소 p95 기준(시연용)
+HIGH_VALUE_CHECK_FROM = 100_000  # 이 금액 이상 결제는 직전에 금액을 다시 확인한다
 
 # 결제 설정 버전 (시연용 "잘못된 배포"). v1 정상, v2 잘못된 배포: 결제사 승인이 500대로 실패한다.
 # 장애 스위치(active)가 아니라 설정 버전이라 해제로는 안 풀리고, 이전 버전으로 되돌려야 풀린다.
@@ -676,6 +677,21 @@ class Shop:
         return self.get_order(order_id), False
 
     @staticmethod
+    def _amount_mismatch(conn: sqlite3.Connection, order: sqlite3.Row) -> PaymentOutcome | None:
+        """고액 결제(10만 원 이상) 직전 금액 재확인: 품목 금액 + 배송비 - 포인트 - 쿠폰이 주문
+        합계와 다르면 결제사에 보내지 않는다(금액이 바뀐 주문을 그대로 청구하지 않게)."""
+        if order["total_amount"] < HIGH_VALUE_CHECK_FROM:
+            return None
+        items = conn.execute(
+            "SELECT COALESCE(SUM(unit_price), 0) FROM order_items WHERE order_id = ?",
+            (order["order_id"],),
+        ).fetchone()[0]
+        expected = items + order["shipping_fee"] - order["points_used"] - order["coupon_discount"]
+        if expected != order["total_amount"]:
+            return PaymentOutcome(False, "AMOUNT_MISMATCH", BASELINE_LATENCY_MS, server_error=True)
+        return None
+
+    @staticmethod
     def _payable_order(conn: sqlite3.Connection, order_id: str) -> sqlite3.Row:
         order = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
         if order is None:
@@ -766,7 +782,7 @@ class Shop:
         """`pg_wait_ms`: 결제사 쪽 지연으로 실제로 기다린 시간. 표본 지연에 그대로 더한다."""
         with self.db.tx() as conn:
             order = self._payable_order(conn, order_id)
-            outcome = self.gateway.attempt(simulate)
+            outcome = self._amount_mismatch(conn, order) or self.gateway.attempt(simulate)
             outcome.latency_ms += pg_wait_ms
             self._record_payment(conn, order, outcome, method_code)
         return self.get_order(order_id)
