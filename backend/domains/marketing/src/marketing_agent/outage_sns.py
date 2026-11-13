@@ -1,4 +1,5 @@
-"""장애 사과·보상 SNS 글 초안 (skill `draft_outage_sns_post`, `list_outage_sns_drafts`).
+"""장애 사과·보상 SNS 글 초안 (skill `draft_outage_sns_post`, `list_outage_sns_drafts`,
+`merge_outage_sns_drafts`).
 
 장애가 났을 때 (a) 사과 공지가 나갔거나 (b) 보상 쿠폰을 드렸으면, 총괄이 이 skill을 불러
 Instagram 글 *초안*을 바로 만들어 둔다. 여기서 끝이다.
@@ -16,11 +17,24 @@ Instagram 글 *초안*을 바로 만들어 둔다. 여기서 끝이다.
 - 금지 항목 필터(`forbidden_terms`): 기술 용어·서버 이름·IP·버전·계정·토큰 모양이 캡션에 있으면
   초안을 만들지 않는다(`forbidden_term`). 고정 문장만 쓰므로 평소에는 걸리지 않는 이중 잠금이다.
 - AI 생성 표시·시연용 가상 서비스·약관 문구는 기존 `draft_sns_post`와 같은 조립 함수를 쓴다.
+
+유사 초안 병합(`merge_outage_sns_drafts`, 규칙 기반 1단계. LLM 없음):
+- 새 문장을 만들지 않는다. 같은 계기·공지 종류·미디어 종류이고 같은 출처(`source_ref`) 또는 같은
+  한국 날짜에 쌓인, 미디어 없는 초안 중 글이 같거나 거의 같은 것을 묶어 대표 1건만 남긴다
+  (가장 최근이면서 점검을 통과한 것). 나머지는 지우지 않고 `status="merged"`,
+  `merged_into`로 표시한다.
+- 캡션은 바꾸지 않으므로 AI 표시·금지어 점검 결과가 그대로 유효하다. 게시(`publish_sns`)는 건드리지
+  않는다. 승인 대기·게시 중·게시된 초안은 제외한다. 같은 병합을 다시 해도 결과가 같다.
+- 유사 판정은 `similar_captions`(규칙) 한 곳에 모았다. 이후 LLM 다듬기 단계가 생겨도 이 판정 뒤에
+  끼우기만 하면 되고, 후보 묶기·표시·저장 구조는 그대로다.
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import Field, ValidationError, model_validator
@@ -123,15 +137,21 @@ class OutageSnsDraftItem(AxModel):
     media_kind: str
     media_attached: bool
     created_at: UtcDatetime
+    # 유사 초안 병합 표시. 옛 서버·옛 레코드는 draft·빈 값이다
+    status: Literal["draft", "merged"] = "draft"
+    merged_into: str | None = None
+    merged_from: list[str] = Field(default_factory=list)
 
 
 class ListOutageSnsDraftsInput(AxModel):
     limit: int = Field(default=20, ge=1, le=100)
+    include_merged: bool = False  # true면 병합된 원본(감사 기록)도 보여 준다
 
 
 class OutageSnsDraftList(AxModel):
     items: list[OutageSnsDraftItem] = Field(default_factory=list)
-    total: int = 0
+    total: int = 0  # include_merged가 false면 병합된 원본을 뺀 수
+    merged_total: int = 0  # 병합된 원본 수(목록에 넣었든 아니든)
     unknown_reason: str | None = None
 
 
@@ -228,7 +248,7 @@ async def list_outage_sns_drafts(request: AgentRequest, store: sns.SnsStore) -> 
             "invalid_input",
             errors=[f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()],
         )
-    rows, total = store.list_by_source(SOURCE_KIND, data.limit)
+    rows, total = store.list_by_source(SOURCE_KIND, data.limit, data.include_merged)
     listing = OutageSnsDraftList(
         items=[
             OutageSnsDraftItem(
@@ -240,10 +260,14 @@ async def list_outage_sns_drafts(request: AgentRequest, store: sns.SnsStore) -> 
                 media_kind=d.media_kind,
                 media_attached=bool(d.asset_ref or d.assets),
                 created_at=created_at,
+                status=d.status,
+                merged_into=d.merged_into,
+                merged_from=d.merged_from,
             )
             for d, created_at in rows
         ],
         total=total,
+        merged_total=store.count_merged_by_source(SOURCE_KIND),
         unknown_reason=None if rows else "장애 사과·보상 SNS 초안이 없음",
     )
     return AgentResult(
@@ -254,5 +278,296 @@ async def list_outage_sns_drafts(request: AgentRequest, store: sns.SnsStore) -> 
             ["list_outage_sns_drafts"],
             f"장애 SNS 초안 {total}건 조회" if rows else "장애 SNS 초안이 없음",
             [d.post_draft_id for d, _ in rows],
+        ),
+    )
+
+
+# --- 유사 초안 병합 (skill `merge_outage_sns_drafts`) ------------------------------------------
+
+# 글이 "거의 같다"고 볼 어절 집합 겹침 비율(자카드). 보수적으로 높게 둔다. 테스트가 이 값을 고정한다
+SIMILARITY_THRESHOLD = 0.9
+GROUP_MIN = 2
+GROUP_MAX = 10
+KST = timezone(timedelta(hours=9))
+
+SkipReason = Literal[
+    "not_found",
+    "not_outage_draft",
+    "already_merged",
+    "media_attached",
+    "check_failed",
+    "publish_in_progress_or_done",
+    "publish_state_unknown",
+]
+
+_PUNCT = re.compile(r"[^\w\s]|_", re.UNICODE)
+
+
+def _tokens(text: str) -> list[str]:
+    """글자 정규화: 호환 문자 통일·소문자·구두점은 공백으로·공백과 줄바꿈을 통일한 어절."""
+    return _PUNCT.sub(" ", unicodedata.normalize("NFKC", text).lower()).split()
+
+
+def normalize_caption(text: str) -> str:
+    return " ".join(_tokens(text))
+
+
+def _collapse(text: str) -> str:
+    return "".join(_tokens(text))
+
+
+def _pieces(template: str) -> tuple[str, ...]:
+    """고정 문장을 `{label}` 자리 기준으로 쪼갠 조각(공백·구두점 없앤 꼴)."""
+    return tuple(p for p in (_collapse(x) for x in template.split("{label}")) if p)
+
+
+_CAUSE_KEYS = [(code, _pieces(text)) for code, text in CAUSE_TEXT.items()]
+_ACTION_KEYS = [
+    *((code, _pieces(text)) for code, text in ACTION_TEXT.items()),
+    ("not_recovered", _pieces(NOT_RECOVERED_TEXT)),
+]
+_COMPENSATION_KEY = _pieces(COMPENSATION_TEXT)
+
+
+def key_signature(caption: str) -> tuple[str | None, str | None, bool]:
+    """캡션에 든 (원인 문장, 조치 문장, 보상 문장 여부). 서로 다르면 같은 그룹이 될 수 없다."""
+    flat = _collapse(caption)
+
+    def find(keys: list[tuple[str, tuple[str, ...]]]) -> str | None:
+        for code, parts in keys:
+            if all(part in flat for part in parts):
+                return code
+        return None
+
+    return find(_CAUSE_KEYS), find(_ACTION_KEYS), all(p in flat for p in _COMPENSATION_KEY)
+
+
+def similar_captions(a: str, b: str) -> bool:
+    """두 캡션이 같거나 거의 같은가(규칙). 원인·조치·보상 핵심 문장이 다르면 항상 아니다.
+
+    같음: 공백·줄바꿈·구두점 정규화 뒤 동일. 거의 같음: 핵심 문장이 모두 같고 어절 집합의
+    자카드 비율이 `SIMILARITY_THRESHOLD` 이상(핵심 문장을 못 알아보는 글은 이 경로를 안 쓴다).
+    """
+    if normalize_caption(a) == normalize_caption(b):
+        return True
+    sig_a, sig_b = key_signature(a), key_signature(b)
+    if sig_a != sig_b or sig_a[0] is None or sig_a[1] is None:
+        return False
+    set_a, set_b = set(_tokens(a)), set(_tokens(b))
+    union = set_a | set_b
+    return bool(union) and len(set_a & set_b) / len(union) >= SIMILARITY_THRESHOLD
+
+
+def passes_checks(draft: sns.SnsPostDraft) -> bool:
+    """대표가 될 수 있는 초안인가: 저장된 캡션이 AI 표시·필수 문구·금지어·길이 검사를 통과한다."""
+    caption = draft.caption
+    body = draft.required_text[0] if draft.required_text else caption
+    return (
+        draft.is_ai_generated
+        and sns.ai_label_text(draft.media_kind) in caption
+        and all(text in caption for text in draft.required_text)
+        and not forbidden_terms(body)
+        and not any(phrase in caption for phrase in sns.FORBIDDEN_PHRASES)
+        and len(caption) <= sns.CAPTION_MAX
+    )
+
+
+class MergeOutageSnsDraftsInput(AxModel):
+    draft_ids: list[str] | None = Field(default=None, max_length=100)
+    dry_run: bool = True  # 기본은 저장하지 않는 미리보기
+
+
+class MergeGroup(AxModel):
+    representative: str  # 남는 대표 초안 id
+    merged_from: list[str]  # 이번에 병합 표시되는 원본 id(최근 순)
+    representative_caption: str
+    trigger: str | None = None
+
+
+class MergeSkip(AxModel):
+    id: str
+    reason: SkipReason
+
+
+class MergeOutageSnsDraftsOutput(AxModel):
+    dry_run: bool
+    groups: list[MergeGroup] = Field(default_factory=list)
+    merged_count: int = 0  # 병합 표시된(dry_run이면 될) 원본 수
+    remaining_count: int = 0  # 병합 뒤 목록에 남는 초안 수
+    skipped: list[MergeSkip] = Field(default_factory=list)
+
+
+# 초안 id → 게시 요청 기록(승인 대기·게시 중·게시됨 포함)이 있는가. 읽지 못하면 예외
+PublishLookup = Callable[[str], bool]
+Row = tuple[sns.SnsPostDraft, datetime]
+
+
+def _same_bucket(a: sns.SnsPostDraft, b: sns.SnsPostDraft) -> bool:
+    return (a.outage_trigger, a.notice_kind, a.media_kind) == (
+        b.outage_trigger,
+        b.notice_kind,
+        b.media_kind,
+    )
+
+
+def _related(a: Row, b: Row) -> bool:
+    """같은 출처 또는 같은 한국 날짜."""
+    return (
+        a[0].source_ref == b[0].source_ref
+        or a[1].astimezone(KST).date() == b[1].astimezone(KST).date()
+    )
+
+
+def _skip_reason(d: sns.SnsPostDraft, has_publish_record: PublishLookup) -> SkipReason | None:
+    if d.source_kind != SOURCE_KIND or d.outage_trigger is None:
+        return "not_outage_draft"
+    if d.status == "merged":
+        return "already_merged"
+    if d.asset_ref or d.assets or d.asset_sha256:
+        return "media_attached"
+    if not passes_checks(d):
+        return "check_failed"
+    try:
+        if has_publish_record(d.post_draft_id):
+            return "publish_in_progress_or_done"
+    except Exception:  # noqa: BLE001 - 게시 상태를 읽지 못하면 건드리지 않는다
+        return "publish_state_unknown"
+    return None
+
+
+def plan_merge(
+    rows: list[Row], *, draft_ids: list[str] | None, has_publish_record: PublishLookup
+) -> tuple[list[tuple[sns.SnsPostDraft, list[sns.SnsPostDraft]]], list[MergeSkip]]:
+    """(대표, 병합될 원본들) 묶음과 건너뛴 초안. 저장하지 않는다. 같은 입력이면 같은 결과다."""
+    by_id = {d.post_draft_id: (d, at) for d, at in rows}
+    skipped: list[MergeSkip] = []
+    if draft_ids is None:
+        pool = list(by_id.values())
+    else:
+        pool = []
+        for pid in dict.fromkeys(draft_ids):
+            if pid in by_id:
+                pool.append(by_id[pid])
+            else:
+                skipped.append(MergeSkip(id=pid, reason="not_found"))
+
+    candidates: list[Row] = []
+    for d, at in pool:
+        reason = _skip_reason(d, has_publish_record)
+        if reason is None:
+            candidates.append((d, at))
+        elif draft_ids is not None or reason in (
+            "check_failed",
+            "publish_in_progress_or_done",
+            "publish_state_unknown",
+        ):
+            skipped.append(MergeSkip(id=d.post_draft_id, reason=reason))
+
+    # 최근 순(같으면 id 순)으로 시드를 잡고 시드와 비슷한 것만 모은다(전이 묶기 없음).
+    # 시드가 가장 최근이므로 대표다
+    candidates.sort(key=lambda x: (-x[1].timestamp(), x[0].post_draft_id))
+    used: set[str] = set()
+    plans: list[tuple[sns.SnsPostDraft, list[sns.SnsPostDraft]]] = []
+    for seed in candidates:
+        if seed[0].post_draft_id in used:
+            continue
+        group = [seed]
+        for other in candidates:
+            if len(group) >= GROUP_MAX:
+                break
+            if other[0].post_draft_id in used or other is seed:
+                continue
+            if (
+                _same_bucket(seed[0], other[0])
+                and _related(seed, other)
+                and similar_captions(seed[0].caption, other[0].caption)
+            ):
+                group.append(other)
+        if len(group) < GROUP_MIN:
+            continue
+        used.update(d.post_draft_id for d, _ in group)
+        plans.append((seed[0], [d for d, _ in group[1:]]))
+    return plans, skipped
+
+
+async def merge_outage_sns_drafts(request: AgentRequest, store: sns.SnsStore) -> AgentResult:
+    """유사 장애 초안 병합. 초안 저장소의 메타데이터만 바꾸고 캡션·게시는 건드리지 않는다."""
+    from marketing_agent.sns_publish import publisher
+
+    try:
+        data = MergeOutageSnsDraftsInput.model_validate(request.input)
+    except ValidationError as error:
+        return _failed(
+            request,
+            "invalid_input",
+            errors=[f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()],
+        )
+
+    def has_publish_record(post_draft_id: str) -> bool:
+        return bool(publisher.store().with_draft(post_draft_id))
+
+    rows, _ = store.list_by_source(SOURCE_KIND, None, include_merged=True)
+    plans, skipped = plan_merge(
+        rows, draft_ids=data.draft_ids, has_publish_record=has_publish_record
+    )
+    originals = {d.post_draft_id: d for d, _ in rows}
+
+    groups: list[MergeGroup] = []
+    updates: dict[str, sns.SnsPostDraft] = {}
+    now = datetime.now(UTC)
+    for rep, sources in plans:
+        absorbed: list[str] = list(rep.merged_from)
+        for source in sources:
+            absorbed.append(source.post_draft_id)
+            # 이미 다른 초안을 흡수한 원본이면 그 원본들도 새 대표로 넘긴다(연쇄 없이 한 단계로)
+            for child_id in source.merged_from:
+                absorbed.append(child_id)
+                child = originals.get(child_id)
+                if child is not None and child.status == "merged":
+                    updates[child_id] = child.model_copy(update={"merged_into": rep.post_draft_id})
+            updates[source.post_draft_id] = source.model_copy(
+                update={
+                    "status": "merged",
+                    "merged_into": rep.post_draft_id,
+                    "merged_from": [],
+                    "merged_at": now,
+                }
+            )
+        updates[rep.post_draft_id] = rep.model_copy(
+            update={"merged_from": sorted(dict.fromkeys(absorbed))}
+        )
+        groups.append(
+            MergeGroup(
+                representative=rep.post_draft_id,
+                merged_from=[s.post_draft_id for s in sources],
+                representative_caption=rep.caption,
+                trigger=rep.outage_trigger,
+            )
+        )
+
+    merged_count = sum(len(g.merged_from) for g in groups)
+    visible = sum(1 for d, _ in rows if d.status != "merged")
+    output = MergeOutageSnsDraftsOutput(
+        dry_run=data.dry_run,
+        groups=groups,
+        merged_count=merged_count,
+        remaining_count=visible - merged_count,
+        skipped=skipped,
+    )
+    if not data.dry_run and updates:
+        try:
+            store.update_meta(list(updates.values()))
+        except Exception:  # noqa: BLE001 - 하나라도 못 쓰면 전부 되돌려진다
+            return _failed(request, "storage_error")
+    mode = "미리보기" if data.dry_run else "실행"
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        output=output.model_dump(mode="json"),
+        evidence=sns._evidence(
+            ["merge_outage_sns_drafts"],
+            f"장애 SNS 초안 유사 병합 {mode}: {len(groups)}묶음, 원본 {merged_count}건"
+            "(캡션·게시는 바꾸지 않음)",
+            [g.representative for g in groups],
         ),
     )

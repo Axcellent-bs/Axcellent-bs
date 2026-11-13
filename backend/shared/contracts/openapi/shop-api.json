@@ -361,7 +361,9 @@
           "kind": {
             "enum": [
               "latency",
-              "failure"
+              "failure",
+              "lost_response",
+              "pg_slow"
             ],
             "title": "Kind",
             "type": "string"
@@ -759,6 +761,40 @@
           }
         },
         "title": "PaymentIn",
+        "type": "object"
+      },
+      "PaymentRollbackIn": {
+        "properties": {
+          "to_version": {
+            "enum": [
+              "v1",
+              "v2"
+            ],
+            "title": "To Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to_version"
+        ],
+        "title": "PaymentRollbackIn",
+        "type": "object"
+      },
+      "PaymentVersionIn": {
+        "properties": {
+          "version": {
+            "enum": [
+              "v1",
+              "v2"
+            ],
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "PaymentVersionIn",
         "type": "object"
       },
       "ProductIn": {
@@ -1572,6 +1608,55 @@
           }
         },
         "summary": "Inject Fault"
+      }
+    },
+    "/api/shop/admin/faults/pg": {
+      "delete": {
+        "description": "결제사 쪽 지연(시험용)을 끈다. 사람(admin)만. 인프라 AI의 해제로는 꺼지지 않는다.",
+        "operationId": "pg_ok_api_shop_admin_faults_pg_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Pg Ok Api Shop Admin Faults Pg Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pg Ok"
       }
     },
     "/api/shop/admin/feedback": {
@@ -2517,7 +2602,7 @@
     },
     "/api/shop/admin/marketing/outage-sns-drafts": {
       "get": {
-        "description": "장애 사과·보상 SNS 글 초안 읽기 중계. 초안만 보여 주고 게시하지 않는다.",
+        "description": "장애 사과·보상 SNS 글 초안 읽기 중계. 초안만 보여 주고 게시하지 않는다.\n\n`include_merged`(기본 false): 유사 초안 병합으로 접힌 원본(감사 기록)까지 본다.",
         "operationId": "marketing_outage_sns_drafts_api_shop_admin_marketing_outage_sns_drafts_get",
         "parameters": [
           {
@@ -2528,6 +2613,16 @@
               "default": 20,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_merged",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Merged",
+              "type": "boolean"
             }
           },
           {
@@ -2859,6 +2954,268 @@
           }
         },
         "summary": "Mark Shipped"
+      }
+    },
+    "/api/shop/admin/payment-version": {
+      "get": {
+        "operationId": "payment_version_api_shop_admin_payment_version_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Payment Version Api Shop Admin Payment Version Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Payment Version"
+      },
+      "put": {
+        "description": "결제 설정 버전 배포(사람만, `demo_deploy.sh --bad`·`--reset`). v2는 잘못된 배포다.",
+        "operationId": "deploy_payment_version_api_shop_admin_payment_version_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentVersionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Deploy Payment Version Api Shop Admin Payment Version Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deploy Payment Version"
+      }
+    },
+    "/api/shop/admin/payment-version/rollback": {
+      "post": {
+        "description": "결제 설정을 이전 버전으로 되돌린다(인프라 AI 롤백). 앞으로 바꾸는 것은 거절한다.",
+        "operationId": "rollback_payment_version_api_shop_admin_payment_version_rollback_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentRollbackIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rollback Payment Version Api Shop Admin Payment Version Rollback Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rollback Payment Version"
+      }
+    },
+    "/api/shop/admin/payments/recheck": {
+      "post": {
+        "description": "시간 초과 결제를 결제사에 지금 다시 확인한다(기록만 바로잡고 돈은 옮기지 않는다).",
+        "operationId": "recheck_payments_api_shop_admin_payments_recheck_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Recheck Payments Api Shop Admin Payments Recheck Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recheck Payments"
+      }
+    },
+    "/api/shop/admin/payments/timeouts": {
+      "get": {
+        "description": "시간 초과(승인됐는지 모름) 결제. 다시 확인을 기다리는 돈이다.",
+        "operationId": "timeout_payments_api_shop_admin_payments_timeouts_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Timeout Payments Api Shop Admin Payments Timeouts Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Timeout Payments"
       }
     },
     "/api/shop/admin/returns": {

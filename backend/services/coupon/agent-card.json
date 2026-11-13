@@ -222,6 +222,18 @@
       "priority": "optional"
     },
     {
+      "id": "merge_outage_sns_drafts",
+      "description": "장애 사과·보상 SNS 글 초안 중 거의 같은 것을 규칙으로 묶어 대표 1건만 남긴다(LLM 없음, 새 문장을 만들지 않는다). 같은 계기·공지 종류·미디어 종류이고 같은 출처 또는 같은 한국 날짜의 미디어 없는 초안 중, 글이 정규화 뒤 같거나 핵심 문장(원인·조치·보상)이 같고 어절 겹침 비율이 높은 것만 2~10건씩 묶는다. 대표는 가장 최근이면서 AI 표시·금지어 점검을 통과한 초안이고, 나머지는 지우지 않고 status=merged, merged_into=대표 id로 표시하며 대표에 merged_from을 적는다. dry_run=true(기본)는 저장 없이 미리보기. 승인 대기·게시 중·게시된 초안과 미디어가 붙은 초안은 건드리지 않고 skipped로 돌려준다. 같은 병합을 다시 해도 결과가 같다. 초안 저장소 메타데이터만 바꾸며 캡션·게시(publish_sns)·비용은 없다.",
+      "input_schema": "agents/marketing/src/marketing_agent/outage_sns.py#MergeOutageSnsDraftsInput",
+      "output_schema": "agents/marketing/src/marketing_agent/outage_sns.py#MergeOutageSnsDraftsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "check_sns_post",
       "description": "초안(post_draft_id)과 게시하려는 캡션·is_ai_generated를 코드 규칙으로 점검한다. AI 라벨·초안 문구 일치·쿠폰 제약 사항·금칙어·공지 밖 숫자·길이·해시태그 30·@태그 20, 자산의 이미지/릴스 규격(릴스는 ffprobe, 없으면 media_check_unavailable로 거절), AI 라벨 오버레이·기계판독 표시를 보고 하나라도 어긋나면 rejected(ai_label_missing_count, text_mismatch_count, constraint_missing_count 등). 상태를 바꾸지 않는다.",
       "input_schema": "agents/marketing/src/marketing_agent/sns.py#CheckSnsPostInput",

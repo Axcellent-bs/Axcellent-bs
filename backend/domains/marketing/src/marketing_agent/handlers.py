@@ -78,7 +78,11 @@ from marketing_agent.media.config import MediaSettings
 from marketing_agent.media.ledger import MediaLedger
 from marketing_agent.media.prompts import PromptRejected
 from marketing_agent.notice import NoticeStore, make_draft
-from marketing_agent.outage_sns import draft_outage_sns_post, list_outage_sns_drafts
+from marketing_agent.outage_sns import (
+    draft_outage_sns_post,
+    list_outage_sns_drafts,
+    merge_outage_sns_drafts,
+)
 from marketing_agent.schemas import (
     ActiveNotices,
     DraftNoticeInput,
@@ -959,6 +963,11 @@ async def list_outage_sns_drafts_skill(request: AgentRequest) -> AgentResult:
     return await list_outage_sns_drafts(request, STATE.sns)
 
 
+async def merge_outage_sns_drafts_skill(request: AgentRequest) -> AgentResult:
+    """유사 장애 초안 병합. 초안 메타데이터만 바꾼다(캡션·게시·비용 없음, `execute()` 비경유)."""
+    return await merge_outage_sns_drafts(request, STATE.sns)
+
+
 async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
     return await check_sns_post(request, STATE.sns)
 
@@ -1113,6 +1122,7 @@ HANDLERS = {
     "draft_sns_post": draft_sns_post_skill,
     "draft_outage_sns_post": draft_outage_sns_post_skill,
     "list_outage_sns_drafts": list_outage_sns_drafts_skill,
+    "merge_outage_sns_drafts": merge_outage_sns_drafts_skill,
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,
     "cancel_campaign": cancel_campaign,

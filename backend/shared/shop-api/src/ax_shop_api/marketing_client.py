@@ -71,11 +71,15 @@ async def get_brief(proposal_id: str) -> dict[str, Any]:
     return view["item"]
 
 
-async def list_outage_sns_drafts(limit: int = 20) -> dict[str, Any]:
-    """장애 사과·보상 SNS 글 초안 목록(저장 시각 늦은 순). `{items, total, unknown_reason}`.
+async def list_outage_sns_drafts(limit: int = 20, include_merged: bool = False) -> dict[str, Any]:
+    """장애 사과·보상 SNS 글 초안 목록(저장 시각 늦은 순).
+
+    `{items, total, merged_total, unknown_reason}`.
+
+    `include_merged`가 false면 유사 초안 병합으로 접힌 원본은 뺀다.
 
     읽기만 한다. 초안을 만들거나 게시하지 않는다.
     """
     if not 1 <= limit <= LIST_LIMIT_MAX:
         raise ShopError("INVALID_LIMIT", f"limit은 1~{LIST_LIMIT_MAX}이어야 한다", 400)
-    return await _call("list_outage_sns_drafts", {"limit": limit})
+    return await _call("list_outage_sns_drafts", {"limit": limit, "include_merged": include_merged})

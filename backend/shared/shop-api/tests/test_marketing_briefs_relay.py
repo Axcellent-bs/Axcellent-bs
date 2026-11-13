@@ -127,7 +127,7 @@ def test_lists_outage_sns_drafts(client, monkeypatch) -> None:
     assert (target, request.skill, request.input) == (
         "marketing",
         "list_outage_sns_drafts",
-        {"limit": 5},
+        {"limit": 5, "include_merged": False},
     )
 
 
@@ -138,3 +138,11 @@ def test_outage_sns_drafts_limit_and_role(client, monkeypatch) -> None:
     assert client.get(path, headers=INFRA).status_code == 403
     assert client.get(path).status_code in (401, 403)
     assert seen == []
+
+
+def test_outage_sns_drafts_include_merged_is_passed_through(client, monkeypatch) -> None:
+    seen = _upstream(monkeypatch, output={"items": [], "total": 0})
+    path = "/api/shop/admin/marketing/outage-sns-drafts"
+    assert client.get(f"{path}?include_merged=true", headers=ADMIN).status_code == 200
+    assert client.get(path, headers=ADMIN).status_code == 200
+    assert [r.input["include_merged"] for _, r in seen] == [True, False]

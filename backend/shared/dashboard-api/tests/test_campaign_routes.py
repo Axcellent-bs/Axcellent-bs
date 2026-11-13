@@ -448,3 +448,36 @@ def test_brief_publish_retry_uses_the_same_path_with_a_fresh_key(
         refused.status_code == 200
         and refused.json()["data"]["outcome"] == "retry_rejected_by_human"
     )
+
+
+OUTAGE_MERGE = "/api/dashboard/marketing/outage-sns-drafts/merge"
+
+
+def test_outage_sns_merge_defaults_to_preview_and_sends_only_ids(
+    client: TestClient, fake: Fake
+) -> None:
+    assert client.post(OUTAGE_MERGE, json={}).status_code == 200
+    ids = {"dry_run": False, "draft_ids": ["spd_a", "spd_b"], "caption": "바꾼 글"}
+    assert client.post(OUTAGE_MERGE, json=ids).status_code == 200
+    (t1, r1), (t2, r2) = fake.calls
+    assert (t1, r1.skill) == ("marketing", "merge_outage_sns_drafts")
+    assert r1.input == {"dry_run": True}  # 기본은 저장 없는 미리보기
+    assert r2.input == {"dry_run": False, "draft_ids": ["spd_a", "spd_b"]}  # 글은 보내지 않는다
+    assert all(r.skill != "publish_sns" for _, r in fake.calls)
+
+
+def test_outage_sns_merge_needs_a_person_and_valid_body(client: TestClient, fake: Fake) -> None:
+    bad = {"authorization": "Bearer nope"}
+    assert client.post(OUTAGE_MERGE, json={}, headers=bad).status_code in (401, 403)
+    assert client.post(OUTAGE_MERGE, json={"dry_run": "maybe"}).status_code == 422
+    assert client.post(OUTAGE_MERGE, json={"draft_ids": ["x" * 65]}).status_code == 422
+    assert fake.calls == []
+
+
+def test_outage_sns_merge_maps_failures(client: TestClient, fake: Fake) -> None:
+    fake.status, fake.outcome = TaskStatus.FAILED, "invalid_input"
+    assert client.post(OUTAGE_MERGE, json={}).status_code == 400
+    fake.outcome = "storage_error"
+    assert client.post(OUTAGE_MERGE, json={}).status_code == 502
+    fake.status, fake.outcome = TaskStatus.CANCELED, None
+    assert client.post(OUTAGE_MERGE, json={}).status_code == 504

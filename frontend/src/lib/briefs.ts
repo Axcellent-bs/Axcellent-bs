@@ -1,6 +1,7 @@
 import { ApiError, failureError, statusOnlyError } from "./apiError";
 import { writeAuth } from "./api";
 import { DASHBOARD_API_URL, RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
+import type { MergeAnswer } from "./outageMerge";
 import type { BriefMediaAnswer, MediaEstimate, PreparedMedia, PublishAnswer, PublishState } from "./briefMedia";
 
 // 마케팅이 기획에서 받은 기획안 읽기. 화면은 마케팅을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
@@ -205,14 +206,40 @@ export interface OutageSnsDraft {
   media_kind: string;
   media_attached: boolean;
   created_at: string;
+  /** 유사 초안 병합 표시. 옛 서버는 이 칸들이 없다 */
+  status?: "draft" | "merged";
+  merged_into?: string | null;
+  merged_from?: string[];
 }
-export interface OutageSnsDraftList { items: OutageSnsDraft[]; total: number; unknown_reason: string | null }
+/** `total`은 병합된 원본을 뺀 수(include_merged=false일 때), `merged_total`은 병합된 원본 수. 옛 서버는 merged_total이 없다 */
+export interface OutageSnsDraftList { items: OutageSnsDraft[]; total: number; merged_total?: number; unknown_reason: string | null }
 export const OUTAGE_TRIGGER_KO: Record<string, string> = { apology_notice: "사과 공지", compensation: "보상 쿠폰 지급" };
 export const outageTriggerKo = (trigger: string | null) => (trigger ? OUTAGE_TRIGGER_KO[trigger] ?? trigger : "확인할 수 없음");
 
+/**
+ * 장애 사과·보상 초안의 유사 초안 병합(dashboard-api, 사람 토큰 필요). 초안 저장소의 병합 표시만 바꾼다:
+ * 캡션·게시·비용은 없다. dryRun=true는 저장 없는 미리보기. 오류는 상태 코드만 담아 던진다(문구는 `mergeHttpErrorKo`).
+ */
+async function mergeOutageSnsDrafts(dryRun: boolean, draftIds?: string[]): Promise<MergeAnswer> {
+  const path = "/api/dashboard/marketing/outage-sns-drafts/merge";
+  const payload: Record<string, unknown> = { dry_run: dryRun };
+  if (draftIds) payload.draft_ids = draftIds;
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data?.output) throw statusOnlyError(json, res.status);
+  return json.data.output as MergeAnswer;
+}
+
 export const briefs = {
   list: (limit = 50) => get<BriefList>(`/api/shop/admin/marketing/briefs?limit=${briefsListLimit(limit)}`),
-  outageSnsDrafts: (limit = 20) => get<OutageSnsDraftList>(`/api/shop/admin/marketing/outage-sns-drafts?limit=${briefsListLimit(limit)}`),
+  outageSnsDrafts: (limit = 20, includeMerged = false) =>
+    get<OutageSnsDraftList>(`/api/shop/admin/marketing/outage-sns-drafts?limit=${briefsListLimit(limit)}${includeMerged ? "&include_merged=true" : ""}`),
+  mergeOutageSnsDrafts,
   handoff,
   makeMedia,
   requestPublish,
