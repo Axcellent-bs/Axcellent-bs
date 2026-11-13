@@ -99,6 +99,9 @@ class SnsHandoffRecord(AxModel):
     reason_code: str | None = None
     handed_at: UtcDatetime | None = None  # 처음 넘긴 시각. 실패 기록은 없다
     updated_at: UtcDatetime
+    # `prepare_brief_media`가 만든 미디어 초안 기록(만든 요청 초안의 `request_sha` 포함).
+    # 요청 초안(종류·필드)이 바뀌면 화면에는 보여 주지 않는다. 옛 기록에는 없다
+    prepared: dict | None = None
 
 
 class SnsHandoffState(AxModel):
@@ -110,6 +113,10 @@ class SnsHandoffState(AxModel):
     reason_code: str | None = None
     handed_at: UtcDatetime | None = None
     draft_state: DraftState | None = None  # 초안이 SNS 초안 저장소에 있는지·미디어가 붙었는지
+    # 지금 요청 초안으로 미디어를 만들 때의 예상 비용·상한(조회 때 단가표·장부에서 계산, 저장 안 함)
+    media_estimate: dict | None = None
+    # 지금 요청 초안으로 만든 미디어 초안(없거나 요청 초안이 바뀌었으면 None)
+    prepared: dict | None = None
 
 
 class StoredBriefView(StoredBrief):

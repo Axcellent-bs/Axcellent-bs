@@ -40,6 +40,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -264,21 +265,50 @@ def price_problem(
     return None
 
 
-def state_of(record: SnsHandoffRecord | None, draft_state: DraftState | None) -> SnsHandoffState:
+def request_sha(media_request: dict) -> str:
+    """요청 초안에서 생성 결과를 정하는 값(종류·템플릿·규격·필드)의 해시. 바뀌면 다른 미디어다."""
+    names = ("media_kind", "scene_template_id", "resolution", "quality", "duration_s", "media_ref")
+    parts = [[name, media_request.get(name)] for name in names]
+    parts.append(["fields", media_request.get("fields") or {}])
+    raw = json.dumps(parts, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def prepared_of(record: SnsHandoffRecord) -> dict | None:
+    """지금 요청 초안으로 만든 미디어 초안 기록. 요청 초안이 바뀌었으면 None이다."""
+    prepared, media = record.prepared, record.media_request
+    if record.status != "handed" or not isinstance(prepared, dict) or not media:
+        return None
+    if prepared.get("request_sha") != request_sha(media):
+        return None
+    return {k: v for k, v in prepared.items() if k != "request_sha"}
+
+
+def state_of(
+    record: SnsHandoffRecord | None,
+    draft_state: DraftState | None,
+    estimate: dict | None = None,
+) -> SnsHandoffState:
     if record is None:
         return SnsHandoffState()
+    handed = record.status == "handed"
     return SnsHandoffState(
         status=record.status,
         draft_id=record.draft_id,
         media_request=record.media_request,
         reason_code=record.reason_code,
         handed_at=record.handed_at,
-        draft_state=draft_state if record.status == "handed" else None,
+        draft_state=draft_state if handed else None,
+        media_estimate=estimate if handed else None,
+        prepared=prepared_of(record),
     )
 
 
 def view_of(
-    item: StoredBrief, record: SnsHandoffRecord | None, draft_state: DraftState | None
+    item: StoredBrief,
+    record: SnsHandoffRecord | None,
+    draft_state: DraftState | None,
+    estimate: dict | None = None,
 ) -> StoredBriefView:
     try:
         recommendation: dict | None = recommendation_for(item).model_dump(mode="json")
@@ -286,7 +316,7 @@ def view_of(
         recommendation = None
     return StoredBriefView(
         **item.model_dump(),
-        sns_handoff=state_of(record, draft_state),
+        sns_handoff=state_of(record, draft_state, estimate),
         media_recommendation=recommendation,
     )
 
@@ -301,8 +331,10 @@ __all__ = [
     "SnsMediaRequestDraft",
     "build_media_request",
     "media_request_for",
+    "prepared_of",
     "price_problem",
     "recommendation_for",
+    "request_sha",
     "state_of",
     "view_of",
 ]
