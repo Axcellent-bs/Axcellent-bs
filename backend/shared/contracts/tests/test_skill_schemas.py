@@ -54,6 +54,11 @@ def test_find_related_prs_and_link_incident() -> None:
     assert FindRelatedPrsOutput().candidates == []  # 후보가 없어도 된다
     minimal = RelatedPr.model_validate({"pr_number": 1, "title": "t", "merged_at": T0})
     assert (minimal.spec_id, minimal.para_id, minimal.changed_paths) == (None, None, [])
+    assert (minimal.repo, minimal.connection_id, minimal.merge_sha) == (None, None, None)
+    real = RelatedPr.model_validate(
+        {**PR, "repo": "org/shop", "connection_id": "c1", "merge_sha": "abc123"}
+    )
+    assert (real.repo, real.connection_id, real.merge_sha) == ("org/shop", "c1", "abc123")
     link = LinkIncidentInput.model_validate(
         {"incident_context_id": "ctx_inc_1", "pr_numbers": [42], "follow_up_title": "재발 방지"}
     )
@@ -396,3 +401,24 @@ def test_verify_recovery_and_strictness() -> None:
         )
     with pytest.raises(ValidationError):  # 시간대 없는 시각은 거부
         VerifyRecoveryInput.model_validate({"component": "payment", "since": "2026-10-22T05:00:00"})
+
+
+def test_revert_merged_pr() -> None:
+    from ax_contracts.schemas import RevertMergedPrInput, RevertMergedPrOutput
+
+    ask = RevertMergedPrInput.model_validate(
+        {"connection_id": "c1", "pr_number": 42, "reason": "결제 오류 원인"}
+    )
+    assert ask.incident_context_id is None
+    with pytest.raises(ValidationError):
+        RevertMergedPrInput.model_validate({"connection_id": "c1", "pr_number": 0, "reason": "x"})
+    with pytest.raises(ValidationError):
+        RevertMergedPrInput.model_validate({"connection_id": "c1", "pr_number": 1, "reason": ""})
+    out = RevertMergedPrOutput.model_validate(
+        {"revert_pr_number": 43, "merged": False, "status": "auto_merge_scheduled"}
+    )
+    assert out.merge_sha is None
+    held = RevertMergedPrOutput.model_validate({"merged": False, "status": "held"})
+    assert held.revert_pr_number is None
+    with pytest.raises(ValidationError):
+        RevertMergedPrOutput.model_validate({"revert_pr_number": 43, "merged": True, "status": "x"})

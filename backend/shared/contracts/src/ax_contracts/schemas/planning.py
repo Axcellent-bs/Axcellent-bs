@@ -22,6 +22,10 @@ class RelatedPr(AxModel):
     spec_id: str | None = None  # 근거 기획 문서
     para_id: str | None = None  # 요구사항·완료 기준 문단 id (R1, C2 …)
     changed_paths: list[str] = Field(default_factory=list)
+    # 형상관리 연결의 실제 레포에서 읽은 PR이면 채운다 (메모리 PR이면 None)
+    repo: str | None = None  # owner/name
+    connection_id: str | None = None  # 개발 서비스의 형상관리 연결 id
+    merge_sha: str | None = None
 
 
 class FindRelatedPrsInput(AxModel):
@@ -57,6 +61,27 @@ class VerifyRollbackTargetOutput(AxModel):
     approved: bool
     reason_code: Literal["deploy_before_incident", "no_deploy_in_window", "deploy_after_incident"]
     related_prs: list[RelatedPr] = Field(default_factory=list)
+
+
+# ---- revert_merged_pr: infra → dev, 등급 B (execute 경유)
+#
+# 형상관리 연결의 레포에서 병합된 PR을 되돌리는 PR을 열고 머지까지 간다.
+# CI를 기다려야 하면 자동 머지를 예약하고 auto_merge_scheduled로 돌려준다.
+# 관문이 사람 확인으로 보내면 held. 멱등 키는 connection_id + pr_number.
+
+
+class RevertMergedPrInput(AxModel):
+    connection_id: str
+    pr_number: int = Field(gt=0)
+    reason: str = Field(min_length=1)
+    incident_context_id: str | None = None
+
+
+class RevertMergedPrOutput(AxModel):
+    revert_pr_number: int | None = None  # 관문이 되돌리기 PR 열기부터 막으면(held) None
+    merged: bool
+    merge_sha: str | None = None
+    status: Literal["merged", "auto_merge_scheduled", "held"]
 
 
 # ---- hr 연동 (이슈 #10 이후, 인사 구성안 HR2 연동 ④·인수인계 검증)
