@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { actorText } from "@/lib/actor";
 import { PLANNING_ASK_EVENT, finance, humanTokenSet, type PlanningAsk, type PlanningQuestion, type PlanningRequest } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
@@ -6,7 +6,7 @@ import { Empty, Panel, ResourceBody, useResource } from "./bits";
 
 // 재무 → 기획 개선 요청: 사람이 정한 요청만 보낸다. 기획이 근거를 되물으면 재무 AI가 보낸 근거로 답하고,
 // 기록으로 답하지 못한 질문은 사람이 여기서 답한다. 재무는 요청만 보내고 기획서·우선순위는 기획이 정한다.
-// 고칠 점은 어느 탭에서든 생기므로 탭이 아니라 화면 위 버튼(PlanningButton) → 옆 패널(PlanningDrawer)에서 연다.
+// 고칠 점은 어느 탭에서든 생기므로 탭 밖에 늘 펼쳐 둔다. 화면 위 버튼·"이걸로 개선 요청"은 이 섹션으로 내려간다.
 
 /** 진행 중(보낸 요청) 수와 사람이 답할 기획 질문 수. 화면 위 버튼 배지에 쓴다 */
 export function usePlanningCounts(tick: number) {
@@ -23,46 +23,19 @@ export function PlanningButton({ tick, onOpen }: { tick: number; onOpen: () => v
   const { open, waiting } = usePlanningCounts(tick);
   const label = [open ? `진행 중 ${open}` : null, waiting ? `답할 질문 ${waiting}` : null].filter(Boolean).join(" · ");
   return (
-    <button type="button" onClick={onOpen} aria-haspopup="dialog" className={waiting ? "btn-primary" : "btn-ghost"}>
+    <button type="button" onClick={onOpen} className={waiting ? "btn-primary" : "btn-ghost"}>
       기획에 개선 요청{label && <span className="ml-1 tabular-nums">({label})</span>}
     </button>
   );
 }
 
-/** 표 옆 "이걸로 개선 요청": 누르면 옆 패널이 열리고 제목·근거가 미리 채워진다 */
+/** 표 옆 "이걸로 개선 요청": 누르면 기획 요청 섹션으로 내려가 제목·근거를 미리 채운다 */
 export function PlanningAskLink({ title, evidence, className = "" }: PlanningAsk & { className?: string }) {
   return (
     <button type="button" className={`text-sm font-medium text-brand-700 hover:underline ${className}`}
       onClick={() => window.dispatchEvent(new CustomEvent<PlanningAsk>(PLANNING_ASK_EVENT, { detail: { title, evidence } }))}>
       이걸로 개선 요청
     </button>
-  );
-}
-
-/** 옆에서 열리는 패널. Esc·바깥 누르기로 닫는다 */
-export function PlanningDrawer({ open, onClose, tick, prefill }: { open: boolean; onClose: () => void; tick: number; prefill: (PlanningAsk & { n: number }) | null }) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    closeRef.current?.focus();
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <button type="button" aria-label="패널 닫기" className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <aside role="dialog" aria-modal="true" aria-labelledby="planning-drawer-title"
-        className="relative flex h-full w-full max-w-xl flex-col gap-4 overflow-y-auto bg-surface-2 p-4 shadow-xl sm:p-6">
-        <div className="flex items-center gap-2">
-          <h2 id="planning-drawer-title" className="text-lg font-semibold text-ink-900">기획에 개선 요청</h2>
-          <button ref={closeRef} type="button" className="btn-ghost ml-auto" onClick={onClose}>닫기</button>
-        </div>
-        <PlanningQuestionsSection tick={tick} />
-        <PlanningRequestsSection tick={tick} prefill={prefill} />
-      </aside>
-    </div>
   );
 }
 
@@ -195,7 +168,7 @@ export function PlanningRequestsSection({ tick, prefill = null }: { tick: number
   }
 
   return (
-    <Panel id="planning-requests" title="보낼 요청과 보낸 요청"
+    <Panel id="planning-requests" title="기획에 개선 요청"
       hint="재무 업무에서 고칠 점을 기획에 보냅니다. 근거는 한 줄에 하나씩 적어 주세요. 기획이 근거를 되물으면 재무 AI가 이 근거로 답합니다. 잘못 보낸 요청은 '요청 빼기'로 기획에서도 지웁니다(이미 개발로 넘어간 요청은 기획 화면에서 중단해야 해요).">
       <div className="space-y-2">
         <input className="field w-full" placeholder="바꿀 내용 한 줄 (예: PG 정산 파일을 매일 자동으로 받기)" maxLength={120}
