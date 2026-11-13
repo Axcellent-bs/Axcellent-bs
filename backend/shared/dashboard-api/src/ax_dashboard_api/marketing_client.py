@@ -164,6 +164,24 @@ async def brief_media_call(proposal_id: str) -> dict[str, Any]:
     return out
 
 
+async def brief_publish_request_call(proposal_id: str) -> dict[str, Any]:
+    """준비된 미디어 초안의 게시 요청(`request_brief_publish`). 승인 대기 건만 만든다.
+
+    본문이 없다: 초안·파일·해시·캡션은 마케팅이 보관본에서 읽는다. 게시는 사람이 승인 화면에서
+    진행을 눌러야만 이어진다(여기서 승인하지 않는다). 막힘·상한·거절은 판단 결과라 그대로 돌려준다.
+    """
+    out = await call(
+        "request_brief_publish",
+        {"proposal_id": proposal_id},
+        campaign_id=brief_media_context(proposal_id),
+        key=f"ui:brief-publish:{proposal_id}",
+    )
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] in BRIEF_MEDIA_FAILURES:
+        status, code = BRIEF_MEDIA_FAILURES[out["outcome"]]
+        raise ApiError(status, code, f"게시를 요청할 수 없다 ({out['outcome']})")
+    return out
+
+
 async def brief_media_preview(proposal_id: str) -> tuple[Path, str]:
     """준비된 미디어 초안의 AI 라벨 입힌 파일(경로, Content-Type). 없으면 404.
 

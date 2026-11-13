@@ -32,7 +32,7 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
-from marketing_agent import brief_media, shop_client
+from marketing_agent import brief_media, brief_publish, shop_client
 from marketing_agent.brief_handoff import (
     AUTO,
     DRAFT_MEDIA_KIND,
@@ -627,6 +627,14 @@ def _media_estimate(request: AgentRequest, record: SnsHandoffRecord | None) -> d
         return None
 
 
+def _publish_state(record: SnsHandoffRecord | None) -> dict | None:
+    """준비된 미디어 초안의 게시 요청 상태(승인 대기 저장소에서 읽기만). 못 읽으면 None."""
+    try:
+        return brief_publish.publish_state(record, STATE.sns)
+    except Exception:  # noqa: BLE001 - 조회는 돌려준다. 화면은 게시 요청 버튼을 두지 않는다
+        return None
+
+
 def _with_handoff(item: StoredBrief, request: AgentRequest) -> StoredBriefView:
     record = STATE.briefs.handoff(item.proposal_id)
     return view_of(
@@ -634,6 +642,7 @@ def _with_handoff(item: StoredBrief, request: AgentRequest) -> StoredBriefView:
         record,
         _draft_state(record.draft_id if record else None),
         _media_estimate(request, record),
+        _publish_state(record),
     )
 
 
@@ -988,7 +997,15 @@ async def prepare_brief_media_skill(request: AgentRequest) -> AgentResult:
         except BriefStorageError:
             record = None
         state["media_estimate"] = _media_estimate(request, record)
+        state["publish"] = _publish_state(record)
     return result
+
+
+async def request_brief_publish_skill(request: AgentRequest) -> AgentResult:
+    """준비된 미디어 초안의 게시 요청(C등급 사람 승인 대기 건)을 만든다. 승인은 사람만 한다."""
+    return await brief_publish.request_brief_publish(
+        request, briefs=STATE.briefs, store=STATE.sns, publish=publish_sns
+    )
 
 
 async def publish_sns_skill(request: AgentRequest) -> AgentResult:
@@ -1102,6 +1119,7 @@ HANDLERS = {
     "generate_media": generate_media_skill,
     "prepare_sns_post_from_media": prepare_sns_post_from_media_skill,
     "prepare_brief_media": prepare_brief_media_skill,
+    "request_brief_publish": request_brief_publish_skill,
     "marketing_chat_send": marketing_chat_send,
     "marketing_chat_list": marketing_chat_list,
     "marketing_chat_get": marketing_chat_get,

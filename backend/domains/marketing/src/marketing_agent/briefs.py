@@ -117,6 +117,8 @@ class SnsHandoffState(AxModel):
     media_estimate: dict | None = None
     # 지금 요청 초안으로 만든 미디어 초안(없거나 요청 초안이 바뀌었으면 None)
     prepared: dict | None = None
+    # 준비된 미디어 초안의 게시 요청(승인 대기) 상태. 승인 대기 저장소에서 읽은 값만(없으면 None)
+    publish: dict | None = None
 
 
 class StoredBriefView(StoredBrief):

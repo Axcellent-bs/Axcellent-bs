@@ -138,3 +138,109 @@ export function mediaHttpErrorKo(status: number | undefined): string {
   if (status === 504) return "시간 안에 끝나지 않았습니다. 생성이 계속되고 있을 수 있으니 1~2분 뒤 새로고침해 확인해 주세요. 다시 눌러도 같은 미디어를 두 번 만들지 않습니다.";
   return "미디어를 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.";
 }
+
+// ---- 게시 요청(C 등급 사람 승인 대기 건 만들기) ------------------------------------------
+// 이 화면은 게시하지 않는다. 요청하면 서버가 승인 대기 건(10분 만료)만 만들고, 사람이 승인 화면에서
+// 진행을 눌러야 게시된다. 글·파일은 서버가 보관본에서 읽는다(화면은 기획안 번호만 보낸다).
+
+export type PublishStatus = "not_requested" | "held" | "publishing" | "published" | "rejected" | "failed" | "unknown";
+
+/** 서버가 승인 대기 저장소에서 읽어 준 게시 요청 상태. 옛 서버는 이 칸이 없다 */
+export interface PublishState {
+  status: PublishStatus;
+  /** true일 때만 "게시 요청" 버튼을 둔다 */
+  can_request: boolean;
+  reason_code: string | null;
+  review_id: string | null;
+  failure_code: string | null;
+  permalink: string | null;
+  /** 게시될 글(서버 보관본 그대로) */
+  caption: string | null;
+}
+
+export interface PublishAnswer {
+  status: string;
+  outcome: string | null;
+  output: { publish?: PublishState | null; review_id?: string } | null;
+}
+
+export const PUBLISH_EXPIRY_MIN = 10;
+
+/** 게시 요청을 할 수 없거나 실패한 이유(코드별 문구). 서버 문장은 쓰지 않는다 */
+const PUBLISH_FAIL_KO: Record<string, string> = {
+  not_handed: "아직 SNS·미디어로 넘기지 않은 기획안입니다.",
+  not_prepared: "게시할 수 있는 미디어 초안이 없습니다. 먼저 미디어를 만들어 주세요.",
+  check_not_passed: "초안 검사를 통과하지 못해 게시를 요청할 수 없습니다.",
+  media_kind_unsupported: "캐러셀은 이 화면에서 게시를 요청할 수 없습니다.",
+  draft_missing: "서버에서 초안을 찾을 수 없어 요청하지 않았습니다.",
+  draft_changed: "초안 내용이 만든 뒤 바뀌어 요청하지 않았습니다. 미디어를 다시 만들어 주세요.",
+  daily_limit_reached: "24시간 게시 상한에 도달해 지금은 요청할 수 없습니다. 나중에 다시 시도해 주세요.",
+  publish_halted: "게시가 중단된 상태라 요청할 수 없습니다. 담당자 확인이 필요합니다.",
+  limits_config_error: "서버의 게시 한도 설정을 읽을 수 없어 요청하지 않았습니다.",
+  adapter_unavailable: "서버에 Instagram 게시 설정이 없어 요청하지 않았습니다. 승인을 받아도 게시할 수 없는 상태입니다.",
+  execute_rejected: "안전 장치가 이 게시 요청을 거절했습니다.",
+  execute_failed: "안전 장치에서 요청을 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.",
+  storage_error: "게시 대기 저장소를 읽을 수 없어 요청하지 않았습니다. 게시되지 않았습니다.",
+  invalid_input: "서버가 요청을 받아들이지 않았습니다. 새로고침한 뒤 다시 시도해 주세요.",
+  brief_not_found: "기획안을 찾을 수 없습니다.",
+  TIMEOUT: "서버 응답이 늦어 결과를 알 수 없습니다. 새로고침해 상태를 확인해 주세요. 다시 눌러도 같은 요청을 두 번 만들지 않습니다.",
+};
+
+/** 승인 뒤 게시가 실패한 이유(대기 건의 failure_code) */
+const PUBLISH_FAILURE_KO: Record<string, string> = {
+  content_changed: "승인 뒤 내용이 바뀌어 게시하지 않았습니다. 새 승인이 필요합니다.",
+  review_rejected: "사람이 거절했거나 승인 시간이 지났습니다.",
+  daily_limit_reached: "24시간 게시 상한에 도달해 게시하지 못했습니다.",
+  publish_halted: "게시가 중단돼 게시하지 못했습니다.",
+  adapter_unavailable: "서버에 Instagram 게시 설정이 없어 게시하지 못했습니다.",
+};
+
+export const publishReasonKo = (code: string | null | undefined): string =>
+  (code && PUBLISH_FAIL_KO[code]) || `게시를 요청하지 못했습니다. 잠시 뒤 다시 시도해 주세요${code ? ` (${code})` : ""}.`;
+
+export interface PublishLine { tone: "info" | "ok" | "warn" | "bad"; text: string }
+
+/** 서버가 준 게시 요청 상태를 화면 한 줄로. 요청 전(not_requested)이면 null */
+export function publishStatusLine(p: PublishState | null | undefined): PublishLine | null {
+  if (!p) return null;
+  switch (p.status) {
+    case "held":
+      return { tone: "info", text: `게시 승인 대기 중입니다. 사람이 승인 화면에서 ${PUBLISH_EXPIRY_MIN}분 안에 진행을 눌러야 게시되고, 시간이 지나면 만료됩니다.` };
+    case "publishing":
+      return { tone: "info", text: "승인됐습니다. Instagram에 게시하는 중입니다." };
+    case "published":
+      return { tone: "ok", text: "Instagram에 게시됐습니다." };
+    case "rejected":
+      return { tone: "warn", text: "거절됐거나 승인 시간이 지나 만료됐습니다. 이 초안은 다시 요청할 수 없습니다." };
+    case "failed":
+      return { tone: "bad", text: `게시되지 않았습니다. ${(p.failure_code && PUBLISH_FAILURE_KO[p.failure_code]) || `담당자 확인이 필요합니다${p.failure_code ? ` (${p.failure_code})` : ""}.`}` };
+    case "unknown":
+      return { tone: "warn", text: "게시 요청 상태를 읽을 수 없습니다. 잠시 뒤 새로고침해 주세요." };
+    default:
+      return null;
+  }
+}
+
+export type PublishResultKind = "requested" | "already" | "failed";
+export interface PublishResult { kind: PublishResultKind; text: string }
+
+/** 게시 요청 응답을 화면 문구로 */
+export function publishResultKo(answer: PublishAnswer): PublishResult {
+  if (answer.status === "completed" && answer.outcome === "requested") {
+    return { kind: "requested", text: `게시 요청을 보냈습니다. 아직 게시되지 않았습니다. 사람이 ${PUBLISH_EXPIRY_MIN}분 안에 승인 화면에서 진행을 눌러야 합니다.` };
+  }
+  if (answer.status === "completed" && answer.outcome === "already_requested") {
+    return { kind: "already", text: "이미 요청된 건입니다. 새로 요청하지 않았습니다." };
+  }
+  return { kind: "failed", text: publishReasonKo(answer.outcome) };
+}
+
+/** 연결 오류(HTTP 상태)를 화면 문구로. 서버가 보낸 문장은 쓰지 않는다 */
+export function publishHttpErrorKo(status: number | undefined): string {
+  if (status === 401 || status === 403) return "게시를 요청할 권한이 없습니다. 사람 토큰 설정(또는 서버의 이 경로 허용)을 확인해 주세요.";
+  if (status === 404) return "기획안을 찾을 수 없거나 서버가 아직 이 기능을 지원하지 않습니다.";
+  if (status === 400 || status === 422) return "요청을 서버가 받아들이지 않았습니다. 새로고침한 뒤 다시 시도해 주세요.";
+  if (status === 502) return "마케팅 AI에 연결할 수 없습니다. 마케팅 서버가 켜져 있는지 확인해 주세요.";
+  if (status === 504) return "시간 안에 끝나지 않았습니다. 새로고침해 상태를 확인해 주세요. 다시 눌러도 같은 요청을 두 번 만들지 않습니다.";
+  return "게시를 요청하지 못했습니다. 잠시 뒤 다시 시도해 주세요.";
+}

@@ -354,6 +354,18 @@
       ],
       "verifier": "safety",
       "priority": "optional"
+    },
+    {
+      "id": "request_brief_publish",
+      "description": "준비된 미디어 초안(넘긴 기획안 proposal_id)의 '게시 요청'을 만든다. 입력은 기획안 번호뿐이고 초안 id·파일 참조·해시·캡션은 호출자가 보내지 않는다(서버가 넘김 기록의 prepared와 SNS 초안 저장소에서 읽는다). 요청 직전에 check_sns_post를 다시 돌려 통과한 값만 기존 publish_sns(C등급, 항상 사람 승인, 승인 대기 10분 만료)로 보낸다. 이 skill은 승인하지 않는다: 사람이 승인 화면에서 진행을 눌러야만 기존 구독자·폴링이 Instagram 게시로 잇는다. 24시간 게시 상한·중단 상태·어댑터 설정 확인은 publish_sns 안에서 그대로 일어난다. 성공하면 outcome requested, 이미 요청된 건은 publish_sns를 다시 부르지 않고 already_requested와 상태만 돌려준다. 막힌 이유는 not_handed·not_prepared·check_not_passed·media_kind_unsupported(캐러셀 포함)·draft_missing·draft_changed. sns_handoff.publish로 상태(not_requested·held·publishing·published·rejected·failed)를 조회한다.",
+      "input_schema": "agents/marketing/src/marketing_agent/brief_publish.py#RequestBriefPublishInput",
+      "output_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsOutput",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
     }
   ]
 }

@@ -288,6 +288,7 @@ def state_of(
     record: SnsHandoffRecord | None,
     draft_state: DraftState | None,
     estimate: dict | None = None,
+    publish: dict | None = None,
 ) -> SnsHandoffState:
     if record is None:
         return SnsHandoffState()
@@ -301,6 +302,7 @@ def state_of(
         draft_state=draft_state if handed else None,
         media_estimate=estimate if handed else None,
         prepared=prepared_of(record),
+        publish=publish if handed else None,
     )
 
 
@@ -309,6 +311,7 @@ def view_of(
     record: SnsHandoffRecord | None,
     draft_state: DraftState | None,
     estimate: dict | None = None,
+    publish: dict | None = None,
 ) -> StoredBriefView:
     try:
         recommendation: dict | None = recommendation_for(item).model_dump(mode="json")
@@ -316,7 +319,7 @@ def view_of(
         recommendation = None
     return StoredBriefView(
         **item.model_dump(),
-        sns_handoff=state_of(record, draft_state, estimate),
+        sns_handoff=state_of(record, draft_state, estimate, publish),
         media_recommendation=recommendation,
     )
 

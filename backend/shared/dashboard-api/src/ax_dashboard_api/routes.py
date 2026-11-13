@@ -995,6 +995,17 @@ async def preview_brief_media(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> 
     return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
 
 
+@router.post("/marketing/briefs/{proposal_id}/publish-request")
+async def request_brief_publish(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> dict:
+    """준비된 미디어 초안의 게시 요청(C등급 사람 승인 대기 건)을 만든다. 본문이 없다.
+
+    마케팅 `request_brief_publish` → 기존 `publish_sns`. 이 호출은 승인 대기 건을 만들 뿐이고
+    게시하지 않는다: 사람이 승인 화면에서 진행을 눌러야만 Instagram에 올라간다.
+    """
+    _no_org_in_mock()
+    return ok(await marketing_client.brief_publish_request_call(proposal_id))
+
+
 class VideoPostPrepareBody(BaseModel):
     """영상 게시물 준비. 공지·쿠폰·기획안(proposal_id) 중 정확히 하나. 자유 프롬프트 없음."""
 

@@ -384,10 +384,12 @@ class _NewContainer(Exception):
 # -- 스킬
 def _counts(params: dict[str, Any], sns_store: Any | None) -> dict[str, int]:
     """safety 기준표 필드. 초안이 없으면 확인할 수 없으므로 어긋난 것으로 센다(fail-closed)."""
-    from marketing_agent.sns import AI_LABEL_TEXT
+    from marketing_agent.sns import ai_label_text
 
     draft = sns_store.get(params["post_draft_id"]) if sns_store is not None else None
-    missing_label = 0 if (params["is_ai_generated"] and AI_LABEL_TEXT in params["caption"]) else 1
+    # 라벨 문구는 종류별이다(릴스는 "영상"). 점검(`check_sns_post`)과 같은 문구를 본다
+    label = ai_label_text(params["media_kind"])
+    missing_label = 0 if (params["is_ai_generated"] and label in params["caption"]) else 1
     if draft is None:
         return {
             "ai_label_missing_count": missing_label,
