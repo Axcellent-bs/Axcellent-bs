@@ -415,6 +415,13 @@ action = "finance_request_change"
 owner = "finance"
 base_grade = "A"
 
+# 재무 화면에서 사람이 보낸 개선 요청을 거둬들이기 (기획 withdraw_ticket). 기획 기록에서 그 요청이 지워질
+# 뿐 돈은 움직이지 않는다. 개발로 넘어간 요청은 기획이 거절한다
+[[actions]]
+action = "finance_withdraw_change"
+owner = "finance"
+base_grade = "A"
+
 # ---- 판매자 정산 (고객지원, 2026-11-12 재무에서 옮김). 판매자에게 돈을 내보내는 일이라 항상 C(사람 승인).
 # 고객지원(settlement 서비스)이 정산금을 내고 묶음 지급 승인을 요청한다. 재무는 결과를 받아 보여 주기만 한다
 [[actions]]
@@ -474,6 +481,14 @@ verifier = "safety"
 action = "create_ticket"
 owner = "planning"
 requesters = ["planning", "dev"]
+base_grade = "A"
+
+# 요청 부서가 자기 요청 거둬들이기 (11/13). 개발로 넘어가기 전 요청·기획서 초안만 기획 기록에서 지운다.
+# 돈·외부 시스템을 건드리지 않아 A. 넘어간 요청은 planning이 지우지 않고 사람이 기획 화면에서 중단한다
+[[actions]]
+action = "withdraw_ticket"
+owner = "planning"
+requesters = ["planning"]
 base_grade = "A"
 
 # 기획 → 개발 넘기기 (서비스 나누기). planning·dev 서비스가 같은 부서 기록을 옮길 뿐이라 A

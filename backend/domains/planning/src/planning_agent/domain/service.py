@@ -1438,6 +1438,80 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
 
         await self._apply(log)
 
+    async def withdraw_ticket(
+        self,
+        *,
+        requester: str,
+        request_id: str,
+        source_ref: str | None,
+        reason: str,
+        idempotency_key: str,
+    ) -> ActionResult:
+        """요청 부서가 자기가 보낸 요청을 거둬들인다 (A, 2026-11-13). 목록에서 요청을 지운다.
+
+        - 보낸 부서가 같고, 요청에 `source_ref`가 있으면 그것도 같아야 한다 (`not_yours`).
+        - 기획서가 개발로 넘어갔거나 작업·PR이 있거나, 다른 요청이 이 요청에 묶여 있으면 지우지
+          않는다 (`in_progress`). 그때는 기획 화면에서 사람이 중단·기각한다.
+        - 이 요청에만 딸린 기획서(초안이든 확정이든 개발 전)는 같이 지운다.
+        - 같은 idempotency_key의 두 번째 요청은 이전 결과를 돌려준다.
+        """
+        cached = self._idempotent.get(idempotency_key)
+        if cached is not None:
+            return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
+        dept = "dev" if requester == "dev" else department_of(requester)
+        dept = dept if dept in DEPT_NAME else "orchestrator"  # create_ticket과 같은 규칙
+
+        def out(outcome: str, message: str = "", spec: str | None = None) -> ActionResult:
+            return ActionResult(
+                outcome=outcome,
+                output={
+                    "request_id": request_id,
+                    "outcome": outcome,
+                    "message": message,
+                    "removed_spec": spec,
+                },
+            )
+
+        async def run(s: State) -> ActionResult:
+            req = next((r for r in s.requests if r.id == request_id), None)
+            if req is None:
+                return out("not_found", f"{request_id}가 없습니다 (이미 지워졌을 수 있음)")
+            if req.from_ != dept or (req.source_ref and req.source_ref != source_ref):
+                return out("not_yours", f"{request_id}는 이 부서가 보낸 요청이 아닙니다")
+            if any(r.duplicate_of == req.id for r in s.requests):
+                return out("in_progress", f"다른 요청이 {req.id}에 묶여 있어 기획에서 정리합니다")
+            sp = next((x for x in s.specs if x.id == req.spec), None)
+            shared = sp is not None and any(r.spec == sp.id for r in s.requests if r.id != req.id)
+            if sp is not None and (sp.handed_to_dev or any(t.spec == sp.id for t in s.tasks)):
+                return out("in_progress", f"{req.id}는 이미 개발로 넘어가 기획에서 중단해야 합니다")
+            why = " ".join(reason.split())[:120]
+            await self._execute(
+                "withdraw_ticket",
+                req.context_id,
+                req.id,
+                f"{req.id} 요청 부서({DEPT_NAME.get(dept, dept)})가 철회",
+                {"from": dept, "source_ref": req.source_ref},
+                [req.id, *([req.source_ref] if req.source_ref else [])],
+            )
+            removed = sp.id if sp is not None and not shared else None
+            s.requests = [r for r in s.requests if r.id != req.id]
+            if removed:
+                s.specs = [x for x in s.specs if x.id != removed]
+            note = f" · {why}" if why else ""
+            gone = f", 기획서 {removed}도 지움" if removed else ""
+            s.activity.append(
+                self._act(
+                    self.clock(), req.context_id, dept, "planning", "withdraw_ticket", "A2A",
+                    f"{req.id} 요청 부서가 철회해 목록에서 지움{gone}{note}", "A",
+                )
+            )  # fmt: skip
+            return out("withdrawn", f"{req.id}를 지웠습니다", removed)
+
+        result = await self._apply(run)
+        self._idempotent[idempotency_key] = result
+        self._save()
+        return result
+
     async def receive_dev_result(
         self,
         *,

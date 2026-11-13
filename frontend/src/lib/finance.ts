@@ -180,7 +180,7 @@ export interface ReconItem {
 /** 대사 기간의 건이 어느 PG 자료와 맞춰졌는지와 올린 파일이 덮는 판매일 기간 */
 export interface PgCoverage { uploaded: number; generated: number; periods: { from: string; to: string }[] }
 /** 재무가 기획에 보낸 개선 요청 */
-export interface PlanningRequest { source_ref: string; title: string; facts: string[]; request_id: string; context_id: string; outcome: "created" | "linked_duplicate"; duplicate_of: string | null; by: string; by_label?: string; at: string }
+export interface PlanningRequest { source_ref: string; title: string; facts: string[]; request_id: string; context_id: string; outcome: "created" | "linked_duplicate"; duplicate_of: string | null; by: string; by_label?: string; at: string; withdrawn_at?: string; withdrawn_by?: string; withdraw_outcome?: "withdrawn" | "not_found" }
 export interface PgImport {
   file: string | null;
   at: string;
@@ -683,6 +683,9 @@ export const finance = {
   planningRequests: () => fin<Envelope<{ requests: PlanningRequest[] }>>("/api/finance/planning-requests"),
   sendPlanningRequest: (title: string, evidence: string) =>
     fin<Envelope<PlanningRequest>>("/api/finance/planning-requests", { method: "POST", body: { title, evidence }, human: true }),
+  /** 보낸 요청 거둬들이기: 기획(withdraw_ticket)에서 지우고 재무 목록에서도 뺀다. 개발로 넘어간 요청은 기획이 거절한다 */
+  withdrawPlanningRequest: (sourceRef: string, reason = "") =>
+    fin<Envelope<PlanningRequest>>(`/api/finance/planning-requests/${encodeURIComponent(sourceRef)}/withdraw`, { method: "POST", body: { reason }, human: true }),
   bankOutflows: () => fin<Envelope<BankOutflows>>("/api/finance/bank/outflows"),
   noteBankOutflow: (rowId: string, note: string) =>
     fin<Envelope<BankOutflows>>(`/api/finance/bank/outflows/${encodeURIComponent(rowId)}/note`, { method: "POST", body: { note }, human: true }),

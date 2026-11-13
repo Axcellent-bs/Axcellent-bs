@@ -31,6 +31,8 @@ from ax_contracts.schemas.planning import (
     ReceivePlanningAnswerOutput,
     RequestReleaseCheckInput,
     RequestReleaseCheckOutput,
+    WithdrawTicketInput,
+    WithdrawTicketOutput,
 )
 from ax_workflow.a2a import _gate_rejected, _invalid, _missing_key, _requester
 from ax_workflow.core import GateRefused
@@ -266,9 +268,47 @@ async def receive_campaign_update(request: AgentRequest) -> AgentResult:
     )
 
 
+async def withdraw_ticket(request: AgentRequest) -> AgentResult:
+    """요청 부서가 자기가 보낸 요청을 거둬들인다 (A, execute 경유). 지우면 outcome withdrawn.
+
+    보낸 부서·source_ref가 다르면 not_yours, 개발로 넘어갔거나 묶인 요청이 있으면 in_progress,
+    없으면 not_found. 셋 다 상태를 바꾸지 않고 completed로 돌려준다(요청 부서가 사유를 보여 준다).
+    """
+    try:
+        inp = WithdrawTicketInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        result = await get_service().withdraw_ticket(
+            requester=_requester(request),
+            request_id=inp.request_id,
+            source_ref=inp.source_ref,
+            reason=inp.reason,
+            idempotency_key=request.meta.idempotency_key,
+        )
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    out = WithdrawTicketOutput.model_validate(result.output)
+    refs = [f"req:{out.request_id}"]
+    if inp.source_ref:
+        refs.append(f"source:{inp.source_ref}")
+    if out.removed_spec:
+        refs.append(f"spec:{out.removed_spec}")
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=out.outcome,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(data_summary=f"{out.request_id} 철회 {out.outcome}", ref_ids=refs),
+    )
+
+
 # 기획 서비스(planning 8101)가 받는 skill
 PLANNING_HANDLERS = {
     "create_ticket": create_ticket,
+    "withdraw_ticket": withdraw_ticket,
     "receive_dev_result": receive_dev_result,
     "receive_planning_answer": receive_planning_answer,
     "request_release_check": request_release_check,

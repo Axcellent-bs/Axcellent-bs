@@ -61,6 +61,10 @@ class SentRequestStore:
             return None
         return item
 
+    def remove(self, tenant_id: str, request_id: str) -> None:
+        """거둬들인 요청은 기획이 되물을 일이 없으니 지운다."""
+        self._items.pop((tenant_id, request_id), None)
+
     def clear(self) -> None:
         self._items.clear()
 
