@@ -219,7 +219,7 @@ async def _connection_checks(client: httpx.AsyncClient) -> list[Check]:
 
     for name, target, why in (
         ("쇼핑몰 연결", "shop-api", "주문·결제를 못 받아 결산·대사가 비어 보일 수 있습니다"),
-        ("데이터 AI 연결", "data", "이벤트 화면의 피해 숫자에 쓰는 영향 분석을 못 받습니다"),
+        ("데이터 AI 연결", "data", "장애 이슈 화면의 미결제 숫자에 쓰는 영향 분석을 못 받습니다"),
     ):
         status, _ = await _get_json(client, f"{agent_url(target)}/health")
         checks.append(
