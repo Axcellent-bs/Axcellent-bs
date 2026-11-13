@@ -299,12 +299,16 @@ class LiveSources:
         output = await self._ask_data(meta, "impact_analysis", body)
         received = datetime.now(UTC)
         started = _started_at(output)
+        # 각각 반올림하면 합이 1ms 어긋날 수 있어 처리 시간은 전체에서 대기를 뺀다
+        total_ms = _ms(sent, received)
+        queue_ms = _ms(sent, started)
+        process_ms = None if queue_ms is None or total_ms is None else total_ms - queue_ms
         _log_impact(
             context_id,
             "miss",
-            queue_ms=_ms(sent, started),
-            process_ms=_ms(started, received),
-            total_ms=_ms(sent, received),
+            queue_ms=queue_ms,
+            process_ms=process_ms,
+            total_ms=total_ms,
             ok=output is not None,
         )
         if output is None:
