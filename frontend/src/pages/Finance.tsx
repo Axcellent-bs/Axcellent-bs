@@ -11,7 +11,7 @@ import { Chip, ErrorBox, MetaLine, MockBadge, TONE, Waiting, useResource } from 
 import { IncidentFinance } from "@/components/finance/Incident";
 import { SelfTestPanel } from "@/components/finance/Kept";
 import { TeamBudgetSection } from "@/components/finance/TeamBudget";
-import { PlanningButton, PlanningQuestionsSection, PlanningRequestsSection } from "@/components/finance/PlanningRequests";
+import { PlanningQuestionsSection, PlanningRequestsSection } from "@/components/finance/PlanningRequests";
 import { OrchestratorRequestsSection } from "@/components/finance/OrchestratorRequests";
 import { ReconciliationSection } from "@/components/finance/Reconciliation";
 import { SafetyQueue } from "@/components/finance/SafetyQueue";
@@ -163,10 +163,9 @@ export default function FinancePage() {
 
   useEffect(() => { if (anchor && !legacyDaily) scrollToId(anchor); }, [anchor, legacyDaily]);
 
-  // 기획에 개선 요청: 화면에 늘 펼쳐 둔다(재무 AI 테스트처럼). 화면 위 버튼·다른 탭의 "이걸로 개선 요청"은
+  // 기획에 개선 요청: 화면에 늘 펼쳐 둔다(재무 AI 테스트처럼). 다른 탭의 "이걸로 개선 요청"은
   // 이 섹션으로 내려가고, "이걸로 개선 요청"은 제목·근거를 미리 채운다
   const [planningPrefill, setPlanningPrefill] = useState<(PlanningAsk & { n: number }) | null>(null);
-  const openPlanning = useCallback(() => scrollToId("planning-requests"), []);
   useEffect(() => {
     const onAsk = (e: Event) => {
       const detail = (e as CustomEvent<PlanningAsk>).detail ?? {};
@@ -264,7 +263,6 @@ export default function FinancePage() {
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm sm:ml-auto">
           <DataToggle />
-          {!exampleMode && <PlanningButton tick={tick} onOpen={openPlanning} />}
           <button className="btn-ghost" onClick={bump}>새로고침</button>
           {safetyUp != null && <Chip label={safetyUp ? "안전 장치 켜짐" : "안전 장치 꺼짐"} tone={safetyUp ? TONE.ok : TONE.bad} />}
           {financeUp != null && <Chip label={financeUp ? "재무 AI 켜짐" : "재무 AI 꺼짐"} tone={financeUp ? TONE.ok : TONE.bad} />}
@@ -279,7 +277,7 @@ export default function FinancePage() {
           <li><b>장부 확인</b>: 결제 실패(미결제, 고객 돈이 나가지 않은 받지 못한 매출), 확인·환불 필요(시간 초과 결제: 고객 돈이 빠져나갔을 수 있음), 보상 쿠폰, 환불로 빠져나간 돈을 나눠 봅니다.</li>
           <li><b>보류 큐 결정</b>: 재무가 정해야 하는 보류 건은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다. 판매자 정산 지급 승인은 <Link href={SUPPORT_SETTLEMENT_PATH} className="font-medium text-brand-700 underline">고객지원 &gt; 판매자 정산</Link>에서 합니다.</li>
           <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정(①), 대사 메모(②)를 하고 팀 예산(④, 확정은 인사 AI)을 보고 판매자 정산 결과(③)를 봅니다. 세무 자료는 ⑤, 현금 흐름은 ⑦, 고객지원 비용 기록은 ①에 있습니다.</li>
-          <li><b>기획에 개선 요청</b>: 고칠 점이 보이면 화면 위 <b>기획에 개선 요청</b> 버튼이나 표 옆 <b>이걸로 개선 요청</b>을 누릅니다. 기획이 되물은 질문도 거기서 답합니다. <b>총괄이 재무에 맡긴 일</b>과 <b>기획에 개선 요청</b>은 탭 밖에 늘 보입니다.</li>
+          <li><b>기획에 개선 요청</b>: 고칠 점이 보이면 재무 AI 테스트 아래 <b>기획에 개선 요청</b>에 적거나 표 옆 <b>이걸로 개선 요청</b>을 누릅니다. 기획이 되물은 질문도 거기서 답합니다. <b>총괄이 재무에 맡긴 일</b>과 <b>기획에 개선 요청</b>은 탭 밖에 늘 보입니다.</li>
         </ol>
         <p className="mt-3 text-sm text-ink-500">
           단계별 설명과 자주 묻는 질문은 <Link href="/finance/guide" className="font-medium text-brand-700 underline">재무 AI 관리자 사용법</Link>에 있습니다.
@@ -298,14 +296,15 @@ export default function FinancePage() {
       {/* 재무 AI 테스트는 실제 서버 상태를 보는 것이라 예시 모드에서는 숨긴다 */}
       {!exampleMode && <SelfTestPanel test={test} meta={testMeta} loaded={testLoaded} open={testOpen} running={testing} disabled={financeUp === false} onRunNow={runTest} />}
 
-      {/* 총괄이 재무에 맡긴 일과 기획에 개선 요청은 탭 밖에 늘 펼쳐 둔다 (11/13 ⑧ 탭에서 옮김) */}
-      {!exampleMode && <OrchestratorRequestsSection tick={tick} onSummary={setAiWork} />}
+      {/* 기획에 개선 요청과 총괄이 재무에 맡긴 일은 탭 밖에 늘 펼쳐 둔다 (11/13 ⑧ 탭에서 옮김).
+          기획에 개선 요청을 바로 위에 둔다(태윤님 요청). 화면 위 버튼은 두지 않는다 */}
       {!exampleMode && (
         <div className="space-y-4">
           <PlanningQuestionsSection tick={tick} />
           <PlanningRequestsSection tick={tick} prefill={planningPrefill} />
         </div>
       )}
+      {!exampleMode && <OrchestratorRequestsSection tick={tick} onSummary={setAiWork} />}
 
       {(financeUp === false || safetyUp === false) && (
         <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
