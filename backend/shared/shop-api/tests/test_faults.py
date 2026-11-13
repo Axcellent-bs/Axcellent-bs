@@ -151,9 +151,13 @@ def test_recovery_once_traffic_is_normal_again() -> None:
     for second in range(0, 61, 5):
         monitor.record(float(second), 1500.0, False)
         monitor.evaluate(float(second))
-    for second in range(70, 140, 5):  # 정상 표본이 창을 채운다
+    # 정상 표본이 창을 채운 뒤(125초)에도 정상이 1분 이어져야 복구다
+    for second in range(70, 185, 5):
         monitor.record(float(second), 180.0, False)
         monitor.evaluate(float(second))
+        assert monitor.degraded
+    monitor.record(185.0, 180.0, False)
+    monitor.evaluate(185.0)
     assert not monitor.degraded
     assert _outbox_types(db) == ["shop.degraded", "shop.recovered"]
 
@@ -178,16 +182,42 @@ def test_event_ids_do_not_repeat_after_the_db_is_recreated() -> None:
     assert second_event["idempotency_key"].startswith("shop.degraded:dgd_0001-")
 
 
-def test_reset_publishes_recovered_only_if_degraded() -> None:
+def _normal_for(monitor: Monitor, start: int, end: int) -> None:
+    for second in range(start, end + 1, 5):
+        monitor.record(float(second), 180.0, False)
+        monitor.evaluate(float(second))
+
+
+def test_release_alone_is_not_recovery() -> None:
+    """스위치를 끈 것만으로는 복구 신호를 보내지 않는다. 새 표본이 정상으로 1분 이어져야 한다."""
     monitor, db = _monitor()
-    monitor.reset()
+    monitor.released()  # 장애 상태가 아니면 아무것도 남지 않는다
     assert _outbox_types(db) == []
-    for second in range(0, 61, 5):
+    _trip_degraded(monitor)
+    monitor.released(released_by="infra")
+    monitor.released(released_by="infra")  # 두 번 불러도 같다
+    assert monitor.degraded and _outbox_types(db) == ["shop.degraded"]
+    _normal_for(monitor, 70, 125)  # 정상 표본이 모인 70~125초: 아직 1분이 안 됐다
+    assert monitor.degraded and _outbox_types(db) == ["shop.degraded"]
+    _normal_for(monitor, 130, 130)  # 정상이 처음 판정된 90초(표본 5개)부터 1분이 안 됐다
+    assert monitor.degraded
+    _normal_for(monitor, 135, 150)
+    assert not monitor.degraded
+    assert _outbox_types(db) == ["shop.degraded", "shop.recovered"]
+    data = _outbox(db)[-1]["data"]
+    assert (data["recovery"], data["released_by"]) == ("fault_released", "infra")
+
+
+def test_release_does_not_hide_a_fault_the_switch_did_not_cause() -> None:
+    """스위치와 상관없는 장애(계속 느림)는 해제 뒤에도 장애 상태이고 복구 신호가 없다."""
+    monitor, db = _monitor()
+    _trip_degraded(monitor)
+    monitor.released(released_by="infra")
+    for second in range(70, 400, 5):
         monitor.record(float(second), 1500.0, False)
         monitor.evaluate(float(second))
-    monitor.reset()
-    monitor.reset()  # 두 번 해제해도 한 번만
-    assert _outbox_types(db) == ["shop.degraded", "shop.recovered"]
+    assert monitor.degraded
+    assert _outbox_types(db) == ["shop.degraded"]  # 새 장애로 다시 열지도 않는다
 
 
 # --- 시나리오 A 흐름: 주입 → degraded → infra가 해제 → recovered ---------------
@@ -205,9 +235,22 @@ def test_inject_degrade_and_release_by_infra(client: TestClient, clock: Clock) -
     assert (data.component, data.metric_code, data.threshold) == ("payment", "p95_latency_ms", 1000)
     assert data.value == 2180.0
 
-    client.delete("/api/shop/admin/faults", headers=INFRA)  # 롤백이 해제 API를 호출한다
+    released = client.delete("/api/shop/admin/faults", headers=INFRA).json()["data"]
+    assert released["released"] is True and released["active"] is False
+    assert released["degraded"] is True  # 해제는 복구가 아니다
+    assert released["last_release"]["released_by"] == "infra"
+    assert [t for t in _types() if t.startswith("shop.")] == ["shop.degraded"]
+    again = client.delete("/api/shop/admin/faults", headers=INFRA).json()["data"]
+    assert again["released"] is False  # 이미 꺼진 스위치를 끄면 아무것도 바뀌지 않는다
+
+    # 해제 뒤 결제가 정상으로 이어진다 (5초 간격, 결제마다 판정). 표본 5개(25초) + 정상 1분
+    for n in range(1, 18):
+        clock.now += 5
+        _pay(client)
+        if n < 17:
+            assert [t for t in _types() if t.startswith("shop.")] == ["shop.degraded"]
     assert [t for t in _types() if t.startswith("shop.")] == ["shop.degraded", "shop.recovered"]
-    recovered = events.MOCK_PUBLISHED[-1]
+    recovered = next(e for e in events.MOCK_PUBLISHED if e.type == EventType.SHOP_RECOVERED)
     assert ShopDegradedData.model_validate(recovered.data).value is None  # 새 측정값 없음
     # 해제로 풀렸고 인프라 AI가 풀었다는 것을 싣는다 (총괄이 해결 내용으로 남긴다)
     how = (recovered.data["recovery"], recovered.data["released_by"])
@@ -220,7 +263,8 @@ def test_recovered_says_how_it_recovered() -> None:
     """해제로 풀리면 해제한 쪽을, 해제 없이 지표가 돌아오면 `metrics_normal`을 싣는다."""
     released, db = _monitor()
     _trip_degraded(released)
-    released.reset(released_by="admin")
+    released.released(released_by="admin")
+    _normal_for(released, 70, 200)
     data = _outbox(db)[-1]["data"]
     assert (data["recovery"], data["released_by"]) == ("fault_released", "admin")
 

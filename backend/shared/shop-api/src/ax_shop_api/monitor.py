@@ -54,6 +54,10 @@ class Monitor:
         self.thresholds = thresholds or Thresholds.from_env()
         self._samples: deque[tuple[float, float, bool]] = deque()  # (시각, 지연 ms, 5xx 여부)
         self._breach_since: float | None = None
+        # 장애 중 정상 표본만 이어지기 시작한 시각. `sustain_s` 이어져야 복구로 본다
+        self._normal_since: float | None = None
+        # 장애 중 스위치를 끈 쪽. 해제는 복구가 아니라서 복구 신호가 나갈 때 싣기만 한다
+        self._released_by: str | None = None
         self.degraded = False
         self._incident_key: str | None = None
         self._metric_code: str | None = None
@@ -109,24 +113,25 @@ class Monitor:
             )
 
     def evaluate(self, now: float) -> None:
-        """기준 초과가 `sustain_s` 이어지면 `shop.degraded`, 정상 복귀하면 `shop.recovered`.
+        """기준 초과가 `sustain_s` 이어지면 `shop.degraded`, 장애 중 정상이 `sustain_s` 이어지면
+        `shop.recovered`.
 
         지속 시간은 기준을 넘기 시작한 첫 표본(느리거나 5xx인 표본)의 시각부터 센다.
+        복구도 같은 기준으로 지표만 보고 판정한다. 장애 스위치를 껐어도 표본이 정상으로 이어지기
+        전에는 복구가 아니다. 장애 중 스위치를 껐으면 `recovery=fault_released`와 끈 쪽을 싣고,
+        끄지 않고 풀렸으면 `metrics_normal`이다.
         """
         breach = self._breach(now)
         if breach is None:
             if len(self._samples) >= self.thresholds.min_samples:  # 표본이 충분한데 정상
                 self._breach_since = None
                 if self.degraded:
-                    self.degraded = False
-                    self._enqueue(
-                        EventType.SHOP_RECOVERED,
-                        self._metric_code or "",
-                        None,
-                        None,
-                        recovery="metrics_normal",
-                    )
+                    if self._normal_since is None:
+                        self._normal_since = now
+                    if now - self._normal_since >= self.thresholds.sustain_s:
+                        self._recovered()
             return
+        self._normal_since = None
         if self._breach_since is None:
             slow = self.thresholds.p95_latency_ms
             bad = [at for at, latency, error in self._samples if latency > slow or error]
@@ -136,21 +141,30 @@ class Monitor:
             self._metric_code = breach[0]
             self._enqueue(EventType.SHOP_DEGRADED, *breach, since=self._breach_since)
 
-    def reset(self, released_by: str | None = None) -> None:
-        """장애를 해제할 때: 지난 표본을 버리고, 장애 상태였다면 `shop.recovered`를 발행한다.
+    def released(self, released_by: str | None = None) -> None:
+        """켜져 있던 장애 스위치를 껐을 때: 스위치 때문에 쌓인 표본만 버리고 "해제됨"을 남긴다.
 
-        복구 직후에는 새 측정값이 없으므로 `value`·`threshold`는 비운다(확인할 수 없음).
-        해제로 풀렸다는 것(`recovery=fault_released`)과 해제한 쪽(`released_by`)을 싣는다.
+        복구 신호는 보내지 않는다. 장애 상태(`degraded`)는 그대로이고, 새 표본이 정상으로
+        `sustain_s` 이어지면 `evaluate`가 `shop.recovered`(`recovery=fault_released`)를 보낸다.
+        스위치와 상관없는 장애였다면 새 표본도 기준을 넘어 장애 상태가 이어진다.
         """
         self._samples.clear()
         self._breach_since = None
+        self._normal_since = None
         if self.degraded:
-            self.degraded = False
-            self._enqueue(
-                EventType.SHOP_RECOVERED,
-                self._metric_code or "",
-                None,
-                None,
-                recovery="fault_released",
-                released_by=released_by,
-            )
+            self._released_by = released_by or ""
+
+    def _recovered(self) -> None:
+        """복구 신호. 값·기준은 비운다(장애 지표가 아니라 정상 지속으로 판정했다)."""
+        by = self._released_by
+        self.degraded = False
+        self._normal_since = None
+        self._released_by = None
+        self._enqueue(
+            EventType.SHOP_RECOVERED,
+            self._metric_code or "",
+            None,
+            None,
+            recovery="metrics_normal" if by is None else "fault_released",
+            released_by=by or None,
+        )

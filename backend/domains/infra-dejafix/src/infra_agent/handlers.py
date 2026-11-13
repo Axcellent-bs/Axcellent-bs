@@ -247,9 +247,10 @@ async def _apply(
                     output={**base, "message": f"장애 해제 호출 실패: {type(exc).__name__}"},
                     evidence=evidence,
                 )
-            output["fault_released"] = True
+            # 되돌리기는 해제 전 상태를 미리 보지 않는다: 쇼핑몰이 켜진 스위치를 껐다고 할 때만 성공
+            output["fault_released"] = switched_off(None, state)
             output["fault_state"] = state
-            output["post_check_ok"] = not state.get("active", False)
+            output["post_check_ok"] = output["fault_released"]
         rt.history.mark_rolled_back(target)
         return AgentResult(
             meta=request.meta,
@@ -312,6 +313,26 @@ def _path_label(decision: ExecuteDecision) -> str:
 RELEASE_ACTION = "release_fault"
 
 
+def switched_off(before: dict[str, Any] | None, after: dict[str, Any]) -> bool:
+    """해제 직후 확인: 해제 전에 장애 스위치가 켜져 있었고 해제 뒤 꺼졌을 때만 True.
+
+    `before`가 없으면(되돌리기처럼 미리 보지 않은 경우) 쇼핑몰 응답의 `released`(이번 호출이
+    켜져 있던 스위치를 껐는지)만 본다. 예전 쇼핑몰은 `released`가 없어 해제 전 상태로 판단한다.
+    """
+    was_on = bool(before.get("active", False)) if before is not None else True
+    released = bool(after.get("released", was_on))
+    return was_on and released and not after.get("active", False)
+
+
+def _release_not_needed(request: AgentRequest, state: dict[str, Any], message: str) -> AgentResult:
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome="not_needed",
+        output={"message": message, "fault_state": state},
+    )
+
+
 async def release_fault(request: AgentRequest) -> AgentResult:
     """같은 유형 과거 장애를 푼 처리 방식(장애 상태 해제)을 다시 한다.
 
@@ -334,14 +355,14 @@ async def release_fault(request: AgentRequest) -> AgentResult:
             request, "server_unknown", f"판매 사이트 상태 조회 실패: {type(exc).__name__}"
         )
     if server_state(state) != "fault":
-        return AgentResult(
-            meta=request.meta,
-            status=TaskStatus.COMPLETED,
-            outcome="not_needed",
-            output={
-                "message": "결제 서버가 지금 이상이 아니라 해제하지 않았다",
-                "fault_state": state,
-            },
+        return _release_not_needed(request, state, "결제 서버가 지금 이상이 아니라 해제하지 않았다")
+    if not state.get("active", False):
+        # 감시는 이상인데 장애 스위치는 꺼져 있다: 스위치가 아닌 다른 원인이다.
+        # 꺼진 스위치를 끄면 고친 것처럼 기록만 남으므로 하지 않는다(원인 확인·사람 이관으로 간다)
+        return _release_not_needed(
+            request,
+            state,
+            "결제 서버는 이상이지만 장애 스위치가 꺼져 있어 해제할 것이 없다(다른 원인)",
         )
     params = inp.model_dump(mode="json")
     evidence = Evidence(
@@ -363,9 +384,10 @@ async def release_fault(request: AgentRequest) -> AgentResult:
             after = await rt.shop.release_fault()
         except Exception as exc:  # 관문은 통과했지만 실제 조치가 실패했다
             return _failed(request, "release_failed", f"장애 해제 호출 실패: {type(exc).__name__}")
+        released = switched_off(state, after)
         output = ReleaseFaultOutput(
-            fault_released=True,
-            post_check_ok=not after.get("active", False),
+            fault_released=released,
+            post_check_ok=released,
             past_case_id=inp.past_case_id,
             execution_id=decision.execution_id,
             grade=decision.grade,

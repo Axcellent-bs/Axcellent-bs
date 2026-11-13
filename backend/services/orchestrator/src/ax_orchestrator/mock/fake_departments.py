@@ -273,6 +273,11 @@ ALT_OUTPUTS: dict[tuple[str, str], Callable[[AgentRequest], dict[str, Any]]] = {
     # 같은 유형 과거 장애가 장애 상태 해제로 풀렸다(유사도 0.92, low는 0.80)
     ("find_similar_cases", "past_release"): lambda r: _past_release(0.92),
     ("find_similar_cases", "past_release_low"): lambda r: _past_release(0.80),
+    # 감시는 이상인데 장애 스위치는 꺼져 있다(예: 결제사 지연): 인프라가 해제하지 않는다
+    ("release_fault", "switch_off"): lambda r: _ok(
+        message="결제 서버는 이상이지만 장애 스위치가 꺼져 있어 해제할 것이 없다(다른 원인)",
+        fault_state={"active": False, "failing": False, "degraded": True},
+    ),
     ("verify_recovery", "not_recovered"): lambda r: _ok(
         recovered=False, infra_metrics_ok=False, business_metrics_ok=None
     ),
