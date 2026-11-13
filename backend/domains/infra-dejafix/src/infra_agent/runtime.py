@@ -21,6 +21,7 @@ from infra_agent.clients import (
 )
 from infra_agent.deployments import DeploymentHistory
 from infra_agent.diagnosis import Diagnosis
+from infra_agent.pr_suspects import A2ADev, DevClient, NoDev, PrSuspect
 
 
 def _now() -> datetime:
@@ -37,6 +38,9 @@ class Runtime:
     # 사건이 열린 시각 (총괄 사건 기록). 롤백 요청에 incident_opened_at이 없을 때 채운다
     incident_opened_at: Callable[[str], Awaitable[str | None]] = orchestrator_opened_at
     diagnoses: dict[str, Diagnosis] = field(default_factory=dict)  # context_id → 마지막 진단
+    dev: DevClient = field(default_factory=lambda: default_dev())
+    # context_id → (service, version) → 원인 PR. 진단이 넣고 되돌리기가 읽는다
+    pr_suspects: dict[str, dict[tuple[str, str], PrSuspect]] = field(default_factory=dict)
     rollbacks: dict[str, dict[str, Any]] = field(default_factory=dict)  # idempotency_key → 결과
     releases: dict[str, dict[str, Any]] = field(
         default_factory=dict
@@ -48,6 +52,13 @@ class Runtime:
             for r in self.rollbacks.values()
             if r["context_id"] == context_id and r["status"] == "executed"
         )
+
+
+def default_dev() -> DevClient:
+    """목 모드는 실제 레포 후보를 찾지 않는다(기존 배포 기록 진단만). 실제 모드는 A2A."""
+    from ax_agent_template.config import is_mock
+
+    return NoDev() if is_mock("infra") else A2ADev()
 
 
 _runtime: Runtime | None = None

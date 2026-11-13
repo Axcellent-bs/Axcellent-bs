@@ -31,7 +31,15 @@ from ax_contracts.schemas.infra import (
     VerifyRecoveryOutput,
 )
 from infra_agent.deployments import SHOP_PAYMENT_CONFIG, Deployment
-from infra_agent.diagnosis import Diagnosis, confirm_with_server, diagnose, server_state
+from infra_agent.diagnosis import (
+    Diagnosis,
+    confirm_with_server,
+    diagnose,
+    lookback,
+    server_state,
+    with_pr_suspects,
+)
+from infra_agent.pr_suspects import is_pr_service
 from infra_agent.runtime import get_runtime
 
 ACTION = "rollback_deployment"
@@ -93,7 +101,16 @@ async def diagnose_incident(request: AgentRequest) -> AgentResult:
         return _failed(request, "invalid_input", str(exc))
     rt = get_runtime()
     mock = is_mock("infra")
-    diag = diagnose(rt.history, inp.component, rt.clock(), mock=mock)
+    now = rt.clock()
+    diag = diagnose(rt.history, inp.component, now, mock=mock)
+    if not mock and diag.output.status == "undetermined":
+        # 배포 기록에 원인이 없으면 연결된 실제 레포에서 구간 안에 머지된 PR을 후보로 본다
+        try:
+            prs = await rt.dev.related_prs(request.meta, inp.component, now - lookback(), now)
+        except Exception:  # noqa: BLE001 - 못 물으면 지금처럼 원인 미확정
+            prs = []
+        diag = with_pr_suspects(diag, prs, now)
+        rt.pr_suspects[request.meta.context_id] = {(p.service, p.version): p for p in prs}
     if not mock and diag.output.status == "suspected":
         # 배포 후보만으로는 롤백하지 않는다: 결제 서버 이상이 확인돼야 원인으로 본다
         try:
@@ -159,6 +176,8 @@ async def rollback_deployment(request: AgentRequest) -> AgentResult:
     key = f"{context_id}:{ACTION}:{inp.service}:{inp.from_version}"
     if (done := rt.rollbacks.get(key)) and done["status"] == "executed":
         return done["result"].model_copy(update={"meta": request.meta})
+    if is_pr_service(inp.service):
+        return await _rollback_pr(request, rt, inp, key)
 
     target = rt.history.find(inp.service, inp.from_version)
     if target is None:
@@ -345,6 +364,50 @@ _INT_KEYS = ("suspect_count", "low_confidence", "irreversible_count", "prior_rol
 
 def _path_label(decision: ExecuteDecision) -> str:
     return "human_approved" if decision.grade == "C" else "auto"
+
+
+async def _rollback_pr(request: AgentRequest, rt: Any, inp: RollbackInput, key: str) -> AgentResult:
+    """원인이 PR이면 되돌리기 = 그 PR의 되돌리기 PR을 열어 머지한다 (개발 AI `revert_merged_pr`).
+
+    관문(B)은 개발 AI가 `execute()`로 거친다. 보류면 개발의 `input-required`를 그대로 돌려줘
+    총괄이 사람 승인 뒤 같은 요청을 다시 보내게 한다. 재배포는 고객사 자동 배포가 맡는다.
+    """
+    context_id = request.meta.context_id
+    suspect = rt.pr_suspects.get(context_id, {}).get((inp.service, inp.from_version))
+    if suspect is None:
+        return _failed(
+            request,
+            "invalid_input",
+            f"이 사건 진단에 원인 PR {inp.service} {inp.from_version}이 없다",
+        )
+    reason = f"장애 {context_id}: 원인 PR #{suspect.pr_number} 되돌리기"
+    try:
+        result = await rt.dev.revert_pr(request.meta, suspect, reason)
+    except Exception as exc:  # noqa: BLE001
+        message = f"개발 AI 되돌리기 요청 실패: {type(exc).__name__}"
+        return _failed(request, "dev_unavailable", message)
+    out = dict(result.output) if isinstance(result.output, dict) else {}
+    revert_no = out.get("revert_pr_number")
+    output = {
+        **out,
+        "service": inp.service,
+        "from_version": inp.from_version,
+        "rolled_back_to": f"revert PR #{revert_no}" if revert_no else None,
+        "pr_number": suspect.pr_number,
+        "repo": suspect.repo,
+        "fault_released": False,
+    }
+    done = result.status == TaskStatus.COMPLETED and out.get("status") in (
+        "merged",
+        "auto_merge_scheduled",
+    )
+    final = result.model_copy(update={"meta": request.meta, "output": output})
+    rt.rollbacks[key] = {
+        "context_id": context_id,
+        "status": "executed" if done else "not_executed",
+        "result": final,
+    }
+    return final
 
 
 # ---------- release_fault ----------
