@@ -67,6 +67,8 @@ from finance_agent.schemas import (
     ClosingReportOutput,
     SupportCostInput,
     SupportCostOutput,
+    TeamBudgetConfirmInput,
+    TeamBudgetConfirmOutput,
 )
 from finance_agent.sources import Impact, LiveSources, MockSources, Sources, order_key
 
@@ -425,6 +427,63 @@ async def closing_report(request: AgentRequest) -> AgentResult:
         output=output.model_dump(mode="json"),
         evidence=_evidence(
             [*BOOK_QUERIES[:2], f"closing:{data.period}:{key[1]}"], report["commentary"]
+        ),
+    )
+
+
+# ------------------------------------------------- record_team_budget (인사 확정 → 재무 기록)
+async def confirm_team_budget(
+    month: str, signature: str, by: str, note: str | None
+) -> tuple[dict[str, Any] | None, str, str]:
+    """인사가 확정한 팀 예산을 장부에 남긴다. (기록, 결과 코드, 안내) — 기록이 None이면 거절.
+
+    예산 확정은 인사 AI(사람)가 한다(11/13). 재무는 지금 숫자가 확정할 때 보던 숫자와 같은지만
+    보고 기록한다. 확정은 지금 인원과 맞춰 본다(화면용으로 기억해 둔 인원이면 그사이 확정된 발령을
+    놓친다).
+    """
+    state().sources.forget_headcount(month)
+    data, _ = await team_budget_data(month)
+    if data["status"] == "unavailable":
+        return None, "team_headcount_unavailable", "인사 AI에서 팀 인원을 받지 못해 기록할 수 없다"
+    if data["example"]:
+        return None, "example_headcount", "인사 AI가 준 인원이 가상 명부(예시)라 기록하지 않는다"
+    if data["signature"] != signature:
+        return None, "stale", "그사이 인원이나 단가가 바뀌었다. 다시 불러와 확인하고 확정한다"
+    saved = state().records.team_budgets.get(month)
+    if saved and saved.get("signature") == signature and saved.get("decided_by") == "hr":
+        return saved, "already_recorded", "같은 숫자로 이미 기록했다"
+    record = team_budget.approval(data, by, fc.iso(_now()), note) | {"decided_by": "hr"}
+    state().records.team_budgets[month] = record
+    return record, "recorded", "인사가 확정한 팀 예산을 기록했다"
+
+
+async def record_team_budget(request: AgentRequest) -> AgentResult:
+    """인사 AI에서 사람이 확정한 팀 예산을 재무 장부에 기록한다 (hr → finance, 11/13).
+
+    돈을 움직이지 않고 재무 기록만 남긴다(그래서 읽기 등급이다). 숫자가 바뀌었거나 예시 인원이면
+    기록하지 않고 실패로 돌려준다.
+    """
+    data = _parse(request, TeamBudgetConfirmInput)
+    if isinstance(data, AgentResult):
+        return data
+    note = (data.note or "").strip() or None
+    record, code, message = await confirm_team_budget(
+        data.month, data.signature, data.confirmed_by.strip(), note
+    )
+    if record is None:
+        return _result(request, TaskStatus.FAILED, outcome=code, output={"message": message})
+    output = TeamBudgetConfirmOutput(
+        month=data.month, status=code, total=record["total"], signature=record["signature"]
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=code,
+        output=output.model_dump(mode="json"),
+        evidence=Evidence(
+            data_summary=f"{data.month} 팀 예산 {record['total']:,}원 (인사 확정 {record['by']})",
+            collected_at=_now(),
+            ref_ids=[f"team_budget:{data.month}"],
         ),
     )
 
@@ -910,5 +969,6 @@ HANDLERS = {
     "cancel_campaign": cancel_campaign,
     "closing_report": closing_report,
     "record_support_cost": record_support_cost,
+    "record_team_budget": record_team_budget,
     "answer_planning_question": answer_planning_question,
 }

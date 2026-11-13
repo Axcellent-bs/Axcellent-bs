@@ -33,7 +33,7 @@
 | `GET /api/finance/tax/vat?date=` | ⑤ 부가세 신고 보조 집계 (분기) | 없음 |
 | `GET /api/finance/tax/seller-report?date=&format=` | ⑤ 판매자별 판매 명세 (제75조 초안) | 없음 |
 | `GET /api/finance/team-budget?month=YYYY-MM` | ④ 팀 예산 (팀 인원 × 인당 월 단가) | 없음 |
-| `POST /api/finance/team-budget/{month}/approve` | ④ 팀 예산 확정 (`signature` 일치) | **사람** |
+| `POST /api/finance/team-budget/{month}/approve` | 쓰지 않음(403). 확정은 인사, 재무는 기록 | - |
 | `GET /api/finance/rules` | 재무·세무 규칙과 근거 | 없음 |
 | `GET /api/finance/other-pnl?month=` | ① 그 달의 장부 밖 손익 | 없음 |
 | `POST /api/finance/other-pnl` | ① 장부 밖 손익 입력. 확정한 달은 409 | **사람** |
@@ -414,41 +414,7 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
             }
         )
 
-    # 팀 예산: 이번 달과 다음 달(발령은 다음 달 1일부터 반영) 중 확정이 안 됐거나 숫자가 바뀐 달
-    this_month = team_budget.month_of(today)
-    for month in (this_month, team_budget.shift_month(this_month, 1)):
-        tb, _ = await team_budget_data(month)
-        if tb["status"] not in ("pending", "changed") or tb["example"]:
-            continue  # 예시 인원은 확정할 일이 아니다
-        changed = [r for r in tb["rows"] if r["change"]]
-        todo.append(
-            {
-                "kind": "team_budget",
-                "title": (
-                    f"{month} 팀 예산 다시 확인 필요 (확정 뒤 인원·단가가 바뀜)"
-                    if tb["status"] == "changed"
-                    else f"{month} 팀 예산 확정 대기"
-                ),
-                "count": len(tb["rows"]),
-                "amount": tb["total"],
-                "link": "policy",
-                # 재무 담당이 숫자를 보고 확정한다. 재무 AI는 예산을 혼자 바꾸지 않는다
-                "action": {
-                    "type": "team_budget_approve",
-                    "month": month,
-                    "signature": tb["signature"],
-                },
-                "items": [
-                    {
-                        "ref": r["team"],
-                        "title": r["team"],
-                        "detail": f"{r['prev_headcount']}명 → {r['headcount']}명",
-                        "amount": r["change"],
-                    }
-                    for r in changed[:TODO_ITEMS]
-                ],
-            }
-        )
+    # 팀 예산 확정은 인사 AI(사람)가 한다(11/13). 재무 "할 일"에 올리지 않고 ④ 탭에서 상태만 본다
     meta = books.meta()
     if missing:
         meta = meta | {"unavailable": [*meta.get("unavailable", []), *missing]}
@@ -900,46 +866,16 @@ def add_finance_api(app: FastAPI) -> None:
         return ok(data, _team_budget_meta(missing))
 
     @app.post("/api/finance/team-budget/{month}/approve", response_model=None)
-    async def approve_team_budget(
-        month: str, request: Request, authorization: str | None = Header(default=None)
-    ) -> dict | JSONResponse:
-        """재무 담당이 그 달 팀 예산을 확정한다. 보던 숫자(`signature`)와 지금이 같아야 한다."""
-        try:
-            person = human_from_authorization(authorization)
-        except PermissionError as exc:
-            return error(401, "unauthorized", str(exc))
-        try:
-            m = team_budget.parse_month(month, fc.today())
-        except ValueError as exc:
-            return error(400, "invalid_request", str(exc))
-        body = await _body(request)
-        sig, note = body.get("signature"), body.get("note")
-        if not isinstance(sig, str) or not sig:
-            return error(400, "invalid_request", "signature(확정할 때 보던 숫자)가 필요하다")
-        if note is not None and (not isinstance(note, str) or len(note) > 500):
-            return error(400, "invalid_request", "note는 500자 이하 문자열")
-        # 확정은 지금 인원과 맞춰 본다. 화면용으로 기억해 둔 인원이면 그사이 확정된 발령을 놓친다
-        state().sources.forget_headcount(m)
-        data, missing = await team_budget_data(m)
-        if data["status"] == "unavailable":
-            return error(
-                503, "team_headcount_unavailable", "인사 AI에서 팀 인원을 받지 못해 확정할 수 없다"
-            )
-        if data["example"]:
-            return error(
-                409,
-                "example_headcount",
-                "인사 AI가 준 인원이 가상 명부(예시)라 팀 예산으로 확정하지 않는다",
-            )
-        if data["signature"] != sig:
-            return error(
-                409, "stale", "그사이 인원이나 단가가 바뀌었다. 다시 불러와 확인하고 확정한다"
-            )
-        record = team_budget.approval(data, person, fc.iso(fc.now()), (note or "").strip() or None)
-        record |= label_fields(person, request)
-        state().records.team_budgets[m] = record
-        data, missing = await team_budget_data(m)
-        return ok(data, _team_budget_meta(missing) | {"approved_by": person})
+    async def approve_team_budget(month: str) -> JSONResponse:
+        """예전 "재무가 팀 예산 확정" 길. 확정은 인사 AI(사람)가 하고 재무는 기록만 한다(11/13).
+
+        인사가 확정하면 재무 A2A `record_team_budget`으로 기록이 들어온다. 이 길로는 확정 안 한다.
+        """
+        return error(
+            403,
+            "decided_by_hr",
+            "팀 예산 확정은 인사 AI에서 합니다. 재무는 인사가 확정한 결과를 기록만 합니다.",
+        )
 
     @app.get("/api/finance/settlements/deadlines", response_model=None)
     async def get_deadlines() -> dict | JSONResponse:

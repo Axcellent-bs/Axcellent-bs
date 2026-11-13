@@ -726,7 +726,7 @@ export const finance = {
   variance: (date?: string | null) => fin<Envelope<Variance>>(`/api/finance/variance${query({ date })}`),
   /** 팀 예산 (인사 팀 인원 × 인당 월 단가). month 생략 = 이번 달 */
   teamBudget: (month?: string | null) => fin<Envelope<TeamBudget>>(`/api/finance/team-budget${query({ month })}`),
-  /** 팀 예산 확정. 사람 토큰만. 보던 숫자(signature)가 지금과 같아야 한다 */
+  /** 예전 "재무가 팀 예산 확정" 길. 서버가 403(decided_by_hr)으로 막는다. 확정은 인사 AI가 한다(11/13) */
   approveTeamBudget: (month: string, signature: string, note?: string) =>
     fin<Envelope<TeamBudget>>(`/api/finance/team-budget/${encodeURIComponent(month)}/approve`, { method: "POST", body: { signature, note: note || null }, human: true }),
   statements: (period: StatementPeriod, date?: string | null) =>

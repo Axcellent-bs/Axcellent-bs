@@ -1,4 +1,7 @@
-"""팀 예산: 팀 인원 × 인당 월 단가, 지난달 대비 증감, 재무 담당 확정 (2026-11-02 합의)."""
+"""팀 예산: 팀 인원 × 인당 월 단가, 지난달 대비 증감 (2026-11-02 합의).
+
+확정은 인사 AI(사람)가 하고 재무는 `record_team_budget`으로 기록만 한다 (11/13).
+"""
 
 from __future__ import annotations
 
@@ -39,6 +42,28 @@ def _todo(client: TestClient) -> list[dict[str, Any]]:
     return [t for t in todo if t["kind"] == "team_budget"]
 
 
+def _a2a(client: TestClient, token: str, month: str, signature: str, note: str | None) -> dict:
+    body = {
+        "meta": {
+            "context_id": f"ctx_team_budget_{month}",
+            "token": token,
+            "path": [],
+            "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
+        },
+        "skill": "record_team_budget",
+        "input": {"month": month, "signature": signature, "confirmed_by": "준하"}
+        | ({"note": note} if note else {}),
+    }
+    res = client.post("/a2a", json=body)
+    assert res.status_code == 200
+    return res.json()
+
+
+def _hr_confirm(client: TestClient, month: str, signature: str, note: str | None = None) -> dict:
+    """인사 AI가 사람이 확정한 팀 예산을 재무에 보낸다 (A2A `record_team_budget`)."""
+    return _a2a(client, "mock:hr", month, signature, note)
+
+
 def test_budget_is_headcount_times_monthly_rate_and_a_transfer_keeps_the_total() -> None:
     """멘토링 예시: A 5명·B 3명 × 10만원 → 50만·30만, 1명 A→B 발령이면 40만·40만, 합계 그대로."""
     r = team_budget.report("2026-12", {"A팀": 4, "B팀": 4}, {"A팀": 5, "B팀": 3}, 100000, None)
@@ -75,42 +100,52 @@ def test_api_shows_next_month_transfer_from_the_hr_headcount() -> None:
     assert client.get("/api/finance/team-budget?month=2026-1").status_code == 400
 
 
-def test_only_a_person_approves_and_only_the_numbers_they_saw() -> None:
+def test_only_hr_confirms_and_only_the_numbers_they_saw() -> None:
+    """확정은 인사가 한다. 재무 화면의 예전 확정 길은 막혀 있고, 인사가 본 숫자만 기록한다."""
     client = TestClient(app)
     d = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
     url = "/api/finance/team-budget/2026-11/approve"
-    assert client.post(url, json={"signature": d["signature"]}).status_code == 401
-    assert client.post(url, json={"signature": "old"}, headers=HUMAN).status_code == 409
-    assert "2026-11" not in handlers.state().records.team_budgets  # 바뀐 숫자는 확정하지 않는다
+    old = client.post(url, json={"signature": d["signature"]}, headers=HUMAN)
+    assert old.status_code == 403 and old.json()["error"]["code"] == "decided_by_hr"
+    stale = _hr_confirm(client, "2026-11", "old")
+    assert (stale["status"], stale["outcome"]) == ("failed", "stale")
+    assert "2026-11" not in handlers.state().records.team_budgets  # 바뀐 숫자는 기록하지 않는다
 
-    ok = client.post(url, json={"signature": d["signature"], "note": "확인"}, headers=HUMAN)
-    assert ok.status_code == 200
-    data = ok.json()["data"]
+    ok = _hr_confirm(client, "2026-11", d["signature"], note="확인")
+    assert (ok["status"], ok["outcome"]) == ("completed", "recorded")
+    assert ok["output"]["total"] == d["total"]
+    data = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
     assert data["status"] == "approved"
-    assert (data["approved"]["by"], data["approved"]["total"]) == ("taeyoon", d["total"])
-    assert [t["action"]["month"] for t in _todo(client)] == ["2026-10"]  # 확정한 달은 빠진다
+    assert (data["approved"]["by"], data["approved"]["total"]) == ("준하", d["total"])
+    assert handlers.state().records.team_budgets["2026-11"]["decided_by"] == "hr"
+    assert _hr_confirm(client, "2026-11", d["signature"])["outcome"] == "already_recorded"
 
 
-def test_the_overview_asks_for_this_and_next_month() -> None:
-    todo = _todo(TestClient(app))
-    assert [t["action"]["month"] for t in todo] == ["2026-10", "2026-11"]  # 오늘 2026-10-23
-    assert all(t["action"]["type"] == "team_budget_approve" and t["link"] == "policy" for t in todo)
+def test_only_hr_may_send_the_confirmation() -> None:
+    client = TestClient(app)
+    d = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
+    res = _a2a(client, "mock:marketing", "2026-11", d["signature"], None)
+    assert res["status"] != "completed"
+    assert "2026-11" not in handlers.state().records.team_budgets
+
+
+def test_the_overview_does_not_ask_finance_to_confirm() -> None:
+    """팀 예산 확정은 인사 일이라 재무 할 일에 올리지 않는다 (11/13). ④ 탭에서 상태만 본다."""
+    client = TestClient(app)
+    assert _todo(client) == []
+    for month in ("2026-10", "2026-11"):  # 이번 달·다음 달은 아직 확정 전으로 보인다
+        data = client.get(f"/api/finance/team-budget?month={month}").json()["data"]
+        assert data["status"] == "pending"
 
 
 def test_a_rate_change_after_approval_asks_again(monkeypatch: pytest.MonkeyPatch) -> None:
     client = TestClient(app)
     d = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
-    client.post(
-        "/api/finance/team-budget/2026-11/approve",
-        json={"signature": d["signature"]},
-        headers=HUMAN,
-    )
+    assert _hr_confirm(client, "2026-11", d["signature"])["outcome"] == "recorded"
     _per_head(monkeypatch, 120000)
     again = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
     assert again["status"] == "changed"
     assert again["approved"]["per_head_monthly"] == 100000  # 확정 당시 숫자는 그대로 남는다
-    todo = next(t for t in _todo(client) if t["action"]["month"] == "2026-11")
-    assert "다시 확인" in todo["title"]
 
 
 class _NoHr(MockSources):
@@ -124,11 +159,8 @@ def test_without_hr_numbers_nothing_is_invented_or_approved() -> None:
     body = client.get("/api/finance/team-budget").json()
     assert body["data"]["status"] == "unavailable" and body["data"]["total"] is None
     assert body["meta"]["unavailable"] == ["team_headcount"]
-    post = client.post(
-        "/api/finance/team-budget/2026-10/approve", json={"signature": "x"}, headers=HUMAN
-    )
-    assert post.status_code == 503
-    assert _todo(client) == []
+    assert _hr_confirm(client, "2026-10", "x")["outcome"] == "team_headcount_unavailable"
+    assert "2026-10" not in handlers.state().records.team_budgets
 
 
 def _meta() -> RequestMeta:
@@ -193,14 +225,9 @@ def test_example_headcount_is_shown_but_never_approved() -> None:
     client = TestClient(app)
     d = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
     assert d["example"] is True and d["total"] == d["headcount_total"] * 100000
-    post = client.post(
-        "/api/finance/team-budget/2026-11/approve",
-        json={"signature": d["signature"]},
-        headers=HUMAN,
-    )
-    assert post.status_code == 409 and post.json()["error"]["code"] == "example_headcount"
+    post = _hr_confirm(client, "2026-11", d["signature"])
+    assert (post["status"], post["outcome"]) == ("failed", "example_headcount")
     assert "2026-11" not in handlers.state().records.team_budgets
-    assert _todo(client) == []  # 예시 인원으로 사람에게 확정을 부탁하지 않는다
 
 
 def _hr_reply(month: str, heads: int, *, example: bool = False) -> dict[str, Any]:
@@ -239,15 +266,12 @@ def test_approve_checks_hr_again_not_the_remembered_headcount(
     heads["2026-11"] = _hr_reply("2026-11", 6)
     # 화면 조회는 아직 기억해 둔 값을 쓴다
     assert client.get("/api/finance/team-budget?month=2026-11").json()["data"]["total"] == 500000
-    url = "/api/finance/team-budget/2026-11/approve"
-    stale = client.post(url, json={"signature": seen["signature"]}, headers=HUMAN)
-    assert stale.status_code == 409 and stale.json()["error"]["code"] == "stale"
+    assert _hr_confirm(client, "2026-11", seen["signature"])["outcome"] == "stale"
     assert "2026-11" not in handlers.state().records.team_budgets
 
     now = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
     assert now["total"] == 600000  # 다시 불러오면 새 인원이 보인다
-    ok = client.post(url, json={"signature": now["signature"]}, headers=HUMAN)
-    assert ok.status_code == 200 and ok.json()["data"]["approved"]["total"] == 600000
+    assert _hr_confirm(client, "2026-11", now["signature"])["output"]["total"] == 600000
 
 
 def test_month_before_hr_records_is_not_zero_won(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -256,10 +280,7 @@ def test_month_before_hr_records_is_not_zero_won(monkeypatch: pytest.MonkeyPatch
     client = TestClient(app)
     body = client.get("/api/finance/team-budget?month=2026-10").json()
     assert body["data"]["status"] == "unavailable" and body["data"]["total"] is None
-    post = client.post(
-        "/api/finance/team-budget/2026-10/approve", json={"signature": "x"}, headers=HUMAN
-    )
-    assert post.status_code == 503
+    assert _hr_confirm(client, "2026-10", "x")["outcome"] == "team_headcount_unavailable"
 
 
 def test_first_recorded_month_can_be_approved_without_last_month(
@@ -273,9 +294,6 @@ def test_first_recorded_month_can_be_approved_without_last_month(
     assert d["example"] is False and d["status"] == "pending" and d["total"] == 500000
     assert d["prev_total"] is None and d["change_total"] is None
     assert body["meta"]["unavailable"] == ["team_headcount_prev"]
-    ok = client.post(
-        "/api/finance/team-budget/2026-11/approve",
-        json={"signature": d["signature"]},
-        headers=HUMAN,
-    )
-    assert ok.status_code == 200 and ok.json()["data"]["status"] == "approved"
+    assert _hr_confirm(client, "2026-11", d["signature"])["outcome"] == "recorded"
+    data = client.get("/api/finance/team-budget?month=2026-11").json()["data"]
+    assert data["status"] == "approved"

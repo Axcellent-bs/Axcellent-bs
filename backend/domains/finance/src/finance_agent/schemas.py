@@ -99,6 +99,27 @@ class IncidentFinanceOutput(AxModel):
     recorded_at: str
 
 
+# ------------------------------- record_team_budget (hr → finance, 읽기·기록, 11/13)
+class TeamBudgetConfirmInput(AxModel):
+    """인사 AI에서 사람이 확정한 그 달 팀 예산. 재무는 숫자가 맞는지만 보고 장부에 기록한다.
+
+    `signature`는 인사 쪽 사람이 확정할 때 보던 숫자(재무 `GET /api/finance/team-budget`의
+    `signature`)다. 그사이 인원·단가가 바뀌었으면 기록하지 않는다(`stale`).
+    """
+
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    signature: str = Field(min_length=1, max_length=200)
+    confirmed_by: str = Field(min_length=1, max_length=80)  # 인사 화면에서 확정한 사람
+    note: str | None = Field(default=None, max_length=500)
+
+
+class TeamBudgetConfirmOutput(AxModel):
+    month: str
+    status: Literal["recorded", "already_recorded"]
+    total: int
+    signature: str
+
+
 # ------------------------------- record_support_cost (orchestrator → finance, 읽기·기록)
 class SupportCostInput(AxModel):
     """고객지원이 닫은 문의의 처리 결과 (`support.inquiry_resolved` 이벤트의 사실 필드)."""

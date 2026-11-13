@@ -80,6 +80,8 @@ def test_agent_card(client: TestClient) -> None:
     assert set(skills) == {
         "closing_report",
         "record_support_cost",
+        # 인사가 확정한 팀 예산 기록 (인사 → 재무, 11/13 확정은 인사로 옮김)
+        "record_team_budget",
         "answer_planning_question",
         "record_campaign_result",
         "review_campaign_budget",
@@ -105,7 +107,7 @@ def test_agent_card(client: TestClient) -> None:
     record = skills["record_incident_finance"]
     assert (record.grade, record.allowed_requesters) == ("read", ["orchestrator"])
     served = client.get("/.well-known/agent-card.json").json()
-    assert served["name"] == "finance" and len(served["skills"]) == 14
+    assert served["name"] == "finance" and len(served["skills"]) == 15  # + record_team_budget
 
 
 # ------------------------------------------- 금액 다시 계산 (예전 verify_amount, recheck.py)

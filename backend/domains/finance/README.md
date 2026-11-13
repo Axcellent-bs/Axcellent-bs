@@ -17,7 +17,7 @@
 | ① 결산·리포트 | `closing.py` | 일·주·월 손익, 분개 미리보기, 설명 문장. 주문·쿠폰 자료를 못 받으면 그 숫자로 계산하는 줄은 0이 아니라 `null` |
 | ② 매출·PG 대사 | `reconciliation.py` | `matched`·`mismatch`·`missing_in_pg`·`pending`·`fee_anomaly` |
 | ③ 판매자 정산 받기 | `settlement_feed.py` | 고객지원 skill을 A2A로 읽는다: `seller_settlement`(내역서)·`seller_settlement_weeks`(여러 주)·`seller_settlement_batches`(묶음 상태)·`seller_settlement_deadlines`(지급 기한). 못 받으면 `null`이고 지어내지 않는다. 30초 기억(실패는 10초) |
-| ④ 팀 예산 | `team_budget.py` | 팀 예산 = 그달 1일 팀 인원(인사 `team_headcount`) × 인당 월 단가. 확정은 사람 |
+| ④ 팀 예산 | `team_budget.py` | 팀 예산 = 그달 1일 팀 인원(인사 `team_headcount`) × 인당 월 단가. 확정은 인사 AI(사람), 재무는 A2A `record_team_budget`으로 기록만 |
 | 사건 보상 장부 | `ledger.py` | 쿠폰 업무는 재무가 맡지 않는다(마케팅·고객지원 합의). 지급은 마케팅(`issue_coupon`), 판정은 고객지원이 하고 재무는 **끝난 금액**만 사건별로 적는다(보류·거절 줄과 등급은 장부에 없다): safety 실행 기록(`safety_executions`)이 있으면 그것이 원본이라 이벤트를 더하지 않고, 없는 사건만 이벤트(`events`)로 적는다. 목 모드는 시드(`seed`). 둘 다 없으면 null |
 | 사건별 화면 | `incidents.py` | 사건 목록·상세: data 영향 그대로 + 보상 장부 + 환불 금액(`refunds`: 사건 구간·영향 고객으로 귀속, 금액·건수만) + 빠져나간 돈 합계(`money_out_total` = 보상 + 환불) (재설계 문서 12-1). 재무 단계는 #415로 없앴다 |
 | 설정 | `finance_policy.toml` | 수수료율(기본 10%, 문구 8%), 주 정산, PG 3.1%, 인당 월 단가, 보류 추이 기준 |
@@ -62,7 +62,7 @@ safety·finance를 목 모드로 띄운 뒤 `uv run python domains/finance/demo/
 - 사건별 API (시나리오 A, 재설계 문서 12-1, `incidents.py`): `GET /api/finance/incidents`(`meta.ledger_source`), `GET /api/finance/incidents/{context_id}`(없으면 404 `not_found`). 목 시드: `ctx_inc_scn_a_0001`(data 목과 같은 6건·4명·95,000원 + 보상 2,000원 × 4장)
 - 장애 구간(`window`)은 총괄 사건 목록 `GET /api/incidents`(8000)의 `opened_at`·`closed_at`을 **읽기 전용으로** 읽어서 안다 (계약 `contracts/src/ax_contracts/data_access/orchestrator_incidents.py`, [협업] #417 제안 A). 사건 **중**에 총괄을 부르는 것이 아니라 평상시 사건 조회에서만 읽는다. 주소는 `AX_ORCHESTRATOR_URL`(기본 `http://orchestrator:8000`). 못 읽거나 계약과 다르거나 아직 열린 사건이면 구간·영향 모두 `null`이고 data에 묻지 않는다(fail-closed). 목 모드는 장부 시드로 구간을 안다
 - 재무제표: `GET /api/finance/statements?period=month|quarter|year&date=&format=json|csv|xlsx` (K-IFRS 기능별 손익계산서, 당기·전기, `csv`·`xlsx`는 내려받기). 장부에 없는 항목은 `null`(자료 없음)
-- 지금 사람이 할 일(`GET /api/finance/overview`의 `todo`): 항목마다 `action`(결산 확정, 대사 메모, 팀 예산 확정)과 건별 `items`가 붙어 화면이 그 자리에서 결정 버튼을 띄운다. 쿠폰·환불은 할 일을 만들지 않는다. 판매자 정산은 지급 요청·승인 할 일이 없고, 고객지원이 기한을 넘길 판매자를 알려 주면 알림(`settlement_deadline`, `action.type`=`open_tab`, 처리는 고객지원)만 띄운다
+- 지금 사람이 할 일(`GET /api/finance/overview`의 `todo`): 항목마다 `action`(결산 확정, 대사 메모)과 건별 `items`가 붙어 화면이 그 자리에서 결정 버튼을 띄운다. 쿠폰·환불은 할 일을 만들지 않는다. 판매자 정산은 지급 요청·승인 할 일이 없고, 고객지원이 기한을 넘길 판매자를 알려 주면 알림(`settlement_deadline`, `action.type`=`open_tab`, 처리는 고객지원)만 띄운다
 - 화면 예시 데이터: 재무 화면 [실제 데이터 | 예시 데이터] 전환의 예시 쪽은 `demo/export_example.py`가 목 시드로 만든 `frontend/src/lib/financeExample.json`이다. 시드나 계산이 바뀌면 다시 만든다
 - 기존 조회 API: `/api/finance/ledger`(사건별 보상 지급·주문별 환불 누적), `/api/finance/self-test`(재무 AI 테스트 버튼: 가짜 자료로 계산 규칙 점검 + 안전 장치·쇼핑몰·데이터 AI 연결 확인, 상태를 바꾸지 않음), `/api/finance/self-test/last`(마지막 결과, `data.trigger`=`auto`|`manual`, `meta.interval_seconds`·`meta.next_run_at`)
 - 재무 AI 테스트 자동 실행: 서버가 켜지고 5초 뒤 한 번, 그다음 `FINANCE_SELF_TEST_SECONDS`(기본 600초, 0이면 끔)마다 서버 안에서 돌려 `/self-test/last`에 남긴다. 테스트(`tests/conftest.py`)는 0으로 끈다
