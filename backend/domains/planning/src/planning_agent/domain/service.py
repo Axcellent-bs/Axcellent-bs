@@ -864,7 +864,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
 
     async def _draft_spec(self, s: State, req: Request) -> None:
         """요청으로 기획서 초안을 쓰고(write_spec) 자동 확정 규칙으로 넘긴다."""
-        spec_id = f"SPEC-{len(s.specs) + 6}"
+        spec_id = _next_spec_id(s)
         ctx = req.context_id
         t = self.clock()
         plan = await self._check_plan(ctx, spec_id, req)
@@ -1265,7 +1265,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         """간단 요청 앞쪽: write_spec → 자동 확정 → split_tasks.
 
         `done`이면 작업을 바로 완료로 둔다 (합친 모드)."""
-        spec_id = f"SPEC-{len(s.specs) + 6}"
+        spec_id = _next_spec_id(s)
         task_id = f"T-{len(s.tasks) + 10}"
         ctx = req.context_id
 
@@ -2696,6 +2696,14 @@ __all__ = [
     "PlanningService",
     "action_name",
 ]
+
+
+def _next_spec_id(s: State) -> str:
+    """새 기획서 번호. 지운 기획서(사람 삭제·요청 철회)가 있어도 겹치지 않게 가장 큰 번호 + 1.
+
+    지운 적이 없으면 예전 규칙(개수 + 6)과 같은 번호가 나온다."""
+    nums = [int(x.id.split("-")[1]) for x in s.specs if x.id.split("-")[-1].isdigit()]
+    return f"SPEC-{max([len(s.specs) + 6, *(n + 1 for n in nums)])}"
 
 
 def _next_question_id(s: State, req_id: str) -> str:
