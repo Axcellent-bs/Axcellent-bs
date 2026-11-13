@@ -257,7 +257,7 @@ export default function FinancePage() {
         <summary className="cursor-pointer font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">처음이라면: 관리자가 할 일</summary>
         <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-ink-700">
           <li><b>재무 AI 테스트 확인</b>: 맨 위 <b>재무 AI 테스트</b>가 초록색(정상)인지 봅니다. 서버가 10분마다 스스로 테스트하므로 누를 필요는 없습니다. "늦어지고 있습니다" 경고가 보이면 재무 AI 서버를 확인합니다.</li>
-          <li><b>이벤트 고르기</b>: <b>장애 이벤트 재무</b> 탭 위쪽 이벤트 탭에서 살펴볼 이벤트를 고릅니다. 가장 최근 이벤트가 먼저 열려 있고, 오래된 이벤트는 끝의 <b>이전 이벤트</b> 목록에 있습니다.</li>
+          <li><b>이슈 고르기</b>: <b>재무 장애 이슈</b> 탭 위쪽 이슈 탭에서 살펴볼 이슈를 고릅니다. 가장 최근 이슈가 먼저 열려 있고, 오래된 이슈는 끝의 <b>이전 이슈</b> 목록에 있습니다.</li>
           <li><b>장부 확인</b>: 결제 실패(미결제, 고객 돈이 나가지 않은 받지 못한 매출), 확인·환불 필요(시간 초과 결제: 고객 돈이 빠져나갔을 수 있음), 보상 쿠폰, 환불로 빠져나간 돈을 나눠 봅니다.</li>
           <li><b>보류 큐 결정</b>: 재무가 정해야 하는 보류 건은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다. 판매자 정산 지급 승인은 <Link href={SUPPORT_SETTLEMENT_PATH} className="font-medium text-brand-700 underline">고객지원 &gt; 판매자 정산</Link>에서 합니다.</li>
           <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정(①), 대사 메모(②), 팀 예산 확정(④)을 하고 판매자 정산 결과(③)를 봅니다. 세무 자료는 ⑤, 현금 흐름은 ⑦, 총괄이 재무에 맡긴 일·기획 요청·고객지원 비용 기록은 ⑧에 있습니다.</li>
@@ -322,8 +322,8 @@ export default function FinancePage() {
       </section>
 
       {mode === "incident" && (
-        <div aria-label="장애 이벤트 재무">
-          <ErrorBoundary title="이벤트 화면을 그리지 못했습니다">
+        <div aria-label="재무 장애 이슈">
+          <ErrorBoundary title="이슈 화면을 그리지 못했습니다">
             <IncidentFinance list={incidents} selected={selectedIncident} onSelect={(id) => openIncident(id)} tick={tick} />
           </ErrorBoundary>
         </div>

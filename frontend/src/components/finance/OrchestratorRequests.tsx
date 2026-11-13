@@ -90,7 +90,7 @@ function Row({ row, incidentIds }: { row: RequestRow; incidentIds: Set<string> }
       <td className="py-2 pr-3">
         {ctx ? (
           <Link href={`/orchestrator?ctx=${encodeURIComponent(ctx)}`} className="font-medium text-brand-700 underline" title={ctx}>{humanId(ctx)}</Link>
-        ) : <span className="text-ink-500">사건 전</span>}
+        ) : <span className="text-ink-500">이슈 전</span>}
       </td>
       <td className="py-2 pr-3">
         {result ? <Chip label={result.label} tone={result.tone} /> : <span className="text-sm text-ink-500">응답 기록 없음</span>}
@@ -118,7 +118,7 @@ export function OrchestratorRequestsSection({ tick }: { tick: number }) {
             <div className="scroll-thin overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-sm">
                 <thead className="text-sm text-ink-500">
-                  <tr><th className="pb-1 pr-3 font-medium">시각</th><th className="pb-1 pr-3 font-medium">맡긴 일</th><th className="pb-1 pr-3 font-medium">사건·문의</th><th className="pb-1 pr-3 font-medium">결과</th><th /></tr>
+                  <tr><th className="pb-1 pr-3 font-medium">시각</th><th className="pb-1 pr-3 font-medium">맡긴 일</th><th className="pb-1 pr-3 font-medium">이슈·문의</th><th className="pb-1 pr-3 font-medium">결과</th><th /></tr>
                 </thead>
                 <tbody>{rows.slice(0, shown).map((r) => <Row key={r.request.log_id} row={r} incidentIds={incidentIds} />)}</tbody>
               </table>

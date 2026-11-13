@@ -62,7 +62,7 @@ function IncidentTabs({ recent, older, selected, onSelect }: { recent: IncidentS
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div role="tablist" aria-label="장애 이벤트 (최근 먼저)" className="flex min-w-0 flex-wrap gap-1">
+      <div role="tablist" aria-label="장애 이슈 (최근 먼저)" className="flex min-w-0 flex-wrap gap-1">
         {recent.map((i, idx) => {
           const on = i.context_id === selected;
           return (
@@ -78,10 +78,10 @@ function IncidentTabs({ recent, older, selected, onSelect }: { recent: IncidentS
       </div>
       {older.length > 0 && (
         <label className="min-w-0 max-w-full">
-          <span className="sr-only">이전 이벤트 고르기</span>
+          <span className="sr-only">이전 이슈 고르기</span>
           <select value={olderSelected ? selected ?? "" : ""} onChange={(e) => { if (e.target.value) onSelect(e.target.value); }}
             className={`max-w-full rounded-full border-0 py-2 pl-4 pr-8 text-sm font-medium ring-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${olderSelected ? "bg-brand-600 text-white ring-brand-600" : "bg-surface text-ink-700 ring-ink-100"}`}>
-            <option value="">이전 이벤트 {older.length}건</option>
+            <option value="">이전 이슈 {older.length}건</option>
             {older.map((i) => (
               <option key={i.context_id} value={i.context_id}>
                 {incidentName(i.context_id, i.component)} · {shortDay(i.opened_at)}
@@ -145,17 +145,17 @@ function Cards({ d }: { d: IncidentDetail }) {
             )}
             <p className="text-sm text-ink-500">재무는 이 숫자를 다시 계산하지 않습니다.{impact.collected_at && ` ${shortDateTime(impact.collected_at)} 분석`}</p>
           </>
-        ) : <p className="text-ink-500">{d.window ? "데이터 AI의 영향 분석을 아직 받지 못했습니다." : "장애 구간을 몰라 계산하지 못했습니다. 총괄 AI의 이벤트 기록은 서버를 다시 켜면 비워집니다."}</p>}
+        ) : <p className="text-ink-500">{d.window ? "데이터 AI의 영향 분석을 아직 받지 못했습니다." : "장애 구간을 몰라 계산하지 못했습니다. 총괄 AI의 이슈 기록은 서버를 다시 켜면 비워집니다."}</p>}
       </Card>
 
       <Card title="보상으로 나간 돈 (장부)" value={krw(c.total_executed)}>
-        <p>이 이벤트로 실제 나간 금액입니다.</p>
+        <p>이 이슈로 실제 나간 금액입니다.</p>
       </Card>
 
       <Card title="환불로 나간 돈 (장부)" value={krw(refunds?.total)}>
         {refunds
-          ? <p>이 이벤트 구간에 영향 고객에게 나간 환불 <b className="tabular-nums">{count(refunds.count, "건")}</b>입니다.</p>
-          : <p className="text-ink-500">장애 구간이나 영향 고객을 몰라 이 이벤트에 묶지 못했습니다.</p>}
+          ? <p>이 이슈 구간에 영향 고객에게 나간 환불 <b className="tabular-nums">{count(refunds.count, "건")}</b>입니다.</p>
+          : <p className="text-ink-500">장애 구간이나 영향 고객을 몰라 이 이슈에 묶지 못했습니다.</p>}
         <p>보상과 환불을 더한 돈 <b className="tabular-nums">{krw(d.money_out_total)}</b></p>
       </Card>
 
@@ -210,7 +210,7 @@ function Recipients({ d }: { d: IncidentDetail }) {
             </tbody>
           </table>
         </div>
-      ) : <div className="mt-2"><Empty>이 이벤트로 나간 보상 쿠폰이 아직 없습니다.</Empty></div>}
+      ) : <div className="mt-2"><Empty>이 이슈로 나간 보상 쿠폰이 아직 없습니다.</Empty></div>}
       {noCustomer > 0 && (
         <p className="mt-2 text-sm leading-relaxed text-ink-500">
           "고객 정보 없음" {noCustomer}건: 안전 장치와 쇼핑몰 기록에서 고객 번호를 찾지 못한 줄입니다. 금액은 지급 기록 그대로입니다.
@@ -286,18 +286,18 @@ export function IncidentFinance({ list, selected, onSelect, tick }: {
   const selectedSummary = items.find((i) => i.context_id === selected) ?? null;
   const panelLabel = selected && recent.some((i) => i.context_id === selected)
     ? { "aria-labelledby": tabId(selected) }
-    : { "aria-label": selected ? incidentName(selected, selectedSummary?.component) : "장애 이벤트" };
+    : { "aria-label": selected ? incidentName(selected, selectedSummary?.component) : "장애 이슈" };
   const src = list.env?.meta.ledger_source ? ledgerSourceKo(list.env.meta.ledger_source) : null;
   return (
     <section id="incident-finance" aria-labelledby="incident-finance-title" className="card scroll-mt-4 p-4 sm:p-5">
       <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
         <div className="min-w-0 flex-1">
           <h2 id="incident-finance-title" className="flex flex-wrap items-center gap-2 text-base font-semibold text-ink-900">
-            장애 이벤트 재무 <MockBadge meta={list.env?.meta} />
+            재무 장애 이슈 <MockBadge meta={list.env?.meta} />
           </h2>
           <p className="mt-0.5 text-sm leading-relaxed text-ink-500">
-            결제 같은 서비스에 장애가 나면 총괄 AI가 이벤트를 열고, 보상은 고객지원 AI가 정해 마케팅 AI가 지급합니다.
-            재무는 쿠폰·환불의 끝난 금액을 이벤트별 장부에 적기만 합니다.
+            결제 같은 서비스에 장애가 나면 총괄 AI가 이슈를 열고, 보상은 고객지원 AI가 정해 마케팅 AI가 지급합니다.
+            재무는 쿠폰·환불의 끝난 금액을 이슈별 장부에 적기만 합니다.
           </p>
           {src && <p className="text-sm text-ink-500">장부 출처: {src.label}</p>}
         </div>
@@ -305,13 +305,13 @@ export function IncidentFinance({ list, selected, onSelect, tick }: {
 
       <div className="mt-4">
         {!list.env ? (
-          list.error ? <ErrorBox message={list.error} onRetry={list.reload} /> : <Waiting what="장애 이벤트를 불러오는 중…" />
+          list.error ? <ErrorBox message={list.error} onRetry={list.reload} /> : <Waiting what="장애 이슈를 불러오는 중…" />
         ) : (
           <>
             {list.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 목록을 보여 줍니다. ${list.error}`} onRetry={list.reload} /></div>}
             {items.length === 0 ? (
               <Empty>
-                아직 재무가 아는 장애 이벤트가 없습니다. 장애가 나서 총괄 AI가 이벤트를 열고 보상 쿠폰이 나가면 여기에 나타납니다.
+                아직 재무가 아는 장애 이슈가 없습니다. 장애가 나서 총괄 AI가 이슈를 열고 보상 쿠폰이 나가면 여기에 나타납니다.
               </Empty>
             ) : (
               <div className="space-y-4">
@@ -321,7 +321,7 @@ export function IncidentFinance({ list, selected, onSelect, tick }: {
                     className="rounded-2xl border border-ink-100 p-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 sm:p-5">
                     <IncidentDetailView key={selected} id={selected} summary={selectedSummary} tick={tick} />
                   </div>
-                ) : <Empty>위에서 이벤트를 고르세요.</Empty>}
+                ) : <Empty>위에서 이슈를 고르세요.</Empty>}
               </div>
             )}
           </>

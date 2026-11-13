@@ -41,7 +41,7 @@ async def record_incident_finance(request: AgentRequest) -> AgentResult:
             request,
             TaskStatus.FAILED,
             outcome="invalid_input",
-            output={"errors": [f"context_id는 {INCIDENT_PREFIX}로 시작하는 장애 이벤트여야 한다"]},
+            output={"errors": [f"context_id는 {INCIDENT_PREFIX}로 시작하는 장애 이슈여야 한다"]},
         )
     if data.window_to < data.window_from:
         return _result(
