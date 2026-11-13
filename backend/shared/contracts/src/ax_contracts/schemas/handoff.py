@@ -28,6 +28,9 @@ from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
 HANDED_TO_HUMAN = "handed_to_human"  # status는 input-required, output은 `HandedToHumanOutput`
 NO_ASSIGNEE = "no_assignee"  # status는 failed. 받는 서비스가 꺼져 있고 조직도에도 맡은 부서가 없다
 INBOX_UNREACHABLE = "inbox_unreachable"  # status는 failed. 할 일함(dashboard-api)에 넣지 못했다
+# 맡을 부서가 아직 정해지지 않은 일의 `assignee_unit`. 화면은 "담당 미정"으로 보인다.
+# 총괄이 `transfer_queued` 단계를 받은 요청에 올릴 때 조직도에 맡은 부서가 없으면 이 값을 쓴다
+UNASSIGNED_UNIT = "unassigned"
 
 
 class HandoffStatus(StrEnum):

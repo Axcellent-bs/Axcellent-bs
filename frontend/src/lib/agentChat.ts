@@ -8,7 +8,7 @@ import type { CommLine, CommOutcome } from "./types";
 // 부서가 돌려준 자유 문장(summary·note·untrusted 등)은 화면에 옮기지 않는다. 화면 없는 순수 함수만 둔다.
 
 // ---------------------------------------------------------------- 총괄 JSON (ax-backend orchestrator models.py view())
-export type StepStatus = "pending" | "running" | "held" | "waiting_human" | "waiting_async" | "completed" | "failed" | "skipped" | "rejected_by_human";
+export type StepStatus = "pending" | "running" | "held" | "waiting_human" | "waiting_async" | "completed" | "failed" | "skipped" | "rejected_by_human" | "transfer_queued";
 
 export interface OrchStep {
   step_id: string;
@@ -390,10 +390,16 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
     }
     if (step.handoff_task_id) {
       // 받는 서비스가 꺼져 있어 담당 부서 사람에게 넘어감 (C 등급 승인 대기와 다르다)
-      const unit = typeof step.output.assignee_unit === "string" ? step.output.assignee_unit : "담당 부서";
+      const rawUnit = typeof step.output.assignee_unit === "string" ? step.output.assignee_unit : "담당 부서";
+      const unit = rawUnit === "unassigned" ? "담당 미정" : rawUnit;
+      // 총괄이 스스로 끝내지 못해 사람에게 넘긴 단계(transfer_queued)도 받은 요청에 올라간다
+      const queued = step.status === "transfer_queued";
       out.push({
         kind: "msg", id: `${sid}:handoff`, at: step.started_at, room, from: speaker(step.dept), to: speaker(CENTRAL), fromKey: step.dept ?? "", central: false,
-        text: `이 서비스는 켜져 있지 않아 ${unit} 할 일함으로 넘겼습니다. 사람이 처리하면 이어 갑니다.`, tag: "사람 처리", raw: rawOf(`skill: ${step.skill}`, step.handoff_task_id), tone: "warn", facts: [],
+        text: queued
+          ? `사람의 받은 요청에 올렸습니다 (${unit}). 사람이 확인하면 결과를 이 이벤트에 남깁니다.`
+          : `이 서비스는 켜져 있지 않아 ${unit} 할 일함으로 넘겼습니다. 사람이 처리하면 이어 갑니다.`,
+        tag: queued ? "받은 요청" : "사람 처리", raw: rawOf(`skill: ${step.skill}`, step.handoff_task_id), tone: "warn", facts: [],
       });
       if (step.status === "waiting_human") continue;
     }

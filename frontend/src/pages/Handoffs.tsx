@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
+import { Link } from "@/lib/nav";
 import { AGENTS, SERVICES } from "@/demo/services";
 import { ApiError } from "@/lib/apiError";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
@@ -18,6 +19,8 @@ import HandoffsExample from "./HandoffsExample";
 const REFRESH_MS = 30_000;
 
 /** 서비스 id(또는 에이전트 이름)를 메뉴에 보이는 이름으로. 모르는 값은 그대로 */
+/** 맡을 부서가 정해지지 않은 일(총괄이 이관 큐로 넘긴 단계)은 "담당 미정"으로 보인다 */
+const unitName = (unit: string) => (unit === "unassigned" ? "담당 미정" : unit);
 const serviceName = (id: string) => SERVICES.find((s) => s.id === id)?.name ?? AGENTS.find((g) => g.id === id)?.name ?? id;
 
 const STATUS_FILTERS: { value: HandoffStatus | ""; label: string }[] = [
@@ -80,11 +83,15 @@ function Detail({ task, onClosed }: { task: HandoffTask; onClosed: (t: HandoffTa
       </header>
 
       <dl className="grid grid-cols-2 gap-3 text-sm">
-        <div><dt className="text-xs text-ink-500">맡은 부서</dt><dd className="mt-0.5 font-semibold">{task.assignee_unit}</dd></div>
+        <div><dt className="text-xs text-ink-500">맡은 부서</dt><dd className="mt-0.5 font-semibold">{unitName(task.assignee_unit)}</dd></div>
         <div><dt className="text-xs text-ink-500">담당자</dt><dd className="mt-0.5 font-semibold">{task.assignee ?? "부서 전체"}</dd></div>
         <div><dt className="text-xs text-ink-500">받은 시각</dt><dd className="mt-0.5">{shortDateTime(task.created_at)} <span className="text-ink-500">({ago(task.created_at)})</span></dd></div>
         <div><dt className="text-xs text-ink-500">업무 이름</dt><dd className="mt-0.5 font-mono text-xs">{task.skill}</dd></div>
-        <div className="col-span-2"><dt className="text-xs text-ink-500">사건·대화 번호</dt><dd className="mt-0.5 break-all font-mono text-xs">{task.context_id}</dd></div>
+        <div className="col-span-2"><dt className="text-xs text-ink-500">사건·대화 번호</dt><dd className="mt-0.5 break-all font-mono text-xs">{task.context_id}</dd>
+          {task.from_service === "orchestrator" && (
+            <Link className="mt-1 inline-block text-xs font-medium text-brand-600 underline" href={`/orchestrator?ctx=${encodeURIComponent(task.context_id)}`}>총괄 이벤트에서 보기</Link>
+          )}
+        </div>
       </dl>
 
       <div className="space-y-1">
@@ -234,7 +241,7 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
             return next;
           })}>
             <option value="">모든 부서</option>
-            {[...new Set([...units, ...(unit ? [unit] : [])])].map((u) => <option key={u} value={u}>{u}</option>)}
+            {[...new Set([...units, ...(unit ? [unit] : [])])].map((u) => <option key={u} value={u}>{unitName(u)}</option>)}
           </select>
           {loadedAt && <span className="text-ink-500">{ago(loadedAt)} 갱신</span>}
           <button type="button" className="btn-ghost" onClick={load}>새로고침</button>
@@ -283,9 +290,12 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
                         </button>
                         <p className="text-xs text-ink-500">→ {serviceName(t.to_service)}</p>
                       </td>
-                      <td className="px-4 py-3">{skillLabel(t.skill)}</td>
                       <td className="px-4 py-3">
-                        {t.assignee_unit}
+                        {skillLabel(t.skill)}
+                        {t.from_service === "orchestrator" && <p className="line-clamp-2 text-xs text-ink-500">{humanizePlanIds(t.reason)}</p>}
+                      </td>
+                      <td className="px-4 py-3">
+                        {unitName(t.assignee_unit)}
                         {t.assignee && <span className="text-ink-500"> · {t.assignee}</span>}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-ink-700" title={shortDateTime(t.created_at)}>{ago(t.created_at)}</td>
