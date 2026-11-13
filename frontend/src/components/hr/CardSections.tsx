@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { HrCard } from "@/lib/hr";
 import { DecisionCard } from "@/components/hr/DecisionCards";
 import DuplicateGroups from "@/components/hr/DuplicateGroups";
@@ -45,6 +46,24 @@ function Head({ kind, title, count, desc }: { kind: Kind; title: string; count: 
   );
 }
 
+// 한 열에 처음 몇 장만 보이고 나머지는 "더 보기"로 펼친다(한쪽이 길어 다른 쪽 카드가 아래로 밀리지 않게)
+const FIRST_SHOWN = 5;
+
+function CardList({ kind, cards }: { kind: Kind; cards: HrCard[] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? cards : cards.slice(0, FIRST_SHOWN);
+  return (
+    <div className="space-y-3">
+      {shown.map((c) => <Kinded key={c.card_id} kind={kind} card={c} />)}
+      {cards.length > FIRST_SHOWN && (
+        <button type="button" className="btn-ghost w-full" aria-expanded={all} onClick={() => setAll((v) => !v)}>
+          {all ? "처음 5장만 보기" : `${cards.length - FIRST_SHOWN}장 더 보기`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function CardSections({ cards }: { cards: HrCard[] | null }) {
   if (cards === null) {
     return (
@@ -72,7 +91,7 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
         </div>
         {incidents.length === 0
           ? <p className="py-4 text-center text-sm text-ink-500">아직 장애 대응 카드가 없습니다.</p>
-          : <div className="space-y-3">{incidents.map((c) => <Kinded key={c.card_id} kind="incident" card={c} />)}</div>}
+          : <CardList kind="incident" cards={incidents} />}
       </section>
 
       <section aria-labelledby="sec-decision" className="card min-w-0 space-y-3 p-6">
@@ -87,7 +106,7 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
         <DuplicateGroups />
         {decisions.length === 0
           ? <p className="py-4 text-center text-sm text-ink-500">아직 업무 결정 카드가 없습니다.</p>
-          : <div className="space-y-3">{decisions.map((c) => <Kinded key={c.card_id} kind="decision" card={c} />)}</div>}
+          : <CardList kind="decision" cards={decisions} />}
       </section>
       </div>
 

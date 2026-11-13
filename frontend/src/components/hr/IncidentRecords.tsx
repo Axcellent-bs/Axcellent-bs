@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { clockKo, incidentTitle, INCIDENT_STATUS_KO, type OrchIncident, type OrchStep } from "@/lib/agentChat";
 import { dateStr } from "@/lib/format";
 import { hr, type AuditEntry } from "@/lib/hr";
@@ -13,6 +13,16 @@ import ResolutionForm from "@/components/hr/ResolutionForm";
 // 화면에는 사람이 읽는 말만 쓰고, 이벤트 번호·카드 번호·기록 종류 코드는 마우스를 올리면(title) 보인다.
 
 const RECORD_SKILL = "record_case";
+
+// 고른 이벤트를 보는 탭. 위아래로 길게 이어지던 구역을 하나로 묶었다
+type TabId = "work" | "times" | "resolution";
+const TABS: { id: TabId; label: string }[] = [
+  { id: "work", label: "AI가 한 일" },
+  { id: "times", label: "이벤트 타임라인" },
+  { id: "resolution", label: "해결 내용" },
+];
+// 탭 안에서는 각 구역의 카드 테두리를 빼서 카드 안에 카드가 겹쳐 보이지 않게 한다
+const BARE = "[&>section.card]:border-0 [&>section.card]:bg-transparent [&>section.card]:p-0 [&>section.card]:shadow-none [&>section.card]:ring-0";
 
 const STEP_KO: Record<string, { label: string; tone: string }> = {
   completed: { label: "기록됨", tone: "bg-emerald-50 text-emerald-700" },
@@ -93,45 +103,56 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
 
   // 고른 이벤트가 없으면 가장 최근 이벤트
   const current = incidents?.find((i) => i.context_id === picked) ?? incidents?.[0] ?? null;
+  const [tab, setTab] = useState<TabId>("work");
+  // 총괄 화면에서 "결정 기록에서 보기"로 넘어오면 카드 아래에 있는 이 구역으로 바로 내려간다
+  const top = useRef<HTMLElement>(null);
+  useEffect(() => { if (initialCtx) top.current?.scrollIntoView({ block: "start" }); }, [initialCtx]);
 
   return (
-    <div className="space-y-6">
-      <section className="card space-y-4 p-6">
-        <div>
-          <h2 className="text-lg font-semibold">AI가 남긴 이벤트 기록</h2>
-          <p className="mt-1 text-xs text-ink-500">캣북스에 이벤트가 나면 총괄 AI가 인사 AI에게 기록을 맡깁니다. 줄을 누르면 아래에서 인사 AI가 한 일을 볼 수 있습니다.</p>
-        </div>
-        {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
-        {!incidents ? (!err && <p className="py-6 text-center text-sm text-ink-500">불러오는 중…</p>)
-          : incidents.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">아직 인사 AI가 기록한 이벤트가 없습니다.</p>
-          : (
-            <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100">
+    <section ref={top} aria-labelledby="records-title" className="card space-y-4 p-6">
+      <div>
+        <h2 id="records-title" className="text-lg font-semibold">AI가 남긴 이벤트 기록</h2>
+        <p className="mt-1 text-xs text-ink-500">캣북스에 이벤트가 나면 총괄 AI가 인사 AI에게 기록을 맡깁니다. 왼쪽에서 이벤트를 고르면 오른쪽에서 인사 AI가 한 일과 시간, 해결 내용을 볼 수 있습니다.</p>
+      </div>
+      {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
+      {!incidents ? (!err && <p className="py-6 text-center text-sm text-ink-500">불러오는 중…</p>)
+        : incidents.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">아직 인사 AI가 기록한 이벤트가 없습니다.</p>
+        : (
+          <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <ul className="max-h-[34rem] divide-y divide-ink-100 overflow-y-auto rounded-2xl border border-ink-100" aria-label="이벤트 목록">
               {incidents.map((inc) => <RecordRow key={inc.context_id} inc={inc} active={inc.context_id === current?.context_id} onPick={() => setPicked(inc.context_id)} />)}
             </ul>
-          )}
-      </section>
-
-      <section className="card space-y-4 p-6">
-        <div>
-          <h2 className="text-lg font-semibold">AI가 한 일</h2>
-          <p className="mt-1 text-xs text-ink-500">고른 이벤트에서 인사 AI가 한 일을 시간순으로 봅니다. 남아 있는 기록을 그대로 보여 줍니다.</p>
-        </div>
-        {incidents && incidents.length > 0 && current && (
-          <select className="field" value={current.context_id} onChange={(e) => setPicked(e.target.value)} aria-label="이벤트 고르기">
-            {incidents.map((inc) => <option key={inc.context_id} value={inc.context_id}>{incidentName(inc)}{inc.opened_at ? ` (${dateStr(inc.opened_at)})` : ""}</option>)}
-          </select>
+            {current && (
+              <div className="min-w-0 space-y-3">
+                <div>
+                  <p className="font-semibold" title={`${current.title} · ${current.context_id}`}>{incidentName(current)}</p>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                    <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">총괄 이벤트에서 보기 →</Link>
+                    <Link href={`/agent-eval?ctx=${encodeURIComponent(current.context_id)}`} className="inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">에이전트 평가에서 단계별 시간 보기 →</Link>
+                  </div>
+                </div>
+                <div role="tablist" aria-label="고른 이벤트" className="flex flex-wrap gap-1">
+                  {TABS.map((t) => (
+                    <button key={t.id} type="button" role="tab" id={`rec-tab-${t.id}`} aria-selected={tab === t.id} aria-controls={`rec-panel-${t.id}`} onClick={() => setTab(t.id)}
+                      className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${tab === t.id ? "bg-brand-600 text-white" : "bg-surface text-ink-700 ring-1 ring-ink-100 hover:bg-ink-100"}`}>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+                <div role="tabpanel" id={`rec-panel-${tab}`} aria-labelledby={`rec-tab-${tab}`} className={BARE}>
+                  {tab === "work" && <Timeline inc={current} />}
+                  {tab === "times" && <EventTimes inc={current} />}
+                  {tab === "resolution" && <ResolutionForm inc={current} />}
+                </div>
+              </div>
+            )}
+          </div>
         )}
-        {current && <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">총괄 이벤트에서 보기 →</Link>}
-        {current && <Link href={`/agent-eval?ctx=${encodeURIComponent(current.context_id)}`} className="ml-4 inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">에이전트 평가에서 단계별 시간 보기 →</Link>}
-        {current ? <Timeline inc={current} /> : <p className="text-xs text-ink-500">볼 이벤트가 없습니다.</p>}
-      </section>
-
-      {current && <EventTimes inc={current} />}
-
-      {current && <ResolutionForm inc={current} />}
-
-      <RepeatCompare />
-    </div>
+      <details className="rounded-2xl border border-ink-100 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">처음 겪은 장애와 반복된 장애 비교</summary>
+        <div className={`mt-3 ${BARE}`}><RepeatCompare /></div>
+      </details>
+    </section>
   );
 }
 
