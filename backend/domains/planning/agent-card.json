@@ -35,7 +35,7 @@
       "grade": "A",
       "allowed_requesters": ["support", "marketing", "hr", "data", "finance", "orchestrator", "dev"],
       "verifier": null,
-      "priority": "optional"
+      "priority": "required"
     },
     {
       "id": "receive_dev_result",

@@ -35,6 +35,7 @@ def test_agent_card_format_and_served() -> None:
     assert (card.name, card.owner, card.url) == ("planning", "예진", "http://planning:8101/a2a")
     skills = {s.id: s for s in card.skills}
     intake = {"create_ticket", "receive_planning_answer"}  # 요청 접수 (#174)·되묻기 답
+    intake |= {"withdraw_ticket"}  # 요청 부서가 자기 요청 거둬들이기 (11/13)
     proposals = {"receive_insight", "receive_campaign_update"}  # 기획 제안 (11/4)
     # 직접 대화 (11/5)
     chat = {f"planning_chat_{x}" for x in ("send", "list", "get", "close", "remove")}
@@ -53,6 +54,8 @@ def test_agent_card_format_and_served() -> None:
         "orchestrator",
         "dev",  # 개발 AI 대화가 계획을 기획에 넘긴다 (11/09)
     ]
+    withdraw = skills["withdraw_ticket"]
+    assert withdraw.allowed_requesters == skills["create_ticket"].allowed_requesters
     assert skills["receive_dev_result"].allowed_requesters == ["dev"]
     reads = {"planning_chat_list", "planning_chat_get"}  # 대화 목록·읽기만 read
     assert all(skills[k].grade == ("read" if k in reads else "A") for k in skills)
