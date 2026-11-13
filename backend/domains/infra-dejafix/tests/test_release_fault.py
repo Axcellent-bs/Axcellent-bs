@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from infra_agent.handlers import switched_off
 from infra_agent.main import app
 
 PAST = {"component": "payment", "past_case_id": "card_past", "similarity": 0.92}
@@ -44,6 +45,45 @@ def test_does_nothing_when_the_server_is_already_fine(a2a_body, gate, runtime) -
     result = _call(a2a_body, PAST)
     assert (result["status"], result["outcome"]) == ("completed", "not_needed")
     assert fake.calls == [] and runtime.shop.released == 0
+
+
+def test_switch_off_with_a_degraded_monitor_is_not_released(a2a_body, gate, runtime) -> None:
+    """감시는 이상인데 스위치는 꺼져 있다(예: 결제사 지연): 꺼진 스위치를 끄지 않는다."""
+    fake = gate("executed")
+    runtime.shop.state.update(active=False, failing=False, degraded=True)
+    result = _call(a2a_body, PAST)
+    assert (result["status"], result["outcome"]) == ("completed", "not_needed")
+    assert "스위치가 꺼져" in result["output"]["message"]
+    # 총괄이 과거 처리 재사용을 끝낸 것으로 보지 않는다
+    assert "fault_released" not in result["output"]
+    assert fake.calls == [] and runtime.shop.released == 0
+
+
+def test_post_check_fails_when_the_shop_did_not_turn_a_switch_off(
+    a2a_body, gate, runtime, monkeypatch
+) -> None:
+    """확인과 해제 사이에 다른 쪽이 먼저 껐으면 이번 해제는 아무것도 바꾸지 않았다."""
+    gate("executed")
+
+    async def already_off() -> dict:
+        runtime.shop.released += 1
+        runtime.shop.state.update(active=False, failing=False)
+        return {**runtime.shop.state, "released": False}
+
+    monkeypatch.setattr(runtime.shop, "release_fault", already_off)
+    out = _call(a2a_body, PAST)["output"]
+    assert out["fault_released"] is False and out["post_check_ok"] is False
+
+
+def test_switched_off_needs_on_before_and_off_after() -> None:
+    on, off = {"active": True}, {"active": False}
+    assert switched_off(on, {**off, "released": True}) is True
+    assert switched_off(off, {**off, "released": False}) is False  # 원래 꺼져 있었다
+    assert switched_off(on, {"active": True, "released": True}) is False  # 끈 뒤에도 켜져 있다
+    assert switched_off(on, {**off, "released": False}) is False  # 다른 쪽이 먼저 껐다
+    assert switched_off(on, off) is True  # 예전 쇼핑몰(released 없음)은 해제 전 상태로 본다
+    assert switched_off(None, {**off, "released": True}) is True  # 되돌리기: 쇼핑몰 응답만 본다
+    assert switched_off(None, {**off, "released": False}) is False
 
 
 def test_bad_input_is_refused(a2a_body, gate, runtime) -> None:

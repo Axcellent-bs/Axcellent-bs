@@ -96,6 +96,26 @@ async def test_a_repeat_incident_is_fixed_the_same_way_right_away(harness) -> No
 
 
 @pytest.mark.asyncio
+async def test_switch_off_fault_is_not_fixed_by_release_and_goes_to_a_person(harness) -> None:
+    """스위치가 꺼진 채 난 장애(지연 등): 인프라가 해제하지 않는다.
+
+    그러면 사람에게 넘기고 복구 시각이 없다."""
+    harness.fakes.script("infra", "diagnose_incident", "undetermined")
+    harness.fakes.script("hr", "find_similar_cases", "past_release")
+    harness.fakes.script("infra", "release_fault", "switch_off")
+    inc = await run(harness)
+    assert len(called(harness, "release_fault")) == 1
+    assert "fault_released" not in inc.outputs["past_fix"]
+    assert inc.steps["rollback"].status == "transfer_queued"  # 원인 확인·사람 이관으로 간다
+    assert called(harness, "verify_recovery") == []  # 해제한 사람이 없으니 복구 검증도 기다린다
+    assert inc.status == "degraded"
+    assert inc.recovered_at is None and inc.mttr_seconds() is None
+    assert inc.shared.get("recovered_notice_id") is None  # 정상화 공지도 없다
+    sent = called(harness, "record_resolution")[0].input
+    assert sent["outcome"] == "unresolved" and sent["action_code"] is None
+
+
+@pytest.mark.asyncio
 async def test_a_less_similar_past_case_is_not_replayed(harness) -> None:
     harness.fakes.script("infra", "diagnose_incident", "undetermined")
     harness.fakes.script("hr", "find_similar_cases", "past_release_low")

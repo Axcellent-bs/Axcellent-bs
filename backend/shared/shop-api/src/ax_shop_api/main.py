@@ -655,7 +655,8 @@ def create_app(
 
     @app.delete("/api/shop/admin/faults")
     async def release_fault(caller: str = Depends(_caller(RELEASE_ALLOWED))) -> dict:
-        state = shop.release_fault(released_by=caller)  # 복구 신호에 누가 풀었는지 싣는다
+        # 해제한 쪽은 지표로 복구를 확인한 뒤 나가는 복구 신호에 싣는다
+        state = shop.release_fault(released_by=caller)
         await outbox.flush(database)
         return _ok(state)
 

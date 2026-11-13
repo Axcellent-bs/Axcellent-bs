@@ -118,6 +118,30 @@ def test_a_rollback_finished_in_this_event_wins_over_the_past_action() -> None:
     assert draft is not None and draft["source"] == "past_case"
     assert draft["action"] == "쇼핑몰 서버 이전 버전으로 되돌림 (v2.14 → v2.13)"
     assert draft["root_cause"] == "배포 후 결제 설정 누락" and len(draft["basis"]) == 2
+    assert "'이전 버전으로 되돌리기'" in draft["basis"][1]
+
+
+def test_a_released_fault_names_the_release_not_a_rollback() -> None:
+    """되돌리기를 건너뛰고 장애 상태를 해제한 사건에 '이전 버전으로 되돌리기'라고 쓰지 않는다."""
+    inc = incident(past_fix="completed", rollback="skipped")
+    inc.outputs["similar_cases"] = past_case()
+    inc.outputs["past_fix"] = {"fault_released": True}
+    draft = resolution_draft(inc)
+    assert draft is not None and draft["source"] == "past_case"
+    assert draft["action"] == (
+        "과거 같은 장애의 처리 방식대로 인프라 AI가 결제 장애 상태를 해제해 정상화"
+    )
+    assert "'장애 상태 해제'" in draft["basis"][1]
+    assert not any("되돌리기" in line for line in draft["basis"])
+
+
+def test_a_release_that_turned_nothing_off_is_not_an_action() -> None:
+    inc = incident(past_fix="completed", rollback="transfer_queued")
+    inc.outputs["similar_cases"] = past_case()
+    inc.outputs["past_fix"] = {"message": "장애 스위치가 꺼져 있어 해제할 것이 없다"}
+    draft = resolution_draft(inc)
+    assert draft is not None and draft["action"] == "직전 버전으로 롤백"  # 과거 조치는 참고로만
+    assert len(draft["basis"]) == 1
 
 
 def test_other_type_past_events_are_not_used_for_the_draft() -> None:

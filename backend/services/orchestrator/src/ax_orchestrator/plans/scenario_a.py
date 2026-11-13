@@ -98,8 +98,9 @@ def fixed_at(inc: Incident) -> datetime:
     """복구 확인을 셀 시작 시각 = 조치가 끝난 시각 (#909).
 
     사건 열린 시각부터 세면 장애 동안의 실패가 늘 섞여 복구로 판정되지 않는다. 조치 순서대로
-    과거 처리 재사용(release_fault) 완료, 롤백 완료, 사람이 장애를 해제한 시각(`shop.recovered`의
-    `recovery=fault_released`를 받은 시각)이고, 셋 다 없으면 지금처럼 사건 열린 시각이다.
+    과거 처리 재사용(release_fault) 완료, 롤백 완료, 사람이 장애를 해제한 뒤 쇼핑몰이 지표로 복구를
+    확인한 시각(`shop.recovered`의 `recovery=fault_released`를 받은 시각. 해제 순간에는 신호가
+    없다)이고, 셋 다 없으면 지금처럼 사건 열린 시각이다.
     """
     past = inc.steps.get("past_fix")
     if _past_fix_done(inc) and past is not None and past.finished_at is not None:
@@ -222,7 +223,10 @@ def _rollback_gate(inc: Incident) -> tuple[str, str, str] | None:
 
 
 def _human_released(inc: Incident) -> bool:
-    """사람이 장애 상태를 해제했다는 신호(shop.recovered, recovery=fault_released)를 받았는지."""
+    """사람이 장애 상태를 해제했고 쇼핑몰이 지표로 복구를 확인했다는 신호를 받았는지.
+
+    쇼핑몰은 해제만으로는 복구 신호를 보내지 않는다. 해제 뒤 정상 표본이 지속 기준만큼 이어져야
+    `shop.recovered`(recovery=fault_released)가 온다."""
     how = inc.shared.get("recovery")
     return (
         inc.recovered_at is not None

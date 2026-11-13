@@ -50,9 +50,11 @@ class MockShop:
         return dict(self.state)
 
     async def release_fault(self) -> dict[str, Any]:
+        """실제 쇼핑몰처럼: 스위치만 끄고 감시 이상(`degraded`)은 지표가 돌아올 때까지 둔다."""
         self.released += 1
-        self.state.update(active=False, failing=False, degraded=False)
-        return dict(self.state)
+        was_on = bool(self.state.get("active", False))
+        self.state.update(active=False, failing=False)
+        return {**self.state, "released": was_on}
 
 
 @dataclass

@@ -200,6 +200,7 @@ class Shop:
         self.gateway = gateway or Gateway()
         self.monitor = monitor or Monitor(db)
         self.clock = clock
+        self.last_release: dict[str, Any] | None = None
 
     # --- 조회 -------------------------------------------------------------
     def list_sellers(self) -> list[dict[str, Any]]:
@@ -978,6 +979,8 @@ class Shop:
             "failing": self.gateway.failing,
             "lost_response": self.gateway.lost_response,
             "degraded": self.monitor.degraded,
+            # 마지막으로 켜져 있던 스위치를 끈 기록 ({"released_by", "released_at"}). 없으면 None
+            "last_release": self.last_release,
         }
 
     def inject_fault(self, kind: str, delay_ms: int = 0) -> dict[str, Any]:
@@ -985,13 +988,18 @@ class Shop:
         return self.fault_state()
 
     def release_fault(self, released_by: str | None = None) -> dict[str, Any]:
-        """장애를 해제한다. 장애 상태였다면 `shop.recovered`가 outbox에 들어간다.
+        """장애 스위치를 끈다. 켜져 있던 스위치를 껐을 때만 "해제됨"을 남긴다.
 
-        복구 신호에는 해제로 풀렸다는 것(`recovery=fault_released`)과 해제한 쪽을 싣는다.
+        해제는 복구가 아니다. 복구 신호(`shop.recovered`)는 모니터가 새 표본이 정상으로 이어지는
+        것을 확인한 뒤에 나간다. 응답의 `released`는 이번 호출이 켜져 있던 스위치를 껐는지다
+        (이미 꺼져 있었으면 False: 아무것도 바뀌지 않았다).
         """
+        was_on = self.gateway.active
         self.gateway.release()
-        self.monitor.reset(released_by=released_by)
-        return self.fault_state()
+        if was_on:
+            self.monitor.released(released_by=released_by)
+            self.last_release = {"released_by": released_by, "released_at": _now()}
+        return {**self.fault_state(), "released": was_on}
 
     def evaluate_monitor(self) -> None:
         self.monitor.evaluate(self.clock())

@@ -49,24 +49,41 @@ def _this_event(inc: Incident) -> tuple[str | None, str | None, list[str]]:
         level = _CONFIDENCE_KO.get(str(top.get("confidence")), "알 수 없음")
         basis.append(f"원인은 데이터분석 AI가 낸 원인 후보 중 가장 확실한 것(확신도 {level})")
     action = None
-    rollback = inc.steps.get("rollback")
-    past_fix = inc.steps.get("past_fix")
-    if (
-        past_fix is not None
-        and past_fix.status == "completed"
-        and (inc.outputs.get("past_fix") or {}).get("fault_released")
-    ):
+    done = _done_action(inc)
+    if done == "release_fault":
         action = "과거 같은 장애의 처리 방식대로 인프라 AI가 결제 장애 상태를 해제해 정상화"
-        basis.append("조치는 총괄이 과거 같은 장애의 처리 방식으로 끝낸 '장애 상태 해제'")
-    elif rollback is not None and rollback.status == "completed":
+        basis.append(f"조치는 총괄이 과거 같은 장애의 처리 방식으로 끝낸 '{_ACTION_NAME[done]}'")
+    elif done == "rollback_deployment":
         out = inc.outputs.get("rollback") or {}
         service = plain_terms(str(out.get("service") or "배포"))
         before, after = out.get("from_version"), out.get("to_version")
         action = f"{service} 이전 버전으로 되돌림" + (
             f" ({before} → {after})" if before and after else ""
         )
-        basis.append("조치는 총괄이 끝낸 '이전 버전으로 되돌리기'")
+        basis.append(f"조치는 총괄이 끝낸 '{_ACTION_NAME[done]}'")
     return root_cause, action, basis
+
+
+# 이번 이벤트에서 총괄이 끝낸 조치(action_code) → 근거 문장에 쓰는 이름
+_ACTION_NAME = {
+    "release_fault": "장애 상태 해제",
+    "rollback_deployment": "이전 버전으로 되돌리기",
+}
+
+
+def _done_action(inc: Incident) -> str | None:
+    """이번 이벤트에서 실제로 끝낸 조치. 장애 상태 해제가 먼저다(해제했으면 되돌리지 않는다)."""
+    past_fix = inc.steps.get("past_fix")
+    if (
+        past_fix is not None
+        and past_fix.status == "completed"
+        and (inc.outputs.get("past_fix") or {}).get("fault_released")
+    ):
+        return "release_fault"
+    rollback = inc.steps.get("rollback")
+    if rollback is not None and rollback.status == "completed":
+        return "rollback_deployment"
+    return None
 
 
 def resolution_draft(inc: Incident) -> dict[str, Any] | None:
@@ -80,9 +97,10 @@ def resolution_draft(inc: Incident) -> dict[str, Any] | None:
             f"같은 유형의 과거 이벤트(비슷한 정도 {pct}%)에서 가져온 원인과 조치예요. "
             "이번 이벤트의 원인과 같은지 확인해 주세요"
         ]
-        if this_action:
+        done = _done_action(inc)
+        if this_action and done is not None:
             basis.append(
-                "조치는 이번 이벤트에서 총괄이 끝낸 '이전 버전으로 되돌리기'라서"
+                f"조치는 이번 이벤트에서 총괄이 끝낸 '{_ACTION_NAME[done]}'라서"
                 " 과거 조치보다 우선했어요"
             )
         return {
