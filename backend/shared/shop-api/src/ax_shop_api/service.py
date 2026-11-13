@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import sqlite3
 import time
@@ -158,6 +159,11 @@ class Gateway:
         self.failing = False
         # 결제사는 승인했는데 우리 쪽 응답이 끊긴다(시간 초과). 다시 확인하면 승인으로 나온다
         self.lost_response = False
+        # 결제사 쪽 지연 (시험용, `pg_slow`). 쇼핑몰 장애 스위치가 아니다: `active`·해제
+        # (`release`)에 들어가지 않아 AI(인프라 release_fault)가 끌 수 없고, 사람(admin)이
+        # `pg_ok`로만 끈다.
+        # "AI가 고치지 못하는 장애" 시연용. 결제마다 실제로 기다린다(`pg_wait`)
+        self.pg_delay_ms = 0
 
     def inject(self, kind: str, delay_ms: int = 0) -> None:
         if kind == "latency":
@@ -166,6 +172,19 @@ class Gateway:
             self.failing = True
         elif kind == "lost_response":
             self.lost_response = True
+        elif kind == "pg_slow":
+            self.pg_delay_ms = delay_ms
+
+    def pg_ok(self) -> None:
+        self.pg_delay_ms = 0
+
+    async def pg_wait(self) -> float:
+        """결제사 쪽 지연이 켜져 있으면 실제로 기다리고, 기다린 ms를 돌려준다(없으면 0)."""
+        if not self.pg_delay_ms:
+            return 0.0
+        start = time.perf_counter()
+        await asyncio.sleep(self.pg_delay_ms / 1000)
+        return (time.perf_counter() - start) * 1000
 
     def release(self) -> None:
         self.delay_ms, self.failing, self.lost_response = 0, False, False
@@ -716,10 +735,14 @@ class Shop:
             )
         return payment_id
 
-    def pay(self, order_id: str, method_code: str, simulate: str | None) -> dict[str, Any]:
+    def pay(
+        self, order_id: str, method_code: str, simulate: str | None, pg_wait_ms: float = 0.0
+    ) -> dict[str, Any]:
+        """`pg_wait_ms`: 결제사 쪽 지연으로 실제로 기다린 시간. 표본 지연에 그대로 더한다."""
         with self.db.tx() as conn:
             order = self._payable_order(conn, order_id)
             outcome = self.gateway.attempt(simulate)
+            outcome.latency_ms += pg_wait_ms
             self._record_payment(conn, order, outcome, method_code)
         return self.get_order(order_id)
 
@@ -978,6 +1001,8 @@ class Shop:
             "delay_ms": self.gateway.delay_ms,
             "failing": self.gateway.failing,
             "lost_response": self.gateway.lost_response,
+            # 결제사 쪽 지연(시험용). 장애 스위치(active)가 아니라 따로 둔다. 0이면 꺼짐
+            "pg_delay_ms": self.gateway.pg_delay_ms,
             "degraded": self.monitor.degraded,
             # 마지막으로 켜져 있던 스위치를 끈 기록 ({"released_by", "released_at"}). 없으면 None
             "last_release": self.last_release,
@@ -985,6 +1010,12 @@ class Shop:
 
     def inject_fault(self, kind: str, delay_ms: int = 0) -> dict[str, Any]:
         self.gateway.inject(kind, delay_ms)
+        return self.fault_state()
+
+    def pg_ok(self) -> dict[str, Any]:
+        """결제사 쪽 지연을 끈다(사람만). 해제가 아니므로 표본·장애 상태는 그대로 두고, 정상
+        결제가 이어지면 모니터가 지표로 복구를 판정한다(`recovery=metrics_normal`)."""
+        self.gateway.pg_ok()
         return self.fault_state()
 
     def release_fault(self, released_by: str | None = None) -> dict[str, Any]:

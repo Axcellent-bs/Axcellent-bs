@@ -59,6 +59,16 @@ def test_switch_off_with_a_degraded_monitor_is_not_released(a2a_body, gate, runt
     assert fake.calls == [] and runtime.shop.released == 0
 
 
+def test_pg_side_latency_is_not_released(a2a_body, gate, runtime) -> None:
+    """시험용 결제사 쪽 지연(pg_slow): 스위치가 아니라 AI가 끌 수 없다 → 해제하지 않는다."""
+    fake = gate("executed")
+    runtime.shop.state.update(active=False, failing=False, degraded=True, pg_delay_ms=1500)
+    result = _call(a2a_body, PAST)
+    assert (result["status"], result["outcome"]) == ("completed", "not_needed")
+    assert result["output"]["fault_state"]["pg_delay_ms"] == 1500
+    assert fake.calls == [] and runtime.shop.released == 0
+
+
 def test_post_check_fails_when_the_shop_did_not_turn_a_switch_off(
     a2a_body, gate, runtime, monkeypatch
 ) -> None:

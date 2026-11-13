@@ -115,6 +115,19 @@ bash backend/scripts/shop_fault.sh failure
 powershell -File backend/scripts/slow_agent.ps1 -Port 8106 -DelaySeconds 20 -HoldSeconds 38
 ```
 
+### `shop_fault.sh pg-slow`: AI가 고치지 못하는 장애 시연 (결제사 쪽 지연)
+- **시험용 장애입니다.** 결제마다 실제로 지정한 시간(기본 1500ms, 최대 10000ms)만큼 기다리고, 그 지연이 모니터 표본에 그대로 남습니다. 응답이 느려져 p95 기준을 넘으면 사건이 열립니다.
+- **쇼핑몰 장애 스위치가 아닙니다.** 상태의 `active`는 false로 남습니다. 그래서 인프라 AI는 "과거 같은 장애의 처리 방식 다시 하기"(장애 해제)를 하지 않고(`not_needed`), 사건은 원인 확인·사람 이관으로 갑니다. 인프라 AI가 해제 API를 불러도 이 지연은 꺼지지 않습니다.
+- **켜기·끄기는 사람(admin 토큰)만 합니다.** `pg-ok`로 끈 뒤에도 바로 복구가 아닙니다. 느린 표본이 1분 창에서 빠지고 정상 결제가 지속 기준(로컬 20초)만큼 이어져야 쇼핑몰이 복구 신호(`recovery=metrics_normal`, 해제한 쪽 없음)를 보냅니다. 끈 뒤 대략 1분 20초 걸립니다.
+- 결제가 있어야 판정됩니다. 로컬에서는 `SHOP_TRAFFIC=on`으로 가상 주문을 켜 둡니다. 가상 주문의 요청 마감이 10초라 지연은 10초보다 짧게 둡니다.
+- 상태 보기(`shop_fault.sh`)에 "결제사 쪽 지연: 켜짐/꺼짐"이 장애 스위치와 따로 나옵니다.
+
+```bash
+bash backend/scripts/shop_fault.sh pg-slow 1500   # 결제사 쪽 지연 켜기
+bash backend/scripts/shop_fault.sh                # 상태 (결제사 쪽 지연 줄이 따로 보임)
+bash backend/scripts/shop_fault.sh pg-ok          # 끄기 (사람만)
+```
+
 ### `pg_demo_file.sh`: 재무 대사 예외 시연
 - **장애 주입이 아닙니다.** PG 정산 파일에 PG 쪽 사건 4건을 일부러 넣어 재무에 올립니다. [33]
   1. 부분 취소가 PG에만 반영됨: −2,000원

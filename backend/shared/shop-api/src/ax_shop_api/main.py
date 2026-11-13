@@ -24,7 +24,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
 from ax_agent_template.config import set_agent_name
 from ax_agent_template.server import verify_token
@@ -144,10 +144,20 @@ class CancelIn(BaseModel):
     reason_code: Literal["buyer", "seller", "system"] = "buyer"
 
 
+PG_SLOW_MAX_MS = 10_000  # 결제사 쪽 지연은 결제마다 실제로 기다리므로 상한을 둔다
+
+
 class FaultIn(BaseModel):
     # lost_response: 결제사는 승인했는데 응답이 끊김(시간 초과 → 다시 확인하면 승인으로 나온다)
-    kind: Literal["latency", "failure", "lost_response"]
-    delay_ms: int = Field(default=2000, ge=0, le=60000)  # kind=latency일 때 더할 지연
+    # pg_slow: 결제사 쪽 지연(시험용). 장애 스위치가 아니라 AI가 끌 수 없다(`DELETE .../faults/pg`)
+    kind: Literal["latency", "failure", "lost_response", "pg_slow"]
+    delay_ms: int = Field(default=2000, ge=0, le=60000)  # latency·pg_slow일 때 더할 지연
+
+    @model_validator(mode="after")
+    def _pg_slow_limit(self) -> FaultIn:
+        if self.kind == "pg_slow" and not 0 < self.delay_ms <= PG_SLOW_MAX_MS:
+            raise ValueError(f"pg_slow 지연은 1~{PG_SLOW_MAX_MS}ms")
+        return self
 
 
 class BannerIn(BaseModel):
@@ -591,7 +601,8 @@ def create_app(
 
     @app.post("/api/shop/orders/{order_id}/payments")
     async def pay(order_id: str, body: PaymentIn) -> dict:
-        order = shop.pay(order_id, body.method_code, body.simulate)
+        waited = await shop.gateway.pg_wait()  # 결제사 쪽 지연(시험용)을 실제로 기다린다
+        order = shop.pay(order_id, body.method_code, body.simulate, pg_wait_ms=waited)
         shop.evaluate_monitor()
         await outbox.flush(database)
         return _ok(order)
@@ -657,6 +668,13 @@ def create_app(
     async def release_fault(caller: str = Depends(_caller(RELEASE_ALLOWED))) -> dict:
         # 해제한 쪽은 지표로 복구를 확인한 뒤 나가는 복구 신호에 싣는다
         state = shop.release_fault(released_by=caller)
+        await outbox.flush(database)
+        return _ok(state)
+
+    @app.delete("/api/shop/admin/faults/pg")
+    async def pg_ok(_: str = Depends(_caller(INJECT_ALLOWED))) -> dict:
+        """결제사 쪽 지연(시험용)을 끈다. 사람(admin)만. 인프라 AI의 해제로는 꺼지지 않는다."""
+        state = shop.pg_ok()
         await outbox.flush(database)
         return _ok(state)
 
