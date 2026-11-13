@@ -209,6 +209,8 @@ async def test_recovery_reruns_impact_to_the_recovery_time(harness, monkeypatch)
     """첫 분석(이벤트를 열고 2초 뒤) 뒤의 실패가 복구 때 다시 센 결과에 들어온다."""
     from ax_orchestrator.mock import fake_departments as fd
 
+    # 대응이 끝날 때 복구를 확인하지 못했고(장애 중으로 닫힘), 쇼핑몰 복구 신호가 나중에 온다
+    harness.fakes.script("infra", "verify_recovery", "not_recovered")
     engine = await harness.start()
     manager = IncidentManager(engine, scenario_a)
     inc = await manager.handle(event(EventType.SHOP_DEGRADED, "evt_deg_1"))

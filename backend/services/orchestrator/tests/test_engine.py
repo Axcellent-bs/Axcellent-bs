@@ -129,8 +129,11 @@ async def test_degraded_event_has_no_recovery_time_until_the_shop_recovers(harne
 
 @pytest.mark.asyncio
 async def test_recovery_before_the_response_ends_is_not_left_degraded(harness) -> None:
-    """복구 신호를 대응 종료 전에 받았으면 degraded로 남기지 않는다."""
+    """복구 신호를 대응 종료 전에 받았으면 degraded로 남기지 않는다.
+
+    복구 검증이 복구를 확인하지 못한 경우다(확인했으면 신호와 검증 중 이른 시각이 끝점)."""
     harness.fakes.script("marketing", "publish_notice", "fail", "fail", "fail")
+    harness.fakes.script("infra", "verify_recovery", "not_recovered")
     engine = await harness.start()
     inc = new_incident()
     inc.recovered_at = inc.opened_at + timedelta(seconds=30)
