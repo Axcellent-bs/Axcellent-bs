@@ -49,6 +49,24 @@ async def suggest_compensation(request: AgentRequest) -> AgentResult:
     except shop_client.ShopError as exc:
         return error_result(request.meta, TaskStatus.FAILED, "shop_unavailable", str(exc))
     buyer_id = buyer_ids.from_number(inquiry.user_id)
+    if order is None and shop_client.order_source() != "seed":
+        # `load_order`는 결제가 끝난 주문만 돌려준다. 없는 주문과 결제가 끝나지 않은 주문을 갈라서,
+        # 문의도 주문도 있는데 "문의를 찾을 수 없다"로 답하지 않는다.
+        try:
+            raw = await shop_client.fetch_order_facts(inquiry.order_id)
+        except shop_client.ShopError as exc:
+            return error_result(request.meta, TaskStatus.FAILED, "shop_unavailable", str(exc))
+        if raw is not None and raw.get("buyer_id") == buyer_id:
+            return h._done(
+                request,
+                _not_eligible("결제가 끝나지 않은 주문이라 보상 대상이 아니다"),
+                outcome="order_unpaid",
+                evidence=Evidence(
+                    queries=["shop_order"],
+                    ref_ids=[f"inquiry:{inquiry.id}", f"order:{inquiry.order_id}"],
+                    data_summary="주문이 결제 완료 상태가 아님",
+                ),
+            )
     if order is None or order.buyer_id != buyer_id:  # 남의 주문으로 보상을 만들지 않는다
         return h._not_found(request, parsed.inquiry_id)
 

@@ -74,7 +74,7 @@ class ImpactCounts:
 def aggregate_impact(
     result: ShopFailedOrdersResult | list[FailedOrder] | list[FailureEvent],
 ) -> ImpactCounts:
-    """실패 주문 수, 영향 고객 수(같은 buyer_id는 한 번), 피해 금액 합계를 계산한다.
+    """실패 주문 수, 영향 고객 수(같은 buyer_id는 한 번), 결제 실패(미결제) 금액 합계를 계산한다.
 
     주문 목록(장애로 실패한 것만 고른 목록)도 받는다.
     금액이 음수인 주문이 있으면 ValueError를 낸다 (음수 피해 금액은 없다).

@@ -329,9 +329,13 @@ class SupportInquiryReceivedData(AxModel):
     `category`·`urgency`는 분류 코드값이다.
     `message_count`는 문의에 쌓인 고객 메시지 수이며 첫 접수는 1이다.
     `order_id`는 다른 주문 이벤트와 같은 `ord_` 문자열 ID다.
+    `inquiry_id`는 고객지원 저장소가 매기는 순번이라 저장소를 새로 시작하면 1부터 다시 시작한다.
+    `inquiry_ref`는 문의마다 바뀌지 않는 ID(사건 ID, `ctx_…`)라 받는 쪽은 문의를 이것으로
+    구분해 기록한다. 없을 수 있다(옛 발행분).
     """
 
     inquiry_id: int
+    inquiry_ref: str | None = None
     order_id: str | None = None
     category: str | None = None
     urgency: Literal["low", "medium", "high"] | None = None
@@ -350,9 +354,13 @@ class SupportInquiryResolvedData(AxModel):
     `compensated`다.
     `order_id`는 다른 주문 이벤트와 같은 `ord_` 문자열 ID, `coupon_id`는 마케팅 `coupon.issued`와
     이어 보는 `cpn_` ID, `refund_amount`는 정수 원이다.
+    `inquiry_id`는 고객지원 저장소가 매기는 순번이라 저장소를 새로 시작하면 1부터 다시 시작해
+    예전 문의와 겹칠 수 있다. `inquiry_ref`는 문의마다 바뀌지 않는 ID(사건 ID, `ctx_…`)라
+    받는 쪽은 기록을 이것으로 구분해야 한다. 없을 수 있다(옛 발행분).
     """
 
     inquiry_id: int
+    inquiry_ref: str | None = None
     order_id: str | None = None
     status: Literal["resolved", "escalated"]
     resolution: Literal["answered", "claim_decided", "compensated", "escalated"]

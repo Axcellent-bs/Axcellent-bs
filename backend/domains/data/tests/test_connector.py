@@ -168,6 +168,7 @@ def test_fake_company_impact_analysis_runs_on_the_memory_connector(coldchain) ->
     assert out.failed_order_count == 3  # 장애 쪽 실패 이벤트
     assert out.affected_customer_count == 2 and out.affected_customer_ids == ["acct_a", "acct_b"]
     assert out.damage_amount == 250000
+    assert out.unpaid_amount == 250000  # 결제 실패(미결제) 금액 = 실패 금액 합 (11/13)
     assert [(c.category, c.failed_order_count) for c in out.by_category] == [
         ("chilled", 1),
         ("frozen", 2),

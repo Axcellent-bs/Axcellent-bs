@@ -68,7 +68,7 @@ async def test_unknown_kind_lists_key_values() -> None:
 async def test_missing_keys_do_not_raise() -> None:
     result = await explain("impact", {}, _Boom("data"))
     assert result.fallback is True
-    assert "피해 금액 -원" in result.summary
+    assert "결제 실패(미결제) 금액 -원" in result.summary  # 캣북스 카탈로그의 금액 이름
 
 
 @pytest.mark.asyncio

@@ -178,4 +178,7 @@ def test_catbooks_report_and_impact_words_are_unchanged() -> None:
             MockLLMClient(),
         )
     )
-    assert impact.summary == "장애 구간 실패 주문 3건, 영향 고객 2명, 피해 금액 1,000원입니다."
+    # 캣북스는 금액을 "결제 실패(미결제) 금액"으로 부른다 (11/13, 실제 손실로 오해하지 않게)
+    assert impact.summary == (
+        "장애 구간 실패 주문 3건, 영향 고객 2명, 결제 실패(미결제) 금액 1,000원입니다."
+    )

@@ -113,7 +113,7 @@ export const SERVICES: Service[] = [
     desc: '결산·대사·정산과 장애 보상 장부, 이벤트 후 감사를 맡습니다.',
     // 화면 안 전환(pages/Finance.tsx)을 사이드바 하위 탭으로 연다. ①~⑥ 업무 탭은 평상시 화면 안에 둔다
     children: [
-      { href: '/finance', label: '장애 이벤트 재무' },
+      { href: '/finance', label: '재무 장애 이슈' },
       { href: '/finance/daily', label: '평상시 재무 업무' },
     ],
   },

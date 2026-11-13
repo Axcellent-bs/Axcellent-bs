@@ -292,7 +292,8 @@ def _template(kind: str, facts: dict[str, int | float | str]) -> str:
         return (
             f"장애 구간 실패 {words.unit_label} {_fmt(facts.get('failed_order_count'))}건, "
             f"영향 {words.customer_label} {_fmt(facts.get('affected_customer_count'))}명, "
-            f"피해 금액 {_fmt(facts.get('damage_amount'), comma=True)}{words.money_unit}입니다."
+            f"{words.money_label} {_fmt(facts.get('damage_amount'), comma=True)}"
+            f"{words.money_unit}입니다."
         )
     if kind == "anomaly":
         return (
