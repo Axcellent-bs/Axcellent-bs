@@ -17,6 +17,7 @@ const KIND: Record<FinanceTodo["kind"], { label: string; tone: string }> = {
   closing_confirm: { label: "결산", tone: TONE.info },
   recon_exception: { label: "대사", tone: TONE.bad },
   team_budget: { label: "팀 예산", tone: TONE.info },
+  planning_question: { label: "기획 질문", tone: TONE.warn },
 };
 
 /** 건마다 메모를 남기는 할 일의 버튼 이름·안내 */
@@ -87,6 +88,22 @@ export function TodoCard({ todo, onDone, onOpen }: {
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn-ghost" onClick={onOpen}>팀별 숫자 보기</button>
         </div>
+      </div>
+    );
+  } else if (action?.type === "planning_answer") {
+    // 기획이 되물었는데 재무 AI가 기록으로 못 답한 질문. 답은 화면 위 기획 요청 패널에서 한다 (onOpen이 패널을 연다)
+    decision = (
+      <div className="mt-3 space-y-2">
+        <p className="text-sm text-ink-500">기획이 기획서를 쓰다 근거를 되물었는데, 재무 AI가 보낸 기록으로는 답하지 못했습니다. 답하면 기획서 근거로 남습니다.</p>
+        <ul className="space-y-1 text-sm">
+          {(todo.items ?? []).map((item) => (
+            <li key={item.ref} className="flex flex-wrap items-baseline gap-x-2 rounded-xl border border-ink-100 px-3 py-2">
+              <b className="font-mono text-ink-700">{plainText(item.title)}</b>
+              <span className="text-sm text-ink-900">{plainText(item.detail)}</span>
+            </li>
+          ))}
+        </ul>
+        <button type="button" className="btn-primary" onClick={onOpen}>질문에 답하기</button>
       </div>
     );
   } else if (action?.type === "open_tab") {

@@ -40,9 +40,9 @@ export interface SupportCostRecord {
 }
 
 // ---------------------------------------------------------------- §11 overview
-export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "closing_drift" | "vat_drift" | "recon_exception" | "team_budget";
+export type TodoKind = "settlement_batch" | "settlement_deadline" | "closing_confirm" | "closing_drift" | "vat_drift" | "recon_exception" | "team_budget" | "planning_question";
 /** 할 일에서 사람이 바로 누를 결정 */
-export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "open_tab" | "team_budget_approve";
+export type TodoActionType = "closing_confirm" | "settlement_request" | "review_decision" | "recon_note" | "open_tab" | "team_budget_approve" | "planning_answer";
 export interface TodoAction { type: TodoActionType; period?: string; date?: string; review_id?: string | null; month?: string; signature?: string }
 /** 건마다 결정할 때의 한 건 (대사 불일치·감사 의심) */
 export interface TodoItem { ref: string; title: string; detail: string; amount: number | null }
@@ -181,6 +181,22 @@ export interface ReconItem {
 export interface PgCoverage { uploaded: number; generated: number; periods: { from: string; to: string }[] }
 /** 재무가 기획에 보낸 개선 요청 */
 export interface PlanningRequest { source_ref: string; title: string; facts: string[]; request_id: string; context_id: string; outcome: "created" | "linked_duplicate"; duplicate_of: string | null; by: string; by_label?: string; at: string; withdrawn_at?: string; withdrawn_by?: string; withdraw_outcome?: "withdrawn" | "not_found" }
+export interface PlanningQuestion {
+  question_id: string;
+  request_id: string;
+  question: string;
+  about?: string | null;
+  options: string[];
+  asked_at: string;
+  status: "waiting" | "answered";
+  answer?: string;
+  answered_by?: string;
+  answered_by_label?: string;
+  answered_at?: string;
+}
+/** 다른 탭의 "이걸로 개선 요청"이 화면 위 기획 요청 패널을 열 때 보내는 내용 */
+export interface PlanningAsk { title?: string; evidence?: string }
+export const PLANNING_ASK_EVENT = "finance:planning-ask";
 export interface PgImport {
   file: string | null;
   at: string;
@@ -683,6 +699,10 @@ export const finance = {
   planningRequests: () => fin<Envelope<{ requests: PlanningRequest[] }>>("/api/finance/planning-requests"),
   sendPlanningRequest: (title: string, evidence: string) =>
     fin<Envelope<PlanningRequest>>("/api/finance/planning-requests", { method: "POST", body: { title, evidence }, human: true }),
+  /** 기획이 되물었는데 재무 AI가 기록으로 못 답한 질문 (사람이 답한다, 11/13) */
+  planningQuestions: () => fin<Envelope<{ questions: PlanningQuestion[]; waiting: number }>>("/api/finance/planning-questions"),
+  answerPlanningQuestion: (questionId: string, answer: string) =>
+    fin<Envelope<PlanningQuestion>>(`/api/finance/planning-questions/${encodeURIComponent(questionId)}/answer`, { method: "POST", body: { answer }, human: true }),
   /** 보낸 요청 거둬들이기: 기획(withdraw_ticket)에서 지우고 재무 목록에서도 뺀다. 개발로 넘어간 요청은 기획이 거절한다 */
   withdrawPlanningRequest: (sourceRef: string, reason = "") =>
     fin<Envelope<PlanningRequest>>(`/api/finance/planning-requests/${encodeURIComponent(sourceRef)}/withdraw`, { method: "POST", body: { reason }, human: true }),
@@ -810,8 +830,12 @@ export function todayKst(now = new Date()): string {
 }
 
 /** todo.link 또는 kind → 화면 탭 id. 탭 id는 주소 해시(#closing)라 바꾸지 않고 새 탭만 더한다 */
-export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "tax" | "campaigns" | "cash" | "requests";
-export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "campaigns", "cash", "requests"];
+// ⑧ 요청·기록 탭은 없앴다(11/13): 기획 요청은 화면 위 버튼·옆 패널, 고객지원 비용은 ① 결산,
+// 총괄이 맡긴 일은 재무 AI 테스트 옆 "재무 AI가 한 일"로 옮겼다. 옛 주소는 FINANCE_SECTION_TAB·PAGE_ANCHORS가 받는다
+export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "tax" | "campaigns" | "cash";
+export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "campaigns", "cash"];
+/** 탭 밖(화면 위)에 있는 섹션 앵커. 이 해시로 들어오면 그 자리를 연다 */
+export const PAGE_ANCHORS = ["safety-queue", "orchestrator-requests", "planning-requests", "planning-questions"] as const;
 /**
  * 섹션 앵커(#cashflow 같은 Panel id) → 그 섹션이 있는 탭. 탭을 옮긴 섹션의 옛 링크도 새 탭으로 열고 그 섹션으로 내려간다.
  * 섹션을 다른 탭으로 옮기면 여기도 고친다.
@@ -824,7 +848,9 @@ export const FINANCE_SECTION_TAB: Record<string, FinanceTab> = {
   "tax-vat": "tax", "tax-seller-report": "tax", "tax-income": "tax", "tax-exports": "tax", "tax-rules": "tax",
   "campaign-pnl": "campaigns", "campaign-reviews": "campaigns", "campaign-lessons": "campaigns", "campaign-insights": "campaigns", "campaign-opinions": "campaigns",
   cashflow: "cash",
-  "planning-requests": "requests", "support-costs": "requests", "orchestrator-requests": "requests",
+  "support-costs": "closing",
+  // 옛 ⑧ 요청·기록 탭 주소 → 평상시 업무 첫 탭 (기획 요청 패널·재무 AI가 한 일은 PAGE_ANCHORS로 연다)
+  requests: "closing",
 };
 /** 주소 해시(# 없이) → 열 탭. 탭 id도 섹션 앵커도 아니면 null */
 export function financeHashTab(hash: string): FinanceTab | null {
@@ -836,6 +862,7 @@ const TODO_TAB: Record<TodoKind, FinanceTab> = {
   closing_drift: "closing",
   vat_drift: "tax",
   settlement_batch: "settlements", settlement_deadline: "settlements", closing_confirm: "closing", recon_exception: "reconciliation", team_budget: "policy",
+  planning_question: "closing", // 탭이 아니라 화면 위 기획 요청 패널에서 답한다 (Todo가 패널을 연다)
 };
 export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {
   return financeHashTab(t.link ?? "") ?? TODO_TAB[t.kind] ?? "closing";

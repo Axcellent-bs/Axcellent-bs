@@ -5,6 +5,7 @@ import {
   type PgCoverage, type ReconItem, type ReconStatus,
 } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
+import { PlanningAskLink } from "./PlanningRequests";
 
 // ② 매출·PG 대사: 주문 ↔ 결제 ↔ PG 정산을 건별로 맞춘 결과. 일치하지 않는 건만 사람이 메모한다.
 
@@ -177,7 +178,12 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                         {i.status === "matched" || i.status === "pending" ? (
                           i.note && <p className="text-sm text-ink-500">메모: {plainText(i.note)}</p>
                         ) : (
-                          <NoteForm key={i.payment_id} item={i} onSaved={saveItem} />
+                          <>
+                            <NoteForm key={i.payment_id} item={i} onSaved={saveItem} />
+                            <PlanningAskLink className="mt-1"
+                              title={`대사 예외 줄이기: ${RECON_KO[i.status]?.label ?? i.status}`}
+                              evidence={`매출·PG 대사 예외 (${RECON_KO[i.status]?.label ?? i.status})\n주문 ${i.order_id ?? "-"} · 결제 ${i.payment_id}\n주문 ${krw(i.order_amount)} · PG ${krw(i.pg_amount)}${i.reason ? `\n${plainText(i.reason)}` : ""}`} />
+                          </>
                         )}
                       </div>
                     </li>

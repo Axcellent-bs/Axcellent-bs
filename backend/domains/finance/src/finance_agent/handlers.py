@@ -160,6 +160,10 @@ class FinanceRecords:
         # 사람이 재무 화면에서 기획에 보낸 개선 요청 (`POST /api/finance/planning-requests`).
         # 기획이 되물으면(`answer_planning_question`) 이 기록의 근거로 답한다
         self.planning_requests: list[dict[str, Any]] = []
+        # 기획이 되물었는데 재무 기록으로 답하지 못한 질문(`needs_human`). 사람이 화면에서 답한다
+        # question_id → {question_id, request_id, context_id, tenant_id, question, about, options,
+        #               asked_at, status(waiting|answered), answer, answered_by, answered_at}
+        self.planning_questions: dict[str, dict[str, Any]] = {}
         # 예전 저장 파일의 정산 묶음(정산을 고객지원으로 옮기기 전 기록). 쓰지 않고, 옮기는
         # 스크립트가 읽을 수 있게 저장 파일에 그대로 둔다. 지금 묶음 상태는 고객지원에서 받는다
         self.legacy_batches: dict[str, dict[str, Any]] = {}
@@ -603,6 +607,22 @@ async def answer_planning_question(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     out = answer_question(data, request.meta.tenant_id, request.meta.context_id)
+    if out.status == "needs_human":
+        # 사람이 화면(기획에 개선 요청 패널·지금 할 일)에서 답하도록 남긴다. 같은 질문은 한 번만
+        state().records.planning_questions.setdefault(
+            data.question_id,
+            {
+                "question_id": data.question_id,
+                "request_id": data.request_id,
+                "context_id": request.meta.context_id,
+                "tenant_id": request.meta.tenant_id,
+                "question": data.question,
+                "about": data.about,
+                "options": list(data.options),
+                "asked_at": _now().isoformat(),
+                "status": "waiting",
+            },
+        )
     return _result(
         request,
         TaskStatus.COMPLETED,

@@ -46,7 +46,7 @@ DECISION_PATHS = re.compile(
     r"|bank/statement|bank/file|bank/imports/[^/]+/remove|bank/outflows/[^/]+/note"
     r"|exports/run|closing/adjust"
     r"|tax/vat/confirm|other-pnl|pg/file|pg/clear|planning-requests"
-    r"|planning-requests/[^/]+/withdraw"
+    r"|planning-requests/[^/]+/withdraw|planning-questions/[^/]+/answer"
     r"|team-budget/[^/]+/approve)$"
 )
 
