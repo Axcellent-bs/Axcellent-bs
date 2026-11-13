@@ -36,9 +36,14 @@ CREATE TABLE IF NOT EXISTS planning_chat_threads (
   summary TEXT NOT NULL DEFAULT '',
   messages TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  removed_at TEXT,
+  removed_by TEXT
 )
 """
+# 숨김 처리(소프트 삭제): 행은 지우지 않고 removed_at·removed_by만 적는다.
+# 옛 DB는 열이 없어 켤 때 붙인다.
+_REMOVED_COLUMNS = ("removed_at", "removed_by")
 
 
 def _now() -> datetime:
@@ -53,6 +58,13 @@ class ChatStore:
         self._db.row_factory = sqlite3.Row
         with self._lock:
             self._db.execute(_DDL)
+            have = {
+                r["name"]
+                for r in self._db.execute("PRAGMA table_info(planning_chat_threads)").fetchall()
+            }
+            for col in _REMOVED_COLUMNS:
+                if col not in have:
+                    self._db.execute(f"ALTER TABLE planning_chat_threads ADD COLUMN {col} TEXT")
             self._db.commit()
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
@@ -76,12 +88,16 @@ class ChatStore:
         }
 
     def get(self, thread_id: str) -> dict[str, Any] | None:
-        rows = self._rows("SELECT * FROM planning_chat_threads WHERE id = ?", (thread_id,))
+        rows = self._rows(
+            "SELECT * FROM planning_chat_threads WHERE id = ? AND removed_at IS NULL",
+            (thread_id,),
+        )
         return self._view(rows[0]) if rows else None
 
     def list_all(self, limit: int = 100) -> list[dict[str, Any]]:
         rows = self._rows(
-            "SELECT * FROM planning_chat_threads ORDER BY updated_at DESC, seq DESC LIMIT ?",
+            "SELECT * FROM planning_chat_threads WHERE removed_at IS NULL"
+            " ORDER BY updated_at DESC, seq DESC LIMIT ?",
             (limit,),
         )
         return [self._view(r) for r in rows]
@@ -183,6 +199,22 @@ class ChatStore:
 
         return self._update(thread_id, mutate, summary)
 
+    def hide(self, thread_id: str, by: str | None) -> bool:
+        """대화를 숨긴다(행은 남기고 removed_at·removed_by만 적는다).
+
+        이미 숨겼으면 건드리지 않고 False.
+
+        답하는 중이어도 숨긴다. 뒤늦은 답은 `_update`가 `get`으로 못 찾아 무시한다.
+        """
+        with self._lock:
+            cur = self._db.execute(
+                "UPDATE planning_chat_threads SET removed_at = ?, removed_by = ?"
+                " WHERE id = ? AND removed_at IS NULL",
+                (self.clock().isoformat(), by, thread_id),
+            )
+            self._db.commit()
+            return cur.rowcount > 0
+
     @staticmethod
     def _first_question(msgs: list[dict[str, Any]]) -> str:
         first = next((m["text"] for m in msgs if m["role"] == "user"), "")
@@ -192,7 +224,8 @@ class ChatStore:
         """`minutes` 동안 말이 없는 `talking` 대화를 끝낸다. 끝낸 대화 id를 돌려준다."""
         cut = (self.clock() - timedelta(minutes=minutes)).isoformat()
         rows = self._rows(
-            "SELECT id FROM planning_chat_threads WHERE status = 'talking' AND updated_at < ?",
+            "SELECT id FROM planning_chat_threads"
+            " WHERE status = 'talking' AND updated_at < ? AND removed_at IS NULL",
             (cut,),
         )
         for r in rows:
@@ -201,7 +234,9 @@ class ChatStore:
 
     def recover_orphans(self) -> list[str]:
         """켤 때: 답을 만들던 중에 서버가 꺼진 대화는 안내 한 줄을 붙여 `talking`으로 돌린다."""
-        rows = self._rows("SELECT id FROM planning_chat_threads WHERE status = 'answering'")
+        rows = self._rows(
+            "SELECT id FROM planning_chat_threads WHERE status = 'answering' AND removed_at IS NULL"
+        )
         for r in rows:
             self.finish_turn(r["id"], INTERRUPTED, kind="error")
         return [r["id"] for r in rows]

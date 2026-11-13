@@ -30,6 +30,11 @@ class MemoryRepo:
         raw = self.tables[table].get(tuple(key))
         return None if raw is None else json.loads(raw)
 
+    def delete(self, table: str, key: tuple) -> None:
+        if self.fail:
+            raise RuntimeError("db down")
+        self.tables[table].pop(tuple(key), None)
+
     def upsert(self, table: str, values: dict[str, Any], doc: dict[str, Any]) -> None:
         if self.fail:
             raise RuntimeError("db down")

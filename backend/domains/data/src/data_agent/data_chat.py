@@ -595,6 +595,14 @@ class DataChatService:
         self._own(who, thread_id)
         return visible(self.store.close(thread_id) or {}, who)
 
+    def remove(self, who: str, thread_id: str) -> None:
+        """본인 대화를 숨긴다(행은 남기고 `removed_at`만 적는다).
+
+        답을 만드는 중이어도 숨기며, 늦게 온 답은 버려진다."""
+        self._own(who, thread_id)
+        if not self.store.hide(thread_id, who):  # 그 사이 다른 요청이 먼저 숨겼다
+            raise ChatRefused("not_found", f"대화 {thread_id}가 없다")
+
     def send(self, who: str, thread_id: str | None, message: str) -> dict[str, Any]:
         """글을 저장하고 `answering`으로 돌려준다. 답은 백그라운드에서 붙는다."""
         message = message.strip()

@@ -49,6 +49,7 @@ class Table:
     name: str
     pk: tuple[str, ...]
     columns: tuple[str, ...] = ()  # pk 말고 따로 조회·갱신하는 보조 컬럼
+    nullable: tuple[str, ...] = ()  # `columns` 중 비어 있을 수 있는 것 (나중에 더한 컬럼)
 
 
 TABLES: tuple[Table, ...] = (
@@ -70,7 +71,12 @@ TABLES: tuple[Table, ...] = (
     ),
     Table("planning_questions", ("tenant_id", "question_id"), ("context_id", "status")),
     Table("ideas", ("tenant_id", "idea_id"), ("context_id", "status", "kind")),
-    Table("support_chats", ("tenant_id", "chat_id"), ("context_id", "who", "status")),
+    Table(
+        "support_chats",
+        ("tenant_id", "chat_id"),
+        ("context_id", "who", "status", "removed_at", "removed_by"),
+        nullable=("removed_at", "removed_by"),  # 숨김 처리: 지우지 않고 시각·사람만 남긴다
+    ),
     Table("compensation_sequences", ("tenant_id", "context_id")),
     Table("compensation_results", ("tenant_id", "idempotency_key"), ("context_id",)),
 )
@@ -115,11 +121,19 @@ def schema_sql() -> str:
     """테이블을 만드는 SQL. 여러 번 실행해도 안전하다."""
     statements = []
     for table in TABLES:
-        columns = [f"    {c} {column_type(c)} NOT NULL" for c in (*table.pk, *table.columns)]
+        columns = [
+            f"    {c} {column_type(c)}{'' if c in table.nullable else ' NOT NULL'}"
+            for c in (*table.pk, *table.columns)
+        ]
         columns.append("    doc jsonb NOT NULL")
         columns.append(f"    PRIMARY KEY ({', '.join(table.pk)})")
         statements.append(
             f"CREATE TABLE IF NOT EXISTS {table.name} (\n" + ",\n".join(columns) + "\n);"
+        )
+        # 예전에 만든 테이블에는 나중에 더한 컬럼이 없다. 있으면 아무 일도 하지 않는다
+        statements.extend(
+            f"ALTER TABLE {table.name} ADD COLUMN IF NOT EXISTS {c} {column_type(c)};"
+            for c in table.nullable
         )
     statements.append(LEGACY_CLAIMS_MIGRATION)
     statements.append("CREATE INDEX IF NOT EXISTS claims_status_idx ON claims (tenant_id, status);")
@@ -142,6 +156,10 @@ class Repo(Protocol):
 
     def get(self, table: str, key: tuple[Any, ...]) -> dict[str, Any] | None:
         """기본키(`pk` 순서)로 `doc` 한 건을 읽는다. 없으면 None."""
+        ...
+
+    def delete(self, table: str, key: tuple[Any, ...]) -> None:
+        """기본키(`pk` 순서)로 한 건을 지운다. 없어도 오류가 아니다."""
         ...
 
 
@@ -209,6 +227,12 @@ class PgRepo:
         spec = BY_NAME[table]
         params = [values[c] for c in (*spec.pk, *spec.columns)] + [Jsonb(doc)]
         self._run(lambda conn: conn.execute(self._upserts[table], params))
+
+    def delete(self, table: str, key: tuple[Any, ...]) -> None:
+        spec = BY_NAME[table]
+        where = " AND ".join(f"{c} = %s" for c in spec.pk)
+        sql = f"DELETE FROM {spec.name} WHERE {where}"
+        self._run(lambda conn: conn.execute(sql, list(key)))
 
     def close(self) -> None:
         with self._lock:
@@ -515,6 +539,8 @@ class PersistentChatStore(ChatStore):
                 "context_id": thread.context_id,
                 "who": thread.who,
                 "status": thread.status,
+                "removed_at": thread.removed_at,
+                "removed_by": thread.removed_by,
             },
             thread.model_dump(mode="json"),
         )

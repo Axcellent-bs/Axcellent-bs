@@ -20,7 +20,9 @@ data `impact_analysis`의 입력·출력은 계약(`ImpactAnalysisInput`·`Impac
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -89,7 +91,12 @@ class Impact:
 
 class Sources(Protocol):
     async def impact(
-        self, meta: RequestMeta, context_id: str, window: dict[str, Any] | None
+        self,
+        meta: RequestMeta,
+        context_id: str,
+        window: dict[str, Any] | None,
+        *,
+        final: bool = False,
     ) -> Impact | None: ...
 
     async def incident_window(self, context_id: str) -> dict[str, Any] | None: ...
@@ -148,7 +155,12 @@ class MockSources:
         self.seed = seed
 
     async def impact(
-        self, meta: RequestMeta, context_id: str, window: dict[str, Any] | None
+        self,
+        meta: RequestMeta,
+        context_id: str,
+        window: dict[str, Any] | None,
+        *,
+        final: bool = False,
     ) -> Impact | None:
         row = self.seed.get("impacts", {}).get(context_id)
         return _impact_from(row, f"mock:impact:{context_id}") if row else None
@@ -185,6 +197,36 @@ HR_CALL_SECONDS = 10.0
 # data에 같은 A2A 요청이 반복되지 않게 한다 (AI 대화방에 같은 대화가 쌓이지 않게)
 IMPACT_CACHE_SECONDS = 300
 
+impact_log = logging.getLogger("finance.impact")
+
+
+def _started_at(output: dict[str, Any] | None) -> datetime | None:
+    """데이터분석이 처리를 시작한 시각(응답 `started_at`). 없거나 읽을 수 없으면 None."""
+    raw = (output or {}).get("started_at")
+    if not isinstance(raw, str):
+        return None
+    try:
+        at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo is not None else None
+
+
+def _ms(start: datetime | None, end: datetime | None) -> int | None:
+    if start is None or end is None:
+        return None
+    return round((end - start).total_seconds() * 1000)
+
+
+def _log_impact(context_id: str, cache: str, **fields: Any) -> None:
+    """영향 분석 요청 로그 한 줄 (JSON).
+
+    cache: hit(기억한 값) · inflight(묻는 중인 요청을 같이 기다림) · miss(새로 물음).
+    miss는 queue_ms·process_ms·total_ms를 같이 남긴다 (처리 시작 시각을 모르면 null).
+    """
+    line = {"event": "impact_analysis", "context_id": context_id, "cache": cache, **fields}
+    impact_log.info(json.dumps(line, ensure_ascii=False))
+
 
 class LiveSources:
     """data 에이전트 A2A 호출. 응답이 없거나 형식이 다르면 None."""
@@ -200,11 +242,22 @@ class LiveSources:
         return result.output if result.status == TaskStatus.COMPLETED else None
 
     async def impact(
-        self, meta: RequestMeta, context_id: str, window: dict[str, Any] | None
+        self,
+        meta: RequestMeta,
+        context_id: str,
+        window: dict[str, Any] | None,
+        *,
+        final: bool = False,
     ) -> Impact | None:
         """사건 구간의 영향. 구간을 모르면 묻지 않고 None (data 계약은 구간이 필수다).
 
         사건 번호는 입력이 아니라 요청 meta(`context_id`)로 전달된다.
+        `final`(해결로 닫힌 사건)이면 한 번 받은 결과를 계속 쓴다
+        (프로세스 메모리라 다시 켜면 한 번 다시 묻는다).
+        진행 중·degraded 사건은 IMPACT_CACHE_SECONDS마다 다시 묻는다.
+        같은 사건·구간을 이미 묻는 중이면 새로 묻지 않고 그 결과를 같이 기다린다
+        (진행 중 요청 합치기).
+        그 요청이 예외로 끝나면 기다리던 쪽도 같은 예외를 받는다. 실패(None·예외)는 기억하지 않는다.
         """
         payload = impact_input(window)
         if payload is None:
@@ -212,23 +265,66 @@ class LiveSources:
         body = payload.model_dump(mode="json", exclude_none=True)
         key = (context_id, json.dumps(body, sort_keys=True))
         hit = self._impact_cache.get(key)
-        now = time.monotonic()
-        if hit is not None and now - hit[0] < IMPACT_CACHE_SECONDS:
-            return hit[1]
+        if hit is not None and (hit[2] or time.monotonic() - hit[0] < IMPACT_CACHE_SECONDS):
+            _log_impact(context_id, "hit")
+            return hit[1]  # 닫힌 사건이면 시간과 상관없이, 아니면 5분 안
+        pending = self._impact_inflight.get(key)
+        if pending is not None:
+            _log_impact(context_id, "inflight")
+            return await asyncio.shield(pending)  # 기다리던 쪽이 취소돼도 묻는 요청은 계속
+        future: asyncio.Future[Impact | None] = asyncio.get_running_loop().create_future()
+        self._impact_inflight[key] = future
+        try:
+            impact = await self._fetch_impact(meta, context_id, body)
+        except asyncio.CancelledError:
+            future.cancel()
+            raise
+        except Exception as exc:
+            future.set_exception(exc)
+            future.exception()  # 기다리는 쪽이 없어도 "꺼내지 않은 예외" 경고가 나지 않게
+            raise
+        else:
+            future.set_result(impact)
+            if impact is not None:  # 실패는 기억하지 않는다 (다음 호출이 다시 묻는다)
+                self._impact_cache[key] = (time.monotonic(), impact, final)
+            return impact
+        finally:
+            self._impact_inflight.pop(key, None)
+
+    async def _fetch_impact(
+        self, meta: RequestMeta, context_id: str, body: dict[str, Any]
+    ) -> Impact | None:
+        """데이터분석에 한 번 묻는다. 대기(요청~처리 시작)·처리(처리 시작~응답) 시간을 남긴다."""
+        sent = datetime.now(UTC)
         output = await self._ask_data(meta, "impact_analysis", body)
+        received = datetime.now(UTC)
+        started = _started_at(output)
+        # 각각 반올림하면 합이 1ms 어긋날 수 있어 처리 시간은 전체에서 대기를 뺀다
+        total_ms = _ms(sent, received)
+        queue_ms = _ms(sent, started)
+        process_ms = None if queue_ms is None or total_ms is None else total_ms - queue_ms
+        _log_impact(
+            context_id,
+            "miss",
+            queue_ms=queue_ms,
+            process_ms=process_ms,
+            total_ms=total_ms,
+            ok=output is not None,
+        )
         if output is None:
             return None
         try:
             ImpactAnalysisOutput.model_validate(output)
         except ValidationError:
             return None
-        impact = _impact_from(output, f"data:impact_analysis:{context_id}")
-        self._impact_cache[key] = (now, impact)
-        return impact
+        return _impact_from(output, f"data:impact_analysis:{context_id}")
 
     def __init__(self, http_client: httpx.AsyncClient | None = None) -> None:
         self._http = http_client  # 테스트용
-        self._impact_cache: dict[tuple[str, str], tuple[float, Impact | None]] = {}
+        # (사건, 구간) → (받은 시각, 영향, 닫힌 사건인지)
+        self._impact_cache: dict[tuple[str, str], tuple[float, Impact | None, bool]] = {}
+        # (사건, 구간) → 지금 데이터분석에 묻는 중인 요청의 결과
+        self._impact_inflight: dict[tuple[str, str], asyncio.Future[Impact | None]] = {}
         self._headcount_cache: dict[str, tuple[float, TeamHeadcountOutput | None]] = {}
 
     async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None:
@@ -306,6 +402,9 @@ class LiveSources:
                 )
             except ValidationError:
                 return None
+            # 해결로 닫힌 사건은 영향 구간이 더 바뀌지 않는다 → 영향 분석 결과를 계속 기억해도 된다.
+            # degraded는 나중에 복구 신호로 구간이 바뀔 수 있어 아니다
+            final = found.status == "resolved" and found.closed_at is not None
             if found.impact_from and found.impact_to:  # 총괄이 영향 분석에 쓴 구간 (정확)
                 return {
                     "component": found.component,
@@ -314,6 +413,7 @@ class LiveSources:
                     "window_exact": True,
                     "recovered_at": found.recovered_at,
                     "category": None,  # 총괄은 분류를 주지 않는다
+                    "final": final,
                 }
             # 영향 구간을 안 실은 사건: AI 처리 시각으로 대신한다. 장애 시작보다 늦게 시작할 수 있어
             # 앞부분 영향 고객이 빠진다 → 근사로 표시하고 보상 대상 판정에 쓰지 않는다
@@ -324,5 +424,6 @@ class LiveSources:
                 "window_exact": False,
                 "recovered_at": found.recovered_at,
                 "category": None,
+                "final": final,
             }
         return None

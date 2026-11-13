@@ -49,6 +49,7 @@ from ax_contracts.schemas.hr import (
 )
 from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
+    chat_remove,
     claim_mapping,
     data_chat,
     dev_chat,
@@ -1983,6 +1984,33 @@ async def customer_data_purge(conversation_id: int) -> dict:
 def _given(**filters: str | None) -> dict[str, str]:
     """값이 있는 필터만 hr 입력으로 보낸다."""
     return {k: v for k, v in filters.items() if v is not None}
+
+
+# ---------------------------------------------------------------- 1:1 대화 지우기
+# POST /api/dashboard/<부서>-chat/{thread_id}/remove → 그 부서의 `<부서>_chat_remove` (본인 대화만).
+# POST 전용 새 경로다. 기존 GET·close 경로에는 메서드를 더하지 않는다
+# (251 nginx는 경로마다 POST를 연다). 인사 대화는 인사 서비스의 HTTP
+# (/api/hr/chat/{id}/remove)를 화면이 바로 부른다.
+CHAT_REMOVE_AGENTS = (
+    "data", "dev", "finance", "infra", "marketing", "orchestrator", "planning", "support",
+)  # fmt: skip
+
+
+def _chat_remove_route(agent: str) -> None:
+    async def remove_chat(thread_id: str, request: Request) -> dict:
+        return ok(await chat_remove.remove(agent, thread_id, request))
+
+    router.add_api_route(
+        f"/{agent}-chat/{{thread_id}}/remove",
+        remove_chat,
+        methods=["POST"],
+        name=f"{agent}_chat_remove",
+        summary=f"{agent} AI 1:1 대화 지우기 (본인 대화만)",
+    )
+
+
+for _agent in CHAT_REMOVE_AGENTS:
+    _chat_remove_route(_agent)
 
 
 router.include_router(mock_only)

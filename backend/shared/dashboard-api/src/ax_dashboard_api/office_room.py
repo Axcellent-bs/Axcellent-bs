@@ -12,6 +12,10 @@
   말이 오간 대화. 최근에 말이 오간 것이 먼저다(최대 200줄). `room`을 주면 그 방 대화만 준다.
   읽기는 다른 화면 읽기처럼 열려 있다. 이 읽기는 부서 AI를 부르지 않아 공통 로그에 줄이
   쌓이지 않는다.
+- `POST /api/dashboard/office-room/{room_id}/remove` `{from_id}`: 그 방에서 내가 만든 대화를
+  목록에서 지운다(office_room.db 줄 + 부서 대화 서버의 대화). 줄을 지우지 않고
+  removed_at·removed_by를 남기는 숨김 처리라 기록은 보관된다.
+  내가 만든 대화가 없으면 403, 보이는 줄이 없는 방이면 404.
 - `room_id`: 대화가 오간 방. 전체 대화방은 `all`(기본값), 장애·이슈 방은 총괄 사건 `context_id`다.
   같은 부서·같은 대화를 다른 방으로 다시 올려도 처음 방 그대로 둔다(대화가 방을 옮겨 다니지 않게).
 - `from_id`·`from_name`은 화면 로그인 계정(데모 계정)이다. 사람 토큰은 화면이 같이 쓰는 값이라
@@ -29,11 +33,12 @@ import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, Field
 
+from ax_dashboard_api import chat_remove
 from ax_dashboard_api.auth import require_human_for_writes
-from ax_dashboard_api.envelope import ok
+from ax_dashboard_api.envelope import ApiError, ok
 
 DB_ENV = "AX_OFFICE_ROOM_DB"
 DEFAULT_HOURS = 24
@@ -55,12 +60,22 @@ CREATE TABLE IF NOT EXISTS office_threads (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     room_id    TEXT NOT NULL DEFAULT 'all',
+    removed_at TEXT,
+    removed_by TEXT,
     PRIMARY KEY (agent, thread_id)
 );
 CREATE INDEX IF NOT EXISTS idx_office_threads_updated ON office_threads (updated_at);
 """
 # room_id 칸이 생기기 전 파일에도 칸을 붙인 뒤 만든다
 _ROOM_INDEX = "CREATE INDEX IF NOT EXISTS idx_office_threads_room ON office_threads (room_id)"
+# 예전 파일에 없을 수 있는 칸: 칸 이름 → 붙일 정의.
+# 지우기는 줄을 지우지 않고 숨긴 시각·사람(removed_at·removed_by)을 남긴다
+_LATE_COLUMNS = {
+    "room_id": f"TEXT NOT NULL DEFAULT '{ALL_ROOM}'",
+    "removed_at": "TEXT",
+    "removed_by": "TEXT",
+}
+_SHOWN = "removed_at IS NULL"
 
 
 class OfficeThreadBody(BaseModel):
@@ -79,20 +94,18 @@ class OfficeRoomStore:
         if path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
-        self._add_room_column()
+        self._add_late_columns()
 
-    def _add_room_column(self) -> None:
-        """room_id 칸이 없는 예전 파일이면 붙인다.
+    def _add_late_columns(self) -> None:
+        """room_id·removed_at·removed_by 칸이 없는 예전 파일이면 붙인다.
 
         이미 있으면 아무것도 하지 않는다(여러 번 켜도 안전).
         """
         with self._conn:
             cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(office_threads)")}
-            if "room_id" not in cols:
-                self._conn.execute(
-                    "ALTER TABLE office_threads"
-                    f" ADD COLUMN room_id TEXT NOT NULL DEFAULT '{ALL_ROOM}'"
-                )
+            for name, spec in _LATE_COLUMNS.items():
+                if name not in cols:
+                    self._conn.execute(f"ALTER TABLE office_threads ADD COLUMN {name} {spec}")
             self._conn.execute(_ROOM_INDEX)
 
     def touch(self, body: OfficeThreadBody, now: datetime) -> dict[str, Any]:
@@ -121,8 +134,8 @@ class OfficeRoomStore:
         return dict(row)
 
     def recent(self, since: datetime, room: str | None = None) -> list[dict[str, Any]]:
-        """`since` 뒤에 말이 오간 대화. `room`을 주면 그 방만."""
-        where, args = "updated_at >= ?", [since.isoformat()]
+        """`since` 뒤에 말이 오간 대화. `room`을 주면 그 방만. 숨긴(지운) 줄은 뺀다."""
+        where, args = f"updated_at >= ? AND {_SHOWN}", [since.isoformat()]
         if room is not None:
             where += " AND room_id = ?"
             args.append(room)
@@ -133,6 +146,31 @@ class OfficeRoomStore:
                 (*args, MAX_ROWS),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def in_room(self, room: str) -> list[dict[str, Any]]:
+        """그 방의 보이는 대화 줄 전부 (기간과 상관없이, 숨긴 줄은 뺀다)."""
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM office_threads WHERE room_id = ? AND {_SHOWN}"
+                " ORDER BY created_at, rowid",
+                (room,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def hide(self, room: str, keys: list[tuple[str, str]], by: str, now: datetime) -> int:
+        """그 방의 (부서, 대화 id) 줄을 숨긴다(줄은 남기고 removed_at·removed_by를 적는다).
+
+        이미 숨긴 줄은 그대로 둔다(처음 숨긴 시각·사람 유지). 새로 숨긴 줄 수를 돌려준다.
+        """
+        with self._lock, self._conn:
+            return sum(
+                self._conn.execute(
+                    "UPDATE office_threads SET removed_at = ?, removed_by = ?"
+                    f" WHERE room_id = ? AND agent = ? AND thread_id = ? AND {_SHOWN}",
+                    (now.isoformat(), by, room, agent, thread_id),
+                ).rowcount
+                for agent, thread_id in keys
+            )
 
 
 _store: OfficeRoomStore | None = None
@@ -178,3 +216,63 @@ def list_office_threads(
 ) -> dict[str, Any]:
     rows = get_store().recent(_now() - timedelta(hours=hours), room)
     return ok(rows, total=len(rows))
+
+
+class RemoveRoomBody(BaseModel):
+    """지우는 사람(화면 로그인 계정 id). 단톡방 줄에 저장한 보낸 사람(from_id)과 맞춰 본다."""
+
+    from_id: str = Field(min_length=1, max_length=64)
+
+
+FORBIDDEN_TEXT = "만든 사람만 삭제할 수 있어요"
+
+
+@router.post("/office-room/{room_id}/remove")
+async def remove_office_room(
+    body: RemoveRoomBody,
+    request: Request,
+    room_id: str = Path(min_length=1, max_length=64),
+) -> dict[str, Any]:
+    """단톡방에서 내가 만든(처음 보낸) 대화를 목록에서 지운다. POST 전용.
+
+    지우기는 숨김 처리다: 줄을 지우지 않고 removed_at·removed_by를 남긴다
+    (기록은 보관, 되돌릴 수 있음).
+    1. 그 방에 보이는 줄이 없으면 404, 내가 만든 줄이 없으면 403 "만든 사람만 삭제할 수 있어요"
+    2. 내가 만든 줄을 office_room.db에서 숨긴다 (다른 사람이 만든 줄은 그대로)
+    3. 각 줄의 부서 대화 서버에서 그 대화를 숨긴다(`<부서>_chat_remove`, 인사는 HTTP).
+       한 부서가 실패해도 나머지는 계속하고 부서별 결과를 돌려준다.
+       이미 없는 대화(404)는 지운 것으로 본다
+    다른 화면은 목록(GET)을 다시 읽을 때 사라진 것을 본다.
+    """
+    store = get_store()
+    rows = store.in_room(room_id)
+    if not rows:
+        raise ApiError(404, "NOT_FOUND", "없는 단톡방이에요")
+    mine = [r for r in rows if r["from_id"] == body.from_id]
+    if not mine:
+        raise ApiError(403, "FORBIDDEN", FORBIDDEN_TEXT)
+    keys = [(r["agent"], r["thread_id"]) for r in mine]
+    removed = store.hide(room_id, keys, body.from_id, _now())
+    results: list[dict[str, Any]] = []
+    for r in mine:
+        one: dict[str, Any] = {"agent": r["agent"], "thread_id": r["thread_id"]}
+        try:
+            await chat_remove.remove(r["agent"], r["thread_id"], request)
+            results.append(one | {"ok": True})
+        except ApiError as exc:
+            if exc.status_code == 404:  # 부서 쪽에 이미 없다 = 지워진 것
+                results.append(one | {"ok": True, "note": "이미 없음"})
+            else:
+                results.append(
+                    one | {"ok": False, "status": exc.status_code, "reason": exc.message}
+                )
+        except Exception as exc:  # noqa: BLE001 - 한 부서 실패가 나머지를 막지 않게 한다
+            results.append(one | {"ok": False, "status": 502, "reason": type(exc).__name__})
+    return ok(
+        {
+            "room_id": room_id,
+            "removed": removed,
+            "kept": len(rows) - len(mine),
+            "departments": results,
+        }
+    )

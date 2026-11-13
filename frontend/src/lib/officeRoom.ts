@@ -43,6 +43,38 @@ async function call(init?: RequestInit, query = ""): Promise<unknown> {
   return body.data;
 }
 
+/** 단톡방 지우기 결과: 부서마다 지웠는지 (한 부서가 실패해도 나머지는 지운다) */
+export interface RoomRemoveResult {
+  roomId: string;
+  removed: number;
+  kept: number;
+  departments: { agent: string; threadId: string; ok: boolean; status?: number; reason?: string }[];
+}
+
+/** 단톡방에서 내가 만든 대화를 지운다. POST `<목록>/<방>/remove` (만든 사람이 아니면 403, 없는 방 404) */
+export async function removeOfficeRoom(roomId: string, fromId: string): Promise<RoomRemoveResult> {
+  const res = await fetch(`${URL}/${encodeURIComponent(roomId)}/remove`, {
+    method: "POST", cache: "no-store", headers: headers(), body: JSON.stringify({ from_id: fromId }),
+  });
+  const body = (await res.json().catch(() => null)) as { data?: Record<string, unknown>; error?: { message?: string } } | null;
+  if (!res.ok || !body?.data) throw new RoomRemoveError(body?.error?.message ?? `단톡방 목록 서버 응답 ${res.status}`, res.status);
+  const d = body.data;
+  const deps = Array.isArray(d.departments) ? (d.departments as Record<string, unknown>[]) : [];
+  return {
+    roomId: String(d.room_id ?? roomId),
+    removed: Number(d.removed ?? 0),
+    kept: Number(d.kept ?? 0),
+    departments: deps.map((x) => ({
+      agent: String(x.agent ?? ""), threadId: String(x.thread_id ?? ""), ok: x.ok === true,
+      ...(typeof x.status === "number" ? { status: x.status } : {}), ...(typeof x.reason === "string" ? { reason: x.reason } : {}),
+    })),
+  };
+}
+
+export class RoomRemoveError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 /** 서버가 받는 가장 긴 기간(시간). dashboard-api office_room.MAX_HOURS */
 export const OFFICE_ROOM_MAX_HOURS = 168;
 

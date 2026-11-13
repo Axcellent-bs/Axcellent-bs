@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from ax_agent_template import execute as gate_module
 from ax_agent_template import llm
 from ax_contracts.schemas import ExecuteDecision
+from ax_contracts.schemas import chat as chat_schemas
 from ax_contracts.schemas import planning as planning_schemas
 from ax_workflow_testing import plan
 from planning_agent.domain.metrics import compute_metrics
@@ -35,7 +36,8 @@ def test_agent_card_format_and_served() -> None:
     skills = {s.id: s for s in card.skills}
     intake = {"create_ticket", "receive_planning_answer"}  # 요청 접수 (#174)·되묻기 답
     proposals = {"receive_insight", "receive_campaign_update"}  # 기획 제안 (11/4)
-    chat = {f"planning_chat_{x}" for x in ("send", "list", "get", "close")}  # 직접 대화 (11/5)
+    # 직접 대화 (11/5)
+    chat = {f"planning_chat_{x}" for x in ("send", "list", "get", "close", "remove")}
     rest = {"receive_dev_result", "request_release_check"}
     assert set(skills) == intake | proposals | chat | rest
     for name in chat:
@@ -59,6 +61,10 @@ def test_agent_card_format_and_served() -> None:
         assert skill.verifier is None
         for ref in (skill.input_schema, skill.output_schema):
             path, name = ref.split("#")
+            if name == "ChatRemoveOutput":  # 부서 공용 대화 지우기 결과
+                assert path == "shared/contracts/src/ax_contracts/schemas/chat.py"
+                assert hasattr(chat_schemas, name)
+                continue
             assert path == "shared/contracts/src/ax_contracts/schemas/planning.py"
             assert hasattr(planning_schemas, name)
     served = TestClient(app).get("/.well-known/agent-card.json").json()

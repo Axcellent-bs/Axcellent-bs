@@ -91,6 +91,7 @@ def test_agent_card(client: TestClient) -> None:
         # 사람과 직접 대화 (dashboard-api → 재무)
         "finance_chat_send",
         "finance_chat_close",
+        "finance_chat_remove",
         "finance_chat_list",
         "finance_chat_get",
     }
@@ -104,7 +105,7 @@ def test_agent_card(client: TestClient) -> None:
     record = skills["record_incident_finance"]
     assert (record.grade, record.allowed_requesters) == ("read", ["orchestrator"])
     served = client.get("/.well-known/agent-card.json").json()
-    assert served["name"] == "finance" and len(served["skills"]) == 13
+    assert served["name"] == "finance" and len(served["skills"]) == 14
 
 
 # ------------------------------------------- 금액 다시 계산 (예전 verify_amount, recheck.py)

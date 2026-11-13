@@ -37,9 +37,14 @@ CREATE TABLE IF NOT EXISTS orchestrator_chat_threads (
   summary TEXT NOT NULL DEFAULT '',
   messages TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  removed_at TEXT,
+  removed_by TEXT
 )
 """
+# 숨김 처리(지우지 않고 `removed_at`·`removed_by`만 남긴다)를 더하기 전에 만든 DB에 붙일 컬럼
+_ADDED_COLUMNS = ("removed_at", "removed_by")
+_LIVE = "removed_at IS NULL"  # 숨긴 대화는 모든 조회·정리에서 뺀다
 
 
 def _now() -> datetime:
@@ -54,6 +59,13 @@ class ChatStore:
         self._db.row_factory = sqlite3.Row
         with self._lock:
             self._db.execute(_DDL)
+            info = self._db.execute("PRAGMA table_info(orchestrator_chat_threads)")
+            have = {r["name"] for r in info}
+            for column in _ADDED_COLUMNS:
+                if column not in have:
+                    self._db.execute(
+                        f"ALTER TABLE orchestrator_chat_threads ADD COLUMN {column} TEXT"
+                    )
             self._db.commit()
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
@@ -77,12 +89,15 @@ class ChatStore:
         }
 
     def get(self, thread_id: str) -> dict[str, Any] | None:
-        rows = self._rows("SELECT * FROM orchestrator_chat_threads WHERE id = ?", (thread_id,))
+        rows = self._rows(
+            f"SELECT * FROM orchestrator_chat_threads WHERE id = ? AND {_LIVE}", (thread_id,)
+        )
         return self._view(rows[0]) if rows else None
 
     def list_all(self, limit: int = 100) -> list[dict[str, Any]]:
         rows = self._rows(
-            "SELECT * FROM orchestrator_chat_threads ORDER BY updated_at DESC, seq DESC LIMIT ?",
+            f"SELECT * FROM orchestrator_chat_threads WHERE {_LIVE}"
+            " ORDER BY updated_at DESC, seq DESC LIMIT ?",
             (limit,),
         )
         return [self._view(r) for r in rows]
@@ -93,7 +108,7 @@ class ChatStore:
             row = self._db.execute(
                 "SELECT COALESCE(MAX(seq), 0) AS n FROM orchestrator_chat_threads"
             ).fetchone()
-            seq = int(row["n"]) + 1
+            seq = int(row["n"]) + 1  # 숨긴 대화의 행도 남아 있어 그 번호를 다시 쓰지 않는다
             thread_id = f"orchchat-{seq}"
             self._db.execute(
                 "INSERT INTO orchestrator_chat_threads"
@@ -184,6 +199,19 @@ class ChatStore:
 
         return self._update(thread_id, mutate, summary)
 
+    def remove(self, thread_id: str, by: str) -> bool:
+        """대화를 숨긴다(행은 지우지 않고 `removed_at`·`removed_by`만 남긴다).
+
+        보이는 대화를 숨겼으면 True. 없거나 이미 숨겼으면 False이고 먼저 남긴 기록은 그대로다."""
+        with self._lock:
+            cur = self._db.execute(
+                "UPDATE orchestrator_chat_threads SET removed_at = ?, removed_by = ?"
+                f" WHERE id = ? AND {_LIVE}",
+                (self.clock().isoformat(), by, thread_id),
+            )
+            self._db.commit()
+            return cur.rowcount > 0
+
     @staticmethod
     def _first_question(msgs: list[dict[str, Any]]) -> str:
         first = next((m["text"] for m in msgs if m["role"] == "user"), "")
@@ -193,7 +221,8 @@ class ChatStore:
         """`minutes` 동안 말이 없는 `talking` 대화를 끝낸다. 끝낸 대화 id를 돌려준다."""
         cut = (self.clock() - timedelta(minutes=minutes)).isoformat()
         rows = self._rows(
-            "SELECT id FROM orchestrator_chat_threads WHERE status = 'talking' AND updated_at < ?",
+            "SELECT id FROM orchestrator_chat_threads"
+            f" WHERE status = 'talking' AND updated_at < ? AND {_LIVE}",
             (cut,),
         )
         for r in rows:
@@ -202,7 +231,9 @@ class ChatStore:
 
     def recover_orphans(self) -> list[str]:
         """켤 때: 답을 만들던 중에 서버가 꺼진 대화는 안내 한 줄을 붙여 `talking`으로 돌린다."""
-        rows = self._rows("SELECT id FROM orchestrator_chat_threads WHERE status = 'answering'")
+        rows = self._rows(
+            f"SELECT id FROM orchestrator_chat_threads WHERE status = 'answering' AND {_LIVE}"
+        )
         for r in rows:
             self.finish_turn(r["id"], INTERRUPTED, kind="error")
         return [r["id"] for r in rows]

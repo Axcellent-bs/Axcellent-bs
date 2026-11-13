@@ -88,6 +88,16 @@
       "allowed_requesters": ["dashboard-api"],
       "verifier": null,
       "priority": "required"
+    },
+    {
+      "id": "infra_chat_remove",
+      "description": "인프라 AI 대화 지우기(요청한 사람 본인 대화만, 저장소에서 삭제). 대화 기록만 지우고 업무 상태는 바꾸지 않는다. 거절 outcome: not_found·forbidden(남의 대화).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#InfraChatRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/chat.py#ChatRemoveOutput",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "required"
     }
   ]
 }

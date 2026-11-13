@@ -50,6 +50,7 @@ from ax_contracts.schemas import (
     Evidence,
     TaskStatus,
 )
+from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.data import (
     AccuracyReportInput,
     ActivityReportInput,
@@ -287,6 +288,9 @@ def _shop_unavailable(request: AgentRequest, error: ShopUnavailable, query: str)
 
 
 async def impact_analysis(request: AgentRequest) -> AgentResult:
+    # 처리를 시작한 시각을 응답에 싣는다: 부른 쪽(재무)이 대기·처리 시간을 나눠 남긴다.
+    # 분석 결과(analyze_impact)는 같은 입력이면 같게 두고, 시각은 여기서만 붙인다
+    started_at = datetime.now(UTC)
     data = _parse(request, ImpactAnalysisInput)
     if isinstance(data, AgentResult):
         return data
@@ -298,10 +302,11 @@ async def impact_analysis(request: AgentRequest) -> AgentResult:
         return _unavailable(request, error)
     except ShopUnavailable as error:
         return _shop_unavailable(request, error, "shop_failed_orders")
+    output = result.output.model_copy(update={"started_at": started_at})
     return _result(
         request,
         TaskStatus.COMPLETED,
-        output=result.output.model_dump(mode="json"),
+        output=output.model_dump(mode="json"),
         evidence=result.evidence,
         fallback=result.fallback,
         **_fallback_reason(result),
@@ -1526,11 +1531,20 @@ async def data_chat_close(request: AgentRequest) -> AgentResult:
     return await _chat_call(request, DataChatRef, "data_chat_close", run)
 
 
+async def data_chat_remove(request: AgentRequest) -> AgentResult:
+    def run(d: DataChatRef) -> dict[str, Any]:
+        get_chat().remove(d.who, d.thread_id)
+        return ChatRemoveOutput(thread_id=d.thread_id, removed=True).model_dump(mode="json")
+
+    return await _chat_call(request, DataChatRef, "data_chat_remove", run)
+
+
 HANDLERS = {
     "data_chat_send": data_chat_send,
     "data_chat_list": data_chat_list,
     "data_chat_get": data_chat_get,
     "data_chat_close": data_chat_close,
+    "data_chat_remove": data_chat_remove,
     "impact_analysis": impact_analysis,
     "receive_idea_report": receive_idea_report,
     "list_idea_reports": list_idea_reports,

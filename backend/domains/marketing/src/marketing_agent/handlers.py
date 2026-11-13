@@ -30,6 +30,7 @@ from ax_contracts.schemas import (
     NoticePublishedData,
     TaskStatus,
 )
+from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import shop_client
 from marketing_agent.brief_handoff import (
@@ -946,6 +947,20 @@ async def marketing_chat_close(request: AgentRequest) -> AgentResult:
     return _chat_done(request, "marketing_chat_close", {"thread": thread})
 
 
+async def marketing_chat_remove(request: AgentRequest) -> AgentResult:
+    data = _parse(request, ChatThreadRef)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        STATE.chat.remove(data.who, data.thread_id)
+    except ChatRefused as refused:
+        return _chat_failed(request, refused)
+    except ChatStorageError:
+        return _chat_storage_failed(request)
+    out = ChatRemoveOutput(thread_id=data.thread_id, removed=True)
+    return _chat_done(request, "marketing_chat_remove", out.model_dump(mode="json"))
+
+
 HANDLERS = {
     "draft_notice": draft_notice,
     "publish_notice": publish_notice,
@@ -970,4 +985,5 @@ HANDLERS = {
     "marketing_chat_list": marketing_chat_list,
     "marketing_chat_get": marketing_chat_get,
     "marketing_chat_close": marketing_chat_close,
+    "marketing_chat_remove": marketing_chat_remove,
 }

@@ -346,6 +346,18 @@
       "priority": "recommended"
     },
     {
+      "id": "support_chat_remove",
+      "description": "고객지원 AI 대화 지우기(요청한 사람 본인 대화만, 저장소에서 삭제). 대화 기록만 지우고 업무 상태는 바꾸지 않는다. 거절 outcome: not_found·forbidden(남의 대화).",
+      "input_schema": "agents/support/src/support_agent/chat_schemas.py#ChatCloseInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/chat.py#ChatRemoveOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "support_chat_list",
       "description": "직접 대화 목록을 최근 순으로 읽는다. 열람 권한대로 본인 대화는 원문, 담당·관리자는 다른 사람 대화의 요약(일이 생긴 대화는 원문), 그 밖의 사람은 다른 사람 대화를 보지 못한다. 상태를 바꾸지 않는다.",
       "input_schema": "agents/support/src/support_agent/chat_schemas.py#ChatListInput",

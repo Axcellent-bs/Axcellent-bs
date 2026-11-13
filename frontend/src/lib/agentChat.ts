@@ -1,3 +1,4 @@
+import { SCREEN_KEEP_OUTCOMES, closedTimes, isBackgroundRead } from "./commFilter";
 import type { ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
 import type { CommLine, CommOutcome } from "./types";
@@ -553,8 +554,6 @@ export const CHAT_READ_SKILL = /_chat_(list|get)$/;
 // 화면이 보낸 대화(*_chat_send·*_chat_close)도 뺀다: 사람 대화는 대화 창구에서 말풍선으로 따로 보이므로 같은 일이 두 번 보인다.
 // 하루 한 번 보관 기간 청소(purge_expired_inquiries·purge_expired_claims)도 성공하면 뺀다.
 const SCREEN = "dashboard-api";
-/** 실패·보류·거절·사람 확인은 화면 줄이어도 남긴다 */
-const SCREEN_KEEP_OUTCOMES: ReadonlySet<string> = new Set(["failed", "rejected", "held", "needs_human"]);
 
 /** 화면(dashboard-api)이 주고받은 줄 중 기록에서 뺄 줄인가 */
 export function isScreenRead(line: CommLine): boolean {
@@ -562,22 +561,16 @@ export function isScreenRead(line: CommLine): boolean {
   return !SCREEN_KEEP_OUTCOMES.has(line.outcome);
 }
 
-// 부서끼리 조회(skill 등급 read)만 주고받은 줄도 뺀다: 화면 탭을 열 때마다 재무 → 인사 팀 인원, 문의 → 기억 카드 검색 같은 줄이
-// 쌓여서다. 사건(ctx_inc_)·변경 요청(ctx_req_) 안의 조회는 일의 흐름이라 남기고, 실패·보류·거절·사람 확인도 남긴다. 원본 공통 로그는 그대로
-const WORK_CONTEXT = /^ctx_(inc|req)_/;
-
-/** 일과 상관없는 조회 줄인가 (사건·요청 밖, 성공·진행 중) */
-export function isBackgroundRead(line: CommLine): boolean {
-  if (line.grade !== "read" || SCREEN_KEEP_OUTCOMES.has(line.outcome)) return false;
-  return !WORK_CONTEXT.test(line.context_id ?? "");
-}
+// 부서끼리 조회만 주고받은 줄(사건·요청 밖, 또는 사건이 닫힌 뒤)은 lib/commFilter.ts가 가른다
+export { closedTimes, isBackgroundRead };
 
 export function commItems(comms: CommLine[], incidents: OrchIncident[], executions: ExecutionRecord[]) {
   const byId = new Map(incidents.map((i) => [i.context_id, i]));
   const ids = new Set(byId.keys());
   const safetyIds = new Set(executions.map((e) => e.execution_id));
+  const closedAt = closedTimes(incidents);
   return comms
-    .filter((line) => !CHAT_READ_SKILL.test(line.skill ?? "") && !isScreenRead(line) && !isBackgroundRead(line))
+    .filter((line) => !CHAT_READ_SKILL.test(line.skill ?? "") && !isScreenRead(line) && !isBackgroundRead(line, closedAt))
     .map((line) => ({ line, room: commRoom(line, ids) }))
     .filter(({ line, room }) => !coveredByIncident(line, byId.get(room)))
     .map(({ line, room }) => commItem(line, room, safetyIds));

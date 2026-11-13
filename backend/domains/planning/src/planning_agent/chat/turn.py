@@ -146,6 +146,13 @@ class ChatService:
         self._own(who, thread_id)
         return visible(self.store.close(thread_id) or {}, who)
 
+    def remove(self, who: str | None, thread_id: str) -> str:
+        """본인 대화를 숨긴다(행은 남기고 숨긴 시각·사람만 적는다). 숨긴 대화 id를 돌려준다."""
+        self._own(who, thread_id)
+        if not self.store.hide(thread_id, who):
+            raise ChatRefused("not_found", f"대화 {thread_id}가 없다")
+        return thread_id
+
     def send(self, who: str | None, thread_id: str | None, message: str) -> dict[str, Any]:
         """글을 저장하고 `answering`으로 돌려준다. 답은 뒤에서 붙는다(이벤트 루프 안에서 부른다)."""
         message = message.strip()

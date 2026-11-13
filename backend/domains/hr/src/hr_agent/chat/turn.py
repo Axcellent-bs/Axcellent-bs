@@ -78,4 +78,7 @@ async def turn(
         summary = out.summary.strip() or None
     except Exception:  # noqa: BLE001 - 이유만 남기고 대화는 이어 간다
         reply, summary = "LLM 응답을 받지 못했어요. 잠시 뒤 다시 보내 주세요.", None
-    return threads.append(svc, th["id"], "assistant", reply, summary)
+    try:
+        return threads.append(svc, th["id"], "assistant", reply, summary)
+    except KeyError:  # 답을 만드는 사이 본인이 대화를 지웠다. 되살리지 않는다
+        raise ChatRefused(404, "NOT_FOUND", f"대화 {th['id']}가 없다") from None

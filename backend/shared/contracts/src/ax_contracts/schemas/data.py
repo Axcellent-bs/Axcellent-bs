@@ -42,6 +42,9 @@ class ImpactAnalysisOutput(AxModel):
     # 평소보다 더 실패한 건수: 구간 장애 쪽 실패 − 지난 7일 같은 시각 ±1시간의 평소 실패
     # (구간 길이만큼, 반올림, 0 미만이면 0). 지난 7일 자료가 없으면 None. 예전 응답에는 없다
     excess_failed_order_count: int | None = Field(default=None, ge=0)
+    # 데이터분석이 이 요청을 처리하기 시작한 시각. 부른 쪽이 대기(요청~시작)와
+    # 처리(시작~응답) 시간을 나눠 남기는 데 쓴다(재무 영향 분석 로그). 예전 응답에는 없다
+    started_at: UtcDatetime | None = None
 
     @model_validator(mode="after")
     def _customer_count_matches_ids(self) -> Self:

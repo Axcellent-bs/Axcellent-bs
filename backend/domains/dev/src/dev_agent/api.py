@@ -522,7 +522,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         rows = sorted(
             [
                 c
-                for c in svc.state.chats
+                for c in svc.live_chats()
                 if dev_chat.seen_from(c, SCREEN) and dev_chat.of_account(c, account)
             ],
             key=lambda c: (c.updated_at, int(c.id.split("-")[-1] or 0)),

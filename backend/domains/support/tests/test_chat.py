@@ -289,6 +289,105 @@ def test_who_may_close(env: Spawned, llm: MockLLMClient) -> None:
     assert legacy["outcome"] == "forbidden"
 
 
+def test_remove_deletes_only_the_owners_thread(env: Spawned, llm: MockLLMClient) -> None:
+    send("공용", "질문")
+    env.run()
+    mine = call("support_chat_remove", {"thread_id": "chat-1", "viewer": "공용"})
+    assert mine["status"] == "completed" and not mine.get("outcome"), mine
+    assert mine["output"] == {"thread_id": "chat-1", "removed": True}
+    assert chat_handlers.CHATS.get("chat-1") is None
+    after = call("support_chat_get", {"thread_id": "chat-1", "viewer": "공용"})
+    assert after["outcome"] == "not_found"
+
+
+def test_remove_refuses_someone_elses_and_unknown(env: Spawned, llm: MockLLMClient) -> None:
+    send("공용", "질문")
+    env.run()
+    for role in ("member", "admin"):  # 관리자도 남의 대화는 못 지운다
+        nope = call("support_chat_remove", {"thread_id": "chat-1", "viewer": "병환", "role": role})
+        assert nope["outcome"] == "forbidden"
+    assert chat_handlers.CHATS.get("chat-1") is not None
+    unknown = call("support_chat_remove", {"thread_id": "chat-9", "viewer": "공용"})
+    assert unknown["outcome"] == "not_found"
+
+
+def test_removing_while_answering_does_not_bring_the_thread_back(
+    env: Spawned, llm: MockLLMClient
+) -> None:
+    send("공용", "질문")  # 답을 아직 안 돌렸다 (answering)
+    assert chat_handlers.CHATS.get("chat-1").status == "answering"
+    call("support_chat_remove", {"thread_id": "chat-1", "viewer": "공용"})
+    env.run()  # 늦은 답이 끝난다
+    assert chat_handlers.CHATS.get("chat-1") is None
+    fresh = thread_of(send("공용", "새 질문"))
+    assert fresh["id"] != "chat-1"  # 지운 번호를 다시 쓰지 않는다
+
+
+def test_remove_also_hides_in_the_database(memory_repo: type) -> None:
+    repo = memory_repo()
+    store = PersistentChatStore(repo)
+    t = store.create("예진", "질문", CTX)
+    assert store.remove(t.id, "예진") is True and store.remove(t.id, "예진") is False
+    assert PersistentChatStore(repo).get(t.id) is None
+
+
+def test_removed_thread_disappears_but_the_row_stays(memory_repo: type) -> None:
+    repo = memory_repo()
+    store = PersistentChatStore(repo)
+    t = store.create("예진", "질문", CTX)
+    store.remove(t.id, "예진")
+    assert store.get(t.id) is None and store.all() == [] and store.find_by_ref("x") is None
+    row = repo.get("support_chats", (t.tenant_id, t.id))
+    assert row is not None and row["removed_by"] == "예진" and row["removed_at"]
+    assert PersistentChatStore(repo).all() == []  # 재시작해도 숨긴 채다
+
+
+def test_removing_twice_keeps_the_first_record(env: Spawned, llm: MockLLMClient) -> None:
+    send("공용", "질문")
+    env.run()
+    call("support_chat_remove", {"thread_id": "chat-1", "viewer": "공용"})
+    first = chat_handlers.CHATS._threads["chat-1"]
+    again = call("support_chat_remove", {"thread_id": "chat-1", "viewer": "공용"})
+    assert again["outcome"] == "not_found"
+    kept = chat_handlers.CHATS._threads["chat-1"]
+    assert (kept.removed_at, kept.removed_by) == (first.removed_at, "공용")
+    assert kept.removed_at is not None
+
+
+def test_late_answer_does_not_revive_a_removed_thread(env: Spawned, llm: MockLLMClient) -> None:
+    send("공용", "질문")
+    call("support_chat_remove", {"thread_id": "chat-1", "viewer": "공용"})
+    env.run()
+    assert chat_handlers.CHATS.get("chat-1") is None
+    stored = chat_handlers.CHATS._threads["chat-1"]
+    assert stored.removed_at is not None and stored.removed_by == "공용"
+    store = ChatStore()
+    t = store.create("공용", "질문", CTX)
+    store.remove(t.id, "공용")
+    store.add_message(t.id, "assistant", "늦은 답")  # 직접 덧붙여도 숨김은 풀리지 않는다
+    assert store.get(t.id) is None and store._threads[t.id].removed_at is not None
+
+
+def test_old_stored_thread_without_removed_fields_loads(memory_repo: type) -> None:
+    repo = memory_repo()
+    store = PersistentChatStore(repo)
+    t = store.create("예진", "질문", CTX)
+    old = t.model_dump(mode="json")
+    del old["removed_at"], old["removed_by"]
+    repo.tables["support_chats"][(t.tenant_id, t.id)] = json.dumps(old, ensure_ascii=False)
+    loaded = PersistentChatStore(repo)
+    assert [x.id for x in loaded.all()] == [t.id]
+    assert loaded.remove(t.id, "예진") is True and loaded.all() == []
+
+
+def test_schema_adds_the_removed_columns_idempotently() -> None:
+    from support_agent.persistence import schema_sql
+
+    sql = schema_sql()
+    for column in ("removed_at", "removed_by"):
+        assert f"ALTER TABLE support_chats ADD COLUMN IF NOT EXISTS {column} text;" in sql
+
+
 def test_closing_twice_returns_the_same_thread(env: Spawned, llm: MockLLMClient) -> None:
     thread_of(send("공용", "질문"))
     env.run()
@@ -539,6 +638,7 @@ def test_chat_skills_are_on_the_inquiry_card_and_gated() -> None:
     for skill, grade in (
         ("support_chat_send", "A"),
         ("support_chat_close", "A"),
+        ("support_chat_remove", "A"),
         ("support_chat_list", "read"),
         ("support_chat_get", "read"),
     ):

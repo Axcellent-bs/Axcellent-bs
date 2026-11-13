@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from ax_agent_template.llm import LLMSettings
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 from ax_workflow.core import ActionError
+from ax_workflow.models import ChatThread
 from dev_agent import coder, dev_chat, handlers, repo_routing, vcs
 from dev_agent.dev_chat import ChatTurn
 from dev_agent.main import app
@@ -183,6 +184,87 @@ def test_a2a_skills_use_the_same_chats(service: PlanningService, adapter) -> Non
         assert bad_mode.status != TaskStatus.COMPLETED
 
     asyncio.run(run())
+
+
+def test_a2a_remove_deletes_only_my_thread(service: PlanningService, adapter) -> None:
+    dev_chat.set_llm(ChatLLM([ASK]))
+
+    async def run() -> None:
+        sent = await handlers.dev_chat_send(
+            _req("dev_chat_send", {"who": "yejin", "message": "배너 바꿔 줘"})
+        )
+        await dev_chat.wait_idle()
+        tid = sent.output["thread"]["id"]
+        denied = await handlers.dev_chat_remove(
+            _req("dev_chat_remove", {"who": "jaehun", "thread_id": tid})
+        )
+        assert denied.status == TaskStatus.FAILED and denied.outcome == "forbidden"
+        assert service.chat_of(tid) is not None  # 남의 대화는 그대로
+        gone = await handlers.dev_chat_remove(
+            _req("dev_chat_remove", {"who": "yejin", "thread_id": tid})
+        )
+        assert gone.status == TaskStatus.COMPLETED
+        assert gone.output["thread_id"] == tid and gone.output["removed"] is True
+        assert service.chat_of(tid) is None
+        again = await handlers.dev_chat_get(
+            _req("dev_chat_get", {"who": "yejin", "thread_id": tid})
+        )
+        assert again.status == TaskStatus.FAILED and again.outcome == "not_found"
+        unknown = await handlers.dev_chat_remove(
+            _req("dev_chat_remove", {"who": "yejin", "thread_id": "chat-99"})
+        )
+        assert unknown.status == TaskStatus.FAILED and unknown.outcome == "not_found"
+
+    asyncio.run(run())
+
+
+def test_removing_an_answering_thread_is_not_resurrected(service: PlanningService, adapter) -> None:
+    dev_chat.set_llm(ChatLLM([ASK]))
+
+    async def run() -> None:
+        th = await dev_chat.send(service, None, "배너", who="yejin", origin="dashboard")
+        assert th.status == "answering"
+        await dev_chat.remove(service, th.id, "yejin", "dashboard")
+        await dev_chat.wait_idle()  # 늦게 끝난 답이 대화를 다시 만들거나 오류를 내지 않는다
+        assert service.chat_of(th.id) is None
+        # 지우지 않고 숨긴다: 기록은 남고, 늦은 답이 숨김을 풀지 않는다
+        kept = next(c for c in service.state.chats if c.id == th.id)
+        assert kept.removed_at is not None and kept.removed_by == "yejin"
+        assert dev_chat.listed(service, "yejin", origin="dashboard") == []
+
+    asyncio.run(run())
+
+
+def test_removed_thread_is_hidden_but_stays_in_state(service: PlanningService, adapter) -> None:
+    dev_chat.set_llm(ChatLLM([ASK]))
+
+    async def run() -> None:
+        th = await dev_chat.send(service, None, "배너", who="yejin", origin="dashboard")
+        await dev_chat.wait_idle()
+        await dev_chat.remove(service, th.id, "yejin", "dashboard")
+        assert dev_chat.listed(service, "yejin", origin="dashboard") == []
+        assert service.chat_of(th.id) is None
+        kept = next(c for c in service.state.chats if c.id == th.id)
+        assert kept.removed_at is not None and kept.removed_by == "yejin"
+        assert kept.messages  # 메시지도 그대로
+        first = (kept.removed_at, kept.removed_by)
+        with pytest.raises(ActionError) as err:  # 두 번 숨겨도 안전하다
+            await dev_chat.remove(service, th.id, "yejin", "dashboard")
+        assert err.value.code == "NOT_FOUND"
+        assert (kept.removed_at, kept.removed_by) == first
+
+    asyncio.run(run())
+
+
+def test_old_state_without_removed_fields_loads() -> None:
+    old = {
+        "id": "chat-1",
+        "title": "옛 대화",
+        "created_at": "2026-11-01T00:00:00+00:00",
+        "updated_at": "2026-11-01T00:00:00+00:00",
+    }
+    th = ChatThread.model_validate(old)
+    assert th.removed_at is None and th.removed_by is None
 
 
 def test_without_llm_is_refused(service: PlanningService, adapter) -> None:

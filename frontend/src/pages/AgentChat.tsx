@@ -9,6 +9,10 @@ import { useChatRooms, type ChatRooms, type Conn } from "@/components/office/use
 import { orchestrator } from "@/lib/orchestrator";
 import { shopFaults, type FaultState } from "@/lib/shopFaults";
 import { humanizePlanIds } from "@/lib/format";
+import { RoomMenu, type MenuItem } from "@/components/office/RoomMenu";
+import { useHiddenRooms } from "@/components/office/useHiddenRooms";
+import { useRoomRemoval, type RowKind } from "@/components/office/useRoomRemoval";
+import { useToast } from "@/components/office/useToast";
 
 // AI 대화방 · 대화 기록. 부서 AI들이 A2A로 주고받은 일과 사람이 건 말을 메신저처럼 보여 준다.
 // 방: 전체 대화방(처음 열면 여기) / 장애·이슈 방(총괄 사건 하나 = 방 하나) / 1:1 대화(나만 보임).
@@ -96,15 +100,27 @@ interface RowActions {
   canAdd: (id: string) => boolean;
   open: (id: string) => void;
   add: (id: string) => void;
+  isHidden: (id: string) => boolean;
+  hide: (id: string) => void;
+  unhide: (id: string) => void;
+  /** ⋯ 메뉴의 지우기 항목 */
+  removeItems: (kind: RowKind, title: string, agentKey?: string) => MenuItem[];
+  refreshMine: () => void;
 }
 
-function RoomRow({ id, on, avatar, title, status, preview, time, unread, act }: {
+function RoomRow({ id, on, avatar, title, status, preview, time, unread, act, kind, agentKey, dim }: {
   id: string; on: boolean; avatar: ReactNode; title: string; status?: string; preview?: string; time?: string; unread?: number; act: RowActions;
+  kind: RowKind; agentKey?: string; dim?: boolean;
 }) {
   const pane = act.paneOf(id);
+  const menu: MenuItem[] = [
+    { key: "hide", label: "목록에서 숨기기", sub: "내 브라우저에서만 · 기록은 그대로", onSelect: () => act.hide(id) },
+    ...act.removeItems(kind, title, agentKey),
+  ];
+  const canAdd = !dim && act.canAdd(id);
   const onDrag = (e: DragEvent<HTMLLIElement>) => { e.dataTransfer.setData(DRAG_TYPE, id); e.dataTransfer.effectAllowed = "move"; };
   return (
-    <li className="group relative" draggable onDragStart={onDrag}>
+    <li className={`group relative ${dim ? "opacity-50" : ""}`} draggable onDragStart={onDrag}>
       <button type="button" onClick={() => act.open(id)} aria-current={on ? "true" : undefined}
         className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-500 ${on ? "bg-brand-50" : "hover:bg-ink-50"}`}>
         {avatar}
@@ -120,11 +136,17 @@ function RoomRow({ id, on, avatar, title, status, preview, time, unread, act }: 
           {!!unread && !on && <span className="chat-badge bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`안 읽은 메시지 ${unread}개`}>{unread}</span>}
         </span>
       </button>
-      {act.canAdd(id) && (
+      {canAdd && (
         <button type="button" onClick={() => act.add(id)} title="빈 칸(없으면 선택된 칸)에 열기" aria-label={`${title} 칸에 열기`}
           className="absolute right-2 top-1/2 -translate-y-1/2 border border-dashed border-brand-500 bg-surface px-1.5 text-[11px] font-bold text-brand-700 opacity-0 transition focus:opacity-100 group-hover:opacity-100">
           ＋
         </button>
+      )}
+      {dim ? (
+        <button type="button" onClick={() => act.unhide(id)} aria-label={`${title} 다시 보이기`}
+          className="btn-ghost absolute right-2 top-1/2 -translate-y-1/2 bg-surface px-2 py-0.5 text-[11px]">다시 보이기</button>
+      ) : (
+        <RoomMenu title={title} items={menu} onOpen={() => { if (kind === "all") act.refreshMine(); }} className={canAdd ? "right-9" : "right-2"} />
       )}
     </li>
   );
@@ -134,9 +156,13 @@ function RoomList({ all, incidents, unseen, act, focusedRoom, narrow }: {
   all: ChatRoom; incidents: ChatRoom[]; unseen: Record<string, number>; act: RowActions; focusedRoom: string | null; narrow: boolean;
 }) {
   const [q, setQ] = useState("");
-  const shownIncidents = incidents.filter((r) => matchRoom(q, r.title, r.longTitle));
-  const shownDirect = DIRECT_AGENTS.filter((a) => matchRoom(q, a.name));
-  const showAll = matchRoom(q, all.title, "전체");
+  const [showHidden, setShowHidden] = useState(false);
+  // 숨긴 방은 평소엔 빼고, "숨긴 방 보기"를 켜면 흐리게 같이 보인다 (검색은 그대로 적용)
+  const hiddenIds = [all.id, ...incidents.map((r) => r.id), ...DIRECT_AGENTS.map((a) => DIRECT_PREFIX + a.key)].filter(act.isHidden);
+  const visibleRoom = (id: string) => showHidden || !act.isHidden(id);
+  const shownIncidents = incidents.filter((r) => matchRoom(q, r.title, r.longTitle) && visibleRoom(r.id));
+  const shownDirect = DIRECT_AGENTS.filter((a) => matchRoom(q, a.name) && visibleRoom(DIRECT_PREFIX + a.key));
+  const showAll = matchRoom(q, all.title, "전체") && visibleRoom(all.id);
   return (
     <nav aria-label="채팅 목록" className={`card flex shrink-0 flex-col overflow-hidden ${narrow ? "lg:w-64" : "lg:w-80"}`}>
       <div className="p-3">
@@ -146,7 +172,7 @@ function RoomList({ all, incidents, unseen, act, focusedRoom, narrow }: {
         {showAll && (
           <ul>
             <RoomRow id={all.id} on={focusedRoom === all.id} avatar={<RoomAvatar room={all} />} title={all.title}
-              preview={all.preview} time={roomTime(all.lastAt)} unread={unseen[all.id]} act={act} />
+              preview={all.preview} time={roomTime(all.lastAt)} unread={unseen[all.id]} act={act} kind="all" dim={act.isHidden(all.id)} />
           </ul>
         )}
         <h2 className="px-4 pb-1 pt-3 text-[11px] font-semibold text-ink-500">장애·이슈 방</h2>
@@ -154,7 +180,7 @@ function RoomList({ all, incidents, unseen, act, focusedRoom, narrow }: {
           <ul>
             {shownIncidents.map((r) => (
               <RoomRow key={r.id} id={r.id} on={focusedRoom === r.id} avatar={<RoomAvatar room={r} />} title={r.title}
-                status={r.status} preview={r.preview} time={roomTime(r.lastAt)} unread={unseen[r.id]} act={act} />
+                status={r.status} preview={r.preview} time={roomTime(r.lastAt)} unread={unseen[r.id]} act={act} kind="incident" dim={act.isHidden(r.id)} />
             ))}
           </ul>
         )}
@@ -165,10 +191,18 @@ function RoomList({ all, incidents, unseen, act, focusedRoom, narrow }: {
               const id = DIRECT_PREFIX + a.key;
               return (
                 <RoomRow key={a.key} id={id} on={focusedRoom === id} avatar={<RoomAvatar agentKey={a.key} name={a.name} />} title={a.name}
-                  preview={a.live ? undefined : "준비 중"} act={act} />
+                  preview={a.live ? undefined : "준비 중"} act={act} kind="direct" agentKey={a.key} dim={act.isHidden(id)} />
               );
             })}
           </ul>
+        )}
+        {hiddenIds.length > 0 && (
+          <div className="mt-3 flex items-center justify-between gap-2 border-t border-ink-100 px-4 pt-2 text-[11px] text-ink-500">
+            <span>숨긴 방 {hiddenIds.length}개</span>
+            <button type="button" className="font-medium text-brand-700 hover:underline" aria-pressed={showHidden} onClick={() => setShowHidden((v) => !v)}>
+              {showHidden ? "숨긴 방 감추기" : "숨긴 방 보기"}
+            </button>
+          </div>
         )}
       </div>
     </nav>
@@ -451,7 +485,18 @@ export default function AgentChat() {
     setRooms(next.slice(0, MAX_PANES));
     setFocus(pos);
   }, [visible, rooms]);
+  // 숨기기: 내 브라우저에서만 목록에서 뺀다. 열려 있던 방은 칸에서 닫는다
+  const hidden = useHiddenRooms();
+  const toast = useToast();
+  const [gen, setGen] = useState(0); // 1:1 기록을 지우면 열린 1:1 칸을 새로 읽는다
+  const removal = useRoomRemoval({ toast, onAllRemoved: () => { void data.refresh(); }, onDirectRemoved: () => setGen((g) => g + 1) });
+  const hideRoom = (id: string) => {
+    hidden.hide(id);
+    setRooms((cur) => cur.filter((r) => r !== id));
+    toast.show("목록에서 숨겼어요", { action: { label: "되돌리기", onClick: () => hidden.unhide(id) } });
+  };
   const act: RowActions = {
+    isHidden: hidden.isHidden, hide: hideRoom, unhide: hidden.unhide, removeItems: removal.itemsFor, refreshMine: removal.refreshMine,
     paneOf: (id) => { const i = visible.indexOf(id); return shownCount > 1 && i >= 0 ? i + 1 : null; },
     canAdd: (id) => shownCount > 1 && !visible.includes(id),
     open: (id) => openAt(focusIdx, id),
@@ -550,12 +595,14 @@ export default function AgentChat() {
             };
             if (!id) return <EmptyPane key={`empty-${i}`} {...common} />;
             return (
-              <RoomPane key={`${i}:${id}`} room={id} {...common} onClose={shownCount > 1 ? () => close(i) : undefined}
+              <RoomPane key={`${i}:${id}:${gen}`} room={id} {...common} onClose={shownCount > 1 ? () => close(i) : undefined}
                 data={data} busyHold={busyHold} onDecide={decide} replayRoom={replayRoom} />
             );
           })}
         </div>
       </div>
+      {removal.modal}
+      {toast.node}
     </div>
   );
 }

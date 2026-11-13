@@ -210,6 +210,7 @@ def test_rest_merge_of_merged_pr_is_noop_without_gate(service, monkeypatch) -> N
 
 def test_dev_agent_card_format_and_served() -> None:
     """개발 카드: 관련 PR·장애 연결·롤백 확인·진행 중 항목·인계 확인·기획서 넘겨받기."""
+    from ax_contracts.schemas import chat as chat_schemas
     from ax_contracts.schemas import planning as planning_schemas
     from dev_agent.main import load_card
 
@@ -218,7 +219,7 @@ def test_dev_agent_card_format_and_served() -> None:
     skills = {s.id: s for s in card.skills}
     required = {"find_related_prs", "link_incident", "verify_rollback_target"}
     hr_links = {"list_in_progress", "list_dev_outcomes", "verify_handover"}
-    chat = {f"dev_chat_{x}" for x in ("send", "list", "get", "close")}  # 직접 대화 (11/5)
+    chat = {f"dev_chat_{x}" for x in ("send", "list", "get", "close", "remove")}  # 직접 대화
     assert set(skills) == required | hr_links | chat | {
         "start_dev",
         "receive_release_order",
@@ -244,6 +245,10 @@ def test_dev_agent_card_format_and_served() -> None:
         assert skill.verifier is None
         for ref in (skill.input_schema, skill.output_schema):
             path, name = ref.split("#")
+            if name == "ChatRemoveOutput":  # 부서 공용 대화 계약
+                assert path == "shared/contracts/src/ax_contracts/schemas/chat.py"
+                assert hasattr(chat_schemas, name)
+                continue
             assert path == "shared/contracts/src/ax_contracts/schemas/planning.py"
             assert hasattr(planning_schemas, name)
     served = TestClient(app).get("/.well-known/agent-card.json").json()
