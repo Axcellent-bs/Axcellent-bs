@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { shortDateTime, won } from "@/lib/format";
 import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
-import { BRIEFS_LIST_MAX, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, type StoredBrief } from "@/lib/briefs";
+import { BRIEFS_LIST_MAX, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, outageTriggerKo, type OutageSnsDraft, type StoredBrief } from "@/lib/briefs";
 
 // SNS·미디어 탭. 이미지·영상 생성과 SNS 게시 흐름을 안내하고,
 // 안전 장치 보류 큐(finance.reviews)에서 읽을 수 있는 마케팅 항목(publish_sns, generate_media)만 읽기 전용으로 보여 준다.
@@ -47,6 +47,8 @@ export function SnsMedia() {
   const [loading, setLoading] = useState(false);
   const [handed, setHanded] = useState<StoredBrief[] | null>(null);
   const [handedError, setHandedError] = useState<string | null>(null);
+  const [outage, setOutage] = useState<OutageSnsDraft[] | null>(null);
+  const [outageError, setOutageError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,6 +60,15 @@ export function SnsMedia() {
       } catch (e) {
         const err = e as { status?: number; message?: string };
         setHandedError(briefsError({ status: err.status, message: err.message ?? "알 수 없는 오류" }));
+      }
+    }
+    if (briefsEnabled) {
+      try {
+        setOutage((await briefs.outageSnsDrafts(20)).items);
+        setOutageError(null);
+      } catch (e) {
+        const err = e as { status?: number; message?: string };
+        setOutageError(briefsError({ status: err.status, message: err.message ?? "알 수 없는 오류" }));
       }
     }
     try {
@@ -96,6 +107,31 @@ export function SnsMedia() {
           <p className="text-xs font-medium text-ink-700">비용 장부 (오늘·이달 합계, 건당 상한)</p>
           <Empty>{NOT_WIRED}</Empty>
         </div>
+      </Section>
+
+      <Section title="장애 사과·보상 글 초안" desc="장애 때 사과 공지가 나가거나 보상 쿠폰을 드리면 마케팅 AI가 SNS 글 초안을 바로 만들어 둡니다. 초안일 뿐 게시된 글이 아닙니다. 게시는 사람이 승인해야 합니다(C 등급).">
+        <ul className="list-disc space-y-1 pl-5 text-xs text-ink-700">
+          <li>원인은 확인된 경우에만 쉬운 말로 적고, 확인되지 않았으면 "원인 확인 중"이라고 적습니다.</li>
+          <li>내부 용어·숫자·담당자 이름은 넣지 않고, AI 생성 표시와 시연용 가상 서비스 안내가 들어갑니다.</li>
+        </ul>
+        {!briefsEnabled ? <Empty>마케팅 읽기 연결이 꺼져 있어 초안 목록을 읽을 수 없습니다.</Empty>
+          : outageError ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{outageError}</p>
+            : outage === null ? <Empty>불러오는 중입니다.</Empty>
+              : outage.length === 0 ? <Empty>만들어진 초안이 없습니다.</Empty> : (
+                <ul className="space-y-3" aria-label="장애 사과·보상 글 초안 목록">
+                  {outage.map((d) => (
+                    <li key={d.post_draft_id} className="space-y-2 rounded-2xl border border-ink-100 p-4">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                        <span className="chip bg-brand-50 text-brand-700">{outageTriggerKo(d.trigger)}</span>
+                        <span className="chip bg-amber-50 text-amber-800">초안 · 게시 안 됨</span>
+                        <span className="text-ink-500">{d.media_attached ? "미디어가 붙은 초안" : "캡션 초안만 있음 (미디어 없음)"}</span>
+                        <span className="ml-auto tabular-nums text-ink-500" title={`초안 ${d.post_draft_id} · 이벤트 ${d.context_id}`}>{shortDateTime(d.created_at)} 만듦</span>
+                      </div>
+                      <p className="whitespace-pre-wrap text-sm text-ink-700">{d.caption}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
       </Section>
 
       <Section title="받은 기획안에서 넘어온 작업" desc="받은 기획안 탭에서 SNS·미디어로 넘긴 기획안입니다. 넘기면 글 초안과 미디어 요청 초안까지만 만들고, 아래 다음 단계는 사람이 이어서 합니다.">

@@ -171,6 +171,8 @@ SERVICES: tuple[Service, ...] = (
             "start_campaign",
             "record_campaign_result",
             "draft_sns_post",
+            "draft_outage_sns_post",
+            "list_outage_sns_drafts",
             "check_sns_post",
             "publish_sns",
             "generate_media",

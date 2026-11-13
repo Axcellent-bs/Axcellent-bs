@@ -2515,6 +2515,65 @@
         "summary": "Marketing Brief"
       }
     },
+    "/api/shop/admin/marketing/outage-sns-drafts": {
+      "get": {
+        "description": "장애 사과·보상 SNS 글 초안 읽기 중계. 초안만 보여 주고 게시하지 않는다.",
+        "operationId": "marketing_outage_sns_drafts_api_shop_admin_marketing_outage_sns_drafts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Marketing Outage Sns Drafts Api Shop Admin Marketing Outage Sns Drafts Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Marketing Outage Sns Drafts"
+      }
+    },
     "/api/shop/admin/orchestrator/departments": {
       "get": {
         "operationId": "orchestrator_departments_api_shop_admin_orchestrator_departments_get",

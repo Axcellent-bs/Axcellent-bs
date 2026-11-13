@@ -89,7 +89,8 @@ async def test_scenario_records_every_call_per_dept(harness: Harness) -> None:
     usage = UsageRecorder()
     engine.caller = RecordingCaller(engine.caller, usage)
     await engine.run(new_incident(), scenario_a())
-    assert usage.summary("marketing")["calls"] == 4
+    # 공지 초안·게시 2쌍 + 사과·보상 SNS 글 초안 2개
+    assert usage.summary("marketing")["calls"] == 6
     assert usage.summary("hr")["calls"] == 4  # 유사 이벤트 조회, 기록, 해결 내용, 시각
     # 영향 분석 + 원인 후보 추정 + 처리 시간 요약(kpi_summary)
     assert usage.summary("data")["calls"] == 3
@@ -120,7 +121,8 @@ def test_departments_endpoint_exposes_usage_after_an_incident(monkeypatch) -> No
         _wait_done(client, ctx)
         after = {d["name"]: d for d in client.get("/api/departments").json()["data"]}
     marketing = after["marketing"]
-    assert marketing["usage"]["calls"] == 5 and marketing["usage"]["retries"] == 1
+    # 공지 4번 + 게시 재시도 1번 + 사과·보상 SNS 글 초안 2번
+    assert marketing["usage"]["calls"] == 7 and marketing["usage"]["retries"] == 1
     publish = next(s for s in marketing["skills"] if s["id"] == "publish_notice")
     assert publish["calls"] == 3 and publish["errors"] == 1
     assert len(marketing["series"]) == 20 and marketing["recent"][0]["skill"] == "publish_notice"

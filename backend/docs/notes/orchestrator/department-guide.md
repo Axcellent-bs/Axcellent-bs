@@ -84,6 +84,8 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 | `publish_notice` | A | 점검 공지 게시 (marketing) | notice | 예 | `{"draft_id": "drf_incident_opened"}` |
 | `draft_notice` | read | 정상화 공지 초안 (marketing) | recovery | 예 | `{"facts": {"component": "payment", "opened_at": "2026-10-16T01:00:00Z", "resolved_at": "2026-10-16T01:00:00Z"}, "kind": "incident_resolved"}` |
 | `publish_notice` | A | 정상화 공지 (marketing) | recovered_draft | 예 | `{"draft_id": "drf_incident_resolved"}` |
+| `draft_outage_sns_post` | read | 보상 안내 SNS 글 초안 (marketing, 게시는 사람 승인) | compensation | 아니오 | `{"action_code": "none", "cause_code": "unknown", "compensation_issued": true, "component": "payment", "recovered": false, "trigger": "compensation"}` |
+| `draft_outage_sns_post` | read | 사과 안내 SNS 글 초안 (marketing, 게시는 사람 승인) | recovered_notice | 아니오 | `{"action_code": "reverted_update", "cause_code": "recent_update", "compensation_issued": true, "component": "payment", "notice_id": "ntc_drf_incident_resolved", "recovered": true, "trigger": "apology_notice"}` |
 
 ## support
 
@@ -106,5 +108,5 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
 | `find_similar_cases` | read | 비슷한 과거 이벤트 찾기 (hr) | 없음 (이벤트 시작 즉시) | 아니오 | `{"event_type": null, "limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
-| `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), end_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면) | 예 | `{"alternatives_considered": ["과거 같은 장애의 처리 방식 다시 하기: 건너뜀", "원인 확인 요청: 건너뜀", "장애 공지 배너 내리기: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 과거 같은 장애의 처리 방식 다시 하기, 원인 확인 요청, 장애 공지 배너 내리기", "event_typ` |
+| `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), end_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면), compensation_sns_draft(끝나면), apology_sns_draft(끝나면) | 예 | `{"alternatives_considered": ["과거 같은 장애의 처리 방식 다시 하기: 건너뜀", "원인 확인 요청: 건너뜀", "장애 공지 배너 내리기: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 과거 같은 장애의 처리 방식 다시 하기, 원인 확인 요청, 장애 공지 배너 내리기", "event_typ` |
 | `record_resolution` | A | 해결 내용 기록 (hr) | record(끝나면) | 아니오 | `{"action": "배포 이전 버전으로 되돌림", "action_code": "rollback_deployment", "context_id": "ctx_inc_guide", "minutes_to_resolve": 0, "outcome": "resolved", "root_cause": "PR #412 배포가 원인일 수 있음"}` |
