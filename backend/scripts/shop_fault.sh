@@ -7,6 +7,10 @@
 #   bash backend/scripts/shop_fault.sh recheck    # 시간 초과 결제를 지금 다시 확인
 #   bash backend/scripts/shop_fault.sh clear      # 해제
 #   bash backend/scripts/shop_fault.sh            # 지금 상태
+# 시험용 "결제사 쪽 지연" (AI가 고치지 못하는 장애 시연용, docs/ops/shop-fault-test.md):
+#   bash backend/scripts/shop_fault.sh pg-slow [ms]  # 결제마다 실제로 ms(기본 1500)만큼 기다린다.
+#                                                     # 장애 스위치가 아니라 AI 해제(clear)로 안 꺼진다
+#   bash backend/scripts/shop_fault.sh pg-ok         # 결제사 쪽 지연 끄기 (사람만)
 # 관리자 토큰은 run_all.sh 가 만든 backend/.data/web.env 에서 읽는다(출력하지 않는다).
 set -eu
 cd "$(dirname "$0")/.."
@@ -23,7 +27,22 @@ case "${1:-status}" in
   lost) curl -s -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" -d '{"kind":"lost_response"}' ;;
   recheck) curl -s -X POST "${URL%/faults}/payments/recheck" -H "$AUTH" ;;
   clear) curl -s -X DELETE "$URL" -H "$AUTH" ;;
-  status) curl -s "$URL" -H "$AUTH" ;;
-  *) echo "사용법: shop_fault.sh [failure|latency|lost|recheck|clear|status]" >&2; exit 2 ;;
+  pg-slow)
+    MS="${2:-1500}"
+    case "$MS" in '' | *[!0-9]*) echo "pg-slow 지연은 숫자(ms)로: shop_fault.sh pg-slow 1500" >&2; exit 2 ;; esac
+    curl -s -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" -d "{\"kind\":\"pg_slow\",\"delay_ms\":$MS}" ;;
+  pg-ok) curl -s -X DELETE "$URL/pg" -H "$AUTH" ;;
+  status)
+    STATE=$(curl -s "$URL" -H "$AUTH")
+    echo "$STATE"
+    # 결제사 쪽 지연은 장애 스위치(active)와 따로 보인다
+    PG=$(printf '%s' "$STATE" | grep -o '"pg_delay_ms":[0-9]*' | cut -d: -f2 || true)
+    if [ -n "$PG" ] && [ "$PG" != "0" ]; then
+      echo "결제사 쪽 지연: 켜짐 (${PG}ms, 장애 스위치 아님 — AI가 끌 수 없음, 끄기: shop_fault.sh pg-ok)"
+    else
+      echo "결제사 쪽 지연: 꺼짐"
+    fi
+    ;;
+  *) echo "사용법: shop_fault.sh [failure|latency|lost|recheck|clear|status|pg-slow [ms]|pg-ok]" >&2; exit 2 ;;
 esac
 echo

@@ -186,8 +186,9 @@ class TossPayments:
                     failure_detail="FAULT_INJECTED",
                 )  # fmt: skip
             else:
+                waited = await gateway.pg_wait()  # 결제사 쪽 지연(시험용)을 실제로 기다린다
                 outcome = await self.client.confirm(payment_key, toss_order_id, start.amount)
-                outcome.latency_ms += gateway.delay_ms
+                outcome.latency_ms += gateway.delay_ms + waited
                 if gateway.lost_response and outcome.ok:  # 장애 주입: 승인됐는데 응답이 끊김
                     outcome = PaymentOutcome(
                         False, TIMEOUT_CODE, outcome.latency_ms, True,
