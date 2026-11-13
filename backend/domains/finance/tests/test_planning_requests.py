@@ -86,6 +86,7 @@ def test_a_person_sends_a_request_to_planning_and_planning_questions_get_answere
     dept, req = fake.calls[0]
     assert (dept, req.skill) == ("planning", "create_ticket")
     assert req.input["title"] == BODY["title"] and req.input["source_ref"] == "fin_req_0001"
+    assert req.input["separate"] is True  # 사람이 한 건씩 보낸 요청은 기획에 따로 들어간다
     listed = client.get("/api/finance/planning-requests").json()["data"]["requests"]
     assert [r["request_id"] for r in listed] == ["REQ-7"]
     # 기획이 되물으면 이제 "모름"이 아니라 보낸 근거로 답한다

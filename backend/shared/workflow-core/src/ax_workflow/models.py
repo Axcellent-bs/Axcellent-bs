@@ -109,6 +109,8 @@ class Request(DomainModel):
     from_service: str | None = None
     # 사람이 중단함: 기획서 초안·자동 확정·개발 전달·배포 지시를 재개 전까지 멈춘다
     paused: bool = False
+    # 요청 부서가 따로 받기를 원함 (create_ticket `separate`). 비슷한 요청이 있어도 묶지 않는다
+    separate: bool = False
 
 
 class ParaWarn(DomainModel):

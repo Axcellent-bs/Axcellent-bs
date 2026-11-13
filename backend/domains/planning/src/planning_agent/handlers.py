@@ -64,6 +64,7 @@ async def create_ticket(request: AgentRequest) -> AgentResult:
             source_ref=inp.source_ref,
             evidence_ids=inp.evidence_ids,
             idempotency_key=request.meta.idempotency_key,
+            separate=inp.separate,
         )
     except GateRefused as exc:
         return AgentResult(

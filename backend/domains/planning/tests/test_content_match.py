@@ -155,3 +155,25 @@ def test_follow_up_from_dev_is_not_bound() -> None:
     svc.state.requests.append(req)
     svc._bind_by_content(svc.state, req)
     assert req.duplicate_of is None and req.context_id == "ctx_inc_0007"
+
+
+@pytest.mark.role("planning")
+def test_separate_request_is_not_bound_even_when_llm_says_same() -> None:
+    """요청 부서가 따로 받기(`separate`)를 원하면 LLM이 같은 일로 봐도 묶지 않는다 (11/13)."""
+    llm = JudgeLLM("same")
+    svc = _svc(llm)
+    a = _ticket(svc, "기획에 개선 요청 테스트입니다", "시험", "k1")
+    llm.first = a.output["request_id"]
+    b = run(
+        svc.create_ticket(
+            context_id="ctx_k2", requester="finance", title="기획에 개선 요청 테스트2입니다",
+            evidence="시험", source_ref="fin_req_0005", evidence_ids=[], idempotency_key="k2",
+            separate=True,
+        )
+    )  # fmt: skip
+    assert b.outcome == "created" and b.output["duplicate_of"] is None
+    rb = _req(svc, b.output["request_id"])
+    assert rb.duplicate_of is None and rb.state != "중복 연결"
+    assert rb.context_id != _req(svc, a.output["request_id"]).context_id
+    # 비슷한 요청 표시(제안)는 그대로 남긴다
+    assert [x.id for x in rb.related if x.relation == "same"] == [a.output["request_id"]]

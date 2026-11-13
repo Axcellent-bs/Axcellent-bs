@@ -229,6 +229,9 @@ class CreateTicketInput(AxModel):
     evidence: str  # 근거 요약 (예: 반복 문의 42건)
     source_ref: str | None = None  # 요청 부서 쪽 참조 ID (예: 고객지원 문의 ID). 판정에 안 쓴다
     evidence_ids: list[str] = Field(default_factory=list)  # 근거 ID
+    # True면 비슷한 요청이 있어도 묶지 않고 따로 받는다 (11/13). 사람이 화면에서 한 건씩 정해 보낸
+    # 요청(재무 개선 요청 등)이 남의 요청에 붙지 않게 한다. 비슷한 요청 표시(제안)는 그대로 한다
+    separate: bool = False
 
 
 class CreateTicketOutput(AxModel):

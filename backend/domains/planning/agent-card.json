@@ -11,7 +11,7 @@
   "skills": [
     {
       "id": "create_ticket",
-      "description": "변경 요청 접수. 같은 요청(같은 제목, 기존 중복 규칙)이 있으면 새 요청을 원래 요청에 묶고 outcome linked_duplicate + duplicate_of(원래 REQ), context_id는 원래 요청의 ctx_req_. 없으면 outcome created + 새 REQ와 planning이 발급한 ctx_req_. source_ref·evidence_ids는 저장만 하고 판정에 안 쓴다. 고객 원문(untrusted)은 읽지 않는다. 결과 통지는 같은 context_id에 path를 비운 새 요청으로 보낸다(요청 부서 수신 skill이 생기기 전까지는 활동 기록만). execute()를 거친다.",
+      "description": "변경 요청 접수. 같은 요청(같은 제목, 기존 중복 규칙)이 있으면 새 요청을 원래 요청에 묶고 outcome linked_duplicate + duplicate_of(원래 REQ), context_id는 원래 요청의 ctx_req_. 없으면 outcome created + 새 REQ와 planning이 발급한 ctx_req_. source_ref·evidence_ids는 저장만 하고 판정에 안 쓴다. separate=true면 비슷한 요청이 있어도 묶지 않고 따로 받는다(비슷한 요청 표시만). 고객 원문(untrusted)은 읽지 않는다. 결과 통지는 같은 context_id에 path를 비운 새 요청으로 보낸다(요청 부서 수신 skill이 생기기 전까지는 활동 기록만). execute()를 거친다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CreateTicketInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CreateTicketOutput",
       "grade": "A",
