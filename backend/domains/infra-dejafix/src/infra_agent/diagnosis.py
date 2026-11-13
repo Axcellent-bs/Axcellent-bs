@@ -1,6 +1,7 @@
 """원인 진단 규칙 (코드). LLM을 쓰지 않는다.
 
 - 진단 구간(기본 60분) 안에 그 구성요소를 바꾼 배포를 원인 후보로 본다. 없으면 `undetermined`.
+  이미 되돌린 배포(롤백·사람의 수동 되돌리기)는 후보가 아니다.
 - 확신도: 후보가 하나이고 배포 뒤 15분 안에 진단하면 `high`, 그보다 오래됐으면 `mid`.
   후보가 여럿이면 가장 최근 것이 `mid`, 나머지는 `low`.
 - 목 모드는 시간과 상관없이 가장 최근 배포 1건을 `high` 후보로 돌려준다(SCN-A 체크리스트).
@@ -58,7 +59,8 @@ def diagnose(
     history: DeploymentHistory, component: str | None, now: datetime, *, mock: bool
 ) -> Diagnosis:
     scope = [component] if component else []
-    rows = history.for_component(component)
+    # 되돌린 배포는 더 이상 돌고 있지 않아 원인 후보가 아니다
+    rows = [d for d in history.for_component(component) if d.deploy_id not in history.rolled_back]
     if mock:
         picked = rows[:1]
         suspects = [_suspect(d, "high") for d in picked]

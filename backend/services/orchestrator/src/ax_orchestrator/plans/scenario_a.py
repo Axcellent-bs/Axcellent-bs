@@ -177,6 +177,14 @@ def _past_fix_gate(inc: Incident) -> tuple[str, str, str] | None:
     rec = recommend(inc.outputs.get("similar_cases")) or {}
     if rec.get("status") != "found":
         return ("skipped", "no_past_case", "같은 유형 과거 장애의 해결 기록 없음")
+    if rec.get("action_code") == "rollback_deployment":
+        # 과거엔 잘못된 배포를 되돌려 풀었다: 장애 상태 해제가 아니라 되돌리기 단계가 맡는다.
+        # 되돌릴 배포는 진단이 원인 배포를 찾아야 정해지므로, 못 찾았으면 사람에게 넘긴다
+        return (
+            "skipped",
+            "past_case_rollback",
+            "과거 같은 장애는 배포를 되돌려 풀림: 장애 상태 해제 대신 되돌리기로 처리",
+        )
     if rec.get("action_code") not in REPLAYABLE:
         return ("skipped", "not_replayable", "과거 처리 방식을 AI가 다시 할 수 없음")
     if (rec.get("similarity") or 0) < PAST_FIX_MIN_SIMILARITY:

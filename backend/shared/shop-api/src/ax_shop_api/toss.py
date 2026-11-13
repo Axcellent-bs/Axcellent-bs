@@ -27,6 +27,8 @@ from typing import Any
 import httpx
 
 from ax_shop_api.service import (
+    BAD_CONFIG_PG_CODE,
+    BAD_PAYMENT_VERSION,
     BASELINE_LATENCY_MS,
     TIMEOUT_CODE,
     PaymentOutcome,
@@ -53,6 +55,8 @@ class PaymentConfig:
     provider: str  # fake | toss_test (실제로 동작하는 값)
     secret_key: str | None = field(default=None, repr=False)  # repr·로그에 나가지 않게
     warning: str | None = None  # 시작할 때 남길 경고 한 줄 (키 값은 담지 않는다)
+    # 라이브 키가 들어 있었는지(쓰지는 않는다). 잘못된 배포 시연(결제 설정 v2)을 막는 데 쓴다
+    live_key: bool = False
 
 
 def load_config(env: Mapping[str, str] | None = None) -> PaymentConfig:
@@ -71,7 +75,8 @@ def load_config(env: Mapping[str, str] | None = None) -> PaymentConfig:
         why = f"{KEY_ENV}가 테스트 키(test_)가 아니라"
     else:
         return PaymentConfig(TOSS_TEST, key)
-    return PaymentConfig(FAKE, warning=f"{why} 가짜 결제로 동작한다")
+    live = key.startswith("live_")
+    return PaymentConfig(FAKE, warning=f"{why} 가짜 결제로 동작한다", live_key=live)
 
 
 def _code(response: httpx.Response) -> str | None:
@@ -101,8 +106,13 @@ class TossClient:
     def __repr__(self) -> str:  # 인증 값이 repr로 새지 않게
         return "TossClient()"
 
-    async def confirm(self, payment_key: str, toss_order_id: str, amount: int) -> PaymentOutcome:
+    async def confirm(
+        self, payment_key: str, toss_order_id: str, amount: int, test_code: str | None = None
+    ) -> PaymentOutcome:
+        """`test_code`: 토스 테스트 키에서만 쓰는 `TossPayments-Test-Code`(정해 둔 오류를 받음)."""
         headers = {"Authorization": self._auth, "Idempotency-Key": toss_order_id}
+        if test_code:
+            headers["TossPayments-Test-Code"] = test_code
         body = {"paymentKey": payment_key, "orderId": toss_order_id, "amount": amount}
         started = self._timer()
         try:
@@ -187,7 +197,13 @@ class TossPayments:
                 )  # fmt: skip
             else:
                 waited = await gateway.pg_wait()  # 결제사 쪽 지연(시험용)을 실제로 기다린다
-                outcome = await self.client.confirm(payment_key, toss_order_id, start.amount)
+                # 잘못된 배포(결제 설정 v2): 토스 테스트 키에 500대 테스트 코드를 붙여 실패시킨다.
+                # 토스 승인 흐름은 테스트 키일 때만 만들어진다(라이브 키는 가짜 결제로 동작)
+                bad = gateway.config_version == BAD_PAYMENT_VERSION
+                outcome = await self.client.confirm(
+                    payment_key, toss_order_id, start.amount,
+                    test_code=BAD_CONFIG_PG_CODE if bad else None,
+                )  # fmt: skip
                 outcome.latency_ms += gateway.delay_ms + waited
                 if gateway.lost_response and outcome.ok:  # 장애 주입: 승인됐는데 응답이 끊김
                     outcome = PaymentOutcome(
