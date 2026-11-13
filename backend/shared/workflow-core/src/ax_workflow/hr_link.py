@@ -35,7 +35,14 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
-from ax_contracts.schemas.hr import CheckPlanInput, CheckPlanOutput, PlanDraft, RecordCaseOutput
+from ax_contracts.schemas.hr import (
+    CheckPlanInput,
+    CheckPlanOutput,
+    PlanDraft,
+    RecordCaseOutput,
+    RetireRequestCardsInput,
+    RetireRequestCardsOutput,
+)
 from ax_contracts.schemas.record import RecordCase
 
 HR_TIMEOUT_SECONDS = 30.0
@@ -63,6 +70,29 @@ class HrRecordResult:
             "duplicate": "이미 기록됨",
         }.get(self.outcome or "", self.outcome or "기록됨")
         return f"인사 {label}" + (f" {self.card_id}" if self.card_id else "")
+
+
+@dataclass
+class HrRetireResult:
+    """`retire_request_cards` 결과. `ok`가 False면 `reason`에 못 한 까닭 (다시 시도한다)."""
+
+    ok: bool
+    outcome: str | None = None  # retired · duplicate · none · partial
+    retired: list[str] | None = None
+    reason: str | None = None
+
+    @property
+    def text(self) -> str:
+        if not self.ok:
+            return f"인사 카드 내리기 실패: {self.reason}"
+        n = len(self.retired or [])
+        label = {
+            "retired": f"인사 카드 {n}장 내림",
+            "partial": f"인사 카드 {n}장 내림 (일부는 관문 보류)",
+            "duplicate": "인사 카드는 이미 내려가 있음",
+            "none": "인사에 내릴 카드 없음",
+        }.get(self.outcome or "", f"인사 카드 {n}장 내림")
+        return label + (f" ({', '.join(self.retired or [])})" if n else "")
 
 
 @dataclass
@@ -131,6 +161,30 @@ class HrClient:
             # 출력 전환 전의 인사라도 완료면 기록된 것으로 본다 (카드 번호만 모름)
             return HrRecordResult(True, outcome=out.outcome)
         return HrRecordResult(True, outcome=parsed.outcome, card_id=parsed.card_id)
+
+    async def retire_request_cards(
+        self, ctx: str, request_id: str, spec_id: str | None, reason: str, idempotency_key: str
+    ) -> HrRetireResult:
+        """철회된 요청에서 나온 인사 카드(업무 결정·요청)를 `retired`로 내려 달라고 한다."""
+        inp = RetireRequestCardsInput(
+            context_id=ctx, request_id=request_id, spec_id=spec_id, reason=reason
+        )
+        req = AgentRequest(
+            meta=self._meta(ctx, idempotency_key),
+            skill="retire_request_cards",
+            input=inp.model_dump(mode="json"),
+        )
+        out = await self._ask(req)
+        if isinstance(out, str):
+            return HrRetireResult(False, reason=out)
+        try:
+            parsed = RetireRequestCardsOutput.model_validate(out.output or {})
+        except ValidationError:
+            return HrRetireResult(False, reason="retire_request_cards 출력이 계약과 다름")
+        if out.outcome == "partial":  # 일부만 내렸다: 나머지는 다음에 다시 시도
+            return HrRetireResult(False, outcome="partial", retired=parsed.retired_card_ids,
+                                  reason="일부 카드가 관문에서 보류됨")  # fmt: skip
+        return HrRetireResult(True, outcome=out.outcome, retired=parsed.retired_card_ids)
 
     async def check_plan(self, ctx: str, draft: PlanDraft, untrusted: dict[str, str]) -> PlanCheck:
         """초안을 인사 `check_plan`에 보낸다. 초안 속 외부 문구는 `untrusted`로 따로 보낸다."""

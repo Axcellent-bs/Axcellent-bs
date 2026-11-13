@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -70,6 +71,20 @@ async def _resync_on_start() -> None:
     마케팅에 보내다 끊긴 제안도 다시 보낸다 (응답이 없으면 자동 재전송)."""
     asyncio.get_running_loop().create_task(get_service().resync_peer())
     get_service().resume_briefs()
+    asyncio.get_running_loop().create_task(_retire_after_start())
+
+
+# 인사 서버가 같이 켜지는 중일 수 있어 잠시 뒤에 부른다
+RETIRE_DELAY_SECONDS = 20.0
+
+
+async def _retire_after_start() -> None:
+    """철회했는데 인사 카드를 못 내린 요청이 있으면 다시 부른다 (인사가 꺼져 있었을 때 등)."""
+    await asyncio.sleep(RETIRE_DELAY_SECONDS)
+    try:
+        await get_service().retire_withdrawn_cards()
+    except Exception:  # 켤 때 뒷일이라 서버를 멈추지 않는다. 다음 철회 때 다시 한다
+        logging.getLogger("ax.planning").exception("철회 요청 인사 카드 내리기 실패")
 
 
 app.router.on_startup.append(_resync_on_start)
