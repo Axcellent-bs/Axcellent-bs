@@ -121,7 +121,7 @@ def test_pg_payment_missing_on_our_side_needs_refund_check() -> None:
     day, rows = _settled_day_payments()
     live = _live_like()
     target = next(o for o in live.orders if o["payments"])
-    target["payments"][0] = dict(target["payments"][0], status="unknown")
+    target["payments"][0] = dict(target["payments"][0], status="timeout")
     unknown_id = target["payments"][0]["payment_id"]
     extra = [
         {"payment_id": unknown_id, "order_id": target["order_id"], "amount": 15000, "fee": 465,

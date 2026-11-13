@@ -84,7 +84,7 @@ class IncidentFinanceOutput(AxModel):
     compensation_total: int | None  # 이 이벤트로 나간 보상 쿠폰 합계 (재무 장부)
     refund_total: int | None  # 장애 구간에 영향 고객에게 나간 환불 합계
     money_out_total: int | None  # 보상 + 환불 (둘 중 하나라도 모르면 null)
-    # 장애 구간에 결과 모름으로 남은 결제(돈이 빠져나갔을 수 있어 확인·환불 필요). 보상과 별도
+    # 장애 구간에 시간 초과으로 남은 결제(돈이 빠져나갔을 수 있어 확인·환불 필요). 보상과 별도
     refund_needed_total: int | None = None
     compensation_coupon_count: int | None
     failed_orders: int | None

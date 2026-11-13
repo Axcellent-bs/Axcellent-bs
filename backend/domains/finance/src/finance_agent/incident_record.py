@@ -9,7 +9,7 @@
   재무가 다시 계산하지 않는다.
 - 보상 쿠폰은 재무가 이미 받은 장부(안전 관문 실행 기록 + 쿠폰 이벤트)에서 합계를 읽는다.
 - 환불은 장애 구간 안에 영향 고객에게 나간 환불 금액만 더한다(`incidents.incident_refunds`).
-- 환불 필요(확인 필요): 장애 구간에 결과 모름(`unknown`)으로 남은 결제 금액. 고객 돈이 빠져나갔을
+- 환불 필요(확인 필요): 장애 구간에 시간 초과(`unknown`)으로 남은 결제 금액. 고객 돈이 빠져나갔을
   수 있어 판매 서버의 결제사 확인이나 고객지원 환불이 필요하다. 보상 쿠폰과 따로 적는다.
   구간이나 영향 고객을 모르면 0으로 채우지 않고 null(확인할 수 없음)이다.
 - 같은 이벤트를 다시 부르면 기록을 새 값으로 바꾼다(보상이 늦게 끝나도 마지막 값이 남는다).
@@ -26,7 +26,7 @@ from finance_agent.handlers import _evidence, _parse, _result, compensation_ledg
 from finance_agent.incidents import (
     INCIDENT_PREFIX,
     incident_refunds,
-    incident_unknown_payments,
+    incident_timeout_payments,
 )
 from finance_agent.schemas import IncidentFinanceInput, IncidentFinanceOutput
 
@@ -79,7 +79,7 @@ async def record_incident_finance(request: AgentRequest) -> AgentResult:
     if refunds is None:
         unavailable.append("refunds")
     refund_total = refunds["total"] if refunds is not None else None
-    needed = incident_unknown_payments(books, window)
+    needed = incident_timeout_payments(books, window)
     refund_needed_total = needed["total"] if needed is not None else None
     money_out = None if refund_total is None or comp_total is None else comp_total + refund_total
 

@@ -111,15 +111,15 @@ class PaymentOutcome:
     server_error: bool = False  # 카드 거절(PG_DECLINED)은 5xx가 아니다
     method_code: str | None = None  # 결제사가 알려 준 결제 수단(토스). 없으면 요청 값
     failure_detail: str | None = None  # 결제사 오류 코드 등(토스). 가짜 결제는 None
-    # 결과 모름: 결제사에 요청은 갔는데 응답이 끊겨(시간 초과·연결 오류) 승인됐는지 모른다.
+    # 시간 초과: 결제사에 요청은 갔는데 응답이 끊겨(시간 초과·연결 오류) 승인됐는지 모른다.
     # 실패로 적지 않고 `unknown`으로 남긴 뒤 결제사 조회로 다시 확인한다(돈이 빠져나갔을 수 있다)
-    unknown: bool = False
+    timed_out: bool = False
     # 가짜 결제사가 실제로 승인했는지(장애 주입 lost_response 시험용). 토스는 None(조회로 확인)
     pg_approved: bool | None = None
 
 
-UNKNOWN_CODE = "PG_UNKNOWN"
-PAYMENT_UNKNOWN = "unknown"
+TIMEOUT_CODE = "PG_TIMEOUT"
+PAYMENT_TIMEOUT = "timeout"
 
 
 ATTEMPT_PREPARED, ATTEMPT_CONFIRMED, ATTEMPT_FAILED = "prepared", "confirmed", "failed"
@@ -156,7 +156,7 @@ class Gateway:
     def __init__(self) -> None:
         self.delay_ms = 0
         self.failing = False
-        # 결제사는 승인했는데 우리 쪽 응답이 끊긴다(결과 모름). 다시 확인하면 승인으로 나온다
+        # 결제사는 승인했는데 우리 쪽 응답이 끊긴다(시간 초과). 다시 확인하면 승인으로 나온다
         self.lost_response = False
 
     def inject(self, kind: str, delay_ms: int = 0) -> None:
@@ -180,8 +180,8 @@ class Gateway:
             return PaymentOutcome(False, "PG_UNAVAILABLE", latency, server_error=True)
         if self.lost_response and simulate != "failure":
             return PaymentOutcome(
-                False, UNKNOWN_CODE, latency, server_error=True,
-                failure_detail="LOST_RESPONSE", unknown=True, pg_approved=True,
+                False, TIMEOUT_CODE, latency, server_error=True,
+                failure_detail="LOST_RESPONSE", timed_out=True, pg_approved=True,
             )  # fmt: skip
         if simulate == "failure":
             return PaymentOutcome(False, "PG_DECLINED", latency)
@@ -638,11 +638,11 @@ class Shop:
         if order["status"] not in CANCELLABLE:  # pending_payment·payment_failed만 결제한다
             raise ShopError("ORDER_NOT_PAYABLE", "결제할 수 없는 주문 상태다", 409)
         unknown = conn.execute(
-            "SELECT 1 FROM payments WHERE order_id = ? AND status = ?", (order_id, PAYMENT_UNKNOWN)
+            "SELECT 1 FROM payments WHERE order_id = ? AND status = ?", (order_id, PAYMENT_TIMEOUT)
         ).fetchone()
         if unknown is not None:  # 앞 결제가 승인됐을 수 있다: 다시 결제하면 두 번 청구될 수 있다
             raise ShopError(
-                "PAYMENT_RESULT_UNKNOWN",
+                "PAYMENT_TIMEOUT_CHECKING",
                 "앞 결제의 결과를 확인하는 중이다. 확인이 끝난 뒤 다시 결제한다",
                 409,
             )
@@ -664,7 +664,7 @@ class Shop:
         payment_id = self.db.next_id(conn, "payment", "pay_")
         now = _now()
         method = outcome.method_code or method_code
-        status = "succeeded" if outcome.ok else PAYMENT_UNKNOWN if outcome.unknown else "failed"
+        status = "succeeded" if outcome.ok else PAYMENT_TIMEOUT if outcome.timed_out else "failed"
         conn.execute(
             "INSERT INTO payments (payment_id, order_id, amount, method_code, status, "
             "failure_code, tenant_id, context_id, created_at, provider, pg_payment_key, "
@@ -678,8 +678,8 @@ class Shop:
                 "INSERT INTO pg_fake_records (payment_id, approved, created_at) VALUES (?, ?, ?)",
                 (payment_id, int(outcome.pg_approved), now),
             )
-        if outcome.unknown:
-            # 결과 모름: 주문은 결제 대기로 두고 이벤트를 내지 않는다(다시 확인해 정해지면 낸다)
+        if outcome.timed_out:
+            # 시간 초과: 주문은 결제 대기로 두고 이벤트를 내지 않는다(다시 확인해 정해지면 낸다)
             return payment_id
         conn.execute(
             "UPDATE orders SET status = ?, updated_at = ? WHERE order_id = ?",
@@ -795,7 +795,7 @@ class Shop:
                 conn.execute(
                     "UPDATE payment_attempts SET status = ?, payment_id = ?, updated_at = ? "
                     "WHERE toss_order_id = ?",
-                    (ATTEMPT_CONFIRMED if outcome.ok else PAYMENT_UNKNOWN if outcome.unknown
+                    (ATTEMPT_CONFIRMED if outcome.ok else PAYMENT_TIMEOUT if outcome.timed_out
                      else ATTEMPT_FAILED, payment_id, _now(), start.toss_order_id),
                 )  # fmt: skip
             return self._order(conn, start.order_id)
@@ -877,21 +877,21 @@ class Shop:
             )
         return self.get_order(order_id)
 
-    # --- 결과 모름 결제 다시 확인 ---------------------------------------------
-    def unknown_payments(self) -> list[dict[str, Any]]:
-        """결과 모름(`unknown`) 결제. 오래된 것부터. 토스 시도 번호와 가짜 결제사 기록을 붙인다."""
+    # --- 시간 초과 결제 다시 확인 ---------------------------------------------
+    def timeout_payments(self) -> list[dict[str, Any]]:
+        """시간 초과(`unknown`) 결제. 오래된 것부터. 토스 시도 번호와 가짜 결제사 기록을 붙인다."""
         with self.db.tx() as conn:
             rows = conn.execute(
                 "SELECT p.*, a.toss_order_id, f.approved AS fake_approved FROM payments p "
                 "LEFT JOIN payment_attempts a ON a.payment_id = p.payment_id "
                 "LEFT JOIN pg_fake_records f ON f.payment_id = p.payment_id "
                 "WHERE p.status = ? ORDER BY p.created_at",
-                (PAYMENT_UNKNOWN,),
+                (PAYMENT_TIMEOUT,),
             ).fetchall()
         return [dict(r) for r in rows]
 
     def resolve_payment(self, payment_id: str, approved: bool) -> dict[str, Any]:
-        """결과 모름 결제를 결제사 확인 결과로 정한다. 기록을 바로잡을 뿐 돈을 옮기지 않는다.
+        """시간 초과 결제를 결제사 확인 결과로 정한다. 기록을 바로잡을 뿐 돈을 옮기지 않는다.
 
         - 승인됨: 결제 `succeeded`, 주문 `paid`, `payment.succeeded`(실제로 청구된 돈)
         - 승인 안 됨: 결제 `failed`(`PG_UNAVAILABLE`), 주문 `payment_failed`, `payment.failed`
@@ -903,7 +903,7 @@ class Shop:
             ).fetchone()
             if pay is None:
                 raise ShopError("PAYMENT_NOT_FOUND", "결제를 찾을 수 없다", 404)
-            if pay["status"] != PAYMENT_UNKNOWN:
+            if pay["status"] != PAYMENT_TIMEOUT:
                 return {"payment_id": payment_id, "status": pay["status"], "changed": False}
             now = _now()
             order_id, amount = pay["order_id"], pay["amount"]
@@ -957,14 +957,14 @@ class Shop:
                 "UPDATE payment_attempts SET status = ?, updated_at = ? "
                 "WHERE payment_id = ? AND status = ?",
                 (ATTEMPT_CONFIRMED if approved else ATTEMPT_FAILED, now, payment_id,
-                 PAYMENT_UNKNOWN),
+                 PAYMENT_TIMEOUT),
             )  # fmt: skip
         return {"payment_id": payment_id, "status": status, "changed": True}
 
-    def recheck_fake_unknown(self) -> list[dict[str, Any]]:
-        """가짜 결제사 결제의 결과 모름을 가짜 결제사 기록으로 정한다(토스는 toss 모듈이 조회)."""
+    def recheck_fake_timeouts(self) -> list[dict[str, Any]]:
+        """가짜 결제사 결제의 시간 초과을 가짜 결제사 기록으로 정한다(토스는 toss 모듈이 조회)."""
         done = []
-        for row in self.unknown_payments():
+        for row in self.timeout_payments():
             if row["provider"] != "fake":
                 continue
             done.append(self.resolve_payment(row["payment_id"], bool(row["fake_approved"])))

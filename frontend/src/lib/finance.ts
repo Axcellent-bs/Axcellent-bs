@@ -470,7 +470,7 @@ export interface IncidentDetail {
   compensation: IncidentCompensation;
   /** 이벤트 구간 안에 영향 고객에게 나간 환불. 구간·영향 고객을 모르면 null (0원과 다르다) */
   refunds: IncidentRefunds | null;
-  /** 결과 모름으로 남은 결제(확인·환불 필요). 구간을 모르면 null */
+  /** 시간 초과으로 남은 결제(확인·환불 필요). 구간을 모르면 null */
   refund_needed?: IncidentRefunds | null;
   /** 보상 + 환불. 둘 중 하나라도 모르면 null */
   money_out_total: number | null;

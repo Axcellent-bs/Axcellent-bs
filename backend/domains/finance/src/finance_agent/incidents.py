@@ -55,8 +55,8 @@ def incident_refunds(
     return {"total": total, "count": count}
 
 
-def incident_unknown_payments(books: Any, window: dict[str, Any] | None) -> dict[str, Any] | None:
-    """장애 구간에 결과 모름(`unknown`)으로 남은 결제 금액: 확인·환불이 필요할 수 있는 돈.
+def incident_timeout_payments(books: Any, window: dict[str, Any] | None) -> dict[str, Any] | None:
+    """장애 구간에 시간 초과(`unknown`)으로 남은 결제 금액: 확인·환불이 필요할 수 있는 돈.
 
     결제사에 요청은 갔는데 응답이 끊겨 승인됐는지 모르는 결제다. 판매 서버가 결제사에 다시 확인해
     승인이면 결제 완료로, 아니면 실패로 바꾼다. 아직 남아 있는 것만 더한다(재무는 금액만 적는다).
@@ -68,7 +68,7 @@ def incident_unknown_payments(books: Any, window: dict[str, Any] | None) -> dict
     total, count = 0, 0
     for order in books.orders:
         for p in order.get("payments", []):
-            if p.get("status") != "unknown":
+            if p.get("status") != "timeout":
                 continue
             at = fc.iso(p["created_at"]) if p.get("created_at") else None
             if at is None or not (start <= at <= end):
@@ -140,8 +140,8 @@ async def incident_view(
         "impact": impact_out,
         "compensation": {"coupons": coupons, **(totals or dict.fromkeys(_TOTAL_KEYS))},
         "refunds": refunds,
-        # 결과 모름으로 남은 결제(고객 돈이 빠져나갔을 수 있어 확인·환불이 필요할 수 있는 돈)
-        "refund_needed": incident_unknown_payments(books, window),
+        # 시간 초과으로 남은 결제(고객 돈이 빠져나갔을 수 있어 확인·환불이 필요할 수 있는 돈)
+        "refund_needed": incident_timeout_payments(books, window),
         # 재무가 보는 숫자: 보상 + 환불로 사건에서 빠져나간 돈 (둘 중 하나라도 없으면 null)
         "money_out_total": money_out,
         "ledger_source": ledger_source,

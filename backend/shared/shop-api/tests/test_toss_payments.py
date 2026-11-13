@@ -198,18 +198,18 @@ def test_toss_5xx_is_unavailable() -> None:
 
 
 def test_toss_timeout_is_unknown_not_failed() -> None:
-    """승인 요청이 시간 초과면 토스는 승인했을 수 있다: 실패가 아니라 결과 모름으로 남긴다."""
+    """승인 요청이 시간 초과면 토스는 승인했을 수 있다: 실패가 아니라 시간 초과으로 남긴다."""
     client = _client(FakeToss(error=httpx.ReadTimeout("slow")))
     order = _order(client)
     data = _confirm(client, _prepare(client, order["order_id"])).json()["data"]
     assert data["status"] == "pending_payment"  # 실패로 바꾸지 않는다
-    assert data["payments"][0]["status"] == "unknown"
-    assert data["payments"][0]["failure_code"] == "PG_UNKNOWN"
+    assert data["payments"][0]["status"] == "timeout"
+    assert data["payments"][0]["failure_code"] == "PG_TIMEOUT"
     assert _payment_row(client, order["order_id"])["failure_detail"] == "TIMEOUT"
-    # 결과를 모르는 동안 다시 결제하면 두 번 청구될 수 있어 막는다
+    # 시간 초과로 결과를 모르는 동안 다시 결제하면 두 번 청구될 수 있어 막는다
     again = client.post(f"/api/shop/orders/{order['order_id']}/payments/toss/prepare")
     assert again.status_code == 409
-    assert again.json()["error"]["code"] == "PAYMENT_RESULT_UNKNOWN"
+    assert again.json()["error"]["code"] == "PAYMENT_TIMEOUT_CHECKING"
 
 
 class LookupToss(FakeToss):
@@ -232,8 +232,8 @@ class LookupToss(FakeToss):
         (200, {"status": "DONE"}, "paid", "succeeded"),  # 실제로 청구됐다
         (404, {"code": "NOT_FOUND_PAYMENT"}, "payment_failed", "failed"),  # 승인 안 됨
         (200, {"status": "ABORTED"}, "payment_failed", "failed"),
-        (200, {"status": "IN_PROGRESS"}, "pending_payment", "unknown"),  # 아직 모름: 그대로
-        (500, {}, "pending_payment", "unknown"),  # 조회 실패: 그대로
+        (200, {"status": "IN_PROGRESS"}, "pending_payment", "timeout"),  # 아직 모름: 그대로
+        (500, {}, "pending_payment", "timeout"),  # 조회 실패: 그대로
     ],
 )
 def test_recheck_resolves_unknown_with_toss_lookup(
@@ -268,7 +268,7 @@ def test_lost_response_fault_with_toss_is_unknown_then_paid() -> None:
     client.post("/api/shop/admin/faults", json={"kind": "lost_response"}, headers=ADMIN)
     order = _order(client)
     data = _confirm(client, _prepare(client, order["order_id"])).json()["data"]
-    assert data["payments"][0]["status"] == "unknown"
+    assert data["payments"][0]["status"] == "timeout"
     assert _payment_row(client, order["order_id"])["failure_detail"] == "LOST_RESPONSE"
     fake.body = {"status": "DONE"}
     client.post("/api/shop/admin/payments/recheck", headers=ADMIN)

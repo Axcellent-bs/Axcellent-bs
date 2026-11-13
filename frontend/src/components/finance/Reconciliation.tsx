@@ -11,7 +11,7 @@ import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 export const RECON_KO: Record<ReconStatus, { label: string; hint: string; tone: string }> = {
   mismatch: { label: "금액 다름", hint: "주문 금액과 PG가 알려 준 금액이 다릅니다", tone: TONE.bad },
   missing_in_pg: { label: "PG에 기록 없음", hint: "결제는 됐는데 PG 정산 자료에 없습니다", tone: TONE.bad },
-  missing_in_ours: { label: "우리 기록 없음", hint: "PG에는 결제가 있는데 우리 쪽은 실패·결과 모름입니다. 고객 돈이 빠져나갔을 수 있어 환불이나 확인이 필요합니다", tone: TONE.bad },
+  missing_in_ours: { label: "우리 기록 없음", hint: "PG에는 결제가 있는데 우리 쪽은 실패·시간 초과입니다. 고객 돈이 빠져나갔을 수 있어 환불이나 확인이 필요합니다", tone: TONE.bad },
   fee_anomaly: { label: "수수료 이상", hint: "PG 수수료가 계약한 비율과 다릅니다", tone: TONE.warn },
   pending: { label: "정산 전", hint: "PG가 아직 돈을 보내기 전입니다. 보통 기다리면 됩니다", tone: TONE.info },
   matched: { label: "일치", hint: "주문·결제·PG 금액이 모두 맞습니다", tone: TONE.ok },

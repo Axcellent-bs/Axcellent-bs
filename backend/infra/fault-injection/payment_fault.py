@@ -1,6 +1,7 @@
 """결제 장애 주입·해제 (SHOP-06, 실서버 시나리오 A).
 
-    python infra/fault-injection/payment_fault.py inject [--kind failure|latency|lost_response] [--delay-ms N]
+    python infra/fault-injection/payment_fault.py inject [--kind KIND] [--delay-ms N]
+      KIND: failure | latency | lost_response(승인됐는데 응답이 끊김 = 시간 초과)
     python infra/fault-injection/payment_fault.py clear
 
 shop-api의 `/api/shop/admin/faults`를 부른다. 표준 라이브러리만 쓰고 bash·pwsh 어디서나 돈다.

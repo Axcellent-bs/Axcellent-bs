@@ -1,4 +1,4 @@
-"""결과 모름 결제(가짜 결제사): 장애 주입 lost_response → 결과 모름 → 다시 확인 → 결제됨."""
+"""시간 초과 결제(가짜 결제사): 장애 주입 lost_response → 시간 초과 → 다시 확인 → 결제됨."""
 
 from __future__ import annotations
 
@@ -42,10 +42,10 @@ def test_lost_response_leaves_payment_unknown_and_blocks_paying_again() -> None:
     order_id = _order(client)
     data = _pay(client, order_id).json()["data"]
     assert data["status"] == "pending_payment"
-    assert data["payments"][0]["status"] == "unknown"
-    assert data["payments"][0]["failure_code"] == "PG_UNKNOWN"
+    assert data["payments"][0]["status"] == "timeout"
+    assert data["payments"][0]["failure_code"] == "PG_TIMEOUT"
     assert _pay(client, order_id).status_code == 409  # 두 번 청구될 수 있어 막는다
-    listed = client.get("/api/shop/admin/payments/unknown", headers=ADMIN).json()["data"]
+    listed = client.get("/api/shop/admin/payments/timeouts", headers=ADMIN).json()["data"]
     assert [r["order_id"] for r in listed] == [order_id]
 
 
