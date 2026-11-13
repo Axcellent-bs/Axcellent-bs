@@ -38,6 +38,18 @@
       "priority": "required"
     },
     {
+      "id": "revert_merged_pr",
+      "description": "형상관리 연결(connection_id) 레포에서 병합된 PR(pr_number)을 되돌리는 PR을 열고 머지까지 간다. 레포 작업 공간과 같은 repo_revert_pr(B) → merge_pr(B) 관문을 차례로 거친다. CI를 기다려야 하면 자동 머지를 예약하고 auto_merge_scheduled, 관문이 막거나 CI가 실패하면 held(input-required, human_input). 같은 연결·PR을 다시 부르면 이미 연 되돌리기 PR을 쓴다. 어떤 PR을 되돌릴지는 요청한 쪽이 정한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#RevertMergedPrInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#RevertMergedPrOutput",
+      "grade": "B",
+      "allowed_requesters": [
+        "infra"
+      ],
+      "verifier": "safety",
+      "priority": "optional"
+    },
+    {
       "id": "verify_rollback_target",
       "description": "infra rollback_deployment(B)의 교차검증. 배포가 사건 뒤면 거절(deploy_after_incident), 배포 직전 구간 안에 머지된 PR이 있으면 승인(deploy_before_incident), 없으면 거절(no_deploy_in_window). 거절도 completed + outcome rejected_by_review. 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#VerifyRollbackTargetInput",

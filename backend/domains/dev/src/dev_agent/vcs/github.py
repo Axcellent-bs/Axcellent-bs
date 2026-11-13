@@ -94,6 +94,13 @@ mutation($id: ID!, $title: String) {
   }
 }
 """
+_AUTO_MERGE = """
+mutation($id: ID!, $method: PullRequestMergeMethod!) {
+  enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: $method}) {
+    pullRequest { number }
+  }
+}
+"""
 _REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
@@ -335,14 +342,17 @@ class GithubVcsAdapter:
 
     @staticmethod
     def _change(pr: dict, files: list[dict]) -> Change:
+        merged = bool(pr.get("merged") or pr.get("merged_at"))
         return Change(
             number=int(pr["number"]),
             title=pr.get("title") or "",
             branch=(pr.get("head") or {}).get("ref", ""),
             base=(pr.get("base") or {}).get("ref", ""),
-            merged=bool(pr.get("merged") or pr.get("merged_at")),
+            merged=merged,
             merged_at=_time(pr.get("merged_at")),
             url=pr.get("html_url"),
+            # 열린 PR의 merge_commit_sha는 시험 머지라 머지된 것만 쓴다
+            merge_sha=(str(pr.get("merge_commit_sha") or "") or None) if merged else None,
             files=tuple(
                 ChangedFile(
                     path=f["filename"],
@@ -838,6 +848,20 @@ class GithubVcsAdapter:
         return OpenedChange(
             number=int(made["number"]), url=made.get("url"), branch=made.get("headRefName") or ""
         )
+
+    async def enable_auto_merge(self, number: int, method: str = "squash") -> None:
+        """CI가 끝나면 GitHub가 병합하게 자동 머지를 건다.
+
+        레포 설정에서 자동 머지(Allow auto-merge)가 켜져 있어야 한다."""
+        if method not in MERGE_METHODS:
+            raise VcsError("invalid", f"모르는 병합 방식: {method}")
+        pr = await self._call("GET", f"/pulls/{int(number)}")
+        if pr.get("merged") or pr.get("merged_at"):
+            raise VcsError("conflict", f"이미 병합된 변경: {number}")
+        node = pr.get("node_id")
+        if not node:
+            raise VcsError("invalid", f"변경 {number}의 node_id가 없다")
+        await self._graphql(_AUTO_MERGE, {"id": node, "method": method.upper()})
 
     async def _default_branch(self) -> str:
         repo = await self._call("GET", "")

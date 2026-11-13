@@ -92,6 +92,7 @@ class Change:
     merged_at: datetime | None = None
     url: str | None = None
     files: tuple[ChangedFile, ...] = ()
+    merge_sha: str | None = None  # 병합 커밋 (병합된 것만)
 
     @property
     def changed_paths(self) -> list[str]:

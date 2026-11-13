@@ -115,6 +115,7 @@ class MockVcsAdapter:
         self._issue_comments: dict[int, list[Comment]] = {}
         # 쓰기 호출 기록 (테스트에서 execute 뒤에만 불렀는지 본다)
         self.writes: list[tuple[str, int]] = []
+        self.auto_merge: set[int] = set()  # 자동 머지를 예약한 변경
 
     async def server_info(self) -> ServerInfo:
         """목 부품: 클라우드처럼 본다 (버전 점검 대상 아님)."""
@@ -157,6 +158,7 @@ class MockVcsAdapter:
                 merged_at=merged_at,
                 url=f"mock://change/{number}",
                 files=changed,
+                merge_sha=f"seed{number:04d}" if merged_at is not None else None,
             ),
             body=body,
             runs=list(checks if checks is not None else self._default_checks),
@@ -284,7 +286,9 @@ class MockVcsAdapter:
         entry = self._entry(number)
         if entry.change.merged:
             raise VcsError("conflict", f"이미 병합된 변경: {number}")
-        entry.change = replace(entry.change, merged=True, merged_at=self._clock())
+        entry.change = replace(
+            entry.change, merged=True, merged_at=self._clock(), merge_sha=f"merge{number:04d}"
+        )
         entry.closed_at = entry.updated_at = self._clock()
         if entry.change.base == self.base_branch:
             # 되돌리기에 쓰려고 병합 직전 기준 파일을 남긴다
@@ -491,6 +495,16 @@ class MockVcsAdapter:
         e.updated_at = self._clock()
         self.writes.append(("reopen_change", number))
         return self._summary(e)
+
+    async def enable_auto_merge(self, number: int, method: str = "squash") -> None:
+        """자동 머지 예약만 기록한다 (CI가 끝나면 병합하는 일은 하지 않는다)."""
+        self._writable()
+        if method not in MERGE_METHODS:
+            raise VcsError("invalid", f"모르는 병합 방식: {method}")
+        if self._entry(number).change.merged:
+            raise VcsError("conflict", f"이미 병합된 변경: {number}")
+        self.auto_merge.add(number)
+        self.writes.append(("enable_auto_merge", number))
 
     async def revert_change(self, number: int, title: str | None = None) -> OpenedChange:
         """병합 직전 기준 파일로 되돌리는 변경을 연다 (그때 없던 파일은 지운다)."""
