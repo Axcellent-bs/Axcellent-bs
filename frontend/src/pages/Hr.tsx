@@ -111,12 +111,15 @@ export default function HrPage() {
         )}
       </section>
 
-      {/* ② 기록 도구 */}
-      {/* 인사 AI가 실제로 남긴 이벤트 기록과 고른 이벤트의 처리 내역 */}
-      <IncidentRecords initialCtx={ctxParam} />
-      {/* 확정된 카드는 장애 대응(보라)·업무 결정(민트)으로 나눠 보여 준다. 최근 순 최대 200장 */}
+      {/* ② 확정된 카드: 이 화면의 본문이라 사람이 할 일 바로 아래에 둔다. 장애 대응(보라)·업무 결정(민트)을 나란히, 최근 순 최대 200장 */}
       <CardSections cards={view.decided} />
-      <Section title="계획 비교" desc="새 계획이 예전에 채택되지 않은 안과 겹치는지 확인합니다. 저장하지 않고 보기만 합니다."><PlanChecker /></Section>
+      {/* ③ 이벤트 기록: 인사 AI가 남긴 이벤트 목록과 고른 이벤트의 한 일·타임라인·해결 내용 */}
+      <IncidentRecords initialCtx={ctxParam} />
+      {/* ④ 계획 비교는 가끔 쓰는 도구라 접어 둔다 */}
+      <details className="rounded-2xl border border-ink-100 bg-surface px-5 py-3 text-sm">
+        <summary className="cursor-pointer font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">계획 비교</summary>
+        <div className="mt-3"><Section title="계획 비교" desc="새 계획이 예전에 채택되지 않은 안과 겹치는지 확인합니다. 저장하지 않고 보기만 합니다."><PlanChecker /></Section></div>
+      </details>
     </div>
   );
 }
