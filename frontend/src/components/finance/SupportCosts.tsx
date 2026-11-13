@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiError";
 import { Link } from "@/lib/nav";
 import { shortDateTime } from "@/lib/format";
 import { finance, krw, type SupportCostRecord } from "@/lib/finance";
@@ -10,6 +13,37 @@ const RESOLUTION_KO: Record<string, string> = {
   answered: "답변으로 해결", claim_decided: "클레임 처리", compensated: "보상 지급", escalated: "다른 부서로 이관",
 };
 const DECISION_KO: Record<string, string> = { approve: "승인", reject: "거절" };
+
+// 고객지원 문의 번호는 고객지원 문의 DB를 새로 시작하면 다시 1부터 매겨진다(11/13 확인: 예전 기록의 #5가
+// 지금은 다른 고객의 문의). 그래서 링크를 걸기 전에 지금 그 번호 문의의 주문이 기록의 주문과 같은지 본다.
+type InquiryMatch = "checking" | "same" | "other" | "gone" | "unknown";
+
+function useInquiryMatch(inquiryId: number, orderId: string | null): InquiryMatch {
+  const [match, setMatch] = useState<InquiryMatch>(orderId ? "checking" : "unknown");
+  useEffect(() => {
+    if (!orderId) return;
+    let live = true;
+    api.admin.get(inquiryId)
+      .then((c) => live && setMatch(String(c.order_id ?? "") === orderId ? "same" : "other"))
+      .catch((e) => live && setMatch(e instanceof ApiError && e.status === 404 ? "gone" : "unknown"));
+    return () => { live = false; };
+  }, [inquiryId, orderId]);
+  return match;
+}
+
+function InquiryLink({ r }: { r: SupportCostRecord }) {
+  const match = useInquiryMatch(r.inquiry_id, r.order_id);
+  const cls = "ml-3 whitespace-nowrap text-sm";
+  if (match === "other" || match === "gone") {
+    const why = match === "other"
+      ? `지금 고객지원의 문의 #${r.inquiry_id}는 다른 주문의 문의입니다. 고객지원 문의 기록이 새로 시작되기 전 기록이라 같은 번호로 찾을 수 없어요.`
+      : `고객지원에 문의 #${r.inquiry_id}가 없습니다.`;
+    return <span className={`${cls} text-ink-500`} title={why}>고객지원 문의 없음</span>;
+  }
+  if (match === "checking") return <span className={`${cls} text-ink-500`}>문의 확인 중…</span>;
+  // same·unknown(주문 없음·확인 실패): 지금처럼 문의 진단으로 보낸다
+  return <Link href={`/support?inquiry=${r.inquiry_id}#inquiry`} className={`${cls} font-medium text-brand-700 underline`}>고객지원 문의 →</Link>;
+}
 
 function Row({ r }: { r: SupportCostRecord }) {
   const spent = r.expense_used
@@ -28,7 +62,7 @@ function Row({ r }: { r: SupportCostRecord }) {
       <td className="py-2 pr-3 whitespace-nowrap text-ink-500">{shortDateTime(r.recorded_at)}</td>
       <td className="py-2">
         <Link href={`/orchestrator?ctx=${encodeURIComponent(r.context_id)}`} className="whitespace-nowrap text-sm font-medium text-brand-700 underline">총괄 이벤트 →</Link>
-        <Link href={`/support?inquiry=${r.inquiry_id}#inquiry`} className="ml-3 whitespace-nowrap text-sm font-medium text-brand-700 underline">고객지원 문의 →</Link>
+        <InquiryLink r={r} />
       </td>
     </tr>
   );
