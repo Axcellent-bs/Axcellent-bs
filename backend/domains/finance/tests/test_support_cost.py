@@ -160,3 +160,44 @@ def test_a_coupon_after_closing_is_kept_with_the_refund() -> None:
     out = _out(_ask(base | {"coupon_id": "cpn_1"}))
     assert (out.status, out.refund_amount, out.coupon_issued) == ("updated", 5000, True)
     assert "환불 5,000원" in out.note and "쿠폰 지급" in out.note
+
+
+def test_a_renumbered_inquiry_with_its_own_ref_does_not_overwrite_the_old_record() -> None:
+    """고객지원 번호가 다시 1부터 매겨져도 `inquiry_ref`가 다르면 다른 기록이다 (11/13, #1082)."""
+    old = _out(_ask({"inquiry_id": 5, "order_id": "ord_2001", "resolution": "answered"}))
+    new = _out(
+        _ask(
+            {
+                "inquiry_id": 5,
+                "order_id": "ord_2002",
+                "resolution": "claim_decided",
+                "refund_amount": 9000,
+                "inquiry_ref": "ctx_sup_new_5",
+            }
+        )
+    )
+    assert new.status == "recorded" and new.record_id == "sc_ctx_sup_new_5"
+    rows = handlers.state().ledger.support_costs
+    assert rows[5]["order_id"] == "ord_2001" and rows[5]["refund_amount"] == 0  # 예전 기록 그대로
+    assert rows["ctx_sup_new_5"]["order_id"] == "ord_2002"
+    assert rows["ctx_sup_new_5"]["inquiry_ref"] == "ctx_sup_new_5"
+    assert old.record_id == "sc_5"
+    # 같은 ref로 다시 오면 같은 기록이다
+    again = _out(
+        _ask({"inquiry_id": 5, "order_id": "ord_2002", "resolution": "answered",
+              "inquiry_ref": "ctx_sup_new_5"})
+    )  # fmt: skip
+    assert again.status == "already_recorded" and len(rows) == 2
+
+
+def test_records_keyed_by_ref_survive_a_restart(tmp_path) -> None:
+    from finance_agent import persist
+
+    _ask({"inquiry_id": 3, "order_id": "ord_2001", "resolution": "answered"})
+    _ask({"inquiry_id": 3, "order_id": "ord_2002", "resolution": "answered",
+          "inquiry_ref": "ctx_sup_3b"})  # fmt: skip
+    path = tmp_path / "state.json"
+    persist.save(handlers.state(), path)
+    handlers.reset_state(MockSources())
+    assert persist.load(handlers.state(), path)
+    assert set(handlers.state().ledger.support_costs) == {3, "ctx_sup_3b"}

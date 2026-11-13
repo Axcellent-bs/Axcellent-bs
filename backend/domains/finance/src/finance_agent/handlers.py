@@ -81,7 +81,8 @@ class Ledger:
         self.refunds: dict[str, int] = {}  # order_id → 환불 누적
         self.seen_events: set[str] = set()
         # 문의 번호 → 고객지원 처리 결과 비용 기록
-        self.support_costs: dict[int, dict[str, Any]] = {}
+        # 문의 비용 기록. 키는 바뀌지 않는 문의 ID(`inquiry_ref`)가 있으면 그것, 없으면 문의 번호
+        self.support_costs: dict[int | str, dict[str, Any]] = {}
         # context_id → 사건 구간·부품. 총괄 사건 목록은 재시작하면 비워져서 받았을 때 남겨 둔다
         self.incident_windows: dict[str, dict[str, Any]] = {}
         self.coupon_events: dict[str, list[dict[str, Any]]] = {}  # context_id → 보상 쿠폰 이벤트
@@ -482,13 +483,17 @@ async def record_support_cost(request: AgentRequest) -> AgentResult:
         unavailable.extend(books.meta([])["unavailable"])
     else:
         unavailable.append("문의에 주문이 연결되지 않아 배송비를 확인하지 못함")
-    previous = ledger.support_costs.get(data.inquiry_id)
+    # 번호만으로 찾으면 번호가 다시 매겨진 새 문의가 예전 기록을 덮어쓴다 (11/13). 그래서 바뀌지
+    # 않는 문의 ID가 오면 그것으로 기록을 구분한다. 예전 기록(번호 키)은 그대로 둔다
+    key: int | str = data.inquiry_ref or data.inquiry_id
+    previous = ledger.support_costs.get(key)
     if previous is None:
         refund = data.refund_amount or 0
         coupon = data.coupon_id is not None
         record = {
-            "record_id": f"sc_{data.inquiry_id}",
+            "record_id": f"sc_{data.inquiry_ref or data.inquiry_id}",
             "inquiry_id": data.inquiry_id,
+            "inquiry_ref": data.inquiry_ref,
             "order_id": data.order_id,
             "resolution": data.resolution,
             "claim_decision": data.claim_decision,
@@ -503,7 +508,7 @@ async def record_support_cost(request: AgentRequest) -> AgentResult:
     else:
         record, changed = _with_new_expense(previous, data)
         status = "updated" if changed else "already_recorded"
-    ledger.support_costs[data.inquiry_id] = record
+    ledger.support_costs[key] = record
     spent = "경비 사용 없음"
     if record["expense_used"]:
         parts = [f"환불 {record['refund_amount']:,}원"] if record["refund_amount"] else []

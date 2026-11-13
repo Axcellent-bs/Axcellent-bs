@@ -104,7 +104,10 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.ledger.coupons = {k: dict(v) for k, v in led["coupons"].items()}
     s.ledger.refunds = dict(led["refunds"])
     s.ledger.seen_events = set(led["seen_events"])
-    s.ledger.support_costs = {int(k): v for k, v in led["support_costs"].items()}
+    # 키: 문의 번호(예전 기록) 또는 바뀌지 않는 문의 ID(`inquiry_ref`, `ctx_…`)
+    s.ledger.support_costs = {
+        (int(k) if k.isdigit() else k): v for k, v in led["support_costs"].items()
+    }
     s.ledger.coupon_events = {k: list(v) for k, v in led["coupon_events"].items()}
     s.ledger.incident_windows = {k: dict(v) for k, v in led.get("incident_windows", {}).items()}
     s.ledger.incident_reports = {k: dict(v) for k, v in led.get("incident_reports", {}).items()}
