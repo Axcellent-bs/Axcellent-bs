@@ -206,7 +206,7 @@ export const ALL_ROOM = "all";
 
 // ---------------------------------------------------------------- 안전한 결과 값만 고르기
 const FIELD_KO: Record<string, string> = {
-  failed_order_count: "실패 주문", affected_customer_count: "영향 고객", damage_amount: "피해 금액", affected_customer_ids: "영향 고객 id",
+  failed_order_count: "실패 주문", affected_customer_count: "영향 고객", damage_amount: "결제 실패(미결제) 금액", affected_customer_ids: "영향 고객 id",
   suspects: "의심 배포", impact_scope: "영향 범위", status: "판정", rolled_back_to: "되돌린 버전", candidates: "후보 PR", linked_paras: "연결",
   notice_id: "공지 id", eligible_customer_ids: "보상 대상", amount_per_customer: "1인 금액", issued: "지급", total_amount: "총액",
   failed_orders: "실패 주문", affected_customers: "영향 고객", lost_amount: "매출 손실", compensation_coupon_count: "보상 쿠폰",

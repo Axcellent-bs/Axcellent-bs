@@ -94,7 +94,7 @@ function IncidentTabs({ recent, older, selected, onSelect }: { recent: IncidentS
   );
 }
 
-/** 상세 맨 위 요약: 피해 + 보상 (이벤트 목록 값 그대로) */
+/** 상세 맨 위 요약: 결제 실패(미결제) + 보상 (이벤트 목록 값 그대로) */
 function SummaryStrip({ s }: { s: IncidentSummary }) {
   return (
     <div className="flex flex-wrap items-end gap-x-6 gap-y-2 rounded-2xl bg-surface-2 px-4 py-3">
@@ -257,7 +257,7 @@ function IncidentDetailView({ id, summary, tick }: { id: string; summary: Incide
       <ResourceBody res={res}>
         {(d) => (
           <div className="space-y-5">
-            {/* 숫자(피해·보상·환불)를 먼저, 안내와 장부 출처는 뒤로 */}
+            {/* 숫자(미결제·보상·환불·확인 필요)를 먼저, 안내와 장부 출처는 뒤로 */}
             <Cards d={d} />
             <Recipients d={d} />
             <WhatToDo />

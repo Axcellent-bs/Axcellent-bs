@@ -942,5 +942,5 @@ export function plainText(text: string | null | undefined, sellers?: Record<stri
     .replace(/\bdata 영향/g, "데이터 AI 영향")
     .replace(/출처:? (events|safety_executions|seed)\b/g, (_, src: string) => `출처: ${ledgerSourceKo(src).label}`)
     .replace(/\b(issue_coupon|refund_request|confirm_settlement)\b/g, (c: string) => ACTION_KO[c] ?? c)
-    .replace(/\b(damage_amount|compensation_total)\b/g, (c: string) => (c === "damage_amount" ? "피해 금액" : "보상 합계"));
+    .replace(/\b(damage_amount|compensation_total)\b/g, (c: string) => (c === "damage_amount" ? "결제 실패(미결제) 금액" : "보상 합계"));
 }
