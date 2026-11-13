@@ -8,6 +8,8 @@
 - 실제 모드는 결제 서버 이상도 확인돼야 원인으로 본다(`confirm_with_server`). 배포 후보가 있어도
   서버가 정상이거나 상태를 못 읽으면 `undetermined`로 두어 롤백하지 않고 사람에게 넘긴다
   (고객 문의 급증만으로 열린 장애 등, #소통 2026-11-09 합의).
+- 배포 기록에 후보가 없으면(실제 모드) 연결된 레포에서 구간 안에 머지된 PR을 후보로 본다
+  (`with_pr_suspects`, `pr_suspects.py`). 확신도 규칙은 배포와 같다(머지 시각 기준).
 - 복구 예상 시각은 만들지 않는다.
 """
 
@@ -20,6 +22,7 @@ from typing import Any, Literal
 
 from ax_contracts.schemas.infra import DiagnoseIncidentOutput, SuspectDeployment
 from infra_agent.deployments import Deployment, DeploymentHistory
+from infra_agent.pr_suspects import PrSuspect
 
 HIGH_CONFIDENCE_WINDOW = timedelta(minutes=15)
 
@@ -101,3 +104,29 @@ def confirm_with_server(diag: Diagnosis, server: Literal["fault", "ok", "unknown
         return replace(diag, server=server)
     output = diag.output.model_copy(update={"status": "undetermined", "suspects": []})
     return replace(diag, output=output, server=server)
+
+
+def with_pr_suspects(diag: Diagnosis, prs: list[PrSuspect], now: datetime) -> Diagnosis:
+    """배포 기록으로 원인을 못 찾았을 때 원인 PR을 후보로 넣는다 (최근 머지 먼저).
+
+    배포 기록에 후보가 있으면 그대로 둔다. 서버 이상 확인(`confirm_with_server`)은 이 뒤에 한다.
+    """
+    if diag.output.status == "suspected" or not prs:
+        return diag
+    if len(prs) == 1:
+        fresh = now - prs[0].merged_at <= HIGH_CONFIDENCE_WINDOW
+        levels = ["high" if fresh else "mid"]
+    else:
+        levels = ["mid"] + ["low"] * (len(prs) - 1)
+    suspects = [
+        SuspectDeployment(
+            service=p.service,
+            version=p.version,
+            deployed_at=p.merged_at,
+            change_summary=f"PR #{p.pr_number} {p.title}".strip(),
+            confidence=level,  # type: ignore[arg-type]
+        )
+        for p, level in zip(prs, levels, strict=True)
+    ]
+    output = diag.output.model_copy(update={"status": "suspected", "suspects": suspects})
+    return replace(diag, output=output)
