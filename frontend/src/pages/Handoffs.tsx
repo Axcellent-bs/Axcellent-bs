@@ -89,7 +89,7 @@ function Detail({ task, onClosed }: { task: HandoffTask; onClosed: (t: HandoffTa
         <div><dt className="text-xs text-ink-500">업무 이름</dt><dd className="mt-0.5 font-mono text-xs">{task.skill}</dd></div>
         <div className="col-span-2"><dt className="text-xs text-ink-500">사건·대화 번호</dt><dd className="mt-0.5 break-all font-mono text-xs">{task.context_id}</dd>
           {task.from_service === "orchestrator" && (
-            <Link className="mt-1 inline-block text-xs font-medium text-brand-600 underline" href={`/orchestrator?ctx=${encodeURIComponent(task.context_id)}`}>총괄 이벤트에서 보기</Link>
+            <Link className="mt-1 inline-block text-xs font-medium text-brand-600 underline" href={`/orchestrator?ctx=${encodeURIComponent(task.context_id)}`}>총괄 이슈에서 보기</Link>
           )}
         </div>
       </dl>

@@ -282,6 +282,6 @@ async def evaluate_agents(svc: Services, request: AgentRequest) -> AgentResult:
         output,
         outcome="listed",
         evidence=make_evidence(
-            svc.clock, f"에이전트 평가 집계: 이벤트 {len(events)}건", [c.card_id for c in cards]
+            svc.clock, f"에이전트 평가 집계: 이슈 {len(events)}건", [c.card_id for c in cards]
         ),
     )

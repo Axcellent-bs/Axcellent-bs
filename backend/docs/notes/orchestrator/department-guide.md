@@ -74,7 +74,7 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
 | `find_related_prs` | read | 관련 코드 변경 찾기 (dev) | diagnose, impact | 아니오 | `{"component": "payment", "window_from": "2026-10-16T00:45:00Z", "window_to": "2026-10-16T01:15:00Z"}` |
-| `link_incident` | A | 이벤트에 코드 변경 연결 (dev) | related_prs | 아니오 | `{"incident_context_id": "ctx_inc_guide", "pr_numbers": [412, 418]}` |
+| `link_incident` | A | 이슈에 코드 변경 연결 (dev) | related_prs | 아니오 | `{"incident_context_id": "ctx_inc_guide", "pr_numbers": [412, 418]}` |
 
 ## marketing
 
@@ -107,6 +107,6 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
-| `find_similar_cases` | read | 비슷한 과거 이벤트 찾기 (hr) | 없음 (이벤트 시작 즉시) | 아니오 | `{"event_type": null, "limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
-| `record_case` | A | 이벤트 기록 (hr) | recovered_notice(끝나면), end_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면), compensation_sns_draft(끝나면), apology_sns_draft(끝나면) | 예 | `{"alternatives_considered": ["과거 같은 장애의 처리 방식 다시 하기: 건너뜀", "원인 확인 요청: 건너뜀", "장애 공지 배너 내리기: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 과거 같은 장애의 처리 방식 다시 하기, 원인 확인 요청, 장애 공지 배너 내리기", "event_typ` |
+| `find_similar_cases` | read | 비슷한 과거 이슈 찾기 (hr) | 없음 (이벤트 시작 즉시) | 아니오 | `{"event_type": null, "limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
+| `record_case` | A | 이슈 기록 (hr) | recovered_notice(끝나면), end_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면), compensation_sns_draft(끝나면), apology_sns_draft(끝나면) | 예 | `{"alternatives_considered": ["과거 같은 장애의 처리 방식 다시 하기: 건너뜀", "원인 확인 요청: 건너뜀", "장애 공지 배너 내리기: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 과거 같은 장애의 처리 방식 다시 하기, 원인 확인 요청, 장애 공지 배너 내리기", "event_typ` |
 | `record_resolution` | A | 해결 내용 기록 (hr) | record(끝나면) | 아니오 | `{"action": "배포 이전 버전으로 되돌림", "action_code": "rollback_deployment", "context_id": "ctx_inc_guide", "minutes_to_resolve": 0, "outcome": "resolved", "root_cause": "PR #412 배포가 원인일 수 있음"}` |

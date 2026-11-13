@@ -215,7 +215,7 @@ class IncidentStore:
             try:
                 found.append(incident_from_dict(json.loads(body)))
             except (ValueError, KeyError, TypeError):
-                log.warning("저장된 이벤트를 읽지 못해 건너뜀: %s", context_id)
+                log.warning("저장된 이슈를 읽지 못해 건너뜀: %s", context_id)
         return found
 
     def mark_seen(self, event_id: str) -> bool:

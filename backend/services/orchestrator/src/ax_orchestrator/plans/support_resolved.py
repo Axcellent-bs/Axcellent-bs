@@ -47,7 +47,7 @@ def _verify_record(output: dict[str, Any]) -> tuple[str, str] | None:
     entries = output.get("entries") or []
     if any(_recorded(e) for e in entries if isinstance(e, dict)):
         return None
-    return "record_not_found", "인사 기록에서 이 이벤트의 처리 결과 기록을 찾지 못함"
+    return "record_not_found", "인사 기록에서 이 이슈의 처리 결과 기록을 찾지 못함"
 
 
 def support_resolved() -> Plan:

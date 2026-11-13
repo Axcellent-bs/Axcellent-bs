@@ -4,7 +4,7 @@ import { DecisionCard } from "@/components/hr/DecisionCards";
 import DuplicateGroups from "@/components/hr/DuplicateGroups";
 
 // 결정 기록 화면: 확정된 카드를 두 종류로 나눠 색으로 구별한다.
-// - 장애 대응 카드(보라): 장애 이벤트가 끝날 때 총괄이 남긴 기록(kind=incident). 비슷한 이벤트 검색에 쓰이고 병합하지 않는다.
+// - 장애 대응 카드(보라): 장애 이슈가 끝날 때 총괄이 남긴 기록(kind=incident). 비슷한 이슈 검색에 쓰이고 병합하지 않는다.
 // - 업무 결정 카드(민트): 기획서 확정·정책·기각 같은 업무 결정(kind=decision). 같은 내용이 여러 장이면 병합 대상이다.
 // 그 밖의 종류(사례·공지·정책·사기)는 맨 아래에 접어 둔다.
 const KINDS = {
@@ -84,9 +84,9 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
         <div id="sec-incident">
           <Head
             kind="incident"
-            title="장애 대응 카드(이벤트 기록)"
+            title="장애 대응 카드(이슈 기록)"
             count={incidents.length}
-            desc="장애가 끝나면 총괄이 남기는 기록이고, 비슷한 이벤트를 찾는 데 쓰입니다."
+            desc="장애가 끝나면 총괄이 남기는 기록이고, 비슷한 이슈를 찾는 데 쓰입니다."
           />
         </div>
         {incidents.length === 0

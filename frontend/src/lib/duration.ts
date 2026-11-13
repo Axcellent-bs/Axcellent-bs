@@ -24,7 +24,7 @@ export function durationKo(seconds: number): string {
   return rest === 0 ? `${m}분` : `${m}분 ${rest}초`;
 }
 
-// ---- 이벤트 시각(시스템이 잰 값). 사람이 적은 시각이 아니다 ----
+// ---- 이슈 시각(시스템이 잰 값). 사람이 적은 시각이 아니다 ----
 export interface EventTimes {
   detected_at?: string | null;
   cause_candidate_at?: string | null;

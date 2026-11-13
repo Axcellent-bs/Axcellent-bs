@@ -94,13 +94,13 @@ def resolution_draft(inc: Incident) -> dict[str, Any] | None:
     if past.get("status") == "found":
         pct = round((past.get("similarity") or 0) * 100)
         basis = [
-            f"같은 유형의 과거 이벤트(비슷한 정도 {pct}%)에서 가져온 원인과 조치예요. "
-            "이번 이벤트의 원인과 같은지 확인해 주세요"
+            f"같은 유형의 과거 이슈(비슷한 정도 {pct}%)에서 가져온 원인과 조치예요. "
+            "이번 이슈의 원인과 같은지 확인해 주세요"
         ]
         done = _done_action(inc)
         if this_action and done is not None:
             basis.append(
-                f"조치는 이번 이벤트에서 총괄이 끝낸 '{_ACTION_NAME[done]}'라서"
+                f"조치는 이번 이슈에서 총괄이 끝낸 '{_ACTION_NAME[done]}'라서"
                 " 과거 조치보다 우선했어요"
             )
         return {

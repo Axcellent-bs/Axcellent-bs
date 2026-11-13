@@ -70,7 +70,7 @@ def find_active_incident(get_manager: GetManager) -> Handler:
         inc = manager.find_active(parsed.component, parsed.occurred_at) if manager else None
         if inc is None:
             output = FindActiveIncidentOutput(found=False)
-            summary = "맞는 이벤트 없음"
+            summary = "맞는 이슈 없음"
         else:
             output = FindActiveIncidentOutput(
                 found=True,
@@ -82,7 +82,7 @@ def find_active_incident(get_manager: GetManager) -> Handler:
                 recovered_at=inc.recovered_at,
                 notice_id=inc.shared.get("notice_id"),  # 점검 공지가 게시됐을 때만, 지어내지 않는다
             )
-            summary = f"{inc.component} 이벤트 {inc.status}"
+            summary = f"{inc.component} 이슈 {inc.status}"
         return AgentResult(
             meta=request.meta,
             status=TaskStatus.COMPLETED,

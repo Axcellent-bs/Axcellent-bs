@@ -69,7 +69,7 @@ async def test_incident_view_carries_the_recommendation(harness) -> None:
     await engine.run(inc, scenario_a())
     assert inc.view()["recommendation"] == {
         "status": "no_evidence",
-        "reason": "비슷한 과거 이벤트가 없음",
+        "reason": "비슷한 과거 이슈가 없음",
     }
 
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { durationKo, segmentsOf, type EventTimes } from "@/lib/duration";
 import { hr, type HrCard } from "@/lib/hr";
 
-// 처음 겪은 장애와 반복된 장애(시작할 때 같은 유형의 과거 이벤트를 근거로 본 것)의 시간을 견준다.
+// 처음 겪은 장애와 반복된 장애(시작할 때 같은 유형의 과거 이슈를 근거로 본 것)의 시간을 견준다.
 // 시간은 시스템이 잰 값이다: 감지부터 쇼핑몰이 정상 복귀를 알린 때까지. 사람이 적은 값이 아니다.
 // 건수가 적어서 통계가 아니라 사례 비교로만 읽는다. 3건 미만이면 가운데 값을 내지 않고 사례를 그대로 보여 준다.
 interface Row { cardId: string; title: string; total: number; evidence: number | null; human: number | null; repeat: boolean }
@@ -40,14 +40,14 @@ export default function RepeatCompare() {
   }, []);
 
   const groups = [
-    { label: "처음 겪은 장애", note: "시작할 때 같은 유형의 과거 이벤트가 없음", items: (rows ?? []).filter((r) => !r.repeat) },
-    { label: "반복된 장애", note: "시작할 때 같은 유형의 과거 이벤트를 근거로 봄", items: (rows ?? []).filter((r) => r.repeat) },
+    { label: "처음 겪은 장애", note: "시작할 때 같은 유형의 과거 이슈가 없음", items: (rows ?? []).filter((r) => !r.repeat) },
+    { label: "반복된 장애", note: "시작할 때 같은 유형의 과거 이슈를 근거로 봄", items: (rows ?? []).filter((r) => r.repeat) },
   ];
   return (
     <section className="card space-y-3 p-6">
       <div>
         <h2 className="text-lg font-semibold">처음과 반복의 해결 시간</h2>
-        <p className="mt-1 text-xs text-ink-500">시간은 이벤트를 감지한 때부터 쇼핑몰이 정상 복귀를 알린 때까지이고, 시스템이 쟀습니다. 정상 복귀가 기록된 이벤트만 셉니다. 건수가 적으니 사례를 견주는 용도로만 보세요. 시연에서는 장애를 푼 때가 복귀 시각이라 시연하는 사람의 속도로 정해집니다.</p>
+        <p className="mt-1 text-xs text-ink-500">시간은 이슈를 감지한 때부터 쇼핑몰이 정상 복귀를 알린 때까지이고, 시스템이 쟀습니다. 정상 복귀가 기록된 이슈만 셉니다. 건수가 적으니 사례를 견주는 용도로만 보세요. 시연에서는 장애를 푼 때가 복귀 시각이라 시연하는 사람의 속도로 정해집니다.</p>
       </div>
       {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
       {!rows ? (!err && <p className="text-xs text-ink-500">불러오는 중…</p>) : (

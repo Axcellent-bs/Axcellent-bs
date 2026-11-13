@@ -75,7 +75,7 @@ def _incident(view: dict[str, Any]) -> dict[str, Any]:
 def collect(manager: Any) -> dict[str, Any]:
     """총괄 이벤트 기록을 사실로. 총괄이 준비되지 않았으면 `unavailable`만 담는다."""
     if manager is None:
-        return {"unavailable": ["총괄이 아직 준비되지 않아 이벤트 기록을 읽지 못했다"]}
+        return {"unavailable": ["총괄이 아직 준비되지 않아 이슈 기록을 읽지 못했다"]}
     views = manager.listing()
     recent = views[-RECENT:][::-1]  # 최근 순
     # 대응 중(open) 또는 총괄 대응은 끝났지만 쇼핑몰이 아직 안 풀린(degraded, 복구 신호 없음) 이벤트

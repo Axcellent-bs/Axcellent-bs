@@ -282,7 +282,7 @@ async def incidents() -> dict:
 async def incident(context_id: str) -> JSONResponse:
     inc = state.manager.incidents.get(context_id) if state.manager else None
     if inc is None:
-        return JSONResponse({"error": {"code": "NOT_FOUND", "message": "이벤트 없음"}}, 404)
+        return JSONResponse({"error": {"code": "NOT_FOUND", "message": "이슈 없음"}}, 404)
     return JSONResponse({"data": inc.view(), "meta": {}})
 
 

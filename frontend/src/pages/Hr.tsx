@@ -46,7 +46,7 @@ const GUIDE: ReactNode[] = [
 ];
 
 export default function HrPage() {
-  const ctxParam = useSearchParams().get("ctx"); // 총괄 이벤트 화면의 "결정 기록에서 보기"로 들어올 때
+  const ctxParam = useSearchParams().get("ctx"); // 총괄 이슈 화면의 "결정 기록에서 보기"로 들어올 때
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [up, setUp] = useState(true);
@@ -113,7 +113,7 @@ export default function HrPage() {
 
       {/* ② 확정된 카드: 이 화면의 본문이라 사람이 할 일 바로 아래에 둔다. 장애 대응(보라)·업무 결정(민트)을 나란히, 최근 순 최대 200장 */}
       <CardSections cards={view.decided} />
-      {/* ③ 이벤트 기록: 인사 AI가 남긴 이벤트 목록과 고른 이벤트의 한 일·타임라인·해결 내용 */}
+      {/* ③ 이슈 기록: 인사 AI가 남긴 이슈 목록과 고른 이슈의 한 일·타임라인·해결 내용 */}
       <IncidentRecords initialCtx={ctxParam} />
       {/* ④ 계획 비교는 가끔 쓰는 도구라 접어 둔다 */}
       <details className="rounded-2xl border border-ink-100 bg-surface px-5 py-3 text-sm">
