@@ -6857,6 +6857,141 @@
         "summary": "Merge Outage Sns Drafts"
       }
     },
+    "/api/dashboard/marketing/outage-sns-drafts/{post_draft_id}/media": {
+      "post": {
+        "description": "장애 사과·보상 초안에 이미지를 붙인다(사람이 '이 초안으로 진행'을 한 번 누름). 본문이 없다.\n\n마케팅 `prepare_outage_sns_media` → 기존 생성 흐름(B등급 안전 관문·건당/월 상한·단가표\nfail-closed·\nAI 라벨·점검). 장면·필드는 서버 코드 고정값이고 초안 캡션은 바뀌지 않는다. 게시하지 않는다.\n진행 불가(병합됨·게시 이력·검사 미통과)·보류·상한 초과는 오류가 아니라 `status`·`outcome`이다.",
+        "operationId": "prepare_outage_sns_media_api_dashboard_marketing_outage_sns_drafts__post_draft_id__media_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "post_draft_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+              "title": "Post Draft Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Prepare Outage Sns Media Api Dashboard Marketing Outage Sns Drafts  Post Draft Id  Media Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prepare Outage Sns Media"
+      }
+    },
+    "/api/dashboard/marketing/outage-sns-drafts/{post_draft_id}/media/preview": {
+      "get": {
+        "description": "이미지를 붙인 초안의 미리보기. AI 표시를 입힌 결과 파일(`labeled.jpg`)만 내준다.",
+        "operationId": "preview_outage_sns_media_api_dashboard_marketing_outage_sns_drafts__post_draft_id__media_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "post_draft_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+              "title": "Post Draft Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Outage Sns Media"
+      }
+    },
+    "/api/dashboard/marketing/outage-sns-drafts/{post_draft_id}/publish-request": {
+      "post": {
+        "description": "이미지를 붙인 장애 초안의 게시 요청(C등급 사람 승인 대기 건)을 만든다. 본문이 없다.\n\n마케팅 `request_outage_sns_publish` → 기존 `publish_sns`. 승인 대기 건을 만들 뿐 게시하지\n않는다:\n사람이 카드 안 승인 패널에서 승인해야 Instagram에 올라간다. 만료 건의 사람 재요청은\n`?retry=true`.",
+        "operationId": "request_outage_sns_publish_api_dashboard_marketing_outage_sns_drafts__post_draft_id__publish_request_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "post_draft_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+              "title": "Post Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "retry",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Retry",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Request Outage Sns Publish Api Dashboard Marketing Outage Sns Drafts  Post Draft Id  Publish Request Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Outage Sns Publish"
+      }
+    },
     "/api/dashboard/marketing/video-post/prepare": {
       "post": {
         "description": "영상 생성 + 게시 초안 준비(마케팅 `prepare_sns_post_from_media`). 길게 걸릴 수 있다.",

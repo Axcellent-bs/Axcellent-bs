@@ -3,6 +3,7 @@ import { shortDateTime, won } from "@/lib/format";
 import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
 import { BriefMediaMaker } from "./BriefMediaMaker";
+import { OutageProceed } from "./OutageProceed";
 import { ApiError } from "@/lib/apiError";
 import { mergeHttpErrorKo, mergeSummaryKo, previewDraftIds, skipReasonKo, type MergeAnswer } from "@/lib/outageMerge";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, outageTriggerKo, type OutageSnsDraft, type StoredBrief } from "@/lib/briefs";
@@ -144,7 +145,7 @@ export function SnsMedia() {
         </div>
       </Section>
 
-      <Section title="장애 사과·보상 글 초안" desc="장애 때 사과 공지가 나가거나 보상 쿠폰을 드리면 마케팅 AI가 SNS 글 초안을 바로 만들어 둡니다. 초안일 뿐 게시된 글이 아닙니다. 게시는 사람이 승인해야 합니다(C 등급).">
+      <Section title="장애 사과·보상 글 초안" desc="장애 때 사과 공지가 나가거나 보상 쿠폰을 드리면 마케팅 AI가 SNS 글 초안을 바로 만들어 둡니다. 초안일 뿐 게시된 글이 아닙니다. 카드의 '이 초안으로 진행'을 누르면 확인 뒤 이미지를 만들어 붙이고 게시 요청(승인 대기)까지 보내며, 게시는 사람이 승인 패널에서 한 번 더 승인해야 합니다(C 등급).">
         <ul className="list-disc space-y-1 pl-5 text-xs text-ink-700">
           <li>원인은 확인된 경우에만 쉬운 말로 적고, 확인되지 않았으면 "원인 확인 중"이라고 적습니다.</li>
           <li>내부 용어·숫자·담당자 이름은 넣지 않고, AI 생성 표시와 시연용 가상 서비스 안내가 들어갑니다.</li>
@@ -197,10 +198,11 @@ export function SnsMedia() {
                         <span className="chip bg-amber-50 text-amber-800">초안 · 게시 안 됨</span>
                         {d.status === "merged" && <span className="chip bg-ink-50 text-ink-700" title={d.merged_into ?? undefined}>병합됨 · 대표 초안 아래로 접힘</span>}
                         {d.merged_from && d.merged_from.length > 0 && <span className="chip bg-ink-50 text-ink-700">비슷한 초안 {d.merged_from.length}건 병합</span>}
-                        <span className="text-ink-500">{d.media_attached ? "미디어가 붙은 초안" : "캡션 초안만 있음 (미디어 없음)"}</span>
+                        <span className="text-ink-500">{d.media_flow?.prepared ? "이미지가 붙은 초안" : d.media_attached ? "미디어가 붙은 초안" : "캡션 초안만 있음 (미디어 없음)"}</span>
                         <span className="ml-auto tabular-nums text-ink-500" title={`초안 ${d.post_draft_id} · 이벤트 ${d.context_id}`}>{shortDateTime(d.created_at)} 만듦</span>
                       </div>
                       <p className="whitespace-pre-wrap text-sm text-ink-700">{d.caption}</p>
+                      {d.status !== "merged" && <OutageProceed draft={d} onDone={() => void load()} />}
                     </li>
                   ))}
                 </ul>

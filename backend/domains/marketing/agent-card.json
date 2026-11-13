@@ -207,7 +207,7 @@
     },
     {
       "id": "list_outage_sns_drafts",
-      "description": "장애 사과·보상 SNS 글 초안(draft_outage_sns_post가 만든 것)을 저장 시각이 늦은 순으로 돌려준다(캡션·계기·이벤트 번호·미디어 첨부 여부). 없으면 빈 목록과 이유를 돌려준다. 상태를 바꾸지 않는다.",
+      "description": "장애 사과·보상 SNS 글 초안(draft_outage_sns_post가 만든 것)을 저장 시각이 늦은 순으로 돌려준다(캡션·계기·이벤트 번호·미디어 첨부 여부). 없으면 빈 목록과 이유를 돌려준다. 상태를 바꾸지 않는다. 입력 post_draft_id로 한 건만 조회할 수 있다. 이미지를 붙인 사본 초안은 목록에서 빼고 원본 카드의 media_flow(진행 상태·예상 비용·준비된 이미지·게시 요청 상태)로 보여 준다.",
       "input_schema": "agents/marketing/src/marketing_agent/outage_sns.py#ListOutageSnsDraftsInput",
       "output_schema": "agents/marketing/src/marketing_agent/outage_sns.py#OutageSnsDraftList",
       "grade": "read",
@@ -371,6 +371,30 @@
       "id": "request_brief_publish",
       "description": "준비된 미디어 초안(넘긴 기획안 proposal_id)의 '게시 요청'을 만든다. 입력은 기획안 번호뿐이고 초안 id·파일 참조·해시·캡션은 호출자가 보내지 않는다(서버가 넘김 기록의 prepared와 SNS 초안 저장소에서 읽는다). 요청 직전에 check_sns_post를 다시 돌려 통과한 값만 기존 publish_sns(C등급, 항상 사람 승인, 승인 대기 10분 만료)로 보낸다. 이 skill은 승인하지 않는다: 사람이 승인 화면에서 진행을 눌러야만 기존 구독자·폴링이 Instagram 게시로 잇는다. 24시간 게시 상한·중단 상태·어댑터 설정 확인은 publish_sns 안에서 그대로 일어난다. 성공하면 outcome requested, 이미 요청된 건은 publish_sns를 다시 부르지 않고 already_requested와 상태만 돌려준다. 막힌 이유는 not_handed·not_prepared·check_not_passed·media_kind_unsupported(캐러셀 포함)·draft_missing·draft_changed. 입력 retry=true는 사람이 누르는 '다시 요청'이다: 승인 마감(10분)이 지나 자동 거절된 건(review_timeout)에 한해 새 멱등 키(시도 번호 포함)로 publish_sns를 다시 부르며, 항상 승인 대기로만 만들고 자동 승인은 없다. 사람이 거절한 건(retry_rejected_by_human)·거절/만료를 구분할 수 없는 옛 기록(retry_cause_unknown)·이미 게시된 같은 내용(retry_already_published)·다른 승인 대기가 있는 경우(retry_other_held)·만료가 아닌 건(retry_not_expired)은 거부한다. sns_handoff.publish로 상태(not_requested·held·publishing·published·rejected(사람 거절, rejected_cause)·expired(마감 만료)·failed)와 카드 안 승인 패널용 값(expires_at·preview_url·preview_kind·ai_label·proposal_id·can_retry)을 조회한다.",
       "input_schema": "agents/marketing/src/marketing_agent/brief_publish.py#RequestBriefPublishInput",
+      "output_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsOutput",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "prepare_outage_sns_media",
+      "description": "장애 사과·보상 SNS 글 초안(post_draft_id)에 이미지를 붙인다. 입력은 초안 id뿐이고 장면 템플릿(cat_apology_image)·필드·규격은 코드 고정값이라 호출자가 정하지 못한다(자유 프롬프트 없음). 초안 캡션은 건드리지 않고 이미지를 붙인 사본을 새 초안으로 저장한다(media_from이 원본). 생성은 기존 generate_media_flow를 그대로 거친다(B등급 안전 관문·건당/월 상한·단가표 fail-closed·장부 예약) → 규격 변환 → AI 라벨 → check_sns_post. 게시(publish_sns, C등급 사람 승인)는 부르지 않는다. 이미 병합된 초안(already_merged)·게시 요청 이력이 있는 초안(publish_history)·검사 미통과 초안(check_failed)·영상 초안(video_not_supported)·장애 초안이 아닌 것(not_outage_draft)은 비용 전에 거절한다. context_id와 생성 묶음 id를 초안 id에서만 정해(ctx_outage_<초안 id>) 같은 초안은 누가 다시 불러도 장부에서 재생되고(비용이 다시 나지 않음), 이미 준비됐으면 already_prepared, 만드는 중이면 in_progress다. list_outage_sns_drafts의 media_flow로 진행 상태·예상 비용·상한을 조회한다.",
+      "input_schema": "agents/marketing/src/marketing_agent/outage_sns_media.py#PrepareOutageSnsMediaInput",
+      "output_schema": "agents/marketing/src/marketing_agent/sns.py#SnsPostCheck",
+      "grade": "B",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": "safety",
+      "priority": "optional"
+    },
+    {
+      "id": "request_outage_sns_publish",
+      "description": "이미지를 붙인 장애 사과·보상 초안(post_draft_id)의 '게시 요청'을 만든다. 입력은 초안 id(와 retry)뿐이고 사본 초안 id·파일 참조·해시·캡션은 서버가 보관본에서 읽는다. 요청 직전에 check_sns_post를 다시 돌려 통과한 값만 기존 publish_sns(C등급, 항상 사람 승인, 승인 대기 10분 만료)로 보낸다. 이 skill은 승인하지 않는다: 사람이 카드 안 승인 패널이나 승인 화면에서 진행을 눌러야만 기존 구독자·폴링이 게시로 잇는다. 상태 조회·이미 요청한 건(already_requested)·만료 건의 사람 재요청(retry=true, 새 멱등 키)은 request_brief_publish와 같은 로직(brief_publish)이다. 막힌 이유는 draft_not_found·not_outage_draft·not_prepared·check_not_passed·draft_changed와 retry_* 코드.",
+      "input_schema": "agents/marketing/src/marketing_agent/outage_sns_media.py#RequestOutageSnsPublishInput",
       "output_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsOutput",
       "grade": "C",
       "allowed_requesters": [

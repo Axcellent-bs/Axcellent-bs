@@ -32,7 +32,7 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
-from marketing_agent import brief_media, brief_publish, shop_client
+from marketing_agent import brief_media, brief_publish, outage_sns_media, shop_client
 from marketing_agent.brief_handoff import (
     AUTO,
     DRAFT_MEDIA_KIND,
@@ -960,7 +960,18 @@ async def draft_outage_sns_post_skill(request: AgentRequest) -> AgentResult:
 
 
 async def list_outage_sns_drafts_skill(request: AgentRequest) -> AgentResult:
-    return await list_outage_sns_drafts(request, STATE.sns)
+    result = await list_outage_sns_drafts(request, STATE.sns)
+    # 카드별 진행 상태(이미지 만들기·게시 요청·승인 대기). 참고 정보라 못 구하면 비워 둔다
+    for item in (result.output or {}).get("items", []):
+        try:
+            draft = STATE.sns.get(str(item.get("post_draft_id")))
+            if draft is not None:
+                item["media_flow"] = outage_sns_media.flow_state(
+                    request, draft, STATE.sns, ledger=STATE.media_ledger
+                )
+        except Exception:  # noqa: BLE001 - 목록은 돌려준다. 화면은 진행 버튼을 두지 않는다
+            item["media_flow"] = None
+    return result
 
 
 async def merge_outage_sns_drafts_skill(request: AgentRequest) -> AgentResult:
@@ -1008,6 +1019,20 @@ async def prepare_brief_media_skill(request: AgentRequest) -> AgentResult:
         state["media_estimate"] = _media_estimate(request, record)
         state["publish"] = _publish_state(record)
     return result
+
+
+async def prepare_outage_sns_media_skill(request: AgentRequest) -> AgentResult:
+    """장애 초안에 이미지를 붙인다(B등급 생성). 게시는 하지 않는다(C등급 사람 승인)."""
+    return await outage_sns_media.prepare_outage_sns_media(
+        request, store=STATE.sns, ledger=STATE.media_ledger, from_decision=_from_decision
+    )
+
+
+async def request_outage_sns_publish_skill(request: AgentRequest) -> AgentResult:
+    """이미지를 붙인 장애 초안의 게시 요청(승인 대기 건)만 만든다. 승인은 사람만 한다."""
+    return await outage_sns_media.request_outage_sns_publish(
+        request, store=STATE.sns, publish=publish_sns
+    )
 
 
 async def request_brief_publish_skill(request: AgentRequest) -> AgentResult:
@@ -1130,6 +1155,8 @@ HANDLERS = {
     "prepare_sns_post_from_media": prepare_sns_post_from_media_skill,
     "prepare_brief_media": prepare_brief_media_skill,
     "request_brief_publish": request_brief_publish_skill,
+    "prepare_outage_sns_media": prepare_outage_sns_media_skill,
+    "request_outage_sns_publish": request_outage_sns_publish_skill,
     "marketing_chat_send": marketing_chat_send,
     "marketing_chat_list": marketing_chat_list,
     "marketing_chat_get": marketing_chat_get,

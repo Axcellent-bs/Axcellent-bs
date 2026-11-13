@@ -141,10 +141,14 @@ class OutageSnsDraftItem(AxModel):
     status: Literal["draft", "merged"] = "draft"
     merged_into: str | None = None
     merged_from: list[str] = Field(default_factory=list)
+    # 카드 진행 상태(`outage_sns_media.flow_state`): 이미지 만들기·게시 요청·승인 대기. 목록
+    # 조회 때만 채운다
+    media_flow: dict | None = None
 
 
 class ListOutageSnsDraftsInput(AxModel):
     limit: int = Field(default=20, ge=1, le=100)
+    post_draft_id: str | None = Field(default=None, min_length=1, max_length=64)  # 한 건만 조회
     include_merged: bool = False  # true면 병합된 원본(감사 기록)도 보여 준다
 
 
@@ -248,7 +252,15 @@ async def list_outage_sns_drafts(request: AgentRequest, store: sns.SnsStore) -> 
             "invalid_input",
             errors=[f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()],
         )
-    rows, total = store.list_by_source(SOURCE_KIND, data.limit, data.include_merged)
+    all_rows, _ = store.list_by_source(SOURCE_KIND, None, data.include_merged)
+    # 이미지를 붙인 사본(`media_from`)은 원본 카드의 진행 상태로 보여 주므로 목록에서 뺀다
+    visible = [
+        (d, at)
+        for d, at in all_rows
+        if not d.media_from and (data.post_draft_id in (None, d.post_draft_id))
+    ]
+    total = len(visible)
+    rows = visible[: data.limit]
     listing = OutageSnsDraftList(
         items=[
             OutageSnsDraftItem(
@@ -441,6 +453,8 @@ def plan_merge(
     """(대표, 병합될 원본들) 묶음과 건너뛴 초안. 저장하지 않는다. 같은 입력이면 같은 결과다."""
     by_id = {d.post_draft_id: (d, at) for d, at in rows}
     skipped: list[MergeSkip] = []
+    # 이미지를 붙인 사본이 있는 원본은 진행 중인 건이라 병합하지 않는다
+    derived_origins = {d.media_from for d, _ in rows if d.media_from}
     if draft_ids is None:
         pool = list(by_id.values())
     else:
@@ -453,7 +467,11 @@ def plan_merge(
 
     candidates: list[Row] = []
     for d, at in pool:
-        reason = _skip_reason(d, has_publish_record)
+        reason = (
+            "media_attached"
+            if d.post_draft_id in derived_origins
+            else _skip_reason(d, has_publish_record)
+        )
         if reason is None:
             candidates.append((d, at))
         elif draft_ids is not None or reason in (

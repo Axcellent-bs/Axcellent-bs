@@ -163,6 +163,12 @@ class SnsPostDraft(AxModel):
     merged_into: str | None = None  # status="merged"인 원본이 가리키는 대표 초안 id
     merged_from: list[str] = Field(default_factory=list)  # 대표 초안이 흡수한 원본 id들
     merged_at: UtcDatetime | None = None
+    # 장애 초안에 이미지를 붙여 만든 사본(`prepare_outage_sns_media`). 캡션은 원본 그대로이고 이
+    # 초안이
+    # 게시 대상이다. 원본(캡션만 있는 초안)의 id를 가리킨다. 옛 레코드는 기본값(None)으로 읽는다
+    media_from: str | None = None
+    # 사본에 미디어를 붙인 뒤 돌린 `check_sns_post` 결과(verdict·publishable·problems·checked_at)
+    media_check: dict[str, Any] | None = None
 
 
 class CheckSnsPostInput(AxModel):
@@ -309,6 +315,25 @@ class SnsStore:
             except ValueError:
                 continue
         return items, len(rows)
+
+    def find_derived(self, post_draft_id: str) -> SnsPostDraft | None:
+        """원본 초안(`media_from`이 가리키는 id)에서 이미지를 붙여 만든 사본. 없으면 None.
+
+        사본은 원본당 하나다(장애 초안 경로의 장면·필드가 코드 고정이라 같은 원본은 같은 사본이
+        된다).
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload FROM sns_drafts WHERE json_extract(payload, '$.media_from') = ?"
+                " ORDER BY created_at DESC, post_draft_id",
+                (post_draft_id,),
+            ).fetchall()
+        for (payload,) in rows:
+            try:
+                return SnsPostDraft.model_validate_json(payload)
+            except ValidationError:
+                continue
+        return None
 
     def count_merged_by_source(self, source_kind: str) -> int:
         return len(self._rows_by_source(source_kind, True)) - len(

@@ -1010,6 +1010,45 @@ async def request_brief_publish(
     return ok(await marketing_client.brief_publish_request_call(proposal_id, retry))
 
 
+_DRAFT_ID = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+
+
+@router.post("/marketing/outage-sns-drafts/{post_draft_id}/media")
+async def prepare_outage_sns_media(post_draft_id: str = Path(pattern=_DRAFT_ID)) -> dict:
+    """장애 사과·보상 초안에 이미지를 붙인다(사람이 '이 초안으로 진행'을 한 번 누름). 본문이 없다.
+
+    마케팅 `prepare_outage_sns_media` → 기존 생성 흐름(B등급 안전 관문·건당/월 상한·단가표
+    fail-closed·
+    AI 라벨·점검). 장면·필드는 서버 코드 고정값이고 초안 캡션은 바뀌지 않는다. 게시하지 않는다.
+    진행 불가(병합됨·게시 이력·검사 미통과)·보류·상한 초과는 오류가 아니라 `status`·`outcome`이다.
+    """
+    _no_org_in_mock()
+    return ok(await marketing_client.outage_media_call(post_draft_id))
+
+
+@router.get("/marketing/outage-sns-drafts/{post_draft_id}/media/preview")
+async def preview_outage_sns_media(post_draft_id: str = Path(pattern=_DRAFT_ID)) -> FileResponse:
+    """이미지를 붙인 초안의 미리보기. AI 표시를 입힌 결과 파일(`labeled.jpg`)만 내준다."""
+    _no_org_in_mock()
+    path, media_type = await marketing_client.outage_media_preview(post_draft_id)
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/marketing/outage-sns-drafts/{post_draft_id}/publish-request")
+async def request_outage_sns_publish(
+    post_draft_id: str = Path(pattern=_DRAFT_ID), retry: bool = False
+) -> dict:
+    """이미지를 붙인 장애 초안의 게시 요청(C등급 사람 승인 대기 건)을 만든다. 본문이 없다.
+
+    마케팅 `request_outage_sns_publish` → 기존 `publish_sns`. 승인 대기 건을 만들 뿐 게시하지
+    않는다:
+    사람이 카드 안 승인 패널에서 승인해야 Instagram에 올라간다. 만료 건의 사람 재요청은
+    `?retry=true`.
+    """
+    _no_org_in_mock()
+    return ok(await marketing_client.outage_publish_request_call(post_draft_id, retry))
+
+
 class OutageSnsMergeBody(BaseModel):
     dry_run: bool = True  # 기본은 저장 없는 미리보기. 실제 병합은 사람이 false로 보낸다
     draft_ids: list[str] | None = Field(default=None, max_length=100)
