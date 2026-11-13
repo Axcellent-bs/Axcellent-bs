@@ -67,6 +67,7 @@ def build_inquiry_received(request: AgentRequest, conversation: Conversation) ->
     order_id = conversation.order_id
     data = SupportInquiryReceivedData(
         inquiry_id=conversation.id,
+        inquiry_ref=conversation.context_id,
         # 계약의 `order_id`는 `ord_` 문자열이다. 시드 주문("101")처럼 그 형식이 아닌 ID는 지어서
         # 바꾸지 않고 비워 둔다.
         order_id=order_id if order_id and order_id.startswith("ord_") else None,
@@ -142,6 +143,7 @@ def build_inquiry_resolved(
         resolution = "compensated"  # 클레임 판정이 없고 보상 쿠폰만 나갔다
     data = SupportInquiryResolvedData(
         inquiry_id=conversation.id,
+        inquiry_ref=conversation.context_id,
         order_id=order_id if order_id and order_id.startswith("ord_") else None,
         status="escalated" if escalated else "resolved",
         resolution=resolution,  # type: ignore[arg-type]

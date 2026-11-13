@@ -102,7 +102,16 @@ def test_create_inquiry_publishes_one_event_with_facts_only(client: TestClient) 
     data = SupportInquiryReceivedData.model_validate(event.data)
     assert data.inquiry_id == inquiry_id and data.message_count == 1
     assert data.category and data.urgency in {"low", "medium", "high"}
-    assert set(event.data) == {"inquiry_id", "order_id", "category", "urgency", "message_count"}
+    assert set(event.data) == {
+        "inquiry_id",
+        "inquiry_ref",
+        "order_id",
+        "category",
+        "urgency",
+        "message_count",
+    }
+    # 문의 번호는 저장소를 새로 시작하면 1부터 다시 시작한다. 바뀌지 않는 ID를 같이 싣는다
+    assert data.inquiry_ref == handlers.STORE.get(inquiry_id).context_id
 
 
 def test_order_id_is_not_invented_from_numeric_seed_id(client: TestClient) -> None:
@@ -251,6 +260,7 @@ def test_closing_an_inquiry_publishes_one_resolved_event_with_facts_only(
     (event,) = resolved()
     assert event.data == {
         "inquiry_id": inquiry_id,
+        "inquiry_ref": handlers.STORE.get(inquiry_id).context_id,  # 번호와 달리 바뀌지 않는 ID
         "order_id": None,
         "status": "resolved",
         "resolution": "answered",
