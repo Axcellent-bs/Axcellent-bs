@@ -51,6 +51,15 @@ quality = "medium"
 fields = ["season", "color_theme", "category"]
 sentence = "A flat illustrated scene of a friendly cartoon cat mascot browsing shelves in a cozy independent bookstore, {season} atmosphere, {color_theme} color palette, a small display themed around {category}. Original character design. No text, no letters, no numbers, no logos, no real people, no real brands, no readable book covers."
 
+# 장애 사과 글용 이미지. 사과 문구는 이미지에 그리지 않고 캡션으로만 전한다(글자 금지).
+# 사람·아동·실존 인물 없음, 원본 고양이 마스코트만, 차분한 파스텔 톤. 장애 초안 경로가 필드를 코드로 고정한다.
+[template.cat_apology_image]
+kind = "image"
+resolution = "1024x1024"
+quality = "medium"
+fields = ["color_theme"]
+sentence = "A calm flat illustrated scene of a friendly cartoon cat mascot standing quietly in a softly lit, tidy, empty room with its head gently bowed in a respectful, apologetic pose, serene and sincere mood, {color_theme} color palette. Original character design, the cat mascot is the only character in the scene. No text, no letters, no numbers, no logos, no people, no children, no real people, no real brands, no readable signs or book covers."
+
 [template.cat_bookstore_video]
 kind = "video"
 resolution = "720p"

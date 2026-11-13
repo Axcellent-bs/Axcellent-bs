@@ -2,6 +2,7 @@ import { ApiError, failureError, statusOnlyError } from "./apiError";
 import { writeAuth } from "./api";
 import { DASHBOARD_API_URL, RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
 import type { MergeAnswer } from "./outageMerge";
+import type { OutageMediaAnswer, OutageMediaFlow } from "./outageMedia";
 import type { BriefMediaAnswer, MediaEstimate, PreparedMedia, PublishAnswer, PublishState } from "./briefMedia";
 
 // 마케팅이 기획에서 받은 기획안 읽기. 화면은 마케팅을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
@@ -210,6 +211,8 @@ export interface OutageSnsDraft {
   status?: "draft" | "merged";
   merged_into?: string | null;
   merged_from?: string[];
+  /** 카드 진행 상태(이미지 만들기·게시 요청·승인 대기). 옛 서버는 이 칸이 없다 */
+  media_flow?: OutageMediaFlow | null;
 }
 /** `total`은 병합된 원본을 뺀 수(include_merged=false일 때), `merged_total`은 병합된 원본 수. 옛 서버는 merged_total이 없다 */
 export interface OutageSnsDraftList { items: OutageSnsDraft[]; total: number; merged_total?: number; unknown_reason: string | null }
@@ -235,6 +238,33 @@ async function mergeOutageSnsDrafts(dryRun: boolean, draftIds?: string[]): Promi
   return json.data.output as MergeAnswer;
 }
 
+const outagePath = (draftId: string) => `/api/dashboard/marketing/outage-sns-drafts/${encodeURIComponent(draftId)}`;
+
+/**
+ * 장애 초안에 이미지를 붙인다(dashboard-api, 사람 토큰 필요). 초안 id만 보낸다(장면·필드는 서버 고정값).
+ * 게시는 하지 않는다. 오류는 서버 문장 없이 상태 코드만 담아 던진다(문구는 `outageHttpErrorKo`).
+ */
+async function makeOutageMedia(draftId: string): Promise<OutageMediaAnswer> {
+  const path = `${outagePath(draftId)}/media`;
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
+  return json.data as OutageMediaAnswer;
+}
+
+/** 이미지를 붙인 장애 초안의 게시 요청: 승인 대기 건(C 등급, 10분 만료)만 만든다. 게시하지 않는다 */
+async function requestOutagePublish(draftId: string, retry = false): Promise<PublishAnswer> {
+  const path = `${outagePath(draftId)}/publish-request`;
+  const res = await fetch(`${DASHBOARD_API_URL}${path}${retry ? "?retry=true" : ""}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
+  return json.data as PublishAnswer;
+}
+
+/** 장애 초안에 붙인 이미지 미리보기 주소. `version`은 파일이 바뀌면 새로 받게 하는 값이다 */
+export const outageMediaPreviewUrl = (draftId: string, version: string | null) =>
+  `${DASHBOARD_API_URL}${outagePath(draftId)}/media/preview${version ? `?v=${encodeURIComponent(version.slice(0, 12))}` : ""}`;
+
 export const briefs = {
   list: (limit = 50) => get<BriefList>(`/api/shop/admin/marketing/briefs?limit=${briefsListLimit(limit)}`),
   outageSnsDrafts: (limit = 20, includeMerged = false) =>
@@ -243,6 +273,8 @@ export const briefs = {
   handoff,
   makeMedia,
   requestPublish,
+  makeOutageMedia,
+  requestOutagePublish,
 };
 
 export const HANDOFF_REASON_KO: Record<string, string> = {

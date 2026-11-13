@@ -97,8 +97,10 @@ def prepare_input(proposal_id: str, media: dict) -> dict[str, Any]:
     )
 
 
-def _inner(request: AgentRequest, proposal_id: str, skill: str, data: dict) -> AgentRequest:
-    meta = request.meta.model_copy(update={"context_id": context_id_for(proposal_id)})
+def _inner(
+    request: AgentRequest, proposal_id: str, skill: str, data: dict, context_id: str | None = None
+) -> AgentRequest:
+    meta = request.meta.model_copy(update={"context_id": context_id or context_id_for(proposal_id)})
     return request.model_copy(update={"skill": skill, "input": data, "meta": meta})
 
 
@@ -109,11 +111,13 @@ def estimate(
     *,
     ledger: MediaLedger,
     settings: MediaSettings | None = None,
+    context_id: str | None = None,
 ) -> dict[str, Any]:
     """지금 요청 초안으로 만들 때의 예상 비용과 상한. 외부 호출 없이 단가표·장부만 읽는다.
 
     `status`: `ok`(만들 수 있음) | `blocked`(`reason_code`). `settled`면 이미 끝난 생성이라 다시
-    눌러도 비용이 나지 않는다. 모르는 값은 None으로 둔다.
+    눌러도 비용이 나지 않는다. 모르는 값은 None으로 둔다. `context_id`는 장부 키를 만드는 사건 id를
+    기획안 말고 다른 출처(장애 초안)가 정할 때만 준다.
     """
     settings = settings or MediaSettings.from_env()
     kind = media.get("media_kind")
@@ -137,7 +141,7 @@ def estimate(
         return out | {"reason_code": reason}
     gen_input = {"post_draft_id": media.get("media_ref")} | _generation_fields(media)
     plan = plan_cost(
-        _inner(request, proposal_id, "generate_media", gen_input),
+        _inner(request, proposal_id, "generate_media", gen_input, context_id),
         ledger=ledger,
         settings=settings,
         allow_video=True,

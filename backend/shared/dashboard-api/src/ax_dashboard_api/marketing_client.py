@@ -189,6 +189,94 @@ async def brief_publish_request_call(proposal_id: str, retry: bool = False) -> d
     return out
 
 
+# 장애 초안 이미지·게시 요청에서 요청 자체가 틀린 실패만 HTTP 오류로 바꾼다. 막힘·상한·보류는
+# 판단 결과
+OUTAGE_MEDIA_FAILURES = {
+    "draft_not_found": (404, "NOT_FOUND"),
+    "invalid_input": (400, "INVALID_INPUT"),
+}
+
+
+def outage_media_context(draft_id: str) -> str:
+    return f"outg_{draft_id}"
+
+
+async def outage_media_call(draft_id: str) -> dict[str, Any]:
+    """장애 초안에 이미지를 붙인다(`prepare_outage_sns_media`). 게시하지 않는다.
+
+    장면·필드는 보내지 않는다(마케팅이 코드 고정값을 쓴다). 같은 초안은 키가 같고 마케팅이 생성
+    장부로
+    중복 생성을 막는다. 보류·상한 초과·진행 불가는 판단 결과라 그대로 돌려준다.
+    """
+    out = await call(
+        "prepare_outage_sns_media",
+        {"post_draft_id": draft_id},
+        campaign_id=outage_media_context(draft_id),
+        key=f"ui:outage-media:{draft_id}",
+        deadline_s=video_timeout_s(),
+    )
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] in OUTAGE_MEDIA_FAILURES:
+        status, code = OUTAGE_MEDIA_FAILURES[out["outcome"]]
+        raise ApiError(status, code, f"이미지를 만들 수 없다 ({out['outcome']})")
+    return out
+
+
+async def outage_publish_request_call(draft_id: str, retry: bool = False) -> dict[str, Any]:
+    """이미지를 붙인 장애 초안의 게시 요청(`request_outage_sns_publish`). 승인 대기 건만 만든다.
+
+    본문이 없다: 사본 초안·파일·해시·캡션은 마케팅이 보관본에서 읽는다. 여기서 승인하지 않는다.
+    `retry`는 사람이 누른 "다시 요청"이다(만료로 닫힌 건만, 마케팅이 판정한다).
+    """
+    payload: dict[str, Any] = {"post_draft_id": draft_id}
+    key = f"ui:outage-publish:{draft_id}"
+    if retry:
+        payload["retry"] = True
+        key += f":retry:{uuid.uuid4().hex[:12]}"
+    out = await call(
+        "request_outage_sns_publish",
+        payload,
+        campaign_id=outage_media_context(draft_id),
+        key=key,
+    )
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] in OUTAGE_MEDIA_FAILURES:
+        status, code = OUTAGE_MEDIA_FAILURES[out["outcome"]]
+        raise ApiError(status, code, f"게시를 요청할 수 없다 ({out['outcome']})")
+    return out
+
+
+def _preview_file(ref: Any, sha: Any, missing: ApiError) -> tuple[Path, str]:
+    """기록된 파일만 내준다: 미디어 폴더 안쪽·이름이 `labeled.jpg|mp4`·기록된 sha256과 같은 파일."""
+    raw_root = (os.getenv(MEDIA_DIR_ENV) or "").strip()
+    if not (isinstance(ref, str) and isinstance(sha, str) and ref and raw_root):
+        raise missing
+    root = Path(raw_root).resolve()
+    path = (root / ref).resolve()
+    media_type = PREVIEW_FILES.get(path.name)
+    if media_type is None or not path.is_relative_to(root) or not path.is_file():
+        raise missing
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != sha:  # 점검한 뒤 바뀐 파일은 보여 주지 않는다
+        raise missing
+    return path, media_type
+
+
+async def outage_media_preview(draft_id: str) -> tuple[Path, str]:
+    """이미지를 붙인 장애 초안의 AI 라벨 입힌 파일(경로, Content-Type). 없으면 404."""
+    missing = ApiError(404, "NOT_FOUND", "준비된 이미지가 없다")
+    out = await call(
+        "list_outage_sns_drafts",
+        {"post_draft_id": draft_id, "include_merged": True, "limit": 1},
+        campaign_id=outage_media_context(draft_id),
+        key=f"ui:outage-media-preview:{draft_id}",
+    )
+    items = (out.get("output") or {}).get("items") or []
+    prepared = ((items[0].get("media_flow") or {}).get("prepared") or {}) if items else {}
+    return _preview_file(prepared.get("asset_ref"), prepared.get("asset_sha256"), missing)
+
+
 async def outage_sns_merge_call(draft_ids: list[str] | None, dry_run: bool) -> dict[str, Any]:
     """장애 사과·보상 SNS 초안의 유사 초안 병합(`merge_outage_sns_drafts`).
 

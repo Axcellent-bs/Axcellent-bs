@@ -23,6 +23,8 @@
 | `draft_outage_sns_post` | read |
 | `list_outage_sns_drafts` | read |
 | `merge_outage_sns_drafts` | read |
+| `prepare_outage_sns_media` | B | dashboard-api | `post_draft_id` → 장애 사과·보상 초안에 이미지를 붙인 사본 초안(생성·변환·AI 라벨·점검). 장면 `cat_apology_image`·필드는 코드 고정, 캡션 불변, 게시 안 함 |
+| `request_outage_sns_publish` | C | dashboard-api | `post_draft_id`·`retry?` → 이미지를 붙인 장애 초안의 게시 요청(승인 대기 건, 10분 만료). 승인은 사람만 |
 | `check_sns_post` | read |
 | `publish_sns` | C |
 | `generate_media` | B |

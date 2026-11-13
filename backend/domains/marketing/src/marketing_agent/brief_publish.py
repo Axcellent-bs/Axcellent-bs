@@ -115,23 +115,31 @@ def sha_for(data: dict) -> str:
     )
 
 
-def key_for(proposal_id: str, data: dict, attempt: int = 0) -> str:
+def key_for_ctx(context_id: str, data: dict, attempt: int = 0) -> str:
     """`publish_sns`가 쓰는 멱등 키와 같은 값(내용 해시 포함). `attempt`는 사람 재요청 번호."""
-    return publisher.idempotency_key(
-        context_id_for(proposal_id), data["post_draft_id"], sha_for(data), attempt
-    )
+    return publisher.idempotency_key(context_id, data["post_draft_id"], sha_for(data), attempt)
 
 
-def chain_of(proposal_id: str, data: dict, get: PendingGet | None = None) -> list[pend.PendingPost]:
+def key_for(proposal_id: str, data: dict, attempt: int = 0) -> str:
+    return key_for_ctx(context_id_for(proposal_id), data, attempt)
+
+
+def chain_of_ctx(
+    context_id: str, data: dict, get: PendingGet | None = None
+) -> list[pend.PendingPost]:
     """같은 내용의 요청 기록을 시도 순서(0, 1, ...)로. 없으면 빈 목록. 저장소 오류는 올린다."""
     getter = get or publisher.store().get
     rows: list[pend.PendingPost] = []
     for attempt in range(MAX_ATTEMPTS):
-        row = getter(key_for(proposal_id, data, attempt))
+        row = getter(key_for_ctx(context_id, data, attempt))
         if row is None:
             break
         rows.append(row)
     return rows
+
+
+def chain_of(proposal_id: str, data: dict, get: PendingGet | None = None) -> list[pend.PendingPost]:
+    return chain_of_ctx(context_id_for(proposal_id), data, get)
 
 
 _IN_FLIGHT = (pend.HELD, pend.APPROVED, pend.PUBLISHING)
@@ -211,8 +219,15 @@ def publish_state(
     base["preview_url"] = f"/api/dashboard/marketing/briefs/{record.proposal_id}/media/preview"
     base["preview_kind"] = "video" if kind == "reel" else "image"
     base["ai_label"] = prepared.get("label_text") or sns.ai_label_text(kind)
+    return state_from_chain(base, data, context_id_for(record.proposal_id), get)
+
+
+def state_from_chain(
+    base: dict[str, Any], data: dict, context_id: str, get: PendingGet | None = None
+) -> dict[str, Any]:
+    """`publish_state`의 상태 계산 본체. 기획안·장애 초안이 같이 쓴다(`base`는 화면 칸의 기본값)."""
     try:
-        chain = chain_of(record.proposal_id, data, get)
+        chain = chain_of_ctx(context_id, data, get)
         same = _same_content(sha_for(data), chain, get is not None)
     except pend.PendingStorageError:
         return base | {"status": "unknown", "reason_code": "storage_error"}
@@ -285,33 +300,63 @@ async def request_brief_publish(
     if check.get("verdict") != "approved" or check.get("publishable") is not True:
         return _failed(request, "check_not_passed", problems=list(check.get("problems") or [])[:20])
 
+    return await submit_publish(
+        request,
+        context_id=context_id_for(pid),
+        ref_id=pid,
+        label=f"기획안 {pid}",
+        publish_input=publish_input,
+        retry=data.retry,
+        publish=publish,
+        state_of=lambda: publish_state(record, store),
+        store=store,
+    )
+
+
+async def submit_publish(
+    request: AgentRequest,
+    *,
+    context_id: str,
+    ref_id: str,
+    label: str,
+    publish_input: dict,
+    retry: bool,
+    publish: Callable[..., Any],
+    state_of: Callable[[], dict[str, Any] | None],
+    store: SnsStore,
+) -> AgentResult:
+    """게시 요청 본체(멱등·사람 재요청·`publish_sns` 호출). 기획안·장애 초안이 같이 쓴다.
+
+    점검을 다시 돌려 통과한 `publish_input`만 받는다. 이미 요청한 건은 `publish_sns`를 다시 부르지
+    않고 상태만 돌려주고, 승인은 하지 않는다(항상 C등급 승인 대기).
+    """
     try:
-        chain = chain_of(pid, publish_input)
+        chain = chain_of_ctx(context_id, publish_input)
         same = _same_content(sha_for(publish_input), chain, False)
     except pend.PendingStorageError:
         return _failed(request, "storage_error")
     evidence = Evidence(
-        queries=[ACTION],
-        data_summary=f"기획안 {pid} 게시 {'재요청' if data.retry else '요청'}",
+        queries=[request.skill],
+        data_summary=f"{label} 게시 {'재요청' if retry else '요청'}",
         collected_at=datetime.now(UTC),
-        ref_ids=[pid, publish_input["post_draft_id"]],
+        ref_ids=[ref_id, publish_input["post_draft_id"]],
     )
     attempt = 0
-    if data.retry:  # 사람이 누른 "다시 요청": 만료로 닫힌 건만. 그 밖은 코드로 거부한다
+    if retry:  # 사람이 누른 "다시 요청": 만료로 닫힌 건만. 그 밖은 코드로 거부한다
         problem = retry_problem(chain, same)
         if problem is not None:
-            return _failed(request, problem, publish=publish_state(record, store))
+            return _failed(request, problem, publish=state_of())
         attempt = len(chain)
     elif chain:  # 이미 요청한 건. 다시 부르지 않고 상태만 돌려준다
         return AgentResult(
             meta=request.meta,
             status=TaskStatus.COMPLETED,
             outcome="already_requested",
-            output={"publish": publish_state(record, store)},
+            output={"publish": state_of()},
             evidence=evidence,
         )
 
-    meta = request.meta.model_copy(update={"context_id": context_id_for(pid)})
+    meta = request.meta.model_copy(update={"context_id": context_id})
     sent = request.model_copy(update={"skill": "publish_sns", "input": publish_input, "meta": meta})
     # 시도 번호는 재요청에서만 넘긴다(첫 요청은 옛 호출 모양 그대로)
     result = await (publish(sent, store, attempt=attempt) if attempt else publish(sent, store))
@@ -322,7 +367,7 @@ async def request_brief_publish(
         held_row = publisher.store().by_review(str(output.get("review_id") or ""))
         if held_row is not None:
             await publisher.remember_expiry(held_row)
-    output["publish"] = publish_state(record, store)
+    output["publish"] = state_of()
     held = result.outcome == "held"
     return result.model_copy(
         update={

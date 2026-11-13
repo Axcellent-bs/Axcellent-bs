@@ -183,6 +183,8 @@ SERVICES: tuple[Service, ...] = (
             "prepare_sns_post_from_media",
             "prepare_brief_media",
             "request_brief_publish",
+            "prepare_outage_sns_media",
+            "request_outage_sns_publish",
             "cancel_campaign",
         ),
         "공지·쿠폰",

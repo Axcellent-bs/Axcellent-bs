@@ -450,6 +450,119 @@ def test_brief_publish_retry_uses_the_same_path_with_a_fresh_key(
     )
 
 
+OUTAGE_MEDIA = "/api/dashboard/marketing/outage-sns-drafts/spd_abc/media"
+OUTAGE_PUBLISH = "/api/dashboard/marketing/outage-sns-drafts/spd_abc/publish-request"
+
+
+def test_outage_media_sends_only_the_draft_id_with_a_stable_key(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outcome = None
+    first = client.post(OUTAGE_MEDIA)
+    # 본문에 장면·필드·캡션을 실어도 마케팅으로 가지 않는다(코드 고정값만 쓴다)
+    again = client.post(OUTAGE_MEDIA, json={"scene_template_id": "x", "fields": {"a": "b"}})
+    assert first.status_code == again.status_code == 200
+    target, request = fake.calls[0]
+    assert (target, request.skill) == ("marketing", "prepare_outage_sns_media")
+    assert request.input == fake.calls[1][1].input == {"post_draft_id": "spd_abc"}
+    assert request.meta.idempotency_key == fake.calls[1][1].meta.idempotency_key
+    assert all(r.skill != "publish_sns" for _, r in fake.calls)
+
+
+def test_outage_routes_need_a_person_and_a_valid_id(client: TestClient, fake: Fake) -> None:
+    bad = {"authorization": "Bearer nope"}
+    for url in (OUTAGE_MEDIA, OUTAGE_PUBLISH):
+        assert client.post(url, headers=bad).status_code in (401, 403)
+        assert client.post(url.replace("spd_abc", "a%20b")).status_code == 422
+    assert fake.calls == []
+
+
+def test_outage_media_passes_judgements_and_maps_bad_requests(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.status, fake.outcome = TaskStatus.INPUT_REQUIRED, "held"
+    held = client.post(OUTAGE_MEDIA)
+    assert held.status_code == 200 and held.json()["data"]["output"]["review_id"] == "rev_1"
+    for outcome in ("budget_exceeded", "already_merged", "publish_history", "check_failed"):
+        fake.status, fake.outcome = TaskStatus.FAILED, outcome
+        response = client.post(OUTAGE_MEDIA)
+        assert response.status_code == 200 and response.json()["data"]["outcome"] == outcome
+    fake.status, fake.outcome = TaskStatus.FAILED, "draft_not_found"
+    assert client.post(OUTAGE_MEDIA).status_code == 404
+    fake.status, fake.outcome = TaskStatus.FAILED, "invalid_input"
+    assert client.post(OUTAGE_MEDIA).status_code == 400
+    fake.status, fake.outcome = TaskStatus.CANCELED, None
+    assert client.post(OUTAGE_MEDIA).status_code == 504
+
+
+def test_outage_publish_request_sends_only_the_draft_id_and_retry_uses_a_fresh_key(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outcome = "requested"
+    body = {"caption": "바꾼 글", "asset_ref": "x"}
+    first, again = client.post(OUTAGE_PUBLISH), client.post(OUTAGE_PUBLISH, json=body)
+    retried = client.post(OUTAGE_PUBLISH + "?retry=true")
+    assert first.status_code == again.status_code == retried.status_code == 200
+    plain, same, retry = (call[1] for call in fake.calls)
+    assert plain.skill == "request_outage_sns_publish"
+    assert plain.input == same.input == {"post_draft_id": "spd_abc"}
+    assert plain.meta.idempotency_key == same.meta.idempotency_key
+    assert retry.input == {"post_draft_id": "spd_abc", "retry": True}
+    assert retry.meta.idempotency_key != plain.meta.idempotency_key
+    assert all(r.skill != "publish_sns" for _, r in fake.calls)  # 여기서 승인·게시하지 않는다
+    for outcome in ("retry_rejected_by_human", "not_prepared", "adapter_unavailable"):
+        fake.status, fake.outcome = TaskStatus.FAILED, outcome
+        refused = client.post(OUTAGE_PUBLISH)
+        assert refused.status_code == 200 and refused.json()["data"]["outcome"] == outcome
+    fake.status, fake.outcome = TaskStatus.FAILED, "draft_not_found"
+    assert client.post(OUTAGE_PUBLISH).status_code == 404
+
+
+def _outage_preview_setup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, ref: str, sha: str | None
+) -> None:
+    async def send(target: str, request: AgentRequest) -> AgentResult:
+        assert (target, request.skill) == ("marketing", "list_outage_sns_drafts")
+        prepared = None if sha is None else {"asset_ref": ref, "asset_sha256": sha}
+        items = [{"post_draft_id": "spd_abc", "media_flow": {"prepared": prepared}}]
+        return AgentResult(meta=request.meta, status=TaskStatus.COMPLETED, output={"items": items})
+
+    monkeypatch.setattr(marketing_client, "SEND", send)
+    monkeypatch.setenv(marketing_client.MEDIA_DIR_ENV, str(tmp_path / "media"))
+
+
+def test_outage_media_preview_serves_only_the_checked_labeled_file(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    import hashlib
+
+    folder = tmp_path / "media" / "t" / "ctx" / "med_1"
+    folder.mkdir(parents=True)
+    content = b"labeled-image-bytes"
+    (folder / "labeled.jpg").write_bytes(content)
+    (folder / "asset.png").write_bytes(content)  # 라벨을 입히기 전 원본
+    (tmp_path / "labeled.jpg").write_bytes(content)  # 미디어 폴더 밖
+    sha = hashlib.sha256(content).hexdigest()
+    url = OUTAGE_MEDIA + "/preview"
+
+    _outage_preview_setup(monkeypatch, tmp_path, "t/ctx/med_1/labeled.jpg", sha)
+    response = client.get(url)
+    assert response.status_code == 200 and response.content == content
+    assert response.headers["content-type"] == "image/jpeg"
+
+    for ref, digest in (
+        ("t/ctx/med_1/asset.png", sha),
+        ("../labeled.jpg", sha),
+        ("t/ctx/med_1/labeled.jpg", "0" * 64),
+        ("t/ctx/none/labeled.jpg", sha),
+        ("t/ctx/med_1/labeled.jpg", None),
+    ):
+        _outage_preview_setup(monkeypatch, tmp_path, ref, digest)
+        assert client.get(url).status_code == 404, ref
+    monkeypatch.delenv(marketing_client.MEDIA_DIR_ENV)
+    assert client.get(url).status_code == 404
+
+
 OUTAGE_MERGE = "/api/dashboard/marketing/outage-sns-drafts/merge"
 
 
