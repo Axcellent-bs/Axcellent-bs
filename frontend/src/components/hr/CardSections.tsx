@@ -59,7 +59,9 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
   const others = cards.filter((c) => c.kind !== "incident" && c.kind !== "decision");
   return (
     <div className="space-y-6">
-      <section aria-labelledby="sec-incident" className="card space-y-3 p-6">
+      {/* 넓은 화면에서는 왼쪽 장애 대응(보라), 오른쪽 업무 결정(민트)으로 나란히 둔다. 좁으면 위아래로 쌓인다 */}
+      <div className="grid items-start gap-6 lg:grid-cols-2">
+      <section aria-labelledby="sec-incident" className="card min-w-0 space-y-3 p-6">
         <div id="sec-incident">
           <Head
             kind="incident"
@@ -73,7 +75,7 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
           : <div className="space-y-3">{incidents.map((c) => <Kinded key={c.card_id} kind="incident" card={c} />)}</div>}
       </section>
 
-      <section aria-labelledby="sec-decision" className="card space-y-3 p-6">
+      <section aria-labelledby="sec-decision" className="card min-w-0 space-y-3 p-6">
         <div id="sec-decision">
           <Head
             kind="decision"
@@ -87,6 +89,7 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
           ? <p className="py-4 text-center text-sm text-ink-500">아직 업무 결정 카드가 없습니다.</p>
           : <div className="space-y-3">{decisions.map((c) => <Kinded key={c.card_id} kind="decision" card={c} />)}</div>}
       </section>
+      </div>
 
       {others.length > 0 && (
         <details className="card p-6">
