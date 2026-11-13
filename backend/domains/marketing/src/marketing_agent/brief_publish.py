@@ -18,6 +18,11 @@
 
 조회에는 `sns_handoff.publish`(`publish_state`)로 같은 상태를 낸다. 승인 대기 저장소에 이미 있는
 값만 읽는다(지어내지 않음).
+
+사람 재요청(`retry=true`): 승인 마감(10분)이 지나 자동 거절된 건(`review_timeout`)만, 사람이 누르는
+"다시 요청"만 새 승인 건을 만든다. 새 멱등 키에 시도 번호(`:r<n>`)가 들어가고 `publish_sns`는 그대로
+(24시간 상한·AI 표시·점검 재실행·항상 승인 대기)이며 자동 승인은 없다. 사람이 거절한 건·거절/만료를
+구분할 수 없는 옛 기록·같은 내용이 이미 게시됐거나 다른 승인 대기가 있는 경우는 코드로 거부한다.
 """
 
 from __future__ import annotations
@@ -50,13 +55,16 @@ _STATUS = {
     pend.APPROVED: "publishing",  # 승인됨, 게시 중
     pend.PUBLISHING: "publishing",
     pend.PUBLISHED: "published",
-    pend.REJECTED: "rejected",  # 거절 또는 만료(저장소는 둘을 구분하지 않는다)
+    pend.REJECTED: "rejected",  # 사람 거절(만료는 failure_code로 가려 "expired"로 낸다)
     pend.FAILED: "failed",
 }
+MAX_ATTEMPTS = 20  # 같은 내용의 재요청 기록을 따라가는 상한(무한 루프 방지)
 
 
 class RequestBriefPublishInput(AxModel):
     proposal_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    # 만료로 닫힌 건을 사람이 다시 요청한다. 만료가 아니면 retry_* 코드로 거부한다
+    retry: bool = False
 
 
 def publish_input_for(record: SnsHandoffRecord | None, store: SnsStore) -> tuple[dict | None, str]:
@@ -101,12 +109,65 @@ def publish_input_for(record: SnsHandoffRecord | None, store: SnsStore) -> tuple
     }, ""
 
 
-def key_for(proposal_id: str, data: dict) -> str:
-    """`publish_sns`가 쓰는 멱등 키와 같은 값(내용 해시 포함)."""
-    sha = publisher.content_sha(
+def sha_for(data: dict) -> str:
+    return publisher.content_sha(
         data["caption"], data["asset_sha256"], data["media_kind"], data["share_to_feed"], True
     )
-    return publisher.idempotency_key(context_id_for(proposal_id), data["post_draft_id"], sha)
+
+
+def key_for(proposal_id: str, data: dict, attempt: int = 0) -> str:
+    """`publish_sns`가 쓰는 멱등 키와 같은 값(내용 해시 포함). `attempt`는 사람 재요청 번호."""
+    return publisher.idempotency_key(
+        context_id_for(proposal_id), data["post_draft_id"], sha_for(data), attempt
+    )
+
+
+def chain_of(proposal_id: str, data: dict, get: PendingGet | None = None) -> list[pend.PendingPost]:
+    """같은 내용의 요청 기록을 시도 순서(0, 1, ...)로. 없으면 빈 목록. 저장소 오류는 올린다."""
+    getter = get or publisher.store().get
+    rows: list[pend.PendingPost] = []
+    for attempt in range(MAX_ATTEMPTS):
+        row = getter(key_for(proposal_id, data, attempt))
+        if row is None:
+            break
+        rows.append(row)
+    return rows
+
+
+_IN_FLIGHT = (pend.HELD, pend.APPROVED, pend.PUBLISHING)
+
+
+def rejected_cause(row: pend.PendingPost) -> str | None:
+    """거절 건의 원인: human | unknown(만료와 구분 못 하던 옛 기록). 만료·거절 아님은 None."""
+    if row.status != pend.REJECTED or row.failure_code == publisher.REVIEW_TIMEOUT:
+        return None
+    return "human" if row.result.get("cause") == "human" else "unknown"
+
+
+def retry_problem(
+    chain: list[pend.PendingPost], same_content: list[pend.PendingPost]
+) -> str | None:
+    """사람 재요청을 거부하는 코드. 허용이면 None(마지막 건이 만료로 닫혔고 다른 건이 없다)."""
+    if any(r.status == pend.PUBLISHED for r in same_content):
+        return "retry_already_published"
+    if any(r.status in _IN_FLIGHT for r in same_content):
+        return "retry_other_held"
+    latest = chain[-1] if chain else None
+    if latest is None or latest.status != pend.REJECTED:
+        return "retry_not_expired"
+    cause = rejected_cause(latest)
+    if cause == "human":
+        return "retry_rejected_by_human"
+    if cause == "unknown":
+        return "retry_cause_unknown"
+    return None
+
+
+def _same_content(
+    sha: str, chain: list[pend.PendingPost], injected: bool
+) -> list[pend.PendingPost]:
+    """같은 내용의 모든 대기 건. 저장소를 주입받은 조회(`get`)에서는 자기 기록만 본다."""
+    return list(chain) if injected or not chain else publisher.store().with_content_sha(sha)
 
 
 def publish_state(
@@ -114,8 +175,12 @@ def publish_state(
 ) -> dict[str, Any] | None:
     """조회용 게시 요청 상태. 미디어 초안이 없으면 None.
 
-    `status`: not_requested | held(승인 대기) | publishing(승인됨·게시 중) | published | rejected
-    (거절 또는 만료) | failed | unknown(저장소를 읽지 못함). `can_request`가 참일 때만 버튼을 둔다.
+    `status`: not_requested | held(승인 대기) | publishing(승인됨·게시 중) | published |
+    rejected(사람 거절; `rejected_cause`는 human, 옛 기록이라 만료와 구분 못 하면 unknown) |
+    expired(마감이 지나 자동 거절, 사람이 다시 요청 가능) | failed | unknown(저장소 읽기 실패).
+    `can_request`가 참일 때만 "게시 요청", `can_retry`가 참일 때만 "다시 요청" 버튼을 둔다.
+    카드 안 승인 패널용: `expires_at`(안전 관문 마감, 모르면 None)·`preview_url`/`preview_kind`·
+    `ai_label`·`proposal_id`. 값은 모두 저장소·보관본에서 읽은 것이다.
     """
     if record is None or record.status != "handed" or prepared_of(record) is None:
         return None
@@ -128,21 +193,47 @@ def publish_state(
         "failure_code": None,
         "permalink": None,
         "caption": None,
+        "proposal_id": record.proposal_id,
+        "expires_at": None,
+        "preview_url": None,
+        "preview_kind": None,
+        "ai_label": None,
+        "rejected_cause": None,
+        "attempt": 0,
+        "can_retry": False,
+        "retry_reason_code": None,
     }
     if data is None:
         return base
     base["caption"] = data["caption"]  # 게시될 글(확인 단계에 보여 준다). 화면은 고칠 수 없다
+    prepared = prepared_of(record) or {}
+    kind = data["media_kind"]
+    base["preview_url"] = f"/api/dashboard/marketing/briefs/{record.proposal_id}/media/preview"
+    base["preview_kind"] = "video" if kind == "reel" else "image"
+    base["ai_label"] = prepared.get("label_text") or sns.ai_label_text(kind)
     try:
-        row = (get or publisher.store().get)(key_for(record.proposal_id, data))
+        chain = chain_of(record.proposal_id, data, get)
+        same = _same_content(sha_for(data), chain, get is not None)
     except pend.PendingStorageError:
         return base | {"status": "unknown", "reason_code": "storage_error"}
-    if row is None:
+    if not chain:
         return base | {"can_request": True}
+    row = chain[-1]
+    status = _STATUS.get(row.status, "failed")
+    cause = rejected_cause(row)
+    if row.status == pend.REJECTED and cause is None:
+        status = "expired"
+    problem = retry_problem(chain, same)
     return base | {
-        "status": _STATUS.get(row.status, "failed"),
+        "status": status,
         "review_id": row.review_id if row.status == pend.HELD else None,
         "failure_code": row.failure_code,
         "permalink": row.result.get("permalink") if row.status == pend.PUBLISHED else None,
+        "expires_at": row.result.get("review_expires_at") if row.status == pend.HELD else None,
+        "rejected_cause": cause,
+        "attempt": len(chain) - 1,
+        "can_retry": problem is None,
+        "retry_reason_code": problem if status in ("expired", "rejected") else None,
     }
 
 
@@ -194,18 +285,24 @@ async def request_brief_publish(
     if check.get("verdict") != "approved" or check.get("publishable") is not True:
         return _failed(request, "check_not_passed", problems=list(check.get("problems") or [])[:20])
 
-    key = key_for(pid, publish_input)
     try:
-        existing = publisher.store().get(key)
+        chain = chain_of(pid, publish_input)
+        same = _same_content(sha_for(publish_input), chain, False)
     except pend.PendingStorageError:
         return _failed(request, "storage_error")
     evidence = Evidence(
         queries=[ACTION],
-        data_summary=f"기획안 {pid} 게시 요청",
+        data_summary=f"기획안 {pid} 게시 {'재요청' if data.retry else '요청'}",
         collected_at=datetime.now(UTC),
         ref_ids=[pid, publish_input["post_draft_id"]],
     )
-    if existing is not None:  # 이미 요청한 건. 다시 부르지 않고 상태만 돌려준다
+    attempt = 0
+    if data.retry:  # 사람이 누른 "다시 요청": 만료로 닫힌 건만. 그 밖은 코드로 거부한다
+        problem = retry_problem(chain, same)
+        if problem is not None:
+            return _failed(request, problem, publish=publish_state(record, store))
+        attempt = len(chain)
+    elif chain:  # 이미 요청한 건. 다시 부르지 않고 상태만 돌려준다
         return AgentResult(
             meta=request.meta,
             status=TaskStatus.COMPLETED,
@@ -215,11 +312,16 @@ async def request_brief_publish(
         )
 
     meta = request.meta.model_copy(update={"context_id": context_id_for(pid)})
-    result = await publish(
-        request.model_copy(update={"skill": "publish_sns", "input": publish_input, "meta": meta}),
-        store,
-    )
+    sent = request.model_copy(update={"skill": "publish_sns", "input": publish_input, "meta": meta})
+    # 시도 번호는 재요청에서만 넘긴다(첫 요청은 옛 호출 모양 그대로)
+    result = await (publish(sent, store, attempt=attempt) if attempt else publish(sent, store))
     output = dict(result.output or {})
+    if (
+        result.outcome == "held"
+    ):  # 화면의 남은 시간용 마감 시각(읽기 전용 조회, 실패해도 요청은 그대로)
+        held_row = publisher.store().by_review(str(output.get("review_id") or ""))
+        if held_row is not None:
+            await publisher.remember_expiry(held_row)
     output["publish"] = publish_state(record, store)
     held = result.outcome == "held"
     return result.model_copy(

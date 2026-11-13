@@ -2,6 +2,7 @@ import { ActionQueue } from "@/components/finance/SafetyQueue";
 import { CampaignControl } from "./CampaignControl";
 import { MARKETING_HOLD_ACTIONS } from "@/lib/finance";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router";
 import { ago, shortDateTime, won } from "@/lib/format";
 import {
   CHANNEL_LIVE_KO, PURPOSE_LIVE_KO, actionKo, holdKo, incidentClosed, incidentName, loadMarketingLive, statusKo,
@@ -48,6 +49,9 @@ function gradeChip(grade: string, status: string, hold: string | null) {
 export type LiveView = "notice" | "campaign";
 
 export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) {
+  // `?review=<보류 건 번호>`: 기획안 카드의 링크가 가리킨 건을 강조만 한다(링크로 승인되지 않는다)
+  const [params] = useSearchParams();
+  const highlightReview = params.get("review");
   const [live, setLive] = useState<MarketingLive | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -83,7 +87,7 @@ export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) 
         </div>
       </header>
 
-      <ActionQueue action={MARKETING_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 쿠폰·공지·SNS 게시·영상 생성·캠페인 집행이 여기 모입니다." />
+      <ActionQueue action={MARKETING_HOLD_ACTIONS} highlight={highlightReview} intro="안전 장치가 사람 확인으로 보류한 쿠폰·공지·SNS 게시·영상 생성·캠페인 집행이 여기 모입니다." />
 
       {view === "campaign" && <CampaignControl />}
 

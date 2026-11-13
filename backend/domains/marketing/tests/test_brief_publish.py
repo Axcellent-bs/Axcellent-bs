@@ -62,8 +62,8 @@ class FakeGate:
             )
         return self.by_key[key]
 
-    def resolve(self, status: str) -> str:
-        key, decision = next(iter(self.by_key.items()))
+    def resolve(self, status: str, index: int = 0) -> str:
+        key, decision = list(self.by_key.items())[index]
         self.by_key[key] = decision.model_copy(update={"status": status})
         return decision.review_id or ""
 
@@ -83,6 +83,12 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeGate:
     gate = FakeGate()
     gate.adapter = fake  # type: ignore[attr-defined]
     monkeypatch.setattr(publisher, "execute", gate.execute)
+    gate.reviews = {}  # type: ignore[attr-defined]  # review_id -> 안전 관문 보류 건(가짜)
+
+    async def review_info(row, client=None):  # noqa: ANN001
+        return gate.reviews.get(row.review_id)  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(publisher, "_review_info", review_info)  # 안전 관문 조회도 가짜
 
     async def no_sleep(_: float) -> None:
         return None
@@ -230,6 +236,15 @@ def test_request_creates_a_held_item_and_never_publishes(env: FakeGate) -> None:
         "failure_code": None,
         "permalink": None,
         "caption": CAPTION,
+        "proposal_id": "PROP-5",
+        "expires_at": None,
+        "preview_url": "/api/dashboard/marketing/briefs/PROP-5/media/preview",
+        "preview_kind": "video",
+        "ai_label": AI_LABEL_TEXT_REEL,
+        "rejected_cause": None,
+        "attempt": 0,
+        "can_retry": False,
+        "retry_reason_code": None,
     }
     out = _request()
     assert out["status"] == "completed" and out["outcome"] == "requested", out
@@ -392,3 +407,167 @@ def test_only_dashboard_api_may_call() -> None:
             == "rejected"
         )
     assert publisher.store()._query("") == []  # noqa: SLF001
+
+
+# --- 승인 패널 정보·만료/거절 구분·사람 재요청 -------------------------------------------------
+
+EXPIRES = "2030-01-01T00:10:00+00:00"
+
+
+def _hold(env: FakeGate, expires: str | None = EXPIRES) -> dict:
+    """게시 요청을 만든다(마감 시각은 가짜 안전 관문이 알려 준다)."""
+    if expires:
+        env.reviews[f"rev_{len(env.by_key) + 1}"] = {  # type: ignore[attr-defined]
+            "status": "pending",
+            "expires_at": expires,
+        }
+    return _request()
+
+
+def _retry() -> dict:
+    return _call("request_brief_publish", {"proposal_id": "PROP-5", "retry": True})
+
+
+def _expire(env: FakeGate, index: int = 0) -> None:
+    import asyncio
+
+    env.resolve("rejected", index)
+    row = publisher.store()._query("ORDER BY created_at")[index]  # noqa: SLF001
+    asyncio.run(publisher.apply_decision(row, "rejected", "poll", expired=True))
+
+
+def test_held_state_carries_panel_info(env: FakeGate) -> None:
+    _prepared_brief()
+    _hold(env)
+    view = _view()
+    assert view["status"] == "held" and view["review_id"] == "rev_1"
+    assert view["expires_at"] == EXPIRES  # 안전 관문 보류 건의 마감 그대로(연장·변경 없음)
+    assert view["caption"] == CAPTION and view["proposal_id"] == "PROP-5"
+    assert view["preview_kind"] == "video" and view["preview_url"].endswith("/PROP-5/media/preview")
+    assert view["ai_label"] == AI_LABEL_TEXT_REEL
+
+
+def test_poll_records_expiry_and_distinguishes_expired_from_rejected(env: FakeGate) -> None:
+    import asyncio
+
+    _prepared_brief()
+    _hold(env, expires=None)
+    assert _view()["expires_at"] is None  # 아직 모르면 지어내지 않는다
+    env.reviews["rev_1"] = {"status": "pending", "expires_at": EXPIRES}  # type: ignore[attr-defined]
+    assert asyncio.run(publisher.poll_reviews_once()) == 0
+    assert _view()["expires_at"] == EXPIRES
+
+    env.reviews["rev_1"] = {"status": "expired", "expires_at": EXPIRES}  # type: ignore[attr-defined]
+    env.resolve("rejected")
+    assert asyncio.run(publisher.poll_reviews_once()) == 1
+    row = _row()
+    assert row.status == pending.REJECTED and row.failure_code == "review_timeout"
+    view = _view()
+    assert (
+        view["status"] == "expired" and view["can_retry"] is True and view["can_request"] is False
+    )
+    assert view["rejected_cause"] is None and view["expires_at"] is None
+    assert _published(env) == 0
+
+
+def test_human_rejection_is_recorded_as_rejected_with_cause(env: FakeGate) -> None:
+    import asyncio
+
+    _prepared_brief()
+    _hold(env)
+    env.reviews["rev_1"] = {"status": "rejected", "expires_at": EXPIRES}  # type: ignore[attr-defined]
+    env.resolve("rejected")
+    asyncio.run(publisher.poll_reviews_once())
+    assert _row().failure_code == "review_rejected"
+    view = _view()
+    assert view["status"] == "rejected" and view["rejected_cause"] == "human"
+    assert view["can_retry"] is False and view["retry_reason_code"] == "retry_rejected_by_human"
+
+
+def test_event_from_system_means_expired(env: FakeGate) -> None:
+    import asyncio
+
+    publisher.setup_subscriber()
+    _prepared_brief()
+    _hold(env)
+    env.resolve("rejected")
+    envelope = _envelope("rev_1")
+    envelope.data.update({"decision": "rejected", "decided_by": "system"})
+    asyncio.run(events.publish(envelope))
+    assert _row().failure_code == "review_timeout" and _view()["status"] == "expired"
+
+
+def test_legacy_rejected_record_is_unknown_and_cannot_be_retried(env: FakeGate) -> None:
+    _prepared_brief()
+    _hold(env)
+    row = _row()
+    # 구분을 못 하던 옛 기록: failure_code만 review_rejected, 원인 표시(cause)가 없다
+    publisher.store().transition(
+        row.idempotency_key, pending.HELD, pending.REJECTED, failure_code="review_rejected"
+    )
+    view = _view()
+    assert view["status"] == "rejected" and view["rejected_cause"] == "unknown"
+    assert view["can_retry"] is False and view["retry_reason_code"] == "retry_cause_unknown"
+    out = _retry()
+    assert out["outcome"] == "retry_cause_unknown" and len(env.calls) == 1
+
+
+def test_retry_after_expiry_makes_a_new_held_item_only(env: FakeGate) -> None:
+    _prepared_brief()
+    _hold(env)
+    _expire(env)
+    out = _retry()
+    assert out["status"] == "completed" and out["outcome"] == "requested", out
+    assert len(env.calls) == 2 and env.calls[0] != env.calls[1]
+    assert env.calls[1].endswith(":r1")  # 새 멱등 키에 시도 번호
+    view = _view()
+    assert view["status"] == "held" and view["attempt"] == 1 and view["review_id"] == "rev_2"
+    assert view["can_retry"] is False
+    assert _published(env) == 0  # 재요청도 승인 대기로만 만든다(자동 승인 없음)
+    rows = publisher.store()._query("ORDER BY created_at")  # noqa: SLF001
+    assert [r.status for r in rows] == [pending.REJECTED, pending.HELD]
+    # 같은 요청을 또 누르면 다른 승인 대기가 있어 거부된다
+    assert _retry()["outcome"] == "retry_other_held" and len(env.calls) == 2
+    # 재요청 건이 또 만료되면 다시 요청할 수 있다(r2)
+    _expire(env, 1)
+    again = _retry()
+    assert again["outcome"] == "requested" and env.calls[2].endswith(":r2")
+
+
+def test_retry_refusals(env: FakeGate) -> None:
+    _prepared_brief()
+    assert _retry()["outcome"] == "retry_not_expired"  # 요청한 적이 없다
+    _hold(env)
+    assert _retry()["outcome"] == "retry_other_held"  # 승인 대기 중
+    assert len(env.calls) == 1
+    # 같은 내용이 이미 게시됐다
+    row = _row()
+    store = publisher.store()
+    store.transition(row.idempotency_key, pending.HELD, pending.APPROVED)
+    store.transition(row.idempotency_key, pending.APPROVED, pending.PUBLISHING)
+    store.transition(row.idempotency_key, pending.PUBLISHING, pending.PUBLISHED)
+    assert _retry()["outcome"] == "retry_already_published"
+    assert _published(env) == 0 and len(env.calls) == 1
+
+
+def test_plain_request_after_expiry_never_retries(env: FakeGate) -> None:
+    _prepared_brief()
+    _hold(env)
+    _expire(env)
+    out = _request()  # retry 없이 누르면 새로 만들지 않는다
+    assert out["outcome"] == "already_requested" and out["output"]["publish"]["status"] == "expired"
+    assert len(env.calls) == 1
+
+
+def test_retry_cannot_bypass_daily_limit(env: FakeGate, monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepared_brief()
+    _hold(env)
+    _expire(env)
+
+    async def refuse(adapter):  # noqa: ANN001
+        return "daily_limit_reached", {}
+
+    monkeypatch.setattr(publisher, "_pre_gate", refuse)
+    out = _retry()
+    assert out["status"] == "failed" and out["outcome"] == "daily_limit_reached"
+    assert len(env.calls) == 1

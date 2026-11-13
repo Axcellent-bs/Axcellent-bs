@@ -90,7 +90,9 @@
 - 기존 `publish_sns`를 그대로 부른다: C등급, 항상 사람 승인(승인 대기 10분 만료). 사람이 승인 화면에서 진행을 눌러야만 기존 구독자·폴링이 Instagram 게시로 잇는다. 이 skill은 승인하지 않고 만료를 늘리지 않는다. 24시간 게시 상한(45)·중단 상태·어댑터 설정 확인도 `publish_sns` 안에서 그대로다.
 - 캐러셀은 범위 밖(`media_kind_unsupported`). 막는 이유 코드: `not_handed`·`not_prepared`·`check_not_passed`·`draft_missing`·`draft_changed`.
 - 멱등: `context_id`를 `ctx_brief_<번호>`로 고정하고 내용 해시가 키에 들어간다. 이미 대기·게시·거절된 건은 `already_requested`와 상태만 돌려주고 `publish_sns`를 다시 부르지 않는다. 거절·만료된 건은 같은 키라 다시 요청할 수 없다(새 초안이 필요).
-- 조회의 `sns_handoff.publish`: `status`(`not_requested`·`held`·`publishing`·`published`·`rejected`(거절 또는 만료)·`failed`·`unknown`)·`can_request`·`caption` 등. 승인 대기 저장소에서 읽은 값만 쓴다.
+- 조회의 `sns_handoff.publish`: `status`(`not_requested`·`held`·`publishing`·`published`·`rejected`(사람 거절, `rejected_cause`: `human`·`unknown`=옛 기록)·`expired`(승인 마감 만료)·`failed`·`unknown`)·`can_request`·`can_retry`·`caption` 등. 카드 안 승인 패널용으로 `expires_at`(안전 관문 보류 건의 마감, 생성 직후와 폴링 때 `GET /api/safety/reviews/{id}`로 읽어 적어 둔 값)·`preview_url`·`preview_kind`·`ai_label`·`proposal_id`도 준다. 승인 대기 저장소에서 읽은 값만 쓴다.
+- 거절과 만료는 `failure_code`로 구분해 기록한다: `review_rejected`(사람 거절, `result.cause=human`) · `review_timeout`(마감 만료, 안전 관문이 `system`으로 자동 거절하거나 폴링이 `expired`를 봄). 구분을 못 하던 옛 기록은 `rejected`+`rejected_cause=unknown`으로 두고 재요청하지 않는다.
+- 사람 재요청 `retry=true`(같은 skill, dashboard-api는 같은 경로의 `?retry=true`): 마감 만료(`review_timeout`)로 닫힌 건만 새 멱등 키(`...:r<시도 번호>`)로 `publish_sns`를 다시 부른다. 항상 승인 대기로만 만들고 자동 승인은 없다. 거부 코드: `retry_not_expired`·`retry_rejected_by_human`·`retry_cause_unknown`·`retry_already_published`(같은 내용이 이미 게시)·`retry_other_held`(다른 승인 대기 있음). 24시간 상한·AI 표시·점검 재실행은 그대로다.
 
 ### 사람과 직접 대화 (`chat.py`, `chat_store.py`)
 - 화면 경로: dashboard-api `/api/dashboard/marketing-chat` (GET 목록, GET `/{id}`, POST `{thread_id?, message}`, POST `/{id}/close`). 사람 토큰(`Authorization: Bearer`)이 있어야 읽기도 된다.

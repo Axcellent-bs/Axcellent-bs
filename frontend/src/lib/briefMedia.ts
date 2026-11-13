@@ -143,7 +143,8 @@ export function mediaHttpErrorKo(status: number | undefined): string {
 // 이 화면은 게시하지 않는다. 요청하면 서버가 승인 대기 건(10분 만료)만 만들고, 사람이 승인 화면에서
 // 진행을 눌러야 게시된다. 글·파일은 서버가 보관본에서 읽는다(화면은 기획안 번호만 보낸다).
 
-export type PublishStatus = "not_requested" | "held" | "publishing" | "published" | "rejected" | "failed" | "unknown";
+/** rejected = 사람이 거절, expired = 승인 시간(10분)이 지나 자동 거절(사람이 다시 요청할 수 있다) */
+export type PublishStatus = "not_requested" | "held" | "publishing" | "published" | "rejected" | "expired" | "failed" | "unknown";
 
 /** 서버가 승인 대기 저장소에서 읽어 준 게시 요청 상태. 옛 서버는 이 칸이 없다 */
 export interface PublishState {
@@ -156,6 +157,20 @@ export interface PublishState {
   permalink: string | null;
   /** 게시될 글(서버 보관본 그대로) */
   caption: string | null;
+  // 카드 안 승인 패널용. 옛 서버는 이 칸들이 없다(없으면 패널은 있는 만큼만 보여 준다)
+  proposal_id?: string;
+  /** 안전 장치 승인 마감 시각(ISO). 아직 모르면 null */
+  expires_at?: string | null;
+  /** 대시보드 API 상대 경로. 앞에 서버 주소를 붙여 쓴다 */
+  preview_url?: string | null;
+  preview_kind?: "image" | "video" | null;
+  ai_label?: string | null;
+  /** rejected일 때: human = 사람이 거절, unknown = 만료와 구분하지 못하는 옛 기록 */
+  rejected_cause?: "human" | "unknown" | null;
+  attempt?: number;
+  /** true일 때만 "다시 요청" 버튼을 둔다(만료로 닫힌 건) */
+  can_retry?: boolean;
+  retry_reason_code?: string | null;
 }
 
 export interface PublishAnswer {
@@ -183,6 +198,11 @@ const PUBLISH_FAIL_KO: Record<string, string> = {
   storage_error: "게시 대기 저장소를 읽을 수 없어 요청하지 않았습니다. 게시되지 않았습니다.",
   invalid_input: "서버가 요청을 받아들이지 않았습니다. 새로고침한 뒤 다시 시도해 주세요.",
   brief_not_found: "기획안을 찾을 수 없습니다.",
+  retry_not_expired: "승인 시간이 지나 닫힌 건만 다시 요청할 수 있습니다.",
+  retry_rejected_by_human: "사람이 거절한 건이라 다시 요청할 수 없습니다.",
+  retry_cause_unknown: "거절인지 만료인지 구분할 수 없는 옛 기록이라 다시 요청할 수 없습니다. 담당자에게 문의해 주세요.",
+  retry_already_published: "같은 내용이 이미 게시돼 다시 요청할 수 없습니다.",
+  retry_other_held: "이 내용의 다른 승인 대기 건이 있어 다시 요청할 수 없습니다. 그 건을 먼저 처리해 주세요.",
   TIMEOUT: "서버 응답이 늦어 결과를 알 수 없습니다. 새로고침해 상태를 확인해 주세요. 다시 눌러도 같은 요청을 두 번 만들지 않습니다.",
 };
 
@@ -190,6 +210,7 @@ const PUBLISH_FAIL_KO: Record<string, string> = {
 const PUBLISH_FAILURE_KO: Record<string, string> = {
   content_changed: "승인 뒤 내용이 바뀌어 게시하지 않았습니다. 새 승인이 필요합니다.",
   review_rejected: "사람이 거절했거나 승인 시간이 지났습니다.",
+  review_timeout: "승인 시간이 지나 자동으로 닫혔습니다.",
   daily_limit_reached: "24시간 게시 상한에 도달해 게시하지 못했습니다.",
   publish_halted: "게시가 중단돼 게시하지 못했습니다.",
   adapter_unavailable: "서버에 Instagram 게시 설정이 없어 게시하지 못했습니다.",
@@ -205,13 +226,17 @@ export function publishStatusLine(p: PublishState | null | undefined): PublishLi
   if (!p) return null;
   switch (p.status) {
     case "held":
-      return { tone: "info", text: `게시 승인 대기 중입니다. 사람이 승인 화면에서 ${PUBLISH_EXPIRY_MIN}분 안에 진행을 눌러야 게시되고, 시간이 지나면 만료됩니다.` };
+      return { tone: "info", text: `게시 승인 대기 중입니다. 사람이 ${PUBLISH_EXPIRY_MIN}분 안에 승인해야 게시되고, 시간이 지나면 만료됩니다.` };
     case "publishing":
       return { tone: "info", text: "승인됐습니다. Instagram에 게시하는 중입니다." };
     case "published":
       return { tone: "ok", text: "Instagram에 게시됐습니다." };
     case "rejected":
-      return { tone: "warn", text: "거절됐거나 승인 시간이 지나 만료됐습니다. 이 초안은 다시 요청할 수 없습니다." };
+      return { tone: "warn", text: p.rejected_cause === "human"
+        ? "사람이 거절했습니다. 이 초안은 다시 요청할 수 없습니다."
+        : "거절됐거나 승인 시간이 지나 만료됐습니다(옛 기록이라 구분할 수 없습니다). 이 초안은 다시 요청할 수 없습니다." };
+    case "expired":
+      return { tone: "warn", text: `승인 시간(${PUBLISH_EXPIRY_MIN}분)이 지나 만료됐습니다. 게시되지 않았습니다.${p.can_retry ? " 필요하면 사람이 다시 요청할 수 있습니다." : ""}` };
     case "failed":
       return { tone: "bad", text: `게시되지 않았습니다. ${(p.failure_code && PUBLISH_FAILURE_KO[p.failure_code]) || `담당자 확인이 필요합니다${p.failure_code ? ` (${p.failure_code})` : ""}.`}` };
     case "unknown":
@@ -244,3 +269,39 @@ export function publishHttpErrorKo(status: number | undefined): string {
   if (status === 504) return "시간 안에 끝나지 않았습니다. 새로고침해 상태를 확인해 주세요. 다시 눌러도 같은 요청을 두 번 만들지 않습니다.";
   return "게시를 요청하지 못했습니다. 잠시 뒤 다시 시도해 주세요.";
 }
+
+// ---- 카드 안 승인 패널 ------------------------------------------------------------------------
+
+/** 마감까지 남은 초. 마감을 모르면 null(지어내지 않는다) */
+export function remainingSeconds(expiresAt: string | null | undefined, nowMs: number): number | null {
+  if (!expiresAt) return null;
+  const t = Date.parse(expiresAt);
+  return Number.isNaN(t) ? null : Math.floor((t - nowMs) / 1000);
+}
+
+/** 남은 시간 문구(1분 단위). 마감을 모르면 "남은 시간을 알 수 없음" */
+export function remainingKo(seconds: number | null): string {
+  if (seconds == null) return "남은 시간을 알 수 없습니다";
+  if (seconds <= 0) return "승인 시간이 지났습니다";
+  if (seconds < 60) return "1분 미만 남음";
+  return `약 ${Math.ceil(seconds / 60)}분 남음`;
+}
+
+/** 승인 패널의 버튼을 켤지. 내용 확인 체크·승인자 이름·마감 전이어야 한다(마감을 모르면 서버 판단에 맡긴다) */
+export function canDecideNow(o: { tokenSet: boolean; reviewed: boolean; approver: string | null; remaining: number | null; busy: boolean }): boolean {
+  return o.tokenSet && o.reviewed && !!o.approver && !o.busy && !(o.remaining != null && o.remaining <= 0);
+}
+
+/** 승인·거절 호출 오류를 화면 문구로. 서버 문장은 쓰지 않는다 */
+export function decideErrorKo(status: number | undefined, code: string | null | undefined): string {
+  if (code === "SELF_APPROVAL") return "요청한 본인은 승인할 수 없습니다. 다른 사람이 눌러 주세요.";
+  if (status === 409 || code === "ALREADY_DECIDED") return "이미 결정됐거나 승인 시간이 지난 건입니다. 새로고침해 확인해 주세요.";
+  if (status === 404) return "보류 건을 찾을 수 없습니다. 승인 시간이 지나 정리됐을 수 있습니다. 새로고침해 확인해 주세요.";
+  if (status === 401 || status === 403) return "사람 권한이 없어 처리하지 못했습니다. 사람 토큰 설정을 확인해 주세요.";
+  if (status === 0) return "안전 장치 서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.";
+  return "처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.";
+}
+
+/** 승인 화면 링크: 해당 건을 강조한다(`?review=<id>`). 링크를 여는 것만으로는 아무것도 승인되지 않는다 */
+export const approvalLink = (reviewId: string | null | undefined): string =>
+  reviewId ? `/marketing/campaign?review=${encodeURIComponent(reviewId)}` : "/marketing/campaign";

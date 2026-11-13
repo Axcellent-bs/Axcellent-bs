@@ -426,3 +426,25 @@ def test_brief_media_preview_serves_only_the_checked_labeled_file(
         assert client.get(url).status_code == 404, ref
     monkeypatch.delenv(marketing_client.MEDIA_DIR_ENV)
     assert client.get(url).status_code == 404
+
+
+def test_brief_publish_retry_uses_the_same_path_with_a_fresh_key(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outcome = "requested"
+    first = client.post(BRIEF_PUBLISH)
+    retried = client.post(BRIEF_PUBLISH + "?retry=true")
+    assert first.status_code == retried.status_code == 200
+    plain, retry = fake.calls[0][1], fake.calls[1][1]
+    assert plain.input == {"proposal_id": "PROP-5"}  # 보통 요청은 그대로(옛 호출 모양)
+    assert retry.skill == "request_brief_publish"
+    assert retry.input == {"proposal_id": "PROP-5", "retry": True}
+    assert retry.meta.idempotency_key != plain.meta.idempotency_key
+    assert all(r.skill != "publish_sns" for _, r in fake.calls)
+    # 재요청 거부(retry_*)는 판단 결과라 오류가 아니다
+    fake.status, fake.outcome = TaskStatus.FAILED, "retry_rejected_by_human"
+    refused = client.post(BRIEF_PUBLISH + "?retry=true")
+    assert (
+        refused.status_code == 200
+        and refused.json()["data"]["outcome"] == "retry_rejected_by_human"
+    )
