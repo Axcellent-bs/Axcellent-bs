@@ -104,7 +104,7 @@ function Row({ row, incidentIds }: { row: RequestRow; incidentIds: Set<string> }
   );
 }
 
-/** 최근 7일 맡은 일 중 실패·거절 건수. 화면 위 "재무 AI가 한 일" 요약과 지금 할 일에 쓴다 */
+/** 최근 7일 맡은 일 중 실패·거절 건수. 지금 할 일에 쓴다 */
 const FAIL_WINDOW_MS = 7 * 24 * 3600 * 1000;
 export function failedCount(rows: RequestRow[], now = Date.now()): number {
   return rows.filter((r) => r.reply && ["failed", "rejected"].includes(r.reply.outcome as string) && now - time(r.request) < FAIL_WINDOW_MS).length;

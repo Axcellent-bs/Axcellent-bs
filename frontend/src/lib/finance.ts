@@ -830,8 +830,8 @@ export function todayKst(now = new Date()): string {
 }
 
 /** todo.link 또는 kind → 화면 탭 id. 탭 id는 주소 해시(#closing)라 바꾸지 않고 새 탭만 더한다 */
-// ⑧ 요청·기록 탭은 없앴다(11/13): 기획 요청은 화면 위 버튼·옆 패널, 고객지원 비용은 ① 결산,
-// 총괄이 맡긴 일은 재무 AI 테스트 옆 "재무 AI가 한 일"로 옮겼다. 옛 주소는 FINANCE_SECTION_TAB·PAGE_ANCHORS가 받는다
+// ⑧ 요청·기록 탭은 없앴다(11/13): 총괄이 맡긴 일·기획에 개선 요청은 탭 밖에 늘 펼쳐 두고,
+// 고객지원 비용은 ① 결산으로 옮겼다. 옛 주소는 FINANCE_SECTION_TAB·PAGE_ANCHORS가 받는다
 export type FinanceTab = "closing" | "reconciliation" | "settlements" | "policy" | "tax" | "campaigns" | "cash";
 export const FINANCE_TABS: FinanceTab[] = ["closing", "reconciliation", "settlements", "policy", "tax", "campaigns", "cash"];
 /** 탭 밖(화면 위)에 있는 섹션 앵커. 이 해시로 들어오면 그 자리를 연다 */
@@ -849,7 +849,7 @@ export const FINANCE_SECTION_TAB: Record<string, FinanceTab> = {
   "campaign-pnl": "campaigns", "campaign-reviews": "campaigns", "campaign-lessons": "campaigns", "campaign-insights": "campaigns", "campaign-opinions": "campaigns",
   cashflow: "cash",
   "support-costs": "closing",
-  // 옛 ⑧ 요청·기록 탭 주소 → 평상시 업무 첫 탭 (기획 요청 패널·재무 AI가 한 일은 PAGE_ANCHORS로 연다)
+  // 옛 ⑧ 요청·기록 탭 주소 → 평상시 업무 첫 탭 (탭 밖 섹션은 PAGE_ANCHORS로 그 자리로 내려간다)
   requests: "closing",
 };
 /** 주소 해시(# 없이) → 열 탭. 탭 id도 섹션 앵커도 아니면 null */

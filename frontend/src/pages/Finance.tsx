@@ -11,7 +11,7 @@ import { Chip, ErrorBox, MetaLine, MockBadge, TONE, Waiting, useResource } from 
 import { IncidentFinance } from "@/components/finance/Incident";
 import { SelfTestPanel } from "@/components/finance/Kept";
 import { TeamBudgetSection } from "@/components/finance/TeamBudget";
-import { PlanningButton, PlanningDrawer } from "@/components/finance/PlanningRequests";
+import { PlanningButton, PlanningQuestionsSection, PlanningRequestsSection } from "@/components/finance/PlanningRequests";
 import { OrchestratorRequestsSection } from "@/components/finance/OrchestratorRequests";
 import { ReconciliationSection } from "@/components/finance/Reconciliation";
 import { SafetyQueue } from "@/components/finance/SafetyQueue";
@@ -45,7 +45,6 @@ const TAB_LABEL: Record<FinanceTab, string> = {
   campaigns: "⑥ 캠페인 재무",
   cash: "⑦ 자금·현금 흐름",
 };
-const PLANNING_ANCHORS = new Set(["planning-requests", "planning-questions"]);
 
 const KPI: { key: keyof FinanceKpis; label: string; hint: string }[] = [
   { key: "gmv", label: "총거래액", hint: "고객이 결제한 금액 전체" },
@@ -142,7 +141,7 @@ export default function FinancePage() {
   const tab: FinanceTab = hashedTab ?? "closing";
   // 탭 id가 아닌 해시(섹션 앵커, #safety-queue)는 그 자리로 내려간다
   const pageAnchor = (PAGE_ANCHORS as readonly string[]).includes(hashTab);
-  const anchor = hashTab && !(FINANCE_TABS as string[]).includes(hashTab) && (isTab || pageAnchor) && !PLANNING_ANCHORS.has(hashTab) ? hashTab : null;
+  const anchor = hashTab && !(FINANCE_TABS as string[]).includes(hashTab) && (isTab || pageAnchor) ? hashTab : null;
   const urlIncident = new URLSearchParams(location.search).get("incident");
   const [closingFocus, setClosingFocus] = useState<{ date: string } | null>(null);
   const openTab = useCallback((t: FinanceTab, scroll = false) => {
@@ -164,24 +163,21 @@ export default function FinancePage() {
 
   useEffect(() => { if (anchor && !legacyDaily) scrollToId(anchor); }, [anchor, legacyDaily]);
 
-  // 기획에 개선 요청: 화면 위 버튼·다른 탭의 "이걸로 개선 요청"·옛 주소(#planning-requests)로 옆 패널을 연다
-  const [planningOpen, setPlanningOpen] = useState(PLANNING_ANCHORS.has(hashTab));
+  // 기획에 개선 요청: 화면에 늘 펼쳐 둔다(재무 AI 테스트처럼). 화면 위 버튼·다른 탭의 "이걸로 개선 요청"은
+  // 이 섹션으로 내려가고, "이걸로 개선 요청"은 제목·근거를 미리 채운다
   const [planningPrefill, setPlanningPrefill] = useState<(PlanningAsk & { n: number }) | null>(null);
-  const openPlanning = useCallback(() => setPlanningOpen(true), []);
-  const closePlanning = useCallback(() => setPlanningOpen(false), []);
+  const openPlanning = useCallback(() => scrollToId("planning-requests"), []);
   useEffect(() => {
     const onAsk = (e: Event) => {
       const detail = (e as CustomEvent<PlanningAsk>).detail ?? {};
       setPlanningPrefill((p) => ({ ...detail, n: (p?.n ?? 0) + 1 }));
-      setPlanningOpen(true);
+      scrollToId("planning-requests");
     };
     window.addEventListener(PLANNING_ASK_EVENT, onAsk);
     return () => window.removeEventListener(PLANNING_ASK_EVENT, onAsk);
   }, []);
-  useEffect(() => { if (PLANNING_ANCHORS.has(hashTab)) setPlanningOpen(true); }, [hashTab]);
-  // 재무 AI가 한 일(총괄이 맡긴 일) 요약: 실패가 있으면 지금 할 일에도 올린다
+  // 총괄이 재무에 맡긴 일 요약: 최근 7일 실패가 있으면 지금 할 일에도 올린다
   const [aiWork, setAiWork] = useState<{ total: number; failed: number } | null>(null);
-  const [aiWorkOpen, setAiWorkOpen] = useState(hashTab === "orchestrator-requests");
 
   // 30초마다, 그리고 무언가를 바꾼 뒤 모든 섹션을 새로 받는다
   const [tick, setTick] = useState(0);
@@ -283,7 +279,7 @@ export default function FinancePage() {
           <li><b>장부 확인</b>: 결제 실패(미결제, 고객 돈이 나가지 않은 받지 못한 매출), 확인·환불 필요(시간 초과 결제: 고객 돈이 빠져나갔을 수 있음), 보상 쿠폰, 환불로 빠져나간 돈을 나눠 봅니다.</li>
           <li><b>보류 큐 결정</b>: 재무가 정해야 하는 보류 건은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다. 판매자 정산 지급 승인은 <Link href={SUPPORT_SETTLEMENT_PATH} className="font-medium text-brand-700 underline">고객지원 &gt; 판매자 정산</Link>에서 합니다.</li>
           <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정(①), 대사 메모(②)를 하고 팀 예산(④, 확정은 인사 AI)을 보고 판매자 정산 결과(③)를 봅니다. 세무 자료는 ⑤, 현금 흐름은 ⑦, 고객지원 비용 기록은 ①에 있습니다.</li>
-          <li><b>기획에 개선 요청</b>: 고칠 점이 보이면 화면 위 <b>기획에 개선 요청</b> 버튼이나 표 옆 <b>이걸로 개선 요청</b>을 누릅니다. 기획이 되물은 질문도 거기서 답합니다. 총괄이 재무에 맡긴 일은 재무 AI 테스트 아래 <b>재무 AI가 한 일</b>에 있습니다.</li>
+          <li><b>기획에 개선 요청</b>: 고칠 점이 보이면 화면 위 <b>기획에 개선 요청</b> 버튼이나 표 옆 <b>이걸로 개선 요청</b>을 누릅니다. 기획이 되물은 질문도 거기서 답합니다. <b>총괄이 재무에 맡긴 일</b>과 <b>기획에 개선 요청</b>은 탭 밖에 늘 보입니다.</li>
         </ol>
         <p className="mt-3 text-sm text-ink-500">
           단계별 설명과 자주 묻는 질문은 <Link href="/finance/guide" className="font-medium text-brand-700 underline">재무 AI 관리자 사용법</Link>에 있습니다.
@@ -302,19 +298,13 @@ export default function FinancePage() {
       {/* 재무 AI 테스트는 실제 서버 상태를 보는 것이라 예시 모드에서는 숨긴다 */}
       {!exampleMode && <SelfTestPanel test={test} meta={testMeta} loaded={testLoaded} open={testOpen} running={testing} disabled={financeUp === false} onRunNow={runTest} />}
 
-      {/* 재무 AI가 한 일: 총괄이 재무에 맡긴 일. 재무 AI 테스트와 같은 "AI가 제대로 일하나" 자리 (11/13 ⑧에서 옮김) */}
+      {/* 총괄이 재무에 맡긴 일과 기획에 개선 요청은 탭 밖에 늘 펼쳐 둔다 (11/13 ⑧ 탭에서 옮김) */}
+      {!exampleMode && <OrchestratorRequestsSection tick={tick} onSummary={setAiWork} />}
       {!exampleMode && (
-        <details id="orchestrator-requests-box" open={aiWorkOpen} onToggle={(e) => setAiWorkOpen((e.target as HTMLDetailsElement).open)}
-          className="scroll-mt-4 rounded-2xl border border-ink-100 bg-surface px-4 py-3 text-sm sm:px-5">
-          <summary className="flex cursor-pointer flex-wrap items-center gap-2 font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
-            재무 AI가 한 일 <span className="font-normal text-ink-500">(총괄이 재무에 맡긴 일)</span>
-            {aiWork && <span className="font-normal tabular-nums text-ink-500">{aiWork.total}건</span>}
-            {aiFailed > 0 && <Chip label={`최근 7일 실패 ${aiFailed}건`} tone={TONE.bad} />}
-          </summary>
-          <div className="mt-3">
-            <OrchestratorRequestsSection tick={tick} onSummary={setAiWork} />
-          </div>
-        </details>
+        <div className="space-y-4">
+          <PlanningQuestionsSection tick={tick} />
+          <PlanningRequestsSection tick={tick} prefill={planningPrefill} />
+        </div>
       )}
 
       {(financeUp === false || safetyUp === false) && (
@@ -340,16 +330,16 @@ export default function FinancePage() {
             {todo.map((t, i) => (
               <TodoCard key={`${t.kind}-${i}`} todo={t} onDone={() => { bump(); void loadSide(); }}
                 onOpen={() => {
-                  if (t.kind === "planning_question") { openPlanning(); return; }
+                  if (t.kind === "planning_question") { scrollToId("planning-questions"); return; }
                   if (t.action?.type === "closing_confirm" && t.action.date) setClosingFocus({ date: t.action.date });
                   openTab(todoTab(t), true);
                 }} />
             ))}
             {aiFailed > 0 && (
               <li>
-                <button type="button" onClick={() => { setAiWorkOpen(true); scrollToId("orchestrator-requests-box"); }}
+                <button type="button" onClick={() => scrollToId("orchestrator-requests")}
                   className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
-                  <Chip label="재무 AI가 한 일" tone={TONE.bad} />
+                  <Chip label="총괄이 맡긴 일" tone={TONE.bad} />
                   <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">총괄이 맡긴 일 중 최근 7일 실패·거절 {aiFailed}건 확인</span>
                   <span className="text-sm font-medium text-brand-700">무엇이 실패했는지 보기 →</span>
                 </button>
@@ -457,7 +447,6 @@ export default function FinancePage() {
       {/* 보류 큐에서 결정하면 할 일(정산 승인 대기 등)도 새로 받는다 */}
       <SafetyQueue reviews={reviews} error={reviewsError} highlight={null} reload={() => { bump(); return loadSide(); }} />
 
-      <PlanningDrawer open={planningOpen} onClose={closePlanning} tick={tick} prefill={planningPrefill} />
     </div>
   );
 }
