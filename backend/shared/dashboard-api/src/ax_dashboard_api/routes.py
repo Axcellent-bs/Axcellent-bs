@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ax_contracts.schemas.hr import (
     AnswerHandoverQuestionOutput,
@@ -933,7 +934,21 @@ async def cancel_campaign(campaign_id: str, body: CampaignCancelBody) -> dict:
 
 
 class BriefHandoffBody(BaseModel):
-    media_kind: Literal["image", "video"] = "image"
+    """`auto`면 마케팅이 기획안에서 종류를 고른다. 종류·`fields`를 주면 관리자 선택이 우선한다."""
+
+    media_kind: Literal["image", "video", "carousel", "auto"] = "image"
+    # 관리자가 정한 장면 템플릿 필드(이름 → 값). 값 검사는 마케팅이 화이트리스트로 한다
+    fields: dict[str, str] | None = Field(default=None, max_length=8)
+    autofill: bool = False  # 나머지 필드를 기획안 근거·기본값으로 채운다
+    revise: bool = False  # 이미 넘긴 기획안의 미디어 요청 초안을 다시 만든다
+
+    @field_validator("fields")
+    @classmethod
+    def _short_fields(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        for name, item in (value or {}).items():
+            if not (1 <= len(name) <= 40 and 1 <= len(item) <= 60):
+                raise ValueError("fields 이름은 1~40자, 값은 1~60자")
+        return value
 
 
 @router.post("/marketing/briefs/{proposal_id}/sns-handoff")
@@ -945,10 +960,15 @@ async def handoff_brief_to_sns(
 
     미디어 생성(B 등급 비용)과 SNS 게시(C 등급 사람 승인)는 여기서 하지 않는다.
     실패 이유(가격표 없음 등)는 오류가 아니라 결과의 `sns_handoff.reason_code`로 돌려준다.
+    `revise`로 종류·필드를 바꾸다 막히면 결과 `outcome`이 `revise_rejected`(보관본 그대로)다.
     """
     _no_org_in_mock()
+    extra = body.model_dump(exclude={"media_kind"}, exclude_defaults=True)
     key = f"ui:sns-handoff:{proposal_id}:{body.media_kind}"
-    return ok(await marketing_client.handoff_call(proposal_id, body.media_kind, key))
+    if extra:  # 내용이 다르면 키도 다르다(옛 호출의 키는 그대로)
+        raw = json.dumps(extra, sort_keys=True, ensure_ascii=False)
+        key += ":" + hashlib.sha256(raw.encode()).hexdigest()[:16]
+    return ok(await marketing_client.handoff_call(proposal_id, body.media_kind, key, extra))
 
 
 class VideoPostPrepareBody(BaseModel):

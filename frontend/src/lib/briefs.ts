@@ -36,6 +36,33 @@ export interface SnsMediaRequest {
   missing_fields: string[];
   next_steps: string[];
   auto_generate: boolean;
+  // 아래는 자동 추천·관리자 선택 기록이다. 옛 서버·옛 기록에는 없다
+  /** 종류를 누가 정했나. auto_fallback = 추천 종류를 서버가 만들 수 없어 이미지로 넘김 */
+  kind_source?: "auto" | "auto_fallback" | "admin" | null;
+  recommended_media_kind?: string | null;
+  recommendation_reason?: string | null;
+  recommendation_confidence?: string | null;
+  recommendation_blocked?: string | null;
+  /** 필드 값의 출처: brief(기획안 근거) | default(기본값) | admin(관리자) */
+  field_sources?: Record<string, string>;
+  field_reasons?: Record<string, string>;
+  /** 고를 수 있는 값. null이면 짧은 단어를 직접 적는다 */
+  field_options?: Record<string, string[] | null>;
+  field_max_len?: Record<string, number>;
+}
+
+export type MediaKindChoice = "auto" | "image" | "video" | "carousel";
+
+export interface MediaFieldNote { field: string; value: string | null; source: "brief" | "default" | "undecided"; reason: string }
+
+/** 마케팅 AI가 기획안 글에서 규칙으로 계산한 추천. 화면은 받은 값만 보여 준다 */
+export interface MediaRecommendation {
+  media_kind: "image" | "video" | "carousel";
+  rule: string;
+  reason: string;
+  confidence: "high" | "low";
+  fields: Record<string, string>;
+  field_notes: MediaFieldNote[];
 }
 
 /** SNS·미디어로 넘긴 상태. 마케팅 서버가 알려 주는 값만 쓴다(옛 서버는 이 칸이 없을 수 있다) */
@@ -51,6 +78,8 @@ export interface SnsHandoff {
 /** 받은 기획안. 지금 마케팅이 아는 상태는 `received`(받음)뿐이다 */
 export interface StoredBrief {
   sns_handoff?: SnsHandoff;
+  /** 옛 서버는 이 칸이 없다 */
+  media_recommendation?: MediaRecommendation | null;
   campaign_id: string;
   proposal_id: string;
   status: "received";
@@ -85,15 +114,34 @@ async function get<T>(path: string): Promise<T> {
   return body.data;
 }
 
-export interface HandoffAnswer { status: string; outcome: string | null; output: { outcome: string; sns_handoff: SnsHandoff; campaign_id: string | null } }
+export interface HandoffAnswer {
+  status: string;
+  outcome: string | null;
+  output: { outcome: string; sns_handoff: SnsHandoff; campaign_id: string | null; reason_code?: string | null; field?: string | null; field_code?: string | null };
+}
 
-/** 기획안을 SNS·미디어로 넘긴다(dashboard-api, 사람 토큰 필요). 미디어 생성·게시는 하지 않고 초안만 만든다 */
-async function handoff(proposalId: string): Promise<HandoffAnswer> {
+export interface HandoffOptions {
+  /** auto = 마케팅 AI 추천을 따른다(기본). 종류를 고르면 관리자 선택이 우선한다 */
+  mediaKind?: MediaKindChoice;
+  /** 관리자가 정한 필드 값. 추천 값을 덮어쓴다 */
+  fields?: Record<string, string>;
+  /** 이미 넘긴 기획안의 미디어 요청 초안을 다시 만든다 */
+  revise?: boolean;
+}
+
+/**
+ * 기획안을 SNS·미디어로 넘긴다(dashboard-api, 사람 토큰 필요). 미디어 생성·게시는 하지 않고 초안만 만든다.
+ * 종류·필드는 마케팅 AI가 기획안에서 추천해 채우고, 관리자가 고른 값이 있으면 그것이 우선한다.
+ */
+async function handoff(proposalId: string, options: HandoffOptions = {}): Promise<HandoffAnswer> {
+  const payload: Record<string, unknown> = { media_kind: options.mediaKind ?? "auto", autofill: true };
+  if (options.fields && Object.keys(options.fields).length > 0) payload.fields = options.fields;
+  if (options.revise) payload.revise = true;
   const path = `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/sns-handoff`;
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
-    body: JSON.stringify({ media_kind: "image" }),
+    body: JSON.stringify(payload),
     cache: "no-store",
   });
   const json = await res.json().catch(() => null);
@@ -135,8 +183,36 @@ export const HANDOFF_REASON_KO: Record<string, string> = {
   unknown_scene_template: "장면 템플릿을 찾을 수 없습니다",
   caption_too_long: "캡션이 너무 길어 초안을 만들 수 없습니다",
   forbidden_phrase: "참여를 조건으로 거는 말이 있어 초안을 만들 수 없습니다",
+  invalid_field: "쓸 수 없는 필드 값이 있습니다",
 };
 export const handoffReasonKo = (code: string | null) => (code ? HANDOFF_REASON_KO[code] ?? `넘기지 못했습니다 (${code})` : "");
+
+export const MEDIA_KIND_KO: Record<string, string> = { image: "이미지", video: "영상", carousel: "캐러셀" };
+export const mediaKindKo = (kind: string | null | undefined) => (kind ? MEDIA_KIND_KO[kind] ?? kind : "확인할 수 없음");
+export const MEDIA_FIELD_KO: Record<string, string> = { season: "계절", color_theme: "색감", category: "책 분류" };
+export const mediaFieldKo = (name: string) => MEDIA_FIELD_KO[name] ?? name;
+export const FIELD_SOURCE_KO: Record<string, string> = { brief: "자동 · 기획안 근거", default: "자동 · 기본값", admin: "관리자 선택", undecided: "미정" };
+export const KIND_SOURCE_KO: Record<string, string> = { auto: "자동 선택", auto_fallback: "자동 선택 · 이미지로 대체", admin: "관리자 선택" };
+/** 필드 값 검사에 걸린 이유(마케팅 `prompts.py`의 닫힌 집합) */
+export const FIELD_CODE_KO: Record<string, string> = {
+  value_not_allowed: "고를 수 있는 값이 아닙니다",
+  free_text: "짧은 단어(한글·영문·숫자)만 쓸 수 있습니다",
+  pii: "개인정보나 고객 원문처럼 보이는 말은 쓸 수 없습니다",
+  text_request: "글자를 그려 달라는 말은 쓸 수 없습니다",
+  real_person_or_brand: "실존 인물·브랜드 이름은 쓸 수 없습니다",
+  field_not_allowed: "이 장면 템플릿에 없는 필드입니다",
+  field_value_invalid: "값이 비어 있습니다",
+};
+
+/** 종류·필드 바꾸기가 막혔을 때 화면 문구. 막히지 않았으면 null */
+export function reviseProblemKo(output: HandoffAnswer["output"]): string | null {
+  if (output.outcome !== "revise_rejected" && output.outcome !== "failed") return null;
+  const code = output.reason_code ?? output.sns_handoff.reason_code;
+  if (code === "invalid_field" && output.field) {
+    return `${mediaFieldKo(output.field)}: ${FIELD_CODE_KO[output.field_code ?? ""] ?? "쓸 수 없는 값입니다"}`;
+  }
+  return handoffReasonKo(code) || "바꾸지 못했습니다";
+}
 
 export const DRAFT_STATE_KO: Record<string, string> = {
   caption_only: "캡션 초안만 있음 (미디어 없음)",

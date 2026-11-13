@@ -116,6 +116,9 @@ class StoredBriefView(StoredBrief):
     """받은 기획안 + 넘김 상태. 목록·조회 출력에 쓴다(저장본 `StoredBrief`는 바뀌지 않는다)."""
 
     sns_handoff: SnsHandoffState = Field(default_factory=SnsHandoffState)
+    # 기획안 글에서 계산한 미디어 종류·필드 추천(`media_recommend.py`).
+    # 저장하지 않고 조회 때 계산한다
+    media_recommendation: dict | None = None
 
 
 class ListCampaignBriefsInput(AxModel):
