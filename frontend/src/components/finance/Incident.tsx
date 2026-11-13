@@ -160,7 +160,9 @@ function Cards({ d }: { d: IncidentDetail }) {
       </Card>
 
       <Card title="확인·환불 필요 (시간 초과 결제)" value={krw(d.refund_needed?.total)}>
-        {d.refund_needed
+        {d.refund_needed && d.refund_needed.count === 0
+          ? <p>이번 장애 구간에는 응답이 끊긴 결제가 없어 <b>고객 돈이 실제로 빠져나간 결제는 없습니다.</b> 결제 실패 장애(failure)는 결제사를 부르지 않고 실패하므로 이 금액이 생기지 않습니다.</p>
+          : d.refund_needed
           ? <p>결제사에 요청은 갔는데 응답이 끊겨 승인됐는지 모르는 결제 <b className="tabular-nums">{count(d.refund_needed.count, "건")}</b>입니다. 고객 돈이 빠져나갔을 수 있어 판매 서버가 결제사에 다시 확인하고, 필요하면 고객지원이 환불합니다. 보상 쿠폰과 따로 셉니다.</p>
           : <p className="text-ink-500">장애 구간을 몰라 계산하지 못했습니다.</p>}
       </Card>
