@@ -9,6 +9,7 @@
 | `list_candidate_cards` | read |
 | `get_audit_timeline` | read |
 | `decide_candidate_card` | A |
+| `retire_request_cards` | A |
 
 - 실행: `uv run --package ax-svc-decisions uvicorn svc_decisions.main:app --port 8114` (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)
 - 다른 에이전트가 `hr`로 불러도 위 skill이면 이 서비스로 온다 (`route_target`).

@@ -13,6 +13,7 @@ from ax_contracts.schemas import AgentRequest, AgentResult
 from hr_agent import planning_questions
 from hr_agent.cards import decision as card_decision
 from hr_agent.cards import merge
+from hr_agent.cards import retire as card_retire
 from hr_agent.cards import service as cards
 from hr_agent.case_memory import service as case_memory
 from hr_agent.clients.errors import UpstreamError, bind_meta
@@ -134,6 +135,7 @@ _HANDLERS = {
     "get_audit_timeline": _with_services(views.get_audit_timeline),
     "evaluate_agents": _with_services(dept_eval.evaluate_agents),
     "decide_candidate_card": _with_services(card_decision.decide_candidate_card),
+    "retire_request_cards": _with_services(card_retire.retire_request_cards),
     "check_plan": check_plan,
     "answer_planning_question": _with_services(planning_questions.answer_planning_question),
     "find_similar_fraud_cards": _with_services(fraud_similar.find_similar_fraud_cards),
