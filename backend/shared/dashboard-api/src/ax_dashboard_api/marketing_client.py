@@ -65,11 +65,16 @@ HANDOFF_FAILURES = {
 }
 
 
-async def handoff_call(proposal_id: str, media_kind: str, key: str) -> dict[str, Any]:
-    """받은 기획안을 SNS·미디어로 넘긴다. 미디어 생성·게시는 하지 않는다(마케팅 skill 쪽 규칙)."""
+async def handoff_call(
+    proposal_id: str, media_kind: str, key: str, extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """받은 기획안을 SNS·미디어로 넘긴다. 미디어 생성·게시는 하지 않는다(마케팅 skill 쪽 규칙).
+
+    `extra`는 관리자 선택(`fields`·`autofill`·`revise`)이다. 준 것만 그대로 넘긴다.
+    """
     out = await call(
         "handoff_brief_to_sns",
-        {"proposal_id": proposal_id, "media_kind": media_kind},
+        {"proposal_id": proposal_id, "media_kind": media_kind, **(extra or {})},
         campaign_id=f"cmp_{proposal_id}",
         key=key,
     )

@@ -120,7 +120,7 @@
     },
     {
       "id": "handoff_brief_to_sns",
-      "description": "받은 기획안(proposal_id 또는 campaign_id) 하나를 SNS·미디어 작업으로 넘긴다. 보관된 기획안의 title·idea·why·facts를 받은 그대로(숫자 계산 없음) 기존 draft_sns_post로 SNS 글 초안을 만들어 보관하고, 장면 템플릿 기반 미디어 요청 초안(media_kind image 기본·video, 템플릿 필드는 사람이 정할 때까지 비어 있음)을 함께 기록한다. 단가표(prices.toml)에 실제 공급자·모델 조합이 없으면 넘기지 않고 failed(price_not_found·model_not_configured·price_table_error, fail-closed). 미디어 생성(generate_media, B등급 비용)과 게시(publish_sns, C등급 사람 승인)는 부르지 않는다. 결과 outcome은 handed·already_handed(같은 기획안은 멱등, 보관본 그대로)·failed(reason_code), 없는 기획안은 brief_not_found. 넘김 상태(not_handed·handed·failed)는 기획안 저장소(MARKETING_BRIEFS_DB)에 남아 list_campaign_briefs·get_campaign_brief의 sns_handoff로 읽는다. 마케팅 전용 저장소만 쓰고 외부 호출·게시가 없어 execute()를 부르지 않는다.",
+      "description": "받은 기획안(proposal_id 또는 campaign_id) 하나를 SNS·미디어 작업으로 넘긴다. 보관된 기획안의 title·idea·why·facts를 받은 그대로(숫자 계산 없음) 기존 draft_sns_post로 SNS 글 초안을 만들어 보관하고, 장면 템플릿 기반 미디어 요청 초안(media_kind image 기본·video·carousel·auto)을 함께 기록한다. media_kind=auto면 기획안 글에서 결정적 규칙(LLM 없음)으로 종류를 고르고 근거 한 줄을 남기며, autofill=true(또는 auto·fields 지정)면 템플릿 필드를 기획안 근거·안전한 기본값으로 채우고 근거가 없는 필드는 미정으로 둔다. 관리자가 준 종류·fields가 추천보다 우선하고(화이트리스트 검사, 걸리면 invalid_field), 자동으로 고른 종류를 단가표·모델 문제로 만들 수 없으면 이미지로 넘기고 이유를 남긴다(auto_fallback). 종류만 주는 옛 호출은 필드를 채우지 않는다. 이미 넘긴 기획안은 revise=true일 때만 요청 초안을 다시 만들고(revised), 막히면 보관본을 바꾸지 않는다(revise_rejected). 단가표(prices.toml)에 실제 공급자·모델 조합이 없으면 넘기지 않고 failed(price_not_found·model_not_configured·price_table_error, fail-closed). 미디어 생성(generate_media, B등급 비용)과 게시(publish_sns, C등급 사람 승인)는 부르지 않는다. 결과 outcome은 handed·already_handed(같은 기획안은 멱등, 보관본 그대로)·failed(reason_code), 없는 기획안은 brief_not_found. 넘김 상태(not_handed·handed·failed)는 기획안 저장소(MARKETING_BRIEFS_DB)에 남아 list_campaign_briefs·get_campaign_brief의 sns_handoff로 읽는다. 마케팅 전용 저장소만 쓰고 외부 호출·게시가 없어 execute()를 부르지 않는다.",
       "input_schema": "agents/marketing/src/marketing_agent/brief_handoff.py#HandoffBriefToSnsInput",
       "output_schema": "agents/marketing/src/marketing_agent/brief_handoff.py#HandoffBriefToSnsOutput",
       "grade": "read",
@@ -191,6 +191,32 @@
       "grade": "read",
       "allowed_requesters": [
         "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "draft_outage_sns_post",
+      "description": "장애가 났을 때 사과 공지가 나갔거나(trigger=apology_notice, 게시한 장애·정상화 공지 notice_id 필수) 보상 쿠폰을 드렸으면(trigger=compensation) Instagram 글 초안을 바로 만든다. 초안만 저장하고 게시하지 않는다(게시는 publish_sns C등급 사람 승인, 미디어 생성도 부르지 않음). 원인은 장애 기록의 코드(cause_code·action_code)만 받아 일반인이 읽는 고정 문장으로 쓴다: 원인으로 본 업데이트를 되돌려 복구가 확인된 경우(recent_update)에만 원인을 말하고 그 밖에는 '원인 확인 중'이라고 쓴다. 자유 글·버전·지표·영향 숫자는 받지 않으며, 기술 용어·서버 이름·IP·계정·토큰 모양이 있으면 forbidden_term으로 만들지 않는다. AI 생성 안내·시연용 가상 서비스·약관 문구는 draft_sns_post와 같다. 공지가 없으면 notice_not_found, 장애 공지가 아니면 notice_not_incident.",
+      "input_schema": "agents/marketing/src/marketing_agent/outage_sns.py#DraftOutageSnsPostInput",
+      "output_schema": "agents/marketing/src/marketing_agent/sns.py#SnsPostDraft",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "list_outage_sns_drafts",
+      "description": "장애 사과·보상 SNS 글 초안(draft_outage_sns_post가 만든 것)을 저장 시각이 늦은 순으로 돌려준다(캡션·계기·이벤트 번호·미디어 첨부 여부). 없으면 빈 목록과 이유를 돌려준다. 상태를 바꾸지 않는다.",
+      "input_schema": "agents/marketing/src/marketing_agent/outage_sns.py#ListOutageSnsDraftsInput",
+      "output_schema": "agents/marketing/src/marketing_agent/outage_sns.py#OutageSnsDraftList",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "dashboard-api",
+        "shop-api"
       ],
       "verifier": null,
       "priority": "optional"
