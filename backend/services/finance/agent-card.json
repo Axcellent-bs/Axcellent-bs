@@ -35,6 +35,18 @@
       "priority": "recommended"
     },
     {
+      "id": "record_team_budget",
+      "description": "인사가 확정한 팀 예산 기록. 인사 AI에서 사람이 그 달 팀 예산(그달 1일 팀 인원 × 인당 월 단가)을 확정하면 인사가 확정할 때 보던 숫자(signature)와 확정한 사람을 보낸다. 재무는 지금 숫자와 같은지만 보고 장부에 기록한다(같은 숫자 다시 오면 already_recorded). 숫자가 바뀌었으면 stale, 인원을 못 받으면 team_headcount_unavailable, 예시 명부면 example_headcount로 기록하지 않는다. 돈을 움직이지 않고 재무 기록 말고는 상태를 바꾸지 않는다.",
+      "input_schema": "agents/finance/src/finance_agent/schemas.py#TeamBudgetConfirmInput",
+      "output_schema": "agents/finance/src/finance_agent/schemas.py#TeamBudgetConfirmOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "hr"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "answer_planning_question",
       "description": "기획 질문에 답한다. 기획이 재무가 보낸 요청(create_ticket)의 근거를 되물으면, 재무가 보낸 요청의 기록(보낼 때 코드가 만든 사실 문장·근거 ID)으로만 답한다. 근거 질문이고 기록에 사실이 있으면 answered, 재무가 보낸 요청이지만 기록으로 답할 수 없으면 needs_human(사람이 답하면 planning receive_planning_answer로 보낸다), 보낸 기록이 없으면 unknown. 지어내지 않는다. 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#AnswerPlanningQuestionInput",

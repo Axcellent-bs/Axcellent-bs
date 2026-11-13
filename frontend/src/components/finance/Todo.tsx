@@ -68,11 +68,11 @@ export function TodoCard({ todo, onDone, onOpen }: {
         <Link href={SUPPORT_SETTLEMENT_PATH} className="btn-primary">고객지원 판매자 정산 열기</Link>
       </Decision>
     );
-  } else if (action?.type === "team_budget_approve" && action.month && action.signature) {
-    const { month, signature } = action;
+  } else if (action?.type === "team_budget_approve") {
+    // 예전 서버가 보낸 "팀 예산 확정" 할 일. 확정은 인사 AI가 하므로(11/13) 재무에서는 누르지 않는다
     decision = (
       <div className="mt-3 space-y-2">
-        <p className="text-sm text-ink-500">팀 예산 = 그달 1일 팀 인원 × 인당 월 단가입니다. 인원은 인사 AI가 알려 준 숫자이고, 발령은 다음 달 1일부터 반영됩니다. 숫자가 맞으면 확정하세요. 돈을 옮기지는 않습니다.</p>
+        <p className="text-sm text-ink-500">팀 예산 확정은 인사 AI에서 합니다. 인사가 확정하면 재무가 그 숫자를 기록합니다.</p>
         {(todo.items ?? []).length > 0 && (
           <ul className="space-y-1 text-sm">
             {(todo.items ?? []).map((item) => (
@@ -86,8 +86,6 @@ export function TodoCard({ todo, onDone, onOpen }: {
         )}
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn-ghost" onClick={onOpen}>팀별 숫자 보기</button>
-          <button type="button" className="btn-primary" disabled={!humanTokenSet || busy}
-            onClick={() => run(() => finance.approveTeamBudget(month, signature))}>{busy ? "확정하는 중…" : `${month} 팀 예산 확정`}</button>
         </div>
       </div>
     );

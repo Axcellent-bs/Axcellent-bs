@@ -196,6 +196,8 @@ SERVICES: tuple[Service, ...] = (
         (
             "closing_report",
             "record_support_cost",
+            # 인사가 확정한 팀 예산 기록 (11/13, 확정은 인사)
+            "record_team_budget",
             "answer_planning_question",
             "record_campaign_result",
             "review_campaign_budget",

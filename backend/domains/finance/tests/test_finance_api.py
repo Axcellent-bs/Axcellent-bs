@@ -84,12 +84,8 @@ def test_overview_shape(client: TestClient) -> None:
     kinds = [t["kind"] for t in data["todo"]]
     # 판매자 정산은 고객지원이 한다. 재무 할 일에 지급 승인 요청·승인이 없다
     # (고객지원이 꺼져 있으면 기한 알림도 지어내지 않는다)
-    assert kinds == [
-        "closing_confirm",
-        "recon_exception",
-        "team_budget",  # 이번 달
-        "team_budget",  # 다음 달 (발령은 다음 달 1일부터)
-    ]
+    # 팀 예산 확정은 인사 AI가 한다(11/13). 재무 할 일에는 올리지 않는다
+    assert kinds == ["closing_confirm", "recon_exception"]
     for t in data["todo"]:
         assert {"kind", "title", "count", "amount", "link", "action"} <= set(t)
         assert t["count"] > 0
@@ -101,7 +97,7 @@ def test_overview_shape(client: TestClient) -> None:
         "date": "2026-10-22",
     }
     assert actions["recon_exception"]["type"] == "recon_note"
-    assert actions["team_budget"]["type"] == "team_budget_approve"
+    assert "team_budget" not in actions
     for t in data["todo"]:
         if t["kind"] == "recon_exception":
             assert t["items"] and all(

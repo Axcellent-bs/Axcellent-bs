@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { actorText } from "@/lib/actor";
-import { finance, humanTokenSet, krw, plainText, signedKrw, todayKst, type TeamBudget } from "@/lib/finance";
+import { finance, krw, plainText, signedKrw, todayKst, type TeamBudget } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
 // ④ 팀 예산 (인사 ↔ 재무, 2026-11-02 #2-재무 합의).
 // 팀 예산 = 그달 1일 팀 인원(인사 AI) × 인당 월 단가(회사 설정). 발령은 다음 달 1일부터, 파견은 세지 않는다.
-// 재무 AI는 계산과 지난달 대비 증감만 보여 주고, 확정은 재무 담당(사람)이 누른다.
+// 재무 AI는 계산과 지난달 대비 증감만 보여 주고, 확정은 인사 AI(사람)가 한다(11/13).
+// 인사가 확정하면 재무 A2A `record_team_budget`으로 기록이 들어오고, 여기서는 그 기록만 보여 준다.
 
 const STATUS_KO: Record<TeamBudget["status"], { label: string; tone: string }> = {
-  pending: { label: "확정 전", tone: TONE.warn },
-  approved: { label: "확정됨", tone: TONE.ok },
+  pending: { label: "인사 확정 대기", tone: TONE.warn },
+  approved: { label: "인사 확정 · 재무 기록됨", tone: TONE.ok },
   changed: { label: "확정 뒤 숫자가 바뀜", tone: TONE.bad },
   unavailable: { label: "인원을 받지 못함", tone: TONE.muted },
 };
@@ -28,30 +29,11 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
   const thisMonth = todayKst().slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
   const res = useResource(`team-budget:${month}`, () => finance.teamBudget(month), tick);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState("");
-  const [problem, setProblem] = useState<string | null>(null);
-
-  async function approve(b: TeamBudget) {
-    if (!b.signature) return;
-    setBusy(true);
-    setProblem(null);
-    try {
-      const out = await finance.approveTeamBudget(b.month, b.signature, note.trim());
-      res.set(() => out);
-      setNote("");
-    } catch (e) {
-      setProblem((e as Error).message);
-      await res.reload();
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const months = [shiftMonth(thisMonth, -1), thisMonth, shiftMonth(thisMonth, 1)];
   return (
     <Panel id="team-budget" title="팀 예산" meta={res.env?.meta}
-      hint="팀 예산 = 그달 1일 팀 인원 × 인당 월 단가입니다. 인원은 인사 AI가 알려 준 숫자이고(이름은 받지 않음), 발령은 다음 달 1일부터 반영됩니다. 파견은 원래 팀으로 셉니다. 재무 AI는 계산만 하고 확정은 재무 담당이 합니다."
+      hint="팀 예산 = 그달 1일 팀 인원 × 인당 월 단가입니다. 인원은 인사 AI가 알려 준 숫자이고(이름은 받지 않음), 발령은 다음 달 1일부터 반영됩니다. 파견은 원래 팀으로 셉니다. 재무 AI는 계산만 하고, 확정은 인사 AI에서 사람이 합니다. 인사가 확정하면 재무는 그 결과를 기록합니다."
       tools={
         <div className="flex gap-1 rounded-full bg-ink-50 p-0.5" role="group" aria-label="달 고르기">
           {months.map((m) => (
@@ -113,29 +95,18 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
 
               {b.approved && (
                 <p className="text-sm text-ink-500">
-                  {actorText(b.approved.by_label, b.approved.by)}님이 {new Date(b.approved.at).toLocaleString("ko-KR")}에 합계 {krw(b.approved.total)}(인당 {krw(b.approved.per_head_monthly)})로 확정함
+                  인사 AI에서 {actorText(b.approved.by_label, b.approved.by)}님이 {new Date(b.approved.at).toLocaleString("ko-KR")}에 합계 {krw(b.approved.total)}(인당 {krw(b.approved.per_head_monthly)})로 확정해 재무에 기록됨
                   {b.approved.note && ` · 메모: ${plainText(b.approved.note)}`}
                 </p>
               )}
 
               {!b.example && (b.status === "pending" || b.status === "changed") && (
-                <div className="space-y-2 rounded-2xl border border-ink-100 px-4 py-3">
-                  <p className="text-sm text-ink-500">
-                    {b.status === "changed"
-                      ? "확정한 뒤 팀 인원이나 인당 단가가 바뀌었습니다. 지금 숫자를 보고 다시 확정하세요."
-                      : "숫자가 맞으면 확정하세요. 이 달 팀 예산을 기준으로 남길 뿐, 돈을 옮기지는 않습니다."}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <input className="field min-w-0 flex-1" value={note} maxLength={500} placeholder="메모 (선택) 예: 12월 발령 반영 확인"
-                      onChange={(e) => setNote(e.target.value)} aria-label="확정 메모" />
-                    <button type="button" className="btn-primary" disabled={!humanTokenSet || busy} onClick={() => void approve(b)}>
-                      {busy ? "확정하는 중…" : `${b.month} 팀 예산 확정`}
-                    </button>
-                  </div>
-                  {!humanTokenSet && <p className="text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 확정 버튼이 꺼져 있습니다.</p>}
-                </div>
+                <p className="rounded-2xl border border-ink-100 px-4 py-3 text-sm text-ink-500">
+                  {b.status === "changed"
+                    ? "인사가 확정한 뒤 팀 인원이나 인당 단가가 바뀌었습니다. 인사 AI에서 지금 숫자로 다시 확정하면 재무에 새로 기록됩니다."
+                    : "팀 예산 확정은 인사 AI에서 합니다. 인사가 확정하면 재무가 이 숫자를 기록합니다. 재무는 돈을 옮기지 않습니다."}
+                </p>
               )}
-              {problem && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{problem}</p>}
             </div>
           );
         }}
