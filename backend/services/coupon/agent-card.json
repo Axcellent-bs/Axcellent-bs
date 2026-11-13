@@ -344,6 +344,18 @@
       ],
       "verifier": "safety",
       "priority": "optional"
+    },
+    {
+      "id": "prepare_brief_media",
+      "description": "넘긴 기획안(proposal_id)의 보관된 미디어 요청 초안(종류·장면 템플릿·필드·규격)으로 미디어 초안을 만든다. 입력은 기획안 번호뿐이고 종류·필드는 호출자가 보내지 않는다. 기존 prepare_sns_post_from_media를 그대로 부른다: 생성(generate_media: B등급 안전 관문·건당/월 상한·단가표 fail-closed) → 규격 변환 → AI 라벨 → draft_sns_post → check_sns_post. 게시(publish_sns, C등급 사람 승인)는 부르지 않는다. 넘기지 않은 기획안은 not_handed, 미정 필드가 남았으면 fields_missing, 캐러셀은 장마다 장면을 사람이 정해야 해서 carousel_items_undecided, 배경음 모드의 영상은 bgm_fields_required로 비용 전에 거절한다. context_id와 생성 묶음 id를 기획안에서만 정해 같은 요청 초안은 누가 다시 불러도 장부에서 재생되고(비용이 다시 나지 않음), 이미 준비된 초안이 있으면 already_prepared, 만드는 중이면 in_progress다. 결과(초안 id·점검 결과·AI 라벨 문구·비용)는 넘김 기록의 prepared에 남아 list_campaign_briefs·get_campaign_brief의 sns_handoff.prepared로 읽고, 요청 초안이 바뀌면 보이지 않는다. sns_handoff.media_estimate는 조회 때 단가표·장부로 계산한 예상 비용·상한이다(저장하지 않는다).",
+      "input_schema": "agents/marketing/src/marketing_agent/brief_media.py#PrepareBriefMediaInput",
+      "output_schema": "agents/marketing/src/marketing_agent/sns.py#SnsPostCheck",
+      "grade": "B",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": "safety",
+      "priority": "optional"
     }
   ]
 }

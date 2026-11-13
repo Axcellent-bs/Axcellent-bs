@@ -32,7 +32,7 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
-from marketing_agent import shop_client
+from marketing_agent import brief_media, shop_client
 from marketing_agent.brief_handoff import (
     AUTO,
     DRAFT_MEDIA_KIND,
@@ -557,7 +557,7 @@ async def list_campaign_briefs(request: AgentRequest) -> AgentResult:
         return data
     try:
         stored, total = STATE.briefs.list(data.limit)
-        items = [_with_handoff(i) for i in stored]
+        items = [_with_handoff(i, request) for i in stored]
     except BriefStorageError:
         return _brief_storage_failed(request)
     listing = CampaignBriefList(
@@ -586,7 +586,7 @@ async def get_campaign_brief(request: AgentRequest) -> AgentResult:
         )
     try:
         found = STATE.briefs.get(data.proposal_id, data.campaign_id)
-        item = _with_handoff(found) if found is not None else None
+        item = _with_handoff(found, request) if found is not None else None
     except BriefStorageError:
         return _brief_storage_failed(request)
     view = CampaignBriefView(
@@ -615,9 +615,26 @@ def _draft_state(draft_id: str | None) -> DraftState | None:
     return "media_attached" if (draft.asset_ref or draft.assets) else "caption_only"
 
 
-def _with_handoff(item: StoredBrief) -> StoredBriefView:
+def _media_estimate(request: AgentRequest, record: SnsHandoffRecord | None) -> dict | None:
+    """넘긴 요청 초안의 예상 비용·상한(단가표·장부에서 계산). 참고 정보라 못 구하면 None."""
+    if record is None or record.status != "handed" or not record.media_request:
+        return None
+    try:
+        return brief_media.estimate(
+            request, record.proposal_id, record.media_request, ledger=STATE.media_ledger
+        )
+    except Exception:  # noqa: BLE001 - 조회는 돌려준다. 화면은 비용을 모른다고 보여 준다
+        return None
+
+
+def _with_handoff(item: StoredBrief, request: AgentRequest) -> StoredBriefView:
     record = STATE.briefs.handoff(item.proposal_id)
-    return view_of(item, record, _draft_state(record.draft_id if record else None))
+    return view_of(
+        item,
+        record,
+        _draft_state(record.draft_id if record else None),
+        _media_estimate(request, record),
+    )
 
 
 def _handoff_done(
@@ -630,7 +647,9 @@ def _handoff_done(
     out = HandoffBriefToSnsOutput(
         outcome=outcome,
         campaign_id=campaign_id,
-        sns_handoff=state_of(record, _draft_state(record.draft_id)),
+        sns_handoff=state_of(
+            record, _draft_state(record.draft_id), _media_estimate(request, record)
+        ),
         **detail,
     )
     return _result(
@@ -952,6 +971,26 @@ async def prepare_sns_post_from_media_skill(request: AgentRequest) -> AgentResul
     )
 
 
+async def prepare_brief_media_skill(request: AgentRequest) -> AgentResult:
+    """넘긴 기획안의 요청 초안으로 미디어 초안을 만든다. 게시는 하지 않는다(C등급 사람 승인)."""
+    result = await brief_media.prepare_brief_media(
+        request,
+        briefs=STATE.briefs,
+        notices=STATE.notices,
+        store=STATE.sns,
+        ledger=STATE.media_ledger,
+        from_decision=_from_decision,
+    )
+    state = (result.output or {}).get("sns_handoff")
+    if isinstance(state, dict) and state.get("status") == "handed":
+        try:
+            record = STATE.briefs.handoff(str(request.input.get("proposal_id")))
+        except BriefStorageError:
+            record = None
+        state["media_estimate"] = _media_estimate(request, record)
+    return result
+
+
 async def publish_sns_skill(request: AgentRequest) -> AgentResult:
     return await publish_sns(request, STATE.sns)
 
@@ -1062,6 +1101,7 @@ HANDLERS = {
     "cancel_campaign": cancel_campaign,
     "generate_media": generate_media_skill,
     "prepare_sns_post_from_media": prepare_sns_post_from_media_skill,
+    "prepare_brief_media": prepare_brief_media_skill,
     "marketing_chat_send": marketing_chat_send,
     "marketing_chat_list": marketing_chat_list,
     "marketing_chat_get": marketing_chat_get,

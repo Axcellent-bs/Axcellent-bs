@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ax_contracts.schemas.hr import (
@@ -969,6 +970,29 @@ async def handoff_brief_to_sns(
         raw = json.dumps(extra, sort_keys=True, ensure_ascii=False)
         key += ":" + hashlib.sha256(raw.encode()).hexdigest()[:16]
     return ok(await marketing_client.handoff_call(proposal_id, body.media_kind, key, extra))
+
+
+_PROPOSAL_ID = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+
+
+@router.post("/marketing/briefs/{proposal_id}/media")
+async def prepare_brief_media(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> dict:
+    """넘긴 기획안의 저장된 미디어 요청(종류·필드)으로 미디어 초안을 만든다. 본문이 없다.
+
+    마케팅 `prepare_brief_media` → 기존 `prepare_sns_post_from_media`(B등급 안전 관문·비용 상한·
+    AI 라벨·점검). 게시(`publish_sns`, C등급 사람 승인)는 하지 않는다. 영상은 길게 걸릴 수 있다.
+    보류·상한 초과·미정 필드 같은 판단 결과는 오류가 아니라 `status`·`outcome`으로 돌려준다.
+    """
+    _no_org_in_mock()
+    return ok(await marketing_client.brief_media_call(proposal_id))
+
+
+@router.get("/marketing/briefs/{proposal_id}/media/preview")
+async def preview_brief_media(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> FileResponse:
+    """준비된 미디어 초안의 미리보기. AI 표시를 입힌 결과 파일(`labeled.jpg|mp4`)만 내준다."""
+    _no_org_in_mock()
+    path, media_type = await marketing_client.brief_media_preview(proposal_id)
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
 
 
 class VideoPostPrepareBody(BaseModel):

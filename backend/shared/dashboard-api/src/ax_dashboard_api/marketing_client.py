@@ -12,6 +12,7 @@ import os
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from ax_agent_template import config
@@ -128,6 +129,72 @@ async def video_publish_call(publish_input: dict[str, Any]) -> dict[str, Any]:
     if out["status"] == TaskStatus.FAILED.value and out["outcome"] == "invalid_input":
         raise ApiError(400, "INVALID_INPUT", "게시 입력이 맞지 않는다 (invalid_input)")
     return out
+
+
+# 기획안 미디어 만들기에서 화면이 설명할 수 없는(요청 자체가 틀린) 실패만 HTTP 오류로 바꾼다.
+# 그 밖의 실패·보류(상한 초과·안전 장치 보류·미정 필드 등)는 판단 결과라 그대로 돌려준다
+BRIEF_MEDIA_FAILURES = {
+    "brief_not_found": (404, "NOT_FOUND"),
+    "invalid_input": (400, "INVALID_INPUT"),
+}
+MEDIA_DIR_ENV = "MARKETING_MEDIA_DIR"  # 마케팅과 같은 폴더를 가리켜야 미리보기를 읽을 수 있다
+PREVIEW_FILES = {"labeled.jpg": "image/jpeg", "labeled.mp4": "video/mp4"}  # AI 라벨을 입힌 결과만
+
+
+def brief_media_context(proposal_id: str) -> str:
+    return f"brfm_{proposal_id}"
+
+
+async def brief_media_call(proposal_id: str) -> dict[str, Any]:
+    """넘긴 기획안의 요청 초안으로 미디어 초안을 만든다(`prepare_brief_media`). 게시하지 않는다.
+
+    종류·필드는 보내지 않는다(마케팅이 보관본에서 읽는다). 같은 기획안은 키가 같고, 마케팅이
+    생성 장부로 중복 생성을 막는다. 영상 생성이 길어 마감은 영상 준비와 같다.
+    """
+    out = await call(
+        "prepare_brief_media",
+        {"proposal_id": proposal_id},
+        campaign_id=brief_media_context(proposal_id),
+        key=f"ui:brief-media:{proposal_id}",
+        deadline_s=video_timeout_s(),
+    )
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] in BRIEF_MEDIA_FAILURES:
+        status, code = BRIEF_MEDIA_FAILURES[out["outcome"]]
+        raise ApiError(status, code, f"미디어를 만들 수 없다 ({out['outcome']})")
+    return out
+
+
+async def brief_media_preview(proposal_id: str) -> tuple[Path, str]:
+    """준비된 미디어 초안의 AI 라벨 입힌 파일(경로, Content-Type). 없으면 404.
+
+    마케팅 조회(`get_campaign_brief`)의 `sns_handoff.prepared`가 가리키는 파일만 내준다:
+    미디어 폴더 안쪽·이름이 `labeled.jpg|mp4`·기록된 sha256과 같은 파일(점검을 거친 그 파일).
+    """
+    missing = ApiError(404, "NOT_FOUND", "준비된 미디어 초안이 없다")
+    out = await call(
+        "get_campaign_brief",
+        {"proposal_id": proposal_id},
+        campaign_id=brief_media_context(proposal_id),
+        key=f"ui:brief-media-preview:{proposal_id}",
+    )
+    item = ((out.get("output") or {}).get("item")) or {}
+    prepared = (item.get("sns_handoff") or {}).get("prepared") or {}
+    ref, sha = prepared.get("asset_ref"), prepared.get("asset_sha256")
+    raw_root = (os.getenv(MEDIA_DIR_ENV) or "").strip()
+    if not (isinstance(ref, str) and isinstance(sha, str) and ref and raw_root):
+        raise missing
+    root = Path(raw_root).resolve()
+    path = (root / ref).resolve()
+    media_type = PREVIEW_FILES.get(path.name)
+    if media_type is None or not path.is_relative_to(root) or not path.is_file():
+        raise missing
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != sha:  # 점검한 뒤 바뀐 파일은 보여 주지 않는다
+        raise missing
+    return path, media_type
 
 
 CHAT_DEADLINE_SECONDS = 30

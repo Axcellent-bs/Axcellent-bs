@@ -180,6 +180,7 @@ SERVICES: tuple[Service, ...] = (
             "publish_sns",
             "generate_media",
             "prepare_sns_post_from_media",
+            "prepare_brief_media",
             "cancel_campaign",
         ),
         "공지·쿠폰",
