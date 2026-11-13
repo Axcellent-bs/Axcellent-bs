@@ -145,7 +145,8 @@ class CancelIn(BaseModel):
 
 
 class FaultIn(BaseModel):
-    kind: Literal["latency", "failure"]
+    # lost_response: 결제사는 승인했는데 응답이 끊김(결과 모름 → 다시 확인하면 승인으로 나온다)
+    kind: Literal["latency", "failure", "lost_response"]
     delay_ms: int = Field(default=2000, ge=0, le=60000)  # kind=latency일 때 더할 지연
 
 
@@ -411,11 +412,23 @@ def create_app(
     storefront = Storefront(database)
     interval = float(os.getenv("SHOP_MONITOR_INTERVAL_S") or 5)  # 0이면 주기 판정을 끈다
 
+    recheck_every = float(os.getenv("SHOP_PAYMENT_RECHECK_S") or 30)  # 결과 모름 다시 확인 간격
+    last_recheck = [0.0]
+
     async def _monitor_loop() -> None:
         """결제 요청이 없어도 지속 시간을 판정하도록 주기적으로 평가한다."""
         while True:
             await asyncio.sleep(interval)
             shop.evaluate_monitor()
+            now = asyncio.get_running_loop().time()
+            if recheck_every > 0 and now - last_recheck[0] >= recheck_every:
+                last_recheck[0] = now
+                try:
+                    await toss.recheck_unknown(
+                        shop, toss_payments.client if toss_payments else None
+                    )
+                except Exception:  # 다시 확인이 실패해도 판정 루프는 계속 돈다
+                    logging.getLogger(__name__).exception("결과 모름 결제 다시 확인 실패")
             await outbox.drain(database)  # 쌓인 미발행은 여기서 묶음씩 비운다
 
     @contextlib.asynccontextmanager
@@ -625,6 +638,20 @@ def create_app(
     @app.post("/api/shop/admin/faults", status_code=201)
     async def inject_fault(body: FaultIn, _: str = Depends(_caller(INJECT_ALLOWED))) -> dict:
         return _ok(shop.inject_fault(body.kind, body.delay_ms))
+
+    @app.get("/api/shop/admin/payments/unknown")
+    async def unknown_payments(_: str = Depends(_caller(RELEASE_ALLOWED))) -> dict:
+        """결과 모름(승인됐는지 모름) 결제. 다시 확인을 기다리는 돈이다."""
+        rows = shop.unknown_payments()
+        keep = ("payment_id", "order_id", "amount", "provider", "failure_detail", "created_at")
+        return _ok([{k: r.get(k) for k in keep} for r in rows])
+
+    @app.post("/api/shop/admin/payments/recheck")
+    async def recheck_payments(_: str = Depends(_caller(RELEASE_ALLOWED))) -> dict:
+        """결과 모름 결제를 결제사에 지금 다시 확인한다(기록만 바로잡고 돈은 옮기지 않는다)."""
+        done = await toss.recheck_unknown(shop, toss_payments.client if toss_payments else None)
+        await outbox.flush(database)
+        return _ok({"resolved": done, "left": len(shop.unknown_payments())})
 
     @app.delete("/api/shop/admin/faults")
     async def release_fault(caller: str = Depends(_caller(RELEASE_ALLOWED))) -> dict:

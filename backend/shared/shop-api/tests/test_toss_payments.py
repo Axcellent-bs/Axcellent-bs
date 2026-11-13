@@ -197,12 +197,83 @@ def test_toss_5xx_is_unavailable() -> None:
     assert [error for *_, error in client.app.state.shop.monitor._samples] == [True]
 
 
-def test_toss_timeout_is_unavailable() -> None:
+def test_toss_timeout_is_unknown_not_failed() -> None:
+    """승인 요청이 시간 초과면 토스는 승인했을 수 있다: 실패가 아니라 결과 모름으로 남긴다."""
     client = _client(FakeToss(error=httpx.ReadTimeout("slow")))
     order = _order(client)
     data = _confirm(client, _prepare(client, order["order_id"])).json()["data"]
-    assert data["payments"][0]["failure_code"] == "PG_UNAVAILABLE"
+    assert data["status"] == "pending_payment"  # 실패로 바꾸지 않는다
+    assert data["payments"][0]["status"] == "unknown"
+    assert data["payments"][0]["failure_code"] == "PG_UNKNOWN"
     assert _payment_row(client, order["order_id"])["failure_detail"] == "TIMEOUT"
+    # 결과를 모르는 동안 다시 결제하면 두 번 청구될 수 있어 막는다
+    again = client.post(f"/api/shop/orders/{order['order_id']}/payments/toss/prepare")
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "PAYMENT_RESULT_UNKNOWN"
+
+
+class LookupToss(FakeToss):
+    """승인은 시간 초과, 결제 조회(GET)는 정한 상태를 돌려준다."""
+
+    def __init__(self, lookup_status: int, lookup_body: dict | None = None):
+        super().__init__()
+        self.lookup_status, self.lookup_body = lookup_status, lookup_body or {}
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(self.lookup_status, json=self.lookup_body)
+        raise httpx.ReadTimeout("slow")
+
+
+@pytest.mark.parametrize(
+    ("lookup_status", "lookup_body", "order_status", "payment_status"),
+    [
+        (200, {"status": "DONE"}, "paid", "succeeded"),  # 실제로 청구됐다
+        (404, {"code": "NOT_FOUND_PAYMENT"}, "payment_failed", "failed"),  # 승인 안 됨
+        (200, {"status": "ABORTED"}, "payment_failed", "failed"),
+        (200, {"status": "IN_PROGRESS"}, "pending_payment", "unknown"),  # 아직 모름: 그대로
+        (500, {}, "pending_payment", "unknown"),  # 조회 실패: 그대로
+    ],
+)
+def test_recheck_resolves_unknown_with_toss_lookup(
+    lookup_status: int, lookup_body: dict, order_status: str, payment_status: str
+) -> None:
+    fake = LookupToss(lookup_status, lookup_body)
+    client = _client(fake)
+    order = _order(client)
+    _confirm(client, _prepare(client, order["order_id"]))
+    res = client.post("/api/shop/admin/payments/recheck", headers=ADMIN)
+    assert res.status_code == 200
+    after = client.get(f"/api/shop/orders/{order['order_id']}").json()["data"]
+    assert after["status"] == order_status
+    assert after["payments"][0]["status"] == payment_status
+    lookups = [r for r in fake.requests if r.method == "GET"]
+    assert lookups and lookups[0].url.path.endswith(f"/orders/{order['order_id']}-a1")
+
+
+def test_recheck_needs_admin_or_infra() -> None:
+    client = _client(FakeToss())
+    assert client.post("/api/shop/admin/payments/recheck").status_code == 401
+    other = {"Authorization": "Bearer mock:marketing"}
+    assert client.post("/api/shop/admin/payments/recheck", headers=other).status_code == 403
+    infra = {"Authorization": "Bearer mock:infra"}
+    assert client.post("/api/shop/admin/payments/recheck", headers=infra).status_code == 200
+
+
+def test_lost_response_fault_with_toss_is_unknown_then_paid() -> None:
+    """lost_response: 토스는 승인했는데 응답이 끊긴 것처럼 남는다 → 확인하면 결제됨."""
+    fake = FakeToss()
+    client = _client(fake)
+    client.post("/api/shop/admin/faults", json={"kind": "lost_response"}, headers=ADMIN)
+    order = _order(client)
+    data = _confirm(client, _prepare(client, order["order_id"])).json()["data"]
+    assert data["payments"][0]["status"] == "unknown"
+    assert _payment_row(client, order["order_id"])["failure_detail"] == "LOST_RESPONSE"
+    fake.body = {"status": "DONE"}
+    client.post("/api/shop/admin/payments/recheck", headers=ADMIN)
+    after = client.get(f"/api/shop/orders/{order['order_id']}").json()["data"]
+    assert after["status"] == "paid"
 
 
 def test_toss_connection_error_is_unavailable() -> None:

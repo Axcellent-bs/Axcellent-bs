@@ -160,7 +160,7 @@ export interface ClosingReport {
 }
 
 // ---------------------------------------------------------------- ② 매출·PG 대사
-export type ReconStatus = "matched" | "mismatch" | "missing_in_pg" | "pending" | "fee_anomaly";
+export type ReconStatus = "matched" | "mismatch" | "missing_in_pg" | "pending" | "fee_anomaly" | "missing_in_ours";
 export interface ReconItem {
   order_id: string;
   payment_id: string;
@@ -470,6 +470,8 @@ export interface IncidentDetail {
   compensation: IncidentCompensation;
   /** 이벤트 구간 안에 영향 고객에게 나간 환불. 구간·영향 고객을 모르면 null (0원과 다르다) */
   refunds: IncidentRefunds | null;
+  /** 결과 모름으로 남은 결제(확인·환불 필요). 구간을 모르면 null */
+  refund_needed?: IncidentRefunds | null;
   /** 보상 + 환불. 둘 중 하나라도 모르면 null */
   money_out_total: number | null;
   ledger_source: LedgerSource;
@@ -786,7 +788,7 @@ export const barWidth = (ratio: number | null | undefined) => (ratio == null || 
 export const CATEGORY_KO: Record<string, string> = { book: "도서", books: "도서", stationery: "문구", ebook: "전자책", ebooks: "전자책", goods: "굿즈" };
 
 /** 화면에 기본으로 보여 줄 대사 상태: 사람이 볼 불일치만. 정산 전·일치는 누르면 보인다 */
-export const RECON_ORDER: ReconStatus[] = ["mismatch", "missing_in_pg", "fee_anomaly", "pending", "matched"];
+export const RECON_ORDER: ReconStatus[] = ["missing_in_ours", "mismatch", "missing_in_pg", "fee_anomaly", "pending", "matched"];
 export const DEFAULT_RECON_FILTER: ReconStatus[] = RECON_ORDER.filter((s) => s !== "matched" && s !== "pending");
 
 /** 묶음에 넣을 판매자: 백엔드 ready()와 같다. 보류 사유가 없고 줄 돈이 있으며, 아직 요청 전이거나 지난 요청이 거절·만료·분실된 판매자 */

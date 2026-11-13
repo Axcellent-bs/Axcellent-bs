@@ -8,6 +8,10 @@
   가짜 결제로 동작하고 시작할 때 경고 한 줄을 남긴다. 키 값은 어디에도 출력·로그하지 않는다.
 - 장애 주입(SHOP-06): `failure`면 토스를 부르지 않고 `PG_UNAVAILABLE`(5xx)로 실패시킨다.
   `latency`는 가짜 결제처럼 값으로만 더한다(실제로 기다리지 않는다).
+  `lost_response`는 토스 승인을 실제로 부른 뒤 응답이 끊긴 것처럼 결과 모름으로 남긴다.
+- 결과 모름: 승인 요청이 시간 초과·연결 오류로 끝나면 토스에서는 승인됐을 수 있다(돈이 빠져나감).
+  실패로 적지 않고 `unknown`(`PG_UNKNOWN`)으로 남긴 뒤 `recheck_unknown`이 토스 결제 조회
+  (`GET /v1/payments/orders/{orderId}`)로 승인 여부를 확인해 정한다.
 """
 
 from __future__ import annotations
@@ -22,12 +26,22 @@ from typing import Any
 
 import httpx
 
-from ax_shop_api.service import BASELINE_LATENCY_MS, PaymentOutcome, Shop, ShopError
+from ax_shop_api.service import (
+    BASELINE_LATENCY_MS,
+    UNKNOWN_CODE,
+    PaymentOutcome,
+    Shop,
+    ShopError,
+)
 
 PROVIDER_ENV = "PAYMENT_PROVIDER"
 KEY_ENV = "TOSS_SECRET_KEY"
 FAKE, TOSS_TEST = "fake", "toss_test"
 CONFIRM_URL = "https://api.tosspayments.com/v1/payments/confirm"
+LOOKUP_URL = "https://api.tosspayments.com/v1/payments/orders/{order_id}"
+# 토스 결제 상태: 승인 끝(DONE)과 승인 안 됨으로 확정된 상태. 그 밖(진행 중)은 아직 모름
+APPROVED_STATES = {"DONE", "PARTIAL_CANCELED", "CANCELED"}
+NOT_APPROVED_STATES = {"ABORTED", "EXPIRED"}
 TIMEOUT_S = 10.0
 
 # 토스 응답 `method`(한글) → 우리 `method_code`. 그 밖(가상계좌·상품권 등)은 other
@@ -96,9 +110,11 @@ class TossClient:
             async with client:
                 response = await client.post(CONFIRM_URL, json=body, headers=headers)
         except httpx.TimeoutException:
-            return self._unavailable(started, "TIMEOUT")
-        except httpx.HTTPError:
+            return self._unknown(started, "TIMEOUT")
+        except httpx.ConnectError:  # 요청이 토스에 닿지 않았다: 승인됐을 수 없다
             return self._unavailable(started, "CONNECT_ERROR")
+        except httpx.HTTPError:  # 보낸 뒤 끊김(읽기 오류 등): 승인됐을 수 있다
+            return self._unknown(started, "NETWORK_ERROR")
         elapsed = (self._timer() - started) * 1000
         if response.status_code == 200:
             data = response.json()
@@ -112,6 +128,37 @@ class TossClient:
     def _unavailable(self, started: float, detail: str) -> PaymentOutcome:
         elapsed = (self._timer() - started) * 1000
         return PaymentOutcome(False, "PG_UNAVAILABLE", elapsed, True, failure_detail=detail)
+
+    def _unknown(self, started: float, detail: str) -> PaymentOutcome:
+        elapsed = (self._timer() - started) * 1000
+        return PaymentOutcome(
+            False, UNKNOWN_CODE, elapsed, True, failure_detail=detail, unknown=True
+        )
+
+    async def lookup(self, toss_order_id: str) -> bool | None:
+        """토스 결제 조회. 승인됨 True, 승인 안 됨 False, 아직 모름(진행 중·조회 실패) None."""
+        try:
+            client = httpx.AsyncClient(transport=self._transport, timeout=self._timeout)
+            async with client:
+                response = await client.get(
+                    LOOKUP_URL.format(order_id=toss_order_id),
+                    headers={"Authorization": self._auth},
+                )
+        except httpx.HTTPError:
+            return None
+        if response.status_code == 404:  # 토스에 결제가 없다: 승인되지 않았다
+            return False
+        if response.status_code != 200:
+            return None
+        try:
+            state = str(response.json().get("status") or "")
+        except ValueError:
+            return None
+        if state in APPROVED_STATES:
+            return True
+        if state in NOT_APPROVED_STATES:
+            return False
+        return None
 
 
 class TossPayments:
@@ -141,9 +188,32 @@ class TossPayments:
             else:
                 outcome = await self.client.confirm(payment_key, toss_order_id, start.amount)
                 outcome.latency_ms += gateway.delay_ms
+                if gateway.lost_response and outcome.ok:  # 장애 주입: 승인됐는데 응답이 끊김
+                    outcome = PaymentOutcome(
+                        False, UNKNOWN_CODE, outcome.latency_ms, True,
+                        failure_detail="LOST_RESPONSE", unknown=True,
+                    )  # fmt: skip
             order = self.shop.toss_finish(start, outcome, payment_key)
         self._locks.pop(toss_order_id, None)
         return order, False
+
+
+async def recheck_unknown(shop: Shop, client: TossClient | None) -> list[dict[str, Any]]:
+    """결과 모름 결제를 결제사에 다시 확인해 정한다. 아직 모르면 그대로 둔다(다음에 다시 본다).
+
+    가짜 결제사는 가짜 결제사 기록으로, 토스는 결제 조회로 확인한다.
+    기록만 바로잡고 돈은 옮기지 않는다.
+    """
+    done = shop.recheck_fake_unknown()
+    if client is None:
+        return done
+    for row in shop.unknown_payments():
+        if row["provider"] != TOSS_TEST or not row.get("toss_order_id"):
+            continue
+        approved = await client.lookup(row["toss_order_id"])
+        if approved is not None:
+            done.append(shop.resolve_payment(row["payment_id"], approved))
+    return done
 
 
 def require(payments: TossPayments | None) -> TossPayments:

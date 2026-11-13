@@ -98,7 +98,7 @@ function IncidentTabs({ recent, older, selected, onSelect }: { recent: IncidentS
 function SummaryStrip({ s }: { s: IncidentSummary }) {
   return (
     <div className="flex flex-wrap items-end gap-x-6 gap-y-2 rounded-2xl bg-surface-2 px-4 py-3">
-      <p className="text-sm tabular-nums text-ink-700">피해 {krw(s.damage_amount)} · 보상으로 나간 돈 {krw(s.compensation_total)}</p>
+      <p className="text-sm tabular-nums text-ink-700">결제 실패(미결제) {krw(s.damage_amount)} · 보상으로 나간 돈 {krw(s.compensation_total)}</p>
     </div>
   );
 }
@@ -129,10 +129,11 @@ function Cards({ d }: { d: IncidentDetail }) {
   const { impact, compensation: c, refunds } = d;
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      <Card title="피해 (데이터 AI 분석 그대로)" value={krw(impact?.damage_amount)}>
+      <Card title="결제 실패(미결제) 금액 (데이터 AI 분석 그대로)" value={krw(impact?.damage_amount)}>
         {impact ? (
           <>
             <p>실패한 주문 <b className="tabular-nums">{count(impact.failed_orders, "건")}</b> · 피해 고객 <b className="tabular-nums">{count(impact.affected_customers, "명")}</b></p>
+            <p className="text-sm text-ink-500">결제가 실패해 고객 돈이 빠져나가지 않은 금액입니다(받지 못한 매출).</p>
             {impact.by_category.length > 0 && (
               <ul className="space-y-0.5 border-t border-ink-100 pt-1.5">
                 {impact.by_category.map((k) => (
@@ -156,6 +157,12 @@ function Cards({ d }: { d: IncidentDetail }) {
           ? <p>이 이벤트 구간에 영향 고객에게 나간 환불 <b className="tabular-nums">{count(refunds.count, "건")}</b>입니다.</p>
           : <p className="text-ink-500">장애 구간이나 영향 고객을 몰라 이 이벤트에 묶지 못했습니다.</p>}
         <p>보상과 환불을 더한 돈 <b className="tabular-nums">{krw(d.money_out_total)}</b></p>
+      </Card>
+
+      <Card title="확인·환불 필요 (결과 모름 결제)" value={krw(d.refund_needed?.total)}>
+        {d.refund_needed
+          ? <p>결제사에 요청은 갔는데 응답이 끊겨 승인됐는지 모르는 결제 <b className="tabular-nums">{count(d.refund_needed.count, "건")}</b>입니다. 고객 돈이 빠져나갔을 수 있어 판매 서버가 결제사에 다시 확인하고, 필요하면 고객지원이 환불합니다. 보상 쿠폰과 따로 셉니다.</p>
+          : <p className="text-ink-500">장애 구간을 몰라 계산하지 못했습니다.</p>}
       </Card>
     </div>
   );

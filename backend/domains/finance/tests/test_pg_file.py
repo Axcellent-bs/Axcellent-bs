@@ -116,6 +116,39 @@ def test_uploaded_period_is_reconciled_against_the_file() -> None:
     assert cov["uploaded"] == len(on_day) and cov["generated"] == len(others)
 
 
+def test_pg_payment_missing_on_our_side_needs_refund_check() -> None:
+    """PG 파일에는 있는데 우리 쪽 결제 성공 기록이 없으면 `missing_in_ours`(환불·확인 필요)."""
+    day, rows = _settled_day_payments()
+    live = _live_like()
+    target = next(o for o in live.orders if o["payments"])
+    target["payments"][0] = dict(target["payments"][0], status="unknown")
+    unknown_id = target["payments"][0]["payment_id"]
+    extra = [
+        {"payment_id": unknown_id, "order_id": target["order_id"], "amount": 15000, "fee": 465,
+         "sold_date": day, "paid_out_date": day},
+        {"payment_id": "tgen_lost_1", "order_id": "", "amount": 9000, "fee": 279,
+         "sold_date": day, "paid_out_date": day},
+    ]  # fmt: skip
+    records = handlers.state().records
+    pg_file.import_file(_csv(rows + extra), "pg.csv", records.pg_rows, records.pg_periods)
+    records.pg_version += 1
+    result = rc.reconcile(live, None, {})
+    by = {i["payment_id"]: i for i in result["items"]}
+    if day >= result["from"][:10]:  # 대사 기간(최근 7일) 안의 판매일일 때만 나온다
+        lost = by["tgen_lost_1"]
+        assert lost["status"] == "missing_in_ours" and lost["our_payment_status"] is None
+        assert rc.exception_amount(lost) == 9000
+        assert result["counts"]["missing_in_ours"] >= 1
+    # 시드(모의 장부)에는 올린 PG 파일을 섞지 않으므로 이 상태가 생기지 않는다
+    assert rc.reconcile(bk.seed_books(), None, {})["counts"]["missing_in_ours"] == 0
+    assert "missing_in_ours" in rc.EXCEPTION_STATUSES
+
+
+def test_missing_in_ours_status_can_be_filtered() -> None:
+    assert rc.parse_statuses("missing_in_ours") == ("missing_in_ours",)
+    assert "missing_in_ours" in rc.parse_statuses(None)
+
+
 def test_upload_api_clear_and_meta() -> None:
     async def live() -> bk.Books:
         return _live_like()

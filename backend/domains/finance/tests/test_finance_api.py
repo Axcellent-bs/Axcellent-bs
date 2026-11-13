@@ -134,7 +134,9 @@ def test_reconciliation_shape(client: TestClient) -> None:
     body = _get(client, "/api/finance/reconciliation")
     data = body["data"]
     assert set(data) == {"from", "to", "pg_coverage", "counts", "totals", "items", "shown"}
-    assert set(data["counts"]) == {"matched", "mismatch", "missing_in_pg", "pending", "fee_anomaly"}
+    assert set(data["counts"]) == {
+        "matched", "mismatch", "missing_in_pg", "pending", "fee_anomaly", "missing_in_ours",
+    }  # fmt: skip
     assert set(data["totals"]) == {"order_amount", "pg_amount", "pg_fee", "pay_out"}
     assert body["meta"]["pg_source"] == "mock_toss_settlement"
     one = _get(client, "/api/finance/reconciliation", date="2026-10-20")["data"]
@@ -146,8 +148,10 @@ def test_reconciliation_sends_only_what_the_screen_shows(client: TestClient) -> 
     """기본은 사람이 볼 불일치만. 일치·정산 전은 화면이 켤 때만 받는다. 건수는 늘 전체다."""
     data = _get(client, "/api/finance/reconciliation")["data"]
     statuses = {i["status"] for i in data["items"]}
-    assert statuses and statuses <= {"mismatch", "missing_in_pg", "fee_anomaly"}
-    assert data["shown"]["statuses"] == ["mismatch", "missing_in_pg", "fee_anomaly"]
+    assert statuses and statuses <= {"mismatch", "missing_in_pg", "fee_anomaly", "missing_in_ours"}
+    assert data["shown"]["statuses"] == [
+        "mismatch", "missing_in_pg", "fee_anomaly", "missing_in_ours",
+    ]  # fmt: skip
     assert data["shown"]["total"] == len(data["items"])
     every = _get(client, "/api/finance/reconciliation", status="all")["data"]
     assert len(every["items"]) == sum(every["counts"].values())
