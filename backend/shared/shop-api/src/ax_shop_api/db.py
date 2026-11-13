@@ -140,6 +140,11 @@ CREATE INDEX IF NOT EXISTS idx_orders_buyer_id ON orders(buyer_id);
 -- 결제 지표 시계열(기간)과 실패 주문(상태 + 기간, 시각 순 LIMIT)
 CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at);
 CREATE INDEX IF NOT EXISTS idx_payments_status_created_at ON payments(status, created_at);
+-- 가짜 결제사가 실제로 승인했는지(장애 주입 lost_response: 승인했는데 응답이 끊김). 시간 초과
+-- 결제를 다시 확인할 때 토스 결제 조회 대신 이 표를 본다
+CREATE TABLE IF NOT EXISTS pg_fake_records (
+  payment_id TEXT PRIMARY KEY, approved INTEGER NOT NULL, created_at TEXT NOT NULL
+);
 """
 
 # 이미 만들어진 DB 파일에 뒤늦게 붙은 열(`CREATE TABLE IF NOT EXISTS`는 열을 더하지 않는다)
@@ -196,6 +201,8 @@ _ADDED_COLUMNS = {
         ("provider", "TEXT NOT NULL DEFAULT 'fake'"),
         ("pg_payment_key", "TEXT"),
         ("failure_detail", "TEXT"),
+        # 시간 초과(unknown)이었던 결제를 다시 확인해 succeeded·failed로 정한 시각
+        ("resolved_at", "TEXT"),
     ),
 }
 

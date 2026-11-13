@@ -6,6 +6,9 @@
 - `mismatch`: PG 금액 ≠ 주문 금액
 - `fee_anomaly`: PG 수수료가 기본 수수료율 계산값과 허용 오차(`fee_tolerance`)보다 더 다름
 - `matched`: 모두 맞음
+- `missing_in_ours`: 올린 PG 정산 파일에는 결제가 있는데 우리 쪽은 결제 성공 기록이 없음
+  (결제 실패·시간 초과·기록 없음). 고객 돈이 빠져나갔는데 주문이 처리되지 않았을 수 있어
+  환불 또는 확인이 필요하다. 올린 PG 파일에서만 나온다(모의 자료는 우리 결제로 만들어 생기지 않는다)
 
 PG 정산은 올린 PG 정산 파일이 덮는 날은 그 파일, 그 밖의 날은 결제 기록으로 만든 모의 자료
 (토스 정산 형식)다(`books.pg_settlements`, 건마다 `pg_basis`). 사람이 남긴 처리 메모(`note`)는
@@ -21,7 +24,7 @@ from finance_agent import finance_config as fc
 from finance_agent import pg_file
 from finance_agent.books import Books, in_range, pg_settlements, pg_upload
 
-STATUSES = ("matched", "mismatch", "missing_in_pg", "pending", "fee_anomaly")
+STATUSES = ("matched", "mismatch", "missing_in_pg", "pending", "fee_anomaly", "missing_in_ours")
 
 
 def recon_range(d: date | None, today: date) -> tuple[date, date]:
@@ -117,6 +120,7 @@ def _reconcile(books: Books, d: date | None, today: date, cfg: Any) -> dict[str,
                 else "generated",
             }
         )
+    items.extend(_missing_in_ours(books, start_d, end_d, cfg))
     items.sort(key=lambda i: (i["paid_at"], i["payment_id"]), reverse=True)
     counts = {s: sum(1 for i in items if i["status"] == s) for s in STATUSES}
     totals = {
@@ -139,7 +143,57 @@ def _reconcile(books: Books, d: date | None, today: date, cfg: Any) -> dict[str,
     }
 
 
-EXCEPTION_STATUSES = ("mismatch", "missing_in_pg", "fee_anomaly")
+def _missing_in_ours(books: Books, start_d: date, end_d: date, cfg: Any) -> list[dict[str, Any]]:
+    """올린 PG 정산 파일에는 있는데 우리 쪽 결제 성공 기록이 없는 건(판매일이 기간 안).
+
+    PG 파일의 결제 번호는 우리 결제 번호나 토스 paymentKey일 수 있어 둘 다로 찾는다.
+    우리 쪽에 실패·시간 초과으로 남은 결제가 있으면 그 주문과 상태를 붙인다.
+    """
+    _, rows, _ = pg_upload(books)
+    if not rows:
+        return []
+    ok_ids: set[str] = set()
+    others: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    for order in books.orders:
+        for p in order.get("payments", []):
+            keys = [k for k in (p.get("payment_id"), p.get("pg_payment_key")) if k]
+            if p.get("status") == "succeeded":
+                ok_ids.update(keys)
+            else:
+                for k in keys:
+                    others[k] = (order, p)
+    out = []
+    for pid, row in rows.items():
+        sold = row.get("sold_date")
+        if not sold or not (start_d.isoformat() <= sold < end_d.isoformat()) or pid in ok_ids:
+            continue
+        order, ours = others.get(pid, (None, None))
+        our_state = (ours or {}).get("status") or "없음"
+        out.append(
+            {
+                "order_id": (order or {}).get("order_id") or row.get("order_id"),
+                "payment_id": pid,
+                "paid_at": f"{sold}T00:00:00Z",
+                "order_amount": 0,
+                "pg_amount": row.get("amount"),
+                "fee": row.get("fee"),
+                "expected_fee": fc.rate_amount(row.get("amount") or 0, cfg.fee_rate),
+                "pay_out_amount": None,
+                "paid_out_date": row.get("paid_out_date"),
+                "status": "missing_in_ours",
+                "reason": (
+                    f"PG에는 결제가 있는데 우리 쪽 결제 성공 기록이 없음(우리 상태: {our_state}). "
+                    "고객 돈이 빠져나갔을 수 있어 환불 또는 확인 필요"
+                ),
+                "note": None,
+                "pg_basis": "uploaded",
+                "our_payment_status": (ours or {}).get("status"),
+            }
+        )
+    return out
+
+
+EXCEPTION_STATUSES = ("mismatch", "missing_in_pg", "fee_anomaly", "missing_in_ours")
 
 
 def parse_statuses(value: str | None) -> tuple[str, ...]:
@@ -175,6 +229,8 @@ def exceptions(result: dict[str, Any]) -> list[dict[str, Any]]:
 def exception_amount(item: dict[str, Any]) -> int:
     if item["status"] == "missing_in_pg":
         return item["order_amount"]
+    if item["status"] == "missing_in_ours":  # 고객이 낸 돈(환불·확인 대상)
+        return item["pg_amount"] or 0
     if item["status"] == "mismatch":
         return abs((item["pg_amount"] or 0) - item["order_amount"])
     return abs((item["fee"] or 0) - item["expected_fee"])

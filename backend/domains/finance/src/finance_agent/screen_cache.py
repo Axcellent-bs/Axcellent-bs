@@ -60,7 +60,7 @@ FIRST_SCREENS = (
     "/api/finance/closing?period=day",
     "/api/finance/variance",
     "/api/finance/statements?period=month",
-    "/api/finance/reconciliation?status=mismatch,missing_in_pg,fee_anomaly",
+    "/api/finance/reconciliation?status=mismatch,missing_in_pg,fee_anomaly,missing_in_ours",
     "/api/finance/settlements",
     "/api/finance/settlements/deadlines",
     "/api/finance/payables",

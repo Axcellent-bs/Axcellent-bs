@@ -106,6 +106,7 @@ TODO_ITEMS = 10  # 할 일 카드에 바로 보여 줄 건수
 RECON_KO = {
     "mismatch": "결제 금액과 PG 금액이 다름",
     "missing_in_pg": "PG 정산에 없음",
+    "missing_in_ours": "PG에는 있는데 우리 기록 없음(환불·확인 필요)",
     "fee_anomaly": "PG 수수료가 기준과 다름",
 }
 
