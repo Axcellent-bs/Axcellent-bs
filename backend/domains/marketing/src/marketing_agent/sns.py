@@ -139,8 +139,8 @@ class CarouselAsset(AxModel):
 
 class SnsPostDraft(AxModel):
     post_draft_id: str
-    source_kind: Literal["notice", "coupon", "brief"]
-    source_ref: str  # notice_id, campaign_id 또는 proposal_id
+    source_kind: Literal["notice", "coupon", "brief", "outage"]
+    source_ref: str  # notice_id, campaign_id, proposal_id 또는 장애 이벤트(context_id)
     notice_kind: NoticeKind | None = None  # 공지 출처의 종류. 없으면(쿠폰·옛 초안) 상품 홍보로 본다
     platform: Literal["instagram"]
     media_kind: Literal["image", "reel", "carousel"]
@@ -155,6 +155,8 @@ class SnsPostDraft(AxModel):
     asset_sha256: str | None = None  # 캐러셀이면 전체 해시(`carousel_sha256`)
     assets: list[CarouselAsset] = Field(default_factory=list)  # 캐러셀의 각 장(게시 순서)
     platform_options: dict[str, Any] = Field(default_factory=dict)
+    # 장애 사과·보상 초안(`source_kind="outage"`)이 만들어진 계기: apology_notice | compensation
+    outage_trigger: str | None = None
 
 
 class CheckSnsPostInput(AxModel):
@@ -252,6 +254,27 @@ class SnsStore:
         except ValidationError:  # 계약이 바뀌어 읽을 수 없는 줄
             return None
 
+    def list_by_source(
+        self, source_kind: str, limit: int
+    ) -> tuple[list[tuple[SnsPostDraft, datetime]], int]:
+        """출처 종류가 같은 초안을 저장 시각이 늦은 순으로. (목록, 전체 수). 못 읽는 줄은 뺀다."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload, created_at FROM sns_drafts"
+                " WHERE json_extract(payload, '$.source_kind') = ?"
+                " ORDER BY created_at DESC, post_draft_id",
+                (source_kind,),
+            ).fetchall()
+        items: list[tuple[SnsPostDraft, datetime]] = []
+        for payload, created_at in rows[:limit]:
+            try:
+                items.append(
+                    (SnsPostDraft.model_validate_json(payload), datetime.fromisoformat(created_at))
+                )
+            except ValueError:
+                continue
+        return items, len(rows)
+
 
 def content_id(
     caption_sha256: str,
@@ -291,6 +314,8 @@ def is_product_promotion(draft: SnsPostDraft) -> bool:
     """
     if draft.source_kind == "coupon":
         return True
+    if draft.source_kind == "outage":  # 장애 사과·보상 안내는 상품 홍보가 아니다
+        return False
     return draft.notice_kind is None or draft.notice_kind in PRODUCT_NOTICE_KINDS
 
 

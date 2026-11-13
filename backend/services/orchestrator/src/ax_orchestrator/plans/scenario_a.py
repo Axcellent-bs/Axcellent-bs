@@ -17,6 +17,12 @@
   재무는 기록만 하고 보상·환불을 결정하지 않는다. 재무가 꺼져 있거나 실패해도 다른 단계는 그대로다.
   장애 때 나간 쿠폰·환불 하나하나는 지금처럼 이벤트로 재무 장부에 들어간다.
   문의가 닫히면 `support_resolved` plan에서 총괄이 재무를 불러 장부에 기록한다.
+- 사과·보상 SNS 글 초안: 보상 쿠폰이 나가면(`compensation_sns_draft`), 정상화(사과) 공지가 나가면
+  (`apology_sns_draft`) 마케팅 `draft_outage_sns_post`로 SNS 글 초안을 바로 만들어 둔다. 초안까지만
+  만들고 게시는 하지 않는다(게시는 마케팅 `publish_sns`, 항상 사람 승인). 원인은 코드만 넘긴다:
+  원인으로 본 배포를 되돌려 복구 확인까지 끝났을 때만 `recent_update`, 그 밖에는 `unknown`
+  (글에는 "원인 확인 중"). 배포 이름·버전·지표·영향 숫자는 넘기지 않는다. 실패해도 다른 단계는
+  그대로다.
 """
 
 from __future__ import annotations
@@ -280,6 +286,65 @@ def _compensation_gate(inc: Incident) -> tuple[str, str, str] | None:
     return ("skipped", "no_affected_customers", "영향 고객 목록이 없어 보상 요청 없음")
 
 
+COMPONENTS = ("api", "db", "payment")  # 마케팅 공지·SNS 초안이 받는 구성요소 코드
+
+
+def _coupons_sent(inc: Incident) -> bool:
+    """보상 쿠폰이 한 건이라도 실제로 요청됐는지(고객지원 결과의 `requested`)."""
+    run = inc.steps.get("compensation")
+    if run is None or run.status != "completed":
+        return False
+    return any(r.get("status") == "requested" for r in _out(inc, "compensation").get("results", []))
+
+
+def _outage_facts(inc: Incident) -> dict[str, Any]:
+    """SNS 초안에 넘기는 장애 사실 코드. 단계 결과에 있는 것만 쓰고 원문 글은 넘기지 않는다.
+
+    원인은 "원인으로 본 배포를 되돌렸고 복구 확인까지 끝남"일 때만 확정(`recent_update`)이다.
+    진단이 의심만 했거나 사람이 풀었으면 `unknown`(글에는 "원인 확인 중")이다.
+    """
+    recovery = inc.steps.get("recovery")
+    rollback = inc.steps.get("rollback")
+    recovered = recovery is not None and recovery.status == "completed"
+    reverted = (
+        recovered
+        and rollback is not None
+        and rollback.status == "completed"
+        and _out(inc, "diagnose").get("status") == "suspected"
+    )
+    if reverted:
+        cause, action = "recent_update", "reverted_update"
+    elif recovered and (_past_fix_done(inc) or _human_released(inc)):
+        cause, action = "unknown", "restored"
+    else:
+        cause, action = "unknown", "none"
+    return {
+        "component": inc.component if inc.component in COMPONENTS else None,
+        "cause_code": cause,
+        "action_code": action,
+        "recovered": recovered,
+        "compensation_issued": _coupons_sent(inc),
+    }
+
+
+def _compensation_sns_draft(inc: Incident) -> dict[str, Any]:
+    return {"trigger": "compensation", **_outage_facts(inc)}
+
+
+def _compensation_sns_gate(inc: Incident) -> tuple[str, str, str] | None:
+    if _coupons_sent(inc):
+        return None
+    return ("skipped", "no_coupon_sent", "나간 보상 쿠폰이 없어 보상 안내 SNS 초안 없음")
+
+
+def _apology_sns_draft(inc: Incident) -> dict[str, Any]:
+    return {
+        "trigger": "apology_notice",
+        "notice_id": _out(inc, "recovered_notice").get("notice_id"),
+        **_outage_facts(inc),
+    }
+
+
 def _late_compensation(inc: Incident) -> dict[str, Any]:
     """복구 뒤 다시 센 영향 분석에서 새로 잡힌 고객만 보상 "대기"에 올린다(쿠폰은 사람 승인 뒤)."""
     return {
@@ -485,6 +550,8 @@ PROMISED_SECONDS: dict[str, float] = {
     "record": 10.0,
     "resolution": 10.0,
     "late_compensation": 30.0,
+    "compensation_sns_draft": 10.0,
+    "apology_sns_draft": 10.0,
 }
 
 
@@ -621,6 +688,23 @@ def _scenario_a() -> Plan:
                 keep={"notice_id": "recovered_notice_id"},
             ),
             Step(
+                "compensation_sns_draft",
+                "draft_outage_sns_post",
+                "보상 안내 SNS 글 초안 (marketing, 게시는 사람 승인)",
+                after=("compensation",),
+                build=_compensation_sns_draft,
+                gate=_compensation_sns_gate,
+                required=False,
+            ),
+            Step(
+                "apology_sns_draft",
+                "draft_outage_sns_post",
+                "사과 안내 SNS 글 초안 (marketing, 게시는 사람 승인)",
+                after=("recovered_notice",),
+                build=_apology_sns_draft,
+                required=False,
+            ),
+            Step(
                 "end_notice",
                 "end_incident_notice",
                 "장애 공지 배너 내리기 (marketing)",
@@ -663,6 +747,8 @@ def _scenario_a() -> Plan:
                     "finance_record",
                     "kpi",
                     "root_cause",
+                    "compensation_sns_draft",
+                    "apology_sns_draft",
                 ),
                 kind="record",
             ),

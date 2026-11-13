@@ -1,6 +1,7 @@
 """결제 장애 주입·해제 (SHOP-06, 실서버 시나리오 A).
 
-    python infra/fault-injection/payment_fault.py inject [--kind failure|latency] [--delay-ms N]
+    python infra/fault-injection/payment_fault.py inject [--kind KIND] [--delay-ms N]
+      KIND: failure | latency | lost_response(승인됐는데 응답이 끊김 = 시간 초과)
     python infra/fault-injection/payment_fault.py clear
 
 shop-api의 `/api/shop/admin/faults`를 부른다. 표준 라이브러리만 쓰고 bash·pwsh 어디서나 돈다.
@@ -65,7 +66,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="결제 장애 주입·해제")
     sub = parser.add_subparsers(dest="command", required=True)
     on = sub.add_parser("inject", help="결제 경로에 장애를 넣는다")
-    on.add_argument("--kind", choices=("failure", "latency"), default="failure")
+    on.add_argument("--kind", choices=("failure", "latency", "lost_response"), default="failure")
     on.add_argument("--delay-ms", type=int, default=2000)
     sub.add_parser("clear", help="장애를 해제한다")
     return parser

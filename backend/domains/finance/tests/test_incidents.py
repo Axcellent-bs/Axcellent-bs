@@ -63,6 +63,7 @@ DETAIL_KEYS = {
     "impact",
     "compensation",
     "refunds",
+    "refund_needed",
     "money_out_total",
     "ledger_source",
 }

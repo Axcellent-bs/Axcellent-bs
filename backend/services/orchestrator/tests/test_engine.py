@@ -39,8 +39,8 @@ async def test_scenario_a_completes(harness) -> None:
     skipped = ("cause_check", "past_fix", "end_notice")
     assert all(s.status == "completed" for k, s in inc.steps.items() if k not in skipped)
     assert harness.events == ["incident.opened", "incident.resolved"]
-    # + 과거 같은 장애의 처리 방식 다시 하기, 장애 배너 내리기
-    assert inc.metrics["steps_total"] == 20
+    # + 과거 같은 장애의 처리 방식 다시 하기, 장애 배너 내리기, 사과·보상 SNS 글 초안 2개
+    assert inc.metrics["steps_total"] == 22
     assert inc.metrics["auto_rate"] == 1.0
 
 

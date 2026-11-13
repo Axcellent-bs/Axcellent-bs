@@ -155,8 +155,24 @@ export const BRIEFS_LIST_MAX = 100;
 export const briefsListLimit = (limit: number): number =>
   Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), BRIEFS_LIST_MAX) : BRIEFS_LIST_MAX;
 
+/** 장애 사과·보상 SNS 글 초안(마케팅 `list_outage_sns_drafts`). 초안일 뿐 게시된 글이 아니다 */
+export interface OutageSnsDraft {
+  post_draft_id: string;
+  trigger: "apology_notice" | "compensation" | null;
+  context_id: string;
+  source_ref: string;
+  caption: string;
+  media_kind: string;
+  media_attached: boolean;
+  created_at: string;
+}
+export interface OutageSnsDraftList { items: OutageSnsDraft[]; total: number; unknown_reason: string | null }
+export const OUTAGE_TRIGGER_KO: Record<string, string> = { apology_notice: "사과 공지", compensation: "보상 쿠폰 지급" };
+export const outageTriggerKo = (trigger: string | null) => (trigger ? OUTAGE_TRIGGER_KO[trigger] ?? trigger : "확인할 수 없음");
+
 export const briefs = {
   list: (limit = 50) => get<BriefList>(`/api/shop/admin/marketing/briefs?limit=${briefsListLimit(limit)}`),
+  outageSnsDrafts: (limit = 20) => get<OutageSnsDraftList>(`/api/shop/admin/marketing/outage-sns-drafts?limit=${briefsListLimit(limit)}`),
   handoff,
 };
 

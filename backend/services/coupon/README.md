@@ -20,6 +20,8 @@
 | `build_campaign_link` | read |
 | `issue_coupon` | A |
 | `draft_sns_post` | read |
+| `draft_outage_sns_post` | read |
+| `list_outage_sns_drafts` | read |
 | `check_sns_post` | read |
 | `publish_sns` | C |
 | `generate_media` | B |

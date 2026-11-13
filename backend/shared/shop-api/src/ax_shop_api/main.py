@@ -145,7 +145,8 @@ class CancelIn(BaseModel):
 
 
 class FaultIn(BaseModel):
-    kind: Literal["latency", "failure"]
+    # lost_response: 결제사는 승인했는데 응답이 끊김(시간 초과 → 다시 확인하면 승인으로 나온다)
+    kind: Literal["latency", "failure", "lost_response"]
     delay_ms: int = Field(default=2000, ge=0, le=60000)  # kind=latency일 때 더할 지연
 
 
@@ -411,11 +412,23 @@ def create_app(
     storefront = Storefront(database)
     interval = float(os.getenv("SHOP_MONITOR_INTERVAL_S") or 5)  # 0이면 주기 판정을 끈다
 
+    recheck_every = float(os.getenv("SHOP_PAYMENT_RECHECK_S") or 30)  # 시간 초과 다시 확인 간격
+    last_recheck = [0.0]
+
     async def _monitor_loop() -> None:
         """결제 요청이 없어도 지속 시간을 판정하도록 주기적으로 평가한다."""
         while True:
             await asyncio.sleep(interval)
             shop.evaluate_monitor()
+            now = asyncio.get_running_loop().time()
+            if recheck_every > 0 and now - last_recheck[0] >= recheck_every:
+                last_recheck[0] = now
+                try:
+                    await toss.recheck_timeouts(
+                        shop, toss_payments.client if toss_payments else None
+                    )
+                except Exception:  # 다시 확인이 실패해도 판정 루프는 계속 돈다
+                    logging.getLogger(__name__).exception("시간 초과 결제 다시 확인 실패")
             await outbox.drain(database)  # 쌓인 미발행은 여기서 묶음씩 비운다
 
     @contextlib.asynccontextmanager
@@ -626,6 +639,20 @@ def create_app(
     async def inject_fault(body: FaultIn, _: str = Depends(_caller(INJECT_ALLOWED))) -> dict:
         return _ok(shop.inject_fault(body.kind, body.delay_ms))
 
+    @app.get("/api/shop/admin/payments/timeouts")
+    async def timeout_payments(_: str = Depends(_caller(RELEASE_ALLOWED))) -> dict:
+        """시간 초과(승인됐는지 모름) 결제. 다시 확인을 기다리는 돈이다."""
+        rows = shop.timeout_payments()
+        keep = ("payment_id", "order_id", "amount", "provider", "failure_detail", "created_at")
+        return _ok([{k: r.get(k) for k in keep} for r in rows])
+
+    @app.post("/api/shop/admin/payments/recheck")
+    async def recheck_payments(_: str = Depends(_caller(RELEASE_ALLOWED))) -> dict:
+        """시간 초과 결제를 결제사에 지금 다시 확인한다(기록만 바로잡고 돈은 옮기지 않는다)."""
+        done = await toss.recheck_timeouts(shop, toss_payments.client if toss_payments else None)
+        await outbox.flush(database)
+        return _ok({"resolved": done, "left": len(shop.timeout_payments())})
+
     @app.delete("/api/shop/admin/faults")
     async def release_fault(caller: str = Depends(_caller(RELEASE_ALLOWED))) -> dict:
         state = shop.release_fault(released_by=caller)  # 복구 신호에 누가 풀었는지 싣는다
@@ -662,6 +689,13 @@ def create_app(
         proposal_id: str, _: str = Depends(_caller(ORCHESTRATOR_VIEWERS))
     ) -> dict:
         return _ok(await marketing_client.get_brief(proposal_id))
+
+    @app.get("/api/shop/admin/marketing/outage-sns-drafts")
+    async def marketing_outage_sns_drafts(
+        limit: int = 20, _: str = Depends(_caller(ORCHESTRATOR_VIEWERS))
+    ) -> dict:
+        """장애 사과·보상 SNS 글 초안 읽기 중계. 초안만 보여 주고 게시하지 않는다."""
+        return _ok(await marketing_client.list_outage_sns_drafts(limit))
 
     # --- 공지 배너(SHOP-08): 고객 화면이 읽고, 마케팅 관문 토큰만 게시·해제한다 ---------
     @app.get("/api/shop/banners")

@@ -52,6 +52,7 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("draft_notice", "read", None),
         ("publish_notice", "A", None),
         ("end_incident_notice", "A", None),
+        ("draft_outage_sns_post", "read", None),
     ],
     "support": [
         ("send_reply", "A", None),
@@ -165,6 +166,13 @@ DEFAULT_OUTPUTS: dict[str, Callable[[AgentRequest], dict[str, Any]]] = {
         notice_id=f"ntc_{r.input.get('draft_id', 'none')}",
         channel_code="banner",
         status="published",
+    ),
+    # 실제 마케팅 `SnsPostDraft` 모양의 일부(초안만 만들고 게시하지 않는다)
+    "draft_outage_sns_post": lambda r: _ok(
+        post_draft_id=f"spd_{r.input.get('trigger', 'x')}",
+        source_kind="outage",
+        outage_trigger=r.input.get("trigger"),
+        auto_publish=False,
     ),
     "end_incident_notice": lambda r: _ok(ended_notice_ids=["ntc_incident_opened"], status="ended"),
     # 실제 재무 `LossReport` 모양(받지 못한 값은 None = 확인할 수 없음)

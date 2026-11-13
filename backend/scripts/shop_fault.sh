@@ -3,6 +3,8 @@
 # AI 대화방에는 장애 버튼이 없다. 장애는 사람이 요청하면 운영자가 이 명령으로 넣는다.
 #   bash backend/scripts/shop_fault.sh failure    # 결제가 서버 오류(5xx)로 실패 → 약 25초 뒤 사건이 열린다
 #   bash backend/scripts/shop_fault.sh latency    # 결제 응답 2초 지연
+#   bash backend/scripts/shop_fault.sh lost       # 결제사는 승인했는데 응답이 끊김(시간 초과)
+#   bash backend/scripts/shop_fault.sh recheck    # 시간 초과 결제를 지금 다시 확인
 #   bash backend/scripts/shop_fault.sh clear      # 해제
 #   bash backend/scripts/shop_fault.sh            # 지금 상태
 # 관리자 토큰은 run_all.sh 가 만든 backend/.data/web.env 에서 읽는다(출력하지 않는다).
@@ -18,8 +20,10 @@ AUTH="Authorization: Bearer $TOKEN"
 case "${1:-status}" in
   failure) curl -s -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" -d '{"kind":"failure"}' ;;
   latency) curl -s -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" -d '{"kind":"latency","delay_ms":2000}' ;;
+  lost) curl -s -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" -d '{"kind":"lost_response"}' ;;
+  recheck) curl -s -X POST "${URL%/faults}/payments/recheck" -H "$AUTH" ;;
   clear) curl -s -X DELETE "$URL" -H "$AUTH" ;;
   status) curl -s "$URL" -H "$AUTH" ;;
-  *) echo "사용법: shop_fault.sh [failure|latency|clear|status]" >&2; exit 2 ;;
+  *) echo "사용법: shop_fault.sh [failure|latency|lost|recheck|clear|status]" >&2; exit 2 ;;
 esac
 echo

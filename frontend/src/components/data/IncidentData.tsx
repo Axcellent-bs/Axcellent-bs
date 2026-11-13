@@ -116,7 +116,7 @@ function ImpactCard({ inc }: { inc: OrchIncident }) {
   const bars: Record<string, number> = {};
   for (const c of cats) { const v = num(c.failed_order_count); if (v != null) bars[name(c.category)] = v; }
   return (
-    <Panel id="data-impact" title="영향 분석" hint="장애 구간에 실패한 주문과 영향을 받은 고객, 피해 금액입니다. 데이터 AI가 센 숫자를 그대로 보여 줍니다.">
+    <Panel id="data-impact" title="영향 분석" hint="장애 구간에 결제가 실패한 주문과 영향을 받은 고객, 결제 실패(미결제) 금액입니다. 고객 돈이 빠져나가지 않은 받지 못한 매출입니다. 데이터 AI가 센 숫자를 그대로 보여 줍니다.">
       {!step ? <Empty>이번 사건에는 영향 분석 단계가 없습니다.</Empty> : !impact || Object.keys(impact).length === 0 ? <Empty>영향 분석 결과가 아직 없습니다 ({UNKNOWN}).</Empty> : (
         <div className="space-y-4">
           <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-900">{impact.summary || UNKNOWN}</p>
@@ -125,7 +125,7 @@ function ImpactCard({ inc }: { inc: OrchIncident }) {
             {cats.length === 0 ? <p className="text-xs text-ink-500">카테고리별 값: {UNKNOWN}</p> : (
               <ChartWithTable
                 chart={<Bars data={bars} color="bg-accent" />}
-                table={<TableView columns={["카테고리", "실패 주문", "피해 금액"]} rows={cats.map((c) => [name(c.category), count(c.failed_order_count, "건"), krw(num(c.damage_amount))])} />}
+                table={<TableView columns={["카테고리", "실패 주문", "미결제 금액"]} rows={cats.map((c) => [name(c.category), count(c.failed_order_count, "건"), krw(num(c.damage_amount))])} />}
               />
             )}
           </div>
@@ -271,7 +271,7 @@ export function IncidentData({ list, detail, selected, onSelect }: {
   if (incidents.length === 0) {
     return (
       <Empty>
-        아직 장애 사건이 없어요. 쇼핑몰에서 결제 장애가 감지되면 총괄이 사건을 열고, 데이터 AI가 센 실패 주문·영향 고객·피해 금액이 여기에 나타납니다.
+        아직 장애 사건이 없어요. 쇼핑몰에서 결제 장애가 감지되면 총괄이 사건을 열고, 데이터 AI가 센 실패 주문·영향 고객·미결제 금액이 여기에 나타납니다.
       </Empty>
     );
   }
@@ -288,7 +288,7 @@ export function IncidentData({ list, detail, selected, onSelect }: {
           <div className="flex flex-wrap gap-3">
             <Stat label="실패 주문" value={count(impact?.failed_order_count, "건")} tone={num(impact?.failed_order_count) == null ? "text-ink-500" : ""} />
             <Stat label="영향 고객" value={count(impact?.affected_customer_count, "명")} tone={num(impact?.affected_customer_count) == null ? "text-ink-500" : ""} />
-            <Stat label="피해 금액" value={krw(num(impact?.damage_amount))} tone={num(impact?.damage_amount) == null ? "text-ink-500" : "text-accent"} />
+            <Stat label="결제 실패(미결제)" value={krw(num(impact?.damage_amount))} tone={num(impact?.damage_amount) == null ? "text-ink-500" : "text-accent"} />
             <Stat label="복구까지 걸린 시간" value={duration(inc.metrics?.mttr_seconds)} sub="감지 → 정상 복귀" tone={num(inc.metrics?.mttr_seconds) == null ? "text-ink-500" : ""} />
           </div>
           <Panel id="data-flow" title="데이터 AI 처리 흐름" hint={`${incidentTitle(inc)} · ${shortDateTime(inc.opened_at)} 시작. 감지는 쇼핑몰 모니터·Zabbix가 하고, 데이터 AI는 총괄 요청을 받아 일합니다.`}>
