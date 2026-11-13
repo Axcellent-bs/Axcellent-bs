@@ -1510,7 +1510,61 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         result = await self._apply(run)
         self._idempotent[idempotency_key] = result
         self._save()
+        if result.outcome == "withdrawn":
+            await self.retire_withdrawn_cards()  # 인사 결정 기록에서도 내린다 (잠금 밖)
         return result
+
+    def _withdrawn_without_hr(self) -> list[tuple[str, str, str | None]]:
+        """철회했는데 아직 인사 카드를 내리지 못한 요청 (사건, REQ, 같이 지운 기획서).
+
+        활동 기록으로 정한다: `withdraw_ticket` 줄이 있고, 같은 사건에 성공한
+        `retire_request_cards` 줄이 없으면 남은 것이다 (예전에 철회한 요청도 다시 잡힌다).
+        """
+        done = {
+            a.context_id
+            for a in self.state.activity
+            if a.point == "retire_request_cards" and a.grade == "A"
+        }
+        pending: list[tuple[str, str, str | None]] = []
+        for a in self.state.activity:
+            if a.point != "withdraw_ticket" or a.context_id in done:
+                continue
+            req = re.match(r"(REQ-\d+) 요청 부서가 철회", a.text)
+            if req is None:
+                continue
+            spec = re.search(r"기획서 (SPEC-\d+)도 지움", a.text)
+            item = (a.context_id, req.group(1), spec.group(1) if spec else None)
+            if item not in pending:
+                pending.append(item)
+        return pending
+
+    async def retire_withdrawn_cards(self) -> list[str]:
+        """철회한 요청에서 나온 인사 카드를 내린다 (인사 `retire_request_cards`, 11/13).
+
+        인사가 꺼져 있거나 일부만 내렸으면 실패로 남기고, 다음 철회·서버 시작 때 다시 부른다.
+        인사는 같은 요청을 다시 불러도 같은 결과라 여러 번 불러도 된다. 목 모드면 부르지 않는다.
+        """
+        if self._hr is None:
+            return []
+        texts: list[str] = []
+        for ctx, req_id, spec_id in self._withdrawn_without_hr():
+            res = await self._hr.retire_request_cards(
+                ctx, req_id, spec_id, "요청 부서가 요청을 철회함",
+                f"{ctx}:retire_request_cards:{req_id}",
+            )  # fmt: skip
+            text = f"{req_id} 철회 → {res.text}"
+            texts.append(text)
+
+            async def log(s: State, ctx: str = ctx, text: str = text, ok: bool = res.ok) -> None:
+                s.activity.append(
+                    self._act(
+                        self.clock(), ctx, "planning", "hr", "retire_request_cards", "A2A",
+                        text, "A" if ok else None,
+                    )
+                )  # fmt: skip
+
+            await self._apply(log)
+        return texts
 
     async def receive_dev_result(
         self,
