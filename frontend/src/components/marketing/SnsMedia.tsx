@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { shortDateTime, won } from "@/lib/format";
 import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
-import { briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, type StoredBrief } from "@/lib/briefs";
+import { BRIEFS_LIST_MAX, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, type StoredBrief } from "@/lib/briefs";
 
 // SNS·미디어 탭. 이미지·영상 생성과 SNS 게시 흐름을 안내하고,
 // 안전 장치 보류 큐(finance.reviews)에서 읽을 수 있는 마케팅 항목(publish_sns, generate_media)만 읽기 전용으로 보여 준다.
@@ -52,7 +52,7 @@ export function SnsMedia() {
     setLoading(true);
     if (briefsEnabled) {
       try {
-        const list = await briefs.list(200);
+        const list = await briefs.list(BRIEFS_LIST_MAX);
         setHanded(list.items.filter((i) => i.sns_handoff && i.sns_handoff.status !== "not_handed"));
         setHandedError(null);
       } catch (e) {

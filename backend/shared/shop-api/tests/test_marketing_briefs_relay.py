@@ -89,3 +89,29 @@ def test_other_agents_cannot_read(client, monkeypatch) -> None:
     assert client.get("/api/shop/admin/marketing/briefs", headers=INFRA).status_code == 403
     assert client.get("/api/shop/admin/marketing/briefs").status_code == 401
     assert seen == []
+
+
+def test_frontend_never_asks_more_than_relay_limit() -> None:
+    """화면이 중계 상한보다 큰 limit을 보내면 400 "limit은 1~100이어야 한다"가 화면에 뜬다.
+
+    화면 쪽 상한 상수가 중계 상한과 같고, 목록 호출이 그보다 큰 숫자를 직접 쓰지 않는지 본다.
+    """
+    import re
+    from pathlib import Path
+
+    from ax_shop_api import marketing_client
+
+    candidates = (p / "frontend" / "src" for p in Path(__file__).resolve().parents)
+    src = next((c for c in candidates if c.is_dir()), None)
+    if src is None:
+        pytest.skip("frontend 소스가 없는 환경")
+    lib = (src / "lib" / "briefs.ts").read_text(encoding="utf-8")
+    declared = re.search(r"export const BRIEFS_LIST_MAX = (\d+);", lib)
+    assert declared and int(declared.group(1)) == marketing_client.LIST_LIMIT_MAX
+    assert "limit=${briefsListLimit(limit)}" in lib
+    literals = [
+        (path.name, int(n))
+        for path in [*src.rglob("*.ts"), *src.rglob("*.tsx")]
+        for n in re.findall(r"\bbriefs\.list\((\d+)\)", path.read_text(encoding="utf-8"))
+    ]
+    assert [x for x in literals if not 1 <= x[1] <= marketing_client.LIST_LIMIT_MAX] == []
