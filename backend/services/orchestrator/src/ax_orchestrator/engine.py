@@ -22,6 +22,7 @@ from ax_agent_template import routing
 from ax_agent_template.services import route_target
 from ax_contracts.schemas import (
     HANDED_TO_HUMAN,
+    TENANT_ID_DEFAULT,
     AgentRequest,
     AgentResult,
     ErrorCode,
@@ -29,6 +30,7 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
+from ax_orchestrator.inbox import InboxPoster, queue_transfer
 from ax_orchestrator.models import (
     NO_RESPONSE,
     NOT_INTERVENTION,
@@ -251,6 +253,8 @@ class Engine:
         late_retry_delays: tuple[float, ...] = (),
         async_heartbeat_timeout: float = ASYNC_HEARTBEAT_SECONDS,
         async_total_timeout: float = ASYNC_TOTAL_SECONDS,
+        inbox: InboxPoster | None = None,
+        tenant_id: str = TENANT_ID_DEFAULT,
     ) -> None:
         self.registry = registry
         # 긴 작업(비동기): 부서가 마지막으로 응답한 뒤 이 시간(초)이 지나도록 소식이 없으면 응답이
@@ -266,6 +270,9 @@ class Engine:
         self._released: dict[str, asyncio.Event] = {}
         self.caller = caller
         self.publish = publish
+        # `transfer_queued` 단계를 사람의 받은 요청에 올리는 함수. None이면 올리지 않는다(시험 기본)
+        self.inbox = inbox
+        self.tenant_id = tenant_id
         self.hold_timeout = hold_timeout
         self.handoff_timeout = handoff_timeout
         self.retry_delay = retry_delay
@@ -335,6 +342,20 @@ class Engine:
         return progressed
 
     async def _run_step(self, inc: Incident, step: Step) -> None:
+        await self._execute_step(inc, step)
+        await self._queue_transfer(inc, step)
+
+    async def _queue_transfer(self, inc: Incident, step: Step) -> None:
+        """단계가 "이관 큐로 넘김"으로 끝났으면 사람의 받은 요청에도 올린다(`inbox.py`)."""
+        if self.inbox is None:
+            return
+        run = inc.steps[step.id]
+        try:
+            await queue_transfer(inc, run, self.inbox, self.tenant_id)
+        except Exception as exc:  # noqa: BLE001 - 받은 요청에 못 올려도 총괄 흐름은 이어 간다
+            inc.log(f"{run.label}: 받은 요청에 올리지 못함 ({type(exc).__name__})")
+
+    async def _execute_step(self, inc: Incident, step: Step) -> None:
         run = inc.steps[step.id]
         run.started_at = now()
         run.status = "running"
@@ -1054,6 +1075,18 @@ class Engine:
         for wait in inc.handoffs.values():
             if wait.task_id == task_id:
                 return wait.finish(status, result)
+        # 이관 큐로 넘긴 단계를 사람이 받은 요청에서 끝냈다: 상태는 그대로 두고 결과를 메모로 남긴다
+        for run in inc.steps.values():
+            if run.handoff_task_id == task_id and run.status == "transfer_queued":
+                label = "처리함" if status == "done" else "처리하지 않기로 함"
+                text = f"사람이 받은 요청에서 {label}"
+                run.note = f"{run.note} · {text}" if run.note and text not in run.note else text
+                if isinstance(result, str) and result:
+                    run.output = {**run.output, "human_result": result}
+                    inc.log(f"{run.label}: {text} — {result[:200]}")
+                else:
+                    inc.log(f"{run.label}: {text}")
+                return True
         return False
 
     def keep_early_handoff(

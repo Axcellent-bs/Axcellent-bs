@@ -24,11 +24,12 @@ from pydantic import BaseModel
 
 from ax_agent_template import events
 from ax_agent_template.config import set_agent_name
-from ax_contracts.schemas import EventEnvelope, EventType
+from ax_contracts.schemas import TENANT_ID_DEFAULT, EventEnvelope, EventType
 from ax_orchestrator.a2a import build_a2a_app
 from ax_orchestrator.auth import require_admin, require_agent, require_human
 from ax_orchestrator.engine import Engine
 from ax_orchestrator.hybrid import HybridDepartments, real_depts_from_env
+from ax_orchestrator.inbox import post_to_inbox
 from ax_orchestrator.manager import SUBSCRIBED, IncidentManager
 from ax_orchestrator.mock.fake_departments import FakeDepartments
 from ax_orchestrator.models import Incident, now
@@ -117,6 +118,9 @@ class AppState:
             # 장애 배너 내리기처럼 정리 단계가 모두 실패하면 1분·3분·10분 뒤 다시 시도한다
             late_retry_delays=(60.0, 180.0, 600.0),
             persist=self.store.save,
+            # 사람에게 넘긴("이관 큐") 단계는 사람의 받은 요청에도 올린다. 목 모드는 올리지 않는다
+            inbox=None if self.mock else post_to_inbox,
+            tenant_id=os.getenv("TENANT_ID", TENANT_ID_DEFAULT),
             # 안전 관문의 사람 결정을 되물어 확인한다. 목 모드는 AX_SAFETY_URL을 줄 때만 부른다
             review_check=(
                 http_review_checker() if not self.mock or os.getenv("AX_SAFETY_URL") else None
