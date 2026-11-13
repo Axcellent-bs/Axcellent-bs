@@ -20,9 +20,12 @@ from typing import Any
 
 from ax_orchestrator.models import Incident, Plan, Step
 
-# 이벤트가 알려 주는 처리 결과 필드 (`SupportInquiryResolvedData`). 있는 것만 재무에 넘긴다
+# 이벤트가 알려 주는 처리 결과 필드 (`SupportInquiryResolvedData`). 있는 것만 재무에 넘긴다.
+# `inquiry_id`는 고객지원 저장소를 새로 시작하면 1부터 다시 매겨져 예전 문의와 겹칠 수 있다.
+# `inquiry_ref`는 바뀌지 않는 문의 ID라 재무는 있으면 이것으로 기록을 구분한다(없으면 문의 번호)
 SIGNAL_FIELDS = (
     "inquiry_id",
+    "inquiry_ref",
     "order_id",
     "resolution",
     "claim_id",

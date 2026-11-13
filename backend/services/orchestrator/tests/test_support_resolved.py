@@ -56,6 +56,36 @@ async def test_a_resolved_inquiry_goes_to_finance_then_hr(harness) -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_stable_inquiry_ref_is_passed_to_finance(harness) -> None:
+    """문의 번호는 저장소를 새로 시작하면 겹칠 수 있어, 바뀌지 않는 문의 ID가 있으면 보낸다."""
+    mgr = IncidentManager(await harness.start(), scenario_a)
+    inc = await mgr.handle(
+        resolved("evt_ref", 5, inquiry_ref="ctx_inq_abc123", order_id="ord_0216")
+    )
+    await mgr.wait(inc.context_id)
+
+    finance_call = next(c for c in harness.fakes.calls if c[1].skill == "record_support_cost")
+    assert finance_call[1].input == {
+        "inquiry_id": 5,
+        "inquiry_ref": "ctx_inq_abc123",
+        "order_id": "ord_0216",
+        "resolution": "answered",
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_old_signal_without_inquiry_ref_still_works(harness) -> None:
+    """예전 신호에는 inquiry_ref가 없다. 없는 값은 만들어 내지 않고 지금처럼 번호로 보낸다."""
+    mgr = IncidentManager(await harness.start(), scenario_a)
+    inc = await mgr.handle(resolved("evt_old", 6, order_id="ord_0216"))
+    await mgr.wait(inc.context_id)
+
+    finance_call = next(c for c in harness.fakes.calls if c[1].skill == "record_support_cost")
+    assert "inquiry_ref" not in finance_call[1].input
+    assert [r.status for r in inc.steps.values()] == ["completed"] * 3
+
+
+@pytest.mark.asyncio
 async def test_an_inquiry_without_expense_is_still_recorded(harness) -> None:
     """경비를 쓰지 않아도(답변만 한 문의) 처리 결과는 재무 기록과 인사 기록으로 남는다."""
     mgr = IncidentManager(await harness.start(), scenario_a)
