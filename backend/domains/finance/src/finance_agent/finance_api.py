@@ -1147,6 +1147,8 @@ def add_finance_api(app: FastAPI) -> None:
                     "evidence": evidence.strip(),
                     "source_ref": source_ref,
                     "evidence_ids": ids,
+                    # 사람이 한 건씩 정해 보낸 요청이라 비슷한 요청이 있어도 기획에 따로 들어간다
+                    "separate": True,
                 },
             ),
         )

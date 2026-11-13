@@ -176,3 +176,31 @@ def test_create_ticket_simple_request_runs_auto_flow(service, a2a_body) -> None:
     assert req.auto is not None and req.auto.ok
     spec = next(s for s in service.state.specs if s.id == req.spec)
     assert spec.status == "확정" and spec.auto and spec.handed_to_dev
+
+
+@pytest.mark.role("planning")
+def test_create_ticket_separate_is_not_linked_to_a_same_request(service, a2a_body) -> None:
+    """`separate`면 같은 제목 요청이 있어도 묶지 않고 따로 받는다 (11/13, 재무 화면 요청)."""
+
+    def send(key: str, ref: str) -> dict:
+        body = a2a_body(
+            "create_ticket",
+            {"title": "결제 실패 뒤 장바구니가 비워진다", "evidence": "e", "source_ref": ref,
+             "separate": True},
+            token="mock:finance",
+            context_id="ctx_fin",
+            idempotency_key=key,
+        )  # fmt: skip
+        return _call(body)
+
+    first, second = send("s1", "fin_req_0001"), send("s2", "fin_req_0002")
+    for res in (first, second):
+        assert res["outcome"] == "created"
+        assert CreateTicketOutput.model_validate(res["output"]).duplicate_of is None
+    ids = {first["output"]["request_id"], second["output"]["request_id"]}
+    assert len(ids) == 2
+    reqs = [r for r in service.state.requests if r.id in ids]
+    assert all(r.duplicate_of is None and r.separate and r.state != "중복 연결" for r in reqs)
+    assert first["output"]["context_id"] != second["output"]["context_id"]
+    # 시드 REQ-12(같은 제목)에도 묶이지 않는다
+    assert next(r for r in service.state.requests if r.id == "REQ-12").state == "기획 중"

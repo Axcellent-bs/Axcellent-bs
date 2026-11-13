@@ -534,6 +534,8 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         """
         if not self._content_match or req.duplicate_of or req.state != "접수":
             return
+        if req.separate:  # 요청 부서가 따로 받기를 원함: 비슷한 요청은 표시만 하고 묶지 않는다
+            return
         # 개발이 장애 연결로 만든 재발 방지 요청은 묶지 않는다. 사건 번호가 개발 사본과 같아야
         # 사후관리(aftercare) 연결이 맞는다 (via "link_incident (재발 방지)", #363)
         if req.via.startswith("link_incident"):
@@ -735,14 +737,17 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         evidence_ids: list[str] | None = None,
         req_id: str | None = None,
         from_service: str | None = None,
+        separate: bool = False,
     ) -> ActionResult:
         """create_ticket: 묶을 요청이 있으면 중복 연결, 아니면 등록 후 간단 요청 판정.
+
+        `separate`면 비슷한 요청이 있어도 묶지 않는다 (요청 부서가 따로 받기를 원함, 11/13).
 
         기획 LLM이 있으면 여기서는 묶지 않고 `_relate_new`가 내용으로 판단해 묶는다.
 
         `source_ref`·`evidence_ids`는 저장만 한다 (중복·간단 요청 판정에 쓰지 않는다).
         """
-        dup_id = None if self._content_match else find_duplicate(s.requests, title)
+        dup_id = None if self._content_match or separate else find_duplicate(s.requests, title)
         req_id = req_id or f"REQ-{20 + seq}"
         # 사건(ctx_inc_)에서 온 원인 확인 요청은 사람이 원인을 볼 일이라
         # 자동 기획·PR로 넘기지 않는다.
@@ -774,6 +779,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
             source_ref=source_ref,
             evidence_ids=list(evidence_ids or []),
             from_service=from_service,
+            separate=separate,
         )
         s.requests.append(req)
         s.activity.append(
@@ -1330,6 +1336,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         source_ref: str | None,
         evidence_ids: list[str],
         idempotency_key: str,
+        separate: bool = False,
     ) -> ActionResult:
         """변경 요청 접수 (A, #174). 같은 요청이 있으면 묶고(linked_duplicate), 없으면 새 REQ와
         `ctx_req_`를 발급한다(created). 같은 idempotency_key의 두 번째 요청은 이전 결과를 돌려준다.
@@ -1351,7 +1358,9 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
             seq = s.seq + 1
             s.seq = seq
             t = self.clock()
-            dup_id = None if self._content_match else find_duplicate(s.requests, title)
+            dup_id = (
+                None if self._content_match or separate else find_duplicate(s.requests, title)
+            )
             original = next((r for r in s.requests if r.id == dup_id), None) if dup_id else None
             used_ctx = {r.context_id for r in s.requests}
             n = 20 + seq
@@ -1379,6 +1388,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
                 evidence_ids=evidence_ids,
                 req_id=f"REQ-{m}",
                 from_service=requester if requester in SERVICE_BY_ID else None,
+                separate=separate,
             )
             req_id = result.output["request_id"]
             return ActionResult(
