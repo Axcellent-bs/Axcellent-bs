@@ -21,6 +21,17 @@ def iso(value: datetime | None) -> str | None:
     return value.strftime("%Y-%m-%dT%H:%M:%SZ") if value else None
 
 
+def _utc(value: Any) -> datetime | None:
+    """부서가 준 ISO 시각. 시간대가 없거나 읽을 수 없으면 None(지어내지 않는다)."""
+    if not isinstance(value, str):
+        return None
+    try:
+        at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo is not None else None
+
+
 @dataclass
 class Step:
     """plan의 한 단계. 엔진은 시나리오를 모르고 이 정의만 실행한다."""
@@ -208,16 +219,47 @@ class Incident:
     def new_context_id() -> str:
         return f"ctx_inc_{uuid.uuid4().hex[:12]}"
 
+    def verified_at(self) -> datetime | None:
+        """복구 검증(verify_recovery)이 복구됐다고(`recovered=true`) 확인한 시각. 없으면 None.
+
+        인프라가 준 확인 시각(`checked_at`)이 먼저이고, 없으면(예전 저장분) 단계가 끝난 시각이다.
+        """
+        run = self.steps.get("recovery")
+        out = self.outputs.get("recovery") or {}
+        if run is None or run.status != "completed" or out.get("recovered") is not True:
+            return None
+        return _utc(out.get("checked_at")) or run.finished_at
+
+    def recovery_point(self) -> datetime | None:
+        """장애가 풀렸다고 인정하는 시각. 아직 모르면 None.
+
+        - 복구 검증이 `recovered=true`면: 쇼핑몰 복구 신호(`recovered_at`)가 검증보다 먼저 왔으면
+          그 시각, 아니면 검증 시각. 쇼핑몰 신호는 검증이 복구를 확인했을 때만 인정한다.
+        - 검증 없이 장애 중(degraded)으로 닫혔다가 나중에 복구 신호로 풀린 이벤트는 그 신호 시각
+          (닫힌 뒤라 검증이 다시 돌지 않는다. 닫힌 시각을 쓰면 복구보다 앞선다).
+        """
+        verified = self.verified_at()
+        if verified is not None:
+            if self.recovered_at is not None and self.recovered_at <= verified:
+                return self.recovered_at
+            return verified
+        if self.settled_by_recovery:
+            return self.recovered_at
+        return None
+
     def recovery_end(self) -> datetime | None:
         """복구 시간(mttr_seconds)의 끝 시각. 아직 정할 수 없으면 None.
 
-        degraded로 닫혔다가 복구 신호로 풀린 이벤트는 복구 신호 시각, 처음부터 resolved로 닫힌
-        이벤트는 닫힌 시각이다.
+        장애 중(degraded)으로 닫힌 이벤트는 복구 신호가 올 때까지 None이고 오면 그 시각이다.
+        그 밖에는 `recovery_point()`, 없으면(복구 검증이 없는 계획 등) 닫힌 시각이다.
+        마무리 단계(장부·기록)가 길어도 복구 시간은 늘지 않는다.
+        공통 로그 `incident.resolved`의 `recovered_at`도 이 값이다.
         """
-        if self.status == "degraded":
+        if self.status == "degraded":  # 장애가 안 풀린 채 대응이 끝났다: 복구 신호를 기다린다
             return self.recovered_at
-        if self.settled_by_recovery and self.recovered_at is not None:
-            return self.recovered_at
+        point = self.recovery_point()
+        if point is not None:
+            return point
         return self.closed_at
 
     def mttr_seconds(self) -> float | None:
@@ -249,12 +291,15 @@ class Incident:
     def impact_window(self) -> tuple[datetime, datetime]:
         """영향 분석 구간. 장애 시작(since)부터, 없으면 열린 시각 앞 15분부터 뒤 15분까지.
 
-        복구 신호(recovered_at)가 구간 안에 있으면 거기서 끊는다. 복구 뒤 실패는 이 장애가 아니다.
+        복구로 인정한 시각(`recovery_point()`, 복구 시간의 끝과 같은 기준)이 구간 안에 있으면
+        거기서 끊는다. 복구 뒤 실패는 이 장애가 아니다. 검증이 확인하지 않은 쇼핑몰 신호로는
+        끊지 않는다.
         """
         start = self.since if self.since is not None else self.opened_at - timedelta(minutes=15)
         end = self.opened_at + timedelta(minutes=15)
-        if self.recovered_at is not None and start < self.recovered_at < end:
-            end = self.recovered_at
+        point = self.recovery_point()
+        if point is not None and start < point < end:
+            end = point
         return start, end
 
     def _impact_window_view(self) -> dict[str, str | None]:

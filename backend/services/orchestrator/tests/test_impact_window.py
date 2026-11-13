@@ -64,9 +64,33 @@ def test_row_has_no_impact_window_without_the_impact_step() -> None:
     assert (view["impact_from"], view["impact_to"]) == (None, None)
 
 
+def _verified(inc: Incident, at: datetime) -> None:
+    run = StepRun("recovery", "verify_recovery", "복구 검증 (infra)", status="completed")
+    run.finished_at = at
+    inc.steps["recovery"] = run
+    inc.outputs["recovery"] = {"recovered": True, "checked_at": at.isoformat()}
+
+
 def test_window_ends_at_recovery_when_it_comes_before_the_default_end() -> None:
     inc = _incident(OPENED - timedelta(seconds=25))
     inc.recovered_at = OPENED + timedelta(seconds=30)
+    _verified(inc, OPENED + timedelta(seconds=60))
+    assert _window(inc)["window_to"] == "2026-10-28T07:24:31Z"  # 신호가 검증보다 먼저
+
+
+def test_window_ends_at_the_verification_without_a_shop_signal() -> None:
+    inc = _incident(OPENED - timedelta(seconds=25))
+    _verified(inc, OPENED + timedelta(seconds=60))
+    assert _window(inc)["window_to"] == "2026-10-28T07:25:01Z"
+
+
+def test_an_unverified_shop_signal_does_not_end_the_window() -> None:
+    """검증이 복구를 확인하지 않았으면 쇼핑몰 신호로 구간을 끊지 않는다(복구 시간과 같은 기준)."""
+    inc = _incident(OPENED - timedelta(seconds=25))
+    inc.recovered_at = OPENED + timedelta(seconds=30)
+    assert _window(inc)["window_to"] == "2026-10-28T07:39:01Z"
+    inc.status = "resolved"
+    inc.settled_by_recovery = True  # 장애 중으로 닫힌 뒤 신호로 풀림: 신호 시각까지
     assert _window(inc)["window_to"] == "2026-10-28T07:24:31Z"
 
 
