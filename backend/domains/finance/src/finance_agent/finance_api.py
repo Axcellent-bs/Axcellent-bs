@@ -15,7 +15,8 @@
 | `POST /api/finance/pg/file?name=` | ② PG 정산 파일(CSV) 올리기. 그 기간은 파일과 대사 | **사람** |
 | `GET /api/finance/pg/imports` | ② 올린 PG 정산 파일 기록·기간 | 없음 |
 | `POST /api/finance/planning-requests` | 재무 개선 요청을 기획(`create_ticket`)에 보냄 | **사람** |
-| `GET /api/finance/planning-requests` | 기획에 보낸 개선 요청 기록 | 없음 |
+| `GET /api/finance/planning-requests` | 기획에 보낸 개선 요청 기록 (거둬들인 요청은 뺌) | 없음 |
+| `POST /api/finance/planning-requests/{source_ref}/withdraw` | 보낸 요청 거둬들이기 | **사람** |
 | `POST /api/finance/pg/clear` | ② 올린 PG 정산 자료 모두 빼기(이유 필수, 기록은 남김) | **사람** |
 | `GET /api/finance/settlements?period=YYYY-Www` | ③ 판매자 정산 내역서 (고객지원 것) | 없음 |
 | `GET /api/finance/settlements/deadlines` | ③ 지급 기한 점검 (고객지원 것) | 없음 |
@@ -68,8 +69,14 @@ from fastapi.responses import JSONResponse, Response
 from ax_agent_template import call_agent
 from ax_agent_template.config import is_mock
 from ax_agent_template.execute import execute
-from ax_contracts.schemas import AgentRequest, Evidence, RequestMeta, TaskStatus
-from ax_contracts.schemas.planning import CreateTicketOutput
+from ax_contracts.schemas import (
+    TENANT_ID_DEFAULT,
+    AgentRequest,
+    Evidence,
+    RequestMeta,
+    TaskStatus,
+)
+from ax_contracts.schemas.planning import CreateTicketOutput, WithdrawTicketOutput
 from finance_agent import (
     bank,
     bank_file,
@@ -99,7 +106,7 @@ from finance_agent.handlers import (
     team_budget_data,
 )
 from finance_agent.human import human_from_authorization, label_fields
-from finance_agent.planning_questions import record_sent_request
+from finance_agent.planning_questions import STORE, record_sent_request
 from finance_agent.rules import load_rules
 
 TODO_ITEMS = 10  # 할 일 카드에 바로 보여 줄 건수
@@ -1174,9 +1181,88 @@ def add_finance_api(app: FastAPI) -> None:
         )
         return ok(row, {"sent_by": person})
 
+    @app.post("/api/finance/planning-requests/{source_ref}/withdraw", response_model=None)
+    async def withdraw_planning_request(
+        source_ref: str, request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """보낸 개선 요청을 거둬들인다. 기획 `withdraw_ticket`이 지우면 재무 목록에서도 뺀다.
+
+        안전 관문(`finance_withdraw_change`)을 먼저 거친다. 기획에 이미 없으면(`not_found`) 재무
+        기록만 뺀다. 개발로 넘어갔거나 다른 부서 요청이면 기획이 거절하고 재무 기록은 그대로 둔다.
+        기록은 지우지 않고 `withdrawn_at`·`withdrawn_by`를 남긴다(번호를 다시 쓰지 않게).
+        """
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        reason = body.get("reason") or ""
+        if not isinstance(reason, str) or len(reason) > 200:
+            return error(400, "invalid_request", "reason은 200자까지 문자열")
+        records = state().records
+        row = next(
+            (
+                r
+                for r in records.planning_requests
+                if r.get("source_ref") == source_ref and not r.get("withdrawn_at")
+            ),
+            None,
+        )
+        if row is None or not row.get("request_id"):
+            return error(404, "not_found", f"보낸 요청 {source_ref}가 없습니다.")
+        tenant = row.get("tenant_id") or TENANT_ID_DEFAULT
+        stamp = fc.now().strftime("%Y%m%d%H%M%S")
+        meta_req = RequestMeta(
+            context_id=row.get("context_id") or f"ctx_req_{source_ref}",
+            tenant_id=tenant,
+            token="finance-dashboard",
+            deadline=fc.now() + timedelta(seconds=40),
+            idempotency_key=f"{source_ref}:withdraw_ticket:{stamp}",
+        )
+        decision = await execute(
+            "finance_withdraw_change",
+            {"source_ref": source_ref, "request_id": row["request_id"]},
+            meta_req,
+            Evidence(
+                data_summary=f"재무 개선 요청 거둬들이기: {row['request_id']} {source_ref}",
+                collected_at=fc.now(),
+                ref_ids=[source_ref, row["request_id"]],
+            ),
+        )
+        if decision.status != "executed":
+            return error(409, "not_executed", f"안전 관문이 실행하지 않았다({decision.status})")
+        reply = await call_agent(
+            "planning",
+            AgentRequest(
+                meta=meta_req,
+                skill="withdraw_ticket",
+                input={
+                    "request_id": row["request_id"],
+                    "source_ref": source_ref,
+                    "reason": reason.strip(),
+                },
+            ),
+        )
+        if reply.status != TaskStatus.COMPLETED:
+            return error(
+                502,
+                "planning_unavailable",
+                f"기획이 요청을 받지 못했다({reply.outcome or reply.status.value})",
+            )
+        out = WithdrawTicketOutput.model_validate(reply.output)
+        if out.outcome not in ("withdrawn", "not_found"):
+            return error(409, out.outcome, out.message or "기획이 지우지 않았습니다.")
+        row["withdrawn_at"] = fc.iso(fc.now())
+        row["withdrawn_by"] = person
+        row.update(label_fields(person, request, "withdrawn_by_label"))
+        row["withdraw_outcome"] = out.outcome
+        STORE.remove(tenant, row["request_id"])
+        return ok(row, {"withdrawn_by": person, "planning": out.outcome})
+
     @app.get("/api/finance/planning-requests")
     async def list_planning_requests() -> dict:
-        return ok({"requests": list(reversed(state().records.planning_requests))}, {})
+        rows = [r for r in state().records.planning_requests if not r.get("withdrawn_at")]
+        return ok({"requests": list(reversed(rows))}, {})
 
     @app.get("/api/finance/pg/imports")
     async def pg_imports() -> dict:

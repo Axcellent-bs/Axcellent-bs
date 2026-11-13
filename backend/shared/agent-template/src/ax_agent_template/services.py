@@ -313,6 +313,8 @@ SERVICES: tuple[Service, ...] = (
         8101,
         (
             "create_ticket",
+            # 요청 부서가 자기 요청 거둬들이기 (재무 화면 "요청 빼기", 11/13)
+            "withdraw_ticket",
             "receive_dev_result",
             "receive_planning_answer",
             "request_release_check",

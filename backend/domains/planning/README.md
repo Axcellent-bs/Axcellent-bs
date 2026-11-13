@@ -52,6 +52,7 @@
 | skill | 등급 | 요청 가능 | 입력 → 출력 |
 | --- | --- | --- | --- |
 | `create_ticket` | A | support, marketing, hr, data, orchestrator | `CreateTicketInput` → `CreateTicketOutput` (#174). 같은 제목 요청이 있으면 새 요청을 원래 요청에 묶고 outcome `linked_duplicate` + `duplicate_of`(원래 REQ), `context_id`는 원래 요청의 `ctx_req_`. 없으면 outcome `created` + 새 `REQ-n`·`ctx_req_`(planning 발급). `source_ref`(예: `inq_42`)·`evidence_ids`는 저장만 하고 판정에 안 쓴다. `untrusted`(고객 원문)는 읽지 않는다. 간단 요청이면 자동 처리 흐름을 탄다. 결과 통지는 같은 `context_id`에 `path`를 비운 새 요청으로 보낸다(요청 부서 수신 skill 전까지는 활동 기록만). `idempotency_key` 필수 |
+| `withdraw_ticket` | A | support, marketing, hr, data, finance, orchestrator, dev | `WithdrawTicketInput` → `WithdrawTicketOutput` (11/13). 요청 부서가 자기가 보낸 요청을 거둬들이면 요청(과 그 요청에만 딸린 기획서)을 목록에서 지운다. 보낸 부서·`source_ref`가 다르면 `not_yours`, 개발로 넘어갔거나 작업이 있거나 묶인 요청이 있으면 `in_progress`(사람이 기획 화면에서 중단·기각), 없으면 `not_found`. `idempotency_key` 필수 |
 
 `evidence.ref_ids`는 `pr:28`, `para:SPEC-5:R3`, `req:REQ-102` 형식이다. 근거가 없으면 `data_summary`가 "확인할 수 없음"으로 시작한다.
 입력이 계약과 다르면 `failed` + outcome `invalid_input`, 관문이 거부하면 `failed` + outcome `gate_rejected`.

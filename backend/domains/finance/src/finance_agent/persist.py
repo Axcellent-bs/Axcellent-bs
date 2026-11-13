@@ -85,6 +85,8 @@ def _remember_sent(rows: list[dict[str, Any]]) -> None:
     from finance_agent.planning_questions import record_sent_request
 
     for r in rows:
+        if r.get("withdrawn_at"):  # 거둬들인 요청은 되묻기에 답하지 않는다
+            continue
         if r.get("request_id") and r.get("context_id"):
             record_sent_request(
                 r.get("tenant_id") or TENANT_ID_DEFAULT,

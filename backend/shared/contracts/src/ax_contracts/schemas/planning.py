@@ -219,6 +219,29 @@ class CreateTicketOutput(AxModel):
         return self
 
 
+# ---- 변경 요청 철회 (2026-11-13, 재무 요청)
+#
+# - `withdraw_ticket`: 요청 부서 → planning, 등급 A.
+# - 요청 부서가 자기가 보낸 요청(create_ticket)을 거둬들인다. planning은 그 요청을 목록에서 지운다.
+# - 보낸 부서와 `source_ref`가 맞아야 한다. 다른 부서 요청은 `not_yours`.
+# - 이미 개발로 넘어갔거나(작업·PR 있음) 다른 요청이 이 요청에 묶여 있으면 지우지 않는다
+#   (`in_progress`). 그때는 기획 화면에서 사람이 중단·기각한다.
+# - 없는 요청은 `not_found` (이미 지워졌으면 요청 부서는 자기 기록만 지우면 된다).
+
+
+class WithdrawTicketInput(AxModel):
+    request_id: str  # REQ-n (create_ticket이 돌려준 번호)
+    source_ref: str | None = None  # create_ticket에 보낸 요청 부서 참조 ID. 있으면 같아야 한다
+    reason: str = ""  # 철회 이유 (활동 기록에만 남긴다)
+
+
+class WithdrawTicketOutput(AxModel):
+    request_id: str
+    outcome: Literal["withdrawn", "not_found", "not_yours", "in_progress"]
+    message: str = ""
+    removed_spec: str | None = None  # 같이 지운 기획서 초안 ID
+
+
 # ---- 변경 요청 결과 통지 (이슈 #280 요청, planning)
 #
 # - `receive_change_result`: planning → 요청 부서(support·hr·data), 등급 A.
