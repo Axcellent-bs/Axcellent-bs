@@ -215,6 +215,10 @@ export const hr = {
   orgBasis: (reason: string) => post<OrgBasis>("/org-changes/basis", { reason }),
   orgParse: (text: string) => post<OrgParse>("/org-changes/parse", { text }),
   orgDescription: (changeId: string) => call<OrgDescription>(`/org-changes/${encodeURIComponent(changeId)}/description`),
+  /** 그 달 팀 예산 확정(사람 토큰). signature는 확정할 때 보던 재무 팀 예산의 값이다. 재무는 기록만 한다 */
+  confirmTeamBudget: (month: string, signature: string, note?: string) =>
+    post<{ month: string; status: "recorded" | "already_recorded"; total: number; signature: string }>(
+      `/org-budget/${encodeURIComponent(month)}/confirm`, { signature, ...(note?.trim() ? { note: note.trim() } : {}) }),
   /** 그 달 팀별 인원 미리 보기. 재무에 나가는 값과 같다 */
   orgHeadcount: (month: string) => call<OrgHeadcount>(`/org-headcount?month=${encodeURIComponent(month)}`),
   activity: (contextId: string) => call<AuditEntry[]>(`/hr-activity/${encodeURIComponent(contextId)}`),

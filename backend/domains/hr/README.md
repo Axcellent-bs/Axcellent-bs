@@ -25,6 +25,7 @@ Agent Card: `agent-card.json` (`/.well-known/agent-card.json`으로 공개). 입
 | `team_headcount` | 조회 | 그달 1일 기준 팀별 인원수(이름·직원 ID 없음). 확정된 발령 기록이 있고 전 직원 등록 완료가 표시되면 그 기록으로 세고(`example: false`), 아니면 가상 명부(예시)라 `example: true` | orchestrator·finance |
 | `record_org_change` | A | 조직 변동(팀 이동·입사·퇴사) 초안 저장. 승인 없이 저장하고 확정 전에는 인원에 세지 않는다 | dashboard-api |
 | `decide_org_change` | A | 인사 담당자가 초안을 확정·반려. 확정하면 그때부터 `team_headcount`에 센다 | dashboard-api |
+| `confirm_team_budget` | A | 인사 담당자가 그 달 팀 예산을 확정하고 재무 `record_team_budget`으로 기록을 요청 | dashboard-api |
 | `list_org_changes` | 조회 | 조직 변동 기록 목록(초안·확정·반려)과 명부 등록 상태 | dashboard-api |
 | `set_org_roster_complete` | A | 인사 담당자가 "전 직원 등록 완료"를 표시(확정 명부가 전체 직원 수일 때만). 표시해야 `team_headcount`가 확정 기록으로 센다 | dashboard-api |
 | `record_leave` | A | 휴가 기간(서울 날짜)만 기록한다. 사유·종류는 받지 않는다. 사람 토큰으로 들어온 요청만 | dashboard-api |

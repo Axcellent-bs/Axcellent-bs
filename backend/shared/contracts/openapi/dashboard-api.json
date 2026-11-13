@@ -1761,6 +1761,34 @@
         "title": "SupportChatSendBody",
         "type": "object"
       },
+      "TeamBudgetConfirmBody": {
+        "description": "그 달 팀 예산 확정. `signature`는 확정할 때 보던 재무 팀 예산의 값이다.",
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "signature": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Signature",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signature"
+        ],
+        "title": "TeamBudgetConfirmBody",
+        "type": "object"
+      },
       "TextBody": {
         "properties": {
           "text": {
@@ -7841,6 +7869,59 @@
           }
         },
         "summary": "Order Detail"
+      }
+    },
+    "/api/dashboard/org-budget/{month}/confirm": {
+      "post": {
+        "description": "그 달 팀 예산 확정(사람 토큰 필요). 재무는 같은 숫자인지 보고 기록만 한다.",
+        "operationId": "confirm_team_budget_api_dashboard_org_budget__month__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "month",
+            "required": true,
+            "schema": {
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "title": "Month",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamBudgetConfirmBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Confirm Team Budget Api Dashboard Org Budget  Month  Confirm Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Team Budget"
       }
     },
     "/api/dashboard/org-changes": {

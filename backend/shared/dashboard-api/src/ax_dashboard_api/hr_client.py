@@ -52,6 +52,9 @@ CONFLICT_OUTCOMES = frozenset(
         "NOT_BASIS_CARD",
         "LEDGER_CONFLICT",
         "ROSTER_COUNT_MISMATCH",
+        "STALE",
+        "TEAM_HEADCOUNT_UNAVAILABLE",
+        "EXAMPLE_HEADCOUNT",
     }
 )
 
