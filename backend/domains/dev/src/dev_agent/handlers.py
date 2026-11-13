@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.chat import ChatRemoveOutput
+from ax_contracts.schemas.message import InputReason
 from ax_contracts.schemas.planning import (
     DevChatListInput,
     DevChatRef,
@@ -31,6 +32,7 @@ from ax_contracts.schemas.planning import (
     RelatedPr,
     RequestPauseInput,
     RequestPauseOutput,
+    RevertMergedPrInput,
     VerifyHandoverInput,
     VerifyHandoverOutput,
     VerifyRollbackTargetInput,
@@ -41,8 +43,9 @@ from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.handover import ROSTER_AREAS, Item, is_roster_area
 from ax_workflow.models import PR
 from ax_workflow.rules import ROLLBACK_LOOKBACK
-from dev_agent import dev_chat
+from dev_agent import dev_chat, incident_repo
 from dev_agent.runtime import get_service
+from dev_agent.vcs.base import VcsError
 
 
 def _related(rows: list[tuple[PR, str | None, str | None]]) -> list[RelatedPr]:
@@ -74,20 +77,32 @@ async def find_related_prs(request: AgentRequest) -> AgentResult:
         inp = FindRelatedPrsInput.model_validate(request.input)
     except ValidationError as exc:
         return _invalid(request, exc)
-    rows = await get_service().find_related_prs(
+    svc = get_service()
+    rows = await svc.find_related_prs(
         context_id=request.meta.context_id,
         requester=_requester(request),
         window_from=inp.window_from,
         window_to=inp.window_to,
         component=inp.component,
     )
-    candidates = _related(rows)
+    # 형상관리 연결의 실제 레포에서 머지된 PR도 같은 구간(앞 30분 포함)으로 더한다
+    candidates, failed = await incident_repo.repo_related(
+        svc,
+        context_id=request.meta.context_id,
+        requester=_requester(request),
+        window_from=inp.window_from - ROLLBACK_LOOKBACK,
+        window_to=inp.window_to,
+        component=inp.component,
+        memory=rows,
+    )
     comp = f" AND changed_paths 접두사 '{inp.component}'" if inp.component else ""
     summary = (
         f"구간 안 머지 PR {len(candidates)}건 (시간 관계만, 원인 판정은 하지 않음)"
         if candidates
         else "확인할 수 없음: 구간 안 머지 PR 없음"
     )
+    if failed:
+        summary += f" · 레포를 읽지 못한 연결: {', '.join(failed)}"
     return AgentResult(
         meta=request.meta,
         status=TaskStatus.COMPLETED,
@@ -100,6 +115,61 @@ async def find_related_prs(request: AgentRequest) -> AgentResult:
             data_summary=summary,
             ref_ids=_refs(candidates),
         ),
+    )
+
+
+async def revert_merged_pr(request: AgentRequest) -> AgentResult:
+    """연결 레포의 병합된 PR을 되돌리는 PR을 열고 머지까지 간다 (B, execute 경유).
+
+    관문이 막거나 CI가 실패하면 input-required(human_input)로 사람 확인을 기다린다."""
+    try:
+        inp = RevertMergedPrInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        out = await incident_repo.revert_merged(
+            get_service(),
+            context_id=request.meta.context_id,
+            requester=_requester(request),
+            connection_id=inp.connection_id,
+            pr_number=inp.pr_number,
+            reason=inp.reason,
+            incident_context_id=inp.incident_context_id,
+        )
+    except ActionError as exc:
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.FAILED,
+            outcome=exc.code.lower(),
+            output={"message": exc.message},
+        )
+    except VcsError as exc:
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.FAILED,
+            outcome="vcs_error",
+            output={"message": f"형상관리 오류 ({exc.code}): {exc}"},
+        )
+    key = f"{inp.connection_id}#{inp.pr_number}"
+    rev = f"#{out.revert_pr_number}" if out.revert_pr_number else "없음"
+    text = {
+        "merged": f"{key} 되돌리기 PR {rev} 머지",
+        "auto_merge_scheduled": f"{key} 되돌리기 PR {rev} 자동 머지 예약 (CI 대기)",
+        "held": f"{key} 되돌리기 보류 (PR {rev}) → 사람 확인",
+    }[out.status]
+    refs = [f"pr:{inp.pr_number}"] + (
+        [f"pr:{out.revert_pr_number}"] if out.revert_pr_number else []
+    )
+    held = out.status == "held"
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.INPUT_REQUIRED if held else TaskStatus.COMPLETED,
+        reason_code=InputReason.HUMAN_INPUT if held else None,
+        outcome=out.status,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(data_summary=text, ref_ids=refs),
     )
 
 
@@ -662,6 +732,7 @@ async def dev_chat_remove(request: AgentRequest) -> AgentResult:
 DEV_HANDLERS = {
     "find_related_prs": find_related_prs,
     "link_incident": link_incident,
+    "revert_merged_pr": revert_merged_pr,
     "verify_rollback_target": verify_rollback_target,
     "list_in_progress": list_in_progress,
     "list_dev_outcomes": list_dev_outcomes,

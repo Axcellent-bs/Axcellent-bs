@@ -224,7 +224,10 @@ def test_dev_agent_card_format_and_served() -> None:
         "start_dev",
         "receive_release_order",
         "receive_request_pause",
+        "revert_merged_pr",
     }
+    assert skills["revert_merged_pr"].grade == "B"
+    assert skills["revert_merged_pr"].allowed_requesters == ["infra"]
     for name in chat:
         assert skills[name].allowed_requesters == ["dashboard-api"], name
     assert {k for k in chat if skills[k].grade == "read"} == {"dev_chat_list", "dev_chat_get"}
@@ -242,7 +245,8 @@ def test_dev_agent_card_format_and_served() -> None:
     assert skills["verify_handover"].allowed_requesters == ["safety"]
     assert skills["start_dev"].allowed_requesters == ["planning"]
     for skill in card.skills:
-        assert skill.verifier is None
+        # B는 관문(repo_revert_pr·merge_pr)의 안전 코드 규칙이 검증한다
+        assert skill.verifier == ("safety" if skill.grade == "B" else None), skill.id
         for ref in (skill.input_schema, skill.output_schema):
             path, name = ref.split("#")
             if name == "ChatRemoveOutput":  # 부서 공용 대화 계약
