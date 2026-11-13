@@ -34,6 +34,7 @@ STATE_CHANGING = {
     "restore_merged_card": "memory.card_link",
     "record_org_change": "record_org_change",
     "decide_org_change": "decide_org_change",
+    "confirm_team_budget": "confirm_team_budget",
     "set_org_roster_complete": "set_org_roster_complete",
     "record_leave": "record_leave",
     "cancel_leave": "cancel_leave",
@@ -106,7 +107,7 @@ def test_agent_card_lists_all_skills_with_resolvable_schemas() -> None:
     card = load_card()
     ids = {s.id for s in card.skills}
     assert ids == set(HANDLERS) == STATE_CHANGING.keys() | READ_ONLY
-    assert len(ids) == 33
+    assert len(ids) == 34
     for skill in card.skills:
         for ref in (skill.input_schema, skill.output_schema):
             path, _, cls = ref.partition("#")
@@ -131,7 +132,7 @@ def test_agent_card_grades_match_the_safety_registry_draft(svc) -> None:
 
 def test_agent_card_is_served_over_http(client: TestClient) -> None:
     served = client.get("/.well-known/agent-card.json").json()
-    assert served["name"] == "hr" and len(served["skills"]) == 33
+    assert served["name"] == "hr" and len(served["skills"]) == 34
 
 
 # 2) 결정성 ----------------------------------------------------------------------

@@ -21,6 +21,7 @@ from hr_agent.dept_eval import summary as dept_eval
 from hr_agent.fraud_similar import service as fraud_similar
 from hr_agent.handover import service as handover
 from hr_agent.org import basis as org_basis
+from hr_agent.org import budget as org_budget
 from hr_agent.org import changes as org_changes
 from hr_agent.org import describe as org_describe
 from hr_agent.org import headcount as org_headcount
@@ -93,6 +94,10 @@ async def set_org_roster_complete(request: AgentRequest) -> AgentResult:
     return await org_changes.set_org_roster_complete(get_services(), request)
 
 
+async def confirm_team_budget(request: AgentRequest) -> AgentResult:
+    return await org_budget.confirm_team_budget(get_services(), request)
+
+
 async def team_headcount(request: AgentRequest) -> AgentResult:
     return await org_headcount.team_headcount(get_services(), request)
 
@@ -150,6 +155,7 @@ _HANDLERS = {
     "team_headcount": team_headcount,
     "record_org_change": record_org_change,
     "decide_org_change": decide_org_change,
+    "confirm_team_budget": confirm_team_budget,
     "list_org_changes": list_org_changes,
     "set_org_roster_complete": set_org_roster_complete,
     "record_leave": record_leave,

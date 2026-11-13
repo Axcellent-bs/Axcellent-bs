@@ -256,3 +256,31 @@ def test_a_wrong_basis_card_is_a_409(client: TestClient, fake: Fake) -> None:
     assert (
         res.status_code == 409 and fake.last("record_org_change").input["basis_card_id"] == "card_x"
     )
+
+
+def test_confirming_the_team_budget_sends_the_signature_and_the_human(client, fake) -> None:
+    fake.outputs["confirm_team_budget"] = {
+        "month": "2026-12",
+        "status": "recorded",
+        "total": 600000,
+        "signature": "sig-1",
+    }
+    res = client.post(BASE + "/org-budget/2026-12/confirm", json={"signature": "sig-1"})
+    assert res.status_code == 200 and res.json()["data"]["status"] == "recorded"
+    sent = fake.last("confirm_team_budget")
+    assert sent.input["month"] == "2026-12" and sent.input["signature"] == "sig-1"
+    assert sent.input["confirmed_by"]  # 사람 토큰에서 채운다 (요청 본문으로 받지 않는다)
+    assert sent.meta.idempotency_key and "team-budget:2026-12:sig-1" in sent.meta.idempotency_key
+
+
+def test_a_stale_team_budget_is_a_409(client, fake) -> None:
+    fake.overrides["confirm_team_budget"] = {"outcome": "STALE", "output": {"message": "바뀜"}}
+    res = client.post(BASE + "/org-budget/2026-12/confirm", json={"signature": "old"})
+    assert res.status_code == 409 and res.json()["error"]["code"] == "CONFLICT"
+
+
+def test_confirming_the_team_budget_needs_a_human_token(client, fake) -> None:
+    client.headers.pop("authorization", None)
+    res = client.post(BASE + "/org-budget/2026-12/confirm", json={"signature": "s"})
+    assert res.status_code == 401
+    assert fake.sent == []

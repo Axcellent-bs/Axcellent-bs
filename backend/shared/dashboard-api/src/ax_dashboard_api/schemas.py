@@ -820,6 +820,13 @@ class OrgChangeDecisionBody(BaseModel):
     note: str | None = None
 
 
+class TeamBudgetConfirmBody(BaseModel):
+    """그 달 팀 예산 확정. `signature`는 확정할 때 보던 재무 팀 예산의 값이다."""
+
+    signature: str = Field(min_length=1, max_length=200)
+    note: str | None = Field(default=None, max_length=500)
+
+
 class OrgRosterCompleteBody(BaseModel):
     """전 직원 등록 완료 표시(`complete=true`) 또는 다시 열기(`false`)."""
 

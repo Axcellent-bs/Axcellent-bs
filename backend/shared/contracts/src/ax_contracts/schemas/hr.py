@@ -33,6 +33,7 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `parse_org_change_text` | 읽기 | 발령 문장을 입력 칸으로 정리하는 제안(LLM, 저장 안 함) |
 | `describe_org_change` | 읽기 | 발령 요약 설명문(숫자는 코드, 문장만 LLM) |
 | `set_org_roster_complete` | A | 인사 담당자가 "전 직원 등록 완료"를 표시 (요청자 dashboard-api) |
+| `confirm_team_budget` | A | 인사 담당자가 팀 예산 확정, 재무는 기록만 (dashboard-api) |
 | `team_headcount` | 읽기 | 그 달 1일 기준 팀별 인원수 (이름·직원 ID 없음, 요청자 finance 팀 예산) |
 | `record_leave` | A | 휴가 기간 기록(사유·종류 없음, 요청자 인사 서비스, 사람 토큰만) |
 | `cancel_leave` | A | 휴가 기록에 취소 표시(취소한 사람·시각)만 남김(지우지 않음), 사람 토큰만 |
@@ -409,6 +410,22 @@ class ListOrgChangesOutput(AxModel):
     expected_members: int = Field(default=0, ge=0)  # 전체 직원 수(가정)
     roster_complete: bool = False
     collected_at: UtcDatetime
+
+
+class ConfirmTeamBudgetInput(AxModel):
+    """인사 담당자가 그 달 팀 예산을 확정한다. 재무는 `signature`가 지금과 같을 때만 기록한다."""
+
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    signature: str = Field(min_length=1, max_length=200)  # 재무 GET /api/finance/team-budget의 값
+    confirmed_by: str = Field(min_length=1, max_length=80)  # dashboard-api가 사람 토큰에서 채운다
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ConfirmTeamBudgetOutput(AxModel):
+    month: str
+    status: Literal["recorded", "already_recorded"]
+    total: int
+    signature: str
 
 
 class SetOrgRosterCompleteInput(AxModel):

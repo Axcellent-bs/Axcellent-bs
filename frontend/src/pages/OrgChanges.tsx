@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Loading } from "@/components/admin/bits";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
+import { finance, krw, type TeamBudget } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
 import { showEmp, storedEmp, storedEmpInText } from "@/lib/hr";
 import {
@@ -9,7 +10,7 @@ import {
 } from "@/lib/hr";
 
 // 조직 변동(발령) 화면: ① 지금 사람이 할 일(확정 대기 초안) → ② 명부 등록 현황 → ③ 처음 직원 등록(일괄)
-// → ④ 발령 입력 → ⑤ 팀 인원 미리 보기 → ⑥ 발령 기록.
+// → ④ 발령 입력 → ⑤ 팀 인원 미리 보기 → ⑥ 팀 예산 확정(인사가 확정, 재무는 기록) → ⑦ 발령 기록.
 // 초안은 승인 없이 저장되고 인사 담당자가 확정해야 인원에 센다. "전 직원 등록 완료"를 표시해야 재무에는
 // 확정 기록 기준 인원이 나간다(그 전에는 예시 인원). 인원·반영 월은 hr이 계산한 값을 그대로 보여 준다.
 
@@ -42,6 +43,62 @@ function Section({ title, desc, children }: { title: string; desc?: ReactNode; c
 function describe(c: OrgChange): string {
   if (c.kind === "transfer") return `${c.from_team} → ${c.to_team}`;
   return c.kind === "join" ? `${c.to_team}에 입사` : `${c.from_team}에서 퇴사`;
+}
+
+// 그 달 팀 예산(재무가 계산한 숫자)을 보여 주고 인사 담당자가 확정한다. 확정하면 인사가 재무에 기록을 요청한다.
+// 확정할 때 본 숫자(signature)를 같이 보내고, 그사이 바뀌었으면 재무가 기록하지 않는다.
+function BudgetConfirm({ month, headcountExample, busy, run }: {
+  month: string; headcountExample: boolean; busy: boolean; run: (job: () => Promise<unknown>) => Promise<void>;
+}) {
+  const [budget, setBudget] = useState<TeamBudget | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const load = () => finance.teamBudget(month)
+      .then((r) => { if (live) { setBudget(r.data); setProblem(null); } })
+      .catch((e) => { if (live) { setBudget(null); setProblem(errText(e)); } });
+    load();
+    const poll = setInterval(load, 15000);
+    return () => { live = false; clearInterval(poll); };
+  }, [month]);
+
+  const done = budget?.status === "approved";
+  const ready = !!budget && budget.status !== "unavailable" && !budget.example && !!budget.signature && !done && !headcountExample;
+  return (
+    <Section title="팀 예산 확정" desc="팀 예산 = 그달 1일 팀 인원 × 인당 월 단가입니다. 숫자는 재무 AI가 계산한 값이고, 확정은 인사 담당자가 합니다. 확정하면 재무는 같은 숫자인지 확인하고 기록만 남깁니다.">
+      {problem && <p className="rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-700">재무 AI에서 팀 예산을 불러오지 못했습니다. {problem}</p>}
+      {budget && budget.status === "unavailable" && <p className="rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-700">{month}의 팀 인원을 받지 못해 팀 예산을 계산하지 않았습니다. 0원으로 채우지 않습니다.</p>}
+      {budget && budget.status !== "unavailable" && (
+        <>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            {budget.example || headcountExample ? <Chip label="예시 인원 · 확정 불가" tone="bg-amber-50 text-amber-700" />
+              : done ? <Chip label="인사 확정 · 재무 기록됨" tone="bg-emerald-50 text-emerald-700" />
+              : budget.status === "changed" ? <Chip label="확정 뒤 숫자가 바뀜" tone="bg-red-50 text-red-800" />
+              : <Chip label="확정 대기" tone="bg-amber-50 text-amber-700" />}
+            <span className="text-ink-700">인당 월 <b className="tabular-nums">{krw(budget.per_head_monthly)}</b> · 합계 <b className="tabular-nums">{krw(budget.total)}</b></span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs text-ink-500"><th className="py-1 pr-4 font-medium">팀</th><th className="py-1 pr-4 text-right font-medium">인원</th><th className="py-1 text-right font-medium">예산</th></tr></thead>
+              <tbody>
+                {budget.rows.map((r) => <tr key={r.team} className="border-t border-ink-100"><td className="py-1.5 pr-4">{r.team}</td><td className="py-1.5 pr-4 text-right tabular-nums">{r.headcount}명</td><td className="py-1.5 text-right tabular-nums">{krw(r.budget)}</td></tr>)}
+              </tbody>
+            </table>
+          </div>
+          {done && budget.approved && <p className="text-xs text-ink-500">{budget.approved.by_label ?? budget.approved.by}님이 확정 · {shortDateTime(budget.approved.at)}</p>}
+          {!done && (
+            <div className="flex flex-wrap items-center gap-3">
+              <button className="btn-primary" disabled={!HUMAN_TOKEN_SET || busy || !ready}
+                onClick={() => run(async () => { if (budget.signature) await hr.confirmTeamBudget(month, budget.signature); })}>
+                {monthMark(month)} 팀 예산 확정
+              </button>
+              {!ready && <p className="text-xs text-ink-500">예시 인원이거나 등록이 끝나지 않으면 확정할 수 없습니다.</p>}
+            </div>
+          )}
+        </>
+      )}
+    </Section>
+  );
 }
 
 export default function OrgChangesPage() {
@@ -87,7 +144,7 @@ export default function OrgChangesPage() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">조직 변동</h1>
-          <p className="mt-1 text-sm text-ink-500">팀 이동·입사·퇴사를 기록합니다. 확정한 내용으로 팀별 인원을 세고, 재무 AI가 팀 예산을 계산할 때 이 인원을 씁니다.</p>
+          <p className="mt-1 text-sm text-ink-500">팀 이동·입사·퇴사를 기록합니다. 확정한 내용으로 팀별 인원을 세고, 재무 AI가 이 인원으로 팀 예산을 계산합니다. 팀 예산은 여기서 인사 담당자가 확정하고, 재무는 기록만 합니다.</p>
         </div>
         <div className="ml-auto text-xs text-ink-500">{shortDateTime(data.collected_at)} 기준</div>
       </header>
@@ -157,7 +214,7 @@ export default function OrgChangesPage() {
               ? <Chip label="전 직원 등록 완료" tone="bg-emerald-50 text-emerald-700" />
               : <Chip label="등록 중" tone="bg-amber-50 text-amber-700" />}
             <p className="text-xs text-ink-500">
-              {data.roster_complete ? "재무 AI에는 확정한 발령으로 센 인원이 전달됩니다." : "등록이 끝나기 전에는 재무 AI에 예시 인원이 전달되고, 예산을 확정할 수 없습니다."}
+              {data.roster_complete ? "재무 AI에는 확정한 발령으로 센 인원이 전달됩니다." : "등록이 끝나기 전에는 재무 AI에 예시 인원이 전달되고, 팀 예산을 확정할 수 없습니다."}
             </p>
           </div>
           <div className="ml-auto">
@@ -202,7 +259,10 @@ export default function OrgChangesPage() {
           : <p className="rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-700">{preview?.message ?? "이 달의 인원을 알 수 없습니다."}</p>}
       </Section>
 
-      {/* ⑥ 발령 기록 */}
+      {/* ⑥ 팀 예산 확정 (확정은 인사, 재무는 기록만) */}
+      <BudgetConfirm month={month} headcountExample={!!preview?.example} busy={busy} run={run} />
+
+      {/* ⑦ 발령 기록 */}
       <Section title="발령 기록" desc="최근 순입니다. 확정된 것만 팀 인원에 세고, 초안과 반려는 세지 않습니다.">
         {data.changes.length === 0
           ? <p className="py-6 text-center text-sm text-ink-500">아직 발령 기록이 없습니다.</p>

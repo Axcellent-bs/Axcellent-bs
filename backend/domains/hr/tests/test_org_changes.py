@@ -376,3 +376,62 @@ def test_expected_member_count_comes_from_env(monkeypatch):
         assert roster._expected_member_count() == 6
     monkeypatch.delenv("HR_EXPECTED_MEMBERS")
     assert roster._expected_member_count() == 6
+
+
+# ---------------------------------------------------------------- 팀 예산 확정 (인사 → 재무 기록)
+from ax_contracts.schemas import AgentResult, TaskStatus  # noqa: E402
+from hr_agent.org import budget  # noqa: E402
+
+
+def _confirm_budget(client, signature="sig-1", key=None) -> dict:
+    inp = {"month": "2026-12", "signature": signature, "confirmed_by": "인사 담당"}
+    return client.post("/a2a", json=_body("confirm_team_budget", inp, key=key)).json()
+
+
+def _finance(monkeypatch, **fields) -> list:
+    sent: list = []
+
+    async def fake_send(target, req):
+        sent.append((target, req))
+        base = {"status": TaskStatus.COMPLETED, "output": {}}
+        return AgentResult(meta=req.meta, **{**base, **fields})
+
+    monkeypatch.setattr(budget, "SEND", fake_send)
+    return sent
+
+
+def test_confirming_the_team_budget_asks_finance_to_record_it(client, monkeypatch) -> None:
+    sent = _finance(
+        monkeypatch,
+        outcome="recorded",
+        output={"month": "2026-12", "status": "recorded", "total": 600000, "signature": "sig-1"},
+    )
+    res = _confirm_budget(client)
+    assert res["status"] == "completed" and res["outcome"] == "recorded"
+    assert res["output"]["total"] == 600000
+    target, req = sent[0]
+    assert target == "finance" and req.skill == "record_team_budget"
+    assert req.input == {
+        "month": "2026-12",
+        "signature": "sig-1",
+        "confirmed_by": "인사 담당",
+    }
+
+
+@pytest.mark.parametrize("code", ["stale", "team_headcount_unavailable", "example_headcount"])
+def test_finance_refusals_are_passed_back_not_hidden(client, monkeypatch, code) -> None:
+    _finance(monkeypatch, status=TaskStatus.FAILED, outcome=code, output={"message": "x"})
+    res = _confirm_budget(client)
+    assert res["outcome"] == code.upper()  # 확정한 것처럼 보이지 않는다
+
+
+def test_a_finance_outage_is_a_failure_not_a_confirmation(client, monkeypatch) -> None:
+    _finance(monkeypatch, status=TaskStatus.CANCELED, outcome="TIMEOUT")
+    assert _confirm_budget(client)["status"] == "failed"
+
+
+def test_only_the_dashboard_may_confirm_the_team_budget(client, monkeypatch) -> None:
+    sent = _finance(monkeypatch)
+    inp = {"month": "2026-12", "signature": "s", "confirmed_by": "x"}
+    res = client.post("/a2a", json=_body("confirm_team_budget", inp, token="mock:finance")).json()
+    assert res["status"] != "completed" and sent == []

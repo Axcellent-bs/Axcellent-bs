@@ -7,6 +7,7 @@
 | `team_headcount` | read |
 | `record_org_change` | A |
 | `decide_org_change` | A |
+| `confirm_team_budget` | A |
 | `list_org_changes` | read |
 | `set_org_roster_complete` | A |
 | `record_leave` | A |

@@ -25,6 +25,7 @@ from ax_contracts.schemas.hr import (
     ChangeStatus,
     CheckPlanInput,
     CheckPlanOutput,
+    ConfirmTeamBudgetOutput,
     DecideCandidateCardOutput,
     DecideDuplicateGroupOutput,
     DecideOrgChangeOutput,
@@ -109,6 +110,7 @@ from ax_dashboard_api.schemas import (
     StatusBody,
     Summary,
     SupportChatSendBody,
+    TeamBudgetConfirmBody,
     TextBody,
     TriageBody,
     Validation,
@@ -1474,6 +1476,24 @@ async def cancel_leave(request: Request, leave_id: str = Path(min_length=1, max_
         target=f"leave-cancel:{leave_id}",
     )
     return ok(CancelLeaveOutput.model_validate(out))
+
+
+@router.post("/org-budget/{month}/confirm")
+async def confirm_team_budget(
+    request: Request,
+    body: TeamBudgetConfirmBody,
+    month: str = Path(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+) -> dict:
+    """그 달 팀 예산 확정(사람 토큰 필요). 재무는 같은 숫자인지 보고 기록만 한다."""
+    _no_org_in_mock()
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = {"month": month, "signature": body.signature, "confirmed_by": who}
+    if body.note and body.note.strip():
+        payload["note"] = body.note.strip()
+    out = await hr_client.call(
+        "confirm_team_budget", payload, target=f"team-budget:{month}:{body.signature}"
+    )
+    return ok(ConfirmTeamBudgetOutput.model_validate(out))
 
 
 @router.get("/org-headcount")

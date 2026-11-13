@@ -303,6 +303,7 @@ SERVICES: tuple[Service, ...] = (
             "team_headcount",
             "record_org_change",
             "decide_org_change",
+            "confirm_team_budget",
             "list_org_changes",
             "set_org_roster_complete",
             "record_leave",
