@@ -996,14 +996,18 @@ async def preview_brief_media(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> 
 
 
 @router.post("/marketing/briefs/{proposal_id}/publish-request")
-async def request_brief_publish(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> dict:
+async def request_brief_publish(
+    proposal_id: str = Path(pattern=_PROPOSAL_ID), retry: bool = False
+) -> dict:
     """준비된 미디어 초안의 게시 요청(C등급 사람 승인 대기 건)을 만든다. 본문이 없다.
 
     마케팅 `request_brief_publish` → 기존 `publish_sns`. 이 호출은 승인 대기 건을 만들 뿐이고
     게시하지 않는다: 사람이 승인 화면에서 진행을 눌러야만 Instagram에 올라간다.
+    `?retry=true`는 승인 마감이 지나 닫힌 건을 사람이 다시 요청하는 것이다(같은 경로, 새 경로 없음).
+    마감 만료가 아닌 건은 마케팅이 `retry_*` 코드로 거부한다. 이 경로는 승인하지 않는다.
     """
     _no_org_in_mock()
-    return ok(await marketing_client.brief_publish_request_call(proposal_id))
+    return ok(await marketing_client.brief_publish_request_call(proposal_id, retry))
 
 
 class VideoPostPrepareBody(BaseModel):

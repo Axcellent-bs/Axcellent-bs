@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { shortDateTime, won } from "@/lib/format";
 import { briefs, mediaKindKo, mediaPreviewUrl, type StoredBrief } from "@/lib/briefs";
-import { estimateBlockKo, estimateLines, isReel, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishResultKo, publishStatusLine, waitKo, PUBLISH_EXPIRY_MIN, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
+import { ApprovalPanel } from "./ApprovalPanel";
+import { approvalLink, estimateBlockKo, estimateLines, isReel, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, waitKo, PUBLISH_EXPIRY_MIN, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
 
 // 넘어온 기획안 한 건의 "미디어 만들기". 저장된 미디어 요청(종류·필드)을 서버가 그대로 실행해 초안을 만든다.
 // - 누르면 먼저 예상 비용(서버가 단가표·장부에서 계산한 값)을 보여 주고, 사람이 확인해야 시작한다.
-// - 이 화면은 게시하지 않는다. "게시 요청"은 C 등급 승인 대기 건(10분 만료)만 만들고, 게시는 사람이 승인 화면에서 진행을 눌러야 한다.
+// - 이 화면은 게시하지 않는다. "게시 요청"은 C 등급 승인 대기 건(10분 만료)만 만들고, 게시는 사람 승인(카드 안 승인 패널 또는 승인 화면) 뒤에만 된다.
+// - 승인 시간이 지나 닫힌 건만 사람이 "다시 요청"할 수 있다(자동 재요청 없음).
 // - 숫자·상태는 서버가 준 값만 쓴다. 서버가 주지 않으면 비워 두고 버튼을 끈다.
 
 /** 만드는 중인 기획안. 목록이 새로 그려져도(15초 새로고침) 같은 건을 두 번 시작하지 않는다 */
@@ -21,18 +23,19 @@ const TONE: Record<string, string> = { info: "bg-brand-50 text-brand-700", ok: "
 function PublishRequest({ proposalId, prepared, state, onDone }: { proposalId: string; prepared: PreparedMedia; state: PublishState | null | undefined; onDone: () => void }) {
   const [step, setStep] = useState<"idle" | "confirm" | "busy">(() => (publishing.has(proposalId) ? "busy" : "idle"));
   const [result, setResult] = useState<PublishResult | null>(null);
+  const retryMode = useRef(false); // 확인 단계가 "다시 요청"인지
   const line = publishStatusLine(state);
   const link = (
-    <Link className="font-medium text-brand-700 underline" to="/marketing/campaign">사람 승인 화면 열기</Link>
+    <Link className="font-medium text-brand-700 underline" to={approvalLink(state?.review_id)}>사람 승인 화면 열기</Link>
   );
 
-  async function send() {
+  async function send(retry = false) {
     if (publishing.has(proposalId)) return; // 클릭 잠금
     publishing.add(proposalId);
     setStep("busy");
     setResult(null);
     try {
-      setResult(publishResultKo(await briefs.requestPublish(proposalId)));
+      setResult(publishResultKo(await briefs.requestPublish(proposalId, retry)));
     } catch (e) {
       setResult({ kind: "failed", text: publishHttpErrorKo((e as { status?: number }).status) });
     } finally {
@@ -44,10 +47,16 @@ function PublishRequest({ proposalId, prepared, state, onDone }: { proposalId: s
 
   // 서버가 요청할 수 있다고 알려 준 때만 버튼을 둔다(이미 대기·게시·거절된 건, 캐러셀 등은 숨김)
   const canRequest = HUMAN_TOKEN_SET && state?.can_request === true && state.status === "not_requested";
+  // 승인 시간이 지나 닫힌 건만 사람이 다시 요청할 수 있다(서버가 can_retry로 알려 준다)
+  const canRetry = HUMAN_TOKEN_SET && state?.status === "expired" && state.can_retry === true;
+  const retryBlocked = (state?.status === "expired" || state?.status === "rejected") && state.can_retry !== true && state.retry_reason_code
+    ? publishReasonKo(state.retry_reason_code) : null;
   return (
     <div className="space-y-2" aria-label={`${proposalId} 게시 요청`}>
       {line && <p className={`rounded-xl px-3 py-2 ${TONE[line.tone]}`} role="status">{line.text}</p>}
+      {state?.status === "held" && <ApprovalPanel key={state.review_id ?? "held"} state={state} onDone={onDone} />}
       {state?.status === "held" && <p>{link}</p>}
+      {retryBlocked && <p className="text-ink-500">{retryBlocked}</p>}
       {step === "busy" ? (
         <p className="text-ink-700" role="status">게시 요청을 보내는 중입니다.</p>
       ) : step === "confirm" ? (
@@ -60,16 +69,21 @@ function PublishRequest({ proposalId, prepared, state, onDone }: { proposalId: s
             </li>
             <li>AI 생성물 표시가 파일과 게시 값에 들어갑니다{prepared.label_text ? ` ("${prepared.label_text}")` : ""}.</li>
             <li>사람 승인이 한 번 더 필요합니다. 승인 화면에서 진행을 눌러야 게시됩니다.</li>
-            <li>승인 요청은 {PUBLISH_EXPIRY_MIN}분 뒤 만료됩니다. 만료되면 이 초안은 다시 요청할 수 없습니다.</li>
+            <li>승인 요청은 {PUBLISH_EXPIRY_MIN}분 뒤 만료됩니다. 시간이 지나 닫히면 사람이 다시 요청할 수 있습니다. 사람이 거절한 건은 다시 요청할 수 없습니다.</li>
           </ul>
           <div className="flex flex-wrap gap-2">
-            <button className="btn-primary text-xs" onClick={() => void send()}>게시 요청 보내기</button>
+            <button className="btn-primary text-xs" onClick={() => void send(retryMode.current)}>{retryMode.current ? "다시 요청 보내기" : "게시 요청 보내기"}</button>
             <button className="btn-ghost text-xs" onClick={() => setStep("idle")}>취소</button>
           </div>
         </div>
+      ) : canRetry ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button className="btn-primary text-xs" onClick={() => { retryMode.current = true; setResult(null); setStep("confirm"); }}>다시 요청</button>
+          <span className="text-ink-500">승인 시간이 지나 닫힌 건을 새 승인 대기로 다시 올립니다. 게시는 사람 승인 뒤에만 됩니다.</span>
+        </div>
       ) : canRequest ? (
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn-primary text-xs" onClick={() => { setResult(null); setStep("confirm"); }}>게시 요청</button>
+          <button className="btn-primary text-xs" onClick={() => { retryMode.current = false; setResult(null); setStep("confirm"); }}>게시 요청</button>
           <span className="text-ink-500">누르면 확인 단계가 먼저 나옵니다. 게시는 사람 승인 뒤에만 됩니다.</span>
         </div>
       ) : null}
@@ -114,7 +128,7 @@ function Prepared({ proposalId, prepared, publish, onDone }: { proposalId: strin
       {ready && !publish && (
         <p className="text-ink-700">
           게시는 C 등급이라 사람 승인이 필요합니다. 이 서버는 이 화면에서의 게시 요청을 아직 지원하지 않습니다.{" "}
-          <Link className="font-medium text-brand-700 underline" to="/marketing/campaign">사람 승인 화면 열기</Link>
+          <Link className="font-medium text-brand-700 underline" to={approvalLink(null)}>사람 승인 화면 열기</Link>
         </p>
       )}
     </div>

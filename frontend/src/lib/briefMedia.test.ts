@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 미디어 만들기의 비용 줄·결과 문구가 서버 값만 쓰는지.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { estimateBlockKo, estimateLines, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, type MediaEstimate, type PublishState } from "./briefMedia.ts";
+import { estimateBlockKo, estimateLines, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, remainingSeconds, remainingKo, canDecideNow, decideErrorKo, approvalLink, type MediaEstimate, type PublishState } from "./briefMedia.ts";
 
 const estimate = (over: Partial<MediaEstimate> = {}): MediaEstimate => ({
   status: "ok", reason_code: null, media_kind: "video", cost_krw: 835, settled: false, basis: "price_table",
@@ -90,4 +90,56 @@ test("게시 요청 연결 오류는 서버 문장 없이 상태별 문구", () 
   assert.match(publishHttpErrorKo(404), /지원하지 않/);
   assert.match(publishHttpErrorKo(504), /두 번 만들지 않습니다/);
   assert.match(publishHttpErrorKo(undefined), /다시 시도/);
+});
+
+test("남은 시간은 서버가 준 마감만 쓰고 1분 단위로 적는다", () => {
+  const now = Date.parse("2030-01-01T00:00:00Z");
+  assert.equal(remainingSeconds(null, now), null);
+  assert.equal(remainingSeconds("not-a-date", now), null);
+  assert.equal(remainingSeconds("2030-01-01T00:10:00Z", now), 600);
+  assert.equal(remainingKo(null), "남은 시간을 알 수 없습니다");
+  assert.equal(remainingKo(600), "약 10분 남음");
+  assert.equal(remainingKo(61), "약 2분 남음");
+  assert.equal(remainingKo(30), "1분 미만 남음");
+  assert.match(remainingKo(0), /지났습니다/);
+});
+
+test("승인 버튼은 확인 체크·이름·마감 전일 때만 켜진다", () => {
+  const ok = { tokenSet: true, reviewed: true, approver: "병환", remaining: 300, busy: false };
+  assert.equal(canDecideNow(ok), true);
+  assert.equal(canDecideNow({ ...ok, reviewed: false }), false);
+  assert.equal(canDecideNow({ ...ok, approver: null }), false);
+  assert.equal(canDecideNow({ ...ok, tokenSet: false }), false);
+  assert.equal(canDecideNow({ ...ok, busy: true }), false);
+  assert.equal(canDecideNow({ ...ok, remaining: 0 }), false);
+  assert.equal(canDecideNow({ ...ok, remaining: null }), true);
+});
+
+test("만료와 사람 거절은 다른 문구, 만료만 다시 요청을 안내한다", () => {
+  const expired = publishStatusLine(publish({ status: "expired", can_retry: true }))!.text;
+  assert.match(expired, /만료/);
+  assert.match(expired, /다시 요청/);
+  assert.doesNotMatch(publishStatusLine(publish({ status: "expired", can_retry: false }))!.text, /다시 요청/);
+  assert.match(publishStatusLine(publish({ status: "rejected", rejected_cause: "human" }))!.text, /사람이 거절/);
+  assert.match(publishStatusLine(publish({ status: "rejected", rejected_cause: "unknown" }))!.text, /구분할 수 없습니다/);
+});
+
+test("재요청 거부 코드는 코드별 한국어 안내", () => {
+  for (const code of ["retry_not_expired", "retry_rejected_by_human", "retry_cause_unknown", "retry_already_published", "retry_other_held"]) {
+    assert.ok(!publishReasonKo(code).includes(code), code);
+  }
+  assert.match(publishResultKo({ status: "failed", outcome: "retry_rejected_by_human", output: null }).text, /사람이 거절/);
+});
+
+test("승인 호출 오류는 본인 승인·이미 결정·권한을 가른다", () => {
+  assert.match(decideErrorKo(403, "SELF_APPROVAL"), /본인/);
+  assert.match(decideErrorKo(409, "ALREADY_DECIDED"), /이미 결정/);
+  assert.match(decideErrorKo(403, "HUMAN_ONLY"), /권한/);
+  assert.match(decideErrorKo(404, null), /찾을 수 없/);
+});
+
+test("승인 화면 링크는 건을 강조할 뿐 승인 정보를 담지 않는다", () => {
+  assert.equal(approvalLink("rev_1"), "/marketing/campaign?review=rev_1");
+  assert.equal(approvalLink(null), "/marketing/campaign");
+  assert.ok(!/approve|decision|token/i.test(approvalLink("rev_1")));
 });

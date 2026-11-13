@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ago, shortDateTime } from "@/lib/format";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { FIELD_SOURCE_KO, STATUS_STEPS, briefStatusKo, briefs, briefsError, briefsEnabled, draftStateKo, handoffReasonKo, mediaFieldKo, reviseProblemKo, safeLink, type BriefList, type MediaKindChoice, type StoredBrief } from "@/lib/briefs";
+import { ApprovalPanel } from "./ApprovalPanel";
 import { KindSelect, MediaRequestEditor, RecommendationLine } from "./MediaRequestEditor";
 
 // 받은 기획안. 기획이 사람 확정을 거쳐 넘긴 기획안을 마케팅이 받은 그대로 보여 준다(읽기만).
@@ -154,6 +155,10 @@ function Detail({ item, onDone }: { item: StoredBrief; onDone: () => void }) {
       {b.note && <p className="rounded-lg bg-ink-50 px-3 py-2 text-xs"><span className="text-ink-500">메모 </span>{b.note}</p>}
 
       <HandoffBox key={item.proposal_id} item={item} onDone={onDone} />
+
+      {item.sns_handoff?.publish?.status === "held" && (
+        <ApprovalPanel key={item.sns_handoff.publish.review_id ?? "held"} state={item.sns_handoff.publish} onDone={onDone} />
+      )}
 
       {b.body_md && (
         <details className="rounded-lg border border-ink-100 px-3 py-2 text-xs">

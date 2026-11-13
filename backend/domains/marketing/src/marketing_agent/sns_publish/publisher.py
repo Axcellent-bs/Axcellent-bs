@@ -73,6 +73,8 @@ from marketing_agent.sns_publish.pending import (
 
 ACTION = "publish_sns"
 SOURCE = "marketing"
+REVIEW_REJECTED = "review_rejected"  # 사람이 거절했다(옛 기록은 만료와 구분되지 않는다)
+REVIEW_TIMEOUT = "review_timeout"  # 마감까지 결정이 없어 자동 거절됐다(사람 재요청 대상)
 NOT_READY = "ig_not_ready"  # 9007/2207027
 NOT_READY_RETRIES = 1
 CAPTION_MAX = 2200
@@ -165,8 +167,10 @@ def params_sha(params: dict[str, Any]) -> str:
     )
 
 
-def idempotency_key(context_id: str, post_draft_id: str, sha: str) -> str:
-    return f"{context_id}:{ACTION}:{post_draft_id}:{sha[:12]}"
+def idempotency_key(context_id: str, post_draft_id: str, sha: str, attempt: int = 0) -> str:
+    """멱등 키. `attempt`는 사람이 만료 건을 다시 요청할 때만 1 이상이다(0이면 옛 키 그대로)."""
+    base = f"{context_id}:{ACTION}:{post_draft_id}:{sha[:12]}"
+    return f"{base}:r{attempt}" if attempt > 0 else base
 
 
 # 승인 시점의 "지금 내용". 기본은 저장해 둔 값에서 로컬 자산 파일이 있으면 그 해시를 다시 계산한다.
@@ -422,7 +426,10 @@ def _carousel_check(params: dict[str, Any], draft: Any) -> tuple[int, int, list[
     return media.overlay_missing, media.asset_changed, media.problems
 
 
-async def publish_sns(request: AgentRequest, sns_store: Any | None = None) -> AgentResult:
+async def publish_sns(
+    request: AgentRequest, sns_store: Any | None = None, *, attempt: int = 0
+) -> AgentResult:
+    """`attempt`는 입력이 아니라 호출 인자다: 만료 건의 사람 재요청에서 마케팅 코드만 넣는다."""
     try:
         data = PublishSnsInput.model_validate(request.input)
     except ValidationError as error:
@@ -439,7 +446,7 @@ async def publish_sns(request: AgentRequest, sns_store: Any | None = None) -> Ag
         params["asset_sha256"] = sns_media.carousel_sha256(list(data.asset_sha256s or []))
         params["asset_ref"] = ""
     sha = params_sha(params)
-    key = idempotency_key(request.meta.context_id, data.post_draft_id, sha)
+    key = idempotency_key(request.meta.context_id, data.post_draft_id, sha, attempt)
 
     # 실제 어댑터가 없으면 승인을 받으러 가기 전에 거부한다(받아도 게시할 수 없다)
     try:
@@ -601,8 +608,13 @@ async def _approve_and_publish(row: PendingPost, source: str) -> None:
 
 
 async def apply_decision(
-    row: PendingPost, decision: Literal["approved", "rejected"], source: str
+    row: PendingPost,
+    decision: Literal["approved", "rejected"],
+    source: str,
+    *,
+    expired: bool = False,
 ) -> None:
+    """`expired`는 거절이 사람 결정이 아니라 마감 만료(자동 거절)일 때만 참이다."""
     if row.status != HELD:
         _row_log(
             row,
@@ -611,7 +623,10 @@ async def apply_decision(
         )
         return
     if decision == "rejected":
-        _close(row, HELD, REJECTED, "review_rejected")
+        if expired:
+            _close(row, HELD, REJECTED, REVIEW_TIMEOUT)
+        else:  # `cause`로 새 기록과 구분 못 하던 옛 기록(cause 없음)을 가른다
+            _close(row, HELD, REJECTED, REVIEW_REJECTED, result={"cause": "human"})
         return
     await _approve_and_publish(row, source)
 
@@ -630,7 +645,8 @@ async def on_review_decided(envelope: EventEnvelope) -> None:
     row = store().by_review(data.review_id)
     if row is None or row.tenant_id != envelope.tenant_id:
         return
-    await apply_decision(row, data.decision, "event")
+    # 마감 만료는 안전 관문이 `system` 이름으로 자동 거절한다(사람 이름이 아니다)
+    await apply_decision(row, data.decision, "event", expired=data.decided_by == "system")
 
 
 def setup_subscriber() -> bool:
@@ -649,7 +665,8 @@ def setup_subscriber() -> bool:
 
 
 # -- 폴링 대비책
-async def _review_status(row: PendingPost, client: httpx.AsyncClient | None) -> str | None:
+async def _review_info(row: PendingPost, client: httpx.AsyncClient | None) -> dict[str, Any] | None:
+    """안전 관문 보류 건 조회(읽기 전용 GET). 못 읽으면 None, 다음 주기에 다시 묻는다."""
     if not row.review_id:
         return None
     http = client or httpx.AsyncClient()
@@ -660,7 +677,8 @@ async def _review_status(row: PendingPost, client: httpx.AsyncClient | None) -> 
             timeout=10.0,
         )
         response.raise_for_status()
-        return response.json()["data"]["status"]
+        data = response.json()["data"]
+        return data if isinstance(data, dict) and "status" in data else None
     except Exception:  # noqa: BLE001 - 다음 주기에 다시 묻는다
         return None
     finally:
@@ -668,16 +686,43 @@ async def _review_status(row: PendingPost, client: httpx.AsyncClient | None) -> 
             await http.aclose()
 
 
+async def _review_status(row: PendingPost, client: httpx.AsyncClient | None) -> str | None:
+    info = await _review_info(row, client)
+    return info["status"] if info else None
+
+
+async def remember_expiry(row: PendingPost, info: dict[str, Any] | None = None) -> None:
+    """안전 관문 보류 건의 마감 시각을 대기 건에 적어 둔다(조회 화면의 남은 시간).
+
+    `info`가 없으면 한 번 읽어 온다. 마감을 바꾸지 않고 적기만 한다.
+    """
+    info = info or await _review_info(row, None)
+    raw = (info or {}).get("expires_at")
+    if not isinstance(raw, str):
+        return
+    try:
+        stamp = datetime.fromisoformat(raw)
+    except ValueError:
+        return
+    with contextlib.suppress(PendingStorageError):
+        store().set_review_expiry(row.idempotency_key, stamp.astimezone(UTC).isoformat())
+
+
 async def poll_reviews_once(client: httpx.AsyncClient | None = None) -> int:
     """대기(held) 건마다 `GET /api/safety/reviews/{id}`로 결정을 확인한다. 이은 건수를 돌려준다."""
     handled = 0
     for row in store().with_status(HELD):
-        status = await _review_status(row, client)
+        info = await _review_info(row, client)
+        status = info["status"] if info else None
         if status == "approved":
             await apply_decision(row, "approved", "poll")
-        elif status in ("rejected", "expired"):
+        elif status == "rejected":
             await apply_decision(row, "rejected", "poll")
+        elif status == "expired":  # 거절과 만료를 구분해 기록한다
+            await apply_decision(row, "rejected", "poll", expired=True)
         else:
+            if status == "pending" and info is not None:
+                await remember_expiry(row, info)
             continue
         handled += 1
     return handled

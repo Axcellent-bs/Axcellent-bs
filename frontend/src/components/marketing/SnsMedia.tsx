@@ -39,7 +39,7 @@ const NOT_WIRED = "아직 화면에 연결되지 않았습니다.";
 const PIPELINE: { step: string; who: string; note: string }[] = [
   { step: "초안", who: "마케팅 AI", note: "게시된 공지, 공개 쿠폰 사실, 받은 기획안으로 캡션 초안을 만듭니다(draft_sns_post). AI 생성 표시 문구가 들어갑니다." },
   { step: "검사", who: "마케팅 AI", note: "AI 표시 누락·승인한 문구와의 차이·쿠폰 필수 안내 누락을 코드 규칙으로 점검합니다(check_sns_post)." },
-  { step: "사람 승인", who: "사람", note: "SNS 게시(publish_sns)는 C 등급이라 항상 안전 장치 보류 큐에서 사람이 승인해야 합니다." },
+  { step: "사람 승인", who: "사람", note: "SNS 게시(publish_sns)는 C 등급이라 항상 사람이 승인해야 합니다. 기획안 카드의 승인 패널이나 승인 화면에서 승인합니다." },
   { step: "게시", who: "마케팅 AI", note: "승인을 받은 뒤에만 게시합니다. 마케팅 AI가 스스로 승인하는 길은 없습니다." },
 ];
 
@@ -208,7 +208,7 @@ export function SnsMedia() {
         </ul>
       </Section>
 
-      <Section title="사람 결정 대기 (SNS·미디어)" desc="안전 장치 보류 큐에서 마케팅 AI가 요청한 SNS 게시·이미지·영상 만들기만 읽어 옵니다.">
+      <Section title="사람 결정 대기 (SNS·미디어)" desc="안전 장치 보류 큐에서 마케팅 AI가 요청한 SNS 게시·이미지·영상 만들기를 읽기만 하는 목록입니다. 게시 승인·거절은 위 기획안 카드의 승인 패널에서 하고, 이 목록에서는 누를 수 없습니다.">
         {error ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">보류 건을 읽지 못했습니다. {error}</p>
           : holds === null ? <Empty>불러오는 중입니다.</Empty>
             : holds.length === 0 ? <Empty>기다리는 건이 없습니다.</Empty> : (

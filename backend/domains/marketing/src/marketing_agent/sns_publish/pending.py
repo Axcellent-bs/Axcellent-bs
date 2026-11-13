@@ -169,6 +169,24 @@ class PendingStore:
     def with_status(self, status: str) -> list[PendingPost]:
         return self._query("WHERE status = ? ORDER BY created_at", (status,))
 
+    def with_content_sha(self, sha: str) -> list[PendingPost]:
+        """같은 내용(content_sha)의 모든 대기 건(재요청 거부 판단용)."""
+        return self._query("WHERE content_sha = ? ORDER BY created_at", (sha,))
+
+    def set_review_expiry(self, key: str, expires_at: str) -> None:
+        """held인 건에만 안전 관문 마감 시각을 `result.review_expires_at`에 적는다(상태 불변)."""
+        try:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "UPDATE sns_pending SET result = json_set(COALESCE(result, '{}'),"
+                    " '$.review_expires_at', ?) WHERE idempotency_key = ? AND status = ?",
+                    (expires_at, key, HELD),
+                )
+        except sqlite3.Error as error:
+            raise PendingStorageError(
+                f"마감 시각을 적을 수 없다: {type(error).__name__}"
+            ) from error
+
     def count_posts_since(self, since: datetime) -> int:
         """`since` 이후 게시된(또는 `media_publish`를 보낸) 건수. 게시 여부가 불확실한 건도 센다."""
         try:

@@ -175,9 +175,10 @@ async function makeMedia(proposalId: string): Promise<BriefMediaAnswer> {
  * 준비된 초안의 "게시 요청": 승인 대기 건(C 등급, 10분 만료)만 만든다. 게시하지 않는다.
  * 기획안 번호만 보낸다(글·파일은 서버가 보관본에서 읽는다). 오류는 상태 코드만 담아 던진다.
  */
-async function requestPublish(proposalId: string): Promise<PublishAnswer> {
+async function requestPublish(proposalId: string, retry = false): Promise<PublishAnswer> {
   const path = `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/publish-request`;
-  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
+  // retry: 승인 시간이 지나 닫힌 건을 사람이 다시 요청한다(같은 경로, 서버가 만료 건만 받는다). 승인하지 않는다
+  const res = await fetch(`${DASHBOARD_API_URL}${path}${retry ? "?retry=true" : ""}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.data) throw new ApiError(`요청 실패 (${res.status})`, res.status);
   return json.data as PublishAnswer;
