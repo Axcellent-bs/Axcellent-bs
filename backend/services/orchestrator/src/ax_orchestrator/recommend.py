@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 USABLE = ("resolved", "workaround")  # 미해결 이벤트의 기록은 추천 근거로 쓰지 않는다
-CAVEAT = "과거 이벤트의 기록이며 이번 이벤트의 원인으로 확정된 것이 아니다. 사람이 확인한다."
+CAVEAT = "과거 이슈의 기록이며 이번 이슈의 원인으로 확정된 것이 아니다. 사람이 확인한다."
 
 
 def recommend(similar: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -30,11 +30,11 @@ def recommend(similar: dict[str, Any] | None) -> dict[str, Any] | None:
     ]
     if not usable:
         if not cases:
-            reason = "비슷한 과거 이벤트가 없음"
+            reason = "비슷한 과거 이슈가 없음"
         elif not same:
-            reason = f"같은 유형의 과거 이벤트가 없음 (다른 유형 {len(cases)}건은 참고용)"
+            reason = f"같은 유형의 과거 이슈가 없음 (다른 유형 {len(cases)}건은 참고용)"
         else:
-            reason = "비슷한 과거 이벤트는 있으나 해결된 기록(원인·조치)이 없음"
+            reason = "비슷한 과거 이슈는 있으나 해결된 기록(원인·조치)이 없음"
         return {"status": "no_evidence", "reason": reason}
     # 다시 할 수 있는 처리 방식(action_code)이 남은 사례를 먼저, 그다음 유사도 순
     best = max(

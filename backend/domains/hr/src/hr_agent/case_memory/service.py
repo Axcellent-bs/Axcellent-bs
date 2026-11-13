@@ -159,7 +159,7 @@ async def record_resolution(svc: Services, request: AgentRequest) -> AgentResult
             outcome="duplicate",
             evidence=make_evidence(
                 svc.clock,
-                f"이미 해결 기록이 있어 바꾸지 않음: 이벤트 {params.context_id}",
+                f"이미 해결 기록이 있어 바꾸지 않음: 이슈 {params.context_id}",
                 [card.card_id],
             ),
         )
@@ -182,9 +182,7 @@ async def record_resolution(svc: Services, request: AgentRequest) -> AgentResult
         action_code=params.action_code,
     )
     key = f"record_resolution:{card.card_id}:{_payload_hash(resolution)}"
-    evidence = make_evidence(
-        svc.clock, f"해결 내용 기록: 이벤트 {params.context_id}", [card.card_id]
-    )
+    evidence = make_evidence(svc.clock, f"해결 내용 기록: 이슈 {params.context_id}", [card.card_id])
     if svc.idem.get(key) is not None:
         svc.audit.record(
             params.context_id, "record_resolution.duplicate", {"card_id": card.card_id}
@@ -285,7 +283,7 @@ async def record_event_times(svc: Services, request: AgentRequest) -> AgentResul
         else None
     )
     timings_changed = new_timings is not None and new_timings != card.extra.get("step_timings")
-    evidence = make_evidence(svc.clock, f"이벤트 시각 기록: {params.context_id}", [card.card_id])
+    evidence = make_evidence(svc.clock, f"이슈 시각 기록: {params.context_id}", [card.card_id])
     if not fresh and not timings_changed:
         return completed(
             request,
@@ -446,9 +444,9 @@ async def find_similar_cases(svc: Services, request: AgentRequest) -> AgentResul
         collected_at=svc.clock(),
     )
     summary = (
-        f"비슷한 과거 이벤트 {len(cases)}건 ({method})"
+        f"비슷한 과거 이슈 {len(cases)}건 ({method})"
         if cases
-        else "비슷한 과거 이벤트 없음: 기록에 없음"
+        else "비슷한 과거 이슈 없음: 기록에 없음"
     )
     return completed(
         request,

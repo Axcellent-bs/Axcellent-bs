@@ -1,6 +1,6 @@
 import { ago } from "@/lib/format";
 import CardBody from "@/components/hr/CardBody";
-import { authorKo, plainText, type HrCard } from "@/lib/hr";
+import { authorKo, issueWord, plainText, type HrCard } from "@/lib/hr";
 
 // 결정 기록 화면: 확정된(후보가 아닌) 결정 카드 한 장. 값은 인사 AI가 저장한 그대로 보여 준다.
 const CONF_KO = { low: "낮음", mid: "보통", high: "높음" } as const;
@@ -17,14 +17,14 @@ export function DecisionCard({ card }: { card: HrCard }) {
   return (
     <article className="space-y-2 rounded-2xl border border-ink-100 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <b className="text-base">{plainText(card.title).replace(/ · 문의 #\d+ 처리 결과 기록: /, " · ")}</b>
+        <b className="text-base">{issueWord(card, plainText(card.title).replace(/ · 문의 #\d+ 처리 결과 기록: /, " · "))}</b>
         <Chip label="확정" tone="bg-emerald-50 text-emerald-700" />
         {card.confidence && <Chip label={`AI 확신도 ${CONF_KO[card.confidence]}`} tone="bg-ink-100 text-ink-500" />}
         {fromPlanning && <Chip label="기획 AI" tone="bg-violet-50 text-violet-700" />}
         {isDemo && <Chip label="시연 주입" tone="bg-amber-50 text-amber-700" />}
       </div>
       <CardBody card={card} />
-      <p className="text-sm text-ink-500" title={`카드 ${card.card_id} · 이벤트 ${card.context_id}`}>{authorKo(card.author)}가 {ago(card.created_at)} 남김</p>
+      <p className="text-sm text-ink-500" title={`카드 ${card.card_id} · 이슈 ${card.context_id}`}>{authorKo(card.author)}가 {ago(card.created_at)} 남김</p>
     </article>
   );
 }

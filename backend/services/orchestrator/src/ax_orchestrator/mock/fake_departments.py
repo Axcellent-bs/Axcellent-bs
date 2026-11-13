@@ -306,7 +306,7 @@ def _past_release(similarity: float, action_code: str = "release_fault") -> dict
         cases=[
             {
                 "card_id": card_id,
-                "title": "[이벤트] payment 장애",
+                "title": "[이슈] payment 장애",
                 "similarity": similarity,
                 "same_type": True,
                 "resolution": {

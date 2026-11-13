@@ -1,7 +1,7 @@
 import type { OrchIncident } from "@/lib/agentChat";
 import { durationKo, secondsBetween, segmentsOf, type EventTimes as Times } from "@/lib/duration";
 
-// 이벤트 하나가 어떻게 흘렀는지. 시각은 모두 시스템이 잰 값이다(단계 완료, 사람 할 일함, 쇼핑몰의 정상 복귀 신호).
+// 이슈 하나가 어떻게 흘렀는지. 시각은 모두 시스템이 잰 값이다(단계 완료, 사람 할 일함, 쇼핑몰의 정상 복귀 신호).
 const clock = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit", second: "2-digit" }) : null;
 
@@ -18,7 +18,7 @@ export default function EventTimes({ inc }: { inc: OrchIncident & { timeline?: T
   return (
     <section className="card space-y-3 p-6">
       <div>
-        <h2 className="text-lg font-semibold">이벤트 타임라인</h2>
+        <h2 className="text-lg font-semibold">이슈 타임라인</h2>
         <p className="mt-1 text-xs text-ink-500">시각은 모두 시스템이 자동으로 잰 값입니다. 괄호 안은 장애를 감지한 뒤 걸린 시간입니다.</p>
       </div>
       <ol className="space-y-1.5 text-sm">
@@ -38,7 +38,7 @@ export default function EventTimes({ inc }: { inc: OrchIncident & { timeline?: T
           )}
         </p>
       )}
-      {t.prior_case_id && <p className="text-xs text-ink-500">시작할 때 같은 유형의 과거 이벤트를 근거로 봤어요(반복 장애).</p>}
+      {t.prior_case_id && <p className="text-xs text-ink-500">시작할 때 같은 유형의 과거 이슈를 근거로 봤어요(반복 장애).</p>}
     </section>
   );
 }

@@ -294,7 +294,7 @@ class Engine:
     async def run(self, inc: Incident, plan: Plan) -> Incident:
         for step in plan.steps:
             inc.steps[step.id] = StepRun(step.id, step.skill, step.label)
-        inc.log(f"이벤트 시작: {inc.title}")
+        inc.log(f"이슈 시작: {inc.title}")
         await self._publish("incident.opened", inc)
         self._save(inc)
 
@@ -820,7 +820,7 @@ class Engine:
             run.output["_next_payload"] = {**payload, "answers": {q_skill: dict(answer.output)}}
             return False
         run.status = "skipped"
-        run.note = "고객 자료 대기 — 이벤트 요약에 남김"
+        run.note = "고객 자료 대기 — 이슈 요약에 남김"
         run.finished_at = now()
         inc.log(f"{run.label}: 고객 입력 대기(보류)")
         return True
@@ -1205,7 +1205,7 @@ class Engine:
             # 인사가 꺼진 회사: 시각 기록은 사람이 할 일이 아니라 참고 기록이라 보내지 않는다.
             # (라우터는 읽기 조회가 아니면 꺼진 서비스 요청을 사람 할 일함에 넣으므로 여기서 멈춘다)
             inc.times_off = True
-            inc.log("이벤트 시각 기록 건너뜀: 인사 서비스가 꺼져 있음")
+            inc.log("이슈 시각 기록 건너뜀: 인사 서비스가 꺼져 있음")
             return
         fresh = {
             name: at.isoformat()
@@ -1246,12 +1246,12 @@ class Engine:
             result = await self.caller(entry.dept, req)
             outcome = (result.output or {}).get("outcome")
         except Exception as exc:  # noqa: BLE001 - 시각 기록 실패가 이벤트 처리를 막지 않게 한다
-            inc.log(f"이벤트 시각 기록 실패: {type(exc).__name__}")
+            inc.log(f"이슈 시각 기록 실패: {type(exc).__name__}")
             return
         if getattr(result.outcome, "value", result.outcome) == ErrorCode.SERVICE_DISABLED.value:
             # 인사가 꺼진 회사: 시각 기록은 사람이 할 일이 아니라 참고 기록이라 넘기지 않고 멈춘다
             inc.times_off = True
-            inc.log("이벤트 시각 기록 건너뜀: 인사 서비스가 꺼져 있음")
+            inc.log("이슈 시각 기록 건너뜀: 인사 서비스가 꺼져 있음")
             return
         if outcome in ("recorded", "duplicate"):
             inc.times_sent.update(fresh)
@@ -1259,9 +1259,9 @@ class Engine:
             if send_timings and timings_digest is not None:
                 inc.times_sent["step_timings"] = timings_digest
                 sent.append("step_timings")
-            inc.log(f"이벤트 시각 기록: {', '.join(TIME_KO.get(k, k) for k in sent)}")
+            inc.log(f"이슈 시각 기록: {', '.join(TIME_KO.get(k, k) for k in sent)}")
         else:
-            inc.log(f"이벤트 시각 기록 보류: {outcome or '결과 없음'}")
+            inc.log(f"이슈 시각 기록 보류: {outcome or '결과 없음'}")
 
     async def _close(self, inc: Incident, plan: Plan) -> None:
         required = {s.id for s in plan.steps if s.required}
@@ -1271,7 +1271,7 @@ class Engine:
         inc.settle_after_recovery()  # 복구 신호를 먼저 받았으면 장애 중으로 남기지 않는다
         inc.summary = [self._summary_line(r) for r in inc.steps.values()]
         inc.metrics = incident_metrics(inc)
-        inc.log(f"이벤트 종료: {inc.status}")
+        inc.log(f"이슈 종료: {inc.status}")
         log_resolved(inc)  # 해결로 닫히면 공통 로그에 복구 시각을 남긴다 (degraded는 남기지 않음)
         await self.sync_times(inc)
         self._save(inc)
@@ -1302,7 +1302,7 @@ class Engine:
         try:
             self.persist(inc)
         except Exception:  # noqa: BLE001 - 저장 실패가 장애 대응을 막으면 안 된다
-            log.exception("이벤트 저장 실패: %s", inc.context_id)
+            log.exception("이슈 저장 실패: %s", inc.context_id)
 
 
 def incident_metrics(inc: Incident) -> dict[str, Any]:

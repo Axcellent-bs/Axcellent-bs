@@ -7,18 +7,18 @@ import RepeatCompare from "@/components/hr/RepeatCompare";
 import EventTimes from "@/components/hr/EventTimes";
 import ResolutionForm from "@/components/hr/ResolutionForm";
 
-// 결정 기록 화면(실제 모드): 캣북스 이벤트가 나면 총괄 AI가 인사 AI에게 이벤트 기록(record_case)을 맡긴다.
-// 그 단계를 총괄 이벤트 목록(dashboard-api /incidents)에서 꺼내 "어느 이벤트를, 언제, 무엇으로, 어떤 상태로" 기록했는지 보여 주고,
-// 고른 이벤트에서 인사 AI가 한 일(dashboard-api /hr-activity)을 시간순으로 보여 준다.
-// 화면에는 사람이 읽는 말만 쓰고, 이벤트 번호·카드 번호·기록 종류 코드는 마우스를 올리면(title) 보인다.
+// 결정 기록 화면(실제 모드): 캣북스 이슈가 나면 총괄 AI가 인사 AI에게 이슈 기록(record_case)을 맡긴다.
+// 그 단계를 총괄 이슈 목록(dashboard-api /incidents)에서 꺼내 "어느 이슈를, 언제, 무엇으로, 어떤 상태로" 기록했는지 보여 주고,
+// 고른 이슈에서 인사 AI가 한 일(dashboard-api /hr-activity)을 시간순으로 보여 준다.
+// 화면에는 사람이 읽는 말만 쓰고, 이슈 번호·카드 번호·기록 종류 코드는 마우스를 올리면(title) 보인다.
 
 const RECORD_SKILL = "record_case";
 
-// 고른 이벤트를 보는 탭. 위아래로 길게 이어지던 구역을 하나로 묶었다
+// 고른 이슈를 보는 탭. 위아래로 길게 이어지던 구역을 하나로 묶었다
 type TabId = "work" | "times" | "resolution";
 const TABS: { id: TabId; label: string }[] = [
   { id: "work", label: "AI가 한 일" },
-  { id: "times", label: "이벤트 타임라인" },
+  { id: "times", label: "이슈 타임라인" },
   { id: "resolution", label: "해결 내용" },
 ];
 // 탭 안에서는 각 구역의 카드 테두리를 빼서 카드 안에 카드가 겹쳐 보이지 않게 한다
@@ -38,8 +38,8 @@ const STEP_KO: Record<string, { label: string; tone: string }> = {
 const OUTCOME_KO: Record<string, string> = {
   card_created: "결정 카드를 기록으로 저장했어요",
   candidate: "AI가 확신하지 못해 확정 전 기록으로 남겼어요 (사람 확인 필요)",
-  record_only: "결정이 없는 이벤트라 기록만 남겼어요",
-  duplicate: "이미 기록된 이벤트라 다시 저장하지 않았어요",
+  record_only: "결정이 없는 이슈라 기록만 남겼어요",
+  duplicate: "이미 기록된 이슈라 다시 저장하지 않았어요",
 };
 const CONF_KO: Record<string, string> = { low: "낮음", mid: "보통", high: "높음" };
 // 인사 AI 감사 기록의 종류 (domains/hr audit.record)
@@ -81,19 +81,19 @@ function auditDetail(e: AuditEntry): string {
   return parts.join(" · ");
 }
 
-// ---------------------------------------------------------------- 이벤트 기록 목록 + 고른 이벤트의 타임라인
+// ---------------------------------------------------------------- 이슈 기록 목록 + 고른 이슈의 타임라인
 export default function IncidentRecords({ initialCtx = null }: { initialCtx?: string | null }) {
   const [incidents, setIncidents] = useState<OrchIncident[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string | null>(initialCtx); // 총괄 이벤트 화면에서 넘어오면 그 이벤트를 먼저 보여 준다
+  const [picked, setPicked] = useState<string | null>(initialCtx); // 총괄 이슈 화면에서 넘어오면 그 이슈를 먼저 보여 준다
 
   const load = useCallback(async () => {
     try {
       const all = await hr.incidents();
-      // 인사 AI에게 이벤트 기록을 맡긴 이벤트만, 최근 이벤트가 위로
+      // 인사 AI에게 이슈 기록을 맡긴 이슈만, 최근 이슈가 위로
       const mine = all.filter((i) => recordStep(i)).sort((a, b) => (b.opened_at ?? "").localeCompare(a.opened_at ?? ""));
       setIncidents(mine); setErr(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : "이벤트 목록을 받지 못했습니다"); }
+    } catch (e) { setErr(e instanceof Error ? e.message : "이슈 목록을 받지 못했습니다"); }
   }, []);
   useEffect(() => {
     load();
@@ -101,7 +101,7 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
     return () => clearInterval(poll);
   }, [load]);
 
-  // 고른 이벤트가 없으면 가장 최근 이벤트
+  // 고른 이슈가 없으면 가장 최근 이슈
   const current = incidents?.find((i) => i.context_id === picked) ?? incidents?.[0] ?? null;
   const [tab, setTab] = useState<TabId>("work");
   // 총괄 화면에서 "결정 기록에서 보기"로 넘어오면 카드 아래에 있는 이 구역으로 바로 내려간다
@@ -111,15 +111,15 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
   return (
     <section ref={top} aria-labelledby="records-title" className="card space-y-4 p-6">
       <div>
-        <h2 id="records-title" className="text-lg font-semibold">AI가 남긴 이벤트 기록</h2>
-        <p className="mt-1 text-xs text-ink-500">캣북스에 이벤트가 나면 총괄 AI가 인사 AI에게 기록을 맡깁니다. 왼쪽에서 이벤트를 고르면 오른쪽에서 인사 AI가 한 일과 시간, 해결 내용을 볼 수 있습니다.</p>
+        <h2 id="records-title" className="text-lg font-semibold">AI가 남긴 이슈 기록</h2>
+        <p className="mt-1 text-xs text-ink-500">캣북스에 이슈가 나면 총괄 AI가 인사 AI에게 기록을 맡깁니다. 왼쪽에서 이슈를 고르면 오른쪽에서 인사 AI가 한 일과 시간, 해결 내용을 볼 수 있습니다.</p>
       </div>
       {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
       {!incidents ? (!err && <p className="py-6 text-center text-sm text-ink-500">불러오는 중…</p>)
-        : incidents.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">아직 인사 AI가 기록한 이벤트가 없습니다.</p>
+        : incidents.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">아직 인사 AI가 기록한 이슈가 없습니다.</p>
         : (
           <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-            <ul className="max-h-[34rem] divide-y divide-ink-100 overflow-y-auto rounded-2xl border border-ink-100" aria-label="이벤트 목록">
+            <ul className="max-h-[34rem] divide-y divide-ink-100 overflow-y-auto rounded-2xl border border-ink-100" aria-label="이슈 목록">
               {incidents.map((inc) => <RecordRow key={inc.context_id} inc={inc} active={inc.context_id === current?.context_id} onPick={() => setPicked(inc.context_id)} />)}
             </ul>
             {current && (
@@ -127,11 +127,11 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
                 <div>
                   <p className="font-semibold" title={`${current.title} · ${current.context_id}`}>{incidentName(current)}</p>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
-                    <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">총괄 이벤트에서 보기 →</Link>
+                    <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">총괄 이슈에서 보기 →</Link>
                     <Link href={`/agent-eval?ctx=${encodeURIComponent(current.context_id)}`} className="inline-block text-xs font-semibold text-brand-600 underline underline-offset-2">에이전트 평가에서 단계별 시간 보기 →</Link>
                   </div>
                 </div>
-                <div role="tablist" aria-label="고른 이벤트" className="flex flex-wrap gap-1">
+                <div role="tablist" aria-label="고른 이슈" className="flex flex-wrap gap-1">
                   {TABS.map((t) => (
                     <button key={t.id} type="button" role="tab" id={`rec-tab-${t.id}`} aria-selected={tab === t.id} aria-controls={`rec-panel-${t.id}`} onClick={() => setTab(t.id)}
                       className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${tab === t.id ? "bg-brand-600 text-white" : "bg-surface text-ink-700 ring-1 ring-ink-100 hover:bg-ink-100"}`}>
@@ -178,7 +178,7 @@ function RecordRow({ inc, active, onPick }: { inc: OrchIncident; active: boolean
         </span>
         <span className="flex flex-wrap gap-1.5">
           <Chip label={st.label} tone={st.tone} title={step.status} />
-          <Chip label={`이벤트 ${INCIDENT_STATUS_KO[inc.status] ?? "상태 확인 필요"}`} tone="bg-ink-100 text-ink-500" title={inc.status} />
+          <Chip label={`이슈 ${INCIDENT_STATUS_KO[inc.status] ?? "상태 확인 필요"}`} tone="bg-ink-100 text-ink-500" title={inc.status} />
         </span>
       </button>
     </li>
@@ -202,11 +202,11 @@ function Timeline({ inc }: { inc: OrchIncident }) {
   if (!rows) return <p className="text-xs text-ink-500">불러오는 중…</p>;
   return (
     <ol className="divide-y divide-ink-100 rounded-2xl border border-ink-100">
-      {/* 총괄 AI가 인사 AI에게 기록을 맡긴 시각 (총괄 이벤트 기록) */}
+      {/* 총괄 AI가 인사 AI에게 기록을 맡긴 시각 (총괄 이슈 기록) */}
       {step?.started_at && (
         <li className="flex flex-wrap items-baseline gap-x-3 px-4 py-2 text-xs" title={`${step.skill} · ${inc.context_id}`}>
           <span className="tabular-nums text-ink-500">{clockKo(step.started_at)}</span>
-          <span className="font-medium">총괄 AI가 인사 AI에게 이벤트 기록을 맡김</span>
+          <span className="font-medium">총괄 AI가 인사 AI에게 이슈 기록을 맡김</span>
           <span className="text-ink-500">{incidentTitle(inc)}</span>
         </li>
       )}
@@ -217,7 +217,7 @@ function Timeline({ inc }: { inc: OrchIncident }) {
           <span className="text-ink-500">{auditDetail(r)}</span>
         </li>
       ))}
-      {rows.length === 0 && <li className="px-4 py-2 text-xs text-ink-500">인사 AI 쪽에는 이 이벤트의 처리 내역이 아직 없습니다.</li>}
+      {rows.length === 0 && <li className="px-4 py-2 text-xs text-ink-500">인사 AI 쪽에는 이 이슈의 처리 내역이 아직 없습니다.</li>}
     </ol>
   );
 }

@@ -79,10 +79,10 @@ const STEP_NAME: Record<string, string> = {
   compensation: "영향 고객 일괄 보상", recovery: "복구 검증", late_compensation: "복구 뒤 놓친 고객 보상 대기",
   recovered_draft: "정상화 공지 초안", cost: "처리 결과 장부에 기록",
   compensation_sns_draft: "보상 안내 SNS 글 초안", apology_sns_draft: "사과 안내 SNS 글 초안",
-  diagnose: "원인 진단", impact: "영향 분석", similar_cases: "비슷한 과거 이벤트 찾기", root_cause: "원인 후보 추정",
+  diagnose: "원인 진단", impact: "영향 분석", similar_cases: "비슷한 과거 이슈 찾기", root_cause: "원인 후보 추정",
   cause_check: "원인 확인 요청", rollback: "문제 배포를 이전 버전으로 되돌리기", related_prs: "관련 PR 찾기",
-  link_incident: "이벤트에 PR 연결", notice: "점검 공지 초안", notice_publish: "점검 공지 게시", publish_notice: "점검 공지 게시",
-  recovered_notice: "정상화 공지", end_notice: "장애 배너 내리기", kpi: "처리 시간 요약", record: "이벤트 기록", resolution: "해결 내용 기록",
+  link_incident: "이슈에 PR 연결", notice: "점검 공지 초안", notice_publish: "점검 공지 게시", publish_notice: "점검 공지 게시",
+  recovered_notice: "정상화 공지", end_notice: "장애 배너 내리기", kpi: "처리 시간 요약", record: "이슈 기록", resolution: "해결 내용 기록",
 };
 const REASON_CODE: Record<string, string> = {
   gate_rejected: "안전 확인 단계에서 막힘", metric_not_supported: "아직 분석하지 못하는 항목", service_disabled: "해당 서비스가 꺼져 있음",
@@ -146,8 +146,13 @@ export function cardRows(card: Pick<HrCard, "title" | "body" | "kind">): CardRow
     const parts = [get("결과"), known(get("원인")) && `원인 ${known(get("원인"))}`, known(get("조치")) && `조치 ${known(get("조치"))}`].filter(Boolean);
     if (parts.length) rows.push({ label: "해결", text: parts.join(" · ") });
   }
-  return rows;
+  return card.kind === "incident" ? rows.map((r) => ({ ...r, text: issueWord(card, r.text) })) : rows;
 }
+
+/** 예전에 저장된 장애 대응 카드는 "이벤트"로 적혀 있다. 화면에서만 "이슈"로 보여 준다(저장된 글은 그대로).
+ *  업무 결정 카드는 프로모션 같은 다른 뜻의 "이벤트"가 있을 수 있어 바꾸지 않는다 */
+export const issueWord = (card: Pick<HrCard, "kind">, text: string) =>
+  card.kind === "incident" ? text.replace(/이벤트/g, "이슈") : text;
 
 /** 카드를 남긴 주체 이름을 사람이 읽는 말로 (총괄·부서 코드) */
 export const authorKo = (author: string) => DEPT_NAME[author] ?? author;
@@ -182,12 +187,12 @@ const post = <T>(path: string, body: unknown) => call<T>(path, { method: "POST",
 
 export const hr = {
   candidateCards: () => call<HrCard[]>("/candidate-cards"),
-  /** 확정된(후보가 아닌) 결정 카드, 최근 순. 이벤트 번호를 주면 그 이벤트에서 만든 카드만 */
+  /** 확정된(후보가 아닌) 결정 카드, 최근 순. 이슈 번호를 주면 그 이슈에서 만든 카드만 */
   decisionCards: (contextId?: string, limit = 50) =>
     call<HrCard[]>(`/decision-cards?limit=${limit}${contextId ? `&context_id=${encodeURIComponent(contextId)}` : ""}`),
   decide: (cardId: string, decision: "approve" | "reject") =>
     post<{ card_id: string; status: string }>(`/candidate-cards/${encodeURIComponent(cardId)}/decision`, { decision }),
-  /** 사람이 이벤트의 해결 내용을 적는다. 소요 시간은 서버가 openedAt부터 잰다 */
+  /** 사람이 이슈의 해결 내용을 적는다. 소요 시간은 서버가 openedAt부터 잰다 */
   recordResolution: (contextId: string, body: ResolutionInput) =>
     post<{ outcome: string; card_id: string | null }>(`/incidents/${encodeURIComponent(contextId)}/resolution`, body),
   duplicateGroups: () => call<DuplicateView>("/duplicate-groups"),
@@ -213,9 +218,9 @@ export const hr = {
   /** 그 달 팀별 인원 미리 보기. 재무에 나가는 값과 같다 */
   orgHeadcount: (month: string) => call<OrgHeadcount>(`/org-headcount?month=${encodeURIComponent(month)}`),
   activity: (contextId: string) => call<AuditEntry[]>(`/hr-activity/${encodeURIComponent(contextId)}`),
-  /** 에이전트 평가: 최근 장애 이벤트에서 각 에이전트가 일한 시간을 기준과 견준 판정 모음 (읽기) */
+  /** 에이전트 평가: 최근 장애 이슈에서 각 에이전트가 일한 시간을 기준과 견준 판정 모음 (읽기) */
   agentEvaluation: (limit = 30) => call<AgentEvaluation>(`/agent-evaluation?limit=${limit}`),
   checkPlan: (draft: PlanDraft) => post<PlanCheck>("/plan-checks", { draft }),
-  /** 총괄 이벤트 목록(dashboard-api가 총괄 /api/incidents를 중계). 인사 AI의 이벤트 기록 단계(record_case)가 들어 있다 */
+  /** 총괄 이슈 목록(dashboard-api가 총괄 /api/incidents를 중계). 인사 AI의 이슈 기록 단계(record_case)가 들어 있다 */
   incidents: () => call<OrchIncident[]>("/incidents"),
 };

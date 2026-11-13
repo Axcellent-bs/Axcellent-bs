@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import type { OrchIncident } from "@/lib/agentChat";
 import { hr, type HrCard } from "@/lib/hr";
 
-// 이벤트를 고친 사람이 "무슨 일이었고 어떻게 고쳤는지"를 확인해 남기는 칸. 비슷한 장애가 다시 나면 총괄이 이 기록을 근거로 보여 준다.
+// 이슈를 고친 사람이 "무슨 일이었고 어떻게 고쳤는지"를 확인해 남기는 칸. 비슷한 장애가 다시 나면 총괄이 이 기록을 근거로 보여 준다.
 // 총괄이 아는 사실(원인 후보·끝난 롤백)이 있으면 초안으로 미리 채운다. 초안은 사람이 확인하고 눌러야 저장된다.
-// 이 칸은 원인과 조치를 남기는 곳이고 시간은 재지 않는다. 시간은 시스템이 감지부터 정상 복귀까지 잰다(이벤트 타임라인).
+// 이 칸은 원인과 조치를 남기는 곳이고 시간은 재지 않는다. 시간은 시스템이 감지부터 정상 복귀까지 잰다(이슈 타임라인).
 const OUTCOME_KO = { resolved: "해결됨", workaround: "임시 조치", unresolved: "미해결" } as const;
 type Outcome = keyof typeof OUTCOME_KO;
 const MAX = 300;
@@ -20,7 +20,7 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  // 이벤트가 바뀌거나 초안이 새로 생기거나 바뀌면(사람이 아직 손대지 않았을 때만) 초안으로 채운다
+  // 이슈가 바뀌거나 초안이 새로 생기거나 바뀌면(사람이 아직 손대지 않았을 때만) 초안으로 채운다
   const draftKey = JSON.stringify(draft);
   const [touched, setTouched] = useState(false);
   useEffect(() => { setTouched(false); setMsg(null); }, [inc.context_id]);
@@ -73,7 +73,7 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
   return (
     <section className="card space-y-3 p-6">
       <div>
-        <h2 className="text-lg font-semibold">이 이벤트의 해결 내용 확인하고 남기기</h2>
+        <h2 className="text-lg font-semibold">이 이슈의 해결 내용 확인하고 남기기</h2>
         <p className="mt-1 text-xs text-ink-500">원인을 확인하고 고친 사람이 확인해 남깁니다. 비워 두면 "확인할 수 없음"으로 남습니다. 시간은 사람이 적지 않고 시스템이 위 타임라인에서 잽니다.</p>
       </div>
       {draft && (
@@ -81,13 +81,13 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
           <b>{matchesDraft ? "AI 초안 · 사람 확인 전" : "AI 초안을 고쳤어요"}</b>
           <span className="ml-2">
             {draft.source === "past_case"
-              ? "같은 유형의 과거 이벤트에서 가져왔어요. 이번 원인과 같은지 확인하거나 고친 뒤 남겨 주세요."
+              ? "같은 유형의 과거 이슈에서 가져왔어요. 이번 원인과 같은지 확인하거나 고친 뒤 남겨 주세요."
               : "총괄이 아는 사실만 채웠어요. 맞는지 확인하거나 고친 뒤 남겨 주세요."}
           </span>
           <ul className="mt-1 list-disc pl-5">{draft.basis.map((b) => <li key={b}>{b}</li>)}</ul>
           {draft.source === "past_case" && draft.this_event_cause && (
             <p className="mt-2 rounded-lg bg-white/60 px-3 py-2">
-              <b>이번 이벤트에서 AI가 찾은 후보(참고용, 칸에는 넣지 않았어요)</b>
+              <b>이번 이슈에서 AI가 찾은 후보(참고용, 칸에는 넣지 않았어요)</b>
               <span className="mt-0.5 block">{draft.this_event_cause}</span>
             </p>
           )}
@@ -110,7 +110,7 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중…" : "확인했어요, 해결 내용 남기기"}</button>
-        {prior && <span className="text-xs text-ink-500">이 이벤트는 시작할 때 비슷한 과거 이벤트를 근거로 봤어요(반복 장애로 기록).</span>}
+        {prior && <span className="text-xs text-ink-500">이 이슈는 시작할 때 비슷한 과거 이슈를 근거로 봤어요(반복 장애로 기록).</span>}
         {msg && <span role={msg.ok ? "status" : "alert"} className={`text-xs ${msg.ok ? "text-emerald-700" : "text-red-700"}`}>{msg.text}</span>}
       </div>
     </section>

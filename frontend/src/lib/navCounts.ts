@@ -31,7 +31,7 @@ async function count(part: 'planning' | 'dev'): Promise<number | undefined> {
   }
 }
 
-/** 총괄 이벤트들의 사람 승인 대기 건수. 읽지 못하면 숫자를 지운다 */
+/** 총괄 이슈들의 사람 승인 대기 건수. 읽지 못하면 숫자를 지운다 */
 async function heldCount(): Promise<number | undefined> {
   if (!relayEnabled) return undefined
   try {

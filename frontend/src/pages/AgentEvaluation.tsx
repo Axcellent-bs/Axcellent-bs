@@ -29,7 +29,7 @@ function Section({ title, desc, children }: { title: string; desc?: string; chil
   );
 }
 
-/** 이벤트 하나에서 에이전트가 한 일을 점 하나로. 모양·글자·색을 같이 쓰고, 누르면 아래 단계 시간으로 이동한다 */
+/** 이슈 하나에서 에이전트가 한 일을 점 하나로. 모양·글자·색을 같이 쓰고, 누르면 아래 단계 시간으로 이동한다 */
 function Dot({ d, onPick }: { d: AgentSummary["recent"][number]; onPick: () => void }) {
   const v = VERDICT[d.verdict];
   const hint = `${d.title} · ${v.label}${d.reason ? ` · ${d.reason}` : ""}`;
@@ -49,11 +49,11 @@ function AgentCard({ a, onPick }: { a: AgentSummary; onPick: (ctx: string) => vo
     <article className="rounded-2xl border border-ink-100 bg-surface p-5">
       <header className="flex flex-wrap items-baseline gap-2">
         <h3 className="text-[15px] font-semibold">{agentName(a.dept)}</h3>
-        <span className="text-xs text-ink-500">참여한 이벤트 {a.events}건</span>
+        <span className="text-xs text-ink-500">참여한 이슈 {a.events}건</span>
       </header>
       <p className={`mt-2 text-sm font-medium ${TONE_TEXT[r.tone]}`}>{r.text}</p>
       {a.recent.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5" role="list" aria-label={`${agentName(a.dept)} 최근 이벤트`}>
+        <div className="mt-3 flex flex-wrap gap-1.5" role="list" aria-label={`${agentName(a.dept)} 최근 이슈`}>
           {a.recent.slice(0, RECENT_DOTS).map((d) => <span role="listitem" key={d.context_id}><Dot d={d} onPick={() => onPick(d.context_id)} /></span>)}
         </div>
       )}
@@ -66,29 +66,29 @@ function AgentCard({ a, onPick }: { a: AgentSummary; onPick: (ctx: string) => vo
       {lastLate?.reason && <p className="mt-3 text-xs text-ink-600">가장 최근 확인이 필요했던 이유: {lastLate.reason}</p>}
       {a.repeats.length > 0 && (
         <ul className="mt-3 space-y-1 text-xs text-ink-500">
-          {a.repeats.map((x) => <li key={x.event_type}>같은 유형의 이벤트에서 {x.count}번 확인이 필요했어요: {x.title}</li>)}
+          {a.repeats.map((x) => <li key={x.event_type}>같은 유형의 이슈에서 {x.count}번 확인이 필요했어요: {x.title}</li>)}
         </ul>
       )}
     </article>
   );
 }
 
-/** 날짜별 이벤트 수와, 그중 확인이 필요했던 이벤트 수 */
+/** 날짜별 이슈 수와, 그중 확인이 필요했던 이슈 수 */
 function Trend({ data }: { data: DailyTrend[] }) {
-  if (data.length === 0) return <p className="text-sm text-ink-500">날짜별로 볼 이벤트가 아직 없어요.</p>;
+  if (data.length === 0) return <p className="text-sm text-ink-500">날짜별로 볼 이슈가 아직 없어요.</p>;
   const top = Math.max(1, ...data.map((d) => d.events));
   const W = 56;
   const H = 120;
   return (
     <div className="overflow-x-auto">
-      <svg role="img" aria-label="날짜별 이벤트 수와 확인이 필요했던 이벤트 수" width={Math.max(260, data.length * W + 16)} height={H + 44}>
+      <svg role="img" aria-label="날짜별 이슈 수와 확인이 필요했던 이슈 수" width={Math.max(260, data.length * W + 16)} height={H + 44}>
         {data.map((d, i) => {
           const x = 8 + i * W;
           const total = (d.events / top) * H;
           const look = (d.with_check / top) * H;
           return (
             <g key={d.day}>
-              <title>{`${shortDate(d.day)}: 이벤트 ${d.events}건 중 확인이 필요했던 이벤트 ${d.with_check}건`}</title>
+              <title>{`${shortDate(d.day)}: 이슈 ${d.events}건 중 확인이 필요했던 이슈 ${d.with_check}건`}</title>
               <rect x={x} y={H - total} width={W - 18} height={total} rx={4} className="fill-emerald-200" />
               <rect x={x} y={H - look} width={W - 18} height={look} rx={4} className="fill-amber-400" />
               <text x={x + (W - 18) / 2} y={H + 16} textAnchor="middle" className="fill-ink-600 text-[11px]">{shortDate(d.day)}</text>
@@ -98,8 +98,8 @@ function Trend({ data }: { data: DailyTrend[] }) {
         })}
       </svg>
       <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-ink-500">
-        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-emerald-200" />이벤트 수</span>
-        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" />확인이 필요했던 이벤트</span>
+        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-emerald-200" />이슈 수</span>
+        <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" />확인이 필요했던 이슈</span>
       </p>
     </div>
   );
@@ -225,19 +225,19 @@ export default function AgentEvaluationPage() {
         </p>
         {data.use_promised && (
           <p className="mt-1 text-xs text-ink-500">
-            기준 시간은 로컬 이벤트 기록으로 잡은 <b>임시 값</b>이에요. 몇십 분 걸리는 긴 작업은 총 시간이 아니라 부서의 응답이 <b>{secondsKo(data.max_silence_seconds)}</b> 넘게 끊겼는지를 봐요.
+            기준 시간은 로컬 이슈 기록으로 잡은 <b>임시 값</b>이에요. 몇십 분 걸리는 긴 작업은 총 시간이 아니라 부서의 응답이 <b>{secondsKo(data.max_silence_seconds)}</b> 넘게 끊겼는지를 봐요.
           </p>
         )}
         <p className="mt-1 text-xs text-ink-500">시간만 본 결과예요. 일의 품질을 평가한 것이 아니고, 확인이 필요하다는 건 잘못했다는 뜻이 아니라 한 번 살펴보라는 뜻이에요.</p>
       </section>
 
       {data.events.length === 0 ? (
-        <Section title="아직 평가할 이벤트가 없어요">
-          <p className="text-sm text-ink-600">장애 이벤트가 끝나면 여기에 나타나요.</p>
+        <Section title="아직 평가할 이슈가 없어요">
+          <p className="text-sm text-ink-600">장애 이슈가 끝나면 여기에 나타나요.</p>
         </Section>
       ) : (
         <>
-          <Section title="에이전트별 현황" desc={few ? `이벤트가 ${MIN_EVENTS}건 이상 쌓이면 문장으로 요약해 드려요.` : "점을 누르면 그 이벤트의 단계별 시간으로 이동해요. 왼쪽이 가장 최근이에요."}>
+          <Section title="에이전트별 현황" desc={few ? `이슈가 ${MIN_EVENTS}건 이상 쌓이면 문장으로 요약해 드려요.` : "점을 누르면 그 이슈의 단계별 시간으로 이동해요. 왼쪽이 가장 최근이에요."}>
             <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               {data.agents.map((a) => <AgentCard key={a.dept} a={a} onPick={(ctx) => { setPicked(ctx); document.getElementById("event-steps")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} />)}
             </div>
@@ -248,13 +248,13 @@ export default function AgentEvaluationPage() {
             </p>
           </Section>
 
-          <Section title="날짜별 흐름" desc="하루 이벤트 수와, 그중 확인이 필요했던 이벤트 수예요.">
+          <Section title="날짜별 흐름" desc="하루 이슈 수와, 그중 확인이 필요했던 이슈 수예요.">
             <Trend data={data.trend} />
           </Section>
 
           <div id="event-steps" className="scroll-mt-4">
-            <Section title="이벤트별 단계 시간" desc="이벤트를 고르면 단계마다 시간을 나눠서 볼 수 있어요.">
-              <select className="field" aria-label="이벤트 고르기" value={current?.context_id ?? ""} onChange={(e) => setPicked(e.target.value)}>
+            <Section title="이슈별 단계 시간" desc="이슈를 고르면 단계마다 시간을 나눠서 볼 수 있어요.">
+              <select className="field" aria-label="이슈 고르기" value={current?.context_id ?? ""} onChange={(e) => setPicked(e.target.value)}>
                 {data.events.map((e) => <option key={e.context_id} value={e.context_id}>{e.title}{e.at ? ` (${shortDateTime(e.at)})` : ""}</option>)}
               </select>
               {current && (
@@ -262,7 +262,7 @@ export default function AgentEvaluationPage() {
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
                     {current.criteria_version !== data.criteria_version && <span>그때 기준: 임시 기준 {current.criteria_version}판</span>}
                     <Link href={`/ops?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">결정 기록에서 보기 →</Link>
-                    <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">총괄 이벤트에서 보기 →</Link>
+                    <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">총괄 이슈에서 보기 →</Link>
                   </div>
                   <EventTimeline ev={current} />
                 </>

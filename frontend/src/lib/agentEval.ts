@@ -97,16 +97,16 @@ export const VERDICT: Record<Verdict, { label: string; mark: string; dot: string
   absent: { label: "참여 안 함", mark: "–", dot: "text-ink-300", chip: "bg-ink-100 text-ink-500" },
 };
 
-/** 문장으로 요약할 최근 이벤트 수와, 이보다 적으면 판단을 미루는 기준 */
+/** 문장으로 요약할 최근 이슈 수와, 이보다 적으면 판단을 미루는 기준 */
 export const SENTENCE_WINDOW = 5;
 export const MIN_EVENTS = 3;
 
 export type Tone = "good" | "look" | "bad" | "none";
 
-/** 에이전트 한 줄 요약. 이벤트가 적으면 단정하지 않는다. */
+/** 에이전트 한 줄 요약. 이슈가 적으면 단정하지 않는다. */
 export function readout(a: AgentSummary): { text: string; tone: Tone } {
   const joined = a.recent.filter((d) => d.verdict !== "absent");
-  if (joined.length === 0) return { text: "아직 참여한 이벤트가 없어요.", tone: "none" };
+  if (joined.length === 0) return { text: "아직 참여한 이슈가 없어요.", tone: "none" };
   if (joined.length < MIN_EVENTS) return { text: "아직 기록이 적어서 판단하기 이릅니다.", tone: "none" };
   const last = joined.slice(0, SENTENCE_WINDOW);
   const count = (...v: Verdict[]) => last.filter((d) => v.includes(d.verdict)).length;

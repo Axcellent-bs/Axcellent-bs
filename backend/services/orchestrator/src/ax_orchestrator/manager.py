@@ -135,7 +135,7 @@ class IncidentManager:
         try:
             self.store.save(inc)
         except Exception:  # noqa: BLE001 - 저장 실패가 이벤트 처리를 막지 않게 한다
-            log.exception("이벤트 저장 실패: %s", inc.context_id)
+            log.exception("이슈 저장 실패: %s", inc.context_id)
 
     def restore(self) -> int:
         """저장된 이벤트와 처리한 event_id를 불러온다. 진행 중이던 이벤트의 수를 돌려준다.
@@ -168,7 +168,7 @@ class IncidentManager:
         inc.settle_after_recovery()  # 복구 신호를 이미 받았으면 장애 중으로 남기지 않는다
         inc.summary = [Engine._summary_line(run) for run in inc.steps.values()]
         inc.metrics = incident_metrics(inc)
-        inc.log(f"총괄이 다시 켜져 진행 중이던 이벤트를 이어 가지 않았다: {INTERRUPTED_NOTE}")
+        inc.log(f"총괄이 다시 켜져 진행 중이던 이슈를 이어 가지 않았다: {INTERRUPTED_NOTE}")
         log_resolved(inc)  # 열려 있는 동안 복구 신호를 받아 해결로 바뀐 경우만 남는다
 
     def judge(self, env: EventEnvelope) -> str:
@@ -304,7 +304,7 @@ class IncidentManager:
                 existing.log(f"이벤트 수신: {env.type.value} ({env.source})")
             return "noted", existing
         if existing is not None:
-            existing.log(f"같은 이벤트에 합침: {env.type.value} ({env.source}, {env.event_id})")
+            existing.log(f"같은 이슈에 합침: {env.type.value} ({env.source}, {env.event_id})")
             return "merged", existing
         inc = Incident(
             context_id=Incident.new_context_id(),

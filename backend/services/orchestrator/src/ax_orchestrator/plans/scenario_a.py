@@ -586,7 +586,7 @@ def _scenario_a() -> Plan:
             Step(
                 "similar_cases",
                 "find_similar_cases",
-                "비슷한 과거 이벤트 찾기 (hr)",
+                "비슷한 과거 이슈 찾기 (hr)",
                 build=_similar,
                 required=False,
             ),
@@ -642,7 +642,7 @@ def _scenario_a() -> Plan:
             Step(
                 "link_incident",
                 "link_incident",
-                "이벤트에 코드 변경 연결 (dev)",
+                "이슈에 코드 변경 연결 (dev)",
                 after=("related_prs",),
                 build=_link,
                 required=False,
@@ -750,7 +750,7 @@ def _scenario_a() -> Plan:
             Step(
                 "record",
                 "record_case",
-                "이벤트 기록 (hr)",
+                "이슈 기록 (hr)",
                 also_after=(
                     "recovered_notice",
                     "end_notice",
