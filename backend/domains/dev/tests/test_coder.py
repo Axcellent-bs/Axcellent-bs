@@ -1435,6 +1435,75 @@ def test_pause_stops_running_coder_and_resume_restarts(service, adapter) -> None
     assert c.status == "merged" and c.error is None
 
 
+def _big_repo() -> list[str]:
+    # 이름순으로 앞 폴더(dashboard-web)만 수백 개, 고칠 파일은 뒤쪽 shop-web에 있다
+    front = [f"dashboard-web/src/components/w{i:04d}.tsx" for i in range(900)]
+    back = [
+        "shop-web/src/components/shop/NoticeBanners.tsx",
+        "shop-web/src/components/shop/Cart.tsx",
+        "shop-web/src/pages/index.tsx",
+    ]
+    return sorted(front + back)
+
+
+def test_listing_pulls_paths_named_in_the_task_to_the_front() -> None:
+    rows = _big_repo()
+    text = (
+        "shop-web/src/components/shop/NoticeBanners.tsx에서 "
+        "'주문은 판매 서버(shop-api)로 바로 들어갑니다.' 문구 삭제"
+    )
+    out = coder.listing_for(rows, (), text)
+    assert out[0] == "shop-web/src/components/shop/NoticeBanners.tsx"
+    assert len(out) == coder.MAX_LISTING
+    # 이름만 적어도 같은 이름 파일을 찾고, 폴더를 적으면 그 아래 파일을 당긴다
+    assert coder.mentioned("NoticeBanners.tsx 문구", rows) == [
+        "shop-web/src/components/shop/NoticeBanners.tsx"
+    ]
+    assert set(coder.mentioned("shop-web/src/components/shop/ 아래", rows)) == {
+        "shop-web/src/components/shop/NoticeBanners.tsx",
+        "shop-web/src/components/shop/Cart.tsx",
+    }
+    assert coder.mentioned("없는 파일 nope/Missing.tsx", rows) == []
+
+
+def test_listing_ranks_task_words_and_keeps_every_folder_visible() -> None:
+    rows = _big_repo()
+    # 경로를 안 적어도 작업 낱말(notice·banner)로 후보가 앞에 온다
+    out = coder.listing_for(rows, (), "쇼핑몰 notice banner 문구 바꾸기")
+    assert out[0] == "shop-web/src/components/shop/NoticeBanners.tsx"
+    # 글에 단서가 없어도 이름순으로 자르지 않고 폴더마다 번갈아 넣어 뒤 폴더도 보인다
+    plain = coder.listing_for(rows)
+    assert any(p.startswith("shop-web/") for p in plain)
+    assert coder.by_folder(["a/1", "a/2", "a/3", "b/1", "x"]) == ["a/1", "b/1", "x", "a/2", "a/3"]
+
+
+def test_coder_finds_a_named_file_past_the_list_limit(service: PlanningService, adapter) -> None:
+    # 담당 경로 없이, 이름순 2000개 컷 뒤에 있는 파일을 작업 글에 적어 둔 경우
+    from dev_agent.vcs.base import LIST_LIMIT
+
+    target = "shop-web/src/components/shop/NoticeBanners.tsx"
+    adapter.seed_files({f"dashboard-web/src/w{i:05d}.ts": "x\n" for i in range(LIST_LIMIT + 10)})
+    adapter.seed_files({target: "export const A = '주문은 판매 서버로 바로 들어갑니다.'\n"})
+    assert target not in run(adapter.list_files())  # 기본 한도로는 안 보인다
+    fake = FakeLLM(
+        plan=CodePlan(files=[FilePick(path=target, action="modify", reason="문구 삭제")]),
+        writes={target: "export const A = ''\n"},
+    )
+    coder.set_llm(fake)
+    run(
+        _go(
+            service,
+            title="공지 배너 문구 삭제",
+            plan=f"{target}에서 '주문은 판매 서버(shop-api)로 바로 들어갑니다.' 문구 삭제",
+            done="문구가 보이지 않는다",
+        )
+    )
+    c = _task(service).coding
+    assert c is not None and c.status == "merged", (c and c.status, c and c.error)
+    plan_data = fake.calls[0][2]
+    assert plan_data["files"][0] == target and plan_data["mentioned"] == [target]
+
+
 def test_secret_files_never_listed_or_picked() -> None:
     secrets = [
         ".env", "backend/.env.local", "deploy/server.pem", "keys/id_rsa", "ssh/id_ed25519.pub",
