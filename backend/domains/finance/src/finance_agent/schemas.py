@@ -110,6 +110,9 @@ class SupportCostInput(AxModel):
     claim_decision: Literal["approve", "reject"] | None = None
     coupon_id: str | None = None
     refund_amount: int | None = Field(default=None, ge=0)
+    # 바뀌지 않는 문의 ID (고객지원 #1082, 문의의 사건 ID `ctx_…`). 문의 번호는 고객지원 저장소를
+    # 새로 시작하면 1부터 다시 매겨져 예전 기록과 겹치므로, 있으면 기록을 이것으로 구분한다
+    inquiry_ref: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class SupportCostOutput(AxModel):
