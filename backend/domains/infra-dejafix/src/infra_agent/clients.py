@@ -20,6 +20,8 @@ from ax_agent_template.config import agent_token, agent_url, is_mock
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 
 FAULTS_PATH = "/api/shop/admin/faults"
+# 쇼핑몰 결제 설정 버전(잘못된 배포 시연). 인프라 토큰은 읽기와 되돌리기만 통한다
+PAYMENT_VERSION_PATH = "/api/shop/admin/payment-version"
 SHOP_TIMEOUT_SECONDS = 10.0
 DATA_TIMEOUT_SECONDS = 20.0
 PAYMENT_METRICS = ["payment_fail_rate", "order_fail_count"]
@@ -29,6 +31,10 @@ class ShopClient(Protocol):
     async def fault_state(self) -> dict[str, Any]: ...
 
     async def release_fault(self) -> dict[str, Any]: ...
+
+    async def payment_version(self) -> dict[str, Any]: ...
+
+    async def rollback_payment_version(self, to_version: str) -> dict[str, Any]: ...
 
 
 class DataClient(Protocol):
@@ -45,6 +51,7 @@ class MockShop:
         default_factory=lambda: {"active": False, "failing": False, "degraded": False}
     )
     released: int = 0
+    payment_rollbacks: int = 0
 
     async def fault_state(self) -> dict[str, Any]:
         return dict(self.state)
@@ -55,6 +62,16 @@ class MockShop:
         was_on = bool(self.state.get("active", False))
         self.state.update(active=False, failing=False)
         return {**self.state, "released": was_on}
+
+    async def payment_version(self) -> dict[str, Any]:
+        return {"version": self.state.get("payment_version", "v1")}
+
+    async def rollback_payment_version(self, to_version: str) -> dict[str, Any]:
+        """실제 쇼핑몰처럼: 이전 버전으로만 되돌리고 되돌리기 전·후를 돌려준다."""
+        before = str(self.state.get("payment_version", "v1"))
+        self.payment_rollbacks += 1
+        self.state["payment_version"] = to_version
+        return {"before": before, "version": to_version, "changed": before != to_version}
 
 
 @dataclass
@@ -95,6 +112,23 @@ class HttpShop:
     async def release_fault(self) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=SHOP_TIMEOUT_SECONDS) as client:
             response = await client.delete(self.base_url + FAULTS_PATH, headers=self._headers())
+        response.raise_for_status()
+        return dict(response.json().get("data") or {})
+
+    async def payment_version(self) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=SHOP_TIMEOUT_SECONDS) as client:
+            url = self.base_url + PAYMENT_VERSION_PATH
+            response = await client.get(url, headers=self._headers())
+        response.raise_for_status()
+        return dict(response.json().get("data") or {})
+
+    async def rollback_payment_version(self, to_version: str) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=SHOP_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                self.base_url + PAYMENT_VERSION_PATH + "/rollback",
+                json={"to_version": to_version},
+                headers=self._headers(),
+            )
         response.raise_for_status()
         return dict(response.json().get("data") or {})
 

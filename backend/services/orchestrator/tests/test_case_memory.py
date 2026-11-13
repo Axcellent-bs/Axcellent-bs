@@ -116,6 +116,32 @@ async def test_switch_off_fault_is_not_fixed_by_release_and_goes_to_a_person(har
 
 
 @pytest.mark.asyncio
+async def test_a_past_rollback_is_not_replayed_as_a_release(harness) -> None:
+    """과거 같은 장애가 배포를 되돌려 풀렸으면 장애 상태 해제를 하지 않는다."""
+    harness.fakes.script("infra", "diagnose_incident", "undetermined")
+    harness.fakes.script("hr", "find_similar_cases", "past_rollback")
+    inc = await run(harness)
+    assert called(harness, "release_fault") == []
+    past = inc.steps["past_fix"]
+    assert (past.status, past.reason_code) == ("skipped", "past_case_rollback")
+    # 되돌릴 배포를 진단이 못 찾았으니 사람에게 넘긴다(과거 조치는 참고로 붙는다)
+    rollback = inc.steps["rollback"]
+    assert rollback.status == "transfer_queued" and "되돌림" in rollback.note
+
+
+@pytest.mark.asyncio
+async def test_a_found_bad_deploy_is_rolled_back_whatever_the_past_case(harness) -> None:
+    """진단이 원인 배포를 찾았으면 과거 사례가 해제였어도 되돌리기로 처리한다."""
+    harness.fakes.script("hr", "find_similar_cases", "past_release")
+    inc = await run(harness)
+    assert called(harness, "release_fault") == []
+    assert inc.steps["past_fix"].reason_code == "cause_found"
+    assert inc.steps["rollback"].status == "completed"
+    sent = called(harness, "record_resolution")[0].input
+    assert sent["action_code"] == "rollback_deployment"
+
+
+@pytest.mark.asyncio
 async def test_a_less_similar_past_case_is_not_replayed(harness) -> None:
     harness.fakes.script("infra", "diagnose_incident", "undetermined")
     harness.fakes.script("hr", "find_similar_cases", "past_release_low")

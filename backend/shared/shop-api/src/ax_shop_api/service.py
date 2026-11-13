@@ -146,6 +146,20 @@ PROMISED_DELIVERY_DAYS = 3
 
 BASELINE_LATENCY_MS = 180.0  # 평소 p95 기준(시연용)
 
+# 결제 설정 버전 (시연용 "잘못된 배포"). v1 정상, v2 잘못된 배포: 결제사 승인이 500대로 실패한다.
+# 장애 스위치(active)가 아니라 설정 버전이라 해제로는 안 풀리고, 이전 버전으로 되돌려야 풀린다.
+PAYMENT_VERSIONS = ("v1", "v2")  # 앞이 이전 버전
+GOOD_PAYMENT_VERSION, BAD_PAYMENT_VERSION = PAYMENT_VERSIONS
+# v2의 실패 코드. 토스 테스트 키면 승인 요청에 이 값을 `TossPayments-Test-Code`로 붙여 토스가 500을
+# 돌려주게 하고, 가짜 결제사면 같은 코드로 실패시킨다
+BAD_CONFIG_PG_CODE = "FAILED_INTERNAL_SYSTEM_PROCESSING"
+
+
+def _check_version(version: str) -> None:
+    if version not in PAYMENT_VERSIONS:
+        known = ", ".join(PAYMENT_VERSIONS)
+        raise ShopError("UNKNOWN_VERSION", f"결제 설정 버전은 {known}", 422)
+
 
 class Gateway:
     """가짜 결제 서버. 요청한 대로(`simulate`) 성공·실패를 돌려준다.
@@ -164,6 +178,8 @@ class Gateway:
         # `pg_ok`로만 끈다.
         # "AI가 고치지 못하는 장애" 시연용. 결제마다 실제로 기다린다(`pg_wait`)
         self.pg_delay_ms = 0
+        # 결제 설정 버전(`PAYMENT_VERSIONS`). 장애 스위치가 아니다(active·release에 안 들어간다)
+        self.config_version = GOOD_PAYMENT_VERSION
 
     def inject(self, kind: str, delay_ms: int = 0) -> None:
         if kind == "latency":
@@ -197,6 +213,11 @@ class Gateway:
         latency = BASELINE_LATENCY_MS + self.delay_ms
         if self.failing:
             return PaymentOutcome(False, "PG_UNAVAILABLE", latency, server_error=True)
+        if self.config_version == BAD_PAYMENT_VERSION:  # 잘못된 배포: 결제사가 500으로 실패
+            return PaymentOutcome(
+                False, "PG_UNAVAILABLE", latency, server_error=True,
+                failure_detail=BAD_CONFIG_PG_CODE,
+            )  # fmt: skip
         if self.lost_response and simulate != "failure":
             return PaymentOutcome(
                 False, TIMEOUT_CODE, latency, server_error=True,
@@ -220,6 +241,9 @@ class Shop:
         self.monitor = monitor or Monitor(db)
         self.clock = clock
         self.last_release: dict[str, Any] | None = None
+        # 결제 설정 버전이 지금 값이 된 시각·바꾼 쪽 (켤 때는 v1, 바꾼 쪽 없음)
+        self.payment_version_since = _now()
+        self.payment_version_by: str | None = None
 
     # --- 조회 -------------------------------------------------------------
     def list_sellers(self) -> list[dict[str, Any]]:
@@ -1003,6 +1027,8 @@ class Shop:
             "lost_response": self.gateway.lost_response,
             # 결제사 쪽 지연(시험용). 장애 스위치(active)가 아니라 따로 둔다. 0이면 꺼짐
             "pg_delay_ms": self.gateway.pg_delay_ms,
+            # 결제 설정 버전(잘못된 배포 시연). 장애 스위치가 아니다
+            "payment_version": self.gateway.config_version,
             "degraded": self.monitor.degraded,
             # 마지막으로 켜져 있던 스위치를 끈 기록 ({"released_by", "released_at"}). 없으면 None
             "last_release": self.last_release,
@@ -1017,6 +1043,43 @@ class Shop:
         결제가 이어지면 모니터가 지표로 복구를 판정한다(`recovery=metrics_normal`)."""
         self.gateway.pg_ok()
         return self.fault_state()
+
+    # --- 결제 설정 버전 (시연용 "잘못된 배포") -------------------------------------
+    def payment_version(self) -> dict[str, Any]:
+        return {
+            "version": self.gateway.config_version,
+            "since": self.payment_version_since,
+            "changed_by": self.payment_version_by,
+            "versions": list(PAYMENT_VERSIONS),
+        }
+
+    def _set_version(self, version: str, by: str | None) -> None:
+        self.gateway.config_version = version
+        self.payment_version_since = _now()
+        self.payment_version_by = by
+
+    def set_payment_version(self, version: str, by: str | None) -> dict[str, Any]:
+        """결제 설정을 그 버전으로 배포한다(사람만). 같은 버전이면 바꾸지 않는다."""
+        _check_version(version)
+        before = self.gateway.config_version
+        if version != before:
+            self._set_version(version, by)
+        return {**self.payment_version(), "before": before, "changed": version != before}
+
+    def rollback_payment_version(self, to_version: str, by: str | None) -> dict[str, Any]:
+        """결제 설정을 이전 버전으로 되돌린다(인프라 AI 롤백·사람). 앞으로는 바꾸지 못한다.
+
+        이미 그 버전이면 바꾸지 않는다(`changed=false`). 응답의 `before`·`version`으로 되돌리기 전
+        ·후를 확인한다."""
+        _check_version(to_version)
+        before = self.gateway.config_version
+        if PAYMENT_VERSIONS.index(to_version) > PAYMENT_VERSIONS.index(before):
+            raise ShopError(
+                "NOT_A_ROLLBACK", f"{before}에서 {to_version}(으)로는 되돌리기가 아니다", 409
+            )
+        if to_version != before:
+            self._set_version(to_version, by)
+        return {**self.payment_version(), "before": before, "changed": to_version != before}
 
     def release_fault(self, released_by: str | None = None) -> dict[str, Any]:
         """장애 스위치를 끈다. 켜져 있던 스위치를 껐을 때만 "해제됨"을 남긴다.

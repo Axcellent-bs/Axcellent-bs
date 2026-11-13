@@ -50,7 +50,13 @@ from ax_shop_api.lookups import Lookups
 from ax_shop_api.promotions import Promotions
 from ax_shop_api.refunds import Refunds
 from ax_shop_api.seed import seed
-from ax_shop_api.service import ORDER_PAGE_DEFAULT, ORDER_PAGE_MAX, Shop, ShopError
+from ax_shop_api.service import (
+    BAD_PAYMENT_VERSION,
+    ORDER_PAGE_DEFAULT,
+    ORDER_PAGE_MAX,
+    Shop,
+    ShopError,
+)
 from ax_shop_api.storefront import Storefront
 
 
@@ -145,6 +151,14 @@ class CancelIn(BaseModel):
 
 
 PG_SLOW_MAX_MS = 10_000  # 결제사 쪽 지연은 결제마다 실제로 기다리므로 상한을 둔다
+
+
+class PaymentVersionIn(BaseModel):
+    version: Literal["v1", "v2"]  # PAYMENT_VERSIONS
+
+
+class PaymentRollbackIn(BaseModel):
+    to_version: Literal["v1", "v2"]
 
 
 class FaultIn(BaseModel):
@@ -321,6 +335,10 @@ INJECT_ALLOWED = {"admin"}
 # 상품 등록·수정(재고 보충 포함)은 운영자(admin)만
 PRODUCT_WRITERS = {"admin"}
 RELEASE_ALLOWED = {"admin", "infra"}
+# 결제 설정 버전(잘못된 배포 시연): 배포(아무 버전으로)는 사람만, 이전 버전으로 되돌리기만 인프라
+# 롤백(관문을 거친 rollback_deployment)도 부른다. 인프라 토큰은 되돌리기 경로 하나만 통한다
+PAYMENT_VERSION_DEPLOYERS = {"admin"}
+PAYMENT_VERSION_ROLLBACK = {"admin", "infra"}
 # 공지·쿠폰 쓰기는 마케팅 관문 토큰만, 쿠폰 조회는 사후 검증·중복 확인을 하는 부서와
 # 캠페인 성과를 세는 data(읽기 전용)까지
 MARKETING_ONLY = {"marketing"}
@@ -670,6 +688,28 @@ def create_app(
         state = shop.release_fault(released_by=caller)
         await outbox.flush(database)
         return _ok(state)
+
+    @app.get("/api/shop/admin/payment-version")
+    async def payment_version(_: str = Depends(_caller(FAULT_STATE_READERS))) -> dict:
+        return _ok(shop.payment_version())
+
+    @app.put("/api/shop/admin/payment-version")
+    async def deploy_payment_version(
+        body: PaymentVersionIn, caller: str = Depends(_caller(PAYMENT_VERSION_DEPLOYERS))
+    ) -> dict:
+        """결제 설정 버전 배포(사람만, `demo_deploy.sh --bad`·`--reset`). v2는 잘못된 배포다."""
+        if body.version == BAD_PAYMENT_VERSION and payment_config.live_key:
+            raise ShopError(
+                "LIVE_KEY", "라이브 결제 키가 있으면 잘못된 배포(v2)를 하지 않는다", 409
+            )
+        return _ok(shop.set_payment_version(body.version, caller))
+
+    @app.post("/api/shop/admin/payment-version/rollback")
+    async def rollback_payment_version(
+        body: PaymentRollbackIn, caller: str = Depends(_caller(PAYMENT_VERSION_ROLLBACK))
+    ) -> dict:
+        """결제 설정을 이전 버전으로 되돌린다(인프라 AI 롤백). 앞으로 바꾸는 것은 거절한다."""
+        return _ok(shop.rollback_payment_version(body.to_version, caller))
 
     @app.delete("/api/shop/admin/faults/pg")
     async def pg_ok(_: str = Depends(_caller(INJECT_ALLOWED))) -> dict:

@@ -30,7 +30,7 @@ from ax_contracts.schemas.infra import (
     VerifyRecoveryInput,
     VerifyRecoveryOutput,
 )
-from infra_agent.deployments import Deployment
+from infra_agent.deployments import SHOP_PAYMENT_CONFIG, Deployment
 from infra_agent.diagnosis import Diagnosis, confirm_with_server, diagnose, server_state
 from infra_agent.runtime import get_runtime
 
@@ -175,6 +175,29 @@ async def rollback_deployment(request: AgentRequest) -> AgentResult:
             f"to_version {inp.to_version}이 직전 정상 버전 {previous.version}과 다르다",
         )
 
+    if target.applies_to == SHOP_PAYMENT_CONFIG:
+        # 쇼핑몰 결제 설정 배포: 지금 버전을 먼저 본다. 이미 이전 버전이면(사람이 되돌림 등) 할 일이
+        # 없고, 대상 버전이 아니면 이 배포가 지금 돌고 있지 않다. 상태를 모르면 되돌리지 않는다
+        try:
+            running = str((await rt.shop.payment_version()).get("version") or "")
+        except Exception as exc:  # noqa: BLE001 - fail-closed
+            return _failed(
+                request, "server_unknown", f"결제 설정 버전 조회 실패: {type(exc).__name__}"
+            )
+        if running != target.version:
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.COMPLETED,
+                outcome="not_needed",
+                output={
+                    "service": target.service,
+                    "from_version": target.version,
+                    "to_version": previous.version,
+                    "running_version": running,
+                    "message": f"결제 설정이 이미 {running}이라 되돌리지 않았다",
+                },
+            )
+
     diag = rt.diagnoses.get(context_id)
     if diag is None:  # 같은 사건의 진단 기록이 없으면 대상 배포 기준으로 다시 진단한다
         component = target.components[0] if target.components else None
@@ -236,7 +259,23 @@ async def _apply(
 
     if decision.status == "executed":
         output = {**base, "rolled_back_to": to_version, "path": _path_label(decision)}
-        if params.get("release_fault_injection", True):
+        if target.applies_to == SHOP_PAYMENT_CONFIG:
+            # 실제 되돌리기: 쇼핑몰 결제 설정을 이전 버전으로 (장애 스위치는 건드리지 않는다)
+            try:
+                done = await rt.shop.rollback_payment_version(to_version)
+            except Exception as exc:  # 관문은 통과했지만 실제 조치가 실패했다
+                return AgentResult(
+                    meta=request.meta,
+                    status=TaskStatus.FAILED,
+                    outcome="rollback_failed",
+                    output={**base, "message": f"결제 설정 되돌리기 실패: {type(exc).__name__}"},
+                    evidence=evidence,
+                )
+            before, after = done.get("before"), done.get("version")
+            output["payment_version"] = {"before": before, "after": after}
+            # 해제 직후 확인: 되돌리기 전 대상 버전(v2) → 후 이전 버전(v1)일 때만 성공
+            output["post_check_ok"] = before == target.version and after == to_version
+        elif params.get("release_fault_injection", True):
             try:
                 state = await rt.shop.release_fault()
             except Exception as exc:  # 관문은 통과했지만 실제 조치가 실패했다

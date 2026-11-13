@@ -25,6 +25,13 @@ class Deployment:
     components: tuple[str, ...]
     change_summary: str
     irreversible: tuple[str, ...] = ()
+    # 이 배포가 실제로 바꾼 대상. `SHOP_PAYMENT_CONFIG`면 쇼핑몰 결제 설정 버전이라, 롤백이
+    # 쇼핑몰 결제 설정을 이 기록의 이전 버전으로 실제로 되돌린다(시연 "잘못된 배포").
+    # None은 기록만 있는 배포
+    applies_to: str | None = None
+
+
+SHOP_PAYMENT_CONFIG = "shop_payment_config"
 
 
 def _parse(row: dict[str, Any]) -> Deployment:
@@ -67,9 +74,16 @@ class DeploymentHistory:
         return sorted(rows, key=lambda d: d.deployed_at, reverse=True)
 
     def find(self, service: str, version: str) -> Deployment | None:
-        return next(
-            (d for d in self.deployments if d.service == service and d.version == version), None
-        )
+        """같은 버전이 여러 번 배포됐으면(시연을 되풀이) 되돌리지 않은 것 중 가장 최근 것."""
+        rows = [d for d in self.deployments if d.service == service and d.version == version]
+        live = [d for d in rows if d.deploy_id not in self.rolled_back]
+        return max(live or rows, key=lambda d: d.deployed_at, default=None)
+
+    def running(self, service: str) -> Deployment | None:
+        """그 서비스에서 되돌리지 않은 가장 최근 배포 (지금 돌고 있는 버전)."""
+        rows = [d for d in self.deployments if d.service == service]
+        rows = [d for d in rows if d.deploy_id not in self.rolled_back]
+        return max(rows, key=lambda d: d.deployed_at, default=None)
 
     def previous_good(self, target: Deployment) -> Deployment | None:
         """같은 서비스에서 대상 배포 바로 앞의, 되돌리지 않은 배포."""
@@ -90,8 +104,12 @@ class DeploymentHistory:
         rows = [d for d in self.deployments if d.service == service]
         if not rows:
             return "v1.0.0"
-        head, _, last = max(rows, key=lambda d: d.deployed_at).version.rpartition(".")
-        version = f"{head}.{int(last) + 1}" if head and last.isdigit() else f"{head}.{last}.1"
+        latest = max(rows, key=lambda d: d.deployed_at).version
+        head, _, last = latest.rpartition(".")
+        if not head:  # 점이 없는 버전(결제 설정 v2 등) → v2.1
+            version = f"{latest}.1"
+        else:
+            version = f"{head}.{int(last) + 1}" if last.isdigit() else f"{head}.{last}.1"
         while self.find(service, version):
             head, _, last = version.rpartition(".")
             version = f"{head}.{int(last) + 1}"
@@ -105,6 +123,7 @@ class DeploymentHistory:
         components: tuple[str, ...],
         change_summary: str,
         at: datetime,
+        applies_to: str | None = None,
     ) -> Deployment:
         """배포 하나를 기록한다 (시연 준비 `POST /api/infra/demo-deploy`). 재시작하면 사라진다."""
         deployment = Deployment(
@@ -114,6 +133,7 @@ class DeploymentHistory:
             deployed_at=at,
             components=components,
             change_summary=change_summary,
+            applies_to=applies_to,
         )
         self.deployments.append(deployment)
         return deployment
