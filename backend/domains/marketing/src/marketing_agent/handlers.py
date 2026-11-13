@@ -34,9 +34,13 @@ from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import shop_client
 from marketing_agent.brief_handoff import (
+    AUTO,
     DRAFT_MEDIA_KIND,
+    FieldRejected,
     HandoffBriefToSnsInput,
     HandoffBriefToSnsOutput,
+    SnsMediaRequestDraft,
+    build_media_request,
     media_request_for,
     price_problem,
     state_of,
@@ -616,12 +620,17 @@ def _with_handoff(item: StoredBrief) -> StoredBriefView:
 
 
 def _handoff_done(
-    request: AgentRequest, outcome: str, record: SnsHandoffRecord, campaign_id: str
+    request: AgentRequest,
+    outcome: str,
+    record: SnsHandoffRecord,
+    campaign_id: str,
+    **detail: str | None,
 ) -> AgentResult:
     out = HandoffBriefToSnsOutput(
         outcome=outcome,
         campaign_id=campaign_id,
         sns_handoff=state_of(record, _draft_state(record.draft_id)),
+        **detail,
     )
     return _result(
         request,
@@ -636,9 +645,40 @@ def _handoff_done(
     )
 
 
+def _handoff_media(
+    item: StoredBrief, data: HandoffBriefToSnsInput
+) -> tuple[SnsMediaRequestDraft | None, str | None, dict[str, str | None]]:
+    """(미디어 요청 초안, 막힌 이유 코드, 이유 상세). 생성은 하지 않고 만들 수 있는지만 본다.
+
+    옛 호출(종류만)은 필드를 채우지 않는다. `auto`·`autofill`·`fields`가 있으면 추천으로 채우고
+    관리자 값으로 덮어쓴다. 자동으로 고른 종류가 가격표에 막히면 이미지로 물러난다(이유를 남긴다).
+    관리자가 직접 고른 종류는 물러나지 않는다(fail-closed).
+    """
+    settings = MediaSettings.from_env()
+    try:
+        if not data.fills:
+            media = media_request_for(item.proposal_id, data.media_kind)
+            return media, price_problem(media, settings), {}
+        media = build_media_request(item, data.media_kind, data.fields)
+        problem = price_problem(media, settings)
+        if problem is not None and data.media_kind == AUTO and media.media_kind != "image":
+            fallback = build_media_request(
+                item, "image", data.fields, kind_source="auto_fallback", blocked=problem
+            )
+            if price_problem(fallback, settings) is None:
+                return fallback, None, {}
+        return media, problem, {}
+    except FieldRejected as error:
+        return None, "invalid_field", {"field": error.field, "field_code": error.code}
+    except (PromptRejected, KeyError):
+        return None, "unknown_scene_template", {}
+
+
 async def handoff_brief_to_sns(request: AgentRequest) -> AgentResult:
     """받은 기획안으로 미디어 요청 초안과 SNS 글 초안을 만들어 보관한다.
 
+    미디어 종류·필드는 기획안에서 추천하고(`media_kind=auto`), 관리자가 준 종류·필드가 우선한다.
+    이미 넘긴 기획안은 `revise=true`일 때만 요청 초안을 다시 만든다.
     미디어 생성(`generate_media`)·게시(`publish_sns`)는 부르지 않는다. 사람이 이어서 한다.
     """
     data = _parse(request, HandoffBriefToSnsInput)
@@ -651,6 +691,16 @@ async def handoff_brief_to_sns(request: AgentRequest) -> AgentResult:
             outcome="invalid_input",
             output={"errors": ["proposal_id|campaign_id: missing"]},
         )
+
+    async def draft(media_kind: str) -> AgentResult:
+        draft_input = {"proposal_id": pid, "media_kind": DRAFT_MEDIA_KIND[media_kind]}
+        return await draft_sns_post(
+            request.model_copy(update={"input": draft_input}),
+            STATE.notices,
+            STATE.sns,
+            STATE.briefs,
+        )
+
     try:
         item = STATE.briefs.get(data.proposal_id, data.campaign_id)
         if item is None:
@@ -658,45 +708,64 @@ async def handoff_brief_to_sns(request: AgentRequest) -> AgentResult:
         pid = item.proposal_id
         record = STATE.briefs.handoff(pid)
         now = _now()
-        draft_input = {"proposal_id": pid, "media_kind": DRAFT_MEDIA_KIND[data.media_kind]}
-        if record is not None and record.status == "handed":
+        handed = record is not None and record.status == "handed"
+        stored_kind = str(((record.media_request if record else None) or {}).get("media_kind"))
+        if stored_kind not in DRAFT_MEDIA_KIND:
+            stored_kind = "image"
+        if record is not None and handed and not data.revise:
             # 멱등: 보관본 그대로. 초안만 사라졌다면 같은 내용으로 다시 저장한다(id는 내용 주소)
             if STATE.sns.get(record.draft_id or "") is None:
-                await draft_sns_post(
-                    request.model_copy(update={"input": draft_input}),
-                    STATE.notices,
-                    STATE.sns,
-                    STATE.briefs,
-                )
+                await draft(stored_kind)
             return _handoff_done(request, "already_handed", record, item.campaign_id)
 
-        def failed(code: str, media: dict | None = None) -> AgentResult:
+        media, problem, detail = _handoff_media(item, data)
+        media_dict = media.model_dump(mode="json") if media is not None else None
+
+        if record is not None and handed:  # revise: 막히면 보관본을 바꾸지 않는다
+            if problem is not None or media is None:
+                return _handoff_done(
+                    request,
+                    "revise_rejected",
+                    record,
+                    item.campaign_id,
+                    reason_code=problem,
+                    **detail,
+                )
+            draft_id = record.draft_id
+            same_draft_kind = DRAFT_MEDIA_KIND[media.media_kind] == DRAFT_MEDIA_KIND[stored_kind]
+            if not same_draft_kind or STATE.sns.get(draft_id or "") is None:
+                drafted = await draft(media.media_kind)
+                if drafted.status != TaskStatus.COMPLETED or not drafted.output:
+                    return _handoff_done(
+                        request,
+                        "revise_rejected",
+                        record,
+                        item.campaign_id,
+                        reason_code=drafted.outcome or "draft_failed",
+                    )
+                draft_id = drafted.output["post_draft_id"]
+            rec = record.model_copy(
+                update={"draft_id": draft_id, "media_request": media_dict, "updated_at": now}
+            )
+            STATE.briefs.save_handoff(rec)
+            return _handoff_done(request, "revised", rec, item.campaign_id)
+
+        def failed(code: str, **more: str | None) -> AgentResult:
             rec = SnsHandoffRecord(
                 proposal_id=pid,
                 status="failed",
-                media_request=media,
+                media_request=media_dict,
                 reason_code=code,
                 updated_at=now,
             )
             STATE.briefs.save_handoff(rec)
-            return _handoff_done(request, "failed", rec, item.campaign_id)
+            return _handoff_done(request, "failed", rec, item.campaign_id, **more)
 
-        try:
-            media = media_request_for(pid, data.media_kind)
-        except (PromptRejected, KeyError):
-            return failed("unknown_scene_template")
-        media_dict = media.model_dump(mode="json")
-        problem = price_problem(media, MediaSettings.from_env())  # 가격표 fail-closed
-        if problem is not None:
-            return failed(problem, media_dict)
-        drafted = await draft_sns_post(
-            request.model_copy(update={"input": draft_input}),
-            STATE.notices,
-            STATE.sns,
-            STATE.briefs,
-        )
+        if problem is not None or media is None:  # 가격표 fail-closed, 템플릿·필드 문제
+            return failed(problem or "unknown_scene_template", **detail)
+        drafted = await draft(media.media_kind)
         if drafted.status != TaskStatus.COMPLETED or not drafted.output:
-            return failed(drafted.outcome or "draft_failed", media_dict)
+            return failed(drafted.outcome or "draft_failed")
         rec = SnsHandoffRecord(
             proposal_id=pid,
             status="handed",

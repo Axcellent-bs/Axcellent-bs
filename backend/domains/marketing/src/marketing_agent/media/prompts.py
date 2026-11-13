@@ -140,3 +140,22 @@ def render_prompt(template_id: str, fields: dict[str, object], path: Path | None
             raise PromptRejected("field_missing", name)
     values = {name: _check_value(config, name, fields[name]) for name in template.fields}
     return _PLACEHOLDER.sub(lambda m: values[m.group(1)], template.sentence)
+
+
+def check_field_value(name: str, value: object, path: Path | None = None) -> str:
+    """필드 값 하나를 `render_prompt`와 같은 규칙으로 검사한다.
+
+    모르는 필드·걸린 값은 `PromptRejected`.
+    """
+    config = _load(path or TEMPLATES_PATH)
+    if name not in config.field_values:
+        raise PromptRejected("field_not_allowed", name)
+    return _check_value(config, name, value)
+
+
+def field_choices(name: str, path: Path | None = None) -> tuple[tuple[str, ...] | None, int]:
+    """필드의 (고를 수 있는 값 목록 | None=짧은 단어, 짧은 단어 최대 길이). 화면 선택지에 쓴다."""
+    config = _load(path or TEMPLATES_PATH)
+    if name not in config.field_values:
+        raise PromptRejected("field_not_allowed", name)
+    return config.field_values[name], config.field_max_len[name]

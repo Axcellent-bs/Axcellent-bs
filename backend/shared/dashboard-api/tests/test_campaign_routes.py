@@ -157,6 +157,40 @@ def test_sns_handoff_needs_a_person_and_valid_input(client: TestClient, fake: Fa
     assert fake.calls == []
 
 
+def test_sns_handoff_passes_auto_kind_and_admin_overrides(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "handed"
+    auto = {"media_kind": "auto", "autofill": True}
+    assert client.post(HANDOFF, json=auto).status_code == 200
+    assert fake.calls[0][1].input == {
+        "proposal_id": "PROP-1",
+        "media_kind": "auto",
+        "autofill": True,
+    }
+    revise = {
+        "media_kind": "video",
+        "fields": {"season": "winter"},
+        "autofill": True,
+        "revise": True,
+    }
+    assert client.post(HANDOFF, json=revise).status_code == 200
+    assert fake.calls[1][1].input == {"proposal_id": "PROP-1", **revise}
+    other = revise | {"fields": {"season": "summer"}}
+    assert client.post(HANDOFF, json=other).status_code == 200
+    keys = [c[1].meta.idempotency_key for c in fake.calls]
+    assert len(set(keys)) == 3  # 내용이 다르면 키도 다르다
+    assert client.post(HANDOFF, json={"media_kind": "carousel"}).status_code == 200
+    assert fake.calls[3][1].input == {"proposal_id": "PROP-1", "media_kind": "carousel"}
+
+
+def test_sns_handoff_rejects_oversized_fields(client: TestClient, fake: Fake) -> None:
+    assert client.post(HANDOFF, json={"fields": {"season": "x" * 61}}).status_code == 422
+    assert client.post(HANDOFF, json={"fields": {"": "winter"}}).status_code == 422
+    many = {f"f{i}": "a" for i in range(9)}
+    assert client.post(HANDOFF, json={"fields": many}).status_code == 422
+    assert client.post(HANDOFF, json={"fields": "winter"}).status_code == 422
+    assert fake.calls == []
+
+
 def test_sns_handoff_failure_codes_use_the_error_envelope(client: TestClient, fake: Fake) -> None:
     fake.status, fake.outcome = TaskStatus.FAILED, "brief_not_found"
     response = client.post(HANDOFF, json={})
