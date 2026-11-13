@@ -36,7 +36,11 @@ class ImpactAnalysisOutput(AxModel):
     failed_order_count: int = Field(ge=0)
     affected_customer_count: int = Field(ge=0)
     affected_customer_ids: list[str] = Field(default_factory=list)  # 가명 ID만
-    damage_amount: int = Field(ge=0)  # 정수 원
+    damage_amount: int = Field(ge=0)  # 정수 원 (결제 실패 주문 금액 합, 이름은 호환을 위해 그대로)
+    # 결제 실패(미결제) 금액 (11/13). 고객 돈이 나가지 않은 받지 못한 매출이다. 지금은
+    # `damage_amount`와 같은 값이고, 실제 손실·환불할 돈이 아니라는 뜻을 이름으로 드러낸다.
+    # 예전 응답에는 없다
+    unpaid_amount: int | None = Field(default=None, ge=0)
     by_category: list[CategoryImpact] = Field(default_factory=list)
     summary: str
     # 평소보다 더 실패한 건수: 구간 장애 쪽 실패 − 지난 7일 같은 시각 ±1시간의 평소 실패
@@ -478,6 +482,9 @@ class CatalogImpact(AxModel):
     customer_label: str  # 영향받은 사람 (예: 고객, 거래처)
     money_field: str  # 피해 금액으로 더하는 칸
     money_unit: str = "원"
+    # 영향 금액을 부르는 말 (11/13). 캣북스는 "결제 실패(미결제) 금액"(받지 못한 매출, 실제 손실이
+    # 아님). 없으면 예전 문구 "피해 금액"
+    money_label: str = "피해 금액"
 
 
 class MetricCatalog(AxModel):

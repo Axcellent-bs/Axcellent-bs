@@ -94,7 +94,7 @@ class ImpactResult:
 
 
 def _category_distribution(orders: list) -> list[CategoryImpact]:
-    """카테고리별 실패 건수·피해 금액. 카테고리 이름순으로 정렬한다."""
+    """카테고리별 실패 건수·결제 실패(미결제) 금액. 카테고리 이름순으로 정렬한다."""
     counts: dict[str, int] = {}
     amounts: dict[str, int] = {}
     for order in orders:
@@ -179,6 +179,7 @@ async def analyze_impact(
         affected_customer_count=len(customer_ids),
         affected_customer_ids=customer_ids,
         damage_amount=counts.damage_amount,
+        unpaid_amount=counts.damage_amount,  # 결제 실패(미결제) 금액 = 실패 주문 금액 합
         by_category=by_category,
         summary=text,
         excess_failed_order_count=excess,
@@ -192,7 +193,8 @@ async def analyze_impact(
     summary = (
         f"실패 {words.unit_label} {counts.failed_order_count}건, "
         f"영향 {words.customer_label} {len(customer_ids)}명, "
-        f"피해 금액 {counts.damage_amount}{words.money_unit}, 카테고리 {len(by_category)}개"
+        f"{words.money_label} {counts.damage_amount}{words.money_unit}, "
+        f"카테고리 {len(by_category)}개"
     )
     summary += f"\n{usual_note}" + (f", 초과분 {excess}건" if excess is not None else "")
     for name, count in sorted(split.excluded.items()):

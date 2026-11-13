@@ -353,7 +353,7 @@ export function IncidentData({ list, detail, selected, onSelect }: {
           <div className="flex flex-wrap gap-3">
             <Stat label="실패 주문" value={count(impact?.failed_order_count, "건")} tone={num(impact?.failed_order_count) == null ? "text-ink-500" : ""} />
             <Stat label="영향 고객" value={count(impact?.affected_customer_count, "명")} tone={num(impact?.affected_customer_count) == null ? "text-ink-500" : ""} />
-            <Stat label="결제 실패(미결제)" value={krw(num(impact?.damage_amount))} tone={num(impact?.damage_amount) == null ? "text-ink-500" : "text-accent"} />
+            <Stat label="결제 실패(미결제)" value={krw(num(impact?.unpaid_amount ?? impact?.damage_amount))} tone={num(impact?.unpaid_amount ?? impact?.damage_amount) == null ? "text-ink-500" : "text-accent"} />
             <Stat label="복구까지 걸린 시간" value={duration(inc.metrics?.mttr_seconds)} sub="감지 → 정상 복귀" tone={num(inc.metrics?.mttr_seconds) == null ? "text-ink-500" : ""} />
           </div>
           <Panel id="data-flow" title="데이터 AI 처리 흐름" hint={`${incidentTitle(inc)} · ${shortDateTime(inc.opened_at)} 시작. 감지는 쇼핑몰 모니터·Zabbix가 하고, 데이터 AI는 총괄 요청을 받아 일합니다.`}>

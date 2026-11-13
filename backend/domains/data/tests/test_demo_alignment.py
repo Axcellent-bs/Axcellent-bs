@@ -87,6 +87,7 @@ def test_impact_skill_on_demo_window() -> None:
     out = asyncio.run(analyze_impact(data, TENANT, MockLLMClient(), ENV)).output
     assert out.failed_order_count == seed.EXPECTED_FAILED_ORDER_COUNT
     assert out.damage_amount == seed.EXPECTED_DAMAGE_AMOUNT
+    assert out.unpaid_amount == seed.EXPECTED_DAMAGE_AMOUNT
     assert out.affected_customer_ids == ["buy_0001", "buy_0002", "buy_0003", "buy_0004"]
 
 

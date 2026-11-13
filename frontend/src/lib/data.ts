@@ -16,6 +16,8 @@ export interface ImpactOutput {
   affected_customer_count?: number | null;
   affected_customer_ids?: string[] | null;
   damage_amount?: number | null;
+  /** 결제 실패(미결제) 금액 (11/13). 예전 응답에는 없어 damage_amount로 대신한다 */
+  unpaid_amount?: number | null;
   by_category?: CategoryImpact[] | null;
   summary?: string | null;
 }

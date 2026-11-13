@@ -83,7 +83,7 @@ export default function DataPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">데이터 분석</h1>
           <p className="mt-1 text-sm text-ink-500">
-            {company ? `${company.name} 데이터분석팀입니다.` : "데이터분석팀입니다."} 장애가 나면 실패한 주문·영향 고객·피해 금액을 세고, 복구됐는지 지표로 확인하고, 처리 시간을 요약합니다.
+            {company ? `${company.name} 데이터분석팀입니다.` : "데이터분석팀입니다."} 장애가 나면 실패한 주문·영향 고객·결제 실패(미결제) 금액을 세고, 복구됐는지 지표로 확인하고, 처리 시간을 요약합니다.
             운영 지표에서는 복구 속도와 AI 단독 처리율을, 트렌드&콘텐츠에서는 감지 → 추천 → 넘김 → 성과를 봅니다.
           </p>
         </div>
