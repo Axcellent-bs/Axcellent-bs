@@ -11,7 +11,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -71,7 +74,6 @@ async def _resync_on_start() -> None:
     마케팅에 보내다 끊긴 제안도 다시 보낸다 (응답이 없으면 자동 재전송)."""
     asyncio.get_running_loop().create_task(get_service().resync_peer())
     get_service().resume_briefs()
-    asyncio.get_running_loop().create_task(_retire_after_start())
 
 
 # 인사 서버가 같이 켜지는 중일 수 있어 잠시 뒤에 부른다
@@ -88,6 +90,23 @@ async def _retire_after_start() -> None:
 
 
 app.router.on_startup.append(_resync_on_start)
+
+# 템플릿 앱은 `lifespan`을 쓰므로 위 `on_startup`은 실행되지 않는다 (11/13 확인, 기획 담당에 알림).
+# 철회 요청 인사 카드 재시도는 켤 때 꼭 돌아야 해서 템플릿 lifespan을 감싸 따로 띄운다
+_template_lifespan = app.router.lifespan_context
+
+
+@asynccontextmanager
+async def _lifespan(a: Any) -> AsyncIterator[None]:
+    async with _template_lifespan(a):
+        task = asyncio.get_running_loop().create_task(_retire_after_start())
+        try:
+            yield
+        finally:
+            task.cancel()
+
+
+app.router.lifespan_context = _lifespan
 
 
 @app.exception_handler(AuthError)

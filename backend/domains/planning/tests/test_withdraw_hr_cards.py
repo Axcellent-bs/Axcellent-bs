@@ -138,3 +138,29 @@ def test_mock_mode_does_not_call_hr() -> None:
     svc.state.auto_policy.level = 0
     asyncio.run(_ticket_and_withdraw(svc))
     assert _retire_acts(svc) == []
+
+
+def test_the_retry_really_runs_when_the_server_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """템플릿 앱은 lifespan을 써서 on_startup이 안 돈다. 재시도는 lifespan으로 켤 때 돈다."""
+    import time
+
+    from fastapi.testclient import TestClient
+
+    import planning_agent.main as planning_main
+    from planning_agent.runtime import get_service
+
+    calls: list[int] = []
+
+    async def fake() -> list[str]:
+        calls.append(1)
+        return []
+
+    monkeypatch.setattr(planning_main, "RETIRE_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(get_service(), "retire_withdrawn_cards", fake)
+    with TestClient(planning_main.app) as client:
+        for _ in range(50):
+            client.get("/health")
+            if calls:
+                break
+            time.sleep(0.02)
+    assert calls == [1]
