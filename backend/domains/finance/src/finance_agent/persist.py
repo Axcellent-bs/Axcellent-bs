@@ -57,6 +57,7 @@ def dump(s: State) -> dict[str, Any]:
             "recon_notes": records.recon_notes,
             "recon_note_log": records.recon_note_log,
             "planning_requests": records.planning_requests,
+            "planning_questions": records.planning_questions,
             # 예전 정산 묶음(쓰지 않음). 고객지원으로 옮기는 스크립트가 읽게 그대로 남긴다
             "batches": records.legacy_batches,
             "policy_acks": records.policy_acks,
@@ -119,6 +120,9 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.recon_notes = dict(rec["recon_notes"])
     s.records.recon_note_log = list(rec["recon_note_log"])
     s.records.planning_requests = [dict(r) for r in rec.get("planning_requests", [])]
+    s.records.planning_questions = {
+        k: dict(v) for k, v in rec.get("planning_questions", {}).items()
+    }
     _remember_sent(s.records.planning_requests)
     s.records.legacy_batches = {k: dict(v) for k, v in rec.get("batches", {}).items()}
     s.records.policy_acks = {k: dict(v) for k, v in rec.get("policy_acks", {}).items()}

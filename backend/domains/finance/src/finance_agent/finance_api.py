@@ -17,6 +17,8 @@
 | `POST /api/finance/planning-requests` | 재무 개선 요청을 기획(`create_ticket`)에 보냄 | **사람** |
 | `GET /api/finance/planning-requests` | 기획에 보낸 개선 요청 기록 (거둬들인 요청은 뺌) | 없음 |
 | `POST /api/finance/planning-requests/{source_ref}/withdraw` | 보낸 요청 거둬들이기 | **사람** |
+| `GET /api/finance/planning-questions` | 기획이 되물었는데 재무 기록으로 못 답한 질문 | 없음 |
+| `POST /api/finance/planning-questions/{question_id}/answer` | 그 질문에 답함 | **사람** |
 | `POST /api/finance/pg/clear` | ② 올린 PG 정산 자료 모두 빼기(이유 필수, 기록은 남김) | **사람** |
 | `GET /api/finance/settlements?period=YYYY-Www` | ③ 판매자 정산 내역서 (고객지원 것) | 없음 |
 | `GET /api/finance/settlements/deadlines` | ③ 지급 기한 점검 (고객지원 것) | 없음 |
@@ -76,7 +78,11 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
-from ax_contracts.schemas.planning import CreateTicketOutput, WithdrawTicketOutput
+from ax_contracts.schemas.planning import (
+    AnswerPlanningQuestionInput,
+    CreateTicketOutput,
+    WithdrawTicketOutput,
+)
 from finance_agent import (
     bank,
     bank_file,
@@ -106,7 +112,7 @@ from finance_agent.handlers import (
     team_budget_data,
 )
 from finance_agent.human import human_from_authorization, label_fields
-from finance_agent.planning_questions import STORE, record_sent_request
+from finance_agent.planning_questions import STORE, human_answer_request, record_sent_request
 from finance_agent.rules import load_rules
 
 TODO_ITEMS = 10  # 할 일 카드에 바로 보여 줄 건수
@@ -415,6 +421,31 @@ async def overview_data() -> tuple[dict[str, Any], dict[str, Any]]:
         )
 
     # 팀 예산 확정은 인사 AI(사람)가 한다(11/13). 재무 "할 일"에 올리지 않고 ④ 탭에서 상태만 본다
+
+    # 기획이 되물었는데 재무 AI가 기록으로 답하지 못한 질문 (사람이 답해야 기획서가 나아간다, 11/13)
+    waiting = [
+        q for q in state().records.planning_questions.values() if q.get("status") == "waiting"
+    ]
+    if waiting:
+        todo.append(
+            {
+                "kind": "planning_question",
+                "title": f"기획이 되물은 질문 {len(waiting)}건에 답하기",
+                "count": len(waiting),
+                "amount": None,
+                "link": "planning-requests",
+                "action": {"type": "planning_answer"},
+                "items": [
+                    {
+                        "ref": q["question_id"],
+                        "title": q["request_id"],
+                        "detail": q.get("question") or "",
+                        "amount": None,
+                    }
+                    for q in waiting[:TODO_ITEMS]
+                ],
+            }
+        )
     meta = books.meta()
     if missing:
         meta = meta | {"unavailable": [*meta.get("unavailable", []), *missing]}
@@ -1196,6 +1227,87 @@ def add_finance_api(app: FastAPI) -> None:
         row["withdraw_outcome"] = out.outcome
         STORE.remove(tenant, row["request_id"])
         return ok(row, {"withdrawn_by": person, "planning": out.outcome})
+
+    @app.get("/api/finance/planning-questions")
+    async def list_planning_questions() -> dict:
+        """기획이 되물었는데 재무 기록으로 못 답한 질문. 답 기다리는 것이 먼저, 그다음 최근 순."""
+        rows = sorted(
+            state().records.planning_questions.values(),
+            key=lambda q: (q.get("status") != "waiting", q.get("asked_at") or ""),
+        )
+        waiting = [q for q in rows if q.get("status") == "waiting"]
+        answered = sorted(
+            (q for q in rows if q.get("status") != "waiting"),
+            key=lambda q: q.get("answered_at") or "",
+            reverse=True,
+        )
+        return ok({"questions": waiting + answered, "waiting": len(waiting)}, {})
+
+    @app.post("/api/finance/planning-questions/{question_id}/answer", response_model=None)
+    async def answer_planning_question_by_person(
+        question_id: str, request: Request, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """기획 되묻기에 사람이 답한다. 안전 관문(`finance_answer_planning`)을 거쳐 기획
+        `receive_planning_answer`로 보낸다. 기획이 받으면 답한 것으로 남긴다."""
+        try:
+            person = human_from_authorization(authorization)
+        except PermissionError as exc:
+            return error(401, "unauthorized", str(exc))
+        body = await _body(request)
+        answer = body.get("answer")
+        if not isinstance(answer, str) or not 1 <= len(answer.strip()) <= 1000:
+            return error(400, "invalid_request", "answer는 1~1000자 문자열")
+        q = state().records.planning_questions.get(question_id)
+        if q is None:
+            return error(404, "not_found", f"기획 질문 {question_id}가 없습니다.")
+        if q.get("status") != "waiting":
+            return error(409, "already_answered", "이미 답한 질문입니다.")
+        meta_req = RequestMeta(
+            context_id=q["context_id"],
+            tenant_id=q.get("tenant_id") or TENANT_ID_DEFAULT,
+            token="finance-dashboard",
+            deadline=fc.now() + timedelta(seconds=40),
+            idempotency_key=f"{q['context_id']}:finance_answer_planning:{question_id}",
+        )
+        decision = await execute(
+            "finance_answer_planning",
+            {"question_id": question_id, "request_id": q["request_id"]},
+            meta_req,
+            Evidence(
+                data_summary=f"기획 질문 {question_id} 답 ({q['request_id']})",
+                collected_at=fc.now(),
+                ref_ids=[question_id, q["request_id"]],
+            ),
+        )
+        if decision.status != "executed":
+            return error(409, "not_executed", f"안전 관문이 실행하지 않았다({decision.status})")
+        question = AnswerPlanningQuestionInput(
+            question_id=question_id,
+            request_id=q["request_id"],
+            question=q.get("question") or "",
+            about=q.get("about"),
+            options=list(q.get("options") or []),
+        )
+        reply = await call_agent(
+            "planning", human_answer_request(meta_req, question, answer.strip())
+        )
+        if reply.status != TaskStatus.COMPLETED:
+            return error(
+                502,
+                "planning_unavailable",
+                f"기획이 답을 받지 못했다({reply.outcome or reply.status.value})",
+            )
+        q.update(
+            {
+                "status": "answered",
+                "answer": answer.strip(),
+                "answered_by": person,
+                "answered_at": fc.iso(fc.now()),
+                "planning_outcome": reply.outcome,
+                **label_fields(person, request, "answered_by_label"),
+            }
+        )
+        return ok(q, {"answered_by": person})
 
     @app.get("/api/finance/planning-requests")
     async def list_planning_requests() -> dict:

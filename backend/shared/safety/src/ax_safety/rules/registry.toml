@@ -428,6 +428,13 @@ action = "finance_withdraw_change"
 owner = "finance"
 base_grade = "A"
 
+# 기획이 되물었는데 재무 기록으로 답하지 못한 질문에 사람이 답해 기획 receive_planning_answer로 보내기 (11/13).
+# 기획서 근거로 남을 뿐 돈은 움직이지 않는다 (고객지원 send_planning_answer와 같은 A)
+[[actions]]
+action = "finance_answer_planning"
+owner = "finance"
+base_grade = "A"
+
 # ---- 판매자 정산 (고객지원, 2026-11-12 재무에서 옮김). 판매자에게 돈을 내보내는 일이라 항상 C(사람 승인).
 # 고객지원(settlement 서비스)이 정산금을 내고 묶음 지급 승인을 요청한다. 재무는 결과를 받아 보여 주기만 한다
 [[actions]]

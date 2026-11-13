@@ -1,5 +1,6 @@
 import { ago, shortDateTime } from "@/lib/format";
 import type { SelfTest, SelfTestLastMeta } from "@/lib/finance";
+import { PlanningAskLink } from "./PlanningRequests";
 
 // 재무 AI 테스트 결과. 서버가 10분마다 자동으로 테스트하고, 화면은 1분마다 최근 결과를 받아 보여 준다.
 // 사람이 버튼을 누를 필요는 없다. "지금 다시 테스트"는 바로 확인하고 싶을 때만 쓴다.
@@ -98,7 +99,13 @@ export function SelfTestPanel({ test, meta, loaded, open, running, disabled, onR
         )}
         {bad.length > 0 && (
           <ul className="mt-2 space-y-1 text-sm">
-            {bad.map((c) => <li key={c.name}><b>{c.level === "fail" ? "실패" : "주의"}</b> · {c.name}: {c.detail}</li>)}
+            {bad.map((c) => (
+              <li key={c.name} className="flex flex-wrap items-baseline gap-x-2">
+                <span><b>{c.level === "fail" ? "실패" : "주의"}</b> · {c.name}: {c.detail}</span>
+                <PlanningAskLink title={`재무 AI 테스트 "${c.name}" 고치기`}
+                  evidence={`재무 AI 자동 테스트 ${c.level === "fail" ? "실패" : "주의"}: ${c.name}\n${c.detail}`} />
+              </li>
+            ))}
           </ul>
         )}
         <details className="mt-2 text-sm" open={open}>

@@ -89,7 +89,7 @@ ax-contracts, ax-agent-template, data 에이전트(`impact_analysis`, `fraud_sco
 - 캠페인: `record_campaign_result`, `review_campaign_budget`, `verify_campaign_budget`, `finance_insights`. 쿠폰·환불은 판단하지 않는다
   - `verify_campaign_budget`은 지금 아무도 부르지 않는다. 캠페인 시작(`start_campaign`)의 교차검증자는 안전 장치 자체이고(기준표), 재무는 비용을 승인·반려하지 않고 의견만 낸다(BRK-005). 검증자로 쓰지 않기로 한 상태다
   - `finance_insights`는 총괄이 부를 수 있게 열어 두었지만 아직 부르는 곳이 없다
-- 기획 개선 요청: 재무 화면(⑧ 요청·기록 탭)에서 사람이 바꿀 내용과 근거를 적어 보내면 안전 관문(`finance_request_change`, A)을 거쳐 기획 `create_ticket`으로 간다. 보낸 근거는 재무 기록에 남아(`FINANCE_STATE_FILE`) 다시 켜도 기획의 되묻기에 답한다
+- 기획 개선 요청: 재무 화면 위 "기획에 개선 요청" 버튼(옆 패널)에서 사람이 바꿀 내용과 근거를 적어 보내면 안전 관문(`finance_request_change`, A)을 거쳐 기획 `create_ticket`으로 간다. 보낸 근거는 재무 기록에 남아(`FINANCE_STATE_FILE`) 다시 켜도 기획의 되묻기에 답한다
 - 시뮬레이션: `uv run python -m finance_agent.simulation`. 가정은 `backend/docs/notes/finance/simulation-assumptions.md`
 - 파일 자동화 환경변수: `FINANCE_EXPORT_DIR`, `FINANCE_BANK_INBOX`, `FINANCE_EXPORT_SECONDS`
 - 은행 거래내역: 재무 담당자가 화면(② 매출·PG 대사 → 은행 입금 대조)에서 은행 파일(CSV·xlsx)을 그대로 올린다. 읽은 기록·잘못 올린 기록 빼기도 같은 탭(은행 거래내역 읽은 기록)에 있다

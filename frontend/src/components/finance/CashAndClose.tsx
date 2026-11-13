@@ -4,6 +4,7 @@ import { shortDateTime } from "@/lib/format";
 import { actorText } from "@/lib/actor";
 import { finance, humanTokenSet, krw, plainText, signedKrw, type BankImport, type BankUnexplained, type BankOutflows } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, Stat, TONE, useResource } from "./bits";
+import { PlanningAskLink } from "./PlanningRequests";
 
 // 돈이 실제로 맞는지 보는 화면. 숫자는 재무 AI 서버가 계산한 값 그대로다.
 // - 월 마감 체크리스트(①): 그 달을 닫기 전에 끝낼 일을 장부로 판정
@@ -57,6 +58,10 @@ export function ChecklistSection({ tick, onOpen }: { tick: number; onOpen: (targ
                         ? <Chip label={`기한 지남 · ${dueText(i.due)}`} tone={TONE.bad} />
                         : <span className="text-sm tabular-nums text-ink-700">기한 {dueText(i.due)}</span>)}
                     {!done && <button type="button" className="text-sm font-medium text-brand-700 hover:underline" onClick={() => onOpen(CHECK_ANCHOR[i.key] ?? i.link)}>하러 가기 →</button>}
+                    {!done && i.overdue && i.due && (
+                      <PlanningAskLink title={`월 마감 "${i.label}" 기한 지키기`}
+                        evidence={`월 마감 체크리스트 "${i.label}" 기한 지남 (${dueText(i.due)})\n${i.detail}`} />
+                    )}
                   </li>
                 );
               })}

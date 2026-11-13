@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "@/lib/nav";
 import { api } from "@/lib/api";
 import { humanId, shortDateTime } from "@/lib/format";
@@ -104,9 +104,17 @@ function Row({ row, incidentIds }: { row: RequestRow; incidentIds: Set<string> }
   );
 }
 
-export function OrchestratorRequestsSection({ tick }: { tick: number }) {
+/** 최근 7일 맡은 일 중 실패·거절 건수. 화면 위 "재무 AI가 한 일" 요약과 지금 할 일에 쓴다 */
+const FAIL_WINDOW_MS = 7 * 24 * 3600 * 1000;
+export function failedCount(rows: RequestRow[], now = Date.now()): number {
+  return rows.filter((r) => r.reply && ["failed", "rejected"].includes(r.reply.outcome as string) && now - time(r.request) < FAIL_WINDOW_MS).length;
+}
+
+export function OrchestratorRequestsSection({ tick, onSummary }: { tick: number; onSummary?: (s: { total: number; failed: number }) => void }) {
   const res = useResource("orchestrator-requests", load, tick);
   const [shown, setShown] = useState(PAGE);
+  const rows = res.env?.data.rows;
+  useEffect(() => { if (rows && onSummary) onSummary({ total: rows.length, failed: failedCount(rows) }); }, [rows, onSummary]);
   return (
     <Panel id="orchestrator-requests" title="총괄이 재무에 맡긴 일"
       hint="총괄 AI가 재무 AI에 보낸 요청입니다. AI 대화방에 보이는 것과 같은 공통 로그에서 총괄 → 재무 요청만 골랐고, 결과는 재무 AI가 총괄에 돌려준 응답에서 읽습니다. 읽기 전용입니다.">
