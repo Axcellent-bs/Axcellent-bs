@@ -58,7 +58,7 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
           return (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                {b.example ? <Chip label="예시 인원" tone={TONE.muted} /> : <Chip label={s.label} tone={s.tone} />}
+                {b.example ? <Chip label="예시 인원" tone={TONE.muted} /> : <Chip label={b.status === "approved" && b.approved?.decided_by !== "hr" ? "확정됨 (예전 방식)" : s.label} tone={s.tone} />}
                 <span className="text-ink-700">인당 월 <b className="tabular-nums">{krw(b.per_head_monthly)}</b> · 총 {people(b.headcount_total)}</span>
                 <span className="text-ink-900">합계 <b className="tabular-nums">{krw(b.total)}</b></span>
                 {b.change_total != null && <span className="text-sm tabular-nums text-ink-500">{b.prev_month} 대비 {b.change_total === 0 ? "변동 없음" : delta(b.change_total)}</span>}
@@ -95,7 +95,8 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
 
               {b.approved && (
                 <p className="text-sm text-ink-500">
-                  인사 AI에서 {actorText(b.approved.by_label, b.approved.by)}님이 {new Date(b.approved.at).toLocaleString("ko-KR")}에 합계 {krw(b.approved.total)}(인당 {krw(b.approved.per_head_monthly)})로 확정해 재무에 기록됨
+                  {b.approved.decided_by === "hr" ? "인사 AI에서 " : "예전 방식(재무 화면)으로 "}{actorText(b.approved.by_label, b.approved.by)}님이 {new Date(b.approved.at).toLocaleString("ko-KR")}에 합계 {krw(b.approved.total)}(인당 {krw(b.approved.per_head_monthly)})로 확정한 기록
+                  {b.approved.decided_by !== "hr" && " · 앞으로 확정은 인사 AI에서 합니다"}
                   {b.approved.note && ` · 메모: ${plainText(b.approved.note)}`}
                 </p>
               )}

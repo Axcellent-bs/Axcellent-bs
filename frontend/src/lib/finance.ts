@@ -322,7 +322,7 @@ export interface CloseChecklist { month: string; items: CloseItem[]; done: numbe
 
 // ---------------------------------------------------------------- ④ 팀 예산 (인사 ↔ 재무)
 export interface TeamBudgetRow { team: string; headcount: number; budget: number; prev_headcount: number | null; prev_budget: number | null; change: number | null }
-export interface TeamBudgetApproval { month: string; per_head_monthly: number; total: number; signature: string; by: string; by_label?: string; at: string; note: string | null; rows: { team: string; headcount: number; budget: number }[] }
+export interface TeamBudgetApproval { month: string; per_head_monthly: number; total: number; signature: string; by: string; by_label?: string; at: string; note: string | null; /** "hr"면 인사가 확정해 기록된 것(11/13 뒤). 없으면 예전에 재무 화면에서 확정한 기록 */ decided_by?: string | null; rows: { team: string; headcount: number; budget: number }[] }
 export interface TeamBudget {
   month: string;
   prev_month: string;
