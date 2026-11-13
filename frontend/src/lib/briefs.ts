@@ -1,4 +1,4 @@
-import { ApiError } from "./apiError";
+import { ApiError, failureError, statusOnlyError } from "./apiError";
 import { writeAuth } from "./api";
 import { DASHBOARD_API_URL, RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
 import type { BriefMediaAnswer, MediaEstimate, PreparedMedia, PublishAnswer, PublishState } from "./briefMedia";
@@ -116,8 +116,9 @@ async function get<T>(path: string): Promise<T> {
   if (!briefsEnabled) throw new ApiError("받은 기획안 읽기 연결이 꺼져 있습니다", 403);
   const res = await fetch(`${RELAY_API_URL}${path}`, { headers: { Authorization: `Bearer ${RELAY_VIEW_TOKEN}` }, cache: "no-store" });
   let body: { data?: T; error?: { message?: string } } = {};
-  try { body = await res.json(); } catch { /* 본문이 JSON이 아님 */ }
-  if (!res.ok || body.data === undefined) throw new ApiError(body.error?.message ?? `요청 실패 (${res.status})`, res.status);
+  let parsed: unknown;
+  try { parsed = await res.json(); body = (parsed ?? {}) as typeof body; } catch { /* 본문이 JSON이 아님 */ }
+  if (!res.ok || body.data === undefined) throw failureError(res.ok ? body : parsed, res.status);
   return body.data;
 }
 
@@ -152,7 +153,7 @@ async function handoff(proposalId: string, options: HandoffOptions = {}): Promis
     cache: "no-store",
   });
   const json = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(json?.error?.message ?? `요청 실패 (${res.status})`, res.status);
+  if (!res.ok) throw failureError(json, res.status);
   return json.data as HandoffAnswer;
 }
 
@@ -167,7 +168,7 @@ async function makeMedia(proposalId: string): Promise<BriefMediaAnswer> {
   const path = mediaPath(proposalId);
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
   const json = await res.json().catch(() => null);
-  if (!res.ok || !json?.data) throw new ApiError(`요청 실패 (${res.status})`, res.status);
+  if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as BriefMediaAnswer;
 }
 
@@ -179,7 +180,7 @@ async function requestPublish(proposalId: string): Promise<PublishAnswer> {
   const path = `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/publish-request`;
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
   const json = await res.json().catch(() => null);
-  if (!res.ok || !json?.data) throw new ApiError(`요청 실패 (${res.status})`, res.status);
+  if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as PublishAnswer;
 }
 

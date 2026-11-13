@@ -34,7 +34,7 @@ function PublishRequest({ proposalId, prepared, state, onDone }: { proposalId: s
     try {
       setResult(publishResultKo(await briefs.requestPublish(proposalId)));
     } catch (e) {
-      setResult({ kind: "failed", text: publishHttpErrorKo((e as { status?: number }).status) });
+      setResult({ kind: "failed", text: publishHttpErrorKo((e as { status?: number }).status, (e as { code?: string | null }).code) });
     } finally {
       publishing.delete(proposalId);
       setStep("idle");
@@ -157,7 +157,7 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
       const made = answer.output?.sns_handoff?.prepared;
       setFresh(made ? { key: requestKey, prepared: made } : null);
     } catch (e) {
-      setResult({ kind: "failed", text: mediaHttpErrorKo((e as { status?: number }).status) });
+      setResult({ kind: "failed", text: mediaHttpErrorKo((e as { status?: number }).status, (e as { code?: string | null }).code) });
     } finally {
       inFlight.delete(id);
       setStep("idle");

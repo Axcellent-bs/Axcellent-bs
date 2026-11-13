@@ -1,4 +1,4 @@
-import { ApiError } from "./apiError";
+import { ApiError, failureError, isNginxBlocked } from "./apiError";
 import type { DeadlineReport, FinanceMeta, Settlements } from "./finance";
 import type { ChangeProposalSent, DeclineReason, IdeaArea, IdeaDigestResult, IdeaKind, IncidentCompensationDecision, PlanningAnswerResult } from "./support";
 import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, FeedbackItem, FeedbackOverview, FeedbackStatus, Health, Kpi, Me, PurgeReport, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
@@ -18,6 +18,7 @@ function unwrap<T>(body: unknown): T {
 
 /** 실패 본문 해석: ax-backend `{error: {code, message}}`와 FastAPI `{detail}` 둘 다 받는다. */
 function toError(body: unknown, status: number): ApiError {
+  if (isNginxBlocked(status, body)) return failureError(body, status);
   const b = (body ?? {}) as { error?: { code?: string; message?: string }; detail?: unknown };
   if (b.error?.message) return new ApiError(b.error.message, status, undefined, b.error.code);
   const detail = b.detail;

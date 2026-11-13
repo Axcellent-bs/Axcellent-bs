@@ -1,5 +1,6 @@
 // 기획안 "미디어 만들기"의 응답 모양과 화면 문구. 숫자·상태는 마케팅 서버가 준 값만 쓴다(지어내지 않는다).
-// 이 파일은 순수 계산만 한다(가져오기 없음): `npm test`(node --test)에서 그대로 돈다.
+// 이 파일은 순수 계산만 한다(화면·환경 값을 가져오지 않음): `npm test`(node --test)에서 그대로 돈다.
+import { NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from "./apiError.ts";
 
 /** 지금 요청 초안으로 만들 때의 예상 비용·상한. 마케팅이 조회 때 단가표·장부에서 계산한다 */
 export interface MediaEstimate {
@@ -130,7 +131,8 @@ export function mediaResultKo(answer: BriefMediaAnswer): MediaResult {
 }
 
 /** 연결 오류(HTTP 상태)를 화면 문구로. 서버가 보낸 문장은 쓰지 않는다 */
-export function mediaHttpErrorKo(status: number | undefined): string {
+export function mediaHttpErrorKo(status: number | undefined, code?: string | null): string {
+  if (code === NGINX_BLOCKED_CODE) return NGINX_BLOCKED_MESSAGE;
   if (status === 401 || status === 403) return "미디어를 만들 권한이 없습니다. 사람 토큰 설정(또는 서버의 이 경로 허용)을 확인해 주세요.";
   if (status === 404) return "기획안을 찾을 수 없거나 서버가 아직 이 기능을 지원하지 않습니다.";
   if (status === 400 || status === 422) return "요청을 서버가 받아들이지 않았습니다. 새로고침한 뒤 다시 시도해 주세요.";
@@ -236,7 +238,8 @@ export function publishResultKo(answer: PublishAnswer): PublishResult {
 }
 
 /** 연결 오류(HTTP 상태)를 화면 문구로. 서버가 보낸 문장은 쓰지 않는다 */
-export function publishHttpErrorKo(status: number | undefined): string {
+export function publishHttpErrorKo(status: number | undefined, code?: string | null): string {
+  if (code === NGINX_BLOCKED_CODE) return NGINX_BLOCKED_MESSAGE;
   if (status === 401 || status === 403) return "게시를 요청할 권한이 없습니다. 사람 토큰 설정(또는 서버의 이 경로 허용)을 확인해 주세요.";
   if (status === 404) return "기획안을 찾을 수 없거나 서버가 아직 이 기능을 지원하지 않습니다.";
   if (status === 400 || status === 422) return "요청을 서버가 받아들이지 않았습니다. 새로고침한 뒤 다시 시도해 주세요.";
