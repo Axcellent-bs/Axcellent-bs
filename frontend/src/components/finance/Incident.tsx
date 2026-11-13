@@ -128,7 +128,7 @@ function Card({ title, value, tone = "text-ink-900", children }: { title: string
 function Cards({ d }: { d: IncidentDetail }) {
   const { impact, compensation: c, refunds } = d;
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2">
       <Card title="결제 실패(미결제) 금액 (데이터 AI 분석 그대로)" value={krw(impact?.damage_amount)}>
         {impact ? (
           <>
