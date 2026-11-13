@@ -1,7 +1,7 @@
 import { ApiError } from "./apiError";
 import { writeAuth } from "./api";
 import { DASHBOARD_API_URL, RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
-import type { BriefMediaAnswer, MediaEstimate, PreparedMedia } from "./briefMedia";
+import type { BriefMediaAnswer, MediaEstimate, PreparedMedia, PublishAnswer, PublishState } from "./briefMedia";
 
 // 마케팅이 기획에서 받은 기획안 읽기. 화면은 마케팅을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
 // 응답 모양은 ax-backend `marketing_agent/briefs.py`(`StoredBrief`)와 계약 `CampaignBriefInput` 기준이다.
@@ -78,6 +78,8 @@ export interface SnsHandoff {
   media_estimate?: MediaEstimate | null;
   /** 지금 요청 초안으로 만든 미디어 초안. 없거나 요청 초안이 바뀌었으면 null */
   prepared?: PreparedMedia | null;
+  /** 준비된 초안의 게시 요청(승인 대기) 상태. 옛 서버는 이 칸이 없다 */
+  publish?: PublishState | null;
 }
 
 /** 받은 기획안. 지금 마케팅이 아는 상태는 `received`(받음)뿐이다 */
@@ -169,6 +171,18 @@ async function makeMedia(proposalId: string): Promise<BriefMediaAnswer> {
   return json.data as BriefMediaAnswer;
 }
 
+/**
+ * 준비된 초안의 "게시 요청": 승인 대기 건(C 등급, 10분 만료)만 만든다. 게시하지 않는다.
+ * 기획안 번호만 보낸다(글·파일은 서버가 보관본에서 읽는다). 오류는 상태 코드만 담아 던진다.
+ */
+async function requestPublish(proposalId: string): Promise<PublishAnswer> {
+  const path = `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/publish-request`;
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data) throw new ApiError(`요청 실패 (${res.status})`, res.status);
+  return json.data as PublishAnswer;
+}
+
 /** 준비된 미디어 초안의 미리보기 주소(AI 표시를 입힌 결과 파일). `version`은 파일이 바뀌면 새로 받게 하는 값이다 */
 export const mediaPreviewUrl = (proposalId: string, version: string | null) =>
   `${DASHBOARD_API_URL}${mediaPath(proposalId)}/preview${version ? `?v=${encodeURIComponent(version.slice(0, 12))}` : ""}`;
@@ -199,6 +213,7 @@ export const briefs = {
   outageSnsDrafts: (limit = 20) => get<OutageSnsDraftList>(`/api/shop/admin/marketing/outage-sns-drafts?limit=${briefsListLimit(limit)}`),
   handoff,
   makeMedia,
+  requestPublish,
 };
 
 export const HANDOFF_REASON_KO: Record<string, string> = {

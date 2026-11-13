@@ -82,6 +82,16 @@
 - `sns_handoff.media_estimate`: 조회 때 `plan_cost`(=`generate_media`와 같은 단가표·환율·건당 상한 규칙)와 장부의 이달 누적으로 계산한 예상 비용·상한. 저장하지 않으며 계산할 수 없으면 이유 코드만 준다.
 - 미리보기는 dashboard-api `GET .../media/preview`가 `MARKETING_MEDIA_DIR`의 `labeled.jpg|mp4`(AI 라벨을 입히고 점검한 파일, sha256 일치)만 내준다. dashboard-api와 마케팅이 같은 `MARKETING_MEDIA_DIR`을 봐야 한다.
 
+### 기획안 게시 요청 (`request_brief_publish`, `brief_publish.py`)
+
+화면의 "게시 요청" 버튼이 부른다(dashboard-api `POST /api/dashboard/marketing/briefs/{proposal_id}/publish-request`, 본문 없음).
+
+- 입력은 기획안 번호뿐이다. 초안 id·파일 참조·해시·캡션·종류는 서버가 넘김 기록의 `prepared`(지금 요청 초안으로 만든 것)와 SNS 초안 저장소에서 읽는다(초안과 어긋나면 `draft_changed`). 요청 직전에 `check_sns_post`를 다시 돌려 통과한 값만 보낸다.
+- 기존 `publish_sns`를 그대로 부른다: C등급, 항상 사람 승인(승인 대기 10분 만료). 사람이 승인 화면에서 진행을 눌러야만 기존 구독자·폴링이 Instagram 게시로 잇는다. 이 skill은 승인하지 않고 만료를 늘리지 않는다. 24시간 게시 상한(45)·중단 상태·어댑터 설정 확인도 `publish_sns` 안에서 그대로다.
+- 캐러셀은 범위 밖(`media_kind_unsupported`). 막는 이유 코드: `not_handed`·`not_prepared`·`check_not_passed`·`draft_missing`·`draft_changed`.
+- 멱등: `context_id`를 `ctx_brief_<번호>`로 고정하고 내용 해시가 키에 들어간다. 이미 대기·게시·거절된 건은 `already_requested`와 상태만 돌려주고 `publish_sns`를 다시 부르지 않는다. 거절·만료된 건은 같은 키라 다시 요청할 수 없다(새 초안이 필요).
+- 조회의 `sns_handoff.publish`: `status`(`not_requested`·`held`·`publishing`·`published`·`rejected`(거절 또는 만료)·`failed`·`unknown`)·`can_request`·`caption` 등. 승인 대기 저장소에서 읽은 값만 쓴다.
+
 ### 사람과 직접 대화 (`chat.py`, `chat_store.py`)
 - 화면 경로: dashboard-api `/api/dashboard/marketing-chat` (GET 목록, GET `/{id}`, POST `{thread_id?, message}`, POST `/{id}/close`). 사람 토큰(`Authorization: Bearer`)이 있어야 읽기도 된다.
 - 조회·설명만 한다. 읽는 값은 받은 기획안·게시 중인 공지·쿠폰 지급 건수뿐이고, 숫자는 저장소 값을 그대로 인용한다. 캠페인 시작·취소, 공지 게시, 쿠폰 지급을 하라는 말에는 "대화로는 못 한다"는 안내만 한다(모델을 부르지 않음). 대화로 일이 생기지 않으므로 `task_id`는 항상 `null`이다.

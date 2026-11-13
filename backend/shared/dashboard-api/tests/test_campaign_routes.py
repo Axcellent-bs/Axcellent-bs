@@ -343,6 +343,46 @@ def test_brief_media_passes_judgements_and_maps_bad_requests(
     assert client.post(BRIEF_MEDIA).status_code == 504
 
 
+BRIEF_PUBLISH = "/api/dashboard/marketing/briefs/PROP-5/publish-request"
+
+
+def test_brief_publish_request_sends_only_the_proposal_id(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "requested"
+    body = {"publish_input": {"caption": "바꾼 캡션"}, "asset_ref": "x", "caption": "y"}
+    first, again = client.post(BRIEF_PUBLISH), client.post(BRIEF_PUBLISH, json=body)
+    assert first.status_code == again.status_code == 200
+    target, request = fake.calls[0]
+    assert (target, request.skill) == ("marketing", "request_brief_publish")
+    # 브라우저가 본문을 실어도 마케팅으로 가지 않는다(보관본만 쓴다)
+    assert request.input == fake.calls[1][1].input == {"proposal_id": "PROP-5"}
+    assert request.meta.idempotency_key == fake.calls[1][1].meta.idempotency_key
+    assert all(r.skill != "publish_sns" for _, r in fake.calls)
+
+
+def test_brief_publish_request_needs_a_person_and_a_valid_id(
+    client: TestClient, fake: Fake
+) -> None:
+    bad = {"authorization": "Bearer nope"}
+    assert client.post(BRIEF_PUBLISH, headers=bad).status_code in (401, 403)
+    assert client.post(BRIEF_PUBLISH.replace("PROP-5", "a%20b")).status_code == 422
+    assert fake.calls == []
+
+
+def test_brief_publish_request_passes_judgements_and_maps_bad_requests(
+    client: TestClient, fake: Fake
+) -> None:
+    for outcome in ("daily_limit_reached", "adapter_unavailable", "check_not_passed"):
+        fake.status, fake.outcome = TaskStatus.FAILED, outcome
+        response = client.post(BRIEF_PUBLISH)
+        assert response.status_code == 200 and response.json()["data"]["outcome"] == outcome
+    fake.status, fake.outcome = TaskStatus.FAILED, "brief_not_found"
+    assert client.post(BRIEF_PUBLISH).status_code == 404
+    fake.status, fake.outcome = TaskStatus.FAILED, "invalid_input"
+    assert client.post(BRIEF_PUBLISH).status_code == 400
+    fake.status, fake.outcome = TaskStatus.CANCELED, None
+    assert client.post(BRIEF_PUBLISH).status_code == 504
+
+
 def _preview_setup(monkeypatch: pytest.MonkeyPatch, tmp_path, ref: str, sha: str | None) -> None:
     async def send(target: str, request: AgentRequest) -> AgentResult:
         assert (target, request.skill) == ("marketing", "get_campaign_brief")

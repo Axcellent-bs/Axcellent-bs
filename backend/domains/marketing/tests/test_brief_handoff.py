@@ -158,6 +158,7 @@ def test_state_is_included_in_list_and_get() -> None:
         "draft_state": None,
         "media_estimate": None,  # 넘기지 않은 기획안에는 예상 비용·만든 미디어가 없다
         "prepared": None,
+        "publish": None,
     }
     got = _call("get_campaign_brief", {"proposal_id": "PROP-1"})["output"]["item"]
     assert got["sns_handoff"]["draft_id"] == by_id["PROP-1"]["draft_id"]

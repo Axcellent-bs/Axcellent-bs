@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 미디어 만들기의 비용 줄·결과 문구가 서버 값만 쓰는지.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { estimateBlockKo, estimateLines, mediaHttpErrorKo, mediaResultKo, type MediaEstimate } from "./briefMedia.ts";
+import { estimateBlockKo, estimateLines, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, type MediaEstimate, type PublishState } from "./briefMedia.ts";
 
 const estimate = (over: Partial<MediaEstimate> = {}): MediaEstimate => ({
   status: "ok", reason_code: null, media_kind: "video", cost_krw: 835, settled: false, basis: "price_table",
@@ -55,4 +55,39 @@ test("서버 오류 문장은 화면에 그대로 나오지 않는다", () => {
     assert.ok(text.length > 0 && !text.includes("Traceback"));
   }
   assert.match(mediaHttpErrorKo(504), /두 번 만들지 않습니다/);
+});
+
+const publish = (over: Partial<PublishState> = {}): PublishState => ({
+  status: "not_requested", can_request: true, reason_code: null, review_id: null, failure_code: null, permalink: null, caption: "글", ...over,
+});
+
+test("게시 요청 상태: 요청 전에는 줄이 없고, 대기·게시·거절을 구분한다", () => {
+  assert.equal(publishStatusLine(publish()), null);
+  assert.equal(publishStatusLine(null), null);
+  assert.match(publishStatusLine(publish({ status: "held", can_request: false }))!.text, /10분 안에.*만료/);
+  assert.match(publishStatusLine(publish({ status: "publishing", can_request: false }))!.text, /승인됐습니다/);
+  assert.equal(publishStatusLine(publish({ status: "published", can_request: false }))!.tone, "ok");
+  assert.match(publishStatusLine(publish({ status: "rejected", can_request: false }))!.text, /거절됐거나.*만료/);
+  assert.match(publishStatusLine(publish({ status: "failed", failure_code: "content_changed" }))!.text, /내용이 바뀌어/);
+  assert.match(publishStatusLine(publish({ status: "failed", failure_code: "new_code" }))!.text, /new_code/);
+});
+
+test("게시 요청 결과: 요청됨은 아직 게시되지 않았다고 알리고, 실패는 코드별 문구", () => {
+  const ok = publishResultKo({ status: "completed", outcome: "requested", output: null });
+  assert.equal(ok.kind, "requested");
+  assert.match(ok.text, /아직 게시되지 않았습니다/);
+  assert.equal(publishResultKo({ status: "completed", outcome: "already_requested", output: null }).kind, "already");
+  for (const code of ["daily_limit_reached", "check_not_passed", "media_kind_unsupported", "adapter_unavailable", "publish_halted"]) {
+    const r = publishResultKo({ status: "failed", outcome: code, output: null });
+    assert.equal(r.kind, "failed");
+    assert.ok(!r.text.includes(code), code);
+  }
+  assert.equal(publishReasonKo("new_code"), "게시를 요청하지 못했습니다. 잠시 뒤 다시 시도해 주세요 (new_code).");
+});
+
+test("게시 요청 연결 오류는 서버 문장 없이 상태별 문구", () => {
+  assert.match(publishHttpErrorKo(403), /권한/);
+  assert.match(publishHttpErrorKo(404), /지원하지 않/);
+  assert.match(publishHttpErrorKo(504), /두 번 만들지 않습니다/);
+  assert.match(publishHttpErrorKo(undefined), /다시 시도/);
 });
