@@ -70,6 +70,14 @@ GO_AHEAD = (
     "구현해", "구현 해", "그대로 해", "그렇게 해", "ㄱㄱ", "고고",
 )  # fmt: skip
 
+
+def _live(s: State) -> list[ChatThread]:
+    """숨기지 않은 대화만.
+
+    기획 서비스도 같은 상태로 이 모듈을 부르므로 서비스 메서드 대신 상태만 본다."""
+    return [c for c in s.chats if c.removed_at is None]
+
+
 STATUS_TEXT = {
     "queued": "대기 중",
     "claimed": "개발자 Claude가 가져감",
@@ -662,7 +670,7 @@ async def _link(
     메시지 없이 바꾸는 대화 기록일 뿐이라 관문을 다시 타지 않는다."""
 
     async def run(s: State) -> None:
-        th = next((c for c in svc.live_chats(s) if c.id == tid), None)
+        th = next((c for c in _live(s) if c.id == tid), None)
         if th is None:
             raise ActionError("NOT_FOUND", f"대화 {tid}가 없다")
         if request_id is not None:
@@ -767,7 +775,7 @@ async def resume_waiting(svc: DevService) -> None:
     기다리게 둔 대화만 정리한다 (상태가 바뀔 때마다 부른다)."""
     from ax_workflow import related
 
-    for th in [c for c in svc.live_chats() if c.status == "waiting"]:
+    for th in [c for c in _live(svc.state) if c.status == "waiting"]:
         index = svc._relater.index if svc._relater is not None else None
         done = [await related.settled_now(svc.state, rid, index) for rid in th.waiting_for]
         if not all(done):
@@ -801,7 +809,7 @@ async def notice_long_waits(svc: DevService) -> int:
     서로 기다리다 멈추는 일은 없고, 오래 걸리는 것만 사람이 알면 된다."""
     now = svc.clock()
     n = 0
-    for th in [c for c in svc.live_chats() if c.status == "waiting"]:
+    for th in [c for c in _live(svc.state) if c.status == "waiting"]:
         since, count = _wait_since(th)
         if since is None or count > 1 or now - since < timedelta(minutes=WAIT_NOTICE_MINUTES):
             continue
@@ -953,7 +961,7 @@ def _idle_closable(svc: DevService, th: ChatThread) -> bool:
 async def close_idle(svc: DevService) -> list[str]:
     """CLOSE_AFTER_MINUTES 넘게 말이 없는 대화를 끝낸다. 끝낸 대화 id를 준다."""
     limit = svc.clock() - timedelta(minutes=CLOSE_AFTER_MINUTES)
-    ids = [c.id for c in svc.live_chats() if c.updated_at <= limit and _idle_closable(svc, c)]
+    ids = [c.id for c in _live(svc.state) if c.updated_at <= limit and _idle_closable(svc, c)]
     for tid in ids:
         await svc.chat_set(tid, status="closed")
     return ids
@@ -961,7 +969,7 @@ async def close_idle(svc: DevService) -> list[str]:
 
 async def recover_orphans(svc: DevService) -> list[str]:
     """다시 켜질 때 `answering`으로 남은 대화(답을 만들던 중 꺼짐)를 알리고 되돌린다."""
-    ids = [c.id for c in svc.live_chats() if c.status == "answering"]
+    ids = [c.id for c in _live(svc.state) if c.status == "answering"]
     for tid in ids:
         await svc.chat_add(
             tid,
@@ -991,6 +999,6 @@ def view(th: ChatThread, who: str | None) -> dict[str, Any]:
 def listed(
     svc: DevService, who: str | None, limit: int = LIST_LIMIT, origin: str | None = None
 ) -> list[dict[str, Any]]:
-    rows = [c for c in svc.live_chats() if seen_from(c, origin)]
+    rows = [c for c in _live(svc.state) if seen_from(c, origin)]
     rows = sorted(rows, key=lambda c: c.updated_at, reverse=True)[:limit]
     return [view(c, who) for c in rows]
