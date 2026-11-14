@@ -8,6 +8,7 @@
 | `list_claims` | read |
 | `get_claim` | read |
 | `claim_stats` | read |
+| `book_issue_stats` | read |
 | `claim_queue` | read |
 | `create_claim` | A |
 | `decide_claim` | A |

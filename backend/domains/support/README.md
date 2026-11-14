@@ -49,6 +49,7 @@
 | `request_change` | A | dashboard-api, orchestrator | 변경 요청을 기획 `create_ticket`으로 보내고 `ctx_req_`를 문의와 연결. 안전 관문(`execute`)을 먼저 거치고(실행되지 않으면 아무것도 보내지 않는다), 보낸 제목·근거 요약·근거 ID를 연결 기록(`sent_title`·`sent_evidence`·`sent_evidence_ids`)에 남겨 기획이 되물을 때(#264) 쓴다 |
 | `list_change_requests` | read | dashboard-api, orchestrator | 문의·변경 요청 연결 목록 |
 | `list_claims`, `get_claim`, `claim_stats`, `claim_queue` | read | dashboard-api, orchestrator | 클레임 목록·상세(판정 근거·감사 기록)·건수·보상 큐 |
+| `book_issue_stats` | read | dashboard-api, orchestrator, data | 기간별 책(상품)별 클레임·불량·반품 입고·환불 집계 (코드가 셈, claims 서비스). 문의 건수·판매 수량 대비 비율은 아직 없음(`missing`에 적음) |
 | `inquiry_overview` | read | dashboard-api, orchestrator, data | KPI(초안 채택률·수정 정도·가드 적중·분류별 건수)와 답변 대기 문의 (긴급도·대기 시간 순) |
 | `detect_inquiry_surge` | read | dashboard-api, orchestrator, data | 분류별 문의 급증 감지 (DEP-CS-05): 최근 창 건수를 평소 창 평균(`baseline_method=median`이면 창별 건수의 중앙값)과 견줌 |
 | `propose_change_requests` | read | dashboard-api, orchestrator | 급증한 분류마다 기획에 보낼 변경 요청안을 코드 규칙으로 만든다(#281, LLM 없음): 제목 한 줄·근거 요약(건수·평소 대비 배수, 급증 창에 들어온 문의 중 상담원이 "분류 필요"에서 정한 원인 이름이 있으면 `상담원이 정한 원인: 이름 N건`을 상위 3개까지 덧붙인다. 근거 500자·개인정보 검사를 넘으면 붙이지 않는다)·대표 문의(샘플 중 번호가 가장 작은 문의)·나머지 근거 ID(`inq_<번호>`)·이미 요청됨 여부. 만들기만 하고 보내거나 저장하지 않는다. 이미 "보내지 않기"를 고른 제안은 `declined`·`decline_reason`으로 표시한다. 보내는 일은 사람이 고른 뒤 `request_change`가 한다 |
