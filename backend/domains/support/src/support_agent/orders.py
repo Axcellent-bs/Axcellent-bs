@@ -21,6 +21,8 @@ class OrderItem(AxModel):
     points_share: int = 0
     coupon_share: int = 0  # 이 품목이 받은 쿠폰 할인 몫 (shop-api `coupon_share`, 없던 주문은 0)
     refunded_qty: int = 0
+    # 상품 ID (shop-api `product_id`). 책별 집계의 열쇠. 시드·옛 기록은 None (제목으로 추측 안 함)
+    product_id: str | None = None
 
 
 class Order(AxModel):

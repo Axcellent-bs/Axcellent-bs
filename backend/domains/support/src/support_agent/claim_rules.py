@@ -40,6 +40,7 @@ class Line:
     unit_price: int
     refund_cash: int
     points_back: int
+    product_id: str | None = None  # 상품 ID. 옛 기록·시드 주문은 None
 
 
 @dataclass
@@ -66,7 +67,9 @@ def _lines(order: Order, wanted: dict[int, int] | None) -> list[Line]:
         qty = min(requested, refundable)
         unit = item.paid_amount // item.qty if item.qty else 0
         points = item.points_share * qty // item.qty if item.qty else 0
-        lines.append(Line(item.id, item.title, qty, requested, unit, unit * qty, points))
+        lines.append(
+            Line(item.id, item.title, qty, requested, unit, unit * qty, points, item.product_id)
+        )
     return lines
 
 

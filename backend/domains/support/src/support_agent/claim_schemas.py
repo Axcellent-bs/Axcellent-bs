@@ -53,6 +53,7 @@ class ClaimLine(AxModel):
     unit_price: int
     refund_cash: int
     points_back: int
+    product_id: str | None = None  # 상품 ID (책별 집계용). 옛 클레임은 None
 
 
 class ClaimDeduction(AxModel):
