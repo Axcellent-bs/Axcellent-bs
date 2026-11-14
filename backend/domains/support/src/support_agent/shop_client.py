@@ -147,7 +147,7 @@ async def _send(
             # 그래서 쓰기 권한이 있는 설치(251)가 처리 상태를 그대로 쥔다
             return httpx.Response(200, json={"data": {}, "meta": {}})
         raise ShopError("READ_ONLY", "읽기 전용 설치라 판매 서버에 쓰지 않는다")
-    shared = client or _client  # 여러 번 부르는 읽기는 하나를 넘겨 재사용한다 (_shared_client)
+    shared = client or _client  # 여러 번 부르는 읽기는 하나를 넘겨 재사용한다 (shared_client)
     http = shared or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
     try:
         response = await http.request(method, _url(path), headers=_headers(), **kwargs)
@@ -166,7 +166,7 @@ async def _send(
 
 
 @asynccontextmanager
-async def _shared_client() -> AsyncIterator[httpx.AsyncClient]:
+async def shared_client() -> AsyncIterator[httpx.AsyncClient]:
     """같은 서버를 여러 번 읽을 때 쓸 클라이언트 하나.
 
     호출마다 새로 만들면 연결·TLS 설정 비용이 쌓인다 (주문 4만 건을 읽는 데 18.9초 →
@@ -272,10 +272,16 @@ async def fetch_sold_qty(
     qty: dict[str, int] = {}
     scanned = 0
     cursor: str | None = None
-    async with _shared_client() as client:
+    async with shared_client() as client:
         for _ in range(max_pages):
-            if stop_at is not None and datetime.now(UTC) >= stop_at:
-                return SalesRead(qty, scanned, False)
+            timeout = TIMEOUT_SECONDS
+            if stop_at is not None:
+                remaining = (stop_at - datetime.now(UTC)).total_seconds()
+                if remaining <= 0:
+                    return SalesRead(qty, scanned, False)
+                timeout = min(
+                    TIMEOUT_SECONDS, max(remaining, 0.5)
+                )  # 페이지 하나가 마감을 넘기지 않게
             params: dict[str, Any] = {
                 "since": since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "until": until.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -283,7 +289,7 @@ async def fetch_sold_qty(
             }
             if cursor:
                 params["cursor"] = cursor
-            response = await _send("GET", "/orders", params=params, client=client)
+            response = await _send("GET", "/orders", params=params, client=client, timeout=timeout)
             if response.status_code != 200:
                 raise _error(response)
             body = response.json()
@@ -300,9 +306,12 @@ async def fetch_sold_qty(
     return SalesRead(qty, scanned, False)
 
 
-async def fetch_order(order_id: str) -> Order | None:
-    """주문을 읽는다. 없거나 결제가 끝나지 않았으면 None, 연결 실패는 `ShopError`."""
-    response = await _send("GET", f"/orders/{order_id}")
+async def fetch_order(order_id: str, *, client: httpx.AsyncClient | None = None) -> Order | None:
+    """주문을 읽는다. 없거나 결제가 끝나지 않았으면 None, 연결 실패는 `ShopError`.
+
+    여러 주문을 이어서 읽을 때는 `shared_client()`의 클라이언트를 `client`로 넘겨 재사용한다.
+    """
+    response = await _send("GET", f"/orders/{order_id}", client=client)
     if response.status_code == 404:
         return None
     if response.status_code != 200:
@@ -323,11 +332,11 @@ async def fetch_order_facts(order_id: str) -> dict[str, Any] | None:
     return response.json()["data"]
 
 
-async def load_order(order_id: str) -> Order | None:
-    """클레임 판정에 쓸 주문. 출처는 `order_source()`가 정한다."""
+async def load_order(order_id: str, *, client: httpx.AsyncClient | None = None) -> Order | None:
+    """클레임 판정에 쓸 주문. 출처는 `order_source()`가 정한다. `client`는 `fetch_order`와 같다."""
     if order_source() == "seed":
         return orders.get_order(order_id)
-    return await fetch_order(order_id)
+    return await fetch_order(order_id, client=client)
 
 
 async def refund(

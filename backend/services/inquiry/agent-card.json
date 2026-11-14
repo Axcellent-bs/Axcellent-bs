@@ -439,7 +439,7 @@
     },
     {
       "id": "inquiry_order_counts",
-      "description": "기간(day·week·month) 안의 문의를 주문별로 센다(문의 건수·분류 코드별). 책별 집계(book_issue_stats)가 문의를 상품에 붙일 때 클레임 서비스가 부른다. 주문 ID·건수·분류 코드뿐이고 고객 이름·구매자 ID·글은 담지 않는다. 주문이 200개를 넘으면 문의 많은 순으로 자르고 truncated로 알린다. LLM을 쓰지 않는다.",
+      "description": "기간(day·week·month) 안의 문의를 주문별로 센다(문의 건수·분류 코드별). 책별 집계(book_issue_stats)가 문의를 상품에 붙일 때 클레임 서비스가 부른다. 주문 ID·건수·분류 코드뿐이고 고객 이름·구매자 ID·글은 담지 않는다. 요청한 고객사(meta.tenant_id)의 문의만 센다. 주문이 200개를 넘으면 문의 많은 순으로 자르고 truncated로 알린다. LLM을 쓰지 않는다.",
       "input_schema": "agents/support/src/support_agent/book_issue_schemas.py#InquiryOrderCountsInput",
       "output_schema": "agents/support/src/support_agent/book_issue_schemas.py#InquiryOrderCounts",
       "grade": "read",

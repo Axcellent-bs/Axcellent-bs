@@ -42,6 +42,8 @@ class BookIssueRow(AxModel):
     # 읽지 못했으면 None (0으로 채우지 않는다)
     inquiry_count: int | None = None
     inquiry_count_single_item: int | None = None  # 상품 하나뿐인 주문의 문의만 센 값
+    # 문의를 일부 주문만 읽었으면 False (건수가 더 많을 수 있다). 못 읽은 것으로 0을 채우지 않는다
+    inquiry_complete: bool | None = None
     inquiry_attribution: Literal["order_level"] = "order_level"
     top_categories: list[CategoryCount] = Field(default_factory=list)  # 문의 분류 상위 3개
     # 판매 수량을 못 읽었으면 None (0으로 채우지 않는다). 비율 = 클레임 수량 / 같은 기간 판매 수량.
@@ -61,6 +63,8 @@ class BookIssueReport(AxModel):
     sales_read: bool = False  # 판매 수량을 끝까지 읽어 합쳤는가
     sales_orders_scanned: int | None = None  # 판매 수량을 세려고 읽은 주문 수
     inquiries_read: bool = False  # 문의 건수를 읽어 합쳤는가
+    # 읽지 못한·상품 ID 없는 주문, 주문 200개 상한, 마감으로 건너뛴 주문이 없으면 True
+    inquiries_complete: bool | None = None
     total_inquiries: int | None = None  # 기간 안의 전체 문의 수 (읽었을 때)
     inquiries_not_attributed: int | None = None  # 결제 전 주문 등으로 상품에 못 붙인 문의 수
     missing: list[str] = Field(default_factory=list)  # 못 읽은 값과 이유

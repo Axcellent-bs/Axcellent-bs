@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
 from ax_agent_template.execute import execute
 from ax_agent_template.server import error_result
@@ -21,7 +21,7 @@ from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from support_agent import book_issue_stats, claim_rules, events, persistence, shop_client
 from support_agent import handlers as h
 from support_agent.book_issue_schemas import PERIOD_DAYS, BookIssueInput, InquiryOrderCounts
-from support_agent.book_issue_stats import OrderInquiry
+from support_agent.book_issue_stats import OrderInquiry, OrderStatus
 from support_agent.claim_schemas import (
     ClaimReasonHit,
     CreateClaimInput,
@@ -137,20 +137,34 @@ async def claim_stats(request: AgentRequest) -> AgentResult:
 
 
 ORDER_READ_CONCURRENCY = 8
-SALES_DEADLINE_MARGIN = 3  # 요청 마감 몇 초 전에 판매 수량 읽기를 멈추는가
+DEADLINE_MARGIN = 3  # 요청 마감 몇 초 전에 선택 근거(문의·판매 수량) 읽기를 멈추는가
 
 
-async def _skipped() -> tuple[None, None, list[str]]:
+async def _skipped[T](value: T) -> T:
     """읽지 않기로 한 근거 (`include_inquiries`·`include_sales`가 False)."""
-    return None, None, []
+    return value
 
 
-async def _inquiry_evidence(
-    request: AgentRequest, period: str
-) -> tuple[list[OrderInquiry] | None, int | None, list[str]]:
+class InquiryEvidence(NamedTuple):
+    """문의 서비스에서 읽은 주문별 문의와 그 주문의 상품. `orders`가 None이면 읽지 못한 것이다."""
+
+    orders: list[OrderInquiry] | None = None
+    total: int | None = None
+    truncated: bool = False
+    notes: tuple[str, ...] = ()
+
+
+class SalesEvidence(NamedTuple):
+    sold: dict[str, int] | None = None
+    scanned: int | None = None
+    notes: tuple[str, ...] = ()
+
+
+async def _inquiry_evidence(request: AgentRequest, period: str) -> InquiryEvidence:
     """문의 서비스에서 주문별 문의 건수를 읽고, 그 주문들의 상품을 판매 서버에서 읽는다.
 
-    읽지 못하면 (None, None, 이유)다. 문의 건수를 0으로 채우지 않는다.
+    문의는 선택 근거라서 어떤 이유로든 못 읽으면 `orders=None`과 이유를 돌려주고,
+    클레임 집계는 그대로 나간다. 문의 건수를 0으로 채우지 않는다.
     """
     meta = request.meta.model_copy(update={"idempotency_key": None})
     try:
@@ -159,90 +173,115 @@ async def _inquiry_evidence(
             AgentRequest(meta=meta, skill="inquiry_order_counts", input={"period": period}),
         )
         if reply.status != TaskStatus.COMPLETED:
-            return None, None, [f"문의 건수를 읽지 못했다: {reply.outcome}"]
+            return InquiryEvidence(notes=(f"문의 건수를 읽지 못했다: {reply.outcome}",))
         counts = InquiryOrderCounts.model_validate(reply.output)
     except Exception:  # noqa: BLE001 - 문의는 부가 근거라 클레임 집계는 그대로 낸다
         h.logger.warning("주문별 문의 건수를 읽지 못했다", exc_info=True)
-        return None, None, ["문의 건수를 읽지 못했다 (문의 서비스에 닿지 못함)"]
+        return InquiryEvidence(notes=("문의 건수를 읽지 못했다 (문의 서비스에 닿지 못함)",))
 
+    stop_at = request.meta.deadline - timedelta(seconds=DEADLINE_MARGIN)
     gate = asyncio.Semaphore(ORDER_READ_CONCURRENCY)
 
-    async def products(order_id: str) -> tuple[tuple[str, str], ...] | None:
+    async def read(
+        order_id: str, http: Any
+    ) -> tuple[OrderStatus, tuple[tuple[str, str], ...], bool]:
+        """(상태, (상품 ID, 제목)들, 상품 ID 없는 품목이 있는가)."""
         async with gate:
+            if datetime.now(UTC) >= stop_at:  # 마감이 가까우면 더 읽지 않는다
+                return "unread", (), False
             try:
-                order = await shop_client.load_order(order_id)
+                order = await shop_client.load_order(order_id, client=http)
             except shop_client.ShopError:
-                return None
+                return "unread", (), False
+            except Exception:  # noqa: BLE001 - 응답 모양이 이상해도 클레임 집계는 그대로 낸다
+                h.logger.warning("주문 %s을 읽다가 실패했다", order_id, exc_info=True)
+                return "unread", (), False
         if order is None:  # 결제 전이거나 없는 주문 (결제 실패 문의는 상품 불만이 아니라서 뺀다)
-            return ()
-        return tuple((i.product_id, i.title) for i in order.items if i.product_id)
+            return "unpaid", (), False
+        known = {i.product_id: i.title for i in order.items if i.product_id}
+        unknown = any(not i.product_id for i in order.items)
+        if not known:
+            return "no_product", (), unknown
+        return "ok", tuple(known.items()), unknown
 
-    loaded = await asyncio.gather(*(products(o.order_id) for o in counts.orders))
-    unread = sum(1 for p in loaded if p is None)
-    notes = []
+    async with shop_client.shared_client() as http:
+        loaded = await asyncio.gather(*(read(o.order_id, http) for o in counts.orders))
+    notes: list[str] = []
+    unread = sum(1 for status, _, _ in loaded if status == "unread")
     if unread:
-        notes.append(f"판매 서버에서 주문 {unread}개를 읽지 못해 그 문의는 상품에 붙이지 못했다")
+        notes.append(
+            f"판매 서버에서 주문 {unread}개를 읽지 못했거나 마감 때문에 건너뛰어 "
+            "그 문의는 상품에 붙이지 못했다"
+        )
     if counts.truncated:
         notes.append("문의가 있는 주문이 많아 문의 많은 순 200개 주문까지만 붙였다")
-    evidence = [
-        OrderInquiry(o.order_id, o.inquiry_count, o.categories, p or ())
-        for o, p in zip(counts.orders, loaded, strict=True)
+    orders = [
+        OrderInquiry(o.order_id, o.inquiry_count, o.categories, products, status, unknown)
+        for o, (status, products, unknown) in zip(counts.orders, loaded, strict=True)
     ]
-    return evidence, counts.total_inquiries, notes
+    return InquiryEvidence(orders, counts.total_inquiries, counts.truncated, tuple(notes))
 
 
-async def _sales_evidence(
-    request: AgentRequest, now: datetime, period: str
-) -> tuple[dict[str, int] | None, int | None, list[str]]:
+async def _sales_evidence(request: AgentRequest, now: datetime, period: str) -> SalesEvidence:
     """판매 서버 주문 목록에서 기간 안 상품별 판매 수량을 읽는다.
 
-    끝까지 읽지 못하면(연결 실패·페이지 상한·마감) 모자란 수량으로 비율을 내지 않게
-    (None, None, 이유)를 돌려준다.
+    끝까지 읽지 못하면(연결 실패·페이지 상한·마감·응답 모양 이상) 모자란 수량으로 비율을 내지 않게
+    `sold=None`과 이유를 돌려준다. 판매 수량은 선택 근거라서 클레임 집계는 그대로 나간다.
     """
     if shop_client.order_source() == "seed":
-        return None, None, ["주문 출처가 시드라 판매 수량을 읽지 않았다"]
+        return SalesEvidence(notes=("주문 출처가 시드라 판매 수량을 읽지 않았다",))
     since = now - timedelta(days=PERIOD_DAYS[period])
     try:
         read = await shop_client.fetch_sold_qty(
-            since, now, stop_at=request.meta.deadline - timedelta(seconds=SALES_DEADLINE_MARGIN)
+            since, now, stop_at=request.meta.deadline - timedelta(seconds=DEADLINE_MARGIN)
         )
     except shop_client.ShopError as exc:
-        return None, None, [f"판매 수량을 읽지 못했다: {exc}"]
+        return SalesEvidence(notes=(f"판매 수량을 읽지 못했다: {exc}",))
+    except Exception:  # noqa: BLE001 - 응답 모양이 이상해도 클레임 집계는 그대로 낸다
+        h.logger.warning("판매 수량을 읽다가 실패했다", exc_info=True)
+        return SalesEvidence(notes=("판매 수량을 읽지 못했다 (응답을 해석하지 못함)",))
     if not read.complete:
-        return (
-            None,
-            None,
-            [
+        return SalesEvidence(
+            notes=(
                 f"주문이 많아 {read.orders_scanned}건까지만 읽어서 판매 수량을 내지 않았다 "
-                "(모자란 수량으로 비율을 내면 틀린다)"
-            ],
+                "(모자란 수량으로 비율을 내면 틀린다)",
+            )
         )
-    return read.qty_by_product, read.orders_scanned, []
+    return SalesEvidence(read.qty_by_product, read.orders_scanned)
 
 
 async def book_issue_stats_skill(request: AgentRequest) -> AgentResult:
-    """책(상품)별 클레임·불량·반품·환불·문의 집계. 이벤트 후보에서 불만 많은 책을 거를 근거다."""
+    """책(상품)별 클레임·불량·반품·환불·문의 집계. 이벤트 후보에서 불만 많은 책을 거를 근거다.
+
+    요청한 고객사(`meta.tenant_id`)의 클레임만 센다. 판매 수량은 연결된 판매 서버(고객사 하나)
+    것이다.
+    """
     parsed = h._parse(request, BookIssueInput)
     if isinstance(parsed, AgentResult):
         return parsed
     now = datetime.now(UTC)
     inquiry_task = (
-        _inquiry_evidence(request, parsed.period) if parsed.include_inquiries else _skipped()
+        _inquiry_evidence(request, parsed.period)
+        if parsed.include_inquiries
+        else _skipped(InquiryEvidence())
     )
     sales_task = (
-        _sales_evidence(request, now, parsed.period) if parsed.include_sales else _skipped()
+        _sales_evidence(request, now, parsed.period)
+        if parsed.include_sales
+        else _skipped(SalesEvidence())
     )
-    (inquiries, total, notes), sales = await asyncio.gather(inquiry_task, sales_task)
-    sold, scanned, sales_notes = sales
+    inquiry, sales = await asyncio.gather(inquiry_task, sales_task)
+    tenant = request.meta.tenant_id
     report = book_issue_stats.book_issue_report(
-        CLAIMS.list(),
+        [c for c in CLAIMS.list() if c.tenant_id == tenant],
         now,
         parsed,
-        inquiries,
-        total_inquiries=total,
-        sold=sold,
-        sales_orders_scanned=scanned,
-        notes=[*notes, *sales_notes],
+        inquiry.orders,
+        total_inquiries=inquiry.total,
+        inquiries_truncated=inquiry.truncated,
+        sold=sales.sold,
+        sales_orders_scanned=sales.scanned,
+        notes=[*inquiry.notes, *sales.notes],
     )
     return h._done(request, report.model_dump(mode="json"))
 
