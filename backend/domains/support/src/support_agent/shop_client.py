@@ -208,6 +208,7 @@ def to_order(data: dict[str, Any]) -> Order | None:
                 paid_amount=item["paid_amount"],
                 points_share=item.get("points_share", 0),
                 coupon_share=item.get("coupon_share") or 0,
+                product_id=item.get("product_id"),
             )
             for item in data.get("items", [])
         ],

@@ -195,6 +195,38 @@ def test_coupon_fields_are_mapped_and_missing_ones_default_to_zero() -> None:
     assert nulls is not None and nulls.coupon_discount == 0
 
 
+def test_product_id_is_mapped_and_missing_one_stays_none() -> None:
+    """책별 집계의 열쇠. product_id를 옮기고, 없으면 제목으로 추측하지 않고 None이다."""
+    order = shop_client.to_order(shop_order())
+    assert order is not None and [i.product_id for i in order.items] == ["prd_0001"]
+    old_item = {k: v for k, v in shop_order()["items"][0].items() if k != "product_id"}
+    old = shop_client.to_order(shop_order(items=[old_item]))
+    assert old is not None and [i.product_id for i in old.items] == [None]
+
+
+def test_claim_lines_carry_the_product_id() -> None:
+    from support_agent import claim_rules
+    from support_agent.claim_schemas import ClaimLine
+
+    order = shop_client.to_order(shop_order(delivered_at="2026-10-22T00:00:00Z"))
+    assert order is not None
+    decision = claim_rules.decide(
+        order,
+        "return",
+        "defect",
+        items=None,
+        evidence_count=1,
+        unsealed=False,
+        prior_claims=0,
+        now=datetime(2026, 10, 23, tzinfo=UTC),
+    )
+    assert [line.product_id for line in decision.lines] == ["prd_0001"]
+    line = ClaimLine(**vars(decision.lines[0]))
+    assert line.product_id == "prd_0001"
+    legacy = {k: v for k, v in vars(decision.lines[0]).items() if k != "product_id"}
+    assert ClaimLine(**legacy).product_id is None  # 옛 클레임 기록은 None으로 읽는다
+
+
 def test_unpaid_orders_are_not_mapped() -> None:
     assert shop_client.to_order(shop_order(status="pending_payment", payments=[])) is None
     failed = [{**shop_order()["payments"][0], "status": "failed"}]
