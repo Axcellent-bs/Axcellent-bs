@@ -17,8 +17,9 @@ from typing import Any
 from ax_agent_template.execute import execute
 from ax_agent_template.server import error_result
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
-from support_agent import claim_rules, events, persistence, shop_client
+from support_agent import book_issue_stats, claim_rules, events, persistence, shop_client
 from support_agent import handlers as h
+from support_agent.book_issue_schemas import BookIssueInput
 from support_agent.claim_schemas import (
     ClaimReasonHit,
     CreateClaimInput,
@@ -131,6 +132,15 @@ async def get_claim(request: AgentRequest) -> AgentResult:
 
 async def claim_stats(request: AgentRequest) -> AgentResult:
     return h._done(request, CLAIMS.stats().model_dump(mode="json"))
+
+
+async def book_issue_stats_skill(request: AgentRequest) -> AgentResult:
+    """책(상품)별 클레임·불량·반품·환불 집계. 이벤트 후보에서 불만 많은 책을 거를 근거다."""
+    parsed = h._parse(request, BookIssueInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    report = book_issue_stats.book_issue_report(CLAIMS.list(), datetime.now(UTC), parsed)
+    return h._done(request, report.model_dump(mode="json"))
 
 
 async def claim_queue(request: AgentRequest) -> AgentResult:
@@ -474,6 +484,7 @@ CLAIM_HANDLERS = {
     "list_claims": list_claims,
     "get_claim": get_claim,
     "claim_stats": claim_stats,
+    "book_issue_stats": book_issue_stats_skill,
     "claim_queue": claim_queue,
     "create_claim": create_claim,
     "decide_claim": decide_claim,
