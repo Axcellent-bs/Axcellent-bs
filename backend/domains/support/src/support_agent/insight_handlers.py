@@ -43,8 +43,9 @@ async def inquiry_order_counts_skill(request: AgentRequest) -> AgentResult:
     parsed = h._parse(request, InquiryOrderCountsInput)
     if isinstance(parsed, AgentResult):
         return parsed
+    tenant = request.meta.tenant_id  # 요청한 고객사의 문의만 센다
     counts = inquiry_order_counts.inquiry_order_counts(
-        h.STORE.all(), datetime.now(UTC), parsed.period
+        [c for c in h.STORE.all() if c.tenant_id == tenant], datetime.now(UTC), parsed.period
     )
     return h._done(request, counts.model_dump(mode="json"))
 

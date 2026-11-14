@@ -78,6 +78,19 @@ def claim(
     )
 
 
+def t_claim(
+    claim_id: int,
+    product: str,
+    *,
+    cash: int = 10000,
+    received: bool = False,
+    paid: int = 0,
+) -> Claim:
+    return claim(
+        claim_id, [line(f"i{claim_id}", product, "책", 1, cash)], received=received, paid=paid
+    )
+
+
 def report(claims: list[Claim], **query: Any):
     return book_issue_report(claims, NOW, BookIssueInput(**query))
 
@@ -296,9 +309,13 @@ def test_skill_returns_the_report_and_validates_input(client: TestClient) -> Non
 
 # ---------------------------------------------------------------- 문의 합치기 (순수 코드)
 def order_inquiry(
-    order_id: str, count: int, products: list[tuple[str, str]], **cats: int
+    order_id: str,
+    count: int,
+    products: list[tuple[str, str]],
+    status: Any = "ok",
+    **cats: int,
 ) -> OrderInquiry:
-    return OrderInquiry(order_id, count, cats or {"payment": count}, tuple(products))
+    return OrderInquiry(order_id, count, cats or {"payment": count}, tuple(products), status)
 
 
 def test_inquiries_are_attributed_per_order_to_every_product_in_it() -> None:
@@ -333,17 +350,85 @@ def test_inquiry_only_products_are_listed_and_claim_rows_get_zero_when_read() ->
     assert [r.product_id for r in result.items] == ["prd_1", "prd_2"]  # 클레임 있는 것이 먼저
 
 
-def test_unpaid_or_unread_orders_are_reported_not_attributed() -> None:
+def test_unpaid_orders_are_left_out_on_purpose_and_the_counts_stay_complete() -> None:
     result = book_issue_report(
         [],
         NOW,
         BookIssueInput(),
-        [order_inquiry("ord_1", 4, []), order_inquiry("ord_2", 1, [("prd_1", "책")])],
-        notes=["판매 서버에서 주문 1개를 읽지 못해 그 문의는 상품에 붙이지 못했다"],
+        [
+            order_inquiry("ord_1", 4, [], status="unpaid"),
+            order_inquiry("ord_2", 1, [("prd_1", "책")]),
+        ],
     )
-    assert result.inquiries_not_attributed == 4
-    assert any("상품에 붙이지 못한 문의 4건" in m for m in result.missing)
-    assert any("주문 1개를 읽지 못해" in m for m in result.missing)
+    assert result.inquiries_not_attributed == 4 and result.inquiries_complete is True
+    assert any("결제 전이거나 없는 주문의 문의 4건" in m for m in result.missing)
+    assert result.items[0].inquiry_count == 1 and result.items[0].inquiry_complete is True
+
+
+def test_unread_orders_make_the_counts_incomplete_and_unknown_products_none() -> None:
+    claims = [t_claim(1, "prd_1"), t_claim(2, "prd_2")]
+    result = book_issue_report(
+        claims,
+        NOW,
+        BookIssueInput(),
+        [
+            order_inquiry("ord_1", 5, [], status="unread"),
+            order_inquiry("ord_2", 2, [("prd_2", "책 B")]),
+        ],
+    )
+    rows = {r.product_id: r for r in result.items}
+    assert result.inquiries_complete is False and result.inquiries_not_attributed == 5
+    # 문의를 전부 읽지 못했으니 prd_1에 문의가 없다고 말할 수 없다: 0이 아니라 None
+    assert rows["prd_1"].inquiry_count is None and rows["prd_1"].inquiry_complete is False
+    assert rows["prd_2"].inquiry_count == 2 and rows["prd_2"].inquiry_complete is False
+    assert "일부 주문만 읽어 더 많을 수 있음" in rows["prd_2"].reason
+    assert any("상품에 붙이지 못한 문의 5건" in m for m in result.missing)
+
+
+def test_truncated_inquiry_orders_make_the_counts_incomplete() -> None:
+    result = book_issue_report(
+        [t_claim(1, "prd_1")],
+        NOW,
+        BookIssueInput(),
+        [order_inquiry("ord_2", 2, [("prd_2", "책 B")])],
+        inquiries_truncated=True,
+    )
+    rows = {r.product_id: r for r in result.items}
+    assert result.inquiries_complete is False
+    assert rows["prd_1"].inquiry_count is None
+
+
+def test_items_without_a_product_id_do_not_count_as_a_single_item_order() -> None:
+    result = book_issue_report(
+        [],
+        NOW,
+        BookIssueInput(),
+        [
+            OrderInquiry("ord_1", 3, {"payment": 3}, (("prd_1", "책"),), has_unknown_items=True),
+            order_inquiry("ord_2", 1, [("prd_1", "책")]),
+            order_inquiry("ord_3", 2, [], status="no_product"),
+        ],
+    )
+    row = result.items[0]
+    assert (row.inquiry_count, row.inquiry_count_single_item) == (
+        4,
+        1,
+    )  # ord_1은 단일 주문이 아니다
+    assert result.inquiries_complete is False
+    assert any("상품 ID가 없는 품목이 든 주문 1개" in m for m in result.missing)
+    assert any("상품 ID가 없는 주문이라 상품에 붙이지 못한 문의 2건" in m for m in result.missing)
+
+
+def test_paid_amount_is_split_by_item_refund_and_keeps_deductions() -> None:
+    deducted = t_claim(1, "prd_1", cash=10000, received=True, paid=4000)  # 변심 반품 배송비 공제
+    two = t_claim(2, "prd_2", cash=6000, received=True, paid=8000).model_copy(
+        update={"lines": [line("x", "prd_2", "책 B", 1, 6000), line("y", "prd_3", "책 C", 1, 4000)]}
+    )
+    rows = {
+        r.product_id: r for r in book_issue_report([deducted, two], NOW, BookIssueInput()).items
+    }
+    assert rows["prd_1"].refund_cash_total == 4000  # 품목 환불액 10,000이 아니라 실제 지급액
+    assert (rows["prd_2"].refund_cash_total, rows["prd_3"].refund_cash_total) == (4800, 3200)
 
 
 def test_without_inquiries_the_inquiry_fields_stay_none() -> None:
@@ -425,7 +510,7 @@ def run_skill(client: TestClient, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def fake_orders(monkeypatch: pytest.MonkeyPatch, mapping: dict[str, Any]) -> None:
-    async def load(order_id: str) -> Any:
+    async def load(order_id: str, *, client: Any = None) -> Any:
         value = mapping[order_id]
         if isinstance(value, Exception):
             raise value
@@ -503,7 +588,8 @@ def test_skill_attaches_inquiries_from_the_inquiry_service(
     assert rows["prd_1"]["inquiry_count"] == 2 and rows["prd_1"]["claim_count"] == 1
     assert out["inquiries_read"] and out["total_inquiries"] == 9
     assert out["inquiries_not_attributed"] == 4  # 결제 전 1건 + 읽지 못한 3건
-    assert any("주문 1개를 읽지 못해" in m for m in out["missing"])
+    assert any("주문 1개를 읽지 못했거나" in m for m in out["missing"])
+    assert out["inquiries_complete"] is False  # 못 읽은 주문이 있어 건수가 모자랄 수 있다
 
 
 def test_skill_still_returns_claims_when_the_inquiry_service_is_down(
@@ -601,3 +687,129 @@ async def test_fetch_sold_qty_reuses_one_http_client_for_all_pages(
     await shop_client._send("GET", "/orders")
     await shop_client._send("GET", "/orders")
     assert len(made) == 2
+
+
+# ---------------------------------------------------------------- 검토에서 나온 수정 (핸들러 쪽)
+def _inquiry_orders(*ids: str) -> dict[str, Any]:
+    return counts_output(
+        [{"order_id": i, "inquiry_count": 1, "categories": {"payment": 1}} for i in ids],
+        total=len(ids),
+    )
+
+
+def test_other_tenants_claims_are_not_counted(client: TestClient) -> None:
+    store = claim_handlers.CLAIMS
+    other = claim(2, [line("b", "prd_1", "책")]).model_copy(
+        update={
+            "tenant_id": "other-co",
+            "created_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+    )
+    store._claims[2] = other
+    out = run_skill(client, {"include_inquiries": False, "include_sales": False})["output"]
+    assert out["items"][0]["claim_count"] == 1 and out["total_claims"] == 1
+
+
+def test_inquiry_order_counts_only_counts_the_requesting_tenant(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = conversation_store([("ord_1", "payment", 1), ("ord_2", "payment", 1)])
+    list(store.all())[1].tenant_id = "other-co"
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for conversation in store.all():
+        conversation.messages[0].created_at = now
+    monkeypatch.setattr(handlers, "STORE", store)
+    body = {
+        "meta": {
+            "context_id": "ctx_req_0001",
+            "token": "mock:dashboard-api",
+            "path": [],
+            "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
+            "idempotency_key": None,
+        },
+        "skill": "inquiry_order_counts",
+        "input": {"period": "week"},
+        "untrusted": {},
+    }
+    out = client.post("/a2a", json=body).json()["output"]
+    assert out["total_inquiries"] == 1 and [o["order_id"] for o in out["orders"]] == ["ord_1"]
+
+
+def test_an_unexpected_shop_error_does_not_take_down_the_claim_counts(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_send(monkeypatch, _inquiry_orders("ord_a", "ord_b"))
+    fake_orders(
+        monkeypatch, {"ord_a": one_order("ord_a", [("책 A", "prd_1")]), "ord_b": KeyError("x")}
+    )
+    out = run_skill(client, {"include_sales": False})["output"]
+    assert out["items"][0]["claim_count"] == 1  # 클레임 집계는 그대로 나간다
+    assert out["items"][0]["inquiry_count"] == 1 and out["inquiries_complete"] is False
+
+    monkeypatch.setenv("SUPPORT_ORDER_SOURCE", "shop-api")
+
+    async def broken(*args: Any, **kwargs: Any) -> shop_client.SalesRead:
+        raise ValueError("invalid literal for int()")
+
+    monkeypatch.setattr(shop_client, "fetch_sold_qty", broken)
+    out = run_skill(client, {"include_inquiries": False})["output"]
+    assert out["items"][0]["claim_count"] == 1 and not out["sales_read"]
+    assert any("판매 수량을 읽지 못했다 (응답을 해석하지 못함)" in m for m in out["missing"])
+
+
+def test_inquiry_order_reads_stop_near_the_deadline(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_send(monkeypatch, _inquiry_orders("ord_a", "ord_b"))
+
+    async def must_not_read(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("마감이 가까운데 주문을 읽었다")
+
+    monkeypatch.setattr(shop_client, "load_order", must_not_read)
+    monkeypatch.setattr(claim_handlers, "DEADLINE_MARGIN", 10_000)  # 마감까지 남은 시간보다 크다
+    out = run_skill(client, {"include_sales": False})["output"]
+    assert out["inquiries_complete"] is False
+    assert out["items"][0]["inquiry_count"] is None  # 읽지 못했으니 0이 아니다
+    assert any("2개를 읽지 못했거나 마감 때문에 건너뛰어" in m for m in out["missing"])
+
+
+def test_inquiry_order_reads_share_one_http_client(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx
+
+    fake_send(monkeypatch, _inquiry_orders("ord_a", "ord_b", "ord_c"))
+    monkeypatch.setenv("SUPPORT_ORDER_SOURCE", "shop-api")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        order = _order(request.url.path.rsplit("/", 1)[-1], [("prd_1", 1)])
+        order["created_at"] = "2026-11-14T00:00:00Z"
+        order["payments"] = [{**order["payments"][0], "created_at": "2026-11-14T00:00:01Z"}]
+        order.update(buyer_id="buy_0001")
+        order["items"] = [
+            {
+                "order_item_id": "oit_1",
+                "product_id": "prd_1",
+                "title": "책",
+                "qty": 1,
+                "paid_amount": 1000,
+            }
+        ]
+        order["payments"][0]["payment_id"] = "pay_1"
+        return httpx.Response(200, json={"data": order, "meta": {}})
+
+    made: list[int] = []
+    real = httpx.AsyncClient
+
+    def factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        made.append(1)
+        return real(*args, transport=httpx.MockTransport(handle), **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    shop_client.use_client(None)
+    try:
+        out = run_skill(client, {"include_sales": False})["output"]
+    finally:
+        shop_client.use_client(None)
+    assert out["items"][0]["inquiry_count"] == 3 and out["inquiries_complete"] is True
+    assert len(made) == 1  # 주문 세 개를 클라이언트 하나로
