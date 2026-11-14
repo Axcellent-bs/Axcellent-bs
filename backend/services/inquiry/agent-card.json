@@ -438,6 +438,21 @@
       "handoff": false
     },
     {
+      "id": "inquiry_order_counts",
+      "description": "기간(day·week·month) 안의 문의를 주문별로 센다(문의 건수·분류 코드별). 책별 집계(book_issue_stats)가 문의를 상품에 붙일 때 클레임 서비스가 부른다. 주문 ID·건수·분류 코드뿐이고 고객 이름·구매자 ID·글은 담지 않는다. 주문이 200개를 넘으면 문의 많은 순으로 자르고 truncated로 알린다. LLM을 쓰지 않는다.",
+      "input_schema": "agents/support/src/support_agent/book_issue_schemas.py#InquiryOrderCountsInput",
+      "output_schema": "agents/support/src/support_agent/book_issue_schemas.py#InquiryOrderCounts",
+      "grade": "read",
+      "allowed_requesters": [
+        "support",
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "propose_change_requests",
       "description": "분류별 문의 급증(detect_inquiry_surge와 같은 입력)에서 기획에 보낼 변경 요청안을 코드 규칙으로 만든다 (LLM 없음). 제안마다 제목 한 줄·근거 요약(건수·평소 대비 배수)·대표 문의(샘플 중 번호가 가장 작은 문의)·나머지 근거 문의 ID(inq_<번호>)·이미 요청됨 여부·보내지 않기로 한 제안의 이유를 담고, 고객 원문이나 개인정보는 담지 않는다. 만들기만 하고 아무것도 보내거나 저장하지 않는다. 보내는 일은 사람이 고른 뒤 request_change가 한다.",
       "input_schema": "agents/support/src/support_agent/proposal_schemas.py#ProposeChangesInput",
