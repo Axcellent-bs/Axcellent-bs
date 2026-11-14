@@ -49,7 +49,7 @@
 | `request_change` | A | dashboard-api, orchestrator | 변경 요청을 기획 `create_ticket`으로 보내고 `ctx_req_`를 문의와 연결. 안전 관문(`execute`)을 먼저 거치고(실행되지 않으면 아무것도 보내지 않는다), 보낸 제목·근거 요약·근거 ID를 연결 기록(`sent_title`·`sent_evidence`·`sent_evidence_ids`)에 남겨 기획이 되물을 때(#264) 쓴다 |
 | `list_change_requests` | read | dashboard-api, orchestrator | 문의·변경 요청 연결 목록 |
 | `list_claims`, `get_claim`, `claim_stats`, `claim_queue` | read | dashboard-api, orchestrator | 클레임 목록·상세(판정 근거·감사 기록)·건수·보상 큐 |
-| `book_issue_stats` | read | dashboard-api, orchestrator, data | 기간별 책(상품)별 클레임·불량·반품 입고·환불·문의 집계 (코드가 셈, claims 서비스). 문의는 주문 단위로 상품에 붙임. 판매 수량 대비 비율은 아직 없음(`missing`에 적음) |
+| `book_issue_stats` | read | dashboard-api, orchestrator, data | 기간별 책(상품)별 클레임·불량·반품 입고·환불·문의 집계 (코드가 셈, claims 서비스). 문의는 주문 단위로 상품에 붙임. 판매 서버 주문 목록에서 판매 수량을 읽어 클레임 비율(`claim_rate`)을 냄(끝까지 못 읽으면 비율 없이 이유를 `missing`에 적음) |
 | `inquiry_order_counts` | read | support, dashboard-api, orchestrator | 기간별 주문별 문의 건수·분류 코드 (inquiry 서비스, 책별 집계가 부름) |
 | `inquiry_overview` | read | dashboard-api, orchestrator, data | KPI(초안 채택률·수정 정도·가드 적중·분류별 건수)와 답변 대기 문의 (긴급도·대기 시간 순) |
 | `detect_inquiry_surge` | read | dashboard-api, orchestrator, data | 분류별 문의 급증 감지 (DEP-CS-05): 최근 창 건수를 평소 창 평균(`baseline_method=median`이면 창별 건수의 중앙값)과 견줌 |

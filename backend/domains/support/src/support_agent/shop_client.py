@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +103,9 @@ def _headers() -> dict[str, str]:
         if not key:
             logger.error(
                 "%s에 서비스 %r의 키가 없다(설정된 서비스: %s). 요청을 보내지 않는다",
-                ENV_KEYS, service_name(), ", ".join(sorted(keys)),
+                ENV_KEYS,
+                service_name(),
+                ", ".join(sorted(keys)),
             )  # 키 값은 싣지 않는다
             raise ShopError("NO_SERVICE_KEY", "이 서비스의 판매 서버 연결 키가 설정돼 있지 않다")
         return {"Authorization": f"Bearer {key}"}
@@ -213,6 +216,68 @@ def to_order(data: dict[str, Any]) -> Order | None:
             for item in data.get("items", [])
         ],
     )
+
+
+SALES_PAGE_LIMIT = 1000  # 판매 서버 주문 목록 한 페이지 최대
+SALES_MAX_PAGES = 30  # 한 번에 읽는 페이지 상한 (최대 3만 주문)
+
+
+@dataclass(frozen=True)
+class SalesRead:
+    qty_by_product: dict[str, int]  # 상품 ID → 결제가 끝난 주문의 판매 수량
+    orders_scanned: int
+    complete: bool  # False면 페이지 상한·마감 때문에 끝까지 읽지 못했다 (수량이 모자란다)
+
+
+def _is_paid(data: dict[str, Any]) -> bool:
+    return data.get("status") == "paid" and any(
+        p.get("status") == "succeeded" for p in data.get("payments", [])
+    )
+
+
+async def fetch_sold_qty(
+    since: datetime,
+    until: datetime,
+    *,
+    stop_at: datetime | None = None,
+    max_pages: int = SALES_MAX_PAGES,
+) -> SalesRead:
+    """접수 시각이 `since` 이상 `until` 미만인 결제 끝난 주문의 상품별 판매 수량.
+
+    판매 서버 주문 목록(`GET /orders?since&until&cursor`)을 페이지로 읽는다.
+    주문 목록은 order_id 순이라
+    중간에 멈추면 최근 주문만 읽은 게 아니라 일부만 읽은 것이다.
+    `complete=False`일 때는 수량을 쓰지 않는다.
+    연결 실패·거절은 `ShopError`다.
+    """
+    qty: dict[str, int] = {}
+    scanned = 0
+    cursor: str | None = None
+    for _ in range(max_pages):
+        if stop_at is not None and datetime.now(UTC) >= stop_at:
+            return SalesRead(qty, scanned, False)
+        params: dict[str, Any] = {
+            "since": since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "until": until.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "limit": SALES_PAGE_LIMIT,
+        }
+        if cursor:
+            params["cursor"] = cursor
+        response = await _send("GET", "/orders", params=params)
+        if response.status_code != 200:
+            raise _error(response)
+        body = response.json()
+        for order in body["data"]:
+            scanned += 1
+            if not _is_paid(order):
+                continue
+            for item in order.get("items", []):
+                if item.get("product_id"):
+                    qty[item["product_id"]] = qty.get(item["product_id"], 0) + int(item["qty"])
+        cursor = (body.get("meta") or {}).get("next_cursor")
+        if not cursor:
+            return SalesRead(qty, scanned, True)
+    return SalesRead(qty, scanned, False)
 
 
 async def fetch_order(order_id: str) -> Order | None:

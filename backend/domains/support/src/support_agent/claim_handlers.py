@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ax_agent_template.execute import execute
@@ -20,7 +20,7 @@ from ax_agent_template.server import error_result
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from support_agent import book_issue_stats, claim_rules, events, persistence, shop_client
 from support_agent import handlers as h
-from support_agent.book_issue_schemas import BookIssueInput, InquiryOrderCounts
+from support_agent.book_issue_schemas import PERIOD_DAYS, BookIssueInput, InquiryOrderCounts
 from support_agent.book_issue_stats import OrderInquiry
 from support_agent.claim_schemas import (
     ClaimReasonHit,
@@ -137,6 +137,12 @@ async def claim_stats(request: AgentRequest) -> AgentResult:
 
 
 ORDER_READ_CONCURRENCY = 8
+SALES_DEADLINE_MARGIN = 3  # 요청 마감 몇 초 전에 판매 수량 읽기를 멈추는가
+
+
+async def _skipped() -> tuple[None, None, list[str]]:
+    """읽지 않기로 한 근거 (`include_inquiries`·`include_sales`가 False)."""
+    return None, None, []
 
 
 async def _inquiry_evidence(
@@ -185,21 +191,58 @@ async def _inquiry_evidence(
     return evidence, counts.total_inquiries, notes
 
 
+async def _sales_evidence(
+    request: AgentRequest, now: datetime, period: str
+) -> tuple[dict[str, int] | None, int | None, list[str]]:
+    """판매 서버 주문 목록에서 기간 안 상품별 판매 수량을 읽는다.
+
+    끝까지 읽지 못하면(연결 실패·페이지 상한·마감) 모자란 수량으로 비율을 내지 않게
+    (None, None, 이유)를 돌려준다.
+    """
+    if shop_client.order_source() == "seed":
+        return None, None, ["주문 출처가 시드라 판매 수량을 읽지 않았다"]
+    since = now - timedelta(days=PERIOD_DAYS[period])
+    try:
+        read = await shop_client.fetch_sold_qty(
+            since, now, stop_at=request.meta.deadline - timedelta(seconds=SALES_DEADLINE_MARGIN)
+        )
+    except shop_client.ShopError as exc:
+        return None, None, [f"판매 수량을 읽지 못했다: {exc}"]
+    if not read.complete:
+        return (
+            None,
+            None,
+            [
+                f"주문이 많아 {read.orders_scanned}건까지만 읽어서 판매 수량을 내지 않았다 "
+                "(모자란 수량으로 비율을 내면 틀린다)"
+            ],
+        )
+    return read.qty_by_product, read.orders_scanned, []
+
+
 async def book_issue_stats_skill(request: AgentRequest) -> AgentResult:
     """책(상품)별 클레임·불량·반품·환불·문의 집계. 이벤트 후보에서 불만 많은 책을 거를 근거다."""
     parsed = h._parse(request, BookIssueInput)
     if isinstance(parsed, AgentResult):
         return parsed
-    inquiries, total, notes = None, None, []
-    if parsed.include_inquiries:
-        inquiries, total, notes = await _inquiry_evidence(request, parsed.period)
+    now = datetime.now(UTC)
+    inquiry_task = (
+        _inquiry_evidence(request, parsed.period) if parsed.include_inquiries else _skipped()
+    )
+    sales_task = (
+        _sales_evidence(request, now, parsed.period) if parsed.include_sales else _skipped()
+    )
+    (inquiries, total, notes), sales = await asyncio.gather(inquiry_task, sales_task)
+    sold, scanned, sales_notes = sales
     report = book_issue_stats.book_issue_report(
         CLAIMS.list(),
-        datetime.now(UTC),
+        now,
         parsed,
         inquiries,
         total_inquiries=total,
-        notes=notes,
+        sold=sold,
+        sales_orders_scanned=scanned,
+        notes=[*notes, *sales_notes],
     )
     return h._done(request, report.model_dump(mode="json"))
 
