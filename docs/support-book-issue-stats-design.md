@@ -87,3 +87,15 @@ class BookIssueRow(AxModel):
 - 문의를 품목에 귀속하는 방식: 주문 단위(위 안)로 충분한가, 문의 접수에 품목 선택을 받아야 하는가 (쇼핑몰 화면 변경 필요).
 - 책(`product_id`)과 ISBN 매핑: 상품에 ISBN이 없어 보인다. 연령별 자료(ISBN 기준)와 합칠 때 필요하다.
 - 마케팅·재무가 쓰는 시점과 호출 모양 (태윤 님·마케팅 담당과 협의).
+
+## 구현 상태 (2026-11-14)
+- #1097: `OrderItem`·`ClaimLine`에 `product_id` 추가. #1098: `book_issue_stats` (클레임만).
+- 문의 건수(이 문서의 `inquiry_count`): 클레임은 `claims` 서비스, 문의는 `inquiry` 서비스에 따로 있어서 둘을 나눠 구현했다.
+  - `inquiry` 서비스에 읽기 skill `inquiry_order_counts`를 더했다. 기간 안의 문의를 **주문별**로 센다
+    (주문 ID·건수·분류 코드뿐, 주문 200개 상한).
+  - `book_issue_stats`가 이 skill을 서비스 호출(`h.SEND`)로 읽고, 그 주문들의 상품을 판매 서버에서 읽어
+    (`load_order`, 8개씩 동시) 문의를 상품에 붙인다. 결제 전 주문의 문의(결제 실패 문의 등)는 상품 불만이
+    아니라서 붙이지 않고 `inquiries_not_attributed`로 알린다. 읽지 못한 값은 0이 아니라 `None`/`missing`.
+  - 문의만 있고 클레임이 없는 상품도 보인다 (`min_inquiries`). `include_inquiries=false`면 문의 서비스와 판매 서버를 부르지 않는다.
+- 아직 없는 것: 판매 수량 대비 비율(`sold_qty`·`claim_rate`, 판매 서버에서 기간별 판매 수량을 읽는 길 필요),
+  문의 품목 단위 귀속(접수 화면 변경 필요), 상품과 ISBN 매핑.

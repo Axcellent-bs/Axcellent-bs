@@ -391,7 +391,7 @@
     },
     {
       "id": "book_issue_stats",
-      "description": "기간(day·week·month) 안의 클레임을 상품(책)별로 코드가 센다: 클레임 수(종류별)·불량 등 사유 건수·반품 입고 수량·지급한 환불액. 이벤트 후보에서 불만 많은 책을 거를 근거다. 묶는 열쇠는 상품 ID이고 상품 ID가 없는 클레임은 claims_without_product로 알린다. 판매 수량 대비 비율과 문의 건수는 아직 없다(missing에 적는다). 고객 이름·구매자 ID·글은 담지 않는다. LLM을 쓰지 않는다.",
+      "description": "기간(day·week·month) 안의 클레임을 상품(책)별로 코드가 센다: 클레임 수(종류별)·불량 등 사유 건수·반품 입고 수량·지급한 환불액. 이벤트 후보에서 불만 많은 책을 거를 근거다. 묶는 열쇠는 상품 ID이고 상품 ID가 없는 클레임은 claims_without_product로 알린다. 문의는 문의 서비스에서 주문별로 읽어 상품에 붙인다(주문 단위, include_inquiries=false면 읽지 않음). 판매 수량 대비 비율은 아직 없다(missing에 적는다). 고객 이름·구매자 ID·글은 담지 않는다. LLM을 쓰지 않는다.",
       "input_schema": "agents/support/src/support_agent/book_issue_schemas.py#BookIssueInput",
       "output_schema": "agents/support/src/support_agent/book_issue_schemas.py#BookIssueReport",
       "grade": "read",
@@ -489,6 +489,16 @@
       "allowed_requesters": ["dashboard-api", "orchestrator", "data"],
       "verifier": null,
       "handoff": false,
+      "priority": "recommended"
+    },
+    {
+      "id": "inquiry_order_counts",
+      "description": "기간(day·week·month) 안의 문의를 주문별로 센다(문의 건수·분류 코드별). 책별 집계(book_issue_stats)가 문의를 상품에 붙일 때 클레임 서비스가 부른다. 주문 ID·건수·분류 코드뿐이고 고객 이름·구매자 ID·글은 담지 않는다. 주문이 200개를 넘으면 문의 많은 순으로 자르고 truncated로 알린다. LLM을 쓰지 않는다.",
+      "input_schema": "agents/support/src/support_agent/book_issue_schemas.py#InquiryOrderCountsInput",
+      "output_schema": "agents/support/src/support_agent/book_issue_schemas.py#InquiryOrderCounts",
+      "grade": "read",
+      "allowed_requesters": ["support", "dashboard-api", "orchestrator"],
+      "verifier": null,
       "priority": "recommended"
     },
     {

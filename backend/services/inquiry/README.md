@@ -19,6 +19,7 @@
 | `support_chat_list` | read |
 | `support_chat_get` | read |
 | `detect_inquiry_surge` | read |
+| `inquiry_order_counts` | read |
 | `propose_change_requests` | read |
 | `decline_change_proposal` | A |
 | `answer_planning_question` | read |

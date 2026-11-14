@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,7 +20,8 @@ from ax_agent_template.server import error_result
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from support_agent import book_issue_stats, claim_rules, events, persistence, shop_client
 from support_agent import handlers as h
-from support_agent.book_issue_schemas import BookIssueInput
+from support_agent.book_issue_schemas import BookIssueInput, InquiryOrderCounts
+from support_agent.book_issue_stats import OrderInquiry
 from support_agent.claim_schemas import (
     ClaimReasonHit,
     CreateClaimInput,
@@ -134,12 +136,71 @@ async def claim_stats(request: AgentRequest) -> AgentResult:
     return h._done(request, CLAIMS.stats().model_dump(mode="json"))
 
 
+ORDER_READ_CONCURRENCY = 8
+
+
+async def _inquiry_evidence(
+    request: AgentRequest, period: str
+) -> tuple[list[OrderInquiry] | None, int | None, list[str]]:
+    """문의 서비스에서 주문별 문의 건수를 읽고, 그 주문들의 상품을 판매 서버에서 읽는다.
+
+    읽지 못하면 (None, None, 이유)다. 문의 건수를 0으로 채우지 않는다.
+    """
+    meta = request.meta.model_copy(update={"idempotency_key": None})
+    try:
+        reply = await h.SEND(
+            "support",
+            AgentRequest(meta=meta, skill="inquiry_order_counts", input={"period": period}),
+        )
+        if reply.status != TaskStatus.COMPLETED:
+            return None, None, [f"문의 건수를 읽지 못했다: {reply.outcome}"]
+        counts = InquiryOrderCounts.model_validate(reply.output)
+    except Exception:  # noqa: BLE001 - 문의는 부가 근거라 클레임 집계는 그대로 낸다
+        h.logger.warning("주문별 문의 건수를 읽지 못했다", exc_info=True)
+        return None, None, ["문의 건수를 읽지 못했다 (문의 서비스에 닿지 못함)"]
+
+    gate = asyncio.Semaphore(ORDER_READ_CONCURRENCY)
+
+    async def products(order_id: str) -> tuple[tuple[str, str], ...] | None:
+        async with gate:
+            try:
+                order = await shop_client.load_order(order_id)
+            except shop_client.ShopError:
+                return None
+        if order is None:  # 결제 전이거나 없는 주문 (결제 실패 문의는 상품 불만이 아니라서 뺀다)
+            return ()
+        return tuple((i.product_id, i.title) for i in order.items if i.product_id)
+
+    loaded = await asyncio.gather(*(products(o.order_id) for o in counts.orders))
+    unread = sum(1 for p in loaded if p is None)
+    notes = []
+    if unread:
+        notes.append(f"판매 서버에서 주문 {unread}개를 읽지 못해 그 문의는 상품에 붙이지 못했다")
+    if counts.truncated:
+        notes.append("문의가 있는 주문이 많아 문의 많은 순 200개 주문까지만 붙였다")
+    evidence = [
+        OrderInquiry(o.order_id, o.inquiry_count, o.categories, p or ())
+        for o, p in zip(counts.orders, loaded, strict=True)
+    ]
+    return evidence, counts.total_inquiries, notes
+
+
 async def book_issue_stats_skill(request: AgentRequest) -> AgentResult:
-    """책(상품)별 클레임·불량·반품·환불 집계. 이벤트 후보에서 불만 많은 책을 거를 근거다."""
+    """책(상품)별 클레임·불량·반품·환불·문의 집계. 이벤트 후보에서 불만 많은 책을 거를 근거다."""
     parsed = h._parse(request, BookIssueInput)
     if isinstance(parsed, AgentResult):
         return parsed
-    report = book_issue_stats.book_issue_report(CLAIMS.list(), datetime.now(UTC), parsed)
+    inquiries, total, notes = None, None, []
+    if parsed.include_inquiries:
+        inquiries, total, notes = await _inquiry_evidence(request, parsed.period)
+    report = book_issue_stats.book_issue_report(
+        CLAIMS.list(),
+        datetime.now(UTC),
+        parsed,
+        inquiries,
+        total_inquiries=total,
+        notes=notes,
+    )
     return h._done(request, report.model_dump(mode="json"))
 
 

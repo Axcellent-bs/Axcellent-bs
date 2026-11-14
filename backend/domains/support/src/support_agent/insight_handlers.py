@@ -10,7 +10,8 @@ from datetime import UTC, datetime
 
 from ax_contracts.schemas import AgentRequest, AgentResult
 from support_agent import handlers as h
-from support_agent import insights
+from support_agent import inquiry_order_counts, insights
+from support_agent.book_issue_schemas import InquiryOrderCountsInput
 from support_agent.insight_schemas import SurgeInput
 
 
@@ -37,7 +38,19 @@ async def detect_inquiry_surge(request: AgentRequest) -> AgentResult:
     return h._done(request, report.model_dump(mode="json"))
 
 
+async def inquiry_order_counts_skill(request: AgentRequest) -> AgentResult:
+    """기간 안의 문의를 주문별로 센다 (책별 집계가 문의를 상품에 붙일 때 부른다)."""
+    parsed = h._parse(request, InquiryOrderCountsInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    counts = inquiry_order_counts.inquiry_order_counts(
+        h.STORE.all(), datetime.now(UTC), parsed.period
+    )
+    return h._done(request, counts.model_dump(mode="json"))
+
+
 INSIGHT_HANDLERS = {
     "inquiry_overview": inquiry_overview,
     "detect_inquiry_surge": detect_inquiry_surge,
+    "inquiry_order_counts": inquiry_order_counts_skill,
 }
