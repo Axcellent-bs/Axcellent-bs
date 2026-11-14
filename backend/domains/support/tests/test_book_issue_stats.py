@@ -567,3 +567,37 @@ def test_skill_skips_sales_in_seed_mode_and_when_asked(
     monkeypatch.setattr(shop_client, "fetch_sold_qty", must_not_call)
     out = run_skill(client, {"include_inquiries": False, "include_sales": False})["output"]
     assert not out["sales_read"] and out["items"][0]["claim_rate"] is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_sold_qty_reuses_one_http_client_for_all_pages(
+    monkeypatch: pytest.MonkeyPatch, _reset_shop: Any
+) -> None:
+    """페이지마다 클라이언트를 새로 만들면 연결·TLS 설정 비용이 쌓인다 (4만 건에서 2.7배 느림)."""
+    import httpx
+
+    pages = [[_order(f"o{n}", [("prd_1", n)])] for n in (1, 2, 3)]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        cursor = request.url.params.get("cursor")
+        index = int(cursor) if cursor else 0
+        nxt = str(index + 1) if index + 1 < len(pages) else None
+        return httpx.Response(200, json={"data": pages[index], "meta": {"next_cursor": nxt}})
+
+    made: list[int] = []
+    real = httpx.AsyncClient
+
+    def factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        made.append(1)
+        return real(*args, transport=httpx.MockTransport(handle), **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    shop_client.use_client(None)  # 바꿔 끼운 클라이언트 없이, 코드가 직접 만드는 길
+    read = await shop_client.fetch_sold_qty(NOW - timedelta(days=1), NOW)
+    assert read.qty_by_product == {"prd_1": 6} and read.complete and read.orders_scanned == 3
+    assert len(made) == 1  # 세 페이지를 클라이언트 하나로
+
+    made.clear()  # 한 번만 부르는 읽기는 지금처럼 자기 클라이언트를 만들고 닫는다
+    await shop_client._send("GET", "/orders")
+    await shop_client._send("GET", "/orders")
+    assert len(made) == 2
