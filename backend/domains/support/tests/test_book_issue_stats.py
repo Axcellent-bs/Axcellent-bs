@@ -144,6 +144,117 @@ def test_rate_and_sold_qty_are_none_and_explained() -> None:
     row = result.items[0]
     assert row.sold_qty is None and row.claim_rate is None
     assert any("claim_rate" in m for m in result.missing)
+    assert not result.sales_read and result.sales_orders_scanned is None
+
+
+def test_claim_rate_is_claimed_qty_over_sold_qty() -> None:
+    claims = [
+        claim(1, [line("a", "prd_1", "책", 1)]),
+        claim(2, [line("b", "prd_1", "책", 1)]),
+    ]
+    result = book_issue_report(claims, NOW, BookIssueInput(), sold={"prd_1": 40})
+    row = result.items[0]
+    assert (row.claim_qty, row.sold_qty, row.claim_rate) == (2, 40, 0.05)
+    assert "판매 40권 중 2권 클레임(5.0%)" in row.reason
+    assert result.sales_read
+    assert not any("읽지 않아" in m for m in result.missing)
+    assert any("1을 넘을 수 있다" in m for m in result.missing)  # 접수 기간 기준 비율임을 알린다
+
+
+def test_claim_rate_can_exceed_one_and_is_none_without_sales() -> None:
+    claims = [
+        claim(1, [line("a", "prd_1", "책", 3, 30000)]),
+        claim(2, [line("b", "prd_2", "책 B")]),
+    ]
+    result = book_issue_report(claims, NOW, BookIssueInput(), sold={"prd_1": 2})
+    rows = {r.product_id: r for r in result.items}
+    assert rows["prd_1"].claim_rate == 1.5  # 오래전 주문의 클레임이 들어오면 1을 넘을 수 있다
+    assert rows["prd_2"].sold_qty == 0 and rows["prd_2"].claim_rate is None
+    assert any("판매가 없어 비율을 내지 못한 상품 1개" in m for m in result.missing)
+
+
+def test_inquiry_only_product_with_sales_has_zero_rate() -> None:
+    result = book_issue_report(
+        [],
+        NOW,
+        BookIssueInput(),
+        [OrderInquiry("ord_1", 1, {"payment": 1}, (("prd_1", "책"),))],
+        sold={"prd_1": 10},
+    )
+    row = result.items[0]
+    assert (row.claim_qty, row.sold_qty, row.claim_rate) == (0, 10, 0.0)
+
+
+# ------------------------------------------------------------ 판매 수량 읽기 (주문 목록)
+def _order(order_id: str, items: list[tuple[str, int]], *, paid: bool = True) -> dict[str, Any]:
+    return {
+        "order_id": order_id,
+        "status": "paid" if paid else "payment_failed",
+        "payments": [{"status": "succeeded" if paid else "failed"}],
+        "items": [{"product_id": p, "qty": q} for p, q in items],
+    }
+
+
+def _shop_pages(pages: list[list[dict[str, Any]]], seen: list[Any] | None = None) -> None:
+    import httpx
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(dict(request.url.params))
+        if request.url.path != "/api/shop/orders":
+            return httpx.Response(404)
+        cursor = request.url.params.get("cursor")
+        index = int(cursor) if cursor else 0
+        nxt = str(index + 1) if index + 1 < len(pages) else None
+        return httpx.Response(200, json={"data": pages[index], "meta": {"next_cursor": nxt}})
+
+    shop_client.use_client(httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+
+
+@pytest.fixture
+def _reset_shop(monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")  # 판매 서버 호출에 쓰는 목 토큰
+    yield
+    shop_client.use_client(None)
+
+
+@pytest.mark.asyncio
+async def test_fetch_sold_qty_sums_paid_orders_across_pages(_reset_shop: Any) -> None:
+    seen: list[Any] = []
+    _shop_pages(
+        [
+            [_order("o1", [("prd_1", 2), ("prd_2", 1)]), _order("o2", [("prd_1", 5)], paid=False)],
+            [_order("o3", [("prd_1", 1)])],
+        ],
+        seen,
+    )
+    read = await shop_client.fetch_sold_qty(NOW - timedelta(days=30), NOW)
+    assert read.qty_by_product == {"prd_1": 3, "prd_2": 1}  # 결제 안 된 주문은 뺀다
+    assert read.orders_scanned == 3 and read.complete
+    assert seen[0]["since"] == "2026-10-15T12:00:00Z" and seen[0]["until"] == "2026-11-14T12:00:00Z"
+    assert seen[1]["cursor"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_fetch_sold_qty_reports_incomplete_when_cut_short(_reset_shop: Any) -> None:
+    _shop_pages([[_order("o1", [("prd_1", 1)])], [_order("o2", [("prd_1", 1)])]])
+    cut = await shop_client.fetch_sold_qty(NOW - timedelta(days=1), NOW, max_pages=1)
+    assert not cut.complete and cut.orders_scanned == 1
+    late = await shop_client.fetch_sold_qty(
+        NOW - timedelta(days=1), NOW, stop_at=datetime(2020, 1, 1, tzinfo=UTC)
+    )
+    assert not late.complete and late.orders_scanned == 0
+
+
+@pytest.mark.asyncio
+async def test_fetch_sold_qty_raises_shop_error(_reset_shop: Any) -> None:
+    import httpx
+
+    shop_client.use_client(
+        httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    )
+    with pytest.raises(shop_client.ShopError):
+        await shop_client.fetch_sold_qty(NOW - timedelta(days=1), NOW)
 
 
 @pytest.fixture
@@ -406,3 +517,53 @@ def test_skill_still_returns_claims_when_the_inquiry_service_is_down(
     fake_send(monkeypatch, None, exc=RuntimeError("boom"))
     out = run_skill(client, {})["output"]
     assert any("문의 서비스에 닿지 못함" in m for m in out["missing"])
+
+
+# ---------------------------------------------------------------- skill: 판매 수량과 비율
+def test_skill_adds_sold_qty_and_claim_rate_from_the_shop(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, _reset_shop: Any
+) -> None:
+    monkeypatch.setenv("SUPPORT_ORDER_SOURCE", "shop-api")
+    _shop_pages([[_order("o1", [("prd_1", 3)]), _order("o2", [("prd_1", 1)])]])
+    out = run_skill(client, {"include_inquiries": False})["output"]
+    row = out["items"][0]
+    assert (row["sold_qty"], row["claim_qty"], row["claim_rate"]) == (4, 1, 0.25)
+    assert out["sales_read"] and out["sales_orders_scanned"] == 2
+
+
+def test_skill_leaves_rate_empty_when_sales_cannot_be_read_completely(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SUPPORT_ORDER_SOURCE", "shop-api")
+
+    async def partial(*args: Any, **kwargs: Any) -> shop_client.SalesRead:
+        return shop_client.SalesRead({"prd_1": 99}, 30000, False)
+
+    monkeypatch.setattr(shop_client, "fetch_sold_qty", partial)
+    out = run_skill(client, {"include_inquiries": False})["output"]
+    assert out["items"][0]["claim_rate"] is None and out["items"][0]["sold_qty"] is None
+    assert not out["sales_read"]
+    assert any("30000건까지만 읽어서 판매 수량을 내지 않았다" in m for m in out["missing"])
+
+    async def down(*args: Any, **kwargs: Any) -> shop_client.SalesRead:
+        raise shop_client.ShopError("UNAVAILABLE", "판매 서버 연결 실패")
+
+    monkeypatch.setattr(shop_client, "fetch_sold_qty", down)
+    out = run_skill(client, {"include_inquiries": False})["output"]
+    assert out["items"][0]["claim_count"] == 1  # 클레임 집계는 그대로 나간다
+    assert any("판매 수량을 읽지 못했다: 판매 서버 연결 실패" in m for m in out["missing"])
+
+
+def test_skill_skips_sales_in_seed_mode_and_when_asked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = run_skill(client, {"include_inquiries": False})["output"]  # 목 모드 = 시드 주문
+    assert any("시드라 판매 수량을 읽지 않았다" in m for m in out["missing"])
+    monkeypatch.setenv("SUPPORT_ORDER_SOURCE", "shop-api")
+
+    async def must_not_call(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("include_sales=false인데 판매 서버를 불렀다")
+
+    monkeypatch.setattr(shop_client, "fetch_sold_qty", must_not_call)
+    out = run_skill(client, {"include_inquiries": False, "include_sales": False})["output"]
+    assert not out["sales_read"] and out["items"][0]["claim_rate"] is None

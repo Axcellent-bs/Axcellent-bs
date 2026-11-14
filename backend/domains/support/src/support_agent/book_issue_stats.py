@@ -7,8 +7,9 @@
 - 문의는 주문에만 이어져 있어서 주문 단위로 센다. 품목이 여럿인 주문의 문의는 그 주문의 모든 상품에
   세고(`inquiry_count`), 상품 하나뿐인 주문의 문의만 센 값(`inquiry_count_single_item`)도 준다.
   문의를 못 읽었으면(`inquiries=None`) 문의 칸은 None이다 (0으로 채우지 않는다).
-- 판매 수량 대비 비율은 아직 없다 (판매 서버에서 기간별 판매 수량을 읽는 길이 따로 필요하다).
-  그래서 `sold_qty`·`claim_rate`는 None이고 `missing`에 적는다.
+- 판매 수량 대비 비율(`claim_rate`)은 판매 수량을 끝까지 읽었을 때만 낸다 (`sold=None`이면 None).
+  비율 = 접수 기간의 클레임 수량 / 같은 기간 결제 끝난 주문의 판매 수량이다. 오래전 주문의 클레임도
+  접수 기간에 들어와 1을 넘을 수 있다. 판매 수량이 0이면 비율을 낼 수 없어 None이다.
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ def _top(categories: Counter[str]) -> list[CategoryCount]:
 def _claim_row(product_id: str, claims: list[Claim]) -> BookIssueRow:
     by_type: Counter[str] = Counter()
     defect = 0
+    claim_qty = 0
     return_qty = 0
     refund = 0
     title = ""
@@ -66,6 +68,7 @@ def _claim_row(product_id: str, claims: list[Claim]) -> BookIssueRow:
         mine = [line for line in claim.lines if line.product_id == product_id]
         title = mine[0].title  # 오래된 것부터 돌므로 마지막에 가장 최근 제목이 남는다
         by_type[claim.type] += 1
+        claim_qty += sum(line.requested_qty for line in mine)
         if claim.reason in DEFECT_REASONS:
             defect += 1
         if claim.return_received_at:
@@ -78,6 +81,7 @@ def _claim_row(product_id: str, claims: list[Claim]) -> BookIssueRow:
         claim_count=len(claims),
         claims_by_type=dict(by_type),
         defect_claim_count=defect,
+        claim_qty=claim_qty,
         return_qty=return_qty,
         refund_cash_total=refund,
         reason="",
@@ -96,6 +100,8 @@ def _reason(row: BookIssueRow) -> str:
         parts.append(f"환불 {row.refund_cash_total:,}원")
     if row.inquiry_count:
         parts.append(f"문의 {row.inquiry_count}건(주문 단위)")
+    if row.claim_rate is not None and row.sold_qty:
+        parts.append(f"판매 {row.sold_qty}권 중 {row.claim_qty}권 클레임({row.claim_rate:.1%})")
     return ", ".join(parts) or "기록 없음"
 
 
@@ -128,9 +134,14 @@ def book_issue_report(
     inquiries: Iterable[OrderInquiry] | None = None,
     *,
     total_inquiries: int | None = None,
+    sold: Mapping[str, int] | None = None,
+    sales_orders_scanned: int | None = None,
     notes: Iterable[str] = (),
 ) -> BookIssueReport:
     """`inquiries`가 None이면 클레임만 센다. 주면 문의 건수를 상품에 붙인다.
+
+    `sold`는 상품 ID → 같은 기간 판매 수량이다. 주면(끝까지 읽은 것만 준다) 모든 줄에 `sold_qty`와
+    `claim_rate`를 채운다. None이면 둘 다 None이다.
 
     `total_inquiries`는 기간 안의 전체 문의 수(문의 서비스가 센 값), `notes`는 문의를 읽다가 못 읽은
     값(예: 판매 서버 주문 일부를 못 읽음)의 설명이다 — `missing`에 그대로 붙는다.
@@ -177,6 +188,15 @@ def book_issue_report(
                     update={"inquiry_count": 0, "inquiry_count_single_item": 0}
                 )
 
+    no_sales_rate = 0
+    if sold is not None:
+        for product_id, row in list(rows.items()):
+            sold_qty = sold.get(product_id, 0)
+            rate = round(row.claim_qty / sold_qty, 3) if sold_qty > 0 else None
+            if rate is None and row.claim_qty:
+                no_sales_rate += 1
+            rows[product_id] = row.model_copy(update={"sold_qty": sold_qty, "claim_rate": rate})
+
     wanted = set(query.product_ids) if query.product_ids else None
     shown = [
         row.model_copy(update={"reason": _reason(row)})
@@ -188,7 +208,16 @@ def book_issue_report(
         key=lambda r: (-r.claim_count, -r.defect_claim_count, -(r.inquiry_count or 0), r.product_id)
     )
 
-    missing = ["판매 수량을 읽지 않아 클레임 비율(claim_rate)은 내지 않았다"]
+    missing = []
+    if sold is None:
+        missing.append("판매 수량을 읽지 않아 클레임 비율(claim_rate)은 내지 않았다")
+    else:
+        missing.append(
+            "클레임 비율은 접수 기간의 클레임 수량을 같은 기간 판매 수량으로 나눈 값이라 "
+            "오래전 주문의 클레임도 들어가 1을 넘을 수 있다"
+        )
+        if no_sales_rate:
+            missing.append(f"기간 안 판매가 없어 비율을 내지 못한 상품 {no_sales_rate}개")
     if without_product:
         missing.append(f"상품 ID가 없어 상품별로 세지 못한 클레임 {without_product}건")
     if inquiries is None:
@@ -203,6 +232,8 @@ def book_issue_report(
         items=shown[: query.limit],
         total_claims=len(in_period),
         claims_without_product=without_product,
+        sales_read=sold is not None,
+        sales_orders_scanned=sales_orders_scanned if sold is not None else None,
         inquiries_read=inquiries is not None,
         total_inquiries=total_inquiries if inquiries is not None else None,
         inquiries_not_attributed=not_attributed,
