@@ -23,6 +23,7 @@ def test_card_validates(card: AgentCard) -> None:
         "impact_analysis",
         "fraud_score",
         "kpi_summary",
+        "sales_analysis",
         "root_cause_hypotheses",
         "accuracy_report",
         "activity_report",
@@ -118,6 +119,16 @@ def test_service_card_has_the_same_requesters_as_the_domain_card() -> None:
     by_domain = {s["id"]: s["allowed_requesters"] for s in domain["skills"]}
     by_service = {s["id"]: s["allowed_requesters"] for s in service["skills"]}
     assert by_service == by_domain
+
+
+def test_sales_analysis_is_a_read_for_screen_and_orchestrator(card: AgentCard) -> None:
+    """매출 분석: 화면(dashboard-api 토큰)과 총괄만, 운영 지표 탭(kpi_summary)과 같은 요청자."""
+    skill = next(s for s in card.skills if s.id == "sales_analysis")
+    kpi = next(s for s in card.skills if s.id == "kpi_summary")
+    assert skill.grade == "read" and skill.verifier is None
+    assert skill.allowed_requesters == kpi.allowed_requesters == ["orchestrator", "dashboard-api"]
+    assert skill.input_schema.endswith("data.py#SalesAnalysisInput")
+    assert skill.output_schema.endswith("data.py#SalesAnalysisOutput")
 
 
 def test_root_cause_is_a_lookup_for_orchestrator(card: AgentCard) -> None:
