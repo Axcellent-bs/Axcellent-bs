@@ -57,6 +57,7 @@ class Refunds:
                     409,
                 )
             refund_id = self.db.next_id(conn, "refund", "rfd_")
+            stamp = _iso(self.now())
             conn.execute(
                 "INSERT INTO refunds VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -67,8 +68,14 @@ class Refunds:
                     idempotency_key,
                     TENANT_ID,
                     context_id,
-                    _iso(self.now()),
+                    stamp,
                 ),
+            )
+            # 환불도 주문이 바뀐 것이다: 판매 기록 내보내기(`sales-export`)가 updated_at 커서로
+            # 이 주문을 다시 내보내게 한다. 상태(status)는 그대로 둔다
+            conn.execute(
+                "UPDATE orders SET updated_at = ? WHERE order_id = ? AND updated_at < ?",
+                (stamp, payment["order_id"], stamp),
             )
             data = PaymentRefundedData(
                 payment_id=payment_id,

@@ -19,6 +19,8 @@ ADDED = (
     # 주문 목록 페이지(기간·구매자)
     "idx_orders_created_at",
     "idx_orders_buyer_id",
+    # 판매 기록 내보내기 커서 (updated_at, order_id)
+    "idx_orders_updated_at",
     # 결제 지표 시계열·실패 주문(기간, 상태 + 기간)
     "idx_payments_created_at",
     "idx_payments_status_created_at",

@@ -137,6 +137,8 @@ CREATE INDEX IF NOT EXISTS idx_refunds_order_id ON refunds(order_id);
 -- 주문 목록 페이지: 기간(since·until)과 구매자별 조회
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
 CREATE INDEX IF NOT EXISTS idx_orders_buyer_id ON orders(buyer_id);
+-- 판매 기록 내보내기(sales-export): (updated_at, order_id) 커서로 바뀐 주문을 순서대로 읽는다
+CREATE INDEX IF NOT EXISTS idx_orders_updated_at ON orders(updated_at, order_id);
 -- 결제 지표 시계열(기간)과 실패 주문(상태 + 기간, 시각 순 LIMIT)
 CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at);
 CREATE INDEX IF NOT EXISTS idx_payments_status_created_at ON payments(status, created_at);
