@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Loading } from "@/components/admin/bits";
 import CardSections from "@/components/hr/CardSections";
-import IncidentRecords from "@/components/hr/IncidentRecords";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { ago } from "@/lib/format";
-import { useSearchParams } from "@/lib/nav";
 import CardBody from "@/components/hr/CardBody";
 import { authorKo, hr, plainText, type HrCard, type PlanCheck, type PlanDraft } from "@/lib/hr";
 
@@ -38,7 +36,7 @@ function Section({ title, desc, children }: { title: string; desc?: ReactNode; c
 /** `decided`가 null이면 확정 카드 목록을 받지 못한 것(서버가 아직 이 조회를 모를 때) */
 interface View { cards: HrCard[]; decided: HrCard[] | null }
 
-const TITLE = "결정 기록";
+const TITLE = "업무 기록";
 const DESC = "회사의 결정을 기록으로 남기고, 새 계획이 예전에 채택되지 않은 안과 겹치는지 확인합니다.";
 const GUIDE: ReactNode[] = [
   <>맨 위 <b>지금 사람이 할 일</b>에서 AI가 확신하지 못해 확정을 미뤄 둔 기록을 봅니다.</>,
@@ -46,7 +44,6 @@ const GUIDE: ReactNode[] = [
 ];
 
 export default function HrPage() {
-  const ctxParam = useSearchParams().get("ctx"); // 총괄 이슈 화면의 "결정 기록에서 보기"로 들어올 때
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [up, setUp] = useState(true);
@@ -112,9 +109,7 @@ export default function HrPage() {
       </section>
 
       {/* ② 확정된 카드: 이 화면의 본문이라 사람이 할 일 바로 아래에 둔다. 장애 대응(보라)·업무 결정(민트)을 나란히, 최근 순 최대 200장 */}
-      <CardSections cards={view.decided} />
-      {/* ③ 이슈 기록: 아카이브 AI가 남긴 이슈 목록과 고른 이슈의 한 일·타임라인·해결 내용 */}
-      <IncidentRecords initialCtx={ctxParam} />
+      <CardSections cards={view.decided} hideIncident />
       {/* ④ 계획 비교는 가끔 쓰는 도구라 접어 둔다 */}
       <details className="rounded-2xl border border-ink-100 bg-surface px-5 py-3 text-sm">
         <summary className="cursor-pointer font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">계획 비교</summary>

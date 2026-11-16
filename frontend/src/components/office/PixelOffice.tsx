@@ -40,13 +40,16 @@ const SEATS: Record<DeskKey, { fx: number; fy: number; char: number; back?: bool
   finance: { fx: 0.472, fy: 0.81, char: 1, back: true, bubble: "down" },
   // 위 책상 앞쪽 의자 (뒷모습). 말풍선은 아래 줄 마케팅·인사 머리 사이로
   safety: { fx: 0.413, fy: 0.535, char: 5, back: true, bubble: "down" },
+  // 위 책상 앞쪽 의자 (뒷모습), 인프라 앞자리
+  archive: { fx: 0.272, fy: 0.535, char: 3, back: true, bubble: "down" },
   // 라운지 빈백 (앞모습, 왕관)
   orchestrator: { fx: 0.795, fy: 0.638, char: 3, bubble: "up" },
 };
 /** 대기 동작(고개 돌리기·좌우) 씨앗. 개발 자리를 끼워 넣어도 원래 8자리의 동작이 바뀌지 않게 예전 순번을 쓴다 */
-const SEED = Object.fromEntries(DESKS.filter((d) => d.key !== "dev" && d.key !== "safety").map((d, i) => [d.key, i])) as Record<DeskKey, number>;
+const SEED = Object.fromEntries(DESKS.filter((d) => d.key !== "dev" && d.key !== "safety" && d.key !== "archive").map((d, i) => [d.key, i])) as Record<DeskKey, number>;
 SEED.dev = 8;
 SEED.safety = 9;
+SEED.archive = 10;
 const SEAT_PX = Object.fromEntries(DESKS.map((d) => [d.key, toC(SEATS[d.key].fx, SEATS[d.key].fy)])) as Record<DeskKey, Pt>;
 const DESK_BY = Object.fromEntries(DESKS.map((d) => [d.key, d])) as Record<DeskKey, (typeof DESKS)[number]>;
 
@@ -77,7 +80,7 @@ type Pose = { row: number; col: number; flip: boolean };
 
 const isBack = (k: DeskKey) => !!SEATS[k].back;
 /** 뒷모습이지만 위·아래 책상 사이 통로에 바로 붙은 자리 (위 책상 앞쪽 의자) */
-const onAisle = (k: DeskKey) => !isBack(k) || k === "safety";
+const onAisle = (k: DeskKey) => !isBack(k) || k === "safety" || k === "archive";
 const isTop = (k: DeskKey) => k in TOP_EXIT_X;
 /** 그 자리 사람이 다니는 통로 y */
 const laneOf = (k: DeskKey) => (onAisle(k) ? AISLE_Y : LOW_Y);

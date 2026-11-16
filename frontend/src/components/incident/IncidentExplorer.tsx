@@ -5,6 +5,15 @@ import { ago } from "@/lib/format";
 import { CompanyName } from "@/demo/CompanyName";
 import { IncidentDetail } from "./IncidentDetail";
 
+type Kind = "incident" | "inquiry" | "all";
+const KIND_TABS: { id: Kind; label: string }[] = [
+  { id: "incident", label: "장애" },
+  { id: "inquiry", label: "문의 처리 결과" },
+  { id: "all", label: "전체" },
+];
+/** 고객지원 문의가 해결되어 총괄이 남긴 이슈(장애가 아님) */
+const isInquiry = (i?: OrchIncident) => i?.kind === "support_resolved";
+
 // 사람 승인을 기다리는 일 요약 + 이슈 목록(왼쪽) + 고른 이슈의 상세(오른쪽).
 // 총괄 화면과 아카이브 AI의 장애 기록 화면이 같이 쓴다. 읽기 전용이다.
 export function IncidentExplorer({ incidents, initialCtx = null, children }: {
@@ -15,7 +24,12 @@ export function IncidentExplorer({ incidents, initialCtx = null, children }: {
   children?: React.ReactNode;
 }) {
   const [picked, setPicked] = useState<string | null>(initialCtx);
-  const list = [...incidents].reverse();
+  // 종류 필터: 기본은 "장애". 총괄이 문의 처리 결과처럼 장애가 아닌 이슈도 같이 열기 때문에 나눠 본다
+  const startKind: Kind = initialCtx && isInquiry(incidents.find((i) => i.context_id === initialCtx)) ? "all" : "incident";
+  const [kind, setKind] = useState<Kind>(startKind);
+  const matches = (i: OrchIncident) => kind === "all" || (kind === "inquiry") === isInquiry(i);
+  // 진행 중인 이슈를 위로, 같은 상태끼리는 최근 이슈가 위로
+  const list = [...incidents].reverse().filter(matches).sort((a, b) => Number(b.status === "open") - Number(a.status === "open"));
   const current = list.find((i) => i.context_id === picked) ?? list[0] ?? null;
   const open = incidents.filter((i) => i.status === "open").length;
   const holds = incidents.reduce((n, i) => n + i.pending_holds.length, 0);
@@ -40,9 +54,18 @@ export function IncidentExplorer({ incidents, initialCtx = null, children }: {
 
       {children}
 
+      <div role="group" aria-label="이슈 종류" className="flex flex-wrap gap-1">
+        {KIND_TABS.map((t) => (
+          <button key={t.id} type="button" aria-pressed={kind === t.id} onClick={() => { setKind(t.id); setPicked(null); }}
+            className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${kind === t.id ? "bg-brand-600 text-white" : "bg-surface text-ink-700 ring-1 ring-ink-100 hover:bg-ink-50"}`}>
+            {t.label}<span className="ml-1.5 tabular-nums opacity-70">{incidents.filter((i) => t.id === "all" || (t.id === "inquiry") === isInquiry(i)).length}</span>
+          </button>
+        ))}
+      </div>
+
       {list.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-ink-300 px-5 py-8 text-center text-sm text-ink-500">
-          아직 이슈가 없습니다. <CompanyName />에 장애가 생기면 총괄 AI가 이슈를 열고 여기에 나타납니다.
+          이 종류의 이슈가 아직 없습니다. <CompanyName />에 문제가 생기면 총괄 AI가 이슈를 열고 여기에 나타납니다.
         </p>
       ) : (
         <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
@@ -61,7 +84,7 @@ export function IncidentExplorer({ incidents, initialCtx = null, children }: {
               </li>
             ))}
           </ul>
-          {current && <IncidentDetail incident={current} />}
+          {current && <IncidentDetail key={current.context_id} incident={current} />}
         </div>
       )}
     </>
