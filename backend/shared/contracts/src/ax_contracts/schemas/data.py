@@ -49,6 +49,10 @@ class ImpactAnalysisOutput(AxModel):
     # 데이터분석이 이 요청을 처리하기 시작한 시각. 부른 쪽이 대기(요청~시작)와
     # 처리(시작~응답) 시간을 나눠 남기는 데 쓴다(재무 영향 분석 로그). 예전 응답에는 없다
     started_at: UtcDatetime | None = None
+    # 장애 구간에 시간 초과로 남은 결제(확인·환불 필요). 실패 주문·미결제와 따로 센다.
+    # 모르면 None. 예전 응답에는 없다
+    timeout_count: int | None = Field(default=None, ge=0)
+    timeout_amount: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _customer_count_matches_ids(self) -> Self:

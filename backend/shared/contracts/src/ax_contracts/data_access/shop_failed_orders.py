@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import ConfigDict, Field
 
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
@@ -21,6 +23,10 @@ class ShopFailedOrdersQuery(AxModel):
     category: str | None = None
     limit: int = Field(default=1000, ge=1)
     tenant_id: str = TENANT_ID_DEFAULT
+    # 고를 결제 상태 (2026-11-16 추가). `failed`(기본): 결제 실패. `timeout`: 결제사 응답이 끊겨
+    # 승인됐는지 모르고 아직 다시 확인 전인 결제(응답 모양은 같고 reason=PG_TIMEOUT,
+    # failed_at=결제 시도 시각). 판매 서버 `GET /api/shop/failed-orders?status=`
+    status: Literal["failed", "timeout"] = "failed"
 
 
 class FailedOrder(AxModel):
