@@ -38,7 +38,7 @@
 ## skill 모양 (초안)
 `book_issue_stats` (읽기)
 
-입력: `period`(`day|week|month`, 기본 `month`), `limit`(기본 20), `min_claims`(기본 1), 선택 `product_ids`
+입력: `period`(`day|week|month`, 기본 `month`), `limit`(기본 20), `min_claims`(기본 1), 선택 `product_ids`(주면 그 상품은 클레임·문의가 0건이어도 모두 돌려주고 `min_claims`·`min_inquiries`·`limit`로 자르지 않는다)
 출력: `items: list[BookIssueRow]`, `missing: list[str]` (못 읽은 값과 이유), `period_start/end`, `generated_at`
 
 ```python
@@ -106,6 +106,13 @@ class BookIssueRow(AxModel):
   - `include_sales=false`면 판매 서버를 읽지 않는다. 주문 출처가 시드(목 모드)면 읽지 않는다.
 - 아직 없는 것: 문의 품목 단위 귀속(접수 화면 변경 필요), 상품과 ISBN 매핑, 한 번에 3만 주문이 넘는 기간의 판매 수량
   (집계 읽기 경로가 있어야 한다 — 판매 서버 레포 분리가 끝난 뒤 협의).
+
+## 짚어 물은 상품의 0건 행 (2026-11-16, 데이터 요청 #1125)
+- 데이터가 브리프에 고객 반응을 붙일 때 불만이 하나도 없는 책이 "집계에 없음"으로 빠져 고객 반응이 비어 보였다. `product_ids`를 주면 요청한 상품은 모두 한 행씩 돌려준다.
+- 0건 행: `claim_count`·`defect_claim_count`·`claim_qty`·`return_qty`·`refund_cash_total`은 0, 문의를 전부 읽었으면 `inquiry_count`도 0(일부만 읽었으면 `None`), 판매 수량을 읽었으면 `sold_qty`와 `claim_rate`(판매 0이면 `None`)를 채운다. 읽지 않은 값은 `None`이고 0으로 채우지 않는다. `reason`은 "기간 안 클레임 없음".
+- `product_ids`를 줬을 때는 `min_claims`·`min_inquiries`를 무시하고 `limit`보다 많아도 요청한 상품은 자르지 않는다(정렬은 그대로: 클레임 많은 순이라 0건 행이 뒤).
+- 없는 상품 ID(오타 등)도 0건 행이 된다. 판매를 읽었는데 판매·클레임·문의가 모두 없는 상품이 있으면 `missing`에 "없는 상품 ID일 수도 있다"고 적는다. 판매 서버에 상품이 있는지는 따로 확인하지 않는다.
+- `product_ids`를 주지 않았을 때는 그대로다(0건 상품은 나오지 않는다).
 
 ## 검토 뒤 고친 것 (2026-11-14, 머지된 #1097~#1100·#1103을 독립 검토한 결과)
 - **문의 건수의 가짜 0**: 문의를 일부 주문만 읽었으면(판매 서버에서 못 읽은 주문, 상품 ID가 하나도 없는 주문, 주문 200개 상한, 마감으로 건너뛴 주문)
