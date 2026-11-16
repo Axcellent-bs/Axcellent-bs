@@ -547,6 +547,26 @@ def test_shop_fault_falls_back_to_local_web_env(tmp_path: Path) -> None:
     assert out.stdout.strip() == "url=http://127.0.0.1:8010 token=local-tok args=status"
 
 
+@pytest.mark.parametrize(
+    "given",
+    [{"SHOP_API_URL": "https://shop.example"}, {"SHOP_ADMIN_TOKEN": "cb-admin"}],
+    ids=["url-only", "token-only"],
+)
+def test_shop_fault_with_only_one_of_url_and_token_stops(
+    tmp_path: Path, given: dict[str, str]
+) -> None:
+    """하나만 주면 멈춘다: 로컬 토큰을 다른 주소로도, 토큰만 127.0.0.1로도 보내지 않는다."""
+    clone, backend = _fault_env(tmp_path)
+    (backend / ".data" / "web.env").write_text(
+        "VITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
+    )
+    out = _fault(backend, {"CATBOOKS_DEMO_DIR": str(clone), **given})
+    assert out.returncode == 1
+    assert out.stdout == ""  # 캣북스 스크립트를 부르지 않았다
+    assert "SHOP_API_URL" in out.stderr and "SHOP_ADMIN_TOKEN" in out.stderr
+    assert "local-tok" not in out.stderr
+
+
 def test_shop_fault_without_any_token_stops(tmp_path: Path) -> None:
     clone, backend = _fault_env(tmp_path)
     out = _fault(backend, {"CATBOOKS_DEMO_DIR": str(clone)})
