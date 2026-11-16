@@ -546,8 +546,68 @@ def test_retry_reuses_written_code_without_llm(service: PlanningService, adapter
     assert again.count("CodePlan") == 2 and again.count("FileWrite") == 2  # 다시 쓰지 않음
     c = _task(service).coding
     assert c.pr is not None and c.status in ("opened", "merged")
-    assert any("작성해 둔 코드로 PR 다시 시도" in a.text for a in service.state.activity)
+    assert any("작성해 둔 코드로 PR부터 다시 시도" in a.text for a in service.state.activity)
     assert coder.draft_of(service, "T-D1") is None
+
+
+def test_retry_after_review_failure_starts_from_review(service: PlanningService, adapter) -> None:
+    """리뷰에서 멈춰도 쓴 코드는 저장돼 있어, 다시 시도하면 고르기·쓰기 없이 리뷰부터 한다."""
+    llm = FakeLLM(fail={"CodeReview"})
+    coder.set_llm(llm)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "failed" and "리뷰" in (c.error or "")
+    assert coder.draft_of(service, "T-D1") is not None
+
+    llm.fail = set()
+    run(_retry(service, "T-D1"))
+    names = [x[0] for x in llm.calls]
+    assert names.count("CodePlan") == 2 and names.count("FileWrite") == 2  # 다시 쓰지 않음
+    assert names.count("CodeReview") == 2  # 실패한 것 + 다시 한 것
+    assert _task(service).coding.status == "merged"
+    assert any("작성해 둔 코드로 리뷰부터 다시 시도" in a.text for a in service.state.activity)
+
+
+def test_failed_edits_are_asked_again_alone() -> None:
+    """맞은 부분은 두고 못 맞춘 부분만 다시 묻는다. 전체 다시 쓰기는 그래도 안 될 때만."""
+    from dev_agent.coder import Edit, apply_some
+
+    text, failed = apply_some(
+        "a\nb\nb\n", [Edit(find="a", replace="A"), Edit(find="b", replace="B")]
+    )
+    assert text == "A\nb\nb\n" and [why for _, why in failed] == ["find가 2번 나온다"]
+
+    class Partial(FakeLLM):
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            data = untrusted or {}
+            if schema is FileWrite and data.get("action") == "modify":
+                self.calls.append(("FileWrite", prompt, data))
+                if "failed_edits" in data:
+                    return FileWrite(
+                        edits=[Edit(find="<div>배너</div>", replace="<div>신간</div>")]
+                    )
+                ok = Edit(find="export function Banner()", replace="export function Banner2()")
+                bad = Edit(find="없는 글", replace="x")
+                return FileWrite(edits=[ok, bad], reason="두 곳")
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    llm = Partial(plan=CodePlan(files=[FilePick(path=BANNER, reason="배너")]))
+    coder.set_llm(llm)
+    out = run(
+        coder._write_one(
+            llm,
+            coder.Job(1, "T", "S", "R", "c", "t", "p", (), (), None),
+            FilePick(path=BANNER, reason="배너"),
+            BANNER_OLD,
+            [],
+        )
+    )
+    assert out[0] == BANNER_OLD.replace("Banner()", "Banner2()").replace("배너", "신간")
+    writes = [x for x in llm.calls if x[0] == "FileWrite"]
+    assert len(writes) == 2  # 전체 다시 쓰기(FULL_PROMPT) 없음
+    retry = writes[1][2]
+    assert [f["find"] for f in retry["failed_edits"]] == ["없는 글"]
+    assert "Banner2" in retry["current"]  # 맞은 부분은 이미 들어가 있다
 
 
 def test_apply_edits_and_fallback() -> None:
@@ -866,6 +926,40 @@ def test_revise_only_for_waiting_task_with_open_pr(service: PlanningService, ada
     with pytest.raises(ActionError) as err:
         run(service.revise_dev_task("T-D1", "   "))
     assert err.value.code == "INVALID_INPUT"
+
+
+def test_revise_rewrites_only_the_files_the_instruction_points_to(
+    service: PlanningService, adapter
+) -> None:
+    """수정 지시는 가리킨 PR 파일만 다시 쓴다. 어느 파일인지 모르면 LLM 없이 사람에게 묻는다."""
+    fake = FakeLLM(
+        writes={
+            BANNER: lambda d: BANNER_FIX if d.get("instruction") else BANNER_NEW,
+            NOTICE: lambda d: (
+                "export const NOTICE = '내일 배송'\n" if d.get("instruction") else NOTICE_NEW
+            ),
+        },
+        reviews=[CodeReview(verdict="불일치", notes=["a"]), CodeReview(verdict="통과")],
+    )
+    coder.set_llm(fake)
+    run(_go(service))
+    assert _task(service).coding.status == "waiting_human"  # 고칠 게 없는 불일치
+
+    async def revise(text: str):
+        await service.revise_dev_task("T-D1", text)
+        await service.wait_coding()
+
+    before = len(fake.calls)
+    run(revise("Notice.tsx 공지를 내일 배송으로 바꿔"))
+    wrote = [x[2]["path"] for x in fake.calls[before:] if x[0] == "FileWrite"]
+    assert wrote == [NOTICE]
+    c = _task(service).coding
+    assert {f.path for f in c.files} == {BANNER, NOTICE}  # 안 고친 파일도 PR 목록에 남는다
+    assert any("2개 중 1개만 고침" in a.text for a in service.state.activity)
+
+    assert coder.revise_targets("색을 바꿔", [BANNER, NOTICE]) == []
+    assert coder.revise_targets("색을 바꿔", [BANNER]) == [BANNER]
+    assert coder.revise_targets("banner 여백", [BANNER, NOTICE]) == [BANNER]
 
 
 # ---------------------------------------------------------------- 작업 대기열 (같은 파일은 차례로)

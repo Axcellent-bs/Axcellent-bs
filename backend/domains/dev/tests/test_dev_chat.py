@@ -222,6 +222,20 @@ def test_chat_listing_puts_talked_about_files_first_and_stays_small(
     assert files[0] == target and len(files) == dev_chat.MAX_LISTING
 
 
+def test_bare_go_ahead_hands_off_without_llm(service: PlanningService, adapter) -> None:
+    """계획이 선 뒤 "진행해"만 보내면 LLM을 부르지 않고 정해 둔 답으로 넘긴다."""
+    fake = ChatLLM([START])
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        _post(c, message="배너 문구 바꿔 줘")
+        th = _post(c, thread_id="chat-1", message="네 진행해 주세요!").json()["data"]
+    assert len(fake.calls) == 1  # 계획 턴만 LLM
+    assert th["status"] == "handed" and th["messages"][-1]["text"].startswith(dev_chat.GO_REPLY)
+    assert dev_chat.just_go("ㄱㄱ") and dev_chat.just_go("좋아요 그대로 해")
+    assert not dev_chat.just_go("진행해. 그런데 버튼 색도 파란색으로 바꿔 줘")
+    assert not dev_chat.just_go("배너 좀 봐 줘")
+
+
 def test_planning_refusal_keeps_plan_for_retry(service: PlanningService, adapter) -> None:
     adapter.tickets.fail = AgentResult(
         meta=AgentRequest(

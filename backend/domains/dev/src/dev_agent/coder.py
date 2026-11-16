@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import difflib
 import json
 import os
@@ -171,6 +172,15 @@ WRITE_PROMPT = (
     "- 새 파일(action create)이거나 edits로 쓰기 어려울 때만 content에 파일 전체 글을 넣는다 "
     "(설명·코드 블록 표시 없이).\n"
     "- reason은 바꾼 내용 한 줄이다.\n"
+    '- JSON {"edits": [{"find": "...", "replace": "..."}], "content": "", "reason": "..."} 로만 '
+    "답한다."
+)
+
+EDIT_RETRY_PROMPT = (
+    "너는 개발팀의 코딩 에이전트다. 지난 답의 바꿀 부분(edits) 중 failed_edits만 지금 파일"
+    "(current)에 맞출 수 없었다. 나머지는 이미 current에 들어가 있다.\n"
+    "- failed_edits마다 problem을 보고, find를 current에 꼭 한 번 나오는 글 그대로"
+    "(앞뒤 몇 줄 포함) 다시 복사해 같은 뜻의 edits를 준다. 이미 들어간 부분은 다시 주지 않는다.\n"
     '- JSON {"edits": [{"find": "...", "replace": "..."}], "content": "", "reason": "..."} 로만 '
     "답한다."
 )
@@ -813,13 +823,22 @@ def _base(job: Job) -> dict[str, Any]:
 
 
 def apply_edits(current: str, edits: list[Edit]) -> str | None:
-    """바꿀 부분을 차례로 적용한다. find가 꼭 한 번 나오지 않으면 None (전체 쓰기로 다시)."""
+    """바꿀 부분을 차례로 적용한다. find가 꼭 한 번 나오지 않는 게 하나라도 있으면 None."""
+    text, failed = apply_some(current, edits)
+    return None if failed else text
+
+
+def apply_some(current: str, edits: list[Edit]) -> tuple[str, list[tuple[Edit, str]]]:
+    """맞는 부분만 차례로 적용한다. (적용한 글, 못 맞춘 부분과 이유)."""
     text = current
+    failed: list[tuple[Edit, str]] = []
     for e in edits:
-        if not e.find or text.count(e.find) != 1:
-            return None
-        text = text.replace(e.find, e.replace, 1)
-    return text
+        n = text.count(e.find) if e.find else 0
+        if n == 1:
+            text = text.replace(e.find, e.replace, 1)
+        else:
+            failed.append((e, "find가 비었다" if not e.find else f"find가 {n}번 나온다"))
+    return text, failed
 
 
 async def _write_one(
@@ -830,7 +849,10 @@ async def _write_one(
     notes: list[str],
     others: list[FilePick] | None = None,
 ) -> tuple[str, str]:
-    """파일 하나의 새 글과 이유. 바꿀 부분(edits)을 적용하고, 못 맞추면 전체를 다시 받는다."""
+    """파일 하나의 새 글과 이유. 바꿀 부분(edits)을 적용한다.
+
+    못 맞춘 부분만 한 번 다시 묻고(맞은 부분은 그대로 둔다), 그래도 안 되면 마지막으로 전체를
+    다시 받는다. 전체 다시 쓰기는 입력·출력이 가장 크다."""
     data = {
         **_base(job),
         "path": pick.path,
@@ -843,9 +865,23 @@ async def _write_one(
     }
     got = await _ask(llm, f"파일 쓰기 {pick.path}", WRITE_PROMPT, FileWrite, data, job.ctx)
     if got.edits and pick.action != "create":
-        applied = apply_edits(current, got.edits)
-        if applied is not None:
-            return applied, _one_line(got.reason or pick.reason)
+        reason = _one_line(got.reason or pick.reason)
+        text, failed = apply_some(current, got.edits)
+        if not failed:
+            return text, reason
+        retry = {
+            **data,
+            "current": text,
+            "failed_edits": [{"find": e.find, "replace": e.replace, "problem": why}
+                             for e, why in failed],
+        }  # fmt: skip
+        again = await _ask(
+            llm, f"파일 고치기 다시 {pick.path}", EDIT_RETRY_PROMPT, FileWrite, retry, job.ctx
+        )
+        if again.edits:
+            fixed, still = apply_some(text, again.edits)
+            if not still:
+                return fixed, reason
         got = await _ask(llm, f"파일 다시 쓰기 {pick.path}", FULL_PROMPT, FileWrite, data, job.ctx)
     reason = _one_line(got.reason or pick.reason)
     if got.content:
@@ -1121,18 +1157,26 @@ async def _run(svc: DevService, job: Job) -> None:
         await _revise(svc, job, llm, adapter)
         return
 
-    # 다시 시도: 같은 연결로 리뷰까지 끝낸 코드가 있으면 LLM을 다시 부르지 않고 PR부터 다시 한다
+    # 다시 시도: 같은 연결로 써 둔 코드가 있으면 고르기·쓰기를 다시 하지 않는다.
+    # 리뷰까지 끝났으면 PR부터, 쓰기만 끝났으면 리뷰부터 잇는다 (단계마다 저장해 둔다)
     draft = draft_of(svc, job.task_id)
     if draft is not None and draft.connection == job.connection:
+        reviewed = bool(draft.verdicts)
         await svc.coding_step(
             job,
             "writing",
             point="code.write",
-            text=f"작성해 둔 코드로 PR 다시 시도\n{write_text(draft.rows)}",
+            text=(
+                f"작성해 둔 코드로 {'PR' if reviewed else '리뷰'}부터 다시 시도\n"
+                f"{write_text(draft.rows)}"
+            ),
             files=draft.rows,
             summary=draft.summary,
             attempts=draft.attempts,
         )
+        if not reviewed:
+            draft = await _review(svc, job, llm, copy.deepcopy(draft))
+            put_draft(svc, job.task_id, draft)
         await _open(svc, job, draft)
         return
 
@@ -1210,8 +1254,10 @@ async def _run(svc: DevService, job: Job) -> None:
         job, "writing", point="code.write", text=write_text(rows), files=rows, attempts=1
     )
 
-    # 4. 리뷰 → 불일치면 한 번 고쳐 다시 리뷰 (PR 전)
+    # 4. 리뷰 → 불일치면 한 번 고침 (PR 전). 쓴 코드는 리뷰 전에 저장해 두어, 리뷰가 멈춰도
+    # 다시 시도할 때 고르기·쓰기를 다시 하지 않는다
     draft = Draft(job.connection, picks, originals, contents, rows, summary)
+    put_draft(svc, job.task_id, copy.deepcopy(draft))  # 리뷰가 고치는 건 따로 둔다
     draft = await _review(svc, job, llm, draft)
     put_draft(svc, job.task_id, draft)
 
@@ -1406,32 +1452,61 @@ async def _read_or_empty(adapter: VcsAdapter, path: str, ref: str | None = None)
         raise CoderStop("failed", f"형상관리 파일 읽기 {path} 실패 ({exc.code})") from None
 
 
-async def _revise(svc: DevService, job: Job, llm: Any, adapter: VcsAdapter) -> None:
-    """사람 지시 → PR 브랜치 글 위에서 고치기 → 리뷰(불일치면 한 번 더) → 같은 PR에 커밋.
+def revise_targets(instruction: str, paths: list[str]) -> list[str]:
+    """사람 수정 지시가 가리키는 PR 파일 (LLM 없이). 지시에 적힌 파일 → 지시 낱말이 경로에 든
+    파일 → PR 파일이 하나뿐이면 그 파일. 못 고르면 빈 목록 (사람에게 파일을 묻는다)."""
+    named = mentioned(instruction, paths)
+    if named:
+        return named
+    hits = scored(instruction, paths)
+    if hits:
+        return hits[:MAX_FILES]
+    return paths if len(paths) == 1 else []
 
-    리뷰가 통과하면 기존 자동 머지 규칙으로 잇는다 (걸리면 다시 사람 확인)."""
+
+async def _revise(svc: DevService, job: Job, llm: Any, adapter: VcsAdapter) -> None:
+    """사람 지시 → 지시가 가리키는 PR 파일만 PR 브랜치 글 위에서 고치기 → 리뷰 → 같은 PR에 커밋.
+
+    지시와 관계없는 파일은 다시 쓰지 않는다 (토큰 절약). 리뷰가 통과하면 기존 자동 머지 규칙으로
+    잇는다 (걸리면 다시 사람 확인)."""
     pr = svc.coding_pr(job)
     if pr is None:
         raise CoderStop("failed", "고칠 PR이 없다")
     await svc.coding_step(job, "reading")
-    paths = [p for p in pr.changed_paths if not is_secret(p)]
-    base_rows = await asyncio.gather(*(_read_or_empty(adapter, p) for p in paths))
-    head_rows = await asyncio.gather(*(_read_or_empty(adapter, p, pr.branch) for p in paths))
-    base = dict(zip(paths, base_rows, strict=True))
-    current = dict(zip(paths, head_rows, strict=True))
+    every = [p for p in pr.changed_paths if not is_secret(p)]
+    paths = revise_targets(job.instruction or "", every)
+    if not paths:
+        raise CoderStop(
+            "waiting_human",
+            "수정 지시가 어느 파일인지 모름 → 지시에 파일 이름을 적어 주세요 "
+            f"({', '.join(every[:5])})",
+        )
+    # 읽기는 PR 파일 전부 (줄 수·리뷰 diff용, LLM 아님). 쓰기는 지시가 가리킨 파일만
+    base_rows = await asyncio.gather(*(_read_or_empty(adapter, p) for p in every))
+    head_rows = await asyncio.gather(*(_read_or_empty(adapter, p, pr.branch) for p in every))
+    base = dict(zip(every, base_rows, strict=True))
+    current = dict(zip(every, head_rows, strict=True))
+    for p in paths:
+        n = len(_lines(current[p]))
+        if n > MAX_FILE_LINES:
+            raise CoderStop("waiting_human", f"{p} {n}줄 > {MAX_FILE_LINES}줄 → 사람 확인")
     picks = [
         FilePick(path=p, action="modify" if current[p] else "create", reason="사람 지시 반영")
         for p in paths
     ]
     await svc.coding_step(
-        job, "writing", point="code.plan", text=f"사람 지시 · {pr.id} 파일 {len(picks)}개",
+        job, "writing", point="code.plan",
+        text=f"사람 지시 · {pr.id} 파일 {len(every)}개 중 {len(picks)}개만 고침",
         attempts=1,
     )  # fmt: skip
 
-    fixed, reasons = await _write_all(llm, job, picks, current, [])
+    fixed, wrote = await _write_all(llm, job, picks, current, [])
     changed = {p: c for p, c in fixed.items() if c != current[p]}
     if not changed:
         raise CoderStop("waiting_human", "지시를 반영한 수정이 없음 → 사람 확인")
+    task = next((t for t in svc.state.tasks if t.id == job.task_id), None)
+    reasons = {f.path: f.reason for f in (task.coding.files if task and task.coding else [])}
+    reasons.update({p: wrote[p] for p in changed})
     contents = {**current, **changed}
     rows = file_rows(base, contents, reasons)
     if total_lines(rows) > MAX_TOTAL_LINES:
