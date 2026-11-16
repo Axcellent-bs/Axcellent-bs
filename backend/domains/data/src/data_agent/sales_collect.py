@@ -10,6 +10,10 @@
   주문을 같은 커서 방식으로 준다
 - 저장소의 커서부터 이어 받고 페이지마다 저장 + 커서를 남긴다. 같은 주문은 덮어쓴다(upsert)
 - 끝까지 받았을 때만 마지막 수집 시각을 바꾼다. 실패하면 이유만 남기고 숫자를 지어내지 않는다
+- 어떤 오류(연결 실패·저장소 오류·형식 오류 등)에도 프로세스는 끝나지 않고 다음 주기에 다시 한다.
+  오류 종류와 이름만 로그 한 줄과 `sync_state.last_error`에 남긴다(예외 문장은 남기지 않는다).
+  같은 오류가 연달아 나면 로그는 한 줄만 쓰고 바뀌거나 회복할 때 몇 번 연속이었는지 적는다.
+  `--every` 없이 한 번 돌렸을 때 오류가 있으면 종료 코드 1
 - 간격: `--every` 또는 `DATA_SALES_SYNC_SECONDS`(기본 300초, 최소 60초)
 - 같은 DB에 수집기가 둘 돌지 않게 DB 옆 `sales_collect.lock`을 잡는다(`collector_lock`)
 """
@@ -19,12 +23,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import sqlite3
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
+
+from pydantic import ValidationError
 
 from ax_contracts.data_access.shop_sales import (
     SalesOrderLine,
@@ -82,8 +89,8 @@ async def collect_once(
     """커서부터 끝까지(또는 `max_pages`까지) 받아 저장한다."""
     attempted = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
     result = RunResult(attempted)
-    cursor = store.sync_state(tenant_id, source_name).cursor
     try:
+        cursor = store.sync_state(tenant_id, source_name).cursor
         while result.pages < max_pages:
             page = await source.sales_export(cursor, limit)
             result.pages += 1
@@ -98,11 +105,48 @@ async def collect_once(
                 break
     except ConnectorUnavailable as error:
         result.errors.append(f"판매 기록 [{error.code}]")
+    except Exception as error:  # noqa: BLE001 - 수집기는 어떤 오류에도 다음 주기를 돈다
+        result.errors.append(describe(error))
     error_text = "; ".join(result.errors) if result.errors else None
     if not result.finished and not result.errors:
         error_text = "한 번에 다 받지 못함 (다음 수집에 이어서)"
-    store.finish_sync(tenant_id, source_name, attempted, error_text)
+    try:
+        store.finish_sync(tenant_id, source_name, attempted, error_text)
+    except Exception as error:  # noqa: BLE001 - 상태를 못 남겨도 수집기는 계속 돈다
+        result.errors.append(f"수집 상태 기록 실패: {describe(error)}")
     return result
+
+
+def describe(error: BaseException) -> str:
+    """예외를 로그·`last_error`에 남길 짧은 이유로. 예외 문장은 넣지 않는다(토큰·쿼리값이 섞일 수
+    있어서). 종류와 이름만 남긴다."""
+    if isinstance(error, sqlite3.Error):
+        what = "판매 저장소 오류"
+    elif isinstance(error, ValidationError):
+        what = f"판매 기록 형식 오류 ({error.error_count()}개 칸)"
+    else:
+        what = "예상 못 한 오류"
+    return f"{what} [{type(error).__name__}]"
+
+
+class ErrorStreak:
+    """연속 같은 오류는 로그 한 줄만 쓰고 횟수를 센다. 바뀌거나 회복하면 몇 번이었는지 한 줄."""
+
+    def __init__(self) -> None:
+        self.key: tuple[str, ...] = ()
+        self.count = 0
+
+    def lines(self, result: RunResult) -> list[str]:
+        key = tuple(result.errors)
+        if key and key == self.key:
+            self.count += 1
+            return []
+        out = []
+        if self.count > 1:
+            out.append(f"[sales] 앞 오류가 {self.count}번 연속 났음: {'; '.join(self.key)}")
+        self.key, self.count = key, (1 if key else 0)
+        out.append(result.line())
+        return out
 
 
 # ---------------------------------------------------------------- 목 모드 (테스트 전용)
@@ -212,10 +256,18 @@ async def run(every: int | None, env: Mapping[str, str]) -> int:
     store = SalesStore(db_path(env))
     tenant = (env.get(TENANT_ENV) or TENANT_ID_DEFAULT).strip()
     name = catalog.current().connector
+    streak = ErrorStreak()
     try:
         while True:
-            result = await collect_once(get_source(env), store, tenant_id=tenant, source_name=name)
-            print(result.line(), flush=True)
+            try:
+                source = get_source(env)
+            except Exception as error:  # noqa: BLE001 - 출처를 못 만들어도 다음 주기에 다시
+                result = RunResult(datetime.now(UTC).replace(microsecond=0))
+                result.errors.append(f"판매 기록 출처를 만들 수 없음 {describe(error)}")
+            else:
+                result = await collect_once(source, store, tenant_id=tenant, source_name=name)
+            for line in streak.lines(result):
+                print(line, flush=True)
             if every is None:
                 return 1 if result.errors else 0
             await asyncio.sleep(every)
