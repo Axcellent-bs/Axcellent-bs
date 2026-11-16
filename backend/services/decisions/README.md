@@ -1,6 +1,6 @@
-# services/decisions — 결정 기록
+# services/decisions — 결정 기록 (아카이브 AI)
 
-포트 8114 · 업무 로직 `domains/hr` · 화면 서비스 id `decisions`
+포트 8114 · 업무 로직 `domains/archive` · 화면 서비스 id `decisions`
 
 | skill | 등급 |
 | --- | --- |

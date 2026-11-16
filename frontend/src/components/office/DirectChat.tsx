@@ -36,7 +36,7 @@ interface Talk {
   remove?: (id: string) => Promise<void>;
 }
 
-// 인사 AI 대화 창구(decisions 8114 `/api/hr/chat`). CORS가 없어 기본값은 Vite 개발 프록시(/hr-api → vite.config.ts)
+// 인사 AI 대화 창구(org 8124 `/api/hr/chat`). CORS가 없어 기본값은 Vite 개발 프록시(/hr-api → vite.config.ts)
 // 인사 데이터를 다루는 대화라 읽기에도 사람 토큰을 붙인다
 const HR_API_URL = (import.meta.env.VITE_HR_API_URL as string | undefined) ?? "/hr-api";
 const toThread = (x: Record<string, unknown>): ChatThread => ({

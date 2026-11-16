@@ -3,6 +3,7 @@
 # Keep this file ASCII-only: lint-imports reads it with the OS default encoding (cp949 on Korean Windows).
 [importlinter]
 root_packages =
+    archive_agent
     data_agent
     dev_agent
     finance_agent
@@ -16,6 +17,7 @@ root_packages =
 name = Domains do not import each other
 type = independence
 modules =
+    archive_agent
     data_agent
     dev_agent
     finance_agent

@@ -25,11 +25,13 @@ from ax_contracts.schemas import (
     EvaluatedStep,
     RepeatEventType,
 )
-from hr_agent.case_memory.service import KINDS
 from hr_agent.dept_eval.criteria import CriteriaError, load_criteria
 from hr_agent.dept_eval.stages import LABELS
 from hr_agent.results import completed, failed, invalid_input, make_evidence
 from hr_agent.services import Services
+
+# 평가 대상 카드 종류(이슈·결정·사례). 아카이브의 검색 대상과 같은 값이다
+KINDS = ("incident", "decision", "case")
 
 # 화면에 보이는 순서. 판정이 없는 에이전트도 "참여한 이벤트 없음"으로 보여 준다
 AGENT_ORDER = ("infra", "data", "dev", "support", "marketing", "finance", "hr")

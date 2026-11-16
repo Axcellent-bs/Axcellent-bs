@@ -275,31 +275,9 @@ def test_hr_runs_on_the_real_clients_against_fake_servers(svc, fake_memory) -> N
         }
         return client.post("/a2a", json=raw).json()
 
-    rec = {
-        "context_id": "ctx_real_01",
-        "kind": "decision_rejected",
-        "summary": "결제 서버 캐시 도입안을 기각했다",
-        "decision_reason": "정합성 위험",
-        "alternatives_considered": ["현행 유지"],
-        "source_refs": ["req:1", "area:payment"],
-        "author": "planning",
-    }
-    assert call("record_case", rec, "r", "mock:planning")["outcome"] == "card_created"
-    assert len(fake_memory.cards) == 1  # 카드가 hr 로컬이 아니라 memory에 저장됐다
-    assert svc.store.all("SELECT * FROM mock_cards") == []
-
     started = call("start_handover", {"owner_id": "emp_01"}, "s")
     assert {i["item_id"] for i in started["output"]["items"]} >= {"pr_9"}
     assert planning_fake.requests[0]["meta"]["context_id"] == "ctx_real_01"
-
-    draft = {
-        "title": "결제 서버 캐시 도입",
-        "summary": "서버 캐시",
-        "area": "payment",
-        "kind": "spec",
-    }
-    plan = call("check_plan", {"draft": draft}, "p", "mock:planning")
-    assert plan["output"]["verdict"] == "warn"
 
 
 def test_an_upstream_failure_fails_closed_without_changing_state(svc, fake_memory) -> None:
@@ -314,13 +292,13 @@ def test_an_upstream_failure_fails_closed_without_changing_state(svc, fake_memor
     raw = {
         "meta": {
             "context_id": "ctx_real_02",
-            "token": "mock:planning",
+            "token": "mock:dashboard-api",
             "path": [],
             "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
             "idempotency_key": "r",
         },
-        "skill": "check_plan",
-        "input": {"draft": {"title": "t", "summary": "s", "area": "payment", "kind": "spec"}},
+        "skill": "evaluate_agents",
+        "input": {},
     }
     res = client.post("/a2a", json=raw).json()
     assert (res["status"], res["outcome"]) == ("failed", "UPSTREAM_UNAVAILABLE")

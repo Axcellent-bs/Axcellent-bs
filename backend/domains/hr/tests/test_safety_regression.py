@@ -16,19 +16,14 @@ from hr_agent.main import app
 from hr_agent.services import Services
 
 STATE_CHANGING = [
-    "record_case",
     "start_handover",
     "answer_handover_question",
     "confirm_handover",
-    "decide_candidate_card",
 ]
 READ_SKILLS = [
     "get_roster",
-    "check_plan",
     "list_handovers",
     "list_open_questions",
-    "list_candidate_cards",
-    "get_audit_timeline",
 ]
 ALL_SKILLS = [*STATE_CHANGING, *READ_SKILLS]
 
@@ -77,24 +72,7 @@ def world(svc, client) -> dict[str, Any]:
 
     started = call("start_handover", {"owner_id": "emp_01"}, "w1")
     low_hover = call("start_handover", {"owner_id": "emp_03"}, "w2")
-    candidate = client.post(
-        "/a2a",
-        json=body(
-            "record_case",
-            {
-                "context_id": "ctx_w_cand",
-                "kind": "decision",
-                "summary": "근거 없이 정한 결정",
-                "source_refs": ["area:payment"],
-                "author": "planning",
-            },
-            "w7",
-            "ctx_w_cand",
-            "mock:planning",
-        ),
-    ).json()
     return {
-        "candidate": {"card_id": candidate["output"]["card_id"], "decision": "approve"},
         "answer": {
             "question_id": started["output"]["questions"][0]["question_id"],
             "answer": "답변",
@@ -105,25 +83,12 @@ def world(svc, client) -> dict[str, Any]:
 
 def valid_input(skill: str, world: dict[str, Any]) -> dict[str, Any]:
     return {
-        "record_case": {
-            "context_id": "ctx_sr_new",
-            "kind": "spec_confirmed",
-            "summary": "새 결정을 확정했다",
-            "decision_reason": "이유",
-            "alternatives_considered": ["대안"],
-            "source_refs": ["pr:9", "area:payment"],
-            "author": "planning",
-        },
         "start_handover": {"owner_id": "emp_04", "successor_id": "emp_03"},
         "answer_handover_question": world["answer"],
         "confirm_handover": world["confirm_handover"],
-        "decide_candidate_card": world["candidate"],
         "get_roster": {},
-        "check_plan": {"draft": {"title": "t", "summary": "s", "area": "payment", "kind": "spec"}},
         "list_handovers": {},
         "list_open_questions": {},
-        "list_candidate_cards": {},
-        "get_audit_timeline": {"context_id": "ctx_sr_0001"},
     }[skill]
 
 
@@ -316,7 +281,6 @@ def test_injected_text_never_changes_the_outcome(skill) -> None:
                 "answer": "답변",
             },
             "confirm_handover": {"handover_id": started["output"]["handover_id"]},
-            "candidate": {"card_id": "card_none", "decision": "approve"},
         }
         raw = body(skill, valid_input(skill, world), "inj", "ctx_inj_1")
         if payload:
@@ -333,4 +297,4 @@ def test_the_suite_covers_at_least_the_planned_number_of_attempts(request) -> No
     items = [
         i for i in request.session.items if i.module.__name__.endswith("test_safety_regression")
     ]
-    assert len(items) >= 50, len(items)
+    assert len(items) >= 30, len(items)

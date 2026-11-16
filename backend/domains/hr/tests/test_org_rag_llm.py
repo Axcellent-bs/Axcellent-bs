@@ -9,18 +9,18 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from ax_agent_template.llm import MockLLMClient
 from ax_contracts.schemas import (
+    AgentResult,
+    Card,
     DescribeOrgChangeOutput,
     FindOrgChangeBasisOutput,
     ParseOrgChangeTextOutput,
+    TaskStatus,
 )
 from hr_agent.config import HrSettings, ManualClock
 from hr_agent.main import app
 from hr_agent.narrative import NarrativeOut
 from hr_agent.org.parse import _DateExpr, _Parsed
-from hr_agent.retrieval.cards import DenseCardSearch
-from hr_agent.retrieval.dense import DenseIndex
 from hr_agent.services import build_services, set_services
 from hr_agent.store import Store
 
@@ -45,21 +45,6 @@ REJECTED = (
     ["현행 유지"],
 )
 REASON = "개발팀 인력 부족으로 기획팀 인원을 개발팀으로 이동"
-
-
-class MockEmbedder:
-    def __init__(self) -> None:
-        self._mock = MockLLMClient()
-        self.calls = 0
-
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        self.calls += 1
-        return await self._mock.embed(texts)
-
-
-class BrokenEmbedder:
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        raise RuntimeError("429 rate limited")
 
 
 class FakeLLM:
@@ -100,14 +85,8 @@ def make(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AX_ORG_CONFIG", str(org))
     made = []
 
-    def _make(*, embedder=None, llm=None, **settings):
-        index = DenseIndex(str(tmp_path / "v.db"), embedder, "mock") if embedder else None
-        svc = build_services(
-            HrSettings(mock=True, **settings),
-            clock=ManualClock(),
-            llm=llm,
-            dense=DenseCardSearch(index) if index else None,
-        )
+    def _make(*, llm=None, **settings):
+        svc = build_services(HrSettings(mock=True, **settings), clock=ManualClock(), llm=llm)
         set_services(svc)
         made.append(svc)
         return svc, TestClient(app)
@@ -122,21 +101,22 @@ def post(client, skill, inp, token="mock:dashboard-api") -> dict:
     return client.post("/a2a", json=_body(skill, inp, token)).json()
 
 
-def record_card(client, n: int, spec: tuple) -> str:
-    kind, summary, reason, *rest = spec if len(spec) > 3 else (*spec, [])
-    rec = {
-        "context_id": f"ctx_rec_{n:04d}",
-        "kind": kind,
-        "summary": summary,
-        "decision_reason": reason,
-        "alternatives_considered": rest[0] if rest else [],
-        "source_refs": [f"req:{n}", "area:payment"],
-        "author": "planning",
-    }
-    body = _body("record_case", rec, "mock:planning", ctx=rec["context_id"])
-    res = client.post("/a2a", json=body).json()
-    assert res["status"] == "completed", res
-    return res["output"]["card_id"]
+def record_card(svc, n: int, spec: tuple) -> str:
+    """결정 카드를 회사 기억에 바로 쓴다(카드는 아카이브가 만들지만 인사는 저장된 카드만 본다)."""
+    kind, summary, reason, *_ = spec
+    card = Card(
+        card_id=f"card_dec{n}",
+        kind="decision" if kind != "incident" else "incident",
+        context_id=f"ctx_rec_{n:04d}",
+        title=summary,
+        body=f"{summary} {reason}",
+        author="planning",
+        confidence="high",
+        created_at=svc.clock(),
+        extra={"decision": summary},
+    )
+    asyncio.run(svc.memory.write_card(card))
+    return card.card_id
 
 
 def draft(client, member, kind, frm, to, date, **extra) -> dict:
@@ -162,87 +142,96 @@ def find(client, reason=REASON, **extra) -> dict:
     return post(client, "find_org_change_basis", {"reason": reason, **extra})
 
 
-def test_basis_finds_the_related_decision_card(make) -> None:
-    embedder = MockEmbedder()
-    _, client = make(embedder=embedder, dense_min_cosine=0.2)
-    card = record_card(client, 1, STAFF)
+class FakeArchive:
+    """아카이브 AI 대신 근거 후보를 돌려주는 가짜. 받은 요청을 기록한다."""
+
+    def __init__(self, output: dict | None = None, fail: str | None = None) -> None:
+        self.sent: list = []
+        self.output = output
+        self.fail = fail
+
+    async def __call__(self, target, req):
+        self.sent.append((target, req))
+        if self.fail:
+            return AgentResult(
+                meta=req.meta, status=TaskStatus.FAILED, outcome=self.fail, output={}
+            )
+        return AgentResult(
+            meta=req.meta, status=TaskStatus.COMPLETED, outcome="found", output=self.output
+        )
+
+
+CANDIDATE = {
+    "candidates": [
+        {
+            "card_id": "card_dec1",
+            "title": STAFF[1],
+            "summary": STAFF[1],
+            "similarity": 0.83,
+            "rejected": False,
+        }
+    ],
+    "method": "dense",
+    "collected_at": "2026-10-22T09:00:00Z",
+}
+
+
+def test_basis_is_asked_of_the_archive_and_returned_as_is(make, monkeypatch) -> None:
+    from hr_agent.org import basis
+
+    fake = FakeArchive(CANDIDATE)
+    monkeypatch.setattr(basis, "SEND", fake)
+    _, client = make()
     res = find(client)
     out = FindOrgChangeBasisOutput.model_validate(res["output"])
-    assert embedder.calls > 0 and out.method == "dense"
-    assert [c.card_id for c in out.candidates] == [card]
-    assert 0.2 <= out.candidates[0].similarity <= 1.0 and out.candidates[0].rejected is False
-    assert res["outcome"] == "found"
+    assert res["outcome"] == "found" and out.method == "dense"
+    assert [c.card_id for c in out.candidates] == ["card_dec1"]
+    target, req = fake.sent[0]
+    assert (target, req.skill) == ("hr", "find_similar_decisions")
+    assert req.input == {"reason": REASON, "limit": 3}
 
 
-def test_basis_is_empty_when_nothing_is_close_enough(make) -> None:
-    _, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
-    record_card(client, 1, STAFF)
-    res = find(client, "회의실 예약 화면 색상 변경")
-    assert res["outcome"] == "none" and res["output"]["candidates"] == []  # 근거 카드 없음
+def test_an_empty_answer_means_no_basis_card(make, monkeypatch) -> None:
+    from hr_agent.org import basis
+
+    empty = {"candidates": [], "method": "dice", "collected_at": "2026-10-22T09:00:00Z"}
+    monkeypatch.setattr(basis, "SEND", FakeArchive(empty))
+    _, client = make()
+    res = find(client)
+    assert res["outcome"] == "none" and res["output"]["candidates"] == []
 
 
-def test_basis_pool_is_confirmed_decision_cards_only(make) -> None:
-    svc, client = make(embedder=MockEmbedder(), dense_min_cosine=0.1)
-    incident = {
-        "context_id": "ctx_inc_0001",
-        "kind": "incident",
-        "summary": "개발팀 인력 부족으로 장애 대응이 늦어졌다",
-        "decision_reason": "개발팀 인력 부족",
-        "alternatives_considered": ["현행 유지"],
-        "source_refs": ["inc:1"],
-        "author": "orchestrator",
-    }
-    body = _body("record_case", incident, "mock:orchestrator", ctx="ctx_inc_0001")
-    assert client.post("/a2a", json=body).json()["status"] == "completed"
-    candidate_card = {
-        "context_id": "ctx_ext_0001",
-        "kind": "decision_extracted",
-        "summary": "개발팀 인력 부족으로 인원을 이동하기로 했다",
-        "source_refs": ["doc:1"],
-        "author": "planning",
-    }
-    body = _body("record_case", candidate_card, "mock:planning", ctx="ctx_ext_0001")
-    assert client.post("/a2a", json=body).json()["status"] == "completed"
-    # 장애 대응 카드와 확정 전 후보 카드는 근거 후보가 아니다 (둘 다 카드로 만들어져 있다)
-    active = asyncio.run(svc.memory.list_cards(area=None, states=["active"]))
-    assert [c.kind for c in active] == ["incident"]
-    assert len(asyncio.run(svc.memory.list_cards(area=None, states=["candidate"]))) == 1
-    assert find(client)["output"]["candidates"] == []
+def test_basis_is_not_made_up_when_the_archive_does_not_answer(make, monkeypatch) -> None:
+    from hr_agent.org import basis
+
+    monkeypatch.setattr(basis, "SEND", FakeArchive(fail="UPSTREAM"))
+    _, client = make()
+    res = find(client)
+    assert res["status"] == "failed" and res["outcome"] == "ARCHIVE_UNAVAILABLE"
 
 
-def test_basis_marks_a_rejected_past_decision(make) -> None:
-    _, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
-    card = record_card(client, 1, REJECTED)
-    res = find(client, "재무/정산팀 인원을 줄이는 개편")
-    assert [(c["card_id"], c["rejected"]) for c in res["output"]["candidates"]] == [(card, True)]
+def test_a_broken_archive_answer_is_a_failure(make, monkeypatch) -> None:
+    from hr_agent.org import basis
+
+    monkeypatch.setattr(basis, "SEND", FakeArchive({"candidates": "x"}))
+    _, client = make()
+    assert find(client)["outcome"] == "ARCHIVE_BAD_RESPONSE"
 
 
-def test_basis_falls_back_to_dice_when_embedding_fails(make) -> None:
-    _, client = make(embedder=BrokenEmbedder())
-    card = record_card(client, 1, STAFF)
-    out = FindOrgChangeBasisOutput.model_validate(find(client)["output"])
-    assert out.method == "dice" and [c.card_id for c in out.candidates] == [card]
+def test_basis_input_is_checked_before_asking(make, monkeypatch) -> None:
+    from hr_agent.org import basis
 
-
-def test_finding_a_basis_never_links_or_saves_anything(make) -> None:
-    svc, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
-    record_card(client, 1, STAFF)
-    find(client)
-    assert svc.store.all("SELECT * FROM org_changes") == []
-
-
-def test_basis_limit_and_input_are_checked(make) -> None:
-    _, client = make(embedder=MockEmbedder(), dense_min_cosine=0.0)
-    for n in range(1, 5):
-        record_card(client, n, (STAFF[0], f"{STAFF[1]} {n}", STAFF[2], STAFF[3]))
-    assert len(find(client, limit=2)["output"]["candidates"]) == 2
+    fake = FakeArchive(CANDIDATE)
+    monkeypatch.setattr(basis, "SEND", fake)
+    _, client = make()
     assert find(client, "가")["outcome"] == "INVALID_INPUT"
     assert find(client, limit=9)["outcome"] == "INVALID_INPUT"
+    assert fake.sent == []
 
 
 def test_basis_card_is_saved_only_when_a_person_picks_it(make) -> None:
-    svc, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
-    card = record_card(client, 1, STAFF)
+    svc, client = make()
+    card = record_card(svc, 1, STAFF)
     res = draft(client, "emp_a", "join", None, "기획팀", "2026-11-01", basis_card_id=card)
     change = res["output"]["change"]
     assert change["basis_card_id"] == card and "인력 부족" in change["basis_title"]
@@ -251,26 +240,19 @@ def test_basis_card_is_saved_only_when_a_person_picks_it(make) -> None:
 
 
 def test_only_a_confirmed_decision_card_can_be_the_basis(make) -> None:
-    _, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
-    incident = {
-        "context_id": "ctx_inc_0002",
-        "kind": "incident",
-        "summary": "결제 장애",
-        "decision_reason": "결제 서버 오류",
-        "alternatives_considered": ["재시작"],
-        "source_refs": ["inc:2"],
-        "author": "orchestrator",
-    }
-    body = _body("record_case", incident, "mock:orchestrator", ctx="ctx_inc_0002")
-    inc_card = client.post("/a2a", json=body).json()["output"]["card_id"]
+    svc, client = make()
+    inc_card = record_card(svc, 2, ("incident", "결제 장애", "결제 서버 오류"))
     res = draft(client, "emp_a", "join", None, "기획팀", "2026-11-01", basis_card_id=inc_card)
     assert res["outcome"] == "NOT_BASIS_CARD"
     res = draft(client, "emp_a", "join", None, "기획팀", "2026-11-01", basis_card_id="card_none")
     assert res["outcome"] == "UNKNOWN_CARD"
 
 
-def test_only_the_dashboard_may_ask_for_a_basis(make) -> None:
-    _, client = make(embedder=MockEmbedder(), dense_min_cosine=0.2)
+def test_only_the_dashboard_may_ask_for_a_basis(make, monkeypatch) -> None:
+    from hr_agent.org import basis
+
+    monkeypatch.setattr(basis, "SEND", FakeArchive(CANDIDATE))
+    _, client = make()
     for token in ("mock:orchestrator", "mock:finance", "mock:stranger"):
         res = post(client, "find_org_change_basis", {"reason": REASON}, token)
         assert (res["status"], res["outcome"]) == ("rejected", "FORBIDDEN_SKILL")

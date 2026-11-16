@@ -17,9 +17,6 @@ from hr_agent.clients.planning import MockPlanningClient, PlanningClient
 from hr_agent.clients.safety import GateClient, MockGate, TemplateGate
 from hr_agent.config import Clock, HrSettings, system_clock
 from hr_agent.narrative import Narrator
-from hr_agent.retrieval.cards import DenseCardSearch, build_dense_search
-from hr_agent.retrieval.duplicates import SameDecisionJudge, TitleSuggester
-from hr_agent.retrieval.verify import RelevanceVerifier
 from hr_agent.store import Store
 from hr_agent.util import dumps, loads
 
@@ -53,8 +50,6 @@ class Services:
     narrator: Narrator
     audit: AuditLog
     idem: IdempotencyStore
-    dense: DenseCardSearch | None = None  # None이면 계획 비교는 Dice로 찾는다
-    verifier: RelevanceVerifier | None = None  # None이면 Dense 후보를 LLM으로 거르지 않는다
     llm: Any = None  # None이면 LLM이 필요한 기능(발령 문장 정리)은 쓸 수 없다
     extras: dict[str, Any] = field(default_factory=dict)
 
@@ -64,8 +59,6 @@ def build_services(
     *,
     clock: Clock | None = None,
     llm: LLMClient | None = None,
-    dense: DenseCardSearch | None = None,
-    verifier: RelevanceVerifier | None = None,
     seed: bool = True,
 ) -> Services:
     """설정에 맞는 부품을 만든다. 목 모드면 목 클라이언트와 가상 시드 데이터를 쓴다."""
@@ -87,10 +80,6 @@ def build_services(
         llm_settings = LLMSettings.from_env("hr")
         if llm_settings.model and llm_settings.base_url:
             llm = LLMClient("hr", llm_settings)
-    if dense is None and settings.dense_search and not settings.mock:
-        dense = build_dense_search(settings.db_path)
-    if verifier is None and settings.dense_verify and llm is not None:
-        verifier = RelevanceVerifier(llm)
     gate: GateClient
     if settings.mock:
         gate = MockGate(store, clock, hold_ttl_minutes=settings.hold_ttl_minutes)
@@ -106,14 +95,8 @@ def build_services(
         narrator=Narrator(llm),
         audit=AuditLog(store, clock),
         idem=IdempotencyStore(store, clock),
-        dense=dense,
-        verifier=verifier,
         llm=llm,
     )
-    if llm is not None and dense is not None and not settings.mock:
-        # 같은 주제로 본 결정 쌍을 가르고(같은 결정/내용이 바뀜/별개) 묶음의 대표 제목을 제안한다
-        services.extras.setdefault("same_judge", SameDecisionJudge(llm))
-        services.extras.setdefault("title_suggester", TitleSuggester(llm))
     from hr_agent.handover.service import register_verifiers
 
     register_verifiers(services)

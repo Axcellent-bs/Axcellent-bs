@@ -4,6 +4,7 @@ requires-python = ">=3.12"
 
 [manifest]
 members = [
+    "ax-agent-archive",
     "ax-agent-data",
     "ax-agent-dev",
     "ax-agent-finance",
@@ -76,6 +77,27 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a9/d2/f4d173e22df740bc37b1db102b386ba719b66e95b0f0d751f556b387e6d2/anyio-4.15.1.tar.gz", hash = "sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94", size = 276966, upload-time = "2026-09-05T10:42:39.44Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5242c28d84e4a5c2435ca5c3f797ed7e2e/anyio-4.15.1-py3-none-any.whl", hash = "sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101", size = 132079, upload-time = "2026-09-05T10:42:37.923Z" },
+]
+
+[[package]]
+name = "ax-agent-archive"
+version = "0.1.0"
+source = { editable = "domains/archive" }
+dependencies = [
+    { name = "ax-agent-template" },
+    { name = "ax-contracts" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ax-agent-template", editable = "shared/agent-template" },
+    { name = "ax-contracts", editable = "shared/contracts" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "uvicorn", specifier = ">=0.30" },
 ]
 
 [[package]]
@@ -456,11 +478,11 @@ name = "ax-svc-decisions"
 version = "0.1.0"
 source = { editable = "services/decisions" }
 dependencies = [
-    { name = "ax-agent-hr" },
+    { name = "ax-agent-archive" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "ax-agent-hr", editable = "domains/hr" }]
+requires-dist = [{ name = "ax-agent-archive", editable = "domains/archive" }]
 
 [[package]]
 name = "ax-svc-dev"

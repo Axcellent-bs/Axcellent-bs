@@ -7,9 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ax_contracts.schemas import AgentRequest, RecordCase
-from hr_agent.cards.service import record_case
-from hr_agent.case_memory.service import record_event_times
+from ax_contracts.schemas import AgentRequest, JudgeStepTimingsOutput
 from hr_agent.dept_eval import CriteriaError, judge_step, judge_timings, load_criteria
 from hr_agent.dept_eval.criteria import DEFAULT_PATH, parse_criteria
 from hr_agent.dept_eval.stages import STAGES, Excluded, Stage, stage_of
@@ -30,27 +28,6 @@ def _req(skill: str, inp: dict, key: str = "k") -> AgentRequest:
             "input": inp,
         }
     )
-
-
-def _times(**kw) -> dict:
-    return {"context_id": CONTEXT, **kw}
-
-
-async def _incident(svc) -> str:
-    record = RecordCase.model_validate(
-        {
-            "context_id": CONTEXT,
-            "kind": "incident",
-            "summary": "결제가 서버 오류로 자꾸 실패해요",
-            "decision_reason": "원인을 확정하지 못해 사람에게 넘김",
-            "alternatives_considered": ["즉시 롤백"],
-            "source_refs": [f"inc:{CONTEXT}", "area:infra"],
-            "author": "orchestrator",
-        }
-    )
-    result = await record_case(svc, _req("record_case", record.model_dump(mode="json"), "rc"))
-    assert result.output["outcome"] == "card_created", result.output
-    return result.output["card_id"]
 
 
 # 총괄 장애 대응 계획(scenario_a)의 단계 번호와 늦게 도는 단계. 이 표와 어긋나면 시험이 깨진다
@@ -316,17 +293,6 @@ def test_use_promised_must_be_true_or_false() -> None:
         )
 
 
-@pytest.mark.asyncio
-async def test_the_promise_travels_from_the_timings_to_the_saved_judgment(svc) -> None:
-    card_id = await _incident(svc)
-    rows = [_t("impact", dept="data", work_seconds=45.0, promised_seconds=60.0)]
-    await record_event_times(svc, _req("record_event_times", _times(step_timings=rows), key="p"))
-    card = await svc.memory.get_card(card_id)
-    assert card.extra["step_timings"][0]["promised_seconds"] == 60.0
-    (item,) = card.extra["step_judgments"]["items"]
-    assert (item["verdict"], item["limit_seconds"], item["promised"]) == ("normal", 60.0, True)
-
-
 # ---- 긴 작업의 응답 끊김(기준값 v3) ---------------------------------------------------------
 
 
@@ -382,63 +348,56 @@ def test_the_silence_limit_must_be_a_positive_number() -> None:
             )
 
 
-# ---- 카드에 저장 ------------------------------------------------------------------------------
+# ---- 판정 skill (아카이브가 이슈 시각을 기록할 때 부른다) ---------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_judgments_are_saved_on_the_card_with_the_criteria_version(svc) -> None:
-    card_id = await _incident(svc)
+async def test_the_judge_skill_returns_the_verdicts_with_the_criteria_version(svc) -> None:
+    from hr_agent.dept_eval.skill import judge_step_timings
+
     rows = [
         _t("diagnose", dept="infra", work_seconds=1.5),
         _t("rollback", dept="infra", work_seconds=40.0, attempts=2),
         _t("recovery", dept="infra", work_seconds=120.0),
     ]
-    result = await record_event_times(
-        svc, _req("record_event_times", _times(step_timings=rows), key="a")
-    )
-    assert result.output["outcome"] == "recorded"
-    saved = (await svc.memory.get_card(card_id)).extra["step_judgments"]
-    assert saved["criteria_version"] == 3
-    verdicts = {item["step_id"]: item["verdict"] for item in saved["items"]}
-    assert verdicts == {"diagnose": "normal", "rollback": "check"}  # 복구 검증은 빠진다
+    result = await judge_step_timings(svc, _req("judge_step_timings", {"step_timings": rows}))
+    assert result.status.value == "completed" and result.outcome == "judged"
+    out = JudgeStepTimingsOutput.model_validate(result.output)
+    assert out.criteria_version == 3
+    assert {i["step_id"]: i["verdict"] for i in out.items} == {
+        "diagnose": "normal",
+        "rollback": "check",
+    }  # 복구 검증은 빠진다
 
 
 @pytest.mark.asyncio
-async def test_judgments_follow_the_last_step_timings(svc) -> None:
-    card_id = await _incident(svc)
-    first = [_t("rollback", dept="infra", work_seconds=40.0, attempts=2)]
-    await record_event_times(svc, _req("record_event_times", _times(step_timings=first), key="a"))
-    later = [_t("rollback", dept="infra", work_seconds=3.0, attempts=1)]
-    await record_event_times(svc, _req("record_event_times", _times(step_timings=later), key="b"))
-    items = (await svc.memory.get_card(card_id)).extra["step_judgments"]["items"]
-    assert [i["verdict"] for i in items] == ["normal"]
+async def test_the_judge_skill_carries_the_promise_into_the_verdict(svc) -> None:
+    from hr_agent.dept_eval.skill import judge_step_timings
+
+    rows = [_t("impact", dept="data", work_seconds=45.0, promised_seconds=60.0)]
+    result = await judge_step_timings(svc, _req("judge_step_timings", {"step_timings": rows}))
+    (item,) = JudgeStepTimingsOutput.model_validate(result.output).items
+    assert (item["verdict"], item["limit_seconds"], item["promised"]) == ("normal", 60.0, True)
 
 
 @pytest.mark.asyncio
-async def test_times_without_step_timings_make_no_judgments(svc) -> None:
-    card_id = await _incident(svc)
-    result = await record_event_times(
-        svc,
-        _req("record_event_times", _times(detected_at=svc.clock().isoformat()), key="a"),
-    )
-    assert result.output["outcome"] == "recorded"
-    assert "step_judgments" not in (await svc.memory.get_card(card_id)).extra
-
-
-@pytest.mark.asyncio
-async def test_an_unreadable_criteria_file_does_not_block_recording_times(
+async def test_an_unreadable_criteria_file_is_a_failure_not_a_guess(
     svc, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from hr_agent.dept_eval import skill
+
     def broken():
         raise CriteriaError("깨진 파일")
 
-    monkeypatch.setattr("hr_agent.case_memory.service.load_criteria", broken)
-    card_id = await _incident(svc)
+    monkeypatch.setattr(skill, "load_criteria", broken)
     rows = [_t("diagnose", dept="infra", work_seconds=1.5)]
-    result = await record_event_times(
-        svc, _req("record_event_times", _times(step_timings=rows), key="a")
-    )
-    assert result.output["outcome"] == "recorded"
-    extra = (await svc.memory.get_card(card_id)).extra
-    assert extra["step_timings"] and "step_judgments" not in extra
-    assert CONTEXT  # 시간은 그대로 저장되고 판정만 건너뛴다
+    result = await skill.judge_step_timings(svc, _req("judge_step_timings", {"step_timings": rows}))
+    assert result.status.value == "failed" and result.outcome == "CRITERIA_UNREADABLE"
+
+
+@pytest.mark.asyncio
+async def test_bad_input_is_rejected_by_the_judge_skill(svc) -> None:
+    from hr_agent.dept_eval.skill import judge_step_timings
+
+    result = await judge_step_timings(svc, _req("judge_step_timings", {"step_timings": "x"}))
+    assert result.status.value == "rejected"
