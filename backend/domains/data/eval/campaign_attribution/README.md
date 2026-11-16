@@ -12,7 +12,7 @@ uv run python domains/data/eval/campaign_attribution/score.py --judge <모듈>:<
 
 ## 데이터
 
-결제·캠페인 평가와 같은 생성기(`eval/eval_world.py`)로 만든다. 주문·결제는 shop-api 코드로 넣는다.
+결제·캠페인 평가와 같은 생성기(`eval/eval_world.py`)로 만든다. 주문·결제는 가짜 판매 서버(`eval/fake_shop.py`, 판매 서버와 같은 규칙)로 넣는다.
 
 - **유입 표시는 합성 주입이다**(`attribution.tags`, 생성기에 이번에 추가): 구간 안 주문마다 따로 둔 난수로 태그 하나(출처 `src_source`·매체 `src_medium`·캠페인 `src_campaign`, 비율 `fraction`)를 붙이거나 붙이지 않는다. shop-api `place_order`의 `src_*` 칸 그대로다(#655). 다른 캠페인 태그도 같은 방식이다. `attribution`이 없는 시나리오는 예전과 똑같은 데이터다(다른 평가의 다시 만들기 비교로 확인).
 - 평가용 shop-api 응답(`World.transport`)에 `GET /api/shop/orders/attributed`(shop-api와 같은 조회 코드 `Lookups.attributed_orders`)를 더했다.

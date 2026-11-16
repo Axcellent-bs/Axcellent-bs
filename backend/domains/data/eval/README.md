@@ -15,10 +15,19 @@ uv run python domains/data/eval/run.py   # 결과: eval/results/latest.json
 DATA_EVAL_CACHE_DIR=.eval-cache uv run pytest -q -m eval   # backend/.eval-cache (git에 안 올라감)
 ```
 
-- 키: 생성기 코드(`eval_world.py`·`make_cases.py`) + shop-api 소스(`shared/shop-api/src`) + 케이스 명세(`expected` 제외)의 해시. 폴더는 `<코드 해시>/<명세 해시>.sqlite`이고, 코드 해시가 다른 예전 폴더는 처음 쓸 때 지운다. 깨진 파일은 지우고 새로 만든다.
+- 키: 생성기 코드(`eval_world.py`·`make_cases.py`) + 가짜 판매 서버(`fake_shop.py`·`shop_api_openapi.json`) + 케이스 명세(`expected` 제외)의 해시. 폴더는 `<코드 해시>/<명세 해시>.sqlite`이고, 코드 해시가 다른 예전 폴더는 처음 쓸 때 지운다. 깨진 파일은 지우고 새로 만든다.
 - CI `data-eval` job은 이 폴더를 `actions/cache`로 저장·복원한다.
 - 캐시를 써도 결과는 완전히 같다(`tests/test_eval_cache.py`: DB 전체·결제 기록·케이스 결과 비교).
-- 시드·주문·outbox의 몇 칸(`created_at`, `promised_delivery_at` 등)에는 시나리오 시계가 아니라 만든 시각(벽시계)이 들어간다. 캐시와 상관없이 실행마다 다르며, 평가가 부르는 조회(failed-orders·metric-series)는 이 칸을 읽지 않는다.
+- 가짜 판매 서버는 모든 시각(시드 시각·주문·결제·약속 배송일)을 시나리오 시계로 정한다. 벽시계가 들어가는 칸이 없어 DB 전체가 실행마다 같다.
+
+### 가짜 판매 서버 (`fake_shop.py`)
+
+판매 서버는 `Catbooks-demo/catbooks-demo`로 분리됐다. data 평가와 시험은 판매 서버 코드(`ax_shop_api`)를 import하지 않고, `fake_shop.py`가 평가에 필요한 일만 판매 서버와 같은 규칙으로 흉내 낸다(재무 holdout의 가짜 판매 서버와 같은 방식, 코드는 부서마다 따로 둔다).
+
+- 쓰기: 시드(판매자·상품·구매자), 상품 등록, 주문(쿠폰 할인·포인트를 품목 금액 비율로 나눔, 5만 원 미만 배송비 3,000원, 유입 표시 `src_*`), 결제(장애 주입 중 `PG_UNAVAILABLE`, 카드 거절 `PG_DECLINED`, 성공이면 약속 배송일 +3일), 캠페인 쿠폰 발급·사용 장수. ID는 `접두사 + 4자리 순번`
+- 읽기(HTTP): `/failed-orders`·`/metric-series`·`/orders`(페이지·cursor)·`/orders/attributed`·`/products`·`/coupons`·`/sellers/{id}/profile`·`/prices`. `{data, meta}` 모양과 계산 규칙이 판매 서버와 같다
+- 표: 판매 서버와 같은 표·열(sellers·products·buyers·orders·order_items·payments·refunds·coupons·counters). 생성기가 SQL로 바로 읽는다
+- 계약: 판매 서버 OpenAPI 고정본 `shop_api_openapi.json`(받은 커밋은 `fake_shop.OPENAPI_SOURCE`). 다시 받기: `cd backend && python scripts/sync_shop_openapi.py` (어긋났는지만 `--check`). 요청 경로·쿼리·토큰 규칙이 고정본과 맞는지는 `tests/test_eval_fake_shop.py`가 잰다
 
 ## 규칙
 
@@ -58,7 +67,7 @@ seed `20261029` 분석 결론:
   - 길이(5~60분)
   - 세일 여부(25%, 구간 전체 2·3배). 주문 급감 케이스에는 세일을 고르지 않는다(v2부터)
   - 잡음 건수(0~3건, 결제사 타임아웃, 지난 7일에도 넣을지)
-- 데이터는 기존 케이스와 같이 shop-api 코드로 만든다(`eval_world.build`).
+- 데이터는 기존 케이스와 같이 가짜 판매 서버로 만든다(`eval_world.build`).
 - 정답은 생성 조건에서 정한다. 결제 장애는 실제로 만들어진 장애 쪽 실패 수로 다듬는다(아래 "장애 쪽 실패가 0건·1건일 때").
 - 케이스마다 생성 조건이 `holdout` 필드에 있다. 결과 파일에는 `holdout.wrong`(틀린 항목)과 `holdout.conditions`가 남는다. `run.py`는 화면에 틀린 항목 수만 보여 준다.
 
@@ -125,7 +134,7 @@ seed `20261029` 분석 결론:
 
 ## 케이스 종류
 
-정답은 `make_cases.py`가 shop-api 코드로 데이터를 만든 뒤(`eval_world.build`) 그 결제 기록에서 센다. 명세를 바꾸면 `uv run python domains/data/eval/make_cases.py`로 다시 만든다.
+정답은 `make_cases.py`가 가짜 판매 서버로 데이터를 만든 뒤(`eval_world.build`) 그 결제 기록에서 센다. 명세를 바꾸면 `uv run python domains/data/eval/make_cases.py`로 다시 만든다.
 
 | 종류 | 케이스 | 이유 |
 | --- | --- | --- |
@@ -141,7 +150,7 @@ seed `20261029` 분석 결론:
 | 새벽 약한 장애 (low 기록) | `pay_half_10m_03h_night` | 새벽 10분 50% 장애는 실패 1건이라 잡음 1건과 데이터로 구분 불가. 기록 여부로 채점. 사건(이상)이 아니어야 하고, 지표 판정이 normal 또는 unknown + severity `low` + 이유에 "장애 쪽 실패 1건"이면 맞다(`anomaly.low_recorded_rate`) |
 | 새벽 약한 장애 (이상) | `pay_half_20m_03h_night` | 새벽 20분 50% 장애(03:40~04:00)로 장애 쪽 실패가 3건 나온다. 데이터로 장애라고 말할 수 있어 이상으로 잡는지 본다 |
 | 낮 평소 장애 쪽 실패 | `usual_fault_*` (장애 없음 3: `normal_10h`·`12h`·`15h`, 장애 3: `pay_full_15m_11h`·`pay_half_20m_13h`·`pay_weak20_30m_16h`) | 낮에 평소에도 장애 쪽 실패(`PG_TIMEOUT`)가 5분에 1~3건씩 나는 구간(#131). 시간대별 평소 실패율 λ 기준(#112)의 효과를 잰다. 예전 고정 기준(5분 2건·2구간 연속)이면 장애 없음 3개를 모두 이상으로 본다. 주문은 5분 20건 기준이고, λ가 보는 같은 시각 ±1시간에도 주문·평소 실패를 만든다(`traffic.history_margin_minutes`=60, 분석하는 날은 구간 앞쪽만). 장애 중 평소 실패가 장애 결제와 겹치면 `injected_*`에 들어가서, 초과분(평소 평균을 뺀 값)이 정답보다 5~8건 작게 나온다(`impact.excess_mean_abs_error`) |
-| 판매자 | `sellers.json` (24명: 사기 9, 정상 15) | 사기 점수 등급. 정상 쪽에 경계 케이스(신규인데 정상, 세일로 저가가 많은 정상, 대량 등록하는 큰 판매자)를 넣었다. 판매자마다 shop-api 코드로 임시 DB를 만들어 `facts` 중 shop-api에 넣을 수 있는 것(가입 일수·저가 비율·24시간 등록 수)을 넣고, fraud_score 핸들러가 실제 shop-api 조회 경로로 읽는다(`eval_sellers.py`). 사업자 중복·유사 카드는 넣을 수 없어 핸들러에서 "확인할 수 없음"이다. `fraud.precision`·`recall`은 그 핸들러 결과(`level` high=사기), `fraud.conservative_precision`·`conservative_recall`은 같은 결과의 보수적 상한(`max_possible_level` high=사기), `fraud.complete_rate`는 빠진 규칙 없이 답한 비율, `fraud.rule_*`는 `facts` 전부로 낸 참고 점수다 |
+| 판매자 | `sellers.json` (24명: 사기 9, 정상 15) | 사기 점수 등급. 정상 쪽에 경계 케이스(신규인데 정상, 세일로 저가가 많은 정상, 대량 등록하는 큰 판매자)를 넣었다. 판매자마다 가짜 판매 서버를 만들어 `facts` 중 판매 서버에 넣을 수 있는 것(가입 일수·저가 비율·24시간 등록 수)을 넣고, fraud_score 핸들러가 판매 서버와 같은 조회 경로(`/api/shop/sellers/{id}/profile`·`/prices`)로 읽는다(`eval_sellers.py`). 사업자 중복·유사 카드는 넣을 수 없어 핸들러에서 "확인할 수 없음"이다. `fraud.precision`·`recall`은 그 핸들러 결과(`level` high=사기), `fraud.conservative_precision`·`conservative_recall`은 같은 결과의 보수적 상한(`max_possible_level` high=사기), `fraud.complete_rate`는 빠진 규칙 없이 답한 비율, `fraud.rule_*`는 `facts` 전부로 낸 참고 점수다 |
 
 ## trend_scan 케이스 (`trend/`, 검색어 급상승)
 
