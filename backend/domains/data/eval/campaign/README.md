@@ -12,12 +12,12 @@ uv run python domains/data/eval/campaign/score.py --judge <모듈>:<함수>   # 
 
 ## 데이터
 
-결제 평가와 같은 생성기(`eval/eval_world.py`)로 만든다. 판매자·상품·구매자는 shop-api 시드, 주문·결제·쿠폰은 shop-api 코드(`Shop.place_order`·`pay`, `Promotions.issue_coupon`)로 넣는다. 5분마다 주문 수는 시간대 수준을 평균으로 한 포아송이고, 시나리오 id로 씨앗을 고정해 늘 같은 데이터다.
+결제 평가와 같은 생성기(`eval/eval_world.py`)로 만든다. 판매자·상품·구매자는 판매 서버 시드와 같은 값, 주문·결제·쿠폰은 가짜 판매 서버(`eval/fake_shop.py`의 `place_order`·`pay`·`issue_coupon`, 판매 서버와 같은 규칙)로 넣는다. 5분마다 주문 수는 시간대 수준을 평균으로 한 포아송이고, 시나리오 id로 씨앗을 고정해 늘 같은 데이터다.
 
 - **주문 증감은 합성 주입이다.** 캠페인 구간의 주문 수준에 정해진 배수를 곱한다: `injection.type` sale(늘림)·order_drop(줄임)·none(그대로). 기준선은 지난 7일 같은 시간대다(생성기가 함께 만든다).
 - **캠페인 쿠폰**(`spec.campaign`, 생성기에 이번에 추가): 지난 7일보다 먼저 구매자 `buyers`명에게 캠페인 쿠폰(`campaign_id`, 한 사람 `units_each`장)을 발급한다. 구간 안에서 그 구매자의 주문은 `use_fraction` 확률로 쿠폰을 쓴다. 구간이 끝난 뒤 5분 간격으로 `used_after`장을 더 쓴다. 이 장수는 구간 안에서 쓰지 않게 남겨 둔다(조건과 기록이 늘 같게).
 - `campaign`이 없는 시나리오는 예전과 똑같은 데이터다. 쿠폰 결정은 따로 씨앗을 둔 난수로 한다. 이 PR에서 기존 결제 평가 케이스 73개(cases·holdout)의 결제·주문 기록 지문이 바뀌지 않은 것을 확인했다.
-- 평가용 shop-api 응답(`World.transport`)에 `GET /api/shop/coupons`(shop-api와 같은 조회 코드 `Promotions.list_coupons`)를 더했다.
+- 평가용 shop-api 응답(`World.transport`)에 `GET /api/shop/coupons`(판매 서버와 같은 조회 규칙, 가짜 판매 서버 `list_coupons`)를 더했다.
 
 ## 정답 (`expected`) — 주입 조건에서 정한다
 

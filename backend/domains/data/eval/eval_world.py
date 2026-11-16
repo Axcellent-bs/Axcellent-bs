@@ -1,13 +1,18 @@
-"""평가 시나리오의 쇼핑몰 데이터를 실제 shop-api 코드로 만든다.
+"""평가 시나리오의 쇼핑몰 데이터를 가짜 판매 서버(`fake_shop.py`)로 만든다.
 
-- 판매자·상품·구매자: shop-api 시드(`ax_shop_api.seed.seed`) 그대로. 재고만 넉넉히 늘린다.
-- 주문·결제: shop-api `Shop.create_order`·`Shop.pay`로 넣는다. 시각은 shop-api의 `_now`를
-  시나리오 시계로 바꿔 끼워 정한다.
-- 결제 장애: shop-api 장애 주입(`Shop.inject_fault("failure")`·`release_fault`) 그대로다.
+판매 서버는 `Catbooks-demo/catbooks-demo`로 분리됐다. 판매 서버 코드(`ax_shop_api`)를 import하지
+않고, 같은 규칙(ID·금액 나누기·배송비·쿠폰 장수·장애 주입·실패 코드·조회 계산)을 흉내 낸 가짜
+판매 서버에 쓰고 읽는다. 가짜의 응답 모양은 판매 서버 OpenAPI 고정본으로 시험이 잰다
+(`tests/test_eval_fake_shop.py`).
+
+- 판매자·상품·구매자: 판매 서버 시드와 같은 값(`fake_shop.FakeShop.seed`). 재고만 넉넉히 늘린다.
+- 주문·결제: 가짜 판매 서버 `create_order`·`place_order`·`pay`로 넣는다. 시각은 가짜 판매 서버에
+  넣어 준 시나리오 시계(`now`)가 정한다.
+- 결제 장애: 판매 서버와 같은 장애 주입(`inject_fault("failure")`·`release_fault`)이다.
   세기(`fraction`)는 장애 구간 주문 중 장애가 걸린 채 결제한 비율이다.
 - 카드 거절(평상시 실패): `simulate="failure"`로 일정 간격마다 하나씩 넣는다 (`PG_DECLINED`).
 - 처음 보는 실패 코드(`injection.failure_code`): 장애로 실패한 결제의 `failure_code`를 그 코드로
-  바꾼다 (shop-api가 새 코드를 쓰기 시작한 상황).
+  바꾼다 (판매 서버가 새 코드를 쓰기 시작한 상황).
 - 알려진 장애 쪽 코드(`injection.fault_code`, 예 `PG_TIMEOUT`): 장애로 실패한 결제의 코드를 그것으로
   바꾼다. 처음 보는 코드가 아니라서 영향 숫자는 낼 수 있어야 한다.
 - 잡음(`type: fault_noise`): 장애 구간 없이 `at_minutes`분마다 결제 하나만 결제 서버 쪽에서
@@ -16,8 +21,8 @@
 - 다른 상황에 얹는 잡음(holdout 생성기): `noise_at_minutes`·`noise_history`·`noise_code`.
 - 구간 전체 세일(holdout 생성기): `traffic.sale_factor`배로 주문이 늘어난다.
 - 캠페인 쿠폰(`campaign`, campaign_effect 평가 `eval/campaign/`): 지난 7일보다 먼저 구매자
-  `buyers`명에게 캠페인 쿠폰(`campaign_id`, `units_each`장)을 shop-api 쿠폰 발급 코드로 준다.
-  구간 안에서 그 구매자의 주문은 `use_fraction` 확률로 쿠폰을 쓴다(shop-api `place_order`).
+  `buyers`명에게 캠페인 쿠폰(`campaign_id`, `units_each`장)을 판매 서버 규칙의 쿠폰 발급으로 준다.
+  구간 안에서 그 구매자의 주문은 `use_fraction` 확률로 쿠폰을 쓴다(`place_order`).
   `used_after`가 있으면 구간이 끝난 뒤 5분 간격으로 그만큼 더 쓴다
   (조회 시점 누적 사용률에 섞이는 몫). 그 장수는 구간 안에서 쓰지 않게 남겨 둔다.
 - 여러 날 캠페인(`eval/campaign/multiday/`): `traffic.history_days`가 있으면 지난 7일 같은
@@ -32,7 +37,7 @@
   따로 씨앗을 둔 난수라 `product_boost`가 없는 시나리오의 데이터는 예전과 같다.
 - 유입 표시(`attribution.tags`, campaign_effect 유입경로 평가 `eval/campaign_attribution/`): 구간 안
   주문마다 따로 둔 난수로 태그 하나(출처·매체·campaign_id, 비율 `fraction`)를 붙이거나 붙이지 않는다
-  (shop-api `place_order`의 `src_*`). 다른 캠페인 태그도 같은 방식이다. 없는 시나리오는 예전과 같다.
+  (`place_order`의 `src_*`). 다른 캠페인 태그도 같은 방식이다. 없는 시나리오는 예전과 같다.
 
 정답(실패 주문 수·금액·영향 고객, 이상 시작 시각)은 data 에이전트 코드가 아니라 여기서 만든
 결제 기록에서 바로 센다(`Truth`).
@@ -47,36 +52,55 @@
 난수는 시나리오 id로 씨앗을 고정한 `random.Random`만 쓴다. 같은 시나리오면 늘 같은 데이터다.
 
 캐시: 환경변수 `DATA_EVAL_CACHE_DIR`가 있으면 만든 데이터(DB + 결제 기록)를 그 폴더에 파일로 두고,
-키가 같으면 다시 만들지 않고 읽는다. 키 = 생성기 코드(`eval_world.py`·`make_cases.py`) + shop-api
-소스(`shared/shop-api/src`) + 시나리오 명세(`expected` 제외)의 해시. 없으면 캐시하지 않는다.
-같은 시나리오면 늘 같은 데이터라서 캐시를 써도 결과가 같다(`tests/test_eval_cache.py`).
+키가 같으면 다시 만들지 않고 읽는다. 키 = 생성기 코드(`eval_world.py`·`make_cases.py`) + 가짜 판매
+서버(`fake_shop.py`·`shop_api_openapi.json`) + 시나리오 명세(`expected` 제외)의 해시. 없으면
+캐시하지 않는다. 같은 시나리오면 늘 같은 데이터라서 캐시를 써도 결과가 같다
+(`tests/test_eval_cache.py`).
 """
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
+import importlib.util
 import json
 import math
 import os
 import random
 import shutil
 import sqlite3
+import sys
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import httpx
 
-from ax_contracts.data_access.shop_failed_orders import ShopFailedOrdersQuery
-from ax_contracts.data_access.shop_metric_series import ShopMetricSeriesQuery
-from ax_shop_api import service
-from ax_shop_api.db import Db
-from ax_shop_api.lookups import Lookups
-from ax_shop_api.promotions import Promotions
-from ax_shop_api.seed import BUYER_COUNT, PRODUCTS, seed, seed_buyer_id
+
+def _load_fake_shop() -> ModuleType:
+    """가짜 판매 서버를 고유한 모듈 이름으로 읽는다.
+
+    재무 평가에도 같은 파일 이름(`domains/finance/eval/fake_shop.py`)이 있어 `import fake_shop`으로
+    읽으면 한 pytest 프로세스에서 먼저 읽힌 부서의 것이 섞일 수 있다.
+    """
+    name = "data_eval_fake_shop"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            name, Path(__file__).resolve().parent / "fake_shop.py"
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+fake_shop = _load_fake_shop()
+PRODUCTS = fake_shop.PRODUCTS  # (product_id, seller_id, name, category_code, price, stock)
+BUYER_COUNT = fake_shop.BUYER_COUNT
+seed_buyer_id = fake_shop.seed_buyer_id
 
 BUCKET = timedelta(minutes=5)
 HISTORY_DAYS = 7  # 기준선: 지난 7일 같은 시간대
@@ -112,7 +136,7 @@ class World:
     """한 시나리오의 쇼핑몰. `transport`로 data 클라이언트가 실제 조회 코드를 부른다."""
 
     spec: dict[str, Any]
-    db: Db
+    db: Any  # fake_shop.FakeShopDb (판매 서버와 같은 표, `tx()`로 SQL을 읽는다)
     payments: list[Payment] = field(default_factory=list)
 
     @property
@@ -120,70 +144,15 @@ class World:
         return parse(self.spec["window"]["from"]), parse(self.spec["window"]["to"])
 
     def transport(self) -> httpx.MockTransport:
-        """shop-api `/api/shop/failed-orders`·`/metric-series`와 같은 응답을 준다.
-
-        응답은 shop-api와 같은 조회 코드(`Lookups`)로 만든다.
+        """판매 서버 `/api/shop/failed-orders`·`/metric-series`·`/orders`·`/orders/attributed`·
+        `/products`·`/coupons`와 같은 응답을 준다(가짜 판매 서버의 조회, 지금 시각 = 구간 끝).
         """
-        lookups = Lookups(self.db, now=lambda: self.window[1])
-
-        def handle(request: httpx.Request) -> httpx.Response:
-            params = request.url.params
-            path = request.url.path
-            meta: dict[str, object] = {}
-            if path.endswith("/failed-orders"):
-                query = ShopFailedOrdersQuery(
-                    from_=parse(params["from"]),
-                    to=parse(params["to"]),
-                    category=params.get("category"),
-                    limit=int(params.get("limit", 1000)),
-                )
-                data = lookups.failed_orders(query).model_dump(mode="json")
-            elif path.endswith("/metric-series"):
-                query = ShopMetricSeriesQuery(
-                    metric=params["metric"],
-                    from_=parse(params["from"]),
-                    to=parse(params["to"]),
-                    bucket=params.get("bucket", "5m"),
-                )
-                data = lookups.metric_series(query).model_dump(mode="json")
-            elif path.endswith("/coupons"):  # shop-api `GET /api/shop/coupons` (캠페인 평가)
-                data = Promotions(self.db).list_coupons(
-                    params.get("buyer_id"), params.get("purpose_code"), params.get("campaign_id")
-                )
-            elif path.endswith("/orders"):  # shop-api `GET /api/shop/orders` (캠페인 매출 평가)
-                data, meta["next_cursor"] = service.Shop(self.db).list_orders(
-                    params.get("buyer_id"),
-                    params.get("since"),
-                    params.get("until"),
-                    int(params.get("limit", service.ORDER_PAGE_DEFAULT)),
-                    params.get("cursor"),
-                )
-            elif path.endswith("/orders/attributed"):  # shop-api 유입 주문 조회 (유입경로 평가)
-                data = lookups.attributed_orders(
-                    parse(params["from"]), parse(params["to"]), params.get("campaign_id"),
-                    params.get("source"), int(params.get("limit", 500)),
-                )  # fmt: skip
-            elif path.endswith("/products"):  # shop-api `GET /api/shop/products` (상품 기준 평가)
-                data = service.Shop(self.db).list_products(
-                    params.get("seller_id"), params.get("category_code")
-                )
-            else:
-                return httpx.Response(404, json={"error": {"code": "NOT_FOUND"}})
-            return httpx.Response(200, content=json.dumps({"data": data, "meta": meta}))
-
-        return httpx.MockTransport(handle)
+        end = self.window[1]
+        shop = fake_shop.FakeShop(self.db, now=lambda: end)
+        return fake_shop.FakeShopTransport(shop, now=lambda: end)
 
 
-@contextlib.contextmanager
-def _clock() -> Iterator[list[datetime]]:
-    """shop-api의 현재 시각(`service._now`)을 시나리오 시계로 바꿔 끼운다."""
-    now: list[datetime] = [datetime(2026, 1, 1, tzinfo=UTC)]
-    original = service._now
-    service._now = lambda: iso(now[0])
-    try:
-        yield now
-    finally:
-        service._now = original
+START = datetime(2026, 1, 1, tzinfo=UTC)  # 시나리오 시계의 처음 값 (시드를 넣는 시각)
 
 
 def _slots(
@@ -247,23 +216,19 @@ _EVAL_DIR = Path(__file__).resolve().parent
 _BACKEND = _EVAL_DIR.parents[2]
 # 생성 결과를 바꿀 수 있는 코드. 하나라도 바뀌면 캐시 키가 바뀐다
 CODE_FILES = (_EVAL_DIR / "eval_world.py", _EVAL_DIR / "make_cases.py")
-SHOP_API_SRC = _BACKEND / "shared" / "shop-api" / "src"
+# 가짜 판매 서버와 그 계약 고정본 (판매 서버 소스 대신)
+SHOP_FILES = (_EVAL_DIR / "fake_shop.py", _EVAL_DIR / "shop_api_openapi.json")
 
 
 def _source_files() -> list[Path]:
-    shop = [
-        p
-        for p in SHOP_API_SRC.rglob("*")
-        if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
-    ]
-    return [*CODE_FILES, *sorted(shop)]
+    return [*CODE_FILES, *SHOP_FILES]
 
 
 _code_hash: str | None = None
 
 
 def code_hash() -> str:
-    """생성기 코드 + shop-api 소스의 해시 (한 프로세스에서 한 번 센다)."""
+    """생성기 코드 + 가짜 판매 서버의 해시 (한 프로세스에서 한 번 센다)."""
     global _code_hash
     if _code_hash is None:
         digest = hashlib.sha256()
@@ -342,7 +307,7 @@ def save(world: World, path: Path) -> None:
 
 def load(spec: dict[str, Any], path: Path) -> World:
     """`save`한 파일에서 데이터를 읽어 새 메모리 DB로 만든다."""
-    db = Db(":memory:")
+    db = fake_shop.FakeShopDb(":memory:")
     src = sqlite3.connect(path)
     try:
         rows = src.execute(
@@ -388,8 +353,10 @@ def build(spec: dict[str, Any]) -> World:
 
 def generate(spec: dict[str, Any]) -> World:
     """시나리오 명세로 쇼핑몰 데이터를 새로 만든다 (캐시 없음)."""
-    db = Db(":memory:")
-    seed(db)
+    db = fake_shop.FakeShopDb(":memory:")
+    now: list[datetime] = [START]  # 시나리오 시계. 가짜 판매 서버가 쓰는 시각은 모두 이 값이다
+    shop = fake_shop.FakeShop(db, now=lambda: now[0])
+    shop.seed()
     with db.tx() as conn:  # 재고가 모자라 주문이 막히지 않게 늘린다 (가격·분류는 시드 그대로)
         conn.execute("UPDATE products SET stock = 1000000")
     world = World(spec=spec, db=db)
@@ -400,8 +367,6 @@ def generate(spec: dict[str, Any]) -> World:
     per_bucket = float(traffic.get("orders_per_5m", 5))
     rng = random.Random(spec["id"])
 
-    clock_seconds = [0.0]
-    shop = service.Shop(db, clock=lambda: clock_seconds[0])
     order_no = 0
     if kind == "fault_noise":
         noise = _noise_targets(injection, window_from)
@@ -421,14 +386,14 @@ def generate(spec: dict[str, Any]) -> World:
     campaign = spec.get("campaign")  # 캠페인 쿠폰 (없으면 예전과 똑같이 만든다)
     coupons: dict[str, list[Any]] = {}  # 구매자 → [쿠폰 id, 남은 장수]
     if campaign:
-        coupons = _issue_campaign_coupons(db, campaign, window_from)
+        coupons = _issue_campaign_coupons(shop, now, campaign, window_from)
         crng = random.Random(f"{spec['id']}:campaign")  # 기존 난수 순서를 바꾸지 않게 따로
         reserve = int(campaign.get("used_after", 0))
     weekday_levels = traffic.get("weekday_levels")  # 요일 배수 (여러 날 캠페인)
     # 캠페인 매출 평가 (없으면 예전과 똑같이 만든다):
     # - `basket.qty_factor`: 구간 안 주문의 수량에 곱한다 (주문 수는 그대로, 금액만 늘림)
     # - `payment_gap.days_ago`: 그 날(0 = 구간, k = k일 전 같은 시간대)의 주문은 만들고
-    #   결제하지 않는다 (결제 기록 공백: shop-api는 결제 대기 주문으로 남긴다)
+    #   결제하지 않는다 (결제 기록 공백: 판매 서버는 결제 대기 주문으로 남긴다)
     basket = int((spec.get("basket") or {}).get("qty_factor", 1))
     # 상품 기준 평가 (`eval/campaign_products/`, 없으면 예전과 똑같이 만든다):
     # `product_boost` = 구간 안에서 그 상품만 `factor`배가 되게 그 상품 주문을 더 넣는다
@@ -441,110 +406,108 @@ def generate(spec: dict[str, Any]) -> World:
     gap_ranges = [
         (window_from - timedelta(days=d), window_to - timedelta(days=d)) for d in gap_days
     ]
-    with _clock() as now:
-        margin = timedelta(minutes=int(traffic.get("history_margin_minutes", 0)))
-        if traffic.get("history_days"):  # 이어진 기록 (여러 날 캠페인)
-            slots = _continuous_slots(window_from, window_to, int(traffic["history_days"]))
-        else:
-            slots = _slots(window_from, window_to, margin)
-        # 기록을 늘린 여러 날 케이스: 구간 시작 `older_rng_before_days`일보다 앞 칸은 따로 둔 난수와
-        # 따로 센 주문 번호로 만든다. 그 뒤 칸(예전 기록)은 늘리기 전과 똑같은 데이터다
-        split = traffic.get("older_rng_before_days")
-        older_from = window_from - timedelta(days=int(split)) if split else None
-        orng = random.Random(f"{spec['id']}:older")
-        older_no = 0
-        for slot in slots:
-            in_window = window_from <= slot < window_to
-            if kind == "empty" and (in_window or injection.get("history_empty")):
-                continue  # 이 버킷에는 주문이 하나도 없다
-            older = older_from is not None and slot < older_from
-            r = orng if older else rng
-            level = per_bucket * HOUR_LEVEL[slot.hour]
-            if weekday_levels:
-                level *= float(weekday_levels[slot.weekday()])
-            if in_window and kind == "order_drop" and _in(slot, injection):
-                level *= float(injection["factor"])
-            if in_window and kind == "sale" and _in(slot, injection):
-                level *= float(injection["factor"])
-            if in_window:
-                level *= sale_factor
-            count = _poisson(r, level)  # 실제 주문처럼 5분마다 포아송으로 흔들린다
-            for moment, buyer, lines in _slot_orders(slot, count, r, level, in_window, boost,
-                                                     prng):  # fmt: skip
-                now[0] = moment
-                clock_seconds[0] = moment.timestamp()
-                if older:
-                    older_no += 1
-                else:
-                    order_no += 1
-                if in_window and basket > 1:  # 난수를 더 쓰지 않는다 (다른 케이스와 같은 순서)
-                    lines = [(p, q * basket) for p, q in lines]
-                if any(s <= moment < e for s, e in gap_ranges):
-                    shop.create_order(buyer, lines)  # 결제 기록 공백: 결제하지 않는다
-                    continue
-                held = coupons.get(buyer) if in_window else None
-                # 유입 표시: 구간 안 주문에만, 따로 둔 난수로 (없는 시나리오는 예전과 같다)
-                src = _source_tags(attribution, arng) if in_window and attribution else {}
-                # 구간 뒤에 쓸 장수(`used_after`)는 남겨 둔다 (조건과 기록이 늘 같게)
-                spare = held is not None and sum(c[1] for c in coupons.values()) > reserve
-                if (
-                    held
-                    and held[1] > 0
-                    and spare
-                    and crng.random() < float(campaign["use_fraction"])
-                ):
-                    order = shop.place_order(buyer, lines, coupon_id=held[0], **src)[0]
-                    held[1] -= 1
-                elif src:
-                    order = shop.place_order(buyer, lines, **src)[0]
-                else:
-                    order = shop.create_order(buyer, lines)
-                faulty = (
-                    in_window
-                    and kind == "payment_failure"
-                    and _in(moment, injection)
-                    and rng.random() < float(injection.get("fraction", 1.0))
-                )
-                # 잡음: 이 5분 안의 첫 결제 하나만 결제 서버 쪽에서 실패한다 (장애 구간이 아님)
-                while noise and noise[0] + BUCKET <= moment:  # 주문이 없던 5분은 잡음도 없다
-                    noise.pop(0)
-                blip = bool(noise) and noise[0] <= moment
-                if blip:
-                    noise.pop(0)
-                if faulty or blip:
-                    shop.inject_fault("failure")
-                seq = older_no if older else order_no
-                simulate = "failure" if seq % DECLINE_EVERY == 0 else None
-                paid = shop.pay(order["order_id"], "card", simulate)
-                if faulty or blip:
-                    shop.release_fault()
-                    final = code if faulty else noise_code
-                    if final:
-                        with db.tx() as conn:
-                            conn.execute(
-                                "UPDATE payments SET failure_code = ? WHERE order_id = ?",
-                                (final, paid["order_id"]),
-                            )
-                with db.tx() as conn:  # 방금 넣은 결제 기록 (정답은 여기서 센다)
-                    pay = conn.execute(
-                        "SELECT amount, status, failure_code FROM payments "
-                        "WHERE order_id = ? ORDER BY rowid DESC LIMIT 1",
-                        (paid["order_id"],),
-                    ).fetchone()
-                world.payments.append(
-                    Payment(
-                        order_id=paid["order_id"],
-                        buyer_id=buyer,
-                        amount=int(pay["amount"]),
-                        at=moment,
-                        failure_code=None if pay["status"] == "succeeded" else pay["failure_code"],
-                        faulty=faulty,
-                        noise=blip,
-                    )
-                )
-        if campaign and int(campaign.get("used_after", 0)) > 0:
-            _use_after_window(world, shop, coupons, int(campaign["used_after"]), now, clock_seconds)
+    margin = timedelta(minutes=int(traffic.get("history_margin_minutes", 0)))
+    if traffic.get("history_days"):  # 이어진 기록 (여러 날 캠페인)
+        slots = _continuous_slots(window_from, window_to, int(traffic["history_days"]))
+    else:
+        slots = _slots(window_from, window_to, margin)
+    # 기록을 늘린 여러 날 케이스: 구간 시작 `older_rng_before_days`일보다 앞 칸은 따로 둔 난수와
+    # 따로 센 주문 번호로 만든다. 그 뒤 칸(예전 기록)은 늘리기 전과 똑같은 데이터다
+    split = traffic.get("older_rng_before_days")
+    older_from = window_from - timedelta(days=int(split)) if split else None
+    orng = random.Random(f"{spec['id']}:older")
+    older_no = 0
+    for slot in slots:
+        in_window = window_from <= slot < window_to
+        if kind == "empty" and (in_window or injection.get("history_empty")):
+            continue  # 이 버킷에는 주문이 하나도 없다
+        older = older_from is not None and slot < older_from
+        r = orng if older else rng
+        level = per_bucket * HOUR_LEVEL[slot.hour]
+        if weekday_levels:
+            level *= float(weekday_levels[slot.weekday()])
+        if in_window and kind == "order_drop" and _in(slot, injection):
+            level *= float(injection["factor"])
+        if in_window and kind == "sale" and _in(slot, injection):
+            level *= float(injection["factor"])
+        if in_window:
+            level *= sale_factor
+        count = _poisson(r, level)  # 실제 주문처럼 5분마다 포아송으로 흔들린다
+        for moment, buyer, lines in _slot_orders(slot, count, r, level, in_window, boost, prng):
+            now[0] = moment
+            if older:
+                older_no += 1
+            else:
+                order_no += 1
+            if in_window and basket > 1:  # 난수를 더 쓰지 않는다 (다른 케이스와 같은 순서)
+                lines = [(p, q * basket) for p, q in lines]
+            if any(s <= moment < e for s, e in gap_ranges):
+                shop.create_order(buyer, lines)  # 결제 기록 공백: 결제하지 않는다
+                continue
+            held = coupons.get(buyer) if in_window else None
+            # 유입 표시: 구간 안 주문에만, 따로 둔 난수로 (없는 시나리오는 예전과 같다)
+            src = _source_tags(attribution, arng) if in_window and attribution else {}
+            # 구간 뒤에 쓸 장수(`used_after`)는 남겨 둔다 (조건과 기록이 늘 같게)
+            spare = held is not None and sum(c[1] for c in coupons.values()) > reserve
+            if held and held[1] > 0 and spare and crng.random() < float(campaign["use_fraction"]):
+                order = shop.place_order(buyer, lines, coupon_id=held[0], **src)
+                held[1] -= 1
+            elif src:
+                order = shop.place_order(buyer, lines, **src)
+            else:
+                order = shop.create_order(buyer, lines)
+            faulty = (
+                in_window
+                and kind == "payment_failure"
+                and _in(moment, injection)
+                and rng.random() < float(injection.get("fraction", 1.0))
+            )
+            # 잡음: 이 5분 안의 첫 결제 하나만 결제 서버 쪽에서 실패한다 (장애 구간이 아님)
+            while noise and noise[0] + BUCKET <= moment:  # 주문이 없던 5분은 잡음도 없다
+                noise.pop(0)
+            blip = bool(noise) and noise[0] <= moment
+            if blip:
+                noise.pop(0)
+            if faulty or blip:
+                shop.inject_fault("failure")
+            seq = older_no if older else order_no
+            simulate = "failure" if seq % DECLINE_EVERY == 0 else None
+            paid = shop.pay(order["order_id"], "card", simulate)
+            if faulty or blip:
+                shop.release_fault()
+                final = code if faulty else noise_code
+                if final:
+                    with db.tx() as conn:
+                        conn.execute(
+                            "UPDATE payments SET failure_code = ? WHERE order_id = ?",
+                            (final, paid["order_id"]),
+                        )
+            record = _payment_record(world, paid["order_id"], buyer, moment, faulty, blip)
+            world.payments.append(record)
+    if campaign and int(campaign.get("used_after", 0)) > 0:
+        _use_after_window(world, shop, coupons, int(campaign["used_after"]), now)
     return world
+
+
+def _payment_record(
+    world: World, order_id: str, buyer: str, moment: datetime, faulty: bool, noise: bool
+) -> Payment:
+    """방금 넣은 결제 기록 (정답은 여기서 센다). 주문의 마지막 결제 행을 읽는다."""
+    with world.db.tx() as conn:
+        pay = conn.execute(
+            "SELECT amount, status, failure_code FROM payments "
+            "WHERE order_id = ? ORDER BY rowid DESC LIMIT 1",
+            (order_id,),
+        ).fetchone()
+    return Payment(
+        order_id=order_id,
+        buyer_id=buyer,
+        amount=int(pay["amount"]),
+        at=moment,
+        failure_code=None if pay["status"] == "succeeded" else pay["failure_code"],
+        faulty=faulty,
+        noise=noise,
+    )
 
 
 def _source_tags(attribution: dict[str, Any], arng: random.Random) -> dict[str, str]:
@@ -593,15 +556,14 @@ def _slot_orders(
 
 
 def _issue_campaign_coupons(
-    db: Db, campaign: dict[str, Any], window_from: datetime
+    shop: Any, now: list[datetime], campaign: dict[str, Any], window_from: datetime
 ) -> dict[str, list[Any]]:
     """구매자 1번부터 `buyers`명에게 캠페인 쿠폰을 발급한다 (지난 7일보다 먼저, 기한 없음)."""
-    issued_at = window_from - timedelta(days=HISTORY_DAYS + 1)
-    promotions = Promotions(db, now=lambda: issued_at)
+    now[0] = window_from - timedelta(days=HISTORY_DAYS + 1)  # 발급 시각
     out: dict[str, list[Any]] = {}
     for n in range(1, int(campaign["buyers"]) + 1):
         buyer = seed_buyer_id(n)
-        coupon, _ = promotions.issue_coupon(
+        coupon, _ = shop.issue_coupon(
             idempotency_key=f"eval-{campaign['campaign_id']}-{n}",
             purpose_code="campaign",
             buyer_id=buyer,
@@ -615,11 +577,10 @@ def _issue_campaign_coupons(
 
 def _use_after_window(
     world: World,
-    shop: service.Shop,
+    shop: Any,
     coupons: dict[str, list[Any]],
     uses: int,
     now: list[datetime],
-    clock_seconds: list[float],
 ) -> None:
     """구간이 끝난 뒤 5분 간격으로 쿠폰을 `uses`장 더 쓴다 (남은 장수가 있는 구매자를 돌아가며)."""
     moment = world.window[1]
@@ -629,25 +590,11 @@ def _use_after_window(
             break
         buyer, held = holders[0]
         now[0] = moment
-        clock_seconds[0] = moment.timestamp()
-        order = shop.place_order(buyer, [(PRODUCTS[0][0], 1)], coupon_id=held[0])[0]
+        order = shop.place_order(buyer, [(PRODUCTS[0][0], 1)], coupon_id=held[0])
         held[1] -= 1
         paid = shop.pay(order["order_id"], "card", None)
-        with world.db.tx() as conn:  # 방금 넣은 결제 기록 (구간 안 결제와 같은 방법으로 읽는다)
-            pay = conn.execute(
-                "SELECT amount, status, failure_code FROM payments "
-                "WHERE order_id = ? ORDER BY rowid DESC LIMIT 1",
-                (paid["order_id"],),
-            ).fetchone()
-        world.payments.append(
-            Payment(
-                order_id=paid["order_id"],
-                buyer_id=buyer,
-                amount=int(pay["amount"]),
-                at=moment,
-                failure_code=None if pay["status"] == "succeeded" else pay["failure_code"],
-            )
-        )
+        # 방금 넣은 결제 기록 (구간 안 결제와 같은 방법으로 읽는다)
+        world.payments.append(_payment_record(world, paid["order_id"], buyer, moment, False, False))
         moment += BUCKET
 
 

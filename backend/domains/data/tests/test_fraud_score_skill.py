@@ -1,25 +1,30 @@
-"""fraud_score 핸들러: shop-api 판매자 정보·가격을 실제 shop-api 앱(경로·토큰 포함)으로 읽는다.
+"""fraud_score 핸들러: 판매 서버 판매자 정보·가격을 HTTP(경로·토큰 포함)로 읽는다.
 
-- 사업자 해시(shop-api에 없음)와 유사 사기 카드(hr skill 없음)는 "확인할 수 없음"이고
+판매 서버는 `Catbooks-demo/catbooks-demo`로 분리됐다. 판매 서버 앱 대신 data 평가의 가짜 판매
+서버(`eval/fake_shop.py`, 판매 서버와 같은 경로·토큰 검사·계산)를 HTTP 전송으로 붙인다.
+
+- 사업자 해시(판매 서버에 없음)와 유사 사기 카드(hr skill 없음)는 "확인할 수 없음"이고
   점수에서 빠진다.
-- shop-api를 못 읽으면 failed + unavailable, 없는 판매자는 failed + not_found.
+- 판매 서버를 못 읽으면 failed + unavailable, 없는 판매자는 failed + not_found.
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 
-from ax_agent_template import config, events
+from ax_agent_template import events
 from ax_contracts.data_access.shop_seller_prices import SellerProductPrice, ShopSellerPricesResult
 from ax_contracts.data_access.shop_seller_profile import ShopSellerProfile
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import FraudScoreInput, FraudScoreOutput
-from ax_shop_api.db import Db
-from ax_shop_api.main import create_app
 from data_agent import handlers
 from data_agent.clients.shop_client import HttpSellerClient, ShopApi
 from data_agent.metrics.fraud import (
@@ -33,29 +38,42 @@ from data_agent.metrics.fraud import (
 )
 from data_agent.skills.fraud_score import score_fraud
 
+_NAME = "data_eval_fake_shop"  # eval_world와 같은 이름 (재무의 같은 이름 파일과 섞이지 않게)
+if _NAME not in sys.modules:
+    _spec = importlib.util.spec_from_file_location(
+        _NAME, Path(__file__).resolve().parents[1] / "eval" / "fake_shop.py"
+    )
+    assert _spec and _spec.loader
+    sys.modules[_NAME] = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(sys.modules[_NAME])
+fake_shop = sys.modules[_NAME]
+
 
 def _iso(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @pytest.fixture(autouse=True)
-def _mock_mode(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN202
+def _mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
-    monkeypatch.setenv("SHOP_MONITOR_INTERVAL_S", "0")
     events.reset_mock_bus()
-    before = config._agent_name
-    yield
-    config._agent_name = before  # shop-api 앱이 프로세스 이름을 shop으로 바꾼다
+
+
+def _shop_transport(seed: bool) -> tuple[Any, httpx.MockTransport]:
+    """가짜 판매 서버(지금 시각 = 실제 시계)와 판매 서버처럼 토큰을 검사하는 HTTP 전송."""
+    shop = fake_shop.FakeShop(fake_shop.FakeShopDb(":memory:"), now=lambda: datetime.now(UTC))
+    if seed:
+        shop.seed()
+    return shop, fake_shop.FakeShopTransport(shop, check_tokens=True)
 
 
 @pytest.fixture
-def shop(monkeypatch: pytest.MonkeyPatch) -> Db:
-    """실제 shop-api 앱. 핸들러의 판매자 클라이언트가 이 앱을 data 토큰으로 부른다."""
-    db = Db(":memory:")
-    app = create_app(db, seed_data=False)
+def shop(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """판매 서버 DB(가짜). 핸들러의 판매자 클라이언트가 이 서버를 data 토큰으로 부른다."""
+    built, transport = _shop_transport(seed=False)
 
     def client() -> HttpSellerClient:
-        http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://shop")
+        http = httpx.AsyncClient(transport=transport, base_url="http://shop")
         return HttpSellerClient(ShopApi("http://shop", token="mock:data", client=http))
 
     monkeypatch.setattr(handlers, "get_seller_client", client)
@@ -64,10 +82,12 @@ def shop(monkeypatch: pytest.MonkeyPatch) -> Db:
         raise httpx.ConnectError("hr 없음")
 
     monkeypatch.setattr(handlers, "get_fraud_card_sender", lambda: hr_off)
-    return db
+    return built.db
 
 
-def _seller(db: Db, seller_id: str, joined: datetime, products: list[tuple[int, datetime]]) -> None:
+def _seller(
+    db: Any, seller_id: str, joined: datetime, products: list[tuple[int, datetime]]
+) -> None:
     with db.tx() as conn:
         conn.execute(
             "INSERT INTO sellers VALUES (?, ?, 'book', 'shop-demo', NULL, ?)",
@@ -91,7 +111,7 @@ def _call(seller_id: str):  # noqa: ANN202
     return asyncio.run(handlers.HANDLERS["fraud_score"](request))
 
 
-def test_scores_known_rules_only_and_lists_unknown_rules(shop: Db) -> None:
+def test_scores_known_rules_only_and_lists_unknown_rules(shop: Any) -> None:
     now = datetime.now(UTC)
     old = now - timedelta(days=30)
     _seller(shop, "sel_ref", now - timedelta(days=400), [(20000, old)] * 6)  # 카테고리 기준 가격
@@ -127,7 +147,7 @@ def test_scores_known_rules_only_and_lists_unknown_rules(shop: Db) -> None:
     assert "확인할 수 없음: FRAUD_SIMILAR" in result.evidence.data_summary
 
 
-def test_seller_without_active_products_cannot_tell_low_price(shop: Db) -> None:
+def test_seller_without_active_products_cannot_tell_low_price(shop: Any) -> None:
     _seller(shop, "sel_empty", datetime.now(UTC) - timedelta(days=100), [])
     out = FraudScoreOutput.model_validate(_call("sel_empty").output)
     assert out.unknown_rules == ["LOW_PRICE", DUP_BUSINESS, FRAUD_SIMILAR]
@@ -137,7 +157,7 @@ def test_seller_without_active_products_cannot_tell_low_price(shop: Db) -> None:
     assert (out.complete, out.max_possible_score, out.max_possible_level) == (False, 70, "high")
 
 
-def test_unknown_seller_is_not_found(shop: Db) -> None:
+def test_unknown_seller_is_not_found(shop: Any) -> None:
     result = _call("sel_none")
     assert result.status == TaskStatus.FAILED
     assert result.outcome == "not_found"
@@ -162,10 +182,10 @@ def test_shop_api_down_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_shop_api_rejecting_the_token_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    app = create_app(Db(":memory:"))
+    _, transport = _shop_transport(seed=True)  # 판매 서버 시드: sel_0001이 있다
 
     def client() -> HttpSellerClient:
-        http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://shop")
+        http = httpx.AsyncClient(transport=transport, base_url="http://shop")
         return HttpSellerClient(ShopApi("http://shop", token="mock:finance", client=http))
 
     monkeypatch.setattr(handlers, "get_seller_client", client)
@@ -174,7 +194,7 @@ def test_shop_api_rejecting_the_token_is_unavailable(monkeypatch: pytest.MonkeyP
     assert result.output["code"] == "FORBIDDEN"
 
 
-def test_invalid_input(shop: Db) -> None:
+def test_invalid_input(shop: Any) -> None:
     meta = RequestMeta(
         context_id="ctx_fraud_test",
         token="mock:finance",
