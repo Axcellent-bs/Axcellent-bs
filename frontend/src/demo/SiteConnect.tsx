@@ -4,7 +4,7 @@ import { PreparingChip } from '@/components/Preparing'
 import type { ConnectionState } from '@/lib/companyConnection'
 import Integrations from './Integrations'
 
-// 사이트 연결: 고객사 사이트가 어떻게 만들어졌는지 고르면(① 쇼핑몰 플랫폼 ② 직접 만든 사이트) 그 경우에 맞는 연결 창구를 보여 준다.
+// 사이트 연결: 고객사 사이트가 어떻게 만들어졌는지 고르면(① 직접 만든 사이트 ② 사이트 제작 플랫폼) 그 경우에 맞는 연결 창구를 보여 준다.
 // 고객사는 고르고·누르고·붙여 넣기만 한다. 사이트 코드나 서버는 건드리지 않는다.
 // 'AXcellent 규격 API'만 실제 연결(Integrations, shop-api)이고, 나머지는 이 화면 안 데모 상태라 "준비 중" 표시를 붙인다.
 // 붙여 넣은 키·토큰·비밀번호는 다시 보여 주지 않는다(키·토큰은 앞 몇 글자만).
@@ -49,10 +49,10 @@ export default function SiteConnect({ onShop }: { onShop: (s: ConnectionState | 
       <section className="space-y-4">
         <SectionHead title="사이트 연결" desc="사이트가 어떻게 만들어졌는지 골라 주세요. 사이트 코드나 서버는 건드리지 않고, 여기서 고르고·누르고·붙여 넣기만 해요." />
         <div role="radiogroup" aria-label="사이트 종류" className="grid gap-3 md:grid-cols-2">
-          <Radio on={kind === 'platform'} onPick={() => setKind('platform')} title="쇼핑몰 플랫폼으로 만들었어요"
-            desc="카페24 · 고도몰 · 아임웹 · Shopify · 스마트스토어. 버튼 한 번으로 연결해요 (권한 동의)." />
           <Radio on={kind === 'custom'} onPick={() => setKind('custom')} title="직접 만든 사이트예요"
-            desc="자체 개발 쇼핑몰 · 여행사 · 예약 사이트 등. 이미 쓰는 API·DB·운영 도구를 연결해요." />
+            desc="자체 개발한 서비스·예약 사이트 등. 이미 쓰는 API·DB·운영 도구를 연결해요." />
+          <Radio on={kind === 'platform'} onPick={() => setKind('platform')} title="사이트 제작 플랫폼으로 만들었어요"
+            desc="플랫폼 위에 만든 사이트예요. 플랫폼 계정으로 허락하면 한 번에 연결돼요." />
         </div>
       </section>
       {kind === 'platform' && <PlatformPanel />}
@@ -77,8 +77,8 @@ function PlatformPanel() {
   }
 
   return (
-    <section className="space-y-4" aria-label="쇼핑몰 플랫폼 연결">
-      <SectionHead as="h3" title="쇼핑몰 플랫폼 연결" desc="플랫폼을 고르고 몰 주소를 넣은 뒤, 플랫폼 창에서 허락하면 끝나요." right={<PreparingChip />} />
+    <section className="space-y-4" aria-label="플랫폼 연결">
+      <SectionHead as="h3" title="플랫폼 연결" desc="플랫폼을 고르고 몰 주소를 넣은 뒤, 플랫폼 창에서 허락하면 끝나요." right={<PreparingChip />} />
       <div className="card">
         {linked ? (
           <>
