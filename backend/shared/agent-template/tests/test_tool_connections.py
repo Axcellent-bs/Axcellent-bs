@@ -59,6 +59,7 @@ def test_public_has_no_secret_values(vault: Path) -> None:
 
 def test_mask() -> None:
     assert tc.mask("abc") == "••••"
+    assert tc.mask("abcd") == "••••"
     assert tc.mask("abcdef") == "abcd••••"
     assert tc.mask("-----BEGIN PRIVATE KEY", key=True) == "설정됨"
 
@@ -121,3 +122,31 @@ def test_written_file_is_0600(vault: Path) -> None:
     tc._cache = None
     tc.read_all()
     assert vault.stat().st_mode & 0o777 == 0o600
+
+
+def test_broken_file_blocks_writes(vault: Path) -> None:
+    conn = _save()
+    broken = b"{not json, keep me"
+    vault.write_bytes(broken)
+    for action in (
+        lambda: _save("새 연결"),
+        lambda: _save("고침", conn_id=conn.id),
+        lambda: tc.record_check(conn.id, True, "ok"),
+        lambda: tc.delete(conn.id, by="t"),
+    ):
+        with pytest.raises(tc.ToolConnectionError) as e:
+            action()
+        assert e.value.code == "config" and "읽을 수 없어" in e.value.message
+    assert vault.read_bytes() == broken
+    assert not vault.with_name(vault.name + ".tmp").exists()
+    assert tc.read_all() == []
+
+
+def test_failed_write_removes_tmp(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_a: object, **_k: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(tc.json, "dump", boom)
+    with pytest.raises(OSError):
+        _save()
+    assert not vault.with_name(vault.name + ".tmp").exists()

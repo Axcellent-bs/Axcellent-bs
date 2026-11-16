@@ -40,7 +40,7 @@ def mask(value: str, *, key: bool = False) -> str:
     """화면에 보일 가린 값. 개인 키는 `설정됨`, 짧은 값은 `••••`, 나머지는 `앞4글자••••`."""
     if key:
         return "설정됨"
-    if len(value) < 4:
+    if len(value) <= 4:
         return "••••"
     return value[:4] + "••••"
 
@@ -144,24 +144,24 @@ def _parse(raw: Any, path: str) -> list[ToolConnection]:
 
 
 # 바뀐 시각·크기가 같으면 다시 읽지 않는다. 깨진 파일 경고도 같은 상태면 한 번만 남긴다
-_cache: tuple[str, int, int, list[ToolConnection]] | None = None
+_cache: tuple[str, int, int, list[ToolConnection], bool] | None = None
 _lock = threading.RLock()
 
 
-def read_all() -> list[ToolConnection]:
-    """저장된 연결 전부. 경로가 없거나 파일이 없거나 깨졌으면 빈 목록."""
+def _load() -> tuple[list[ToolConnection], bool]:
+    """(연결 목록, 파일이 있는데 읽지 못했는가)."""
     global _cache
     path = connections_file()
     if not path:
-        return []
+        return [], False
     with _lock:
         try:
             stat = os.stat(path)
         except OSError:
-            return []  # 저장한 적 없음: 정상
+            return [], False  # 저장한 적 없음: 정상
         key = (path, stat.st_mtime_ns, stat.st_size)
         if _cache is not None and _cache[:3] == key:
-            return list(_cache[3])
+            return list(_cache[3]), _cache[4]
         try:
             os.chmod(path, 0o600)  # 예전에 넓은 권한으로 만든 파일도 만든 사용자만 읽게 맞춘다
         except OSError:
@@ -171,8 +171,28 @@ def read_all() -> list[ToolConnection]:
         except (OSError, ValueError) as exc:  # json.JSONDecodeError는 ValueError다
             logger.warning("도구 연결 파일이 깨져 쓰지 않는다: %s (%s)", path, type(exc).__name__)
             found = []
-        _cache = (*key, found)
-        return list(found)
+            broken = True
+        else:
+            broken = False
+        _cache = (*key, found, broken)
+        return list(found), broken
+
+
+def read_all() -> list[ToolConnection]:
+    """저장된 연결 전부. 경로가 없거나 파일이 없거나 깨졌으면 빈 목록."""
+    return _load()[0]
+
+
+def _read_for_write() -> list[ToolConnection]:
+    """쓰기 전에 읽는다. 파일이 깨졌으면 덮어써서 다른 연결을 잃지 않도록 거절한다."""
+    conns, broken = _load()
+    if broken:
+        raise ToolConnectionError(
+            "config",
+            "보관함 파일을 읽을 수 없어 저장하지 않았어요. "
+            "파일을 확인하거나 백업해 둔 뒤 다시 시도하세요",
+        )
+    return conns
 
 
 def get(conn_id: str) -> ToolConnection | None:
@@ -201,9 +221,18 @@ def _write(conns: list[ToolConnection]) -> None:
         os.chmod(tmp, 0o600)
     except OSError:
         pass  # 윈도 등
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump([c._row() for c in conns], f, ensure_ascii=False, indent=2)
-    os.replace(tmp, target)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump([c._row() for c in conns], f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     _cache = None
 
 
@@ -254,7 +283,7 @@ def upsert(
     if not name:
         raise ToolConnectionError("invalid", "이름을 입력하세요")
     with _lock:
-        conns = read_all()
+        conns = _read_for_write()
         before = next((c for c in conns if c.id == conn_id), None) if conn_id else None
         if conn_id and before is None:
             raise ToolConnectionError("not_found", "없는 연결이다")
@@ -282,7 +311,7 @@ def upsert(
 def record_check(conn_id: str, ok: bool, detail: str) -> ToolConnection:
     """확인 결과를 남긴다 (`detail`에는 비밀 값이 없어야 한다)."""
     with _lock:
-        conns = read_all()
+        conns = _read_for_write()
         before = next((c for c in conns if c.id == conn_id), None)
         if before is None:
             raise ToolConnectionError("not_found", "없는 연결이다")
@@ -301,7 +330,7 @@ def record_check(conn_id: str, ok: bool, detail: str) -> ToolConnection:
 def delete(conn_id: str, *, by: str) -> bool:
     """연결을 지운다. 지웠으면 True, 원래 없었으면 False."""
     with _lock:
-        conns = read_all()
+        conns = _read_for_write()
         before = next((c for c in conns if c.id == conn_id), None)
         if before is None:
             return False

@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable
 
 import httpx
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from ax_agent_template import github_app as _shared
 from ax_agent_template.tool_connections import ToolConnectionError
@@ -20,7 +21,7 @@ JWT_LIFE = _shared.JWT_LIFE
 REFRESH_BEFORE = _shared.REFRESH_BEFORE
 
 
-def load_key(pem: str):  # type: ignore[no-untyped-def]
+def load_key(pem: str) -> rsa.RSAPrivateKey:
     """PEM 개인 키를 읽는다. 틀리면 `VcsError`(config)."""
     try:
         return _shared.load_key(pem)
