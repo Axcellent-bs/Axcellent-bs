@@ -185,6 +185,24 @@ def now(text: str) -> bool:
     return any(p in low for p in NOW)
 
 
+# "진행해"만 보낸 턴: LLM 없이 이 답으로 지난 계획을 넘긴다 (토큰 절약)
+GO_REPLY = "진행할게요."
+GO_EXTRA_CHARS = 12  # 진행 말 밖에 이보다 많이 덧붙였으면 LLM이 읽는다 (계획이 바뀔 수 있음)
+_FILLER = re.compile(
+    r"[\s.,!?~^ㅎㅋ]+|네|넵|응|좋아요?|그래요?|오케이|ok|부탁(해요|합니다|드려요)?|주세요|줘"
+)
+
+
+def just_go(text: str) -> bool:
+    """진행하라는 말뿐인가 (진행 말을 빼고 남는 글이 짧다). 덧붙인 내용이 있으면 False."""
+    if not (go_ahead(text) or now(text)):
+        return False
+    rest = _norm(text).lower()
+    for p in sorted(GO_AHEAD + NOW, key=len, reverse=True):
+        rest = rest.replace(p, "")
+    return len(_FILLER.sub("", rest)) <= GO_EXTRA_CHARS
+
+
 def title_of(text: str) -> str:
     first = _norm(str(text).strip().splitlines()[0] if str(text).strip() else "")
     return (first[:40] + "…") if len(first) > 40 else (first or "새 대화")
@@ -567,6 +585,12 @@ async def _reply(
             return await svc.chat_add(tid, "assistant", status_reply(svc, th))
         if _open_pr_waiting(svc, th.task_id):
             return await _revise(svc, llm, th, text)
+
+    # "진행해"만 왔고 세운 계획이 있으면 LLM을 부르지 않고 정해 둔 답으로 넘긴다
+    ready_plan = last_plan(th)
+    if ready_plan is not None and just_go(text):
+        cid = pick_connection(conns, th, None, text) if conns else None
+        return await _handoff(svc, tid, ready_plan, GO_REPLY, connection=cid)
 
     try:
         out = await _ask_llm(llm, th, conns, last_task)
