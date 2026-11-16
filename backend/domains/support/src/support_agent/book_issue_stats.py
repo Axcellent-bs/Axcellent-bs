@@ -91,6 +91,7 @@ def _paid_share(claim: Claim, mine: list[ClaimLine]) -> int:
 
 def _claim_row(product_id: str, claims: list[Claim]) -> BookIssueRow:
     by_type: Counter[str] = Counter()
+    by_reason: Counter[str] = Counter()
     defect = 0
     claim_qty = 0
     return_qty = 0
@@ -100,6 +101,7 @@ def _claim_row(product_id: str, claims: list[Claim]) -> BookIssueRow:
         mine = [line for line in claim.lines if line.product_id == product_id]
         title = mine[0].title  # 오래된 것부터 돌므로 마지막에 가장 최근 제목이 남는다
         by_type[claim.type] += 1
+        by_reason[claim.reason] += 1
         claim_qty += sum(line.requested_qty for line in mine)
         if claim.reason in DEFECT_REASONS:
             defect += 1
@@ -112,6 +114,7 @@ def _claim_row(product_id: str, claims: list[Claim]) -> BookIssueRow:
         title=title,
         claim_count=len(claims),
         claims_by_type=dict(by_type),
+        claims_by_reason=dict(by_reason),
         defect_claim_count=defect,
         claim_qty=claim_qty,
         return_qty=return_qty,

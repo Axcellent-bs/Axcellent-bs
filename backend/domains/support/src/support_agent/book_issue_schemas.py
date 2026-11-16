@@ -36,6 +36,9 @@ class BookIssueRow(AxModel):
     title: str  # 화면용(가장 최근 클레임의 품목 제목). 묶는 열쇠가 아니다
     claim_count: int  # 이 상품 품목이 든 클레임 수 (한 클레임은 상품마다 한 번)
     claims_by_type: dict[str, int] = Field(default_factory=dict)  # cancel·return·exchange
+    # 사유 코드별 클레임 수 (change_of_mind·defect·wrong_item·damaged·missing_item·late_delivery·
+    # other). 클레임 하나는 사유 하나라 합이 claim_count와 같다. 묶는 기준은 쓰는 쪽이 정한다
+    claims_by_reason: dict[str, int] = Field(default_factory=dict)
     defect_claim_count: int  # 사유가 불량·파손·오배송·누락인 클레임 수
     claim_qty: int = 0  # 클레임으로 접수된 수량 (고객이 요청한 수량의 합)
     return_qty: int  # 반품이 입고된 수량

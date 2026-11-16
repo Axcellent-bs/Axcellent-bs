@@ -106,6 +106,8 @@ def test_claims_are_grouped_by_product_id_not_by_title() -> None:
     rows = {r.product_id: r for r in result.items}
     assert rows["prd_1"].claim_count == 2
     assert rows["prd_1"].claims_by_type == {"return": 1, "exchange": 1}
+    assert rows["prd_1"].claims_by_reason == {"defect": 2}  # 기본 사유가 defect
+    assert rows["prd_2"].claims_by_reason == {"change_of_mind": 1}
     assert rows["prd_1"].title == "고양이의 하루 (개정판)"  # 가장 최근 접수의 제목
     assert rows["prd_2"].claim_count == 1 and rows["prd_2"].defect_claim_count == 0
     assert [r.product_id for r in result.items] == ["prd_1", "prd_2"]  # 많은 순
@@ -995,3 +997,31 @@ def test_zero_rows_do_not_invent_values_that_were_not_read() -> None:
 def test_without_product_ids_quiet_products_stay_out() -> None:
     result = book_issue_report([], NOW, BookIssueInput(), [], sold={"prd_2": 40})
     assert result.items == []
+
+
+def test_claims_by_reason_counts_each_claim_once_and_sums_to_the_claim_count() -> None:
+    claims = [
+        claim(
+            1, [line("a", "prd_1", "책", 1), line("b", "prd_1", "책", 2, 20000)], reason="damaged"
+        ),
+        claim(2, [line("c", "prd_1", "책")], reason="change_of_mind"),
+        claim(3, [line("d", "prd_1", "책")], reason="change_of_mind"),
+        claim(4, [line("e", "prd_1", "책"), line("f", "prd_2", "다른 책")], reason="wrong_item"),
+        claim(5, [line("g", "prd_1", "책")], reason="late_delivery"),
+        claim(6, [line("h", "prd_1", "책")], reason="other"),
+    ]
+    row = {r.product_id: r for r in report(claims).items}["prd_1"]
+    assert row.claims_by_reason == {
+        "damaged": 1,
+        "change_of_mind": 2,
+        "wrong_item": 1,
+        "late_delivery": 1,
+        "other": 1,
+    }
+    assert sum(row.claims_by_reason.values()) == row.claim_count == 6
+    assert row.defect_claim_count == 2  # damaged + wrong_item (기존 불량 합은 그대로)
+
+
+def test_rows_without_claims_have_an_empty_reason_map() -> None:
+    result = book_issue_report([], NOW, BookIssueInput(product_ids=["prd_9"]))
+    assert result.items[0].claims_by_reason == {}  # 클레임이 없으면 비어 있다 (지어내지 않는다)
