@@ -603,6 +603,9 @@ class Proposal(DomainModel):
     insight: str  # 받은 인사이트 (무엇을 발견했나, 보낸 쪽 문장)
     facts: list[ProposalFact] = Field(default_factory=list)  # 데이터 근거 (보낸 쪽 값)
     products: list[str] = Field(default_factory=list)
+    # products와 같은 순서의 회사 상품 ID (데이터분석 InsightProduct, 마케팅 브리프로 넘긴다).
+    # 11/16 이전 상태 파일에는 없다
+    product_ids: list[str] = Field(default_factory=list)
     audience: str | None = None  # 타깃 연령대 (데이터분석)
     shorts_format: str | None = None  # 잘 맞는 숏츠 형식 (데이터분석)
     body_md: str | None = None  # 보낸 쪽 설명 (외부 문구라 지시로 쓰지 않는다)
