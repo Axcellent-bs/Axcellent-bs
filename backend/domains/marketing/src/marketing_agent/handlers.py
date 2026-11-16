@@ -1130,6 +1130,17 @@ async def marketing_chat_remove(request: AgentRequest) -> AgentResult:
     return _chat_done(request, "marketing_chat_remove", out.model_dump(mode="json"))
 
 
+def _brief_product_ids(campaign_id: str) -> list[str]:
+    """받아 둔 기획안에서 그 캠페인의 회사 상품 ID를 꺼낸다. 기획안이 없거나 ID가 없으면 빈 목록."""
+    stored = STATE.briefs.get(None, campaign_id)
+    return list(stored.brief.product_ids) if stored is not None else []
+
+
+async def start_campaign_skill(request: AgentRequest) -> AgentResult:
+    """`start_campaign`: 요청이 상품을 안 주면 기획안의 `product_ids`를 재무 예산 의견에 싣는다."""
+    return await start_campaign(request, brief_product_ids=_brief_product_ids)
+
+
 HANDLERS = {
     "draft_notice": draft_notice,
     "publish_notice": publish_notice,
@@ -1142,7 +1153,7 @@ HANDLERS = {
     "handoff_brief_to_sns": handoff_brief_to_sns,
     "build_campaign_link": build_campaign_link_skill,
     "issue_coupon": issue_coupon,
-    "start_campaign": start_campaign,
+    "start_campaign": start_campaign_skill,
     "record_campaign_result": record_campaign_result,
     "draft_sns_post": draft_sns_post_skill,
     "draft_outage_sns_post": draft_outage_sns_post_skill,

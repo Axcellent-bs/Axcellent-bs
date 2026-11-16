@@ -14,6 +14,14 @@ from typing import Any, Literal
 
 from finance_agent import finance_config as fc
 from finance_agent.books import Books, item_gross, order_sold, paid_at
+from finance_agent.customer_reaction import (
+    NOT_RELEVANT,
+    STATUS_FLAGGED,
+    STATUS_NOT_RELEVANT,
+    STATUS_UNAVAILABLE,
+    Reaction,
+    flag_text,
+)
 from finance_agent.rules import applied, load_rules
 
 Verdict = Literal["good", "neutral", "bad"]
@@ -371,6 +379,7 @@ def decide(
     today: date,
     monthly_budget: dict[str, Any] | None = None,
     started: dict[str, dict[str, Any]] | None = NO_STARTS,
+    reaction: Reaction = NOT_RELEVANT,
 ) -> dict[str, Any]:
     """재무 의견: 권장·줄여서 권장·권하지 않음. 집행을 막지 않는다(막는 것은 안전 관문과 사람).
 
@@ -378,6 +387,9 @@ def decide(
     확인 결과를 근거로 남긴다.
 
     `started`가 None이면 안전 관문 기록을 못 읽은 것이다. 쓴 돈을 모르니 권하지 않는다.
+
+    `reaction`은 고객지원 책별 집계로 본 고객 반응이다(`CRX-001`). 요청에 상품이 없으면 아무 규칙도
+    적용하지 않는다(기본값). 걸린 책이 있으면 책이 몇 권이든 요청당 한 번만 한도에 곱한다.
     """
     book = load_rules()
     brake, lesson_rules = book.brake, book.lessons
@@ -454,6 +466,36 @@ def decide(
             limit = cap
             limits.append(detail)
 
+    # 고객 반응: 걸린 책이 있으면 요청당 한 번만 한도에 곱한다. 못 읽었거나 판매가 적은 책은 의견을
+    # 바꾸지 않고 규칙 기록과 이유에 남긴다 (`CRX-001`)
+    notes: list[str] = []
+    if reaction.status != STATUS_NOT_RELEVANT:
+        crx = book.customer_reaction
+        if reaction.status == STATUS_UNAVAILABLE:
+            note = "고객 반응을 못 읽어 반영하지 않음"
+            rules.append(applied("CRX-001", f"{note} ({reaction.note or '이유 모름'})"))
+            notes.append(note)
+        else:
+            if reaction.status == STATUS_FLAGGED:
+                cap = fc.rate_amount(requested, crx.limit_factor)
+                names = "; ".join(flag_text(f) for f in reaction.flagged)
+                detail = (
+                    f"{names} → 요청 금액의 {crx.limit_factor:.0%}인 {fc.won(cap)}까지 "
+                    "(걸린 책이 여럿이어도 요청당 한 번)"
+                )
+                if cap < limit:
+                    limit = cap
+                    limits.append(detail)
+            else:
+                detail = f"걸린 책 없음 (읽은 책 {reaction.checked}권)"
+            if reaction.low_sales:
+                low = ", ".join(reaction.low_sales)
+                notes.append(f"판매 적어 비율 참고만 (판매 {crx.min_sold_qty}권 미만): {low}")
+                detail += f". 판매 적어 비율 참고만: {low}"
+            if reaction.unread:
+                detail += f". 집계에 없는 상품: {', '.join(reaction.unread)}"
+            rules.append(applied("CRX-001", detail))
+
     if not rejects and limit < brake.min_viable_krw:
         rejects.append(f"권장 금액 {fc.won(limit)}이 최소 {fc.won(brake.min_viable_krw)}보다 적음")
     rules.append(applied("BRK-005"))
@@ -472,6 +514,7 @@ def decide(
     else:
         decision, reasons = "approved", ["모든 기준을 통과함"]
         advice = "요청 금액 그대로 써도 재무 기준에 걸리지 않습니다."
+    reasons = [*reasons, *notes]  # 의견을 바꾸지 않은 참고(못 읽음·판매 적음)는 이유 끝에 덧붙인다
     return {
         "campaign_id": request["campaign_id"],
         "campaign_name": request["campaign_name"],
@@ -486,6 +529,11 @@ def decide(
         "cash_net_krw": cash_net_krw,
         "remaining_budget_krw": remaining,
         "open_lessons": len(open_lessons),
+        "customer_reaction": {
+            "status": reaction.status,
+            "flagged": [f.product_id for f in reaction.flagged],
+            "low_sales": list(reaction.low_sales),
+        },
     }
 
 
