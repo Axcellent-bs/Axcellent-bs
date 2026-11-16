@@ -10,7 +10,7 @@ import pytest
 from ax_contracts.schemas import AgentRequest, JudgeStepTimingsOutput
 from hr_agent.dept_eval import CriteriaError, judge_step, judge_timings, load_criteria
 from hr_agent.dept_eval.criteria import DEFAULT_PATH, parse_criteria
-from hr_agent.dept_eval.stages import STAGES, Excluded, Stage, stage_of
+from hr_agent.dept_eval.stages import STAGES, Excluded, Stage, current_dept, stage_of
 
 CONTEXT = "ctx_inc_0001"
 
@@ -145,6 +145,22 @@ def test_dev_steps_are_counted_as_dev_even_though_the_plan_says_planning() -> No
     for step_id in ("related_prs", "link_incident"):
         stage = STAGES[step_id]
         assert isinstance(stage, Stage) and stage.dept == "dev"
+
+
+def test_issue_record_steps_are_counted_as_archive() -> None:
+    """결정 기록을 인사에서 분리했으니(2026-11-16) 이슈 기록 3단계는 아카이브가 일한 것으로 센다."""
+    for step_id in ("similar_cases", "record", "resolution"):
+        stage = STAGES[step_id]
+        assert isinstance(stage, Stage) and stage.dept == "archive"
+    assert not any(isinstance(s, Stage) and s.dept == "hr" for s in STAGES.values())
+
+
+def test_legacy_hr_dept_is_read_as_archive_for_issue_record_steps() -> None:
+    """분리 전에 "인사"로 저장된 판정은 판정은 그대로 두고 부서만 아카이브로 읽는다."""
+    assert current_dept("record", "hr") == "archive"
+    assert current_dept("similar_cases", "hr") == "archive"
+    assert current_dept("diagnose", "infra") == "infra"
+    assert current_dept("unknown_step", "hr") == "hr"
 
 
 def test_unknown_steps_are_not_judged() -> None:
