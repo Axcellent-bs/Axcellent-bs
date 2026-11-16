@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { DangerRow, Facts, More, Notice, SectionHead, StatusChip } from '@/components/connect/parts'
+import { Notice, SectionHead, StatusChip } from '@/components/connect/parts'
 import { PreparingChip } from '@/components/Preparing'
 import type { ConnectionState } from '@/lib/companyConnection'
 import Integrations from './Integrations'
@@ -9,15 +9,6 @@ import Integrations from './Integrations'
 // 'AXcellent 규격 API'만 실제 연결(Integrations, shop-api)이고, 나머지는 이 화면 안 데모 상태라 "준비 중" 표시를 붙인다.
 // 붙여 넣은 키·토큰·비밀번호는 다시 보여 주지 않는다(키·토큰은 앞 몇 글자만).
 
-const PLATFORMS = ['카페24', '고도몰', '아임웹', 'Shopify', '스마트스토어'] as const
-const PERMS = [
-  { id: 'orders', label: '주문·결제 읽기', write: false },
-  { id: 'goods', label: '상품·재고 읽기', write: false },
-  { id: 'members', label: '회원 수·연령대 읽기 (이름·연락처는 받지 않아요)', write: false },
-  { id: 'coupon', label: '쿠폰 발급', write: true },
-  { id: 'stop', label: '상품 판매 중지', write: true },
-  { id: 'banner', label: '공지 배너', write: true },
-] as const
 const OPS = [
   { id: 'gha', name: 'GitHub Actions', group: '배포', use: '문제 생기면 이전 버전으로 되돌리기' },
   { id: 'jenkins', name: 'Jenkins', group: '배포', use: '문제 생기면 이전 버전으로 되돌리기' },
@@ -52,7 +43,7 @@ export default function SiteConnect({ onShop }: { onShop: (s: ConnectionState | 
           <Radio on={kind === 'custom'} onPick={() => setKind('custom')} title="직접 만든 사이트예요"
             desc="자체 개발한 서비스·예약 사이트 등. 이미 쓰는 API·DB·운영 도구를 연결해요." />
           <Radio on={kind === 'platform'} onPick={() => setKind('platform')} title="사이트 제작 플랫폼으로 만들었어요"
-            desc="플랫폼 위에 만든 사이트예요. 플랫폼 계정으로 허락하면 한 번에 연결돼요." />
+            desc={<>플랫폼 위에 만든 사이트예요. 플랫폼 계정으로 허락하면 한 번에 연결돼요. <PreparingChip /></>} />
         </div>
       </section>
       {kind === 'platform' && <PlatformPanel />}
@@ -61,81 +52,14 @@ export default function SiteConnect({ onShop }: { onShop: (s: ConnectionState | 
   )
 }
 
+// 플랫폼(카페24 등) 연결은 보류: 플랫폼 앱 등록에 사업자 등록이 필요하다 (2026-11-16 결정). 지어낸 연결 상태는 보여 주지 않는다.
 function PlatformPanel() {
-  const [platform, setPlatform] = useState<(typeof PLATFORMS)[number]>(PLATFORMS[0])
-  const [shop, setShop] = useState('')
-  const [perms, setPerms] = useState<Record<string, boolean>>(() => Object.fromEntries(PERMS.map((p) => [p.id, true])))
-  const [linked, setLinked] = useState<{ platform: string; shop: string; at: number; perms: string[] } | null>(null)
-  const [confirmOff, setConfirmOff] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const grant = (e: FormEvent) => {
-    e.preventDefault()
-    if (!shop.trim()) return setError('몰 주소를 입력해 주세요.')
-    setError(null)
-    setLinked({ platform, shop: hostOnly(shop), at: Date.now(), perms: PERMS.filter((p) => perms[p.id]).map((p) => p.label) })
-  }
-
   return (
     <section className="space-y-4" aria-label="플랫폼 연결">
-      <SectionHead as="h3" title="플랫폼 연결" desc="플랫폼을 고르고 몰 주소를 넣은 뒤, 플랫폼 창에서 허락하면 끝나요." right={<PreparingChip />} />
-      <div className="card">
-        {linked ? (
-          <>
-            <div className="space-y-5 p-6">
-              <div className="flex flex-wrap items-center gap-3">
-                <p className="text-xl font-semibold">{linked.platform}</p>
-                <StatusChip tone="ok">연결됨 · 정상</StatusChip>
-              </div>
-              <Facts cols={4} items={[
-                ['몰 주소', <span className="font-mono">{linked.shop}</span>],
-                ['마지막 주문 수신', '방금'],
-                ['웹훅', '3개 자동 등록됨'],
-                ['받는 권한', `${linked.perms.length}개`],
-              ]} />
-              <More summary="권한 다시 보기">
-                <ul className="list-inside list-disc">{linked.perms.map((p) => <li key={p}>{p}</li>)}</ul>
-                <p>권한을 바꾸려면 {linked.platform}에서 다시 허락해 주세요.</p>
-              </More>
-            </div>
-            <DangerRow note={confirmOff ? `${linked.platform} 연결을 끊고 자동 등록한 웹훅도 지워요.` : '연결을 끊어도 몰 데이터는 그대로예요.'}>
-              {confirmOff ? (
-                <>
-                  <button type="button" className="btn-quiet" onClick={() => setConfirmOff(false)}>취소</button>
-                  <button type="button" className="btn-primary bg-red-700 hover:bg-red-800" onClick={() => { setLinked(null); setConfirmOff(false) }}>연결 끊기</button>
-                </>
-              ) : <button type="button" className="btn-ghost text-red-700" onClick={() => setConfirmOff(true)}>연결 끊기</button>}
-            </DangerRow>
-          </>
-        ) : (
-          <form onSubmit={grant} className="space-y-5 p-6">
-            <div role="radiogroup" aria-label="플랫폼" className="flex flex-wrap gap-2">
-              {PLATFORMS.map((p) => (
-                <button key={p} type="button" role="radio" aria-checked={platform === p} onClick={() => setPlatform(p)}
-                  className={`border px-3 py-1.5 text-sm ${platform === p ? 'border-brand-600 bg-brand-50/50 font-semibold' : 'border-ink-100 text-ink-700 hover:border-ink-300'}`}>{p}</button>
-              ))}
-            </div>
-            <Field label="몰 주소">
-              <input className="field font-mono" placeholder="예: mystore.example.com" value={shop} onChange={(e) => setShop(e.target.value)} />
-            </Field>
-            <div className="space-y-2 bg-ink-50 p-4">
-              <p className="text-sm font-semibold">AXcellent가 받을 권한 <span className="text-xs font-normal text-ink-500">({platform} 창에서 한 번 더 보여요)</span></p>
-              <ul className="grid gap-1.5 sm:grid-cols-2">
-                {PERMS.map((p) => (
-                  <li key={p.id}>
-                    <label className="flex items-start gap-2 text-sm">
-                      <input type="checkbox" className="mt-1" checked={perms[p.id]} onChange={(e) => setPerms({ ...perms, [p.id]: e.target.checked })} />
-                      <span>{p.label}{p.write && <span className="ml-1 text-xs text-ink-500">(업무 처리)</span>}</span>
-                    </label>
-                  </li>
-                ))}
-              </ul>
-              <p className="text-xs text-ink-500">이벤트 알림(웹훅)은 AXcellent가 자동으로 등록해요.</p>
-            </div>
-            {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-            <button className="btn-primary px-5">{platform}에서 허락하기 ↗</button>
-          </form>
-        )}
+      <SectionHead as="h3" title="플랫폼 연결" desc="플랫폼 계정으로 허락하면 한 번에 연결되는 방식이에요." right={<PreparingChip />} />
+      <div className="card space-y-2 p-6">
+        <p className="text-sm text-ink-700">플랫폼 연결은 아직 준비 중이에요. 열리면 이 자리에서 플랫폼을 고르고 허락하기만 하면 돼요.</p>
+        <p className="text-sm text-ink-500">그전에는 사이트가 쓰는 API로 연결할 수 있어요. 위에서 "직접 만든 사이트예요"를 골라 주세요.</p>
       </div>
     </section>
   )
