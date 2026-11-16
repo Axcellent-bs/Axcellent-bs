@@ -36,9 +36,10 @@ interface Talk {
   remove?: (id: string) => Promise<void>;
 }
 
-// 인사 AI 대화 창구(org 8124 `/api/hr/chat`). CORS가 없어 기본값은 Vite 개발 프록시(/hr-api → vite.config.ts)
-// 인사 데이터를 다루는 대화라 읽기에도 사람 토큰을 붙인다
+// 인사 AI(org 8124 `/api/hr/chat`)와 아카이브 AI(decisions 8114 `/api/archive/chat`)는 부서 서버가 직접 받는다. CORS가 없어
+// 기본값은 Vite 개발 프록시(/hr-api, /archive-api → vite.config.ts). 기록을 다루는 대화라 읽기에도 사람 토큰을 붙인다
 const HR_API_URL = (import.meta.env.VITE_HR_API_URL as string | undefined) ?? "/hr-api";
+const ARCHIVE_API_URL = (import.meta.env.VITE_ARCHIVE_API_URL as string | undefined) ?? "/archive-api";
 const toThread = (x: Record<string, unknown>): ChatThread => ({
   ...(x as unknown as ChatThread),
   taskId: (x.task_id as string | null | undefined) ?? null,
@@ -46,25 +47,30 @@ const toThread = (x: Record<string, unknown>): ChatThread => ({
   updatedAt: String(x.updated_at ?? ""),
   messageCount: typeof x.message_count === "number" ? x.message_count : undefined,
 });
-async function hrCall<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${HR_API_URL}/api/hr${path}`, {
-    ...init,
-    cache: "no-store",
-    headers: { "Content-Type": "application/json", ...(SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {}) },
-  });
-  const body = (await res.json().catch(() => null)) as { data?: T; error?: { code?: string; message?: string } } | null;
-  // 상태 코드를 같이 넘긴다 (지우기 실패 안내에 쓴다)
-  if (!res.ok || !body || body.data === undefined) {
-    throw new DirectChatError(body?.error?.message ?? `인사 AI에 연결할 수 없어요 (${res.status})`, res.status, body?.error?.code ?? `HTTP_${res.status}`);
-  }
-  return body.data;
+/** 부서 서버 직접 대화 창구 (`<base>/api/<dept>/chat`). 둘 다 같은 대화 모양을 돌려준다 */
+function deptTalk(base: string, dept: "hr" | "archive", name: string): Talk {
+  const call = async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
+    const res = await fetch(`${base}/api/${dept}${path}`, {
+      ...init,
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", ...(SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {}) },
+    });
+    const body = (await res.json().catch(() => null)) as { data?: T; error?: { code?: string; message?: string } } | null;
+    // 상태 코드를 같이 넘긴다 (지우기 실패 안내에 쓴다)
+    if (!res.ok || !body || body.data === undefined) {
+      throw new DirectChatError(body?.error?.message ?? `${name}에 연결할 수 없어요 (${res.status})`, res.status, body?.error?.code ?? `HTTP_${res.status}`);
+    }
+    return body.data;
+  };
+  return {
+    list: () => call<Record<string, unknown>[]>("/chat").then((d) => (Array.isArray(d) ? d.map(toThread) : [])),
+    get: (id) => call<Record<string, unknown>>(`/chat/${encodeURIComponent(id)}`).then(toThread),
+    send: (x) => call<Record<string, unknown>>("/chat", { method: "POST", body: JSON.stringify(x) }).then(toThread),
+    remove: (id) => call<Record<string, unknown>>(`/chat/${encodeURIComponent(id)}/remove`, { method: "POST", body: "{}" }).then(() => undefined),
+  };
 }
-const hrTalk: Talk = {
-  list: () => hrCall<Record<string, unknown>[]>("/chat").then((d) => (Array.isArray(d) ? d.map(toThread) : [])),
-  get: (id) => hrCall<Record<string, unknown>>(`/chat/${encodeURIComponent(id)}`).then(toThread),
-  send: (x) => hrCall<Record<string, unknown>>("/chat", { method: "POST", body: JSON.stringify(x) }).then(toThread),
-  remove: (id) => hrCall<Record<string, unknown>>(`/chat/${encodeURIComponent(id)}/remove`, { method: "POST", body: "{}" }).then(() => undefined),
-};
+const hrTalk = deptTalk(HR_API_URL, "hr", "인사 AI");
+const archiveTalk = deptTalk(ARCHIVE_API_URL, "archive", "아카이브 AI");
 
 export const DIRECT_PREFIX = "direct:";
 export interface DirectAgent {
@@ -81,7 +87,7 @@ export const DIRECT_AGENTS: DirectAgent[] = [
   { key: "data", name: "데이터분석 AI", note: "트렌드·인사이트·영상 성과·캠페인 결과·수집 상태를 숫자로 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요. 개인정보·비밀은 적지 마세요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/data-chat" }, { closable: true }) },
   { key: "infra", name: "인프라 AI", note: "최근 배포, 결제 서버 상태, 장애 사건의 진단·롤백·복구 확인 결과를 읽고 설명해요. 대화로 롤백하거나 장애를 넣고 빼지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/infra-chat" }, { closable: true }) },
   { key: "safety", name: "안전규칙 AI", note: "어떤 일에 어떤 안전규칙(기준)이 걸려 있는지, 어떤 일이 왜 보류됐고 어디서 결정하는지를 안전규칙 기록으로 읽고 설명해요. 대화로 승인하거나 기준을 바꾸지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: SAFETY_API_URL, path: "/api/safety/chat" }, { closable: true, getByQuery: true }) },
-  { key: "archive", name: "아카이브 AI", note: "장애 기록과 업무 기록을 직접 물어보는 대화방은 아직 준비 중이에요. 기록은 메뉴의 아카이브 AI에서 볼 수 있어요.", live: false },
+  { key: "archive", name: "아카이브 AI", note: "장애 기록과 업무 기록(결정 카드)을 기록으로 읽고 설명해요. 대화로 기록을 남기거나 카드를 확정하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: archiveTalk },
   { key: "marketing", name: "마케팅 AI", note: "마케팅 일을 물어보면 마케팅 AI가 답해요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/marketing-chat" }) },
 ];
 export const directAgentOf = (room: string) =>

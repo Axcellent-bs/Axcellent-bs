@@ -56,6 +56,7 @@ Agent = Literal[
     "planning",
     "marketing",
     "hr",
+    "archive",
     "infra",
     "orchestrator",
     "safety",
