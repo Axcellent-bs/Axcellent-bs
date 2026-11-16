@@ -51,6 +51,19 @@
       "handoff": false
     },
     {
+      "id": "diagnose_agent_issue",
+      "description": "인사가 에이전트 평가에서 같은 단계의 확인 필요가 반복된 것을 찾아 보내는 진단 요청을 받아 저장한다. 같은 (에이전트, 단계)의 열린 요청에는 새 근거를 더하고(updated), 같은 근거는 duplicate로 답하며, 에이전트당 하루 한도를 넘으면 limited로 받지 않는다. 받기만 하고 이벤트를 열거나 다른 부서에 일을 시키지 않는다. 원인 진단은 이후 단계에서 총괄이 한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/diagnosis.py#DiagnoseAgentIssueInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/diagnosis.py#DiagnoseAgentIssueOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "hr"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "orchestrator_chat_send",
       "description": "말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 orchestrator_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. LLM은 코드가 모은 총괄 사실(이벤트 단계·시간·승인 대기)만 풀어 쓴다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy. 총괄 AI 직접 대화(dashboard-api /api/dashboard/orchestrator-chat). 조회·설명만 하고 이벤트·승인·단계의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/orchestrator_chat.py#OrchestratorChatSendInput",

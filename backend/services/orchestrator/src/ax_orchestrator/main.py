@@ -285,6 +285,13 @@ async def finance_opinions() -> dict:
     return {"data": list(reversed(rows)), "meta": {"mock": state.mock}}
 
 
+@app.get("/api/agent-diagnoses")
+async def agent_diagnoses() -> dict:
+    """인사가 에이전트 평가에서 반복을 찾아 보낸 진단 요청. 최근 받은 것부터. 읽기 전용."""
+    rows = state.manager.agent_diagnoses.list() if state.manager else []
+    return {"data": list(reversed(rows)), "meta": {"mock": state.mock}}
+
+
 @app.get("/api/incidents/{context_id}")
 async def incident(context_id: str) -> JSONResponse:
     inc = state.manager.incidents.get(context_id) if state.manager else None
