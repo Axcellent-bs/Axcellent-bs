@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
@@ -47,34 +46,18 @@ def sample(run) -> list[dict]:  # noqa: ANN001
     return list(picked.values())
 
 
-# 만든 시각(벽시계)이 들어가는 칸. shop-api 시드·주문·outbox가 시나리오 시계 대신 지금 시각을 쓴다.
-# 캐시와 상관없이 실행마다 다르고, 평가가 부르는 조회(failed-orders·metric-series)는 읽지 않는다.
-WALL_CLOCK = {
-    "sellers": {"created_at"},
-    "products": {"created_at", "updated_at"},
-    "buyers": {"created_at"},
-    "orders": {"promised_delivery_at"},
-    "outbox_events": {"created_at"},
-}
-
-
 def _dump(world) -> tuple[dict[str, list[dict]], list]:  # noqa: ANN001
-    """DB 전체(표마다 모든 행·칸)와 결제 기록. 벽시계 칸만 가린다."""
+    """DB 전체(표마다 모든 행·칸)와 결제 기록. 가린 칸은 없다.
+
+    가짜 판매 서버는 시각을 모두 시나리오 시계로 정한다(벽시계를 쓰는 칸이 없다). 그래서 시드
+    시각·약속 배송일까지 실행마다 같아야 한다.
+    """
     tables: dict[str, list[dict]] = {}
     with world.db.tx() as conn:
         names = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
         for name in sorted(names):
-            rows = []
-            for row in conn.execute(f'SELECT * FROM "{name}" ORDER BY rowid'):
-                values = dict(row)
-                for column in WALL_CLOCK.get(name, ()):
-                    values[column] = "<wall-clock>"
-                if name == "outbox_events":
-                    payload = json.loads(values["payload"])
-                    payload.pop("occurred_at")
-                    values["payload"] = payload
-                rows.append(values)
-            tables[name] = rows
+            rows = conn.execute(f'SELECT * FROM "{name}" ORDER BY rowid')
+            tables[name] = [dict(row) for row in rows]
     return tables, list(world.payments)
 
 
@@ -127,20 +110,29 @@ def test_key_follows_spec_and_code(tmp_path, monkeypatch) -> None:
     code.write_text("A = 1\n", encoding="utf-8")
     monkeypatch.setattr(eval_world, "CODE_FILES", (code,))
     monkeypatch.setattr(eval_world, "_BACKEND", tmp_path)
-    monkeypatch.setattr(eval_world, "SHOP_API_SRC", tmp_path / "shop")
+    shop = tmp_path / "fake_shop.py"
+    shop.write_text("B = 1\n", encoding="utf-8")
+    monkeypatch.setattr(eval_world, "SHOP_FILES", (shop,))
     monkeypatch.setattr(eval_world, "_code_hash", None)
     before = eval_world.code_hash()
     code.write_text("A = 2\n", encoding="utf-8")
     monkeypatch.setattr(eval_world, "_code_hash", None)
     assert eval_world.code_hash() != before
     assert eval_world.cache_path(spec, tmp_path).parent.name == eval_world.code_hash()
+    # 가짜 판매 서버가 바뀌어도 키가 바뀐다
+    middle = eval_world.code_hash()
+    shop.write_text("B = 2\n", encoding="utf-8")
+    monkeypatch.setattr(eval_world, "_code_hash", None)
+    assert eval_world.code_hash() not in (before, middle)
 
 
-def test_shop_api_source_is_part_of_the_key() -> None:
+def test_fake_shop_is_part_of_the_key() -> None:
+    """키는 판매 서버 소스가 아니라 가짜 판매 서버와 그 계약 고정본으로 정한다."""
     files = eval_world._source_files()
-    assert eval_world.SHOP_API_SRC / "ax_shop_api" / "service.py" in files
-    assert eval_world.SHOP_API_SRC / "ax_shop_api" / "seed.py" in files
-    assert all("__pycache__" not in f.parts for f in files)
+    assert EVAL / "fake_shop.py" in files
+    assert EVAL / "shop_api_openapi.json" in files
+    assert all(f.is_file() for f in files)
+    assert not any("shop-api" in f.parts for f in files)
 
 
 def test_no_env_means_no_cache(sample, tmp_path, monkeypatch) -> None:  # noqa: ANN001

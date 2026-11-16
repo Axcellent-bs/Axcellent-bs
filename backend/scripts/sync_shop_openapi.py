@@ -10,7 +10,7 @@
 
 공개 레포라 토큰 없이 읽는다. `GITHUB_TOKEN`이 있으면 커밋 조회에 붙인다(요청 한도).
 표준 라이브러리만 쓴다.
-새 사본(예: 데이터분석 가짜 판매 서버)이 생기면 `TARGETS`에 더한다.
+새 사본이 생기면 `TARGETS`에 더한다(지금: 재무·데이터분석 가짜 판매 서버).
 """
 
 from __future__ import annotations
@@ -44,6 +44,10 @@ TARGETS = [
     Target(
         pin=BACKEND / "domains/finance/eval/shop_api_openapi.json",
         source=BACKEND / "domains/finance/eval/fake_shop.py",
+    ),
+    Target(
+        pin=BACKEND / "domains/data/eval/shop_api_openapi.json",
+        source=BACKEND / "domains/data/eval/fake_shop.py",
     ),
 ]
 

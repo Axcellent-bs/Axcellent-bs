@@ -5,10 +5,11 @@ import { RULE_KO } from "@/components/finance/SafetyQueue";
 import { actionKo, holdPage, holdWhy, speaker } from "@/lib/agentChat";
 import { ACTION_KO as FINANCE_ACTION_KO, type ExecStatus, type ExecutionRecord, type Grade, type Review } from "@/lib/finance";
 import { ago, shortDateTime, won } from "@/lib/format";
-import { SAFETY_ACTION_KO, SAFETY_RULE_KO, safety, type ConnectionHold, type RegisteredAction, type SafetyThresholds } from "@/lib/safety";
+import { SAFETY_ACTION_KO, SAFETY_RULE_KO, safety, type RegisteredAction, type SafetyThresholds } from "@/lib/safety";
 
 // 안전규칙 AI 화면: 모든 AI의 상태 변경(돈·게시·배포)은 execute()로 안전규칙 AI를 지난다.
-// ① 사람 결정 대기 → ② 최근 판단 | ③ 등록된 일(두 칸) → ④ 연결 보류 → ⑤ 지키는 기준.
+// ① 사람 결정 대기 → ② 최근 판단 | ③ 등록된 일(두 칸) → ④ 지키는 기준.
+// 연결 보류(개발 AI의 KEV 판정)는 251 연결이 클라우드(GitHub)뿐이라 걸릴 일이 없어 화면에서 뺐다 (서버 기능은 그대로).
 // ① 사람 결정 대기는 모든 AI의 C 등급 보류다(모든 AI의 상태 변경이 execute()로 이 관문을 지나므로 따로 연동할 곳이 없다).
 // 모두 안전규칙 AI 서버(8001)의 기록을 그대로 읽는다. 결정은 그 일을 맡은 화면에서 사람이 한다 (여기서는 링크만).
 
@@ -38,6 +39,10 @@ function jobKo(a: string): string {
   return ko !== a ? ko : FINANCE_ACTION_KO[a] ?? SAFETY_ACTION_KO[a] ?? a;
 }
 const ruleKo = (key: string) => RULE_KO[key] ?? SAFETY_RULE_KO[key] ?? key;
+/** 한국 시각 날짜 "2026-11-16" */
+const dayOf = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+/** "11월 16일 (월)" */
+const dayLabel = (day: string) => new Date(`${day}T00:00:00+09:00`).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", weekday: "short" });
 const errText = (e: unknown) => (e instanceof Error ? e.message : "불러오지 못했습니다");
 const duration = (sec: number) => (sec >= 3600 ? `${Math.round(sec / 3600)}시간` : sec >= 60 ? `${Math.round(sec / 60)}분` : `${sec}초`);
 
@@ -78,18 +83,16 @@ type SafetyRule = SafetyThresholds["rules"][number];
 export default function Safety() {
   const [execs, setExecs] = useState<ExecutionRecord[] | null>(null);
   const [reviews, setReviews] = useState<Review[] | null>(null);
-  const [holds, setHolds] = useState<ConnectionHold[] | null>(null);
   const [thresholds, setThresholds] = useState<SafetyThresholds | null>(null);
   const [registry, setRegistry] = useState<RegisteredAction[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [at, setAt] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const got = await Promise.allSettled([safety.executions(), safety.reviews(), safety.connectionHolds(), safety.thresholds(), safety.registry()]);
-    const [e, r, h, t, g] = got;
+    const got = await Promise.allSettled([safety.executions(), safety.reviews(), safety.thresholds(), safety.registry()]);
+    const [e, r, t, g] = got;
     if (e.status === "fulfilled") setExecs(e.value);
     if (r.status === "fulfilled") setReviews(r.value);
-    if (h.status === "fulfilled") setHolds(h.value);
     if (t.status === "fulfilled") setThresholds(t.value);
     if (g.status === "fulfilled") setRegistry(g.value);
     const failed = got.find((x) => x.status === "rejected");
@@ -103,7 +106,15 @@ export default function Safety() {
     return () => clearInterval(t);
   }, [load]);
 
-  const recent = useMemo(() => (execs ? [...execs].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, RECENT) : []), [execs]);
+  // 최근 판단: 날짜를 고르면 그날 전부, 안 고르면 최근 RECENT건
+  const [day, setDay] = useState("");
+  const sorted = useMemo(() => (execs ? [...execs].sort((a, b) => b.created_at.localeCompare(a.created_at)) : []), [execs]);
+  const days = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const x of sorted) { const d = dayOf(x.created_at); m.set(d, (m.get(d) ?? 0) + 1); }
+    return [...m.entries()];
+  }, [sorted]);
+  const recent = useMemo(() => (day ? sorted.filter((x) => dayOf(x.created_at) === day) : sorted.slice(0, RECENT)), [sorted, day]);
   const pending = useMemo(() => (reviews ?? []).filter((r) => r.status === "pending").sort((a, b) => a.created_at.localeCompare(b.created_at)), [reviews]);
   const counts = useMemo(() => {
     const c = { total: execs?.length ?? 0, executed: 0, held: 0, rejected: 0 };
@@ -114,7 +125,6 @@ export default function Safety() {
     }
     return c;
   }, [execs]);
-  const activeHolds = (holds ?? []).filter((h) => h.hold);
   const rulesByAction = useMemo(() => {
     const m = new Map<string, SafetyRule[]>();
     for (const r of thresholds?.rules ?? []) m.set(r.action, [...(m.get(r.action) ?? []), r]);
@@ -122,7 +132,7 @@ export default function Safety() {
   }, [thresholds]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-8">
       <header className="card space-y-4 px-8 py-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -172,7 +182,16 @@ export default function Safety() {
       </Section>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <Section title="② 최근 판단" desc={`안전규칙 AI가 받은 실행 요청과 판단 결과입니다 (최근 ${RECENT}건).`}>
+        <Section title="② 최근 판단" desc={day ? `${dayLabel(day)}에 안전규칙 AI가 받은 실행 요청과 판단 결과입니다 (${recent.length}건).` : `안전규칙 AI가 받은 실행 요청과 판단 결과입니다 (최근 ${RECENT}건).`}
+          right={days.length > 0 && (
+            <label className="flex items-center gap-2 text-sm text-ink-500">
+              <span className="shrink-0">날짜</span>
+              <select id="safety-recent-day" className="field w-auto py-1" value={day} onChange={(e) => setDay(e.target.value)}>
+                <option value="">최근 {RECENT}건</option>
+                {days.map(([d, n]) => <option key={d} value={d}>{dayLabel(d)} · {n}건</option>)}
+              </select>
+            </label>
+          )}>
           {!execs ? <Empty>불러오는 중…</Empty> : recent.length === 0 ? <Empty>아직 받은 실행 요청이 없어요.</Empty> : (
             <div className="max-h-[640px] overflow-auto">
               <table className="w-full min-w-[520px] text-sm">
@@ -228,20 +247,7 @@ export default function Safety() {
         </Section>
       </div>
 
-      <Section title="④ 연결 보류" desc="개발 AI가 외부 연결 서버에서 실제로 악용 중인 취약점(CISA KEV)을 찾으면, 패치될 때까지 그 연결로 쓰는 일을 보류합니다.">
-        {!holds ? <Empty>불러오는 중…</Empty> : activeHolds.length === 0 ? <Empty>보류 중인 연결이 없어요.</Empty> : (
-          <ul className="divide-y divide-ink-100">
-            {activeHolds.map((h) => (
-              <li key={h.connection_id} className="py-3 text-sm">
-                <p className="font-medium">{h.product} {h.version}</p>
-                <p className="mt-0.5 text-sm text-ink-500">{h.kev_cves.join(", ")} · {shortDateTime(h.judged_at)} 판단 · {h.reason}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
-
-      <Section title="⑤ 지키는 기준" desc="이 기준에 걸리면 바로 실행하지 않고 사람 결정으로 보류합니다."
+      <Section title="④ 지키는 기준" desc="이 기준에 걸리면 바로 실행하지 않고 사람 결정으로 보류합니다."
         right={thresholds && <span className="text-sm text-ink-500">기준 {thresholds.version}판 · 검증 대기 {duration(thresholds.verify_timeout_seconds)} · 사람 결정 기한 {duration(thresholds.review_timeout_seconds)}</span>}>
         {!thresholds ? <Empty>불러오는 중…</Empty> : thresholds.rules.length === 0 ? <Empty>등록된 기준이 없어요.</Empty> : (
           <div className="grid gap-3 md:grid-cols-2">

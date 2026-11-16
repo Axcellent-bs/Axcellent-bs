@@ -2,7 +2,8 @@
 
 켠 서비스는 data 하나(켠 서비스 파일 `AX_ENABLED_SERVICES_FILE`)다.
 
-1. 결제 장애 데이터: data 평가 생성기(`eval_world`)가 실제 shop-api 코드로 만든 결제 장애 케이스
+1. 결제 장애 데이터: data 평가 생성기(`eval_world`)가 가짜 판매 서버(판매 서버와 같은 규칙)로 만든
+   결제 장애 케이스
 2. data 감시(`monitor.run_once`)가 이상을 찾아 `metric.anomaly`를 발행한다.
    data 이상 탐지 skill도 A2A로 부른다
 3. 총괄(IncidentManager + Engine)이 이벤트를 열고 data 영향 분석을 A2A로 부른다

@@ -452,6 +452,11 @@ async def accuracy_report(request: AgentRequest) -> AgentResult:
     )
 
 
+def get_reaction_sender():  # noqa: ANN201 - 테스트·평가가 바꿔 끼우는 자리
+    """고객지원 book_issue_stats 조회(브리프 고객 반응)에 쓰는 A2A 함수. 기본은 `call_agent`."""
+    return call_agent
+
+
 def get_fraud_card_sender():  # noqa: ANN201 - 테스트·평가가 바꿔 끼우는 자리
     """hr 유사 사기 카드 조회에 쓰는 A2A 함수. 기본은 `call_agent`."""
     return call_agent
@@ -1036,12 +1041,18 @@ async def _build_brief(
 
         return stored_info(env, datetime.now(UTC), ids)
 
+    async def reactions(ids: list[str]):  # noqa: ANN202 - 연결 상품의 고객 반응 (고객지원)
+        from data_agent.clients import customer_reaction
+
+        return await customer_reaction.read(ids, request.meta, send=get_reaction_sender())
+
     return await make_brief(
         data, llm, env=env, popular=popular_out, popular_reason=popular_why, rising=rising,
         age_fn=ages, promo=promo_out, catalog=catalog, aliases=cand_aliases(env),
         category_cache=get_category_cache(), shorts=shorts_out,
         context_id=request.meta.context_id, opportunities_fn=opportunities,
         video_info=video_info, warned=warned, same_targets=cand_same_targets(env), build=build,
+        reaction_fn=reactions,
     )  # fmt: skip
 
 

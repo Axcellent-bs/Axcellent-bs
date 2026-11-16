@@ -126,3 +126,13 @@ async def test_answer_runs_with_facts(gate: Gate, coupon, llm: FakeLLM) -> None:
     got = service.get("태윤", th["id"])
     assert [m["text"] for m in got["messages"]] == ["왜 보류됐어?", "보류 1건이에요."]
     assert llm.seen[0]["facts"]["pending_reviews"][0]["rules_hit"]
+
+
+def test_detail_by_query_is_the_same_as_the_path(chat_client: TestClient) -> None:
+    """251 nginx는 `chat` 주소에만 사람 토큰을 붙여서 화면은 상세를 `?thread_id=`로 읽는다."""
+    res = chat_client.post("/api/safety/chat", json={"message": "등급이 뭐야?"}, headers=HUMAN)
+    tid = res.json()["data"]["id"]
+    by_query = chat_client.get(f"/api/safety/chat?thread_id={tid}", headers=HUMAN).json()["data"]
+    assert by_query["id"] == tid and by_query["restricted"] is False
+    assert by_query["messages"][0]["text"] == "등급이 뭐야?"
+    assert chat_client.get("/api/safety/chat?thread_id=safetychat-99").status_code == 404

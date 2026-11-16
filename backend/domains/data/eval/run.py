@@ -1,11 +1,11 @@
 """데이터 분석 에이전트 정확도 평가: uv run python domains/data/eval/run.py
 
-- 정답지 `cases/*.json`의 시나리오마다 쇼핑몰 데이터를 실제 shop-api 코드로 다시 만들고
-  (`eval_world`), data의 실제 skill 코드로 돌려 정답과 비교한다.
-  - 이상 탐지: `detect_anomalies` (shop-api 지표 시계열을 data 커넥터 `ShopApiConnector`로 읽는다)
+- 정답지 `cases/*.json`의 시나리오마다 쇼핑몰 데이터를 가짜 판매 서버(`fake_shop.py`, 판매 서버와
+  같은 규칙)로 다시 만들고(`eval_world`), data의 실제 skill 코드로 돌려 정답과 비교한다.
+  - 이상 탐지: `detect_anomalies` (판매 서버 지표 시계열을 data 커넥터 `ShopApiConnector`로 읽는다)
   - 영향 분석: `analyze_impact` (실패 주문을 같은 커넥터 `ShopApiConnector`로 읽는다)
-  - 사기 점수: `fraud_score` 핸들러. 판매자마다 shop-api 코드로 임시 DB를 만들고(`eval_sellers`)
-    핸들러가 data의 `HttpSellerClient`로 읽는다. shop-api에 없는 사실(사업자 중복·유사 카드)은
+  - 사기 점수: `fraud_score` 핸들러. 판매자마다 가짜 판매 서버를 만들고(`eval_sellers`)
+    핸들러가 data의 `HttpSellerClient`로 읽는다. 판매 서버에 없는 사실(사업자 중복·유사 카드)은
     핸들러에서 "확인할 수 없음"이라 점수에서 빠진다(`fraud.precision`·`recall`). 빠진 규칙을
     모두 위험으로 본 상한 등급도 따로 잰다(`fraud.conservative_*`, `complete_rate`). 참고로 정답지
     `facts` 전부로 낸 규칙 점수(`metrics/fraud.score_seller`)도 라벨과 비교한다(`rule_*`).
@@ -49,7 +49,6 @@ from ax_contracts.schemas.data import (  # noqa: E402
     ImpactAnalysisOutput,
     RootCauseInput,
 )
-from ax_shop_api.lookups import Lookups  # noqa: E402
 from data_agent import detect, handlers  # noqa: E402
 from data_agent.clients.shop_client import (  # noqa: E402
     HttpSellerClient,
@@ -463,11 +462,13 @@ async def run_case(case: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _facts_drift(db: Any, seller: dict[str, Any], now: datetime) -> list[str]:
-    """만든 shop-api 데이터가 정답지 facts(shop-api에 넣을 수 있는 것)와 다른 항목."""
-    lookups = Lookups(db, now=lambda: now)
-    profile = lookups.seller_profile(ShopSellerProfileQuery(seller_id=seller["id"]))
-    prices = lookups.seller_prices(ShopSellerPricesQuery(seller_id=seller["id"]))
+def _facts_drift(shop: Any, seller: dict[str, Any], now: datetime) -> list[str]:
+    """만든 판매자 데이터가 정답지 facts(판매 서버에 넣을 수 있는 것)와 다른 항목.
+
+    `shop`은 `eval_sellers.build`가 만든 가짜 판매 서버다(판매 서버와 같은 조회 계산).
+    """
+    profile = shop.seller_profile(ShopSellerProfileQuery(seller_id=seller["id"]), now)
+    prices = shop.seller_prices(ShopSellerPricesQuery(seller_id=seller["id"]))
     pairs = [(i.price, i.category_median_price) for i in prices.items]
     got = {
         "joined_days": (now - profile.joined_at).days,
@@ -483,9 +484,9 @@ async def run_sellers(sellers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     try:
         for seller in sellers:
             now = datetime.now(UTC)
-            db = eval_sellers.build(seller, now)
+            shop = eval_sellers.build(seller, now)
             async with httpx.AsyncClient(
-                transport=eval_sellers.transport(db), base_url="http://shop"
+                transport=eval_sellers.transport(shop), base_url="http://shop"
             ) as client:
                 api = ShopApi("http://shop", token="eval", client=client)
                 handlers.get_seller_client = lambda api=api: HttpSellerClient(api)
@@ -502,7 +503,7 @@ async def run_sellers(sellers: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 {
                     "id": seller["id"],
                     "label": seller["label"],
-                    "facts_drift": _facts_drift(db, seller, now),
+                    "facts_drift": _facts_drift(shop, seller, now),
                     "skill_status": result.status.value,
                     "skill_outcome": result.outcome,
                     "skill_score": output.get("score"),

@@ -10,7 +10,7 @@ uv run python domains/data/eval/campaign_revenue/score.py --judge <모듈>:<함�
 ```
 
 ## 데이터
-결제·캠페인 평가와 같은 생성기(`eval/eval_world.py`, shop-api 코드)로 만든 합성 쇼핑몰. 이 평가를 위해 생성기에 두 칸을 더했다(없으면 예전과 똑같이 만든다).
+결제·캠페인 평가와 같은 생성기(`eval/eval_world.py`, 가짜 판매 서버)로 만든 합성 쇼핑몰. 이 평가를 위해 생성기에 두 칸을 더했다(없으면 예전과 똑같이 만든다).
 - `basket.qty_factor`: 구간 안 주문의 수량 배수 (주문 수는 그대로, 금액만 늘림)
 - `payment_gap.days_ago`: 그 날(0 = 구간, k = k일 전 같은 시간대) 주문은 만들고 결제하지 않음 (결제 기록 공백, shop-api에는 결제 대기 주문으로 남는다)
 - 응답에 `GET /api/shop/orders?since&until`(shop-api와 같은 코드)을 더함

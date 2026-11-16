@@ -19,12 +19,12 @@ type Talk = NonNullable<DirectAgent["talk"]>;
 type Thread = Awaited<ReturnType<Talk["get"]>>;
 
 /** 받는 곳 칩 순서 (서버를 부르는 대상은 이 목록뿐) */
-export const OFFICE_TALK_KEYS = ["dev", "data", "support", "finance", "planning", "marketing", "hr", "infra", "orchestrator"] as const;
+export const OFFICE_TALK_KEYS = ["dev", "data", "support", "finance", "planning", "marketing", "hr", "infra", "orchestrator", "safety"] as const;
 export const TALK_KEYS = OFFICE_TALK_KEYS;
 export type TalkKey = (typeof OFFICE_TALK_KEYS)[number];
 /** 칩 이름 (사무실 자리 이름과 같다) */
 export const TALK_LABEL: Record<string, string> = {
-  dev: "개발", data: "데이터분석", support: "고객지원", finance: "재무", planning: "기획", marketing: "마케팅", hr: "인사", orchestrator: "총괄", infra: "인프라",
+  dev: "개발", data: "데이터분석", support: "고객지원", finance: "재무", planning: "기획", marketing: "마케팅", hr: "인사", orchestrator: "총괄", infra: "인프라", safety: "안전규칙",
 };
 
 export interface TalkChip { key: string; label: string; disabled: boolean; reason: string | null }

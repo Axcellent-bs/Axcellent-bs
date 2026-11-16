@@ -46,9 +46,19 @@ MAX_HOURS = 168
 MAX_ROWS = 200
 ALL_ROOM = "all"  # 전체 대화방 (화면 ALL_ROOM). 장애·이슈 방은 총괄 사건 context_id
 
-# 단톡방에서 말을 걸 수 있는 부서 (화면 useOfficeTalk의 OFFICE_TALK_KEYS와 같다)
+# 단톡방에서 말을 걸 수 있는 부서 (화면 useOfficeTalk의 OFFICE_TALK_KEYS와 같다).
+# safety(안전규칙 AI)는 대화가 안전규칙 서버 HTTP `/api/safety/chat`에 있다
 Agent = Literal[
-    "dev", "data", "support", "finance", "planning", "marketing", "hr", "infra", "orchestrator"
+    "dev",
+    "data",
+    "support",
+    "finance",
+    "planning",
+    "marketing",
+    "hr",
+    "infra",
+    "orchestrator",
+    "safety",
 ]
 
 _SCHEMA = """
@@ -239,7 +249,7 @@ async def remove_office_room(
     (기록은 보관, 되돌릴 수 있음).
     1. 그 방에 보이는 줄이 없으면 404, 내가 만든 줄이 없으면 403 "만든 사람만 삭제할 수 있어요"
     2. 내가 만든 줄을 office_room.db에서 숨긴다 (다른 사람이 만든 줄은 그대로)
-    3. 각 줄의 부서 대화 서버에서 그 대화를 숨긴다(`<부서>_chat_remove`, 인사는 HTTP).
+    3. 각 줄의 부서 대화 서버에서 그 대화를 숨긴다(`<부서>_chat_remove`, 인사·안전규칙은 HTTP).
        한 부서가 실패해도 나머지는 계속하고 부서별 결과를 돌려준다.
        이미 없는 대화(404)는 지운 것으로 본다
     다른 화면은 목록(GET)을 다시 읽을 때 사라진 것을 본다.

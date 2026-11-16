@@ -84,10 +84,16 @@ def test_write_needs_human_token(client: TestClient) -> None:
     assert client.get(BASE).json()["data"] == []
 
 
+def test_safety_thread_is_listed(client: TestClient) -> None:
+    """안전규칙 AI도 단톡방에서 말을 받는다 (11/16)."""
+    client.post(BASE, json=_body(agent="safety", thread_id="safetychat-1"), headers=HUMAN)
+    assert [r["agent"] for r in client.get(BASE).json()["data"]] == ["safety"]
+
+
 @pytest.mark.parametrize(
     "bad",
     [
-        {"agent": "safety"},
+        {"agent": "memory"},
         {"thread_id": ""},
         {"from_name": ""},
         {"from_name": "가" * 41},
