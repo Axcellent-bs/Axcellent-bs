@@ -1,0 +1,27 @@
+name: shop-openapi-drift
+
+# 판매 서버(Catbooks-demo/catbooks-demo) OpenAPI 원본과 AXcellent 사본이 같은지 하루 한 번 본다.
+# PR 필수 체크가 아니다: 원본이 바뀌어도 AXcellent PR은 막지 않고, 이 작업만 실패로 알린다.
+# 고치기: cd backend && python scripts/sync_shop_openapi.py  → PR
+on:
+  schedule:
+    - cron: "0 0 * * *" # 매일 09:00 KST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: backend/.python-version
+      - run: python scripts/sync_shop_openapi.py --check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

@@ -10,7 +10,8 @@
   `/sellers`·`/coupons`에 판매 서버와 같은 `{data, meta}` 모양으로 답한다(주문은 `order_id` 순
   페이지, `meta.next_cursor`).
 - 모양이 판매 서버 계약과 맞는지는 고정본 `shop_api_openapi.json`(`OPENAPI_SOURCE`)으로 시험이
-  잰다(`tests/test_holdout_fake_shop.py`). 판매 서버 계약이 바뀌면 고정본을 새 커밋에서 다시 받는다.
+  잰다(`tests/test_holdout_fake_shop.py`). 판매 서버 계약이 바뀌면 고정본을 새 커밋에서 다시 받는다:
+  `cd backend && python scripts/sync_shop_openapi.py` (어긋났는지만: `--check`).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import httpx
 
 OPENAPI_PATH = Path(__file__).resolve().parent / "shop_api_openapi.json"
 OPENAPI_SOURCE = (
-    "Catbooks-demo/catbooks-demo@4e75f59d7f9ebd70531cf29a3e5b973f6b2517ae "
+    "Catbooks-demo/catbooks-demo@bb70ac67014e083b8a4c960803077a9ffdd13568 "
     "backend/contracts/openapi/shop-api.json"
 )
 
