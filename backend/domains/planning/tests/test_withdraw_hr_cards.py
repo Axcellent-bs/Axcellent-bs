@@ -167,6 +167,42 @@ def test_the_retry_really_runs_when_the_server_starts(monkeypatch: pytest.Monkey
     assert calls == [1]
 
 
+def test_resync_and_resume_really_run_when_the_server_starts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """켤 때 개발 서비스와 맞추기·마케팅 다시 보내기도 lifespan으로 돈다 (on_startup은 안 돈다)."""
+    import time
+
+    from fastapi.testclient import TestClient
+
+    import planning_agent.main as planning_main
+    from planning_agent.runtime import get_service
+
+    calls: list[str] = []
+
+    async def fake_resync() -> None:
+        calls.append("resync")
+
+    def fake_resume() -> int:
+        calls.append("resume")
+        return 0
+
+    async def fake_retire() -> list[str]:
+        return []
+
+    svc = get_service()
+    monkeypatch.setattr(svc, "resync_peer", fake_resync)
+    monkeypatch.setattr(svc, "resume_briefs", fake_resume)
+    monkeypatch.setattr(svc, "retire_withdrawn_cards", fake_retire)
+    with TestClient(planning_main.app) as client:
+        for _ in range(50):
+            client.get("/health")
+            if len(calls) == 2:
+                break
+            time.sleep(0.02)
+    assert sorted(calls) == ["resume", "resync"]
+
+
 def test_an_old_hr_retire_line_still_counts_as_done() -> None:
     """아카이브로 나뉘기 전(11/16 #1131 전)에 `to="hr"`로 남은 성공 줄도 내린 것으로 본다."""
     hr = Hr()
