@@ -3322,10 +3322,12 @@ class DevService(PlanningCore):
         notes: list[str],
         earlier: list[str] | None = None,
         ci_hold: str | None = None,
+        fixed: bool = False,
     ) -> bool:
         """리뷰 결과를 관문 review_pr 뒤 PR에 남긴다. 통과면 기존 자동 머지 규칙대로 잇는다.
         earlier는 PR 전에 고치느라 지나간 리뷰 결과다 (PR 리뷰 기록 앞에 붙인다).
         ci_hold는 CI가 실패·시간 초과해 자동 머지하지 않고 사람 확인으로 둘 이유다.
+        fixed는 리뷰 뒤 고친 코드라 다시 리뷰하지 않고 CI로 확인했다는 뜻이다 (통과로 남긴다).
 
         돌려주는 값: 불일치라 한 번 더 고쳐야 하면 True."""
         fix = False
@@ -3339,6 +3341,8 @@ class DevService(PlanningCore):
             cr.ci_hold = False  # 이번 리뷰 결과로 다시 정한다
             p.reviews.extend(earlier or [])  # type: ignore[arg-type]
             text = f"{p.id} 리뷰 {verdict} · 노트 {len(notes)}개"
+            if fixed:
+                text = f"{p.id} 리뷰 지적 반영 · CI로 확인 · 노트 {len(notes)}개"
             await self._execute(
                 "review_pr",
                 job.ctx,
@@ -3349,7 +3353,7 @@ class DevService(PlanningCore):
             p.reviews.append(verdict)  # type: ignore[arg-type]
             cr.review = CodingReview(verdict=verdict, notes=notes)  # type: ignore[arg-type]
             cr.updated_at = self.clock()
-            self._code_act(s, job, "code.review", f"리뷰 {verdict} · 노트 {len(notes)}개")
+            self._code_act(s, job, "code.review", text.removeprefix(f"{p.id} "))
             if verdict == "통과" and ci_hold:
                 task.state = "머지 대기"
                 self._hold(p, WAIT_HUMAN, pr_check(s, p))

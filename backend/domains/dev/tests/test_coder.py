@@ -265,20 +265,67 @@ def test_review_mismatch_then_one_fix_then_pass(service: PlanningService, adapte
     assert _points(service).count("code.review") == 1
 
 
-def test_review_mismatch_twice_waits_in_queue(service: PlanningService, adapter) -> None:
+def test_review_mismatch_fixed_once_without_second_review(
+    service: PlanningService, adapter
+) -> None:
+    """리뷰는 한 번만: 불일치면 한 번 고치고 다시 리뷰하지 않는다 (CI가 마지막 확인)."""
+    fake = FakeLLM(
+        plan=CodePlan(files=[FilePick(path=BANNER)]),
+        writes={BANNER: lambda d: BANNER_FIX if d["review_notes"] else BANNER_NEW},
+        reviews=[CodeReview(verdict="불일치", notes=["a"])],
+    )
+    coder.set_llm(fake)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "merged" and c.attempts == 2, c.error
+    assert [x[0] for x in fake.calls].count("CodeReview") == 1
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert pr.reviews == ["불일치", "통과"]
+    assert adapter.contents(pr.vcs_number)[BANNER] == BANNER_FIX
+    assert any("CI로 확인" in a.text for a in service.state.activity)
+
+
+@pytest.mark.parametrize("ci", ["none", "passed"])
+def test_fixed_code_is_checked_by_ci(
+    service: PlanningService, adapter, monkeypatch, ci: str
+) -> None:
+    """리뷰 뒤 고친 코드: CI 통과면 머지, CI가 없는 레포면 자동 머지하지 않고 사람 확인."""
+    monkeypatch.setattr(coder, "NO_CI_GRACE_SECONDS", 0.0)
+    monkeypatch.setattr(coder, "CI_POLL_SECONDS", 0.0)
+    vcs.set_vcs(ChecksAdapter(ci))
     coder.set_llm(
         FakeLLM(
             plan=CodePlan(files=[FilePick(path=BANNER)]),
             writes={BANNER: lambda d: BANNER_FIX if d["review_notes"] else BANNER_NEW},
-            reviews=[CodeReview(verdict="불일치", notes=["a"]), CodeReview(verdict="불일치")],
+            reviews=[CodeReview(verdict="불일치", notes=["a"])],
+        )
+    )
+    run(_go(service))
+    c = _task(service).coding
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    if ci == "passed":
+        assert c.status == "merged" and pr.merged, c.error
+        return
+    assert c.status == "waiting_human" and not pr.merged
+    assert "CI 없음" in (c.error or "") and c.ci_hold
+
+
+def test_review_mismatch_with_nothing_to_fix_waits_in_queue(
+    service: PlanningService, adapter
+) -> None:
+    coder.set_llm(
+        FakeLLM(
+            plan=CodePlan(files=[FilePick(path=BANNER)]),
+            writes={BANNER: BANNER_NEW},  # 지적을 받아도 같은 글 → 고친 게 없다
+            reviews=[CodeReview(verdict="불일치", notes=["a"])],
         )
     )
     run(_go(service))
     c = _task(service).coding
     assert c.status == "waiting_human" and c.attempts == 2
     pr = next(p for p in service.state.prs if p.id == c.pr)
-    assert pr.reviews == ["불일치", "불일치"] and not pr.merged
-    assert pr.auto_review is not None and "pr_review_mismatch" in pr.auto_review.rules
+    assert pr.reviews == ["불일치"] and not pr.merged
+    assert pr.auto_review is not None and "리뷰 불일치" in (c.error or "")
     rows = TestClient(app).get("/api/planning/review-queue").json()["data"]
     assert any(r["id"] == pr.id for r in rows)
 
@@ -994,7 +1041,7 @@ def test_base_changed_before_pr_rewrites_once(service: PlanningService, adapter)
     c = _task(service).coding
     assert c.status == "merged"
     assert "code.rebase" in _points(service)
-    assert [x[0] for x in fake.calls].count("CodeReview") == 2  # 다시 쓴 뒤 다시 리뷰
+    assert [x[0] for x in fake.calls].count("CodeReview") == 1  # 다시 쓴 뒤 다시 리뷰하지 않음
 
 
 def test_merge_conflict_retry_closes_pr_and_rewrites(service: PlanningService, adapter) -> None:

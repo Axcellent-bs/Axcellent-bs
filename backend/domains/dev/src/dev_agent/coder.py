@@ -1,9 +1,9 @@
 """코딩 에이전트 (개발 역할). 개발팀원이 개발 화면에 쓴 기획을 연결된 레포에 실제로 구현한다.
 
 흐름: 파일 목록 읽기 → 후보 파일 고르기(LLM, 이름만) → 후보 내용을 보고 확정(LLM) →
-파일마다 새 글 쓰기(LLM) → 완료 기준으로 리뷰(LLM) → 불일치면 한 번 고쳐(리뷰가 짚은 새
-파일도 더해) 다시 리뷰 → 관문 뒤 마지막 결과만 커밋 하나로 PR → 리뷰 결과를 PR에 남기고
-기존 자동 머지 규칙.
+파일마다 새 글 쓰기(LLM) → 완료 기준으로 리뷰(LLM, 한 번만) → 불일치면 한 번 고쳐(리뷰가
+짚은 새 파일도 더해) → 관문 뒤 마지막 결과만 커밋 하나로 PR → CI → 기존 자동 머지 규칙.
+고친 코드는 다시 리뷰하지 않고 CI 통과로 확인한다 (토큰 절약. CI가 없는 레포면 사람 확인).
 
 - 상태 잠금 밖에서 돈다. 단계마다 서비스의 작은 액션(`coding_*`)으로 진행 상태를 적는다 (SSE).
 - 한도: 파일 5개, 바뀐 줄 합 1500줄, 고칠 파일 600줄. 넘으면 PR 없이 사람 확인(`waiting_human`).
@@ -47,7 +47,7 @@ MAX_PER_MENTION = 50  # 글에 적힌 폴더·파일 이름 하나가 당겨 올
 ALL_FILES = 100_000  # 레포 파일 목록을 받을 때 한도 (자르지 않고 다 받는다)
 MAX_PLAN_CHARS = 8000
 MAX_DONE_LINES = 20
-MAX_ATTEMPTS = 2  # 첫 작성 + 리뷰 불일치 뒤 수정 1번
+MAX_ATTEMPTS = 2  # 첫 작성 + 리뷰 불일치 뒤 수정 1번 (다시 리뷰하지 않는다)
 MAX_NOTES = 5
 MAX_DIFF_CHARS = 12000  # 리뷰에 보낼 파일 하나의 diff 길이
 MAX_CANDIDATES = 8  # 내용을 보고 확정할 후보 파일 수
@@ -946,7 +946,7 @@ class Draft:
     contents: dict[str, str]
     rows: list[CodingFile]
     summary: str | None
-    verdicts: list[str] = field(default_factory=list)  # 리뷰 결과 차례대로
+    verdicts: list[str] = field(default_factory=list)  # 리뷰 결과 차례대로 (+ "고침"·"다시 씀")
     notes: list[str] = field(default_factory=list)  # 마지막 리뷰의 지적
     attempts: int = 1
     freshened: bool = False  # PR 직전 확인에서 최신 글로 한 번 다시 썼나
@@ -1220,54 +1220,70 @@ async def _run(svc: DevService, job: Job) -> None:
 
 
 async def _review(svc: DevService, job: Job, llm: Any, d: Draft) -> Draft:
-    """완료 기준으로 리뷰한다. 불일치면 짚은 파일만 고쳐 다시 리뷰 (모두 PR 전, 커밋 없음).
-    두 번째도 불일치거나 고친 게 없으면 그대로 돌려준다 (PR 뒤 사람 확인으로 간다)."""
+    """완료 기준으로 한 번 리뷰한다 (LLM). 불일치면 짚은 파일만 한 번 고치고 "고침"으로 남긴다.
+    고친 코드는 다시 리뷰하지 않는다: PR의 CI가 마지막 확인이다 (`final_verdict`).
+    고친 게 없으면 불일치 그대로 돌려준다 (PR 뒤 사람 확인)."""
     reasons = {r.path: r.reason for r in d.rows}
     d.picks = [p for p in d.picks if p.path in d.contents]
-    while True:
-        await svc.coding_step(job, "reviewing")
-        diffs = [
-            {"path": p, "diff": unified(p, d.originals.get(p, ""), c)}
-            for p, c in d.contents.items()
-        ]
-        review = await _ask(
-            llm, "리뷰", REVIEW_PROMPT, CodeReview, {**_base(job), "diffs": diffs}, job.ctx
+    await svc.coding_step(job, "reviewing")
+    diffs = [
+        {"path": p, "diff": unified(p, d.originals.get(p, ""), c)} for p, c in d.contents.items()
+    ]
+    review = await _ask(
+        llm, "리뷰", REVIEW_PROMPT, CodeReview, {**_base(job), "diffs": diffs}, job.ctx
+    )
+    d.notes = [" ".join(n.split())[:200] for n in review.notes if str(n).strip()][:MAX_NOTES]
+    d.verdicts.append(review.verdict)
+    if review.verdict == "통과" or d.attempts >= MAX_ATTEMPTS:
+        return d
+    d.attempts += 1
+    await svc.coding_step(job, "writing", attempts=d.attempts)
+    # 리뷰가 짚은 파일만 다시 쓴다 (짚은 게 없으면 전부, 새로 짚은 파일은 더한다)
+    targets = await _fix_targets(job, d.picks, review.fix_files, d.notes, d.originals)
+    d.picks += [t for t in targets if t not in d.picks]
+    current = {t.path: d.contents.get(t.path, d.originals.get(t.path, "")) for t in targets}
+    fixed, fix_reasons = await _write_all(llm, job, targets, current, d.notes)
+    changed = {p: c for p, c in fixed.items() if c != current[p]}
+    if not changed:
+        return d
+    d.contents.update(changed)
+    reasons.update({p: fix_reasons[p] for p in changed})
+    d.rows = file_rows(d.originals, d.contents, reasons)
+    if total_lines(d.rows) > MAX_TOTAL_LINES:
+        raise CoderStop(
+            "waiting_human",
+            f"수정 뒤 바뀐 줄 {total_lines(d.rows)}줄 > {MAX_TOTAL_LINES}줄 → 사람 확인 (PR 없음)",
         )
-        d.notes = [" ".join(n.split())[:200] for n in review.notes if str(n).strip()][:MAX_NOTES]
-        d.verdicts.append(review.verdict)
-        if review.verdict == "통과" or d.attempts >= MAX_ATTEMPTS:
-            return d
-        d.attempts += 1
-        await svc.coding_step(job, "writing", attempts=d.attempts)
-        # 리뷰가 짚은 파일만 다시 쓴다 (짚은 게 없으면 전부, 새로 짚은 파일은 더한다)
-        targets = await _fix_targets(job, d.picks, review.fix_files, d.notes, d.originals)
-        d.picks += [t for t in targets if t not in d.picks]
-        current = {t.path: d.contents.get(t.path, d.originals.get(t.path, "")) for t in targets}
-        fixed, fix_reasons = await _write_all(llm, job, targets, current, d.notes)
-        changed = {p: c for p, c in fixed.items() if c != current[p]}
-        if not changed:
-            return d
-        d.contents.update(changed)
-        reasons.update({p: fix_reasons[p] for p in changed})
-        d.rows = file_rows(d.originals, d.contents, reasons)
-        if total_lines(d.rows) > MAX_TOTAL_LINES:
-            raise CoderStop(
-                "waiting_human",
-                f"수정 뒤 바뀐 줄 {total_lines(d.rows)}줄 > {MAX_TOTAL_LINES}줄"
-                " → 사람 확인 (PR 없음)",
-            )
-        await svc.coding_step(
-            job,
-            "writing",
-            point="code.write",
-            text=f"리뷰 지적 반영\n{write_text(d.rows)}",
-            files=d.rows,
-        )
+    d.verdicts.append("고침")
+    await svc.coding_step(
+        job,
+        "writing",
+        point="code.write",
+        text=f"리뷰 지적 반영 (다시 리뷰하지 않고 CI로 확인)\n{write_text(d.rows)}",
+        files=d.rows,
+    )
+    return d
+
+
+def final_verdict(verdicts: list[str]) -> tuple[str, bool, list[str]]:
+    """PR에 남길 리뷰 결과, CI로만 확인하나(리뷰 뒤 코드를 고치거나 다시 씀), 앞 리뷰 결과들.
+
+    - 통과 → 통과 (리뷰 뒤 최신 코드 위에서 다시 썼으면 CI로 확인)
+    - 불일치 → 고침 → 통과로 남기되 CI 필수 (다시 리뷰하지 않는다)
+    - 불일치(고친 게 없음) → 불일치"""
+    real = [v for v in verdicts if v != "다시 씀"]
+    if not real:
+        return "불일치", False, []
+    earlier = [v for v in real[:-1] if v in ("통과", "불일치")]
+    rewritten = bool(verdicts) and verdicts[-1] == "다시 씀"
+    if real[-1] == "고침":
+        return "통과", True, earlier
+    return real[-1], real[-1] == "통과" and rewritten, earlier
 
 
 async def _freshen(svc: DevService, job: Job, d: Draft) -> Draft:
     """PR 올리기 직전 한 곳에서만 다시 쓴다: 읽었던 파일이 기준 브랜치에서 바뀌었으면 최신 글
-    위에서 그 파일만 다시 쓰고 다시 리뷰한다 (리뷰 결과가 옛 코드 기준으로 남지 않게).
+    위에서 그 파일만 다시 쓴다. 다시 리뷰하지 않고 CI 통과로 확인한다.
     한 번 다시 쓴 뒤에도 또 바뀌면 사람 확인. 고치기 횟수는 리뷰 고치기와 같이 센다."""
     paths = [p.path for p in d.picks if p.action == "modify" and p.path in d.contents]
     if not paths:
@@ -1316,13 +1332,13 @@ async def _freshen(svc: DevService, job: Job, d: Draft) -> Draft:
         job, "writing", point="code.write", text=f"최신 코드 위에서 다시 씀\n{write_text(d.rows)}",
         files=d.rows,
     )  # fmt: skip
-    d.verdicts.append("다시 씀")
-    d = await _review(svc, job, llm, d)
+    d.verdicts.append("다시 씀")  # 다시 리뷰하지 않는다: CI가 확인한다 (final_verdict)
     return await _freshen(svc, job, d)
 
 
-async def _wait_ci(svc: DevService, job: Job) -> str | None:
+async def _wait_ci(svc: DevService, job: Job, need_ci: bool = False) -> str | None:
     """PR CI가 끝날 때까지 기다린다. 통과·CI 없는 레포면 None, 아니면 사람 확인 이유.
+    need_ci(리뷰 뒤 고친 코드)면 CI 없는 레포도 사람 확인이다 (확인한 곳이 없으니).
 
     자동 머지·교차검증은 CI가 끝난 뒤에 본다 (교차검증 대기 시간도 그때부터 센다)."""
     pr = svc.coding_pr(job)
@@ -1349,6 +1365,8 @@ async def _wait_ci(svc: DevService, job: Job) -> str | None:
             names = ", ".join(r.name for r in checks.runs if r.state == "failed")
             return f"{pr.id} CI 실패 ({names[:120]}) → 사람 확인"
         if not checks.runs and waited >= NO_CI_GRACE_SECONDS:
+            if need_ci:
+                return f"{pr.id} CI 없음 → 리뷰 뒤 고친 코드라 사람 확인"
             await svc.coding_step(
                 job, "reviewing", point="code.ci", text=f"{pr.id} CI 없음\n검사 없이 이어감"
             )
@@ -1359,11 +1377,11 @@ async def _wait_ci(svc: DevService, job: Job) -> str | None:
 
 
 async def _finish(svc: DevService, job: Job, d: Draft) -> None:
-    """PR에 리뷰 결과를 남긴다. 통과면 CI를 기다린 뒤 자동 머지 규칙으로 잇는다."""
-    verdict = d.verdicts[-1] if d.verdicts else "불일치"
-    hold = await _wait_ci(svc, job) if verdict == "통과" else None
-    earlier = [v for v in d.verdicts[:-1] if v != "다시 씀"]
-    if await svc.coding_review(job, verdict, d.notes, earlier=earlier, ci_hold=hold):
+    """PR에 리뷰 결과를 남긴다. 통과면 CI를 기다린 뒤 자동 머지 규칙으로 잇는다.
+    리뷰 뒤 고친 코드는 CI가 꼭 있어야 한다 (다시 리뷰하지 않으므로)."""
+    verdict, ci_only, earlier = final_verdict(d.verdicts)
+    hold = await _wait_ci(svc, job, need_ci=ci_only) if verdict == "통과" else None
+    if await svc.coding_review(job, verdict, d.notes, earlier=earlier, ci_hold=hold, fixed=ci_only):
         raise CoderStop("waiting_human", "리뷰 불일치 → 사람 확인")
 
 
