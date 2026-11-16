@@ -228,6 +228,16 @@ load_policy() {
   done < "${POLICY_FILE}"
   validate_self_approve
   validate_autodeploy
+  validate_restart
+}
+
+# [restart] backup_keep: 없으면 백업을 지우지 않는다. 있으면 2 이상 정수만(이번 세트와 직전 세트는 늘 남겨야 한다).
+validate_restart() {
+  local v="${POLICY[restart.backup_keep]-}"
+  [[ -n "${POLICY[restart.backup_keep]+x}" ]] || return 0
+  if [[ ! "${v}" =~ ^[1-9][0-9]{0,8}$ ]] || (( v < 2 )); then
+    deny "policy-value" "${RC_CONFIG}" "정책 restart.backup_keep 은 2 이상의 정수여야 한다(없애면 정리 안 함)"
+  fi
 }
 
 # [autodeploy]: 자동 배포 정지 표시 파일. 모르는 키가 있으면 정책 로드 실패(전체 거부)다.
@@ -1314,6 +1324,7 @@ do_status() {
     say "location 프로필: ${REPLY} (nginx-add-location 맨 뒤에 이름을 붙인다)"
   fi
   pending_list
+  backup_status_line
 }
 
 do_lock() {
@@ -1817,6 +1828,175 @@ backup_dest() { # 원본경로 [확장자] → BACKUP_DEST. 같은 이름이 있
     dest="${dest}.${REPLY}"
   fi
   BACKUP_DEST="${dest}${ext}"
+  BK_CURRENT_NAMES+=("${BACKUP_DEST##*/}")
+}
+
+# ---------------------------------------------------------------------------
+# restart-backend 백업 보관 정리(정책 [restart] backup_keep). 기본은 없음 = 지우지 않는다.
+# 대상은 "정책에 적힌 폴더·sqlite 파일의 백업"뿐이다. 이름은 <원본이름>.bak-before-<SHA 8자>[.<시각>][접미]
+# 이고, 접미는 폴더 백업의 .tgz / -sqlite, sqlite 파일 백업의 없음만 인정한다. 그 밖의 이름·심볼릭 링크는 건드리지 않는다.
+# 번들 백업(www-*), .env 백업, deploy-* 파일, 정책에 없는 원본의 백업도 건드리지 않는다.
+# ---------------------------------------------------------------------------
+readonly RE_BAKBASE='^\.?[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$'
+readonly RE_BAKTAIL='^([0-9a-f]{8})(\.[0-9]{8}-[0-9]{6})?(\.tgz|-sqlite)?$'
+BK_CURRENT_NAMES=()          # 이번 실행이 만든 백업 이름
+declare -A BK_BASEKIND=()    # 원본이름 → dir | file
+declare -A BK_MEMBERS=()     # "원본|키" → 줄바꿈으로 구분한 이름들
+declare -A BK_NEWEST=()      # "원본|키" → 가장 최근 수정 시각(초)
+declare -A BK_CUR=()         # "원본|키" → 1 이면 이번 실행이 만든 세트
+declare -A BK_SIZEK=()       # 이름 → KiB
+BK_SETS=()
+BK_TOTALK=0
+
+backup_bases() { # 정책에서 정리 대상 원본 이름을 모은다(.env·www-·deploy- 계열과 이상한 이름은 뺀다)
+  local src b kind conflict=""
+  local -a skip=()
+  BK_BASEKIND=()
+  for kind in dir file; do
+    if [[ "${kind}" == "dir" ]]; then policy_items restart.backup_dirs; else policy_items restart.backup_sqlite; fi
+    for src in "${ITEMS[@]}"; do
+      path_ok "${src}" || continue
+      b="${src##*/}"
+      [[ "${b}" =~ ${RE_BAKBASE} && "${b}" != *..* ]] || continue
+      [[ "${b}" != .env* && "${b}" != www-* && "${b}" != deploy-* ]] || continue
+      if [[ -n "${BK_BASEKIND[${b}]+x}" && "${BK_BASEKIND[${b}]}" != "${kind}" ]]; then
+        skip+=("${b}")
+      fi
+      BK_BASEKIND["${b}"]="${kind}"
+    done
+  done
+  for b in "${skip[@]}"; do unset 'BK_BASEKIND[$b]'; done
+}
+
+fmt_kib() { # KiB → REPLY
+  local k="$1"
+  if (( k >= 1048576 )); then
+    REPLY="$((k * 10 / 1048576 / 10)).$((k * 10 / 1048576 % 10)) GiB"
+  elif (( k >= 1024 )); then
+    REPLY="$((k / 1024)) MiB"
+  else
+    REPLY="${k} KiB"
+  fi
+}
+
+backup_scan() { # P_backup_dir 안의 게이트 백업 세트를 모은다(숨김 이름 포함)
+  local p name base tail key ext id m t cur c k
+  BK_SETS=(); BK_MEMBERS=(); BK_NEWEST=(); BK_CUR=(); BK_SIZEK=(); BK_TOTALK=0
+  backup_bases
+  [[ -d "${P_backup_dir}" ]] || return 0
+  shopt -s dotglob nullglob
+  for p in "${P_backup_dir}"/*; do
+    [[ ! -L "${p}" ]] || continue
+    name="${p##*/}"
+    for base in "${!BK_BASEKIND[@]}"; do
+      [[ "${name}" == "${base}.bak-before-"* ]] || continue
+      tail="${name#"${base}.bak-before-"}"
+      [[ "${tail}" =~ ${RE_BAKTAIL} ]] || continue
+      key="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+      ext="${BASH_REMATCH[3]}"
+      if [[ "${BK_BASEKIND[${base}]}" == "dir" ]]; then
+        case "${ext}" in
+          .tgz) [[ -f "${p}" ]] || continue ;;
+          -sqlite) [[ -d "${p}" ]] || continue ;;
+          *) continue ;;
+        esac
+      else
+        [[ -z "${ext}" && -f "${p}" ]] || continue
+      fi
+      id="${base}|${key}"
+      m="$(stat -c %Y -- "${p}" 2>/dev/null)" || m=0
+      [[ "${m}" =~ ^[0-9]{1,12}$ ]] || m=0
+      k="$(du -sk -- "${p}" 2>/dev/null | cut -f1)" || k=0
+      [[ "${k}" =~ ^[0-9]{1,12}$ ]] || k=0
+      if [[ -z "${BK_MEMBERS[${id}]+x}" ]]; then
+        BK_SETS+=("${id}")
+        BK_MEMBERS["${id}"]=""
+        BK_NEWEST["${id}"]=0
+      fi
+      BK_MEMBERS["${id}"]+="${name}"$'\n'
+      t="${BK_NEWEST[${id}]}"
+      if (( m > t )); then BK_NEWEST["${id}"]="${m}"; fi
+      BK_SIZEK["${name}"]="${k}"
+      BK_TOTALK=$((BK_TOTALK + k))
+      for cur in "${BK_CURRENT_NAMES[@]}"; do
+        [[ "${cur}" == "${name}" ]] && BK_CUR["${id}"]=1
+      done
+      break
+    done
+  done
+  shopt -u dotglob nullglob
+  return 0
+}
+
+backup_delete_one() { # 이름 → 검증된 한 경로만 지운다. 실패하면 1
+  local name="$1" p real rdir
+  [[ "${name}" != */* && "${name}" != *..* && -n "${name}" ]] || return 1
+  p="${P_backup_dir}/${name}"
+  [[ ! -L "${p}" && -e "${p}" ]] || return 1
+  rdir="$(realpath -e -- "${P_backup_dir}")" || return 1
+  real="$(realpath -e -- "${p}")" || return 1
+  [[ "${real}" == "${rdir}/${name}" ]] || return 1
+  rm -rf --one-file-system -- "${real}"
+}
+
+backup_prune() {
+  local keep="${POLICY[restart.backup_keep]-}" line id base name size drop
+  local last_base="" rank=0 eff
+  local -a lines=() victims=()
+  [[ -n "${keep}" ]] || return 0
+  [[ "${keep}" =~ ^[1-9][0-9]{0,8}$ ]] && (( keep >= 2 )) || { say "경고: 보관 정리 건너뜀(backup_keep 값 이상)"; return 0; }
+  backup_scan
+  # 드라이런은 새 세트가 아직 없으므로 그 한 자리를 비워 두고 센다(실제 실행과 같은 결과가 나오게)
+  eff="${keep}"
+  (( DRY )) && eff=$((keep - 1))
+  # 정렬: 원본별로, 이번 실행 세트 먼저, 그다음 최근 순. 이번 세트와 직전 세트는 keep>=2 라서 항상 남는다.
+  for id in "${BK_SETS[@]}"; do
+    lines+=("${id%%|*} ${BK_CUR[${id}]:-0} ${BK_NEWEST[${id}]} ${id#*|}")
+  done
+  (( ${#lines[@]} > 0 )) || { say "보관 정리: 지울 백업 없음(backup_keep=${keep})"; return 0; }
+  while IFS= read -r line; do
+    set -- ${line}
+    base="$1"
+    if [[ "${base}" != "${last_base}" ]]; then last_base="${base}"; rank=0; fi
+    rank=$((rank + 1))
+    (( rank > eff )) || continue
+    [[ "$2" == "0" ]] || continue
+    victims+=("${base}|$4")
+  done < <(printf '%s\n' "${lines[@]}" | sort -k1,1 -k2,2nr -k3,3nr -k4,4r)
+  if (( ${#victims[@]} == 0 )); then
+    say "보관 정리: 지울 백업 없음(backup_keep=${keep})"
+    return 0
+  fi
+  for id in "${victims[@]}"; do
+    while IFS= read -r name; do
+      [[ -n "${name}" ]] || continue
+      fmt_kib "${BK_SIZEK[${name}]:-0}"
+      size="${REPLY}"
+      if (( DRY )); then
+        say "DRY_RUN: 보관 정리 예정: ${name} (${size})"
+        continue
+      fi
+      if backup_delete_one "${name}"; then
+        say "보관 정리: ${name} (${size})"
+        audit "backup-prune:${name}:${size// /}" || true
+      else
+        printf '경고: 보관 정리 실패(건너뜀): %s\n' "${name}" >&2
+      fi
+    done <<< "${BK_MEMBERS[${id}]}"
+  done
+  return 0
+}
+
+backup_status_line() {
+  local keep="${POLICY[restart.backup_keep]-}" desc
+  path_set backup_dir || return 0
+  require_paths backup_dir
+  backup_scan
+  (( ${#BK_BASEKIND[@]} > 0 )) || return 0
+  fmt_kib "${BK_TOTALK}"
+  desc="제한 없음"
+  [[ -z "${keep}" ]] || desc="backup_keep=${keep}"
+  say "백업 보관: ${#BK_SETS[@]}세트, 합계 ${REPLY} (정책 ${desc}; 숨김 항목 포함, 정책에 적힌 원본의 백업만 센다)"
 }
 
 # 재시작하려는 SHA 와 서버 레포 HEAD 가 다를 때. 어느 쪽이 앞섰는지 가려 다음에 칠 명령을 알려 준다.
@@ -1901,6 +2081,9 @@ do_restart_backend() {
     done
   done
   say "백업 끝"
+  # 백업이 다 끝난 뒤에만, 정책 backup_keep 이 있을 때만. 실패해도 재시작은 계속한다.
+  backup_prune || printf '경고: 백업 보관 정리 중 오류(재시작은 계속한다)
+' >&2
 
   say "재시작: 메모리에만 있는 상태가 지워진다(--ack-data-loss 확인됨)"
   run systemctl reset-failed "${unit}"
