@@ -131,6 +131,7 @@
 - `rollback-bundle <SHA>`는 그 백업을 풀어 번들 폴더만 되돌리고, 기록해 둔 직전 배포 해시를 알려 준다. 레포 체크아웃을 되돌리는 것은 게이트에 없다.
 - 번들 점검: 정책의 표시 문자열(`required_strings`)이 번들에 있어야 하고, 정책이 지정한 env 파일들(`secret_env_files`)의 값(12자 이상)이 번들에 들어 있으면 실패한다. 배포 스크립트가 일부러 번들에 넣는 값은 정책 `bundle_allowed_env_names`에 변수 이름을 적어 예외로 둔다.
 - sqlite 파일 백업은 파이썬 `sqlite3` 모듈의 backup API로 한다(sqlite3 명령이 없는 서버도 있다).
+- `restart-backend`의 폴더 백업은 결과물이 둘로 나뉜다: `<이름>.bak-before-<커밋 8자>.tgz`(sqlite 파일 `*.db`·`*.db-wal`·`*.db-shm`을 뺀 나머지)와 `<이름>.bak-before-<커밋 8자>-sqlite/`(700 폴더, 폴더 바로 아래 `*.db`를 backup API로 뜬 사본). 쓰는 중인 sqlite 파일을 tar가 읽다 실패하는 것을 막기 위해서다. 되돌릴 때는 둘 다 필요하다.
 - 번들 교체는 정책 `web_root_parent` 바로 아래 폴더에서만 한다.
 
 ### 자동 배포 정지·재개

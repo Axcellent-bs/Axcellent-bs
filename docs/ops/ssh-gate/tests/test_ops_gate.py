@@ -234,7 +234,13 @@ class GateCase(unittest.TestCase):
         write(r / "data/front.env", f"APP_FRONT_TOKEN={HUMAN}\n")
         write(r / "data/secrets.env", f"SOME_API_TOKEN={SECRET}\nSHORT=abc\n")
         write(r / "data/state.json", "{}")
-        write(r / "data/data-dir/x.db", "x")
+        (r / "data/data-dir").mkdir(parents=True, exist_ok=True)
+        ddb = sqlite3.connect(str(r / "data/data-dir/x.db"))
+        ddb.execute("create table t (v text)")
+        ddb.execute("insert into t values ('dir-row')")
+        ddb.commit()
+        ddb.close()
+        write(r / "data/data-dir/keep.txt", "keep")
         write(r / "opt/app/repo/backend/.env",
               f"APP_PUBLIC_MARK=placeholder-a\nAPP_VIEWER_TOKEN={VIEWER}\n")
         write(self.state / "git_known", f"{SHA}\n{SHA_LOCAL}\n{SHA_FEATURE}\n{SHA_OLD}\n")
@@ -819,9 +825,36 @@ class RestartTests(GateCase):
         for name in ("secrets.env", "state.json", ".env"):
             self.assertIn(f"{name}.bak-before-{SHA[:8]}", backups)
         self.assertIn(f"data-dir.bak-before-{SHA[:8]}.tgz", backups)
+        self.assertIn(f"data-dir.bak-before-{SHA[:8]}-sqlite", backups)
         self.assertIn("health: 3/3", p.stdout)
         for text in (p.stdout, p.stderr, self.audit_text()):
             self.assertNotIn(SECRET, text)
+
+    def test_dir_backup_excludes_sqlite_and_copies_it_separately(self):
+        import tarfile
+        self.assertRc(self.gate("owner-a", self.CMD), 0)
+        bdir = self.rootp / "backups"
+        with tarfile.open(bdir / f"data-dir.bak-before-{SHA[:8]}.tgz") as tf:
+            names = tf.getnames()
+        self.assertIn("data-dir/keep.txt", names)
+        self.assertNotIn("data-dir/x.db", names)
+        sq = bdir / f"data-dir.bak-before-{SHA[:8]}-sqlite"
+        self.assertTrue(sq.is_dir())
+        if os.name == "posix":
+            self.assertEqual(sq.stat().st_mode & 0o777, 0o700)
+        copy = sqlite3.connect(str(sq / "x.db"))
+        self.assertEqual(copy.execute("select v from t").fetchall(), [("dir-row",)])
+        copy.close()
+
+    def test_dry_run_shows_exclude_and_sqlite_backup_and_writes_nothing(self):
+        p = self.gate("owner-a", f"restart-backend {SHA} --ack-data-loss --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn(r"--exclude=\*.db", p.stdout)
+        self.assertIn(r"--exclude=\*.db-wal", p.stdout)
+        self.assertIn(r"--exclude=\*.db-shm", p.stdout)
+        self.assertIn("DRY_RUN: mkdir -m 700 --", p.stdout)
+        self.assertIn("DRY_RUN: python3 -I -c", p.stdout)
+        self.assertEqual(os.listdir(self.rootp / "backups"), [])
 
     def test_second_restart_keeps_first_backup(self):
         self.assertRc(self.gate("owner-a", self.CMD), 0)
