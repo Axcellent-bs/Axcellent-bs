@@ -40,6 +40,8 @@ class SalesOrderLine(AxModel):
     unit_price: int
     coupon_share: int = 0
     points_share: int = 0
+    # 상품 세부 분류 (예: 도서의 장르). 큰 분류는 category_code 그대로. 없으면 None (11/16 추가)
+    genre_code: str | None = None
 
 
 class SalesOrderRefund(AxModel):
