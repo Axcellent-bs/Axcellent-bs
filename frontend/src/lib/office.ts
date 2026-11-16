@@ -8,22 +8,23 @@ export type DeskKey = "infra" | "data" | "support" | "finance" | "planning" | "m
 
 export interface DeskDef { key: DeskKey; label: string; x: number; y: number; shirt: string; hair: string; skin: string }
 
-/** 사무실 좌표(논리 픽셀 256×176). 색은 캔버스 픽셀 그림 전용이다 (화면 UI 색은 디자인 토큰을 쓴다) */
+/** 사무실 좌표(논리 픽셀 256×176). 색은 캔버스 픽셀 그림 전용이다 (화면 UI 색은 디자인 토큰을 쓴다).
+ *  shirt는 이름표 앞 색 점이고, AI 대화방 대화 기록의 아바타 색(Messenger.tsx AVATAR)과 같게 둔다 */
 export const DESKS: DeskDef[] = [
-  { key: "infra", label: "인프라", x: 14, y: 62, shirt: "#2a9d8f", hair: "#1b1b1b", skin: "#f2c9a0" },
-  { key: "data", label: "데이터분석", x: 74, y: 62, shirt: "#6d28d9", hair: "#2b1d14", skin: "#f5d0b0" },
-  { key: "support", label: "고객지원", x: 134, y: 62, shirt: "#047857", hair: "#6b3e26", skin: "#f2c9a0" },
-  { key: "finance", label: "재무", x: 194, y: 62, shirt: "#b45309", hair: "#3a2a1a", skin: "#e8b98f" },
-  { key: "planning", label: "기획", x: 14, y: 128, shirt: "#5b4fd0", hair: "#191919", skin: "#f5d0b0" },
-  { key: "marketing", label: "마케팅", x: 74, y: 128, shirt: "#ec7452", hair: "#7a4a2a", skin: "#f2c9a0" },
-  { key: "hr", label: "인사", x: 134, y: 128, shirt: "#b91c1c", hair: "#4a2f1b", skin: "#e8b98f" },
+  { key: "infra", label: "인프라", x: 14, y: 62, shirt: "#4a4a6e", hair: "#1b1b1b", skin: "#f2c9a0" },
+  { key: "data", label: "데이터분석", x: 74, y: 62, shirt: "#2f7d4f", hair: "#2b1d14", skin: "#f5d0b0" },
+  { key: "support", label: "고객지원", x: 134, y: 62, shirt: "#f9a8d4", hair: "#6b3e26", skin: "#f2c9a0" },
+  { key: "finance", label: "재무", x: 194, y: 62, shirt: "#a87a0a", hair: "#3a2a1a", skin: "#e8b98f" },
+  { key: "planning", label: "기획", x: 14, y: 128, shirt: "#5b5bd6", hair: "#191919", skin: "#f5d0b0" },
+  { key: "marketing", label: "마케팅", x: 74, y: 128, shirt: "#bef264", hair: "#7a4a2a", skin: "#f2c9a0" },
+  { key: "hr", label: "인사", x: 134, y: 128, shirt: "#f97316", hair: "#4a2f1b", skin: "#e8b98f" },
   // 아카이브: 위 책상 앞쪽 의자(뒷모습). 장애·업무 기록을 남기고 찾아 준다. x·y는 쓰는 곳이 없다
-  { key: "archive", label: "아카이브", x: 14, y: 92, shirt: "#7c3aed", hair: "#2b1d14", skin: "#f2c9a0" },
+  { key: "archive", label: "아카이브", x: 14, y: 92, shirt: "#14b8a6", hair: "#2b1d14", skin: "#f2c9a0" },
   // 개발: 기획 맞은편 의자(뒷모습). x·y는 쓰는 곳이 없어(그림 자리는 PixelOffice SEATS) 기획 아래쪽 값만 둔다
-  { key: "dev", label: "개발", x: 14, y: 150, shirt: "#0369a1", hair: "#3a2a1a", skin: "#f2c9a0" },
-  { key: "orchestrator", label: "총괄 AI", x: 194, y: 128, shirt: "#2e2688", hair: "#222222", skin: "#f5d0b0" },
+  { key: "dev", label: "개발", x: 14, y: 150, shirt: "#232345", hair: "#3a2a1a", skin: "#f2c9a0" },
+  { key: "orchestrator", label: "총괄 AI", x: 194, y: 128, shirt: "#4c1d95", hair: "#222222", skin: "#f5d0b0" },
   // 안전규칙: 위 책상 앞쪽 의자(뒷모습). 모든 AI의 실행 요청(execute)을 받아 등급을 매긴다. x·y는 쓰는 곳이 없다
-  { key: "safety", label: "안전규칙", x: 74, y: 92, shirt: "#475569", hair: "#1b1b1b", skin: "#f5d0b0" },
+  { key: "safety", label: "안전규칙", x: 74, y: 92, shirt: "#fde047", hair: "#1b1b1b", skin: "#f5d0b0" },
 ];
 
 /** 기록의 부서 이름 → 자리. 회사 기억(memory)은 데이터 부서 담당이라 데이터 자리에 앉힌다. 안전규칙(safety)은 자기 자리가 있다 */
