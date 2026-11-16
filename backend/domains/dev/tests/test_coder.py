@@ -635,6 +635,52 @@ def test_confirm_step_sees_previews_and_can_change_picks(service: PlanningServic
     assert write[2]["others"] == []
 
 
+def test_confirm_is_skipped_when_the_task_names_the_files(
+    service: PlanningService, adapter
+) -> None:
+    """작업 글에 사람이 적은 파일만 후보면 확정 LLM을 부르지 않고 바로 쓴다 (토큰 절약)."""
+    fake = FakeLLM(
+        plan=CodePlan(files=[FilePick(path=BANNER, reason="배너")]), writes={BANNER: BANNER_NEW}
+    )
+    coder.set_llm(fake)
+    run(_go(service, plan=f"{BANNER}의 배너 문구를 신간 안내로 바꾼다."))
+    c = _task(service).coding
+    assert c.status == "merged", c.error
+    assert [x[0] for x in fake.calls] == ["CodePlan", "FileWrite", "CodeReview"]
+
+
+def test_confirm_still_runs_for_picks_the_task_did_not_name(
+    service: PlanningService, adapter
+) -> None:
+    """이름으로만 고른 후보가 섞이면 확정 단계를 그대로 거치고, 경로 목록은 줄여 보낸다."""
+    adapter.seed_files({f"shop-web/src/x/f{i:03d}.ts": "x\n" for i in range(300)})
+    fake = FakeLLM(
+        plan=CodePlan(
+            files=[FilePick(path=BANNER, reason="배너"), FilePick(path=CHECKOUT, reason="혹시")]
+        ),
+        writes={BANNER: BANNER_NEW, CHECKOUT: "export function Checkout() {\n  return 1\n}\n"},
+    )
+    coder.set_llm(fake)
+    run(_go(service, plan=f"{BANNER}의 배너 문구를 신간 안내로 바꾼다."))
+    plans = [x[2] for x in fake.calls if x[0] == "CodePlan"]
+    assert len(plans) == 2 and "candidates" in plans[1]
+    assert len(plans[0]["files"]) > coder.MAX_CONFIRM_LISTING
+    assert len(plans[1]["files"]) == coder.MAX_CONFIRM_LISTING
+    assert plans[1]["files"][0] == BANNER  # 글에 적힌 경로가 앞에 남는다
+
+
+def test_named_files_are_exact_single_files_only() -> None:
+    rows = ["web/a/Banner.tsx", "web/b/Banner.tsx", "web/c/Only.tsx", "web/c/x.ts"]
+    text = "Banner.tsx 고치고 Only.tsx, web/c 폴더, web/a/Banner.tsx"
+    assert coder.named_files(text, rows) == {"web/c/Only.tsx", "web/a/Banner.tsx"}
+    picks = [FilePick(path="web/c/Only.tsx", reason="x")]
+    assert coder.skip_confirm(picks, {"web/c/Only.tsx"})
+    assert not coder.skip_confirm(picks, set())
+    new = [FilePick(path="web/c/Only.tsx", action="create", reason="x")]
+    assert not coder.skip_confirm(new, {"web/c/Only.tsx"})
+    assert not coder.skip_confirm([], set())
+
+
 def test_review_can_add_a_file_in_fix_pass(service: PlanningService, adapter) -> None:
     """리뷰가 diff에 없던 파일을 짚으면 수정 단계에서 그 파일도 고친다 (없으면 새로 만든다)."""
     theme = "shop-web/src/theme.ts"

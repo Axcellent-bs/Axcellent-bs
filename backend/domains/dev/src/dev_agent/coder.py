@@ -51,6 +51,7 @@ MAX_ATTEMPTS = 2  # 첫 작성 + 리뷰 불일치 뒤 수정 1번
 MAX_NOTES = 5
 MAX_DIFF_CHARS = 12000  # 리뷰에 보낼 파일 하나의 diff 길이
 MAX_CANDIDATES = 8  # 내용을 보고 확정할 후보 파일 수
+MAX_CONFIRM_LISTING = 100  # 확정 단계에 다시 보여 줄 경로 수 (후보 밖 파일을 더할 때만 쓴다)
 MAX_PREVIEW_CHARS = 3000  # 후보 파일 하나의 미리보기 길이
 MAX_OUTLINE_LINES = 60  # 긴 파일은 앞부분 + 뼈대 줄(선택자·함수·export 등)만
 LLM_TIMEOUT_SECONDS = 400.0  # 단계 하나 전체 (요청 재시도 포함)
@@ -484,6 +485,32 @@ def mentioned(text: str, rows: list[str]) -> list[str]:
             hits = [p for p in rows if p.rsplit("/", 1)[-1] == t]
         out += [p for p in hits[:MAX_PER_MENTION] if p not in out]
     return out
+
+
+def named_files(text: str, rows: list[str]) -> set[str]:
+    """글에 파일 하나로 딱 짚힌 경로 (경로 그대로, 또는 이름이 하나뿐인 파일). 폴더는 뺀다."""
+    out: set[str] = set()
+    for tok in _PATH_RE.findall(text or ""):
+        t = tok
+        while t.startswith("./"):
+            t = t[2:]
+        t = t.rstrip("./").lstrip("/")
+        if not t or "." not in t.rsplit("/", 1)[-1]:
+            continue
+        hits = [p for p in rows if p == t or p.endswith("/" + t)]
+        if len(hits) == 1:
+            out.add(hits[0])
+    return out
+
+
+def skip_confirm(candidates: list[FilePick], named: set[str]) -> bool:
+    """후보가 모두 작업 글에 사람이 적은 파일이면 확정(LLM) 단계를 건너뛴다 (토큰 절약).
+
+    이름만 보고 고른 게 아니라 사람이 짚은 파일이라 미리보기로 다시 고를 게 없다. 빠진 파일은
+    뒤 리뷰가 `fix_files`로 더한다."""
+    return 0 < len(candidates) <= MAX_FILES and all(
+        p.action == "modify" and p.path in named for p in candidates
+    )
 
 
 def _words(text: str) -> set[str]:
@@ -1127,7 +1154,13 @@ async def _run(svc: DevService, job: Job) -> None:
         )
     bodies = await _read_all(adapter, [p.path for p in candidates if p.action == "modify"])
     plan = first
-    if bodies:
+    if bodies and skip_confirm(candidates, named_files(text, listed)):
+        await svc.coding_step(
+            job, "reading", point="code.read", text="작업 글에 적힌 파일이라 확정 단계 건너뜀"
+        )
+        plan = first.model_copy(update={"files": candidates})
+    elif bodies:
+        data = {**data, "files": listing[:MAX_CONFIRM_LISTING]}  # 앞 단계 기록은 그대로 둔다
         data["candidates"] = [
             {
                 "path": p.path,
