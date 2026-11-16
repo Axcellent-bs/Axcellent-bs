@@ -1805,6 +1805,51 @@
         "title": "TextBody",
         "type": "object"
       },
+      "ToolConnectionIn": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "kind": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Name",
+            "type": "string"
+          },
+          "secrets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Secrets",
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "ToolConnectionIn",
+        "type": "object"
+      },
       "TriageBody": {
         "description": "`send` 분류 필요로 올리기, `decide` 분류 이름 정하고 마치기, `clear` 표시 지우기.",
         "properties": {
@@ -9451,6 +9496,227 @@
           }
         },
         "summary": "support AI 1:1 대화 지우기 (본인 대화만)"
+      }
+    },
+    "/api/dashboard/tool-connections": {
+      "get": {
+        "operationId": "list_connections_api_dashboard_tool_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Connections Api Dashboard Tool Connections Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Connections"
+      },
+      "post": {
+        "operationId": "create_connection_api_dashboard_tool_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolConnectionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Connection"
+      }
+    },
+    "/api/dashboard/tool-connections/test": {
+      "post": {
+        "operationId": "test_connection_api_dashboard_tool_connections_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolConnectionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Test Connection Api Dashboard Tool Connections Test Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Connection"
+      }
+    },
+    "/api/dashboard/tool-connections/{conn_id}": {
+      "delete": {
+        "operationId": "delete_connection_api_dashboard_tool_connections__conn_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conn_id",
+            "required": true,
+            "schema": {
+              "title": "Conn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Connection Api Dashboard Tool Connections  Conn Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Connection"
+      },
+      "put": {
+        "operationId": "update_connection_api_dashboard_tool_connections__conn_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conn_id",
+            "required": true,
+            "schema": {
+              "title": "Conn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolConnectionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Connection"
+      }
+    },
+    "/api/dashboard/tool-connections/{conn_id}/check": {
+      "post": {
+        "operationId": "check_connection_api_dashboard_tool_connections__conn_id__check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conn_id",
+            "required": true,
+            "schema": {
+              "title": "Conn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Check Connection Api Dashboard Tool Connections  Conn Id  Check Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Connection"
       }
     },
     "/api/dashboard/users": {

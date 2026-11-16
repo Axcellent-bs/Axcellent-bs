@@ -18,6 +18,7 @@ from ax_dashboard_api import (
     shop_events,
     shop_relay,
     support_client,
+    tool_connections,
 )
 from ax_dashboard_api.envelope import install_error_handlers, is_mock
 from ax_dashboard_api.routes import router
@@ -102,6 +103,7 @@ app.include_router(handoffs.inbox)
 app.include_router(office_room.router)
 # 시스템 관리 > 회사 연결 (고객사 판매 서버 주소, 쓰기는 사람 토큰)
 app.include_router(company_connection.router)
+app.include_router(tool_connections.router)
 # 알림 받는 주소: 고객사 판매 서버가 회사 키로 이벤트를 보낸다 (사람 토큰 대신 회사 키)
 app.include_router(shop_events.router)
 # 판매자 정산: 고객지원(support)이 계산·지급 승인 요청을 한다 (요청은 사람 토큰)
