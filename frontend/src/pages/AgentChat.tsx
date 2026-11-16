@@ -83,8 +83,7 @@ function ConnChip({ label, conn }: { label: string; conn: Conn }) {
 function RoomAvatar({ room, agentKey, name }: { room?: ChatRoom; agentKey?: string; name?: string }) {
   if (agentKey) return <Avatar name={name ?? agentKey} k={agentKey} />;
   if (room?.kind === "all") return <span aria-hidden="true" className="chat-avatar flex h-9 w-9 shrink-0 items-center justify-center bg-brand-600 text-[11px] font-bold text-white">전체</span>;
-  const open = room?.status === "open";
-  return <span aria-hidden="true" className={`chat-avatar flex h-9 w-9 shrink-0 items-center justify-center text-[11px] font-bold text-white ${open ? "bg-red-700" : "bg-amber-700"}`}>장애</span>;
+  return <span aria-hidden="true" className="chat-avatar flex h-9 w-9 shrink-0 items-center justify-center bg-red-800 text-[11px] font-bold text-white">장애</span>;
 }
 
 /** 칸 번호 배지 (목록 줄·칸 머리) */
