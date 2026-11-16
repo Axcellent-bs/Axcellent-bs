@@ -47,6 +47,7 @@ class BookIssueRow(AxModel):
     title: str                           # 화면용. 묶는 열쇠가 아니다
     claim_count: int
     claims_by_type: dict[str, int]
+    claims_by_reason: dict[str, int]     # 사유 코드별 클레임 수(재현 님 요청, 합 = claim_count). 묶는 기준은 쓰는 쪽이 정한다
     defect_claim_count: int
     return_qty: int
     refund_cash_total: int
