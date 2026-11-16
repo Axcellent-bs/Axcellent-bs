@@ -36,14 +36,15 @@ class DenseCardSearch:
 def build_dense_search(
     db_path: str, env: Mapping[str, str] | None = None
 ) -> DenseCardSearch | None:
-    """임베딩 설정(`MEMORY_*` 또는 `LLM_*`·`EMBED_MODEL`)이 있고 hr DB가 파일일 때만 만든다.
+    """임베딩 설정(`MEMORY_*` 또는 `LLM_*`·`EMBED_MODEL`)이 있고 아카이브 DB가 파일일 때만 만든다.
 
-    벡터는 hr DB 옆의 `hr_vectors.db`에 둔다. 설정이 없으면 None이고, 호출하는 쪽은 Dice로 대체한다.
+    벡터는 DB 파일 옆의 `<DB 이름>_vectors.db`(archive.db면 archive_vectors.db)에 둔다.
+    설정이 없으면 None이고, 호출하는 쪽은 Dice로 대체한다.
     """
     settings = LLMSettings.from_env("memory", env if env is not None else os.environ)
     if not (settings.embed_model and settings.base_url) or db_path == ":memory:":
         return None
-    path = str(Path(db_path).with_name("hr_vectors.db"))
+    path = str(Path(db_path).with_name(f"{Path(db_path).stem}_vectors.db"))
     return DenseCardSearch(
         DenseIndex(path, LLMEmbedder(LLMClient("memory", settings)), settings.embed_model)
     )

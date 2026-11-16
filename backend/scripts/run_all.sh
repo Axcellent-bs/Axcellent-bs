@@ -347,6 +347,13 @@ fi
 
 # 고객사 데이터는 파일에 둔다 (다시 켜도 남는다). 쇼핑몰은 비어 있을 때만 시드를 넣는다
 export SHOP_DB_PATH="$PWD/$DATA/shop.db" HR_DB_PATH="$PWD/$DATA/hr.db"
+# 아카이브 AI(결정 기록·이슈 기록) 전용 파일. 옮기기 전(archive.db가 없을 때)에는 예전처럼 hr.db를 같이 읽어
+# 기록이 비어 보이지 않게 한다. 옮기기: uv run python scripts/migrate_archive_db.py
+if [ -f "$DATA/archive.db" ]; then
+  export ARCHIVE_DB_PATH="$PWD/$DATA/archive.db"
+else
+  echo "[주의] $DATA/archive.db가 없어 아카이브 AI가 hr.db를 같이 읽습니다 (scripts/migrate_archive_db.py로 옮기세요)"
+fi
 export AX_LLM_USAGE_DB="$PWD/$DATA/llm_usage.db"
 # 결제 장애 감지를 시연 시간에 맞춘다 (기본 1분 지속 → 20초, 5초마다 판정). .env 값이 있으면 그걸 쓴다
 export SHOP_DEGRADED_SUSTAIN_S="${SHOP_DEGRADED_SUSTAIN_S:-20}" SHOP_MONITOR_INTERVAL_S="${SHOP_MONITOR_INTERVAL_S:-5}"

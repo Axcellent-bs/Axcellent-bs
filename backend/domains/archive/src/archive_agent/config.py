@@ -93,7 +93,8 @@ class ArchiveSettings:
         source = os.environ if env is None else env
         return cls(
             mock=_flag(source, "HR_MOCK") or _flag(source, "AGENT_TEMPLATE_MOCK"),
-            db_path=source.get("HR_DB_PATH") or ":memory:",
+            # 전용 파일(ARCHIVE_DB_PATH)이 먼저, 없으면 예전처럼 HR_DB_PATH
+            db_path=source.get("ARCHIVE_DB_PATH") or source.get("HR_DB_PATH") or ":memory:",
             hold_ttl_minutes=_int(source, "HR_HOLD_TTL_MIN", 10),
             card_auto_confirm=source.get("HR_CARD_AUTO_CONFIRM") or "high",
             memory_mode=source.get("HR_MEMORY_MODE") or "mock",

@@ -57,6 +57,30 @@ proposal_ttl_hours = 24      # 제안이 승인을 기다릴 수 있는 시간
 # 자리표시: {method} {segment} {port}. 메서드 제한 한 줄과 "proxy_pass http://127.0.0.1:{port};" 한 줄은 필수다.
 block_lines = ["limit_except {method} { deny all; }", "rewrite ^/{segment}/(.*)$ /$1 break;", "proxy_pass http://127.0.0.1:{port};", "include snippets/example-proxy.conf;", "include snippets/example-auth.conf;"]
 
+# 프로필(선택): location 블록 끝에 덧붙는 지시어 묶음에 이름을 붙여 둔다. 요청하는 사람은 이름만 고른다
+#   nginx-add-location <이름> POST <정규식> <프로필이름>
+# 쓸 수 있는 지시어는 검증기가 정한 타임아웃·본문 크기 계열뿐이다:
+#   proxy_read_timeout proxy_send_timeout proxy_connect_timeout send_timeout client_body_timeout (1초~3600초, 단위 s/m)
+#   client_max_body_size (1k~1024m, 단위 k/m. 0=무제한은 안 된다)
+# 그 밖의 지시어(proxy_pass, include, rewrite, add_header 등)를 적으면 그 프로필을 쓰는 제안이 거부된다.
+# block_lines 에 이미 있는 지시어도 프로필에 넣을 수 없다. 프로필 이름은 영어 소문자·숫자·-.
+[location_profiles]
+long-timeout = ["proxy_read_timeout 300s;", "proxy_send_timeout 300s;"]
+big-body = ["client_max_body_size 50m;"]
+
+# 추가 nginx 대상 파일(선택). 이 구역이 없으면 [paths] nginx_conf 하나만 다룬다(예전과 같다).
+# 적으면 nginx-add-location 승인과 nginx-restore 가 대상 전부를 한 묶음으로 바꾼다:
+#   전부 사전 검증 → 전부 백업 → 전부 교체 → nginx -t 한 번 → reload. 어느 단계든 실패하면 전부 되돌린다.
+# 요청하는 사람은 대상을 고르지 못한다. 대상 파일마다 삽입 표시 줄(# AX-GATE-INSERT-BELOW)이 한 개씩 있어야 한다.
+# 이름은 영어 소문자·숫자·-. 값은 전체 경로. 쓰려면 아래 두 줄의 주석을 풀고 경로를 채운다.
+# [nginx_targets]
+# site-b = "TODO"
+
+# 대상별 블록 줄(선택). 그 대상의 기존 location 모양이 [location] block_lines 와 다를 때만 적는다.
+# 없으면 그 대상도 [location] block_lines 를 쓴다. 이름은 [nginx_targets] 에 있어야 한다. 규칙은 block_lines 와 같다.
+# [nginx_target_block_lines]
+# site-b = ["limit_except {method} { deny all; }", "proxy_pass http://127.0.0.1:{port};", "include snippets/example-proxy-b.conf;"]
+
 [lock]
 default_hours = 4     # lock 에 해제시각을 안 적었을 때 잠그는 시간
 max_hours = 24        # 한 번에 잠글 수 있는 최대 시간
