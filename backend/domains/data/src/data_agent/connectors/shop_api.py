@@ -22,6 +22,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_agent_template import config
+from ax_contracts.data_access.shop_customers import ShopCustomersExportResult
 from ax_contracts.data_access.shop_failed_orders import (
     ShopFailedOrdersQuery,
     ShopFailedOrdersResult,
@@ -50,6 +51,8 @@ ORDERS_CHUNK = timedelta(hours=1)
 ORDERS_PAGE = 1000
 FAILED_ORDERS_LIMIT = EVENTS_LIMIT  # shop-api `/failed-orders`의 최대 limit
 SALES_EXPORT_PAGE = 500  # 판매 기록 내보내기 한 페이지 (shop-api 최대 1000)
+CUSTOMERS_EXPORT_PAGE = 500  # 고객 내보내기 한 페이지 (계약 최대 1000)
+NOT_FOUND = "NOT_FOUND"  # 그 주소가 판매 서버에 없음 (오류 코드 없는 404)
 TRANSACTIONS_METRIC = "payment_count"  # 거래 시도 수 = 결제 시도 수
 
 # shop-api 오류 이름 (예전 이름). 커넥터 공통 오류와 같은 것이다
@@ -159,11 +162,16 @@ class ShopApi:
 
 
 def _error(response: httpx.Response) -> ShopUnavailable:
+    """오류 응답 → `ShopUnavailable`. shop-api 오류 코드가 있으면 그것, 없으면 `UNAVAILABLE`.
+
+    단 404에 오류 코드가 없으면(그 주소가 서버에 아직 없음, FastAPI 기본 404) `NOT_FOUND`다.
+    새 내보내기(고객 등)가 없는 판매 서버를 다른 실패와 나눠 보려고 쓴다.
+    """
     status = response.status_code
     try:
         code = str(response.json()["error"]["code"])
     except (ValueError, KeyError, TypeError):
-        code = "UNAVAILABLE"
+        code = NOT_FOUND if status == 404 else "UNAVAILABLE"
     return ShopUnavailable(code, f"shop-api 응답 {status} ({code})")
 
 
@@ -342,6 +350,23 @@ class ShopApiConnector:
             return ShopSalesExportResult.model_validate(data)
         except ValidationError as exc:
             raise ShopUnavailable("BAD_RESPONSE", "판매 기록 응답 형식이 계약과 다르다") from exc
+
+    async def customers_export(
+        self, cursor: str | None = None, limit: int = CUSTOMERS_EXPORT_PAGE
+    ) -> ShopCustomersExportResult:
+        """고객 한 페이지 (`GET /api/shop/customers-export`, 계약 `shop_customers`).
+
+        `(updated_at, buyer_id)` 순서로 `cursor` 다음부터 `limit`건. 판매 서버에 이 주소가
+        없으면(오류 코드 없는 404) `ShopUnavailable("NOT_FOUND")`, 형식이 다르면 `BAD_RESPONSE`.
+        """
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        data = await self.api.get("/customers-export", params)
+        try:
+            return ShopCustomersExportResult.model_validate(data)
+        except ValidationError as exc:
+            raise ShopUnavailable("BAD_RESPONSE", "고객 응답 형식이 계약과 다르다") from exc
 
     async def products(self) -> list[CatalogProduct]:
         """판매 중 상품 (shop-api가 판매 중만 준다). 형식이 다르면 `ShopUnavailable`."""

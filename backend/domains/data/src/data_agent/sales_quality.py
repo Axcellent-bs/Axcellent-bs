@@ -4,7 +4,8 @@
   직전 기간 = 같은 길이로 1일·7일·30일 앞(오늘이면 어제 0시 ~ 어제 같은 시각)
 - 저장소 시각은 UTC이고 여기서 한국 시간으로 바꿔 날짜·자정 경계를 정한다
 - 품질 보고: 기간 안 주문 행 수, 주문이 하나도 없는 날, 버린 행 수·이유, 마지막 수집 시각,
-  카탈로그에 이름이 없는 category_code
+  카탈로그에 이름이 없는 category_code, 카탈로그 genres에 없는 genre_code, 카탈로그 attributes에
+  없는 고객 속성 key·값(저장된 고객 전체 기준)
 - 품질 관문: 설정이 없거나, 끝까지 받은 적이 없거나, 마지막 수집이 `max_staleness_minutes`보다
   오래됐거나, 기간 안 결제 완료 주문이 `min_period_orders`보다 적으면 숫자를 내지 않고
   "데이터 부족: 이유"를 돌려준다
@@ -78,6 +79,15 @@ def quality(
             if line.category_code and line.category_code not in known
         }
     )
+    genres = cfg.genres if cfg else {}
+    unknown_genres = sorted(
+        {
+            line.genre_code
+            for o in orders
+            for line in o.lines
+            if line.genre_code and line.genre_code not in genres
+        }
+    )
     dropped = store.dropped(tenant_id, w.start, w.end)
     return SalesQuality(
         rows_in_period=len(orders),
@@ -86,7 +96,23 @@ def quality(
         dropped_reasons=dropped,
         last_synced_at=store.sync_state(tenant_id).last_synced_at,
         unknown_category_codes=unknown,
+        unknown_genres=unknown_genres,
+        unmapped_attribute_values=unmapped_attributes(store, tenant_id, cfg),
     )
+
+
+def unmapped_attributes(
+    store: SalesStore, tenant_id: str, cfg: CatalogSales | None
+) -> dict[str, list[str]]:
+    """저장된 고객 속성 중 카탈로그 `attributes`에 없는 것: key → 값 code 목록.
+    카탈로그에 없는 key는 그 key의 값을 모두 넣는다."""
+    known = {a.key: a.values for a in cfg.attributes} if cfg else {}
+    out: dict[str, list[str]] = {}
+    for key, codes in sorted(store.attribute_values(tenant_id).items()):
+        missing = sorted(c for c in codes if c not in known.get(key, {}))
+        if missing:
+            out[key] = missing
+    return out
 
 
 def paid_orders(orders: Sequence[StoredOrder]) -> list[StoredOrder]:
