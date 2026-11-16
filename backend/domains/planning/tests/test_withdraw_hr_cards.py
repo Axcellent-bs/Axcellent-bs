@@ -93,6 +93,7 @@ def test_withdraw_asks_hr_to_retire_the_request_cards() -> None:
     assert asked.reason
     [act] = _retire_acts(svc)
     assert act.grade == "A" and "인사 카드 1장 내림" in act.text and act.context_id == ctx
+    assert (act.from_, act.to) == ("planning", "archive")  # 결정 기록은 아카이브가 받는다 (#1131)
     # 이미 내렸으면 다시 부르지 않는다
     assert asyncio.run(svc.retire_withdrawn_cards()) == []
     assert len(hr.retires()) == 1
@@ -164,3 +165,24 @@ def test_the_retry_really_runs_when_the_server_starts(monkeypatch: pytest.Monkey
                 break
             time.sleep(0.02)
     assert calls == [1]
+
+
+def test_an_old_hr_retire_line_still_counts_as_done() -> None:
+    """아카이브로 나뉘기 전(11/16 #1131 전)에 `to="hr"`로 남은 성공 줄도 내린 것으로 본다."""
+    hr = Hr()
+    svc = _svc(hr)
+    at = datetime(2026, 11, 13, 6, 15, tzinfo=UTC)
+    svc.state.activity += [
+        Activity(
+            at=at, context_id="ctx_req_0032", from_="finance", to="planning",
+            point="withdraw_ticket", kind="A2A", grade="A",
+            text="REQ-35 요청 부서가 철회해 목록에서 지움, 기획서 SPEC-12도 지움 · 시험",
+        ),
+        Activity(
+            at=at, context_id="ctx_req_0032", from_="planning", to="hr",
+            point="retire_request_cards", kind="A2A", grade="A",
+            text="REQ-35 철회 → 인사 카드 1장 내림",
+        ),
+    ]  # fmt: skip
+    assert asyncio.run(svc.retire_withdrawn_cards()) == []
+    assert hr.retires() == []
