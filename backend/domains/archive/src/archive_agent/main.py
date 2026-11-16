@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from archive_agent.chat.api import create_chat_router
 from archive_agent.handlers import HANDLERS
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
@@ -29,3 +30,4 @@ def load_card() -> AgentCard:
 
 
 app = create_agent_app(load_card(), HANDLERS)
+app.include_router(create_chat_router())  # AI 대화방 직접 대화 (chat/)
