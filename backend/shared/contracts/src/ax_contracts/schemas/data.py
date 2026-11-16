@@ -14,7 +14,7 @@ from typing import Any, Literal, Self
 
 from pydantic import Field, model_validator
 
-from ax_contracts.schemas.common import AxModel, UtcDatetime
+from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
 
 # ---------- impact_analysis ----------
 
@@ -487,6 +487,26 @@ class CatalogImpact(AxModel):
     money_label: str = "피해 금액"
 
 
+class CatalogSales(AxModel):
+    """매출 분석(`sales_analysis`) 회사 설정 (카탈로그 `[sales]` 구역).
+
+    다른 회사는 같은 모양의 toml로 바꿔 끼운다. 값은 이름·기준이고 숫자를 만들지 않는다.
+    """
+
+    version: str = "1"  # 이 설정의 판 (근거에 남긴다)
+    # 매출 정의 한 줄 (화면 위쪽에 그대로 보인다)
+    revenue_definition: str = (
+        "매출 = 결제 완료 주문의 상품 금액 − 쿠폰 할인 − 포인트 사용 − 기간 안 환불 (배송비 제외)"
+    )
+    categories: dict[str, str] = Field(default_factory=dict)  # category_code → 화면 이름
+    source_labels: dict[str, str] = Field(default_factory=dict)  # 유입 src_source → 화면 이름
+    medium_labels: dict[str, str] = Field(default_factory=dict)  # 유입 src_medium → 화면 이름
+    min_product_orders: int = Field(default=5, ge=1)  # 상품 증감 비교의 최소 표본 (주문 수)
+    max_staleness_minutes: int = Field(default=30, ge=1)  # 마지막 수집이 이보다 오래되면 숫자 안 냄
+    # 기간 안 결제 완료 주문이 이보다 적으면 숫자 안 냄
+    min_period_orders: int = Field(default=20, ge=1)
+
+
 class MetricCatalog(AxModel):
     id: str
     name: str  # 회사 표시명
@@ -501,6 +521,8 @@ class MetricCatalog(AxModel):
     revenue_metric: str | None = None
     # 지표·실패 이벤트·거래량을 읽는 커넥터 이름 (data `clients.shop_client.CONNECTORS`)
     connector: str = "shop-api"
+    # 매출 분석 설정 (`[sales]`). 없으면 매출 분석은 "설정 없음"으로 숫자를 내지 않는다
+    sales: CatalogSales | None = None
 
     @model_validator(mode="after")
     def _unique_metric_ids(self) -> Self:
@@ -3138,6 +3160,124 @@ class DataChatThreadOutput(AxModel):
 class DataChatListOutput(AxModel):
     threads: list[dict[str, Any]]
     schema_version: str = DATA_CHAT_SCHEMA_VERSION
+
+
+# ---------------------------------------------------------------- sales_analysis (매출 분석, 11/16)
+# data가 쌓은 표준 판매 저장소(sales_orders 등)만 읽는다. 판매 서버를 직접 읽지 않는다. LLM 없음,
+# 회사 상태를 바꾸지 않는다(grade read). 금액은 모두 정수 원.
+#
+# - 기간: today = 한국 시간 오늘 0시 ~ 기준 시각, 7d·30d = 한국 시간 6일·29일 전 0시 ~ 기준 시각.
+#   직전 기간 = 같은 길이로 하루 단위만큼 앞(오늘 → 어제 0시 ~ 어제 같은 시각, 7d → 7일 앞)
+# - 매출 = 결제 완료 주문의 상품 금액 합 − 쿠폰 할인 − 포인트 사용 − 기간 안 환불 (배송비 제외).
+#   주문은 접수 시각, 환불은 환불 시각으로 기간을 정한다
+# - 객단가 = 매출 ÷ 결제 완료 주문 수 (반올림)
+# - 재구매 고객 = 이 기간 이전에도 결제 완료 주문이 있는 buyer_id
+# - 품질 관문에 걸리면 status "insufficient"이고 숫자 칸(kpis·categories·…)은 비운다
+SalesPeriod = Literal["today", "7d", "30d"]
+SalesKpiKey = Literal["revenue", "order_count", "aov", "repeat_rate"]
+
+
+class SalesAnalysisInput(AxModel):
+    period: SalesPeriod = "7d"
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class SalesKpi(AxModel):
+    """위쪽 숫자 하나. 금액·건은 정수, 비율은 0~1."""
+
+    key: SalesKpiKey
+    label: str
+    unit: Literal["won", "count", "rate"]
+    value: int | float | None = None
+    previous: int | float | None = None
+    # 직전 대비 변화. 금액·건은 변화율(0.062 = 6.2%), 비율은 차이(0.018 = 1.8%p).
+    # 직전 값이 0이거나 없으면 None
+    change: float | None = None
+    change_kind: Literal["ratio", "points"] = "ratio"
+
+
+class SalesCategoryRow(AxModel):
+    code: str  # 원본 category_code (화면에는 label만)
+    label: str  # 카탈로그 이름. 없으면 "이름 없는 분류"
+    revenue: int = 0
+    share: float | None = Field(default=None, ge=0, le=1)  # 기간 매출 중 비중. 매출이 0 이하면 None
+    previous_revenue: int = 0
+    change: float | None = None  # 변화율. 직전이 0 이하면 None
+
+
+class SalesProductMove(AxModel):
+    product_id: str
+    label: str  # 상품 이름 (없으면 "이름 없는 상품")
+    category_label: str | None = None
+    revenue: int = 0
+    previous_revenue: int = 0
+    change: float | None = None  # 매출 변화율
+    orders: int = Field(default=0, ge=0)  # 이 상품이 든 결제 완료 주문 수
+    previous_orders: int = Field(default=0, ge=0)
+
+
+class SalesCustomerMix(AxModel):
+    buyers: int = Field(default=0, ge=0)  # 기간 안 결제 완료 주문이 있는 구매자 수
+    repeat_buyers: int = Field(default=0, ge=0)
+    new_revenue: int = 0
+    repeat_revenue: int = 0
+    new_share: float | None = Field(default=None, ge=0, le=1)  # 매출이 0 이하면 None
+    repeat_share: float | None = Field(default=None, ge=0, le=1)
+    coupon_orders: int = Field(default=0, ge=0)  # 쿠폰 할인이 있는 결제 완료 주문 수
+    coupon_order_rate: float | None = Field(default=None, ge=0, le=1)
+
+
+class SalesChannelRow(AxModel):
+    source: str | None = None  # 원본 src_source (화면에는 label만)
+    medium: str | None = None
+    label: str  # "네이버 · 검색 광고", 표시가 없으면 "직접 유입"
+    revenue: int = 0
+    orders: int = Field(default=0, ge=0)
+    share: float | None = Field(default=None, ge=0, le=1)
+
+
+class SalesQuality(AxModel):
+    """품질 보고. 관문에 걸려도 채운다."""
+
+    rows_in_period: int = Field(default=0, ge=0)  # 기간 안 주문 행 (상태 무관, 버린 행 제외)
+    # 주문이 하나도 없는 날 (한국 날짜 YYYY-MM-DD)
+    empty_days: list[str] = Field(default_factory=list)
+    dropped_rows: int = Field(default=0, ge=0)  # 정제에서 버린 행 (접수 시각이 기간 안인 주문)
+    dropped_reasons: dict[str, int] = Field(default_factory=dict)  # 이유(한국어) → 행 수
+    last_synced_at: UtcDatetime | None = None  # 마지막으로 수집에 성공한 시각
+    unknown_category_codes: list[str] = Field(default_factory=list)  # 카탈로그에 이름이 없는 코드
+
+
+class SalesBasis(AxModel):
+    """근거: 기간, 읽은 행 수, 마지막 수집 시각, 카탈로그 판."""
+
+    period_from: UtcDatetime
+    period_to: UtcDatetime
+    previous_from: UtcDatetime
+    previous_to: UtcDatetime
+    rows_read: int = Field(default=0, ge=0)
+    last_synced_at: UtcDatetime | None = None
+    catalog_id: str
+    catalog_version: str | None = None
+
+
+class SalesAnalysisOutput(AxModel):
+    period: SalesPeriod
+    as_of: UtcDatetime  # 기준 시각 (= 기간 끝)
+    status: Literal["ok", "insufficient"] = "ok"
+    insufficient_reasons: list[str] = Field(default_factory=list)  # "데이터 부족: …" 이유 문장
+    definition: str = ""  # 숫자 정의 한 줄 (카탈로그 revenue_definition)
+    kpis: list[SalesKpi] = Field(default_factory=list)
+    categories: list[SalesCategoryRow] = Field(default_factory=list)
+    products_up: list[SalesProductMove] = Field(default_factory=list)  # 많이 늘어난 상품 (최대 5)
+    products_down: list[SalesProductMove] = Field(default_factory=list)  # 많이 줄어든 상품 (최대 5)
+    products_low_sample: int = Field(default=0, ge=0)  # 표본 부족으로 비교하지 않은 상품 수
+    min_product_orders: int | None = None  # 상품 비교의 최소 표본 (주문 수)
+    customers: SalesCustomerMix | None = None
+    channels: list[SalesChannelRow] = Field(default_factory=list)
+    quality: SalesQuality = Field(default_factory=SalesQuality)
+    basis: SalesBasis
+    summary: str = ""  # 코드 템플릿 문장 (숫자는 위 출력값만)
 
 
 TrendInsight.model_rebuild()
