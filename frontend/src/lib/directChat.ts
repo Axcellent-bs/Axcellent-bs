@@ -56,15 +56,18 @@ async function request(ep: ChatEndpoint, suffix: string, init?: RequestInit): Pr
   return body.data;
 }
 
-/** `closable`: 이 창구가 `POST <주소>/<id>/close`(대화 끝내기)를 갖고 있을 때만 켠다 (고객지원) */
-export const directChatApi = (ep: ChatEndpoint, opts: { closable?: boolean } = {}) => {
+/**
+ * `closable`: 이 창구가 `POST <주소>/<id>/close`(대화 끝내기)를 갖고 있을 때만 켠다 (고객지원).
+ * `getByQuery`: 상세를 `<주소>?thread_id=<id>`로 읽는다 (안전규칙: 251 nginx가 목록 주소에만 사람 토큰을 붙인다)
+ */
+export const directChatApi = (ep: ChatEndpoint, opts: { closable?: boolean; getByQuery?: boolean } = {}) => {
   const one = (d: unknown) => {
     if (!isThread(d)) throw new DirectChatError("대화 서버가 대화를 돌려주지 않았어요", 502, "NO_THREAD");
     return toThread(d);
   };
   return {
     list: () => request(ep, "").then(toThreads),
-    get: (id: string) => request(ep, `/${encodeURIComponent(id)}`).then(one),
+    get: (id: string) => request(ep, opts.getByQuery ? `?thread_id=${encodeURIComponent(id)}` : `/${encodeURIComponent(id)}`).then(one),
     send: (x: { thread_id?: string; message: string }) => request(ep, "", { method: "POST", body: JSON.stringify(x) }).then(one),
     ...(opts.closable ? { close: (id: string) => request(ep, `/${encodeURIComponent(id)}/close`, { method: "POST", body: "{}" }).then(one) } : {}),
     // 대화 지우기 (본인 대화만, 서버가 확인). POST 전용 `<주소>/<id>/remove` (DELETE는 쓰지 않는다)
