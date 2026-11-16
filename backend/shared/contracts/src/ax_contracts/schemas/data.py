@@ -2055,6 +2055,20 @@ class TrendInsightBriefRequest(AxModel):
     requested_by: str | None = Field(default=None, max_length=40)  # 화면 계정 표시 이름 (기록용)
 
 
+class CustomerReaction(AxModel):
+    """연결 상품 하나의 고객 반응 (고객지원 book_issue_stats 결과 그대로, 데이터는 세지 않는다)."""
+
+    product_id: str = Field(min_length=1)
+    product_name: str
+    period: Literal["day", "week", "month"] = "month"
+    claim_count: int = Field(ge=0)  # 이 상품이 든 클레임 수
+    defect_count: int = Field(ge=0)  # 사유가 불량·파손·오배송·누락인 클레임 수
+    sold_qty: int = Field(ge=0)  # 같은 기간 판매 수량
+    # 클레임 수량 ÷ 같은 기간 판매 수량. 접수 기간 기준이라 1을 넘을 수 있다 (그때 note)
+    claim_rate: float | None = Field(default=None, ge=0)
+    note: str | None = None
+
+
 class InsightEvidence(AxModel):
     """인사이트 하나의 데이터 근거 (모두 기존 skill 결과 그대로, 없으면 None)."""
 
@@ -2077,6 +2091,9 @@ class InsightEvidence(AxModel):
     season_month: dt.date | None = None
     # 아래는 예전 응답은 없다. 근거 영상의 주소·썸네일 (links의 영상과 같은 것)
     video_links: list[VideoLink] = Field(default_factory=list)
+    # 아래는 예전 응답은 없다. 연결 상품의 고객 반응 (고객지원 book_issue_stats 값 그대로).
+    # 판매 5권 미만·못 읽은 상품은 넣지 않고 이유를 missing에 적는다
+    customer_reaction: list[CustomerReaction] = Field(default_factory=list)
 
 
 class InsightProduct(AxModel):
