@@ -2504,14 +2504,19 @@ class DevService(PlanningCore):
         await self._apply(run)
 
     async def retry_dev_task(
-        self, task_id: str, connection: str | None = None, approved: bool = False
+        self,
+        task_id: str,
+        connection: str | None = None,
+        approved: bool = False,
+        paths: list[str] | None = None,
     ) -> ActionResult:
         """실패·사람 확인으로 멈췄거나 사람이 중단한 코딩 작업을 처음부터 다시 돌린다 (재개).
 
         열린 PR이 있으면 안 된다 (중단하면 PR은 닫히므로 중단한 작업은 재개할 수 있다).
         머지가 충돌로 실패한 작업만 예외: 그 PR을 닫고 최신 코드로 다시 쓴다.
         다시 돌 때 레포의 최신 코드를 다시 읽는다.
-        `approved`: 사람이 generate_pr 보류 건을 승인함 → 보류 때 키로 보낸다 (같은 경로일 때)."""
+        `approved`: 사람이 generate_pr 보류 건을 승인함 → 보류 때 키로 보낸다 (같은 경로일 때).
+        `paths`: 사람이 직접 고른 고칠 파일. AI가 파일을 고르지 않고 이 파일을 바로 쓴다."""
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
@@ -2523,6 +2528,16 @@ class DevService(PlanningCore):
         if task_id in self._coding or task.coding.status not in resumable:
             raise ActionError("NOT_RETRYABLE", f"{task_id}는 진행 중이거나 끝났다")
         conflict = task.coding.merge_conflict
+        # 쓸 수 없는 경로(`..`·절대 경로)·비밀 파일·빌드 결과는 뺀다 (coder와 같은 걸러내기)
+        cleaned = [coder.clean_path(p) for p in paths or []]
+        ok = [p for p in cleaned if p and not coder.skip_path(p)]
+        picked = list(dict.fromkeys(ok)) if paths else list(task.coding.picked)
+        if paths is not None and paths and not picked:
+            raise ActionError("INVALID_INPUT", "고를 수 없는 경로다")
+        if len(picked) > coder.MAX_FILES:
+            raise ActionError("INVALID_INPUT", f"파일은 {coder.MAX_FILES}개까지 고를 수 있다")
+        if paths:
+            coder.drop_draft(self, task_id)  # 고른 파일로 처음부터 쓴다
         if any(p.task == task_id and not p.closed and (p.merged or not conflict)
                for p in self.state.prs):  # fmt: skip
             raise ActionError(
@@ -2551,6 +2566,8 @@ class DevService(PlanningCore):
                     sp.keep_dev = True
             if approved and x.coding.hold_key:
                 how = "보류 승인 → PR 열기"
+            if paths:
+                how = f"사람이 고른 파일 {len(picked)}개로 다시 쓰기"
             if x.coding.merge_conflict:
                 how = "충돌 → 최신 코드로 다시 쓰기"
                 for pr in [p for p in s.prs if p.task == task_id and not p.closed]:
@@ -2573,6 +2590,7 @@ class DevService(PlanningCore):
                 mode=x.coding.mode, hold_key=x.coding.hold_key, hold_review=x.coding.hold_review,
                 hold_paths=x.coding.hold_paths, hold_ok=approved and x.coding.hold_key is not None,
                 text_warnings=x.coding.text_warnings, text_ok_by=x.coding.text_ok_by,
+                picked=picked,
             )  # fmt: skip
             x.state = "진행 중"
             s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_retry", "A2A", text, "A"))
@@ -2990,6 +3008,7 @@ class DevService(PlanningCore):
             connection=task.coding.connection,
             instruction=task.coding.instruction,
             skip_queue=task.coding.skip_queue,
+            picked=tuple(task.coding.picked),
             # 기획 서비스가 넘긴 기획서 (개발팀이 직접 쓴 기획도 handed_to_dev라 origin을 본다)
             from_planning=sp.handed_to_dev and sp.origin != coder.DEV_TEAM,
             keep_dev=sp.keep_dev,
@@ -3323,11 +3342,15 @@ class DevService(PlanningCore):
         earlier: list[str] | None = None,
         ci_hold: str | None = None,
         fixed: bool = False,
+        skipped: bool = False,
+        human_hold: str | None = None,
     ) -> bool:
         """리뷰 결과를 관문 review_pr 뒤 PR에 남긴다. 통과면 기존 자동 머지 규칙대로 잇는다.
         earlier는 PR 전에 고치느라 지나간 리뷰 결과다 (PR 리뷰 기록 앞에 붙인다).
         ci_hold는 CI가 실패·시간 초과해 자동 머지하지 않고 사람 확인으로 둘 이유다.
         fixed는 리뷰 뒤 고친 코드라 다시 리뷰하지 않고 CI로 확인했다는 뜻이다 (통과로 남긴다).
+        skipped는 위험도 낮음이라 LLM 리뷰를 건너뛰고 CI로 확인했다는 뜻이다 (통과로 남긴다).
+        human_hold는 위험도 높음이라 자동 머지하지 않고 사람 확인으로 둘 이유다.
 
         돌려주는 값: 불일치라 한 번 더 고쳐야 하면 True."""
         fix = False
@@ -3343,6 +3366,8 @@ class DevService(PlanningCore):
             text = f"{p.id} 리뷰 {verdict} · 노트 {len(notes)}개"
             if fixed:
                 text = f"{p.id} 리뷰 지적 반영 · CI로 확인 · 노트 {len(notes)}개"
+            if skipped:
+                text = f"{p.id} 리뷰 생략 (위험도 낮음) · CI로 확인"
             await self._execute(
                 "review_pr",
                 job.ctx,
@@ -3354,6 +3379,13 @@ class DevService(PlanningCore):
             cr.review = CodingReview(verdict=verdict, notes=notes)  # type: ignore[arg-type]
             cr.updated_at = self.clock()
             self._code_act(s, job, "code.review", text.removeprefix(f"{p.id} "))
+            if verdict == "통과" and human_hold and not ci_hold:
+                task.state = "머지 대기"
+                self._hold(p, WAIT_HUMAN, pr_check(s, p))
+                cr.status = "waiting_human"
+                cr.error = human_hold
+                self._code_act(s, job, "code.risk", human_hold)
+                return
             if verdict == "통과" and ci_hold:
                 task.state = "머지 대기"
                 self._hold(p, WAIT_HUMAN, pr_check(s, p))

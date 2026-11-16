@@ -1,6 +1,6 @@
 // 개발·배포 화면(/dev). 확정된 기획서를 작업·PR로 만들고, 교차검증·배포·사후관리까지 맡는다.
 // 메뉴(사이드바 하위 탭 demo/services.ts) = 작업 현황(첫 화면)·작업(작업·PR·AI 교차검증·운영·배포·사후관리)·지표. 에이전트 대화는 메뉴에서 빼고 주소로만 연다. 틀은 기획 화면과 같이 쓴다(components/planning-common/Shell.tsx).
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link, useRouter } from '@/lib/nav'
 import { IconLink } from '@/components/icons'
 import { PlanningShell, type Section, type View } from '@/components/planning-common/Shell'
@@ -8,6 +8,7 @@ import { prSlug, toPath } from '@/components/planning-common/links'
 import { repoPending } from '@/components/planning-common/repo'
 import { AgentTalk, Talk } from '@/components/planning-common/talk'
 import { ChatPanel, useDevChat } from '@/components/dev/chat'
+import { useOpenDevChat } from '@/components/dev/chatOpen'
 import { Activity, Audit, Autonomy } from '@/components/dev/metrics'
 import { Aftercare, Ops } from '@/components/dev/ops'
 import { PrsTab } from '@/components/dev/repows'
@@ -38,6 +39,9 @@ function DevTools({ v }: { v: View }) {
   const router = useRouter()
   const [chatOpen, setChatOpen] = useState(false)
   const chat = useDevChat(state, connected)
+  const { upsert, select } = chat
+  // 작업 카드의 'AI 대화로 넘기기': 만든 대화를 패널에 넣고 연다
+  useOpenDevChat(useCallback((t) => { upsert(t); select(t.id); setChatOpen(true) }, [upsert, select]))
   const repoWait = repoPending(state)
   const firstRepoWait = state.prs.find((p) => p.target?.status === 'proposed')
   return (
