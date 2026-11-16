@@ -33,11 +33,11 @@ function useNow(ms = 30_000) {
   return t
 }
 
-// 교차검증 건의 바뀐 파일. 레포에 열린 PR이면 레포 diff를, 예시 PR이면 바뀐 대표 줄로 만든 diff를 보여 준다
-export function exampleFiles(s: S, pr: PR): RepoFile[] {
+// 교차검증 건의 바뀐 파일. 레포에 열린 PR이면 레포 diff를, 아니면 코딩 기록의 바뀐 파일을 보여 준다
+function recordFiles(s: S, pr: PR): RepoFile[] {
   const by = new Map<string, CodeLine[]>()
   for (const c of codeOf(s, pr)) by.set(c.path, [...(by.get(c.path) ?? []), c])
-  // 줄 기록(예시)은 diff로, 파일 단위 기록(실제 코딩 기록)은 줄 없이 파일만 보여 준다
+  // 코딩 기록은 파일 단위라 줄 없이 파일만 보여 준다 (줄 기록이 있으면 diff로)
   return [...by].map(([path, ls]) => ({
     path, status: 'modified', additions: ls.length, deletions: 0, previous_path: null, truncated: false,
     patch: ls[0].line == null ? null : [`@@ -${ls[0].line},0 +${ls[0].line},${ls.length} @@`, ...ls.map((l) => `+${l.text}`)].join('\n'),
@@ -46,7 +46,7 @@ export function exampleFiles(s: S, pr: PR): RepoFile[] {
 function Changes({ s, pr }: { s: S; pr: PR }) {
   const conn = pr.target?.connectionId
   const n = pr.vcsNumber ?? undefined
-  const [files, setFiles] = useState<RepoFile[] | null>(n != null && conn ? null : exampleFiles(s, pr))
+  const [files, setFiles] = useState<RepoFile[] | null>(n != null && conn ? null : recordFiles(s, pr))
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (n == null || !conn) return
