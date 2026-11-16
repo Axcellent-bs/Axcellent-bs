@@ -356,5 +356,10 @@ def test_catbooks_catalog_customer_market_settings_validate() -> None:
         "society": {"kdc": "3"}, "history": {"kdc": "9"}, "science": {"kdc": "4"},
         "language": {"kdc": "7"},
     }  # fmt: skip
-    assert sales.population[0].table_ref == {}  # KOSIS 표 id 미확인
+    ref = sales.population[0].table_ref  # KOSIS 행정구역(읍면동)별/5세별 주민등록인구, 전국
+    assert (ref["org_id"], ref["tbl_id"], ref["obj_l1"], ref["prd_se"]) == (
+        "101", "DT_1B04005N", "00", "M")
+    assert ref["dims"] == {"age_band": "c2", "gender": "itm"}
+    assert ref["codes"]["gender"] == {"female": "T4", "male": "T3", "no_answer": []}
+    assert ref["codes"]["age_band"]["20s"] == ["25", "30"]
     assert [p.attribute_keys for p in sales.population] == [["age_band", "gender"]]

@@ -292,13 +292,41 @@ source_id = "data4library"
 genre_code = "language"
 params = { kdc = "7" }  # 7 언어 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
 
-# 시장 커버 비율의 인구 통계 (연령대 × 성별, KOSIS). table_ref는 비워 둔다 (미확인):
-# KOSIS 연령×성별 주민등록인구 표 id를 확인하지 못함 (KOSIS 표 화면이 로그인(SSO)으로 넘어가
-# 확인 못 함). 표 id·분류 코드를 확인한 뒤 채운다
+# 시장 커버 비율의 인구 통계 (연령대 × 성별, KOSIS)
+# 출처: 통계청 KOSIS "행정구역(읍면동)별/5세별 주민등록인구" (월별)
+#   https://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=DT_1B04005N
+# 코드는 KOSIS 통계표 메타(getMeta type=ITM, 2026-11-16 조회)로 확인:
+#   - 분류 A 행정구역: 00 = 전국 (obj_l1로 전국 한 곳만 고른다)
+#   - 분류 B 5세별: 15 = 10~14세, 20 = 15~19세, 25 = 20~24세, … 100 = 95~99세, 105 = 100+
+#   - 항목: T3 = 남자인구수, T4 = 여자인구수 (T2 총인구수는 쓰지 않는다)
+# 연령대는 5세 코드를 더한다 (50대 이상 = 50세 이상 전부). 기준은 가장 최근 달(new_est_prd_cnt 1)
+# 성별 no_answer(응답 안 함)는 인구 통계에 없는 값이라 코드를 비워 둔다 → 커버 비율을 내지 않는다
 [[sales.population]]
 attribute_keys = ["age_band", "gender"]
 source_id = "kosis"
-table_ref = {}
+
+[sales.population.table_ref]
+org_id = "101"
+tbl_id = "DT_1B04005N"
+label = "통계청 주민등록인구 (5세별)"
+prd_se = "M"
+new_est_prd_cnt = 1
+obj_l1 = "00"
+obj_l2 = "ALL"
+itm_id = "ALL"
+dims = { age_band = "c2", gender = "itm" }
+
+[sales.population.table_ref.codes.age_band]
+10s = ["15", "20"]
+20s = ["25", "30"]
+30s = ["35", "40"]
+40s = ["45", "50"]
+50s_plus = ["55", "60", "65", "70", "75", "80", "85", "90", "95", "100", "105"]
+
+[sales.population.table_ref.codes.gender]
+female = "T4"
+male = "T3"
+no_answer = []
 
 # 이벤트 종류. 할인율·전환율은 지난 캠페인이 없을 때 쓰는 가정 값이다 (가정)
 [[sales.event_kinds]]

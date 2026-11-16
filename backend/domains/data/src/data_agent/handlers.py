@@ -547,7 +547,8 @@ async def market_coverage(request: AgentRequest) -> AgentResult:
         request,
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
-        evidence=segment_analysis.evidence(out.basis, now),
+        # 인구 출처·기준 달 (예: "… (2026-10 기준)")을 근거에 남긴다
+        evidence=segment_analysis.evidence(out.basis, now, segment_analysis.population_note(out)),
     )
 
 
