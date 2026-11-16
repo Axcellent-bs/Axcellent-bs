@@ -1,0 +1,104 @@
+# 테스트 전용 가짜 회사: 모바일·PC 게임사. 고객·시장 분석과 매출 분석이 캣북스 이름 없이
+# 카탈로그만 바꿔 끼워 돌아가는지 본다 (tests/test_other_company_analysis.py).
+# 형식: ax_contracts.schemas.data.MetricCatalog. 모든 이름·숫자는 지어낸 테스트 값이다.
+id = "pixelforge"
+name = "픽셀포지 게임즈 (테스트)"
+connector = "memory"
+volume_metric = "purchase_count"
+volume_label = "결제"
+
+[[metrics]]
+id = "purchase_count"
+label = "인앱 결제 수"
+bad_direction = "down"
+unit = "건"
+
+[[metrics]]
+id = "login_fail_count"
+label = "로그인 실패 건수"
+bad_direction = "up"
+unit = "건"
+fault_codes = ["AUTH_SERVER_DOWN"]
+
+[impact]
+unit_label = "결제"
+customer_label = "플레이어"
+money_field = "amount"
+money_unit = "원"
+
+[categories]
+game_item = "게임 아이템"
+pass = "시즌 패스"
+
+[sales]
+version = "game-1"
+revenue_definition = "매출 = 결제 완료 인앱 구매 금액 − 쿠폰 할인 − 포인트 사용 − 기간 안 환불"
+min_product_orders = 2
+max_staleness_minutes = 60
+min_period_orders = 10
+min_group_size = 3
+active_days = 60
+
+[sales.categories]
+game_item = "게임 아이템"
+pass = "시즌 패스"
+
+[sales.source_labels]
+appstore = "앱스토어 검색"
+discord = "디스코드"
+
+[sales.medium_labels]
+push = "푸시 알림"
+
+[sales.genres]
+rpg = "롤플레잉"
+puzzle = "퍼즐"
+casual = "캐주얼"
+
+[sales.genre_keywords]
+rpg = ["모바일 RPG", "MMORPG 추천"]
+puzzle = ["퍼즐 게임"]
+casual = ["캐주얼 게임"]
+
+[[sales.attributes]]
+key = "age_band"
+label = "나이대"
+[sales.attributes.values]
+teen = "십대 플레이어"
+young = "청년 플레이어"
+adult = "성인 플레이어"
+
+[[sales.attributes]]
+key = "platform"
+label = "플랫폼"
+[sales.attributes.values]
+ios = "아이폰"
+android = "안드로이드"
+pc = "PC"
+
+[[sales.population]]
+attribute_keys = ["age_band"]
+source_id = "kosis"
+table_ref = {}
+
+[[sales.event_kinds]]
+code = "item_pack"
+label = "아이템 패키지 할인"
+discount_rate = 0.20
+conversion_low = 0.04
+conversion_high = 0.08
+
+[[sales.event_kinds]]
+code = "login_bonus"
+label = "접속 보상"
+discount_rate = 0.05
+conversion_low = 0.01
+conversion_high = 0.02
+
+[[sales.quick_questions]]
+label = "청년 아이폰"
+filters = { age_band = "young", platform = "ios" }
+
+[[sales.quick_questions]]
+label = "십대 안드로이드"
+filters = { age_band = "teen", platform = "android" }
