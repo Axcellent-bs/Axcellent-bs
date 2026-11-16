@@ -43,7 +43,7 @@ class Reaction:
     sales_unread: tuple[
         str, ...
     ] = ()  # 판매 수량을 못 읽어 비율을 못 낸 책 (판매가 적은 것과 다르다)
-    checked: int = 0  # 읽은 책 수
+    checked: int = 0  # 요청한 상품 중 집계에 나온 책 수 (응답 줄 수가 아니다)
     note: str = ""  # 못 읽은 이유 등
     unread: tuple[str, ...] = field(default_factory=tuple)  # 요청했는데 집계에 없는 상품
 
@@ -104,7 +104,7 @@ def evaluate(
         flagged=tuple(flagged),
         low_sales=tuple(low),
         sales_unread=tuple(unread_sales),
-        checked=len(rows),
+        checked=len({p for p in product_ids if p in rows}),
         unread=unread,
     )
 

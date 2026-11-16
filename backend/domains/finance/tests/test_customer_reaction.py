@@ -116,6 +116,13 @@ def test_requested_products_missing_from_the_report_are_listed() -> None:
     assert got.unread == ("prd_9",) and got.checked == 1
 
 
+def test_checked_counts_requested_products_not_the_rows_that_came_back() -> None:
+    """응답에 요청하지 않은 줄이 섞여도, 같은 상품이 두 번 와도 요청한 상품 기준으로 센다."""
+    rows = [row("prd_1"), row("prd_1"), row("prd_2"), row("prd_extra")]
+    got = cr.evaluate(report(*rows), ["prd_1", "prd_2", "prd_9"], RULES)
+    assert got.checked == 2 and got.unread == ("prd_9",)
+
+
 # ------------------------------------------------------------ 한도에 곱하기
 def _ask(requested: int = 1_000_000) -> dict:
     return {
@@ -362,3 +369,14 @@ def test_a_good_answer_is_read_as_the_contract_report_for_one_month_without_inqu
     assert seen["target"] == "support" and seen["skill"] == "book_issue_stats"
     assert seen["input"]["period"] == "month" and seen["input"]["include_inquiries"] is False
     assert seen["input"]["product_ids"] == ["prd_1", "prd_2"]
+
+
+def test_the_output_separates_unread_sales_from_low_sales() -> None:
+    reaction = cr.evaluate(
+        report(row("prd_1", sold=None, title="못 읽은 책"), row("prd_2", sold=3, title="적은 책")),
+        ["prd_1", "prd_2"],
+        RULES,
+    )
+    got = decide(reaction)["customer_reaction"]
+    assert got["sales_unread"] == ["못 읽은 책"] and got["low_sales"] == ["적은 책"]
+    assert decide(cr.NOT_RELEVANT)["customer_reaction"]["sales_unread"] == []
