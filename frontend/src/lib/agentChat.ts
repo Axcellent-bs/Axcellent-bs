@@ -82,7 +82,7 @@ export interface OrchIncident {
 
 /** POST /api/demo/incidents 본문 (main.py DemoRequest). 모두 선택 */
 export interface DemoRequest {
-  hold_rollback?: boolean; // 롤백이 C 등급 보류가 된다(사람 승인 대기). 총괄 목 모드 옵션 이름
+  hold_rollback?: boolean; // 롤백이 C 등급 보류가 된다(사람 승인 대기). 총괄 AI 목 모드 옵션 이름
   fail_marketing?: boolean;
   wrong_owner?: boolean;
   infra_card_empty?: boolean;
@@ -347,7 +347,7 @@ const SKIP_WHY: [RegExp, string][] = [
   [/^확인할 수 없음 \(.+ 서비스가 꺼져 있음\)/, "그 서비스가 꺼져 있어 확인할 수 없어 건너뜀"],
   [/^선행 단계 미완료/, "앞 단계가 끝나지 않아 건너뜀"],
   [/Agent Card에 skill 없음/, "맡을 부서를 찾지 못해 건너뜀 (Agent Card에 skill 없음)"],
-  [/allowed_requesters/, "총괄이 요청할 수 없는 skill이라 건너뜀"],
+  [/allowed_requesters/, "총괄 AI가 요청할 수 없는 skill이라 건너뜀"],
   [/^고객 자료 대기/, "고객 자료를 기다려 보류"],
   [/^확신도 높은 원인 후보가 있어/, "확신도 높은 원인 후보가 있어 원인 확인 요청 없이 건너뜀"],
 ];

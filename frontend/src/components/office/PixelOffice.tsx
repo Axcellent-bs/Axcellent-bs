@@ -418,7 +418,7 @@ function boardCard(ctx: CanvasRenderingContext2D, v: OfficeView) {
   }
   const { done, total } = v.progress;
   ctx.font = `600 15px ${FONT}`; ctx.fillStyle = "#64748b";
-  ctx.fillText(total ? "사건 진행" : "총괄 사건", x + 12, y + 24);
+  ctx.fillText(total ? "사건 진행" : "총괄 AI 사건", x + 12, y + 24);
   ctx.font = `800 22px ${FONT}`; ctx.textAlign = "right";
   const txt = !v.incident ? "없음" : v.status === "alert" ? `${done}/${total}` : v.status === "degraded" ? "일부 미완료" : "해결";
   ctx.fillStyle = !v.incident ? "#475569" : v.status === "alert" ? "#d97706" : v.status === "degraded" ? "#ea580c" : "#16a34a";

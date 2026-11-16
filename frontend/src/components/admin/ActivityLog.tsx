@@ -107,7 +107,7 @@ function detailOf(e: ActivityEntry): string {
 /** 줄에서 이어 볼 곳: 클레임 줄은 클레임 화면, 총괄에 넘긴 줄은 총괄 화면 */
 function linkOf(e: ActivityEntry): { href: string; label: string } | null {
   if (e.ref?.startsWith("claim:")) return { href: `/claims?id=${e.ref.slice(6)}`, label: "클레임 보기" };
-  if (e.kind === "handed_to_orchestrator") return { href: "/orchestrator", label: "총괄에서 보기" };
+  if (e.kind === "handed_to_orchestrator") return { href: "/orchestrator", label: "총괄 AI에서 보기" };
   return null;
 }
 

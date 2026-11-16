@@ -23,7 +23,7 @@ function DetectionLine({ inc }: { inc: OrchIncident }) {
   const verified = verifiedAtOf(inc);
   const cells: { label: string; who: string | null; at: string | null }[] = [
     { label: "감지", who: by?.source ? detectorName(by.source) : null, at: clock(by?.at) },
-    { label: "사건 열림", who: "총괄", at: clock(inc.opened_at) },
+    { label: "사건 열림", who: "총괄 AI", at: clock(inc.opened_at) },
     { label: "요청 받음", who: "데이터 AI", at: clock(stepOf(inc, "impact")?.started_at) },
     { label: "정상 복귀", who: null, at: clock(recoveryEndOf(inc)) },
     ...(verified ? [{ label: "복구 검증 끝", who: "인프라 AI", at: clock(verified) }] : []),
@@ -336,7 +336,7 @@ export function IncidentData({ list, detail, selected, onSelect }: {
   if (incidents.length === 0) {
     return (
       <Empty>
-        아직 장애 사건이 없어요. 쇼핑몰에서 결제 장애가 감지되면 총괄이 사건을 열고, 데이터 AI가 센 실패 주문·영향 고객·미결제 금액이 여기에 나타납니다.
+        아직 장애 사건이 없어요. 쇼핑몰에서 결제 장애가 감지되면 총괄 AI가 사건을 열고, 데이터 AI가 센 실패 주문·영향 고객·미결제 금액이 여기에 나타납니다.
       </Empty>
     );
   }
@@ -356,7 +356,7 @@ export function IncidentData({ list, detail, selected, onSelect }: {
             <Stat label="결제 실패(미결제)" value={krw(num(impact?.unpaid_amount ?? impact?.damage_amount))} tone={num(impact?.unpaid_amount ?? impact?.damage_amount) == null ? "text-ink-500" : "text-accent"} />
             <Stat label="복구까지 걸린 시간" value={duration(inc.metrics?.mttr_seconds)} sub="감지 → 정상 복귀" tone={num(inc.metrics?.mttr_seconds) == null ? "text-ink-500" : ""} />
           </div>
-          <Panel id="data-flow" title="데이터 AI 처리 흐름" hint={`${incidentTitle(inc)} · ${shortDateTime(inc.opened_at)} 시작. 감지는 쇼핑몰 모니터·Zabbix가 하고, 데이터 AI는 총괄 요청을 받아 일합니다.`}>
+          <Panel id="data-flow" title="데이터 AI 처리 흐름" hint={`${incidentTitle(inc)} · ${shortDateTime(inc.opened_at)} 시작. 감지는 쇼핑몰 모니터·Zabbix가 하고, 데이터 AI는 총괄 AI 요청을 받아 일합니다.`}>
             <Flow inc={inc} />
           </Panel>
           <RootCauseCard inc={inc} />

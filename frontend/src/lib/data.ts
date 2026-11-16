@@ -92,7 +92,7 @@ export const FACT_KIND_KO: Record<string, string> = {
 };
 /** 사실 출처(skill) → 화면 이름 */
 export const FACT_SOURCE_KO: Record<string, string> = {
-  input: "총괄이 준 이상 구간",
+  input: "총괄 AI가 준 이상 구간",
   "dev.find_related_prs": "개발 AI · 관련 PR",
   "planning.find_related_prs": "개발 AI · 관련 PR", // 개발이 기획에서 나오기 전 기록
   "marketing.list_active_notices": "마케팅 AI · 게시 중 공지",
@@ -1963,7 +1963,7 @@ export interface VideoPerformanceListOutput {
 
 /** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */
 export const DATA_SERVER = "데이터 AI 서버(8106)";
-export const ORCH_SERVER = "총괄 서버(8000)";
+export const ORCH_SERVER = "총괄 AI 서버(8000)";
 /**
  * 데이터 AI를 부를지. 실제 토큰(로컬)이거나 공유 서버의 자리표시자(DATA_A2A_PLACEHOLDER)면 부른다.
  * 자리표시자도 본문 meta.token에 그대로 보내고, 실제 토큰은 nginx가 Authorization 헤더로 넣는다. 빈 값이면 부르지 않는다.

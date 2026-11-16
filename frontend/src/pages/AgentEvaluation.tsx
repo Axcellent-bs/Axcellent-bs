@@ -262,7 +262,7 @@ export default function AgentEvaluationPage() {
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
                     {current.criteria_version !== data.criteria_version && <span>그때 기준: 임시 기준 {current.criteria_version}판</span>}
                     <Link href={`/archive/incidents?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">결정 기록에서 보기 →</Link>
-                    <Link href={`/archive/incidents?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">총괄 이슈에서 보기 →</Link>
+                    <Link href={`/archive/incidents?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">총괄 AI 이슈에서 보기 →</Link>
                   </div>
                   <EventTimeline ev={current} />
                 </>

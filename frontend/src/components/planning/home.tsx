@@ -160,7 +160,7 @@ function Flow({ title, href, stages, counts }: { title: string; href: string; st
 }
 
 // 피드 아이콘 글자 (부서 이름 첫 글자가 어색한 것만)
-const AV: Record<string, string> = { human: '사람', planning: '기획', orchestrator: '총괄' }
+const AV: Record<string, string> = { human: '사람', planning: '기획', orchestrator: '총괄 AI' }
 
 // 활동을 날짜(MM-DD)별로 묶는다 (최근 날짜 먼저, 받은 순서 그대로)
 function feedDays(xs: S['activity']): [string, S['activity']][] {

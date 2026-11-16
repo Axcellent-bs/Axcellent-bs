@@ -93,7 +93,7 @@ export default function DataPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs sm:ml-auto">
           <button className="btn-ghost" onClick={bump}>새로고침</button>
-          {orchUp != null && <Chip label={orchUp ? "총괄 켜짐" : "총괄 꺼짐"} tone={orchUp ? TONE.ok : TONE.bad} />}
+          {orchUp != null && <Chip label={orchUp ? "총괄 AI 켜짐" : "총괄 AI 꺼짐"} tone={orchUp ? TONE.ok : TONE.bad} />}
           {dataUp != null && <Chip label={dataUp ? "데이터 AI 켜짐" : "데이터 AI 꺼짐"} tone={dataUp ? TONE.ok : TONE.bad} />}
         </div>
       </header>}
@@ -105,7 +105,7 @@ export default function DataPage() {
       )}
       {dataUp === false && (
         <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
-          {DATA_SERVER}에 연결할 수 없어요. 운영 지표·리포트·트렌드를 받을 수 없습니다.{orchUp ? " 장애 사건 데이터는 총괄 기록으로 계속 보입니다." : ""}
+          {DATA_SERVER}에 연결할 수 없어요. 운영 지표·리포트·트렌드를 받을 수 없습니다.{orchUp ? " 장애 사건 데이터는 총괄 AI 기록으로 계속 보입니다." : ""}
         </p>
       )}
 

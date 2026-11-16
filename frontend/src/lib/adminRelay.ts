@@ -54,7 +54,7 @@ export interface DepartmentsMeta { mock?: boolean; window_seconds?: number; buck
 export const relayEnabled = Boolean(RELAY_VIEW_TOKEN && RELAY_API_URL);
 
 async function get<T, M = Record<string, unknown>>(path: string): Promise<{ data: T; meta: M }> {
-  if (!relayEnabled) throw new ApiError("총괄 읽기 연결이 꺼져 있습니다", 403);
+  if (!relayEnabled) throw new ApiError("총괄 AI 읽기 연결이 꺼져 있습니다", 403);
   const res = await fetch(`${RELAY_API_URL}${path}`, { headers: { Authorization: `Bearer ${RELAY_VIEW_TOKEN}` }, cache: "no-store" });
   let body: { data?: T; meta?: M; error?: { message?: string } } = {};
   try { body = await res.json(); } catch { /* 본문이 JSON이 아님 */ }
@@ -69,10 +69,10 @@ export const adminRelay = {
 
 /** 연결 오류를 화면 문구로 */
 export function relayError(error: { status?: number; message: string }): string {
-  if (error.status === 502) return "총괄에 연결할 수 없습니다. 총괄 서버가 켜져 있는지 확인해 주세요.";
-  if (error.status === 504) return "총괄이 제때 응답하지 않았습니다.";
+  if (error.status === 502) return "총괄 AI에 연결할 수 없습니다. 총괄 AI 서버가 켜져 있는지 확인해 주세요.";
+  if (error.status === 504) return "총괄 AI가 제때 응답하지 않았습니다.";
   if (error.status === 404) return "부서 사용량 경로가 서버에 없습니다. shop-api를 최신으로 올려 주세요.";
-  if (error.status === 401 || error.status === 403) return "총괄 읽기 권한이 없습니다.";
+  if (error.status === 401 || error.status === 403) return "총괄 AI 읽기 권한이 없습니다.";
   return error.message;
 }
 

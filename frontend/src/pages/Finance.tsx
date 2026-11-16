@@ -277,7 +277,7 @@ export default function FinancePage() {
           <li><b>장부 확인</b>: 결제 실패(미결제, 고객 돈이 나가지 않은 받지 못한 매출), 확인·환불 필요(시간 초과 결제: 고객 돈이 빠져나갔을 수 있음), 보상 쿠폰, 환불로 빠져나간 돈을 나눠 봅니다.</li>
           <li><b>보류 큐 결정</b>: 재무가 정해야 하는 보류 건은 아래 <b>안전 장치 보류 큐</b>에서 진행 또는 멈춤을 누릅니다. 판매자 정산 지급 승인은 <Link href={SUPPORT_SETTLEMENT_PATH} className="font-medium text-brand-700 underline">고객지원 &gt; 판매자 정산</Link>에서 합니다.</li>
           <li><b>평상시 업무</b>: <b>평상시 재무 업무</b> 탭에서 결산 확정(①), 대사 메모(②)를 하고 팀 예산(④, 확정은 인사 AI)을 보고 판매자 정산 결과(③)를 봅니다. 세무 자료는 ⑤, 현금 흐름은 ⑦, 고객지원 비용 기록은 ①에 있습니다.</li>
-          <li><b>기획에 개선 요청</b>: 고칠 점이 보이면 재무 AI 테스트 아래 <b>기획에 개선 요청</b>에 적거나 표 옆 <b>이걸로 개선 요청</b>을 누릅니다. 기획이 되물은 질문도 거기서 답합니다. <b>총괄이 재무에 맡긴 일</b>과 <b>기획에 개선 요청</b>은 탭 밖에 늘 보입니다.</li>
+          <li><b>기획에 개선 요청</b>: 고칠 점이 보이면 재무 AI 테스트 아래 <b>기획에 개선 요청</b>에 적거나 표 옆 <b>이걸로 개선 요청</b>을 누릅니다. 기획이 되물은 질문도 거기서 답합니다. <b>총괄 AI가 재무에 맡긴 일</b>과 <b>기획에 개선 요청</b>은 탭 밖에 늘 보입니다.</li>
         </ol>
         <p className="mt-3 text-sm text-ink-500">
           단계별 설명과 자주 묻는 질문은 <Link href="/finance/guide" className="font-medium text-brand-700 underline">재무 AI 관리자 사용법</Link>에 있습니다.
@@ -338,8 +338,8 @@ export default function FinancePage() {
               <li>
                 <button type="button" onClick={() => scrollToId("orchestrator-requests")}
                   className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-surface px-4 py-3 text-left shadow-sm transition hover:ring-2 hover:ring-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
-                  <Chip label="총괄이 맡긴 일" tone={TONE.bad} />
-                  <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">총괄이 맡긴 일 중 최근 7일 실패·거절 {aiFailed}건 확인</span>
+                  <Chip label="총괄 AI가 맡긴 일" tone={TONE.bad} />
+                  <span className="min-w-0 flex-1 text-sm font-medium text-ink-900">총괄 AI가 맡긴 일 중 최근 7일 실패·거절 {aiFailed}건 확인</span>
                   <span className="text-sm font-medium text-brand-700">무엇이 실패했는지 보기 →</span>
                 </button>
               </li>

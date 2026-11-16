@@ -62,10 +62,10 @@ export interface QueueItem {
   params: Record<string, number | string | boolean | string[]>
   at?: string
   decide_with?: Action
-  evidence?: CrossEvidence[] // 교차검증 근거 (merge_pr, 총괄·데이터분석에 물은 결과)
+  evidence?: CrossEvidence[] // 교차검증 근거 (merge_pr, 총괄 AI·데이터분석에 물은 결과)
 }
 
-const VERIFIER: Record<QueueItem['action'], string> = { confirm_spec: '인사 check_plan', merge_pr: '총괄 · 데이터분석 근거 → 안전 관문' }
+const VERIFIER: Record<QueueItem['action'], string> = { confirm_spec: '인사 check_plan', merge_pr: '총괄 AI · 데이터분석 근거 → 안전 관문' }
 
 function toReview(q: QueueItem, ctxOf: (ref: string) => string): CrossReview & { decideWith?: Action } {
   const done = /승인|확정|머지/.test(q.state) ? '승인' : /거절/.test(q.state) ? '거절' : undefined

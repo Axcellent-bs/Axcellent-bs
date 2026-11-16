@@ -86,7 +86,7 @@ export default function CardSections({ cards, hideIncident = false }: { cards: H
             kind="incident"
             title="장애 대응 카드(이슈 기록)"
             count={incidents.length}
-            desc="장애가 끝나면 총괄이 남기는 기록이고, 비슷한 이슈를 찾는 데 쓰입니다."
+            desc="장애가 끝나면 총괄 AI가 남기는 기록이고, 비슷한 이슈를 찾는 데 쓰입니다."
           />
         </div>
         {incidents.length === 0

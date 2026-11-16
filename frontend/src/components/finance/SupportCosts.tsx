@@ -61,7 +61,7 @@ function Row({ r }: { r: SupportCostRecord }) {
       <td className="py-2 pr-3"><Chip label={spent} tone={r.expense_used ? TONE.warn : TONE.muted} /></td>
       <td className="py-2 pr-3 whitespace-nowrap text-ink-500">{shortDateTime(r.recorded_at)}</td>
       <td className="py-2">
-        <Link href={`/archive/incidents?ctx=${encodeURIComponent(r.context_id)}`} className="whitespace-nowrap text-sm font-medium text-brand-700 underline">총괄 이슈 →</Link>
+        <Link href={`/archive/incidents?ctx=${encodeURIComponent(r.context_id)}`} className="whitespace-nowrap text-sm font-medium text-brand-700 underline">총괄 AI 이슈 →</Link>
         <InquiryLink r={r} />
       </td>
     </tr>

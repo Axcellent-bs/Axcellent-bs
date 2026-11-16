@@ -165,7 +165,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
         </ResourceBody>
       </Panel>
 
-      <Panel id="campaign-opinions" title="총괄에 낸 의견" hint="총괄 AI에 A2A로 보냅니다. 총괄 쪽 받는 기능이 준비되기 전에는 전달 대기로 남고 자동으로 다시 보냅니다.">
+      <Panel id="campaign-opinions" title="총괄 AI에 낸 의견" hint="총괄 AI에 A2A로 보냅니다. 총괄 AI 쪽 받는 기능이 준비되기 전에는 전달 대기로 남고 자동으로 다시 보냅니다.">
         <ResourceBody res={view}>
           {(v) => v.opinions.length === 0 ? <Empty>아직 낸 의견이 없습니다.</Empty> : (
             <ul className="space-y-2 text-sm text-ink-700">

@@ -116,11 +116,11 @@ export function OrchestratorRequestsSection({ tick, onSummary }: { tick: number;
   const rows = res.env?.data.rows;
   useEffect(() => { if (rows && onSummary) onSummary({ total: rows.length, failed: failedCount(rows) }); }, [rows, onSummary]);
   return (
-    <Panel id="orchestrator-requests" title="총괄이 재무에 맡긴 일"
-      hint="총괄 AI가 재무 AI에 보낸 요청입니다. AI 대화방에 보이는 것과 같은 공통 로그에서 총괄 → 재무 요청만 골랐고, 결과는 재무 AI가 총괄에 돌려준 응답에서 읽습니다. 읽기 전용입니다.">
+    <Panel id="orchestrator-requests" title="총괄 AI가 재무에 맡긴 일"
+      hint="총괄 AI가 재무 AI에 보낸 요청입니다. AI 대화방에 보이는 것과 같은 공통 로그에서 총괄 AI → 재무 요청만 골랐고, 결과는 재무 AI가 총괄 AI에 돌려준 응답에서 읽습니다. 읽기 전용입니다.">
       <ResourceBody res={res}>
         {({ rows, truncated, incidentIds }) => rows.length === 0 ? (
-          <Empty>아직 총괄이 재무에 맡긴 일이 없어요.</Empty>
+          <Empty>아직 총괄 AI가 재무에 맡긴 일이 없어요.</Empty>
         ) : (
           <>
             <div className="scroll-thin overflow-x-auto">
