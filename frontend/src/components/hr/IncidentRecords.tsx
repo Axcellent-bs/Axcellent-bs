@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { clockKo, incidentTitle, INCIDENT_STATUS_KO, type OrchIncident, type OrchStep } from "@/lib/agentChat";
 import { dateStr } from "@/lib/format";
 import { hr, type AuditEntry } from "@/lib/hr";
+import { useIncidents } from "@/lib/incidents";
 import { Link } from "@/lib/nav";
 import RepeatCompare from "@/components/hr/RepeatCompare";
 import EventTimes from "@/components/hr/EventTimes";
@@ -83,23 +84,14 @@ function auditDetail(e: AuditEntry): string {
 
 // ---------------------------------------------------------------- 이슈 기록 목록 + 고른 이슈의 타임라인
 export default function IncidentRecords({ initialCtx = null }: { initialCtx?: string | null }) {
-  const [incidents, setIncidents] = useState<OrchIncident[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  // 총괄 이슈 목록은 다른 화면과 같이 한 번만 읽는다(lib/incidents.ts)
+  const { incidents: all, error: err } = useIncidents();
+  // 아카이브 AI에게 이슈 기록을 맡긴 이슈만, 최근 이슈가 위로
+  const incidents = useMemo(
+    () => (all ? all.filter((i) => recordStep(i)).sort((a, b) => (b.opened_at ?? "").localeCompare(a.opened_at ?? "")) : null),
+    [all],
+  );
   const [picked, setPicked] = useState<string | null>(initialCtx); // 총괄 이슈 화면에서 넘어오면 그 이슈를 먼저 보여 준다
-
-  const load = useCallback(async () => {
-    try {
-      const all = await hr.incidents();
-      // 아카이브 AI에게 이슈 기록을 맡긴 이슈만, 최근 이슈가 위로
-      const mine = all.filter((i) => recordStep(i)).sort((a, b) => (b.opened_at ?? "").localeCompare(a.opened_at ?? ""));
-      setIncidents(mine); setErr(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : "이슈 목록을 받지 못했습니다"); }
-  }, []);
-  useEffect(() => {
-    load();
-    const poll = setInterval(load, 15000); // 15초마다 새로 받는다
-    return () => clearInterval(poll);
-  }, [load]);
 
   // 고른 이슈가 없으면 가장 최근 이슈
   const current = incidents?.find((i) => i.context_id === picked) ?? incidents?.[0] ?? null;

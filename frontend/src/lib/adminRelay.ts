@@ -1,4 +1,5 @@
 import { ApiError } from "./apiError";
+import type { OrchIncident, OrchStep } from "./agentChat";
 import { RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
 
 // 총괄 이슈·부서 사용량 읽기. 화면은 총괄을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
@@ -8,34 +9,8 @@ import { RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
 
 export type StepStatus = "pending" | "running" | "completed" | "failed" | "held" | "waiting_human" | "waiting_async" | "skipped" | "rejected_by_human" | "transfer_queued";
 
-export interface Step {
-  step_id: string;
-  skill: string;
-  label: string;
-  dept: string | null;
-  status: StepStatus;
-  attempts: number;
-  note: string;
-  grade: string | null;
-  started_at: string | null;
-  finished_at: string | null;
-  transferred_to: string | null;
-  reason_code: string | null;
-  /** 승인 대기·사람 할 일함 대기(초). 단계 전체 시간에서 빼면 부서가 일한 시간이다 */
-  approval_wait_seconds?: number | null;
-  human_wait_seconds?: number | null;
-  /** 이 단계가 보통 걸리는 시간(기준 시간, 초). 지금 값은 임시다. 없으면 기본 30초 */
-  promised_seconds?: number | null;
-  /** 긴 작업(비동기): 마지막으로 응답한 시각, 진행 알림 횟수, 응답 사이가 가장 길게 비었던 시간(초), 마지막 진행률·메모 */
-  last_response_at?: string | null;
-  heartbeats?: number;
-  max_silence_seconds?: number | null;
-  progress_percent?: number | null;
-  progress_note?: string | null;
-  async_task_id?: string | null;
-  /** 단계 결과. 스킬마다 모양이 다르다(예: 비슷한 과거 이슈 찾기의 cases) */
-  output?: Record<string, unknown>;
-}
+/** 총괄 이슈의 단계. 총괄 화면·장애 기록 화면·AI 대화방이 같은 모양(`OrchStep`)을 쓴다 */
+export type Step = OrchStep;
 /** 비슷한 과거 이슈에 남은 원인·조치를 이번 이슈에 참고로 붙인 것 (총괄이 계산, 실행하지 않음) */
 export interface Recommendation {
   status: "found" | "no_evidence";
@@ -54,23 +29,8 @@ export interface PendingHold {
   step_id: string; skill: string; label: string;
   review_id?: string | null; since?: string | null; expires_at?: string | null;
 }
-export interface Incident {
-  context_id: string;
-  kind: string;
-  title: string;
-  component: string;
-  status: "open" | "resolved" | "degraded";
-  opened_at: string;
-  closed_at: string | null;
-  steps: Step[];
-  recommendation?: Recommendation | null;
-  events: { at: string; message: string }[];
-  summary: string[];
-  metrics: { mttr_seconds?: number; steps_total?: number; steps_completed?: number; held?: number; transfers?: number; retries?: number };
-  /** 총괄이 보관한 값(예: 점검 공지 번호). 부서가 주지 않으면 없다 */
-  shared?: Record<string, unknown>;
-  pending_holds: PendingHold[];
-}
+/** 총괄 이슈. 모양은 `OrchIncident`(lib/agentChat.ts) 하나다 */
+export type Incident = OrchIncident;
 
 // 부서 카드·사용량. 사용량은 총괄이 부른 호출을 센 실측이고, 값이 없으면 null(화면은 "확인할 수 없음")
 export interface UsageSummary { calls: number; errors: number; waiting: number; success_rate: number | null; avg_ms: number | null; p95_ms: number | null; retries: number; last_called_at: string | null }
@@ -134,6 +94,9 @@ export const STEP_STATUS: Record<StepStatus, { label: string; tone: string }> = 
   rejected_by_human: { label: "보류 후 거절", tone: "bg-red-50 text-red-700" },
   transfer_queued: { label: "사람에게 넘김", tone: "bg-brand-50 text-brand-700" },
 };
+/** 단계 상태 이름표. 총괄이 정의 밖의 상태를 주어도 그대로 보여 준다 */
+export const stepStatus = (status: string): { label: string; tone: string } =>
+  (STEP_STATUS as Record<string, { label: string; tone: string }>)[status] ?? { label: status, tone: "bg-ink-100 text-ink-700" };
 export const INCIDENT_STATUS: Record<Incident["status"], { label: string; tone: string }> = {
   open: { label: "AI가 처리 중", tone: "bg-brand-50 text-brand-700" },
   resolved: { label: "해결됨", tone: "bg-emerald-50 text-emerald-700" },
