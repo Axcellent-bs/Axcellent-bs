@@ -487,10 +487,70 @@ class CatalogImpact(AxModel):
     money_label: str = "피해 금액"
 
 
+class AttributeDef(AxModel):
+    """고객 속성 하나 (예: 연령대). 어떤 속성이 있는지는 회사 설정이 정한다(코드에 쓰지 않는다)."""
+
+    key: str = Field(min_length=1, max_length=40)
+    label: str = Field(min_length=1)
+    values: dict[str, str] = Field(min_length=1)  # 값 code → 화면 이름 (순서 = 화면 순서)
+
+
+class ExternalFilter(AxModel):
+    """속성 값 하나를 바깥 출처 조건으로 바꾸는 표 (예: 20대 → 정보나루 from_age 20·to_age 29)."""
+
+    source_id: str = Field(min_length=1)  # 커넥터 이름 (data4library·naver_shopping 등)
+    attribute_key: str
+    value_code: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class GenreExternal(AxModel):
+    """장르 하나를 바깥 출처 조건으로 바꾸는 표 (예: 소설 → 정보나루 kdc 8)."""
+
+    source_id: str = Field(min_length=1)
+    genre_code: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class PopulationSource(AxModel):
+    """시장 커버 비율에 쓰는 인구 통계표. 여기 적힌 속성 조합만 계산한다."""
+
+    attribute_keys: list[str] = Field(min_length=1)
+    source_id: str = Field(min_length=1)  # 예: kosis
+    # 표 위치와 값 대응 (예: org_id·tbl_id·itm_id, 속성 값 → 표의 분류 코드). 모양은 커넥터가 안다
+    table_ref: dict[str, Any] = Field(default_factory=dict)
+    base_year: int | None = None
+
+
+class EventKind(AxModel):
+    """이벤트 종류 (예: 쿠폰). 전환율은 지난 캠페인이 없을 때 쓰는 가정값(0~1)."""
+
+    code: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    discount_rate: float = Field(ge=0, le=1)
+    conversion_low: float = Field(ge=0, le=1)
+    conversion_high: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _low_le_high(self) -> Self:
+        if self.conversion_low > self.conversion_high:
+            raise ValueError(f"event_kinds {self.code}: conversion_low가 conversion_high보다 크다")
+        return self
+
+
+class QuickQuestion(AxModel):
+    """화면의 자주 묻는 질문 칩: 이름 + 속성 조건."""
+
+    label: str = Field(min_length=1)
+    filters: dict[str, str] = Field(min_length=1)  # 속성 key → 값 code
+
+
 class CatalogSales(AxModel):
     """매출 분석(`sales_analysis`) 회사 설정 (카탈로그 `[sales]` 구역).
 
     다른 회사는 같은 모양의 toml로 바꿔 끼운다. 값은 이름·기준이고 숫자를 만들지 않는다.
+    고객·시장 분석(11/16)의 칸은 모두 기본값이 있는 선택 칸이다. 이름(장르·속성·이벤트 종류)은
+    여기에만 두고 분석·화면 코드에 쓰지 않는다.
     """
 
     version: str = "1"  # 이 설정의 판 (근거에 남긴다)
@@ -505,6 +565,60 @@ class CatalogSales(AxModel):
     max_staleness_minutes: int = Field(default=30, ge=1)  # 마지막 수집이 이보다 오래되면 숫자 안 냄
     # 기간 안 결제 완료 주문이 이보다 적으면 숫자 안 냄
     min_period_orders: int = Field(default=20, ge=1)
+    # ---- 고객·시장 분석 (11/16, 모두 선택)
+    genres: dict[str, str] = Field(default_factory=dict)  # genre_code → 화면 이름
+    # genre_code → 시즌 판단용 대표 검색어 (작년 같은 달 검색 배수)
+    genre_keywords: dict[str, list[str]] = Field(default_factory=dict)
+    attributes: list[AttributeDef] = Field(default_factory=list)
+    external_filters: list[ExternalFilter] = Field(default_factory=list)
+    genre_external: list[GenreExternal] = Field(default_factory=list)
+    population: list[PopulationSource] = Field(default_factory=list)
+    event_kinds: list[EventKind] = Field(default_factory=list)
+    quick_questions: list[QuickQuestion] = Field(default_factory=list)
+    min_group_size: int = Field(default=5, ge=1)  # 한 묶음이 이보다 적으면 숫자를 숨긴다
+    active_days: int = Field(default=365, ge=1)  # 대상 고객 = 최근 N일 결제 완료 주문 1회 이상
+
+    @model_validator(mode="after")
+    def _references_exist(self) -> Self:
+        """key·code 중복 금지, 없는 속성·값·장르를 가리키지 않기."""
+        keys = [a.key for a in self.attributes]
+        if len(keys) != len(set(keys)):
+            raise ValueError("attributes: key가 겹친다")
+        values = {a.key: a.values for a in self.attributes}
+        codes = [e.code for e in self.event_kinds]
+        if len(codes) != len(set(codes)):
+            raise ValueError("event_kinds: code가 겹친다")
+
+        def check_value(where: str, key: str, code: str) -> None:
+            if key not in values:
+                raise ValueError(f"{where}: 없는 속성 {key}")
+            if code not in values[key]:
+                raise ValueError(f"{where}: 속성 {key}에 없는 값 {code}")
+
+        for genre in self.genre_keywords:
+            if genre not in self.genres:
+                raise ValueError(f"genre_keywords: 없는 장르 {genre}")
+        for f in self.external_filters:
+            check_value("external_filters", f.attribute_key, f.value_code)
+        for g in self.genre_external:
+            if g.genre_code not in self.genres:
+                raise ValueError(f"genre_external: 없는 장르 {g.genre_code}")
+        combos = [tuple(p.attribute_keys) for p in self.population]
+        if len(combos) != len(set(combos)):
+            raise ValueError("population: 같은 속성 조합이 겹친다")
+        for p in self.population:
+            if len(set(p.attribute_keys)) != len(p.attribute_keys):
+                raise ValueError("population: 한 조합 안에 같은 속성이 겹친다")
+            for key in p.attribute_keys:
+                if key not in values:
+                    raise ValueError(f"population: 없는 속성 {key}")
+        labels = [q.label for q in self.quick_questions]
+        if len(labels) != len(set(labels)):
+            raise ValueError("quick_questions: label이 겹친다")
+        for q in self.quick_questions:
+            for key, code in q.filters.items():
+                check_value("quick_questions", key, code)
+        return self
 
 
 class MetricCatalog(AxModel):
@@ -3246,6 +3360,10 @@ class SalesQuality(AxModel):
     dropped_reasons: dict[str, int] = Field(default_factory=dict)  # 이유(한국어) → 행 수
     last_synced_at: UtcDatetime | None = None  # 마지막으로 수집에 성공한 시각
     unknown_category_codes: list[str] = Field(default_factory=list)  # 카탈로그에 이름이 없는 코드
+    # 카탈로그 genres에 없는 genre_code (11/16, 고객·시장 분석)
+    unknown_genres: list[str] = Field(default_factory=list)
+    # 카탈로그 attributes에 없는 고객 속성 값: 속성 key → 매핑 안 된 값 code 목록 (11/16)
+    unmapped_attribute_values: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class SalesBasis(AxModel):
@@ -3278,6 +3396,258 @@ class SalesAnalysisOutput(AxModel):
     quality: SalesQuality = Field(default_factory=SalesQuality)
     basis: SalesBasis
     summary: str = ""  # 코드 템플릿 문장 (숫자는 위 출력값만)
+
+
+# ---------------------------------------------------------------- 고객·시장 분석 (11/16)
+# segment_profile · segment_favorites · market_coverage · event_proposal(_send).
+# 표준 판매 저장소(sales_orders·sales_customers 등)만 읽는다. 숫자는 코드가 계산하고 LLM은 이벤트
+# 제안의 title·summary만 쓴다(숫자 검증 실패면 코드 템플릿). 이름(속성·장르·이벤트 종류)은 회사
+# 카탈로그 `[sales]`에서 온다.
+#
+# 공통
+# - 결제 완료 주문 기준(`sales_clean.counts_as_revenue`). 기간은 한국 시간 0시 기준으로 N일
+# - 개인정보: 집단 통계만. 한 묶음이 `min_group_size`(기본 5)명 미만이면 `suppressed=True`이고
+#   그 묶음의 숫자 칸(비율·배수·구매자 수 등)은 비운다(None)
+# - 품질 관문(`sales_quality.gate`)에 걸리면 status "insufficient"와 이유, 숫자 칸은 비운다
+# - `quality`·`basis`는 매출 분석과 같은 모양. 직전 비교가 없는 분석의 `basis.previous_*`는
+#   기간 시작 시각과 같게 둔다
+# - 대상 고객(이벤트 제안) = 그 속성 묶음에서 최근 `active_days`(기본 365)일 결제 완료 주문이
+#   1회 이상인 고객
+SegmentPeriod = Literal["30d", "90d", "365d"]
+SegmentTargetKind = Literal["category", "genre", "product"]
+ExternalStatus = Literal["ok", "key_missing", "limit", "error"]
+
+
+class SegmentShare(AxModel):
+    """속성 값 하나의 구성비: 대상 구매자 중 비율 vs 전체 구매자 중 비율, 배수."""
+
+    value_code: str
+    label: str
+    target_share: float | None = Field(default=None, ge=0, le=1)
+    overall_share: float | None = Field(default=None, ge=0, le=1)
+    lift: float | None = Field(default=None, ge=0)  # target_share ÷ overall_share. 못 재면 None
+    buyers: int | None = Field(default=None, ge=0)  # 대상 구매자 중 이 값인 사람 수
+    suppressed: bool = False  # min_group_size 미만이면 True, 숫자 칸은 None
+
+
+class SegmentAttributeBreakdown(AxModel):
+    key: str
+    label: str
+    values: list[SegmentShare] = Field(default_factory=list)  # 카탈로그 값 순서
+    # 이 속성 값이 없거나(선택 항목이라 고르지 않음) 설정에 없는 값인 대상 구매자 수
+    unknown_buyers: int | None = Field(default=None, ge=0)
+
+
+class SegmentProfileInput(AxModel):
+    target_kind: SegmentTargetKind
+    target_code: str = Field(min_length=1, max_length=80)
+    attribute_keys: list[str] = Field(default_factory=list)  # 비우면 설정의 모든 속성
+    period: SegmentPeriod = "90d"
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class SegmentProfileOutput(AxModel):
+    status: Literal["ok", "insufficient"] = "ok"
+    insufficient_reasons: list[str] = Field(default_factory=list)
+    target_kind: SegmentTargetKind
+    target_code: str
+    target_label: str = ""
+    period: SegmentPeriod
+    target_buyers: int | None = Field(default=None, ge=0)  # 대상을 산 구매자 (suppressed면 None)
+    target_suppressed: bool = False
+    overall_buyers: int | None = Field(default=None, ge=0)  # 기간 안 전체 구매자
+    attributes: list[SegmentAttributeBreakdown] = Field(default_factory=list)
+    quality: SalesQuality = Field(default_factory=SalesQuality)
+    basis: SalesBasis | None = None
+    summary: str = ""
+
+
+class FavoriteItem(AxModel):
+    """우리 쇼핑몰 안 순위 한 줄: 그 집단이 산 장르·상품."""
+
+    kind: Literal["genre", "category", "product"]
+    code: str
+    label: str
+    share: float | None = Field(default=None, ge=0, le=1)  # 집단 구매자 중 이것을 산 비율
+    lift: float | None = Field(default=None, ge=0)  # 전체 구매자 중 비율 대비 배수
+    buyers: int | None = Field(default=None, ge=0)
+    suppressed: bool = False
+
+
+class ExternalItem(AxModel):
+    name: str
+    value: float | None = None
+    unit: str = ""
+    rank: int | None = Field(default=None, ge=1)
+
+
+class ExternalResult(AxModel):
+    """바깥 출처 한 곳의 결과. 키 없음·한도 초과·오류면 이유만, 숫자를 지어내지 않는다."""
+
+    source_id: str
+    label: str = ""  # 화면 이름 (예: 도서관 정보나루 인기대출)
+    status: ExternalStatus = "ok"
+    reason: str = ""
+    period_label: str = ""  # 예: 최근 3개월
+    condition_label: str = ""  # 바깥 출처에 건 조건 (사람이 읽는 말)
+    items: list[ExternalItem] = Field(default_factory=list)
+
+
+class SegmentFavoritesInput(AxModel):
+    filters: dict[str, str] = Field(min_length=1)  # 속성 key → 값 code
+    period: SegmentPeriod = "90d"
+    top: int = Field(default=10, ge=1, le=20)
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class SegmentFavoritesOutput(AxModel):
+    status: Literal["ok", "insufficient"] = "ok"
+    insufficient_reasons: list[str] = Field(default_factory=list)
+    filters: dict[str, str] = Field(default_factory=dict)
+    filter_label: str = ""  # 예: "20대 · 여성"
+    period: SegmentPeriod
+    segment_buyers: int | None = Field(default=None, ge=0)
+    segment_suppressed: bool = False
+    internal: list[FavoriteItem] = Field(default_factory=list)
+    external: list[ExternalResult] = Field(default_factory=list)
+    quality: SalesQuality = Field(default_factory=SalesQuality)
+    basis: SalesBasis | None = None
+    summary: str = ""
+
+
+class CoverageRow(AxModel):
+    """속성 조합 하나: 우리 구매자 수 ÷ 인구."""
+
+    values: dict[str, str] = Field(default_factory=dict)  # 속성 key → 값 code
+    label: str
+    buyers: int | None = Field(default=None, ge=0)
+    population: int | None = Field(default=None, ge=0)
+    population_source: str = ""  # 예: 통계청 주민등록인구 (표 이름)
+    base_year: int | None = None
+    coverage: float | None = Field(default=None, ge=0, le=1)
+    suppressed: bool = False
+    status: Literal["ok", "population_missing", "error"] = "ok"
+    reason: str = ""
+
+
+class MarketCoverageInput(AxModel):
+    attribute_keys: list[str] = Field(min_length=1)  # 설정 population에 있는 조합만
+    period: Literal["365d"] = "365d"
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class MarketCoverageOutput(AxModel):
+    status: Literal["ok", "insufficient"] = "ok"
+    insufficient_reasons: list[str] = Field(default_factory=list)
+    attribute_keys: list[str] = Field(default_factory=list)
+    period: Literal["365d"] = "365d"
+    rows: list[CoverageRow] = Field(default_factory=list)
+    quality: SalesQuality = Field(default_factory=SalesQuality)
+    basis: SalesBasis | None = None
+    summary: str = ""
+
+
+class ProposalReason(AxModel):
+    """제안 근거 하나: 숫자 하나와 출처."""
+
+    kind: Literal["segment", "season", "conversion"]
+    text: str  # 사람이 읽는 한 줄 (숫자는 value와 같은 값)
+    value: float | None = None
+    unit: str = ""  # 배 · % 등
+    source: str  # 예: 캣북스 주문 기록 최근 90일 / 네이버 검색어 트렌드 / 지난 캠페인 2건 / 가정값
+
+
+class TimingBasis(AxModel):
+    month: str  # 이벤트 달 YYYY-MM
+    keywords: list[str] = Field(default_factory=list)  # 시즌 판단 검색어 (카탈로그 genre_keywords)
+    last_year_multiple: float | None = Field(default=None, ge=0)  # 작년 같은 달 ÷ 작년 평균
+    source: str = ""
+
+
+class ProposalEstimate(AxModel):
+    """예상 효과 = 대상 고객 수 × 전환율 범위 × 객단가. 할인 비용 = 예상 매출 × 할인율."""
+
+    target_customers: int = Field(ge=0)
+    conversion_low: float = Field(ge=0, le=1)
+    conversion_high: float = Field(ge=0, le=1)
+    conversion_source: Literal["past_campaign", "assumption"]
+    assumption: bool = False  # 전환율이 가정값이면 True (화면에 "가정")
+    aov: int | None = Field(default=None, ge=0)  # 그 장르(분류) 객단가
+    orders_low: int = Field(default=0, ge=0)
+    orders_high: int = Field(default=0, ge=0)
+    revenue_low: int = Field(default=0, ge=0)
+    revenue_high: int = Field(default=0, ge=0)
+    discount_cost_low: int = Field(default=0, ge=0)
+    discount_cost_high: int = Field(default=0, ge=0)
+    formula: str = ""  # 계산식 한 줄 (숫자 포함)
+
+
+class ProposalSent(AxModel):
+    """기획에 넘긴 기록."""
+
+    sent_at: UtcDatetime
+    outcome: Literal["created", "duplicate", "rejected"]
+    proposal_ref: str | None = None  # 기획 제안 번호 (PROP-n)
+
+
+class ProposalPastResult(AxModel):
+    """지난 제안의 예상 vs 실제 (성과 되돌리기)."""
+
+    proposal_id: str
+    proposal_ref: str | None = None
+    campaign_id: str | None = None
+    expected_low: int | None = None  # 예상 매출 범위
+    expected_high: int | None = None
+    actual: int | None = None  # 캠페인 기간 매출 증분 (campaign_result)
+    period_from: UtcDatetime | None = None
+    period_to: UtcDatetime | None = None
+
+
+class EventProposalItem(AxModel):
+    proposal_id: str  # 날짜·조건으로 만든 해시. 같은 입력이면 같은 값
+    target_filters: dict[str, str] = Field(default_factory=dict)  # 누구 (속성 key → 값 code)
+    target_label: str = ""
+    genre_code: str | None = None  # 무엇 (장르 또는 분류 하나)
+    category_code: str | None = None
+    item_label: str = ""
+    event_kind: str  # 카탈로그 event_kinds code
+    event_label: str = ""
+    timing_basis: TimingBasis
+    reasons: list[ProposalReason] = Field(min_length=3, max_length=3)
+    estimate: ProposalEstimate
+    limits: list[str] = Field(default_factory=list)  # 한계 문장
+    score: float | None = None  # 후보 점수 (코드 규칙, 순서용)
+    title: str | None = None  # LLM 또는 코드 템플릿
+    summary: str | None = None
+    sent: ProposalSent | None = None
+    past_results: list[ProposalPastResult] = Field(default_factory=list)
+
+
+class EventProposalInput(AxModel):
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    max_items: int = Field(default=3, ge=1, le=5)
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class EventProposalOutput(AxModel):
+    status: Literal["ok", "insufficient"] = "ok"
+    insufficient_reasons: list[str] = Field(default_factory=list)
+    month: str
+    proposals: list[EventProposalItem] = Field(default_factory=list)
+    quality: SalesQuality = Field(default_factory=SalesQuality)
+    basis: SalesBasis | None = None
+    summary: str = ""
+
+
+class EventProposalSendInput(AxModel):
+    proposal_id: str = Field(min_length=1, max_length=80)
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class EventProposalSendOutput(AxModel):
+    outcome: Literal["created", "duplicate", "rejected"]
+    proposal_ref: str | None = None  # 기획 제안 번호 (PROP-n)
+    reason: str = ""
 
 
 TrendInsight.model_rebuild()
