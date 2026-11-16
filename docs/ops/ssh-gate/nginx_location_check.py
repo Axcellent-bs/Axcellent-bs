@@ -22,6 +22,10 @@
 
 요청하는 사람이 정하는 것은 이름·메서드·정규식뿐이다. 블록 줄·포트·호스트는 고를 수 없다.
 
+프로필(선택): 정책이 이름을 붙여 둔 지시어 묶음(--profile-name, --profile-line)을 블록 줄 뒤에
+덧붙인다. 요청하는 사람은 이름만 고른다. 프로필 줄에 쓸 수 있는 지시어는 이 파일에 고정된
+타임아웃·본문 크기 목록(PROFILE_DIRECTIVES)뿐이고 값에는 한도가 있다. 프로필을 안 쓰면 블록은 예전과 같다.
+
 하는 일
   check        메서드·정규식·허용 접두·업스트림 표·블록 줄을 검사한다.
   render       검사를 통과한 입력으로 location 블록 한 개를 만들어 출력한다.
@@ -71,9 +75,27 @@ MAX_BLOCK_LINES = 12
 REQUIRED_LIMIT_PREFIX = "limit_except {method} "
 REQUIRED_PROXY_LINE = "proxy_pass http://127.0.0.1:{port};"
 
+# 프로필: 정책이 이름을 붙여 둔 "덧붙는 지시문 묶음". 요청하는 사람은 이름만 고른다.
+# 프로필 줄에 쓸 수 있는 지시문은 아래뿐이다(타임아웃·본문 크기). 여기에 없는 지시문
+# (proxy_pass, include, rewrite, add_header, 인증 관련 등)은 정책에 적어도 거부한다.
+PROFILE_DIRECTIVES = {
+    "proxy_read_timeout": "time",
+    "proxy_send_timeout": "time",
+    "proxy_connect_timeout": "time",
+    "send_timeout": "time",
+    "client_body_timeout": "time",
+    "client_max_body_size": "size",
+}
+RE_PROFILE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,23}$")
+RE_PROFILE_LINE = re.compile(r"^([a-z_]{1,40}) ([0-9]{1,5})([a-z]?);$")
+MAX_PROFILE_LINES = len(PROFILE_DIRECTIVES)
+MAX_TIMEOUT_SECONDS = 3600           # 한 시간
+MAX_BODY_BYTES = 1024 * 1024 * 1024  # 1g. 0(무제한)은 받지 않는다
+
 RE_COMMENT = re.compile(
     r"^# ax-gate: name=(?P<name>[a-z0-9][a-z0-9-]{0,39}) user=(?P<user>[a-z][a-z0-9-]{1,31})"
-    r" added=(?P<stamp>[0-9]{8}-[0-9]{6}) location ~ (?P<regex>\S+) \{ "
+    r" added=(?P<stamp>[0-9]{8}-[0-9]{6})(?: profile=(?P<profile>[a-z0-9][a-z0-9-]{0,23}))?"
+    r" location ~ (?P<regex>\S+) \{ "
 )
 
 EXIT_OK = 0
@@ -222,9 +244,45 @@ def check_block_lines(block_lines):
         raise ConfigError("proxy_pass 줄은 하나만 둘 수 있다")
 
 
-def validate(method, regex, allowed_methods, allowed_prefixes, upstreams, block_lines):
+def check_profile_lines(profile_lines, block_lines):
+    """정책이 준 프로필 줄을 본다. 허용 목록의 지시문, 정해진 값 꼴, 한도 안의 값만 통과한다."""
+    if len(profile_lines) > MAX_PROFILE_LINES:
+        raise ConfigError("프로필 줄이 너무 많다")
+    seen = set()
+    for line in profile_lines:
+        m = RE_PROFILE_LINE.fullmatch(line) if isinstance(line, str) else None   # 끝의 줄바꿈도 받지 않는다
+        if not m:
+            raise ConfigError("프로필 줄은 '<지시문> <숫자><단위>;' 한 가지 꼴만 된다")
+        directive, number, unit = m.group(1), int(m.group(2)), m.group(3)
+        kind = PROFILE_DIRECTIVES.get(directive)
+        if kind is None:
+            raise ConfigError(
+                "프로필에 쓸 수 없는 지시문이다. 쓸 수 있는 것: " + " ".join(sorted(PROFILE_DIRECTIVES))
+            )
+        if directive in seen:
+            raise ConfigError("프로필에 같은 지시문이 두 번 있다")
+        seen.add(directive)
+        if kind == "time":
+            if unit not in ("", "s", "m"):
+                raise ConfigError("타임아웃 단위는 s 나 m 만 된다")
+            seconds = number * (60 if unit == "m" else 1)
+            if not 1 <= seconds <= MAX_TIMEOUT_SECONDS:
+                raise ConfigError("타임아웃은 1초~%d초 안이어야 한다" % MAX_TIMEOUT_SECONDS)
+        else:
+            if unit not in ("k", "m"):
+                raise ConfigError("본문 크기 단위는 k 나 m 만 된다")
+            size = number * (1024 if unit == "k" else 1024 * 1024)
+            if not 1 <= size <= MAX_BODY_BYTES:
+                raise ConfigError("본문 크기는 1k~1024m 안이어야 한다(0=무제한은 안 된다)")
+        for block_line in block_lines:
+            if block_line.startswith(directive + " "):
+                raise ConfigError("프로필의 지시문이 블록 줄에 이미 있다")
+
+
+def validate(method, regex, allowed_methods, allowed_prefixes, upstreams, block_lines, profile_lines=()):
     """전체 검사. (첫 조각, 포트) 를 돌려준다."""
     check_block_lines(block_lines)
+    check_profile_lines(profile_lines, block_lines)
     for m in allowed_methods:
         if m not in METHOD_UNIVERSE:
             raise ConfigError("허용 메서드 목록에 게이트가 다루지 않는 메서드가 있다")
@@ -250,7 +308,13 @@ def validate(method, regex, allowed_methods, allowed_prefixes, upstreams, block_
     return segment, port
 
 
-def render_block(name, user, stamp, method, regex, segment, port, block_lines, indent=""):
+def render_block(name, user, stamp, method, regex, segment, port, block_lines, indent="",
+                 profile_name="", profile_lines=()):
+    if bool(profile_name) != bool(profile_lines):
+        raise ConfigError("프로필 이름과 프로필 줄은 같이 있거나 같이 없어야 한다")
+    if profile_name and not RE_PROFILE_NAME.match(profile_name):
+        raise ConfigError("프로필 이름 형식이 잘못됐다")
+    check_profile_lines(profile_lines, block_lines)
     if not RE_NAME.match(name):
         raise Rejected("bad-name", "이름은 영어 소문자·숫자·- 만, 40자 이하")
     if not RE_KEY.match(user):
@@ -261,33 +325,38 @@ def render_block(name, user, stamp, method, regex, segment, port, block_lines, i
         raise ConfigError("들여쓰기에 공백 아닌 글자가 있다")
     check_block_lines(block_lines)
     body = " ".join(
-        ln.replace("{method}", method).replace("{segment}", segment).replace("{port}", str(port))
-        for ln in block_lines
+        [ln.replace("{method}", method).replace("{segment}", segment).replace("{port}", str(port))
+         for ln in block_lines]
+        + list(profile_lines)   # 프로필 줄은 자리표시를 쓰지 않는다. 정책 블록 줄 뒤에 그대로 붙는다
     )
+    tag = " profile=%s" % profile_name if profile_name else ""
     return (
-        "%s# ax-gate: name=%s user=%s added=%s\n" % (indent, name, user, stamp)
+        "%s# ax-gate: name=%s user=%s added=%s%s\n" % (indent, name, user, stamp, tag)
         + "%slocation ~ %s { %s }\n" % (indent, regex, body)
     )
 
 
-def check_block(text, allowed_methods, allowed_prefixes, upstreams, block_lines):
+def check_block(text, allowed_methods, allowed_prefixes, upstreams, block_lines,
+                profile_name="", profile_lines=()):
     """블록 글이 정책의 블록 줄로 만든 것과 정확히 같은지 본다(공백·줄바꿈 위치는 무시)."""
     flat = " ".join(text.split())
     m = RE_COMMENT.match(flat)
     if not m:
         raise Rejected("block-shape", "게이트가 만든 블록의 모양이 아니다")
     found = m.groupdict()
+    if (found["profile"] or "") != (profile_name or ""):
+        raise Rejected("block-shape", "블록의 프로필이 정책이 준 프로필과 다르다")
     # 메서드는 블록 안에서 읽지 않는다. 허용 메서드마다 블록을 다시 만들어 글자 그대로 비교한다.
     last_error = Rejected("block-shape", "정책의 블록 줄과 다른 블록이다(임의 지시어·다른 include·다른 호스트 금지)")
     for method in allowed_methods:
         try:
             segment, port = validate(method, found["regex"], allowed_methods, allowed_prefixes,
-                                     upstreams, block_lines)
+                                     upstreams, block_lines, profile_lines)
         except Rejected as exc:
             last_error = exc
             continue
         expected = render_block(found["name"], found["user"], found["stamp"], method, found["regex"],
-                                segment, port, block_lines)
+                                segment, port, block_lines, "", profile_name, profile_lines)
         if " ".join(expected.split()) == flat:
             return True
         last_error = Rejected("block-shape", "정책의 블록 줄과 다른 블록이다(임의 지시어·다른 include·다른 호스트 금지)")
@@ -295,9 +364,11 @@ def check_block(text, allowed_methods, allowed_prefixes, upstreams, block_lines)
 
 
 def apply_to_conf(conf_text, name, user, stamp, method, regex,
-                  allowed_methods, allowed_prefixes, upstreams, block_lines):
+                  allowed_methods, allowed_prefixes, upstreams, block_lines,
+                  profile_name="", profile_lines=()):
     """삽입 표시 줄 바로 아래에 블록을 넣은 새 설정 글을 돌려준다."""
-    segment, port = validate(method, regex, allowed_methods, allowed_prefixes, upstreams, block_lines)
+    segment, port = validate(method, regex, allowed_methods, allowed_prefixes, upstreams, block_lines,
+                             profile_lines)
     lines = conf_text.splitlines(keepends=True)
     marker_at = [i for i, ln in enumerate(lines) if ln.strip() == INSERT_MARKER]
     if len(marker_at) != 1:
@@ -313,8 +384,10 @@ def apply_to_conf(conf_text, name, user, stamp, method, regex,
             raise Rejected("duplicate-name", "같은 이름의 게이트 location 이 이미 있다")
     marker_line = lines[marker_at[0]]
     indent = marker_line[:len(marker_line) - len(marker_line.lstrip(" \t"))]
-    block = render_block(name, user, stamp, method, regex, segment, port, block_lines, indent)
-    check_block(block, allowed_methods, allowed_prefixes, upstreams, block_lines)  # 자기 점검
+    block = render_block(name, user, stamp, method, regex, segment, port, block_lines, indent,
+                         profile_name, profile_lines)
+    check_block(block, allowed_methods, allowed_prefixes, upstreams, block_lines,
+                profile_name, profile_lines)  # 자기 점검
     if not marker_line.endswith("\n"):
         lines[marker_at[0]] = marker_line + "\n"
     return "".join(lines[:marker_at[0] + 1]) + block + "".join(lines[marker_at[0] + 1:])
@@ -342,6 +415,8 @@ def build_parser():
         sp.add_argument("--allowed-prefix", action="append", default=[])
         sp.add_argument("--upstream", action="append", default=[], metavar="조각=포트")
         sp.add_argument("--block-line", action="append", default=[], metavar="지시어 줄")
+        sp.add_argument("--profile-name", default="", metavar="프로필 이름")
+        sp.add_argument("--profile-line", action="append", default=[], metavar="프로필 지시어 줄")
 
     def naming(sp):
         sp.add_argument("--name", required=True)
@@ -373,21 +448,27 @@ def main(argv=None):
     try:
         upstreams = parse_upstreams(args.upstream)
         rules = (args.allowed_method, args.allowed_prefix, upstreams, args.block_line)
+        profile_name, profile_lines = args.profile_name, tuple(args.profile_line)
+        if bool(profile_name) != bool(profile_lines):
+            raise ConfigError("--profile-name 과 --profile-line 은 같이 주거나 같이 뺀다")
+        if profile_name and not RE_PROFILE_NAME.match(profile_name):
+            raise ConfigError("프로필 이름 형식이 잘못됐다")
         if args.cmd == "check":
-            validate(args.method, args.regex, *rules)
+            validate(args.method, args.regex, *rules, profile_lines)
             print("OK")
         elif args.cmd == "render":
-            segment, port = validate(args.method, args.regex, *rules)
+            segment, port = validate(args.method, args.regex, *rules, profile_lines)
             sys.stdout.write(render_block(args.name, args.user, args.stamp, args.method,
-                                          args.regex, segment, port, args.block_line))
+                                          args.regex, segment, port, args.block_line, "",
+                                          profile_name, profile_lines))
         elif args.cmd == "check-block":
-            check_block(sys.stdin.read(), *rules)
+            check_block(sys.stdin.read(), *rules, profile_name, profile_lines)
             print("OK")
         elif args.cmd == "apply":
             with open(args.conf, "r", encoding="utf-8", newline="") as fh:
                 conf_text = fh.read()
             new_text = apply_to_conf(conf_text, args.name, args.user, args.stamp, args.method,
-                                     args.regex, *rules)
+                                     args.regex, *rules, profile_name, profile_lines)
             with open(args.out, "w", encoding="utf-8", newline="") as fh:
                 fh.write(new_text)
             print("OK")

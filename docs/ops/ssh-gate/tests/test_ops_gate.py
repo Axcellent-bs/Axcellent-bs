@@ -82,7 +82,16 @@ case "$1" in
 esac
 exit 1
 """,
-    "systemctl": 'echo "systemctl $*" >> "$FAKE_LOG"\nexit 0\n',
+    # state/systemctl_rc 가 있으면 그 끝 코드로 끝난다(reload 실패 시험용)
+    "systemctl": ('echo "systemctl $*" >> "$FAKE_LOG"\n'
+                  'exit "$(cat "$FAKE_STATE/systemctl_rc" 2>/dev/null || echo 0)"\n'),
+    # 진짜 cp 를 부른다. state/cp_fail_dest 에 적힌 곳으로의 복사만 한 번 실패한다(교체 도중 실패 시험용)
+    "cp": ('for last; do :; done\n'
+           'if [[ -f "$FAKE_STATE/cp_fail_dest" && "$last" == "$(cat "$FAKE_STATE/cp_fail_dest")" ]]; then\n'
+           '  rm -f "$FAKE_STATE/cp_fail_dest"\n  echo "cp FAILED" >> "$FAKE_STATE/cp_failures"\n  exit 1\nfi\n'
+           'while IFS= read -r real; do\n'
+           '  [[ "$(dirname "$real")" != "$(dirname "$0")" ]] && exec "$real" "$@"\n'
+           'done < <(type -aP cp)\nexit 127\n'),
     "nginx": 'echo "nginx $*" >> "$FAKE_LOG"\nexit "$(cat "$FAKE_STATE/nginx_rc" 2>/dev/null || echo 0)"\n',
     # 주소별 응답 코드: state/curl_code_<포트> 가 있으면 그 값, 없으면 state/curl_code, 그것도 없으면 200
     "curl": ('url="${@: -1}"\nport="${url##*:}"\nport="${port%%/*}"\necho "curl $url" >> "$FAKE_LOG"\n'
@@ -1108,6 +1117,348 @@ class NginxRestoreAndStatusTests(GateCase):
         self.assertNotIn(SECRET, p.stdout)
 
 
+CONF_B = """server {
+    listen 8301;
+    # AX-GATE-INSERT-BELOW
+    location /example-api/ {
+        limit_except GET HEAD { deny all; }
+    }
+}
+"""
+PROFILES = ('\n[location_profiles]\n'
+            'long-timeout = ["proxy_read_timeout 300s;", "proxy_send_timeout 300s;"]\n'
+            'big-body = ["client_max_body_size 50m;"]\n')
+
+
+def old_digest(name, method, regex, proposer):
+    """프로필·다중 대상이 생기기 전의 확인값 공식. 프로필 없는 제안은 이 값 그대로여야 한다."""
+    import hashlib
+    return hashlib.sha256(f"{name}\n{method}\n{regex}\n{proposer}\n".encode()).hexdigest()[:12]
+
+
+class NginxMultiTargetTests(GateCase):
+    """정책 [nginx_targets]: 대상 파일 전부를 한 묶음으로 바꾼다. 실패하면 전부 되돌린다."""
+
+    def setUp(self):
+        super().setUp()
+        self.conf_b = self.rootp / "etc/nginx/conf.d/site-b.conf"
+        write(self.conf_b, CONF_B)
+        self.targets = f'\n[nginx_targets]\nsite-b = "{self.root}/etc/nginx/conf.d/site-b.conf"\n'
+        write(self.policy, policy_text(self.root) + self.targets)
+
+    def backup_dirs(self):
+        return sorted(os.listdir(self.rootp / "etc/nginx/backup"))
+
+    def pending(self):
+        return sorted(os.listdir(self.rootp / "var/lib/ax-gate/pending"))
+
+    def both(self):
+        return self.conf.read_text(encoding="utf-8"), self.conf_b.read_text(encoding="utf-8")
+
+    def approve(self, digest, key="owner-c"):
+        return self.gate(key, f"nginx-approve-location card-decision {digest} --announced")
+
+    def test_approval_changes_every_target_with_one_test_and_one_reload(self):
+        digest = self.propose()
+        self.assertEqual(digest, old_digest("card-decision", "POST", GOOD_REGEX, "owner-b"))
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))             # 제안만으로는 아무것도 안 바뀐다
+        p = self.approve(digest)
+        self.assertRc(p, 0)
+        a, b = self.both()
+        for text in (a, b):
+            self.assertIn("location ~ " + GOOD_REGEX + " {", text)
+            self.assertIn("proxy_pass http://127.0.0.1:8201;", text)
+        self.assertIn("listen 8301;", b)
+        calls = self.calls()
+        self.assertEqual(calls.count("nginx -t"), 1)
+        self.assertEqual(calls.count("systemctl reload nginx"), 1)
+        self.assertLess(calls.index("nginx -t"), calls.index("systemctl reload nginx"))
+        (bdir,) = self.backup_dirs()
+        saved = self.rootp / "etc/nginx/backup" / bdir
+        # 기본 대상은 예전 자리, 추가 대상은 targets/<이름>/ 아래
+        self.assertEqual((saved / "site.conf").read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertTrue((saved / "site.conf.sha256").exists())
+        self.assertEqual((saved / "targets/site-b/site-b.conf").read_text(encoding="utf-8"), CONF_B)
+        self.assertTrue((saved / "targets/site-b/site-b.conf.sha256").exists())
+        self.assertIn("적용한 대상(전부 한 번에): 기본, site-b", p.stdout)
+        (rec,) = os.listdir(self.rootp / "var/lib/ax-gate/approved")
+        self.assertIn("targets=기본, site-b\n",
+                      (self.rootp / "var/lib/ax-gate/approved" / rec).read_text(encoding="utf-8"))
+        self.assertIn("nginx 대상 파일: 기본, site-b", self.gate("member-x", "status").stdout)
+        # 그 백업으로 복원하면 두 파일 다 원래대로 돌아온다(한 번의 nginx -t·reload)
+        time.sleep(1.1)
+        p = self.gate("owner-a", f"nginx-restore {bdir} --announced")
+        self.assertRc(p, 0)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        self.assertIn("복원한 대상: 기본, site-b", p.stdout)
+        self.assertEqual(self.calls().count("nginx -t"), 2)
+        self.assertEqual(self.calls().count("systemctl reload nginx"), 2)
+
+    def test_failed_nginx_test_restores_every_target(self):
+        digest = self.propose()
+        write(self.state / "nginx_rc", "1\n")
+        p = self.approve(digest)
+        self.assertRc(p, 1)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        self.assertNotIn("reload", self.calls())
+        self.assertIn("result=fail:nginx-test-failed", self.audit_text())
+        self.assertEqual(self.pending(), ["card-decision.req"])
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/approved"), [])
+
+    def test_failure_while_replacing_second_target_restores_the_first(self):
+        digest = self.propose()
+        write(self.state / "cp_fail_dest", f"{self.root}/etc/nginx/conf.d/site-b.conf")
+        p = self.approve(digest)
+        self.assertRc(p, 1)
+        self.assertTrue((self.state / "cp_failures").exists())          # 실제로 교체 도중에 실패했다
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))              # 먼저 바꾼 기본 대상도 되돌아왔다
+        self.assertNotIn("nginx -t", self.calls())
+        self.assertNotIn("reload", self.calls())
+        self.assertIn("result=fail:nginx-replace-failed", self.audit_text())
+        self.assertEqual(self.pending(), ["card-decision.req"])
+
+    def test_failed_reload_restores_every_target(self):
+        digest = self.propose()
+        write(self.state / "systemctl_rc", "1\n")
+        p = self.approve(digest)
+        self.assertRc(p, 1)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        self.assertIn("result=fail:nginx-reload-failed", self.audit_text())
+        self.assertEqual(self.pending(), ["card-decision.req"])
+
+    def test_every_target_is_checked_before_anything_changes(self):
+        # 둘째 대상에 삽입 표시 줄이 없으면 제안부터 안 된다
+        write(self.conf_b, CONF_B.replace("    # AX-GATE-INSERT-BELOW\n", ""))
+        self.assertRc(self.gate("owner-b", f"nginx-add-location card-decision POST {GOOD_REGEX}"), 2)
+        self.assertEqual(self.pending(), [])
+        # 제안 뒤에 둘째 대상이 바뀌어 넣을 수 없게 되면, 승인은 아무것도 바꾸지 않고 멈춘다(백업 폴더도 없다)
+        write(self.conf_b, CONF_B)
+        digest = self.propose()
+        broken = CONF_B.replace("    # AX-GATE-INSERT-BELOW\n", "")
+        write(self.conf_b, broken)
+        p = self.approve(digest)
+        self.assertRc(p, 2)
+        self.assertEqual(self.both(), (ORIG_CONF, broken))
+        self.assertEqual(self.backup_dirs(), [])
+        self.assertNotIn("nginx", self.calls())
+        self.assertIn("result=fail:location-rejected", self.audit_text())
+        # 둘째 대상에 같은 정규식이 이미 있어도 마찬가지다
+        write(self.conf_b, CONF_B.replace("# AX-GATE-INSERT-BELOW\n",
+                                          "# AX-GATE-INSERT-BELOW\n    location ~ " + GOOD_REGEX + " { }\n"))
+        self.assertRc(self.approve(digest), 2)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertEqual(self.backup_dirs(), [])
+
+    def test_target_specific_block_lines(self):
+        lines = ('["limit_except {method} { deny all; }", "proxy_pass http://127.0.0.1:{port};", '
+                 '"include snippets/example-proxy-b.conf;"]')
+        write(self.policy, policy_text(self.root) + self.targets
+              + f"\n[nginx_target_block_lines]\nsite-b = {lines}\n")
+        self.assertRc(self.approve(self.propose()), 0)
+        a, b = self.both()
+        self.assertIn("include snippets/example-auth.conf; }", a)
+        self.assertNotIn("example-proxy-b", a)
+        self.assertIn("proxy_pass http://127.0.0.1:8201; include snippets/example-proxy-b.conf; }", b)
+        self.assertNotIn("rewrite", b)
+        # 대상별 블록 줄도 검증기를 거친다: 메서드 제한이 빠진 줄이면 제안이 안 된다
+        bad = '["proxy_pass http://127.0.0.1:{port};"]'
+        write(self.policy, policy_text(self.root) + self.targets
+              + f"\n[nginx_target_block_lines]\nsite-b = {bad}\n")
+        self.assertRc(self.gate("owner-b", f"nginx-add-location other POST {GOOD_REGEX[:-1]}/x$"), 2)
+        self.assertEqual(self.pending(), [])
+
+    def test_restore_reverts_every_target_when_nginx_test_fails(self):
+        self.assertRc(self.approve(self.propose()), 0)
+        changed = self.both()
+        (bdir,) = self.backup_dirs()
+        write(self.state / "nginx_rc", "1\n")
+        time.sleep(1.1)
+        self.assertRc(self.gate("owner-a", f"nginx-restore {bdir} --announced"), 1)
+        self.assertEqual(self.both(), changed)
+        self.assertEqual(self.calls().count("systemctl reload nginx"), 1)   # 승인 때 한 번뿐
+
+    def test_restore_checks_every_copy_before_changing_anything(self):
+        self.assertRc(self.approve(self.propose()), 0)
+        changed = self.both()
+        (bdir,) = self.backup_dirs()
+        write(self.rootp / "etc/nginx/backup" / bdir / "targets/site-b/site-b.conf", "# tampered\n")
+        self.assertRc(self.gate("owner-a", f"nginx-restore {bdir} --announced"), 1)
+        self.assertIn("result=fail:backup-checksum", self.audit_text())
+        self.assertEqual(self.both(), changed)
+        self.assertEqual(self.backup_dirs(), [bdir])
+
+    def test_restore_from_backup_made_before_targets_leaves_extra_target_alone(self):
+        old = self.rootp / "etc/nginx/backup/pre-manual-20261111"
+        write(old / "site.conf", "# older\n")
+        p = self.gate("owner-c", "nginx-restore pre-manual-20261111 --announced")
+        self.assertRc(p, 0)
+        self.assertEqual(self.both(), ("# older\n", CONF_B))
+        self.assertIn("대상 site-b: 이 백업에 사본이 없다(그 대상은 그대로 둔다)", p.stdout)
+        self.assertIn("복원한 대상: 기본 / 백업에 없어 그대로 둔 대상: site-b", p.stdout)
+        # 복원 직전 상태는 대상 전부를 백업해 둔다(되돌리기는 전부 한 번에)
+        undo = [d for d in self.backup_dirs() if d.startswith("pre-gate-restore-")][0]
+        self.assertTrue((self.rootp / "etc/nginx/backup" / undo / "targets/site-b/site-b.conf").exists())
+
+    def test_requester_cannot_pick_a_target(self):
+        # 넷째 인자는 프로필 이름이다. 대상 이름을 적어도 대상이 골라지지 않는다
+        p = self.gate("owner-b", f"nginx-add-location card-decision POST {GOOD_REGEX} site-b")
+        self.assertRc(p, 2)
+        self.assertIn("result=fail:profile-unknown", self.audit_text())
+        self.assertEqual(self.pending(), [])
+
+    def test_bad_target_policy_stops_nginx_actions_but_not_status(self):
+        r = self.root
+        bad = [
+            f'[nginx_targets]\nSite_B = "{r}/etc/nginx/conf.d/site-b.conf"\n',          # 이름 형식
+            f'[nginx_targets]\nsite-b = "{r}/etc/nginx/conf.d/site.conf"\n',            # 기본 대상과 같은 파일
+            '[nginx_targets]\nsite-b = "relative/site-b.conf"\n',                       # 경로 아님
+            f'[nginx_targets]\nsite-b = "{r}/etc/nginx/../nginx/conf.d/site-b.conf"\n',
+            '[nginx_targets]\nsite-b = "TODO"\n',
+            f'[nginx_targets]\nsite-b = ["{r}/etc/nginx/conf.d/site-b.conf"]\n',        # 목록(글이 아님)
+            self.targets.strip() + '\n\n[nginx_target_block_lines]\nsite-c = ["x;"]\n',   # 없는 대상의 블록 줄
+        ]
+        write(self.rootp / "etc/nginx/backup/pre-old/site.conf", "# old\n")
+        for body in bad:
+            with self.subTest(body=body):
+                write(self.policy, policy_text(self.root) + "\n" + body)
+                self.assertRc(self.gate("owner-b", f"nginx-add-location n1 POST {GOOD_REGEX}"), 5)
+                self.assertRc(self.gate("owner-a", "nginx-restore pre-old --announced"), 5)
+                self.assertRc(self.gate("member-x", "status"), 0)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        self.assertEqual(self.pending(), [])
+        self.assertNotIn("nginx", self.calls())
+
+    def test_dry_run_changes_nothing_on_any_target(self):
+        digest = self.propose()
+        p = self.gate("owner-c", f"nginx-approve-location card-decision {digest} --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN:", p.stdout)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        self.assertEqual(self.backup_dirs(), [])
+        self.assertNotIn("nginx", self.calls())
+
+
+class NginxProfileTests(GateCase):
+    """정책 [location_profiles]: 요청하는 사람은 이름만 고른다. 내용은 정책과 검증기 허용 목록이 정한다."""
+
+    def setUp(self):
+        super().setUp()
+        write(self.policy, policy_text(self.root) + PROFILES)
+
+    def propose_with(self, profile, key="owner-b"):
+        p = self.gate(key, f"nginx-add-location card-decision POST {GOOD_REGEX} {profile}")
+        self.assertRc(p, 0)
+        return [ln.split()[-1] for ln in p.stdout.splitlines() if ln.strip().startswith("확인값")][0]
+
+    def test_without_profile_nothing_changes_from_before(self):
+        digest = self.propose()
+        self.assertEqual(digest, old_digest("card-decision", "POST", GOOD_REGEX, "owner-b"))
+        req = (self.rootp / "var/lib/ax-gate/pending/card-decision.req").read_text(encoding="utf-8")
+        self.assertNotIn("profile=", req)
+        p = self.gate("owner-c", f"nginx-approve-location card-decision {digest} --announced")
+        self.assertRc(p, 0)
+        conf = self.conf.read_text(encoding="utf-8")
+        self.assertIn("include snippets/example-auth.conf; }", conf)
+        self.assertNotIn("profile=", conf)
+        self.assertNotIn("timeout", conf)
+        self.assertIn(f"note=proposer:owner-b,digest:{digest},self-approve:no\tlayer=root\t", self.audit_text())
+        (bdir,) = os.listdir(self.rootp / "etc/nginx/backup")
+        self.assertFalse((self.rootp / "etc/nginx/backup" / bdir / "targets").exists())
+
+    def test_profile_is_bound_into_digest_shown_in_status_and_applied(self):
+        digest = self.propose_with("long-timeout")
+        self.assertNotEqual(digest, old_digest("card-decision", "POST", GOOD_REGEX, "owner-b"))
+        st = self.gate("member-x", "status").stdout
+        self.assertIn(f"POST {GOOD_REGEX} / 확인값 {digest} / 프로필 long-timeout", st)
+        self.assertIn("location 프로필: big-body, long-timeout", st)
+        self.assertIn(f"note=digest:{digest},profile:long-timeout\tlayer=root\tresult=proposed", self.audit_text())
+        p = self.gate("owner-c", f"nginx-approve-location card-decision {digest} --announced")
+        self.assertRc(p, 0)
+        conf = self.conf.read_text(encoding="utf-8")
+        self.assertIn("# ax-gate: name=card-decision user=owner-b added=", conf)
+        self.assertIn(" profile=long-timeout\n", conf)
+        self.assertIn("include snippets/example-auth.conf; proxy_read_timeout 300s; proxy_send_timeout 300s; }",
+                      conf)
+        self.assertEqual(conf.count("proxy_pass "), 1)
+        self.assertIn(f"note=proposer:owner-b,digest:{digest},self-approve:no,profile:long-timeout\tlayer=root\t"
+                      "result=applied:", self.audit_text())
+        (rec,) = os.listdir(self.rootp / "var/lib/ax-gate/approved")
+        self.assertIn("profile=long-timeout\n",
+                      (self.rootp / "var/lib/ax-gate/approved" / rec).read_text(encoding="utf-8"))
+
+    def test_unknown_or_malformed_profile_name(self):
+        p = self.gate("owner-b", f"nginx-add-location card-decision POST {GOOD_REGEX} huge")
+        self.assertRc(p, 2)
+        self.assertIn("쓸 수 있는 프로필: big-body, long-timeout", p.stderr)
+        self.assertIn("result=fail:profile-unknown", self.audit_text())
+        for name in ("Long", "a/b", "../x", "proxy_pass", "x;y"):
+            with self.subTest(name=name):
+                self.assertRc(self.gate("owner-b", f"nginx-add-location card-decision POST {GOOD_REGEX} {name}"), 2)
+        self.assertRc(self.gate("owner-b", f"nginx-add-location card-decision POST {GOOD_REGEX} big-body x"), 2)
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/pending"), [])
+
+    def test_profile_with_directive_outside_allow_list_is_refused(self):
+        bad = [
+            '["proxy_pass http://127.0.0.1:9999;"]',
+            '["include snippets/other.conf;"]',
+            '["add_header X-Test 1;"]',
+            '["proxy_read_timeout 300s;", "rewrite ^/(.*)$ /$1 break;"]',
+            '["proxy_read_timeout 300s; proxy_pass http://127.0.0.1:9999;"]',
+            '["proxy_read_timeout 99999s;"]',
+            '["client_max_body_size 0;"]',
+            '["limit_except GET { deny all; }"]',
+            '[]',                       # 빈 프로필
+            '"proxy_read_timeout 300s;"',   # 목록이 아님
+        ]
+        for body in bad:
+            with self.subTest(body=body):
+                write(self.policy, policy_text(self.root) + f"\n[location_profiles]\nrisky = {body}\n")
+                self.assertRc(self.gate("owner-b", f"nginx-add-location n1 POST {GOOD_REGEX} risky"), 2)
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/pending"), [])
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertNotIn("nginx", self.calls())
+
+    def test_profile_removed_or_made_unsafe_after_proposal_stops_approval(self):
+        digest = self.propose_with("long-timeout")
+        approve = f"nginx-approve-location card-decision {digest} --announced"
+        write(self.policy, policy_text(self.root))                       # 프로필이 정책에서 사라짐
+        self.assertRc(self.gate("owner-c", approve), 2)
+        self.assertIn("result=fail:profile-unknown", self.audit_text())
+        write(self.policy, policy_text(self.root)
+              + '\n[location_profiles]\nlong-timeout = ["proxy_pass http://127.0.0.1:9999;"]\n')
+        self.assertRc(self.gate("owner-c", approve), 2)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertEqual(os.listdir(self.rootp / "etc/nginx/backup"), [])
+        self.assertNotIn("nginx", self.calls())
+
+    def test_changing_the_profile_in_the_proposal_file_breaks_the_digest(self):
+        digest = self.propose_with("big-body")
+        req = self.rootp / "var/lib/ax-gate/pending/card-decision.req"
+        original = req.read_text(encoding="utf-8")
+        approve = f"nginx-approve-location card-decision {digest} --announced"
+        for changed in (original.replace("profile=big-body", "profile=long-timeout"),
+                        original.replace("profile=big-body\n", "")):
+            with self.subTest(changed=changed[-40:]):
+                write(req, changed)
+                self.assertRc(self.gate("owner-c", approve), 2)
+        self.assertEqual(self.audit_text().count("result=fail:digest-mismatch"), 2)
+        write(req, original.replace("profile=big-body", "profile=Bad Name"))
+        self.assertRc(self.gate("owner-c", approve), 1)                  # 깨진 제안 파일
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+
+    def test_profile_and_multiple_targets_together(self):
+        conf_b = self.rootp / "etc/nginx/conf.d/site-b.conf"
+        write(conf_b, CONF_B)
+        write(self.policy, policy_text(self.root) + PROFILES
+              + f'\n[nginx_targets]\nsite-b = "{self.root}/etc/nginx/conf.d/site-b.conf"\n')
+        digest = self.propose_with("big-body")
+        self.assertRc(self.gate("owner-c", f"nginx-approve-location card-decision {digest} --announced"), 0)
+        for path in (self.conf, conf_b):
+            self.assertIn("include snippets/example-auth.conf; client_max_body_size 50m; }",
+                          path.read_text(encoding="utf-8"))
+        self.assertEqual(self.calls().count("nginx -t"), 1)
+
+
 class ExamplePolicyTests(GateCase):
     def test_gate_can_load_the_example_policy(self):
         shutil.copyfile(EXAMPLE_POLICY, self.policy)
@@ -1156,6 +1507,12 @@ class ExamplePolicyTests(GateCase):
         chk.validate("POST", "^" + prefix + "x/[^/]+/approve$", data["location"]["allowed_methods"],
                      data["location_prefixes"]["authorized-1"], data["location_upstreams"],
                      data["location"]["block_lines"])
+        # 예시의 프로필은 검증기 허용 목록 안의 지시어뿐이다. 추가 대상은 예시에서 켜 두지 않는다
+        self.assertTrue(data["location_profiles"])
+        for lines in data["location_profiles"].values():
+            chk.check_profile_lines(lines, data["location"]["block_lines"])
+        self.assertNotIn("nginx_targets", data)
+        self.assertNotIn("nginx_target_block_lines", data)
 
 
 if __name__ == "__main__":
