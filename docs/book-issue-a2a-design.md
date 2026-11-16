@@ -28,21 +28,21 @@
 |---|---|---|
 | 기획 → 마케팅 | 기획이 사람이 확정한 제안을 `receive_campaign_brief`(A)로 보낸다. `CampaignBriefInput`: `facts: list[InsightFact]`(데이터 근거), `products: list[str]` | 상품 **이름**(문자열). 상품 ID 없음 |
 | 마케팅 → 재무 | 마케팅 `start_campaign`이 재무 `review_campaign_budget`(read)에 묻고 `execute("start_campaign")`. 입력 `CampaignBudgetReviewInput`: `campaign_id`, `campaign_name`, `channel`, `requested_krw` | **상품 정보 없음**. 재무 의견은 예산 규칙만으로 낸다 |
-| 데이터 → 기획 | 데이터 인사이트 브리프(`trend_insight_brief`)가 `InsightInput`(`facts: list[InsightFact]`, `products: list[str]` 관련 회사 상품 **이름**, `audience` 타깃 연령대)를 기획에 준다 | 이름만 (아래) |
+| 데이터 → 기획 | 데이터 인사이트 브리프(`trend_insight_brief`)가 `ReceiveInsightInput`(`facts: list[InsightFact]`, `products: list[str]` 관련 회사 상품 **이름**, `audience` 타깃 연령대)를 기획에 준다 | 이름만 (아래) |
 | 데이터 내부 | `product_link`가 소재를 회사 실제 상품과 잇는다 (판매 서버 상품 목록 `GET /api/shop/products`를 읽어 이름·카테고리 일치와 임베딩 유사도). 결과 `LinkedProduct`에 `product_id`·이름·근거(`match`, `reason`)가 있다 | **상품 ID가 있다** |
 | 고객지원 → 데이터 | 고객의 소리 일일 보고(`receive_idea_report`), `book_issue_stats` 요청자에 `data`가 이미 들어 있음 | 상품 ID |
 
 빈칸 둘: ① 기획안·예산 요청에 **상품 ID가 없어** 책별 집계와 이어 붙일 열쇠가 없다. ② 재무 예산 의견이 상품 신호를 모른다.
 
 ①은 새로 만들 문제가 아니다. 데이터의 `product_link`가 소재를 상품과 이을 때 `LinkedProduct.product_id`를 이미 갖고 있는데,
-데이터가 기획에 넘기는 `InsightInput.products`가 이름(문자열)만 싣는 곳에서 ID가 떨어진다. 즉 **ID는 데이터에 있고,
+데이터가 기획에 넘기는 `ReceiveInsightInput.products`가 이름(문자열)만 싣는 곳에서 ID가 떨어진다. 즉 **ID는 데이터에 있고,
 데이터 → 기획 넘기기에서 이름으로 줄어든다.** 이름→ID 매핑을 새로 만들 필요 없이 이 ID를 계속 들고 가면 된다
 (새 이름 매칭은 이름이 겹치거나 바뀌면 틀린다).
 
 ## 연결 안 (세 갈래, 앞에서부터 가볍다)
 
 ### A. 기획안에 "고객 반응" 근거를 한 줄 더하기 (기획·데이터 쪽, 가장 가볍다)
-데이터가 브리프에 `InsightFact`를 만들 때 고객지원 `book_issue_stats`를 A2A로 읽어(이미 `data` 허용) 제안 상품의
+데이터가 브리프에 `InsightFact`를 만들 때 고객지원 `book_issue_stats`(서비스 이름은 `claims`)를 A2A로 읽어(이미 `data` 허용) 제안 상품의
 고객 반응을 한 줄 더한다.
 - `label`: "OO 책 클레임·문의 (최근 30일)", `value`: "클레임 비율 7.5% · 불량 3건", `source`: `book_issue_stats`.
 - 기획안·마케팅은 `InsightFact`(`facts`)를 이미 받으므로 **이 줄 자체는 계약 변경이 없다**. **합의(재현 11/16): 데이터가 찬성했고** 클레임 비율·불량·파손 건수를 붙이며, "불만 많은 책은 이벤트 후보에서 뺀다"는 근거로도 쓴다.
@@ -83,15 +83,17 @@
 세 안 모두 새 skill은 없고, 고객지원 쪽 변경은 `allowed_requesters` 추가와 문서뿐이다.
 
 ## 구현 순서 (1·2는 2026-11-16~17 구현됨, 3·4는 남음)
-1. **상품 ID 열쇠 (합의됨, 재현 11/16 → 구현됨 #1128)**: 이름 매칭을 새로 만들지 않고, 데이터가 이미 가진 `LinkedProduct.product_id`를 `product_ids`(선택, 상품 ID 문자열 목록)로 **기획안까지 싣는다**. `products`(이름)는 그대로 두고 나란히 넘긴다. 계약 변경은 추가만이다: `planning.py`의 `InsightInput`(데이터→기획)과 `CampaignBriefInput`(기획→마케팅)에 선택 칸 `product_ids`. 데이터는 인사이트를 보낼 때 관련 상품 ID를 같이 싣는다. **누가 계약 PR을 올릴지 미정**(데이터가 `InsightInput`의 보내는 쪽이라 재현 님이 자연스럽고, 필요하면 고객지원이 올린다).
+1. **상품 ID 열쇠 (합의됨, 재현 11/16 → 구현됨 #1128)**: 이름 매칭을 새로 만들지 않고, 데이터가 이미 가진 `LinkedProduct.product_id`를 `product_ids`(선택, 상품 ID 문자열 목록)로 **기획안까지 싣는다**. `products`(이름)는 그대로 두고 나란히 넘긴다. 계약 변경은 추가만이다: `planning.py`의 `ReceiveInsightInput`(데이터→기획)과 `CampaignBriefInput`(기획→마케팅)에 선택 칸 `product_ids`. 데이터는 인사이트를 보낼 때 관련 상품 ID를 같이 싣는다. **누가 계약 PR을 올릴지 미정**(데이터가 `ReceiveInsightInput`의 보내는 쪽이라 재현 님이 자연스럽고, 필요하면 고객지원이 올린다).
 2. **A (합의됨 → 구현됨 #1125·#1128)**: 데이터가 `product_ids`의 상품마다 `book_issue_stats`를 읽어 브리프 `InsightFact`로 만든다 (고객지원 변경 없음, 요청자에 `data`는 이미 허용). 읽을 때 아래 "합의와 운영 의견"의 캐시·호출 상한을 지킨다.
-3. **B**: 계약 `product_ids` 추가 PR → 마케팅이 실어 보내기 → 재무가 읽고 의견에 반영 → 고객지원 카드에 `finance` 요청자 추가.
+3. **B**: **순서가 중요하다**(`AxModel`이 `extra="forbid"`라 새 칸을 채워 보내는 쪽이 받는 쪽보다 먼저 배포되면 거절한다, 예진 11/17):
+   ① 계약 PR — `CampaignBudgetReviewInput.product_ids`(선택) 추가, 그리고 **`BookIssueInput`·`BookIssueReport`를 도메인(`backend/domains/support/.../book_issue_schemas.py`)에서 `shared/contracts`로 옮긴다(추가)**. `domains`끼리 import하지 않는 규칙 때문에 재무가 이 응답을 읽으려면 계약에 있어야 한다. (A안은 데이터가 자기 모델로 읽고 `extra="ignore"`라 이미 동작하지만, B는 계약이 필요하다.)
+   ② 재무가 새 칸을 읽도록 고친다 → ③ 마케팅이 새 칸을 채워 보낸다 → ④ 고객지원 카드에 `finance` 요청자를 더한다. 카드는 **`backend/services/claims/agent-card.json`(`book_issue_stats`는 `claims` 서비스에 있다)과 `backend/domains/support/agent-card.json` 두 곳을 같이** 고친다(재무가 `call_agent` 대상을 `claims`로 불러야 한다).
 4. 테스트는 각 부서 작업이 끝난 뒤 한 번에, 실제 모드에서 "불만 많은 책 예산 요청 → 의견에 이유가 붙는다" 한 장면을 확인한다.
 
 ## 열린 질문
-1. ~~상품 ID 열쇠~~ **합의·구현됨(#1128, 재현 님이 올림)**: `product_ids`(선택)를 `InsightInput`·`CampaignBriefInput`에 추가한다. 남은 것: **계약 PR을 누가 올릴지**, 그리고 임베딩·카테고리로 이은 상품(`match != name`)을 책별 집계에 써도 되는가, 이름 일치만 쓸까?
+1. ~~상품 ID 열쇠~~ **합의·구현됨(#1128, 재현 님이 올림)**: `product_ids`(선택)를 `ReceiveInsightInput`·`CampaignBriefInput`에 추가한다. 남은 것: **계약 PR을 누가 올릴지**, 그리고 임베딩·카테고리로 이은 상품(`match != name`)을 책별 집계에 써도 되는가, 이름 일치만 쓸까?
 2. ~~A안~~ **합의됨**(재현 11/16). B안(재무 예산 의견)은 재무·마케팅 변경이 필요하다. 담당자는? 멘토 시연에는 B가 더 잘 보인다.
-3. 클레임 비율·불량 기준값(예: 5%)과 의견을 얼마나 낮출지 — 재무·마케팅이 정한다. 판매가 적은 책(예: 10권 미만)은 비율이 흔들려서 최소 판매 수량 기준이 필요하다.
+3. 클레임 비율·불량 기준값(예: 5%)과 의견을 얼마나 낮출지 — 재무·마케팅이 정한다. 판매가 적은 책(예: 10권 미만)은 비율이 흔들려서 최소 판매 수량 기준이 필요하다. **데이터(A)는 이미 판매 5권 미만이면 근거에 넣지 않는다**(#1125). **B는 켜기 전에 기준값을 정하고(제안: 데이터와 같은 5권), 기준보다 적게 팔린 책은 의견을 바꾸지 않고 `reasons`에 "판매 적어 비율 참고만"으로 둔다**(예진 11/17 제안). 예산 화면 노출(질문 4)은 B가 붙은 뒤 재무 의견의 `reasons` 한 줄로 먼저 보이게 하면 화면을 새로 만들 필요가 없다.
 4. 캠페인 예산 화면(재무 "캠페인 재무" → "캠페인 예산"으로 이름 변경 예정)에 이 근거를 보일지, 보인다면 고객지원 근거 한 줄의 모양.
 5. 비율의 한계를 받는 쪽이 알아야 한다: 접수 기간 기준이라 1을 넘을 수 있다. **판매 수량 읽기는 #1145로 `sales-summary` 전환됐다**(7일씩·5분 캐시). 251은 아직 옛 판매 서버라 캣북스를 따로 배포하기 전까지는 주문 목록 3만 건 상한으로 폴백한다(`missing`로 알림). 클레임 기간과 판매 기간 끝이 최대 5분 어긋날 수 있다.
 6. 캐시 시간과 요청당 상품 수 상한: 고객지원 쪽은 정했다(판매 수량 5분 캐시, 입력 `product_ids` 최대 100개이고 집계는 상품 수와 상관없이 한 번에 읽음). 데이터는 하루 캐시한다. **남은 것**은 B안에서 재무가 예산 요청마다 부르는 빈도를 모르는 상태라, 그때 재무·재헌 님과 정한다.
