@@ -12,7 +12,8 @@ export function shortDateTime(iso: string | null | undefined) {
   return kst(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export function ago(iso: string) {
+export function ago(iso: string | null | undefined) {
+  if (!iso) return "–";
   const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
   if (min < 1) return "방금 전";
   if (min < 60) return `${min}분 전`;

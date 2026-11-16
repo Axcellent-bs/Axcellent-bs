@@ -131,8 +131,13 @@ export const SERVICES: Service[] = [
     ],
   },
   {
-    id: 'decisions', agent: 'archive', family: 'backoffice', name: '결정 기록', by: 'AXcellent', Icon: IconBook, entry: '/ops', paths: ['/ops'],
-    desc: '회사의 결정을 기록하고, 새 계획이 과거에 기각된 안과 겹치는지 봅니다.',
+    id: 'decisions', agent: 'archive', family: 'backoffice', name: '결정 기록', by: 'AXcellent', Icon: IconBook, entry: '/ops', paths: ['/ops', '/archive'],
+    desc: '회사의 결정을 기록하고, 새 계획이 과거에 기각된 안과 겹치는지 봅니다. 장애 기록도 여기서 봅니다.',
+    // 장애 기록(총괄이 처리한 이슈와 그 기록)을 하위 탭으로 연다. 탭 이름·순서는 5단계 화면 통합에서 정리한다
+    children: [
+      { href: '/ops', label: '결정 기록' },
+      { href: '/archive/incidents', label: '장애 기록' },
+    ],
   },
   {
     id: 'agent-eval', agent: 'hr', family: 'backoffice', name: '에이전트 평가', by: 'AXcellent', Icon: IconClock, entry: '/agent-eval', paths: ['/agent-eval'],

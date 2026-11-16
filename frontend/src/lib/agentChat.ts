@@ -25,6 +25,18 @@ export interface OrchStep {
   reason_code: string | null;
   /** 서비스가 꺼져 담당 부서 할 일함으로 넘어간 일 번호 (status "waiting_human", 업무 요청 라우터) */
   handoff_task_id?: string | null;
+  /** 승인 대기·사람 할 일함 대기(초). 단계 전체 시간에서 빼면 부서가 일한 시간이다 */
+  approval_wait_seconds?: number | null;
+  human_wait_seconds?: number | null;
+  /** 이 단계가 보통 걸리는 시간(기준 시간, 초). 지금 값은 임시다. 없으면 기본 30초 */
+  promised_seconds?: number | null;
+  /** 긴 작업(비동기): 마지막으로 응답한 시각, 진행 알림 횟수, 응답 사이가 가장 길게 비었던 시간(초), 마지막 진행률·메모 */
+  last_response_at?: string | null;
+  heartbeats?: number;
+  max_silence_seconds?: number | null;
+  progress_percent?: number | null;
+  progress_note?: string | null;
+  async_task_id?: string | null;
   output: Record<string, unknown>;
 }
 
@@ -44,7 +56,7 @@ export interface OrchIncident {
   metrics: Record<string, number>;
   pending_holds: { step_id: string; skill: string; label: string; review_id?: string | null; since?: string | null; expires_at?: string | null }[];
   /** 비슷한 과거 이슈에서 뽑은 참고 추천(총괄이 계산). 근거가 있으면 card_id가 그 과거 이슈 카드 */
-  recommendation?: { status: string; card_id?: string } | null;
+  recommendation?: import("./adminRelay").Recommendation | null;
   /** 총괄이 이미 아는 사실로 만든 해결 내용 초안(저장 전). 아는 게 없으면 null */
   /** 시스템이 잰 이슈 시각(감지·원인 후보 도착·사람에게 넘김·정상 복귀). 모르는 시각은 null */
   timeline?: import("./duration").EventTimes | null;
