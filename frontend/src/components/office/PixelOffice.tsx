@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { DESKS, POP_MS, type Bubble, type DeskKey, type OfficeView, type Visit } from "@/lib/office";
 
 // 픽셀 사무실 캔버스: 서울 사무실 장면 (통유리 창 너머 한강·63빌딩, 오른쪽 라운지).
-// 배경은 사람·이름표가 없는 빈 사무실 그림(seoul-office-v2.webp, 1537×688 원본 그대로)이고,
+// 배경은 사람·이름표가 없는 빈 사무실 그림(seoul-office-v3.webp, 1024×460 받은 그대로)이고,
 // 11자리 사람·이름표·말풍선·보드 카드·불꽃은 코드로 그린다.
 // 좌표·글자 크기는 논리 크기 W×H 기준이고, 캔버스는 그림 원본 크기(CW×CH)로 만들어 그림을 줄이거나 늘리지 않는다.
 // 캐릭터 스프라이트는 pablodelucca/pixel-agents(MIT)에서 가져왔다 (public/office/CREDITS.md).
@@ -15,10 +15,10 @@ import { DESKS, POP_MS, type Bubble, type DeskKey, type OfficeView, type Visit }
 // - 일하는 중인 자리는 픽셀 불꽃이 일렁이고, 일이 끝나면 머리 위로 "✓ 결과"가 떠오른다.
 // - prefers-reduced-motion이면 걷지 않고, 불꽃은 고정 모양, "✓ 결과"는 떠오르지 않고 제자리에서 사라진다.
 
-const W = 1280, H = 573; // 논리 크기 = 배경 비율(1537×688), 자르기 없음
-const CW = 1537, CH = 688; // 캔버스 실제 픽셀 = 배경 원본 크기 (그림 화질을 그대로 쓴다)
+const W = 1280, H = 575; // 논리 크기 = 배경 비율(1024×460), 자르기 없음
+const CW = 1024, CH = 460; // 캔버스 실제 픽셀 = 배경 원본 크기 (그림 화질을 그대로 쓴다)
 const BASE = import.meta.env.BASE_URL;
-const BG_SRC = `${BASE}office/seoul-office-v2.webp`;
+const BG_SRC = `${BASE}office/seoul-office-v3.webp`;
 const FONT = '"Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
 
 /** 배경 그림 비율 좌표 → 캔버스 좌표 */
@@ -73,7 +73,7 @@ const SPEED = 300; // 걷기 캔버스 px/초
 const MAX_WALKERS = 3;
 const STAY_ORCH_MS = 1200, STAY_DESK_MS = 1400;
 /** 보드 카드 (그림 비율 fx0, fy0, fx1, fy1): 커피 코너 바로 오른쪽, 화분 앞 */
-const BOARD = [0.789, 0.27, 0.9, 0.44] as const;
+const BOARD = [0.79, 0.263, 0.907, 0.45] as const;
 
 // 스프라이트 시트: 16×32 칸 7열 × 3줄 (줄 0 앞, 1 뒤, 2 옆). 열 0~2 걷기, 3~4 타이핑, 5~6 읽기
 const FW = 16, FH = 32, SC = 2.2;
@@ -417,7 +417,7 @@ function later(ctx: CanvasRenderingContext2D, text: string, k: number) {
 function boardCard(ctx: CanvasRenderingContext2D, v: OfficeView) {
   const a = toC(BOARD[0], BOARD[1]), b = toC(BOARD[2], BOARD[3]);
   const x = a.x, y = a.y, w = b.x - a.x, h = b.y - a.y;
-  ctx.fillStyle = "rgba(255,255,252,.94)"; rr(ctx, x, y, w, h, 6); ctx.fill();
+  ctx.fillStyle = "#fffffc"; rr(ctx, x, y, w, h, 6); ctx.fill();
   ctx.strokeStyle = "#8e959e"; ctx.lineWidth = 2; ctx.stroke();
   ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
   if (v.board) {
