@@ -40,6 +40,9 @@ class Reaction:
     status: str
     flagged: tuple[Flag, ...] = ()
     low_sales: tuple[str, ...] = ()  # 판매가 적어 참고만 한 책 (제목 또는 상품 ID)
+    sales_unread: tuple[
+        str, ...
+    ] = ()  # 판매 수량을 못 읽어 비율을 못 낸 책 (판매가 적은 것과 다르다)
     checked: int = 0  # 읽은 책 수
     note: str = ""  # 못 읽은 이유 등
     unread: tuple[str, ...] = field(default_factory=tuple)  # 요청했는데 집계에 없는 상품
@@ -63,13 +66,14 @@ def evaluate(
     rows = {row.product_id: row for row in report.items}
     flagged: list[Flag] = []
     low: list[str] = []
+    unread_sales: list[str] = []
     for product_id in product_ids:
         row = rows.get(product_id)
         if row is None:
             continue  # 집계에 없는 상품은 아래 `unread`로 알린다
         sold = row.sold_qty
         if sold is None:  # 판매 수량을 못 읽었으면 비율을 모른다. 불량 건수만으로 판단하지 않는다
-            low.append(_label(row))
+            unread_sales.append(_label(row))  # "판매가 적음"이 아니라 "못 읽음"으로 따로 알린다
             continue
         if sold < rules.min_sold_qty:
             low.append(_label(row))
@@ -99,6 +103,7 @@ def evaluate(
         status=status,
         flagged=tuple(flagged),
         low_sales=tuple(low),
+        sales_unread=tuple(unread_sales),
         checked=len(rows),
         unread=unread,
     )

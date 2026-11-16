@@ -6,7 +6,9 @@
 
 import asyncio
 import json
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -19,13 +21,16 @@ from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import (
     AttributeDef,
     CatalogSales,
+    CoverageRow,
     ExternalFilter,
     GenreExternal,
     MarketCoverageOutput,
     PopulationSource,
+    SegmentAttributeBreakdown,
     SegmentFavoritesOutput,
     SegmentOptionsOutput,
     SegmentProfileOutput,
+    SegmentShare,
 )
 from data_agent import catalog, handlers
 from data_agent.connectors.data4library import Data4LibraryConnector
@@ -73,23 +78,30 @@ def order(n: int, buyer: str, genre: str, status: str = "paid") -> SalesOrderRow
     )  # fmt: skip
 
 
-def people() -> list[tuple[str, dict[str, str], str]]:
-    """(가명 buyer_id, 속성, 산 장르). 20대 10명(8명 g1), 10대 10명(2명 g1), 모름 6명(g1)."""
+def people(teens_g1: int = 2) -> list[tuple[str, dict[str, str], str]]:
+    """(가명 buyer_id, 속성, 산 장르). 20대 10명(8명 g1), 10대 10명(teens_g1명 g1, 기본 2),
+    모름 6명(g1). 모두 여성."""
     rows = []
     for i in range(10):
         rows.append((f"pseud_a{i:02d}", {"age_band": "20s", "gender": "female"},
                      "g1" if i < 8 else "g2"))  # fmt: skip
     for i in range(10):
         rows.append((f"pseud_b{i:02d}", {"age_band": "10s", "gender": "female"},
-                     "g1" if i < 2 else "g2"))  # fmt: skip
+                     "g1" if i < teens_g1 else "g2"))  # fmt: skip
     for i in range(6):
         rows.append((f"pseud_c{i:02d}", {}, "g1"))  # 속성 없음 = 모름
     return rows
 
 
-def small_store(customers_error: str | None = None, with_customers: bool = True) -> SalesStore:
+def small_store(
+    customers_error: str | None = None,
+    with_customers: bool = True,
+    teens_g1: int = 2,
+    extra: Sequence[tuple[str, dict[str, str], str]] = (),
+    base: Sequence[tuple[str, dict[str, str], str]] | None = None,
+) -> SalesStore:
     store = SalesStore(":memory:")
-    rows = people()
+    rows = [*(people(teens_g1) if base is None else base), *extra]
     orders = [order(n, buyer, genre) for n, (buyer, _, genre) in enumerate(rows)]
     orders.append(order(999, "pseud_a00", "g2", status="cancelled"))  # 결제 안 된 주문은 빼고 센다
     store.upsert(TENANT, orders, NOW)
@@ -122,16 +134,19 @@ def share(out: SegmentProfileOutput, key: str, code: str):
 
 
 def test_profile_lift_and_known_denominator() -> None:
-    out = profile(small_store())
+    # 10대 g1 5명: 연령 값 칸이 모두 기준 이상이라 숨김 없이 비율을 본다
+    out = profile(small_store(teens_g1=5))
     assert out.status == "ok" and out.target_label == "장르1"
-    assert out.target_buyers == 16 and out.overall_buyers == 26  # 취소 주문은 세지 않음
+    assert out.target_buyers == 19 and out.overall_buyers == 26  # 취소 주문은 세지 않음
     twenties = share(out, "age_band", "20s")
-    # 대상 중 아는 사람 10명 중 8명, 전체 중 아는 사람 20명 중 10명 → 0.8 ÷ 0.5 = 1.6배
-    assert twenties.buyers == 8 and twenties.target_share == 0.8
-    assert twenties.overall_share == 0.5 and twenties.lift == 1.6
+    # 대상 중 아는 사람 13명 중 8명, 전체 중 아는 사람 20명 중 10명 → 0.6154 ÷ 0.5 = 1.2308배
+    assert twenties.buyers == 8 and twenties.target_share == 0.6154
+    assert twenties.overall_share == 0.5 and twenties.lift == 1.2308
+    teens = share(out, "age_band", "10s")
+    assert teens.buyers == 5 and teens.target_share == 0.3846 and teens.lift == 0.7692
     assert [a.key for a in out.attributes] == ["age_band", "gender"]  # 카탈로그 순서
     assert [v.value_code for v in out.attributes[0].values] == ["10s", "20s"]
-    assert "1.60배" in out.summary and out.basis and out.basis.data_source is None
+    assert "1.23배" in out.summary and out.basis and out.basis.data_source is None
 
 
 def test_profile_suppresses_small_groups() -> None:
@@ -141,6 +156,10 @@ def test_profile_suppresses_small_groups() -> None:
     assert teens.target_share is None and teens.overall_share is None and teens.lift is None
     male = share(out, "gender", "male")  # 0명
     assert male.suppressed and male.buyers is None
+    # 2차 숨김: 값이 둘뿐이라 남은 칸(20대 8명, 여성 10명)을 내면 숨긴 칸 = 합계 − 그 칸이 된다
+    for twin in (share(out, "age_band", "20s"), share(out, "gender", "female")):
+        assert twin.suppressed and twin.buyers is None and twin.target_share is None
+        assert twin.overall_share is None and twin.lift is None
     dump = json.dumps(out.model_dump(mode="json"), ensure_ascii=False)
     assert "pseud_" not in dump  # 구매자 ID는 내지 않는다
 
@@ -149,8 +168,8 @@ def test_profile_counts_unknown_attributes() -> None:
     out = profile(small_store())
     age = next(a for a in out.attributes if a.key == "age_band")
     assert age.unknown_buyers == 6  # 속성 없는 6명 = 모름
-    # 카탈로그에 없는 값도 모름이다
-    store = small_store()
+    # 카탈로그에 없는 값도 모름이다 (10대 g1 5명: 20대 칸이 2차 숨김에 걸리지 않게)
+    store = small_store(teens_g1=5)
     store.upsert_customers(
         TENANT,
         [CustomerRow(buyer_id="pseud_a00", joined_at=DAY, updated_at=DAY,
@@ -358,10 +377,19 @@ def _kosis(env: dict[str, str], handler) -> tuple[KosisConnector, list[httpx.Req
     return KosisConnector(env, client=client, cache=DayCache(lambda: date(2026, 11, 16))), seen
 
 
-def coverage(cfg: CatalogSales, conn: KosisConnector, keys=("gender", "age_band")):
+# 남성 구매자 (10대 7명, 20대 6명): 조합 표 네 칸이 모두 기준 이상
+MALES = [
+    *((f"pseud_m1{i}", {"age_band": "10s", "gender": "male"}, "g2") for i in range(7)),
+    *((f"pseud_m2{i}", {"age_band": "20s", "gender": "male"}, "g2") for i in range(6)),
+]
+
+
+def coverage(
+    cfg: CatalogSales, conn: KosisConnector, keys=("gender", "age_band"), store=None
+) -> MarketCoverageOutput:
     return run(
-        seg.coverage_with_population(small_store(), TENANT, list(keys), cfg, "test", NOW,
-                                     kosis=conn)
+        seg.coverage_with_population(store or small_store(extra=MALES), TENANT, list(keys), cfg,
+                                     "test", NOW, kosis=conn)
     )  # fmt: skip
 
 
@@ -376,8 +404,11 @@ def test_coverage_population_missing_when_table_not_set() -> None:
                and r.population is None and r.coverage is None for r in out.rows)  # fmt: skip
     by = {r.label: r for r in out.rows}
     assert by["20대 · 여성"].buyers == 10 and by["10대 · 여성"].buyers == 10
-    assert by["20대 · 남성"].suppressed and by["20대 · 남성"].buyers is None
+    assert by["10대 · 남성"].buyers == 7 and by["20대 · 남성"].buyers == 6
     assert "인구 비교는 못 함" in out.summary
+    # 남성이 0명이면 남성 칸을 숨기고, 2×2 표라 여성 칸도 숨긴다 (줄 합계로 계산되지 않게)
+    alone = coverage(CFG, conn, store=small_store())
+    assert all(r.suppressed and r.buyers is None for r in alone.rows)
 
 
 def test_coverage_with_kosis_age_by_gender_table() -> None:
@@ -394,8 +425,11 @@ def test_coverage_with_kosis_age_by_gender_table() -> None:
     assert row.status == "ok" and row.population == 1000 and row.base_year == 2025  # 최근 시점
     assert row.coverage == 0.01 and row.population_source == "연령 성별 인구"
     male = by["20대 · 남성"]
-    assert male.population == 900 and male.suppressed and male.coverage is None
+    assert male.population == 900 and male.buyers == 6 and male.coverage == round(6 / 900, 8)
     assert "커버 비율을 계산" in out.summary
+    hidden = coverage(cfg, conn, store=small_store())  # 남성 0명 → 네 칸 모두 숨김
+    row = {r.label: r for r in hidden.rows}["20대 · 남성"]
+    assert row.population == 900 and row.suppressed and row.coverage is None  # 인구는 공공 통계
 
 
 def test_coverage_kosis_errors_are_reasons_not_numbers() -> None:
@@ -553,3 +587,169 @@ def test_handlers_read_the_store(monkeypatch: pytest.MonkeyPatch) -> None:
         out = model.model_validate(result.output)
         assert out.status == "insufficient"  # 마지막 수집이 오래됨 (지금 시각 기준)
         assert "카탈로그 catbooks" in result.evidence.data_summary
+
+
+# ---------------------------------------------------------------- 숨긴 값 계산 불가
+# 숨긴 값 하나를 다른 숫자로 계산할 수 없음.
+# 공개된 숫자만으로 "숨긴 칸들의 합 = 공개 합계 − 보이는 칸 합" 방정식을 세우고(비율 × 합계로
+# 계산되는 합계 포함), 숨긴 칸 하나라도 값이 하나로 풀리면 실패한다. 풀이는 seg와 따로 짠다.
+
+
+def _rank(rows: list[list[Fraction]]) -> int:
+    m = [list(r) for r in rows]
+    rank = 0
+    for col in range(len(m[0]) if m else 0):
+        pivot = next((i for i in range(rank, len(m)) if m[i][col]), None)
+        if pivot is None:
+            continue
+        m[rank], m[pivot] = m[pivot], m[rank]
+        for i in range(len(m)):
+            if i != rank and m[i][col]:
+                f = m[i][col] / m[rank][col]
+                m[i] = [a - f * b for a, b in zip(m[i], m[rank], strict=True)]
+        rank += 1
+    return rank
+
+
+def solved(unknowns: list[str], equations: list[set[str]]) -> set[str]:
+    """방정식(각각 "이 미지수들의 합 = 아는 값")으로 값이 하나로 정해지는 미지수."""
+    rows = [[Fraction(int(u in eq)) for u in unknowns] for eq in equations if eq & set(unknowns)]
+    if not rows:
+        return set()
+    base = _rank(rows)
+    return {
+        u for k, u in enumerate(unknowns)
+        if _rank([*rows, [Fraction(int(j == k)) for j in range(len(unknowns))]]) == base
+    }  # fmt: skip
+
+
+def profile_leaks(out: SegmentProfileOutput) -> dict[str, set[str]]:
+    """속성마다 공개된 숫자로 계산되는 숨긴 칸 (target_buyers, 보이는 buyers·비율, 모름 수)."""
+    leaks: dict[str, set[str]] = {}
+    for attr in out.attributes:
+        hidden = [v.value_code for v in attr.values if v.buyers is None]
+        unknowns = hidden + (["모름"] if attr.unknown_buyers is None else [])
+        equations: list[set[str]] = []
+        if out.target_buyers is not None:  # 값 칸 + 모름 = 대상 구매자
+            equations.append(set(unknowns))
+        shown = [v for v in attr.values if v.buyers is not None and v.target_share]
+        if shown:  # 그 속성을 아는 대상 구매자 = buyers ÷ target_share (비율로 계산)
+            known = {round((v.buyers or 0) / (v.target_share or 1)) for v in shown}
+            assert len(known) == 1  # 공개 숫자로 정말 계산된다
+            equations.append(set(hidden))
+            # 보이는 overall_share 합이 1에서 빠지는 몫도 숨긴 값 칸들의 합이다 (같은 방정식 꼴)
+        leaks[attr.key] = solved(unknowns, equations)
+    return leaks
+
+
+def coverage_leaks(out: MarketCoverageOutput) -> set[str]:
+    """조합 표의 줄 합계·전체 합계를 공개됐다고 보고(가장 나쁜 경우) 계산되는 숨긴 줄."""
+    unknowns = [r.label for r in out.rows if r.buyers is None]
+    keys = out.attribute_keys
+    equations = [set(unknowns)]
+    for k in keys:  # 속성 k만 바뀌고 나머지 값이 같은 줄들 = 한 줄 합계
+        lines: dict[tuple, set[str]] = {}
+        for r in out.rows:
+            rest = tuple(r.values[o] for o in keys if o != k)
+            lines.setdefault(rest, set()).add(r.label)
+        equations += list(lines.values())
+    return solved(unknowns, equations)
+
+
+def test_leak_checker_catches_a_single_hidden_cell() -> None:
+    # 2차 숨김이 없을 때의 모양: 20대 8명·모름 6명·대상 16명이면 10대 = 16 − 8 − 6
+    values = [
+        SegmentShare(value_code="10s", label="10대", suppressed=True),
+        SegmentShare(value_code="20s", label="20대", buyers=8, target_share=0.8,
+                     overall_share=0.5, lift=1.6),
+    ]  # fmt: skip
+    age = SegmentAttributeBreakdown(key="age_band", label="연령대", unknown_buyers=6, values=values)
+    leaky = SegmentProfileOutput(target_kind="genre", target_code="g1", period="30d",
+                                 target_buyers=16, attributes=[age])  # fmt: skip
+    assert profile_leaks(leaky) == {"age_band": {"10s"}}
+    rows = [CoverageRow(values={"a": a, "b": b}, label=a + b, buyers=None if a + b == "xm" else 9)
+            for a in ("x", "y") for b in ("f", "m")]  # fmt: skip
+    assert coverage_leaks(MarketCoverageOutput(attribute_keys=["a", "b"], rows=rows)) == {"xm"}
+
+
+CFG3 = CFG.model_copy(update={"attributes": [
+    AttributeDef(key="age_band", label="연령대",
+                 values={"10s": "10대", "20s": "20대", "30s": "30대"}),
+    CFG.attributes[1],
+]})  # fmt: skip
+
+
+def buyers_of(prefix: str, n: int, attrs: dict[str, str], genre: str = "g1") -> list:
+    return [(f"pseud_{prefix}{i:02d}", attrs, genre) for i in range(n)]
+
+
+def test_profile_hidden_cell_cannot_be_computed_from_other_numbers() -> None:
+    # 기본: 10대 2명(1차) → 20대도 숨김 (모름 6명은 보임)
+    out = profile(small_store())
+    assert profile_leaks(out) == {"age_band": set(), "gender": set()}
+    age = next(a for a in out.attributes if a.key == "age_band")
+    assert age.unknown_buyers == 6 and all(v.suppressed for v in age.values)
+
+    # 값 셋 중 하나만 작다 → 보이는 칸 중 가장 작은 30대(6명)를 더 숨기고 20대는 낸다
+    f = {"gender": "female"}
+    three = buyers_of("t", 2, {"age_band": "10s", **f}) + buyers_of(
+        "w", 8, {"age_band": "20s", **f}) + buyers_of("h", 6, {"age_band": "30s", **f})
+    out3 = profile(small_store(base=three), cfg=CFG3)
+    assert profile_leaks(out3) == {"age_band": set(), "gender": set()}
+    assert [v.suppressed for v in out3.attributes[0].values] == [True, False, True]
+    assert share(out3, "age_band", "20s").buyers == 8
+    assert out3.attributes[0].unknown_buyers == 0
+
+    # 모름이 3명(1차 숨김)이면 값 칸이 하나라도 보일 때 모름 = 대상 − buyers ÷ target_share
+    # → 그 속성의 값 칸을 모두 숨긴다. 다른 속성(성별)은 그대로 낸다
+    unknown3 = buyers_of("t", 7, {"age_band": "10s", **f}) + buyers_of(
+        "w", 8, {"age_band": "20s", **f}) + buyers_of("u", 3, f)
+    out_u = profile(small_store(base=unknown3))
+    assert profile_leaks(out_u) == {"age_band": set(), "gender": set()}
+    age_u = next(a for a in out_u.attributes if a.key == "age_band")
+    assert age_u.unknown_buyers is None and all(v.suppressed for v in age_u.values)
+    assert all(v.target_share is None and v.overall_share is None and v.lift is None
+               for v in age_u.values)  # fmt: skip
+    assert out_u.target_buyers == 18 and share(out_u, "gender", "female").buyers is None  # 남 0명
+
+
+def test_coverage_hidden_cell_cannot_be_computed_from_other_numbers() -> None:
+    conn, _ = _kosis(KOSIS_KEY, _no_network)
+    cfg3 = CFG3.model_copy(update={"population": CFG.population})
+    rows = (
+        buyers_of("af", 10, {"age_band": "10s", "gender": "female"})
+        + buyers_of("am", 7, {"age_band": "10s", "gender": "male"})
+        + buyers_of("bf", 10, {"age_band": "20s", "gender": "female"})
+        + buyers_of("bm", 3, {"age_band": "20s", "gender": "male"})  # 1차 숨김
+        + buyers_of("cf", 8, {"age_band": "30s", "gender": "female"})
+        + buyers_of("cm", 9, {"age_band": "30s", "gender": "male"})
+    )
+    out = coverage(cfg3, conn, store=small_store(base=rows))
+    assert coverage_leaks(out) == set()
+    by = {r.label: r for r in out.rows}
+    # 20대 남성을 감추려면 직사각형(10대·20대 × 여성·남성)이 필요. 30대 줄은 그대로 낸다
+    assert [r.label for r in out.rows if r.suppressed] == [
+        "10대 · 여성", "10대 · 남성", "20대 · 여성", "20대 · 남성"
+    ]
+    assert by["30대 · 여성"].buyers == 8 and by["30대 · 남성"].buyers == 9
+    assert all(r.coverage is None for r in out.rows if r.suppressed)
+    assert coverage_leaks(coverage(CFG, conn, store=small_store())) == set()  # 2×2 모두 숨김
+
+
+def test_no_hidden_cell_is_computable_on_the_fake_source(fake_store: SalesStore) -> None:
+    cat = catalog.load_catalog("catbooks")
+    sales = cat.sales
+    assert sales is not None
+    tight = sales.model_copy(update={"min_group_size": 40})  # 숨김이 많이 생기게
+    for cfg in (sales, tight):
+        for kind, code in (("genre", "novel"), ("genre", "kids"), ("product", "fk_p016")):
+            for period in ("30d", "90d"):
+                out = seg.profile(fake_store, TENANT, kind, code, [], period, cfg, cat.id, NOW)
+                assert out.status == "ok"
+                assert all(not v for v in profile_leaks(out).values()), (kind, code, period)
+        kconn, _ = _kosis({}, _no_network)
+        cov = run(seg.coverage_with_population(fake_store, TENANT, ["age_band", "gender"], cfg,
+                                               cat.id, NOW, kosis=kconn))  # fmt: skip
+        assert cov.status == "ok" and coverage_leaks(cov) == set()
+    hidden = [r for r in cov.rows if r.suppressed]
+    assert hidden and len(hidden) < len(cov.rows)  # 기준 40이면 일부만 숨긴다

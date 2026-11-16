@@ -237,6 +237,11 @@ class CodingRun(DomainModel):
     waiting_for: list[str] = Field(default_factory=list)  # 기다리는 앞 작업 id
     # 머지가 충돌로 실패함: 다시 시도하면 PR을 닫고 최신 코드로 다시 쓴다
     merge_conflict: bool = False
+    # 사람이 직접 고른 고칠 파일. 있으면 AI가 파일을 고르지 않고 이 파일을 바로 쓴다
+    picked: list[str] = Field(default_factory=list)
+    # 바뀐 파일로 정한 위험도 (dev_agent.risk): low·medium·high와 이유 한 줄
+    risk: Literal["low", "medium", "high"] | None = None
+    risk_why: str | None = None
     # 이 작업이 지금까지 쓴 LLM 호출·토큰 (다시 시도해도 이어서 센다). 실행 한 번 상한은 coder
     llm_calls: int = 0
     llm_tokens: int = 0

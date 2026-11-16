@@ -105,9 +105,10 @@ def test_books_with_few_sales_are_only_noted_never_flagged() -> None:
     assert got.low_sales == ("적게 팔린 책",)
 
 
-def test_an_unread_sales_quantity_is_not_guessed() -> None:
+def test_an_unread_sales_quantity_is_not_guessed_and_not_called_low_sales() -> None:
     got = look([row("prd_1", sold=None, claims=9, defect=9)])
-    assert got.status == cr.STATUS_CLEAR and got.low_sales == ("책 prd_1",)
+    assert got.status == cr.STATUS_CLEAR and got.flagged == ()
+    assert got.sales_unread == ("책 prd_1",) and got.low_sales == ()  # "판매 적음"이 아니다
 
 
 def test_requested_products_missing_from_the_report_are_listed() -> None:
@@ -166,6 +167,13 @@ def test_the_limit_is_not_cut_again_when_another_rule_already_limits_it_lower() 
     assert got["approved_limit_krw"] == 300_000  # 현금 한도가 더 낮다
 
 
+def test_when_another_rule_already_limits_lower_the_books_stay_in_the_rule_record_only() -> None:
+    got = decide(look([row("prd_1", claims=20, title="걸린 책")]), cash=300_000)
+    assert got["approved_limit_krw"] == 300_000
+    assert not any("걸린 책" in r for r in got["reasons"])  # 이유에는 안 나온다(동작은 맞다)
+    assert "걸린 책" in crx(got)[0]["detail"]  # CRX-001 기록에는 남는다
+
+
 def test_a_cut_below_the_minimum_viable_amount_becomes_not_recommended_by_brk_005() -> None:
     minimum = load_rules().brake.min_viable_krw
     requested = minimum + 10_000  # 절반이 최소 금액 밑이 된다
@@ -187,6 +195,16 @@ def test_few_sales_keep_the_opinion_and_say_so_in_the_reasons_and_the_rule_recor
     assert "신간" in got["reasons"][-1] and "참고만" in crx(got)[0]["detail"]
 
 
+def test_an_unread_sales_quantity_is_named_in_the_reasons_and_the_rule_record() -> None:
+    got = decide(look([row("prd_1", sold=None, claims=9, defect=9, title="수량 모르는 책")]))
+    assert got["decision"] == "approved" and got["approved_limit_krw"] == 1_000_000
+    assert got["reasons"][-1] == "판매 수량을 못 읽어 비율 반영 안 함: 수량 모르는 책"
+    assert "판매 수량을 못 읽어 비율 반영 안 함" in crx(got)[0]["detail"]
+    assert all(
+        "판매 적어" not in r for r in got["reasons"]
+    )  # 못 읽은 것을 "판매 적음"으로 적지 않는다
+
+
 def test_an_unreadable_report_keeps_the_limit_and_records_the_rule() -> None:
     got = decide(cr.unavailable("고객지원 책별 집계를 받지 못함"))
     assert got["decision"] == "approved" and got["approved_limit_krw"] == 1_000_000
@@ -195,10 +213,13 @@ def test_an_unreadable_report_keeps_the_limit_and_records_the_rule() -> None:
     assert got["customer_reaction"]["status"] == cr.STATUS_UNAVAILABLE
 
 
-def test_requests_without_products_apply_no_customer_reaction_rule_at_all() -> None:
+def test_requests_without_products_record_crx_001_as_not_applicable_and_change_nothing() -> None:
+    """ "확인했는데 해당 없음"이 적용 규칙에 남아 "안 봄"과 구분된다. 한도·이유는 그대로다."""
     got = decide(cr.NOT_RELEVANT)
-    assert crx(got) == [] and got["customer_reaction"]["status"] == cr.STATUS_NOT_RELEVANT
-    assert got["reasons"] == ["모든 기준을 통과함"]
+    assert len(crx(got)) == 1 and "요청에 상품이 없어 반영 안 함" in crx(got)[0]["detail"]
+    assert got["customer_reaction"]["status"] == cr.STATUS_NOT_RELEVANT
+    assert got["reasons"] == ["모든 기준을 통과함"]  # 이유에는 넣지 않는다
+    assert got["decision"] == "approved" and got["approved_limit_krw"] == 1_000_000
 
 
 def test_the_rule_is_in_the_rule_book_and_waits_for_review() -> None:
@@ -263,7 +284,9 @@ def test_the_skill_does_not_read_anything_for_requests_without_products() -> Non
     sources = _Reading(report(row("prd_1", claims=20)))
     out = _review(sources, _ask())
     assert sources.asked == [] and out["opinion"] == "recommend"
-    assert all(r["rule_id"] != "CRX-001" for r in out["applied_rules"])
+    mine = [r for r in out["applied_rules"] if r["rule_id"] == "CRX-001"]
+    assert len(mine) == 1 and "상품이 없어 반영 안 함" in mine[0]["detail"]
+    assert out["reasons"] == ["모든 기준을 통과함"]
 
 
 def test_the_skill_keeps_the_limit_when_the_report_cannot_be_read() -> None:

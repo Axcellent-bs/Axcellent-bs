@@ -14,6 +14,24 @@ LLM을 쓰지 않고 회사 상태를 바꾸지 않는다(grade read). 숫자는
   (모름은 `unknown_buyers`로 따로 센다). 그래서 한 속성의 값 비율 합은 1이다
 - 개인정보: 집단 통계만 낸다. 묶음이 `min_group_size`(기본 5)명 미만이면 `suppressed=True`이고
   그 묶음의 숫자 칸은 None. "모름" 수도 0보다 크고 기준 미만이면 None. buyer_id 목록은 내지 않는다
+- 2차 숨김(complementary suppression): 숨긴 칸 값을 공개된 합계·다른 칸·비율로 거꾸로 계산할 수
+  없게 한다. 규칙
+  - 합이 공개된(또는 계산되는) 칸 묶음을 정한다. 숨긴 칸 값이 그 합계들과 보이는 칸으로 하나로
+    정해지면(선형 방정식으로 풀리면 — 묶음 안에 숨긴 칸이 하나뿐인 경우 등) 그 칸이 든 묶음의
+    보이는 칸 중 값이 가장 작은 칸(같으면 앞 칸)부터, 숨기면 풀리지 않게 되는 칸을 하나 더 숨긴다
+    (`suppressed=True`, 숫자 칸 None). 더 풀리는 칸이 없을 때까지 되풀이한다(`protect`)
+  - 0명인 칸도 기준 미만이라 숨긴 칸으로 센다(0도 알려 주지 않는다)
+  - segment_profile, 속성 하나마다: 값 칸들 + "모름" 칸의 합 = target_buyers(공개). 값 칸들의
+    합(그 속성을 아는 대상 구매자)은 보이는 칸이 하나라도 있으면 buyers ÷ target_share로 계산되므로
+    공개된 합계로 본다. 그래서 "모름"을 숨기면(0 < 모름 < 기준) 그 속성의 값 칸을 모두 숨긴다
+    (하나라도 보이면 모름 = target_buyers − buyers ÷ target_share). 비율은 분모가 묶음 합계라
+    같은 묶음 규칙으로 함께 막힌다: 보이는 target_share·overall_share 합이 1에서 빠지는 몫은
+    숨긴 칸 둘 이상에 나뉘어 있다. lift = target_share ÷ overall_share는 같은 칸 안의 값이라
+    숨긴 칸에는 내지 않는다
+  - market_coverage: 화면에 합계 칸은 없지만 같은 365일 구매자 수가 다른 곳(segment_favorites의
+    한 속성 조건 구매자 수 등)에서 나올 수 있어, 조합 표의 한 줄(다른 속성 값 하나를 고정한 칸들)과
+    전체 합을 공개된 합계로 보고 같은 규칙을 쓴다. 인구는 공공 통계라 숨기지 않고, 숨긴 줄의
+    커버 비율은 None이다(커버 비율 × 인구 = 구매자라서)
 - 품질 관문: `sales_quality.gate` 그대로 + 고객 기록 관문(고객 내보내기 출처 `<출처>:customers`의
   `last_error`가 있으면 그 문장, 저장된 고객이 0명이면 "저장된 고객 기록이 없음"). 걸리면
   status "insufficient"와 이유, 숫자 칸은 비운다
@@ -51,6 +69,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from fractions import Fraction
 from typing import Any
 
 from ax_contracts.schemas import Evidence
@@ -193,6 +212,129 @@ def lift(target: float | None, overall: float | None) -> float | None:
 def small(count: int, least: int) -> int | None:
     """0이거나 기준 이상이면 그 수, 0보다 크고 기준 미만이면 숨김(None)."""
     return count if count == 0 or count >= least else None
+
+
+# ---------------------------------------------------------------- 2차 숨김
+
+
+def _rank(rows: list[list[Fraction]]) -> int:
+    """행렬 계수 (가우스 소거, 분수로 정확히)."""
+    work = [list(r) for r in rows]
+    rank = 0
+    width = len(work[0]) if work else 0
+    for col in range(width):
+        pivot = next((i for i in range(rank, len(work)) if work[i][col] != 0), None)
+        if pivot is None:
+            continue
+        work[rank], work[pivot] = work[pivot], work[rank]
+        for i in range(len(work)):
+            if i != rank and work[i][col] != 0:
+                factor = work[i][col] / work[rank][col]
+                work[i] = [a - factor * b for a, b in zip(work[i], work[rank], strict=True)]
+        rank += 1
+    return rank
+
+
+def _equations(hidden: set[int], groups: Sequence[Sequence[int]]) -> tuple[list[int], list]:
+    order = sorted(hidden)
+    rows = [
+        [Fraction(1 if cell in g else 0) for cell in order]
+        for g in groups
+        if any(cell in hidden for cell in g)
+    ]
+    return order, rows
+
+
+def _solved(pos: int, order: list[int], rows: list, base: int) -> bool:
+    unit = [Fraction(1 if k == pos else 0) for k in range(len(order))]
+    return _rank([*rows, unit]) == base
+
+
+def determined_cells(hidden: set[int], groups: Sequence[Sequence[int]]) -> list[int]:
+    """숨긴 칸 중 합계가 공개된 묶음(groups)과 보이는 칸으로 값이 하나로 정해지는 칸.
+
+    묶음마다 "숨긴 칸들의 합 = 공개 합계 − 보이는 칸 합"이 알려진다. 숨긴 칸 i는 단위 벡터 e_i가
+    그 방정식들(숨긴 칸 표시 벡터)이 펼치는 공간에 있을 때만 정해진다.
+    """
+    order, rows = _equations(hidden, groups)
+    if not rows:
+        return []
+    base = _rank(rows)
+    return [cell for pos, cell in enumerate(order) if _solved(pos, order, rows, base)]
+
+
+def is_determined(cell: int, hidden: set[int], groups: Sequence[Sequence[int]]) -> bool:
+    order, rows = _equations(hidden, groups)
+    return bool(rows) and _solved(order.index(cell), order, rows, _rank(rows))
+
+
+MAX_EXTRA_CELLS = 3  # 한 번에 더 숨겨 볼 칸 수 상한 (2차원 표는 직사각형을 만드는 3칸이면 된다)
+
+
+def protect(values: Sequence[int], hidden: set[int], groups: Sequence[Sequence[int]]) -> set[int]:
+    """2차 숨김: 숨긴 칸이 계산되지 않을 때까지 보이는 칸을 더 숨긴다 (모듈 docstring 규칙).
+
+    값이 정해지는 숨긴 칸마다, 숨기면 그 칸이 풀리지 않게 되는 보이는 칸 묶음을 칸 수가 적은 것 →
+    값 합이 작은 것(같으면 앞 칸) 순으로 골라 숨긴다. 한 묶음 안에서는 가장 작은 보이는 칸 하나로
+    충분하고, 2차원 표에서는 직사각형을 만드는 칸이 필요하다. 3칸으로도 안 되면 그 칸이 든 묶음의
+    보이는 칸을 모두 숨긴다.
+    """
+    hidden = set(hidden)
+    while True:
+        stuck = determined_cells(hidden, groups)
+        if not stuck:
+            return hidden
+        cell = stuck[0]
+        visible = [c for c in range(len(values)) if c not in hidden]
+        best: tuple[int, ...] | None = None
+        for size in range(1, min(MAX_EXTRA_CELLS, len(visible)) + 1):
+            tries = sorted(
+                itertools.combinations(visible, size), key=lambda e: (sum(values[c] for c in e), e)
+            )
+            best = next(
+                (e for e in tries if not is_determined(cell, hidden | set(e), groups)), None
+            )
+            if best is not None:
+                break
+        if best is None:
+            best = tuple(c for g in groups if cell in g for c in g if c not in hidden)
+        if not best:  # 더 숨길 보이는 칸이 없다 (호출자가 합계 쪽을 처리)
+            return hidden
+        hidden |= set(best)
+
+
+def profile_hidden(counts: Sequence[int], unknown: int, least: int) -> tuple[set[int], bool]:
+    """segment_profile 속성 하나의 숨길 값 칸(위치)과 "모름"을 숨길지.
+
+    칸 = 값 칸들(0..k-1) + 모름(k). 합계: 전체(target_buyers, 공개)와 값 칸 합(보이는 값 칸이
+    하나라도 있으면 buyers ÷ target_share로 계산됨).
+    """
+    k = len(counts)
+    cells = [*counts, unknown]
+    hidden = {i for i, n in enumerate(counts) if n < least}
+    if small(unknown, least) is None:
+        hidden.add(k)
+    while True:
+        groups: list[list[int]] = [list(range(k + 1))]
+        if any(i not in hidden for i in range(k)):
+            groups.append(list(range(k)))
+        more = protect(cells, hidden, groups)
+        if more == hidden:
+            break
+        hidden = more
+    return {i for i in hidden if i < k}, k in hidden
+
+
+def coverage_groups(sizes: Sequence[int]) -> list[list[int]]:
+    """조합 표(itertools.product 순서)의 합계 묶음: 속성마다 다른 속성 값을 고정한 줄 + 전체."""
+    combos = list(itertools.product(*(range(n) for n in sizes)))
+    groups: list[list[int]] = [list(range(len(combos)))]
+    for p in range(len(sizes)):
+        lines: dict[tuple[int, ...], list[int]] = defaultdict(list)
+        for idx, combo in enumerate(combos):
+            lines[combo[:p] + combo[p + 1 :]].append(idx)
+        groups += [g for g in lines.values() if len(g) > 1]
+    return groups
 
 
 def known_value(attrs: dict[str, str] | None, key: str, values: dict[str, str]) -> str | None:
@@ -383,10 +525,13 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
         o_vals = [known_value(snap.attrs.get(b), key, attr.values) for b in overall]
         t_known = sum(v is not None for v in t_vals)
         o_known = sum(v is not None for v in o_vals)
+        unknown = len(target) - t_known
+        counts = [t_vals.count(code) for code in attr.values]
+        hidden, hide_unknown = profile_hidden(counts, unknown, least)  # 1차 + 2차 숨김
         shares = []
-        for code, label in attr.values.items():
-            n = t_vals.count(code)
-            if suppressed or n < least:
+        for i, (code, label) in enumerate(attr.values.items()):
+            n = counts[i]
+            if suppressed or i in hidden:
                 shares.append(SegmentShare(value_code=code, label=label, suppressed=True))
                 continue
             ts, os_ = ratio(n, t_known), ratio(o_vals.count(code), o_known)
@@ -394,13 +539,12 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
                 SegmentShare(value_code=code, label=label, target_share=ts, overall_share=os_,
                              lift=lift(ts, os_), buyers=n)
             )  # fmt: skip
-        unknown = len(target) - t_known
         breakdowns.append(
             SegmentAttributeBreakdown(
                 key=key,
                 label=attr.label,
                 values=shares,
-                unknown_buyers=None if suppressed else small(unknown, least),
+                unknown_buyers=None if suppressed or hide_unknown else unknown,
             )
         )
     out = SegmentProfileOutput(
@@ -779,15 +923,21 @@ def coverage_buyers(
         if all(found):  # 하나라도 모름이면 세지 않는다
             counts[tuple(str(v) for v in found)] += 1
     least = cfg.min_group_size
+    combos = list(itertools.product(*(list(values[k]) for k in keys)))
+    found = [counts.get(combo, 0) for combo in combos]
+    hidden = protect(  # 1차(기준 미만) + 2차 숨김 (줄·전체 합계로 계산되지 않게)
+        found,
+        {i for i, n in enumerate(found) if n < least},
+        coverage_groups([len(values[k]) for k in keys]),
+    )
     rows = []
-    for combo in itertools.product(*(list(values[k]) for k in keys)):
-        n = counts.get(combo, 0)
+    for i, combo in enumerate(combos):
         rows.append(
             CoverageRow(
                 values=dict(zip(keys, combo, strict=True)),
                 label=" · ".join(values[k][c] for k, c in zip(keys, combo, strict=True)),
-                buyers=None if n < least else n,
-                suppressed=n < least,
+                buyers=None if i in hidden else found[i],
+                suppressed=i in hidden,
                 base_year=pop.base_year,
             )
         )

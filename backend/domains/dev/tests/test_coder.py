@@ -1704,3 +1704,80 @@ def test_secret_files_never_listed_or_picked() -> None:
     picks.append(FilePick(path="deploy/new.pem", action="create", reason="x"))
     kept, dropped = coder.check_picks(picks, {".env", "src/app.ts"})
     assert [p.path for p in kept] == ["src/app.ts"] and dropped == 2
+
+
+# ------------------------------------------------------------ 위험도(파일로만) · 사람이 고른 파일
+
+
+def test_risk_is_decided_by_files_not_line_count(service: PlanningService) -> None:
+    from dev_agent.risk import risk_of
+
+    s = service.state
+    assert risk_of(s, [CHECKOUT])[0] == "high"  # 결제 화면은 한 줄이어도 높음
+    assert risk_of(s, ["shop-web/src/styles/app.css", "docs/guide.md"])[0] == "low"
+    assert risk_of(s, ["shop-web/src/locales/ko.json"])[0] == "low"
+    # 가장 위험한 파일이 등급이다
+    assert risk_of(s, ["shop-web/src/styles/app.css", BANNER])[0] == "medium"
+    assert risk_of(s, ["web/vite.config.ts"]) == (
+        "high",
+        "빌드·배포·의존성 파일 web/vite.config.ts",
+    )
+    assert risk_of(s, ["backend/shop-api/src/x.py"])[0] == "high"
+    assert risk_of(s, [".claude/settings.json"])[0] == "high"
+    assert risk_of(s, ["shop-web/src/config.json"])[0] == "medium"
+
+
+def test_low_risk_skips_llm_review_and_needs_ci(service: PlanningService, adapter) -> None:
+    css = "shop-web/src/styles/app.css"
+    adapter.seed_files({css: ".a { color: red; }\n"})
+    fake = FakeLLM(
+        plan=CodePlan(files=[FilePick(path=css, reason="색")]),
+        writes={css: ".a { color: blue; }\n"},
+    )
+    coder.set_llm(fake)
+    run(_go(service, plan=f"{css} 색을 파랑으로"))
+    c = _task(service).coding
+    assert c.status == "merged" and c.risk == "low", c.error
+    assert "CodeReview" not in [x[0] for x in fake.calls]
+    assert any("리뷰 생략 (위험도 낮음)" in a.text for a in service.state.activity)
+
+
+def test_high_risk_waits_for_human_after_review(service: PlanningService, adapter) -> None:
+    pkg = "shop-web/package.json"
+    adapter.seed_files({pkg: '{"name": "shop"}\n'})
+    fake = FakeLLM(
+        plan=CodePlan(files=[FilePick(path=pkg, reason="이름")]),
+        writes={pkg: '{"name": "shop-web"}\n'},
+    )
+    coder.set_llm(fake)
+    run(_go(service, plan=f"{pkg} 이름 바꾸기"))
+    c = _task(service).coding
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert c.status == "waiting_human" and not pr.merged
+    assert c.risk == "high" and "위험도 높음" in (c.error or "")
+    assert [x[0] for x in fake.calls].count("CodeReview") == 1
+
+
+def test_human_picked_files_skip_ai_choosing(service: PlanningService, adapter) -> None:
+    """'고칠 파일을 고르지 못함' → 사람이 파일을 골라 다시 시도하면 AI가 고르지 않고 바로 쓴다."""
+    fake = FakeLLM(plan=CodePlan(files=[]), writes={BANNER: BANNER_NEW})
+    coder.set_llm(fake)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "failed" and c.error == "고칠 파일을 고르지 못함"
+
+    before = len(fake.calls)
+    with pytest.raises(ActionError):
+        run(service.retry_dev_task("T-D1", paths=["../etc/passwd"]))
+    run(_retry_paths(service, "T-D1", [BANNER]))
+    names = [x[0] for x in fake.calls[before:]]
+    assert "CodePlan" not in names and names.count("FileWrite") == 1
+    c = _task(service).coding
+    assert c.status == "merged" and c.picked == [BANNER], c.error
+    assert any("사람이 고른 파일 1개" in a.text for a in service.state.activity)
+
+
+async def _retry_paths(svc: PlanningService, task_id: str, paths: list[str]):
+    out = await svc.retry_dev_task(task_id, paths=paths)
+    await svc.wait_coding()
+    return out

@@ -692,21 +692,40 @@ async def retry_opinions() -> int:
     return done
 
 
-async def cash_net_krw() -> int | None:
-    """앞으로 몇 주의 누적 순현금. 주문 자료를 못 받았거나 빈 주가 있으면 None(확인 불가)."""
+async def cash_position() -> tuple[int | None, str]:
+    """캠페인 예산 브레이크(BRK-004)가 보는 현금. (금액, 기준)을 돌려준다.
+
+    - `balance`: 통장 잔액을 올렸으면 앞으로 몇 주의 **예상 잔액 최저값 − 최소 현금**이다.
+      지난주 판매분 PG 정산금은 이미 통장에 들어왔는데 그 판매자 정산금은 이번 주에 나가므로,
+      순현금만 더하면 통장에 돈이 충분해도 첫 주가 크게 마이너스로 나온다(11/16 −24억 원).
+      그래서 잔액을 알면 잔액으로 본다
+    - `net`: 잔액을 모르면 예전처럼 앞으로 몇 주의 누적 순현금이다
+    - 주문 자료를 못 받았거나 빈 주가 있으면 None(확인 불가)
+    """
     if state().cash_override is not None:
-        return state().cash_override
+        return state().cash_override, "net"
     books = await state().books()
     if "orders" in books.unavailable:
-        return None
+        return None, "net"
     from finance_agent.finance_api import cashflow_view
 
     weeks = load_rules().brake.cash_lookahead_weeks
-    rows = (await cashflow_view(books))["weeks"][:weeks]
+    view = await cashflow_view(books)
+    rows = view["weeks"][:weeks]
+    if len(rows) < weeks:
+        return None, "net"
+    balances = [r.get("balance") for r in rows]
+    if all(b is not None for b in balances):
+        return min(balances) - int(view.get("min_cash_krw") or 0), "balance"
     values = [r.get("net") for r in rows]
-    if len(values) < weeks or any(v is None for v in values):
-        return None
-    return sum(values)
+    if any(v is None for v in values):
+        return None, "net"
+    return sum(values), "net"
+
+
+async def cash_net_krw() -> int | None:
+    """브레이크가 보는 현금 금액만 (`cash_position`). 기준은 `cash_position`으로 본다."""
+    return (await cash_position())[0]
 
 
 async def started_campaigns() -> dict[str, dict[str, Any]] | None:
@@ -761,6 +780,8 @@ async def read_customer_reaction(data: CampaignBudgetReviewInput, context_id: st
     """
     if not data.product_ids:
         return cr.NOT_RELEVANT
+    # 참고: 고객지원을 부를 때 `tenant_id`는 넘기지 않는다. 지금은 고객사가 하나라 괜찮고,
+    # 여러 고객사를 받게 되면 요청 메타의 `tenant_id`를 같이 넘겨야 한다 (태윤 11/17 검토 기록)
     rules = load_rules().customer_reaction
     meta = RequestMeta(
         context_id=context_id,
@@ -777,12 +798,14 @@ async def review_budget(data: CampaignBudgetReviewInput, context_id: str) -> dic
     """예산 판단. 판단을 남기고, 승인이 아니면 총괄에 의견으로 알린다."""
     records = state().records
     today = fc.today()
+    cash, cash_basis = await cash_position()
     review = cp.decide(
         data.model_dump(),
         campaigns=records.campaigns,
         reviews=records.budget_reviews,
         lessons=records.lessons,
-        cash_net_krw=await cash_net_krw(),
+        cash_net_krw=cash,
+        cash_basis=cash_basis,
         today=today,
         monthly_budget=await monthly_budget(),
         started=await started_campaigns(),

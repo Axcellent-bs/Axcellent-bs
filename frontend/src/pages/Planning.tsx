@@ -45,12 +45,12 @@ export default function PlanningPage() {
       sections={SECTIONS}
       actions={({ state, dispatch, section, item }) => (section === 'proposals' && item ? <ProposalActions s={state} d={dispatch} item={item} /> : null)}
     >
-      {({ state: s, dispatch: d, example, section, sub, tab, rest, item, item2 }) => (
+      {({ state: s, dispatch: d, section, sub, tab, rest, item, item2 }) => (
         <>
           {section === 'home' && <Home s={s} />}
           {section === 'proposals' && <Proposals s={s} d={d} item={item} />}
           {section === 'requests' && <Requests s={s} d={d} filter={sub} item={rest[0] ? decodeURIComponent(rest[0]) : undefined} />}
-          {section === 'work' && tab === 'specs' && <Specs s={s} d={d} item={item} item2={item2} example={example} />}
+          {section === 'work' && tab === 'specs' && <Specs s={s} d={d} item={item} item2={item2} />}
           {section === 'docs' && <Docs s={s} d={d} item={item} />}
           {section === 'talk' && <Talk s={s} d={d} item={item} />}
           {section === 'agents' && <AgentTalk s={s} item={item} />}

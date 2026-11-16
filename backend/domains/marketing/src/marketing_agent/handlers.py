@@ -1131,8 +1131,12 @@ async def marketing_chat_remove(request: AgentRequest) -> AgentResult:
 
 
 def _brief_product_ids(campaign_id: str) -> list[str]:
-    """받아 둔 기획안에서 그 캠페인의 회사 상품 ID를 꺼낸다. 기획안이 없거나 ID가 없으면 빈 목록."""
-    stored = STATE.briefs.get(None, campaign_id)
+    """받아 둔 기획안에서 그 캠페인의 회사 상품 ID를 꺼낸다. 없거나 저장소를 못 읽으면 빈 목록."""
+    try:
+        stored = STATE.briefs.get(None, campaign_id)
+    except BriefStorageError:
+        # 기획안 저장소를 못 읽어도 캠페인 시작을 깨지 않는다. 상품 신호만 빼고 재무 의견을 받는다
+        return []
     return list(stored.brief.product_ids) if stored is not None else []
 
 

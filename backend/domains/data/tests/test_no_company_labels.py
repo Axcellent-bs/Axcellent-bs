@@ -21,6 +21,8 @@ SRC = Path(catalog.__file__).resolve().parent  # src/data_agent
 GENERIC: dict[tuple[str, str], str] = {
     # 유입 출처가 카탈로그 source_labels에 없을 때 묶는 이름. 캣북스 직업 값 "기타"와 글자만 겹친다
     ("sales_analysis.py", "기타 경로"): "카탈로그에 없는 유입 출처를 묶는 일반 이름",
+    # 목 표본(테스트 전용) 상품 제목 = shop-api seed 상품 이름. 장르 이름 "노트"와 글자만 겹친다
+    ("sales_collect.py", "무지 노트 3권 세트"): "목 표본 상품 제목 (shop-api seed 상품 이름)",
 }
 
 

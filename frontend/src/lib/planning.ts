@@ -381,6 +381,10 @@ export const devTaskApi = (base: string) => ({
     return d as DevTaskStarted
   }),
   retry: (taskId: string, approved = false) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post(approved ? { approved } : {})),
+  // 파일 직접 고르기: 사람이 고른 파일로 다시 시도 (AI가 파일을 고르지 않고 바로 쓴다)
+  retryWith: (taskId: string, paths: string[]) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post({ paths })),
+  // 파일 직접 고르기 후보: 작업 연결 레포 파일 (q로 검색, 최대 50개)
+  files: (taskId: string, q = '') => call<{ files: string[]; existing: number }>(base, `/dev-tasks/${encodeURIComponent(taskId)}/files?q=${encodeURIComponent(q)}`),
   // PR 열기 보류 건 새로 받기 (만료·모름). 받은 review_id를 사람이 승인한 뒤 retry(approved)
   renewHold: (taskId: string) => call<{ review_id: string | null }>(base, `/dev-tasks/${encodeURIComponent(taskId)}/renew-hold`, post()),
   cancel: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/cancel`, post()),
@@ -417,6 +421,8 @@ export const chatApi = (base: string) => {
     list: (account: string) => call<unknown>(base, `/dev-chat?account=${encodeURIComponent(account)}`).then(toThreads),
     get: (id: string, account: string) => call<unknown>(base, `/dev-chat/${encodeURIComponent(id)}?account=${encodeURIComponent(account)}`).then(one),
     send: (x: ChatSend) => call<unknown>(base, '/dev-chat', post(x)).then(one),
+    // 멈춘 작업을 AI 대화로 넘기기: 작업과 이어진 새 대화. 대화에서 파일을 정하고 '진행해'면 같은 작업을 다시 시도
+    fromTask: (taskId: string, account: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/to-chat`, post({ account })).then(one),
   }
 }
 

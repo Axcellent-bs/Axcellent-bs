@@ -504,13 +504,15 @@ def test_inquiry_order_counts_truncates_many_orders() -> None:
 
 
 # ---------------------------------------------------------------- claims 쪽 합치기
-def run_skill(client: TestClient, payload: dict[str, Any]) -> dict[str, Any]:
+def run_skill(
+    client: TestClient, payload: dict[str, Any], deadline_seconds: float = 30
+) -> dict[str, Any]:
     body = {
         "meta": {
             "context_id": "ctx_req_0001",
             "token": "mock:dashboard-api",
             "path": [],
-            "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
+            "deadline": (datetime.now(UTC) + timedelta(seconds=deadline_seconds)).isoformat(),
             "idempotency_key": None,
         },
         "skill": "book_issue_stats",
@@ -1025,3 +1027,40 @@ def test_claims_by_reason_counts_each_claim_once_and_sums_to_the_claim_count() -
 def test_rows_without_claims_have_an_empty_reason_map() -> None:
     result = book_issue_report([], NOW, BookIssueInput(product_ids=["prd_9"]))
     assert result.items[0].claims_by_reason == {}  # 클레임이 없으면 비어 있다 (지어내지 않는다)
+
+
+# ----------------------------------------------- 짧은 마감(재무가 3초)에도 판매 수량을 읽는다
+def test_the_stop_time_keeps_three_seconds_for_long_deadlines_and_a_share_for_short_ones() -> None:
+    from support_agent.claim_handlers import _stop_at
+
+    now = datetime(2026, 11, 17, 12, 0, tzinfo=UTC)
+    assert _stop_at(now + timedelta(seconds=30), now) == now + timedelta(seconds=27)  # 3초 여유
+    short = _stop_at(now + timedelta(seconds=3), now)
+    assert short == now + timedelta(seconds=2.1)  # 3초 마감이면 0.9초만 남긴다
+    assert short > now  # 시작하자마자 지난 것이 아니다
+    assert _stop_at(now - timedelta(seconds=1), now) == now - timedelta(
+        seconds=1
+    )  # 지난 마감은 여유 0
+
+
+def test_a_three_second_deadline_from_finance_still_reads_the_sold_quantity(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, _reset_shop: Any
+) -> None:
+    """재무가 deadline을 3초 뒤로 주면 예전에는 마감 3초 전이 이미 지나 `sold_qty`가 비었다."""
+    monkeypatch.setenv("SUPPORT_ORDER_SOURCE", "shop-api")
+    first = {"left": True}
+
+    def once(params: dict[str, Any]) -> list[dict[str, Any]]:
+        if first["left"]:
+            first["left"] = False
+            return [{"product_id": "prd_1", "gross_qty": 4}]
+        return []
+
+    _summary_server(once)
+    out = run_skill(
+        client, {"include_inquiries": False, "product_ids": ["prd_1"]}, deadline_seconds=3
+    )["output"]
+    row = out["items"][0]
+    assert out["sales_read"] is True
+    assert (row["sold_qty"], row["claim_rate"]) == (4, 0.25)
+    assert not any("마감" in m for m in out["missing"])

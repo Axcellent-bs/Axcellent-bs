@@ -493,3 +493,20 @@ async def test_no_brief_means_no_products_and_the_start_still_goes_on(
     result = await handlers.start_campaign_skill(_req("start_campaign", START))
     assert result.status == TaskStatus.COMPLETED
     assert finance.calls[0][1].input["product_ids"] == []
+
+
+async def test_a_broken_brief_store_does_not_break_the_campaign_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from marketing_agent.briefs import BriefStorageError
+
+    finance = Finance()
+    _wire(monkeypatch, finance)
+
+    def broken(proposal_id: object, campaign_id: str) -> object:
+        raise BriefStorageError("저장소를 읽지 못함")
+
+    monkeypatch.setattr(handlers.STATE.briefs, "get", broken)
+    result = await handlers.start_campaign_skill(_req("start_campaign", START))
+    assert result.status == TaskStatus.COMPLETED  # 상품 신호만 빼고 재무 의견을 받는다
+    assert finance.calls[0][1].input["product_ids"] == []
