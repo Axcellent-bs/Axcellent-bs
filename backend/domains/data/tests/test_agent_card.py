@@ -28,6 +28,8 @@ def test_card_validates(card: AgentCard) -> None:
         "segment_profile",
         "segment_favorites",
         "market_coverage",
+        "event_proposal",
+        "event_proposal_send",
         "root_cause_hypotheses",
         "accuracy_report",
         "activity_report",
@@ -83,8 +85,28 @@ def test_video_explorer_is_a_read_for_screen_marketing_planning_and_orchestrator
     assert skill.output_schema.endswith("#VideoExplorerOutput")
 
 
+# 상태를 바꾸는 카드 skill은 이것만 (data 자신의 execute() 관문을 거친다)
+STATE_CHANGING = {"event_proposal_send": "A"}
+
+
 def test_all_skills_are_read(card: AgentCard) -> None:
-    assert all(s.grade == "read" for s in card.skills)
+    """event_proposal_send(기획에 보내기, A)만 빼고 모두 read. 빼는 skill은 정한 등급 그대로."""
+    assert all(s.grade == "read" for s in card.skills if s.id not in STATE_CHANGING)
+    assert {s.id: s.grade for s in card.skills if s.id in STATE_CHANGING} == STATE_CHANGING
+
+
+def test_event_proposal_skills(card: AgentCard) -> None:
+    """이벤트 제안: 제안은 read, 보내기는 A(verifier 없음). 둘 다 매출 분석과 같은 요청자."""
+    sales = next(s for s in card.skills if s.id == "sales_analysis")
+    read = next(s for s in card.skills if s.id == "event_proposal")
+    send = next(s for s in card.skills if s.id == "event_proposal_send")
+    assert read.grade == "read" and send.grade == "A"
+    assert read.verifier is None and send.verifier is None
+    assert read.allowed_requesters == send.allowed_requesters == sales.allowed_requesters
+    assert read.input_schema.endswith("data.py#EventProposalInput")
+    assert read.output_schema.endswith("data.py#EventProposalOutput")
+    assert send.input_schema.endswith("data.py#EventProposalSendInput")
+    assert send.output_schema.endswith("data.py#EventProposalSendOutput")
 
 
 def test_fraud_score_requesters(card: AgentCard) -> None:
