@@ -22,17 +22,17 @@ sys.path.insert(0, str(HERE))
 os.environ.setdefault("AGENT_TEMPLATE_MOCK", "1")
 os.environ.setdefault("HR_MOCK", "1")
 
-from archive_agent.cards.link import _decision_text, topic_scores  # noqa: E402
-from archive_agent.cards.service import record_case  # noqa: E402
-from archive_agent.retrieval.cards import build_dense_search  # noqa: E402
-from archive_agent.retrieval.duplicates import SameDecisionJudge, TitleSuggester  # noqa: E402
 from run_eval import load_env  # noqa: E402
 
-from ax_agent_template.llm import LLMClient, LLMSettings  # noqa: E402
-from ax_contracts.schemas import AgentRequest  # noqa: E402
+from archive_agent.cards.link import _decision_text, topic_scores  # noqa: E402
+from archive_agent.cards.service import record_case  # noqa: E402
 from archive_agent.config import ArchiveSettings  # noqa: E402
+from archive_agent.retrieval.cards import build_dense_search  # noqa: E402
+from archive_agent.retrieval.duplicates import SameDecisionJudge, TitleSuggester  # noqa: E402
 from archive_agent.services import build_services  # noqa: E402
 from archive_agent.util import similarity  # noqa: E402
+from ax_agent_template.llm import LLMClient, LLMSettings  # noqa: E402
+from ax_contracts.schemas import AgentRequest  # noqa: E402
 
 DEV_MAX_TOPIC = 20
 CALL_LIMIT = 60

@@ -1,6 +1,7 @@
 """결정 기록 서비스 에이전트 (decisions, 8114) = 아카이브 AI.
 
-업무 로직은 `domains/archive`(archive_agent)를 그대로 쓰고, 이 폴더의 `agent-card.json`에 올린 skill만 받는다.
+업무 로직은 `domains/archive`(archive_agent)를 그대로 쓰고,
+이 폴더의 `agent-card.json`에 올린 skill만 받는다.
 카드에 없는 skill은 템플릿 ACL이 막는다. 서비스 대응표: `ax_agent_template/services.py`.
 """
 

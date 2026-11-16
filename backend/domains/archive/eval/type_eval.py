@@ -24,16 +24,16 @@ sys.path.insert(0, str(HERE))
 os.environ.setdefault("AGENT_TEMPLATE_MOCK", "1")
 os.environ.setdefault("HR_MOCK", "1")
 
-from archive_agent.cards.service import record_case  # noqa: E402
-from archive_agent.case_memory.service import find_similar_cases, record_resolution  # noqa: E402
-from archive_agent.retrieval.cards import build_dense_search  # noqa: E402
 from run_eval import load_env  # noqa: E402
 
+from archive_agent.cards.service import record_case  # noqa: E402
+from archive_agent.case_memory.service import find_similar_cases, record_resolution  # noqa: E402
+from archive_agent.config import ArchiveSettings  # noqa: E402
+from archive_agent.retrieval.cards import build_dense_search  # noqa: E402
+from archive_agent.services import build_services  # noqa: E402
 from ax_contracts.schemas import AgentRequest, FindSimilarCasesOutput  # noqa: E402
 from ax_orchestrator.naming import event_title, event_type  # noqa: E402
 from ax_orchestrator.recommend import recommend  # noqa: E402
-from archive_agent.config import ArchiveSettings  # noqa: E402
-from archive_agent.services import build_services  # noqa: E402
 
 # 환불 유형은 평가 당시 총괄이 받던 재무 이상 신호(repeat_refund)다.
 # 재무가 환불 감사를 그만둬(#393) 총괄은 이제 받지 않는다. 기록된 결과와 맞추려고 그대로 둔다.

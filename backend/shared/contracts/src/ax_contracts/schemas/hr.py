@@ -477,13 +477,13 @@ class FindSimilarDecisionsOutput(FindOrgChangeBasisOutput):
 
 
 class JudgeStepTimingsInput(AxModel):
-    """이슈 하나의 단계 시간 목록(총괄이 보낸 `StepTiming` 모양)을 기준값과 견줘 판정해 달라는 요청."""
+    """이슈 하나의 단계 시간 목록(총괄이 보낸 `StepTiming` 모양)을 판정해 달라는 요청."""
 
     step_timings: list[dict[str, Any]] = Field(max_length=200)
 
 
 class JudgeStepTimingsOutput(AxModel):
-    """판정 묶음. 기준값 버전이 같이 담겨, 카드에 저장하면 그때의 기준이 남는다(시간 계산만, LLM 없음)."""
+    """판정 묶음. 기준값 버전이 같이 담겨 카드에 저장하면 그때의 기준이 남는다(LLM 없음)."""
 
     criteria_version: int = Field(ge=1)
     items: list[dict[str, Any]] = Field(default_factory=list)

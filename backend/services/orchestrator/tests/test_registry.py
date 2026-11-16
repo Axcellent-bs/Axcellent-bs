@@ -72,8 +72,9 @@ async def test_real_dev_cards_load() -> None:
         for dept, folder in names.items()
     }
 
-    # 결정 기록(아카이브 AI) skill은 대응표상 아직 부서 이름 `hr`로 도착한다(서비스 카드를 합쳐 받는다)
-    archive = json.loads((ROOT / "domains" / "archive" / "agent-card.json").read_text("utf-8"))
+    # 결정 기록(아카이브 AI) skill은 대응표상 아직 부서 이름 `hr`로 도착한다(카드를 합쳐 받는다)
+    archive_card = ROOT / "domains" / "archive" / "agent-card.json"
+    archive = json.loads(archive_card.read_text("utf-8"))
     cards["hr"]["skills"] = [*cards["hr"]["skills"], *archive["skills"]]
 
     async def fetch(dept: str):

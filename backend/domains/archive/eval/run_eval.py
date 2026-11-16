@@ -24,9 +24,8 @@ from pathlib import Path
 from archive_agent.retrieval.dense import DenseIndex, LLMEmbedder, cosine, mask, text_key
 from archive_agent.retrieval.hybrid import fuse
 from archive_agent.retrieval.sparse import SparseIndex
-
-from ax_agent_template.llm import LLMClient, LLMSettings, MockLLMClient
 from archive_agent.util import similarity
+from ax_agent_template.llm import LLMClient, LLMSettings, MockLLMClient
 
 HERE = Path(__file__).parent
 BACKEND = HERE.parents[2]

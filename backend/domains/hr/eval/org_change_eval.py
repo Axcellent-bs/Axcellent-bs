@@ -8,7 +8,9 @@
 결과: results/org_change_eval.json
 """
 
-# 주의(2026-11-16): 근거 카드 검색 코드(retrieval)가 아카이브 AI(domains/archive)로 옮겨져 이 스크립트의 retrieval import는 지금 돌지 않는다. CI 대상이 아니다. 아카이브의 find_similar_decisions를 부르도록 3단계에서 고친다.
+# 주의(2026-11-16): 근거 카드 검색 코드(retrieval)가 아카이브 AI(domains/archive)로 옮겨져
+# 이 스크립트의 retrieval import는 지금 돌지 않는다(CI 대상 아님). 3단계에서
+# 아카이브의 find_similar_decisions를 부르도록 고친다.
 
 from __future__ import annotations
 

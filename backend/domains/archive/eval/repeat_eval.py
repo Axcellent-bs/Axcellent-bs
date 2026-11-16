@@ -28,14 +28,14 @@ sys.path.insert(0, str(HERE))
 os.environ.setdefault("AGENT_TEMPLATE_MOCK", "1")
 os.environ.setdefault("HR_MOCK", "1")
 
-from archive_agent.cards.service import record_case  # noqa: E402
-from archive_agent.case_memory.service import find_similar_cases, record_resolution  # noqa: E402
-from archive_agent.retrieval.cards import build_dense_search  # noqa: E402
 from run_eval import load_env  # noqa: E402
 
-from ax_contracts.schemas import AgentRequest, FindSimilarCasesOutput  # noqa: E402
+from archive_agent.cards.service import record_case  # noqa: E402
+from archive_agent.case_memory.service import find_similar_cases, record_resolution  # noqa: E402
 from archive_agent.config import ArchiveSettings  # noqa: E402
+from archive_agent.retrieval.cards import build_dense_search  # noqa: E402
 from archive_agent.services import build_services  # noqa: E402
+from ax_contracts.schemas import AgentRequest, FindSimilarCasesOutput  # noqa: E402
 
 PAY, SLOW, REFUND = (
     "payment 장애 감지 (error_rate_5xx)",

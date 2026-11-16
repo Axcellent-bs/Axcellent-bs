@@ -13,9 +13,10 @@ import json
 import sys
 from collections import defaultdict
 
+from run_eval import HERE, build_dense_index, card_text, load_cards
+
 from archive_agent.retrieval.dense import cosine, mask, text_key
 from archive_agent.retrieval.sparse import SparseIndex
-from run_eval import HERE, build_dense_index, card_text, load_cards
 
 
 def main(use_dense: bool) -> None:

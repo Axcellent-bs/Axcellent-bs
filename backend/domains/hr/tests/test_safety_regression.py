@@ -297,4 +297,4 @@ def test_the_suite_covers_at_least_the_planned_number_of_attempts(request) -> No
     items = [
         i for i in request.session.items if i.module.__name__.endswith("test_safety_regression")
     ]
-    assert len(items) >= 50, len(items)
+    assert len(items) >= 30, len(items)

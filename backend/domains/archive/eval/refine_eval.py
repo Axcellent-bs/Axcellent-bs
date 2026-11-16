@@ -13,7 +13,6 @@ import json
 import sys
 from collections import defaultdict
 
-from archive_agent.retrieval.verify import RelevanceVerifier
 from run_eval import (
     BACKEND,
     HERE,
@@ -27,6 +26,7 @@ from run_eval import (
     summarize,
 )
 
+from archive_agent.retrieval.verify import RelevanceVerifier
 from ax_agent_template.llm import LLMClient, LLMSettings
 
 CACHE = BACKEND / ".data" / "verify_cache.json"

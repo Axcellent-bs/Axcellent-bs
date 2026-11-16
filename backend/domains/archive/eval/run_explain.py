@@ -22,15 +22,15 @@ os.environ.setdefault(
 os.environ.setdefault("HR_MOCK", "1")
 
 from fastapi.testclient import TestClient  # noqa: E402
-from archive_agent.retrieval.cards import build_dense_search  # noqa: E402
 from run_eval import HERE, load_env  # noqa: E402
 
-from ax_agent_template.llm import LLMClient, LLMSettings  # noqa: E402
-from ax_contracts.schemas import CheckPlanOutput  # noqa: E402
 from archive_agent.config import ArchiveSettings, ManualClock  # noqa: E402
 from archive_agent.main import app  # noqa: E402
 from archive_agent.narrative import Narrator  # noqa: E402
+from archive_agent.retrieval.cards import build_dense_search  # noqa: E402
 from archive_agent.services import build_services, set_services  # noqa: E402
+from ax_agent_template.llm import LLMClient, LLMSettings  # noqa: E402
+from ax_contracts.schemas import CheckPlanOutput  # noqa: E402
 
 REJECTED_IDS = {"gold_A1_05", "gold_A4_01", "gold_A4_03", "gold_A4_05", "gold_A6_03"}
 SAMPLES = 10
