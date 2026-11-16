@@ -31,6 +31,7 @@ from ax_agent_template.server import verify_token
 from ax_agent_template.services import department_of
 from ax_contracts.data_access.shop_failed_orders import ShopFailedOrdersQuery
 from ax_contracts.data_access.shop_metric_series import ShopMetricSeriesQuery
+from ax_contracts.data_access.shop_sales import ShopSalesExportQuery
 from ax_contracts.data_access.shop_seller_prices import ShopSellerPricesQuery
 from ax_contracts.data_access.shop_seller_profile import ShopSellerProfileQuery
 from ax_shop_api import (
@@ -49,6 +50,7 @@ from ax_shop_api.db import Db
 from ax_shop_api.lookups import Lookups
 from ax_shop_api.promotions import Promotions
 from ax_shop_api.refunds import Refunds
+from ax_shop_api.sales_export import SalesExport
 from ax_shop_api.seed import seed
 from ax_shop_api.service import (
     BAD_PAYMENT_VERSION,
@@ -436,6 +438,7 @@ def create_app(
     )
     promotions = Promotions(database)
     lookups = Lookups(database)
+    sales_export = SalesExport(database)
     refunds = Refunds(database)
     storefront = Storefront(database)
     interval = float(os.getenv("SHOP_MONITOR_INTERVAL_S") or 5)  # 0이면 주기 판정을 끈다
@@ -1257,6 +1260,17 @@ def create_app(
     ) -> dict:
         query = _query(ShopMetricSeriesQuery, metric=metric, from_=from_, to=to, bucket=bucket)
         result = lookups.metric_series(query)
+        return _ok(result.model_dump(mode="json"))
+
+    @app.get("/api/shop/sales-export")
+    def sales_export_page(
+        cursor: str | None = None,
+        limit: int = 500,
+        _: str = Depends(_caller(DATA_READERS)),
+    ) -> dict:
+        """판매 기록 내보내기 (data 수집기). 동기 핸들러라 스레드에서 읽는다(#959와 같은 이유)."""
+        query = _query(ShopSalesExportQuery, cursor=cursor, limit=limit)
+        result = sales_export.export(query)
         return _ok(result.model_dump(mode="json"))
 
     @app.get("/api/shop/sellers/{seller_id}/profile")
