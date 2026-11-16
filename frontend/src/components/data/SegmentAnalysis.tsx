@@ -3,13 +3,13 @@ import { Empty, Waiting } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
 import { dataAi, kpiLive, type SegmentPeriod } from "@/lib/data";
 import {
-  DATA_NOTE, coverageView, favoritesView, filterLabel, nextMonth, optionsView, parseTarget, profileView,
-  proposalsView, sectionState, sendResultText,
-  type CoverageView, type FavoritesView, type GateView, type OptionsView, type ProfileView, type ProposalView,
-  type ProposalsView, type SectionState,
+  DATA_NOTE, SUPPRESSED, coverageView, favoritesView, filterLabel, nextMonth, optionsView, parseTarget, profileView,
+  proposalsView, questionView, sectionState, sendResultText,
+  type CoverageView, type FavoriteList, type FavoritesView, type GateView, type OptionsView, type ProfileView,
+  type ProposalView, type ProposalsView, type QuestionView, type SectionState,
 } from "@/lib/segmentView";
 
-// 고객·시장 분석: 물어보기(segment_favorites) · ○○은 누가 사나(segment_profile) · 시장 커버(market_coverage)
+// 고객·시장 분석: 물어보기(글로 묻기 segment_question → segment_favorites) · ○○은 누가 사나(segment_profile) · 시장 커버(market_coverage)
 // · 다음 달 이벤트 제안(event_proposal, 기획에 넘기기 event_proposal_send).
 // 선택지(속성·값·장르·분류·자주 묻는 질문·기간)는 segment_options 응답에서만 읽는다. 보여 줄 글자는 lib/segmentView.ts가 만든다.
 // skill이 아직 없거나 실패하면 탭 전체가 아니라 그 칸만 "준비 중"·다시 시도로 둔다.
@@ -105,18 +105,75 @@ function Bar({ pct, muted }: { pct: number; muted?: boolean }) {
 
 // ---- 1) 물어보기
 
+function FavoriteBlock({ list }: { list: FavoriteList }) {
+  return (
+    <div className="min-w-0 space-y-1">
+      <p className="text-xs font-semibold text-brand-700">{list.title}</p>
+      {list.rows.length === 0 ? <p className="text-sm text-ink-500">보여 줄 순위가 없어요</p> : (
+        <ol className="list-decimal space-y-1 pl-5 text-sm">
+          {list.rows.map((r, i) => (
+            <li key={i}>
+              <span className={`font-medium ${r.high ? "text-emerald-700" : "text-ink-900"}`}>{r.label}</span>{" "}
+              <span className={`text-xs ${r.suppressed ? "text-ink-400" : "text-ink-500"}`}>— {r.detail}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 function Ask({ options }: { options: OptionsView }) {
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [period, setPeriod] = useState<SegmentPeriod>((options.periods.find((p) => p.value === "90d") ?? options.periods[0])?.value as SegmentPeriod ?? "90d");
   const [ask, setAsk] = useState<{ filters: Record<string, string>; period: SegmentPeriod } | null>(null);
+  const [text, setText] = useState("");
+  const [reading, setReading] = useState(false);
+  const [question, setQuestion] = useState<QuestionView | null>(null);
+  const [questionNote, setQuestionNote] = useState<string | null>(null);
   const key = ask ? JSON.stringify(ask) : null;
   const res = useLoad(key, () => dataAi.segmentFavorites(ask!.filters, ask!.period).then((r) => r.output));
-  const view: FavoritesView | null = res.data ? favoritesView(res.data) : null;
+  const view: FavoritesView | null = res.data ? favoritesView(res.data, options.itemNoun) : null;
   const picked = Object.fromEntries(Object.entries(draft).filter(([, v]) => v));
   const chosen = filterLabel(picked, options.attributes);
 
+  /** 글 질문 → 고르는 칸에 채우고 바로 분석. 못 읽으면 고르는 칸을 쓰게 안내 */
+  const readQuestion = async () => {
+    const q = text.trim();
+    if (!q) return;
+    setReading(true);
+    setQuestionNote(null);
+    try {
+      const v = questionView((await dataAi.segmentQuestion(q)).output, options);
+      setQuestion(v);
+      if (v.kind === "ok") {
+        const p = v.period ?? period;
+        setDraft(v.filters);
+        setPeriod(p);
+        setAsk({ filters: v.filters, period: p });
+      }
+    } catch (e) {
+      const s = sectionState((e as Error).message);
+      setQuestion(null);
+      setQuestionNote(s.kind === "missing" ? "글로 묻기는 준비 중이에요. 아래에서 골라 주세요." : s.message);
+    } finally {
+      setReading(false);
+    }
+  };
+
   return (
     <Section id="seg-ask" title="물어보기" hint="집단을 고르면 우리 쇼핑몰에서 많이 산 것과 바깥 시장 인기를 나란히 봅니다." badge={view?.kind === "ok" ? view.badge : null}>
+      <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); void readQuestion(); }}>
+        <label className="sr-only" htmlFor="seg-question">질문</label>
+        <input id="seg-question" className="field min-w-0 flex-1" maxLength={200} value={text} onChange={(e) => setText(e.target.value)}
+          placeholder={`예: ${options.chips[0]?.label ?? "궁금한"} 고객이 좋아하는 ${options.itemNoun}은?`} />
+        <button type="submit" className="btn-primary" disabled={reading || !text.trim()}>{reading ? "읽는 중…" : "분석"}</button>
+      </form>
+      {question?.kind === "ok" && <p role="status" className="text-sm font-medium text-brand-700">{question.text}</p>}
+      {question?.kind === "unparsed" && (
+        <p role="status" className="text-sm text-amber-800">{question.text}{question.reason ? ` (${question.reason})` : ""}</p>
+      )}
+      {questionNote && <p role="status" className="text-xs text-ink-500">{questionNote}</p>}
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
         {options.attributes.map((a) => (
           <Select key={a.key} label={a.label} value={draft[a.key] ?? ""} onChange={(v) => setDraft((d) => ({ ...d, [a.key]: v }))}>
@@ -143,24 +200,20 @@ function Ask({ options }: { options: OptionsView }) {
         </ul>
       )}
       <StateBox load={res} what="물어보기" />
-      {ask == null && !res.state && <p className="text-xs text-ink-500">속성을 고르거나 질문을 누르면 분석합니다.</p>}
+      {ask == null && !res.state && <p className="text-xs text-ink-500">질문을 쓰거나, 속성을 고르거나, 자주 묻는 질문을 누르면 분석합니다.</p>}
       {view?.kind === "gate" && <Gate view={view} />}
       {view?.kind === "ok" && (
         <div className="space-y-3">
           <div className="grid gap-3 lg:grid-cols-2">
-            <div className="min-w-0 space-y-2 rounded-xl bg-brand-50 px-4 py-3">
-              <p className="text-xs font-semibold text-brand-700">{view.header}</p>
-              {view.rows.length === 0 ? <p className="text-sm text-ink-500">보여 줄 순위가 없어요</p> : (
-                <ol className="list-decimal space-y-1 pl-5 text-sm">
-                  {view.rows.map((r, i) => (
-                    <li key={i}><span className="font-medium text-ink-900">{r.label}</span> <span className={`text-xs ${r.suppressed ? "text-ink-400" : "text-ink-500"}`}>— {r.detail}</span></li>
-                  ))}
-                </ol>
-              )}
+            <div className="min-w-0 space-y-3 rounded-xl bg-brand-50 px-4 py-3">
+              <p className="text-sm font-semibold text-ink-900">{view.header}</p>
+              <FavoriteBlock list={view.genres} />
+              <FavoriteBlock list={view.products} />
             </div>
             <div className="min-w-0 space-y-3 rounded-xl bg-sky-50 px-4 py-3">
               <p className="text-xs font-semibold text-sky-800">바깥 시장</p>
-              {view.external.length === 0 ? <p className="text-sm text-ink-500">이 집단에 맞춰 볼 바깥 출처가 없어요</p> : view.external.map((e, i) => (
+              {view.externalNote && <p className="text-xs text-ink-500">{view.externalNote}</p>}
+              {view.external.length === 0 && !view.externalNote ? <p className="text-sm text-ink-500">이 집단에 맞춰 볼 바깥 출처가 없어요</p> : view.external.map((e, i) => (
                 <div key={i} className="min-w-0 space-y-1">
                   <p className="text-sm font-medium text-ink-900">{e.title}{e.meta && <span className="text-xs font-normal text-ink-500"> · {e.meta}</span>}</p>
                   {e.note ? <p className="text-xs text-ink-500">{e.note}</p> : (
@@ -190,7 +243,7 @@ function Who({ options }: { options: OptionsView }) {
 
   return (
     <Section id="seg-who" title={name ? `${name}은(는) 누가 사나` : "누가 사나"}
-      hint="이 분야 구매자의 구성을 전체 고객 구성과 견줍니다. 배수가 1보다 크면 그 집단이 특히 많이 삽니다." badge={view?.kind === "ok" ? view.badge : null}>
+      hint="이 분야 구매자의 구성을 전체 고객 구성과 견줍니다. 배수가 1.2배 이상이면 그 집단이 특히 많이 사는 것으로 보고 초록으로 표시합니다." badge={view?.kind === "ok" ? view.badge : null}>
       {options.targets.length === 0 ? <Empty>고를 분류·장르가 아직 없어요</Empty> : (
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
           <Select label="분류·장르" value={target} onChange={setTarget}>
@@ -254,7 +307,7 @@ function Who({ options }: { options: OptionsView }) {
 function Coverage({ options }: { options: OptionsView }) {
   const [combo, setCombo] = useState(options.coverage[0]?.value ?? "");
   const res = useLoad(combo ? combo : null, () => dataAi.marketCoverage(combo.split(",")).then((r) => r.output));
-  const view: CoverageView | null = res.data ? coverageView(res.data) : null;
+  const view: CoverageView | null = res.data ? coverageView(res.data, options.attributes) : null;
 
   return (
     <Section id="seg-coverage" title="시장을 얼마나 덮고 있나" hint="우리 구매자 수(최근 1년)를 공공 인구 통계로 나눠 봅니다. 남은 시장이 큰 묶음이 위에 옵니다." badge={view?.kind === "ok" ? view.badge : null}>
@@ -265,6 +318,29 @@ function Coverage({ options }: { options: OptionsView }) {
       )}
       <StateBox load={res} what="시장 커버 비율" />
       {view?.kind === "gate" && <Gate view={view} />}
+      {view?.kind === "buyers" && (
+        <div className="space-y-2">
+          <p className="rounded-xl bg-surface-2 px-3 py-2 text-xs text-ink-700">{view.note}</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-ink-500">
+                  <th className="py-2 pr-3 font-medium">{view.corner}</th>
+                  {view.columns.map((c) => <th key={c} className="py-2 pr-3 text-right font-medium">{c}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {view.rows.map((r) => (
+                  <tr key={r.label} className="border-t border-ink-100">
+                    <td className="py-2 pr-3 font-medium text-ink-900">{r.label}</td>
+                    {r.cells.map((c, i) => <td key={i} className={`py-2 pr-3 text-right tabular-nums ${c === SUPPRESSED ? "text-xs text-ink-400" : "text-ink-700"}`}>{c}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       {view?.kind === "ok" && (view.rows.length === 0 ? <Empty>보여 줄 묶음이 없어요</Empty> : (
         <div className="space-y-2">
           <ul className="space-y-2 sm:hidden">
@@ -379,6 +455,12 @@ function Proposals() {
         <div className="space-y-3">
           {view.empty && <Empty>{view.empty}</Empty>}
           {view.items.map((p) => <ProposalCard key={p.id} p={p} />)}
+          {view.excluded && (
+            <details className="rounded-xl bg-surface-2 px-4 py-2 text-sm text-ink-700">
+              <summary className="cursor-pointer font-medium text-ink-900">{view.excluded.title}</summary>
+              <ul className="mt-2 space-y-1 text-xs">{view.excluded.rows.map((x, i) => <li key={i}>{x}</li>)}</ul>
+            </details>
+          )}
           {view.summary && <p className="text-xs text-ink-500">요약: {view.summary}</p>}
         </div>
       )}

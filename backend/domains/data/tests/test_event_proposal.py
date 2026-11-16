@@ -32,7 +32,7 @@ from data_agent import catalog, handlers
 from data_agent.clients import customer_reaction
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.event_proposal_store import EventProposalStore, StoredProposal
-from data_agent.explain import LLM_UNAVAILABLE, NUMBER_INVALID
+from data_agent.explain import LLM_UNAVAILABLE, NUMBER_INVALID, _bad_numbers
 from data_agent.sales_collect import collect_once
 from data_agent.sales_fake import FAKE_DIR, FakeSalesSource, load_config
 from data_agent.sales_store import SalesStore, customers_source
@@ -57,6 +57,8 @@ CFG = CatalogSales(
         AttributeDef(key="gender", label="성별", values={"female": "여성", "male": "남성"}),
     ],
     event_kinds=[SHIPPING, COUPON],
+    # 표본이 20명뿐이라 예상 주문(낮은 쪽)이 0건이다. 후보 거르기는 아래 전용 시험에서 본다
+    min_orders_low=0,
 )
 
 
@@ -218,6 +220,46 @@ def test_season_unknown_is_an_assumed_one() -> None:
     assert p.timing_basis.last_year_multiple is None
     assert any("1배로 가정" in line for line in p.limits)
     assert p.score == round(1.6 * 8 / 30, 4)
+
+
+def test_low_season_candidates_are_excluded_with_reason() -> None:
+    """시즌 배수 < min_season_multiple이면 제안에서 빼고 excluded에. 장르 자리는 차지하지 않는다."""
+    # g2 작년 12월 = 5 → 평균 (11 × 10 + 5) ÷ 12의 0.52배
+    out = propose(make_store(), trend=FakeTrend({"g1": 22.0, "g2": 5.0})).output
+    assert [p.genre_code for p in out.proposals] == ["g1"]
+    assert out.excluded and all(e.item_label == "장르2" for e in out.excluded)
+    assert all("작년 같은 달 검색 배수 0.52배 (기준 1.00배 미만)" in e.reason for e in out.excluded)
+    assert {e.target_label for e in out.excluded} <= {"10대", "남성", "10대 · 남성"}
+    # 시즌을 못 잰 후보(1배 가정)는 시즌 기준으로 빼지 않는다
+    strict = CFG.model_copy(update={"min_season_multiple": 1.5})
+    unknown = propose(make_store(), cfg=strict, trend=FakeTrend(error="UNAUTHORIZED")).output
+    assert len(unknown.proposals) == 2 and unknown.excluded == []
+
+
+def test_low_orders_candidates_are_excluded_and_summary_says_so() -> None:
+    cfg = CFG.model_copy(update={"min_orders_low": 5})  # 대상 10명 × 3% = 0건
+    out = propose(make_store(), cfg=cfg).output
+    assert out.status == "ok" and out.proposals == []
+    assert out.excluded and len(out.excluded) <= ep.EXCLUDED_MAX
+    assert out.excluded[0].reason == "예상 주문(낮은 쪽) 0건 (기준 5건 미만)"
+    assert "기준(시즌 배수·예상 주문)에 못 미쳐 제외함" in out.summary
+
+
+def test_money_facts_use_commas_and_number_check_ignores_them() -> None:
+    c = ep.Candidate(filters={"age_band": "20s"}, label="20대", genre="g1", genre_label="장르1",
+                     segment_size=10, buyers=8, share=0.8, base_share=0.5, lift=1.6,
+                     target_customers=1000, aov=61572)  # fmt: skip
+    est = ep.estimate(c, COUPON, ())
+    season = ep.Season(("검색어1",), 2.0, "네이버", date(2025, 12, 1), date(2025, 1, 1))
+    reasons = ep.reasons_of(c, season, COUPON, (), None)
+    facts = ep.text_facts(c, COUPON, MONTH, est, reasons)
+    assert facts["객단가"] == "61,572원"
+    assert facts["예상 매출 낮음"] == f"{est.revenue_low:,}원"
+    text = f"객단가 61,572원(61572원), 예상 매출 {est.revenue_low:,}~{est.revenue_high:,}원"
+    assert _bad_numbers(text, facts) == []
+    assert _bad_numbers("객단가 61,573원", facts) == [61573.0]
+    item = propose(make_store(), max_items=1).output.proposals[0]
+    assert f"{item.estimate.revenue_low:,}~{item.estimate.revenue_high:,}원" in (item.summary or "")
 
 
 def test_quality_gate_and_missing_event_kinds() -> None:
@@ -466,7 +508,12 @@ def test_handlers_propose_then_send(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(handlers, "get_reaction_sender", lambda: support)
     monkeypatch.setattr(handlers, "get_event_proposal_sender", lambda: send)
     monkeypatch.setattr(handlers, "get_event_proposal_gate", lambda: _executed)
-    catalog.use_catalog(catalog.load_catalog("catbooks"))
+    cat = catalog.load_catalog("catbooks")
+    assert cat.sales is not None and cat.sales.min_orders_low == 5  # 카탈로그 가정값
+    # 표본 20명이라 예상 주문이 0건: 주문 기준만 0으로 바꿔 보내기 흐름을 본다
+    catalog.use_catalog(cat.model_copy(update={
+        "sales": cat.sales.model_copy(update={"min_orders_low": 0}),
+    }))  # fmt: skip
     handlers.use_sales_store(store)
     handlers.use_event_proposal_store(proposals)
     try:

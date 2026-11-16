@@ -88,6 +88,11 @@ min_period_orders = 20  # 기간 안 결제 완료 주문이 이보다 적으면
 # ---- 고객·시장 분석 (11/16)
 min_group_size = 5  # 한 묶음(예: 20대·여성)의 고객이 이보다 적으면 숫자를 숨긴다
 active_days = 365  # 대상 고객 = 최근 365일 결제 완료 주문 1회 이상
+item_noun = "책"  # 화면에 쓰는 품목 이름 (예: "많이 산 책")
+# 이벤트 후보 거르기 (가정): 작년 같은 달 검색 배수가 평균보다 낮거나(1.0배 미만) 예상 주문(낮은
+# 쪽)이 5건 미만이면 제안에서 빼고 "제외한 후보"로 보여 준다. 기준은 시연용 가정값이다
+min_season_multiple = 1.0  # 가정
+min_orders_low = 5  # 가정
 
 # category_code → 화면 이름 (shop-api storefront.CATEGORY_NAMES와 같은 이름). 없는 코드는 품질 보고에 남는다
 [sales.categories]

@@ -220,6 +220,17 @@ export interface SegmentOptionsOutput {
   data_source: string | null;
   catalog_id: string;
   catalog_version: string | null;
+  /** 화면에 쓰는 품목 이름 (예: 책·게임). 예전 서버면 없음 → "상품" */
+  item_noun?: string;
+}
+/** 글 질문 → 고르는 칸 값 (segment_question). LLM은 segment_options 보기 안의 code만 고른다 */
+export interface SegmentQuestionOutput {
+  status: "ok" | "unparsed";
+  filters: Record<string, string>;
+  genre_code: string | null;
+  period: SegmentPeriod | null;
+  understood_label: string;
+  reason: string;
 }
 export interface SegmentShare {
   value_code: string; label: string; target_share: number | null; overall_share: number | null;
@@ -282,7 +293,10 @@ export interface EventProposalItem {
 export interface EventProposalOutput {
   status: "ok" | "insufficient"; insufficient_reasons: string[]; month: string;
   proposals: EventProposalItem[]; quality: SalesQuality; basis: SalesBasis | null; summary: string;
+  /** 기준(시즌 배수·예상 주문)에 못 미쳐 뺀 후보. 예전 서버면 없음 */
+  excluded?: ExcludedProposal[];
 }
+export interface ExcludedProposal { target_label: string; item_label: string; reason: string }
 export interface EventProposalSendOutput { outcome: "created" | "duplicate" | "rejected"; proposal_ref: string | null; reason: string }
 export interface SalesAnalysisOutput {
   period: SalesPeriod;
@@ -1981,6 +1995,7 @@ export const dataAi = {
   salesAnalysis: (period: SalesPeriod) => askData<SalesAnalysisOutput>("sales_analysis", "매출 분석", { period }),
   // 고객·시장 분석. skill이 아직 없으면 서버가 거절(FORBIDDEN_SKILL·403)하고 화면은 그 칸만 "준비 중"
   segmentOptions: () => askData<SegmentOptionsOutput>("segment_options", "분석 선택지"),
+  segmentQuestion: (text: string) => askData<SegmentQuestionOutput>("segment_question", "글 질문 읽기", { text }),
   segmentFavorites: (filters: Record<string, string>, period: SegmentPeriod) =>
     askData<SegmentFavoritesOutput>("segment_favorites", "집단이 좋아하는 것", { filters, period }),
   segmentProfile: (target_kind: SegmentTargetKind, target_code: string, period: SegmentPeriod) =>

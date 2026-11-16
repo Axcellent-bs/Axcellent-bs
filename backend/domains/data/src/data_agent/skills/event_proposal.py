@@ -28,6 +28,12 @@ LLM은 제안마다 제목(title)과 요약(summary)만 쓴다. 회사마다 다
   (n이 `FULL_SAMPLE`명보다 적은 묶음은 표본이 작아 깎는다)
 - 점수 큰 순(같으면 배수 큰 순, 묶음 이름, 장르 code). 한 장르·한 묶음은 한 번만 고른다
   (비슷한 제안이 겹치지 않게)
+- 기준 미달 후보 제외(카탈로그, 가정값): 잰 시즌 배수 < `min_season_multiple`이거나 예상 주문 낮은
+  쪽 < `min_orders_low`이면 제안에서 빼고 `excluded`에 이유와 함께 둔다(점수 순 최대
+  `EXCLUDED_MAX`). 시즌을 못 잰 후보(1배로 가정)는 시즌 기준으로 빼지 않는다. 뺀 후보는 장르·묶음을
+  차지하지 않아 다음 후보가 그 자리를 쓸 수 있다
+- 금액은 LLM 사실·템플릿 문장 모두 쉼표 표기(`won`, 예: 61,572원). 숫자 검증은 쉼표를 지우고
+  비교한다
 
 예상 효과
 - 전환율: 지난 캠페인 쿠폰 사용률(사용 ÷ 발급, 캠페인 쿠폰이 있는 캠페인만)이 있으면 그
@@ -107,6 +113,7 @@ from ax_contracts.schemas.data import (
     EventProposalItem,
     EventProposalOutput,
     EventProposalSendOutput,
+    ExcludedProposal,
     ProposalEstimate,
     ProposalPastResult,
     ProposalReason,
@@ -150,6 +157,7 @@ CLAIM_RATE_HIGH = 0.05  # 최근 한 달 클레임 비율이 이 이상이면 �
 TOP_PRODUCTS = 3  # 기획에 넘기는 그 장르 상위 상품 수 (구매자 수 순)
 PAST_RESULTS_MAX = 3  # 같은 조건으로 전에 보낸 제안 (예상 범위)
 TITLE_MAX, SUMMARY_MAX = 60, 300  # LLM 문장 길이 (기획 계약 120·400보다 짧게)
+EXCLUDED_MAX = 10  # 기준 미달로 뺀 후보를 보여 주는 수 (점수 순)
 SEASON_ASSUMED_SOURCE = "가정값 (검색 트렌드 확인 불가)"
 NAVER_SOURCE = "네이버 검색어 트렌드"
 QUERIES = [*seg.QUERIES, "event_proposal_store.event_proposals"]
@@ -533,11 +541,17 @@ def text_facts(
         "전환율 낮음(%)": round(est.conversion_low * 100, 2),
         "전환율 높음(%)": round(est.conversion_high * 100, 2),
         "전환율 출처": "가정값" if est.assumption else "지난 캠페인",
-        "객단가(원)": est.aov or 0, "예상 주문 낮음": est.orders_low,
-        "예상 주문 높음": est.orders_high, "예상 매출 낮음(원)": est.revenue_low,
-        "예상 매출 높음(원)": est.revenue_high, "할인율(%)": round(kind.discount_rate * 100, 2),
-        "할인 비용 낮음(원)": est.discount_cost_low, "할인 비용 높음(원)": est.discount_cost_high,
+        "객단가": won(est.aov or 0), "예상 주문 낮음": est.orders_low,
+        "예상 주문 높음": est.orders_high, "예상 매출 낮음": won(est.revenue_low),
+        "예상 매출 높음": won(est.revenue_high), "할인율(%)": round(kind.discount_rate * 100, 2),
+        "할인 비용 낮음": won(est.discount_cost_low),
+        "할인 비용 높음": won(est.discount_cost_high),
     }  # fmt: skip
+
+
+def won(amount: int) -> str:
+    """금액 표기: 쉼표 + 원 (예: 61,572원). LLM 사실과 템플릿 문장이 같은 표기를 쓴다."""
+    return f"{amount:,}원"
 
 
 def build(  # noqa: PLR0913 - 계산 재료를 그대로 받는다
@@ -549,8 +563,12 @@ def build(  # noqa: PLR0913 - 계산 재료를 그대로 받는다
     seasons: dict[str, Season],
     past: Sequence[PastCampaign],
     data_source: str | None,
-) -> list[Draft]:
-    """점수 순으로 고르고 제안을 만든다 (제목·요약은 템플릿, 문장은 나중에)."""
+) -> tuple[list[Draft], list[ExcludedProposal]]:
+    """점수 순으로 고르고 제안을 만든다 (제목·요약은 템플릿, 문장은 나중에).
+
+    기준 미달(시즌 배수 < `min_season_multiple`, 예상 주문 낮은 쪽 < `min_orders_low`) 후보는
+    제안에서 빼고 이유와 함께 돌려준다. 뺀 후보는 장르·묶음을 차지하지 않는다.
+    """
     scored = sorted(
         ((score_of(c, seasons.get(c.genre)), c) for c in base.candidates),
         key=lambda x: (-x[0], -x[1].lift, x[1].label, x[1].genre,
@@ -558,16 +576,23 @@ def build(  # noqa: PLR0913 - 계산 재료를 그대로 받는다
     )  # fmt: skip
     kind = pick_kind(cfg.event_kinds, past)
     drafts: list[Draft] = []
+    excluded: list[ExcludedProposal] = []
     used_genres: set[str] = set()
     used_groups: set[tuple[tuple[str, str], ...]] = set()
     for score, c in scored:
         group = tuple(sorted(c.filters.items()))
         if c.genre in used_genres or group in used_groups:
             continue
-        used_genres.add(c.genre)
-        used_groups.add(group)
         season = seasons.get(c.genre) or Season((), None, "시즌을 보지 않음")
         est = estimate(c, kind, past)
+        why = exclusion_reasons(season, est, cfg)
+        if why:
+            if len(excluded) < EXCLUDED_MAX:
+                excluded.append(ExcludedProposal(target_label=c.label, item_label=c.genre_label,
+                                                 reason=" · ".join(why)))  # fmt: skip
+            continue
+        used_genres.add(c.genre)
+        used_groups.add(group)
         reasons = reasons_of(c, season, kind, past, data_source)
         item = EventProposalItem(
             proposal_id=proposal_id(tenant_id, month, c.filters, c.genre, kind.code),
@@ -587,7 +612,18 @@ def build(  # noqa: PLR0913 - 계산 재료를 그대로 받는다
         drafts.append(Draft(item, c, kind, facts))
         if len(drafts) >= max_items:
             break
-    return drafts
+    return drafts, excluded
+
+
+def exclusion_reasons(season: Season, est: ProposalEstimate, cfg: CatalogSales) -> list[str]:
+    """기준 미달 이유. 시즌을 못 잰 후보(1배로 가정)는 시즌 기준으로 빼지 않는다."""
+    why: list[str] = []
+    if season.multiple is not None and season.multiple < cfg.min_season_multiple:
+        why.append(f"작년 같은 달 검색 배수 {num(season.multiple)}배 "
+                   f"(기준 {num(cfg.min_season_multiple)}배 미만)")  # fmt: skip
+    if est.orders_low < cfg.min_orders_low:
+        why.append(f"예상 주문(낮은 쪽) {est.orders_low:,}건 (기준 {cfg.min_orders_low:,}건 미만)")
+    return why
 
 
 # ---------------------------------------------------------------- 문장 (템플릿 · LLM)
@@ -823,6 +859,10 @@ def summary_of(out: EventProposalOutput, candidates: int, cfg: CatalogSales | No
     if out.status != "ok":
         text = f"{label} 이벤트 제안을 내지 않음 — " + "; ".join(out.insufficient_reasons)
         return seg.with_source(text, out.basis)
+    if not out.proposals and out.excluded:
+        text = (f"{label} 이벤트 제안 없음: 후보 {len(out.excluded)}건이 기준(시즌 배수·예상 "
+                "주문)에 못 미쳐 제외함.")  # fmt: skip
+        return seg.with_source(text, out.basis)
     if not out.proposals:
         least = cfg.min_group_size if cfg else 0
         text = (f"{label} 이벤트 제안 없음: 묶음 배수 {MIN_LIFT}배 이상이고 {least}명 이상인 "
@@ -875,7 +915,7 @@ async def propose(  # noqa: PLR0913 - 저장소·커넥터를 바꿔 끼울 수 
         f"naver search-trend group={g} {s.first_month:%Y-%m}~{s.same_month:%Y-%m} month"
         for g, s in sorted(seasons.items()) if s.first_month and s.same_month
     ]  # fmt: skip
-    drafts = build(base, cfg, tenant_id, month, max_items, seasons, past, data_source)
+    drafts, excluded = build(base, cfg, tenant_id, month, max_items, seasons, past, data_source)
     notes: list[str] = []
     if past_note:
         notes.append(past_note)
@@ -913,7 +953,7 @@ async def propose(  # noqa: PLR0913 - 저장소·커넥터를 바꿔 끼울 수 
     if fallbacks:
         notes.append(f"제목·요약을 템플릿으로 대체함 {len(fallbacks)}건: "
                      + ", ".join(sorted(set(fallbacks))))  # fmt: skip
-    out = EventProposalOutput(**common, proposals=items)
+    out = EventProposalOutput(**common, proposals=items, excluded=excluded)
     out = out.model_copy(update={"summary": summary_of(out, len(base.candidates), cfg)})
     return ProposalRun(
         out, evidence_of(out, now, queries, notes), bool(fallbacks),

@@ -38,6 +38,9 @@ max_staleness_minutes = 60
 min_period_orders = 10
 min_group_size = 3
 active_days = 60
+item_noun = "게임"  # 화면 품목 이름
+# 플레이어가 30명뿐이라 예상 주문(낮은 쪽)이 작다. 제안이 나오게 주문 기준은 0으로 둔다
+min_orders_low = 0
 
 [sales.categories]
 game_item = "게임 아이템"

@@ -227,6 +227,8 @@ SERVICES: tuple[Service, ...] = (
             "sales_analysis",
             # 고객·시장 분석 (11/16, 표준 판매 저장소만, grade read)
             "segment_options",
+            # 글 질문 → 고르는 칸 값 (LLM은 카탈로그 보기 안의 code만 고름, grade read)
+            "segment_question",
             "segment_profile",
             "segment_favorites",
             "market_coverage",
