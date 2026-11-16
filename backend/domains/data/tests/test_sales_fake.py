@@ -90,7 +90,7 @@ def _genre_share(
 def test_group_preferences_show_in_orders() -> None:
     src = fake()
     for when, genres in (
-        ({"age_band": "30s", "occupation": "employee"}, {"ai_it", "business"}),
+        ({"age_band": "30s", "occupation": "employee"}, {"it", "business"}),
         ({"age_band": "20s", "gender": "female"}, {"essay", "novel"}),
         ({"age_band": "10s", "occupation": "student"}, {"comics"}),
     ):

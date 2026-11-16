@@ -115,34 +115,45 @@ referral = "추천 링크"
 display = "배너 광고"
 shorts = "숏츠"
 
-# genre_code → 화면 이름. 판매 서버 장르 확정 전 잠정 (판매 서버가 장르 코드를 정하면 맞춘다).
-# 도서(book): novel·essay·self_help·ai_it·business·humanities·comics·kids
-# 문구(stationery): writing·notes·deco. 없는 코드는 품질 보고(unknown_genres)에 남는다
+# genre_code → 화면 이름. 판매 서버(캣북스) 장르 코드·이름·순서 그대로:
+# Catbooks-demo/catbooks-demo `backend/shop-api/src/ax_shop_api/genres.py` GENRES (커밋 413a5584).
+# 없는 코드는 품질 보고(unknown_genres)에 남는다
 [sales.genres]
 novel = "소설"
-essay = "에세이"
+essay = "시·에세이"
+business = "경제경영"
 self_help = "자기계발"
-ai_it = "AI·IT"
-business = "경제·경영"
 humanities = "인문"
-comics = "만화"
+society = "사회·정치"
+history = "역사"
+science = "과학"
+it = "AI·IT"
+language = "외국어"
 kids = "어린이"
+comics = "만화"
+hobby = "여행·취미"
 writing = "필기구"
-notes = "노트·다이어리"
-deco = "다꾸·꾸미기"
+notebook = "노트"
+deco = "다꾸"
 
-# genre_code → 시즌 판단용 대표 검색어 (작년 같은 달 검색 배수)
+# genre_code → 시즌 판단용 대표 검색어 (작년 같은 달 검색 배수). 검색어는 장르 이름을 그대로
+# 풀어 쓴 것이다(검색량 숫자는 네이버 검색어 트렌드 응답에서만 읽는다)
 [sales.genre_keywords]
 novel = ["소설 추천", "베스트셀러 소설"]
-essay = ["에세이 추천", "힐링 에세이"]
-self_help = ["자기계발서", "습관 책"]
-ai_it = ["챗GPT 책", "AI 활용", "코딩 입문"]
+essay = ["에세이 추천", "시집 추천"]
 business = ["재테크 책", "경제 책 추천"]
+self_help = ["자기계발서", "습관 책"]
 humanities = ["인문학 책", "철학 책"]
-comics = ["웹툰 단행본", "만화책"]
+society = ["사회 책 추천", "정치 책"]
+history = ["역사 책 추천", "한국사 책"]
+science = ["과학 책 추천", "교양 과학"]
+it = ["챗GPT 책", "AI 활용", "코딩 입문"]
+language = ["영어 공부 책", "외국어 공부"]
 kids = ["어린이 책", "그림책 추천"]
+comics = ["웹툰 단행본", "만화책"]
+hobby = ["여행 책", "취미 책"]
 writing = ["볼펜 추천", "만년필"]
-notes = ["다이어리", "노트 추천"]
+notebook = ["노트 추천", "다이어리"]
 deco = ["다꾸 스티커", "마스킹테이프"]
 
 # 고객 속성 (판매 서버와 맞춘 코드). 값이 비면 "모름"으로 센다. 순서 = 화면 순서
@@ -174,8 +185,13 @@ self_employed = "자영업"
 other = "기타"
 no_answer = "응답 안 함"
 
-# 속성 값 → 도서관 정보나루 인기대출 조건 (connectors/data4library.py 문서 예시 `from_age=6&to_age=10`
-# 에서 확인한 칸 이름). 50대 이상(상한 미확인)과 성별(gender 값의 뜻 미확인)은 넣지 않았다
+# 속성 값 → 도서관 정보나루 인기대출(loanItemSrch) 조건.
+# 출처: 도서관 정보나루 Open API 매뉴얼 v20260620, https://www.data4library.kr/downloadApiManual
+#   - 요청 명세 10~11쪽: from_age(시작연령)·to_age(종료연령). "시작연령(from_age)만 있을 경우
+#     종료연령(to_age)는 100세로 자동 설정"
+#   - 코드표 58쪽 "성별 코드": 0 = 남성, 1 = 여성, 2 = 미상
+# 성별 no_answer(응답 안 함)는 넣지 않는다: 매뉴얼의 2 = 미상은 "응답 안 함"과 같은 뜻이 아니다
+# 연령 10s~40s: 매뉴얼 10~11쪽 from_age·to_age (https://www.data4library.kr/downloadApiManual)
 [[sales.external_filters]]
 source_id = "data4library"
 attribute_key = "age_band"
@@ -200,31 +216,80 @@ attribute_key = "age_band"
 value_code = "40s"
 params = { from_age = 40, to_age = 49 }
 
-# 장르 → 도서관 정보나루 kdc (KDC 대분류 근사, connectors/data4library.KDC_CLASSES).
-# 확실한 것만: 소설·에세이 8 문학, AI·IT 0 총류(컴퓨터), 경제·경영 3 사회과학.
-# 자기계발·인문·만화·어린이는 대분류 하나로 정하기 어려워 넣지 않았다
+# 50대 이상: from_age만 (to_age는 100세로 자동 설정, 매뉴얼 10~11쪽 https://www.data4library.kr/downloadApiManual)
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "age_band"
+value_code = "50s_plus"
+params = { from_age = 50 }
+
+# 성별 코드 0 = 남성, 1 = 여성 (매뉴얼 58쪽 "성별 코드", https://www.data4library.kr/downloadApiManual)
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "gender"
+value_code = "male"
+params = { gender = "0" }
+
+# 성별 코드 1 = 여성 (매뉴얼 58쪽 "성별 코드", https://www.data4library.kr/downloadApiManual)
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "gender"
+value_code = "female"
+params = { gender = "1" }
+
+# 장르 → 도서관 정보나루 kdc. 출처: 도서관 정보나루 Open API 매뉴얼 v20260620 코드표 59쪽
+# "대주제 코드" (https://www.data4library.kr/downloadApiManual): 0 총류, 1 철학, 2 종교,
+# 3 사회과학, 4 자연과학, 5 기술과학, 6 예술, 7 언어, 8 문학, 9 역사.
+# 장르 이름과 대주제 이름이 같은 주제일 때만 넣는다.
+# 넣지 않은 장르 (미확인):
+#   - it(AI·IT): 0 총류는 컴퓨터과학(KDC 004) 말고도 백과사전·연속간행물 등을 다 담는다. 매뉴얼
+#     표에는 2자리 세부주제까지만 있어 004를 고를 수 없으므로 근사로 넣지 않는다
+#   - self_help(자기계발): 매뉴얼 대주제·세부주제 표에 맞는 분류가 없음
+#   - humanities(인문): KDC 분류 하나가 아님 (철학·역사·언어 등에 걸침)
+#   - comics(만화): 매뉴얼 표에 없음 (65 회화·도화는 만화가 아님)
+#   - kids(어린이): KDC 주제가 아님. 매뉴얼 58~59쪽 ISBN 부가기호(addCode) 7 = 아동이 있지만
+#     커넥터 popular_loans가 addCode를 받지 않아 넣지 않는다
+#   - hobby(여행·취미): 분류 하나로 정할 수 없음
+#   - writing·notebook·deco: 문구라 도서 분류가 아님
+# business(경제경영)는 매뉴얼 세부주제 32 경제학이 있지만 커넥터가 dtl_kdc를 받지 않아 kdc 3만 쓴다
 [[sales.genre_external]]
 source_id = "data4library"
 genre_code = "novel"
-params = { kdc = "8" }
+params = { kdc = "8" }  # 8 문학 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
 
 [[sales.genre_external]]
 source_id = "data4library"
 genre_code = "essay"
-params = { kdc = "8" }
-
-[[sales.genre_external]]
-source_id = "data4library"
-genre_code = "ai_it"
-params = { kdc = "0" }
+params = { kdc = "8" }  # 8 문학 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
 
 [[sales.genre_external]]
 source_id = "data4library"
 genre_code = "business"
-params = { kdc = "3" }
+params = { kdc = "3" }  # 3 사회과학 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
 
-# 시장 커버 비율의 인구 통계 (연령대 × 성별, KOSIS). 레포에서 확인한 연령·성별 표 id가 없어
-# table_ref는 비워 둔다 (표 id·분류 코드를 확인한 뒤 채운다)
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "society"
+params = { kdc = "3" }  # 3 사회과학 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "history"
+params = { kdc = "9" }  # 9 역사 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "science"
+params = { kdc = "4" }  # 4 자연과학 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "language"
+params = { kdc = "7" }  # 7 언어 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+# 시장 커버 비율의 인구 통계 (연령대 × 성별, KOSIS). table_ref는 비워 둔다 (미확인):
+# KOSIS 연령×성별 주민등록인구 표 id를 확인하지 못함 (KOSIS 표 화면이 로그인(SSO)으로 넘어가
+# 확인 못 함). 표 id·분류 코드를 확인한 뒤 채운다
 [[sales.population]]
 attribute_keys = ["age_band", "gender"]
 source_id = "kosis"
