@@ -4,9 +4,12 @@
 #                                            # 이미 떠 있으면 켜지 않는다 ("이미 실행 중 (pid …), 먼저 stop")
 #   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기 (자식까지, 끝에 "남은 프로세스 0개" 확인)
 #   bash backend/scripts/run_all.sh reset    # 끄고 테스트로 쌓인 기록(.data·이벤트 버스)을 지운다
-#   bash backend/scripts/run_all.sh --only data,finance,shop-api   # 고른 서버만 (이름은 아래 APPS)
+#   bash backend/scripts/run_all.sh --only data,finance            # 고른 서버만 (이름은 아래 APPS)
 #   bash backend/scripts/run_all.sh --only data-demo              # 묶음: core, data-demo (아래 GROUP_*)
 #     안 띄운 서비스는 AX_ENABLED_SERVICES에서도 빠진다(이미 줬으면 교집합). stop은 늘 전체 포트를 끈다
+#   CATBOOKS_LOCAL=on bash backend/scripts/run_all.sh   # 로컬 개발만: 옆 catbooks-demo에서 판매 서버(8010)·가상 주문도
+#     stop·reset도 켤 때와 같은 CATBOOKS_LOCAL 값으로 부른다(backend/.env에 두면 늘 같다). on으로 켜고 값 없이
+#     끄면 판매 서버·가상 주문은 .pid로만 끄고, 8010 포트와 남은 프로세스 확인에서는 빠진다(남으면 on으로 다시 stop)
 # 먼저 backend/ 에서 `uv sync --all-packages` 한 번. 로그는 backend/.logs/<이름>.log
 #
 # 실제 모드에 필요한 것
@@ -213,8 +216,14 @@ echo "$START_LINE"
 # 컨테이너가 아니라서 서비스 이름 대신 localhost 주소를 알려 준다 (AX_<이름>_URL, agent_url)
 while read -r name port _; do
   [ -n "$name" ] || continue
+  [ "$name" = "shop-api" ] && continue  # 판매 서버 주소는 아래 (외부 판매 서버면 건드리지 않는다)
   export "AX_$(echo "$name" | tr 'a-z-' 'A-Z_')_URL=http://127.0.0.1:$port"
 done <<< "$APPS"
+# 판매 서버: 로컬로 띄울 때만(CATBOOKS_LOCAL=on) 8010을 기본으로 둔다. 이미 준 AX_SHOP_API_URL이 먼저다.
+# 아니면 AX_SHOP_API_URL(셸·.env) 또는 회사 연결이 정한다
+if [ "$CB_LOCAL" = 1 ]; then
+  export AX_SHOP_API_URL="${AX_SHOP_API_URL:-http://127.0.0.1:8010}"
+fi
 # 부서 이름으로 부르는 코드가 있어도 skill로 서비스를 고르지만(route_target), 고를 수 없는 경우를 위해 대표 서비스로 둔다
 export AX_SUPPORT_URL=http://127.0.0.1:8102 AX_HR_URL=http://127.0.0.1:8104
 export AX_MARKETING_URL=http://127.0.0.1:8103 AX_INFRA_URL=http://127.0.0.1:8107

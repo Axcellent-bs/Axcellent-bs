@@ -93,7 +93,8 @@ bash scripts/run_all.sh stop
   `CATBOOKS_DEMO_DIR`) `run_all.sh`가 그 레포의 venv(없으면 `uv sync` 한 번)로 판매 서버(8010)와 가상 주문을 띄운다. 서버에서는 켜지 않는다.
 - `SHOP_TRAFFIC=on`이면(로컬로 띄운 때만) 캣북스 레포의 `backend/scripts/shop_traffic.py`가 3초마다 캣북스 고객 주문·결제를 넣는다. 결제 성공·실패는 쇼핑몰이 정한다.
   결제가 실패한 고객 일부(30%)는 쇼핑몰 문의 창구로 그 주문에 대해 문의를 남긴다 → 고객지원 AI가 받아 답변 초안을 쓴다.
-- 장애 넣기·빼기는 운영자 명령이다: `bash scripts/shop_fault.sh failure|latency|clear|status` (캣북스 레포 스크립트를 부르는 래퍼, 관리자 토큰은 `.data/web.env`에서). 테스트 기록을 지우려면 `bash scripts/run_all.sh reset`.
+- 장애 넣기·빼기는 운영자 명령이다: `bash scripts/shop_fault.sh failure|latency|clear|status` (캣북스 레포 스크립트를 부르는 래퍼).
+  따로 배포한 캣북스에 넣을 때는 `SHOP_API_URL`(판매 서버 주소)과 `SHOP_ADMIN_TOKEN`(캣북스 관리자 토큰)을 주고 부른다. 둘 다 없을 때만 `backend/.data/web.env`의 토큰과 `http://127.0.0.1:8010`을 쓰는데, 이건 `CATBOOKS_LOCAL=on`으로 `run_all.sh`가 띄운 로컬 판매 서버에서만 통한다. 테스트 기록을 지우려면 `bash scripts/run_all.sh reset`.
 - 캣북스 쇼핑몰 화면(고객이 보는 곳)은 캣북스 레포의 `frontend/shop-web`이다. 같은 shop-api(8010)에 붙여 띄우면 장애 때 결제 화면에
   "결제 서버에 문제가 있어 결제하지 못했습니다"가 뜬다(띄우는 법은 캣북스 레포 README).
 - 장애 대응 흐름: AI 대화방의 "캣북스에 장애 넣기" → 캣북스 결제가 실제로 실패 → 쇼핑몰 감시가 `shop.degraded`

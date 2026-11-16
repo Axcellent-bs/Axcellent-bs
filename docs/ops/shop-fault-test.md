@@ -14,6 +14,7 @@
   - 장애를 넣는 데는 쇼핑몰 admin 토큰이 필요합니다.
   - 이 토큰은 `run_all.sh`가 `backend/.data/web.env`의 `VITE_SHOP_ADMIN_TOKEN`에 씁니다. [4]
   - `shop_fault.sh`는 그 파일에서 토큰을 읽고, 파일이 없으면 멈춥니다. [5]
+  - 위 두 줄은 `CATBOOKS_LOCAL=on`으로 `run_all.sh`가 띄운 **로컬 판매 서버**에서만 통합니다. 따로 배포한 캣북스에 넣을 때는 `SHOP_API_URL`(판매 서버 주소)과 `SHOP_ADMIN_TOKEN`(캣북스 관리자 토큰)을 주고 부릅니다. 이 두 값이 있으면 `web.env`보다 먼저 씁니다.
   - 251 공용 서버에서는 251에서 `run_all.sh`를 띄운 재현님이 넣어야 합니다.
 - **화면에는 장애 버튼이 없습니다.** 명령으로만 넣습니다. [6]
 
@@ -174,15 +175,15 @@ bash backend/scripts/pg_demo_file.sh clear    # 시연 끝나면 빼기
 
 | 번호 | 내용 | 파일:줄 |
 |---|---|---|
-| [1] | `SHOP_TRAFFIC=on`일 때만 가상 주문 (기본 꺼짐) | `backend/scripts/run_all.sh:492-495` |
+| [1] | `SHOP_TRAFFIC=on`일 때만 가상 주문 (기본 꺼짐) | `backend/scripts/run_all.sh:501-504` |
 | [2] | 가상 주문 분당 20건(3초마다 1건) | 캣북스 레포 `backend/scripts/shop_traffic.py` |
 | [3] | 판단 창 60초, 최소 표본 5건 | 캣북스 레포 `backend/shop-api/src/ax_shop_api/monitor.py` |
-| [4] | admin 토큰을 `web.env`에 씀 | `backend/scripts/run_all.sh:434` |
-| [5] | `shop_fault.sh`가 `web.env`에서 토큰을 읽음, 없으면 멈춤 | `backend/scripts/shop_fault.sh:22-26` |
-| [6] | 장애 버튼 없음, failure 약 25초 뒤 사건 열림 | `backend/scripts/shop_fault.sh:3-4` |
+| [4] | admin 토큰을 `web.env`에 씀 | `backend/scripts/run_all.sh:443` |
+| [5] | `shop_fault.sh`가 `web.env`에서 토큰을 읽음, 없으면 멈춤 | `backend/scripts/shop_fault.sh:25-33` |
+| [6] | 장애 버튼 없음, failure 약 25초 뒤 사건 열림 | `backend/scripts/shop_fault.sh:3`, `:6` |
 | [7] | 기준 p95 1000ms, 5xx 비율 2% | 캣북스 레포 `backend/shop-api/src/ax_shop_api/monitor.py` |
 | [8] | latency는 2000ms 지연 | 캣북스 레포 `backend/scripts/shop_fault.sh` (`latency`) |
-| [9] | 지속 20초, 판단 간격 5초 (`run_all.sh` 값) | `backend/scripts/run_all.sh:380` |
+| [9] | 지속 20초, 판단 간격 5초 (`run_all.sh` 값) | `backend/scripts/run_all.sh:389` |
 | [10] | 지속 시간은 첫 기준 초과 표본부터 셈 (코드 기본값 60초) | 캣북스 레포 `backend/shop-api/src/ax_shop_api/monitor.py` |
 | [11] | 감시 루프 간격 | 캣북스 레포 `backend/shop-api/src/ax_shop_api/main.py` |
 | [12] | 되돌리기는 진단·영향 분석 뒤 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:546` |

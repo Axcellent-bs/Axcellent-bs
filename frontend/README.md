@@ -110,7 +110,9 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
    ```
 3. 장애 사건을 만들어요. 쇼핑몰에 결제 장애를 주입하면 주문 결제가 5xx로 실패하고, 쇼핑몰 감시가 20초 넘게 이어진 실패를 재서 `shop.degraded`를 내요. 총괄이 그걸 받아 사건을 열고 데이터 AI가 영향 분석·복구 확인·처리 시간 요약을 해요
    ```bash
-   # backend/ 에서. 주입은 admin 토큰만 돼요 (web.env의 VITE_SHOP_ADMIN_TOKEN을 읽어 캣북스 레포 스크립트에 넘김, 값은 출력하지 않음)
+   # backend/ 에서. 주입은 admin 토큰만 돼요 (값은 출력하지 않음)
+   # 따로 배포한 캣북스: SHOP_API_URL=<판매 서버 주소> SHOP_ADMIN_TOKEN=<캣북스 관리자 토큰> 을 앞에 붙여요
+   # 둘 다 없으면 web.env의 VITE_SHOP_ADMIN_TOKEN과 127.0.0.1:8010을 써요(CATBOOKS_LOCAL=on으로 띄운 로컬 판매 서버에서만 통해요)
    bash scripts/shop_fault.sh failure
    # 30초쯤 기다린 뒤 해제하면 shop.recovered로 복구 확인이 이어져요
    bash scripts/shop_fault.sh clear

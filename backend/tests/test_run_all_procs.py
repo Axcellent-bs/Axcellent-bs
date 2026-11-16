@@ -376,7 +376,10 @@ def test_run_all_passes_the_traffic_pid_file_and_stop_reads_it() -> None:
     launch = text[text.index('rm -f "$TRAFFIC_PID_FILE"') :]
     launch = launch[: launch.index('"$CB_BACKEND/scripts/shop_traffic.py"')]
     assert 'SHOP_TRAFFIC_PID_FILE="$TRAFFIC_PID_FILE"' in launch
-    # 가상 주문 스크립트(write_pid_file)는 캣북스 레포에 있고 그쪽 시험이 본다
+    # pid 파일을 적는 쪽(shop_traffic.write_pid_file)은 캣북스 레포로 옮겼다. 시험도 그쪽에 있다:
+    # Catbooks-demo/catbooks-demo backend/shop-api/tests/test_shop_traffic.py
+    #   test_write_pid_file_writes_its_real_pid,
+    #   test_write_pid_file_without_a_path_or_unwritable_does_not_raise
 
 
 # --- 캣북스 판매 서버: AXcellent는 띄우지 않는다. 로컬 개발로만 옆 클론에서 (CATBOOKS_LOCAL=on) ---
@@ -476,3 +479,76 @@ def test_shop_api_source_is_not_in_this_repo() -> None:
     # 판매 서버 소스는 캣북스 레포에 있다 (pull 뒤 남은 __pycache__는 상관없다)
     assert not list((BACKEND / "shared" / "shop-api").rglob("*.py"))
     assert not (BACKEND / "scripts" / "shop_traffic.py").exists()
+
+
+def test_shop_api_url_is_only_defaulted_when_local() -> None:
+    """외부 판매 서버면 AX_SHOP_API_URL을 8010으로 덮지 않는다. 로컬이어도 이미 준 값이 먼저다."""
+    text = RUN_ALL.read_text(encoding="utf-8")
+    loop = text[text.index("# 컨테이너가 아니라서") :]
+    loop = loop[: loop.index('done <<< "$APPS"')]
+    assert '[ "$name" = "shop-api" ] && continue' in loop
+    assert (
+        'if [ "$CB_LOCAL" = 1 ]; then\n'
+        '  export AX_SHOP_API_URL="${AX_SHOP_API_URL:-http://127.0.0.1:8010}"\nfi'
+    ) in text
+
+
+# --- shop_fault.sh: 환경의 SHOP_API_URL·SHOP_ADMIN_TOKEN이 먼저, 없을 때만 로컬(web.env·8010) ----
+
+
+def _fault_env(tmp_path: Path) -> tuple[Path, Path]:
+    """가짜 캣북스 클론(받은 주소·토큰만 찍는 shop_fault.sh)과 web.env가 있는 가짜 backend."""
+    clone = tmp_path / "catbooks-demo"
+    (clone / "backend" / "scripts").mkdir(parents=True)
+    (clone / "backend" / "scripts" / "shop_fault.sh").write_text(
+        'echo "url=$SHOP_API_URL token=$SHOP_ADMIN_TOKEN args=$*"\n', encoding="utf-8"
+    )
+    backend = tmp_path / "ax" / "backend"
+    (backend / "scripts").mkdir(parents=True)
+    (backend / ".data").mkdir()
+    script = BACKEND / "scripts" / "shop_fault.sh"
+    (backend / "scripts" / "shop_fault.sh").write_bytes(script.read_bytes())
+    return clone, backend
+
+
+def _fault(backend: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [_bash(), str(backend / "scripts" / "shop_fault.sh"), "status"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={"PATH": os.environ.get("PATH", ""), **env},
+        timeout=30,
+    )
+
+
+def test_shop_fault_prefers_env_url_and_token(tmp_path: Path) -> None:
+    clone, backend = _fault_env(tmp_path)
+    (backend / ".data" / "web.env").write_text(
+        "VITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
+    )
+    env = {
+        "CATBOOKS_DEMO_DIR": str(clone),
+        "SHOP_API_URL": "https://shop.example",
+        "SHOP_ADMIN_TOKEN": "cb-admin",
+    }
+    out = _fault(backend, env)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "url=https://shop.example token=cb-admin args=status"
+
+
+def test_shop_fault_falls_back_to_local_web_env(tmp_path: Path) -> None:
+    clone, backend = _fault_env(tmp_path)
+    (backend / ".data" / "web.env").write_text(
+        "VITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
+    )
+    out = _fault(backend, {"CATBOOKS_DEMO_DIR": str(clone)})
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "url=http://127.0.0.1:8010 token=local-tok args=status"
+
+
+def test_shop_fault_without_any_token_stops(tmp_path: Path) -> None:
+    clone, backend = _fault_env(tmp_path)
+    out = _fault(backend, {"CATBOOKS_DEMO_DIR": str(clone)})
+    assert out.returncode == 1
+    assert "SHOP_ADMIN_TOKEN" in out.stderr and out.stdout == ""
