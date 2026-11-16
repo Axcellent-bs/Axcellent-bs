@@ -14,7 +14,7 @@ const modeOf = (enabled: boolean | null) => (enabled === null ? '' : enabled ? '
 const normalize = (u: string) => u.trim().replace(/\/+$/, '')
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
 
-export default function Integrations({ onState }: { onState?: (s: ConnectionState | 'error') => void } = {}) {
+export default function Integrations({ onState, embedded = false }: { onState?: (s: ConnectionState | 'error') => void; embedded?: boolean } = {}) {
   const [state, setStateRaw] = useState<ConnectionState | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [url, setUrl] = useState('')
@@ -71,7 +71,7 @@ export default function Integrations({ onState }: { onState?: (s: ConnectionStat
 
   return (
     <section className="space-y-4">
-      <SectionHead title="회사 판매 서버"
+      <SectionHead as={embedded ? 'h3' : 'h2'} title={embedded ? 'AXcellent 규격 API 연결' : '회사 판매 서버'}
         desc="부서 AI가 주문·상품·구매자를 읽는 곳이에요. 바꾸면 다시 켜지 않아도 모든 부서 AI가 바로 따라가요."
         right={status} />
 
