@@ -72,8 +72,8 @@ const MEET: Pt[] = [{ x: -72, y: 8 }, { x: -112, y: -20 }, { x: -112, y: 34 }].m
 const SPEED = 300; // 걷기 캔버스 px/초
 const MAX_WALKERS = 3;
 const STAY_ORCH_MS = 1200, STAY_DESK_MS = 1400;
-/** 보드 카드 (그림 비율 fx0, fy0, fx1, fy1): 오른쪽 창 위 */
-const BOARD = [0.76, 0.05, 0.887, 0.225] as const;
+/** 보드 카드 (그림 비율 fx0, fy0, fx1, fy1): 커피 코너 바로 오른쪽, 화분 앞 */
+const BOARD = [0.789, 0.27, 0.9, 0.44] as const;
 
 // 스프라이트 시트: 16×32 칸 7열 × 3줄 (줄 0 앞, 1 뒤, 2 옆). 열 0~2 걷기, 3~4 타이핑, 5~6 읽기
 const FW = 16, FH = 32, SC = 2.2;
@@ -133,6 +133,16 @@ export function PixelOffice({ view, label, onPick }: { view: OfficeView; label: 
     const ctx = cv?.getContext("2d");
     if (!cv || !ctx) return;
     const bg = loadImage(BG_SRC);
+    // 캔버스 실제 픽셀을 화면에 보이는 픽셀 수(기기 배율 포함)에 맞춘다. 그림 원본(CW×CH)보다 크게는 만들지 않는다
+    const px = { w: CW, h: CH };
+    const fit = () => {
+      const w = Math.max(320, Math.min(CW, Math.round(cv.clientWidth * (window.devicePixelRatio || 1))));
+      const h = Math.round((w * CH) / CW);
+      if (w !== px.w) { px.w = w; px.h = h; cv.width = w; cv.height = h; }
+    };
+    fit();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : null;
+    ro?.observe(cv);
     const sprites = Array.from({ length: 6 }, (_, i) => loadImage(`${BASE}office/char_${i}.png`));
     let reduced = reducedNow();
     const mq = typeof window.matchMedia === "function" ? window.matchMedia(REDUCE) : null;
@@ -201,11 +211,11 @@ export function PixelOffice({ view, label, onPick }: { view: OfficeView; label: 
           if (next) start(next);
         }
       }
-      draw(ctx, { bg, sprites }, v, now / 1000, wall, walkers, reduced);
+      draw(ctx, px, { bg, sprites }, v, now / 1000, wall, walkers, reduced);
       raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
-    return () => { cancelAnimationFrame(raf); mq?.removeEventListener?.("change", onMq); };
+    return () => { cancelAnimationFrame(raf); mq?.removeEventListener?.("change", onMq); ro?.disconnect(); };
   }, []);
 
   const canvas = (
@@ -231,9 +241,9 @@ type Mode = "sit" | "walk" | "stand";
 type Art = { bg: HTMLImageElement; sprites: HTMLImageElement[] };
 const ready = (img: HTMLImageElement) => img.complete && img.naturalWidth > 0;
 
-function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number, wall: number, walkers: Record<DeskKey, Walker>, reduced: boolean) {
-  ctx.setTransform(CW / W, 0, 0, CH / H, 0, 0);
-  // 배경은 부드럽게(원본 크기로 그리므로 늘리거나 줄이지 않는다), 캐릭터 그림은 픽셀 그대로
+function draw(ctx: CanvasRenderingContext2D, px: { w: number; h: number }, art: Art, v: OfficeView, t: number, wall: number, walkers: Record<DeskKey, Walker>, reduced: boolean) {
+  ctx.setTransform(px.w / W, 0, 0, px.h / H, 0, 0);
+  // 배경은 한 번만 고화질로 줄여 그리고(캔버스가 화면에 보이는 크기라 CSS로 다시 줄이지 않는다), 캐릭터 그림은 픽셀 그대로
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   if (ready(art.bg)) ctx.drawImage(art.bg, 0, 0, W, H);
@@ -420,14 +430,18 @@ function boardCard(ctx: CanvasRenderingContext2D, v: OfficeView) {
     return;
   }
   const { done, total } = v.progress;
-  ctx.font = `600 15px ${FONT}`; ctx.fillStyle = "#64748b";
-  ctx.fillText(total ? "사건 진행" : "총괄 AI 사건", x + 12, y + 24);
-  ctx.font = `800 22px ${FONT}`; ctx.textAlign = "right";
+  ctx.font = `600 14px ${FONT}`; ctx.fillStyle = "#64748b";
+  const title = total ? "사건 진행" : "총괄 AI 사건";
+  ctx.fillText(title, x + 12, y + 24);
   const txt = !v.incident ? "없음" : v.status === "alert" ? `${done}/${total}` : v.status === "degraded" ? "일부 미완료" : "해결";
+  ctx.font = `800 20px ${FONT}`;
+  // 카드가 좁아서 한 줄에 안 들어가면 상태 글을 아래 줄로 내린다
+  const tight = 12 + (ctx.measureText(title).width * 14) / 20 + 8 + ctx.measureText(txt).width + 12 > w;
   ctx.fillStyle = !v.incident ? "#475569" : v.status === "alert" ? "#d97706" : v.status === "degraded" ? "#ea580c" : "#16a34a";
-  ctx.fillText(txt, x + w - 12, y + 27);
+  if (tight) { ctx.textAlign = "left"; ctx.fillText(txt, x + 12, y + 50); }
+  else { ctx.textAlign = "right"; ctx.fillText(txt, x + w - 12, y + 26); }
   if (v.incident && v.status === "alert") {
-    ctx.font = `600 14px ${FONT}`; ctx.fillStyle = "#334155"; ctx.textAlign = "left";
+    ctx.font = `600 13px ${FONT}`; ctx.fillStyle = "#334155"; ctx.textAlign = "left";
     ctx.fillText("결제 장애 대응", x + 12, y + 50);
   }
   if (total > 0) progressBar(ctx, x, y, w, h, done, total, v.status === "alert" ? "#f59e0b" : v.status === "degraded" ? "#ea580c" : "#16a34a");
