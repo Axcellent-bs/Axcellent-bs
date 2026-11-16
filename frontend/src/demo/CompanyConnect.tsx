@@ -4,10 +4,10 @@ import type { ConnectionState } from '@/lib/companyConnection'
 import { privateIp, useHosts } from './store'
 import { useEnabledServices } from './services'
 import { checkKey, connectWithKey, disconnect, updateCompanyInfo, useCompany, useKeys, type CompanyInfo, type IssuedKey } from './company'
-import Integrations from './Integrations'
+import SiteConnect from './SiteConnect'
 
 // 회사 연결 (고객사 시스템 관리자). 맨 위: 연결 지도(이 서버 → 회사 → 판매 서버 → 사내 PC 상태 한 줄),
-// 아래: AXcellent 연결, 회사 판매 서버 연결(회사가 연결된 뒤에만).
+// 아래: AXcellent 연결, 사이트 연결(플랫폼·직접 만든 사이트, 회사가 연결된 뒤에만).
 // AXcellent 연결은 키를 넣어 확인하고 → 회사 정보를 직접 입력하면 → 이 워크스페이스가 그 회사로 연결된다.
 // 키에는 회사 정보가 없다(연결 권한만). 키 발급은 AXcellent 운영팀이 하고, 연결·끊기는 여기서 고객사가 한다.
 const STEPS = ['회사 정보 저장', '사내망 확인', '첫 상태 신호 보내기', '연결 완료'] as const
@@ -274,7 +274,7 @@ export default function CompanyConnect() {
         )}
       </section>
 
-      {connected && <Integrations onState={setShop} />}
+      {connected && <SiteConnect onShop={setShop} />}
     </div>
   )
 }
