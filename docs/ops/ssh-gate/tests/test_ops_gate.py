@@ -73,6 +73,10 @@ case "$1" in
     exit 1 ;;
   branch) grep -qx "$4" "$FAKE_STATE/git_on_origin" && echo "  origin/somewhere"; exit 0 ;;
   merge-base)
+    # state/git_pairs 가 있으면 "조상 후손" 줄로만 판정한다(앞선/뒤처진 방향 시험용)
+    if [[ "$4" != origin/* && -f "$FAKE_STATE/git_pairs" ]]; then
+      grep -qx "$3 $4" "$FAKE_STATE/git_pairs"; exit $?
+    fi
     if [[ "$4" != origin/* ]]; then   # HEAD 가 그 커밋의 조상인가(앞으로 감기 가능한가)
       grep -qx "$4" "$FAKE_STATE/git_behind_head" 2>/dev/null && exit 1
       exit 0
@@ -99,6 +103,8 @@ exit 1
 # 가짜 배포 스크립트: 받은 환경변수를 기록만 한다
 DEPLOY_SH = """#!/usr/bin/env bash
 echo "deploy.sh REF=${DEPLOY_REF:-} MARK=${APP_PUBLIC_MARK:-} ROOT=${DEPLOY_WEB_ROOT:-} URL=${DEPLOY_CHECK_URL:-} SITE=${APP_SITE_URL:-}" >> "$FAKE_LOG"
+# state/deploy_moves_head 가 있으면 진짜 배포처럼 서버 레포 HEAD 를 그 커밋으로 옮긴다
+if [[ -f "$FAKE_STATE/deploy_moves_head" ]]; then echo "${DEPLOY_REF:-}" > "$FAKE_STATE/git_head"; fi
 exit "$(cat "$FAKE_STATE/deploy_rc" 2>/dev/null || echo 0)"
 """
 
@@ -1108,6 +1114,328 @@ class NginxRestoreAndStatusTests(GateCase):
         self.assertNotIn(SECRET, p.stdout)
 
 
+PAUSED_SH = HERE.parent / "autodeploy-paused.sh"
+OWNER_PLUS = ALL + ', "autodeploy-pause", "autodeploy-resume"'
+
+
+class AutodeployPauseTests(GateCase):
+    """자동 배포 정지·재개: 정책의 정지 표시 파일 하나만 쓴다. 권한자만, 최대 시간 안에서."""
+
+    def setUp(self):
+        super().setUp()
+        (self.rootp / "var/lib/autodeploy").mkdir(parents=True)
+        self.pause = self.rootp / "var/lib/autodeploy/autodeploy.pause"
+        self.write_policy()
+
+    def write_policy(self, section=None, default=None, owners=OWNER_PLUS):
+        text = policy_text(self.root).replace(f"owner-a = [{ALL}]", f"owner-a = [{owners}]")
+        text = text.replace(f"owner-b = [{ALL}]", f"owner-b = [{owners}]")
+        if default is not None:
+            text = text.replace('_default = ["status", "deploy-bundle", "record-pr"]', f"_default = [{default}]")
+        if section is None:
+            section = (f'[autodeploy]\npause_file = "{self.root}/var/lib/autodeploy/autodeploy.pause"\n'
+                       "default_hours = 2\nmax_hours = 12\n")
+        write(self.policy, text + "\n" + section)
+
+    def tree(self):
+        """임시 서버 폴더의 모든 파일(게이트가 쓰는 감사 로그·호출 기록·실행 잠금 제외)."""
+        skip = ("var/log/ax-gate/", "state/", "run/lock/")
+        out = {}
+        for path in sorted(self.rootp.rglob("*")):
+            rel = path.relative_to(self.rootp).as_posix()
+            if path.is_file() and not rel.startswith(skip):
+                out[rel] = path.read_bytes()
+        return out
+
+    def paused(self):
+        """동봉한 판정 스크립트를 돌린다: 0 = 멈춤, 1 = 안 멈춤."""
+        return subprocess.run([BASH, PAUSED_SH.as_posix(), self.pause.as_posix()], capture_output=True,
+                              encoding="utf-8", errors="replace", timeout=60)
+
+    def fields(self):
+        return dict(ln.split("=", 1) for ln in self.pause.read_text(encoding="utf-8").splitlines())
+
+    def test_pause_writes_only_the_pause_file_and_resume_overwrites_it(self):
+        before = self.tree()
+        self.assertEqual(self.paused().returncode, 1)                  # 파일이 없으면 멈춘 것이 아니다
+        p = self.gate("owner-a", "autodeploy-pause team-demo")
+        self.assertRc(p, 0)
+        after = self.tree()
+        changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
+        self.assertEqual(changed, {"var/lib/autodeploy/autodeploy.pause"})     # 그 파일 하나만
+        f = self.fields()
+        self.assertEqual((f["user"], f["reason"]), ("owner-a", "team-demo"))
+        self.assertAlmostEqual(int(f["until_epoch"]), time.time() + 2 * 3600, delta=120)   # 기본 2시간
+        r = self.paused()
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("건 사람 owner-a", r.stderr)
+        st = self.gate("member-x", "status").stdout
+        self.assertIn("자동 배포: 정지 중 — 건 사람 owner-a, 사유 team-demo, 재개 예정 " + f["until"], st)
+        # 정지는 게이트의 수동 배포를 막지 않는다(자동 배포 쪽만 읽는다)
+        self.assertRc(self.gate("member-x", f"deploy-bundle {SHA} --dry-run"), 0)
+        # 재개: 지우지 않고 재개 시각을 지금으로 덮어쓴다
+        p = self.gate("owner-b", "autodeploy-resume")
+        self.assertRc(p, 0)
+        self.assertTrue(self.pause.exists())
+        f = self.fields()
+        self.assertLessEqual(int(f["until_epoch"]), int(time.time()))
+        self.assertEqual((f["user"], f["reason"], f["resumed_by"]), ("owner-a", "team-demo", "owner-b"))
+        self.assertEqual(self.paused().returncode, 1)
+        self.assertIn("자동 배포: 정지 아님(owner-b 가 ", self.gate("member-x", "status").stdout)
+        audit = self.audit_text()
+        self.assertIn("user=owner-a\taction=autodeploy-pause\targs=team-demo\tmode=real\tannounced=no\tpr=-\t"
+                      "note=-\tlayer=root\tresult=start", audit)
+        self.assertIn("layer=root\tresult=paused:", audit)
+        self.assertIn("user=owner-b\taction=autodeploy-resume\t", audit)
+        self.assertIn("layer=root\tresult=resumed", audit)
+        # 자동 배포의 타이머·서비스·스크립트는 건드리지 않는다(status 가 부르는 읽기 명령만 있다)
+        for word in ("systemctl stop", "systemctl start", "systemctl disable", "systemctl restart",
+                     "systemctl reload", "nginx -t", "deploy.sh REF="):
+            self.assertNotIn(word, self.calls())
+        self.assertRc(self.gate("owner-a", "autodeploy-resume"), 0)     # 이미 재개됨: 할 일 없음
+        self.assertEqual(self.fields()["resumed_by"], "owner-b")
+
+    def test_time_limit_comes_from_policy(self):
+        soon = time.strftime("%Y-%m-%dT%H:%M", time.localtime(time.time() + 3 * 3600))
+        self.assertRc(self.gate("owner-a", f"autodeploy-pause demo {soon}"), 0)
+        self.assertEqual(self.fields()["until"], soon)
+        before = self.pause.read_bytes()
+        late = time.strftime("%Y-%m-%dT%H:%M", time.localtime(time.time() + 13 * 3600))
+        for until in (late, "2099-01-01T00:00", "2020-01-01T00:00", "2026-13-45T99:99"):
+            with self.subTest(until=until):
+                self.assertRc(self.gate("owner-a", f"autodeploy-pause demo {until}"), 2)
+        for cmd in ("autodeploy-pause", "autodeploy-pause two words x", "autodeploy-pause demo tomorrow",
+                    "autodeploy-pause demo;id", "autodeploy-resume now", "autodeploy-pause ../x"):
+            with self.subTest(cmd=cmd):
+                self.assertRc(self.gate("owner-a", cmd), 2)
+        self.assertEqual(self.pause.read_bytes(), before)
+        # 최대 시간은 정책 값이다: 1시간으로 줄이면 3시간 뒤는 거부된다
+        self.write_policy(section=(f'[autodeploy]\npause_file = "{self.root}/var/lib/autodeploy/autodeploy.pause"\n'
+                                   "default_hours = 1\nmax_hours = 1\n"))
+        self.assertRc(self.gate("owner-a", f"autodeploy-pause demo {soon}"), 2)
+        self.assertIn("result=fail:bad-until", self.audit_text())
+
+    def test_expired_pause_is_not_paused_without_resume(self):
+        write(self.pause, f"user=owner-a\nreason=demo\nuntil=2026-01-01T00:00\nuntil_epoch={int(time.time()) - 60}\n")
+        self.assertEqual(self.paused().returncode, 1)
+        self.assertIn("자동 배포: 정지 아님(재개 예정 2026-01-01T00:00 지남", self.gate("member-x", "status").stdout)
+        before = self.pause.read_bytes()
+        self.assertRc(self.gate("owner-a", "autodeploy-resume"), 0)
+        self.assertEqual(self.pause.read_bytes(), before)
+
+    def test_only_listed_accounts_and_never_default(self):
+        for cmd in ("autodeploy-pause demo", "autodeploy-resume"):
+            with self.subTest(cmd=cmd):
+                self.assertRc(self.gate("member-x", cmd), 3)              # 기본 계정
+                self.assertRc(self.gate("owner-c", cmd), 3)               # 표에 그 동작이 없는 권한자
+                self.assertRc(self.root_step(["member-x", "0", "0", "-"] + cmd.split()), 3)
+        self.assertFalse(self.pause.exists())
+        # _default 에 이 동작을 두면 정책 로드가 실패한다(전체 거부)
+        for extra in ('"autodeploy-pause"', '"autodeploy-resume"'):
+            with self.subTest(extra=extra):
+                self.write_policy(default=f'"status", "deploy-bundle", "record-pr", {extra}')
+                self.assertRc(self.gate("owner-a", "status"), 5)
+                self.assertRc(self.gate("member-x", "autodeploy-pause demo"), 5)
+        self.assertFalse(self.pause.exists())
+        self.assertNotIn("sudo", self.calls())
+
+    def test_while_locked_only_pause_is_allowed(self):
+        self.assertRc(self.gate("owner-a", "lock team-demo"), 0)
+        self.assertRc(self.gate("owner-a", "autodeploy-pause team-demo"), 0)
+        self.assertEqual(self.paused().returncode, 0)
+        self.assertRc(self.gate("owner-a", "autodeploy-resume"), 4)
+        self.assertRc(self.root_step(["owner-a", "0", "0", "-", "autodeploy-resume"]), 4)
+        self.assertEqual(self.paused().returncode, 0)
+        self.assertRc(self.gate("owner-a", "unlock"), 0)
+        self.assertRc(self.gate("owner-a", "autodeploy-resume"), 0)
+        self.assertEqual(self.paused().returncode, 1)
+
+    def test_dry_run_changes_nothing(self):
+        self.assertRc(self.gate("owner-a", "autodeploy-pause demo --dry-run"), 0)
+        self.assertFalse(self.pause.exists())
+        self.assertRc(self.gate("owner-a", "autodeploy-pause demo"), 0)
+        before = self.pause.read_bytes()
+        p = self.gate("owner-a", "autodeploy-resume --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN:", p.stdout)
+        self.assertEqual(self.pause.read_bytes(), before)
+
+    def test_bad_policy_for_pause_file(self):
+        r = self.root
+        other = self.rootp / "data/state.json"
+        before = other.read_bytes()
+        cases = [
+            ("", 5),                                                            # [autodeploy] 없음
+            ('[autodeploy]\npause_file = "TODO"\n', 5),
+            ('[autodeploy]\npause_file = "relative/autodeploy.pause"\n', 5),
+            (f'[autodeploy]\npause_file = "{r}/data/state.json"\n', 5),          # 이름이 autodeploy.pause 가 아님
+            (f'[autodeploy]\npause_file = "{r}/etc/ax-gate/policy.toml"\n', 5),
+            (f'[autodeploy]\npause_file = "{r}/var/lib/../lib/autodeploy/autodeploy.pause"\n', 5),
+            (f'[autodeploy]\npause_file = "{r}/no/such/dir/autodeploy.pause"\n', 5),
+        ]
+        for section, rc in cases:
+            with self.subTest(section=section):
+                self.write_policy(section=section)
+                self.assertRc(self.gate("owner-a", "autodeploy-pause demo"), rc)
+                self.assertRc(self.gate("member-x", "status"), 0)                # status 는 계속 된다
+        self.assertFalse(self.pause.exists())
+        self.assertEqual(other.read_bytes(), before)
+        # 모르는 키는 정책 로드 실패
+        self.write_policy(section=f'[autodeploy]\npause_file = "{r}/var/lib/autodeploy/autodeploy.pause"\nunit = "x"\n')
+        self.assertRc(self.gate("owner-a", "status"), 5)
+        # 정책에 [autodeploy] 가 없으면 status 에 줄이 없다(예전과 같다)
+        self.write_policy(section="")
+        self.assertNotIn("자동 배포", self.gate("member-x", "status").stdout)
+
+    def test_pause_file_spot_that_is_not_a_regular_file_is_never_written(self):
+        self.pause.mkdir()
+        self.assertRc(self.gate("owner-a", "autodeploy-pause demo"), 1)
+        self.assertIn("result=fail:pause-file", self.audit_text())
+        self.assertTrue(self.pause.is_dir())
+        self.assertEqual(self.paused().returncode, 0)                    # 판정은 안전한 쪽(멈춤)
+
+    def test_unreadable_pause_file_counts_as_paused_and_resume_repairs_it(self):
+        write(self.pause, "garbage\n")
+        self.assertEqual(self.paused().returncode, 0)
+        self.assertIn("정지 중으로 본다", self.gate("member-x", "status").stdout)
+        self.assertRc(self.gate("owner-a", "autodeploy-resume"), 0)
+        self.assertEqual(self.paused().returncode, 1)
+        self.assertEqual(self.fields()["resumed_by"], "owner-a")
+
+    def test_helper_script_usage_and_never_executes_file_content(self):
+        marker = self.rootp / "pwned"
+        write(self.pause, f"until_epoch=$(touch {marker.as_posix()})\nuser=`id`\n")
+        self.assertEqual(self.paused().returncode, 0)                    # 해석 불가 → 멈춤
+        self.assertFalse(marker.exists())
+        p = subprocess.run([BASH, PAUSED_SH.as_posix()], capture_output=True, timeout=60)
+        self.assertEqual(p.returncode, 2)
+        future = int(time.time()) + 600
+        write(self.pause, f"user=owner-a\nuntil=2026-01-01T00:00\nuntil_epoch={future}\n")
+        self.assertEqual(self.paused().returncode, 0)
+
+
+class RestartHeadMismatchTests(GateCase):
+    """restart-backend 의 head-mismatch: 어느 쪽이 앞섰는지 가려 다음 명령을 알려 준다."""
+
+    CMD = f"restart-backend {SHA} --ack-data-loss --announced"
+    HEAD = "d" * 40
+
+    def set_head(self, relation):
+        write(self.state / "git_head", self.HEAD + "\n")
+        pairs = {"behind": f"{self.HEAD} {SHA}\n", "ahead": f"{SHA} {self.HEAD}\n", "diverged": "\n"}[relation]
+        write(self.state / "git_pairs", pairs)
+
+    def test_server_behind_tells_to_deploy_first(self):
+        self.set_head("behind")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn(f"  1) deploy-bundle {SHA[:8]} --announced", p.stdout)
+        self.assertIn(f"  2) restart-backend {SHA[:8]} --ack-data-loss --announced", p.stdout)
+        self.assertIn(f"먼저 deploy-bundle {SHA[:8]}", p.stderr)
+        self.assertIn("result=fail:head-mismatch", self.audit_text())
+        self.assertNotIn("systemctl", self.calls())
+        self.assertNotIn("deploy.sh REF=", self.calls())
+
+    def test_server_ahead_tells_to_restart_with_current_head(self):
+        self.set_head("ahead")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn(f"  restart-backend {self.HEAD[:8]} --ack-data-loss --announced", p.stdout)
+        self.assertNotIn("deploy-bundle", p.stdout)
+        self.assertIn("result=fail:head-mismatch", self.audit_text())
+        self.assertNotIn("systemctl", self.calls())
+
+    def test_diverged_gives_no_command(self):
+        self.set_head("diverged")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn("서로 다른 갈래", p.stderr)
+        self.assertNotIn("deploy-bundle", p.stdout + p.stderr)
+        self.assertNotIn("systemctl", self.calls())
+
+    def deploy_first_policy(self, value="true", perms=None):
+        text = policy_text(self.root).replace('unit = "example-backend"',
+                                              f'unit = "example-backend"\ndeploy_first = {value}')
+        if perms:
+            text = text.replace(f"owner-c = [{ALL}]", f"owner-c = [{perms}]")
+        write(self.policy, text)
+
+    def test_deploy_first_is_off_by_default_and_when_false(self):
+        self.set_head("behind")
+        self.deploy_first_policy("false")
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertNotIn("deploy.sh REF=", self.calls())
+        self.assertNotIn("systemctl", self.calls())
+
+    def test_deploy_first_stops_before_restart_when_deploy_does_not_move_head(self):
+        self.set_head("behind")
+        self.deploy_first_policy("true")
+        # 배포가 HEAD 를 옮기지 못하면 배포 뒤 HEAD 확인에서 멈춘다(재시작하지 않는다)
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertEqual(self.calls().count("deploy.sh REF=" + SHA), 2)
+        self.assertNotIn("systemctl", self.calls())
+        self.assertIn(f"result=deploy-first:{SHA[:8]}", self.audit_text())
+        self.assertIn("result=fail:head-after-deploy", self.audit_text())
+
+    def test_deploy_first_deploys_then_restarts(self):
+        self.set_head("behind")
+        self.deploy_first_policy("true")
+        write(self.state / "deploy_moves_head", "1\n")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        calls = self.calls()
+        self.assertEqual(calls.count("deploy.sh REF=" + SHA), 2)
+        self.assertLess(calls.index("deploy.sh REF=" + SHA), calls.index("systemctl restart example-backend"))
+        backups = os.listdir(self.rootp / "backups")
+        self.assertIn(f"www-site-a.bak-before-{SHA[:8]}.tgz", backups)      # 배포의 번들 백업도 그대로 뜬다
+        self.assertIn(f"app.db.bak-before-{SHA[:8]}", backups)              # 재시작의 백업도 뜬다
+        audit = self.audit_text()
+        self.assertIn(f"result=deploy-first:{SHA[:8]}", audit)
+        self.assertIn(f"result=prev-head:{self.HEAD}", audit)
+        self.assertIn("health: 3/3", p.stdout)
+
+    def test_deploy_first_failure_in_bundle_check_stops_before_restart(self):
+        self.set_head("behind")
+        self.deploy_first_policy("true")
+        write(self.state / "deploy_moves_head", "1\n")
+        write(self.rootp / "var/www/site-a/assets/leak.js", f'const k="{SECRET}";\n')
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn("result=fail:bundle-check", self.audit_text())
+        self.assertNotIn("systemctl", self.calls())
+        self.assertNotIn(SECRET, p.stdout + p.stderr + self.audit_text())
+
+    def test_deploy_first_needs_deploy_permission_too(self):
+        self.set_head("behind")
+        self.deploy_first_policy("true", perms='"status", "restart-backend"')
+        p = self.gate("owner-c", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn(f"  1) deploy-bundle {SHA[:8]} --announced", p.stdout)
+        self.assertNotIn("deploy.sh REF=", self.calls())
+        self.assertNotIn("deploy-first", self.audit_text())
+
+    def test_deploy_first_never_applies_when_server_is_ahead_or_diverged(self):
+        self.deploy_first_policy("true")
+        for relation in ("ahead", "diverged"):
+            with self.subTest(relation=relation):
+                self.set_head(relation)
+                self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertNotIn("deploy.sh REF=", self.calls())
+        self.assertNotIn("systemctl", self.calls())
+
+    def test_deploy_first_dry_run_shows_both_steps_and_changes_nothing(self):
+        self.set_head("behind")
+        self.deploy_first_policy("true")
+        p = self.gate("owner-a", f"restart-backend {SHA} --ack-data-loss --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN: as_deploy env", p.stdout)
+        self.assertIn("systemctl restart example-backend", p.stdout)
+        self.assertNotIn("deploy.sh REF=", self.calls())
+        self.assertNotIn("systemctl", self.calls())
+        self.assertEqual(os.listdir(self.rootp / "backups"), [])
+
+
 class ExamplePolicyTests(GateCase):
     def test_gate_can_load_the_example_policy(self):
         shutil.copyfile(EXAMPLE_POLICY, self.policy)
@@ -1139,6 +1467,11 @@ class ExamplePolicyTests(GateCase):
         self.assertEqual(set(perms["_default"]), {"status", "deploy-bundle", "record-pr"})
         self.assertEqual(data["location"]["allowed_methods"], ["POST"])
         self.assertEqual(data["deploy"]["allowed_branches"], ["dev"])
+        # 자동 배포 정지·재개는 예시에서 누구에게도 열려 있지 않고, 선행 배포 연계는 꺼져 있다
+        for actions in perms.values():
+            self.assertFalse({"autodeploy-pause", "autodeploy-resume"} & set(actions))
+        self.assertNotIn("autodeploy", data)
+        self.assertIs(data["restart"]["deploy_first"], False)
         # 예시에는 가짜 값과 자리표시자만 있다: 경로는 전부 "TODO"
         self.assertTrue(data["paths"])
         self.assertEqual(set(data["paths"].values()), {"TODO"})

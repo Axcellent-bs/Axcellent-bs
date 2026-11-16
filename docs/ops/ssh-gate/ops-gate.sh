@@ -23,7 +23,9 @@ IFS=$' \t\n'
 export LC_ALL=C
 
 readonly GATE_VERSION="0.2.0-draft"
-readonly ALL_ACTIONS=(status lock unlock nginx-restore nginx-add-location nginx-approve-location deploy-bundle restart-backend rollback-bundle record-pr)
+readonly ALL_ACTIONS=(status lock unlock nginx-restore nginx-add-location nginx-approve-location deploy-bundle restart-backend rollback-bundle record-pr autodeploy-pause autodeploy-resume)
+# 기본 계정(_default)에 열 수 없는 동작. 정책 _default 에 들어 있으면 정책 로드가 실패한다(전체 거부).
+readonly NOT_FOR_DEFAULT=(autodeploy-pause autodeploy-resume)
 # 실행 전에 팀 채널 알림을 올렸다고 확인(--announced)해야 하는 동작
 readonly NEED_ANNOUNCE=(nginx-restore nginx-approve-location deploy-bundle restart-backend rollback-bundle)
 
@@ -223,6 +225,25 @@ load_policy() {
     deny "policy-syntax" "${RC_CONFIG}" "정책 파일 ${n}번째 줄을 해석할 수 없다(전체 거부)"
   done < "${POLICY_FILE}"
   validate_self_approve
+  validate_autodeploy
+}
+
+# [autodeploy]: 자동 배포 정지 표시 파일. 모르는 키가 있으면 정책 로드 실패(전체 거부)다.
+# 정지·재개 동작은 권한자용이다. [permissions] _default 에 들어 있으면 정책 로드 실패(전체 거부)다.
+validate_autodeploy() {
+  local k a
+  for k in "${!POLICY[@]}"; do
+    [[ "${k}" == autodeploy.* ]] || continue
+    case "${k}" in
+      autodeploy.pause_file | autodeploy.default_hours | autodeploy.max_hours) ;;
+      *) deny "policy-value" "${RC_CONFIG}" "정책 [autodeploy] 에 알 수 없는 키가 있다(전체 거부)" ;;
+    esac
+  done
+  for a in "${NOT_FOR_DEFAULT[@]}"; do
+    if policy_list_has "permissions._default" "${a}"; then
+      deny "policy-value" "${RC_CONFIG}" "정책 [permissions] _default 에 ${a} 를 둘 수 없다(권한자 계정에만 적는다. 전체 거부)"
+    fi
+  done
 }
 
 # [self_approve] accounts: 제안자 본인이 자기 제안을 승인해도 되는 계정 목록(기본은 비어 있음 = 금지).
@@ -306,6 +327,8 @@ ax-gate 사용법 (ssh <내 계정>@<서버> <동작> ...)
   restart-backend <SHA> --ack-data-loss
   rollback-bundle <SHA>
   record-pr <참조: 백업폴더명 또는 SHA> <PR번호>               감사 로그에 PR 번호를 남긴다
+  autodeploy-pause <사유> [재개시각 YYYY-MM-DDTHH:MM]        자동 배포를 재개시각까지 멈춘다(정지 표시 파일만 쓴다)
+  autodeploy-resume                                          자동 배포를 지금 재개한다
 맨 끝에 붙일 수 있는 것(순서 무관):
   --dry-run     실제로 바꾸지 않고 할 일만 보여 준다
   --announced   팀 채널에 알림 한 줄(되돌리는 방법 포함)을 올렸다는 확인. 바꾸는 동작에는 필수
@@ -324,8 +347,15 @@ validate_args() {
     deny "unknown-action" "${RC_USAGE}" "허용 목록에 없는 동작이다"
   fi
   case "${ACTION}" in
-    status | unlock)
+    status | unlock | autodeploy-resume)
       (( n == 0 )) || deny "bad-args" "${RC_USAGE}" "${ACTION} 은 인자를 받지 않는다"
+      ;;
+    autodeploy-pause)
+      (( n == 1 || n == 2 )) || deny "bad-args" "${RC_USAGE}" "autodeploy-pause <사유> [재개시각]"
+      [[ "${ARGS[0]}" =~ ${RE_REASON} ]] || deny "bad-reason" "${RC_USAGE}" "사유는 영어·숫자·_.,- 만, 80자 이하"
+      if (( n == 2 )); then
+        [[ "${ARGS[1]}" =~ ${RE_UNTIL} ]] || deny "bad-until" "${RC_USAGE}" "재개시각은 YYYY-MM-DDTHH:MM"
+      fi
       ;;
     lock)
       (( n == 1 || n == 2 )) || deny "bad-args" "${RC_USAGE}" "lock <사유> [해제시각]"
@@ -457,8 +487,147 @@ lock_describe() {
 deny_if_locked() {
   if lock_active; then
     lock_describe >&2
-    deny "locked" "${RC_LOCKED}" "배포 금지 잠금 중이라 읽기(status)와 unlock 만 된다"
+    deny "locked" "${RC_LOCKED}" "배포 금지 잠금 중이라 읽기(status)와 unlock, 자동 배포 정지(autodeploy-pause)만 된다"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# 자동 배포 정지 표시 파일 (정책 [autodeploy] pause_file)
+# 게이트는 이 파일 하나만 쓴다. 자동 배포를 돌리는 쪽(서버의 스크립트)이 이 파일을 읽고 건너뛴다.
+# 게이트는 자동 배포의 타이머·서비스·스크립트를 건드리지 않는다. 재개는 파일을 지우지 않고
+# 재개 시각을 지금으로 덮어쓴다(게이트에 지우는 동작을 두지 않는다).
+# ---------------------------------------------------------------------------
+A_KEY="" A_REASON="" A_UNTIL="" A_EPOCH="" A_RESUMED=""
+
+autodeploy_file() { # → REPLY (정지 표시 파일 경로). 정책에 없거나 쓸 수 없는 자리면 실패
+  local f="${POLICY[autodeploy.pause_file]-}"
+  path_ok "${f}" ||
+    step_fail "config-path" "${RC_CONFIG}" "정책 [autodeploy] pause_file 이 없거나 경로가 아니다(설치 때 채워야 한다)"
+  # 게이트 자신의 파일(정책·잠금·감사 로그)이나 그 폴더 밖 임의 파일을 덮어쓰지 않게 이름을 고정한다.
+  [[ "${f##*/}" == "autodeploy.pause" ]] ||
+    step_fail "config-path" "${RC_CONFIG}" "정책 [autodeploy] pause_file 의 파일 이름은 autodeploy.pause 여야 한다"
+  REPLY="${f}"
+}
+
+autodeploy_read() { # 파일 → 0 읽음, 1 없음, 2 깨짐
+  local f="$1" line
+  A_KEY="" A_REASON="" A_UNTIL="" A_EPOCH="" A_RESUMED=""
+  [[ -e "${f}" || -L "${f}" ]] || return 1
+  [[ -f "${f}" && ! -L "${f}" ]] || return 2
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    case "${line}" in
+      user=*) A_KEY="${line#user=}" ;;
+      reason=*) A_REASON="${line#reason=}" ;;
+      until=*) A_UNTIL="${line#until=}" ;;
+      until_epoch=*) A_EPOCH="${line#until_epoch=}" ;;
+      resumed_by=*) A_RESUMED="${line#resumed_by=}" ;;
+    esac
+  done < "${f}" || return 2
+  [[ "${A_KEY}" =~ ${RE_KEY} && "${A_REASON}" =~ ${RE_REASON} && "${A_EPOCH}" =~ ${RE_EPOCH} && "${A_UNTIL}" =~ ${RE_UNTIL} ]] || return 2
+  [[ -z "${A_RESUMED}" || "${A_RESUMED}" =~ ${RE_KEY} ]] || return 2
+  return 0
+}
+
+autodeploy_describe() { # 정책에 설정이 없으면 아무것도 출력하지 않는다
+  local f="${POLICY[autodeploy.pause_file]-}" rc=0 now
+  [[ -n "${f}" ]] || return 0
+  if ! path_ok "${f}" || [[ "${f##*/}" != "autodeploy.pause" ]]; then
+    say "자동 배포: 정책 [autodeploy] pause_file 이 잘못됐다(정지·재개를 쓸 수 없다)"
+    return 0
+  fi
+  autodeploy_read "${f}" || rc=$?
+  case "${rc}" in
+    1) say "자동 배포: 정지 아님(정지 표시 파일 없음)" ;;
+    2) say "자동 배포: 정지 중으로 본다(정지 표시 파일을 해석할 수 없다. 사람이 확인한다)" ;;
+    *)
+      now="$(date +%s)"
+      if (( now < A_EPOCH )); then
+        say "자동 배포: 정지 중 — 건 사람 ${A_KEY}, 사유 ${A_REASON}, 재개 예정 ${A_UNTIL}"
+      elif [[ -n "${A_RESUMED}" ]]; then
+        say "자동 배포: 정지 아님(${A_RESUMED} 가 ${A_UNTIL} 에 재개)"
+      else
+        say "자동 배포: 정지 아님(재개 예정 ${A_UNTIL} 지남, 건 사람 ${A_KEY})"
+      fi
+      ;;
+  esac
+}
+
+autodeploy_write() { # 파일 계정 사유 until epoch [재개한계정]
+  local f="$1" tmp="$1.tmp.$$"
+  [[ -d "${f%/*}" && ! -L "${f%/*}" ]] ||
+    step_fail "config-path" "${RC_CONFIG}" "정책 [autodeploy] pause_file 의 폴더가 없다(설치 때 만들어야 한다)"
+  [[ ! -L "${f}" && ( ! -e "${f}" || -f "${f}" ) ]] ||
+    step_fail "pause-file" "${RC_FAIL}" "정지 표시 파일 자리에 파일이 아닌 것이 있다. 쓰지 않는다"
+  (
+    umask 022
+    printf 'user=%s\nreason=%s\nuntil=%s\nuntil_epoch=%s\ncreated=%s\n' \
+      "$2" "$3" "$4" "$5" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${tmp}"
+    if [[ -n "${6:-}" ]]; then
+      printf 'resumed_by=%s\n' "$6" >> "${tmp}"
+    fi
+  )
+  chmod 644 -- "${tmp}"
+  mv -f -- "${tmp}" "${f}"
+}
+
+do_autodeploy_pause() {
+  local reason="${ARGS[0]}" until="${ARGS[1]-}" f now epoch def max
+  autodeploy_file
+  f="${REPLY}"
+  policy_uint autodeploy.default_hours 2
+  def="${REPLY}"
+  policy_uint autodeploy.max_hours 12
+  max="${REPLY}"
+  now="$(date +%s)"
+  if [[ -n "${until}" ]]; then
+    epoch="$(date -d "${until/T/ }" +%s 2>/dev/null)" || step_fail "bad-until" "${RC_USAGE}" "재개시각을 날짜로 읽을 수 없다"
+  else
+    epoch=$((now + def * 3600))
+    until="$(date -d "@${epoch}" '+%Y-%m-%dT%H:%M')"
+  fi
+  (( epoch > now )) || step_fail "bad-until" "${RC_USAGE}" "재개시각이 이미 지났다"
+  (( epoch <= now + max * 3600 )) || step_fail "bad-until" "${RC_USAGE}" "재개시각이 최대 ${max}시간을 넘는다"
+  NOTE="until:${until}"
+  if (( DRY )); then
+    say "DRY_RUN: 자동 배포 정지 표시 파일을 쓴다 — 사유 ${reason}, 재개 예정 ${until}"
+    return 0
+  fi
+  autodeploy_write "${f}" "${KEY}" "${reason}" "${until}" "${epoch}"
+  audit "paused:${until}"
+  say "자동 배포를 멈췄다 — 사유 ${reason}, 재개 예정 ${until}(그 시각이 지나면 저절로 재개된다)"
+  say "게이트의 수동 배포(deploy-bundle)는 이 정지와 상관없이 된다. 그것까지 막으려면 lock 을 건다"
+  say "먼저 끝났으면: autodeploy-resume"
+}
+
+do_autodeploy_resume() {
+  local f rc=0 now until
+  autodeploy_file
+  f="${REPLY}"
+  autodeploy_read "${f}" || rc=$?
+  now="$(date +%s)"
+  if (( rc == 1 )); then
+    say "자동 배포가 멈춰 있지 않다(할 일 없음)"
+    return 0
+  fi
+  if (( rc == 0 )) && (( now >= A_EPOCH )); then
+    say "자동 배포가 멈춰 있지 않다(재개 예정 ${A_UNTIL} 지남. 할 일 없음)"
+    return 0
+  fi
+  autodeploy_describe
+  until="$(date -d "@${now}" '+%Y-%m-%dT%H:%M')"
+  NOTE="until:${until}"
+  if (( DRY )); then
+    say "DRY_RUN: 정지 표시 파일의 재개 시각을 지금(${until})으로 덮어쓴다"
+    return 0
+  fi
+  # 지우지 않는다. 재개 시각을 지금으로 덮어써서 "누가 언제 재개했는지"가 파일에 남게 한다.
+  if (( rc == 0 )); then
+    autodeploy_write "${f}" "${A_KEY}" "${A_REASON}" "${until}" "${now}" "${KEY}"
+  else
+    autodeploy_write "${f}" "${KEY}" "resumed-unreadable-file" "${until}" "${now}" "${KEY}"
+  fi
+  audit "resumed"
+  say "자동 배포를 재개했다(다음 자동 배포 주기부터 돈다)"
 }
 
 # ---------------------------------------------------------------------------
@@ -523,7 +692,7 @@ front_main() {
   validate_args
   check_permission
   case "${ACTION}" in
-    status | unlock | record-pr) ;;
+    status | unlock | record-pr | autodeploy-pause) ;;   # 잠금 중에도 자동 배포를 멈추는 것은 된다(재개는 안 된다)
     *) deny_if_locked ;;
   esac
   require_announced
@@ -770,6 +939,7 @@ do_status() {
   local u root head
   say "ax-gate ${GATE_VERSION} — status (읽기 전용)"
   lock_describe
+  autodeploy_describe
   health_count
   say "health: ${H_OK}/${H_TOTAL}${H_BAD:+ — 실패:${H_BAD}}"
   policy_items status.urls "${RE_LOCALURL}"
@@ -1201,6 +1371,42 @@ backup_dest() { # 원본경로 [확장자] → BACKUP_DEST. 같은 이름이 있
   BACKUP_DEST="${dest}${ext}"
 }
 
+# 재시작하려는 SHA 와 서버 레포 HEAD 가 다를 때. 어느 쪽이 앞섰는지 가려 다음에 칠 명령을 알려 준다.
+# 정책 [restart] deploy_first = true 이고 이 계정에 deploy-bundle 권한도 있으면, 서버가 뒤처진 경우에 한해
+# 번들 배포를 먼저 하고 이어서 재시작한다(기본 false: 안내만 하고 멈춘다).
+restart_head_mismatch() {
+  local head="$1" pk="permissions.${KEY}" sha8="${FULL_SHA:0:8}" now=""
+  [[ "${head}" =~ ${RE_SHA_FULL} ]] || step_fail "git-head" "${RC_FAIL}" "레포 HEAD 를 볼 수 없다"
+  if as_deploy git -C "${P_repo}" merge-base --is-ancestor "${head}" "${FULL_SHA}"; then
+    # 서버 코드가 그 SHA 보다 뒤에 있다 → 먼저 배포해야 한다.
+    [[ -n "${POLICY[${pk}]+x}" ]] || pk="permissions._default"
+    if [[ "${POLICY[restart.deploy_first]-false}" == "true" ]] && policy_list_has "${pk}" "deploy-bundle"; then
+      say "서버 코드(${head:0:8})가 ${sha8} 보다 뒤에 있다. 정책 deploy_first 에 따라 번들 배포를 먼저 한다"
+      (( DRY )) || audit "deploy-first:${sha8}"
+      do_deploy_bundle
+      if (( DRY )); then
+        say "DRY_RUN: 배포가 끝나면 서버 레포 HEAD 가 ${sha8} 인지 확인하고 재시작으로 넘어간다"
+        return 0
+      fi
+      now="$(as_deploy git -C "${P_repo}" rev-parse HEAD)" || now=""
+      [[ "${now}" == "${FULL_SHA}" ]] ||
+        step_fail "head-mismatch" "${RC_FAIL}" "먼저 배포했지만 서버 레포 HEAD 가 그 SHA 가 아니다. 재시작하지 않았다"
+      return 0
+    fi
+    say "서버 코드(${head:0:8})가 ${sha8} 보다 뒤에 있다. 재시작은 서버 코드를 옮기지 않는다. 다음 순서로 한다:"
+    say "  1) deploy-bundle ${sha8} --announced"
+    say "  2) restart-backend ${sha8} --ack-data-loss --announced"
+    step_fail "head-mismatch" "${RC_FAIL}" "서버 레포 HEAD(${head:0:8})가 그 SHA 보다 뒤에 있다. 먼저 deploy-bundle ${sha8} 를 한다. 재시작하지 않았다"
+  fi
+  if as_deploy git -C "${P_repo}" merge-base --is-ancestor "${FULL_SHA}" "${head}"; then
+    # 서버 코드가 이미 그 SHA 보다 앞서 있다 → 지금 HEAD 로 재시작하면 된다.
+    say "서버 코드(${head:0:8})가 이미 ${sha8} 보다 앞서 있다(그 커밋은 지금 코드에 들어 있다). 지금 코드로 재시작하려면:"
+    say "  restart-backend ${head:0:8} --ack-data-loss --announced"
+    step_fail "head-mismatch" "${RC_FAIL}" "서버 레포 HEAD(${head:0:8})가 그 SHA 보다 앞서 있다. restart-backend ${head:0:8} 로 다시 한다. 재시작하지 않았다"
+  fi
+  step_fail "head-mismatch" "${RC_FAIL}" "서버 레포 HEAD(${head:0:8})와 그 SHA 가 서로 다른 갈래다. 재시작하면 다른 코드가 뜬다. 서버 책임자에게 알린다"
+}
+
 do_restart_backend() {
   local head timeout poll waited=0 unit src
   local -a sqlite_files=() plain_files=() dirs=()
@@ -1215,8 +1421,9 @@ do_restart_backend() {
   dirs=("${ITEMS[@]}")
   resolve_sha "${ARGS[0]}"
   head="$(as_deploy git -C "${P_repo}" rev-parse HEAD)" || step_fail "git-head" "${RC_FAIL}" "레포 HEAD 를 볼 수 없다"
-  [[ "${head}" == "${FULL_SHA}" ]] ||
-    step_fail "head-mismatch" "${RC_FAIL}" "서버 레포 HEAD 가 그 SHA 가 아니다. 재시작하면 다른 코드가 뜬다"
+  if [[ "${head}" != "${FULL_SHA}" ]]; then
+    restart_head_mismatch "${head}"
+  fi
   policy_uint restart.health_timeout_seconds 180
   timeout="${REPLY}"
   policy_uint restart.poll_seconds 5
@@ -1328,7 +1535,7 @@ root_main() {
   check_root_owned "${CHECKER}" || deny "checker-perms" "${RC_CONFIG}" "검증기 파일이 root 소유가 아니거나 남이 쓸 수 있다"
   case "${ACTION}" in
     status | record-pr) ;;
-    unlock) acquire_run_lock ;;
+    unlock | autodeploy-pause) acquire_run_lock ;;
     *)
       deny_if_locked
       require_announced
@@ -1353,6 +1560,8 @@ root_main() {
       deploy-bundle) do_deploy_bundle ;;
       restart-backend) do_restart_backend ;;
       rollback-bundle) do_rollback_bundle ;;
+      autodeploy-pause) do_autodeploy_pause ;;
+      autodeploy-resume) do_autodeploy_resume ;;
     esac
   )
   rc=$?
