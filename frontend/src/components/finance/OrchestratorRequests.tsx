@@ -89,7 +89,7 @@ function Row({ row, incidentIds }: { row: RequestRow; incidentIds: Set<string> }
       </td>
       <td className="py-2 pr-3">
         {ctx ? (
-          <Link href={`/orchestrator?ctx=${encodeURIComponent(ctx)}`} className="font-medium text-brand-700 underline" title={ctx}>{humanId(ctx)}</Link>
+          <Link href={`/archive/incidents?ctx=${encodeURIComponent(ctx)}`} className="font-medium text-brand-700 underline" title={ctx}>{humanId(ctx)}</Link>
         ) : <span className="text-ink-500">이슈 전</span>}
       </td>
       <td className="py-2 pr-3">

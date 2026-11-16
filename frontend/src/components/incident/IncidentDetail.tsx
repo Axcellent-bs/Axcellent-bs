@@ -5,7 +5,11 @@ import { incidentTitle, stepLabel, type OrchIncident, type OrchStep } from "@/li
 import { durationKo, segmentsOf, type EventTimes } from "@/lib/duration";
 import { ago, humanizePlanIds } from "@/lib/format";
 import { recordState } from "@/lib/incidentRecord";
-import { Link } from "@/lib/nav";
+import EventTimesView from "@/components/hr/EventTimes";
+import RepeatCompare from "@/components/hr/RepeatCompare";
+import ResolutionForm from "@/components/hr/ResolutionForm";
+import { AiActivity } from "./AiActivity";
+import { IncidentCards } from "./IncidentCards";
 
 // 이슈 하나의 상세: 총괄이 준 단계·진행 기록·요약을 사람이 읽는 말로 보여 준다.
 // 총괄 화면과 아카이브 AI의 장애 기록 화면이 같이 쓴다. 이 화면은 읽기 전용이다.
@@ -191,10 +195,26 @@ function HoldNotice({ holds }: { holds: OrchIncident["pending_holds"] }) {
   );
 }
 
+type TabId = "timeline" | "resolve" | "past";
+const TABS: { id: TabId; label: string }[] = [
+  { id: "timeline", label: "타임라인" },
+  { id: "resolve", label: "해결·카드" },
+  { id: "past", label: "과거" },
+];
+const BARE = "[&>section.card]:border-0 [&>section.card]:bg-transparent [&>section.card]:p-0 [&>section.card]:shadow-none [&>section.card]:ring-0";
+
+/** 맨 위에 늘 보이는 한 줄 추천: 비슷한 과거 이슈에서 뽑은 추천이 있으면 그 조치 */
+function oneLineRecommend(inc: OrchIncident): string | null {
+  const r = inc.recommendation as { action?: string | null; root_cause?: string | null } | null | undefined;
+  return r?.action ?? r?.root_cause ?? null;
+}
+
 export function IncidentDetail({ incident }: { incident: OrchIncident }) {
+  const [tab, setTab] = useState<TabId>("timeline");
   const shared = Object.entries(incident.shared ?? {});
   const done = incident.steps.filter((s) => s.status === "completed").length;
   const record = recordState(incident);
+  const rec = oneLineRecommend(incident);
   return (
     <div className="min-w-0 space-y-5">
       <section className="card space-y-3 p-5">
@@ -204,24 +224,18 @@ export function IncidentDetail({ incident }: { incident: OrchIncident }) {
           <span className="ml-auto text-xs tabular-nums text-ink-500">단계 {done}/{incident.steps.length} 완료</span>
         </div>
         <p className="text-xs text-ink-500" title={`이슈 번호 ${incident.context_id}`}>시작 {clock(incident.opened_at)} · 종료 {clock(incident.closed_at)}</p>
+        {!!incident.pending_holds.length && <HoldNotice holds={incident.pending_holds} />}
+        {incident.summary[0] && <p className="text-[15px]" title={incident.summary[0]}>{eventKo(incident.summary[0].replace(/\s*\[[^\]]*\]/g, ""), incident)}</p>}
+        {rec && <p className="rounded-xl bg-violet-50 px-3 py-2 text-sm text-violet-900"><b>추천</b> · {rec} <span className="text-xs opacity-70">(참고용, 자세한 근거는 과거 탭)</span></p>}
         <p className="flex flex-wrap items-center gap-2 text-sm">
           <span className={`chip ${record.tone}`}>{record.label}</span>
-          {record.step && <Link href={`/ops?ctx=${encodeURIComponent(incident.context_id)}`} className="text-xs font-semibold text-brand-600 underline underline-offset-2">결정 기록에서 보기 →</Link>}
+          {!!shared.length && shared.map(([key, value]) => (
+            <span key={key} className="chip bg-emerald-50 text-emerald-700" title={`${key} = ${String(value)}`}>
+              {key === "notice_id" ? "점검 공지를 쇼핑몰에 게시함" : key === "recovered_notice_id" ? "정상화 공지를 쇼핑몰에 게시함" : "그 밖의 기록"}
+            </span>
+          ))}
         </p>
-        {!!shared.length && (
-          <ul className="flex flex-wrap gap-2 text-sm">
-            {shared.map(([key, value]) => (
-              <li key={key} className="chip bg-emerald-50 text-emerald-700" title={`${key} = ${String(value)}`}>
-                {key === "notice_id" ? "점검 공지를 쇼핑몰에 게시함" : key === "recovered_notice_id" ? "정상화 공지를 쇼핑몰에 게시함" : "그 밖의 기록"}
-              </li>
-            ))}
-          </ul>
-        )}
-        {!!incident.pending_holds.length && <HoldNotice holds={incident.pending_holds} />}
       </section>
-
-      <SimilarCases incident={incident} />
-      <PastRecommendation incident={incident} />
 
       <section className="card overflow-x-auto p-5">
         <h3 className="mb-1 text-[15px] font-semibold">단계</h3>
@@ -271,21 +285,51 @@ export function IncidentDetail({ incident }: { incident: OrchIncident }) {
         </table>
       </section>
 
-      {!!incident.summary.length && (
-        <section className="card p-5">
-          <h3 className="mb-2 text-[15px] font-semibold">요약</h3>
-          <ul className="list-inside list-disc space-y-1 text-[15px]">{incident.summary.map((line) => <li key={line} title={line}>{eventKo(line.replace(/\s*\[[^\]]*\]/g, ""), incident)}</li>)}</ul>
-        </section>
-      )}
-
-      <section className="card p-5">
-        <h3 className="mb-2 text-[15px] font-semibold">진행 기록</h3>
-        <ol className="space-y-1.5 text-[15px]">
-          {incident.events.map((e, idx) => (
-            <li key={`${e.at}-${idx}`} className="flex gap-3"><span className="w-28 shrink-0 whitespace-nowrap text-[13px] tabular-nums text-ink-500">{clock(e.at)}</span><span title={e.message}>{eventKo(e.message, incident)}</span></li>
+      <div className="space-y-3">
+        <div role="tablist" aria-label="고른 이슈" className="flex flex-wrap gap-1">
+          {TABS.map((t) => (
+            <button key={t.id} type="button" role="tab" id={`inc-tab-${t.id}`} aria-selected={tab === t.id} aria-controls={`inc-panel-${t.id}`} onClick={() => setTab(t.id)}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${tab === t.id ? "bg-brand-600 text-white" : "bg-surface text-ink-700 ring-1 ring-ink-100 hover:bg-ink-50"}`}>
+              {t.label}
+            </button>
           ))}
-        </ol>
-      </section>
+        </div>
+        <div role="tabpanel" id={`inc-panel-${tab}`} aria-labelledby={`inc-tab-${tab}`} className="space-y-5">
+          {tab === "timeline" && (
+            <>
+              {incident.status === "open" ? null : <div className={BARE}><EventTimesView inc={incident} /></div>}
+              <section className="card p-5">
+                <h3 className="mb-2 text-[15px] font-semibold">진행 기록</h3>
+                <ol className="space-y-1.5 text-[15px]">
+                  {incident.events.map((e, idx) => (
+                    <li key={`${e.at}-${idx}`} className="flex gap-3"><span className="w-28 shrink-0 whitespace-nowrap text-[13px] tabular-nums text-ink-500">{clock(e.at)}</span><span title={e.message}>{eventKo(e.message, incident)}</span></li>
+                  ))}
+                </ol>
+              </section>
+              <details className="card p-5">
+                <summary className="cursor-pointer text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">아카이브 AI가 한 일</summary>
+                <div className="mt-3"><AiActivity inc={incident} /></div>
+              </details>
+            </>
+          )}
+          {tab === "resolve" && (
+            <>
+              <section className="card p-5"><div className={BARE}><ResolutionForm inc={incident} /></div></section>
+              <section className="card p-5"><IncidentCards contextId={incident.context_id} /></section>
+            </>
+          )}
+          {tab === "past" && (
+            <>
+              <SimilarCases incident={incident} />
+              <PastRecommendation incident={incident} />
+              <details className="card p-5">
+                <summary className="cursor-pointer text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">처음 겪은 장애와 반복된 장애 비교</summary>
+                <div className={`mt-3 ${BARE}`}><RepeatCompare /></div>
+              </details>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

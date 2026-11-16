@@ -4,7 +4,7 @@ import { ALL_ROOM, deptOf, skillKo, speaker, type ChatItem, type OrchIncident, t
 // 상태는 기록된 값(단계 status·말풍선 문장·facts)으로만 정하고, 화면 없는 순수 함수만 둔다.
 
 // ---------------------------------------------------------------- 자리
-export type DeskKey = "infra" | "data" | "support" | "finance" | "planning" | "marketing" | "hr" | "dev" | "orchestrator" | "safety";
+export type DeskKey = "infra" | "data" | "support" | "finance" | "planning" | "marketing" | "hr" | "archive" | "dev" | "orchestrator" | "safety";
 
 export interface DeskDef { key: DeskKey; label: string; x: number; y: number; shirt: string; hair: string; skin: string }
 
@@ -17,6 +17,8 @@ export const DESKS: DeskDef[] = [
   { key: "planning", label: "기획", x: 14, y: 128, shirt: "#5b4fd0", hair: "#191919", skin: "#f5d0b0" },
   { key: "marketing", label: "마케팅", x: 74, y: 128, shirt: "#ec7452", hair: "#7a4a2a", skin: "#f2c9a0" },
   { key: "hr", label: "인사", x: 134, y: 128, shirt: "#b91c1c", hair: "#4a2f1b", skin: "#e8b98f" },
+  // 아카이브: 위 책상 앞쪽 의자(뒷모습). 장애·업무 기록을 남기고 찾아 준다. x·y는 쓰는 곳이 없다
+  { key: "archive", label: "아카이브", x: 14, y: 92, shirt: "#7c3aed", hair: "#2b1d14", skin: "#f2c9a0" },
   // 개발: 기획 맞은편 의자(뒷모습). x·y는 쓰는 곳이 없어(그림 자리는 PixelOffice SEATS) 기획 아래쪽 값만 둔다
   { key: "dev", label: "개발", x: 14, y: 150, shirt: "#0369a1", hair: "#3a2a1a", skin: "#f2c9a0" },
   { key: "orchestrator", label: "총괄", x: 194, y: 128, shirt: "#2e2688", hair: "#222222", skin: "#f5d0b0" },
@@ -29,7 +31,6 @@ export function deskOf(name: string | null | undefined): DeskKey | null {
   if (!name) return null;
   // 서비스 이름(inquiry·coupon·org 등)은 먼저 부서로 (AI 대화방 이름과 같은 규칙)
   let dept = deptOf(name);
-  if (dept === "archive") dept = "hr"; // 아카이브 자리는 나중에 따로 만든다. 당장은 인사 자리를 쓴다
   if (dept === "memory") return "data";
   return DESKS.some((d) => d.key === dept) ? (dept as DeskKey) : null;
 }
