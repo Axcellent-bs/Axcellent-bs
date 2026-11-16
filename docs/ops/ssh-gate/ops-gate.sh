@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ax-gate — 서버 위임 게이트 (초안, 일반 구현. 구체 서버 값은 비공개 정책 파일에서 읽는다)
+# ax-gate — 서버 위임 게이트 (일반 구현. 구체 서버 값은 비공개 정책 파일에서 읽는다)
 #
 # 설치 위치: /usr/local/sbin/ax-gate (root:root 755)
 #
@@ -22,7 +22,7 @@ set -Eeuo pipefail
 IFS=$' \t\n'
 export LC_ALL=C
 
-readonly GATE_VERSION="0.2.0-draft"
+readonly GATE_VERSION="0.3.0"
 readonly ALL_ACTIONS=(status lock unlock nginx-restore nginx-add-location nginx-approve-location deploy-bundle restart-backend rollback-bundle record-pr)
 # 실행 전에 팀 채널 알림을 올렸다고 확인(--announced)해야 하는 동작
 readonly NEED_ANNOUNCE=(nginx-restore nginx-approve-location deploy-bundle restart-backend rollback-bundle)
@@ -297,89 +297,208 @@ policy_str() { # 키 정규식 → REPLY. 없거나 형식이 틀리면 실패
   [[ "${REPLY}" =~ ${re} ]] || step_fail "config" "${RC_CONFIG}" "정책 ${k} 가 없거나 형식이 틀리다"
 }
 
+# 이 계정에 허용된 동작(게이트가 아는 동작만, 정해진 순서로) → REPLY (띄어쓰기로 구분)
+allowed_actions() {
+  local pk="permissions.${KEY}" a out=""
+  [[ -n "${POLICY[${pk}]+x}" ]] || pk="permissions._default"
+  for a in "${ALL_ACTIONS[@]}"; do
+    if policy_list_has "${pk}" "${a}"; then
+      out+="${out:+ }${a}"
+    fi
+  done
+  REPLY="${out}"
+}
+
 check_permission() {
   local pk="permissions.${KEY}"
   [[ -n "${POLICY[${pk}]+x}" ]] || pk="permissions._default"
   if ! policy_list_has "${pk}" "${ACTION}"; then
-    deny "not-permitted" "${RC_PERM}" "계정 ${KEY} 에게 ${ACTION} 권한이 없다"
+    allowed_actions
+    deny "not-permitted" "${RC_PERM}" "계정 ${KEY} 에게 ${ACTION} 권한이 없다. 이 계정에 허용된 동작: ${REPLY:-없음} (권한이 필요하면 권한자에게 요청한다)"
   fi
 }
 
 # ---------------------------------------------------------------------------
 # 인자 검증 (앞단·뒷단 공통)
 # ---------------------------------------------------------------------------
-usage() {
-  cat >&2 <<'EOF'
-ax-gate 사용법 (ssh <내 계정>@<서버> <동작> ...)
-  status
-  lock <사유> [해제시각 YYYY-MM-DDTHH:MM]     사유는 영어·숫자·_.,- 만(띄어쓰기 대신 -)
-  unlock
-  nginx-restore <백업폴더명>
-  nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식> [프로필]   제안만 한다(바로 적용되지 않는다)
-                                             프로필은 정책에 있는 이름만(status 에 나온다). 대상 파일은 고를 수 없다
-  nginx-approve-location <이름> <확인값 12자>                  제안자와 다른 권한자가 승인하면 적용된다
-  deploy-bundle <SHA>
-  restart-backend <SHA> --ack-data-loss
-  rollback-bundle <SHA>
-  record-pr <참조: 백업폴더명 또는 SHA> <PR번호>               감사 로그에 PR 번호를 남긴다
-맨 끝에 붙일 수 있는 것(순서 무관):
+# 동작별 형식 한 줄 → REPLY. 사용법·help·오류 안내가 같은 글을 쓴다.
+action_format() {
+  case "$1" in
+    status) REPLY="status" ;;
+    lock) REPLY="lock <사유> [해제시각 YYYY-MM-DDTHH:MM]" ;;
+    unlock) REPLY="unlock" ;;
+    nginx-restore) REPLY="nginx-restore <백업폴더명>" ;;
+    nginx-add-location) REPLY="nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식> [프로필]" ;;
+    nginx-approve-location) REPLY="nginx-approve-location <이름> <확인값 12자>" ;;
+    deploy-bundle) REPLY="deploy-bundle <SHA>" ;;
+    restart-backend) REPLY="restart-backend <SHA> --ack-data-loss" ;;
+    rollback-bundle) REPLY="rollback-bundle <SHA>" ;;
+    record-pr) REPLY="record-pr <참조: 백업폴더명 또는 SHA> <PR번호>" ;;
+    help) REPLY="help [동작]" ;;
+    *) REPLY="" ;;
+  esac
+}
+
+# 동작별 설명 한 줄 → REPLY
+action_note() {
+  case "$1" in
+    status) REPLY="읽기 전용 점검" ;;
+    lock) REPLY="배포 금지 잠금. 사유는 영어·숫자·_.,- 만(띄어쓰기 대신 -)" ;;
+    unlock) REPLY="잠금 해제" ;;
+    nginx-restore) REPLY="nginx 설정을 백업으로 되돌린다" ;;
+    nginx-add-location) REPLY="새 쓰기 경로 제안만 한다(바로 적용되지 않는다). 프로필은 정책에 있는 이름만(status 에 나온다). 대상 파일은 고를 수 없다" ;;
+    nginx-approve-location) REPLY="제안자와 다른 권한자가 승인하면 적용된다" ;;
+    deploy-bundle) REPLY="번들 배포. 지금 서버 코드보다 앞선 커밋만" ;;
+    restart-backend) REPLY="서비스 재시작. 서버 레포 HEAD 가 그 SHA 여야 한다" ;;
+    rollback-bundle) REPLY="번들을 그 SHA 배포 직전으로 되돌린다" ;;
+    record-pr) REPLY="감사 로그에 PR 번호를 남긴다" ;;
+    help) REPLY="내 계정에 허용된 동작과 형식을 본다(서버를 바꾸지 않는다)" ;;
+    *) REPLY="" ;;
+  esac
+}
+
+usage_flags() {
+  cat <<'EOF'
+동작 뒤 어디에든 붙일 수 있는 것(순서 무관):
   --dry-run     실제로 바꾸지 않고 할 일만 보여 준다
   --announced   팀 채널에 알림 한 줄(되돌리는 방법 포함)을 올렸다는 확인. 바꾸는 동작에는 필수
   pr=<번호>     관련 PR 번호를 감사 로그에 남긴다
 EOF
 }
 
+usage() {
+  local a fmt
+  {
+    printf 'ax-gate 사용법 (ssh <내 계정>@<서버> <동작> ...). 동작은 맨 앞에 적는다\n'
+    for a in help "${ALL_ACTIONS[@]}"; do
+      action_format "${a}"
+      fmt="${REPLY}"
+      action_note "${a}"
+      printf '  %s\n      %s\n' "${fmt}" "${REPLY}"
+    done
+    usage_flags
+  } >&2
+}
+
+# 모르는 동작에 비슷한 동작을 제안한다 → REPLY (없으면 빈 글).
+# 제안에는 게이트가 아는 동작 이름만 들어간다. 받은 글은 출력하지 않는다.
+suggest_actions() {
+  local cand="${1,,}" a w part hit out="" n=0
+  local -a words=() parts=()
+  REPLY=""
+  cand="${cand//_/-}"
+  [[ "${cand}" =~ ^[a-z?-][a-z-]{0,31}$ ]] || return 0
+  case "${cand}" in
+    -h | --help | usage | "?" | man | commands | list) REPLY="help"; return 0 ;;
+  esac
+  IFS='-' read -r -a words <<< "${cand}"
+  for a in help "${ALL_ACTIONS[@]}"; do
+    IFS='-' read -r -a parts <<< "${a}"
+    hit=0
+    # 낱말 단위로만 견준다(앞부분이 같을 때). 글자 조각이 우연히 겹치는 것은 제안하지 않는다.
+    for w in "${words[@]}"; do
+      (( ${#w} >= 3 )) || continue
+      for part in "${parts[@]}"; do
+        if [[ "${part}" == "${w}"* || "${w}" == "${part}"* ]]; then
+          hit=1
+        fi
+      done
+    done
+    if (( hit )); then
+      out+="${out:+, }${a}"
+      n=$((n + 1))
+    fi
+    (( n < 4 )) || break
+  done
+  REPLY="${out}"
+}
+
+# 인자 개수가 틀렸을 때: 그 동작의 형식 한 줄을 같이 보여 준다.
+bad_args() {
+  local a extra=""
+  for a in "${ARGS[@]}"; do
+    if [[ "${a}" == --* && "${a}" != "--ack-data-loss" ]]; then
+      extra=" 모르는 옵션이 있다(쓸 수 있는 것: --dry-run --announced --ack-data-loss pr=<번호>)."
+    fi
+  done
+  action_format "${ACTION}"
+  deny "bad-args" "${RC_USAGE}" "인자 개수가 맞지 않는다.${extra} 형식: ${REPLY}"
+}
+
+# 정규식이 1차 거름망에서 걸렸을 때 흔한 원인을 짚어 준다(받은 정규식은 출력하지 않는다).
+bad_regex() {
+  local rx="$1" hint=""
+  if [[ "${rx}" == *"{"* || "${rx}" == *"}"* ]]; then
+    hint+=" 중괄호 반복({8} 등)은 쓸 수 없다. [0-9a-f]{8} 대신 [0-9a-f]+ 처럼 허용 묶음을 쓴다."
+  fi
+  if [[ "${rx}" == *"'"* || "${rx}" == *'"'* ]]; then
+    hint+=" 따옴표가 들어왔다. 정규식만 따로 감싸지 말고 명령 전체를 작은따옴표 한 쌍으로 감싼다."
+  fi
+  if [[ "${rx}" == *"*"* || "${rx}" == *"?"* ]]; then
+    hint+=" * 와 ? 는 쓸 수 없다. 가변 부분은 [^/]+ 로 적는다."
+  fi
+  if [[ "${rx}" != "^/"* || "${rx}" != *"$" ]]; then
+    hint+=" ^/ 로 시작하고 \$ 로 끝나야 한다."
+  fi
+  deny "bad-regex" "${RC_USAGE}" "정규식에 쓸 수 없는 글자가 있거나 ^/...\$ 꼴이 아니다.${hint} 쓸 수 있는 묶음: [^/]+ [0-9]+ [0-9a-f]+ [0-9a-f-]+ [a-z0-9-]+ [A-Za-z0-9_-]+"
+}
+
 validate_args() {
-  local n="${#ARGS[@]}" ok=0 a
+  local n="${#ARGS[@]}" ok=0 a raw
   for a in "${ALL_ACTIONS[@]}"; do
     [[ "${a}" == "${ACTION}" ]] && ok=1
   done
   if (( ! ok )); then
+    raw="${ACTION}"
     [[ "${ACTION}" =~ ${RE_ACTION} ]] || ACTION="invalid"
     usage
-    deny "unknown-action" "${RC_USAGE}" "허용 목록에 없는 동작이다"
+    suggest_actions "${raw}"
+    if [[ -n "${REPLY}" ]]; then
+      deny "unknown-action" "${RC_USAGE}" "허용 목록에 없는 동작이다. 비슷한 동작: ${REPLY}"
+    fi
+    deny "unknown-action" "${RC_USAGE}" "허용 목록에 없는 동작이다. help 로 내 계정에 허용된 동작을 본다"
   fi
   case "${ACTION}" in
     status | unlock)
-      (( n == 0 )) || deny "bad-args" "${RC_USAGE}" "${ACTION} 은 인자를 받지 않는다"
+      (( n == 0 )) || bad_args
       ;;
     lock)
-      (( n == 1 || n == 2 )) || deny "bad-args" "${RC_USAGE}" "lock <사유> [해제시각]"
+      (( n == 1 || n == 2 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_REASON} ]] || deny "bad-reason" "${RC_USAGE}" "사유는 영어·숫자·_.,- 만, 80자 이하"
       if (( n == 2 )); then
         [[ "${ARGS[1]}" =~ ${RE_UNTIL} ]] || deny "bad-until" "${RC_USAGE}" "해제시각은 YYYY-MM-DDTHH:MM"
       fi
       ;;
     nginx-restore)
-      (( n == 1 )) || deny "bad-args" "${RC_USAGE}" "nginx-restore <백업폴더명>"
+      (( n == 1 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_FOLDER} && "${ARGS[0]}" != *..* ]] ||
         deny "bad-folder" "${RC_USAGE}" "백업 폴더 이름이 잘못됐다"
       ;;
     nginx-add-location)
-      (( n == 3 || n == 4 )) || deny "bad-args" "${RC_USAGE}" "nginx-add-location <이름> <메서드> <정규식> [프로필]"
+      (( n == 3 || n == 4 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_LOCNAME} ]] || deny "bad-name" "${RC_USAGE}" "이름은 영어 소문자·숫자·- 만"
       [[ "${ARGS[1]}" =~ ${RE_METHOD} ]] || deny "bad-method" "${RC_USAGE}" "메서드는 POST|PUT|PATCH|DELETE"
-      [[ "${ARGS[2]}" =~ ${RE_LOCREGEX} ]] || deny "bad-regex" "${RC_USAGE}" "정규식에 쓸 수 없는 글자가 있거나 ^/...$ 꼴이 아니다"
+      [[ "${ARGS[2]}" =~ ${RE_LOCREGEX} ]] || bad_regex "${ARGS[2]}"
       if (( n == 4 )); then
-        [[ "${ARGS[3]}" =~ ${RE_PROFILE} ]] || deny "bad-profile" "${RC_USAGE}" "프로필 이름은 영어 소문자·숫자·- 만(정책에 있는 이름)"
+        [[ "${ARGS[3]}" =~ ${RE_PROFILE} ]] || deny "bad-profile" "${RC_USAGE}" "프로필 이름은 영어 소문자·숫자·- 만(정책에 있는 이름. status 의 \"location 프로필\")"
       fi
       ;;
     nginx-approve-location)
-      (( n == 2 )) || deny "bad-args" "${RC_USAGE}" "nginx-approve-location <이름> <확인값 12자>"
+      (( n == 2 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_LOCNAME} ]] || deny "bad-name" "${RC_USAGE}" "이름은 영어 소문자·숫자·- 만"
       [[ "${ARGS[1]}" =~ ${RE_DIGEST} ]] || deny "bad-digest" "${RC_USAGE}" "확인값은 status 에 나온 16진수 12자"
       ;;
     record-pr)
-      (( n == 2 )) || deny "bad-args" "${RC_USAGE}" "record-pr <참조> <PR번호>"
+      (( n == 2 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_FOLDER} && "${ARGS[0]}" != *..* ]] || deny "bad-ref" "${RC_USAGE}" "참조는 백업 폴더명이나 SHA"
       [[ "${ARGS[1]}" =~ ${RE_PR} ]] || deny "bad-pr" "${RC_USAGE}" "PR 번호는 숫자"
       ;;
     deploy-bundle | rollback-bundle)
-      (( n == 1 )) || deny "bad-args" "${RC_USAGE}" "${ACTION} <SHA>"
+      (( n == 1 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_SHA} ]] || deny "bad-sha" "${RC_USAGE}" "SHA 는 16진수 소문자 7~40자"
       ;;
     restart-backend)
-      (( n == 2 )) || deny "bad-args" "${RC_USAGE}" "restart-backend <SHA> --ack-data-loss"
+      (( n == 2 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_SHA} ]] || deny "bad-sha" "${RC_USAGE}" "SHA 는 16진수 소문자 7~40자"
       [[ "${ARGS[1]}" == "--ack-data-loss" ]] ||
         deny "no-ack" "${RC_USAGE}" "재시작하면 메모리에만 있는 상태가 지워진다. 알고 한다면 --ack-data-loss 를 붙인다"
@@ -484,37 +603,110 @@ deny_if_locked() {
 # 앞단
 # ---------------------------------------------------------------------------
 parse_command() {
-  local cmd="$1" toks=() last
+  local cmd="$1" toks=() rest=() t act
   if [[ -z "${cmd}" ]]; then
     usage
-    deny "no-command" "${RC_USAGE}" "대화형 접속은 안 된다. 동작을 하나 적는다"
+    deny "no-command" "${RC_USAGE}" "대화형 접속은 안 된다. 동작을 하나 적는다(help 로 내 계정에 허용된 동작을 본다)"
   fi
   if (( ${#cmd} > 512 )) || [[ "${cmd}" =~ ${RE_NONPRINT} ]]; then
     deny "bad-chars" "${RC_USAGE}" "명령이 너무 길거나 쓸 수 없는 글자(제어 문자·한글 등)가 있다"
   fi
   read -r -a toks <<< "${cmd}"
   if (( ${#toks[@]} == 0 || ${#toks[@]} > 9 )); then
-    deny "bad-args" "${RC_USAGE}" "인자 개수가 맞지 않는다"
+    deny "bad-args" "${RC_USAGE}" "인자 개수가 맞지 않는다(help 로 형식을 본다)"
   fi
-  while (( ${#toks[@]} > 1 )); do
-    last="${toks[${#toks[@]}-1]}"
-    case "${last}" in
+  # 동작은 맨 앞이다. 그 뒤의 --dry-run·--announced·pr=<번호> 는 어디에 있든 떼어 낸다.
+  # (검증 전의 동작 글자는 감사 로그에 남지 않게, 다 떼어 낸 뒤에 ACTION 에 넣는다.)
+  act="${toks[0]}"
+  for t in "${toks[@]:1}"; do
+    case "${t}" in
       --dry-run) DRY=1 ;;
       --announced) ANNOUNCED=1 ;;
       pr=*)
-        PR="${last#pr=}"
+        PR="${t#pr=}"
         if [[ ! "${PR}" =~ ${RE_PR} ]]; then
           PR="-"
           deny "bad-pr" "${RC_USAGE}" "pr=<번호> 는 숫자여야 한다"
         fi
         ;;
-      *) break ;;
+      *) rest+=("${t}") ;;
     esac
-    unset 'toks[${#toks[@]}-1]'
   done
-  (( ${#toks[@]} > 0 )) || deny "bad-args" "${RC_USAGE}" "동작이 없다"
-  ACTION="${toks[0]}"
-  ARGS=("${toks[@]:1}")
+  case "${act}" in
+    --help | -h) act="help" ;;
+  esac
+  ACTION="${act}"
+  ARGS=()
+  if (( ${#rest[@]} > 0 )); then
+    ARGS=("${rest[@]}")
+  fi
+  # restart-backend 는 --ack-data-loss 를 SHA 앞에 적어도 받는다(뒷단에는 정해진 순서로 넘긴다).
+  if [[ "${ACTION}" == "restart-backend" ]] && (( ${#ARGS[@]} == 2 )) && [[ "${ARGS[0]}" == "--ack-data-loss" ]]; then
+    ARGS=("${ARGS[1]}" "--ack-data-loss")
+  fi
+}
+
+# help: 앞단에서 끝난다. sudo 를 부르지 않고 서버를 바꾸지 않는다. 내 계정에 허용된 동작과 형식을 보여 준다.
+front_help() {
+  local a fmt allowed target="" ok=0
+  local -a mine=() others=()
+  ACTION="help"
+  if (( ${#ARGS[@]} > 1 )); then
+    bad_args
+  fi
+  if (( ${#ARGS[@]} == 1 )); then
+    for a in "${ALL_ACTIONS[@]}"; do
+      [[ "${a}" == "${ARGS[0]}" ]] && ok=1
+    done
+    if (( ! ok )); then
+      suggest_actions "${ARGS[0]}"
+      deny "unknown-action" "${RC_USAGE}" "help 뒤에는 동작 이름만 적는다${REPLY:+. 비슷한 동작: ${REPLY}}"
+    fi
+    target="${ARGS[0]}"
+    A_ARGS="${target}"
+  fi
+  allowed_actions
+  allowed="${REPLY}"
+  for a in "${ALL_ACTIONS[@]}"; do
+    if [[ " ${allowed} " == *" ${a} "* ]]; then
+      mine+=("${a}")
+    else
+      others+=("${a}")
+    fi
+  done
+  say "ax-gate ${GATE_VERSION} — help (서버를 바꾸지 않는다)"
+  if [[ -n "${target}" ]]; then
+    action_format "${target}"
+    fmt="${REPLY}"
+    action_note "${target}"
+    say "형식: ${fmt}"
+    say "  ${REPLY}"
+    if [[ " ${allowed} " == *" ${target} "* ]]; then
+      say "계정 ${KEY}: 이 동작을 쓸 수 있다"
+    else
+      say "계정 ${KEY}: 이 동작 권한이 없다(권한자에게 요청한다)"
+    fi
+  else
+    say "계정 ${KEY} 에 허용된 동작:"
+    if (( ${#mine[@]} == 0 )); then
+      say "  (없음)"
+    fi
+    for a in "${mine[@]}"; do
+      action_format "${a}"
+      fmt="${REPLY}"
+      action_note "${a}"
+      say "  ${fmt}"
+      say "      ${REPLY}"
+    done
+    if (( ${#others[@]} > 0 )); then
+      say "이 계정에 없는 동작(권한자에게 요청한다): ${others[*]}"
+    fi
+  fi
+  usage_flags
+  say "동작은 맨 앞에 적는다. 정규식이 들어가는 명령은 명령 전체를 작은따옴표 한 쌍으로 감싼다."
+  say "바꾸는 동작은 먼저 --dry-run 으로 할 일을 보고, --announced 없이 실행해 알림 문안을 받는다."
+  audit "help" || printf '경고: 감사 로그에 쓰지 못했다\n' >&2
+  exit 0
 }
 
 front_main() {
@@ -539,6 +731,9 @@ front_main() {
   [[ "${DRY_RUN:-0}" == "1" ]] && DRY=1
   load_policy
   parse_command "${SSH_ORIGINAL_COMMAND:-}"
+  if [[ "${ACTION}" == "help" ]]; then
+    front_help
+  fi
   validate_args
   check_permission
   case "${ACTION}" in

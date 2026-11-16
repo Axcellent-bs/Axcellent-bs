@@ -56,7 +56,7 @@ def _manager() -> IncidentManager:
         "b",
         "y",
         "인사 기록",
-        dept="hr",
+        dept="archive",
         status="completed",
         started_at=t0,
         finished_at=t0 + timedelta(seconds=80),

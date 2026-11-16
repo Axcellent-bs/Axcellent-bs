@@ -30,7 +30,7 @@ async def test_similar_cases_are_searched_first_with_title_and_component(harness
 
 @pytest.mark.asyncio
 async def test_search_failure_does_not_stop_the_incident(harness) -> None:
-    harness.fakes.script("hr", "find_similar_cases", "fail", "fail", "fail")
+    harness.fakes.script("archive", "find_similar_cases", "fail", "fail", "fail")
     inc = await run(harness)
     assert inc.steps["similar_cases"].status == "failed"
     assert inc.status == "resolved"  # 참고용 조회라 필수 단계가 아니다
@@ -82,7 +82,7 @@ async def test_the_handover_waits_for_the_past_case_so_the_hint_is_never_missed(
 async def test_a_repeat_incident_is_fixed_the_same_way_right_away(harness) -> None:
     """원인 미확정이어도 같은 유형 과거 장애가 장애 상태 해제로 풀렸으면 바로 같은 처리를 한다."""
     harness.fakes.script("infra", "diagnose_incident", "undetermined")
-    harness.fakes.script("hr", "find_similar_cases", "past_release")
+    harness.fakes.script("archive", "find_similar_cases", "past_release")
     inc = await run(harness)
     fix = called(harness, "release_fault")
     assert len(fix) == 1 and fix[0].input["past_case_id"] == "card_past_release"
@@ -101,7 +101,7 @@ async def test_switch_off_fault_is_not_fixed_by_release_and_goes_to_a_person(har
 
     그러면 사람에게 넘기고 복구 시각이 없다."""
     harness.fakes.script("infra", "diagnose_incident", "undetermined")
-    harness.fakes.script("hr", "find_similar_cases", "past_release")
+    harness.fakes.script("archive", "find_similar_cases", "past_release")
     harness.fakes.script("infra", "release_fault", "switch_off")
     inc = await run(harness)
     assert len(called(harness, "release_fault")) == 1
@@ -119,7 +119,7 @@ async def test_switch_off_fault_is_not_fixed_by_release_and_goes_to_a_person(har
 async def test_a_past_rollback_is_not_replayed_as_a_release(harness) -> None:
     """과거 같은 장애가 배포를 되돌려 풀렸으면 장애 상태 해제를 하지 않는다."""
     harness.fakes.script("infra", "diagnose_incident", "undetermined")
-    harness.fakes.script("hr", "find_similar_cases", "past_rollback")
+    harness.fakes.script("archive", "find_similar_cases", "past_rollback")
     inc = await run(harness)
     assert called(harness, "release_fault") == []
     past = inc.steps["past_fix"]
@@ -132,7 +132,7 @@ async def test_a_past_rollback_is_not_replayed_as_a_release(harness) -> None:
 @pytest.mark.asyncio
 async def test_a_found_bad_deploy_is_rolled_back_whatever_the_past_case(harness) -> None:
     """진단이 원인 배포를 찾았으면 과거 사례가 해제였어도 되돌리기로 처리한다."""
-    harness.fakes.script("hr", "find_similar_cases", "past_release")
+    harness.fakes.script("archive", "find_similar_cases", "past_release")
     inc = await run(harness)
     assert called(harness, "release_fault") == []
     assert inc.steps["past_fix"].reason_code == "cause_found"
@@ -144,7 +144,7 @@ async def test_a_found_bad_deploy_is_rolled_back_whatever_the_past_case(harness)
 @pytest.mark.asyncio
 async def test_a_less_similar_past_case_is_not_replayed(harness) -> None:
     harness.fakes.script("infra", "diagnose_incident", "undetermined")
-    harness.fakes.script("hr", "find_similar_cases", "past_release_low")
+    harness.fakes.script("archive", "find_similar_cases", "past_release_low")
     inc = await run(harness)
     assert called(harness, "release_fault") == []
     past = inc.steps["past_fix"]

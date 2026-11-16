@@ -25,7 +25,9 @@ def _mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     handlers.reset_state()
 
 
-def _body(skill: str, input: dict, token: str = "mock:hr", key: str | None = "k1", **extra) -> dict:
+def _body(
+    skill: str, input: dict, token: str = "mock:archive", key: str | None = "k1", **extra
+) -> dict:
     meta = {
         "context_id": CTX,
         "token": token,
@@ -347,7 +349,7 @@ def test_review는_execute가_보류하면_바꾸지_않는다(monkeypatch: pyte
     assert got["candidate"] is True
 
 
-def test_review는_hr만_부를_수_있다() -> None:
+def test_review는_아카이브만_부를_수_있다() -> None:
     card_id = _candidate()
     out = _call(
         "card_review", {"card_id": card_id, "decision": "approve"}, key="r1", token="mock:data"

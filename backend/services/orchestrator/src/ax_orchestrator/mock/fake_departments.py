@@ -64,7 +64,7 @@ CARDS: dict[str, list[tuple[str, str, str | None]]] = {
         ("record_support_cost", "read", None),
         ("record_incident_finance", "read", None),
     ],
-    "hr": [
+    "archive": [
         ("record_case", "A", None),
         ("get_audit_timeline", "read", None),
         ("find_similar_cases", "read", None),
@@ -80,7 +80,7 @@ OWNERS = {
     "marketing": "재헌",
     "support": "병환",
     "finance": "태윤",
-    "hr": "준하",
+    "archive": "준하",
 }
 
 

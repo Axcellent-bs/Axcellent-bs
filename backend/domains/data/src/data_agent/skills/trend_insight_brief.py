@@ -1434,6 +1434,25 @@ def cached_brief(
     return BriefResult(out, as_evidence(out, [f"trend_insight_brief cache rules={rules}"], now))
 
 
+async def add_reactions(out: TrendInsightBriefOutput, reaction_fn: Any, queries: list[str]) -> None:
+    """연결 상품 전부를 한 번에 물어 인사이트마다 고객 반응을 채운다 (`clients.customer_reaction`).
+
+    `reaction_fn(product_ids)`는 `Reactions`를 돌려준다. 실패해도 브리프는 만든다 (칸은 비고 이유는
+    각 인사이트 evidence.missing)."""
+    from data_agent.clients import customer_reaction as cr
+
+    ids = list(dict.fromkeys(p.product_id for i in out.insights for p in i.products))
+    if not ids:
+        return
+    try:
+        got = await reaction_fn(ids)
+    except Exception as error:  # noqa: BLE001 - 보조 근거라 어떤 실패든 읽지 못함으로 둔다
+        got = cr.Reactions(reason=f"{cr.SOURCE} 호출 실패 ({type(error).__name__})")
+    queries.append(f"{cr.SKILL} period={cr.PERIOD} products={len(ids)}")
+    if cr.fill(out.insights, got) and cr.SKILL not in out.sources:
+        out.sources.append(cr.SKILL)
+
+
 async def make_brief(
     request: TrendInsightBriefRequest,
     llm: LLMClient,
@@ -1456,6 +1475,7 @@ async def make_brief(
     warned: Warned | None = None,
     same_targets: Mapping[str, Sequence[str]] | None = None,
     build: Any = None,
+    reaction_fn: Any = None,
 ) -> BriefResult:
     """기존 skill 결과를 묶어 인사이트 3~7개 (하루 캐시). 상태를 바꾸지 않는다(브리프 기록만).
 
@@ -1713,6 +1733,8 @@ async def make_brief(
         for n, i in enumerate(out.insights, start=1):
             i.rank = n
         out.summary = summary(out)
+        if reaction_fn is not None:  # 연결 상품의 고객 반응 (고객지원 book_issue_stats, 한 번만)
+            await add_reactions(out, reaction_fn, queries)
         for i in out.insights:  # 응답에 나오는 숫자 전부 (인사이트는 fact_ids로 가리킴)
             mine = insight_facts(i)
             # 기회 카드에서 온 인사이트는 한 줄이 카드 숫자를 쓰므로 카드 facts도 가리킨다

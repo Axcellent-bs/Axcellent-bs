@@ -62,6 +62,23 @@ ANSWERED = {
 }
 
 
+ARCHIVE_SKILLS = {
+    "record_case",
+    "find_similar_cases",
+    "record_resolution",
+    "record_event_times",
+    "list_cards",
+    "list_candidate_cards",
+    "decide_candidate_card",
+    "list_duplicate_groups",
+    "decide_duplicate_group",
+    "restore_merged_card",
+    "retire_request_cards",
+    "get_audit_timeline",
+    "check_plan",
+}
+
+
 class Fake:
     """hr 대역. skill별 결과를 `results`에 넣어 둔다 (기본은 `completed` + 출력)."""
 
@@ -71,7 +88,8 @@ class Fake:
         self.overrides: dict[str, dict[str, Any]] = {}  # skill -> AgentResult 필드
 
     async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
-        assert target == "hr"
+        # 결정 기록 skill은 아카이브, 나머지는 인사로 간다
+        assert target == ("archive" if req.skill in ARCHIVE_SKILLS else "hr")
         self.sent.append(req)
         fields = {"status": TaskStatus.COMPLETED, "output": self.outputs.get(req.skill, {})}
         return AgentResult(meta=req.meta, **{**fields, **self.overrides.get(req.skill, {})})

@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -228,6 +229,42 @@ def _log_impact(context_id: str, cache: str, **fields: Any) -> None:
     impact_log.info(json.dumps(line, ensure_ascii=False))
 
 
+def store_key(key: tuple[str, str]) -> str:
+    """(사건, 구간 JSON) → 저장 파일 키."""
+    return f"{key[0]}|{key[1]}"
+
+
+def impact_to_row(impact: Impact) -> dict[str, Any]:
+    """저장 파일에 남길 모양 (JSON)."""
+    return {
+        "failed_orders": impact.failed_orders,
+        "affected_customers": impact.affected_customers,
+        "lost_amount": impact.lost_amount,
+        "affected_customer_ids": sorted(impact.affected_customer_ids),
+        "ref": impact.ref,
+        "by_category": [list(c) for c in impact.by_category],
+        "window_exact": impact.window_exact,
+    }
+
+
+def impact_from_row(row: dict[str, Any]) -> Impact | None:
+    """저장 파일 모양 → Impact. 모양이 다르면 None (다시 묻는다)."""
+    try:
+        return Impact(
+            failed_orders=int(row["failed_orders"]),
+            affected_customers=int(row["affected_customers"]),
+            lost_amount=int(row["lost_amount"]),
+            affected_customer_ids=frozenset(str(i) for i in row.get("affected_customer_ids", [])),
+            ref=str(row.get("ref", "")),
+            by_category=tuple(
+                (str(c[0]), int(c[1]), int(c[2])) for c in row.get("by_category", [])
+            ),
+            window_exact=bool(row.get("window_exact", True)),
+        )
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+
+
 class LiveSources:
     """data 에이전트 A2A 호출. 응답이 없거나 형식이 다르면 None."""
 
@@ -264,6 +301,10 @@ class LiveSources:
             return None
         body = payload.model_dump(mode="json", exclude_none=True)
         key = (context_id, json.dumps(body, sort_keys=True))
+        stored = self._stored_impact(key) if final else None
+        if stored is not None:  # 닫힌 사건: 다시 켜도 저장해 둔 결과를 쓴다 (data에 다시 묻지 않음)
+            _log_impact(context_id, "stored")
+            return stored
         hit = self._impact_cache.get(key)
         if hit is not None and (hit[2] or time.monotonic() - hit[0] < IMPACT_CACHE_SECONDS):
             _log_impact(context_id, "hit")
@@ -287,9 +328,19 @@ class LiveSources:
             future.set_result(impact)
             if impact is not None:  # 실패는 기억하지 않는다 (다음 호출이 다시 묻는다)
                 self._impact_cache[key] = (time.monotonic(), impact, final)
+                if final:
+                    self._store_impact(key, impact)
             return impact
         finally:
             self._impact_inflight.pop(key, None)
+
+    def _stored_impact(self, key: tuple[str, str]) -> Impact | None:
+        row = self.final_store().get(store_key(key)) if self.final_store else None
+        return impact_from_row(row) if row else None
+
+    def _store_impact(self, key: tuple[str, str], impact: Impact) -> None:
+        if self.final_store is not None:
+            self.final_store()[store_key(key)] = impact_to_row(impact)
 
     async def _fetch_impact(
         self, meta: RequestMeta, context_id: str, body: dict[str, Any]
@@ -321,6 +372,9 @@ class LiveSources:
 
     def __init__(self, http_client: httpx.AsyncClient | None = None) -> None:
         self._http = http_client  # 테스트용
+        # 닫힌 사건의 영향을 저장 파일에 남기는 곳 (재무 기록 `final_impacts`, State가 잇는다).
+        # 없으면 프로세스 메모리에만 기억한다
+        self.final_store: Callable[[], dict[str, dict[str, Any]]] | None = None
         # (사건, 구간) → (받은 시각, 영향, 닫힌 사건인지)
         self._impact_cache: dict[tuple[str, str], tuple[float, Impact | None, bool]] = {}
         # (사건, 구간) → 지금 데이터분석에 묻는 중인 요청의 결과

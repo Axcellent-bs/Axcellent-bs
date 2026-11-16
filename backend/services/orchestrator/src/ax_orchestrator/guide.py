@@ -17,7 +17,7 @@ from ax_orchestrator.models import Incident
 from ax_orchestrator.plans.scenario_a import scenario_a
 from ax_orchestrator.registry import Registry
 
-DEPTS = ["infra", "data", "planning", "dev", "marketing", "support", "finance", "hr"]
+DEPTS = ["infra", "data", "planning", "dev", "marketing", "support", "finance", "archive"]
 FIXED_AT = datetime(2026, 10, 16, 1, 0, 0, tzinfo=UTC)
 
 HEADER = """# 부서별 연동 안내서 (총괄이 내 skill을 부르는 방식)
@@ -36,7 +36,7 @@ uv run python -m ax_orchestrator
 ORCHESTRATOR_REAL_DEPTS=finance uv run python -m ax_orchestrator
 ```
    - 터미널에 나온 `http://localhost:<포트>/demo`를 연다. 포트를 직접 정하려면 `--port 8002`, 브라우저를 안 열려면 `--no-browser`.
-   - 주소는 `AX_<부서>_URL`(없으면 기본 포트 표), 여러 부서는 쉼표로(`hr,finance`).
+   - 주소는 `AX_<부서>_URL`(없으면 기본 포트 표), 여러 부서는 쉼표로(`archive,finance`).
    - 내 에이전트도 목 모드(`AGENT_TEMPLATE_MOCK=1`)면 토큰 검증이 맞는다.
 3. `/demo`에서 장애를 주입한다. 부서 카드에 `실제`/`목` 표시가 나오고, 내 skill 호출이 이벤트 흐름에 보인다.
 4. `GET /api/registry`로 내 카드가 제대로 읽혔는지 확인한다(`unavailable`에 내 부서가 있으면 카드 수집 실패).

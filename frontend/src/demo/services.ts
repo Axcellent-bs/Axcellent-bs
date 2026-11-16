@@ -28,10 +28,10 @@ export type AgentId = 'orchestrator' | 'safety' | 'support' | 'finance' | 'data'
 export const AGENTS: { id: AgentId; name: string; Icon: ComponentType<{ size?: number }>; backend: string }[] = [
   { id: 'orchestrator', Icon: IconBolt, name: '총괄', backend: 'orchestrator (8000) · shop-api 관리 중계 (8010)' },
   { id: 'safety', Icon: IconLock, name: '안전규칙 AI', backend: 'safety (8001)' },
+  { id: 'archive', Icon: IconBook, name: '아카이브 AI', backend: 'decisions (8114) · dashboard-api (8020)' },
   { id: 'support', Icon: IconUser, name: '고객지원 AI', backend: 'dashboard-api (8020)' },
   { id: 'finance', Icon: IconShield, name: '재무 AI', backend: 'finance (8105) · safety (8001)' },
   { id: 'data', Icon: IconChart, name: '데이터분석 AI', backend: 'data (8106)' },
-  { id: 'archive', Icon: IconBook, name: '아카이브 AI', backend: 'decisions (8114) · dashboard-api (8020)' },
   { id: 'hr', Icon: IconUsers, name: '인사 AI', backend: 'dashboard-api (8020)' },
   { id: 'marketing', Icon: IconMegaphone, name: '마케팅 AI', backend: '연결 전 (화면 안 시연 데이터)' },
   { id: 'planning', Icon: IconPlan, name: '기획 AI', backend: 'planning (8101) · dashboard-api (8020)' },
@@ -128,11 +128,16 @@ export const SERVICES: Service[] = [
       { href: '/data/ops', label: '운영 지표' },
       { href: '/data/trend', label: '트렌드&콘텐츠' },
       { href: '/data/sales', label: '매출 분석' },
+      { href: '/data/segments', label: '고객·시장 분석' },
     ],
   },
   {
-    id: 'decisions', agent: 'archive', family: 'backoffice', name: '결정 기록', by: 'AXcellent', Icon: IconBook, entry: '/ops', paths: ['/ops'],
-    desc: '회사의 결정을 기록하고, 새 계획이 과거에 기각된 안과 겹치는지 봅니다.',
+    id: 'decisions', agent: 'archive', family: 'backoffice', name: '장애·업무 기록', by: 'AXcellent', Icon: IconBook, entry: '/archive/incidents', paths: ['/ops', '/archive'],
+    desc: '장애 기록(총괄이 처리한 이슈와 해결 내용)과 업무 기록(회사의 결정, 기각된 안과 겹치는지 확인)을 남기고 찾아봅니다.',
+    children: [
+      { href: '/archive/incidents', label: '장애 기록' },
+      { href: '/ops', label: '업무 기록' },
+    ],
   },
   {
     id: 'agent-eval', agent: 'hr', family: 'backoffice', name: '에이전트 평가', by: 'AXcellent', Icon: IconClock, entry: '/agent-eval', paths: ['/agent-eval'],

@@ -30,7 +30,7 @@ class Hr:
         self.asked: list[AgentRequest] = []
 
     async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
-        assert target == "hr"
+        assert target == "archive"
         self.asked.append(req)
         if self.fail:
             return AgentResult(meta=req.meta, status=TaskStatus.FAILED, outcome="unreachable")

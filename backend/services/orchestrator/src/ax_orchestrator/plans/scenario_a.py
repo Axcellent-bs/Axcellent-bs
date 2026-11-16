@@ -586,7 +586,7 @@ def _scenario_a() -> Plan:
             Step(
                 "similar_cases",
                 "find_similar_cases",
-                "비슷한 과거 이슈 찾기 (hr)",
+                "비슷한 과거 이슈 찾기 (archive)",
                 build=_similar,
                 required=False,
             ),
@@ -750,7 +750,7 @@ def _scenario_a() -> Plan:
             Step(
                 "record",
                 "record_case",
-                "이슈 기록 (hr)",
+                "이슈 기록 (archive)",
                 also_after=(
                     "recovered_notice",
                     "end_notice",
@@ -767,7 +767,7 @@ def _scenario_a() -> Plan:
             Step(
                 "resolution",
                 "record_resolution",
-                "해결 내용 기록 (hr)",
+                "해결 내용 기록 (archive)",
                 also_after=("record",),
                 build=_resolution,
                 required=False,

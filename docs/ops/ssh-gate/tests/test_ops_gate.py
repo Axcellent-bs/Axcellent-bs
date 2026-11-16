@@ -1458,6 +1458,185 @@ class NginxProfileTests(GateCase):
                           path.read_text(encoding="utf-8"))
         self.assertEqual(self.calls().count("nginx -t"), 1)
 
+    def test_profile_argument_shows_in_help_and_bad_args(self):
+        p = self.gate("owner-b", "help")
+        self.assertRc(p, 0)
+        self.assertIn("  nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식> [프로필]\n", p.stdout)
+        self.assertIn("프로필은 정책에 있는 이름만", p.stdout)
+        self.assertIn("형식: nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식> [프로필]",
+                      self.gate("member-x", "help nginx-add-location").stdout)
+        p = self.gate("owner-b", "nginx-add-location card-decision POST")
+        self.assertRc(p, 2)
+        self.assertIn("<정규식> [프로필]", p.stderr)
+        # 프로필 인자가 붙어도 플래그는 어디에든 올 수 있다
+        p = self.gate("owner-b", f"nginx-add-location --dry-run card-decision POST {GOOD_REGEX} big-body")
+        self.assertRc(p, 0)
+        self.assertIn("프로필 big-body", p.stdout)
+
+
+class UsabilityTests(GateCase):
+    """사용법 오류를 줄이는 장치: help, 플래그 순서 무관, 오류 안내. 안전 경계는 그대로다."""
+
+    def test_help_lists_only_my_actions_without_sudo(self):
+        p = self.gate("member-x", "help")
+        self.assertRc(p, 0)
+        self.assertIn("계정 member-x 에 허용된 동작:", p.stdout)
+        for line in ("  status", "  deploy-bundle <SHA>", "  record-pr <참조: 백업폴더명 또는 SHA> <PR번호>"):
+            self.assertIn(line + "\n", p.stdout)
+        self.assertNotIn("  restart-backend <SHA>", p.stdout)
+        self.assertIn("이 계정에 없는 동작(권한자에게 요청한다): lock unlock nginx-restore nginx-add-location "
+                      "nginx-approve-location restart-backend rollback-bundle", p.stdout)
+        self.assertIn("--dry-run", p.stdout)
+        self.assertIn("ax-gate 0.3.0", p.stdout)
+        self.assertEqual(self.calls(), "")                       # sudo 를 부르지 않는다(앞단에서 끝난다)
+        self.assertIn("user=member-x\taction=help\targs=-\tmode=real\tannounced=no\tpr=-\tnote=-\t"
+                      "layer=front\tresult=help", self.audit_text())
+        self.assertNotIn("layer=root", self.audit_text())
+
+    def test_help_for_owner_and_for_one_action(self):
+        p = self.gate("owner-a", "help")
+        self.assertRc(p, 0)
+        self.assertIn("  restart-backend <SHA> --ack-data-loss\n", p.stdout)
+        self.assertNotIn("이 계정에 없는 동작", p.stdout)
+        p = self.gate("member-x", "help restart-backend")
+        self.assertRc(p, 0)
+        self.assertIn("형식: restart-backend <SHA> --ack-data-loss", p.stdout)
+        self.assertIn("이 동작 권한이 없다", p.stdout)
+        self.assertIn("action=help\targs=restart-backend\t", self.audit_text())
+        self.assertIn("이 동작을 쓸 수 있다", self.gate("owner-a", "help restart-backend").stdout)
+        for alias in ("--help", "-h"):
+            self.assertRc(self.gate("member-x", alias), 0)
+        self.assertEqual(self.calls(), "")
+
+    def test_help_rejects_extra_or_unknown_words_and_never_echoes_them(self):
+        p = self.gate("member-x", "help /etc/shadow")
+        self.assertRc(p, 2)
+        self.assertNotIn("/etc/shadow", p.stderr + p.stdout + self.audit_text())
+        self.assertRc(self.gate("member-x", "help status extra"), 2)
+        p = self.gate("member-x", "help deploy")
+        self.assertRc(p, 2)
+        self.assertIn("비슷한 동작: deploy-bundle", p.stderr)
+        self.assertEqual(self.calls(), "")
+
+    def test_help_works_while_locked_and_is_front_only(self):
+        write(self.lock, "garbage\n")
+        self.assertRc(self.gate("member-x", "help"), 0)
+        # 뒷단은 help 를 모른다(앞단 전용). root 로 도는 코드가 늘지 않는다.
+        self.assertRc(self.root_step(["member-x", "0", "0", "-", "help"]), 2)
+        self.assertIn("layer=root\tresult=denied:unknown-action", self.audit_text())
+
+    def test_flags_are_recognized_anywhere_after_the_action(self):
+        self.assertRc(self.gate("owner-b", f"deploy-bundle --announced {SHA} pr=963"), 0)
+        self.assertRc(self.gate("owner-b", f"deploy-bundle pr=964 {SHA} --announced"), 0)
+        audit = self.audit_text()
+        for pr in ("963", "964"):
+            self.assertIn(f"action=deploy-bundle\targs={SHA}\tmode=real\tannounced=yes\tpr={pr}\tnote=-\t"
+                          "layer=root\tresult=start", audit)
+        p = self.gate("owner-b", f"deploy-bundle --dry-run {SHA}")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN:", p.stdout)
+        p = self.gate("owner-a", f"nginx-add-location --dry-run other POST {GOOD_REGEX}")
+        self.assertRc(p, 0)
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/pending"), [])
+        # 동작은 여전히 맨 앞이어야 한다
+        self.assertRc(self.gate("owner-b", f"--announced deploy-bundle {SHA}"), 2)
+        self.assertRc(self.gate("owner-b", f"pr=1 deploy-bundle {SHA} --announced"), 2)
+        # 알림 확인이 빠지면 순서와 상관없이 멈춘다
+        self.assertRc(self.gate("owner-b", f"deploy-bundle pr=965 {SHA}"), 2)
+        self.assertIn("pr=965\tnote=-\tlayer=front\tresult=denied:not-announced", self.audit_text())
+
+    def test_restart_accepts_ack_before_sha_and_root_layer_stays_strict(self):
+        for cmd in (f"restart-backend --ack-data-loss {SHA} --announced",
+                    f"restart-backend --announced --ack-data-loss {SHA}",
+                    f"restart-backend {SHA} --announced --ack-data-loss"):
+            with self.subTest(cmd=cmd):
+                self.assertRc(self.gate("owner-a", cmd), 0)
+        audit = self.audit_text()
+        self.assertEqual(audit.count(f"action=restart-backend\targs={SHA} --ack-data-loss\tmode=real\t"
+                                     "announced=yes\tpr=-\tnote=-\tlayer=root\tresult=start"), 3)
+        self.assertEqual(self.calls().count("systemctl restart example-backend"), 3)
+        # 뒷단 검증은 그대로다: 순서가 바뀐 요청을 직접 넣으면 거부한다
+        before = self.calls().count("systemctl restart")
+        self.assertRc(self.root_step(["owner-a", "0", "1", "-", "restart-backend", "--ack-data-loss", SHA]), 2)
+        self.assertEqual(self.calls().count("systemctl restart"), before)
+        # 확인 플래그 자체는 여전히 필수다
+        self.assertRc(self.gate("owner-a", f"restart-backend {SHA} --announced"), 2)
+        self.assertRc(self.gate("owner-a", f"restart-backend --ack-data-loss --ack-data-loss --announced"), 2)
+
+    def test_bad_args_shows_the_format_of_that_action(self):
+        cases = {
+            "deploy-bundle": "형식: deploy-bundle <SHA>",
+            "lock": "형식: lock <사유> [해제시각 YYYY-MM-DDTHH:MM]",
+            "nginx-add-location n POST": "형식: nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식>",
+            "nginx-approve-location n": "형식: nginx-approve-location <이름> <확인값 12자>",
+            f"restart-backend {SHA}": "형식: restart-backend <SHA> --ack-data-loss",
+            "record-pr x": "형식: record-pr <참조: 백업폴더명 또는 SHA> <PR번호>",
+            "status now": "형식: status",
+        }
+        for cmd, want in cases.items():
+            with self.subTest(cmd=cmd):
+                p = self.gate("owner-a", cmd)
+                self.assertRc(p, 2)
+                self.assertIn(want, p.stderr)
+        p = self.gate("owner-a", f"deploy-bundle {SHA} --anounced-zzqq")
+        self.assertRc(p, 2)
+        self.assertIn("모르는 옵션이 있다", p.stderr)
+        self.assertNotIn("zzqq", p.stderr + self.audit_text())
+        self.assertEqual(self.audit_text().count("result=denied:bad-args"), len(cases) + 1)
+        self.assertEqual(self.calls(), "")
+
+    def test_unknown_action_suggests_known_actions_only(self):
+        for cmd, want in ((f"deploy {SHA}", "비슷한 동작: deploy-bundle"),
+                          ("restart", "비슷한 동작: restart-backend"),
+                          ("rollback", "비슷한 동작: rollback-bundle"),
+                          ("deploy_bundle", "비슷한 동작: deploy-bundle"),
+                          ("nginx-add", "nginx-add-location"),
+                          ("usage", "비슷한 동작: help")):
+            with self.subTest(cmd=cmd):
+                p = self.gate("owner-a", cmd)
+                self.assertRc(p, 2)
+                self.assertIn(want, p.stderr)
+        p = self.gate("owner-a", "cat /etc/shadow")
+        self.assertRc(p, 2)
+        self.assertNotIn("비슷한 동작", p.stderr)
+        self.assertIn("help 로 내 계정에 허용된 동작을 본다", p.stderr)
+        self.assertNotIn("/etc/shadow", p.stderr + self.audit_text())
+        self.assertEqual(self.calls(), "")
+
+    def test_bad_regex_explains_braces_quotes_and_wildcards(self):
+        base = "nginx-add-location zzqq-name POST "
+        p = self.gate("owner-a", base + "^/example-api/api/items/zzqq/[0-9a-f]{8}$")
+        self.assertRc(p, 2)
+        self.assertIn("중괄호", p.stderr)
+        self.assertIn("[0-9a-f]+", p.stderr)
+        p = self.gate("owner-a", base + "'^/example-api/api/items/zzqq/[^/]+$'")
+        self.assertRc(p, 2)
+        self.assertIn("명령 전체를 작은따옴표", p.stderr)
+        p = self.gate("owner-a", base + "^/example-api/api/items/zzqq/.*$")
+        self.assertRc(p, 2)
+        self.assertIn("[^/]+ 로 적는다", p.stderr)
+        p = self.gate("owner-a", base + "^/example-api/api/items/zzqq/x?$")
+        self.assertRc(p, 2)
+        self.assertEqual(self.audit_text().count("result=denied:bad-regex"), 4)
+        # 받은 정규식은 출력·기록하지 않는다
+        self.assertNotIn("zzqq/", p.stderr + self.audit_text())
+        self.assertEqual(self.calls(), "")
+        # 안내대로 허용 묶음으로 바꾸면 통과한다
+        self.assertRc(self.gate("owner-a", base + "^/example-api/api/items/zzqq/[0-9a-f]+$"), 0)
+
+    def test_not_permitted_lists_what_this_account_can_do(self):
+        p = self.gate("member-x", "lock demo")
+        self.assertRc(p, 3)
+        self.assertIn("이 계정에 허용된 동작: status deploy-bundle record-pr", p.stderr)
+        p = self.gate("restore-only", f"deploy-bundle {SHA} --announced")
+        self.assertRc(p, 3)
+        self.assertIn("이 계정에 허용된 동작: status nginx-restore nginx-approve-location", p.stderr)
+
+    def test_version_has_no_draft_suffix(self):
+        p = self.gate("member-x", "status")
+        self.assertIn("ax-gate 0.3.0 — status", p.stdout)
+        self.assertNotIn("draft", p.stdout)
+
 
 class ExamplePolicyTests(GateCase):
     def test_gate_can_load_the_example_policy(self):

@@ -142,6 +142,10 @@ from planning_agent.domain.proposal_actions import PROPOSAL_ORIGIN, ProposalMixi
 from planning_agent.domain.returned_actions import RETURNED_DEV, ReturnedMixin, return_ctx
 from planning_agent.spec_writer import SpecWriter, default_writer
 
+# 결정 기록(record_case·check_plan·retire_request_cards)을 받는 곳. 활동·창구에 이 이름으로 남긴다.
+# 11/16 #1131에서 인사(hr)에서 아카이브로 나뉨. 예전 기록의 "hr" 줄도 그대로 읽는다.
+ARCHIVE = "archive"
+
 SAMPLE_TICKETS = {
     "support": [
         "배송 조회 화면에서 송장 번호가 안 보인다",
@@ -637,12 +641,14 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
     def _hr_act(self, ctx: str, case: str, hr: HrRecordResult | None) -> Activity:
         """인사 기록 활동 한 줄. 실제로 불렀으면 결과(카드·실패)를 붙인다."""
         if hr is None:
-            return self._act(self.clock(), ctx, "planning", "hr", "record_case", "A2A", case, "A")
+            return self._act(
+                self.clock(), ctx, "planning", ARCHIVE, "record_case", "A2A", case, "A"
+            )
         return self._act(
             self.clock(),
             ctx,
             "planning",
-            "hr",
+            ARCHIVE,
             "record_case",
             "A2A",
             f"{case} → {hr.text}",
@@ -879,7 +885,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
                 t,
                 ctx,
                 "planning",
-                "hr",
+                ARCHIVE,
                 "check_plan",
                 "A2A",
                 plan.text if plan else "② 인사 기각 이력 확인 → 없음",
@@ -1280,7 +1286,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
             s.activity.append(act)
             return act
 
-        step("planning", "hr", "check_plan", "A2A", "② 인사 기각 이력 확인 → 없음", "read")
+        step("planning", ARCHIVE, "check_plan", "A2A", "② 인사 기각 이력 확인 → 없음", "read")
 
         spec_text = (
             f"{spec_id} 작성 (요구사항 1, 완료 기준 1, 질문 0) → 간단 요청 규칙으로 자동 확정"
@@ -1568,7 +1574,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
             async def log(s: State, ctx: str = ctx, text: str = text, ok: bool = res.ok) -> None:
                 s.activity.append(
                     self._act(
-                        self.clock(), ctx, "planning", "hr", "retire_request_cards", "A2A",
+                        self.clock(), ctx, "planning", ARCHIVE, "retire_request_cards", "A2A",
                         text, "A" if ok else None,
                     )
                 )  # fmt: skip
@@ -1928,7 +1934,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
                     self.clock(),
                     ctx,
                     "planning",
-                    "hr",
+                    ARCHIVE,
                     "record_case",
                     "A2A",
                     f"{case} · {audit}",

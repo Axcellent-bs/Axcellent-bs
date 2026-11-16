@@ -140,7 +140,7 @@ class HrClient:
     async def _ask(self, req: AgentRequest) -> AgentResult | str:
         """인사에 묻는다. 못 받으면 까닭(문자열)을 돌려준다."""
         try:
-            out = await asyncio.wait_for(self._call("hr", req), self.timeout)
+            out = await asyncio.wait_for(self._call("archive", req), self.timeout)
         except TimeoutError:
             return f"{int(self.timeout)}초 안에 응답 없음"
         except Exception as exc:  # 서비스 꺼짐·연결 실패

@@ -358,7 +358,7 @@ function RoomPane(p: PaneProps) {
   };
 
   const links = [
-    ...(inc ? [{ href: `/orchestrator?ctx=${encodeURIComponent(inc.context_id)}`, label: "사건 자세히" }] : []),
+    ...(inc ? [{ href: `/archive/incidents?ctx=${encodeURIComponent(inc.context_id)}`, label: "사건 자세히" }] : []),
     ...(direct ? [] : [{ href: `/agents/office?room=${encodeURIComponent(room)}`, label: "AI 오피스에서 보기" }]),
   ];
   const head = (

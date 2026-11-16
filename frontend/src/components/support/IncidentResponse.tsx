@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "@/components/finance/bits";
 import { Link } from "@/lib/nav";
-import { STEP_STATUS, adminRelay, relayEnabled, type Incident } from "@/lib/adminRelay";
+import { adminRelay, relayEnabled, stepStatus, type Incident } from "@/lib/adminRelay";
 import { incidentTitle, skillKo, stepLabel } from "@/lib/agentChat";
 import { shortDateTime } from "@/lib/format";
 import { support, type ExecutionRow } from "@/lib/support";
@@ -45,7 +45,7 @@ export function buildRows(incident: Incident, executions: ExecutionRow[]): Row[]
       return {
         id: `step-${s.step_id}`, at: (done ? s.finished_at : null) ?? s.started_at!, source: "step" as const, label: stepLabel(s.label), who: "고객지원 AI",
         state: done ? "applied" : blocked ? "blocked" : "waiting",
-        stateLabel: done ? "적용됨" : STEP_STATUS[s.status]?.label ?? s.status, grade: s.grade,
+        stateLabel: done ? "적용됨" : stepStatus(s.status).label, grade: s.grade,
       };
     });
   const execs: Row[] = executions
@@ -61,14 +61,15 @@ export function buildRows(incident: Incident, executions: ExecutionRow[]): Row[]
 }
 
 /** 사건이 열린 뒤 몇 분 몇 초 만인지 */
-export function elapsed(fromIso: string, atIso: string): string {
+export function elapsed(fromIso: string | null, atIso: string): string {
+  if (!fromIso) return "–";
   const sec = Math.round((Date.parse(atIso) - Date.parse(fromIso)) / 1000);
   if (Number.isNaN(sec)) return "–";
   if (sec < 0) return "사건 시작 전";
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
   return `+${h ? `${h}시간 ` : ""}${m || h ? `${m}분 ` : ""}${s}초`;
 }
-const secondsOf = (iso: string) => new Date(iso).toLocaleTimeString("ko-KR", { hour12: false });
+const secondsOf = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour12: false }) : "–");
 
 function Detail({ incident, tick }: { incident: Incident; tick: number }) {
   const res = useResource(`support-executions-${incident.context_id}`, () => support.executions(incident.context_id), tick);
@@ -134,7 +135,7 @@ export function IncidentResponse({ tick }: { tick: number }) {
   const list = useResource("support-incident-list", async () => ({ data: (await adminRelay.incidents()).data, meta: { mock: false } }), tick);
   const [picked, setPicked] = useState<string | null>(null);
   const incidents = useMemo(
-    () => [...(list.env?.data ?? [])].sort((a, b) => Date.parse(b.opened_at) - Date.parse(a.opened_at)),
+    () => [...(list.env?.data ?? [])].sort((a, b) => Date.parse(b.opened_at ?? "") - Date.parse(a.opened_at ?? "")),
     [list.env],
   );
   // 기본은 가장 최근의 결제 사건, 없으면 가장 최근 사건
