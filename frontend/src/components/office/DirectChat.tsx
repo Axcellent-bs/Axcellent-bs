@@ -80,7 +80,7 @@ export const DIRECT_AGENTS: DirectAgent[] = [
   { key: "finance", name: "재무 AI", note: "손익·결산·판매자 정산 결과(고객지원이 계산)·통장 대조·현금 흐름·캠페인 손익·장애 비용을 장부 숫자로 읽고 설명해요. 대화로 장부를 바꾸거나 비용을 승인하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/finance-chat" }, { closable: true }) },
   { key: "data", name: "데이터분석 AI", note: "트렌드·인사이트·영상 성과·캠페인 결과·수집 상태를 숫자로 읽고 설명해요. 대화로 바꾸는 일은 하지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요. 개인정보·비밀은 적지 마세요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/data-chat" }, { closable: true }) },
   { key: "infra", name: "인프라 AI", note: "최근 배포, 결제 서버 상태, 장애 사건의 진단·롤백·복구 확인 결과를 읽고 설명해요. 대화로 롤백하거나 장애를 넣고 빼지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/infra-chat" }, { closable: true }) },
-  { key: "safety", name: "안전규칙 AI", note: "어떤 일에 어떤 안전규칙(기준)이 걸려 있는지, 어떤 일이 왜 보류됐고 어디서 결정하는지를 안전규칙 기록으로 읽고 설명해요. 대화로 승인하거나 기준을 바꾸지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: SAFETY_API_URL, path: "/api/safety/chat" }, { closable: true }) },
+  { key: "safety", name: "안전규칙 AI", note: "어떤 일에 어떤 안전규칙(기준)이 걸려 있는지, 어떤 일이 왜 보류됐고 어디서 결정하는지를 안전규칙 기록으로 읽고 설명해요. 대화로 승인하거나 기준을 바꾸지 않아요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: SAFETY_API_URL, path: "/api/safety/chat" }, { closable: true, getByQuery: true }) },
   { key: "marketing", name: "마케팅 AI", note: "마케팅 일을 물어보면 마케팅 AI가 답해요. 답이 오기까지 몇 초 걸릴 수 있어요.", live: true, talk: directChatApi({ base: DASHBOARD_API_URL, path: "/api/dashboard/marketing-chat" }) },
 ];
 export const directAgentOf = (room: string) =>

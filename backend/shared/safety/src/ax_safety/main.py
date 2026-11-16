@@ -290,9 +290,21 @@ def create_app(
     def _refused(exc: ChatRefused) -> JSONResponse:
         return _error(exc.status, exc.code, exc.message)
 
-    @app.get("/api/safety/chat")
-    def chat_list(authorization: str | None = Header(default=None)) -> dict:
-        return _ok(chat.list(_who(authorization, False)))
+    @app.get("/api/safety/chat", response_model=None)
+    def chat_list(
+        thread_id: str | None = None, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """목록. `?thread_id=`면 그 대화 하나 (`/chat/{id}`와 같다).
+
+        공유 서버(251) nginx는 사람 토큰을 정해 둔 경로에만 붙여서, 화면은 상세도 이 주소로 읽는다.
+        """
+        who = _who(authorization, False)
+        if thread_id is None:
+            return _ok(chat.list(who))
+        try:
+            return _ok(chat.get(who, thread_id))
+        except ChatRefused as exc:
+            return _refused(exc)
 
     @app.get("/api/safety/chat/{thread_id}", response_model=None)
     def chat_get(
