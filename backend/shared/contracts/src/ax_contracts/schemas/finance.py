@@ -130,6 +130,9 @@ class CampaignBudgetReviewInput(AxModel):
     campaign_name: str
     channel: str
     requested_krw: int = Field(gt=0)
+    # 캠페인이 다루는 상품 ID(선택, 최대 10개). 재무가 고객지원 `book_issue_stats`(`claims`)로
+    # 불만 많은 책인지 읽는 데 쓴다. 비워 두면(옛 요청) 상품 신호를 반영하지 않는다
+    product_ids: list[str] = Field(default_factory=list, max_length=10)
 
 
 class CampaignBudgetReviewOutput(AxModel):

@@ -105,6 +105,7 @@ class BookIssueRow(AxModel):
   - 비율 = 접수 기간의 클레임 수량(`claim_qty`, 고객이 요청한 수량) / 같은 기간 판매 수량. 오래전 주문의 클레임도
     접수 기간에 들어와 1을 넘을 수 있다 (`missing`에 항상 알린다). 기간 안 판매가 0이면 비율은 None.
   - `include_sales=false`면 판매 서버를 읽지 않는다. 주문 출처가 시드(목 모드)면 읽지 않는다.
+- 계약 위치(2026-11-17): `BookIssueInput`·`BookIssueReport`(와 `BookIssueRow`·`CategoryCount`·`PERIOD_DAYS`)를 `shared/contracts`의 `ax_contracts/schemas/book_issue.py`로 옮겼다(예진 님 리뷰: 재무·데이터가 `domains`끼리 import하지 않고 읽으려면 계약에 있어야 한다). 고객지원의 `book_issue_schemas.py`는 같은 이름으로 다시 내보내 기존 import가 그대로 되고, 문의 서비스 쪽 모델(`InquiryOrderCounts*`)은 도메인에 남긴다. 재무 예산 검토 입력 `CampaignBudgetReviewInput`에는 선택 칸 `product_ids`(최대 10개)를 더했다(B안 ①).
 - 데이터·기획 연결(2026-11-16): 데이터 브리프가 `book_issue_stats`를 A2A로 불러 연결 상품의 고객 반응 숫자를 근거로 담고(#1125), 기획 근거 줄과 `product_ids` 선택 칸으로 넘긴다(#1128). 짚어 물은 상품의 0건 행(#1129), 사유별 클레임 수 `claims_by_reason`(#1147)은 데이터 요청으로 더했다.
 - 아직 없는 것: 문의 품목 단위 귀속(접수 화면 변경 필요), 상품과 ISBN 매핑(판매 서버 상품에 `isbn13`·`author`·`publisher` 칸은 생겼고 책 데이터는 예진 님이 채우는 중).
   (한 번에 3만 주문이 넘는 기간의 판매 수량은 판매 집계 읽기 경로로 해결했다 — #1145. 251은 옛 판매 서버라 캣북스를 따로 배포하기 전까지는 주문 목록 3만 건 상한이 남는다.)
