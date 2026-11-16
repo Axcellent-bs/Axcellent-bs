@@ -285,6 +285,7 @@ nginx
 
 - [ ] `restart-backend <서버 HEAD SHA> --ack-data-loss --dry-run`의 백업 대상이 맞는지
   - 백업 폴더 항목은 결과물이 `<이름>.tgz`(sqlite 파일 제외)와 `<이름>-sqlite/`(700 폴더) 둘로 나뉜다
+  - `backup_sqlite`에 적은 파일은 별도 파일로만 저장되고 `-sqlite/` 폴더에는 들어가지 않는다(`--dry-run`에 `중복 건너뜀` 줄)
   - 정책에 `backup_keep`을 적었다면 `보관 정리 예정` 목록이 의도한 오래된 세트뿐인지
 - [ ] 실제 재시작은 다음에 재시작이 필요한 때 게이트로 해 보고 걸린 시간과 health 결과를 적는다
 

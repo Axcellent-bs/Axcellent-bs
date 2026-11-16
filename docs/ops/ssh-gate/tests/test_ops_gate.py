@@ -1068,6 +1068,85 @@ class RestartBackupRetentionTests(GateCase):
         self.assertRegex(p.stdout, r"백업 보관: 5세트, 합계 .*backup_keep=5")
 
 
+class RestartSqliteDedupeTests(GateCase):
+    """backup_sqlite 로 이미 뜬 파일은 폴더 백업의 -sqlite 복사에서 건너뛴다(같은 파일을 두 번 저장하지 않는다)."""
+    CMD = f"restart-backend {SHA} --ack-data-loss --announced"
+
+    def setUp(self):
+        super().setUp()
+        d = self.rootp / "data/data-dir"
+        y = sqlite3.connect(str(d / "y.db"))
+        y.execute("create table t (v text)")
+        y.execute("insert into t values ('y-row')")
+        y.commit()
+        y.close()
+        self.sq = self.rootp / "backups" / f"data-dir.bak-before-{SHA[:8]}-sqlite"
+
+    def set_sqlite(self, items):
+        arr = ", ".join(f'"{self.root}/{i}"' for i in items)
+        old = f'backup_sqlite = ["{self.root}/data/app.db"]'
+        write(self.policy, policy_text(self.root).replace(old, f"backup_sqlite = [{arr}]"))
+
+    def test_overlap_goes_to_separate_file_only(self):
+        self.set_sqlite(["data/app.db", "data/data-dir/x.db"])
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        bdir = self.rootp / "backups"
+        self.assertTrue((bdir / f"x.db.bak-before-{SHA[:8]}").is_file())
+        self.assertFalse((self.sq / "x.db").exists())
+        self.assertTrue((self.sq / "y.db").is_file())
+        self.assertIn("중복 건너뜀: x.db (backup_sqlite로 이미 백업)", p.stdout)
+        self.assertNotIn("중복 건너뜀: y.db", p.stdout)
+
+    def test_no_overlap_behaves_as_before(self):
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertTrue((self.sq / "x.db").is_file())
+        self.assertTrue((self.sq / "y.db").is_file())
+        self.assertNotIn("중복 건너뜀", p.stdout)
+
+    def test_empty_backup_sqlite_puts_everything_in_folder(self):
+        self.set_sqlite([])
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertTrue((self.sq / "x.db").is_file())
+        self.assertTrue((self.sq / "y.db").is_file())
+        self.assertNotIn("중복 건너뜀", p.stdout)
+
+    def test_dry_run_shows_skip_line_and_writes_nothing(self):
+        self.set_sqlite(["data/app.db", "data/data-dir/x.db"])
+        p = self.gate("owner-a", f"restart-backend {SHA} --ack-data-loss --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("중복 건너뜀: x.db (backup_sqlite로 이미 백업)", p.stdout)
+        self.assertEqual(os.listdir(self.rootp / "backups"), [])
+
+    def test_all_dbs_overlapping_leaves_empty_folder_still_a_set_for_prune(self):
+        self.set_sqlite(["data/app.db", "data/data-dir/x.db", "data/data-dir/y.db"])
+        bdir = self.rootp / "backups"
+        t0 = time.time() - 100000
+        olds = [f"{i:08x}" for i in range(0xa0, 0xa4)]
+        for n, sha in enumerate(olds):
+            tgz = bdir / f"data-dir.bak-before-{sha}.tgz"
+            tgz.write_text("x", encoding="utf-8")
+            sq = bdir / f"data-dir.bak-before-{sha}-sqlite"
+            sq.mkdir()                                     # 안이 빈 -sqlite 폴더
+            for q in (tgz, sq):
+                os.utime(q, (t0 + n * 1000, t0 + n * 1000))
+        text = policy_text(self.root).replace("poll_seconds = 0\n", "poll_seconds = 0\nbackup_keep = 3\n")
+        write(self.policy, text.replace(
+            f'backup_sqlite = ["{self.root}/data/app.db"]',
+            f'backup_sqlite = ["{self.root}/data/app.db", "{self.root}/data/data-dir/x.db", "{self.root}/data/data-dir/y.db"]'))
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertEqual(os.listdir(self.sq), [])
+        for sha in olds[:2]:
+            self.assertFalse((bdir / f"data-dir.bak-before-{sha}.tgz").exists())
+            self.assertFalse((bdir / f"data-dir.bak-before-{sha}-sqlite").exists())
+        for sha in olds[2:]:
+            self.assertTrue((bdir / f"data-dir.bak-before-{sha}.tgz").exists())
+            self.assertTrue((bdir / f"data-dir.bak-before-{sha}-sqlite").is_dir())
+
+
 class NginxTwoPersonTests(GateCase):
     def backup_dirs(self):
         return sorted(os.listdir(self.rootp / "etc/nginx/backup"))
