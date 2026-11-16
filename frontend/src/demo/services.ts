@@ -26,7 +26,7 @@ export const FAMILIES: { id: Family; name: string; desc: string }[] = [
  */
 export type AgentId = 'orchestrator' | 'safety' | 'support' | 'finance' | 'data' | 'archive' | 'hr' | 'marketing' | 'planning' | 'dev'
 export const AGENTS: { id: AgentId; name: string; Icon: ComponentType<{ size?: number }>; backend: string }[] = [
-  { id: 'orchestrator', Icon: IconBolt, name: '총괄', backend: 'orchestrator (8000) · shop-api 관리 중계 (8010)' },
+  { id: 'orchestrator', Icon: IconBolt, name: '총괄 AI', backend: 'orchestrator (8000) · shop-api 관리 중계 (8010)' },
   { id: 'safety', Icon: IconLock, name: '안전규칙 AI', backend: 'safety (8001)' },
   { id: 'archive', Icon: IconBook, name: '아카이브 AI', backend: 'decisions (8114) · dashboard-api (8020)' },
   { id: 'support', Icon: IconUser, name: '고객지원 AI', backend: 'dashboard-api (8020)' },
@@ -133,7 +133,7 @@ export const SERVICES: Service[] = [
   },
   {
     id: 'decisions', agent: 'archive', family: 'backoffice', name: '장애·업무 기록', by: 'AXcellent', Icon: IconBook, entry: '/archive/incidents', paths: ['/ops', '/archive'],
-    desc: '장애 기록(총괄이 처리한 이슈와 해결 내용)과 업무 기록(회사의 결정, 기각된 안과 겹치는지 확인)을 남기고 찾아봅니다.',
+    desc: '장애 기록(총괄 AI가 처리한 이슈와 해결 내용)과 업무 기록(회사의 결정, 기각된 안과 겹치는지 확인)을 남기고 찾아봅니다.',
     children: [
       { href: '/archive/incidents', label: '장애 기록' },
       { href: '/ops', label: '업무 기록' },
@@ -169,7 +169,7 @@ export const SERVICES: Service[] = [
     ],
   },
   {
-    id: 'orchestrator', agent: 'orchestrator', family: 'together', name: '총괄·사건', by: 'AXcellent', Icon: IconBolt, entry: '/orchestrator', paths: ['/orchestrator'],
+    id: 'orchestrator', agent: 'orchestrator', family: 'together', name: '총괄 AI·사건', by: 'AXcellent', Icon: IconBolt, entry: '/orchestrator', paths: ['/orchestrator'],
     desc: '여러 서비스에 걸친 사건을 묶어 조율하고 사람 승인을 받습니다.',
   },
   {

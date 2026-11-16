@@ -21,7 +21,7 @@ export const DESKS: DeskDef[] = [
   { key: "archive", label: "아카이브", x: 14, y: 92, shirt: "#7c3aed", hair: "#2b1d14", skin: "#f2c9a0" },
   // 개발: 기획 맞은편 의자(뒷모습). x·y는 쓰는 곳이 없어(그림 자리는 PixelOffice SEATS) 기획 아래쪽 값만 둔다
   { key: "dev", label: "개발", x: 14, y: 150, shirt: "#0369a1", hair: "#3a2a1a", skin: "#f2c9a0" },
-  { key: "orchestrator", label: "총괄", x: 194, y: 128, shirt: "#2e2688", hair: "#222222", skin: "#f5d0b0" },
+  { key: "orchestrator", label: "총괄 AI", x: 194, y: 128, shirt: "#2e2688", hair: "#222222", skin: "#f5d0b0" },
   // 안전규칙: 위 책상 앞쪽 의자(뒷모습). 모든 AI의 실행 요청(execute)을 받아 등급을 매긴다. x·y는 쓰는 곳이 없다
   { key: "safety", label: "안전규칙", x: 74, y: 92, shirt: "#475569", hair: "#1b1b1b", skin: "#f5d0b0" },
 ];

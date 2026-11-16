@@ -178,7 +178,7 @@ export default function IncidentCompensationQueue() {
       })}
 
       {list !== null && incidents.length === 0 && !error && (
-        <p className="mt-3 text-sm text-ink-500">총괄이 장애 복구 뒤 영향 고객을 올리면 여기에 나타납니다. 승인하기 전에는 아무에게도 쿠폰이 나가지 않습니다.</p>
+        <p className="mt-3 text-sm text-ink-500">총괄 AI가 장애 복구 뒤 영향 고객을 올리면 여기에 나타납니다. 승인하기 전에는 아무에게도 쿠폰이 나가지 않습니다.</p>
       )}
       {(list?.notes ?? []).length > 0 && incidents.length > 0 && (
         <ul className="mt-3 list-disc space-y-0.5 pl-4 text-[11px] text-ink-500">

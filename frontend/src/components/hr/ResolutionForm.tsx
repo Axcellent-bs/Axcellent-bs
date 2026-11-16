@@ -82,7 +82,7 @@ export default function ResolutionForm({ inc }: { inc: OrchIncident }) {
           <span className="ml-2">
             {draft.source === "past_case"
               ? "같은 유형의 과거 이슈에서 가져왔어요. 이번 원인과 같은지 확인하거나 고친 뒤 남겨 주세요."
-              : "총괄이 아는 사실만 채웠어요. 맞는지 확인하거나 고친 뒤 남겨 주세요."}
+              : "총괄 AI가 아는 사실만 채웠어요. 맞는지 확인하거나 고친 뒤 남겨 주세요."}
           </span>
           <ul className="mt-1 list-disc pl-5">{draft.basis.map((b) => <li key={b}>{b}</li>)}</ul>
           {draft.source === "past_case" && draft.this_event_cause && (

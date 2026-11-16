@@ -20,7 +20,7 @@ export default function OrchestratorPage() {
 
   // 예전 주소(/orchestrator?ctx=…)로 들어오면 장애 기록의 그 이슈로 보낸다
   if (ctx) return <Navigate to={`/archive/incidents?ctx=${encodeURIComponent(ctx)}`} replace />;
-  if (!incidents) return <Loading error={error} what="총괄 이슈를 불러오는 중…" />;
+  if (!incidents) return <Loading error={error} what="총괄 AI 이슈를 불러오는 중…" />;
 
   const holds = incidents.reduce((n, i) => n + i.pending_holds.length, 0);
   const faults = incidents.filter((i) => !isInquiry(i.kind));
@@ -31,7 +31,7 @@ export default function OrchestratorPage() {
     <div className="space-y-8 px-8 pb-12 pt-2">
       <header className="flex flex-wrap items-end gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">총괄</h1>
+          <h1 className="text-2xl font-bold tracking-tight">총괄 AI</h1>
           <p className="mt-1 text-sm text-ink-500"><CompanyName />에서 문제가 생기면 총괄 AI가 이슈 하나로 묶고, 부서에 일을 나눠 맡깁니다. 사람 승인이 필요한 일만 사람에게 올립니다. 이 화면은 보기만 할 수 있습니다.</p>
         </div>
         <div className="ml-auto flex items-center gap-2 text-xs">
@@ -79,7 +79,7 @@ export default function OrchestratorPage() {
 
       <section className="card space-y-2 p-6" aria-labelledby="orch-eval">
         <div className="flex items-center gap-2"><h2 id="orch-eval" className="text-lg font-semibold">에이전트 평가 진단</h2><PreparingChip /></div>
-        <p className="text-sm text-ink-500">인사 AI의 에이전트 평가 결과를 총괄이 받아 부서별 문제를 진단하는 자리입니다. 아직 연결되지 않았습니다.</p>
+        <p className="text-sm text-ink-500">인사 AI의 에이전트 평가 결과를 총괄 AI가 받아 부서별 문제를 진단하는 자리입니다. 아직 연결되지 않았습니다.</p>
       </section>
     </div>
   );

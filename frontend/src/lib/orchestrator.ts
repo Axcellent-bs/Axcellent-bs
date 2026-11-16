@@ -10,7 +10,7 @@ async function callRaw<T, M = Record<string, unknown>>(path: string, init?: Requ
   if (!res.ok) {
     // FastAPI HTTPException은 {detail}, 직접 만든 오류는 {error: {message}}
     const message = body?.error?.message ?? (typeof body?.detail === "string" ? body.detail : null);
-    throw new ApiError(message ?? `총괄 요청 실패 (${res.status})`, res.status);
+    throw new ApiError(message ?? `총괄 AI 요청 실패 (${res.status})`, res.status);
   }
   return { data: body.data as T, meta: (body.meta ?? {}) as M };
 }

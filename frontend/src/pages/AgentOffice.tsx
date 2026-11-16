@@ -153,7 +153,7 @@ export default function AgentOffice() {
     return new Set([...items.filter((it) => fresh(seen, it.id)), ...talk.items.filter((it) => fresh(humanSeen, it.id))].map((it) => it.id));
   }, [items, seen, talk.items, humanSeen, now]);
   const typing: Typing[] = DESKS.filter((d) => view.desks[d.key].state === "working").map((d) => ({
-    key: d.key, name: d.key === "orchestrator" ? "총괄" : `${d.label} Agent`, what: skillKo(view.desks[d.key].skill) || "작업",
+    key: d.key, name: d.key === "orchestrator" ? "총괄 AI" : `${d.label} Agent`, what: skillKo(view.desks[d.key].skill) || "작업",
   }));
   // 이 방에서 답을 기다리는 부서는 "답을 쓰는" 줄을 하나 더 (총괄 일로 이미 작업 중 줄이 있으면 그대로)
   const talkRoom = mode === "live" ? room : ALL_ROOM;
@@ -199,7 +199,7 @@ export default function AgentOffice() {
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold tracking-tight">AI 오피스</h1>
           <p className="mt-1 text-sm text-ink-500">
-            부서 AI가 지금 무슨 일을 하는지 사무실로 봅니다. 총괄이 일을 맡기면 그 부서가 총괄에게 와서 받아 가고, 일하는 동안 불꽃이 일어납니다. 사람 승인이 필요하면 🚩 승인 대기로 깜빡입니다.
+            부서 AI가 지금 무슨 일을 하는지 사무실로 봅니다. 총괄 AI가 일을 맡기면 그 부서가 총괄 AI에게 와서 받아 가고, 일하는 동안 불꽃이 일어납니다. 사람 승인이 필요하면 🚩 승인 대기로 깜빡입니다.
             {" "}오른쪽 단톡방은 <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">대화 기록</Link>과 같은 방이라 어디서 말해도 양쪽에 보입니다. 캐릭터를 누르면 그 부서와 1:1로 이야기합니다(나만 보임).
           </p>
           {mode === "live" && (
@@ -236,8 +236,8 @@ export default function AgentOffice() {
 
       {mode === "replay" && (
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {autoNote ? "중앙 Agent(총괄)에 연결할 수 없어 리플레이를 보여 줍니다. " : ""}
-          리플레이는 결제 장애(시나리오 A, 롤백 C 등급 보류)를 총괄 응답 모양으로 만든 <b>예시 사건</b>입니다. 숫자는 시연용 값입니다.
+          {autoNote ? "중앙 Agent(총괄 AI)에 연결할 수 없어 리플레이를 보여 줍니다. " : ""}
+          리플레이는 결제 장애(시나리오 A, 롤백 C 등급 보류)를 총괄 AI 응답 모양으로 만든 <b>예시 사건</b>입니다. 숫자는 시연용 값입니다.
         </p>
       )}
       {mode === "campaign" && (
@@ -250,7 +250,7 @@ export default function AgentOffice() {
         <section aria-label="부서 AI 사무실" className="card flex min-w-0 shrink-0 flex-col gap-3 p-4 xl:flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="card-title">부서 AI 사무실</h2>
-            <span className="text-xs text-ink-500">{DESKS.length}자리 · 총괄·안전규칙 포함</span>
+            <span className="text-xs text-ink-500">{DESKS.length}자리 · 총괄 AI·안전규칙 포함</span>
             <span className={`chip ml-auto ${STATUS_LOOK[view.status]}`}>
               <span className={`h-1.5 w-1.5 rounded-full bg-current ${view.status === "alert" ? "animate-pulse" : ""}`} aria-hidden="true" />
               {liveReady ? statusText : "불러오는 중…"}
