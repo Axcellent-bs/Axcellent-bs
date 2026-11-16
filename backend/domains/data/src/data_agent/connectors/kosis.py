@@ -87,6 +87,9 @@ class KosisDataPoint:
     prd_se: str
     prd_de: str
     value: float | None  # DT가 숫자가 아니면 None (0이 아님)
+    # 두 번째 분류 (objL2를 줬을 때, 예: 연령 × 성별 표의 성별). 없으면 빈 문자열
+    c2: str = ""
+    c2_nm: str = ""
 
 
 _cache = DayCache(label=LABEL)
@@ -165,8 +168,12 @@ class KosisConnector:
         start_prd_de: str | None = None,
         end_prd_de: str | None = None,
         new_est_prd_cnt: int | None = None,
+        obj_l2: str | None = None,
     ) -> list[KosisDataPoint]:
-        """통계표 자료. 기간은 시작·끝 또는 최근 n개 시점."""
+        """통계표 자료. 기간은 시작·끝 또는 최근 n개 시점.
+
+        `obj_l2`(선택, 11/16): 두 번째 분류(예: 연령 × 성별 표). 주지 않으면 예전과 같은 요청이다
+        (쿼리에 objL2를 넣지 않는다 → 재생 파일 키도 같다)."""
         query: dict[str, Any] = {
             "method": "getList",
             "orgId": org_id,
@@ -181,6 +188,7 @@ class KosisConnector:
             ("startPrdDe", start_prd_de),
             ("endPrdDe", end_prd_de),
             ("newEstPrdCnt", new_est_prd_cnt),
+            ("objL2", obj_l2),
         ):
             if value is not None:
                 query[name] = value
@@ -199,6 +207,8 @@ class KosisConnector:
                     prd_se=str(r.get("PRD_SE", "")),
                     prd_de=str(r.get("PRD_DE", "")),
                     value=_number(r.get("DT")),
+                    c2=str(r.get("C2", "")),
+                    c2_nm=str(r.get("C2_NM", "")),
                 )
                 for r in rows
             ]

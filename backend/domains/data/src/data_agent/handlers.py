@@ -67,9 +67,13 @@ from ax_contracts.schemas.data import (
     FraudScoreInput,
     ImpactAnalysisInput,
     KpiSummaryInput,
+    MarketCoverageInput,
     PromoConceptsRequest,
     RootCauseInput,
     SalesAnalysisInput,
+    SegmentFavoritesInput,
+    SegmentOptionsInput,
+    SegmentProfileInput,
     ShortsStatsRequest,
     TrendAgeOutput,
     TrendAgeRequest,
@@ -106,7 +110,7 @@ from data_agent.response_cache import ResponseCache
 from data_agent.sales_store import DB_ENV as SALES_DB_ENV
 from data_agent.sales_store import DEFAULT_DB as SALES_DEFAULT_DB
 from data_agent.sales_store import SalesStore
-from data_agent.skills import topic_category
+from data_agent.skills import segment_analysis, topic_category
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
 from data_agent.skills.anomaly_detection import detect_anomalies, env_settings, get_metric_source
@@ -413,6 +417,102 @@ async def sales_analysis(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=sales_evidence(out, now),
+    )
+
+
+# ---- 고객·시장 분석 (11/16). 표준 판매 저장소만 읽는다. LLM 없음, grade read. 저장소 읽기는
+# 스레드에서. 다른 고객사 판매 기록은 읽지 않는다(sales_analysis와 같은 확인)
+
+
+async def segment_options(request: AgentRequest) -> AgentResult:
+    """화면 선택지(속성·장르·분류·질문·이벤트 종류·인구 조합)를 카탈로그 `[sales]`에서."""
+    data = _parse(request, SegmentOptionsInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    out = await asyncio.to_thread(
+        segment_analysis.read_options, get_sales_store(), data.tenant_id, cat.sales, cat.id
+    )
+    version = out.catalog_version or "없음"
+    extra = f"카탈로그 {cat.id} 판 {version}" + (
+        f", 출처 {out.data_source}" if out.data_source else ""
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            queries=["catalog.sales", "sales_store.sync_state"],
+            data_summary=extra,
+            collected_at=now,
+            ref_ids=[],
+        ),
+    )
+
+
+async def segment_profile(request: AgentRequest) -> AgentResult:
+    """분류·장르·상품 구매자 vs 전체 구매자의 속성 구성비·배수."""
+    data = _parse(request, SegmentProfileInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    out = await asyncio.to_thread(
+        segment_analysis.profile, get_sales_store(), data.tenant_id, data.target_kind,
+        data.target_code, data.attribute_keys, data.period, cat.sales, cat.id, now,
+    )  # fmt: skip
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=segment_analysis.evidence(out.basis, now),
+    )
+
+
+async def segment_favorites(request: AgentRequest) -> AgentResult:
+    """속성 묶음이 우리 쇼핑몰에서 산 장르·분류·상품 순위 + 설정된 바깥 출처(정보나루 등)."""
+    data = _parse(request, SegmentFavoritesInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    out = await segment_analysis.favorites_with_external(
+        get_sales_store(), data.tenant_id, data.filters, data.period, data.top, cat.sales,
+        cat.id, now,
+    )  # fmt: skip
+    called = ", ".join(f"{e.label} {e.status}" for e in out.external)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=segment_analysis.evidence(out.basis, now, f"바깥 출처 {called}" if called else ""),
+    )
+
+
+async def market_coverage(request: AgentRequest) -> AgentResult:
+    """속성 조합별 우리 구매자 수 ÷ 인구(KOSIS). 표 설정이 없으면 인구 칸은 이유만."""
+    data = _parse(request, MarketCoverageInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    out = await segment_analysis.coverage_with_population(
+        get_sales_store(), data.tenant_id, data.attribute_keys, cat.sales, cat.id, now
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=segment_analysis.evidence(out.basis, now),
     )
 
 
@@ -1610,6 +1710,10 @@ HANDLERS = {
     "fraud_score": fraud_score,
     "kpi_summary": kpi_summary,
     "sales_analysis": sales_analysis,
+    "segment_options": segment_options,
+    "segment_profile": segment_profile,
+    "segment_favorites": segment_favorites,
+    "market_coverage": market_coverage,
     "root_cause_hypotheses": root_cause_hypotheses,
     "accuracy_report": accuracy_report,
     "activity_report": activity_report,

@@ -24,6 +24,10 @@ def test_card_validates(card: AgentCard) -> None:
         "fraud_score",
         "kpi_summary",
         "sales_analysis",
+        "segment_options",
+        "segment_profile",
+        "segment_favorites",
+        "market_coverage",
         "root_cause_hypotheses",
         "accuracy_report",
         "activity_report",
@@ -129,6 +133,27 @@ def test_sales_analysis_is_a_read_for_screen_and_orchestrator(card: AgentCard) -
     assert skill.allowed_requesters == kpi.allowed_requesters == ["orchestrator", "dashboard-api"]
     assert skill.input_schema.endswith("data.py#SalesAnalysisInput")
     assert skill.output_schema.endswith("data.py#SalesAnalysisOutput")
+
+
+@pytest.mark.parametrize(
+    ("skill_id", "model"),
+    [
+        ("segment_options", "SegmentOptions"),
+        ("segment_profile", "SegmentProfile"),
+        ("segment_favorites", "SegmentFavorites"),
+        ("market_coverage", "MarketCoverage"),
+    ],
+)
+def test_segment_skills_are_reads_like_sales_analysis(
+    card: AgentCard, skill_id: str, model: str
+) -> None:
+    """고객·시장 분석 4개: grade read, 매출 분석과 같은 요청자, 계약 입출력."""
+    skill = next(s for s in card.skills if s.id == skill_id)
+    sales = next(s for s in card.skills if s.id == "sales_analysis")
+    assert skill.grade == "read" and skill.verifier is None
+    assert skill.allowed_requesters == sales.allowed_requesters
+    assert skill.input_schema.endswith(f"data.py#{model}Input")
+    assert skill.output_schema.endswith(f"data.py#{model}Output")
 
 
 def test_root_cause_is_a_lookup_for_orchestrator(card: AgentCard) -> None:
