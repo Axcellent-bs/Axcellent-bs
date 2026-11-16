@@ -35,7 +35,7 @@ const SECTIONS: Record<string, Section> = {
 
 // 제목 줄 오른쪽: 레포 승인 대기 · AI 작업 중 · AI와 대화 · 연결(본인 Claude·레포·개발 도구)
 function DevTools({ v }: { v: View }) {
-  const { state, connected, example } = v
+  const { state, connected } = v
   const router = useRouter()
   const [chatOpen, setChatOpen] = useState(false)
   const chat = useDevChat(state, connected)
@@ -52,7 +52,7 @@ function DevTools({ v }: { v: View }) {
       {chat.working.length > 0 && (
         <button type="button" className="chip amber" onClick={() => { chat.select(chat.working[0]); setChatOpen(true) }}>AI 작업 중 {chat.working.length}</button>
       )}
-      <button type="button" className="btn-primary px-3 py-1" disabled={!connected || example} title={example ? '예시 모드에서는 쓸 수 없어요' : connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
+      <button type="button" className="btn-primary px-3 py-1" disabled={!connected} title={connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
       <Link href="/connections" className="btn-quiet px-2 py-1" title="연결 (형상관리·AI)" aria-label="연결 (형상관리·AI)">
         <IconLink size={20} />
       </Link>
@@ -74,10 +74,10 @@ export default function DevPage() {
       tabCount={(v, section, tab) => (section === 'work' && tab === 'reviews' ? v.state.reviews.filter((x) => !x.result).length : 0)}
       tools={(v) => <DevTools v={v} />}
     >
-      {({ state: s, dispatch: d, section, sub, tab, rest, item, example }) => (
+      {({ state: s, dispatch: d, section, sub, tab, rest, item }) => (
         <>
           {section === 'tasks' && <TaskBoard s={s} filter={sub} />}
-          {section === 'work' && tab === 'prs' && <PrsTab s={s} d={d} example={example} parts={rest.map((x) => decodeURIComponent(x))} />}
+          {section === 'work' && tab === 'prs' && <PrsTab s={s} d={d} parts={rest.map((x) => decodeURIComponent(x))} />}
           {section === 'work' && tab === 'reviews' && <Reviews s={s} d={d} item={item} />}
           {section === 'work' && tab === 'ops' && <Ops s={s} item={item} />}
           {section === 'work' && tab === 'aftercare' && <Aftercare s={s} item={item} />}
