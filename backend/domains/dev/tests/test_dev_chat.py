@@ -203,6 +203,25 @@ def test_plan_waits_for_go_ahead_then_goes_to_planning(service: PlanningService,
     assert "dev_chat" in actions and "dev_task_create" not in actions
 
 
+def test_chat_listing_puts_talked_about_files_first_and_stays_small(
+    service: PlanningService, adapter
+) -> None:
+    """매 턴 보내는 파일 목록: 대화에 나온 파일이 앞, 이름순 2000개 컷 뒤 파일도 보인다.
+
+    150개까지만 보낸다."""
+    from dev_agent.vcs.base import LIST_LIMIT
+
+    target = "zz-web/src/NoticeBanners.tsx"
+    adapter.seed_files({f"aa-web/src/w{i:05d}.ts": "x\n" for i in range(LIST_LIMIT + 10)})
+    adapter.seed_files({target: "x\n"})
+    fake = ChatLLM([ASK])
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        assert _post(c, message="NoticeBanners.tsx 문구 지워 줘").status_code == 200
+    files = fake.calls[0]["files"]["default"]
+    assert files[0] == target and len(files) == dev_chat.MAX_LISTING
+
+
 def test_planning_refusal_keeps_plan_for_retry(service: PlanningService, adapter) -> None:
     adapter.tickets.fail = AgentResult(
         meta=AgentRequest(

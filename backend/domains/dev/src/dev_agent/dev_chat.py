@@ -55,7 +55,7 @@ MAX_QUESTIONS = 2  # 되묻기 횟수 (넘으면 더 묻지 않고 계획을 보
 # 계획이 섰을 때 붙이는 안내. 화면의 "이대로 진행" 버튼도 "진행해"를 보낸다
 READY_HINT = "이대로 진행하려면 '진행해'라고 보내 주세요."
 MAX_HISTORY = 20  # LLM에 보낼 최근 메시지 수
-MAX_LISTING = 300  # LLM에 보여 줄 파일 경로 수 (연결 전체 합)
+MAX_LISTING = 150  # LLM에 보여 줄 파일 경로 수 (연결 전체 합, 대화 낱말에 맞는 것부터)
 MAX_LISTED_CONNECTIONS = 3
 MAX_REPLY_CHARS = 2000
 LLM_TIMEOUT_SECONDS = 180.0  # 계획(plan)까지 쓰는 답은 60초를 넘기도 한다. 코딩 요청 하나와 같게
@@ -307,8 +307,11 @@ def _open_pr_waiting(svc: DevService, task_id: str | None) -> bool:
     return any(p.task == task_id and not p.merged and not p.closed for p in svc.state.prs)
 
 
-async def _listing(conns: list[vcs.Connection]) -> dict[str, list[str]]:
-    """연결마다 파일 경로 목록 (coder와 같은 걸러내기, 합 300개). 읽기 실패면 빈 목록."""
+async def _listing(conns: list[vcs.Connection], text: str = "") -> dict[str, list[str]]:
+    """연결마다 파일 경로 목록 (coder와 같은 걸러내기·순서, 합 150개). 읽기 실패면 빈 목록.
+
+    대화에 적힌 경로·낱말에 맞는 파일을 앞에 둔다. 이름순 앞부분만 보내면 매 턴 토큰만 쓰고
+    정작 필요한 파일은 빠진다."""
     conns = conns[:MAX_LISTED_CONNECTIONS]
     cap = MAX_LISTING // max(len(conns), 1)
     out: dict[str, list[str]] = {}
@@ -316,13 +319,15 @@ async def _listing(conns: list[vcs.Connection]) -> dict[str, list[str]]:
         try:
             adapter = vcs_bridge.active(c.id)
             paths = (
-                await asyncio.wait_for(adapter.list_files(), LIST_TIMEOUT_SECONDS)
+                await asyncio.wait_for(
+                    adapter.list_files(limit=coder.ALL_FILES), LIST_TIMEOUT_SECONDS
+                )
                 if adapter is not None
                 else []
             )
         except Exception:  # noqa: BLE001 - 목록이 없어도 대화는 이어 간다
             paths = []
-        out[c.id] = coder.listing_for(paths)[:cap]
+        out[c.id] = coder.listing_for(paths, tuple(c.paths), text)[:cap]
     return out
 
 
@@ -339,7 +344,9 @@ async def _ask_llm(
             for c in conns
         ],
         "chosen_connection": th.connection,
-        "files": await _listing(chosen),
+        "files": await _listing(
+            chosen, " ".join(m.text for m in th.messages[-MAX_HISTORY:] if m.role == "user")
+        ),
         "questions_asked": questions_asked(th),
         "last_task": last_task,
     }
