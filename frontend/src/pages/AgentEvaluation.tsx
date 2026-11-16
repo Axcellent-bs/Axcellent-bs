@@ -178,7 +178,7 @@ function EventTimeline({ ev }: { ev: EvaluatedEvent }) {
 }
 
 export default function AgentEvaluationPage() {
-  const ctxParam = useSearchParams().get("ctx"); // 결정 기록 화면의 "단계별 시간 보기"로 들어올 때
+  const ctxParam = useSearchParams().get("ctx"); // 아카이브 AI 장애 기록 화면의 "에이전트 평가에서 보기"로 들어올 때
   const [data, setData] = useState<AgentEvaluation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(ctxParam);

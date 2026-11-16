@@ -6,7 +6,7 @@ import { ago } from "@/lib/format";
 import CardBody from "@/components/hr/CardBody";
 import { authorKo, hr, plainText, type HrCard, type PlanCheck, type PlanDraft } from "@/lib/hr";
 
-// 결정 기록 화면 (재무 AI 화면과 같은 짜임): ① 지금 사람이 할 일 → ② 기록 도구.
+// 업무 기록 화면 (재무 AI 화면과 같은 짜임): ① 지금 사람이 할 일 → ② 기록 도구.
 // hr이 계산한 판정을 그대로 보여 주고, 사람이 하는 일(후보 카드 승인·폐기)만 버튼으로 둔다.
 
 const CONF_KO = { low: "낮음", mid: "보통", high: "높음" } as const;

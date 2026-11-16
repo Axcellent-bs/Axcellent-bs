@@ -1,7 +1,7 @@
 import { stepStatus, type Incident, type Step } from "./adminRelay";
 
-// 총괄 이벤트에서 인사 AI가 이벤트를 기록하는 단계(`record_case`)의 상태. 총괄이 준 값을 그대로 옮기고 새로 계산하지 않는다.
-// 총괄 화면(이벤트 상세)과 인사 화면(결정 기록)이 같은 문구와 색을 쓰도록 한곳에 둔다.
+// 총괄 이벤트에서 아카이브 AI가 이벤트를 기록하는 단계(`record_case`)의 상태. 총괄이 준 값을 그대로 옮기고 새로 계산하지 않는다.
+// 총괄 화면(이벤트 상세)과 아카이브 AI 장애 기록 화면이 같은 문구와 색을 쓰도록 한곳에 둔다.
 
 export const RECORD_SKILL = "record_case";
 
