@@ -71,9 +71,17 @@ app.include_router(create_chat_router(get_chat_service))
 
 async def _resync_on_start() -> None:
     """켤 때 개발 서비스와 맞춘다. 상대가 아직 안 떴으면 못 보낸 것으로 남겨 다시 보낸다.
-    마케팅에 보내다 끊긴 제안도 다시 보낸다 (응답이 없으면 자동 재전송)."""
-    asyncio.get_running_loop().create_task(get_service().resync_peer())
-    get_service().resume_briefs()
+    마케팅에 보내다 끊긴 제안도 다시 보낸다 (응답이 없으면 자동 재전송). 둘 다 같은 멱등 키라
+    여러 번 돌아도 상대 쪽에 늘지 않는다."""
+    log = logging.getLogger("ax.planning")
+    try:
+        get_service().resume_briefs()
+    except Exception:  # 켤 때 뒷일이라 서버를 멈추지 않는다
+        log.exception("마케팅 전달 다시 보내기 실패")
+    try:
+        await get_service().resync_peer()
+    except Exception:
+        log.exception("개발 서비스와 맞추기 실패")
 
 
 # 인사 서버가 같이 켜지는 중일 수 있어 잠시 뒤에 부른다
@@ -89,21 +97,22 @@ async def _retire_after_start() -> None:
         logging.getLogger("ax.planning").exception("철회 요청 인사 카드 내리기 실패")
 
 
-app.router.on_startup.append(_resync_on_start)
-
-# 템플릿 앱은 `lifespan`을 쓰므로 위 `on_startup`은 실행되지 않는다 (11/13 확인, 기획 담당에 알림).
-# 철회 요청 인사 카드 재시도는 켤 때 꼭 돌아야 해서 템플릿 lifespan을 감싸 따로 띄운다
+# 템플릿 앱은 `lifespan`을 써서 `on_startup`이 실행되지 않는다 (11/13 확인).
+# 켤 때 돌아야 하는 일(개발과 맞추기·마케팅 다시 보내기·철회 카드 재시도)은
+# 템플릿 lifespan을 감싸 띄운다
 _template_lifespan = app.router.lifespan_context
 
 
 @asynccontextmanager
 async def _lifespan(a: Any) -> AsyncIterator[None]:
     async with _template_lifespan(a):
-        task = asyncio.get_running_loop().create_task(_retire_after_start())
+        loop = asyncio.get_running_loop()
+        tasks = [loop.create_task(_resync_on_start()), loop.create_task(_retire_after_start())]
         try:
             yield
         finally:
-            task.cancel()
+            for task in tasks:
+                task.cancel()
 
 
 app.router.lifespan_context = _lifespan
