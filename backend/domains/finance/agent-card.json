@@ -74,7 +74,7 @@
     },
     {
       "id": "review_campaign_budget",
-      "description": "캠페인 예산 요청을 승인·조건부·거절로 판단하고 이유와 근거를 돌려준다. 쿠폰 발급·환불은 대상이 아니다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "description": "캠페인 예산 요청을 승인·조건부·거절로 판단하고 이유와 근거를 돌려준다. 요청에 상품 ID(product_ids, 선택, 최대 10개)가 있으면 고객지원 book_issue_stats(최근 30일, 제한 시간 3초)로 책별 클레임을 읽어, 판매 대비 클레임 비율이 기준 이상이고 클레임이 2건 이상이거나 불량 계열이 3건 이상인 책이 있으면 한도를 요청 금액의 절반으로 줄인다(걸린 책이 여럿이어도 요청당 한 번, 규칙 CRX-001). 판매가 적은 책은 의견을 바꾸지 않고, 못 읽으면 한도를 그대로 두고 이유에 적는다. 쿠폰 발급·환불은 대상이 아니다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
       "grade": "read",

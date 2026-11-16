@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -58,6 +59,9 @@ class StartCampaignInput(AxModel):
     campaign_name: str = Field(min_length=1)
     channel: str = Field(min_length=1)
     budget_krw: StrictInt = Field(gt=0)
+    # 캠페인이 다루는 회사 상품 ID(선택, 최대 10개). 재무가 고객지원 책별 집계로 불만 많은 책인지
+    # 보고 예산 의견을 줄이는 데 쓴다. 비워 두면(옛 요청) 상품 신호 없이 판단한다
+    product_ids: list[str] = Field(default_factory=list, max_length=10)
 
 
 # 데이터가 재는 매출 효과 값 묶음. 호출자가 하나라도 주면 이 묶음은 데이터로 채우지 않는다
@@ -204,17 +208,29 @@ def _gate_outcome(
     return _result(request, TaskStatus.FAILED, outcome=outcome, output=detail, evidence=evidence)
 
 
-async def start_campaign(request: AgentRequest) -> AgentResult:
+async def start_campaign(
+    request: AgentRequest,
+    brief_product_ids: Callable[[str], list[str]] | None = None,
+) -> AgentResult:
+    """캠페인 시작: 재무 의견을 받고 안전 관문을 거친다.
+
+    `brief_product_ids`는 요청에 상품이 없을 때 받아 둔 기획안에서 그 캠페인의 상품 ID를 꺼내는
+    함수다(기획안의 `product_ids`). 요청이 상품을 직접 주면 그것을 쓴다.
+    """
     try:
         data = StartCampaignInput.model_validate(request.input)
     except ValidationError as error:
         return _invalid(request, error)
 
+    product_ids = list(data.product_ids)
+    if not product_ids and brief_product_ids is not None:
+        product_ids = brief_product_ids(data.campaign_id)[:10]
     ask = CampaignBudgetReviewInput(
         campaign_id=data.campaign_id,
         campaign_name=data.campaign_name,
         channel=data.channel,
         requested_krw=data.budget_krw,
+        product_ids=product_ids,
     )
     answer = await _ask_finance(request, REVIEW_SKILL, ask)
     if answer.status != TaskStatus.COMPLETED:

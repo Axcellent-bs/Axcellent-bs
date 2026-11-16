@@ -57,6 +57,7 @@ from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from finance_agent import books as bk
 from finance_agent import campaign as cp
 from finance_agent import chat_log, closing, tax, team_budget
+from finance_agent import customer_reaction as cr
 from finance_agent import finance_config as fc
 from finance_agent import ledger as lg
 from finance_agent.books import Books, load_books, off, set_pg_upload
@@ -771,6 +772,28 @@ async def repeat_estimate() -> dict[str, Any] | None:
     return await off(cp.repeat_estimate, await state().books(), fc.today())
 
 
+async def read_customer_reaction(data: CampaignBudgetReviewInput, context_id: str) -> cr.Reaction:
+    """요청에 상품이 있으면 고객지원 책별 집계를 읽어 고객 반응을 본다(`CRX-001`).
+
+    상품이 없으면(옛 요청) 아무것도 하지 않는다. 못 읽거나 시간 초과면 한도는 그대로 두고
+    못 읽었다고만 남긴다. 예산 의견을 붙잡지 않게 제한 시간은 규칙 파일의 `call_seconds`다.
+    """
+    if not data.product_ids:
+        return cr.NOT_RELEVANT
+    # 참고: 고객지원을 부를 때 `tenant_id`는 넘기지 않는다. 지금은 고객사가 하나라 괜찮고,
+    # 여러 고객사를 받게 되면 요청 메타의 `tenant_id`를 같이 넘겨야 한다 (태윤 11/17 검토 기록)
+    rules = load_rules().customer_reaction
+    meta = RequestMeta(
+        context_id=context_id,
+        token="finance",
+        deadline=_now() + timedelta(seconds=rules.call_seconds),
+    )
+    report = await state().sources.book_issue_report(meta, list(data.product_ids))
+    if report is None:
+        return cr.unavailable("고객지원 책별 집계를 받지 못함")
+    return cr.evaluate(report, list(data.product_ids), rules)
+
+
 async def review_budget(data: CampaignBudgetReviewInput, context_id: str) -> dict[str, Any]:
     """예산 판단. 판단을 남기고, 승인이 아니면 총괄에 의견으로 알린다."""
     records = state().records
@@ -786,6 +809,7 @@ async def review_budget(data: CampaignBudgetReviewInput, context_id: str) -> dic
         today=today,
         monthly_budget=await monthly_budget(),
         started=await started_campaigns(),
+        reaction=await read_customer_reaction(data, context_id),
     )
     review |= {
         "review_id": f"bud_{data.campaign_id}_{len(records.budget_reviews) + 1}",

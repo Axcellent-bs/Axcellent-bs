@@ -46,6 +46,8 @@ from ax_contracts.schemas import (
     TeamHeadcountInput,
     TeamHeadcountOutput,
 )
+from ax_contracts.schemas.book_issue import BookIssueInput, BookIssueReport
+from finance_agent.rules import load_rules
 
 DATA_CALL_SECONDS = 10.0
 SHOP_CALL_SECONDS = 5.0
@@ -105,6 +107,10 @@ class Sources(Protocol):
     async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None: ...
 
     def forget_headcount(self, month: str) -> None: ...
+
+    async def book_issue_report(
+        self, meta: RequestMeta, product_ids: list[str]
+    ) -> BookIssueReport | None: ...
 
 
 def _int(value: Any) -> int | None:
@@ -170,6 +176,18 @@ class MockSources:
         """목 모드는 장부 시드(`seed_incidents`)로 구간을 알아서 총괄을 읽지 않는다."""
         return None
 
+    async def book_issue_report(
+        self, meta: RequestMeta, product_ids: list[str]
+    ) -> BookIssueReport | None:
+        """시드의 책별 집계(`book_issue_report`). 시드에 없으면 None(= 못 읽음)."""
+        row = self.seed.get("book_issue_report")
+        if not row:
+            return None
+        try:
+            return BookIssueReport.model_validate(row)
+        except ValidationError:
+            return None
+
     async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None:
         """시드의 월별 팀 인원. 그 달이 없으면 그 전 가장 가까운 달(발령이 없던 달)을 쓴다."""
         months = self.seed.get("team_headcount") or {}
@@ -199,6 +217,7 @@ HR_CALL_SECONDS = 10.0
 IMPACT_CACHE_SECONDS = 300
 
 impact_log = logging.getLogger("finance.impact")
+reaction_log = logging.getLogger("finance.customer_reaction")
 
 
 def _started_at(output: dict[str, Any] | None) -> datetime | None:
@@ -380,6 +399,35 @@ class LiveSources:
         # (사건, 구간) → 지금 데이터분석에 묻는 중인 요청의 결과
         self._impact_inflight: dict[tuple[str, str], asyncio.Future[Impact | None]] = {}
         self._headcount_cache: dict[str, tuple[float, TeamHeadcountOutput | None]] = {}
+
+    async def book_issue_report(
+        self, meta: RequestMeta, product_ids: list[str]
+    ) -> BookIssueReport | None:
+        """고객지원 `book_issue_stats`(읽기, 서비스 `claims`)로 최근 30일 책별 집계를 읽는다.
+
+        예산 의견을 붙잡지 않게 제한 시간(`[customer_reaction] call_seconds`, 기본 3초)이 지나거나
+        오류가 나거나 응답이 계약과 다르면 None(= 못 읽음)이다. 문의는 읽지 않는다.
+        """
+        seconds = load_rules().customer_reaction.call_seconds
+        deadline = min(meta.deadline, datetime.now(UTC) + timedelta(seconds=seconds))
+        request = AgentRequest(
+            meta=meta.model_copy(update={"deadline": deadline}),
+            skill="book_issue_stats",
+            input=BookIssueInput(
+                period="month", product_ids=product_ids, include_inquiries=False
+            ).model_dump(mode="json"),
+        )
+        try:
+            result = await asyncio.wait_for(call_agent("support", request), timeout=seconds + 0.5)
+        except Exception:  # noqa: BLE001 - 시간 초과·오류 모두 못 읽음이다. 예산 의견은 그대로 낸다
+            reaction_log.warning("고객지원 책별 집계를 읽지 못했다", exc_info=False)
+            return None
+        if result.status != TaskStatus.COMPLETED:
+            return None
+        try:
+            return BookIssueReport.model_validate(result.output)
+        except ValidationError:
+            return None
 
     async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None:
         """인사 `team_headcount` (읽기). 응답이 없거나 계약과 다르면 None."""

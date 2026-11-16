@@ -55,6 +55,17 @@ class BrakeRules(_Strict):
     cash_lookahead_weeks: int = Field(ge=1, le=13)
 
 
+class CustomerReactionRules(_Strict):
+    """고객지원 책별 집계로 예산 의견을 줄이는 기준 (`CRX-001`)."""
+
+    min_sold_qty: int = Field(ge=1)
+    claim_rate: float = Field(gt=0, le=1)
+    min_claims: int = Field(ge=1)
+    defect_claims: int = Field(ge=1)
+    limit_factor: float = Field(gt=0, lt=1)
+    call_seconds: float = Field(gt=0, le=30)
+
+
 class ClosingRules(_Strict):
     spike_ratio: float = Field(gt=1)
     spike_trailing_days: int = Field(ge=1)
@@ -103,6 +114,7 @@ class RuleBook(_Strict):
     updated: str
     campaign: CampaignRules
     brake: BrakeRules
+    customer_reaction: CustomerReactionRules
     closing: ClosingRules
     repeat: RepeatRules
     lessons: LessonRules
