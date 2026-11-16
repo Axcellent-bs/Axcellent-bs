@@ -1,32 +1,35 @@
-"""`find_org_change_basis`: 발령 사유와 비슷한 과거 업무 결정 카드를 찾는다 (RAG, 조회 전용).
+"""`find_org_change_basis`: 발령 사유와 비슷한 과거 업무 결정 카드를 찾는다 (조회 전용).
 
-- 후보 풀은 확정된(후보가 아닌) 업무 결정 카드(`kind=decision`)뿐이다.
-  장애 대응 카드·사례·공지와 대체되거나 폐기된 카드는 뺀다.
-- 사유를 임베딩해 코사인 유사도로 찾는다(기준 `dense_min_cosine`).
-  임베딩을 쓸 수 없으면 Dice로 대체한다.
-- 기준을 넘는 카드가 없으면 후보를 비워 둔다(근거 카드 없음). 가까운 것을 억지로 내놓지 않는다.
-- 과거에 기각된 안(`extra.outcome = "rejected"`)은 `rejected`로 표시해 사람이 알고 판단하게 한다.
-- 찾기만 한다. 근거로 연결하는 것은 사람이 골라 `record_org_change`에
-  `basis_card_id`로 보낼 때다.
+과거 결정을 저장하고 찾는 일은 아카이브 AI가 한다. 인사 AI는 사유를 아카이브의 읽기 skill
+`find_similar_decisions`에 물어 후보를 받아 그대로 돌려준다(검색·임베딩 코드는 인사에 없다).
+- 아카이브가 응답하지 않으면 후보를 지어내지 않고 실패로 답한다(화면은 "불러오지 못함"으로 보인다).
+- 기준을 넘는 카드가 없으면 후보가 비어 있다. 과거에 기각된 안은 `rejected`로 표시된다.
+- 찾기만 한다. 근거로 연결하는 것은 사람이 골라 `record_org_change`에 `basis_card_id`로 보낼 때다.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from pydantic import ValidationError
 
+from ax_agent_template.client import call_agent
 from ax_contracts.schemas import (
     AgentRequest,
     AgentResult,
     FindOrgChangeBasisInput,
     FindOrgChangeBasisOutput,
-    OrgChangeBasisCandidate,
+    FindSimilarDecisionsInput,
+    RequestMeta,
+    TaskStatus,
 )
-from hr_agent.case_memory.service import _dense, _summary
-from hr_agent.clients.memory import card_state
-from hr_agent.results import completed, invalid_input, make_evidence
+from hr_agent.results import completed, failed, invalid_input, make_evidence
 from hr_agent.services import Services
 
-KINDS = ["decision"]
+CALL_TIMEOUT_SECONDS = 20
+TARGET = "hr"  # 부서 이름으로 부르면 skill을 맡은 서비스로 간다 (services.py)
+SKILL = "find_similar_decisions"
+SEND = call_agent  # 테스트에서 바꿀 수 있다
 
 
 async def find_org_change_basis(svc: Services, request: AgentRequest) -> AgentResult:
@@ -34,51 +37,48 @@ async def find_org_change_basis(svc: Services, request: AgentRequest) -> AgentRe
         params = FindOrgChangeBasisInput.model_validate(request.input)
     except ValidationError as exc:
         return invalid_input(request, exc)
-
-    cards = [
-        c
-        for c in await svc.memory.list_cards(area=None, states=["active"])
-        if c.kind in KINDS and card_state(c) == "active"
-    ]
-    found = await _dense(svc, params.reason, cards, params.limit)
-    if found is not None:
-        method = "dense"
-        pairs = found
-    else:
-        method = "dice"
-        allowed = {c.card_id for c in cards}
-        hits = await svc.memory.search_cards(
-            params.reason, area=None, kinds=KINDS, states=["active"], limit=500
-        )
-        pairs = [
-            (h.card, h.score)
-            for h in hits
-            if h.card.card_id in allowed and h.score >= svc.settings.similarity_threshold
-        ]
-    pairs = pairs[: params.limit]
-
-    candidates = [
-        OrgChangeBasisCandidate(
-            card_id=c.card_id,
-            title=c.title,
-            summary=_summary(c),
-            similarity=min(max(s, 0.0), 1.0),
-            rejected=c.extra.get("outcome") == "rejected",
-        )
-        for c, s in pairs
-    ]
-    output = FindOrgChangeBasisOutput(
-        candidates=candidates, method=method, collected_at=svc.clock()
+    meta = request.meta
+    sent = AgentRequest(
+        meta=RequestMeta(
+            context_id=meta.context_id,
+            tenant_id=meta.tenant_id,
+            token="replaced-by-call_agent",
+            path=list(meta.path),
+            deadline=min(
+                meta.deadline, datetime.now(UTC) + timedelta(seconds=CALL_TIMEOUT_SECONDS)
+            ),
+        ),
+        skill=SKILL,
+        input=FindSimilarDecisionsInput(reason=params.reason, limit=params.limit).model_dump(
+            mode="json"
+        ),
     )
-    summary = (
-        f"근거 후보 결정 카드 {len(candidates)}장 ({method})"
-        if candidates
-        else "근거 후보 없음: 기준을 넘는 결정 카드가 없다"
-    )
-    # 사유 원문은 근거 기록에 남기지 않는다(카드 번호만)
+    try:
+        result = await SEND(TARGET, sent)
+    except Exception:  # noqa: BLE001 - 아카이브에 닿지 못하면 후보를 지어내지 않는다
+        return failed(
+            request, "ARCHIVE_UNAVAILABLE", "아카이브 AI에 닿지 못해 근거 후보를 찾지 못했다"
+        )
+    if result.status != TaskStatus.COMPLETED:
+        return failed(
+            request,
+            "ARCHIVE_UNAVAILABLE",
+            f"아카이브 AI가 근거 후보를 찾지 못했다 ({result.status.value})",
+        )
+    try:
+        output = FindOrgChangeBasisOutput.model_validate(result.output)
+    except ValidationError:
+        return failed(request, "ARCHIVE_BAD_RESPONSE", "아카이브 AI의 응답 형식이 맞지 않는다")
+    n = len(output.candidates)
     return completed(
         request,
         output,
-        outcome="found" if candidates else "none",
-        evidence=make_evidence(svc.clock, summary, [c.card_id for c in candidates]),
+        outcome="found" if n else "none",
+        evidence=make_evidence(
+            svc.clock,
+            f"근거 후보 결정 카드 {n}장 ({output.method}, 아카이브 AI)"
+            if n
+            else "근거 후보 없음: 기준을 넘는 결정 카드가 없다",
+            [c.card_id for c in output.candidates],
+        ),
     )

@@ -154,6 +154,32 @@
       ],
       "verifier": null,
       "priority": "recommended"
+    },
+    {
+      "id": "evaluate_agents",
+      "description": "최근 장애 이벤트에서 부서 AI가 일한 시간을 기준값과 비교한 판정을 에이전트별로 모아 조회한다. 점수·등급·순위는 없고 저장된 판정만 쓴다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#EvaluateAgentsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#EvaluateAgentsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "judge_step_timings",
+      "description": "이슈 하나의 단계 시간(총괄이 보낸 step_timings)을 기준값(criteria.toml)과 견줘 정상/확인 필요 등으로 판정한다. 시간 계산만 하고 LLM·상태 변경이 없다. 결과에 기준값 버전이 들어 있어 아카이브가 카드에 같이 저장한다. 기준값 파일을 읽지 못하면 판정을 지어내지 않고 실패(CRITERIA_UNREADABLE)로 답한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#JudgeStepTimingsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#JudgeStepTimingsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "archive",
+        "hr",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }

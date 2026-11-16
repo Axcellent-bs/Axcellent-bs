@@ -1,12 +1,12 @@
 [project]
 name = "ax-svc-decisions"
 version = "0.1.0"
-description = "services/decisions — 결정 기록 (domains/hr)"
+description = "services/decisions — 결정 기록 (domains/archive, 아카이브 AI)"
 requires-python = ">=3.12"
-dependencies = ["ax-agent-hr"]
+dependencies = ["ax-agent-archive"]
 
 [tool.uv.sources]
-ax-agent-hr = { workspace = true }
+ax-agent-archive = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

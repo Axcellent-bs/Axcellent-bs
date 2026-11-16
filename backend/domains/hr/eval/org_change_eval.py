@@ -8,6 +8,8 @@
 결과: results/org_change_eval.json
 """
 
+# 주의(2026-11-16): 근거 카드 검색 코드(retrieval)가 아카이브 AI(domains/archive)로 옮겨져 이 스크립트의 retrieval import는 지금 돌지 않는다. CI 대상이 아니다. 아카이브의 find_similar_decisions를 부르도록 3단계에서 고친다.
+
 from __future__ import annotations
 
 import asyncio
@@ -31,13 +33,13 @@ os.environ["HR_MOCK"] = "1"
 os.environ["AX_ORG_CONFIG"] = str(BACKEND / "config/tenants/catbooks/org.yaml")
 
 from fastapi.testclient import TestClient  # noqa: E402
+from hr_agent.retrieval.cards import DenseCardSearch  # noqa: E402
+from hr_agent.retrieval.dense import DenseIndex, LLMEmbedder  # noqa: E402
 
 from ax_agent_template.llm import LLMClient, LLMSettings  # noqa: E402
 from hr_agent.config import HrSettings, ManualClock  # noqa: E402
 from hr_agent.main import app  # noqa: E402
 from hr_agent.org.roster import org_teams  # noqa: E402
-from hr_agent.retrieval.cards import DenseCardSearch  # noqa: E402
-from hr_agent.retrieval.dense import DenseIndex, LLMEmbedder  # noqa: E402
 from hr_agent.services import build_services, set_services  # noqa: E402
 from hr_agent.util import numbers_in  # noqa: E402
 

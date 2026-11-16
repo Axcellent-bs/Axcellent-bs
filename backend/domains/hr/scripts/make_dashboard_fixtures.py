@@ -21,9 +21,23 @@ os.environ.setdefault("HR_MOCK", "1")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+import archive_agent.main as archive_main  # noqa: E402
+import archive_agent.services as archive_services  # noqa: E402
+from archive_agent.config import ArchiveSettings  # noqa: E402
 from hr_agent.config import HrSettings, ManualClock  # noqa: E402
 from hr_agent.main import app  # noqa: E402
 from hr_agent.services import build_services, set_services  # noqa: E402
+
+# 결정 기록 skill은 아카이브 AI가 받는다. 샘플은 한 화면(인사·결정 기록)이 보는 응답이라 두 앱을
+# 같은 임시 DB 위에서 돌린다(분리 직후에는 카드·감사 기록이 같은 파일에 있다).
+ARCHIVE_SKILLS = {
+    "record_case",
+    "check_plan",
+    "list_cards",
+    "list_candidate_cards",
+    "decide_candidate_card",
+    "get_audit_timeline",
+}
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -37,9 +51,17 @@ def envelope(data: Any, total: int | None = None) -> dict[str, Any]:
 
 
 def main(out_dir: Path) -> None:
-    svc = build_services(HrSettings(mock=True), clock=ManualClock())
+    import tempfile
+
+    db = str(Path(tempfile.mkdtemp()) / "fixtures.db")
+    svc = build_services(HrSettings(mock=True, db_path=db), clock=ManualClock())
     set_services(svc)
+    archive_svc = archive_services.build_services(
+        ArchiveSettings(mock=True, db_path=db), clock=svc.clock
+    )
+    archive_services.set_services(archive_svc)
     client = TestClient(app)
+    archive_client = TestClient(archive_main.app)
 
     def call(
         skill: str, inp: dict[str, Any], key: str, ctx: str, who: str = "orchestrator"
@@ -55,7 +77,8 @@ def main(out_dir: Path) -> None:
             "skill": skill,
             "input": inp,
         }
-        return client.post("/a2a", json=raw).json()
+        target = archive_client if skill in ARCHIVE_SKILLS else client
+        return target.post("/a2a", json=raw).json()
 
     # ---- 이야기: 결제 영역 인계 중, 후보 카드 하나, 온보딩 진행 중, 퇴직 요청 하나 ---------------
     call(
@@ -200,6 +223,8 @@ def main(out_dir: Path) -> None:
         )
     print(f"{len(files) + len(errors)} files -> {out_dir}")
     set_services(None)
+    archive_services.set_services(None)
+    archive_svc.store.close()
     svc.store.close()
 
 

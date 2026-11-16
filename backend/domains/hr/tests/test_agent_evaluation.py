@@ -6,9 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ax_contracts.schemas import AgentRequest, EvaluateAgentsOutput, RecordCase
-from hr_agent.cards.service import record_case
-from hr_agent.case_memory.service import record_event_times
+from ax_contracts.schemas import AgentRequest, Card, EvaluateAgentsOutput
+from hr_agent.dept_eval import judge_timings, load_criteria
 from hr_agent.dept_eval.summary import AGENT_ORDER, _readable, evaluate_agents, reason_of
 
 SUMMARIES = {
@@ -46,32 +45,29 @@ async def _event(
     minutes_ago: int = 0,
     event_type: str | None = None,
 ) -> str:
+    """이슈 카드를 회사 기억에 바로 쓴다(카드는 아카이브가 만들지만 평가는 저장된 값만 읽는다)."""
     ctx = f"ctx_inc_{name}"
-    record = RecordCase.model_validate(
-        {
-            "context_id": ctx,
-            "kind": "incident",
-            "summary": SUMMARIES[name],
-            "decision_reason": "원인을 확정하지 못해 사람에게 넘김",
-            "alternatives_considered": ["즉시 롤백"],
-            "source_refs": [f"inc:{ctx}", "area:infra"],
-            "author": "orchestrator",
-            "event_type": event_type,
-        }
-    )
-    made = await record_case(svc, _req("record_case", ctx, record.model_dump(mode="json"), "rc"))
-    assert made.output["outcome"] == "card_created", made.output
+    extra: dict = {"event_type": event_type}
     if timings is not None:
         detected = (svc.clock() - timedelta(minutes=minutes_ago)).isoformat()
-        sent = await record_event_times(
-            svc,
-            _req(
-                "record_event_times",
-                ctx,
-                {"context_id": ctx, "detected_at": detected, "step_timings": timings},
-            ),
+        extra["timeline"] = {"detected_at": detected}
+        extra["step_timings"] = timings
+        extra["step_judgments"] = judge_timings(timings, load_criteria())
+    await svc.memory.write_card(
+        Card(
+            card_id=f"card_{name}",
+            kind="incident",
+            context_id=ctx,
+            title=SUMMARIES[name],
+            body=SUMMARIES[name],
+            tags=[f"type:{event_type}"] if event_type else [],
+            source_refs=[f"inc:{ctx}", "area:infra"],
+            author="orchestrator",
+            confidence="high",
+            created_at=svc.clock(),
+            extra=extra,
         )
-        assert sent.output["outcome"] == "recorded", sent.output
+    )
     return ctx
 
 

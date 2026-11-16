@@ -16,6 +16,8 @@
 | `find_org_change_basis` | read |
 | `parse_org_change_text` | read |
 | `describe_org_change` | read |
+| `evaluate_agents` | read |
+| `judge_step_timings` | read |
 
 - 실행: `uv run --package ax-svc-org uvicorn svc_org.main:app --port 8124`
   (backend/ 에서, 목 모드 `AGENT_TEMPLATE_MOCK=1`)

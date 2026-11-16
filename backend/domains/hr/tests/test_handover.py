@@ -1,5 +1,6 @@
 """인수인계: 초안·빈자리 질문·답변·확정(B 검증 / C 보류)."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -74,17 +75,24 @@ def test_same_start_twice_makes_one_draft(svc, client) -> None:
 
 
 def test_decision_cards_in_the_area_fill_the_decisions_field(svc, client) -> None:
-    rec = {
-        "context_id": "ctx_x_0001",
-        "kind": "spec_confirmed",
-        "summary": "결제 재시도를 2회로 확정",
-        "decision_reason": "중복 결제 위험",
-        "alternatives_considered": ["무제한"],
-        "source_refs": ["pr:412", "area:payment"],
-        "author": "planning",
-    }
-    body = _body("record_case", rec, "rc", token="mock:planning")
-    assert client.post("/a2a", json=body).json()["status"] == "completed"
+    """같은 영역의 결정 카드(카드는 아카이브가 만든다)가 있으면 결정 항목은 자동으로 채워진다."""
+    from ax_contracts.schemas import Card
+
+    asyncio.run(
+        svc.memory.write_card(
+            Card(
+                card_id="card_dec1",
+                kind="decision",
+                context_id="ctx_x_0001",
+                title="결제 재시도를 2회로 확정",
+                body="결제 재시도를 2회로 확정 중복 결제 위험",
+                author="planning",
+                confidence="high",
+                created_at=svc.clock(),
+                extra={"area": "payment", "decision": "결제 재시도를 2회로 확정"},
+            )
+        )
+    )
     out = StartHandoverOutput.model_validate(_start(client)["output"])
     assert "decisions" not in {q.gap_field for q in out.questions}
     assert any(i.kind == "decision" for i in out.items)

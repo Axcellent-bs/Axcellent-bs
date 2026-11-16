@@ -29,6 +29,7 @@ skill과 등급(등급 신고는 안전 레이어 레지스트리가 원본이�
 | `record_org_change` | A | 조직 변동(발령) 초안 저장. 승인 전에는 인원에 세지 않는다 |
 | `decide_org_change` | A | 인사 담당자가 발령 초안을 확정·반려 (요청자 dashboard-api) |
 | `list_org_changes` | 읽기 | 발령 기록 목록과 명부 등록 상태 |
+| `judge_step_timings` | 읽기 | 이슈의 단계 시간을 기준값과 견줘 판정(아카이브가 기록할 때 부른다) |
 | `find_org_change_basis` | 읽기 | 발령 사유와 비슷한 과거 업무 결정 카드 후보(RAG) |
 | `parse_org_change_text` | 읽기 | 발령 문장을 입력 칸으로 정리하는 제안(LLM, 저장 안 함) |
 | `describe_org_change` | 읽기 | 발령 요약 설명문(숫자는 코드, 문장만 LLM) |
@@ -465,6 +466,27 @@ class FindOrgChangeBasisOutput(AxModel):
     candidates: list[OrgChangeBasisCandidate] = Field(default_factory=list)
     method: Literal["dense", "dice"]
     collected_at: UtcDatetime
+
+
+class FindSimilarDecisionsInput(FindOrgChangeBasisInput):
+    """아카이브 AI: 사유와 비슷한 과거 업무 결정 카드를 찾는다(발령 근거 찾기가 부른다)."""
+
+
+class FindSimilarDecisionsOutput(FindOrgChangeBasisOutput):
+    """`FindOrgChangeBasisOutput`과 같다. 기준 미만이면 `candidates`가 비어 있다."""
+
+
+class JudgeStepTimingsInput(AxModel):
+    """이슈 하나의 단계 시간 목록(총괄이 보낸 `StepTiming` 모양)을 기준값과 견줘 판정해 달라는 요청."""
+
+    step_timings: list[dict[str, Any]] = Field(max_length=200)
+
+
+class JudgeStepTimingsOutput(AxModel):
+    """판정 묶음. 기준값 버전이 같이 담겨, 카드에 저장하면 그때의 기준이 남는다(시간 계산만, LLM 없음)."""
+
+    criteria_version: int = Field(ge=1)
+    items: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ParseOrgChangeTextInput(AxModel):

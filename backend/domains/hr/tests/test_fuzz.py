@@ -18,12 +18,10 @@ SEED = int(os.environ.get("FUZZ_SEED", "20261023"))
 ROUNDS = int(os.environ.get("FUZZ_ROUNDS", "1500"))
 
 SKILLS = [
-    "record_case",
     "get_roster",
     "start_handover",
     "answer_handover_question",
     "confirm_handover",
-    "check_plan",
 ]
 KINDS = [
     "incident",
@@ -191,5 +189,5 @@ def test_every_scenario_gives_the_same_result_every_time(repeat: int) -> None:
         return out
 
     results = asyncio.run(run_all())
-    assert len(results) >= 18
+    assert len(results) >= 4
     assert all(passed and det for _n, passed, det in results), results

@@ -8,21 +8,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
 from ax_contracts.schemas import (
     AgentRequest,
     AgentResult,
-    AuditEntry,
-    GetAuditTimelineInput,
-    GetAuditTimelineOutput,
     HandoverView,
-    ListCandidateCardsInput,
-    ListCandidateCardsOutput,
-    ListCardsInput,
-    ListCardsOutput,
     ListHandoversInput,
     ListHandoversOutput,
     ListOpenQuestionsInput,
@@ -111,64 +103,3 @@ async def list_open_questions(svc: Services, request: AgentRequest) -> AgentResu
         f"답을 기다리는 질문 {len(questions)}건",
         [q.question_id for q in questions],
     )
-
-
-async def list_candidate_cards(svc: Services, request: AgentRequest) -> AgentResult:
-    params = _parse_input(ListCandidateCardsInput, request)
-    if isinstance(params, AgentResult):
-        return params
-    cards = await svc.memory.list_cards(area=params.area, states=["candidate"])
-    output = ListCandidateCardsOutput(cards=cards, collected_at=svc.clock())
-    return _done(
-        svc,
-        request,
-        output,
-        f"사람 확인을 기다리는 후보 카드 {len(cards)}장",
-        [c.card_id for c in cards],
-    )
-
-
-async def list_cards(svc: Services, request: AgentRequest) -> AgentResult:
-    """후보가 아닌 확정 카드를 최근 순으로 돌려준다. 사건 번호를 주면 그 사건에서 만든 카드만."""
-    params = _parse_input(ListCardsInput, request)
-    if isinstance(params, AgentResult):
-        return params
-    found = await svc.memory.list_cards(area=params.area, states=["active"])
-    cards = [
-        c
-        for c in found
-        if c.kind != "request"  # 기획·개발 요청 카드는 결정 카드가 아니다
-        and (params.context_id is None or c.context_id == params.context_id)
-    ]
-    cards.sort(key=lambda c: (c.created_at, c.card_id), reverse=True)
-    cards = cards[: params.limit]
-    output = ListCardsOutput(cards=cards, collected_at=svc.clock())
-    return _done(
-        svc, request, output, f"확정된 결정 카드 {len(cards)}장", [c.card_id for c in cards]
-    )
-
-
-async def get_audit_timeline(svc: Services, request: AgentRequest) -> AgentResult:
-    params = _parse_input(GetAuditTimelineInput, request)
-    if isinstance(params, AgentResult):
-        return params
-    entries: list[dict[str, Any]] = svc.audit.timeline(params.context_id)
-    output = GetAuditTimelineOutput(
-        context_id=params.context_id,
-        entries=[
-            AuditEntry(
-                seq=e["seq"],
-                at=datetime.fromisoformat(e["at"]),
-                kind=e["kind"],
-                payload=e["payload"],
-            )
-            for e in entries
-        ],
-        collected_at=svc.clock(),
-    )
-    summary = (
-        f"감사 기록 {len(entries)}건"
-        if entries
-        else f"{params.context_id}에 대한 감사 기록 없음: 확인할 수 없음"
-    )
-    return _done(svc, request, output, summary, [params.context_id])

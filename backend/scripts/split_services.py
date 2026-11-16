@@ -21,6 +21,7 @@ DEPARTMENTS = {
     "finance": ("finance", "finance_agent", "FINANCE_AGENT_CARD", "ax-agent-finance"),
     "data": ("data", "data_agent", "DATA_AGENT_CARD", "ax-agent-data"),
     "hr": ("hr", "hr_agent", "HR_AGENT_CARD", "ax-agent-hr"),
+    "archive": ("archive", "archive_agent", "ARCHIVE_AGENT_CARD", "ax-agent-archive"),
     "planning": ("planning", "planning_agent", "PLANNING_AGENT_CARD", "ax-agent-planning"),
     "dev": ("dev", "dev_agent", "DEV_AGENT_CARD", "ax-agent-dev"),
     "infra": ("infra-dejafix", "infra_agent", "INFRA_AGENT_CARD", "ax-agent-infra"),
@@ -28,6 +29,10 @@ DEPARTMENTS = {
 # 부서 이름 → 서비스 역할 환경변수. 같은 부서 앱을 서비스마다 따로 띄울 때 맡은 몫을 알린다
 # (기획: planning = 요청·기획서. 개발은 따로 `dev` 부서다)
 ROLE_ENVS = {"planning": "PLANNING_ROLE"}
+# 서비스 id → 업무 로직을 맡은 부서 패키지. 대응표의 부서 이름과 다를 때만 적는다.
+# 결정 기록(`decisions`)은 아카이브 AI(`domains/archive`)가 하지만, 다른 에이전트가 `hr`로 불러도
+# 도착하도록 대응표의 부서 이름은 아직 `hr`다(3단계에서 바꾼다)
+IMPL = {"decisions": "archive"}
 # 직접 만든 서비스 (부서 패키지를 쪼개지 않음)
 STANDALONE = {"orchestrator", "hosts"}
 
@@ -47,7 +52,8 @@ def write(path: Path, text: str) -> None:
 
 
 def build(svc) -> None:
-    folder, package, card_env, dist = DEPARTMENTS[svc.department]
+    impl = IMPL.get(svc.id, svc.department)
+    folder, package, card_env, dist = DEPARTMENTS[impl]
     card_path = ROOT / "domains" / folder / "agent-card.json"
     dept_card = json.loads(card_path.read_text(encoding="utf-8"))
     by_id = {s["id"]: s for s in dept_card["skills"]}

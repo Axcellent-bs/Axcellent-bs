@@ -2,7 +2,7 @@
 담당: 준하 · 포트: 8104
 ## 1. 역할
 인사 에이전트. 두 가지 일을 한다. (온보딩 안내와 발령·교대·퇴직은 하지 않기로 했다. 대신 인사평가 관리와 평가 에이전트 평가를 추가할 예정이다.)
-- **기억 쓰기**: 부서(planning, support, infra 등)가 보낸 사건·결정 기록을 결정 카드로 정리해 회사 기억에 남긴다.
+- **결정 기록은 아카이브 AI의 일이다**: 부서가 보낸 이슈·결정을 카드로 남기고 비슷한 과거를 찾는 일은 2026-11-16에 `domains/archive`로 분리했다. 인사 AI는 아카이브에 물어(`find_similar_decisions`, 발령 근거 찾기) 근거를 받고, 이슈 단계 시간의 판정(`judge_step_timings`)을 아카이브에 해 준다.
 - **사람 변화 대응**: 담당이 바뀔 때 일이 끊기지 않게 한다 (명부 조회, 인수인계, 새 계획과 과거 결정 비교).
 
 판정(완성도·공백·충돌·경과 일수)은 모두 코드 규칙이 하고, LLM은 문장만 다듬는다. LLM이 없거나 실패하면 고정 문장으로 대체하고 `fallback`으로 표시한다.
@@ -20,7 +20,6 @@ Agent Card: `agent-card.json` (`/.well-known/agent-card.json`으로 공개). 입
 
 | skill | 등급 | 하는 일 | 요청 가능 |
 |---|---|---|---|
-| `record_case` | A | 기록을 결정 카드로 정리해 저장 (결정 없으면 기록만, 확신 낮으면 후보) | orchestrator·planning·support·marketing·finance·data·infra |
 | `get_roster` | 조회 | 영역별 담당·교대, 담당 없음·교대 공백 영역 | orchestrator·dashboard-api·planning·support·marketing·finance·data·infra |
 | `team_headcount` | 조회 | 그달 1일 기준 팀별 인원수(이름·직원 ID 없음). 확정된 발령 기록이 있고 전 직원 등록 완료가 표시되면 그 기록으로 세고(`example: false`), 아니면 가상 명부(예시)라 `example: true` | orchestrator·finance |
 | `record_org_change` | A | 조직 변동(팀 이동·입사·퇴사) 초안 저장. 승인 없이 저장하고 확정 전에는 인원에 세지 않는다 | dashboard-api |
@@ -31,17 +30,12 @@ Agent Card: `agent-card.json` (`/.well-known/agent-card.json`으로 공개). 입
 | `record_leave` | A | 휴가 기간(서울 날짜)만 기록한다. 사유·종류는 받지 않는다. 사람 토큰으로 들어온 요청만 | dashboard-api |
 | `cancel_leave` | A | 휴가 기록을 지우지 않고 취소한 사람·시각만 남긴다(수정은 취소 + 새 기록). 이미 취소된 것은 성공(`duplicate`), 없는 ID는 거절. 사람 토큰으로 들어온 요청만 | dashboard-api |
 | `get_presence` | 조회 | 교대 명부와 휴가를 합친 상태(근무 중·교대 외·휴가 중). 휴가 기간·입력자는 상세 요청일 때만 | dashboard-api |
+| `evaluate_agents` | 조회 | 에이전트 평가 집계(에이전트별 건수·점·이유). 카드에 저장된 판정을 읽기만 한다 | dashboard-api |
+| `judge_step_timings` | 조회 | 이슈 하나의 단계 시간을 기준값과 견줘 판정(시간 계산만). 아카이브가 이슈 시각을 기록할 때 부른다 | archive·hr·dashboard-api |
 | `start_handover` | A | 인수인계 초안, 빈 자리 질문, 완성도(코드 계산) | orchestrator |
 | `answer_handover_question` | A | 인계자 답변 반영, 같은 답은 한 번만 | orchestrator·dashboard-api |
 | `confirm_handover` | B(planning 검증) / 완성도 미달 C | 인수인계 확정 | orchestrator |
-| `check_plan` | 조회 | 새 계획을 과거 결정과 비교 (기각됨·충돌·일치·기록에 없음) | orchestrator·dashboard-api·planning |
-| `find_similar_fraud_cards` | 조회 | 판매자 사실(가입 일수·저가 비율·24시간 등록 수)과 비슷한 지난 사기 카드(kind=fraud)와 유사도 0~1. 기준 미만이면 빈 목록 | data |
-| `find_similar_cases` | 조회 | 현재 사건을 설명하는 글과 비슷한 과거 사건·결정 카드와 당시 해결 내용(원인·조치·결과·소요 시간). Dense로 찾고 안 되면 Dice. 기준 미만이면 빈 목록 | orchestrator·infra·data·planning·dashboard-api |
-| `record_resolution` | A | 사건이 해결되면 그 사건의 카드에 원인·조치·결과·소요 시간을 채운다(값이 없으면 확인할 수 없음, 같은 내용은 한 번만. `only_if_unresolved`면 이미 해결 기록이 있을 때 바꾸지 않는다) | orchestrator·infra |
-| `decide_candidate_card` | A | 확신 낮은 후보 카드를 사람이 승인(확정)·폐기 | orchestrator·dashboard-api |
-| `retire_request_cards` | A | 기획이 요청을 거둬들이면 그 요청·기획서에서 나온 업무 결정·요청 카드(후보·확정)를 `retired`로 내린다. 지우지 않고, 다시 불러도 같은 결과 | planning |
-| `list_cards` | 조회 | 확정된(후보가 아닌) 결정 카드, 최근 순. `context_id`로 한 사건의 카드만 | orchestrator·dashboard-api |
-| `list_handovers`·`list_open_questions`·`list_candidate_cards`·`get_audit_timeline` | 조회 | 대시보드 인사 화면용 현황(인수인계·인계자 질문·후보 카드·감사 기록) | orchestrator·dashboard-api |
+| `list_handovers`·`list_open_questions` | 조회 | 대시보드 인사 화면용 현황(인수인계·인계자 질문·후보 카드·감사 기록) | orchestrator·dashboard-api |
 
 ## 4. 의존
 `ax-contracts`, `ax-agent-template`. 다른 부서 폴더를 import하지 않는다.

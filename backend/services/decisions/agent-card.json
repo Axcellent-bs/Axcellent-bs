@@ -1,7 +1,7 @@
 {
   "name": "decisions",
   "owner": "준하",
-  "description": "결정 기록 — hr 업무 중 이 서비스 skill만 맡는다. 인사 — 부서가 보낸 사건·결정 기록을 받아 회사 기억에 카드로 남긴다",
+  "description": "결정 기록 — 아카이브 AI의 서비스. 부서가 보낸 이슈·결정을 회사 기억에 카드로 남기고 비슷한 과거를 찾는다.",
   "url": "http://decisions:8114/a2a",
   "version": "0.1.0",
   "capabilities": {
@@ -79,19 +79,6 @@
       "allowed_requesters": [
         "dashboard-api",
         "orchestrator"
-      ],
-      "verifier": null,
-      "priority": "recommended",
-      "handoff": false
-    },
-    {
-      "id": "evaluate_agents",
-      "description": "최근 장애 이벤트에서 부서 AI가 일한 시간을 기준값과 비교한 판정을 에이전트별로 모아 조회한다. 점수·등급·순위는 없고 저장된 판정만 쓴다.",
-      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#EvaluateAgentsInput",
-      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#EvaluateAgentsOutput",
-      "grade": "read",
-      "allowed_requesters": [
-        "dashboard-api"
       ],
       "verifier": null,
       "priority": "recommended",
@@ -226,6 +213,19 @@
       "verifier": null,
       "priority": "recommended",
       "handoff": false
+    },
+    {
+      "id": "find_similar_decisions",
+      "description": "사유(문장)와 비슷한 과거 업무 결정 카드를 임베딩 검색(RAG)으로 찾는다(조회 전용). 확정된 업무 결정 카드(kind=decision)만 대상이고 기준을 넘는 카드가 없으면 비어 있다. 과거에 기각된 안은 rejected로 표시한다. 인사 AI의 발령 입력 화면이 근거 후보를 보여 주려고 부른다. 자동으로 연결하지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarDecisionsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/hr.py#FindSimilarDecisionsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "hr",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
     }
   ]
 }

@@ -55,10 +55,6 @@ async def snapshot(svc: Services) -> dict[str, Any]:
             "shift": [{"area": a, "at": t.isoformat()} for a, t in gaps.shift_gaps],
         },
         "areas": roster.list_areas(svc.store),
-        "cards": await card_rows(svc),
-        "records": svc.store.all(
-            "SELECT record_id, context_id, kind, summary, source_refs FROM records ORDER BY rowid"
-        ),
         "holds": holds,
         "audit": svc.audit.list(limit=40),
     }
