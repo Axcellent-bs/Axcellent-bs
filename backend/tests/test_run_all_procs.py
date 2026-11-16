@@ -202,8 +202,11 @@ def test_run_all_checks_running_before_start_and_no_longer_restarts_silently() -
     assert start < first_launch
     body = text[start:]
     assert "\nstop_all\n" not in body  # 켜기는 이제 끄고 다시 켜지 않는다 (먼저 stop)
-    assert body.count("winpid_of $! >") == 4  # 서버·주문 트래픽·수집기 2개
-    assert body.count('echo "$START_LINE" > "$LOGS/') == 4
+    # 서버·주문 트래픽·수집기 3개(인기 검색어·YouTube·판매 기록)
+    assert body.count("winpid_of $! >") == 5
+    assert body.count('echo "$START_LINE" > "$LOGS/') == 5
+    # 판매 기록 수집기도 stop이 알아보고(표식) 남은 잠금을 정리한다
+    assert '"data_agent.sales_collect"' in text and '"$DATA/sales_collect.lock"' in text
     assert "export AX_GIT_COMMIT" in text
 
 

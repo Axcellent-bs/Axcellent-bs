@@ -76,3 +76,38 @@ USER_CANCELED = "결제 취소"
 
 # 카테고리 코드 → 한국어 이름. 지금 data 코드에는 캣북스 카테고리 이름이 없어 비워 둔다
 [categories]
+
+# 매출 분석(sales_analysis) 설정. 형식: ax_contracts.schemas.data.CatalogSales
+# 다른 회사는 같은 모양으로 바꿔 끼운다. 이름·기준만 두고 숫자는 코드가 표준 판매 저장소에서 계산한다
+[sales]
+version = "1"
+revenue_definition = "매출 = 결제 완료 주문의 상품 금액 − 쿠폰 할인 − 포인트 사용 − 기간 안 환불 (배송비 제외)"
+min_product_orders = 5  # 상품 증감은 두 기간 모두 이 주문 수 이상인 상품만 비교한다
+max_staleness_minutes = 30  # 마지막 수집이 이보다 오래되면 숫자를 내지 않는다
+min_period_orders = 20  # 기간 안 결제 완료 주문이 이보다 적으면 숫자를 내지 않는다
+
+# category_code → 화면 이름 (shop-api storefront.CATEGORY_NAMES와 같은 이름). 없는 코드는 품질 보고에 남는다
+[sales.categories]
+book = "도서"
+stationery = "문구"
+
+# 유입 출처(utm_source) → 화면 이름. 없는 값은 "기타 경로"로 묶는다. 표시가 없으면 "직접 유입"
+[sales.source_labels]
+naver = "네이버"
+google = "구글"
+youtube = "유튜브"
+instagram = "인스타그램"
+facebook = "페이스북"
+kakao = "카카오"
+banner = "쇼핑몰 배너"
+
+# 유입 매체(utm_medium) → 화면 이름
+[sales.medium_labels]
+cpc = "검색 광고"
+organic = "자연 검색"
+social = "소셜"
+email = "이메일"
+onsite = "쇼핑몰 안"
+referral = "추천 링크"
+display = "배너 광고"
+shorts = "숏츠"
