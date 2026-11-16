@@ -4,6 +4,8 @@
 평가하지 않는다(다른 계획의 같은 이름 단계가 섞이지 않게 한다).
 - 제외: 기획 AI는 사람이 확인하는 단계라 처리 시간 기준을 정할 대상이 아니고, 복구 검증은 쇼핑몰이
   언제 복구되느냐에 달려 부서 평가에서 빼고 "복구 확인에 걸린 시간"을 결과 지표로만 보인다.
+- 이슈 기록 쪽 3단계(`similar_cases`·`record`·`resolution`)는 아카이브 AI가 받는 일이라
+  아카이브로 센다(2026-11-16 결정 기록을 인사에서 분리). 인사 AI는 평가받을 단계가 없다.
 - 개발 `related_prs`·`link_incident`는 총괄 계획표에 아직 (planning)으로 적혀 있어도 개발 서비스에
   있는 단계라 개발로 센다.
 """
@@ -32,7 +34,7 @@ class Excluded:
 
 STAGES: dict[str, Stage | Excluded] = {
     "diagnose": Stage("infra", LOOKUP),
-    "similar_cases": Stage("hr", LOOKUP),
+    "similar_cases": Stage("archive", LOOKUP),
     "impact": Stage("data", LOOKUP),
     "root_cause": Stage("data", LLM),
     "cause_check": Excluded("기획 AI: 사람이 확인하는 단계"),
@@ -48,10 +50,22 @@ STAGES: dict[str, Stage | Excluded] = {
     "end_notice": Excluded("장애 배너 내리기: 복구 신호 뒤에 도는 사후 정리라 평가하지 않는다"),
     "finance_record": Stage("finance", NOTICE),
     "kpi": Stage("data", LOOKUP),
-    "record": Stage("hr", NOTICE),
-    "resolution": Stage("hr", NOTICE),
+    "record": Stage("archive", NOTICE),
+    "resolution": Stage("archive", NOTICE),
     "late_compensation": Stage("support", ACTION),
 }
+
+
+def current_dept(step_id: str, stored: str) -> str:
+    """저장된 판정의 부서. 분리 전에 "인사"로 저장된 이슈 기록 단계는 지금 배정(아카이브)으로 읽는다
+
+    판정(제때·확인 필요 등)은 다시 계산하지 않고, 어느 에이전트의 일인지만 바로잡는다.
+    """
+    if stored == "hr":
+        found = stage_of(step_id)
+        if found is not None:
+            return found.dept
+    return stored
 
 
 def stage_of(step_id: str) -> Stage | None:
