@@ -79,6 +79,7 @@ export const COMM_OUTCOME_TONE: Record<CommOutcome, string> = {
 /** 에이전트 업무(skill) 이름을 사람이 읽는 말로. 할 일함이 쓴다. skill 목록은 backend agent-template services.py.
  *  여기 없는 skill은 skillLabel()이 원래 이름을 그대로 보여 준다(지어내지 않는다). */
 export const SKILL_KO: Record<string, string> = {
+  close_overdue: "월 마감 기한 지남", // 재무가 받은 요청에 올리는 일 (close_alerts.py)
   find_active_incident: "진행 중인 이슈 찾기",
   list_inquiries: "문의 목록 보기", get_inquiry: "문의 보기", check_reply: "답변 점검", summarize_inquiry: "문의 요약",
   create_inquiry: "문의 만들기", add_customer_message: "고객 메시지 추가", send_reply: "답변 보내기", reject_draft: "답변 초안 버리기",
