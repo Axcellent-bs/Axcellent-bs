@@ -3,6 +3,10 @@
 실제 배포 시스템이 없어 JSON 파일 하나가 배포 기록이다. 기본은 패키지 안의 `data/deployments.json`
 (planning 초기 데이터와 같은 버전·시각)이고 `INFRA_DEPLOYMENTS_FILE`로 바꿀 수 있다.
 롤백한 배포는 "되돌림"으로 표시해 직전 정상 버전을 고를 때 건너뛴다.
+
+배포 도구(GitHub Actions·Jenkins)가 연결된 서비스는 이력 미리 받기(`deploy_poll`)가
+`replace_service`로 그 서비스의 시연 이력을 도구의 성공한 실행으로 바꾼다. 도구 실행의 `deploy_id`는
+`<서비스>:<실행 id>`라 다시 받아도 같고, 그래서 "되돌림" 표시가 이어진다.
 """
 
 from __future__ import annotations
@@ -10,10 +14,13 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from infra_agent.deploy_tools import ToolRun
 
 
 @dataclass(frozen=True)
@@ -29,6 +36,26 @@ class Deployment:
     # 쇼핑몰 결제 설정을 이 기록의 이전 버전으로 실제로 되돌린다(시연 "잘못된 배포").
     # None은 기록만 있는 배포
     applies_to: str | None = None
+    # 배포 도구에서 받은 실행이면 도구 이름(`github_actions`·`jenkins`). None은 시연 이력.
+    # 도구 실행은 서비스 전체를 배포하므로 어느 구성요소 진단에도 후보가 된다
+    source: str | None = None
+    # 우리가 롤백으로 띄운 다시 배포. 장애를 만든 변경이 아니라 원인 후보로 보지 않는다
+    is_rollback: bool = False
+
+
+@dataclass
+class Redeploy:
+    """롤백으로 띄운 다시 배포 기록. 도구 이력에서 그 실행을 찾아 버전·롤백 표시를 맞춘다."""
+
+    service: str
+    version: str
+    at: datetime
+    run_id: str | None = None  # 도구가 준 실행 id (Jenkins는 대기열 id라 빌드와 다르다)
+    claimed: str | None = None  # 이 기록으로 찾은 도구 실행 id
+
+
+# 다시 배포 기록보다 이만큼 앞선 실행까지 같은 실행으로 본다 (도구와 우리 시계 차이)
+REDEPLOY_SKEW = timedelta(minutes=2)
 
 
 SHOP_PAYMENT_CONFIG = "shop_payment_config"
@@ -43,6 +70,7 @@ def _parse(row: dict[str, Any]) -> Deployment:
         components=tuple(row.get("components", [])),
         change_summary=row.get("change_summary", ""),
         irreversible=tuple(row.get("irreversible", [])),
+        applies_to=row.get("applies_to") if isinstance(row.get("applies_to"), str) else None,
     )
 
 
@@ -63,14 +91,24 @@ def load_rows() -> list[dict[str, Any]]:
 class DeploymentHistory:
     deployments: list[Deployment]
     rolled_back: set[str] = field(default_factory=set)  # deploy_id
+    redeploys: list[Redeploy] = field(default_factory=list)
 
     @classmethod
     def load(cls) -> DeploymentHistory:
         return cls([_parse(row) for row in load_rows()])
 
     def for_component(self, component: str | None) -> list[Deployment]:
-        """그 구성요소를 바꾼 배포, 최근 것이 앞."""
-        rows = [d for d in self.deployments if component is None or component in d.components]
+        """그 구성요소를 바꾼 배포, 최근 것이 앞.
+
+        도구 실행(`source`)은 서비스 전체 배포라 어느 구성요소에도 든다. 우리가 롤백으로 띄운
+        다시 배포(`is_rollback`)는 이전 버전으로 돌아간 것이라 넣지 않는다.
+        """
+        rows = [
+            d
+            for d in self.deployments
+            if not d.is_rollback
+            and (component is None or d.source is not None or component in d.components)
+        ]
         return sorted(rows, key=lambda d: d.deployed_at, reverse=True)
 
     def find(self, service: str, version: str) -> Deployment | None:
@@ -98,6 +136,64 @@ class DeploymentHistory:
 
     def mark_rolled_back(self, target: Deployment) -> None:
         self.rolled_back.add(target.deploy_id)
+
+    def record_redeploy(
+        self, service: str, version: str, *, at: datetime, run_id: str | None
+    ) -> Redeploy:
+        """롤백으로 띄운 다시 배포를 남긴다. 다음 이력 받기에서 그 실행을 롤백으로 표시한다."""
+        note = Redeploy(service=service, version=version, at=at, run_id=run_id)
+        self.redeploys.append(note)
+        return note
+
+    def _claim(self, service: str, run: ToolRun) -> Redeploy | None:
+        """이 실행이 우리가 띄운 다시 배포면 그 기록.
+
+        실행 id가 같으면 그 기록이다. 실행 id를 모르면(GitHub가 id를 늦게 줌, Jenkins 대기열 id)
+        같은 버전이 기록 시각 뒤에 처음 성공한 실행을 그 기록으로 본다.
+        한 기록은 실행 하나만 맞춘다.
+        """
+        for note in self.redeploys:
+            if note.service != service:
+                continue
+            if note.claimed is not None:
+                if note.claimed == run.run_id:
+                    return note
+                continue
+            if note.run_id == run.run_id or (
+                run.version == note.version and run.at >= note.at - REDEPLOY_SKEW
+            ):
+                note.claimed = run.run_id
+                return note
+        return None
+
+    def replace_service(
+        self, service: str, runs: list[ToolRun], *, tool: str = "deploy_tool"
+    ) -> None:
+        """그 서비스의 이력(시연 이력 포함)을 배포 도구의 성공한 실행으로 바꾼다.
+
+        `deploy_id`가 `<서비스>:<실행 id>`라 "되돌림" 표시(`rolled_back`)는 다시 받아도 이어진다.
+        우리가 롤백으로 띄운 실행은 디스패치한 버전과 롤백 표시(`is_rollback`)를 붙인다.
+        """
+        fresh: list[Deployment] = []
+        for run in sorted(runs, key=lambda r: r.at):
+            if not run.ok:
+                continue  # 실패·진행 중인 실행은 배포되지 않았다
+            note = self._claim(service, run)
+            who = f" · {run.actor}" if run.actor else ""
+            fresh.append(
+                Deployment(
+                    deploy_id=f"{service}:{run.run_id}",
+                    service=service,
+                    version=note.version if note else run.version,
+                    deployed_at=run.at,
+                    components=(),
+                    change_summary=f"{tool} 실행 {run.run_id}{who}"
+                    + (" (롤백 다시 배포)" if note else ""),
+                    source=tool,
+                    is_rollback=note is not None,
+                )
+            )
+        self.deployments = [d for d in self.deployments if d.service != service] + fresh
 
     def next_version(self, service: str) -> str:
         """그 서비스의 마지막 배포 버전에서 끝자리를 하나 올린다 (v2.4.1 → v2.4.2)."""
