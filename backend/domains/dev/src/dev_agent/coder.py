@@ -795,9 +795,11 @@ async def _ask[T: BaseModel](
                 LLM_TIMEOUT_SECONDS,
             )
     except TimeoutError:
-        raise CoderStop("failed", f"LLM {step} 시간 초과") from None
+        raise CoderStop("failed", f"LLM {step} 시간 초과", fields={"transient": True}) from None
     except Exception as exc:  # noqa: BLE001 - 예외 내용 대신 종류만 남긴다
-        raise CoderStop("failed", f"LLM {step} 실패 ({type(exc).__name__})") from None
+        raise CoderStop(
+            "failed", f"LLM {step} 실패 ({type(exc).__name__})", fields={"transient": True}
+        ) from None
 
 
 async def _vcs[R](step: str, call: Awaitable[R]) -> R:
@@ -805,7 +807,9 @@ async def _vcs[R](step: str, call: Awaitable[R]) -> R:
         return await call
     except VcsError as exc:
         raise CoderStop(
-            "failed", f"형상관리 {step} 실패 ({exc.code}){vcs_hint(exc.code)}"
+            "failed",
+            f"형상관리 {step} 실패 ({exc.code}){vcs_hint(exc.code)}",
+            fields={"transient": exc.code == "rate_limited"},
         ) from None
 
 
