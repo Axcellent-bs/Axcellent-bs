@@ -14,6 +14,17 @@ export const ORCHESTRATOR_HREF = '/orchestrator'
 let counts: Record<string, number> = {}
 const listeners = new Set<() => void>()
 
+// 상단 종 알림: 개발 AI 작업 중 사람이 봐야 하는 것 (CI 실패·머지 충돌·자동 머지 안 됨·리뷰 불일치 등)
+export interface DevAlert { id: string; title: string; why: string; href: string }
+let alerts: DevAlert[] = []
+
+function setAlerts(next: DevAlert[]) {
+  const key = (xs: DevAlert[]) => xs.map((a) => `${a.id}|${a.why}`).join(';')
+  if (key(next) === key(alerts)) return
+  alerts = next
+  listeners.forEach((l) => l())
+}
+
 function set(href: string, n: number | undefined) {
   if (counts[href] === n) return
   counts = { ...counts }
@@ -25,8 +36,19 @@ function set(href: string, n: number | undefined) {
 async function count(part: 'planning' | 'dev'): Promise<number | undefined> {
   try {
     const s = fromBackend(await planningApi(apiBase(part)).state(), [])
-    return part === 'planning' ? incomingCount(s) : s.tasks.filter((t) => taskRow(s, t).group === 'stuck').length
+    if (part === 'planning') return incomingCount(s)
+    const stuck = s.tasks.map((t) => taskRow(s, t)).filter((r) => r.group === 'stuck')
+    setAlerts(
+      stuck.filter((r) => !r.t.discarded).map((r) => ({
+        id: r.t.id,
+        title: r.t.title,
+        why: r.t.coding?.error ?? r.cells[2]?.meta ?? '사람 확인 필요',
+        href: r.next.href,
+      })),
+    )
+    return stuck.length
   } catch {
+    if (part === 'dev') setAlerts([])
     return undefined
   }
 }
@@ -62,5 +84,16 @@ export function useNavCounts(planning: boolean, dev: boolean, orchestrator: bool
       return () => listeners.delete(l)
     },
     () => counts,
+  )
+}
+
+/** 개발 AI 알림 목록 (useNavCounts가 개발 서버를 셀 때 같이 채운다) */
+export function useDevAlerts(): DevAlert[] {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l)
+      return () => listeners.delete(l)
+    },
+    () => alerts,
   )
 }

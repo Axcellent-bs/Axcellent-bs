@@ -289,13 +289,15 @@ def test_follow_up_after_merge_goes_to_planning_again(service: PlanningService, 
 
 
 class Picky(CoderLLM):
-    """리뷰를 두 번 불일치로 돌려 PR을 사람 확인 대기로 둔다. 수정 지시가 오면 그 문구로 쓴다."""
+    """리뷰 불일치 뒤 고칠 게 없다고 답해 PR을 사람 확인 대기로 둔다.
+
+    수정 지시가 오면 그 문구로 쓴다."""
 
     FIXED = "export function Banner() {\n  return <div>오늘의 신간</div>\n}\n"
 
     def __init__(self):
         super().__init__()
-        self.reviews = ["불일치", "불일치", "통과"]
+        self.reviews = ["불일치", "통과"]
         self.instructions: list[str | None] = []
 
     async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
@@ -304,6 +306,8 @@ class Picky(CoderLLM):
             self.instructions.append(data.get("instruction"))
             if data.get("instruction"):
                 return FileWrite(content=self.FIXED)
+            if data.get("review_notes"):
+                return FileWrite(content=data["current"])  # 리뷰 지적에 고칠 게 없다
             return FileWrite(content=f"// {len(self.instructions)}\n" + data["current"])
         if schema is CodeReview:
             return CodeReview(verdict=self.reviews.pop(0), notes=["문구가 다르다"])
@@ -323,9 +327,10 @@ def test_simple_fix_on_waiting_pr_commits_to_same_pr(service: PlanningService, a
         pr = next(p for p in service.state.prs if p.task == task_id)
         th = _post(c, thread_id="chat-1", message="문구는 '오늘의 신간'으로 해").json()["data"]
         assert th["messages"][-1]["kind"] == "started" and pr.id in th["messages"][-1]["text"]
-        assert _settle(service, task_id) == "waiting_human"
+        # 지시대로 고친 코드가 리뷰를 통과하면 자동 머지 규칙으로 간다 (불일치 1번은 막지 않는다)
+        assert _settle(service, task_id) == "merged"
         pr = next(p for p in service.state.prs if p.task == task_id)  # 상태는 바꿔 끼워진다
-        assert pr.reviews[-1] == "통과" and not pr.merged
+        assert pr.reviews == ["불일치", "통과"] and pr.merged
     assert chat.check_calls[0]["instruction"] == "문구는 '오늘의 신간'으로 해"
     assert chat.check_calls[0]["pr_files"] == [BANNER]
     assert len([p for p in service.state.prs if p.task == task_id]) == 1  # 새 PR 없음
