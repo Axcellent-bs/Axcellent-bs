@@ -214,16 +214,23 @@ def _shop_pages(pages: list[list[dict[str, Any]]], seen: list[Any] | None = None
     import httpx
 
     def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/api/shop/orders":
+            return httpx.Response(404)  # 판매 집계 읽기 경로가 없는 옛 판매 서버처럼 보인다
         if seen is not None:
             seen.append(dict(request.url.params))
-        if request.url.path != "/api/shop/orders":
-            return httpx.Response(404)
         cursor = request.url.params.get("cursor")
         index = int(cursor) if cursor else 0
         nxt = str(index + 1) if index + 1 < len(pages) else None
         return httpx.Response(200, json={"data": pages[index], "meta": {"next_cursor": nxt}})
 
     shop_client.use_client(httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+
+
+@pytest.fixture(autouse=True)
+def _fresh_sales_cache() -> Any:
+    shop_client.clear_sales_cache()  # 같은 기간의 판매 수량 캐시가 시험끼리 새지 않게 한다
+    yield
+    shop_client.clear_sales_cache()
 
 
 @pytest.fixture
@@ -258,7 +265,7 @@ async def test_fetch_sold_qty_reports_incomplete_when_cut_short(_reset_shop: Any
     late = await shop_client.fetch_sold_qty(
         NOW - timedelta(days=1), NOW, stop_at=datetime(2020, 1, 1, tzinfo=UTC)
     )
-    assert not late.complete and late.orders_scanned == 0
+    assert not late.complete and late.qty_by_product == {}  # 마감이 지났으면 아무것도 읽지 않는다
 
 
 @pytest.mark.asyncio
@@ -667,6 +674,8 @@ async def test_fetch_sold_qty_reuses_one_http_client_for_all_pages(
     pages = [[_order(f"o{n}", [("prd_1", n)])] for n in (1, 2, 3)]
 
     def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/api/shop/orders":
+            return httpx.Response(404)  # 판매 집계 읽기 경로가 없는 옛 판매 서버
         cursor = request.url.params.get("cursor")
         index = int(cursor) if cursor else 0
         nxt = str(index + 1) if index + 1 < len(pages) else None
@@ -683,7 +692,7 @@ async def test_fetch_sold_qty_reuses_one_http_client_for_all_pages(
     shop_client.use_client(None)  # 바꿔 끼운 클라이언트 없이, 코드가 직접 만드는 길
     read = await shop_client.fetch_sold_qty(NOW - timedelta(days=1), NOW)
     assert read.qty_by_product == {"prd_1": 6} and read.complete and read.orders_scanned == 3
-    assert len(made) == 1  # 세 페이지를 클라이언트 하나로
+    assert len(made) == 1  # 집계 시도(404)와 세 페이지를 클라이언트 하나로
 
     made.clear()  # 한 번만 부르는 읽기는 지금처럼 자기 클라이언트를 만들고 닫는다
     await shop_client._send("GET", "/orders")
@@ -815,6 +824,137 @@ def test_inquiry_order_reads_share_one_http_client(
         shop_client.use_client(None)
     assert out["items"][0]["inquiry_count"] == 3 and out["inquiries_complete"] is True
     assert len(made) == 1  # 주문 세 개를 클라이언트 하나로
+
+
+# ------------------------------------------------ 판매 수량 읽기 (판매 집계 읽기 경로, 캐시)
+def _summary_server(
+    rows_for: Any, seen: list[dict[str, Any]] | None = None, status: int = 200
+) -> None:
+    import httpx
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/api/shop/sales-summary":
+            return httpx.Response(404)
+        params = dict(request.url.params)
+        if seen is not None:
+            seen.append(params)
+        if status != 200:
+            return httpx.Response(status, json={"error": {"code": "X", "message": "x"}})
+        return httpx.Response(
+            200, json={"data": {"rows": rows_for(params)}, "meta": {}, "group_by": ["product"]}
+        )
+
+    shop_client.use_client(httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+
+
+@pytest.mark.asyncio
+async def test_sold_qty_is_summed_from_the_sales_summary_in_seven_day_chunks(
+    _reset_shop: Any,
+) -> None:
+    seen: list[dict[str, Any]] = []
+    _summary_server(
+        lambda p: [
+            {"product_id": "prd_1", "order_count": 2, "gross_qty": 3, "net_qty": 3},
+            {"product_id": "prd_2", "order_count": 1, "gross_qty": 1, "net_qty": 0},
+        ],
+        seen,
+    )
+    read = await shop_client.fetch_sold_qty(NOW - timedelta(days=30), NOW)
+    assert read.source == "summary" and read.complete and read.orders_scanned is None
+    assert len(seen) == 5  # 30일 = 7일 4번 + 2일 1번
+    assert read.qty_by_product == {"prd_1": 15, "prd_2": 5}  # 구간마다 합친다 (gross_qty)
+    assert seen[0]["from"] == "2026-10-15T12:00:00Z" and seen[0]["to"] == "2026-10-22T12:00:00Z"
+    assert seen[-1]["to"] == "2026-11-14T12:00:00Z"
+    assert all(p["group_by"] == "product" for p in seen)
+    ends = [p["to"] for p in seen]
+    assert ends == sorted(ends)  # 끊김 없이 이어지고 겹치지 않는다
+    assert [p["from"] for p in seen[1:]] == ends[:-1]
+
+
+@pytest.mark.asyncio
+async def test_the_summary_window_end_is_floored_to_five_minutes(_reset_shop: Any) -> None:
+    seen: list[dict[str, Any]] = []
+    _summary_server(lambda p: [], seen)
+    late = NOW + timedelta(minutes=3, seconds=40)
+    await shop_client.fetch_sold_qty(late - timedelta(days=1), late)
+    assert seen[-1]["to"] == "2026-11-14T12:00:00Z"  # 12:03:40 → 12:00
+    assert seen[0]["from"] == "2026-11-13T12:00:00Z"  # 기간 길이는 그대로
+
+
+@pytest.mark.asyncio
+async def test_a_second_read_of_the_same_window_uses_the_cache(_reset_shop: Any) -> None:
+    seen: list[dict[str, Any]] = []
+    _summary_server(lambda p: [{"product_id": "prd_1", "gross_qty": 4}], seen)
+    first = await shop_client.fetch_sold_qty(NOW - timedelta(days=7), NOW)
+    again = await shop_client.fetch_sold_qty(
+        NOW - timedelta(days=7) + timedelta(seconds=90), NOW + timedelta(seconds=90)
+    )  # 90초 뒤 같은 5분 칸이다
+    assert len(seen) == 1 and again is first
+    shop_client.clear_sales_cache()
+    await shop_client.fetch_sold_qty(NOW - timedelta(days=7), NOW)
+    assert len(seen) == 2  # 캐시를 비우면 다시 읽는다
+
+
+@pytest.mark.asyncio
+async def test_the_cache_expires_and_incomplete_reads_are_not_cached(
+    _reset_shop: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[dict[str, Any]] = []
+    _summary_server(lambda p: [{"product_id": "prd_1", "gross_qty": 1}], seen)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(shop_client.time, "monotonic", lambda: clock["now"])
+    await shop_client.fetch_sold_qty(NOW - timedelta(days=1), NOW)
+    clock["now"] += shop_client.SALES_CACHE_SECONDS + 1
+    await shop_client.fetch_sold_qty(NOW - timedelta(days=1), NOW)
+    assert len(seen) == 2  # 몇 분이 지나면 다시 읽는다
+    shop_client.clear_sales_cache()
+    late = datetime(2020, 1, 1, tzinfo=UTC)
+    cut = await shop_client.fetch_sold_qty(NOW - timedelta(days=1), NOW, stop_at=late)
+    assert not cut.complete and cut.source == "summary"
+    seen.clear()
+    shop_client.clear_sales_cache()
+    await shop_client.fetch_sold_qty(NOW - timedelta(days=1), NOW, stop_at=late)
+    await shop_client.fetch_sold_qty(NOW - timedelta(days=1), NOW)
+    assert len(seen) == 1  # 끝까지 못 읽은 결과는 캐시에 넣지 않아 다음에 읽는다
+
+
+@pytest.mark.asyncio
+async def test_a_server_without_the_summary_path_falls_back_to_the_order_list(
+    _reset_shop: Any,
+) -> None:
+    _shop_pages([[_order("o1", [("prd_1", 2)]), _order("o2", [("prd_1", 1)], paid=False)]])
+    read = await shop_client.fetch_sold_qty(NOW - timedelta(days=7), NOW)
+    assert read.source == "orders" and read.qty_by_product == {"prd_1": 2}
+    assert read.orders_scanned == 2 and read.complete
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403, 422, 500])
+async def test_other_summary_errors_are_not_hidden_by_the_fallback(
+    _reset_shop: Any, status: int
+) -> None:
+    _summary_server(lambda p: [], status=status)
+    with pytest.raises(shop_client.ShopError):
+        await shop_client.fetch_sold_qty(NOW - timedelta(days=7), NOW)
+
+
+def test_the_skill_reports_summary_reads_without_an_order_count(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, _reset_shop: Any
+) -> None:
+    monkeypatch.setenv("SUPPORT_ORDER_SOURCE", "shop-api")
+    first = {"left": True}
+
+    def once(params: dict[str, Any]) -> list[dict[str, Any]]:
+        if first["left"]:  # 7일 구간마다 부르므로 한 구간에만 판매가 있다고 한다
+            first["left"] = False
+            return [{"product_id": "prd_1", "gross_qty": 4}]
+        return []
+
+    _summary_server(once)
+    out = run_skill(client, {"include_inquiries": False})["output"]
+    row = out["items"][0]
+    assert (row["sold_qty"], row["claim_qty"], row["claim_rate"]) == (4, 1, 0.25)
+    assert out["sales_read"] and out["sales_orders_scanned"] is None
 
 
 def test_asked_products_come_back_even_with_zero_claims_and_inquiries() -> None:
