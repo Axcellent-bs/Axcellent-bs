@@ -132,7 +132,10 @@ export default function Safety() {
               <Link href="/agents/chat?rooms=all" className="text-brand-700 underline">AI 대화방</Link>에서도 볼 수 있어요.
             </p>
           </div>
-          <span className="text-xs text-ink-500">{at ? `${shortDateTime(at)} 기준 · 15초마다 새로 읽음` : "불러오는 중…"}</span>
+          <div className="flex flex-col items-end gap-2">
+            <Link href="/agents/chat?rooms=direct:safety" className="btn-primary text-sm">안전규칙 AI에게 묻기</Link>
+            <span className="text-xs text-ink-500">{at ? `${shortDateTime(at)} 기준 · 15초마다 새로 읽음` : "불러오는 중…"}</span>
+          </div>
         </div>
         {problem && <Problem>{problem}</Problem>}
         <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
