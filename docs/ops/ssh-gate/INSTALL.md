@@ -190,6 +190,38 @@ restrict,from="<허용 출처 IP>",command="/usr/local/sbin/ax-gate <계정>" ss
 
 끄기: 정책에서 그 구역을 지운다. 이미 넣은 location은 그대로 남는다.
 
+## 7-1. 자동 배포 정지·재개 연결(선택)
+
+`autodeploy-pause` / `autodeploy-resume`을 쓰려면 한 번 연결한다. 게이트는 정지 표시 파일만 쓰고, 그 파일을 읽어 건너뛰는 것은 자동 배포 쪽이 한다. 순서대로 한다(새 게이트 파일을 먼저 설치한 뒤에 정책을 고친다).
+
+```bash
+# 1) 판정 스크립트 설치(읽기 전용. root 권한이 필요 없는 스크립트다)
+sudo install -o root -g root -m 755 autodeploy-paused.sh /usr/local/sbin/ax-gate-autodeploy-paused
+
+# 2) 정지 표시 파일을 둘 폴더(root 만 쓰고, 자동 배포를 돌리는 계정이 읽을 수 있어야 한다)
+sudo install -d -o root -g root -m 755 <게이트 상태 폴더>
+```
+
+3. 정책에 구역을 넣는다(먼저 정책을 백업). 파일 이름은 `autodeploy.pause`여야 한다.
+   ```toml
+   [autodeploy]
+   pause_file = "<게이트 상태 폴더>/autodeploy.pause"
+   default_hours = 2
+   max_hours = 12
+   ```
+4. 정지·재개를 쓸 권한자 계정의 `[permissions]` 줄에 `"autodeploy-pause", "autodeploy-resume"`을 더한다. `_default`에는 넣지 않는다(넣으면 게이트가 모든 요청을 거부한다).
+5. 서버의 자동 배포 스크립트(이 레포에 없다) 맨 앞에 아래 세 줄을 넣는다. 자동 배포가 타이머·크론 중 무엇으로 돌든 스크립트가 하나면 한 곳이다.
+   ```bash
+   if /usr/local/sbin/ax-gate-autodeploy-paused <게이트 상태 폴더>/autodeploy.pause; then
+     exit 0   # 멈춰 있다. 이번 주기는 배포하지 않는다
+   fi
+   ```
+6. 확인: `autodeploy-pause test` → `status`에 "자동 배포: 정지 중" → 자동 배포를 한 주기 돌려(또는 스크립트를 손으로 실행해) 건너뛰는지 본다 → `autodeploy-resume` → 다음 주기에 다시 도는지 본다.
+
+연결(5번)을 하기 전에는 정지 동작이 파일만 쓰고 자동 배포는 그대로 돈다. 끄기: 5번의 세 줄을 지우고 정책의 구역과 권한을 지운다.
+
+`[restart] deploy_first`는 기본 false다. true로 바꾸면 `restart-backend`가 서버 코드가 뒤처져 있을 때 번들 배포를 먼저 한다(`README.md`의 "재시작과 서버 코드가 어긋날 때"). 켜는 것은 서버 책임자의 결정이다.
+
 ## 8. 설치 후 검증 체크리스트
 
 `<서버>`는 대상 서버 주소, `<계정>`은 시험하는 사람의 계정. 각 줄을 실제로 실행하고 결과를 적는다.
@@ -218,6 +250,8 @@ restrict,from="<허용 출처 IP>",command="/usr/local/sbin/ax-gate <계정>" ss
 - [ ] 권한자가 아닌 계정으로 `deploy-bundle <SHA> --dry-run` → 할 일만 출력, 끝 코드 0
 - [ ] 권한자 계정으로 `lock test` → `status`에 잠금 표시 → 다른 계정의 `deploy-bundle <SHA> --dry-run` → 끝 코드 4 → `unlock`
 - [ ] 잠금 파일이 root 소유 644인지, 개인 계정으로는 못 지우는지
+- [ ] (자동 배포 정지를 켰다면) 권한자가 아닌 계정으로 `autodeploy-pause test` → 끝 코드 3. 권한자로 실행 → 정지 표시 파일이 root 소유 644로 생기고 그 밖의 파일은 안 바뀐다 → 자동 배포가 그 주기를 건너뛴다 → `autodeploy-resume` 뒤 파일이 남아 있고 `resumed_by=`가 적혀 있다
+- [ ] (자동 배포 정지를 켰다면) 최대 시간을 넘는 재개시각 → 거부. 잠금 중 `autodeploy-resume` → 끝 코드 4
 - [ ] 재부팅 뒤에도 잠금 파일·방화벽 규칙·키 파일이 유지되는지
 
 SHA·배포(먼저 `--dry-run`으로)

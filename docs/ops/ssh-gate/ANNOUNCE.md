@@ -124,7 +124,16 @@ ssh axgate lock team-demo 2026-01-02T18:00     # 사유는 영어·숫자·-_., 
 ssh axgate unlock
 ```
 
-잠겨 있는 동안은 `status`, `unlock`, `record-pr`만 됩니다. 해제시각을 안 적으면 기본 시간만큼 잠깁니다.
+잠겨 있는 동안은 `status`, `unlock`, `record-pr`, `autodeploy-pause`만 됩니다. 해제시각을 안 적으면 기본 시간만큼 잠깁니다.
+
+`lock`은 게이트로 하는 배포만 막습니다. 서버에서 저절로 도는 **자동 배포**까지 멈추려면(정책에 그 권한이 적힌 계정만):
+
+```powershell
+ssh axgate autodeploy-pause team-demo 2026-01-02T18:00    # 재개시각을 안 적으면 기본 시간
+ssh axgate autodeploy-resume                              # 먼저 끝났으면
+```
+
+재개시각이 지나면 저절로 재개됩니다. 지금 멈춰 있는지는 `status`의 "자동 배포" 줄에 나옵니다.
 
 ### 새 쓰기 경로 열기 — 반드시 두 사람
 
@@ -157,7 +166,7 @@ ssh axgate unlock
 ssh axgate restart-backend <SHA> --ack-data-loss --announced
 ```
 
-재시작하면 **메모리에만 있는 상태가 지워집니다.** 무엇이 지워지는지는 책임자가 따로 알려 줍니다. `--ack-data-loss`는 이걸 알고 한다는 확인입니다. `<SHA>`는 지금 서버 레포가 가리키는 커밋이어야 합니다(`status`의 "서버 레포 HEAD"). 다르면 `head-mismatch`로 멈추니 먼저 `deploy-bundle <SHA>`로 서버 코드를 그 커밋으로 옮긴 뒤 다시 재시작합니다. `--ack-data-loss`는 SHA 앞에 적어도 됩니다. 게이트가 백업을 먼저 뜨고, 서비스가 다 뜰 때까지 기다린 뒤 결과를 알려 줍니다.
+재시작하면 **메모리에만 있는 상태가 지워집니다.** 무엇이 지워지는지는 책임자가 따로 알려 줍니다. `--ack-data-loss`는 이걸 알고 한다는 확인입니다. `<SHA>`는 지금 서버 레포가 가리키는 커밋이어야 합니다(`status`의 "서버 레포 HEAD"). 다르면 `head-mismatch`로 멈추고, 다음에 칠 명령(먼저 `deploy-bundle <SHA>`로 서버 코드를 옮길지, 지금 HEAD로 재시작할지)을 그대로 알려 줍니다. `--ack-data-loss`는 SHA 앞에 적어도 됩니다. 게이트가 백업을 먼저 뜨고, 서비스가 다 뜰 때까지 기다린 뒤 결과를 알려 줍니다.
 
 ### 하면 안 되는 것(권한자)
 

@@ -16,6 +16,8 @@ label = "server"      # 알림 문안 맨 앞에 붙는 이름(영어·숫자·-
 # OS 계정 → 허용 동작. 신원은 서버의 개인 계정(실제 로그인 사용자)이다.
 # 동작: status lock unlock nginx-restore nginx-add-location nginx-approve-location
 #       deploy-bundle restart-backend rollback-bundle record-pr
+#       autodeploy-pause autodeploy-resume (자동 배포 정지·재개. 쓰려면 권한자 줄에 직접 더한다.
+#       _default 에는 둘 수 없다: 넣으면 게이트가 정책을 거부한다)
 #
 # 단계 예시:
 #   모두        status, deploy-bundle(자동 배포가 막혔을 때의 수동 처리), record-pr
@@ -96,8 +98,21 @@ secret_env_files = ["TODO"]                   # 여기 적힌 env 파일들의 �
 bundle_allowed_env_names = []                 # 위 검사의 예외: 배포 스크립트가 일부러 번들에 넣는 값의 변수 이름
 check_url = "http://127.0.0.1:8300/"          # 배포 뒤 200 이어야 하는 주소(선택)
 
+# 자동 배포 정지·재개(선택). 이 구역이 없으면 autodeploy-pause / autodeploy-resume 는 설정 오류로 멈춘다.
+# 게이트는 pause_file 한 파일만 쓴다(root 소유 644). 자동 배포의 타이머·서비스·스크립트는 건드리지 않는다.
+# 서버의 자동 배포 스크립트가 맨 앞에서 그 파일을 읽고 건너뛰게 한 번 연결해야 한다(INSTALL.md, 동봉한 autodeploy-paused.sh).
+# 파일 이름은 반드시 autodeploy.pause 여야 하고 폴더는 미리 만들어 둔다. 재개시각이 지나면 저절로 재개된다.
+# 쓰려면 아래 네 줄의 주석을 풀고 경로를 채운다. 이 구역의 키는 이 셋뿐이다(다른 키가 있으면 게이트가 정책을 거부한다).
+# [autodeploy]
+# pause_file = "TODO"   # 예: <게이트 상태 폴더>/autodeploy.pause
+# default_hours = 2     # 재개시각을 안 적었을 때 멈추는 시간
+# max_hours = 12        # 한 번에 멈출 수 있는 최대 시간
+
 [restart]
 unit = "example-backend"        # 재시작할 서비스
+# restart-backend 의 SHA 가 서버 코드보다 앞서 있을 때(head-mismatch): false 면 "먼저 deploy-bundle" 안내만 하고 멈춘다.
+# true 면 그 계정에 deploy-bundle 권한도 있을 때에 한해 번들 배포를 먼저 하고 이어서 재시작한다.
+deploy_first = false
 health_timeout_seconds = 180    # 다시 뜰 때까지 기다리는 최대 시간(폴링)
 poll_seconds = 5
 backup_sqlite = []              # 재시작 전에 백업할 sqlite 파일(전체 경로)
