@@ -395,7 +395,7 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/book_issue.py#BookIssueInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/book_issue.py#BookIssueReport",
       "grade": "read",
-      "allowed_requesters": ["dashboard-api", "orchestrator", "data"],
+      "allowed_requesters": ["dashboard-api", "orchestrator", "data", "finance"],
       "verifier": null,
       "priority": "recommended"
     },

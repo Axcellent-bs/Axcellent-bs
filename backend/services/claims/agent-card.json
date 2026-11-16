@@ -74,7 +74,8 @@
       "allowed_requesters": [
         "dashboard-api",
         "orchestrator",
-        "data"
+        "data",
+        "finance"
       ],
       "verifier": null,
       "priority": "recommended",
