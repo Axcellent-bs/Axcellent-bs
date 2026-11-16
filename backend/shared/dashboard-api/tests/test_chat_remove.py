@@ -253,3 +253,41 @@ def test_old_db_without_removed_columns_opens_and_hides(
     assert client.post(f"{POST}/{ROOM}/remove", json={"from_id": "acc_me"}).status_code == 200
     assert client.get(POST).json()["data"] == []
     assert _stored(db)[0]["removed_by"] == "acc_me"
+
+
+def test_safety_chat_is_removed_over_http_with_the_human_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """안전규칙 AI 대화는 A2A가 아니라 safety 서버 HTTP `/api/safety/chat/{id}/remove`로 지운다."""
+    import asyncio
+    from types import SimpleNamespace
+
+    seen: list[tuple[str, dict]] = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {"data": {"thread_id": "safetychat-3", "removed": True}}
+
+    class FakeClient:
+        def __init__(self, **_: Any) -> None: ...
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_: Any) -> None: ...
+
+        async def post(self, url: str, headers: dict) -> FakeResponse:
+            seen.append((url, headers))
+            return FakeResponse()
+
+    monkeypatch.setattr(chat_remove.httpx, "AsyncClient", FakeClient)
+    # 사람 확인은 다른 테스트가 본다. 여기서는 받은 Authorization을 그대로 넘기는지만 본다
+    monkeypatch.setattr(chat_remove, "human_from_authorization", lambda _a: "tester")
+    request = SimpleNamespace(headers={"authorization": "Bearer person-token"})
+    out = asyncio.run(chat_remove.remove("safety", "safetychat-3", request))  # type: ignore[arg-type]
+    assert out == {"thread_id": "safetychat-3", "removed": True}
+    [(url, headers)] = seen
+    assert url.endswith("/api/safety/chat/safetychat-3/remove")
+    assert headers == {"Authorization": "Bearer person-token"}

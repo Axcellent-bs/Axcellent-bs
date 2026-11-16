@@ -57,13 +57,15 @@ def _error_of(body: Any) -> tuple[str | None, str | None]:
     return err.get("code"), err.get("message")
 
 
-async def _remove_hr(thread_id: str, authorization: str | None) -> dict[str, Any]:
-    url = f"{_hr_base()}/api/hr/chat/{thread_id}/remove"
+async def _remove_http(
+    url: str, thread_id: str, authorization: str | None, name: str
+) -> dict[str, Any]:
+    """HTTP로 대화를 지우는 부서(인사·안전규칙). 사람 토큰을 그대로 넘긴다."""
     try:
         async with httpx.AsyncClient(timeout=HR_CALL_SECONDS) as http:
             res = await http.post(url, headers={"Authorization": authorization or ""})
     except httpx.HTTPError as exc:
-        reason = f"인사 AI에 연결할 수 없다 ({type(exc).__name__})"
+        reason = f"{name}에 연결할 수 없다 ({type(exc).__name__})"
         raise ApiError(502, "UPSTREAM_FAILED", reason) from None
     try:
         body: Any = res.json()
@@ -71,10 +73,25 @@ async def _remove_hr(thread_id: str, authorization: str | None) -> dict[str, Any
         body = None
     if res.status_code >= 400:
         code, message = _error_of(body)
-        reason = str(message or "인사 AI가 지우지 못했다")
+        reason = str(message or f"{name}가 지우지 못했다")
         raise ApiError(res.status_code, str(code or "UPSTREAM_FAILED"), reason)
     data = body.get("data") if isinstance(body, dict) else None
     return data if isinstance(data, dict) else {"thread_id": thread_id, "removed": True}
+
+
+async def _remove_hr(thread_id: str, authorization: str | None) -> dict[str, Any]:
+    url = f"{_hr_base()}/api/hr/chat/{thread_id}/remove"
+    return await _remove_http(url, thread_id, authorization, "인사 AI")
+
+
+def _safety_base() -> str:
+    """안전규칙 대화 HTTP 주소 (safety 서버)."""
+    return config.agent_url("safety").rstrip("/")
+
+
+async def _remove_safety(thread_id: str, authorization: str | None) -> dict[str, Any]:
+    url = f"{_safety_base()}/api/safety/chat/{thread_id}/remove"
+    return await _remove_http(url, thread_id, authorization, "안전규칙 AI")
 
 
 async def remove(agent: str, thread_id: str, request: Request) -> dict[str, Any]:
@@ -83,6 +100,8 @@ async def remove(agent: str, thread_id: str, request: Request) -> dict[str, Any]
     who = human_from_authorization(authorization)  # 사람 토큰이 아니면 401·403
     if agent == "hr":
         return await _remove_hr(thread_id, authorization)
+    if agent == "safety":
+        return await _remove_safety(thread_id, authorization)
     if agent == "support":
         if is_mock():
             raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
