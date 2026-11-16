@@ -1856,7 +1856,7 @@ restart_head_mismatch() {
 }
 
 do_restart_backend() {
-  local head timeout poll waited=0 unit src
+  local head timeout poll waited=0 unit src db
   local -a sqlite_files=() plain_files=() dirs=()
   require_paths repo backup_dir
   service_unit
@@ -1891,7 +1891,14 @@ do_restart_backend() {
   for src in "${dirs[@]}"; do
     [[ "${src}" != *..* && -d "${src}" ]] || step_fail "backup-source" "${RC_FAIL}" "백업할 폴더가 없다: ${src##*/}"
     backup_dest "${src}" ".tgz"
-    run tar --force-local -czf "${BACKUP_DEST}" -C "${src%/*}" "${src##*/}"
+    # sqlite 파일은 쓰는 중이라 tar 가 "file changed as we read it" 로 실패하므로 빼고, 아래에서 backup API 로 따로 뜬다
+    run tar --force-local -czf "${BACKUP_DEST}" --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' -C "${src%/*}" "${src##*/}"
+    backup_dest "${src}" "-sqlite"
+    run mkdir -m 700 -- "${BACKUP_DEST}"
+    for db in "${src}"/*.db; do
+      [[ -f "${db}" ]] || continue
+      run python3 -I -c "${PY_SQLITE_BACKUP}" "${db}" "${BACKUP_DEST}/${db##*/}"
+    done
   done
   say "백업 끝"
 
