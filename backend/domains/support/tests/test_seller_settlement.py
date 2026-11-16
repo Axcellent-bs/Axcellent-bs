@@ -504,6 +504,8 @@ async def test_live_books_pages_orders_and_splits_refunds(monkeypatch: pytest.Mo
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(f"{request.url.path}?{request.url.query.decode()}")
         if request.url.path == "/api/shop/orders":
+            # 주문 조회에도 연결 키를 붙인다 (shop-api `SHOP_ORDERS_PUBLIC_READ=off` 대비)
+            assert request.headers["Authorization"] == "Bearer t"
             cursor = request.url.params.get("cursor")
             if cursor is None:
                 return httpx.Response(200, json={"data": [], "meta": {"next_cursor": "c2"}})
