@@ -149,7 +149,9 @@ def test_period_window_and_filters() -> None:
     assert month.total_claims == 2 and [r.product_id for r in month.items] == ["prd_1"]
     assert report(claims, min_claims=2).items[0].product_id == "prd_1"
     assert report(claims, min_claims=3).items == []
-    assert report(claims, product_ids=["prd_9"]).items == []
+    # 짚어 물은 상품은 클레임이 없어도 0건 행으로 돌려준다 (min_claims도 넘는다)
+    asked = report(claims, product_ids=["prd_9"], min_claims=3).items
+    assert [(r.product_id, r.claim_count, r.sold_qty) for r in asked] == [("prd_9", 0, None)]
 
 
 def test_rate_and_sold_qty_are_none_and_explained() -> None:
@@ -813,3 +815,43 @@ def test_inquiry_order_reads_share_one_http_client(
         shop_client.use_client(None)
     assert out["items"][0]["inquiry_count"] == 3 and out["inquiries_complete"] is True
     assert len(made) == 1  # 주문 세 개를 클라이언트 하나로
+
+
+def test_asked_products_come_back_even_with_zero_claims_and_inquiries() -> None:
+    claims = [claim(1, [line("a", "prd_1", "책 A")])]
+    result = book_issue_report(
+        claims,
+        NOW,
+        BookIssueInput(product_ids=["prd_1", "prd_2", "prd_3"], min_claims=5, limit=1),
+        [],
+        sold={"prd_1": 10, "prd_2": 40},
+    )
+    rows = {r.product_id: r for r in result.items}
+    assert set(rows) == {"prd_1", "prd_2", "prd_3"}  # limit=1이어도 짚어 물은 상품은 안 자른다
+    assert [r.product_id for r in result.items][0] == "prd_1"  # 클레임 있는 상품이 먼저
+    quiet = rows["prd_2"]
+    assert (quiet.claim_count, quiet.defect_claim_count, quiet.claim_qty) == (0, 0, 0)
+    assert (quiet.return_qty, quiet.refund_cash_total) == (0, 0)
+    assert (quiet.inquiry_count, quiet.sold_qty, quiet.claim_rate) == (0, 40, 0.0)
+    assert "판매 40권 중 0권 클레임(0.0%)" in quiet.reason
+    assert rows["prd_3"].sold_qty == 0 and rows["prd_3"].claim_rate is None
+    assert any("모두 없는 상품 1개" in m and "없는 상품 ID" in m for m in result.missing)
+
+
+def test_zero_rows_do_not_invent_values_that_were_not_read() -> None:
+    result = book_issue_report([], NOW, BookIssueInput(product_ids=["prd_2"]))
+    (row,) = result.items
+    assert (row.claim_count, row.inquiry_count, row.sold_qty, row.claim_rate) == (
+        0,
+        None,
+        None,
+        None,
+    )
+    assert row.reason == "기간 안 클레임 없음"
+    assert not result.sales_read and not result.inquiries_read
+    assert not any("모두 없는 상품" in m for m in result.missing)  # 판매를 못 읽어 말할 수 없다
+
+
+def test_without_product_ids_quiet_products_stay_out() -> None:
+    result = book_issue_report([], NOW, BookIssueInput(), [], sold={"prd_2": 40})
+    assert result.items == []
