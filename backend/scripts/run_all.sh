@@ -53,10 +53,10 @@ MARKERS=()
 while read -r _ _ module; do
   [ -n "${module:-}" ] && MARKERS+=("uvicorn $module")
 done <<< "$APPS"
-MARKERS+=("data_agent.trending_collect" "data_agent.youtube_collect" "shop_traffic.py")
+MARKERS+=("data_agent.trending_collect" "data_agent.youtube_collect" "data_agent.sales_collect" "shop_traffic.py")
 # 가상 주문(shop_traffic.py)도 자기 실제 pid를 같은 모양으로 적는다 (.pid의 bash 번호만으로는 못 끌 때가 있어서)
 TRAFFIC_PID_FILE="$DATA/shop_traffic.pid.json"
-COLLECTOR_LOCKS=("$DATA/youtube_collect.lock" "$DATA/trending_collect.lock" "$TRAFFIC_PID_FILE")
+COLLECTOR_LOCKS=("$DATA/youtube_collect.lock" "$DATA/trending_collect.lock" "$DATA/sales_collect.lock" "$TRAFFIC_PID_FILE")
 
 # --only 묶음 이름 (data-demo = core + data 업무 리포트가 부르는 서비스)
 GROUP_core="safety,memory,shop-api,dashboard-api,orchestrator"
@@ -476,8 +476,14 @@ if echo "$RUN_APPS" | awk '$1 == "data" {found=1} END {exit !found}'; then
   echo "$START_LINE" > "$LOGS/youtube-collect.log"
   "$PY" -m data_agent.youtube_collect --every 3600 >> "$LOGS/youtube-collect.log" 2>&1 &
   winpid_of $! > "$LOGS/youtube-collect.pid"
-  # 수집기 두 개를 켰다는 줄 (잠금을 못 잡아 끝났는지는 각 로그 첫 줄, 상태는 data_sources 출처 현황)
-  echo "수집기: trending_collect·youtube_collect 1시간마다 (로그 $LOGS/trending-collect.log, $LOGS/youtube-collect.log)"
+  # 매출 분석: shop-api 판매 기록을 이어 받아 표준 판매 저장소(DATA_SALES_DB)에 쌓는다.
+  # 간격은 DATA_SALES_SYNC_SECONDS(기본 300초). 잠금(backend/.data/sales_collect.lock)으로 하나만 돈다
+  keep_log sales-collect
+  echo "$START_LINE" > "$LOGS/sales-collect.log"
+  "$PY" -m data_agent.sales_collect --every "${DATA_SALES_SYNC_SECONDS:-300}" >> "$LOGS/sales-collect.log" 2>&1 &
+  winpid_of $! > "$LOGS/sales-collect.pid"
+  # 수집기 세 개를 켰다는 줄 (잠금을 못 잡아 끝났는지는 각 로그 첫 줄, 상태는 data_sources 출처 현황)
+  echo "수집기: trending_collect·youtube_collect 1시간마다, sales_collect ${DATA_SALES_SYNC_SECONDS:-300}초마다 (로그 $LOGS/*-collect.log)"
 fi
 
 sleep 8

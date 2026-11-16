@@ -224,6 +224,7 @@ SERVICES: tuple[Service, ...] = (
             "impact_analysis",
             "fraud_score",
             "kpi_summary",
+            "sales_analysis",
             "root_cause_hypotheses",
             "accuracy_report",
             "activity_report",

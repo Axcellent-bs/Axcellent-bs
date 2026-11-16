@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { DESKS, POP_MS, type Bubble, type DeskKey, type OfficeView, type Visit } from "@/lib/office";
 
 // 픽셀 사무실 캔버스: 서울 사무실 장면 (통유리 창 너머 한강·63빌딩, 오른쪽 라운지).
-// 배경은 사람·이름표가 없는 빈 사무실 그림이고, 9자리 사람·이름표·말풍선·보드 카드·불꽃은 코드로 그린다.
+// 배경은 사람·이름표가 없는 빈 사무실 그림이고, 10자리 사람·이름표·말풍선·보드 카드·불꽃은 코드로 그린다.
 // 캐릭터 스프라이트는 pablodelucca/pixel-agents(MIT)에서 가져왔다 (public/office/CREDITS.md).
 // 그림 색은 이미지·캔버스 전용이다 (화면 UI는 디자인 토큰을 쓴다).
 //
@@ -38,12 +38,15 @@ const SEATS: Record<DeskKey, { fx: number; fy: number; char: number; back?: bool
   dev: { fx: 0.248, fy: 0.81, char: 4, back: true, bubble: "down" },
   support: { fx: 0.359, fy: 0.81, char: 2, back: true, bubble: "down" },
   finance: { fx: 0.472, fy: 0.81, char: 1, back: true, bubble: "down" },
+  // 위 책상 앞쪽 의자 (뒷모습). 말풍선은 아래 줄 마케팅·인사 머리 사이로
+  safety: { fx: 0.413, fy: 0.535, char: 5, back: true, bubble: "down" },
   // 라운지 빈백 (앞모습, 왕관)
   orchestrator: { fx: 0.795, fy: 0.638, char: 3, bubble: "up" },
 };
 /** 대기 동작(고개 돌리기·좌우) 씨앗. 개발 자리를 끼워 넣어도 원래 8자리의 동작이 바뀌지 않게 예전 순번을 쓴다 */
-const SEED = Object.fromEntries(DESKS.filter((d) => d.key !== "dev").map((d, i) => [d.key, i])) as Record<DeskKey, number>;
+const SEED = Object.fromEntries(DESKS.filter((d) => d.key !== "dev" && d.key !== "safety").map((d, i) => [d.key, i])) as Record<DeskKey, number>;
 SEED.dev = 8;
+SEED.safety = 9;
 const SEAT_PX = Object.fromEntries(DESKS.map((d) => [d.key, toC(SEATS[d.key].fx, SEATS[d.key].fy)])) as Record<DeskKey, Pt>;
 const DESK_BY = Object.fromEntries(DESKS.map((d) => [d.key, d])) as Record<DeskKey, (typeof DESKS)[number]>;
 
@@ -73,9 +76,11 @@ type Pt = { x: number; y: number };
 type Pose = { row: number; col: number; flip: boolean };
 
 const isBack = (k: DeskKey) => !!SEATS[k].back;
+/** 뒷모습이지만 위·아래 책상 사이 통로에 바로 붙은 자리 (위 책상 앞쪽 의자) */
+const onAisle = (k: DeskKey) => !isBack(k) || k === "safety";
 const isTop = (k: DeskKey) => k in TOP_EXIT_X;
 /** 그 자리 사람이 다니는 통로 y */
-const laneOf = (k: DeskKey) => (isBack(k) ? LOW_Y : AISLE_Y);
+const laneOf = (k: DeskKey) => (onAisle(k) ? AISLE_Y : LOW_Y);
 /** 자리에서 통로까지 (마지막 점이 통로 위) */
 function exitPath(k: DeskKey): Pt[] {
   const s = SEAT_PX[k];
@@ -85,7 +90,7 @@ function exitPath(k: DeskKey): Pt[] {
 /** 다른 부서에게 말을 전할 때 서는 곳: 받는 자리 옆 통로 */
 function besideOf(k: DeskKey): Pt {
   const s = SEAT_PX[k];
-  const y = isBack(k) ? LOW_Y : isTop(k) ? AISLE_Y : AISLE_Y + 22;
+  const y = !onAisle(k) ? LOW_Y : isTop(k) || isBack(k) ? AISLE_Y : AISLE_Y + 22;
   return { x: s.x + 46, y };
 }
 /** 길: 자리 → 그 자리 통로 → (통로가 다르면 옆길) → 목적지 통로 → 목적지 */

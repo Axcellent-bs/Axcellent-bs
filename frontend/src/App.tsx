@@ -17,6 +17,7 @@ import OrgChanges from '@/pages/OrgChanges'
 import Incidents from '@/pages/Incidents'
 import IncidentDetail from '@/pages/IncidentDetail'
 import Orchestrator from '@/pages/Orchestrator'
+import Safety from '@/pages/Safety'
 import Kb from '@/pages/Kb'
 import Marketing from '@/pages/Marketing'
 import PlanningPage from '@/pages/Planning'
@@ -91,6 +92,7 @@ function Pages() {
           <Route path="/org" element={<OrgChanges />} />
           <Route path="/marketing/*" element={<Marketing />} />
           <Route path="/orchestrator" element={<Orchestrator />} />
+          <Route path="/safety" element={<Safety />} />
           <Route path="/data/*" element={<Data />} />
           <Route path="/planning/*" element={<PlanningPage />} />
           <Route path="/dev/*" element={<DevPage />} />

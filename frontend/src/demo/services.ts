@@ -3,7 +3,7 @@
 // 화면은 예전 캣북스 대시보드의 AI 화면을 옮겨 온 것이다. paths가 그 서비스에 속한 화면 주소, agent가 맡은 AI다.
 import { useSyncExternalStore, type ComponentType } from 'react'
 import {
-  IconBolt, IconBook, IconBox, IconCart, IconChart, IconClock, IconCode, IconMegaphone, IconOffice, IconPlan, IconReceipt, IconShield, IconStar, IconUser, IconUsers,
+  IconBolt, IconBook, IconBox, IconCart, IconChart, IconClock, IconCode, IconLock, IconMegaphone, IconOffice, IconPlan, IconReceipt, IconShield, IconStar, IconUser, IconUsers,
 } from '@/components/icons'
 
 export type SubItem = { href: string; label: string; soon?: boolean }
@@ -19,17 +19,19 @@ export const FAMILIES: { id: Family; name: string; desc: string }[] = [
 ]
 
 /**
- * AXcellent가 관리하는 AI 8개. 예전 캣북스 대시보드(ax-frontend dashboard-web)에 있던 AI를 모두 이리로 옮겼다.
+ * AXcellent가 관리하는 AI 10개. 예전 캣북스 대시보드(ax-frontend dashboard-web)에 있던 AI를 모두 이리로 옮겼다.
  * id는 ax-backend .github/team.yml 부서 id, backend는 화면이 부르는 서버(src/lib/env.ts).
  * 왼쪽 메뉴는 이 순서대로 AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다 (AdminShell).
- * 안전 관문(safety)·회사 기억(memory)은 AI 화면이 아니라 뒤에서 도는 서버라 넣지 않는다. 인프라는 DejaFix가 맡는다.
+ * 안전규칙 AI(safety)는 모든 AI의 상태 변경을 execute()로 받아 판단하므로 화면(/safety)을 둔다. 회사 기억(memory)은 뒤에서 도는 서버라 넣지 않는다. 인프라는 DejaFix가 맡는다.
  */
-export type AgentId = 'orchestrator' | 'support' | 'finance' | 'data' | 'hr' | 'marketing' | 'planning' | 'dev'
+export type AgentId = 'orchestrator' | 'safety' | 'support' | 'finance' | 'data' | 'archive' | 'hr' | 'marketing' | 'planning' | 'dev'
 export const AGENTS: { id: AgentId; name: string; Icon: ComponentType<{ size?: number }>; backend: string }[] = [
   { id: 'orchestrator', Icon: IconBolt, name: '총괄', backend: 'orchestrator (8000) · shop-api 관리 중계 (8010)' },
+  { id: 'safety', Icon: IconLock, name: '안전규칙 AI', backend: 'safety (8001)' },
   { id: 'support', Icon: IconUser, name: '고객지원 AI', backend: 'dashboard-api (8020)' },
   { id: 'finance', Icon: IconShield, name: '재무 AI', backend: 'finance (8105) · safety (8001)' },
   { id: 'data', Icon: IconChart, name: '데이터분석 AI', backend: 'data (8106)' },
+  { id: 'archive', Icon: IconBook, name: '아카이브 AI', backend: 'decisions (8114) · dashboard-api (8020)' },
   { id: 'hr', Icon: IconUsers, name: '인사 AI', backend: 'dashboard-api (8020)' },
   { id: 'marketing', Icon: IconMegaphone, name: '마케팅 AI', backend: '연결 전 (화면 안 시연 데이터)' },
   { id: 'planning', Icon: IconPlan, name: '기획 AI', backend: 'planning (8101) · dashboard-api (8020)' },
@@ -125,10 +127,11 @@ export const SERVICES: Service[] = [
       { href: '/data', label: '장애 영향 분석' },
       { href: '/data/ops', label: '운영 지표' },
       { href: '/data/trend', label: '트렌드&콘텐츠' },
+      { href: '/data/sales', label: '매출 분석' },
     ],
   },
   {
-    id: 'decisions', agent: 'hr', family: 'backoffice', name: '결정 기록', by: 'AXcellent', Icon: IconBook, entry: '/ops', paths: ['/ops'],
+    id: 'decisions', agent: 'archive', family: 'backoffice', name: '결정 기록', by: 'AXcellent', Icon: IconBook, entry: '/ops', paths: ['/ops'],
     desc: '회사의 결정을 기록하고, 새 계획이 과거에 기각된 안과 겹치는지 봅니다.',
   },
   {
@@ -164,6 +167,10 @@ export const SERVICES: Service[] = [
     id: 'orchestrator', agent: 'orchestrator', family: 'together', name: '총괄·사건', by: 'AXcellent', Icon: IconBolt, entry: '/orchestrator', paths: ['/orchestrator'],
     desc: '여러 서비스에 걸친 사건을 묶어 조율하고 사람 승인을 받습니다.',
   },
+  {
+    id: 'safety', agent: 'safety', family: 'together', name: '안전규칙', by: 'AXcellent', Icon: IconLock, entry: '/safety', paths: ['/safety'],
+    desc: '모든 AI의 돈·게시·배포 요청에 등급을 매겨 실행하거나 사람 결정으로 보류합니다.',
+  },
 ]
 
 /** 서비스를 맡은 AI 이름 (DejaFix 서비스는 없음) */
@@ -191,9 +198,16 @@ const KNOWN_KEY = 'axcellent-demo-services-known'
 const ADDED_BEFORE_KNOWN_LIST = ['agent-eval', 'orders']
 const ALL = SERVICES.map((s) => s.id)
 // 필수 서비스: 회사가 끌 수 없고 카탈로그에서 내릴 수도 없다. 다른 AI가 장애 기록(총괄 사건·고객지원 장애 확인·
-// 재무 장애 비용·인사 대응 시간)을 쓰므로 장애 대응과 그 감시 대상인 PC·서버 연결은 늘 켜 둔다
-export const REQUIRED_SERVICES = ['incident', 'hosts']
+// 재무 장애 비용·인사 대응 시간)을 쓰므로 장애 대응과 그 감시 대상인 PC·서버 연결은 늘 켜 둔다.
+// 총괄은 AI들 사이의 일을 나누고 모으는 자리라, 어떤 서비스를 골라도 늘 켜 둔다.
+// 안전규칙은 모든 AI의 상태 변경이 지나는 관문이라 끌 수 없다
+export const REQUIRED_SERVICES = ['incident', 'hosts', 'orchestrator', 'safety']
 export const isRequired = (id: string) => REQUIRED_SERVICES.includes(id)
+// 필수 카드 아래에 보이는 이유
+export const requiredReason = (id: string) =>
+  id === 'orchestrator' ? 'AI들 사이의 일을 나누고 모아서 늘 켜 둬요'
+    : id === 'safety' ? '모든 AI의 돈·게시·배포 요청이 지나는 관문이라 늘 켜 둬요'
+      : '다른 AI가 장애 기록을 써서 늘 켜 둬요'
 const withRequired = (ids: string[]) => [...REQUIRED_SERVICES.filter((id) => !ids.includes(id)), ...ids]
 const save = (ids: string[]) => {
   try {

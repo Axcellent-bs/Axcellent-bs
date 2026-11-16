@@ -8,6 +8,10 @@ members = [
 ]
 exclude = ["services/hosts"]
 
+[tool.uv]
+# CVE-2026-126360(traceparent 정규식 DoS). FastAPI가 끌고 오는 간접 의존성. FastAPI가 1.45.2 이상을 요구하면 이 줄 삭제
+constraint-dependencies = ["opentelemetry-api>=1.45.2"]
+
 [dependency-groups]
 dev = [
     "pytest>=8",

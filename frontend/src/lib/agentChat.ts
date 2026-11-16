@@ -79,7 +79,7 @@ export interface DemoRequest {
 // ---------------------------------------------------------------- 이름표
 export const DEPT_KO: Record<string, string> = {
   orchestrator: "총괄 AI", planning: "기획", dev: "개발", support: "고객지원", marketing: "마케팅", hr: "인사",
-  finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전 관문", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
+  finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전규칙", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
   "dashboard-api": "AXcellent 화면", operator: "운영자(사람)",
 };
 // 백엔드는 서비스 단위로 나뉘어 있다(backend/README.md). 서비스 이름 → 부서.
@@ -98,7 +98,7 @@ const SERVICE_KO: Record<string, string> = {
   handover: "인수인계", decisions: "결정 기록", org: "조직 변동",
   dev: "개발·배포", planning: "요청·기획서", incident: "인프라", hosts: "PC·서버 연결",
 };
-const NOT_AGENT = new Set(["orchestrator", "safety", "memory", "shop-api", "dashboard-api", "operator"]);
+const NOT_AGENT = new Set(["orchestrator", "memory", "shop-api", "dashboard-api", "operator"]);
 /** 말하는 쪽 이름. 부서·서비스는 "{부서} AI", 총괄·안전 관문 등은 그대로 */
 export function speaker(dept: string | null | undefined): string {
   if (!dept) return "담당 미정";
@@ -465,7 +465,7 @@ export function executionItems(rec: ExecutionRecord, room: string = SAFETY_ROOM)
   const amount = d.computed_amount != null ? ` (금액 ${fmtNum(d.computed_amount)}원)` : "";
   const out: ChatItem[] = [{
     kind: "msg", id: `${id}:req`, at: rec.created_at, room, from: speaker(req.requester), to: speaker("safety"), fromKey: req.requester, central: false,
-    text: `${actionKo(req.action)} 실행 요청${amount}`, tag: "안전 관문 기록", raw: rawOf(`action: ${req.action}`, req.context_id), tone: "request", facts: [],
+    text: `${actionKo(req.action)} 실행 요청${amount}`, tag: "안전규칙 AI 기록", raw: rawOf(`action: ${req.action}`, req.context_id), tone: "request", facts: [],
   }];
   if (d.verifier) {
     const verdict =

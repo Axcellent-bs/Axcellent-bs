@@ -1,5 +1,5 @@
 import { PageHead, SectionHead, StatusChip, Tiles } from '@/components/connect/parts'
-import { AGENTS, FAMILIES, agentName, isRequired, toggleService, useEnabledServices, usePublishedServices, type Service } from './services'
+import { AGENTS, FAMILIES, agentName, isRequired, requiredReason, toggleService, useEnabledServices, usePublishedServices, type Service } from './services'
 
 // 서비스 고르기: Adobe Creative Cloud 앱 목록처럼 회사가 쓸 서비스를 켜고 끈다. 끈 서비스는 모든 직원 메뉴에서 빠진다.
 // 계층: 요약(사용 중·필수·끈 서비스) › 제품군 구역(인프라·고객 경험…) › 서비스 카드 › 맡은 AI 표(펼침)
@@ -33,7 +33,7 @@ function ServiceCard({ s, on }: { s: Service; on: boolean }) {
       </div>
       <div className="flex items-center justify-end gap-3 border-t border-ink-100 px-5 py-3">
         {required ? (
-          <span className="text-xs text-ink-500">다른 AI가 장애 기록을 써서 늘 켜 둬요</span>
+          <span className="text-xs text-ink-500">{requiredReason(s.id)}</span>
         ) : (
           <button type="button" onClick={() => toggleService(s.id)} className={on ? 'btn-quiet' : 'btn-primary'}>
             {on ? '끄기' : '켜기'}
