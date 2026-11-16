@@ -237,6 +237,52 @@ def test_connector_customers_export_request_and_404() -> None:
     assert coded.value.code == "SELLER_NOT_FOUND"
 
 
+@pytest.mark.parametrize("sales_source", [None, "", "shop-api"])
+def test_real_mode_reads_customers_from_the_shop_server(
+    monkeypatch: pytest.MonkeyPatch, sales_source: str | None
+) -> None:
+    """실제 모드(`AX_SHOP_API_URL` 있음, `DATA_SALES_SOURCE`가 fake 아님, 목 아님)면 수집기 출처가
+    shop-api 커넥터이고 `GET /api/shop/customers-export`를 그 주소로 부른다 (네트워크 없음)."""
+    from ax_agent_template.company_connection import CONNECTION_FILE_ENV
+    from data_agent import catalog
+    from data_agent.connectors import shop_api
+
+    monkeypatch.delenv(CONNECTION_FILE_ENV, raising=False)  # 화면의 회사 연결 주소가 없을 때
+    monkeypatch.setenv("DATA_TOKEN", "mock:data")  # 테스트용 가짜 토큰
+    env = {"AX_SHOP_API_URL": "http://shop.test:8010"}
+    if sales_source is not None:
+        env["DATA_SALES_SOURCE"] = sales_source
+    seen: list[httpx.Request] = []
+    sales = {"orders": [mock_rows(1)[0].model_dump(mode="json")], "next_cursor": "s1",
+             "has_more": False}  # fmt: skip
+    people = {"customers": [customer("b1", age_band="20s").model_dump(mode="json")],
+              "next_cursor": "c1", "has_more": False}  # fmt: skip
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        body = sales if request.url.path.endswith("/sales-export") else people
+        return httpx.Response(200, json={"data": body, "meta": {}})
+
+    catalog.use_catalog(catalog.load_catalog("catbooks"))
+    shop_api.use_client(httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    try:
+        source = sales_collect.get_source(env)
+        assert isinstance(source, ShopApiConnector)
+        assert sales_collect.source_name(env) == "shop-api"
+        store = SalesStore(":memory:")
+        result = run(collect_once(source, store, now=NOW))
+    finally:
+        shop_api.use_client(None)
+        catalog.use_catalog(None)
+    assert [(r.url.host, r.url.port, r.url.path) for r in seen] == [
+        ("shop.test", 8010, "/api/shop/sales-export"),
+        ("shop.test", 8010, "/api/shop/customers-export"),
+    ]
+    assert all(r.headers["authorization"] == "Bearer mock:data" for r in seen)
+    assert result.errors == [] and result.notes == [] and result.customers_saved == 1
+    assert store.customers(TENANT)[0].attributes == {"age_band": "20s"}
+
+
 # ---------------------------------------------------------------- 품질 보고
 
 CFG = CatalogSales(
@@ -279,8 +325,10 @@ def test_catbooks_catalog_customer_market_settings_validate() -> None:
 
     sales = load_catalog("catbooks").sales
     assert sales is not None  # CatalogSales 교차 확인(없는 장르·속성·값을 가리키지 않음)을 통과
-    books = {"novel", "essay", "self_help", "ai_it", "business", "humanities", "comics", "kids"}
-    assert set(sales.genres) == books | {"writing", "notes", "deco"}
+    assert list(sales.genres) == [
+        "novel", "essay", "business", "self_help", "humanities", "society", "history",
+        "science", "it", "language", "kids", "comics", "hobby", "writing", "notebook", "deco",
+    ]  # fmt: skip
     assert set(sales.genre_keywords) == set(sales.genres)
     attrs = {a.key: list(a.values) for a in sales.attributes}
     assert attrs == {
@@ -292,6 +340,21 @@ def test_catbooks_catalog_customer_market_settings_validate() -> None:
     assert 3 <= len(sales.quick_questions) <= 4
     assert {"bundle_discount", "genre_coupon"} <= {e.code for e in sales.event_kinds}
     assert all(f.source_id == "data4library" for f in sales.external_filters)
-    assert all(set(f.params) == {"from_age", "to_age"} for f in sales.external_filters)
-    assert all(set(g.params) == {"kdc"} for g in sales.genre_external)
+    # 정보나루 매뉴얼 v20260620으로 확인한 조건만 (연령 10~11쪽, 성별 코드 58쪽, KDC 대주제 59쪽)
+    by_value = {(f.attribute_key, f.value_code): f.params for f in sales.external_filters}
+    assert by_value == {
+        ("age_band", "10s"): {"from_age": 10, "to_age": 19},
+        ("age_band", "20s"): {"from_age": 20, "to_age": 29},
+        ("age_band", "30s"): {"from_age": 30, "to_age": 39},
+        ("age_band", "40s"): {"from_age": 40, "to_age": 49},
+        ("age_band", "50s_plus"): {"from_age": 50},  # to_age는 100세로 자동 설정
+        ("gender", "male"): {"gender": "0"},
+        ("gender", "female"): {"gender": "1"},
+    }  # no_answer(응답 안 함)는 2 = 미상과 뜻이 달라 넣지 않는다
+    assert {g.genre_code: g.params for g in sales.genre_external} == {
+        "novel": {"kdc": "8"}, "essay": {"kdc": "8"}, "business": {"kdc": "3"},
+        "society": {"kdc": "3"}, "history": {"kdc": "9"}, "science": {"kdc": "4"},
+        "language": {"kdc": "7"},
+    }  # fmt: skip
+    assert sales.population[0].table_ref == {}  # KOSIS 표 id 미확인
     assert [p.attribute_keys for p in sales.population] == [["age_band", "gender"]]

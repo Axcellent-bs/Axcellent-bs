@@ -47,24 +47,26 @@ values = { female = 0.55, male = 0.40, no_answer = 0.05 }  # 가정
 missing = 0.15  # 가정
 values = { student = 0.18, employee = 0.50, self_employed = 0.10, other = 0.12, no_answer = 0.10 }  # 가정
 
-# 장르 기본 선호 무게 (가정). 아래 묶음 선호가 곱해진다
+# 장르 기본 선호 무게 (가정). 아래 묶음 선호가 곱해진다. 코드는 회사 카탈로그 [sales.genres]
+# (판매 서버 genres.py GENRES와 같은 코드) 중 가상 상품이 있는 것만 쓴다. 순서를 바꾸면 같은 seed의
+# 주문이 달라진다
 [genre_weights]
 novel = 1.4
 essay = 1.0
 self_help = 0.9
-ai_it = 0.8
+it = 0.8
 business = 0.8
 humanities = 0.7
 comics = 0.8
 kids = 0.6
 writing = 0.6
-notes = 0.6
+notebook = 0.6
 deco = 0.5
 
 # 묶음 선호 (가정): 조건(속성 key → 값 code)이 모두 맞는 회원은 장르 무게를 곱한다
 [[preferences]]
 when = { age_band = "30s", occupation = "employee" }
-boost = { ai_it = 3.0, business = 2.5 }  # 가정
+boost = { it = 3.0, business = 2.5 }  # 가정
 
 [[preferences]]
 when = { age_band = "20s", gender = "female" }
@@ -132,21 +134,21 @@ price = 15000
 product_id = "fk_p008"
 title = "업무에 바로 쓰는 AI (가상)"
 category_code = "book"
-genre_code = "ai_it"
+genre_code = "it"
 price = 22000
 
 [[products]]
 product_id = "fk_p009"
 title = "처음 만나는 파이썬 (가상)"
 category_code = "book"
-genre_code = "ai_it"
+genre_code = "it"
 price = 25000
 
 [[products]]
 product_id = "fk_p010"
 title = "데이터로 일하는 법 (가상)"
 category_code = "book"
-genre_code = "ai_it"
+genre_code = "it"
 price = 23000
 
 [[products]]
@@ -223,14 +225,14 @@ price = 19000
 product_id = "fk_p021"
 title = "무지 노트 3권 (가상)"
 category_code = "stationery"
-genre_code = "notes"
+genre_code = "notebook"
 price = 7500
 
 [[products]]
 product_id = "fk_p022"
 title = "2027 다이어리 (가상)"
 category_code = "stationery"
-genre_code = "notes"
+genre_code = "notebook"
 price = 14000
 
 [[products]]
