@@ -77,7 +77,7 @@ def test_export_row_has_amounts_lines_payment_and_no_personal_fields(
     assert row["items_amount"] == 2 * 18000
     assert row["lines"] == [
         {"product_id": "prd_0001", "category_code": "book", "title": "파이썬 입문서", "qty": 2,
-         "unit_price": 18000, "coupon_share": 0, "points_share": 0},
+         "unit_price": 18000, "coupon_share": 0, "points_share": 0, "genre_code": None},
     ]  # fmt: skip
     assert row["refunds"] == []
     text = res.text
