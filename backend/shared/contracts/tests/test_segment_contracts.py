@@ -22,6 +22,7 @@ from ax_contracts.schemas.data import (
     EventProposalOutput,
     EventProposalSendInput,
     EventProposalSendOutput,
+    ExcludedProposal,
     MarketCoverageInput,
     MarketCoverageOutput,
     MetricCatalog,
@@ -32,6 +33,8 @@ from ax_contracts.schemas.data import (
     SegmentOptionsOutput,
     SegmentProfileInput,
     SegmentProfileOutput,
+    SegmentQuestionInput,
+    SegmentQuestionOutput,
 )
 
 AGE = {"key": "age_band", "label": "연령대",
@@ -314,3 +317,64 @@ def test_segment_options_shape() -> None:
         SegmentOptionsOutput.model_validate({"periods": ["7d"]})
     with pytest.raises(ValidationError):
         SegmentOptionsOutput.model_validate({"genres": [{"code": "x"}]})
+
+
+# ---------------------------------------------------------------- 11/16 시안 맞춤 칸
+
+
+def test_catalog_new_fields_default_and_validate() -> None:
+    """item_noun·min_season_multiple·min_orders_low: 기본값이 있어 예전 설정도 통과."""
+    old = CatalogSales.model_validate(BOOKSTORE)
+    assert old.item_noun == "상품"
+    assert old.min_season_multiple == 1.0 and old.min_orders_low == 5
+    game = CatalogSales.model_validate(
+        {**GAME, "item_noun": "게임", "min_season_multiple": 1.2, "min_orders_low": 3}
+    )
+    assert game.item_noun == "게임" and game.min_season_multiple == 1.2
+    assert CatalogSales.model_validate(game.model_dump(mode="json")) == game
+    for bad in ({"item_noun": ""}, {"min_season_multiple": -0.1}, {"min_orders_low": -1}):
+        with pytest.raises(ValidationError):
+            CatalogSales.model_validate({**GAME, **bad})
+
+
+def test_options_item_noun_default() -> None:
+    assert SegmentOptionsOutput().item_noun == "상품"
+    assert SegmentOptionsOutput(item_noun="게임").item_noun == "게임"
+
+
+def test_event_proposal_excluded() -> None:
+    assert EventProposalOutput(month="2026-12").excluded == []
+    out = EventProposalOutput(
+        month="2026-12",
+        proposals=[_proposal()],
+        excluded=[
+            {"target_label": "20대 · 여성", "item_label": "에세이",
+             "reason": "작년 같은 달 검색 배수 0.9배 (기준 1.0배 미만)"},
+        ],
+    )  # fmt: skip
+    assert out.excluded[0].item_label == "에세이"
+    assert EventProposalOutput.model_validate(out.model_dump(mode="json")) == out
+    assert ExcludedProposal().reason == ""
+    with pytest.raises(ValidationError):
+        ExcludedProposal.model_validate({"reason": "x", "score": 1})
+
+
+def test_segment_question_contract() -> None:
+    assert SegmentQuestionInput(text="20대 여성이 좋아하는 책은?").tenant_id == "shop-demo"
+    for bad in ("", "가" * 201):
+        with pytest.raises(ValidationError):
+            SegmentQuestionInput(text=bad)
+    empty = SegmentQuestionOutput()
+    assert empty.status == "unparsed" and empty.filters == {} and empty.genre_code is None
+    assert empty.period is None and empty.understood_label == "" and empty.reason == ""
+    ok = SegmentQuestionOutput(
+        status="ok",
+        filters={"age_band": "20s", "gender": "f"},
+        period="90d",
+        understood_label="20대 · 여성 · 직업 전체 · 최근 90일",
+    )
+    assert SegmentQuestionOutput.model_validate(ok.model_dump(mode="json")) == ok
+    with pytest.raises(ValidationError):
+        SegmentQuestionOutput(status="maybe")
+    with pytest.raises(ValidationError):
+        SegmentQuestionOutput(status="ok", period="7d")
