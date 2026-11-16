@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from ax_agent_template.llm import LLMClient
 from ax_workflow.core import GateRefused
 from ax_workflow.models import CodingFile
-from dev_agent import llm_env, llm_key, vcs_bridge
+from dev_agent import llm_env, llm_key, risk, vcs_bridge
 from dev_agent.vcs.base import VcsAdapter, VcsError, check_path
 from dev_agent.wording import gate_text
 
@@ -327,6 +327,7 @@ class Job:
     connection: str | None
     instruction: str | None = None  # 사람이 대기 중인 PR에 준 수정 지시
     skip_queue: bool = False  # '지금 진행': 같은 파일 작업이 있어도 기다리지 않는다
+    picked: tuple[str, ...] = ()  # 사람이 직접 고른 고칠 파일 (있으면 AI가 고르지 않는다)
     # 기획 서비스가 넘긴 작업인가 (돌려보낼 곳이 있다). 개발팀 기획은 사람 확인으로 둔다
     from_planning: bool = False
     keep_dev: bool = False  # 사람이 개발로 확정함: 코드 변경이 아니라는 판단으로 멈추지 않는다
@@ -511,6 +512,17 @@ def named_files(text: str, rows: list[str]) -> set[str]:
         if len(hits) == 1:
             out.add(hits[0])
     return out
+
+
+def human_picks(paths: tuple[str, ...], existing: set[str]) -> list[FilePick]:
+    """사람이 고른 파일 → 고칠 파일. 레포에 있으면 modify, 없으면 create. 쓸 수 없는 경로는 뺀다."""
+    out: list[FilePick] = []
+    for raw in paths:
+        path = clean_path(raw)
+        if path and not skip_path(path) and path not in [p.path for p in out]:
+            action = "modify" if path in existing else "create"
+            out.append(FilePick(path=path, action=action, reason="사람이 고른 파일"))
+    return out[:MAX_FILES]
 
 
 def skip_confirm(candidates: list[FilePick], named: set[str]) -> bool:
@@ -1188,37 +1200,44 @@ async def _run(svc: DevService, job: Job) -> None:
     listing = listing_for(listed, job.hints, text)
     await svc.coding_step(job, "reading", point="code.read", text=f"파일 {len(listing)}개 읽음")
 
-    # 2. 고칠 파일 고르기: 이름으로 후보 → 후보 내용(미리보기)을 보고 확정
-    data = {**_base(job), "path_hints": list(job.hints), "mentioned": named, "files": listing}
-    first = await _ask(llm, "후보 고르기", PLAN_PROMPT, CodePlan, data, job.ctx)
-    candidates = check_picks(first.files, set(listed))[0][:MAX_CANDIDATES]
-    if first.not_code is not None and not job.keep_dev:
-        raise not_code_stop(
-            job, first.not_code, bool(candidates), bool(named) or hinted(job.hints, listed)
-        )
-    bodies = await _read_all(adapter, [p.path for p in candidates if p.action == "modify"])
-    plan = first
-    if bodies and skip_confirm(candidates, named_files(text, listed)):
-        await svc.coding_step(
-            job, "reading", point="code.read", text="작업 글에 적힌 파일이라 확정 단계 건너뜀"
-        )
-        plan = first.model_copy(update={"files": candidates})
-    elif bodies:
-        data = {**data, "files": listing[:MAX_CONFIRM_LISTING]}  # 앞 단계 기록은 그대로 둔다
-        data["candidates"] = [
-            {
-                "path": p.path,
-                "action": p.action,
-                "reason": p.reason,
-                "preview": preview_of(bodies.get(p.path, "")),
-            }
-            for p in candidates
-        ]
-        plan = await _ask(llm, "파일 확정", CONFIRM_PROMPT, CodePlan, data, job.ctx)
-    picks, dropped = check_picks(plan.files, set(listed))
-    summary = " ".join((plan.summary or first.summary).split())[:300] or None
-    chosen = [CodingFile(path=p.path, reason=p.reason) for p in picks]
-    text = f"고칠 파일 {len(picks)}개 선택" + (f" (뺀 경로 {dropped}개)" if dropped else "")
+    # 2. 고칠 파일 고르기. 사람이 고른 파일이 있으면 LLM 없이 그 파일을 쓴다
+    if job.picked:
+        picks = human_picks(job.picked, set(listed))
+        dropped, summary, bodies = 0, None, {}
+        text = f"사람이 고른 파일 {len(picks)}개 (AI 고르기 건너뜀)"
+        chosen = [CodingFile(path=p.path, reason=p.reason) for p in picks]
+    else:
+        # 2. 고칠 파일 고르기: 이름으로 후보 → 후보 내용(미리보기)을 보고 확정
+        data = {**_base(job), "path_hints": list(job.hints), "mentioned": named, "files": listing}
+        first = await _ask(llm, "후보 고르기", PLAN_PROMPT, CodePlan, data, job.ctx)
+        candidates = check_picks(first.files, set(listed))[0][:MAX_CANDIDATES]
+        if first.not_code is not None and not job.keep_dev:
+            raise not_code_stop(
+                job, first.not_code, bool(candidates), bool(named) or hinted(job.hints, listed)
+            )
+        bodies = await _read_all(adapter, [p.path for p in candidates if p.action == "modify"])
+        plan = first
+        if bodies and skip_confirm(candidates, named_files(text, listed)):
+            await svc.coding_step(
+                job, "reading", point="code.read", text="작업 글에 적힌 파일이라 확정 단계 건너뜀"
+            )
+            plan = first.model_copy(update={"files": candidates})
+        elif bodies:
+            data = {**data, "files": listing[:MAX_CONFIRM_LISTING]}  # 앞 단계 기록은 그대로 둔다
+            data["candidates"] = [
+                {
+                    "path": p.path,
+                    "action": p.action,
+                    "reason": p.reason,
+                    "preview": preview_of(bodies.get(p.path, "")),
+                }
+                for p in candidates
+            ]
+            plan = await _ask(llm, "파일 확정", CONFIRM_PROMPT, CodePlan, data, job.ctx)
+        picks, dropped = check_picks(plan.files, set(listed))
+        summary = " ".join((plan.summary or first.summary).split())[:300] or None
+        chosen = [CodingFile(path=p.path, reason=p.reason) for p in picks]
+        text = f"고칠 파일 {len(picks)}개 선택" + (f" (뺀 경로 {dropped}개)" if dropped else "")
     if not picks:
         raise CoderStop("failed", "고칠 파일을 고르지 못함", "code.plan", text)
     if len(picks) > MAX_FILES:
@@ -1271,7 +1290,15 @@ async def _review(svc: DevService, job: Job, llm: Any, d: Draft) -> Draft:
     고친 게 없으면 불일치 그대로 돌려준다 (PR 뒤 사람 확인)."""
     reasons = {r.path: r.reason for r in d.rows}
     d.picks = [p for p in d.picks if p.path in d.contents]
-    await svc.coding_step(job, "reviewing")
+    level, why = risk.risk_of(svc.state, list(d.contents))
+    await svc.coding_step(
+        job, "reviewing", point="code.risk", text=f"위험도 {risk.LABEL[level]} · {why}",
+        risk=level, risk_why=why,
+    )  # fmt: skip
+    if level == "low":  # 스타일·문서·문구 파일만: LLM 리뷰 없이 CI로 확인한다
+        d.notes = []
+        d.verdicts.append("생략")
+        return d
     diffs = [
         {"path": p, "diff": unified(p, d.originals.get(p, ""), c)} for p, c in d.contents.items()
     ]
@@ -1315,6 +1342,7 @@ def final_verdict(verdicts: list[str]) -> tuple[str, bool, list[str]]:
     """PR에 남길 리뷰 결과, CI로만 확인하나(리뷰 뒤 코드를 고치거나 다시 씀), 앞 리뷰 결과들.
 
     - 통과 → 통과 (리뷰 뒤 최신 코드 위에서 다시 썼으면 CI로 확인)
+    - 생략(위험도 낮음) → 통과로 남기되 CI 필수
     - 불일치 → 고침 → 통과로 남기되 CI 필수 (다시 리뷰하지 않는다)
     - 불일치(고친 게 없음) → 불일치"""
     real = [v for v in verdicts if v != "다시 씀"]
@@ -1322,7 +1350,7 @@ def final_verdict(verdicts: list[str]) -> tuple[str, bool, list[str]]:
         return "불일치", False, []
     earlier = [v for v in real[:-1] if v in ("통과", "불일치")]
     rewritten = bool(verdicts) and verdicts[-1] == "다시 씀"
-    if real[-1] == "고침":
+    if real[-1] in ("고침", "생략"):
         return "통과", True, earlier
     return real[-1], real[-1] == "통과" and rewritten, earlier
 
@@ -1427,7 +1455,13 @@ async def _finish(svc: DevService, job: Job, d: Draft) -> None:
     리뷰 뒤 고친 코드는 CI가 꼭 있어야 한다 (다시 리뷰하지 않으므로)."""
     verdict, ci_only, earlier = final_verdict(d.verdicts)
     hold = await _wait_ci(svc, job, need_ci=ci_only) if verdict == "통과" else None
-    if await svc.coding_review(job, verdict, d.notes, earlier=earlier, ci_hold=hold, fixed=ci_only):
+    skipped = "생략" in d.verdicts
+    level, why = risk.risk_of(svc.state, list(d.contents))
+    human = f"위험도 높음 ({why}) → 사람 확인 후 머지" if level == "high" else None
+    if await svc.coding_review(
+        job, verdict, d.notes, earlier=earlier, ci_hold=hold, fixed=ci_only and not skipped,
+        skipped=skipped, human_hold=human,
+    ):  # fmt: skip
         raise CoderStop("waiting_human", "리뷰 불일치 → 사람 확인")
 
 

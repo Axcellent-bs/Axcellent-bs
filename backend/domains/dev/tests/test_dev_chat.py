@@ -588,3 +588,60 @@ def test_small_change_does_not_ask_impact(service: PlanningService, adapter) -> 
     last = th["messages"][-1]
     assert th["status"] == "talking" and last["kind"] == "plan"
     assert not last["text"].startswith(dev_chat.IMPACT_ASK)
+
+
+class NoPick(CoderLLM):
+    """후보 고르기에서 파일을 못 고른다 (고칠 파일을 고르지 못함)."""
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+        if schema is CodePlan:
+            return CodePlan(files=[])
+        return await super().structured(prompt, schema, untrusted, images, context_id)
+
+
+def test_stuck_task_goes_to_chat_and_retries_with_chosen_files(
+    service: PlanningService, adapter
+) -> None:
+    """멈춘 작업을 AI 대화로 넘기면, 대화로 고른 파일로 같은 작업을 다시 시도한다 (새 요청 없음)."""
+    coder.set_llm(NoPick())
+    fake = ChatLLM([START])
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        body = {"title": "배너 문구", "plan": "배너 문구를 바꾼다", "done": "신간 문구"}
+        task_id = c.post("/api/planning/dev-tasks", json=body).json()["data"]["task_id"]
+        assert _settle(service, task_id) == "failed"
+        r = c.post(f"/api/planning/dev-tasks/{task_id}/to-chat", json={"account": "admin"})
+        assert r.status_code == 200, r.text
+        th = r.json()["data"]
+        assert th["task_id"] == task_id and th["status"] == "talking"
+        assert "고칠 파일을 고르지 못함" in th["messages"][0]["text"]
+        assert fake.calls == []  # 넘길 때 LLM 없음
+
+        coder.set_llm(CoderLLM())
+        th = _post(c, thread_id=th["id"], message="Banner.tsx 문구를 바꿔", account="admin").json()
+        th = _post(c, thread_id=th["data"]["id"], message="진행해", account="admin").json()["data"]
+        assert th["status"] == "started" and BANNER in th["messages"][-1]["text"]
+        assert _settle(service, task_id) == "merged"
+    assert adapter.tickets.got == []  # 기획에 새 요청을 만들지 않는다
+    assert _task(service, task_id).coding.picked == [BANNER]  # ../etc/passwd는 빠진다
+    assert len(fake.calls) == 1  # 계획 턴만 LLM ("진행해"는 LLM 없음)
+
+    with TestClient(app) as c:  # 멈춘 작업이 아니면 넘기지 않는다
+        r = c.post(f"/api/planning/dev-tasks/{task_id}/to-chat", json={})
+        assert r.status_code == 400 and r.json()["error"]["code"] == "NOT_STUCK"
+
+
+def test_pick_files_list_for_a_stuck_task(service: PlanningService, adapter) -> None:
+    """'파일 직접 고르기' 후보: 레포 파일을 검색해 준다 (걸러낸 파일은 빼고)."""
+    coder.set_llm(NoPick())
+    with TestClient(app) as c:
+        body = {"title": "배너 문구", "plan": "배너 문구를 바꾼다", "done": "신간 문구"}
+        task_id = c.post("/api/planning/dev-tasks", json=body).json()["data"]["task_id"]
+        assert _settle(service, task_id) == "failed"
+        r = c.get(f"/api/planning/dev-tasks/{task_id}/files?q=banner")
+        assert r.status_code == 200, r.text
+        rows = r.json()["data"]
+        assert rows["files"] == [BANNER]
+        rows = c.get(f"/api/planning/dev-tasks/{task_id}/files").json()["data"]
+        assert BANNER in rows["files"] and not any("node_modules" in p for p in rows["files"])
+        assert c.get("/api/planning/dev-tasks/T-X/files").status_code == 404
