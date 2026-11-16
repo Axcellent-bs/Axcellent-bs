@@ -39,6 +39,10 @@ function jobKo(a: string): string {
   return ko !== a ? ko : FINANCE_ACTION_KO[a] ?? SAFETY_ACTION_KO[a] ?? a;
 }
 const ruleKo = (key: string) => RULE_KO[key] ?? SAFETY_RULE_KO[key] ?? key;
+/** 한국 시각 날짜 "2026-11-16" */
+const dayOf = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+/** "11월 16일 (월)" */
+const dayLabel = (day: string) => new Date(`${day}T00:00:00+09:00`).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", weekday: "short" });
 const errText = (e: unknown) => (e instanceof Error ? e.message : "불러오지 못했습니다");
 const duration = (sec: number) => (sec >= 3600 ? `${Math.round(sec / 3600)}시간` : sec >= 60 ? `${Math.round(sec / 60)}분` : `${sec}초`);
 
@@ -102,7 +106,15 @@ export default function Safety() {
     return () => clearInterval(t);
   }, [load]);
 
-  const recent = useMemo(() => (execs ? [...execs].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, RECENT) : []), [execs]);
+  // 최근 판단: 날짜를 고르면 그날 전부, 안 고르면 최근 RECENT건
+  const [day, setDay] = useState("");
+  const sorted = useMemo(() => (execs ? [...execs].sort((a, b) => b.created_at.localeCompare(a.created_at)) : []), [execs]);
+  const days = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const x of sorted) { const d = dayOf(x.created_at); m.set(d, (m.get(d) ?? 0) + 1); }
+    return [...m.entries()];
+  }, [sorted]);
+  const recent = useMemo(() => (day ? sorted.filter((x) => dayOf(x.created_at) === day) : sorted.slice(0, RECENT)), [sorted, day]);
   const pending = useMemo(() => (reviews ?? []).filter((r) => r.status === "pending").sort((a, b) => a.created_at.localeCompare(b.created_at)), [reviews]);
   const counts = useMemo(() => {
     const c = { total: execs?.length ?? 0, executed: 0, held: 0, rejected: 0 };
@@ -170,7 +182,16 @@ export default function Safety() {
       </Section>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <Section title="② 최근 판단" desc={`안전규칙 AI가 받은 실행 요청과 판단 결과입니다 (최근 ${RECENT}건).`}>
+        <Section title="② 최근 판단" desc={day ? `${dayLabel(day)}에 안전규칙 AI가 받은 실행 요청과 판단 결과입니다 (${recent.length}건).` : `안전규칙 AI가 받은 실행 요청과 판단 결과입니다 (최근 ${RECENT}건).`}
+          right={days.length > 0 && (
+            <label className="flex items-center gap-2 text-sm text-ink-500">
+              <span className="shrink-0">날짜</span>
+              <select id="safety-recent-day" className="field w-auto py-1" value={day} onChange={(e) => setDay(e.target.value)}>
+                <option value="">최근 {RECENT}건</option>
+                {days.map(([d, n]) => <option key={d} value={d}>{dayLabel(d)} · {n}건</option>)}
+              </select>
+            </label>
+          )}>
           {!execs ? <Empty>불러오는 중…</Empty> : recent.length === 0 ? <Empty>아직 받은 실행 요청이 없어요.</Empty> : (
             <div className="max-h-[640px] overflow-auto">
               <table className="w-full min-w-[520px] text-sm">
