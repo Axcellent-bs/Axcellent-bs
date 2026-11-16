@@ -55,7 +55,7 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceivePlanningAnswerInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceivePlanningAnswerOutput",
       "grade": "A",
-      "allowed_requesters": ["support", "marketing", "hr", "data", "finance", "orchestrator"],
+      "allowed_requesters": ["support", "marketing", "hr", "archive", "data", "finance", "orchestrator"],
       "verifier": null,
       "priority": "required"
     },

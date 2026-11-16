@@ -18,6 +18,7 @@ from ax_contracts.schemas import TENANT_ID_DEFAULT, UtcDatetime
 Dept = Literal[
     "planning",
     "hr",
+    "archive",  # 결정 기록(아카이브 AI, decisions 8114). 인사에서 나뉨 (11/16 #1131)
     "support",
     "marketing",
     "data",
@@ -34,6 +35,7 @@ Dept = Literal[
 DEPT_NAME: dict[str, str] = {
     "planning": "기획",
     "hr": "인사",
+    "archive": "아카이브",
     "support": "고객지원",
     "marketing": "마케팅",
     "data": "데이터분석",

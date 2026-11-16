@@ -12,11 +12,11 @@
 import { PROPOSAL_ACTIONS, PROPOSAL_ORIGIN, SEED_PROPOSALS, proposalOpen, proposalReady, reduceProposals, type Proposal, type ProposalAction } from './proposals'
 
 export type Dept =
-  | 'planning' | 'dev' | 'hr' | 'support' | 'marketing' | 'data' | 'finance'
+  | 'planning' | 'dev' | 'hr' | 'archive' | 'support' | 'marketing' | 'data' | 'finance'
   | 'infra' | 'orchestrator' | 'safety' | 'shop' | 'memory' | 'human'
 
 export const DEPT_NAME: Record<Dept, string> = {
-  planning: '요청·기획서', dev: '개발·배포', hr: '인사', support: '고객지원', marketing: '마케팅', data: '데이터분석',
+  planning: '요청·기획서', dev: '개발·배포', hr: '인사', archive: '아카이브', support: '고객지원', marketing: '마케팅', data: '데이터분석',
   finance: '재무/정산', infra: '인프라(DejaFix)', orchestrator: '통합 에이전트', safety: '안전 레이어',
   shop: '판매 사이트', memory: '회사 기억', human: '사람',
 }
@@ -866,7 +866,7 @@ function confirmSpecCore(s: State, specId: string, by: Approver, note: string): 
       ...s.activity,
       { t, ctx, from: 'planning', to: 'planning', point: 'confirm_spec', kind: 'A2A', grade: 'A', text: `${spec.id} ${how} · ${note}` },
       { t, ctx, from: 'planning', to: 'planning', point: 'split_tasks', kind: 'A2A', grade: 'A', text: `요구사항 ${reqs.length}개 → 작업 ${tasks.map((x) => x.id).join(', ')}` },
-      { t, ctx, from: 'planning', to: 'hr', point: 'record_case', kind: 'A2A', grade: 'A', text: `① kind spec_confirmed · ${spec.id} (${how})` },
+      { t, ctx, from: 'planning', to: 'archive', point: 'record_case', kind: 'A2A', grade: 'A', text: `① kind spec_confirmed · ${spec.id} (${how})` },
       ...(req ? [{ t, ctx, from: 'planning' as const, to: req.from, point: 'get_request_status', kind: 'A2A' as const, grade: 'read' as const, text: `${req.id} 상태 "작업 중" (기획서 ${how})` }] : []),
     ],
   }
@@ -899,7 +899,7 @@ function mergeCore(s: State, prId: string, by: 'rule' | 'review' | 'human', rule
   const act: Activity[] = [
     { t, ctx, from: 'planning', to: 'safety', point: 'execute(merge_pr)', kind: 'execute', grade: 'B', text: `${pr.id} ${how}` },
     { t, ctx, from: 'planning', to: 'shop', point: 'github_merge_pull', kind: 'API', text: `${pr.id} 머지 → dev 배포` },
-    { t, ctx, from: 'planning', to: 'hr', point: 'record_case', kind: 'A2A', grade: 'A', text: `① kind pr_merged · ${pr.id}` },
+    { t, ctx, from: 'planning', to: 'archive', point: 'record_case', kind: 'A2A', grade: 'A', text: `① kind pr_merged · ${pr.id}` },
   ]
   if (allDone && info.req) {
     act.push({ t, ctx, from: 'planning', to: 'hr', point: 'record_case', kind: 'A2A', grade: 'A', text: `① kind request_closed · ${info.req.id}` })
