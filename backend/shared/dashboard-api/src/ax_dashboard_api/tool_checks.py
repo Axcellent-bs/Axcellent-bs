@@ -23,6 +23,7 @@ from urllib.parse import quote
 import httpx
 import yaml
 
+from ax_agent_template import company_connection as host_policy
 from ax_agent_template.github_app import GithubAppAuth
 from ax_agent_template.tool_connections import ToolConnection, ToolConnectionError
 from ax_dashboard_api.company_connection import Check
@@ -49,8 +50,7 @@ class _Scrub:
         self.add(*values)
 
     def add(self, *values: str) -> None:
-        # 한 글자짜리 값을 가리면 문구 전체가 망가지므로 4글자부터 가린다
-        self._values.update(v for v in values if v and len(v) >= 4)
+        self._values.update(v for v in values if v)
 
     def __call__(self, text: str) -> str:
         for value in sorted(self._values, key=len, reverse=True):
@@ -107,6 +107,15 @@ def _auth_from(conn: ToolConnection) -> tuple[GithubAppAuth, str]:
     return auth, _s(conn.config, "base_url", GITHUB_API).rstrip("/")
 
 
+def _host_problem(url: str) -> str | None:
+    """나가기 직전 주소 정책 확인 (저장된 연결도 같다). 어긋나면 이유."""
+    try:
+        host_policy.check_host(host_policy.validate_shop_url(url))
+    except ValueError as exc:
+        return f"주소를 쓸 수 없어요 (INVALID_URL): {exc}"
+    return None
+
+
 async def _github_app_checks(
     conn: ToolConnection, client: httpx.AsyncClient, scrub: _Scrub
 ) -> tuple[list[Check], GithubAppAuth | None, str]:
@@ -115,6 +124,10 @@ async def _github_app_checks(
         auth, base = _auth_from(conn)
     except ToolConnectionError as exc:
         return [Check("token", "설치 토큰", False, scrub(exc.message))], None, GITHUB_API
+    if base != GITHUB_API:
+        problem = _host_problem(base)
+        if problem:
+            return [Check("token", "설치 토큰", False, problem)], None, base
     checks: list[Check] = []
     try:
         token = await auth.token(client, base)
@@ -309,6 +322,9 @@ async def _jenkins_checks(
     param = _s(config, "version_param", "version")
     if not job:
         return [Check("job", "Jenkins 작업", False, "작업 이름을 입력해 주세요")]
+    problem = _host_problem(url)
+    if problem:
+        return [Check("job", "Jenkins 작업", False, problem)]
     auth = httpx.BasicAuth(_s(config, "username"), secrets.get("api_token", ""))
     res, error = await _send(
         client,
@@ -370,6 +386,9 @@ async def _jenkins_checks(
 async def _dejafix_checks(config: dict[str, Any], secrets: dict[str, str]) -> list[Check]:
     # 로그인 경로·본문은 dejafix-proxy `DejaFixSession._login`과 같다
     # (패키지끼리 import하지 않아 복제)
+    problem = _host_problem(_s(config, "url").rstrip("/"))
+    if problem:
+        return [Check("login", "로그인", False, problem)]
     async with _client(base_url=_s(config, "url").rstrip("/")) as client:
         res, error = await _send(
             client,

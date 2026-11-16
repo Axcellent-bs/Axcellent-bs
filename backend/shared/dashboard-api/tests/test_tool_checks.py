@@ -241,3 +241,59 @@ def test_error_text_scrubbed_when_secret_in_message(monkeypatch) -> None:
     checks = _run("jenkins", cfg, {"api_token": API_TOKEN}, lookup=lambda _: None)
     assert all(API_TOKEN not in c.detail for c in checks)
     assert any("••••" in c.detail for c in checks)
+
+
+def test_stored_link_local_urls_make_no_request(monkeypatch, pem) -> None:
+    sent: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(str(request.url))
+        return httpx.Response(200, json={})
+
+    _install(monkeypatch, handle)
+    bad = "http://169.254.169.254"
+    app = ToolConnection(
+        "github_app-1",
+        "github_app",
+        "앱",
+        {"app_id": "1", "installation_id": "2", "base_url": bad},
+        {"private_key": pem},
+    )
+    runs = [
+        ("jenkins", {**JENKINS, "url": bad}, {"api_token": API_TOKEN}),
+        ("dejafix", {**DEJAFIX, "url": bad}, {"password": PASSWORD}),
+        ("github_app", app.config, {"private_key": pem}),
+        ("github_actions", ACTIONS_CONFIG, {}),
+    ]
+    for kind, config, secrets in runs:
+        checks = _run(kind, config, secrets, lookup=lambda _, a=app: a)
+        assert not all(c.ok for c in checks), kind
+        assert "INVALID_URL" in json.dumps([c.detail for c in checks], ensure_ascii=False), kind
+    assert sent == []
+
+
+def test_github_401_body_with_token_is_not_in_details(monkeypatch, pem) -> None:
+    fake = "ghs_FAKE_leaked_token_999"
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"message": f"Bad credentials {fake}"})
+
+    _install(monkeypatch, handle)
+    checks = _run(
+        "github_app",
+        {"app_id": "1", "installation_id": "2"},
+        {"private_key": pem},
+        lookup=lambda _: None,
+    )
+    text = json.dumps([c.as_dict() for c in checks], ensure_ascii=False)
+    assert fake not in text and "401" in text
+
+
+def test_short_secret_is_scrubbed(monkeypatch) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"property": [], "builds": []})
+
+    _install(monkeypatch, handle)
+    cfg = {**JENKINS, "version_param": "ab"}
+    checks = _run("jenkins", cfg, {"api_token": "ab"}, lookup=lambda _: None)
+    assert all("ab" not in c.detail.replace("••••", "") for c in checks)

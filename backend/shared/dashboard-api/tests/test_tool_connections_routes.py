@@ -192,3 +192,107 @@ def test_broken_store_is_409(calls, client, tmp_path) -> None:
     (tmp_path / "tool_connections.json").write_text("{broken", encoding="utf-8")
     res = client.post(BASE, json=_body())
     assert res.status_code == 409 and res.json()["error"]["code"] == "STORE_UNAVAILABLE"
+
+
+# 저장된 비밀을 다른 곳으로 보내지 못하게: 주소·계정이 바뀌면 비밀을 다시 받는다
+@pytest.fixture
+def wire(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """진짜 확인을 돌리고 전송 계층에 닿은 요청을 모은다."""
+    import httpx
+
+    from ax_dashboard_api import tool_checks
+
+    monkeypatch.setenv(store.FILE_ENV, str(tmp_path / "tool_connections.json"))
+    monkeypatch.setattr(store, "_cache", None)
+    reached: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        reached.append(str(request.url))
+        return httpx.Response(404, json={})
+
+    monkeypatch.setattr(tool_checks, "TRANSPORT", httpx.MockTransport(handle))
+    return reached
+
+
+def _seed(kind: str, config: dict, secrets: dict) -> None:
+    store.upsert(kind, "저장", config, secrets, conn_id=None, by="t")
+
+
+CASES = [
+    (
+        "jenkins",
+        JENKINS,
+        {"api_token": SECRET},
+        {**JENKINS, "url": "http://10.99.99.99:8080"},
+    ),
+    (
+        "jenkins",
+        JENKINS,
+        {"api_token": SECRET},
+        {**JENKINS, "username": "other"},
+    ),
+    (
+        "dejafix",
+        {"url": "http://10.0.0.9:18000", "username": "viewer"},
+        {"password": "pw-secret-1"},
+        {"url": "http://10.9.9.9:18000", "username": "viewer"},
+    ),
+    (
+        "github_app",
+        {"app_id": "1", "installation_id": "2"},
+        {"private_key": "-----BEGIN RSA PRIVATE KEY-----x"},
+        {"app_id": "1", "installation_id": "2", "base_url": "http://10.9.9.9"},
+    ),
+    (
+        "github_app",
+        {"app_id": "1", "installation_id": "2"},
+        {"private_key": "-----BEGIN RSA PRIVATE KEY-----x"},
+        {"app_id": "9", "installation_id": "2"},
+    ),
+]
+
+
+@pytest.mark.parametrize(("kind", "saved_config", "saved_secrets", "new_config"), CASES)
+def test_test_with_id_and_new_endpoint_requires_secret(
+    wire, client, kind, saved_config, saved_secrets, new_config
+) -> None:
+    _seed(kind, saved_config, saved_secrets)
+    body = {"kind": kind, "name": "x", "config": new_config, "secrets": {}, "id": f"{kind}-1"}
+    res = client.post(BASE + "/test", json=body)
+    assert res.status_code == 422 and res.json()["error"]["code"] == "SECRET_REQUIRED"
+    assert wire == []
+
+
+@pytest.mark.parametrize(("kind", "saved_config", "saved_secrets", "new_config"), CASES)
+def test_put_with_new_endpoint_requires_secret(
+    wire, client, kind, saved_config, saved_secrets, new_config
+) -> None:
+    _seed(kind, saved_config, saved_secrets)
+    body = {"kind": kind, "name": "x", "config": new_config, "secrets": {}}
+    res = client.put(f"{BASE}/{kind}-1", json=body)
+    assert res.status_code == 422 and res.json()["error"]["code"] == "SECRET_REQUIRED"
+    assert wire == []
+    saved = store.get(f"{kind}-1")
+    assert saved is not None and saved.config == saved_config
+
+
+def test_new_endpoint_with_new_secret_is_allowed(wire, client) -> None:
+    _seed("jenkins", JENKINS, {"api_token": SECRET})
+    body = _body(config={**JENKINS, "url": "http://10.99.99.99:8080"}, secrets={"api_token": "n"})
+    res = client.post(BASE + "/test", json={**body, "id": "jenkins-1"})
+    assert res.status_code == 200 and len(wire) == 1 and "10.99.99.99" in wire[0]
+
+
+def test_github_app_default_base_url_is_same_as_missing(calls, client) -> None:
+    client.post(BASE, json=_app_body())
+    body = _app_body()
+    body["config"]["base_url"] = "https://api.github.com/"
+    body["secrets"] = {}
+    assert client.put(BASE + "/github_app-1", json=body).status_code == 200
+
+
+def test_recheck_of_stored_link_local_url_makes_no_request(wire, client) -> None:
+    _seed("jenkins", {**JENKINS, "url": "http://169.254.169.254"}, {"api_token": SECRET})
+    data = client.post(BASE + "/jenkins-1/check").json()["data"]
+    assert data["ok"] is False and "INVALID_URL" in data["checks"][0]["detail"]
+    assert wire == []

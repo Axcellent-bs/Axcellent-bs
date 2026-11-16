@@ -112,6 +112,8 @@ def _clean(body: ToolConnectionIn) -> tuple[dict[str, Any], dict[str, str]]:
         value = raw.strip() if isinstance(raw, str) else ""
         if value:
             config[f["key"]] = value
+    if config.get("base_url", "").rstrip("/") == DEFAULT_GITHUB:
+        del config["base_url"]  # 기본 주소는 저장하지 않는다 (사내 주소 정책 대상이 아님)
     for key in URL_KEYS.get(body.kind, ()):
         if key in config:
             try:
@@ -170,9 +172,40 @@ async def _run(kind: str, config: dict[str, Any], secrets: dict[str, str]) -> li
     return await run_checks(kind, config, secrets, lookup=store.get)
 
 
-def _merged(saved: ToolConnection | None, secrets: dict[str, str]) -> dict[str, str]:
-    """입력한 비밀 값 위에 빈 칸은 저장된 값을 채운다."""
-    merged = dict(saved.secrets) if saved else {}
+# 저장된 비밀 값을 물려받으려면 같아야 하는 칸(비밀이 갈 곳과 누구인지). 바뀌면 비밀을 다시 받는다
+IDENTITY_KEYS = {
+    "github_app": ("base_url", "app_id", "installation_id"),
+    "jenkins": ("url", "username"),
+    "dejafix": ("url", "username"),
+}
+DEFAULT_GITHUB = "https://api.github.com"
+
+
+def _identity(kind: str, config: dict[str, Any]) -> tuple[str, ...]:
+    out = []
+    for key in IDENTITY_KEYS.get(kind, ()):
+        value = str(config.get(key) or "")
+        if key == "base_url":
+            value = value.rstrip("/") or DEFAULT_GITHUB
+        out.append(value)
+    return tuple(out)
+
+
+def _merged(
+    saved: ToolConnection | None, config: dict[str, Any], secrets: dict[str, str]
+) -> dict[str, str]:
+    """입력한 비밀 값 위에 빈 칸은 저장된 값을 채운다.
+
+    주소·계정이 저장된 것과 다르면 저장된 비밀을 물려주지 않는다 (다른 곳으로 새는 것을 막는다).
+    """
+    merged: dict[str, str] = {}
+    if saved is not None:
+        inherited = {k: v for k, v in saved.secrets.items() if v and not secrets.get(k)}
+        if inherited and _identity(saved.kind, saved.config) != _identity(saved.kind, config):
+            raise ApiError(
+                422, "SECRET_REQUIRED", "주소나 계정을 바꾸면 비밀 값을 다시 넣어 주세요"
+            )
+        merged.update(saved.secrets)
     merged.update({k: v for k, v in secrets.items() if v})
     return merged
 
@@ -201,14 +234,14 @@ async def test_connection(body: ToolConnectionIn) -> dict:
     if saved is not None and saved.kind != body.kind:
         raise ApiError(422, "INVALID_REQUEST", "연결 종류는 바꿀 수 없어요")
     config, secrets = _clean(body)
-    checks = await _run(body.kind, config, _merged(saved, secrets))
+    checks = await _run(body.kind, config, _merged(saved, config, secrets))
     return ok({"ok": all(c.ok for c in checks), "checks": [c.as_dict() for c in checks]})
 
 
 async def _save(body: ToolConnectionIn, request: Request, conn_id: str | None):  # noqa: ANN202
     saved = _saved(conn_id)
     config, secrets = _clean(body)
-    merged = _merged(saved, secrets)
+    merged = _merged(saved, config, secrets)
     _require_fields(body.kind, config, merged)
     _guard_unique(body.kind, config, conn_id)
     checks = await _run(body.kind, config, merged)
