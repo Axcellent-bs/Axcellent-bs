@@ -1,7 +1,7 @@
 // 기획서 화면: 문서가 원본이고 문단에 작업·PR·결정이 붙는다
 import { useEffect, useState, type Dispatch } from 'react'
 import { Button, Notice, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, exampleFill, nextDocId, type Action, type FillPreview, type Decision, type Spec, type State as S } from '@/lib/planningData'
+import { DEPT_NAME, nextDocId, type Action, type Decision, type Spec, type State as S } from '@/lib/planningData'
 import { State, Tag, rowNav } from '@/components/planning-common/parts'
 import { Linked, Ref, go, idText, reviewOf, toPath } from '@/components/planning-common/links'
 import { CONFIRMED_BY } from '@/components/planning-common/flow'
@@ -102,7 +102,7 @@ function ReleaseCheckBox({ d, spec }: { d: Dispatch<Action>; spec: string }) {
 
 // ---------------------------------------------------------------- 기획 문서 (문서가 원본, 문단에 모든 것이 붙는다)
 // 기획서 탭 첫 화면 = 기획서 목록 (최근 것이 위). 줄을 누르면 그 기획서 상세로
-export function Specs({ s, d, item, item2, example }: P & { item?: string; item2?: string; example?: boolean }) {
+export function Specs({ s, d, item, item2 }: P & { item?: string; item2?: string }) {
   if (!item) return <SpecList s={s} d={d} />
   const spec = s.specs.find((x) => x.id === item)
   if (!spec) {
@@ -111,7 +111,7 @@ export function Specs({ s, d, item, item2, example }: P & { item?: string; item2
     const next = num(item) > Math.max(0, ...s.specs.map((x) => num(x.id)))
     return <SpecPending key={item} item={item} waiting={next} />
   }
-  return <SpecView key={spec.id} s={s} d={d} spec={spec} item2={item2} example={example} />
+  return <SpecView key={spec.id} s={s} d={d} spec={spec} item2={item2} />
 }
 
 function SpecPending({ item, waiting }: { item: string; waiting: boolean }) {
@@ -432,7 +432,7 @@ function ListEdit({ prefix, items, onChange, locked }: { prefix: string; items: 
   )
 }
 
-function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; example?: boolean }) {
+function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
   // 작업·PR·장애가 연결된 문단만 눌러서 오른쪽에 본다
   const linked = (id: string) => s.tasks.some((t) => t.spec === spec.id && t.para === id) || s.incidents.some((i) => i.candidates.some((c) => c.spec === spec.id && c.para === id))
   const para = spec.paras.find((p) => p.id === item2 && linked(p.id)) ?? spec.paras.find((p) => linked(p.id))
@@ -492,13 +492,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; examp
     if (!draft) setDraft(base)
     setFilling(true)
     try {
-      // 예시 모드여도 서버의 기획 AI가 읽는다. 서버에 닿지 않을 때만 소제목 읽기로 대신한다
-      let got: FillPreview & { ai: boolean }
-      try {
-        got = await previewFill({ spec: spec.id, template: tpl, title: base.title, bodyMd: base.bodyMd, question: spec.question, current: { problem: base.problem, goal: base.goal, requirements: base.reqs, done_criteria: base.dones } })
-      } catch {
-        got = { ...exampleFill(base.bodyMd), ai: false }
-      }
+      const got = await previewFill({ spec: spec.id, template: tpl, title: base.title, bodyMd: base.bodyMd, question: spec.question, current: { problem: base.problem, goal: base.goal, requirements: base.reqs, done_criteria: base.dones } })
       const next = { ...base }
       const filled: string[] = []
       const label = (src: string) => sections.find((x) => x.source === src || x.key === src)?.label ?? src
@@ -514,7 +508,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string; examp
       setDraft(next)
       void askSuggest(next) // 자동 채우기 뒤에도 빈 칸이 남으면 AI 제안
       if (got.answer && spec.question) { setAnswerFound(got.answer); filled.push('질문 답') }
-      const how = !got.ai ? 'AI 연결 안 됨 · 소제목만 읽었어요' : got.by === 'llm' ? 'AI가 읽고 채웠어요' : 'AI가 채우고 빈 곳은 소제목으로'
+      const how = got.by === 'llm' ? 'AI가 읽고 채웠어요' : 'AI가 채우고 빈 곳은 소제목으로'
       toast.show(filled.length ? `${how} · ${filled.join(', ')} · 확인하고 저장해 주세요` : locked ? '바뀐 항목이 없어요 (확정된 기획서라 요구사항·완료 기준은 잠겨 있어요)' : '자유 작성에서 바꿀 내용을 찾지 못했어요')
     } catch (x) {
       toast.show(`자동 채우기 실패: ${(x as Error).message}`)
