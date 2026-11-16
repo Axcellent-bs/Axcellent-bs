@@ -128,6 +128,7 @@ export const SERVICES: Service[] = [
       { href: '/data/ops', label: '운영 지표' },
       { href: '/data/trend', label: '트렌드&콘텐츠' },
       { href: '/data/sales', label: '매출 분석' },
+      { href: '/data/segments', label: '고객·시장 분석' },
     ],
   },
   {
