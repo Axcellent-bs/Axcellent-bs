@@ -353,6 +353,7 @@ class ProposalMixin:
             p = Proposal(
                 id=pid, title=inp.title, from_=frm, skill=inp.skill, insight_id=inp.insight_id,
                 insight=inp.summary, facts=_facts_of(inp.facts), products=inp.products,
+                product_ids=inp.product_ids,
                 audience=inp.audience, shorts_format=inp.shorts_format,
                 body_md=inp.body_md, idea=draft.idea, why=draft.why, target=target,
                 format=draft.format, written_by=draft.written_by, warnings=draft.warnings,
@@ -498,6 +499,7 @@ class ProposalMixin:
         brief = CampaignBriefInput(
             proposal_id=p.id, insight_id=p.insight_id, title=p.title, idea=p.idea, why=p.why,
             facts=_facts_in(p), target=_target_in(p), products=p.products, format=p.format,
+            product_ids=p.product_ids,
             approved_by="사람", note=p.note, body_md=body_md,
             continue_campaign=_prev_campaign(self.state, p),
         )  # fmt: skip
