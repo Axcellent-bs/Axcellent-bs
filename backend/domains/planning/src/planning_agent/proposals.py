@@ -363,7 +363,21 @@ def brief_facts(t: TrendInsight) -> list[InsightFact]:
     if t.shorts_format and t.shorts_format_median_views is not None:
         views = _views(t.shorts_format_median_views)
         add(f'"{t.shorts_format}" 숏츠 중앙값 조회', views, f"{src}:shorts")
+    # 연결 상품의 고객 반응 (고객지원 book_issue_stats 값 그대로). 트렌드 근거가 없는 인사이트는
+    # 고객 반응만으로 넘기지 않는다. 12줄 상한을 넘으면 고객 반응 줄부터 뺀다 (뒤에 붙임)
+    if out:
+        for r in e.customer_reaction:
+            value = f"클레임 {r.claim_count}건 · 판매 {r.sold_qty}권"
+            if r.claim_rate is not None:
+                value += f" 중 {_num(r.claim_rate * 100)}%"
+            if r.note:
+                value += f" ({r.note})"
+            period = _PERIOD.get(r.period, r.period)
+            add(f"고객 반응 · {r.product_name} ({period})", value, f"{src}:book_issue_stats")
     return out[:12]
+
+
+_PERIOD = {"day": "최근 하루", "week": "최근 일주일", "month": "최근 한 달"}
 
 
 # 데이터분석 내부 참조 (기회 카드 id 등)는 사람이 읽는 설명에서 뺀다
@@ -424,6 +438,7 @@ def from_brief(out: TrendInsightBriefOutput) -> list[ReceiveInsightInput]:
                 skill="trend_insight_brief",
                 facts=facts,
                 products=[p.name for p in t.products][:10],
+                product_ids=[p.product_id for p in t.products][:10],
                 audience=t.target_age,
                 shorts_format=t.shorts_format,
                 generated_at=out.generated_at,
