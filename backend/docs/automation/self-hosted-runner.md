@@ -51,7 +51,7 @@
 
 ## 평소 동작
 
-- 월~금 02:00 KST에 1회 (금요일은 3회 연속), 수동 실행 가능. 각 run: `docker compose -p ax-real -f infra/compose.yml up -d --build` -> 헬스 대기 -> 결제 장애 주입(`infra/fault-injection`) -> `AX_E2E_MODE=real` e2e -> 장애 해제 -> `docker compose -p ax-real ... down -v`.
+- 월~금 02:00 KST에 1회 (금요일은 3회 연속), 수동 실행 가능. 각 run: `docker compose -p ax-real -f infra/compose.yml up -d --build` -> 헬스 대기 -> 결제 장애 주입(캣북스 레포 `backend/infra/fault-injection`) -> `AX_E2E_MODE=real` e2e -> 장애 해제 -> `docker compose -p ax-real ... down -v`.
 - **compose 프로젝트는 `ax-real`로 분리한다.** `infra/compose.yml`의 `name: ax-backend`는 서버 PC 상시 스택(데모용 `up -d`)이 쓰므로, 같은 이름이면 `up --build`가 상시 컨테이너를 덮어쓰고 `down -v`가 공통 로그·DB 볼륨을 지운다. `-p ax-real`이면 컨테이너·볼륨이 따로라 `down -v`는 ax-real 것만 지운다 (공통 로그 `common-log`도 이 실행 전용 사본).
 - **상시 스택이 떠 있으면 실행하지 않는다.** 시작 전에 `docker compose -p ax-backend ps -q`가 비어 있지 않으면 "상시 스택이 떠 있음, 포트 충돌"을 남기고 실패로 끝낸다 (같은 포트 8000~8107 등을 쓰기 때문). real-run이 도는 시간(02:00 KST 전후)에는 상시 데모를 내려 두거나 포트를 분리한다. 개발실(`-p ax-devroom`)은 별도라 영향이 없다.
 - 결과: `real-result` 아티팩트(`real-result.json`, `real-detail.json`). 개발실 갱신(`devroom-update`)이 내려받는다. LLM 호출 수·토큰은 수집 경로가 생기면 `real-detail.json`의 `llm_usage`에 채운다 (지금은 null과 사유).
@@ -68,7 +68,8 @@
 
 ## 알려진 제한
 
-- 장애 주입: `infra/fault-injection/payment_fault.py inject|clear` 스크립트가 아직 없다 (infra 요청). 없으면 장애 주입 없이 단독 점수만 돈다.
+- 판매 서버: `infra/compose.yml`에는 캣북스 판매 서버(shop-api)가 없다. 캣북스 레포(`Catbooks-demo/catbooks-demo`)에서 따로 띄우고 AXcellent는 `AX_SHOP_API_URL`(또는 회사 연결)·연결 키·웹훅으로 붙는다. 러너에 판매 서버가 없으면 판매 데이터가 필요한 단계는 실패로 남는다.
+- 장애 주입: 캣북스 레포의 `backend/infra/fault-injection/payment_fault.py inject|clear`를 쓴다(레포 분리로 옮김). 러너에 그 레포 클론이 아직 없다. 없으면 장애 주입 없이 단독 점수만 돈다.
 - 연결(총괄 12단계) 실서버 점수는 아직 pending이다. 지금은 단독 점수만 real로 판정한다.
 - Windows에서 `docker compose up --build`는 첫 실행에 오래 걸린다 (이미지 캐시가 쌓이면 줄어든다). 시간 예산: run 하나 최대 70분(up 25 + 헬스 5 + e2e 20 + down 10), job 제한 240분, 다음 run이 220분 안에 못 끝날 것 같으면 시작하지 않는다 (금요일 3회 중 일부가 건너뛰어질 수 있고 결과에 사유가 남는다).
 - Gemini(LLM) 사용량 호출 수·토큰은 아직 집계하지 않는다 (#282, agent-template 요청). 집계 경로가 생기면 `real-detail.json`의 `llm_usage`에 채운다.

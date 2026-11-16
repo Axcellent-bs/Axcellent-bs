@@ -10,9 +10,8 @@ include:
   - path:
       - ../shared/memory/compose.yml
       - ./common-log/memory.yml
-  - path:
-      - ../shared/shop-api/compose.yml
-      - ./common-log/shop-api.yml
+  # 캣북스 판매 서버(shop-api)는 캣북스 레포(Catbooks-demo/catbooks-demo)에서 따로 띄운다(그 레포의
+  # backend/shop-api/compose.yml). AXcellent는 AX_SHOP_API_URL(또는 회사 연결)·연결 키·웹훅으로만 붙는다
   - path:
       - ../shared/dashboard-api/compose.yml
       - ./common-log/dashboard-api.yml

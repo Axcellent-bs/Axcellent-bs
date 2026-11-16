@@ -84,4 +84,8 @@ VITE_DASHBOARD_API_URL=http://localhost:8020
 
 ## 장애 주입
 
-`fault-injection/` 참조.
+캣북스 레포 [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)의 `backend/infra/fault-injection/`으로 옮겼다. 이 레포에서는 `bash scripts/shop_fault.sh failure|latency|clear`(옆 클론의 스크립트를 부르는 래퍼)를 쓴다.
+
+## 판매 서버
+
+캣북스 판매 서버(shop-api)는 이 compose에 없다. 캣북스 레포에서 따로 배포하고(그 레포의 `backend/shop-api/compose.yml`), AXcellent는 `AX_SHOP_API_URL`(또는 회사 연결)·연결 키·웹훅으로만 붙는다. `compose.server.yml`의 게이트웨이는 더 이상 shop-api를 기다리지 않는다. 게이트웨이 nginx의 `/shop-api/` 프록시는 따로 배포한 판매 서버 주소를 가리켜야 한다.

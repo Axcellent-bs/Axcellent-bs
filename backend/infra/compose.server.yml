@@ -19,11 +19,6 @@ services:
     expose:
       - "8002"
     restart: unless-stopped
-  shop-api:
-    ports: !reset []
-    expose:
-      - "8010"
-    restart: unless-stopped
   dashboard-api:
     ports: !reset []
     expose:
@@ -85,7 +80,7 @@ services:
     restart: unless-stopped
 
   # 고객 홈페이지(/), 관리자(/admin/), 기획·개발(/admin/planning/) 정적 파일과
-  # /api/ -> dashboard-api, /shop-api/ -> shop-api 프록시. 이미지는 ax-frontend의 nginx/Dockerfile로 만든다
+  # /api/ -> dashboard-api 프록시(/shop-api/는 따로 배포한 캣북스 판매 서버, Catbooks-demo/catbooks-demo). 이미지는 ax-frontend의 nginx/Dockerfile로 만든다
   # (두 레포를 같은 폴더에 나란히 clone. 다른 위치면 AX_FRONTEND_DIR).
   gateway:
     build:
@@ -98,5 +93,4 @@ services:
       - "${AX_GATEWAY_PORT:-8080}:80"
     depends_on:
       - dashboard-api
-      - shop-api
     restart: unless-stopped

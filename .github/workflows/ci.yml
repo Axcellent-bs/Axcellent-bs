@@ -81,8 +81,8 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # shared는 data(src·eval·tests)가 import하는 패키지만: agent-template·contracts·shop-api
-          if echo "$files" | grep -qE '^(backend/domains/data/|backend/shared/(agent-template|contracts|shop-api)/|backend/pyproject\.toml$|backend/uv\.lock$|\.github/workflows/ci\.yml$)'; then
+          # shared는 data(src·eval·tests)가 import하는 패키지만: agent-template·contracts
+          if echo "$files" | grep -qE '^(backend/domains/data/|backend/shared/(agent-template|contracts)/|backend/pyproject\.toml$|backend/uv\.lock$|\.github/workflows/ci\.yml$)'; then
             echo "관련 파일이 바뀌었다 ($range): 평가를 돌린다"
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
@@ -107,7 +107,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: backend/.eval-cache
-          key: data-eval-world-${{ hashFiles('backend/domains/data/eval/eval_world.py', 'backend/domains/data/eval/make_cases.py', 'backend/shared/shop-api/src/**', 'backend/domains/data/eval/cases/**', 'backend/domains/data/eval/holdout/**') }}
+          key: data-eval-world-${{ hashFiles('backend/domains/data/eval/eval_world.py', 'backend/domains/data/eval/make_cases.py', 'backend/domains/data/eval/cases/**', 'backend/domains/data/eval/holdout/**') }}
           restore-keys: data-eval-world-
       - if: steps.changes.outputs.run == 'true'
         env:

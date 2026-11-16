@@ -3,6 +3,8 @@
 캣북스 쇼핑몰(shop-api)에 결제 장애를 일부러 넣고, AI들이 사건을 열어 처리하는 흐름을 시험할 때 읽는 문서입니다.
 숫자는 모두 코드에서 확인한 값이고, 근거(파일:줄)는 맨 끝에 모았습니다. [1]처럼 번호로 가리킵니다.
 
+판매 서버(shop-api)·가상 주문·장애 스크립트는 캣북스 레포 [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)에 있고 따로 배포합니다. AXcellent는 판매 서버를 띄우지 않고 주소(`AX_SHOP_API_URL` 또는 회사 연결)·연결 키·웹훅으로만 붙습니다. 로컬에서 시험할 때만 이 레포 옆에 캣북스 레포를 클론하고 `CATBOOKS_LOCAL=on`으로 `run_all.sh`를 띄우면 판매 서버와 가상 주문이 같이 뜹니다(기본 꺼짐).
+
 ## 1. 준비
 
 - **가상 주문 켜기:** `backend/.env`에 `SHOP_TRAFFIC=on`을 넣고 `run_all.sh`로 띄웁니다. [1]
@@ -172,17 +174,17 @@ bash backend/scripts/pg_demo_file.sh clear    # 시연 끝나면 빼기
 
 | 번호 | 내용 | 파일:줄 |
 |---|---|---|
-| [1] | `SHOP_TRAFFIC=on`일 때만 가상 주문 (기본 꺼짐) | `backend/scripts/run_all.sh:418-424` |
-| [2] | 가상 주문 분당 20건(3초마다 1건) | `backend/scripts/shop_traffic.py:61` |
-| [3] | 판단 창 60초, 최소 표본 5건 | `backend/shared/shop-api/src/ax_shop_api/monitor.py:28`, `:30` |
-| [4] | admin 토큰을 `web.env`에 씀 | `backend/scripts/run_all.sh:384` |
-| [5] | `shop_fault.sh`가 `web.env`에서 토큰을 읽음, 없으면 멈춤 | `backend/scripts/shop_fault.sh:8`, `:12-14` |
+| [1] | `SHOP_TRAFFIC=on`일 때만 가상 주문 (기본 꺼짐) | `backend/scripts/run_all.sh:492-495` |
+| [2] | 가상 주문 분당 20건(3초마다 1건) | 캣북스 레포 `backend/scripts/shop_traffic.py` |
+| [3] | 판단 창 60초, 최소 표본 5건 | 캣북스 레포 `backend/shop-api/src/ax_shop_api/monitor.py` |
+| [4] | admin 토큰을 `web.env`에 씀 | `backend/scripts/run_all.sh:434` |
+| [5] | `shop_fault.sh`가 `web.env`에서 토큰을 읽음, 없으면 멈춤 | `backend/scripts/shop_fault.sh:22-26` |
 | [6] | 장애 버튼 없음, failure 약 25초 뒤 사건 열림 | `backend/scripts/shop_fault.sh:3-4` |
-| [7] | 기준 p95 1000ms, 5xx 비율 2% | `backend/shared/shop-api/src/ax_shop_api/monitor.py:26-27`, `:73-76` |
-| [8] | latency는 2000ms 지연 | `backend/scripts/shop_fault.sh:20` |
-| [9] | 지속 20초, 판단 간격 5초 (`run_all.sh` 값) | `backend/scripts/run_all.sh:330` |
-| [10] | 지속 시간은 첫 기준 초과 표본부터 셈 (코드 기본값 60초) | `backend/shared/shop-api/src/ax_shop_api/monitor.py:29`, `:130-137` |
-| [11] | 감시 루프 간격 | `backend/shared/shop-api/src/ax_shop_api/main.py:412` |
+| [7] | 기준 p95 1000ms, 5xx 비율 2% | 캣북스 레포 `backend/shop-api/src/ax_shop_api/monitor.py` |
+| [8] | latency는 2000ms 지연 | 캣북스 레포 `backend/scripts/shop_fault.sh` (`latency`) |
+| [9] | 지속 20초, 판단 간격 5초 (`run_all.sh` 값) | `backend/scripts/run_all.sh:380` |
+| [10] | 지속 시간은 첫 기준 초과 표본부터 셈 (코드 기본값 60초) | 캣북스 레포 `backend/shop-api/src/ax_shop_api/monitor.py` |
+| [11] | 감시 루프 간격 | 캣북스 레포 `backend/shop-api/src/ax_shop_api/main.py` |
 | [12] | 되돌리기는 진단·영향 분석 뒤 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:546` |
 | [13] | 원인 진단 단계 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:506` |
 | [14] | 원인 후보 추정 단계 (영향 분석 뒤) | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:525-528` |

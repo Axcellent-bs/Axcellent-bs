@@ -20,7 +20,6 @@ members = [
     "ax-memory",
     "ax-orchestrator",
     "ax-safety",
-    "ax-shop-api",
     "ax-svc-claims",
     "ax-svc-coupon",
     "ax-svc-data",
@@ -402,27 +401,6 @@ requires-dist = [
 name = "ax-safety"
 version = "0.1.0"
 source = { editable = "shared/safety" }
-dependencies = [
-    { name = "ax-agent-template" },
-    { name = "ax-contracts" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "uvicorn" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "ax-agent-template", editable = "shared/agent-template" },
-    { name = "ax-contracts", editable = "shared/contracts" },
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "uvicorn", specifier = ">=0.30" },
-]
-
-[[package]]
-name = "ax-shop-api"
-version = "0.1.0"
-source = { editable = "shared/shop-api" }
 dependencies = [
     { name = "ax-agent-template" },
     { name = "ax-contracts" },

@@ -7,7 +7,7 @@ AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사
 
 | 폴더 | 내용 |
 | --- | --- |
-| `shared/` | 공통: `contracts`(계약), `agent-template`(에이전트 틀·서비스 대응표), `safety`(안전 관문), `memory`(회사 기억), `dashboard-api`(화면 중계), `shop-api`(고객사 쇼핑몰 시뮬·총괄 읽기 중계) |
+| `shared/` | 공통: `contracts`(계약), `agent-template`(에이전트 틀·서비스 대응표), `safety`(안전 관문), `memory`(회사 기억), `dashboard-api`(화면 중계). 고객사 판매 서버(shop-api)는 캣북스 레포 [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)로 옮겼다 |
 | `domains/` | 업무 로직. 원래 부서 패키지 그대로(support·hr·marketing·finance·data·planning·infra-dejafix). 직접 띄우지 않고 서비스가 가져다 쓴다 |
 | `services/` | 서비스 에이전트 14개. 각자 카드(`agent-card.json`)·포트·실행 설정을 가진다 |
 | `infra/` | docker compose (`infra/compose.yml`이 `shared/*`·`services/*` compose를 모은다) |
@@ -52,7 +52,7 @@ AXcellent 에이전트들이 캣북스의 실제 주문·결제 데이터로 A2A
 cd backend
 uv sync --all-packages
 cp .env.example .env            # LLM_MODEL·LLM_BASE_URL·LLM_API_KEY(·EMBED_MODEL)를 채운다. 커밋하지 않는다. 이미지를 읽는 모델이면 영수증 사진 대조도 켜진다
-bash scripts/run_all.sh         # 16개 서버(DejaFix 계정이 있으면 17개) (+ SHOP_TRAFFIC=on이면 캣북스 가상 주문 트래픽). 로그 backend/.logs/, 데이터 backend/.data/
+bash scripts/run_all.sh         # 서버 전부(DejaFix 계정이 없으면 dejafix-proxy 빼고). 판매 서버는 띄우지 않는다(아래). 로그 backend/.logs/, 데이터 backend/.data/
 bash scripts/run_web.sh         # 다른 터미널: 화면(frontend 3090)을 실제 모드 토큰으로 켠다
 bash scripts/run_all.sh stop
 ```
@@ -66,15 +66,15 @@ bash scripts/run_all.sh stop
 
 - **일부 서버만 띄우기** (`--only`, 없으면 전부): 메모리가 모자라거나 한 부서만 볼 때 쓴다.
   ```bash
-  bash scripts/run_all.sh --only data,finance,shop-api   # 이름은 run_all.sh의 APPS 목록 이름
-  bash scripts/run_all.sh --only core                    # safety, memory, shop-api, dashboard-api, orchestrator
+  bash scripts/run_all.sh --only data,finance            # 이름은 run_all.sh의 APPS 목록 이름
+  bash scripts/run_all.sh --only core                    # safety, memory, dashboard-api, orchestrator (+ CATBOOKS_LOCAL=on이면 shop-api)
   bash scripts/run_all.sh --only data-demo               # core + data, finance, inquiry, coupon, dev (data 업무 리포트가 부르는 곳)
   bash scripts/run_all.sh --only data-demo,incident      # 묶음과 이름을 섞어도 된다
   ```
   - 시작할 때 `띄운 서버 N개: …, 안 띄움: …`을 출력한다. 모르는 이름이면 목록을 보여 주고 멈춘다.
   - 안 띄운 서비스는 `AX_ENABLED_SERVICES`에서도 자동으로 빠진다. 그래서 라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다. 이미 `AX_ENABLED_SERVICES`를 줬으면 둘의 교집합이고, 남는 서비스가 없으면 `none`(모두 끔)이다.
-  - 캣북스 가상 주문은 `.env`에 `SHOP_TRAFFIC=on`이 있을 때만 넣는다(기본 꺼짐, 끄면 `캣북스 가상 주문 꺼짐(…)` 한 줄). 꺼도 같은 스크립트가 발송·도착 표시와 재고 보충은 계속 한다(사람이 사이트에서 한 주문도 정산되게). 결제 장애 감지는 60초에 결제 표본 5건 이상이 필요해서 장애 시연 때는 켠다. `stop`은 지금처럼 전체 포트를 끈다.
-  - shop-api의 바인드 주소는 `AX_SHOP_API_HOST`로 바꾼다(기본 `127.0.0.1`, 다른 서버는 늘 `127.0.0.1`). 예: 같은 망의 다른 PC에서 부르려면 `AX_SHOP_API_HOST=0.0.0.0 bash scripts/run_all.sh`. 이때 8010이 외부에 열리니 방화벽을 확인한다.
+  - 캣북스 가상 주문은 `.env`에 `SHOP_TRAFFIC=on`이 있을 때만 넣는다(기본 꺼짐, 끄면 `캣북스 가상 주문 꺼짐(…)` 한 줄). 꺼도 같은 스크립트가 발송·도착 표시와 재고 보충은 계속 한다(사람이 사이트에서 한 주문도 정산되게). 결제 장애 감지는 60초에 결제 표본 5건 이상이 필요해서 장애 시연 때는 켠다. `stop`은 지금처럼 전체 포트를 끈다(8010은 `CATBOOKS_LOCAL=on`으로 로컬 판매 서버를 띄울 때만).
+  - (로컬 판매 서버만) shop-api의 바인드 주소는 `AX_SHOP_API_HOST`로 바꾼다(기본 `127.0.0.1`, 다른 서버는 늘 `127.0.0.1`). 예: 같은 망의 다른 PC에서 부르려면 `AX_SHOP_API_HOST=0.0.0.0 bash scripts/run_all.sh`. 이때 8010이 외부에 열리니 방화벽을 확인한다.
   - DejaFix 읽기 전용 프록시(`dejafix-proxy`, 8030)는 `.env`에 `DEJAFIX_USERNAME`이 있을 때만 run_all이 같이 띄운다(없으면 `dejafix-proxy 안 띄움(DEJAFIX_USERNAME 없음)` 한 줄). 인프라 AI가 DejaFix 장애를 읽게 하려면 `.env`에 `INFRA_DEJAFIX_URL=http://127.0.0.1:8030`(예시)을 둔다.
   - 메모리(전용 메모리, Windows 로컬 측정): 전체 16개 서버 + 트래픽은 프로세스 36개·약 940MB, `data-demo`는 26개·약 680MB다.
 - Docker가 필요하다. 이벤트 버스(Redis)를 컨테이너 `ax-redis`로 띄운다 (`REDIS_URL`을 주면 그걸 쓴다).
@@ -85,12 +85,17 @@ bash scripts/run_all.sh stop
   쓰기·그 밖의 관리 API는 모두 403이다. 에이전트 토큰 명부와 따로 두어 다른 서버(총괄 등)로는 통하지 않는다.
   켤 때마다 바뀌는 에이전트 토큰과 달리 고정 값이라 정적 빌드에 넣어도 재시작에 깨지지 않는다.
 - 캣북스 데이터(`.data/shop.db`)·공통 로그(`.data/common_log.db`)·인사(`.data/hr.db`)는 파일이라 다시 켜도 남는다.
-- `SHOP_TRAFFIC=on`이면 `scripts/shop_traffic.py`가 3초마다 캣북스 고객 주문·결제를 넣는다. 결제 성공·실패는 쇼핑몰이 정한다.
+- **판매 서버는 AXcellent 밖에 있다.** 캣북스 판매 서버(shop-api)·쇼핑몰 화면(shop-web)·가상 주문·장애 스크립트는 캣북스 레포
+  [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)(`backend/shop-api`, `frontend/shop-web`)에 있고 따로 배포한다.
+  AXcellent는 판매 서버를 띄우지 않고 주소(`AX_SHOP_API_URL`, 또는 시스템 관리 > 회사 연결)·연결 키·웹훅으로만 붙는다.
+  `run_all.sh`는 `shop-api는 외부 판매 서버라 띄우지 않음(…)` 한 줄을 찍고 건너뛰며, 8010은 끄지도 않는다.
+- 로컬 개발 편의(기본 꺼짐): `CATBOOKS_LOCAL=on`이고 이 레포 옆에 캣북스 레포를 클론해 두면(`../catbooks-demo`, 다른 곳이면
+  `CATBOOKS_DEMO_DIR`) `run_all.sh`가 그 레포의 venv(없으면 `uv sync` 한 번)로 판매 서버(8010)와 가상 주문을 띄운다. 서버에서는 켜지 않는다.
+- `SHOP_TRAFFIC=on`이면(로컬로 띄운 때만) 캣북스 레포의 `backend/scripts/shop_traffic.py`가 3초마다 캣북스 고객 주문·결제를 넣는다. 결제 성공·실패는 쇼핑몰이 정한다.
   결제가 실패한 고객 일부(30%)는 쇼핑몰 문의 창구로 그 주문에 대해 문의를 남긴다 → 고객지원 AI가 받아 답변 초안을 쓴다.
-- 장애 넣기·빼기는 운영자 명령이다: `bash scripts/shop_fault.sh failure|latency|clear|status`. 테스트 기록을 지우려면 `bash scripts/run_all.sh reset`.
-- 캣북스 쇼핑몰 화면(고객이 보는 곳)은 ax-frontend의 shop-web이다. 같은 shop-api(8010)에 붙여 띄우면 장애 때 결제 화면에
-  "결제 서버에 문제가 있어 결제하지 못했습니다"가 뜬다: `cd ax-frontend && npm run dev:shop` (3000, CORS 허용됨).
-  마케팅 AI가 게시한 공지 배너는 shop-web에 아직 그리는 곳이 없다(ax-frontend 쪽 작업).
+- 장애 넣기·빼기는 운영자 명령이다: `bash scripts/shop_fault.sh failure|latency|clear|status` (캣북스 레포 스크립트를 부르는 래퍼, 관리자 토큰은 `.data/web.env`에서). 테스트 기록을 지우려면 `bash scripts/run_all.sh reset`.
+- 캣북스 쇼핑몰 화면(고객이 보는 곳)은 캣북스 레포의 `frontend/shop-web`이다. 같은 shop-api(8010)에 붙여 띄우면 장애 때 결제 화면에
+  "결제 서버에 문제가 있어 결제하지 못했습니다"가 뜬다(띄우는 법은 캣북스 레포 README).
 - 장애 대응 흐름: AI 대화방의 "캣북스에 장애 넣기" → 캣북스 결제가 실제로 실패 → 쇼핑몰 감시가 `shop.degraded`
   (20초 지속, `SHOP_DEGRADED_SUSTAIN_S`) → Redis → 총괄이 사건을 열고 7개 부서를 실제로 부른다.
 - **목 스위치는 테스트 전용**: `AGENT_TEMPLATE_MOCK=1`·`<서비스>_MOCK=1`(예: `DATA_MOCK`, `ORCHESTRATOR_MOCK`, `DASHBOARD_MOCK`)과 테스트용 가짜 부서(`services/orchestrator/.../mock/`)는 CI 단위 테스트가 쓴다. 로컬 실행·데모에는 쓰지 않는다. `run_all.sh`는 `.env`에 남아 있어도 끄고, `run_all.sh mock`은 지웠다.

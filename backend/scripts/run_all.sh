@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 로컬에서 백엔드 전체(공통 5개 + 서비스 11개 + 총괄)를 실제 모드로 띄운다. 목 모드는 없다(*_MOCK은 테스트 전용).
-#   bash backend/scripts/run_all.sh          # 실제 LLM·실제 토큰·Redis·파일 DB (캣북스 가상 주문은 SHOP_TRAFFIC=on일 때만, 배송 표시는 늘)
+#   bash backend/scripts/run_all.sh          # 실제 LLM·실제 토큰·Redis·파일 DB (판매 서버는 외부. CATBOOKS_LOCAL=on이면 옆 catbooks-demo에서 로컬로)
 #                                            # 이미 떠 있으면 켜지 않는다 ("이미 실행 중 (pid …), 먼저 stop")
 #   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기 (자식까지, 끝에 "남은 프로세스 0개" 확인)
 #   bash backend/scripts/run_all.sh reset    # 끄고 테스트로 쌓인 기록(.data·이벤트 버스)을 지운다
@@ -47,13 +47,34 @@ orchestrator 8000 ax_orchestrator.main:app
 "
 # 접어 둔 서비스(띄우지 않고 켠 서비스에서도 뺀다). 되살리려면 위 APPS에 줄을 되돌리고 여기서 뺀다
 FOLDED="handover"
-PORTS=$(echo "$APPS" | awk 'NF {print $2}' | tr '\n' ',' | sed 's/,$//')
+
+# >>> 캣북스 판매 서버 (로컬 개발 전용, tests/test_run_all_procs.py가 이 부분만 실행한다)
+# 판매 서버(shop-api)·가상 주문은 캣북스 레포(Catbooks-demo/catbooks-demo)에 있고 따로 배포한다.
+# AXcellent는 판매 서버를 띄우지 않고 주소(AX_SHOP_API_URL 또는 회사 연결)·연결 키·웹훅으로만 붙는다.
+# 로컬 개발 편의로만: CATBOOKS_LOCAL=on 이고 옆 클론(CATBOOKS_DEMO_DIR, 기본 이 레포 옆 catbooks-demo)에
+# backend/shop-api가 있으면 그 레포에서 판매 서버(8010)와 가상 주문을 띄운다. 기본은 꺼짐
+CATBOOKS_DEMO_DIR="${CATBOOKS_DEMO_DIR:-$PWD/../../catbooks-demo}"
+CB_BACKEND="$CATBOOKS_DEMO_DIR/backend"
+if [ -z "${CATBOOKS_LOCAL+x}" ] && [ -f .env ]; then
+  CATBOOKS_LOCAL=$(tr -d '\r' < .env | sed -n 's/^CATBOOKS_LOCAL=//p' | tail -n 1 | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
+fi
+CB_LOCAL=0
+if [ "${CATBOOKS_LOCAL:-off}" = "on" ] && [ -d "$CB_BACKEND/shop-api" ]; then
+  CB_LOCAL=1
+fi
+# <<< 캣북스 판매 서버
+
+# 이 스크립트가 맡는 서버 (판매 서버는 로컬 개발로 띄울 때만. 아니면 8010을 쥔 다른 판매 서버를 끄지 않는다)
+OWN_APPS="$APPS"
+[ "$CB_LOCAL" = 1 ] || OWN_APPS=$(echo "$APPS" | awk 'NF && $1 != "shop-api"')
+PORTS=$(echo "$OWN_APPS" | awk 'NF {print $2}' | tr '\n' ',' | sed 's/,$//')
 # 이 스크립트가 띄우는 프로세스를 명령줄로 알아보는 표식 (scripts/procs.py: 이미 떠 있는지·끈 뒤 남았는지)
 MARKERS=()
 while read -r _ _ module; do
   [ -n "${module:-}" ] && MARKERS+=("uvicorn $module")
-done <<< "$APPS"
-MARKERS+=("data_agent.trending_collect" "data_agent.youtube_collect" "data_agent.sales_collect" "shop_traffic.py")
+done <<< "$OWN_APPS"
+MARKERS+=("data_agent.trending_collect" "data_agent.youtube_collect" "data_agent.sales_collect")
+[ "$CB_LOCAL" = 1 ] && MARKERS+=("shop_traffic.py")
 # 가상 주문(shop_traffic.py)도 자기 실제 pid를 같은 모양으로 적는다 (.pid의 bash 번호만으로는 못 끌 때가 있어서)
 TRAFFIC_PID_FILE="$DATA/shop_traffic.pid.json"
 COLLECTOR_LOCKS=("$DATA/youtube_collect.lock" "$DATA/trending_collect.lock" "$DATA/sales_collect.lock" "$TRAFFIC_PID_FILE")
@@ -169,6 +190,13 @@ if [ "$CMD" = "mock" ]; then
   echo "목 모드는 지웠습니다. 로컬도 실제 모드 하나로 돕니다 (*_MOCK 스위치는 CI 단위 테스트 전용)." >&2
   exit 2
 fi
+
+# >>> 판매 서버 건너뛰기 (tests/test_run_all_procs.py가 이 부분만 실행한다)
+if [ "$CB_LOCAL" != 1 ] && echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
+  RUN_APPS=$(echo "$RUN_APPS" | awk 'NF && $1 != "shop-api"')
+  echo "shop-api는 외부 판매 서버라 띄우지 않음(주소는 AX_SHOP_API_URL 또는 회사 연결, 로컬 개발로 옆 catbooks-demo에서 띄우려면 CATBOOKS_LOCAL=on)"
+fi
+# <<< 판매 서버 건너뛰기
 
 # 켜기: 같은 서버·수집기가 이미 떠 있으면 켜지 않는다 (옛 코드가 남아 새 코드를 막지 않게)
 if ! "$PY" scripts/procs.py running "${MARKERS[@]}"; then
@@ -412,6 +440,14 @@ token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
 RUN_COUNT=$(echo "$RUN_APPS" | awk 'NF' | wc -l | tr -d ' ')
 echo "띄운 서버 ${RUN_COUNT}개: $(echo "$RUN_APPS" | awk 'NF {print $1}' | tr '\n' ' ' | sed 's/ $//'), 안 띄움: ${SKIPPED:-없음}"
 
+# 캣북스 레포 venv의 python (없으면 빈 값)
+cb_python() {
+  local p
+  for p in "$CB_BACKEND/.venv/Scripts/python.exe" "$CB_BACKEND/.venv/bin/python"; do
+    [ -x "$p" ] && { echo "$p"; return 0; }
+  done
+  echo ""
+}
 started=0
 while read -r name port module; do
   [ -n "$name" ] || continue
@@ -431,14 +467,25 @@ while read -r name port module; do
   echo "$START_LINE" > "$LOGS/$name.log"
   # shop-api만 바인드 주소를 바꿀 수 있다(AX_SHOP_API_HOST, 기본 127.0.0.1). 나머지는 127.0.0.1
   host=127.0.0.1
-  [ "$name" = "shop-api" ] && host="${AX_SHOP_API_HOST:-127.0.0.1}"
-  "$PY" -m uvicorn "$module" --host "$host" --port "$port" >> "$LOGS/$name.log" 2>&1 &
+  py="$PY"
+  if [ "$name" = "shop-api" ]; then
+    # 로컬 개발 전용(CATBOOKS_LOCAL=on): 캣북스 레포의 venv로 띄운다. venv가 없으면 한 번 만든다
+    host="${AX_SHOP_API_HOST:-127.0.0.1}"
+    py=$(cb_python)
+    [ -n "$py" ] || (cd "$CB_BACKEND" && uv sync -q) >> "$LOGS/$name.log" 2>&1
+    py=$(cb_python)
+    if [ -z "$py" ]; then
+      echo "캣북스 레포 venv를 만들지 못해 판매 서버를 띄우지 않습니다: $CB_BACKEND (.logs/$name.log)" >&2
+      continue
+    fi
+  fi
+  "$py" -m uvicorn "$module" --host "$host" --port "$port" >> "$LOGS/$name.log" 2>&1 &
   winpid_of $! > "$LOGS/$name.pid"
   started=$((started + 1))
 done <<< "$RUN_APPS"
 
 # >>> 주문 트래픽 스위치 (tests/test_run_all_procs.py가 이 부분만 실행한다)
-# 캣북스 가상 주문(scripts/shop_traffic.py)은 .env의 SHOP_TRAFFIC=on일 때만 넣는다(기본 꺼짐).
+# 캣북스 가상 주문(캣북스 레포 backend/scripts/shop_traffic.py)은 .env의 SHOP_TRAFFIC=on일 때만 넣는다(기본 꺼짐).
 # 꺼도 같은 스크립트가 발송·도착 표시와 재고 보충은 계속 한다(SHOP_TRAFFIC_ORDERS=0). 발송·도착이
 # 안 적히면 사람이 사이트에서 한 주문도 재무 판매자 정산에서 보류된다. 결제 장애 감지는 결제
 # 표본(60초에 최소 5건)이 있어야 해서 장애 시연 때는 on으로 켠다
@@ -452,7 +499,8 @@ fi
 # <<< 주문 트래픽 스위치
 
 # 캣북스 주문 트래픽·배송 표시 (shop-api를 띄웠을 때만. 가상 주문은 위 스위치가 정한다)
-if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
+# 스크립트는 캣북스 레포의 backend/scripts/shop_traffic.py (CATBOOKS_LOCAL=on일 때만 여기까지 온다)
+if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}' && [ -n "$(cb_python)" ]; then
   # 재고가 0이 되면 주문이 조용히 멈춰 장애가 안 잡히는 것처럼 보인다. 자동 보충을 기본으로 켠다
   # (끄려면 SHOP_TRAFFIC_REFILL=0). 보충에는 위에서 만든 admin 토큰을 쓴다
   keep_log shop-traffic
@@ -460,7 +508,7 @@ if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
   rm -f "$TRAFFIC_PID_FILE"  # 지난번 번호가 남지 않게 (새로 뜬 shop_traffic.py가 다시 적는다)
   SHOP_TRAFFIC_PID_FILE="$TRAFFIC_PID_FILE" \
   SHOP_API_URL=http://127.0.0.1:8010 SHOP_TRAFFIC_REFILL="${SHOP_TRAFFIC_REFILL:-1}" SHOP_TRAFFIC_ORDERS="$SHOP_TRAFFIC_ORDERS" \
-    "$PY" scripts/shop_traffic.py >> "$LOGS/shop-traffic.log" 2>&1 &
+    "$(cb_python)" "$CB_BACKEND/scripts/shop_traffic.py" >> "$LOGS/shop-traffic.log" 2>&1 &
   winpid_of $! > "$LOGS/shop-traffic.pid"
 fi
 

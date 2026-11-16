@@ -102,18 +102,18 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
    bash scripts/run_all.sh        # 끄기: bash scripts/run_all.sh stop
    ```
    - 포트 8000~8122를 써요. 시작할 때 이 포트를 쥔 프로세스를 끄기 때문에, 8000에 DejaFix를 띄워 뒀다면 DejaFix를 다른 포트(예: 18000)로 옮겨 두세요
-   - 쇼핑몰 고객 주문 트래픽(`scripts/shop_traffic.py`, 3초마다 1건)도 같이 켜져요
+   - 캣북스 판매 서버(shop-api)는 AXcellent가 띄우지 않아요. 캣북스 레포 [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)에 있고 따로 배포해요. AXcellent는 주소(`AX_SHOP_API_URL` 또는 회사 연결)·연결 키·웹훅으로만 붙어요
+   - 로컬에서 같이 띄우려면(개발 편의, 기본 꺼짐) 이 레포 옆에 캣북스 레포를 클론하고(`../catbooks-demo`, 다른 곳이면 `CATBOOKS_DEMO_DIR`) `CATBOOKS_LOCAL=on`을 주세요. 판매 서버(8010)와 고객 주문 트래픽(`SHOP_TRAFFIC=on`일 때 3초마다 1건)이 같이 켜져요
 2. 화면을 켜요. `backend/.data/web.env`의 토큰을 읽어 개발 서버(3090)를 켜요. 3090에 다른 개발 서버가 떠 있으면 먼저 꺼요
    ```bash
    bash scripts/run_web.sh        # backend/ 에서
    ```
 3. 장애 사건을 만들어요. 쇼핑몰에 결제 장애를 주입하면 주문 결제가 5xx로 실패하고, 쇼핑몰 감시가 20초 넘게 이어진 실패를 재서 `shop.degraded`를 내요. 총괄이 그걸 받아 사건을 열고 데이터 AI가 영향 분석·복구 확인·처리 시간 요약을 해요
    ```bash
-   # backend/ 에서. 주입은 admin 토큰만 돼요 (web.env의 VITE_SHOP_ADMIN_TOKEN, 값은 출력하지 않음)
-   export SHOP_FAULT_TOKEN="$(sed -n 's/^VITE_SHOP_ADMIN_TOKEN=//p' .data/web.env)"
-   .venv/Scripts/python.exe infra/fault-injection/payment_fault.py inject   # macOS·Linux: .venv/bin/python
+   # backend/ 에서. 주입은 admin 토큰만 돼요 (web.env의 VITE_SHOP_ADMIN_TOKEN을 읽어 캣북스 레포 스크립트에 넘김, 값은 출력하지 않음)
+   bash scripts/shop_fault.sh failure
    # 30초쯤 기다린 뒤 해제하면 shop.recovered로 복구 확인이 이어져요
-   .venv/Scripts/python.exe infra/fault-injection/payment_fault.py clear
+   bash scripts/shop_fault.sh clear
    ```
    - 감지 시간은 `SHOP_DEGRADED_SUSTAIN_S`(run_all.sh 기본 20초)와 `SHOP_MONITOR_INTERVAL_S`(5초)로 정해져요
 4. http://localhost:3090/data 를 열어요. 왼쪽 사이드바 "데이터분석 AI > 데이터 분석"의 하위 탭 3개: **장애 영향 분석**(`/data`, 장애 사건 데이터 + 아래 리포트), **운영 지표**(`/data/ops`, 평상시 지표 · 복구 속도 · AI 단독 처리율), **트렌드&콘텐츠**(`/data/trend`)예요. 장애 영향 분석에 사건이, 운영 지표에 복구 시간·자동 처리율이 나와요. 옛 주소(`/data#daily`·`#report`·`#trend`·`#trend/<단계>`)는 새 주소로 옮겨 줘요. 사건을 하나 더 만들면 1차·2차 복구 시간이 비교돼요
@@ -165,7 +165,7 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
 1. **화면이 부르는 주소 표**: 화면 코드(`src/pages/<화면>.tsx`, `src/lib/<서비스>.ts`, `src/components/<서비스>/`)에서 `fetch`하는 주소를 전부 찾아 표로 적고, 실제 모드에서 각 주소가 응답하는지 확인해요
    - 예: 위 "화면이 부르는 주소" 표 (총괄 3개, 데이터 AI 2개)
 2. **진짜 모드에서 데이터가 생기는 방법**: 화면에 값이 채워지려면 백엔드에서 무슨 일이 있어야 하는지 찾아 적어요. 시드나 녹화본이 아니라 실제 흐름으로 만들어요
-   - 예: 결제 장애 주입(`backend/infra/fault-injection/payment_fault.py`) → 쇼핑몰 감시 `shop.degraded` → 총괄 사건 → 데이터 AI 단계
+   - 예: 결제 장애 주입(`backend/scripts/shop_fault.sh failure`) → 쇼핑몰 감시 `shop.degraded` → 총괄 사건 → 데이터 AI 단계
 3. **회사 이름·고유 용어 제거**: 특정 회사 이름(예: 캣북스)을 화면에 박지 않아요. 연결된 회사 이름(`src/demo/company.ts`의 `useCompany()`)을 쓰고, 연결 전이면 이름 없이 써요. 문서 번호(SCN-L, 시나리오 A 등)도 화면 문구에서 빼요
    - 예: "데이터분석팀입니다" 앞에 연결된 회사 이름을 붙이고, 없으면 이름 없이
 4. **빈 상태·서버 꺼짐 안내**: 값이 없을 때 예시 숫자를 만들지 않고 무엇을 하면 채워지는지 안내해요. "예시 데이터"처럼 녹화본을 전제한 표시는 빼요. 서버가 꺼지면 어느 서버가 꺼졌는지 이름과 포트로 보여 줘요

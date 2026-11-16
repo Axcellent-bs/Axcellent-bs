@@ -229,13 +229,14 @@ def _bash() -> str:
     return found
 
 
-def _run(snippet: str, env: dict[str, str]) -> str:
+def _run(snippet: str, env: dict[str, str], cwd: Path | None = None) -> str:
     result = subprocess.run(
         [_bash(), "-c", snippet],
         capture_output=True,
         text=True,
         encoding="utf-8",
         env={"PATH": os.environ.get("PATH", ""), **env},
+        cwd=cwd,
         timeout=30,
         check=True,
     )
@@ -326,7 +327,7 @@ def test_traffic_script_still_starts_with_the_switch_off() -> None:
     """꺼도 스크립트는 띄우고(배송 표시·재고 보충), 스위치 값만 넘긴다."""
     text = RUN_ALL.read_text(encoding="utf-8")
     launch = text[text.index(TRAFFIC_BLOCK[1]) :]
-    launch = launch[: launch.index("scripts/shop_traffic.py")]
+    launch = launch[: launch.index('"$CB_BACKEND/scripts/shop_traffic.py"')]
     assert 'SHOP_TRAFFIC_ORDERS="$SHOP_TRAFFIC_ORDERS"' in launch
     assert "SHOP_TRAFFIC_ON" not in text
 
@@ -373,18 +374,105 @@ def test_run_all_passes_the_traffic_pid_file_and_stop_reads_it() -> None:
     locks = text[text.index("COLLECTOR_LOCKS=(") :].splitlines()[0]
     assert '"$TRAFFIC_PID_FILE"' in locks  # stop_all이 procs.py --locks로 넘긴다
     launch = text[text.index('rm -f "$TRAFFIC_PID_FILE"') :]
-    launch = launch[: launch.index("scripts/shop_traffic.py")]
+    launch = launch[: launch.index('"$CB_BACKEND/scripts/shop_traffic.py"')]
     assert 'SHOP_TRAFFIC_PID_FILE="$TRAFFIC_PID_FILE"' in launch
+    # 가상 주문 스크립트(write_pid_file)는 캣북스 레포에 있고 그쪽 시험이 본다
 
 
-def test_shop_traffic_writes_its_real_pid(tmp_path: Path) -> None:
-    script = BACKEND / "scripts" / "shop_traffic.py"
-    spec = importlib.util.spec_from_file_location("shop_traffic", script)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    path = tmp_path / "shop_traffic.pid.json"
-    module.write_pid_file(str(path))
-    assert procs.lock_pids([path]) == [os.getpid()]
-    module.write_pid_file(None)  # 값이 없으면 아무것도 하지 않는다
-    module.write_pid_file(str(tmp_path / "no" / "dir" / "x.json"))  # 적지 못해도 멈추지 않는다
+# --- 캣북스 판매 서버: AXcellent는 띄우지 않는다. 로컬 개발로만 옆 클론에서 (CATBOOKS_LOCAL=on) ---
+
+CB_BLOCK = ("# >>> 캣북스 판매 서버", "# <<< 캣북스 판매 서버")
+SKIP_BLOCK = ("# >>> 판매 서버 건너뛰기", "# <<< 판매 서버 건너뛰기")
+SKIP_LINE = (
+    "shop-api는 외부 판매 서버라 띄우지 않음(주소는 AX_SHOP_API_URL 또는 회사 연결, "
+    "로컬 개발로 옆 catbooks-demo에서 띄우려면 CATBOOKS_LOCAL=on)"
+)
+APPS_TWO = "data 8106 svc_data.main:app\n" + SHOP_LINE
+
+
+def _clone(tmp_path: Path) -> Path:
+    clone = tmp_path / "catbooks-demo"
+    (clone / "backend" / "shop-api").mkdir(parents=True)
+    return clone
+
+
+def _decide(env: dict[str, str], cwd: Path) -> tuple[str, list[str]]:
+    """판매 서버 결정 + 건너뛰기를 돌려 (CB_LOCAL, 출력 줄들[마지막은 남은 RUN_APPS 이름])."""
+    block = _between(*CB_BLOCK) + "\n" + _between(*SKIP_BLOCK)
+    snippet = f'RUN_APPS="$(printf "{APPS_TWO}")"\n{block}\necho "cb=$CB_LOCAL"\n' + (
+        "echo \"$RUN_APPS\" | awk 'NF {print $1}' | tr '\\n' ' '"
+    )
+    lines = _run(snippet, env, cwd=cwd).splitlines()
+    cb = next(line for line in lines if line.startswith("cb="))
+    return cb, lines
+
+
+@pytest.mark.parametrize("value", [None, "", "off", "1"])
+def test_shop_api_is_skipped_by_default(tmp_path: Path, value: str | None) -> None:
+    """기본(꺼짐)이면 옆 클론이 있어도 판매 서버를 띄우지 않고 한 줄로 알린다."""
+    clone = _clone(tmp_path)
+    env = {"CATBOOKS_DEMO_DIR": str(clone)} | ({} if value is None else {"CATBOOKS_LOCAL": value})
+    cb, lines = _decide(env, cwd=tmp_path)  # tmp_path에는 .env가 없다
+    assert cb == "cb=0"
+    assert lines[0] == SKIP_LINE
+    assert lines[-1].split() == ["data"]
+
+
+def test_shop_api_is_skipped_when_on_but_no_clone(tmp_path: Path) -> None:
+    env = {"CATBOOKS_LOCAL": "on", "CATBOOKS_DEMO_DIR": str(tmp_path / "missing")}
+    cb, lines = _decide(env, cwd=tmp_path)
+    assert cb == "cb=0"
+    assert lines[0] == SKIP_LINE
+    assert lines[-1].split() == ["data"]
+
+
+def test_shop_api_runs_from_the_clone_when_catbooks_local_on(tmp_path: Path) -> None:
+    clone = _clone(tmp_path)
+    cb, lines = _decide({"CATBOOKS_LOCAL": "on", "CATBOOKS_DEMO_DIR": str(clone)}, cwd=tmp_path)
+    assert cb == "cb=1"
+    assert SKIP_LINE not in lines
+    assert lines[-1].split() == ["data", "shop-api"]
+
+
+def test_catbooks_local_is_read_from_backend_env_when_unset(tmp_path: Path) -> None:
+    """환경변수가 없으면 backend/.env의 CATBOOKS_LOCAL을 본다 (다른 줄은 읽지 않는다)."""
+    clone = _clone(tmp_path)
+    (tmp_path / ".env").write_text("OTHER=1\nCATBOOKS_LOCAL=on  # 로컬만\n", encoding="utf-8")
+    cb, _ = _decide({"CATBOOKS_DEMO_DIR": str(clone)}, cwd=tmp_path)
+    assert cb == "cb=1"
+
+
+def test_default_clone_dir_is_next_to_the_repo() -> None:
+    default = 'CATBOOKS_DEMO_DIR="${CATBOOKS_DEMO_DIR:-$PWD/../../catbooks-demo}"'
+    assert default in _between(*CB_BLOCK)
+
+
+def test_shop_api_launch_uses_the_clone_venv_and_traffic_script() -> None:
+    """판매 서버는 옆 클론의 venv(없으면 uv sync 한 번)로, 가상 주문은 그 레포 스크립트로 띄운다."""
+    text = RUN_ALL.read_text(encoding="utf-8")
+    launch = text[text.index('if [ "$name" = "shop-api" ]; then') :]
+    launch = launch[: launch.index("started=$((started + 1))")]
+    assert "py=$(cb_python)" in launch
+    assert '(cd "$CB_BACKEND" && uv sync -q)' in launch
+    assert '"$py" -m uvicorn "$module"' in launch
+    assert '"$(cb_python)" "$CB_BACKEND/scripts/shop_traffic.py"' in text
+    assert '"$PY" scripts/shop_traffic.py' not in text
+
+
+def test_stop_does_not_own_port_8010_unless_local(tmp_path: Path) -> None:
+    """기본이면 8010(외부 판매 서버)을 끄는 포트·표식에서 뺀다."""
+    head = _between('APPS="', "# 가상 주문(shop_traffic.py)도")
+    snippet = f'cd "{tmp_path.as_posix()}"\n{head}\necho "$PORTS"\nprintf "%s\\n" "${{MARKERS[@]}}"'
+    off = _run(snippet, {"CATBOOKS_LOCAL": "off"}).splitlines()
+    assert "8010" not in off[0].split(",") and "uvicorn ax_shop_api.main:app" not in off
+    assert "shop_traffic.py" not in off
+    clone = _clone(tmp_path)
+    on = _run(snippet, {"CATBOOKS_LOCAL": "on", "CATBOOKS_DEMO_DIR": str(clone)}).splitlines()
+    assert "8010" in on[0].split(",") and "uvicorn ax_shop_api.main:app" in on
+    assert "shop_traffic.py" in on
+
+
+def test_shop_api_source_is_not_in_this_repo() -> None:
+    # 판매 서버 소스는 캣북스 레포에 있다 (pull 뒤 남은 __pycache__는 상관없다)
+    assert not list((BACKEND / "shared" / "shop-api").rglob("*.py"))
+    assert not (BACKEND / "scripts" / "shop_traffic.py").exists()
