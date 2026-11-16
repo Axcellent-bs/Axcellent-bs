@@ -450,6 +450,7 @@ def options(cfg: CatalogSales | None, catalog_id: str, source: str | None) -> Se
         data_source=source,
         catalog_id=catalog_id,
         catalog_version=cfg.version,
+        item_noun=cfg.item_noun,
     )
 
 
@@ -684,12 +685,22 @@ def favorites_summary(out: SegmentFavoritesOutput, least: int | None = None) -> 
     if out.segment_suppressed:
         return with_source(f"{label} {who} 구매자가 {least}명 미만이라 숫자를 숨김.", out.basis)
     text = f"{label} {who} 구매자 {out.segment_buyers}명."
-    genre = next((i for i in out.internal if i.kind == "genre" and not i.suppressed), None)
-    if genre is not None and genre.lift is not None:
+    genres = [i for i in out.internal if i.kind == "genre" and not i.suppressed]
+    # 첫 문장 = 배수(전체 대비) 1위 장르, 둘째 문장 = 구매 비율 1위 장르 (같은 정렬 규칙: 큰 값 →
+    # 이름 → code)
+    by_lift = min(
+        (g for g in genres if g.lift is not None),
+        key=lambda g: (-(g.lift or 0), -(g.share or 0), g.label, g.code),
+        default=None,
+    )
+    by_share = genres[0] if genres else None  # internal은 구매 비율 큰 순
+    if by_lift is not None:
         text += (
-            f" 가장 많이 산 장르는 {genre.label} (구매자 중 {pct(genre.share)}, "
-            f"전체 대비 {genre.lift:.2f}배)."
+            f" 특히 많이 사는 장르는 {by_lift.label} (전체 대비 {by_lift.lift:.1f}배, "
+            f"구매자 중 {pct(by_lift.share)})."
         )
+    if by_share is not None:
+        text += f" 가장 많이 산 장르는 {by_share.label} (구매자 중 {pct(by_share.share)})."
     ok = [e for e in out.external if e.status == "ok"]
     if out.external:
         text += f" 바깥 출처 {len(out.external)}곳 중 {len(ok)}곳 확인."

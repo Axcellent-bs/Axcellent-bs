@@ -23,6 +23,7 @@ from ax_contracts.schemas.data import (
     CatalogSales,
     CoverageRow,
     ExternalFilter,
+    FavoriteItem,
     GenreExternal,
     MarketCoverageOutput,
     PopulationSource,
@@ -240,6 +241,31 @@ def test_favorites_internal_ranking() -> None:
     products = [(i.label, i.suppressed) for i in out.internal if i.kind == "product"]
     assert products == [("책 g1", False), ("책 g2", True)]  # 숨김은 뒤에, 숫자 없이
     assert "pseud_" not in json.dumps(out.model_dump(mode="json"), ensure_ascii=False)
+    # 요약: 첫 문장 = 배수 1위 장르, 둘째 문장 = 구매 비율 1위 장르
+    lifted = f"특히 많이 사는 장르는 장르1 (전체 대비 {genres[0].lift:.1f}배, 구매자 중 80.0%)."
+    assert lifted in out.summary
+    assert out.summary.endswith("가장 많이 산 장르는 장르1 (구매자 중 80.0%).")
+    assert out.summary.index("특히") < out.summary.index("가장 많이 산")
+
+
+def test_favorites_summary_lift_first_then_share() -> None:
+    out = SegmentFavoritesOutput(
+        filters={"age_band": "20s"}, filter_label="20대", period="90d", segment_buyers=40,
+        internal=[
+            FavoriteItem(kind="genre", code="a", label="가", share=0.5, lift=1.1, buyers=20),
+            FavoriteItem(kind="genre", code="b", label="나", share=0.2, lift=2.0, buyers=8),
+            FavoriteItem(kind="category", code="c", label="다", share=0.9, lift=3.0, buyers=36),
+        ],
+    )  # fmt: skip
+    text = seg.favorites_summary(out, 5)
+    assert "특히 많이 사는 장르는 나 (전체 대비 2.0배, 구매자 중 20.0%)." in text
+    assert text.endswith("가장 많이 산 장르는 가 (구매자 중 50.0%).")  # 분류(다)는 장르가 아님
+
+
+def test_options_item_noun() -> None:
+    assert seg.options(CFG, "test", None).item_noun == "상품"
+    game = CFG.model_copy(update={"item_noun": "게임"})
+    assert seg.options(game, "test", None).item_noun == "게임"
 
 
 def test_favorites_small_segment_and_bad_filters() -> None:

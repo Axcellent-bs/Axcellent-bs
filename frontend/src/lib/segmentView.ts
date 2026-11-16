@@ -1,10 +1,11 @@
 // 고객·시장 분석 탭(components/data/SegmentAnalysis.tsx)이 그리는 값. 서버가 준 숫자를 글자로만 바꾼다(새 지표를 계산하지 않는다).
 // 순수 함수라 node --test로 시험한다 (segmentView.test.ts). 코드값(속성 key·값 code·장르 code·source_id·proposal_id)은 글자로 내보내지 않는다.
 // 선택지(속성·값·장르·분류·자주 묻는 질문·기간)는 segment_options 응답에서만 읽는다 (코드에 고정하지 않음).
+// 품목 이름(책·게임 등)은 segment_options의 item_noun, 바깥 출처 이름은 응답 label에서만 온다 (회사 낱말을 박지 않는다).
 import type {
-  CoverageRow, EventProposalItem, EventProposalOutput, EventProposalSendOutput, ExternalResult,
+  CoverageRow, EventProposalItem, EventProposalOutput, EventProposalSendOutput, ExternalResult, FavoriteItem,
   MarketCoverageOutput, SalesBasis, SalesQuality, SegmentFavoritesOutput, SegmentOptionsOutput,
-  SegmentPeriod, SegmentProfileOutput,
+  SegmentPeriod, SegmentProfileOutput, SegmentQuestionOutput,
 } from "./data.ts";
 
 export const DATA_NOTE = "고객 속성은 시연용 가상 데이터, 바깥 시장 숫자는 공공 데이터";
@@ -21,10 +22,16 @@ export function pct(v: number): string {
   return `${p}%`;
 }
 
-/** 배수 "1.5배" (소수 첫째 자리) */
+/** 배수 "1.5배" · "1.0배" (늘 소수 첫째 자리까지) */
 export function times(v: number): string {
-  return `${Math.round(v * 10) / 10}배`;
+  return `${(Math.round(v * 10) / 10).toFixed(1)}배`;
 }
+
+/** 이 배수 이상이면 "특히 많이 산다"로 초록 강조 (1.0~1.2는 차이가 작아 강조하지 않음) */
+export const HIGH_LIFT = 1.2;
+export const isHigh = (lift: number | null | undefined) => lift != null && lift >= HIGH_LIFT;
+
+const DEFAULT_NOUN = "상품";
 
 const PERIOD_LABEL: Record<SegmentPeriod, string> = { "30d": "최근 30일", "90d": "최근 90일", "365d": "최근 1년" };
 export const periodLabel = (p: SegmentPeriod) => PERIOD_LABEL[p] ?? "기간 모름";
@@ -82,6 +89,7 @@ export interface OptionsView {
   targets: TargetChoice[];
   periods: Choice[];
   coverage: Choice[]; // value = 속성 key를 ","로 이은 것
+  itemNoun: string; // 화면 품목 이름 (예: 책·게임)
   badge: string | null;
 }
 
@@ -109,8 +117,27 @@ export function optionsView(o: SegmentOptionsOutput): OptionsView {
     coverage: o.population_keys
       .filter((ks) => ks.length > 0 && ks.every((k) => labelOf.has(k)))
       .map((ks) => ({ value: ks.join(","), label: ks.map((k) => labelOf.get(k)!).join(" × ") })),
+    itemNoun: o.item_noun?.trim() || DEFAULT_NOUN,
     badge: fakeBadge(o),
   };
+}
+
+// ---- 0) 글로 묻기 (segment_question)
+
+export type QuestionView =
+  | { kind: "ok"; text: string; filters: Record<string, string>; period: SegmentPeriod | null }
+  | { kind: "unparsed"; text: string; reason: string | null };
+
+/** 서버가 고른 code를 화면 선택지와 다시 맞춘다 (선택지에 없는 속성·값은 버림). 하나도 안 남으면 unparsed */
+export function questionView(out: SegmentQuestionOutput, options: Pick<OptionsView, "attributes" | "periods">): QuestionView {
+  const filters = Object.fromEntries(Object.entries(out.status === "ok" ? out.filters : {})
+    .filter(([k, v]) => options.attributes.some((a) => a.key === k && a.values.some((x) => x.value === v))));
+  if (Object.keys(filters).length === 0) {
+    return { kind: "unparsed", text: "어느 집단인지 골라 주세요", reason: out.reason && HANGUL.test(out.reason) ? out.reason : null };
+  }
+  const period = out.period && options.periods.some((p) => p.value === out.period) ? out.period : null;
+  const label = out.understood_label && HANGUL.test(out.understood_label) ? out.understood_label : filterLabel(filters, options.attributes);
+  return { kind: "ok", text: `이렇게 읽었어요: ${label}`, filters, period };
 }
 
 /** 칩·드롭다운 값으로 고른 조건 → 화면 이름 ("20대 · 여성"). 모르는 값은 빼고 code를 보이지 않는다 */
@@ -123,16 +150,20 @@ export function filterLabel(filters: Record<string, string>, attributes: Attribu
 
 // ---- 1) 물어보기 (segment_favorites)
 
-export interface FavoriteRow { label: string; detail: string; suppressed: boolean }
+export interface FavoriteRow { label: string; detail: string; suppressed: boolean; high: boolean }
 export interface ExternalView { title: string; meta: string; state: "ok" | "note"; note: string | null; rows: { label: string; detail: string }[] }
+export interface FavoriteList { title: string; rows: FavoriteRow[] }
 export interface FavoritesOkView {
   kind: "ok";
   header: string;
-  rows: FavoriteRow[];
-  external: ExternalView[];
+  genres: FavoriteList; // 특히 많이 사는 장르 (배수 높은 순 5개)
+  products: FavoriteList; // 많이 산 {item_noun} (서버 순서 = 구매 비율 순 5개)
+  external: ExternalView[]; // 결과를 받은 바깥 출처
+  externalNote: string | null; // 실패한 출처 (같은 이유는 한 번) · 확인한 출처 n/m
   summary: string;
   badge: string | null;
 }
+export const TOP_ROWS = 5;
 export type FavoritesView = GateView | FavoritesOkView;
 
 const EXTERNAL_NOTE: Record<Exclude<ExternalResult["status"], "ok">, string> = {
@@ -155,26 +186,73 @@ export function externalView(e: ExternalResult): ExternalView {
   return { title, meta, state: rows.length ? "ok" : "note", note: rows.length ? null : "결과가 없어요", rows };
 }
 
-export function favoritesView(out: SegmentFavoritesOutput): FavoritesView {
+function favoriteRow(f: FavoriteItem): FavoriteRow {
+  if (f.suppressed) return { label: f.label, detail: SUPPRESSED, suppressed: true, high: false };
+  const parts = [
+    f.share != null ? `구매자의 ${pct(f.share)}` : null,
+    f.lift != null ? `전체 대비 ${times(f.lift)}` : null,
+    f.buyers != null ? people(f.buyers) : null,
+  ].filter(Boolean);
+  return { label: f.label, detail: parts.join(" · "), suppressed: false, high: isHigh(f.lift) };
+}
+
+/** 배수 큰 순 (같으면 구매 비율 큰 순, 서버 순서). 표본 부족은 뒤에 */
+function byLift(items: FavoriteItem[]): FavoriteItem[] {
+  return items.map((f, i) => ({ f, i })).sort((a, b) =>
+    Number(a.f.suppressed) - Number(b.f.suppressed)
+    || (b.f.lift ?? -1) - (a.f.lift ?? -1)
+    || (b.f.share ?? -1) - (a.f.share ?? -1)
+    || a.i - b.i).map(({ f }) => f);
+}
+
+/** 바깥 출처: 결과를 받은 것은 그대로, 실패는 (출처·상태·이유)가 같으면 한 번만 + "확인한 출처 n/m" (출처 = source_id) */
+export function externalSummary(results: ExternalResult[]): { shown: ExternalView[]; note: string | null } {
+  const shown = results.filter((e) => e.status === "ok").map(externalView);
+  const failed = new Map<string, string>();
+  for (const e of results) {
+    if (e.status === "ok") continue;
+    const key = `${e.source_id}|${e.status}|${e.reason}`;
+    if (failed.has(key)) continue;
+    const v = externalView(e);
+    failed.set(key, `${v.title} ${v.note}`);
+  }
+  if (failed.size === 0) return { shown, note: null };
+  const sources = new Set(results.map((e) => e.source_id));
+  const okSources = new Set(results.filter((e) => e.status === "ok").map((e) => e.source_id));
+  return { shown, note: [...failed.values(), `확인한 출처 ${okSources.size}/${sources.size}`].join(" · ") };
+}
+
+export function favoritesView(out: SegmentFavoritesOutput, itemNoun: string = DEFAULT_NOUN): FavoritesView {
   if (out.status === "insufficient") return gate(out);
   const who = out.filter_label || "고른 집단";
   const count = out.segment_suppressed ? SUPPRESSED : out.segment_buyers != null ? `구매자 ${people(out.segment_buyers)}` : "구매자 수 모름";
+  // 분류(category: 큰 묶음)는 이 칸에서 뺀다. 장르는 배수 순, 품목은 서버 순서(구매 비율 순)
+  const genres = out.segment_suppressed ? [] : byLift(out.internal.filter((f) => f.kind === "genre")).slice(0, TOP_ROWS);
+  const products = out.segment_suppressed ? [] : out.internal.filter((f) => f.kind === "product").slice(0, TOP_ROWS);
+  const ext = externalSummary(out.external);
   return {
     kind: "ok",
     header: `우리 쇼핑몰 · ${who} ${count} (${periodLabel(out.period)})`,
-    rows: out.segment_suppressed ? [] : out.internal.map((f) => {
-      if (f.suppressed) return { label: f.label, detail: SUPPRESSED, suppressed: true };
-      const parts = [
-        f.share != null ? `구매자의 ${pct(f.share)}` : null,
-        f.lift != null ? `전체 대비 ${times(f.lift)}` : null,
-        f.buyers != null ? people(f.buyers) : null,
-      ].filter(Boolean);
-      return { label: f.label, detail: parts.join(" · "), suppressed: false };
-    }),
-    external: out.external.map(externalView),
-    summary: out.summary,
+    genres: { title: "특히 많이 사는 장르", rows: genres.map(favoriteRow) },
+    products: { title: `많이 산 ${itemNoun}`, rows: products.map(favoriteRow) },
+    external: ext.shown,
+    externalNote: ext.note,
+    summary: favoritesSummary(out),
     badge: fakeBadge(out),
   };
+}
+
+/** 첫 문장 = 배수 1위 장르, 둘째 문장 = 구매 비율 1위 장르 (서버 숫자를 글자로만) */
+export function favoritesSummary(out: SegmentFavoritesOutput): string {
+  if (out.segment_suppressed) return "";
+  const genres = out.internal.filter((f) => f.kind === "genre" && !f.suppressed);
+  const lifted = byLift(genres.filter((f) => f.lift != null))[0];
+  const bought = genres.filter((f) => f.share != null).map((f, i) => ({ f, i }))
+    .sort((a, b) => (b.f.share ?? 0) - (a.f.share ?? 0) || a.i - b.i)[0]?.f;
+  const parts: string[] = [];
+  if (lifted) parts.push(`특히 많이 사는 장르: ${lifted.label} (전체 대비 ${times(lifted.lift!)}).`);
+  if (bought) parts.push(`가장 많이 산 장르: ${bought.label} (구매자의 ${pct(bought.share!)}).`);
+  return parts.join(" ");
 }
 
 // ---- 2) ○○은 누가 사나 (segment_profile)
@@ -209,7 +287,7 @@ export function profileView(out: SegmentProfileOutput): ProfileView {
           targetPct: v.target_share != null ? Math.max(0, Math.min(100, Math.round(v.target_share * 1000) / 10)) : 0,
           overall: v.overall_share != null ? pct(v.overall_share) : "-",
           lift: v.lift != null ? times(v.lift) : "-",
-          high: v.lift != null && v.lift > 1,
+          high: isHigh(v.lift),
           suppressed: false,
         }),
       unknown: a.unknown_buyers ? `${a.label} 모름 ${people(a.unknown_buyers)}` : null,
@@ -223,15 +301,54 @@ export function profileView(out: SegmentProfileOutput): ProfileView {
 
 export interface CoverageRowView { label: string; buyers: string; population: string; coverage: string; source: string; note: string | null }
 export interface CoverageOkView { kind: "ok"; rows: CoverageRowView[]; summary: string; badge: string | null }
-export type CoverageView = GateView | CoverageOkView;
+/** 모든 줄에 인구가 없으면: 안내 한 줄 + 첫 속성(줄) × 둘째 속성(칸) 구매자 수 표 하나 */
+export interface BuyersTableView {
+  kind: "buyers";
+  note: string;
+  corner: string; // 예: "연령대 \ 성별"
+  columns: string[];
+  rows: { label: string; cells: string[] }[];
+  badge: string | null;
+}
+export type CoverageView = GateView | CoverageOkView | BuyersTableView;
+
+function buyersCell(r: CoverageRow | undefined): string {
+  if (!r) return "-";
+  if (r.suppressed) return SUPPRESSED;
+  return r.buyers != null ? people(r.buyers) : "-";
+}
+
+function buyersTable(out: MarketCoverageOutput, attributes: AttributeChoice[]): BuyersTableView | null {
+  const attrs = out.attribute_keys.map((k) => attributes.find((a) => a.key === k));
+  if (attrs.length === 0 || attrs.length > 2 || attrs.some((a) => !a)) return null;
+  const [rowAttr, colAttr] = attrs as AttributeChoice[];
+  const find = (rv: string, cv?: string) => out.rows.find((r) =>
+    r.values[rowAttr.key] === rv && (colAttr == null || r.values[colAttr.key] === cv));
+  const reasons = [...new Set(out.rows.map((r) => r.reason).filter((x) => HANGUL.test(x)))];
+  return {
+    kind: "buyers",
+    note: `인구 통계를 아직 받지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요${reasons.length === 1 ? ` · ${reasons[0]}` : ""}`,
+    corner: colAttr ? `${rowAttr.label} \\ ${colAttr.label}` : rowAttr.label,
+    columns: colAttr ? colAttr.values.map((v) => v.label) : ["우리 구매자"],
+    rows: rowAttr.values.map((rv) => ({
+      label: rv.label,
+      cells: colAttr ? colAttr.values.map((cv) => buyersCell(find(rv.value, cv.value))) : [buyersCell(find(rv.value))],
+    })),
+    badge: fakeBadge(out),
+  };
+}
 
 /** 남은 시장(인구 − 우리 구매자)이 큰 묶음을 위로. 숫자가 없는 묶음은 아래 (서버 순서 유지) */
 function remaining(r: CoverageRow): number {
   return r.status === "ok" && !r.suppressed && r.population != null && r.buyers != null ? r.population - r.buyers : -1;
 }
 
-export function coverageView(out: MarketCoverageOutput): CoverageView {
+export function coverageView(out: MarketCoverageOutput, attributes: AttributeChoice[] = []): CoverageView {
   if (out.status === "insufficient") return gate(out);
+  if (out.rows.length > 0 && out.rows.every((r) => r.status === "population_missing")) {
+    const table = buyersTable(out, attributes);
+    if (table) return table;
+  }
   const rows = out.rows.map((r, i) => ({ r, i })).sort((a, b) => remaining(b.r) - remaining(a.r) || a.i - b.i).map(({ r }) => {
     const source = [r.population_source, r.base_year != null ? `${r.base_year}년` : null].filter(Boolean).join(" · ");
     if (r.status !== "ok") {
@@ -282,7 +399,10 @@ export interface ProposalView {
   sent: string | null;
   past: string[];
 }
-export interface ProposalsOkView { kind: "ok"; month: string; items: ProposalView[]; summary: string; empty: string | null; badge: string | null }
+export interface ProposalsOkView {
+  kind: "ok"; month: string; items: ProposalView[]; summary: string; empty: string | null; badge: string | null;
+  excluded: { title: string; rows: string[] } | null; // "제외한 후보 n건" (접어서 보임)
+}
 export type ProposalsView = GateView | ProposalsOkView;
 
 export function sentText(s: { outcome: "created" | "duplicate" | "rejected"; proposal_ref: string | null; reason?: string }): string {
@@ -331,5 +451,12 @@ export function proposalsView(out: EventProposalOutput): ProposalsView {
     summary: out.summary,
     empty: out.proposals.length ? null : "이번 달에 낼 만한 제안이 없어요",
     badge: fakeBadge(out),
+    excluded: (out.excluded ?? []).length === 0 ? null : {
+      title: `제외한 후보 ${out.excluded!.length}건`,
+      rows: out.excluded!.map((x) => {
+        const what = [x.target_label, x.item_label].filter(Boolean).join(" · ") || "후보";
+        return HANGUL.test(x.reason) ? `${what} — ${x.reason}` : what;
+      }),
+    },
   };
 }

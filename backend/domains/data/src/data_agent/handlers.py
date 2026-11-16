@@ -77,6 +77,7 @@ from ax_contracts.schemas.data import (
     SegmentFavoritesInput,
     SegmentOptionsInput,
     SegmentProfileInput,
+    SegmentQuestionInput,
     ShortsStatsRequest,
     TrendAgeOutput,
     TrendAgeRequest,
@@ -117,7 +118,7 @@ from data_agent.response_cache import ResponseCache
 from data_agent.sales_store import DB_ENV as SALES_DB_ENV
 from data_agent.sales_store import DEFAULT_DB as SALES_DEFAULT_DB
 from data_agent.sales_store import SalesStore
-from data_agent.skills import event_proposal, segment_analysis, topic_category
+from data_agent.skills import event_proposal, segment_analysis, segment_question, topic_category
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
 from data_agent.skills.anomaly_detection import detect_anomalies, env_settings, get_metric_source
@@ -457,6 +458,33 @@ async def segment_options(request: AgentRequest) -> AgentResult:
             collected_at=now,
             ref_ids=[],
         ),
+    )
+
+
+async def segment_question_skill(request: AgentRequest) -> AgentResult:
+    """글 질문 → 고르는 칸 값. LLM은 카탈로그 보기 안의 code만 고른다 (숫자 없음, grade read)."""
+    data = _parse(request, SegmentQuestionInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    parsed = await segment_question.parse(data.text, cat.sales, get_llm())
+    out = parsed.output
+    version = cat.sales.version if cat.sales else "없음"
+    note = f"카탈로그 {cat.id} 판 {version}, 결과 {out.status}" + (
+        f" ({out.reason})" if out.reason else ""
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            queries=["catalog.sales"], data_summary=note, collected_at=now, ref_ids=[]
+        ),
+        fallback=parsed.fallback_reason is not None,
+        fallback_reason=parsed.fallback_reason,
     )
 
 
@@ -1858,6 +1886,7 @@ HANDLERS = {
     "kpi_summary": kpi_summary,
     "sales_analysis": sales_analysis,
     "segment_options": segment_options,
+    "segment_question": segment_question_skill,
     "segment_profile": segment_profile,
     "segment_favorites": segment_favorites,
     "market_coverage": market_coverage,

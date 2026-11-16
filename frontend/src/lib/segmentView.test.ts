@@ -7,8 +7,8 @@ import type {
   SegmentOptionsOutput, SegmentProfileOutput,
 } from "./data.ts";
 import {
-  coverageView, favoritesView, fakeBadge, filterLabel, nextMonth, optionsView, parseTarget, pct,
-  profileView, proposalsView, sectionState, sendResultText, times,
+  coverageView, favoritesView, fakeBadge, filterLabel, isHigh, nextMonth, optionsView, parseTarget, pct,
+  profileView, proposalsView, questionView, sectionState, sendResultText, times,
 } from "./segmentView.ts";
 
 const QUALITY: SalesQuality = {
@@ -119,6 +119,11 @@ test("숫자 글자: 퍼센트·배수", () => {
   assert.equal(pct(0.125), "12.5%");
   assert.equal(pct(0.000393), "0.04%");
   assert.equal(times(1.487), "1.5배");
+  assert.equal(times(1), "1.0배");
+  assert.equal(times(2), "2.0배");
+  assert.equal(isHigh(1.2), true);
+  assert.equal(isHigh(1.19), false);
+  assert.equal(isHigh(null), false);
 });
 
 test("선택지는 segment_options에서만 읽고, 없는 속성을 가리키는 칩·조합은 뺀다", () => {
@@ -136,22 +141,129 @@ test("선택지는 segment_options에서만 읽고, 없는 속성을 가리키�
 });
 
 test("물어보기: 우리 쇼핑몰 순위와 바깥 시장(키 필요·한도) 칸", () => {
-  const v = favoritesView(FAVORITES);
+  const v = favoritesView(FAVORITES, "책");
   assert.equal(v.kind, "ok");
   if (v.kind !== "ok") return;
   assert.equal(v.header, "우리 쇼핑몰 · 20대 · 여성 구매자 412명 (최근 90일)");
-  assert.deepEqual(v.rows[0], { label: "소설", detail: "구매자의 31% · 전체 대비 1.4배 · 128명", suppressed: false });
-  assert.deepEqual(v.rows[1], { label: "시", detail: "표본 부족", suppressed: true });
-  assert.deepEqual(v.external[0], { title: "도서관 정보나루 인기대출", meta: "20대 · 여성 · 최근 3개월", state: "ok", note: null, rows: [{ label: "1. 책 하나", detail: "1,240회" }] });
-  assert.equal(v.external[1].note, "키 등록 필요"); // 영어 이유는 내보내지 않는다
-  assert.equal(v.external[2].note, "오늘 조회 한도에 닿음 · 하루 한도 1000회를 넘었어요");
+  assert.equal(v.genres.title, "특히 많이 사는 장르");
+  assert.deepEqual(v.genres.rows[0], { label: "소설", detail: "구매자의 31% · 전체 대비 1.4배 · 128명", suppressed: false, high: true });
+  assert.deepEqual(v.genres.rows[1], { label: "시", detail: "표본 부족", suppressed: true, high: false });
+  assert.equal(v.products.title, "많이 산 책");
+  assert.deepEqual(v.external, [{ title: "도서관 정보나루 인기대출", meta: "20대 · 여성 · 최근 3개월", state: "ok", note: null, rows: [{ label: "1. 책 하나", detail: "1,240회" }] }]);
+  // 실패한 출처는 한 줄로: 영어 이유는 내보내지 않는다
+  assert.equal(v.externalNote, "네이버 쇼핑인사이트 키 등록 필요 · 통계청 오늘 조회 한도에 닿음 · 하루 한도 1000회를 넘었어요 · 확인한 출처 1/3");
   assert.equal(v.badge, null);
   noCodes(v, ["g_novel", "g_poem", "data4library", "naver_shopping", "kosis", "age_band"]);
 });
 
+test("물어보기: 장르는 배수 높은 순 5개, 품목은 product만 5개, 분류는 뺀다, 요약은 배수 1위 → 구매 비율 1위", () => {
+  const g = (code: string, share: number, lift: number) => ({ kind: "genre" as const, code, label: `장르${code}`, share, lift, buyers: 10, suppressed: false });
+  const p = (code: string) => ({ kind: "product" as const, code, label: `품목${code}`, share: 0.1, lift: 1, buyers: 10, suppressed: false });
+  const v = favoritesView({
+    ...FAVORITES, external: [],
+    internal: [
+      g("1", 0.5, 1.1), g("2", 0.3, 2.0), g("3", 0.2, 1.2), g("4", 0.2, 1.19), g("5", 0.1, 0.9), g("6", 0.1, 3.0),
+      { kind: "category", code: "c", label: "큰 분류", share: 0.9, lift: 5, buyers: 99, suppressed: false },
+      ...["a", "b", "c", "d", "e", "f"].map(p),
+    ],
+  }, "게임");
+  assert.ok(v.kind === "ok");
+  if (v.kind !== "ok") return;
+  assert.deepEqual(v.genres.rows.map((r) => r.label), ["장르6", "장르2", "장르3", "장르4", "장르1"]);
+  assert.deepEqual(v.genres.rows.map((r) => r.high), [true, true, true, false, false]); // 1.2배부터 강조
+  assert.equal(v.products.title, "많이 산 게임");
+  assert.deepEqual(v.products.rows.map((r) => r.label), ["품목a", "품목b", "품목c", "품목d", "품목e"]);
+  assert.equal(JSON.stringify(v).includes("큰 분류"), false);
+  assert.equal(v.summary, "특히 많이 사는 장르: 장르6 (전체 대비 3.0배). 가장 많이 산 장르: 장르1 (구매자의 50%).");
+  assert.equal(v.externalNote, null);
+});
+
+test("물어보기: 같은 이유로 실패한 출처는 한 번만, 확인한 출처 n/m", () => {
+  const miss = (label: string) => ({ source_id: "lib", label, status: "key_missing" as const, reason: "UNAUTHORIZED: key", period_label: "", condition_label: "", items: [] });
+  const v = favoritesView({ ...FAVORITES, external: [miss("공공 도서관"), miss("공공 도서관 · 장르1"), miss("공공 도서관 · 장르2")] });
+  assert.ok(v.kind === "ok" && v.external.length === 0);
+  if (v.kind !== "ok") return;
+  assert.equal(v.externalNote, "공공 도서관 키 등록 필요 · 확인한 출처 0/1");
+});
+
 test("물어보기: 집단 전체가 표본 부족이면 순위를 비우고 표본 부족만", () => {
   const v = favoritesView({ ...FAVORITES, segment_buyers: null, segment_suppressed: true, internal: [] });
-  assert.ok(v.kind === "ok" && v.header.includes("표본 부족") && v.rows.length === 0);
+  assert.ok(v.kind === "ok" && v.header.includes("표본 부족") && v.genres.rows.length === 0 && v.products.rows.length === 0);
+  assert.ok(v.kind === "ok" && v.summary === "");
+});
+
+test("글로 묻기: 읽은 조건은 선택지와 맞추고, 못 읽으면 고르라고 안내", () => {
+  const o = optionsView(OPTIONS);
+  const ok = questionView({ status: "ok", filters: { age_band: "20s", gender: "f", region: "x" }, genre_code: null, period: "30d",
+    understood_label: "20대 · 여성 · 직업군 전체 · 최근 30일", reason: "" }, o);
+  assert.deepEqual(ok, { kind: "ok", text: "이렇게 읽었어요: 20대 · 여성 · 직업군 전체 · 최근 30일", filters: { age_band: "20s", gender: "f" }, period: "30d" });
+  const unparsed = questionView({ status: "unparsed", filters: {}, genre_code: null, period: null, understood_label: "", reason: "질문에서 고객 묶음(속성 값)을 찾지 못함" }, o);
+  assert.deepEqual(unparsed, { kind: "unparsed", text: "어느 집단인지 골라 주세요", reason: "질문에서 고객 묶음(속성 값)을 찾지 못함" });
+  // 선택지에 없는 값만 왔으면 unparsed, 영어 이유는 숨긴다
+  const odd = questionView({ status: "ok", filters: { age_band: "99s" }, genre_code: null, period: "7d" as never, understood_label: "", reason: "bad" }, o);
+  assert.deepEqual(odd, { kind: "unparsed", text: "어느 집단인지 골라 주세요", reason: null });
+});
+
+test("시장 커버: 모든 줄에 인구가 없으면 안내 한 줄 + 연령대(줄) × 성별(칸) 구매자 표", () => {
+  const o = optionsView(OPTIONS);
+  const missing = (age: string, g: string, buyers: number | null, suppressed = false) => ({
+    values: { age_band: age, gender: g }, label: "", buyers, population: null, population_source: "", base_year: null, coverage: null,
+    suppressed, status: "population_missing" as const, reason: "인구 통계표 설정 필요",
+  });
+  const v = coverageView({ ...COVERAGE, rows: [missing("20s", "f", 120), missing("20s", "m", 80), missing("30s", "f", null, true), missing("30s", "m", 40)] }, o.attributes);
+  assert.equal(v.kind, "buyers");
+  if (v.kind !== "buyers") return;
+  assert.equal(v.note, "인구 통계를 아직 받지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요 · 인구 통계표 설정 필요");
+  assert.equal(v.corner, "연령대 \\ 성별");
+  assert.deepEqual(v.columns, ["여성", "남성"]);
+  assert.deepEqual(v.rows, [
+    { label: "20대", cells: ["120명", "80명"] },
+    { label: "30대", cells: ["표본 부족", "40명"] },
+    { label: "답하지 않음", cells: ["-", "-"] },
+  ]);
+  noCodes(v, ["age_band", "gender", "20s"]);
+  // 인구가 있는 줄이 하나라도 있으면 지금 표 그대로
+  assert.equal(coverageView(COVERAGE, o.attributes).kind, "ok");
+});
+
+test("이벤트 제안: 기준 미달 후보는 '제외한 후보 n건'으로 접는다", () => {
+  const v = proposalsView({ ...PROPOSALS, excluded: [
+    { target_label: "20대 · 여성", item_label: "시·에세이", reason: "작년 같은 달 검색 배수 0.52배 (기준 1.00배 미만)" },
+    { target_label: "10대", item_label: "만화", reason: "too few" },
+  ] });
+  assert.ok(v.kind === "ok");
+  if (v.kind !== "ok") return;
+  assert.deepEqual(v.excluded, { title: "제외한 후보 2건", rows: ["20대 · 여성 · 시·에세이 — 작년 같은 달 검색 배수 0.52배 (기준 1.00배 미만)", "10대 · 만화"] });
+  const none = proposalsView(PROPOSALS); // 예전 서버(excluded 없음)
+  assert.ok(none.kind === "ok" && none.excluded === null);
+});
+
+test("다른 회사(가짜 게임사) 설정이면 화면 글자에 '책'이 나오지 않는다", () => {
+  const game: SegmentOptionsOutput = {
+    attributes: [{ key: "age_band", label: "연령대", values: [{ code: "20s", label: "20대" }] }, { key: "gender", label: "성별", values: [{ code: "male", label: "남성" }] }],
+    genres: [{ code: "rpg", label: "RPG" }], categories: [{ code: "item", label: "게임 아이템" }],
+    quick_questions: [{ label: "20대 남성", filters: { age_band: "20s", gender: "male" } }], event_kinds: [{ code: "pack", label: "아이템 패키지" }],
+    periods: ["30d", "90d", "365d"], population_keys: [["age_band", "gender"]], min_group_size: 3, data_source: null,
+    catalog_id: "pixelforge", catalog_version: "game-1", item_noun: "게임",
+  };
+  const o = optionsView(game);
+  assert.equal(o.itemNoun, "게임");
+  const fav = favoritesView({
+    ...FAVORITES, filter_label: "20대 · 남성", summary: "",
+    internal: [
+      { kind: "genre", code: "rpg", label: "RPG", share: 0.8, lift: 2.4, buyers: 8, suppressed: false },
+      { kind: "product", code: "rpg_pack", label: "rpg pack", share: 0.8, lift: 2.4, buyers: 8, suppressed: false },
+    ],
+    external: [{ source_id: "store", label: "앱 마켓 인기 순위", status: "key_missing", reason: "", period_label: "", condition_label: "", items: [] }],
+  }, o.itemNoun);
+  const q = questionView({ status: "ok", filters: { age_band: "20s", gender: "male" }, genre_code: "rpg", period: null,
+    understood_label: "20대 · 남성 · RPG · 최근 90일", reason: "" }, o);
+  const shown = JSON.stringify([o.attributes, o.chips, o.targets, o.periods, o.coverage, o.itemNoun, fav, q]);
+  assert.equal(shown.includes("책"), false);
+  assert.equal(shown.includes("대출"), false);
+  assert.ok(fav.kind === "ok" && fav.products.title === "많이 산 게임");
+  // 품목 이름이 없는 예전 서버면 일반 낱말
+  assert.equal(optionsView(OPTIONS).itemNoun, "상품");
 });
 
 test("누가 사나: 대상 vs 전체 막대와 배수, 표본 부족·모름, 가짜 데이터 배지", () => {
