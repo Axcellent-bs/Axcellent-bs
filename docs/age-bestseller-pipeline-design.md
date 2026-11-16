@@ -1,15 +1,16 @@
 # 연령별 베스트셀러 자료 → 데이터 분석 → 이벤트 근거 (설계)
 
-상태: 초안(판매 서버 쪽 재료는 끝났고, 일일 보고의 계약 칸과 고객지원의 연령대별 요청 건수 코드는 아직 없음). 제안: 배병환(고객지원), 2026-11-13. 2026-11-14 보강, 2026-11-16 재현(데이터) 답·판매 서버 진행을 반영(아래 "진행 상황").
+상태: 초안(판매 서버 쪽 재료는 끝났다. 일일 보고의 연령대별 요청 건수 칸 `by_age_band`는 2026-11-17에 하지 않기로 했고, 베스트셀러 칸의 계약은 아직 없음). 제안: 배병환(고객지원), 2026-11-13. 2026-11-14 보강, 2026-11-16 재현(데이터) 답·판매 서버 진행을 반영(아래 "진행 상황").
 
 ## 진행 상황 (2026-11-17 갱신)
-- **2026-11-17 현재 (요약)**: 판매 서버(Catbooks-demo)에 구매자 `age_band`(#9)·`gender`(#15)·`occupation`(회원 가입 #19·이름 바꾸기 #22), 상품 `genre_code`(#21)·책 정보 `isbn13`·`author`·`publisher`(#14)가 들어갔다. 판매 집계 `sales-summary`는 `age_band`·`gender`·`occupation`·`genre`·`category`·`product` 묶음과 `period`(일·주·월)를 주고 구매자 5명 미만인 줄은 숫자를 숨긴다(#12·#18·#26). 데이터는 가명 구매자 ID와 속성을 `GET /api/shop/customers-export`(#24)로 받는다. 고객지원은 책별 집계 `book_issue_stats`를 더 갖췄다(0건 상품 행 #1129, 판매 수량을 `sales-summary`로 읽기 #1145, 사유별 클레임 수 #1147). 데이터는 이 숫자를 브리프 근거로 쓰고(#1125) 기획 근거 줄·`product_ids`로 넘긴다(#1128, `book-issue-a2a-design.md`). **아직 없는 것**: 일일 보고(`idea.py`)의 연령대별 요청 건수 칸(`by_age_band`, 계약 PR은 데이터가 올리기로 함)과 그것을 세는 고객지원 코드, 베스트셀러 칸.
+- **2026-11-17 결정 (재현 님, 데이터)**: 일일 보고에 연령대별 요청 건수 칸 `by_age_band`를 **더하지 않는다.** 오전에는 데이터가 칸을 추가하기로 했으나 취소했다. 데이터가 가명 구매자 ID와 연령대를 `customers-export`로 직접 받아 연령대별로 세므로, 고객지원이 연령대별로 세서 보낼 필요가 없다. 고객지원은 개인 단위 나이를 받거나 보내지 않는 것도 그대로다. 같은 날 정해진 것: 사유별 클레임 수 `claims_by_reason`은 **사유 코드 그대로** 준다(불량=`defect`·`damaged`·`wrong_item`·`missing_item` / 배송=`late_delivery` / 변심=`change_of_mind` / 기타=`other`로 묶는 것은 데이터 설정), 데이터는 단위가 다른 결과끼리 빼서 쓰지 않고 한 칸을 숨기면 합계로 풀 수 없게 다음 작은 칸도 숨긴다(데이터 #1163), 데이터는 0건 상품 행(#1129)을 받아 자기 쪽 0건 제외 처리를 걷어낸다. 아래 본문에서 `by_age_band` 관련 부분은 지웠고, 기록으로 남긴 곳은 "취소됨"이라고 적었다.
+- **2026-11-17 현재 (요약)**: 판매 서버(Catbooks-demo)에 구매자 `age_band`(#9)·`gender`(#15)·`occupation`(회원 가입 #19·이름 바꾸기 #22), 상품 `genre_code`(#21)·책 정보 `isbn13`·`author`·`publisher`(#14)가 들어갔다. 판매 집계 `sales-summary`는 `age_band`·`gender`·`occupation`·`genre`·`category`·`product` 묶음과 `period`(일·주·월)를 주고 구매자 5명 미만인 줄은 숫자를 숨긴다(#12·#18·#26). 데이터는 가명 구매자 ID와 속성을 `GET /api/shop/customers-export`(#24)로 받는다. 고객지원은 책별 집계 `book_issue_stats`를 더 갖췄다(0건 상품 행 #1129, 판매 수량을 `sales-summary`로 읽기 #1145, 사유별 클레임 수 #1147). 데이터는 이 숫자를 브리프 근거로 쓰고(#1125) 기획 근거 줄·`product_ids`로 넘긴다(#1128, `book-issue-a2a-design.md`). **아직 없는 것**: 베스트셀러 칸(`bestseller_groups`)과 그 계약 PR. 연령대별 요청 건수 칸(`by_age_band`)은 하지 않기로 했다(위 결정).
 - 예진 님 동의: 판매 서버 `buyers`에 `age_band`(구간만, 생년월일 없음) 선택 칸은 가능. 캣북스는 Catbooks-demo로 옮겨져 가입·프로필 화면도
   그쪽에서 받는다. 구간은 `trend_age`에 맞춘다 (11/13 #소통 스레드).
 - 고객지원 쪽 "우리 쪽 사실"은 먼저 만들었다 (분담안): 책별 클레임·불량·반품·환불·문의·클레임 비율 집계 `book_issue_stats`
   (#1096~#1100 머지, 설계 `support-book-issue-stats-design.md`). 캠페인 예산 쪽 연결은 `book-issue-a2a-design.md`(#1102).
-  아직 없는 것: 연령대별 건수(`by_age_band`, 구매자 `age_band`가 생겨야 센다), 계약 PR, 베스트셀러 칸.
-- **재현 님(데이터) 답, 2026-11-16 — 세 가지 모두 찬성**: ① 일일 보고에 선택 칸만 추가하면 **스키마 버전은 안 올린다**(기존 보고가 그대로 읽히면 충분) ② 연령 구간은 `trend_age` 5개(`10s`·`20s`·`30s`·`40s`·`50s_plus`, 비우면 "연령 모름")로 **확정**, 데이터 쪽 고객 분석도 이 코드를 쓴다 ③ 분담안 찬성: 고객지원은 우리 쪽 사실(연령대별 요청, 책별 문의·클레임·반품), 정보나루·판매·재고를 붙이는 일은 데이터.
+  아직 없는 것: 계약 PR, 베스트셀러 칸. (연령대별 건수 `by_age_band`는 2026-11-17에 하지 않기로 했다.)
+- **재현 님(데이터) 답, 2026-11-16 — 세 가지 모두 찬성**: ① 일일 보고에 선택 칸만 추가하면 **스키마 버전은 안 올린다**(기존 보고가 그대로 읽히면 충분) ② 연령 구간은 `trend_age` 5개(`10s`·`20s`·`30s`·`40s`·`50s_plus`, 비우면 "연령 모름")로 **확정**, 데이터 쪽 고객 분석도 이 코드를 쓴다 ③ 분담안 찬성: 고객지원은 우리 쪽 사실(책별 문의·클레임·반품. 연령대별 요청 건수는 11/17에 데이터가 `customers-export`로 직접 세기로 바뀜), 정보나루·판매·재고를 붙이는 일은 데이터.
 - **판매 서버는 새 레포로 옮겨졌다**(`Catbooks-demo/catbooks-demo`, 예진 님). 이 레포(Axcellent-bs)의 `shop-api`에는 올리지 않고 그쪽 `backend/shop-api`에 올린다. 거기에 들어간 것: `buyers.age_band`와 문의·클레임·아이디어 읽기 응답의 `age_band`(**#9 병합, 11/16**), 판매 수량을 상품·연령대·분류별로 합치는 `GET /api/shop/sales-summary`(**#12 병합**), 상품 `isbn13`·`author`·`publisher`(**#14, 리뷰 대기**). 가입·프로필 화면은 예진 님이 `shop-web`에서 한다.
 - **새 요청(재현 님)**: 데이터가 "고객·시장 분석"(20대 여성이 좋아하는 책, 이 분야는 누가 사나, 다음 달 이벤트 제안)을 만드는 중이라 판매 서버 회원에 **성별·직업군 속성과 상품 장르**가 필요하다. `buyers.age_band`를 두 번 만들지 않게 판매 서버 회원 속성은 같은 방식으로 이어 붙였다. **2026-11-17 현재 판매 서버(Catbooks-demo)에 모두 들어갔다**: 성별 `buyers.gender`(#15), 직업군 `buyers.occupation`(회원 가입 #19, 이름 바꾸기 #22), 상품 장르 `products.genre_code`(#21), 책 정보 `isbn13`·`author`·`publisher`(#14). 아래 "멘토 요구와 이 설계의 범위"·열린 질문 참고.
 
@@ -52,7 +53,6 @@
 ```
 고객 의견 ─▶ [고객지원] 하루 한 번 일일 보고 한 건
                  ├ clusters          (기존) 이벤트·혜택 요청 묶음
-                 ├ by_age_band       (추가) 요청을 낸 연령대별 건수·고객 수  ← 구매자 age_band가 있을 때만
                  └ bestseller_groups (추가) 연령대별 베스트셀러 자료 (근거 링크 필수)
                  ▼  receive_idea_report (A2A, grade read)
             [데이터] 일일 보고를 쌓아 일·주·월·년으로 합침
@@ -62,7 +62,6 @@
 
 기간 합산 규칙 (기존 규칙을 따른다):
 - 주는 월요일 시작. 일일 보고를 받은 날 수(`report_days`)를 같이 보여 준다 (빠진 날을 0으로 채우지 않는다).
-- 연령대별 건수·고객 수는 날마다 센 값의 합이다. 여러 날 낸 같은 고객은 날마다 센다 (기존 `customer_count`와 같다).
 - 베스트셀러는 기간 안에서 같은 ISBN(없으면 제목 정규화 열쇠)끼리 합쳐 **몇 번의 보고에 나왔는지**와
   가장 높았던 순위를 보여 준다. 출처가 다른 대출 횟수끼리는 더하지 않는다 (출처별로 따로 둔다).
 
@@ -75,13 +74,6 @@
 AgeBand = Literal["10s", "20s", "30s", "40s", "50s_plus"]
 SourceKind = Literal["manual", "library_loan", "retail_rank"]
 Trust = Literal["verified", "reference"]  # verified: 출처 API가 준 숫자, reference: 사람 입력·기사
-
-
-class AgeBandCount(AxModel):
-    """요청을 낸 고객의 연령대별 집계. 개인 단위 나이는 싣지 않는다."""
-    age_band: AgeBand | None            # None = 연령 모름(입력 전 구매자)과, 5명 미만이라 합친 구간
-    count: int = Field(ge=1)
-    customer_count: int = Field(ge=1)
 
 
 class BestsellerEntry(AxModel):
@@ -106,9 +98,8 @@ class BestsellerGroup(AxModel):
     entries: list[BestsellerEntry] = Field(max_length=50)
 
 
-class IdeaReportInput(AxModel):            # 기존 모델에 두 칸을 더한다
+class IdeaReportInput(AxModel):            # 기존 모델에 한 칸을 더한다
     ...
-    by_age_band: list[AgeBandCount] = Field(default_factory=list, max_length=6)  # 5구간 + 연령 모름
     bestseller_groups: list[BestsellerGroup] = Field(default_factory=list, max_length=20)
 
 
@@ -127,16 +118,15 @@ class BestsellerTrendRow(AxModel):
     reason: str                         # 코드가 만든 한 줄 근거
 
 
-class IdeaTrendBucket(AxModel):            # 기존 모델에 두 칸을 더한다
+class IdeaTrendBucket(AxModel):            # 기존 모델에 한 칸을 더한다
     ...
-    by_age_band: list[AgeBandCount] = Field(default_factory=list)   # 기간 합산(작은 구간은 합친 뒤 값)
     bestsellers: list[BestsellerTrendRow] = Field(default_factory=list)  # 위에 정의
 ```
 
 - 중복: 같은 (`tenant`, `report_date`)는 한 번만 받는다 (기존 규칙). 베스트셀러 칸은 같은 `source_url`이 같은 날 두 번 오면 한 번만 센다.
 - `trust="reference"`(사람 입력·기사) 자료는 순위 계산에 쓰지 않고 "참고" 칸에만 보인다.
 - 이벤트 종류 추가는 하지 않는다.
-- **작은 연령대 건수는 합쳐서 보낸다**(예진 11/17 리뷰): 한 구간의 `customer_count`가 **5명 미만**이면 그 구간으로 보내지 않고 `age_band=None`(연령 모름)에 합친다. "10대 1명"처럼 한 사람으로 좁혀지는 값을 막는 규칙이고, 판매 서버 `sales-summary`의 5명 미만 숨기기(Catbooks-demo #18)와 같은 기준이다. 나중에 성별·직업이 붙어 칸이 더 잘게 나뉘어도 같은 기준을 쓴다. 기준값은 상수 하나(`MIN_AGE_BAND_CUSTOMERS = 5`)로 둔다. 합친 `None` 항목은 연령을 알려 주지 않으므로 그대로 보낸다.
+- **작은 연령대 건수를 합쳐서 보내는 규칙은 필요 없어졌다**(`by_age_band`를 보내지 않기로 했다, 2026-11-17). 5명 미만 숨기기는 판매 서버 `sales-summary`(Catbooks-demo #18)와 데이터가 쓰는 `customers-export` 집계 쪽 기준으로 남는다. 고객지원이 연령대 건수를 다시 보내게 되면 5명 미만을 `age_band=None`에 합치는 규칙부터 넣는다(예진 11/17 리뷰).
 - **판매·재고를 읽는 규칙**: 데이터가 붙이는 `shop_stock`·`shop_sales_30d`는 판매 서버 `sales-summary`를 짧게(7일씩) 나눠 읽고 몇 분 캐시한다. 251 `shop.db`에 주문이 30만 건쯤이라 한 번에 크게 읽으면 결제 모니터가 지연으로 잡힌다(예진 11/16·`book-issue-a2a-design.md`·고객지원 #1145가 같은 규칙).
 - 사람 입력(근거 링크 필수)은 고객지원의 새 skill `submit_bestseller_reference`가 받는다. 상태를 바꾸므로 `execute()`를 거친다. **서비스 카드는 아이디어 접수 `submit_idea`가 있는 `backend/services/inquiry/agent-card.json`에 올리고, `backend/domains/support/agent-card.json`과 같은 PR에서 함께 고친다**(둘이 어긋나면 `FORBIDDEN_SKILL`이 난다, #1045).
 
@@ -186,21 +176,21 @@ class IdeaTrendBucket(AxModel):            # 기존 모델에 두 칸을 더한�
 
 ## 구매자 연령대 (판매 서버 → 고객지원 → 데이터)
 
-`by_age_band`의 재료는 구매자 연령대다. 원래 판매 서버 `buyers`에는 나이·생년이 없었다 (`buyer_id`, `tenant_id`,
+(`by_age_band`는 2026-11-17에 하지 않기로 했다. 아래는 구매자 연령대가 판매 서버에 어떻게 들어왔는지의 기록이고, 데이터가 `customers-export`로 이 값을 직접 읽는다.) 구매자 연령대의 재료는 판매 서버 `buyers`다. 원래 판매 서버 `buyers`에는 나이·생년이 없었다 (`buyer_id`, `tenant_id`,
 `context_id`, `created_at`뿐). **2026-11-16 새 레포(Catbooks-demo #9)에서 `age_band`가 들어갔다.** 시드 구매자에 임의로 채우면 지어낸 데이터라서 하지 않는다(기존 구매자는 `null`).
 
 1. **(끝남, Catbooks-demo #9)** 판매 서버 `buyers`에 `age_band`(선택, NULL 허용)를 `_ADDED_COLUMNS`로 추가했다. 생년월일은 받지 않고
    **연령대 구간만** 저장한다 (개인정보 부담을 줄인다).
 2. **(끝남, #9)** 고객지원이 읽는 admin 문의·클레임·아이디어 읽기 항목에 `age_band`를 더했다. 기존 필드는 그대로다. 주문 응답에는 싣지 않았다: 연령대별 판매는 `sales-summary`(#12, `group_by=age_band`)로 읽는다. 단 연령대는 **주문 시점이 아니라 지금의 `buyers.age_band`** 기준이다(구매자가 나중에 바꾸면 과거 주문도 새 구간으로 센다). 전체 구매자 목록(`GET /users`)에는 싣지 않는다.
-3. (아직 없음, 계약 칸이 dev에 들어온 뒤) 고객지원은 하루 보고를 만들 때 연령대 건수만 센다. 새 레포 판매 서버의 문의·클레임·아이디어 읽기 항목에 `age_band`가 이미 실려 있어 읽기만 하면 된다(251의 옛 판매 서버에는 아직 없어 "연령 모름"으로 센다). 개인 단위 나이는 데이터로 보내지 않고 저장하지도 않는다.
+3. (취소됨, 2026-11-17 재현 님) 고객지원이 하루 보고를 만들 때 연령대 건수를 세어 보내는 일은 하지 않는다. 데이터가 `customers-export`로 직접 센다. (처음 계획: 하루 보고를 만들 때 연령대 건수만 센다.) 새 레포 판매 서버의 문의·클레임·아이디어 읽기 항목에 `age_band`가 이미 실려 있어 읽기만 하면 된다(251의 옛 판매 서버에는 아직 없어 "연령 모름"으로 센다). 개인 단위 나이는 데이터로 보내지 않고 저장하지도 않는다.
 4. 값이 없는 접수는 "연령 모름"으로 따로 세고 어느 연령대에도 넣지 않는다. 입력 경로가 생기기 전에는 화면에
    "준비 중"을 둔다 (`Preparing.tsx`).
 5. 나이를 받는 가입·프로필 화면은 캣북스 쇼핑몰(`Catbooks-demo`의 `frontend/shop-web`)에서 예진 님이 한다. 값을 정하는 경로는 `PATCH /users/{buyer_id}`(토큰 없이 누구나 바꿀 수 있는 데모)다. 동의 문구·보관 기간은 사람이 정한다. 연령대는 개인정보라서 실제 서비스로 옮길 때는 본인 확인을 붙여야 한다.
 
 ## 구현 순서 (PR 단위, 앞 단계가 뒤 단계를 막지 않게)
-0. **(끝남) 고객지원 쪽 우리 사실**: 책별 집계 `book_issue_stats` (#1096~#1100). 연령대별 건수(`by_age_band`)는 아래 1번이 있어야 센다.
-1. **(끝남) 구매자 연령대 칸** (판매 서버, **Catbooks-demo #9**, 11/16 병합): `buyers.age_band`와 읽는 응답 추가. 값이 없는 구매자는 NULL. AXcellent 쪽 `shop-api`에는 올리지 않는다(곧 빠진다). 가입·프로필 화면은 예진 님. 이 칸을 읽어 `by_age_band`를 세는 고객지원 집계는 판매 서버가 새 레포로 뜬 뒤에 의미가 있다.
-2. **계약 PR (아직 없음, 데이터가 올리기로 함 — 재현 11/16)** — **고객지원은 이 계약이 dev에 머지된 뒤에만 새 칸을 채워 보낸다**(`AxModel`이 `extra="forbid"`라 새 칸을 보내는 쪽이 받는 쪽보다 먼저 배포되면 데이터가 보고를 거절한다, 예진 11/17): `idea.py`에 위 칸을 **추가만** 한다(스키마 버전은 올리지 않는다, 재현 11/16) + 계약 테스트 (옛 보고도 받는지). 가장 먼저 머지해서 양쪽이 같은 모양을 본다.
+0. **(끝남) 고객지원 쪽 우리 사실**: 책별 집계 `book_issue_stats` (#1096~#1100). 연령대별 건수(`by_age_band`)는 2026-11-17에 하지 않기로 했다.
+1. **(끝남) 구매자 연령대 칸** (판매 서버, **Catbooks-demo #9**, 11/16 병합): `buyers.age_band`와 읽는 응답 추가. 값이 없는 구매자는 NULL. AXcellent 쪽 `shop-api`에는 올리지 않는다(곧 빠진다). 가입·프로필 화면은 예진 님. 데이터가 이 값을 `customers-export`로 직접 읽는다(고객지원이 세는 `by_age_band`는 취소).
+2. **계약 PR (아직 없음, 데이터가 올리기로 함 — 재현 11/16)** — **고객지원은 이 계약이 dev에 머지된 뒤에만 새 칸을 채워 보낸다**(`AxModel`이 `extra="forbid"`라 새 칸을 보내는 쪽이 받는 쪽보다 먼저 배포되면 데이터가 보고를 거절한다, 예진 11/17): `idea.py`에 위 칸(`bestseller_groups`·`bestsellers`)을 **추가만** 한다(스키마 버전은 올리지 않는다, 재현 11/16) + 계약 테스트 (옛 보고도 받는지). 가장 먼저 머지해서 양쪽이 같은 모양을 본다.
 3. **데이터 쪽**: 일일 보고 저장에 새 칸을 더하고(재시작해도 남게), 주·월·연 합산(`list_idea_reports`)에
    연령대·베스트셀러를 태운다. 정보나루·우리 판매·재고를 붙인다(분담 합의됨, 재현 11/16). 판매는 `sales-summary`를 읽을 수 있다.
 4. **고객지원 쪽**: 사람 입력 화면(`submit_bestseller_reference`)과 하루 한 번 데이터로 보내기.
