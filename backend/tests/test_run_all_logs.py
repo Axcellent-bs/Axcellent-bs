@@ -97,10 +97,13 @@ def test_same_start_time_does_not_overwrite(tmp_path: Path) -> None:
 
 
 def test_every_log_start_keeps_the_previous_one_first() -> None:
-    """서버·주문 트래픽·수집기 2개: 새로 쓰기 바로 앞 줄에서 keep_log를 부른다."""
+    """서버·주문 트래픽·수집기 3개(인기 검색어·YouTube·판매 기록).
+
+    새로 쓰기 바로 앞 줄에서 keep_log를 부른다.
+    """
     lines = RUN_ALL.read_text(encoding="utf-8").splitlines()
     starts = [i for i, line in enumerate(lines) if 'echo "$START_LINE" > "$LOGS/' in line]
-    assert len(starts) == 4
+    assert len(starts) == 5
     for i in starts:
         assert lines[i - 1].strip().startswith("keep_log "), lines[i]
 

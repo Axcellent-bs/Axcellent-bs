@@ -27,6 +27,7 @@ from ax_contracts.data_access.shop_failed_orders import (
     ShopFailedOrdersResult,
 )
 from ax_contracts.data_access.shop_metric_series import MetricName, ShopMetricSeriesResult
+from ax_contracts.data_access.shop_sales import ShopSalesExportResult
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from data_agent.connectors import (
     EVENTS_LIMIT,
@@ -48,6 +49,7 @@ ORDERS_CHUNK = timedelta(hours=1)
 # 주문 목록 한 페이지 (shop-api 최대 1000). 한 구간에 더 있으면 meta.next_cursor로 넘긴다
 ORDERS_PAGE = 1000
 FAILED_ORDERS_LIMIT = EVENTS_LIMIT  # shop-api `/failed-orders`의 최대 limit
+SALES_EXPORT_PAGE = 500  # 판매 기록 내보내기 한 페이지 (shop-api 최대 1000)
 TRANSACTIONS_METRIC = "payment_count"  # 거래 시도 수 = 결제 시도 수
 
 # shop-api 오류 이름 (예전 이름). 커넥터 공통 오류와 같은 것이다
@@ -323,6 +325,23 @@ class ShopApiConnector:
         second = await self.attributed_orders(mid, window_to, campaign_id, source,
                                               _depth=_depth + 1)  # fmt: skip
         return first + second
+
+    async def sales_export(
+        self, cursor: str | None = None, limit: int = SALES_EXPORT_PAGE
+    ) -> ShopSalesExportResult:
+        """판매 기록 한 페이지 (`GET /api/shop/sales-export`, 계약 `shop_sales`).
+
+        `(updated_at, order_id)` 순서로 `cursor` 다음부터 `limit`건.
+        형식이 다르면 `ShopUnavailable`.
+        """
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        data = await self.api.get("/sales-export", params)
+        try:
+            return ShopSalesExportResult.model_validate(data)
+        except ValidationError as exc:
+            raise ShopUnavailable("BAD_RESPONSE", "판매 기록 응답 형식이 계약과 다르다") from exc
 
     async def products(self) -> list[CatalogProduct]:
         """판매 중 상품 (shop-api가 판매 중만 준다). 형식이 다르면 `ShopUnavailable`."""
