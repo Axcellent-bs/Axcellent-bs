@@ -31,6 +31,7 @@ from ax_contracts.schemas.diagnosis import (
     RequestAgentDiagnosisOutput,
     SentDiagnosis,
 )
+from hr_agent.dept_eval.cards import load_cards
 from hr_agent.dept_eval.criteria import CriteriaError, load_criteria
 from hr_agent.dept_eval.repeat import Finding, find_repeats
 from hr_agent.dept_eval.summary import _event, _latest_cards
@@ -58,7 +59,9 @@ async def send_to_orchestrator(
             context_id=meta.context_id,
             tenant_id=meta.tenant_id,
             token="replaced-by-call_agent",
-            path=list(meta.path),
+            # 이슈를 기록하던 호출(총괄 → 아카이브 → 인사)의 뒤를 잇는 새 요청이다.
+            # 경로를 이으면 총괄이 이미 있어 순환(LOOP_DETECTED)으로 거절되므로 새로 시작한다
+            path=[],
             deadline=deadline,
             idempotency_key=f"diag:{payload.agent}:{payload.step_id}:{newest}",
         ),
@@ -118,7 +121,7 @@ async def request_agent_diagnosis(svc: Services, request: AgentRequest) -> Agent
         criteria = load_criteria()
     except CriteriaError:
         return failed(request, "CRITERIA_UNREADABLE", "기준값 파일을 읽지 못해 요청하지 않았다")
-    cards = _latest_cards(await svc.memory.list_cards(states=["active"]))[:LIMIT]
+    cards = _latest_cards(await load_cards(svc, request.meta))[:LIMIT]
     events = [_event(c) for c in cards]
     findings = find_repeats(events, criteria.repeat, context_id=params.context_id)
     send = _sender(svc)

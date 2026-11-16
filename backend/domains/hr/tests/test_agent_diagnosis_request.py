@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -231,3 +232,107 @@ async def test_invalid_input_is_refused(svc) -> None:
     )
     result = await request_agent_diagnosis(svc, bad)
     assert result.status.value == "rejected" and result.outcome == "INVALID_INPUT"
+
+
+# ---- 카드 읽는 곳 ------------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_real_mode_reads_the_cards_from_the_archive_not_its_own_store(svc) -> None:
+    """실제 모드의 이슈 카드는 아카이브 저장소에 쌓인다(인사 저장소만 읽으면 새 이슈가 안 보임)."""
+    from hr_agent.dept_eval.cards import load_cards
+
+    await _event_card(svc, "a", [_t("rollback", "infra", **SLOW)], 10)  # 인사 저장소의 옛 카드
+    asked: list[str] = []
+
+    async def archive_cards(meta):  # noqa: ANN001, ANN202
+        asked.append(meta.context_id)
+        return []
+
+    svc.extras["eval_cards"] = archive_cards
+    assert await load_cards(svc, _req("ctx_inc_x").meta) == []
+    assert asked == ["ctx_inc_x"]
+
+
+@pytest.mark.asyncio
+async def test_real_mode_asks_the_archive_list_cards_skill(svc, monkeypatch) -> None:
+    from hr_agent.dept_eval import cards as cards_module
+
+    seen: dict = {}
+
+    class _Result:
+        status = cards_module.TaskStatus.COMPLETED
+        output = {"cards": [], "collected_at": datetime.now(UTC).isoformat()}
+
+    async def fake_call(target, request):  # noqa: ANN001, ANN202
+        seen["target"], seen["skill"], seen["input"] = target, request.skill, request.input
+        seen["path"] = request.meta.path
+        return _Result()
+
+    monkeypatch.setattr(cards_module, "call_agent", fake_call)
+    svc.settings = replace(svc.settings, mock=False)
+    got = await cards_module.load_cards(svc, _req("ctx_inc_x").meta)
+    assert got == []
+    assert (seen["target"], seen["skill"], seen["input"]) == (
+        "archive",
+        "list_cards",
+        {"limit": 200},
+    )
+
+
+@pytest.mark.asyncio
+async def test_unreachable_archive_is_an_error_not_an_empty_list(svc, monkeypatch) -> None:
+    from hr_agent.clients.errors import UpstreamError
+    from hr_agent.dept_eval import cards as cards_module
+
+    async def boom(target, request):  # noqa: ANN001, ANN202
+        raise ConnectionError("꺼짐")
+
+    monkeypatch.setattr(cards_module, "call_agent", boom)
+    svc.settings = replace(svc.settings, mock=False)
+    with pytest.raises(UpstreamError):
+        await cards_module.load_cards(svc, _req("ctx_inc_x").meta)
+
+
+@pytest.mark.asyncio
+async def test_the_request_to_the_orchestrator_starts_a_new_path(monkeypatch) -> None:
+    """총괄이 시작한 기록 호출의 뒤라 경로를 이으면 총괄이 이미 있어 LOOP_DETECTED로 거절된다."""
+    from ax_contracts.schemas import RequestMeta
+    from hr_agent.dept_eval import diagnosis as module
+
+    seen: dict = {}
+
+    class _Result:
+        status = module.TaskStatus.COMPLETED
+        output = {"request_id": "diag-1", "status": "received", "duplicate": False}
+
+    async def fake_call(target, request):  # noqa: ANN001, ANN202
+        seen["target"], seen["path"], seen["skill"] = target, request.meta.path, request.skill
+        return _Result()
+
+    monkeypatch.setattr(module, "call_agent", fake_call)
+    meta = RequestMeta(
+        context_id="ctx_inc_a",
+        token="mock:archive",
+        path=["orchestrator", "decisions"],
+        deadline=datetime.now(UTC) + timedelta(seconds=30),
+    )
+    payload = DiagnoseAgentIssueInput.model_validate(
+        {
+            "agent": "infra",
+            "step_id": "rollback",
+            "step_label": "문제 배포 되돌리기",
+            "window": 3,
+            "flagged": 2,
+            "criteria_version": 3,
+            "evidence": [
+                {"context_id": "ctx_inc_a", "title": "t", "verdict": "check", "limit_seconds": 30.0}
+            ],
+            "requested_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    out = await module.send_to_orchestrator(meta, payload)
+    assert out is not None and out.status == "received"
+    assert (seen["target"], seen["skill"], seen["path"]) == (
+        "orchestrator",
+        "diagnose_agent_issue",
+        [],
+    )
