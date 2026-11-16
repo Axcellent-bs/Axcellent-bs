@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from "react-router";
 import { ActivityReport } from "@/components/data/ActivityReport";
 import { IncidentData } from "@/components/data/IncidentData";
 import { LearningKpi } from "@/components/data/LearningKpi";
+import { SalesAnalysis } from "@/components/data/SalesAnalysis";
 import { TrendScan } from "@/components/data/TrendScan";
 import { Chip, TONE, useResource } from "@/components/finance/bits";
 import { DATA_SERVER, ORCH_SERVER, dataAi, sortRecent } from "@/lib/data";
@@ -19,8 +20,8 @@ import { useCompany } from "@/demo/company";
 
 const REFRESH_MS = 30_000;
 
-type Mode = "incident" | "ops" | "trend";
-const MODE_PATH: Record<Mode, string> = { incident: "/data", ops: "/data/ops", trend: "/data/trend" };
+type Mode = "incident" | "ops" | "trend" | "sales";
+const MODE_PATH: Record<Mode, string> = { incident: "/data", ops: "/data/ops", trend: "/data/trend", sales: "/data/sales" };
 
 /** 옛 주소(/data#daily 등)가 가야 할 새 주소. 새 주소면 null */
 function legacyTarget(frag: string): { pathname: string; hash: string } | null {
@@ -35,7 +36,7 @@ export default function DataPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const legacy = legacyTarget(location.hash);
-  const mode: Mode = location.pathname.startsWith(MODE_PATH.trend) ? "trend" : location.pathname.startsWith(MODE_PATH.ops) ? "ops" : "incident";
+  const mode: Mode = location.pathname.startsWith(MODE_PATH.sales) ? "sales" : location.pathname.startsWith(MODE_PATH.trend) ? "trend" : location.pathname.startsWith(MODE_PATH.ops) ? "ops" : "incident";
   const urlIncident = new URLSearchParams(location.search).get("incident");
 
   /** 사건 고르기: 주소(?incident=)에 남겨 새로고침해도 같은 사건을 본다 */
@@ -79,7 +80,7 @@ export default function DataPage() {
   return (
     <div className={`w-full px-4 pb-12 pt-2 sm:px-8 ${mode === "trend" ? "space-y-4" : "space-y-6 sm:space-y-8"}`}>
       {/* 트렌드&콘텐츠는 첫 화면에 탭과 내용이 보이게 제목 한 줄만 (TrendScan). 설명은 그 안 접힘 */}
-      {mode !== "trend" && <header className="flex flex-wrap items-end gap-3">
+      {mode !== "trend" && mode !== "sales" && <header className="flex flex-wrap items-end gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">데이터 분석</h1>
           <p className="mt-1 text-sm text-ink-500">
@@ -112,6 +113,7 @@ export default function DataPage() {
         </div>
       )}
       {mode === "ops" && <LearningKpi tick={tick} incidents={list.env?.data ?? null} />}
+      {mode === "sales" && <SalesAnalysis tick={tick} />}
       {mode === "trend" && <TrendScan dataUp={dataUp} company={company?.name ?? null} />}
     </div>
   );

@@ -31,6 +31,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 import uuid
@@ -68,6 +69,7 @@ from ax_contracts.schemas.data import (
     KpiSummaryInput,
     PromoConceptsRequest,
     RootCauseInput,
+    SalesAnalysisInput,
     ShortsStatsRequest,
     TrendAgeOutput,
     TrendAgeRequest,
@@ -81,6 +83,7 @@ from ax_contracts.schemas.data import (
 )
 from ax_contracts.schemas.idea import IdeaReportInput
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
+from data_agent import catalog as metric_catalog
 from data_agent import data_chat, idea_reports, llm_budget, llm_failure, llm_halt, llm_inflight
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
@@ -100,6 +103,9 @@ from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
 from data_agent.response_cache import DB_ENV as RESPONSES_DB_ENV
 from data_agent.response_cache import ResponseCache
+from data_agent.sales_store import DB_ENV as SALES_DB_ENV
+from data_agent.sales_store import DEFAULT_DB as SALES_DEFAULT_DB
+from data_agent.sales_store import SalesStore
 from data_agent.skills import topic_category
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
@@ -111,6 +117,8 @@ from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
 from data_agent.skills.promo_concepts import make_concepts
 from data_agent.skills.root_cause import estimate_root_cause
+from data_agent.skills.sales_analysis import analyze as analyze_sales
+from data_agent.skills.sales_analysis import evidence as sales_evidence
 from data_agent.skills.shorts_stats import shorts_stats as run_shorts_stats
 from data_agent.skills.trend_age import popular_targets
 from data_agent.skills.trend_age import trend_age as run_trend_age
@@ -366,6 +374,45 @@ async def kpi_summary(request: AgentRequest) -> AgentResult:
         evidence=result.evidence,
         fallback=result.fallback,
         **_fallback_reason(result),
+    )
+
+
+_sales_store: SalesStore | None = None
+
+
+def get_sales_store() -> SalesStore:
+    """매출 분석 표준 판매 저장소 (`DATA_SALES_DB`). 테스트는 `use_sales_store`로 바꿔 끼운다."""
+    global _sales_store
+    if _sales_store is None:
+        _sales_store = SalesStore(os.environ.get(SALES_DB_ENV) or SALES_DEFAULT_DB)
+    return _sales_store
+
+
+def use_sales_store(store: SalesStore | None) -> None:
+    global _sales_store
+    _sales_store = store
+
+
+async def sales_analysis(request: AgentRequest) -> AgentResult:
+    """매출 분석. 표준 판매 저장소만 읽는다. LLM 없음, 상태를 바꾸지 않는다(grade read).
+
+    품질 관문에 걸리면 completed로 답하되 숫자 칸을 비우고 "데이터 부족: 이유"를 담는다.
+    """
+    data = _parse(request, SalesAnalysisInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:  # 다른 고객사 판매 기록은 읽지 않는다
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    out = await asyncio.to_thread(
+        analyze_sales, get_sales_store(), data.tenant_id, data.period, cat.sales, cat.id, now
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=sales_evidence(out, now),
     )
 
 
@@ -1551,6 +1598,7 @@ HANDLERS = {
     "anomaly_detection": anomaly_detection,
     "fraud_score": fraud_score,
     "kpi_summary": kpi_summary,
+    "sales_analysis": sales_analysis,
     "root_cause_hypotheses": root_cause_hypotheses,
     "accuracy_report": accuracy_report,
     "activity_report": activity_report,

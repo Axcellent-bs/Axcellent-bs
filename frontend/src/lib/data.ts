@@ -169,6 +169,54 @@ export interface KpiSummaryOutput {
   /** 운영 중 사람 반응 (공통 로그로 셈). 로그가 없으면 null */
   human_feedback?: HumanFeedback | null;
 }
+// ---------------------------------------------------------------- 매출 분석 (sales_analysis, 백엔드 계약과 같은 모양)
+export type SalesPeriod = "today" | "7d" | "30d";
+export interface SalesKpi {
+  key: "revenue" | "order_count" | "aov" | "repeat_rate";
+  label: string;
+  unit: "won" | "count" | "rate";
+  value: number | null;
+  previous: number | null;
+  change: number | null;
+  change_kind: "ratio" | "points";
+}
+export interface SalesCategory { code: string; label: string; revenue: number; share: number | null; previous_revenue: number; change: number | null }
+export interface SalesProductMove {
+  product_id: string; label: string; category_label: string | null;
+  revenue: number; previous_revenue: number; change: number | null; orders: number; previous_orders: number;
+}
+export interface SalesCustomers {
+  buyers: number; repeat_buyers: number; new_revenue: number; repeat_revenue: number;
+  new_share: number | null; repeat_share: number | null; coupon_orders: number; coupon_order_rate: number | null;
+}
+export interface SalesChannel { source: string | null; medium: string | null; label: string; revenue: number; orders: number; share: number | null }
+export interface SalesQuality {
+  rows_in_period: number; empty_days: string[]; dropped_rows: number; dropped_reasons: Record<string, number>;
+  last_synced_at: string | null; unknown_category_codes: string[];
+}
+export interface SalesBasis {
+  period_from: string; period_to: string; previous_from: string; previous_to: string;
+  rows_read: number; last_synced_at: string | null; catalog_id: string; catalog_version: string | null;
+}
+export interface SalesAnalysisOutput {
+  period: SalesPeriod;
+  as_of: string;
+  status: "ok" | "insufficient";
+  insufficient_reasons: string[];
+  definition: string;
+  kpis: SalesKpi[];
+  categories: SalesCategory[];
+  products_up: SalesProductMove[];
+  products_down: SalesProductMove[];
+  products_low_sample: number;
+  min_product_orders: number | null;
+  customers: SalesCustomers | null;
+  channels: SalesChannel[];
+  quality: SalesQuality;
+  basis: SalesBasis;
+  summary: string;
+}
+
 export interface HumanFeedback {
   handoffs_closed: number; handoffs_rejected: number; handoff_reject_rate: number | null;
   reviews_decided: number; reviews_rejected: number; review_reject_rate: number | null;
@@ -1843,6 +1891,8 @@ export const dataAi = {
     return true;
   },
   kpiSummary: () => askData<KpiSummaryOutput>("kpi_summary", "KPI"),
+  /** 매출 분석. period: 오늘 · 최근 7일 · 최근 30일. 숫자는 서버가 계산한 값 그대로 */
+  salesAnalysis: (period: SalesPeriod) => askData<SalesAnalysisOutput>("sales_analysis", "매출 분석", { period }),
   accuracyReport: () => askData<AccuracyReportOutput>("accuracy_report", "정확도 평가 결과"),
   /** start: 한국 시간 날짜(YYYY-MM-DD). 비우면 서버가 직전 기간을 고른다. services: 비우면 전체 */
   activityReport: (period: ActivityPeriod, start: string | null, services: string[] = []) =>
