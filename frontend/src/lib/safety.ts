@@ -100,4 +100,5 @@ export const SAFETY_ACTION_KO: Record<string, string> = {
   auto_policy_update: "자동 처리 기준 바꾸기", confirm_spec: "기획서 확정", merge_pr: "코드 변경 합치기", repo_revert_pr: "코드 변경 되돌리기",
   repo_close_pr: "코드 변경 닫기", repo_reopen_pr: "코드 변경 다시 열기", repo_comment: "코드 변경에 댓글", repo_delete_branch: "브랜치 지우기",
   code_write: "코드 쓰기", dev_chat: "개발 대화",
+  retry_stuck_intake: "멈춘 접수 다시 시도",
 };
