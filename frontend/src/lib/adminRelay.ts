@@ -57,9 +57,9 @@ export const relayEnabled = Boolean(DASHBOARD_API_URL);
 async function get<T, M = Record<string, unknown>>(path: string): Promise<{ data: T; meta: M }> {
   if (!relayEnabled) throw new ApiError("총괄 AI 읽기 연결이 꺼져 있습니다", 403);
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, { cache: "no-store" });
-  let body: { data?: T; meta?: M; error?: { message?: string } } = {};
+  let body: { data?: T; meta?: M; error?: { code?: string; message?: string } } = {};
   try { body = await res.json(); } catch { /* 본문이 JSON이 아님 */ }
-  if (!res.ok || body.data === undefined) throw new ApiError(body.error?.message ?? `요청 실패 (${res.status})`, res.status);
+  if (!res.ok || body.data === undefined) throw new ApiError(body.error?.message ?? `요청 실패 (${res.status})`, res.status, undefined, body.error?.code);
   return { data: body.data, meta: (body.meta ?? {}) as M };
 }
 
@@ -69,11 +69,12 @@ export const adminRelay = {
 };
 
 /** 연결 오류를 화면 문구로 */
-export function relayError(error: { status?: number; message: string }): string {
+export function relayError(error: { status?: number; message: string; code?: string | null }): string {
   if (error.status === 502) return "총괄 AI에 연결할 수 없습니다. 총괄 AI 서버가 켜져 있는지 확인해 주세요.";
   if (error.status === 504) return "총괄 AI가 제때 응답하지 않았습니다.";
   if (error.status === 404) return "부서 사용량 경로가 서버에 없습니다. 판매 서버와 화면 중계 서버(dashboard-api)를 최신으로 올려 주세요.";
-  if (error.status === 401 || error.status === 403) return "총괄 AI 읽기 권한이 없습니다.";
+  // 판매 서버가 화면 중계 서버(dashboard-api)의 열람 토큰을 받지 않음 (503 UPSTREAM_AUTH)
+  if (error.code === "UPSTREAM_AUTH") return "총괄 AI 읽기 권한이 없습니다.";
   return error.message;
 }
 

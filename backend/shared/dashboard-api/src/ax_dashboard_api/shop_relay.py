@@ -30,6 +30,8 @@ TIMEOUT_SECONDS = 10.0
 # 테스트에서 httpx.MockTransport로 바꿔 끼워요
 TRANSPORT: httpx.AsyncBaseTransport | None = None
 VIEWER_TOKEN_ENV = "SHOP_VIEWER_TOKEN"
+# shop-api `VIEWER_TOKEN_MIN_LENGTH`와 같아요. 더 짧으면 판매 서버가 열람 토큰을 꺼 둬요
+VIEWER_TOKEN_MIN_LENGTH = 24
 # 판매 서버 목록 상한과 같아요 (shop-api `marketing_client.LIST_LIMIT_MAX`)
 LIST_LIMIT_MAX = 100
 
@@ -48,6 +50,13 @@ router = APIRouter(prefix="/api/dashboard/shop", dependencies=[Depends(require_h
 
 def _token() -> str:
     token = os.getenv(VIEWER_TOKEN_ENV, "").strip()
+    if token and len(token) < VIEWER_TOKEN_MIN_LENGTH:
+        # 값은 문구에 넣지 않아요
+        raise ApiError(
+            503,
+            "SHOP_VIEWER_TOKEN_TOO_SHORT",
+            f"{VIEWER_TOKEN_ENV}가 {VIEWER_TOKEN_MIN_LENGTH}자보다 짧아 판매 서버가 받지 않아요",
+        )
     if token:
         return token
     if is_mock():

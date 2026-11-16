@@ -181,8 +181,8 @@ export function ReceivedBriefs() {
       setList(await briefs.list());
       setError(null);
     } catch (e) {
-      const err = e as { status?: number; message?: string };
-      setError(briefsError({ status: err.status, message: err.message ?? "알 수 없는 오류" }));
+      const err = e as { status?: number; message?: string; code?: string | null };
+      setError(briefsError({ status: err.status, message: err.message ?? "알 수 없는 오류", code: err.code }));
     }
   }, []);
 

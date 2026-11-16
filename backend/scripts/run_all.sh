@@ -392,14 +392,15 @@ os.chmod(path, 0o600)
 print(line, human, work, ','.join(f'{p}:{t}' for p, t in ph.items()) or '-',
       ','.join(f'{p}:{t}' for p, t in pw.items()) or '-', viewer)
 " "$NAMES" "$DATA/tokens.env" "${AX_PEOPLE:-}")
-PEOPLE_WORK="$(printf '%s' "$PEOPLE_WORK" | tr -d '\015')"
-VIEWER_TOKEN="$(printf '%s' "$VIEWER_TOKEN" | tr -d '\015')"  # Windows 파이썬이 줄 끝에 붙이는 CR을 지운다
+PEOPLE_WORK="$(printf '%s' "$PEOPLE_WORK" | tr -d '\015')"  # Windows 파이썬이 줄 끝에 붙이는 CR을 지운다
+VIEWER_TOKEN="$(printf '%s' "$VIEWER_TOKEN" | tr -d '\015')"
 [ "$PEOPLE_HUMAN" = "-" ] && PEOPLE_HUMAN=""
 [ "$PEOPLE_WORK" = "-" ] && PEOPLE_WORK=""
 export AX_AGENT_TOKENS
 # 판매 서버 읽기 전용 열람 토큰: shop-api가 검증하고 dashboard-api가 서버 쪽에서 붙인다(화면에는 넘기지 않는다).
 # .env에 SHOP_VIEWER_TOKEN이 있으면 그 값을, 없으면 tokens.env에 둔 값을 쓴다
 export SHOP_VIEWER_TOKEN="${SHOP_VIEWER_TOKEN:-$VIEWER_TOKEN}"
+[ "${#SHOP_VIEWER_TOKEN}" -ge 24 ] || echo "경고: .env의 SHOP_VIEWER_TOKEN이 24자보다 짧아 판매 서버 관리 읽기 중계(총괄·기획안·장애 상태)가 503입니다 (값은 출력하지 않음)" >&2
 # 사람 토큰: 안전 관문 보류 결정·재무·dashboard-api 쓰기. 이름 "공용"은 모두가 같이 쓰는 토큰이다
 # (화면 데모 로그인의 "운영자" 역할과는 다른 것. 사람마다 나누려면 AX_PEOPLE)
 # 사람별 토큰(AX_PEOPLE)이 있으면 같이 넣는다. 공용 토큰은 로컬 화면 빌드(web.env)가 쓴다

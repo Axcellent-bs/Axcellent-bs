@@ -133,6 +133,17 @@ def test_missing_viewer_token_is_503_without_calling_the_shop(seen, client, monk
     assert seen == []
 
 
+def test_short_viewer_token_is_503_without_leaking_it(seen, client, monkeypatch) -> None:
+    monkeypatch.setenv("SHOP_VIEWER_TOKEN", "short-secret-value")
+    res = client.get("/api/dashboard/shop/faults")
+    assert res.status_code == 503
+    error = res.json()["error"]
+    assert error["code"] == "SHOP_VIEWER_TOKEN_TOO_SHORT"
+    assert "SHOP_VIEWER_TOKEN" in error["message"] and "24" in error["message"]
+    assert "short-secret-value" not in res.text
+    assert seen == []
+
+
 def test_mock_mode_without_a_token_uses_the_mock_viewer(seen, client, monkeypatch) -> None:
     monkeypatch.delenv("SHOP_VIEWER_TOKEN")
     monkeypatch.setenv("DASHBOARD_MOCK", "1")

@@ -323,9 +323,10 @@ export const DRAFT_STATE_KO: Record<string, string> = {
 export const draftStateKo = (state: string | null) => (state ? DRAFT_STATE_KO[state] ?? state : "확인할 수 없음");
 
 /** 연결 오류를 화면 문구로 */
-export function briefsError(error: { status?: number; message: string }): string {
+export function briefsError(error: { status?: number; message: string; code?: string | null }): string {
   if (error.status === 502) return "마케팅 AI에 연결할 수 없습니다. 마케팅 서버가 켜져 있는지 확인해 주세요.";
   if (error.status === 504) return "마케팅 AI가 제때 응답하지 않았습니다. 잠시 뒤 다시 시도해 주세요.";
-  if (error.status === 403 || error.status === 401) return "받은 기획안을 읽을 권한이 없습니다. 화면 중계 서버의 열람 토큰(SHOP_VIEWER_TOKEN) 설정을 확인해 주세요.";
+  // 판매 서버가 화면 중계 서버(dashboard-api)의 열람 토큰을 받지 않음 (503 UPSTREAM_AUTH)
+  if (error.code === "UPSTREAM_AUTH") return "받은 기획안을 읽을 권한이 없습니다. 화면 중계 서버의 열람 토큰(SHOP_VIEWER_TOKEN) 설정을 확인해 주세요.";
   return error.message;
 }
