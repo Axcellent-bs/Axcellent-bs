@@ -3394,6 +3394,9 @@ class SalesBasis(AxModel):
     last_synced_at: UtcDatetime | None = None
     catalog_id: str
     catalog_version: str | None = None
+    # 저장소를 채운 출처가 실제 판매 서버가 아닐 때의 표시 (11/16). 가짜 출처(데모 전용
+    # `DATA_SALES_SOURCE=fake`)로 채웠으면 "가짜 데이터(데모용)". 실제 판매 서버면 None
+    data_source: str | None = None
 
 
 class SalesAnalysisOutput(AxModel):
@@ -3665,6 +3668,44 @@ class EventProposalSendOutput(AxModel):
     outcome: Literal["created", "duplicate", "rejected"]
     proposal_ref: str | None = None  # 기획 제안 번호 (PROP-n)
     reason: str = ""
+
+
+# ---------------------------------------------------------------- segment_options (11/16)
+# 화면(고객·시장 분석 탭)의 드롭다운·칩·목록을 회사 카탈로그 `[sales]`에서 내려 준다. 화면 코드에
+# 속성·장르·질문 이름을 고정하지 않게. 설정을 읽기만 한다(grade read, 숫자 없음).
+class OptionItem(AxModel):
+    code: str
+    label: str
+
+
+class OptionAttribute(AxModel):
+    key: str
+    label: str
+    values: list[OptionItem] = Field(default_factory=list)  # 카탈로그 순서 그대로
+
+
+class OptionQuestion(AxModel):
+    label: str
+    filters: dict[str, str] = Field(default_factory=dict)  # 속성 key → 값 code
+
+
+class SegmentOptionsInput(AxModel):
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class SegmentOptionsOutput(AxModel):
+    attributes: list[OptionAttribute] = Field(default_factory=list)
+    genres: list[OptionItem] = Field(default_factory=list)
+    categories: list[OptionItem] = Field(default_factory=list)
+    quick_questions: list[OptionQuestion] = Field(default_factory=list)
+    event_kinds: list[OptionItem] = Field(default_factory=list)
+    periods: list[SegmentPeriod] = Field(default_factory=lambda: ["30d", "90d", "365d"])
+    # market_coverage에 넣을 수 있는 속성 조합 (카탈로그 population 순서)
+    population_keys: list[list[str]] = Field(default_factory=list)
+    min_group_size: int = Field(default=5, ge=1)
+    data_source: str | None = None  # SalesBasis.data_source와 같은 값
+    catalog_id: str = ""
+    catalog_version: str | None = None
 
 
 TrendInsight.model_rebuild()

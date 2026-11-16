@@ -121,3 +121,14 @@ def test_sales_analysis_output_insufficient_has_no_numbers() -> None:
     assert out.kpis == [] and out.customers is None and out.quality.rows_in_period == 0
     dumped = SalesAnalysisOutput.model_validate(out.model_dump(mode="json"))
     assert dumped == out
+
+
+def test_sales_basis_data_source_is_optional() -> None:
+    """11/16 추가: 근거의 출처 표시 (가짜 출처면 "가짜 데이터(데모용)"). 없으면 None."""
+    old = {"period_from": "2026-11-16T00:00:00Z", "period_to": "2026-11-16T03:00:00Z",
+           "previous_from": "2026-11-15T00:00:00Z", "previous_to": "2026-11-15T03:00:00Z",
+           "catalog_id": "catbooks"}  # fmt: skip
+    assert SalesBasis.model_validate(old).data_source is None  # 예전 응답도 그대로 받는다
+    fake = SalesBasis.model_validate({**old, "data_source": "가짜 데이터(데모용)"})
+    assert fake.data_source == "가짜 데이터(데모용)"
+    assert SalesBasis.model_validate(fake.model_dump(mode="json")) == fake
