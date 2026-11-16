@@ -333,7 +333,8 @@ export interface Cashflow {
   note: string;
 }
 /** `due`: 기한(YYYY-MM-DD, finance_policy.toml [closing]). `overdue`: 안 끝났는데 기한이 지남 */
-export interface CloseItem { key: string; label: string; status: "done" | "pending" | "unknown"; detail: string; link: string; due?: string; overdue?: boolean }
+/** `alert`: 기한이 지나 사람 할 일함(받은 요청)에 올린 기록 (11/16, close_alerts.py) */
+export interface CloseItem { key: string; label: string; status: "done" | "pending" | "unknown"; detail: string; link: string; due?: string; overdue?: boolean; alert?: { task_id: string; assignee_unit: string; at: string } }
 export interface CloseChecklist { month: string; items: CloseItem[]; done: number; total: number; ready: boolean; closed: boolean }
 
 // ---------------------------------------------------------------- ④ 팀 예산 (인사 ↔ 재무)

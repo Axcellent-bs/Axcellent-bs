@@ -23,7 +23,7 @@ from ax_contracts.schemas import AgentCard
 from finance_agent import closing, exports, persist, pg_file, screen_cache, tax
 from finance_agent import finance_config as fc
 from finance_agent.chat.a2a import CHAT_HANDLERS
-from finance_agent.finance_api import add_finance_api, run_export_cycle
+from finance_agent.finance_api import add_finance_api, run_close_alerts, run_export_cycle
 from finance_agent.handlers import (
     HANDLERS,
     SUBSCRIBED_EVENTS,
@@ -65,6 +65,9 @@ Trigger = Literal["auto", "manual"]
 DEFAULT_DAILY_CLOSING_SECONDS = 86400
 DAILY_CLOSING_FIRST_DELAY = 10.0
 DAILY_CLOSING_SCHEDULE: dict[str, Any] = {"interval_seconds": 0, "next_run_at": None}
+# 월 마감 기한 지남 → 받은 요청에 올리기 (close_alerts.py). 켠 뒤 잠시 뒤 한 번, 그다음 이 간격마다
+DEFAULT_CLOSE_ALERT_SECONDS = 3600
+CLOSE_ALERT_FIRST_DELAY = 60.0
 
 
 def _card_path() -> Path:
@@ -185,6 +188,31 @@ def daily_closing_seconds() -> int:
         return DEFAULT_DAILY_CLOSING_SECONDS
 
 
+def close_alert_seconds() -> int:
+    """`FINANCE_CLOSE_ALERT_SECONDS` (기본 3600초). 0이면 끈다. 잘못된 값은 기본값."""
+    raw = os.getenv("FINANCE_CLOSE_ALERT_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_CLOSE_ALERT_SECONDS
+    try:
+        return max(int(raw), 0)
+    except ValueError:
+        logger.warning("FINANCE_CLOSE_ALERT_SECONDS=%r는 숫자가 아니라 기본 3600초를 쓴다", raw)
+        return DEFAULT_CLOSE_ALERT_SECONDS
+
+
+async def close_alert_loop(interval: float, first_delay: float = CLOSE_ALERT_FIRST_DELAY):
+    """월 마감 기한 지난 항목을 받은 요청에 올린다. 한 번 실패해도 계속 돈다."""
+    delay = first_delay
+    while True:
+        await asyncio.sleep(delay)
+        try:
+            for r in await run_close_alerts():
+                logger.info("월 마감 기한 지남 받은 요청: %s %s", r["status"], r["key"])
+        except Exception:  # 다음 회차는 그대로 돈다
+            logger.exception("월 마감 기한 지남 받은 요청 올리기 중 오류")
+        delay = interval
+
+
 async def run_and_store_daily_closing(trigger: Trigger) -> dict[str, Any]:
     """전날 하루 결산을 계산해 `/api/finance/closing/last`가 읽는 곳에 남긴다.
 
@@ -248,6 +276,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(asyncio.create_task(self_test_loop(interval, SELF_TEST_FIRST_DELAY)))
     if saved_to is not None:  # 시험과 단독 실행에서는 돌리지 않는다
         tasks.append(asyncio.create_task(opinion_retry_loop()))
+        if alert_interval := close_alert_seconds():
+            tasks.append(asyncio.create_task(close_alert_loop(alert_interval)))
     if export_interval := export_seconds():
         tasks.append(asyncio.create_task(export_loop(export_interval)))
     if closing_interval:
