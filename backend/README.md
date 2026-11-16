@@ -84,7 +84,8 @@ bash scripts/run_all.sh stop
   화면 빌드의 `VITE_SHOP_VIEWER_TOKEN`에 같은 값을 넣는다. 총괄 사건·부서 읽기 중계와 장애 상태 읽기(GET)만 열리고,
   쓰기·그 밖의 관리 API는 모두 403이다. 에이전트 토큰 명부와 따로 두어 다른 서버(총괄 등)로는 통하지 않는다.
   켤 때마다 바뀌는 에이전트 토큰과 달리 고정 값이라 정적 빌드에 넣어도 재시작에 깨지지 않는다.
-- 캣북스 데이터(`.data/shop.db`)·공통 로그(`.data/common_log.db`)·인사(`.data/hr.db`)는 파일이라 다시 켜도 남는다.
+- 캣북스 데이터(`.data/shop.db`)·공통 로그(`.data/common_log.db`)·인사(`.data/hr.db`)·아카이브(`.data/archive.db`, 검색 벡터는 `archive_vectors.db`)는 파일이라 다시 켜도 남는다.
+  아카이브 파일이 없으면 예전처럼 `hr.db`를 같이 읽는다. 옛 기록은 서버를 끄고 `uv run python scripts/migrate_archive_db.py`로 옮긴다(백업 후 복사, `--dry-run`으로 건수 확인, 원본은 지우지 않음).
 - `SHOP_TRAFFIC=on`이면 `scripts/shop_traffic.py`가 3초마다 캣북스 고객 주문·결제를 넣는다. 결제 성공·실패는 쇼핑몰이 정한다.
   결제가 실패한 고객 일부(30%)는 쇼핑몰 문의 창구로 그 주문에 대해 문의를 남긴다 → 고객지원 AI가 받아 답변 초안을 쓴다.
 - 장애 넣기·빼기는 운영자 명령이다: `bash scripts/shop_fault.sh failure|latency|clear|status`. 테스트 기록을 지우려면 `bash scripts/run_all.sh reset`.
