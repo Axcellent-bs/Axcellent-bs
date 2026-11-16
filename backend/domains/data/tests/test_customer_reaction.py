@@ -40,13 +40,15 @@ def _row(pid: str, claims: int, defects: int, sold: int | None, rate: float | No
 
 
 def _support(rows: list[dict], seen: list[AgentRequest], status=TaskStatus.COMPLETED,
-             outcome: str | None = None):  # noqa: ANN202
+             outcome: str | None = None, missing: list[str] | None = None):  # noqa: ANN202
     async def send(target: str, request: AgentRequest) -> AgentResult:
         seen.append(request)
         assert (target, request.skill) == ("support", "book_issue_stats")
         output = {"period": "month", "period_start": "2026-10-17", "period_end": "2026-11-16",
                   "items": rows, "total_claims": len(rows), "claims_without_product": 0,
                   "sales_read": True}  # fmt: skip
+        if missing is not None:
+            output["missing"] = missing
         return AgentResult(meta=request.meta, status=status, outcome=outcome,
                            output=output if status == TaskStatus.COMPLETED else {})  # fmt: skip
 
@@ -111,8 +113,60 @@ def test_under_five_sold_is_left_out_with_reason() -> None:
     assert ev.missing == [
         "고객 반응 · 적게 팔린 책: 최근 한 달 판매 4권 (5권 미만이라 넣지 않음)",
         "고객 반응 · 판매 모름: 판매 수량을 읽지 못함",
-        "고객 반응 · 클레임 없음: 최근 한 달 클레임이 없어 집계에 없음 (판매 수량 모름)",
+        # #1129 뒤로 줄이 없다는 것은 고객지원이 그 상품을 모른다는 뜻이다
+        "고객 반응 · 클레임 없음: 고객지원 집계에 이 상품이 없음 (없는 상품 ID일 수 있음)",
     ]
+
+
+def test_zero_claim_product_is_filled_with_zero_rate() -> None:
+    """#1129: 물은 상품은 클레임 0건이어도 줄이 온다. 판매 5권 이상이면 비율 0으로 넣는다."""
+    send = _support([_row("p0", 0, 0, 40, 0.0), _row("p9", 0, 0, None, None)], [])
+    out = _brief(_insight([("p0", "조용한 책"), ("p9", "판매 모르는 책")]))
+    asyncio.run(add_reactions(out, _fn(send), []))
+    ev = out.insights[0].evidence
+    (got,) = ev.customer_reaction
+    assert (got.product_id, got.claim_count, got.defect_count, got.sold_qty, got.claim_rate) == (
+        "p0", 0, 0, 40, 0.0,
+    )  # fmt: skip
+    assert got.note is None
+    # 0건이어도 판매 수량을 모르면 예전처럼 뺀다
+    assert ev.missing == ["고객 반응 · 판매 모르는 책: 판매 수량을 읽지 못함"]
+
+
+def test_unknown_product_gets_new_missing_text() -> None:
+    send = _support([_row("p1", 1, 0, 30, 0.033)], [])
+    out = _brief(_insight([("p1", "아는 책"), ("ghost", "모르는 책")]))
+    asyncio.run(add_reactions(out, _fn(send), []))
+    ev = out.insights[0].evidence
+    assert [r.product_id for r in ev.customer_reaction] == ["p1"]
+    assert ev.missing == [
+        "고객 반응 · 모르는 책: 고객지원 집계에 이 상품이 없음 (없는 상품 ID일 수 있음)"
+    ]
+
+
+def test_support_missing_sentences_move_to_evidence_once() -> None:
+    slow = "판매 수량을 판매 서버에서 읽지 못함 (시간 초과)"
+    notes = [slow, slow, "주문 번호가 없는 클레임 2건은 상품별로 나누지 않음"]
+    send = _support([_row("p1", 3, 1, 120, 0.025)], [], missing=notes)
+    out = _brief(_insight([("p1", "책")]), _insight([("p1", "책")], 2), _insight([], 3))
+    asyncio.run(add_reactions(out, _fn(send), []))
+    for i in out.insights[:2]:  # 연결 상품이 있는 인사이트에만, 같은 문장은 한 번만
+        assert i.evidence.missing == [
+            "판매 수량을 판매 서버에서 읽지 못함 (시간 초과)",
+            "주문 번호가 없는 클레임 2건은 상품별로 나누지 않음",
+        ]
+    assert out.insights[2].evidence.missing == []
+    got = asyncio.run(cr.read(["p1"], META, send=send, now=NOW))
+    assert got.missing == (
+        "판매 수량을 판매 서버에서 읽지 못함 (시간 초과)",
+        "주문 번호가 없는 클레임 2건은 상품별로 나누지 않음",
+    )
+
+
+def test_old_response_without_missing_still_reads() -> None:
+    got = asyncio.run(cr.read(["p1"], META, send=_support([_row("p1", 3, 1, 120, 0.025)], []),
+                              now=NOW))  # fmt: skip
+    assert got.missing == () and "p1" in got.rows
 
 
 @pytest.mark.parametrize(
