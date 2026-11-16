@@ -125,7 +125,7 @@ class IncidentManager:
         self.plan_factory = plan_factory
         self.store = store
         self.incidents: dict[str, Incident] = {}
-        self.finance_opinions = FinanceOpinions()
+        self.finance_opinions = FinanceOpinions(store)
         self._seen: set[str] = set()
         self._tasks: dict[str, asyncio.Task[Incident]] = {}
 
@@ -146,6 +146,7 @@ class IncidentManager:
         """
         if self.store is None:
             return 0
+        self.finance_opinions.restore()  # 재무가 보낸 의견도 다시 올린다
         self._seen |= self.store.seen_ids()
         interrupted = 0
         for inc in self.store.load_all():

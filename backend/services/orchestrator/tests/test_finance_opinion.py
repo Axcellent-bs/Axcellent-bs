@@ -90,3 +90,59 @@ def test_old_opinions_are_dropped_past_the_limit(client, monkeypatch) -> None:
         _send(http, {**OPINION, "opinion_id": f"op_{n}"})
     ids = [r["opinion"]["opinion_id"] for r in manager.finance_opinions.list()]
     assert ids == ["op_1", "op_2"]
+
+
+def test_opinions_survive_a_restart(tmp_path, monkeypatch) -> None:
+    """저장소를 주면 받은 의견이 파일에 남아 다시 켜도 그대로 올라온다."""
+    from ax_orchestrator.store import IncidentStore
+
+    monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
+    path = str(tmp_path / "orch.db")
+    first = IncidentManager(None, scenario_a, store=IncidentStore(path))  # type: ignore[arg-type]
+    monkeypatch.setattr(state, "manager", first)
+    http = TestClient(app)
+    _send(http, OPINION)
+    _send(http, {**OPINION, "opinion_id": "op_2", "kind": "insight", "campaign_id": None})
+    assert first.store is not None
+    first.store.close()
+
+    again = IncidentManager(None, scenario_a, store=IncidentStore(path))  # type: ignore[arg-type]
+    again.restore()
+    ids = [r["opinion"]["opinion_id"] for r in again.finance_opinions.list()]
+    assert ids == ["op_1", "op_2"]
+    assert again.finance_opinions.list()[0]["opinion"]["profit_krw"] == 207776
+    # 다시 켠 뒤 같은 의견이 또 와도 한 번만
+    monkeypatch.setattr(state, "manager", again)
+    assert _send(http, OPINION).outcome == "duplicate"
+    set_agent_name("orchestrator")
+
+
+def test_dropped_past_the_limit_also_leave_the_file(tmp_path, monkeypatch) -> None:
+    from ax_orchestrator import finance_opinions
+    from ax_orchestrator.store import IncidentStore
+
+    monkeypatch.setattr(finance_opinions, "MAX_OPINIONS", 2)
+    store = IncidentStore(str(tmp_path / "orch.db"))
+    kept = finance_opinions.FinanceOpinions(store)
+    from ax_contracts.schemas.finance import FinanceOpinion
+
+    for n in range(3):
+        kept.add(FinanceOpinion.model_validate({**OPINION, "opinion_id": f"op_{n}"}), "ctx")
+    assert [r["opinion"]["opinion_id"] for r in store.load_opinions()] == ["op_1", "op_2"]
+
+
+def test_screen_lists_received_opinions_newest_first(client) -> None:
+    http, _ = client
+    _send(http, OPINION)
+    _send(http, {**OPINION, "opinion_id": "op_2"})
+    res = http.get("/api/finance-opinions")
+    assert res.status_code == 200
+    rows = res.json()["data"]
+    assert [r["opinion"]["opinion_id"] for r in rows] == ["op_2", "op_1"]
+    assert rows[0]["received_at"] and rows[0]["context_id"] == "ctx_cmp_1"
+
+
+def test_screen_is_empty_without_manager(client, monkeypatch) -> None:
+    http, _ = client
+    monkeypatch.setattr(state, "manager", None)
+    assert http.get("/api/finance-opinions").json()["data"] == []
