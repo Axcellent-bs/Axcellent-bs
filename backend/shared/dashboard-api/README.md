@@ -26,6 +26,19 @@
 | `/queue-entries` | `/admin/queue` |
 | `/reviews` | `/admin/reviews` |
 
+### 판매 서버 관리 읽기 중계 (GET만)
+화면이 판매 서버(shop-api)를 직접 부르지 않게 정해 둔 경로만 대신 읽어요(`shop_relay.py`). 주소는 `agent_url("shop-api")`(회사 연결 → `AX_SHOP_API_URL` → 기본), 토큰은 서버 쪽 `SHOP_VIEWER_TOKEN`이에요. 응답은 판매 서버의 `{data, meta}` 그대로예요.
+| 경로 (`/api/dashboard/shop` 아래) | 판매 서버 경로 |
+| --- | --- |
+| `/orchestrator/incidents` | `/api/shop/admin/orchestrator/incidents` |
+| `/orchestrator/departments` | `/api/shop/admin/orchestrator/departments` |
+| `/marketing/briefs?limit` | `/api/shop/admin/marketing/briefs` |
+| `/marketing/outage-sns-drafts?limit&include_merged` | `/api/shop/admin/marketing/outage-sns-drafts` |
+| `/banners` | `/api/shop/banners` |
+| `/faults` | `/api/shop/admin/faults` (상태 읽기만, 넣기·빼기는 운영자 명령) |
+
+오류: 연결 못 함 502 `UPSTREAM_UNAVAILABLE`, 시간 초과(10초) 504 `UPSTREAM_TIMEOUT`, 판매 서버가 토큰을 거절하면 503 `UPSTREAM_AUTH`, 토큰 미설정 503 `SHOP_VIEWER_TOKEN_NOT_SET`, 경로 없음 404 `UPSTREAM_NOT_FOUND`, 판매 서버 중계의 502·504는 상태·문장 그대로(`UPSTREAM_RELAY`), 그 밖은 502 `UPSTREAM_ERROR`.
+
 ### 주문 내역 (읽기 전용, #798)
 상담 콘솔 "AI 처리 내역 > 주문 내역" 탭이 쓴다. 판매 서버(shop-api)의 주문을 그대로 맞춰 줄 뿐 쓰지 않는다(취소·환불은 클레임 흐름).
 - `GET /orders?user_id&since&until`: 구매자의 주문, **최신순**. `since` 이상·`until` 미만(주문 시각, ISO 8601, 시간대 없으면 UTC)이고 둘 다 없으면 전체다. 잘못된 시각은 400 `INVALID_PERIOD`. 칸: `id`·`order_no`·`status`·`status_ko`·`title`에 `created_at`·`total_amount`(실제 결제 금액)·`refunded_amount`·`item_count`를 더했다(기존 칸 그대로).

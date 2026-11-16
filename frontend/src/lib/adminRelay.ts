@@ -1,11 +1,12 @@
 import { ApiError } from "./apiError";
 import type { OrchIncident, OrchStep } from "./agentChat";
-import { RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
+import { DASHBOARD_API_URL } from "./env";
 
-// 총괄 이슈·부서 사용량 읽기. 화면은 총괄을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
+// 총괄 이슈·부서 사용량 읽기. 화면은 총괄도 판매 서버도 직접 부르지 않고 dashboard-api 중계(GET만,
+// `/api/dashboard/shop/*`)를 부른다. dashboard-api가 회사 연결 주소의 shop-api를 서버 쪽 열람 토큰으로 읽는다.
 // 응답 모양은 ax-backend `orchestrator/src/ax_orchestrator/models.py`(`Incident.view()`)와
 // `main.py`(`departments()`) 기준이고, 중계 응답은 OpenAPI에 모양이 없어 손으로 적는다.
-// 토큰은 환경변수(개발용)에서만 오고 브라우저 저장소에는 두지 않는다. 진짜 로그인은 사람 인증 뒤에 붙는다.
+// 화면 번들에는 판매 서버 주소·토큰이 없다.
 
 export type StepStatus = "pending" | "running" | "completed" | "failed" | "held" | "waiting_human" | "waiting_async" | "skipped" | "rejected_by_human" | "transfer_queued";
 
@@ -50,29 +51,30 @@ export interface Department {
 }
 export interface DepartmentsMeta { mock?: boolean; window_seconds?: number; bucket_seconds?: number }
 
-/** 토큰이 없으면(운영 빌드 기본) 총괄 화면과 부서 사용량이 꺼진다 */
-export const relayEnabled = Boolean(RELAY_VIEW_TOKEN && RELAY_API_URL);
+/** 화면 중계 서버(dashboard-api) 주소가 비어 있으면 총괄 화면과 부서 사용량이 꺼진다 */
+export const relayEnabled = Boolean(DASHBOARD_API_URL);
 
 async function get<T, M = Record<string, unknown>>(path: string): Promise<{ data: T; meta: M }> {
   if (!relayEnabled) throw new ApiError("총괄 AI 읽기 연결이 꺼져 있습니다", 403);
-  const res = await fetch(`${RELAY_API_URL}${path}`, { headers: { Authorization: `Bearer ${RELAY_VIEW_TOKEN}` }, cache: "no-store" });
-  let body: { data?: T; meta?: M; error?: { message?: string } } = {};
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { cache: "no-store" });
+  let body: { data?: T; meta?: M; error?: { code?: string; message?: string } } = {};
   try { body = await res.json(); } catch { /* 본문이 JSON이 아님 */ }
-  if (!res.ok || body.data === undefined) throw new ApiError(body.error?.message ?? `요청 실패 (${res.status})`, res.status);
+  if (!res.ok || body.data === undefined) throw new ApiError(body.error?.message ?? `요청 실패 (${res.status})`, res.status, undefined, body.error?.code);
   return { data: body.data, meta: (body.meta ?? {}) as M };
 }
 
 export const adminRelay = {
-  incidents: () => get<Incident[]>("/api/shop/admin/orchestrator/incidents"),
-  departments: () => get<Department[], DepartmentsMeta>("/api/shop/admin/orchestrator/departments"),
+  incidents: () => get<Incident[]>("/api/dashboard/shop/orchestrator/incidents"),
+  departments: () => get<Department[], DepartmentsMeta>("/api/dashboard/shop/orchestrator/departments"),
 };
 
 /** 연결 오류를 화면 문구로 */
-export function relayError(error: { status?: number; message: string }): string {
+export function relayError(error: { status?: number; message: string; code?: string | null }): string {
   if (error.status === 502) return "총괄 AI에 연결할 수 없습니다. 총괄 AI 서버가 켜져 있는지 확인해 주세요.";
   if (error.status === 504) return "총괄 AI가 제때 응답하지 않았습니다.";
-  if (error.status === 404) return "부서 사용량 경로가 서버에 없습니다. shop-api를 최신으로 올려 주세요.";
-  if (error.status === 401 || error.status === 403) return "총괄 AI 읽기 권한이 없습니다.";
+  if (error.status === 404) return "부서 사용량 경로가 서버에 없습니다. 판매 서버와 화면 중계 서버(dashboard-api)를 최신으로 올려 주세요.";
+  // 판매 서버가 화면 중계 서버(dashboard-api)의 열람 토큰을 받지 않음 (503 UPSTREAM_AUTH)
+  if (error.code === "UPSTREAM_AUTH") return "총괄 AI 읽기 권한이 없습니다.";
   return error.message;
 }
 

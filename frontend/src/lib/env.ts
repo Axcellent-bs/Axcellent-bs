@@ -15,16 +15,11 @@ export const SAFETY_HUMAN_TOKEN = import.meta.env.VITE_SAFETY_HUMAN_TOKEN ?? ''
 /** 총괄(orchestrator, 8000). 총괄은 CORS가 없어 기본값은 Vite 개발 프록시(/orch → vite.config.ts) */
 export const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL ?? '/orch'
 /**
- * 총괄 사건·부서 사용량을 읽는 shop-api 관리 읽기 중계(개발용 임시). 토큰은 run_web.sh가 넣는 관리자 토큰이다.
- * 진짜 로그인과 역할은 사람 인증(#265) 뒤에 이 자리를 대신한다.
+ * 관리자(admin) 토큰. 총괄 시연 시작·기획 형상관리 연결에만 쓴다(run_web.sh가 넣는다).
+ * 판매 서버(shop-api) 관리 읽기는 화면이 부르지 않고 dashboard-api(`/api/dashboard/shop/*`)가
+ * 회사 연결 주소로 서버 쪽 열람 토큰(`SHOP_VIEWER_TOKEN`)을 붙여 대신 읽는다. 판매 서버 주소·토큰은 번들에 없다.
  */
-export const RELAY_API_URL = import.meta.env.VITE_SHOP_ADMIN_API_URL || 'http://localhost:8010'
 export const RELAY_TOKEN = import.meta.env.VITE_SHOP_ADMIN_TOKEN || ''
-/**
- * 읽기에만 쓰는 열람 토큰(총괄 사건·부서 읽기, 장애 상태). 쓰기는 못 한다(shop-api `SHOP_VIEWER_TOKEN`).
- * 사내망 서버처럼 관리자 토큰을 화면에 넣을 수 없는 곳은 이것만 넣는다. 없으면 관리자 토큰을 쓴다
- */
-export const RELAY_VIEW_TOKEN = import.meta.env.VITE_SHOP_VIEWER_TOKEN || RELAY_TOKEN
 /** 데이터분석 AI: 데이터 AI(data, 8106). 기본값 /data-a2a는 Vite 개발 프록시(vite.config.ts, DATA_PROXY_TARGET) */
 export const DATA_A2A_URL = import.meta.env.VITE_DATA_A2A_URL ?? '/data-a2a'
 /** 데이터 AI 직접 조회 토큰. 비어 있으면 KPI 실시간 조회를 하지 않는다. 브라우저 저장소에 두지 않는다 */

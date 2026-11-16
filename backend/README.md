@@ -80,10 +80,12 @@ bash scripts/run_all.sh stop
 - Docker가 필요하다. 이벤트 버스(Redis)를 컨테이너 `ax-redis`로 띄운다 (`REDIS_URL`을 주면 그걸 쓴다).
 - 에이전트 토큰(`AX_AGENT_TOKENS`)·사람 토큰은 켤 때마다 새로 만들어 프로세스에만 넘긴다. 화면에 넘길 값만
   `backend/.data/web.env`에 쓴다 (커밋 안 함).
-- 사내망 서버처럼 관리자 토큰을 화면에 넣을 수 없는 곳은 **읽기 전용 열람 토큰**을 쓴다: `.env`의 `SHOP_VIEWER_TOKEN`(24자 이상)과
-  화면 빌드의 `VITE_SHOP_VIEWER_TOKEN`에 같은 값을 넣는다. 총괄 사건·부서 읽기 중계와 장애 상태 읽기(GET)만 열리고,
+- 화면은 판매 서버(shop-api) 관리 읽기(총괄 사건·부서, 받은 기획안·장애 SNS 초안, 공지 배너, 장애 상태)를
+  직접 부르지 않고 dashboard-api의 `/api/dashboard/shop/*`(GET만)를 부른다. dashboard-api가 회사 연결 주소
+  (`agent_url("shop-api")`)로 **읽기 전용 열람 토큰** `SHOP_VIEWER_TOKEN`(24자 이상)을 붙여 부른다.
+  shop-api와 dashboard-api에 같은 값을 넣고, 화면 빌드에는 넣지 않는다. 열람 토큰은 위 읽기만 열리고
   쓰기·그 밖의 관리 API는 모두 403이다. 에이전트 토큰 명부와 따로 두어 다른 서버(총괄 등)로는 통하지 않는다.
-  켤 때마다 바뀌는 에이전트 토큰과 달리 고정 값이라 정적 빌드에 넣어도 재시작에 깨지지 않는다.
+  `.env`에 없으면 run_all.sh가 `.data/tokens.env`에 만들어 두고 다시 켤 때 그대로 쓴다.
 - 캣북스 데이터(`.data/shop.db`)·공통 로그(`.data/common_log.db`)·인사(`.data/hr.db`)·아카이브(`.data/archive.db`, 검색 벡터는 `archive_vectors.db`)는 파일이라 다시 켜도 남는다.
   아카이브 파일이 없으면 예전처럼 `hr.db`를 같이 읽는다. 옛 기록은 서버를 끄고 `uv run python scripts/migrate_archive_db.py`로 옮긴다(백업 후 복사, `--dry-run`으로 건수 확인, 원본은 지우지 않음).
 - `SHOP_TRAFFIC=on`이면 `scripts/shop_traffic.py`가 3초마다 캣북스 고객 주문·결제를 넣는다. 결제 성공·실패는 쇼핑몰이 정한다.

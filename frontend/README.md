@@ -55,7 +55,7 @@
 
 | AI | AXcellent 서비스 | 부르는 서버 (ax-backend) |
 | --- | --- | --- |
-| 총괄 | 총괄·사건 | orchestrator 8000, shop-api 관리 중계 8010 |
+| 총괄 | 총괄·사건 | orchestrator 8000, 판매 서버 관리 읽기 중계(dashboard-api 8020 `/api/dashboard/shop/*`) |
 | 고객지원 AI | 고객 문의 / 클레임·보상 / 리뷰·지식 | dashboard-api 8020 |
 | 재무 AI | 재무 관리 | finance 8105, safety 8001 |
 | 데이터분석 AI | 데이터 분석 | data 8106 |

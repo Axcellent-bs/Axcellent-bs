@@ -1105,8 +1105,10 @@
               "planning",
               "marketing",
               "hr",
+              "archive",
               "infra",
-              "orchestrator"
+              "orchestrator",
+              "safety"
             ],
             "title": "Agent",
             "type": "string"
@@ -7248,7 +7250,7 @@
     },
     "/api/dashboard/office-room/{room_id}/remove": {
       "post": {
-        "description": "단톡방에서 내가 만든(처음 보낸) 대화를 목록에서 지운다. POST 전용.\n\n지우기는 숨김 처리다: 줄을 지우지 않고 removed_at·removed_by를 남긴다\n(기록은 보관, 되돌릴 수 있음).\n1. 그 방에 보이는 줄이 없으면 404, 내가 만든 줄이 없으면 403 \"만든 사람만 삭제할 수 있어요\"\n2. 내가 만든 줄을 office_room.db에서 숨긴다 (다른 사람이 만든 줄은 그대로)\n3. 각 줄의 부서 대화 서버에서 그 대화를 숨긴다(`<부서>_chat_remove`, 인사는 HTTP).\n   한 부서가 실패해도 나머지는 계속하고 부서별 결과를 돌려준다.\n   이미 없는 대화(404)는 지운 것으로 본다\n다른 화면은 목록(GET)을 다시 읽을 때 사라진 것을 본다.",
+        "description": "단톡방에서 내가 만든(처음 보낸) 대화를 목록에서 지운다. POST 전용.\n\n지우기는 숨김 처리다: 줄을 지우지 않고 removed_at·removed_by를 남긴다\n(기록은 보관, 되돌릴 수 있음).\n1. 그 방에 보이는 줄이 없으면 404, 내가 만든 줄이 없으면 403 \"만든 사람만 삭제할 수 있어요\"\n2. 내가 만든 줄을 office_room.db에서 숨긴다 (다른 사람이 만든 줄은 그대로)\n3. 각 줄의 부서 대화 서버에서 그 대화를 숨긴다(`<부서>_chat_remove`, 인사·안전규칙은 HTTP).\n   한 부서가 실패해도 나머지는 계속하고 부서별 결과를 돌려준다.\n   이미 없는 대화(404)는 지운 것으로 본다\n다른 화면은 목록(GET)을 다시 읽을 때 사라진 것을 본다.",
         "operationId": "remove_office_room_api_dashboard_office_room__room_id__remove_post",
         "parameters": [
           {
@@ -9083,6 +9085,190 @@
           }
         },
         "summary": "Settlement Deadlines"
+      }
+    },
+    "/api/dashboard/shop/banners": {
+      "get": {
+        "description": "쇼핑몰에 게시 중인 공지 배너.",
+        "operationId": "banners_api_dashboard_shop_banners_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Banners Api Dashboard Shop Banners Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Banners"
+      }
+    },
+    "/api/dashboard/shop/faults": {
+      "get": {
+        "description": "결제 장애 상태(읽기만). 넣기·빼기는 중계하지 않아요.",
+        "operationId": "faults_api_dashboard_shop_faults_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Faults Api Dashboard Shop Faults Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Faults"
+      }
+    },
+    "/api/dashboard/shop/marketing/briefs": {
+      "get": {
+        "description": "마케팅이 받은 기획안 목록.",
+        "operationId": "marketing_briefs_api_dashboard_shop_marketing_briefs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Marketing Briefs Api Dashboard Shop Marketing Briefs Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Marketing Briefs"
+      }
+    },
+    "/api/dashboard/shop/marketing/outage-sns-drafts": {
+      "get": {
+        "description": "장애 사과·보상 SNS 글 초안 목록. 초안만 읽고 게시하지 않아요.",
+        "operationId": "marketing_outage_sns_drafts_api_dashboard_shop_marketing_outage_sns_drafts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_merged",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Merged",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Marketing Outage Sns Drafts Api Dashboard Shop Marketing Outage Sns Drafts Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Marketing Outage Sns Drafts"
+      }
+    },
+    "/api/dashboard/shop/orchestrator/departments": {
+      "get": {
+        "description": "부서 카드·사용량 (판매 서버 총괄 읽기 중계).",
+        "operationId": "orchestrator_departments_api_dashboard_shop_orchestrator_departments_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Orchestrator Departments Api Dashboard Shop Orchestrator Departments Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Orchestrator Departments"
+      }
+    },
+    "/api/dashboard/shop/orchestrator/incidents": {
+      "get": {
+        "description": "총괄 사건 목록 (판매 서버 총괄 읽기 중계).",
+        "operationId": "orchestrator_incidents_api_dashboard_shop_orchestrator_incidents_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Orchestrator Incidents Api Dashboard Shop Orchestrator Incidents Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Orchestrator Incidents"
       }
     },
     "/api/dashboard/support-chat": {

@@ -26,7 +26,7 @@ export const FAMILIES: { id: Family; name: string; desc: string }[] = [
  */
 export type AgentId = 'orchestrator' | 'safety' | 'support' | 'finance' | 'data' | 'archive' | 'hr' | 'marketing' | 'planning' | 'dev'
 export const AGENTS: { id: AgentId; name: string; Icon: ComponentType<{ size?: number }>; backend: string }[] = [
-  { id: 'orchestrator', Icon: IconBolt, name: '총괄 AI', backend: 'orchestrator (8000) · shop-api 관리 중계 (8010)' },
+  { id: 'orchestrator', Icon: IconBolt, name: '총괄 AI', backend: 'orchestrator (8000) · 판매 서버 관리 읽기 중계 (dashboard-api 8020)' },
   { id: 'safety', Icon: IconLock, name: '안전규칙 AI', backend: 'safety (8001)' },
   { id: 'archive', Icon: IconBook, name: '아카이브 AI', backend: 'decisions (8114) · dashboard-api (8020)' },
   { id: 'support', Icon: IconUser, name: '고객지원 AI', backend: 'dashboard-api (8020)' },
