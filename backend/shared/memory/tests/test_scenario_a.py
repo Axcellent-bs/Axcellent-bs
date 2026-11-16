@@ -91,10 +91,10 @@ def _call(agent: TestClient, tmp_path: Path, skill: str, data: dict, *argv: str)
     return response.json()
 
 
-def _write_as_hr(agent: TestClient, tmp_path: Path, data: dict, ctx: str, key: str) -> dict:
+def _write_as_archive(agent: TestClient, tmp_path: Path, data: dict, ctx: str, key: str) -> dict:
     return _call(
         agent, tmp_path, "card_write", data,
-        "--as", "hr", "--context-id", ctx, "--idempotency-key", key,
+        "--as", "archive", "--context-id", ctx, "--idempotency-key", key,
     )  # fmt: skip
 
 
@@ -104,7 +104,7 @@ def test_agent_card_declares_grades(agent: TestClient) -> None:
     assert card["name"] == "memory"
     assert skills["card_write"]["grade"] == "A"  # memory_write_card
     assert skills["card_search"]["grade"] == "read"  # memory_search_card
-    assert "hr" in skills["card_write"]["allowed_requesters"]
+    assert "archive" in skills["card_write"]["allowed_requesters"]
     assert "memory_write_card" in skills["card_write"]["description"]
     assert "memory_search_card" in skills["card_search"]["description"]
 
@@ -113,9 +113,9 @@ def test_incident_card_saved_then_found_for_second_incident(
     agent: TestClient, tmp_path: Path
 ) -> None:
     """사건 카드 저장 → 2차 장애 설명으로 검색하면 1차 사건 카드가 맨 위에 나온다."""
-    saved = _write_as_hr(agent, tmp_path, incident_card(RECORD), INCIDENT_CTX, "rec-scn-a-1")
+    saved = _write_as_archive(agent, tmp_path, incident_card(RECORD), INCIDENT_CTX, "rec-scn-a-1")
     assert saved["status"] == "completed"
-    assert saved["meta"]["requester"] == "hr"
+    assert saved["meta"]["requester"] == "archive"
     card_id = saved["output"]["card_id"]
     assert card_id.startswith("card_")
     assert saved["output"]["created"] is True
@@ -124,7 +124,7 @@ def test_incident_card_saved_then_found_for_second_incident(
     for i, (kind, ctx, title, body) in enumerate(NOISE):
         noise = {"card": {"kind": kind, "context_id": ctx, "title": title, "body": body,
                           "author": "hr", "confidence": "high"}}  # fmt: skip
-        assert _write_as_hr(agent, tmp_path, noise, ctx, f"noise-{i}")["status"] == "completed"
+        assert _write_as_archive(agent, tmp_path, noise, ctx, f"noise-{i}")["status"] == "completed"
 
     # 2차 장애: 통합 에이전트가 아니라 고객지원이 직접 비슷한 사건을 찾는다
     query = {"query": "결제 API 응답 지연 결제 실패 급증 배포", "kind": ["incident"], "top_k": 3}
@@ -166,14 +166,14 @@ def test_incident_card_saved_then_found_for_second_incident(
 
 
 def test_same_record_twice_does_not_duplicate(agent: TestClient, tmp_path: Path) -> None:
-    first = _write_as_hr(agent, tmp_path, incident_card(RECORD), INCIDENT_CTX, "rec-scn-a-1")
-    again = _write_as_hr(agent, tmp_path, incident_card(RECORD), INCIDENT_CTX, "rec-scn-a-2")
+    first = _write_as_archive(agent, tmp_path, incident_card(RECORD), INCIDENT_CTX, "rec-scn-a-1")
+    again = _write_as_archive(agent, tmp_path, incident_card(RECORD), INCIDENT_CTX, "rec-scn-a-2")
     assert again["status"] == "completed"
     assert again["output"] == {"card_id": first["output"]["card_id"], "created": False}
 
 
 def test_write_needs_idempotency_key(agent: TestClient, tmp_path: Path) -> None:
-    result = _call(agent, tmp_path, "card_write", incident_card(RECORD), "--as", "hr")
+    result = _call(agent, tmp_path, "card_write", incident_card(RECORD), "--as", "archive")
     assert result["status"] == "failed"
     assert result["outcome"] == "invalid_input"
 

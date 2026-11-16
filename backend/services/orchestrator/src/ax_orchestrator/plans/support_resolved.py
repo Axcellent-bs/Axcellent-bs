@@ -50,7 +50,7 @@ def _verify_record(output: dict[str, Any]) -> tuple[str, str] | None:
     entries = output.get("entries") or []
     if any(_recorded(e) for e in entries if isinstance(e, dict)):
         return None
-    return "record_not_found", "인사 기록에서 이 이슈의 처리 결과 기록을 찾지 못함"
+    return "record_not_found", "아카이브 기록에서 이 이슈의 처리 결과 기록을 찾지 못함"
 
 
 def support_resolved() -> Plan:
@@ -73,7 +73,7 @@ def support_resolved() -> Plan:
             Step(
                 "record",
                 "record_case",
-                "처리 결과 기록 (hr)",
+                "처리 결과 기록 (archive)",
                 # 재무 기록이 실패해도 상담 처리 결과는 기록으로 남긴다
                 also_after=("cost",),
                 kind="record",
@@ -81,7 +81,7 @@ def support_resolved() -> Plan:
             Step(
                 "verify",
                 "get_audit_timeline",
-                "인사 기록 읽어 확인 (hr)",
+                "아카이브 기록 읽어 확인 (archive)",
                 after=("record",),
                 build=lambda inc: {"context_id": inc.context_id},
                 verdict=_verify_record,

@@ -187,7 +187,7 @@ def test_basis_is_asked_of_the_archive_and_returned_as_is(make, monkeypatch) -> 
     assert res["outcome"] == "found" and out.method == "dense"
     assert [c.card_id for c in out.candidates] == ["card_dec1"]
     target, req = fake.sent[0]
-    assert (target, req.skill) == ("hr", "find_similar_decisions")
+    assert (target, req.skill) == ("archive", "find_similar_decisions")
     assert req.input == {"reason": REASON, "limit": 3}
 
 

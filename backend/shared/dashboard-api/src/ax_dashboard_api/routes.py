@@ -52,6 +52,7 @@ from ax_contracts.schemas.hr import (
 )
 from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
+    archive_client,
     chat_remove,
     claim_mapping,
     data_chat,
@@ -769,7 +770,8 @@ async def candidate_cards(area: str | None = None) -> dict:
         items = mock_handover.BOARD.candidate_cards(area)
     else:
         out = await or_unavailable(
-            hr_client.call("list_candidate_cards", {"area": area} if area else {}), {"cards": []}
+            archive_client.call("list_candidate_cards", {"area": area} if area else {}),
+            {"cards": []},
         )
         items = [Card.model_validate(c) for c in out["cards"]]
     return ok(items, total=len(items))
@@ -787,7 +789,7 @@ async def decision_cards(
     else:
         payload = _given(area=area, context_id=context_id)
         out = await or_unavailable(
-            hr_client.call("list_cards", {**payload, "limit": limit}), {"cards": []}
+            archive_client.call("list_cards", {**payload, "limit": limit}), {"cards": []}
         )
         items = [Card.model_validate(c) for c in out["cards"]]
     return ok(items, total=len(items))
@@ -801,7 +803,7 @@ async def decide_candidate_card(card_id: str, body: CandidateDecisionBody) -> di
     payload: dict[str, str] = {"card_id": card_id, "decision": body.decision}
     if body.note and body.note.strip():
         payload["note"] = body.note.strip()
-    out = await hr_client.call(
+    out = await archive_client.call(
         "decide_candidate_card", payload, target=f"card:{card_id}:{body.decision}"
     )
     return ok(DecideCandidateCardOutput.model_validate(out))
@@ -1520,7 +1522,7 @@ async def duplicate_groups(area: str | None = None) -> dict:
     if is_mock():
         return ok({"groups": [], "merged": []})
     out = await or_unavailable(
-        hr_client.call("list_duplicate_groups", {"area": area} if area else {}),
+        archive_client.call("list_duplicate_groups", {"area": area} if area else {}),
         {"groups": [], "merged": []},
     )
     return ok({"groups": out.get("groups", []), "merged": out.get("merged", [])})
@@ -1532,7 +1534,7 @@ async def decide_duplicate_group(group_id: str, body: DuplicateDecisionBody) -> 
     if is_mock():
         raise ApiError(404, "NOT_FOUND", "시연 데이터에는 중복 묶음이 없다")
     payload: dict = {"group_id": group_id, **body.model_dump(exclude_none=True)}
-    out = await hr_client.call(
+    out = await archive_client.call(
         "decide_duplicate_group",
         payload,
         target=f"dup:{group_id}:{body.decision}:{body.representative_id}",
@@ -1548,7 +1550,7 @@ async def restore_merged_card(card_id: str) -> dict:
     """병합으로 대체됨이 된 카드를 되돌린다. hr이 `restore_merged_card`(A)로 실행한다."""
     if is_mock():
         raise ApiError(404, "NOT_FOUND", "시연 데이터에는 병합된 카드가 없다")
-    out = await hr_client.call(
+    out = await archive_client.call(
         "restore_merged_card", {"card_id": card_id}, target=f"restore:{card_id}"
     )
     result = RestoreMergedCardOutput.model_validate(out)
@@ -1569,7 +1571,7 @@ async def record_incident_resolution(context_id: str, body: ResolutionBody) -> d
         if at > datetime.now(UTC) + timedelta(minutes=1):
             raise ApiError(422, "INVALID_INPUT", "해결 시각이 지금보다 늦을 수 없다")
     payload: dict = {"context_id": context_id, **body.model_dump(mode="json", exclude_none=True)}
-    out = await hr_client.call(
+    out = await archive_client.call(
         "record_resolution",
         payload,
         context_id=context_id,
@@ -1622,7 +1624,7 @@ async def hr_activity(context_id: str) -> dict:
         items = mock_hr.BOARD.audit_timeline(context_id)
     else:
         out = await or_unavailable(
-            hr_client.call("get_audit_timeline", {"context_id": context_id}), {"entries": []}
+            archive_client.call("get_audit_timeline", {"context_id": context_id}), {"entries": []}
         )
         items = [AuditEntry.model_validate(e) for e in out["entries"]]
     return ok(items, total=len(items))
@@ -1653,7 +1655,7 @@ async def plan_checks(body: CheckPlanInput) -> dict:
     """새 계획이 과거에 기각된 안과 겹치는지 판정한다 (읽기, 저장 안 함)."""
     if is_mock():
         return ok(mock_hr.BOARD.check_plan(body.draft))
-    out = await hr_client.call("check_plan", {"draft": body.draft.model_dump(mode="json")})
+    out = await archive_client.call("check_plan", {"draft": body.draft.model_dump(mode="json")})
     return ok(CheckPlanOutput.model_validate(out))
 
 

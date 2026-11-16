@@ -1,6 +1,6 @@
 """혼합 모드: 지정한 부서만 실제 에이전트를 부르고 나머지는 가짜 부서가 대신한다.
 
-`ORCHESTRATOR_REAL_DEPTS=hr,finance`처럼 쉼표로 부서 이름을 준다. 실제 부서의 주소는
+`ORCHESTRATOR_REAL_DEPTS=archive,finance`처럼 쉼표로 부서 이름을 준다. 실제 부서의 주소는
 `AX_<부서>_URL`(없으면 agent-template 기본 포트 표), 토큰은 총괄의 `ORCHESTRATOR_TOKEN`
 (`ORCHESTRATOR_MOCK=1`이면 `mock:orchestrator`)이다.
 각 팀은 자기 에이전트만 띄우고 이 변수에 자기 이름을 넣으면 총괄 목업에 붙여 볼 수 있다.

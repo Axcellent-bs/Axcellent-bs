@@ -93,7 +93,7 @@ async def test_recovery_goes_to_the_latest_incident_of_that_component_only(harne
 @pytest.mark.asyncio
 async def test_a_failed_time_record_does_not_stop_the_incident(harness) -> None:
     engine = await harness.start()
-    harness.fakes.script("hr", "record_event_times", "fail", "fail", "fail")
+    harness.fakes.script("archive", "record_event_times", "fail", "fail", "fail")
     inc = new_incident()
     await engine.run(inc, scenario_a())
     assert inc.closed_at is not None and inc.times_sent == {}
@@ -167,7 +167,7 @@ async def test_the_decision_card_reason_uses_korean_step_names(harness) -> None:
 @pytest.mark.asyncio
 async def test_a_company_without_hr_does_not_get_time_records_sent_again(harness) -> None:
     engine = await harness.start()
-    harness.fakes.script("hr", "record_event_times", "disabled", "disabled", "disabled")
+    harness.fakes.script("archive", "record_event_times", "disabled", "disabled", "disabled")
     inc = new_incident()
     await engine.run(inc, scenario_a())
     assert inc.closed_at is not None and inc.times_off and inc.times_sent == {}
