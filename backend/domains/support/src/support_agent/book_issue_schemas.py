@@ -15,9 +15,11 @@ PERIOD_DAYS: dict[str, int] = {"day": 1, "week": 7, "month": 30}
 class BookIssueInput(AxModel):
     period: BookIssuePeriod = "month"  # 지금부터 거슬러 올라가는 기간 (1일·7일·30일)
     limit: int = Field(default=20, ge=1, le=100)  # 위에서 몇 개까지 (클레임 많은 순)
-    min_claims: int = Field(default=1, ge=1)  # 이 건수 이상인 상품만
-    min_inquiries: int = Field(default=1, ge=1)  # 클레임이 없어도 문의가 이 건수 이상이면 보인다
-    product_ids: list[str] | None = Field(default=None, max_length=100)  # 주면 이 상품만
+    min_claims: int = Field(default=1, ge=1)  # 이 건수 이상인 상품만 (product_ids를 주면 무시)
+    # 클레임이 없어도 문의가 이 건수 이상이면 보인다 (product_ids를 주면 무시)
+    min_inquiries: int = Field(default=1, ge=1)
+    # 주면 이 상품만, 그리고 클레임·문의가 0건이어도 모두 돌려준다 (limit보다 많아도 안 자른다)
+    product_ids: list[str] | None = Field(default=None, max_length=100)
     include_inquiries: bool = True  # False면 문의 서비스와 판매 서버(주문 상품)를 부르지 않는다
     include_sales: bool = True  # False면 판매 서버 주문 목록을 읽지 않는다 (claim_rate 없음)
 
