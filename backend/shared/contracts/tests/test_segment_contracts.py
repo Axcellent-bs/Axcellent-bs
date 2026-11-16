@@ -28,6 +28,8 @@ from ax_contracts.schemas.data import (
     SalesQuality,
     SegmentFavoritesInput,
     SegmentFavoritesOutput,
+    SegmentOptionsInput,
+    SegmentOptionsOutput,
     SegmentProfileInput,
     SegmentProfileOutput,
 )
@@ -286,3 +288,29 @@ def test_send_contract() -> None:
     assert out.reason == ""
     with pytest.raises(ValidationError):
         EventProposalSendOutput(outcome="sent")
+
+
+def test_segment_options_shape() -> None:
+    """화면이 읽는 선택지: code·label 쌍 배열, 카탈로그 순서 그대로."""
+    assert SegmentOptionsInput().tenant_id == "shop-demo"
+    empty = SegmentOptionsOutput()
+    assert empty.periods == ["30d", "90d", "365d"] and empty.attributes == []
+    assert empty.data_source is None and empty.min_group_size == 5
+    out = SegmentOptionsOutput.model_validate(
+        {
+            "attributes": [{"key": "age_band", "label": "연령대",
+                            "values": [{"code": "20s", "label": "20대"},
+                                       {"code": "10s", "label": "10대"}]}],
+            "genres": [{"code": "rpg", "label": "RPG"}],
+            "quick_questions": [{"label": "20대", "filters": {"age_band": "20s"}}],
+            "population_keys": [["age_band"]],
+            "data_source": "가짜 데이터(데모용)",
+            "catalog_id": "x",
+        }
+    )  # fmt: skip
+    assert [v.code for v in out.attributes[0].values] == ["20s", "10s"]  # 순서 유지
+    assert SegmentOptionsOutput.model_validate(out.model_dump(mode="json")) == out
+    with pytest.raises(ValidationError):
+        SegmentOptionsOutput.model_validate({"periods": ["7d"]})
+    with pytest.raises(ValidationError):
+        SegmentOptionsOutput.model_validate({"genres": [{"code": "x"}]})
