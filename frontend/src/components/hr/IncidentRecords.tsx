@@ -7,9 +7,9 @@ import RepeatCompare from "@/components/hr/RepeatCompare";
 import EventTimes from "@/components/hr/EventTimes";
 import ResolutionForm from "@/components/hr/ResolutionForm";
 
-// 결정 기록 화면(실제 모드): 캣북스 이슈가 나면 총괄 AI가 인사 AI에게 이슈 기록(record_case)을 맡긴다.
+// 결정 기록 화면(실제 모드): 캣북스 이슈가 나면 총괄 AI가 아카이브 AI에게 이슈 기록(record_case)을 맡긴다.
 // 그 단계를 총괄 이슈 목록(dashboard-api /incidents)에서 꺼내 "어느 이슈를, 언제, 무엇으로, 어떤 상태로" 기록했는지 보여 주고,
-// 고른 이슈에서 인사 AI가 한 일(dashboard-api /hr-activity)을 시간순으로 보여 준다.
+// 고른 이슈에서 아카이브 AI가 한 일(dashboard-api /hr-activity)을 시간순으로 보여 준다.
 // 화면에는 사람이 읽는 말만 쓰고, 이슈 번호·카드 번호·기록 종류 코드는 마우스를 올리면(title) 보인다.
 
 const RECORD_SKILL = "record_case";
@@ -34,7 +34,7 @@ const STEP_KO: Record<string, { label: string; tone: string }> = {
   skipped: { label: "건너뜀", tone: "bg-ink-100 text-ink-500" },
   rejected_by_human: { label: "사람이 거절", tone: "bg-red-50 text-red-700" },
 };
-// 인사 AI가 돌려준 기록 결과
+// 아카이브 AI가 돌려준 기록 결과
 const OUTCOME_KO: Record<string, string> = {
   card_created: "결정 카드를 기록으로 저장했어요",
   candidate: "AI가 확신하지 못해 확정 전 기록으로 남겼어요 (사람 확인 필요)",
@@ -42,7 +42,7 @@ const OUTCOME_KO: Record<string, string> = {
   duplicate: "이미 기록된 이슈라 다시 저장하지 않았어요",
 };
 const CONF_KO: Record<string, string> = { low: "낮음", mid: "보통", high: "높음" };
-// 인사 AI 감사 기록의 종류 (domains/hr audit.record)
+// 아카이브 AI 감사 기록의 종류 (domains/hr audit.record)
 const AUDIT_KIND_KO: Record<string, string> = {
   "record_case.card_created": "결정 카드를 기록으로 저장",
   "record_case.candidate": "확정 전 기록으로 저장 (사람 확인 대기)",
@@ -90,7 +90,7 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
   const load = useCallback(async () => {
     try {
       const all = await hr.incidents();
-      // 인사 AI에게 이슈 기록을 맡긴 이슈만, 최근 이슈가 위로
+      // 아카이브 AI에게 이슈 기록을 맡긴 이슈만, 최근 이슈가 위로
       const mine = all.filter((i) => recordStep(i)).sort((a, b) => (b.opened_at ?? "").localeCompare(a.opened_at ?? ""));
       setIncidents(mine); setErr(null);
     } catch (e) { setErr(e instanceof Error ? e.message : "이슈 목록을 받지 못했습니다"); }
@@ -112,11 +112,11 @@ export default function IncidentRecords({ initialCtx = null }: { initialCtx?: st
     <section ref={top} aria-labelledby="records-title" className="card space-y-4 p-6">
       <div>
         <h2 id="records-title" className="text-lg font-semibold">AI가 남긴 이슈 기록</h2>
-        <p className="mt-1 text-xs text-ink-500">캣북스에 이슈가 나면 총괄 AI가 인사 AI에게 기록을 맡깁니다. 왼쪽에서 이슈를 고르면 오른쪽에서 인사 AI가 한 일과 시간, 해결 내용을 볼 수 있습니다.</p>
+        <p className="mt-1 text-xs text-ink-500">캣북스에 이슈가 나면 총괄 AI가 아카이브 AI에게 기록을 맡깁니다. 왼쪽에서 이슈를 고르면 오른쪽에서 아카이브 AI가 한 일과 시간, 해결 내용을 볼 수 있습니다.</p>
       </div>
       {err && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{err}</p>}
       {!incidents ? (!err && <p className="py-6 text-center text-sm text-ink-500">불러오는 중…</p>)
-        : incidents.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">아직 인사 AI가 기록한 이슈가 없습니다.</p>
+        : incidents.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">아직 아카이브 AI가 기록한 이슈가 없습니다.</p>
         : (
           <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
             <ul className="max-h-[34rem] divide-y divide-ink-100 overflow-y-auto rounded-2xl border border-ink-100" aria-label="이슈 목록">
@@ -202,22 +202,22 @@ function Timeline({ inc }: { inc: OrchIncident }) {
   if (!rows) return <p className="text-xs text-ink-500">불러오는 중…</p>;
   return (
     <ol className="divide-y divide-ink-100 rounded-2xl border border-ink-100">
-      {/* 총괄 AI가 인사 AI에게 기록을 맡긴 시각 (총괄 이슈 기록) */}
+      {/* 총괄 AI가 아카이브 AI에게 기록을 맡긴 시각 (총괄 이슈 기록) */}
       {step?.started_at && (
         <li className="flex flex-wrap items-baseline gap-x-3 px-4 py-2 text-xs" title={`${step.skill} · ${inc.context_id}`}>
           <span className="tabular-nums text-ink-500">{clockKo(step.started_at)}</span>
-          <span className="font-medium">총괄 AI가 인사 AI에게 이슈 기록을 맡김</span>
+          <span className="font-medium">총괄 AI가 아카이브 AI에게 이슈 기록을 맡김</span>
           <span className="text-ink-500">{incidentTitle(inc)}</span>
         </li>
       )}
       {rows.map((r) => (
         <li key={r.seq} className="flex flex-wrap items-baseline gap-x-3 px-4 py-2 text-xs" title={`${r.kind} · ${JSON.stringify(r.payload)}`}>
           <span className="tabular-nums text-ink-500">{clockKo(r.at)}</span>
-          <span className="font-medium">{AUDIT_KIND_KO[r.kind] ?? "인사 AI 처리 기록"}</span>
+          <span className="font-medium">{AUDIT_KIND_KO[r.kind] ?? "아카이브 AI 처리 기록"}</span>
           <span className="text-ink-500">{auditDetail(r)}</span>
         </li>
       ))}
-      {rows.length === 0 && <li className="px-4 py-2 text-xs text-ink-500">인사 AI 쪽에는 이 이슈의 처리 내역이 아직 없습니다.</li>}
+      {rows.length === 0 && <li className="px-4 py-2 text-xs text-ink-500">아카이브 AI 쪽에는 이 이슈의 처리 내역이 아직 없습니다.</li>}
     </ol>
   );
 }
