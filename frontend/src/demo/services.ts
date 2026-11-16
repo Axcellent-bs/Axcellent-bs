@@ -192,9 +192,13 @@ const KNOWN_KEY = 'axcellent-demo-services-known'
 const ADDED_BEFORE_KNOWN_LIST = ['agent-eval', 'orders']
 const ALL = SERVICES.map((s) => s.id)
 // 필수 서비스: 회사가 끌 수 없고 카탈로그에서 내릴 수도 없다. 다른 AI가 장애 기록(총괄 사건·고객지원 장애 확인·
-// 재무 장애 비용·인사 대응 시간)을 쓰므로 장애 대응과 그 감시 대상인 PC·서버 연결은 늘 켜 둔다
-export const REQUIRED_SERVICES = ['incident', 'hosts']
+// 재무 장애 비용·인사 대응 시간)을 쓰므로 장애 대응과 그 감시 대상인 PC·서버 연결은 늘 켜 둔다.
+// 총괄은 AI들 사이의 일을 나누고 모으는 자리라, 어떤 서비스를 골라도 늘 켜 둔다
+export const REQUIRED_SERVICES = ['incident', 'hosts', 'orchestrator']
 export const isRequired = (id: string) => REQUIRED_SERVICES.includes(id)
+// 필수 카드 아래에 보이는 이유
+export const requiredReason = (id: string) =>
+  id === 'orchestrator' ? 'AI들 사이의 일을 나누고 모아서 늘 켜 둬요' : '다른 AI가 장애 기록을 써서 늘 켜 둬요'
 const withRequired = (ids: string[]) => [...REQUIRED_SERVICES.filter((id) => !ids.includes(id)), ...ids]
 const save = (ids: string[]) => {
   try {
