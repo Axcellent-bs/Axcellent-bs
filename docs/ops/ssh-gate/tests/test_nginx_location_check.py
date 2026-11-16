@@ -309,7 +309,117 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "duplicate-regex")
 
 
+class ProfileTests(unittest.TestCase):
+    """프로필: 정책이 이름 붙인 지시문 묶음. 타임아웃·본문 크기 계열만 통과한다."""
+
+    LONG = ["proxy_read_timeout 300s;", "proxy_send_timeout 300s;"]
+    ARGS = ("n1", "owner-a", "20260102-101500", "POST", GOOD, "example-api", 8201, BLOCK_LINES)
+
+    def test_allowed_directives_pass(self):
+        for lines in (self.LONG, ["client_max_body_size 50m;"], ["proxy_connect_timeout 10;"],
+                      ["send_timeout 2m;", "client_body_timeout 60s;"], ["client_max_body_size 512k;"],
+                      ["proxy_read_timeout 3600s;"], ["proxy_read_timeout 60m;"], ["client_max_body_size 1024m;"]):
+            with self.subTest(lines=lines):
+                chk.check_profile_lines(lines, BLOCK_LINES)
+                self.assertEqual(chk.validate("POST", GOOD, METHODS, PREFIXES, UPSTREAMS, BLOCK_LINES, lines),
+                                 ("example-api", 8201))
+
+    def test_everything_else_is_refused(self):
+        bad = [
+            ["proxy_pass http://127.0.0.1:9999;"],            # 다른 곳으로 보내기
+            ["include snippets/other.conf;"],
+            ["rewrite ^/(.*)$ /$1 break;"],
+            ["add_header X-Test 1;"],
+            ["auth_basic off;"],
+            ["limit_except GET { deny all; }"],
+            ["proxy_set_header Authorization x;"],
+            ["proxy_read_timeout 300s; proxy_pass http://127.0.0.1:9999;"],   # 한 줄에 두 지시문
+            ["proxy_read_timeout 300s; }"],                    # 블록을 닫으려는 시도
+            ["proxy_read_timeout 300s"],                       # 세미콜론 없음
+            ["proxy_read_timeout  300s;"],
+            ["proxy_read_timeout 300h;"],                      # 모르는 단위
+            ["proxy_read_timeout 0;"],
+            ["proxy_read_timeout 3601s;"],                     # 한도 초과
+            ["proxy_read_timeout 61m;"],
+            ["client_max_body_size 0;"],                       # 0 = 무제한
+            ["client_max_body_size 50;"],                      # 단위 없음
+            ["client_max_body_size 2000m;"],
+            ["client_max_body_size 1g;"],
+            ["proxy_read_timeout 300s;", "proxy_read_timeout 60s;"],   # 같은 지시문 두 번
+            ["PROXY_READ_TIMEOUT 300s;"],
+            ["proxy_read_timeout 300s;\nproxy_pass http://x;"],
+            ["proxy_read_timeout 300s;\n"],
+            [""],
+            ["proxy_read_timeout 1s;"] * 7,
+        ]
+        for lines in bad:
+            with self.subTest(lines=lines):
+                with self.assertRaises(chk.ConfigError):
+                    chk.check_profile_lines(lines, BLOCK_LINES)
+                with self.assertRaises(chk.ConfigError):
+                    chk.validate("POST", GOOD, METHODS, PREFIXES, UPSTREAMS, BLOCK_LINES, lines)
+
+    def test_directive_already_in_block_lines_is_refused(self):
+        lines = BLOCK_LINES + ["proxy_read_timeout 60s;"]
+        chk.check_block_lines(lines)
+        with self.assertRaises(chk.ConfigError):
+            chk.check_profile_lines(["proxy_read_timeout 300s;"], lines)
+
+    def test_no_profile_renders_exactly_as_before(self):
+        plain = chk.render_block(*self.ARGS)
+        self.assertEqual(plain, chk.render_block(*self.ARGS, "", "", ()))
+        self.assertNotIn("profile=", plain)
+        self.assertEqual(plain.splitlines()[0], "# ax-gate: name=n1 user=owner-a added=20260102-101500")
+
+    def test_profile_lines_are_appended_after_policy_lines_and_tagged(self):
+        block = chk.render_block(*self.ARGS, "", "long-timeout", self.LONG)
+        self.assertEqual(block.splitlines()[0],
+                         "# ax-gate: name=n1 user=owner-a added=20260102-101500 profile=long-timeout")
+        self.assertTrue(block.rstrip().endswith(
+            "include snippets/example-auth.conf; proxy_read_timeout 300s; proxy_send_timeout 300s; }"))
+        self.assertEqual(block.count("proxy_pass "), 1)
+        rules = (METHODS, PREFIXES, UPSTREAMS, BLOCK_LINES)
+        self.assertTrue(chk.check_block(block, *rules, "long-timeout", self.LONG))
+        # 프로필 없이, 다른 이름으로, 다른 줄로 견주면 다른 블록이다
+        for name, lines in (("", ()), ("other", self.LONG), ("long-timeout", ["proxy_read_timeout 60s;"])):
+            with self.subTest(name=name):
+                with self.assertRaises(chk.Rejected):
+                    chk.check_block(block, *rules, name, lines)
+        # 프로필 없는 블록을 프로필 있는 정책으로 견줘도 다르다
+        with self.assertRaises(chk.Rejected):
+            chk.check_block(chk.render_block(*self.ARGS), *rules, "long-timeout", self.LONG)
+
+    def test_name_and_lines_go_together(self):
+        with self.assertRaises(chk.ConfigError):
+            chk.render_block(*self.ARGS, "", "long-timeout", ())
+        with self.assertRaises(chk.ConfigError):
+            chk.render_block(*self.ARGS, "", "", self.LONG)
+        with self.assertRaises(chk.ConfigError):
+            chk.render_block(*self.ARGS, "", "Bad Name", self.LONG)
+
+    def test_apply_with_profile(self):
+        out = chk.apply_to_conf(CONF, "n1", "owner-a", "20260102-101500", "POST", GOOD,
+                                METHODS, PREFIXES, UPSTREAMS, BLOCK_LINES, "long-timeout", self.LONG)
+        self.assertIn("added=20260102-101500 profile=long-timeout\n", out)
+        self.assertIn("proxy_send_timeout 300s; }\n", out)
+
+
 class CliTests(unittest.TestCase):
+    def test_profile_flags(self):
+        base = ["check", "--method", "POST", "--regex", GOOD] + self.BASE
+        ok = ["--profile-name", "long-timeout", "--profile-line", "proxy_read_timeout 300s;"]
+        self.assertEqual(self.run_cli(base + ok)[0], 0)
+        self.assertEqual(self.run_cli(base + ["--profile-name", "long-timeout"])[0], 3)       # 줄 없음
+        self.assertEqual(self.run_cli(base + ["--profile-line", "proxy_read_timeout 300s;"])[0], 3)   # 이름 없음
+        self.assertEqual(self.run_cli(base + ["--profile-name", "x", "--profile-line",
+                                              "proxy_pass http://127.0.0.1:9999;"])[0], 3)
+        rc, block, _err = self.run_cli(["render", "--method", "POST", "--regex", GOOD] + self.NAMING
+                                       + self.BASE + ok)
+        self.assertEqual(rc, 0)
+        self.assertIn("profile=long-timeout", block)
+        self.assertEqual(self.run_cli(["check-block"] + self.BASE + ok, stdin=block)[0], 0)
+        self.assertEqual(self.run_cli(["check-block"] + self.BASE, stdin=block)[0], 2)
+
     BASE = ["--allowed-method", "POST", "--allowed-prefix", PREFIXES[0], "--upstream", "example-api=8201"]
     for _line in BLOCK_LINES:
         BASE += ["--block-line", _line]
