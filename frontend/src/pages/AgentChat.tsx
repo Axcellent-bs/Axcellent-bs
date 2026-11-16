@@ -553,7 +553,7 @@ export default function AgentChat() {
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <ConnChip label="총괄 AI" conn={orchConn} />
-            <ConnChip label="안전 관문" conn={safetyConn} />
+            <ConnChip label="안전규칙 AI" conn={safetyConn} />
             <ConnChip label="공통 로그" conn={commConn} />
             {orchOn && !orchMock && (
               <span className={`chip ${fault?.active ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`} title="캣북스 쇼핑몰 결제 서버 상태 (장애는 운영자가 넣고 뺀다)">

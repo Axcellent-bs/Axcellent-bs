@@ -12,11 +12,11 @@ const WHO_KO: Record<string, string> = {
   marketing: "마케팅 AI", support: "고객지원 AI", finance: "재무 AI", hr: "인사 AI", orchestrator: "총괄 AI",
   data: "데이터 AI", planning: "기획 AI", infra: "인프라 AI", memory: "기록 AI", safety: "안전 장치",
 };
-const WHY_HELD: Record<string, string> = {
+export const WHY_HELD: Record<string, string> = {
   over_threshold: "기준에 걸림", unregistered_action: "등록되지 않은 일", amount_mismatch: "적어 낸 금액과 계산이 다름",
   schema_invalid: "요청 내용이 잘못됨", review_timeout: "기한 안에 아무도 결정하지 않아 자동 취소",
 };
-const RULE_KO: Record<string, string> = {
+export const RULE_KO: Record<string, string> = {
   coupon_total: "쿠폰 한 번에 주는 총액", coupon_unit: "쿠폰 한 장 금액", coupon_daily: "하루 동안 준 쿠폰 합계",
   compensation_per_context: "장애 한 건에 준 보상 합계", compensation_per_customer: "한 고객에게 준 보상 합계",
   refund_single: "환불 한 건 금액", seller_risk: "판매자 위험 점수", base_grade: "항상 사람이 확인하는 일",

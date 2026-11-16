@@ -5,7 +5,7 @@ import { useChatRooms, type Conn } from "@/components/office/useChatRooms";
 import { PixelOffice } from "@/components/office/PixelOffice";
 import { ALL_ROOM, buildTimeline, incidentTitle, skillKo, type ChatItem } from "@/lib/agentChat";
 import { mergeTalk } from "@/lib/officeTalk";
-import { Link, useSearchParams } from "@/lib/nav";
+import { Link, useRouter, useSearchParams } from "@/lib/nav";
 import { CAMPAIGN_END, DESKS, REPLAY_END, deriveOffice, replayCampaign, replayIncident, type DeskKey, type DeskState, type OfficeStatus } from "@/lib/office";
 
 // AI 오피스. 부서 AI가 지금 무엇을 하는지 픽셀 사무실로 보여 주고, 옆에 부서 단톡방을 둔다.
@@ -43,7 +43,10 @@ export default function AgentOffice() {
     const d = directAgentOf(asked);
     if (d) setOpenDirect((o) => (o.includes(d.key) ? o : [...o, d.key]));
   }, [asked]);
+  const router = useRouter();
   const openTalk = (key: string) => {
+    // 안전규칙 AI는 1:1 대화 대신 판단 기록 화면으로 간다
+    if (key === "safety") { router.push("/safety"); return; }
     if (!DIRECT_AGENTS.some((a) => a.key === key)) return;
     setOpenDirect((o) => (o.includes(key) ? o : [...o, key]));
     setRoom(DIRECT_PREFIX + key);
@@ -250,7 +253,7 @@ export default function AgentOffice() {
         <section aria-label="부서 AI 사무실" className="card flex min-w-0 shrink-0 flex-col gap-3 p-4 xl:flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="card-title">부서 AI 사무실</h2>
-            <span className="text-xs text-ink-500">9자리 · 총괄 포함</span>
+            <span className="text-xs text-ink-500">{DESKS.length}자리 · 총괄·안전규칙 포함</span>
             <span className={`chip ml-auto ${STATUS_LOOK[view.status]}`}>
               <span className={`h-1.5 w-1.5 rounded-full bg-current ${view.status === "alert" ? "animate-pulse" : ""}`} aria-hidden="true" />
               {liveReady ? statusText : "불러오는 중…"}
