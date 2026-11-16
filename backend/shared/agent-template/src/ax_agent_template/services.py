@@ -225,6 +225,11 @@ SERVICES: tuple[Service, ...] = (
             "fraud_score",
             "kpi_summary",
             "sales_analysis",
+            # 고객·시장 분석 (11/16, 표준 판매 저장소만, grade read)
+            "segment_options",
+            "segment_profile",
+            "segment_favorites",
+            "market_coverage",
             "root_cause_hypotheses",
             "accuracy_report",
             "activity_report",
