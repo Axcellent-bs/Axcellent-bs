@@ -64,6 +64,8 @@ from ax_contracts.schemas.data import (
     DataChatRef,
     DataChatSendInput,
     DataChatThreadOutput,
+    EventProposalInput,
+    EventProposalSendInput,
     FraudScoreInput,
     ImpactAnalysisInput,
     KpiSummaryInput,
@@ -89,6 +91,7 @@ from ax_contracts.schemas.idea import IdeaReportInput
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from data_agent import catalog as metric_catalog
 from data_agent import data_chat, idea_reports, llm_budget, llm_failure, llm_halt, llm_inflight
+from data_agent.clients import customer_reaction
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
 from data_agent.clients.shop_client import (
@@ -102,6 +105,9 @@ from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.naver_datalab import NaverDatalabConnector
 from data_agent.connectors.youtube import YouTubeConnector
 from data_agent.data_chat_store import ChatStorageError, DataChatStore
+from data_agent.event_proposal_store import DB_ENV as EVENT_DB_ENV
+from data_agent.event_proposal_store import DEFAULT_DB as EVENT_DEFAULT_DB
+from data_agent.event_proposal_store import EventProposalStore
 from data_agent.explain import EXPLAIN_DB_ENV, ExplainCache
 from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
@@ -110,7 +116,7 @@ from data_agent.response_cache import ResponseCache
 from data_agent.sales_store import DB_ENV as SALES_DB_ENV
 from data_agent.sales_store import DEFAULT_DB as SALES_DEFAULT_DB
 from data_agent.sales_store import SalesStore
-from data_agent.skills import segment_analysis, topic_category
+from data_agent.skills import event_proposal, segment_analysis, topic_category
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
 from data_agent.skills.anomaly_detection import detect_anomalies, env_settings, get_metric_source
@@ -513,6 +519,130 @@ async def market_coverage(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=segment_analysis.evidence(out.basis, now),
+    )
+
+
+# ---- 이벤트 제안 (11/16). event_proposal은 grade read(제안 저장은 data 자기 기록),
+# LLM은 제목·요약만. event_proposal_send는 data의 execute("send_event_proposal") 뒤
+# 기획 receive_insight (grade A)
+_event_store: EventProposalStore | None = None
+
+
+def get_event_proposal_store() -> EventProposalStore:
+    """이벤트 제안 저장소 (`DATA_EVENT_PROPOSAL_DB`). 테스트는 `use_event_proposal_store`로."""
+    global _event_store
+    if _event_store is None:
+        _event_store = EventProposalStore(os.environ.get(EVENT_DB_ENV) or EVENT_DEFAULT_DB)
+    return _event_store
+
+
+def use_event_proposal_store(store: EventProposalStore | None) -> None:
+    global _event_store
+    _event_store = store
+
+
+async def get_past_campaigns() -> tuple[list[event_proposal.PastCampaign], str | None]:
+    """지난 캠페인 쿠폰 사용률 (등록된 캠페인 영상의 campaign_id → 커넥터 campaign_coupons).
+
+    테스트는 이 함수를 바꿔 끼운다. 캠페인이 없거나 커넥터가 없으면 빈 목록(전환율은 가정값).
+    """
+    from pathlib import Path
+
+    from data_agent.skills.video_performance import DB_ENV as PERF_ENV
+    from data_agent.skills.video_performance import DEFAULT_DB as PERF_DB
+    from data_agent.skills.video_performance import VideoStore
+
+    path = os.environ.get(PERF_ENV) or PERF_DB
+    if str(path) != ":memory:" and not Path(path).is_file():
+        return [], None
+    videos = VideoStore(path)
+    try:
+        ids = list(dict.fromkeys(v.campaign_id for v in videos.videos(include_test=False)
+                                 if v.campaign_id))  # fmt: skip
+    finally:
+        videos.close()
+    if not ids:
+        return [], None
+    try:
+        connector = get_campaign_connector()
+    except NotImplementedError:
+        return [], None
+    return await event_proposal.past_from_coupons(ids, connector)
+
+
+async def _read_event_base(*args: Any) -> event_proposal.Base:
+    return await asyncio.to_thread(event_proposal.read_base, *args)
+
+
+async def event_proposal_skill(request: AgentRequest) -> AgentResult:
+    """이벤트 제안: 묶음 배수 × 시즌 × 이벤트 종류를 코드로 고르고 예상 효과를 계산한다."""
+    data = _parse(request, EventProposalInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    past, past_note = await get_past_campaigns()
+    sender = get_reaction_sender()
+
+    async def reactions(ids: list[str]) -> customer_reaction.Reactions:
+        return await customer_reaction.read(ids, request.meta, send=sender, now=now)
+
+    run = await event_proposal.propose(
+        get_sales_store(), get_event_proposal_store(), data.tenant_id, data.month, data.max_items,
+        cat.sales, cat.id, now, trend=get_trend_connector(), llm=get_llm(), past=past,
+        past_note=past_note, reactions=reactions, read=_read_event_base,
+    )  # fmt: skip
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=run.output.model_dump(mode="json"),
+        evidence=run.evidence,
+        fallback=run.fallback,
+        fallback_reason=run.fallback_reason,
+    )
+
+
+def get_event_proposal_sender():  # noqa: ANN201 - 테스트가 바꿔 끼우는 자리
+    """기획 receive_insight를 부르는 A2A 함수. 기본은 `call_agent`."""
+    return call_agent
+
+
+def get_event_proposal_gate():  # noqa: ANN201 - 테스트가 바꿔 끼우는 자리
+    """data 자신의 safety 관문 (`execute`)."""
+    from ax_agent_template.execute import execute
+
+    return execute
+
+
+async def event_proposal_send(request: AgentRequest) -> AgentResult:
+    """저장된 이벤트 제안 하나를 기획에 보낸다 (grade A, execute 먼저). 마케팅에는 보내지 않는다."""
+    data = _parse(request, EventProposalSendInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    now = datetime.now(UTC)
+    sent = await event_proposal.send_proposal(
+        get_event_proposal_store(), data.tenant_id, data.proposal_id, request.meta, now,
+        send=get_event_proposal_sender(), gate=get_event_proposal_gate(),
+    )  # fmt: skip
+    out = sent.output
+    return _result(
+        request,
+        sent.status,
+        outcome=sent.outcome,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            queries=["event_proposal_store.event_proposals", "planning.receive_insight"],
+            data_summary=f"{data.proposal_id} → 기획 {out.outcome}"
+            + (f" ({out.proposal_ref})" if out.proposal_ref else "")
+            + (f": {out.reason}" if out.reason else ""),
+            collected_at=now,
+            ref_ids=[f"event_proposal:{data.proposal_id}"]
+            + ([f"proposal:{out.proposal_ref}"] if out.proposal_ref else []),
+        ),
     )
 
 
@@ -1714,6 +1844,8 @@ HANDLERS = {
     "segment_profile": segment_profile,
     "segment_favorites": segment_favorites,
     "market_coverage": market_coverage,
+    "event_proposal": event_proposal_skill,
+    "event_proposal_send": event_proposal_send,
     "root_cause_hypotheses": root_cause_hypotheses,
     "accuracy_report": accuracy_report,
     "activity_report": activity_report,
