@@ -122,7 +122,7 @@ export default function Safety() {
   }, [thresholds]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-8">
       <header className="card space-y-4 px-8 py-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
