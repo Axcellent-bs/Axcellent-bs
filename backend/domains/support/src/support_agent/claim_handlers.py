@@ -223,7 +223,7 @@ async def _inquiry_evidence(request: AgentRequest, period: str) -> InquiryEviden
 
 
 async def _sales_evidence(request: AgentRequest, now: datetime, period: str) -> SalesEvidence:
-    """판매 서버 주문 목록에서 기간 안 상품별 판매 수량을 읽는다.
+    """판매 서버에서 기간 안 상품별 판매 수량을 읽는다(판매 집계 읽기 경로, 없으면 주문 목록).
 
     끝까지 읽지 못하면(연결 실패·페이지 상한·마감·응답 모양 이상) 모자란 수량으로 비율을 내지 않게
     `sold=None`과 이유를 돌려준다. 판매 수량은 선택 근거라서 클레임 집계는 그대로 나간다.
@@ -241,12 +241,11 @@ async def _sales_evidence(request: AgentRequest, now: datetime, period: str) -> 
         h.logger.warning("판매 수량을 읽다가 실패했다", exc_info=True)
         return SalesEvidence(notes=("판매 수량을 읽지 못했다 (응답을 해석하지 못함)",))
     if not read.complete:
-        return SalesEvidence(
-            notes=(
-                f"주문이 많아 {read.orders_scanned}건까지만 읽어서 판매 수량을 내지 않았다 "
-                "(모자란 수량으로 비율을 내면 틀린다)",
-            )
-        )
+        if read.source == "summary":
+            note = "마감 때문에 판매 집계를 끝까지 읽지 못해 판매 수량을 내지 않았다"
+        else:
+            note = f"주문이 많아 {read.orders_scanned}건까지만 읽어서 판매 수량을 내지 않았다"
+        return SalesEvidence(notes=(f"{note} (모자란 수량으로 비율을 내면 틀린다)",))
     return SalesEvidence(read.qty_by_product, read.orders_scanned)
 
 
