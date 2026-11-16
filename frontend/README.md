@@ -34,6 +34,7 @@
 | 요청·기획서 | AXcellent | `/planning` |
 | 개발·배포 | AXcellent | `/dev` |
 | 총괄·사건 | AXcellent | `/orchestrator` |
+| 안전규칙 AI (기본 포함, 끌 수 없음) | AXcellent | `/safety` |
 | 기본 포함: AI 대화방·AI 오피스 | AXcellent | `/agents/chat`, `/agents/office` |
 | 시스템 관리: 서비스 고르기·회사 서비스 연결 | AXcellent | `/system/services`, `/system/integrations` |
 | 메인(로그인 전 서비스 카탈로그) | — | `/` → 로그인 버튼 → `/login` |

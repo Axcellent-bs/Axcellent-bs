@@ -203,14 +203,17 @@ export function ShareBars({ rows, format }: { rows: { label: string; value: numb
   const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1);
   const total = rows.reduce((t, r) => t + Math.abs(r.value), 0) || 1;
   return (
-    <ul className="space-y-2">
+    // 줄마다 따로 grid면 금액 길이에 따라 막대 폭이 달라진다. 목록 하나를 grid로 두고 줄은 칸만 나눠(contents)
+    // 막대 칸과 금액 칸 폭을 모든 줄이 같이 쓴다. 금액·%는 오른쪽 정렬
+    <ul className="grid grid-cols-[minmax(7rem,10rem)_1fr_auto_3rem] items-center gap-x-3 gap-y-2 text-sm">
       {rows.map((r) => (
-        <li key={r.label} className="grid grid-cols-[minmax(7rem,10rem)_1fr_auto] items-center gap-3 text-sm">
+        <li key={r.label} className="contents">
           <span className="text-ink-700">{r.label}</span>
           <span className="h-2 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
             <span className={`block h-full rounded-full ${r.value < 0 ? "bg-red-700/60" : "bg-brand-500"}`} style={{ width: `${Math.max((Math.abs(r.value) / max) * 100, 1)}%` }} />
           </span>
-          <span className="tabular-nums text-ink-900">{format(r.value)} <span className="text-ink-500">{Math.round((Math.abs(r.value) / total) * 100)}%</span></span>
+          <span className="text-right tabular-nums text-ink-900">{format(r.value)}</span>
+          <span className="text-right tabular-nums text-ink-500">{Math.round((Math.abs(r.value) / total) * 100)}%</span>
         </li>
       ))}
     </ul>
