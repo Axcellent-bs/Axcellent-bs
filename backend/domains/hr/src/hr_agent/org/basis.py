@@ -27,7 +27,7 @@ from hr_agent.results import completed, failed, invalid_input, make_evidence
 from hr_agent.services import Services
 
 CALL_TIMEOUT_SECONDS = 20
-TARGET = "hr"  # 부서 이름으로 부르면 skill을 맡은 서비스로 간다 (services.py)
+TARGET = "archive"  # 부서 이름으로 부르면 skill을 맡은 서비스로 간다 (services.py)
 SKILL = "find_similar_decisions"
 SEND = call_agent  # 테스트에서 바꿀 수 있다
 

@@ -28,7 +28,8 @@ export const DESKS: DeskDef[] = [
 export function deskOf(name: string | null | undefined): DeskKey | null {
   if (!name) return null;
   // 서비스 이름(inquiry·coupon·org 등)은 먼저 부서로 (AI 대화방 이름과 같은 규칙)
-  const dept = deptOf(name);
+  let dept = deptOf(name);
+  if (dept === "archive") dept = "hr"; // 아카이브 자리는 나중에 따로 만든다. 당장은 인사 자리를 쓴다
   if (dept === "memory") return "data";
   return DESKS.some((d) => d.key === dept) ? (dept as DeskKey) : null;
 }

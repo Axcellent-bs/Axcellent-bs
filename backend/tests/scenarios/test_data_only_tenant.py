@@ -371,7 +371,7 @@ def test_disabled_services_are_handed_off_without_their_cards(
 
     registry, inc, done = asyncio.run(scenario())
     assert set(registry.cards) == {"data"}
-    assert {"infra", "marketing", "planning", "support", "hr"} <= set(registry.unavailable)
+    assert {"infra", "marketing", "planning", "support", "archive"} <= set(registry.unavailable)
     assert all("꺼진 서비스" in why for why in registry.unavailable.values())
     skipped = [r.note for r in inc.steps.values() if "Agent Card에 skill 없음" in (r.note or "")]
     assert skipped == []  # 예전에는 원인 진단·비슷한 사례·보상·기록 등이 여기서 건너뛰었다

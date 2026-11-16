@@ -43,7 +43,7 @@ class Hr:
         self.asked: list[AgentRequest] = []
 
     async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
-        assert target == "hr"
+        assert target == "archive"
         self.asked.append(req)
         if self.slow:
             await asyncio.sleep(1)

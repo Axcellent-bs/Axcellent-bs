@@ -102,8 +102,13 @@ async def call(
     context_id: str | None = None,
     key: str | None = None,
     target: str | None = None,
+    to: str = TARGET,
 ) -> dict[str, Any]:
-    """hr skill을 부른다. 상태를 바꾸는 skill에는 `key`나 `target`으로 멱등 키를 준다."""
+    """hr skill을 부른다. 상태를 바꾸는 skill에는 `key`나 `target`으로 멱등 키를 준다.
+
+    `to`는 받는 에이전트 이름이다(기본 `hr`).
+    결정 기록 skill은 `archive_client`가 `archive`로 부른다.
+    """
     context = context_id or new_context_id()
     config.set_agent_name(AGENT_NAME)
     request = AgentRequest(
@@ -116,4 +121,4 @@ async def call(
         skill=skill,
         input=input or {},
     )
-    return unwrap(await SEND(TARGET, request))
+    return unwrap(await SEND(to, request))

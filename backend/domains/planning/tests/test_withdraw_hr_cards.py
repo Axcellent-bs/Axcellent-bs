@@ -40,7 +40,7 @@ class Hr:
         ]
 
     async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
-        assert target == "hr"
+        assert target == "archive"
         self.asked.append(req)
         if req.skill != "retire_request_cards":
             return AgentResult(

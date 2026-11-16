@@ -11,7 +11,7 @@ from ax_contracts.schemas import HoldReason
 from ax_safety.gate import Gate
 from ax_safety.rules import load_registry
 
-WRITERS = ["hr", "support", "marketing", "planning", "finance", "orchestrator", "data"]
+WRITERS = ["hr", "archive", "support", "marketing", "planning", "finance", "orchestrator", "data"]
 
 
 @pytest.fixture
@@ -57,18 +57,20 @@ async def test_data_deletion_always_waits_for_a_person(gate: Gate, act) -> None:
 
 
 @pytest.mark.asyncio
-async def test_memory_card_link_only_hr(gate: Gate, act) -> None:
-    ok = await gate.execute(act("memory.card_link", "hr", "link-1"))
-    assert (ok.grade, ok.status) == ("A", "executed")
+async def test_memory_card_link_only_archive(gate: Gate, act) -> None:
+    for who in ("archive", "hr"):  # hr은 되돌릴 때를 위해 남겨 둔다(2026-11-16)
+        ok = await gate.execute(act("memory.card_link", who, f"link-{who}"))
+        assert (ok.grade, ok.status) == ("A", "executed")
     other = await gate.execute(act("memory.card_link", "support", "link-2"))
     assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
 
 
 @pytest.mark.asyncio
-async def test_memory_card_review_only_hr(gate: Gate, act) -> None:
-    """후보 카드 승인·폐기 반영 (#304): hr만, A."""
-    ok = await gate.execute(act("memory.card_review", "hr", "review-1"))
-    assert (ok.grade, ok.status) == ("A", "executed")
+async def test_memory_card_review_only_archive(gate: Gate, act) -> None:
+    """후보 카드 승인·폐기 반영 (#304): 아카이브만, A."""
+    for who in ("archive", "hr"):
+        ok = await gate.execute(act("memory.card_review", who, f"review-{who}"))
+        assert (ok.grade, ok.status) == ("A", "executed")
     other = await gate.execute(act("memory.card_review", "data", "review-2"))
     assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
 
@@ -870,7 +872,7 @@ async def test_planning_and_dev_do_not_share_actions(gate: Gate, act, action: st
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("requester", ["hr", "planning", "dev"])
+@pytest.mark.parametrize("requester", ["hr", "archive", "planning", "dev"])
 async def test_record_case_is_a_for_hr_planning_and_dev(gate: Gate, act, requester: str) -> None:
     """기획·개발은 PR 머지·요청 완료를 인사에 보내기 전에 record_case 관문을 거친다 (#881)."""
     ok = await gate.execute(act("record_case", requester, f"rc-{requester}"))

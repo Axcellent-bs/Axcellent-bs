@@ -78,7 +78,7 @@ export interface DemoRequest {
 
 // ---------------------------------------------------------------- 이름표
 export const DEPT_KO: Record<string, string> = {
-  orchestrator: "총괄 AI", planning: "기획", dev: "개발", support: "고객지원", marketing: "마케팅", hr: "인사",
+  orchestrator: "총괄 AI", planning: "기획", dev: "개발", support: "고객지원", marketing: "마케팅", hr: "인사", archive: "아카이브",
   finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전규칙", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
   "dashboard-api": "AXcellent 화면", operator: "운영자(사람)",
 };
@@ -87,7 +87,7 @@ export const DEPT_KO: Record<string, string> = {
 // 서비스 id와 부서 이름이 같은 것(orchestrator·finance·data·planning·dev)은 넣지 않는다
 const SERVICE_DEPT: Record<string, string> = {
   inquiry: "support", claims: "support", settlement: "support", reviews: "support", coupon: "marketing",
-  handover: "hr", decisions: "hr", org: "hr",
+  handover: "hr", decisions: "archive", org: "hr",
   incident: "infra", hosts: "infra",
 };
 /** 서비스 이름 → 부서 (서비스가 아니면 그대로). AI 대화방 이름과 AI 오피스 자리가 같은 규칙을 쓴다 */
@@ -346,7 +346,7 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
   const opened = inc.opened_at ?? inc.events[0]?.at ?? "";
   out.push({ kind: "separator", id: `${room}:sep`, at: opened, room, text: `${incidentTitle(inc)}${opened ? ` · ${clockKo(opened)} 시작` : ""}`, raw: `이슈 번호 ${inc.context_id}`, variant: "topic" });
   out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: inc.component.startsWith("support-inquiry-")
-      ? `고객지원 AI가 문의를 해결 종료해서 총괄 AI가 "${incidentTitle(inc)}" 이슈를 열고 재무·인사에 넘겼어요.`
+      ? `고객지원 AI가 문의를 해결 종료해서 총괄 AI가 "${incidentTitle(inc)}" 이슈를 열고 재무·아카이브에 넘겼어요.`
       : `캣북스 쇼핑몰이 "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 이슈를 열었어요.` });
 
   for (const step of inc.steps) {

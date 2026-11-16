@@ -33,19 +33,19 @@ const isOver = (s: StepRow, worked: number | null) => worked != null && !!s.prom
 // 코드는 마우스를 올리면(title) 보이게 둔다.
 const DEPT_SAY: Record<string, string> = {
   infra: "인프라 AI", data: "데이터분석 AI", planning: "기획 AI", dev: "개발 AI", marketing: "마케팅 AI",
-  support: "고객지원 AI", finance: "재무 AI", hr: "인사 AI", orchestrator: "총괄 AI",
+  support: "고객지원 AI", finance: "재무 AI", hr: "인사 AI", archive: "아카이브 AI", orchestrator: "총괄 AI",
 };
 const STEP_KO: Record<string, string> = {
   rollback: "배포 되돌리기", recovery: "복구 확인", recovered_draft: "정상화 공지 초안", diagnose: "원인 진단",
   impact: "영향 분석", notice: "점검 공지", end_notice: "장애 배너 내리기", compensation: "피해 고객 보상",
   similar_cases: "비슷한 과거 이슈 찾기", resolution: "해결 내용 기록",
   compensation_sns_draft: "보상 안내 SNS 글 초안", apology_sns_draft: "사과 안내 SNS 글 초안",
-  cost: "처리 결과 장부에 기록", record: "처리 결과 기록", verify: "인사 기록 읽어 확인",
+  cost: "처리 결과 장부에 기록", record: "처리 결과 기록", verify: "아카이브 기록 읽어 확인",
 };
 const NOTE_KO: Record<string, string> = {
   suspected: "최근 배포가 원인으로 의심됨", linked_duplicate: "이미 있는 같은 요청에 연결함", verify_timeout: "다른 AI의 확인이 제때 끝나지 않아 사람 승인으로 넘김",
   undetermined: "원인을 특정하지 못함", requested: "보상을 요청함", card_created: "기록을 남김",
-  listed: "인사 기록에서 확인함", partial: "일부만 확인함", candidate: "후보 기록으로 저장함 (사람 확인 대기)",
+  listed: "아카이브 기록에서 확인함", partial: "일부만 확인함", candidate: "후보 기록으로 저장함 (사람 확인 대기)",
   found: "비슷한 과거 이슈를 찾음", none: "비슷한 과거 이슈 없음", recorded: "해결 내용을 남김", duplicate: "이미 남긴 해결 내용",
   no_card: "해결 내용을 남길 기록이 없음",
   created: "요청을 만들었음", "failed: gate_rejected": "안전 확인 단계에서 막힘", recovered: "복구됨", not_recovered: "아직 복구 안 됨",
@@ -186,7 +186,7 @@ const spanText = (t: EventTimes | null | undefined) => {
 };
 const OUTCOME_KO: Record<string, string> = { resolved: "해결됨", workaround: "임시 조치", unresolved: "미해결" };
 
-/** 이슈가 열릴 때 인사 AI가 찾은 비슷한 과거 이슈. 저장된 해결 내용만 보여 주고 추천은 하지 않는다 */
+/** 이슈가 열릴 때 아카이브 AI가 찾은 비슷한 과거 이슈. 저장된 해결 내용만 보여 주고 추천은 하지 않는다 */
 function SimilarCases({ incident }: { incident: Incident }) {
   const step = incident.steps.find((s) => s.skill === "find_similar_cases");
   if (!step || step.status === "pending" || step.status === "running") return null;
@@ -195,7 +195,7 @@ function SimilarCases({ incident }: { incident: Incident }) {
     <section className="card space-y-2 p-5">
       <h3 className="text-[15px] font-semibold">비슷한 과거 이슈</h3>
       {step.status !== "completed" ? (
-        <p className="text-sm text-ink-500">인사 AI에서 과거 이슈를 찾지 못했습니다. 이슈 처리에는 영향이 없습니다.</p>
+        <p className="text-sm text-ink-500">아카이브 AI에서 과거 이슈를 찾지 못했습니다. 이슈 처리에는 영향이 없습니다.</p>
       ) : !cases.length ? (
         <p className="text-sm text-ink-500">비슷한 과거 이슈가 없습니다.</p>
       ) : (

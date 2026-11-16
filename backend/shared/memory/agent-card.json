@@ -15,7 +15,7 @@
       "input_schema": "contracts/src/ax_contracts/schemas/record.py#CardWriteInput",
       "output_schema": "contracts/src/ax_contracts/schemas/record.py#CardWriteOutput",
       "grade": "A",
-      "allowed_requesters": ["hr", "support", "marketing", "planning", "finance", "orchestrator", "data"],
+      "allowed_requesters": ["hr", "archive", "support", "marketing", "planning", "finance", "orchestrator", "data"],
       "verifier": null,
       "priority": "required"
     },
@@ -25,7 +25,7 @@
       "input_schema": "contracts/src/ax_contracts/schemas/record.py#CardSearchInput",
       "output_schema": "contracts/src/ax_contracts/schemas/record.py#CardSearchOutput",
       "grade": "read",
-      "allowed_requesters": ["orchestrator", "planning", "support", "marketing", "hr", "finance", "data", "infra", "safety"],
+      "allowed_requesters": ["orchestrator", "planning", "support", "marketing", "hr", "archive", "finance", "data", "infra", "safety"],
       "verifier": null,
       "priority": "required"
     },
@@ -35,7 +35,7 @@
       "input_schema": "contracts/src/ax_contracts/schemas/record.py#CardGetInput",
       "output_schema": "contracts/src/ax_contracts/schemas/record.py#CardGetOutput",
       "grade": "read",
-      "allowed_requesters": ["orchestrator", "planning", "support", "marketing", "hr", "finance", "data", "infra", "safety", "dashboard-api"],
+      "allowed_requesters": ["orchestrator", "planning", "support", "marketing", "hr", "archive", "finance", "data", "infra", "safety", "dashboard-api"],
       "verifier": null,
       "priority": "required"
     },
@@ -45,7 +45,7 @@
       "input_schema": "contracts/src/ax_contracts/schemas/record.py#CardLinkInput",
       "output_schema": "contracts/src/ax_contracts/schemas/record.py#CardLinkOutput",
       "grade": "A",
-      "allowed_requesters": ["hr"],
+      "allowed_requesters": ["hr", "archive"],
       "verifier": null,
       "priority": "recommended"
     },
@@ -55,7 +55,7 @@
       "input_schema": "contracts/src/ax_contracts/schemas/record.py#CardReviewInput",
       "output_schema": "contracts/src/ax_contracts/schemas/record.py#CardReviewOutput",
       "grade": "A",
-      "allowed_requesters": ["hr"],
+      "allowed_requesters": ["hr", "archive"],
       "verifier": null,
       "priority": "recommended"
     }
