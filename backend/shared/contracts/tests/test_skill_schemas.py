@@ -208,6 +208,19 @@ def test_data_impact_analysis() -> None:
         ImpactAnalysisOutput.model_validate({**IMPACT, "eta": "10m"})
 
 
+def test_data_impact_timeout_payments_are_optional() -> None:
+    old = ImpactAnalysisOutput.model_validate(IMPACT)  # 예전 응답에는 없다
+    assert (old.timeout_count, old.timeout_amount) == (None, None)
+    out = ImpactAnalysisOutput.model_validate(
+        {**IMPACT, "timeout_count": 2, "timeout_amount": 41000}
+    )
+    assert (out.timeout_count, out.timeout_amount) == (2, 41000)
+    assert out.failed_order_count == old.failed_order_count  # 실패 주문과 따로 센다
+    for field in ("timeout_count", "timeout_amount"):
+        with pytest.raises(ValidationError):  # 음수 거부
+            ImpactAnalysisOutput.model_validate({**IMPACT, field: -1})
+
+
 def test_data_anomaly_detection() -> None:
     assert AnomalyDetectionInput.model_validate({"window_from": T0, "window_to": T1}).metrics == []
     verdict = {

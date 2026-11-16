@@ -20,7 +20,11 @@
     (취소·전액 환불 주문 제외)
   - 결제: 장애 주입(`inject_fault("failure")`) 중이면 `PG_UNAVAILABLE`, 카드 거절
     (`simulate="failure"`)이면 `PG_DECLINED`로 실패하고 주문은 `payment_failed`. 성공이면 `paid`이고
-    약속 배송일 = 결제 시각 + 3일. 결제할 수 있는 주문은 결제 대기·결제 실패뿐이다
+    약속 배송일 = 결제 시각 + 3일. 결제할 수 있는 주문은 결제 대기·결제 실패뿐이다.
+    `inject_fault("lost_response")` 중이면 결제를 `timeout`(`PG_TIMEOUT`)으로 남기고 주문은
+    결제 대기다
+  - `/failed-orders?status=timeout`: 시간 초과로 남은 결제를 실패 주문과 같은 모양으로 준다
+    (기본 `failed`, 그 밖의 값은 422). 구간은 판매 서버와 같이 결제 시도 시각 [from, to)
   - 시각은 모두 주입한 시계(`now`)로 정하고 `YYYY-MM-DDTHH:MM:SSZ`(UTC, 초 단위)로 적는다.
     판매 서버는 같은 일을 벽시계로 한다(시드 시각·약속 배송일). 평가는 시나리오 시계 하나만 쓴다
 - 읽기(`FakeShopTransport`)는 data가 판매 서버에 보내는 GET에 같은 `{data, meta}` 모양으로 답한다:
@@ -106,6 +110,8 @@ PROMISED_DELIVERY_DAYS = 3
 ORDER_PAGE_DEFAULT = 200
 ORDER_PAGE_MAX = 1000
 PAYABLE = ("pending_payment", "payment_failed")
+PAYMENT_TIMEOUT = "timeout"  # 시간 초과로 남은 결제 상태 (판매 서버 service.py)
+TIMEOUT_CODE = "PG_TIMEOUT"  # 그 결제의 failure_code
 _PAYMENT_KEYS = ("payment_id", "amount", "method_code", "status", "failure_code", "created_at")
 _REFUND_CHUNK = 500  # IN (...) 한 번에 넣는 주문 수(SQLite 변수 상한 안쪽)
 _SOURCE_TAG = re.compile(r"[A-Za-z0-9._-]{1,64}")
@@ -321,6 +327,7 @@ class FakeShop:
         self.db = db
         self.now = now
         self.failing = False  # 장애 주입(failure) 스위치
+        self.lost_response = False  # 장애 주입(lost_response) 스위치: 결제가 시간 초과로 남는다
 
     # ---- 시드
     def seed(self) -> None:
@@ -485,16 +492,27 @@ class FakeShop:
 
     # ---- 결제
     def inject_fault(self, kind: str) -> None:
-        """장애 주입. 평가가 쓰는 `failure`(모든 결제를 PG_UNAVAILABLE로 실패)만 흉내 낸다."""
-        if kind != "failure":
+        """장애 주입. `failure`(모든 결제를 PG_UNAVAILABLE로 실패)와 `lost_response`(결제사 응답이
+        끊겨 결제가 시간 초과로 남음)만 흉내 낸다."""
+        if kind == "failure":
+            self.failing = True
+        elif kind == "lost_response":
+            self.lost_response = True
+        else:
             raise FakeShopError("FAULT_NOT_IMITATED", f"가짜 판매 서버에 없는 장애: {kind}")
-        self.failing = True
 
     def release_fault(self) -> None:
         self.failing = False
+        self.lost_response = False
 
     def pay(self, order_id: str, method_code: str, simulate: str | None) -> dict[str, Any]:
-        """결제 시도 하나. 장애 중이면 PG_UNAVAILABLE, `simulate="failure"`면 PG_DECLINED."""
+        """결제 시도 하나. 장애 중이면 PG_UNAVAILABLE, `simulate="failure"`면 PG_DECLINED.
+
+        `lost_response` 중이면(카드 거절 시도가 아니면) 판매 서버 `service.py`처럼 결제를
+        `timeout`(failure_code `PG_TIMEOUT`)으로 남기고 주문은 결제 대기로 둔다.
+        """
+        if self.lost_response and not self.failing and simulate != "failure":
+            return self._pay_timed_out(order_id, method_code)
         with self.db.tx() as conn:
             order = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
             if order is None:
@@ -526,6 +544,24 @@ class FakeShop:
                     "UPDATE orders SET promised_delivery_at = ? WHERE order_id = ?",
                     (iso(promised), order_id),
                 )
+            return self._order(conn, order_id)
+
+    def _pay_timed_out(self, order_id: str, method_code: str) -> dict[str, Any]:
+        """시간 초과로 남은 결제 하나 (판매 서버 `_record_payment`의 `timed_out`)."""
+        with self.db.tx() as conn:
+            order = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
+            if order is None:
+                raise FakeShopError("ORDER_NOT_FOUND", "주문을 찾을 수 없다", 404)
+            if order["status"] not in PAYABLE:
+                raise FakeShopError("ORDER_NOT_PAYABLE", "결제할 수 없는 주문 상태다", 409)
+            payment_id = self.db.next_id(conn, "payment", "pay_")
+            conn.execute(
+                "INSERT INTO payments (payment_id, order_id, amount, method_code, status, "
+                "failure_code, tenant_id, context_id, created_at, provider, pg_payment_key, "
+                "failure_detail) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'fake', NULL, ?)",
+                (payment_id, order_id, order["total_amount"], method_code, PAYMENT_TIMEOUT,
+                 TIMEOUT_CODE, TENANT_ID, iso(self.now()), "LOST_RESPONSE"),
+            )  # fmt: skip
             return self._order(conn, order_id)
 
     # ---- 주문 응답 (판매 서버 service.py `_orders_view`와 같은 모양)
@@ -703,6 +739,10 @@ class FakeShop:
 
     # ---- 데이터 조회 (판매 서버 lookups.py). `now`는 응답의 조회 시각·최근 등록 기준이다
     def failed_orders(self, query: ShopFailedOrdersQuery, now: datetime) -> ShopFailedOrdersResult:
+        """결제 실패(`status=failed`, 기본) 또는 시간 초과(`timeout`) 결제의 주문.
+
+        판매 서버와 같이 결제 시도 시각이 [from, to)인 것이고 `failed_at`은 결제 시도 시각이다.
+        """
         if query.to <= query.from_:
             raise FakeShopError("INVALID_RANGE", "to는 from보다 뒤여야 한다")
         sql = (
@@ -711,10 +751,10 @@ class FakeShop:
             "   ON pr.product_id = i.product_id WHERE i.order_id = p.order_id "
             "   ORDER BY i.rowid LIMIT 1) AS category "
             "FROM payments p JOIN orders o ON o.order_id = p.order_id "
-            "WHERE p.status = 'failed' AND p.tenant_id = ? "
+            "WHERE p.status = ? AND p.tenant_id = ? "
             "AND p.created_at >= ? AND p.created_at < ?"
         )
-        args: list[Any] = [query.tenant_id, iso(query.from_), iso(query.to)]
+        args: list[Any] = [query.status, query.tenant_id, iso(query.from_), iso(query.to)]
         if query.category:
             sql += " AND category = ?"
             args.append(query.category)
@@ -1077,6 +1117,7 @@ class FakeShopTransport(httpx.MockTransport):
                 to=_when(params, "to"),
                 category=params.get("category"),
                 limit=int(params.get("limit", 1000)),
+                status=params.get("status", "failed"),  # 그 밖의 값은 계약이 거절 → 422
             )
             return shop.failed_orders(query, now).model_dump(mode="json")
         if path.endswith("/metric-series"):

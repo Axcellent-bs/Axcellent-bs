@@ -20,6 +20,10 @@ export interface ImpactOutput {
   unpaid_amount?: number | null;
   by_category?: CategoryImpact[] | null;
   summary?: string | null;
+  /** 장애 구간에 시간 초과로 남은 결제(확인·환불 필요) 건수·금액. 실패 주문·미결제와 따로 센다.
+   *  셀 수 없으면 null, 예전 응답에는 없다 */
+  timeout_count?: number | null;
+  timeout_amount?: number | null;
 }
 export interface RecoveryOutput { recovered?: boolean | null; infra_metrics_ok?: boolean | null; business_metrics_ok?: boolean | null }
 
@@ -116,6 +120,14 @@ export const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v 
 export const count = (n: unknown, unit: string) => {
   const v = num(n);
   return v == null ? UNKNOWN : `${v.toLocaleString("ko-KR")}${unit}`;
+};
+
+/** 시간 초과로 남은 결제: "2건 · 48,000원". 건수나 금액 중 하나라도 모르면 null(화면은 "확인할 수 없음") */
+export const timeoutPayments = (impact: ImpactOutput | null | undefined): string | null => {
+  const n = num(impact?.timeout_count);
+  const amount = num(impact?.timeout_amount);
+  if (n == null || amount == null) return null;
+  return `${n.toLocaleString("ko-KR")}건 · ${Math.round(amount).toLocaleString("ko-KR")}원`;
 };
 
 /** 걸린 시간: 4.78 → "4.8초", 540 → "9분", 570 → "9분 30초" */

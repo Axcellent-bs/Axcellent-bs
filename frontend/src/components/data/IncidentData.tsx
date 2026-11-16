@@ -6,7 +6,7 @@ import { krw } from "@/lib/finance";
 import { humanId, shortDateTime } from "@/lib/format";
 import {
   CATEGORY_KO, CONFIDENCE_KO, FACT_KIND_KO, FACT_SOURCE_KO, FLOW, INCIDENT_STATUS_KO, ORCH_SERVER, SKIP_DEFAULT, STEP_STATUS_KO, UNKNOWN, bool, clock, count,
-  detectorName, duration, impactOf, num, pickedByRule, recoveryEndOf, recoveryOf, rootCauseOf, skipReason, stepOf, verifiedAtOf, type CauseFact,
+  detectorName, duration, impactOf, num, pickedByRule, recoveryEndOf, recoveryOf, rootCauseOf, skipReason, stepOf, timeoutPayments, verifiedAtOf, type CauseFact,
   type RootCauseOutput,
 } from "@/lib/data";
 
@@ -343,6 +343,7 @@ export function IncidentData({ list, detail, selected, onSelect }: {
   // 상세가 아직 오지 않았으면 목록의 값(같은 사건 모양)을 쓴다
   const inc = detail.env?.data.context_id === selected ? detail.env.data : incidents.find((i) => i.context_id === selected) ?? null;
   const impact = impactOf(inc);
+  const timeouts = timeoutPayments(impact);
   return (
     <div className="space-y-5">
       <IncidentPicker list={incidents} selected={selected} onSelect={onSelect} />
@@ -354,6 +355,7 @@ export function IncidentData({ list, detail, selected, onSelect }: {
             <Stat label="실패 주문" value={count(impact?.failed_order_count, "건")} tone={num(impact?.failed_order_count) == null ? "text-ink-500" : ""} />
             <Stat label="영향 고객" value={count(impact?.affected_customer_count, "명")} tone={num(impact?.affected_customer_count) == null ? "text-ink-500" : ""} />
             <Stat label="결제 실패(미결제)" value={krw(num(impact?.unpaid_amount ?? impact?.damage_amount))} tone={num(impact?.unpaid_amount ?? impact?.damage_amount) == null ? "text-ink-500" : "text-accent"} />
+            <Stat label="확인·환불 필요 (시간 초과 결제)" value={timeouts ?? UNKNOWN} tone={timeouts == null ? "text-ink-500" : ""} />
             <Stat label="복구까지 걸린 시간" value={duration(inc.metrics?.mttr_seconds)} sub="감지 → 정상 복귀" tone={num(inc.metrics?.mttr_seconds) == null ? "text-ink-500" : ""} />
           </div>
           <Panel id="data-flow" title="데이터 AI 처리 흐름" hint={`${incidentTitle(inc)} · ${shortDateTime(inc.opened_at)} 시작. 감지는 쇼핑몰 모니터·Zabbix가 하고, 데이터 AI는 총괄 AI 요청을 받아 일합니다.`}>
