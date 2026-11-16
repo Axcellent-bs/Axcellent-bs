@@ -203,7 +203,7 @@ export function ReceivedBriefs() {
         <p className="mt-1 text-xs text-ink-500">기획이 사람 확정을 거쳐 넘긴 기획안입니다. 읽기만 하며, 캠페인 시작은 이 화면의 캠페인 칸에서 합니다. 서버를 다시 배포하면 목록이 비어 기획이 다시 보내야 할 수 있습니다.</p>
       </div>
 
-      {!briefsEnabled && <p className="py-4 text-center text-sm text-ink-500">받은 기획안 읽기 연결이 꺼져 있습니다. 열람 토큰을 설정해 주세요.</p>}
+      {!briefsEnabled && <p className="py-4 text-center text-sm text-ink-500">받은 기획안 읽기 연결이 꺼져 있습니다. 화면 중계 서버(dashboard-api) 주소를 설정해 주세요.</p>}
       {error && <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{error}</p>}
       {briefsEnabled && !list && !error && <p className="text-sm text-ink-500">불러오는 중입니다.</p>}
       {list && items.length === 0 && <p className="py-6 text-center text-sm text-ink-500">{list.unknown_reason ?? "받은 기획안이 없습니다."}</p>}

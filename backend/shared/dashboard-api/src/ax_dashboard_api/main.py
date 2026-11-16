@@ -16,6 +16,7 @@ from ax_dashboard_api import (
     office_room,
     settlements,
     shop_events,
+    shop_relay,
     support_client,
 )
 from ax_dashboard_api.envelope import install_error_handlers, is_mock
@@ -105,6 +106,8 @@ app.include_router(company_connection.router)
 app.include_router(shop_events.router)
 # 판매자 정산: 고객지원(support)이 계산·지급 승인 요청을 한다 (요청은 사람 토큰)
 app.include_router(settlements.router)
+# 판매 서버 관리 읽기 중계: 화면이 판매 서버를 직접 부르지 않게 (GET만, 서버 쪽 열람 토큰)
+app.include_router(shop_relay.router)
 
 
 @app.get("/health")
