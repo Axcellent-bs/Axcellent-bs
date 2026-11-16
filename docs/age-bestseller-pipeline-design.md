@@ -79,7 +79,7 @@ Trust = Literal["verified", "reference"]  # verified: 출처 API가 준 숫자, 
 
 class AgeBandCount(AxModel):
     """요청을 낸 고객의 연령대별 집계. 개인 단위 나이는 싣지 않는다."""
-    age_band: AgeBand
+    age_band: AgeBand | None            # None = 연령 모름(입력 전 구매자)과, 5명 미만이라 합친 구간
     count: int = Field(ge=1)
     customer_count: int = Field(ge=1)
 
@@ -108,14 +108,8 @@ class BestsellerGroup(AxModel):
 
 class IdeaReportInput(AxModel):            # 기존 모델에 두 칸을 더한다
     ...
-    by_age_band: list[AgeBandCount] = Field(default_factory=list, max_length=5)
+    by_age_band: list[AgeBandCount] = Field(default_factory=list, max_length=6)  # 5구간 + 연령 모름
     bestseller_groups: list[BestsellerGroup] = Field(default_factory=list, max_length=20)
-
-
-class IdeaTrendBucket(AxModel):            # 기존 모델에 두 칸을 더한다
-    ...
-    by_age_band: list[AgeBandCount] = Field(default_factory=list)   # 기간 합산
-    bestsellers: list[BestsellerTrendRow] = Field(default_factory=list)  # 아래
 
 
 class BestsellerTrendRow(AxModel):
@@ -128,13 +122,23 @@ class BestsellerTrendRow(AxModel):
     trust: Trust                        # 가장 낮은 등급 기준
     shop_stock: int | None = None       # 데이터가 붙임. 모르면 None
     shop_sales_30d: int | None = None   # 데이터가 붙임. 모르면 None
+    our_product_id: str | None = None   # 데이터가 붙임(`LinkedProduct.product_id`). 못 이으면 None
+    link_match: str | None = None       # `name`·`category`·`embedding`. 못 이으면 None
     reason: str                         # 코드가 만든 한 줄 근거
+
+
+class IdeaTrendBucket(AxModel):            # 기존 모델에 두 칸을 더한다
+    ...
+    by_age_band: list[AgeBandCount] = Field(default_factory=list)   # 기간 합산(작은 구간은 합친 뒤 값)
+    bestsellers: list[BestsellerTrendRow] = Field(default_factory=list)  # 위에 정의
 ```
 
 - 중복: 같은 (`tenant`, `report_date`)는 한 번만 받는다 (기존 규칙). 베스트셀러 칸은 같은 `source_url`이 같은 날 두 번 오면 한 번만 센다.
 - `trust="reference"`(사람 입력·기사) 자료는 순위 계산에 쓰지 않고 "참고" 칸에만 보인다.
 - 이벤트 종류 추가는 하지 않는다.
-- 사람 입력(근거 링크 필수)은 고객지원의 새 skill `submit_bestseller_reference`가 받는다. 상태를 바꾸므로 `execute()`를 거친다.
+- **작은 연령대 건수는 합쳐서 보낸다**(예진 11/17 리뷰): 한 구간의 `customer_count`가 **5명 미만**이면 그 구간으로 보내지 않고 `age_band=None`(연령 모름)에 합친다. "10대 1명"처럼 한 사람으로 좁혀지는 값을 막는 규칙이고, 판매 서버 `sales-summary`의 5명 미만 숨기기(Catbooks-demo #18)와 같은 기준이다. 나중에 성별·직업이 붙어 칸이 더 잘게 나뉘어도 같은 기준을 쓴다. 기준값은 상수 하나(`MIN_AGE_BAND_CUSTOMERS = 5`)로 둔다. 합친 `None` 항목은 연령을 알려 주지 않으므로 그대로 보낸다.
+- **판매·재고를 읽는 규칙**: 데이터가 붙이는 `shop_stock`·`shop_sales_30d`는 판매 서버 `sales-summary`를 짧게(7일씩) 나눠 읽고 몇 분 캐시한다. 251 `shop.db`에 주문이 30만 건쯤이라 한 번에 크게 읽으면 결제 모니터가 지연으로 잡힌다(예진 11/16·`book-issue-a2a-design.md`·고객지원 #1145가 같은 규칙).
+- 사람 입력(근거 링크 필수)은 고객지원의 새 skill `submit_bestseller_reference`가 받는다. 상태를 바꾸므로 `execute()`를 거친다. **서비스 카드는 아이디어 접수 `submit_idea`가 있는 `backend/services/inquiry/agent-card.json`에 올리고, `backend/domains/support/agent-card.json`과 같은 PR에서 함께 고친다**(둘이 어긋나면 `FORBIDDEN_SKILL`이 난다, #1045).
 
 ## 연령 구간 맞추기
 우리 `AgeBand`(`10s`·`20s`·`30s`·`40s`·`50s_plus`)는 데이터 `trend_age` 기본 구간과 같은 5개다. 네이버 연령 코드로 보면
@@ -196,7 +200,7 @@ class BestsellerTrendRow(AxModel):
 ## 구현 순서 (PR 단위, 앞 단계가 뒤 단계를 막지 않게)
 0. **(끝남) 고객지원 쪽 우리 사실**: 책별 집계 `book_issue_stats` (#1096~#1100). 연령대별 건수(`by_age_band`)는 아래 1번이 있어야 센다.
 1. **(끝남) 구매자 연령대 칸** (판매 서버, **Catbooks-demo #9**, 11/16 병합): `buyers.age_band`와 읽는 응답 추가. 값이 없는 구매자는 NULL. AXcellent 쪽 `shop-api`에는 올리지 않는다(곧 빠진다). 가입·프로필 화면은 예진 님. 이 칸을 읽어 `by_age_band`를 세는 고객지원 집계는 판매 서버가 새 레포로 뜬 뒤에 의미가 있다.
-2. **계약 PR (아직 없음, 데이터가 올리기로 함 — 재현 11/16)**: `idea.py`에 위 칸을 **추가만** 한다(스키마 버전은 올리지 않는다, 재현 11/16) + 계약 테스트 (옛 보고도 받는지). 가장 먼저 머지해서 양쪽이 같은 모양을 본다.
+2. **계약 PR (아직 없음, 데이터가 올리기로 함 — 재현 11/16)** — **고객지원은 이 계약이 dev에 머지된 뒤에만 새 칸을 채워 보낸다**(`AxModel`이 `extra="forbid"`라 새 칸을 보내는 쪽이 받는 쪽보다 먼저 배포되면 데이터가 보고를 거절한다, 예진 11/17): `idea.py`에 위 칸을 **추가만** 한다(스키마 버전은 올리지 않는다, 재현 11/16) + 계약 테스트 (옛 보고도 받는지). 가장 먼저 머지해서 양쪽이 같은 모양을 본다.
 3. **데이터 쪽**: 일일 보고 저장에 새 칸을 더하고(재시작해도 남게), 주·월·연 합산(`list_idea_reports`)에
    연령대·베스트셀러를 태운다. 정보나루·우리 판매·재고를 붙인다(분담 합의됨, 재현 11/16). 판매는 `sales-summary`를 읽을 수 있다.
 4. **고객지원 쪽**: 사람 입력 화면(`submit_bestseller_reference`)과 하루 한 번 데이터로 보내기.
