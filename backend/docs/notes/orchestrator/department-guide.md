@@ -14,7 +14,7 @@ uv run python -m ax_orchestrator
 ORCHESTRATOR_REAL_DEPTS=finance uv run python -m ax_orchestrator
 ```
    - 터미널에 나온 `http://localhost:<포트>/demo`를 연다. 포트를 직접 정하려면 `--port 8002`, 브라우저를 안 열려면 `--no-browser`.
-   - 주소는 `AX_<부서>_URL`(없으면 기본 포트 표), 여러 부서는 쉼표로(`hr,finance`).
+   - 주소는 `AX_<부서>_URL`(없으면 기본 포트 표), 여러 부서는 쉼표로(`archive,finance`).
    - 내 에이전트도 목 모드(`AGENT_TEMPLATE_MOCK=1`)면 토큰 검증이 맞는다.
 3. `/demo`에서 장애를 주입한다. 부서 카드에 `실제`/`목` 표시가 나오고, 내 skill 호출이 이벤트 흐름에 보인다.
 4. `GET /api/registry`로 내 카드가 제대로 읽혔는지 확인한다(`unavailable`에 내 부서가 있으면 카드 수집 실패).
@@ -103,10 +103,10 @@ curl -X POST localhost:<포트>/api/events -H 'Content-Type: application/json'
 
 > 총괄은 고객지원이 문의를 닫으면 재무를 불러(`record_support_cost`) 장부에 기록하게 한다. 장애 때 나간 쿠폰·환불은 이벤트로 재무 장부에 기록된다.
 
-## hr
+## archive
 
 | skill | 등급 | 단계 | 선행 단계 | 필수 | 입력 예시 |
 |---|---|---|---|---|---|
-| `find_similar_cases` | read | 비슷한 과거 이슈 찾기 (hr) | 없음 (이벤트 시작 즉시) | 아니오 | `{"event_type": null, "limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
-| `record_case` | A | 이슈 기록 (hr) | recovered_notice(끝나면), end_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면), compensation_sns_draft(끝나면), apology_sns_draft(끝나면) | 예 | `{"alternatives_considered": ["과거 같은 장애의 처리 방식 다시 하기: 건너뜀", "원인 확인 요청: 건너뜀", "장애 공지 배너 내리기: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 과거 같은 장애의 처리 방식 다시 하기, 원인 확인 요청, 장애 공지 배너 내리기", "event_typ` |
-| `record_resolution` | A | 해결 내용 기록 (hr) | record(끝나면) | 아니오 | `{"action": "배포 이전 버전으로 되돌림", "action_code": "rollback_deployment", "context_id": "ctx_inc_guide", "minutes_to_resolve": 0, "outcome": "resolved", "root_cause": "PR #412 배포가 원인일 수 있음"}` |
+| `find_similar_cases` | read | 비슷한 과거 이슈 찾기 (archive) | 없음 (이벤트 시작 즉시) | 아니오 | `{"event_type": null, "limit": 3, "query": "결제가 서버 오류로 자꾸 실패해요"}` |
+| `record_case` | A | 이슈 기록 (archive) | recovered_notice(끝나면), end_notice(끝나면), link_incident(끝나면), compensation(끝나면), finance_record(끝나면), kpi(끝나면), root_cause(끝나면), compensation_sns_draft(끝나면), apology_sns_draft(끝나면) | 예 | `{"alternatives_considered": ["과거 같은 장애의 처리 방식 다시 하기: 건너뜀", "원인 확인 요청: 건너뜀", "장애 공지 배너 내리기: 건너뜀"], "area": "infra", "author": "orchestrator", "context_id": "ctx_inc_guide", "decision_reason": "끝내지 못한 일: 과거 같은 장애의 처리 방식 다시 하기, 원인 확인 요청, 장애 공지 배너 내리기", "event_typ` |
+| `record_resolution` | A | 해결 내용 기록 (archive) | record(끝나면) | 아니오 | `{"action": "배포 이전 버전으로 되돌림", "action_code": "rollback_deployment", "context_id": "ctx_inc_guide", "minutes_to_resolve": 0, "outcome": "resolved", "root_cause": "PR #412 배포가 원인일 수 있음"}` |

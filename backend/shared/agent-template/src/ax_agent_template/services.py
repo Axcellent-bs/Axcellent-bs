@@ -275,7 +275,7 @@ SERVICES: tuple[Service, ...] = (
     ),
     Service(
         "decisions",
-        "hr",
+        "archive",
         8114,
         (
             "record_case",

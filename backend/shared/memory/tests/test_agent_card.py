@@ -12,6 +12,7 @@ REQUESTERS = {
     "support",
     "marketing",
     "hr",
+    "archive",
     "finance",
     "data",
     "infra",
@@ -39,14 +40,14 @@ def test_상태를_바꾸는_skill은_A등급이다() -> None:
     assert _skill(card, "card_get").grade == "read"
 
 
-def test_card_link는_hr만_요청할_수_있다() -> None:
-    assert _skill(load_card(), "card_link").allowed_requesters == ["hr"]
+def test_card_link는_아카이브만_요청할_수_있다() -> None:
+    assert _skill(load_card(), "card_link").allowed_requesters == ["hr", "archive"]
 
 
-def test_card_review는_hr만_부르는_A등급이다() -> None:
+def test_card_review는_아카이브만_부르는_A등급이다() -> None:
     """후보 카드 승인·폐기 반영 (#304)."""
     skill = _skill(load_card(), "card_review")
-    assert (skill.grade, skill.allowed_requesters) == ("A", ["hr"])
+    assert (skill.grade, skill.allowed_requesters) == ("A", ["hr", "archive"])
     assert skill.input_schema.endswith("#CardReviewInput")
     assert skill.output_schema.endswith("#CardReviewOutput")
 

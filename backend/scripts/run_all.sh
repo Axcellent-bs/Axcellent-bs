@@ -188,7 +188,7 @@ while read -r name port _; do
   export "AX_$(echo "$name" | tr 'a-z-' 'A-Z_')_URL=http://127.0.0.1:$port"
 done <<< "$APPS"
 # 부서 이름으로 부르는 코드가 있어도 skill로 서비스를 고르지만(route_target), 고를 수 없는 경우를 위해 대표 서비스로 둔다
-export AX_SUPPORT_URL=http://127.0.0.1:8102 AX_HR_URL=http://127.0.0.1:8104
+export AX_SUPPORT_URL=http://127.0.0.1:8102 AX_HR_URL=http://127.0.0.1:8104 AX_ARCHIVE_URL=http://127.0.0.1:8114
 export AX_MARKETING_URL=http://127.0.0.1:8103 AX_INFRA_URL=http://127.0.0.1:8107
 # 이름이 다른 주소 변수 (shop-api의 총괄 중계, hr의 회사 기억)
 export SHOP_ORCHESTRATOR_URL=http://127.0.0.1:8000 HR_MEMORY_URL=http://127.0.0.1:8002
@@ -358,7 +358,7 @@ export SHOP_DEGRADED_SUSTAIN_S="${SHOP_DEGRADED_SUSTAIN_S:-20}" SHOP_MONITOR_INT
 # 사람별 토큰: AX_PEOPLE="예진,준하"처럼 이름을 주면 사람마다 사람 토큰(승인·머지·재무 결정)과
 # 작업 대기열 토큰(내 Claude MCP)을 따로 만든다. 누가 결정했는지 관문·화면 기록에 이름이 남는다.
 # 내 작업 토큰 보기: sed -n 's/^WORK_TOKEN\.예진=//p' backend/.data/tokens.env (내 Claude 연결에 넣는다)
-NAMES="$(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ') support marketing hr infra admin"
+NAMES="$(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ') support marketing hr archive infra admin"
 read -r AX_AGENT_TOKENS HUMAN_TOKEN WORK_TOKEN PEOPLE_HUMAN PEOPLE_WORK < <("$PY" -c "
 import os, secrets, sys
 names, path = sys.argv[1].split(), sys.argv[2]

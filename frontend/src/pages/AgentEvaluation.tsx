@@ -178,7 +178,7 @@ function EventTimeline({ ev }: { ev: EvaluatedEvent }) {
 }
 
 export default function AgentEvaluationPage() {
-  const ctxParam = useSearchParams().get("ctx"); // 결정 기록 화면의 "단계별 시간 보기"로 들어올 때
+  const ctxParam = useSearchParams().get("ctx"); // 아카이브 AI 장애 기록 화면의 "에이전트 평가에서 보기"로 들어올 때
   const [data, setData] = useState<AgentEvaluation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(ctxParam);
@@ -261,8 +261,8 @@ export default function AgentEvaluationPage() {
                 <>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
                     {current.criteria_version !== data.criteria_version && <span>그때 기준: 임시 기준 {current.criteria_version}판</span>}
-                    <Link href={`/ops?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">결정 기록에서 보기 →</Link>
-                    <Link href={`/orchestrator?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">총괄 이슈에서 보기 →</Link>
+                    <Link href={`/archive/incidents?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">결정 기록에서 보기 →</Link>
+                    <Link href={`/archive/incidents?ctx=${encodeURIComponent(current.context_id)}`} className="font-semibold text-brand-600 underline underline-offset-2">총괄 이슈에서 보기 →</Link>
                   </div>
                   <EventTimeline ev={current} />
                 </>

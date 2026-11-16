@@ -24,6 +24,7 @@ DEFAULT_PORTS: dict[str, int] = {
     "support": 8102,
     "marketing": 8103,
     "hr": 8104,
+    "archive": 8114,  # 아카이브 AI = 서비스 decisions
     "finance": 8105,
     "data": 8106,
     "infra": 8107,

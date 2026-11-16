@@ -38,7 +38,7 @@ def test_summary_counts_success_rate_latency_and_retries() -> None:
     usage.add(_rec(ms=300, status="failed", key="b"))
     usage.add(_rec(ms=200, key="b"))  # 같은 멱등 키 = 재시도 1회
     usage.add(_rec(status="input-required", ms=50, key="c"))  # 대기는 성공률에서 뺀다
-    usage.add(_rec(dept="hr"))
+    usage.add(_rec(dept="archive"))
     s = usage.summary("data")
     assert (s["calls"], s["errors"], s["waiting"], s["retries"]) == (4, 1, 1, 1)
     assert s["success_rate"] == pytest.approx(0.667, abs=0.001)
@@ -91,7 +91,7 @@ async def test_scenario_records_every_call_per_dept(harness: Harness) -> None:
     await engine.run(new_incident(), scenario_a())
     # 공지 초안·게시 2쌍 + 사과·보상 SNS 글 초안 2개
     assert usage.summary("marketing")["calls"] == 6
-    assert usage.summary("hr")["calls"] == 4  # 유사 이벤트 조회, 기록, 해결 내용, 시각
+    assert usage.summary("archive")["calls"] == 4  # 유사 이벤트 조회, 기록, 해결 내용, 시각
     # 영향 분석 + 원인 후보 추정 + 처리 시간 요약(kpi_summary)
     assert usage.summary("data")["calls"] == 3
 
@@ -126,7 +126,7 @@ def test_departments_endpoint_exposes_usage_after_an_incident(monkeypatch) -> No
     publish = next(s for s in marketing["skills"] if s["id"] == "publish_notice")
     assert publish["calls"] == 3 and publish["errors"] == 1
     assert len(marketing["series"]) == 20 and marketing["recent"][0]["skill"] == "publish_notice"
-    assert after["hr"]["usage"]["calls"] == 4
+    assert after["archive"]["usage"]["calls"] == 4
 
 
 def test_departments_marks_unavailable_dept(monkeypatch) -> None:

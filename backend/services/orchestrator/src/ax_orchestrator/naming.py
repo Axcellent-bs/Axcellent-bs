@@ -39,6 +39,7 @@ DEPT_KO = {
     "support": "고객지원 AI",
     "finance": "재무 AI",
     "hr": "인사 AI",
+    "archive": "아카이브 AI",
     "orchestrator": "총괄 AI",
 }
 # 단계 메모의 코드 → 사람이 읽는 말 (코드가 아닌 메모는 그대로 둔다)
