@@ -371,6 +371,7 @@ def decide(
     today: date,
     monthly_budget: dict[str, Any] | None = None,
     started: dict[str, dict[str, Any]] | None = NO_STARTS,
+    cash_basis: str = "net",
 ) -> dict[str, Any]:
     """재무 의견: 권장·줄여서 권장·권하지 않음. 집행을 막지 않는다(막는 것은 안전 관문과 사람).
 
@@ -410,12 +411,13 @@ def decide(
         if brake.min_viable_krw < limit:  # 현금을 모르면 큰돈은 쓰지 않고, 흐름은 멈추지 않는다
             limit = brake.min_viable_krw
             limits.append(f"{detail}. 최소 금액 {fc.won(limit)}까지만 권장")
-    elif cash_net_krw <= 0:
-        detail = f"앞으로 {weeks}주 누적 순현금 {fc.won(cash_net_krw)}"
-        rejects.append(detail)
     else:
-        detail = f"앞으로 {weeks}주 누적 순현금 {fc.won(cash_net_krw)}"
-        if cash_net_krw < limit:
+        # balance: 예상 잔액 최저값 − 최소 현금(통장 잔액을 알 때), net: 누적 순현금(모를 때)
+        what = "예상 잔액 여유(최저 잔액 − 최소 현금)" if cash_basis == "balance" else "누적 순현금"
+        detail = f"앞으로 {weeks}주 {what} {fc.won(cash_net_krw)}"
+        if cash_net_krw <= 0:
+            rejects.append(detail)
+        elif cash_net_krw < limit:
             limit = cash_net_krw
             limits.append(f"{detail}까지만 권장")
     rules.append(applied("BRK-004", detail))
@@ -484,6 +486,7 @@ def decide(
         "recommendation": advice,
         "applied_rules": rules,
         "cash_net_krw": cash_net_krw,
+        "cash_basis": cash_basis,
         "remaining_budget_krw": remaining,
         "open_lessons": len(open_lessons),
     }
@@ -499,6 +502,7 @@ def compare_with_history(
     today: date,
     monthly_budget: dict[str, Any] | None = None,
     started: dict[str, dict[str, Any]] | None = NO_STARTS,
+    cash_basis: str = "net",
 ) -> dict[str, Any]:
     """같은 요청을 실패 이력이 없을 때와 지금으로 판단해 나란히 보여 준다."""
     clean = {
@@ -509,6 +513,7 @@ def compare_with_history(
     common = {
         "reviews": reviews,
         "cash_net_krw": cash_net_krw,
+        "cash_basis": cash_basis,
         "today": today,
         "monthly_budget": monthly_budget,
         "started": started,
