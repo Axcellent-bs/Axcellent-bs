@@ -268,3 +268,87 @@ def test_live_commentary_prompt_carries_tenant_name(kit, monkeypatch: pytest.Mon
 def test_finance_code_has_no_hardcoded_tenant_name(name: str) -> None:
     source = (Path(closing.__file__).parent / name).read_text(encoding="utf-8")
     assert "캣북스" not in source
+
+
+# ---------- 결산 설명에 장부와 다른 숫자를 쓰지 않는다 ----------
+
+
+class _TextLLM:
+    """정해 둔 문장을 돌려주는 가짜 LLM."""
+
+    def __init__(self, text: str) -> None:
+        self.settings = type("S", (), {"model": "m"})()
+        self.text = text
+
+    async def structured(self, prompt, schema, untrusted=None):
+        return schema(text=self.text)
+
+
+# 총거래액 1,675,000 / 수수료 167,500 / 쿠폰 30,000 / 환불 48,000 / PG 51,925 / 주문 12건
+# → 영업 결과 167,500 − 30,000 − 51,925 = 85,575
+BIG = closing.Totals(1_675_000, 167_500, 30_000, 48_000, 51_925, 12)
+LOSS = closing.Totals(1000, 100, 500, 0, 31, 1)  # 영업 결과 100 − 500 − 31 = −431
+
+
+@pytest.mark.parametrize(
+    ("t", "text", "source"),
+    [
+        (BIG, "어제 총거래액은 1,675,000원(주문 12건), 영업 결과는 85,575원 흑자입니다.", "llm"),
+        (BIG, "쿠폰 30,000원과 PG 수수료 51,925원을 빼고, 환불 48,000원은 정산에서 뺍니다.", "llm"),
+        (LOSS, "어제는 쿠폰 500원 때문에 영업 결과가 431원 적자입니다.", "llm"),  # 음수를 양수로
+        (BIG, "어제 판매 수수료 매출은 약 17만 원입니다.", "template"),  # 반올림
+        (BIG, "어제 총거래액은 1,680,000원입니다.", "template"),  # 반올림
+        (BIG, "어제 주문은 15건입니다.", "template"),  # 지어낸 건수
+        (BIG, "쿠폰과 PG 수수료로 81,925원이 나갔습니다.", "template"),  # 합산
+        (BIG, "수수료율은 10%입니다.", "template"),  # 넘기지 않은 비율
+        (BIG, "영업 결과는 지난달보다 12,000원 늘었습니다.", "template"),  # 넘기지 않은 비교
+    ],
+)
+def test_commentary_with_numbers_not_in_the_books_falls_back_to_the_template(
+    monkeypatch: pytest.MonkeyPatch, t: closing.Totals, text: str, source: str
+) -> None:
+    monkeypatch.setattr(closing, "LLMClient", lambda dept: _TextLLM(text))
+    got, src = asyncio.run(closing.write_commentary("어제", t, False))
+    assert src == source
+    assert got == (text if source == "llm" else closing.template_commentary("어제", t))
+
+
+def test_unsupported_numbers_lists_what_the_books_do_not_have() -> None:
+    numbers = closing.commentary_numbers("10월 20일", BIG)
+    text = "10월 20일 총거래액은 약 17만 원, 주문 15건, 영업 결과 85,575원입니다."
+    assert closing.unsupported_numbers(text, numbers) == ["17만 원", "15건"]
+
+
+@pytest.mark.parametrize(
+    "t",
+    [
+        BIG,
+        LOSS,
+        closing.Totals(0, 0, 0, 0, 0, 0),
+        closing.Totals(32345, 2988, 3000, 10000, 1096, 2),
+    ],
+)
+@pytest.mark.parametrize(
+    "label", ["오늘", "어제", "10월 20일", "2026년 10월", "10월 19일부터 한 주"]
+)
+def test_the_template_sentence_itself_always_passes_the_number_check(
+    t: closing.Totals, label: str
+) -> None:
+    """같은 숫자로 쓴 템플릿 문장이 걸리면, 맞게 쓴 LLM 문장도 버리게 된다."""
+    text = closing.template_commentary(label, t)
+    assert closing.unsupported_numbers(text, closing.commentary_numbers(label, t)) == []
+
+
+def test_live_report_with_a_made_up_number_shows_the_template(
+    kit, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    books = _day_books(kit)
+    books.mock = False
+    monkeypatch.setattr(closing, "LLMClient", lambda dept: _TextLLM("총거래액은 약 3만 원입니다."))
+    report = asyncio.run(closing.closing_report(books, "day", date(2026, 10, 20), None))
+    assert report["commentary_source"] == "template"
+    assert "32,345원" in report["commentary"] and "3만 원" not in report["commentary"]
+    good = "10월 20일 총거래액은 32,345원(주문 2건)입니다."
+    monkeypatch.setattr(closing, "LLMClient", lambda dept: _TextLLM(good))
+    report = asyncio.run(closing.closing_report(books, "day", date(2026, 10, 20), None))
+    assert (report["commentary_source"], report["commentary"]) == ("llm", good)
