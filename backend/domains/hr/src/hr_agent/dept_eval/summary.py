@@ -25,6 +25,7 @@ from ax_contracts.schemas import (
     EvaluatedStep,
     RepeatEventType,
 )
+from hr_agent.dept_eval.cards import load_cards
 from hr_agent.dept_eval.criteria import CriteriaError, load_criteria
 from hr_agent.dept_eval.stages import LABELS, current_dept
 from hr_agent.results import completed, failed, invalid_input, make_evidence
@@ -264,7 +265,7 @@ async def evaluate_agents(svc: Services, request: AgentRequest) -> AgentResult:
         criteria = load_criteria()
     except CriteriaError as exc:
         return failed(request, "CRITERIA_UNREADABLE", str(exc)[:200])
-    cards = _latest_cards(await svc.memory.list_cards(states=["active"]))[: params.limit]
+    cards = _latest_cards(await load_cards(svc, request.meta))[: params.limit]
     events = [_event(c) for c in cards]
     depts = [*AGENT_ORDER, *sorted({s.dept for e in events for s in e.steps} - set(AGENT_ORDER))]
     output = EvaluateAgentsOutput(
