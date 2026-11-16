@@ -3,7 +3,8 @@
 저장은 다른 서비스(사람 할 일함, 공통 로그)처럼 SQLite 파일 하나다. 위치는 `ORCHESTRATOR_DB`이고,
 비어 있으면 프로세스 메모리(`:memory:`)에 둔다(다시 켜면 사라진다. 예전 동작).
 
-저장하는 것은 이벤트 기록(단계 결과·로그·지표)과 처리한 `event_id`뿐이다. 승인 대기(`Hold`)와
+저장하는 것은 이벤트 기록(단계 결과·로그·지표), 처리한 `event_id`, 재무가 보낸 의견
+(`finance_opinions`)이다. 승인 대기(`Hold`)와
 사람 할 일함 대기(`HandoffWait`)는 `asyncio.Event`라 저장하지 않는다. 다시 켤 때 진행 중이던
 이벤트는 이어 가지 않고 "재시작으로 중단됨"으로 남긴다(`IncidentManager.restore`).
 """
@@ -37,6 +38,11 @@ CREATE TABLE IF NOT EXISTS incidents (
 CREATE TABLE IF NOT EXISTS seen_events (
     event_id TEXT PRIMARY KEY,
     seen_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS finance_opinions (
+    opinion_id  TEXT PRIMARY KEY,
+    received_at TEXT NOT NULL,
+    body        TEXT NOT NULL
 );
 """
 
@@ -232,6 +238,39 @@ class IncidentStore:
         with self._lock:
             rows = self._db.execute("SELECT event_id FROM seen_events").fetchall()
         return {row[0] for row in rows}
+
+    def save_opinion(self, opinion_id: str, received_at: str, row: dict[str, Any]) -> None:
+        """재무가 보낸 의견 한 줄. 같은 `opinion_id`는 처음 것만 남긴다."""
+        body = json.dumps(row, ensure_ascii=False, default=str)
+        with self._lock:
+            self._db.execute(
+                "INSERT OR IGNORE INTO finance_opinions (opinion_id, received_at, body)"
+                " VALUES (?, ?, ?)",
+                (opinion_id, received_at, body),
+            )
+            self._db.commit()
+
+    def drop_opinion(self, opinion_id: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM finance_opinions WHERE opinion_id = ?", (opinion_id,))
+            self._db.commit()
+
+    def load_opinions(self) -> list[dict[str, Any]]:
+        """받은 순서대로. 읽지 못하는 줄은 건너뛴다."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT opinion_id, body FROM finance_opinions ORDER BY received_at, rowid"
+            ).fetchall()
+        found: list[dict[str, Any]] = []
+        for opinion_id, body in rows:
+            try:
+                row = json.loads(body)
+            except ValueError:
+                log.warning("저장된 재무 의견을 읽지 못해 건너뜀: %s", opinion_id)
+                continue
+            if isinstance(row, dict) and isinstance(row.get("opinion"), dict):
+                found.append(row)
+        return found
 
     def close(self) -> None:
         with self._lock:

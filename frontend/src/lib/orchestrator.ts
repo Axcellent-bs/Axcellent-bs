@@ -28,10 +28,24 @@ const post = <T>(path: string, payload: unknown, token: string) =>
     body: payload === undefined ? undefined : JSON.stringify(payload),
   });
 
+/** 재무가 총괄에 보낸 의견 한 줄 (GET /api/finance-opinions, 최근 받은 것부터). 형식은 계약 FinanceOpinion */
+export interface FinanceOpinionRow {
+  context_id: string;
+  received_at?: string;
+  opinion: {
+    opinion_id: string; kind: "campaign_result" | "budget_decision" | "insight";
+    campaign_id: string | null; campaign_name: string | null; channel: string | null;
+    spend_krw: number | null; revenue_krw: number | null; profit_krw: number | null; roi: number | null;
+    verdict: string | null; reasons: string[]; recommendation: string; submitted_at: string;
+  };
+}
+
 export const orchestrator = {
   health: () => call<{ status: string }>("/health"),
   /** 이슈 목록 (열린 순서). 각 항목에 steps·events·pending_holds가 모두 들어 있다 */
   incidents: () => callRaw<OrchIncident[], IncidentsMeta>("/api/incidents"),
+  /** 재무가 보낸 의견 (캠페인 손익·예산 의견·인사이트). 총괄은 보관만 한다 */
+  financeOpinions: () => call<FinanceOpinionRow[]>("/api/finance-opinions"),
   incident: (contextId: string) => call<OrchIncident>(`/api/incidents/${encodeURIComponent(contextId)}`),
   /** 목 모드 전용: 판매 사이트 결제 장애를 주입한다. 관리자(admin) 토큰을 보낸다 */
   startDemo: (req: DemoRequest = {}) => post<{ context_id: string }>("/api/demo/incidents", req, RELAY_TOKEN),

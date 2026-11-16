@@ -1,6 +1,7 @@
 import { Navigate } from "react-router";
 import { Loading } from "@/components/admin/bits";
 import { PreparingChip } from "@/components/Preparing";
+import { FinanceOpinionsCard } from "@/components/admin/FinanceOpinionsCard";
 import { SupportOverviewCard } from "@/components/admin/SupportOverviewCard";
 import { clock, incidentStatus } from "@/lib/adminRelay";
 import { incidentTitle } from "@/lib/agentChat";
@@ -9,7 +10,7 @@ import { useIncidents } from "@/lib/incidents";
 import { Link, useSearchParams } from "@/lib/nav";
 import { CompanyName } from "@/demo/CompanyName";
 
-// 총괄 개요: 사람 승인을 기다리는 일, 종류별 이슈 건수, 장애가 아닌 이슈(문의 처리 결과).
+// 총괄 개요: 사람 승인을 기다리는 일, 종류별 이슈 건수, 장애가 아닌 이슈(문의 처리 결과), 재무가 낸 의견.
 // 이슈 목록·상세와 기록은 아카이브 AI의 장애 기록 화면에서 본다. 이 화면은 읽기 전용이다.
 const isInquiry = (kind: string) => kind === "support_resolved";
 
@@ -73,6 +74,8 @@ export default function OrchestratorPage() {
           </ul>
         )}
       </section>
+
+      <FinanceOpinionsCard tick={updatedAt?.getTime() ?? 0} />
 
       <section className="card space-y-2 p-6" aria-labelledby="orch-eval">
         <div className="flex items-center gap-2"><h2 id="orch-eval" className="text-lg font-semibold">에이전트 평가 진단</h2><PreparingChip /></div>
