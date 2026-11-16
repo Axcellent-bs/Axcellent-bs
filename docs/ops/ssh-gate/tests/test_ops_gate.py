@@ -876,6 +876,198 @@ class RestartTests(GateCase):
         self.assertIn("result=end:rc=1", self.audit_text())
 
 
+class RestartBackupRetentionTests(GateCase):
+    """restart-backend 백업 보관 개수 제한(정책 [restart] backup_keep)."""
+    CMD = f"restart-backend {SHA} --ack-data-loss --announced"
+    OLD = [f"{i:08x}" for i in range(0xa0, 0xa4)]      # 오래된 순서 4세트
+
+    def set_keep(self, line="backup_keep = 3"):
+        text = policy_text(self.root).replace("poll_seconds = 0\n", f"poll_seconds = 0\n{line}\n")
+        write(self.policy, text)
+
+    def make_sets(self, base="data-dir", shas=None, plain=False):
+        """오래된 순서로 세트를 만든다. 폴더 원본이면 .tgz + -sqlite, 파일 원본(plain)이면 이름 하나."""
+        bdir = self.rootp / "backups"
+        t0 = time.time() - 100000
+        for n, sha in enumerate(shas or self.OLD):
+            when = t0 + n * 1000
+            if plain:
+                paths = [bdir / f"{base}.bak-before-{sha}"]
+                paths[0].write_text("x", encoding="utf-8")
+            else:
+                tgz = bdir / f"{base}.bak-before-{sha}.tgz"
+                tgz.write_text("x", encoding="utf-8")
+                sq = bdir / f"{base}.bak-before-{sha}-sqlite"
+                sq.mkdir()
+                (sq / "x.db").write_text("x", encoding="utf-8")
+                paths = [tgz, sq]
+            for p in paths:
+                os.utime(p, (when, when))
+
+    def names(self):
+        return sorted(os.listdir(self.rootp / "backups"))
+
+    def sets_of(self, base):
+        """base 의 .tgz 이름에서 세트 키(SHA 8자[.시각])만 뽑는다."""
+        pre, suf = f"{base}.bak-before-", ".tgz"
+        return sorted(n[len(pre):-len(suf)] for n in self.names() if n.startswith(pre) and n.endswith(suf))
+
+    def test_keeps_newest_n_sets_and_deletes_older(self):
+        self.make_sets()
+        self.make_sets(base="app.db", plain=True)
+        self.set_keep()
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        bdir = self.rootp / "backups"
+        new = SHA[:8]
+        self.assertEqual(self.sets_of("data-dir"), sorted([self.OLD[2], self.OLD[3], new]))
+        for sha in self.OLD[:2]:
+            self.assertFalse((bdir / f"data-dir.bak-before-{sha}.tgz").exists())
+            self.assertFalse((bdir / f"data-dir.bak-before-{sha}-sqlite").exists())
+            self.assertFalse((bdir / f"app.db.bak-before-{sha}").exists())
+            self.assertRegex(p.stdout, rf"보관 정리: data-dir\.bak-before-{sha}\.tgz \(")
+            self.assertRegex(p.stdout, rf"보관 정리: data-dir\.bak-before-{sha}-sqlite \(")
+        for sha in self.OLD[2:]:
+            self.assertTrue((bdir / f"data-dir.bak-before-{sha}.tgz").exists())
+            self.assertTrue((bdir / f"data-dir.bak-before-{sha}-sqlite" / "x.db").exists())
+            self.assertTrue((bdir / f"app.db.bak-before-{sha}").exists())
+        self.assertTrue((bdir / f"data-dir.bak-before-{new}-sqlite").is_dir())
+        self.assertIn("result=backup-prune:", self.audit_text())
+        self.assertIn("systemctl restart", self.calls())
+        # 정리는 백업이 끝난 뒤에 한다
+        self.assertLess(p.stdout.index("백업 끝"), p.stdout.index("보관 정리:"))
+
+    def test_other_names_symlinks_and_other_kinds_are_never_touched(self):
+        self.make_sets()
+        bdir = self.rootp / "backups"
+        keep_names = [
+            "www-site-a.bak-before-000000a0.tgz",            # 번들 백업
+            "deploy-prev-head.bak-before-000000a0",          # 직전 HEAD 기록
+            ".env.bak-before-000000a0",                      # .env 백업
+            "other.bak-before-000000a0.tgz",                 # 정책에 없는 원본
+            "data-dir.bak-before-000000a0.tgz.old",          # 접미가 다름
+            "data-dir.bak-before-000000g0.tgz",              # 16진수가 아님
+            "data-dir.bak-before-a0.tgz",                    # 8자가 아님
+            "data-dir.bak-before-000000a0.zip",              # 모르는 접미
+            "data-dir.bak-before-000000a0",                  # 폴더 원본의 접미 없는 이름
+            "data-dir.bak-before-000000a0.20250101.tgz",     # 시각 형식이 다름
+            "notes.txt",
+        ]
+        for n in keep_names:
+            (bdir / n).write_text("x", encoding="utf-8")
+            os.utime(bdir / n, (1000, 1000))                 # 아주 오래된 것처럼
+        outside = self.rootp / "outside.txt"
+        outside.write_text("do-not-delete", encoding="utf-8")
+        linked = bdir / "data-dir.bak-before-000000b0.tgz"   # 패턴에 맞는 이름의 심볼릭 링크
+        try:
+            os.symlink(outside, linked)
+            have_link = True
+        except (OSError, NotImplementedError):
+            have_link = False
+        self.set_keep()
+        self.assertRc(self.gate("owner-a", self.CMD), 0)
+        for n in keep_names:
+            self.assertTrue((bdir / n).exists(), n)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "do-not-delete")
+        if have_link:
+            self.assertTrue(os.path.islink(linked))
+        self.assertFalse((bdir / f"data-dir.bak-before-{self.OLD[0]}.tgz").exists())
+        self.assertTrue((bdir / f".env.bak-before-{SHA[:8]}").exists())
+
+    def test_default_without_backup_keep_deletes_nothing(self):
+        self.make_sets()
+        before = self.names()
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertTrue(set(before) <= set(self.names()))
+        self.assertNotIn("보관 정리", p.stdout)
+        self.assertNotIn("backup-prune", self.audit_text())
+
+    def test_dry_run_lists_but_does_not_delete(self):
+        self.make_sets()
+        before = self.names()
+        self.set_keep()
+        p = self.gate("owner-a", f"restart-backend {SHA} --ack-data-loss --dry-run")
+        self.assertRc(p, 0)
+        self.assertEqual(self.names(), before)
+        # 새 세트 한 자리를 빼고 2세트만 남기므로 오래된 2세트가 지울 목록이다
+        self.assertIn(f"보관 정리 예정: data-dir.bak-before-{self.OLD[0]}.tgz", p.stdout)
+        self.assertIn(f"보관 정리 예정: data-dir.bak-before-{self.OLD[1]}-sqlite", p.stdout)
+        self.assertNotIn(f"보관 정리 예정: data-dir.bak-before-{self.OLD[2]}", p.stdout)
+        self.assertNotIn("backup-prune", self.audit_text())
+
+    def test_hidden_dot_named_sets_are_pruned_too(self):
+        (self.rootp / "data/.hid-dir").mkdir()
+        write(self.rootp / "data/.hid-dir/keep.txt", "k")
+        old = f'backup_dirs = ["{self.root}/data/data-dir"]'
+        new = f'backup_dirs = ["{self.root}/data/data-dir", "{self.root}/data/.hid-dir"]\nbackup_keep = 3'
+        text = policy_text(self.root)
+        self.assertIn(old, text)
+        write(self.policy, text.replace(old, new))
+        self.make_sets(base=".hid-dir")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertEqual(self.sets_of(".hid-dir"), sorted([self.OLD[2], self.OLD[3], SHA[:8]]))
+        self.assertIn(f"보관 정리: .hid-dir.bak-before-{self.OLD[0]}.tgz", p.stdout)
+
+    def test_current_and_previous_sets_always_kept(self):
+        self.make_sets()
+        self.make_sets(shas=[SHA[:8]])                       # 같은 SHA 의 옛 세트: 이번 세트는 이름에 시각이 붙는다
+        for suffix in (".tgz", "-sqlite"):
+            recent = time.time() - 50
+            os.utime(self.rootp / "backups" / f"data-dir.bak-before-{SHA[:8]}{suffix}", (recent, recent))
+        self.set_keep("backup_keep = 2")
+        self.assertRc(self.gate("owner-a", self.CMD), 0)
+        sets = self.sets_of("data-dir")
+        self.assertEqual(len(sets), 2)
+        self.assertIn(SHA[:8], sets)                                         # 직전 세트
+        self.assertTrue(any(s.startswith(SHA[:8] + ".") for s in sets))      # 이번 세트(시각 붙음)
+
+    def test_delete_failure_only_warns_and_restart_continues(self):
+        self.make_sets()
+        self.set_keep()
+        write(self.rootp / "fakebin/rm", "#!/usr/bin/env bash\nexit 1\n")
+        os.chmod(self.rootp / "fakebin/rm", 0o755)
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertIn("경고: 보관 정리 실패", p.stderr)
+        self.assertIn("systemctl restart", self.calls())
+
+    def test_backup_failure_prunes_nothing(self):
+        self.make_sets()
+        self.set_keep()
+        (self.rootp / "data/state.json").unlink()            # 백업할 파일이 없어 백업이 실패한다
+        before = self.names()
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertTrue(set(before) <= set(self.names()))
+        self.assertNotIn("backup-prune", self.audit_text())
+
+    def test_invalid_backup_keep_is_policy_error(self):
+        for line in ("backup_keep = 1", "backup_keep = 0", 'backup_keep = "abc"', "backup_keep = true",
+                     'backup_keep = ["3"]', "backup_keep = 02"):
+            self.set_keep(line)
+            p = self.gate("owner-a", "status")
+            self.assertRc(p, 5)
+            self.assertIn("backup_keep", p.stderr, line)
+        self.set_keep("backup_keep = 2")
+        self.assertRc(self.gate("owner-a", "status"), 0)
+
+    def test_status_shows_retention_line_counting_hidden(self):
+        self.make_sets()
+        p = self.gate("owner-a", "status")
+        self.assertRc(p, 0)
+        self.assertRegex(p.stdout, r"백업 보관: 4세트, 합계 .*제한 없음")
+        (self.rootp / "data/.hid").mkdir()
+        self.make_sets(base=".hid", shas=[self.OLD[0]])
+        old = f'backup_dirs = ["{self.root}/data/data-dir"]'
+        text = policy_text(self.root)
+        write(self.policy, text.replace(
+            old, f'backup_dirs = ["{self.root}/data/data-dir", "{self.root}/data/.hid"]\nbackup_keep = 5'))
+        p = self.gate("owner-a", "status")
+        self.assertRc(p, 0)
+        self.assertRegex(p.stdout, r"백업 보관: 5세트, 합계 .*backup_keep=5")
+
+
 class NginxTwoPersonTests(GateCase):
     def backup_dirs(self):
         return sorted(os.listdir(self.rootp / "etc/nginx/backup"))

@@ -118,6 +118,11 @@ poll_seconds = 5
 backup_sqlite = []              # 재시작 전에 백업할 sqlite 파일(전체 경로)
 backup_files = []               # 재시작 전에 복사해 둘 파일
 backup_dirs = []                # 재시작 전에 묶어 둘 폴더
+# 백업 보관 개수. 적지 않으면(기본) 백업을 하나도 지우지 않는다. 2 이상의 정수만 쓸 수 있다(1·0·글자는 정책 오류).
+# 적으면 restart-backend 가 백업을 성공적으로 끝낸 뒤, 위 backup_dirs·backup_sqlite 에 적힌 원본의 게이트 백업 세트
+# (<이름>.bak-before-<SHA 8자>[.시각]의 .tgz / -sqlite / sqlite 파일 사본)를 최신 N세트만 남기고 지운다.
+# 이번에 만든 세트와 직전 세트는 N 과 상관없이 남는다. 번들 백업(www-*), .env 백업, deploy-* 파일은 건드리지 않는다.
+# backup_keep = 5
 
 [health]
 urls = ["http://127.0.0.1:8201/health"]   # 전부 200 이어야 정상. status 와 restart-backend 가 쓴다
