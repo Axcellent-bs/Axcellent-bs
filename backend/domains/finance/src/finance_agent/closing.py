@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from ax_agent_template.llm import LLMClient
 from finance_agent import finance_config as fc
 from finance_agent.books import Books, in_range, item_gross, paid_at, pg_settlements
+from finance_agent.chat import verify
 from finance_agent.rules import applied_many, load_rules
 
 logger = logging.getLogger("ax.finance.closing")
@@ -428,6 +429,8 @@ async def write_commentary(
     """(설명, 출처). 목 모드이거나 LLM 설정이 없거나 실패하면 템플릿 문장.
 
     확인할 수 없는 숫자가 있으면 LLM에 넘기지 않는다 (0원을 숫자로 읽고 설명할 수 있어서).
+    LLM 문장에 장부(넘긴 숫자)에 없는 숫자가 있으면 버리고 템플릿 문장을 쓴다
+    (재무 대화 답과 같은 검사 `chat/verify.py`. 반올림·합산·지어낸 숫자를 막는다).
     """
     fallback = template_commentary(label, t, unknown)
     if mock or unknown:
@@ -435,16 +438,30 @@ async def write_commentary(
     client = LLMClient("finance")
     if not client.settings.model:
         return fallback, "template"
-    numbers = {"기간": label, "주문 수": t.order_count} | {
-        LINE_LABELS[k]: v for k, v in t.as_kpis().items()
-    }
+    numbers = commentary_numbers(label, t)
     prompt = commentary_prompt(numbers)
     try:
         out = await client.structured(prompt, Commentary)
     except Exception:  # 미구현·네트워크·스키마 오류 모두 템플릿으로
         logger.info("결산 설명 LLM 실패, 템플릿 문장을 쓴다")
         return fallback, "template"
+    bad = unsupported_numbers(out.text, numbers)
+    if bad:
+        logger.warning("결산 설명에 장부에 없는 숫자가 있어 템플릿 문장을 쓴다: %s", bad)
+        return fallback, "template"
     return out.text, "llm"
+
+
+def commentary_numbers(label: str, t: Totals) -> dict[str, Any]:
+    """결산 설명 LLM에 넘기는 숫자(기간 이름·주문 수·손익 줄). 설명 문장은 이 숫자만 쓸 수 있다."""
+    return {"기간": label, "주문 수": t.order_count} | {
+        LINE_LABELS[k]: v for k, v in t.as_kpis().items()
+    }
+
+
+def unsupported_numbers(text: str, numbers: dict[str, Any]) -> list[str]:
+    """결산 설명 문장에서 넘긴 숫자(기간·주문 수·손익 줄)에 없는 숫자. 없으면 빈 목록."""
+    return verify.bad_numbers(text, verify.allowed_numbers(numbers))
 
 
 async def closing_report(
