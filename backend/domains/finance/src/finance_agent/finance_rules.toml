@@ -28,7 +28,7 @@ monthly_budget_krw = 1000000   # 직전 달 자료가 없을 때만 쓰는 임�
 min_viable_krw = 50000         # 이보다 적게 남으면 조건부 승인도 의미가 없어 거절한다
 loss_limit_krw = 500000        # 이달 캠페인 손실 합계가 이 값 이상이면 거절
 loss_streak_reject = 2         # 같은 채널이 연속으로 이만큼 적자면 거절
-cash_lookahead_weeks = 4       # 앞으로 이 주수의 누적 순현금을 본다
+cash_lookahead_weeks = 4       # 앞으로 이 주수의 현금 여유(예상 잔액 최저값, 잔액을 모르면 누적 순현금)를 본다
 
 [closing]
 spike_ratio = 3.0             # 하루 판매액이 평소의 이 배 이상이면 확정 전에 알린다
@@ -349,7 +349,7 @@ review = "pending"
 id = "BRK-004"
 area = "brake"
 title = "현금 흐름"
-statement = "앞으로 몇 주의 누적 순현금이 요청 금액보다 적으면 그 금액까지만 권하고, 0 이하면 권하지 않는다. 확인할 수 없으면 최소 금액까지만 권한다."
+statement = "앞으로 몇 주의 현금 여유가 요청 금액보다 적으면 그 금액까지만 권하고, 0 이하면 권하지 않는다. 통장 잔액을 올렸으면 여유는 예상 잔액 최저값 − 최소 현금이고, 없으면 누적 순현금이다. 확인할 수 없으면 최소 금액까지만 권한다."
 basis = "내부 기준, [brake] cash_lookahead_weeks, 13주 현금 흐름 예측"
 review = "pending"
 
