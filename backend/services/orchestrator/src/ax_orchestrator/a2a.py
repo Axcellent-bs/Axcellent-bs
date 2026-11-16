@@ -24,6 +24,7 @@ from ax_contracts.schemas import (
     FindActiveIncidentOutput,
     TaskStatus,
 )
+from ax_contracts.schemas.diagnosis import DiagnoseAgentIssueInput
 from ax_contracts.schemas.finance import FinanceOpinion, ReceiveFinanceOpinionOutput
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from ax_orchestrator.chat.a2a import CHAT_HANDLERS
@@ -171,6 +172,45 @@ def receive_finance_opinion(get_manager: GetManager) -> Handler:
     return handler
 
 
+def diagnose_agent_issue(get_manager: GetManager) -> Handler:
+    """인사가 보낸 에이전트 평가 진단 요청을 받아 저장한다(접수까지. 진단·전달은 이후 단계)."""
+
+    async def handler(request: AgentRequest) -> AgentResult:
+        try:
+            req = DiagnoseAgentIssueInput.model_validate(request.input)
+        except ValidationError as error:
+            errors = [f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()]
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.FAILED,
+                outcome="invalid_input",
+                output={"errors": errors},
+            )
+        manager = get_manager()
+        if manager is None:
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.FAILED,
+                outcome="not_ready",
+                output={"errors": ["총괄이 아직 준비되지 않았다. 나중에 다시 보낸다"]},
+            )
+        out = manager.agent_diagnoses.receive(req)
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.COMPLETED,
+            outcome=out.status,
+            output=out.model_dump(mode="json"),
+            evidence=Evidence(
+                queries=[f"hr.agent_evaluation agent={req.agent} step={req.step_id}"],
+                data_summary=f"{req.agent} {req.step_label} 진단 요청 {out.status}",
+                collected_at=datetime.now(UTC),
+                ref_ids=[e.context_id for e in req.evidence],
+            ),
+        )
+
+    return handler
+
+
 def build_a2a_app(get_manager: GetManager) -> FastAPI:
     """`/a2a`와 `/.well-known/agent-card.json`을 가진 앱. 총괄 서버 맨 끝에 붙인다."""
     get_chat_service(get_manager)  # 대화가 이벤트 기록을 읽을 수 있게 매니저를 넘겨 둔다
@@ -180,6 +220,7 @@ def build_a2a_app(get_manager: GetManager) -> FastAPI:
             "find_active_incident": find_active_incident(get_manager),
             "answer_planning_question": answer_planning_question(get_manager),
             "receive_finance_opinion": receive_finance_opinion(get_manager),
+            "diagnose_agent_issue": diagnose_agent_issue(get_manager),
             **CHAT_HANDLERS,
         },
     )

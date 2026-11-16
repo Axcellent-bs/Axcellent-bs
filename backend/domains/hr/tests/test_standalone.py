@@ -44,6 +44,8 @@ READ_ONLY = {
     "evaluate_agents",
     "judge_step_timings",
 }
+# 인사 안의 상태는 바꾸지 않고 총괄에 요청만 보내는 skill(등급 A, 아카이브만 부른다)
+SENDS = {"request_agent_diagnosis"}
 
 
 def body(
@@ -91,8 +93,8 @@ def record(n: int, kind: str = "spec_confirmed", reason: bool = True, area: str 
 def test_agent_card_lists_all_skills_with_resolvable_schemas() -> None:
     card = load_card()
     ids = {s.id for s in card.skills}
-    assert ids == set(HANDLERS) == STATE_CHANGING.keys() | READ_ONLY
-    assert len(ids) == 20
+    assert ids == set(HANDLERS) == STATE_CHANGING.keys() | READ_ONLY | SENDS
+    assert len(ids) == 21
     for skill in card.skills:
         for ref in (skill.input_schema, skill.output_schema):
             path, _, cls = ref.partition("#")
@@ -117,7 +119,7 @@ def test_agent_card_grades_match_the_safety_registry_draft(svc) -> None:
 
 def test_agent_card_is_served_over_http(client: TestClient) -> None:
     served = client.get("/.well-known/agent-card.json").json()
-    assert served["name"] == "hr" and len(served["skills"]) == 20
+    assert served["name"] == "hr" and len(served["skills"]) == 21
 
 
 # 2) 결정성 ----------------------------------------------------------------------
@@ -145,7 +147,9 @@ def test_too_many_hops_are_rejected(client: TestClient) -> None:
 
 
 # 4) 권한 ------------------------------------------------------------------------
-@pytest.mark.parametrize("skill", sorted(STATE_CHANGING | dict.fromkeys(READ_ONLY)))
+@pytest.mark.parametrize(
+    "skill", sorted(STATE_CHANGING | dict.fromkeys(READ_ONLY) | dict.fromkeys(SENDS))
+)
 def test_unlisted_requesters_are_rejected_for_every_skill(client: TestClient, skill: str) -> None:
     res = client.post("/a2a", json=body(skill, {}, token="mock:stranger")).json()
     assert (res["status"], res["outcome"]) == ("rejected", "FORBIDDEN_SKILL")

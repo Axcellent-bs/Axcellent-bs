@@ -14,7 +14,7 @@ from archive_agent.audit import AuditLog
 from archive_agent.clients.memory import MemoryClient, MockMemoryClient
 from archive_agent.clients.safety import GateClient, MockGate, TemplateGate
 from archive_agent.config import ArchiveSettings, Clock, system_clock
-from archive_agent.judge import JudgeFn, judge_via_hr
+from archive_agent.judge import DiagnoseFn, JudgeFn, judge_via_hr, request_diagnosis_via_hr
 from archive_agent.narrative import Narrator
 from archive_agent.org_areas import MOCK_AREAS, load_org_areas
 from archive_agent.retrieval.cards import DenseCardSearch, build_dense_search
@@ -59,6 +59,8 @@ class Services:
     verifier: RelevanceVerifier | None = None  # None이면 Dense 후보를 LLM으로 거르지 않는다
     llm: Any = None  # None이면 LLM이 필요한 기능은 쓸 수 없다
     judge: JudgeFn | None = None  # 이슈 단계 시간의 판정(인사 AI). None이면 판정을 비워 둔다
+    # 판정 저장 뒤 반복 확인(인사 AI → 총괄 진단 요청). None이면 하지 않는다
+    diagnose: DiagnoseFn | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
 
@@ -70,6 +72,7 @@ def build_services(
     dense: DenseCardSearch | None = None,
     verifier: RelevanceVerifier | None = None,
     judge: JudgeFn | None = None,
+    diagnose: DiagnoseFn | None = None,
 ) -> Services:
     """설정에 맞는 부품을 만든다. 목 모드면 목 클라이언트와 가상 영역을 쓴다."""
     settings = settings or ArchiveSettings.from_env()
@@ -109,6 +112,11 @@ def build_services(
         verifier=verifier,
         llm=llm,
         judge=judge if judge is not None else (None if settings.mock else judge_via_hr),
+        diagnose=(
+            diagnose
+            if diagnose is not None
+            else (None if settings.mock else request_diagnosis_via_hr)
+        ),
     )
     if llm is not None and dense is not None and not settings.mock:
         # 같은 주제로 본 결정 쌍을 가르고(같은 결정/내용이 바뀜/별개) 묶음의 대표 제목을 제안한다
