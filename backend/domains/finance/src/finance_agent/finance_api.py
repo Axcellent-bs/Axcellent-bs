@@ -87,6 +87,7 @@ from finance_agent import (
     bank,
     bank_file,
     cashflow,
+    close_alerts,
     close_checklist,
     closing,
     exports,
@@ -273,18 +274,39 @@ async def cashflow_view(books: Any) -> dict[str, Any]:
     )
 
 
-async def checklist_view(books: Any, d: Any = None) -> dict[str, Any]:
-    """월 마감 체크리스트. 정산 내역서·묶음은 고객지원에서 미리 받아 넘긴다."""
+async def checklist_view(books: Any, d: Any = None, today: Any = None) -> dict[str, Any]:
+    """월 마감 체크리스트. 정산 내역서·묶음은 고객지원에서 미리 받아 넘긴다.
+
+    기한이 지나 받은 요청에 올린 항목에는 `alert`(받은 요청 번호·부서·시각)가 붙는다.
+    """
     d = d or fc.today()
     weeks = await settlement_feed.weeks(close_checklist.settlement_periods(d))
     batches = await settlement_feed.batches()
-    return await off(
+    result = await off(
         close_checklist.checklist,
         books,
         state().records,
         d,
+        today,
         settlements=weeks,
         batches=batches,
+    )
+    close_alerts.mark_alerted(result, state().records.close_alerts, TENANT_ID_DEFAULT)
+    return result
+
+
+async def run_close_alerts(today: Any = None) -> list[dict[str, Any]]:
+    """이번 달과 지난달 체크리스트에서 기한 지난 항목을 받은 요청에 올린다 (close_alerts.py).
+
+    지난달도 보는 까닭: 월 결산 확정처럼 기한이 다음 달 초인 항목은 달이 바뀐 뒤에 기한이 지난다.
+    """
+    today = today or fc.today()
+    books = await state().books()
+    first = today.replace(day=1)
+    months = [first - timedelta(days=1), today]
+    checklists = [await checklist_view(books, d, today) for d in months]
+    return await close_alerts.alert_overdue(
+        checklists, state().records.close_alerts, TENANT_ID_DEFAULT
     )
 
 

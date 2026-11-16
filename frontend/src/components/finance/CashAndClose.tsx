@@ -57,6 +57,9 @@ export function ChecklistSection({ tick, onOpen }: { tick: number; onOpen: (targ
                       : i.overdue
                         ? <Chip label={`기한 지남 · ${dueText(i.due)}`} tone={TONE.bad} />
                         : <span className="text-sm tabular-nums text-ink-700">기한 {dueText(i.due)}</span>)}
+                    {!done && i.alert && (
+                      <Link href="/handoffs" className="text-sm text-ink-500 underline" title={`받은 요청 ${i.alert.task_id}`}>받은 요청에 올림 ({i.alert.assignee_unit})</Link>
+                    )}
                     {!done && <button type="button" className="text-sm font-medium text-brand-700 hover:underline" onClick={() => onOpen(CHECK_ANCHOR[i.key] ?? i.link)}>하러 가기 →</button>}
                     {!done && i.overdue && i.due && (
                       <PlanningAskLink title={`월 마감 "${i.label}" 기한 지키기`}

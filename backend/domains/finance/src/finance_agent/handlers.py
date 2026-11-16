@@ -164,6 +164,8 @@ class FinanceRecords:
         # question_id → {question_id, request_id, context_id, tenant_id, question, about, options,
         #               asked_at, status(waiting|answered), answer, answered_by, answered_at}
         self.planning_questions: dict[str, dict[str, Any]] = {}
+        # 월 마감 기한 지남을 받은 요청에 올린 기록 (close_alerts.py). 키 = 달·항목·기한
+        self.close_alerts: dict[str, dict[str, Any]] = {}
         # 예전 저장 파일의 정산 묶음(정산을 고객지원으로 옮기기 전 기록). 쓰지 않고, 옮기는
         # 스크립트가 읽을 수 있게 저장 파일에 그대로 둔다. 지금 묶음 상태는 고객지원에서 받는다
         self.legacy_batches: dict[str, dict[str, Any]] = {}
