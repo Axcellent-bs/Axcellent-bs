@@ -2,7 +2,7 @@ import { ago } from "@/lib/format";
 import CardBody from "@/components/hr/CardBody";
 import { authorKo, issueWord, plainText, type HrCard } from "@/lib/hr";
 
-// 결정 기록 화면: 확정된(후보가 아닌) 결정 카드 한 장. 값은 인사 AI가 저장한 그대로 보여 준다.
+// 결정 기록 화면: 확정된(후보가 아닌) 결정 카드 한 장. 값은 아카이브 AI가 저장한 그대로 보여 준다.
 const CONF_KO = { low: "낮음", mid: "보통", high: "높음" } as const;
 const Chip = ({ label, tone }: { label: string; tone: string }) => <span className={`chip ${tone}`}>{label}</span>;
 
