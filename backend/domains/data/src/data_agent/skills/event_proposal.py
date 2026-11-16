@@ -67,6 +67,22 @@ LLM 문장
   (다시 누를 수 있다).
   이미 created·duplicate로 보낸 제안은 기획을 다시 부르지 않고 duplicate
 - 마케팅에는 보내지 않는다(기획이 사람 확인 뒤 넘긴다)
+
+성과 되돌리기 (`past_results`, 예상 vs 실제)
+- 고르는 제안: 같은 고객사에서 기획에 보낸(created·duplicate) 제안 중 이번 제안과 묶음·장르·이벤트
+  종류가 같은 것. 다른 달의 제안(proposal_id가 다름)은 캠페인이 없어도 예상 범위만으로 보이고,
+  이번 제안 자신(같은 proposal_id, 같은 달에 다시 부른 경우)은 캠페인이 연결됐을 때만 보인다
+  (보낸 사실은 이미 `sent`에 있다)
+- 연결: 제안 → 보낸 기록의 기획 제안 번호(`sent.proposal_ref`, PROP-n) → 캠페인. 캠페인 성과 결과
+  (`campaign_result`)의 proposal_id가 그 PROP-n이거나 insight_id가 이 제안의 proposal_id(보낼 때
+  insight_id = proposal_id)이면 연결. 시험 캠페인은 뺀다
+- 한 줄 = 제안 하나 × 연결된 캠페인 하나. expected_low·high = 그 제안의 예상 매출 범위,
+  actual = 캠페인 기간 매출 증분(`campaign_result` 판정의 incremental_gross_krw, 마이너스 그대로,
+  측정 불가면 None), period = 캠페인 측정 기간. 연결된 캠페인이 없으면 campaign_id·actual·기간은
+  비운다
+- 순서: 제안 달 최근 것부터, 같은 제안 안에서는 캠페인 기간 최근 것부터. 최대 `PAST_RESULTS_MAX`줄
+- 캠페인 결과는 보낸 제안이 있을 때만 읽는다(`campaign_results` 주입, 핸들러는 영상 저장소 →
+  campaign_result). 못 읽으면 예상 범위만 두고 근거에 이유 한 줄
 """
 
 from __future__ import annotations
@@ -85,6 +101,7 @@ from pydantic import BaseModel, ValidationError
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import (
+    CampaignResultOutput,
     CatalogSales,
     EventKind,
     EventProposalItem,
@@ -148,6 +165,8 @@ NOT_STORED = "저장된 제안이 없음 (먼저 이벤트 제안을 불러야 �
 Send = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 Gate = Callable[..., Awaitable[Any]]
 ReactionReader = Callable[[list[str]], Awaitable[Reactions]]
+# 성과 되돌리기: 보낸 제안의 id·기획 제안 번호 → 연결된 캠페인 성과 결과 (campaign_result)
+ResultReader = Callable[[set[str]], Awaitable[Sequence[CampaignResultOutput]]]
 SendOutcome = Literal["created", "duplicate", "rejected"]
 
 
@@ -713,25 +732,79 @@ async def past_from_coupons(
     return out, None
 
 
+def was_sent(item: EventProposalItem) -> bool:
+    return item.sent is not None and item.sent.outcome in ("created", "duplicate")
+
+
+def link_keys(stored: Iterable[StoredProposal]) -> set[str]:
+    """보낸 제안의 proposal_id와 기획 제안 번호(PROP-n). 캠페인 결과를 이 값으로 찾는다."""
+    keys: set[str] = set()
+    for s in stored:
+        if was_sent(s.item):
+            keys.add(s.item.proposal_id)
+            if s.item.sent and s.item.sent.proposal_ref:
+                keys.add(s.item.sent.proposal_ref)
+    return keys
+
+
+def linked(
+    item: EventProposalItem, results: Sequence[CampaignResultOutput]
+) -> list[CampaignResultOutput]:
+    """보낸 제안 하나에 연결된 캠페인 결과 (시험 캠페인 뺌, 기간 최근 것부터, campaign_id 한 번)."""
+    ref = item.sent.proposal_ref if item.sent else None
+    found = {
+        r.campaign_id: r for r in results
+        if not r.test and ((ref is not None and r.proposal_id == ref)
+                           or r.insight_id == item.proposal_id)
+    }  # fmt: skip
+    return sorted(
+        found.values(),
+        key=lambda r: (r.window_from or datetime.min.replace(tzinfo=UTC), r.campaign_id),
+        reverse=True,
+    )
+
+
+def actual_of(result: CampaignResultOutput) -> int | None:
+    """캠페인 기간 매출 증분 (campaign_result 판정 값 그대로, 측정 불가면 None)."""
+    verdict = result.sales.verdict if result.sales else None
+    return verdict.incremental_gross_krw if verdict else None
+
+
 def past_results(
-    stored: Sequence[StoredProposal], item: EventProposalItem
+    stored: Sequence[StoredProposal],
+    item: EventProposalItem,
+    results: Sequence[CampaignResultOutput] = (),
 ) -> list[ProposalPastResult]:
-    """같은 묶음·장르·이벤트로 전에 기획에 보낸 제안 (예상 범위만, 최근 것부터 3개)."""
+    """같은 묶음·장르·이벤트로 기획에 보낸 제안의 예상 vs 실제 (최근 것부터 최대 3줄).
+
+    다른 달의 제안은 캠페인이 없어도 예상 범위만 보인다. 이번 제안 자신은 캠페인이 연결됐을 때만.
+    """
     found = [
         s.item for s in stored
-        if s.item.proposal_id != item.proposal_id and s.item.sent is not None
-        and s.item.sent.outcome in ("created", "duplicate")
+        if was_sent(s.item)
         and s.item.genre_code == item.genre_code and s.item.event_kind == item.event_kind
         and s.item.target_filters == item.target_filters
     ]  # fmt: skip
-    found.sort(key=lambda i: i.timing_basis.month, reverse=True)
-    return [
-        ProposalPastResult(
-            proposal_id=i.proposal_id, proposal_ref=i.sent.proposal_ref if i.sent else None,
-            expected_low=i.estimate.revenue_low, expected_high=i.estimate.revenue_high,
-        )  # fmt: skip
-        for i in found[:PAST_RESULTS_MAX]
-    ]
+    found.sort(key=lambda i: (i.timing_basis.month, i.proposal_id), reverse=True)
+    rows: list[ProposalPastResult] = []
+    for i in found:
+        common: dict[str, Any] = {
+            "proposal_id": i.proposal_id,
+            "proposal_ref": i.sent.proposal_ref if i.sent else None,
+            "expected_low": i.estimate.revenue_low,
+            "expected_high": i.estimate.revenue_high,
+        }
+        campaigns = linked(i, results)
+        if not campaigns and i.proposal_id != item.proposal_id:
+            rows.append(ProposalPastResult(**common))
+        rows += [
+            ProposalPastResult(
+                **common, campaign_id=r.campaign_id, actual=actual_of(r),
+                period_from=r.window_from, period_to=r.window_to,
+            )  # fmt: skip
+            for r in campaigns
+        ]
+    return rows[:PAST_RESULTS_MAX]
 
 
 # ---------------------------------------------------------------- event_proposal 전체
@@ -781,6 +854,7 @@ async def propose(  # noqa: PLR0913 - 저장소·커넥터를 바꿔 끼울 수 
     past_note: str | None = None,
     reactions: ReactionReader | None = None,
     read: Callable[..., Awaitable[Base]] | None = None,
+    campaign_results: ResultReader | None = None,
 ) -> ProposalRun:
     """이벤트 제안. 저장소 읽기는 `read`(핸들러는 스레드)로, 나머지는 여기서."""
     if read is None:
@@ -810,6 +884,14 @@ async def propose(  # noqa: PLR0913 - 저장소·커넥터를 바꿔 끼울 수 
         if (why := await add_reactions(drafts, reactions)) is not None:
             notes.append(f"고객 반응 읽지 못함: {why}")
     stored = {s.item.proposal_id: s for s in proposals.all(tenant_id)}
+    results: Sequence[CampaignResultOutput] = ()
+    keys = link_keys(stored.values())
+    if drafts and keys and campaign_results is not None:
+        try:
+            results = await campaign_results(keys)
+        except Exception as error:  # noqa: BLE001 - 성과를 못 읽어도 제안은 낸다 (예상 범위만)
+            notes.append(f"지난 제안 성과(campaign_result)를 읽지 못함 ({type(error).__name__})")
+        queries.append(f"campaign_result 보낸 제안 연결 (캠페인 {len(results)}개)")
     fallbacks: list[str] = []
     items: list[EventProposalItem] = []
     for d in drafts:
@@ -826,7 +908,7 @@ async def propose(  # noqa: PLR0913 - 저장소·커넥터를 바꿔 끼울 수 
                                                  text.by_llm))  # fmt: skip
         sent = before.item.sent if before is not None else None
         items.append(item.model_copy(update={
-            "sent": sent, "past_results": past_results(list(stored.values()), item),
+            "sent": sent, "past_results": past_results(list(stored.values()), item, results),
         }))  # fmt: skip
     if fallbacks:
         notes.append(f"제목·요약을 템플릿으로 대체함 {len(fallbacks)}건: "

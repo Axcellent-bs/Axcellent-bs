@@ -58,6 +58,7 @@ from ax_contracts.schemas.data import (
     AnomalyDetectionInput,
     BriefRegenBlocked,
     CampaignEffectInput,
+    CampaignResultOutput,
     ContentRecommendRequest,
     DataChatListInput,
     DataChatListOutput,
@@ -570,6 +571,21 @@ async def get_past_campaigns() -> tuple[list[event_proposal.PastCampaign], str |
     return await event_proposal.past_from_coupons(ids, connector)
 
 
+async def get_proposal_results(keys: set[str]) -> list[CampaignResultOutput]:
+    """성과 되돌리기: 보낸 이벤트 제안(evp-… id·PROP-n)에 연결된 캠페인의 campaign_result.
+
+    영상 저장소에서 insight_id 또는 proposal_id가 keys에 있는 캠페인만 고른다 (10분 캐시).
+    테스트는 이 함수를 바꿔 끼운다. 영상이 없으면 빈 목록.
+    """
+    from data_agent.past_results import campaign_results
+
+    try:
+        connector = get_campaign_connector()
+    except NotImplementedError:
+        connector = None  # 쇼핑몰 연결이 없으면 매출은 측정 불가(actual None)
+    return await campaign_results(os.environ, connector, _stored_shorts(), keys=keys)
+
+
 async def _read_event_base(*args: Any) -> event_proposal.Base:
     return await asyncio.to_thread(event_proposal.read_base, *args)
 
@@ -593,6 +609,7 @@ async def event_proposal_skill(request: AgentRequest) -> AgentResult:
         get_sales_store(), get_event_proposal_store(), data.tenant_id, data.month, data.max_items,
         cat.sales, cat.id, now, trend=get_trend_connector(), llm=get_llm(), past=past,
         past_note=past_note, reactions=reactions, read=_read_event_base,
+        campaign_results=get_proposal_results,
     )  # fmt: skip
     return _result(
         request,

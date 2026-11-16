@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import statistics
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -155,21 +155,33 @@ async def campaign_results(
     *,
     now: datetime | None = None,
     measure: Callable[..., Awaitable[Any]] | None = None,
+    keys: Set[str] | None = None,
 ) -> list[CampaignResultOutput]:
-    """인사이트가 있는 캠페인마다 campaign_result (기획 묶음). 10분 동안 다시 계산하지 않는다."""
+    """인사이트가 있는 캠페인마다 campaign_result (기획 묶음). 10분 동안 다시 계산하지 않는다.
+
+    `keys`를 주면 인사이트 대신 영상의 insight_id 또는 proposal_id(기획 제안 번호)가 그 안에 있는
+    캠페인만 고른다 (이벤트 제안의 성과 되돌리기: evp-… id 또는 PROP-n).
+    """
     from data_agent.skills import campaign_result as cr
     from data_agent.skills.video_performance import DB_ENV, DEFAULT_DB, VideoStore
 
     path = env.get(DB_ENV) or DEFAULT_DB
     if str(path) != ":memory:" and not Path(path).is_file():
         return []  # 등록된 영상이 없다 (캠페인 없음)
+    if keys is not None and not keys:
+        return []
     store = VideoStore(path)
     try:
         ids = list(
             dict.fromkeys(
                 v.campaign_id
                 for v in store.videos(include_test=False)
-                if v.campaign_id and v.insight_id
+                if v.campaign_id
+                and (
+                    v.insight_id
+                    if keys is None
+                    else (v.insight_id in keys or v.proposal_id in keys)
+                )
             )
         )
     finally:

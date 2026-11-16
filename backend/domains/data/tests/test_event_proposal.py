@@ -17,10 +17,13 @@ from ax_contracts.data_access.shop_sales import SalesOrderLine, SalesOrderRow
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import (
     AttributeDef,
+    CampaignResultOutput,
     CatalogSales,
     EventKind,
+    EventProposalItem,
     EventProposalOutput,
     EventProposalSendOutput,
+    ProposalSent,
     TrendScanInput,
 )
 from ax_contracts.schemas.execute import ExecuteDecision
@@ -28,7 +31,7 @@ from ax_contracts.schemas.planning import ReceiveInsightInput
 from data_agent import catalog, handlers
 from data_agent.clients import customer_reaction
 from data_agent.connectors import ConnectorUnavailable
-from data_agent.event_proposal_store import EventProposalStore
+from data_agent.event_proposal_store import EventProposalStore, StoredProposal
 from data_agent.explain import LLM_UNAVAILABLE, NUMBER_INVALID
 from data_agent.sales_collect import collect_once
 from data_agent.sales_fake import FAKE_DIR, FakeSalesSource, load_config
@@ -486,3 +489,110 @@ def test_handlers_propose_then_send(monkeypatch: pytest.MonkeyPatch) -> None:
     assert EventProposalSendOutput.model_validate(sent.output).proposal_ref == "PROP-7"
     assert sent.evidence and "PROP-7" in sent.evidence.data_summary
     assert len(got) == 1 and bad.outcome == "invalid_input"
+
+
+# ---------------------------------------------------------------- 성과 되돌리기 (예상 vs 실제)
+
+
+def _past(
+    item: EventProposalItem, pid: str, month: str, ref: str | None, **update: Any
+) -> StoredProposal:
+    """기획에 보낸 지난 제안 (같은 묶음·장르·이벤트, 달·id만 다름)."""
+    sent = ProposalSent(sent_at=NOW, outcome="created", proposal_ref=ref)
+    tb = item.timing_basis.model_copy(update={"month": month})
+    return StoredProposal(item.model_copy(update={"proposal_id": pid, "timing_basis": tb,
+                                                  "sent": sent, **update}))  # fmt: skip
+
+
+def _campaign(
+    cid: str, start: datetime, actual: int | None, *, ref: str | None = None,
+    insight: str | None = None, test: bool = False,
+) -> CampaignResultOutput:
+    sales = None
+    if actual is not None:
+        sales = {"status": "known", "verdict": {"status": "known", "label": "더 팔림",
+                                                "incremental_gross_krw": actual}}  # fmt: skip
+    return CampaignResultOutput.model_validate({
+        "status": "known", "campaign_id": cid, "proposal_id": ref, "insight_id": insight,
+        "window_from": start.isoformat(), "window_to": (start + timedelta(days=7)).isoformat(),
+        "test": test, "sales": sales,
+    })  # fmt: skip
+
+
+def test_past_results_link_proposal_to_campaign_by_prop_or_insight_id() -> None:
+    item = propose(make_store()).output.proposals[0]
+    oct_, sep, aug = (datetime(2026, m, 5, tzinfo=UTC) for m in (10, 9, 8))
+    stored = [
+        _past(item, "evp-old1", "2026-10", "PROP-1"),
+        _past(item, "evp-old2", "2026-09", None),  # 번호 없음: insight_id(= proposal_id)로 연결
+        _past(item, "evp-old3", "2026-08", "PROP-3"),  # 캠페인 없음: 예상 범위만
+        _past(item, "evp-other", "2026-10", "PROP-5", genre_code="g9"),  # 다른 장르: 안 보임
+    ]
+    results = [
+        _campaign("cmp_a", oct_, 300_000, ref="PROP-1"),
+        _campaign("cmp_test", oct_, 9_999_999, ref="PROP-1", test=True),  # 시험 캠페인: 뺌
+        _campaign("cmp_b", sep, -50_000, insight="evp-old2"),  # 마이너스 그대로
+        _campaign("cmp_x", aug, 1, ref="PROP-9"),  # 연결 안 된 캠페인
+    ]
+    rows = ep.past_results(stored, item, results)
+    assert [(r.proposal_id, r.proposal_ref, r.campaign_id, r.actual) for r in rows] == [
+        ("evp-old1", "PROP-1", "cmp_a", 300_000),
+        ("evp-old2", None, "cmp_b", -50_000),
+        ("evp-old3", "PROP-3", None, None),
+    ]
+    est = item.estimate
+    assert all((r.expected_low, r.expected_high) == (est.revenue_low, est.revenue_high)
+               for r in rows)  # fmt: skip
+    assert (rows[0].period_from, rows[0].period_to) == (oct_, oct_ + timedelta(days=7))
+    assert rows[2].period_from is None and rows[2].period_to is None
+    # 결과를 못 읽으면(빈 목록) 예상 범위만 (예전과 같은 모양)
+    assert [(r.proposal_id, r.campaign_id) for r in ep.past_results(stored, item)] == [
+        ("evp-old1", None), ("evp-old2", None), ("evp-old3", None)]
+    # 최대 3줄: 한 제안에 캠페인이 둘이면 기간 최근 것부터 둘 다
+    two = [_campaign("cmp_a2", oct_ + timedelta(days=10), None, ref="PROP-1"), *results]
+    rows = ep.past_results(stored, item, two)
+    assert [(r.campaign_id, r.actual) for r in rows] == [
+        ("cmp_a2", None), ("cmp_a", 300_000), ("cmp_b", -50_000)]
+
+
+def test_past_results_own_proposal_only_when_a_campaign_is_linked() -> None:
+    item = propose(make_store()).output.proposals[0]
+    me = _past(item, item.proposal_id, item.timing_basis.month, "PROP-7")
+    assert ep.past_results([me], item, []) == []  # 보낸 사실은 sent에 이미 있다
+    start = datetime(2026, 11, 1, tzinfo=UTC)
+    (row,) = ep.past_results([me], item, [_campaign("cmp_1", start, 120_000, ref="PROP-7")])
+    assert (row.proposal_id, row.campaign_id, row.actual) == (item.proposal_id, "cmp_1", 120_000)
+    # 보내지 않았거나 기획이 만들지 않은(rejected) 제안은 보지 않는다
+    for sent in (None, ProposalSent(sent_at=NOW, outcome="rejected", proposal_ref="PROP-7")):
+        other = StoredProposal(me.item.model_copy(update={"sent": sent}))
+        assert ep.past_results([other], item, [_campaign("c", start, 1, ref="PROP-7")]) == []
+    assert ep.link_keys([me]) == {item.proposal_id, "PROP-7"}
+
+
+def test_propose_reads_campaign_results_only_after_sending() -> None:
+    proposals = EventProposalStore(":memory:")
+    asked: list[set[str]] = []
+    start = datetime(2026, 11, 1, tzinfo=UTC)
+
+    async def reader(keys: set[str]) -> list[CampaignResultOutput]:
+        asked.append(set(keys))
+        return [_campaign("cmp_1", start, 80_000, ref="PROP-7")]
+
+    first = propose(make_store(), proposals, campaign_results=reader)
+    assert asked == [] and all(p.past_results == [] for p in first.output.proposals)
+    pid = first.output.proposals[0].proposal_id
+    proposals.mark_sent(TENANT, pid, ProposalSent(sent_at=NOW, outcome="created",
+                                                  proposal_ref="PROP-7"))  # fmt: skip
+    again = propose(make_store(), proposals, campaign_results=reader)
+    assert asked == [{pid, "PROP-7"}]
+    mine = next(p for p in again.output.proposals if p.proposal_id == pid)
+    assert [(r.campaign_id, r.actual) for r in mine.past_results] == [("cmp_1", 80_000)]
+    assert any("campaign_result" in q for q in again.evidence.queries)
+
+    async def broken(keys: set[str]) -> list[CampaignResultOutput]:
+        raise RuntimeError("영상 저장소를 못 읽음")
+
+    failed = propose(make_store(), proposals, campaign_results=broken)
+    mine = next(p for p in failed.output.proposals if p.proposal_id == pid)
+    assert failed.output.status == "ok" and mine.past_results == []
+    assert "지난 제안 성과(campaign_result)를 읽지 못함" in failed.evidence.data_summary
