@@ -547,6 +547,7 @@ def decide(
             "status": reaction.status,
             "flagged": [f.product_id for f in reaction.flagged],
             "low_sales": list(reaction.low_sales),
+            "sales_unread": list(reaction.sales_unread),
         },
     }
 
