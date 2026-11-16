@@ -85,6 +85,9 @@ revenue_definition = "매출 = 결제 완료 주문의 상품 금액 − 쿠폰 
 min_product_orders = 5  # 상품 증감은 두 기간 모두 이 주문 수 이상인 상품만 비교한다
 max_staleness_minutes = 30  # 마지막 수집이 이보다 오래되면 숫자를 내지 않는다
 min_period_orders = 20  # 기간 안 결제 완료 주문이 이보다 적으면 숫자를 내지 않는다
+# ---- 고객·시장 분석 (11/16)
+min_group_size = 5  # 한 묶음(예: 20대·여성)의 고객이 이보다 적으면 숫자를 숨긴다
+active_days = 365  # 대상 고객 = 최근 365일 결제 완료 주문 1회 이상
 
 # category_code → 화면 이름 (shop-api storefront.CATEGORY_NAMES와 같은 이름). 없는 코드는 품질 보고에 남는다
 [sales.categories]
@@ -111,3 +114,157 @@ onsite = "쇼핑몰 안"
 referral = "추천 링크"
 display = "배너 광고"
 shorts = "숏츠"
+
+# genre_code → 화면 이름. 판매 서버 장르 확정 전 잠정 (판매 서버가 장르 코드를 정하면 맞춘다).
+# 도서(book): novel·essay·self_help·ai_it·business·humanities·comics·kids
+# 문구(stationery): writing·notes·deco. 없는 코드는 품질 보고(unknown_genres)에 남는다
+[sales.genres]
+novel = "소설"
+essay = "에세이"
+self_help = "자기계발"
+ai_it = "AI·IT"
+business = "경제·경영"
+humanities = "인문"
+comics = "만화"
+kids = "어린이"
+writing = "필기구"
+notes = "노트·다이어리"
+deco = "다꾸·꾸미기"
+
+# genre_code → 시즌 판단용 대표 검색어 (작년 같은 달 검색 배수)
+[sales.genre_keywords]
+novel = ["소설 추천", "베스트셀러 소설"]
+essay = ["에세이 추천", "힐링 에세이"]
+self_help = ["자기계발서", "습관 책"]
+ai_it = ["챗GPT 책", "AI 활용", "코딩 입문"]
+business = ["재테크 책", "경제 책 추천"]
+humanities = ["인문학 책", "철학 책"]
+comics = ["웹툰 단행본", "만화책"]
+kids = ["어린이 책", "그림책 추천"]
+writing = ["볼펜 추천", "만년필"]
+notes = ["다이어리", "노트 추천"]
+deco = ["다꾸 스티커", "마스킹테이프"]
+
+# 고객 속성 (판매 서버와 맞춘 코드). 값이 비면 "모름"으로 센다. 순서 = 화면 순서
+[[sales.attributes]]
+key = "age_band"
+label = "연령대"
+[sales.attributes.values]
+10s = "10대"
+20s = "20대"
+30s = "30대"
+40s = "40대"
+50s_plus = "50대 이상"
+
+[[sales.attributes]]
+key = "gender"
+label = "성별"
+[sales.attributes.values]
+female = "여성"
+male = "남성"
+no_answer = "응답 안 함"
+
+[[sales.attributes]]
+key = "occupation"
+label = "직업"
+[sales.attributes.values]
+student = "학생"
+employee = "직장인"
+self_employed = "자영업"
+other = "기타"
+no_answer = "응답 안 함"
+
+# 속성 값 → 도서관 정보나루 인기대출 조건 (connectors/data4library.py 문서 예시 `from_age=6&to_age=10`
+# 에서 확인한 칸 이름). 50대 이상(상한 미확인)과 성별(gender 값의 뜻 미확인)은 넣지 않았다
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "age_band"
+value_code = "10s"
+params = { from_age = 10, to_age = 19 }
+
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "age_band"
+value_code = "20s"
+params = { from_age = 20, to_age = 29 }
+
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "age_band"
+value_code = "30s"
+params = { from_age = 30, to_age = 39 }
+
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "age_band"
+value_code = "40s"
+params = { from_age = 40, to_age = 49 }
+
+# 장르 → 도서관 정보나루 kdc (KDC 대분류 근사, connectors/data4library.KDC_CLASSES).
+# 확실한 것만: 소설·에세이 8 문학, AI·IT 0 총류(컴퓨터), 경제·경영 3 사회과학.
+# 자기계발·인문·만화·어린이는 대분류 하나로 정하기 어려워 넣지 않았다
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "novel"
+params = { kdc = "8" }
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "essay"
+params = { kdc = "8" }
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "ai_it"
+params = { kdc = "0" }
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "business"
+params = { kdc = "3" }
+
+# 시장 커버 비율의 인구 통계 (연령대 × 성별, KOSIS). 레포에서 확인한 연령·성별 표 id가 없어
+# table_ref는 비워 둔다 (표 id·분류 코드를 확인한 뒤 채운다)
+[[sales.population]]
+attribute_keys = ["age_band", "gender"]
+source_id = "kosis"
+table_ref = {}
+
+# 이벤트 종류. 할인율·전환율은 지난 캠페인이 없을 때 쓰는 가정 값이다 (가정)
+[[sales.event_kinds]]
+code = "bundle_discount"
+label = "묶음 할인"
+discount_rate = 0.10  # 가정
+conversion_low = 0.02  # 가정
+conversion_high = 0.05  # 가정
+
+[[sales.event_kinds]]
+code = "genre_coupon"
+label = "장르 쿠폰"
+discount_rate = 0.15  # 가정
+conversion_low = 0.03  # 가정
+conversion_high = 0.07  # 가정
+
+[[sales.event_kinds]]
+code = "free_shipping"
+label = "무료 배송"
+discount_rate = 0.05  # 가정 (평균 주문 대비 배송비 몫)
+conversion_low = 0.01  # 가정
+conversion_high = 0.03  # 가정
+
+# 화면의 자주 묻는 질문 칩
+[[sales.quick_questions]]
+label = "20대 여성"
+filters = { age_band = "20s", gender = "female" }
+
+[[sales.quick_questions]]
+label = "30대 직장인"
+filters = { age_band = "30s", occupation = "employee" }
+
+[[sales.quick_questions]]
+label = "10대 학생"
+filters = { age_band = "10s", occupation = "student" }
+
+[[sales.quick_questions]]
+label = "40대 남성"
+filters = { age_band = "40s", gender = "male" }

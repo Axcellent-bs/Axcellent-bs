@@ -43,8 +43,9 @@ from ax_contracts.schemas.data import (
 )
 from data_agent.sales_clean import counts_as_revenue
 from data_agent.sales_quality import KST, PERIOD_LABEL, Window, gate, quality, window
-from data_agent.sales_store import SalesStore, StoredOrder
+from data_agent.sales_store import FAKE_SOURCE, SalesStore, StoredOrder
 
+FAKE_DATA = "가짜 데이터(데모용)"  # 저장소를 가짜 출처(`sales_fake`)가 채웠을 때 근거·요약에 붙인다
 TOP_PRODUCTS = 5
 NO_CATEGORY = "이름 없는 분류"
 NO_PRODUCT = "이름 없는 상품"
@@ -303,7 +304,12 @@ def pct(value: float | None, points: bool = False) -> str:
 
 
 def summary(out: SalesAnalysisOutput) -> str:
-    """요약 한 문장 (코드 템플릿, 숫자는 출력값만)."""
+    """요약 한 문장 (코드 템플릿, 숫자는 출력값만). 가짜 출처면 앞에 표시를 붙인다."""
+    text = _summary(out)
+    return f"[{out.basis.data_source}] {text}" if out.basis.data_source else text
+
+
+def _summary(out: SalesAnalysisOutput) -> str:
     label = PERIOD_LABEL[out.period]
     if out.status != "ok":
         return f"{label} 매출 숫자를 내지 않음 — " + "; ".join(out.insufficient_reasons)
@@ -335,6 +341,7 @@ def analyze(
     cur, created = tally(store, tenant_id, w.start, w.end)
     prev, _ = tally(store, tenant_id, w.previous_start, w.previous_end)
     report = quality(store, tenant_id, w, created, cfg)
+    fake = store.sync_state(tenant_id).source == FAKE_SOURCE
     basis = SalesBasis(
         period_from=w.start,
         period_to=w.end,
@@ -344,6 +351,7 @@ def analyze(
         last_synced_at=report.last_synced_at,
         catalog_id=catalog_id,
         catalog_version=cfg.version if cfg else None,
+        data_source=FAKE_DATA if fake else None,
     )
     reasons = gate(report, cur.orders, cfg, now)
     common = {
@@ -389,6 +397,7 @@ def evidence(out: SalesAnalysisOutput, now: datetime) -> Evidence:
             f"기간 {_kst(b.period_from)}~{_kst(b.period_to)} (한국 시간), 비교 "
             f"{_kst(b.previous_from)}~{_kst(b.previous_to)}, 읽은 행 {b.rows_read}, "
             f"마지막 수집 {synced}, 카탈로그 {b.catalog_id} 판 {b.catalog_version or '없음'}"
+            + (f", 출처 {b.data_source}" if b.data_source else "")
         ),
         collected_at=now,
         ref_ids=[],
