@@ -25,7 +25,7 @@ from ax_workflow.auth import AuthError, check_human
 from ax_workflow.base import TEAM_LEAD
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import dump
-from dev_agent import coder, dev_chat, llm_key, vcs
+from dev_agent import coder, dev_chat, llm_key, vcs, vcs_bridge
 from dev_agent.deploy import DeployError
 from dev_agent.deploy_store import get_deploy_store
 from dev_agent.repo_api import add_repo_routes
@@ -393,15 +393,23 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
 
     @router.post("/dev-tasks/{task_id}/retry", response_model=None, dependencies=HUMAN)
     async def post_dev_task_retry(task_id: str, request: Request) -> dict | JSONResponse:
-        """실패·사람 확인으로 멈춘 코딩 작업 다시 돌리기. 본문 `{connection?}`은 없어도 된다."""
+        """실패·사람 확인으로 멈춘 코딩 작업 다시 돌리기. 본문 `{connection?, paths?}`는 없어도
+        된다. paths는 사람이 직접 고른 고칠 파일 (AI가 파일을 고르지 않는다)."""
         svc = get_service()
         body = await _body(request) or {}
         connection = body.get("connection")
         if connection is not None and not isinstance(connection, str):
             return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
         approved = body.get("approved") is True  # 사람이 generate_pr 보류 건을 승인함
+        paths = body.get("paths")  # 사람이 직접 고른 고칠 파일
+        if paths is not None and (
+            not isinstance(paths, list) or not all(isinstance(x, str) for x in paths)
+        ):
+            return _err(400, "INVALID_INPUT", "paths는 문자열 목록이어야 한다")
         try:
-            result = await svc.retry_dev_task(task_id, connection or None, approved=approved)
+            result = await svc.retry_dev_task(
+                task_id, connection or None, approved=approved, paths=paths or None
+            )
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:
@@ -587,6 +595,44 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _gate_err(exc)
         return _ok(dump(th), svc)
 
+    @router.get("/dev-tasks/{task_id}/files", response_model=None)
+    async def get_dev_task_files(task_id: str, q: str = "") -> dict | JSONResponse:
+        """'파일 직접 고르기' 후보: 이 작업 연결 레포의 파일 경로 (최대 50개, 읽기만, LLM 없음).
+
+        `q`가 있으면 경로에 그 글이 든 것만, 작업 글·담당 경로에 맞는 순서로 준다."""
+        svc = get_service()
+        task = next((t for t in svc.state.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            return _err(404, "NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        job = svc.coding_job(task_id, 0)
+        try:
+            adapter = vcs_bridge.active(task.coding.connection)
+            paths = await adapter.list_files(limit=coder.ALL_FILES) if adapter else []
+        except vcs.VcsError as exc:
+            return _err(502, "VCS_ERROR", f"레포 파일 목록을 읽지 못했다 ({exc.code})")
+        needle = q.strip().lower()[:100]
+        if needle:
+            paths = [p for p in paths if needle in p.lower()]
+        text = f"{q} {coder.job_text(job)}" if job else q
+        rows = coder.listing_for(paths, job.hints if job else (), text)[:MAX_PICK_LIST]
+        return _ok({"files": rows, "existing": len(paths)}, svc)
+
+    @router.post("/dev-tasks/{task_id}/to-chat", response_model=None, dependencies=HUMAN)
+    async def post_dev_task_to_chat(task_id: str, request: Request) -> dict | JSONResponse:
+        """멈춘 작업을 개발 AI 대화로 넘긴다 (작업과 이어진 새 대화). 본문 `{account?}`.
+
+        대화에서 고칠 파일을 정하고 '진행해'면 같은 작업을 그 파일로 다시 시도한다."""
+        svc = get_service()
+        body = await _body(request) or {}
+        account = body.get("account")
+        if account is not None and (not isinstance(account, str) or not 0 < len(account) <= 64):
+            return _err(400, "INVALID_INPUT", "account는 1~64자 문자열이어야 한다")
+        try:
+            th = await dev_chat.open_for_task(svc, task_id, _person(request), account, SCREEN)
+        except ActionError as exc:
+            return _coding_err(exc)
+        return _ok(dump(th), svc)
+
     @router.post("/dev-chat/{thread_id}/close", response_model=None, dependencies=CALLER)
     async def close_dev_chat(
         thread_id: str, request: Request, account: str | None = None
@@ -665,6 +711,7 @@ def add_settings_routes(router: APIRouter, get_service: Callable[[], Any]) -> No
 
 
 # 개발 화면 대화 패널에서 연 대화. 대시보드 AI 대화방(dashboard) 대화와 서로 보이지 않는다
+MAX_PICK_LIST = 50  # 파일 직접 고르기 후보 수
 SCREEN = "screen"
 
 

@@ -104,7 +104,7 @@ from finance_agent import campaign as cp
 from finance_agent import finance_config as fc
 from finance_agent.books import off
 from finance_agent.handlers import (
-    cash_net_krw,
+    cash_position,
     closing_key,
     current_insights,
     monthly_budget,
@@ -1518,12 +1518,14 @@ def add_finance_api(app: FastAPI) -> None:
             "channel": channel,
             "requested_krw": requested,
         }
+        cash, cash_basis = await cash_position()
         result = cp.compare_with_history(
             ask,
             campaigns=records.campaigns,
             reviews=records.budget_reviews,
             lessons=records.lessons,
-            cash_net_krw=await cash_net_krw(),
+            cash_net_krw=cash,
+            cash_basis=cash_basis,
             today=fc.today(),
             monthly_budget=await monthly_budget(),
             started=await started_campaigns(),

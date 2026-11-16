@@ -104,6 +104,9 @@ SYSTEM_PROMPT = (
     "- reply는 개발팀원에게 보여 줄 짧은 한국어 답이다 (해요체).\n"
     "- last_task가 있으면 이 대화에서 이미 끝낸 작업이다 (status·pr·files). 이어지는 요청이면 "
     "그 결과를 바탕으로 새 계획을 세운다.\n"
+    "- last_task의 status가 failed·waiting_human이고 pr이 없으면 멈춘 작업이다 (error가 이유). "
+    "개발팀원과 고칠 파일을 정해 plan.paths에 files의 파일 경로(폴더 말고)를 넣는다. "
+    "'진행해'면 기획에 새로 넘기지 않고 같은 작업을 그 파일로 다시 시도한다.\n"
     "- 레포 코드를 바꾸는 일이 아니면(SNS 게시, 쿠폰 발행, 캠페인·광고 집행, 환불 처리처럼 "
     "다른 부서가 운영으로 하는 일) 계획을 세우지 말고 action ask로 그 부서 AI(AI 대화방 직접 "
     "대화)나 기획에 요청하라고 안내한다. 화면 문구·배너·페이지를 바꾸는 일은 코드 변경이다.\n"
@@ -315,6 +318,93 @@ def _last_task(svc: DevService, th: ChatThread) -> dict | None:
         "files": [f.path for f in c.files],
         "error": c.error,
     }
+
+
+STUCK_STATUSES = ("failed", "waiting_human", "canceled")
+
+
+def stuck_task(svc: DevService, task_id: str | None) -> bool:
+    """멈춘 작업인가 (실패·사람 확인·중단, 열린 PR 없음, 폐기 안 함).
+
+    대화로 이어받아 다시 시도한다."""
+    task = next((t for t in svc.state.tasks if t.id == task_id), None)
+    if task is None or task.coding is None or task.discarded:
+        return False
+    if task.coding.status not in STUCK_STATUSES:
+        return False
+    return not any(p.task == task_id and not p.merged and not p.closed for p in svc.state.prs)
+
+
+async def open_for_task(
+    svc: DevService,
+    task_id: str,
+    who: str | None = None,
+    account: str | None = None,
+    origin: str = "screen",
+) -> ChatThread:
+    """멈춘 작업을 개발 AI 대화로 넘긴다: 작업과 이어진 새 대화를 열고 멈춘 이유를 먼저 보여 준다.
+
+    대화에서 고칠 파일을 정하고 '진행해'면 같은 작업을 그 파일로 다시 시도한다
+    (기획에 새 요청 없음).
+    LLM은 부르지 않는다 (첫 말은 정해 둔 글)."""
+    if svc.role == "planning":
+        raise ActionError("WRONG_ROLE", "개발 AI 대화는 개발 서비스(dev)에서 돈다")
+    task = next((t for t in svc.state.tasks if t.id == task_id), None)
+    if task is None or task.coding is None:
+        raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+    if not stuck_task(svc, task_id):
+        raise ActionError("NOT_STUCK", f"{task_id}는 멈춘 작업이 아니다 (진행 중·PR 있음·끝남)")
+    c = task.coding
+    files = ", ".join(f.path for f in c.files[:5])
+    text = (
+        f"{task_id} '{task.title}' 작업이 멈췄어요: {c.error or c.status}\n"
+        + (f"지난번에 고른 파일: {files}\n" if files else "")
+        + "고칠 파일이나 바꿀 내용을 알려 주세요. 파일을 정한 뒤 '진행해'라고 하시면 "
+        "같은 작업을 그 파일로 다시 시도할게요."
+    )
+    return await svc.chat_add(
+        None, "assistant", text, kind="question", task_id=task_id, status="talking",
+        connection=c.connection, title=f"{task_id} 이어서: {task.title}"[:60], who=who,
+        origin=origin, account=account,
+    )  # fmt: skip
+
+
+async def _retry_with(svc: DevService, th: ChatThread, plan: ChatPlan, reply: str) -> ChatThread:
+    """대화로 정한 파일로 멈춘 작업을 다시 시도한다. 파일이 없으면 묻는다."""
+    assert th.task_id is not None
+    paths = [p for p in plan.paths if "." in p.rsplit("/", 1)[-1]][: coder.MAX_FILES]
+    if not paths:
+        return await svc.chat_add(
+            th.id, "assistant", "어느 파일을 고칠지 알려 주세요. 파일을 정하면 다시 시도할게요.",
+            kind="question", plan=plan, status="talking",
+        )  # fmt: skip
+    try:
+        await svc.retry_dev_task(th.task_id, paths=paths)
+    except ActionError as exc:
+        return await svc.chat_add(
+            th.id, "assistant", f"다시 시도하지 못했어요 ({exc.code}). {exc.message}", kind="error"
+        )
+    except GateRefused as exc:
+        return await svc.chat_add(
+            th.id, "assistant",
+            f"실행 관문이 다시 시도를 허락하지 않았어요 ({exc.decision.status}).", kind="error",
+        )  # fmt: skip
+    head = reply or GO_REPLY
+    return await svc.chat_add(
+        th.id, "assistant",
+        f"{head}\n{th.task_id} 작업을 고른 파일 {len(paths)}개로 다시 시도할게요: "
+        f"{', '.join(paths)}",
+        kind="started", plan=plan, status="started",
+    )  # fmt: skip
+
+
+async def _go_on(
+    svc: DevService, tid: str, th: ChatThread, plan: ChatPlan, reply: str, cid: str | None
+) -> ChatThread:
+    """'진행해': 멈춘 작업과 이어진 대화면 같은 작업을 다시 시도, 아니면 기획에 요청으로 넘긴다."""
+    if th.task_id and stuck_task(svc, th.task_id):
+        return await _retry_with(svc, th, plan, reply)
+    return await _handoff(svc, tid, plan, reply, connection=cid)
 
 
 def _open_pr_waiting(svc: DevService, task_id: str | None) -> bool:
@@ -590,7 +680,7 @@ async def _reply(
     ready_plan = last_plan(th)
     if ready_plan is not None and just_go(text):
         cid = pick_connection(conns, th, None, text) if conns else None
-        return await _handoff(svc, tid, ready_plan, GO_REPLY, connection=cid)
+        return await _go_on(svc, tid, th, ready_plan, GO_REPLY, cid)
 
     try:
         out = await _ask_llm(llm, th, conns, last_task)
@@ -648,7 +738,7 @@ async def _reply(
 
     assert plan is not None
     cid = pick_connection(conns, th, out.connection, text) if conns else None
-    return await _handoff(svc, tid, plan, reply, connection=cid)
+    return await _go_on(svc, tid, th, plan, reply, cid)
 
 
 # ---------------------------------------------------------------- 기획에 넘기기

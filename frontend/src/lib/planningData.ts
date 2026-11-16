@@ -112,6 +112,9 @@ export interface CodingRun {
   skipQueue?: boolean // '지금 진행': 같은 파일 작업이 있어도 기다리지 않음
   waitingFor?: string[] // 작업 대기열: 같은 파일을 먼저 고치는 앞 작업
   mergeConflict?: boolean // 머지 충돌: 다시 시도하면 PR을 닫고 최신 코드로 다시 씀
+  picked?: string[] // 사람이 직접 고른 고칠 파일 (AI가 고르지 않음)
+  risk?: 'low' | 'medium' | 'high' | null // 바뀐 파일로 정한 위험도 (낮음: 리뷰 생략 · 높음: 사람 확인 후 머지)
+  riskWhy?: string | null
   llmCalls?: number // 이 작업이 지금까지 부른 LLM 횟수 (다시 시도 포함)
   llmTokens?: number // 이 작업이 지금까지 쓴 토큰 (입력 + 출력)
   mode?: CodingMode

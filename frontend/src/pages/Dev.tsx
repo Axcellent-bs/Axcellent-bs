@@ -1,6 +1,6 @@
 // 개발·배포 화면(/dev). 확정된 기획서를 작업·PR로 만들고, 교차검증·배포·사후관리까지 맡는다.
 // 메뉴(사이드바 하위 탭 demo/services.ts) = 작업 현황(첫 화면)·작업(작업·PR·AI 교차검증·운영·배포·사후관리)·지표. 에이전트 대화는 메뉴에서 빼고 주소로만 연다. 틀은 기획 화면과 같이 쓴다(components/planning-common/Shell.tsx).
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link, useRouter } from '@/lib/nav'
 import { IconLink } from '@/components/icons'
 import { PlanningShell, type Section, type View } from '@/components/planning-common/Shell'
@@ -8,6 +8,7 @@ import { prSlug, toPath } from '@/components/planning-common/links'
 import { repoPending } from '@/components/planning-common/repo'
 import { AgentTalk, Talk } from '@/components/planning-common/talk'
 import { ChatPanel, useDevChat } from '@/components/dev/chat'
+import { useOpenDevChat } from '@/components/dev/chatOpen'
 import { Activity, Audit, Autonomy } from '@/components/dev/metrics'
 import { Aftercare, Ops } from '@/components/dev/ops'
 import { PrsTab } from '@/components/dev/repows'
@@ -34,10 +35,13 @@ const SECTIONS: Record<string, Section> = {
 
 // 제목 줄 오른쪽: 레포 승인 대기 · AI 작업 중 · AI와 대화 · 연결(본인 Claude·레포·개발 도구)
 function DevTools({ v }: { v: View }) {
-  const { state, connected, example } = v
+  const { state, connected } = v
   const router = useRouter()
   const [chatOpen, setChatOpen] = useState(false)
   const chat = useDevChat(state, connected)
+  const { upsert, select } = chat
+  // 작업 카드의 'AI 대화로 넘기기': 만든 대화를 패널에 넣고 연다
+  useOpenDevChat(useCallback((t) => { upsert(t); select(t.id); setChatOpen(true) }, [upsert, select]))
   const repoWait = repoPending(state)
   const firstRepoWait = state.prs.find((p) => p.target?.status === 'proposed')
   return (
@@ -48,7 +52,7 @@ function DevTools({ v }: { v: View }) {
       {chat.working.length > 0 && (
         <button type="button" className="chip amber" onClick={() => { chat.select(chat.working[0]); setChatOpen(true) }}>AI 작업 중 {chat.working.length}</button>
       )}
-      <button type="button" className="btn-primary px-3 py-1" disabled={!connected || example} title={example ? '예시 모드에서는 쓸 수 없어요' : connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
+      <button type="button" className="btn-primary px-3 py-1" disabled={!connected} title={connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
       <Link href="/connections" className="btn-quiet px-2 py-1" title="연결 (형상관리·AI)" aria-label="연결 (형상관리·AI)">
         <IconLink size={20} />
       </Link>
@@ -70,10 +74,10 @@ export default function DevPage() {
       tabCount={(v, section, tab) => (section === 'work' && tab === 'reviews' ? v.state.reviews.filter((x) => !x.result).length : 0)}
       tools={(v) => <DevTools v={v} />}
     >
-      {({ state: s, dispatch: d, section, sub, tab, rest, item, example }) => (
+      {({ state: s, dispatch: d, section, sub, tab, rest, item }) => (
         <>
           {section === 'tasks' && <TaskBoard s={s} filter={sub} />}
-          {section === 'work' && tab === 'prs' && <PrsTab s={s} d={d} example={example} parts={rest.map((x) => decodeURIComponent(x))} />}
+          {section === 'work' && tab === 'prs' && <PrsTab s={s} d={d} parts={rest.map((x) => decodeURIComponent(x))} />}
           {section === 'work' && tab === 'reviews' && <Reviews s={s} d={d} item={item} />}
           {section === 'work' && tab === 'ops' && <Ops s={s} item={item} />}
           {section === 'work' && tab === 'aftercare' && <Aftercare s={s} item={item} />}
