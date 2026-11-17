@@ -31,11 +31,28 @@ class Rule:
 
 
 @dataclass(frozen=True)
+class RepeatRule:
+    """같은 단계의 확인 필요가 반복될 때 총괄에 진단을 요청하는 조건(판정 기준이 아니다).
+
+    같은 (에이전트, 단계)의 최근 `window`건 중 `flagged_verdicts`가 `min_flagged`건 이상이고,
+    판정할 수 있었던 기록이 `min_records`건 이상일 때만 요청한다. 사람에게 넘김·기록 없음·진행 중은
+    에이전트 탓이 아니거나 아직 모르는 것이라 세지 않는다.
+    """
+
+    min_records: int = 3
+    window: int = 3
+    min_flagged: int = 2
+    flagged_verdicts: tuple[str, ...] = ("check", "silent")
+    daily_limit_per_agent: int = 1
+
+
+@dataclass(frozen=True)
 class Criteria:
     version: int
     updated: str
     default: Rule
     groups: dict[str, Rule] = field(default_factory=dict)
+    repeat: RepeatRule = field(default_factory=RepeatRule)
 
     def rule_for(self, group: str | None) -> Rule:
         return self.groups.get(group or "", self.default)
@@ -59,6 +76,39 @@ def _rule(raw: object, base: Rule | None, where: str) -> Rule:
     return Rule(float(seconds), attempts, promised, float(silence))
 
 
+_COUNTABLE = {"normal", "check", "silent", "blocked", "approval_expired"}
+
+
+def _repeat(raw: object) -> RepeatRule:
+    if raw is None:
+        return RepeatRule()
+    if not isinstance(raw, dict):
+        raise CriteriaError("repeat: 표가 아니다")
+    base = RepeatRule()
+    values: dict[str, int] = {}
+    for name in ("min_records", "window", "min_flagged", "daily_limit_per_agent"):
+        value = raw.get(name, getattr(base, name))
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise CriteriaError(f"repeat.{name}은 1 이상의 정수여야 한다")
+        values[name] = value
+    verdicts = raw.get("flagged_verdicts", list(base.flagged_verdicts))
+    if (
+        not isinstance(verdicts, list)
+        or not verdicts
+        or not all(isinstance(v, str) and v in _COUNTABLE - {"normal"} for v in verdicts)
+    ):
+        raise CriteriaError("repeat.flagged_verdicts는 확인 필요 쪽 판정 이름 목록이어야 한다")
+    if values["min_flagged"] > values["window"]:
+        raise CriteriaError("repeat.min_flagged는 window보다 클 수 없다")
+    return RepeatRule(
+        values["min_records"],
+        values["window"],
+        values["min_flagged"],
+        tuple(verdicts),
+        values["daily_limit_per_agent"],
+    )
+
+
 def parse_criteria(data: dict) -> Criteria:
     version = data.get("version")
     if isinstance(version, bool) or not isinstance(version, int) or version < 1:
@@ -68,7 +118,9 @@ def parse_criteria(data: dict) -> Criteria:
     if not isinstance(groups_raw, dict):
         raise CriteriaError("group은 표여야 한다")
     groups = {name: _rule(raw, default, f"group.{name}") for name, raw in groups_raw.items()}
-    return Criteria(version, str(data.get("updated", "")), default, groups)
+    return Criteria(
+        version, str(data.get("updated", "")), default, groups, _repeat(data.get("repeat"))
+    )
 
 
 def load_criteria(path: Path | str | None = None) -> Criteria:

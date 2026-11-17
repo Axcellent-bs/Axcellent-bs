@@ -1781,3 +1781,86 @@ async def _retry_paths(svc: PlanningService, task_id: str, paths: list[str]):
     out = await svc.retry_dev_task(task_id, paths=paths)
     await svc.wait_coding()
     return out
+
+
+# ------------------------------------------------ 멈춘 뒤 이어서: 에이전트가 스스로 다시 하기
+
+
+def test_agent_retries_once_after_a_passing_llm_error(
+    service: PlanningService, adapter, monkeypatch
+) -> None:
+    """AI 응답 오류는 잠깐 생긴 오류라 에이전트가 한 번 스스로 다시 한다. 또 실패하면 사람 확인."""
+    from dev_agent import service as dev_service
+
+    monkeypatch.setattr(dev_service, "AUTO_RETRY_SECONDS", 0)
+    llm = FakeLLM(fail={"CodeReview"})
+    coder.set_llm(llm)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "failed" and c.transient and c.auto_retries == 0
+
+    async def tick():
+        out = await service.auto_retry_stuck()
+        await service.wait_coding()
+        return out
+
+    assert run(tick()) == ["T-D1"]  # 아직 실패하는 채로 한 번 다시
+    c = _task(service).coding
+    assert c.status == "failed" and c.auto_retries == 1
+    assert run(tick()) == []  # 횟수를 다 써서 사람 확인으로 남는다
+    assert any("에이전트가 다시 시도" in a.text for a in service.state.activity)
+
+    llm.fail = set()
+    run(_retry(service, "T-D1"))  # 사람이 다시 시도하면 횟수는 처음부터
+    c = _task(service).coding
+    assert c.status == "merged" and c.auto_retries == 0
+
+
+def test_plan_errors_are_not_retried_by_the_agent(
+    service: PlanningService, adapter, monkeypatch
+) -> None:
+    """파일을 못 고른 것처럼 사람이 정해야 하는 멈춤은 에이전트가 다시 하지 않는다."""
+    from dev_agent import service as dev_service
+
+    monkeypatch.setattr(dev_service, "AUTO_RETRY_SECONDS", 0)
+    coder.set_llm(FakeLLM(plan=CodePlan(files=[])))
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "failed" and not c.transient
+    assert run(service.auto_retry_stuck()) == []
+
+
+def test_agent_rewrites_once_after_merge_conflict(
+    service: PlanningService, adapter, monkeypatch
+) -> None:
+    from dev_agent import service as dev_service
+
+    monkeypatch.setattr(dev_service, "AUTO_RETRY_SECONDS", 0)
+
+    class Conflict(MockVcsAdapter):
+        clash = True
+
+        async def merge_change(self, number: int, method: str = "squash"):
+            if self.clash:
+                raise VcsError("conflict", "merge conflict")
+            return await super().merge_change(number, method)
+
+    broken = Conflict()
+    broken.seed_files(FILES)
+    vcs.set_vcs(broken)
+    coder.set_llm(FakeLLM(reviews=[CodeReview(verdict="통과", notes=[])] * 2))
+    run(_go(service))
+    c = _task(service).coding
+    first = c.pr
+    assert c.merge_conflict and c.transient and "에이전트가" in (c.error or "")
+
+    broken.clash = False
+
+    async def tick():
+        out = await service.auto_retry_stuck()
+        await service.wait_coding()
+        return out
+
+    assert run(tick()) == ["T-D1"]
+    c = _task(service).coding
+    assert c.status == "merged" and c.pr != first and c.auto_retries == 1

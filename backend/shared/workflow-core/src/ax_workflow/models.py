@@ -239,6 +239,10 @@ class CodingRun(DomainModel):
     merge_conflict: bool = False
     # 사람이 직접 고른 고칠 파일. 있으면 AI가 파일을 고르지 않고 이 파일을 바로 쓴다
     picked: list[str] = Field(default_factory=list)
+    # 잠깐 생긴 오류(AI 응답·GitHub 호출 한도·머지 충돌)로 멈춤: 에이전트가 잠시 뒤 다시 한다.
+    # auto_retries는 에이전트가 스스로 다시 한 횟수 (사람이 다시 시도하면 0부터)
+    transient: bool = False
+    auto_retries: int = 0
     # 바뀐 파일로 정한 위험도 (dev_agent.risk): low·medium·high와 이유 한 줄
     risk: Literal["low", "medium", "high"] | None = None
     risk_why: str | None = None

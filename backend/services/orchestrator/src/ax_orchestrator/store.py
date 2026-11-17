@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS finance_opinions (
     received_at TEXT NOT NULL,
     body        TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_diagnoses (
+    request_id  TEXT PRIMARY KEY,
+    received_at TEXT NOT NULL,
+    body        TEXT NOT NULL
+);
 """
 
 
@@ -269,6 +274,39 @@ class IncidentStore:
                 log.warning("저장된 재무 의견을 읽지 못해 건너뜀: %s", opinion_id)
                 continue
             if isinstance(row, dict) and isinstance(row.get("opinion"), dict):
+                found.append(row)
+        return found
+
+    def save_diagnosis(self, request_id: str, received_at: str, row: dict[str, Any]) -> None:
+        """에이전트 평가 진단 요청 한 줄. 같은 `request_id`는 마지막 값으로 바꾼다."""
+        body = json.dumps(row, ensure_ascii=False, default=str)
+        with self._lock:
+            self._db.execute(
+                "INSERT OR REPLACE INTO agent_diagnoses (request_id, received_at, body)"
+                " VALUES (?, ?, ?)",
+                (request_id, received_at, body),
+            )
+            self._db.commit()
+
+    def drop_diagnosis(self, request_id: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM agent_diagnoses WHERE request_id = ?", (request_id,))
+            self._db.commit()
+
+    def load_diagnoses(self) -> list[dict[str, Any]]:
+        """받은 순서대로. 읽지 못하는 줄은 건너뛴다."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT request_id, body FROM agent_diagnoses ORDER BY received_at, rowid"
+            ).fetchall()
+        found: list[dict[str, Any]] = []
+        for request_id, body in rows:
+            try:
+                row = json.loads(body)
+            except ValueError:
+                log.warning("저장된 진단 요청을 읽지 못해 건너뜀: %s", request_id)
+                continue
+            if isinstance(row, dict) and isinstance(row.get("request_id"), str):
                 found.append(row)
         return found
 

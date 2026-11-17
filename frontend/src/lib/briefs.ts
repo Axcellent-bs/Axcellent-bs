@@ -1,13 +1,13 @@
 import { ApiError, failureError, statusOnlyError } from "./apiError";
 import { writeAuth } from "./api";
-import { DASHBOARD_API_URL, RELAY_API_URL, RELAY_VIEW_TOKEN } from "./env";
+import { DASHBOARD_API_URL } from "./env";
 import type { MergeAnswer } from "./outageMerge";
 import type { OutageMediaAnswer, OutageMediaFlow } from "./outageMedia";
 import type { BriefMediaAnswer, MediaEstimate, PreparedMedia, PublishAnswer, PublishState } from "./briefMedia";
 
-// 마케팅이 기획에서 받은 기획안 읽기. 화면은 마케팅을 직접 부르지 않고 shop-api 관리 읽기 중계(GET만)를 부른다.
+// 마케팅이 기획에서 받은 기획안 읽기. 화면은 마케팅도 판매 서버도 직접 부르지 않고 dashboard-api 중계
+// (GET만, `/api/dashboard/shop/marketing/*`)를 부른다. 판매 서버 토큰은 dashboard-api 서버 쪽에만 있다.
 // 응답 모양은 ax-backend `marketing_agent/briefs.py`(`StoredBrief`)와 계약 `CampaignBriefInput` 기준이다.
-// 토큰은 환경변수(개발용)에서만 오고 브라우저 저장소에는 두지 않는다.
 
 export interface BriefFact { label: string; value: string; source: string; link: string | null }
 export interface BriefTarget { label: string; value: string; measure: string | null }
@@ -98,7 +98,7 @@ export interface StoredBrief {
 
 export interface BriefList { items: StoredBrief[]; total: number; unknown_reason: string | null }
 
-export const briefsEnabled = Boolean(RELAY_VIEW_TOKEN && RELAY_API_URL);
+export const briefsEnabled = Boolean(DASHBOARD_API_URL);
 
 export const STATUS_STEPS = ["받음", "캠페인 시작", "게시", "성과"] as const;
 export const briefStatusKo = (_status: StoredBrief["status"]): (typeof STATUS_STEPS)[number] => "받음";
@@ -116,7 +116,7 @@ export function safeLink(link: string | null | undefined): string | null {
 
 async function get<T>(path: string): Promise<T> {
   if (!briefsEnabled) throw new ApiError("받은 기획안 읽기 연결이 꺼져 있습니다", 403);
-  const res = await fetch(`${RELAY_API_URL}${path}`, { headers: { Authorization: `Bearer ${RELAY_VIEW_TOKEN}` }, cache: "no-store" });
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { cache: "no-store" });
   let body: { data?: T; error?: { message?: string } } = {};
   let parsed: unknown;
   try { parsed = await res.json(); body = (parsed ?? {}) as typeof body; } catch { /* 본문이 JSON이 아님 */ }
@@ -266,9 +266,9 @@ export const outageMediaPreviewUrl = (draftId: string, version: string | null) =
   `${DASHBOARD_API_URL}${outagePath(draftId)}/media/preview${version ? `?v=${encodeURIComponent(version.slice(0, 12))}` : ""}`;
 
 export const briefs = {
-  list: (limit = 50) => get<BriefList>(`/api/shop/admin/marketing/briefs?limit=${briefsListLimit(limit)}`),
+  list: (limit = 50) => get<BriefList>(`/api/dashboard/shop/marketing/briefs?limit=${briefsListLimit(limit)}`),
   outageSnsDrafts: (limit = 20, includeMerged = false) =>
-    get<OutageSnsDraftList>(`/api/shop/admin/marketing/outage-sns-drafts?limit=${briefsListLimit(limit)}${includeMerged ? "&include_merged=true" : ""}`),
+    get<OutageSnsDraftList>(`/api/dashboard/shop/marketing/outage-sns-drafts?limit=${briefsListLimit(limit)}${includeMerged ? "&include_merged=true" : ""}`),
   mergeOutageSnsDrafts,
   handoff,
   makeMedia,
@@ -323,9 +323,10 @@ export const DRAFT_STATE_KO: Record<string, string> = {
 export const draftStateKo = (state: string | null) => (state ? DRAFT_STATE_KO[state] ?? state : "확인할 수 없음");
 
 /** 연결 오류를 화면 문구로 */
-export function briefsError(error: { status?: number; message: string }): string {
+export function briefsError(error: { status?: number; message: string; code?: string | null }): string {
   if (error.status === 502) return "마케팅 AI에 연결할 수 없습니다. 마케팅 서버가 켜져 있는지 확인해 주세요.";
   if (error.status === 504) return "마케팅 AI가 제때 응답하지 않았습니다. 잠시 뒤 다시 시도해 주세요.";
-  if (error.status === 403 || error.status === 401) return "받은 기획안을 읽을 권한이 없습니다. 열람 토큰 설정을 확인해 주세요.";
+  // 판매 서버가 화면 중계 서버(dashboard-api)의 열람 토큰을 받지 않음 (503 UPSTREAM_AUTH)
+  if (error.code === "UPSTREAM_AUTH") return "받은 기획안을 읽을 권한이 없습니다. 화면 중계 서버의 열람 토큰(SHOP_VIEWER_TOKEN) 설정을 확인해 주세요.";
   return error.message;
 }

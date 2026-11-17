@@ -54,6 +54,7 @@ SALES_EXPORT_PAGE = 500  # 판매 기록 내보내기 한 페이지 (shop-api �
 CUSTOMERS_EXPORT_PAGE = 500  # 고객 내보내기 한 페이지 (계약 최대 1000)
 NOT_FOUND = "NOT_FOUND"  # 그 주소가 판매 서버에 없음 (오류 코드 없는 404)
 TRANSACTIONS_METRIC = "payment_count"  # 거래 시도 수 = 결제 시도 수
+TIMEOUT_REASON = "PG_TIMEOUT"  # `/failed-orders?status=timeout` 줄의 reason (판매 서버가 정함)
 
 # shop-api 오류 이름 (예전 이름). 커넥터 공통 오류와 같은 것이다
 ShopUnavailable = ConnectorUnavailable
@@ -183,6 +184,8 @@ class ShopApiConnector:
     - `failure_events`: `GET /api/shop/failed-orders` → 표준 실패 이벤트
       (실패 주문 하나 = 이벤트 하나)
     - `transactions_volume`: 결제 시도 수(`payment_count`) 시계열
+    - `timeout_payments`: `GET /api/shop/failed-orders?status=timeout` → 시간 초과로 남은 결제
+      (건수, 금액). 영향 분석이 실패 주문과 따로 센다. 캣북스 커넥터에만 있다
     - `campaign_coupons`: `GET /api/shop/coupons?campaign_id=` (캠페인 효과 쿠폰 사용률). 회사 공통
       인터페이스가 아니라 캣북스 커넥터에만 있다
     - `products`·`categories`: `GET /api/shop/products`(판매 중 상품)·`/categories`(코드 → 이름).
@@ -224,6 +227,8 @@ class ShopApiConnector:
         }
         if query.category is not None:
             params["category"] = query.category
+        if query.status == "timeout":  # 기본(failed) 요청은 예전과 같게 status를 붙이지 않는다
+            params["status"] = query.status
         data = await self.api.get("/failed-orders", params)
         try:
             return ShopFailedOrdersResult.model_validate(data)
@@ -244,6 +249,40 @@ class ShopApiConnector:
         )
         result = await self.failed_orders_raw(query)
         return FailureEvents(as_events(result), result.truncated)
+
+    async def timeout_payments(
+        self,
+        window_from: datetime,
+        window_to: datetime,
+        tenant_id: str = TENANT_ID_DEFAULT,
+        *,
+        category: str | None = None,
+    ) -> tuple[int, int]:
+        """[from, to)에 시간 초과로 남은 결제의 (건수, 금액 합) (`/failed-orders?status=timeout`).
+
+        결제사 응답이 끊겨 승인됐는지 모르고 아직 다시 확인 전인 결제다(확인·환불 필요). 셀 수
+        없으면 숫자를 지어내지 않고 `ShopUnavailable`을 낸다. 메시지가 근거에 적을 이유 한 줄이다.
+        - `UNSUPPORTED`: 예전 판매 서버가 `status`를 모르고 실패 주문을 준다
+          (`reason`이 `PG_TIMEOUT`이 아닌 줄이 있다)
+        - `TRUNCATED`: 조회 한도에 걸려 잘렸다
+        - 그 밖(422 등): 판매 서버 응답 오류 그대로
+        """
+        query = ShopFailedOrdersQuery(
+            from_=window_from,
+            to=window_to,
+            category=category,
+            limit=FAILED_ORDERS_LIMIT,
+            tenant_id=tenant_id,
+            status="timeout",
+        )
+        result = await self.failed_orders_raw(query)
+        if any(order.reason != TIMEOUT_REASON for order in result.orders):
+            raise ShopUnavailable("UNSUPPORTED", "판매 서버가 시간 초과 결제 조회를 지원하지 않음")
+        if result.truncated:
+            raise ShopUnavailable(
+                "TRUNCATED", f"조회 한도 {FAILED_ORDERS_LIMIT}건에 걸려 잘려서 셀 수 없음"
+            )
+        return len(result.orders), sum(order.amount for order in result.orders)
 
     async def transactions_volume(
         self, window_from: datetime, window_to: datetime

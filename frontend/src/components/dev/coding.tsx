@@ -9,8 +9,10 @@ import { useSession } from '@/demo/session'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Step } from '@/components/planning-common/flow'
 import './usage.css'
-import { Ref, idText } from '@/components/planning-common/links'
+import { Ref, idText, toPath } from '@/components/planning-common/links'
 import { humanizePlanIds } from '@/lib/format'
+import { recoveryOf, type RecoveryAction } from '@/lib/codingRecovery'
+import { Link } from '@/lib/nav'
 
 const api = devTaskApi(DEV_API)
 const actions = planningApi(DEV_API)
@@ -316,6 +318,9 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
   }
   // 멈춘 작업(PR 없음): 사람이 고칠 파일을 고르거나 AI 대화로 넘겨 이어 간다
   const stuck = STUCK.concat('canceled').includes(c.status) && !c.pr && !task.discarded && c.mode !== 'subscription'
+  // 멈춘 이유별 다음 할 일 (lib/codingRecovery.ts). 정해진 게 없으면(중단·돌려보냄 등) 예전 버튼 그대로
+  const rec = task.discarded ? null : recoveryOf(c)
+  const can = (a: RecoveryAction) => !rec || rec.actions.includes(a)
   const toChat = () => act(async () => openDevChat(await chats.fromTask(task.id, account)), `${task.id} AI 대화로 넘김`)
   // 개발자 Claude 대기열에서 아무도 안 가져감: 서버 AI로 넘길 수 있다
   const unclaimed = c.mode === 'subscription' && c.status === 'queued' && !c.claimedBy
@@ -390,6 +395,13 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       )}
       {!!c.review?.notes.length && <ul>{c.review.notes.map((n, i) => <li key={i} className="muted">{n}</li>)}</ul>}
       {c.instruction && <p className="muted">지시: {c.instruction}</p>}
+      {rec && (
+        <p className={rec.who === 'agent' ? 'muted small' : 'small'} role="status">
+          <b>{rec.who === 'agent' ? '에이전트가 이어서 해요' : '다음 할 일'}</b> · {rec.say}
+          {rec.actions.includes('connect') && <> <Link href="/connections" className="plain-link">연결 화면</Link></>}
+          {rec.actions.includes('reviews') && <> <a href={toPath('work/reviews')} className="plain-link">AI 교차검증</a></>}
+        </p>
+      )}
       {c.error && <p className="tag-amber pre-line">{c.error.includes('generate_pr를 허락하지 않음') ? 'PR 열기 보류됨 · 승인 필요' : c.error}</p>}
       {waitingPr && (
         <form className="flex gap-2" onSubmit={revise}>
@@ -400,17 +412,17 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       <span className="tags">
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
         {heldPr && <Button size="small" variant="primary" onClick={() => void approveHold()} disabled={busy}>{busy ? '보내는 중…' : '승인하고 PR 열기'}</Button>}
-        {(STUCK.includes(c.status) || c.status === 'canceled' || c.status === 'returned') && !waitingPr && !task.discarded && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.returnedTo ? '개발에 다시 맡기기' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드 기준으로 다시 작성' : '다시 시도'}</Button>}
+        {(STUCK.includes(c.status) || c.status === 'canceled' || c.status === 'returned') && !waitingPr && !task.discarded && can('retry') && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.returnedTo ? '개발에 다시 맡기기' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드 기준으로 다시 작성' : '다시 시도'}</Button>}
         {textHeld && <Button size="small" onClick={textOk} disabled={busy}>작업 글 확인함</Button>}
         {unclaimed && <Button size="small" onClick={() => void toAgent()} disabled={busy}>서버 AI로 넘기기</Button>}
-        {noChange && <Button size="small" onClick={closeCovered} disabled={busy}>이미 반영됨으로 닫기</Button>}
-        {stuck && <Button size="small" onClick={() => void toChat()} disabled={busy}>AI 대화로 넘기기</Button>}
+        {noChange && can('covered') && <Button size="small" onClick={closeCovered} disabled={busy}>이미 반영됨으로 닫기</Button>}
+        {stuck && can('chat') && <Button size="small" onClick={() => void toChat()} disabled={busy}>AI 대화로 넘기기</Button>}
         <CancelButton taskId={task.id} status={c.status} />
         <DiscardButton task={task} />
         <ReturnButton task={task} />
         {task.discarded && <Tag>폐기됨{task.discardedBy ? ` · ${task.discardedBy}` : ''}</Tag>}
       </span>
-      {stuck && <PickFiles task={task} onDone={() => undefined} />}
+      {stuck && can('pick') && <PickFiles task={task} onDone={() => undefined} />}
     </Step>
   )
 }

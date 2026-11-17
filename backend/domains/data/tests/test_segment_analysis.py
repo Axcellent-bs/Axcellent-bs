@@ -23,6 +23,7 @@ from ax_contracts.schemas.data import (
     CatalogSales,
     CoverageRow,
     ExternalFilter,
+    FavoriteItem,
     GenreExternal,
     MarketCoverageOutput,
     PopulationSource,
@@ -240,6 +241,31 @@ def test_favorites_internal_ranking() -> None:
     products = [(i.label, i.suppressed) for i in out.internal if i.kind == "product"]
     assert products == [("책 g1", False), ("책 g2", True)]  # 숨김은 뒤에, 숫자 없이
     assert "pseud_" not in json.dumps(out.model_dump(mode="json"), ensure_ascii=False)
+    # 요약: 첫 문장 = 배수 1위 장르, 둘째 문장 = 구매 비율 1위 장르
+    lifted = f"특히 많이 사는 장르는 장르1 (전체 대비 {genres[0].lift:.1f}배, 구매자 중 80.0%)."
+    assert lifted in out.summary
+    assert out.summary.endswith("가장 많이 산 장르는 장르1 (구매자 중 80.0%).")
+    assert out.summary.index("특히") < out.summary.index("가장 많이 산")
+
+
+def test_favorites_summary_lift_first_then_share() -> None:
+    out = SegmentFavoritesOutput(
+        filters={"age_band": "20s"}, filter_label="20대", period="90d", segment_buyers=40,
+        internal=[
+            FavoriteItem(kind="genre", code="a", label="가", share=0.5, lift=1.1, buyers=20),
+            FavoriteItem(kind="genre", code="b", label="나", share=0.2, lift=2.0, buyers=8),
+            FavoriteItem(kind="category", code="c", label="다", share=0.9, lift=3.0, buyers=36),
+        ],
+    )  # fmt: skip
+    text = seg.favorites_summary(out, 5)
+    assert "특히 많이 사는 장르는 나 (전체 대비 2.0배, 구매자 중 20.0%)." in text
+    assert text.endswith("가장 많이 산 장르는 가 (구매자 중 50.0%).")  # 분류(다)는 장르가 아님
+
+
+def test_options_item_noun() -> None:
+    assert seg.options(CFG, "test", None).item_noun == "상품"
+    game = CFG.model_copy(update={"item_noun": "게임"})
+    assert seg.options(game, "test", None).item_noun == "게임"
 
 
 def test_favorites_small_segment_and_bad_filters() -> None:
@@ -450,6 +476,120 @@ def test_coverage_rejects_combination_not_in_config() -> None:
     assert "age_band·gender" in out.insufficient_reasons[0]
 
 
+# 행정구역 × 5세 연령 표 모양 (성별이 항목: 남자·여자 인구수, 월별). 코드는 시험용 값
+MONTHLY_REF = {
+    "org_id": "101", "tbl_id": "T_REGION_AGE5", "itm_id": "IM+IF", "prd_se": "M",
+    "obj_l1": "R00", "dims": {"age_band": "c2", "gender": "itm"},
+    "codes": {"age_band": {"10s": ["A10", "A15"], "20s": ["A20", "A25"]},
+              "gender": {"female": "IF", "male": "IM", "no_answer": []}},
+}  # fmt: skip
+FIVE = {"A10": 100, "A15": 110, "A20": 120, "A25": 130, "A30": 999}  # 여자 기준, 남자는 +5
+
+
+def monthly_rows() -> list[dict]:
+    rows = []
+    for prd, bump in (("202609", 0), ("202610", 1)):
+        for age, n in FIVE.items():
+            for itm, sex, extra in (("IF", "여자인구수", 0), ("IM", "남자인구수", 5)):
+                rows.append({"ORG_ID": "101", "TBL_ID": "T_REGION_AGE5", "TBL_NM": "5세별 인구",
+                             "C1": "R00", "C1_NM": "전국", "C2": age, "C2_NM": age,
+                             "ITM_ID": itm, "ITM_NM": sex, "UNIT_NM": "명", "PRD_SE": "M",
+                             "PRD_DE": prd, "DT": str(n + extra + bump)})  # fmt: skip
+    return rows
+
+
+def test_coverage_five_year_ages_and_gender_items() -> None:
+    """5세 코드를 연령대로 묶어 더하고, 성별은 항목(ITM_ID)으로 고른다. 기준은 가장 최근 달."""
+    sexes = {"female": "여성", "male": "남성", "no_answer": "응답 안 함"}
+    gender = AttributeDef(key="gender", label="성별", values=sexes)
+    pop = PopulationSource(attribute_keys=["age_band", "gender"], source_id="kosis",
+                           table_ref=MONTHLY_REF)  # fmt: skip
+    cfg = CFG.model_copy(update={"population": [pop],
+                                 "attributes": [CFG.attributes[0], gender]})  # fmt: skip
+    conn, seen = _kosis(KOSIS_KEY, lambda r: httpx.Response(200, json=monthly_rows()))
+    out = coverage(cfg, conn)
+    params = dict(seen[0].url.params)
+    assert params["objL1"] == "R00" and params["objL2"] == "ALL" and params["itmId"] == "IM+IF"
+    assert params["prdSe"] == "M" and params["newEstPrdCnt"] == "1"
+    by = {r.label: r for r in out.rows}
+    # 202610(최근 달): 20대 여자 = A20 121 + A25 131, 10대 남자 = A10 106 + A15 116
+    women = by["20대 · 여성"]
+    assert women.population == 252 and women.coverage == round(10 / 252, 8)
+    assert by["10대 · 남성"].population == 222 and by["20대 · 남성"].population == 262
+    assert by["10대 · 여성"].population == 212  # A30은 어느 연령대에도 들지 않는다
+    assert by["20대 · 여성"].population_source == "5세별 인구 (2026-10 기준)"
+    assert by["20대 · 여성"].base_year == 2026
+    no_answer = by["20대 · 응답 안 함"]  # 인구 통계에 없는 값 → 비율 없음
+    assert no_answer.status == "population_missing" and no_answer.population is None
+    assert no_answer.coverage is None
+    assert no_answer.reason == "인구 통계에 없는 값이라 비율을 내지 않음"
+    assert "2026-10 기준" in seg.population_note(out)
+
+
+def test_coverage_bad_dims_or_doubled_cells_are_reasons() -> None:
+    bad = PopulationSource(attribute_keys=["age_band", "gender"], source_id="kosis",
+                           table_ref={**MONTHLY_REF, "dims": {"age_band": "c2", "gender": "c2"}})
+    conn, seen = _kosis(KOSIS_KEY, _no_network)
+    out = coverage(CFG.model_copy(update={"population": [bad]}), conn)
+    assert seen == [] and all("dims 설정 확인" in r.reason for r in out.rows)
+    # 지역을 한 곳으로 고르지 않아 같은 칸이 여러 번 오면 숫자를 내지 않는다
+    two_regions = [*monthly_rows(), *({**r, "C1": "R11"} for r in monthly_rows())]
+    loose = PopulationSource(attribute_keys=["age_band", "gender"], source_id="kosis",
+                             table_ref={**MONTHLY_REF, "obj_l1": "ALL"})  # fmt: skip
+    conn2, _ = _kosis(KOSIS_KEY, lambda r: httpx.Response(200, json=two_regions))
+    out2 = coverage(CFG.model_copy(update={"population": [loose]}), conn2)
+    assert all(r.population is None and "같은 칸 값이 여러 개" in r.reason for r in out2.rows)
+
+
+def test_catbooks_population_table_uses_national_five_year_rows() -> None:
+    """catbooks 설정(DT_1B04005N): 전국·5세 코드 묶음·성별 항목. 응답은 실제 표 모양의 가짜 값."""
+    sales = catalog.load_catalog("catbooks").sales
+    assert sales is not None
+    pop = sales.population[0]
+    ref = pop.table_ref
+    assert (ref["org_id"], ref["tbl_id"], ref["obj_l1"]) == ("101", "DT_1B04005N", "00")
+    assert ref["codes"]["gender"]["no_answer"] == []
+    ages = ["5", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55", "60", "65", "70",
+            "75", "80", "85", "90", "95", "100", "105", "0"]  # fmt: skip
+    rows = [
+        {"ORG_ID": "101", "TBL_ID": "DT_1B04005N", "TBL_NM": "주민등록인구", "C1": "00",
+         "C1_NM": "전국", "C2": age, "C2_NM": age, "ITM_ID": itm, "ITM_NM": itm,
+         "UNIT_NM": "명", "PRD_SE": "M", "PRD_DE": "202610",
+         "DT": str(1000 * int(age) + {"T2": 0, "T3": 1, "T4": 2}[itm])}
+        for age in ages for itm in ("T2", "T3", "T4")
+    ]  # fmt: skip
+    conn, seen = _kosis(KOSIS_KEY, lambda r: httpx.Response(200, json=rows))
+    rows_out = run(seg.population_for(pop, [
+        CoverageRow(values={"age_band": "20s", "gender": "female"}, label="20대 · 여성", buyers=10),
+        CoverageRow(values={"age_band": "50s_plus", "gender": "male"}, label="50대+ · 남성",
+                    buyers=10),
+        CoverageRow(values={"age_band": "10s", "gender": "no_answer"}, label="10대 · 응답 안 함",
+                    buyers=10),
+    ], conn))  # fmt: skip
+    assert dict(seen[0].url.params)["objL1"] == "00"
+    women, older, no_answer = rows_out
+    assert women.population == (25000 + 2) + (30000 + 2)  # 20~24세 + 25~29세 여자
+    fifty_plus = [55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105]
+    assert older.population == sum(1000 * a + 1 for a in fifty_plus)  # 50세 이상 전부, 남자
+    assert women.population_source == "통계청 주민등록인구 (5세별) (2026-10 기준)"
+    assert no_answer.population is None and no_answer.coverage is None
+
+
+def test_kosis_table_meta() -> None:
+    meta = [
+        {"OBJ_ID": "A", "OBJ_NM": "행정구역", "ITM_ID": "R00", "ITM_NM": "전국", "UP_ITM_ID": None},
+        {"OBJ_ID": "ITEM", "OBJ_NM": "항목", "ITM_ID": "IF", "ITM_NM": "여자인구수"},
+    ]
+    conn, seen = _kosis(KOSIS_KEY, lambda r: httpx.Response(200, json=meta))
+    got = run(conn.table_meta("101", "T_REGION_AGE5"))
+    params = dict(seen[0].url.params)
+    asked = (params["method"], params["type"], params["tblId"])
+    assert asked == ("getMeta", "ITM", "T_REGION_AGE5")
+    assert [(m.obj_nm, m.itm_id, m.itm_nm, m.up_itm_id) for m in got] == [
+        ("행정구역", "R00", "전국", ""), ("항목", "IF", "여자인구수", "")]
+    assert "test-kosis-key" not in repr(conn) and "test-kosis-key" not in repr(got)
+
+
 def test_kosis_obj_l2_only_when_given() -> None:
     conn, seen = _kosis(KOSIS_KEY, lambda r: httpx.Response(200, json=kosis_rows()))
     old = run(conn.statistics_data("101", "T_AGE_SEX", "T1", "ALL", "Y"))
@@ -525,7 +665,9 @@ def test_end_to_end_with_fake_source(fake_store: SalesStore) -> None:
     )  # fmt: skip
     assert cov.status == "ok" and cov.basis and cov.basis.data_source == FAKE_DATA
     assert len(cov.rows) == 5 * 3 and any(r.buyers for r in cov.rows) and kseen == []
-    assert {r.status for r in cov.rows} == {"population_missing"}  # 캣북스 표 id 미확인
+    # 키가 없으면 KOSIS를 부르지 않고 이유만 (인구를 지어내지 않는다)
+    assert {r.status for r in cov.rows} == {"error"}
+    assert all("UNAUTHORIZED" in r.reason and r.population is None for r in cov.rows)
 
     for out in (prof, fav, cov):
         ev = seg.evidence(out.basis, NOW)

@@ -25,8 +25,9 @@ from ax_contracts.schemas import (
     EvaluatedStep,
     RepeatEventType,
 )
+from hr_agent.dept_eval.cards import load_cards
 from hr_agent.dept_eval.criteria import CriteriaError, load_criteria
-from hr_agent.dept_eval.stages import LABELS
+from hr_agent.dept_eval.stages import LABELS, current_dept
 from hr_agent.results import completed, failed, invalid_input, make_evidence
 from hr_agent.services import Services
 
@@ -34,7 +35,7 @@ from hr_agent.services import Services
 KINDS = ("incident", "decision", "case")
 
 # 화면에 보이는 순서. 판정이 없는 에이전트도 "참여한 이벤트 없음"으로 보여 준다
-AGENT_ORDER = ("infra", "data", "dev", "support", "marketing", "finance", "hr")
+AGENT_ORDER = ("infra", "data", "dev", "support", "marketing", "finance", "archive")
 
 # 한 이벤트 안에서 에이전트의 단계가 여럿일 때 점 하나로 줄이는 우선순위(앞쪽이 더 걸리는 판정)
 # 건너뛴 단계(기록 없음)는 다른 단계가 제때 끝났다면 점에 올리지 않는다
@@ -152,7 +153,7 @@ def _event(card: Any) -> EvaluatedEvent:
             EvaluatedStep(
                 step_id=item["step_id"],
                 label=LABELS.get(item["step_id"], item["step_id"]),
-                dept=item["dept"],
+                dept=current_dept(item["step_id"], item["dept"]),
                 group=item["group"],
                 verdict=item["verdict"],
                 work_seconds=item.get("work_seconds"),
@@ -264,7 +265,7 @@ async def evaluate_agents(svc: Services, request: AgentRequest) -> AgentResult:
         criteria = load_criteria()
     except CriteriaError as exc:
         return failed(request, "CRITERIA_UNREADABLE", str(exc)[:200])
-    cards = _latest_cards(await svc.memory.list_cards(states=["active"]))[: params.limit]
+    cards = _latest_cards(await load_cards(svc, request.meta))[: params.limit]
     events = [_event(c) for c in cards]
     depts = [*AGENT_ORDER, *sorted({s.dept for e in events for s in e.steps} - set(AGENT_ORDER))]
     output = EvaluateAgentsOutput(

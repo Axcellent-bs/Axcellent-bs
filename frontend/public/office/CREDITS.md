@@ -4,7 +4,7 @@
 
 | 파일 | 출처 | 라이선스 |
 | --- | --- | --- |
-| `seoul-office.webp` | 팀이 만든 서울 사무실 그림을 Higgsfield(Flux Kontext)로 편집(사람·이름표 제거, 빈 의자 복원). 편집: 장재현 | — |
+| `seoul-office-v3.webp` | 팀이 만든 서울 사무실 그림(1024×460, 사람 없는 빈 사무실, 선명하게 다시 만든 것). 받은 파일 그대로 쓴다 | — |
 | `char_0.png` ~ `char_5.png` | [Sebaspelusa/pixel-office](https://github.com/Sebaspelusa/pixel-office) `public/pixel-agents/` (원작 [pablodelucca/pixel-agents](https://github.com/pablodelucca/pixel-agents)) | MIT, Copyright (c) pablodelucca |
 
 MIT 라이선스 원문:

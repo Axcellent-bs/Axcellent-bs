@@ -70,6 +70,16 @@
       "priority": "recommended"
     },
     {
+      "id": "segment_question",
+      "description": "고객·시장 분석 글 질문(1~200자)을 고르는 칸 값(속성 key→값 code, 장르 code, 기간)으로 바꾼다. LLM에게는 회사 카탈로그 [sales]의 보기(속성 값·장르·기간)만 주고 그 안의 code만 고르게 한다. 보기에 없는 code는 버리고, 속성 조건이 없거나 LLM이 실패하면 status 'unparsed'와 이유. 숫자를 만들지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#SegmentQuestionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#SegmentQuestionOutput",
+      "grade": "read",
+      "allowed_requesters": ["orchestrator", "dashboard-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "segment_profile",
       "description": "고객 구성: 표준 판매 저장소만 읽어 기간(최근 30·90·365일, 한국 시간) 안 분류·장르·상품 구매자와 전체 구매자의 속성(연령대 등, 회사 카탈로그) 값별 비율·배수·구매자 수, 모름 수를 돌려준다. 결제 완료 주문 기준. 묶음이 최소 크기(기본 5명) 미만이면 숫자를 숨긴다. 집단 통계만 내고 구매자 목록은 내지 않는다. 품질 관문·고객 기록이 없으면 '데이터 부족: 이유'. LLM을 쓰지 않는다. 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#SegmentProfileInput",

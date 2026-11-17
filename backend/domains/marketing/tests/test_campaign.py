@@ -416,3 +416,97 @@ async def test_card_lists_campaign_skills() -> None:
     assert set(skills) == set(handlers.HANDLERS)
     assert (skills["start_campaign"].grade, skills["start_campaign"].verifier) == ("B", "safety")
     assert skills["record_campaign_result"].grade == "read"
+
+
+# ------------------------------------------- 상품 ID를 재무 예산 의견에 싣기 (B안 ③)
+async def test_product_ids_in_the_request_go_to_the_finance_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    asked = {**START, "product_ids": ["prd_1", "prd_2"]}
+    result = await campaign.start_campaign(_req("start_campaign", asked))
+    assert result.status == TaskStatus.COMPLETED
+    (target, sent) = finance.calls[0]
+    assert target == "finance" and sent.skill == campaign.REVIEW_SKILL
+    assert sent.input["product_ids"] == ["prd_1", "prd_2"]
+
+
+async def test_requests_without_products_still_ask_finance_with_an_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    await campaign.start_campaign(_req("start_campaign", START))
+    assert finance.calls[0][1].input["product_ids"] == []  # 옛 요청은 그대로(상품 신호 없음)
+
+
+async def test_more_than_ten_products_are_refused_like_any_other_bad_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    asked = {**START, "product_ids": [f"prd_{n}" for n in range(11)]}
+    result = await campaign.start_campaign(_req("start_campaign", asked))
+    assert result.status != TaskStatus.COMPLETED and finance.calls == []
+
+
+async def test_the_skill_takes_the_products_from_the_received_brief_when_the_request_has_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    looked: list[str] = []
+
+    def fake_get(proposal_id: object, campaign_id: str) -> object:
+        looked.append(campaign_id)
+        return SimpleNamespace(brief=SimpleNamespace(product_ids=["prd_7", "prd_8"]))
+
+    monkeypatch.setattr(handlers.STATE.briefs, "get", fake_get)
+    result = await handlers.start_campaign_skill(_req("start_campaign", START))
+    assert result.status == TaskStatus.COMPLETED and looked == ["cmp_1"]
+    assert finance.calls[0][1].input["product_ids"] == ["prd_7", "prd_8"]
+
+
+async def test_products_in_the_request_win_over_the_brief(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+
+    def never(proposal_id: object, campaign_id: str) -> object:
+        raise AssertionError("요청이 상품을 줬으면 기획안을 찾지 않는다")
+
+    monkeypatch.setattr(handlers.STATE.briefs, "get", never)
+    asked = {**START, "product_ids": ["prd_1"]}
+    await handlers.start_campaign_skill(_req("start_campaign", asked))
+    assert finance.calls[0][1].input["product_ids"] == ["prd_1"]
+
+
+async def test_no_brief_means_no_products_and_the_start_still_goes_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    result = await handlers.start_campaign_skill(_req("start_campaign", START))
+    assert result.status == TaskStatus.COMPLETED
+    assert finance.calls[0][1].input["product_ids"] == []
+
+
+async def test_a_broken_brief_store_does_not_break_the_campaign_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from marketing_agent.briefs import BriefStorageError
+
+    finance = Finance()
+    _wire(monkeypatch, finance)
+
+    def broken(proposal_id: object, campaign_id: str) -> object:
+        raise BriefStorageError("저장소를 읽지 못함")
+
+    monkeypatch.setattr(handlers.STATE.briefs, "get", broken)
+    result = await handlers.start_campaign_skill(_req("start_campaign", START))
+    assert result.status == TaskStatus.COMPLETED  # 상품 신호만 빼고 재무 의견을 받는다
+    assert finance.calls[0][1].input["product_ids"] == []

@@ -118,6 +118,14 @@ def test_failed_orders_limit_range() -> None:
         ShopFailedOrdersQuery.model_validate({**base, "limit": 0})
 
 
+def test_failed_orders_status_defaults_to_failed() -> None:
+    base = {"from": "2026-10-22T05:00:00Z", "to": "2026-10-22T06:00:00Z"}
+    assert ShopFailedOrdersQuery.model_validate(base).status == "failed"
+    assert ShopFailedOrdersQuery.model_validate({**base, "status": "timeout"}).status == "timeout"
+    with pytest.raises(ValidationError):  # 판매 서버도 그 밖의 값은 422
+        ShopFailedOrdersQuery.model_validate({**base, "status": "succeeded"})
+
+
 # ------------------------------------------------- 총괄 사건 목록 (#417 제안 A, #418)
 INCIDENT = {
     "context_id": "ctx_inc_0001",

@@ -25,6 +25,7 @@ def test_card_validates(card: AgentCard) -> None:
         "kpi_summary",
         "sales_analysis",
         "segment_options",
+        "segment_question",
         "segment_profile",
         "segment_favorites",
         "market_coverage",
@@ -161,6 +162,7 @@ def test_sales_analysis_is_a_read_for_screen_and_orchestrator(card: AgentCard) -
     ("skill_id", "model"),
     [
         ("segment_options", "SegmentOptions"),
+        ("segment_question", "SegmentQuestion"),
         ("segment_profile", "SegmentProfile"),
         ("segment_favorites", "SegmentFavorites"),
         ("market_coverage", "MarketCoverage"),

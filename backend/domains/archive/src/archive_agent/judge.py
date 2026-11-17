@@ -26,6 +26,10 @@ SKILL = "judge_step_timings"
 # (요청 메타, 단계 시간 목록) -> 판정 묶음. 판정할 수 없으면 None
 JudgeFn = Callable[[RequestMeta, list[dict[str, Any]]], Awaitable[dict[str, Any] | None]]
 
+# 판정을 카드에 저장한 뒤 반복 확인을 인사 AI에 맡긴다. (요청 메타, 이슈 번호) -> 했는지
+DiagnoseFn = Callable[[RequestMeta, str], Awaitable[bool]]
+DIAGNOSE_SKILL = "request_agent_diagnosis"
+
 
 async def judge_via_hr(meta: RequestMeta, timings: list[dict[str, Any]]) -> dict[str, Any] | None:
     deadline = min(meta.deadline, datetime.now(UTC) + timedelta(seconds=CALL_TIMEOUT_SECONDS))
@@ -50,3 +54,25 @@ async def judge_via_hr(meta: RequestMeta, timings: list[dict[str, Any]]) -> dict
         return JudgeStepTimingsOutput.model_validate(result.output).model_dump(mode="json")
     except ValueError:
         return None
+
+
+async def request_diagnosis_via_hr(meta: RequestMeta, context_id: str) -> bool:
+    """판정이 카드에 저장된 이슈를 인사 AI에 알려, 같은 단계의 확인 필요가 반복됐으면 총괄에 진단을
+    요청하게 한다. 인사가 응답하지 않아도 이슈 시각·판정 기록은 막지 않는다(실패하면 False)."""
+    deadline = min(meta.deadline, datetime.now(UTC) + timedelta(seconds=CALL_TIMEOUT_SECONDS))
+    sent = AgentRequest(
+        meta=RequestMeta(
+            context_id=meta.context_id,
+            tenant_id=meta.tenant_id,
+            token="replaced-by-call_agent",
+            path=list(meta.path),
+            deadline=deadline,
+        ),
+        skill=DIAGNOSE_SKILL,
+        input={"context_id": context_id},
+    )
+    try:
+        result = await call_agent(TARGET, sent)
+    except Exception:  # noqa: BLE001 - 반복 확인이 안 돼도 시각 기록은 막지 않는다
+        return False
+    return result.status == TaskStatus.COMPLETED

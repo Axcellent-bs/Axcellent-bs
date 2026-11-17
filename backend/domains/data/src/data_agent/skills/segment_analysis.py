@@ -58,6 +58,10 @@ LLM을 쓰지 않고 회사 상태를 바꾸지 않는다(grade read). 숫자는
   (`table_ref`: org_id·tbl_id·itm_id·prd_se, 선택 obj_l1·obj_l2(기본 ALL)·new_est_prd_cnt(기본 1)·
   unit_scale(기본 1)·label, `codes` = 속성 key → 값 code → 표 분류 코드(문자열 또는 목록)).
   가장 최근 시점 값을 더한다. 표 설정이 비면 모든 줄 population_missing "인구 통계표 설정 필요".
+  선택 `dims`(속성 key → c1·c2·itm): 속성을 항목(ITM_ID, 예: 남자·여자 인구수)에도 맞출 수 있다.
+  없으면 첫 속성 c1, 둘째 속성 c2. 쓰지 않는 칸(예: 지역)은 obj_l1 등으로 한 코드만 고른다.
+  코드 목록이 빈 값(예: 응답 안 함)은 인구가 없어 비율을 내지 않는다. 월 단위 표면
+  population_source에 기준 달("YYYY-MM 기준")을 붙이고 근거에도 남긴다
   커넥터 오류는 status error와 이유. 인구를 지어내지 않는다
 """
 
@@ -450,6 +454,7 @@ def options(cfg: CatalogSales | None, catalog_id: str, source: str | None) -> Se
         data_source=source,
         catalog_id=catalog_id,
         catalog_version=cfg.version,
+        item_noun=cfg.item_noun,
     )
 
 
@@ -684,12 +689,22 @@ def favorites_summary(out: SegmentFavoritesOutput, least: int | None = None) -> 
     if out.segment_suppressed:
         return with_source(f"{label} {who} 구매자가 {least}명 미만이라 숫자를 숨김.", out.basis)
     text = f"{label} {who} 구매자 {out.segment_buyers}명."
-    genre = next((i for i in out.internal if i.kind == "genre" and not i.suppressed), None)
-    if genre is not None and genre.lift is not None:
+    genres = [i for i in out.internal if i.kind == "genre" and not i.suppressed]
+    # 첫 문장 = 배수(전체 대비) 1위 장르, 둘째 문장 = 구매 비율 1위 장르 (같은 정렬 규칙: 큰 값 →
+    # 이름 → code)
+    by_lift = min(
+        (g for g in genres if g.lift is not None),
+        key=lambda g: (-(g.lift or 0), -(g.share or 0), g.label, g.code),
+        default=None,
+    )
+    by_share = genres[0] if genres else None  # internal은 구매 비율 큰 순
+    if by_lift is not None:
         text += (
-            f" 가장 많이 산 장르는 {genre.label} (구매자 중 {pct(genre.share)}, "
-            f"전체 대비 {genre.lift:.2f}배)."
+            f" 특히 많이 사는 장르는 {by_lift.label} (전체 대비 {by_lift.lift:.1f}배, "
+            f"구매자 중 {pct(by_lift.share)})."
         )
+    if by_share is not None:
+        text += f" 가장 많이 산 장르는 {by_share.label} (구매자 중 {pct(by_share.share)})."
     ok = [e for e in out.external if e.status == "ok"]
     if out.external:
         text += f" 바깥 출처 {len(out.external)}곳 중 {len(ok)}곳 확인."
@@ -970,25 +985,59 @@ async def population_for(
         return all_rows(
             "population_missing", f"{POPULATION_MISSING} (빠진 칸: {need or '속성 2개까지'})"
         )
-    two = len(pop.attribute_keys) == 2
+    dims = population_dims(pop)
+    if dims is None:
+        return all_rows("population_missing", f"{POPULATION_MISSING} (dims 설정 확인)")
+    use_l2 = "c2" in dims.values() or "obj_l2" in ref
     try:
         points = await kosis.statistics_data(
             str(ref["org_id"]), str(ref["tbl_id"]), str(ref["itm_id"]),
             str(ref.get("obj_l1", "ALL")), str(ref["prd_se"]),
             new_est_prd_cnt=int(ref.get("new_est_prd_cnt", 1)),
-            obj_l2=str(ref.get("obj_l2", "ALL")) if two else None,
+            obj_l2=str(ref.get("obj_l2", "ALL")) if use_l2 else None,
         )  # fmt: skip
     except ConnectorUnavailable as exc:
         return all_rows("error", f"KOSIS를 읽지 못함 ({exc.code}: {exc})")
     return _attach(pop, rows, points)
 
 
+DIMS = ("c1", "c2", "itm")  # 속성을 맞출 수 있는 통계표 칸: 첫째 분류·둘째 분류·항목(ITM_ID)
+DOUBLED = "통계표 설정 확인 필요: 같은 칸 값이 여러 개 (지역 등을 한 곳으로)"
+
+
+def population_dims(pop: PopulationSource) -> dict[str, str] | None:
+    """속성 key → 통계표 칸. `table_ref.dims`가 없으면 예전처럼 첫 속성 c1, 둘째 속성 c2.
+
+    예: 행정구역 × 연령 표에서 성별이 항목(남자·여자 인구수)이면 {"age_band": "c2", "gender":
+    "itm"}이고 행정구역은 `obj_l1`로 한 곳(예: 전국)만 고른다. 잘못된 설정이면 None.
+    """
+    raw = pop.table_ref.get("dims")
+    if raw is None:
+        return dict(zip(pop.attribute_keys, ("c1", "c2"), strict=False))
+    if not isinstance(raw, dict) or set(raw) != set(pop.attribute_keys):
+        return None
+    dims = {str(k): str(v) for k, v in raw.items()}
+    if any(v not in DIMS for v in dims.values()) or len(set(dims.values())) != len(dims):
+        return None
+    return dims
+
+
+def base_month(latest: str, prd_se: str) -> str | None:
+    """월 단위 표의 기준 달 "YYYY-MM" (예: "202610" → "2026-10"). 아니면 None."""
+    if prd_se.upper() == "M" and len(latest) == 6 and latest.isdigit():
+        return f"{latest[:4]}-{latest[4:]}"
+    return None
+
+
 def _attach(
     pop: PopulationSource, rows: list[CoverageRow], points: list[KosisDataPoint]
 ) -> list[CoverageRow]:
+    """최근 시점 값을 속성 값 코드로 더한다. 코드 목록이 비어 있는 값(예: 응답 안 함)은 인구가
+    없어 커버 비율을 내지 않는다. 쓰지 않는 칸(예: 지역)은 한 코드로 골라야 한다(겹치면 이유만)."""
     ref = pop.table_ref
     codes: dict[str, dict[str, Any]] = ref["codes"]
     scale = float(ref.get("unit_scale", 1) or 1)
+    dims = population_dims(pop) or {}
     dated = [p for p in points if p.value is not None]
     if not dated:
         return [
@@ -996,30 +1045,43 @@ def _attach(
             for r in rows
         ]
     latest = max(p.prd_de for p in dated)
-    two = len(pop.attribute_keys) == 2
-    table: dict[tuple[str, str], float] = {
-        (p.c1, p.c2 if two else ""): p.value
-        for p in dated
-        if p.prd_de == latest and p.value is not None
-    }
+    used = set(dims.values())
+
+    def cell(c1: str, c2: str, itm: str) -> tuple[str, str, str]:
+        return (c1 if "c1" in used else "", c2 if "c2" in used else "",
+                itm if "itm" in used else "")  # fmt: skip
+
+    table: dict[tuple[str, str, str], float] = {}
+    doubled = False
+    for p in dated:
+        if p.prd_de != latest or p.value is None:
+            continue
+        key = cell(p.c1, p.c2, p.itm_id)
+        doubled = doubled or key in table
+        table[key] = p.value
     label = str(ref.get("label") or dated[0].tbl_nm or "KOSIS")
+    month = base_month(latest, str(ref.get("prd_se", "")))
+    if month:
+        label = f"{label} ({month} 기준)"
     year = pop.base_year or (int(latest[:4]) if latest[:4].isdigit() else None)
     out = []
     for r in rows:
-        keys = pop.attribute_keys
-        c1 = _codes(codes.get(keys[0], {}).get(r.values[keys[0]]))
-        c2 = _codes(codes.get(keys[1], {}).get(r.values[keys[1]])) if two else [""]
         update: dict[str, Any] = {"population_source": label, "base_year": year}
-        pairs = list(itertools.product(c1, c2))
-        if not c1 or not c2:
+        per_dim = {d: [""] for d in DIMS}
+        for key, dim in dims.items():
+            per_dim[dim] = _codes(codes.get(key, {}).get(r.values[key]))
+        cells = [cell(*c) for c in itertools.product(per_dim["c1"], per_dim["c2"], per_dim["itm"])]
+        if doubled:
+            update |= {"status": "population_missing", "reason": DOUBLED}
+        elif not cells:
             update |= {
                 "status": "population_missing",
-                "reason": "이 값의 통계표 분류 코드 설정 없음",
+                "reason": "인구 통계에 없는 값이라 비율을 내지 않음",
             }
-        elif any(pair not in table for pair in pairs):
+        elif any(c not in table for c in cells):
             update |= {"status": "population_missing", "reason": "통계표에 이 조합의 값이 없음"}
         else:
-            people = round(sum(table[pair] for pair in pairs) * scale)
+            people = round(sum(table[c] for c in cells) * scale)
             update["population"] = people
             if r.buyers is not None and people > 0:
                 if r.buyers > people:
@@ -1028,6 +1090,12 @@ def _attach(
                     update["coverage"] = round(r.buyers / people, 8)
         out.append(r.model_copy(update=update))
     return out
+
+
+def population_note(out: MarketCoverageOutput) -> str:
+    """근거 한 줄: 인구 출처(기준 달 포함). 인구를 붙이지 않았으면 빈 문자열."""
+    sources = sorted({r.population_source for r in out.rows if r.population_source})
+    return f"인구 {', '.join(sources)}" if sources else ""
 
 
 def coverage_summary(out: MarketCoverageOutput) -> str:

@@ -20,6 +20,7 @@ from ax_contracts.schemas import (
     TaskCompletedData,
     TaskProgressData,
 )
+from ax_orchestrator.agent_diagnoses import AgentDiagnoses
 from ax_orchestrator.engine import Engine, ReviewOutcome, incident_metrics
 from ax_orchestrator.finance_opinions import FinanceOpinions
 from ax_orchestrator.models import Incident, Plan, iso, now
@@ -126,6 +127,7 @@ class IncidentManager:
         self.store = store
         self.incidents: dict[str, Incident] = {}
         self.finance_opinions = FinanceOpinions(store)
+        self.agent_diagnoses = AgentDiagnoses(store)
         self._seen: set[str] = set()
         self._tasks: dict[str, asyncio.Task[Incident]] = {}
 
@@ -147,6 +149,7 @@ class IncidentManager:
         if self.store is None:
             return 0
         self.finance_opinions.restore()  # 재무가 보낸 의견도 다시 올린다
+        self.agent_diagnoses.restore()  # 인사가 보낸 평가 진단 요청도 다시 올린다
         self._seen |= self.store.seen_ids()
         interrupted = 0
         for inc in self.store.load_all():

@@ -238,6 +238,7 @@ class DevService(PlanningCore):
                 try:
                     await self.sync_prs()
                     await self.recheck_ci()  # CI 실패로 멈춘 PR: 나중에 통과하면 다시 판단
+                    await self.auto_retry_stuck()  # 잠깐 생긴 오류로 멈춘 작업: 한 번 다시
                     await work_queue.expire_leases(self)  # 진행 보고가 끊긴 구독형 작업 되돌리기
                     # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
                     await dev_chat.notice_long_waits(self)
@@ -1486,6 +1487,29 @@ class DevService(PlanningCore):
         await self._apply(run)
         return len(done)
 
+    async def auto_retry_stuck(self) -> list[str]:
+        """잠깐 생긴 오류(AI 응답·GitHub 호출 한도·머지 충돌)로 멈춘 작업을 에이전트가 다시 한다.
+
+        멈춘 뒤 AUTO_RETRY_SECONDS가 지난 것만, 작업마다 AUTO_RETRY_MAX번까지. 다시 한 작업 id.
+        다시 하기는 사람 다시 시도와 같은 관문(dev_task_retry)을 지난다. 써 둔 코드가 있으면 이어서
+        쓴다 (coder 단계 저장). 횟수를 다 쓰면 사람 확인으로 남는다."""
+        due = self.clock() - timedelta(seconds=AUTO_RETRY_SECONDS)
+        ids = [
+            t.id for t in self.state.tasks
+            if t.coding is not None and t.coding.transient and t.coding.status == "failed"
+            and t.coding.mode == "agent" and t.coding.auto_retries < AUTO_RETRY_MAX
+            and not t.discarded and t.id not in self._coding
+            and (t.coding.updated_at is None or t.coding.updated_at <= due)
+        ]  # fmt: skip
+        done: list[str] = []
+        for task_id in ids:
+            try:
+                await self.retry_dev_task(task_id, auto=True)
+            except (ActionError, GateRefused):
+                continue  # 다시 할 수 없으면(예산·관문·일시 중단) 사람 확인으로 남긴다
+            done.append(task_id)
+        return done
+
     async def recheck_ci(self) -> int:
         """CI 실패·시간 초과로 사람 확인에 둔 PR의 CI를 다시 본다. 다시 판단한 PR 수.
 
@@ -2509,6 +2533,7 @@ class DevService(PlanningCore):
         connection: str | None = None,
         approved: bool = False,
         paths: list[str] | None = None,
+        auto: bool = False,
     ) -> ActionResult:
         """실패·사람 확인으로 멈췄거나 사람이 중단한 코딩 작업을 처음부터 다시 돌린다 (재개).
 
@@ -2516,7 +2541,8 @@ class DevService(PlanningCore):
         머지가 충돌로 실패한 작업만 예외: 그 PR을 닫고 최신 코드로 다시 쓴다.
         다시 돌 때 레포의 최신 코드를 다시 읽는다.
         `approved`: 사람이 generate_pr 보류 건을 승인함 → 보류 때 키로 보낸다 (같은 경로일 때).
-        `paths`: 사람이 직접 고른 고칠 파일. AI가 파일을 고르지 않고 이 파일을 바로 쓴다."""
+        `paths`: 사람이 직접 고른 고칠 파일. AI가 파일을 고르지 않고 이 파일을 바로 쓴다.
+        `auto`: 잠깐 생긴 오류 뒤 에이전트가 스스로 다시 함 (`auto_retry_stuck`). 횟수를 잇는다."""
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
@@ -2568,6 +2594,8 @@ class DevService(PlanningCore):
                 how = "보류 승인 → PR 열기"
             if paths:
                 how = f"사람이 고른 파일 {len(picked)}개로 다시 쓰기"
+            if auto:
+                how = f"잠깐 생긴 오류 → 에이전트가 다시 시도 ({x.coding.error or ''})"
             if x.coding.merge_conflict:
                 how = "충돌 → 최신 코드로 다시 쓰기"
                 for pr in [p for p in s.prs if p.task == task_id and not p.closed]:
@@ -2591,6 +2619,7 @@ class DevService(PlanningCore):
                 hold_paths=x.coding.hold_paths, hold_ok=approved and x.coding.hold_key is not None,
                 text_warnings=x.coding.text_warnings, text_ok_by=x.coding.text_ok_by,
                 picked=picked,
+                auto_retries=x.coding.auto_retries + 1 if auto else 0,
             )  # fmt: skip
             x.state = "진행 중"
             s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_retry", "A2A", text, "A"))
@@ -3412,7 +3441,8 @@ class DevService(PlanningCore):
                     )  # fmt: skip
                     cr.merge_conflict = fail is not None and vcs_bridge.CONFLICT_MARK in fail.text
                     if cr.merge_conflict:
-                        cr.error = f"{p.id} 머지 충돌 → 다시 시도하면 PR을 닫고 최신 코드로 다시 씀"
+                        cr.error = f"{p.id} 머지 충돌 → 에이전트가 PR을 닫고 최신 코드로 다시 씀"
+                        cr.transient = True  # auto_retry_stuck이 한 번 다시 쓴다
                     elif fail is not None:
                         cr.error = f"{fail.text} → 사람 머지 버튼으로 다시 시도"
                     else:
@@ -3955,6 +3985,9 @@ WAIT_POLL_SECONDS = 30  # 다른 서비스 요청을 기다리는 대화를 다�
 
 
 PR_SYNC_SECONDS = 60  # 형상관리에서 직접 머지·닫은 PR을 맞추는 간격
+
+AUTO_RETRY_SECONDS = 60  # 잠깐 생긴 오류로 멈춘 뒤 에이전트가 다시 하기까지 기다리는 시간
+AUTO_RETRY_MAX = 1  # 작업마다 에이전트가 스스로 다시 하는 횟수 (넘으면 사람 확인)
 
 
 def _cross_check_timeout_min() -> int:

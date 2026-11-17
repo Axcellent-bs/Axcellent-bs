@@ -20,6 +20,10 @@ export interface ImpactOutput {
   unpaid_amount?: number | null;
   by_category?: CategoryImpact[] | null;
   summary?: string | null;
+  /** 장애 구간에 시간 초과로 남은 결제(확인·환불 필요) 건수·금액. 실패 주문·미결제와 따로 센다.
+   *  셀 수 없으면 null, 예전 응답에는 없다 */
+  timeout_count?: number | null;
+  timeout_amount?: number | null;
 }
 export interface RecoveryOutput { recovered?: boolean | null; infra_metrics_ok?: boolean | null; business_metrics_ok?: boolean | null }
 
@@ -116,6 +120,14 @@ export const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v 
 export const count = (n: unknown, unit: string) => {
   const v = num(n);
   return v == null ? UNKNOWN : `${v.toLocaleString("ko-KR")}${unit}`;
+};
+
+/** 시간 초과로 남은 결제: "2건 · 48,000원". 건수나 금액 중 하나라도 모르면 null(화면은 "확인할 수 없음") */
+export const timeoutPayments = (impact: ImpactOutput | null | undefined): string | null => {
+  const n = num(impact?.timeout_count);
+  const amount = num(impact?.timeout_amount);
+  if (n == null || amount == null) return null;
+  return `${n.toLocaleString("ko-KR")}건 · ${Math.round(amount).toLocaleString("ko-KR")}원`;
 };
 
 /** 걸린 시간: 4.78 → "4.8초", 540 → "9분", 570 → "9분 30초" */
@@ -220,6 +232,17 @@ export interface SegmentOptionsOutput {
   data_source: string | null;
   catalog_id: string;
   catalog_version: string | null;
+  /** 화면에 쓰는 품목 이름 (예: 책·게임). 예전 서버면 없음 → "상품" */
+  item_noun?: string;
+}
+/** 글 질문 → 고르는 칸 값 (segment_question). LLM은 segment_options 보기 안의 code만 고른다 */
+export interface SegmentQuestionOutput {
+  status: "ok" | "unparsed";
+  filters: Record<string, string>;
+  genre_code: string | null;
+  period: SegmentPeriod | null;
+  understood_label: string;
+  reason: string;
 }
 export interface SegmentShare {
   value_code: string; label: string; target_share: number | null; overall_share: number | null;
@@ -282,7 +305,10 @@ export interface EventProposalItem {
 export interface EventProposalOutput {
   status: "ok" | "insufficient"; insufficient_reasons: string[]; month: string;
   proposals: EventProposalItem[]; quality: SalesQuality; basis: SalesBasis | null; summary: string;
+  /** 기준(시즌 배수·예상 주문)에 못 미쳐 뺀 후보. 예전 서버면 없음 */
+  excluded?: ExcludedProposal[];
 }
+export interface ExcludedProposal { target_label: string; item_label: string; reason: string }
 export interface EventProposalSendOutput { outcome: "created" | "duplicate" | "rejected"; proposal_ref: string | null; reason: string }
 export interface SalesAnalysisOutput {
   period: SalesPeriod;
@@ -1981,6 +2007,7 @@ export const dataAi = {
   salesAnalysis: (period: SalesPeriod) => askData<SalesAnalysisOutput>("sales_analysis", "매출 분석", { period }),
   // 고객·시장 분석. skill이 아직 없으면 서버가 거절(FORBIDDEN_SKILL·403)하고 화면은 그 칸만 "준비 중"
   segmentOptions: () => askData<SegmentOptionsOutput>("segment_options", "분석 선택지"),
+  segmentQuestion: (text: string) => askData<SegmentQuestionOutput>("segment_question", "글 질문 읽기", { text }),
   segmentFavorites: (filters: Record<string, string>, period: SegmentPeriod) =>
     askData<SegmentFavoritesOutput>("segment_favorites", "집단이 좋아하는 것", { filters, period }),
   segmentProfile: (target_kind: SegmentTargetKind, target_code: string, period: SegmentPeriod) =>

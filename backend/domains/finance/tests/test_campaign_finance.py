@@ -18,7 +18,8 @@ from finance_agent.simulation.engine import funnel, load_scenario, render_report
 from finance_agent.sources import MockSources
 
 TODAY = date(2026, 10, 15)
-RULE_IDS = {"BRK-001", "BRK-002", "BRK-003", "BRK-004", "BRK-005"}
+# CRX-001(고객 반응)은 상품이 없는 요청에도 "해당 없음"으로 항상 남는다 (태윤 11/17)
+RULE_IDS = {"BRK-001", "BRK-002", "BRK-003", "BRK-004", "BRK-005", "CRX-001"}
 
 
 class _AnyStarted(dict):

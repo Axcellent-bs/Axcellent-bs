@@ -1,10 +1,10 @@
 import { writeAuth } from "./api";
-import { DASHBOARD_API_URL, RELAY_API_URL } from "./env";
+import { DASHBOARD_API_URL } from "./env";
 import { MARKETING_HOLD_ACTIONS, finance, type ExecutionRecord, type Review } from "./finance";
 import { shortDateTime } from "./format";
 
 // 마케팅 AI 화면의 실제 데이터.
-// - 쇼핑몰(shop-api) GET /api/shop/banners: 지금 캣북스에 걸린 공지 배너. 고객 화면용이라 토큰이 없다.
+// - 쇼핑몰(shop-api) GET /api/shop/banners: 지금 캣북스에 걸린 공지 배너. dashboard-api(/api/dashboard/shop/banners)가 회사 연결 주소로 대신 읽는다.
 // - 안전 장치(safety) GET /api/safety/executions: 마케팅 AI가 요청한 공지 게시·쿠폰 발급 기록(등급·금액).
 // - 안전 장치 GET /api/safety/reviews: 사람 결정을 기다리는 보류 건.
 // - dashboard-api GET /api/dashboard/incidents: 사건 이름(구성요소·시작 시각)을 붙이는 데만 쓴다.
@@ -166,7 +166,8 @@ function groupCoupons(coupons: CouponRun[]): CouponGroup[] {
 
 export async function loadMarketingLive(): Promise<MarketingLive> {
   const [banners, executions, reviews, incidents] = await Promise.allSettled([
-    getJson<ShopBanner[]>(`${RELAY_API_URL}/api/shop/banners`, "캣북스 쇼핑몰 서버"),
+    // 판매 서버는 dashboard-api가 회사 연결 주소로 대신 읽는다
+    getJson<ShopBanner[]>(`${DASHBOARD_API_URL}/api/dashboard/shop/banners`, "캣북스 쇼핑몰 공지 중계"),
     finance.executions(),
     finance.reviews(),
     getJson<IncidentLite[]>(`${DASHBOARD_API_URL}/api/dashboard/incidents`, "화면 중계 서버"),

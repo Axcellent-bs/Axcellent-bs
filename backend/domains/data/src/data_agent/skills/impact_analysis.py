@@ -16,6 +16,14 @@ LLM은 `summary` 문장만 쓰며, 숫자가 어긋나면 고정 템플릿으로
 - 지난 7일 자료가 없거나 읽지 못하면 None(확인할 수 없음). 결제 수를 주지 않는 클라이언트(목)도 None
 - 계산된 초과분과 평소 실패 수(소수 둘째 자리)는 LLM 설명의 facts에도 넣는다. 그래서 설명이 이 두
   숫자를 써도 통과하고, 계산에 없는 숫자는 계속 막는다(`explain._numbers_valid`). 모르면 넣지 않는다
+
+시간 초과 결제(`timeout_count`·`timeout_amount`): 결제사 응답이 끊겨 승인됐는지 모르고 아직 다시
+확인 전인 결제(확인·환불 필요)다. 실패 주문·미결제·영향 고객과 따로 센다(앞 숫자는 바뀌지 않는다).
+- 커넥터 `timeout_payments`(shop-api `/failed-orders?status=timeout`)가 있을 때만 부른다
+- 셀 수 없으면(커넥터에 없음·예전 판매 서버·422 등 오류·잘림) None이고 이유 한 줄을 근거에 적는다
+- 센 값은 설명 facts에도 넣어 설명이 이 숫자를 써도 통과한다
+- 구간은 영향 구간 그대로 보낸다. 판매 서버는 결제 시도 시각 [from, to)로 센다(재무
+  `incident_timeout_payments`는 [start, end]로 끝 시각을 넣는다)
 """
 
 from __future__ import annotations
@@ -109,11 +117,15 @@ def _category_distribution(orders: list) -> list[CategoryImpact]:
 
 
 def impact_facts(
-    counts: ImpactCounts, excess: int | None, usual: float | None
+    counts: ImpactCounts,
+    excess: int | None,
+    usual: float | None,
+    timeout: tuple[int, int] | None = None,
 ) -> dict[str, int | float | str]:
     """영향 설명에 넘기는 숫자 (설명이 쓸 수 있는 숫자는 이것뿐이다).
 
-    초과분·평소 실패 수는 계산했을 때만 넣는다. 평소 실패 수는 근거 문장과 같은 소수 둘째 자리다.
+    초과분·평소 실패 수·시간 초과 결제(건수, 금액)는 계산했을 때만 넣는다. 평소 실패 수는 근거
+    문장과 같은 소수 둘째 자리다.
     """
     facts: dict[str, int | float | str] = {
         "failed_order_count": counts.failed_order_count,
@@ -124,7 +136,33 @@ def impact_facts(
         facts["excess_failed_order_count"] = excess
     if usual is not None:
         facts["usual_fault_failures"] = round(usual, 2)
+    if timeout is not None:
+        facts["timeout_count"], facts["timeout_amount"] = timeout
     return facts
+
+
+async def _timeouts(
+    connector: Connector, data: ImpactAnalysisInput, tenant_id: str
+) -> tuple[tuple[int, int] | None, str]:
+    """장애 구간에 시간 초과로 남은 결제 (건수, 금액)와 근거 한 줄. 모르면 (None, 이유).
+
+    커넥터의 `timeout_payments`(캣북스 shop-api 커넥터에만 있다)로 센다. 없으면 확인할 수 없음이다.
+    셀 수 없으면 커넥터가 `ConnectorUnavailable`을 내고 그 메시지가 이유다(숫자를 지어내지 않는다).
+    실패 주문·미결제·영향 고객과 섞지 않고 따로 센다.
+    """
+    word = catalog.denominator_label()  # 캣북스: 결제 → "시간 초과로 남은 결제"
+    label = f"시간 초과로 남은 {word}"
+    counter = getattr(connector, "timeout_payments", None)
+    if counter is None:
+        return None, f"{label}: 확인할 수 없음 (이 커넥터에 시간 초과 {word} 조회가 없음)"
+    try:
+        count, amount = await counter(
+            data.window_from, data.window_to, tenant_id, category=data.category
+        )
+    except ConnectorUnavailable as error:
+        return None, f"{label}: 확인할 수 없음 ({error})"
+    unit = catalog.current().impact.money_unit
+    return (count, amount), f"{label} {count}건, {amount}{unit}"
 
 
 async def analyze_impact(
@@ -170,7 +208,8 @@ async def analyze_impact(
 
     usual, usual_note = await _usual(conn, data, tenant_id)
     excess = excess_failures(counts.failed_order_count, usual)
-    explanation = await explain("impact", impact_facts(counts, excess, usual), llm)
+    timeout, timeout_note = await _timeouts(conn, data, tenant_id)
+    explanation = await explain("impact", impact_facts(counts, excess, usual, timeout), llm)
     text = explanation.summary
     if excess is not None:
         text = f"{text} 평소보다 {excess}건 많음."
@@ -183,6 +222,8 @@ async def analyze_impact(
         by_category=by_category,
         summary=text,
         excess_failed_order_count=excess,
+        timeout_count=timeout[0] if timeout else None,
+        timeout_amount=timeout[1] if timeout else None,
     )
     condition = (
         f"shop_failed_orders from={data.window_from.isoformat()} "
@@ -197,6 +238,7 @@ async def analyze_impact(
         f"카테고리 {len(by_category)}개"
     )
     summary += f"\n{usual_note}" + (f", 초과분 {excess}건" if excess is not None else "")
+    summary += f"\n{timeout_note}"
     for name, count in sorted(split.excluded.items()):
         summary += f"\n{name} {count}건은 장애 피해에서 제외"
     if result.truncated:
