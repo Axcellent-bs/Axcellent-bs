@@ -237,6 +237,40 @@ def net_of(adjustment: dict[str, Any]) -> int:
     return next((x["diff"] for x in adjustment["lines"] if x["code"] == "net_result"), 0)
 
 
+def before_source_switch(confirmation: dict[str, Any] | None) -> bool:
+    """판매 자료를 바꾸기 전에 확정한 결산인가 (`[sales_source] switched_at`).
+
+    바꾼 시각이 아직 오지 않았으면(지금이 그 전이면) 적용하지 않는다.
+    """
+    switched = fc.load_config().sales_source.switched_at
+    if not confirmation or switched is None or not confirmation.get("at"):
+        return False
+    if fc.now() < switched:
+        return False
+    at = fc.parse_dt(confirmation["at"])
+    return at is not None and at < switched
+
+
+def usable_snapshot(confirmation: dict[str, Any] | None) -> dict[str, Any] | None:
+    """보고·비교에 쓸 확정 숫자. 판매 자료를 바꾸기 전에 확정했으면 None(지금 숫자로 계산)."""
+    if not confirmation or before_source_switch(confirmation):
+        return None
+    return confirmation.get("snapshot")
+
+
+def source_switch_info(confirmation: dict[str, Any] | None) -> dict[str, Any] | None:
+    """화면 안내용. 판매 자료 교체 전에 확정한 결산이면 바꾼 시각·이유와 확정 당시 숫자를 준다."""
+    if not before_source_switch(confirmation):
+        return None
+    cfg = fc.load_config().sales_source
+    snap = (confirmation or {}).get("snapshot") or {}
+    return {
+        "switched_at": fc.iso(cfg.switched_at) if cfg.switched_at else None,
+        "note": cfg.note,
+        "confirmed_lines": snap.get("lines", []),
+    }
+
+
 def snapshot_of(
     report: dict[str, Any], books: Books, statement_column: dict[str, Any]
 ) -> dict[str, Any]:
@@ -262,7 +296,7 @@ def find_drifts(
     out = []
     unknown = unknown_codes(books)
     for (period, day), confirmation in closings.items():
-        snap = confirmation.get("snapshot")
+        snap = usable_snapshot(confirmation)  # 판매 자료 교체 전 확정은 비교하지 않는다
         if not snap:
             continue
         start, end = period_range(period, date.fromisoformat(day))  # type: ignore[arg-type]
@@ -478,8 +512,10 @@ async def closing_report(
     label = period_label(period, d, fc.today())
     shown_date = d if period == "day" else start_d
     current = lines(t, unknown)
-    snap = (confirmation or {}).get("snapshot")
-    if snap:  # 확정한 숫자를 그대로 쓴다. 지금 숫자와 다르면 차이를 따로 보여 준다
+    # 확정한 숫자를 그대로 쓴다. 지금 숫자와 다르면 차이를 따로 보여 준다.
+    # 판매 자료를 바꾸기 전에 확정했으면 지금 숫자를 보이고 확정 당시 숫자는 안내로만 준다
+    snap = usable_snapshot(confirmation)
+    if snap:
         shown, journal_lines = snap["lines"], snap["journal"]
         commentary, source = snap["commentary"], snap["commentary_source"]
         warnings = snap["close_warnings"]
@@ -508,6 +544,7 @@ async def closing_report(
         "confirmed_by": confirmation["by"] if confirmation else None,
         "confirmed_at": confirmation["at"] if confirmation else None,
         "snapshot_at": snap["taken_at"] if snap else None,
+        "source_switch": source_switch_info(confirmation),
         "drift": drift,
         "adjustment_proposal": (
             {

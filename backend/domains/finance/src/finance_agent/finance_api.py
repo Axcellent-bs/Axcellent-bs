@@ -734,6 +734,15 @@ def add_finance_api(app: FastAPI) -> None:
         confirmation = records.get(key)
         if confirmation is None or not confirmation.get("snapshot"):
             return error(404, "not_confirmed", "숫자를 저장해 확정한 달이 아니다")
+        if closing.before_source_switch(confirmation):
+            # 판매 자료가 통째로 바뀐 것은 조정할 차이가 아니다.
+            # 새 판매 자료로 보려면 확정을 취소하고 다시 확정한다
+            return error(
+                409,
+                "source_switched",
+                "판매 자료를 바꾸기 전에 확정한 달이다. "
+                "확정을 취소하고 새 판매 자료로 다시 확정한다",
+            )
         books = await state().fresh_books()
         report = await closing.closing_report(books, "month", d, confirmation, records)
         proposal = report["adjustment_proposal"]
