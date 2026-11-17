@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-// 연결 화면들(회사 연결 /system/connect, 연결 /connections)이 같이 쓰는 계층 부품.
+// 연결 화면들(회사 연결 /system/connect, 도구 연결 /system/tools)이 같이 쓰는 계층 부품.
 // 계층: 페이지 제목(한 줄 요약) › 구역 제목(+상태) › 카드(핵심 값은 크게, 보조 사실은 흐리게) › 도움말(펼침).
 // 상태는 말로 쓴다(연결됨·확인 전·끊김). 색은 같은 뜻에 같은 색만 쓴다.
 

@@ -181,8 +181,10 @@ export const SERVICES: Service[] = [
 /** 서비스를 맡은 AI 이름 (DejaFix 서비스는 없음) */
 export const agentName = (s: Service) => AGENTS.find((g) => g.id === s.agent)?.name
 
-/** 서비스를 고르지 않아도 모두 쓰는 화면. 할 일함은 꺼진 서비스로 가던 일이 사람에게 쌓이는 곳이라 어느 서비스를 샀든 보인다 */
-export const SHARED_PATHS = ['/handoffs', '/agents/chat', '/agents/office', '/connections']
+/** 서비스를 고르지 않아도 모두 쓰는 화면. 할 일함은 꺼진 서비스로 가던 일이 사람에게 쌓이는 곳이라 어느 서비스를 샀든 보인다.
+ *  도구 연결(/system/tools)은 시스템 관리 아래지만 모두 연다(회사 공용 연결은 관리자만 바꾼다).
+ *  /connections·/system/devtools는 도구 연결로 넘기는 예전 주소 (노션 계정 연결이 /connections?notion=…로 돌아온다) */
+export const SHARED_PATHS = ['/handoffs', '/agents/chat', '/agents/office', '/system/tools', '/connections', '/system/devtools']
 
 export const matchPath = (base: string, path: string) =>
   base === '/' ? path === '/' : path === base || path.startsWith(`${base}/`)

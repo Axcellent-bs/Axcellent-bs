@@ -398,7 +398,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       {rec && (
         <p className={rec.who === 'agent' ? 'muted small' : 'small'} role="status">
           <b>{rec.who === 'agent' ? '에이전트가 이어서 해요' : '다음 할 일'}</b> · {rec.say}
-          {rec.actions.includes('connect') && <> <Link href="/connections" className="plain-link">연결 화면</Link></>}
+          {rec.actions.includes('connect') && <> <Link href="/system/tools" className="plain-link">도구 연결</Link></>}
           {rec.actions.includes('reviews') && <> <a href={toPath('work/reviews')} className="plain-link">AI 교차검증</a></>}
         </p>
       )}

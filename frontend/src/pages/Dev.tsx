@@ -53,11 +53,11 @@ function DevTools({ v }: { v: View }) {
         <button type="button" className="chip amber" onClick={() => { chat.select(chat.working[0]); setChatOpen(true) }}>AI 작업 중 {chat.working.length}</button>
       )}
       <button type="button" className="btn-primary px-3 py-1" disabled={!connected} title={connected ? '개발 에이전트' : '개발·배포 서버 꺼짐'} onClick={() => setChatOpen(true)}>AI와 대화</button>
-      <Link href="/connections" className="btn-quiet px-2 py-1" title="연결 (형상관리·AI)" aria-label="연결 (형상관리·AI)">
+      <Link href="/system/tools" className="btn-quiet px-2 py-1" title="도구 연결 (형상관리·배포·AI)" aria-label="도구 연결 (형상관리·배포·AI)">
         <IconLink size={20} />
       </Link>
       {chatOpen && (
-        <ChatPanel s={state} chat={chat} connected={connected} onClose={() => setChatOpen(false)} onTools={() => { setChatOpen(false); router.push('/connections') }} />
+        <ChatPanel s={state} chat={chat} connected={connected} onClose={() => setChatOpen(false)} onTools={() => { setChatOpen(false); router.push('/system/tools') }} />
       )}
     </>
   )
