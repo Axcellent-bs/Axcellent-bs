@@ -5,7 +5,7 @@ import { Link } from "@/lib/nav";
 import { orchestrator, type FinanceOpinionRow } from "@/lib/orchestrator";
 
 // 총괄 화면의 "재무가 낸 의견": 재무 AI가 A2A(receive_finance_opinion)로 보낸 의견을 총괄이 받은 그대로 보여 준다.
-// 총괄은 보관만 하고 일을 시키지 않는다. 숫자는 재무가 보낸 값 그대로다. 원본과 자세한 근거는 재무 화면 캠페인 재무에 있다.
+// 총괄은 보관만 하고 일을 시키지 않는다. 숫자는 재무가 보낸 값 그대로다. 원본과 자세한 근거는 재무 화면 캠페인 예산에 있다.
 
 const KIND: Record<FinanceOpinionRow["opinion"]["kind"], { label: string; tone: string }> = {
   campaign_result: { label: "캠페인 손익", tone: "bg-sky-50 text-sky-800" },
@@ -33,7 +33,7 @@ export function FinanceOpinionsCard({ tick = 0 }: { tick?: number }) {
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h2 id="orch-finance" className="text-lg font-semibold">재무가 낸 의견</h2>
         {rows && <span className="text-sm tabular-nums text-ink-500">받은 의견 {rows.length}건</span>}
-        <Link href="/finance/daily#campaigns" className="ml-auto text-sm font-medium text-brand-700 underline underline-offset-2">재무 화면 캠페인 재무에서 근거 보기 →</Link>
+        <Link href="/finance/daily#campaigns" className="ml-auto text-sm font-medium text-brand-700 underline underline-offset-2">재무 화면 캠페인 예산에서 근거 보기 →</Link>
       </div>
       <p className="text-sm text-ink-500">재무 AI가 캠페인 결과, 줄이거나 권하지 않은 예산, 놓치기 쉬운 패턴을 총괄 AI에 알립니다. 총괄 AI는 받아 두기만 하고, 집행 여부는 사람과 안전규칙이 정합니다.</p>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}

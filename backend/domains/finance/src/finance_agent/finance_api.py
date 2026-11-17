@@ -1487,6 +1487,8 @@ def add_finance_api(app: FastAPI) -> None:
                     records.campaigns.values(), key=lambda c: c["period_to"], reverse=True
                 ),
                 "running": running,
+                # 콘텐츠 카테고리별 조회당 제작비 (CMP-007). 7일 조회수를 잰 캠페인만
+                "categories": cp.category_view_costs(records.campaigns),
                 "reviews": list(reversed(records.budget_reviews)),
                 "lessons": list(reversed(records.lessons)),
                 "opinions": list(reversed(records.opinions)),

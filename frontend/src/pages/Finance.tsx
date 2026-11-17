@@ -42,7 +42,7 @@ const TAB_LABEL: Record<FinanceTab, string> = {
   settlements: "③ 판매자 정산",
   policy: "④ 팀 예산",
   tax: "⑤ 세무 지원",
-  campaigns: "⑥ 캠페인 재무",
+  campaigns: "⑥ 캠페인 예산",
   cash: "⑦ 자금·현금 흐름",
 };
 

@@ -88,6 +88,9 @@ class InsightRules(_Strict):
     overrun_window_days: int = Field(ge=1)
     overrun_min_count: int = Field(ge=1)
     tax_deadline_warn_days: int = Field(ge=0)
+    shift_min_categories: int = Field(ge=2)
+    shift_min_ratio: float = Field(gt=1)
+    shift_pct: float = Field(gt=0, lt=1)
 
 
 class Bracket(_Strict):

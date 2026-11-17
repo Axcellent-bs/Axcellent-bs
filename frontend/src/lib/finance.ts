@@ -98,7 +98,7 @@ export interface BankImport {
 }
 export interface ExportsView { packages: ExportPackage[]; bank_imports: BankImport[] }
 
-// 캠페인 재무: 손익 기록, 예산 판단, 실패 교훈, 총괄에 낸 의견
+// 캠페인 예산: 손익 기록, 예산 판단, 실패 교훈, 총괄에 낸 의견
 export type CampaignVerdict = "good" | "neutral" | "bad";
 export type BudgetDecision = "approved" | "conditional" | "rejected";
 export interface CampaignRecord {
@@ -106,6 +106,15 @@ export interface CampaignRecord {
   spend_krw: number; coupon_krw: number; gmv_krw: number | null; orders?: number | null; measured_gmv_krw?: number | null; measured_orders?: number | null; effect_generated_at?: string | null; revenue_krw: number | null; profit_krw: number | null;
   roi: number | null; roas: number | null; ltv_profit_krw: number | null; verdict: CampaignVerdict | null; status: "recorded" | "waiting_revenue"; source: string;
   applied_rules: AppliedRule[];
+  // 콘텐츠 카테고리별 예산 (11/17, 옛 기록에는 없다)
+  content_category?: string | null; format?: "shorts" | "reels" | null; production_cost_krw?: number | null;
+  views?: number | null; views_point?: "1h" | "1d" | "3d" | "7d" | null;
+  cost_per_view?: number | null; view_cost_status?: "measured" | "measuring" | "no_views" | "no_production_cost" | "zero_views";
+}
+/** 콘텐츠 카테고리별 조회당 제작비 (CMP-007). 게시 7일 조회수를 잰 캠페인만 합한다 */
+export interface CategoryViewCost {
+  content_category: string; campaigns: string[]; production_cost_krw: number; views: number;
+  measuring: number; latest_production_krw: number | null; cost_per_view: number | null;
 }
 export interface BudgetReview {
   review_id: string; campaign_id: string; campaign_name: string; channel: string; requested_krw: number; approved_limit_krw: number;
@@ -121,10 +130,13 @@ export interface CampaignView {
   budget: { month: string; monthly_krw: number; provisional: boolean; basis: string; committed_krw: number | null };
   running: { campaign_id: string; active_krw: number }[];
   break_even_roas: number | null;
+  categories?: CategoryViewCost[];
 }
 export interface FinanceInsight {
   insight_id: string; kind: string; severity: "warn" | "info"; title: string; message: string;
   evidence: { label: string; value: string | number | null }[]; recommendation: string; applied_rules: AppliedRule[];
+  // budget_shift(INS-005)만: 다음 회차 제작비를 어느 카테고리에서 어디로 얼마 옮길지
+  shift?: { from: string; to: string; amount_krw: number; ratio: number };
 }
 
 /** 쇼핑몰 장부에 없는 월 손익. 재무 담당이 입력한다 */
@@ -847,7 +859,7 @@ export const FINANCE_SECTION_TAB: Record<string, FinanceTab> = {
   deadlines: "settlements", payables: "settlements", "seller-transfers": "settlements",
   "team-budget": "policy",
   "tax-vat": "tax", "tax-seller-report": "tax", "tax-income": "tax", "tax-exports": "tax", "tax-rules": "tax",
-  "campaign-pnl": "campaigns", "campaign-reviews": "campaigns", "campaign-lessons": "campaigns", "campaign-insights": "campaigns", "campaign-opinions": "campaigns",
+  "campaign-pnl": "campaigns", "campaign-categories": "campaigns", "campaign-reviews": "campaigns", "campaign-lessons": "campaigns", "campaign-insights": "campaigns", "campaign-opinions": "campaigns",
   cashflow: "cash",
   "support-costs": "closing",
   // 옛 ⑧ 요청·기록 탭 주소 → 평상시 업무 첫 탭 (탭 밖 섹션은 PAGE_ANCHORS로 그 자리로 내려간다)

@@ -94,13 +94,19 @@ def compute_result(data: dict[str, Any], repeat: dict[str, Any] | None = None) -
     cfg = fc.load_config()
     book = load_rules().campaign
     spend, coupon, gmv = data["spend_krw"], data.get("coupon_krw") or 0, data.get("gmv_krw")
+    production = data.get("production_cost_krw") or 0
     record = {
         **data,
         "coupon_krw": coupon,
         "commission_rate": cfg.commission.default_rate,
         "pg_fee_rate": cfg.pg.fee_rate,
         "break_even_roas": break_even_roas(),
-        "expense_classes": {"spend_krw": "광고선전비", "coupon_krw": "매출 차감"},
+        "expense_classes": {
+            "spend_krw": "광고선전비",
+            "production_cost_krw": "광고선전비(제작비)",
+            "coupon_krw": "매출 차감",
+        },
+        **view_cost(data),
     }
     if gmv is None:
         return record | {
@@ -119,9 +125,9 @@ def compute_result(data: dict[str, Any], repeat: dict[str, Any] | None = None) -
         }
     revenue = fc.rate_amount(gmv, cfg.commission.default_rate)
     pg_fee = fc.rate_amount(gmv, cfg.pg.fee_rate)
-    cost = spend + coupon + pg_fee
+    cost = spend + production + coupon + pg_fee
     profit = revenue - cost
-    invested = spend + coupon
+    invested = spend + production + coupon
     roi = round(profit / invested, 4) if invested else None
     roas = round(gmv / spend, 2) if spend else None
     if roi is None:
@@ -162,8 +168,9 @@ def compute_result(data: dict[str, Any], repeat: dict[str, Any] | None = None) -
             ),
             applied(
                 "CMP-002",
-                f"광고비 {fc.won(spend)} + 쿠폰 {fc.won(coupon)} + PG {fc.won(pg_fee)} "
-                f"= {fc.won(cost)}",
+                f"광고비 {fc.won(spend)}"
+                + (f" + 제작비 {fc.won(production)}" if production else "")
+                + f" + 쿠폰 {fc.won(coupon)} + PG {fc.won(pg_fee)} = {fc.won(cost)}",
             ),
             applied("CMP-003", f"손익 {fc.won(profit)}, ROI {_pct(roi)}"),
             applied(
@@ -175,6 +182,27 @@ def compute_result(data: dict[str, Any], repeat: dict[str, Any] | None = None) -
             applied("EXP-002"),
         ],
     }
+
+
+VIEWS_FINAL_POINT = "7d"  # 조회당 제작비는 게시 7일 조회수로만 낸다 (CMP-007)
+
+
+def view_cost(data: dict[str, Any]) -> dict[str, Any]:
+    """조회당 제작비 (CMP-007). 제작비·조회수가 없거나 7일 측정 전이면 계산하지 않고 이유를 둔다."""
+    production, views, point = (
+        data.get("production_cost_krw"),
+        data.get("views"),
+        data.get("views_point"),
+    )
+    if production is None:
+        return {"cost_per_view": None, "view_cost_status": "no_production_cost"}
+    if views is None or point is None:
+        return {"cost_per_view": None, "view_cost_status": "no_views"}
+    if point != VIEWS_FINAL_POINT:
+        return {"cost_per_view": None, "view_cost_status": "measuring"}
+    if views == 0:
+        return {"cost_per_view": None, "view_cost_status": "zero_views"}
+    return {"cost_per_view": round(production / views, 2), "view_cost_status": "measured"}
 
 
 def _pct(value: float | None) -> str:
@@ -615,6 +643,120 @@ def _evidence(label: str, value: Any) -> dict[str, Any]:
     return {"label": label, "value": value}
 
 
+def category_view_costs(campaigns: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """콘텐츠 카테고리별 조회당 제작비 (CMP-007). 7일 조회수를 잰 캠페인만 모은다.
+
+    카테고리마다 제작비·조회수를 합해 나눈다(캠페인마다 나눈 값의 평균이 아니다).
+    `latest_production_krw`는 그 카테고리 가장 최근 캠페인의 제작비로, 다음 회차 기준이 된다.
+    측정 중인 캠페인은 `measuring`에 센다. 조회당 제작비가 싼 순서다.
+    """
+    rows: dict[str, dict[str, Any]] = {}
+    for c in sorted(campaigns.values(), key=lambda c: (c["period_to"], c["campaign_id"])):
+        category = c.get("content_category")
+        if not category:
+            continue
+        row = rows.setdefault(
+            category,
+            {
+                "content_category": category,
+                "campaigns": [],
+                "production_cost_krw": 0,
+                "views": 0,
+                "measuring": 0,
+                "latest_production_krw": None,
+            },
+        )
+        if c.get("view_cost_status") == "measuring":
+            row["measuring"] += 1
+        if c.get("cost_per_view") is None:
+            continue
+        row["campaigns"].append(c["campaign_id"])
+        row["production_cost_krw"] += c["production_cost_krw"]
+        row["views"] += c["views"]
+        row["latest_production_krw"] = c["production_cost_krw"]
+    out = []
+    for row in rows.values():
+        views = row["views"]
+        row["cost_per_view"] = round(row["production_cost_krw"] / views, 2) if views else None
+        out.append(row)
+    return sorted(
+        out,
+        key=lambda r: (r["cost_per_view"] is None, r["cost_per_view"] or 0, r["content_category"]),
+    )
+
+
+def budget_shift(campaigns: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    """INS-005: 조회당 제작비가 싼 카테고리로 다음 회차 제작비를 옮기자는 의견. 총액은 그대로다.
+
+    재무는 의견만 낸다. 다음 회차 비중은 기획이 제안하고 사람이 정한다.
+    """
+    cfg = load_rules().insights
+    measured = [r for r in category_view_costs(campaigns) if r["cost_per_view"] is not None]
+    if len(measured) < cfg.shift_min_categories:
+        return None
+    best, worst = measured[0], measured[-1]
+    cheap, dear = best["cost_per_view"], worst["cost_per_view"]
+    if cheap <= 0 or dear < cheap * cfg.shift_min_ratio:
+        return None
+    amount = min(
+        round(best["latest_production_krw"] * cfg.shift_pct), worst["latest_production_krw"]
+    )
+    if amount <= 0:
+        return None
+    ratio = round(worst["cost_per_view"] / best["cost_per_view"], 1)
+    latest = max(best["campaigns"][-1], worst["campaigns"][-1])
+    return {
+        "insight_id": (
+            f"budget_shift:{best['content_category']}:{worst['content_category']}:{latest}"
+        ),
+        "kind": "budget_shift",
+        "severity": "info",
+        "title": (
+            f"{best['content_category']} 조회당 제작비가 {worst['content_category']}의 "
+            f"1/{ratio}입니다"
+        ),
+        "message": (
+            f"게시 7일 조회수 기준으로 {best['content_category']}는 조회 1회에 "
+            f"{best['cost_per_view']:,}원, {worst['content_category']}는 "
+            f"{worst['cost_per_view']:,}원이 들었습니다. 다음 회차 제작비를 옮기면 "
+            "같은 돈으로 조회수를 더 얻을 수 있습니다. 총 제작비는 늘리지 않습니다."
+        ),
+        "evidence": [
+            *[
+                _evidence(
+                    r["content_category"],
+                    f"제작비 {fc.won(r['production_cost_krw'])} ÷ 7일 조회수 "
+                    f"{r['views']:,}회 = 조회당 {r['cost_per_view']:,}원",
+                )
+                for r in measured
+            ],
+            _evidence("옮길 금액", fc.won(amount)),
+        ],
+        "recommendation": (
+            f"다음 회차 {best['content_category']} 제작비를 "
+            f"{fc.won(best['latest_production_krw'])} → "
+            f"{fc.won(best['latest_production_krw'] + amount)}로 올리고, "
+            f"{worst['content_category']}를 {fc.won(worst['latest_production_krw'])} → "
+            f"{fc.won(worst['latest_production_krw'] - amount)}로 줄이는 것을 기획·마케팅과 "
+            "논의하세요."
+        ),
+        "categories": measured,
+        "shift": {
+            "from": worst["content_category"],
+            "to": best["content_category"],
+            "amount_krw": amount,
+            "ratio": ratio,
+        },
+        "applied_rules": [
+            applied("CMP-007"),
+            applied(
+                "INS-005",
+                f"{ratio}배 차이 ≥ {cfg.shift_min_ratio}배 → 제작비 {cfg.shift_pct:.0%} 이동",
+            ),
+        ],
+    }
+
+
 def insights(
     campaigns: dict[str, dict[str, Any]],
     reviews: list[dict[str, Any]],
@@ -726,6 +868,10 @@ def insights(
                 "applied_rules": [applied("INS-003")],
             }
         )
+
+    shift = budget_shift(campaigns)
+    if shift is not None:
+        found.append(shift)
 
     if tax_pack is not None:
         due = date.fromisoformat(tax_pack["filing"]["due"])

@@ -2,7 +2,7 @@ import { finance, krw, signedKrw, type BudgetDecision, type CampaignVerdict } fr
 import { shortDateTime } from "@/lib/format";
 import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
-// ⑥ 캠페인 재무: 마케팅이 보낸 성과를 수수료 기준 손익으로 적고, 예산 요청에 의견을 낸다(승인·반려는 하지 않는다).
+// ⑥ 캠페인 예산: 마케팅이 보낸 성과를 수수료 기준 손익으로 적고, 예산 요청에 의견을 낸다(승인·반려는 하지 않는다).
 // 쿠폰 발급과 환불은 판단하지 않는다. 끝난 쿠폰 금액을 비용에 적을 뿐이다.
 // 숫자는 서버가 계산한 값 그대로다. 마케팅 연결 전에는 기록이 없어 비어 있다.
 
@@ -24,7 +24,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
   return (
     <div className="space-y-4">
       <Panel id="campaign-pnl" title="캠페인 손익" meta={view.env?.meta}
-        hint="회사 매출은 판매액이 아니라 수수료입니다. 손익 = 판매액의 수수료 − 광고비 − 회사 부담 쿠폰 − PG 수수료. 효율 판단은 이 단기 손익으로 하고, 재구매 포함 손익은 참고로만 보여 줍니다.">
+        hint="회사 매출은 판매액이 아니라 수수료입니다. 손익 = 판매액의 수수료 − 광고비 − 제작비 − 회사 부담 쿠폰 − PG 수수료. 효율 판단은 이 단기 손익으로 하고, 재구매 포함 손익은 참고로만 보여 줍니다.">
         <ResourceBody res={view}>
           {(v) => (
             <div className="space-y-3">
@@ -75,6 +75,45 @@ export function CampaignsSection({ tick }: { tick: number }) {
               {v.campaigns[0] && <AppliedRules rules={v.campaigns[0].applied_rules} />}
             </div>
           )}
+        </ResourceBody>
+      </Panel>
+
+      <Panel id="campaign-categories" title="콘텐츠 카테고리별 제작비"
+        hint="쇼츠·릴스를 카테고리(예: 아재개그·몸개그)별로 묶어 조회당 제작비를 봅니다. 조회수는 데이터 AI가 잰 게시 7일 값만 쓰고, 7일이 안 된 영상은 측정 중으로 셉니다. 다음 회차 제안은 재무 의견이고, 비중은 기획·마케팅과 사람이 정합니다.">
+        <ResourceBody res={view}>
+          {(v) => {
+            const rows = v.categories ?? [];
+            if (rows.length === 0) return <Empty>카테고리를 적은 캠페인이 아직 없습니다. 마케팅이 결과에 카테고리·제작비를, 데이터 AI가 7일 조회수를 보내면 여기에 모입니다.</Empty>;
+            const shift = (insights.env?.data ?? []).find((i) => i.kind === "budget_shift")?.shift;
+            const next = (row: (typeof rows)[number]) => {
+              if (!shift || row.latest_production_krw === null) return "-";
+              if (row.content_category === shift.to) return `${krw(row.latest_production_krw + shift.amount_krw)} (+${krw(shift.amount_krw)})`;
+              if (row.content_category === shift.from) return `${krw(row.latest_production_krw - shift.amount_krw)} (−${krw(shift.amount_krw)})`;
+              return krw(row.latest_production_krw);
+            };
+            return (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead className="text-left text-ink-500">
+                    <tr>{(["카테고리", "잰 캠페인", "제작비 합", "7일 조회수", "조회당 제작비", "측정 중", "다음 회차 제작비 (재무 의견)"] as const).map((h, i) => <th key={h} className={`pb-2 font-medium ${i >= 1 ? "text-right" : ""}`}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.content_category} className="border-t border-ink-100">
+                        <td className="py-2 font-medium text-ink-900">{row.content_category}</td>
+                        <td className="py-2 text-right tabular-nums">{row.campaigns.length}개</td>
+                        <td className="py-2 text-right tabular-nums">{row.campaigns.length ? krw(row.production_cost_krw) : "-"}</td>
+                        <td className="py-2 text-right tabular-nums">{row.campaigns.length ? `${row.views.toLocaleString("ko-KR")}회` : "-"}</td>
+                        <td className="py-2 text-right font-semibold tabular-nums text-ink-900">{row.cost_per_view === null ? "측정 전" : `${row.cost_per_view.toLocaleString("ko-KR")}원`}</td>
+                        <td className="py-2 text-right tabular-nums text-ink-500">{row.measuring ? `${row.measuring}개` : "-"}</td>
+                        <td className="py-2 text-right tabular-nums">{next(row)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          }}
         </ResourceBody>
       </Panel>
 

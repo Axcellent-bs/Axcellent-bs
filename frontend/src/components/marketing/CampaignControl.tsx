@@ -44,7 +44,7 @@ function explain(a: CampaignAnswer): string {
     case "over_approved_limit": return `이전 방식의 응답입니다. 요청액이 당시 재무 한도를 넘어 시작하지 않았습니다. 금액을 줄여 다시 요청하세요. ${reasons}`.trim();
     case "rejected_by_review": return "사람이 거절했습니다.";
     case "finance_review_unavailable": return "재무 AI의 의견을 받지 못해 시작하지 않았습니다.";
-    case "recorded": return "재무에 손익을 기록했습니다. 재무 AI의 캠페인 재무 탭에서 볼 수 있습니다.";
+    case "recorded": return "재무에 손익을 기록했습니다. 재무 AI의 캠페인 예산 탭에서 볼 수 있습니다.";
     case "waiting_revenue": return "판매액이 없어 판단을 미뤘습니다. 판매액을 알면 다시 저장하세요.";
     case "not_started": return "시작하지 않은 캠페인이라 기록하지 않았습니다.";
     case "canceled": return "취소했습니다. 잡아 둔 예산이 풀렸습니다.";

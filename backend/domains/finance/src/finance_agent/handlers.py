@@ -923,6 +923,9 @@ async def record_result(data: CampaignResultInput, context_id: str) -> dict[str,
     }
     records.campaigns[data.campaign_id] = record
     if record["verdict"] is None:
+        # 판매액이 없어도 7일 조회수를 쟀으면 카테고리 제작비 재배분(INS-005)은 볼 수 있다
+        if record.get("view_cost_status") == "measured":
+            await submit_insights(context_id)
         return record | {"write": "recorded"}
     record["lesson"] = cp.apply_lessons(record, records.lessons, _now())
     await submit_opinion(cp.opinion_of(record, _now()), context_id)

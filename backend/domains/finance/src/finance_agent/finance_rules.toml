@@ -4,7 +4,7 @@
 # - review: "expert"는 전문가가 확인한 규칙, "pending"은 전문가 확인 전이다
 # - 세법 조항과 회계 기준은 공개 자료로 찾아 적었다. 신고와 판단의 최종 책임은 세무사·담당자에게 있다
 
-version = 12
+version = 13
 updated = "2026-11-17"
 
 # 세무사·회계사에게 먼저 물을 질문. 묶음의 expert-review-checklist.docx에 들어간다
@@ -58,6 +58,10 @@ trend_min_campaigns = 3   # 채널 하락 추세를 보는 최소 캠페인 수
 overrun_window_days = 90  # 반복 초과를 보는 기간
 overrun_min_count = 2     # 이만큼 반복되면 인사이트
 tax_deadline_warn_days = 14
+# 콘텐츠 카테고리별 제작비 재배분(INS-005). 7일 조회수가 잰 카테고리끼리만 비교한다
+shift_min_categories = 2   # 이만큼 카테고리가 있어야 비교한다
+shift_min_ratio = 2.0      # 가장 비싼 카테고리의 조회당 제작비가 가장 싼 쪽의 이 배수 이상일 때만
+shift_pct = 0.3            # 다음 회차에 가장 싼 쪽 제작비를 이만큼 올리고, 그만큼 가장 비싼 쪽에서 뺀다
 
 [[income_tax.brackets]]   # 법인세법 제55조 ①, 2026-01-01 이후 개시 사업연도
 upto_krw = 200000000
@@ -396,6 +400,22 @@ basis = "내부 기준"
 review = "pending"
 
 # ---------------------------------------------------------------- 인사이트
+[[rules]]
+id = "CMP-007"
+area = "campaign"
+title = "제작비와 조회당 제작비"
+statement = "영상 제작비는 광고비와 따로 적고 캠페인 비용에 더한다. 조회당 제작비 = 제작비 ÷ 게시 7일 조회수. 조회수는 데이터 AI가 잰 값만 쓰고, 7일 측정 전이면 계산하지 않는다(측정 중)."
+basis = "EXP-002와 같은 광고선전비, 데이터 video_performance"
+review = "pending"
+
+[[rules]]
+id = "INS-005"
+area = "insight"
+title = "콘텐츠 카테고리 제작비 재배분"
+statement = "7일 조회수를 잰 카테고리끼리 조회당 제작비를 비교해, 가장 비싼 쪽이 가장 싼 쪽의 shift_min_ratio배 이상이면 다음 회차 제작비를 싼 쪽으로 shift_pct만큼 옮기자는 의견을 낸다. 총 제작비는 늘리지 않는다. 결정은 기획·마케팅과 사람이 한다."
+basis = "CMP-007, 내부 기준 [insights] shift_min_categories, shift_min_ratio, shift_pct"
+review = "pending"
+
 [[rules]]
 id = "INS-001"
 area = "insight"
