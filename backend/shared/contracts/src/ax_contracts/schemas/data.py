@@ -587,6 +587,11 @@ class CatalogSales(AxModel):
     # 적으면 제안에서 빼고 excluded에 이유와 함께 둔다
     min_season_multiple: float = Field(default=1.0, ge=0)
     min_orders_low: int = Field(default=5, ge=0)
+    # ---- 데이터 분석 확장 (11/17, 모두 선택)
+    # 가정: 단골이 이 날 수 넘게 안 사면 떠날 위험으로 본다 (retention at_risk)
+    churn_days: int = Field(default=60, ge=1)
+    repeat_min_orders: int = Field(default=2, ge=2)  # 단골 기준: 결제 완료 주문 이 수 이상
+    value_horizon_days: int = Field(default=90, ge=1)  # 경로별 고객 가치를 보는 기간 (첫 구매부터)
 
     @model_validator(mode="after")
     def _references_exist(self) -> Self:
@@ -3634,6 +3639,17 @@ class ProposalPastResult(AxModel):
     period_to: UtcDatetime | None = None
 
 
+class BundleBasis(AxModel):
+    """묶음 할인 후보의 근거: basket_pairs의 한 쌍 (같은 사람이 기간 안에 둘 다 산 것)."""
+
+    a_code: str
+    a_label: str = ""
+    b_code: str
+    b_label: str = ""
+    lift: float | None = Field(default=None, ge=0)
+    together_buyers: int | None = Field(default=None, ge=0)
+
+
 class EventProposalItem(AxModel):
     proposal_id: str  # 날짜·조건으로 만든 해시. 같은 입력이면 같은 값
     target_filters: dict[str, str] = Field(default_factory=dict)  # 누구 (속성 key → 값 code)
@@ -3652,6 +3668,7 @@ class EventProposalItem(AxModel):
     summary: str | None = None
     sent: ProposalSent | None = None
     past_results: list[ProposalPastResult] = Field(default_factory=list)
+    bundle: BundleBasis | None = None  # 묶음 할인 후보일 때만 (11/17)
 
 
 class EventProposalInput(AxModel):
@@ -3745,6 +3762,122 @@ class SegmentQuestionOutput(AxModel):
     period: SegmentPeriod | None = None
     understood_label: str = ""  # 예: "20대 · 여성 · 직업 전체 · 최근 90일"
     reason: str = ""  # unparsed일 때 이유 (사람이 읽는 말)
+
+
+# ---------------------------------------------------------------- 데이터 분석 확장 (11/17)
+# basket_pairs · retention · channel_value. 모두 grade read(회사 상태를 바꾸지 않음), LLM 없음.
+# 고객·시장 분석과 같은 규칙: 표준 판매 저장소만 읽고, 결제 완료 주문 기준, 한국 시간 0시 기준 기간,
+# `min_group_size` 미만 묶음은 suppressed=True이고 숫자 칸은 None, 품질 관문에 걸리면
+# status "insufficient"와 이유. 기준값(churn_days·repeat_min_orders·value_horizon_days)은
+# 카탈로그 `[sales]`에서 온다.
+BasketLevel = Literal["genre", "product"]
+
+
+class BasketPairsInput(AxModel):
+    level: BasketLevel = "genre"
+    period: SegmentPeriod = "90d"
+    filters: dict[str, str] = Field(default_factory=dict)  # 속성 key → 값 code (비우면 전체)
+    max_pairs: int = Field(default=10, ge=1, le=20)
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class BasketPair(AxModel):
+    """함께 사는 한 쌍. 단위는 '같은 사람이 기간 안에 둘 다 산 것'(주문 단위 아님)."""
+
+    a_code: str
+    a_label: str = ""
+    b_code: str
+    b_label: str = ""
+    together_buyers: int | None = Field(default=None, ge=0)  # 둘 다 산 사람 수
+    a_buyers: int | None = Field(default=None, ge=0)
+    b_buyers: int | None = Field(default=None, ge=0)
+    confidence: float | None = Field(default=None, ge=0, le=1)  # a를 산 사람 중 b도 산 비율
+    lift: float | None = Field(default=None, ge=0)  # confidence ÷ (전체 중 b를 산 비율)
+    suppressed: bool = False
+
+
+class BasketPairsOutput(AxModel):
+    status: Literal["ok", "insufficient"] = "ok"
+    insufficient_reasons: list[str] = Field(default_factory=list)
+    level: BasketLevel = "genre"
+    period: SegmentPeriod = "90d"
+    filters: dict[str, str] = Field(default_factory=dict)
+    pairs: list[BasketPair] = Field(default_factory=list)
+    basis: SalesBasis | None = None
+    quality: SalesQuality = Field(default_factory=SalesQuality)
+    summary: str = ""
+
+
+class RetentionInput(AxModel):
+    cohorts: int = Field(default=3, ge=1, le=6)  # 보는 첫 구매 달 수 (최근 달부터)
+    filters: dict[str, str] = Field(default_factory=dict)  # 속성 key → 값 code (비우면 전체)
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class RetentionCohort(AxModel):
+    """첫 구매 달 하나: 그 달 첫 구매 고객 중 30·60·90일 안에 다시 산 비율."""
+
+    cohort_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    customers: int | None = Field(default=None, ge=0)
+    # 기간이 아직 다 지나지 않았거나 suppressed면 None
+    r30: float | None = Field(default=None, ge=0, le=1)
+    r60: float | None = Field(default=None, ge=0, le=1)
+    r90: float | None = Field(default=None, ge=0, le=1)
+    suppressed: bool = False
+
+
+class RetentionAtRisk(AxModel):
+    """속성 묶음 하나의 단골 중 churn_days 넘게 안 산 사람 (가정 기준)."""
+
+    filters: dict[str, str] = Field(default_factory=dict)  # 속성 key → 값 code
+    label: str = ""
+    regulars: int | None = Field(default=None, ge=0)  # 단골 수 (repeat_min_orders 이상)
+    at_risk: int | None = Field(default=None, ge=0)
+    share: float | None = Field(default=None, ge=0, le=1)  # at_risk ÷ regulars
+    top_item_label: str | None = None  # 그 묶음이 가장 많이 산 장르·상품 이름
+    suppressed: bool = False
+
+
+class RetentionOutput(AxModel):
+    status: Literal["ok", "insufficient"] = "ok"
+    insufficient_reasons: list[str] = Field(default_factory=list)
+    filters: dict[str, str] = Field(default_factory=dict)
+    cohorts: list[RetentionCohort] = Field(default_factory=list)  # 오래된 달부터
+    at_risk: list[RetentionAtRisk] = Field(default_factory=list)
+    churn_days: int = Field(default=60, ge=1)  # 쓴 기준 (카탈로그 churn_days, 가정)
+    basis: SalesBasis | None = None
+    quality: SalesQuality = Field(default_factory=SalesQuality)
+    summary: str = ""
+
+
+class ChannelValueInput(AxModel):
+    period: SegmentPeriod = "365d"  # 첫 구매가 들어간 기간
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class ChannelValueRow(AxModel):
+    """첫 구매 유입 경로 하나: 그 경로로 온 새 고객의 value_horizon_days 동안 가치."""
+
+    source: str | None = None  # 원본 src_source (화면에는 label만). 표시가 없으면 None
+    label: str  # 카탈로그 source_labels 이름, 표시가 없으면 "직접 유입"
+    new_customers: int | None = Field(default=None, ge=0)
+    revenue_per_customer: int | None = Field(default=None, ge=0)  # 원
+    repeat_rate: float | None = Field(default=None, ge=0, le=1)  # 기간 안 다시 산 비율
+    orders_per_customer: float | None = Field(default=None, ge=0)
+    cost_krw: int | None = Field(default=None, ge=0)  # 경로 비용 (재무 연결 전까지 늘 None)
+    suppressed: bool = False
+
+
+class ChannelValueOutput(AxModel):
+    status: Literal["ok", "insufficient"] = "ok"
+    insufficient_reasons: list[str] = Field(default_factory=list)
+    period: SegmentPeriod = "365d"
+    horizon_days: int = Field(default=90, ge=1)  # 쓴 기준 (카탈로그 value_horizon_days)
+    rows: list[ChannelValueRow] = Field(default_factory=list)
+    cost_note: str = "재무 연결 대기"
+    basis: SalesBasis | None = None
+    quality: SalesQuality = Field(default_factory=SalesQuality)
+    summary: str = ""
 
 
 TrendInsight.model_rebuild()
