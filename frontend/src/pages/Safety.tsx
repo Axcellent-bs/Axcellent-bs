@@ -176,7 +176,7 @@ export default function Safety() {
                 </div>
                 {holdFolded(r.action)
                   ? <span className="chip" title="담당 화면(인수인계)이 접혀 있어 결정할 곳이 없어요. 기한이 지나면 자동으로 취소돼요.">담당 화면 없음(접힘)</span>
-                  : <Link href={holdPage(r.action)} className="btn-ghost text-sm">결정하러 가기</Link>}
+                  : <Link href={holdPage(r.action, execs?.find((e) => e.execution_id === r.execution_id)?.request.params?.target)} className="btn-ghost text-sm">결정하러 가기</Link>}
               </li>
             ))}
           </ul>

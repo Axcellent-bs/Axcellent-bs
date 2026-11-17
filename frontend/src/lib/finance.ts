@@ -938,6 +938,8 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
 export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_media", "start_campaign"] as const;
 /** 개발·배포 화면(/dev/work/holds)에서 결정하는 보류 건 (PR 만들기·머지·되돌리기, 자동 머지 기준 바꾸기, 배포 되돌리기) */
 export const DEV_HOLD_ACTIONS = ["generate_pr", "merge_pr", "repo_revert_pr", "auto_policy_update", "rollback_deployment"] as const;
+/** 기획서 화면(/planning/work/specs/<기획서 번호>)의 "교차검증 대기" 칸에서 결정하는 보류 건 (기획서 확정) */
+export const PLANNING_HOLD_ACTION = "confirm_spec";
 /** 고객지원 판매자 정산 화면에서 결정하는 보류 건 (정산 묶음 지급 승인) */
 export const SETTLEMENT_HOLD_ACTION = "confirm_settlement";
 /** 고객지원 보상 큐(/queue)에서 결정하는 보류 건 (데이터 삭제 승인, 보관 기간이 지난 문의·클레임 삭제) */
@@ -948,7 +950,7 @@ export const SUPPORT_SETTLEMENT_PATH = "/settlements";
 /** 담당 화면이 접혀 있어 사람이 결정할 곳이 없는 보류 (인사 인수인계, 준하 11/17).
  *  handover 서비스를 띄우지 않아 보류될 경로도 꺼져 있다. 다시 켜면 인사 화면에 ActionQueue를 붙이고 여기서 뺀다 */
 export const FOLDED_HOLD_ACTIONS = ["confirm_handover", "confirm_handover_incomplete"] as const;
-export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", SETTLEMENT_HOLD_ACTION, ...MARKETING_HOLD_ACTIONS, ...SUPPORT_DELETION_HOLD_ACTIONS, ...DEV_HOLD_ACTIONS, ...FOLDED_HOLD_ACTIONS]);
+export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", SETTLEMENT_HOLD_ACTION, ...MARKETING_HOLD_ACTIONS, ...SUPPORT_DELETION_HOLD_ACTIONS, ...DEV_HOLD_ACTIONS, ...FOLDED_HOLD_ACTIONS, PLANNING_HOLD_ACTION]);
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
