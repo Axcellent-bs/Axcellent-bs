@@ -31,6 +31,8 @@ from ax_agent_template.config import get_agent_name
 from ax_agent_template.services import department_of
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.diagnosis import (
+    ListImprovementNotesOutput,
+    ReceivedImprovementNote,
     ReceiveImprovementNoteInput,
     ReceiveImprovementNoteOutput,
 )
@@ -124,6 +126,20 @@ class ImprovementNoteStore:
             rows = self._db.execute(sql, args).fetchall()
         return [json.loads(r[0]) for r in rows]
 
+    def received_notes(
+        self, limit: int = MAX_NOTES, *, now: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """화면용 목록: 참고할 수 있는 노트(최근 것부터)에 받은 시각을 붙인다."""
+        cutoff = ((now or datetime.now(UTC)) - timedelta(days=MAX_AGE_DAYS)).isoformat()
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT body, received_at FROM improvement_notes"
+                " WHERE status = 'active' AND received_at >= ?"
+                " ORDER BY received_at DESC, rowid DESC LIMIT ?",
+                (cutoff, limit),
+            ).fetchall()
+        return [{**json.loads(body), "received_at": at} for body, at in rows]
+
     def notes_for_skill(
         self, skill: str, limit: int = 3, *, now: datetime | None = None
     ) -> list[dict[str, Any]]:
@@ -150,23 +166,26 @@ def caution_text(notes: list[dict[str, Any]]) -> str:
 
 
 def with_caution(service: str, skill: str, result: AgentResult) -> AgentResult:
-    """완료한 응답의 근거(`evidence.data_summary`)에 주의 사항을 덧붙인다. 노트가 없으면 그대로다.
+    """완료한 응답의 근거 `evidence.notices`에 주의 사항을 덧붙인다. 노트가 없으면 그대로다.
 
     코드가 정해진 순서로 도는 단계는 노트를 읽어 스스로 바꿀 수 없다. 대신 응답을 읽는 사람과 AI가
-    이 단계가 반복해 느렸다는 걸 알 수 있게 한다. 결과 값(`output`)은 건드리지 않는다.
+    이 단계가 반복해 느렸다는 걸 알 수 있게 한다. 숫자 검증을 거친 문장(`data_summary`)과
+    결과 값(`output`)은 건드리지 않는다. 별도 칸이라 리포트·확정 기록에 섞이지 않는다.
     """
     if skill == SKILL or result.status != TaskStatus.COMPLETED or result.evidence is None:
         return result
     notes = store_for(service).notes_for_skill(skill)
     if not notes:
         return result
-    summary = result.evidence.data_summary
     text = caution_text(notes)
-    if text in summary:
+    if text in result.evidence.notices:
         return result
-    joined = f"{summary}\n{text}" if summary else text
     return result.model_copy(
-        update={"evidence": result.evidence.model_copy(update={"data_summary": joined})}
+        update={
+            "evidence": result.evidence.model_copy(
+                update={"notices": [*result.evidence.notices, text]}
+            )
+        }
     )
 
 
@@ -177,6 +196,19 @@ def store_for(service: str) -> ImprovementNoteStore:
     if service not in _stores:
         _stores[service] = ImprovementNoteStore.for_service(service)
     return _stores[service]
+
+
+def list_for_service(service: str) -> ListImprovementNotesOutput:
+    """이 서비스가 받아 둔 진단 결과(읽기). 화면 칸이 `GET /api/improvement-notes`로 읽는다."""
+    return ListImprovementNotesOutput(
+        service=service,
+        notes=[
+            ReceivedImprovementNote.model_validate(
+                {k: v for k, v in n.items() if k in ReceivedImprovementNote.model_fields}
+            )
+            for n in store_for(service).received_notes()
+        ],
+    )
 
 
 def reset_stores() -> None:

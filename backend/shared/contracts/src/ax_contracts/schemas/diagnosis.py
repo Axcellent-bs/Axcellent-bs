@@ -115,3 +115,27 @@ class ReceiveImprovementNoteOutput(AxModel):
     note_id: str
     status: NoteStatus
     reason: str | None = None
+
+
+class ReceivedImprovementNote(AxModel):
+    """에이전트가 받아 저장해 둔 진단 결과 하나(읽기용). 화면의 "총괄 AI가 보낸 진단" 칸이 쓴다."""
+
+    note_id: str
+    diagnosis_id: str
+    agent: str
+    step_id: str
+    step_label: str
+    summary: str
+    findings: list[str] = Field(default_factory=list)
+    evidence_contexts: list[str] = Field(default_factory=list)
+    method: Literal["rules", "llm"] = "rules"
+    cause_known: bool = True
+    issued_at: UtcDatetime
+    received_at: UtcDatetime
+
+
+class ListImprovementNotesOutput(AxModel):
+    """한 서비스가 지금 참고하는(거두거나 만료·대체되지 않은) 진단 결과, 최근 것부터."""
+
+    service: str
+    notes: list[ReceivedImprovementNote] = Field(default_factory=list)

@@ -81,6 +81,9 @@ class Evidence(AxModel):
     data_summary: str = ""
     collected_at: UtcDatetime | None = None
     ref_ids: list[str] = Field(default_factory=list)
+    # 응답을 읽는 사람·AI에게 알리는 주의 사항. `data_summary`(숫자 검증을 거친 문장)와 섞지 않는다.
+    # 예: 총괄이 이 단계의 반복 지연을 진단해 보냈다는 알림(에이전트 평가)
+    notices: list[str] = Field(default_factory=list)
 
 
 class AgentRequest(AxModel):

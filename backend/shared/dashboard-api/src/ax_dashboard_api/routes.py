@@ -57,6 +57,7 @@ from ax_dashboard_api import (
     claim_mapping,
     data_chat,
     dev_chat,
+    diagnosis_notes,
     finance_chat,
     hr_client,
     infra_chat,
@@ -1668,6 +1669,21 @@ async def agent_evaluation(limit: int = Query(30, ge=1, le=200)) -> dict:
         )
     out = await or_unavailable(hr_client.call("evaluate_agents", {"limit": limit}), None)
     return ok(EvaluateAgentsOutput.model_validate(out) if out is not None else None)
+
+
+@router.get("/agent-diagnosis-notes")
+async def agent_diagnosis_notes(agent: str = Query(..., min_length=1, max_length=32)) -> dict:
+    """에이전트 화면의 "총괄 AI가 보낸 진단" 칸: 그 에이전트가 받아 둔 진단 결과 (읽기).
+
+    총괄이 같은 단계의 반복 지연을 진단해 보낸 결과다. 철회는 총괄 화면에서만 한다.
+    진단 결과를 받는 에이전트가 아니면 404. 목 모드는 가짜를 만들지 않고 빈 목록을 돌려준다.
+    """
+    if not diagnosis_notes.services_for(agent):
+        raise ApiError(404, "UNKNOWN_AGENT", "진단 결과를 받는 에이전트가 아니다")
+    if is_mock():
+        return ok([], total=0)
+    items = await diagnosis_notes.received_notes(agent)
+    return ok(items, total=len(items))
 
 
 @router.post("/plan-checks")
