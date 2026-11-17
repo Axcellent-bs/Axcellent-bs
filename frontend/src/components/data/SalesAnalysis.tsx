@@ -3,10 +3,11 @@ import { Empty, ErrorBox, Panel, Waiting, useResource } from "@/components/finan
 import { DATA_SERVER, dataAi, kpiLive, type SalesPeriod } from "@/lib/data";
 import { PreparingChip } from "@/components/Preparing";
 import {
-  SALES_PERIODS, calcLine, channelValueView, compareLabel, salesView,
+  SALES_PERIODS, calcOfResult, channelValueView, compareLabel, salesView,
   type ChannelValueView, type ChannelView, type ProductView, type SalesGateView, type SalesOkView, type Tone,
 } from "@/lib/salesView";
 import { sectionState } from "@/lib/segmentView";
+import { useStaleReload } from "./staleReload";
 
 // 매출 분석: 무엇이 팔리나 · 누가 사나 · 유입 경로별 매출 · 유입 경로별 고객 가치(channel_value).
 // 데이터 AI의 sales_analysis·channel_value 결과를 그대로 보여 준다.
@@ -87,7 +88,9 @@ function Channels({ rows }: { rows: ChannelView[] }) {
 function ChannelValue({ tick }: { tick: number }) {
   const res = useResource("channel-value", () => dataAi.channelValue("365d").then((r) => ({ data: r, meta: { mock: false } })), tick);
   const view: ChannelValueView | null = res.env ? channelValueView(res.env.data.output) : null;
-  const calc = res.env ? calcLine(res.env.data.evidence?.collected_at, res.env.data.output.basis?.last_synced_at) : null;
+  const c = calcOfResult(res.env?.data);
+  useStaleReload(c.stale, c.stamp, res.reload);
+  const calc = c.line;
   const missing = res.error != null && sectionState(res.error).kind === "missing";
 
   return (
@@ -208,6 +211,8 @@ function Body({ view, tick, calc }: { view: SalesOkView; tick: number; calc: str
 function Live({ tick }: { tick: number }) {
   const [period, setPeriod] = useState<SalesPeriod>("7d");
   const res = useResource(`sales-${period}`, () => dataAi.salesAnalysis(period).then((r) => ({ data: r, meta: { mock: false } })), tick);
+  const c = calcOfResult(res.env?.data);
+  useStaleReload(c.stale, c.stamp, res.reload);
   const view = res.env ? salesView(res.env.data.output) : null;
 
   return (
@@ -242,7 +247,7 @@ function Live({ tick }: { tick: number }) {
       {view?.kind === "gate" && <Gate view={view} />}
       {view?.kind === "ok" && (
         <Body view={view} tick={tick}
-          calc={res.env ? calcLine(res.env.data.evidence?.collected_at, res.env.data.output.basis?.last_synced_at) : null} />
+          calc={c.line} />
       )}
     </div>
   );

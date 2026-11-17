@@ -82,8 +82,17 @@ def test_cache_hits_until_version_or_input_changes() -> None:
     assert again.computed_at == first.computed_at
     assert not call({"period": "30d", "top": 5}).hit  # 다른 입력
     store.upsert(TENANT, [order(1)], NOW)  # 새 행 → 버전이 오른다
-    assert not call({"period": "7d", "top": 5}).hit
+    # 이전 결과 먼저 (11/17): 예전 결과(v1)를 stale로 바로 주고 새 계산은 뒤에서 한 번
+    stale = call({"period": "7d", "top": 5})
+    assert stale.stale and stale.value == first.value and stale.computed_at == first.computed_at
+    cache.wait()
+    fresh = call({"period": "7d", "top": 5})
+    assert fresh.hit and not fresh.stale and fresh.value == "v3"
     assert len(calls) == 3
+    waited = cached("s", store, TENANT, {"period": "30d", "top": 5}, "cat", "1", NOW,
+                    compute("w"), cache, stale_ok=False)  # fmt: skip
+    assert not waited.stale and waited.value == "v4"  # 미리 계산은 기다려 새로 계산
+    assert len(calls) == 4
     other = SalesStore(":memory:")  # 다른 저장소는 섞이지 않는다
     assert not cached("s", other, TENANT, {"period": "7d", "top": 5}, "cat", "1", NOW,
                       compute("o"), cache).hit  # fmt: skip
@@ -117,6 +126,77 @@ def test_same_key_at_once_is_computed_once() -> None:
         results = [f.result() for f in futures]
     assert calls == [1] and {r.value for r in results} == {42}
     assert sum(not r.hit for r in results) == 1
+
+
+def test_stale_result_first_and_refresh_starts_once() -> None:
+    """같은 묶음의 예전 결과가 있으면 바로 주고, 새 계산은 동시에 여러 번 불러도 뒤에서 한 번."""
+    cache = ResultCache()
+    family = ("s", "t", "{}")
+    old = cache.get_or_compute((family, 1), lambda: "옛", NOW, family)
+    calls: list[int] = []
+    gate = threading.Event()
+
+    def slow() -> str:
+        calls.append(1)
+        gate.wait(5)
+        return "새"
+
+    started = time.perf_counter()
+    got = [cache.get_or_compute((family, 2), slow, NOW, family) for _ in range(3)]
+    took = time.perf_counter() - started
+    assert took < 0.5  # 새 계산을 기다리지 않았다
+    assert all(g.stale and g.value == "옛" and g.computed_at == old.computed_at for g in got)
+    gate.set()
+    cache.wait()
+    assert calls == [1]  # 같은 키 계산은 한 번만
+    fresh = cache.get_or_compute((family, 2), slow, NOW, family)
+    assert fresh.value == "새" and fresh.hit and not fresh.stale
+    assert calls == [1]
+
+
+def test_stale_is_not_taken_from_another_store_id() -> None:
+    """저장소 생성 id가 다르면(리셋한 새 저장소) 예전 결과로 쓰지 않고 기다려 새로 계산한다."""
+    cache = ResultCache()
+    a, b = SalesStore(":memory:"), SalesStore(":memory:")
+    b.cache_token = a.cache_token  # 같은 서버 프로세스·같은 저장소 객체 자리라고 쳐도
+    assert a.store_id != b.store_id
+    cached("s", a, TENANT, {}, "cat", "1", NOW, lambda: "옛", cache)
+    b.upsert(TENANT, [order(1)], NOW)  # 버전도 다르다
+    got = cached("s", b, TENANT, {}, "cat", "1", NOW, lambda: "새", cache)
+    assert got.value == "새" and not got.stale and not got.hit
+
+
+def test_handler_marks_stale_in_basis_then_refreshes() -> None:
+    CACHE.clear()
+    store = SalesStore(":memory:")
+    now = datetime.now(UTC)
+    store.upsert(TENANT, [order(i, now - timedelta(hours=1)) for i in range(30)], now)
+    store.finish_sync(TENANT, "shop-api", now, None)
+    catalog.use_catalog(catalog.load_catalog("catbooks"))
+    handlers.use_sales_store(store)
+
+    def call() -> Any:
+        return asyncio.run(handlers.sales_analysis(_request("sales_analysis", period="today")))
+
+    try:
+        first = call()
+        store.upsert(TENANT, [order(99, now - timedelta(minutes=30))], now)  # 새 판매 기록
+        second = call()
+        CACHE.wait()
+        third = call()
+    finally:
+        handlers.use_sales_store(None)
+        catalog.use_catalog(None)
+    b1, b2, b3 = (r.output["basis"] for r in (first, second, third))
+    assert b1["stale"] is False and b1["computed_at"]
+    assert b2["stale"] is True and b2["computed_at"] == b1["computed_at"]  # 예전 결과·그 계산 시각
+    assert second.output["kpis"] == first.output["kpis"]
+    assert "갱신 중" in second.evidence.data_summary
+    assert b3["stale"] is False  # 뒤에서 새로 계산한 결과
+    rows = {k["key"]: k["value"] for k in third.output["kpis"]}
+    assert rows["order_count"] == {k["key"]: k["value"] for k in first.output["kpis"]}[
+        "order_count"
+    ] + 1
 
 
 def _request(skill: str, **inp: Any) -> AgentRequest:
@@ -253,6 +333,30 @@ def test_perf_sales_analysis_first_and_cached(big: SalesStore) -> None:
     print("\n" + "\n".join(lines))
     assert max(hits) < 0.3
     assert max(firsts) < 3.0
+
+
+@PERF
+def test_perf_previous_result_first(big: SalesStore) -> None:
+    """판매 기록이 바뀐 뒤 예전 결과가 있으면 0.3초 안에 준다 (새 계산은 뒤에서)."""
+    cat = catalog.load_catalog("catbooks")
+    CACHE.clear()
+    lines, quick = [], []
+    for period in ("today", "7d", "30d"):
+        sales_reads.sales_analysis(big, TENANT, period, cat, NOW)
+    big.upsert(TENANT, [order(900_001, NOW - timedelta(hours=2))], NOW)  # 저장소 버전이 오른다
+    for period in ("today", "7d", "30d"):
+        started = time.perf_counter()
+        got = sales_reads.sales_analysis(big, TENANT, period, cat, NOW)
+        took = time.perf_counter() - started
+        assert got.stale
+        lines.append(f"sales_analysis {period}: 예전 결과 먼저 {took:.3f}초")
+        quick.append(took)
+    started = time.perf_counter()
+    CACHE.wait(120)
+    lines.append(f"뒤 갱신 3개 끝까지 {time.perf_counter() - started:.2f}초")
+    assert not sales_reads.sales_analysis(big, TENANT, "30d", cat, NOW).stale
+    print("\n" + "\n".join(lines))
+    assert max(quick) < 0.3
 
 
 @PERF

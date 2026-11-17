@@ -20,6 +20,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import threading
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -70,7 +71,15 @@ def run[T](  # noqa: PLR0913 - 캐시 키 재료와 계산
     now: datetime,
     compute: Callable[[], T],
 ) -> Computed[T]:
-    return cached(skill, store, tenant_id, inputs, cat.id, catalog_key(cat), now, compute)
+    """캐시 계산. 화면 요청은 예전 결과가 있으면 먼저 받고(뒤에서 갱신), 미리 계산(`warm`)은
+    기다려 새로 계산한다."""
+    return cached(
+        skill, store, tenant_id, inputs, cat.id, catalog_key(cat), now, compute,
+        stale_ok=not getattr(_WARMING, "on", False),
+    )  # fmt: skip
+
+
+_WARMING = threading.local()  # 이 스레드가 미리 계산 중인지
 
 
 def sales_analysis(
@@ -174,12 +183,16 @@ def warm(store: SalesStore, tenant_id: str, cat: MetricCatalog, now: datetime) -
         keys = list(cfg.population[0].attribute_keys)
         jobs.append(("market_coverage", lambda: coverage_buyers(store, tenant_id, keys, cat, now)))
     jobs.append(("event_proposal", lambda: event_base(store, tenant_id, cat, now)))
-    for name, job in jobs:
-        try:
-            job()
-            done.append(name)
-        except Exception:  # noqa: BLE001 - 하나가 실패해도 나머지는 계산한다
-            logger.warning("판매 분석 미리 계산 실패: %s", name, exc_info=True)
+    _WARMING.on = True
+    try:
+        for name, job in jobs:
+            try:
+                job()
+                done.append(name)
+            except Exception:  # noqa: BLE001 - 하나가 실패해도 나머지는 계산한다
+                logger.warning("판매 분석 미리 계산 실패: %s", name, exc_info=True)
+    finally:
+        _WARMING.on = False
     return done
 
 

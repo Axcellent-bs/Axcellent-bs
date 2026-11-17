@@ -3412,6 +3412,10 @@ class SalesBasis(AxModel):
     # 저장소를 채운 출처가 실제 판매 서버가 아닐 때의 표시 (11/16). 가짜 출처(데모 전용
     # `DATA_SALES_SOURCE=fake`)로 채웠으면 "가짜 데이터(데모용)". 실제 판매 서버면 None
     data_source: str | None = None
+    # 결과 캐시 (11/17): 이 답을 계산한 시각, 그리고 판매 기록이 바뀌기 전 예전 결과를 먼저 준
+    # 것인지(stale, 새 계산은 뒤에서 돌고 있다). 캐시를 거치지 않은 답은 None·False
+    computed_at: UtcDatetime | None = None
+    stale: bool = False
 
 
 class SalesAnalysisOutput(AxModel):
