@@ -265,20 +265,67 @@ def test_review_mismatch_then_one_fix_then_pass(service: PlanningService, adapte
     assert _points(service).count("code.review") == 1
 
 
-def test_review_mismatch_twice_waits_in_queue(service: PlanningService, adapter) -> None:
+def test_review_mismatch_fixed_once_without_second_review(
+    service: PlanningService, adapter
+) -> None:
+    """리뷰는 한 번만: 불일치면 한 번 고치고 다시 리뷰하지 않는다 (CI가 마지막 확인)."""
+    fake = FakeLLM(
+        plan=CodePlan(files=[FilePick(path=BANNER)]),
+        writes={BANNER: lambda d: BANNER_FIX if d["review_notes"] else BANNER_NEW},
+        reviews=[CodeReview(verdict="불일치", notes=["a"])],
+    )
+    coder.set_llm(fake)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "merged" and c.attempts == 2, c.error
+    assert [x[0] for x in fake.calls].count("CodeReview") == 1
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert pr.reviews == ["불일치", "통과"]
+    assert adapter.contents(pr.vcs_number)[BANNER] == BANNER_FIX
+    assert any("CI로 확인" in a.text for a in service.state.activity)
+
+
+@pytest.mark.parametrize("ci", ["none", "passed"])
+def test_fixed_code_is_checked_by_ci(
+    service: PlanningService, adapter, monkeypatch, ci: str
+) -> None:
+    """리뷰 뒤 고친 코드: CI 통과면 머지, CI가 없는 레포면 자동 머지하지 않고 사람 확인."""
+    monkeypatch.setattr(coder, "NO_CI_GRACE_SECONDS", 0.0)
+    monkeypatch.setattr(coder, "CI_POLL_SECONDS", 0.0)
+    vcs.set_vcs(ChecksAdapter(ci))
     coder.set_llm(
         FakeLLM(
             plan=CodePlan(files=[FilePick(path=BANNER)]),
             writes={BANNER: lambda d: BANNER_FIX if d["review_notes"] else BANNER_NEW},
-            reviews=[CodeReview(verdict="불일치", notes=["a"]), CodeReview(verdict="불일치")],
+            reviews=[CodeReview(verdict="불일치", notes=["a"])],
+        )
+    )
+    run(_go(service))
+    c = _task(service).coding
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    if ci == "passed":
+        assert c.status == "merged" and pr.merged, c.error
+        return
+    assert c.status == "waiting_human" and not pr.merged
+    assert "CI 없음" in (c.error or "") and c.ci_hold
+
+
+def test_review_mismatch_with_nothing_to_fix_waits_in_queue(
+    service: PlanningService, adapter
+) -> None:
+    coder.set_llm(
+        FakeLLM(
+            plan=CodePlan(files=[FilePick(path=BANNER)]),
+            writes={BANNER: BANNER_NEW},  # 지적을 받아도 같은 글 → 고친 게 없다
+            reviews=[CodeReview(verdict="불일치", notes=["a"])],
         )
     )
     run(_go(service))
     c = _task(service).coding
     assert c.status == "waiting_human" and c.attempts == 2
     pr = next(p for p in service.state.prs if p.id == c.pr)
-    assert pr.reviews == ["불일치", "불일치"] and not pr.merged
-    assert pr.auto_review is not None and "pr_review_mismatch" in pr.auto_review.rules
+    assert pr.reviews == ["불일치"] and not pr.merged
+    assert pr.auto_review is not None and "리뷰 불일치" in (c.error or "")
     rows = TestClient(app).get("/api/planning/review-queue").json()["data"]
     assert any(r["id"] == pr.id for r in rows)
 
@@ -499,8 +546,68 @@ def test_retry_reuses_written_code_without_llm(service: PlanningService, adapter
     assert again.count("CodePlan") == 2 and again.count("FileWrite") == 2  # 다시 쓰지 않음
     c = _task(service).coding
     assert c.pr is not None and c.status in ("opened", "merged")
-    assert any("작성해 둔 코드로 PR 다시 시도" in a.text for a in service.state.activity)
+    assert any("작성해 둔 코드로 PR부터 다시 시도" in a.text for a in service.state.activity)
     assert coder.draft_of(service, "T-D1") is None
+
+
+def test_retry_after_review_failure_starts_from_review(service: PlanningService, adapter) -> None:
+    """리뷰에서 멈춰도 쓴 코드는 저장돼 있어, 다시 시도하면 고르기·쓰기 없이 리뷰부터 한다."""
+    llm = FakeLLM(fail={"CodeReview"})
+    coder.set_llm(llm)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "failed" and "리뷰" in (c.error or "")
+    assert coder.draft_of(service, "T-D1") is not None
+
+    llm.fail = set()
+    run(_retry(service, "T-D1"))
+    names = [x[0] for x in llm.calls]
+    assert names.count("CodePlan") == 2 and names.count("FileWrite") == 2  # 다시 쓰지 않음
+    assert names.count("CodeReview") == 2  # 실패한 것 + 다시 한 것
+    assert _task(service).coding.status == "merged"
+    assert any("작성해 둔 코드로 리뷰부터 다시 시도" in a.text for a in service.state.activity)
+
+
+def test_failed_edits_are_asked_again_alone() -> None:
+    """맞은 부분은 두고 못 맞춘 부분만 다시 묻는다. 전체 다시 쓰기는 그래도 안 될 때만."""
+    from dev_agent.coder import Edit, apply_some
+
+    text, failed = apply_some(
+        "a\nb\nb\n", [Edit(find="a", replace="A"), Edit(find="b", replace="B")]
+    )
+    assert text == "A\nb\nb\n" and [why for _, why in failed] == ["find가 2번 나온다"]
+
+    class Partial(FakeLLM):
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            data = untrusted or {}
+            if schema is FileWrite and data.get("action") == "modify":
+                self.calls.append(("FileWrite", prompt, data))
+                if "failed_edits" in data:
+                    return FileWrite(
+                        edits=[Edit(find="<div>배너</div>", replace="<div>신간</div>")]
+                    )
+                ok = Edit(find="export function Banner()", replace="export function Banner2()")
+                bad = Edit(find="없는 글", replace="x")
+                return FileWrite(edits=[ok, bad], reason="두 곳")
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    llm = Partial(plan=CodePlan(files=[FilePick(path=BANNER, reason="배너")]))
+    coder.set_llm(llm)
+    out = run(
+        coder._write_one(
+            llm,
+            coder.Job(1, "T", "S", "R", "c", "t", "p", (), (), None),
+            FilePick(path=BANNER, reason="배너"),
+            BANNER_OLD,
+            [],
+        )
+    )
+    assert out[0] == BANNER_OLD.replace("Banner()", "Banner2()").replace("배너", "신간")
+    writes = [x for x in llm.calls if x[0] == "FileWrite"]
+    assert len(writes) == 2  # 전체 다시 쓰기(FULL_PROMPT) 없음
+    retry = writes[1][2]
+    assert [f["find"] for f in retry["failed_edits"]] == ["없는 글"]
+    assert "Banner2" in retry["current"]  # 맞은 부분은 이미 들어가 있다
 
 
 def test_apply_edits_and_fallback() -> None:
@@ -633,6 +740,52 @@ def test_confirm_step_sees_previews_and_can_change_picks(service: PlanningServic
     assert c.summary == "확정"
     write = next(x for x in llm.calls if x[0] == "FileWrite")
     assert write[2]["others"] == []
+
+
+def test_confirm_is_skipped_when_the_task_names_the_files(
+    service: PlanningService, adapter
+) -> None:
+    """작업 글에 사람이 적은 파일만 후보면 확정 LLM을 부르지 않고 바로 쓴다 (토큰 절약)."""
+    fake = FakeLLM(
+        plan=CodePlan(files=[FilePick(path=BANNER, reason="배너")]), writes={BANNER: BANNER_NEW}
+    )
+    coder.set_llm(fake)
+    run(_go(service, plan=f"{BANNER}의 배너 문구를 신간 안내로 바꾼다."))
+    c = _task(service).coding
+    assert c.status == "merged", c.error
+    assert [x[0] for x in fake.calls] == ["CodePlan", "FileWrite", "CodeReview"]
+
+
+def test_confirm_still_runs_for_picks_the_task_did_not_name(
+    service: PlanningService, adapter
+) -> None:
+    """이름으로만 고른 후보가 섞이면 확정 단계를 그대로 거치고, 경로 목록은 줄여 보낸다."""
+    adapter.seed_files({f"shop-web/src/x/f{i:03d}.ts": "x\n" for i in range(300)})
+    fake = FakeLLM(
+        plan=CodePlan(
+            files=[FilePick(path=BANNER, reason="배너"), FilePick(path=CHECKOUT, reason="혹시")]
+        ),
+        writes={BANNER: BANNER_NEW, CHECKOUT: "export function Checkout() {\n  return 1\n}\n"},
+    )
+    coder.set_llm(fake)
+    run(_go(service, plan=f"{BANNER}의 배너 문구를 신간 안내로 바꾼다."))
+    plans = [x[2] for x in fake.calls if x[0] == "CodePlan"]
+    assert len(plans) == 2 and "candidates" in plans[1]
+    assert len(plans[0]["files"]) > coder.MAX_CONFIRM_LISTING
+    assert len(plans[1]["files"]) == coder.MAX_CONFIRM_LISTING
+    assert plans[1]["files"][0] == BANNER  # 글에 적힌 경로가 앞에 남는다
+
+
+def test_named_files_are_exact_single_files_only() -> None:
+    rows = ["web/a/Banner.tsx", "web/b/Banner.tsx", "web/c/Only.tsx", "web/c/x.ts"]
+    text = "Banner.tsx 고치고 Only.tsx, web/c 폴더, web/a/Banner.tsx"
+    assert coder.named_files(text, rows) == {"web/c/Only.tsx", "web/a/Banner.tsx"}
+    picks = [FilePick(path="web/c/Only.tsx", reason="x")]
+    assert coder.skip_confirm(picks, {"web/c/Only.tsx"})
+    assert not coder.skip_confirm(picks, set())
+    new = [FilePick(path="web/c/Only.tsx", action="create", reason="x")]
+    assert not coder.skip_confirm(new, {"web/c/Only.tsx"})
+    assert not coder.skip_confirm([], set())
 
 
 def test_review_can_add_a_file_in_fix_pass(service: PlanningService, adapter) -> None:
@@ -773,6 +926,40 @@ def test_revise_only_for_waiting_task_with_open_pr(service: PlanningService, ada
     with pytest.raises(ActionError) as err:
         run(service.revise_dev_task("T-D1", "   "))
     assert err.value.code == "INVALID_INPUT"
+
+
+def test_revise_rewrites_only_the_files_the_instruction_points_to(
+    service: PlanningService, adapter
+) -> None:
+    """수정 지시는 가리킨 PR 파일만 다시 쓴다. 어느 파일인지 모르면 LLM 없이 사람에게 묻는다."""
+    fake = FakeLLM(
+        writes={
+            BANNER: lambda d: BANNER_FIX if d.get("instruction") else BANNER_NEW,
+            NOTICE: lambda d: (
+                "export const NOTICE = '내일 배송'\n" if d.get("instruction") else NOTICE_NEW
+            ),
+        },
+        reviews=[CodeReview(verdict="불일치", notes=["a"]), CodeReview(verdict="통과")],
+    )
+    coder.set_llm(fake)
+    run(_go(service))
+    assert _task(service).coding.status == "waiting_human"  # 고칠 게 없는 불일치
+
+    async def revise(text: str):
+        await service.revise_dev_task("T-D1", text)
+        await service.wait_coding()
+
+    before = len(fake.calls)
+    run(revise("Notice.tsx 공지를 내일 배송으로 바꿔"))
+    wrote = [x[2]["path"] for x in fake.calls[before:] if x[0] == "FileWrite"]
+    assert wrote == [NOTICE]
+    c = _task(service).coding
+    assert {f.path for f in c.files} == {BANNER, NOTICE}  # 안 고친 파일도 PR 목록에 남는다
+    assert any("2개 중 1개만 고침" in a.text for a in service.state.activity)
+
+    assert coder.revise_targets("색을 바꿔", [BANNER, NOTICE]) == []
+    assert coder.revise_targets("색을 바꿔", [BANNER]) == [BANNER]
+    assert coder.revise_targets("banner 여백", [BANNER, NOTICE]) == [BANNER]
 
 
 # ---------------------------------------------------------------- 작업 대기열 (같은 파일은 차례로)
@@ -948,7 +1135,7 @@ def test_base_changed_before_pr_rewrites_once(service: PlanningService, adapter)
     c = _task(service).coding
     assert c.status == "merged"
     assert "code.rebase" in _points(service)
-    assert [x[0] for x in fake.calls].count("CodeReview") == 2  # 다시 쓴 뒤 다시 리뷰
+    assert [x[0] for x in fake.calls].count("CodeReview") == 1  # 다시 쓴 뒤 다시 리뷰하지 않음
 
 
 def test_merge_conflict_retry_closes_pr_and_rewrites(service: PlanningService, adapter) -> None:
@@ -1517,3 +1704,163 @@ def test_secret_files_never_listed_or_picked() -> None:
     picks.append(FilePick(path="deploy/new.pem", action="create", reason="x"))
     kept, dropped = coder.check_picks(picks, {".env", "src/app.ts"})
     assert [p.path for p in kept] == ["src/app.ts"] and dropped == 2
+
+
+# ------------------------------------------------------------ 위험도(파일로만) · 사람이 고른 파일
+
+
+def test_risk_is_decided_by_files_not_line_count(service: PlanningService) -> None:
+    from dev_agent.risk import risk_of
+
+    s = service.state
+    assert risk_of(s, [CHECKOUT])[0] == "high"  # 결제 화면은 한 줄이어도 높음
+    assert risk_of(s, ["shop-web/src/styles/app.css", "docs/guide.md"])[0] == "low"
+    assert risk_of(s, ["shop-web/src/locales/ko.json"])[0] == "low"
+    # 가장 위험한 파일이 등급이다
+    assert risk_of(s, ["shop-web/src/styles/app.css", BANNER])[0] == "medium"
+    assert risk_of(s, ["web/vite.config.ts"]) == (
+        "high",
+        "빌드·배포·의존성 파일 web/vite.config.ts",
+    )
+    assert risk_of(s, ["backend/shop-api/src/x.py"])[0] == "high"
+    assert risk_of(s, [".claude/settings.json"])[0] == "high"
+    assert risk_of(s, ["shop-web/src/config.json"])[0] == "medium"
+
+
+def test_low_risk_skips_llm_review_and_needs_ci(service: PlanningService, adapter) -> None:
+    css = "shop-web/src/styles/app.css"
+    adapter.seed_files({css: ".a { color: red; }\n"})
+    fake = FakeLLM(
+        plan=CodePlan(files=[FilePick(path=css, reason="색")]),
+        writes={css: ".a { color: blue; }\n"},
+    )
+    coder.set_llm(fake)
+    run(_go(service, plan=f"{css} 색을 파랑으로"))
+    c = _task(service).coding
+    assert c.status == "merged" and c.risk == "low", c.error
+    assert "CodeReview" not in [x[0] for x in fake.calls]
+    assert any("리뷰 생략 (위험도 낮음)" in a.text for a in service.state.activity)
+
+
+def test_high_risk_waits_for_human_after_review(service: PlanningService, adapter) -> None:
+    pkg = "shop-web/package.json"
+    adapter.seed_files({pkg: '{"name": "shop"}\n'})
+    fake = FakeLLM(
+        plan=CodePlan(files=[FilePick(path=pkg, reason="이름")]),
+        writes={pkg: '{"name": "shop-web"}\n'},
+    )
+    coder.set_llm(fake)
+    run(_go(service, plan=f"{pkg} 이름 바꾸기"))
+    c = _task(service).coding
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert c.status == "waiting_human" and not pr.merged
+    assert c.risk == "high" and "위험도 높음" in (c.error or "")
+    assert [x[0] for x in fake.calls].count("CodeReview") == 1
+
+
+def test_human_picked_files_skip_ai_choosing(service: PlanningService, adapter) -> None:
+    """'고칠 파일을 고르지 못함' → 사람이 파일을 골라 다시 시도하면 AI가 고르지 않고 바로 쓴다."""
+    fake = FakeLLM(plan=CodePlan(files=[]), writes={BANNER: BANNER_NEW})
+    coder.set_llm(fake)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "failed" and c.error == "고칠 파일을 고르지 못함"
+
+    before = len(fake.calls)
+    with pytest.raises(ActionError):
+        run(service.retry_dev_task("T-D1", paths=["../etc/passwd"]))
+    run(_retry_paths(service, "T-D1", [BANNER]))
+    names = [x[0] for x in fake.calls[before:]]
+    assert "CodePlan" not in names and names.count("FileWrite") == 1
+    c = _task(service).coding
+    assert c.status == "merged" and c.picked == [BANNER], c.error
+    assert any("사람이 고른 파일 1개" in a.text for a in service.state.activity)
+
+
+async def _retry_paths(svc: PlanningService, task_id: str, paths: list[str]):
+    out = await svc.retry_dev_task(task_id, paths=paths)
+    await svc.wait_coding()
+    return out
+
+
+# ------------------------------------------------ 멈춘 뒤 이어서: 에이전트가 스스로 다시 하기
+
+
+def test_agent_retries_once_after_a_passing_llm_error(
+    service: PlanningService, adapter, monkeypatch
+) -> None:
+    """AI 응답 오류는 잠깐 생긴 오류라 에이전트가 한 번 스스로 다시 한다. 또 실패하면 사람 확인."""
+    from dev_agent import service as dev_service
+
+    monkeypatch.setattr(dev_service, "AUTO_RETRY_SECONDS", 0)
+    llm = FakeLLM(fail={"CodeReview"})
+    coder.set_llm(llm)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "failed" and c.transient and c.auto_retries == 0
+
+    async def tick():
+        out = await service.auto_retry_stuck()
+        await service.wait_coding()
+        return out
+
+    assert run(tick()) == ["T-D1"]  # 아직 실패하는 채로 한 번 다시
+    c = _task(service).coding
+    assert c.status == "failed" and c.auto_retries == 1
+    assert run(tick()) == []  # 횟수를 다 써서 사람 확인으로 남는다
+    assert any("에이전트가 다시 시도" in a.text for a in service.state.activity)
+
+    llm.fail = set()
+    run(_retry(service, "T-D1"))  # 사람이 다시 시도하면 횟수는 처음부터
+    c = _task(service).coding
+    assert c.status == "merged" and c.auto_retries == 0
+
+
+def test_plan_errors_are_not_retried_by_the_agent(
+    service: PlanningService, adapter, monkeypatch
+) -> None:
+    """파일을 못 고른 것처럼 사람이 정해야 하는 멈춤은 에이전트가 다시 하지 않는다."""
+    from dev_agent import service as dev_service
+
+    monkeypatch.setattr(dev_service, "AUTO_RETRY_SECONDS", 0)
+    coder.set_llm(FakeLLM(plan=CodePlan(files=[])))
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "failed" and not c.transient
+    assert run(service.auto_retry_stuck()) == []
+
+
+def test_agent_rewrites_once_after_merge_conflict(
+    service: PlanningService, adapter, monkeypatch
+) -> None:
+    from dev_agent import service as dev_service
+
+    monkeypatch.setattr(dev_service, "AUTO_RETRY_SECONDS", 0)
+
+    class Conflict(MockVcsAdapter):
+        clash = True
+
+        async def merge_change(self, number: int, method: str = "squash"):
+            if self.clash:
+                raise VcsError("conflict", "merge conflict")
+            return await super().merge_change(number, method)
+
+    broken = Conflict()
+    broken.seed_files(FILES)
+    vcs.set_vcs(broken)
+    coder.set_llm(FakeLLM(reviews=[CodeReview(verdict="통과", notes=[])] * 2))
+    run(_go(service))
+    c = _task(service).coding
+    first = c.pr
+    assert c.merge_conflict and c.transient and "에이전트가" in (c.error or "")
+
+    broken.clash = False
+
+    async def tick():
+        out = await service.auto_retry_stuck()
+        await service.wait_coding()
+        return out
+
+    assert run(tick()) == ["T-D1"]
+    c = _task(service).coding
+    assert c.status == "merged" and c.pr != first and c.auto_retries == 1

@@ -78,6 +78,7 @@ export const AGENT_NAME: Record<string, string> = {
   support: "고객지원 AI",
   marketing: "마케팅 AI",
   finance: "재무 AI",
+  archive: "아카이브 AI",
   hr: "인사 AI",
 };
 export const agentName = (dept: string) => AGENT_NAME[dept] ?? dept;

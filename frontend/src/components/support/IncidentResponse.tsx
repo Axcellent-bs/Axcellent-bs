@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "@/components/finance/bits";
 import { Link } from "@/lib/nav";
-import { STEP_STATUS, adminRelay, relayEnabled, type Incident } from "@/lib/adminRelay";
+import { adminRelay, relayEnabled, stepStatus, type Incident } from "@/lib/adminRelay";
 import { incidentTitle, skillKo, stepLabel } from "@/lib/agentChat";
 import { shortDateTime } from "@/lib/format";
 import { support, type ExecutionRow } from "@/lib/support";
@@ -45,7 +45,7 @@ export function buildRows(incident: Incident, executions: ExecutionRow[]): Row[]
       return {
         id: `step-${s.step_id}`, at: (done ? s.finished_at : null) ?? s.started_at!, source: "step" as const, label: stepLabel(s.label), who: "고객지원 AI",
         state: done ? "applied" : blocked ? "blocked" : "waiting",
-        stateLabel: done ? "적용됨" : STEP_STATUS[s.status]?.label ?? s.status, grade: s.grade,
+        stateLabel: done ? "적용됨" : stepStatus(s.status).label, grade: s.grade,
       };
     });
   const execs: Row[] = executions
@@ -61,14 +61,15 @@ export function buildRows(incident: Incident, executions: ExecutionRow[]): Row[]
 }
 
 /** 사건이 열린 뒤 몇 분 몇 초 만인지 */
-export function elapsed(fromIso: string, atIso: string): string {
+export function elapsed(fromIso: string | null, atIso: string): string {
+  if (!fromIso) return "–";
   const sec = Math.round((Date.parse(atIso) - Date.parse(fromIso)) / 1000);
   if (Number.isNaN(sec)) return "–";
   if (sec < 0) return "사건 시작 전";
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
   return `+${h ? `${h}시간 ` : ""}${m || h ? `${m}분 ` : ""}${s}초`;
 }
-const secondsOf = (iso: string) => new Date(iso).toLocaleTimeString("ko-KR", { hour12: false });
+const secondsOf = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour12: false }) : "–");
 
 function Detail({ incident, tick }: { incident: Incident; tick: number }) {
   const res = useResource(`support-executions-${incident.context_id}`, () => support.executions(incident.context_id), tick);
@@ -109,7 +110,7 @@ function Detail({ incident, tick }: { incident: Incident; tick: number }) {
                       <tr key={r.id} className="border-t border-ink-100 align-top">
                         <td className="whitespace-nowrap py-2 pr-3 tabular-nums"><b>{secondsOf(r.at)}</b><span className="block text-[11px] text-ink-500">{shortDateTime(r.at)}</span></td>
                         <td className="whitespace-nowrap py-2 pr-3 tabular-nums text-ink-700">{elapsed(incident.opened_at, r.at)}</td>
-                        <td className="py-2 pr-3 text-ink-900">{r.label}<span className="ml-1.5 text-[11px] text-ink-500">{r.source === "step" ? "총괄 단계" : "안전 관문 기록"}</span></td>
+                        <td className="py-2 pr-3 text-ink-900">{r.label}<span className="ml-1.5 text-[11px] text-ink-500">{r.source === "step" ? "총괄 AI 단계" : "안전 관문 기록"}</span></td>
                         <td className="whitespace-nowrap py-2 pr-3 text-ink-700">{r.who}</td>
                         <td className="whitespace-nowrap py-2"><Chip label={r.stateLabel} tone={STATE_TONE[r.state]} />{r.grade && <span className="ml-1.5 text-[11px] text-ink-500">{r.grade}등급</span>}</td>
                       </tr>
@@ -120,7 +121,7 @@ function Detail({ incident, tick }: { incident: Incident; tick: number }) {
             )}
             <IncidentCompensationList contextId={incident.context_id} tick={tick} />
             <p className="text-[11px] text-ink-500">
-              적용 시각은 안전 관문이 &quot;실행함&quot;으로 판정한 시각(또는 총괄 단계가 끝난 시각)입니다. 보류·검증 중인 건은 아직 적용 전이라 시각이 요청 시각입니다.
+              적용 시각은 안전 관문이 &quot;실행함&quot;으로 판정한 시각(또는 총괄 AI 단계가 끝난 시각)입니다. 보류·검증 중인 건은 아직 적용 전이라 시각이 요청 시각입니다.
               문의 단위 처리 내용은 <Link href="/console" className="underline">상담 콘솔</Link>의 AI 처리 내력에서 볼 수 있습니다.
             </p>
           </div>
@@ -134,13 +135,13 @@ export function IncidentResponse({ tick }: { tick: number }) {
   const list = useResource("support-incident-list", async () => ({ data: (await adminRelay.incidents()).data, meta: { mock: false } }), tick);
   const [picked, setPicked] = useState<string | null>(null);
   const incidents = useMemo(
-    () => [...(list.env?.data ?? [])].sort((a, b) => Date.parse(b.opened_at) - Date.parse(a.opened_at)),
+    () => [...(list.env?.data ?? [])].sort((a, b) => Date.parse(b.opened_at ?? "") - Date.parse(a.opened_at ?? "")),
     [list.env],
   );
   // 기본은 가장 최근의 결제 사건, 없으면 가장 최근 사건
   const current = incidents.find((i) => i.context_id === picked) ?? incidents.find((i) => i.component === "payment") ?? incidents[0];
 
-  if (!relayEnabled) return <Panel id="incident-response" title="사건 대응 기록"><Empty>총괄 읽기 연결이 꺼져 있어 사건을 불러올 수 없습니다.</Empty></Panel>;
+  if (!relayEnabled) return <Panel id="incident-response" title="사건 대응 기록"><Empty>총괄 AI 읽기 연결이 꺼져 있어 사건을 불러올 수 없습니다.</Empty></Panel>;
   const tools = incidents.length > 1 && current ? (
     <select className="field py-1 text-xs" value={current.context_id} onChange={(e) => setPicked(e.target.value)} aria-label="사건 고르기">
       {incidents.map((i) => <option key={i.context_id} value={i.context_id}>{shortDateTime(i.opened_at)} · {incidentTitle(i)}</option>)}
@@ -155,7 +156,7 @@ export function IncidentResponse({ tick }: { tick: number }) {
             <p className="text-sm"><b>{incidentTitle(current)}</b> <span className="text-ink-500">· {shortDateTime(current.opened_at)} 시작 · {current.status === "open" ? "대응 중" : current.status === "resolved" ? "해결됨" : "사람 확인 필요"}</span></p>
             <Detail incident={current} tick={tick} />
           </div>
-        ) : <Empty>아직 열린 사건이 없습니다. 쇼핑몰에서 문제가 감지되면 총괄이 사건을 열고 여기에 대응 기록이 쌓입니다.</Empty>}
+        ) : <Empty>아직 열린 사건이 없습니다. 쇼핑몰에서 문제가 감지되면 총괄 AI가 사건을 열고 여기에 대응 기록이 쌓입니다.</Empty>}
       </ResourceBody>
     </Panel>
   );

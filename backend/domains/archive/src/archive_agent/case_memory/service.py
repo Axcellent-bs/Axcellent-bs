@@ -319,6 +319,8 @@ async def record_event_times(svc: Services, request: AgentRequest) -> AgentResul
         extra["step_timings"] = new_timings
         await _store_judgments(svc, request.meta, params.context_id, extra, new_timings or [])
     await svc.memory.write_card(card.model_copy(update={"extra": extra}))
+    if timings_changed and extra.get("step_judgments") and svc.diagnose is not None:
+        await _check_repeats(svc, request.meta, params.context_id)
     svc.audit.record(
         params.context_id,
         "record_event_times",
@@ -334,6 +336,17 @@ async def record_event_times(svc: Services, request: AgentRequest) -> AgentResul
         outcome="recorded",
         evidence=evidence,
     )
+
+
+async def _check_repeats(svc: Services, meta: RequestMeta, context_id: str) -> None:
+    """판정을 저장한 뒤 인사 AI에 반복 확인을 맡긴다. 못 해도 시각 기록은 막지 않는다."""
+    assert svc.diagnose is not None
+    try:
+        done = await svc.diagnose(meta, context_id)
+    except Exception:  # noqa: BLE001 - 반복 확인은 덤이라 실패해도 기록을 막지 않는다
+        done = False
+    if not done:
+        svc.audit.record(context_id, "dept_eval.diagnosis_check_unavailable", {})
 
 
 async def _store_judgments(

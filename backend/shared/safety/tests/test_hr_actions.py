@@ -12,8 +12,10 @@ from ax_safety.gate import Gate
 A_ACTIONS = [
     "start_handover",
     "answer_handover_question",
-    "decide_candidate_card",
 ]
+
+# 결정 기록은 아카이브가 한다(2026-11-16 인사에서 분리): 요청자가 hr이 아니라 archive다
+ARCHIVE_A_ACTIONS = ["decide_candidate_card"]
 
 # hr에서 뺀 액션 (#374, #375). 등록하지 않으니 무엇을 보내도 미등록이라 C(사람 승인)다.
 REMOVED_ACTIONS = [
@@ -23,6 +25,16 @@ REMOVED_ACTIONS = [
     "update_onboarding_step",
     "confirm_offboarding",
 ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ARCHIVE_A_ACTIONS)
+async def test_archive_record_actions_are_a(gate: Gate, act, action: str) -> None:
+    decision = await gate.execute(act(action, "archive", f"ar-{action}"))
+    assert (decision.grade, decision.status) == ("A", "executed")
+    for other in ("hr", "support"):
+        denied = await gate.execute(act(action, other, f"ar-{action}-{other}"))
+        assert denied.hold_reason == HoldReason.UNREGISTERED_ACTION
 
 
 @pytest.mark.asyncio

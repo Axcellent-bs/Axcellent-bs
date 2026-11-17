@@ -19,7 +19,8 @@ const REASON: Record<string, string> = {
 }
 const kst = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '')
 
-export function NotionConnect() {
+/** readOnly: 일반 회원(도구 연결 › 문서). 회사 공용 연결이라 상태만 보이고 연결·확인·지우기 버튼은 없다 */
+export function NotionConnect({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [conn, setConn] = useState<NotionConnection | null>(null)
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
@@ -65,8 +66,8 @@ export function NotionConnect() {
         right={<>
           {offline && <StatusChip tone="wait">기획 AI에 연결할 수 없음</StatusChip>}
           {status && <StatusChip tone={status.tone}>{status.label}</StatusChip>}
-          {conn?.connected && <button type="button" className="btn-ghost" disabled={busy} onClick={() => void act(() => notionApi.check())}>연결 확인</button>}
-          {conn?.connected && conn.source === 'saved' && (
+          {!readOnly && conn?.connected && <button type="button" className="btn-ghost" disabled={busy} onClick={() => void act(() => notionApi.check())}>연결 확인</button>}
+          {!readOnly && conn?.connected && conn.source === 'saved' && (
             <button type="button" className="btn-quiet" disabled={busy}
               onClick={() => { if (window.confirm('노션 토큰을 지울까요? 기획의 "노션에서 가져오기"가 멈춰요.')) void act(() => notionApi.remove()) }}>지우기</button>
           )}
@@ -86,6 +87,7 @@ export function NotionConnect() {
 
       {back && <p className={`text-sm ${back === 'ok' ? 'text-emerald-700' : 'text-red-700'}`}>{BACK[back.split(':')[0]] ?? '노션 계정 연결 결과를 알 수 없어요.'}{back.includes(':') && <> <span className="mono">({back.split(':')[1]})</span> {REASON[back.split(':')[1]] ?? ''}</>}</p>}
 
+      {!readOnly && <>
       <div className="flex flex-wrap items-center gap-3 border-t border-ink-100 pt-4">
         <button type="button" className="btn-primary px-4" disabled={busy || offline || !conn?.oauth_ready} onClick={() => void startOauth()}>
           {conn?.source === 'saved' ? '다른 노션 계정으로 다시 연결' : '노션 계정 연결'}
@@ -113,6 +115,7 @@ export function NotionConnect() {
       </form>
       <p className="mt-1 text-xs text-ink-500">내부 통합은 가져올 노션 페이지마다 ··· › 연결 › 이 통합을 추가해야 읽혀요.</p>
       </details>
+      </>}
       {error && <p className="text-sm text-red-700">{error}</p>}
     </section>
   )

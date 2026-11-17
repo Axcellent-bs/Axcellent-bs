@@ -17,10 +17,10 @@ const GROUP_MS = 3 * 60_000;
 
 // 부서별 아바타 색 (디자인 토큰만 사용)
 const AVATAR: Record<string, string> = {
-  infra: "bg-ink-700 text-app", data: "bg-violet-700 text-white", memory: "bg-violet-700 text-white",
-  planning: "bg-brand-500 text-white", marketing: "bg-accent text-white", support: "bg-emerald-700 text-white",
-  finance: "bg-amber-700 text-white", hr: "bg-red-700 text-white", dev: "bg-ink-900 text-app",
-  human: "bg-ink-500 text-white", safety: "bg-brand-strong text-white", orchestrator: "bg-brand-strong text-white",
+  infra: "bg-ink-700 text-app", data: "bg-emerald-700 text-white", memory: "bg-emerald-700 text-white",
+  planning: "bg-brand-500 text-white", marketing: "bg-lime-300 text-ink-900", support: "bg-pink-300 text-ink-900",
+  finance: "bg-amber-700 text-white", hr: "bg-orange-500 text-white", archive: "bg-teal-500 text-white", dev: "bg-ink-900 text-app",
+  human: "bg-ink-500 text-white", safety: "bg-yellow-300 text-ink-900", orchestrator: "bg-violet-900 text-white",
 };
 export const avatarLook = (key: string) => AVATAR[key] ?? "bg-ink-500 text-white";
 

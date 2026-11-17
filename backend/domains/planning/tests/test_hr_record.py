@@ -43,7 +43,7 @@ class Hr:
         self.asked: list[AgentRequest] = []
 
     async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
-        assert target == "hr"
+        assert target == "archive"
         self.asked.append(req)
         if self.slow:
             await asyncio.sleep(1)
@@ -65,7 +65,7 @@ def _service(hr: Hr, gate=_ok_gate, timeout: float = 30.0) -> PlanningService:
 
 
 def _hr_acts(svc: PlanningService) -> list[str]:
-    return [a.text for a in svc.state.activity if a.point == "record_case" and a.to == "hr"]
+    return [a.text for a in svc.state.activity if a.point == "record_case" and a.to == "archive"]
 
 
 def test_mock_mode_has_no_recorder(service) -> None:

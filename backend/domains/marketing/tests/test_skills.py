@@ -88,7 +88,7 @@ def _fake_execute(monkeypatch: pytest.MonkeyPatch, decision: ExecuteDecision) ->
 def test_agent_card_matches_template_format() -> None:
     card = load_card()
     assert card.name == "marketing"
-    assert {s.id for s in card.skills} == set(handlers.HANDLERS)
+    assert {s.id for s in card.skills} == set(handlers.HANDLERS) | {"receive_improvement_note"}
     issue = next(s for s in card.skills if s.id == "issue_coupon")
     assert (issue.grade, issue.verifier) == ("A", None)
     assert client.get("/.well-known/agent-card.json").json()["name"] == "marketing"
@@ -607,6 +607,8 @@ def _banner_shop(monkeypatch: pytest.MonkeyPatch, handler=None) -> list[httpx.Re
             return handler(request)
         if request.method == "DELETE":
             return httpx.Response(200, json={"data": {"status": "ended"}, "meta": {}})
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": [], "meta": {}})
         body = json.loads(request.content)
         return httpx.Response(201, json={"data": {"notice_id": body["notice_id"]}, "meta": {}})
 
@@ -723,6 +725,8 @@ def test_end_banner_ignores_a_banner_the_shop_does_not_have(
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "DELETE":
             return httpx.Response(404, json={"error": {"code": "BANNER_NOT_FOUND"}})
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": []})
         body = json.loads(request.content)
         return httpx.Response(201, json={"data": {"notice_id": body["notice_id"]}})
 
@@ -1020,3 +1024,164 @@ def test_ended_banner_text_can_be_posted_again_for_a_new_event(
     second = _open_banner(OTHER)["output"]["notice_id"]
     assert second != first
     assert first in _posts(seen) and second in _posts(seen)
+
+
+# --- 정상화 배너 기한·중복 방지 ------------------------------------------------
+
+
+def _resolved_banner(context_id: str = CTX) -> dict:
+    return _call(
+        "publish_notice",
+        {
+            "draft_id": _call(
+                "draft_notice", {**DRAFT_INPUT, "kind": "incident_resolved"}, context_id=context_id
+            )["output"]["draft_id"]
+        },
+        context_id=context_id,
+    )
+
+
+def _posted_bodies(seen: list[httpx.Request]) -> list[dict]:
+    return [json.loads(r.content) for r in seen if r.method == "POST"]
+
+
+def _shop_with_posts(
+    monkeypatch: pytest.MonkeyPatch, fail_list: bool = False
+) -> list[httpx.Request]:
+    """올라온 배너를 기억했다가 목록으로 돌려주는 가짜 쇼핑몰."""
+    posted: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            if fail_list:
+                return httpx.Response(503, text="down")
+            return httpx.Response(200, json={"data": posted, "meta": {}})
+        if request.method == "DELETE":
+            return httpx.Response(200, json={"data": {"status": "ended"}, "meta": {}})
+        body = json.loads(request.content)
+        posted.append({**body, "status": "active"})
+        return httpx.Response(201, json={"data": {"notice_id": body["notice_id"]}, "meta": {}})
+
+    return _banner_shop(monkeypatch, handler)
+
+
+def test_resolved_banner_gets_an_expiry_but_incident_banner_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    now = datetime(2026, 11, 16, 3, 0, tzinfo=UTC)
+    handlers.STATE.notices.now = lambda: now
+    opened = _open_banner(CTX)["output"]["notice_id"]
+    resolved = _resolved_banner()["output"]["notice_id"]
+    by_id = {body["notice_id"]: body for body in _posted_bodies(seen)}
+    assert by_id[opened]["valid_to"] is None  # 장애 배너는 그대로
+    assert datetime.fromisoformat(by_id[resolved]["valid_to"]) == now + timedelta(hours=24)
+    view = _call("get_notice", {"notice_id": resolved}, token="mock:support")["output"]
+    assert datetime.fromisoformat(view["valid_to"]) == now + timedelta(hours=24)
+
+
+def test_resolved_banner_expiry_hours_can_be_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    monkeypatch.setenv("MARKETING_RESOLVED_BANNER_HOURS", "6")
+    now = datetime(2026, 11, 16, 3, 0, tzinfo=UTC)
+    handlers.STATE.notices.now = lambda: now
+    _resolved_banner()
+    assert datetime.fromisoformat(_posted_bodies(seen)[0]["valid_to"]) == now + timedelta(hours=6)
+    for bad in ("abc", "0", "-3"):
+        monkeypatch.setenv("MARKETING_RESOLVED_BANNER_HOURS", bad)
+        assert handlers.resolved_banner_hours() == 24.0
+
+
+def test_resolved_banner_keeps_a_given_expiry(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_execute(monkeypatch, _decision())
+    seen = _banner_shop(monkeypatch)
+    given = "2026-12-01T00:00:00+00:00"
+    draft = _draft("incident_resolved", valid_to=given)
+    _call("publish_notice", {"draft_id": draft})
+    assert datetime.fromisoformat(_posted_bodies(seen)[0]["valid_to"]) == datetime.fromisoformat(
+        given
+    )
+
+
+def test_resolved_banner_leaves_the_active_list_after_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_execute(monkeypatch, _decision())
+    _banner_shop(monkeypatch)
+    moment = [datetime(2026, 11, 16, 3, 0, tzinfo=UTC)]
+    handlers.STATE.notices.now = lambda: moment[0]
+    _resolved_banner()
+    assert _active()["total"] == 1
+    moment[0] += timedelta(hours=24, minutes=1)
+    assert _active()["total"] == 0
+
+
+def test_same_text_resolved_banner_from_a_second_event_is_not_posted_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """같은 문구의 정상화 배너가 기한을 두고 떠 있으면 새로 올리지 않고 그대로 둔다."""
+    _fake_execute(monkeypatch, _decision())
+    seen = _shop_with_posts(monkeypatch)
+    first = _resolved_banner(CTX)["output"]["notice_id"]
+    second = _resolved_banner(OTHER)["output"]["notice_id"]
+    assert second == first
+    assert len(_posted_bodies(seen)) == 1
+    assert _deletes(seen) == []
+
+
+def test_resolved_banner_dedupe_survives_a_marketing_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_execute(monkeypatch, _decision())
+    seen = _shop_with_posts(monkeypatch)
+    first = _resolved_banner(CTX)["output"]["notice_id"]
+    handlers.STATE.notices = type(handlers.STATE.notices)()  # 재시작: 메모리를 잊는다
+    second = _resolved_banner(OTHER)["output"]["notice_id"]
+    assert second == first and len(_posted_bodies(seen)) == 1
+
+
+def test_resolved_banner_reuse_still_takes_down_the_incident_banner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_execute(monkeypatch, _decision())
+    seen = _shop_with_posts(monkeypatch)
+    _resolved_banner(CTX)
+    opened = _open_banner(OTHER, facts={"component": "db"})["output"]["notice_id"]
+    _resolved_banner(OTHER)  # 다른 문구(db)라 새 배너
+    _open_banner("ctx_inc_0003")
+    reused = _resolved_banner("ctx_inc_0003")
+    assert reused["status"] == "completed"
+    assert opened in _deletes(seen) and len(_deletes(seen)) == 2
+
+
+def test_resolved_banner_without_expiry_in_the_shop_is_not_reused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """기한 없는 옛 배너를 같이 쓰면 영영 안 내려가므로 새 배너를 올린다."""
+    _fake_execute(monkeypatch, _decision())
+    text = _call("draft_notice", {**DRAFT_INPUT, "kind": "incident_resolved"})["output"][
+        "public_text"
+    ]
+    legacy = {"notice_id": "ntc_legacy", "text": text, "status": "active", "valid_to": None}
+    seen = _banner_shop(
+        monkeypatch,
+        lambda r: httpx.Response(
+            200 if r.method == "GET" else 201,
+            json={"data": [legacy] if r.method == "GET" else {"notice_id": "x"}, "meta": {}},
+        ),
+    )
+    result = _resolved_banner()
+    assert result["output"]["notice_id"] != "ntc_legacy"
+    assert len(_posted_bodies(seen)) == 1
+
+
+def test_banner_list_failure_does_not_block_a_resolved_banner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_execute(monkeypatch, _decision())
+    seen = _shop_with_posts(monkeypatch, fail_list=True)
+    result = _resolved_banner()
+    assert result["status"] == "completed"
+    assert len(_posted_bodies(seen)) == 1

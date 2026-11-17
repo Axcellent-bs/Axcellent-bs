@@ -19,7 +19,7 @@ from ax_contracts.schemas.hr import FindSimilarFraudCardsOutput
 
 SendFn = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 
-TARGET = "hr"  # 부서 이름으로 부르면 skill을 맡은 서비스(decisions)로 간다 (services.py)
+TARGET = "archive"  # 부서 이름으로 부르면 skill을 맡은 서비스(decisions)로 간다 (services.py)
 SKILL = "find_similar_fraud_cards"
 SOURCE = f"hr.{SKILL}"
 TIMEOUT_SECONDS = 5.0

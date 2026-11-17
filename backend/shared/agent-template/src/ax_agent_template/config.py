@@ -20,10 +20,12 @@ DEFAULT_PORTS: dict[str, int] = {
     "memory": 8002,
     "shop-api": 8010,
     "dashboard-api": 8020,
+    "dejafix-proxy": 8030,
     "planning": 8101,
     "support": 8102,
     "marketing": 8103,
     "hr": 8104,
+    "archive": 8114,  # 아카이브 AI = 서비스 decisions
     "finance": 8105,
     "data": 8106,
     "infra": 8107,

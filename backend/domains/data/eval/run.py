@@ -187,14 +187,20 @@ def _impact_allowed(got: ImpactAnalysisOutput, usual: float | None) -> dict[str,
 
     실패 주문 수·영향 고객 수·피해 금액·초과분은 skill 출력에서 가져온다. 평소 실패 수는 실서버
     계산을 검증하려고 근거 문장을 읽지 않고 평가가 케이스의 지난 7일 결제 기록으로 직접 센 값
-    (`eval_world.usual_fault_failures`)을 넣는다. 모르면(None) 넣지 않는다.
+    (`eval_world.usual_fault_failures`)을 넣는다. 모르면(None) 넣지 않는다. 시간 초과 결제
+    (건수, 금액)는 skill 출력에 있을 때만 넣는다(실서버도 셀 수 있었을 때만 facts에 넣는다).
     """
     counts = ImpactCounts(
         failed_order_count=got.failed_order_count,
         affected_customer_count=got.affected_customer_count,
         damage_amount=got.damage_amount,
     )
-    return impact_facts(counts, got.excess_failed_order_count, usual)
+    timeout = (
+        (got.timeout_count, got.timeout_amount)
+        if got.timeout_count is not None and got.timeout_amount is not None
+        else None
+    )
+    return impact_facts(counts, got.excess_failed_order_count, usual, timeout)
 
 
 def _fabricated(summary: str, allowed: dict[str, int | float | str]) -> bool:

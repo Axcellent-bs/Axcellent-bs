@@ -307,6 +307,12 @@ def linked_incident_paras(state: State, pr: PR) -> dict[str, str]:
     return linked
 
 
+def incident_paths(state: State) -> set[str]:
+    """장애 표시(link_incident) 문단의 PR이 바꾼 경로. 이 경로를 또 고치면 위험이 크다."""
+    marked = _incident_paras(state)
+    return {p for pr in state.prs if _para_key(state, pr) in marked for p in pr.changed_paths}
+
+
 def linked_incident_count(state: State, pr: PR) -> int:
     """장애 표시 문단 연결 수."""
     return len(linked_incident_paras(state, pr))

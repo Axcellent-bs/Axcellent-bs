@@ -62,10 +62,10 @@ export interface QueueItem {
   params: Record<string, number | string | boolean | string[]>
   at?: string
   decide_with?: Action
-  evidence?: CrossEvidence[] // 교차검증 근거 (merge_pr, 총괄·데이터분석에 물은 결과)
+  evidence?: CrossEvidence[] // 교차검증 근거 (merge_pr, 총괄 AI·데이터분석에 물은 결과)
 }
 
-const VERIFIER: Record<QueueItem['action'], string> = { confirm_spec: '인사 check_plan', merge_pr: '총괄 · 데이터분석 근거 → 안전 관문' }
+const VERIFIER: Record<QueueItem['action'], string> = { confirm_spec: '인사 check_plan', merge_pr: '총괄 AI · 데이터분석 근거 → 안전 관문' }
 
 function toReview(q: QueueItem, ctxOf: (ref: string) => string): CrossReview & { decideWith?: Action } {
   const done = /승인|확정|머지/.test(q.state) ? '승인' : /거절/.test(q.state) ? '거절' : undefined
@@ -269,11 +269,14 @@ export interface VcsConnection {
   paths: string[]; mount?: string; token_set: boolean; token_hint: string; source: 'screen' | 'env'
   // 인증: token(사람 토큰) · app(GitHub App). App 개인 키는 넣었는지만 온다
   auth?: VcsAuth; app_id?: string; installation_id?: string; key_set?: boolean
+  // 공용 보관함의 GitHub 앱(github_app) id와 이름. 비어 있으면 예전 방식(앱 정보를 레포마다 넣음)
+  app_ref?: string; app_name?: string
 }
 export type VcsAuth = 'token' | 'app'
 export interface VcsConnectionInput {
   id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string
   auth?: VcsAuth; app_id?: string; installation_id?: string; private_key?: string
+  app_ref?: string // GitHub App: 보관함 github_app 연결 id (이것을 보내면 앱 정보는 보관함 것을 쓴다)
   detect_branch?: boolean // 브랜치를 비우면 레포 기본 브랜치를 읽어 넣는다 (GitHub)
 }
 export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string; inventory?: VcsInventory | null }
@@ -381,6 +384,10 @@ export const devTaskApi = (base: string) => ({
     return d as DevTaskStarted
   }),
   retry: (taskId: string, approved = false) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post(approved ? { approved } : {})),
+  // 파일 직접 고르기: 사람이 고른 파일로 다시 시도 (AI가 파일을 고르지 않고 바로 쓴다)
+  retryWith: (taskId: string, paths: string[]) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post({ paths })),
+  // 파일 직접 고르기 후보: 작업 연결 레포 파일 (q로 검색, 최대 50개)
+  files: (taskId: string, q = '') => call<{ files: string[]; existing: number }>(base, `/dev-tasks/${encodeURIComponent(taskId)}/files?q=${encodeURIComponent(q)}`),
   // PR 열기 보류 건 새로 받기 (만료·모름). 받은 review_id를 사람이 승인한 뒤 retry(approved)
   renewHold: (taskId: string) => call<{ review_id: string | null }>(base, `/dev-tasks/${encodeURIComponent(taskId)}/renew-hold`, post()),
   cancel: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/cancel`, post()),
@@ -417,6 +424,8 @@ export const chatApi = (base: string) => {
     list: (account: string) => call<unknown>(base, `/dev-chat?account=${encodeURIComponent(account)}`).then(toThreads),
     get: (id: string, account: string) => call<unknown>(base, `/dev-chat/${encodeURIComponent(id)}?account=${encodeURIComponent(account)}`).then(one),
     send: (x: ChatSend) => call<unknown>(base, '/dev-chat', post(x)).then(one),
+    // 멈춘 작업을 AI 대화로 넘기기: 작업과 이어진 새 대화. 대화에서 파일을 정하고 '진행해'면 같은 작업을 다시 시도
+    fromTask: (taskId: string, account: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/to-chat`, post({ account })).then(one),
   }
 }
 

@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -45,6 +46,8 @@ from ax_contracts.schemas import (
     TeamHeadcountInput,
     TeamHeadcountOutput,
 )
+from ax_contracts.schemas.book_issue import BookIssueInput, BookIssueReport
+from finance_agent.rules import load_rules
 
 DATA_CALL_SECONDS = 10.0
 SHOP_CALL_SECONDS = 5.0
@@ -104,6 +107,10 @@ class Sources(Protocol):
     async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None: ...
 
     def forget_headcount(self, month: str) -> None: ...
+
+    async def book_issue_report(
+        self, meta: RequestMeta, product_ids: list[str]
+    ) -> BookIssueReport | None: ...
 
 
 def _int(value: Any) -> int | None:
@@ -169,6 +176,18 @@ class MockSources:
         """목 모드는 장부 시드(`seed_incidents`)로 구간을 알아서 총괄을 읽지 않는다."""
         return None
 
+    async def book_issue_report(
+        self, meta: RequestMeta, product_ids: list[str]
+    ) -> BookIssueReport | None:
+        """시드의 책별 집계(`book_issue_report`). 시드에 없으면 None(= 못 읽음)."""
+        row = self.seed.get("book_issue_report")
+        if not row:
+            return None
+        try:
+            return BookIssueReport.model_validate(row)
+        except ValidationError:
+            return None
+
     async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None:
         """시드의 월별 팀 인원. 그 달이 없으면 그 전 가장 가까운 달(발령이 없던 달)을 쓴다."""
         months = self.seed.get("team_headcount") or {}
@@ -198,6 +217,7 @@ HR_CALL_SECONDS = 10.0
 IMPACT_CACHE_SECONDS = 300
 
 impact_log = logging.getLogger("finance.impact")
+reaction_log = logging.getLogger("finance.customer_reaction")
 
 
 def _started_at(output: dict[str, Any] | None) -> datetime | None:
@@ -226,6 +246,42 @@ def _log_impact(context_id: str, cache: str, **fields: Any) -> None:
     """
     line = {"event": "impact_analysis", "context_id": context_id, "cache": cache, **fields}
     impact_log.info(json.dumps(line, ensure_ascii=False))
+
+
+def store_key(key: tuple[str, str]) -> str:
+    """(사건, 구간 JSON) → 저장 파일 키."""
+    return f"{key[0]}|{key[1]}"
+
+
+def impact_to_row(impact: Impact) -> dict[str, Any]:
+    """저장 파일에 남길 모양 (JSON)."""
+    return {
+        "failed_orders": impact.failed_orders,
+        "affected_customers": impact.affected_customers,
+        "lost_amount": impact.lost_amount,
+        "affected_customer_ids": sorted(impact.affected_customer_ids),
+        "ref": impact.ref,
+        "by_category": [list(c) for c in impact.by_category],
+        "window_exact": impact.window_exact,
+    }
+
+
+def impact_from_row(row: dict[str, Any]) -> Impact | None:
+    """저장 파일 모양 → Impact. 모양이 다르면 None (다시 묻는다)."""
+    try:
+        return Impact(
+            failed_orders=int(row["failed_orders"]),
+            affected_customers=int(row["affected_customers"]),
+            lost_amount=int(row["lost_amount"]),
+            affected_customer_ids=frozenset(str(i) for i in row.get("affected_customer_ids", [])),
+            ref=str(row.get("ref", "")),
+            by_category=tuple(
+                (str(c[0]), int(c[1]), int(c[2])) for c in row.get("by_category", [])
+            ),
+            window_exact=bool(row.get("window_exact", True)),
+        )
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
 
 
 class LiveSources:
@@ -264,6 +320,10 @@ class LiveSources:
             return None
         body = payload.model_dump(mode="json", exclude_none=True)
         key = (context_id, json.dumps(body, sort_keys=True))
+        stored = self._stored_impact(key) if final else None
+        if stored is not None:  # 닫힌 사건: 다시 켜도 저장해 둔 결과를 쓴다 (data에 다시 묻지 않음)
+            _log_impact(context_id, "stored")
+            return stored
         hit = self._impact_cache.get(key)
         if hit is not None and (hit[2] or time.monotonic() - hit[0] < IMPACT_CACHE_SECONDS):
             _log_impact(context_id, "hit")
@@ -287,9 +347,19 @@ class LiveSources:
             future.set_result(impact)
             if impact is not None:  # 실패는 기억하지 않는다 (다음 호출이 다시 묻는다)
                 self._impact_cache[key] = (time.monotonic(), impact, final)
+                if final:
+                    self._store_impact(key, impact)
             return impact
         finally:
             self._impact_inflight.pop(key, None)
+
+    def _stored_impact(self, key: tuple[str, str]) -> Impact | None:
+        row = self.final_store().get(store_key(key)) if self.final_store else None
+        return impact_from_row(row) if row else None
+
+    def _store_impact(self, key: tuple[str, str], impact: Impact) -> None:
+        if self.final_store is not None:
+            self.final_store()[store_key(key)] = impact_to_row(impact)
 
     async def _fetch_impact(
         self, meta: RequestMeta, context_id: str, body: dict[str, Any]
@@ -321,11 +391,43 @@ class LiveSources:
 
     def __init__(self, http_client: httpx.AsyncClient | None = None) -> None:
         self._http = http_client  # 테스트용
+        # 닫힌 사건의 영향을 저장 파일에 남기는 곳 (재무 기록 `final_impacts`, State가 잇는다).
+        # 없으면 프로세스 메모리에만 기억한다
+        self.final_store: Callable[[], dict[str, dict[str, Any]]] | None = None
         # (사건, 구간) → (받은 시각, 영향, 닫힌 사건인지)
         self._impact_cache: dict[tuple[str, str], tuple[float, Impact | None, bool]] = {}
         # (사건, 구간) → 지금 데이터분석에 묻는 중인 요청의 결과
         self._impact_inflight: dict[tuple[str, str], asyncio.Future[Impact | None]] = {}
         self._headcount_cache: dict[str, tuple[float, TeamHeadcountOutput | None]] = {}
+
+    async def book_issue_report(
+        self, meta: RequestMeta, product_ids: list[str]
+    ) -> BookIssueReport | None:
+        """고객지원 `book_issue_stats`(읽기, 서비스 `claims`)로 최근 30일 책별 집계를 읽는다.
+
+        예산 의견을 붙잡지 않게 제한 시간(`[customer_reaction] call_seconds`, 기본 3초)이 지나거나
+        오류가 나거나 응답이 계약과 다르면 None(= 못 읽음)이다. 문의는 읽지 않는다.
+        """
+        seconds = load_rules().customer_reaction.call_seconds
+        deadline = min(meta.deadline, datetime.now(UTC) + timedelta(seconds=seconds))
+        request = AgentRequest(
+            meta=meta.model_copy(update={"deadline": deadline}),
+            skill="book_issue_stats",
+            input=BookIssueInput(
+                period="month", product_ids=product_ids, include_inquiries=False
+            ).model_dump(mode="json"),
+        )
+        try:
+            result = await asyncio.wait_for(call_agent("support", request), timeout=seconds + 0.5)
+        except Exception:  # noqa: BLE001 - 시간 초과·오류 모두 못 읽음이다. 예산 의견은 그대로 낸다
+            reaction_log.warning("고객지원 책별 집계를 읽지 못했다", exc_info=False)
+            return None
+        if result.status != TaskStatus.COMPLETED:
+            return None
+        try:
+            return BookIssueReport.model_validate(result.output)
+        except ValidationError:
+            return None
 
     async def team_headcount(self, meta: RequestMeta, month: str) -> TeamHeadcountOutput | None:
         """인사 `team_headcount` (읽기). 응답이 없거나 계약과 다르면 None."""

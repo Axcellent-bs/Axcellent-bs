@@ -67,9 +67,31 @@ def test_start_needs_a_person(client: TestClient, fake: Fake) -> None:
     assert fake.calls == []
 
 
+def test_start_without_video_sends_no_video_fields(client: TestClient, fake: Fake) -> None:
+    assert client.post("/api/dashboard/campaigns/start", json=START).status_code == 200
+    payload = fake.calls[0][1].input
+    assert "video_url" not in payload and "test" not in payload
+
+
+@pytest.mark.parametrize("test_flag", [True, False])
+def test_start_passes_video_url_and_test_through(
+    client: TestClient, fake: Fake, test_flag: bool
+) -> None:
+    url = "https://www.youtube.com/shorts/abc123"
+    body = START | {"video_url": url, "test": test_flag}
+    assert client.post("/api/dashboard/campaigns/start", json=body).status_code == 200
+    payload = fake.calls[0][1].input
+    assert payload["video_url"] == url and payload["test"] is test_flag
+
+
 @pytest.mark.parametrize(
     "bad",
-    [START | {"budget_krw": 0}, START | {"campaign_id": "../x"}, START | {"channel": ""}],
+    [
+        START | {"budget_krw": 0},
+        START | {"campaign_id": "../x"},
+        START | {"channel": ""},
+        START | {"video_url": "https://www.youtube.com/shorts/abc123"},
+    ],
 )
 def test_bad_start_stops_before_marketing(client: TestClient, fake: Fake, bad: dict) -> None:
     assert client.post("/api/dashboard/campaigns/start", json=bad).status_code == 422

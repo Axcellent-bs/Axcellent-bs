@@ -8,20 +8,11 @@ import { humanizePlanIds } from '@/lib/format'
 export interface CodeLine { path: string; line?: number; text: string }
 export interface TraceStep { kind: '코드' | 'PR' | '작업' | '문단' | '결정' | '기각 이력' | '기획서' | '요청' | '근거' | '장애'; title: string; detail?: string; href?: string }
 
-// PR이 바꾼 곳. 1) 개발 AI 코딩 기록의 바뀐 파일(실제 기록, 파일 단위)
-// 2) 예시 데이터의 대표 줄(예시 기획서 문단에만 있음). 둘 다 없으면 지어내지 않고 빈 목록
+// PR이 바꾼 곳: 개발 AI 코딩 기록의 바뀐 파일(실제 기록, 파일 단위). 없으면 지어내지 않고 빈 목록
 export function codeOf(s: State, pr: PR): CodeLine[] {
   const task = s.tasks.find((t) => t.id === pr.task)
   const files = task?.coding?.files ?? []
   if (files.length) return files.map((f) => ({ path: f.path, text: `+${f.additions ?? 0} −${f.deletions ?? 0}${f.reason ? ` · ${f.reason}` : ''}` }))
-  const key = `${task?.spec}:${task?.para}`
-  if (key === 'SPEC-5:R3') return [{ path: 'shop-api/payment/config.py', line: 12, text: 'PAYMENT_TIMEOUT_MS = 8000' }]
-  if (key === 'SPEC-7:R1') return [
-    { path: 'shop-api/cart/service.py', line: 41, text: 'if payment.failed: keep_cart(cart, mark_sold_out=True)' },
-    { path: 'shop-api/cart/service.py', line: 42, text: 'return CartResult(kept=True, reason="payment_failed")' },
-  ]
-  if (key === 'SPEC-6:R1') return [{ path: 'shop-api/payment/rollout.py', line: 8, text: 'CANARY_PERCENT = 5  # 5%에 먼저 내보내고 이상 없으면 전체' }]
-  if (key === 'SPEC-7:R2') return [{ path: 'shop-web/checkout/FailNotice.tsx', line: 18, text: '<RetryButton to="/checkout" keepCart />' }]
   return []
 }
 

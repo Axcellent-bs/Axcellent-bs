@@ -27,6 +27,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from ax_agent_template import improvement_notes
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas import Evidence, RequestMeta
 from ax_contracts.schemas.data import (
@@ -66,6 +67,30 @@ _PROMPT = (
     "- confidence: 근거가 직접적이고 시간이 맞으면 high, 정황만 있으면 mid, 약하면 low.\n"
     f"- 후보는 최대 {MAX_HYPOTHESES}개. 근거가 없으면 빈 목록으로 답한다."
 )
+
+
+# 총괄 AI가 이 단계에 보낸 개선 노트가 있을 때 프롬프트에 더하는 규칙. 노트의 숫자·시각이
+# 설명에 새어 들어가면 출력 검증이 후보를 버리므로, 노트는 숫자 없는 한 줄 요지로만 주고
+# 근거(fact_ids)로 쓰지 못하게 한다
+_NOTE_RULE = (
+    "- notes에는 총괄 AI가 이 단계에 보낸 진단 메모가 있다.\n"
+    "  이 단계가 최근 반복해 오래 걸렸다는 뜻이다.\n"
+    "  notes는 근거가 아니다: fact_ids로 쓰지 않고 explanation에도 옮겨 쓰지 않는다.\n"
+    "  대신 explanation을 한 문장으로 짧게 쓴다."
+)
+NOTE_STEP = "root_cause"
+MAX_NOTES_IN_PROMPT = 3
+
+
+def recent_notes(service: str = "data") -> list[str]:
+    """이 단계에 걸린 참고할 수 있는 개선 노트를 숫자 없는 한 줄 요지로(최대 3개)."""
+    notes = improvement_notes.store_for(service).active_notes(NOTE_STEP, MAX_NOTES_IN_PROMPT)
+    return [
+        "최근 이 단계가 반복해 오래 걸렸다 ("
+        + ("원인 확정" if n.get("cause_known", True) else "원인 미확정")
+        + ")"
+        for n in notes
+    ]
 
 
 class _Candidate(BaseModel):
@@ -231,9 +256,18 @@ async def _ask_llm(facts: list[CauseFact], llm: LLMClient, context_id: str) -> l
         for f in facts
         if f.kind != "unavailable"
     ]
-    result = await llm.structured(
-        _PROMPT, _Candidates, untrusted={"facts": shown}, context_id=context_id
-    )
+    notes = recent_notes()
+    if not notes:  # 노트가 없으면 전과 똑같이 묻는다
+        result = await llm.structured(
+            _PROMPT, _Candidates, untrusted={"facts": shown}, context_id=context_id
+        )
+    else:
+        result = await llm.structured(
+            f"{_PROMPT}\n{_NOTE_RULE}",
+            _Candidates,
+            untrusted={"facts": shown, "notes": notes},
+            context_id=context_id,
+        )
     return result.hypotheses
 
 

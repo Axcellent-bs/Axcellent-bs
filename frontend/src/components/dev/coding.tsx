@@ -1,17 +1,22 @@
 // 코딩 에이전트: AI와 대화(chat.tsx)로 시작한 작업은 파일 읽기 → 작성 → 리뷰 → PR까지 간다.
 // 진행 상태는 Task.coding으로 SSE를 타고 온다
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, RELATION_LABEL, byRelation, type CodingRun, type CodingStatus, type Request, type State as S, type Task } from '@/lib/planningData'
-import { DEV_API, PlanningApiError, approveReview, devTaskApi, planningApi, useCodingLimits } from '@/lib/planning'
+import { DEV_API, PlanningApiError, approveReview, chatApi, devTaskApi, planningApi, useCodingLimits } from '@/lib/planning'
+import { openDevChat } from '@/components/dev/chatOpen'
+import { useSession } from '@/demo/session'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Step } from '@/components/planning-common/flow'
 import './usage.css'
-import { Ref, idText } from '@/components/planning-common/links'
+import { Ref, idText, toPath } from '@/components/planning-common/links'
 import { humanizePlanIds } from '@/lib/format'
+import { recoveryOf, type RecoveryAction } from '@/lib/codingRecovery'
+import { Link } from '@/lib/nav'
 
 const api = devTaskApi(DEV_API)
 const actions = planningApi(DEV_API)
+const chats = chatApi(DEV_API)
 
 export const CODING_LABEL: Record<CodingStatus, string> = {
   queued: '대기', claimed: '맡음', reading: '파일 읽는 중', writing: '코드 작성 중', reviewing: '리뷰 중',
@@ -54,6 +59,68 @@ export const canReturn = (t: Task) => !t.discarded && t.state !== '완료' && ![
 const DEPTS = ['marketing', 'support', 'finance', 'hr', 'data', 'other'] as const
 
 /** 기획으로 돌려보내기: 부서 + 이유 한 줄. 돌고 있으면 멈추고 열린 PR은 서버가 닫는다 */
+const RISK_LABEL = { low: '낮음', medium: '보통', high: '높음' } as const
+const RISK_TONE = { low: 'green', medium: undefined, high: 'amber' } as const
+const RISK_HOW = { low: 'LLM 리뷰 없이 CI 통과면 자동 머지', medium: '리뷰 1번, 고친 코드는 CI로 확인', high: '리뷰 1번 + 사람 확인 후 머지' } as const
+
+/** 파일 직접 고르기: 레포 파일을 검색해 체크하면 그 파일로 다시 시도한다 (AI가 파일을 고르지 않음) */
+function PickFiles({ task, onDone }: { task: Task; onDone: () => void }) {
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const [rows, setRows] = useState<string[]>([])
+  const [chosen, setChosen] = useState<string[]>(task.coding?.picked ?? [])
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    const t = setTimeout(() => {
+      api.files(task.id, q).then((d) => { if (alive) setRows(d.files) }).catch(() => { if (alive) setRows([]) })
+    }, 250)
+    return () => { alive = false; clearTimeout(t) }
+  }, [open, q, task.id])
+  if (!open) return <Button size="small" onClick={() => setOpen(true)}>파일 직접 고르기</Button>
+  const toggle = (p: string) => setChosen((xs) => (xs.includes(p) ? xs.filter((x) => x !== p) : xs.length < MAX_PICK ? [...xs, p] : xs))
+  const send = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!chosen.length) return
+    setBusy(true)
+    try {
+      await api.retryWith(task.id, chosen)
+      toast.show(`${idText(task.id)} 고른 파일 ${chosen.length}개로 다시 시작`)
+      setOpen(false)
+      onDone()
+    } catch (x) {
+      toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const list = [...chosen, ...rows.filter((p) => !chosen.includes(p))]
+  return (
+    <form className="card w-full border border-ink-100 p-3" onSubmit={send} aria-label="고칠 파일 직접 고르기">
+      <p className="small muted">고칠 파일을 {MAX_PICK}개까지 골라 주세요. AI는 파일을 다시 고르지 않고 이 파일을 바로 고쳐요.</p>
+      <input className="field mt-2 w-full" value={q} onChange={(e) => setQ(e.target.value)} placeholder="파일 이름이나 경로로 찾기" aria-label="파일 찾기" autoFocus />
+      <ul className="mt-2 max-h-64 overflow-y-auto">
+        {list.length === 0 && <li className="small muted">맞는 파일이 없어요.</li>}
+        {list.map((p) => (
+          <li key={p}>
+            <label className="flex items-center gap-2 py-0.5">
+              <input type="checkbox" checked={chosen.includes(p)} onChange={() => toggle(p)} disabled={!chosen.includes(p) && chosen.length >= MAX_PICK} />
+              <span className="mono small">{p}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <span className="tags mt-2">
+        <Button size="small" variant="primary" type="submit" disabled={busy || !chosen.length}>{busy ? '보내는 중…' : `고른 파일 ${chosen.length}개로 다시 시도`}</Button>
+        <Button size="small" type="button" onClick={() => setOpen(false)}>닫기</Button>
+      </span>
+    </form>
+  )
+}
+const MAX_PICK = 5
+
 export function ReturnButton({ task }: { task: Task }) {
   const toast = useToast()
   const [open, setOpen] = useState(false)
@@ -207,6 +274,7 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  const account = useSession().account?.id ?? 'guest'
   const c = task.coding
   const lim = useCodingLimits()
   if (!c) return null
@@ -248,6 +316,12 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       setBusy(false)
     }
   }
+  // 멈춘 작업(PR 없음): 사람이 고칠 파일을 고르거나 AI 대화로 넘겨 이어 간다
+  const stuck = STUCK.concat('canceled').includes(c.status) && !c.pr && !task.discarded && c.mode !== 'subscription'
+  // 멈춘 이유별 다음 할 일 (lib/codingRecovery.ts). 정해진 게 없으면(중단·돌려보냄 등) 예전 버튼 그대로
+  const rec = task.discarded ? null : recoveryOf(c)
+  const can = (a: RecoveryAction) => !rec || rec.actions.includes(a)
+  const toChat = () => act(async () => openDevChat(await chats.fromTask(task.id, account)), `${task.id} AI 대화로 넘김`)
   // 개발자 Claude 대기열에서 아무도 안 가져감: 서버 AI로 넘길 수 있다
   const unclaimed = c.mode === 'subscription' && c.status === 'queued' && !c.claimedBy
   const toAgent = () => act(() => api.toAgent(task.id), `${task.id} 서버 AI로 넘김`)
@@ -289,6 +363,8 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
         {c.attempts > 1 && <Tag>{c.attempts}번째 시도</Tag>}
         {!!c.llmCalls && <Tag><UsageBar used={c.llmTokens ?? 0} limit={lim.runTokens} label={`AI ${c.llmCalls}/${lim.runCalls}회 · 토큰`} title="코딩 실행 한 번의 한도 대비 (다시 시도까지 합친 양)" /></Tag>}
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}
+        {c.risk && <Tag tone={RISK_TONE[c.risk]} title={`${c.riskWhy ?? ''} · ${RISK_HOW[c.risk]}`}>위험도 {RISK_LABEL[c.risk]}</Tag>}
+        {!!c.picked?.length && <Tag>사람이 고른 파일 {c.picked.length}개</Tag>}
         {c.review && <Tag tone={c.review.verdict === '통과' ? 'green' : 'amber'}>리뷰 {c.review.verdict}</Tag>}
         {c.instruction && <Tag>사람이 지시함</Tag>}
         {c.ciHold && c.status === 'waiting_human' && <Tag tone="amber">CI 다시 확인 중</Tag>}
@@ -319,6 +395,13 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       )}
       {!!c.review?.notes.length && <ul>{c.review.notes.map((n, i) => <li key={i} className="muted">{n}</li>)}</ul>}
       {c.instruction && <p className="muted">지시: {c.instruction}</p>}
+      {rec && (
+        <p className={rec.who === 'agent' ? 'muted small' : 'small'} role="status">
+          <b>{rec.who === 'agent' ? '에이전트가 이어서 해요' : '다음 할 일'}</b> · {rec.say}
+          {rec.actions.includes('connect') && <> <Link href="/system/tools" className="plain-link">도구 연결</Link></>}
+          {rec.actions.includes('reviews') && <> <a href={toPath('work/reviews')} className="plain-link">AI 교차검증</a></>}
+        </p>
+      )}
       {c.error && <p className="tag-amber pre-line">{c.error.includes('generate_pr를 허락하지 않음') ? 'PR 열기 보류됨 · 승인 필요' : c.error}</p>}
       {waitingPr && (
         <form className="flex gap-2" onSubmit={revise}>
@@ -329,15 +412,17 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
       <span className="tags">
         {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
         {heldPr && <Button size="small" variant="primary" onClick={() => void approveHold()} disabled={busy}>{busy ? '보내는 중…' : '승인하고 PR 열기'}</Button>}
-        {(STUCK.includes(c.status) || c.status === 'canceled' || c.status === 'returned') && !waitingPr && !task.discarded && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.returnedTo ? '개발에 다시 맡기기' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드 기준으로 다시 작성' : '다시 시도'}</Button>}
+        {(STUCK.includes(c.status) || c.status === 'canceled' || c.status === 'returned') && !waitingPr && !task.discarded && can('retry') && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.returnedTo ? '개발에 다시 맡기기' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드 기준으로 다시 작성' : '다시 시도'}</Button>}
         {textHeld && <Button size="small" onClick={textOk} disabled={busy}>작업 글 확인함</Button>}
         {unclaimed && <Button size="small" onClick={() => void toAgent()} disabled={busy}>서버 AI로 넘기기</Button>}
-        {noChange && <Button size="small" onClick={closeCovered} disabled={busy}>이미 반영됨으로 닫기</Button>}
+        {noChange && can('covered') && <Button size="small" onClick={closeCovered} disabled={busy}>이미 반영됨으로 닫기</Button>}
+        {stuck && can('chat') && <Button size="small" onClick={() => void toChat()} disabled={busy}>AI 대화로 넘기기</Button>}
         <CancelButton taskId={task.id} status={c.status} />
         <DiscardButton task={task} />
         <ReturnButton task={task} />
         {task.discarded && <Tag>폐기됨{task.discardedBy ? ` · ${task.discardedBy}` : ''}</Tag>}
       </span>
+      {stuck && can('pick') && <PickFiles task={task} onDone={() => undefined} />}
     </Step>
   )
 }

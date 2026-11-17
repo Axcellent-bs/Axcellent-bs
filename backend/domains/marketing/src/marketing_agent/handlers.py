@@ -9,7 +9,8 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+import os
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -31,6 +32,7 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
+from ax_contracts.schemas.finance import ContentFormat
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import brief_media, brief_publish, outage_sns_media, shop_client
 from marketing_agent.brief_handoff import (
@@ -102,6 +104,18 @@ from marketing_agent.sns_publish.publisher import publish_sns
 
 SOURCE = "marketing"
 BANNER_TEXT_MAX = 200  # shop-api 배너 문구 상한
+RESOLVED_BANNER_HOURS_ENV = "MARKETING_RESOLVED_BANNER_HOURS"
+RESOLVED_BANNER_HOURS_DEFAULT = 24.0  # 정상화 배너는 게시 뒤 이 시간이 지나면 저절로 내려간다
+
+
+def resolved_banner_hours() -> float:
+    """정상화 배너를 게시해 두는 시간. 환경변수가 없거나 0 이하·숫자가 아니면 기본값이다."""
+    raw = os.getenv(RESOLVED_BANNER_HOURS_ENV, "").strip()
+    try:
+        hours = float(raw) if raw else RESOLVED_BANNER_HOURS_DEFAULT
+    except ValueError:
+        return RESOLVED_BANNER_HOURS_DEFAULT
+    return hours if hours > 0 else RESOLVED_BANNER_HOURS_DEFAULT
 
 
 class State:
@@ -292,6 +306,16 @@ async def publish_notice(request: AgentRequest) -> AgentResult:
         # 쇼핑몰 배너 문구는 200자까지다. 안전 장치를 부르기 전에 막아 실행 기록을 남기지 않는다
         return _result(request, TaskStatus.FAILED, outcome="notice_text_too_long")
 
+    if (
+        draft.kind == "incident_resolved"
+        and draft.channel_code == "banner"
+        and draft.valid_to is None
+    ):
+        # 정상화 배너는 끝을 알리는 공지가 따로 없어 기한이 없으면 영영 남는다. 게시 시각부터 센다.
+        # 초안 번호는 입력에서 만들어지므로 기한을 채워도 배너 번호는 그대로다(재요청도 같은 번호)
+        expiry = STATE.notices.now() + timedelta(hours=resolved_banner_hours())
+        draft = draft.model_copy(update={"valid_to": expiry})
+
     key = f"{request.meta.context_id}:publish_notice:{draft.draft_id}"
     evidence = _evidence(["publish_notice"], f"초안 {draft.draft_id} 게시 요청", [draft.draft_id])
     decision = await execute(
@@ -321,6 +345,27 @@ async def publish_notice(request: AgentRequest) -> AgentResult:
             ),
         )
 
+    reused = await _same_resolved_banner(request, draft, to_shop)
+    if reused is not None:
+        # 같은 문구의 정상화 배너가 이미 기한을 두고 떠 있으면 새로 올리지 않고 그대로 둔다
+        # (기한을 늘리지 않는다). 같은 사건의 장애 배너는 평소처럼 내린다
+        try:
+            await _end_incident_banners_after_resolved(request.meta.context_id)
+        except shop_client.ShopError as exc:
+            return _result(request, TaskStatus.FAILED, outcome=f"shop_banner_failed:{exc.code}")
+        notice_id = STATE.notices.join(request.meta.context_id, draft, reused)
+        published = PublishedNotice(notice_id=notice_id, channel_code=draft.channel_code)
+        return _result(
+            request,
+            TaskStatus.COMPLETED,
+            output=published.model_dump(mode="json"),
+            evidence=_evidence(
+                ["publish_notice"],
+                "같은 문구의 정상화 배너가 떠 있어 새로 올리지 않고 그대로 둠",
+                [notice_id, decision.execution_id],
+            ),
+        )
+
     notice_id = None
     if to_shop:
         # 쇼핑몰 배너 번호는 초안에서 만든다(같은 초안은 같은 번호라
@@ -338,9 +383,7 @@ async def publish_notice(request: AgentRequest) -> AgentResult:
             if (
                 draft.kind == "incident_resolved"
             ):  # 복구 공지가 나가면 같은 사건의 장애 배너를 내린다
-                for earlier in STATE.notices.open_incident_notice_ids(request.meta.context_id):
-                    if STATE.notices.can_end(request.meta.context_id, earlier):
-                        await shop_client.end_banner(earlier)
+                await _end_incident_banners_after_resolved(request.meta.context_id)
         except shop_client.ShopError as exc:
             return _result(request, TaskStatus.FAILED, outcome=f"shop_banner_failed:{exc.code}")
     notice_id = STATE.notices.publish(request.meta.context_id, draft, notice_id)
@@ -375,6 +418,49 @@ async def _same_incident_banner(draft: NoticeDraft, to_shop: bool) -> str | None
     if earlier is not None:  # 재요청: 같이 쓰던 배너면 그대로, 아니면 원래 길(같은 번호)로
         return earlier if earlier != own else None
     return STATE.notices.open_incident_by_text(draft.public_text)
+
+
+async def _end_incident_banners_after_resolved(context_id: str) -> None:
+    for earlier in STATE.notices.open_incident_notice_ids(context_id):
+        if STATE.notices.can_end(context_id, earlier):
+            await shop_client.end_banner(earlier)
+
+
+async def _same_resolved_banner(
+    request: AgentRequest, draft: NoticeDraft, to_shop: bool
+) -> str | None:
+    """올리려는 정상화 배너와 같은 문구로 쇼핑몰에 기한을 두고 떠 있는 배너 번호. 없으면 `None`.
+
+    메모리가 아니라 쇼핑몰 배너 목록으로 찾아서 마케팅이 다시 켜져도 막힌다. 기한이 없는 옛
+    배너는 같이 쓰지 않는다(그걸 쓰면 영영 안 내려간다). 목록을 읽지 못하면 게시를 막지 않고
+    새로 올린다. 이미 게시한 초안의 재요청은 원래 길(같은 번호)로 보낸다.
+    """
+    if not to_shop or draft.kind != "incident_resolved":
+        return None
+    if STATE.notices.published_id(draft.draft_id) is not None:
+        return None
+    try:
+        banners = await shop_client.list_banners()
+    except shop_client.ShopError as exc:
+        log_event(
+            request.meta.context_id,
+            request.meta.tenant_id,
+            "resolved_banner_lookup_failed",
+            {"code": exc.code, "level": "warning"},
+        )
+        return None
+    own = f"ntc_{draft.draft_id.removeprefix('drf_')}"
+    for banner in banners:
+        notice_id = banner.get("notice_id")
+        if (
+            isinstance(notice_id, str)
+            and notice_id != own
+            and banner.get("status") == "active"
+            and banner.get("text") == draft.public_text
+            and banner.get("valid_to")
+        ):
+            return notice_id
+    return None
 
 
 async def end_incident_notice(request: AgentRequest) -> AgentResult:
@@ -1130,6 +1216,52 @@ async def marketing_chat_remove(request: AgentRequest) -> AgentResult:
     return _chat_done(request, "marketing_chat_remove", out.model_dump(mode="json"))
 
 
+def _stored_brief(campaign_id: str) -> StoredBrief | None:
+    """받아 둔 기획안. 없거나 저장소를 못 읽으면 None (기획안 조회 실패가 캠페인을 막지 않는다)."""
+    try:
+        return STATE.briefs.get(None, campaign_id)
+    except BriefStorageError:
+        return None
+
+
+def _brief_content(campaign_id: str) -> tuple[str | None, ContentFormat | None]:
+    """받아 둔 기획안의 (content_category, content_format). 없거나 못 읽으면 (None, None)."""
+    stored = _stored_brief(campaign_id)
+    if stored is None:
+        return None, None
+    return stored.brief.content_category, stored.brief.content_format
+
+
+async def start_campaign_skill(request: AgentRequest) -> AgentResult:
+    """`start_campaign`: 요청이 안 준 상품·카테고리·형식은 기획안 값을 재무 예산 의견에 싣는다.
+
+    한 번 부를 때 기획안은 한 번만 읽는다(상품 ID와 카테고리·형식이 같은 기획안에서 나온다).
+    """
+    looked: dict[str, StoredBrief | None] = {}
+
+    def brief(campaign_id: str) -> StoredBrief | None:
+        if campaign_id not in looked:
+            looked[campaign_id] = _stored_brief(campaign_id)
+        return looked[campaign_id]
+
+    def product_ids(campaign_id: str) -> list[str]:
+        stored = brief(campaign_id)
+        return list(stored.brief.product_ids) if stored is not None else []
+
+    def content(campaign_id: str) -> tuple[str | None, ContentFormat | None]:
+        stored = brief(campaign_id)
+        if stored is None:
+            return None, None
+        return stored.brief.content_category, stored.brief.content_format
+
+    return await start_campaign(request, brief_product_ids=product_ids, brief_content=content)
+
+
+async def record_campaign_result_skill(request: AgentRequest) -> AgentResult:
+    """`record_campaign_result`: 요청이 안 준 카테고리·형식은 기획안 값으로 채운다."""
+    return await record_campaign_result(request, brief_content=_brief_content)
+
+
 HANDLERS = {
     "draft_notice": draft_notice,
     "publish_notice": publish_notice,
@@ -1142,8 +1274,8 @@ HANDLERS = {
     "handoff_brief_to_sns": handoff_brief_to_sns,
     "build_campaign_link": build_campaign_link_skill,
     "issue_coupon": issue_coupon,
-    "start_campaign": start_campaign,
-    "record_campaign_result": record_campaign_result,
+    "start_campaign": start_campaign_skill,
+    "record_campaign_result": record_campaign_result_skill,
     "draft_sns_post": draft_sns_post_skill,
     "draft_outage_sns_post": draft_outage_sns_post_skill,
     "list_outage_sns_drafts": list_outage_sns_drafts_skill,

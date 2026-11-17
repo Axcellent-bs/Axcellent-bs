@@ -110,3 +110,27 @@ def test_campaign_result_feeds_the_past_result_and_is_cached(tmp_path: Path) -> 
                               " · 주문 -15건")
     assert p.note_line == past_results.CONTRA
     assert {a.kind for a in p.alerts} == {"loss", "data_gap"}  # 앞 시점을 안 재서 data_gap도
+
+
+def test_keys_pick_campaigns_by_proposal_id_or_insight_id(tmp_path: Path) -> None:
+    """이벤트 제안의 성과 되돌리기: 영상의 proposal_id(PROP-n)나 insight_id로 캠페인을 고른다."""
+    past_results.clear_cache()
+    env = _setup(tmp_path)  # cmp_1: insight_id ins_1
+    req = VideoPerformanceRequest(video_url="https://youtu.be/bbbbbbbbbbb", campaign_id="cmp_2",
+                                  proposal_id="PROP-7", promo_id="p2")  # fmt: skip
+    asyncio.run(vp.video_performance(req, FakeYouTube(), env=env, now=PUB))
+
+    async def measure(data, connector, *, env):  # noqa: ANN001, ANN202, ARG001
+        return CampaignEffectOutput.model_validate({**EFFECT, "campaign_id": data.campaign_id})
+
+    now = PUB + timedelta(days=9)
+
+    def ids(**kw):  # noqa: ANN003, ANN202
+        got = asyncio.run(past_results.campaign_results(env, "shop", now=now, measure=measure,
+                                                        **kw))  # fmt: skip
+        return [(r.campaign_id, r.proposal_id, r.insight_id) for r in got]
+
+    assert ids() == [("cmp_1", None, "ins_1")]  # 기본: 인사이트가 있는 캠페인만 (예전 그대로)
+    assert ids(keys={"PROP-7"}) == [("cmp_2", "PROP-7", None)]
+    assert ids(keys={"ins_1", "PROP-7"}) == [("cmp_1", None, "ins_1"), ("cmp_2", "PROP-7", None)]
+    assert ids(keys=set()) == [] and ids(keys={"PROP-404"}) == []

@@ -310,12 +310,12 @@ action = "inspect_return"
 owner = "support"
 base_grade = "A"
 
-# ---- 인사 (준하)
-# 기획·개발은 PR 머지·요청 완료를 인사에 보내기 전에 이 액션으로 관문을 거친다(dev 서비스 분리 #881)
+# ---- 아카이브 (준하): 결정 기록(2026-11-16 인사 AI에서 분리)
+# 기획·개발은 PR 머지·요청 완료를 아카이브에 보내기 전에 이 액션으로 관문을 거친다(dev 서비스 분리 #881)
 [[actions]]
 action = "record_case"
-owner = "hr"
-requesters = ["hr", "planning", "dev"]
+owner = "archive"
+requesters = ["hr", "archive", "planning", "dev"]
 base_grade = "A"
 
 # 조직 변동(팀 이동·입사·퇴사) 기록. 초안 저장은 인원에 세지 않는다. 확정·반려는 인사 담당자가
@@ -371,7 +371,7 @@ base_grade = "A"
 # 확신 낮은 후보 카드 승인·폐기 (#177). 사람이 대시보드에서 고르고 hr skill이 execute()를 부른다
 [[actions]]
 action = "decide_candidate_card"
-owner = "hr"
+owner = "archive"
 base_grade = "A"
 
 # 인수인계 확정: planning이 verify_handover로 검증. 완성도가 기준 미만이면 C (thresholds.toml)
@@ -448,20 +448,20 @@ base_grade = "C"
 [[actions]]
 action = "memory.card_write"
 owner = "memory"
-requesters = ["memory", "hr", "support", "marketing", "planning", "finance", "orchestrator", "data"]
+requesters = ["memory", "hr", "archive", "support", "marketing", "planning", "finance", "orchestrator", "data"]
 base_grade = "A"
 
 [[actions]]
 action = "memory.card_link"
 owner = "memory"
-requesters = ["memory", "hr"]
+requesters = ["memory", "hr", "archive"]
 base_grade = "A"
 
-# 후보 카드 승인·폐기 반영 (#304). 사람이 hr decide_candidate_card로 정한 결과를 memory에 쓴다
+# 후보 카드 승인·폐기 반영 (#304). 사람이 아카이브 decide_candidate_card로 정한 결과를 memory에 쓴다
 [[actions]]
 action = "memory.card_review"
 owner = "memory"
-requesters = ["memory", "hr"]
+requesters = ["memory", "hr", "archive"]
 base_grade = "A"
 
 # ---- 데이터 (재현, #829). 측정이 끝난 캠페인 성과 결과를 기획에 보낸다(data → planning receive_campaign_update)
@@ -471,13 +471,18 @@ action = "send_campaign_update"
 owner = "data"
 requesters = ["data"]
 base_grade = "A"
+[[actions]]
+action = "send_event_proposal"
+owner = "data"
+requesters = ["data"]
+base_grade = "A"
 
 # ---- 변경 요청 결과 받기 (#280·#292). planning이 요청을 닫을 때 보낸 결과를 요청 부서가 자기 기록에 반영한다
 # 상태 변경은 요청 부서 쪽 기록뿐이고 돈·외부 시스템을 건드리지 않아 A. 멱등성 키 ctx_req_…:change_result:REQ-n
 [[actions]]
 action = "receive_change_result"
 owner = "support"
-requesters = ["support", "hr", "data"]
+requesters = ["support", "hr", "archive", "data"]
 base_grade = "A"
 
 # ---- 기획·개발 (예진). 검증자 = 안전 레이어 코드 규칙(변경 크기·허용 경로, thresholds.toml)
@@ -578,14 +583,15 @@ base_grade = "A"
 [[actions]]
 action = "receive_planning_answer"
 owner = "planning"
-requesters = ["planning", "support", "marketing", "hr", "data", "finance", "orchestrator"]
+requesters = ["planning", "support", "marketing", "hr", "archive", "data", "finance", "orchestrator"]
 base_grade = "A"
 
 # 기획 제안 (11/4): 데이터분석 인사이트 → 제안, 마케팅(게시)·데이터분석(성과)이 결과를 알린다
 [[actions]]
 action = "receive_insight"
 owner = "planning"
-requesters = ["planning", "data", "marketing"]
+# finance: 캠페인 콘텐츠 카테고리 제작비 재배분 의견(INS-005 budget_shift, 11/17)
+requesters = ["planning", "data", "marketing", "finance"]
 base_grade = "A"
 
 [[actions]]

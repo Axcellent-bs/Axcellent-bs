@@ -3,7 +3,8 @@
 - 공통: `audit_logs`, `idempotency`, `records`(결정이 없어 기록만 남긴 것)
 - 목 전용(실제에서는 다른 서비스가 가진다): `mock_cards`(memory), `gate_decisions`(안전 레이어)
 
-분리 직후(2단계)에는 인사와 같은 SQLite 파일(`HR_DB_PATH`)을 읽는다. 파일이 갈라지는 것은 4단계다.
+전용 파일은 `ARCHIVE_DB_PATH`(archive.db)다. 없으면 예전처럼 `HR_DB_PATH`를 읽는다.
+옛 파일의 기록은 `scripts/migrate_archive_db.py`로 옮긴다.
 모든 테이블에 `tenant_id`를 둔다. 스키마는 전 문장 `IF NOT EXISTS`다.
 """
 

@@ -118,6 +118,7 @@ def _read_all(monkeypatch: pytest.MonkeyPatch) -> Any:
                 m: await connector.metric_series(m, T0, end) for m in METRICS
             }
             out["events"] = await connector.failure_events(T0, end)
+            out["timeouts"] = await connector.timeout_payments(T0, end)  # ?status=timeout
             out["coupons"] = await connector.campaign_coupons("cmp_eval")
             out["orders"] = await connector.orders(T0, end)
             out["attributed"] = await connector.attributed_orders(T0, end, "cmp_eval", "youtube")
@@ -211,6 +212,7 @@ def test_responses_are_read_by_the_data_contracts(monkeypatch: pytest.MonkeyPatc
     assert [p[1] for p in out["coupon_order_count"]] == [1.0, 0.0, 0.0]
     assert [p[1] for p in out["coupon_discount_amount"]] == [3000.0, 0.0, 0.0]
     assert len(out["events"].events) == 2 and not out["events"].truncated  # 장애 1·카드 거절 1
+    assert out["timeouts"] == (0, 0)  # 시간 초과로 남은 결제 없음
     assert [(c.used_units, c.count) for c in out["coupons"]] == [(1, 2)]
     assert sorted(o.order_id for o in out["orders"]) == ["ord_0001", "ord_0002", "ord_0003",
                                                          "ord_0004"]  # fmt: skip

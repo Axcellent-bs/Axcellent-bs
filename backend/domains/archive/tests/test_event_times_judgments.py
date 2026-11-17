@@ -167,3 +167,58 @@ async def test_a_stale_judgment_is_dropped_when_the_judge_goes_away(svc) -> None
         ),
     )
     assert "step_judgments" not in (await svc.memory.get_card(card_id)).extra
+
+
+class FakeDiagnose:
+    """인사 AI의 반복 확인을 대신하는 가짜. 부른 이슈 번호만 적는다."""
+
+    def __init__(self, *, fail: bool = False, answer: bool = True) -> None:
+        self.calls: list[str] = []
+        self.fail = fail
+        self.answer = answer
+
+    async def __call__(self, meta: RequestMeta, context_id: str) -> bool:
+        self.calls.append(context_id)
+        if self.fail:
+            raise RuntimeError("인사 AI에 닿지 않음")
+        return self.answer
+
+
+@pytest.mark.asyncio
+async def test_repeat_check_is_asked_after_the_judgments_are_saved(svc) -> None:
+    svc.judge = FakeJudge()
+    svc.diagnose = diagnose = FakeDiagnose()
+    card_id = await _incident(svc)
+    rows = [_t("rollback", dept="infra", attempts=2)]
+    await record_event_times(svc, _req("record_event_times", _times(step_timings=rows)))
+    assert diagnose.calls == [CONTEXT]
+    # 인사가 카드에서 판정을 읽으니 부르는 시점에 이미 저장돼 있어야 한다
+    assert (await svc.memory.get_card(card_id)).extra["step_judgments"]["items"]
+
+
+@pytest.mark.asyncio
+async def test_no_repeat_check_without_judgments_or_step_timings(svc) -> None:
+    svc.diagnose = diagnose = FakeDiagnose()
+    await _incident(svc)
+    rows = [_t("rollback", dept="infra")]
+    svc.judge = None  # 판정을 못 받으면 반복을 볼 근거가 없다
+    await record_event_times(svc, _req("record_event_times", _times(step_timings=rows), "a"))
+    svc.judge = FakeJudge()
+    await record_event_times(
+        svc, _req("record_event_times", _times(detected_at=svc.clock().isoformat()), "b")
+    )  # 단계 시간 없이 시각만
+    assert diagnose.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail", [True, False])
+async def test_repeat_check_trouble_never_blocks_the_times(svc, fail: bool) -> None:
+    svc.judge = FakeJudge()
+    svc.diagnose = FakeDiagnose(fail=fail, answer=False)
+    card_id = await _incident(svc)
+    rows = [_t("rollback", dept="infra", attempts=2)]
+    result = await record_event_times(svc, _req("record_event_times", _times(step_timings=rows)))
+    assert result.output["outcome"] == "recorded"
+    assert (await svc.memory.get_card(card_id)).extra["step_judgments"]["items"]
+    unavailable = "dept_eval.diagnosis_check_unavailable" in svc.audit.kinds(CONTEXT)
+    assert unavailable is True  # 못 했다는 사실은 감사 기록에 남긴다

@@ -55,7 +55,7 @@
 
 | AI | AXcellent 서비스 | 부르는 서버 (ax-backend) |
 | --- | --- | --- |
-| 총괄 | 총괄·사건 | orchestrator 8000, shop-api 관리 중계 8010 |
+| 총괄 | 총괄·사건 | orchestrator 8000, 판매 서버 관리 읽기 중계(dashboard-api 8020 `/api/dashboard/shop/*`) |
 | 고객지원 AI | 고객 문의 / 클레임·보상 / 리뷰·지식 | dashboard-api 8020 |
 | 재무 AI | 재무 관리 | finance 8105, safety 8001 |
 | 데이터분석 AI | 데이터 분석 | data 8106 |
@@ -103,7 +103,7 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
    ```
    - 포트 8000~8122를 써요. 시작할 때 이 포트를 쥔 프로세스를 끄기 때문에, 8000에 DejaFix를 띄워 뒀다면 DejaFix를 다른 포트(예: 18000)로 옮겨 두세요
    - 캣북스 판매 서버(shop-api)는 AXcellent가 띄우지 않아요. 캣북스 레포 [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)에 있고 따로 배포해요. AXcellent는 주소(`AX_SHOP_API_URL` 또는 회사 연결)·연결 키·웹훅으로만 붙어요
-   - 로컬에서 같이 띄우려면(개발 편의, 기본 꺼짐) 이 레포 옆에 캣북스 레포를 클론하고(`../catbooks-demo`, 다른 곳이면 `CATBOOKS_DEMO_DIR`) `CATBOOKS_LOCAL=on`을 주세요. 판매 서버(8010)와 고객 주문 트래픽(`SHOP_TRAFFIC=on`일 때 3초마다 1건)이 같이 켜져요
+   - 로컬에서 판매 서버가 필요하면 캣북스 레포를 따로 클론해 8010에 띄워요(`backend/README.md` "캣북스 판매 서버"). `run_all.sh`는 `AX_SHOP_API_URL`을 기본 `http://127.0.0.1:8010`으로 넘겨서 그대로 붙어요. 다른 주소면 `AX_SHOP_API_URL`이나 회사 연결 화면에서 바꿔요
 2. 화면을 켜요. `backend/.data/web.env`의 토큰을 읽어 개발 서버(3090)를 켜요. 3090에 다른 개발 서버가 떠 있으면 먼저 꺼요
    ```bash
    bash scripts/run_web.sh        # backend/ 에서
@@ -111,13 +111,12 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
 3. 장애 사건을 만들어요. 쇼핑몰에 결제 장애를 주입하면 주문 결제가 5xx로 실패하고, 쇼핑몰 감시가 20초 넘게 이어진 실패를 재서 `shop.degraded`를 내요. 총괄이 그걸 받아 사건을 열고 데이터 AI가 영향 분석·복구 확인·처리 시간 요약을 해요
    ```bash
    # backend/ 에서. 주입은 admin 토큰만 돼요 (값은 출력하지 않음)
-   # 따로 배포한 캣북스: SHOP_API_URL=<판매 서버 주소> SHOP_ADMIN_TOKEN=<캣북스 관리자 토큰> 을 둘 다 앞에 붙여요(하나만 주면 멈춰요)
-   # 둘 다 없으면 web.env의 VITE_SHOP_ADMIN_TOKEN과 127.0.0.1:8010을 써요(CATBOOKS_LOCAL=on으로 띄운 로컬 판매 서버에서만 통해요)
+   # SHOP_API_URL=<판매 서버 주소, 로컬이면 http://127.0.0.1:8010> SHOP_ADMIN_TOKEN=<캣북스 관리자 토큰> 을 둘 다 앞에 붙여요(하나라도 없으면 멈춰요)
    bash scripts/shop_fault.sh failure
    # 30초쯤 기다린 뒤 해제하면 shop.recovered로 복구 확인이 이어져요
    bash scripts/shop_fault.sh clear
    ```
-   - 감지 시간은 `SHOP_DEGRADED_SUSTAIN_S`(run_all.sh 기본 20초)와 `SHOP_MONITOR_INTERVAL_S`(5초)로 정해져요
+   - 감지 시간은 캣북스 쪽 `SHOP_DEGRADED_SUSTAIN_S`(시연 값 20초)와 `SHOP_MONITOR_INTERVAL_S`(5초)로 정해져요
 4. http://localhost:3090/data 를 열어요. 왼쪽 사이드바 "데이터분석 AI > 데이터 분석"의 하위 탭 3개: **장애 영향 분석**(`/data`, 장애 사건 데이터 + 아래 리포트), **운영 지표**(`/data/ops`, 평상시 지표 · 복구 속도 · AI 단독 처리율), **트렌드&콘텐츠**(`/data/trend`)예요. 장애 영향 분석에 사건이, 운영 지표에 복구 시간·자동 처리율이 나와요. 옛 주소(`/data#daily`·`#report`·`#trend`·`#trend/<단계>`)는 새 주소로 옮겨 줘요. 사건을 하나 더 만들면 1차·2차 복구 시간이 비교돼요
 5. **트렌드&콘텐츠 탭**(`/data/trend`, 검색어 급상승 `trend_scan`): 장애 주입 없이 데이터 AI 서버(8106)와 네이버 키(`backend/.env`의 `NAVER_HUB_CLIENT_ID`·`NAVER_HUB_CLIENT_SECRET`)만 있으면 돼요. 트렌드만 볼 때는 `bash scripts/run_all.sh --only data` + `bash scripts/run_web.sh`로 충분해요
    - **하위 탭 4개** = 감지 → 인사이트 → 넘김 → 성과. 콘텐츠 루프 띠의 4단계와 하나씩 같아요(정의는 `src/lib/contentLoop.ts` 한 곳): `/data/trend#detect`(1 감지) · `#recommend`(2 인사이트: 인사이트 브리프 + 참고용 예시 아이디어) · `#handoff`(3 넘김: 기획팀이 이 인사이트를 가져가 제안을 만들어요. 가져간 기록 보기는 준비 중) · `#result`(4 성과: 게시·성과 측정, 다음 추천 반영은 준비 중). 루프 띠의 단계를 누르면 같은 이름 하위 탭으로 가요. 옛 주소 `#trend/video`는 넘김, `#trend/campaign`·`#trend/feedback`은 성과로 가요.
@@ -203,13 +202,10 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
 
 DejaFix 화면은 띄우지 않아요. DejaFix API 계약(`DejaFix/DejaFix` `contracts/api.md` #10)의 `GET /api/incidents?status=problem`으로 **지금 진행 중인 장애만** 받아서 AXcellent가 그려요 (`src/pages/Incidents.tsx`, `src/lib/dejafix.ts`).
 
-- 항상 **실제 DejaFix 데이터**를 불러요. `frontend/.env`에 아래를 넣고 개발 서버를 다시 켜요.
-
-  ```
-  DEJAFIX_PROXY_TARGET=http://127.0.0.1:18000   # DejaFix 백엔드 주소
-  DEJAFIX_USERNAME=admin                        # DejaFix 계정 (viewer 이상)
-  DEJAFIX_PASSWORD=<DejaFix .env 의 DEMO_ADMIN_PASSWORD>
-  ```
-  DejaFix는 모든 API에 로그인 토큰을 요구해요. 개발 서버(`dejafix-proxy.ts`)가 이 계정으로 대신 로그인해서 부르기 때문에 토큰과 비밀번호는 화면 코드에 실리지 않아요. 읽기(GET)만 넘겨요.
+- 항상 **실제 DejaFix 데이터**를 불러요. DejaFix 주소·계정은 화면의 **회원·서버 관리 › DejaFix 연결**에서 정해요(도구 연결 보관함).
+  개발 서버(`dejafix-proxy.ts`)는 `/dejafix-api`를 백엔드 dejafix-proxy(`http://127.0.0.1:8030`, `run_all.sh`가 띄움)로 그대로 넘기고,
+  그 프록시가 보관함의 계정으로 대신 로그인해요. 그래서 토큰과 비밀번호는 화면 코드에 실리지 않아요. 읽기(GET)만 넘겨요.
+- 보관함을 거치지 않고 DejaFix 백엔드에 바로 붙일 때만 `frontend/.env`에 `DEJAFIX_PROXY_TARGET`(예: `http://127.0.0.1:18000`)과
+  `DEJAFIX_USERNAME`·`DEJAFIX_PASSWORD`(viewer 이상)를 넣어요. 그러면 개발 서버가 대신 로그인해요.
 - 30초마다 다시 받아요. 응답의 `meta.stale`이 true면 "수집 멈춤" 안내를 띄워요.
 - 예전에 `public/dejafix/`에 넣어 두던 DejaFix 빌드본과 `scripts/build-dejafix.mjs`는 지웠어요.

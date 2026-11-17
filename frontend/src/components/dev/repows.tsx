@@ -4,12 +4,12 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 import { Button, Modal, useDismiss, useToast } from '@dejafix/common-frontend'
-import type { Action, PR, State as S } from '@/lib/planningData'
+import type { Action, State as S } from '@/lib/planningData'
 import { DiffFiles } from '@/components/dev/diff'
 import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type RepoBranch, type RepoCheckState, type RepoGraph, type RepoGraphCommit, type RepoPr, type RepoIssue, type RepoIssueState, type RepoPrDetail, type RepoPrState, type VcsConnection } from '@/lib/planning'
 import { layoutGraph, laneColor, type GraphRow } from '@/components/dev/graphlayout'
 import { prSlug, toPath, go, idText } from '@/components/planning-common/links'
-import { Work, exampleFiles } from '@/components/dev/work'
+import { Work } from '@/components/dev/work'
 import { Markdown } from '@/components/planning-common/markdown'
 import { humanizePlanIds } from '@/lib/format'
 
@@ -123,7 +123,7 @@ function LoadError({ error }: { error: unknown }) {
 
 // ---------------------------------------------------------------- 탭 틀: 작업 · 레포 PR · 이슈 · 브랜치 · 커밋 그래프
 
-export function PrsTab({ s, d, parts, example = false }: { s: S; d: Dispatch<Action>; parts: string[]; example?: boolean }) {
+export function PrsTab({ s, d, parts }: { s: S; d: Dispatch<Action>; parts: string[] }) {
   const [view, a, b] = parts
   const mode = view === 'repo' ? 'repo' : view === 'issues' ? 'issues' : view === 'branches' ? 'branches' : view === 'graph' ? 'graph' : 'work'
   const [conns, conn, setConn] = useConnection()
@@ -131,14 +131,9 @@ export function PrsTab({ s, d, parts, example = false }: { s: S; d: Dispatch<Act
   // 작업 목록 레포 거르기 (레포 여럿일 때, ''이면 전체). 레포 PR 화면 선택과 따로 기억한다
   const [workRepo, setWorkRepoState] = useState(() => { try { return localStorage.getItem(WORK_REPO_KEY) ?? '' } catch { return '' } })
   const setWorkRepo = (x: string) => { setWorkRepoState(x); try { localStorage.setItem(WORK_REPO_KEY, x) } catch { /* 이번 화면만 */ } }
-  // 작업 목록 레포: 실제 데이터는 연결 목록, 예시 데이터는 상태에 나온 예시 레포
-  const stateRepos = [...new Map(s.prs.filter((p) => p.target).map((p) => [p.target!.connectionId, { id: p.target!.connectionId, repo: p.target!.repo }])).values()]
-  const workRepos = example ? stateRepos : conns.map((c) => ({ id: c.id, repo: c.repo }))
+  // 작업 목록 레포: 연결 목록
+  const workRepos = conns.map((c) => ({ id: c.id, repo: c.repo }))
   const shownRepo = workRepos.some((c) => c.id === workRepo) ? workRepo : ''
-  // 예시 데이터: 레포 PR·이슈·브랜치·그래프도 예시 레포로 고른다 (실제 형상관리는 읽지 않는다).
-  // 예시인지는 화면의 실제/예시 스위치로만 정한다 (실제 PR이 지금 없는 연결을 가리켜도 예시로 보지 않는다)
-  const exampleRepos = example
-  const exRepo = shownRepo || workRepos[0]?.id || ''
   return (
     <>
       <div className="rp-bar">
@@ -149,12 +144,7 @@ export function PrsTab({ s, d, parts, example = false }: { s: S; d: Dispatch<Act
           <a href={toPath('work/prs/branches')} className={mode === 'branches' ? 'on' : ''} aria-current={mode === 'branches' ? 'page' : undefined}>브랜치</a>
           <a href={graphHref()} className={mode === 'graph' ? 'on' : ''} aria-current={mode === 'graph' ? 'page' : undefined}>커밋 그래프</a>
         </nav>
-        {mode !== 'work' && exampleRepos && workRepos.length > 1 && (
-          <select className="select rp-pick" value={exRepo} onChange={(e) => setWorkRepo(e.target.value)} aria-label="레포">
-            {workRepos.map((c) => <option key={c.id} value={c.id}>{c.repo || c.id}</option>)}
-          </select>
-        )}
-        {mode !== 'work' && !exampleRepos && conns.length > 1 && (
+        {mode !== 'work' && conns.length > 1 && (
           <select className="select rp-pick" value={conn} onChange={(e) => setConn(e.target.value)} aria-label="레포">
             {conns.map((c) => <option key={c.id} value={c.id}>{c.repo || c.id}</option>)}
           </select>
@@ -165,127 +155,16 @@ export function PrsTab({ s, d, parts, example = false }: { s: S; d: Dispatch<Act
             {workRepos.map((c) => <option key={c.id} value={c.id}>{c.repo || c.id}</option>)}
           </select>
         )}
-        {mode !== 'work' && !exampleRepos && conns.length === 1 && repo && <code className="rp-repo">{repo.repo}</code>}
+        {mode !== 'work' && conns.length === 1 && repo && <code className="rp-repo">{repo.repo}</code>}
       </div>
       {mode === 'work' && <Work s={s} d={d} item={view} repo={shownRepo || undefined} />}
-      {mode === 'repo' && exampleRepos && a && /^\d+$/.test(a) && <ExamplePrView s={s} number={Number(a)} tab={b} />}
-      {mode !== 'work' && exampleRepos && !(mode === 'repo' && a) && (mode === 'repo' ? <ExampleBoard s={s} repo={exRepo} /> : <div className="empty"><b>예시 레포 · {mode === 'issues' ? '이슈' : mode === 'branches' ? '브랜치' : '커밋'} 없음</b></div>)}
-      {!exampleRepos && <>
       {mode === 'repo' && !a && <Board key={conn} conn={conn} />}
       {mode === 'repo' && a && /^\d+$/.test(a) && <PrView key={`${conn}:${a}`} conn={conn} number={Number(a)} tab={b} />}
       {mode === 'issues' && !a && <IssueBoard key={conn} conn={conn} />}
       {mode === 'issues' && a && /^\d+$/.test(a) && <IssueView key={`${conn}:${a}`} conn={conn} number={Number(a)} />}
       {mode === 'branches' && <BranchTable key={conn} conn={conn} />}
       {mode === 'graph' && <GraphView key={conn} conn={conn} sel={a && /^[0-9A-Za-z]{4,64}$/.test(a) ? a : undefined} />}
-      </>}
     </>
-  )
-}
-
-// 예시 PR 번호 = "PR #29"의 29
-const exampleNumber = (p: PR) => Number(/\d+/.exec(p.id)?.[0] ?? 0)
-
-// 예시 데이터의 PR 화면: 실제 레포 PR 화면(PrView)과 같은 모양으로, 예시 기록으로 본문·커밋·바뀐 파일을 만든다
-function ExamplePrView({ s, number, tab }: { s: S; number: number; tab?: string }) {
-  const p = s.prs.find((x) => exampleNumber(x) === number)
-  const api = useMemo(() => repoApi(DEV_API, ''), [])
-  if (!p) return <><Back /><div className="empty"><b>예시 PR #{number} 없음</b></div></>
-  const task = s.tasks.find((t) => t.id === p.task)
-  const spec = s.specs.find((x) => x.id === task?.spec)
-  const para = spec?.paras.find((x) => x.id === task?.para)
-  const files = exampleFiles(s, p)
-  const state: RepoPrState = p.merged ? 'merged' : p.closed ? 'closed' : 'open'
-  const body = [
-    '## 기획', spec ? `${spec.title}` : '-', '',
-    '## 완료 기준', para ? `- ${humanizePlanIds(para.text)}` : '- -', '',
-    '## 바뀐 파일', ...(files.length ? files.map((f) => `- \`${f.path}\` (+${f.additions} −${f.deletions})`) : [`- ${p.gate.paths}`]), '',
-    `작업: ${idText(p.task)}${spec ? ` · 기획서: ${idText(spec.id)}` : ''}`,
-  ].join('\n')
-  const x: RepoPrDetail = {
-    connection: p.target?.connectionId ?? 'example', repo: p.target?.repo ?? '예시 레포', base_branch: 'main', read_only: true,
-    pr: { number, title: p.title.replace(/^[A-Z]\d+: /, ''), state, branch: p.branch, base: 'main', author: '개발 AI', body, draft: false,
-      created_at: null, updated_at: null, merged_at: null, closed_at: null, url: null, comments: p.reviews.length, checks: p.gate.result === '통과' ? 'passed' : 'failed' },
-    internal: { id: p.id, task: p.task, merged: p.merged, closed: !!p.closed },
-    diff: { number, files, truncated: false, total_files: files.length },
-    commits: [{ sha: `ex${number}`.padEnd(7, '0'), message: p.title, author: '개발 AI', at: null }],
-    comments: p.reviews.map((r, i) => ({ id: `r${i}`, author: '리뷰 AI', body: r === '통과' ? '리뷰 통과: 완료 기준과 맞아요.' : '리뷰 불일치: 완료 기준과 다른 곳이 있어 다시 고쳐요.', at: null })),
-    checks: { state: p.gate.result === '통과' ? 'passed' : 'failed', runs: [{ name: '범위 점검', state: p.gate.result === '통과' ? 'passed' : 'failed' }] },
-  }
-  const view = tab === 'commits' ? 'commits' : tab === 'files' ? 'files' : 'talk'
-  const lines = files.reduce((n, f) => n + f.additions + f.deletions, 0)
-  return (
-    <section className="rp-detail">
-      <Back />
-      <header className="rp-head">
-        <div className="rp-head-main">
-          <h1 className="rp-h1">{x.pr.title} <span className="rp-num">#{number}</span></h1>
-          <div className="rp-head-meta">
-            <PrState v={state} />
-            <AiTag id={p.id} />
-            <Branches head={p.branch} base="main" />
-            <span>개발 AI</span>
-            <span className="tag">예시</span>
-          </div>
-        </div>
-      </header>
-      <nav className="subtabs rp-subtabs" aria-label="PR 보기">
-        <a href={repoHref(number)} className={view === 'talk' ? 'on' : ''} aria-current={view === 'talk' ? 'page' : undefined}>대화 <span className="subtab-count">{x.comments.length}</span></a>
-        <a href={repoHref(number, 'commits')} className={view === 'commits' ? 'on' : ''} aria-current={view === 'commits' ? 'page' : undefined}>커밋 <span className="subtab-count">{x.commits.length}</span></a>
-        <a href={repoHref(number, 'files')} className={view === 'files' ? 'on' : ''} aria-current={view === 'files' ? 'page' : undefined}>변경 파일 <span className="subtab-count">{files.length}</span></a>
-        <span className="rp-diffstat"><span className="rp-add">+{files.reduce((n, f) => n + f.additions, 0)}</span> <span className="rp-del">−{files.reduce((n, f) => n + f.deletions, 0)}</span></span>
-      </nav>
-      <div className={view === 'files' ? 'rp-files-wrap' : 'rp-body'}>
-        {view === 'talk' && <Talk x={x} api={api} readOnly onDone={() => undefined} />}
-        {view === 'commits' && <Commits x={x} />}
-        {view === 'files' && <DiffFiles files={files} truncated={false} total={files.length} draftKey={`example#${number}`} editable={false} />}
-        {view !== 'files' && <Sidebar x={x} lines={lines} />}
-      </div>
-    </section>
-  )
-}
-
-// 예시 데이터의 레포 PR 게시판: 그 레포로 올린(올릴) PR을 상태별로. 줄을 누르면 예시 PR 화면(GitHub 모양)으로
-function ExampleBoard({ s, repo }: { s: S; repo: string }) {
-  const [tab, setTab] = useState<RepoPrState | 'all'>('open')
-  const items = s.prs.filter((p) => p.target?.connectionId === repo).map((p) => ({ p, state: (p.merged ? 'merged' : p.closed ? 'closed' : 'open') as RepoPrState }))
-  const count = (x: RepoPrState) => items.filter((i) => i.state === x).length
-  const rows = tab === 'all' ? items : items.filter((i) => i.state === tab)
-  const tabs: [RepoPrState | 'all', string, number][] = [['open', '열림', count('open')], ['merged', '머지', count('merged')], ['closed', '닫힘', count('closed')], ['all', '전체', items.length]]
-  return (
-    <section className="rp-board">
-      <div className="rp-board-head">
-        <div className="rp-tabs" role="tablist" aria-label="PR 상태">
-          {tabs.map(([id, label, n]) => (
-            <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>
-              {id !== 'all' && <span className={`rp-dot rp-${id}`} aria-hidden />}{label} <b>{n}</b>
-            </button>
-          ))}
-        </div>
-      </div>
-      {!rows.length ? <div className="empty"><b>PR 없음</b></div> : (
-        <ul className="rp-list">
-          {rows.map(({ p, state }) => (
-            <li key={p.id}>
-              <a href={repoHref(exampleNumber(p))} className="rp-row">
-                <span className={`rp-icon rp-${state}`} title={STATE_LABEL[state]} aria-label={STATE_LABEL[state]} />
-                <span className="rp-main">
-                  <span className="rp-title">
-                    {p.title.replace(/^[A-Z]\d+: /, '')}
-                    <span className="grade rp-ai" title={p.task}>AI · {idText(p.task)}</span>
-                    {p.target?.status === 'proposed' && <span className="tag">레포 승인 대기</span>}
-                  </span>
-                  <span className="rp-meta">
-                    <span className="mono idc" title={p.id}>{idText(p.id)}</span>
-                    <Branches head={p.branch} base="main" />
-                    <span>{p.gate.lines}줄 · {p.gate.files}파일</span>
-                  </span>
-                </span>
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   )
 }
 

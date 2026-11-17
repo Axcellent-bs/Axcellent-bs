@@ -73,6 +73,10 @@ case "$1" in
     exit 1 ;;
   branch) grep -qx "$4" "$FAKE_STATE/git_on_origin" && echo "  origin/somewhere"; exit 0 ;;
   merge-base)
+    # state/git_pairs 가 있으면 "조상 후손" 줄로만 판정한다(앞선/뒤처진 방향 시험용)
+    if [[ "$4" != origin/* && -f "$FAKE_STATE/git_pairs" ]]; then
+      grep -qx "$3 $4" "$FAKE_STATE/git_pairs"; exit $?
+    fi
     if [[ "$4" != origin/* ]]; then   # HEAD 가 그 커밋의 조상인가(앞으로 감기 가능한가)
       grep -qx "$4" "$FAKE_STATE/git_behind_head" 2>/dev/null && exit 1
       exit 0
@@ -82,7 +86,16 @@ case "$1" in
 esac
 exit 1
 """,
-    "systemctl": 'echo "systemctl $*" >> "$FAKE_LOG"\nexit 0\n',
+    # state/systemctl_rc 가 있으면 그 끝 코드로 끝난다(reload 실패 시험용)
+    "systemctl": ('echo "systemctl $*" >> "$FAKE_LOG"\n'
+                  'exit "$(cat "$FAKE_STATE/systemctl_rc" 2>/dev/null || echo 0)"\n'),
+    # 진짜 cp 를 부른다. state/cp_fail_dest 에 적힌 곳으로의 복사만 한 번 실패한다(교체 도중 실패 시험용)
+    "cp": ('for last; do :; done\n'
+           'if [[ -f "$FAKE_STATE/cp_fail_dest" && "$last" == "$(cat "$FAKE_STATE/cp_fail_dest")" ]]; then\n'
+           '  rm -f "$FAKE_STATE/cp_fail_dest"\n  echo "cp FAILED" >> "$FAKE_STATE/cp_failures"\n  exit 1\nfi\n'
+           'while IFS= read -r real; do\n'
+           '  [[ "$(dirname "$real")" != "$(dirname "$0")" ]] && exec "$real" "$@"\n'
+           'done < <(type -aP cp)\nexit 127\n'),
     "nginx": 'echo "nginx $*" >> "$FAKE_LOG"\nexit "$(cat "$FAKE_STATE/nginx_rc" 2>/dev/null || echo 0)"\n',
     # 주소별 응답 코드: state/curl_code_<포트> 가 있으면 그 값, 없으면 state/curl_code, 그것도 없으면 200
     "curl": ('url="${@: -1}"\nport="${url##*:}"\nport="${port%%/*}"\necho "curl $url" >> "$FAKE_LOG"\n'
@@ -99,6 +112,8 @@ exit 1
 # 가짜 배포 스크립트: 받은 환경변수를 기록만 한다
 DEPLOY_SH = """#!/usr/bin/env bash
 echo "deploy.sh REF=${DEPLOY_REF:-} MARK=${APP_PUBLIC_MARK:-} ROOT=${DEPLOY_WEB_ROOT:-} URL=${DEPLOY_CHECK_URL:-} SITE=${APP_SITE_URL:-}" >> "$FAKE_LOG"
+# state/deploy_moves_head 가 있으면 진짜 배포처럼 서버 레포 HEAD 를 그 커밋으로 옮긴다
+if [[ -f "$FAKE_STATE/deploy_moves_head" ]]; then echo "${DEPLOY_REF:-}" > "$FAKE_STATE/git_head"; fi
 exit "$(cat "$FAKE_STATE/deploy_rc" 2>/dev/null || echo 0)"
 """
 
@@ -219,7 +234,13 @@ class GateCase(unittest.TestCase):
         write(r / "data/front.env", f"APP_FRONT_TOKEN={HUMAN}\n")
         write(r / "data/secrets.env", f"SOME_API_TOKEN={SECRET}\nSHORT=abc\n")
         write(r / "data/state.json", "{}")
-        write(r / "data/data-dir/x.db", "x")
+        (r / "data/data-dir").mkdir(parents=True, exist_ok=True)
+        ddb = sqlite3.connect(str(r / "data/data-dir/x.db"))
+        ddb.execute("create table t (v text)")
+        ddb.execute("insert into t values ('dir-row')")
+        ddb.commit()
+        ddb.close()
+        write(r / "data/data-dir/keep.txt", "keep")
         write(r / "opt/app/repo/backend/.env",
               f"APP_PUBLIC_MARK=placeholder-a\nAPP_VIEWER_TOKEN={VIEWER}\n")
         write(self.state / "git_known", f"{SHA}\n{SHA_LOCAL}\n{SHA_FEATURE}\n{SHA_OLD}\n")
@@ -804,9 +825,36 @@ class RestartTests(GateCase):
         for name in ("secrets.env", "state.json", ".env"):
             self.assertIn(f"{name}.bak-before-{SHA[:8]}", backups)
         self.assertIn(f"data-dir.bak-before-{SHA[:8]}.tgz", backups)
+        self.assertIn(f"data-dir.bak-before-{SHA[:8]}-sqlite", backups)
         self.assertIn("health: 3/3", p.stdout)
         for text in (p.stdout, p.stderr, self.audit_text()):
             self.assertNotIn(SECRET, text)
+
+    def test_dir_backup_excludes_sqlite_and_copies_it_separately(self):
+        import tarfile
+        self.assertRc(self.gate("owner-a", self.CMD), 0)
+        bdir = self.rootp / "backups"
+        with tarfile.open(bdir / f"data-dir.bak-before-{SHA[:8]}.tgz") as tf:
+            names = tf.getnames()
+        self.assertIn("data-dir/keep.txt", names)
+        self.assertNotIn("data-dir/x.db", names)
+        sq = bdir / f"data-dir.bak-before-{SHA[:8]}-sqlite"
+        self.assertTrue(sq.is_dir())
+        if os.name == "posix":
+            self.assertEqual(sq.stat().st_mode & 0o777, 0o700)
+        copy = sqlite3.connect(str(sq / "x.db"))
+        self.assertEqual(copy.execute("select v from t").fetchall(), [("dir-row",)])
+        copy.close()
+
+    def test_dry_run_shows_exclude_and_sqlite_backup_and_writes_nothing(self):
+        p = self.gate("owner-a", f"restart-backend {SHA} --ack-data-loss --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn(r"--exclude=\*.db", p.stdout)
+        self.assertIn(r"--exclude=\*.db-wal", p.stdout)
+        self.assertIn(r"--exclude=\*.db-shm", p.stdout)
+        self.assertIn("DRY_RUN: mkdir -m 700 --", p.stdout)
+        self.assertIn("DRY_RUN: python3 -I -c", p.stdout)
+        self.assertEqual(os.listdir(self.rootp / "backups"), [])
 
     def test_second_restart_keeps_first_backup(self):
         self.assertRc(self.gate("owner-a", self.CMD), 0)
@@ -826,6 +874,277 @@ class RestartTests(GateCase):
         self.assertRc(p, 1)
         self.assertIn("result=fail:health-timeout", self.audit_text())
         self.assertIn("result=end:rc=1", self.audit_text())
+
+
+class RestartBackupRetentionTests(GateCase):
+    """restart-backend 백업 보관 개수 제한(정책 [restart] backup_keep)."""
+    CMD = f"restart-backend {SHA} --ack-data-loss --announced"
+    OLD = [f"{i:08x}" for i in range(0xa0, 0xa4)]      # 오래된 순서 4세트
+
+    def set_keep(self, line="backup_keep = 3"):
+        text = policy_text(self.root).replace("poll_seconds = 0\n", f"poll_seconds = 0\n{line}\n")
+        write(self.policy, text)
+
+    def make_sets(self, base="data-dir", shas=None, plain=False):
+        """오래된 순서로 세트를 만든다. 폴더 원본이면 .tgz + -sqlite, 파일 원본(plain)이면 이름 하나."""
+        bdir = self.rootp / "backups"
+        t0 = time.time() - 100000
+        for n, sha in enumerate(shas or self.OLD):
+            when = t0 + n * 1000
+            if plain:
+                paths = [bdir / f"{base}.bak-before-{sha}"]
+                paths[0].write_text("x", encoding="utf-8")
+            else:
+                tgz = bdir / f"{base}.bak-before-{sha}.tgz"
+                tgz.write_text("x", encoding="utf-8")
+                sq = bdir / f"{base}.bak-before-{sha}-sqlite"
+                sq.mkdir()
+                (sq / "x.db").write_text("x", encoding="utf-8")
+                paths = [tgz, sq]
+            for p in paths:
+                os.utime(p, (when, when))
+
+    def names(self):
+        return sorted(os.listdir(self.rootp / "backups"))
+
+    def sets_of(self, base):
+        """base 의 .tgz 이름에서 세트 키(SHA 8자[.시각])만 뽑는다."""
+        pre, suf = f"{base}.bak-before-", ".tgz"
+        return sorted(n[len(pre):-len(suf)] for n in self.names() if n.startswith(pre) and n.endswith(suf))
+
+    def test_keeps_newest_n_sets_and_deletes_older(self):
+        self.make_sets()
+        self.make_sets(base="app.db", plain=True)
+        self.set_keep()
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        bdir = self.rootp / "backups"
+        new = SHA[:8]
+        self.assertEqual(self.sets_of("data-dir"), sorted([self.OLD[2], self.OLD[3], new]))
+        for sha in self.OLD[:2]:
+            self.assertFalse((bdir / f"data-dir.bak-before-{sha}.tgz").exists())
+            self.assertFalse((bdir / f"data-dir.bak-before-{sha}-sqlite").exists())
+            self.assertFalse((bdir / f"app.db.bak-before-{sha}").exists())
+            self.assertRegex(p.stdout, rf"보관 정리: data-dir\.bak-before-{sha}\.tgz \(")
+            self.assertRegex(p.stdout, rf"보관 정리: data-dir\.bak-before-{sha}-sqlite \(")
+        for sha in self.OLD[2:]:
+            self.assertTrue((bdir / f"data-dir.bak-before-{sha}.tgz").exists())
+            self.assertTrue((bdir / f"data-dir.bak-before-{sha}-sqlite" / "x.db").exists())
+            self.assertTrue((bdir / f"app.db.bak-before-{sha}").exists())
+        self.assertTrue((bdir / f"data-dir.bak-before-{new}-sqlite").is_dir())
+        self.assertIn("result=backup-prune:", self.audit_text())
+        self.assertIn("systemctl restart", self.calls())
+        # 정리는 백업이 끝난 뒤에 한다
+        self.assertLess(p.stdout.index("백업 끝"), p.stdout.index("보관 정리:"))
+
+    def test_other_names_symlinks_and_other_kinds_are_never_touched(self):
+        self.make_sets()
+        bdir = self.rootp / "backups"
+        keep_names = [
+            "www-site-a.bak-before-000000a0.tgz",            # 번들 백업
+            "deploy-prev-head.bak-before-000000a0",          # 직전 HEAD 기록
+            ".env.bak-before-000000a0",                      # .env 백업
+            "other.bak-before-000000a0.tgz",                 # 정책에 없는 원본
+            "data-dir.bak-before-000000a0.tgz.old",          # 접미가 다름
+            "data-dir.bak-before-000000g0.tgz",              # 16진수가 아님
+            "data-dir.bak-before-a0.tgz",                    # 8자가 아님
+            "data-dir.bak-before-000000a0.zip",              # 모르는 접미
+            "data-dir.bak-before-000000a0",                  # 폴더 원본의 접미 없는 이름
+            "data-dir.bak-before-000000a0.20250101.tgz",     # 시각 형식이 다름
+            "notes.txt",
+        ]
+        for n in keep_names:
+            (bdir / n).write_text("x", encoding="utf-8")
+            os.utime(bdir / n, (1000, 1000))                 # 아주 오래된 것처럼
+        outside = self.rootp / "outside.txt"
+        outside.write_text("do-not-delete", encoding="utf-8")
+        linked = bdir / "data-dir.bak-before-000000b0.tgz"   # 패턴에 맞는 이름의 심볼릭 링크
+        try:
+            os.symlink(outside, linked)
+            have_link = True
+        except (OSError, NotImplementedError):
+            have_link = False
+        self.set_keep()
+        self.assertRc(self.gate("owner-a", self.CMD), 0)
+        for n in keep_names:
+            self.assertTrue((bdir / n).exists(), n)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "do-not-delete")
+        if have_link:
+            self.assertTrue(os.path.islink(linked))
+        self.assertFalse((bdir / f"data-dir.bak-before-{self.OLD[0]}.tgz").exists())
+        self.assertTrue((bdir / f".env.bak-before-{SHA[:8]}").exists())
+
+    def test_default_without_backup_keep_deletes_nothing(self):
+        self.make_sets()
+        before = self.names()
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertTrue(set(before) <= set(self.names()))
+        self.assertNotIn("보관 정리", p.stdout)
+        self.assertNotIn("backup-prune", self.audit_text())
+
+    def test_dry_run_lists_but_does_not_delete(self):
+        self.make_sets()
+        before = self.names()
+        self.set_keep()
+        p = self.gate("owner-a", f"restart-backend {SHA} --ack-data-loss --dry-run")
+        self.assertRc(p, 0)
+        self.assertEqual(self.names(), before)
+        # 새 세트 한 자리를 빼고 2세트만 남기므로 오래된 2세트가 지울 목록이다
+        self.assertIn(f"보관 정리 예정: data-dir.bak-before-{self.OLD[0]}.tgz", p.stdout)
+        self.assertIn(f"보관 정리 예정: data-dir.bak-before-{self.OLD[1]}-sqlite", p.stdout)
+        self.assertNotIn(f"보관 정리 예정: data-dir.bak-before-{self.OLD[2]}", p.stdout)
+        self.assertNotIn("backup-prune", self.audit_text())
+
+    def test_hidden_dot_named_sets_are_pruned_too(self):
+        (self.rootp / "data/.hid-dir").mkdir()
+        write(self.rootp / "data/.hid-dir/keep.txt", "k")
+        old = f'backup_dirs = ["{self.root}/data/data-dir"]'
+        new = f'backup_dirs = ["{self.root}/data/data-dir", "{self.root}/data/.hid-dir"]\nbackup_keep = 3'
+        text = policy_text(self.root)
+        self.assertIn(old, text)
+        write(self.policy, text.replace(old, new))
+        self.make_sets(base=".hid-dir")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertEqual(self.sets_of(".hid-dir"), sorted([self.OLD[2], self.OLD[3], SHA[:8]]))
+        self.assertIn(f"보관 정리: .hid-dir.bak-before-{self.OLD[0]}.tgz", p.stdout)
+
+    def test_current_and_previous_sets_always_kept(self):
+        self.make_sets()
+        self.make_sets(shas=[SHA[:8]])                       # 같은 SHA 의 옛 세트: 이번 세트는 이름에 시각이 붙는다
+        for suffix in (".tgz", "-sqlite"):
+            recent = time.time() - 50
+            os.utime(self.rootp / "backups" / f"data-dir.bak-before-{SHA[:8]}{suffix}", (recent, recent))
+        self.set_keep("backup_keep = 2")
+        self.assertRc(self.gate("owner-a", self.CMD), 0)
+        sets = self.sets_of("data-dir")
+        self.assertEqual(len(sets), 2)
+        self.assertIn(SHA[:8], sets)                                         # 직전 세트
+        self.assertTrue(any(s.startswith(SHA[:8] + ".") for s in sets))      # 이번 세트(시각 붙음)
+
+    def test_delete_failure_only_warns_and_restart_continues(self):
+        self.make_sets()
+        self.set_keep()
+        write(self.rootp / "fakebin/rm", "#!/usr/bin/env bash\nexit 1\n")
+        os.chmod(self.rootp / "fakebin/rm", 0o755)
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertIn("경고: 보관 정리 실패", p.stderr)
+        self.assertIn("systemctl restart", self.calls())
+
+    def test_backup_failure_prunes_nothing(self):
+        self.make_sets()
+        self.set_keep()
+        (self.rootp / "data/state.json").unlink()            # 백업할 파일이 없어 백업이 실패한다
+        before = self.names()
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertTrue(set(before) <= set(self.names()))
+        self.assertNotIn("backup-prune", self.audit_text())
+
+    def test_invalid_backup_keep_is_policy_error(self):
+        for line in ("backup_keep = 1", "backup_keep = 0", 'backup_keep = "abc"', "backup_keep = true",
+                     'backup_keep = ["3"]', "backup_keep = 02"):
+            self.set_keep(line)
+            p = self.gate("owner-a", "status")
+            self.assertRc(p, 5)
+            self.assertIn("backup_keep", p.stderr, line)
+        self.set_keep("backup_keep = 2")
+        self.assertRc(self.gate("owner-a", "status"), 0)
+
+    def test_status_shows_retention_line_counting_hidden(self):
+        self.make_sets()
+        p = self.gate("owner-a", "status")
+        self.assertRc(p, 0)
+        self.assertRegex(p.stdout, r"백업 보관: 4세트, 합계 .*제한 없음")
+        (self.rootp / "data/.hid").mkdir()
+        self.make_sets(base=".hid", shas=[self.OLD[0]])
+        old = f'backup_dirs = ["{self.root}/data/data-dir"]'
+        text = policy_text(self.root)
+        write(self.policy, text.replace(
+            old, f'backup_dirs = ["{self.root}/data/data-dir", "{self.root}/data/.hid"]\nbackup_keep = 5'))
+        p = self.gate("owner-a", "status")
+        self.assertRc(p, 0)
+        self.assertRegex(p.stdout, r"백업 보관: 5세트, 합계 .*backup_keep=5")
+
+
+class RestartSqliteDedupeTests(GateCase):
+    """backup_sqlite 로 이미 뜬 파일은 폴더 백업의 -sqlite 복사에서 건너뛴다(같은 파일을 두 번 저장하지 않는다)."""
+    CMD = f"restart-backend {SHA} --ack-data-loss --announced"
+
+    def setUp(self):
+        super().setUp()
+        d = self.rootp / "data/data-dir"
+        y = sqlite3.connect(str(d / "y.db"))
+        y.execute("create table t (v text)")
+        y.execute("insert into t values ('y-row')")
+        y.commit()
+        y.close()
+        self.sq = self.rootp / "backups" / f"data-dir.bak-before-{SHA[:8]}-sqlite"
+
+    def set_sqlite(self, items):
+        arr = ", ".join(f'"{self.root}/{i}"' for i in items)
+        old = f'backup_sqlite = ["{self.root}/data/app.db"]'
+        write(self.policy, policy_text(self.root).replace(old, f"backup_sqlite = [{arr}]"))
+
+    def test_overlap_goes_to_separate_file_only(self):
+        self.set_sqlite(["data/app.db", "data/data-dir/x.db"])
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        bdir = self.rootp / "backups"
+        self.assertTrue((bdir / f"x.db.bak-before-{SHA[:8]}").is_file())
+        self.assertFalse((self.sq / "x.db").exists())
+        self.assertTrue((self.sq / "y.db").is_file())
+        self.assertIn("중복 건너뜀: x.db (backup_sqlite로 이미 백업)", p.stdout)
+        self.assertNotIn("중복 건너뜀: y.db", p.stdout)
+
+    def test_no_overlap_behaves_as_before(self):
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertTrue((self.sq / "x.db").is_file())
+        self.assertTrue((self.sq / "y.db").is_file())
+        self.assertNotIn("중복 건너뜀", p.stdout)
+
+    def test_empty_backup_sqlite_puts_everything_in_folder(self):
+        self.set_sqlite([])
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertTrue((self.sq / "x.db").is_file())
+        self.assertTrue((self.sq / "y.db").is_file())
+        self.assertNotIn("중복 건너뜀", p.stdout)
+
+    def test_dry_run_shows_skip_line_and_writes_nothing(self):
+        self.set_sqlite(["data/app.db", "data/data-dir/x.db"])
+        p = self.gate("owner-a", f"restart-backend {SHA} --ack-data-loss --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("중복 건너뜀: x.db (backup_sqlite로 이미 백업)", p.stdout)
+        self.assertEqual(os.listdir(self.rootp / "backups"), [])
+
+    def test_all_dbs_overlapping_leaves_empty_folder_still_a_set_for_prune(self):
+        self.set_sqlite(["data/app.db", "data/data-dir/x.db", "data/data-dir/y.db"])
+        bdir = self.rootp / "backups"
+        t0 = time.time() - 100000
+        olds = [f"{i:08x}" for i in range(0xa0, 0xa4)]
+        for n, sha in enumerate(olds):
+            tgz = bdir / f"data-dir.bak-before-{sha}.tgz"
+            tgz.write_text("x", encoding="utf-8")
+            sq = bdir / f"data-dir.bak-before-{sha}-sqlite"
+            sq.mkdir()                                     # 안이 빈 -sqlite 폴더
+            for q in (tgz, sq):
+                os.utime(q, (t0 + n * 1000, t0 + n * 1000))
+        text = policy_text(self.root).replace("poll_seconds = 0\n", "poll_seconds = 0\nbackup_keep = 3\n")
+        write(self.policy, text.replace(
+            f'backup_sqlite = ["{self.root}/data/app.db"]',
+            f'backup_sqlite = ["{self.root}/data/app.db", "{self.root}/data/data-dir/x.db", "{self.root}/data/data-dir/y.db"]'))
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertEqual(os.listdir(self.sq), [])
+        for sha in olds[:2]:
+            self.assertFalse((bdir / f"data-dir.bak-before-{sha}.tgz").exists())
+            self.assertFalse((bdir / f"data-dir.bak-before-{sha}-sqlite").exists())
+        for sha in olds[2:]:
+            self.assertTrue((bdir / f"data-dir.bak-before-{sha}.tgz").exists())
+            self.assertTrue((bdir / f"data-dir.bak-before-{sha}-sqlite").is_dir())
 
 
 class NginxTwoPersonTests(GateCase):
@@ -1108,6 +1427,892 @@ class NginxRestoreAndStatusTests(GateCase):
         self.assertNotIn(SECRET, p.stdout)
 
 
+PAUSED_SH = HERE.parent / "autodeploy-paused.sh"
+OWNER_PLUS = ALL + ', "autodeploy-pause", "autodeploy-resume"'
+
+
+class AutodeployPauseTests(GateCase):
+    """자동 배포 정지·재개: 정책의 정지 표시 파일 하나만 쓴다. 권한자만, 최대 시간 안에서."""
+
+    def setUp(self):
+        super().setUp()
+        (self.rootp / "var/lib/autodeploy").mkdir(parents=True)
+        self.pause = self.rootp / "var/lib/autodeploy/autodeploy.pause"
+        self.write_policy()
+
+    def write_policy(self, section=None, default=None, owners=OWNER_PLUS):
+        text = policy_text(self.root).replace(f"owner-a = [{ALL}]", f"owner-a = [{owners}]")
+        text = text.replace(f"owner-b = [{ALL}]", f"owner-b = [{owners}]")
+        if default is not None:
+            text = text.replace('_default = ["status", "deploy-bundle", "record-pr"]', f"_default = [{default}]")
+        if section is None:
+            section = (f'[autodeploy]\npause_file = "{self.root}/var/lib/autodeploy/autodeploy.pause"\n'
+                       "default_hours = 2\nmax_hours = 12\n")
+        write(self.policy, text + "\n" + section)
+
+    def tree(self):
+        """임시 서버 폴더의 모든 파일(게이트가 쓰는 감사 로그·호출 기록·실행 잠금 제외)."""
+        skip = ("var/log/ax-gate/", "state/", "run/lock/")
+        out = {}
+        for path in sorted(self.rootp.rglob("*")):
+            rel = path.relative_to(self.rootp).as_posix()
+            if path.is_file() and not rel.startswith(skip):
+                out[rel] = path.read_bytes()
+        return out
+
+    def paused(self):
+        """동봉한 판정 스크립트를 돌린다: 0 = 멈춤, 1 = 안 멈춤."""
+        return subprocess.run([BASH, PAUSED_SH.as_posix(), self.pause.as_posix()], capture_output=True,
+                              encoding="utf-8", errors="replace", timeout=60)
+
+    def fields(self):
+        return dict(ln.split("=", 1) for ln in self.pause.read_text(encoding="utf-8").splitlines())
+
+    def test_pause_writes_only_the_pause_file_and_resume_overwrites_it(self):
+        before = self.tree()
+        self.assertEqual(self.paused().returncode, 1)                  # 파일이 없으면 멈춘 것이 아니다
+        p = self.gate("owner-a", "autodeploy-pause team-demo")
+        self.assertRc(p, 0)
+        after = self.tree()
+        changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
+        self.assertEqual(changed, {"var/lib/autodeploy/autodeploy.pause"})     # 그 파일 하나만
+        f = self.fields()
+        self.assertEqual((f["user"], f["reason"]), ("owner-a", "team-demo"))
+        self.assertAlmostEqual(int(f["until_epoch"]), time.time() + 2 * 3600, delta=120)   # 기본 2시간
+        r = self.paused()
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("건 사람 owner-a", r.stderr)
+        st = self.gate("member-x", "status").stdout
+        self.assertIn("자동 배포: 정지 중 — 건 사람 owner-a, 사유 team-demo, 재개 예정 " + f["until"], st)
+        # 정지는 게이트의 수동 배포를 막지 않는다(자동 배포 쪽만 읽는다)
+        self.assertRc(self.gate("member-x", f"deploy-bundle {SHA} --dry-run"), 0)
+        # 재개: 지우지 않고 재개 시각을 지금으로 덮어쓴다
+        p = self.gate("owner-b", "autodeploy-resume")
+        self.assertRc(p, 0)
+        self.assertTrue(self.pause.exists())
+        f = self.fields()
+        self.assertLessEqual(int(f["until_epoch"]), int(time.time()))
+        self.assertEqual((f["user"], f["reason"], f["resumed_by"]), ("owner-a", "team-demo", "owner-b"))
+        self.assertEqual(self.paused().returncode, 1)
+        self.assertIn("자동 배포: 정지 아님(owner-b 가 ", self.gate("member-x", "status").stdout)
+        audit = self.audit_text()
+        self.assertIn("user=owner-a\taction=autodeploy-pause\targs=team-demo\tmode=real\tannounced=no\tpr=-\t"
+                      "note=-\tlayer=root\tresult=start", audit)
+        self.assertIn("layer=root\tresult=paused:", audit)
+        self.assertIn("user=owner-b\taction=autodeploy-resume\t", audit)
+        self.assertIn("layer=root\tresult=resumed", audit)
+        # 자동 배포의 타이머·서비스·스크립트는 건드리지 않는다(status 가 부르는 읽기 명령만 있다)
+        for word in ("systemctl stop", "systemctl start", "systemctl disable", "systemctl restart",
+                     "systemctl reload", "nginx -t", "deploy.sh REF="):
+            self.assertNotIn(word, self.calls())
+        self.assertRc(self.gate("owner-a", "autodeploy-resume"), 0)     # 이미 재개됨: 할 일 없음
+        self.assertEqual(self.fields()["resumed_by"], "owner-b")
+
+    def test_time_limit_comes_from_policy(self):
+        soon = time.strftime("%Y-%m-%dT%H:%M", time.localtime(time.time() + 3 * 3600))
+        self.assertRc(self.gate("owner-a", f"autodeploy-pause demo {soon}"), 0)
+        self.assertEqual(self.fields()["until"], soon)
+        before = self.pause.read_bytes()
+        late = time.strftime("%Y-%m-%dT%H:%M", time.localtime(time.time() + 13 * 3600))
+        for until in (late, "2099-01-01T00:00", "2020-01-01T00:00", "2026-13-45T99:99"):
+            with self.subTest(until=until):
+                self.assertRc(self.gate("owner-a", f"autodeploy-pause demo {until}"), 2)
+        for cmd in ("autodeploy-pause", "autodeploy-pause two words x", "autodeploy-pause demo tomorrow",
+                    "autodeploy-pause demo;id", "autodeploy-resume now", "autodeploy-pause ../x"):
+            with self.subTest(cmd=cmd):
+                self.assertRc(self.gate("owner-a", cmd), 2)
+        self.assertEqual(self.pause.read_bytes(), before)
+        # 최대 시간은 정책 값이다: 1시간으로 줄이면 3시간 뒤는 거부된다
+        self.write_policy(section=(f'[autodeploy]\npause_file = "{self.root}/var/lib/autodeploy/autodeploy.pause"\n'
+                                   "default_hours = 1\nmax_hours = 1\n"))
+        self.assertRc(self.gate("owner-a", f"autodeploy-pause demo {soon}"), 2)
+        self.assertIn("result=fail:bad-until", self.audit_text())
+
+    def test_expired_pause_is_not_paused_without_resume(self):
+        write(self.pause, f"user=owner-a\nreason=demo\nuntil=2026-01-01T00:00\nuntil_epoch={int(time.time()) - 60}\n")
+        self.assertEqual(self.paused().returncode, 1)
+        self.assertIn("자동 배포: 정지 아님(재개 예정 2026-01-01T00:00 지남", self.gate("member-x", "status").stdout)
+        before = self.pause.read_bytes()
+        self.assertRc(self.gate("owner-a", "autodeploy-resume"), 0)
+        self.assertEqual(self.pause.read_bytes(), before)
+
+    def test_only_listed_accounts_and_never_default(self):
+        for cmd in ("autodeploy-pause demo", "autodeploy-resume"):
+            with self.subTest(cmd=cmd):
+                self.assertRc(self.gate("member-x", cmd), 3)              # 기본 계정
+                self.assertRc(self.gate("owner-c", cmd), 3)               # 표에 그 동작이 없는 권한자
+                self.assertRc(self.root_step(["member-x", "0", "0", "-"] + cmd.split()), 3)
+        self.assertFalse(self.pause.exists())
+        # _default 에 이 동작을 두면 정책 로드가 실패한다(전체 거부)
+        for extra in ('"autodeploy-pause"', '"autodeploy-resume"'):
+            with self.subTest(extra=extra):
+                self.write_policy(default=f'"status", "deploy-bundle", "record-pr", {extra}')
+                self.assertRc(self.gate("owner-a", "status"), 5)
+                self.assertRc(self.gate("member-x", "autodeploy-pause demo"), 5)
+        self.assertFalse(self.pause.exists())
+        self.assertNotIn("sudo", self.calls())
+
+    def test_while_locked_only_pause_is_allowed(self):
+        self.assertRc(self.gate("owner-a", "lock team-demo"), 0)
+        self.assertRc(self.gate("owner-a", "autodeploy-pause team-demo"), 0)
+        self.assertEqual(self.paused().returncode, 0)
+        self.assertRc(self.gate("owner-a", "autodeploy-resume"), 4)
+        self.assertRc(self.root_step(["owner-a", "0", "0", "-", "autodeploy-resume"]), 4)
+        self.assertEqual(self.paused().returncode, 0)
+        self.assertRc(self.gate("owner-a", "unlock"), 0)
+        self.assertRc(self.gate("owner-a", "autodeploy-resume"), 0)
+        self.assertEqual(self.paused().returncode, 1)
+
+    def test_dry_run_changes_nothing(self):
+        self.assertRc(self.gate("owner-a", "autodeploy-pause demo --dry-run"), 0)
+        self.assertFalse(self.pause.exists())
+        self.assertRc(self.gate("owner-a", "autodeploy-pause demo"), 0)
+        before = self.pause.read_bytes()
+        p = self.gate("owner-a", "autodeploy-resume --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN:", p.stdout)
+        self.assertEqual(self.pause.read_bytes(), before)
+
+    def test_bad_policy_for_pause_file(self):
+        r = self.root
+        other = self.rootp / "data/state.json"
+        before = other.read_bytes()
+        cases = [
+            ("", 5),                                                            # [autodeploy] 없음
+            ('[autodeploy]\npause_file = "TODO"\n', 5),
+            ('[autodeploy]\npause_file = "relative/autodeploy.pause"\n', 5),
+            (f'[autodeploy]\npause_file = "{r}/data/state.json"\n', 5),          # 이름이 autodeploy.pause 가 아님
+            (f'[autodeploy]\npause_file = "{r}/etc/ax-gate/policy.toml"\n', 5),
+            (f'[autodeploy]\npause_file = "{r}/var/lib/../lib/autodeploy/autodeploy.pause"\n', 5),
+            (f'[autodeploy]\npause_file = "{r}/no/such/dir/autodeploy.pause"\n', 5),
+        ]
+        for section, rc in cases:
+            with self.subTest(section=section):
+                self.write_policy(section=section)
+                self.assertRc(self.gate("owner-a", "autodeploy-pause demo"), rc)
+                self.assertRc(self.gate("member-x", "status"), 0)                # status 는 계속 된다
+        self.assertFalse(self.pause.exists())
+        self.assertEqual(other.read_bytes(), before)
+        # 모르는 키는 정책 로드 실패
+        self.write_policy(section=f'[autodeploy]\npause_file = "{r}/var/lib/autodeploy/autodeploy.pause"\nunit = "x"\n')
+        self.assertRc(self.gate("owner-a", "status"), 5)
+        # 정책에 [autodeploy] 가 없으면 status 에 줄이 없다(예전과 같다)
+        self.write_policy(section="")
+        self.assertNotIn("자동 배포", self.gate("member-x", "status").stdout)
+
+    def test_pause_file_spot_that_is_not_a_regular_file_is_never_written(self):
+        self.pause.mkdir()
+        self.assertRc(self.gate("owner-a", "autodeploy-pause demo"), 1)
+        self.assertIn("result=fail:pause-file", self.audit_text())
+        self.assertTrue(self.pause.is_dir())
+        self.assertEqual(self.paused().returncode, 0)                    # 판정은 안전한 쪽(멈춤)
+
+    def test_unreadable_pause_file_counts_as_paused_and_resume_repairs_it(self):
+        write(self.pause, "garbage\n")
+        self.assertEqual(self.paused().returncode, 0)
+        self.assertIn("정지 중으로 본다", self.gate("member-x", "status").stdout)
+        self.assertRc(self.gate("owner-a", "autodeploy-resume"), 0)
+        self.assertEqual(self.paused().returncode, 1)
+        self.assertEqual(self.fields()["resumed_by"], "owner-a")
+
+    def test_helper_script_usage_and_never_executes_file_content(self):
+        marker = self.rootp / "pwned"
+        write(self.pause, f"until_epoch=$(touch {marker.as_posix()})\nuser=`id`\n")
+        self.assertEqual(self.paused().returncode, 0)                    # 해석 불가 → 멈춤
+        self.assertFalse(marker.exists())
+        p = subprocess.run([BASH, PAUSED_SH.as_posix()], capture_output=True, timeout=60)
+        self.assertEqual(p.returncode, 2)
+        future = int(time.time()) + 600
+        write(self.pause, f"user=owner-a\nuntil=2026-01-01T00:00\nuntil_epoch={future}\n")
+        self.assertEqual(self.paused().returncode, 0)
+
+
+class RestartHeadMismatchTests(GateCase):
+    """restart-backend 의 head-mismatch: 어느 쪽이 앞섰는지 가려 다음 명령을 알려 준다."""
+
+    CMD = f"restart-backend {SHA} --ack-data-loss --announced"
+    HEAD = "d" * 40
+
+    def set_head(self, relation):
+        write(self.state / "git_head", self.HEAD + "\n")
+        pairs = {"behind": f"{self.HEAD} {SHA}\n", "ahead": f"{SHA} {self.HEAD}\n", "diverged": "\n"}[relation]
+        write(self.state / "git_pairs", pairs)
+
+    def test_server_behind_tells_to_deploy_first(self):
+        self.set_head("behind")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn(f"  1) deploy-bundle {SHA[:8]} --announced", p.stdout)
+        self.assertIn(f"  2) restart-backend {SHA[:8]} --ack-data-loss --announced", p.stdout)
+        self.assertIn(f"먼저 deploy-bundle {SHA[:8]}", p.stderr)
+        self.assertIn("result=fail:head-mismatch", self.audit_text())
+        self.assertNotIn("systemctl", self.calls())
+        self.assertNotIn("deploy.sh REF=", self.calls())
+
+    def test_server_ahead_tells_to_restart_with_current_head(self):
+        self.set_head("ahead")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn(f"  restart-backend {self.HEAD[:8]} --ack-data-loss --announced", p.stdout)
+        self.assertNotIn("deploy-bundle", p.stdout)
+        self.assertIn("result=fail:head-mismatch", self.audit_text())
+        self.assertNotIn("systemctl", self.calls())
+
+    def test_diverged_gives_no_command(self):
+        self.set_head("diverged")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn("서로 다른 갈래", p.stderr)
+        self.assertNotIn("deploy-bundle", p.stdout + p.stderr)
+        self.assertNotIn("systemctl", self.calls())
+
+    def deploy_first_policy(self, value="true", perms=None):
+        text = policy_text(self.root).replace('unit = "example-backend"',
+                                              f'unit = "example-backend"\ndeploy_first = {value}')
+        if perms:
+            text = text.replace(f"owner-c = [{ALL}]", f"owner-c = [{perms}]")
+        write(self.policy, text)
+
+    def test_deploy_first_is_off_by_default_and_when_false(self):
+        self.set_head("behind")
+        self.deploy_first_policy("false")
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertNotIn("deploy.sh REF=", self.calls())
+        self.assertNotIn("systemctl", self.calls())
+
+    def test_deploy_first_stops_before_restart_when_deploy_does_not_move_head(self):
+        self.set_head("behind")
+        self.deploy_first_policy("true")
+        # 배포가 HEAD 를 옮기지 못하면 배포 뒤 HEAD 확인에서 멈춘다(재시작하지 않는다)
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertEqual(self.calls().count("deploy.sh REF=" + SHA), 2)
+        self.assertNotIn("systemctl", self.calls())
+        self.assertIn(f"result=deploy-first:{SHA[:8]}", self.audit_text())
+        self.assertIn("result=fail:head-after-deploy", self.audit_text())
+
+    def test_deploy_first_deploys_then_restarts(self):
+        self.set_head("behind")
+        self.deploy_first_policy("true")
+        write(self.state / "deploy_moves_head", "1\n")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        calls = self.calls()
+        self.assertEqual(calls.count("deploy.sh REF=" + SHA), 2)
+        self.assertLess(calls.index("deploy.sh REF=" + SHA), calls.index("systemctl restart example-backend"))
+        backups = os.listdir(self.rootp / "backups")
+        self.assertIn(f"www-site-a.bak-before-{SHA[:8]}.tgz", backups)      # 배포의 번들 백업도 그대로 뜬다
+        self.assertIn(f"app.db.bak-before-{SHA[:8]}", backups)              # 재시작의 백업도 뜬다
+        audit = self.audit_text()
+        self.assertIn(f"result=deploy-first:{SHA[:8]}", audit)
+        self.assertIn(f"result=prev-head:{self.HEAD}", audit)
+        self.assertIn("health: 3/3", p.stdout)
+
+    def test_deploy_first_failure_in_bundle_check_stops_before_restart(self):
+        self.set_head("behind")
+        self.deploy_first_policy("true")
+        write(self.state / "deploy_moves_head", "1\n")
+        write(self.rootp / "var/www/site-a/assets/leak.js", f'const k="{SECRET}";\n')
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn("result=fail:bundle-check", self.audit_text())
+        self.assertNotIn("systemctl", self.calls())
+        self.assertNotIn(SECRET, p.stdout + p.stderr + self.audit_text())
+
+    def test_deploy_first_needs_deploy_permission_too(self):
+        self.set_head("behind")
+        self.deploy_first_policy("true", perms='"status", "restart-backend"')
+        p = self.gate("owner-c", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn(f"  1) deploy-bundle {SHA[:8]} --announced", p.stdout)
+        self.assertNotIn("deploy.sh REF=", self.calls())
+        self.assertNotIn("deploy-first", self.audit_text())
+
+    def test_deploy_first_never_applies_when_server_is_ahead_or_diverged(self):
+        self.deploy_first_policy("true")
+        for relation in ("ahead", "diverged"):
+            with self.subTest(relation=relation):
+                self.set_head(relation)
+                self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertNotIn("deploy.sh REF=", self.calls())
+        self.assertNotIn("systemctl", self.calls())
+
+    def test_deploy_first_dry_run_shows_both_steps_and_changes_nothing(self):
+        self.set_head("behind")
+        self.deploy_first_policy("true")
+        p = self.gate("owner-a", f"restart-backend {SHA} --ack-data-loss --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN: as_deploy env", p.stdout)
+        self.assertIn("systemctl restart example-backend", p.stdout)
+        self.assertNotIn("deploy.sh REF=", self.calls())
+        self.assertNotIn("systemctl", self.calls())
+        self.assertEqual(os.listdir(self.rootp / "backups"), [])
+
+
+class AutodeployHelpTests(GateCase):
+    """새 동작이 help·오류 안내에 나오는지(PR1 의 사용성 장치와 맞물림)."""
+
+    def test_new_actions_show_in_help_for_accounts_that_have_them(self):
+        text = policy_text(self.root).replace(f"owner-a = [{ALL}]", f"owner-a = [{OWNER_PLUS}]")
+        write(self.policy, text)
+        p = self.gate("owner-a", "help")
+        self.assertRc(p, 0)
+        self.assertIn("  autodeploy-pause <사유> [재개시각 YYYY-MM-DDTHH:MM]\n", p.stdout)
+        self.assertIn("  autodeploy-resume\n", p.stdout)
+        self.assertNotIn("이 계정에 없는 동작", p.stdout)
+        # 권한이 없는 계정에는 "없는 동작"으로만 나온다
+        p = self.gate("member-x", "help")
+        self.assertIn("rollback-bundle autodeploy-pause autodeploy-resume", p.stdout)
+        self.assertNotIn("  autodeploy-pause <사유>", p.stdout)
+        p = self.gate("member-x", "help autodeploy-pause")
+        self.assertRc(p, 0)
+        self.assertIn("형식: autodeploy-pause <사유> [재개시각 YYYY-MM-DDTHH:MM]", p.stdout)
+        self.assertIn("이 동작 권한이 없다", p.stdout)
+        self.assertEqual(self.calls(), "")
+
+    def test_bad_args_and_suggestions_for_new_actions(self):
+        text = policy_text(self.root).replace(f"owner-a = [{ALL}]", f"owner-a = [{OWNER_PLUS}]")
+        write(self.policy, text)
+        p = self.gate("owner-a", "autodeploy-pause")
+        self.assertRc(p, 2)
+        self.assertIn("형식: autodeploy-pause <사유> [재개시각 YYYY-MM-DDTHH:MM]", p.stderr)
+        p = self.gate("owner-a", "autodeploy-resume now")
+        self.assertRc(p, 2)
+        self.assertIn("형식: autodeploy-resume", p.stderr)
+        p = self.gate("owner-a", "autodeploy")
+        self.assertRc(p, 2)
+        self.assertIn("비슷한 동작: autodeploy-pause, autodeploy-resume", p.stderr)
+        p = self.gate("owner-a", "pause demo")
+        self.assertIn("비슷한 동작: autodeploy-pause", p.stderr)
+        # 플래그는 동작 뒤 어디에든 온다
+        self.assertRc(self.gate("owner-a", "autodeploy-pause --dry-run demo"), 5)   # 정책에 [autodeploy] 없음
+        p = self.gate("member-x", "autodeploy-pause demo")
+        self.assertRc(p, 3)
+        self.assertIn("이 계정에 허용된 동작: status deploy-bundle record-pr", p.stderr)
+
+
+CONF_B = """server {
+    listen 8301;
+    # AX-GATE-INSERT-BELOW
+    location /example-api/ {
+        limit_except GET HEAD { deny all; }
+    }
+}
+"""
+PROFILES = ('\n[location_profiles]\n'
+            'long-timeout = ["proxy_read_timeout 300s;", "proxy_send_timeout 300s;"]\n'
+            'big-body = ["client_max_body_size 50m;"]\n')
+
+
+def old_digest(name, method, regex, proposer):
+    """프로필·다중 대상이 생기기 전의 확인값 공식. 프로필 없는 제안은 이 값 그대로여야 한다."""
+    import hashlib
+    return hashlib.sha256(f"{name}\n{method}\n{regex}\n{proposer}\n".encode()).hexdigest()[:12]
+
+
+class NginxMultiTargetTests(GateCase):
+    """정책 [nginx_targets]: 대상 파일 전부를 한 묶음으로 바꾼다. 실패하면 전부 되돌린다."""
+
+    def setUp(self):
+        super().setUp()
+        self.conf_b = self.rootp / "etc/nginx/conf.d/site-b.conf"
+        write(self.conf_b, CONF_B)
+        self.targets = f'\n[nginx_targets]\nsite-b = "{self.root}/etc/nginx/conf.d/site-b.conf"\n'
+        write(self.policy, policy_text(self.root) + self.targets)
+
+    def backup_dirs(self):
+        return sorted(os.listdir(self.rootp / "etc/nginx/backup"))
+
+    def pending(self):
+        return sorted(os.listdir(self.rootp / "var/lib/ax-gate/pending"))
+
+    def both(self):
+        return self.conf.read_text(encoding="utf-8"), self.conf_b.read_text(encoding="utf-8")
+
+    def approve(self, digest, key="owner-c"):
+        return self.gate(key, f"nginx-approve-location card-decision {digest} --announced")
+
+    def test_approval_changes_every_target_with_one_test_and_one_reload(self):
+        digest = self.propose()
+        self.assertEqual(digest, old_digest("card-decision", "POST", GOOD_REGEX, "owner-b"))
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))             # 제안만으로는 아무것도 안 바뀐다
+        p = self.approve(digest)
+        self.assertRc(p, 0)
+        a, b = self.both()
+        for text in (a, b):
+            self.assertIn("location ~ " + GOOD_REGEX + " {", text)
+            self.assertIn("proxy_pass http://127.0.0.1:8201;", text)
+        self.assertIn("listen 8301;", b)
+        calls = self.calls()
+        self.assertEqual(calls.count("nginx -t"), 1)
+        self.assertEqual(calls.count("systemctl reload nginx"), 1)
+        self.assertLess(calls.index("nginx -t"), calls.index("systemctl reload nginx"))
+        (bdir,) = self.backup_dirs()
+        saved = self.rootp / "etc/nginx/backup" / bdir
+        # 기본 대상은 예전 자리, 추가 대상은 targets/<이름>/ 아래
+        self.assertEqual((saved / "site.conf").read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertTrue((saved / "site.conf.sha256").exists())
+        self.assertEqual((saved / "targets/site-b/site-b.conf").read_text(encoding="utf-8"), CONF_B)
+        self.assertTrue((saved / "targets/site-b/site-b.conf.sha256").exists())
+        self.assertIn("적용한 대상(전부 한 번에): 기본, site-b", p.stdout)
+        (rec,) = os.listdir(self.rootp / "var/lib/ax-gate/approved")
+        self.assertIn("targets=기본, site-b\n",
+                      (self.rootp / "var/lib/ax-gate/approved" / rec).read_text(encoding="utf-8"))
+        self.assertIn("nginx 대상 파일: 기본, site-b", self.gate("member-x", "status").stdout)
+        # 그 백업으로 복원하면 두 파일 다 원래대로 돌아온다(한 번의 nginx -t·reload)
+        time.sleep(1.1)
+        p = self.gate("owner-a", f"nginx-restore {bdir} --announced")
+        self.assertRc(p, 0)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        self.assertIn("복원한 대상: 기본, site-b", p.stdout)
+        self.assertEqual(self.calls().count("nginx -t"), 2)
+        self.assertEqual(self.calls().count("systemctl reload nginx"), 2)
+
+    def test_failed_nginx_test_restores_every_target(self):
+        digest = self.propose()
+        write(self.state / "nginx_rc", "1\n")
+        p = self.approve(digest)
+        self.assertRc(p, 1)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        self.assertNotIn("reload", self.calls())
+        self.assertIn("result=fail:nginx-test-failed", self.audit_text())
+        self.assertEqual(self.pending(), ["card-decision.req"])
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/approved"), [])
+
+    def test_failure_while_replacing_second_target_restores_the_first(self):
+        digest = self.propose()
+        write(self.state / "cp_fail_dest", f"{self.root}/etc/nginx/conf.d/site-b.conf")
+        p = self.approve(digest)
+        self.assertRc(p, 1)
+        self.assertTrue((self.state / "cp_failures").exists())          # 실제로 교체 도중에 실패했다
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))              # 먼저 바꾼 기본 대상도 되돌아왔다
+        self.assertNotIn("nginx -t", self.calls())
+        self.assertNotIn("reload", self.calls())
+        self.assertIn("result=fail:nginx-replace-failed", self.audit_text())
+        self.assertEqual(self.pending(), ["card-decision.req"])
+
+    def test_failed_reload_restores_every_target(self):
+        digest = self.propose()
+        write(self.state / "systemctl_rc", "1\n")
+        p = self.approve(digest)
+        self.assertRc(p, 1)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        self.assertIn("result=fail:nginx-reload-failed", self.audit_text())
+        self.assertEqual(self.pending(), ["card-decision.req"])
+
+    def test_every_target_is_checked_before_anything_changes(self):
+        # 둘째 대상에 삽입 표시 줄이 없으면 제안부터 안 된다
+        write(self.conf_b, CONF_B.replace("    # AX-GATE-INSERT-BELOW\n", ""))
+        self.assertRc(self.gate("owner-b", f"nginx-add-location card-decision POST {GOOD_REGEX}"), 2)
+        self.assertEqual(self.pending(), [])
+        # 제안 뒤에 둘째 대상이 바뀌어 넣을 수 없게 되면, 승인은 아무것도 바꾸지 않고 멈춘다(백업 폴더도 없다)
+        write(self.conf_b, CONF_B)
+        digest = self.propose()
+        broken = CONF_B.replace("    # AX-GATE-INSERT-BELOW\n", "")
+        write(self.conf_b, broken)
+        p = self.approve(digest)
+        self.assertRc(p, 2)
+        self.assertEqual(self.both(), (ORIG_CONF, broken))
+        self.assertEqual(self.backup_dirs(), [])
+        self.assertNotIn("nginx", self.calls())
+        self.assertIn("result=fail:location-rejected", self.audit_text())
+        # 둘째 대상에 같은 정규식이 이미 있어도 마찬가지다
+        write(self.conf_b, CONF_B.replace("# AX-GATE-INSERT-BELOW\n",
+                                          "# AX-GATE-INSERT-BELOW\n    location ~ " + GOOD_REGEX + " { }\n"))
+        self.assertRc(self.approve(digest), 2)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertEqual(self.backup_dirs(), [])
+
+    def test_target_specific_block_lines(self):
+        lines = ('["limit_except {method} { deny all; }", "proxy_pass http://127.0.0.1:{port};", '
+                 '"include snippets/example-proxy-b.conf;"]')
+        write(self.policy, policy_text(self.root) + self.targets
+              + f"\n[nginx_target_block_lines]\nsite-b = {lines}\n")
+        self.assertRc(self.approve(self.propose()), 0)
+        a, b = self.both()
+        self.assertIn("include snippets/example-auth.conf; }", a)
+        self.assertNotIn("example-proxy-b", a)
+        self.assertIn("proxy_pass http://127.0.0.1:8201; include snippets/example-proxy-b.conf; }", b)
+        self.assertNotIn("rewrite", b)
+        # 대상별 블록 줄도 검증기를 거친다: 메서드 제한이 빠진 줄이면 제안이 안 된다
+        bad = '["proxy_pass http://127.0.0.1:{port};"]'
+        write(self.policy, policy_text(self.root) + self.targets
+              + f"\n[nginx_target_block_lines]\nsite-b = {bad}\n")
+        self.assertRc(self.gate("owner-b", f"nginx-add-location other POST {GOOD_REGEX[:-1]}/x$"), 2)
+        self.assertEqual(self.pending(), [])
+
+    def test_restore_reverts_every_target_when_nginx_test_fails(self):
+        self.assertRc(self.approve(self.propose()), 0)
+        changed = self.both()
+        (bdir,) = self.backup_dirs()
+        write(self.state / "nginx_rc", "1\n")
+        time.sleep(1.1)
+        self.assertRc(self.gate("owner-a", f"nginx-restore {bdir} --announced"), 1)
+        self.assertEqual(self.both(), changed)
+        self.assertEqual(self.calls().count("systemctl reload nginx"), 1)   # 승인 때 한 번뿐
+
+    def test_restore_checks_every_copy_before_changing_anything(self):
+        self.assertRc(self.approve(self.propose()), 0)
+        changed = self.both()
+        (bdir,) = self.backup_dirs()
+        write(self.rootp / "etc/nginx/backup" / bdir / "targets/site-b/site-b.conf", "# tampered\n")
+        self.assertRc(self.gate("owner-a", f"nginx-restore {bdir} --announced"), 1)
+        self.assertIn("result=fail:backup-checksum", self.audit_text())
+        self.assertEqual(self.both(), changed)
+        self.assertEqual(self.backup_dirs(), [bdir])
+
+    def test_restore_from_backup_made_before_targets_leaves_extra_target_alone(self):
+        old = self.rootp / "etc/nginx/backup/pre-manual-20261111"
+        write(old / "site.conf", "# older\n")
+        p = self.gate("owner-c", "nginx-restore pre-manual-20261111 --announced")
+        self.assertRc(p, 0)
+        self.assertEqual(self.both(), ("# older\n", CONF_B))
+        self.assertIn("대상 site-b: 이 백업에 사본이 없다(그 대상은 그대로 둔다)", p.stdout)
+        self.assertIn("복원한 대상: 기본 / 백업에 없어 그대로 둔 대상: site-b", p.stdout)
+        # 복원 직전 상태는 대상 전부를 백업해 둔다(되돌리기는 전부 한 번에)
+        undo = [d for d in self.backup_dirs() if d.startswith("pre-gate-restore-")][0]
+        self.assertTrue((self.rootp / "etc/nginx/backup" / undo / "targets/site-b/site-b.conf").exists())
+
+    def test_requester_cannot_pick_a_target(self):
+        # 넷째 인자는 프로필 이름이다. 대상 이름을 적어도 대상이 골라지지 않는다
+        p = self.gate("owner-b", f"nginx-add-location card-decision POST {GOOD_REGEX} site-b")
+        self.assertRc(p, 2)
+        self.assertIn("result=fail:profile-unknown", self.audit_text())
+        self.assertEqual(self.pending(), [])
+
+    def test_bad_target_policy_stops_nginx_actions_but_not_status(self):
+        r = self.root
+        bad = [
+            f'[nginx_targets]\nSite_B = "{r}/etc/nginx/conf.d/site-b.conf"\n',          # 이름 형식
+            f'[nginx_targets]\nsite-b = "{r}/etc/nginx/conf.d/site.conf"\n',            # 기본 대상과 같은 파일
+            '[nginx_targets]\nsite-b = "relative/site-b.conf"\n',                       # 경로 아님
+            f'[nginx_targets]\nsite-b = "{r}/etc/nginx/../nginx/conf.d/site-b.conf"\n',
+            '[nginx_targets]\nsite-b = "TODO"\n',
+            f'[nginx_targets]\nsite-b = ["{r}/etc/nginx/conf.d/site-b.conf"]\n',        # 목록(글이 아님)
+            self.targets.strip() + '\n\n[nginx_target_block_lines]\nsite-c = ["x;"]\n',   # 없는 대상의 블록 줄
+        ]
+        write(self.rootp / "etc/nginx/backup/pre-old/site.conf", "# old\n")
+        for body in bad:
+            with self.subTest(body=body):
+                write(self.policy, policy_text(self.root) + "\n" + body)
+                self.assertRc(self.gate("owner-b", f"nginx-add-location n1 POST {GOOD_REGEX}"), 5)
+                self.assertRc(self.gate("owner-a", "nginx-restore pre-old --announced"), 5)
+                self.assertRc(self.gate("member-x", "status"), 0)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        self.assertEqual(self.pending(), [])
+        self.assertNotIn("nginx", self.calls())
+
+    def test_dry_run_changes_nothing_on_any_target(self):
+        digest = self.propose()
+        p = self.gate("owner-c", f"nginx-approve-location card-decision {digest} --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN:", p.stdout)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        self.assertEqual(self.backup_dirs(), [])
+        self.assertNotIn("nginx", self.calls())
+
+
+class NginxProfileTests(GateCase):
+    """정책 [location_profiles]: 요청하는 사람은 이름만 고른다. 내용은 정책과 검증기 허용 목록이 정한다."""
+
+    def setUp(self):
+        super().setUp()
+        write(self.policy, policy_text(self.root) + PROFILES)
+
+    def propose_with(self, profile, key="owner-b"):
+        p = self.gate(key, f"nginx-add-location card-decision POST {GOOD_REGEX} {profile}")
+        self.assertRc(p, 0)
+        return [ln.split()[-1] for ln in p.stdout.splitlines() if ln.strip().startswith("확인값")][0]
+
+    def test_without_profile_nothing_changes_from_before(self):
+        digest = self.propose()
+        self.assertEqual(digest, old_digest("card-decision", "POST", GOOD_REGEX, "owner-b"))
+        req = (self.rootp / "var/lib/ax-gate/pending/card-decision.req").read_text(encoding="utf-8")
+        self.assertNotIn("profile=", req)
+        p = self.gate("owner-c", f"nginx-approve-location card-decision {digest} --announced")
+        self.assertRc(p, 0)
+        conf = self.conf.read_text(encoding="utf-8")
+        self.assertIn("include snippets/example-auth.conf; }", conf)
+        self.assertNotIn("profile=", conf)
+        self.assertNotIn("timeout", conf)
+        self.assertIn(f"note=proposer:owner-b,digest:{digest},self-approve:no\tlayer=root\t", self.audit_text())
+        (bdir,) = os.listdir(self.rootp / "etc/nginx/backup")
+        self.assertFalse((self.rootp / "etc/nginx/backup" / bdir / "targets").exists())
+
+    def test_profile_is_bound_into_digest_shown_in_status_and_applied(self):
+        digest = self.propose_with("long-timeout")
+        self.assertNotEqual(digest, old_digest("card-decision", "POST", GOOD_REGEX, "owner-b"))
+        st = self.gate("member-x", "status").stdout
+        self.assertIn(f"POST {GOOD_REGEX} / 확인값 {digest} / 프로필 long-timeout", st)
+        self.assertIn("location 프로필: big-body, long-timeout", st)
+        self.assertIn(f"note=digest:{digest},profile:long-timeout\tlayer=root\tresult=proposed", self.audit_text())
+        p = self.gate("owner-c", f"nginx-approve-location card-decision {digest} --announced")
+        self.assertRc(p, 0)
+        conf = self.conf.read_text(encoding="utf-8")
+        self.assertIn("# ax-gate: name=card-decision user=owner-b added=", conf)
+        self.assertIn(" profile=long-timeout\n", conf)
+        self.assertIn("include snippets/example-auth.conf; proxy_read_timeout 300s; proxy_send_timeout 300s; }",
+                      conf)
+        self.assertEqual(conf.count("proxy_pass "), 1)
+        self.assertIn(f"note=proposer:owner-b,digest:{digest},self-approve:no,profile:long-timeout\tlayer=root\t"
+                      "result=applied:", self.audit_text())
+        (rec,) = os.listdir(self.rootp / "var/lib/ax-gate/approved")
+        self.assertIn("profile=long-timeout\n",
+                      (self.rootp / "var/lib/ax-gate/approved" / rec).read_text(encoding="utf-8"))
+
+    def test_unknown_or_malformed_profile_name(self):
+        p = self.gate("owner-b", f"nginx-add-location card-decision POST {GOOD_REGEX} huge")
+        self.assertRc(p, 2)
+        self.assertIn("쓸 수 있는 프로필: big-body, long-timeout", p.stderr)
+        self.assertIn("result=fail:profile-unknown", self.audit_text())
+        for name in ("Long", "a/b", "../x", "proxy_pass", "x;y"):
+            with self.subTest(name=name):
+                self.assertRc(self.gate("owner-b", f"nginx-add-location card-decision POST {GOOD_REGEX} {name}"), 2)
+        self.assertRc(self.gate("owner-b", f"nginx-add-location card-decision POST {GOOD_REGEX} big-body x"), 2)
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/pending"), [])
+
+    def test_profile_with_directive_outside_allow_list_is_refused(self):
+        bad = [
+            '["proxy_pass http://127.0.0.1:9999;"]',
+            '["include snippets/other.conf;"]',
+            '["add_header X-Test 1;"]',
+            '["proxy_read_timeout 300s;", "rewrite ^/(.*)$ /$1 break;"]',
+            '["proxy_read_timeout 300s; proxy_pass http://127.0.0.1:9999;"]',
+            '["proxy_read_timeout 99999s;"]',
+            '["client_max_body_size 0;"]',
+            '["limit_except GET { deny all; }"]',
+            '[]',                       # 빈 프로필
+            '"proxy_read_timeout 300s;"',   # 목록이 아님
+        ]
+        for body in bad:
+            with self.subTest(body=body):
+                write(self.policy, policy_text(self.root) + f"\n[location_profiles]\nrisky = {body}\n")
+                self.assertRc(self.gate("owner-b", f"nginx-add-location n1 POST {GOOD_REGEX} risky"), 2)
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/pending"), [])
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertNotIn("nginx", self.calls())
+
+    def test_profile_removed_or_made_unsafe_after_proposal_stops_approval(self):
+        digest = self.propose_with("long-timeout")
+        approve = f"nginx-approve-location card-decision {digest} --announced"
+        write(self.policy, policy_text(self.root))                       # 프로필이 정책에서 사라짐
+        self.assertRc(self.gate("owner-c", approve), 2)
+        self.assertIn("result=fail:profile-unknown", self.audit_text())
+        write(self.policy, policy_text(self.root)
+              + '\n[location_profiles]\nlong-timeout = ["proxy_pass http://127.0.0.1:9999;"]\n')
+        self.assertRc(self.gate("owner-c", approve), 2)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertEqual(os.listdir(self.rootp / "etc/nginx/backup"), [])
+        self.assertNotIn("nginx", self.calls())
+
+    def test_changing_the_profile_in_the_proposal_file_breaks_the_digest(self):
+        digest = self.propose_with("big-body")
+        req = self.rootp / "var/lib/ax-gate/pending/card-decision.req"
+        original = req.read_text(encoding="utf-8")
+        approve = f"nginx-approve-location card-decision {digest} --announced"
+        for changed in (original.replace("profile=big-body", "profile=long-timeout"),
+                        original.replace("profile=big-body\n", "")):
+            with self.subTest(changed=changed[-40:]):
+                write(req, changed)
+                self.assertRc(self.gate("owner-c", approve), 2)
+        self.assertEqual(self.audit_text().count("result=fail:digest-mismatch"), 2)
+        write(req, original.replace("profile=big-body", "profile=Bad Name"))
+        self.assertRc(self.gate("owner-c", approve), 1)                  # 깨진 제안 파일
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+
+    def test_profile_and_multiple_targets_together(self):
+        conf_b = self.rootp / "etc/nginx/conf.d/site-b.conf"
+        write(conf_b, CONF_B)
+        write(self.policy, policy_text(self.root) + PROFILES
+              + f'\n[nginx_targets]\nsite-b = "{self.root}/etc/nginx/conf.d/site-b.conf"\n')
+        digest = self.propose_with("big-body")
+        self.assertRc(self.gate("owner-c", f"nginx-approve-location card-decision {digest} --announced"), 0)
+        for path in (self.conf, conf_b):
+            self.assertIn("include snippets/example-auth.conf; client_max_body_size 50m; }",
+                          path.read_text(encoding="utf-8"))
+        self.assertEqual(self.calls().count("nginx -t"), 1)
+
+    def test_profile_argument_shows_in_help_and_bad_args(self):
+        p = self.gate("owner-b", "help")
+        self.assertRc(p, 0)
+        self.assertIn("  nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식> [프로필]\n", p.stdout)
+        self.assertIn("프로필은 정책에 있는 이름만", p.stdout)
+        self.assertIn("형식: nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식> [프로필]",
+                      self.gate("member-x", "help nginx-add-location").stdout)
+        p = self.gate("owner-b", "nginx-add-location card-decision POST")
+        self.assertRc(p, 2)
+        self.assertIn("<정규식> [프로필]", p.stderr)
+        # 프로필 인자가 붙어도 플래그는 어디에든 올 수 있다
+        p = self.gate("owner-b", f"nginx-add-location --dry-run card-decision POST {GOOD_REGEX} big-body")
+        self.assertRc(p, 0)
+        self.assertIn("프로필 big-body", p.stdout)
+
+
+class UsabilityTests(GateCase):
+    """사용법 오류를 줄이는 장치: help, 플래그 순서 무관, 오류 안내. 안전 경계는 그대로다."""
+
+    def test_help_lists_only_my_actions_without_sudo(self):
+        p = self.gate("member-x", "help")
+        self.assertRc(p, 0)
+        self.assertIn("계정 member-x 에 허용된 동작:", p.stdout)
+        for line in ("  status", "  deploy-bundle <SHA>", "  record-pr <참조: 백업폴더명 또는 SHA> <PR번호>"):
+            self.assertIn(line + "\n", p.stdout)
+        self.assertNotIn("  restart-backend <SHA>", p.stdout)
+        self.assertIn("이 계정에 없는 동작(권한자에게 요청한다): lock unlock nginx-restore nginx-add-location "
+                      "nginx-approve-location restart-backend rollback-bundle", p.stdout)
+        self.assertIn("--dry-run", p.stdout)
+        self.assertIn("ax-gate 0.3.0", p.stdout)
+        self.assertEqual(self.calls(), "")                       # sudo 를 부르지 않는다(앞단에서 끝난다)
+        self.assertIn("user=member-x\taction=help\targs=-\tmode=real\tannounced=no\tpr=-\tnote=-\t"
+                      "layer=front\tresult=help", self.audit_text())
+        self.assertNotIn("layer=root", self.audit_text())
+
+    def test_help_for_owner_and_for_one_action(self):
+        p = self.gate("owner-a", "help")
+        self.assertRc(p, 0)
+        self.assertIn("  restart-backend <SHA> --ack-data-loss\n", p.stdout)
+        # 이 테스트 정책의 권한자에게 없는 것은 자동 배포 정지·재개뿐이다(따로 적어야 열린다)
+        self.assertIn("이 계정에 없는 동작(권한자에게 요청한다): autodeploy-pause autodeploy-resume\n", p.stdout)
+        p = self.gate("member-x", "help restart-backend")
+        self.assertRc(p, 0)
+        self.assertIn("형식: restart-backend <SHA> --ack-data-loss", p.stdout)
+        self.assertIn("이 동작 권한이 없다", p.stdout)
+        self.assertIn("action=help\targs=restart-backend\t", self.audit_text())
+        self.assertIn("이 동작을 쓸 수 있다", self.gate("owner-a", "help restart-backend").stdout)
+        for alias in ("--help", "-h"):
+            self.assertRc(self.gate("member-x", alias), 0)
+        self.assertEqual(self.calls(), "")
+
+    def test_help_rejects_extra_or_unknown_words_and_never_echoes_them(self):
+        p = self.gate("member-x", "help /etc/shadow")
+        self.assertRc(p, 2)
+        self.assertNotIn("/etc/shadow", p.stderr + p.stdout + self.audit_text())
+        self.assertRc(self.gate("member-x", "help status extra"), 2)
+        p = self.gate("member-x", "help deploy")
+        self.assertRc(p, 2)
+        self.assertIn("비슷한 동작: deploy-bundle", p.stderr)
+        self.assertEqual(self.calls(), "")
+
+    def test_help_works_while_locked_and_is_front_only(self):
+        write(self.lock, "garbage\n")
+        self.assertRc(self.gate("member-x", "help"), 0)
+        # 뒷단은 help 를 모른다(앞단 전용). root 로 도는 코드가 늘지 않는다.
+        self.assertRc(self.root_step(["member-x", "0", "0", "-", "help"]), 2)
+        self.assertIn("layer=root\tresult=denied:unknown-action", self.audit_text())
+
+    def test_flags_are_recognized_anywhere_after_the_action(self):
+        self.assertRc(self.gate("owner-b", f"deploy-bundle --announced {SHA} pr=963"), 0)
+        self.assertRc(self.gate("owner-b", f"deploy-bundle pr=964 {SHA} --announced"), 0)
+        audit = self.audit_text()
+        for pr in ("963", "964"):
+            self.assertIn(f"action=deploy-bundle\targs={SHA}\tmode=real\tannounced=yes\tpr={pr}\tnote=-\t"
+                          "layer=root\tresult=start", audit)
+        p = self.gate("owner-b", f"deploy-bundle --dry-run {SHA}")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN:", p.stdout)
+        p = self.gate("owner-a", f"nginx-add-location --dry-run other POST {GOOD_REGEX}")
+        self.assertRc(p, 0)
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/pending"), [])
+        # 동작은 여전히 맨 앞이어야 한다
+        self.assertRc(self.gate("owner-b", f"--announced deploy-bundle {SHA}"), 2)
+        self.assertRc(self.gate("owner-b", f"pr=1 deploy-bundle {SHA} --announced"), 2)
+        # 알림 확인이 빠지면 순서와 상관없이 멈춘다
+        self.assertRc(self.gate("owner-b", f"deploy-bundle pr=965 {SHA}"), 2)
+        self.assertIn("pr=965\tnote=-\tlayer=front\tresult=denied:not-announced", self.audit_text())
+
+    def test_restart_accepts_ack_before_sha_and_root_layer_stays_strict(self):
+        for cmd in (f"restart-backend --ack-data-loss {SHA} --announced",
+                    f"restart-backend --announced --ack-data-loss {SHA}",
+                    f"restart-backend {SHA} --announced --ack-data-loss"):
+            with self.subTest(cmd=cmd):
+                self.assertRc(self.gate("owner-a", cmd), 0)
+        audit = self.audit_text()
+        self.assertEqual(audit.count(f"action=restart-backend\targs={SHA} --ack-data-loss\tmode=real\t"
+                                     "announced=yes\tpr=-\tnote=-\tlayer=root\tresult=start"), 3)
+        self.assertEqual(self.calls().count("systemctl restart example-backend"), 3)
+        # 뒷단 검증은 그대로다: 순서가 바뀐 요청을 직접 넣으면 거부한다
+        before = self.calls().count("systemctl restart")
+        self.assertRc(self.root_step(["owner-a", "0", "1", "-", "restart-backend", "--ack-data-loss", SHA]), 2)
+        self.assertEqual(self.calls().count("systemctl restart"), before)
+        # 확인 플래그 자체는 여전히 필수다
+        self.assertRc(self.gate("owner-a", f"restart-backend {SHA} --announced"), 2)
+        self.assertRc(self.gate("owner-a", f"restart-backend --ack-data-loss --ack-data-loss --announced"), 2)
+
+    def test_bad_args_shows_the_format_of_that_action(self):
+        cases = {
+            "deploy-bundle": "형식: deploy-bundle <SHA>",
+            "lock": "형식: lock <사유> [해제시각 YYYY-MM-DDTHH:MM]",
+            "nginx-add-location n POST": "형식: nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식>",
+            "nginx-approve-location n": "형식: nginx-approve-location <이름> <확인값 12자>",
+            f"restart-backend {SHA}": "형식: restart-backend <SHA> --ack-data-loss",
+            "record-pr x": "형식: record-pr <참조: 백업폴더명 또는 SHA> <PR번호>",
+            "status now": "형식: status",
+        }
+        for cmd, want in cases.items():
+            with self.subTest(cmd=cmd):
+                p = self.gate("owner-a", cmd)
+                self.assertRc(p, 2)
+                self.assertIn(want, p.stderr)
+        p = self.gate("owner-a", f"deploy-bundle {SHA} --anounced-zzqq")
+        self.assertRc(p, 2)
+        self.assertIn("모르는 옵션이 있다", p.stderr)
+        self.assertNotIn("zzqq", p.stderr + self.audit_text())
+        self.assertEqual(self.audit_text().count("result=denied:bad-args"), len(cases) + 1)
+        self.assertEqual(self.calls(), "")
+
+    def test_unknown_action_suggests_known_actions_only(self):
+        for cmd, want in ((f"deploy {SHA}", "비슷한 동작: deploy-bundle"),
+                          ("restart", "비슷한 동작: restart-backend"),
+                          ("rollback", "비슷한 동작: rollback-bundle"),
+                          ("deploy_bundle", "비슷한 동작: deploy-bundle"),
+                          ("nginx-add", "nginx-add-location"),
+                          ("usage", "비슷한 동작: help")):
+            with self.subTest(cmd=cmd):
+                p = self.gate("owner-a", cmd)
+                self.assertRc(p, 2)
+                self.assertIn(want, p.stderr)
+        p = self.gate("owner-a", "cat /etc/shadow")
+        self.assertRc(p, 2)
+        self.assertNotIn("비슷한 동작", p.stderr)
+        self.assertIn("help 로 내 계정에 허용된 동작을 본다", p.stderr)
+        self.assertNotIn("/etc/shadow", p.stderr + self.audit_text())
+        self.assertEqual(self.calls(), "")
+
+    def test_bad_regex_explains_braces_quotes_and_wildcards(self):
+        base = "nginx-add-location zzqq-name POST "
+        p = self.gate("owner-a", base + "^/example-api/api/items/zzqq/[0-9a-f]{8}$")
+        self.assertRc(p, 2)
+        self.assertIn("중괄호", p.stderr)
+        self.assertIn("[0-9a-f]+", p.stderr)
+        p = self.gate("owner-a", base + "'^/example-api/api/items/zzqq/[^/]+$'")
+        self.assertRc(p, 2)
+        self.assertIn("명령 전체를 작은따옴표", p.stderr)
+        p = self.gate("owner-a", base + "^/example-api/api/items/zzqq/.*$")
+        self.assertRc(p, 2)
+        self.assertIn("[^/]+ 로 적는다", p.stderr)
+        p = self.gate("owner-a", base + "^/example-api/api/items/zzqq/x?$")
+        self.assertRc(p, 2)
+        self.assertEqual(self.audit_text().count("result=denied:bad-regex"), 4)
+        # 받은 정규식은 출력·기록하지 않는다
+        self.assertNotIn("zzqq/", p.stderr + self.audit_text())
+        self.assertEqual(self.calls(), "")
+        # 안내대로 허용 묶음으로 바꾸면 통과한다
+        self.assertRc(self.gate("owner-a", base + "^/example-api/api/items/zzqq/[0-9a-f]+$"), 0)
+
+    def test_not_permitted_lists_what_this_account_can_do(self):
+        p = self.gate("member-x", "lock demo")
+        self.assertRc(p, 3)
+        self.assertIn("이 계정에 허용된 동작: status deploy-bundle record-pr", p.stderr)
+        p = self.gate("restore-only", f"deploy-bundle {SHA} --announced")
+        self.assertRc(p, 3)
+        self.assertIn("이 계정에 허용된 동작: status nginx-restore nginx-approve-location", p.stderr)
+
+    def test_version_has_no_draft_suffix(self):
+        p = self.gate("member-x", "status")
+        self.assertIn("ax-gate 0.3.0 — status", p.stdout)
+        self.assertNotIn("draft", p.stdout)
+
+
 class ExamplePolicyTests(GateCase):
     def test_gate_can_load_the_example_policy(self):
         shutil.copyfile(EXAMPLE_POLICY, self.policy)
@@ -1139,6 +2344,11 @@ class ExamplePolicyTests(GateCase):
         self.assertEqual(set(perms["_default"]), {"status", "deploy-bundle", "record-pr"})
         self.assertEqual(data["location"]["allowed_methods"], ["POST"])
         self.assertEqual(data["deploy"]["allowed_branches"], ["dev"])
+        # 자동 배포 정지·재개는 예시에서 누구에게도 열려 있지 않고, 선행 배포 연계는 꺼져 있다
+        for actions in perms.values():
+            self.assertFalse({"autodeploy-pause", "autodeploy-resume"} & set(actions))
+        self.assertNotIn("autodeploy", data)
+        self.assertIs(data["restart"]["deploy_first"], False)
         # 예시에는 가짜 값과 자리표시자만 있다: 경로는 전부 "TODO"
         self.assertTrue(data["paths"])
         self.assertEqual(set(data["paths"].values()), {"TODO"})
@@ -1156,6 +2366,12 @@ class ExamplePolicyTests(GateCase):
         chk.validate("POST", "^" + prefix + "x/[^/]+/approve$", data["location"]["allowed_methods"],
                      data["location_prefixes"]["authorized-1"], data["location_upstreams"],
                      data["location"]["block_lines"])
+        # 예시의 프로필은 검증기 허용 목록 안의 지시어뿐이다. 추가 대상은 예시에서 켜 두지 않는다
+        self.assertTrue(data["location_profiles"])
+        for lines in data["location_profiles"].values():
+            chk.check_profile_lines(lines, data["location"]["block_lines"])
+        self.assertNotIn("nginx_targets", data)
+        self.assertNotIn("nginx_target_block_lines", data)
 
 
 if __name__ == "__main__":

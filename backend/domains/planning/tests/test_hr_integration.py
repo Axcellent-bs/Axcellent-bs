@@ -127,9 +127,9 @@ def test_reject_draft_sends_decision_rejected(gate) -> None:
     assert keys == ["ctx_req_0013:record_case:REQ-13:decision_rejected"]
     decision = svc.state.decisions[-1]
     assert decision.text.startswith("[기각한 안]") and decision.sent_to_hr
-    to_hr = [a for a in svc.state.activity if a.to == "hr" and a.point == "record_case"]
+    to_hr = [a for a in svc.state.activity if a.to == "archive" and a.point == "record_case"]
     assert "인사에 기각 기록" in to_hr[-1].text
-    assert any(m.to == "hr" and "인사에 기각 기록" in m.text for m in svc.state.outbox)
+    assert any(m.to == "archive" and "인사에 기각 기록" in m.text for m in svc.state.outbox)
 
 
 @pytest.mark.parametrize(
@@ -204,7 +204,7 @@ def test_confirm_with_warn_records_warn_ignored(gate) -> None:
     flow = [a for a in svc.state.activity if a.context_id == "ctx_req_0012"]
     audit = [a for a in flow if a.point == "audit.warn_ignored"]
     assert len(audit) == 1 and "warn 무시 진행" in audit[0].text and "R2(DC-31)" in audit[0].text
-    assert any(a.to == "hr" and "warn 무시 진행" in a.text for a in flow)
+    assert any(a.to == "archive" and "warn 무시 진행" in a.text for a in flow)
     [confirm] = gate.params("confirm_spec")
     assert confirm["warn_ignored"][0] == {
         "para": "R2",

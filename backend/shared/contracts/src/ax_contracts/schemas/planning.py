@@ -13,6 +13,7 @@ from typing import Any, Literal
 from pydantic import Field, model_validator
 
 from ax_contracts.schemas.common import AxModel, UtcDatetime
+from ax_contracts.schemas.finance import ContentFormat
 
 
 class RelatedPr(AxModel):
@@ -607,6 +608,12 @@ class ReceiveInsightInput(AxModel):
     body_md: str | None = Field(default=None, max_length=8000)  # 설명 (마크다운)
     # 이 인사이트로 했던 지난 캠페인 결과 (최근 3개, 데이터분석 brief v4 past_results)
     past: list[InsightPast] = Field(default_factory=list, max_length=3)
+    # 아래는 예전 요청은 없다. products와 같은 순서의 회사 상품 ID (데이터분석 InsightProduct)
+    product_ids: list[str] = Field(default_factory=list, max_length=10)
+    # 아래는 예전 요청은 없다. 캠페인 콘텐츠 카테고리(예: 아재개그)·형식(재무 ContentFormat).
+    # 재무 의견 → 기획 제안 → 마케팅 실행까지 같은 카테고리로 잇는다 (11/17 태윤 요청)
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    content_format: ContentFormat | None = None
 
 
 class ReceiveInsightOutput(AxModel):
@@ -634,6 +641,12 @@ class CampaignBriefInput(AxModel):
     body_md: str | None = None
     # 후속 기획이면 이어 가는 지난 캠페인 id (같은 캠페인을 계속하는 방향, 11/6 예진 결정)
     continue_campaign: str | None = None
+    # 아래는 예전 요청은 없다. products와 같은 순서의 회사 상품 ID (인사이트에서 받은 것)
+    product_ids: list[str] = Field(default_factory=list, max_length=10)
+    # 아래는 예전 요청은 없다. 인사이트에서 받은 콘텐츠 카테고리·형식 (재무·마케팅 content_category,
+    # format과 같은 값). `format`은 기획 초안의 자유 문구(숏폼 15초 등)라 이름을 따로 둔다
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    content_format: ContentFormat | None = None
 
 
 class CampaignBriefOutput(AxModel):

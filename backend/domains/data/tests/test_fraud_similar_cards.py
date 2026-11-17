@@ -60,7 +60,7 @@ SEEN: list[AgentRequest] = []
 def _hr(method: str, max_similarity: float, ids: list[str]):  # noqa: ANN202
     async def send(target: str, request: AgentRequest) -> AgentResult:
         SEEN.append(request)
-        assert (target, request.skill) == ("hr", "find_similar_fraud_cards")
+        assert (target, request.skill) == ("archive", "find_similar_fraud_cards")
         cards = [{"card_id": i, "title": "지난 사기", "similarity": max_similarity} for i in ids]
         return AgentResult(
             meta=request.meta,

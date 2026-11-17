@@ -65,7 +65,7 @@ def create(client: TestClient, key: str = "k-create-1", **untrusted: str) -> dic
 def test_agent_card_matches_handlers_and_is_served(client: TestClient) -> None:
     card = load_card()
     assert card.name == "support"
-    assert {s.id for s in card.skills} == set(ALL_HANDLERS)
+    assert {s.id for s in card.skills} == set(ALL_HANDLERS) | {"receive_improvement_note"}
     assert client.get("/.well-known/agent-card.json").json()["name"] == "support"
 
 

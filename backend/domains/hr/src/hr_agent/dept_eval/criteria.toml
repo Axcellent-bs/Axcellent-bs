@@ -30,6 +30,19 @@ normal_max_attempts = 1
 use_promised = true
 max_silence_seconds = 300
 
+# 같은 단계의 확인 필요가 반복되면 인사 AI가 총괄 AI에 진단을 요청한다(2026-11-16). 이 값은 판정 기준이
+# 아니라 "요청을 보내는 조건"이라 판정 결과를 바꾸지 않으므로 version을 올리지 않는다.
+# 같은 (에이전트, 단계)의 최근 window건 중 flagged_verdicts가 min_flagged건 이상이고, 판정할 수 있었던
+# 기록(사람에게 넘김·기록 없음·진행 중 제외)이 min_records건 이상일 때 요청한다. 값은 임시다.
+# 실패·막힘(blocked)은 이미 사람이 보는 상태라 기본으로 넣지 않았다.
+# daily_limit_per_agent: 에이전트 하나가 하루에 새로 받을 수 있는 요청 수(총괄이 센다)
+[repeat]
+min_records = 3
+window = 3
+min_flagged = 2
+flagged_verdicts = ["check", "silent"]
+daily_limit_per_agent = 1
+
 # 부서·묶음별로 다르게 해야 할 때만 아래처럼 덧붙인다. 지금은 모든 단계가 같은 기준이다.
 # 묶음 이름은 stages.py의 group 값이다.
 # [group."LLM 분석"]

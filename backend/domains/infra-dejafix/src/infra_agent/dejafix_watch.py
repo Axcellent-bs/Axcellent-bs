@@ -7,7 +7,9 @@ DejaFix 레포는 고치지 않는다. DejaFix 읽기 전용 프록시(`dejafix-
 - 원인 판단은 넣지 않는다. 같은 부위의 열린 사건이 있으면 총괄이 합친다.
 
 같은 장애는 한 번만 보낸다(`idempotency_key`가 DejaFix 장애 id). 주기 실행이라 LLM을 부르지 않는다.
-`INFRA_DEJAFIX_URL`이 없으면 켜지 않는다.
+주소는 매 회차 정한다(`base_url`): `INFRA_DEJAFIX_URL` → 보관함에 `dejafix`가 있으면 dejafix-proxy →
+없으면 그 회차는 건너뛴다. 시작할 때 아무것도 없어도 감시는 켜 두어, 나중에 화면에서 연결하면
+재시작 없이 읽기 시작한다.
 
 `INFRA_DEJAFIX_COMPONENTS`(쉼표로 구분, 예: `payment`)를 주면 그 부위만 보낸다. Zabbix 기본
 템플릿(Windows·Linux)이 PC·호스트 트리거에도 `component=memory`·`cpu` 같은 태그를 달아서, 거르지
@@ -26,6 +28,7 @@ from typing import Any
 
 import httpx
 
+from ax_agent_template import tool_connections
 from ax_agent_template.events import publish
 from ax_contracts.schemas import EventEnvelope, EventType
 from ax_contracts.schemas.event import InfraAnomalyData
@@ -53,8 +56,10 @@ def reset_published() -> None:
 
 
 def base_url(env: Mapping[str, str] | None = None) -> str | None:
-    raw = (os.environ if env is None else env).get(URL_ENV, "").strip()
-    return raw.rstrip("/") or None
+    """이번에 읽을 주소: 환경변수 → 보관함 dejafix(프록시) → None. `env`를 주면 환경변수만 본다."""
+    if env is not None:
+        return env.get(URL_ENV, "").strip().rstrip("/") or None
+    return tool_connections.dejafix_proxy_url(URL_ENV)
 
 
 def interval_seconds(env: Mapping[str, str] | None = None) -> int:
@@ -153,27 +158,30 @@ async def run_once(
 
 
 async def run_forever(
-    url: str,
+    url: str | Callable[[], str | None] | None = None,
     interval: int = DEFAULT_INTERVAL_SECONDS,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     components: frozenset[str] | None = None,
 ) -> None:
-    """`interval`초마다 `run_once`. 한 번 실패해도 다음 주기에 다시 읽는다."""
+    """`interval`초마다 `run_once`. 주소는 매 회차 정하고(없으면 건너뜀), 실패해도 다음에 읽는다."""
     while True:
-        try:
-            sent = await run_once(url, clock(), components=components)
-            for env in sent:
-                logger.info("DejaFix 장애를 총괄에 알림: %s", env.idempotency_key)
-        except Exception:  # noqa: BLE001 - DejaFix가 잠깐 안 돼도 감시는 이어 간다
-            logger.warning("DejaFix 현재 장애를 읽지 못했다", exc_info=True)
+        target = url() if callable(url) else (url if url is not None else base_url())
+        if target is not None:
+            try:
+                sent = await run_once(target, clock(), components=components)
+                for env in sent:
+                    logger.info("DejaFix 장애를 총괄에 알림: %s", env.idempotency_key)
+            except Exception:  # noqa: BLE001 - DejaFix가 잠깐 안 돼도 감시는 이어 간다
+                logger.warning("DejaFix 현재 장애를 읽지 못했다", exc_info=True)
         await asyncio.sleep(interval)
 
 
-def start(env: Mapping[str, str] | None = None) -> asyncio.Task | None:
-    """`INFRA_DEJAFIX_URL`이 있으면 감시를 켠다. 없으면 None."""
-    url = base_url(env)
-    if url is None:
-        return None
+def start(env: Mapping[str, str] | None = None) -> asyncio.Task:
+    """감시를 켠다. 주소가 아직 없어도 켜 두고 매 회차 다시 찾는다."""
     return asyncio.create_task(
-        run_forever(url, interval_seconds(env), components=allowed_components(env))
+        run_forever(
+            (lambda: base_url(env)) if env is not None else None,
+            interval_seconds(env),
+            components=allowed_components(env),
+        )
     )

@@ -38,7 +38,7 @@
 ## skill 모양 (초안)
 `book_issue_stats` (읽기)
 
-입력: `period`(`day|week|month`, 기본 `month`), `limit`(기본 20), `min_claims`(기본 1), 선택 `product_ids`
+입력: `period`(`day|week|month`, 기본 `month`), `limit`(기본 20), `min_claims`(기본 1), 선택 `product_ids`(주면 그 상품은 클레임·문의가 0건이어도 모두 돌려주고 `min_claims`·`min_inquiries`·`limit`로 자르지 않는다)
 출력: `items: list[BookIssueRow]`, `missing: list[str]` (못 읽은 값과 이유), `period_start/end`, `generated_at`
 
 ```python
@@ -47,6 +47,7 @@ class BookIssueRow(AxModel):
     title: str                           # 화면용. 묶는 열쇠가 아니다
     claim_count: int
     claims_by_type: dict[str, int]
+    claims_by_reason: dict[str, int]     # 사유 코드별 클레임 수(재현 님 요청, 합 = claim_count). 묶는 기준은 쓰는 쪽이 정한다
     defect_claim_count: int
     return_qty: int
     refund_cash_total: int
@@ -88,7 +89,7 @@ class BookIssueRow(AxModel):
 - 책(`product_id`)과 ISBN 매핑: 상품에 ISBN이 없어 보인다. 연령별 자료(ISBN 기준)와 합칠 때 필요하다.
 - 마케팅·재무가 쓰는 시점과 호출 모양 (태윤 님·마케팅 담당과 협의).
 
-## 구현 상태 (2026-11-14)
+## 구현 상태 (2026-11-14, 2026-11-17 갱신)
 - #1097: `OrderItem`·`ClaimLine`에 `product_id` 추가. #1098: `book_issue_stats` (클레임만).
 - 문의 건수(이 문서의 `inquiry_count`): 클레임은 `claims` 서비스, 문의는 `inquiry` 서비스에 따로 있어서 둘을 나눠 구현했다.
   - `inquiry` 서비스에 읽기 skill `inquiry_order_counts`를 더했다. 기간 안의 문의를 **주문별**로 센다
@@ -97,15 +98,31 @@ class BookIssueRow(AxModel):
     (`load_order`, 8개씩 동시) 문의를 상품에 붙인다. 결제 전 주문의 문의(결제 실패 문의 등)는 상품 불만이
     아니라서 붙이지 않고 `inquiries_not_attributed`로 알린다. 읽지 못한 값은 0이 아니라 `None`/`missing`.
   - 문의만 있고 클레임이 없는 상품도 보인다 (`min_inquiries`). `include_inquiries=false`면 문의 서비스와 판매 서버를 부르지 않는다.
-- 판매 수량 대비 비율(`sold_qty`·`claim_rate`): 판매 서버에 이미 있는 기간별 주문 목록(`GET /orders?since&until&cursor`)을
-  읽는다 (판매 서버는 레포 분리 중이라 새 읽기 경로를 만들지 않았다). 결제가 끝난 주문의 품목 `product_id`별 수량을 더한다.
+- 판매 수량 대비 비율(`sold_qty`·`claim_rate`): **2026-11-17부터 판매 서버의 판매 집계 읽기 경로**(`GET /sales-summary`, 아래 "판매 수량 읽기 방식")를 쓴다. 처음(2026-11-14)에는 판매 서버에 이미 있는 기간별 주문 목록(`GET /orders?since&until&cursor`)을
+  읽었고(판매 서버는 레포 분리 중이라 새 읽기 경로를 만들지 않았다), 그 경로가 없는 옛 판매 서버에서는 지금도 이 주문 목록 읽기로 되돌아간다. 결제가 끝난 주문의 품목 `product_id`별 수량을 더한다.
   - 주문 목록은 order_id 순이라 중간에 멈추면 일부만 읽은 것이다. 페이지 상한(30페이지, 최대 3만 주문)·요청 마감·연결
     실패로 끝까지 못 읽으면 **모자란 수량으로 비율을 내지 않고** `sold_qty`·`claim_rate`를 None으로 두고 이유를 `missing`에 적는다.
   - 비율 = 접수 기간의 클레임 수량(`claim_qty`, 고객이 요청한 수량) / 같은 기간 판매 수량. 오래전 주문의 클레임도
     접수 기간에 들어와 1을 넘을 수 있다 (`missing`에 항상 알린다). 기간 안 판매가 0이면 비율은 None.
   - `include_sales=false`면 판매 서버를 읽지 않는다. 주문 출처가 시드(목 모드)면 읽지 않는다.
-- 아직 없는 것: 문의 품목 단위 귀속(접수 화면 변경 필요), 상품과 ISBN 매핑, 한 번에 3만 주문이 넘는 기간의 판매 수량
-  (집계 읽기 경로가 있어야 한다 — 판매 서버 레포 분리가 끝난 뒤 협의).
+- 계약 위치(2026-11-17): `BookIssueInput`·`BookIssueReport`(와 `BookIssueRow`·`CategoryCount`·`PERIOD_DAYS`)를 `shared/contracts`의 `ax_contracts/schemas/book_issue.py`로 옮겼다(예진 님 리뷰: 재무·데이터가 `domains`끼리 import하지 않고 읽으려면 계약에 있어야 한다). 고객지원의 `book_issue_schemas.py`는 같은 이름으로 다시 내보내 기존 import가 그대로 되고, 문의 서비스 쪽 모델(`InquiryOrderCounts*`)은 도메인에 남긴다. 재무 예산 검토 입력 `CampaignBudgetReviewInput`에는 선택 칸 `product_ids`(최대 10개)를 더했다(B안 ①).
+- 데이터·기획 연결(2026-11-16): 데이터 브리프가 `book_issue_stats`를 A2A로 불러 연결 상품의 고객 반응 숫자를 근거로 담고(#1125), 기획 근거 줄과 `product_ids` 선택 칸으로 넘긴다(#1128). 짚어 물은 상품의 0건 행(#1129), 사유별 클레임 수 `claims_by_reason`(#1147)은 데이터 요청으로 더했다.
+- 아직 없는 것: 문의 품목 단위 귀속(접수 화면 변경 필요), 상품과 ISBN 매핑(판매 서버 상품에 `isbn13`·`author`·`publisher` 칸은 생겼고 책 데이터는 예진 님이 채우는 중).
+  (한 번에 3만 주문이 넘는 기간의 판매 수량은 판매 집계 읽기 경로로 해결했다 — #1145. 251은 옛 판매 서버라 캣북스를 따로 배포하기 전까지는 주문 목록 3만 건 상한이 남는다.)
+
+## 판매 수량 읽기 방식 (2026-11-17)
+- **판매 집계 읽기 경로 먼저**: 판매 수량은 판매 서버(Catbooks-demo)의 `GET /api/shop/sales-summary?group_by=product`로 읽는다(결제가 끝난 주문의 상품별 `gross_qty`, 전액 환불된 주문도 센다 — 클레임 비율의 분모). 주문을 하나씩 읽지 않아 주문이 30만 건쯤이어도 판매 서버를 오래 붙잡지 않는다.
+- **7일씩 나눠 읽기**: 판매 서버가 93일까지 받지만 한 번에 오래 붙잡히지 않게 7일씩 이어서 읽고 합친다(30일이면 5번). 요청 마감이 지나면 끝까지 읽지 못한 것으로 보고 수량을 내지 않는다(모자란 수량으로 비율을 내지 않는다).
+- **몇 분 캐시**: 기간 끝을 5분 단위로 내려 같은 기간의 호출이 같은 열쇠가 되게 하고, 끝까지 읽은 결과를 5분 캐시한다(요청마다 판매 서버를 다시 읽지 않는다). 끝까지 못 읽은 결과는 캐시하지 않는다. 클레임 기간과 판매 기간 끝이 최대 5분 어긋날 수 있다.
+- **옛 판매 서버**: 그 경로가 없는(404·405) 판매 서버면 예전처럼 주문 목록(`GET /orders`)을 페이지로 읽는다(최대 3만 주문). 401·403·422·5xx와 연결 실패는 숨기지 않고 `missing`에 이유를 적는다.
+- 상품 수 상한은 이미 입력(`product_ids` 최대 100개)에 있고, 판매 집계는 상품 수와 상관없이 한 번에 전체를 받아 오므로 따로 더하지 않았다.
+
+## 짚어 물은 상품의 0건 행 (2026-11-16, 데이터 요청 #1125)
+- 데이터가 브리프에 고객 반응을 붙일 때 불만이 하나도 없는 책이 "집계에 없음"으로 빠져 고객 반응이 비어 보였다. `product_ids`를 주면 요청한 상품은 모두 한 행씩 돌려준다.
+- 0건 행: `claim_count`·`defect_claim_count`·`claim_qty`·`return_qty`·`refund_cash_total`은 0, 문의를 전부 읽었으면 `inquiry_count`도 0(일부만 읽었으면 `None`), 판매 수량을 읽었으면 `sold_qty`와 `claim_rate`(판매 0이면 `None`)를 채운다. 읽지 않은 값은 `None`이고 0으로 채우지 않는다. `reason`은 "기간 안 클레임 없음".
+- `product_ids`를 줬을 때는 `min_claims`·`min_inquiries`를 무시하고 `limit`보다 많아도 요청한 상품은 자르지 않는다(정렬은 그대로: 클레임 많은 순이라 0건 행이 뒤).
+- 없는 상품 ID(오타 등)도 0건 행이 된다. 판매를 읽었는데 판매·클레임·문의가 모두 없는 상품이 있으면 `missing`에 "없는 상품 ID일 수도 있다"고 적는다. 판매 서버에 상품이 있는지는 따로 확인하지 않는다.
+- `product_ids`를 주지 않았을 때는 그대로다(0건 상품은 나오지 않는다).
 
 ## 검토 뒤 고친 것 (2026-11-14, 머지된 #1097~#1100·#1103을 독립 검토한 결과)
 - **문의 건수의 가짜 0**: 문의를 일부 주문만 읽었으면(판매 서버에서 못 읽은 주문, 상품 ID가 하나도 없는 주문, 주문 200개 상한, 마감으로 건너뛴 주문)

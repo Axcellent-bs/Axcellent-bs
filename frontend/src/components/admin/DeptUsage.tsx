@@ -51,7 +51,7 @@ function DeptCard({ d, open, onToggle }: { d: Department; open: boolean; onToggl
           </div>
           <Bars series={d.series} />
           <p className="text-[11px] text-ink-500">
-            {d.usage.calls === 0 ? "아직 총괄이 부른 기록이 없습니다." : `마지막 호출 ${clock(d.usage.last_called_at)} · 재시도 ${d.usage.retries}건`}
+            {d.usage.calls === 0 ? "아직 총괄 AI가 부른 기록이 없습니다." : `마지막 호출 ${clock(d.usage.last_called_at)} · 재시도 ${d.usage.retries}건`}
             {d.usage.waiting ? ` · 사람 입력 대기 ${d.usage.waiting}건` : ""}
           </p>
           <button className="btn-ghost text-xs" onClick={onToggle} aria-expanded={open}>{open ? "접기" : `skill ${d.skills.length}개와 최근 호출`}</button>
@@ -77,7 +77,7 @@ function Detail({ d }: { d: Department }) {
           <tbody className="divide-y divide-ink-100">
             {d.skills.map((s) => (
               <tr key={s.id}>
-                <td className="py-1.5 pr-3 font-mono">{s.id}{!s.orchestrator && <span className="ml-1 text-ink-500">(총괄은 안 부름)</span>}</td>
+                <td className="py-1.5 pr-3 font-mono">{s.id}{!s.orchestrator && <span className="ml-1 text-ink-500">(총괄 AI는 안 부름)</span>}</td>
                 <td className="pr-3"><span className={`chip ${(GRADE[s.grade] ?? GRADE.read).tone}`}>{(GRADE[s.grade] ?? { label: s.grade }).label}</span></td>
                 <td className="pr-3 text-right tabular-nums">{s.calls}</td>
                 <td className="pr-3 text-right tabular-nums">{s.errors}</td>
@@ -136,14 +136,14 @@ export function DeptUsage() {
     <section aria-labelledby="dept-usage">
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3">
         <h2 id="dept-usage" className="text-base font-semibold">부서별 호출 현황</h2>
-        <p className="text-xs text-ink-500">총괄이 부서를 부른 호출을 센 실측입니다{windowMin ? ` (최근 ${windowMin}분)` : ""}. 읽기 전용입니다.</p>
+        <p className="text-xs text-ink-500">총괄 AI가 부서를 부른 호출을 센 실측입니다{windowMin ? ` (최근 ${windowMin}분)` : ""}. 읽기 전용입니다.</p>
         {meta.mock && <span className="chip bg-brand-50 text-brand-700">가상 데이터</span>}
       </div>
       {error && <p role="alert" className="mb-3 rounded-xl bg-amber-50 px-4 py-2 text-xs text-amber-800">{error}</p>}
       {!depts && !error && <p className="text-xs text-ink-500">불러오는 중…</p>}
       {depts && quiet && !showAll && (
         <div className="card space-y-3 p-4">
-          <p className="text-sm"><b>{windowMin ? `최근 ${windowMin}분` : "지금"} 총괄이 부른 기록이 없습니다.</b> <span className="text-ink-500">연결된 부서 {depts.length}곳은 모두 조용합니다.</span></p>
+          <p className="text-sm"><b>{windowMin ? `최근 ${windowMin}분` : "지금"} 총괄 AI가 부른 기록이 없습니다.</b> <span className="text-ink-500">연결된 부서 {depts.length}곳은 모두 조용합니다.</span></p>
           <ul className="flex flex-wrap gap-2 text-xs">
             {depts.map((d) => (
               <li key={d.name} className="chip bg-ink-50 text-ink-700">

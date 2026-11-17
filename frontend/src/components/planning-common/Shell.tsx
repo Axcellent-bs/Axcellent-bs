@@ -4,11 +4,11 @@
 // 공통 화면 컴포넌트(@dejafix/common-frontend)의 스타일은 .planning-scope 안에만 적용된다 (postcss.config.js).
 import '@dejafix/common-frontend/styles.css'
 import '@/components/planning-common/planning.css'
-import { useEffect, useReducer, useRef, useState, type Dispatch, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type Dispatch, type MouseEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { Chip, ToastOutlet, ToastProvider, useToast, type NavItem } from '@dejafix/common-frontend'
 import { ACTION_ERROR_EVENT, useSharedStore, apiBase } from '@/lib/planning'
-import { TODAY, initialState, reducer, type Action, type State } from '@/lib/planningData'
+import { type Action, type State } from '@/lib/planningData'
 import { Dep, Point } from '@/components/planning-common/parts'
 import { convoHref, go, setPlanningNav, toPath } from '@/components/planning-common/links'
 import { humanizePlanIds } from '@/lib/format'
@@ -25,7 +25,6 @@ export interface View {
   state: State
   dispatch: Dispatch<Action>
   connected: boolean
-  example: boolean
   section: string
   /** 메뉴 바로 다음 칸 (가로탭이 없는 메뉴에서는 필터·항목) */
   sub?: string
@@ -90,23 +89,14 @@ export function PlanningShell(props: ShellProps) {
 }
 
 const LIVE_DISMISS_KEY = 'planning.liveDismissed'
-const EXAMPLE_KEY = 'axcellent-planning-example'
-// 예시의 AI 승인 감사는 "오늘" 건만 보여서, 예시 기록 날짜를 오늘로 옮긴다
-const todayDemo = (s: State): State => ({ ...s, audit: s.audit.map((a) => ({ ...a, t: `${TODAY}${a.t.slice(5)}` })) })
 
 function Frame({ part, title, desc, home, sections, tabCount, tools, actions, children }: ShellProps) {
   const isSection = (x: string) => x in sections
   const route = useRoute(`/${part}`, home)
   const [live, liveDispatch, connected] = useSharedStore(apiBase(part))
-  // 예시 모드: 서버 대신 화면 안의 프로토타입 예시 데이터(planningData.ts)로 흐름을 보여 준다. 서버 데이터는 건드리지 않는다
-  const [example, setExample] = useState(() => { try { return localStorage.getItem(EXAMPLE_KEY) === '1' } catch { return false } })
-  const [demo, demoDispatch] = useReducer(reducer, initialState, todayDemo)
-  const state = example ? demo : live
-  const dispatch = example ? demoDispatch : liveDispatch
-  const pickExample = (on: boolean) => {
-    setExample(on)
-    try { localStorage.setItem(EXAMPLE_KEY, on ? '1' : '0') } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ }
-  }
+    // 화면은 실제 서버 상태만 본다 (예시 데이터·실제/예시 전환은 없앴다)
+  const state = live
+  const dispatch = liveDispatch
   const toast = useToast()
   useEffect(() => {
     const on = (e: Event) => toast.show((e as CustomEvent<string>).detail)
@@ -162,7 +152,7 @@ function Frame({ part, title, desc, home, sections, tabCount, tools, actions, ch
     .slice(-3)
     .reverse()
 
-  const view: View = { state, dispatch, connected, example, section, sub, tab, rest, item, item2, newWork, newTalk }
+  const view: View = { state, dispatch, connected, section, sub, tab, rest, item, item2, newWork, newTalk }
   const pageActions = actions?.(view) ?? null
 
   return (
@@ -173,17 +163,7 @@ function Frame({ part, title, desc, home, sections, tabCount, tools, actions, ch
           <p className="pl-desc">{(known && sections[section].head?.desc) || desc}</p>
         </div>
         <div className="pl-tools">
-          {(
-            <>
-              <div className="seg-toggle" role="group" aria-label="데이터 보기">
-                <button type="button" aria-pressed={!example} onClick={() => pickExample(false)}>실제 데이터</button>
-                <button type="button" aria-pressed={example} onClick={() => pickExample(true)}>예시 데이터</button>
-              </div>
-              {example
-                ? <Chip tone="amber" title="화면 안 예시 데이터. 서버에 반영되지 않아요">예시 모드</Chip>
-                : <Chip tone={connected ? 'green' : 'amber'} title={`${title} 서버 ${apiBase(part)}`}>{`${title} ${connected ? '켜짐' : '꺼짐'}`}</Chip>}
-            </>
-          )}
+          <Chip tone={connected ? 'green' : 'amber'} title={`${title} 서버 ${apiBase(part)}`}>{`${title} ${connected ? '켜짐' : '꺼짐'}`}</Chip>
           {tools?.(view)}
           {pageActions && <div className="pl-actions">{pageActions}</div>}
           <ToastOutlet />

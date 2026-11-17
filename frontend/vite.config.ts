@@ -18,9 +18,11 @@ export default defineConfig(({ mode }) => {
     '/dev-api': { target: env.DEV_PROXY_TARGET || 'http://127.0.0.1:8111', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/dev-api/, '') },
     // 인사 AI(org, 8124). AI 대화방 직접 대화(/api/hr/chat). 서버에 CORS가 없어 프록시로 부른다 (결정 기록 서비스 8114는 아카이브 AI)
     '/hr-api': { target: env.HR_PROXY_TARGET || 'http://127.0.0.1:8124', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/hr-api/, '') },
+    // 아카이브 AI(decisions, 8114). AI 대화방 직접 대화(/api/archive/chat). 서버에 CORS가 없어 프록시로 부른다
+    '/archive-api': { target: env.ARCHIVE_PROXY_TARGET || 'http://127.0.0.1:8114', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/archive-api/, '') },
   }
   return {
-    // /dejafix-api 는 로그인까지 대신 해야 해서 단순 프록시가 아니라 플러그인이 맡는다 (dejafix-proxy.ts)
+    // /dejafix-api 는 플러그인이 맡는다: 기본은 백엔드 dejafix-proxy(8030)로 그대로, 계정을 적으면 대신 로그인 (dejafix-proxy.ts)
     plugins: [react(), dejafixProxy(env)],
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
     server: { port: 3090, strictPort: true, proxy },

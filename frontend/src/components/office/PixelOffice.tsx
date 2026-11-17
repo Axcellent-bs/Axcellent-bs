@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 import { DESKS, POP_MS, type Bubble, type DeskKey, type OfficeView, type Visit } from "@/lib/office";
 
 // 픽셀 사무실 캔버스: 서울 사무실 장면 (통유리 창 너머 한강·63빌딩, 오른쪽 라운지).
-// 배경은 사람·이름표가 없는 빈 사무실 그림이고, 10자리 사람·이름표·말풍선·보드 카드·불꽃은 코드로 그린다.
+// 배경은 사람·이름표가 없는 빈 사무실 그림(seoul-office-v4.webp, 1312×816 받은 그대로)이고,
+// 11자리 사람·이름표·말풍선·보드 카드·불꽃은 코드로 그린다.
+// 좌표·글자 크기는 논리 크기 W×H 기준이고, 캔버스는 그림 원본 크기(CW×CH)로 만들어 그림을 줄이거나 늘리지 않는다.
 // 캐릭터 스프라이트는 pablodelucca/pixel-agents(MIT)에서 가져왔다 (public/office/CREDITS.md).
 // 그림 색은 이미지·캔버스 전용이다 (화면 UI는 디자인 토큰을 쓴다).
 //
@@ -13,9 +15,10 @@ import { DESKS, POP_MS, type Bubble, type DeskKey, type OfficeView, type Visit }
 // - 일하는 중인 자리는 픽셀 불꽃이 일렁이고, 일이 끝나면 머리 위로 "✓ 결과"가 떠오른다.
 // - prefers-reduced-motion이면 걷지 않고, 불꽃은 고정 모양, "✓ 결과"는 떠오르지 않고 제자리에서 사라진다.
 
-const W = 1280, H = 692; // 캔버스 픽셀 = 배경 비율(1392×752), 자르기 없음
+const W = 1280, H = 796; // 논리 크기 = 배경 비율(1312×816), 자르기 없음
+const CW = 1312, CH = 816; // 캔버스 실제 픽셀 = 배경 원본 크기 (그림 화질을 그대로 쓴다)
 const BASE = import.meta.env.BASE_URL;
-const BG_SRC = `${BASE}office/seoul-office.webp`;
+const BG_SRC = `${BASE}office/seoul-office-v4.webp`;
 const FONT = '"Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
 
 /** 배경 그림 비율 좌표 → 캔버스 좌표 */
@@ -24,74 +27,77 @@ const toC = (fx: number, fy: number) => ({ x: fx * W, y: fy * H });
 type Side = "up" | "down";
 /** 말풍선 최대 폭 (캔버스 폭의 22%) */
 const BUBBLE_MAX_W = Math.round(W * 0.22);
+/** 배경 그림 픽셀(1312×816) → 비율 좌표 */
+const at = (x: number, y: number) => ({ fx: x / CW, fy: y / CH });
 /** 자리(그림 비율, 의자 위 발끝)와 스프라이트. 그림이 6벌이라 멀리 앉은 자리끼리 같은 그림을 쓴다.
- *  `back`: 책상 앞쪽 의자라 뒷모습으로 앉는다. `bubble`: 말풍선 방향(up 머리 위, down 이름표 아래) */
-const SEATS: Record<DeskKey, { fx: number; fy: number; char: number; back?: boolean; bubble: Side }> = {
-  // 위 책상 뒤쪽 의자 (앞모습). 위 책상 앞쪽 의자 2개는 비워 둔다
-  infra: { fx: 0.272, fy: 0.436, char: 0, bubble: "up" },
-  data: { fx: 0.413, fy: 0.436, char: 2, bubble: "up" },
-  // 아래 책상 뒤쪽 의자 (앞모습)
-  planning: { fx: 0.246, fy: 0.654, char: 5, bubble: "up" },
-  marketing: { fx: 0.359, fy: 0.654, char: 1, bubble: "up" },
-  hr: { fx: 0.471, fy: 0.654, char: 0, bubble: "up" },
-  // 아래 책상 앞쪽 의자 (뒷모습). 말풍선은 이름표 아래 (옆 사람 머리·위 줄 이름표를 가리지 않게)
-  dev: { fx: 0.248, fy: 0.81, char: 4, back: true, bubble: "down" },
-  support: { fx: 0.359, fy: 0.81, char: 2, back: true, bubble: "down" },
-  finance: { fx: 0.472, fy: 0.81, char: 1, back: true, bubble: "down" },
-  // 위 책상 앞쪽 의자 (뒷모습). 말풍선은 아래 줄 마케팅·인사 머리 사이로
-  safety: { fx: 0.413, fy: 0.535, char: 5, back: true, bubble: "down" },
-  // 라운지 빈백 (앞모습, 왕관)
-  orchestrator: { fx: 0.795, fy: 0.638, char: 3, bubble: "up" },
+ *  `back`: 뒷모습, `side`: 옆모습(오른쪽을 본다). `bubble`: 말풍선 방향(up 머리 위, down 이름표 아래).
+ *  `tag`: 앉았을 때 이름표가 발끝보다 내려가는 거리(기본 16). 1줄은 바로 아래 2줄 사람 머리를 가리지 않게 짧게 둔다 */
+const SEATS: Record<DeskKey, { fx: number; fy: number; char: number; back?: boolean; side?: boolean; bubble: Side; tag?: number }> = {
+  // 1줄: 창가 책상 3개 앞 의자 (뒷모습, 창 쪽 책상을 본다). 말풍선은 창 쪽 머리 위
+  dev: { ...at(348, 498), char: 4, back: true, bubble: "up", tag: 4 },
+  infra: { ...at(562, 498), char: 0, back: true, bubble: "up", tag: 4 },
+  archive: { ...at(780, 498), char: 3, back: true, bubble: "up", tag: 4 },
+  // 2줄: 책상 블록 위쪽 의자 3개 (앞모습). 말풍선은 이름표 아래
+  planning: { ...at(365, 602), char: 5, bubble: "down" },
+  data: { ...at(565, 602), char: 2, bubble: "down" },
+  finance: { ...at(772, 602), char: 1, bubble: "down" },
+  // 3줄: 책상 블록 아래쪽 의자 3개 (뒷모습). 말풍선은 이름표 아래
+  support: { ...at(363, 738), char: 2, back: true, bubble: "down" },
+  hr: { ...at(562, 738), char: 0, back: true, bubble: "down" },
+  marketing: { ...at(775, 738), char: 4, back: true, bubble: "down" },
+  // 왼쪽 옆을 보는 책상 의자 (옆모습): 안전규칙
+  safety: { ...at(230, 702), char: 1, side: true, bubble: "up" },
+  // 라운지 빨간 빈백 (앞모습, 왕관)
+  orchestrator: { ...at(1105, 618), char: 3, bubble: "up" },
 };
 /** 대기 동작(고개 돌리기·좌우) 씨앗. 개발 자리를 끼워 넣어도 원래 8자리의 동작이 바뀌지 않게 예전 순번을 쓴다 */
-const SEED = Object.fromEntries(DESKS.filter((d) => d.key !== "dev" && d.key !== "safety").map((d, i) => [d.key, i])) as Record<DeskKey, number>;
+const SEED = Object.fromEntries(DESKS.filter((d) => d.key !== "dev" && d.key !== "safety" && d.key !== "archive").map((d, i) => [d.key, i])) as Record<DeskKey, number>;
 SEED.dev = 8;
 SEED.safety = 9;
+SEED.archive = 10;
 const SEAT_PX = Object.fromEntries(DESKS.map((d) => [d.key, toC(SEATS[d.key].fx, SEATS[d.key].fy)])) as Record<DeskKey, Pt>;
 const DESK_BY = Object.fromEntries(DESKS.map((d) => [d.key, d])) as Record<DeskKey, (typeof DESKS)[number]>;
 
 // ---------------------------------------------------------------- 길
-/** 위 책상과 아래 책상 사이 통로 (위 줄·아래 줄 앞모습 자리의 통로) */
-const AISLE_Y = toC(0, 0.563).y;
-/** 아래 책상 앞쪽 의자 뒤 바닥 통로 (뒷모습 자리의 통로) */
-const LOW_Y = toC(0, 0.905).y;
-/** 책상이 없는 세로 옆길 (두 통로를 잇는다) */
-const SIDE_X = toC(0.6, 0).x;
-/** 위 줄 자리는 책상 앞으로 바로 못 나가서 책상 끝 옆으로 나간 뒤 통로로 내려온다 */
-const TOP_EXIT_X: Partial<Record<DeskKey, number>> = { infra: toC(0.199, 0).x, data: toC(0.5, 0).x };
+/** 창가 의자 줄과 책상 블록 위 의자 줄 사이 통로 (1줄·2줄·옆 의자의 통로) */
+const AISLE_Y = toC(0, 0.648).y;
+/** 아래 의자 줄 뒤 바닥 통로 (3줄의 통로) */
+const LOW_Y = toC(0, 0.965).y;
+/** 책상 블록 오른쪽 세로 옆길 (두 통로를 잇는다) */
+const SIDE_X = toC(0.69, 0).x;
+/** 옆 의자(고객지원)는 책상 블록 왼쪽 바깥으로 올라간다 */
+const SIDE_EXIT_X = toC(0.145, 0).x;
+/** 3줄 자리 (아래 통로를 쓴다). 나머지는 위 통로 */
+const LOW_ROW: ReadonlySet<DeskKey> = new Set<DeskKey>(["support", "hr", "marketing"]);
 const HOME = SEAT_PX.orchestrator;
 /** 총괄 앞 만남 자리 (총괄 왼쪽 3칸, 먼저 온 순서로 빈 칸을 쓴다) */
 const MEET: Pt[] = [{ x: -72, y: 8 }, { x: -112, y: -20 }, { x: -112, y: 34 }].map((d) => ({ x: HOME.x + d.x, y: HOME.y + d.y }));
 const SPEED = 300; // 걷기 캔버스 px/초
 const MAX_WALKERS = 3;
 const STAY_ORCH_MS = 1200, STAY_DESK_MS = 1400;
-/** 보드 카드 (그림 비율 fx0, fy0, fx1, fy1): 라운지 위 화이트보드 */
-const BOARD = [0.74, 0.305, 0.867, 0.445] as const;
+/** 보드 카드 (그림 비율 fx0, fy0, fx1, fy1): 라운지 위쪽 화이트보드 안 */
+const BOARD = [0.799, 0.424, 0.911, 0.566] as const;
 
 // 스프라이트 시트: 16×32 칸 7열 × 3줄 (줄 0 앞, 1 뒤, 2 옆). 열 0~2 걷기, 3~4 타이핑, 5~6 읽기
-const FW = 16, FH = 32, SC = 2.2;
+const FW = 16, FH = 32, SC = 2.5;
 const SW = FW * SC, SH = FH * SC;
 
 type Pt = { x: number; y: number };
 type Pose = { row: number; col: number; flip: boolean };
 
-const isBack = (k: DeskKey) => !!SEATS[k].back;
-/** 뒷모습이지만 위·아래 책상 사이 통로에 바로 붙은 자리 (위 책상 앞쪽 의자) */
-const onAisle = (k: DeskKey) => !isBack(k) || k === "safety";
-const isTop = (k: DeskKey) => k in TOP_EXIT_X;
+const onAisle = (k: DeskKey) => !LOW_ROW.has(k);
 /** 그 자리 사람이 다니는 통로 y */
 const laneOf = (k: DeskKey) => (onAisle(k) ? AISLE_Y : LOW_Y);
 /** 자리에서 통로까지 (마지막 점이 통로 위) */
 function exitPath(k: DeskKey): Pt[] {
   const s = SEAT_PX[k];
-  if (isTop(k)) { const x = TOP_EXIT_X[k] as number; return [{ x, y: s.y }, { x, y: AISLE_Y }]; }
+  if (SEATS[k].side) return [{ x: SIDE_EXIT_X, y: s.y }, { x: SIDE_EXIT_X, y: AISLE_Y }];
   return [{ x: s.x, y: laneOf(k) }];
 }
 /** 다른 부서에게 말을 전할 때 서는 곳: 받는 자리 옆 통로 */
 function besideOf(k: DeskKey): Pt {
   const s = SEAT_PX[k];
-  const y = !onAisle(k) ? LOW_Y : isTop(k) || isBack(k) ? AISLE_Y : AISLE_Y + 22;
-  return { x: s.x + 46, y };
+  return { x: s.x + 46, y: laneOf(k) };
 }
 /** 길: 자리 → 그 자리 통로 → (통로가 다르면 옆길) → 목적지 통로 → 목적지 */
 function pathTo(from: DeskKey, dest: Pt, destLane: number): Pt[] {
@@ -130,6 +136,16 @@ export function PixelOffice({ view, label, onPick }: { view: OfficeView; label: 
     const ctx = cv?.getContext("2d");
     if (!cv || !ctx) return;
     const bg = loadImage(BG_SRC);
+    // 캔버스 실제 픽셀을 화면에 보이는 픽셀 수(기기 배율 포함)에 맞춘다. 그림 원본(CW×CH)보다 크게는 만들지 않는다
+    const px = { w: CW, h: CH };
+    const fit = () => {
+      const w = Math.max(320, Math.min(CW, Math.round(cv.clientWidth * (window.devicePixelRatio || 1))));
+      const h = Math.round((w * CH) / CW);
+      if (w !== px.w) { px.w = w; px.h = h; cv.width = w; cv.height = h; }
+    };
+    fit();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : null;
+    ro?.observe(cv);
     const sprites = Array.from({ length: 6 }, (_, i) => loadImage(`${BASE}office/char_${i}.png`));
     let reduced = reducedNow();
     const mq = typeof window.matchMedia === "function" ? window.matchMedia(REDUCE) : null;
@@ -198,25 +214,23 @@ export function PixelOffice({ view, label, onPick }: { view: OfficeView; label: 
           if (next) start(next);
         }
       }
-      draw(ctx, { bg, sprites }, v, now / 1000, wall, walkers, reduced);
+      draw(ctx, px, { bg, sprites }, v, now / 1000, wall, walkers, reduced);
       raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
-    return () => { cancelAnimationFrame(raf); mq?.removeEventListener?.("change", onMq); };
+    return () => { cancelAnimationFrame(raf); mq?.removeEventListener?.("change", onMq); ro?.disconnect(); };
   }, []);
 
-  const canvas = (
-    <canvas ref={ref} width={W} height={H} role="img" aria-label={label}
-      className="block h-auto w-full rounded-2xl [image-rendering:pixelated]" />
-  );
-  if (!onPick) return canvas;
+  // onPick 유무로 감싸는 껍데기를 바꾸면 모드를 바꿀 때 캔버스가 새로 만들어져 그림이 비어 버린다 (그리는 코드는 처음 캔버스에만 붙는다).
+  // 그래서 항상 같은 껍데기에 캔버스를 두고, 버튼만 있을 때 얹는다
   return (
     <div className="relative">
-      {canvas}
-      {DESKS.map((d) => (
+      <canvas ref={ref} width={CW} height={CH} role="img" aria-label={label}
+        className="block h-auto w-full rounded-2xl" />
+      {onPick && DESKS.map((d) => (
         <button key={d.key} type="button" onClick={() => onPick(d.key)}
           aria-label={`${d.label} AI와 1:1 대화 열기`} title={`${d.label} AI와 1:1 대화 (나만 보임)`}
-          className="absolute h-[14%] w-[6%] -translate-x-1/2 -translate-y-full rounded-xl hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+          className="absolute h-[11%] w-[6%] -translate-x-1/2 -translate-y-full rounded-xl hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
           style={{ left: `${SEATS[d.key].fx * 100}%`, top: `${SEATS[d.key].fy * 100}%` }} />
       ))}
     </div>
@@ -228,11 +242,14 @@ type Mode = "sit" | "walk" | "stand";
 type Art = { bg: HTMLImageElement; sprites: HTMLImageElement[] };
 const ready = (img: HTMLImageElement) => img.complete && img.naturalWidth > 0;
 
-function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number, wall: number, walkers: Record<DeskKey, Walker>, reduced: boolean) {
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.imageSmoothingEnabled = false;
+function draw(ctx: CanvasRenderingContext2D, px: { w: number; h: number }, art: Art, v: OfficeView, t: number, wall: number, walkers: Record<DeskKey, Walker>, reduced: boolean) {
+  ctx.setTransform(px.w / W, 0, 0, px.h / H, 0, 0);
+  // 배경은 한 번만 고화질로 줄여 그리고(캔버스가 화면에 보이는 크기라 CSS로 다시 줄이지 않는다), 캐릭터 그림은 픽셀 그대로
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   if (ready(art.bg)) ctx.drawImage(art.bg, 0, 0, W, H);
   else { ctx.fillStyle = "#d6d3cf"; ctx.fillRect(0, 0, W, H); }
+  ctx.imageSmoothingEnabled = false;
 
   // 사람: 발끝 y 순서로 그려 앞사람이 위에 오게 한다
   const people = DESKS.map((d) => {
@@ -248,14 +265,14 @@ function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number,
     else statusGlow(ctx, p, st, t);
     const seat = SEATS[key];
     const sheet = art.sprites[seat.char];
-    const pose = mode === "stand" ? { row: 2, col: 1, flip: w.face } : poseOf(mode, st, t, SEED[key], w.dir, !!seat.back);
+    const pose = mode === "stand" ? { row: 2, col: 1, flip: w.face } : poseOf(mode, st, t, SEED[key], w.dir, !!seat.back, !!seat.side);
     if (ready(sheet)) sprite(ctx, sheet, p, pose);
     if (key === "orchestrator") crown(ctx, p);
   }
 
   boardCard(ctx, v);
   // 이름표: 앉은 사람 먼저, 걷거나 서 있는 사람은 발밑에 따라다니며 맨 위에 그린다 (다른 자리 이름표에 가리지 않게)
-  for (const { key, p, mode } of people) if (mode === "sit") nameTag(ctx, key, p);
+  for (const { key, p, mode } of people) if (mode === "sit") nameTag(ctx, key, p, SEATS[key].tag ?? 16);
   for (const { key, p, mode } of people) if (mode !== "sit") nameTag(ctx, key, p);
 
   // 말풍선: 앉은 자리는 자리마다 정한 방향, 걷는 사람은 머리 위. 옆 자리에 도착해 서 있으면 전할 말
@@ -286,19 +303,19 @@ function draw(ctx: CanvasRenderingContext2D, art: Art, v: OfficeView, t: number,
   if (v.overlay) later(ctx, v.overlay.text, v.overlay.progress);
 }
 
-function poseOf(mode: Mode, state: string, t: number, seed: number, dir: Pt, back = false): Pose {
+function poseOf(mode: Mode, state: string, t: number, seed: number, dir: Pt, back = false, side = false): Pose {
   if (mode === "walk") {
     const col = [0, 1, 2, 1][Math.floor(t * 8) % 4];
     if (Math.abs(dir.y) > Math.abs(dir.x)) return { row: dir.y < 0 ? 1 : 0, col, flip: false };
     return { row: 2, col, flip: dir.x < 0 };
   }
   if (mode === "stand") return { row: 0, col: 1, flip: false };
-  // 뒷모습 자리는 앉은 자세에서 줄 1(뒤)을 쓴다. 열 규칙은 같다
-  const row = back ? 1 : 0;
+  // 뒷모습 자리는 앉은 자세에서 줄 1(뒤), 옆 의자는 줄 2(옆, 오른쪽을 봄)를 쓴다. 열 규칙은 같다
+  const row = side ? 2 : back ? 1 : 0;
   if (state === "working") return { row, col: 3 + (Math.floor(t * 8 + seed) % 2), flip: false };
   if (state === "waiting") return { row, col: 5 + (Math.floor(t * 2) % 2), flip: false };
   // 쉬는 중: 가끔 고개를 돌린다 (뒷모습 자리는 돌리지 않는다)
-  if (back) return { row, col: 1, flip: false };
+  if (back || side) return { row, col: 1, flip: false };
   return { row: Math.floor(t / 3.1 + seed) % 5 === 0 ? 2 : 0, col: 1, flip: seed % 2 === 1 };
 }
 
@@ -358,9 +375,9 @@ function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: n
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
 
-function nameTag(ctx: CanvasRenderingContext2D, key: DeskKey, p: Pt) {
+function nameTag(ctx: CanvasRenderingContext2D, key: DeskKey, p: Pt, dy = 16) {
   const d = DESK_BY[key];
-  const cx = p.x, cy = p.y + 16;
+  const cx = p.x, cy = p.y + dy;
   ctx.font = `700 17px ${FONT}`;
   const w = ctx.measureText(d.label).width + 36;
   ctx.fillStyle = "rgba(34,20,12,.84)"; rr(ctx, cx - w / 2, cy - 13, w, 26, 13); ctx.fill();
@@ -401,7 +418,7 @@ function later(ctx: CanvasRenderingContext2D, text: string, k: number) {
 function boardCard(ctx: CanvasRenderingContext2D, v: OfficeView) {
   const a = toC(BOARD[0], BOARD[1]), b = toC(BOARD[2], BOARD[3]);
   const x = a.x, y = a.y, w = b.x - a.x, h = b.y - a.y;
-  ctx.fillStyle = "rgba(255,255,252,.94)"; rr(ctx, x, y, w, h, 6); ctx.fill();
+  ctx.fillStyle = "#fffffc"; rr(ctx, x, y, w, h, 6); ctx.fill();
   ctx.strokeStyle = "#8e959e"; ctx.lineWidth = 2; ctx.stroke();
   ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
   if (v.board) {
@@ -414,14 +431,18 @@ function boardCard(ctx: CanvasRenderingContext2D, v: OfficeView) {
     return;
   }
   const { done, total } = v.progress;
-  ctx.font = `600 15px ${FONT}`; ctx.fillStyle = "#64748b";
-  ctx.fillText(total ? "사건 진행" : "총괄 사건", x + 12, y + 24);
-  ctx.font = `800 22px ${FONT}`; ctx.textAlign = "right";
+  ctx.font = `600 14px ${FONT}`; ctx.fillStyle = "#64748b";
+  const title = total ? "사건 진행" : "총괄 AI 사건";
+  ctx.fillText(title, x + 12, y + 24);
   const txt = !v.incident ? "없음" : v.status === "alert" ? `${done}/${total}` : v.status === "degraded" ? "일부 미완료" : "해결";
+  ctx.font = `800 20px ${FONT}`;
+  // 카드가 좁아서 한 줄에 안 들어가면 상태 글을 아래 줄로 내린다
+  const tight = 12 + (ctx.measureText(title).width * 14) / 20 + 8 + ctx.measureText(txt).width + 12 > w;
   ctx.fillStyle = !v.incident ? "#475569" : v.status === "alert" ? "#d97706" : v.status === "degraded" ? "#ea580c" : "#16a34a";
-  ctx.fillText(txt, x + w - 12, y + 27);
+  if (tight) { ctx.textAlign = "left"; ctx.fillText(txt, x + 12, y + 50); }
+  else { ctx.textAlign = "right"; ctx.fillText(txt, x + w - 12, y + 26); }
   if (v.incident && v.status === "alert") {
-    ctx.font = `600 14px ${FONT}`; ctx.fillStyle = "#334155"; ctx.textAlign = "left";
+    ctx.font = `600 13px ${FONT}`; ctx.fillStyle = "#334155"; ctx.textAlign = "left";
     ctx.fillText("결제 장애 대응", x + 12, y + 50);
   }
   if (total > 0) progressBar(ctx, x, y, w, h, done, total, v.status === "alert" ? "#f59e0b" : v.status === "degraded" ? "#ea580c" : "#16a34a");

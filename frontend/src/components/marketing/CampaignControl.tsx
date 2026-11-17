@@ -3,6 +3,7 @@ import { finance, humanTokenSet, krw, type CampaignRecord } from "@/lib/finance"
 import { campaigns, type CampaignAnswer } from "@/lib/marketingLive";
 import { dataAi, kpiLive, type CampaignEffectOutput } from "@/lib/data";
 import { todayKst } from "@/lib/finance";
+import { videoFields, type VideoKind } from "@/lib/campaignVideo";
 
 // 캠페인 시작·결과·취소. 재무는 예산에 의견만 내고 막지 않는다(2026-11-06). 시작을 막는 것은
 // 안전 관문의 금액 규칙(사람 승인 보류)이다. 광고 플랫폼 연결이 없어
@@ -44,7 +45,7 @@ function explain(a: CampaignAnswer): string {
     case "over_approved_limit": return `이전 방식의 응답입니다. 요청액이 당시 재무 한도를 넘어 시작하지 않았습니다. 금액을 줄여 다시 요청하세요. ${reasons}`.trim();
     case "rejected_by_review": return "사람이 거절했습니다.";
     case "finance_review_unavailable": return "재무 AI의 의견을 받지 못해 시작하지 않았습니다.";
-    case "recorded": return "재무에 손익을 기록했습니다. 재무 AI의 캠페인 재무 탭에서 볼 수 있습니다.";
+    case "recorded": return "재무에 손익을 기록했습니다. 재무 AI의 캠페인 예산 탭에서 볼 수 있습니다.";
     case "waiting_revenue": return "판매액이 없어 판단을 미뤘습니다. 판매액을 알면 다시 저장하세요.";
     case "not_started": return "시작하지 않은 캠페인이라 기록하지 않았습니다.";
     case "canceled": return "취소했습니다. 잡아 둔 예산이 풀렸습니다.";
@@ -92,6 +93,8 @@ export function CampaignControl() {
   const [name, setName] = useState("");
   const [channel, setChannel] = useState("");
   const [budget, setBudget] = useState("");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoKind, setVideoKind] = useState<VideoKind | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [opinion, setOpinion] = useState<ReturnType<typeof financeOpinionOf>>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -127,9 +130,10 @@ export function CampaignControl() {
     finally { setBusy(false); }
   }
 
+  const video = videoFields(videoUrl, videoKind);
   const start = () => run(
-    () => campaigns.start({ campaign_id: `cmp_${Date.now()}`, campaign_name: name.trim(), channel: channel.trim(), budget_krw: Number(budget) }),
-    () => { setName(""); setBudget(""); },
+    () => campaigns.start({ campaign_id: `cmp_${Date.now()}`, campaign_name: name.trim(), channel: channel.trim(), budget_krw: Number(budget), ...video.fields }),
+    () => { setName(""); setBudget(""); setVideoUrl(""); setVideoKind(null); },
   );
 
   return (
@@ -140,7 +144,19 @@ export function CampaignControl() {
         <label className="block text-sm"><span className="text-ink-700">캠페인 이름</span><input className="field mt-0.5 w-full" value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label className="block text-sm"><span className="text-ink-700">채널</span><input className="field mt-0.5 w-full" placeholder="예: 네이버 검색" value={channel} onChange={(e) => setChannel(e.target.value)} /></label>
         <label className="block text-sm"><span className="text-ink-700">예산(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={budget} onChange={(e) => setBudget(e.target.value.replace(/[^0-9]/g, ""))} /></label>
-        <button className="btn-primary" disabled={busy || !humanTokenSet || !name.trim() || !channel.trim() || !Number(budget)} onClick={start}>시작 요청</button>
+        <button className="btn-primary" disabled={busy || !humanTokenSet || !name.trim() || !channel.trim() || !Number(budget) || video.error !== null} onClick={start}>시작 요청</button>
+      </div>
+      <div className="mt-2 text-sm">
+        <label className="block"><span className="text-ink-700">영상 URL(유튜브 쇼츠, 선택)</span><input className="field mt-0.5 w-full" placeholder="https://youtube.com/shorts/..." value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} /></label>
+        <p className="mt-0.5 text-xs text-ink-500">사람이 유튜브 쇼츠에 직접 올린 영상만 넣습니다. 넣으면 게시 직후 영상 성과에 등록되고, 비우면 등록하지 않습니다. 인스타 릴스 조회수는 읽을 수 없어 시연은 유튜브 쇼츠만 씁니다.</p>
+        {videoUrl.trim() !== "" && (
+          <fieldset className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <legend className="sr-only">영상 종류</legend>
+            <label className="inline-flex items-center gap-1.5"><input type="radio" name="video-kind" checked={videoKind === "test"} onChange={() => setVideoKind("test")} />시험 영상(개발 확인용, 집계 제외)</label>
+            <label className="inline-flex items-center gap-1.5"><input type="radio" name="video-kind" checked={videoKind === "demo"} onChange={() => setVideoKind("demo")} />시연 영상(집계에 들어감)</label>
+          </fieldset>
+        )}
+        {video.error && <p role="alert" className="mt-1 text-xs text-red-800">{video.error}</p>}
       </div>
       {message && <p role="status" className="mt-3 rounded-xl bg-brand-50 px-4 py-2 text-sm text-brand-700">{message}</p>}
       {opinion && (

@@ -42,6 +42,8 @@ KEY_ENVS = ("KOSIS_API_KEY",)
 DOCS_URL = "https://kosis.kr/openapi/devGuide/devGuide_0101List.do"
 LIST_URL = "https://kosis.kr/openapi/statisticsList.do"
 DATA_URL = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
+# 통계표 메타(분류·항목 코드): method=getMeta&type=ITM&orgId=..&tblId=..
+META_URL = "https://kosis.kr/openapi/statisticsData.do"
 DAILY_LIMIT_ENV = "KOSIS_DAILY_LIMIT"
 DEFAULT_DAILY_LIMIT = 1000  # 공식 수치 미확인
 TIMEOUT_SECONDS = 10.0
@@ -87,6 +89,20 @@ class KosisDataPoint:
     prd_se: str
     prd_de: str
     value: float | None  # DT가 숫자가 아니면 None (0이 아님)
+    # 두 번째 분류 (objL2를 줬을 때, 예: 연령 × 성별 표의 성별). 없으면 빈 문자열
+    c2: str = ""
+    c2_nm: str = ""
+
+
+@dataclass(frozen=True)
+class KosisMetaItem:
+    """통계표 메타 한 줄: 분류(OBJ_ID, 예: 행정구역·연령) 또는 항목(ITM)의 코드와 이름."""
+
+    obj_id: str  # 분류 id (항목이면 "ITEM" 등 표마다 다름)
+    obj_nm: str
+    itm_id: str  # 그 분류 안 코드 (예: 지역 코드, 연령 코드, 항목 id)
+    itm_nm: str
+    up_itm_id: str = ""  # 상위 코드 (없으면 빈 문자열)
 
 
 _cache = DayCache(label=LABEL)
@@ -155,6 +171,33 @@ class KosisConnector:
                 "BAD_RESPONSE", f"{LABEL} 응답 형식이 예상과 다르다"
             ) from exc
 
+    async def table_meta(self, org_id: str, tbl_id: str) -> list[KosisMetaItem]:
+        """통계표의 분류·항목 코드 목록 (표 설정을 채울 때 코드를 확인하는 용도)."""
+        query = {
+            "method": "getMeta",
+            "type": "ITM",
+            "orgId": org_id,
+            "tblId": tbl_id,
+            "format": "json",
+            "jsonVD": "Y",
+        }
+        rows = await self._call(META_URL, query)
+        try:
+            return [
+                KosisMetaItem(
+                    obj_id=str(r.get("OBJ_ID", "")),
+                    obj_nm=str(r.get("OBJ_NM", "")),
+                    itm_id=str(r.get("ITM_ID", "")),
+                    itm_nm=str(r.get("ITM_NM", "")),
+                    up_itm_id=str(r.get("UP_ITM_ID", "") or ""),
+                )
+                for r in rows
+            ]
+        except AttributeError as exc:
+            raise ConnectorUnavailable(
+                "BAD_RESPONSE", f"{LABEL} 응답 형식이 예상과 다르다"
+            ) from exc
+
     async def statistics_data(
         self,
         org_id: str,
@@ -165,8 +208,12 @@ class KosisConnector:
         start_prd_de: str | None = None,
         end_prd_de: str | None = None,
         new_est_prd_cnt: int | None = None,
+        obj_l2: str | None = None,
     ) -> list[KosisDataPoint]:
-        """통계표 자료. 기간은 시작·끝 또는 최근 n개 시점."""
+        """통계표 자료. 기간은 시작·끝 또는 최근 n개 시점.
+
+        `obj_l2`(선택, 11/16): 두 번째 분류(예: 연령 × 성별 표). 주지 않으면 예전과 같은 요청이다
+        (쿼리에 objL2를 넣지 않는다 → 재생 파일 키도 같다)."""
         query: dict[str, Any] = {
             "method": "getList",
             "orgId": org_id,
@@ -181,6 +228,7 @@ class KosisConnector:
             ("startPrdDe", start_prd_de),
             ("endPrdDe", end_prd_de),
             ("newEstPrdCnt", new_est_prd_cnt),
+            ("objL2", obj_l2),
         ):
             if value is not None:
                 query[name] = value
@@ -199,6 +247,8 @@ class KosisConnector:
                     prd_se=str(r.get("PRD_SE", "")),
                     prd_de=str(r.get("PRD_DE", "")),
                     value=_number(r.get("DT")),
+                    c2=str(r.get("C2", "")),
+                    c2_nm=str(r.get("C2_NM", "")),
                 )
                 for r in rows
             ]

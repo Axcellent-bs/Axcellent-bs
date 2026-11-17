@@ -3,19 +3,17 @@
 캣북스 쇼핑몰(shop-api)에 결제 장애를 일부러 넣고, AI들이 사건을 열어 처리하는 흐름을 시험할 때 읽는 문서입니다.
 숫자는 모두 코드에서 확인한 값이고, 근거(파일:줄)는 맨 끝에 모았습니다. [1]처럼 번호로 가리킵니다.
 
-판매 서버(shop-api)·가상 주문·장애 스크립트는 캣북스 레포 [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)에 있고 따로 배포합니다. AXcellent는 판매 서버를 띄우지 않고 주소(`AX_SHOP_API_URL` 또는 회사 연결)·연결 키·웹훅으로만 붙습니다. 로컬에서 시험할 때만 이 레포 옆에 캣북스 레포를 클론하고 `CATBOOKS_LOCAL=on`으로 `run_all.sh`를 띄우면 판매 서버와 가상 주문이 같이 뜹니다(기본 꺼짐).
+판매 서버(shop-api)·가상 주문·장애 스크립트는 캣북스 레포 [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)에 있고 따로 배포합니다. AXcellent는 판매 서버를 띄우지 않고 주소(`AX_SHOP_API_URL` 또는 회사 연결)·연결 키·웹훅으로만 붙습니다. 로컬에서 시험할 때는 캣북스 레포를 따로 클론해 판매 서버를 8010에 띄웁니다(띄우는 법은 그 레포 README, `backend/README.md` "캣북스 판매 서버").
 
 ## 1. 준비
 
-- **가상 주문 켜기:** `backend/.env`에 `SHOP_TRAFFIC=on`을 넣고 `run_all.sh`로 띄웁니다. [1]
+- **가상 주문 켜기:** 캣북스 쪽 `.env`에 `SHOP_TRAFFIC=on`을 넣고 캣북스 레포의 `backend/scripts/shop_traffic.py`를 띄웁니다. [1]
   - 기본값은 꺼짐입니다. 켜면 가상 주문이 분당 20건(3초마다 1건) 들어갑니다. [2]
   - 감시는 최근 60초 안에 결제 표본이 5건 이상 있어야 판단합니다. [3] 주문이 없으면 장애를 넣어도 감지되지 않습니다.
-- **`run_all.sh`를 띄운 PC에서만 넣을 수 있습니다.**
-  - 장애를 넣는 데는 쇼핑몰 admin 토큰이 필요합니다.
-  - 이 토큰은 `run_all.sh`가 `backend/.data/web.env`의 `VITE_SHOP_ADMIN_TOKEN`에 씁니다. [4]
-  - `shop_fault.sh`는 그 파일에서 토큰을 읽고, 파일이 없으면 멈춥니다. [5]
-  - 위 두 줄은 `CATBOOKS_LOCAL=on`으로 `run_all.sh`가 띄운 **로컬 판매 서버**에서만 통합니다. 따로 배포한 캣북스에 넣을 때는 `SHOP_API_URL`(판매 서버 주소)과 `SHOP_ADMIN_TOKEN`(캣북스 관리자 토큰)을 주고 부릅니다. 둘 다 주면 그 값을 쓰고, 하나만 주면 멈춥니다(로컬 토큰을 다른 주소로 보내지 않게). 둘 다 비웠을 때만 `web.env` 토큰과 `127.0.0.1:8010`을 씁니다.
-  - 251 공용 서버에서는 251에서 `run_all.sh`를 띄운 재현님이 넣어야 합니다.
+- **캣북스 관리자 토큰이 있어야 넣을 수 있습니다.**
+  - 장애를 넣는 데는 쇼핑몰 admin 토큰(캣북스 쪽 `.env`의 값)이 필요합니다. AXcellent `run_all.sh`가 만드는 토큰으로는 통하지 않습니다.
+  - `shop_fault.sh`는 `SHOP_API_URL`(판매 서버 주소, 로컬이면 `http://127.0.0.1:8010`)과 `SHOP_ADMIN_TOKEN`을 둘 다 받아야 하고, 하나라도 없으면 멈춥니다. [5]
+  - 251 공용 서버에서는 캣북스 관리자 토큰을 가진 사람이 넣습니다.
 - **화면에는 장애 버튼이 없습니다.** 명령으로만 넣습니다. [6]
 
 ## 2. 장애 넣기
@@ -38,7 +36,7 @@ bash backend/scripts/shop_fault.sh           # 지금 상태 보기
 | 구간 | 시간 | 근거 |
 |---|---|---|
 | 첫 실패 결제가 생기기까지 | 최대 3초 (주문이 3초마다 들어옴) | [2] |
-| 기준 초과가 이어져야 하는 시간 | 20초 (코드 기본값 60초를 `run_all.sh`가 20초로 줄임) | [9] [10] |
+| 기준 초과가 이어져야 하는 시간 | 20초 (코드 기본값 60초를 캣북스 쪽 설정이 20초로 줄임) | [9] [10] |
 | 감시가 판단하는 간격 | 5초마다 | [9] [11] |
 
 ## 3. 자동 흐름
@@ -149,7 +147,7 @@ powershell -File backend/scripts/slow_agent.ps1 -Port 8106 -DelaySeconds 20 -Hol
 - **시험용 장애입니다.** 결제마다 실제로 지정한 시간(기본 1500ms, 최대 10000ms)만큼 기다리고, 그 지연이 모니터 표본에 그대로 남습니다. 응답이 느려져 p95 기준을 넘으면 사건이 열립니다.
 - **쇼핑몰 장애 스위치가 아닙니다.** 상태의 `active`는 false로 남습니다. 그래서 인프라 AI는 "과거 같은 장애의 처리 방식 다시 하기"(장애 해제)를 하지 않고(`not_needed`), 사건은 원인 확인·사람 이관으로 갑니다. 인프라 AI가 해제 API를 불러도 이 지연은 꺼지지 않습니다.
 - **켜기·끄기는 사람(admin 토큰)만 합니다.** `pg-ok`로 끈 뒤에도 바로 복구가 아닙니다. 느린 표본이 1분 창에서 빠지고 정상 결제가 지속 기준(로컬 20초)만큼 이어져야 쇼핑몰이 복구 신호(`recovery=metrics_normal`, 해제한 쪽 없음)를 보냅니다. 끈 뒤 대략 1분 20초 걸립니다.
-- 결제가 있어야 판정됩니다. 로컬에서는 `SHOP_TRAFFIC=on`으로 가상 주문을 켜 둡니다. 가상 주문의 요청 마감이 10초라 지연은 10초보다 짧게 둡니다.
+- 결제가 있어야 판정됩니다. 로컬에서는 캣북스 쪽 `SHOP_TRAFFIC=on`으로 가상 주문을 켜 둡니다. 가상 주문의 요청 마감이 10초라 지연은 10초보다 짧게 둡니다.
 - 상태 보기(`shop_fault.sh`)에 "결제사 쪽 지연: 켜짐/꺼짐"이 장애 스위치와 따로 나옵니다.
 
 ```bash
@@ -175,15 +173,15 @@ bash backend/scripts/pg_demo_file.sh clear    # 시연 끝나면 빼기
 
 | 번호 | 내용 | 파일:줄 |
 |---|---|---|
-| [1] | `SHOP_TRAFFIC=on`일 때만 가상 주문 (기본 꺼짐) | `backend/scripts/run_all.sh:501-504` |
+| [1] | `SHOP_TRAFFIC=on`일 때만 가상 주문 (기본 꺼짐) | 캣북스 레포 `backend/scripts/shop_traffic.py` |
 | [2] | 가상 주문 분당 20건(3초마다 1건) | 캣북스 레포 `backend/scripts/shop_traffic.py` |
 | [3] | 판단 창 60초, 최소 표본 5건 | 캣북스 레포 `backend/shop-api/src/ax_shop_api/monitor.py` |
-| [4] | admin 토큰을 `web.env`에 씀 | `backend/scripts/run_all.sh:443` |
-| [5] | `shop_fault.sh`가 `web.env`에서 토큰을 읽음, 없으면 멈춤 | `backend/scripts/shop_fault.sh:26-42` |
+| [4] | (없앰) AXcellent는 판매 서버 admin 토큰을 만들지 않음 | - |
+| [5] | `shop_fault.sh`가 주소·토큰을 둘 다 받아야 함, 하나라도 없으면 멈춤 | `backend/scripts/shop_fault.sh` |
 | [6] | 장애 버튼 없음, failure 약 25초 뒤 사건 열림 | `backend/scripts/shop_fault.sh:3`, `:6` |
 | [7] | 기준 p95 1000ms, 5xx 비율 2% | 캣북스 레포 `backend/shop-api/src/ax_shop_api/monitor.py` |
 | [8] | latency는 2000ms 지연 | 캣북스 레포 `backend/scripts/shop_fault.sh` (`latency`) |
-| [9] | 지속 20초, 판단 간격 5초 (`run_all.sh` 값) | `backend/scripts/run_all.sh:389` |
+| [9] | 지속 20초, 판단 간격 5초 (시연 값) | 캣북스 쪽 `SHOP_DEGRADED_SUSTAIN_S`·`SHOP_MONITOR_INTERVAL_S` |
 | [10] | 지속 시간은 첫 기준 초과 표본부터 셈 (코드 기본값 60초) | 캣북스 레포 `backend/shop-api/src/ax_shop_api/monitor.py` |
 | [11] | 감시 루프 간격 | 캣북스 레포 `backend/shop-api/src/ax_shop_api/main.py` |
 | [12] | 되돌리기는 진단·영향 분석 뒤 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:546` |

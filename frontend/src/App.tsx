@@ -11,6 +11,7 @@ import Data from '@/pages/Data'
 import Finance from '@/pages/Finance'
 import FinanceGuide from '@/pages/FinanceGuide'
 import Handoffs from '@/pages/Handoffs'
+import ArchiveIncidents from '@/pages/ArchiveIncidents'
 import Hr from '@/pages/Hr'
 import AgentEvaluation from '@/pages/AgentEvaluation'
 import OrgChanges from '@/pages/OrgChanges'
@@ -29,7 +30,7 @@ import Support from '@/pages/Support'
 import SellerSettlements from '@/pages/SellerSettlements'
 import Orders from '@/pages/Orders'
 import InfraHosts from '@/demo/InfraHosts'
-import DevTools from '@/demo/DevTools'
+import ToolConnections from '@/demo/ToolConnections'
 import LoginPage from '@/demo/LoginPage'
 import SignupPage from '@/demo/SignupPage'
 import PlanPurchase from '@/demo/PlanPurchase'
@@ -88,6 +89,7 @@ function Pages() {
           <Route path="/finance/daily" element={<Finance />} />
           <Route path="/finance/guide" element={<FinanceGuide />} />
           <Route path="/ops" element={<Hr />} />
+          <Route path="/archive/incidents" element={<ArchiveIncidents />} />
           <Route path="/agent-eval" element={<AgentEvaluation />} />
           <Route path="/org" element={<OrgChanges />} />
           <Route path="/marketing/*" element={<Marketing />} />
@@ -115,8 +117,10 @@ function Pages() {
           <Route path="/control/*" element={<ControlCenter />} />
           {/* 회사 서비스 연결은 회사 연결(/system/connect) 화면 아래쪽으로 합쳤다 */}
           <Route path="/system/integrations" element={<Navigate to="/system/connect" replace />} />
-          <Route path="/connections" element={<DevTools />} />
-          <Route path="/system/devtools" element={<Navigate to="/connections" replace />} />
+          <Route path="/system/tools" element={<ToolConnections />} />
+          {/* 예전 연결 화면 주소는 도구 연결로 (노션 계정 연결에서 돌아오는 ?notion=… 은 그대로 넘긴다) */}
+          <Route path="/connections" element={<ToTools />} />
+          <Route path="/system/devtools" element={<ToTools />} />
           {/* 예전 관리자 대시보드(/admin/*) 주소 호환 */}
           <Route path="/admin/*" element={<LegacyAdminRedirect />} />
           <Route path="*" element={<ToHome />} />
@@ -129,6 +133,12 @@ function Pages() {
 function ToHome() {
   const { account } = useSession()
   return <Navigate to={account ? homeOf(account) : '/'} replace />
+}
+
+/** /connections?notion=ok → /system/tools?notion=ok */
+function ToTools() {
+  const { search } = useLocation()
+  return <Navigate to={`/system/tools${search}`} replace />
 }
 
 /** /admin/console?id=3 → /console?id=3 */

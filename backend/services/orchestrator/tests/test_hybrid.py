@@ -10,10 +10,10 @@ from ax_orchestrator.registry import Registry
 
 
 def test_parse_real_depts() -> None:
-    assert parse_real_depts(" hr, finance ,", DEPTS) == {"hr", "finance"}
+    assert parse_real_depts(" archive, finance ,", DEPTS) == {"archive", "finance"}
     assert parse_real_depts(None, DEPTS) == set()
     with pytest.raises(ValueError, match="알 수 없는 부서: nope"):
-        parse_real_depts("hr,nope", DEPTS)
+        parse_real_depts("archive,nope", DEPTS)
 
 
 def _stub(seen: list):
@@ -49,18 +49,18 @@ def _stub(seen: list):
 async def test_only_chosen_dept_goes_to_real_caller() -> None:
     seen: list = []
     real, fetch = _stub(seen)
-    hybrid = HybridDepartments(FakeDepartments(), {"hr"}, real_caller=real, real_fetch=fetch)
+    hybrid = HybridDepartments(FakeDepartments(), {"archive"}, real_caller=real, real_fetch=fetch)
     registry = Registry()
     await registry.load(DEPTS, hybrid.fetch_card)
-    assert registry.cards["hr"].description == "실제"  # 카드는 실제 부서에서
+    assert registry.cards["archive"].description == "실제"  # 카드는 실제 부서에서
     assert registry.cards["data"].description.endswith("(목 카드)")
     engine = Engine(registry, hybrid, hold_timeout=0.2)
     inc = new_incident()
     await engine.run(inc, scenario_a())
     assert inc.status == "resolved"
-    assert [(d, s) for d, s, _ in seen] == [("hr", "record_case")]
+    assert [(d, s) for d, s, _ in seen] == [("archive", "record_case")]
     assert "orchestrator" in seen[0][2]
-    assert hybrid.modes(DEPTS)["hr"] == "real" and hybrid.modes(DEPTS)["data"] == "mock"
+    assert hybrid.modes(DEPTS)["archive"] == "real" and hybrid.modes(DEPTS)["data"] == "mock"
 
 
 @pytest.mark.asyncio

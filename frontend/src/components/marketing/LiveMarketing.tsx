@@ -46,6 +46,11 @@ function gradeChip(grade: string, status: string, hold: string | null) {
 }
 
 /** 마케팅 화면에서 이 컴포넌트가 그리는 탭. notice = 장애·공지, campaign = 캠페인·쿠폰 (pages/Marketing.tsx) */
+/** 게시 끝이 없는 배너의 안내. 장애 배너만 복구 공지가 나가면 끝난다. 정상화 문구는 그 말이 거짓이라 뺀다(쇼핑몰 응답에 공지 종류가 없어 문구로 가른다). */
+function noEndLabel(text: string): string {
+  return text.includes("정상으로 돌아왔") ? "정하지 않음" : "정하지 않음 (복구 공지가 나가면 끝남)";
+}
+
 export type LiveView = "notice" | "campaign";
 
 export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) {
@@ -120,7 +125,7 @@ export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) 
                       <p className="rounded-lg bg-ink-50 px-3 py-2 text-sm">{b.text}</p>
                       <dl className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
                         <div className="flex gap-2"><dt className="text-ink-500">게시 시작</dt><dd>{shortDateTime(b.valid_from ?? b.created_at)}</dd></div>
-                        <div className="flex gap-2"><dt className="text-ink-500">게시 끝</dt><dd>{b.valid_to ? shortDateTime(b.valid_to) : "정하지 않음 (복구 공지가 나가면 끝남)"}</dd></div>
+                        <div className="flex gap-2"><dt className="text-ink-500">게시 끝</dt><dd>{b.valid_to ? shortDateTime(b.valid_to) : noEndLabel(b.text)}</dd></div>
                       </dl>
                     </article>
                   ))}

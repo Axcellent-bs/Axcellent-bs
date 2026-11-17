@@ -48,16 +48,23 @@ class _Report(BaseModel):
     model_config = ConfigDict(extra="ignore")
     items: list[_Row] = Field(default_factory=list)
     sales_read: bool = False
+    # 고객지원이 "확인할 수 없었던 것"을 적은 문장 (예: 판매 수량을 읽지 못함). 예전 응답에는 없다
+    missing: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class Reactions:
-    """조회 결과. `reason`이 있으면 읽지 못한 것이다 (rows는 비어 있음)."""
+    """조회 결과. `reason`이 있으면 읽지 못한 것이다 (rows는 비어 있음).
+
+    `missing`: 고객지원이 보낸 missing 문장 (중복 없이, 받은 순서).
+    인사이트 evidence.missing으로 옮긴다.
+    """
 
     rows: dict[str, _Row] = field(default_factory=dict)
     asked: frozenset[str] = frozenset()
     sales_read: bool = False
     reason: str | None = None
+    missing: tuple[str, ...] = ()
 
 
 def _failed(reason: str) -> Reactions:
@@ -133,6 +140,7 @@ async def _call(ids: list[str], meta: RequestMeta, send: SendFn) -> Reactions:
         rows={r.product_id: r for r in report.items},
         asked=frozenset(ids),
         sales_read=report.sales_read,
+        missing=tuple(dict.fromkeys(m for m in report.missing if m)),
     )
 
 
@@ -145,7 +153,9 @@ def for_product(
         return None, f"{label}: 읽지 못함 ({got.reason})"
     row = got.rows.get(product_id)
     if row is None:
-        return None, f"{label}: {PERIOD_LABEL} 클레임이 없어 집계에 없음 (판매 수량 모름)"
+        # #1129 뒤로 고객지원은 물은 상품을 클레임·문의가 0건이어도 줄로 돌려준다(claim_count 0).
+        # 그래서 줄이 없다는 것은 고객지원이 그 상품을 모른다는 뜻이다
+        return None, f"{label}: 고객지원 집계에 이 상품이 없음 (없는 상품 ID일 수 있음)"
     if row.sold_qty is None:
         return None, f"{label}: 판매 수량을 읽지 못함"
     if row.sold_qty < MIN_SOLD:
@@ -170,7 +180,8 @@ def for_product(
 def fill(insights: Sequence[TrendInsight], got: Reactions) -> int:
     """인사이트마다 연결 상품의 고객 반응을 채운다. 넣지 않은 상품은 evidence.missing에 이유.
 
-    채운 칸 수를 돌려준다."""
+    고객지원이 보낸 missing 문장도 연결 상품이 있는 인사이트의 evidence.missing에 옮긴다
+    (같은 문장은 한 번만). 채운 칸 수를 돌려준다."""
     filled = 0
     for i in insights:
         ev = i.evidence
@@ -181,4 +192,8 @@ def fill(insights: Sequence[TrendInsight], got: Reactions) -> int:
                 filled += 1
             elif why and why not in ev.missing:
                 ev.missing.append(why)
+        if i.products:
+            for note in got.missing:
+                if note not in ev.missing:
+                    ev.missing.append(note)
     return filled

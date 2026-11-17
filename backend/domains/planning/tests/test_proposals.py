@@ -114,6 +114,22 @@ def test_pull_skips_similar_proposals_even_with_new_ids() -> None:
 
 
 @pytest.mark.role("planning")
+def test_finance_insight_keeps_sender_and_quotes_facts() -> None:
+    """재무 의견(budget_shift)도 제안으로 받는다: 보낸 쪽은 재무로 남고 근거는 재무 facts 그대로."""
+    svc = _svc()
+    fact = {"label": "아재개그 조회당 제작비", "value": "몸개그의 2.1배", "source": "finance"}
+    inp = _insight("budget_shift:1").model_copy(
+        update={"skill": "budget_shift", "facts": [InsightFact.model_validate(fact)]}
+    )
+    res = asyncio.run(svc.receive_insight(requester="finance", inp=inp))
+    p = _p(svc, res.output["proposal_id"])
+    assert p.from_ == "finance" and p.facts[0].value == "몸개그의 2.1배"
+    assert svc.state.activity[-1].from_ == "finance"
+    same = asyncio.run(svc.receive_insight(requester="data", inp=inp))
+    assert same.outcome == "created"  # 같은 id라도 보낸 쪽이 다르면 다른 인사이트
+
+
+@pytest.mark.role("planning")
 def test_rule_draft_quotes_facts_and_dedups_without_rewriting() -> None:
     writer = Writer()
     svc = _svc()
@@ -164,6 +180,29 @@ def test_confirm_to_marketing_sends_brief_with_id_chain() -> None:
     _, sent, key = brief.sent[0]
     assert sent.proposal_id == pid and sent.insight_id == "ins-1" and sent.target.value == "+10%"
     assert sent.schema_version == "1" and key == f"proposal:{pid}:brief"
+
+
+@pytest.mark.role("planning")
+def test_content_category_flows_from_insight_to_brief() -> None:
+    """재무 의견의 콘텐츠 카테고리·형식이 제안에 남고 확정하면 마케팅 brief에 그대로 실린다."""
+    brief = Brief()
+    svc = _svc(marketing=brief)
+    inp = _insight("fin_1").model_copy(
+        update={"content_category": "아재개그", "content_format": "shorts"}
+    )
+
+    async def go():
+        pid = (await svc.receive_insight(requester="finance", inp=inp)).output["proposal_id"]
+        await svc.dispatch({"type": "approveProposal", "proposal": pid})
+        await _flush(svc)
+        return pid
+
+    pid = asyncio.run(go())
+    p = _p(svc, pid)
+    assert p.content_category == "아재개그" and p.content_format == "shorts"
+    _, sent, _ = brief.sent[0]
+    assert sent.content_category == "아재개그" and sent.content_format == "shorts"
+    assert sent.format == p.format  # 기획 초안의 자유 문구 칸은 그대로
 
 
 @pytest.mark.role("planning")

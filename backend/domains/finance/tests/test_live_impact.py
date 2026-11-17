@@ -265,3 +265,43 @@ def test_started_at_is_read_only_when_it_is_a_utc_time() -> None:
     assert sources._started_at({"started_at": "2026-10-22T05:41:00"}) is None  # 시간대 없음
     at = sources._started_at({"started_at": "2026-10-22T05:41:00Z"})
     assert at == datetime(2026, 10, 22, 5, 41, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_closed_incident_impact_survives_a_restart(
+    data_calls: list[AgentRequest], tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """닫힌 사건의 영향은 저장 파일에 남아, 다시 켜도 data에 다시 묻지 않는다 (11/16).
+
+    251에서 재시작 직후 재무 장애 화면을 열면 닫힌 사건 16건을 data에 한 번씩 다시 물어
+    AI 대화방에 "영향 분석 부탁해요"가 몰려 올라왔다.
+    """
+    from finance_agent import handlers, persist
+
+    monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "0")
+    monkeypatch.delenv("FINANCE_MOCK", raising=False)
+    handlers.reset_state(LiveSources())
+    live = handlers.state().sources
+    assert isinstance(live, LiveSources)
+    first = await live.impact(META, "ctx_inc_0001", WINDOW, final=True)
+    assert first is not None and len(data_calls) == 1
+    # 진행 중 사건은 저장하지 않는다 (결과가 바뀔 수 있다)
+    await live.impact(META, "ctx_inc_0002", WINDOW)
+    payload = impact_input(WINDOW)
+    assert payload is not None
+    body = json.dumps(payload.model_dump(mode="json", exclude_none=True), sort_keys=True)
+    assert list(handlers.state().records.final_impacts) == [f"ctx_inc_0001|{body}"]
+    path = tmp_path / "state.json"
+    persist.save(handlers.state(), path)
+
+    handlers.reset_state(LiveSources())  # 다시 켬: 메모리 기억은 비어 있다
+    assert persist.load(handlers.state(), path)
+    again = await handlers.state().sources.impact(META, "ctx_inc_0001", WINDOW, final=True)
+    assert again == first
+    assert len(data_calls) == 2  # 저장한 사건은 다시 묻지 않았다 (두 번째는 진행 중 사건)
+
+
+def test_a_broken_stored_impact_is_asked_again() -> None:
+    assert sources.impact_from_row({"failed_orders": "x"}) is None
+    impact = sources.Impact(3, 2, 15000, frozenset({"buy_1"}), "data:x", (("book", 3, 15000),))
+    assert sources.impact_from_row(sources.impact_to_row(impact)) == impact

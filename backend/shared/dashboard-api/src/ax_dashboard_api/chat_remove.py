@@ -46,8 +46,8 @@ _CALLS = {
 
 
 def _hr_base() -> str:
-    """인사 대화 HTTP 주소 (decisions 서버). `AX_HR_CHAT_URL`로 바꿀 수 있다."""
-    return (os.getenv("AX_HR_CHAT_URL") or config.agent_url("decisions")).rstrip("/")
+    """인사 대화 HTTP 주소 (org 서버). `AX_HR_CHAT_URL`로 바꿀 수 있다."""
+    return (os.getenv("AX_HR_CHAT_URL") or config.agent_url("org")).rstrip("/")
 
 
 def _error_of(body: Any) -> tuple[str | None, str | None]:
@@ -84,6 +84,11 @@ async def _remove_hr(thread_id: str, authorization: str | None) -> dict[str, Any
     return await _remove_http(url, thread_id, authorization, "인사 AI")
 
 
+async def _remove_archive(thread_id: str, authorization: str | None) -> dict[str, Any]:
+    url = f"{config.agent_url('decisions').rstrip('/')}/api/archive/chat/{thread_id}/remove"
+    return await _remove_http(url, thread_id, authorization, "아카이브 AI")
+
+
 def _safety_base() -> str:
     """안전규칙 대화 HTTP 주소 (safety 서버)."""
     return config.agent_url("safety").rstrip("/")
@@ -100,6 +105,8 @@ async def remove(agent: str, thread_id: str, request: Request) -> dict[str, Any]
     who = human_from_authorization(authorization)  # 사람 토큰이 아니면 401·403
     if agent == "hr":
         return await _remove_hr(thread_id, authorization)
+    if agent == "archive":
+        return await _remove_archive(thread_id, authorization)
     if agent == "safety":
         return await _remove_safety(thread_id, authorization)
     if agent == "support":

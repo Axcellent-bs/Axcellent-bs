@@ -20,6 +20,10 @@ export interface ImpactOutput {
   unpaid_amount?: number | null;
   by_category?: CategoryImpact[] | null;
   summary?: string | null;
+  /** 장애 구간에 시간 초과로 남은 결제(확인·환불 필요) 건수·금액. 실패 주문·미결제와 따로 센다.
+   *  셀 수 없으면 null, 예전 응답에는 없다 */
+  timeout_count?: number | null;
+  timeout_amount?: number | null;
 }
 export interface RecoveryOutput { recovered?: boolean | null; infra_metrics_ok?: boolean | null; business_metrics_ok?: boolean | null }
 
@@ -92,7 +96,7 @@ export const FACT_KIND_KO: Record<string, string> = {
 };
 /** 사실 출처(skill) → 화면 이름 */
 export const FACT_SOURCE_KO: Record<string, string> = {
-  input: "총괄이 준 이상 구간",
+  input: "총괄 AI가 준 이상 구간",
   "dev.find_related_prs": "개발 AI · 관련 PR",
   "planning.find_related_prs": "개발 AI · 관련 PR", // 개발이 기획에서 나오기 전 기록
   "marketing.list_active_notices": "마케팅 AI · 게시 중 공지",
@@ -116,6 +120,14 @@ export const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v 
 export const count = (n: unknown, unit: string) => {
   const v = num(n);
   return v == null ? UNKNOWN : `${v.toLocaleString("ko-KR")}${unit}`;
+};
+
+/** 시간 초과로 남은 결제: "2건 · 48,000원". 건수나 금액 중 하나라도 모르면 null(화면은 "확인할 수 없음") */
+export const timeoutPayments = (impact: ImpactOutput | null | undefined): string | null => {
+  const n = num(impact?.timeout_count);
+  const amount = num(impact?.timeout_amount);
+  if (n == null || amount == null) return null;
+  return `${n.toLocaleString("ko-KR")}건 · ${Math.round(amount).toLocaleString("ko-KR")}원`;
 };
 
 /** 걸린 시간: 4.78 → "4.8초", 540 → "9분", 570 → "9분 30초" */
@@ -193,11 +205,111 @@ export interface SalesChannel { source: string | null; medium: string | null; la
 export interface SalesQuality {
   rows_in_period: number; empty_days: string[]; dropped_rows: number; dropped_reasons: Record<string, number>;
   last_synced_at: string | null; unknown_category_codes: string[];
+  // 아래는 고객·시장 분석(11/16) 선택 칸
+  unknown_genres?: string[]; unmapped_attribute_values?: Record<string, string[]>;
 }
 export interface SalesBasis {
   period_from: string; period_to: string; previous_from: string; previous_to: string;
   rows_read: number; last_synced_at: string | null; catalog_id: string; catalog_version: string | null;
+  /** 값이 있으면 가짜 원천(데모용)으로 채운 저장소 (예: "가짜 데이터(데모용)"). 실제 판매 서버면 null */
+  data_source?: string | null;
 }
+
+// ---- 고객·시장 분석 (11/16, 계약 #1116 + segment_options). 숫자는 서버 값 그대로
+export type SegmentPeriod = "1d" | "7d" | "30d" | "90d" | "365d";
+export type SegmentTargetKind = "category" | "genre" | "product";
+export type ExternalStatus = "ok" | "key_missing" | "limit" | "error";
+export interface CodeLabel { code: string; label: string }
+export interface SegmentOptionsOutput {
+  attributes: { key: string; label: string; values: CodeLabel[] }[];
+  genres: CodeLabel[];
+  categories: CodeLabel[];
+  quick_questions: { label: string; filters: Record<string, string> }[];
+  event_kinds: CodeLabel[];
+  periods: SegmentPeriod[];
+  population_keys: string[][];
+  min_group_size: number;
+  data_source: string | null;
+  catalog_id: string;
+  catalog_version: string | null;
+  /** 화면에 쓰는 품목 이름 (예: 책·게임). 예전 서버면 없음 → "상품" */
+  item_noun?: string;
+}
+/** 글 질문 → 고르는 칸 값 (segment_question). LLM은 segment_options 보기 안의 code만 고른다 */
+export interface SegmentQuestionOutput {
+  status: "ok" | "unparsed";
+  filters: Record<string, string>;
+  genre_code: string | null;
+  period: SegmentPeriod | null;
+  understood_label: string;
+  reason: string;
+}
+export interface SegmentShare {
+  value_code: string; label: string; target_share: number | null; overall_share: number | null;
+  lift: number | null; buyers: number | null; suppressed: boolean;
+}
+export interface SegmentAttributeBreakdown { key: string; label: string; values: SegmentShare[]; unknown_buyers: number | null }
+export interface SegmentProfileOutput {
+  status: "ok" | "insufficient"; insufficient_reasons: string[];
+  target_kind: SegmentTargetKind; target_code: string; target_label: string; period: SegmentPeriod;
+  target_buyers: number | null; target_suppressed: boolean; overall_buyers: number | null;
+  attributes: SegmentAttributeBreakdown[];
+  quality: SalesQuality; basis: SalesBasis | null; summary: string;
+}
+export interface FavoriteItem {
+  kind: "genre" | "category" | "product"; code: string; label: string;
+  share: number | null; lift: number | null; buyers: number | null; suppressed: boolean;
+}
+export interface ExternalItem { name: string; value: number | null; unit: string; rank: number | null }
+export interface ExternalResult {
+  source_id: string; label: string; status: ExternalStatus; reason: string;
+  period_label: string; condition_label: string; items: ExternalItem[];
+}
+export interface SegmentFavoritesOutput {
+  status: "ok" | "insufficient"; insufficient_reasons: string[];
+  filters: Record<string, string>; filter_label: string; period: SegmentPeriod;
+  segment_buyers: number | null; segment_suppressed: boolean;
+  internal: FavoriteItem[]; external: ExternalResult[];
+  quality: SalesQuality; basis: SalesBasis | null; summary: string;
+}
+export interface CoverageRow {
+  values: Record<string, string>; label: string; buyers: number | null; population: number | null;
+  population_source: string; base_year: number | null; coverage: number | null; suppressed: boolean;
+  status: "ok" | "population_missing" | "error"; reason: string;
+}
+export interface MarketCoverageOutput {
+  status: "ok" | "insufficient"; insufficient_reasons: string[]; attribute_keys: string[]; period: "365d";
+  rows: CoverageRow[]; quality: SalesQuality; basis: SalesBasis | null; summary: string;
+}
+export interface ProposalReason { kind: "segment" | "season" | "conversion"; text: string; value: number | null; unit: string; source: string }
+export interface ProposalEstimate {
+  target_customers: number; conversion_low: number; conversion_high: number;
+  conversion_source: "past_campaign" | "assumption"; assumption: boolean; aov: number | null;
+  orders_low: number; orders_high: number; revenue_low: number; revenue_high: number;
+  discount_cost_low: number; discount_cost_high: number; formula: string;
+}
+export interface ProposalSent { sent_at: string; outcome: "created" | "duplicate" | "rejected"; proposal_ref: string | null }
+export interface ProposalPastResult {
+  proposal_id: string; proposal_ref: string | null; campaign_id: string | null;
+  expected_low: number | null; expected_high: number | null; actual: number | null;
+  period_from: string | null; period_to: string | null;
+}
+export interface EventProposalItem {
+  proposal_id: string; target_filters: Record<string, string>; target_label: string;
+  genre_code: string | null; category_code: string | null; item_label: string;
+  event_kind: string; event_label: string;
+  timing_basis: { month: string; keywords: string[]; last_year_multiple: number | null; source: string };
+  reasons: ProposalReason[]; estimate: ProposalEstimate; limits: string[]; score: number | null;
+  title: string | null; summary: string | null; sent: ProposalSent | null; past_results: ProposalPastResult[];
+}
+export interface EventProposalOutput {
+  status: "ok" | "insufficient"; insufficient_reasons: string[]; month: string;
+  proposals: EventProposalItem[]; quality: SalesQuality; basis: SalesBasis | null; summary: string;
+  /** 기준(시즌 배수·예상 주문)에 못 미쳐 뺀 후보. 예전 서버면 없음 */
+  excluded?: ExcludedProposal[];
+}
+export interface ExcludedProposal { target_label: string; item_label: string; reason: string }
+export interface EventProposalSendOutput { outcome: "created" | "duplicate" | "rejected"; proposal_ref: string | null; reason: string }
 export interface SalesAnalysisOutput {
   period: SalesPeriod;
   as_of: string;
@@ -1877,7 +1989,7 @@ export interface VideoPerformanceListOutput {
 
 /** 서버가 꺼졌을 때 무엇이 꺼졌는지 보여 주는 이름 */
 export const DATA_SERVER = "데이터 AI 서버(8106)";
-export const ORCH_SERVER = "총괄 서버(8000)";
+export const ORCH_SERVER = "총괄 AI 서버(8000)";
 /**
  * 데이터 AI를 부를지. 실제 토큰(로컬)이거나 공유 서버의 자리표시자(DATA_A2A_PLACEHOLDER)면 부른다.
  * 자리표시자도 본문 meta.token에 그대로 보내고, 실제 토큰은 nginx가 Authorization 헤더로 넣는다. 빈 값이면 부르지 않는다.
@@ -1893,6 +2005,19 @@ export const dataAi = {
   kpiSummary: () => askData<KpiSummaryOutput>("kpi_summary", "KPI"),
   /** 매출 분석. period: 오늘 · 최근 7일 · 최근 30일. 숫자는 서버가 계산한 값 그대로 */
   salesAnalysis: (period: SalesPeriod) => askData<SalesAnalysisOutput>("sales_analysis", "매출 분석", { period }),
+  // 고객·시장 분석. skill이 아직 없으면 서버가 거절(FORBIDDEN_SKILL·403)하고 화면은 그 칸만 "준비 중"
+  segmentOptions: () => askData<SegmentOptionsOutput>("segment_options", "분석 선택지"),
+  segmentQuestion: (text: string) => askData<SegmentQuestionOutput>("segment_question", "글 질문 읽기", { text }),
+  segmentFavorites: (filters: Record<string, string>, period: SegmentPeriod) =>
+    askData<SegmentFavoritesOutput>("segment_favorites", "집단이 좋아하는 것", { filters, period }),
+  segmentProfile: (target_kind: SegmentTargetKind, target_code: string, period: SegmentPeriod) =>
+    askData<SegmentProfileOutput>("segment_profile", "구매자 구성", { target_kind, target_code, period }),
+  marketCoverage: (attribute_keys: string[]) =>
+    askData<MarketCoverageOutput>("market_coverage", "시장 커버 비율", { attribute_keys }, TREND_DEADLINE_MS),
+  eventProposal: (month: string) =>
+    askData<EventProposalOutput>("event_proposal", "이벤트 제안", { month }, TREND_DEADLINE_MS),
+  eventProposalSend: (proposal_id: string) =>
+    askData<EventProposalSendOutput>("event_proposal_send", "기획에 넘기기", { proposal_id }),
   accuracyReport: () => askData<AccuracyReportOutput>("accuracy_report", "정확도 평가 결과"),
   /** start: 한국 시간 날짜(YYYY-MM-DD). 비우면 서버가 직전 기간을 고른다. services: 비우면 전체 */
   activityReport: (period: ActivityPeriod, start: string | null, services: string[] = []) =>

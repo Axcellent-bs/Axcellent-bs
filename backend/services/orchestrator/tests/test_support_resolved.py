@@ -37,7 +37,7 @@ async def test_a_resolved_inquiry_goes_to_finance_then_hr(harness) -> None:
 
     assert inc.kind == "support_resolved"
     assert inc.title == "고객 문의 #7 처리 결과 기록"
-    assert [r.dept for r in inc.steps.values()] == ["finance", "hr", "hr"]
+    assert [r.dept for r in inc.steps.values()] == ["finance", "archive", "archive"]
     assert [r.status for r in inc.steps.values()] == ["completed"] * 3
     assert inc.status == "resolved"
     # 재무가 받은 입력은 이벤트가 알려 준 사실뿐이다
@@ -148,7 +148,7 @@ async def test_the_hr_record_is_read_back_by_this_incident(harness) -> None:
     await mgr.wait(inc.context_id)
 
     verify_call = next(c for c in harness.fakes.calls if c[1].skill == "get_audit_timeline")
-    assert verify_call[0] == "hr"
+    assert verify_call[0] == "archive"
     assert verify_call[1].input == {"context_id": inc.context_id}  # 이 이벤트의 기록만 읽는다
     assert inc.steps["verify"].status == "completed"
     assert inc.status == "resolved"
@@ -159,7 +159,7 @@ async def test_the_hr_record_is_read_back_by_this_incident(harness) -> None:
 
 @pytest.mark.asyncio
 async def test_a_missing_hr_record_is_sent_to_a_human_instead_of_assumed(harness) -> None:
-    harness.fakes.script("hr", "get_audit_timeline", "no_record")
+    harness.fakes.script("archive", "get_audit_timeline", "no_record")
     mgr = IncidentManager(await harness.start(), scenario_a)
     inc = await mgr.handle(resolved("evt_v2", 6))
     await mgr.wait(inc.context_id)

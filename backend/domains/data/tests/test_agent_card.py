@@ -19,11 +19,19 @@ def test_card_validates(card: AgentCard) -> None:
     assert card.name == "data"
     assert card.url == "http://data:8106/a2a"
     assert {s.id for s in card.skills} == {
+        "receive_improvement_note",  # 총괄의 개선 노트를 받는 공통 skill
         "anomaly_detection",
         "impact_analysis",
         "fraud_score",
         "kpi_summary",
         "sales_analysis",
+        "segment_options",
+        "segment_question",
+        "segment_profile",
+        "segment_favorites",
+        "market_coverage",
+        "event_proposal",
+        "event_proposal_send",
         "root_cause_hypotheses",
         "accuracy_report",
         "activity_report",
@@ -79,8 +87,31 @@ def test_video_explorer_is_a_read_for_screen_marketing_planning_and_orchestrator
     assert skill.output_schema.endswith("#VideoExplorerOutput")
 
 
+# 상태를 바꾸는 카드 skill은 이것만 (data 자신의 execute() 관문을 거친다)
+STATE_CHANGING = {"event_proposal_send": "A"}
+
+
 def test_all_skills_are_read(card: AgentCard) -> None:
-    assert all(s.grade == "read" for s in card.skills)
+    """event_proposal_send(기획에 보내기, A)만 빼고 모두 read. 빼는 skill은 정한 등급 그대로."""
+    common = {"receive_improvement_note"}  # 공통 skill: 노트 저장소에만 쓰고 업무 상태는 안 바꾼다
+    assert all(
+        s.grade == "read" for s in card.skills if s.id not in STATE_CHANGING | dict.fromkeys(common)
+    )
+    assert {s.id: s.grade for s in card.skills if s.id in STATE_CHANGING} == STATE_CHANGING
+
+
+def test_event_proposal_skills(card: AgentCard) -> None:
+    """이벤트 제안: 제안은 read, 보내기는 A(verifier 없음). 둘 다 매출 분석과 같은 요청자."""
+    sales = next(s for s in card.skills if s.id == "sales_analysis")
+    read = next(s for s in card.skills if s.id == "event_proposal")
+    send = next(s for s in card.skills if s.id == "event_proposal_send")
+    assert read.grade == "read" and send.grade == "A"
+    assert read.verifier is None and send.verifier is None
+    assert read.allowed_requesters == send.allowed_requesters == sales.allowed_requesters
+    assert read.input_schema.endswith("data.py#EventProposalInput")
+    assert read.output_schema.endswith("data.py#EventProposalOutput")
+    assert send.input_schema.endswith("data.py#EventProposalSendInput")
+    assert send.output_schema.endswith("data.py#EventProposalSendOutput")
 
 
 def test_fraud_score_requesters(card: AgentCard) -> None:
@@ -129,6 +160,28 @@ def test_sales_analysis_is_a_read_for_screen_and_orchestrator(card: AgentCard) -
     assert skill.allowed_requesters == kpi.allowed_requesters == ["orchestrator", "dashboard-api"]
     assert skill.input_schema.endswith("data.py#SalesAnalysisInput")
     assert skill.output_schema.endswith("data.py#SalesAnalysisOutput")
+
+
+@pytest.mark.parametrize(
+    ("skill_id", "model"),
+    [
+        ("segment_options", "SegmentOptions"),
+        ("segment_question", "SegmentQuestion"),
+        ("segment_profile", "SegmentProfile"),
+        ("segment_favorites", "SegmentFavorites"),
+        ("market_coverage", "MarketCoverage"),
+    ],
+)
+def test_segment_skills_are_reads_like_sales_analysis(
+    card: AgentCard, skill_id: str, model: str
+) -> None:
+    """고객·시장 분석 4개: grade read, 매출 분석과 같은 요청자, 계약 입출력."""
+    skill = next(s for s in card.skills if s.id == skill_id)
+    sales = next(s for s in card.skills if s.id == "sales_analysis")
+    assert skill.grade == "read" and skill.verifier is None
+    assert skill.allowed_requesters == sales.allowed_requesters
+    assert skill.input_schema.endswith(f"data.py#{model}Input")
+    assert skill.output_schema.endswith(f"data.py#{model}Output")
 
 
 def test_root_cause_is_a_lookup_for_orchestrator(card: AgentCard) -> None:

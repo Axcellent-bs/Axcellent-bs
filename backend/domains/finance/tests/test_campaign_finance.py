@@ -18,7 +18,8 @@ from finance_agent.simulation.engine import funnel, load_scenario, render_report
 from finance_agent.sources import MockSources
 
 TODAY = date(2026, 10, 15)
-RULE_IDS = {"BRK-001", "BRK-002", "BRK-003", "BRK-004", "BRK-005"}
+# CRX-001(고객 반응)은 상품이 없는 요청에도 "해당 없음"으로 항상 남는다 (태윤 11/17)
+RULE_IDS = {"BRK-001", "BRK-002", "BRK-003", "BRK-004", "BRK-005", "CRX-001"}
 
 
 class _AnyStarted(dict):
@@ -202,6 +203,57 @@ def test_unknown_cash_allows_only_the_minimum() -> None:
 def test_low_cash_limits_the_request() -> None:
     d = _decide(_ask(300_000), cash=120_000)
     assert (d["decision"], d["approved_limit_krw"]) == ("conditional", 120_000)
+
+
+def test_balance_basis_names_the_projected_balance() -> None:
+    """통장 잔액을 알면 여유 금액은 예상 잔액 최저값 − 최소 현금이고, 근거 문구도 그렇게 적는다."""
+    d = cp.decide(
+        _ask(300_000),
+        campaigns={},
+        reviews=[],
+        lessons=[],
+        cash_net_krw=2_997_142_602,
+        cash_basis="balance",
+        today=TODAY,
+        started=cp.NO_STARTS,
+    )
+    assert d["decision"] == "approved" and d["cash_basis"] == "balance"
+    [cash_rule] = [r for r in d["applied_rules"] if r["rule_id"] == "BRK-004"]
+    assert "예상 잔액 여유" in cash_rule["detail"]
+    assert _decide()["cash_basis"] == "net"
+
+
+def _cashflow(monkeypatch: pytest.MonkeyPatch, rows: list[dict], min_cash: int = 0) -> None:
+    from finance_agent import finance_api
+
+    async def fake(books: Any) -> dict:
+        return {"weeks": rows, "min_cash_krw": min_cash}
+
+    monkeypatch.setattr(finance_api, "cashflow_view", fake)
+
+
+def test_cash_uses_projected_balance_not_first_week_payout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """11/16 실제 사례: 지난주 판매분 PG 정산금은 이미 통장에 있고 판매자 정산금만 이번 주에 나가
+    첫 주 순현금이 −24억이었다. 잔액은 약 30억으로 충분하니 브레이크는 잔액으로 본다."""
+    state().cash_override = None
+    rows = [{"net": -2_449_455_304, "balance": 2_998_142_602}] + [
+        {"net": 7_308_129, "balance": 2_998_142_602 + 7_308_129 * k} for k in (1, 2, 3)
+    ]
+    _cashflow(monkeypatch, rows, min_cash=1_000_000)
+    amount, basis = asyncio.run(handlers.cash_position())
+    assert (amount, basis) == (2_998_142_602 - 1_000_000, "balance")
+    assert asyncio.run(handlers.cash_net_krw()) == amount
+
+
+def test_cash_without_balance_falls_back_to_net(monkeypatch: pytest.MonkeyPatch) -> None:
+    state().cash_override = None
+    rows = [{"net": n, "balance": None} for n in (-50, 20, 20, 20)]
+    _cashflow(monkeypatch, rows)
+    assert asyncio.run(handlers.cash_position()) == (10, "net")
+    rows[2]["net"] = None
+    assert asyncio.run(handlers.cash_position()) == (None, "net")
+    _cashflow(monkeypatch, rows[:2])  # 볼 주가 모자라면 모른다
+    assert asyncio.run(handlers.cash_position()) == (None, "net")
 
 
 def test_loss_streak_rejects_but_other_channel_passes() -> None:

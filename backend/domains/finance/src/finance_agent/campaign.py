@@ -14,6 +14,14 @@ from typing import Any, Literal
 
 from finance_agent import finance_config as fc
 from finance_agent.books import Books, item_gross, order_sold, paid_at
+from finance_agent.customer_reaction import (
+    NOT_RELEVANT,
+    STATUS_FLAGGED,
+    STATUS_NOT_RELEVANT,
+    STATUS_UNAVAILABLE,
+    Reaction,
+    flag_text,
+)
 from finance_agent.rules import applied, load_rules
 
 Verdict = Literal["good", "neutral", "bad"]
@@ -86,13 +94,19 @@ def compute_result(data: dict[str, Any], repeat: dict[str, Any] | None = None) -
     cfg = fc.load_config()
     book = load_rules().campaign
     spend, coupon, gmv = data["spend_krw"], data.get("coupon_krw") or 0, data.get("gmv_krw")
+    production = data.get("production_cost_krw") or 0
     record = {
         **data,
         "coupon_krw": coupon,
         "commission_rate": cfg.commission.default_rate,
         "pg_fee_rate": cfg.pg.fee_rate,
         "break_even_roas": break_even_roas(),
-        "expense_classes": {"spend_krw": "광고선전비", "coupon_krw": "매출 차감"},
+        "expense_classes": {
+            "spend_krw": "광고선전비",
+            "production_cost_krw": "광고선전비(제작비)",
+            "coupon_krw": "매출 차감",
+        },
+        **view_cost(data),
     }
     if gmv is None:
         return record | {
@@ -111,9 +125,9 @@ def compute_result(data: dict[str, Any], repeat: dict[str, Any] | None = None) -
         }
     revenue = fc.rate_amount(gmv, cfg.commission.default_rate)
     pg_fee = fc.rate_amount(gmv, cfg.pg.fee_rate)
-    cost = spend + coupon + pg_fee
+    cost = spend + production + coupon + pg_fee
     profit = revenue - cost
-    invested = spend + coupon
+    invested = spend + production + coupon
     roi = round(profit / invested, 4) if invested else None
     roas = round(gmv / spend, 2) if spend else None
     if roi is None:
@@ -154,8 +168,9 @@ def compute_result(data: dict[str, Any], repeat: dict[str, Any] | None = None) -
             ),
             applied(
                 "CMP-002",
-                f"광고비 {fc.won(spend)} + 쿠폰 {fc.won(coupon)} + PG {fc.won(pg_fee)} "
-                f"= {fc.won(cost)}",
+                f"광고비 {fc.won(spend)}"
+                + (f" + 제작비 {fc.won(production)}" if production else "")
+                + f" + 쿠폰 {fc.won(coupon)} + PG {fc.won(pg_fee)} = {fc.won(cost)}",
             ),
             applied("CMP-003", f"손익 {fc.won(profit)}, ROI {_pct(roi)}"),
             applied(
@@ -167,6 +182,27 @@ def compute_result(data: dict[str, Any], repeat: dict[str, Any] | None = None) -
             applied("EXP-002"),
         ],
     }
+
+
+VIEWS_FINAL_POINT = "7d"  # 조회당 제작비는 게시 7일 조회수로만 낸다 (CMP-007)
+
+
+def view_cost(data: dict[str, Any]) -> dict[str, Any]:
+    """조회당 제작비 (CMP-007). 제작비·조회수가 없거나 7일 측정 전이면 계산하지 않고 이유를 둔다."""
+    production, views, point = (
+        data.get("production_cost_krw"),
+        data.get("views"),
+        data.get("views_point"),
+    )
+    if production is None:
+        return {"cost_per_view": None, "view_cost_status": "no_production_cost"}
+    if views is None or point is None:
+        return {"cost_per_view": None, "view_cost_status": "no_views"}
+    if point != VIEWS_FINAL_POINT:
+        return {"cost_per_view": None, "view_cost_status": "measuring"}
+    if views == 0:
+        return {"cost_per_view": None, "view_cost_status": "zero_views"}
+    return {"cost_per_view": round(production / views, 2), "view_cost_status": "measured"}
 
 
 def _pct(value: float | None) -> str:
@@ -371,6 +407,8 @@ def decide(
     today: date,
     monthly_budget: dict[str, Any] | None = None,
     started: dict[str, dict[str, Any]] | None = NO_STARTS,
+    cash_basis: str = "net",
+    reaction: Reaction = NOT_RELEVANT,
 ) -> dict[str, Any]:
     """재무 의견: 권장·줄여서 권장·권하지 않음. 집행을 막지 않는다(막는 것은 안전 관문과 사람).
 
@@ -378,6 +416,9 @@ def decide(
     확인 결과를 근거로 남긴다.
 
     `started`가 None이면 안전 관문 기록을 못 읽은 것이다. 쓴 돈을 모르니 권하지 않는다.
+
+    `reaction`은 고객지원 책별 집계로 본 고객 반응이다(`CRX-001`). 요청에 상품이 없으면 아무 규칙도
+    적용하지 않는다(기본값). 걸린 책이 있으면 책이 몇 권이든 요청당 한 번만 한도에 곱한다.
     """
     book = load_rules()
     brake, lesson_rules = book.brake, book.lessons
@@ -410,12 +451,13 @@ def decide(
         if brake.min_viable_krw < limit:  # 현금을 모르면 큰돈은 쓰지 않고, 흐름은 멈추지 않는다
             limit = brake.min_viable_krw
             limits.append(f"{detail}. 최소 금액 {fc.won(limit)}까지만 권장")
-    elif cash_net_krw <= 0:
-        detail = f"앞으로 {weeks}주 누적 순현금 {fc.won(cash_net_krw)}"
-        rejects.append(detail)
     else:
-        detail = f"앞으로 {weeks}주 누적 순현금 {fc.won(cash_net_krw)}"
-        if cash_net_krw < limit:
+        # balance: 예상 잔액 최저값 − 최소 현금(통장 잔액을 알 때), net: 누적 순현금(모를 때)
+        what = "예상 잔액 여유(최저 잔액 − 최소 현금)" if cash_basis == "balance" else "누적 순현금"
+        detail = f"앞으로 {weeks}주 {what} {fc.won(cash_net_krw)}"
+        if cash_net_krw <= 0:
+            rejects.append(detail)
+        elif cash_net_krw < limit:
             limit = cash_net_krw
             limits.append(f"{detail}까지만 권장")
     rules.append(applied("BRK-004", detail))
@@ -454,6 +496,47 @@ def decide(
             limit = cap
             limits.append(detail)
 
+    # 고객 반응: 걸린 책이 있으면 요청당 한 번만 한도에 곱한다. 못 읽었거나 판매가 적은 책은 의견을
+    # 바꾸지 않고 규칙 기록과 이유에 남긴다 (`CRX-001`)
+    notes: list[str] = []
+    if reaction.status == STATUS_NOT_RELEVANT:
+        # 상품이 없는 요청: 한도·이유는 그대로 두고 "확인했는데 해당 없음"만 적용 규칙에 남긴다
+        # (안 본 것과 구분된다, 태윤 11/17)
+        rules.append(applied("CRX-001", "요청에 상품이 없어 반영 안 함"))
+    else:
+        crx = book.customer_reaction
+        if reaction.status == STATUS_UNAVAILABLE:
+            note = "고객 반응을 못 읽어 반영하지 않음"
+            rules.append(applied("CRX-001", f"{note} ({reaction.note or '이유 모름'})"))
+            notes.append(note)
+        else:
+            if reaction.status == STATUS_FLAGGED:
+                cap = fc.rate_amount(requested, crx.limit_factor)
+                names = "; ".join(flag_text(f) for f in reaction.flagged)
+                detail = (
+                    f"{names} → 요청 금액의 {crx.limit_factor:.0%}인 {fc.won(cap)}까지 "
+                    "(걸린 책이 여럿이어도 요청당 한 번)"
+                )
+                # 다른 규칙이 이미 한도를 더 낮췄으면(cap >= limit) 한도와 이유(limits)는
+                # 바꾸지 않는다. 걸린 책은 아래 `CRX-001` 적용 규칙 기록(detail)에만 남는다
+                # (동작은 맞고 이유에는 안 나온다)
+                if cap < limit:
+                    limit = cap
+                    limits.append(detail)
+            else:
+                detail = f"걸린 책 없음 (읽은 책 {reaction.checked}권)"
+            if reaction.low_sales:
+                low = ", ".join(reaction.low_sales)
+                notes.append(f"판매 적어 비율 참고만 (판매 {crx.min_sold_qty}권 미만): {low}")
+                detail += f". 판매 적어 비율 참고만: {low}"
+            if reaction.sales_unread:
+                unread = ", ".join(reaction.sales_unread)
+                notes.append(f"판매 수량을 못 읽어 비율 반영 안 함: {unread}")
+                detail += f". 판매 수량을 못 읽어 비율 반영 안 함: {unread}"
+            if reaction.unread:
+                detail += f". 집계에 없는 상품: {', '.join(reaction.unread)}"
+            rules.append(applied("CRX-001", detail))
+
     if not rejects and limit < brake.min_viable_krw:
         rejects.append(f"권장 금액 {fc.won(limit)}이 최소 {fc.won(brake.min_viable_krw)}보다 적음")
     rules.append(applied("BRK-005"))
@@ -472,6 +555,7 @@ def decide(
     else:
         decision, reasons = "approved", ["모든 기준을 통과함"]
         advice = "요청 금액 그대로 써도 재무 기준에 걸리지 않습니다."
+    reasons = [*reasons, *notes]  # 의견을 바꾸지 않은 참고(못 읽음·판매 적음)는 이유 끝에 덧붙인다
     return {
         "campaign_id": request["campaign_id"],
         "campaign_name": request["campaign_name"],
@@ -484,8 +568,16 @@ def decide(
         "recommendation": advice,
         "applied_rules": rules,
         "cash_net_krw": cash_net_krw,
+        "cash_basis": cash_basis,
         "remaining_budget_krw": remaining,
         "open_lessons": len(open_lessons),
+        "customer_reaction": {
+            "status": reaction.status,
+            "flagged": [f.product_id for f in reaction.flagged],
+            # 값은 모두 상품 ID다. 제목은 화면이 붙인다(이유 문장에는 제목이 들어간다)
+            "low_sales": list(reaction.low_sales_ids),
+            "sales_unread": list(reaction.sales_unread_ids),
+        },
     }
 
 
@@ -499,6 +591,7 @@ def compare_with_history(
     today: date,
     monthly_budget: dict[str, Any] | None = None,
     started: dict[str, dict[str, Any]] | None = NO_STARTS,
+    cash_basis: str = "net",
 ) -> dict[str, Any]:
     """같은 요청을 실패 이력이 없을 때와 지금으로 판단해 나란히 보여 준다."""
     clean = {
@@ -509,6 +602,7 @@ def compare_with_history(
     common = {
         "reviews": reviews,
         "cash_net_krw": cash_net_krw,
+        "cash_basis": cash_basis,
         "today": today,
         "monthly_budget": monthly_budget,
         "started": started,
@@ -547,6 +641,122 @@ def budget_opinion(review: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------- 인사이트
 def _evidence(label: str, value: Any) -> dict[str, Any]:
     return {"label": label, "value": value}
+
+
+def category_view_costs(campaigns: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """콘텐츠 카테고리별 조회당 제작비 (CMP-007). 7일 조회수를 잰 캠페인만 모은다.
+
+    카테고리마다 제작비·조회수를 합해 나눈다(캠페인마다 나눈 값의 평균이 아니다).
+    `latest_production_krw`는 그 카테고리 가장 최근 캠페인의 제작비로, 다음 회차 기준이 된다.
+    측정 중인 캠페인은 `measuring`에 센다. 조회당 제작비가 싼 순서다.
+    """
+    rows: dict[str, dict[str, Any]] = {}
+    for c in sorted(campaigns.values(), key=lambda c: (c["period_to"], c["campaign_id"])):
+        category = c.get("content_category")
+        if not category:
+            continue
+        row = rows.setdefault(
+            category,
+            {
+                "content_category": category,
+                "campaigns": [],
+                "production_cost_krw": 0,
+                "views": 0,
+                "measuring": 0,
+                "latest_production_krw": None,
+                "format": None,
+            },
+        )
+        if c.get("view_cost_status") == "measuring":
+            row["measuring"] += 1
+        if c.get("cost_per_view") is None:
+            continue
+        row["campaigns"].append(c["campaign_id"])
+        row["production_cost_krw"] += c["production_cost_krw"]
+        row["views"] += c["views"]
+        row["latest_production_krw"] = c["production_cost_krw"]
+        row["format"] = c.get("format") or row["format"]
+    out = []
+    for row in rows.values():
+        views = row["views"]
+        row["cost_per_view"] = round(row["production_cost_krw"] / views, 2) if views else None
+        out.append(row)
+    return sorted(
+        out,
+        key=lambda r: (r["cost_per_view"] is None, r["cost_per_view"] or 0, r["content_category"]),
+    )
+
+
+def budget_shift(campaigns: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    """INS-005: 조회당 제작비가 싼 카테고리로 다음 회차 제작비를 옮기자는 의견. 총액은 그대로다.
+
+    재무는 의견만 낸다. 다음 회차 비중은 기획이 제안하고 사람이 정한다.
+    """
+    cfg = load_rules().insights
+    measured = [r for r in category_view_costs(campaigns) if r["cost_per_view"] is not None]
+    if len(measured) < cfg.shift_min_categories:
+        return None
+    best, worst = measured[0], measured[-1]
+    cheap, dear = best["cost_per_view"], worst["cost_per_view"]
+    if cheap <= 0 or dear < cheap * cfg.shift_min_ratio:
+        return None
+    amount = min(
+        round(best["latest_production_krw"] * cfg.shift_pct), worst["latest_production_krw"]
+    )
+    if amount <= 0:
+        return None
+    ratio = round(worst["cost_per_view"] / best["cost_per_view"], 1)
+    latest = max(best["campaigns"][-1], worst["campaigns"][-1])
+    return {
+        "insight_id": (
+            f"budget_shift:{best['content_category']}:{worst['content_category']}:{latest}"
+        ),
+        "kind": "budget_shift",
+        "severity": "info",
+        "title": (
+            f"{best['content_category']} 조회당 제작비가 {worst['content_category']}의 "
+            f"1/{ratio}입니다"
+        ),
+        "message": (
+            f"게시 7일 조회수 기준으로 {best['content_category']}는 조회 1회에 "
+            f"{best['cost_per_view']:,}원, {worst['content_category']}는 "
+            f"{worst['cost_per_view']:,}원이 들었습니다. 다음 회차 제작비를 옮기면 "
+            "같은 돈으로 조회수를 더 얻을 수 있습니다. 총 제작비는 늘리지 않습니다."
+        ),
+        "evidence": [
+            *[
+                _evidence(
+                    r["content_category"],
+                    f"제작비 {fc.won(r['production_cost_krw'])} ÷ 7일 조회수 "
+                    f"{r['views']:,}회 = 조회당 {r['cost_per_view']:,}원",
+                )
+                for r in measured
+            ],
+            _evidence("옮길 금액", fc.won(amount)),
+        ],
+        "recommendation": (
+            f"다음 회차 {best['content_category']} 제작비를 "
+            f"{fc.won(best['latest_production_krw'])} → "
+            f"{fc.won(best['latest_production_krw'] + amount)}로 올리고, "
+            f"{worst['content_category']}를 {fc.won(worst['latest_production_krw'])} → "
+            f"{fc.won(worst['latest_production_krw'] - amount)}로 줄이는 것을 기획·마케팅과 "
+            "논의하세요."
+        ),
+        "categories": measured,
+        "shift": {
+            "from": worst["content_category"],
+            "to": best["content_category"],
+            "amount_krw": amount,
+            "ratio": ratio,
+        },
+        "applied_rules": [
+            applied("CMP-007"),
+            applied(
+                "INS-005",
+                f"{ratio}배 차이 ≥ {cfg.shift_min_ratio}배 → 제작비 {cfg.shift_pct:.0%} 이동",
+            ),
+        ],
+    }
 
 
 def insights(
@@ -660,6 +870,10 @@ def insights(
                 "applied_rules": [applied("INS-003")],
             }
         )
+
+    shift = budget_shift(campaigns)
+    if shift is not None:
+        found.append(shift)
 
     if tax_pack is not None:
         due = date.fromisoformat(tax_pack["filing"]["due"])

@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 
 from ax_contracts.schemas import AgentRequest, AgentResult
 from hr_agent.clients.errors import UpstreamError, bind_meta
+from hr_agent.dept_eval import diagnosis as dept_diagnosis
 from hr_agent.dept_eval import skill as dept_judge
 from hr_agent.dept_eval import summary as dept_eval
 from hr_agent.handover import service as handover
@@ -122,6 +123,7 @@ _HANDLERS = {
     "list_open_questions": _with_services(views.list_open_questions),
     "evaluate_agents": _with_services(dept_eval.evaluate_agents),
     "judge_step_timings": _with_services(dept_judge.judge_step_timings),
+    "request_agent_diagnosis": _with_services(dept_diagnosis.request_agent_diagnosis),
     "get_roster": get_roster,
     "team_headcount": team_headcount,
     "record_org_change": record_org_change,

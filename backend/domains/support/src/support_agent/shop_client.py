@@ -1,8 +1,8 @@
 """shop-api 연결: 클레임 판정에 쓰는 주문 조회와 현금 환불 (REST).
 
-- 주문 조회 `GET /api/shop/orders/{id}`는 토큰이 필요 없다.
-  환불 `POST /api/shop/payments/{id}/refund`는 `support` 토큰만 받는다
-  (`Authorization: Bearer`, 요청자는 토큰에서 꺼낸다).
+- 모든 요청에 이 서비스의 연결 키(옛 설치는 `support` 토큰)를 붙인다(`Authorization: Bearer`).
+  주문 조회 `GET /api/shop/orders/{id}`도 붙이므로 shop-api가 `SHOP_ORDERS_PUBLIC_READ=off`여도
+  읽힌다. 환불 `POST /api/shop/payments/{id}/refund`는 고객지원 쪽 키·토큰만 받는다.
 - 주소는 `AX_SHOP_API_URL`(없으면 `http://shop-api:8010`, 템플릿 `agent_url`)이다.
 - 주문 출처는 `SUPPORT_ORDER_SOURCE`(`seed` | `shop-api`)로 정한다. 비우면 목 모드는 시드 주문,
   그 밖에는 shop-api다. 목 모드에서 실제 shop-api와 맞춰 볼 때만 `shop-api`로 둔다.
@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -241,17 +242,39 @@ SALES_PAGE_LIMIT = 1000  # 판매 서버 주문 목록 한 페이지 최대
 SALES_MAX_PAGES = 30  # 한 번에 읽는 페이지 상한 (최대 3만 주문)
 
 
+SALES_SUMMARY_CHUNK_DAYS = (
+    7  # 판매 집계를 이 일수씩 나눠 읽는다 (판매 서버가 한 번에 오래 붙잡히지 않게)
+)
+SALES_CACHE_SECONDS = 300  # 같은 기간의 판매 수량은 몇 분 동안 다시 읽지 않는다
+SALES_CACHE_MAX = 32
+_SALES_BUCKET = timedelta(
+    minutes=5
+)  # 기간 끝을 이 단위로 내려 같은 기간의 호출이 같은 열쇠가 되게 한다
+_SALES_CACHE: dict[tuple[str, datetime, datetime], tuple[float, SalesRead]] = {}
+
+
 @dataclass(frozen=True)
 class SalesRead:
     qty_by_product: dict[str, int]  # 상품 ID → 결제가 끝난 주문의 판매 수량
-    orders_scanned: int
+    orders_scanned: int | None  # 주문 목록으로 읽었을 때 읽은 주문 수 (집계로 읽었으면 None)
     complete: bool  # False면 페이지 상한·마감 때문에 끝까지 읽지 못했다 (수량이 모자란다)
+    source: str = "orders"  # "summary"(판매 집계 읽기 경로) | "orders"(주문 목록)
+
+
+def clear_sales_cache() -> None:
+    """판매 수량 캐시를 비운다 (시험·설정 바꾼 뒤)."""
+    _SALES_CACHE.clear()
 
 
 def _is_paid(data: dict[str, Any]) -> bool:
     return data.get("status") == "paid" and any(
         p.get("status") == "succeeded" for p in data.get("payments", [])
     )
+
+
+def _floor(moment: datetime) -> datetime:
+    seconds = int(_SALES_BUCKET.total_seconds())
+    return datetime.fromtimestamp(int(moment.timestamp()) // seconds * seconds, UTC)
 
 
 async def fetch_sold_qty(
@@ -263,46 +286,118 @@ async def fetch_sold_qty(
 ) -> SalesRead:
     """접수 시각이 `since` 이상 `until` 미만인 결제 끝난 주문의 상품별 판매 수량.
 
-    판매 서버 주문 목록(`GET /orders?since&until&cursor`)을 페이지로 읽는다.
-    주문 목록은 order_id 순이라
-    중간에 멈추면 최근 주문만 읽은 게 아니라 일부만 읽은 것이다.
-    `complete=False`일 때는 수량을 쓰지 않는다.
+    1) 판매 서버의 판매 집계 읽기 경로(`GET /sales-summary?group_by=product`)를 7일씩 나눠 읽는다.
+       주문을 하나씩 읽지 않아 주문이 많아도 판매 서버를 오래 붙잡지 않는다.
+    2) 그 경로가 없는 옛 판매 서버(404)면 주문 목록(`GET /orders`)을 페이지로 읽는다. 주문 목록은
+       order_id 순이라 중간에 멈추면 최근 주문만 읽은 게 아니라 일부만 읽은 것이다.
+
+    기간 끝을 5분 단위로 내려 같은 기간의 호출이 같은 열쇠가 되게 하고, 끝까지 읽은 결과는 몇 분
+    캐시한다(요청마다 판매 서버를 다시 읽지 않는다). `complete=False`일 때는 수량을 쓰지 않는다.
     연결 실패·거절은 `ShopError`다.
     """
+    span = until - since
+    until_q = _floor(until)
+    since_q = until_q - span
+    key = (_url("/sales"), since_q, until_q)
+    now_mono = time.monotonic()
+    hit = _SALES_CACHE.get(key)
+    if hit is not None and now_mono - hit[0] < SALES_CACHE_SECONDS:
+        return hit[1]
+    async with shared_client() as client:  # 집계 시도와 주문 목록 읽기가 클라이언트 하나를 쓴다
+        read = await _read_summary(client, since_q, until_q, stop_at=stop_at)
+        if read is None:  # 판매 집계 읽기 경로가 없다(옛 판매 서버): 주문 목록으로 읽는다
+            read = await _read_order_list(
+                client, since_q, until_q, stop_at=stop_at, max_pages=max_pages
+            )
+    if read.complete:
+        if len(_SALES_CACHE) >= SALES_CACHE_MAX:
+            _SALES_CACHE.pop(min(_SALES_CACHE, key=lambda k: _SALES_CACHE[k][0]), None)
+        _SALES_CACHE[key] = (time.monotonic(), read)
+    return read
+
+
+def _iso(moment: datetime) -> str:
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+async def _read_summary(
+    client: httpx.AsyncClient, since: datetime, until: datetime, *, stop_at: datetime | None
+) -> SalesRead | None:
+    """판매 집계 읽기 경로로 상품별 `gross_qty`(결제가 끝난 주문의 판매 수량)를 합친다.
+
+    경로가 없으면(404·405) None을 돌려줘 주문 목록으로 읽게 한다. 그 밖의 거절·연결 실패는
+    `ShopError`다. 마감을 넘기면 끝까지 읽지 못한 것으로 돌려준다.
+    """
+    qty: dict[str, int] = {}
+    chunk = timedelta(days=SALES_SUMMARY_CHUNK_DAYS)
+    start = since
+    while start < until:
+        end = min(start + chunk, until)
+        timeout = TIMEOUT_SECONDS
+        if stop_at is not None:
+            remaining = (stop_at - datetime.now(UTC)).total_seconds()
+            if remaining <= 0:
+                return SalesRead(qty, None, False, "summary")
+            timeout = min(TIMEOUT_SECONDS, max(remaining, 0.5))
+        response = await _send(
+            "GET",
+            "/sales-summary",
+            params={"from": _iso(start), "to": _iso(end), "group_by": "product"},
+            client=client,
+            timeout=timeout,
+        )
+        if response.status_code in (404, 405):
+            return None
+        if response.status_code != 200:
+            raise _error(response)
+        for row in response.json()["data"]["rows"]:
+            product_id = row.get("product_id")
+            if product_id:
+                qty[product_id] = qty.get(product_id, 0) + int(row["gross_qty"])
+        start = end
+    return SalesRead(qty, None, True, "summary")
+
+
+async def _read_order_list(
+    client: httpx.AsyncClient,
+    since: datetime,
+    until: datetime,
+    *,
+    stop_at: datetime | None,
+    max_pages: int,
+) -> SalesRead:
+    """주문 목록(`GET /orders?since&until&cursor`)을 페이지로 읽어 상품별 판매 수량을 센다."""
     qty: dict[str, int] = {}
     scanned = 0
     cursor: str | None = None
-    async with shared_client() as client:
-        for _ in range(max_pages):
-            timeout = TIMEOUT_SECONDS
-            if stop_at is not None:
-                remaining = (stop_at - datetime.now(UTC)).total_seconds()
-                if remaining <= 0:
-                    return SalesRead(qty, scanned, False)
-                timeout = min(
-                    TIMEOUT_SECONDS, max(remaining, 0.5)
-                )  # 페이지 하나가 마감을 넘기지 않게
-            params: dict[str, Any] = {
-                "since": since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "until": until.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "limit": SALES_PAGE_LIMIT,
-            }
-            if cursor:
-                params["cursor"] = cursor
-            response = await _send("GET", "/orders", params=params, client=client, timeout=timeout)
-            if response.status_code != 200:
-                raise _error(response)
-            body = response.json()
-            for order in body["data"]:
-                scanned += 1
-                if not _is_paid(order):
-                    continue
-                for item in order.get("items", []):
-                    if item.get("product_id"):
-                        qty[item["product_id"]] = qty.get(item["product_id"], 0) + int(item["qty"])
-            cursor = (body.get("meta") or {}).get("next_cursor")
-            if not cursor:
-                return SalesRead(qty, scanned, True)
+    for _ in range(max_pages):
+        timeout = TIMEOUT_SECONDS
+        if stop_at is not None:
+            remaining = (stop_at - datetime.now(UTC)).total_seconds()
+            if remaining <= 0:
+                return SalesRead(qty, scanned, False)
+            timeout = min(TIMEOUT_SECONDS, max(remaining, 0.5))  # 페이지 하나가 마감을 넘기지 않게
+        params: dict[str, Any] = {
+            "since": since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "until": until.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "limit": SALES_PAGE_LIMIT,
+        }
+        if cursor:
+            params["cursor"] = cursor
+        response = await _send("GET", "/orders", params=params, client=client, timeout=timeout)
+        if response.status_code != 200:
+            raise _error(response)
+        body = response.json()
+        for order in body["data"]:
+            scanned += 1
+            if not _is_paid(order):
+                continue
+            for item in order.get("items", []):
+                if item.get("product_id"):
+                    qty[item["product_id"]] = qty.get(item["product_id"], 0) + int(item["qty"])
+        cursor = (body.get("meta") or {}).get("next_cursor")
+        if not cursor:
+            return SalesRead(qty, scanned, True)
     return SalesRead(qty, scanned, False)
 
 

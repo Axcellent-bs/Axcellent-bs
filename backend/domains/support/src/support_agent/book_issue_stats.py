@@ -91,6 +91,7 @@ def _paid_share(claim: Claim, mine: list[ClaimLine]) -> int:
 
 def _claim_row(product_id: str, claims: list[Claim]) -> BookIssueRow:
     by_type: Counter[str] = Counter()
+    by_reason: Counter[str] = Counter()
     defect = 0
     claim_qty = 0
     return_qty = 0
@@ -100,6 +101,7 @@ def _claim_row(product_id: str, claims: list[Claim]) -> BookIssueRow:
         mine = [line for line in claim.lines if line.product_id == product_id]
         title = mine[0].title  # 오래된 것부터 돌므로 마지막에 가장 최근 제목이 남는다
         by_type[claim.type] += 1
+        by_reason[claim.reason] += 1
         claim_qty += sum(line.requested_qty for line in mine)
         if claim.reason in DEFECT_REASONS:
             defect += 1
@@ -112,6 +114,7 @@ def _claim_row(product_id: str, claims: list[Claim]) -> BookIssueRow:
         title=title,
         claim_count=len(claims),
         claims_by_type=dict(by_type),
+        claims_by_reason=dict(by_reason),
         defect_claim_count=defect,
         claim_qty=claim_qty,
         return_qty=return_qty,
@@ -135,7 +138,7 @@ def _reason(row: BookIssueRow) -> str:
         parts.append(f"문의 {row.inquiry_count}건(주문 단위{partial})")
     if row.claim_rate is not None and row.sold_qty:
         parts.append(f"판매 {row.sold_qty}권 중 {row.claim_qty}권 클레임({row.claim_rate:.1%})")
-    return ", ".join(parts) or "기록 없음"
+    return ", ".join(parts) or "기간 안 클레임 없음"
 
 
 def _spread_inquiries(
@@ -201,6 +204,22 @@ def book_issue_report(
         for product_id in ids:
             by_product.setdefault(product_id, []).append(claim)
     rows: dict[str, BookIssueRow] = {pid: _claim_row(pid, cs) for pid, cs in by_product.items()}
+    wanted = set(query.product_ids) if query.product_ids else None
+    for product_id in sorted(wanted or ()):
+        # 상품 ID를 짚어 물었으면 클레임이 없어도 그 상품 행을 돌려준다(불만 없는 책이 "집계에
+        # 없음"으로 빠지지 않게). 문의·판매 수량은 아래에서 읽은 만큼만 채운다
+        rows.setdefault(
+            product_id,
+            BookIssueRow(
+                product_id=product_id,
+                title="",
+                claim_count=0,
+                defect_claim_count=0,
+                return_qty=0,
+                refund_cash_total=0,
+                reason="",
+            ),
+        )
 
     inquiry_by_product: dict[str, _Inquiry] = {}
     not_attributed: int | None = None
@@ -250,12 +269,17 @@ def book_issue_report(
                 no_sales_rate += 1
             rows[product_id] = row.model_copy(update={"sold_qty": sold_qty, "claim_rate": rate})
 
-    wanted = set(query.product_ids) if query.product_ids else None
     shown = [
         row.model_copy(update={"reason": _reason(row)})
         for row in rows.values()
-        if (wanted is None or row.product_id in wanted)
-        and (row.claim_count >= query.min_claims or (row.inquiry_count or 0) >= query.min_inquiries)
+        if (wanted is not None and row.product_id in wanted)  # 짚어 물은 상품은 모두 보인다
+        or (
+            wanted is None
+            and (
+                row.claim_count >= query.min_claims
+                or (row.inquiry_count or 0) >= query.min_inquiries
+            )
+        )
     ]
     shown.sort(
         key=lambda r: (-r.claim_count, -r.defect_claim_count, -(r.inquiry_count or 0), r.product_id)
@@ -271,6 +295,16 @@ def book_issue_report(
         )
         if no_sales_rate:
             missing.append(f"기간 안 판매가 없어 비율을 내지 못한 상품 {no_sales_rate}개")
+        silent = sum(
+            1
+            for r in shown
+            if r.claim_count == 0 and not r.claim_qty and not r.sold_qty and not r.inquiry_count
+        )
+        if wanted and silent:
+            missing.append(
+                f"짚어 물은 상품 중 기간 안 판매·클레임·문의가 모두 없는 상품 {silent}개 "
+                "(없는 상품 ID일 수도 있다)"
+            )
     if without_product:
         missing.append(f"상품 ID가 없어 상품별로 세지 못한 클레임 {without_product}건")
     if inquiry_orders is None:
@@ -302,7 +336,7 @@ def book_issue_report(
         period=query.period,
         period_start=start.strftime("%Y-%m-%dT%H:%M:%SZ"),
         period_end=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        items=shown[: query.limit],
+        items=shown[: max(query.limit, len(wanted or ()))],  # 짚어 물은 상품은 잘리지 않는다
         total_claims=len(in_period),
         claims_without_product=without_product,
         sales_read=sold is not None,

@@ -18,6 +18,7 @@ from ax_contracts.schemas import TENANT_ID_DEFAULT, UtcDatetime
 Dept = Literal[
     "planning",
     "hr",
+    "archive",  # 결정 기록(아카이브 AI, decisions 8114). 인사에서 나뉨 (11/16 #1131)
     "support",
     "marketing",
     "data",
@@ -34,6 +35,7 @@ Dept = Literal[
 DEPT_NAME: dict[str, str] = {
     "planning": "기획",
     "hr": "인사",
+    "archive": "아카이브",
     "support": "고객지원",
     "marketing": "마케팅",
     "data": "데이터분석",
@@ -235,6 +237,15 @@ class CodingRun(DomainModel):
     waiting_for: list[str] = Field(default_factory=list)  # 기다리는 앞 작업 id
     # 머지가 충돌로 실패함: 다시 시도하면 PR을 닫고 최신 코드로 다시 쓴다
     merge_conflict: bool = False
+    # 사람이 직접 고른 고칠 파일. 있으면 AI가 파일을 고르지 않고 이 파일을 바로 쓴다
+    picked: list[str] = Field(default_factory=list)
+    # 잠깐 생긴 오류(AI 응답·GitHub 호출 한도·머지 충돌)로 멈춤: 에이전트가 잠시 뒤 다시 한다.
+    # auto_retries는 에이전트가 스스로 다시 한 횟수 (사람이 다시 시도하면 0부터)
+    transient: bool = False
+    auto_retries: int = 0
+    # 바뀐 파일로 정한 위험도 (dev_agent.risk): low·medium·high와 이유 한 줄
+    risk: Literal["low", "medium", "high"] | None = None
+    risk_why: str | None = None
     # 이 작업이 지금까지 쓴 LLM 호출·토큰 (다시 시도해도 이어서 센다). 실행 한 번 상한은 coder
     llm_calls: int = 0
     llm_tokens: int = 0
@@ -595,12 +606,18 @@ class ProposalPast(DomainModel):
 class Proposal(DomainModel):
     id: str  # PROP-n
     title: str
-    from_: Literal["data", "marketing"] = Field(alias="from")
+    from_: Literal["data", "marketing", "finance"] = Field(alias="from")
     skill: str  # 인사이트를 낸 skill
     insight_id: str | None = None  # 보낸 쪽 인사이트 id (id 사슬의 시작)
     insight: str  # 받은 인사이트 (무엇을 발견했나, 보낸 쪽 문장)
     facts: list[ProposalFact] = Field(default_factory=list)  # 데이터 근거 (보낸 쪽 값)
     products: list[str] = Field(default_factory=list)
+    # products와 같은 순서의 회사 상품 ID (데이터분석 InsightProduct, 마케팅 브리프로 넘긴다).
+    # 11/16 이전 상태 파일에는 없다
+    product_ids: list[str] = Field(default_factory=list)
+    # 콘텐츠 카테고리(예: 아재개그)·형식(shorts·reels). 인사이트에서 받아 brief로 넘긴다 (11/17)
+    content_category: str | None = None
+    content_format: Literal["shorts", "reels"] | None = None
     audience: str | None = None  # 타깃 연령대 (데이터분석)
     shorts_format: str | None = None  # 잘 맞는 숏츠 형식 (데이터분석)
     body_md: str | None = None  # 보낸 쪽 설명 (외부 문구라 지시로 쓰지 않는다)

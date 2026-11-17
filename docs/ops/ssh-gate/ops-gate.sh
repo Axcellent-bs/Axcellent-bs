@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ax-gate — 서버 위임 게이트 (초안, 일반 구현. 구체 서버 값은 비공개 정책 파일에서 읽는다)
+# ax-gate — 서버 위임 게이트 (일반 구현. 구체 서버 값은 비공개 정책 파일에서 읽는다)
 #
 # 설치 위치: /usr/local/sbin/ax-gate (root:root 755)
 #
@@ -22,8 +22,10 @@ set -Eeuo pipefail
 IFS=$' \t\n'
 export LC_ALL=C
 
-readonly GATE_VERSION="0.2.0-draft"
-readonly ALL_ACTIONS=(status lock unlock nginx-restore nginx-add-location nginx-approve-location deploy-bundle restart-backend rollback-bundle record-pr)
+readonly GATE_VERSION="0.3.0"
+readonly ALL_ACTIONS=(status lock unlock nginx-restore nginx-add-location nginx-approve-location deploy-bundle restart-backend rollback-bundle record-pr autodeploy-pause autodeploy-resume)
+# 기본 계정(_default)에 열 수 없는 동작. 정책 _default 에 들어 있으면 정책 로드가 실패한다(전체 거부).
+readonly NOT_FOR_DEFAULT=(autodeploy-pause autodeploy-resume)
 # 실행 전에 팀 채널 알림을 올렸다고 확인(--announced)해야 하는 동작
 readonly NEED_ANNOUNCE=(nginx-restore nginx-approve-location deploy-bundle restart-backend rollback-bundle)
 
@@ -75,6 +77,8 @@ readonly RE_REASON='^[A-Za-z0-9][A-Za-z0-9_.,-]{0,79}$'
 readonly RE_UNTIL='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$'
 readonly RE_FOLDER='^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$'
 readonly RE_LOCNAME='^[a-z0-9][a-z0-9-]{0,39}$'
+readonly RE_TARGET='^[a-z0-9][a-z0-9-]{0,23}$'    # 정책 [nginx_targets] 의 대상 이름
+readonly RE_PROFILE='^[a-z0-9][a-z0-9-]{0,23}$'   # 정책 [location_profiles] 의 프로필 이름
 readonly RE_METHOD='^(POST|PUT|PATCH|DELETE)$'
 # 1차 거름망일 뿐이다. 진짜 검사는 nginx_location_check.py 가 한다.
 readonly RE_LOCREGEX='^\^/[]A-Za-z0-9_/().|\\[^+-]{1,198}\$$'
@@ -223,6 +227,35 @@ load_policy() {
     deny "policy-syntax" "${RC_CONFIG}" "정책 파일 ${n}번째 줄을 해석할 수 없다(전체 거부)"
   done < "${POLICY_FILE}"
   validate_self_approve
+  validate_autodeploy
+  validate_restart
+}
+
+# [restart] backup_keep: 없으면 백업을 지우지 않는다. 있으면 2 이상 정수만(이번 세트와 직전 세트는 늘 남겨야 한다).
+validate_restart() {
+  local v="${POLICY[restart.backup_keep]-}"
+  [[ -n "${POLICY[restart.backup_keep]+x}" ]] || return 0
+  if [[ ! "${v}" =~ ^[1-9][0-9]{0,8}$ ]] || (( v < 2 )); then
+    deny "policy-value" "${RC_CONFIG}" "정책 restart.backup_keep 은 2 이상의 정수여야 한다(없애면 정리 안 함)"
+  fi
+}
+
+# [autodeploy]: 자동 배포 정지 표시 파일. 모르는 키가 있으면 정책 로드 실패(전체 거부)다.
+# 정지·재개 동작은 권한자용이다. [permissions] _default 에 들어 있으면 정책 로드 실패(전체 거부)다.
+validate_autodeploy() {
+  local k a
+  for k in "${!POLICY[@]}"; do
+    [[ "${k}" == autodeploy.* ]] || continue
+    case "${k}" in
+      autodeploy.pause_file | autodeploy.default_hours | autodeploy.max_hours) ;;
+      *) deny "policy-value" "${RC_CONFIG}" "정책 [autodeploy] 에 알 수 없는 키가 있다(전체 거부)" ;;
+    esac
+  done
+  for a in "${NOT_FOR_DEFAULT[@]}"; do
+    if policy_list_has "permissions._default" "${a}"; then
+      deny "policy-value" "${RC_CONFIG}" "정책 [permissions] _default 에 ${a} 를 둘 수 없다(권한자 계정에만 적는다. 전체 거부)"
+    fi
+  done
 }
 
 # [self_approve] accounts: 제안자 본인이 자기 제안을 승인해도 되는 계정 목록(기본은 비어 있음 = 금지).
@@ -270,6 +303,19 @@ policy_items() {
   done <<< "${POLICY[${k}]}"
 }
 
+# 정책 한 구역의 키 이름들(정규식에 맞는 것만, 글자 순서) → REPLY (쉼표로 구분)
+policy_section_names() {
+  local sec="$1" re="$2" k out=""
+  local -a keys=()
+  mapfile -t keys < <(printf '%s\n' "${!POLICY[@]}" | sort)
+  for k in "${keys[@]}"; do
+    if [[ "${k}" == "${sec}".* && "${k#"${sec}".}" =~ ${re} ]]; then
+      out+="${out:+, }${k#"${sec}".}"
+    fi
+  done
+  REPLY="${out}"
+}
+
 policy_uint() { # 키 기본값 → REPLY
   local k="$1" def="$2"
   REPLY="${POLICY[${k}]-${def}}"
@@ -282,85 +328,219 @@ policy_str() { # 키 정규식 → REPLY. 없거나 형식이 틀리면 실패
   [[ "${REPLY}" =~ ${re} ]] || step_fail "config" "${RC_CONFIG}" "정책 ${k} 가 없거나 형식이 틀리다"
 }
 
+# 이 계정에 허용된 동작(게이트가 아는 동작만, 정해진 순서로) → REPLY (띄어쓰기로 구분)
+allowed_actions() {
+  local pk="permissions.${KEY}" a out=""
+  [[ -n "${POLICY[${pk}]+x}" ]] || pk="permissions._default"
+  for a in "${ALL_ACTIONS[@]}"; do
+    if policy_list_has "${pk}" "${a}"; then
+      out+="${out:+ }${a}"
+    fi
+  done
+  REPLY="${out}"
+}
+
 check_permission() {
   local pk="permissions.${KEY}"
   [[ -n "${POLICY[${pk}]+x}" ]] || pk="permissions._default"
   if ! policy_list_has "${pk}" "${ACTION}"; then
-    deny "not-permitted" "${RC_PERM}" "계정 ${KEY} 에게 ${ACTION} 권한이 없다"
+    allowed_actions
+    deny "not-permitted" "${RC_PERM}" "계정 ${KEY} 에게 ${ACTION} 권한이 없다. 이 계정에 허용된 동작: ${REPLY:-없음} (권한이 필요하면 권한자에게 요청한다)"
   fi
 }
 
 # ---------------------------------------------------------------------------
 # 인자 검증 (앞단·뒷단 공통)
 # ---------------------------------------------------------------------------
-usage() {
-  cat >&2 <<'EOF'
-ax-gate 사용법 (ssh <내 계정>@<서버> <동작> ...)
-  status
-  lock <사유> [해제시각 YYYY-MM-DDTHH:MM]     사유는 영어·숫자·_.,- 만(띄어쓰기 대신 -)
-  unlock
-  nginx-restore <백업폴더명>
-  nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식>   제안만 한다(바로 적용되지 않는다)
-  nginx-approve-location <이름> <확인값 12자>                  제안자와 다른 권한자가 승인하면 적용된다
-  deploy-bundle <SHA>
-  restart-backend <SHA> --ack-data-loss
-  rollback-bundle <SHA>
-  record-pr <참조: 백업폴더명 또는 SHA> <PR번호>               감사 로그에 PR 번호를 남긴다
-맨 끝에 붙일 수 있는 것(순서 무관):
+# 동작별 형식 한 줄 → REPLY. 사용법·help·오류 안내가 같은 글을 쓴다.
+action_format() {
+  case "$1" in
+    status) REPLY="status" ;;
+    lock) REPLY="lock <사유> [해제시각 YYYY-MM-DDTHH:MM]" ;;
+    unlock) REPLY="unlock" ;;
+    nginx-restore) REPLY="nginx-restore <백업폴더명>" ;;
+    nginx-add-location) REPLY="nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식> [프로필]" ;;
+    nginx-approve-location) REPLY="nginx-approve-location <이름> <확인값 12자>" ;;
+    deploy-bundle) REPLY="deploy-bundle <SHA>" ;;
+    restart-backend) REPLY="restart-backend <SHA> --ack-data-loss" ;;
+    rollback-bundle) REPLY="rollback-bundle <SHA>" ;;
+    record-pr) REPLY="record-pr <참조: 백업폴더명 또는 SHA> <PR번호>" ;;
+    autodeploy-pause) REPLY="autodeploy-pause <사유> [재개시각 YYYY-MM-DDTHH:MM]" ;;
+    autodeploy-resume) REPLY="autodeploy-resume" ;;
+    help) REPLY="help [동작]" ;;
+    *) REPLY="" ;;
+  esac
+}
+
+# 동작별 설명 한 줄 → REPLY
+action_note() {
+  case "$1" in
+    status) REPLY="읽기 전용 점검" ;;
+    lock) REPLY="배포 금지 잠금. 사유는 영어·숫자·_.,- 만(띄어쓰기 대신 -)" ;;
+    unlock) REPLY="잠금 해제" ;;
+    nginx-restore) REPLY="nginx 설정을 백업으로 되돌린다" ;;
+    nginx-add-location) REPLY="새 쓰기 경로 제안만 한다(바로 적용되지 않는다). 프로필은 정책에 있는 이름만(status 에 나온다). 대상 파일은 고를 수 없다" ;;
+    nginx-approve-location) REPLY="제안자와 다른 권한자가 승인하면 적용된다" ;;
+    deploy-bundle) REPLY="번들 배포. 지금 서버 코드보다 앞선 커밋만" ;;
+    restart-backend) REPLY="서비스 재시작. 서버 레포 HEAD 가 그 SHA 여야 한다" ;;
+    rollback-bundle) REPLY="번들을 그 SHA 배포 직전으로 되돌린다" ;;
+    record-pr) REPLY="감사 로그에 PR 번호를 남긴다" ;;
+    autodeploy-pause) REPLY="자동 배포를 재개시각까지 멈춘다(정지 표시 파일만 쓴다). 사유는 영어·숫자·_.,- 만" ;;
+    autodeploy-resume) REPLY="자동 배포를 지금 재개한다" ;;
+    help) REPLY="내 계정에 허용된 동작과 형식을 본다(서버를 바꾸지 않는다)" ;;
+    *) REPLY="" ;;
+  esac
+}
+
+usage_flags() {
+  cat <<'EOF'
+동작 뒤 어디에든 붙일 수 있는 것(순서 무관):
   --dry-run     실제로 바꾸지 않고 할 일만 보여 준다
   --announced   팀 채널에 알림 한 줄(되돌리는 방법 포함)을 올렸다는 확인. 바꾸는 동작에는 필수
   pr=<번호>     관련 PR 번호를 감사 로그에 남긴다
 EOF
 }
 
+usage() {
+  local a fmt
+  {
+    printf 'ax-gate 사용법 (ssh <내 계정>@<서버> <동작> ...). 동작은 맨 앞에 적는다\n'
+    for a in help "${ALL_ACTIONS[@]}"; do
+      action_format "${a}"
+      fmt="${REPLY}"
+      action_note "${a}"
+      printf '  %s\n      %s\n' "${fmt}" "${REPLY}"
+    done
+    usage_flags
+  } >&2
+}
+
+# 모르는 동작에 비슷한 동작을 제안한다 → REPLY (없으면 빈 글).
+# 제안에는 게이트가 아는 동작 이름만 들어간다. 받은 글은 출력하지 않는다.
+suggest_actions() {
+  local cand="${1,,}" a w part hit out="" n=0
+  local -a words=() parts=()
+  REPLY=""
+  cand="${cand//_/-}"
+  [[ "${cand}" =~ ^[a-z?-][a-z-]{0,31}$ ]] || return 0
+  case "${cand}" in
+    -h | --help | usage | "?" | man | commands | list) REPLY="help"; return 0 ;;
+  esac
+  IFS='-' read -r -a words <<< "${cand}"
+  for a in help "${ALL_ACTIONS[@]}"; do
+    IFS='-' read -r -a parts <<< "${a}"
+    hit=0
+    # 낱말 단위로만 견준다(앞부분이 같을 때). 글자 조각이 우연히 겹치는 것은 제안하지 않는다.
+    for w in "${words[@]}"; do
+      (( ${#w} >= 3 )) || continue
+      for part in "${parts[@]}"; do
+        if [[ "${part}" == "${w}"* || "${w}" == "${part}"* ]]; then
+          hit=1
+        fi
+      done
+    done
+    if (( hit )); then
+      out+="${out:+, }${a}"
+      n=$((n + 1))
+    fi
+    (( n < 4 )) || break
+  done
+  REPLY="${out}"
+}
+
+# 인자 개수가 틀렸을 때: 그 동작의 형식 한 줄을 같이 보여 준다.
+bad_args() {
+  local a extra=""
+  for a in "${ARGS[@]}"; do
+    if [[ "${a}" == --* && "${a}" != "--ack-data-loss" ]]; then
+      extra=" 모르는 옵션이 있다(쓸 수 있는 것: --dry-run --announced --ack-data-loss pr=<번호>)."
+    fi
+  done
+  action_format "${ACTION}"
+  deny "bad-args" "${RC_USAGE}" "인자 개수가 맞지 않는다.${extra} 형식: ${REPLY}"
+}
+
+# 정규식이 1차 거름망에서 걸렸을 때 흔한 원인을 짚어 준다(받은 정규식은 출력하지 않는다).
+bad_regex() {
+  local rx="$1" hint=""
+  if [[ "${rx}" == *"{"* || "${rx}" == *"}"* ]]; then
+    hint+=" 중괄호 반복({8} 등)은 쓸 수 없다. [0-9a-f]{8} 대신 [0-9a-f]+ 처럼 허용 묶음을 쓴다."
+  fi
+  if [[ "${rx}" == *"'"* || "${rx}" == *'"'* ]]; then
+    hint+=" 따옴표가 들어왔다. 정규식만 따로 감싸지 말고 명령 전체를 작은따옴표 한 쌍으로 감싼다."
+  fi
+  if [[ "${rx}" == *"*"* || "${rx}" == *"?"* ]]; then
+    hint+=" * 와 ? 는 쓸 수 없다. 가변 부분은 [^/]+ 로 적는다."
+  fi
+  if [[ "${rx}" != "^/"* || "${rx}" != *"$" ]]; then
+    hint+=" ^/ 로 시작하고 \$ 로 끝나야 한다."
+  fi
+  deny "bad-regex" "${RC_USAGE}" "정규식에 쓸 수 없는 글자가 있거나 ^/...\$ 꼴이 아니다.${hint} 쓸 수 있는 묶음: [^/]+ [0-9]+ [0-9a-f]+ [0-9a-f-]+ [a-z0-9-]+ [A-Za-z0-9_-]+"
+}
+
 validate_args() {
-  local n="${#ARGS[@]}" ok=0 a
+  local n="${#ARGS[@]}" ok=0 a raw
   for a in "${ALL_ACTIONS[@]}"; do
     [[ "${a}" == "${ACTION}" ]] && ok=1
   done
   if (( ! ok )); then
+    raw="${ACTION}"
     [[ "${ACTION}" =~ ${RE_ACTION} ]] || ACTION="invalid"
     usage
-    deny "unknown-action" "${RC_USAGE}" "허용 목록에 없는 동작이다"
+    suggest_actions "${raw}"
+    if [[ -n "${REPLY}" ]]; then
+      deny "unknown-action" "${RC_USAGE}" "허용 목록에 없는 동작이다. 비슷한 동작: ${REPLY}"
+    fi
+    deny "unknown-action" "${RC_USAGE}" "허용 목록에 없는 동작이다. help 로 내 계정에 허용된 동작을 본다"
   fi
   case "${ACTION}" in
-    status | unlock)
-      (( n == 0 )) || deny "bad-args" "${RC_USAGE}" "${ACTION} 은 인자를 받지 않는다"
+    status | unlock | autodeploy-resume)
+      (( n == 0 )) || bad_args
+      ;;
+    autodeploy-pause)
+      (( n == 1 || n == 2 )) || bad_args
+      [[ "${ARGS[0]}" =~ ${RE_REASON} ]] || deny "bad-reason" "${RC_USAGE}" "사유는 영어·숫자·_.,- 만, 80자 이하"
+      if (( n == 2 )); then
+        [[ "${ARGS[1]}" =~ ${RE_UNTIL} ]] || deny "bad-until" "${RC_USAGE}" "재개시각은 YYYY-MM-DDTHH:MM"
+      fi
       ;;
     lock)
-      (( n == 1 || n == 2 )) || deny "bad-args" "${RC_USAGE}" "lock <사유> [해제시각]"
+      (( n == 1 || n == 2 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_REASON} ]] || deny "bad-reason" "${RC_USAGE}" "사유는 영어·숫자·_.,- 만, 80자 이하"
       if (( n == 2 )); then
         [[ "${ARGS[1]}" =~ ${RE_UNTIL} ]] || deny "bad-until" "${RC_USAGE}" "해제시각은 YYYY-MM-DDTHH:MM"
       fi
       ;;
     nginx-restore)
-      (( n == 1 )) || deny "bad-args" "${RC_USAGE}" "nginx-restore <백업폴더명>"
+      (( n == 1 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_FOLDER} && "${ARGS[0]}" != *..* ]] ||
         deny "bad-folder" "${RC_USAGE}" "백업 폴더 이름이 잘못됐다"
       ;;
     nginx-add-location)
-      (( n == 3 )) || deny "bad-args" "${RC_USAGE}" "nginx-add-location <이름> <메서드> <정규식>"
+      (( n == 3 || n == 4 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_LOCNAME} ]] || deny "bad-name" "${RC_USAGE}" "이름은 영어 소문자·숫자·- 만"
       [[ "${ARGS[1]}" =~ ${RE_METHOD} ]] || deny "bad-method" "${RC_USAGE}" "메서드는 POST|PUT|PATCH|DELETE"
-      [[ "${ARGS[2]}" =~ ${RE_LOCREGEX} ]] || deny "bad-regex" "${RC_USAGE}" "정규식에 쓸 수 없는 글자가 있거나 ^/...$ 꼴이 아니다"
+      [[ "${ARGS[2]}" =~ ${RE_LOCREGEX} ]] || bad_regex "${ARGS[2]}"
+      if (( n == 4 )); then
+        [[ "${ARGS[3]}" =~ ${RE_PROFILE} ]] || deny "bad-profile" "${RC_USAGE}" "프로필 이름은 영어 소문자·숫자·- 만(정책에 있는 이름. status 의 \"location 프로필\")"
+      fi
       ;;
     nginx-approve-location)
-      (( n == 2 )) || deny "bad-args" "${RC_USAGE}" "nginx-approve-location <이름> <확인값 12자>"
+      (( n == 2 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_LOCNAME} ]] || deny "bad-name" "${RC_USAGE}" "이름은 영어 소문자·숫자·- 만"
       [[ "${ARGS[1]}" =~ ${RE_DIGEST} ]] || deny "bad-digest" "${RC_USAGE}" "확인값은 status 에 나온 16진수 12자"
       ;;
     record-pr)
-      (( n == 2 )) || deny "bad-args" "${RC_USAGE}" "record-pr <참조> <PR번호>"
+      (( n == 2 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_FOLDER} && "${ARGS[0]}" != *..* ]] || deny "bad-ref" "${RC_USAGE}" "참조는 백업 폴더명이나 SHA"
       [[ "${ARGS[1]}" =~ ${RE_PR} ]] || deny "bad-pr" "${RC_USAGE}" "PR 번호는 숫자"
       ;;
     deploy-bundle | rollback-bundle)
-      (( n == 1 )) || deny "bad-args" "${RC_USAGE}" "${ACTION} <SHA>"
+      (( n == 1 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_SHA} ]] || deny "bad-sha" "${RC_USAGE}" "SHA 는 16진수 소문자 7~40자"
       ;;
     restart-backend)
-      (( n == 2 )) || deny "bad-args" "${RC_USAGE}" "restart-backend <SHA> --ack-data-loss"
+      (( n == 2 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_SHA} ]] || deny "bad-sha" "${RC_USAGE}" "SHA 는 16진수 소문자 7~40자"
       [[ "${ARGS[1]}" == "--ack-data-loss" ]] ||
         deny "no-ack" "${RC_USAGE}" "재시작하면 메모리에만 있는 상태가 지워진다. 알고 한다면 --ack-data-loss 를 붙인다"
@@ -457,45 +637,257 @@ lock_describe() {
 deny_if_locked() {
   if lock_active; then
     lock_describe >&2
-    deny "locked" "${RC_LOCKED}" "배포 금지 잠금 중이라 읽기(status)와 unlock 만 된다"
+    deny "locked" "${RC_LOCKED}" "배포 금지 잠금 중이라 읽기(status)와 unlock, 자동 배포 정지(autodeploy-pause)만 된다"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# 자동 배포 정지 표시 파일 (정책 [autodeploy] pause_file)
+# 게이트는 이 파일 하나만 쓴다. 자동 배포를 돌리는 쪽(서버의 스크립트)이 이 파일을 읽고 건너뛴다.
+# 게이트는 자동 배포의 타이머·서비스·스크립트를 건드리지 않는다. 재개는 파일을 지우지 않고
+# 재개 시각을 지금으로 덮어쓴다(게이트에 지우는 동작을 두지 않는다).
+# ---------------------------------------------------------------------------
+A_KEY="" A_REASON="" A_UNTIL="" A_EPOCH="" A_RESUMED=""
+
+autodeploy_file() { # → REPLY (정지 표시 파일 경로). 정책에 없거나 쓸 수 없는 자리면 실패
+  local f="${POLICY[autodeploy.pause_file]-}"
+  path_ok "${f}" ||
+    step_fail "config-path" "${RC_CONFIG}" "정책 [autodeploy] pause_file 이 없거나 경로가 아니다(설치 때 채워야 한다)"
+  # 게이트 자신의 파일(정책·잠금·감사 로그)이나 그 폴더 밖 임의 파일을 덮어쓰지 않게 이름을 고정한다.
+  [[ "${f##*/}" == "autodeploy.pause" ]] ||
+    step_fail "config-path" "${RC_CONFIG}" "정책 [autodeploy] pause_file 의 파일 이름은 autodeploy.pause 여야 한다"
+  REPLY="${f}"
+}
+
+autodeploy_read() { # 파일 → 0 읽음, 1 없음, 2 깨짐
+  local f="$1" line
+  A_KEY="" A_REASON="" A_UNTIL="" A_EPOCH="" A_RESUMED=""
+  [[ -e "${f}" || -L "${f}" ]] || return 1
+  [[ -f "${f}" && ! -L "${f}" ]] || return 2
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    case "${line}" in
+      user=*) A_KEY="${line#user=}" ;;
+      reason=*) A_REASON="${line#reason=}" ;;
+      until=*) A_UNTIL="${line#until=}" ;;
+      until_epoch=*) A_EPOCH="${line#until_epoch=}" ;;
+      resumed_by=*) A_RESUMED="${line#resumed_by=}" ;;
+    esac
+  done < "${f}" || return 2
+  [[ "${A_KEY}" =~ ${RE_KEY} && "${A_REASON}" =~ ${RE_REASON} && "${A_EPOCH}" =~ ${RE_EPOCH} && "${A_UNTIL}" =~ ${RE_UNTIL} ]] || return 2
+  [[ -z "${A_RESUMED}" || "${A_RESUMED}" =~ ${RE_KEY} ]] || return 2
+  return 0
+}
+
+autodeploy_describe() { # 정책에 설정이 없으면 아무것도 출력하지 않는다
+  local f="${POLICY[autodeploy.pause_file]-}" rc=0 now
+  [[ -n "${f}" ]] || return 0
+  if ! path_ok "${f}" || [[ "${f##*/}" != "autodeploy.pause" ]]; then
+    say "자동 배포: 정책 [autodeploy] pause_file 이 잘못됐다(정지·재개를 쓸 수 없다)"
+    return 0
+  fi
+  autodeploy_read "${f}" || rc=$?
+  case "${rc}" in
+    1) say "자동 배포: 정지 아님(정지 표시 파일 없음)" ;;
+    2) say "자동 배포: 정지 중으로 본다(정지 표시 파일을 해석할 수 없다. 사람이 확인한다)" ;;
+    *)
+      now="$(date +%s)"
+      if (( now < A_EPOCH )); then
+        say "자동 배포: 정지 중 — 건 사람 ${A_KEY}, 사유 ${A_REASON}, 재개 예정 ${A_UNTIL}"
+      elif [[ -n "${A_RESUMED}" ]]; then
+        say "자동 배포: 정지 아님(${A_RESUMED} 가 ${A_UNTIL} 에 재개)"
+      else
+        say "자동 배포: 정지 아님(재개 예정 ${A_UNTIL} 지남, 건 사람 ${A_KEY})"
+      fi
+      ;;
+  esac
+}
+
+autodeploy_write() { # 파일 계정 사유 until epoch [재개한계정]
+  local f="$1" tmp="$1.tmp.$$"
+  [[ -d "${f%/*}" && ! -L "${f%/*}" ]] ||
+    step_fail "config-path" "${RC_CONFIG}" "정책 [autodeploy] pause_file 의 폴더가 없다(설치 때 만들어야 한다)"
+  [[ ! -L "${f}" && ( ! -e "${f}" || -f "${f}" ) ]] ||
+    step_fail "pause-file" "${RC_FAIL}" "정지 표시 파일 자리에 파일이 아닌 것이 있다. 쓰지 않는다"
+  (
+    umask 022
+    printf 'user=%s\nreason=%s\nuntil=%s\nuntil_epoch=%s\ncreated=%s\n' \
+      "$2" "$3" "$4" "$5" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "${tmp}"
+    if [[ -n "${6:-}" ]]; then
+      printf 'resumed_by=%s\n' "$6" >> "${tmp}"
+    fi
+  )
+  chmod 644 -- "${tmp}"
+  mv -f -- "${tmp}" "${f}"
+}
+
+do_autodeploy_pause() {
+  local reason="${ARGS[0]}" until="${ARGS[1]-}" f now epoch def max
+  autodeploy_file
+  f="${REPLY}"
+  policy_uint autodeploy.default_hours 2
+  def="${REPLY}"
+  policy_uint autodeploy.max_hours 12
+  max="${REPLY}"
+  now="$(date +%s)"
+  if [[ -n "${until}" ]]; then
+    epoch="$(date -d "${until/T/ }" +%s 2>/dev/null)" || step_fail "bad-until" "${RC_USAGE}" "재개시각을 날짜로 읽을 수 없다"
+  else
+    epoch=$((now + def * 3600))
+    until="$(date -d "@${epoch}" '+%Y-%m-%dT%H:%M')"
+  fi
+  (( epoch > now )) || step_fail "bad-until" "${RC_USAGE}" "재개시각이 이미 지났다"
+  (( epoch <= now + max * 3600 )) || step_fail "bad-until" "${RC_USAGE}" "재개시각이 최대 ${max}시간을 넘는다"
+  NOTE="until:${until}"
+  if (( DRY )); then
+    say "DRY_RUN: 자동 배포 정지 표시 파일을 쓴다 — 사유 ${reason}, 재개 예정 ${until}"
+    return 0
+  fi
+  autodeploy_write "${f}" "${KEY}" "${reason}" "${until}" "${epoch}"
+  audit "paused:${until}"
+  say "자동 배포를 멈췄다 — 사유 ${reason}, 재개 예정 ${until}(그 시각이 지나면 저절로 재개된다)"
+  say "게이트의 수동 배포(deploy-bundle)는 이 정지와 상관없이 된다. 그것까지 막으려면 lock 을 건다"
+  say "먼저 끝났으면: autodeploy-resume"
+}
+
+do_autodeploy_resume() {
+  local f rc=0 now until
+  autodeploy_file
+  f="${REPLY}"
+  autodeploy_read "${f}" || rc=$?
+  now="$(date +%s)"
+  if (( rc == 1 )); then
+    say "자동 배포가 멈춰 있지 않다(할 일 없음)"
+    return 0
+  fi
+  if (( rc == 0 )) && (( now >= A_EPOCH )); then
+    say "자동 배포가 멈춰 있지 않다(재개 예정 ${A_UNTIL} 지남. 할 일 없음)"
+    return 0
+  fi
+  autodeploy_describe
+  until="$(date -d "@${now}" '+%Y-%m-%dT%H:%M')"
+  NOTE="until:${until}"
+  if (( DRY )); then
+    say "DRY_RUN: 정지 표시 파일의 재개 시각을 지금(${until})으로 덮어쓴다"
+    return 0
+  fi
+  # 지우지 않는다. 재개 시각을 지금으로 덮어써서 "누가 언제 재개했는지"가 파일에 남게 한다.
+  if (( rc == 0 )); then
+    autodeploy_write "${f}" "${A_KEY}" "${A_REASON}" "${until}" "${now}" "${KEY}"
+  else
+    autodeploy_write "${f}" "${KEY}" "resumed-unreadable-file" "${until}" "${now}" "${KEY}"
+  fi
+  audit "resumed"
+  say "자동 배포를 재개했다(다음 자동 배포 주기부터 돈다)"
 }
 
 # ---------------------------------------------------------------------------
 # 앞단
 # ---------------------------------------------------------------------------
 parse_command() {
-  local cmd="$1" toks=() last
+  local cmd="$1" toks=() rest=() t act
   if [[ -z "${cmd}" ]]; then
     usage
-    deny "no-command" "${RC_USAGE}" "대화형 접속은 안 된다. 동작을 하나 적는다"
+    deny "no-command" "${RC_USAGE}" "대화형 접속은 안 된다. 동작을 하나 적는다(help 로 내 계정에 허용된 동작을 본다)"
   fi
   if (( ${#cmd} > 512 )) || [[ "${cmd}" =~ ${RE_NONPRINT} ]]; then
     deny "bad-chars" "${RC_USAGE}" "명령이 너무 길거나 쓸 수 없는 글자(제어 문자·한글 등)가 있다"
   fi
   read -r -a toks <<< "${cmd}"
   if (( ${#toks[@]} == 0 || ${#toks[@]} > 9 )); then
-    deny "bad-args" "${RC_USAGE}" "인자 개수가 맞지 않는다"
+    deny "bad-args" "${RC_USAGE}" "인자 개수가 맞지 않는다(help 로 형식을 본다)"
   fi
-  while (( ${#toks[@]} > 1 )); do
-    last="${toks[${#toks[@]}-1]}"
-    case "${last}" in
+  # 동작은 맨 앞이다. 그 뒤의 --dry-run·--announced·pr=<번호> 는 어디에 있든 떼어 낸다.
+  # (검증 전의 동작 글자는 감사 로그에 남지 않게, 다 떼어 낸 뒤에 ACTION 에 넣는다.)
+  act="${toks[0]}"
+  for t in "${toks[@]:1}"; do
+    case "${t}" in
       --dry-run) DRY=1 ;;
       --announced) ANNOUNCED=1 ;;
       pr=*)
-        PR="${last#pr=}"
+        PR="${t#pr=}"
         if [[ ! "${PR}" =~ ${RE_PR} ]]; then
           PR="-"
           deny "bad-pr" "${RC_USAGE}" "pr=<번호> 는 숫자여야 한다"
         fi
         ;;
-      *) break ;;
+      *) rest+=("${t}") ;;
     esac
-    unset 'toks[${#toks[@]}-1]'
   done
-  (( ${#toks[@]} > 0 )) || deny "bad-args" "${RC_USAGE}" "동작이 없다"
-  ACTION="${toks[0]}"
-  ARGS=("${toks[@]:1}")
+  case "${act}" in
+    --help | -h) act="help" ;;
+  esac
+  ACTION="${act}"
+  ARGS=()
+  if (( ${#rest[@]} > 0 )); then
+    ARGS=("${rest[@]}")
+  fi
+  # restart-backend 는 --ack-data-loss 를 SHA 앞에 적어도 받는다(뒷단에는 정해진 순서로 넘긴다).
+  if [[ "${ACTION}" == "restart-backend" ]] && (( ${#ARGS[@]} == 2 )) && [[ "${ARGS[0]}" == "--ack-data-loss" ]]; then
+    ARGS=("${ARGS[1]}" "--ack-data-loss")
+  fi
+}
+
+# help: 앞단에서 끝난다. sudo 를 부르지 않고 서버를 바꾸지 않는다. 내 계정에 허용된 동작과 형식을 보여 준다.
+front_help() {
+  local a fmt allowed target="" ok=0
+  local -a mine=() others=()
+  ACTION="help"
+  if (( ${#ARGS[@]} > 1 )); then
+    bad_args
+  fi
+  if (( ${#ARGS[@]} == 1 )); then
+    for a in "${ALL_ACTIONS[@]}"; do
+      [[ "${a}" == "${ARGS[0]}" ]] && ok=1
+    done
+    if (( ! ok )); then
+      suggest_actions "${ARGS[0]}"
+      deny "unknown-action" "${RC_USAGE}" "help 뒤에는 동작 이름만 적는다${REPLY:+. 비슷한 동작: ${REPLY}}"
+    fi
+    target="${ARGS[0]}"
+    A_ARGS="${target}"
+  fi
+  allowed_actions
+  allowed="${REPLY}"
+  for a in "${ALL_ACTIONS[@]}"; do
+    if [[ " ${allowed} " == *" ${a} "* ]]; then
+      mine+=("${a}")
+    else
+      others+=("${a}")
+    fi
+  done
+  say "ax-gate ${GATE_VERSION} — help (서버를 바꾸지 않는다)"
+  if [[ -n "${target}" ]]; then
+    action_format "${target}"
+    fmt="${REPLY}"
+    action_note "${target}"
+    say "형식: ${fmt}"
+    say "  ${REPLY}"
+    if [[ " ${allowed} " == *" ${target} "* ]]; then
+      say "계정 ${KEY}: 이 동작을 쓸 수 있다"
+    else
+      say "계정 ${KEY}: 이 동작 권한이 없다(권한자에게 요청한다)"
+    fi
+  else
+    say "계정 ${KEY} 에 허용된 동작:"
+    if (( ${#mine[@]} == 0 )); then
+      say "  (없음)"
+    fi
+    for a in "${mine[@]}"; do
+      action_format "${a}"
+      fmt="${REPLY}"
+      action_note "${a}"
+      say "  ${fmt}"
+      say "      ${REPLY}"
+    done
+    if (( ${#others[@]} > 0 )); then
+      say "이 계정에 없는 동작(권한자에게 요청한다): ${others[*]}"
+    fi
+  fi
+  usage_flags
+  say "동작은 맨 앞에 적는다. 정규식이 들어가는 명령은 명령 전체를 작은따옴표 한 쌍으로 감싼다."
+  say "바꾸는 동작은 먼저 --dry-run 으로 할 일을 보고, --announced 없이 실행해 알림 문안을 받는다."
+  audit "help" || printf '경고: 감사 로그에 쓰지 못했다\n' >&2
+  exit 0
 }
 
 front_main() {
@@ -520,10 +912,13 @@ front_main() {
   [[ "${DRY_RUN:-0}" == "1" ]] && DRY=1
   load_policy
   parse_command "${SSH_ORIGINAL_COMMAND:-}"
+  if [[ "${ACTION}" == "help" ]]; then
+    front_help
+  fi
   validate_args
   check_permission
   case "${ACTION}" in
-    status | unlock | record-pr) ;;
+    status | unlock | record-pr | autodeploy-pause) ;;   # 잠금 중에도 자동 배포를 멈추는 것은 된다(재개는 안 된다)
     *) deny_if_locked ;;
   esac
   require_announced
@@ -732,7 +1127,7 @@ copy_compare() { # 이름표 정책경로키: nginx 설정과 사본의 체크�
 }
 
 ops_copy_sync() { # 변경이 성공한 뒤 운영 사본을 갱신하고 체크섬을 알린다
-  local copy
+  local copy i
   if path_set ops_copy_file; then
     copy="${POLICY[paths.ops_copy_file]}"
     run cp -- "${P_nginx_conf}" "${copy}"
@@ -741,26 +1136,139 @@ ops_copy_sync() { # 변경이 성공한 뒤 운영 사본을 갱신하고 체크
   fi
   sum12 "${P_nginx_conf}"
   say "지금 nginx 설정의 sha256 앞 12자: ${REPLY}"
+  for i in "${!NGX_NAMES[@]}"; do
+    (( i > 0 )) || continue
+    sum12 "${NGX_CONFS[i]}"
+    say "지금 nginx 대상 ${NGX_NAMES[i]} 의 sha256 앞 12자: ${REPLY}"
+  done
 }
 
-nginx_backup_current() { # 폴더이름 → 현재 설정을 백업하고 체크섬을 남긴다
-  local bdir="${P_nginx_backup_dir}/$1" base="${P_nginx_conf##*/}"
+# ---------------------------------------------------------------------------
+# nginx 대상 파일. 0번은 언제나 정책 [paths] nginx_conf(기본 대상)다. 정책 [nginx_targets] 에
+# 이름 = "경로" 를 적으면 추가 대상이 된다. nginx 를 바꾸는 동작은 대상 전부를 한 묶음으로 다룬다:
+# 전부 백업 → 전부 교체 → nginx -t 한 번 → reload. 어느 단계든 실패하면 전부 바꾸기 전으로 되돌린다.
+# 요청하는 사람은 대상을 고르지 못한다. [nginx_targets] 가 없으면 기본 대상 하나만 다룬다.
+# ---------------------------------------------------------------------------
+NGX_NAMES=()
+NGX_CONFS=()
+load_nginx_targets() {
+  local k name v c
+  local -a keys=()
+  require_paths nginx_conf
+  NGX_NAMES=("")
+  NGX_CONFS=("${P_nginx_conf}")
+  mapfile -t keys < <(printf '%s\n' "${!POLICY[@]}" | sort)
+  for k in "${keys[@]}"; do
+    [[ "${k}" == nginx_targets.* ]] || continue
+    name="${k#nginx_targets.}"
+    [[ "${name}" =~ ${RE_TARGET} ]] ||
+      step_fail "config" "${RC_CONFIG}" "정책 [nginx_targets] 의 대상 이름은 영어 소문자·숫자·- 만 된다"
+    v="${POLICY[${k}]}"
+    path_ok "${v}" ||
+      step_fail "config-path" "${RC_CONFIG}" "정책 [nginx_targets] ${name} 이 경로가 아니다(설치 때 채워야 한다)"
+    for c in "${NGX_CONFS[@]}"; do
+      [[ "${c}" != "${v}" ]] ||
+        step_fail "config" "${RC_CONFIG}" "정책 [nginx_targets] ${name} 이 다른 대상과 같은 파일이다"
+    done
+    NGX_NAMES+=("${name}")
+    NGX_CONFS+=("${v}")
+  done
+  # 대상별 블록 줄은 [nginx_targets] 에 있는 이름에만 붙일 수 있다(오타를 그냥 넘기지 않는다).
+  for k in "${keys[@]}"; do
+    [[ "${k}" == nginx_target_block_lines.* ]] || continue
+    name="${k#nginx_target_block_lines.}"
+    v=0
+    for c in "${NGX_NAMES[@]}"; do
+      [[ -n "${c}" && "${c}" == "${name}" ]] && v=1
+    done
+    (( v )) || step_fail "config" "${RC_CONFIG}" "정책 [nginx_target_block_lines] 에 [nginx_targets] 에 없는 대상이 있다"
+  done
+}
+
+ngx_label() { # 번호 → REPLY (사람이 읽는 대상 이름)
+  REPLY="${NGX_NAMES[$1]}"
+  [[ -n "${REPLY}" ]] || REPLY="기본"
+}
+
+ngx_labels() { # → REPLY (대상 이름을 쉼표로)
+  local i out=""
+  for i in "${!NGX_NAMES[@]}"; do
+    ngx_label "${i}"
+    out+="${out:+, }${REPLY}"
+  done
+  REPLY="${out}"
+}
+
+# 백업 폴더 안에서 그 대상의 사본 위치 → REPLY.
+# 기본 대상은 예전과 같은 자리(<백업폴더>/<파일명>), 추가 대상은 <백업폴더>/targets/<이름>/<파일명>.
+ngx_backup_path() { # 백업폴더이름 번호
+  local bdir="${P_nginx_backup_dir}/$1" i="$2"
+  if (( i == 0 )); then
+    REPLY="${bdir}/${NGX_CONFS[0]##*/}"
+  else
+    REPLY="${bdir}/targets/${NGX_NAMES[i]}/${NGX_CONFS[i]##*/}"
+  fi
+}
+
+nginx_backup_all() { # 폴더이름 → 대상 전부의 현재 설정을 백업하고 체크섬을 남긴다
+  local bname="$1" bdir="${P_nginx_backup_dir}/$1" i dest
   [[ ! -e "${bdir}" ]] || step_fail "backup-exists" "${RC_FAIL}" "백업 폴더가 이미 있다"
   (umask 022 && run mkdir -- "${bdir}")
-  run cp -a -- "${P_nginx_conf}" "${bdir}/${base}"
-  if (( ! DRY )); then
-    (cd "${bdir}" && sha256sum "${base}" > "${base}.sha256")
-  fi
+  for i in "${!NGX_CONFS[@]}"; do
+    ngx_backup_path "${bname}" "${i}"
+    dest="${REPLY}"
+    if (( i > 0 )); then
+      (umask 022 && run mkdir -p -- "${dest%/*}")
+    fi
+    run cp -a -- "${NGX_CONFS[i]}" "${dest}"
+    if (( ! DRY )); then
+      (cd "${dest%/*}" && sha256sum "${dest##*/}" > "${dest##*/}.sha256")
+    fi
+  done
 }
 
-nginx_test_reload_or_revert() { # 되돌릴백업폴더 → nginx -t 실패면 되돌리고 실패 처리
-  local bdir="${P_nginx_backup_dir}/$1" base="${P_nginx_conf##*/}"
+nginx_restore_all() { # 백업폴더이름 → 대상 전부를 그 백업으로 되돌린다(실패해도 끝까지 간다)
+  local bname="$1" i bad=0
+  for i in "${!NGX_CONFS[@]}"; do
+    ngx_backup_path "${bname}" "${i}"
+    if ! run cp -a -- "${REPLY}" "${NGX_CONFS[i]}"; then
+      ngx_label "${i}"
+      say "경고: 대상 ${REPLY} 을 되돌리지 못했다. 사람이 바로 봐야 한다(백업 폴더 ${bname})"
+      bad=1
+    fi
+  done
+  return "${bad}"
+}
+
+# 새 내용으로 전부 교체한다. 인자: 되돌릴백업폴더 원본1 원본2 ... (대상 번호 순서, 빈 글이면 그 대상은 건너뛴다)
+# 하나라도 실패하면 이미 바꾼 것까지 전부 되돌리고 실패 처리한다.
+nginx_swap_in() {
+  local revert="$1" i=0 src
+  shift
+  for src in "$@"; do
+    if [[ -n "${src}" ]]; then
+      if ! run cp -- "${src}" "${NGX_CONFS[i]}"; then
+        nginx_restore_all "${revert}" || true
+        ngx_label "${i}"
+        step_fail "nginx-replace-failed" "${RC_FAIL}" "대상 ${REPLY} 을 바꾸지 못했다. 대상 전부를 바꾸기 전으로 되돌렸고 reload 하지 않았다"
+      fi
+    fi
+    i=$((i + 1))
+  done
+}
+
+nginx_test_reload_or_revert() { # 되돌릴백업폴더 → nginx -t 나 reload 가 실패하면 대상 전부를 되돌리고 실패 처리
+  local revert="$1"
   if ! run nginx -t; then
-    run cp -a -- "${bdir}/${base}" "${P_nginx_conf}"
+    nginx_restore_all "${revert}" || true
     run nginx -t || say "경고: 되돌린 뒤에도 nginx -t 가 실패한다. 사람이 바로 봐야 한다"
-    step_fail "nginx-test-failed" "${RC_FAIL}" "nginx -t 실패. 설정을 바꾸기 전으로 되돌렸고 reload 하지 않았다"
+    step_fail "nginx-test-failed" "${RC_FAIL}" "nginx -t 실패. 대상 전부를 바꾸기 전으로 되돌렸고 reload 하지 않았다"
   fi
-  run systemctl reload nginx
+  if ! run systemctl reload nginx; then
+    nginx_restore_all "${revert}" || true
+    run nginx -t || say "경고: 되돌린 뒤에도 nginx -t 가 실패한다. 사람이 바로 봐야 한다"
+    step_fail "nginx-reload-failed" "${RC_FAIL}" "reload 실패. 대상 전부를 바꾸기 전으로 되돌렸다. nginx 가 어느 설정으로 떠 있는지 사람이 바로 확인한다"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -770,6 +1278,7 @@ do_status() {
   local u root head
   say "ax-gate ${GATE_VERSION} — status (읽기 전용)"
   lock_describe
+  autodeploy_describe
   health_count
   say "health: ${H_OK}/${H_TOTAL}${H_BAD:+ — 실패:${H_BAD}}"
   policy_items status.urls "${RE_LOCALURL}"
@@ -806,7 +1315,16 @@ do_status() {
     copy_compare "운영 사본" ops_copy_file
     copy_compare "레포 사본" repo_nginx_copy
   fi
+  policy_section_names nginx_targets "${RE_TARGET}"
+  if [[ -n "${REPLY}" ]]; then
+    say "nginx 대상 파일: 기본, ${REPLY} (location 추가·복원은 전부 한 번에 한다)"
+  fi
+  policy_section_names location_profiles "${RE_PROFILE}"
+  if [[ -n "${REPLY}" ]]; then
+    say "location 프로필: ${REPLY} (nginx-add-location 맨 뒤에 이름을 붙인다)"
+  fi
   pending_list
+  backup_status_line
 }
 
 do_lock() {
@@ -856,39 +1374,100 @@ pr_reminder() { # nginx 를 바꾼 뒤: 변경을 PR 로 남기라고 알린다
 }
 
 do_nginx_restore() {
-  local folder="${ARGS[0]}" bdir src stamp base
-  require_paths nginx_conf nginx_backup_dir
-  base="${P_nginx_conf##*/}"
+  local folder="${ARGS[0]}" bdir src stamp i label what restored="" skipped=""
+  local -a srcs=()
+  require_paths nginx_backup_dir
+  load_nginx_targets
   bdir="${P_nginx_backup_dir}/${folder}"
-  src="${bdir}/${base}"
-  if [[ ! -d "${bdir}" || -L "${bdir}" || ! -f "${src}" || -L "${src}" ]]; then
-    step_fail "backup-not-found" "${RC_USAGE}" "그 백업 폴더에 설정 파일이 없다"
-  fi
-  if [[ -f "${bdir}/${base}.sha256" ]]; then
-    (cd "${bdir}" && sha256sum --status -c "${base}.sha256") ||
-      step_fail "backup-checksum" "${RC_FAIL}" "백업의 체크섬이 맞지 않는다(백업이 바뀌었다)"
-    say "백업 체크섬: 일치"
-  else
-    say "백업 체크섬: 파일 없음(확인 못 하고 진행)"
-  fi
+  # 1) 바꾸기 전에 백업의 사본을 전부 확인한다. 기본 대상의 사본은 반드시 있어야 한다.
+  #    추가 대상의 사본이 없는 백업(그 대상을 다루기 전에 뜬 백업)은 그 대상을 그대로 둔다.
+  for i in "${!NGX_CONFS[@]}"; do
+    ngx_backup_path "${folder}" "${i}"
+    src="${REPLY}"
+    ngx_label "${i}"
+    label="${REPLY}"
+    what="백업 체크섬"
+    (( i == 0 )) || what="대상 ${label} 백업 체크섬"
+    if (( i == 0 )); then
+      if [[ ! -d "${bdir}" || -L "${bdir}" || ! -f "${src}" || -L "${src}" ]]; then
+        step_fail "backup-not-found" "${RC_USAGE}" "그 백업 폴더에 설정 파일이 없다"
+      fi
+    elif [[ -L "${bdir}/targets" || -L "${src%/*}" || ! -f "${src}" || -L "${src}" ]]; then
+      say "대상 ${label}: 이 백업에 사본이 없다(그 대상은 그대로 둔다)"
+      srcs+=("")
+      skipped+="${skipped:+, }${label}"
+      continue
+    fi
+    if [[ -f "${src}.sha256" ]]; then
+      (cd "${src%/*}" && sha256sum --status -c "${src##*/}.sha256") ||
+        step_fail "backup-checksum" "${RC_FAIL}" "백업의 체크섬이 맞지 않는다(백업이 바뀌었다)"
+      say "${what}: 일치"
+    else
+      say "${what}: 파일 없음(확인 못 하고 진행)"
+    fi
+    srcs+=("${src}")
+    restored+="${restored:+, }${label}"
+  done
   copy_compare "운영 사본" ops_copy_file
   stamp_now
   stamp="${REPLY}"
-  nginx_backup_current "pre-gate-restore-${stamp}"
+  # 2) 대상 전부의 지금 상태를 백업 → 3) 전부 교체 → 4) nginx -t 한 번 → reload. 실패하면 전부 되돌린다.
+  nginx_backup_all "pre-gate-restore-${stamp}"
   say "복원 전 상태 백업: pre-gate-restore-${stamp}"
-  run cp -a -- "${src}" "${P_nginx_conf}"
+  nginx_swap_in "pre-gate-restore-${stamp}" "${srcs[@]}"
   nginx_test_reload_or_revert "pre-gate-restore-${stamp}"
   ops_copy_sync
   say "nginx 설정을 ${folder} 로 복원하고 reload 했다. 라우팅(허용 메서드와 그 밖의 응답 코드)을 직접 확인한다"
+  if (( ${#NGX_CONFS[@]} > 1 )); then
+    say "복원한 대상: ${restored}${skipped:+ / 백업에 없어 그대로 둔 대상: ${skipped}}"
+  fi
   say "이 복원을 되돌리려면: nginx-restore pre-gate-restore-${stamp}"
   pr_reminder "pre-gate-restore-${stamp}"
 }
 
+# 프로필이 정책에 있는지 본다. 없으면 정책에 있는 프로필 이름을 알려 주고 실패한다.
+# (값은 지시어 줄의 목록이어야 한다. 목록은 항목마다 줄바꿈으로 끝난다.)
+require_profile() {
+  local name="$1"
+  if [[ -n "${POLICY[location_profiles.${name}]-}" && "${POLICY[location_profiles.${name}]}" == *$'\n' ]]; then
+    return 0
+  fi
+  policy_section_names location_profiles "${RE_PROFILE}"
+  step_fail "profile-unknown" "${RC_USAGE}" "그 이름의 프로필이 정책에 없다. 쓸 수 있는 프로필: ${REPLY:-없음}"
+}
+
+# 대상마다 검증기 check 를 돌린다(대상별 블록 줄이 다를 수 있다). 하나라도 거부면 1.
+check_all_targets() { # 계정 메서드 정규식 프로필
+  local key="$1" method="$2" regex="$3" profile="$4" i
+  for i in "${!NGX_CONFS[@]}"; do
+    collect_rules "${key}" "${NGX_NAMES[i]}" "${profile}" || return 1
+    python3 "${CHECKER}" check --method "${method}" --regex "${regex}" "${RULES[@]}" || return 1
+  done
+  return 0
+}
+
+# 대상마다 "지금 설정에 넣을 수 있는지"(삽입 표시 줄·중복) 미리 본다. 결과 파일은 버린다. 하나라도 안 되면 1.
+preview_all_targets() { # 이름 제안자 메서드 정규식 프로필
+  local name="$1" user="$2" method="$3" regex="$4" profile="$5" i tmp="${PENDING_DIR}/.$1.preview" rc=0
+  for i in "${!NGX_CONFS[@]}"; do
+    collect_rules "${user}" "${NGX_NAMES[i]}" "${profile}" || { rc=1; break; }
+    python3 "${CHECKER}" apply --conf "${NGX_CONFS[i]}" --out "${tmp}" --name "${name}" --user "${user}" \
+      --stamp "00000000-000000" --method "${method}" --regex "${regex}" "${RULES[@]}" > /dev/null || { rc=1; break; }
+  done
+  rm -f -- "${tmp}"
+  return "${rc}"
+}
+
 # 정책에서 한 계정의 location 규칙(접두·메서드·업스트림·블록 줄)을 RULES 배열로 모은다.
+# 둘째 인자(대상 이름)가 있고 정책 [nginx_target_block_lines] 에 그 대상의 줄이 있으면 그 줄을 쓴다.
+# 셋째 인자(프로필 이름)가 있으면 정책 [location_profiles] 의 그 줄들을 덧붙인다.
 RULES=()
 collect_rules() {
-  local key="$1" item k n=0
+  local key="$1" tname="${2:-}" profile="${3:-}" blk="location.block_lines" item k n=0
   RULES=()
+  if [[ -n "${tname}" && -n "${POLICY[nginx_target_block_lines.${tname}]+x}" ]]; then
+    blk="nginx_target_block_lines.${tname}"
+  fi
   while IFS= read -r item; do
     if [[ -n "${item}" ]]; then
       RULES+=(--allowed-prefix "${item}")
@@ -905,25 +1484,39 @@ collect_rules() {
     if [[ -n "${item}" ]]; then
       RULES+=(--block-line "${item}")
     fi
-  done <<< "${POLICY[location.block_lines]-}"
+  done <<< "${POLICY[${blk}]-}"
   for k in "${!POLICY[@]}"; do
     if [[ "${k}" == location_upstreams.* ]]; then
       RULES+=(--upstream "${k#location_upstreams.}=${POLICY[${k}]}")
     fi
   done
+  if [[ -n "${profile}" ]]; then
+    RULES+=(--profile-name "${profile}")
+    while IFS= read -r item; do
+      if [[ -n "${item}" ]]; then
+        RULES+=(--profile-line "${item}")
+      fi
+    done <<< "${POLICY[location_profiles.${profile}]-}"
+  fi
 }
 
-proposal_digest() { # 이름 메서드 정규식 제안자 → REPLY (sha256 앞 12자)
+# 이름 메서드 정규식 제안자 [프로필] → REPLY (sha256 앞 12자).
+# 프로필이 없으면 예전과 같은 값이다. 프로필이 있으면 그 이름까지 확인값에 묶인다.
+proposal_digest() {
   local sum
-  sum="$(printf '%s\n' "$1" "$2" "$3" "$4" | sha256sum)"
+  if [[ -n "${5:-}" ]]; then
+    sum="$(printf '%s\n' "$1" "$2" "$3" "$4" "profile=$5" | sha256sum)"
+  else
+    sum="$(printf '%s\n' "$1" "$2" "$3" "$4" | sha256sum)"
+  fi
   REPLY="${sum:0:12}"
 }
 
 # 제안 파일을 읽어 다시 검증한다. Q_* 에 둔다. 0 읽음, 1 없음, 2 깨짐
-Q_NAME="" Q_METHOD="" Q_REGEX="" Q_PROPOSER="" Q_EPOCH=""
+Q_NAME="" Q_METHOD="" Q_REGEX="" Q_PROPOSER="" Q_EPOCH="" Q_PROFILE=""
 proposal_read() {
   local f="$1" line
-  Q_NAME="" Q_METHOD="" Q_REGEX="" Q_PROPOSER="" Q_EPOCH=""
+  Q_NAME="" Q_METHOD="" Q_REGEX="" Q_PROPOSER="" Q_EPOCH="" Q_PROFILE=""
   [[ -f "${f}" && ! -L "${f}" ]] || return 1
   while IFS= read -r line || [[ -n "${line}" ]]; do
     case "${line}" in
@@ -932,10 +1525,12 @@ proposal_read() {
       regex=*) Q_REGEX="${line#regex=}" ;;
       proposer=*) Q_PROPOSER="${line#proposer=}" ;;
       created_epoch=*) Q_EPOCH="${line#created_epoch=}" ;;
+      profile=*) Q_PROFILE="${line#profile=}" ;;
     esac
   done < "${f}" || return 2
   [[ "${Q_NAME}" =~ ${RE_LOCNAME} && "${Q_METHOD}" =~ ${RE_METHOD} && "${Q_REGEX}" =~ ${RE_LOCREGEX} &&
     "${Q_PROPOSER}" =~ ${RE_KEY} && "${Q_EPOCH}" =~ ${RE_EPOCH} ]] || return 2
+  [[ -z "${Q_PROFILE}" || "${Q_PROFILE}" =~ ${RE_PROFILE} ]] || return 2
   return 0
 }
 
@@ -957,8 +1552,8 @@ pending_list() {
     if proposal_expired; then
       say "location 제안(만료): ${Q_NAME} — 제안자 ${Q_PROPOSER}"
     else
-      proposal_digest "${Q_NAME}" "${Q_METHOD}" "${Q_REGEX}" "${Q_PROPOSER}"
-      say "location 제안(승인 대기): 이름 ${Q_NAME} / 제안자 ${Q_PROPOSER} / ${Q_METHOD} ${Q_REGEX} / 확인값 ${REPLY}"
+      proposal_digest "${Q_NAME}" "${Q_METHOD}" "${Q_REGEX}" "${Q_PROPOSER}" "${Q_PROFILE}"
+      say "location 제안(승인 대기): 이름 ${Q_NAME} / 제안자 ${Q_PROPOSER} / ${Q_METHOD} ${Q_REGEX} / 확인값 ${REPLY}${Q_PROFILE:+ / 프로필 ${Q_PROFILE}}"
     fi
   done
   (( any )) || say "location 제안: 없음"
@@ -966,36 +1561,42 @@ pending_list() {
 
 # 제안: 검사만 하고 승인 대기 파일을 만든다. nginx 는 건드리지 않는다.
 do_nginx_add_location() {
-  local name="${ARGS[0]}" method="${ARGS[1]}" regex="${ARGS[2]}" f tmp digest
-  require_paths nginx_conf
+  local name="${ARGS[0]}" method="${ARGS[1]}" regex="${ARGS[2]}" profile="${ARGS[3]-}" f digest
+  load_nginx_targets
+  if [[ -n "${profile}" ]]; then
+    require_profile "${profile}"
+  fi
   collect_rules "${KEY}" || step_fail "no-prefix" "${RC_PERM}" "계정 ${KEY} 에게 허용된 경로 접두가 정책에 없다"
-  python3 "${CHECKER}" check --method "${method}" --regex "${regex}" "${RULES[@]}" ||
+  check_all_targets "${KEY}" "${method}" "${regex}" "${profile}" ||
     step_fail "location-rejected" "${RC_USAGE}" "location 이 검증기를 통과하지 못했다"
-  proposal_digest "${name}" "${method}" "${regex}" "${KEY}"
+  proposal_digest "${name}" "${method}" "${regex}" "${KEY}" "${profile}"
   digest="${REPLY}"
-  NOTE="digest:${digest}"
+  NOTE="digest:${digest}${profile:+,profile:${profile}}"
+  ngx_labels
   if (( DRY )); then
-    say "DRY_RUN: 제안을 저장한다 — ${name} / ${method} ${regex} / 확인값 ${digest}"
+    say "DRY_RUN: 제안을 저장한다 — ${name} / ${method} ${regex} / 확인값 ${digest}${profile:+ / 프로필 ${profile}}"
     return 0
   fi
   f="${PENDING_DIR}/${name}.req"
-  tmp="${PENDING_DIR}/.${name}.preview"
-  # 지금 설정에 넣을 수 있는지(삽입 표시 줄·중복) 미리 본다. 결과 파일은 버린다.
-  if ! python3 "${CHECKER}" apply --conf "${P_nginx_conf}" --out "${tmp}" --name "${name}" --user "${KEY}" \
-    --stamp "00000000-000000" --method "${method}" --regex "${regex}" "${RULES[@]}" > /dev/null; then
-    rm -f -- "${tmp}"
-    step_fail "location-rejected" "${RC_USAGE}" "지금 설정 파일에 넣을 수 없다(삽입 표시 줄·중복 확인)"
-  fi
-  rm -f -- "${tmp}"
+  # 지금 설정에 넣을 수 있는지(삽입 표시 줄·중복) 대상마다 미리 본다. 결과 파일은 버린다.
+  preview_all_targets "${name}" "${KEY}" "${method}" "${regex}" "${profile}" ||
+    step_fail "location-rejected" "${RC_USAGE}" "지금 설정 파일에 넣을 수 없다(삽입 표시 줄·중복 확인. 대상 파일 전부에 들어가야 한다)"
   (
     umask 022
     printf 'name=%s\nmethod=%s\nregex=%s\nproposer=%s\ncreated_epoch=%s\ncreated=%s\ndigest=%s\n' \
       "${name}" "${method}" "${regex}" "${KEY}" "$(date +%s)" "$(date '+%Y-%m-%dT%H:%M:%S%z')" "${digest}" > "${f}.tmp"
+    if [[ -n "${profile}" ]]; then
+      printf 'profile=%s\n' "${profile}" >> "${f}.tmp"
+    fi
   )
   mv -f -- "${f}.tmp" "${f}"
   audit "proposed"
   say "제안을 저장했다(아직 적용되지 않았다)."
-  say "  이름 ${name} / ${method} ${regex}"
+  say "  이름 ${name} / ${method} ${regex}${profile:+ / 프로필 ${profile}}"
+  if (( ${#NGX_CONFS[@]} > 1 )); then
+    ngx_labels
+    say "  적용 대상(전부 한 번에): ${REPLY}"
+  fi
   say "  확인값 ${digest}"
   say "다른 권한자 한 명이 status 로 내용을 확인하고 팀 채널에 알린 뒤 실행해야 적용된다:"
   say "  nginx-approve-location ${name} ${digest} --announced"
@@ -1003,8 +1604,10 @@ do_nginx_add_location() {
 
 # 승인: 제안자와 다른 권한자가 확인값을 대고 실행하면 그때 적용한다.
 do_nginx_approve_location() {
-  local name="${ARGS[0]}" digest="${ARGS[1]}" f rc=0 bname new stamp SELF_APPROVED=0
-  require_paths nginx_conf nginx_backup_dir
+  local name="${ARGS[0]}" digest="${ARGS[1]}" f rc=0 bname new stamp SELF_APPROVED=0 i ptag=""
+  local -a news=()
+  require_paths nginx_backup_dir
+  load_nginx_targets
   f="${PENDING_DIR}/${name}.req"
   proposal_read "${f}" || rc=$?
   (( rc != 1 )) || step_fail "no-proposal" "${RC_USAGE}" "그 이름의 제안이 없다"
@@ -1013,15 +1616,16 @@ do_nginx_approve_location() {
   if proposal_expired; then
     step_fail "proposal-expired" "${RC_USAGE}" "제안이 만료됐다. 다시 제안해야 한다"
   fi
-  proposal_digest "${Q_NAME}" "${Q_METHOD}" "${Q_REGEX}" "${Q_PROPOSER}"
+  proposal_digest "${Q_NAME}" "${Q_METHOD}" "${Q_REGEX}" "${Q_PROPOSER}" "${Q_PROFILE}"
   [[ "${REPLY}" == "${digest}" ]] || step_fail "digest-mismatch" "${RC_USAGE}" "확인값이 제안 내용과 다르다(status 로 다시 확인)"
-  NOTE="proposer:${Q_PROPOSER},digest:${digest},self-approve:no"
+  ptag="${Q_PROFILE:+,profile:${Q_PROFILE}}"
+  NOTE="proposer:${Q_PROPOSER},digest:${digest},self-approve:no${ptag}"
   if [[ "${Q_PROPOSER}" == "${KEY}" ]]; then
     # 기본은 금지. 정책 [self_approve] accounts 에 든 계정만 통과한다(그 밖의 검증은 전부 그대로).
     policy_list_has self_approve.accounts "${KEY}" ||
       step_fail "self-approval" "${RC_PERM}" "제안한 사람은 자기 제안을 승인할 수 없다(둘 이상 확인)"
     SELF_APPROVED=1
-    NOTE="proposer:${Q_PROPOSER},digest:${digest},self-approve:yes"
+    NOTE="proposer:${Q_PROPOSER},digest:${digest},self-approve:yes${ptag}"
     say "셀프 승인(정책 허용 계정): ${KEY} — 제안자와 승인자가 같다. 다른 검증은 모두 그대로 적용한다"
     if command -v logger >/dev/null 2>&1; then
       logger -t ax-gate -- "셀프 승인(정책 허용 계정): user=${KEY} name=${name}" || true
@@ -1029,33 +1633,58 @@ do_nginx_approve_location() {
   fi
   policy_list_has "permissions.${Q_PROPOSER}" "nginx-add-location" ||
     step_fail "proposer-not-permitted" "${RC_PERM}" "제안자에게 지금은 제안 권한이 없다"
-  # 승인자와 제안자 둘 다 그 경로 접두 권한이 있어야 한다.
+  if [[ -n "${Q_PROFILE}" ]]; then
+    require_profile "${Q_PROFILE}"
+  fi
+  # 승인자와 제안자 둘 다 그 경로 접두 권한이 있어야 한다. 대상마다(블록 줄이 다를 수 있다) 검증한다.
   collect_rules "${KEY}" || step_fail "no-prefix" "${RC_PERM}" "계정 ${KEY} 에게 허용된 경로 접두가 정책에 없다"
-  python3 "${CHECKER}" check --method "${Q_METHOD}" --regex "${Q_REGEX}" "${RULES[@]}" ||
+  check_all_targets "${KEY}" "${Q_METHOD}" "${Q_REGEX}" "${Q_PROFILE}" ||
     step_fail "location-rejected" "${RC_USAGE}" "승인자의 허용 접두 밖이거나 검증기를 통과하지 못했다"
   collect_rules "${Q_PROPOSER}" || step_fail "no-prefix" "${RC_PERM}" "제안자에게 허용된 경로 접두가 정책에 없다"
-  python3 "${CHECKER}" check --method "${Q_METHOD}" --regex "${Q_REGEX}" "${RULES[@]}" ||
+  check_all_targets "${Q_PROPOSER}" "${Q_METHOD}" "${Q_REGEX}" "${Q_PROFILE}" ||
     step_fail "location-rejected" "${RC_USAGE}" "location 이 검증기를 통과하지 못했다"
   copy_compare "운영 사본" ops_copy_file
   stamp_now
   stamp="${REPLY}"
   bname="pre-gate-add-${name}-${stamp}"
-  nginx_backup_current "${bname}"
-  new="${P_nginx_backup_dir}/${bname}/${P_nginx_conf##*/}.new"
-  run python3 "${CHECKER}" apply --conf "${P_nginx_conf}" --out "${new}" \
-    --name "${name}" --user "${Q_PROPOSER}" --stamp "${stamp}" \
-    --method "${Q_METHOD}" --regex "${Q_REGEX}" "${RULES[@]}" ||
-    step_fail "location-rejected" "${RC_USAGE}" "설정 파일에 넣지 못했다(삽입 표시 줄·중복 확인)"
-  run cp -- "${new}" "${P_nginx_conf}"
+  # 1) 사전 검증: 대상 전부에 넣을 수 있는지 먼저 본다. 여기서 걸리면 아무것도 바뀌지 않는다.
+  if (( ! DRY )); then
+    preview_all_targets "${name}" "${Q_PROPOSER}" "${Q_METHOD}" "${Q_REGEX}" "${Q_PROFILE}" ||
+      step_fail "location-rejected" "${RC_USAGE}" "설정 파일에 넣지 못했다(삽입 표시 줄·중복 확인). 아무것도 바꾸지 않았다"
+  fi
+  # 2) 대상 전부 백업
+  nginx_backup_all "${bname}"
+  # 3) 대상마다 새 파일을 백업 폴더 안에 만든다(아직 교체 전)
+  for i in "${!NGX_CONFS[@]}"; do
+    collect_rules "${Q_PROPOSER}" "${NGX_NAMES[i]}" "${Q_PROFILE}" ||
+      step_fail "no-prefix" "${RC_PERM}" "제안자에게 허용된 경로 접두가 정책에 없다"
+    ngx_backup_path "${bname}" "${i}"
+    new="${REPLY}.new"
+    run python3 "${CHECKER}" apply --conf "${NGX_CONFS[i]}" --out "${new}" \
+      --name "${name}" --user "${Q_PROPOSER}" --stamp "${stamp}" \
+      --method "${Q_METHOD}" --regex "${Q_REGEX}" "${RULES[@]}" ||
+      step_fail "location-rejected" "${RC_USAGE}" "설정 파일에 넣지 못했다(삽입 표시 줄·중복 확인). 아무것도 바꾸지 않았다"
+    news+=("${new}")
+  done
+  # 4) 전부 교체 → 5) nginx -t 한 번 → reload. 어느 단계든 실패하면 대상 전부를 되돌린다.
+  nginx_swap_in "${bname}" "${news[@]}"
   nginx_test_reload_or_revert "${bname}"
   if (( ! DRY )); then
     # 승인 기록: 제안 파일에 승인자·시각·백업 폴더를 덧붙여 보관한다.
-    printf 'approver=%s\napproved=%s\nbackup=%s\n' "${KEY}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" "${bname}" >> "${f}"
+    ngx_labels
+    printf 'approver=%s\napproved=%s\nbackup=%s\ntargets=%s\n' "${KEY}" "$(date '+%Y-%m-%dT%H:%M:%S%z')" "${bname}" "${REPLY}" >> "${f}"
     mv -f -- "${f}" "${APPROVED_DIR}/${name}-${stamp}.rec"
     audit "applied:${bname}"
   fi
   ops_copy_sync
   say "location ${name} 을 추가하고 reload 했다(제안 ${Q_PROPOSER}, 승인 ${KEY}). 되돌리려면: nginx-restore ${bname}"
+  if (( ${#NGX_CONFS[@]} > 1 )); then
+    ngx_labels
+    say "적용한 대상(전부 한 번에): ${REPLY}"
+  fi
+  if [[ -n "${Q_PROFILE}" ]]; then
+    say "프로필 ${Q_PROFILE} 의 지시어(타임아웃·본문 크기)를 블록에 덧붙였다"
+  fi
   (( SELF_APPROVED )) && say "이 적용은 셀프 승인(정책 허용 계정)이었다. 팀 채널 알림에 그 사실을 적는다"
   say "라우팅(허용 메서드와 그 밖의 응답 코드)을 직접 확인한다"
   pr_reminder "${bname}"
@@ -1199,11 +1828,216 @@ backup_dest() { # 원본경로 [확장자] → BACKUP_DEST. 같은 이름이 있
     dest="${dest}.${REPLY}"
   fi
   BACKUP_DEST="${dest}${ext}"
+  BK_CURRENT_NAMES+=("${BACKUP_DEST##*/}")
+}
+
+# ---------------------------------------------------------------------------
+# restart-backend 백업 보관 정리(정책 [restart] backup_keep). 기본은 없음 = 지우지 않는다.
+# 대상은 "정책에 적힌 폴더·sqlite 파일의 백업"뿐이다. 이름은 <원본이름>.bak-before-<SHA 8자>[.<시각>][접미]
+# 이고, 접미는 폴더 백업의 .tgz / -sqlite, sqlite 파일 백업의 없음만 인정한다. 그 밖의 이름·심볼릭 링크는 건드리지 않는다.
+# 번들 백업(www-*), .env 백업, deploy-* 파일, 정책에 없는 원본의 백업도 건드리지 않는다.
+# ---------------------------------------------------------------------------
+readonly RE_BAKBASE='^\.?[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$'
+readonly RE_BAKTAIL='^([0-9a-f]{8})(\.[0-9]{8}-[0-9]{6})?(\.tgz|-sqlite)?$'
+BK_CURRENT_NAMES=()          # 이번 실행이 만든 백업 이름
+declare -A BK_BASEKIND=()    # 원본이름 → dir | file
+declare -A BK_MEMBERS=()     # "원본|키" → 줄바꿈으로 구분한 이름들
+declare -A BK_NEWEST=()      # "원본|키" → 가장 최근 수정 시각(초)
+declare -A BK_CUR=()         # "원본|키" → 1 이면 이번 실행이 만든 세트
+declare -A BK_SIZEK=()       # 이름 → KiB
+BK_SETS=()
+BK_TOTALK=0
+
+backup_bases() { # 정책에서 정리 대상 원본 이름을 모은다(.env·www-·deploy- 계열과 이상한 이름은 뺀다)
+  local src b kind conflict=""
+  local -a skip=()
+  BK_BASEKIND=()
+  for kind in dir file; do
+    if [[ "${kind}" == "dir" ]]; then policy_items restart.backup_dirs; else policy_items restart.backup_sqlite; fi
+    for src in "${ITEMS[@]}"; do
+      path_ok "${src}" || continue
+      b="${src##*/}"
+      [[ "${b}" =~ ${RE_BAKBASE} && "${b}" != *..* ]] || continue
+      [[ "${b}" != .env* && "${b}" != www-* && "${b}" != deploy-* ]] || continue
+      if [[ -n "${BK_BASEKIND[${b}]+x}" && "${BK_BASEKIND[${b}]}" != "${kind}" ]]; then
+        skip+=("${b}")
+      fi
+      BK_BASEKIND["${b}"]="${kind}"
+    done
+  done
+  for b in "${skip[@]}"; do unset 'BK_BASEKIND[$b]'; done
+}
+
+fmt_kib() { # KiB → REPLY
+  local k="$1"
+  if (( k >= 1048576 )); then
+    REPLY="$((k * 10 / 1048576 / 10)).$((k * 10 / 1048576 % 10)) GiB"
+  elif (( k >= 1024 )); then
+    REPLY="$((k / 1024)) MiB"
+  else
+    REPLY="${k} KiB"
+  fi
+}
+
+backup_scan() { # P_backup_dir 안의 게이트 백업 세트를 모은다(숨김 이름 포함)
+  local p name base tail key ext id m t cur c k
+  BK_SETS=(); BK_MEMBERS=(); BK_NEWEST=(); BK_CUR=(); BK_SIZEK=(); BK_TOTALK=0
+  backup_bases
+  [[ -d "${P_backup_dir}" ]] || return 0
+  shopt -s dotglob nullglob
+  for p in "${P_backup_dir}"/*; do
+    [[ ! -L "${p}" ]] || continue
+    name="${p##*/}"
+    for base in "${!BK_BASEKIND[@]}"; do
+      [[ "${name}" == "${base}.bak-before-"* ]] || continue
+      tail="${name#"${base}.bak-before-"}"
+      [[ "${tail}" =~ ${RE_BAKTAIL} ]] || continue
+      key="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+      ext="${BASH_REMATCH[3]}"
+      if [[ "${BK_BASEKIND[${base}]}" == "dir" ]]; then
+        case "${ext}" in
+          .tgz) [[ -f "${p}" ]] || continue ;;
+          -sqlite) [[ -d "${p}" ]] || continue ;;
+          *) continue ;;
+        esac
+      else
+        [[ -z "${ext}" && -f "${p}" ]] || continue
+      fi
+      id="${base}|${key}"
+      m="$(stat -c %Y -- "${p}" 2>/dev/null)" || m=0
+      [[ "${m}" =~ ^[0-9]{1,12}$ ]] || m=0
+      k="$(du -sk -- "${p}" 2>/dev/null | cut -f1)" || k=0
+      [[ "${k}" =~ ^[0-9]{1,12}$ ]] || k=0
+      if [[ -z "${BK_MEMBERS[${id}]+x}" ]]; then
+        BK_SETS+=("${id}")
+        BK_MEMBERS["${id}"]=""
+        BK_NEWEST["${id}"]=0
+      fi
+      BK_MEMBERS["${id}"]+="${name}"$'\n'
+      t="${BK_NEWEST[${id}]}"
+      if (( m > t )); then BK_NEWEST["${id}"]="${m}"; fi
+      BK_SIZEK["${name}"]="${k}"
+      BK_TOTALK=$((BK_TOTALK + k))
+      for cur in "${BK_CURRENT_NAMES[@]}"; do
+        [[ "${cur}" == "${name}" ]] && BK_CUR["${id}"]=1
+      done
+      break
+    done
+  done
+  shopt -u dotglob nullglob
+  return 0
+}
+
+backup_delete_one() { # 이름 → 검증된 한 경로만 지운다. 실패하면 1
+  local name="$1" p real rdir
+  [[ "${name}" != */* && "${name}" != *..* && -n "${name}" ]] || return 1
+  p="${P_backup_dir}/${name}"
+  [[ ! -L "${p}" && -e "${p}" ]] || return 1
+  rdir="$(realpath -e -- "${P_backup_dir}")" || return 1
+  real="$(realpath -e -- "${p}")" || return 1
+  [[ "${real}" == "${rdir}/${name}" ]] || return 1
+  rm -rf --one-file-system -- "${real}"
+}
+
+backup_prune() {
+  local keep="${POLICY[restart.backup_keep]-}" line id base name size drop
+  local last_base="" rank=0 eff
+  local -a lines=() victims=()
+  [[ -n "${keep}" ]] || return 0
+  [[ "${keep}" =~ ^[1-9][0-9]{0,8}$ ]] && (( keep >= 2 )) || { say "경고: 보관 정리 건너뜀(backup_keep 값 이상)"; return 0; }
+  backup_scan
+  # 드라이런은 새 세트가 아직 없으므로 그 한 자리를 비워 두고 센다(실제 실행과 같은 결과가 나오게)
+  eff="${keep}"
+  (( DRY )) && eff=$((keep - 1))
+  # 정렬: 원본별로, 이번 실행 세트 먼저, 그다음 최근 순. 이번 세트와 직전 세트는 keep>=2 라서 항상 남는다.
+  for id in "${BK_SETS[@]}"; do
+    lines+=("${id%%|*} ${BK_CUR[${id}]:-0} ${BK_NEWEST[${id}]} ${id#*|}")
+  done
+  (( ${#lines[@]} > 0 )) || { say "보관 정리: 지울 백업 없음(backup_keep=${keep})"; return 0; }
+  while IFS= read -r line; do
+    set -- ${line}
+    base="$1"
+    if [[ "${base}" != "${last_base}" ]]; then last_base="${base}"; rank=0; fi
+    rank=$((rank + 1))
+    (( rank > eff )) || continue
+    [[ "$2" == "0" ]] || continue
+    victims+=("${base}|$4")
+  done < <(printf '%s\n' "${lines[@]}" | sort -k1,1 -k2,2nr -k3,3nr -k4,4r)
+  if (( ${#victims[@]} == 0 )); then
+    say "보관 정리: 지울 백업 없음(backup_keep=${keep})"
+    return 0
+  fi
+  for id in "${victims[@]}"; do
+    while IFS= read -r name; do
+      [[ -n "${name}" ]] || continue
+      fmt_kib "${BK_SIZEK[${name}]:-0}"
+      size="${REPLY}"
+      if (( DRY )); then
+        say "DRY_RUN: 보관 정리 예정: ${name} (${size})"
+        continue
+      fi
+      if backup_delete_one "${name}"; then
+        say "보관 정리: ${name} (${size})"
+        audit "backup-prune:${name}:${size// /}" || true
+      else
+        printf '경고: 보관 정리 실패(건너뜀): %s\n' "${name}" >&2
+      fi
+    done <<< "${BK_MEMBERS[${id}]}"
+  done
+  return 0
+}
+
+backup_status_line() {
+  local keep="${POLICY[restart.backup_keep]-}" desc
+  path_set backup_dir || return 0
+  require_paths backup_dir
+  backup_scan
+  (( ${#BK_BASEKIND[@]} > 0 )) || return 0
+  fmt_kib "${BK_TOTALK}"
+  desc="제한 없음"
+  [[ -z "${keep}" ]] || desc="backup_keep=${keep}"
+  say "백업 보관: ${#BK_SETS[@]}세트, 합계 ${REPLY} (정책 ${desc}; 숨김 항목 포함, 정책에 적힌 원본의 백업만 센다)"
+}
+
+# 재시작하려는 SHA 와 서버 레포 HEAD 가 다를 때. 어느 쪽이 앞섰는지 가려 다음에 칠 명령을 알려 준다.
+# 정책 [restart] deploy_first = true 이고 이 계정에 deploy-bundle 권한도 있으면, 서버가 뒤처진 경우에 한해
+# 번들 배포를 먼저 하고 이어서 재시작한다(기본 false: 안내만 하고 멈춘다).
+restart_head_mismatch() {
+  local head="$1" pk="permissions.${KEY}" sha8="${FULL_SHA:0:8}" now=""
+  [[ "${head}" =~ ${RE_SHA_FULL} ]] || step_fail "git-head" "${RC_FAIL}" "레포 HEAD 를 볼 수 없다"
+  if as_deploy git -C "${P_repo}" merge-base --is-ancestor "${head}" "${FULL_SHA}"; then
+    # 서버 코드가 그 SHA 보다 뒤에 있다 → 먼저 배포해야 한다.
+    [[ -n "${POLICY[${pk}]+x}" ]] || pk="permissions._default"
+    if [[ "${POLICY[restart.deploy_first]-false}" == "true" ]] && policy_list_has "${pk}" "deploy-bundle"; then
+      say "서버 코드(${head:0:8})가 ${sha8} 보다 뒤에 있다. 정책 deploy_first 에 따라 번들 배포를 먼저 한다"
+      (( DRY )) || audit "deploy-first:${sha8}"
+      do_deploy_bundle
+      if (( DRY )); then
+        say "DRY_RUN: 배포가 끝나면 서버 레포 HEAD 가 ${sha8} 인지 확인하고 재시작으로 넘어간다"
+        return 0
+      fi
+      now="$(as_deploy git -C "${P_repo}" rev-parse HEAD)" || now=""
+      [[ "${now}" == "${FULL_SHA}" ]] ||
+        step_fail "head-mismatch" "${RC_FAIL}" "먼저 배포했지만 서버 레포 HEAD 가 그 SHA 가 아니다. 재시작하지 않았다"
+      return 0
+    fi
+    say "서버 코드(${head:0:8})가 ${sha8} 보다 뒤에 있다. 재시작은 서버 코드를 옮기지 않는다. 다음 순서로 한다:"
+    say "  1) deploy-bundle ${sha8} --announced"
+    say "  2) restart-backend ${sha8} --ack-data-loss --announced"
+    step_fail "head-mismatch" "${RC_FAIL}" "서버 레포 HEAD(${head:0:8})가 그 SHA 보다 뒤에 있다. 먼저 deploy-bundle ${sha8} 를 한다. 재시작하지 않았다"
+  fi
+  if as_deploy git -C "${P_repo}" merge-base --is-ancestor "${FULL_SHA}" "${head}"; then
+    # 서버 코드가 이미 그 SHA 보다 앞서 있다 → 지금 HEAD 로 재시작하면 된다.
+    say "서버 코드(${head:0:8})가 이미 ${sha8} 보다 앞서 있다(그 커밋은 지금 코드에 들어 있다). 지금 코드로 재시작하려면:"
+    say "  restart-backend ${head:0:8} --ack-data-loss --announced"
+    step_fail "head-mismatch" "${RC_FAIL}" "서버 레포 HEAD(${head:0:8})가 그 SHA 보다 앞서 있다. restart-backend ${head:0:8} 로 다시 한다. 재시작하지 않았다"
+  fi
+  step_fail "head-mismatch" "${RC_FAIL}" "서버 레포 HEAD(${head:0:8})와 그 SHA 가 서로 다른 갈래다. 재시작하면 다른 코드가 뜬다. 서버 책임자에게 알린다"
 }
 
 do_restart_backend() {
-  local head timeout poll waited=0 unit src
-  local -a sqlite_files=() plain_files=() dirs=()
+  local head timeout poll waited=0 unit src db rdb seen dup
+  local -a sqlite_files=() plain_files=() dirs=() sqlite_real=()
   require_paths repo backup_dir
   service_unit
   unit="${REPLY}"
@@ -1215,8 +2049,9 @@ do_restart_backend() {
   dirs=("${ITEMS[@]}")
   resolve_sha "${ARGS[0]}"
   head="$(as_deploy git -C "${P_repo}" rev-parse HEAD)" || step_fail "git-head" "${RC_FAIL}" "레포 HEAD 를 볼 수 없다"
-  [[ "${head}" == "${FULL_SHA}" ]] ||
-    step_fail "head-mismatch" "${RC_FAIL}" "서버 레포 HEAD 가 그 SHA 가 아니다. 재시작하면 다른 코드가 뜬다"
+  if [[ "${head}" != "${FULL_SHA}" ]]; then
+    restart_head_mismatch "${head}"
+  fi
   policy_uint restart.health_timeout_seconds 180
   timeout="${REPLY}"
   policy_uint restart.poll_seconds 5
@@ -1227,6 +2062,8 @@ do_restart_backend() {
     [[ "${src}" != *..* && -f "${src}" ]] || step_fail "backup-source" "${RC_FAIL}" "백업할 파일이 없다: ${src##*/}"
     backup_dest "${src}"
     run python3 -I -c "${PY_SQLITE_BACKUP}" "${src}" "${BACKUP_DEST}"
+    # 폴더 백업의 -sqlite 복사에서 같은 파일을 또 뜨지 않도록 실제 경로를 기억해 둔다
+    rdb="$(realpath -e -- "${src}" 2>/dev/null)" && sqlite_real+=("${rdb}")
   done
   for src in "${plain_files[@]}"; do
     [[ "${src}" != *..* && -f "${src}" ]] || step_fail "backup-source" "${RC_FAIL}" "백업할 파일이 없다: ${src##*/}"
@@ -1236,9 +2073,31 @@ do_restart_backend() {
   for src in "${dirs[@]}"; do
     [[ "${src}" != *..* && -d "${src}" ]] || step_fail "backup-source" "${RC_FAIL}" "백업할 폴더가 없다: ${src##*/}"
     backup_dest "${src}" ".tgz"
-    run tar --force-local -czf "${BACKUP_DEST}" -C "${src%/*}" "${src##*/}"
+    # sqlite 파일은 쓰는 중이라 tar 가 "file changed as we read it" 로 실패하므로 빼고, 아래에서 backup API 로 따로 뜬다
+    run tar --force-local -czf "${BACKUP_DEST}" --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' -C "${src%/*}" "${src##*/}"
+    backup_dest "${src}" "-sqlite"
+    run mkdir -m 700 -- "${BACKUP_DEST}"
+    for db in "${src}"/*.db; do
+      [[ -f "${db}" ]] || continue
+      # backup_sqlite 로 이미 별도 파일에 뜬 것(같은 실제 경로)은 여기서 또 뜨지 않는다(같은 파일이 두 번 저장되는 것을 막는다)
+      dup=0
+      rdb="$(realpath -e -- "${db}" 2>/dev/null)" || rdb=""
+      if [[ -n "${rdb}" ]]; then
+        for seen in "${sqlite_real[@]}"; do
+          [[ "${seen}" == "${rdb}" ]] && { dup=1; break; }
+        done
+      fi
+      if (( dup )); then
+        say "중복 건너뜀: ${db##*/} (backup_sqlite로 이미 백업)"
+        continue
+      fi
+      run python3 -I -c "${PY_SQLITE_BACKUP}" "${db}" "${BACKUP_DEST}/${db##*/}"
+    done
   done
   say "백업 끝"
+  # 백업이 다 끝난 뒤에만, 정책 backup_keep 이 있을 때만. 실패해도 재시작은 계속한다.
+  backup_prune || printf '경고: 백업 보관 정리 중 오류(재시작은 계속한다)
+' >&2
 
   say "재시작: 메모리에만 있는 상태가 지워진다(--ack-data-loss 확인됨)"
   run systemctl reset-failed "${unit}"
@@ -1328,7 +2187,7 @@ root_main() {
   check_root_owned "${CHECKER}" || deny "checker-perms" "${RC_CONFIG}" "검증기 파일이 root 소유가 아니거나 남이 쓸 수 있다"
   case "${ACTION}" in
     status | record-pr) ;;
-    unlock) acquire_run_lock ;;
+    unlock | autodeploy-pause) acquire_run_lock ;;
     *)
       deny_if_locked
       require_announced
@@ -1353,6 +2212,8 @@ root_main() {
       deploy-bundle) do_deploy_bundle ;;
       restart-backend) do_restart_backend ;;
       rollback-bundle) do_rollback_bundle ;;
+      autodeploy-pause) do_autodeploy_pause ;;
+      autodeploy-resume) do_autodeploy_resume ;;
     esac
   )
   rc=$?

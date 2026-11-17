@@ -22,6 +22,7 @@ from finance_agent import finance_config as fc
 from finance_agent.bank import match as bank_match
 from finance_agent.books import Books
 from finance_agent.closing import compute_totals
+from finance_agent.customer_reaction import NOT_RELEVANT, Flag, Reaction, unavailable
 from finance_agent.reconciliation import reconcile
 from finance_agent.tax import income_tax_amount, vat_pack
 
@@ -53,6 +54,8 @@ BRAKE_MIN_VIABLE = 50_000
 BRAKE_LOSS_LIMIT = 500_000
 BRAKE_LOSS_STREAK = 2
 LESSON_FACTOR, LESSON_FLOOR = Decimal("0.5"), Decimal("0.25")
+# [customer_reaction] limit_factor (CRX-001): 걸린 책이 있으면 요청당 한 번
+CRX_LIMIT_FACTOR = Decimal("0.5")
 LABEL = {
     "closing": "결산 (총거래액·수수료·쿠폰·환불·PG 수수료·영업 결과)",
     "reconciliation": "PG 대사 상태 분류",
@@ -492,6 +495,36 @@ def case_income_tax(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
     return got, want, {"base": base}
 
 
+def random_reaction(rng: random.Random) -> Reaction:
+    """고객 반응(CRX-001) 무작위 입력: 상품 없음·못 읽음·걸린 책 없음·걸린 책 1~3권."""
+    r = rng.random()
+    if r < 0.4:
+        return NOT_RELEVANT
+    if r < 0.5:
+        return unavailable("평가용 무작위")
+    flagged = ()
+    if r >= 0.75:  # 걸린 책이 여럿이어도 한도는 한 번만 줄어야 한다
+        flagged = tuple(
+            Flag(
+                product_id=f"prd_{k}",
+                title=f"책 {k}",
+                sold_qty=rng.randint(5, 200),
+                claim_count=rng.randint(2, 30),
+                defect_claim_count=rng.randint(0, 5),
+                claim_rate=rng.choice([None, 0.1, 0.25]),
+                why=rng.choice(["비율", "불량", "비율·불량"]),
+            )
+            for k in range(rng.randint(1, 3))
+        )
+    return Reaction(
+        status="flagged" if flagged else "clear",
+        flagged=flagged,
+        low_sales=tuple(f"적은 책 {k}" for k in range(rng.randint(0, 2))),
+        sales_unread=tuple(f"못 읽은 책 {k}" for k in range(rng.randint(0, 2))),
+        checked=rng.randint(1, 10),
+    )
+
+
 def case_campaign_opinion(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
     """캠페인 예산 의견 (`campaign.decide`): 연속 적자·이달 손실·현금 흐름·남은 예산·실패 교훈."""
     rng, today = g.rng, g.today
@@ -536,6 +569,7 @@ def case_campaign_opinion(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
         "provisional": False,
     }
     again = campaigns and rng.random() < 0.15  # 같은 캠페인을 다시 묻는 경우
+    reaction = random_reaction(rng)
     request = {
         "campaign_id": rng.choice(list(campaigns)) if again else g.uid("cmp"),
         "campaign_name": "새 캠페인",
@@ -551,6 +585,7 @@ def case_campaign_opinion(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
         today=today,
         monthly_budget=budget,
         started=started,
+        reaction=reaction,
     )
     got = (out["decision"], out["approved_limit_krw"])
 
@@ -598,6 +633,8 @@ def case_campaign_opinion(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
     if open_lessons:
         factor = max(LESSON_FACTOR ** len(open_lessons), LESSON_FLOOR)
         limit = min(limit, half_up(max(x["spend_krw"] for x in open_lessons), factor))
+    if reaction.flagged:  # CRX-001: 걸린 책이 몇 권이든 요청당 한 번만 곱한다
+        limit = min(limit, half_up(requested, CRX_LIMIT_FACTOR))
     if not rejects and limit < BRAKE_MIN_VIABLE:
         rejects += 1
     if rejects:
@@ -606,7 +643,16 @@ def case_campaign_opinion(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
         want = ("conditional", limit)
     else:
         want = ("approved", requested)
-    return got, want, {"request": request, "cash": cash, "budget": budget["amount_krw"]}
+    return (
+        got,
+        want,
+        {
+            "request": request,
+            "cash": cash,
+            "budget": budget["amount_krw"],
+            "reaction": f"{reaction.status}·걸린 책 {len(reaction.flagged)}권",
+        },
+    )
 
 
 CASES = {

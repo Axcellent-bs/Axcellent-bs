@@ -59,6 +59,7 @@ def dump(s: State) -> dict[str, Any]:
             "planning_requests": records.planning_requests,
             "planning_questions": records.planning_questions,
             "close_alerts": records.close_alerts,
+            "final_impacts": records.final_impacts,
             # 예전 정산 묶음(쓰지 않음). 고객지원으로 옮기는 스크립트가 읽게 그대로 남긴다
             "batches": records.legacy_batches,
             "policy_acks": records.policy_acks,
@@ -73,6 +74,7 @@ def dump(s: State) -> dict[str, Any]:
             "budget_reviews": records.budget_reviews,
             "lessons": records.lessons,
             "opinions": records.opinions,
+            "planning_insights": records.planning_insights,
             "exports": records.exports,
             "bank_imports": records.bank_imports,
             "pg_rows": records.pg_rows,
@@ -122,6 +124,7 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.recon_note_log = list(rec["recon_note_log"])
     s.records.planning_requests = [dict(r) for r in rec.get("planning_requests", [])]
     s.records.close_alerts = {k: dict(v) for k, v in rec.get("close_alerts", {}).items()}
+    s.records.final_impacts = {k: dict(v) for k, v in rec.get("final_impacts", {}).items()}
     s.records.planning_questions = {
         k: dict(v) for k, v in rec.get("planning_questions", {}).items()
     }
@@ -139,6 +142,7 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.budget_reviews = [dict(r) for r in rec.get("budget_reviews", [])]
     s.records.lessons = [dict(r) for r in rec.get("lessons", [])]
     s.records.opinions = [dict(r) for r in rec.get("opinions", [])]
+    s.records.planning_insights = [dict(r) for r in rec.get("planning_insights", [])]
     s.records.exports = {k: dict(v) for k, v in rec.get("exports", {}).items()}
     s.records.bank_imports = [dict(r) for r in rec.get("bank_imports", [])]
     exports.give_legacy_ids(s.records.bank_imports)  # id 전에 읽은 기록도 뺄 수 있게

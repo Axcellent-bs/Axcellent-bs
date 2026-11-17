@@ -137,7 +137,22 @@ async def claim_stats(request: AgentRequest) -> AgentResult:
 
 
 ORDER_READ_CONCURRENCY = 8
-DEADLINE_MARGIN = 3  # 요청 마감 몇 초 전에 선택 근거(문의·판매 수량) 읽기를 멈추는가
+DEADLINE_MARGIN = 3  # 요청 마감 몇 초 전에 선택 근거(문의·판매 수량) 읽기를 멈추는가 (최대치)
+MARGIN_SHARE = (
+    0.3  # 마감이 짧으면 남은 시간의 이 비율만 여유로 남긴다 (재무가 3초 마감으로 부를 때)
+)
+
+
+def _stop_at(deadline: datetime, now: datetime | None = None) -> datetime:
+    """선택 근거(문의·판매 수량) 읽기를 멈출 시각. 여유는 `min(3초, 남은 시간 × 30%)`다.
+
+    마감이 넉넉하면(30초) 3초 전에 멈추고, 재무처럼 3초 마감으로 부르면 남은 시간의 30%만 남겨
+    시작하자마자 마감이 지나 있지 않게 한다(11/17 태윤 님 검토). 이미 지난 마감은 여유 0이다.
+    """
+    current = now or datetime.now(UTC)
+    remaining = max((deadline - current).total_seconds(), 0.0)
+    margin = min(float(DEADLINE_MARGIN), remaining * MARGIN_SHARE)
+    return deadline - timedelta(seconds=margin)
 
 
 async def _skipped[T](value: T) -> T:
@@ -179,7 +194,7 @@ async def _inquiry_evidence(request: AgentRequest, period: str) -> InquiryEviden
         h.logger.warning("주문별 문의 건수를 읽지 못했다", exc_info=True)
         return InquiryEvidence(notes=("문의 건수를 읽지 못했다 (문의 서비스에 닿지 못함)",))
 
-    stop_at = request.meta.deadline - timedelta(seconds=DEADLINE_MARGIN)
+    stop_at = _stop_at(request.meta.deadline)
     gate = asyncio.Semaphore(ORDER_READ_CONCURRENCY)
 
     async def read(
@@ -223,7 +238,7 @@ async def _inquiry_evidence(request: AgentRequest, period: str) -> InquiryEviden
 
 
 async def _sales_evidence(request: AgentRequest, now: datetime, period: str) -> SalesEvidence:
-    """판매 서버 주문 목록에서 기간 안 상품별 판매 수량을 읽는다.
+    """판매 서버에서 기간 안 상품별 판매 수량을 읽는다(판매 집계 읽기 경로, 없으면 주문 목록).
 
     끝까지 읽지 못하면(연결 실패·페이지 상한·마감·응답 모양 이상) 모자란 수량으로 비율을 내지 않게
     `sold=None`과 이유를 돌려준다. 판매 수량은 선택 근거라서 클레임 집계는 그대로 나간다.
@@ -232,21 +247,18 @@ async def _sales_evidence(request: AgentRequest, now: datetime, period: str) -> 
         return SalesEvidence(notes=("주문 출처가 시드라 판매 수량을 읽지 않았다",))
     since = now - timedelta(days=PERIOD_DAYS[period])
     try:
-        read = await shop_client.fetch_sold_qty(
-            since, now, stop_at=request.meta.deadline - timedelta(seconds=DEADLINE_MARGIN)
-        )
+        read = await shop_client.fetch_sold_qty(since, now, stop_at=_stop_at(request.meta.deadline))
     except shop_client.ShopError as exc:
         return SalesEvidence(notes=(f"판매 수량을 읽지 못했다: {exc}",))
     except Exception:  # noqa: BLE001 - 응답 모양이 이상해도 클레임 집계는 그대로 낸다
         h.logger.warning("판매 수량을 읽다가 실패했다", exc_info=True)
         return SalesEvidence(notes=("판매 수량을 읽지 못했다 (응답을 해석하지 못함)",))
     if not read.complete:
-        return SalesEvidence(
-            notes=(
-                f"주문이 많아 {read.orders_scanned}건까지만 읽어서 판매 수량을 내지 않았다 "
-                "(모자란 수량으로 비율을 내면 틀린다)",
-            )
-        )
+        if read.source == "summary":
+            note = "마감 때문에 판매 집계를 끝까지 읽지 못해 판매 수량을 내지 않았다"
+        else:
+            note = f"주문이 많아 {read.orders_scanned}건까지만 읽어서 판매 수량을 내지 않았다"
+        return SalesEvidence(notes=(f"{note} (모자란 수량으로 비율을 내면 틀린다)",))
     return SalesEvidence(read.qty_by_product, read.orders_scanned)
 
 

@@ -13,12 +13,27 @@
   매출 효과 숫자(기간·`gmv_krw`·`orders`·잰 값)를 호출자가 주지 않으면 데이터 `campaign_result`
   (view=finance)의 `finance_record`를 그대로 가져와 채운다. 집행액·이름·채널·쿠폰은 호출자 값이다.
   호출자가 준 값은 덮어쓰지 않는다. 데이터에 닿지 못하면 재무를 부르지 않고 실패로 올린다.
+  콘텐츠 카테고리·형식(`content_category`·`format`)과 영상 제작비(`production_cost_krw`)는
+  호출자가 준 값을 먼저 싣는다(예산 의견 요청에도 싣는다). 호출자가 안 준 칸만 받아 둔 기획안의
+  `content_category`·`content_format`(재무 쪽 이름은 `format`)으로 채우고, 기획안에도 없거나 못
+  읽으면 비워 둔다(지어내지 않고, 기획안 조회 실패가 시작·결과 전달을 막지 않는다).
+- 영상 등록: `start_campaign`에 사람이 올린 영상 URL(`video_url`, 선택)이 있고 관문이 `executed`로
+  끝난 뒤에만 데이터 `video_performance`에 그 캠페인의 영상으로 등록한다(1h 측정 창이 1시간뿐이라
+  결과 기록 때 등록하면 늦다). URL이 있으면 `test`(시험 영상 여부)를 호출자가 명시해야 한다
+  (기본값으로 시연·시험을 갈라 집계를 오염시키지 않는다). 등록 실패는 캠페인을 막지 않고
+  경고 로그와 `output.video`에만 남긴다.
+- 결과의 조회수: `record_campaign_result`는 호출자가 `views`·`views_point`를 주지 않으면 데이터
+  `video_performance`(campaign_id)를 읽어 가장 늦게 잰 시점의 값을 싣는다(7일 전에 끝났으면 3d 등).
+  측정 중·놓침·등록 없음·시험 영상·데이터 실패면 비워 보내고 값을 지어내지 않는다(결과 전달은
+  막지 않는다). 7일이 지나 다시 부르면 같은 campaign_id로 새 값이 간다(덮어쓰기는 재무가 한다).
 - 쿠폰 지급(`issue_coupon`)은 이 흐름과 별개다. 재무는 쿠폰을 판단하지 않는다.
 - 재무에 닿지 못하면 승인으로 보지 않는다(fail-closed): 시작은 실행하지 않고 멈춘다.
 """
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -37,17 +52,25 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from ax_contracts.schemas.common import AxModel
+from ax_contracts.schemas.data import VideoPerformanceOutput
 from ax_contracts.schemas.finance import (
     CampaignBudgetReviewInput,
     CampaignBudgetReviewOutput,
     CampaignResultInput,
+    ContentFormat,
+    ViewsPoint,
 )
+
+_log = logging.getLogger(__name__)
 
 FINANCE = "finance"
 REVIEW_SKILL = "review_campaign_budget"
 RECORD_SKILL = "record_campaign_result"
 DATA = "data"
 DATA_RESULT_SKILL = "campaign_result"
+DATA_VIDEO_SKILL = "video_performance"
+# 데이터가 재는 시점, 늦은 것부터. 가장 늦게 잰 값을 쓴다
+_POINTS_LATEST_FIRST: tuple[ViewsPoint, ...] = ("7d", "3d", "1d", "1h")
 START_ACTION = "start_campaign"
 
 
@@ -58,6 +81,23 @@ class StartCampaignInput(AxModel):
     campaign_name: str = Field(min_length=1)
     channel: str = Field(min_length=1)
     budget_krw: StrictInt = Field(gt=0)
+    # 캠페인이 다루는 회사 상품 ID(선택, 최대 10개). 재무가 고객지원 책별 집계로 불만 많은 책인지
+    # 보고 예산 의견을 줄이는 데 쓴다. 비워 두면(옛 요청) 상품 신호 없이 판단한다
+    product_ids: list[str] = Field(default_factory=list, max_length=10)
+    # 콘텐츠 카테고리(예: 아재개그)와 형식(shorts·reels). 호출자가 준 값이 먼저이고, 비운 칸만 받아
+    # 둔 기획안의 값으로 채운다. 둘 다 없으면 비운다(재무는 카테고리 없는 캠페인으로 본다)
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    format: ContentFormat | None = None
+    # 사람이 유튜브 쇼츠에 올린 영상 주소(선택). 있으면 캠페인이 시작된 직후 데이터에 등록한다.
+    # 등록하면 `test`를 호출자가 정해야 한다: 시험 영상은 true, 시연·실제 캠페인은 false
+    video_url: str | None = Field(default=None, min_length=1, max_length=500)
+    test: bool | None = None
+
+    @model_validator(mode="after")
+    def _test_flag_with_video(self) -> StartCampaignInput:
+        if self.video_url is not None and self.test is None:
+            raise ValueError("video_url을 주면 test(시험 영상 여부)를 true·false로 정해야 한다")
+        return self
 
 
 # 데이터가 재는 매출 효과 값 묶음. 호출자가 하나라도 주면 이 묶음은 데이터로 채우지 않는다
@@ -90,6 +130,14 @@ class RecordCampaignResultInput(AxModel):
     measured_gmv_krw: int | None = None
     measured_orders: int | None = None
     effect_generated_at: str | None = None
+    # 아래는 호출자가 아는 값만 받는다(재무 계약과 같은 칸). 모르면 비워 두고 채우지 않는다.
+    # 조회수(views·views_point)는 데이터가 잰 값이다. 호출자가 주면 그대로 두고, 안 주면 데이터
+    # `video_performance`에서 읽어 채운다(측정 중·놓침이면 비움)
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    format: ContentFormat | None = None
+    production_cost_krw: int | None = Field(default=None, ge=0)  # 광고비(spend_krw)와 따로
+    views: int | None = Field(default=None, ge=0)
+    views_point: ViewsPoint | None = None
 
     @model_validator(mode="after")
     def _period_in_order(self) -> RecordCampaignResultInput:
@@ -204,17 +252,57 @@ def _gate_outcome(
     return _result(request, TaskStatus.FAILED, outcome=outcome, output=detail, evidence=evidence)
 
 
-async def start_campaign(request: AgentRequest) -> AgentResult:
+# 받아 둔 기획안의 (content_category, content_format). 기획안이 없거나 읽지 못하면 (None, None)
+BriefContent = Callable[[str], tuple[str | None, ContentFormat | None]]
+
+
+def _fill_content(
+    campaign_id: str,
+    category: str | None,
+    fmt: ContentFormat | None,
+    brief_content: BriefContent | None,
+) -> tuple[str | None, ContentFormat | None]:
+    """호출자가 비운 카테고리·형식만 기획안 값으로 채운다. 호출자 값은 덮어쓰지 않는다."""
+    if brief_content is None or (category is not None and fmt is not None):
+        return category, fmt
+    from_brief_category, from_brief_format = brief_content(campaign_id)
+    return (
+        category if category is not None else from_brief_category,
+        fmt if fmt is not None else from_brief_format,
+    )
+
+
+async def start_campaign(
+    request: AgentRequest,
+    brief_product_ids: Callable[[str], list[str]] | None = None,
+    brief_content: BriefContent | None = None,
+) -> AgentResult:
+    """캠페인 시작: 재무 의견을 받고 안전 관문을 거친다.
+
+    `brief_product_ids`는 요청에 상품이 없을 때 받아 둔 기획안에서 그 캠페인의 상품 ID를 꺼내는
+    함수다(기획안의 `product_ids`). 요청이 상품을 직접 주면 그것을 쓴다.
+    `brief_content`도 같은 방식으로 호출자가 안 준 `content_category`·`format`만 기획안의
+    `content_category`·`content_format`으로 채운다.
+    """
     try:
         data = StartCampaignInput.model_validate(request.input)
     except ValidationError as error:
         return _invalid(request, error)
 
+    product_ids = list(data.product_ids)
+    if not product_ids and brief_product_ids is not None:
+        product_ids = brief_product_ids(data.campaign_id)[:10]
+    category, content_format = _fill_content(
+        data.campaign_id, data.content_category, data.format, brief_content
+    )
     ask = CampaignBudgetReviewInput(
         campaign_id=data.campaign_id,
         campaign_name=data.campaign_name,
         channel=data.channel,
         requested_krw=data.budget_krw,
+        product_ids=product_ids,
+        content_category=category,
+        format=content_format,
     )
     answer = await _ask_finance(request, REVIEW_SKILL, ask)
     if answer.status != TaskStatus.COMPLETED:
@@ -261,7 +349,37 @@ async def start_campaign(request: AgentRequest) -> AgentResult:
         request.meta.model_copy(update={"idempotency_key": key}),
         evidence,
     )
-    return _gate_outcome(request, decision, review, evidence)
+    result = _gate_outcome(request, decision, review, evidence)
+    if data.video_url is not None and result.outcome == "executed":
+        result.output["video"] = await _register_video(request, data)
+    return result
+
+
+async def _register_video(request: AgentRequest, data: StartCampaignInput) -> dict[str, Any]:
+    """게시 직후 영상을 데이터 `video_performance`에 등록한다. 실패해도 캠페인은 막지 않는다."""
+    sent = AgentRequest(
+        meta=request.meta,
+        skill=DATA_VIDEO_SKILL,
+        input={
+            "campaign_id": data.campaign_id,
+            "video_url": data.video_url,
+            "test": bool(data.test),
+        },
+    )
+    try:
+        answer = await call_agent(DATA, sent)
+        out = VideoPerformanceOutput.model_validate(answer.output)
+    except Exception as exc:  # noqa: BLE001 - 등록 실패가 이미 시작된 캠페인을 바꾸지 않는다
+        _log.warning("캠페인 %s 영상 등록 실패: %s", data.campaign_id, type(exc).__name__)
+        return {
+            "registered": False,
+            "warning": "영상 등록 실패(데이터에 닿지 못하거나 답이 이상함)",
+        }
+    if answer.status != TaskStatus.COMPLETED or not out.tracking:
+        reason = out.reason or answer.outcome or answer.status.value
+        _log.warning("캠페인 %s 영상 등록 안 됨: %s", data.campaign_id, reason)
+        return {"registered": False, "warning": f"영상 등록 안 됨: {reason}"}
+    return {"registered": True, "video_id": out.video_id, "test": bool(data.test)}
 
 
 def _data_unusable(request: AgentRequest, answer: AgentResult, outcome: str) -> AgentResult:
@@ -313,11 +431,55 @@ async def _fill_from_data(
         return _data_unusable(request, answer, "data_result_invalid")
 
 
-async def record_campaign_result(request: AgentRequest) -> AgentResult:
+def _latest_views(out: VideoPerformanceOutput) -> tuple[int, ViewsPoint] | None:
+    """잰 값이 있는 가장 늦은 시점의 조회수. 측정 중·놓침(unknown)은 건너뛴다."""
+    by_name = {c.checkpoint: c for c in out.checkpoints}
+    for point in _POINTS_LATEST_FIRST:
+        checkpoint = by_name.get(point)
+        if checkpoint and checkpoint.status == "known" and checkpoint.views is not None:
+            return checkpoint.views, point
+    return None
+
+
+async def _fill_views(
+    request: AgentRequest, data: RecordCampaignResultInput
+) -> RecordCampaignResultInput:
+    """호출자가 조회수를 안 줬으면 데이터가 잰 값을 싣는다. 못 얻으면 비워 두고 막지 않는다."""
+    if data.views is not None or data.views_point is not None:
+        return data
+    sent = AgentRequest(
+        meta=request.meta,
+        skill=DATA_VIDEO_SKILL,
+        input={"campaign_id": data.campaign_id},
+    )
+    try:
+        answer = await call_agent(DATA, sent)
+        if answer.status != TaskStatus.COMPLETED:
+            raise ValueError(answer.outcome or answer.status.value)
+        out = VideoPerformanceOutput.model_validate(answer.output)
+    except Exception as exc:  # noqa: BLE001 - 조회수는 선택 칸이라 실패해도 결과 전달은 간다
+        _log.warning("캠페인 %s 조회수를 읽지 못함: %s", data.campaign_id, type(exc).__name__)
+        return data
+    if out.campaign_id not in (None, data.campaign_id) or out.test:
+        return data  # 다른 캠페인 답이거나 시험 영상이면 재무 결과에 싣지 않는다
+    latest = _latest_views(out)
+    if latest is None:
+        return data
+    views, point = latest
+    return data.model_copy(update={"views": views, "views_point": point})
+
+
+async def record_campaign_result(
+    request: AgentRequest, brief_content: BriefContent | None = None
+) -> AgentResult:
     try:
         data = RecordCampaignResultInput.model_validate(request.input)
     except ValidationError as error:
         return _invalid(request, error)
+    category, content_format = _fill_content(
+        data.campaign_id, data.content_category, data.format, brief_content
+    )
+    data = data.model_copy(update={"content_category": category, "format": content_format})
 
     queries = [f"finance.{RECORD_SKILL}"]
     if data.needs_data:
@@ -335,6 +497,7 @@ async def record_campaign_result(request: AgentRequest) -> AgentResult:
                 output={"campaign_id": data.campaign_id},
             )
 
+    data = await _fill_views(request, data)
     # 계약 모델 그대로 보낸다. 값이 없는 선택 필드는 보내지 않아 재무가 0으로 채우지 못한다
     try:
         contract = CampaignResultInput.model_validate(data.model_dump())

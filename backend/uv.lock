@@ -289,6 +289,7 @@ version = "0.1.0"
 source = { editable = "shared/agent-template" }
 dependencies = [
     { name = "ax-contracts" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pyyaml" },
@@ -298,6 +299,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "ax-contracts", editable = "shared/contracts" },
+    { name = "cryptography", specifier = ">=42" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pyyaml", specifier = ">=6" },
@@ -341,6 +343,7 @@ name = "ax-dejafix-proxy"
 version = "0.1.0"
 source = { editable = "shared/dejafix-proxy" }
 dependencies = [
+    { name = "ax-agent-template" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "uvicorn" },
@@ -348,6 +351,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "ax-agent-template", editable = "shared/agent-template" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "uvicorn", specifier = ">=0.30" },

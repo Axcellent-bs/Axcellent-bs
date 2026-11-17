@@ -221,6 +221,7 @@ def test_dev_agent_card_format_and_served() -> None:
     hr_links = {"list_in_progress", "list_dev_outcomes", "verify_handover"}
     chat = {f"dev_chat_{x}" for x in ("send", "list", "get", "close", "remove")}  # 직접 대화
     assert set(skills) == required | hr_links | chat | {
+        "receive_improvement_note",  # 총괄의 개선 노트를 받는 공통 skill
         "start_dev",
         "receive_release_order",
         "receive_request_pause",
@@ -246,6 +247,9 @@ def test_dev_agent_card_format_and_served() -> None:
     assert skills["start_dev"].allowed_requesters == ["planning"]
     for skill in card.skills:
         # B는 관문(repo_revert_pr·merge_pr)의 안전 코드 규칙이 검증한다
+        if skill.id == "receive_improvement_note":  # 총괄의 개선 노트를 받는 공통 skill
+            assert (skill.grade, skill.allowed_requesters) == ("A", ["orchestrator"])
+            continue
         assert skill.verifier == ("safety" if skill.grade == "B" else None), skill.id
         for ref in (skill.input_schema, skill.output_schema):
             path, name = ref.split("#")

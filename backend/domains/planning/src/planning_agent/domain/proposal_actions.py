@@ -5,7 +5,7 @@
 
 사람 버튼: 받아오기(pull_insights) · 확정→마케팅(approve_proposal)
           · 확정→개발(proposal_to_request) · 폐기(reject_proposal) · 고치기(edit_proposal)
-받는 skill: receive_insight(data·marketing → 제안)
+받는 skill: receive_insight(data·marketing·finance → 제안)
           · receive_campaign_update(marketing 게시 · data 성과)
 
 LLM 초안·다른 부서 호출(data promo_concepts, marketing receive_campaign_brief)은
@@ -47,7 +47,7 @@ from planning_agent import proposals as ext
 PULL_CTX = "ctx_proposals"
 PULL_DONE = "pull_insights"  # 받아오기 결과 기록 (화면이 마지막 것을 보여 준다)
 PULL_FAILED = "pull_insights_failed"
-DEPT_LABEL = {"data": "데이터분석", "marketing": "마케팅"}
+DEPT_LABEL = {"data": "데이터분석", "marketing": "마케팅", "finance": "재무"}
 EFFECT_MAX_WINDOW = timedelta(days=7)  # 데이터분석 campaign_effect MAX_WINDOW와 같게
 
 
@@ -324,7 +324,7 @@ class ProposalMixin:
         self: Any, *, requester: str, inp: ReceiveInsightInput, near: str | None = None
     ) -> ActionResult:
         """near: 받아오기가 찾은 비슷한 앞 제안 (인사이트 id가 날마다 바뀌어도 후속으로 잇는다)."""
-        frm = "marketing" if requester == "marketing" else "data"
+        frm = requester if requester in ("marketing", "finance") else "data"
         same = _same_insight(self.state, inp.insight_id, frm) or (
             _find(self.state, near) if near else None
         )
@@ -353,6 +353,8 @@ class ProposalMixin:
             p = Proposal(
                 id=pid, title=inp.title, from_=frm, skill=inp.skill, insight_id=inp.insight_id,
                 insight=inp.summary, facts=_facts_of(inp.facts), products=inp.products,
+                product_ids=inp.product_ids,
+                content_category=inp.content_category, content_format=inp.content_format,
                 audience=inp.audience, shorts_format=inp.shorts_format,
                 body_md=inp.body_md, idea=draft.idea, why=draft.why, target=target,
                 format=draft.format, written_by=draft.written_by, warnings=draft.warnings,
@@ -498,6 +500,8 @@ class ProposalMixin:
         brief = CampaignBriefInput(
             proposal_id=p.id, insight_id=p.insight_id, title=p.title, idea=p.idea, why=p.why,
             facts=_facts_in(p), target=_target_in(p), products=p.products, format=p.format,
+            product_ids=p.product_ids,
+            content_category=p.content_category, content_format=p.content_format,
             approved_by="사람", note=p.note, body_md=body_md,
             continue_campaign=_prev_campaign(self.state, p),
         )  # fmt: skip

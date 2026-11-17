@@ -64,7 +64,7 @@ function CardList({ kind, cards }: { kind: Kind; cards: HrCard[] }) {
   );
 }
 
-export default function CardSections({ cards }: { cards: HrCard[] | null }) {
+export default function CardSections({ cards, hideIncident = false }: { cards: HrCard[] | null; hideIncident?: boolean }) {
   if (cards === null) {
     return (
       <section className="card p-6">
@@ -75,24 +75,24 @@ export default function CardSections({ cards }: { cards: HrCard[] | null }) {
   }
   const incidents = cards.filter((c) => c.kind === "incident");
   const decisions = cards.filter((c) => c.kind === "decision");
-  const others = cards.filter((c) => c.kind !== "incident" && c.kind !== "decision");
+  const others = cards.filter((c) => c.kind !== "decision" && !(hideIncident && c.kind === "incident") && c.kind !== "incident");
   return (
     <div className="space-y-6">
       {/* 넓은 화면에서는 왼쪽 장애 대응(보라), 오른쪽 업무 결정(민트)으로 나란히 둔다. 좁으면 위아래로 쌓인다 */}
-      <div className="grid items-start gap-6 lg:grid-cols-2">
-      <section aria-labelledby="sec-incident" className="card min-w-0 space-y-3 p-6">
+      <div className={`grid items-start gap-6 ${hideIncident ? "" : "lg:grid-cols-2"}`}>
+      {!hideIncident && <section aria-labelledby="sec-incident" className="card min-w-0 space-y-3 p-6">
         <div id="sec-incident">
           <Head
             kind="incident"
             title="장애 대응 카드(이슈 기록)"
             count={incidents.length}
-            desc="장애가 끝나면 총괄이 남기는 기록이고, 비슷한 이슈를 찾는 데 쓰입니다."
+            desc="장애가 끝나면 총괄 AI가 남기는 기록이고, 비슷한 이슈를 찾는 데 쓰입니다."
           />
         </div>
         {incidents.length === 0
           ? <p className="py-4 text-center text-sm text-ink-500">아직 장애 대응 카드가 없습니다.</p>
           : <CardList kind="incident" cards={incidents} />}
-      </section>
+      </section>}
 
       <section aria-labelledby="sec-decision" className="card min-w-0 space-y-3 p-6">
         <div id="sec-decision">

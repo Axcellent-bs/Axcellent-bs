@@ -225,6 +225,6 @@ export const hr = {
   /** 에이전트 평가: 최근 장애 이슈에서 각 에이전트가 일한 시간을 기준과 견준 판정 모음 (읽기) */
   agentEvaluation: (limit = 30) => call<AgentEvaluation>(`/agent-evaluation?limit=${limit}`),
   checkPlan: (draft: PlanDraft) => post<PlanCheck>("/plan-checks", { draft }),
-  /** 총괄 이슈 목록(dashboard-api가 총괄 /api/incidents를 중계). 인사 AI의 이슈 기록 단계(record_case)가 들어 있다 */
+  /** 총괄 이슈 목록(dashboard-api가 총괄 /api/incidents를 중계). 아카이브 AI의 이슈 기록 단계(record_case)가 들어 있다 */
   incidents: () => call<OrchIncident[]>("/incidents"),
 };

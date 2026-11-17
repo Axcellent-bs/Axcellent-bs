@@ -230,7 +230,7 @@ function WhatToDo() {
       <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm">
         <li>보상을 못 받은 고객, 환불 문제: <Link to="/support" className={link}>고객지원 AI</Link></li>
         <li>승인을 기다리는 쿠폰: <Link to="/marketing" className={link}>마케팅 AI</Link></li>
-        <li>장애 진행 상황: <Link to="/orchestrator" className={link}>총괄</Link></li>
+        <li>장애 진행 상황: <Link to="/orchestrator" className={link}>총괄 AI</Link></li>
       </ul>
     </aside>
   );

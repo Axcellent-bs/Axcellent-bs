@@ -85,6 +85,14 @@ revenue_definition = "매출 = 결제 완료 주문의 상품 금액 − 쿠폰 
 min_product_orders = 5  # 상품 증감은 두 기간 모두 이 주문 수 이상인 상품만 비교한다
 max_staleness_minutes = 30  # 마지막 수집이 이보다 오래되면 숫자를 내지 않는다
 min_period_orders = 20  # 기간 안 결제 완료 주문이 이보다 적으면 숫자를 내지 않는다
+# ---- 고객·시장 분석 (11/16)
+min_group_size = 5  # 한 묶음(예: 20대·여성)의 고객이 이보다 적으면 숫자를 숨긴다
+active_days = 365  # 대상 고객 = 최근 365일 결제 완료 주문 1회 이상
+item_noun = "책"  # 화면에 쓰는 품목 이름 (예: "많이 산 책")
+# 이벤트 후보 거르기 (가정): 작년 같은 달 검색 배수가 평균보다 낮거나(1.0배 미만) 예상 주문(낮은
+# 쪽)이 5건 미만이면 제안에서 빼고 "제외한 후보"로 보여 준다. 기준은 시연용 가정값이다
+min_season_multiple = 1.0  # 가정
+min_orders_low = 5  # 가정
 
 # category_code → 화면 이름 (shop-api storefront.CATEGORY_NAMES와 같은 이름). 없는 코드는 품질 보고에 남는다
 [sales.categories]
@@ -111,3 +119,250 @@ onsite = "쇼핑몰 안"
 referral = "추천 링크"
 display = "배너 광고"
 shorts = "숏츠"
+
+# genre_code → 화면 이름. 판매 서버(캣북스) 장르 코드·이름·순서 그대로:
+# Catbooks-demo/catbooks-demo `backend/shop-api/src/ax_shop_api/genres.py` GENRES (커밋 413a5584).
+# 없는 코드는 품질 보고(unknown_genres)에 남는다
+[sales.genres]
+novel = "소설"
+essay = "시·에세이"
+business = "경제경영"
+self_help = "자기계발"
+humanities = "인문"
+society = "사회·정치"
+history = "역사"
+science = "과학"
+it = "AI·IT"
+language = "외국어"
+kids = "어린이"
+comics = "만화"
+hobby = "여행·취미"
+writing = "필기구"
+notebook = "노트"
+deco = "다꾸"
+
+# genre_code → 시즌 판단용 대표 검색어 (작년 같은 달 검색 배수). 검색어는 장르 이름을 그대로
+# 풀어 쓴 것이다(검색량 숫자는 네이버 검색어 트렌드 응답에서만 읽는다)
+[sales.genre_keywords]
+novel = ["소설 추천", "베스트셀러 소설"]
+essay = ["에세이 추천", "시집 추천"]
+business = ["재테크 책", "경제 책 추천"]
+self_help = ["자기계발서", "습관 책"]
+humanities = ["인문학 책", "철학 책"]
+society = ["사회 책 추천", "정치 책"]
+history = ["역사 책 추천", "한국사 책"]
+science = ["과학 책 추천", "교양 과학"]
+it = ["챗GPT 책", "AI 활용", "코딩 입문"]
+language = ["영어 공부 책", "외국어 공부"]
+kids = ["어린이 책", "그림책 추천"]
+comics = ["웹툰 단행본", "만화책"]
+hobby = ["여행 책", "취미 책"]
+writing = ["볼펜 추천", "만년필"]
+notebook = ["노트 추천", "다이어리"]
+deco = ["다꾸 스티커", "마스킹테이프"]
+
+# 고객 속성 (판매 서버와 맞춘 코드). 값이 비면 "모름"으로 센다. 순서 = 화면 순서
+[[sales.attributes]]
+key = "age_band"
+label = "연령대"
+[sales.attributes.values]
+10s = "10대"
+20s = "20대"
+30s = "30대"
+40s = "40대"
+50s_plus = "50대 이상"
+
+[[sales.attributes]]
+key = "gender"
+label = "성별"
+[sales.attributes.values]
+female = "여성"
+male = "남성"
+no_answer = "응답 안 함"
+
+[[sales.attributes]]
+key = "occupation"
+label = "직업"
+[sales.attributes.values]
+student = "학생"
+employee = "직장인"
+self_employed = "자영업"
+other = "기타"
+no_answer = "응답 안 함"
+
+# 속성 값 → 도서관 정보나루 인기대출(loanItemSrch) 조건.
+# 출처: 도서관 정보나루 Open API 매뉴얼 v20260620, https://www.data4library.kr/downloadApiManual
+#   - 요청 명세 10~11쪽: from_age(시작연령)·to_age(종료연령). "시작연령(from_age)만 있을 경우
+#     종료연령(to_age)는 100세로 자동 설정"
+#   - 코드표 58쪽 "성별 코드": 0 = 남성, 1 = 여성, 2 = 미상
+# 성별 no_answer(응답 안 함)는 넣지 않는다: 매뉴얼의 2 = 미상은 "응답 안 함"과 같은 뜻이 아니다
+# 연령 10s~40s: 매뉴얼 10~11쪽 from_age·to_age (https://www.data4library.kr/downloadApiManual)
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "age_band"
+value_code = "10s"
+params = { from_age = 10, to_age = 19 }
+
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "age_band"
+value_code = "20s"
+params = { from_age = 20, to_age = 29 }
+
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "age_band"
+value_code = "30s"
+params = { from_age = 30, to_age = 39 }
+
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "age_band"
+value_code = "40s"
+params = { from_age = 40, to_age = 49 }
+
+# 50대 이상: from_age만 (to_age는 100세로 자동 설정, 매뉴얼 10~11쪽 https://www.data4library.kr/downloadApiManual)
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "age_band"
+value_code = "50s_plus"
+params = { from_age = 50 }
+
+# 성별 코드 0 = 남성, 1 = 여성 (매뉴얼 58쪽 "성별 코드", https://www.data4library.kr/downloadApiManual)
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "gender"
+value_code = "male"
+params = { gender = "0" }
+
+# 성별 코드 1 = 여성 (매뉴얼 58쪽 "성별 코드", https://www.data4library.kr/downloadApiManual)
+[[sales.external_filters]]
+source_id = "data4library"
+attribute_key = "gender"
+value_code = "female"
+params = { gender = "1" }
+
+# 장르 → 도서관 정보나루 kdc. 출처: 도서관 정보나루 Open API 매뉴얼 v20260620 코드표 59쪽
+# "대주제 코드" (https://www.data4library.kr/downloadApiManual): 0 총류, 1 철학, 2 종교,
+# 3 사회과학, 4 자연과학, 5 기술과학, 6 예술, 7 언어, 8 문학, 9 역사.
+# 장르 이름과 대주제 이름이 같은 주제일 때만 넣는다.
+# 넣지 않은 장르 (미확인):
+#   - it(AI·IT): 0 총류는 컴퓨터과학(KDC 004) 말고도 백과사전·연속간행물 등을 다 담는다. 매뉴얼
+#     표에는 2자리 세부주제까지만 있어 004를 고를 수 없으므로 근사로 넣지 않는다
+#   - self_help(자기계발): 매뉴얼 대주제·세부주제 표에 맞는 분류가 없음
+#   - humanities(인문): KDC 분류 하나가 아님 (철학·역사·언어 등에 걸침)
+#   - comics(만화): 매뉴얼 표에 없음 (65 회화·도화는 만화가 아님)
+#   - kids(어린이): KDC 주제가 아님. 매뉴얼 58~59쪽 ISBN 부가기호(addCode) 7 = 아동이 있지만
+#     커넥터 popular_loans가 addCode를 받지 않아 넣지 않는다
+#   - hobby(여행·취미): 분류 하나로 정할 수 없음
+#   - writing·notebook·deco: 문구라 도서 분류가 아님
+# business(경제경영)는 매뉴얼 세부주제 32 경제학이 있지만 커넥터가 dtl_kdc를 받지 않아 kdc 3만 쓴다
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "novel"
+params = { kdc = "8" }  # 8 문학 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "essay"
+params = { kdc = "8" }  # 8 문학 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "business"
+params = { kdc = "3" }  # 3 사회과학 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "society"
+params = { kdc = "3" }  # 3 사회과학 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "history"
+params = { kdc = "9" }  # 9 역사 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "science"
+params = { kdc = "4" }  # 4 자연과학 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+[[sales.genre_external]]
+source_id = "data4library"
+genre_code = "language"
+params = { kdc = "7" }  # 7 언어 (매뉴얼 59쪽, https://www.data4library.kr/downloadApiManual)
+
+# 시장 커버 비율의 인구 통계 (연령대 × 성별, KOSIS)
+# 출처: 통계청 KOSIS "행정구역(읍면동)별/5세별 주민등록인구" (월별)
+#   https://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=DT_1B04005N
+# 코드는 KOSIS 통계표 메타(getMeta type=ITM, 2026-11-16 조회)로 확인:
+#   - 분류 A 행정구역: 00 = 전국 (obj_l1로 전국 한 곳만 고른다)
+#   - 분류 B 5세별: 15 = 10~14세, 20 = 15~19세, 25 = 20~24세, … 100 = 95~99세, 105 = 100+
+#   - 항목: T3 = 남자인구수, T4 = 여자인구수 (T2 총인구수는 쓰지 않는다)
+# 연령대는 5세 코드를 더한다 (50대 이상 = 50세 이상 전부). 기준은 가장 최근 달(new_est_prd_cnt 1)
+# 성별 no_answer(응답 안 함)는 인구 통계에 없는 값이라 코드를 비워 둔다 → 커버 비율을 내지 않는다
+[[sales.population]]
+attribute_keys = ["age_band", "gender"]
+source_id = "kosis"
+
+[sales.population.table_ref]
+org_id = "101"
+tbl_id = "DT_1B04005N"
+label = "통계청 주민등록인구 (5세별)"
+prd_se = "M"
+new_est_prd_cnt = 1
+obj_l1 = "00"
+obj_l2 = "ALL"
+itm_id = "ALL"
+dims = { age_band = "c2", gender = "itm" }
+
+[sales.population.table_ref.codes.age_band]
+10s = ["15", "20"]
+20s = ["25", "30"]
+30s = ["35", "40"]
+40s = ["45", "50"]
+50s_plus = ["55", "60", "65", "70", "75", "80", "85", "90", "95", "100", "105"]
+
+[sales.population.table_ref.codes.gender]
+female = "T4"
+male = "T3"
+no_answer = []
+
+# 이벤트 종류. 할인율·전환율은 지난 캠페인이 없을 때 쓰는 가정 값이다 (가정)
+[[sales.event_kinds]]
+code = "bundle_discount"
+label = "묶음 할인"
+discount_rate = 0.10  # 가정
+conversion_low = 0.02  # 가정
+conversion_high = 0.05  # 가정
+
+[[sales.event_kinds]]
+code = "genre_coupon"
+label = "장르 쿠폰"
+discount_rate = 0.15  # 가정
+conversion_low = 0.03  # 가정
+conversion_high = 0.07  # 가정
+
+[[sales.event_kinds]]
+code = "free_shipping"
+label = "무료 배송"
+discount_rate = 0.05  # 가정 (평균 주문 대비 배송비 몫)
+conversion_low = 0.01  # 가정
+conversion_high = 0.03  # 가정
+
+# 화면의 자주 묻는 질문 칩
+[[sales.quick_questions]]
+label = "20대 여성"
+filters = { age_band = "20s", gender = "female" }
+
+[[sales.quick_questions]]
+label = "30대 직장인"
+filters = { age_band = "30s", occupation = "employee" }
+
+[[sales.quick_questions]]
+label = "10대 학생"
+filters = { age_band = "10s", occupation = "student" }
+
+[[sales.quick_questions]]
+label = "40대 남성"
+filters = { age_band = "40s", gender = "male" }

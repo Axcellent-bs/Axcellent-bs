@@ -16,6 +16,8 @@ label = "server"      # 알림 문안 맨 앞에 붙는 이름(영어·숫자·-
 # OS 계정 → 허용 동작. 신원은 서버의 개인 계정(실제 로그인 사용자)이다.
 # 동작: status lock unlock nginx-restore nginx-add-location nginx-approve-location
 #       deploy-bundle restart-backend rollback-bundle record-pr
+#       autodeploy-pause autodeploy-resume (자동 배포 정지·재개. 쓰려면 권한자 줄에 직접 더한다.
+#       _default 에는 둘 수 없다: 넣으면 게이트가 정책을 거부한다)
 #
 # 단계 예시:
 #   모두        status, deploy-bundle(자동 배포가 막혔을 때의 수동 처리), record-pr
@@ -55,6 +57,30 @@ proposal_ttl_hours = 24      # 제안이 승인을 기다릴 수 있는 시간
 # 자리표시: {method} {segment} {port}. 메서드 제한 한 줄과 "proxy_pass http://127.0.0.1:{port};" 한 줄은 필수다.
 block_lines = ["limit_except {method} { deny all; }", "rewrite ^/{segment}/(.*)$ /$1 break;", "proxy_pass http://127.0.0.1:{port};", "include snippets/example-proxy.conf;", "include snippets/example-auth.conf;"]
 
+# 프로필(선택): location 블록 끝에 덧붙는 지시어 묶음에 이름을 붙여 둔다. 요청하는 사람은 이름만 고른다
+#   nginx-add-location <이름> POST <정규식> <프로필이름>
+# 쓸 수 있는 지시어는 검증기가 정한 타임아웃·본문 크기 계열뿐이다:
+#   proxy_read_timeout proxy_send_timeout proxy_connect_timeout send_timeout client_body_timeout (1초~3600초, 단위 s/m)
+#   client_max_body_size (1k~1024m, 단위 k/m. 0=무제한은 안 된다)
+# 그 밖의 지시어(proxy_pass, include, rewrite, add_header 등)를 적으면 그 프로필을 쓰는 제안이 거부된다.
+# block_lines 에 이미 있는 지시어도 프로필에 넣을 수 없다. 프로필 이름은 영어 소문자·숫자·-.
+[location_profiles]
+long-timeout = ["proxy_read_timeout 300s;", "proxy_send_timeout 300s;"]
+big-body = ["client_max_body_size 50m;"]
+
+# 추가 nginx 대상 파일(선택). 이 구역이 없으면 [paths] nginx_conf 하나만 다룬다(예전과 같다).
+# 적으면 nginx-add-location 승인과 nginx-restore 가 대상 전부를 한 묶음으로 바꾼다:
+#   전부 사전 검증 → 전부 백업 → 전부 교체 → nginx -t 한 번 → reload. 어느 단계든 실패하면 전부 되돌린다.
+# 요청하는 사람은 대상을 고르지 못한다. 대상 파일마다 삽입 표시 줄(# AX-GATE-INSERT-BELOW)이 한 개씩 있어야 한다.
+# 이름은 영어 소문자·숫자·-. 값은 전체 경로. 쓰려면 아래 두 줄의 주석을 풀고 경로를 채운다.
+# [nginx_targets]
+# site-b = "TODO"
+
+# 대상별 블록 줄(선택). 그 대상의 기존 location 모양이 [location] block_lines 와 다를 때만 적는다.
+# 없으면 그 대상도 [location] block_lines 를 쓴다. 이름은 [nginx_targets] 에 있어야 한다. 규칙은 block_lines 와 같다.
+# [nginx_target_block_lines]
+# site-b = ["limit_except {method} { deny all; }", "proxy_pass http://127.0.0.1:{port};", "include snippets/example-proxy-b.conf;"]
+
 [lock]
 default_hours = 4     # lock 에 해제시각을 안 적었을 때 잠그는 시간
 max_hours = 24        # 한 번에 잠글 수 있는 최대 시간
@@ -72,13 +98,31 @@ secret_env_files = ["TODO"]                   # 여기 적힌 env 파일들의 �
 bundle_allowed_env_names = []                 # 위 검사의 예외: 배포 스크립트가 일부러 번들에 넣는 값의 변수 이름
 check_url = "http://127.0.0.1:8300/"          # 배포 뒤 200 이어야 하는 주소(선택)
 
+# 자동 배포 정지·재개(선택). 이 구역이 없으면 autodeploy-pause / autodeploy-resume 는 설정 오류로 멈춘다.
+# 게이트는 pause_file 한 파일만 쓴다(root 소유 644). 자동 배포의 타이머·서비스·스크립트는 건드리지 않는다.
+# 서버의 자동 배포 스크립트가 맨 앞에서 그 파일을 읽고 건너뛰게 한 번 연결해야 한다(INSTALL.md, 동봉한 autodeploy-paused.sh).
+# 파일 이름은 반드시 autodeploy.pause 여야 하고 폴더는 미리 만들어 둔다. 재개시각이 지나면 저절로 재개된다.
+# 쓰려면 아래 네 줄의 주석을 풀고 경로를 채운다. 이 구역의 키는 이 셋뿐이다(다른 키가 있으면 게이트가 정책을 거부한다).
+# [autodeploy]
+# pause_file = "TODO"   # 예: <게이트 상태 폴더>/autodeploy.pause
+# default_hours = 2     # 재개시각을 안 적었을 때 멈추는 시간
+# max_hours = 12        # 한 번에 멈출 수 있는 최대 시간
+
 [restart]
 unit = "example-backend"        # 재시작할 서비스
+# restart-backend 의 SHA 가 서버 코드보다 앞서 있을 때(head-mismatch): false 면 "먼저 deploy-bundle" 안내만 하고 멈춘다.
+# true 면 그 계정에 deploy-bundle 권한도 있을 때에 한해 번들 배포를 먼저 하고 이어서 재시작한다.
+deploy_first = false
 health_timeout_seconds = 180    # 다시 뜰 때까지 기다리는 최대 시간(폴링)
 poll_seconds = 5
 backup_sqlite = []              # 재시작 전에 백업할 sqlite 파일(전체 경로)
 backup_files = []               # 재시작 전에 복사해 둘 파일
 backup_dirs = []                # 재시작 전에 묶어 둘 폴더
+# 백업 보관 개수. 적지 않으면(기본) 백업을 하나도 지우지 않는다. 2 이상의 정수만 쓸 수 있다(1·0·글자는 정책 오류).
+# 적으면 restart-backend 가 백업을 성공적으로 끝낸 뒤, 위 backup_dirs·backup_sqlite 에 적힌 원본의 게이트 백업 세트
+# (<이름>.bak-before-<SHA 8자>[.시각]의 .tgz / -sqlite / sqlite 파일 사본)를 최신 N세트만 남기고 지운다.
+# 이번에 만든 세트와 직전 세트는 N 과 상관없이 남는다. 번들 백업(www-*), .env 백업, deploy-* 파일은 건드리지 않는다.
+# backup_keep = 5
 
 [health]
 urls = ["http://127.0.0.1:8201/health"]   # 전부 200 이어야 정상. status 와 restart-backend 가 쓴다

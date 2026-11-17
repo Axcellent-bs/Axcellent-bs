@@ -49,6 +49,10 @@ class ImpactAnalysisOutput(AxModel):
     # 데이터분석이 이 요청을 처리하기 시작한 시각. 부른 쪽이 대기(요청~시작)와
     # 처리(시작~응답) 시간을 나눠 남기는 데 쓴다(재무 영향 분석 로그). 예전 응답에는 없다
     started_at: UtcDatetime | None = None
+    # 장애 구간에 시간 초과로 남은 결제(확인·환불 필요). 실패 주문·미결제와 따로 센다.
+    # 모르면 None. 예전 응답에는 없다
+    timeout_count: int | None = Field(default=None, ge=0)
+    timeout_amount: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _customer_count_matches_ids(self) -> Self:
@@ -577,6 +581,12 @@ class CatalogSales(AxModel):
     quick_questions: list[QuickQuestion] = Field(default_factory=list)
     min_group_size: int = Field(default=5, ge=1)  # 한 묶음이 이보다 적으면 숫자를 숨긴다
     active_days: int = Field(default=365, ge=1)  # 대상 고객 = 최근 N일 결제 완료 주문 1회 이상
+    # ---- 11/16 시안 맞춤 (모두 선택)
+    item_noun: str = Field(default="상품", min_length=1)  # 화면에 쓰는 품목 이름 (예: 책·게임)
+    # 이벤트 후보 거르기: 작년 같은 달 검색 배수가 이보다 낮거나 예상 주문(낮은 쪽)이 이보다
+    # 적으면 제안에서 빼고 excluded에 이유와 함께 둔다
+    min_season_multiple: float = Field(default=1.0, ge=0)
+    min_orders_low: int = Field(default=5, ge=0)
 
     @model_validator(mode="after")
     def _references_exist(self) -> Self:
@@ -3394,6 +3404,9 @@ class SalesBasis(AxModel):
     last_synced_at: UtcDatetime | None = None
     catalog_id: str
     catalog_version: str | None = None
+    # 저장소를 채운 출처가 실제 판매 서버가 아닐 때의 표시 (11/16). 가짜 출처(데모 전용
+    # `DATA_SALES_SOURCE=fake`)로 채웠으면 "가짜 데이터(데모용)". 실제 판매 서버면 None
+    data_source: str | None = None
 
 
 class SalesAnalysisOutput(AxModel):
@@ -3430,7 +3443,8 @@ class SalesAnalysisOutput(AxModel):
 #   기간 시작 시각과 같게 둔다
 # - 대상 고객(이벤트 제안) = 그 속성 묶음에서 최근 `active_days`(기본 365)일 결제 완료 주문이
 #   1회 이상인 고객
-SegmentPeriod = Literal["30d", "90d", "365d"]
+# 1d·7d는 화면의 짧은 기간으로 뒤에 더했다 (기존 값은 그대로)
+SegmentPeriod = Literal["30d", "90d", "365d", "1d", "7d"]
 SegmentTargetKind = Literal["category", "genre", "product"]
 ExternalStatus = Literal["ok", "key_missing", "limit", "error"]
 
@@ -3646,11 +3660,20 @@ class EventProposalInput(AxModel):
     tenant_id: str = TENANT_ID_DEFAULT
 
 
+class ExcludedProposal(AxModel):
+    """기준(min_season_multiple·min_orders_low)에 못 미쳐 제안에서 뺀 후보 하나."""
+
+    target_label: str = ""
+    item_label: str = ""
+    reason: str = ""  # 사람이 읽는 이유 한 줄 (숫자는 서버 값)
+
+
 class EventProposalOutput(AxModel):
     status: Literal["ok", "insufficient"] = "ok"
     insufficient_reasons: list[str] = Field(default_factory=list)
     month: str
     proposals: list[EventProposalItem] = Field(default_factory=list)
+    excluded: list[ExcludedProposal] = Field(default_factory=list)  # 기준 미달로 뺀 후보
     quality: SalesQuality = Field(default_factory=SalesQuality)
     basis: SalesBasis | None = None
     summary: str = ""
@@ -3665,6 +3688,63 @@ class EventProposalSendOutput(AxModel):
     outcome: Literal["created", "duplicate", "rejected"]
     proposal_ref: str | None = None  # 기획 제안 번호 (PROP-n)
     reason: str = ""
+
+
+# ---------------------------------------------------------------- segment_options (11/16)
+# 화면(고객·시장 분석 탭)의 드롭다운·칩·목록을 회사 카탈로그 `[sales]`에서 내려 준다. 화면 코드에
+# 속성·장르·질문 이름을 고정하지 않게. 설정을 읽기만 한다(grade read, 숫자 없음).
+class OptionItem(AxModel):
+    code: str
+    label: str
+
+
+class OptionAttribute(AxModel):
+    key: str
+    label: str
+    values: list[OptionItem] = Field(default_factory=list)  # 카탈로그 순서 그대로
+
+
+class OptionQuestion(AxModel):
+    label: str
+    filters: dict[str, str] = Field(default_factory=dict)  # 속성 key → 값 code
+
+
+class SegmentOptionsInput(AxModel):
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class SegmentOptionsOutput(AxModel):
+    attributes: list[OptionAttribute] = Field(default_factory=list)
+    genres: list[OptionItem] = Field(default_factory=list)
+    categories: list[OptionItem] = Field(default_factory=list)
+    quick_questions: list[OptionQuestion] = Field(default_factory=list)
+    event_kinds: list[OptionItem] = Field(default_factory=list)
+    periods: list[SegmentPeriod] = Field(default_factory=lambda: ["30d", "90d", "365d"])
+    # market_coverage에 넣을 수 있는 속성 조합 (카탈로그 population 순서)
+    population_keys: list[list[str]] = Field(default_factory=list)
+    min_group_size: int = Field(default=5, ge=1)
+    data_source: str | None = None  # SalesBasis.data_source와 같은 값
+    catalog_id: str = ""
+    catalog_version: str | None = None
+    item_noun: str = "상품"  # 화면에 쓰는 품목 이름 (카탈로그 item_noun)
+
+
+# ---------------------------------------------------------------- segment_question (11/16)
+# 화면 물어보기 칸의 글 질문을 고르는 칸 값으로 바꾼다. LLM은 그 회사 segment_options 안의
+# code만 고른다. 보기에 없는 code는 버리고, 아무것도 못 고르거나 LLM이 실패하면 unparsed.
+# 숫자는 만들지 않는다(grade read).
+class SegmentQuestionInput(AxModel):
+    text: str = Field(min_length=1, max_length=200)
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class SegmentQuestionOutput(AxModel):
+    status: Literal["ok", "unparsed"] = "unparsed"
+    filters: dict[str, str] = Field(default_factory=dict)  # 속성 key → 값 code
+    genre_code: str | None = None
+    period: SegmentPeriod | None = None
+    understood_label: str = ""  # 예: "20대 · 여성 · 직업 전체 · 최근 90일"
+    reason: str = ""  # unparsed일 때 이유 (사람이 읽는 말)
 
 
 TrendInsight.model_rebuild()
