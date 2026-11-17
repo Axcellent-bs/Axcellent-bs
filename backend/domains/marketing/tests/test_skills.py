@@ -88,7 +88,7 @@ def _fake_execute(monkeypatch: pytest.MonkeyPatch, decision: ExecuteDecision) ->
 def test_agent_card_matches_template_format() -> None:
     card = load_card()
     assert card.name == "marketing"
-    assert {s.id for s in card.skills} == set(handlers.HANDLERS)
+    assert {s.id for s in card.skills} == set(handlers.HANDLERS) | {"receive_improvement_note"}
     issue = next(s for s in card.skills if s.id == "issue_coupon")
     assert (issue.grade, issue.verifier) == ("A", None)
     assert client.get("/.well-known/agent-card.json").json()["name"] == "marketing"

@@ -48,6 +48,8 @@ from ax_agent_template.config import (
     set_agent_name,
     token_registry,
 )
+from ax_agent_template.improvement_notes import SKILL as NOTES_SKILL
+from ax_agent_template.improvement_notes import handler_for as notes_handler_for
 from ax_agent_template.logging import log_event
 from ax_agent_template.services import SERVICE_PORTS, department_of
 from ax_contracts.schemas import (
@@ -187,6 +189,9 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
     # 핸들러 없는 skill은 그대로 실패
     if card.name in SERVICE_PORTS:
         handlers = {k: v for k, v in handlers.items() if k in skill_ids}
+    # 총괄의 개선 노트를 받는 공통 skill은 카드에 적기만 하면 된다(핸들러를 따로 만들지 않는다)
+    if NOTES_SKILL in skill_ids and NOTES_SKILL not in handlers:
+        handlers = {**handlers, NOTES_SKILL: notes_handler_for(card.name)}
     if set(handlers) != skill_ids:
         missing = sorted(skill_ids - set(handlers))
         extra = sorted(set(handlers) - skill_ids)

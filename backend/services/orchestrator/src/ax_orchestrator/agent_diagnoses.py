@@ -12,8 +12,15 @@
 - 저장소(`IncidentStore`, `ORCHESTRATOR_DB`)를 주면 파일에도 적어 다시 켜도 남는다.
 - 받은 요청은 이어서 진단한다(`diagnose`, 규칙만, `diagnosis_rules.py`).
   상태는 `received` → `diagnosing` → `diagnosed`(원인을 가릴 만한 겹침이 있음) 또는
-  `insufficient`(근거 부족, 에이전트에 전달하지 않음).
+  `insufficient`(근거 부족).
   진단하는 동안 새 근거가 더해지면 한 번 더 진단한다. 진단이 실패해도 요청은 `received`로 남는다.
+- 진단이 끝나면(`diagnosed`·`insufficient`) 해당 에이전트에 개선 노트로 바로 전달한다(`deliver`,
+  사람 확인 없이 자동). 근거 부족은 "원인 미확정"(`cause_known` 거짓) 표시를 붙여 사실만
+  보낸다. 같은 에이전트·단계의 원인 미확정 노트는 `UNKNOWN_COOLDOWN_DAYS`(7일)에 한 번만
+  보낸다(`skipped`).
+  전달 상태는 `delivery.status`에 `accepted`·`duplicate`·`rejected`(이유)·`failed`(못 보냄)·
+  `revoked`로 남고, 사람이 화면에서 철회할 수 있다(`revoke`). 노트는 기록·알림이라
+  에이전트의 동작을 바꾸지 않는다.
 """
 
 from __future__ import annotations
@@ -24,8 +31,14 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from ax_contracts.schemas.diagnosis import DiagnoseAgentIssueInput, DiagnoseAgentIssueOutput
+from ax_contracts.schemas.diagnosis import (
+    DiagnoseAgentIssueInput,
+    DiagnoseAgentIssueOutput,
+    ReceiveImprovementNoteInput,
+    ReceiveImprovementNoteOutput,
+)
 from ax_orchestrator.diagnosis_cards import CardsUnavailable
+from ax_orchestrator.diagnosis_notes import build_note
 from ax_orchestrator.diagnosis_rules import diagnose as diagnose_rows
 
 if TYPE_CHECKING:
@@ -34,8 +47,14 @@ if TYPE_CHECKING:
 
 # (근거 이슈 번호들, 요청 번호) -> 이슈 번호 → 아카이브 이슈 카드
 CardsFetcher = Callable[[list[str], str], Awaitable[dict[str, dict[str, Any]]]]
+# (노트, 요청 번호) -> 에이전트의 응답. 못 보냈으면 None
+NoteSender = Callable[
+    [ReceiveImprovementNoteInput, str], Awaitable[ReceiveImprovementNoteOutput | None]
+]
 
 OPEN_STATES = ("received", "diagnosing")
+CLOSED_DIAGNOSES = ("diagnosed", "insufficient")
+UNKNOWN_COOLDOWN_DAYS = 7
 MIN_NEW_EVIDENCE = 2
 DAILY_LIMIT = 1
 MAX_REQUESTS = 500
@@ -56,6 +75,8 @@ class AgentDiagnoses:
         self._seq = 0
         # 아카이브 이슈 카드를 읽는 함수. None이면 총괄이 기록한 것만으로 진단한다(목·시험)
         self.cards_fetcher: CardsFetcher | None = None
+        # 진단을 해당 에이전트에 개선 노트로 보내는 함수. None이면 전달하지 않는다(목·시험)
+        self.note_sender: NoteSender | None = None
         # 요청을 받으면 이어서 진단을 시작할지(실제 서버만 켠다)
         self.auto_run = False
         self._tasks: set[asyncio.Task[Any]] = set()
@@ -203,4 +224,99 @@ class AgentDiagnoses:
         row["diagnosed_at"] = datetime.now(UTC).isoformat()
         row["updated_at"] = row["diagnosed_at"]
         self._save(row)
+        await self.deliver(request_id)
         return result
+
+    async def deliver(self, request_id: str) -> dict[str, Any] | None:
+        """진단(`diagnosed`·`insufficient`)을 해당 에이전트에 개선 노트로 보낸다.
+
+        이미 보냈거나 거둔 건은 다시 보내지 않는다.
+
+        못 보내면 `delivery.status`가 `failed`로 남고 요청·진단은 그대로다.
+        """
+        row = self._rows.get(request_id)
+        if row is None or row["status"] not in CLOSED_DIAGNOSES or self.note_sender is None:
+            return None
+        current = row.get("delivery")
+        if current and current["status"] in ("accepted", "duplicate", "rejected", "revoked"):
+            return None
+        note = build_note(row)
+        if not note.cause_known and self._unknown_sent_recently(row):
+            delivery = {
+                "note_id": note.note_id,
+                "status": "skipped",
+                "reason": (
+                    f"원인 미확정 노트는 같은 단계에 {UNKNOWN_COOLDOWN_DAYS}일에 한 번만 보내요"
+                ),
+                "attempts": (current or {}).get("attempts", 0),
+                "delivered_at": None,
+            }
+            row["delivery"] = delivery
+            self._save(row)
+            return delivery
+        answer = await self.note_sender(note, request_id)
+        delivery = {
+            "note_id": note.note_id,
+            "status": answer.status if answer else "failed",
+            "reason": answer.reason if answer else "에이전트에 닿지 않았어요",
+            "attempts": (current or {}).get("attempts", 0) + 1,
+            "delivered_at": datetime.now(UTC).isoformat(),
+        }
+        row["delivery"] = delivery
+        row["updated_at"] = delivery["delivered_at"]
+        self._save(row)
+        return delivery
+
+    def _unknown_sent_recently(self, row: dict[str, Any]) -> bool:
+        """같은 에이전트·단계에 원인 미확정 노트를 최근에 보냈는가(철회·실패는 안 센다)."""
+        cutoff = datetime.now(UTC) - timedelta(days=UNKNOWN_COOLDOWN_DAYS)
+        for other in self._rows.values():
+            delivery = other.get("delivery") or {}
+            if (
+                other is row
+                or other["agent"] != row["agent"]
+                or other["step_id"] != row["step_id"]
+                or other["status"] != "insufficient"
+                or delivery.get("status") not in ("accepted", "duplicate")
+                or not delivery.get("delivered_at")
+            ):
+                continue
+            if datetime.fromisoformat(delivery["delivered_at"]) >= cutoff:
+                return True
+        return False
+
+    async def revoke(self, request_id: str) -> dict[str, Any] | None:
+        """사람이 전달을 철회한다. 에이전트가 그 노트를 쓰지 않게 거두고, 다시 전달하지 않는다.
+
+        에이전트에 닿지 않아도 철회는 기록한다(`revoked`, 사유에 남김). 없는 요청이면 None.
+        """
+        row = self._rows.get(request_id)
+        if row is None or row["status"] not in CLOSED_DIAGNOSES:
+            return None
+        current = row.get("delivery")
+        if current and current["status"] == "revoked":
+            return current
+        reason: str | None = None
+        if (
+            self.note_sender is not None
+            and current
+            and current["status"] in ("accepted", "duplicate")
+        ):
+            answer = await self.note_sender(build_note(row, revoke=True), request_id)
+            if answer is None:
+                reason = "에이전트에 닿지 않아 철회만 기록했어요"
+            elif answer.status != "revoked":
+                reason = answer.reason
+        stamp = datetime.now(UTC).isoformat()
+        delivery = {
+            "note_id": (current or {}).get("note_id") or build_note(row).note_id,
+            "status": "revoked",
+            "reason": reason,
+            "attempts": (current or {}).get("attempts", 0),
+            "delivered_at": (current or {}).get("delivered_at"),
+            "revoked_at": stamp,
+        }
+        row["delivery"] = delivery
+        row["updated_at"] = stamp
+        self._save(row)
+        return delivery

@@ -28,6 +28,7 @@ from ax_contracts.schemas import TENANT_ID_DEFAULT, EventEnvelope, EventType
 from ax_orchestrator.a2a import build_a2a_app
 from ax_orchestrator.auth import require_admin, require_agent, require_human
 from ax_orchestrator.diagnosis_cards import fetch_cards_via_archive
+from ax_orchestrator.diagnosis_notes import send_note_via_agent
 from ax_orchestrator.engine import Engine
 from ax_orchestrator.hybrid import HybridDepartments, real_depts_from_env
 from ax_orchestrator.inbox import post_to_inbox
@@ -137,6 +138,7 @@ class AppState:
         diagnoses = self.manager.agent_diagnoses
         diagnoses.auto_run = not self.mock
         diagnoses.cards_fetcher = None if self.mock else fetch_cards_via_archive
+        diagnoses.note_sender = None if self.mock else send_note_via_agent
         return self.manager
 
     async def _publish(self, kind: str, inc: Incident) -> None:
@@ -295,6 +297,18 @@ async def agent_diagnoses() -> dict:
     """인사가 에이전트 평가에서 반복을 찾아 보낸 진단 요청. 최근 받은 것부터. 읽기 전용."""
     rows = state.manager.agent_diagnoses.list() if state.manager else []
     return {"data": list(reversed(rows)), "meta": {"mock": state.mock}}
+
+
+@app.post("/api/agent-diagnoses/{request_id}/revoke")
+async def revoke_agent_diagnosis(request_id: str, _: str = Depends(require_human)) -> JSONResponse:
+    """사람이 진단의 개선 노트 전달을 철회한다. 에이전트가 그 노트를 쓰지 않게 거둔다."""
+    manager = state.manager
+    delivery = await manager.agent_diagnoses.revoke(request_id) if manager else None
+    if delivery is None:
+        return JSONResponse(
+            {"error": {"code": "NOT_FOUND", "message": "철회할 진단이 없어요"}}, 404
+        )
+    return JSONResponse({"data": delivery})
 
 
 @app.get("/api/incidents/{context_id}")

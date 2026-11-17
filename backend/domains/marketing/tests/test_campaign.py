@@ -413,7 +413,7 @@ async def test_record_result_invalid_input(monkeypatch: pytest.MonkeyPatch, bad:
 
 async def test_card_lists_campaign_skills() -> None:
     skills = {s.id: s for s in load_card().skills}
-    assert set(skills) == set(handlers.HANDLERS)
+    assert set(skills) == set(handlers.HANDLERS) | {"receive_improvement_note"}  # 공통 skill
     assert (skills["start_campaign"].grade, skills["start_campaign"].verifier) == ("B", "safety")
     assert skills["record_campaign_result"].grade == "read"
 
