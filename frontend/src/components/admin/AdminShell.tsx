@@ -9,7 +9,8 @@ import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type 
 import { useOpenHandoffCount } from "@/lib/handoffs";
 import { AlertBell } from "./AlertBell";
 import { DEV_TASKS_HREF, ORCHESTRATOR_HREF, PLANNING_REQUESTS_HREF, useNavCounts } from "@/lib/navCounts";
-import { IconAgents, IconChart, IconGear, IconInbox, IconLink, IconSearch } from "../icons";
+import { IconAgents, IconChart, IconGear, IconInbox, IconSearch } from "../icons";
+import { preConnectMenu, systemMenuFor } from "@/demo/systemMenu";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
 // 고객사 계정은 시스템 관리자 하나이고, 회사가 켠 서비스는 전부 메뉴에 보인다(서비스 고르기에서 끈 서비스만 빠짐, src/demo/session.tsx).
@@ -59,7 +60,6 @@ const SHARED_NAV: NavItem[] = [
       { href: "/agents/office", label: "AI 오피스", match: ["/agents/office"] },
     ],
   },
-  { href: "/connections", label: "연결", Icon: IconLink, match: ["/connections"] },
 ];
 // 관제 센터: 고객사에 설치된 AXcellent 상태를 모아 보는 AXcellent 운영팀 전용 화면 (src/control). 고객사 계정에는 안 보인다
 const CONTROL_MENU: SubItem[] = [
@@ -76,14 +76,10 @@ const CONTROL_NAV: NavItem[] = [
   { href: "/control", label: "관제 센터", Icon: IconChart, children: subNav(CONTROL_MENU), match: ["/control"] },
 ];
 
-// 고객사 시스템 관리자의 관리 화면은 "시스템 관리" 탭 하나 아래에 모은다.
+// 관리 화면은 "시스템 관리" 탭 하나 아래에 모은다 (메뉴 목록: src/demo/systemMenu.ts).
 // 회원·서버 관리: 회원(연결·부서·확인 권한)과 PC·서버 연결(DejaFix), 접속 허용 IP를 한 화면 탭으로 묶는다.
-// PC·서버 연결은 기본 시스템으로 보고 여기 고정으로 둔다 (서비스 메뉴에서는 뺌)
-const SYSTEM_MENU: SubItem[] = [
-  { href: "/system/connect", label: "회사 연결" },
-  { href: "/system/services", label: "서비스 고르기" },
-  { href: "/system/members", label: "회원·서버 관리" },
-];
+// PC·서버 연결은 기본 시스템으로 보고 여기 고정으로 둔다 (서비스 메뉴에서는 뺌).
+// 도구 연결(형상관리·배포·문서·AI)은 모두에게 보인다. 관리자가 아니면 시스템 관리 아래에 이것만 있다
 const systemNav = (menu: SubItem[]): NavItem => ({ href: menu[0].href, label: "시스템 관리", Icon: IconGear, children: subNav(menu), match: ["/system"] });
 
 function useNav(): NavItem[] {
@@ -99,7 +95,7 @@ function useNav(): NavItem[] {
     return first ? [...CONTROL_NAV, { ...first, divider: true }, ...more] : CONTROL_NAV;
   }
   // 회사 연결 전에는 회사 연결만 보인다
-  if (!company) return account.admin ? [systemNav(SYSTEM_MENU.slice(0, 1))] : [];
+  if (!company) return account.admin ? [systemNav(preConnectMenu())] : [];
   return customerNav(account, enabled);
 }
 
@@ -122,8 +118,9 @@ function customerNav(account: Account, enabled: string[]): NavItem[] {
   const others = services.filter((s) => !s.agent && s.id !== INFRA_ID && !(account.admin && s.id === "hosts"));
   const rest = [...others.map(serviceNav), ...SHARED_NAV];
   if (agents.length) rest[0] = { ...rest[0], divider: true };
-  // 고객사 시스템 관리자는 관리 메뉴를 맨 위에
-  return [...(account.admin ? [systemNav(SYSTEM_MENU)] : []), ...agents, ...rest];
+  // 고객사 시스템 관리자는 관리 메뉴를 맨 위에, 일반회원은 맨 아래(예전 "연결" 자리)에 도구 연결만
+  const system = systemNav(systemMenuFor(!!account.admin));
+  return account.admin ? [system, ...agents, ...rest] : [...agents, ...rest, system];
 }
 
 const isOn = (path: string, item: NavItem) => item.match.some((m) => matchPath(m, path));

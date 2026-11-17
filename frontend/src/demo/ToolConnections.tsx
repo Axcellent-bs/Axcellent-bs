@@ -436,7 +436,7 @@ const readTab = (): PanelItem => {
 }
 
 /** 연결 창: 왼쪽 메뉴(형상관리·AI 코딩) + 오른쪽 내용. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
-export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: () => void } = {}) {
+export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClose?: () => void } = {}) {
   const [list, setList] = useState<VcsConnection[] | null>(null)
   const [offline, setOffline] = useState(false)
   const [tests, setTests] = useState<Record<string, VcsTestResult>>({})
@@ -747,12 +747,12 @@ export function DevToolsPanel({ title, onClose }: { title?: string; onClose?: ()
   )
 }
 
-/** 연결 페이지(/connections): 사이드바 AI 오피스 아래. 형상관리 · AI(코딩 방식·키·모델·AI 도구) */
-export default function DevTools() {
+/** 도구 연결(/system/tools): 시스템 관리 아래, 모두 연다. 형상관리 · AI(코딩 방식·키·모델·AI 도구). 예전 /connections */
+export default function ToolConnections() {
   return (
     <div className="space-y-6 px-4 py-8 sm:px-8">
-      <PageHead title="연결">개발 AI와 기획 AI가 쓰는 바깥 도구를 이어요. 레포·노션·AI 키는 서버에만 저장되고 화면에는 끝 4자리만 보여요.</PageHead>
-      <DevToolsPanel />
+      <PageHead where="시스템 관리" title="도구 연결">개발 AI와 기획 AI가 쓰는 바깥 도구를 이어요. 레포·노션·AI 키는 서버에만 저장되고 화면에는 끝 4자리만 보여요.</PageHead>
+      <ToolConnectionsPanel />
     </div>
   )
 }

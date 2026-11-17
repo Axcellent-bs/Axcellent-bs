@@ -92,6 +92,7 @@ export const OPERATORS: Account[] = [
 const all = () => [...customerAccounts(), ...OPERATORS]
 
 
+// 시스템 관리 화면은 관리자만. 도구 연결(/system/tools)은 SHARED_PATHS에 있어 모두 연다
 const SYSTEM_PATHS = ['/system']
 
 /** 이 계정이 지금 쓸 수 있는 서비스: 회사가 켠 AI 서비스 전부 + 이 계정에 배정된 그 밖의 서비스(DejaFix 등) */
