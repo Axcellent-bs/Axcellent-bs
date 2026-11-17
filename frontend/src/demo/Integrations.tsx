@@ -2,25 +2,24 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { DangerRow, Facts, More, Notice, SectionHead, StatusChip } from '@/components/connect/parts'
 import { PreparingChip } from '@/components/Preparing'
 import { ApiError } from '@/lib/apiError'
-import { companyConnection, type ConnectionHistory, type ConnectionMode, type ConnectionState, type ConnectionTest } from '@/lib/companyConnection'
+import { companyConnection, type ConnectionHistory, type ConnectionState, type ConnectionTest } from '@/lib/companyConnection'
 import { HUMAN_TOKEN_SET } from '@/lib/env'
 import { ago } from '@/lib/format'
 
 // 회사 판매 서버(고객사 판매 서버, shop-api 규격) 연결 창구. 저장하면 부서 AI가 모두 재시작 없이 이 주소를 읽는다.
 // 연결 확인은 서버(dashboard-api)가 그 주소를 실제로 불러 상태·상품·구매자를 읽어 본 결과다. 회사 연결 화면(CompanyConnect) 아래쪽에 들어간다.
-// 계층: 지금 읽는 곳(두 모드 중 하나를 고르는 카드) › 보조 사실 › 주소 바꾸기(확인 → 저장) › 기록·규칙(펼침) › 연결 해제(맨 아래)
+// 계층: 보조 사실 › 주소 바꾸기(확인 → 저장) › 기록·규칙(펼침) › 연결 해제(맨 아래). 앞으로는 회사 판매 서버만 쓴다(내부 데이터로 바꾸는 창구 없음).
 const ACTION: Record<ConnectionHistory['action'], string> = { save: '주소 저장', mode: '모드 전환', recheck: '다시 확인', clear: '연결 해제' }
 const modeOf = (enabled: boolean | null) => (enabled === null ? '' : enabled ? ' (실제 연결)' : ' (내부 데이터)')
 const normalize = (u: string) => u.trim().replace(/\/+$/, '')
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
 
-export default function Integrations({ onState, onCheck, embedded = false }: { onState?: (s: ConnectionState | 'error') => void; onCheck?: (r: ConnectionTest | null) => void; embedded?: boolean } = {}) {
+export default function Integrations({ onState, embedded = false }: { onState?: (s: ConnectionState | 'error') => void; embedded?: boolean } = {}) {
   const [state, setStateRaw] = useState<ConnectionState | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [url, setUrl] = useState('')
-  const [result, setResultRaw] = useState<ConnectionTest | null>(null)
-  const setResult = (r: ConnectionTest | null) => { setResultRaw(r); onCheck?.(r) }
-  const [busy, setBusy] = useState<'test' | 'save' | 'clear' | 'mode' | null>(null)
+  const [result, setResult] = useState<ConnectionTest | null>(null)
+  const [busy, setBusy] = useState<'test' | 'save' | 'clear' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const setState = (s: ConnectionState) => { setStateRaw(s); onState?.(s) }
@@ -33,7 +32,7 @@ export default function Integrations({ onState, onCheck, embedded = false }: { o
     return () => { live = false }
   }, [])
 
-  const run = async (kind: 'test' | 'save' | 'clear' | 'mode', work: () => Promise<void>) => {
+  const run = async (kind: 'test' | 'save' | 'clear', work: () => Promise<void>) => {
     setBusy(kind)
     setError(null)
     try {
@@ -50,10 +49,10 @@ export default function Integrations({ onState, onCheck, embedded = false }: { o
   }
   const save = () => void run('save', async () => {
     const saved = await companyConnection.save(url)
-    setState(saved)
+    // 저장만으로 내부 데이터 모드가 풀리지 않을 수 있어, 실제로 회사 판매 서버를 읽게 한다
+    setState(saved.mode === 'internal' ? await companyConnection.mode('connected') : saved)
     setResult(null)
   })
-  const switchMode = (mode: ConnectionMode) => void run('mode', async () => setState(await companyConnection.mode(mode)))
   const clear = () => void run('clear', async () => {
     setState(await companyConnection.clear())
     setResult(null)
@@ -62,13 +61,10 @@ export default function Integrations({ onState, onCheck, embedded = false }: { o
   })
 
   const tested = result !== null && result.ok && result.url === normalize(url)
+  // 저장한 주소가 있는데 아직 내부 데이터로 읽는 상태: 그 주소 그대로 저장하면 바로 전환한다
+  const pendingSwitch = state?.mode === 'internal' && !!state.connection && normalize(url) === normalize(state.connection.shop_api_url)
   const canWrite = HUMAN_TOKEN_SET && (state?.editable ?? false)
   const status = !state ? null : state.mode === 'connected' ? <StatusChip tone="ok">회사 서버 연결됨</StatusChip> : <StatusChip tone="wait">내부 데이터 사용 중</StatusChip>
-
-  const modes: { id: ConnectionMode; title: string; url: string | null; desc: string }[] = state ? [
-    { id: 'internal', title: '내부 데이터', url: state.internal_url, desc: '설치할 때 정한 기본 판매 서버예요. 시험·시연용으로 써요.' },
-    { id: 'connected', title: '회사 판매 서버', url: state.connection?.shop_api_url ?? null, desc: '회사가 운영하는 실제 판매 서버예요.' },
-  ] : []
 
   return (
     <section className="space-y-4">
@@ -82,35 +78,6 @@ export default function Integrations({ onState, onCheck, embedded = false }: { o
 
       <div className="card">
         <div className="space-y-6 p-6">
-          {state && (
-            <div className="space-y-3">
-              <p className="text-xs text-ink-500">지금 읽는 곳</p>
-              <div role="radiogroup" aria-label="판매 서버" className="grid gap-3 md:grid-cols-2">
-                {modes.map((m) => {
-                  const active = state.mode === m.id
-                  const blocked = m.id === 'connected' && !state.connection
-                  return (
-                    <div key={m.id} role="radio" aria-checked={active}
-                      className={`flex flex-col gap-2 border p-4 ${active ? 'border-brand-600 bg-brand-50/50' : 'border-ink-100'}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="font-semibold">{m.title}</p>
-                        {active ? <StatusChip tone="ok">지금 읽는 중</StatusChip> : (
-                          <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => switchMode(m.id)}
-                            disabled={busy !== null || !canWrite || blocked}>
-                            {busy === 'mode' ? '바꾸는 중…' : '이걸로 바꾸기'}
-                          </button>
-                        )}
-                      </div>
-                      <p className={`break-all font-mono text-xs ${m.url ? 'text-ink-900' : 'text-ink-500'}`}>{m.url ?? '아래에서 주소를 확인·저장하면 켤 수 있어요'}</p>
-                      <p className="text-xs text-ink-500">{m.desc}</p>
-                    </div>
-                  )
-                })}
-              </div>
-              <p className="text-xs leading-5 text-amber-800">판매 서버를 바꾸면 확정하지 않은 결산 숫자가 바뀔 수 있어요. 확정한 결산은 그대로이고, 차이는 재무 화면에 결산 차이로 보여요.</p>
-            </div>
-          )}
-
           {state && (
             <div className="border-t border-ink-100 pt-5">
               <Facts cols={4} items={[
@@ -128,8 +95,9 @@ export default function Integrations({ onState, onCheck, embedded = false }: { o
               <input id="shop-api-url" aria-label="판매 서버 주소" className="field min-w-[260px] flex-1 font-mono" placeholder="http://10.20.30.40:8080/shop-api"
                 value={url} onChange={(e) => { setUrl(e.target.value); setResult(null) }} />
               <button className="btn-ghost" disabled={busy !== null || !url.trim() || !canWrite}>{busy === 'test' ? '확인 중…' : '1. 연결 확인'}</button>
-              <button type="button" className="btn-primary" onClick={save} disabled={busy !== null || !tested || !canWrite}>{busy === 'save' ? '저장 중…' : '2. 저장'}</button>
+              <button type="button" className="btn-primary" onClick={save} disabled={busy !== null || !(tested || pendingSwitch) || !canWrite}>{busy === 'save' ? '저장 중…' : '2. 저장'}</button>
             </div>
+            {pendingSwitch && <p role="status" className="text-sm text-amber-800">아직 내부 데이터로 읽고 있어요. 저장하면 회사 판매 서버로 바꿔요</p>}
             {result && (
               <ul className="grid gap-2 sm:grid-cols-3" aria-label="연결 확인 결과">
                 {result.checks.map((c) => (
@@ -140,6 +108,7 @@ export default function Integrations({ onState, onCheck, embedded = false }: { o
                 ))}
               </ul>
             )}
+            <p className="text-xs leading-5 text-amber-800">판매 서버를 바꾸면 확정하지 않은 결산 숫자가 바뀔 수 있어요. 확정한 결산은 그대로이고, 차이는 재무 화면에 결산 차이로 보여요.</p>
             {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           </form>
 
@@ -158,7 +127,7 @@ export default function Integrations({ onState, onCheck, embedded = false }: { o
             )}
             <More summary="어떤 주소를 쓸 수 있나요">
               <p>사내 주소(192.168.x.x 등)는 바로 돼요. 사내 밖 주소는 설치 운영자가 허용 목록(AX_COMPANY_SHOP_ALLOWED_HOSTS)에 넣은 https 주소만 돼요.</p>
-              <p>내부 데이터로 바꾸면 저장한 주소는 남긴 채 기본 판매 서버를 읽어요. 연결 해제는 저장한 주소까지 지워요.</p>
+              <p>연결 해제는 저장한 주소를 지우고 기본 판매 서버로 돌아가요.</p>
               <p>토큰이 필요한 쿠폰·환불 읽기는 <PreparingChip /></p>
             </More>
           </div>
