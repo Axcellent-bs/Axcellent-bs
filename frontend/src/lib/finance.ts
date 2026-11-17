@@ -936,6 +936,8 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
 export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_media", "start_campaign"] as const;
 /** 고객지원 판매자 정산 화면에서 결정하는 보류 건 (정산 묶음 지급 승인) */
 export const SETTLEMENT_HOLD_ACTION = "confirm_settlement";
+/** 고객지원 보상 큐(/queue)에서 결정하는 보류 건 (데이터 삭제 승인, 보관 기간이 지난 문의·클레임 삭제) */
+export const SUPPORT_DELETION_HOLD_ACTIONS = ["approve_data_deletion", "purge_expired_inquiries", "purge_expired_claims"] as const;
 /** 고객지원 > 판매자 정산 화면 주소 (정산 묶음 요청·지급 승인은 거기서 한다) */
 export const SUPPORT_SETTLEMENT_PATH = "/settlements";
 /** 재무 화면에서 결정하지 않는 보류 건. 환불·판매자 정산 지급은 고객지원 화면, 쿠폰·공지·SNS·영상은 마케팅 화면에서 결정한다 */
@@ -945,6 +947,7 @@ export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
   publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", start_campaign: "캠페인 집행",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기",
+  approve_data_deletion: "데이터 삭제 승인", purge_expired_inquiries: "기한 지난 문의 지우기", purge_expired_claims: "기한 지난 클레임 지우기",
 };
 
 /** "2026-W43" → "2026년 43주차". 모양이 다르면 그대로 */

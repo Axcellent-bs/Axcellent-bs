@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Blockers, Loading, OFFLINE, StatusChip } from "@/components/admin/bits";
+import { ActionQueue } from "@/components/finance/SafetyQueue";
 import IncidentCompensationQueue from "@/components/support/IncidentCompensationQueue";
 import RefundHolds from "@/components/support/RefundHolds";
 import { api } from "@/lib/api";
+import { SUPPORT_DELETION_HOLD_ACTIONS } from "@/lib/finance";
 import { shortDateTime, won } from "@/lib/format";
 import { CLAIM_REASON_KO, CLAIM_TYPE_KO, INSPECTION_KO } from "@/lib/labels";
 import type { QueueRun, QueueView } from "@/lib/types";
@@ -53,6 +55,7 @@ export default function QueuePage() {
       {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
       <IncidentCompensationQueue />
       <RefundHolds key={run ? `after-${run.held}-${run.paid}` : "initial"} onDecided={load} />
+      <ActionQueue action={SUPPORT_DELETION_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 개인정보 삭제와 보관 기간이 지난 기록 삭제가 여기 모입니다. 지운 원문은 되돌릴 수 없습니다. 문의는 3년, 클레임은 5년이 지난 기록이 대상입니다." />
       {run && (
         <div role="status" className="rounded-xl border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-700">
           방금 처리: 지급 <b>{run.paid}</b>건 · 보류 <b>{run.held}</b>건
