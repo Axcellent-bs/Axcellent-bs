@@ -175,6 +175,11 @@ DEFAULT_CACHE_KIB = -2000  # SQLite 기본값 (약 2MB)
 
 CUSTOMERS_SUFFIX = ":customers"  # 고객 내보내기의 sync_state 출처 = `<판매 출처>:customers`
 VERSION_SOURCE = "*version*"  # sync_state의 저장소 버전 줄 (판매 기록 출처가 아니다)
+# sync_state의 저장소 생성 id 줄 (11/17): 새 파일을 만들 때 한 번만 uuid를 `cursor` 칸에 넣는다.
+# 리셋한 새 저장소가 옛 저장소와 같은 버전 번호를 다시 써도 결과 캐시가 섞이지 않게 한다
+STORE_ID_SOURCE = "*store*"
+STORE_ID_TENANT = "*"
+_META_SOURCES = (VERSION_SOURCE, STORE_ID_SOURCE)
 WRITE_TIMEOUT = 5.0  # 연결이 잠금을 기다리는 초
 FAKE_SOURCE = "fake"  # 가짜 판매 출처(데모 전용, `sales_fake`)의 sync_state 출처 이름
 
@@ -278,6 +283,20 @@ class SalesStore:
             self._conn.executescript(_SCHEMA)
             self._add_missing_columns()
             self._conn.executescript(_AFTER_COLUMNS)
+            self.store_id = self._ensure_store_id()
+
+    def _ensure_store_id(self) -> str:
+        """저장소 생성 id: 없으면(새 파일·예전 파일) 한 번만 만들어 남기고, 있으면 그대로 읽는다."""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO sync_state (tenant_id, source, cursor) VALUES (?, ?, ?)",
+            (STORE_ID_TENANT, STORE_ID_SOURCE, uuid.uuid4().hex),
+        )
+        self._conn.commit()
+        row = self._conn.execute(
+            "SELECT cursor FROM sync_state WHERE tenant_id = ? AND source = ?",
+            (STORE_ID_TENANT, STORE_ID_SOURCE),
+        ).fetchone()
+        return str(row["cursor"])
 
     def _use_wal(self) -> None:
         """파일 저장소는 WAL로 (예전 파일도 열 때 바뀐다). 다른 연결이 잡고 있어 못 바꾸면
@@ -543,8 +562,8 @@ class SalesStore:
             sql += " AND source = ?"
             args.append(source)
         else:
-            sql += " AND source NOT LIKE ? AND source != ?"
-            args += [f"%{CUSTOMERS_SUFFIX}", VERSION_SOURCE]
+            sql += " AND source NOT LIKE ? AND source NOT IN (?, ?)"
+            args += [f"%{CUSTOMERS_SUFFIX}", *_META_SOURCES]
         sql += " ORDER BY last_synced_at DESC LIMIT 1"
         with self.reading() as conn:
             row = conn.execute(sql, args).fetchone()
@@ -602,6 +621,27 @@ class SalesStore:
                 "SELECT COUNT(*) FROM sales_customers WHERE tenant_id = ?", (tenant_id,)
             ).fetchone()
         return int(row[0])
+
+    def order_span(self, tenant_id: str) -> tuple[int, datetime | None, datetime | None]:
+        """저장된 주문 전부(상태 무관)의 수와 접수 시각 최소·최대 (`sales_collect --reset` 요약)."""
+        with self.reading() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n, MIN(created_at) AS lo, MAX(created_at) AS hi "
+                "FROM sales_orders WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()
+        lo, hi = row["lo"], row["hi"]
+        return int(row["n"]), (parse(lo) if lo else None), (parse(hi) if hi else None)
+
+    def orders_by_source(self, tenant_id: str) -> dict[str | None, int]:
+        """저장된 주문 전부(상태 무관)의 유입 출처(src_source)별 수. 출처 없음은 None."""
+        with self.reading() as conn:
+            rows = conn.execute(
+                "SELECT src_source AS s, COUNT(*) AS n FROM sales_orders WHERE tenant_id = ? "
+                "GROUP BY src_source ORDER BY n DESC, s",
+                (tenant_id,),
+            ).fetchall()
+        return {r["s"]: int(r["n"]) for r in rows}
 
     def orders_created(self, tenant_id: str, start: datetime, end: datetime) -> list[StoredOrder]:
         """접수 시각이 [start, end)인 주문 (상태 무관), 줄·환불 포함."""

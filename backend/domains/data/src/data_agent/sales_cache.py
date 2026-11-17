@@ -7,6 +7,8 @@
     들어오면 자연히 다른 키가 된다 (수집기는 다른 프로세스여도 저장소 파일로 알 수 있다)
   - 한국 날짜: "오늘·최근 N일" 기간은 날짜가 바뀌면 달라진다
   - 저장소(`SalesStore.cache_token`): 시험처럼 저장소를 바꿔 끼워도 섞이지 않게
+  - 저장소 생성 id(`SalesStore.store_id`, 11/17): `sales_collect --reset`으로 새로 만든 저장소가
+    옛 저장소와 같은 버전 번호를 다시 써도 옛 결과가 섞이지 않게 (미리 계산도 같은 키)
 - 메모리 LRU, 최대 `MAX_ENTRIES`(256)개. 만든 지 `MAX_AGE`(30분)가 지난 항목은 다시 계산한다(수집이
   멈췄는데 예전 답을 계속 주지 않게)
 - 같은 키를 동시에 부르면 한 번만 계산하고 나머지는 그 결과를 받는다 (미리 계산과 화면 요청이
@@ -115,7 +117,7 @@ def cached[T](  # noqa: PLR0913 - 키 재료를 그대로 받는다
     """판매 저장소를 읽는 계산 하나를 캐시로 감싼다 (분석 skill들이 같이 쓰는 함수)."""
     key = (
         skill, tenant_id, normalize(inputs), store.data_version(tenant_id), catalog_id,
-        catalog_version, now.astimezone(KST).date().isoformat(), store.cache_token,
+        catalog_version, now.astimezone(KST).date().isoformat(), store.cache_token, store.store_id,
     )  # fmt: skip
     return (cache or CACHE).get_or_compute(key, compute, now)
 
