@@ -11,6 +11,9 @@ import { videoFields, type VideoKind } from "@/lib/campaignVideo";
 // 사람이 적는다. 어느 쪽인지 재무 기록에 남긴다(source). 사람이 고치면 사람이 적은 값이 된다.
 
 const SOURCE = "marketing_screen_manual";
+// 쇼츠 카테고리 예시(멘토 예시). 다른 이름도 적을 수 있다. 재무가 카테고리별 조회당 제작비를 본다
+const CATEGORY_HINTS = ["아재개그", "몸개그", "말장난", "피식"];
+type ContentFormat = "shorts" | "reels";
 
 type FinanceOpinionKind = "recommend" | "reduce" | "not_recommended";
 const OPINION_KO: Record<FinanceOpinionKind, string> = { recommend: "권장", reduce: "줄여서 권장", not_recommended: "권하지 않음" };
@@ -95,6 +98,8 @@ export function CampaignControl() {
   const [budget, setBudget] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [videoKind, setVideoKind] = useState<VideoKind | null>(null);
+  const [category, setCategory] = useState("");
+  const [format, setFormat] = useState<ContentFormat | "">("");
   const [message, setMessage] = useState<string | null>(null);
   const [opinion, setOpinion] = useState<ReturnType<typeof financeOpinionOf>>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -132,8 +137,9 @@ export function CampaignControl() {
 
   const video = videoFields(videoUrl, videoKind);
   const start = () => run(
-    () => campaigns.start({ campaign_id: `cmp_${Date.now()}`, campaign_name: name.trim(), channel: channel.trim(), budget_krw: Number(budget), ...video.fields }),
-    () => { setName(""); setBudget(""); setVideoUrl(""); setVideoKind(null); },
+    () => campaigns.start({ campaign_id: `cmp_${Date.now()}`, campaign_name: name.trim(), channel: channel.trim(), budget_krw: Number(budget), ...video.fields,
+      ...(category.trim() ? { content_category: category.trim() } : {}), ...(format ? { format } : {}) }),
+    () => { setName(""); setBudget(""); setVideoUrl(""); setVideoKind(null); setCategory(""); setFormat(""); },
   );
 
   return (
@@ -145,6 +151,16 @@ export function CampaignControl() {
         <label className="block text-sm"><span className="text-ink-700">채널</span><input className="field mt-0.5 w-full" placeholder="예: 네이버 검색" value={channel} onChange={(e) => setChannel(e.target.value)} /></label>
         <label className="block text-sm"><span className="text-ink-700">예산(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={budget} onChange={(e) => setBudget(e.target.value.replace(/[^0-9]/g, ""))} /></label>
         <button className="btn-primary" disabled={busy || !humanTokenSet || !name.trim() || !channel.trim() || !Number(budget) || video.error !== null} onClick={start}>시작 요청</button>
+      </div>
+      <div className="mt-2 grid gap-2 text-sm sm:grid-cols-[1fr_160px]">
+        <label className="block"><span className="text-ink-700">콘텐츠 카테고리(선택)</span><input className="field mt-0.5 w-full" list="campaign-category-hints" placeholder="예: 아재개그" maxLength={40} value={category} onChange={(e) => setCategory(e.target.value)} /></label>
+        <datalist id="campaign-category-hints">{CATEGORY_HINTS.map((c) => <option key={c} value={c} />)}</datalist>
+        <label className="block"><span className="text-ink-700">형식(선택)</span>
+          <select className="field mt-0.5 w-full" value={format} onChange={(e) => setFormat(e.target.value as ContentFormat | "")}>
+            <option value="">정하지 않음</option><option value="shorts">유튜브 쇼츠</option><option value="reels">인스타 릴스</option>
+          </select>
+        </label>
+        <p className="text-xs text-ink-500 sm:col-span-2">카테고리를 적으면 재무가 카테고리별 조회당 제작비를 보고 다음 회차 제작비 의견을 냅니다. 결과 저장 때 다시 적지 않아도 이 값이 이어집니다.</p>
       </div>
       <div className="mt-2 text-sm">
         <label className="block"><span className="text-ink-700">영상 URL(유튜브 쇼츠, 선택)</span><input className="field mt-0.5 w-full" placeholder="https://youtube.com/shorts/..." value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} /></label>
@@ -195,6 +211,7 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
   const [gmv, setGmv] = useState("");
   const [orders, setOrders] = useState("");
   const [coupon, setCoupon] = useState("");
+  const [production, setProduction] = useState("");
   const [reason, setReason] = useState("");
   const [effect, setEffect] = useState<Effect | null>(null);
   const [effectNote, setEffectNote] = useState<string | null>(null);
@@ -227,6 +244,7 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
     spend_krw: Number(spend), coupon_krw: Number(coupon || 0), gmv_krw: gmv ? Number(gmv) : null, orders: orders ? Number(orders) : null,
     source: effect?.source ?? SOURCE,
     measured_gmv_krw: effect?.measuredGmv ?? null, measured_orders: effect?.measuredOrders ?? null, effect_generated_at: effect?.generatedAt ?? null,
+    ...(production !== "" ? { production_cost_krw: Number(production) } : {}),
   }));
   const digits = (set: (v: string) => void) => (e: { target: { value: string } }) => set(e.target.value.replace(/[^0-9]/g, ""));
   return (
@@ -238,11 +256,12 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
         <button className="btn-ghost" disabled={loading || !kpiLive || !periodOk} onClick={() => void pull()}>{loading ? "불러오는 중" : "데이터 AI에서 불러오기"}</button>
       </div>
       {effectNote && <p role="status" className="mt-2 rounded-xl bg-ink-50 px-3 py-2 text-ink-700">{effectNote}</p>}
-      <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] sm:items-end">
+      <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto] sm:items-end">
         <label className="block"><span className="text-ink-700">실제 광고비(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={spend} onChange={digits(setSpend)} /></label>
         <label className="block"><span className="text-ink-700">늘어난 판매액(원, 모르면 비움)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={gmv} onChange={typed(setGmv)} /></label>
         <label className="block"><span className="text-ink-700">증분 주문(건, 모르면 비움)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={orders} onChange={typed(setOrders)} /></label>
         <label className="block"><span className="text-ink-700">회사 부담 쿠폰(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={coupon} onChange={digits(setCoupon)} /></label>
+        <label className="block"><span className="text-ink-700">영상 제작비(원, 선택)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={production} onChange={digits(setProduction)} /></label>
         <button className="btn-primary" disabled={busy || loading || !humanTokenSet || spend === "" || !periodOk} onClick={save}>결과 저장</button>
       </div>
       {canCancel && (

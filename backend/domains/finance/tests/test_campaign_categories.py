@@ -325,3 +325,32 @@ def test_resending_without_views_keeps_the_views_already_recorded() -> None:
         "output"
     ]
     assert got["views"] == 25_000
+
+
+def test_result_without_category_takes_it_from_the_budget_request() -> None:
+    """화면에서 시작할 때 적은 카테고리·형식을, 결과에 비어 오면 재무가 잇는다."""
+    _sender(state())
+    client = TestClient(app)
+    state().cash_override = 10_000_000
+    ask = {
+        "campaign_id": "a1",
+        "campaign_name": "아재개그 쇼츠",
+        "channel": "유튜브",
+        "requested_krw": 100_000,
+        "content_category": "아재개그",
+        "format": "shorts",
+    }
+    review = client.post("/a2a", json=_body("review_campaign_budget", ask, "mock:marketing"))
+    assert review.json()["status"] == "completed"
+    assert state().records.budget_reviews[-1]["content_category"] == "아재개그"
+    row = {**_shorts("a1", "x", 100_000, 20_000), "content_category": None, "format": None}
+    got = client.post("/a2a", json=_body("record_campaign_result", row, "mock:marketing")).json()[
+        "output"
+    ]
+    assert (got["content_category"], got["format"]) == ("아재개그", "shorts")
+    # 결과에 카테고리를 적으면 결과 값이 이긴다
+    row2 = {**_shorts("a1", "몸개그", 100_000, 20_000)}
+    got = client.post("/a2a", json=_body("record_campaign_result", row2, "mock:marketing")).json()[
+        "output"
+    ]
+    assert got["content_category"] == "몸개그"

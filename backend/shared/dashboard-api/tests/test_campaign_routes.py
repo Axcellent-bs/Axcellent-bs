@@ -616,3 +616,43 @@ def test_outage_sns_merge_maps_failures(client: TestClient, fake: Fake) -> None:
     assert client.post(OUTAGE_MERGE, json={}).status_code == 502
     fake.status, fake.outcome = TaskStatus.CANCELED, None
     assert client.post(OUTAGE_MERGE, json={}).status_code == 504
+
+
+def test_start_and_result_pass_category_format_and_production_cost(
+    client: TestClient, fake: Fake
+) -> None:
+    """화면에서 적은 콘텐츠 카테고리·형식·제작비가 마케팅으로 그대로 간다 (캠페인 예산 A2A)."""
+    body = START | {"content_category": "아재개그", "format": "shorts"}
+    assert client.post("/api/dashboard/campaigns/start", json=body).status_code == 200
+    payload = fake.calls[0][1].input
+    assert (payload["content_category"], payload["format"]) == ("아재개그", "shorts")
+
+    result = {
+        "campaign_name": "가을",
+        "channel": "유튜브",
+        "period_from": "2026-11-17",
+        "period_to": "2026-11-17",
+        "spend_krw": 0,
+        "source": "marketing_screen_manual",
+        "production_cost_krw": 120_000,
+    }
+    assert client.post("/api/dashboard/campaigns/cmp_1/result", json=result).status_code == 200
+    payload = fake.calls[1][1].input
+    assert payload["production_cost_krw"] == 120_000
+    assert "content_category" not in payload  # 비우면 재무가 시작 때 값을 잇는다
+    # 제작비만 바꿔 다시 저장해도 같은 요청으로 묶이지 않는다
+    again = result | {"production_cost_krw": 150_000}
+    assert client.post("/api/dashboard/campaigns/cmp_1/result", json=again).status_code == 200
+    keys = {fake.calls[1][1].meta.idempotency_key, fake.calls[2][1].meta.idempotency_key}
+    assert len(keys) == 2
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [START | {"format": "tiktok"}, START | {"content_category": ""}],
+)
+def test_bad_category_or_format_stops_before_marketing(
+    client: TestClient, fake: Fake, bad: dict
+) -> None:
+    assert client.post("/api/dashboard/campaigns/start", json=bad).status_code == 422
+    assert fake.calls == []
