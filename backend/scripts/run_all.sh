@@ -366,6 +366,8 @@ else
   echo "[주의] $DATA/archive.db가 없어 아카이브 AI가 hr.db를 같이 읽습니다 (scripts/migrate_archive_db.py로 옮기세요)"
 fi
 export AX_LLM_USAGE_DB="$PWD/$DATA/llm_usage.db"
+# 부서가 총괄에게 받은 개선 노트(에이전트 평가 진단)를 서비스마다 파일 하나에 둔다. 다시 켜도 남는다
+export AX_NOTES_DIR="$PWD/$DATA/notes"
 # 결제 장애 감지를 시연 시간에 맞춘다 (기본 1분 지속 → 20초, 5초마다 판정). .env 값이 있으면 그걸 쓴다
 export SHOP_DEGRADED_SUSTAIN_S="${SHOP_DEGRADED_SUSTAIN_S:-20}" SHOP_MONITOR_INTERVAL_S="${SHOP_MONITOR_INTERVAL_S:-5}"
 

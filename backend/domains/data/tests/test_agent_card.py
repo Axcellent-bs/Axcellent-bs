@@ -19,6 +19,7 @@ def test_card_validates(card: AgentCard) -> None:
     assert card.name == "data"
     assert card.url == "http://data:8106/a2a"
     assert {s.id for s in card.skills} == {
+        "receive_improvement_note",  # 총괄의 개선 노트를 받는 공통 skill
         "anomaly_detection",
         "impact_analysis",
         "fraud_score",
@@ -92,7 +93,10 @@ STATE_CHANGING = {"event_proposal_send": "A"}
 
 def test_all_skills_are_read(card: AgentCard) -> None:
     """event_proposal_send(기획에 보내기, A)만 빼고 모두 read. 빼는 skill은 정한 등급 그대로."""
-    assert all(s.grade == "read" for s in card.skills if s.id not in STATE_CHANGING)
+    common = {"receive_improvement_note"}  # 공통 skill: 노트 저장소에만 쓰고 업무 상태는 안 바꾼다
+    assert all(
+        s.grade == "read" for s in card.skills if s.id not in STATE_CHANGING | dict.fromkeys(common)
+    )
     assert {s.id: s.grade for s in card.skills if s.id in STATE_CHANGING} == STATE_CHANGING
 
 

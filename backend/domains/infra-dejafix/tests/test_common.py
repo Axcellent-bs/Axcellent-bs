@@ -23,6 +23,7 @@ def test_agent_card_format_and_served() -> None:
     assert (card.name, card.owner) == ("infra", "예진")
     skills = {s.id: s for s in card.skills}
     assert set(skills) == {
+        "receive_improvement_note",  # 총괄의 개선 노트를 받는 공통 skill
         "diagnose_incident",
         "rollback_deployment",
         "verify_recovery",
@@ -44,6 +45,9 @@ def test_agent_card_format_and_served() -> None:
     assert skills["release_fault"].allowed_requesters == ["orchestrator"]
     assert "orchestrator" in skills["diagnose_incident"].allowed_requesters
     for skill in card.skills:
+        if skill.id == "receive_improvement_note":  # 총괄의 개선 노트를 받는 공통 skill
+            assert (skill.grade, skill.allowed_requesters) == ("A", ["orchestrator"])
+            continue
         assert skill.priority == "required"
         for ref in (skill.input_schema, skill.output_schema):
             path, name = ref.split("#")

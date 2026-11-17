@@ -87,8 +87,11 @@ def record(n: int, kind: str = "spec_confirmed", reason: bool = True, area: str 
 def test_agent_card_lists_all_skills_with_resolvable_schemas() -> None:
     card = load_card()
     ids = {s.id for s in card.skills}
-    assert ids == set(HANDLERS) == STATE_CHANGING.keys() | READ_ONLY
-    assert len(ids) == 16
+    common = {
+        "receive_improvement_note"
+    }  # 총괄의 개선 노트를 받는 공통 skill(핸들러는 템플릿이 붙임)
+    assert ids == set(HANDLERS) | common == STATE_CHANGING.keys() | READ_ONLY | common
+    assert len(ids) == 17
     for skill in card.skills:
         for ref in (skill.input_schema, skill.output_schema):
             path, _, cls = ref.partition("#")
@@ -109,7 +112,7 @@ def test_agent_card_grades_match_the_safety_registry_draft(svc) -> None:
 
 def test_agent_card_is_served_over_http(client: TestClient) -> None:
     served = client.get("/.well-known/agent-card.json").json()
-    assert served["name"] == "archive" and len(served["skills"]) == 16
+    assert served["name"] == "archive" and len(served["skills"]) == 17
 
 
 # 2) 결정성 ----------------------------------------------------------------------

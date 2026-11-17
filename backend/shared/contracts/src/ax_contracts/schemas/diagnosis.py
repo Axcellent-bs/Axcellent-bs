@@ -79,3 +79,37 @@ class RequestAgentDiagnosisOutput(AxModel):
     checked_events: int = Field(ge=0)
     found: int = Field(ge=0)  # 조건을 채운 (에이전트, 단계) 수
     sent: list[SentDiagnosis] = Field(default_factory=list)
+
+
+# ---- 총괄 → 에이전트 개선 노트 (진단한 결과를 해당 에이전트에 전달) ------------------------------
+class ReceiveImprovementNoteInput(AxModel):
+    """총괄이 진단(`diagnosed`)을 해당 에이전트에 보내는 개선 노트.
+
+    노트는 기록·알림이다. 받은 에이전트의 동작을 바꾸지 않고, 에이전트가 다음 일에서 참고하거나
+    (예: LLM 단계의 입력) 담당자가 읽는다. `revoke`가 참이면 이미 보낸 같은 노트를 쓰지 않게 거둔다.
+    """
+
+    note_id: str  # 진단 번호에서 만든다(같은 진단은 같은 노트)
+    diagnosis_id: str
+    agent: str  # 노트를 받을 에이전트(부서) 이름. 받는 쪽이 자기 이름과 같은지 확인한다
+    step_id: str
+    step_label: str
+    summary: str  # 진단 문장(규칙 또는 LLM)
+    findings: list[str] = Field(default_factory=list)  # 찾은 겹침 문장
+    evidence_contexts: list[str] = Field(default_factory=list)  # 근거 이슈 번호
+    method: Literal["rules", "llm"] = "rules"
+    issued_at: UtcDatetime
+    revoke: bool = False
+    # 거짓이면 원인 미확정(근거 부족)이다. 같은 단계가 반복해 느렸다는 사실만 담는다
+    cause_known: bool = True
+
+
+NoteStatus = Literal["accepted", "duplicate", "revoked", "rejected"]
+
+
+class ReceiveImprovementNoteOutput(AxModel):
+    """받은 에이전트의 응답. `rejected`면 이유(`reason`)를 적는다(예: 자기 일이 아님)."""
+
+    note_id: str
+    status: NoteStatus
+    reason: str | None = None

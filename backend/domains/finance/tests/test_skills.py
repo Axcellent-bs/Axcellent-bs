@@ -78,6 +78,7 @@ def test_agent_card(client: TestClient) -> None:
     card = load_card()
     skills = {s.id: s for s in card.skills}
     assert set(skills) == {
+        "receive_improvement_note",  # 총괄의 개선 노트를 받는 공통 skill
         "closing_report",
         "record_support_cost",
         # 인사가 확정한 팀 예산 기록 (인사 → 재무, 11/13 확정은 인사로 옮김)
@@ -107,7 +108,9 @@ def test_agent_card(client: TestClient) -> None:
     record = skills["record_incident_finance"]
     assert (record.grade, record.allowed_requesters) == ("read", ["orchestrator"])
     served = client.get("/.well-known/agent-card.json").json()
-    assert served["name"] == "finance" and len(served["skills"]) == 15  # + record_team_budget
+    assert (
+        served["name"] == "finance" and len(served["skills"]) == 16
+    )  # + record_team_budget, 개선 노트 공통 skill
 
 
 # ------------------------------------------- 금액 다시 계산 (예전 verify_amount, recheck.py)
