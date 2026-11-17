@@ -1,3 +1,4 @@
+import { AgentDiagnosisInbox } from "@/components/admin/AgentDiagnosisInbox";
 import { Loading } from "@/components/admin/bits";
 import { IncidentExplorer } from "@/components/incident/IncidentExplorer";
 import { clock } from "@/lib/adminRelay";
@@ -29,6 +30,9 @@ export default function ArchiveIncidentsPage() {
       {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">{error}</p>}
 
       <IncidentExplorer incidents={incidents} initialCtx={ctx} />
+
+      {/* 총괄 AI가 보낸 진단: 아카이브 AI의 단계(비슷한 과거 찾기·이슈 기록·해결 기록)가 반복해 느릴 때만 보인다 */}
+      <AgentDiagnosisInbox agent="archive" />
     </div>
   );
 }
