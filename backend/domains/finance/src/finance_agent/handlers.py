@@ -752,7 +752,14 @@ def planning_insight(item: dict[str, Any]) -> dict[str, Any]:
                 source=PLANNING_INSIGHT_SKILL,
             )
         )
+    # 기획 제안은 제작비를 올릴 쪽 카테고리를 다룬다 (기획 #1212 content_category·content_format)
+    target = next(
+        (r for r in item.get("categories", []) if shift and r["content_category"] == shift["to"]),
+        None,
+    )
     return ReceiveInsightInput(
+        content_category=shift["to"][:40] if shift else None,
+        content_format=(target or {}).get("format"),
         insight_id=f"fin_{item['insight_id']}"[:80],
         title=item["title"][:120],
         summary=item["message"][:400],

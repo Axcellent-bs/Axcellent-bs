@@ -161,6 +161,7 @@ def test_categories_sum_cost_and_views_and_count_measuring() -> None:
     assert set(rows) == {"아재개그", "몸개그"}
     assert rows["아재개그"]["cost_per_view"] == 5.0  # 250,000 ÷ 50,000 (평균의 평균이 아님)
     assert rows["아재개그"]["latest_production_krw"] == 150_000
+    assert rows["아재개그"]["format"] == "shorts"
     assert (rows["몸개그"]["cost_per_view"], rows["몸개그"]["measuring"]) == (40.0, 1)
 
 
@@ -272,6 +273,8 @@ def test_budget_shift_goes_to_planning_once_with_finance_facts() -> None:
         values["아재개그 조회당 제작비"] == "5.0원" and values["몸개그 조회당 제작비"] == "40.0원"
     )
     assert all(f.source == "finance_insights" for f in payload.facts)
+    # 제작비를 올릴 쪽 카테고리와 그 형식이 기획 제안 칸으로 간다 (기획 #1212)
+    assert (payload.content_category, payload.content_format) == ("아재개그", "shorts")
     # 같은 인사이트를 다시 내도 기획에는 한 번만 간다
     client.post(
         "/a2a",

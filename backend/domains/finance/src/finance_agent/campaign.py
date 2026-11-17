@@ -664,6 +664,7 @@ def category_view_costs(campaigns: dict[str, dict[str, Any]]) -> list[dict[str, 
                 "views": 0,
                 "measuring": 0,
                 "latest_production_krw": None,
+                "format": None,
             },
         )
         if c.get("view_cost_status") == "measuring":
@@ -674,6 +675,7 @@ def category_view_costs(campaigns: dict[str, dict[str, Any]]) -> list[dict[str, 
         row["production_cost_krw"] += c["production_cost_krw"]
         row["views"] += c["views"]
         row["latest_production_krw"] = c["production_cost_krw"]
+        row["format"] = c.get("format") or row["format"]
     out = []
     for row in rows.values():
         views = row["views"]

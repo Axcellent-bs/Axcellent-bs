@@ -14,11 +14,12 @@ const modeOf = (enabled: boolean | null) => (enabled === null ? '' : enabled ? '
 const normalize = (u: string) => u.trim().replace(/\/+$/, '')
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
 
-export default function Integrations({ onState, embedded = false }: { onState?: (s: ConnectionState | 'error') => void; embedded?: boolean } = {}) {
+export default function Integrations({ onState, onCheck, embedded = false }: { onState?: (s: ConnectionState | 'error') => void; onCheck?: (r: ConnectionTest | null) => void; embedded?: boolean } = {}) {
   const [state, setStateRaw] = useState<ConnectionState | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [url, setUrl] = useState('')
-  const [result, setResult] = useState<ConnectionTest | null>(null)
+  const [result, setResultRaw] = useState<ConnectionTest | null>(null)
+  const setResult = (r: ConnectionTest | null) => { setResultRaw(r); onCheck?.(r) }
   const [busy, setBusy] = useState<'test' | 'save' | 'clear' | 'mode' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
