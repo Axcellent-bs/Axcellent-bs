@@ -32,6 +32,7 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
+from ax_contracts.schemas.finance import ContentFormat
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import brief_media, brief_publish, outage_sns_media, shop_client
 from marketing_agent.brief_handoff import (
@@ -1215,19 +1216,50 @@ async def marketing_chat_remove(request: AgentRequest) -> AgentResult:
     return _chat_done(request, "marketing_chat_remove", out.model_dump(mode="json"))
 
 
-def _brief_product_ids(campaign_id: str) -> list[str]:
-    """받아 둔 기획안에서 그 캠페인의 회사 상품 ID를 꺼낸다. 없거나 저장소를 못 읽으면 빈 목록."""
+def _stored_brief(campaign_id: str) -> StoredBrief | None:
+    """받아 둔 기획안. 없거나 저장소를 못 읽으면 None (기획안 조회 실패가 캠페인을 막지 않는다)."""
     try:
-        stored = STATE.briefs.get(None, campaign_id)
+        return STATE.briefs.get(None, campaign_id)
     except BriefStorageError:
-        # 기획안 저장소를 못 읽어도 캠페인 시작을 깨지 않는다. 상품 신호만 빼고 재무 의견을 받는다
-        return []
-    return list(stored.brief.product_ids) if stored is not None else []
+        return None
+
+
+def _brief_content(campaign_id: str) -> tuple[str | None, ContentFormat | None]:
+    """받아 둔 기획안의 (content_category, content_format). 없거나 못 읽으면 (None, None)."""
+    stored = _stored_brief(campaign_id)
+    if stored is None:
+        return None, None
+    return stored.brief.content_category, stored.brief.content_format
 
 
 async def start_campaign_skill(request: AgentRequest) -> AgentResult:
-    """`start_campaign`: 요청이 상품을 안 주면 기획안의 `product_ids`를 재무 예산 의견에 싣는다."""
-    return await start_campaign(request, brief_product_ids=_brief_product_ids)
+    """`start_campaign`: 요청이 안 준 상품·카테고리·형식은 기획안 값을 재무 예산 의견에 싣는다.
+
+    한 번 부를 때 기획안은 한 번만 읽는다(상품 ID와 카테고리·형식이 같은 기획안에서 나온다).
+    """
+    looked: dict[str, StoredBrief | None] = {}
+
+    def brief(campaign_id: str) -> StoredBrief | None:
+        if campaign_id not in looked:
+            looked[campaign_id] = _stored_brief(campaign_id)
+        return looked[campaign_id]
+
+    def product_ids(campaign_id: str) -> list[str]:
+        stored = brief(campaign_id)
+        return list(stored.brief.product_ids) if stored is not None else []
+
+    def content(campaign_id: str) -> tuple[str | None, ContentFormat | None]:
+        stored = brief(campaign_id)
+        if stored is None:
+            return None, None
+        return stored.brief.content_category, stored.brief.content_format
+
+    return await start_campaign(request, brief_product_ids=product_ids, brief_content=content)
+
+
+async def record_campaign_result_skill(request: AgentRequest) -> AgentResult:
+    """`record_campaign_result`: 요청이 안 준 카테고리·형식은 기획안 값으로 채운다."""
+    return await record_campaign_result(request, brief_content=_brief_content)
 
 
 HANDLERS = {
@@ -1243,7 +1275,7 @@ HANDLERS = {
     "build_campaign_link": build_campaign_link_skill,
     "issue_coupon": issue_coupon,
     "start_campaign": start_campaign_skill,
-    "record_campaign_result": record_campaign_result,
+    "record_campaign_result": record_campaign_result_skill,
     "draft_sns_post": draft_sns_post_skill,
     "draft_outage_sns_post": draft_outage_sns_post_skill,
     "list_outage_sns_drafts": list_outage_sns_drafts_skill,
