@@ -7,6 +7,7 @@ import { ApproverField, deciderText, useApproverName } from "./ApproverName";
 // 안전 장치 보류 큐: 사람만 정할 수 있는 일(C 등급). 결정은 safety에 사람 토큰으로 보낸다.
 // 재무 화면(SafetyQueue)에는 아직 담당 화면이 없는 일이 온다. 판매자 정산 묶음 지급 승인은 고객지원 판매자 정산 화면(ActionQueue)에서 결정한다.
 // 환불은 고객지원 보상 큐(RefundHolds), 마케팅 일(쿠폰·공지·SNS·영상)은 마케팅 화면(ActionQueue)에서 결정한다. 재무는 끝난 금액만 장부에 적는다.
+// 데이터 삭제 승인과 보관 기간이 지난 문의·클레임 삭제는 고객지원 보상 큐(/queue)의 ActionQueue에서 결정한다.
 
 const WHO_KO: Record<string, string> = {
   marketing: "마케팅 AI", support: "고객지원 AI", finance: "재무 AI", hr: "인사 AI", orchestrator: "총괄 AI",
@@ -64,6 +65,7 @@ function tipOf(r: Review): string {
   if (r.action === "publish_sns") return "글과 영상이 승인한 초안과 같고 AI 생성 표시가 있으면 진행하세요. 올리면 되돌리기 어렵습니다.";
   if (r.action === "generate_media") return "비용과 길이가 예상과 맞으면 진행하세요. 진행하면 비용이 나갑니다.";
   if (r.action === "publish_notice") return "공지 내용과 채널이 맞는지 보고 진행하세요. SNS 게시라면 멈추세요.";
+  if (r.action === "approve_data_deletion" || r.action === "purge_expired_inquiries" || r.action === "purge_expired_claims") return "지운 원문은 되돌릴 수 없습니다. 지울 대상과 건수가 보관 기간 기준(문의 3년, 클레임 5년)에 맞는지 보고 진행하세요. 애매하면 멈추세요.";
   switch (r.report.hold_reason) {
     case "amount_mismatch": return "요청한 AI가 금액을 잘못 적었다는 뜻입니다. 보통 멈추고 담당자에게 알리세요.";
     case "unregistered_action": return "처음 보는 일입니다. 멈추고 담당자에게 문의하세요.";
