@@ -464,7 +464,11 @@ async def test_the_skill_takes_the_products_from_the_received_brief_when_the_req
 
     def fake_get(proposal_id: object, campaign_id: str) -> object:
         looked.append(campaign_id)
-        return SimpleNamespace(brief=SimpleNamespace(product_ids=["prd_7", "prd_8"]))
+        return SimpleNamespace(
+            brief=SimpleNamespace(
+                product_ids=["prd_7", "prd_8"], content_category=None, content_format=None
+            )
+        )
 
     monkeypatch.setattr(handlers.STATE.briefs, "get", fake_get)
     result = await handlers.start_campaign_skill(_req("start_campaign", START))
@@ -479,10 +483,11 @@ async def test_products_in_the_request_win_over_the_brief(
     _wire(monkeypatch, finance)
 
     def never(proposal_id: object, campaign_id: str) -> object:
-        raise AssertionError("요청이 상품을 줬으면 기획안을 찾지 않는다")
+        raise AssertionError("요청이 상품·카테고리·형식을 다 줬으면 기획안을 찾지 않는다")
 
     monkeypatch.setattr(handlers.STATE.briefs, "get", never)
-    asked = {**START, "product_ids": ["prd_1"]}
+    # 카테고리·형식도 기획안에서 이어 받으므로, 기획안을 안 찾는 경우는 셋 다 준 요청이다
+    asked = {**START, "product_ids": ["prd_1"], **CATEGORY}
     await handlers.start_campaign_skill(_req("start_campaign", asked))
     assert finance.calls[0][1].input["product_ids"] == ["prd_1"]
 
@@ -791,3 +796,146 @@ async def test_record_bad_views_point_is_refused(monkeypatch: pytest.MonkeyPatch
     asked = CALLER | {"views": 1, "views_point": "2d"}
     result = await campaign.record_campaign_result(_req("record_campaign_result", asked))
     assert result.outcome == "invalid_input" and not finance.calls
+
+
+# ------------------------------------------- 기획안의 카테고리·형식 잇기 (기획 #1212)
+def _brief_with(monkeypatch: pytest.MonkeyPatch, **fields: object) -> list[str]:
+    """받아 둔 기획안 대역. `content_format`(기획 칸)이 재무·마케팅 `format`으로 이어지는지 본다."""
+    from types import SimpleNamespace
+
+    looked: list[str] = []
+
+    def fake_get(proposal_id: object, campaign_id: str) -> object:
+        looked.append(campaign_id)
+        return SimpleNamespace(brief=SimpleNamespace(product_ids=[], **fields))
+
+    monkeypatch.setattr(handlers.STATE.briefs, "get", fake_get)
+    return looked
+
+
+BRIEF_CONTENT = {"content_category": "아재개그", "content_format": "reels"}
+
+
+async def test_start_fills_category_and_format_from_the_brief(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    looked = _brief_with(monkeypatch, **BRIEF_CONTENT)
+    result = await handlers.start_campaign_skill(_req("start_campaign", START))
+    assert result.status == TaskStatus.COMPLETED and looked == ["cmp_1"]  # 기획안은 한 번만 읽는다
+    sent = finance.calls[0][1].input
+    # 기획 칸 content_format -> 재무·마케팅 칸 format
+    assert sent["content_category"] == "아재개그" and sent["format"] == "reels"
+    assert "content_format" not in sent
+
+
+async def test_start_caller_values_win_over_the_brief(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    _brief_with(monkeypatch, **BRIEF_CONTENT)
+    asked = START | {"content_category": "퀴즈", "format": "shorts"}
+    await handlers.start_campaign_skill(_req("start_campaign", asked))
+    sent = finance.calls[0][1].input
+    assert sent["content_category"] == "퀴즈" and sent["format"] == "shorts"
+
+
+async def test_start_fills_only_the_missing_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    _brief_with(monkeypatch, **BRIEF_CONTENT)
+    await handlers.start_campaign_skill(_req("start_campaign", START | {"format": "shorts"}))
+    sent = finance.calls[0][1].input
+    assert sent["content_category"] == "아재개그" and sent["format"] == "shorts"
+
+
+async def test_start_brief_without_category_sends_no_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    _brief_with(monkeypatch, content_category=None, content_format=None)
+    result = await handlers.start_campaign_skill(_req("start_campaign", START))
+    assert result.status == TaskStatus.COMPLETED
+    sent = finance.calls[0][1].input
+    assert "content_category" not in sent and "format" not in sent
+
+
+async def test_start_without_a_brief_sends_no_category_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    await handlers.start_campaign_skill(_req("start_campaign", START))
+    sent = finance.calls[0][1].input
+    assert "content_category" not in sent and "format" not in sent
+
+
+async def test_start_broken_brief_store_leaves_category_blank_and_goes_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from marketing_agent.briefs import BriefStorageError
+
+    finance = Finance()
+    _wire(monkeypatch, finance)
+
+    def broken(proposal_id: object, campaign_id: str) -> object:
+        raise BriefStorageError("저장소를 읽지 못함")
+
+    monkeypatch.setattr(handlers.STATE.briefs, "get", broken)
+    result = await handlers.start_campaign_skill(_req("start_campaign", START))
+    assert result.status == TaskStatus.COMPLETED
+    sent = finance.calls[0][1].input
+    assert "content_category" not in sent and "format" not in sent
+
+
+async def test_start_does_not_read_the_brief_when_caller_gave_both(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    looked = _brief_with(monkeypatch, **BRIEF_CONTENT)
+    asked = START | CATEGORY | {"product_ids": ["prd_1"]}
+    await handlers.start_campaign_skill(_req("start_campaign", asked))
+    assert looked == []  # 호출자가 다 줬으면 기획안을 읽지 않는다
+
+
+async def test_record_result_fills_category_and_format_from_the_brief(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    _wire_routed(monkeypatch, finance, _data())
+    _brief_with(monkeypatch, **BRIEF_CONTENT)
+    result = await handlers.record_campaign_result_skill(_req("record_campaign_result", CALLER))
+    assert result.outcome == "recorded"
+    sent = finance.calls[0][1].input
+    assert sent["content_category"] == "아재개그" and sent["format"] == "reels"
+
+
+async def test_record_result_caller_values_win_over_the_brief(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    _wire_routed(monkeypatch, finance, _data())
+    _brief_with(monkeypatch, **BRIEF_CONTENT)
+    asked = CALLER | {"content_category": "퀴즈", "format": "shorts"}
+    await handlers.record_campaign_result_skill(_req("record_campaign_result", asked))
+    sent = finance.calls[0][1].input
+    assert sent["content_category"] == "퀴즈" and sent["format"] == "shorts"
+
+
+async def test_record_result_without_brief_or_with_broken_store_leaves_them_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from marketing_agent.briefs import BriefStorageError
+
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    _wire_routed(monkeypatch, finance, _data())
+    await handlers.record_campaign_result_skill(_req("record_campaign_result", CALLER))
+
+    def broken(proposal_id: object, campaign_id: str) -> object:
+        raise BriefStorageError("저장소를 읽지 못함")
+
+    monkeypatch.setattr(handlers.STATE.briefs, "get", broken)
+    result = await handlers.record_campaign_result_skill(_req("record_campaign_result", CALLER))
+    assert result.outcome == "recorded"
+    for sent in (call[1].input for call in finance.calls):
+        assert "content_category" not in sent and "format" not in sent

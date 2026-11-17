@@ -14,7 +14,9 @@
   (view=finance)의 `finance_record`를 그대로 가져와 채운다. 집행액·이름·채널·쿠폰은 호출자 값이다.
   호출자가 준 값은 덮어쓰지 않는다. 데이터에 닿지 못하면 재무를 부르지 않고 실패로 올린다.
   콘텐츠 카테고리·형식(`content_category`·`format`)과 영상 제작비(`production_cost_krw`)는
-  호출자가 준 값만 그대로 싣는다(예산 의견 요청에도 카테고리·형식을 싣는다). 추측하지 않는다.
+  호출자가 준 값을 먼저 싣는다(예산 의견 요청에도 싣는다). 호출자가 안 준 칸만 받아 둔 기획안의
+  `content_category`·`content_format`(재무 쪽 이름은 `format`)으로 채우고, 기획안에도 없거나 못
+  읽으면 비워 둔다(지어내지 않고, 기획안 조회 실패가 시작·결과 전달을 막지 않는다).
 - 영상 등록: `start_campaign`에 사람이 올린 영상 URL(`video_url`, 선택)이 있고 관문이 `executed`로
   끝난 뒤에만 데이터 `video_performance`에 그 캠페인의 영상으로 등록한다(1h 측정 창이 1시간뿐이라
   결과 기록 때 등록하면 늦다). URL이 있으면 `test`(시험 영상 여부)를 호출자가 명시해야 한다
@@ -82,8 +84,8 @@ class StartCampaignInput(AxModel):
     # 캠페인이 다루는 회사 상품 ID(선택, 최대 10개). 재무가 고객지원 책별 집계로 불만 많은 책인지
     # 보고 예산 의견을 줄이는 데 쓴다. 비워 두면(옛 요청) 상품 신호 없이 판단한다
     product_ids: list[str] = Field(default_factory=list, max_length=10)
-    # 콘텐츠 카테고리(예: 아재개그)와 형식(shorts·reels). 호출자가 아는 값만 받고, 마케팅은
-    # 지어내거나 기획안에서 추측하지 않는다. 비우면 재무는 카테고리 없는 캠페인으로 본다
+    # 콘텐츠 카테고리(예: 아재개그)와 형식(shorts·reels). 호출자가 준 값이 먼저이고, 비운 칸만 받아
+    # 둔 기획안의 값으로 채운다. 둘 다 없으면 비운다(재무는 카테고리 없는 캠페인으로 본다)
     content_category: str | None = Field(default=None, min_length=1, max_length=40)
     format: ContentFormat | None = None
     # 사람이 유튜브 쇼츠에 올린 영상 주소(선택). 있으면 캠페인이 시작된 직후 데이터에 등록한다.
@@ -250,14 +252,37 @@ def _gate_outcome(
     return _result(request, TaskStatus.FAILED, outcome=outcome, output=detail, evidence=evidence)
 
 
+# 받아 둔 기획안의 (content_category, content_format). 기획안이 없거나 읽지 못하면 (None, None)
+BriefContent = Callable[[str], tuple[str | None, ContentFormat | None]]
+
+
+def _fill_content(
+    campaign_id: str,
+    category: str | None,
+    fmt: ContentFormat | None,
+    brief_content: BriefContent | None,
+) -> tuple[str | None, ContentFormat | None]:
+    """호출자가 비운 카테고리·형식만 기획안 값으로 채운다. 호출자 값은 덮어쓰지 않는다."""
+    if brief_content is None or (category is not None and fmt is not None):
+        return category, fmt
+    from_brief_category, from_brief_format = brief_content(campaign_id)
+    return (
+        category if category is not None else from_brief_category,
+        fmt if fmt is not None else from_brief_format,
+    )
+
+
 async def start_campaign(
     request: AgentRequest,
     brief_product_ids: Callable[[str], list[str]] | None = None,
+    brief_content: BriefContent | None = None,
 ) -> AgentResult:
     """캠페인 시작: 재무 의견을 받고 안전 관문을 거친다.
 
     `brief_product_ids`는 요청에 상품이 없을 때 받아 둔 기획안에서 그 캠페인의 상품 ID를 꺼내는
     함수다(기획안의 `product_ids`). 요청이 상품을 직접 주면 그것을 쓴다.
+    `brief_content`도 같은 방식으로 호출자가 안 준 `content_category`·`format`만 기획안의
+    `content_category`·`content_format`으로 채운다.
     """
     try:
         data = StartCampaignInput.model_validate(request.input)
@@ -267,14 +292,17 @@ async def start_campaign(
     product_ids = list(data.product_ids)
     if not product_ids and brief_product_ids is not None:
         product_ids = brief_product_ids(data.campaign_id)[:10]
+    category, content_format = _fill_content(
+        data.campaign_id, data.content_category, data.format, brief_content
+    )
     ask = CampaignBudgetReviewInput(
         campaign_id=data.campaign_id,
         campaign_name=data.campaign_name,
         channel=data.channel,
         requested_krw=data.budget_krw,
         product_ids=product_ids,
-        content_category=data.content_category,
-        format=data.format,
+        content_category=category,
+        format=content_format,
     )
     answer = await _ask_finance(request, REVIEW_SKILL, ask)
     if answer.status != TaskStatus.COMPLETED:
@@ -441,11 +469,17 @@ async def _fill_views(
     return data.model_copy(update={"views": views, "views_point": point})
 
 
-async def record_campaign_result(request: AgentRequest) -> AgentResult:
+async def record_campaign_result(
+    request: AgentRequest, brief_content: BriefContent | None = None
+) -> AgentResult:
     try:
         data = RecordCampaignResultInput.model_validate(request.input)
     except ValidationError as error:
         return _invalid(request, error)
+    category, content_format = _fill_content(
+        data.campaign_id, data.content_category, data.format, brief_content
+    )
+    data = data.model_copy(update={"content_category": category, "format": content_format})
 
     queries = [f"finance.{RECORD_SKILL}"]
     if data.needs_data:
