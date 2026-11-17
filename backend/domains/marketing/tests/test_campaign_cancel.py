@@ -154,7 +154,8 @@ async def test_record_result_not_started_passes_through_once(
         "not_started",
         out,
     )
-    assert len(finance.calls) == 1  # 재시도 없음
+    # 재시도 없음 (조회수 읽기 data 호출은 따로 센다)
+    assert len([1 for t, _ in finance.calls if t == "finance"]) == 1
 
 
 async def test_record_result_without_spend_is_invalid_before_finance(
