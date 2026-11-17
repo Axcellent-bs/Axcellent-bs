@@ -378,7 +378,7 @@ def test_the_output_separates_unread_sales_from_low_sales() -> None:
         RULES,
     )
     got = decide(reaction)["customer_reaction"]
-    assert got["sales_unread"] == ["못 읽은 책"] and got["low_sales"] == ["적은 책"]
+    assert got["sales_unread"] == ["prd_1"] and got["low_sales"] == ["prd_2"]  # 요약은 상품 ID
     assert decide(cr.NOT_RELEVANT)["customer_reaction"]["sales_unread"] == []
 
 
@@ -395,9 +395,27 @@ def test_the_output_carries_the_customer_reaction_summary() -> None:
     assert out["customer_reaction"] == {
         "status": "flagged",
         "flagged": ["prd_1"],
-        "low_sales": ["적은 책"],
-        "sales_unread": ["못 읽은 책"],
+        "low_sales": ["prd_3"],
+        "sales_unread": ["prd_2"],
     }
+    # 요약의 값은 모두 상품 ID이고, 사람이 읽는 이유 문장에는 제목이 들어간다
+    joined = " ".join(out["reasons"])
+    assert "적은 책" in joined and "못 읽은 책" in joined
+
+
+def test_every_list_in_the_summary_holds_product_ids_never_titles() -> None:
+    got = cr.evaluate(
+        report(
+            row("prd_1", sold=100, claims=15, title="나쁜 책"),
+            row("prd_2", sold=None, title="못 읽은 책"),
+            row("prd_3", sold=2, title="적은 책"),
+        ),
+        ["prd_1", "prd_2", "prd_3"],
+        RULES,
+    )
+    assert [f.product_id for f in got.flagged] == ["prd_1"]
+    assert got.low_sales_ids == ("prd_3",) and got.sales_unread_ids == ("prd_2",)
+    assert got.low_sales == ("적은 책",) and got.sales_unread == ("못 읽은 책",)  # 이유 문장용 제목
 
 
 def test_the_output_summary_for_requests_without_products_is_not_relevant() -> None:
