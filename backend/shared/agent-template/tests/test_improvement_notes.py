@@ -143,7 +143,7 @@ def test_notes_survive_a_restart_when_a_folder_is_given(tmp_path, monkeypatch) -
         ("infra", "incident"),
         ("data", "data"),
         ("dev", "dev"),
-        ("support", "inquiry"),
+        ("support", "claims"),
         ("marketing", "coupon"),
         ("finance", "finance"),
         ("archive", "decisions"),
@@ -190,3 +190,152 @@ def test_a_cause_unknown_note_is_kept_like_any_other(client: TestClient) -> None
     assert res["outcome"] == "accepted"
     (stored,) = improvement_notes.store_for("incident").active_notes()
     assert stored["cause_known"] is False
+
+
+# ---- 4단계: 규칙 코드 단계의 응답에 주의 사항을 붙인다 -------------------------------------
+def _caution_app():
+    from ax_contracts.schemas import AgentResult, Evidence, TaskStatus
+
+    card = AgentCard.model_validate(
+        {
+            "name": "incident",
+            "owner": "test",
+            "description": "인프라 서비스",
+            "url": "http://incident:8107/a2a",
+            "skills": [
+                {
+                    "id": sid,
+                    "description": f"{sid} 시험용 skill. 상태를 바꾸지 않는다.",
+                    "input_schema": "x",
+                    "output_schema": "x",
+                    "grade": "read",
+                    "allowed_requesters": ["orchestrator"],
+                    "priority": "optional",
+                }
+                for sid in ("rollback_deployment", "bare", "failing")
+            ]
+            + CARD.skills[0:1],
+        }
+    )
+
+    async def with_evidence(request):  # noqa: ANN001, ANN202
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.COMPLETED,
+            output={"ok": True},
+            evidence=Evidence(queries=["q"], data_summary="되돌림 38초"),
+        )
+
+    async def no_evidence(request):  # noqa: ANN001, ANN202
+        return AgentResult(meta=request.meta, status=TaskStatus.COMPLETED, output={"ok": True})
+
+    async def failing(request):  # noqa: ANN001, ANN202
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.FAILED,
+            outcome="x",
+            output={},
+            evidence=Evidence(queries=["q"], data_summary="실패"),
+        )
+
+    return TestClient(
+        create_agent_app(
+            card, {"rollback_deployment": with_evidence, "bare": no_evidence, "failing": failing}
+        )
+    )
+
+
+def _call(client: TestClient, skill: str) -> dict:
+    body = {
+        "meta": {
+            "context_id": "ctx_x",
+            "token": "mock:orchestrator",
+            "path": [],
+            "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
+        },
+        "skill": skill,
+        "input": {},
+    }
+    return client.post("/a2a", json=body).json()
+
+
+@pytest.fixture
+def caution_client(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv(improvement_notes.NOTES_DIR_ENV, raising=False)
+    improvement_notes.reset_stores()
+    yield _caution_app()
+    improvement_notes.reset_stores()
+
+
+def _add(note_id="note-diag-1", skill="rollback_deployment", **kw) -> None:
+    from ax_contracts.schemas.diagnosis import ReceiveImprovementNoteInput
+
+    improvement_notes.store_for("incident").add(
+        ReceiveImprovementNoteInput.model_validate(_note(note_id=note_id, skill=skill, **kw)),
+        datetime.now(UTC).isoformat(),
+    )
+
+
+def test_a_response_gets_a_caution_line_when_a_note_covers_its_skill(caution_client) -> None:
+    before = _call(caution_client, "rollback_deployment")
+    assert before["evidence"]["data_summary"] == "되돌림 38초"  # 노트가 없으면 그대로
+    _add()
+    after = _call(caution_client, "rollback_deployment")
+    summary = after["evidence"]["data_summary"]
+    assert summary.startswith(
+        "되돌림 38초\n주의: 최근 이 단계가 반복해 오래 걸려 총괄 AI가 진단했어요"
+    )
+    assert "원인 확정, 개선 노트 1건" in summary and "같은 유형의 이벤트" in summary
+    assert after["output"] == before["output"]  # 결과 값은 건드리지 않는다
+
+
+def test_a_cause_unknown_note_says_so_in_the_caution(caution_client) -> None:
+    _add(cause_known=False, summary="원인은 말하지 않아요")
+    summary = _call(caution_client, "rollback_deployment")["evidence"]["data_summary"]
+    assert "원인 미확정" in summary and "원인은 말하지 않아요" in summary
+
+
+def test_no_caution_for_other_skills_revoked_notes_failures_or_missing_evidence(
+    caution_client,
+) -> None:
+    _add()
+    assert "주의" not in (_call(caution_client, "bare").get("evidence") or {}).get(
+        "data_summary", ""
+    )
+    assert _call(caution_client, "bare")["output"] == {"ok": True}
+    assert _call(caution_client, "failing")["evidence"]["data_summary"] == "실패"
+    improvement_notes.store_for("incident").revoke("note-diag-1")
+    assert _call(caution_client, "rollback_deployment")["evidence"]["data_summary"] == "되돌림 38초"
+
+
+def test_the_caution_is_not_added_twice_and_notes_skill_is_never_decorated(caution_client) -> None:
+    from ax_contracts.schemas import AgentResult, Evidence, TaskStatus
+
+    _add()
+    result = AgentResult(
+        meta={"context_id": "c", "token": "t", "deadline": datetime.now(UTC).isoformat()},
+        status=TaskStatus.COMPLETED,
+        output={},
+        evidence=Evidence(data_summary="x"),
+    )
+    once = improvement_notes.with_caution("incident", "rollback_deployment", result)
+    twice = improvement_notes.with_caution("incident", "rollback_deployment", once)
+    assert twice.evidence.data_summary == once.evidence.data_summary
+    assert improvement_notes.with_caution("incident", improvement_notes.SKILL, result) is result
+
+
+def test_notes_for_skill_respects_the_limit_and_the_skill_filter() -> None:
+    from ax_contracts.schemas.diagnosis import ReceiveImprovementNoteInput
+
+    store = ImprovementNoteStore()
+    for n, (step, skill) in enumerate(
+        (("rollback", "rollback_deployment"), ("diagnose", "diagnose_incident"))
+    ):
+        store.add(
+            ReceiveImprovementNoteInput.model_validate(
+                _note(note_id=f"note-{n}", step_id=step, skill=skill)
+            ),
+            datetime.now(UTC).isoformat(),
+        )
+    assert [n["note_id"] for n in store.notes_for_skill("rollback_deployment")] == ["note-0"]
+    assert store.notes_for_skill("nothing") == []

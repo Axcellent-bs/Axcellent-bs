@@ -103,7 +103,6 @@ SERVICES: tuple[Service, ...] = (
             # 문의 저장소를 읽는 skill은 문의를 가진 서비스에 둔다 (저장소가 프로세스마다 따로라서)
             "analyze_receipt",
             "analyze_claim_request",
-            "receive_improvement_note",
         ),
         "고객 문의",
     ),
@@ -131,6 +130,7 @@ SERVICES: tuple[Service, ...] = (
             "decide_incident_compensation",
             "list_incident_queue",
             "purge_expired_claims",
+            "receive_improvement_note",
         ),
         "클레임·보상",
     ),
