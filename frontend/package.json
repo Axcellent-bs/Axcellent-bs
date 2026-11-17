@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit -p .",
-    "test": "node --test src/lib/commFilter.test.ts src/lib/hiddenRooms.test.ts src/lib/briefMedia.test.ts src/lib/apiError.test.ts src/lib/incidentFacts.test.ts src/lib/outageMerge.test.ts src/lib/outageMedia.test.ts src/lib/salesView.test.ts src/lib/codingRecovery.test.ts src/demo/systemMenu.test.ts src/components/connect/DeployTools.test.ts src/components/connect/DejafixConnect.test.ts src/lib/dejafixProxy.test.ts",
+    "test": "node --test src/lib/commFilter.test.ts src/lib/hiddenRooms.test.ts src/lib/briefMedia.test.ts src/lib/apiError.test.ts src/lib/incidentFacts.test.ts src/lib/outageMerge.test.ts src/lib/outageMedia.test.ts src/lib/salesView.test.ts src/lib/codingRecovery.test.ts src/demo/systemMenu.test.ts src/components/connect/DeployTools.test.ts src/components/connect/DejafixConnect.test.ts src/lib/dejafixProxy.test.ts src/lib/agentDiagnosis.test.ts",
     "build": "tsc --noEmit -p . && vite build",
     "preview": "vite preview"
   },

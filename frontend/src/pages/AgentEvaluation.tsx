@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loading } from "@/components/admin/bits";
+import { beforeAfter, countByAgent, type AgentDiagnosisRow } from "@/lib/agentDiagnosis";
 import {
   MIN_EVENTS, TONE_TEXT, VERDICT, agentName, readout, secondsKo,
   type AgentEvaluation, type AgentSummary, type DailyTrend, type EvaluatedEvent, type EvaluatedStep, type Verdict,
@@ -7,6 +8,7 @@ import {
 import { shortDate, shortDateTime } from "@/lib/format";
 import { hr } from "@/lib/hr";
 import { Link, useSearchParams } from "@/lib/nav";
+import { orchestrator } from "@/lib/orchestrator";
 
 // 에이전트 평가 화면: 장애 대응에서 각 에이전트(부서 AI)가 일한 시간을 기준과 견준 결과.
 // 점수·등급·순위는 없다. 사람이 "제때 끝냈구나 / 늦었구나"를 한눈에 읽도록 문장, 점, 이유로만 보여 준다.
@@ -41,7 +43,7 @@ function Dot({ d, onPick }: { d: AgentSummary["recent"][number]; onPick: () => v
   );
 }
 
-function AgentCard({ a, onPick }: { a: AgentSummary; onPick: (ctx: string) => void }) {
+function AgentCard({ a, onPick, diagnoses = 0 }: { a: AgentSummary; onPick: (ctx: string) => void; diagnoses?: number }) {
   const r = readout(a);
   const counts = ORDER.map((v) => [v, a[v]] as const).filter(([, n]) => n > 0);
   const lastLate = a.recent.find((d) => d.verdict === "check" || d.verdict === "silent" || d.verdict === "blocked" || d.verdict === "approval_expired");
@@ -63,6 +65,11 @@ function AgentCard({ a, onPick }: { a: AgentSummary; onPick: (ctx: string) => vo
         </p>
       )}
       {a.handed_off > 0 && <p className="mt-3 text-xs text-ink-500">사람에게 넘김은 실패나 지연이 아니에요.</p>}
+      {diagnoses > 0 && (
+        <p className="mt-3 text-xs">
+          <Link href="/orchestrator#orch-eval" className="font-medium text-brand-700 underline underline-offset-2">총괄 AI의 진단 {diagnoses}건 보기 →</Link>
+        </p>
+      )}
       {lastLate?.reason && <p className="mt-3 text-xs text-ink-600">가장 최근 확인이 필요했던 이유: {lastLate.reason}</p>}
       {a.repeats.length > 0 && (
         <ul className="mt-3 space-y-1 text-xs text-ink-500">
@@ -177,15 +184,51 @@ function EventTimeline({ ev }: { ev: EvaluatedEvent }) {
   );
 }
 
+/** 진단을 에이전트에 전달한 시각 전후로 같은 단계의 판정을 견준다. 원인이 노트라고 단정하지 않고, 이슈가 적으면 판단을 미룬다 */
+function AfterDelivery({ rows, events }: { rows: AgentDiagnosisRow[]; events: EvaluatedEvent[] }) {
+  const items = rows
+    .map((r) => ({ r, c: beforeAfter(r, events) }))
+    .filter((x): x is { r: AgentDiagnosisRow; c: NonNullable<ReturnType<typeof beforeAfter>> } => x.c !== null);
+  if (items.length === 0) return null;
+  return (
+    <Section title="진단을 전달한 뒤 달라졌나요" desc="총괄 AI가 진단을 에이전트에 전달한 시각을 기준으로, 같은 단계에서 확인이 필요했던 이슈 수를 앞뒤로 견줘요. 기준값 판이 같은 이슈끼리만 세요.">
+      <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100">
+        {items.map(({ r, c }) => {
+          const few = c.after.events < MIN_EVENTS;
+          return (
+            <li key={r.request_id} className="space-y-1 px-4 py-3 text-sm">
+              <p className="flex flex-wrap items-baseline gap-2">
+                <b className="font-medium text-ink-900">{agentName(r.agent)} · {r.step_label}</b>
+                <span className="text-xs text-ink-500">{shortDateTime(c.at)}에 전달</span>
+              </p>
+              <p className="tabular-nums text-ink-700">
+                전달 전 이슈 {c.before.events}건 중 {c.before.late}건 → 전달 뒤 이슈 {c.after.events}건 중 {c.after.late}건
+              </p>
+              <p className="text-xs text-ink-500">
+                {few ? `전달 뒤 이슈가 ${c.after.events}건뿐이라 판단하기 이릅니다. ` : ""}
+                전달이 원인이라는 뜻은 아니고, 지켜볼 숫자예요.
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
+  );
+}
+
 export default function AgentEvaluationPage() {
   const ctxParam = useSearchParams().get("ctx"); // 아카이브 AI 장애 기록 화면의 "에이전트 평가에서 보기"로 들어올 때
   const [data, setData] = useState<AgentEvaluation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(ctxParam);
+  // 총괄 AI의 진단. 총괄에 닿지 않아도 평가 화면은 그대로 보인다
+  const [diagnoses, setDiagnoses] = useState<AgentDiagnosisRow[]>([]);
 
   const load = useCallback(async () => {
     try { setData(await hr.agentEvaluation()); setError(null); }
     catch (e) { setError(errText(e)); }
+    try { setDiagnoses(await orchestrator.agentDiagnoses()); }
+    catch { setDiagnoses([]); }
   }, []);
   useEffect(() => {
     load();
@@ -200,6 +243,7 @@ export default function AgentEvaluationPage() {
   );
 
   if (!data) return <Loading error={error} />;
+  const counts = countByAgent(diagnoses);
   const few = data.events.length < MIN_EVENTS;
 
   return (
@@ -239,7 +283,7 @@ export default function AgentEvaluationPage() {
         <>
           <Section title="에이전트별 현황" desc={few ? `이슈가 ${MIN_EVENTS}건 이상 쌓이면 문장으로 요약해 드려요.` : "점을 누르면 그 이슈의 단계별 시간으로 이동해요. 왼쪽이 가장 최근이에요."}>
             <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-              {data.agents.map((a) => <AgentCard key={a.dept} a={a} onPick={(ctx) => { setPicked(ctx); document.getElementById("event-steps")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} />)}
+              {data.agents.map((a) => <AgentCard key={a.dept} a={a} diagnoses={counts[a.dept] ?? 0} onPick={(ctx) => { setPicked(ctx); document.getElementById("event-steps")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} />)}
             </div>
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-500">
               {(["normal", "check", "silent", "handed_off", "blocked", "no_record", "absent"] as Verdict[]).map((v) => (
@@ -247,6 +291,8 @@ export default function AgentEvaluationPage() {
               ))}
             </p>
           </Section>
+
+          <AfterDelivery rows={diagnoses} events={data.events} />
 
           <Section title="날짜별 흐름" desc="하루 이슈 수와, 그중 확인이 필요했던 이슈 수예요.">
             <Trend data={data.trend} />

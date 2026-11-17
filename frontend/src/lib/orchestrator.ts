@@ -1,5 +1,6 @@
 import { ApiError } from "./apiError";
 import { ORCHESTRATOR_URL, RELAY_TOKEN, SAFETY_HUMAN_TOKEN } from "./env";
+import type { AgentDiagnosisRow, DiagnosisDelivery } from "./agentDiagnosis";
 import type { DemoRequest, OrchIncident } from "./agentChat";
 
 // 총괄(orchestrator) API. 응답은 ax-backend 규약 {data, meta}. 형식은 orchestrator/src/ax_orchestrator/main.py 기준.
@@ -47,6 +48,11 @@ export const orchestrator = {
   /** 재무가 보낸 의견 (캠페인 손익·예산 의견·인사이트). 총괄은 보관만 한다 */
   financeOpinions: () => call<FinanceOpinionRow[]>("/api/finance-opinions"),
   incident: (contextId: string) => call<OrchIncident>(`/api/incidents/${encodeURIComponent(contextId)}`),
+  /** 에이전트 평가에서 같은 단계의 확인 필요가 반복돼 인사 AI가 보낸 진단 요청과 진단·전달 상태 (최근 받은 것부터) */
+  agentDiagnoses: () => call<AgentDiagnosisRow[]>("/api/agent-diagnoses"),
+  /** 사람이 진단의 개선 노트 전달을 철회한다. 에이전트가 그 노트를 쓰지 않게 거둔다. 사람 토큰을 보낸다 */
+  revokeDiagnosis: (requestId: string) =>
+    post<DiagnosisDelivery>(`/api/agent-diagnoses/${encodeURIComponent(requestId)}/revoke`, undefined, SAFETY_HUMAN_TOKEN),
   /** 목 모드 전용: 판매 사이트 결제 장애를 주입한다. 관리자(admin) 토큰을 보낸다 */
   startDemo: (req: DemoRequest = {}) => post<{ context_id: string }>("/api/demo/incidents", req, RELAY_TOKEN),
   /** C 등급 보류에 대한 사람 결정을 전달한다. 총괄이 승인하는 것이 아니다.

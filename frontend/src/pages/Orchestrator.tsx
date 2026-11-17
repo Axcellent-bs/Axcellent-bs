@@ -1,6 +1,6 @@
 import { Navigate } from "react-router";
 import { Loading } from "@/components/admin/bits";
-import { PreparingChip } from "@/components/Preparing";
+import { AgentDiagnosisCard } from "@/components/admin/AgentDiagnosisCard";
 import { FinanceOpinionsCard } from "@/components/admin/FinanceOpinionsCard";
 import { SupportOverviewCard } from "@/components/admin/SupportOverviewCard";
 import { clock, incidentStatus } from "@/lib/adminRelay";
@@ -77,10 +77,7 @@ export default function OrchestratorPage() {
 
       <FinanceOpinionsCard tick={updatedAt?.getTime() ?? 0} />
 
-      <section className="card space-y-2 p-6" aria-labelledby="orch-eval">
-        <div className="flex items-center gap-2"><h2 id="orch-eval" className="text-lg font-semibold">에이전트 평가 진단</h2><PreparingChip /></div>
-        <p className="text-sm text-ink-500">인사 AI의 에이전트 평가 결과를 총괄 AI가 받아 부서별 문제를 진단하는 자리입니다. 아직 연결되지 않았습니다.</p>
-      </section>
+      <AgentDiagnosisCard tick={updatedAt?.getTime() ?? 0} />
     </div>
   );
 }
