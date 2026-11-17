@@ -3,8 +3,8 @@
 // 선택지(속성·값·장르·분류·자주 묻는 질문·기간)는 segment_options 응답에서만 읽는다 (코드에 고정하지 않음).
 // 품목 이름(책·게임 등)은 segment_options의 item_noun, 바깥 출처 이름은 응답 label에서만 온다 (회사 낱말을 박지 않는다).
 import type {
-  CoverageRow, EventProposalItem, EventProposalOutput, EventProposalSendOutput, ExternalResult, FavoriteItem,
-  MarketCoverageOutput, RetentionCohort, RetentionOutput, SalesBasis, SalesQuality, SegmentFavoritesOutput,
+  BasketLevel, BasketPairsOutput, CoverageRow, EventProposalItem, EventProposalOutput, EventProposalSendOutput, ExternalResult,
+  FavoriteItem, MarketCoverageOutput, RetentionCohort, RetentionOutput, SalesBasis, SalesQuality, SegmentFavoritesOutput,
   SegmentOptionsOutput, SegmentPeriod, SegmentProfileOutput, SegmentQuestionOutput,
 } from "./data.ts";
 
@@ -310,6 +310,40 @@ export function profileView(out: SegmentProfileOutput): ProfileView {
   };
 }
 
+// ---- 2-1) 함께 사는 장르·품목 (basket_pairs). 단위 = 같은 사람이 기간 안에 둘 다 산 것
+
+export interface PairRowView { pair: string; together: string; confidence: string; lift: string; high: boolean; suppressed: boolean }
+export interface BasketOkView { kind: "ok"; header: string; rows: PairRowView[]; empty: string | null; summary: string; badge: string | null }
+export type BasketView = GateView | BasketOkView;
+
+/** 단위 이름: 장르 또는 화면 품목 이름 (item_noun) */
+export const basketNoun = (level: BasketLevel, itemNoun: string = DEFAULT_NOUN) => (level === "genre" ? "장르" : itemNoun);
+
+export function basketView(out: BasketPairsOutput, attributes: AttributeChoice[], itemNoun: string = DEFAULT_NOUN): BasketView {
+  if (out.status === "insufficient") return gate(out);
+  const who = filterLabel(out.filters, attributes) || "전체 고객";
+  const rows = out.pairs.map((p): PairRowView => {
+    const pair = `${p.a_label} + ${p.b_label}`;
+    if (p.suppressed) return { pair, together: SUPPRESSED, confidence: "-", lift: "-", high: false, suppressed: true };
+    return {
+      pair,
+      together: p.together_buyers != null ? people(p.together_buyers) : "-",
+      confidence: p.confidence != null ? `${p.a_label} 구매자의 ${pct(p.confidence)}` : "-",
+      lift: p.lift != null ? times(p.lift) : "-",
+      high: isHigh(p.lift),
+      suppressed: false,
+    };
+  });
+  return {
+    kind: "ok",
+    header: `${who} · 함께 사는 ${basketNoun(out.level, itemNoun)} (${periodLabel(out.period)})`,
+    rows,
+    empty: rows.length ? null : `${who}에서 함께 산 사람이 충분한 쌍이 없어요`,
+    summary: out.summary,
+    badge: fakeBadge(out),
+  };
+}
+
 // ---- 3) 시장을 얼마나 덮고 있나 (market_coverage)
 
 export interface CoverageRowView { label: string; buyers: string; population: string; coverage: string; source: string; note: string | null }
@@ -462,7 +496,10 @@ export function proposalView(p: EventProposalItem, month: string): ProposalView 
     id: p.proposal_id,
     title: p.title || `${monthLabel(month)} · ${what || "이벤트 제안"}`,
     summary: p.summary,
-    reasons: p.reasons.map((r) => ({ title: REASON_TITLE[r.kind] ?? "근거", text: r.text, source: r.source })),
+    // 묶음 할인 제안의 첫 근거는 "a → b 함께 산 배수"라 제목을 "함께 사는 것"으로
+    reasons: p.reasons.map((r) => ({
+      title: p.bundle && r.kind === "segment" ? "함께 사는 것" : REASON_TITLE[r.kind] ?? "근거", text: r.text, source: r.source,
+    })),
     effect: `주문 +${range(e.orders_low, e.orders_high, (n) => `${withComma(n)}건`)} · 매출 +${range(e.revenue_low, e.revenue_high, won)}`,
     formula: e.formula,
     assumption: e.assumption || e.conversion_source === "assumption",

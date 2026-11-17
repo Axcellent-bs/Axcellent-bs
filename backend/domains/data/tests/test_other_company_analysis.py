@@ -21,6 +21,7 @@ from ax_contracts.data_access.shop_customers import CustomerRow
 from ax_contracts.data_access.shop_sales import SalesOrderLine, SalesOrderRow
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import (
+    BasketPairsOutput,
     CampaignResultOutput,
     ChannelValueOutput,
     EventProposalOutput,
@@ -236,6 +237,40 @@ def test_segment_options_profile_favorites_coverage_with_game_company(game: dict
     assert {r.status for r in cov.rows} == {"population_missing"}
     assert all(r.population is None and r.coverage is None for r in cov.rows)
     _no_catbooks_words(*(o.model_dump(mode="json") for o in (opts, prof, fav, cov)))
+
+
+def test_basket_pairs_with_game_company(game: dict) -> None:
+    """십대·안드로이드 6명이 퍼즐 말고 롤플레잉도 한 번 더 산다 → (롤플레잉, 퍼즐) 쌍 하나."""
+    now: datetime = game["now"]
+    when = now - timedelta(days=1)
+    extra = [SalesOrderRow(
+        order_id=f"gx{i}", buyer_id=f"pl1_{i}", status="paid", created_at=when, updated_at=when,
+        items_amount=PRICES["rpg"], payment_status="succeeded",
+        lines=[SalesOrderLine(product_id="rpg_pack", category_code="game_item", title="rpg pack",
+                              qty=1, unit_price=PRICES["rpg"], genre_code="rpg")],
+    ) for i in range(6)]  # fmt: skip
+    handlers.get_sales_store().upsert(TENANT, extra, now)
+
+    out = BasketPairsOutput.model_validate(_ok(run(handlers.basket_pairs_skill(
+        _request("basket_pairs", period="7d")))))  # fmt: skip
+    assert out.status == "ok", out.insufficient_reasons
+    (pair,) = out.pairs
+    # 롤플레잉 16명(청년 8 + 성인 2 + 십대 6) > 퍼즐 10명 → a = 롤플레잉
+    assert (pair.a_label, pair.b_label, pair.together_buyers) == ("롤플레잉", "퍼즐", 6)
+    assert pair.lift == round(6 * 30 / (16 * 10), 4) and pair.confidence == round(6 / 16, 4)
+    assert "함께 사는 장르" in out.summary
+
+    teens = BasketPairsOutput.model_validate(_ok(run(handlers.basket_pairs_skill(
+        _request("basket_pairs", period="7d", filters={"platform": "android"})))))  # fmt: skip
+    (pair,) = teens.pairs  # 안드로이드 10명 안: 퍼즐 8명 > 롤플레잉 6명
+    assert (pair.a_label, pair.b_label) == ("퍼즐", "롤플레잉")
+    assert pair.lift == round(6 * 10 / (8 * 6), 4)
+
+    items = BasketPairsOutput.model_validate(_ok(run(handlers.basket_pairs_skill(
+        _request("basket_pairs", level="product", period="7d")))))  # fmt: skip
+    assert [(p.a_label, p.b_label) for p in items.pairs] == [("rpg pack", "puzzle pack")]
+    assert "함께 사는 게임" in items.summary  # 게임사 카탈로그 item_noun
+    _no_catbooks_words(*(o.model_dump(mode="json") for o in (out, teens, items)))
 
 
 def _propose(month: str) -> EventProposalOutput:

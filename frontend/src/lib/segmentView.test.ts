@@ -3,12 +3,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type {
-  EventProposalOutput, MarketCoverageOutput, SalesBasis, SalesQuality, SegmentFavoritesOutput,
+  BasketPairsOutput, EventProposalOutput, MarketCoverageOutput, SalesBasis, SalesQuality, SegmentFavoritesOutput,
   SegmentOptionsOutput, SegmentProfileOutput,
 } from "./data.ts";
 import {
-  coverageView, dataNote, favoritesView, fakeBadge, filterLabel, isHigh, nextMonth, optionsView, parseTarget, pct,
-  profileView, proposalsView, questionView, readableReason, retentionView, sectionState, sendResultText, times,
+  basketNoun, basketView, coverageView, dataNote, favoritesView, fakeBadge, filterLabel, isHigh, nextMonth, optionsView, parseTarget,
+  pct, profileView, proposalsView, questionView, readableReason, retentionView, sectionState, sendResultText, times,
   cohortDone,
 } from "./segmentView.ts";
 import type { RetentionOutput } from "./data.ts";
@@ -367,6 +367,51 @@ test("이벤트 제안: 근거 3개·효과 범위·가정·이미 넘김·지�
   noCodes(shown, ["evp_ab12cd", "coupon", "g_ai", "office", "assumption", "past_campaign"]);
   const none = proposalsView({ ...PROPOSALS, proposals: [] });
   assert.ok(none.kind === "ok" && none.empty === "이번 달에 낼 만한 제안이 없어요");
+});
+
+test("이벤트 제안: 묶음 할인 제안은 첫 근거 제목이 '함께 사는 것'", () => {
+  const [base] = PROPOSALS.proposals;
+  const bundle = {
+    ...base, genre_code: null, item_label: "소설 + 에세이",
+    bundle: { a_code: "novel", a_label: "소설", b_code: "essay", b_label: "에세이", lift: 1.44, together_buyers: 42 },
+  };
+  const v = proposalsView({ ...PROPOSALS, proposals: [bundle, base] });
+  assert.ok(v.kind === "ok");
+  if (v.kind !== "ok") return;
+  assert.deepEqual(v.items[0].reasons.map((r) => r.title), ["함께 사는 것", "언제", "무엇"]);
+  assert.deepEqual(v.items[1].reasons.map((r) => r.title), ["누구", "언제", "무엇"]); // 예전 응답(bundle 없음)
+  noCodes({ ...v.items[0], id: "" }, ["novel", "essay"]);
+});
+
+const BASKET: BasketPairsOutput = {
+  status: "ok", insufficient_reasons: [], level: "genre", period: "90d", filters: { age_band: "20s" },
+  pairs: [
+    { a_code: "g_novel", a_label: "소설", b_code: "g_essay", b_label: "에세이", together_buyers: 1180, a_buyers: 3200,
+      b_buyers: 2100, confidence: 0.3688, lift: 1.44, suppressed: false },
+    { a_code: "g_ai", a_label: "AI 활용", b_code: "g_essay", b_label: "에세이", together_buyers: 40, a_buyers: 900,
+      b_buyers: 2100, confidence: 0.0444, lift: 1.1, suppressed: false },
+    { a_code: "g_kids", a_label: "어린이", b_code: "g_ai", b_label: "AI 활용", together_buyers: null, a_buyers: null,
+      b_buyers: null, confidence: null, lift: null, suppressed: true },
+  ],
+  basis: FAKE, quality: QUALITY, summary: "최근 90일 20대 구매자 …",
+};
+
+test("함께 사는 것: 쌍·둘 다 산 사람·비율·배수, 1.2배 이상만 초록, 숨김은 표본 부족", () => {
+  const v = basketView(BASKET, optionsView(OPTIONS).attributes, "책");
+  assert.equal(v.kind, "ok");
+  if (v.kind !== "ok") return;
+  assert.equal(v.header, "20대 · 함께 사는 장르 (최근 3개월)");
+  assert.deepEqual(v.rows[0], { pair: "소설 + 에세이", together: "1,180명", confidence: "소설 구매자의 36.9%", lift: "1.4배", high: true, suppressed: false });
+  assert.equal(v.rows[1].high, false);
+  assert.deepEqual(v.rows[2], { pair: "어린이 + AI 활용", together: "표본 부족", confidence: "-", lift: "-", high: false, suppressed: true });
+  assert.equal(v.badge, "가짜 데이터로 본 결과");
+  noCodes(v, ["g_novel", "g_essay", "g_ai", "g_kids", "age_band", "20s"]);
+  const product = basketView({ ...BASKET, level: "product", filters: {}, pairs: [] }, [], "게임");
+  assert.ok(product.kind === "ok" && product.header === "전체 고객 · 함께 사는 게임 (최근 3개월)");
+  assert.ok(product.kind === "ok" && product.empty === "전체 고객에서 함께 산 사람이 충분한 쌍이 없어요");
+  assert.equal(basketNoun("product", "게임"), "게임");
+  const gated = basketView({ ...BASKET, status: "insufficient", insufficient_reasons: ["데이터 부족: 저장된 고객 기록이 없음"] }, [], "책");
+  assert.ok(gated.kind === "gate" && gated.reasons[0].startsWith("데이터 부족"));
 });
 
 test("기획에 넘기기 결과 글자", () => {

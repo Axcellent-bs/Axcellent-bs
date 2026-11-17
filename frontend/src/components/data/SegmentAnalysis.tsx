@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Empty, Waiting } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
-import { dataAi, kpiLive, type SegmentPeriod } from "@/lib/data";
+import { dataAi, kpiLive, type BasketLevel, type SegmentPeriod } from "@/lib/data";
 import {
-  NOT_YET, SUPPRESSED, dataNote, coverageView, favoritesView, filterLabel, nextMonth, optionsView, parseTarget,
-  profileView, proposalsView, questionView, retentionView, sectionState, sendResultText,
-  type CoverageView, type FavoriteList, type FavoritesView, type GateView, type OptionsView, type ProfileView,
+  NOT_YET, SUPPRESSED, basketNoun, basketView, dataNote, coverageView, favoritesView, filterLabel, nextMonth, optionsView,
+  parseTarget, profileView, proposalsView, questionView, retentionView, sectionState, sendResultText,
+  type BasketView, type CoverageView, type FavoriteList, type FavoritesView, type GateView, type OptionsView, type ProfileView,
   type ProposalView, type ProposalsView, type QuestionView, type RetentionView, type SectionState,
 } from "@/lib/segmentView";
 
-// 고객·시장 분석: 물어보기(글로 묻기 segment_question → segment_favorites) · ○○은 누가 사나(segment_profile) · 시장 커버(market_coverage)
+// 고객·시장 분석: 물어보기(글로 묻기 segment_question → segment_favorites) · ○○은 누가 사나(segment_profile)
+// · 함께 사는 장르·품목(basket_pairs) · 시장 커버(market_coverage)
 // · 다음 달 이벤트 제안(event_proposal, 기획에 넘기기 event_proposal_send).
 // 선택지(속성·값·장르·분류·자주 묻는 질문·기간)는 segment_options 응답에서만 읽는다. 보여 줄 글자는 lib/segmentView.ts가 만든다.
 // skill이 아직 없거나 실패하면 탭 전체가 아니라 그 칸만 "준비 중"·다시 시도로 둔다.
@@ -302,6 +303,73 @@ function Who({ options }: { options: OptionsView }) {
   );
 }
 
+// ---- 2-1) 함께 사는 장르·품목
+
+function Together({ options }: { options: OptionsView }) {
+  const [level, setLevel] = useState<BasketLevel>("genre");
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [period, setPeriod] = useState<SegmentPeriod>((options.periods.find((p) => p.value === "90d") ?? options.periods[0])?.value as SegmentPeriod ?? "90d");
+  const filters = useMemo(() => Object.fromEntries(Object.entries(draft).filter(([, v]) => v)), [draft]);
+  const key = JSON.stringify([level, period, filters]);
+  const res = useLoad(key, () => dataAi.basketPairs(level, period, filters).then((r) => r.output));
+  const view: BasketView | null = res.data ? basketView(res.data, options.attributes, options.itemNoun) : null;
+
+  return (
+    <Section id="seg-together" title={`함께 사는 장르·${options.itemNoun}`}
+      hint="같은 사람이 기간 안에 둘 다 산 것을 셉니다(같은 주문이 아니어도 됩니다). 배수는 따로 살 때 기대보다 몇 배 자주 같이 사는지이고, 1.2배 이상이면 초록으로 표시합니다." badge={view?.kind === "ok" ? view.badge : null}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+        <Select label="단위" value={level} onChange={(v) => setLevel(v as BasketLevel)}>
+          <option value="genre">{basketNoun("genre")}</option>
+          <option value="product">{basketNoun("product", options.itemNoun)}</option>
+        </Select>
+        {options.attributes.map((a) => (
+          <Select key={a.key} label={a.label} value={draft[a.key] ?? ""} onChange={(v) => setDraft((d) => ({ ...d, [a.key]: v }))}>
+            <option value="">전체</option>
+            {a.values.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
+          </Select>
+        ))}
+        {options.periods.length > 0 && (
+          <Select label="기간" value={period} onChange={(v) => setPeriod(v as SegmentPeriod)}>
+            {options.periods.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </Select>
+        )}
+      </div>
+      <StateBox load={res} what="함께 사는 것" />
+      {view?.kind === "gate" && <Gate view={view} />}
+      {view?.kind === "ok" && (
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-ink-900">{view.header}</p>
+          {view.empty ? <p className="text-sm text-ink-500">{view.empty}</p> : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-ink-500">
+                    <th className="py-2 pr-3 font-medium">함께 사는 것</th>
+                    <th className="py-2 pr-3 text-right font-medium">둘 다 산 사람</th>
+                    <th className="py-2 pr-3 font-medium">앞의 것을 산 사람 중</th>
+                    <th className="py-2 text-right font-medium">배수</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {view.rows.map((r, i) => (
+                    <tr key={i} className="border-t border-ink-100">
+                      <td className="py-2 pr-3 font-medium text-ink-900">{r.pair}</td>
+                      <td className={`py-2 pr-3 text-right tabular-nums ${r.suppressed ? "text-xs text-ink-400" : "text-ink-700"}`}>{r.together}</td>
+                      <td className="py-2 pr-3 text-xs text-ink-700">{r.confidence}</td>
+                      <td className={`py-2 text-right tabular-nums ${r.high ? "font-semibold text-emerald-700" : "text-ink-700"}`}>{r.lift}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {view.summary && <p className="text-xs text-ink-500">요약: {view.summary}</p>}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 // ---- 3) 시장을 얼마나 덮고 있나
 
 function Coverage({ options }: { options: OptionsView }) {
@@ -543,7 +611,7 @@ function Retention() {
 function OptionsMissing({ load }: { load: Load<unknown> }) {
   return (
     <>
-      {["물어보기", "누가 사나", "시장을 얼마나 덮고 있나"].map((t, i) => (
+      {["물어보기", "누가 사나", "함께 사는 것", "시장을 얼마나 덮고 있나"].map((t, i) => (
         <Section key={t} id={`seg-wait-${i}`} title={t}>
           <StateBox load={load} what="분석 선택지" />
         </Section>
@@ -576,6 +644,7 @@ export function SegmentAnalysis() {
             <>
               <Ask options={options} />
               <Who options={options} />
+              <Together options={options} />
               <Coverage options={options} />
             </>
           ) : <OptionsMissing load={opts} />}

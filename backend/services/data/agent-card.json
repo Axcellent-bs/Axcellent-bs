@@ -150,6 +150,20 @@
       "handoff": false
     },
     {
+      "id": "basket_pairs",
+      "description": "함께 사는 장르·상품: 표준 판매 저장소만 읽어 기간(최근 1·7·30·90·365일, 한국 시간) 안 결제 완료 주문에서 같은 사람이 둘 다 산 장르끼리(또는 상품끼리) 쌍마다 함께 산 사람 수, 각각 산 사람 수, a를 산 사람 중 b도 산 비율, 배수(함께 산 사람 × 전체 구매자 ÷ (a 구매자 × b 구매자))를 배수 큰 순으로 돌려준다. 대분류는 쌍에서 뺀다. 속성 조건(예: 20대)을 주면 그 사람들 안에서만 센다. 함께 산 사람이 최소 크기(기본 5명) 미만이면 숫자를 숨긴다. 품질 관문·고객 기록이 없으면 '데이터 부족: 이유'. LLM을 쓰지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#BasketPairsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#BasketPairsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "retention",
       "description": "재구매·이탈: 고객의 첫 결제 완료 주문 달(한국)을 코호트로, 지금 달을 뺀 최근 cohorts개 달마다 첫 구매 뒤 30·60·90일 안에 결제 완료 주문이 한 번 더 있는 비율을 돌려준다(기간이 다 지나지 않은 칸은 비움). 단골(결제 완료 주문이 카탈로그 repeat_min_orders번 이상) 중 마지막 주문 뒤 churn_days일(가정)이 지난 사람을 속성 묶음별로 세어 많은 순 상위 5개와 그 묶음이 가장 많이 산 장르를 돌려준다. 묶음이 최소 크기(기본 5명) 미만이면 숨기고 보완 숨김을 쓴다. 고객 기록이 없으면 주문을 읽기 전에 '데이터 부족'. LLM을 쓰지 않는다. 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#RetentionInput",
