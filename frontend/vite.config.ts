@@ -22,7 +22,7 @@ export default defineConfig(({ mode }) => {
     '/archive-api': { target: env.ARCHIVE_PROXY_TARGET || 'http://127.0.0.1:8114', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/archive-api/, '') },
   }
   return {
-    // /dejafix-api 는 로그인까지 대신 해야 해서 단순 프록시가 아니라 플러그인이 맡는다 (dejafix-proxy.ts)
+    // /dejafix-api 는 플러그인이 맡는다: 기본은 백엔드 dejafix-proxy(8030)로 그대로, 계정을 적으면 대신 로그인 (dejafix-proxy.ts)
     plugins: [react(), dejafixProxy(env)],
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
     server: { port: 3090, strictPort: true, proxy },

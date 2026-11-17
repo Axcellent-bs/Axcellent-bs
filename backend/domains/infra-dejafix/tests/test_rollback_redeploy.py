@@ -32,6 +32,7 @@ class FakeTool:
         self.service = service
         self.runs = runs or []
         self.redeployed: list[str] = []
+        self.components: tuple[str, ...] = ()
         self.error: Exception | None = None
 
     async def recent(self, limit: int = 20) -> list[ToolRun]:

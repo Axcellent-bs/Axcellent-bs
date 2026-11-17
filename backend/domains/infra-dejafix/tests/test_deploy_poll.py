@@ -34,6 +34,7 @@ class FakeTool:
         self.runs = runs or []
         self.error: Exception | None = None
         self.calls = 0
+        self.components: tuple[str, ...] = ()
 
     async def recent(self, limit: int = 20) -> list[ToolRun]:
         self.calls += 1
@@ -270,3 +271,22 @@ def test_unrelated_connected_service_is_not_a_payment_suspect() -> None:
     asyncio.run(poll_once(history, [FakeTool(runs=[_run("12", "v3.0.1", 3)])]))
     shop = next(d for d in history.deployments if d.deploy_id == "shop-api:12")
     assert set(shop.components) == {"payment", "api"}
+
+
+def test_tool_components_win_then_learned_then_service_name() -> None:
+    """도구 실행의 장애 부위: 연결에 적은 값 → 시연 이력에서 배운 값 → 서비스 이름."""
+    history = DeploymentHistory.load()
+    named = FakeTool(runs=[_run("12", "v3.0.1", 3)])
+    named.components = ("checkout",)
+    asyncio.run(poll_once(history, [named]))
+    shop = next(d for d in history.deployments if d.deploy_id == "shop-api:12")
+    assert shop.components == ("checkout",)
+    diag = diagnose(history, "checkout", NOW, mock=False)
+    assert [s.version for s in diag.output.suspects] == ["v3.0.1"]
+
+    # 시연 이력에 없는 서비스는 서비스 이름을 부위로 단다 (DejaFix 태그가 서비스 이름일 때 맞는다)
+    asyncio.run(poll_once(history, [FakeTool(service="billing", runs=[_run("5", "v1.2.0", 2)])]))
+    billing = next(d for d in history.deployments if d.deploy_id == "billing:5")
+    assert billing.components == ("billing",)
+    diag = diagnose(history, "billing", NOW, mock=False)
+    assert [s.version for s in diag.output.suspects] == ["v1.2.0"]

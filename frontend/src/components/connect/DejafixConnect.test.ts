@@ -5,7 +5,7 @@ import type { ToolConnection, ToolField } from "../../lib/toolConnections";
 import { dejafixView, formActions, formReducer, incidentCount, initForm } from "../../lib/toolForms.ts";
 
 const dj = (extra: Partial<ToolConnection> = {}): ToolConnection => ({
-  id: "dj1", kind: "dejafix", name: "DejaFix", config: { url: "http://10.0.0.5:18000", username: "viewer" }, secrets_set: { password: "abcd••••" },
+  id: "dj1", kind: "dejafix", name: "DejaFix", config: { url: "http://10.0.0.5:18000", username: "viewer" }, secrets_set: { password: "••••" },
   checked_at: "2026-11-17T01:00:00Z", check_ok: true, check_detail: "로그인: 로그인했어요; 장애 목록: 현재 장애 3건", updated_at: null, updated_by: null, ...extra,
 });
 const FIELDS: ToolField[] = [

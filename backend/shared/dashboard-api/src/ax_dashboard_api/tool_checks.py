@@ -2,7 +2,7 @@
 
 - `github_app`: 설치 토큰 받기 → 설치된 레포 수 → 받은 권한 목록
 - `github_actions`: 앱 연결의 `actions: write` 권한 → 워크플로 파일
-  → `workflow_dispatch` 입력 이름 → 최근 실행
+  → `workflow_dispatch` 입력 이름 → `run-name`에 버전 입력이 들어가는가 → 최근 실행
 - `jenkins`: 작업 조회(기본 인증) → 매개변수 정의에 버전 이름이 있는가 → 최근 빌드
 - `dejafix`: 로그인 → 현재 장애 목록 읽기
 
@@ -197,6 +197,29 @@ def _dispatch_problem(text: str, version_input: str) -> str | None:
     return None
 
 
+def _run_name_problem(text: str, version_input: str) -> str | None:
+    """`run-name`이 버전 입력을 담는지 본다. 없으면 실행 제목에서 버전을 못 읽어 되돌릴 수 없다.
+
+    `${{ inputs.X }}`, `${{ github.event.inputs.X }}` 꼴(괄호 안 공백은 있어도 없어도)을 받는다.
+    """
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return "워크플로 파일을 YAML로 읽지 못했어요. 문법을 확인해 주세요"
+    run_name = doc.get("run-name") if isinstance(doc, dict) else None
+    pattern = (
+        r"\$\{\{[^}]*?(?<![\w.])(?:github\.event\.)?inputs\."
+        + re.escape(version_input)
+        + r"(?![\w-])[^}]*\}\}"
+    )
+    if isinstance(run_name, str) and re.search(pattern, run_name):
+        return None
+    return (
+        f'워크플로에 run-name: "deploy ${{{{ inputs.{version_input} }}}}"처럼 버전을 넣어 주세요. '
+        "그래야 되돌릴 버전을 알 수 있어요"
+    )
+
+
 async def _github_actions_checks(
     config: dict[str, Any], client: httpx.AsyncClient, lookup: Lookup, scrub: _Scrub
 ) -> list[Check]:
@@ -274,6 +297,12 @@ async def _github_actions_checks(
         checks.append(
             Check("input", "버전 입력", True, f"workflow_dispatch에 {version_input} 입력이 있어요")
         )
+    problem = _run_name_problem(text, version_input)
+    if problem:
+        checks.append(Check("run_name", "실행 이름의 버전", False, problem))
+    else:
+        detail = f"run-name에 inputs.{version_input}이 있어요"
+        checks.append(Check("run_name", "실행 이름의 버전", True, detail))
     file_name = quote(path.rsplit("/", 1)[-1])
     res, error = await _send(
         client,

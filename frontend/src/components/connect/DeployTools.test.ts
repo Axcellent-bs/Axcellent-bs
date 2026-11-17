@@ -111,7 +111,7 @@ test("보낼 본문: 빈 칸·빈 비밀은 빼고 공백을 지운다", () => {
 });
 
 test("고치기: 저장된 값으로 채우고 비밀 칸은 비운다. 저장된 비밀은 비워도 필수 칸이 빈 게 아니다", () => {
-  const saved = conn("jenkins", { url: "https://j", username: "bot", job: "deploy", service: "shop" }, { id: "j9", secrets_set: { api_token: "11aa••••" } });
+  const saved = conn("jenkins", { url: "https://j", username: "bot", job: "deploy", service: "shop" }, { id: "j9", secrets_set: { api_token: "••••" } });
   const s = initForm("jenkins", FIELDS.jenkins, saved);
   assert.equal(s.id, "j9");
   assert.equal(s.config.job, "deploy");

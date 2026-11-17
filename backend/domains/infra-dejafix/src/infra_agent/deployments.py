@@ -199,16 +199,26 @@ class DeploymentHistory:
         return None
 
     def replace_service(
-        self, service: str, runs: list[ToolRun], *, tool: str = "deploy_tool"
+        self,
+        service: str,
+        runs: list[ToolRun],
+        *,
+        tool: str = "deploy_tool",
+        components: tuple[str, ...] = (),
     ) -> None:
         """그 서비스의 이력(시연 이력 포함)을 배포 도구의 성공한 실행으로 바꾼다.
+
+        실행에 다는 장애 부위: 연결에 적은 `components` → 시연 이력에서 배운 구성요소 →
+        서비스 이름 하나 (DejaFix component 태그가 서비스 이름이면 그대로 맞는다).
 
         `deploy_id`가 `<서비스>:<실행 id>`라 "되돌림" 표시(`rolled_back`)는 다시 받아도 이어진다.
         우리가 롤백으로 띄운 실행은 디스패치한 버전과 롤백 표시(`is_rollback`)를 붙인다.
         """
         for d in self.deployments:
             self._learn_components(d)
-        components = tuple(sorted(self.components_by_service.get(service, ())))
+        components = (
+            components or tuple(sorted(self.components_by_service.get(service, ()))) or (service,)
+        )
         fresh: list[Deployment] = []
         for run in sorted(runs, key=lambda r: r.at):
             if not run.ok:

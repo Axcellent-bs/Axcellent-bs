@@ -30,10 +30,10 @@
 회사 연결(`company_connection.py`)과 같은 방식이다.
 
 - 파일: `AX_TOOL_CONNECTIONS_FILE`(run_all 기본 `$DATA/tool_connections.json`). 없으면 연결 없음.
-- 모양: `{"connections": [ {id, kind, name, config, secrets, checked_at, check_ok, check_detail, updated_at, updated_by} ]}`
+- 모양: 맨 위가 목록인 JSON `[ {id, kind, name, config, secrets, checked_at, check_ok, check_detail, updated_at, updated_by} ]`
   - `kind`: 이번 묶음은 `github_app` · `github_actions` · `jenkins` · `dejafix`. 2번 묶음에서 `site_api` · `site_db`가 붙는다.
   - `config`: 비밀이 아닌 값(주소·레포·워크플로·작업 이름·버전 입력 이름·대상 서비스 등)
-  - `secrets`: 개인 키·API 토큰·비밀번호. `public()`은 `secrets` 대신 `{이름: "앞4글자••••"}`만 낸다(개인 키는 `설정됨`만).
+  - `secrets`: 개인 키·API 토큰·비밀번호. `public()`은 `secrets` 대신 `{이름: "••••"}`만 낸다(앞글자도 내지 않는다. 목록은 회원 모두가 본다. 개인 키는 `설정됨`만).
 - 쓰기: dashboard-api 한 곳. 임시 파일을 `0600`으로 만들어 `os.replace`, 바꿀 때마다 `<파일>.history.jsonl`에 한 줄(언제·누가·무엇을·어떤 연결, 비밀 값 제외). 비밀 칸을 비워 보내면 이전 값을 그대로 둔다(개발 AI 저장소와 같은 규칙).
 - 읽기: `read_all()` / `find(kind, **match)`. `(경로, mtime_ns, size)`가 바뀌었을 때만 다시 읽는다 → 재시작 없이 반영. 깨진 파일은 경고 한 번 + 없는 것으로 본다. 읽을 때도 `0600`으로 다시 맞춘다.
 - 주소 정책: 주소가 있는 연결(Jenkins·DejaFix·GitHub Enterprise)은 `company_connection.check_host`를 그대로 쓴다(사내 주소 또는 허용 목록+https, 링크 로컬·메타데이터 차단).
@@ -60,12 +60,14 @@
 
 | 종류 | 입력 | 연결 확인 |
 |---|---|---|
-| `github_app` | 앱 ID, 설치 ID, 개인 키(.pem), (선택) GitHub Enterprise 주소 | 설치 토큰 받기 → 설치된 레포 수·권한 목록 |
-| `github_actions` | GitHub 앱 연결 고르기, 레포, 배포 워크플로 파일, 버전 입력 이름(기본 `version`), 대상 서비스 | 앱 권한에 `actions: write` · 워크플로가 있음 · `workflow_dispatch` 입력에 그 이름이 있음 · 최근 실행 읽힘 |
-| `jenkins` | 주소, 사용자 이름, API 토큰, 작업 이름, 버전 매개변수 이름, 대상 서비스 | `GET /job/<작업>/api/json` 200 · 매개변수 정의에 그 이름이 있음 · 최근 빌드 읽힘 |
+| `github_app` | 앱 ID, 설치 ID, 개인 키(.pem), (선택) GitHub Enterprise 주소(`https://<host>/api/v3`, 비우면 api.github.com) | 설치 토큰 받기 → 설치된 레포 수·권한 목록 |
+| `github_actions` | GitHub 앱 연결 고르기, 레포, 배포 워크플로 파일, 버전 입력 이름(기본 `version`), 대상 서비스, (선택) 장애 부위 | 앱 권한에 `actions: write` · 워크플로가 있음 · `workflow_dispatch` 입력에 그 이름이 있음 · `run-name`에 그 입력(`${{ inputs.<이름> }}` 또는 `${{ github.event.inputs.<이름> }}`)이 있음 · 최근 실행 읽힘 |
+| `jenkins` | 주소, 사용자 이름, API 토큰, 작업 이름, 버전 매개변수 이름(기본 `version`), 대상 서비스, (선택) 장애 부위 | `GET /job/<작업>/api/json` 200 · 매개변수 정의에 그 이름이 있음 · 최근 빌드 읽힘 |
 | `dejafix` | DejaFix 백엔드 주소, viewer 계정 이름·비밀번호 | 로그인 성공 · `GET /api/incidents?status=problem` 읽힘(현재 장애 n건) |
 
 - "대상 서비스"는 이 배포 도구가 배포하는 고객사 서비스 이름이다(인프라 AI 진단·롤백의 `service`와 같은 값). 한 서비스에 배포 도구는 하나만(두 번째는 409).
+- "장애 부위"(`components`, 선택, 쉼표로 여럿)는 DejaFix component 태그와 같은 이름(예: `payment`)이다. 도구 실행으로 받은 배포에 이 값을 단다. 비우면 시연 이력에서 배운 구성요소 → 그것도 없으면 서비스 이름 하나를 쓴다. 진단은 장애 부위로 배포를 고르므로, 맞지 않으면 원인 후보가 없다.
+- `run-name` 확인: 실행 목록에는 디스패치 입력 값이 안 나와서 실행 제목(`display_title`)에서 버전을 읽는다. `run-name`에 버전 입력이 없으면 버전이 커밋 앞자리가 되어 롤백 다시 배포를 할 수 없으므로 확인을 실패로 두고 "워크플로에 run-name: "deploy ${{ inputs.version }}"처럼 버전을 넣어 주세요"라고 안내한다.
 - `dejafix`는 하나만 둔다.
 - 워크플로 파일의 `workflow_dispatch` 입력은 `GET /repos/{repo}/contents/{path}`로 받은 YAML에서 읽는다(PyYAML은 agent-template 의존성에 이미 있다).
 - Argo CD는 이번에 넣지 않는다(고객사 관리자가 API 키 계정을 만들어야 해서 "고르고·누르고·붙여 넣기" 원칙에 안 맞음).
@@ -79,7 +81,7 @@
 - 이력 미리 받기: 켤 때와 `INFRA_DEPLOY_POLL_SECONDS`(기본 120초)마다 연결된 도구의 최근 실행을 받아 `DeploymentHistory`에 넣는다(성공한 실행만 배포로, 우리가 롤백으로 띄운 실행은 롤백 표시). 진단은 받아 둔 이력을 바로 쓴다(장애 순간에 외부 호출을 기다리지 않음). 받기 실패는 로그 + 이전 이력 유지.
 - 연결이 없는 서비스는 지금처럼 `deployments.json`(시연 이력)을 쓴다. 연결이 있으면 그 서비스의 시연 이력은 쓰지 않는다.
 - 진단(`diagnose_incident`) 규칙은 그대로다. 이력 출처만 바뀐다.
-- 롤백(`rollback_deployment`): 승인 관문(`execute`, B/C, planning 교차검증)은 그대로 한 번만. `_apply`에서 대상 서비스에 배포 도구 연결이 있으면 `redeploy(to_version)`을 부르고 출력에 `redeploy: {tool, run_ref, url}`을 더한다. 장애 주입 해제·결제 버전 되돌리기는 연결이 없는 시연 경로로 남긴다.
+- 롤백(`rollback_deployment`): 승인 관문(`execute`, B/C, planning 교차검증)은 그대로 한 번만. `_apply`에서 대상 서비스에 배포 도구 연결이 있으면 `redeploy(to_version)`을 부르고 출력에 `redeploy: {tool, run_id, url}`을 더한다. 장애 주입 해제·결제 버전 되돌리기는 연결이 없는 시연 경로로 남긴다.
   - 다시 배포가 실패하면(호출 오류·권한 없음·연결 확인 실패 상태) 다른 길로 넘어가지 않는다. outcome `redeploy_failed` + 사람에게 넘길 처리 순서("<도구>에서 <작업>을 <버전>으로 다시 실행")를 출력에 넣는다.
   - 다시 배포를 띄운 뒤 끝날 때까지 기다리지 않는다. 복구 확인(`verify_recovery`)이 지금처럼 지표로 본다.
 - 계약: `RollbackDeploymentParams`·출력은 추가만 한다. 멱등 키는 그대로.

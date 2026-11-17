@@ -261,6 +261,8 @@ export AX_ENABLED_SERVICES="${AX_ENABLED_SERVICES:-}"
 export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_services.json}"
 # 회사 연결(시스템 관리 > 회사 연결에서 정한 고객사 판매 서버 주소). 있으면 AX_SHOP_API_URL보다 먼저, 재시작 없이 반영
 export AX_COMPANY_CONNECTION_FILE="${AX_COMPANY_CONNECTION_FILE:-$PWD/$DATA/company_connection.json}"
+# 도구 연결 보관함(시스템 관리 > 도구 연결: GitHub 앱·배포 도구·DejaFix). 재시작 없이 반영
+export AX_TOOL_CONNECTIONS_FILE="${AX_TOOL_CONNECTIONS_FILE:-$PWD/$DATA/tool_connections.json}"
 # 사람 할 일함 저장 파일 (dashboard-api)
 export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
 # 오피스 단톡방 대화 목록 (dashboard-api). 다시 켜도 단톡방 대화가 이어진다

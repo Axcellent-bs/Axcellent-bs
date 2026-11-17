@@ -52,6 +52,7 @@ def _expires() -> str:
 
 WORKFLOW = """\
 name: deploy
+run-name: "deploy ${{ inputs.version }}"
 on:
   workflow_dispatch:
     inputs:
@@ -111,7 +112,8 @@ def test_actions_passes(monkeypatch, pem) -> None:
     _install(monkeypatch, _github(WORKFLOW, {"actions": "write"}))
     checks = _run("github_actions", ACTIONS_CONFIG, {}, lookup=_lookup(pem))
     assert all(c.ok for c in checks), checks
-    assert [c.key for c in checks] == ["app", "permission", "workflow", "input", "runs"]
+    keys = ["app", "permission", "workflow", "input", "run_name", "runs"]
+    assert [c.key for c in checks] == keys
 
 
 def test_actions_missing_version_input_says_how_to_fix(monkeypatch, pem) -> None:
@@ -119,6 +121,48 @@ def test_actions_missing_version_input_says_how_to_fix(monkeypatch, pem) -> None
     checks = _run("github_actions", ACTIONS_CONFIG, {}, lookup=_lookup(pem))
     bad = next(c for c in checks if c.key == "input")
     assert not bad.ok and "workflow_dispatch" in bad.detail and "version" in bad.detail
+
+
+@pytest.mark.parametrize(
+    "run_name",
+    [
+        '"deploy ${{ inputs.version }}"',
+        "deploy ${{inputs.version}}",
+        '"${{ github.event.inputs.version }} 배포"',
+        '"${{  github.event.inputs.version  }}"',
+    ],
+)
+def test_actions_run_name_with_version_passes(monkeypatch, pem, run_name) -> None:
+    workflow = WORKFLOW.replace('"deploy ${{ inputs.version }}"', run_name)
+    _install(monkeypatch, _github(workflow, {"actions": "write"}))
+    checks = _run("github_actions", ACTIONS_CONFIG, {}, lookup=_lookup(pem))
+    assert next(c for c in checks if c.key == "run_name").ok, checks
+
+
+@pytest.mark.parametrize(
+    "run_name",
+    [None, '"deploy ${{ github.sha }}"', '"deploy ${{ inputs.version_old }}"', "deploy version"],
+)
+def test_actions_run_name_without_version_fails_with_fix(monkeypatch, pem, run_name) -> None:
+    line = 'run-name: "deploy ${{ inputs.version }}"\n'
+    workflow = WORKFLOW.replace(line, "" if run_name is None else f"run-name: {run_name}\n")
+    _install(monkeypatch, _github(workflow, {"actions": "write"}))
+    checks = _run("github_actions", ACTIONS_CONFIG, {}, lookup=_lookup(pem))
+    bad = next(c for c in checks if c.key == "run_name")
+    assert not bad.ok
+    assert "run-name" in bad.detail and "${{ inputs.version }}" in bad.detail
+    assert "되돌릴 버전" in bad.detail
+
+
+def test_actions_run_name_uses_custom_version_input(monkeypatch, pem) -> None:
+    workflow = (
+        'run-name: "deploy ${{ inputs.tag }}"\n'
+        "on:\n  workflow_dispatch:\n    inputs:\n      tag: {}\njobs: {}\n"
+    )
+    _install(monkeypatch, _github(workflow, {"actions": "write"}))
+    config = {**ACTIONS_CONFIG, "version_input": "tag"}
+    checks = _run("github_actions", config, {}, lookup=_lookup(pem))
+    assert all(c.ok for c in checks), checks
 
 
 def test_actions_without_actions_write_permission(monkeypatch, pem) -> None:

@@ -53,14 +53,15 @@ def test_public_has_no_secret_values(vault: Path) -> None:
     conn = _save()
     text = json.dumps(conn.public(), ensure_ascii=False) + repr(conn)
     assert SECRET not in text
-    assert conn.public()["secrets_set"] == {"token": "ghp_••••"}
+    assert conn.public()["secrets_set"] == {"token": "••••"}
     assert conn.secret_values() == [SECRET]
 
 
 def test_mask() -> None:
     assert tc.mask("abc") == "••••"
     assert tc.mask("abcd") == "••••"
-    assert tc.mask("abcdef") == "abcd••••"
+    assert tc.mask("abcdef") == "••••"  # 앞글자도 내지 않는다
+    assert tc.mask("11aa22bb33cc44dd55ee") == "••••"
     assert tc.mask("-----BEGIN PRIVATE KEY", key=True) == "설정됨"
 
 
