@@ -1,21 +1,18 @@
 import { useState, type ReactNode } from 'react'
 import { SectionHead, StatusChip } from '@/components/connect/parts'
 import { PreparingChip } from '@/components/Preparing'
-import { ago } from '@/lib/format'
 import { Link } from '@/lib/nav'
-import type { ConnectionState, ConnectionTest } from '@/lib/companyConnection'
+import type { ConnectionState } from '@/lib/companyConnection'
 import Integrations from './Integrations'
 
 // 사이트 연결: 고객사 사이트가 어떻게 만들어졌는지 고르면(① 직접 만든 사이트 ② 사이트 제작 플랫폼) 그 경우에 맞는 연결 창구를 보여 준다.
 // 고객사는 고르고·누르고·붙여 넣기만 한다. 사이트 코드나 서버는 건드리지 않는다.
-// 'AXcellent 규격 API'만 실제 연결(Integrations, shop-api)이다. 나머지 방식과 쓰기 확인은 백엔드가 없어 "준비 중" 표시만 둔다(지어낸 연결 상태 없음).
+// 'AXcellent 규격 API'만 실제 연결(Integrations, shop-api)이다. 나머지 방식은 백엔드가 없어 "준비 중" 표시만 두고 고를 수 없게 한다(지어낸 연결 상태 없음).
 // 배포 도구 연결은 시스템 관리 › 도구 연결에서 한다.
 
-type Read = 'axcellent' | 'api' | 'db'
-
-const Radio = ({ on, onPick, title, desc }: { on: boolean; onPick: () => void; title: string; desc: ReactNode }) => (
-  <button type="button" role="radio" aria-checked={on} onClick={onPick}
-    className={`flex flex-col gap-1 border p-4 text-left ${on ? 'border-brand-600 bg-brand-50/50' : 'border-ink-100 hover:border-ink-300'}`}>
+const Radio = ({ on, onPick, title, desc, disabled = false }: { on: boolean; onPick?: () => void; title: string; desc: ReactNode; disabled?: boolean }) => (
+  <button type="button" role="radio" aria-checked={on} aria-disabled={disabled || undefined} disabled={disabled} onClick={disabled ? undefined : onPick}
+    className={`flex flex-col gap-1 border p-4 text-left ${disabled ? 'cursor-not-allowed border-ink-100 opacity-60' : on ? 'border-brand-600 bg-brand-50/50' : 'border-ink-100 hover:border-ink-300'}`}>
     <span className="font-semibold">{title}</span>
     <span className="text-xs leading-5 text-ink-500">{desc}</span>
   </button>
@@ -53,85 +50,22 @@ function PlatformPanel() {
   )
 }
 
-const READ_ROWS: { key: 'health' | 'products' | 'users'; label: string }[] = [
-  { key: 'health', label: '서버 응답' },
-  { key: 'products', label: '상품' },
-  { key: 'users', label: '구매자' },
-]
-const WRITE_ROWS = ['쿠폰 발급', '환불', '판매 중지']
-
-/** AXcellent 규격 API: 읽기는 실제 연결 확인 결과만, 쓰기는 확인 수단이 없어 준비 중 */
-function CapabilityTable({ check, savedAt }: { check: ConnectionTest | null; savedAt: string | null }) {
-  return (
-    <table className="w-full text-sm" aria-label="기능별 연결 상태">
-      <thead><tr className="text-left text-xs text-ink-500"><th scope="col" className="py-2 pr-3 font-medium">구분</th><th scope="col" className="py-2 pr-3 font-medium">기능</th><th scope="col" className="py-2 font-medium">상태</th></tr></thead>
-      <tbody className="divide-y divide-ink-100 border-t border-ink-100">
-        {READ_ROWS.map((r) => {
-          const c = check?.checks.find((x) => x.key === r.key)
-          return (
-            <tr key={r.key}>
-              <td className="py-2 pr-3 text-ink-500">읽기</td>
-              <td className="py-2 pr-3">{r.label}</td>
-              <td className="py-2">{c ? <StatusChip tone={c.ok ? 'ok' : 'bad'}>{c.ok ? '확인됨' : '실패'}</StatusChip>
-                : savedAt ? <StatusChip tone="ok">저장할 때 확인됨 · {ago(savedAt)}</StatusChip>
-                : <StatusChip tone="off">확인 전</StatusChip>}</td>
-            </tr>
-          )
-        })}
-        <tr><td className="py-2 pr-3 text-ink-500">읽기</td><td className="py-2 pr-3">주문</td><td className="py-2"><PreparingChip /></td></tr>
-        {WRITE_ROWS.map((w) => (
-          <tr key={w}><td className="py-2 pr-3 text-ink-500">쓰기</td><td className="py-2 pr-3">{w}</td><td className="py-2"><PreparingChip /></td></tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
 function CustomPanel({ onShop }: { onShop: (s: ConnectionState | 'error') => void }) {
-  const [read, setRead] = useState<Read>('axcellent')
-  const [check, setCheck] = useState<ConnectionTest | null>(null)
-  const [savedAt, setSavedAt] = useState<string | null>(null)
-  // 저장된 연결이 있고 확인된 적이 있으면, 이 세션에서 새로 확인하지 않아도 그 시각을 보여 준다
-  const onState = (s: ConnectionState | 'error') => {
-    setSavedAt(s !== 'error' && s.mode === 'connected' ? s.connection?.verified_at ?? null : null)
-    onShop(s)
-  }
-
   return (
     <section className="space-y-4" aria-label="직접 만든 사이트 연결">
       <SectionHead as="h3" title="직접 만든 사이트 연결" desc="사이트가 쓰는 연결 방법을 하나 골라요." />
 
       <div className="card">
         <div className="space-y-4 p-6">
-          <SectionHead as="h3" title="사이트 데이터 연결 (읽기·쓰기)" desc="아래 셋 중 하나를 골라요."
-            right={read === 'axcellent' ? <StatusChip tone="wait">필수</StatusChip> : undefined} />
+          <SectionHead as="h3" title="사이트 데이터 연결 (읽기·쓰기)" desc="지금은 AXcellent 규격 API만 쓸 수 있어요."
+            right={<StatusChip tone="wait">필수</StatusChip>} />
           <div role="radiogroup" aria-label="사이트 데이터 연결 방법" className="grid gap-3 md:grid-cols-3">
-            <Radio on={read === 'axcellent'} onPick={() => setRead('axcellent')} title="AXcellent 규격 API" desc="AXcellent 규격(shop-api)을 그대로 쓰는 사이트예요. 주소만 확인·저장해요." />
-            <Radio on={read === 'api'} onPick={() => setRead('api')} title="다른 형식의 API" desc="이미 있는 API 주소와 지금 쓰는 인증으로 연결하는 방식이에요." />
-            <Radio on={read === 'db'} onPick={() => setRead('db')} title="읽기 전용 DB" desc="읽기만 되는 DB 계정으로 연결하는 방식이에요." />
+            <Radio on title="AXcellent 규격 API" desc="AXcellent 규격(shop-api)을 그대로 쓰는 사이트예요. 주소만 확인·저장해요." />
+            <Radio on={false} disabled title="다른 형식의 API" desc={<>이미 있는 API 주소와 지금 쓰는 인증으로 연결하는 방식이에요. <PreparingChip /></>} />
+            <Radio on={false} disabled title="읽기 전용 DB" desc={<>읽기만 되는 DB 계정으로 연결하는 방식이에요. <PreparingChip /></>} />
           </div>
-
-          {read === 'axcellent' && (
-            <div className="space-y-3 border-t border-ink-100 pt-4">
-              <CapabilityTable check={check} savedAt={savedAt} />
-              <p className="text-xs text-ink-500">쓰기 확인은 준비 중이에요. 안 되는 쓰기는 담당자에게 처리 순서를 보내요.</p>
-            </div>
-          )}
-          {read === 'api' && (
-            <div className="space-y-2 border-t border-ink-100 pt-4">
-              <div className="flex items-center gap-2"><p className="text-sm font-semibold">다른 형식의 API</p><PreparingChip /></div>
-              <p className="text-sm text-ink-700">다른 형식의 API 연결은 아직 준비 중이에요. 열리면 이 자리에서 연결하고 읽기·쓰기 기능을 확인해요.</p>
-            </div>
-          )}
-          {read === 'db' && (
-            <div className="space-y-2 border-t border-ink-100 pt-4">
-              <div className="flex items-center gap-2"><p className="text-sm font-semibold">읽기 전용 DB</p><PreparingChip /></div>
-              <p className="text-sm text-ink-700">읽기 전용 DB 연결은 아직 준비 중이에요.</p>
-              <p className="text-xs text-ink-500">DB 연결은 읽기만 해요. 쓰기는 담당자에게 처리 순서를 보내요.</p>
-            </div>
-          )}
         </div>
-        <div className={read === 'axcellent' ? 'border-t border-ink-100 p-4' : 'hidden'}><Integrations onState={onState} onCheck={setCheck} embedded /></div>
+        <div className="border-t border-ink-100 p-4"><Integrations onState={onShop} embedded /></div>
       </div>
 
       <div className="card px-5 py-3 text-sm text-ink-700">
