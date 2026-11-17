@@ -156,6 +156,7 @@ LINE_INDEX: dict[str, str] = {
 
 # 집계 세션 동안의 페이지 캐시 (음수 = KiB). 주문 30만 행 기준 임시 표·정렬이 40MB 안팎
 SEGMENT_CACHE_KIB = -131072  # 128MB
+REPEAT_DAYS = (30, 60, 90)  # 재구매를 보는 날 수 (첫 구매 뒤, retention 계약 r30·r60·r90)
 DEFAULT_CACHE_KIB = -2000  # SQLite 기본값 (약 2MB)
 
 CUSTOMERS_SUFFIX = ":customers"  # 고객 내보내기의 sync_state 출처 = `<판매 출처>:customers`
@@ -724,6 +725,7 @@ class SegmentSession:
         self.store, self.conn, self.tenant_id, self.keys = store, conn, tenant_id, list(keys)
         self.params = SalesStore._window(tenant_id, start, end)  # noqa: SLF001
         self._lines = False
+        self._buyers = False
         excluded = ", ".join(f":x{i}" for i in range(len(EXCLUDED_STATUSES)))
         self.paid_where = (
             "o.tenant_id = :t AND o.created_at >= :s AND o.created_at < :e "
@@ -744,7 +746,7 @@ class SegmentSession:
             )
 
     def drop(self) -> None:
-        for name in ("seg_attrs", "seg_lines"):
+        for name in ("seg_attrs", "seg_lines", "seg_buyers"):
             self.conn.execute(f"DROP TABLE IF EXISTS temp.{name}")
 
     def _all(self, sql: str, params: dict[str, object] | None = None) -> list[sqlite3.Row]:
@@ -887,3 +889,92 @@ class SegmentSession:
         )
         uneven = self.store._with_details(self.tenant_id, odd)  # noqa: SLF001 - 잠금 안
         return {r["g"]: (int(r["net"]), int(r["orders"])) for r in rows}, uneven
+
+    # ---- 구매자별 기록 (재구매·이탈, 11/17)
+
+    def buyers(self) -> None:
+        """구매자별 결제 완료 주문의 첫·마지막 접수 시각과 주문 수 임시 표.
+
+        세션 기간 안의 주문만 보고, 처음 한 번만 만든다."""
+        if self._buyers:
+            return
+        self.conn.execute(
+            "CREATE TEMP TABLE seg_buyers (buyer_id TEXT PRIMARY KEY, first_at TEXT NOT NULL, "
+            "last_at TEXT NOT NULL, orders INTEGER NOT NULL) WITHOUT ROWID"
+        )
+        self.conn.execute(
+            "INSERT INTO seg_buyers SELECT o.buyer_id, MIN(o.created_at), MAX(o.created_at), "
+            f"COUNT(*) FROM sales_orders o WHERE {self.paid_where} GROUP BY o.buyer_id",
+            self.params,
+        )
+        self._buyers = True
+
+    def _cell_cols(self, alias: str = "a") -> str:
+        return "".join(f", {alias}.v{i}" for i in range(len(self.keys)))
+
+    def _cell(self, row: sqlite3.Row) -> tuple:
+        return tuple(row[f"v{i}"] for i in range(len(self.keys)))
+
+    def cohort_counts(
+        self, first_from: datetime, first_to: datetime
+    ) -> list[tuple[str, tuple, int, int, int, int]]:
+        """첫 결제 완료 주문이 [first_from, first_to)인 구매자: (첫 구매 달 KST "YYYY-MM", 셀,
+        사람 수, 30·60·90일 안 결제 완료 주문이 2건 이상인 사람 수). N일 안 = 첫 구매 시각 이상,
+        첫 구매 시각 + N일 미만."""
+        self.buyers()
+
+        def until(days: int) -> str:
+            return f"strftime('%Y-%m-%dT%H:%M:%SZ', substr(b.first_at, 1, 19), '+{days} days')"
+
+        rows = self._all(
+            "WITH c AS (SELECT b.buyer_id, "
+            + ", ".join(
+                f"SUM(CASE WHEN o.created_at < {until(d)} THEN 1 ELSE 0 END) AS c{d}"
+                for d in REPEAT_DAYS
+            )
+            + " FROM seg_buyers b CROSS JOIN sales_orders o INDEXED BY idx_sales_orders_buyer "
+            "ON o.tenant_id = :t AND o.buyer_id = b.buyer_id AND o.created_at >= b.first_at "
+            f"AND o.created_at < {until(max(REPEAT_DAYS))} WHERE b.first_at >= :cf "
+            f"AND b.first_at < :ct AND {self.paid_where} GROUP BY b.buyer_id) "
+            "SELECT strftime('%Y-%m', substr(b.first_at, 1, 19), '+9 hours') AS m"
+            f"{self._cell_cols()}, COUNT(*) AS n, "
+            + ", ".join(
+                f"SUM(CASE WHEN c.c{d} >= 2 THEN 1 ELSE 0 END) AS r{d}" for d in REPEAT_DAYS
+            )
+            + " FROM c CROSS JOIN seg_buyers b ON b.buyer_id = c.buyer_id "
+            f"LEFT JOIN seg_attrs a ON a.buyer_id = c.buyer_id GROUP BY m{self._cell_cols()}",
+            {"cf": iso(first_from), "ct": iso(first_to)},
+        )
+        return [
+            (r["m"], self._cell(r), int(r["n"]), int(r["r30"]), int(r["r60"]), int(r["r90"]))
+            for r in rows
+        ]
+
+    def regular_counts(
+        self, min_orders: int, last_before: datetime
+    ) -> list[tuple[tuple, int, int]]:
+        """단골(결제 완료 주문 `min_orders`건 이상)을 셀로: (셀, 단골 수, 마지막 주문이
+        `last_before` 전인 단골 수)."""
+        self.buyers()
+        rows = self._all(
+            f"SELECT 1 AS one{self._cell_cols()}, COUNT(*) AS n, "
+            "SUM(CASE WHEN b.last_at < :cut THEN 1 ELSE 0 END) AS risk FROM seg_buyers b "
+            "LEFT JOIN seg_attrs a ON a.buyer_id = b.buyer_id WHERE b.orders >= :min "
+            f"GROUP BY one{self._cell_cols()}",
+            {"min": min_orders, "cut": iso(last_before)},
+        )
+        return [(self._cell(r), int(r["n"]), int(r["risk"])) for r in rows]
+
+    def regular_genres(self, min_orders: int) -> list[tuple[tuple, str, int]]:
+        """단골이 산 장르: (셀, genre_code, 그 장르를 산 단골 수). 세션 기간 안 결제 완료 줄."""
+        self.buyers()
+        self.lines()
+        rows = self._all(
+            f"SELECT x.genre_code AS g{self._cell_cols()}, COUNT(DISTINCT x.buyer_id) AS n "
+            "FROM seg_lines x CROSS JOIN seg_buyers b ON b.buyer_id = x.buyer_id "
+            "LEFT JOIN seg_attrs a ON a.buyer_id = x.buyer_id WHERE b.orders >= :min "
+            "AND +x.genre_code IS NOT NULL AND +x.genre_code != '' "
+            f"GROUP BY x.genre_code{self._cell_cols()}",
+            {"min": min_orders},
+        )
+        return [(self._cell(r), r["g"], int(r["n"])) for r in rows]

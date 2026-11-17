@@ -26,6 +26,7 @@ from ax_contracts.schemas.data import (
     EventProposalSendOutput,
     MarketCoverageOutput,
     MetricCatalog,
+    RetentionOutput,
     SalesAnalysisOutput,
     SegmentFavoritesOutput,
     SegmentOptionsOutput,
@@ -291,3 +292,36 @@ def test_event_proposal_with_game_company_and_feedback_loop(game: dict) -> None:
     assert same.proposal_id != first.proposal_id
     assert [(r.proposal_id, r.actual) for r in same.past_results] == [
         (first.proposal_id, 420_000)]
+
+
+def test_retention_with_game_company(game: dict) -> None:
+    """게임사 이름만으로: 오래 전에 두 번 결제하고 그 뒤 안 온 성인 PC 플레이어 6명이 떠날 위험."""
+    now: datetime = game["now"]
+    store = handlers.get_sales_store()
+    old = [now - timedelta(days=120), now - timedelta(days=110)]
+    rows = [
+        SalesOrderRow(
+            order_id=f"old{i}_{k}", buyer_id=f"old{i}", status="paid", created_at=when,
+            updated_at=when, items_amount=33000, payment_status="succeeded",
+            lines=[SalesOrderLine(product_id="rpg_pack", category_code="game_item",
+                                  title="rpg pack", qty=1, unit_price=33000, genre_code="rpg")],
+        )
+        for i in range(6) for k, when in enumerate(old)
+    ]  # fmt: skip
+    store.upsert(TENANT, rows, now)
+    store.upsert_customers(TENANT, [
+        CustomerRow(buyer_id=f"old{i}", joined_at=now - timedelta(days=200),
+                    updated_at=now - timedelta(days=200),
+                    attributes={"age_band": "adult", "platform": "pc"})
+        for i in range(6)
+    ], now)  # fmt: skip
+    out = RetentionOutput.model_validate(_ok(run(handlers.retention_skill(
+        _request("retention", cohorts=6)))))  # fmt: skip
+    assert out.status == "ok", out.insufficient_reasons
+    assert out.churn_days == 60
+    cohort = next(c for c in out.cohorts if c.customers)  # 120일 전 달에 6명 첫 구매
+    assert cohort.customers == 6 and cohort.r30 == 1.0  # 10일 뒤 다시 결제
+    top = out.at_risk[0]
+    assert (top.label, top.regulars, top.at_risk, top.top_item_label) == (
+        "성인 플레이어 · PC", 6, 6, "롤플레잉")
+    _no_catbooks_words(out.model_dump(mode="json"))
