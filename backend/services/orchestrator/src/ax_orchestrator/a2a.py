@@ -195,6 +195,8 @@ def diagnose_agent_issue(get_manager: GetManager) -> Handler:
                 output={"errors": ["총괄이 아직 준비되지 않았다. 나중에 다시 보낸다"]},
             )
         out = manager.agent_diagnoses.receive(req)
+        if out.request_id and out.status in ("received", "updated"):
+            manager.agent_diagnoses.schedule(out.request_id, manager.incidents)
         return AgentResult(
             meta=request.meta,
             status=TaskStatus.COMPLETED,
