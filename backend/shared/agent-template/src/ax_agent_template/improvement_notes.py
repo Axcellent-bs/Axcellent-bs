@@ -146,7 +146,7 @@ def caution_text(notes: list[dict[str, Any]]) -> str:
     """응답 근거에 붙일 주의 사항 한 줄. 원인 미확정이면 그렇다고 적는다."""
     latest = notes[0]
     kind = "원인 확정" if latest.get("cause_known", True) else "원인 미확정"
-    return f"{CAUTION_HEAD} ({kind}, 개선 노트 {len(notes)}건): {latest['summary']}"
+    return f"{CAUTION_HEAD} ({kind}, 진단 결과 {len(notes)}건): {latest['summary']}"
 
 
 def with_caution(service: str, skill: str, result: AgentResult) -> AgentResult:
@@ -204,14 +204,14 @@ def handler_for(service: str):  # type: ignore[no-untyped-def]
             out = ReceiveImprovementNoteOutput(
                 note_id=note.note_id,
                 status="rejected",
-                reason=f"이 노트는 {note.agent}의 일이고 이 서비스는 {mine}의 것이에요",
+                reason=f"이 진단 결과는 {note.agent}의 일이고 이 서비스는 {mine}의 것이에요",
             )
         elif note.revoke:
             done = store.revoke(note.note_id)
             out = ReceiveImprovementNoteOutput(
                 note_id=note.note_id,
                 status="revoked" if done else "rejected",
-                reason=None if done else "거둘 노트가 없어요(받은 적 없거나 이미 거둠·대체됨)",
+                reason=None if done else "거둘 진단 결과가 없어요(받은 적 없거나 이미 거둠·대체됨)",
             )
         elif store.get(note.note_id) is not None:
             out = ReceiveImprovementNoteOutput(note_id=note.note_id, status="duplicate")
@@ -225,7 +225,7 @@ def handler_for(service: str):  # type: ignore[no-untyped-def]
             output=out.model_dump(mode="json"),
             evidence=Evidence(
                 queries=[f"orchestrator.diagnosis id={note.diagnosis_id}"],
-                data_summary=f"{note.agent} {note.step_label} 개선 노트 {out.status}",
+                data_summary=f"{note.agent} {note.step_label} 진단 결과 {out.status}",
                 collected_at=datetime.now(UTC),
                 ref_ids=[note.note_id],
             ),

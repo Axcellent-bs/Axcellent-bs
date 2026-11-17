@@ -61,7 +61,7 @@ export const STATUS_LABEL: Record<DiagnosisStatus, { label: string; tone: string
 
 export const DELIVERY_LABEL: Record<DeliveryStatus, { label: string; tone: string }> = {
   accepted: { label: "에이전트가 받았어요", tone: "bg-emerald-50 text-emerald-800" },
-  duplicate: { label: "이미 받은 노트예요", tone: "bg-emerald-50 text-emerald-800" },
+  duplicate: { label: "이미 받은 진단 결과예요", tone: "bg-emerald-50 text-emerald-800" },
   rejected: { label: "에이전트가 거절했어요", tone: "bg-red-50 text-red-800" },
   failed: { label: "아직 못 보냈어요", tone: "bg-red-50 text-red-800" },
   revoked: { label: "철회했어요", tone: "bg-ink-100 text-ink-700" },
