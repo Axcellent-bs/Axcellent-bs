@@ -15,6 +15,7 @@ import { PrsTab } from '@/components/dev/repows'
 import { TaskBoard } from '@/components/dev/board'
 import { Reviews } from '@/components/dev/work'
 import { ActionQueue } from '@/components/finance/SafetyQueue'
+import { AgentDiagnosisInbox } from '@/components/admin/AgentDiagnosisInbox'
 import { DEV_HOLD_ACTIONS } from '@/lib/finance'
 import '@/components/dev/hier.css'
 
@@ -89,7 +90,7 @@ export default function DevPage() {
           {section === 'agents' && <AgentTalk s={s} item={item} />}
           {section === 'metrics' && tab === 'autonomy' && <Autonomy s={s} d={d} item={item} />}
           {section === 'metrics' && tab === 'audit' && <Audit s={s} d={d} />}
-          {section === 'metrics' && tab === 'activity' && <Activity s={s} item={item} />}
+          {section === 'metrics' && tab === 'activity' && <><Activity s={s} item={item} /><AgentDiagnosisInbox agent="dev" /></>}
         </>
       )}
     </PlanningShell>
