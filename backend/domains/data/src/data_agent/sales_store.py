@@ -746,7 +746,7 @@ class SegmentSession:
             )
 
     def drop(self) -> None:
-        for name in ("seg_attrs", "seg_lines", "seg_buyers"):
+        for name in ("seg_attrs", "seg_lines", "seg_buyers", "seg_first"):
             self.conn.execute(f"DROP TABLE IF EXISTS temp.{name}")
 
     def _all(self, sql: str, params: dict[str, object] | None = None) -> list[sqlite3.Row]:
@@ -978,3 +978,67 @@ class SegmentSession:
             {"min": min_orders},
         )
         return [(self._cell(r), r["g"], int(r["n"])) for r in rows]
+
+    # ---- 첫 구매 경로별 고객 가치 (channel_value, 11/17)
+
+    def first_purchases(self) -> None:
+        """구매자별 첫 결제 완료 주문(접수 시각, 같으면 주문 id 순)의 시각과 유입 출처 임시 표."""
+        self.conn.execute("DROP TABLE IF EXISTS temp.seg_first")
+        self.conn.execute(
+            "CREATE TEMP TABLE seg_first (buyer_id TEXT PRIMARY KEY, first_at TEXT NOT NULL, "
+            "src TEXT) WITHOUT ROWID"
+        )
+        self.conn.execute(
+            "INSERT INTO seg_first SELECT buyer_id, created_at, src_source FROM (SELECT "
+            "o.buyer_id, o.created_at, o.src_source, ROW_NUMBER() OVER (PARTITION BY o.buyer_id "
+            "ORDER BY o.created_at, o.order_id) AS rn FROM sales_orders o "
+            f"WHERE {self.paid_where}) "
+            "WHERE rn = 1 ORDER BY buyer_id",
+            self.params,
+        )
+
+    def channel_value(
+        self, first_from: datetime, first_to: datetime, horizon_days: int, now: datetime
+    ) -> tuple[list[tuple[str | None, int, int, int, int]], dict[str | None, int], int]:
+        """첫 결제 완료 주문이 [first_from, first_to)인 구매자 중 첫 구매 + `horizon_days`일이
+        `now` 이전인 사람만, 첫 구매 출처(src_source)별로:
+        ([(출처, 사람 수, 기간 안 주문 순매출 합, 기간 안 주문 수 합, 주문 2건 이상인 사람 수)],
+        {출처: 기간 안 환불 합}, 기간이 아직 안 지나 뺀 사람 수).
+
+        기간 = 첫 구매 시각 이상 ~ + horizon_days일 미만. 순매출 = 상품 금액 − 쿠폰 − 포인트(결제
+        완료 주문, 접수 시각 기준), 환불 = 그 사람의 결제 완료 주문 환불 중 환불 시각이 기간 안인 것
+        (매출 분석과 같은 정의)."""
+        self.first_purchases()
+        days = int(horizon_days)
+        until = f"strftime('%Y-%m-%dT%H:%M:%SZ', substr(f.first_at, 1, 19), '+{days} days')"
+        params: dict[str, object] = {"ff": iso(first_from), "ft": iso(first_to), "now": iso(now)}
+        cohort = "f.first_at >= :ff AND f.first_at < :ft"
+        done = f"{until} <= :now"
+        excluded = self._all(
+            f"SELECT COUNT(*) AS n FROM seg_first f WHERE {cohort} AND NOT ({done})", params
+        )[0]["n"]
+        rows = self._all(
+            "WITH h AS (SELECT f.buyer_id, f.src, COUNT(*) AS orders, "
+            "SUM(o.items_amount - o.coupon_discount - o.points_used) AS net FROM seg_first f "
+            "CROSS JOIN sales_orders o INDEXED BY idx_sales_orders_buyer ON o.tenant_id = :t "
+            "AND o.buyer_id = f.buyer_id AND o.created_at >= f.first_at "
+            f"AND o.created_at < {until} "
+            f"WHERE {cohort} AND {done} AND {self.paid_where} GROUP BY f.buyer_id) "
+            "SELECT src, COUNT(*) AS n, SUM(net) AS net, SUM(orders) AS orders, "
+            "SUM(CASE WHEN orders >= 2 THEN 1 ELSE 0 END) AS rep FROM h GROUP BY src",
+            params,
+        )
+        refunds = self._all(
+            "SELECT f.src AS src, SUM(r.amount) AS amount FROM seg_first f "
+            "CROSS JOIN sales_orders o INDEXED BY idx_sales_orders_buyer ON o.tenant_id = :t "
+            "AND o.buyer_id = f.buyer_id CROSS JOIN sales_refunds r ON r.tenant_id = :t "
+            "AND r.order_id = o.order_id AND r.refunded_at >= f.first_at "
+            f"AND r.refunded_at < {until} "
+            f"WHERE {cohort} AND {done} AND {self.paid_where} GROUP BY f.src",
+            params,
+        )
+        return (
+            [(r["src"], int(r["n"]), int(r["net"]), int(r["orders"]), int(r["rep"])) for r in rows],
+            {r["src"]: int(r["amount"]) for r in refunds},
+            int(excluded),
+        )

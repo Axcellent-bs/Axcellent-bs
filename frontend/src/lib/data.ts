@@ -318,6 +318,15 @@ export interface RetentionAtRisk {
   filters: Record<string, string>; label: string; regulars: number | null; at_risk: number | null;
   share: number | null; top_item_label: string | null; suppressed: boolean;
 }
+// 첫 구매 유입 경로별 고객 가치 (channel_value, 11/17). cost_krw는 재무 연결 전까지 늘 null
+export interface ChannelValueRow {
+  source: string | null; label: string; new_customers: number | null; revenue_per_customer: number | null;
+  repeat_rate: number | null; orders_per_customer: number | null; cost_krw: number | null; suppressed: boolean;
+}
+export interface ChannelValueOutput {
+  status: "ok" | "insufficient"; insufficient_reasons: string[]; period: SegmentPeriod; horizon_days: number;
+  rows: ChannelValueRow[]; cost_note: string; basis: SalesBasis | null; quality: SalesQuality; summary: string;
+}
 export interface RetentionOutput {
   status: "ok" | "insufficient"; insufficient_reasons: string[]; filters: Record<string, string>;
   cohorts: RetentionCohort[]; at_risk: RetentionAtRisk[]; churn_days: number;
@@ -2030,6 +2039,8 @@ export const dataAi = {
     askData<MarketCoverageOutput>("market_coverage", "시장 커버 비율", { attribute_keys }, TREND_DEADLINE_MS),
   eventProposal: (month: string) =>
     askData<EventProposalOutput>("event_proposal", "이벤트 제안", { month }, TREND_DEADLINE_MS),
+  channelValue: (period: SegmentPeriod = "365d") =>
+    askData<ChannelValueOutput>("channel_value", "유입 경로별 고객 가치", { period }, TREND_DEADLINE_MS),
   retention: (cohorts = 3) =>
     askData<RetentionOutput>("retention", "재구매·이탈", { cohorts }, TREND_DEADLINE_MS),
   eventProposalSend: (proposal_id: string) =>

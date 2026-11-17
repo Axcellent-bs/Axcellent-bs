@@ -1,6 +1,6 @@
 // 매출 분석 탭(components/data/SalesAnalysis.tsx)이 그리는 값. 서버가 준 숫자를 글자로만 바꾼다(새 지표를 계산하지 않는다).
 // 순수 함수라 node --test로 시험한다 (salesView.test.ts). 코드값(category code · source · medium · product_id)은 글자로 내보내지 않는다.
-import type { SalesAnalysisOutput, SalesPeriod } from "./data.ts";
+import type { ChannelValueOutput, SalesAnalysisOutput, SalesPeriod } from "./data.ts";
 
 export type Tone = "up" | "down" | "flat";
 
@@ -140,5 +140,51 @@ export function salesView(out: SalesAnalysisOutput): SalesView {
       label: c.label, revenue: won(c.revenue), orders: countText(c.orders), share: c.share == null ? "-" : rate(c.share), sharePct: pct(c.share),
     })),
     quality,
+  };
+}
+
+// ---- 유입 경로별 고객 가치 (channel_value, 11/17). 매출 분석 탭 "유입 경로별 매출" 아래 카드
+
+export const SUPPRESSED = "표본 부족";
+
+export interface ChannelValueRowView {
+  label: string; customers: string; revenue: string; repeat: string; orders: string; cost: string;
+  best: boolean; suppressed: boolean;
+}
+export type ChannelValueView =
+  | { kind: "gate"; reasons: string[] }
+  | { kind: "ok"; hint: string; columns: string[]; rows: ChannelValueRowView[]; empty: string | null; note: string; summary: string };
+
+export function channelValueView(out: ChannelValueOutput): ChannelValueView {
+  if (out.status === "insufficient") {
+    return { kind: "gate", reasons: out.insufficient_reasons.length ? [...out.insufficient_reasons] : ["데이터가 부족해 계산하지 않았어요"] };
+  }
+  const days = out.horizon_days;
+  const firstShown = out.rows.findIndex((r) => !r.suppressed);
+  const rows = out.rows.map((r, i): ChannelValueRowView => {
+    // 비용은 재무가 캠페인 비용을 읽어 줄 수 있게 되기 전까지 비어 있다 (서버 cost_note 그대로)
+    const cost = r.cost_krw != null ? won(r.cost_krw) : out.cost_note || "-";
+    if (r.suppressed || r.new_customers == null) {
+      return { label: r.label, customers: SUPPRESSED, revenue: "-", repeat: "-", orders: "-", cost, best: false, suppressed: true };
+    }
+    return {
+      label: r.label,
+      customers: `${withComma(r.new_customers)}명`,
+      revenue: r.revenue_per_customer != null ? won(r.revenue_per_customer) : "-",
+      repeat: r.repeat_rate != null ? rate(r.repeat_rate) : "-",
+      orders: r.orders_per_customer != null ? `${Math.round(r.orders_per_customer * 10) / 10}건` : "-",
+      cost,
+      best: i === firstShown && out.rows.filter((x) => !x.suppressed).length > 1,
+      suppressed: false,
+    };
+  });
+  return {
+    kind: "ok",
+    hint: `첫 구매를 어느 경로로 했는지로 고객을 묶고, 그 뒤 ${days}일 동안 1인당 얼마를 썼는지 봅니다. 최근 1년 안에 첫 구매하고 ${days}일이 지난 고객만 셉니다.`,
+    columns: ["첫 구매 경로", "새 고객", `${days}일 1인 매출`, "재구매율", "1인 주문", "광고·쿠폰 비용"],
+    rows,
+    empty: rows.length ? null : `최근 1년 안에 첫 구매하고 ${days}일이 지난 고객이 아직 없어요`,
+    note: "비용 칸은 재무가 캠페인 비용을 읽어 줄 수 있게 되면 채워 '비용 대비 고객 가치'로 바꿉니다.",
+    summary: out.summary,
   };
 }
