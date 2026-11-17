@@ -52,6 +52,36 @@ export interface AgentDiagnosisRow {
   delivery?: DiagnosisDelivery;
 }
 
+/**
+ * 에이전트 화면의 "총괄 AI가 보낸 진단" 칸이 읽는 한 건(GET /api/dashboard/agent-diagnosis-notes).
+ * 에이전트가 받아 저장해 둔 진단 결과다. 철회는 총괄 화면에서만 한다. 고객 이름·문의 원문은 없다.
+ */
+export interface ReceivedDiagnosis {
+  note_id: string;
+  diagnosis_id: string;
+  agent: string;
+  step_id: string;
+  step_label: string;
+  summary: string;
+  findings: string[];
+  evidence_contexts: string[];
+  method: "rules" | "llm";
+  /** 거짓이면 원인 미확정(같은 단계가 반복해 느렸다는 사실만 있다) */
+  cause_known: boolean;
+  issued_at: string;
+  received_at: string;
+  /** 받은 서비스(예: claims)와 그 이름(예: 클레임·보상). 한 에이전트에 서비스가 여럿이면 구분에 쓴다 */
+  service: string;
+  service_name: string;
+}
+
+/**
+ * 칸을 보여도 되는 회원: 운영자·관리자. 총괄의 진단은 AXcellent 내부 품질 정보라
+ * 고객사 일반회원(직원)에게는 보이지 않는다.
+ */
+export const canSeeDiagnosisInbox = (kind: "운영자" | "관리자" | "일반회원" | null | undefined) =>
+  kind === "운영자" || kind === "관리자";
+
 export const STATUS_LABEL: Record<DiagnosisStatus, { label: string; tone: string }> = {
   received: { label: "접수", tone: "bg-ink-100 text-ink-700" },
   diagnosing: { label: "진단 중", tone: "bg-sky-50 text-sky-800" },

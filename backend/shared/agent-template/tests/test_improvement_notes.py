@@ -12,6 +12,7 @@ from ax_agent_template.improvement_notes import ImprovementNoteStore
 from ax_agent_template.server import create_agent_app
 from ax_agent_template.services import SERVICES, route_target
 from ax_contracts.schemas import AgentCard
+from ax_contracts.schemas.diagnosis import ReceiveImprovementNoteInput
 
 SCHEMAS = "shared/contracts/src/ax_contracts/schemas/diagnosis.py"
 CARD = AgentCard.model_validate(
@@ -279,33 +280,32 @@ def _add(note_id="note-diag-1", skill="rollback_deployment", **kw) -> None:
 def test_a_response_gets_a_caution_line_when_a_note_covers_its_skill(caution_client) -> None:
     before = _call(caution_client, "rollback_deployment")
     assert before["evidence"]["data_summary"] == "되돌림 38초"  # 노트가 없으면 그대로
+    assert before["evidence"]["notices"] == []
     _add()
     after = _call(caution_client, "rollback_deployment")
-    summary = after["evidence"]["data_summary"]
-    assert summary.startswith(
-        "되돌림 38초\n주의: 최근 이 단계가 반복해 오래 걸려 총괄 AI가 진단했어요"
-    )
-    assert "원인 확정, 진단 결과 1건" in summary and "같은 유형의 이벤트" in summary
+    # 주의 한 줄은 별도 칸에만 붙는다. 숫자 검증을 거친 문장(data_summary)은 그대로다
+    assert after["evidence"]["data_summary"] == "되돌림 38초"
+    (notice,) = after["evidence"]["notices"]
+    assert notice.startswith("주의: 최근 이 단계가 반복해 오래 걸려 총괄 AI가 진단했어요")
+    assert "원인 확정, 진단 결과 1건" in notice and "같은 유형의 이벤트" in notice
     assert after["output"] == before["output"]  # 결과 값은 건드리지 않는다
 
 
 def test_a_cause_unknown_note_says_so_in_the_caution(caution_client) -> None:
     _add(cause_known=False, summary="원인은 말하지 않아요")
-    summary = _call(caution_client, "rollback_deployment")["evidence"]["data_summary"]
-    assert "원인 미확정" in summary and "원인은 말하지 않아요" in summary
+    (notice,) = _call(caution_client, "rollback_deployment")["evidence"]["notices"]
+    assert "원인 미확정" in notice and "원인은 말하지 않아요" in notice
 
 
 def test_no_caution_for_other_skills_revoked_notes_failures_or_missing_evidence(
     caution_client,
 ) -> None:
     _add()
-    assert "주의" not in (_call(caution_client, "bare").get("evidence") or {}).get(
-        "data_summary", ""
-    )
+    assert not (_call(caution_client, "bare").get("evidence") or {}).get("notices")
     assert _call(caution_client, "bare")["output"] == {"ok": True}
-    assert _call(caution_client, "failing")["evidence"]["data_summary"] == "실패"
+    assert _call(caution_client, "failing")["evidence"]["notices"] == []
     improvement_notes.store_for("incident").revoke("note-diag-1")
-    assert _call(caution_client, "rollback_deployment")["evidence"]["data_summary"] == "되돌림 38초"
+    assert _call(caution_client, "rollback_deployment")["evidence"]["notices"] == []
 
 
 def test_the_caution_is_not_added_twice_and_notes_skill_is_never_decorated(caution_client) -> None:
@@ -320,7 +320,8 @@ def test_the_caution_is_not_added_twice_and_notes_skill_is_never_decorated(cauti
     )
     once = improvement_notes.with_caution("incident", "rollback_deployment", result)
     twice = improvement_notes.with_caution("incident", "rollback_deployment", once)
-    assert twice.evidence.data_summary == once.evidence.data_summary
+    assert twice.evidence.notices == once.evidence.notices and len(once.evidence.notices) == 1
+    assert once.evidence.data_summary == "x"  # 문장은 그대로
     assert improvement_notes.with_caution("incident", improvement_notes.SKILL, result) is result
 
 
@@ -339,3 +340,37 @@ def test_notes_for_skill_respects_the_limit_and_the_skill_filter() -> None:
         )
     assert [n["note_id"] for n in store.notes_for_skill("rollback_deployment")] == ["note-0"]
     assert store.notes_for_skill("nothing") == []
+
+
+# ---- 읽기: 받아 둔 진단 결과를 화면이 읽는다 -------------------------------------------------
+def test_received_notes_are_listed_for_the_screen_newest_first(caution_client) -> None:
+    empty = caution_client.get("/api/improvement-notes").json()["data"]
+    assert empty == {"service": "incident", "notes": []}
+    _add("note-diag-1", summary="첫 진단")
+    improvement_notes.store_for("incident").add(
+        ReceiveImprovementNoteInput.model_validate(
+            _note(note_id="note-diag-2", step_id="other", summary="둘째 진단")
+        ),
+        datetime.now(UTC).isoformat(),
+    )
+    data = caution_client.get("/api/improvement-notes").json()["data"]
+    assert [n["note_id"] for n in data["notes"]] == ["note-diag-2", "note-diag-1"]
+    first = data["notes"][1]
+    assert first["summary"] == "첫 진단" and first["received_at"] and first["cause_known"] is True
+
+
+def test_revoked_or_superseded_notes_are_not_listed(caution_client) -> None:
+    _add("note-diag-1")
+    _add("note-diag-2")  # 같은 에이전트·단계의 새 노트가 옛 노트를 대체한다
+    ids = [
+        n["note_id"] for n in caution_client.get("/api/improvement-notes").json()["data"]["notes"]
+    ]
+    assert ids == ["note-diag-2"]
+    improvement_notes.store_for("incident").revoke("note-diag-2")
+    assert caution_client.get("/api/improvement-notes").json()["data"]["notes"] == []
+
+
+def test_the_read_route_exists_only_when_the_card_has_the_notes_skill() -> None:
+    card = AgentCard.model_validate({**CARD.model_dump(mode="json"), "skills": []})
+    client = TestClient(create_agent_app(card, {}))
+    assert client.get("/api/improvement-notes").status_code == 404
