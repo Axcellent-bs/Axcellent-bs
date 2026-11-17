@@ -183,6 +183,29 @@ def test_confirm_to_marketing_sends_brief_with_id_chain() -> None:
 
 
 @pytest.mark.role("planning")
+def test_content_category_flows_from_insight_to_brief() -> None:
+    """재무 의견의 콘텐츠 카테고리·형식이 제안에 남고 확정하면 마케팅 brief에 그대로 실린다."""
+    brief = Brief()
+    svc = _svc(marketing=brief)
+    inp = _insight("fin_1").model_copy(
+        update={"content_category": "아재개그", "content_format": "shorts"}
+    )
+
+    async def go():
+        pid = (await svc.receive_insight(requester="finance", inp=inp)).output["proposal_id"]
+        await svc.dispatch({"type": "approveProposal", "proposal": pid})
+        await _flush(svc)
+        return pid
+
+    pid = asyncio.run(go())
+    p = _p(svc, pid)
+    assert p.content_category == "아재개그" and p.content_format == "shorts"
+    _, sent, _ = brief.sent[0]
+    assert sent.content_category == "아재개그" and sent.content_format == "shorts"
+    assert sent.format == p.format  # 기획 초안의 자유 문구 칸은 그대로
+
+
+@pytest.mark.role("planning")
 def test_marketing_failure_is_kept_not_invented() -> None:
     class Down(Brief):
         async def send(self, ctx, brief, key):
