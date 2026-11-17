@@ -3,6 +3,20 @@
     cd backend
     uv run python -m data_agent.sales_collect              # 한 번
     uv run python -m data_agent.sales_collect --every 300  # 5분마다 (Ctrl+C로 멈춤)
+    uv run python -m data_agent.sales_collect --reset      # 저장소를 비우고 처음부터 다시 받기
+
+`--reset` (11/17): 판매 서버 자료를 갈아 끼웠는데 주문 updated_at이 과거라 이어 받기 커서 뒤라서
+안 들어올 때 쓴다.
+- `--every`와 같이 쓰면 종료 코드 2 (한 번만 실행)
+- 수집기 잠금을 먼저 잡는다. 못 잡으면(수집기가 돌고 있으면) 아무것도 지우지 않고 종료 코드 1
+- DB 파일은 지우지 않고 옆으로 옮긴다: `sales.db` → `sales.db.bak-<UTC YYYYmmddTHHMMSS>`
+  (`-wal`·`-shm`도 같은 접미사). 파일이 없으면 그냥 진행
+- 새 저장소는 새 저장소 생성 id를 받는다(`SalesStore.store_id`, 결과 캐시 키에 들어간다)
+- 주문·고객을 처음부터 끝까지 받는다(`collect_once`를 다 받을 때까지 최대 `RESET_ROUNDS`번).
+  오류가 나면 바로 멈추고 종료 코드 1, 백업은 그대로 두고 되돌리는 방법을 한 줄 적는다
+- 끝나면 저장소에서 바로 센 요약을 적는다: 출처·백업·저장소 생성 id, 전체 주문 수와 접수 날짜 범위,
+  고객 수, 어제까지 7일 결제 완료 건수·매출(매출 분석과 같은 정의), 유입 출처별 주문 수
+- 데이터 AI 서버는 판매 저장소 연결을 연 채라 다시 띄워야 새 파일을 읽는다
 
 - 출처: 회사 카탈로그의 `connector`(캣북스 `shop-api`)의 판매 기록 내보내기(계약 `shop_sales`).
   기존 shop_api 커넥터와 토큰(`DATA_TOKEN` 또는 토큰 명부의 data)을 그대로 쓴다
@@ -72,6 +86,9 @@ NOT_ALL = "한 번에 다 받지 못함 (다음 수집에 이어서)"
 DEFAULT_EVERY_SECONDS = 300
 MIN_EVERY_SECONDS = 60  # 판매 서버에 부담 주지 않게
 MAX_PAGES = 200  # 한 번에 받는 최대 페이지 (500건 × 200 = 10만 건). 넘으면 다음 수집이 이어 받는다
+RESET_ROUNDS = 10  # --reset이 다 받을 때까지 collect_once를 부르는 최대 횟수
+RESET_DAYS = 7  # --reset 요약의 "어제까지 7일"
+NO_SOURCE = "없음"  # 유입 출처가 없는 주문
 
 
 class SalesSource(Protocol):
@@ -395,6 +412,111 @@ async def run(every: int | None, env: Mapping[str, str]) -> int:
         store.close()
 
 
+# ---------------------------------------------------------------- --reset
+
+
+def backup_files(db: Path, at: datetime) -> list[tuple[Path, Path]]:
+    """DB와 -wal·-shm을 `<이름>.bak-<UTC 시각>`으로 옮긴다. 옮긴 (원래, 백업) 목록
+    (없는 파일은 뺀다)."""
+    suffix = f".bak-{at.astimezone(UTC):%Y%m%dT%H%M%S}"
+    moved: list[tuple[Path, Path]] = []
+    for path in (db, db.with_name(f"{db.name}-wal"), db.with_name(f"{db.name}-shm")):
+        if path.exists():
+            target = path.with_name(f"{path.name}{suffix}")
+            path.rename(target)
+            moved.append((path, target))
+    return moved
+
+
+def _customers_pending(store: SalesStore, tenant: str, name: str) -> bool:
+    """고객 내보내기가 한 번에 다 오지 않아 이어 받을 것이 남았는지."""
+    return store.sync_state(tenant, customers_source(name)).last_error == NOT_ALL
+
+
+def reset_summary(  # noqa: PLR0913 - 요약에 적을 재료
+    store: SalesStore, tenant: str, name: str, backup: Path | None, now: datetime
+) -> list[str]:  # fmt: skip
+    """리셋 뒤 요약 (숫자는 저장소에서 바로 센다. 매출은 매출 분석과 같은 집계
+    `sales_sql.tally`)."""
+    from data_agent.sales_quality import KST
+    from data_agent.sales_sql import tally
+
+    total, first, last = store.order_span(tenant)
+    span = (
+        f"{first.astimezone(KST):%Y-%m-%d} ~ {last.astimezone(KST):%Y-%m-%d} (접수 날짜, 한국)"
+        if first and last
+        else "주문 없음"
+    )
+    customers_state = store.sync_state(tenant, customers_source(name))
+    customers = (
+        customers_state.last_error
+        if customers_state.last_error
+        else f"{store.customer_count(tenant):,}명"
+    )
+    today = now.astimezone(KST).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = today - timedelta(days=RESET_DAYS)
+    week, _ = tally(store, tenant, start.astimezone(UTC), today.astimezone(UTC))
+    last_day = today - timedelta(days=1)
+    sources = ", ".join(
+        f"{src or NO_SOURCE} {n:,}건" for src, n in store.orders_by_source(tenant).items()
+    )
+    return [
+        f"[sales] 리셋 끝: 출처 {name}, 백업 {backup or '없음 (옮길 파일 없었음)'}",
+        f"[sales] 저장소 생성 id {store.store_id}",
+        f"[sales] 전체 주문 {total:,}건, {span}",
+        f"[sales] 고객 {customers}",
+        f"[sales] 어제까지 7일({start:%m/%d}~{last_day:%m/%d}) 결제 완료 {week.orders:,}건, "
+        f"매출 {week.revenue:,}원",
+        f"[sales] 유입 출처별 주문 (전체): {sources or '주문 없음'}",
+    ]
+
+
+async def reset(env: Mapping[str, str], now: datetime | None = None) -> int:
+    """저장소를 옆으로 옮기고 새 저장소에 주문·고객을 처음부터 받는다 (잠금은 부르는 쪽이
+    잡는다)."""
+    at = (now or datetime.now(UTC)).astimezone(UTC)
+    db = db_path(env)
+    moved = backup_files(db, at)
+    backup = next((b for orig, b in moved if orig == db), None)
+    undo = (
+        "[sales] 되돌리려면 데이터 AI를 멈춘 채 백업을 sales.db로 다시 옮기세요: "
+        + "; ".join(f"mv {b} {orig}" for orig, b in moved)
+        if moved
+        else "[sales] 옮긴 백업 없음 (처음부터 빈 저장소였음)"
+    )
+    tenant = (env.get(TENANT_ENV) or TENANT_ID_DEFAULT).strip()
+    store: SalesStore | None = None
+    try:
+        store = SalesStore(db)
+        name = source_name(env)
+        source = get_source(env)
+        done = False
+        for _ in range(RESET_ROUNDS):
+            result = await collect_once(source, store, tenant_id=tenant, source_name=name)
+            print(result.line(), flush=True)
+            if result.errors:
+                print("[sales] 리셋 실패: 오류가 나서 멈춤", flush=True)
+                print(undo, flush=True)
+                return 1
+            if result.finished and not _customers_pending(store, tenant, name):
+                done = True
+                break
+        if not done:
+            print(f"[sales] 리셋 실패: {RESET_ROUNDS}번 받아도 끝나지 않음", flush=True)
+            print(undo, flush=True)
+            return 1
+        for line in reset_summary(store, tenant, name, backup, datetime.now(UTC)):
+            print(line, flush=True)
+        return 0
+    except Exception as error:  # noqa: BLE001 - 어떤 오류든 백업은 두고 되돌리는 법을 적는다
+        print(f"[sales] 리셋 실패: {describe(error)}", flush=True)
+        print(undo, flush=True)
+        return 1
+    finally:
+        if store is not None:
+            store.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):  # Windows 콘솔에서도 한글이 깨지지 않게
         reconfigure = getattr(stream, "reconfigure", None)
@@ -407,15 +529,32 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help=f"초마다 반복 (최소 {MIN_EVERY_SECONDS}, 없으면 한 번. 0이면 {EVERY_ENV} 값)",
     )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="저장소를 옆으로 옮겨 두고(백업) 주문·고객을 처음부터 다시 받는다 (한 번만)",
+    )
     args = parser.parse_args(argv)
+    if args.reset and args.every is not None:
+        print("[sales] --reset은 한 번만 실행 (--every와 같이 쓸 수 없음)", flush=True)
+        return 2
     env = dict(os.environ)
     every = None if args.every is None else every_seconds(env, args.every or None)
     path = lock_path(env)
     lock = collector_lock.acquire(path, "sales", lambda line: print(line, flush=True))
     if lock is None:
+        if args.reset:
+            print(
+                f"[sales] 잠금 {path}을 잡지 못해 아무것도 지우지 않음: 돌고 있는 sales_collect를 "
+                "먼저 멈추세요 (pkill -f data_agent.sales_collect)",
+                flush=True,
+            )
+            return 1
         print(f"[sales] 이미 다른 수집기가 돌고 있음 (잠금 {path}): 끝냄", flush=True)
         return 0
     try:
+        if args.reset:
+            return asyncio.run(reset(env))
         return asyncio.run(run(every, env))
     except KeyboardInterrupt:
         return 0
