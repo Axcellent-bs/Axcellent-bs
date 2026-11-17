@@ -331,7 +331,10 @@ async def _get(
 
 
 async def _get_orders(
-    client: httpx.AsyncClient, shop: str, since: datetime | None
+    client: httpx.AsyncClient,
+    shop: str,
+    since: datetime | None,
+    headers: dict[str, str] | None = None,
 ) -> list[dict[str, Any]] | None:
     """`GET /api/shop/orders`를 `ORDERS_PAGE`건씩 `meta.next_cursor`로 끝까지 넘겨 모은다.
 
@@ -344,7 +347,10 @@ async def _get_orders(
     while True:
         try:
             response = await client.get(
-                f"{shop}/api/shop/orders", params=params, timeout=ORDERS_CALL_SECONDS
+                f"{shop}/api/shop/orders",
+                params=params,
+                headers=headers or {},
+                timeout=ORDERS_CALL_SECONDS,
             )
         except httpx.HTTPError:
             return None
@@ -598,13 +604,14 @@ async def _live_books(
     since = store.since(full)
     try:
         shop, safety = agent_url("shop-api"), agent_url("safety")
-        orders_raw = await _get_orders(client, shop, since)
-        products = await _get(client, f"{shop}/api/shop/products")
-        sellers = await _get(client, f"{shop}/api/shop/sellers")
         try:
             headers = {"Authorization": f"Bearer {agent_token('finance')}"}
         except RuntimeError:
             headers = {}
+        # 주문 조회에도 재무 토큰을 붙인다(shop-api `SHOP_ORDERS_PUBLIC_READ=off` 대비)
+        orders_raw = await _get_orders(client, shop, since, headers)
+        products = await _get(client, f"{shop}/api/shop/products")
+        sellers = await _get(client, f"{shop}/api/shop/sellers")
         coupons_raw = await _get(client, f"{shop}/api/shop/coupons", headers) if headers else None
         executions_raw = await _get(client, f"{safety}/api/safety/executions")
     finally:

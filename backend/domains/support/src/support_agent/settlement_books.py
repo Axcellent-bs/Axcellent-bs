@@ -343,7 +343,10 @@ async def _get(client: httpx.AsyncClient, url: str, headers: dict[str, str] | No
 
 
 async def _get_orders(
-    client: httpx.AsyncClient, shop: str, since: datetime | None
+    client: httpx.AsyncClient,
+    shop: str,
+    since: datetime | None,
+    headers: dict[str, str] | None = None,
 ) -> list[dict[str, Any]] | None:
     params: dict[str, Any] = {"limit": ORDERS_PAGE}
     if since is not None:
@@ -352,7 +355,10 @@ async def _get_orders(
     while True:
         try:
             response = await client.get(
-                f"{shop}/api/shop/orders", params=params, timeout=ORDERS_CALL_SECONDS
+                f"{shop}/api/shop/orders",
+                params=params,
+                headers=headers or {},
+                timeout=ORDERS_CALL_SECONDS,
             )
         except httpx.HTTPError:
             return None
@@ -455,10 +461,11 @@ async def live_books(
         since = store.since(full, recent)
         shop = config.agent_url("shop-api")
         try:
-            orders_raw = await _get_orders(client, shop, since)
+            # 주문 조회에도 같은 연결 키를 붙인다(shop-api `SHOP_ORDERS_PUBLIC_READ=off` 대비)
+            headers = coupon_headers()
+            orders_raw = await _get_orders(client, shop, since, headers)
             products = await _get(client, f"{shop}/api/shop/products")
             sellers = await _get(client, f"{shop}/api/shop/sellers")
-            headers = coupon_headers()
             coupons_raw = (
                 await _get(client, f"{shop}/api/shop/coupons", headers) if headers else None
             )
