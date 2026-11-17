@@ -102,6 +102,8 @@ class ReceiveImprovementNoteInput(AxModel):
     revoke: bool = False
     # 거짓이면 원인 미확정(근거 부족)이다. 같은 단계가 반복해 느렸다는 사실만 담는다
     cause_known: bool = True
+    # 이 단계가 부르는 skill 이름. 받는 쪽이 그 skill의 응답에 주의 사항을 붙일 때 쓴다
+    skill: str | None = None
 
 
 NoteStatus = Literal["accepted", "duplicate", "revoked", "rejected"]

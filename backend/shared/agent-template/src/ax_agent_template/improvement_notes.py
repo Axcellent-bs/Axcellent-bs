@@ -124,12 +124,50 @@ class ImprovementNoteStore:
             rows = self._db.execute(sql, args).fetchall()
         return [json.loads(r[0]) for r in rows]
 
+    def notes_for_skill(
+        self, skill: str, limit: int = 3, *, now: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """이 skill에 걸린 참고할 수 있는 노트(최근 것부터). 거두거나 대체·만료된 것은 뺀다."""
+        found = self.active_notes(limit=MAX_NOTES, now=now)
+        return [n for n in found if n.get("skill") == skill][:limit]
+
     def _trim(self) -> None:
         self._db.execute(
             "DELETE FROM improvement_notes WHERE rowid NOT IN"
             " (SELECT rowid FROM improvement_notes ORDER BY received_at DESC, rowid DESC LIMIT ?)",
             (MAX_NOTES,),
         )
+
+
+CAUTION_HEAD = "주의: 최근 이 단계가 반복해 오래 걸려 총괄 AI가 진단했어요"
+
+
+def caution_text(notes: list[dict[str, Any]]) -> str:
+    """응답 근거에 붙일 주의 사항 한 줄. 원인 미확정이면 그렇다고 적는다."""
+    latest = notes[0]
+    kind = "원인 확정" if latest.get("cause_known", True) else "원인 미확정"
+    return f"{CAUTION_HEAD} ({kind}, 개선 노트 {len(notes)}건): {latest['summary']}"
+
+
+def with_caution(service: str, skill: str, result: AgentResult) -> AgentResult:
+    """완료한 응답의 근거(`evidence.data_summary`)에 주의 사항을 덧붙인다. 노트가 없으면 그대로다.
+
+    코드가 정해진 순서로 도는 단계는 노트를 읽어 스스로 바꿀 수 없다. 대신 응답을 읽는 사람과 AI가
+    이 단계가 반복해 느렸다는 걸 알 수 있게 한다. 결과 값(`output`)은 건드리지 않는다.
+    """
+    if skill == SKILL or result.status != TaskStatus.COMPLETED or result.evidence is None:
+        return result
+    notes = store_for(service).notes_for_skill(skill)
+    if not notes:
+        return result
+    summary = result.evidence.data_summary
+    text = caution_text(notes)
+    if text in summary:
+        return result
+    joined = f"{summary}\n{text}" if summary else text
+    return result.model_copy(
+        update={"evidence": result.evidence.model_copy(update={"data_summary": joined})}
+    )
 
 
 _stores: dict[str, ImprovementNoteStore] = {}

@@ -24,6 +24,17 @@ def note_id_of(request_id: str) -> str:
     return f"note-{request_id}"
 
 
+def skill_of(step_id: str) -> str | None:
+    """장애 대응 계획에서 이 단계가 부르는 skill 이름. 모르면 None."""
+    from ax_orchestrator.plans.scenario_a import scenario_a
+
+    plan = scenario_a()
+    for step in [*plan.steps, *plan.late_steps]:
+        if step.id == step_id:
+            return step.skill
+    return None
+
+
 def build_note(row: dict[str, Any], *, revoke: bool = False) -> ReceiveImprovementNoteInput:
     """진단 한 건에서 노트를 만든다. 같은 진단은 항상 같은 `note_id`다."""
     diagnosis = row["diagnosis"]
@@ -44,6 +55,7 @@ def build_note(row: dict[str, Any], *, revoke: bool = False) -> ReceiveImproveme
         issued_at=datetime.now(UTC),
         revoke=revoke,
         cause_known=row["status"] == "diagnosed",
+        skill=skill_of(row["step_id"]),
     )
 
 

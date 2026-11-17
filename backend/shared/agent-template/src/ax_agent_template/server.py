@@ -50,6 +50,7 @@ from ax_agent_template.config import (
 )
 from ax_agent_template.improvement_notes import SKILL as NOTES_SKILL
 from ax_agent_template.improvement_notes import handler_for as notes_handler_for
+from ax_agent_template.improvement_notes import with_caution
 from ax_agent_template.logging import log_event
 from ax_agent_template.services import SERVICE_PORTS, department_of
 from ax_contracts.schemas import (
@@ -395,4 +396,4 @@ async def _process(
         return error_result(meta, TaskStatus.FAILED, ErrorCode.INVALID_OUTPUT)
     if result.meta.context_id != meta.context_id:
         return error_result(meta, TaskStatus.FAILED, ErrorCode.INVALID_OUTPUT)
-    return result
+    return with_caution(card.name, request.skill, result)

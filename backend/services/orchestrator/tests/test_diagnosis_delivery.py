@@ -364,3 +364,21 @@ async def test_revoke_endpoint_needs_a_human_and_revokes(client) -> None:
     assert ok.status_code == 200 and ok.json()["data"]["status"] == "revoked"
     gone = http.post("/api/agent-diagnoses/diag-99/revoke", headers=HUMAN)
     assert gone.status_code == 404
+
+
+def test_the_note_carries_the_skill_the_step_calls() -> None:
+    from ax_orchestrator.diagnosis_notes import skill_of
+
+    assert skill_of("rollback") == "rollback_deployment"
+    assert skill_of("root_cause") == "root_cause_hypotheses"
+    assert skill_of("late_compensation") == "propose_incident_compensation"
+    assert skill_of("no_such_step") is None
+    row = {
+        "request_id": "diag-8",
+        "agent": "infra",
+        "step_id": "rollback",
+        "step_label": "문제 배포 되돌리기",
+        "status": "diagnosed",
+        "diagnosis": {"summary": "요약", "findings": [], "items": [{"context_id": "x"}]},
+    }
+    assert build_note(row).skill == "rollback_deployment"
