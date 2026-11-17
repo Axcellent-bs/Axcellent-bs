@@ -2,12 +2,26 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode, ty
 import { useNavigate } from "react-router";
 import { Link } from "@/lib/nav";
 import { ago, shortDateTime } from "@/lib/format";
-import { ANALYSIS, SEVERITY, currentIncidents, readableTitle, dashboardSummary, recentIncidents, type DashboardSummary, type Incident, type IncidentMeta, type Measured } from "@/lib/dejafix";
+import { DejafixNotConnectedError, ANALYSIS, SEVERITY, currentIncidents, readableTitle, dashboardSummary, recentIncidents, type DashboardSummary, type Incident, type IncidentMeta, type Measured } from "@/lib/dejafix";
+import { listTools } from "@/lib/toolConnections";
+import { useSession } from "@/demo/session";
 
 // 장애 대응 탭 = 지금 진행 중인 장애만. DejaFix API(GET /api/incidents?status=problem)에서 받아 AXcellent가 그린다.
 // 장애를 누르면 AXcellent 장애 상세(/infra/:id, IncidentDetail.tsx)로 간다.
 // DejaFix 현황 화면의 가장 급한 장애·요약·언제 · 어디서도 같은 API 데이터로 다시 그린다. DejaFix 화면을 이 안에 띄우지 않는다.
+// DejaFix 연결(회원·서버 관리 › PC·서버의 DejaFix 연결)이 없으면 목록 대신 연결 안내를 띄운다.
 const REFRESH_MS = 30_000;
+const DEJAFIX_SETUP_HREF = "/system/members?tab=pcs";
+
+/** 장애 목록을 못 받았을 때 DejaFix 연결이 없어서인가: 프록시가 '연결 없음'이라고 했거나, 도구 연결 보관함에 DejaFix가 없다 */
+async function dejafixMissing(reason: unknown): Promise<boolean> {
+  if (reason instanceof DejafixNotConnectedError) return true;
+  try {
+    return !(await listTools()).connections.some((c) => c.kind === "dejafix");
+  } catch {
+    return false; // 보관함을 못 읽으면 연결 여부를 단정하지 않는다
+  }
+}
 const LIST_LIMIT = 10;
 
 type State = { data: Incident[]; meta: IncidentMeta } | null;
@@ -223,6 +237,8 @@ export default function Incidents() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [recent, setRecent] = useState<Incident[] | null>(null);
+  const [notConnected, setNotConnected] = useState(false);
+  const { account } = useSession();
 
   const load = useCallback(async () => {
     // 셋은 따로 받는다. 하나가 실패해도 나머지는 그린다
@@ -232,7 +248,11 @@ export default function Incidents() {
       setState(cur.value);
       setError(null);
       setLoadedAt(new Date().toISOString());
-    } else setError(msg(cur, "장애 목록을 불러오지 못했습니다."));
+      setNotConnected(false);
+    } else {
+      setError(msg(cur, "장애 목록을 불러오지 못했습니다."));
+      setNotConnected(await dejafixMissing(cur.reason));
+    }
     if (sum.status === "fulfilled") {
       setSummary(sum.value);
       setSummaryError(null);
@@ -283,7 +303,15 @@ export default function Incidents() {
           DejaFix의 장애 수집이 멈춰 있습니다. 아래 목록은 마지막으로 수집된 내용입니다.
         </p>
       )}
-      {error && (
+      {notConnected && (
+        <p role="status" className="card border-l-4 border-l-amber-500 px-5 py-3 text-sm text-amber-800">
+          DejaFix가 연결되지 않아 장애 목록을 받지 못해요.{" "}
+          {account?.admin
+            ? <Link href={DEJAFIX_SETUP_HREF} className="font-semibold underline">회원·서버 관리에서 연결</Link>
+            : "관리자에게 회원·서버 관리에서 DejaFix를 연결해 달라고 요청해 주세요."}
+        </p>
+      )}
+      {error && !notConnected && (
         <p role="alert" className="card border-l-4 border-l-red-500 px-5 py-3 text-sm text-red-700">
           {error} {state && "아래는 마지막으로 받은 목록입니다."}
         </p>

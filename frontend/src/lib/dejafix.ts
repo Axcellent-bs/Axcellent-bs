@@ -46,12 +46,23 @@ export interface DashboardSummary {
   avg_analysis_sec: Measured;
 }
 
+/** DejaFix가 연결되지 않음: 프록시(dejafix-proxy)가 503 DEJAFIX_NOT_CONNECTED를 돌려줬다. 화면은 연결 안내를 띄운다 */
+export class DejafixNotConnectedError extends Error {
+  constructor() {
+    super("DejaFix가 연결되지 않아 장애 목록을 받지 못해요.");
+  }
+}
+
 async function get<T>(path: string): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${DEJAFIX_API_URL}${path}`, { cache: "no-store" });
   } catch {
     throw new Error("DejaFix 서버에 연결할 수 없습니다.");
+  }
+  if (res.status === 503) {
+    const body: unknown = await res.json().catch(() => undefined);
+    if ((body as { error?: { code?: string } } | undefined)?.error?.code === "DEJAFIX_NOT_CONNECTED") throw new DejafixNotConnectedError();
   }
   if (res.status === 502) throw new Error("DejaFix 백엔드에 연결할 수 없습니다 (frontend/.env 의 DEJAFIX_PROXY_TARGET 확인).");
   if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (frontend/.env 의 DEJAFIX_USERNAME·DEJAFIX_PASSWORD 확인).");

@@ -4,13 +4,14 @@ import { useCompany } from './company'
 import InfraHosts from './InfraHosts'
 import { READER_AREAS, ipMatches, linkEmail, linkIp, setProfile, unlinkEmail, unlinkIp, useLinks, useProfiles, validRule } from './members'
 import { DeptPicker } from './DeptPicker'
-import { customerAccounts, kindOf, type Account } from './session'
+import { customerAccounts, kindOf, useSession, type Account } from './session'
 import { privateIp, useHosts } from './store'
 import { More, PageHead, SectionHead, StatusChip, Tabs, Tiles } from '@/components/connect/parts'
+import { DejafixCard } from '@/components/connect/DejafixConnect'
 
 // 회원·서버 관리 (관리자 /system/members). 회사 사람과 PC를 한 화면 탭으로 관리한다.
 // - 회원: 계정 연결(이메일)·부서(선택, 표시·조직도용)·확인 권한·열람 담당(인사·재무 AI 대화 요약)·쓰는 PC를 한 표에서
-// - PC·서버: 조직도와 PC 연결 (InfraHosts). 예전 /system/hosts 주소는 이 탭으로 온다
+// - PC·서버: 맨 위 DejaFix 연결(감시 대상과 같은 자리) + 조직도와 PC 연결 (InfraHosts). 예전 /system/hosts 주소는 이 탭으로 온다
 // - 접속 허용: 사내 PC IP나 대역. 그 PC에서 가입·로그인하면 회사 회원이 된다
 // 계정 연결과 접속 허용 중 하나라도 맞으면 그 회원은 회사 회원이다.
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -58,6 +59,7 @@ export default function MembersPage() {
   const [params, setParams] = useSearchParams()
   const tab: Tab = TABS.some((t) => t.id === params.get('tab')) ? (params.get('tab') as Tab) : 'members'
   const accounts = customerAccounts()
+  const { account } = useSession()
 
   const online = hosts.filter((h) => h.status === 'online').length
   const approvers = accounts.filter((a) => a.approver).length
@@ -84,7 +86,12 @@ export default function MembersPage() {
         onPick={(id) => setParams(id === 'members' ? {} : { tab: id }, { replace: true })} />
 
       {tab === 'members' && <Members />}
-      {tab === 'pcs' && <InfraHosts embedded />}
+      {tab === 'pcs' && (
+        <div className="space-y-8">
+          <DejafixCard admin={!!account?.admin} />
+          <InfraHosts embedded />
+        </div>
+      )}
       {tab === 'access' && <Access />}
     </div>
   )
