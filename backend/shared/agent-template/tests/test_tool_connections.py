@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -139,7 +142,7 @@ def test_broken_file_blocks_writes(vault: Path) -> None:
             action()
         assert e.value.code == "config" and "읽을 수 없어" in e.value.message
     assert vault.read_bytes() == broken
-    assert not vault.with_name(vault.name + ".tmp").exists()
+    assert not list(vault.parent.glob(vault.name + "*.tmp"))
     assert tc.read_all() == []
 
 
@@ -150,7 +153,7 @@ def test_failed_write_removes_tmp(vault: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(tc.json, "dump", boom)
     with pytest.raises(OSError):
         _save()
-    assert not vault.with_name(vault.name + ".tmp").exists()
+    assert not list(vault.parent.glob(vault.name + "*.tmp"))
 
 
 def test_dejafix_proxy_url_env_then_vault_then_none(
@@ -170,3 +173,43 @@ def test_dejafix_proxy_url_env_then_vault_then_none(
     assert tc.dejafix_proxy_url("X_DEJAFIX_URL") == "http://dejafix-proxy:8030"
     monkeypatch.setenv("X_DEJAFIX_URL", " http://env.test/ ")
     assert tc.dejafix_proxy_url("X_DEJAFIX_URL") == "http://env.test"
+
+
+_WRITER = """
+import sys
+from ax_agent_template import tool_connections as tc
+for i in range(int(sys.argv[2])):
+    tc.upsert("jenkins", f"{sys.argv[1]}-{i}", {"url": "http://ci.local"}, {}, conn_id=None, by="t")
+"""
+
+
+def test_two_processes_writing_do_not_lose_rows(vault: Path) -> None:
+    env = {**os.environ, tc.FILE_ENV: str(vault)}
+    procs = [
+        subprocess.Popen([sys.executable, "-c", _WRITER, who, "15"], env=env) for who in ("a", "b")
+    ]
+    assert [p.wait(timeout=120) for p in procs] == [0, 0]
+    names = {c.name for c in tc.read_all()}
+    assert names == {f"{w}-{i}" for w in ("a", "b") for i in range(15)}
+    assert not Path(str(vault) + ".lock").exists()
+    assert not list(vault.parent.glob(vault.name + "*.tmp"))
+
+
+def test_stale_lock_is_broken(vault: Path) -> None:
+    lock = Path(str(vault) + ".lock")
+    lock.write_text("12345")
+    old = time.time() - tc.LOCK_STALE - 5
+    os.utime(lock, (old, old))
+    assert _save().id == "jenkins-1"
+    assert not lock.exists()
+
+
+def test_fresh_lock_held_elsewhere_is_busy(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    lock = Path(str(vault) + ".lock")
+    lock.write_text("12345")
+    monkeypatch.setattr(tc, "LOCK_TIMEOUT", 0.1)
+    with pytest.raises(tc.ToolConnectionError) as e:
+        _save()
+    assert e.value.code == "busy"
+    assert lock.exists()  # 남의 잠금은 지우지 않는다
+    assert tc.read_all() == []

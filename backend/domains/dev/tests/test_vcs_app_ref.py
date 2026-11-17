@@ -186,7 +186,9 @@ def test_startup_moves_inline_app_into_vault_once(vault, tmp_path) -> None:
 
 def test_startup_links_existing_vault_app_instead_of_copying(vault, tmp_path) -> None:
     row = _app()
-    _legacy_store(tmp_path / "vcs.json")
+    # 같은 키면 줄바꿈 종류·앞뒤 공백이 달라도 같은 앱으로 본다
+    crlf = "\n" + PEM.replace("\n", "\r\n") + "  "
+    _legacy_store(tmp_path / "vcs.json", private_key=crlf)
     vcs.load_saved()
     assert [r.id for r in tc.read_all()] == [row.id]
     assert vcs.connections()[0].app_ref == row.id
@@ -221,3 +223,68 @@ def test_startup_skips_move_when_vault_is_broken(vault, tmp_path) -> None:
     conn = vcs.connections()[0]
     assert conn.app_ref == "" and conn.private_key == PEM
     assert vault.read_text(encoding="utf-8") == "{깨짐"  # 덮어쓰지 않는다
+
+
+@pytest.mark.parametrize("vault_key", ["other", "none"])
+def test_startup_does_not_link_vault_app_with_other_or_no_key(
+    vault, tmp_path, caplog, vault_key
+) -> None:
+    secrets = (
+        {"private_key": _pem(rsa.generate_private_key(65537, 2048))} if vault_key == "other" else {}
+    )
+    row = tc.upsert(
+        "github_app", "회사 앱", {"app_id": "1234", "installation_id": "42"}, secrets,
+        conn_id=None, by="test",
+    )  # fmt: skip
+    _legacy_store(tmp_path / "vcs.json")
+    with caplog.at_level(logging.WARNING, logger="dev_agent.vcs"):
+        vcs.load_saved()
+    conn = vcs.connections()[0]
+    assert conn.app_ref == "" and conn.private_key == PEM  # 잇지도 지우지도 않는다
+    assert [r.id for r in tc.read_all()] == [row.id]
+    assert "PRIVATE KEY" in (tmp_path / "vcs.json").read_text(encoding="utf-8")
+    warned = [m for m in caplog.messages if "conn-1" in m]
+    assert len(warned) == 1 and "PRIVATE KEY" not in caplog.text
+
+
+def test_two_repos_sharing_one_app_get_one_vault_row(vault, tmp_path) -> None:
+    common = {"kind": "github", "auth": "app", "app_id": "1234", "installation_id": "42"}
+    rows = [
+        {"id": "conn-1", "repo": "acme/shop", "private_key": PEM, **common},
+        # 비운 주소와 공개 API 주소는 같은 곳이다
+        {"id": "conn-2", "repo": "acme/api", "base_url": "https://api.github.com/",
+         "private_key": PEM, **common},
+    ]  # fmt: skip
+    (tmp_path / "vcs.json").write_text(json.dumps(rows), encoding="utf-8")
+    assert vcs.load_saved() == 2
+    saved = tc.read_all()
+    assert len(saved) == 1
+    assert {c.app_ref for c in vcs.connections()} == {saved[0].id}
+
+
+def test_startup_survives_vault_write_failure(vault, tmp_path, monkeypatch, caplog) -> None:
+    def boom(*_a, **_k):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(tc, "upsert", boom)
+    _legacy_store(tmp_path / "vcs.json")
+    with caplog.at_level(logging.WARNING, logger="dev_agent.vcs"):
+        assert vcs.load_saved() == 1
+    conn = vcs.connections()[0]
+    assert conn.app_ref == "" and conn.private_key == PEM
+    assert len([m for m in caplog.messages if "옮기지 못했다" in m]) == 1
+    _, auth = _gh(conn.id)
+    assert auth.app_id == "1234"
+
+
+def test_startup_survives_dev_store_save_failure(vault, tmp_path, monkeypatch) -> None:
+    def boom() -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(vcs, "_save", boom)
+    _legacy_store(tmp_path / "vcs.json")
+    assert vcs.load_saved() == 1
+    conn = vcs.connections()[0]
+    assert conn.app_ref == "" and conn.private_key == PEM  # 레포 연결은 바뀌지 않았다
+    _, auth = _gh(conn.id)
+    assert auth.app_id == "1234"

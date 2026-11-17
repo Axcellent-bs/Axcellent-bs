@@ -426,14 +426,34 @@ def load_saved() -> int:
     return len(conns)
 
 
-def _same_url(a: object, b: str) -> bool:
-    return str(a or "").strip().rstrip("/") == b.strip().rstrip("/")
+def _api_url(raw: object) -> str:
+    """주소 비교용: 비어 있으면 공개 GitHub API 주소, 끝 `/`는 뗀다."""
+    from dev_agent.vcs.github import DEFAULT_BASE_URL
+
+    return (str(raw or "").strip() or DEFAULT_BASE_URL).rstrip("/")
+
+
+def _same_url(a: object, b: object) -> bool:
+    return _api_url(a) == _api_url(b)
+
+
+def _same_key(a: str, b: str) -> bool:
+    """PEM 비교: 앞뒤 공백·줄바꿈 종류(CRLF·LF) 차이는 같은 키로 본다."""
+
+    def norm(pem: str) -> str:
+        return "\n".join(line.strip() for line in pem.strip().splitlines())
+
+    return bool(a and b) and norm(a) == norm(b)
 
 
 def _migrate_inline_apps() -> None:
     """예전 화면 연결의 앱 정보를 보관함 `github_app`으로 옮긴다 (켤 때 한 번, 다시 켜도 같다).
 
-    개발 AI가 보관함에 쓰는 유일한 곳이다. 보관함이 없거나 깨졌으면 옮기지 않는다."""
+    개발 AI가 보관함에 쓰는 유일한 곳이다. 켜기를 막지 않는다: 보관함이 없거나 깨졌거나
+    쓰지 못하면 경고 한 번을 남기고 예전 값(레포 연결에 넣은 앱 정보)으로 계속 돈다.
+
+    dashboard-api의 입력 확인(주소 정책·연결 확인)을 일부러 거치지 않는다. 이미 개발 AI에서
+    쓰던 값을 그대로 옮기는 것이라 새 입력이 아니다."""
     global _screen
     targets = [
         c for c in (_screen or {}).values() if c.auth == "app" and c.private_key and not c.app_ref
@@ -448,21 +468,34 @@ def _migrate_inline_apps() -> None:
             len(targets),
         )
         return
+    before = _screen
     rows = dict(_screen or {})
     moved = 0
-    for conn in targets:
-        try:
+    try:
+        for conn in targets:
+            same_app = [
+                r
+                for r in tool_connections.read_all()
+                if r.kind == APP_KIND
+                and str(r.config.get("app_id") or "") == conn.app_id
+                and str(r.config.get("installation_id") or "") == conn.installation_id
+                and _same_url(r.config.get("base_url"), conn.base_url)
+            ]
             found = next(
                 (
                     r
-                    for r in tool_connections.read_all()
-                    if r.kind == APP_KIND
-                    and str(r.config.get("app_id") or "") == conn.app_id
-                    and str(r.config.get("installation_id") or "") == conn.installation_id
-                    and _same_url(r.config.get("base_url"), conn.base_url)
+                    for r in same_app
+                    if _same_key(r.secrets.get("private_key", ""), conn.private_key)
                 ),
                 None,
             )
+            if found is None and same_app:
+                # 같은 앱인데 키가 없거나 다르다: 어느 쪽이 맞는지 모르니 잇지도 지우지도 않는다
+                logger.warning(
+                    "연결 %s: 보관함의 같은 GitHub 앱과 개인 키가 달라 옮기지 않았다 (그대로 쓴다)",
+                    conn.id,
+                )
+                continue
             if found is None:
                 config = {"app_id": conn.app_id, "installation_id": conn.installation_id}
                 if conn.base_url:
@@ -475,19 +508,23 @@ def _migrate_inline_apps() -> None:
                     conn_id=None,
                     by="migration",
                 )
-        except tool_connections.ToolConnectionError as exc:
-            # 깨진 보관함 등: 덮어쓰지 않고 예전 값으로 계속 돈다 (문구에 비밀 값은 없다)
-            logger.warning("GitHub App 정보를 보관함으로 옮기지 못했다: %s", exc.code)
-            break
-        rows[conn.id] = dataclasses.replace(
-            conn, app_ref=found.id, app_id="", installation_id="", private_key=""
-        )
-        moved += 1
+            rows[conn.id] = dataclasses.replace(
+                conn, app_ref=found.id, app_id="", installation_id="", private_key=""
+            )
+            moved += 1
+        if moved:
+            _screen = rows
+            _save()
+    except (tool_connections.ToolConnectionError, OSError) as exc:
+        # 깨진 보관함·쓰기 실패 등: 레포 연결은 바꾸지 않고 예전 값으로 계속 돈다.
+        # 보관함에 이미 만든 앱은 남아도 된다 (다음에 켤 때 같은 키로 찾아 잇는다)
+        _screen = before
+        code = exc.code if isinstance(exc, tool_connections.ToolConnectionError) else "os_error"
+        logger.warning("GitHub App 정보를 보관함으로 옮기지 못했다 (%s, 그대로 쓴다)", code)
+        return
     if moved:
-        _screen = rows
         _adapters.clear()
         _adapter_apps.clear()
-        _save()
         logger.info("GitHub App 정보 %d개를 도구 연결 보관함으로 옮겼다", moved)
 
 
