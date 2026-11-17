@@ -590,7 +590,8 @@ base_grade = "A"
 [[actions]]
 action = "receive_insight"
 owner = "planning"
-requesters = ["planning", "data", "marketing"]
+# finance: 캠페인 콘텐츠 카테고리 제작비 재배분 의견(INS-005 budget_shift, 11/17)
+requesters = ["planning", "data", "marketing", "finance"]
 base_grade = "A"
 
 [[actions]]

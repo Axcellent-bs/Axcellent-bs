@@ -204,6 +204,22 @@ export function CampaignsSection({ tick }: { tick: number }) {
         </ResourceBody>
       </Panel>
 
+      <Panel id="campaign-planning" title="기획 AI에 보낸 재배분 의견" hint="카테고리 제작비를 옮기자는 재무 의견은 기획 AI에도 A2A로 보냅니다. 기획이 이 근거로 다음 회차 비중을 제안(PROP)하고 사람이 확인합니다. 못 보내면 전달 대기로 남고 자동으로 다시 보냅니다.">
+        <ResourceBody res={view}>
+          {(v) => (v.planning_insights ?? []).length === 0 ? <Empty>아직 기획에 보낸 의견이 없습니다.</Empty> : (
+            <ul className="space-y-2 text-sm text-ink-700">
+              {(v.planning_insights ?? []).slice(0, 10).map((row) => (
+                <li key={row.insight.insight_id} className="flex flex-wrap items-center gap-2">
+                  <Chip label={row.status === "delivered" ? "전달됨" : "전달 대기"} tone={row.status === "delivered" ? TONE.ok : TONE.warn} />
+                  {row.insight.title}
+                  {row.proposal_id && <span className="text-ink-500">· 기획 제안 {row.proposal_id}{row.outcome === "duplicate" ? " (이미 받음)" : ""}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </ResourceBody>
+      </Panel>
+
       <Panel id="campaign-opinions" title="총괄 AI에 낸 의견" hint="총괄 AI에 A2A로 보냅니다. 총괄 AI 쪽 받는 기능이 준비되기 전에는 전달 대기로 남고 자동으로 다시 보냅니다.">
         <ResourceBody res={view}>
           {(v) => v.opinions.length === 0 ? <Empty>아직 낸 의견이 없습니다.</Empty> : (

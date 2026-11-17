@@ -131,6 +131,8 @@ export interface CampaignView {
   running: { campaign_id: string; active_krw: number }[];
   break_even_roas: number | null;
   categories?: CategoryViewCost[];
+  // 기획에 보낸 재무 인사이트(budget_shift)와 기획이 만든 제안 번호
+  planning_insights?: { insight: { insight_id: string; title: string }; status: "pending" | "delivered"; attempts: number; last_problem?: string | null; outcome?: string | null; proposal_id?: string | null; delivered_at?: string }[];
 }
 export interface FinanceInsight {
   insight_id: string; kind: string; severity: "warn" | "info"; title: string; message: string;
@@ -859,7 +861,7 @@ export const FINANCE_SECTION_TAB: Record<string, FinanceTab> = {
   deadlines: "settlements", payables: "settlements", "seller-transfers": "settlements",
   "team-budget": "policy",
   "tax-vat": "tax", "tax-seller-report": "tax", "tax-income": "tax", "tax-exports": "tax", "tax-rules": "tax",
-  "campaign-pnl": "campaigns", "campaign-categories": "campaigns", "campaign-reviews": "campaigns", "campaign-lessons": "campaigns", "campaign-insights": "campaigns", "campaign-opinions": "campaigns",
+  "campaign-pnl": "campaigns", "campaign-categories": "campaigns", "campaign-reviews": "campaigns", "campaign-lessons": "campaigns", "campaign-insights": "campaigns", "campaign-planning": "campaigns", "campaign-opinions": "campaigns",
   cashflow: "cash",
   "support-costs": "closing",
   // 옛 ⑧ 요청·기록 탭 주소 → 평상시 업무 첫 탭 (탭 밖 섹션은 PAGE_ANCHORS로 그 자리로 내려간다)
