@@ -24,8 +24,10 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
+import uuid
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -35,6 +37,8 @@ from pathlib import Path
 from ax_contracts.data_access.shop_customers import CustomerRow
 from ax_contracts.data_access.shop_sales import SalesOrderRow
 from data_agent.sales_clean import EXCLUDED_STATUSES, PAID, clean
+
+logger = logging.getLogger(__name__)
 
 DB_ENV = "DATA_SALES_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[4] / ".data" / "sales.db"  # backend/.data
@@ -67,6 +71,14 @@ CREATE INDEX IF NOT EXISTS idx_sales_orders_paid
 CREATE INDEX IF NOT EXISTS idx_sales_orders_byid ON sales_orders(
     tenant_id, order_id, created_at, payment_status, status, buyer_id, coupon_discount, points_used
 );
+-- 매출 분석 집계(11/18, `sales_sql`): 주문 id 순 + 유입 경로·금액까지 덮어 표를 읽지 않는다
+CREATE INDEX IF NOT EXISTS idx_sales_orders_sales ON sales_orders(
+    tenant_id, order_id, created_at, payment_status, status, buyer_id, coupon_discount,
+    points_used, items_amount, src_source, src_medium
+);
+-- 재구매 고객(기간 시작 전 결제 완료 주문) 확인을 표를 읽지 않고
+CREATE INDEX IF NOT EXISTS idx_sales_orders_buyer_paid
+    ON sales_orders(tenant_id, buyer_id, created_at, payment_status, status);
 CREATE TABLE IF NOT EXISTS sales_order_lines (
     tenant_id     TEXT NOT NULL,
     order_id      TEXT NOT NULL,
@@ -135,6 +147,8 @@ CREATE TABLE IF NOT EXISTS sales_customer_attributes (
 # 예전 DB 파일에 없을 수 있는 칸: (표, 칸, 형식). 열 때 없으면 더한다
 _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("sales_order_lines", "genre_code", "TEXT"),
+    # 저장소 버전 (11/18): 고객사마다 `VERSION_SOURCE` 줄에 둔다. 새 행을 저장할 때마다 +1
+    ("sync_state", "data_version", "INTEGER NOT NULL DEFAULT 0"),
 )
 # 더한 칸을 쓰는 인덱스 (칸을 더한 뒤에 만든다)
 _AFTER_COLUMNS = """
@@ -160,6 +174,8 @@ REPEAT_DAYS = (30, 60, 90)  # 재구매를 보는 날 수 (첫 구매 뒤, reten
 DEFAULT_CACHE_KIB = -2000  # SQLite 기본값 (약 2MB)
 
 CUSTOMERS_SUFFIX = ":customers"  # 고객 내보내기의 sync_state 출처 = `<판매 출처>:customers`
+VERSION_SOURCE = "*version*"  # sync_state의 저장소 버전 줄 (판매 기록 출처가 아니다)
+WRITE_TIMEOUT = 5.0  # 연결이 잠금을 기다리는 초
 FAKE_SOURCE = "fake"  # 가짜 판매 출처(데모 전용, `sales_fake`)의 sync_state 출처 이름
 
 
@@ -236,19 +252,111 @@ class UpsertResult:
 
 
 class SalesStore:
-    """SQLite 파일(또는 `:memory:`) 저장소. 연결 하나를 잠금으로 보호한다."""
+    """SQLite 파일(또는 `:memory:`) 저장소.
+
+    연결 (11/18)
+    - 쓰기(수집기): 쓰기 연결 하나를 잠금으로 보호한다 (`_tx`)
+    - 읽기(분석): 파일이면 스레드마다 따로 여는 **읽기 전용 연결**(읽기 전용 URI + `query_only`)을
+      잠금 없이 쓴다 (`reading`). 파일은 WAL이라 수집이 쓰는 동안에도 읽기가 막히지 않는다
+    - `:memory:`(시험)는 연결끼리 자료를 나눌 수 없어 예전처럼 쓰기 연결을 잠금으로 같이 쓴다
+    """
 
     def __init__(self, path: str | Path) -> None:
-        if str(path) != ":memory:":
+        self.memory = str(path) == ":memory:"
+        if not self.memory:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.path = str(path)
-        self._lock = threading.Lock()
-        self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
+        self.cache_token = uuid.uuid4().hex  # 결과 캐시가 저장소를 가리는 값 (`sales_cache`)
+        self._lock = threading.RLock()  # 쓰기 연결 (읽기 안에서 같은 스레드가 다시 잡을 수 있게)
+        self._local = threading.local()  # 스레드별 읽기 전용 연결
+        self._readers: list[sqlite3.Connection] = []
+        self._readers_lock = threading.Lock()
+        self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=WRITE_TIMEOUT)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
+            self._use_wal()
             self._conn.executescript(_SCHEMA)
             self._add_missing_columns()
             self._conn.executescript(_AFTER_COLUMNS)
+
+    def _use_wal(self) -> None:
+        """파일 저장소는 WAL로 (예전 파일도 열 때 바뀐다). 다른 연결이 잡고 있어 못 바꾸면
+        그대로."""
+        if self.memory:
+            return
+        try:
+            self._conn.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError as error:  # 다른 프로세스가 쓰는 중: 다음에 열 때 바꾼다
+            logger.warning("판매 저장소를 WAL로 바꾸지 못함: %s", error)
+
+    def _reader(self) -> sqlite3.Connection:
+        conn: sqlite3.Connection | None = getattr(self._local, "conn", None)
+        if conn is not None:
+            return conn
+        uri = Path(self.path).resolve().as_uri() + "?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=False, timeout=WRITE_TIMEOUT)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA temp_store = MEMORY")  # 분석 임시 표·정렬은 메모리에
+        conn.execute("PRAGMA query_only = 1")
+        self._local.conn = conn
+        with self._readers_lock:
+            self._readers.append(conn)
+        return conn
+
+    @contextmanager
+    def reading(self) -> Iterator[sqlite3.Connection]:
+        """읽기 연결. 파일이면 이 스레드의 읽기 전용 연결(잠금 없음), `:memory:`면 쓰기 연결+잠금.
+
+        끝날 때 열린 거래를 닫는다 (읽기 연결이 옛 자료를 붙잡고 있지 않게)."""
+        if self.memory:
+            with self._lock:
+                yield self._conn
+                if self._conn.in_transaction:
+                    self._conn.commit()
+            return
+        conn = self._reader()
+        try:
+            yield conn
+        finally:
+            if conn.in_transaction:
+                conn.commit()
+
+    @contextmanager
+    def analysis(self) -> Iterator[sqlite3.Connection]:
+        """분석 문맥: 읽기 연결에서 임시 표를 쓸 수 있게(`query_only` 잠시 해제, 본 DB는 여전히 읽기
+        전용 URI) 하고 페이지 캐시를 키운다. 끝나면 되돌린다. 고객·시장 분석·매출 분석이 쓴다."""
+        with self.reading() as conn:
+            if self.memory:
+                conn.execute("PRAGMA temp_store = MEMORY")
+            else:
+                conn.execute("PRAGMA query_only = 0")
+            conn.execute(f"PRAGMA cache_size = {SEGMENT_CACHE_KIB}")
+            try:
+                yield conn
+            finally:
+                if conn.in_transaction:
+                    conn.commit()
+                conn.execute(f"PRAGMA cache_size = {DEFAULT_CACHE_KIB}")
+                if self.memory:
+                    conn.execute("PRAGMA temp_store = DEFAULT")
+                else:
+                    conn.execute("PRAGMA query_only = 1")
+
+    def data_version(self, tenant_id: str) -> int:
+        """저장소 버전: 수집이 새 행(주문·고객)을 저장할 때마다 오른다 (결과 캐시 키)."""
+        with self.reading() as conn:
+            row = conn.execute(
+                "SELECT data_version FROM sync_state WHERE tenant_id = ? AND source = ?",
+                (tenant_id, VERSION_SOURCE),
+            ).fetchone()
+        return int(row["data_version"] or 0) if row else 0
+
+    def _bump_version(self, conn: sqlite3.Connection, tenant_id: str) -> None:
+        conn.execute(
+            "INSERT INTO sync_state (tenant_id, source, data_version) VALUES (?, ?, 1) "
+            "ON CONFLICT(tenant_id, source) DO UPDATE SET data_version = data_version + 1",
+            (tenant_id, VERSION_SOURCE),
+        )
 
     def _add_missing_columns(self) -> None:
         """예전 DB 파일에 새 칸을 더한다 (있으면 그대로). 잠금 안에서 부른다."""
@@ -259,6 +367,10 @@ class SalesStore:
         self._conn.commit()
 
     def close(self) -> None:
+        with self._readers_lock:
+            readers, self._readers = self._readers, []
+        for conn in readers:
+            conn.close()
         with self._lock:
             self._conn.close()
 
@@ -364,6 +476,8 @@ class SalesStore:
                     ],
                 )
                 saved += 1
+            if saved or dropped_orders or dropped_parts:
+                self._bump_version(conn, tenant_id)  # 결과 캐시를 버리게 (`sales_cache`)
         return UpsertResult(saved, dropped_orders, dropped_parts)
 
     def upsert_customers(
@@ -392,6 +506,8 @@ class SalesStore:
                     [(*key, k, v) for k, v in row.attributes.items() if k and v],
                 )
                 saved += 1
+            if saved:
+                self._bump_version(conn, tenant_id)
         return saved
 
     def save_cursor(self, tenant_id: str, source: str, cursor: str | None) -> None:
@@ -427,11 +543,11 @@ class SalesStore:
             sql += " AND source = ?"
             args.append(source)
         else:
-            sql += " AND source NOT LIKE ?"
-            args.append(f"%{CUSTOMERS_SUFFIX}")
+            sql += " AND source NOT LIKE ? AND source != ?"
+            args += [f"%{CUSTOMERS_SUFFIX}", VERSION_SOURCE]
         sql += " ORDER BY last_synced_at DESC LIMIT 1"
-        with self._lock:
-            row = self._conn.execute(sql, args).fetchone()
+        with self.reading() as conn:
+            row = conn.execute(sql, args).fetchone()
         if row is None:
             return SyncState(None, None, None, None)
         return SyncState(
@@ -444,12 +560,12 @@ class SalesStore:
 
     def customers(self, tenant_id: str) -> list[StoredCustomer]:
         """그 고객사의 고객 전부와 속성 (buyer_id 순서). 속성이 없는 key는 "모름"이다."""
-        with self._lock:
-            rows = self._conn.execute(
+        with self.reading() as conn:
+            rows = conn.execute(
                 "SELECT * FROM sales_customers WHERE tenant_id = ? ORDER BY buyer_id",
                 (tenant_id,),
             ).fetchall()
-            attrs = self._conn.execute(
+            attrs = conn.execute(
                 "SELECT buyer_id, key, value_code FROM sales_customer_attributes "
                 "WHERE tenant_id = ?",
                 (tenant_id,),
@@ -469,8 +585,8 @@ class SalesStore:
 
     def attribute_values(self, tenant_id: str) -> dict[str, set[str]]:
         """그 고객사 고객 속성에 나온 key → 값 code 모음 (품질 보고의 매핑 안 된 값용)."""
-        with self._lock:
-            rows = self._conn.execute(
+        with self.reading() as conn:
+            rows = conn.execute(
                 "SELECT DISTINCT key, value_code FROM sales_customer_attributes "
                 "WHERE tenant_id = ?",
                 (tenant_id,),
@@ -481,32 +597,34 @@ class SalesStore:
         return found
 
     def customer_count(self, tenant_id: str) -> int:
-        with self._lock:
-            row = self._conn.execute(
+        with self.reading() as conn:
+            row = conn.execute(
                 "SELECT COUNT(*) FROM sales_customers WHERE tenant_id = ?", (tenant_id,)
             ).fetchone()
         return int(row[0])
 
     def orders_created(self, tenant_id: str, start: datetime, end: datetime) -> list[StoredOrder]:
         """접수 시각이 [start, end)인 주문 (상태 무관), 줄·환불 포함."""
-        with self._lock:
-            rows = self._conn.execute(
+        with self.reading() as conn:
+            rows = conn.execute(
                 "SELECT * FROM sales_orders WHERE tenant_id = ? AND created_at >= ? "
                 "AND created_at < ? ORDER BY created_at, order_id",
                 (tenant_id, iso(start), iso(end)),
             ).fetchall()
-            return self._with_details(tenant_id, rows)
+            return self._with_details(tenant_id, rows, conn)
 
     def orders_refunded(self, tenant_id: str, start: datetime, end: datetime) -> list[StoredOrder]:
         """환불 시각이 [start, end)인 환불이 있는 주문 (접수 시각 무관), 줄·환불 포함."""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM sales_orders o WHERE o.tenant_id = ? AND EXISTS (SELECT 1 FROM "
-                "sales_refunds r WHERE r.tenant_id = o.tenant_id AND r.order_id = o.order_id "
-                "AND r.refunded_at >= ? AND r.refunded_at < ?) ORDER BY o.created_at, o.order_id",
-                (tenant_id, iso(start), iso(end)),
+        with self.reading() as conn:
+            # 환불 시각 인덱스로 그 기간 환불의 주문만 찾는다 (주문 전체를 훑지 않게, 11/18)
+            rows = conn.execute(
+                "SELECT o.* FROM (SELECT DISTINCT r.order_id FROM sales_refunds r "
+                "WHERE r.tenant_id = ? AND r.refunded_at >= ? AND r.refunded_at < ?) x "
+                "CROSS JOIN sales_orders o ON o.tenant_id = ? AND o.order_id = x.order_id "
+                "ORDER BY o.created_at, o.order_id",
+                (tenant_id, iso(start), iso(end), tenant_id),
             ).fetchall()
-            return self._with_details(tenant_id, rows)
+            return self._with_details(tenant_id, rows, conn)
 
     def buyers_paid_before(
         self, tenant_id: str, buyer_ids: Iterable[str], before: datetime
@@ -515,14 +633,14 @@ class SalesStore:
         ids = sorted(set(buyer_ids))
         found: set[str] = set()
         excluded = sorted(EXCLUDED_STATUSES)
-        with self._lock:
+        with self.reading() as conn:
             for start in range(0, len(ids), 500):
                 chunk = ids[start : start + 500]
                 marks = ",".join("?" * len(chunk))
                 status_marks = ",".join("?" * len(excluded))
                 found.update(
                     r["buyer_id"]
-                    for r in self._conn.execute(
+                    for r in conn.execute(
                         f"SELECT DISTINCT buyer_id FROM sales_orders WHERE tenant_id = ? "
                         f"AND buyer_id IN ({marks}) AND created_at < ? AND payment_status = ? "
                         f"AND LOWER(status) NOT IN ({status_marks})",
@@ -533,8 +651,8 @@ class SalesStore:
 
     def dropped(self, tenant_id: str, start: datetime, end: datetime) -> dict[str, int]:
         """접수 시각이 [start, end)인 주문에서 버린 것: 이유 → 수."""
-        with self._lock:
-            rows = self._conn.execute(
+        with self.reading() as conn:
+            rows = conn.execute(
                 "SELECT reason, COUNT(*) AS n FROM sales_dropped WHERE tenant_id = ? "
                 "AND created_at >= ? AND created_at < ? GROUP BY reason ORDER BY reason",
                 (tenant_id, iso(start), iso(end)),
@@ -542,8 +660,8 @@ class SalesStore:
         return {r["reason"]: r["n"] for r in rows}
 
     def order_count(self, tenant_id: str) -> int:
-        with self._lock:
-            row = self._conn.execute(
+        with self.reading() as conn:
+            row = conn.execute(
                 "SELECT COUNT(*) FROM sales_orders WHERE tenant_id = ?", (tenant_id,)
             ).fetchone()
         return int(row[0])
@@ -551,8 +669,8 @@ class SalesStore:
     # ------------------------------------------------------------------ 집계 읽기 (고객·시장 분석)
 
     def _rows(self, sql: str, params: dict[str, object]) -> list[sqlite3.Row]:
-        with self._lock:
-            return self._conn.execute(sql, params).fetchall()
+        with self.reading() as conn:
+            return conn.execute(sql, params).fetchall()
 
     @staticmethod
     def _window(tenant_id: str, start: datetime, end: datetime) -> dict[str, object]:
@@ -574,21 +692,15 @@ class SalesStore:
     def segment_session(
         self, tenant_id: str, start: datetime, end: datetime, keys: Sequence[str]
     ) -> Iterator[SegmentSession]:
-        """고객·시장 분석 한 번의 집계 읽기. 연결을 잡고 임시 표(기간 안 결제 완료 주문, 구매자별
-        속성)를 만들어 여러 집계에 같이 쓰고, 끝나면 지운다. 숫자만 돌려준다."""
-        with self._lock:
-            # 임시 표·정렬을 메모리에 (디스크 임시 파일로 넘기지 않게). 끝나면 기본값으로 되돌린다.
-            # temp_store를 바꾸면 있던 임시 표가 지워지므로 임시 표를 만들기 전에 바꾼다
-            self._conn.execute("PRAGMA temp_store = MEMORY")
-            self._conn.execute(f"PRAGMA cache_size = {SEGMENT_CACHE_KIB}")
-            session = SegmentSession(self, self._conn, tenant_id, start, end, keys)
+        """고객·시장 분석 한 번의 집계 읽기. 이 스레드의 읽기 연결(`analysis` 문맥: 임시 표·
+        메모리)에 임시 표(구매자별 속성 등)를 만들어 여러 집계에 같이 쓰고, 끝나면 지운다. 숫자만
+        돌려준다. 다른 분석·수집과 연결을 나눠 쓰지 않아 줄을 서지 않는다."""
+        with self.analysis() as conn:
+            session = SegmentSession(self, conn, tenant_id, start, end, keys)
             try:
                 yield session
             finally:
                 session.drop()
-                self._conn.commit()
-                self._conn.execute("PRAGMA temp_store = DEFAULT")
-                self._conn.execute(f"PRAGMA cache_size = {DEFAULT_CACHE_KIB}")
 
     def order_counts(self, tenant_id: str, start: datetime, end: datetime) -> tuple[int, int]:
         """기간 [start, end)에 접수한 주문 수(상태 무관)와 그중 결제 완료 주문 수."""
@@ -606,10 +718,8 @@ class SalesStore:
     ) -> str | None:
         """상품 하나의 이름: 기간 안 결제 완료 주문을 (접수 시각, 주문 id, 줄 순번) 순으로 볼 때
         처음 나온 이름 (줄 인덱스로 그 상품 줄만 본다). 없으면 None."""
-        with self._lock:
-            return self.product_title_in(
-                self._conn, self._window(tenant_id, start, end), product_id
-            )
+        with self.reading() as conn:
+            return self.product_title_in(conn, self._window(tenant_id, start, end), product_id)
 
     @staticmethod
     def product_title_in(
@@ -665,7 +775,9 @@ class SalesStore:
                     found.add(code)
         return out
 
-    def _with_details(self, tenant_id: str, rows: list[sqlite3.Row]) -> list[StoredOrder]:
+    def _with_details(
+        self, tenant_id: str, rows: list[sqlite3.Row], conn: sqlite3.Connection
+    ) -> list[StoredOrder]:
         orders = {
             r["order_id"]: StoredOrder(
                 order_id=r["order_id"],
@@ -686,7 +798,7 @@ class SalesStore:
         for start in range(0, len(ids), 500):
             chunk = ids[start : start + 500]
             marks = ",".join("?" * len(chunk))
-            for ln in self._conn.execute(
+            for ln in conn.execute(
                 f"SELECT * FROM sales_order_lines WHERE tenant_id = ? AND order_id IN ({marks}) "
                 "ORDER BY order_id, line_no",
                 (tenant_id, *chunk),
@@ -703,7 +815,7 @@ class SalesStore:
                         genre_code=ln["genre_code"],
                     )
                 )
-            for rf in self._conn.execute(
+            for rf in conn.execute(
                 f"SELECT * FROM sales_refunds WHERE tenant_id = ? AND order_id IN ({marks}) "
                 "ORDER BY order_id, refund_no",
                 (tenant_id, *chunk),
@@ -988,7 +1100,7 @@ class SegmentSession:
             f"SELECT o.* FROM sales_orders o WHERE o.tenant_id = :t AND o.order_id IN "
             f"({uneven_ids}) ORDER BY o.created_at, o.order_id"
         )
-        uneven = self.store._with_details(self.tenant_id, odd)  # noqa: SLF001 - 잠금 안
+        uneven = self.store._with_details(self.tenant_id, odd, self.conn)  # noqa: SLF001
         return {r["g"]: (int(r["net"]), int(r["orders"])) for r in rows}, uneven
 
     # ---- 구매자별 기록 (재구매·이탈, 11/17)

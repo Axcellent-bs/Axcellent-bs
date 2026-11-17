@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Empty, Waiting } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
-import { dataAi, kpiLive, type BasketLevel, type SegmentPeriod } from "@/lib/data";
+import { dataAi, kpiLive, type A2AResult, type BasketLevel, type SalesBasis, type SegmentPeriod } from "@/lib/data";
+import { calcLine } from "@/lib/salesView";
 import {
   NOT_YET, SUPPRESSED, basketNoun, basketView, dataNote, coverageView, favoritesView, filterLabel, nextMonth, optionsView,
   parseTarget, profileView, proposalsView, questionView, retentionView, sectionState, sendResultText,
@@ -43,7 +44,12 @@ function Badge({ text }: { text: string | null }) {
   return text ? <span className="chip bg-amber-50 text-amber-800">{text}</span> : null;
 }
 
-function Section({ id, title, hint, badge, children }: { id: string; title: string; hint?: string; badge?: string | null; children: ReactNode }) {
+/** 칸 아래 출처 줄 "계산 HH:MM (판매 기록 HH:MM까지)" (응답 근거의 계산 시각 + basis 마지막 수집) */
+function calcOf(res: { data: A2AResult<{ basis?: SalesBasis | null }> | null }): string | null {
+  return res.data ? calcLine(res.data.evidence?.collected_at, res.data.output.basis?.last_synced_at) : null;
+}
+
+function Section({ id, title, hint, badge, calc, children }: { id: string; title: string; hint?: string; badge?: string | null; calc?: string | null; children: ReactNode }) {
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="card min-w-0 space-y-3 p-4 sm:p-5">
       <div className="flex flex-wrap items-center gap-2">
@@ -52,6 +58,7 @@ function Section({ id, title, hint, badge, children }: { id: string; title: stri
       </div>
       {hint && <p className="text-xs text-ink-500">{hint}</p>}
       {children}
+      {calc && <p className="text-xs text-ink-400">{calc}</p>}
     </section>
   );
 }
@@ -133,8 +140,8 @@ function Ask({ options }: { options: OptionsView }) {
   const [question, setQuestion] = useState<QuestionView | null>(null);
   const [questionNote, setQuestionNote] = useState<string | null>(null);
   const key = ask ? JSON.stringify(ask) : null;
-  const res = useLoad(key, () => dataAi.segmentFavorites(ask!.filters, ask!.period).then((r) => r.output));
-  const view: FavoritesView | null = res.data ? favoritesView(res.data, options.itemNoun) : null;
+  const res = useLoad(key, () => dataAi.segmentFavorites(ask!.filters, ask!.period));
+  const view: FavoritesView | null = res.data ? favoritesView(res.data.output, options.itemNoun) : null;
   const picked = Object.fromEntries(Object.entries(draft).filter(([, v]) => v));
   const chosen = filterLabel(picked, options.attributes);
 
@@ -163,7 +170,7 @@ function Ask({ options }: { options: OptionsView }) {
   };
 
   return (
-    <Section id="seg-ask" title="물어보기" hint="집단을 고르면 우리 쇼핑몰에서 많이 산 것과 바깥 시장 인기를 나란히 봅니다." badge={view?.kind === "ok" ? view.badge : null}>
+    <Section id="seg-ask" title="물어보기" hint="집단을 고르면 우리 쇼핑몰에서 많이 산 것과 바깥 시장 인기를 나란히 봅니다." badge={view?.kind === "ok" ? view.badge : null} calc={calcOf(res)}>
       <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); void readQuestion(); }}>
         <label className="sr-only" htmlFor="seg-question">질문</label>
         <input id="seg-question" className="field min-w-0 flex-1" maxLength={200} value={text} onChange={(e) => setText(e.target.value)}
@@ -237,13 +244,13 @@ function Who({ options }: { options: OptionsView }) {
   const [target, setTarget] = useState(options.targets[0]?.value ?? "");
   const [period, setPeriod] = useState<SegmentPeriod>((options.periods.find((p) => p.value === "90d") ?? options.periods[0])?.value as SegmentPeriod ?? "90d");
   const t = parseTarget(target);
-  const res = useLoad(t ? `${target}|${period}` : null, () => dataAi.segmentProfile(t!.kind, t!.code, period).then((r) => r.output));
-  const view: ProfileView | null = res.data ? profileView(res.data) : null;
+  const res = useLoad(t ? `${target}|${period}` : null, () => dataAi.segmentProfile(t!.kind, t!.code, period));
+  const view: ProfileView | null = res.data ? profileView(res.data.output) : null;
   const groups = useMemo(() => [...new Set(options.targets.map((x) => x.group))], [options.targets]);
   const name = options.targets.find((x) => x.value === target)?.label;
 
   return (
-    <Section id="seg-who" title={name ? `${name}은(는) 누가 사나` : "누가 사나"}
+    <Section id="seg-who" title={name ? `${name}은(는) 누가 사나` : "누가 사나"} calc={calcOf(res)}
       hint="이 분야 구매자의 구성을 전체 고객 구성과 견줍니다. 배수가 1.2배 이상이면 그 집단이 특히 많이 사는 것으로 보고 초록으로 표시합니다." badge={view?.kind === "ok" ? view.badge : null}>
       {options.targets.length === 0 ? <Empty>고를 분류·장르가 아직 없어요</Empty> : (
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
@@ -311,11 +318,11 @@ function Together({ options }: { options: OptionsView }) {
   const [period, setPeriod] = useState<SegmentPeriod>((options.periods.find((p) => p.value === "90d") ?? options.periods[0])?.value as SegmentPeriod ?? "90d");
   const filters = useMemo(() => Object.fromEntries(Object.entries(draft).filter(([, v]) => v)), [draft]);
   const key = JSON.stringify([level, period, filters]);
-  const res = useLoad(key, () => dataAi.basketPairs(level, period, filters).then((r) => r.output));
-  const view: BasketView | null = res.data ? basketView(res.data, options.attributes, options.itemNoun) : null;
+  const res = useLoad(key, () => dataAi.basketPairs(level, period, filters));
+  const view: BasketView | null = res.data ? basketView(res.data.output, options.attributes, options.itemNoun) : null;
 
   return (
-    <Section id="seg-together" title={`함께 사는 장르·${options.itemNoun}`}
+    <Section id="seg-together" title={`함께 사는 장르·${options.itemNoun}`} calc={calcOf(res)}
       hint="같은 사람이 기간 안에 둘 다 산 것을 셉니다(같은 주문이 아니어도 됩니다). 배수는 따로 살 때 기대보다 몇 배 자주 같이 사는지이고, 1.2배 이상이면 초록으로 표시합니다." badge={view?.kind === "ok" ? view.badge : null}>
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
         <Select label="단위" value={level} onChange={(v) => setLevel(v as BasketLevel)}>
@@ -374,11 +381,11 @@ function Together({ options }: { options: OptionsView }) {
 
 function Coverage({ options }: { options: OptionsView }) {
   const [combo, setCombo] = useState(options.coverage[0]?.value ?? "");
-  const res = useLoad(combo ? combo : null, () => dataAi.marketCoverage(combo.split(",")).then((r) => r.output));
-  const view: CoverageView | null = res.data ? coverageView(res.data, options.attributes) : null;
+  const res = useLoad(combo ? combo : null, () => dataAi.marketCoverage(combo.split(",")));
+  const view: CoverageView | null = res.data ? coverageView(res.data.output, options.attributes) : null;
 
   return (
-    <Section id="seg-coverage" title="시장을 얼마나 덮고 있나" hint="우리 구매자 수(최근 1년)를 공공 인구 통계로 나눠 봅니다. 남은 시장이 큰 묶음이 위에 옵니다." badge={view?.kind === "ok" ? view.badge : null}>
+    <Section id="seg-coverage" title="시장을 얼마나 덮고 있나" hint="우리 구매자 수(최근 1년)를 공공 인구 통계로 나눠 봅니다. 남은 시장이 큰 묶음이 위에 옵니다." badge={view?.kind === "ok" ? view.badge : null} calc={calcOf(res)}>
       {options.coverage.length === 0 ? <Empty>인구 통계와 맞춰 볼 속성 조합이 설정에 없어요</Empty> : options.coverage.length > 1 && (
         <Select label="묶음" value={combo} onChange={setCombo}>
           {options.coverage.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
@@ -511,11 +518,11 @@ function ProposalCard({ p }: { p: ProposalView }) {
 
 function Proposals() {
   const month = useMemo(() => nextMonth(new Date()), []);
-  const res = useLoad(month, () => dataAi.eventProposal(month).then((r) => r.output));
-  const view: ProposalsView | null = res.data ? proposalsView(res.data) : null;
+  const res = useLoad(month, () => dataAi.eventProposal(month));
+  const view: ProposalsView | null = res.data ? proposalsView(res.data.output) : null;
 
   return (
-    <Section id="seg-event" title={view?.kind === "ok" ? `다음 달(${view.month}) 이벤트 제안` : "다음 달 이벤트 제안"}
+    <Section id="seg-event" title={view?.kind === "ok" ? `다음 달(${view.month}) 이벤트 제안` : "다음 달 이벤트 제안"} calc={calcOf(res)}
       hint="누구에게·언제·무엇을 할지 근거 3개와 예상 효과 범위를 함께 봅니다. 숫자는 코드가 계산하고 AI는 제목·요약만 씁니다." badge={view?.kind === "ok" ? view.badge : null}>
       <StateBox load={res} what="이벤트 제안" />
       {view?.kind === "gate" && <Gate view={view} />}
@@ -539,11 +546,11 @@ function Proposals() {
 // ---- 5) 다시 사나 · 떠나나 (retention)
 
 function Retention() {
-  const res = useLoad("retention", () => dataAi.retention(3).then((r) => r.output));
-  const view: RetentionView | null = res.data ? retentionView(res.data, new Date()) : null;
+  const res = useLoad("retention", () => dataAi.retention(3));
+  const view: RetentionView | null = res.data ? retentionView(res.data.output, new Date()) : null;
 
   return (
-    <Section id="seg-retention" title="다시 사나 · 떠나나" badge={view?.kind === "ok" ? view.badge : null}
+    <Section id="seg-retention" title="다시 사나 · 떠나나" badge={view?.kind === "ok" ? view.badge : null} calc={calcOf(res)}
       hint="첫 구매 달별로 30·60·90일 안에 다시 산 비율과, 단골 중 한동안 안 산 사람이 많은 묶음을 봅니다.">
       <StateBox load={res} what="재구매·이탈" />
       {view?.kind === "gate" && <Gate view={view} />}

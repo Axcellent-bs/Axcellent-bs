@@ -919,9 +919,12 @@ async def favorites_with_external(  # noqa: PLR0913
     now: datetime,
     d4l: Data4LibraryConnector | None = None,
     naver: NaverShoppingConnector | None = None,
+    internal: SegmentFavoritesOutput | None = None,
 ) -> SegmentFavoritesOutput:
-    """저장소 읽기는 스레드에서, 바깥 출처는 status ok일 때만 부른다."""
-    out = await asyncio.to_thread(
+    """저장소 읽기는 스레드에서, 바깥 출처는 status ok일 때만 부른다.
+
+    `internal`(11/18): 이미 계산한 우리 쇼핑몰 순위(결과 캐시). 주면 저장소를 다시 읽지 않는다."""
+    out = internal or await asyncio.to_thread(
         favorites, store, tenant_id, filters, period, top, cfg, catalog_id, now
     )
     if out.status != "ok" or cfg is None:
@@ -1161,8 +1164,10 @@ async def coverage_with_population(  # noqa: PLR0913
     catalog_id: str,
     now: datetime,
     kosis: KosisConnector | None = None,
+    buyers: MarketCoverageOutput | None = None,
 ) -> MarketCoverageOutput:
-    out = await asyncio.to_thread(
+    """`buyers`(11/18): 이미 계산한 구매자 수 줄(결과 캐시). 주면 저장소를 다시 읽지 않는다."""
+    out = buyers or await asyncio.to_thread(
         coverage_buyers, store, tenant_id, attribute_keys, cfg, catalog_id, now
     )
     pop = find_population(out.attribute_keys, cfg) if cfg else None

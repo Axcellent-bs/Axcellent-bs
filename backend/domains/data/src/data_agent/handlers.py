@@ -95,7 +95,15 @@ from ax_contracts.schemas.data import (
 from ax_contracts.schemas.idea import IdeaReportInput
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from data_agent import catalog as metric_catalog
-from data_agent import data_chat, idea_reports, llm_budget, llm_failure, llm_halt, llm_inflight
+from data_agent import (
+    data_chat,
+    idea_reports,
+    llm_budget,
+    llm_failure,
+    llm_halt,
+    llm_inflight,
+    sales_reads,
+)
 from data_agent.clients import customer_reaction
 from data_agent.clients.fact_sources import notices_at
 from data_agent.clients.log_client import get_log_source
@@ -118,11 +126,11 @@ from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
 from data_agent.response_cache import DB_ENV as RESPONSES_DB_ENV
 from data_agent.response_cache import ResponseCache
+from data_agent.sales_cache import stamp
 from data_agent.sales_store import DB_ENV as SALES_DB_ENV
 from data_agent.sales_store import DEFAULT_DB as SALES_DEFAULT_DB
 from data_agent.sales_store import SalesStore
 from data_agent.skills import (
-    basket_pairs,
     channel_value,
     event_proposal,
     retention,
@@ -140,7 +148,6 @@ from data_agent.skills.impact_analysis import analyze_impact
 from data_agent.skills.kpi_summary import summarize_kpi
 from data_agent.skills.promo_concepts import make_concepts
 from data_agent.skills.root_cause import estimate_root_cause
-from data_agent.skills.sales_analysis import analyze as analyze_sales
 from data_agent.skills.sales_analysis import evidence as sales_evidence
 from data_agent.skills.shorts_stats import shorts_stats as run_shorts_stats
 from data_agent.skills.trend_age import popular_targets
@@ -428,14 +435,15 @@ async def sales_analysis(request: AgentRequest) -> AgentResult:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
     cat = metric_catalog.current()
     now = datetime.now(UTC)
-    out = await asyncio.to_thread(
-        analyze_sales, get_sales_store(), data.tenant_id, data.period, cat.sales, cat.id, now
+    got = await asyncio.to_thread(
+        sales_reads.sales_analysis, get_sales_store(), data.tenant_id, data.period, cat, now
     )
+    out = got.value
     return _result(
         request,
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
-        evidence=sales_evidence(out, now),
+        evidence=stamp(sales_evidence(out, now), got),
     )
 
 
@@ -452,9 +460,10 @@ async def segment_options(request: AgentRequest) -> AgentResult:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
     cat = metric_catalog.current()
     now = datetime.now(UTC)
-    out = await asyncio.to_thread(
-        segment_analysis.read_options, get_sales_store(), data.tenant_id, cat.sales, cat.id
+    got = await asyncio.to_thread(
+        sales_reads.segment_options, get_sales_store(), data.tenant_id, cat, now
     )
+    out = got.value
     version = out.catalog_version or "없음"
     extra = f"카탈로그 {cat.id} 판 {version}" + (
         f", 출처 {out.data_source}" if out.data_source else ""
@@ -463,12 +472,12 @@ async def segment_options(request: AgentRequest) -> AgentResult:
         request,
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
-        evidence=Evidence(
+        evidence=stamp(Evidence(
             queries=["catalog.sales", "sales_store.sync_state"],
             data_summary=extra,
             collected_at=now,
             ref_ids=[],
-        ),
+        ), got),  # fmt: skip
     )
 
 
@@ -508,15 +517,16 @@ async def segment_profile(request: AgentRequest) -> AgentResult:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
     cat = metric_catalog.current()
     now = datetime.now(UTC)
-    out = await asyncio.to_thread(
-        segment_analysis.profile, get_sales_store(), data.tenant_id, data.target_kind,
-        data.target_code, data.attribute_keys, data.period, cat.sales, cat.id, now,
+    got = await asyncio.to_thread(
+        sales_reads.segment_profile, get_sales_store(), data.tenant_id, data.target_kind,
+        data.target_code, data.attribute_keys, data.period, cat, now,
     )  # fmt: skip
+    out = got.value
     return _result(
         request,
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
-        evidence=segment_analysis.evidence(out.basis, now),
+        evidence=stamp(segment_analysis.evidence(out.basis, now), got),
     )
 
 
@@ -529,16 +539,22 @@ async def segment_favorites(request: AgentRequest) -> AgentResult:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
     cat = metric_catalog.current()
     now = datetime.now(UTC)
+    store = get_sales_store()
+    got = await asyncio.to_thread(
+        sales_reads.segment_favorites, store, data.tenant_id, data.filters, data.period, data.top,
+        cat, now,
+    )  # fmt: skip
     out = await segment_analysis.favorites_with_external(
-        get_sales_store(), data.tenant_id, data.filters, data.period, data.top, cat.sales,
-        cat.id, now,
+        store, data.tenant_id, data.filters, data.period, data.top, cat.sales, cat.id, now,
+        internal=got.value,
     )  # fmt: skip
     called = ", ".join(f"{e.label} {e.status}" for e in out.external)
+    ev = segment_analysis.evidence(out.basis, now, f"바깥 출처 {called}" if called else "")
     return _result(
         request,
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
-        evidence=segment_analysis.evidence(out.basis, now, f"바깥 출처 {called}" if called else ""),
+        evidence=stamp(ev, got),
     )
 
 
@@ -551,15 +567,16 @@ async def basket_pairs_skill(request: AgentRequest) -> AgentResult:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
     cat = metric_catalog.current()
     now = datetime.now(UTC)
-    out = await asyncio.to_thread(
-        basket_pairs.basket, get_sales_store(), data.tenant_id, data.level, data.period,
-        data.filters, data.max_pairs, cat.sales, cat.id, now,
+    got = await asyncio.to_thread(
+        sales_reads.basket_pairs, get_sales_store(), data.tenant_id, data.level, data.period,
+        data.filters, data.max_pairs, cat, now,
     )  # fmt: skip
+    out = got.value
     return _result(
         request,
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
-        evidence=segment_analysis.evidence(out.basis, now, f"쌍 단위 {data.level}"),
+        evidence=stamp(segment_analysis.evidence(out.basis, now, f"쌍 단위 {data.level}"), got),
     )
 
 
@@ -572,15 +589,20 @@ async def market_coverage(request: AgentRequest) -> AgentResult:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
     cat = metric_catalog.current()
     now = datetime.now(UTC)
-    out = await segment_analysis.coverage_with_population(
-        get_sales_store(), data.tenant_id, data.attribute_keys, cat.sales, cat.id, now
+    store = get_sales_store()
+    got = await asyncio.to_thread(
+        sales_reads.coverage_buyers, store, data.tenant_id, data.attribute_keys, cat, now
     )
+    out = await segment_analysis.coverage_with_population(
+        store, data.tenant_id, data.attribute_keys, cat.sales, cat.id, now, buyers=got.value
+    )
+    # 인구 출처·기준 달 (예: "… (2026-10 기준)")을 근거에 남긴다
+    ev = segment_analysis.evidence(out.basis, now, segment_analysis.population_note(out))
     return _result(
         request,
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
-        # 인구 출처·기준 달 (예: "… (2026-10 기준)")을 근거에 남긴다
-        evidence=segment_analysis.evidence(out.basis, now, segment_analysis.population_note(out)),
+        evidence=stamp(ev, got),
     )
 
 
@@ -593,15 +615,16 @@ async def retention_skill(request: AgentRequest) -> AgentResult:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
     cat = metric_catalog.current()
     now = datetime.now(UTC)
-    out = await asyncio.to_thread(
-        retention.retention, get_sales_store(), data.tenant_id, data.cohorts, data.filters,
-        cat.sales, cat.id, now,
+    got = await asyncio.to_thread(
+        sales_reads.retention, get_sales_store(), data.tenant_id, data.cohorts, data.filters,
+        cat, now,
     )  # fmt: skip
+    out = got.value
     return _result(
         request,
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
-        evidence=retention.evidence_of(out, now, cat.sales),
+        evidence=stamp(retention.evidence_of(out, now, cat.sales), got),
     )
 
 
@@ -614,15 +637,15 @@ async def channel_value_skill(request: AgentRequest) -> AgentResult:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
     cat = metric_catalog.current()
     now = datetime.now(UTC)
-    out, excluded = await asyncio.to_thread(
-        channel_value.channel_value, get_sales_store(), data.tenant_id, data.period, cat.sales,
-        cat.id, now,
-    )  # fmt: skip
+    got = await asyncio.to_thread(
+        sales_reads.channel_value, get_sales_store(), data.tenant_id, data.period, cat, now
+    )
+    out, excluded = got.value
     return _result(
         request,
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
-        evidence=channel_value.evidence_of(out, excluded, now),
+        evidence=stamp(channel_value.evidence_of(out, excluded, now), got),
     )
 
 
@@ -693,6 +716,18 @@ async def _read_event_base(*args: Any) -> event_proposal.Base:
     return await asyncio.to_thread(event_proposal.read_base, *args)
 
 
+def _cached_event_base(cat: Any, keep: list[Any]) -> Callable[..., Awaitable[event_proposal.Base]]:
+    """이벤트 제안 후보(저장소 계산)를 결과 캐시로. 계산 시각·적중은 `keep`에 남긴다."""
+
+    async def read(store: SalesStore, tenant_id: str, _cfg: Any, _cid: str,
+                   now: datetime) -> event_proposal.Base:  # fmt: skip
+        got = await asyncio.to_thread(sales_reads.event_base, store, tenant_id, cat, now)
+        keep.append(got)
+        return got.value
+
+    return read
+
+
 async def event_proposal_skill(request: AgentRequest) -> AgentResult:
     """이벤트 제안: 묶음 배수 × 시즌 × 이벤트 종류를 코드로 고르고 예상 효과를 계산한다."""
     data = _parse(request, EventProposalInput)
@@ -708,17 +743,18 @@ async def event_proposal_skill(request: AgentRequest) -> AgentResult:
     async def reactions(ids: list[str]) -> customer_reaction.Reactions:
         return await customer_reaction.read(ids, request.meta, send=sender, now=now)
 
+    kept: list[Any] = []
     run = await event_proposal.propose(
         get_sales_store(), get_event_proposal_store(), data.tenant_id, data.month, data.max_items,
         cat.sales, cat.id, now, trend=get_trend_connector(), llm=get_llm(), past=past,
-        past_note=past_note, reactions=reactions, read=_read_event_base,
+        past_note=past_note, reactions=reactions, read=_cached_event_base(cat, kept),
         campaign_results=get_proposal_results,
     )  # fmt: skip
     return _result(
         request,
         TaskStatus.COMPLETED,
         output=run.output.model_dump(mode="json"),
-        evidence=run.evidence,
+        evidence=stamp(run.evidence, kept[0]) if kept else run.evidence,
         fallback=run.fallback,
         fallback_reason=run.fallback_reason,
     )

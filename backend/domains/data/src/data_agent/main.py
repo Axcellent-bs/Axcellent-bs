@@ -18,10 +18,11 @@ from ax_agent_template.llm import LLMSettings
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard, RequestMeta
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
-from data_agent import campaign_update
+from data_agent import campaign_update, sales_reads
+from data_agent import catalog as metric_catalog
 from data_agent.clients.log_client import get_log_source
 from data_agent.connectors.shop_api import close_shared_client
-from data_agent.handlers import HANDLERS
+from data_agent.handlers import HANDLERS, get_sales_store
 from data_agent.monitor import run_snapshots_forever
 from data_agent.report_store import Snapshot, get_report_store
 from data_agent.skills.activity_report import build_day_snapshot
@@ -105,12 +106,22 @@ def build_app() -> FastAPI:
             # 성과 결과를 기획에 보내기 (한 시간마다, DATA_SEND_CAMPAIGN_UPDATE가 꺼져 있으면
             # 기획을 부르지 않음)
             sends = asyncio.create_task(campaign_update.run_forever())
+            # 판매 분석 미리 계산 (11/18): 수집기가 새 행을 저장하면 기본 조회를 캐시에 넣는다
+            warm = (
+                asyncio.create_task(sales_reads.run_forever(
+                    get_sales_store, metric_catalog.current, TENANT_ID_DEFAULT,
+                ))  # fmt: skip
+                if sales_reads.warm_enabled()
+                else None
+            )
             try:
                 yield
             finally:
                 if task:
                     task.cancel()
                 sends.cancel()
+                if warm:
+                    warm.cancel()
                 await close_shared_client()  # 판매 서버 공용 HTTP 클라이언트 (#909)
 
     app.router.lifespan_context = lifespan

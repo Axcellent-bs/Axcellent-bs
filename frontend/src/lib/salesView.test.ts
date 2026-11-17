@@ -2,7 +2,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ChannelValueOutput, SalesAnalysisOutput } from "./data.ts";
-import { changeText, channelValueView, koreaTime, rate, salesView, won, type SalesOkView } from "./salesView.ts";
+import { calcLine, changeText, channelValueView, koreaTime, rate, salesView, won, type SalesOkView } from "./salesView.ts";
+
+test("출처 줄: 계산 시각(한국)과 판매 기록 마지막 수집", () => {
+  assert.equal(calcLine("2026-11-18T03:05:00Z", "2026-11-18T03:00:00Z"), "계산 12:05 (판매 기록 12:00까지)");
+  assert.equal(calcLine("2026-11-18T03:05:00Z", null), "계산 12:05");
+  assert.equal(calcLine(null, "2026-11-18T03:00:00Z"), null);
+  assert.equal(calcLine("엉터리", null), null);
+});
 
 function sample(over: Partial<SalesAnalysisOutput> = {}): SalesAnalysisOutput {
   return {

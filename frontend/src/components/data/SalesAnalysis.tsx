@@ -3,7 +3,7 @@ import { Empty, ErrorBox, Panel, Waiting, useResource } from "@/components/finan
 import { DATA_SERVER, dataAi, kpiLive, type SalesPeriod } from "@/lib/data";
 import { PreparingChip } from "@/components/Preparing";
 import {
-  SALES_PERIODS, channelValueView, compareLabel, salesView,
+  SALES_PERIODS, calcLine, channelValueView, compareLabel, salesView,
   type ChannelValueView, type ChannelView, type ProductView, type SalesGateView, type SalesOkView, type Tone,
 } from "@/lib/salesView";
 import { sectionState } from "@/lib/segmentView";
@@ -87,6 +87,7 @@ function Channels({ rows }: { rows: ChannelView[] }) {
 function ChannelValue({ tick }: { tick: number }) {
   const res = useResource("channel-value", () => dataAi.channelValue("365d").then((r) => ({ data: r, meta: { mock: false } })), tick);
   const view: ChannelValueView | null = res.env ? channelValueView(res.env.data.output) : null;
+  const calc = res.env ? calcLine(res.env.data.evidence?.collected_at, res.env.data.output.basis?.last_synced_at) : null;
   const missing = res.error != null && sectionState(res.error).kind === "missing";
 
   return (
@@ -129,6 +130,7 @@ function ChannelValue({ tick }: { tick: number }) {
             </div>
           )}
           {view.summary && <p className="rounded-xl bg-surface-2 px-3 py-2 text-sm text-ink-700"><b>요약</b> {view.summary}</p>}
+          {calc && <p className="text-xs text-ink-500">{calc}</p>}
           <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">{view.note}</p>
         </div>
       )}
@@ -136,7 +138,7 @@ function ChannelValue({ tick }: { tick: number }) {
   );
 }
 
-function Body({ view, tick }: { view: SalesOkView; tick: number }) {
+function Body({ view, tick, calc }: { view: SalesOkView; tick: number; calc: string | null }) {
   return (
     <div className="space-y-4">
       <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -198,7 +200,7 @@ function Body({ view, tick }: { view: SalesOkView; tick: number }) {
 
       <ChannelValue tick={tick} />
 
-      <p className="text-xs text-ink-500">품질 · {view.quality.join(" · ")}</p>
+      <p className="text-xs text-ink-500">품질 · {view.quality.join(" · ")}{calc ? ` · ${calc}` : ""}</p>
     </div>
   );
 }
@@ -238,7 +240,10 @@ function Live({ tick }: { tick: number }) {
         <ErrorBox message={res.env ? `새로 받지 못해 이전 값을 보여 줍니다. ${res.error}` : `${res.error}. ${DATA_SERVER}가 켜져 있는지 확인해 주세요.`} onRetry={res.reload} />
       )}
       {view?.kind === "gate" && <Gate view={view} />}
-      {view?.kind === "ok" && <Body view={view} tick={tick} />}
+      {view?.kind === "ok" && (
+        <Body view={view} tick={tick}
+          calc={res.env ? calcLine(res.env.data.evidence?.collected_at, res.env.data.output.basis?.last_synced_at) : null} />
+      )}
     </div>
   );
 }
