@@ -314,7 +314,7 @@ export function profileView(out: SegmentProfileOutput): ProfileView {
 
 export interface CoverageRowView { label: string; buyers: string; population: string; coverage: string; source: string; note: string | null }
 export interface CoverageOkView { kind: "ok"; rows: CoverageRowView[]; summary: string; badge: string | null }
-/** 모든 줄에 인구가 없으면: 안내 한 줄 + 첫 속성(줄) × 둘째 속성(칸) 구매자 수 표 하나 */
+/** 인구를 하나도 못 붙였으면(모두 인구 없음, 또는 모두 ok 아님 + 같은 이유): 안내 한 줄 + 첫 속성(줄) × 둘째 속성(칸) 구매자 수 표 하나 */
 export interface BuyersTableView {
   kind: "buyers";
   note: string;
@@ -331,16 +331,35 @@ function buyersCell(r: CoverageRow | undefined): string {
   return r.buyers != null ? people(r.buyers) : "-";
 }
 
+/** 서버 이유에서 사람이 읽는 부분만: 한글 설명이 없으면 null. "UNAUTHORIZED: " 같은 오류 코드와
+ * KOSIS_API_KEY 같은 설정 이름은 뺀다 (출처 이름 KOSIS 같은 낱말은 남긴다) */
+export function readableReason(text: string): string | null {
+  if (!HANGUL.test(text)) return null;
+  return text
+    .replace(/\b[A-Z][A-Z_]{2,}:\s*/g, "")
+    .replace(/\b[A-Z0-9]+(?:_[A-Z0-9]+)+\b/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    .trim();
+}
+
+const COVERAGE_NOTE = {
+  missing: "인구 통계를 아직 받지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요",
+  error: "인구 통계를 읽지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요",
+};
+
 function buyersTable(out: MarketCoverageOutput, attributes: AttributeChoice[]): BuyersTableView | null {
   const attrs = out.attribute_keys.map((k) => attributes.find((a) => a.key === k));
   if (attrs.length === 0 || attrs.length > 2 || attrs.some((a) => !a)) return null;
   const [rowAttr, colAttr] = attrs as AttributeChoice[];
   const find = (rv: string, cv?: string) => out.rows.find((r) =>
     r.values[rowAttr.key] === rv && (colAttr == null || r.values[colAttr.key] === cv));
-  const reasons = [...new Set(out.rows.map((r) => r.reason).filter((x) => HANGUL.test(x)))];
+  const reasons = [...new Set(out.rows.map((r) => readableReason(r.reason)).filter((x): x is string => !!x))];
+  const base = out.rows.every((r) => r.status === "error") ? COVERAGE_NOTE.error : COVERAGE_NOTE.missing;
   return {
     kind: "buyers",
-    note: `인구 통계를 아직 받지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요${reasons.length === 1 ? ` · ${reasons[0]}` : ""}`,
+    note: `${base}${reasons.length === 1 ? ` · ${reasons[0]}` : ""}`,
     corner: colAttr ? `${rowAttr.label} \\ ${colAttr.label}` : rowAttr.label,
     columns: colAttr ? colAttr.values.map((v) => v.label) : ["우리 구매자"],
     rows: rowAttr.values.map((rv) => ({
@@ -358,7 +377,12 @@ function remaining(r: CoverageRow): number {
 
 export function coverageView(out: MarketCoverageOutput, attributes: AttributeChoice[] = []): CoverageView {
   if (out.status === "insufficient") return gate(out);
-  if (out.rows.length > 0 && out.rows.every((r) => r.status === "population_missing")) {
+  // 인구를 하나도 못 붙였으면 같은 이유를 줄마다 되풀이하지 않고 한 줄 + 구매자 표로 줄인다:
+  // 모든 줄이 인구 없음이거나, 모든 줄이 ok가 아니고(인구 없음·오류) 이유가 모두 같을 때
+  const notOk = out.rows.length > 0 && out.rows.every((r) => r.status !== "ok");
+  const allMissing = notOk && out.rows.every((r) => r.status === "population_missing");
+  const sameReason = notOk && new Set(out.rows.map((r) => r.reason)).size === 1;
+  if (allMissing || sameReason) {
     const table = buyersTable(out, attributes);
     if (table) return table;
   }
