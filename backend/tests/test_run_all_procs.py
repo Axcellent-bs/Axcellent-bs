@@ -202,9 +202,9 @@ def test_run_all_checks_running_before_start_and_no_longer_restarts_silently() -
     assert start < first_launch
     body = text[start:]
     assert "\nstop_all\n" not in body  # 켜기는 이제 끄고 다시 켜지 않는다 (먼저 stop)
-    # 서버·주문 트래픽·수집기 3개(인기 검색어·YouTube·판매 기록)
-    assert body.count("winpid_of $! >") == 5
-    assert body.count('echo "$START_LINE" > "$LOGS/') == 5
+    # 서버·수집기 3개(인기 검색어·YouTube·판매 기록). 주문 트래픽은 캣북스 레포로 옮겼다
+    assert body.count("winpid_of $! >") == 4
+    assert body.count('echo "$START_LINE" > "$LOGS/') == 4
     # 판매 기록 수집기도 stop이 알아보고(표식) 남은 잠금을 정리한다
     assert '"data_agent.sales_collect"' in text and '"$DATA/sales_collect.lock"' in text
     assert "export AX_GIT_COMMIT" in text
@@ -240,13 +240,14 @@ def _bash() -> str:
     return found
 
 
-def _run(snippet: str, env: dict[str, str]) -> str:
+def _run(snippet: str, env: dict[str, str], cwd: Path | None = None) -> str:
     result = subprocess.run(
         [_bash(), "-c", snippet],
         capture_output=True,
         text=True,
         encoding="utf-8",
         env={"PATH": os.environ.get("PATH", ""), **env},
+        cwd=cwd,
         timeout=30,
         check=True,
     )
@@ -284,44 +285,7 @@ def test_health_check_uses_healthz_for_dejafix_proxy() -> None:
     assert ':$p/health"' not in text and ':$port/health"' not in text  # 예전 직접 주소가 없다
 
 
-# --- 캣북스 가상 주문: SHOP_TRAFFIC=on일 때만 넣고, 꺼도 배송 표시·재고 보충은 돈다 ----------
-
-TRAFFIC_BLOCK = ("# >>> 주문 트래픽 스위치", "# <<< 주문 트래픽 스위치")
-SHOP_LINE = "shop-api 8010 ax_shop_api.main:app"
-OFF_LINE = "캣북스 가상 주문 꺼짐(배송 표시·재고 보충만, SHOP_TRAFFIC=on이면 주문도 넣음)"
-
-
-@pytest.mark.parametrize(
-    ("value", "on"),
-    [(None, False), ("", False), ("off", False), ("0", False), ("on", True), ("1", True)],
-)
-def test_virtual_orders_only_when_switched_on(value: str | None, on: bool) -> None:
-    block = _between(*TRAFFIC_BLOCK)
-    env = {"RUN_APPS": SHOP_LINE} | ({} if value is None else {"SHOP_TRAFFIC": value})
-    out = _run(f'{block}\necho "orders=$SHOP_TRAFFIC_ORDERS"', env)
-    if on:
-        assert out.splitlines() == ["orders=1"]
-    else:
-        assert out.splitlines() == [OFF_LINE, "orders=0"]
-
-
-def test_traffic_switch_is_quiet_without_shop_api() -> None:
-    """--only로 shop-api를 안 띄우면 꺼짐 안내도 찍지 않는다."""
-    block = _between(*TRAFFIC_BLOCK)
-    out = _run(f'{block}\necho "orders=$SHOP_TRAFFIC_ORDERS"', {"RUN_APPS": "data 8106 x:app"})
-    assert out.splitlines() == ["orders=0"]
-
-
-def test_traffic_script_still_starts_with_the_switch_off() -> None:
-    """꺼도 스크립트는 띄우고(배송 표시·재고 보충), 스위치 값만 넘긴다."""
-    text = RUN_ALL.read_text(encoding="utf-8")
-    launch = text[text.index(TRAFFIC_BLOCK[1]) :]
-    launch = launch[: launch.index("scripts/shop_traffic.py")]
-    assert 'SHOP_TRAFFIC_ORDERS="$SHOP_TRAFFIC_ORDERS"' in launch
-    assert "SHOP_TRAFFIC_ON" not in text
-
-
-# --- 가상 주문(shop_traffic.py)도 stop으로 끈다 (2026-11-12: bash 껍데기 pid만 적혀 남았다) -----
+# --- procs.py: 자기 pid 파일을 적는 프로세스도 끈다 (2026-11-12 가상 주문 사례) ---
 
 
 def _traffic_pair(launcher: int, child: int) -> list:
@@ -357,74 +321,22 @@ def test_traffic_without_a_pid_file_is_left_and_reported(
     assert "남아 있음: pid 700" in out and "남아 있음: pid 701" in out
 
 
-def test_run_all_passes_the_traffic_pid_file_and_stop_reads_it() -> None:
+# --- 캣북스 판매 서버: AXcellent는 띄우지도 끄지도 않고, 주소만 알려 준다 (레포 분리 5단계) ---
+
+SHOP_BLOCK = ("# >>> 판매 서버 주소", "# <<< 판매 서버 주소")
+
+
+def test_shop_api_is_not_in_apps_or_groups() -> None:
+    assert not any(line.split()[0] == "shop-api" for line in _apps())
     text = RUN_ALL.read_text(encoding="utf-8")
-    assert 'TRAFFIC_PID_FILE="$DATA/shop_traffic.pid.json"' in text
-    locks = text[text.index("COLLECTOR_LOCKS=(") :].splitlines()[0]
-    assert '"$TRAFFIC_PID_FILE"' in locks  # stop_all이 procs.py --locks로 넘긴다
-    launch = text[text.index('rm -f "$TRAFFIC_PID_FILE"') :]
-    launch = launch[: launch.index("scripts/shop_traffic.py")]
-    assert 'SHOP_TRAFFIC_PID_FILE="$TRAFFIC_PID_FILE"' in launch
+    assert "ax_shop_api" not in text
+    assert "shop_traffic.py" not in text and "TRAFFIC_PID_FILE" not in text
+    groups = [line for line in text.splitlines() if line.startswith("GROUP_")]
+    assert groups and not any("shop-api" in line for line in groups)
 
 
-def test_shop_traffic_writes_its_real_pid(tmp_path: Path) -> None:
-    script = BACKEND / "scripts" / "shop_traffic.py"
-    spec = importlib.util.spec_from_file_location("shop_traffic", script)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    path = tmp_path / "shop_traffic.pid.json"
-    module.write_pid_file(str(path))
-    assert procs.lock_pids([path]) == [os.getpid()]
-    module.write_pid_file(None)  # 값이 없으면 아무것도 하지 않는다
-    module.write_pid_file(str(tmp_path / "no" / "dir" / "x.json"))  # 적지 못해도 멈추지 않는다
-
-
-# --- SHOP_API_EXTERNAL=on: 따로 돌리는 판매 서버·가상 주문을 run_all.sh가 건드리지 않는다 ---
-
-EXT_BLOCK = ("# >>> 판매 서버 따로 돌리기", "# <<< 판매 서버 따로 돌리기")
-
-
-def _ext_run(env: dict[str, str], tmp_path: Path, dotenv: str | None = None) -> list[str]:
-    """블록을 tmp cwd(진짜 .env가 안 읽히게)에서 돌리고 APPS 이름과 스위치를 돌려준다."""
-    if dotenv is not None:
-        (tmp_path / ".env").write_text(dotenv, encoding="utf-8")
-    block = _between(*EXT_BLOCK)
-    snippet = (
-        f"cd \"{tmp_path.as_posix()}\"\nAPPS=$(cat <<'EOF'\n" + "\n".join(_apps()) + "\nEOF\n)\n"
-        f'{block}\necho "on=$SHOP_EXTERNAL_ON"\necho "$APPS" | awk "NF {{print \\$1}}"'
-    )
-    return _run(snippet, env).splitlines()
-
-
-def test_shop_api_external_off_keeps_everything(tmp_path: Path) -> None:
-    names = [line.split()[0] for line in _apps()]
-    for value in (None, "off", "", "0"):
-        env = {} if value is None else {"SHOP_API_EXTERNAL": value}
-        assert _ext_run(env, tmp_path) == ["on=0", *names]
-    assert "shop-api" in names
-
-
-@pytest.mark.parametrize("value", ["on", "1", "true"])
-def test_shop_api_external_on_drops_shop_api(value: str, tmp_path: Path) -> None:
-    names = [line.split()[0] for line in _apps() if not line.startswith("shop-api ")]
-    assert _ext_run({"SHOP_API_EXTERNAL": value}, tmp_path) == ["on=1", *names]
-
-
-def test_shop_api_external_is_read_from_dotenv(tmp_path: Path) -> None:
-    out = _ext_run({}, tmp_path, dotenv='X=1\r\nSHOP_API_EXTERNAL="on"  # 따로\r\n')
-    assert out[0] == "on=1" and "shop-api" not in out
-    out = _ext_run({}, tmp_path, dotenv="SHOP_API_EXTERNAL=off\n")
-    assert out[0] == "on=0" and "shop-api" in out
-
-
-def test_shop_api_external_env_wins_over_dotenv(tmp_path: Path) -> None:
-    out = _ext_run({"SHOP_API_EXTERNAL": "on"}, tmp_path, dotenv="SHOP_API_EXTERNAL=off\n")
-    assert out[0] == "on=1"
-
-
-def test_shop_api_external_on_is_not_owned_for_stop_or_markers(tmp_path: Path) -> None:
-    """on이면 PORTS에 8010, MARKERS에 shop-api·shop_traffic, 잠금에 traffic pid 파일이 없다."""
+def test_stop_does_not_own_port_8010_or_shop_markers(tmp_path: Path) -> None:
+    """따로 띄운 캣북스를 끄지 않게 PORTS·MARKERS·잠금에 판매 서버가 없다."""
     text = RUN_ALL.read_text(encoding="utf-8")
     head = text[text.index('APPS="') : text.index("# --only 묶음 이름")]
     head = head.replace("MARKERS=()", "DATA=.data\nMARKERS=()", 1)
@@ -433,62 +345,132 @@ def test_shop_api_external_on_is_not_owned_for_stop_or_markers(tmp_path: Path) -
         '\nprintf "%s\n" "${COLLECTOR_LOCKS[@]}"'
     )
     snippet = f'cd "{tmp_path.as_posix()}"\n{head}{tail}'
-    off = _run(snippet, {}).splitlines()
-    on = _run(snippet, {"SHOP_API_EXTERNAL": "on"}).splitlines()
-    assert "8010" in off[0] and "uvicorn ax_shop_api.main:app" in off and "shop_traffic.py" in off
-    assert any("shop_traffic.pid.json" in x for x in off)
-    assert "8010" not in on[0].split("=")[1].split(",")
-    assert "uvicorn ax_shop_api.main:app" not in on and "shop_traffic.py" not in on
-    assert not any("shop_traffic.pid.json" in x for x in on)
-    assert "uvicorn ax_safety.main:app" in on  # 나머지는 그대로
+    for env in ({}, {"SHOP_API_EXTERNAL": "on"}, {"SHOP_API_EXTERNAL": "off"}):
+        out = _run(snippet, env).splitlines()
+        assert "8010" not in out[0].split("=")[1].split(",")
+        assert "uvicorn ax_safety.main:app" in out  # 나머지는 그대로
+        assert not any("shop" in line for line in out[1:])
 
 
-def test_shop_api_external_on_skips_traffic_launch_and_prints_line(tmp_path: Path) -> None:
-    """shop-api가 RUN_APPS에 없으면 가상 주문 스위치는 조용하고, 시작 줄은 한 번 찍는다."""
-    block = _between(*TRAFFIC_BLOCK)
-    apps = "\n".join(line for line in _apps() if not line.startswith("shop-api "))
-    out = _run(f'{block}\necho "orders=$SHOP_TRAFFIC_ORDERS"', {"RUN_APPS": apps})
-    assert out.splitlines() == ["orders=0"]
-    text = RUN_ALL.read_text(encoding="utf-8")
-    line = "판매 서버(shop-api)는 밖에서 따로 돌아요(SHOP_API_EXTERNAL=on). 8010은 건드리지 않아요."
-    assert text.count(line) == 1
-    assert "AX_SHOP_API_URL" not in text[text.index(EXT_BLOCK[0]) : text.index(EXT_BLOCK[1])]
-
-
-# --- SHOP_API_EXTERNAL=on: 서비스들이 판매 서버를 같은 호스트 주소로 읽는다 (AX_SHOP_API_URL) ---
+def test_reset_keeps_the_old_shop_db() -> None:
+    """예전 판매 서버 파일(.data/shop.db)은 되돌릴 때를 위해 reset도 지우지 않는다."""
+    reset = _between('if [ "$CMD" = "reset" ]; then', 'if [ "$CMD" = "mock" ]; then')
+    assert "shop.db | shop.db-wal | shop.db-shm) continue" in reset
+    assert 'rm -f "$DATA"/*.db ' not in reset
 
 
 def _url_run(env: dict[str, str], tmp_path: Path) -> dict[str, str]:
-    """따로 돌리기 블록 + AX_<이름>_URL을 내보내는 부분을 tmp cwd에서 돌리고 URL 변수를 돌려준다."""
+    """판매 서버 주소 블록 + AX_<이름>_URL 내보내기를 tmp cwd에서 돌려 URL 변수를 돌려준다."""
     text = RUN_ALL.read_text(encoding="utf-8")
     start = text.index("# 컨테이너가 아니라서 서비스 이름 대신")
     export_part = text[start : text.index("# 부서 이름으로 부르는 코드가 있어도")]
     snippet = (
         f"cd \"{tmp_path.as_posix()}\"\nAPPS=$(cat <<'EOF'\n" + "\n".join(_apps()) + "\nEOF\n)\n"
-        f"{_between(*EXT_BLOCK)}\n{export_part}\n"
+        f"{_between(*SHOP_BLOCK)}\n{export_part}\n"
         'echo "shop=${AX_SHOP_API_URL-UNSET}"\necho "safety=${AX_SAFETY_URL-UNSET}"'
     )
     return dict(line.split("=", 1) for line in _run(snippet, env).splitlines())
 
 
-def test_external_on_exports_local_shop_api_url_from_the_apps_port(tmp_path: Path) -> None:
-    port = next(line.split()[1] for line in _apps() if line.startswith("shop-api "))
-    out = _url_run({"SHOP_API_EXTERNAL": "on"}, tmp_path)
-    assert out["shop"] == f"http://127.0.0.1:{port}"
+@pytest.mark.parametrize("external", [None, "on", "off"])
+def test_shop_api_url_defaults_to_local_8010(tmp_path: Path, external: str | None) -> None:
+    """#1220: 판매 서버를 띄우지 않아도 AX_SHOP_API_URL은 늘 같은 호스트 8010으로 내보낸다."""
+    env = {} if external is None else {"SHOP_API_EXTERNAL": external}
+    out = _url_run(env, tmp_path)
+    assert out["shop"] == "http://127.0.0.1:8010"
     assert out["safety"].startswith("http://127.0.0.1:")  # 나머지 서비스 주소는 그대로
 
 
-def test_external_on_keeps_an_operator_set_shop_api_url(tmp_path: Path) -> None:
-    out = _url_run({"SHOP_API_EXTERNAL": "on", "AX_SHOP_API_URL": "http://10.0.0.5:9000"}, tmp_path)
-    assert out["shop"] == "http://10.0.0.5:9000"
+def test_shop_api_url_keeps_an_operator_set_value(tmp_path: Path) -> None:
+    out = _url_run({"AX_SHOP_API_URL": "http://shop.example:9000"}, tmp_path)
+    assert out["shop"] == "http://shop.example:9000"
 
 
-def test_external_on_from_dotenv_also_exports_the_url(tmp_path: Path) -> None:
-    (tmp_path / ".env").write_text("SHOP_API_EXTERNAL=on\n", encoding="utf-8")
-    assert _url_run({}, tmp_path)["shop"] == "http://127.0.0.1:8010"
+def test_shop_api_source_is_not_in_this_repo() -> None:
+    # 판매 서버 소스는 캣북스 레포에 있다 (pull 뒤 남은 __pycache__는 상관없다)
+    assert not list((BACKEND / "shared" / "shop-api").rglob("*.py"))
+    assert not (BACKEND / "scripts" / "shop_traffic.py").exists()
+    assert not (BACKEND / "infra" / "fault-injection").exists()
 
 
-def test_external_off_still_exports_the_apps_shop_api_url(tmp_path: Path) -> None:
-    """off는 예전과 같다: shop-api가 APPS에 있으니 반복문이 127.0.0.1 주소를 정한다."""
-    for env in ({}, {"SHOP_API_EXTERNAL": "off"}):
-        assert _url_run(env, tmp_path)["shop"] == "http://127.0.0.1:8010"
+# --- shop_fault.sh: SHOP_API_URL·SHOP_ADMIN_TOKEN을 둘 다 받아 캣북스 레포 스크립트로 넘긴다 ----
+
+
+def _fault_env(tmp_path: Path) -> tuple[Path, Path]:
+    """가짜 캣북스 클론(받은 주소·토큰만 찍는 shop_fault.sh)과 web.env가 있는 가짜 backend."""
+    clone = tmp_path / "catbooks-demo"
+    (clone / "backend" / "scripts").mkdir(parents=True)
+    (clone / "backend" / "scripts" / "shop_fault.sh").write_text(
+        'echo "url=$SHOP_API_URL token=$SHOP_ADMIN_TOKEN args=$*"\n', encoding="utf-8"
+    )
+    backend = tmp_path / "ax" / "backend"
+    (backend / "scripts").mkdir(parents=True)
+    (backend / ".data").mkdir()
+    script = BACKEND / "scripts" / "shop_fault.sh"
+    (backend / "scripts" / "shop_fault.sh").write_bytes(script.read_bytes())
+    return clone, backend
+
+
+def _fault(backend: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [_bash(), str(backend / "scripts" / "shop_fault.sh"), "status"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={"PATH": os.environ.get("PATH", ""), **env},
+        timeout=30,
+    )
+
+
+def test_shop_fault_prefers_env_url_and_token(tmp_path: Path) -> None:
+    clone, backend = _fault_env(tmp_path)
+    (backend / ".data" / "web.env").write_text(
+        "VITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
+    )
+    env = {
+        "CATBOOKS_DEMO_DIR": str(clone),
+        "SHOP_API_URL": "https://shop.example",
+        "SHOP_ADMIN_TOKEN": "cb-admin",
+    }
+    out = _fault(backend, env)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "url=https://shop.example token=cb-admin args=status"
+
+
+def test_shop_fault_does_not_fall_back_to_local_web_env(tmp_path: Path) -> None:
+    """AXcellent는 판매 서버를 띄우지 않으니 web.env의 토큰을 판매 서버로 보내지 않는다."""
+    clone, backend = _fault_env(tmp_path)
+    (backend / ".data" / "web.env").write_text(
+        "VITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
+    )
+    out = _fault(backend, {"CATBOOKS_DEMO_DIR": str(clone)})
+    assert out.returncode == 1
+    assert out.stdout == ""
+    assert "local-tok" not in out.stderr
+
+
+@pytest.mark.parametrize(
+    "given",
+    [{"SHOP_API_URL": "https://shop.example"}, {"SHOP_ADMIN_TOKEN": "cb-admin"}],
+    ids=["url-only", "token-only"],
+)
+def test_shop_fault_with_only_one_of_url_and_token_stops(
+    tmp_path: Path, given: dict[str, str]
+) -> None:
+    """하나만 주면 멈춘다: 로컬 토큰을 다른 주소로도, 토큰만 127.0.0.1로도 보내지 않는다."""
+    clone, backend = _fault_env(tmp_path)
+    (backend / ".data" / "web.env").write_text(
+        "VITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
+    )
+    out = _fault(backend, {"CATBOOKS_DEMO_DIR": str(clone), **given})
+    assert out.returncode == 1
+    assert out.stdout == ""  # 캣북스 스크립트를 부르지 않았다
+    assert "SHOP_API_URL" in out.stderr and "SHOP_ADMIN_TOKEN" in out.stderr
+    assert "local-tok" not in out.stderr
+
+
+def test_shop_fault_without_any_token_stops(tmp_path: Path) -> None:
+    clone, backend = _fault_env(tmp_path)
+    out = _fault(backend, {"CATBOOKS_DEMO_DIR": str(clone)})
+    assert out.returncode == 1
+    assert "SHOP_ADMIN_TOKEN" in out.stderr and out.stdout == ""

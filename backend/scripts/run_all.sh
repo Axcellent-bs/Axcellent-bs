@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # 로컬에서 백엔드 전체(공통 5개 + 서비스 11개 + 총괄)를 실제 모드로 띄운다. 목 모드는 없다(*_MOCK은 테스트 전용).
-#   bash backend/scripts/run_all.sh          # 실제 LLM·실제 토큰·Redis·파일 DB (캣북스 가상 주문은 SHOP_TRAFFIC=on일 때만, 배송 표시는 늘)
+#   bash backend/scripts/run_all.sh          # 실제 LLM·실제 토큰·Redis·파일 DB (판매 서버는 띄우지 않는다. 캣북스 레포에서 따로)
 #                                            # 이미 떠 있으면 켜지 않는다 ("이미 실행 중 (pid …), 먼저 stop")
 #   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기 (자식까지, 끝에 "남은 프로세스 0개" 확인)
 #   bash backend/scripts/run_all.sh reset    # 끄고 테스트로 쌓인 기록(.data·이벤트 버스)을 지운다
-#   bash backend/scripts/run_all.sh --only data,finance,shop-api   # 고른 서버만 (이름은 아래 APPS)
-#   SHOP_API_EXTERNAL=on bash backend/scripts/run_all.sh   # 판매 서버(shop-api 8010)·가상 주문은 안 띄우고 stop도 8010을 안 건드린다 (.env에 적어도 됨)
+#   bash backend/scripts/run_all.sh --only data,finance            # 고른 서버만 (이름은 아래 APPS)
 #   bash backend/scripts/run_all.sh --only data-demo              # 묶음: core, data-demo (아래 GROUP_*)
 #     안 띄운 서비스는 AX_ENABLED_SERVICES에서도 빠진다(이미 줬으면 교집합). stop은 늘 전체 포트를 끈다
 # 먼저 backend/ 에서 `uv sync --all-packages` 한 번. 로그는 backend/.logs/<이름>.log
@@ -29,7 +28,6 @@ mkdir -p "$LOGS" "$DATA"
 APPS="
 safety 8001 ax_safety.main:app
 memory 8002 ax_memory.main:app
-shop-api 8010 ax_shop_api.main:app
 dashboard-api 8020 ax_dashboard_api.main:app
 dejafix-proxy 8030 ax_dejafix_proxy.main:app
 planning 8101 svc_planning.main:app
@@ -48,19 +46,14 @@ orchestrator 8000 ax_orchestrator.main:app
 "
 # 접어 둔 서비스(띄우지 않고 켠 서비스에서도 뺀다). 되살리려면 위 APPS에 줄을 되돌리고 여기서 뺀다
 FOLDED="handover"
-# >>> 판매 서버 따로 돌리기 (tests/test_run_all_procs.py가 이 부분만 실행한다)
-# SHOP_API_EXTERNAL=on(1·true)이면 캣북스 판매 서버(shop-api, 8010)를 서버에서 따로 돌린다고 보고,
-# 이 스크립트는 그 서버도 가상 주문(shop_traffic)도 띄우지 않는다. APPS에서 빼므로 stop·reset도
-# 8010 포트를 끄지 않고 shop-api·shop_traffic 표식도 찾지 않는다. 환경변수가 없으면 backend/.env에서 읽는다
-if [ -z "${SHOP_API_EXTERNAL:-}" ] && [ -f .env ]; then
-  SHOP_API_EXTERNAL=$(tr -d '\r' < .env | sed -n 's/^SHOP_API_EXTERNAL=//p' | tail -n 1 | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
-fi
-SHOP_API_PORT=$(echo "$APPS" | awk '$1 == "shop-api" {print $2}')  # 아래에서 APPS에서 빠져도 주소에 쓰도록 먼저 적어 둔다
-SHOP_EXTERNAL_ON=0
-case "${SHOP_API_EXTERNAL:-off}" in
-  on | 1 | true) SHOP_EXTERNAL_ON=1; APPS=$(echo "$APPS" | awk 'NF && $1 != "shop-api"') ;;
-esac
-# <<< 판매 서버 따로 돌리기
+
+# >>> 판매 서버 주소 (tests/test_run_all_procs.py가 이 부분만 실행한다)
+# 캣북스 판매 서버(shop-api)·가상 주문은 캣북스 레포(Catbooks-demo/catbooks-demo)에 있고 따로 띄운다.
+# 이 스크립트는 판매 서버를 띄우지도 끄지도 않는다(8010 포트·표식을 맡지 않아 따로 띄운 캣북스를 끄지 않는다).
+# 서비스들은 회사 연결 파일(있으면 먼저) → AX_SHOP_API_URL(기본 아래 값, 이미 준 값이 먼저) 순으로 찾아간다.
+# 예전 스위치 SHOP_API_EXTERNAL은 이제 늘 켜진 것과 같아서 읽지 않는다(.env에 남아 있어도 상관없다)
+SHOP_API_DEFAULT_URL="http://127.0.0.1:8010"
+# <<< 판매 서버 주소
 PORTS=$(echo "$APPS" | awk 'NF {print $2}' | tr '\n' ',' | sed 's/,$//')
 # 이 스크립트가 띄우는 프로세스를 명령줄로 알아보는 표식 (scripts/procs.py: 이미 떠 있는지·끈 뒤 남았는지)
 MARKERS=()
@@ -68,14 +61,10 @@ while read -r _ _ module; do
   [ -n "${module:-}" ] && MARKERS+=("uvicorn $module")
 done <<< "$APPS"
 MARKERS+=("data_agent.trending_collect" "data_agent.youtube_collect" "data_agent.sales_collect")
-[ "$SHOP_EXTERNAL_ON" = 1 ] || MARKERS+=("shop_traffic.py")
-# 가상 주문(shop_traffic.py)도 자기 실제 pid를 같은 모양으로 적는다 (.pid의 bash 번호만으로는 못 끌 때가 있어서)
-TRAFFIC_PID_FILE="$DATA/shop_traffic.pid.json"
-COLLECTOR_LOCKS=("$DATA/youtube_collect.lock" "$DATA/trending_collect.lock" "$DATA/sales_collect.lock" "$TRAFFIC_PID_FILE")
-[ "$SHOP_EXTERNAL_ON" = 1 ] && COLLECTOR_LOCKS=("${COLLECTOR_LOCKS[@]:0:3}")
+COLLECTOR_LOCKS=("$DATA/youtube_collect.lock" "$DATA/trending_collect.lock" "$DATA/sales_collect.lock")
 
 # --only 묶음 이름 (data-demo = core + data 업무 리포트가 부르는 서비스)
-GROUP_core="safety,memory,shop-api,dashboard-api,orchestrator"
+GROUP_core="safety,memory,dashboard-api,orchestrator"
 GROUP_data_demo="$GROUP_core,data,finance,inquiry,coupon,dev"
 
 # 인자: stop | reset | mock 과 --only <목록> (--only=<목록>도 된다)
@@ -137,7 +126,7 @@ keep_log() {
   target="$prev/$name-$stamp.log"
   while [ -e "$target" ]; do n=$((n + 1)); target="$prev/$name-$stamp-$n.log"; done
   mv "$file" "$target"
-  # 이름 뒤가 숫자(시각)인 것만 센다 (shop-api와 shop-traffic처럼 앞이 같은 이름이 섞이지 않게)
+  # 이름 뒤가 숫자(시각)인 것만 센다 (youtube-collect와 youtube-collect-x처럼 앞이 같은 이름이 섞이지 않게)
   # 새것부터 늘어놓고(수정 시각, mv는 시각을 바꾸지 않는다) KEEP_LOGS개 뒤부터 지운다
   ls -1t "$prev/$name-"[0-9]*.log 2>/dev/null | tail -n "+$((KEEP_LOGS + 1))" | while read -r old; do rm -f "$old"; done
 }
@@ -168,14 +157,18 @@ if [ "$CMD" = "stop" ]; then
   exit 0
 fi
 
-# 테스트로 쌓인 기록을 지우고 처음부터: 캣북스 주문·AI 대화 기록·인사 기록·LLM 사용량·이벤트 버스
-# (캣북스 쇼핑몰은 비어 있으면 시드를 다시 넣는다)
+# 테스트로 쌓인 기록을 지우고 처음부터: AI 대화 기록·인사 기록·LLM 사용량·이벤트 버스
+# 예전 판매 서버 파일(.data/shop.db)은 이제 캣북스 쪽 것이라 지우지 않고 그대로 둔다
 if [ "$CMD" = "reset" ]; then
   if ! stop_all; then
     echo "reset 실패: 위 프로세스가 남아 있어 기록을 지우지 않았습니다" >&2
     exit 1
   fi
-  rm -f "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm "$DATA"/web.env "$DATA"/tokens.env
+  for f in "$DATA"/*.db "$DATA"/*.db-wal "$DATA"/*.db-shm; do
+    case "$(basename "$f")" in shop.db | shop.db-wal | shop.db-shm) continue ;; esac
+    rm -f "$f"
+  done
+  rm -f "$DATA"/web.env "$DATA"/tokens.env
   docker exec ax-redis redis-cli FLUSHALL >/dev/null 2>&1 || true
   echo "reset: backend/.data 와 이벤트 버스를 비웠습니다. 다시 켜려면 bash scripts/run_all.sh"
   exit 0
@@ -203,18 +196,18 @@ while read -r name port _; do
   [ -n "$name" ] || continue
   export "AX_$(echo "$name" | tr 'a-z-' 'A-Z_')_URL=http://127.0.0.1:$port"
 done <<< "$APPS"
-# 판매 서버를 밖에서 따로 돌리면(APPS에 shop-api가 없다) 위 반복이 AX_SHOP_API_URL을 안 만들어 서비스들이
-# 기본값 http://shop-api:8010(컨테이너 이름)으로 빠진다. 같은 호스트의 127.0.0.1 주소를 알려 준다.
-# 운영자가 이미 정한 AX_SHOP_API_URL은 그대로 둔다 (회사 연결 파일이 있으면 그쪽이 먼저)
-[ "$SHOP_EXTERNAL_ON" = 1 ] && export AX_SHOP_API_URL="${AX_SHOP_API_URL:-http://127.0.0.1:$SHOP_API_PORT}"
+# 판매 서버는 이 스크립트가 띄우지 않아 위 반복이 AX_SHOP_API_URL을 만들지 않는다. 그대로 두면 서비스들이
+# 기본값 http://shop-api:8010(컨테이너 이름)으로 빠지므로 같은 호스트 주소를 알려 준다(#1220).
+# 운영자가 이미 정한 AX_SHOP_API_URL(셸·아래 .env)은 그대로 둔다 (회사 연결 파일이 있으면 그쪽이 먼저)
+export AX_SHOP_API_URL="${AX_SHOP_API_URL:-$SHOP_API_DEFAULT_URL}"
 # 부서 이름으로 부르는 코드가 있어도 skill로 서비스를 고르지만(route_target), 고를 수 없는 경우를 위해 대표 서비스로 둔다
 export AX_SUPPORT_URL=http://127.0.0.1:8102 AX_HR_URL=http://127.0.0.1:8104 AX_ARCHIVE_URL=http://127.0.0.1:8114
 export AX_MARKETING_URL=http://127.0.0.1:8103 AX_INFRA_URL=http://127.0.0.1:8107
-# 이름이 다른 주소 변수 (shop-api의 총괄 중계, hr의 회사 기억)
-export SHOP_ORCHESTRATOR_URL=http://127.0.0.1:8000 HR_MEMORY_URL=http://127.0.0.1:8002
-# 화면(AXcellent 3090, 캣북스 쇼핑몰 3000)에서 직접 부르는 서버의 CORS
+# 이름이 다른 주소 변수 (hr의 회사 기억)
+export HR_MEMORY_URL=http://127.0.0.1:8002
+# 화면(AXcellent 3090 등)에서 직접 부르는 서버의 CORS
 WEB="http://localhost:3090,http://127.0.0.1:3090,http://localhost:3001,http://localhost:3000,http://localhost:3010,http://127.0.0.1:3010"
-export DASHBOARD_CORS_ORIGINS="$WEB" FINANCE_CORS_ORIGINS="$WEB" SHOP_CORS_ORIGINS="$WEB"
+export DASHBOARD_CORS_ORIGINS="$WEB" FINANCE_CORS_ORIGINS="$WEB"
 export SAFETY_CORS_ORIGINS="$WEB" PLANNING_CORS_ORIGINS="$WEB"
 # 화면에서 넣은 형상관리 연결(토큰 포함)을 다시 켜도 남게 저장한다. .data/는 git에 안 올라간다
 export PLANNING_VCS_STORE="$PWD/$DATA/vcs_connections.json"
@@ -361,8 +354,8 @@ if [ -z "${REDIS_URL:-}" ]; then
   export REDIS_URL=redis://127.0.0.1:6379/0
 fi
 
-# 고객사 데이터는 파일에 둔다 (다시 켜도 남는다). 쇼핑몰은 비어 있을 때만 시드를 넣는다
-export SHOP_DB_PATH="$PWD/$DATA/shop.db" HR_DB_PATH="$PWD/$DATA/hr.db"
+# 고객사 데이터는 파일에 둔다 (다시 켜도 남는다)
+export HR_DB_PATH="$PWD/$DATA/hr.db"
 # 아카이브 AI(결정 기록·이슈 기록) 전용 파일. 옮기기 전(archive.db가 없을 때)에는 예전처럼 hr.db를 같이 읽어
 # 기록이 비어 보이지 않게 한다. 옮기기: uv run python scripts/migrate_archive_db.py
 if [ -f "$DATA/archive.db" ]; then
@@ -373,8 +366,6 @@ fi
 export AX_LLM_USAGE_DB="$PWD/$DATA/llm_usage.db"
 # 부서가 총괄에게 받은 개선 노트(에이전트 평가 진단)를 서비스마다 파일 하나에 둔다. 다시 켜도 남는다
 export AX_NOTES_DIR="$PWD/$DATA/notes"
-# 결제 장애 감지를 시연 시간에 맞춘다 (기본 1분 지속 → 20초, 5초마다 판정). .env 값이 있으면 그걸 쓴다
-export SHOP_DEGRADED_SUSTAIN_S="${SHOP_DEGRADED_SUSTAIN_S:-20}" SHOP_MONITOR_INTERVAL_S="${SHOP_MONITOR_INTERVAL_S:-5}"
 
 # 에이전트 토큰 명부: 서비스 이름과 원래 부서 이름, 사람 관리자(admin) 모두 넣는다.
 # 토큰은 $DATA/tokens.env 에 두고 다시 켤 때 그대로 쓴다. 켤 때마다 새로 만들면 이미 떠 있는
@@ -415,7 +406,8 @@ VIEWER_TOKEN="$(printf '%s' "$VIEWER_TOKEN" | tr -d '\015')"
 [ "$PEOPLE_HUMAN" = "-" ] && PEOPLE_HUMAN=""
 [ "$PEOPLE_WORK" = "-" ] && PEOPLE_WORK=""
 export AX_AGENT_TOKENS
-# 판매 서버 읽기 전용 열람 토큰: shop-api가 검증하고 dashboard-api가 서버 쪽에서 붙인다(화면에는 넘기지 않는다).
+# 판매 서버 읽기 전용 열람 토큰: 캣북스 shop-api가 검증하고 dashboard-api가 서버 쪽에서 붙인다(화면에는 넘기지 않는다).
+# 따로 띄운 캣북스에도 같은 값을 넣는다.
 # .env에 SHOP_VIEWER_TOKEN이 있으면 그 값을, 없으면 tokens.env에 둔 값을 쓴다
 export SHOP_VIEWER_TOKEN="${SHOP_VIEWER_TOKEN:-$VIEWER_TOKEN}"
 [ "${#SHOP_VIEWER_TOKEN}" -ge 24 ] || echo "경고: .env의 SHOP_VIEWER_TOKEN이 24자보다 짧아 판매 서버 관리 읽기 중계(총괄·기획안·장애 상태)가 503입니다 (값은 출력하지 않음)" >&2
@@ -439,7 +431,7 @@ token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
 } > "$DATA/web.env"
 
 RUN_COUNT=$(echo "$RUN_APPS" | awk 'NF' | wc -l | tr -d ' ')
-[ "$SHOP_EXTERNAL_ON" = 1 ] && echo "판매 서버(shop-api)는 밖에서 따로 돌아요(SHOP_API_EXTERNAL=on). 8010은 건드리지 않아요."
+echo "판매 서버(shop-api)는 띄우지 않아요(캣북스 레포에서 따로). 주소: 회사 연결 또는 AX_SHOP_API_URL"
 echo "띄운 서버 ${RUN_COUNT}개: $(echo "$RUN_APPS" | awk 'NF {print $1}' | tr '\n' ' ' | sed 's/ $//'), 안 띄움: ${SKIPPED:-없음}"
 
 started=0
@@ -459,40 +451,10 @@ while read -r name port module; do
   fi
   keep_log "$name"
   echo "$START_LINE" > "$LOGS/$name.log"
-  # shop-api만 바인드 주소를 바꿀 수 있다(AX_SHOP_API_HOST, 기본 127.0.0.1). 나머지는 127.0.0.1
-  host=127.0.0.1
-  [ "$name" = "shop-api" ] && host="${AX_SHOP_API_HOST:-127.0.0.1}"
-  "$PY" -m uvicorn "$module" --host "$host" --port "$port" >> "$LOGS/$name.log" 2>&1 &
+  "$PY" -m uvicorn "$module" --host 127.0.0.1 --port "$port" >> "$LOGS/$name.log" 2>&1 &
   winpid_of $! > "$LOGS/$name.pid"
   started=$((started + 1))
 done <<< "$RUN_APPS"
-
-# >>> 주문 트래픽 스위치 (tests/test_run_all_procs.py가 이 부분만 실행한다)
-# 캣북스 가상 주문(scripts/shop_traffic.py)은 .env의 SHOP_TRAFFIC=on일 때만 넣는다(기본 꺼짐).
-# 꺼도 같은 스크립트가 발송·도착 표시와 재고 보충은 계속 한다(SHOP_TRAFFIC_ORDERS=0). 발송·도착이
-# 안 적히면 사람이 사이트에서 한 주문도 재무 판매자 정산에서 보류된다. 결제 장애 감지는 결제
-# 표본(60초에 최소 5건)이 있어야 해서 장애 시연 때는 on으로 켠다
-SHOP_TRAFFIC_ORDERS=0
-case "${SHOP_TRAFFIC:-off}" in
-  on | 1 | true) SHOP_TRAFFIC_ORDERS=1 ;;
-esac
-if [ "$SHOP_TRAFFIC_ORDERS" != 1 ] && echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
-  echo "캣북스 가상 주문 꺼짐(배송 표시·재고 보충만, SHOP_TRAFFIC=on이면 주문도 넣음)"
-fi
-# <<< 주문 트래픽 스위치
-
-# 캣북스 주문 트래픽·배송 표시 (shop-api를 띄웠을 때만. 가상 주문은 위 스위치가 정한다)
-if echo "$RUN_APPS" | awk '$1 == "shop-api" {found=1} END {exit !found}'; then
-  # 재고가 0이 되면 주문이 조용히 멈춰 장애가 안 잡히는 것처럼 보인다. 자동 보충을 기본으로 켠다
-  # (끄려면 SHOP_TRAFFIC_REFILL=0). 보충에는 위에서 만든 admin 토큰을 쓴다
-  keep_log shop-traffic
-  echo "$START_LINE" > "$LOGS/shop-traffic.log"
-  rm -f "$TRAFFIC_PID_FILE"  # 지난번 번호가 남지 않게 (새로 뜬 shop_traffic.py가 다시 적는다)
-  SHOP_TRAFFIC_PID_FILE="$TRAFFIC_PID_FILE" \
-  SHOP_API_URL=http://127.0.0.1:8010 SHOP_TRAFFIC_REFILL="${SHOP_TRAFFIC_REFILL:-1}" SHOP_TRAFFIC_ORDERS="$SHOP_TRAFFIC_ORDERS" \
-    "$PY" scripts/shop_traffic.py >> "$LOGS/shop-traffic.log" 2>&1 &
-  winpid_of $! > "$LOGS/shop-traffic.pid"
-fi
 
 # data: Google 인기 검색어 스냅샷을 1시간마다 모은다 (data를 띄웠을 때만, 끄기는 stop이 .pid로 같이 끈다)
 if echo "$RUN_APPS" | awk '$1 == "data" {found=1} END {exit !found}'; then
@@ -506,7 +468,7 @@ if echo "$RUN_APPS" | awk '$1 == "data" {found=1} END {exit !found}'; then
   echo "$START_LINE" > "$LOGS/youtube-collect.log"
   "$PY" -m data_agent.youtube_collect --every 3600 >> "$LOGS/youtube-collect.log" 2>&1 &
   winpid_of $! > "$LOGS/youtube-collect.pid"
-  # 매출 분석: shop-api 판매 기록을 이어 받아 표준 판매 저장소(DATA_SALES_DB)에 쌓는다.
+  # 매출 분석: 판매 서버(shop-api) 판매 기록을 이어 받아 표준 판매 저장소(DATA_SALES_DB)에 쌓는다.
   # 간격은 DATA_SALES_SYNC_SECONDS(기본 300초). 잠금(backend/.data/sales_collect.lock)으로 하나만 돈다
   keep_log sales-collect
   echo "$START_LINE" > "$LOGS/sales-collect.log"

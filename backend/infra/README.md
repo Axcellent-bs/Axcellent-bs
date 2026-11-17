@@ -30,9 +30,9 @@ docker compose -f infra/compose.yml -f infra/compose.server.yml up -d --build
 
 - `infra/compose.server.yml`: `gateway` 서비스 추가(공개 포트 `${AX_GATEWAY_PORT:-8080}`), 나머지 서비스는 `ports`를 비우고 `expose`만, 모든 서비스 `restart: unless-stopped`
 - gateway 이미지는 ax-frontend의 `nginx/Dockerfile`로 만든다. 두 레포를 같은 폴더에 나란히 clone하거나 `AX_FRONTEND_DIR`로 위치를 준다
-- 브라우저는 `/api/`(dashboard-api)와 `/shop-api/`(shop-api)만 부른다. 총괄·safety·부서 에이전트는 외부에 열리지 않는다
+- 브라우저는 `/api/`(dashboard-api)와 `/shop-api/`(따로 배포한 캣북스 판매 서버, 이 compose에는 없음)만 부른다. 총괄·safety·부서 에이전트는 외부에 열리지 않는다
 - `down -v`는 공통 로그·DB 볼륨을 지우므로 서버 PC에서는 쓰지 않는다
-- 토스 테스트 결제를 켜려면 `backend/.env`에 `PAYMENT_PROVIDER=toss_test`와 `TOSS_SECRET_KEY`(결제위젯 시크릿 키)를 넣고, compose를 실행하는 셸이나 `--env-file`로 `VITE_TOSS_CLIENT_KEY`(결제위젯 클라이언트 키)를 넘긴다. 클라이언트 키가 비어 있으면 쇼핑몰은 데모 결제로 동작한다
+- (캣북스 판매 서버 설정, 판매 서버는 캣북스 레포에서 따로 띄운다) 토스 테스트 결제를 켜려면 `backend/.env`에 `PAYMENT_PROVIDER=toss_test`와 `TOSS_SECRET_KEY`(결제위젯 시크릿 키)를 넣고, compose를 실행하는 셸이나 `--env-file`로 `VITE_TOSS_CLIENT_KEY`(결제위젯 클라이언트 키)를 넘긴다. 클라이언트 키가 비어 있으면 쇼핑몰은 데모 결제로 동작한다
 - 키를 바꾸면 gateway는 `--build`로 다시 만들어야 화면에 반영된다(클라이언트 키는 빌드할 때 화면에 들어간다)
 
 ## 포트
@@ -42,7 +42,7 @@ docker compose -f infra/compose.yml -f infra/compose.server.yml up -d --build
 | orchestrator | 8000 |
 | safety | 8001 |
 | memory | 8002 |
-| shop-api | 8010 |
+| (shop-api, 이 compose에 없음: 캣북스 레포에서 따로) | 8010 |
 | dashboard-api | 8020 |
 | dejafix-proxy | 8030 |
 | agents/planning | 8101 |
@@ -84,4 +84,8 @@ VITE_DASHBOARD_API_URL=http://localhost:8020
 
 ## 장애 주입
 
-`fault-injection/` 참조.
+캣북스 레포 [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)의 `backend/infra/fault-injection/`으로 옮겼다. 이 레포에서는 `bash scripts/shop_fault.sh failure|latency|clear`(옆 클론의 스크립트를 부르는 래퍼)를 쓴다.
+
+## 판매 서버
+
+캣북스 판매 서버(shop-api)는 이 compose에 없다. 캣북스 레포에서 따로 배포하고(그 레포의 `backend/shop-api/compose.yml`), AXcellent는 `AX_SHOP_API_URL`(또는 회사 연결)·연결 키·웹훅으로만 붙는다. `compose.server.yml`의 게이트웨이는 더 이상 shop-api를 기다리지 않는다. 게이트웨이 nginx의 `/shop-api/` 프록시는 따로 배포한 판매 서버 주소를 가리켜야 한다.

@@ -48,7 +48,7 @@ class Gate:
 @pytest.fixture
 def repo():
     m = MockVcsAdapter(clock=lambda: T0)
-    m.seed_files({"backend/shared/shop-api/pay.py": "rate = 1\n"})
+    m.seed_files({"backend/shop-api/pay.py": "rate = 1\n"})
     vcs._screen = None
     vcs.set_vcs(m)
     yield m
@@ -62,7 +62,7 @@ def _bad_merge(m: MockVcsAdapter) -> int:
             "gen/pay",
             "결제 요율 바꾸기",
             "",
-            files={"backend/shared/shop-api/pay.py": "rate = 0\n"},
+            files={"backend/shop-api/pay.py": "rate = 0\n"},
         )
     )
     run(m.merge_change(opened.number, "squash"))
@@ -86,9 +86,9 @@ def test_find_related_prs_reads_merged_prs_from_the_connected_repo(service, repo
     assert [(c.pr_number, c.connection_id, c.merge_sha) for c in real] == [
         (n, CID, f"merge{n:04d}")
     ]
-    assert real[0].changed_paths == ["backend/shared/shop-api/pay.py"]
+    assert real[0].changed_paths == ["backend/shop-api/pay.py"]
     # 구성요소로 거른다: 경로가 맞으면 남고, 다른 구성요소면 빠진다
-    pay = _call(a2a_body("find_related_prs", {**window, "component": "backend/shared/shop-api"}))
+    pay = _call(a2a_body("find_related_prs", {**window, "component": "backend/shop-api"}))
     assert [c["pr_number"] for c in pay["output"]["candidates"] if c["connection_id"]] == [n]
     other = _call(a2a_body("find_related_prs", {**window, "component": "shop-web/"}))
     assert not [c for c in other["output"]["candidates"] if c["connection_id"]]
@@ -122,7 +122,7 @@ def test_revert_opens_and_merges_through_both_gates(repo) -> None:
     assert out.merge_sha == f"merge{out.revert_pr_number:04d}"
     assert [a for a, _ in gate.calls] == ["repo_revert_pr", "merge_pr"]
     assert all(p["connection_id"] == CID for _, p in gate.calls)
-    assert run(repo.read_file("backend/shared/shop-api/pay.py")) == "rate = 1\n"
+    assert run(repo.read_file("backend/shop-api/pay.py")) == "rate = 1\n"
     # 다시 불러도 되돌리기 PR을 새로 열지 않는다
     again = run(
         incident_repo.revert_merged(

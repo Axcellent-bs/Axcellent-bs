@@ -194,7 +194,7 @@ def test_safety_protected_paths_count_as_merge_risk() -> None:
     protected = [
         "shop-web/src/pages/Checkout.tsx",
         "shop-web/src/lib/auth.tsx",
-        "shop-api/src/ax_shop_api/service.py",
+        "backend/shop-api/src/ax_shop_api/service.py",
         ".github/workflows/ci.yml",
         "contracts/src/ax_contracts/schemas/planning.py",
     ]

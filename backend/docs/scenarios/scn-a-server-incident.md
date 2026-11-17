@@ -448,7 +448,7 @@
 
 | 구성 | 상태 | 비고 |
 |---|---|---|
-| 장애 주입 스크립트 (`failure`, `latency`) | ✅ | `infra/fault-injection/payment_fault.py` |
+| 장애 주입 스크립트 (`failure`, `latency`) | ✅ | 캣북스 레포 `backend/infra/fault-injection/payment_fault.py` (이 레포는 `scripts/shop_fault.sh`) |
 | shop-api 자체 감시 → `shop.degraded` · `shop.recovered` | ✅ | 기준값 환경변수 |
 | 이벤트 계약 (`shop.degraded`, `infra.anomaly_detected`, `incident.opened/resolved`) | ✅ | |
 | infra skill 입출력 계약 (진단·롤백·복구) | ✅ | `contracts/schemas/infra.py` |
@@ -524,11 +524,11 @@
 ## 14. 시연 방법
 
 ```bash
-docker compose -f infra/compose.yml up                          # 전체 띄우기
-python infra/fault-injection/payment_fault.py inject            # 5xx 장애
-python infra/fault-injection/payment_fault.py inject --kind latency --delay-ms 2000   # 지연 장애
+docker compose -f infra/compose.yml up                          # 전체 띄우기 (판매 서버는 캣북스 레포에서 따로)
+python ../catbooks-demo/backend/infra/fault-injection/payment_fault.py inject            # 5xx 장애
+python ../catbooks-demo/backend/infra/fault-injection/payment_fault.py inject --kind latency --delay-ms 2000   # 지연 장애
 # dashboard-web(3001)에서 사건 흐름 확인
-python infra/fault-injection/payment_fault.py clear             # 수동 해제 (롤백이 자동으로 하는 일)
+python ../catbooks-demo/backend/infra/fault-injection/payment_fault.py clear             # 수동 해제 (롤백이 자동으로 하는 일)
 ```
 
 - 인프라 구현 전: 총괄 혼합 모드로 인프라만 가짜 (`ORCHESTRATOR_REAL_DEPTS=data,planning,marketing,finance,hr`. 지금 플랜에 재무 노드가 남아 있어 `finance`가 들어 있다. 노드를 지우면 빼도 된다)

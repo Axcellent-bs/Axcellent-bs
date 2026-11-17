@@ -25,7 +25,7 @@
 
 ## 백엔드 규칙 (`backend/`)
 
-- 구조: `shared/`(contracts, agent-template, safety, memory, dashboard-api, shop-api) / `domains/`(업무 로직) / `services/`(서비스 13개: 카드·포트·실행 설정)
+- 구조: `shared/`(contracts, agent-template, safety, memory, dashboard-api. 판매 서버 shop-api는 Catbooks-demo/catbooks-demo로 분리) / `domains/`(업무 로직) / `services/`(서비스 13개: 카드·포트·실행 설정)
 - 계약은 `shared/contracts`에만 둔다. 추가만 하고 삭제·이름 변경·타입 변경은 하지 않는다
 - `domains`끼리 import하지 않는다. 서로는 A2A(`call_agent`)로만 부른다
 - 상태 변경은 agent-template의 `execute()`로만 한다 (safety 승인 관문)
