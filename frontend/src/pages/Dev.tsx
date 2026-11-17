@@ -14,6 +14,8 @@ import { Aftercare, Ops } from '@/components/dev/ops'
 import { PrsTab } from '@/components/dev/repows'
 import { TaskBoard } from '@/components/dev/board'
 import { Reviews } from '@/components/dev/work'
+import { ActionQueue } from '@/components/finance/SafetyQueue'
+import { DEV_HOLD_ACTIONS } from '@/lib/finance'
 import '@/components/dev/hier.css'
 
 const SECTIONS: Record<string, Section> = {
@@ -21,6 +23,7 @@ const SECTIONS: Record<string, Section> = {
   work: { label: '작업', icon: 'plan', head: { title: '작업', desc: '작업·PR, 교차검증, 배포, 장애 대응을 다뤄요.' }, tabs: [
     { id: 'prs', label: '작업·PR' },
     { id: 'reviews', label: 'AI 교차검증' },
+    { id: 'holds', label: '안전 확인' },
     { id: 'ops', label: '배포' },
     { id: 'aftercare', label: '장애 대응' },
   ] },
@@ -79,6 +82,7 @@ export default function DevPage() {
           {section === 'tasks' && <TaskBoard s={s} filter={sub} />}
           {section === 'work' && tab === 'prs' && <PrsTab s={s} d={d} parts={rest.map((x) => decodeURIComponent(x))} />}
           {section === 'work' && tab === 'reviews' && <Reviews s={s} d={d} item={item} />}
+          {section === 'work' && tab === 'holds' && <ActionQueue action={DEV_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 PR 만들기·머지·되돌리기와 자동 머지 기준 바꾸기가 여기 모입니다." />}
           {section === 'work' && tab === 'ops' && <Ops s={s} item={item} />}
           {section === 'work' && tab === 'aftercare' && <Aftercare s={s} item={item} />}
           {section === 'talk' && <Talk s={s} d={d} item={item} />}
