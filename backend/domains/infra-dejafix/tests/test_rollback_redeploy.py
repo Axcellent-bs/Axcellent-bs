@@ -231,3 +231,68 @@ def test_sha_fallback_version_is_not_dispatched(a2a_body, gate, runtime, tool) -
     assert out["outcome"] == "redeploy_failed"
     assert "abc1234" in out["output"]["message"]
     assert tool.redeployed == []  # 커밋 앞자리를 inputs.version으로 보내지 않는다
+
+
+def test_redeploy_timeout_handoff_says_check_if_already_started(
+    a2a_body, gate, runtime, polled
+) -> None:
+    tool = polled
+    gate("executed")
+    tool.error = ToolConnectionError("timeout", "POST .../dispatches 연결 실패 (ReadTimeout)")
+    out = _rollback(a2a_body, TOOL_ROLLBACK)
+    assert out["outcome"] == "redeploy_failed"
+    steps = out["output"]["handoff_steps"]
+    assert "이미 시작됐는지 확인" in steps[0]
+    assert steps[-1] == tool.describe("v3.0.0")
+
+
+def test_redeploy_non_timeout_handoff_has_no_check_line(a2a_body, gate, runtime, polled) -> None:
+    tool = polled
+    gate("executed")
+    tool.error = ToolConnectionError("forbidden", "POST .../dispatches → 403")
+    out = _rollback(a2a_body, TOOL_ROLLBACK)
+    assert out["output"]["handoff_steps"] == [tool.describe("v3.0.0")]
+
+
+def test_send_timeout_becomes_timeout_code() -> None:
+    import httpx
+
+    from infra_agent.deploy_tools import _send
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow", request=request)
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            await _send(c, "POST", "http://x/y", "배포 도구")
+
+    with pytest.raises(ToolConnectionError) as e:
+        asyncio.run(run())
+    assert e.value.code == "timeout"
+
+
+def test_poll_run_forever_reads_vault_off_the_event_loop(runtime, monkeypatch) -> None:
+    import threading
+
+    from infra_agent import deploy_poll
+
+    seen: list[int] = []
+
+    def fake_all_tools() -> list:
+        seen.append(threading.get_ident())
+        return []
+
+    async def fake_sleep(_: float) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(deploy_tools, "all_tools", fake_all_tools)
+    monkeypatch.setattr(deploy_poll.asyncio, "sleep", fake_sleep)
+
+    async def run() -> int:
+        main_id = threading.get_ident()
+        with pytest.raises(asyncio.CancelledError):
+            await deploy_poll.run_forever(runtime.history)
+        return main_id
+
+    main_id = asyncio.run(run())
+    assert seen and seen[0] != main_id

@@ -15,12 +15,22 @@
   호출자가 준 값은 덮어쓰지 않는다. 데이터에 닿지 못하면 재무를 부르지 않고 실패로 올린다.
   콘텐츠 카테고리·형식(`content_category`·`format`)과 영상 제작비(`production_cost_krw`)는
   호출자가 준 값만 그대로 싣는다(예산 의견 요청에도 카테고리·형식을 싣는다). 추측하지 않는다.
+- 영상 등록: `start_campaign`에 사람이 올린 영상 URL(`video_url`, 선택)이 있고 관문이 `executed`로
+  끝난 뒤에만 데이터 `video_performance`에 그 캠페인의 영상으로 등록한다(1h 측정 창이 1시간뿐이라
+  결과 기록 때 등록하면 늦다). URL이 있으면 `test`(시험 영상 여부)를 호출자가 명시해야 한다
+  (기본값으로 시연·시험을 갈라 집계를 오염시키지 않는다). 등록 실패는 캠페인을 막지 않고
+  경고 로그와 `output.video`에만 남긴다.
+- 결과의 조회수: `record_campaign_result`는 호출자가 `views`·`views_point`를 주지 않으면 데이터
+  `video_performance`(campaign_id)를 읽어 가장 늦게 잰 시점의 값을 싣는다(7일 전에 끝났으면 3d 등).
+  측정 중·놓침·등록 없음·시험 영상·데이터 실패면 비워 보내고 값을 지어내지 않는다(결과 전달은
+  막지 않는다). 7일이 지나 다시 부르면 같은 campaign_id로 새 값이 간다(덮어쓰기는 재무가 한다).
 - 쿠폰 지급(`issue_coupon`)은 이 흐름과 별개다. 재무는 쿠폰을 판단하지 않는다.
 - 재무에 닿지 못하면 승인으로 보지 않는다(fail-closed): 시작은 실행하지 않고 멈춘다.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any
@@ -40,18 +50,25 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from ax_contracts.schemas.common import AxModel
+from ax_contracts.schemas.data import VideoPerformanceOutput
 from ax_contracts.schemas.finance import (
     CampaignBudgetReviewInput,
     CampaignBudgetReviewOutput,
     CampaignResultInput,
     ContentFormat,
+    ViewsPoint,
 )
+
+_log = logging.getLogger(__name__)
 
 FINANCE = "finance"
 REVIEW_SKILL = "review_campaign_budget"
 RECORD_SKILL = "record_campaign_result"
 DATA = "data"
 DATA_RESULT_SKILL = "campaign_result"
+DATA_VIDEO_SKILL = "video_performance"
+# 데이터가 재는 시점, 늦은 것부터. 가장 늦게 잰 값을 쓴다
+_POINTS_LATEST_FIRST: tuple[ViewsPoint, ...] = ("7d", "3d", "1d", "1h")
 START_ACTION = "start_campaign"
 
 
@@ -69,6 +86,16 @@ class StartCampaignInput(AxModel):
     # 지어내거나 기획안에서 추측하지 않는다. 비우면 재무는 카테고리 없는 캠페인으로 본다
     content_category: str | None = Field(default=None, min_length=1, max_length=40)
     format: ContentFormat | None = None
+    # 사람이 유튜브 쇼츠에 올린 영상 주소(선택). 있으면 캠페인이 시작된 직후 데이터에 등록한다.
+    # 등록하면 `test`를 호출자가 정해야 한다: 시험 영상은 true, 시연·실제 캠페인은 false
+    video_url: str | None = Field(default=None, min_length=1, max_length=500)
+    test: bool | None = None
+
+    @model_validator(mode="after")
+    def _test_flag_with_video(self) -> StartCampaignInput:
+        if self.video_url is not None and self.test is None:
+            raise ValueError("video_url을 주면 test(시험 영상 여부)를 true·false로 정해야 한다")
+        return self
 
 
 # 데이터가 재는 매출 효과 값 묶음. 호출자가 하나라도 주면 이 묶음은 데이터로 채우지 않는다
@@ -102,10 +129,13 @@ class RecordCampaignResultInput(AxModel):
     measured_orders: int | None = None
     effect_generated_at: str | None = None
     # 아래는 호출자가 아는 값만 받는다(재무 계약과 같은 칸). 모르면 비워 두고 채우지 않는다.
-    # 조회수(views·views_point)는 데이터가 잰 값이라 마케팅이 받지도 보내지도 않는다
+    # 조회수(views·views_point)는 데이터가 잰 값이다. 호출자가 주면 그대로 두고, 안 주면 데이터
+    # `video_performance`에서 읽어 채운다(측정 중·놓침이면 비움)
     content_category: str | None = Field(default=None, min_length=1, max_length=40)
     format: ContentFormat | None = None
     production_cost_krw: int | None = Field(default=None, ge=0)  # 광고비(spend_krw)와 따로
+    views: int | None = Field(default=None, ge=0)
+    views_point: ViewsPoint | None = None
 
     @model_validator(mode="after")
     def _period_in_order(self) -> RecordCampaignResultInput:
@@ -291,7 +321,37 @@ async def start_campaign(
         request.meta.model_copy(update={"idempotency_key": key}),
         evidence,
     )
-    return _gate_outcome(request, decision, review, evidence)
+    result = _gate_outcome(request, decision, review, evidence)
+    if data.video_url is not None and result.outcome == "executed":
+        result.output["video"] = await _register_video(request, data)
+    return result
+
+
+async def _register_video(request: AgentRequest, data: StartCampaignInput) -> dict[str, Any]:
+    """게시 직후 영상을 데이터 `video_performance`에 등록한다. 실패해도 캠페인은 막지 않는다."""
+    sent = AgentRequest(
+        meta=request.meta,
+        skill=DATA_VIDEO_SKILL,
+        input={
+            "campaign_id": data.campaign_id,
+            "video_url": data.video_url,
+            "test": bool(data.test),
+        },
+    )
+    try:
+        answer = await call_agent(DATA, sent)
+        out = VideoPerformanceOutput.model_validate(answer.output)
+    except Exception as exc:  # noqa: BLE001 - 등록 실패가 이미 시작된 캠페인을 바꾸지 않는다
+        _log.warning("캠페인 %s 영상 등록 실패: %s", data.campaign_id, type(exc).__name__)
+        return {
+            "registered": False,
+            "warning": "영상 등록 실패(데이터에 닿지 못하거나 답이 이상함)",
+        }
+    if answer.status != TaskStatus.COMPLETED or not out.tracking:
+        reason = out.reason or answer.outcome or answer.status.value
+        _log.warning("캠페인 %s 영상 등록 안 됨: %s", data.campaign_id, reason)
+        return {"registered": False, "warning": f"영상 등록 안 됨: {reason}"}
+    return {"registered": True, "video_id": out.video_id, "test": bool(data.test)}
 
 
 def _data_unusable(request: AgentRequest, answer: AgentResult, outcome: str) -> AgentResult:
@@ -343,6 +403,44 @@ async def _fill_from_data(
         return _data_unusable(request, answer, "data_result_invalid")
 
 
+def _latest_views(out: VideoPerformanceOutput) -> tuple[int, ViewsPoint] | None:
+    """잰 값이 있는 가장 늦은 시점의 조회수. 측정 중·놓침(unknown)은 건너뛴다."""
+    by_name = {c.checkpoint: c for c in out.checkpoints}
+    for point in _POINTS_LATEST_FIRST:
+        checkpoint = by_name.get(point)
+        if checkpoint and checkpoint.status == "known" and checkpoint.views is not None:
+            return checkpoint.views, point
+    return None
+
+
+async def _fill_views(
+    request: AgentRequest, data: RecordCampaignResultInput
+) -> RecordCampaignResultInput:
+    """호출자가 조회수를 안 줬으면 데이터가 잰 값을 싣는다. 못 얻으면 비워 두고 막지 않는다."""
+    if data.views is not None or data.views_point is not None:
+        return data
+    sent = AgentRequest(
+        meta=request.meta,
+        skill=DATA_VIDEO_SKILL,
+        input={"campaign_id": data.campaign_id},
+    )
+    try:
+        answer = await call_agent(DATA, sent)
+        if answer.status != TaskStatus.COMPLETED:
+            raise ValueError(answer.outcome or answer.status.value)
+        out = VideoPerformanceOutput.model_validate(answer.output)
+    except Exception as exc:  # noqa: BLE001 - 조회수는 선택 칸이라 실패해도 결과 전달은 간다
+        _log.warning("캠페인 %s 조회수를 읽지 못함: %s", data.campaign_id, type(exc).__name__)
+        return data
+    if out.campaign_id not in (None, data.campaign_id) or out.test:
+        return data  # 다른 캠페인 답이거나 시험 영상이면 재무 결과에 싣지 않는다
+    latest = _latest_views(out)
+    if latest is None:
+        return data
+    views, point = latest
+    return data.model_copy(update={"views": views, "views_point": point})
+
+
 async def record_campaign_result(request: AgentRequest) -> AgentResult:
     try:
         data = RecordCampaignResultInput.model_validate(request.input)
@@ -365,6 +463,7 @@ async def record_campaign_result(request: AgentRequest) -> AgentResult:
                 output={"campaign_id": data.campaign_id},
             )
 
+    data = await _fill_views(request, data)
     # 계약 모델 그대로 보낸다. 값이 없는 선택 필드는 보내지 않아 재무가 0으로 채우지 못한다
     try:
         contract = CampaignResultInput.model_validate(data.model_dump())

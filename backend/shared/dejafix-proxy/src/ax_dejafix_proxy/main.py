@@ -36,6 +36,8 @@ class DejaFixSession:
         self._password = password
         self._token: str | None = None
         self._lock = asyncio.Lock()
+        self._inflight = 0
+        self._retired = False
 
     @property
     def configured(self) -> bool:
@@ -43,6 +45,12 @@ class DejaFixSession:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    def retire(self) -> None:
+        """더 쓰지 않는 세션. 진행 중인 요청이 끝난 뒤에 클라이언트를 닫는다."""
+        self._retired = True
+        if self._inflight == 0:
+            asyncio.get_running_loop().create_task(self.aclose())
 
     async def _login(self) -> str | None:
         res = await self._client.post(
@@ -56,6 +64,15 @@ class DejaFixSession:
         return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
     async def get(self, path: str, query: str) -> httpx.Response:
+        self._inflight += 1
+        try:
+            return await self._get(path, query)
+        finally:
+            self._inflight -= 1
+            if self._retired and self._inflight == 0:
+                asyncio.get_running_loop().create_task(self.aclose())
+
+    async def _get(self, path: str, query: str) -> httpx.Response:
         url = f"{path}?{query}" if query else path
         async with self._lock:
             if self._token is None:
@@ -102,8 +119,7 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         http = client or httpx.AsyncClient(base_url=url, timeout=10.0)
         fresh = DejaFixSession(http, user, password)
         if held is not None and client is None:
-            old = held[1]
-            asyncio.get_running_loop().create_task(old.aclose())
+            held[1].retire()  # 진행 중인 요청이 있으면 끝난 뒤에 닫는다
         state["s"] = (target, fresh)
         return fresh
 
@@ -148,7 +164,8 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         if from_vault:
             try:
                 # 화면에서 정한 주소는 사내·허용 목록 정책을 통과해야 부른다 (밖으로 나가는 호출 전)
-                company_connection.check_host(target[0])
+                # 이름 풀이(DNS)가 막힐 수 있어 이벤트 루프 밖에서 한다
+                await asyncio.to_thread(company_connection.check_host, target[0])
             except ValueError as exc:
                 return _error(502, "DEJAFIX_UNREACHABLE", f"DejaFix 주소를 쓸 수 없습니다: {exc}")
         try:

@@ -1,8 +1,11 @@
 """공용 도구 연결 보관함: 화면에서 정한 외부 도구 연결(주소·토큰·개인 키)을 한 파일에 둔다.
 
 - 저장: `AX_TOOL_CONNECTIONS_FILE`이 가리키는 JSON 파일 (연결 목록).
-  쓰는 곳은 dashboard-api 한 곳이다.
+  쓰는 곳은 dashboard-api 한 곳이다 (예외: 개발 AI가 켤 때 예전 GitHub App 정보를 한 번 옮긴다,
+  `dev_agent.vcs`).
   비밀 값이 들어 있어 `0600` 임시 파일에 쓰고 `os.replace`로 바꿔치기한다.
+  쓰는 프로세스가 둘이라 읽고-고치고-쓰기는 `<파일>.lock`(O_EXCL로 만드는 잠금 파일)으로 막는다.
+  임시 파일 이름은 쓸 때마다 다르다. 30초 넘은 잠금은 죽은 프로세스가 남긴 것으로 보고 지운다.
 - 읽기: 부를 때마다 바뀐 시각·크기로 확인해 읽는다 (재시작 없이 반영).
   파일이 없으면 연결이 없는 것이다(경고 없음). 깨졌으면 경고를 한 번 남기고 없는 것으로 본다.
 - 비밀 값(`secrets`)은 repr·로그·오류 문구·이력 줄에 넣지 않는다. 화면에는 `public()`만 준다.
@@ -16,12 +19,20 @@ import logging
 import os
 import re
 import threading
+import time
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 FILE_ENV = "AX_TOOL_CONNECTIONS_FILE"
+# 잠금 파일: LOCK_STALE초 지난 것은 죽은 프로세스가 남긴 것으로 보고 지운다.
+# LOCK_TIMEOUT초 기다려도 못 잡으면 busy
+LOCK_STALE = 30.0
+LOCK_TIMEOUT = 5.0
 KINDS = ("github_app", "github_actions", "jenkins", "dejafix")
 
 logger = logging.getLogger("ax.tool_connections")
@@ -143,7 +154,7 @@ def _parse(raw: Any, path: str) -> list[ToolConnection]:
 
 
 # 바뀐 시각·크기가 같으면 다시 읽지 않는다. 깨진 파일 경고도 같은 상태면 한 번만 남긴다
-_cache: tuple[str, int, int, list[ToolConnection], bool] | None = None
+_cache: tuple[str, int, int, int, list[ToolConnection], bool] | None = None
 _lock = threading.RLock()
 
 
@@ -158,9 +169,11 @@ def _load() -> tuple[list[ToolConnection], bool]:
             stat = os.stat(path)
         except OSError:
             return [], False  # 저장한 적 없음: 정상
-        key = (path, stat.st_mtime_ns, stat.st_size)
-        if _cache is not None and _cache[:3] == key:
-            return list(_cache[3]), _cache[4]
+        # st_ino: 같은 크기로 바뀐 시각 단위 안에 다시 쓴 파일(os.replace로 inode가 바뀐다)을 놓치지
+        # 않는다. 윈도에서 st_ino가 0이면 예전처럼 시각·크기만 본다
+        key = (path, stat.st_mtime_ns, stat.st_size, stat.st_ino)
+        if _cache is not None and _cache[:4] == key:
+            return list(_cache[4]), _cache[5]
         try:
             os.chmod(path, 0o600)  # 예전에 넓은 권한으로 만든 파일도 만든 사용자만 읽게 맞춘다
         except OSError:
@@ -180,6 +193,66 @@ def _load() -> tuple[list[ToolConnection], bool]:
 def read_all() -> list[ToolConnection]:
     """저장된 연결 전부. 경로가 없거나 파일이 없거나 깨졌으면 빈 목록."""
     return _load()[0]
+
+
+def _lock_path() -> str:
+    return connections_file() + ".lock"
+
+
+@contextmanager
+def _writing() -> Iterator[None]:
+    """읽고-고치고-쓰기 잠금: 프로세스 안(RLock)과 프로세스 사이(`<파일>.lock`)."""
+    global _cache
+    path = connections_file()
+    if not path:
+        raise ToolConnectionError("config", f"{FILE_ENV}가 설정되지 않아 저장할 수 없다")
+    with _lock:
+        lock = _lock_path()
+        Path(lock).parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + LOCK_TIMEOUT
+        delay = 0.01
+        while True:
+            try:
+                fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                break
+            except FileExistsError:
+                pass
+            except PermissionError:
+                # 윈도: 지워지는 중인 잠금 파일은 PermissionError라 다시 시도한다.
+                # 잠금 파일이 없는데도 거절되면 폴더 권한 문제라 바로 알린다
+                if not os.path.exists(lock):
+                    raise ToolConnectionError(
+                        "config", "도구 연결 보관함 폴더에 쓸 수 없어요. 폴더 권한을 확인하세요"
+                    ) from None
+            try:
+                stale = time.time() - os.stat(lock).st_mtime > LOCK_STALE
+            except OSError:
+                stale = False  # 그사이 풀렸다: 마감·대기를 거쳐 다시 시도한다
+            if stale:
+                logger.warning("오래된 도구 연결 잠금 파일을 지운다: %s", lock)
+                try:
+                    os.remove(lock)
+                except OSError:
+                    pass
+                continue
+            if time.monotonic() >= deadline:
+                raise ToolConnectionError(
+                    "busy", "다른 곳에서 도구 연결을 저장하는 중이에요. 잠시 뒤 다시 시도하세요"
+                )
+            time.sleep(delay)
+            delay = min(delay * 2, 0.2)
+        try:
+            try:
+                os.write(fd, str(os.getpid()).encode("ascii"))
+            finally:
+                os.close(fd)
+            _cache = None  # 다른 프로세스가 막 쓴 것을 놓치지 않게 다시 읽는다
+            yield
+        finally:
+            try:
+                os.remove(lock)
+            except OSError:
+                pass
 
 
 def _read_for_write() -> list[ToolConnection]:
@@ -226,7 +299,7 @@ def _write(conns: list[ToolConnection]) -> None:
         raise ToolConnectionError("config", f"{FILE_ENV}가 설정되지 않아 저장할 수 없다")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = str(target) + ".tmp"
+    tmp = f"{target}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"  # 쓰는 곳마다 다른 임시 파일
     # 토큰·개인 키가 들어 있어 만든 사용자만 읽는다. 처음부터 0600으로 만들고 권한을 다시 맞춘다
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
@@ -294,7 +367,7 @@ def upsert(
     name = (name or "").strip()
     if not name:
         raise ToolConnectionError("invalid", "이름을 입력하세요")
-    with _lock:
+    with _writing():
         conns = _read_for_write()
         before = next((c for c in conns if c.id == conn_id), None) if conn_id else None
         if conn_id and before is None:
@@ -322,7 +395,7 @@ def upsert(
 
 def record_check(conn_id: str, ok: bool, detail: str) -> ToolConnection:
     """확인 결과를 남긴다 (`detail`에는 비밀 값이 없어야 한다)."""
-    with _lock:
+    with _writing():
         conns = _read_for_write()
         before = next((c for c in conns if c.id == conn_id), None)
         if before is None:
@@ -341,7 +414,7 @@ def record_check(conn_id: str, ok: bool, detail: str) -> ToolConnection:
 
 def delete(conn_id: str, *, by: str) -> bool:
     """연결을 지운다. 지웠으면 True, 원래 없었으면 False."""
-    with _lock:
+    with _writing():
         conns = _read_for_write()
         before = next((c for c in conns if c.id == conn_id), None)
         if before is None:

@@ -276,7 +276,8 @@ async def test_record_result_passes_contract_through(monkeypatch: pytest.MonkeyP
     full = RESULT | {"gmv_krw": 1_000_000}
     result = await campaign.record_campaign_result(_req("record_campaign_result", full))
     assert result.outcome == "recorded"
-    assert data.calls == []
+    # 매출 효과는 데이터에서 읽지 않는다(조회수 읽기 video_performance는 따로)
+    assert [c for _, c in data.calls if c.skill == "campaign_result"] == []
     target, sent = finance.calls[0]
     assert (target, sent.skill) == ("finance", "record_campaign_result")
     assert sent.input["gmv_krw"] == 1_000_000 and sent.input["spend_krw"] == 300_000
@@ -384,7 +385,8 @@ async def test_record_result_keeps_known_gmv(monkeypatch: pytest.MonkeyPatch) ->
     await campaign.record_campaign_result(
         _req("record_campaign_result", RESULT | {"gmv_krw": 2_000_000, "orders": 40})
     )
-    assert finance.calls[0][1].input["gmv_krw"] == 2_000_000
+    sent = [r for t, r in finance.calls if r.skill == "record_campaign_result"]
+    assert sent[0].input["gmv_krw"] == 2_000_000
 
 
 async def test_record_result_relays_finance_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -563,7 +565,7 @@ async def test_record_result_passes_category_format_and_production_cost(
     sent = finance.calls[0][1].input
     assert sent["content_category"] == "아재개그" and sent["format"] == "shorts"
     assert sent["production_cost_krw"] == 150_000
-    # 조회수는 데이터가 잰 값이라 마케팅은 보내지 않는다
+    # 데이터가 조회수를 못 주면(이 대역은 다른 모양을 답함) 비워 둔다
     assert "views" not in sent and "views_point" not in sent
     parsed = CampaignResultInput.model_validate(sent)  # 재무 계약이 그대로 받는다
     assert parsed.production_cost_krw == 150_000 and parsed.spend_krw == 300_000
@@ -600,3 +602,192 @@ async def test_record_result_bad_category_fields_never_reach_finance(
     _wire_routed(monkeypatch, finance, _data())
     result = await campaign.record_campaign_result(_req("record_campaign_result", CALLER | bad))
     assert result.outcome == "invalid_input" and finance.calls == []
+
+
+# ---- 영상 등록(start_campaign)과 조회수 채우기(record_campaign_result) ----
+
+
+class VideoData:
+    """`call_agent` 대역: video_performance는 `video`, campaign_result는 `result`가 답한다."""
+
+    def __init__(self, finance: Finance, video: Finance, result: Finance | None = None) -> None:
+        self.finance, self.video, self.result = finance, video, result or _data()
+
+    async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
+        if target == "data" and req.skill == "video_performance":
+            return await self.video(target, req)
+        if target == "data":
+            return await self.result(target, req)
+        return await self.finance(target, req)
+
+
+def _checkpoint(name: str, views: int | None, reason: str | None = None) -> dict:
+    return {
+        "checkpoint": name,
+        "status": "known" if views is not None else "unknown",
+        "views": views,
+        "reason": reason,
+    }
+
+
+def _video(checkpoints: list[dict], **fields) -> Finance:
+    out = {
+        "status": "known",
+        "campaign_id": "cmp_1",
+        "video_id": "abc123",
+        "tracking": True,
+        "checkpoints": checkpoints,
+    } | fields
+    return Finance(output=out, outcome="completed")
+
+
+URL = "https://youtube.com/shorts/abc123"
+
+
+def _wire_video(
+    monkeypatch: pytest.MonkeyPatch, finance: Finance, video: Finance, gate: Gate | None = None
+) -> Gate:
+    gate = gate or Gate()
+    monkeypatch.setattr(campaign, "call_agent", VideoData(finance, video))
+    monkeypatch.setattr(campaign, "execute", gate)
+    return gate
+
+
+async def test_start_registers_video_after_executed(monkeypatch: pytest.MonkeyPatch) -> None:
+    video = _video([])
+    _wire_video(monkeypatch, Finance(), video)
+    asked = START | {"video_url": URL, "test": False}
+    result = await campaign.start_campaign(_req("start_campaign", asked))
+    assert result.outcome == "executed"
+    sent = video.calls[0][1]
+    assert sent.skill == "video_performance"
+    assert sent.input == {"campaign_id": "cmp_1", "video_url": URL, "test": False}
+    assert result.output["video"] == {"registered": True, "video_id": "abc123", "test": False}
+
+
+async def test_start_passes_test_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    video = _video([])
+    _wire_video(monkeypatch, Finance(), video)
+    await campaign.start_campaign(_req("start_campaign", START | {"video_url": URL, "test": True}))
+    assert video.calls[0][1].input["test"] is True
+
+
+async def test_start_without_video_url_does_not_call_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video = _video([])
+    _wire_video(monkeypatch, Finance(), video)
+    result = await campaign.start_campaign(_req("start_campaign", START))
+    assert result.outcome == "executed" and not video.calls
+    assert "video" not in result.output
+
+
+async def test_video_url_without_test_flag_is_refused_before_anything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance, video = Finance(), _video([])
+    gate = _wire_video(monkeypatch, finance, video)
+    result = await campaign.start_campaign(_req("start_campaign", START | {"video_url": URL}))
+    assert result.outcome == "invalid_input"
+    assert not finance.calls and not video.calls and not gate.seen
+
+
+async def test_held_campaign_does_not_register_video(monkeypatch: pytest.MonkeyPatch) -> None:
+    video = _video([])
+    gate = Gate(status="held", hold_reason=HoldReason.OVER_THRESHOLD)
+    _wire_video(monkeypatch, Finance(), video, gate)
+    result = await campaign.start_campaign(
+        _req("start_campaign", START | {"video_url": URL, "test": False})
+    )
+    assert result.outcome == "held" and not video.calls
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        Finance(status=TaskStatus.FAILED, output={}, outcome="data_down"),
+        Finance(output={"status": "unknown", "reason": "영상 못 찾음", "tracking": False}),
+        Finance(output={"nonsense": 1}),
+    ],
+)
+async def test_video_registration_failure_never_blocks_the_campaign(
+    monkeypatch: pytest.MonkeyPatch, answer: Finance
+) -> None:
+    gate = _wire_video(monkeypatch, Finance(), answer)
+    result = await campaign.start_campaign(
+        _req("start_campaign", START | {"video_url": URL, "test": False})
+    )
+    assert result.status == TaskStatus.COMPLETED and result.outcome == "executed"
+    assert gate.seen and result.output["video"]["registered"] is False
+    assert result.output["video"]["warning"]
+
+
+async def test_record_fills_views_from_latest_known_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    video = _video(
+        [
+            _checkpoint("1h", 120),
+            _checkpoint("1d", 3_000),
+            _checkpoint("3d", 9_500),
+            _checkpoint("7d", None, "측정 중"),
+        ]
+    )
+    monkeypatch.setattr(campaign, "call_agent", VideoData(finance, video))
+    result = await campaign.record_campaign_result(_req("record_campaign_result", CALLER))
+    assert result.outcome == "recorded"
+    sent = finance.calls[0][1].input
+    assert sent["views"] == 9_500 and sent["views_point"] == "3d"
+    assert video.calls[0][1].input == {"campaign_id": "cmp_1"}
+
+
+async def test_record_sends_7d_when_measured(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    video = _video([_checkpoint("3d", 9_500), _checkpoint("7d", 20_000)])
+    monkeypatch.setattr(campaign, "call_agent", VideoData(finance, video))
+    await campaign.record_campaign_result(_req("record_campaign_result", CALLER))
+    sent = finance.calls[0][1].input
+    assert sent["views"] == 20_000 and sent["views_point"] == "7d"
+
+
+@pytest.mark.parametrize(
+    "video",
+    [
+        _video([_checkpoint("1h", None, "측정 중"), _checkpoint("1d", None, "놓침")]),
+        _video([], status="unknown", tracking=False, reason="등록된 영상 없음"),
+        _video([_checkpoint("7d", 20_000)], test=True),
+        _video([_checkpoint("7d", 20_000)], campaign_id="cmp_other"),
+        Finance(status=TaskStatus.FAILED, output={}, outcome="data_down"),
+        Finance(output={"nonsense": 1}),
+    ],
+)
+async def test_record_leaves_views_blank_when_unmeasured_or_unusable(
+    monkeypatch: pytest.MonkeyPatch, video: Finance
+) -> None:
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    monkeypatch.setattr(campaign, "call_agent", VideoData(finance, video))
+    result = await campaign.record_campaign_result(_req("record_campaign_result", CALLER))
+    assert result.outcome == "recorded"  # 조회수 때문에 결과 전달이 막히지 않는다
+    sent = finance.calls[0][1].input
+    assert "views" not in sent and "views_point" not in sent
+
+
+async def test_record_keeps_caller_views_and_skips_the_data_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    video = _video([_checkpoint("7d", 20_000)])
+    monkeypatch.setattr(campaign, "call_agent", VideoData(finance, video))
+    asked = CALLER | {"views": 777, "views_point": "1d"}
+    await campaign.record_campaign_result(_req("record_campaign_result", asked))
+    sent = finance.calls[0][1].input
+    assert sent["views"] == 777 and sent["views_point"] == "1d" and not video.calls
+
+
+async def test_record_bad_views_point_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    monkeypatch.setattr(campaign, "call_agent", VideoData(finance, _video([])))
+    asked = CALLER | {"views": 1, "views_point": "2d"}
+    result = await campaign.record_campaign_result(_req("record_campaign_result", asked))
+    assert result.outcome == "invalid_input" and not finance.calls

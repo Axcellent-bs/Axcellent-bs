@@ -444,3 +444,30 @@ def test_dev_signals_use_proxy_when_vault_has_dejafix(
     assert name == "dejafix"
     assert isinstance(dejafix, DejaFixIncidentSource)
     assert dejafix.base_url == "http://dejafix-proxy:8030"
+
+
+def test_store_picks_up_dejafix_connected_after_startup(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """저장소를 만든 뒤(연결 없음) 보관함에 DejaFix를 추가하면 재시작 없이 그 신호원을 쓴다."""
+    from ax_agent_template import tool_connections as tc
+    from dev_agent import deploy_signals
+
+    monkeypatch.setenv(tc.FILE_ENV, str(tmp_path / "tool-connections.json"))
+    monkeypatch.delenv(deploy_signals.DEJAFIX_URL_ENV, raising=False)
+    monkeypatch.delenv("AX_DEJAFIX_PROXY_URL", raising=False)
+    tc._cache = None
+    late_store = DeployStore()
+    before = late_store.source
+    assert not isinstance(before, CombinedSource)  # 연결 전: 목(테스트 전용) 신호원
+    tc.upsert(
+        "dejafix",
+        "장애",
+        {"url": "http://10.0.0.5", "username": "v"},
+        {"password": "pw"},
+        conn_id=None,
+        by="t",
+    )
+    after = late_store.source
+    assert isinstance(after, CombinedSource)
+    assert isinstance(after._sources[0][1], DejaFixIncidentSource)

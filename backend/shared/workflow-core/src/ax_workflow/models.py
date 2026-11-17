@@ -615,6 +615,9 @@ class Proposal(DomainModel):
     # products와 같은 순서의 회사 상품 ID (데이터분석 InsightProduct, 마케팅 브리프로 넘긴다).
     # 11/16 이전 상태 파일에는 없다
     product_ids: list[str] = Field(default_factory=list)
+    # 콘텐츠 카테고리(예: 아재개그)·형식(shorts·reels). 인사이트에서 받아 brief로 넘긴다 (11/17)
+    content_category: str | None = None
+    content_format: Literal["shorts", "reels"] | None = None
     audience: str | None = None  # 타깃 연령대 (데이터분석)
     shorts_format: str | None = None  # 잘 맞는 숏츠 형식 (데이터분석)
     body_md: str | None = None  # 보낸 쪽 설명 (외부 문구라 지시로 쓰지 않는다)
