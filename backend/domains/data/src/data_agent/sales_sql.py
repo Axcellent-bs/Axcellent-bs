@@ -24,6 +24,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from data_agent import sales_summary
 from data_agent.sales_clean import EXCLUDED_STATUSES, PAID, counts_as_revenue
 from data_agent.sales_store import SalesStore, StoredOrder, iso
 
@@ -115,9 +116,9 @@ def _drop(conn: sqlite3.Connection) -> None:
         conn.execute(f"DROP TABLE IF EXISTS temp.{name}")
 
 
-def _build(conn: sqlite3.Connection, p: dict[str, object]) -> None:
+def _build(conn: sqlite3.Connection, p: dict[str, object], summary: bool = False) -> None:
     """임시 표: 결제 완료 주문 줄(주문 id 순으로 한 번 조인), 구매자(재구매 여부), 고르지 않은
-    주문."""
+    주문. `summary`면 재구매 여부를 구매자 요약 표의 첫 결제 시각(< 기간 시작)으로 본다."""
     _drop(conn)
     conn.execute(
         "CREATE TEMP TABLE sa_lines AS SELECT o.order_id, l.line_no, o.created_at, o.buyer_id, "
@@ -132,14 +133,23 @@ def _build(conn: sqlite3.Connection, p: dict[str, object]) -> None:
         "CREATE TEMP TABLE sa_buyers (buyer_id TEXT PRIMARY KEY, rep INTEGER NOT NULL) "
         "WITHOUT ROWID"
     )
-    conn.execute(
-        "INSERT INTO sa_buyers SELECT b.buyer_id, EXISTS (SELECT 1 FROM sales_orders o "
-        "INDEXED BY idx_sales_orders_buyer_paid WHERE o.tenant_id = :t AND o.buyer_id = b.buyer_id "
-        "AND o.created_at < :s AND o.payment_status = :paid "
-        f"AND LOWER(o.status) NOT IN ({_EXCLUDED})) FROM (SELECT DISTINCT o.buyer_id "
-        f"FROM sales_orders o WHERE {PAID_WHERE} ORDER BY o.buyer_id) b",
-        p,
-    )
+    if summary:  # 기간 시작 전 결제 완료 주문이 있다 = 첫 결제 < 기간 시작 (요약 표)
+        conn.execute(
+            "INSERT INTO sa_buyers SELECT b.buyer_id, COALESCE((SELECT s.first_paid_at < :s "
+            "FROM sales_buyer_summary s WHERE s.tenant_id = :t AND s.buyer_id = b.buyer_id), 0) "
+            f"FROM (SELECT DISTINCT o.buyer_id FROM sales_orders o WHERE {PAID_WHERE} "
+            "ORDER BY o.buyer_id) b",
+            p,
+        )
+    else:
+        conn.execute(
+            "INSERT INTO sa_buyers SELECT b.buyer_id, EXISTS (SELECT 1 FROM sales_orders o "
+            "INDEXED BY idx_sales_orders_buyer_paid WHERE o.tenant_id = :t "
+            "AND o.buyer_id = b.buyer_id AND o.created_at < :s AND o.payment_status = :paid "
+            f"AND LOWER(o.status) NOT IN ({_EXCLUDED})) FROM (SELECT DISTINCT o.buyer_id "
+            f"FROM sales_orders o WHERE {PAID_WHERE} ORDER BY o.buyer_id) b",
+            p,
+        )
     # 고르지 않은 주문: 줄 몫 합이 주문 할인과 다르거나 줄이 없다 (주문 id 순으로 한 번 훑는다)
     conn.execute("CREATE TEMP TABLE sa_odd (order_id TEXT PRIMARY KEY) WITHOUT ROWID")
     conn.execute(
@@ -273,7 +283,7 @@ def tally(
     t = Tally(window=(start, end))
     with store.analysis() as conn:
         try:
-            _build(conn, p)
+            _build(conn, p, store.use_summary and sales_summary.ready(conn, tenant_id))
             _sql_part(conn, p, t)
             odd = _odd_orders(store, conn, tenant_id)
             created = int(conn.execute(

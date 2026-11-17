@@ -420,6 +420,8 @@ def big_store(path: str, orders: int, customers: bool) -> SalesStore:
                  for k, v in (("age_band", ages), ("gender", sexes), ("occupation", jobs))],
             )  # fmt: skip
     store.finish_sync(TENANT, "shop-api", NOW - timedelta(minutes=1), None)
+    # SQL로 바로 넣은 주문은 수집기를 거치지 않아 구매자 요약 표를 처음부터 채운다 (11/18)
+    store.rebuild_summary(TENANT)
     return store
 
 

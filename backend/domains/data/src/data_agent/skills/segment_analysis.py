@@ -677,7 +677,9 @@ def favorites(  # noqa: PLR0913
         bought: list[tuple[str, str, int, int]] = []
         titles: dict[str, str] = {}
         if not suppressed:
-            bought, titles = s.item_counts(filters), s.titles()
+            bought = s.item_counts(filters)
+            # 상품 이름은 순위에 나갈 수 있는 상품만 찾는다 (11/18: 기간 줄 전체를 다시 잇지 않게)
+            titles = s.titles(ids=products_to_name(bought, segment_n, overall_n, least, top))
     internal: list[FavoriteItem] = []
     if not suppressed:
         names: dict[str, Callable[[str], str | None]] = {
@@ -694,6 +696,30 @@ def favorites(  # noqa: PLR0913
         internal=internal,
     )
     return out.model_copy(update={"summary": favorites_summary(out, least)})
+
+
+def products_to_name(
+    bought: Sequence[tuple[str, str, int, int]], segment_n: int, overall_n: int, least: int,
+    top: int,
+) -> set[str]:  # fmt: skip
+    """`ranked`가 상품 순위에 넣을 수 있는 상품 id: 보이는 상품 중 (구매 비율, 배수)로 상위
+    `top`개와 그 경계와 같은 값인 상품(이름으로 순서가 갈릴 수 있음). 보이는 상품이 `top`개보다
+    적으면 숨긴 상품(이름 순으로 뒤에 붙는다)도 모두. 나머지 상품은 이름 없이도 순위가 같다."""
+    shown: list[tuple[float, float, str]] = []
+    hidden: list[str] = []
+    for kind, code, total, n in bought:
+        if kind != "product" or n == 0:
+            continue
+        if n < least:
+            hidden.append(code)
+            continue
+        share = ratio(n, segment_n)
+        shown.append((share or 0, lift(share, ratio(total, overall_n)) or 0, code))
+    shown.sort(key=lambda x: (-x[0], -x[1]))
+    if len(shown) <= top:
+        return {c for *_, c in shown} | set(hidden)
+    edge = shown[top - 1][:2]
+    return {c for share, lf, c in shown if (share, lf) >= edge}
 
 
 def ranked(  # noqa: PLR0913

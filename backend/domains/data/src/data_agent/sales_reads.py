@@ -201,6 +201,20 @@ def warm_enabled(env: Mapping[str, str] | None = None) -> bool:
     return (env.get(WARM_ENV) or "1").strip() not in {"0", "false", "off"}
 
 
+async def ensure_summary(store: SalesStore, tenant_id: str) -> bool:
+    """구매자 요약 표가 비어 있으면(준비되지 않았으면) 채운다 (11/18). 채웠으면 True.
+
+    데이터 AI가 시작할 때와 미리 계산 루프마다 부른다. 실패해도 분석은 예전 SQL로 돈다."""
+    try:
+        result = await asyncio.to_thread(store.ensure_summary, tenant_id)
+    except Exception:  # noqa: BLE001 - 채우기가 실패해도 서버는 계속 돈다 (예전 방식으로 센다)
+        logger.warning("구매자 요약 표를 채우지 못함", exc_info=True)
+        return False
+    if result is not None:
+        logger.info("구매자 요약 표 채움: 구매자 %s명, 항목 %s줄", result.buyers, result.items)
+    return result is not None
+
+
 async def run_forever(
     get_store: Callable[[], SalesStore],
     get_catalog: Callable[[], MetricCatalog],
@@ -212,6 +226,8 @@ async def run_forever(
     while True:
         try:
             store = get_store()
+            # 요약 표가 준비되지 않았으면(예전 파일·리셋 뒤 바꿔 끼운 파일) 먼저 채운다
+            await ensure_summary(store, tenant_id)
             version = await asyncio.to_thread(store.data_version, tenant_id)
             if version and version != last:
                 done = await asyncio.to_thread(

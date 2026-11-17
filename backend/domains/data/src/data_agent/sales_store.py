@@ -36,6 +36,7 @@ from pathlib import Path
 
 from ax_contracts.data_access.shop_customers import CustomerRow
 from ax_contracts.data_access.shop_sales import SalesOrderRow
+from data_agent import sales_summary
 from data_agent.sales_clean import EXCLUDED_STATUSES, PAID, clean
 
 logger = logging.getLogger(__name__)
@@ -266,6 +267,9 @@ class SalesStore:
     - `:memory:`(시험)는 연결끼리 자료를 나눌 수 없어 예전처럼 쓰기 연결을 잠금으로 같이 쓴다
     """
 
+    # 분석이 구매자 요약 표(`sales_summary`)를 쓸지 (비교 시험은 False로 예전 SQL과 견준다)
+    use_summary: bool = True
+
     def __init__(self, path: str | Path) -> None:
         self.memory = str(path) == ":memory:"
         if not self.memory:
@@ -284,6 +288,9 @@ class SalesStore:
             self._add_missing_columns()
             self._conn.executescript(_AFTER_COLUMNS)
             self.store_id = self._ensure_store_id()
+            # 구매자 요약 표 (11/18, `sales_summary`). 주문이 없는 새 저장소면 처음부터 준비됨
+            self._conn.executescript(sales_summary.SCHEMA)
+            sales_summary.mark_new_store(self._conn)
 
     def _ensure_store_id(self) -> str:
         """저장소 생성 id: 없으면(새 파일·예전 파일) 한 번만 만들어 남기고, 있으면 그대로 읽는다."""
@@ -411,9 +418,16 @@ class SalesStore:
         """정제해서 덮어쓴다. 한 트랜잭션(페이지 하나가 함께 저장되거나 함께 취소된다)."""
         saved = dropped_orders = dropped_parts = 0
         stamp = iso(synced_at)
+        touched: set[str] = set()  # 요약 표를 다시 셀 구매자 (주문의 예전·새 buyer_id)
         with self._tx() as conn:
             for row in rows:
                 key = (tenant_id, row.order_id)
+                before = conn.execute(
+                    "SELECT buyer_id FROM sales_orders WHERE tenant_id = ? AND order_id = ?", key
+                ).fetchone()
+                if before is not None:
+                    touched.add(before["buyer_id"])
+                touched.add(row.buyer_id)
                 for table in ("sales_order_lines", "sales_refunds", "sales_dropped"):
                     conn.execute(f"DELETE FROM {table} WHERE tenant_id = ? AND order_id = ?", key)
                 result = clean(row)
@@ -496,8 +510,34 @@ class SalesStore:
                 )
                 saved += 1
             if saved or dropped_orders or dropped_parts:
+                # 그 구매자 줄만 다시 센다 (전체 재계산 아님). 버전을 올리는 같은 거래 안
+                sales_summary.refresh(self, conn, tenant_id, touched)
                 self._bump_version(conn, tenant_id)  # 결과 캐시를 버리게 (`sales_cache`)
         return UpsertResult(saved, dropped_orders, dropped_parts)
+
+    # ------------------------------------------------------------------ 구매자 요약 표 (11/18)
+
+    def summary_ready(self, tenant_id: str) -> bool:
+        """요약 표가 이 고객사 주문과 맞는지 (아니면 분석은 예전 SQL로 센다)."""
+        with self.reading() as conn:
+            return sales_summary.ready(conn, tenant_id)
+
+    def rebuild_summary(self, tenant_id: str) -> sales_summary.RebuildResult:
+        """요약 표를 처음부터 채운다 (예전 파일·SQL로 바로 넣은 주문). 저장소 버전도 올린다."""
+        with self._tx() as conn:
+            result = sales_summary.rebuild(self, conn, tenant_id)
+            self._bump_version(conn, tenant_id)
+        return result
+
+    def ensure_summary(self, tenant_id: str) -> sales_summary.RebuildResult | None:
+        """준비되지 않았으면 채운다 (데이터 AI 시작·리셋 직후). 이미 준비됐으면 None."""
+        if self.summary_ready(tenant_id):
+            return None
+        return self.rebuild_summary(tenant_id)
+
+    def summary_counts(self, tenant_id: str) -> sales_summary.RebuildResult:
+        with self.reading() as conn:
+            return sales_summary.counts(conn, tenant_id)
 
     def upsert_customers(
         self, tenant_id: str, rows: Iterable[CustomerRow], synced_at: datetime
@@ -894,6 +934,8 @@ class SegmentSession:
             f"AND o.payment_status = :paid AND LOWER(o.status) NOT IN ({excluded})"
         )
         self.drop()
+        self.start, self.end = start, end
+        self.sum_window, self.sum_all = self._summary_use(start, end)
         cols = "".join(f", v{i} TEXT" for i in range(len(self.keys)))
         conn.execute(f"CREATE TEMP TABLE seg_attrs (buyer_id TEXT PRIMARY KEY{cols}) WITHOUT ROWID")
         if self.keys:
@@ -906,6 +948,29 @@ class SegmentSession:
                 f"WHERE tenant_id = :t AND key IN ({marks}) GROUP BY buyer_id",
                 {"t": tenant_id, **{f"k{i}": k for i, k in enumerate(self.keys)}},
             )
+
+    def _summary_use(self, start: datetime, end: datetime) -> tuple[bool, bool]:
+        """구매자 요약 표(`sales_summary`)로 셀 수 있는지: (기간 [start, end)로, 전체 기록으로).
+
+        - 기간: "기간 안에 결제 완료 주문이 있다" = 마지막 결제 ≥ start. 기간 끝 뒤 결제가 없을 때만
+          같다 (기간 끝 = 지금이면 늘 같다) → 요약 표의 가장 늦은 마지막 결제가 end 전이어야 한다
+        - 전체 기록(첫 구매·결제 수·두 번째 결제): 위 조건 + 가장 이른 첫 결제가 start 이후
+        - 요약 표가 준비되지 않았거나 `SalesStore.use_summary`가 False면 둘 다 False (예전 SQL)
+        """
+        if not self.store.use_summary or not sales_summary.ready(self.conn, self.tenant_id):
+            return False, False
+        row = self.conn.execute(
+            "SELECT MAX(last_paid_at) AS hi, MIN(first_paid_at) AS lo FROM sales_buyer_summary "
+            "WHERE tenant_id = ?",
+            (self.tenant_id,),
+        ).fetchone()
+        window = row["hi"] is None or row["hi"] < iso(end)
+        return window, window and (row["lo"] is None or row["lo"] >= iso(start))
+
+    _ITEMS = (
+        "SELECT i.item_code AS code, i.buyer_id FROM sales_buyer_items i WHERE i.tenant_id = :t "
+        "AND i.level = :lv AND i.last_paid_at >= :s"
+    )
 
     def drop(self) -> None:
         for name in ("seg_attrs", "seg_lines", "seg_buyers", "seg_first", "seg_pi"):
@@ -950,12 +1015,23 @@ class SegmentSession:
 
     def buyer_cells(self) -> Cells:
         """기간 안 결제 완료 구매자 수: 셀 → 명."""
+        if self.sum_window:  # 요약 표: 마지막 결제가 기간 시작 이후
+            return self._cells_of(
+                "SELECT buyer_id FROM sales_buyer_summary WHERE tenant_id = :t "
+                "AND last_paid_at >= :s"
+            )
         return self._cells_of(
             f"SELECT DISTINCT o.buyer_id FROM sales_orders o WHERE {self.paid_where}"
         )
 
     def active_cells(self, start: datetime, end: datetime) -> Cells:
         """다른 기간 [start, end)의 결제 완료 구매자 수 (예: 대상 고객 = 최근 365일): 셀 → 명."""
+        if self.sum_window and end >= self.end:  # 끝이 세션 끝 이후면 요약 표 조건이 같다
+            return self._cells_of(
+                "SELECT buyer_id FROM sales_buyer_summary WHERE tenant_id = :t "
+                "AND last_paid_at >= :s",
+                {"s": iso(start)},
+            )
         return self._cells_of(
             f"SELECT DISTINCT o.buyer_id FROM sales_orders o WHERE {self.paid_where}",
             {"s": iso(start), "e": iso(end)},
@@ -963,6 +1039,12 @@ class SegmentSession:
 
     def item_cells(self, kind: str, code: str) -> Cells:
         """그 대상(장르·분류·상품)이 든 결제 완료 주문의 구매자 수: 셀 → 명 (줄 인덱스로 찾는다)."""
+        if self.sum_window:
+            return self._cells_of(
+                "SELECT i.buyer_id FROM sales_buyer_items i WHERE i.tenant_id = :t "
+                "AND i.level = :lv AND i.item_code = :code AND i.last_paid_at >= :s",
+                {"lv": kind, "code": code},
+            )
         column = ITEM_COLUMNS[kind]
         return self._cells_of(
             f"SELECT DISTINCT o.buyer_id FROM sales_order_lines l INDEXED BY {LINE_INDEX[kind]} "
@@ -975,13 +1057,24 @@ class SegmentSession:
     def item_counts(self, filters: dict[str, str]) -> list[tuple[str, str, int, int]]:
         """(종류, code, 산 구매자 수, 그중 속성 조건이 모두 맞는 구매자 수). 종류는 genre·
         category·product, 빈 code는 세지 않는다. `filters`의 key는 세션 `keys`에 있어야 한다."""
-        self.lines()
         match = " AND ".join(
             f"a.v{self.keys.index(k)} = :f{i}" for i, k in enumerate(filters)
         ) or "1"  # fmt: skip
         params = {f"f{i}": v for i, v in enumerate(filters.values())}
         segment = f"SELECT a.buyer_id FROM seg_attrs a WHERE {match}"
         out: list[tuple[str, str, int, int]] = []
+        if self.sum_window:  # 요약 표: (사람, 항목)당 한 줄이라 COUNT(*) = 구매자 수
+            for kind in ITEM_COLUMNS:
+                rows = self._all(
+                    "SELECT i.item_code AS code, COUNT(*) AS total, "
+                    f"SUM(CASE WHEN i.buyer_id IN ({segment}) THEN 1 ELSE 0 END) AS n "
+                    "FROM sales_buyer_items i WHERE i.tenant_id = :t AND i.level = :lv "
+                    "AND i.last_paid_at >= :s GROUP BY i.item_code",
+                    {**params, "lv": kind},
+                )
+                out += [(kind, r["code"], int(r["total"]), int(r["n"])) for r in rows]
+            return out
+        self.lines()
         for kind, column in ITEM_COLUMNS.items():
             rows = self._all(
                 f"SELECT {column} AS code, COUNT(DISTINCT buyer_id) AS total, "
@@ -1017,13 +1110,20 @@ class SegmentSession:
 
     def genre_cells(self) -> dict[str, Cells]:
         """장르 → (그 장르가 든 결제 완료 주문의 구매자 수: 셀 → 명)."""
-        self.lines()
         cols = "".join(f", a.v{i}" for i in range(len(self.keys)))
-        rows = self._all(
-            f"SELECT x.g{cols}, COUNT(*) AS n FROM (SELECT DISTINCT genre_code AS g, buyer_id "
-            f"FROM seg_lines WHERE {_NON_EMPTY.format(c='genre_code')}) x "
-            f"LEFT JOIN seg_attrs a ON a.buyer_id = x.buyer_id GROUP BY x.g{cols}"
-        )
+        if self.sum_window:
+            rows = self._all(
+                f"SELECT x.code AS g{cols}, COUNT(*) AS n FROM ({self._ITEMS}) x "
+                f"LEFT JOIN seg_attrs a ON a.buyer_id = x.buyer_id GROUP BY x.code{cols}",
+                {"lv": "genre"},
+            )
+        else:
+            self.lines()
+            rows = self._all(
+                f"SELECT x.g{cols}, COUNT(*) AS n FROM (SELECT DISTINCT genre_code AS g, buyer_id "
+                f"FROM seg_lines WHERE {_NON_EMPTY.format(c='genre_code')}) x "
+                f"LEFT JOIN seg_attrs a ON a.buyer_id = x.buyer_id GROUP BY x.g{cols}"
+            )
         out: dict[str, Cells] = {}
         for r in rows:
             cell = tuple(r[f"v{i}"] for i in range(len(self.keys)))
@@ -1063,6 +1163,17 @@ class SegmentSession:
             "CREATE TEMP TABLE seg_pi (code TEXT, buyer_id TEXT, PRIMARY KEY (code, buyer_id)) "
             "WITHOUT ROWID"
         )
+        if self.sum_window:  # 요약 표 (사람, 항목)를 항목 인덱스 순으로 그대로 옮긴다
+            self.conn.execute(
+                f"INSERT INTO seg_pi {self._ITEMS}"
+                + (f" AND i.buyer_id IN ({segment})" if match else ""),
+                {**self.params, "lv": level,
+                 **{f"f{i}": v for i, v in enumerate(filters.values())}},  # fmt: skip
+            )
+            self.conn.execute("CREATE INDEX temp.seg_pi_buyer ON seg_pi(buyer_id, code)")
+            self._pi = want
+            self._pi_filtered = False
+            return
         # 줄 인덱스(code, 주문 id)를 덮어 읽고 주문은 주문 id로 찾는다 (줄 표 본문을 읽지 않는다).
         # code 순으로 읽혀 (code, 사람) 키에 거의 차례로 들어간다
         self.conn.execute(
@@ -1172,6 +1283,14 @@ class SegmentSession:
             "CREATE TEMP TABLE seg_buyers (buyer_id TEXT PRIMARY KEY, first_at TEXT NOT NULL, "
             "last_at TEXT NOT NULL, orders INTEGER NOT NULL) WITHOUT ROWID"
         )
+        if self.sum_all:  # 세션이 전체 기록을 보면 요약 표 그대로
+            self.conn.execute(
+                "INSERT INTO seg_buyers SELECT buyer_id, first_paid_at, last_paid_at, paid_orders "
+                "FROM sales_buyer_summary WHERE tenant_id = :t",
+                self.params,
+            )
+            self._buyers = True
+            return
         self.conn.execute(
             "INSERT INTO seg_buyers SELECT o.buyer_id, MIN(o.created_at), MAX(o.created_at), "
             f"COUNT(*) FROM sales_orders o WHERE {self.paid_where} GROUP BY o.buyer_id",
@@ -1196,6 +1315,25 @@ class SegmentSession:
         def until(days: int) -> str:
             return f"strftime('%Y-%m-%dT%H:%M:%SZ', substr(b.first_at, 1, 19), '+{days} days')"
 
+        if self.sum_all:
+            # 요약 표: N일 안 결제 2건 이상 = 두 번째 결제가 첫 구매 + N일 전 (주문을 훑지 않음)
+            rows = self._all(
+                "SELECT strftime('%Y-%m', substr(b.first_at, 1, 19), '+9 hours') AS m"
+                f"{self._cell_cols()}, COUNT(*) AS n, "
+                + ", ".join(
+                    f"SUM(CASE WHEN s.second_paid_at IS NOT NULL AND s.second_paid_at < {until(d)} "
+                    f"THEN 1 ELSE 0 END) AS r{d}"
+                    for d in REPEAT_DAYS
+                )
+                + " FROM seg_buyers b CROSS JOIN sales_buyer_summary s ON s.tenant_id = :t "
+                "AND s.buyer_id = b.buyer_id LEFT JOIN seg_attrs a ON a.buyer_id = b.buyer_id "
+                f"WHERE b.first_at >= :cf AND b.first_at < :ct GROUP BY m{self._cell_cols()}",
+                {"cf": iso(first_from), "ct": iso(first_to)},
+            )
+            return [
+                (r["m"], self._cell(r), int(r["n"]), int(r["r30"]), int(r["r60"]), int(r["r90"]))
+                for r in rows
+            ]
         rows = self._all(
             "WITH c AS (SELECT b.buyer_id, "
             + ", ".join(
@@ -1238,6 +1376,15 @@ class SegmentSession:
     def regular_genres(self, min_orders: int) -> list[tuple[tuple, str, int]]:
         """단골이 산 장르: (셀, genre_code, 그 장르를 산 단골 수). 세션 기간 안 결제 완료 줄."""
         self.buyers()
+        if self.sum_all:
+            rows = self._all(
+                f"SELECT x.code AS g{self._cell_cols()}, COUNT(*) AS n FROM ({self._ITEMS}) x "
+                "CROSS JOIN seg_buyers b ON b.buyer_id = x.buyer_id "
+                "LEFT JOIN seg_attrs a ON a.buyer_id = x.buyer_id WHERE b.orders >= :min "
+                f"GROUP BY x.code{self._cell_cols()}",
+                {"min": min_orders, "lv": "genre"},
+            )
+            return [(self._cell(r), r["g"], int(r["n"])) for r in rows]
         self.lines()
         rows = self._all(
             f"SELECT x.genre_code AS g{self._cell_cols()}, COUNT(DISTINCT x.buyer_id) AS n "
@@ -1258,6 +1405,13 @@ class SegmentSession:
             "CREATE TEMP TABLE seg_first (buyer_id TEXT PRIMARY KEY, first_at TEXT NOT NULL, "
             "src TEXT) WITHOUT ROWID"
         )
+        if self.sum_all:  # 요약 표의 첫 결제 시각·유입 출처 (첫 순서 = 접수 시각, 주문 id)
+            self.conn.execute(
+                "INSERT INTO seg_first SELECT buyer_id, first_paid_at, first_src_source "
+                "FROM sales_buyer_summary WHERE tenant_id = :t ORDER BY buyer_id",
+                self.params,
+            )
+            return
         self.conn.execute(
             "INSERT INTO seg_first SELECT buyer_id, created_at, src_source FROM (SELECT "
             "o.buyer_id, o.created_at, o.src_source, ROW_NUMBER() OVER (PARTITION BY o.buyer_id "

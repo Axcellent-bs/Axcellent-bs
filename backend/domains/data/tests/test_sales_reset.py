@@ -133,3 +133,76 @@ def test_cache_key_differs_after_reset(env: dict[str, str]) -> None:
         new.close()
     assert got_old.value == "옛 결과"
     assert got_new.value == "새 결과" and not got_new.hit
+
+
+# ---------------------------------------------------------------- 구매자 요약 표 (11/18)
+
+
+def _summary_rows(store: SalesStore) -> tuple[list, list]:
+    with store.reading() as conn:
+        return (
+            [tuple(r) for r in conn.execute("SELECT * FROM sales_buyer_summary ORDER BY 1, 2")],
+            [tuple(r) for r in conn.execute("SELECT * FROM sales_buyer_items ORDER BY 1, 2, 3, 4")],
+        )
+
+
+def test_reset_fills_the_summary_tables_in_the_new_store(
+    env: dict[str, str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    db = Path(env["DATA_SALES_DB"])
+    _old_store(db, env)
+    assert sales_collect.main(["--reset"]) == 0
+    out = capsys.readouterr().out
+    store = SalesStore(db)
+    try:
+        assert store.summary_ready(TENANT)
+        counts = store.summary_counts(TENANT)
+        assert counts.buyers > 0 and counts.items > 0
+        assert f"[sales] 요약 표: 구매자 {counts.buyers:,}명, 항목 {counts.items:,}줄" in out
+        assert "(수집하며 채움)" in out
+        collected = _summary_rows(store)
+        store.rebuild_summary(TENANT)
+        assert _summary_rows(store) == collected  # 수집하며 채운 것 = 처음부터 채운 것
+        old_ids = {r[1] for r in collected[0]}
+        assert not any(b.startswith("old_") for b in old_ids)  # 옛 저장소 구매자는 없다
+    finally:
+        store.close()
+
+
+def test_empty_summary_is_filled_automatically_right_after_reset(
+    env: dict[str, str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """리셋 직후 요약 표가 비어 있어도(준비됨 줄 없는 파일로 바꿔 끼운 경우) 데이터 AI가 채운다."""
+    import asyncio
+    import sqlite3
+
+    from data_agent import sales_reads, sales_summary
+
+    db = Path(env["DATA_SALES_DB"])
+    assert sales_collect.main(["--reset"]) == 0
+    capsys.readouterr()
+    store = SalesStore(db)
+    want = _summary_rows(store)
+    store.close()
+    conn = sqlite3.connect(db)
+    conn.execute("DELETE FROM sales_buyer_summary")
+    conn.execute("DELETE FROM sales_buyer_items")
+    conn.execute("DELETE FROM sync_state WHERE tenant_id = ?", (sales_summary.SUMMARY_TENANT,))
+    conn.commit()
+    conn.close()
+    store = SalesStore(db)
+    try:
+        assert not store.summary_ready(TENANT)
+        assert asyncio.run(sales_reads.ensure_summary(store, TENANT)) is True
+        assert store.summary_ready(TENANT) and _summary_rows(store) == want
+    finally:
+        store.close()
+
+
+def test_rebuild_summary_command(env: dict[str, str], capsys: pytest.CaptureFixture[str]) -> None:
+    db = Path(env["DATA_SALES_DB"])
+    _old_store(db, env)
+    assert sales_collect.main(["--rebuild-summary"]) == 0
+    out = capsys.readouterr().out
+    assert "[sales] 요약 표: 구매자 " in out and "(처음부터 다시 채움)" in out
+    assert sales_collect.main(["--rebuild-summary", "--reset"]) == 2

@@ -4,6 +4,7 @@
     uv run python -m data_agent.sales_collect              # 한 번
     uv run python -m data_agent.sales_collect --every 300  # 5분마다 (Ctrl+C로 멈춤)
     uv run python -m data_agent.sales_collect --reset      # 저장소를 비우고 처음부터 다시 받기
+    uv run python -m data_agent.sales_collect --rebuild-summary  # 구매자 요약 표를 다시 채우기
 
 `--reset` (11/17): 판매 서버 자료를 갈아 끼웠는데 주문 updated_at이 과거라 이어 받기 커서 뒤라서
 안 들어올 때 쓴다.
@@ -468,7 +469,16 @@ def reset_summary(  # noqa: PLR0913 - 요약에 적을 재료
         f"[sales] 어제까지 7일({start:%m/%d}~{last_day:%m/%d}) 결제 완료 {week.orders:,}건, "
         f"매출 {week.revenue:,}원",
         f"[sales] 유입 출처별 주문 (전체): {sources or '주문 없음'}",
+        summary_line(store, tenant),
     ]
+
+
+def summary_line(store: SalesStore, tenant: str, filled: bool | None = None) -> str:
+    """구매자 요약 표 한 줄 (11/18): 채운 구매자·항목 줄 수와 준비됐는지."""
+    counts = store.summary_counts(tenant)
+    how = "처음부터 다시 채움" if filled else "수집하며 채움"
+    state = how if store.summary_ready(tenant) else "준비 안 됨 (분석은 예전 방식)"
+    return f"[sales] 요약 표: 구매자 {counts.buyers:,}명, 항목 {counts.items:,}줄 ({state})"
 
 
 async def reset(env: Mapping[str, str], now: datetime | None = None) -> int:
@@ -505,6 +515,7 @@ async def reset(env: Mapping[str, str], now: datetime | None = None) -> int:
             print(f"[sales] 리셋 실패: {RESET_ROUNDS}번 받아도 끝나지 않음", flush=True)
             print(undo, flush=True)
             return 1
+        store.ensure_summary(tenant)  # 새 저장소는 수집하며 채운다. 준비되지 않았으면 여기서 채운다
         for line in reset_summary(store, tenant, name, backup, datetime.now(UTC)):
             print(line, flush=True)
         return 0
@@ -515,6 +526,18 @@ async def reset(env: Mapping[str, str], now: datetime | None = None) -> int:
     finally:
         if store is not None:
             store.close()
+
+
+def rebuild_summary(env: Mapping[str, str]) -> int:
+    """구매자 요약 표를 기존 주문으로 다시 채운다 (잠금은 부르는 쪽이 잡는다)."""
+    tenant = (env.get(TENANT_ENV) or TENANT_ID_DEFAULT).strip()
+    store = SalesStore(db_path(env))
+    try:
+        store.rebuild_summary(tenant)
+        print(summary_line(store, tenant, filled=True), flush=True)
+        return 0
+    finally:
+        store.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -534,7 +557,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="저장소를 옆으로 옮겨 두고(백업) 주문·고객을 처음부터 다시 받는다 (한 번만)",
     )
+    parser.add_argument(
+        "--rebuild-summary",
+        action="store_true",
+        help="구매자 요약 표를 기존 주문으로 처음부터 다시 채운다 (한 번만, 주문은 받지 않음)",
+    )
     args = parser.parse_args(argv)
+    if args.rebuild_summary and (args.reset or args.every is not None):
+        print("[sales] --rebuild-summary는 혼자 한 번만 실행", flush=True)
+        return 2
     if args.reset and args.every is not None:
         print("[sales] --reset은 한 번만 실행 (--every와 같이 쓸 수 없음)", flush=True)
         return 2
@@ -553,6 +584,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[sales] 이미 다른 수집기가 돌고 있음 (잠금 {path}): 끝냄", flush=True)
         return 0
     try:
+        if args.rebuild_summary:
+            return rebuild_summary(env)
         if args.reset:
             return asyncio.run(reset(env))
         return asyncio.run(run(every, env))
