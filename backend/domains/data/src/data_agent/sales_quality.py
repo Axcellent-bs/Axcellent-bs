@@ -101,6 +101,46 @@ def quality(
     )
 
 
+def quality_counted(
+    store: SalesStore,
+    tenant_id: str,
+    w: Window,
+    rows_in_period: int,
+    cfg: CatalogSales | None,
+) -> SalesQuality:
+    """`quality`와 같은 보고를 주문을 파이썬으로 읽지 않고 저장소 집계로 만든다 (고객·시장 분석).
+    `rows_in_period`는 기간 안 주문 수(상태 무관, `SalesStore.order_counts`)."""
+    have = store.order_days(tenant_id, w.start, w.end)
+    categories, genres = store.unknown_line_codes(
+        tenant_id, w.start, w.end, cfg.categories if cfg else {}, cfg.genres if cfg else {}
+    )
+    dropped = store.dropped(tenant_id, w.start, w.end)
+    return SalesQuality(
+        rows_in_period=rows_in_period,
+        empty_days=[d.isoformat() for d in days_in(w.start, w.end) if d.isoformat() not in have],
+        dropped_rows=sum(dropped.values()),
+        dropped_reasons=dropped,
+        last_synced_at=store.sync_state(tenant_id).last_synced_at,
+        unknown_category_codes=sorted(categories),
+        unknown_genres=sorted(genres),
+        unmapped_attribute_values=unmapped_attributes(store, tenant_id, cfg),
+    )
+
+
+def quality_brief(
+    store: SalesStore, tenant_id: str, w: Window, rows_in_period: int
+) -> SalesQuality:
+    """관문에 먼저 걸려 숫자를 내지 않을 때의 짧은 보고: 기간 안 주문 수(COUNT 하나)·버린 행·
+    마지막 수집만 (빈 날·이름 없는 코드는 세지 않는다)."""
+    dropped = store.dropped(tenant_id, w.start, w.end)
+    return SalesQuality(
+        rows_in_period=rows_in_period,
+        dropped_rows=sum(dropped.values()),
+        dropped_reasons=dropped,
+        last_synced_at=store.sync_state(tenant_id).last_synced_at,
+    )
+
+
 def unmapped_attributes(
     store: SalesStore, tenant_id: str, cfg: CatalogSales | None
 ) -> dict[str, list[str]]:

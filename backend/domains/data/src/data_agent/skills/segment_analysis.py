@@ -10,6 +10,10 @@ LLM을 쓰지 않고 회사 상태를 바꾸지 않는다(grade read). 숫자는
   `basis.previous_*`는 기간 시작 시각과 같다(계약 주석)
 - 구매자 = 기간 안 결제 완료 주문(`sales_clean.counts_as_revenue`)이 있는 가명 buyer_id. 환불은
   구매 여부를 바꾸지 않는다
+- 읽기(11/17): 주문을 파이썬으로 올리지 않는다. 관문(고객 기록 없음·고객 내보내기 오류)을 먼저
+  보고 걸리면 주문 수 COUNT 하나만 읽고 끝낸다. 숫자는 `SalesStore.segment_session`의 SQL 집계
+  (GROUP BY·COUNT(DISTINCT buyer_id))로 받은 "속성 값 셀 → 구매자 수"에서 계산한다. 숨김 규칙
+  (`protect`·`determined_cells`)은 그대로이고 입력만 집계 숫자다
 - 속성 값이 없거나 카탈로그에 없는 값이면 "모름"이다. 비율의 분모는 그 속성 값을 아는 구매자다
   (모름은 `unknown_buyers`로 따로 센다). 그래서 한 속성의 값 비율 합은 1이다
 - 개인정보: 집단 통계만 낸다. 묶음이 `min_group_size`(기본 5)명 미만이면 `suppressed=True`이고
@@ -70,7 +74,8 @@ from __future__ import annotations
 import asyncio
 import itertools
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from fractions import Fraction
@@ -102,9 +107,21 @@ from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.data4library import Data4LibraryConnector
 from data_agent.connectors.kosis import KosisConnector, KosisDataPoint
 from data_agent.connectors.naver_shopping import NaverShoppingConnector
-from data_agent.sales_clean import counts_as_revenue
-from data_agent.sales_quality import INSUFFICIENT, KST, Window, gate, quality
-from data_agent.sales_store import FAKE_SOURCE, SalesStore, StoredOrder, customers_source
+from data_agent.sales_quality import (
+    INSUFFICIENT,
+    KST,
+    Window,
+    gate,
+    quality_brief,
+    quality_counted,
+)
+from data_agent.sales_store import (
+    FAKE_SOURCE,
+    Cells,
+    SalesStore,
+    SegmentSession,
+    customers_source,
+)
 from data_agent.skills.sales_analysis import FAKE_DATA, NO_CATEGORY, NO_PRODUCT
 
 SEGMENT_DAYS: dict[str, int] = {"1d": 1, "7d": 7, "30d": 30, "90d": 90, "365d": 365}
@@ -146,18 +163,28 @@ def segment_window(period: SegmentPeriod, now: datetime) -> Window:
 
 @dataclass
 class Snapshot:
-    """한 기간을 저장소에서 읽은 것: 결제 완료 주문, 구매자 속성, 품질 보고, 관문 이유, 근거."""
+    """한 기간의 관문 결과(품질 보고·이유·근거). 숫자는 `session`으로 집계해 받는다.
+
+    주문을 파이썬으로 올리지 않는다. `SalesStore.segment_session`이 SQL GROUP BY·
+    COUNT(DISTINCT buyer_id)로 구매자 수만 돌려준다. 구매자는 기간 안 결제 완료 주문이 있는 가명
+    buyer_id, 셀은 구매자마다 속성 값을 `keys` 순서로 묶은 것이다(없으면 None).
+    """
 
     window: Window
-    paid: list[StoredOrder]
-    attrs: dict[str, dict[str, str]]  # buyer_id → 속성 (없는 key = 모름)
     report: SalesQuality
     reasons: list[str]
     basis: SalesBasis
+    store: SalesStore
+    tenant_id: str
 
-    @property
-    def buyers(self) -> set[str]:
-        return {o.buyer_id for o in self.paid}
+    def session(self, keys: Sequence[str]) -> AbstractContextManager[SegmentSession]:
+        return self.store.segment_session(self.tenant_id, self.window.start, self.window.end, keys)
+
+
+def cell_count(cells: Cells, keys: Sequence[str], filters: dict[str, str]) -> int:
+    """셀 중 속성 조건(`filters`, 값이 그대로 같아야 함)이 모두 맞는 구매자 수."""
+    at = [(keys.index(k), v) for k, v in filters.items()]
+    return sum(n for cell, n in cells.items() if all(cell[i] == v for i, v in at))
 
 
 def data_source(store: SalesStore, tenant_id: str) -> str | None:
@@ -186,26 +213,29 @@ def snapshot(
     catalog_id: str,
     now: datetime,
 ) -> Snapshot:
+    """관문을 먼저 본다. 고객 기록 관문(고객 없음·고객 내보내기 오류)에 걸리면 주문 집계를 하지
+    않고 짧은 품질 보고(기간 안 주문 수 COUNT 하나·버린 행·마지막 수집)와 이유만 돌려준다.
+    이유 순서는 예전과 같다(품질 관문 → 고객 기록 관문)."""
     w = segment_window(period, now)
-    created = store.orders_created(tenant_id, w.start, w.end)
-    paid = [o for o in created if counts_as_revenue(o.status, o.payment_status)]
-    customers = store.customers(tenant_id)
-    report = quality(store, tenant_id, w, created, cfg)
-    reasons = gate(report, len(paid), cfg, now)
-    if cfg is not None:
-        reasons += customer_reasons(store, tenant_id)
+    created, paid = store.order_counts(tenant_id, w.start, w.end)
+    early = customer_reasons(store, tenant_id) if cfg is not None else []
+    if early:
+        report = quality_brief(store, tenant_id, w, created)
+    else:
+        report = quality_counted(store, tenant_id, w, created, cfg)
+    reasons = gate(report, paid, cfg, now) + early
     basis = SalesBasis(
         period_from=w.start,
         period_to=w.end,
         previous_from=w.start,
         previous_to=w.start,
-        rows_read=len(created) + len(customers),
+        rows_read=created + store.customer_count(tenant_id),
         last_synced_at=report.last_synced_at,
         catalog_id=catalog_id,
         catalog_version=cfg.version if cfg else None,
         data_source=data_source(store, tenant_id),
     )
-    return Snapshot(w, paid, {c.buyer_id: c.attributes for c in customers}, report, reasons, basis)
+    return Snapshot(w, report, reasons, basis, store, tenant_id)
 
 
 # ---------------------------------------------------------------- 계산 도우미
@@ -380,27 +410,13 @@ def filter_label(filters: dict[str, str], cfg: CatalogSales) -> str:
     return " · ".join(parts)
 
 
-def item_buyers(paid: Iterable[StoredOrder]) -> dict[tuple[str, str], set[str]]:
-    """(종류, code) → 그것을 산 구매자. 종류는 genre·category·product."""
-    found: dict[tuple[str, str], set[str]] = defaultdict(set)
-    for order in paid:
-        for line in order.lines:
-            if line.genre_code:
-                found[("genre", line.genre_code)].add(order.buyer_id)
-            if line.category_code:
-                found[("category", line.category_code)].add(order.buyer_id)
-            if line.product_id:
-                found[("product", line.product_id)].add(order.buyer_id)
-    return found
-
-
-def product_titles(paid: Iterable[StoredOrder]) -> dict[str, str]:
-    titles: dict[str, str] = {}
-    for order in paid:
-        for line in order.lines:
-            if line.product_id and line.title and line.product_id not in titles:
-                titles[line.product_id] = line.title
-    return titles
+def by_value(cells: Cells, at: int, values: dict[str, str]) -> dict[str, int]:
+    """셀의 `at`번째 속성 값별 구매자 수. 카탈로그에 없는 값·모름(None)은 빼고 센다."""
+    out: dict[str, int] = defaultdict(int)
+    for cell, n in cells.items():
+        if cell[at] in values:
+            out[cell[at]] += n
+    return dict(out)
 
 
 def kst_text(moment: datetime) -> str:
@@ -501,7 +517,11 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
 ) -> SegmentProfileOutput:
     """대상(분류·장르·상품)을 산 구매자 vs 기간 전체 구매자의 속성 구성비."""
     snap = snapshot(store, tenant_id, period, cfg, catalog_id, now)
-    titles = product_titles(snap.paid)
+    titles: dict[str, str] = {}
+    if target_kind == "product":
+        w = snap.window
+        found = store.product_title(tenant_id, w.start, w.end, target_code)
+        titles = {target_code: found} if found else {}
     common: dict[str, Any] = {
         "target_kind": target_kind,
         "target_code": target_code,
@@ -531,18 +551,20 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
         return out.model_copy(update={"summary": profile_summary(out)})
 
     least = cfg.min_group_size
-    overall = snap.buyers
-    target = item_buyers(snap.paid).get((target_kind, target_code), set())
-    suppressed = len(target) < least
+    ordered = sorted(keys, key=[a.key for a in cfg.attributes].index)
+    with snap.session(ordered) as s:
+        overall_cells = s.buyer_cells()
+        target_cells = s.item_cells(target_kind, target_code)
+    overall_n, target_n = sum(overall_cells.values()), sum(target_cells.values())
+    suppressed = target_n < least
     breakdowns = []
-    for key in sorted(keys, key=[a.key for a in cfg.attributes].index):
+    for at, key in enumerate(ordered):
         attr = next(a for a in cfg.attributes if a.key == key)
-        t_vals = [known_value(snap.attrs.get(b), key, attr.values) for b in target]
-        o_vals = [known_value(snap.attrs.get(b), key, attr.values) for b in overall]
-        t_known = sum(v is not None for v in t_vals)
-        o_known = sum(v is not None for v in o_vals)
-        unknown = len(target) - t_known
-        counts = [t_vals.count(code) for code in attr.values]
+        t_by = by_value(target_cells, at, attr.values)
+        o_by = by_value(overall_cells, at, attr.values)
+        t_known, o_known = sum(t_by.values()), sum(o_by.values())
+        unknown = target_n - t_known
+        counts = [t_by.get(code, 0) for code in attr.values]
         hidden, hide_unknown = profile_hidden(counts, unknown, least)  # 1차 + 2차 숨김
         shares = []
         for i, (code, label) in enumerate(attr.values.items()):
@@ -550,7 +572,7 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
             if suppressed or i in hidden:
                 shares.append(SegmentShare(value_code=code, label=label, suppressed=True))
                 continue
-            ts, os_ = ratio(n, t_known), ratio(o_vals.count(code), o_known)
+            ts, os_ = ratio(n, t_known), ratio(o_by.get(code, 0), o_known)
             shares.append(
                 SegmentShare(value_code=code, label=label, target_share=ts, overall_share=os_,
                              lift=lift(ts, os_), buyers=n)
@@ -565,9 +587,9 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
         )
     out = SegmentProfileOutput(
         **common,
-        target_buyers=None if suppressed else len(target),
+        target_buyers=None if suppressed else target_n,
         target_suppressed=suppressed,
-        overall_buyers=len(overall),
+        overall_buyers=overall_n,
         attributes=breakdowns,
     )
     return out.model_copy(update={"summary": profile_summary(out, least)})
@@ -633,25 +655,28 @@ def favorites(  # noqa: PLR0913
         out = SegmentFavoritesOutput(**common, status="insufficient", insufficient_reasons=reasons)
         return out.model_copy(update={"summary": favorites_summary(out)})
     least = cfg.min_group_size
-    overall = snap.buyers
-    segment = {
-        b for b in overall if all(snap.attrs.get(b, {}).get(k) == v for k, v in filters.items())
-    }
-    suppressed = len(segment) < least
+    keys = list(filters)
+    with snap.session(keys) as s:
+        cells = s.buyer_cells()
+        overall_n = sum(cells.values())
+        segment_n = cell_count(cells, keys, filters)
+        suppressed = segment_n < least
+        bought: list[tuple[str, str, int, int]] = []
+        titles: dict[str, str] = {}
+        if not suppressed:
+            bought, titles = s.item_counts(filters), s.titles()
     internal: list[FavoriteItem] = []
     if not suppressed:
-        bought = item_buyers(snap.paid)
-        titles = product_titles(snap.paid)
         names: dict[str, Callable[[str], str | None]] = {
             "genre": cfg.genres.get,
             "category": lambda c: cfg.categories.get(c, NO_CATEGORY),
             "product": lambda c: titles.get(c, NO_PRODUCT),
         }
         for kind in ("genre", "category", "product"):
-            internal += ranked(kind, bought, segment, overall, names[kind], least, top)
+            internal += ranked(kind, bought, segment_n, overall_n, names[kind], least, top)
     out = SegmentFavoritesOutput(
         **common,
-        segment_buyers=None if suppressed else len(segment),
+        segment_buyers=None if suppressed else segment_n,
         segment_suppressed=suppressed,
         internal=internal,
     )
@@ -660,28 +685,29 @@ def favorites(  # noqa: PLR0913
 
 def ranked(  # noqa: PLR0913
     kind: str,
-    bought: dict[tuple[str, str], set[str]],
-    segment: set[str],
-    overall: set[str],
+    bought: Sequence[tuple[str, str, int, int]],
+    segment_n: int,
+    overall_n: int,
     name: Callable[[str], str | None],
     least: int,
     top: int,
 ) -> list[FavoriteItem]:
-    """한 종류(장르·분류·상품)의 순위: 집단 구매자 중 산 비율 큰 순. 기준 미만은 뒤에 숨김으로."""
+    """한 종류(장르·분류·상품)의 순위: 집단 구매자 중 산 비율 큰 순. 기준 미만은 뒤에 숨김으로.
+
+    `bought` = (종류, code, 산 구매자 수, 그중 집단 구매자 수) — `SalesStore.item_buyer_counts`."""
     shown: list[FavoriteItem] = []
     hidden: list[FavoriteItem] = []
-    for (k, code), who in bought.items():
+    for k, code, total, n in bought:
         label = name(code)
         if k != kind or label is None:  # 카탈로그에 없는 장르는 품질 보고(unknown_genres)에만
             continue
-        n = len(who & segment)
         if n == 0:
             continue
         if n < least:
             hidden.append(FavoriteItem(kind=kind, code=code, label=label, suppressed=True))
             continue
-        share = ratio(n, len(segment))
-        base = ratio(len(who & overall), len(overall))
+        share = ratio(n, segment_n)
+        base = ratio(total, overall_n)
         shown.append(
             FavoriteItem(kind=kind, code=code, label=label, share=share, lift=lift(share, base),
                          buyers=n)
@@ -943,11 +969,10 @@ def coverage_buyers(
         return out.model_copy(update={"summary": coverage_summary(out)})
     values = attribute_values(cfg)
     keys = list(pop.attribute_keys)  # 카탈로그 순서
-    counts: dict[tuple[str, ...], int] = defaultdict(int)
-    for buyer in snap.buyers:
-        found = [known_value(snap.attrs.get(buyer), k, values[k]) for k in keys]
-        if all(found):  # 하나라도 모름이면 세지 않는다
-            counts[tuple(str(v) for v in found)] += 1
+    # 셀 = 구매자의 속성 값 묶음. 아래 조합(카탈로그 값만)으로 찾으므로 하나라도 모름이거나
+    # 카탈로그에 없는 값인 구매자는 세지 않는다
+    with snap.session(keys) as s:
+        counts = s.buyer_cells()
     least = cfg.min_group_size
     combos = list(itertools.product(*(list(values[k]) for k in keys)))
     found = [counts.get(combo, 0) for combo in combos]
