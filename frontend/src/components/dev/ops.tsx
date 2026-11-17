@@ -171,7 +171,7 @@ function IncidentPanel({ s, i }: { s: S; i: S['incidents'][number] }) {
       </div>
       <div className="inc-drawer-body">
         <Flow>
-          <Step name="접수" on href={convoHref(i.ctx)} title={`${i.at} · 통합 에이전트`} />
+          <Step name="접수" on href={convoHref(i.ctx)} title={`${i.at} · 총괄 에이전트`} />
           <Step name="원인 PR" on={i.candidates.length > 0} title={i.candidates.map((c) => c.pr).join(', ') || '없음'}>
             <ul>{i.candidates.map((c) => <li key={c.pr}><Ref s={s} id={c.pr} /> · <a href={toPath(`work/specs/${c.spec}/${c.para}`)} className="plain-link" title={`${c.spec} ${c.para}`}>{idText(c.spec)} {c.para}</a> · {c.mergedAt} 머지</li>)}</ul>
           </Step>

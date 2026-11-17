@@ -17,7 +17,7 @@ export type Dept =
 
 export const DEPT_NAME: Record<Dept, string> = {
   planning: '요청·기획서', dev: '개발·배포', hr: '인사', archive: '아카이브', support: '고객지원', marketing: '마케팅', data: '데이터분석',
-  finance: '재무/정산', infra: '인프라(DejaFix)', orchestrator: '통합 에이전트', safety: '안전 레이어',
+  finance: '재무/정산', infra: '인프라(DejaFix)', orchestrator: '총괄 에이전트', safety: '안전 레이어',
   shop: '판매 사이트', memory: '회사 기억', human: '사람',
 }
 
