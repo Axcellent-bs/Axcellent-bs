@@ -1,5 +1,5 @@
 import { SCREEN_KEEP_OUTCOMES, closedTimes, isBackgroundRead } from "./commFilter";
-import { DEV_HOLD_ACTIONS, FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, SETTLEMENT_HOLD_ACTION, SUPPORT_DELETION_HOLD_ACTIONS, type ExecutionRecord } from "./finance";
+import { DEV_HOLD_ACTIONS, FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, PLANNING_HOLD_ACTION, SETTLEMENT_HOLD_ACTION, SUPPORT_DELETION_HOLD_ACTIONS, type ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
 import { isRedeployFailed } from "./rollbackResult";
 export type { Redeploy, RollbackView } from "./rollbackResult";
@@ -137,7 +137,7 @@ const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑�
 /** 보류(C 등급)를 사람이 결정하는 화면. 화면의 보류 칸이 받는 일과 같아야 한다
  *  (환불·고객지원 삭제 /queue, 판매자 정산 /settlements, 마케팅 5종 /marketing, 개발 4종 /dev/work/holds, 나머지는 재무 보류 큐).
  *  마케팅 4종(공지·SNS·영상·캠페인)이 /finance로 가면 재무 보류 큐가 빼고 보여서 결정할 곳이 없었다 (11/17) */
-export function holdPage(action: string | null | undefined): string {
+export function holdPage(action: string | null | undefined, target?: unknown): string {
   // 환불과 개인정보·기한 지난 기록 삭제는 고객지원 보상 큐(/queue)에서 결정한다 (#1229)
   if (action === "refund_request" || (!!action && (SUPPORT_DELETION_HOLD_ACTIONS as readonly string[]).includes(action))) return "/queue";
   if (action === SETTLEMENT_HOLD_ACTION) return "/settlements";
@@ -145,6 +145,11 @@ export function holdPage(action: string | null | undefined): string {
   // 담당 화면이 접힌 일은 안전규칙 화면에 "담당 화면 없음(접힘)"으로만 보인다
   // PR 만들기·머지·되돌리기·자동 머지 기준은 개발 화면 안전 확인 탭에서 결정한다 (#1232)
   if (action && (DEV_HOLD_ACTIONS as readonly string[]).includes(action)) return "/dev/work/holds";
+  // 기획서 확정은 그 기획서 화면의 "교차검증 대기" 칸에서 결정한다. 기획서 번호는 관문 요청의
+  // `params.target`이다(ax_workflow `_execute`). 번호를 모르면 기획서 목록으로 보낸다
+  if (action === PLANNING_HOLD_ACTION) {
+    return typeof target === "string" && target ? `/planning/work/specs/${encodeURIComponent(target)}` : "/planning/work/specs";
+  }
   if (holdFolded(action)) return "/safety";
   return "/finance";
 }
@@ -523,8 +528,8 @@ export function executionItems(rec: ExecutionRecord, room: string = SAFETY_ROOM)
   });
   if (d.status === "held") {
     out.push({
-      kind: "hold", id: `${id}:hold`, at: rec.created_at, room, state: "pending", link: holdPage(req.action),
-      title: `${speaker(req.requester)}의 ${actionKo(req.action)}${amount}`, detail: `담당 화면(${holdPage(req.action)})에서 결정합니다`,
+      kind: "hold", id: `${id}:hold`, at: rec.created_at, room, state: "pending", link: holdPage(req.action, req.params?.target),
+      title: `${speaker(req.requester)}의 ${actionKo(req.action)}${amount}`, detail: `담당 화면(${holdPage(req.action, req.params?.target)})에서 결정합니다`,
     });
   }
   return out;
