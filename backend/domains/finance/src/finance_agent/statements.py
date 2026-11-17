@@ -232,7 +232,10 @@ def income_statement(
             }
             for code, label, note in NOTES
         ],
-        "basis": "국제회계기준(K-IFRS) 손익계산서 형식. 장부(판매 사이트·안전 장치 기록)에 있는 항목만 계산",
+        "basis": (
+            "국제회계기준(K-IFRS) 손익계산서 형식. "
+            "장부(판매 사이트·안전 장치 기록)에 있는 항목만 계산"
+        ),
         "confirmed": {
             "current": now_fixed == now_total,
             "previous": prev_fixed == prev_total,
