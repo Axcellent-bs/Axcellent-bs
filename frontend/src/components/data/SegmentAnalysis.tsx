@@ -490,7 +490,6 @@ export function SegmentAnalysis() {
     <div className="space-y-4">
       <header className="space-y-2">
         <h1 className="text-2xl font-bold tracking-tight">고객·시장 분석</h1>
-        <p className="text-sm text-ink-500">누가 무엇을 사는지, 바깥 시장은 어떤지 보고 다음 이벤트를 제안합니다. 숫자는 코드가 쇼핑몰 기록과 공공 데이터에서 계산하고, AI는 그 숫자로 문장만 씁니다.</p>
         <p className="flex flex-wrap items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
           {DATA_NOTE}
           <Badge text={options?.badge ?? null} />

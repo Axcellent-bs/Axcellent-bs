@@ -33,7 +33,13 @@ export const isHigh = (lift: number | null | undefined) => lift != null && lift 
 
 const DEFAULT_NOUN = "상품";
 
-const PERIOD_LABEL: Record<SegmentPeriod, string> = { "30d": "최근 30일", "90d": "최근 90일", "365d": "최근 1년" };
+const PERIOD_LABEL: Record<SegmentPeriod, string> = {
+  "1d": "최근 1일",
+  "7d": "최근 7일",
+  "30d": "최근 30일",
+  "90d": "최근 3개월",
+  "365d": "최근 1년",
+};
 export const periodLabel = (p: SegmentPeriod) => PERIOD_LABEL[p] ?? "기간 모름";
 
 // ---- 칸 상태: skill이 없거나 실패하면 그 칸만 "준비 중"

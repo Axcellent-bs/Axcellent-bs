@@ -27,7 +27,13 @@ from data_agent.skills.segment_analysis import SEGMENT_LABEL
 
 SKILL = "segment_question"
 DEFAULT_PERIOD: SegmentPeriod = "90d"  # segment_favorites 기본 기간
-PERIODS: dict[str, SegmentPeriod] = {"30d": "30d", "90d": "90d", "365d": "365d"}
+PERIODS: dict[str, SegmentPeriod] = {
+    "1d": "1d",
+    "7d": "7d",
+    "30d": "30d",
+    "90d": "90d",
+    "365d": "365d",
+}
 NOT_UNDERSTOOD = "질문에서 고객 묶음(속성 값)을 찾지 못함"
 NO_ATTRIBUTES = "설정에 고객 속성(attributes)이 없음"
 WHY = {

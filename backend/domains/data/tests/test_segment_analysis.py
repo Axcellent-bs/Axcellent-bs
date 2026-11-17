@@ -30,6 +30,7 @@ from ax_contracts.schemas.data import (
     SegmentAttributeBreakdown,
     SegmentFavoritesOutput,
     SegmentOptionsOutput,
+    SegmentPeriod,
     SegmentProfileOutput,
     SegmentShare,
 )
@@ -616,10 +617,28 @@ def test_options_follow_catalog_order_and_contract() -> None:
     assert [q.label for q in out.quick_questions] == [q.label for q in sales.quick_questions]
     assert [e.code for e in out.event_kinds] == [e.code for e in sales.event_kinds]
     assert out.population_keys == [p.attribute_keys for p in sales.population]
-    assert out.periods == ["30d", "90d", "365d"] and out.min_group_size == sales.min_group_size
+    # 화면 기간: 1일·7일·30일·3개월 (365d는 시장 커버만 쓴다)
+    assert out.periods == ["1d", "7d", "30d", "90d"] and out.min_group_size == sales.min_group_size
     assert out.catalog_id == cat.id and out.catalog_version == sales.version
     empty = seg.options(None, "x", None)
     assert empty.attributes == [] and empty.catalog_id == "x"
+    assert empty.periods == ["1d", "7d", "30d", "90d"]
+
+
+@pytest.mark.parametrize(
+    ("period", "start"),
+    [
+        ("1d", datetime(2026, 11, 15, 15, 0, tzinfo=UTC)),  # 한국 11/16 0시 (오늘)
+        ("7d", datetime(2026, 11, 9, 15, 0, tzinfo=UTC)),  # 한국 11/10 0시
+        ("30d", datetime(2026, 10, 17, 15, 0, tzinfo=UTC)),
+        ("90d", datetime(2026, 8, 18, 15, 0, tzinfo=UTC)),
+    ],
+)
+def test_screen_periods_cut_from_korean_midnight(period: SegmentPeriod, start: datetime) -> None:
+    w = seg.segment_window(period, NOW)
+    assert (w.start, w.end) == (start, NOW)
+    assert w.previous_start == w.previous_end == start  # 직전 비교 없음
+    assert period in seg.SEGMENT_LABEL
 
 
 # ---------------------------------------------------------------- 가짜 출처로 끝까지

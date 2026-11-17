@@ -216,7 +216,7 @@ export interface SalesBasis {
 }
 
 // ---- 고객·시장 분석 (11/16, 계약 #1116 + segment_options). 숫자는 서버 값 그대로
-export type SegmentPeriod = "30d" | "90d" | "365d";
+export type SegmentPeriod = "1d" | "7d" | "30d" | "90d" | "365d";
 export type SegmentTargetKind = "category" | "genre" | "product";
 export type ExternalStatus = "ok" | "key_missing" | "limit" | "error";
 export interface CodeLabel { code: string; label: string }
