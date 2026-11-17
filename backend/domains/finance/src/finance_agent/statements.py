@@ -147,7 +147,7 @@ def frozen_column(
     closings: dict[tuple[str, str], dict[str, Any]] | None, start: date
 ) -> dict[str, int | None] | None:
     """그 달을 확정했으면 확정할 때 저장한 값. 저장이 없으면 None."""
-    snap = ((closings or {}).get(("month", start.isoformat())) or {}).get("snapshot") or {}
+    snap = closing.usable_snapshot((closings or {}).get(("month", start.isoformat()))) or {}
     return snap.get("statement")
 
 

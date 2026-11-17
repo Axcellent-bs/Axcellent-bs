@@ -152,6 +152,8 @@ export interface ClosingReport {
   applied_rules?: AppliedRule[];
   closable?: boolean;
   snapshot_at?: string | null;
+  /** 판매 자료를 통째로 바꾸기 전에 확정한 결산이면 바꾼 시각·이유와 확정 당시 숫자 (표 숫자는 지금 판매 자료 기준) */
+  source_switch?: { switched_at: string | null; note: string; confirmed_lines: ClosingLine[] } | null;
   drift?: { code: string; label: string; confirmed: number; current: number; diff: number }[];
   close_warnings?: { code: string; message: string }[];
   adjustment_proposal?: { journal: { account: string; debit: number; credit: number; memo: string }[]; net: number; signature: string } | null;

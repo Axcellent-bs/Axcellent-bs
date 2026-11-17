@@ -126,7 +126,7 @@ def _with_confirmed(
     values: dict[str, Any], closings: dict[tuple[str, str], dict[str, Any]] | None, start: date
 ) -> tuple[dict[str, Any], bool]:
     """그 달을 확정했으면 확정 숫자를 쓴다. 비용은 줄에 음수로 저장돼 있어 부호를 맞춘다."""
-    snap = ((closings or {}).get(("month", start.isoformat())) or {}).get("snapshot")
+    snap = closing.usable_snapshot((closings or {}).get(("month", start.isoformat())))
     if not snap:
         return values, False
     fixed = {x["code"]: x["amount"] for x in snap["lines"]}

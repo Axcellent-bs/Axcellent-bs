@@ -318,7 +318,7 @@ def budget_from_last_month(
     days = closing.sales_days(books, last_month, this_month)
     short = days < book.closing.budget_min_sales_days
     note = f", 판매 {days}일치라 임시값" if short else ""
-    snap = ((closings or {}).get(("month", last_month.isoformat())) or {}).get("snapshot")
+    snap = closing.usable_snapshot((closings or {}).get(("month", last_month.isoformat())))
     if snap:
         net = next((x["amount"] for x in snap["lines"] if x["code"] == "net_result"), None)
         # 비용을 입력하고 확정한 달은 비용까지 뺀 영업이익이 기준이다

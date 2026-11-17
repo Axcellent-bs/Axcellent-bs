@@ -84,6 +84,18 @@ class ClosingConfig(_Strict):
     month_closing_due_day: int = Field(default=5, ge=1, le=28)
 
 
+class SalesSourceConfig(_Strict):
+    """판매 자료를 통째로 바꾼 시각 (`finance_policy.toml [sales_source]`).
+
+    판매 서버를 새 DB로 바꾸면 그 전에 확정한 결산은 다른 판매 자료로 계산한 숫자다.
+    이 시각 전에 확정한 결산은 "판매 자료 교체 전 확정"으로 보이고,
+    차이 경고·조정·비교에 쓰지 않는다.
+    """
+
+    switched_at: datetime | None = None
+    note: str = ""
+
+
 class FinanceConfig(_Strict):
     commission: CommissionConfig
     pg: PgConfig
@@ -93,6 +105,7 @@ class FinanceConfig(_Strict):
     cashflow: CashflowConfig = CashflowConfig()
     team_budget: TeamBudgetConfig = TeamBudgetConfig()
     closing: ClosingConfig = ClosingConfig()
+    sales_source: SalesSourceConfig = SalesSourceConfig()
 
 
 @lru_cache(maxsize=1)

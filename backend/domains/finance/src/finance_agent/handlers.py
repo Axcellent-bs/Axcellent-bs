@@ -451,7 +451,8 @@ async def closing_report(request: AgentRequest) -> AgentResult:
         books, data.period, d, state().records.closings.get(key), state().records.closings
     )
     output = ClosingReportOutput(
-        **{k: v for k, v in report.items() if k not in ("from", "to")},
+        # source_switch(판매 자료 교체 안내)는 화면용이라 A2A 계약에는 싣지 않는다
+        **{k: v for k, v in report.items() if k not in ("from", "to", "source_switch")},
         window_from=report["from"],
         window_to=report["to"],
         unavailable=books.meta()["unavailable"],
