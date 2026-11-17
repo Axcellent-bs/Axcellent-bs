@@ -946,7 +946,7 @@ export const SUPPORT_SETTLEMENT_PATH = "/settlements";
 /** 담당 화면이 접혀 있어 사람이 결정할 곳이 없는 보류 (인사 인수인계, 준하 11/17).
  *  handover 서비스를 띄우지 않아 보류될 경로도 꺼져 있다. 다시 켜면 인사 화면에 ActionQueue를 붙이고 여기서 뺀다 */
 export const FOLDED_HOLD_ACTIONS = ["confirm_handover", "confirm_handover_incomplete"] as const;
-export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", SETTLEMENT_HOLD_ACTION, ...MARKETING_HOLD_ACTIONS, ...SUPPORT_DELETION_HOLD_ACTIONS, ...FOLDED_HOLD_ACTIONS]);
+export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", SETTLEMENT_HOLD_ACTION, ...MARKETING_HOLD_ACTIONS, ...SUPPORT_DELETION_HOLD_ACTIONS, ...DEV_HOLD_ACTIONS, ...FOLDED_HOLD_ACTIONS]);
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
