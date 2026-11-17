@@ -7,7 +7,7 @@ import type {
   SegmentOptionsOutput, SegmentProfileOutput,
 } from "./data.ts";
 import {
-  coverageView, favoritesView, fakeBadge, filterLabel, isHigh, nextMonth, optionsView, parseTarget, pct,
+  coverageView, dataNote, favoritesView, fakeBadge, filterLabel, isHigh, nextMonth, optionsView, parseTarget, pct,
   profileView, proposalsView, questionView, sectionState, sendResultText, times,
 } from "./segmentView.ts";
 
@@ -349,4 +349,12 @@ test("가짜 데이터 배지는 data_source가 있을 때만", () => {
   assert.equal(fakeBadge({ basis: null }), null);
   assert.equal(fakeBadge({ basis: FAKE }), "가짜 데이터로 본 결과");
   assert.equal(fakeBadge({ data_source: "가짜" }), "가짜 데이터로 본 결과");
+});
+
+test("맨 위 안내: 가짜 데이터일 때만 '시연용 가상 데이터', 실제 판매 기록이면 공공 데이터 안내만", () => {
+  assert.equal(dataNote(optionsView(OPTIONS)), "고객 속성은 시연용 가상 데이터, 바깥 시장 숫자는 공공 데이터");
+  const real = dataNote(optionsView({ ...OPTIONS, data_source: null }));
+  assert.equal(real, "바깥 시장 숫자는 공공 데이터");
+  assert.equal(real!.includes("가상"), false);
+  assert.equal(dataNote(null), null); // 선택지를 못 받았으면 아무 말도 하지 않는다
 });

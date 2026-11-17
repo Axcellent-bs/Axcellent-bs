@@ -3,7 +3,7 @@ import { Empty, Waiting } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
 import { dataAi, kpiLive, type SegmentPeriod } from "@/lib/data";
 import {
-  DATA_NOTE, SUPPRESSED, coverageView, favoritesView, filterLabel, nextMonth, optionsView, parseTarget, profileView,
+  SUPPRESSED, dataNote, coverageView, favoritesView, filterLabel, nextMonth, optionsView, parseTarget, profileView,
   proposalsView, questionView, sectionState, sendResultText,
   type CoverageView, type FavoriteList, type FavoritesView, type GateView, type OptionsView, type ProfileView,
   type ProposalView, type ProposalsView, type QuestionView, type SectionState,
@@ -490,10 +490,12 @@ export function SegmentAnalysis() {
     <div className="space-y-4">
       <header className="space-y-2">
         <h1 className="text-2xl font-bold tracking-tight">고객·시장 분석</h1>
-        <p className="flex flex-wrap items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          {DATA_NOTE}
-          <Badge text={options?.badge ?? null} />
-        </p>
+        {dataNote(options) && (
+          <p className="flex flex-wrap items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {dataNote(options)}
+            <Badge text={options?.badge ?? null} />
+          </p>
+        )}
       </header>
 
       {!kpiLive ? (
