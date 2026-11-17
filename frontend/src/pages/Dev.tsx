@@ -82,7 +82,7 @@ export default function DevPage() {
           {section === 'tasks' && <TaskBoard s={s} filter={sub} />}
           {section === 'work' && tab === 'prs' && <PrsTab s={s} d={d} parts={rest.map((x) => decodeURIComponent(x))} />}
           {section === 'work' && tab === 'reviews' && <Reviews s={s} d={d} item={item} />}
-          {section === 'work' && tab === 'holds' && <ActionQueue action={DEV_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 PR 만들기·머지·되돌리기와 자동 머지 기준 바꾸기가 여기 모입니다." />}
+          {section === 'work' && tab === 'holds' && <ActionQueue action={DEV_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 PR 만들기·머지·되돌리기, 자동 머지 기준 바꾸기, 배포 되돌리기가 여기 모입니다." />}
           {section === 'work' && tab === 'ops' && <Ops s={s} item={item} />}
           {section === 'work' && tab === 'aftercare' && <Aftercare s={s} item={item} />}
           {section === 'talk' && <Talk s={s} d={d} item={item} />}
