@@ -5,6 +5,7 @@ import { incidentTitle, stepLabel, type OrchIncident, type OrchStep } from "@/li
 import { durationKo, segmentsOf, type EventTimes } from "@/lib/duration";
 import { ago, humanizePlanIds } from "@/lib/format";
 import { recordState } from "@/lib/incidentRecord";
+import { rollbackView } from "@/lib/rollbackResult";
 import EventTimesView from "@/components/hr/EventTimes";
 import RepeatCompare from "@/components/hr/RepeatCompare";
 import ResolutionForm from "@/components/hr/ResolutionForm";
@@ -54,6 +55,30 @@ function noteKo(note: string): string {
   if (!note) return "–";
   if (NOTE_KO[note]) return NOTE_KO[note];
   return note.replace(/\(([a-z_]+)\)/g, (_, k: string) => `(${STEP_KO[k] ?? k})`).replace(/이관 큐로 넘김/g, "사람에게 넘김");
+}
+
+/** 배포 되돌리기 단계: 다시 배포한 실행(도구·실행 번호·링크) 또는 자동으로 못 되돌렸을 때 사람이 할 처리 순서 */
+function RollbackDetail({ step }: { step: StepRow }) {
+  const view = rollbackView(step);
+  if (!view) return null;
+  if (view.kind === "redeployed") {
+    const { tool, runId, url } = view.redeploy;
+    return (
+      <p className="mt-1 text-ink-700">
+        다시 배포: {tool} 실행
+        {runId && <span className="ml-1 font-mono text-ink-500">#{runId}</span>}
+        {url && <a href={url} target="_blank" rel="noreferrer" className="ml-2 font-medium text-brand-700 underline">실행 보기</a>}
+      </p>
+    );
+  }
+  return (
+    <div className="mt-1 text-ink-700">
+      <p className="font-medium text-red-700">자동으로 되돌리지 못했어요. 담당자가 할 일:</p>
+      {view.steps.length > 0
+        ? <ol className="mt-1 list-decimal space-y-0.5 pl-4">{view.steps.map((t, i) => <li key={i}>{t}</li>)}</ol>
+        : <p className="mt-1 text-ink-500">인프라 AI가 처리 순서를 남기지 않았어요.</p>}
+    </div>
+  );
 }
 
 /** 진행 기록 한 줄 */
@@ -277,7 +302,10 @@ export function IncidentDetail({ incident }: { incident: OrchIncident }) {
                 </td>
                 <td className="whitespace-nowrap py-2 pr-3 tabular-nums text-ink-500">{s.promised_seconds ? secondsKo(s.promised_seconds) : "–"}</td>
                 <td className="py-2 pr-3 tabular-nums">{s.attempts || "–"}</td>
-                <td className="py-2 text-xs text-ink-500" title={s.note || undefined}>{noteKo(s.note)}</td>
+                <td className="py-2 text-xs text-ink-500">
+                  <span title={s.note || undefined}>{noteKo(s.note)}</span>
+                  <RollbackDetail step={s} />
+                </td>
               </tr>
               );
             })}
