@@ -137,7 +137,6 @@ from data_agent.explain import (
     _bad_numbers,
 )
 from data_agent.llm_budget import LLMDailyCapReached
-from data_agent.sales_clean import counts_as_revenue
 from data_agent.sales_quality import KST
 from data_agent.sales_store import SalesStore, StoredOrder
 from data_agent.skills import segment_analysis as seg
@@ -245,23 +244,23 @@ def groups(cfg: CatalogSales) -> list[dict[str, str]]:
     return out
 
 
-def matches(attrs: dict[str, str] | None, filters: dict[str, str]) -> bool:
-    return all((attrs or {}).get(k) == v for k, v in filters.items())
-
-
-def active_buyers(store: SalesStore, tenant_id: str, days: int, now: datetime) -> set[str]:
-    """최근 `days`일(한국 0시 기준) 결제 완료 주문이 있는 가명 buyer_id."""
+def active_window(days: int, now: datetime) -> tuple[datetime, datetime]:
+    """대상 고객 기간: 최근 `days`일(한국 0시 기준) ~ now (UTC)."""
     local = now.astimezone(KST).replace(hour=0, minute=0, second=0, microsecond=0)
-    start = (local - timedelta(days=days - 1)).astimezone(UTC)
-    orders = store.orders_created(tenant_id, start, now.astimezone(UTC))
-    return {o.buyer_id for o in orders if counts_as_revenue(o.status, o.payment_status)}
+    return (local - timedelta(days=days - 1)).astimezone(UTC), now.astimezone(UTC)
 
 
-def genre_aov(paid: Iterable[StoredOrder]) -> dict[str, int]:
-    """장르 → 그 장르가 든 주문의 장르 줄 순매출 합 ÷ 그 주문 수 (반올림, 0 미만이면 0)."""
+def genre_aov(totals: dict[str, tuple[int, int]], uneven: Iterable[StoredOrder]) -> dict[str, int]:
+    """장르 → 그 장르가 든 주문의 장르 줄 순매출 합 ÷ 그 주문 수 (반올림, 0 미만이면 0).
+
+    `totals`는 줄 할인 몫이 주문 할인과 맞는 주문을 저장소가 더한 (합, 주문 수)
+    (`SalesStore.genre_line_nets`), `uneven`은 맞지 않아 `line_nets`로 다시 나눠야 하는 주문."""
     total: dict[str, int] = defaultdict(int)
     count: dict[str, int] = defaultdict(int)
-    for order in paid:
+    for genre, (net, orders) in totals.items():
+        total[genre] += net
+        count[genre] += orders
+    for order in uneven:
         if not order.lines:
             continue
         seen: set[str] = set()
@@ -274,19 +273,15 @@ def genre_aov(paid: Iterable[StoredOrder]) -> dict[str, int]:
     return {g: max(0, round(total[g] / count[g])) for g in count}
 
 
-def genre_products(paid: Iterable[StoredOrder]) -> dict[str, list[tuple[str, str]]]:
-    """장르 → 상위 상품 (산 사람 수 큰 순, 같으면 이름·id 순) 최대 `TOP_PRODUCTS`개."""
-    who: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
-    titles: dict[str, str] = {}
-    for order in paid:
-        for line in order.lines:
-            if line.genre_code and line.product_id:
-                who[line.genre_code][line.product_id].add(order.buyer_id)
-                if line.title and line.product_id not in titles:
-                    titles[line.product_id] = line.title
+def genre_products(
+    buyers: dict[str, dict[str, int]], titles: dict[str, str]
+) -> dict[str, list[tuple[str, str]]]:
+    """장르 → 상위 상품 (산 사람 수 큰 순, 같으면 이름·id 순) 최대 `TOP_PRODUCTS`개.
+
+    `buyers` = 장르 → 상품 → 산 구매자 수, `titles` = 장르 줄에서 처음 나온 상품 이름."""
     out: dict[str, list[tuple[str, str]]] = {}
-    for genre, products in who.items():
-        ranked = sorted(products, key=lambda p: (-len(products[p]), titles.get(p, ""), p))
+    for genre, products in buyers.items():
+        ranked = sorted(products, key=lambda p: (-products[p], titles.get(p, ""), p))
         out[genre] = [(p, titles.get(p, NO_PRODUCT)) for p in ranked[:TOP_PRODUCTS]]
     return out
 
@@ -308,35 +303,35 @@ def read_base(
     if reasons or cfg is None:
         return Base(reasons, snap.report, snap.basis)
     least = cfg.min_group_size
-    overall = snap.buyers
-    bought = seg.item_buyers(snap.paid)
-    by_genre = {
-        code: who for (k, code), who in bought.items() if k == "genre" and code in cfg.genres
-    }
-    active = active_buyers(store, tenant_id, cfg.active_days, now)
-    aov = genre_aov(snap.paid)
-    products = genre_products(snap.paid)
+    keys = [a.key for a in cfg.attributes]
+    with snap.session(keys) as s:
+        cells = s.buyer_cells()
+        by_genre = {code: c for code, c in s.genre_cells().items() if code in cfg.genres}
+        active = s.active_cells(*active_window(cfg.active_days, now))
+        aov = genre_aov(*s.genre_nets())
+        products = genre_products(s.genre_products(), s.titles(genre_only=True))
+    overall_n = sum(cells.values())
     candidates: list[Candidate] = []
     for filters in groups(cfg):
-        segment = {b for b in overall if matches(snap.attrs.get(b), filters)}
-        if len(segment) < least:
+        segment = seg.cell_count(cells, keys, filters)
+        if segment < least:
             continue
-        target = sum(1 for b in active if matches(snap.attrs.get(b), filters))
+        target = seg.cell_count(active, keys, filters)
         if target < least:
             continue
         for genre in sorted(by_genre):
             who = by_genre[genre]
-            n = len(who & segment)
+            n = seg.cell_count(who, keys, filters)
             if n < least or genre not in aov:
                 continue
-            share = seg.ratio(n, len(segment))
-            base = seg.ratio(len(who), len(overall))
+            share = seg.ratio(n, segment)
+            base = seg.ratio(sum(who.values()), overall_n)
             lift = seg.lift(share, base)
             if share is None or base is None or lift is None or lift < MIN_LIFT:
                 continue
             candidates.append(Candidate(
                 filters=filters, label=seg.filter_label(filters, cfg), genre=genre,
-                genre_label=cfg.genres[genre], segment_size=len(segment), buyers=n, share=share,
+                genre_label=cfg.genres[genre], segment_size=segment, buyers=n, share=share,
                 base_share=base, lift=lift, target_customers=target, aov=aov[genre],
                 products=products.get(genre, []),
             ))  # fmt: skip
