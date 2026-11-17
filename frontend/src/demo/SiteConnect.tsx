@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { SectionHead, StatusChip } from '@/components/connect/parts'
 import { PreparingChip } from '@/components/Preparing'
+import { ago } from '@/lib/format'
 import { Link } from '@/lib/nav'
 import type { ConnectionState, ConnectionTest } from '@/lib/companyConnection'
 import Integrations from './Integrations'
@@ -53,17 +54,17 @@ function PlatformPanel() {
 }
 
 const READ_ROWS: { key: 'health' | 'products' | 'users'; label: string }[] = [
-  { key: 'health', label: '주문' },
+  { key: 'health', label: '서버 응답' },
   { key: 'products', label: '상품' },
   { key: 'users', label: '구매자' },
 ]
 const WRITE_ROWS = ['쿠폰 발급', '환불', '판매 중지']
 
 /** AXcellent 규격 API: 읽기는 실제 연결 확인 결과만, 쓰기는 확인 수단이 없어 준비 중 */
-function CapabilityTable({ check, checkable }: { check: ConnectionTest | null; checkable: boolean }) {
+function CapabilityTable({ check, savedAt }: { check: ConnectionTest | null; savedAt: string | null }) {
   return (
     <table className="w-full text-sm" aria-label="기능별 연결 상태">
-      <thead><tr className="text-left text-xs text-ink-500"><th className="py-2 pr-3 font-medium">구분</th><th className="py-2 pr-3 font-medium">기능</th><th className="py-2 font-medium">상태</th></tr></thead>
+      <thead><tr className="text-left text-xs text-ink-500"><th scope="col" className="py-2 pr-3 font-medium">구분</th><th scope="col" className="py-2 pr-3 font-medium">기능</th><th scope="col" className="py-2 font-medium">상태</th></tr></thead>
       <tbody className="divide-y divide-ink-100 border-t border-ink-100">
         {READ_ROWS.map((r) => {
           const c = check?.checks.find((x) => x.key === r.key)
@@ -71,10 +72,13 @@ function CapabilityTable({ check, checkable }: { check: ConnectionTest | null; c
             <tr key={r.key}>
               <td className="py-2 pr-3 text-ink-500">읽기</td>
               <td className="py-2 pr-3">{r.label}</td>
-              <td className="py-2">{checkable && c ? <StatusChip tone={c.ok ? 'ok' : 'bad'}>{c.ok ? '확인됨' : '실패'}</StatusChip> : <StatusChip tone="off">확인 전</StatusChip>}</td>
+              <td className="py-2">{c ? <StatusChip tone={c.ok ? 'ok' : 'bad'}>{c.ok ? '확인됨' : '실패'}</StatusChip>
+                : savedAt ? <StatusChip tone="ok">저장할 때 확인됨 · {ago(savedAt)}</StatusChip>
+                : <StatusChip tone="off">확인 전</StatusChip>}</td>
             </tr>
           )
         })}
+        <tr><td className="py-2 pr-3 text-ink-500">읽기</td><td className="py-2 pr-3">주문</td><td className="py-2"><PreparingChip /></td></tr>
         {WRITE_ROWS.map((w) => (
           <tr key={w}><td className="py-2 pr-3 text-ink-500">쓰기</td><td className="py-2 pr-3">{w}</td><td className="py-2"><PreparingChip /></td></tr>
         ))}
@@ -86,6 +90,12 @@ function CapabilityTable({ check, checkable }: { check: ConnectionTest | null; c
 function CustomPanel({ onShop }: { onShop: (s: ConnectionState | 'error') => void }) {
   const [read, setRead] = useState<Read>('axcellent')
   const [check, setCheck] = useState<ConnectionTest | null>(null)
+  const [savedAt, setSavedAt] = useState<string | null>(null)
+  // 저장된 연결이 있고 확인된 적이 있으면, 이 세션에서 새로 확인하지 않아도 그 시각을 보여 준다
+  const onState = (s: ConnectionState | 'error') => {
+    setSavedAt(s !== 'error' && s.mode === 'connected' ? s.connection?.verified_at ?? null : null)
+    onShop(s)
+  }
 
   return (
     <section className="space-y-4" aria-label="직접 만든 사이트 연결">
@@ -94,7 +104,7 @@ function CustomPanel({ onShop }: { onShop: (s: ConnectionState | 'error') => voi
       <div className="card">
         <div className="space-y-4 p-6">
           <SectionHead as="h3" title="사이트 데이터 연결 (읽기·쓰기)" desc="아래 셋 중 하나를 골라요."
-            right={<StatusChip tone="wait">필수</StatusChip>} />
+            right={read === 'axcellent' ? <StatusChip tone="wait">필수</StatusChip> : undefined} />
           <div role="radiogroup" aria-label="사이트 데이터 연결 방법" className="grid gap-3 md:grid-cols-3">
             <Radio on={read === 'axcellent'} onPick={() => setRead('axcellent')} title="AXcellent 규격 API" desc="AXcellent 규격(shop-api)을 그대로 쓰는 사이트예요. 주소만 확인·저장해요." />
             <Radio on={read === 'api'} onPick={() => setRead('api')} title="다른 형식의 API" desc="이미 있는 API 주소와 지금 쓰는 인증으로 연결하는 방식이에요." />
@@ -103,7 +113,7 @@ function CustomPanel({ onShop }: { onShop: (s: ConnectionState | 'error') => voi
 
           {read === 'axcellent' && (
             <div className="space-y-3 border-t border-ink-100 pt-4">
-              <CapabilityTable check={check} checkable />
+              <CapabilityTable check={check} savedAt={savedAt} />
               <p className="text-xs text-ink-500">쓰기 확인은 준비 중이에요. 안 되는 쓰기는 담당자에게 처리 순서를 보내요.</p>
             </div>
           )}
@@ -121,7 +131,7 @@ function CustomPanel({ onShop }: { onShop: (s: ConnectionState | 'error') => voi
             </div>
           )}
         </div>
-        <div className={read === 'axcellent' ? 'border-t border-ink-100 p-4' : 'hidden'}><Integrations onState={onShop} onCheck={setCheck} embedded /></div>
+        <div className={read === 'axcellent' ? 'border-t border-ink-100 p-4' : 'hidden'}><Integrations onState={onState} onCheck={setCheck} embedded /></div>
       </div>
 
       <div className="card px-5 py-3 text-sm text-ink-700">
