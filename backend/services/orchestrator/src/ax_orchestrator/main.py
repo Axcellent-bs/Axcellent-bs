@@ -27,6 +27,7 @@ from ax_agent_template.config import set_agent_name
 from ax_contracts.schemas import TENANT_ID_DEFAULT, EventEnvelope, EventType
 from ax_orchestrator.a2a import build_a2a_app
 from ax_orchestrator.auth import require_admin, require_agent, require_human
+from ax_orchestrator.diagnosis_cards import fetch_cards_via_archive
 from ax_orchestrator.engine import Engine
 from ax_orchestrator.hybrid import HybridDepartments, real_depts_from_env
 from ax_orchestrator.inbox import post_to_inbox
@@ -132,6 +133,10 @@ class AppState:
             self.manager.restore()  # 저장된 이벤트를 올린다(진행 중이던 건은 "재시작으로 중단됨")
         else:  # 같은 이벤트 목록을 유지하면서 부서 동작만 교체
             self.manager.engine = engine
+        # 인사가 보낸 에이전트 평가 진단 요청은 받자마자 진단한다(목 모드·시험은 자동 시작 안 함)
+        diagnoses = self.manager.agent_diagnoses
+        diagnoses.auto_run = not self.mock
+        diagnoses.cards_fetcher = None if self.mock else fetch_cards_via_archive
         return self.manager
 
     async def _publish(self, kind: str, inc: Incident) -> None:
