@@ -85,7 +85,7 @@ export function ToolForm({ kind, data, admin, existing, choices, onSaved, onCanc
       if (!text.includes('PRIVATE KEY')) return dispatch({ type: 'failed', message: 'GitHub 앱 개인 키(.pem) 파일이 아니에요.' })
       setKeyName(file.name)
       dispatch({ type: 'secret', key, value: text })
-    })
+    }).catch(() => dispatch({ type: 'failed', message: '키 파일을 읽지 못했어요. 파일을 다시 골라 주세요.' }))
   }
 
   const apps = appChoices(data.connections)

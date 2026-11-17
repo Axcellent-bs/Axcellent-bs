@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { Link } from "@/lib/nav";
 import { ago, shortDateTime } from "@/lib/format";
 import { DejafixNotConnectedError, ANALYSIS, SEVERITY, currentIncidents, readableTitle, dashboardSummary, recentIncidents, type DashboardSummary, type Incident, type IncidentMeta, type Measured } from "@/lib/dejafix";
-import { listTools } from "@/lib/toolConnections";
 import { useSession } from "@/demo/session";
 
 // 장애 대응 탭 = 지금 진행 중인 장애만. DejaFix API(GET /api/incidents?status=problem)에서 받아 AXcellent가 그린다.
@@ -13,15 +12,7 @@ import { useSession } from "@/demo/session";
 const REFRESH_MS = 30_000;
 const DEJAFIX_SETUP_HREF = "/system/members?tab=pcs";
 
-/** 장애 목록을 못 받았을 때 DejaFix 연결이 없어서인가: 프록시가 '연결 없음'이라고 했거나, 도구 연결 보관함에 DejaFix가 없다 */
-async function dejafixMissing(reason: unknown): Promise<boolean> {
-  if (reason instanceof DejafixNotConnectedError) return true;
-  try {
-    return !(await listTools()).connections.some((c) => c.kind === "dejafix");
-  } catch {
-    return false; // 보관함을 못 읽으면 연결 여부를 단정하지 않는다
-  }
-}
+// 미연결은 프록시가 503 DEJAFIX_NOT_CONNECTED라고 했을 때만 띄운다 (.env로 붙인 프록시는 보관함이 비어도 연결돼 있을 수 있다)
 const LIST_LIMIT = 10;
 
 type State = { data: Incident[]; meta: IncidentMeta } | null;
@@ -251,7 +242,7 @@ export default function Incidents() {
       setNotConnected(false);
     } else {
       setError(msg(cur, "장애 목록을 불러오지 못했습니다."));
-      setNotConnected(await dejafixMissing(cur.reason));
+      setNotConnected(cur.reason instanceof DejafixNotConnectedError);
     }
     if (sum.status === "fulfilled") {
       setSummary(sum.value);

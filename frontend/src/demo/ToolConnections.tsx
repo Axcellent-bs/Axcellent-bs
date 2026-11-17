@@ -701,7 +701,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
         {list && !list.length && !form && (
           <div className="border border-dashed border-ink-300 px-6 py-8 text-center">
             <p className="font-medium">연결한 레포가 없어요</p>
-            <p className="mt-1 text-sm text-ink-500">{admin ? '지금 개발 화면은 시연 데이터를 보여 줘요. 위의 레포 연결로 첫 레포를 이어 주세요.' : '관리자가 연결하면 여기에 보여요.'}</p>
+            <p className="mt-1 text-sm text-ink-500">{admin ? '개발 AI가 코드를 읽고 PR을 올릴 레포가 아직 없어요. 위의 레포 연결로 첫 레포를 이어 주세요.' : '관리자가 연결하면 여기에 보여요.'}</p>
           </div>
         )}
 
