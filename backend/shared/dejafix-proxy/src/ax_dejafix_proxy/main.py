@@ -3,7 +3,8 @@
 DejaFix는 모든 API에 로그인 토큰(JWT)을 요구한다. 서버 nginx는 로그인·토큰 갱신을 못 하므로
 이 서비스가 viewer 계정으로 대신 로그인하고, 받은 토큰을 붙여 GET만 넘긴다.
 개발 서버 프록시(frontend/dejafix-proxy.ts)와 같은 동작이다.
-계정은 환경변수(DEJAFIX_USERNAME·DEJAFIX_PASSWORD)로만 받고 화면·로그에 싣지 않는다.
+연결은 부를 때마다 정한다: 공용 보관함의 `dejafix` → 없으면 환경변수(DEJAFIX_PROXY_TARGET·
+DEJAFIX_USERNAME·DEJAFIX_PASSWORD) → 없으면 503. 계정은 화면·로그에 싣지 않는다.
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request, Response
+
+from ax_agent_template import company_connection, tool_connections
 
 JSON = "application/json"
 
@@ -37,6 +40,9 @@ class DejaFixSession:
     @property
     def configured(self) -> bool:
         return bool(self._username and self._password)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
     async def _login(self) -> str | None:
         res = await self._client.post(
@@ -62,17 +68,51 @@ class DejaFixSession:
         return res
 
 
+# (대상 주소, 계정, 비밀번호). 비밀번호는 로그·응답에 싣지 않는다
+Target = tuple[str, str, str]
+
+
+def _target() -> tuple[Target, bool] | None:
+    """부를 때마다 정한다: 보관함 `dejafix` → 환경 변수 → 없음(None). 둘째 값: 보관함에서 왔는가."""
+    conn = tool_connections.find("dejafix")
+    if conn is not None:
+        url = str(conn.config.get("url") or "").strip().rstrip("/")
+        user = str(conn.config.get("username") or "").strip()
+        password = conn.secrets.get("password", "")
+        if url and user and password:
+            return (url, user, password), True
+    user = os.getenv("DEJAFIX_USERNAME", "")
+    password = os.getenv("DEJAFIX_PASSWORD", "")
+    if user and password:
+        url = os.getenv("DEJAFIX_PROXY_TARGET", "http://127.0.0.1:18000").strip().rstrip("/")
+        return (url, user, password), False
+    return None
+
+
 def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
-    target = os.getenv("DEJAFIX_PROXY_TARGET", "http://127.0.0.1:18000").rstrip("/")
-    owned = client is None
-    http = client or httpx.AsyncClient(base_url=target, timeout=10.0)
-    session = DejaFixSession(http, os.getenv("DEJAFIX_USERNAME"), os.getenv("DEJAFIX_PASSWORD"))
+    """`client`를 주면(테스트) 대상 주소가 어떻든 그 클라이언트로 부른다."""
+    state: dict[str, tuple[Target, DejaFixSession]] = {}
+
+    def session_for(target: Target) -> DejaFixSession:
+        """대상·계정·비밀번호가 바뀌면 세션(토큰)을 새로 만든다."""
+        held = state.get("s")
+        if held is not None and held[0] == target:
+            return held[1]
+        url, user, password = target
+        http = client or httpx.AsyncClient(base_url=url, timeout=10.0)
+        fresh = DejaFixSession(http, user, password)
+        if held is not None and client is None:
+            old = held[1]
+            asyncio.get_running_loop().create_task(old.aclose())
+        state["s"] = (target, fresh)
+        return fresh
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
-        if owned:
-            await http.aclose()
+        held = state.pop("s", None)
+        if held is not None and client is None:
+            await held[1].aclose()
 
     app = FastAPI(
         title="dejafix-proxy",
@@ -96,18 +136,25 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         # 로그인 API를 밖으로 열지 않는다. 넘기는 것은 DejaFix의 /api/* 조회뿐이다.
         if not full.startswith("/api/") or full.startswith("/api/auth"):
             return _error(404, "NOT_FOUND", "넘길 수 없는 경로입니다")
-        if not session.configured:
+        found = _target()
+        if found is None:
             return _error(
                 503,
-                "DEJAFIX_NOT_CONFIGURED",
-                "DejaFix 계정(DEJAFIX_USERNAME·DEJAFIX_PASSWORD)이 설정되지 않았습니다",
+                "DEJAFIX_NOT_CONNECTED",
+                "DejaFix가 연결되지 않았습니다 (화면의 도구 연결 또는 DEJAFIX_USERNAME·"
+                "DEJAFIX_PASSWORD 설정)",
             )
+        target, from_vault = found
+        if from_vault:
+            try:
+                # 화면에서 정한 주소는 사내·허용 목록 정책을 통과해야 부른다 (밖으로 나가는 호출 전)
+                company_connection.check_host(target[0])
+            except ValueError as exc:
+                return _error(502, "DEJAFIX_UNREACHABLE", f"DejaFix 주소를 쓸 수 없습니다: {exc}")
         try:
-            upstream = await session.get(full, request.url.query)
+            upstream = await session_for(target).get(full, request.url.query)
         except httpx.HTTPError:
-            return _error(
-                502, "DEJAFIX_UNREACHABLE", f"DejaFix 백엔드({target})에 연결할 수 없습니다"
-            )
+            return _error(502, "DEJAFIX_UNREACHABLE", "DejaFix 백엔드에 연결할 수 없습니다")
         return Response(
             content=upstream.content,
             status_code=upstream.status_code,

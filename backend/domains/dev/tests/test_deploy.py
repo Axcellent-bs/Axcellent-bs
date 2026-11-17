@@ -417,3 +417,30 @@ def test_reset_restores_seed(client) -> None:
     client.post(f"{BASE}/deployments", json={"pr_numbers": [28]})
     client.post(f"{BASE}/reset")
     assert client.get(f"{BASE}/deployments").json()["meta"]["count"] == 1
+
+
+def test_dev_signals_use_proxy_when_vault_has_dejafix(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ax_agent_template import tool_connections as tc
+    from dev_agent import deploy_signals
+
+    monkeypatch.setenv(tc.FILE_ENV, str(tmp_path / "tool-connections.json"))
+    monkeypatch.delenv(deploy_signals.DEJAFIX_URL_ENV, raising=False)
+    monkeypatch.delenv("AX_DEJAFIX_PROXY_URL", raising=False)
+    tc._cache = None
+    assert tc.dejafix_proxy_url(deploy_signals.DEJAFIX_URL_ENV) is None
+    tc.upsert(
+        "dejafix",
+        "장애",
+        {"url": "http://10.0.0.5", "username": "v"},
+        {"password": "pw"},
+        conn_id=None,
+        by="t",
+    )
+    source = deploy_signals.default_source(deploy_signals.MockSignalSource([]))
+    assert isinstance(source, CombinedSource)
+    name, dejafix = source._sources[0]
+    assert name == "dejafix"
+    assert isinstance(dejafix, DejaFixIncidentSource)
+    assert dejafix.base_url == "http://dejafix-proxy:8030"

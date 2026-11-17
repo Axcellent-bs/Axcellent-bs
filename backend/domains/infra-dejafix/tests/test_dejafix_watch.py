@@ -138,9 +138,8 @@ def test_component_list_comes_from_env() -> None:
     ) == frozenset({"payment", "checkout"})
 
 
-def test_without_url_the_watch_stays_off() -> None:
+def test_without_url_there_is_no_address() -> None:
     assert dejafix_watch.base_url({}) is None
-    assert dejafix_watch.start({}) is None
     assert dejafix_watch.base_url({"INFRA_DEJAFIX_URL": f"{URL}/"}) == URL
     assert dejafix_watch.interval_seconds({}) == 30
     assert dejafix_watch.interval_seconds({"INFRA_DEJAFIX_POLL_SECONDS": "1"}) == 5
@@ -173,3 +172,48 @@ def test_chat_facts_mark_dejafix_unavailable(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(dejafix_watch, "fetch_problems", boom)
     got = asyncio.run(facts.collect())
     assert "dejafix_problems" in got["unavailable"] and "dejafix_problems" not in got
+
+
+@pytest.fixture
+def vault(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    from ax_agent_template import tool_connections as tc
+
+    monkeypatch.setenv(tc.FILE_ENV, str(tmp_path / "tool-connections.json"))
+    monkeypatch.delenv("INFRA_DEJAFIX_URL", raising=False)
+    monkeypatch.delenv("AX_DEJAFIX_PROXY_URL", raising=False)
+    tc._cache = None
+    return tc
+
+
+def _connect(tc) -> None:
+    tc.upsert(
+        "dejafix",
+        "장애",
+        {"url": "http://10.0.0.5", "username": "v"},
+        {"password": "pw"},
+        conn_id=None,
+        by="t",
+    )
+
+
+def test_env_url_wins_over_vault(vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    _connect(vault)
+    monkeypatch.setenv("INFRA_DEJAFIX_URL", f"{URL}/")
+    assert dejafix_watch.base_url() == URL
+
+
+def test_watch_starts_when_vault_gets_dejafix(vault) -> None:
+    """부팅 때 아무것도 없어도 감시는 떠 있고, 나중에 연결하면 재시작 없이 읽는다."""
+    seen: list[str | None] = []
+
+    async def scenario() -> None:
+        task = dejafix_watch.start()
+        await asyncio.sleep(0)
+        assert not task.done()  # 주소가 없어도 켜져 있다
+        seen.append(dejafix_watch.base_url())
+        _connect(vault)
+        seen.append(dejafix_watch.base_url())
+        task.cancel()
+
+    asyncio.run(scenario())
+    assert seen == [None, "http://dejafix-proxy:8030"]

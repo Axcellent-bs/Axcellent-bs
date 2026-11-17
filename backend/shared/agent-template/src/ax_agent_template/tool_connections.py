@@ -207,6 +207,19 @@ def find(kind: str, **config_match: Any) -> ToolConnection | None:
     return None
 
 
+def dejafix_proxy_url(env_name: str) -> str | None:
+    """DejaFix 장애를 읽을 주소. 환경 변수(`env_name`)가 있으면 그것, 없으면 보관함에 `dejafix`가
+    있을 때 dejafix-proxy 주소, 둘 다 없으면 None. 부를 때마다 다시 정한다(재시작 없이 반영)."""
+    from ax_agent_template.config import agent_url  # config가 이 모듈을 쓰게 되어도 순환하지 않게
+
+    explicit = os.getenv(env_name, "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    if find("dejafix") is not None:
+        return agent_url("dejafix-proxy")
+    return None
+
+
 def _write(conns: list[ToolConnection]) -> None:
     global _cache
     path = connections_file()

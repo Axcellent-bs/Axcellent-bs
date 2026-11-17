@@ -306,14 +306,8 @@ for v in LLM_MODEL LLM_BASE_URL LLM_API_KEY; do
 done
 [ -n "${EMBED_MODEL:-}" ] || echo "경고: EMBED_MODEL 이 없습니다. 회사 기억(memory) 검색이 실패합니다 (예: gemini-embedding-001)." >&2
 
-# >>> dejafix-proxy 계정 확인 (tests/test_run_all_procs.py가 이 부분만 실행한다)
-# DejaFix 계정(.env의 DEJAFIX_USERNAME)이 없으면 띄우지 않는다. 띄우면 DejaFix가 없는 PC에서
-# 로그인 실패만 쌓인다. 계정·비밀번호 값은 출력하지 않는다
-if [ -z "${DEJAFIX_USERNAME:-}" ] && echo "$RUN_APPS" | awk '$1 == "dejafix-proxy" {found=1} END {exit !found}'; then
-  RUN_APPS=$(echo "$RUN_APPS" | awk 'NF && $1 != "dejafix-proxy"')
-  echo "dejafix-proxy 안 띄움(DEJAFIX_USERNAME 없음)"
-fi
-# <<< dejafix-proxy 계정 확인
+# dejafix-proxy는 계정이 없어도 띄운다. 연결 전에는 503 DEJAFIX_NOT_CONNECTED만 돌려주고,
+# 화면의 도구 연결에서 DejaFix를 저장하면 재시작 없이 쓴다.
 
 # 안 띄운 서비스는 켠 서비스에서도 뺀다 (라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다).
 # --only로 뺀 서비스와 접어 둔 서비스(FOLDED)가 대상이다. 이미 AX_ENABLED_SERVICES를 줬으면 둘의 교집합이다

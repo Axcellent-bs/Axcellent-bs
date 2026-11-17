@@ -210,7 +210,7 @@ def test_run_all_checks_running_before_start_and_no_longer_restarts_silently() -
     assert "export AX_GIT_COMMIT" in text
 
 
-# --- dejafix-proxy (8030): DejaFix 계정이 있을 때만 run_all이 같이 띄운다 ---------------------
+# --- dejafix-proxy (8030): 계정이 없어도 run_all이 띄운다 ---------------------
 
 RUN_ALL = BACKEND / "scripts" / "run_all.sh"
 DEJAFIX_LINE = "dejafix-proxy 8030 ax_dejafix_proxy.main:app"
@@ -255,32 +255,11 @@ def test_dejafix_proxy_is_in_apps_before_orchestrator() -> None:
     assert names[-1] == "orchestrator"  # 총괄은 여전히 맨 뒤 (부서 카드를 모은다)
 
 
-@pytest.mark.parametrize(
-    ("username", "started"),
-    [(None, False), ("", False), ("viewer-test", True)],
-)
-def test_dejafix_proxy_starts_only_with_a_username(username: str | None, started: bool) -> None:
-    """DEJAFIX_USERNAME이 없으면 띄울 목록에서 빼고 한 줄만 찍는다. 값은 출력하지 않는다."""
-    block = _between("# >>> dejafix-proxy 계정 확인", "# <<< dejafix-proxy 계정 확인")
-    apps = "\n".join(_apps())
-    env = {"RUN_APPS": apps} | ({} if username is None else {"DEJAFIX_USERNAME": username})
-    out = _run(f'{block}\nprintf "%s\\n" "$RUN_APPS" | awk "NF {{print \\$1}}"', env)
-    lines = out.splitlines()
-    others = [line.split()[0] for line in _apps() if not line.startswith("dejafix-proxy ")]
-    if started:
-        assert lines == [line.split()[0] for line in _apps()]
-    else:
-        assert lines[0] == "dejafix-proxy 안 띄움(DEJAFIX_USERNAME 없음)"
-        assert lines[1:] == others
-    if username:
-        assert username not in out
-
-
-def test_dejafix_proxy_block_keeps_only_list_without_it() -> None:
-    """--only로 고른 목록에 dejafix-proxy가 없으면 아무것도 찍지 않는다."""
-    block = _between("# >>> dejafix-proxy 계정 확인", "# <<< dejafix-proxy 계정 확인")
-    out = _run(f'{block}\nprintf "%s\\n" "$RUN_APPS"', {"RUN_APPS": "data 8106 svc_data.main:app"})
-    assert out.splitlines() == ["data 8106 svc_data.main:app"]
+def test_dejafix_proxy_starts_without_a_username() -> None:
+    """계정이 없어도 띄운다(연결 전 503). 보관함에서 연결하면 재시작 없이 쓴다."""
+    text = RUN_ALL.read_text(encoding="utf-8")
+    assert "DEJAFIX_USERNAME" not in text
+    assert "dejafix-proxy 안 띄움" not in text
 
 
 def test_health_check_uses_healthz_for_dejafix_proxy() -> None:
