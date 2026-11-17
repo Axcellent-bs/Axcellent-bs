@@ -135,6 +135,23 @@ class CampaignBudgetReviewInput(AxModel):
     product_ids: list[str] = Field(default_factory=list, max_length=10)
 
 
+class CustomerReactionSummary(AxModel):
+    """예산 의견에 반영한 고객 반응(`CRX-001`)의 요약.
+
+    호출한 쪽·화면이 "걸림", "못 읽음", "판매 적음"을 나눠 볼 수 있다.
+
+    `status`: clear(읽었고 걸린 책 없음), flagged(걸린 책이 있어 한도를 줄임), unavailable(고객지원
+    집계를 못 읽어 반영 안 함), not_relevant(요청에 상품이 없음). 목록의 값은 상품 ID 또는 제목이다.
+    `sales_unread`는 판매 수량을 못 읽어 비율을 못 낸 책이고, `low_sales`(판매가 적어 참고만 한
+    책)와 다르다.
+    """
+
+    status: Literal["clear", "flagged", "unavailable", "not_relevant"]
+    flagged: list[str] = Field(default_factory=list)
+    low_sales: list[str] = Field(default_factory=list)
+    sales_unread: list[str] = Field(default_factory=list)
+
+
 class CampaignBudgetReviewOutput(AxModel):
     """재무의 캠페인 예산 판단.
 
@@ -156,6 +173,8 @@ class CampaignBudgetReviewOutput(AxModel):
     # recommend: 그대로 권함, reduce: 줄이기를 권함, not_recommended: 권하지 않음
     opinion: Literal["recommend", "reduce", "not_recommended"] | None = None
     suggested_krw: int | None = None  # 재무가 권하는 금액 (권하지 않으면 0)
+    # 고객 반응 요약(`CRX-001`). 옛 재무가 보낸 결과에는 없어서 None이다
+    customer_reaction: CustomerReactionSummary | None = None
 
 
 class CampaignCancelInput(AxModel):

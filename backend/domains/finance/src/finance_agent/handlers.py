@@ -837,6 +837,7 @@ def _review_output(review: dict[str, Any]) -> dict[str, Any]:
         advisory=True,
         opinion=cp.OPINION_OF[review["decision"]],
         suggested_krw=review["approved_limit_krw"],
+        customer_reaction=review.get("customer_reaction"),
     ).model_dump(mode="json")
 
 

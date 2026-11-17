@@ -380,3 +380,27 @@ def test_the_output_separates_unread_sales_from_low_sales() -> None:
     got = decide(reaction)["customer_reaction"]
     assert got["sales_unread"] == ["못 읽은 책"] and got["low_sales"] == ["적은 책"]
     assert decide(cr.NOT_RELEVANT)["customer_reaction"]["sales_unread"] == []
+
+
+# ------------------------------------------------------------ 출력 계약에 실린 요약
+def test_the_output_carries_the_customer_reaction_summary() -> None:
+    sources = _Reading(
+        report(
+            row("prd_1", sold=100, claims=15, title="나쁜 책"),
+            row("prd_2", sold=None, title="못 읽은 책"),
+            row("prd_3", sold=2, title="적은 책"),
+        )
+    )
+    out = _review(sources, {**_ask(), "product_ids": ["prd_1", "prd_2", "prd_3"]})
+    assert out["customer_reaction"] == {
+        "status": "flagged",
+        "flagged": ["prd_1"],
+        "low_sales": ["적은 책"],
+        "sales_unread": ["못 읽은 책"],
+    }
+
+
+def test_the_output_summary_for_requests_without_products_is_not_relevant() -> None:
+    out = _review(_Reading(report()), _ask())
+    assert out["customer_reaction"]["status"] == cr.STATUS_NOT_RELEVANT
+    assert out["customer_reaction"]["sales_unread"] == []
