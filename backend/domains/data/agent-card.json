@@ -110,6 +110,16 @@
       "priority": "recommended"
     },
     {
+      "id": "retention",
+      "description": "재구매·이탈: 고객의 첫 결제 완료 주문 달(한국)을 코호트로, 지금 달을 뺀 최근 cohorts개 달마다 첫 구매 뒤 30·60·90일 안에 결제 완료 주문이 한 번 더 있는 비율을 돌려준다(기간이 다 지나지 않은 칸은 비움). 단골(결제 완료 주문이 카탈로그 repeat_min_orders번 이상) 중 마지막 주문 뒤 churn_days일(가정)이 지난 사람을 속성 묶음별로 세어 많은 순 상위 5개와 그 묶음이 가장 많이 산 장르를 돌려준다. 묶음이 최소 크기(기본 5명) 미만이면 숨기고 보완 숨김을 쓴다. 고객 기록이 없으면 주문을 읽기 전에 '데이터 부족'. LLM을 쓰지 않는다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#RetentionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#RetentionOutput",
+      "grade": "read",
+      "allowed_requesters": ["orchestrator", "dashboard-api"],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "event_proposal",
       "description": "이벤트 제안: 이벤트 달(YYYY-MM)에 '누구(고객 속성 묶음)·무엇(장르)·어떤 이벤트(카탈로그 event_kinds)'를 코드 규칙으로 고른다. 최근 90일 묶음 구매 배수(1.2배 이상, 최소 크기 미만 묶음 제외) × 작년 같은 달 검색 배수(네이버 검색어 트렌드, 못 재면 1배로 가정) × 표본 크기로 점수를 매겨 최대 max_items개. 예상 효과 = 대상 고객(최근 active_days일 결제 고객) × 전환율 범위(지난 캠페인 쿠폰 사용률, 없으면 가정값) × 장르 객단가, 할인 비용 = 예상 매출 × 할인율. 근거 3개(묶음 배수·시즌 배수·전환율)와 계산식·한계(고객 반응 클레임 비율 포함). 같은 달·조건이면 같은 proposal_id. 숫자는 코드가 계산하고 LLM은 제목·요약만 쓴다(숫자 검증 실패면 템플릿). 품질 관문에 걸리면 '데이터 부족'. 제안은 data 자기 저장소에 남기고(보내기용) 회사 상태는 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#EventProposalInput",

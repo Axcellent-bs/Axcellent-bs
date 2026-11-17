@@ -4,8 +4,8 @@
 // 품목 이름(책·게임 등)은 segment_options의 item_noun, 바깥 출처 이름은 응답 label에서만 온다 (회사 낱말을 박지 않는다).
 import type {
   CoverageRow, EventProposalItem, EventProposalOutput, EventProposalSendOutput, ExternalResult, FavoriteItem,
-  MarketCoverageOutput, SalesBasis, SalesQuality, SegmentFavoritesOutput, SegmentOptionsOutput,
-  SegmentPeriod, SegmentProfileOutput, SegmentQuestionOutput,
+  MarketCoverageOutput, RetentionCohort, RetentionOutput, SalesBasis, SalesQuality, SegmentFavoritesOutput,
+  SegmentOptionsOutput, SegmentPeriod, SegmentProfileOutput, SegmentQuestionOutput,
 } from "./data.ts";
 
 export const DATA_NOTE = "고객 속성은 시연용 가상 데이터, 바깥 시장 숫자는 공공 데이터";
@@ -495,5 +495,73 @@ export function proposalsView(out: EventProposalOutput): ProposalsView {
         return HANGUL.test(x.reason) ? `${what} — ${x.reason}` : what;
       }),
     },
+  };
+}
+
+// ---- 5) 다시 사나 · 떠나나 (retention)
+
+export const REPEAT_DAYS = [30, 60, 90] as const;
+export const NOT_YET = "아직";
+
+export interface CohortRowView { month: string; customers: string; cells: string[]; suppressed: boolean }
+export interface AtRiskRowView { label: string; count: string; detail: string }
+export interface RetentionOkView {
+  kind: "ok";
+  cohortTitle: string;
+  columns: string[]; // "30일 안" …
+  cohorts: CohortRowView[];
+  cohortHint: string;
+  riskTitle: string;
+  atRisk: AtRiskRowView[];
+  riskEmpty: string | null;
+  note: string;
+  summary: string;
+  badge: string | null;
+}
+export type RetentionView = GateView | RetentionOkView;
+
+/** 첫 구매 달 "YYYY-MM"의 다음 달 1일 0시(한국) + days일이 now 이전이면 그 칸 기간이 다 지남 */
+export function cohortDone(month: string, days: number, now: Date): boolean {
+  const y = Number(month.slice(0, 4));
+  const m = Number(month.slice(5, 7)); // 1..12
+  const nextFirstKst = Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1) - 9 * 3600_000;
+  return nextFirstKst + days * 86400_000 <= now.getTime();
+}
+
+function cohortRow(c: RetentionCohort, now: Date): CohortRowView {
+  if (c.suppressed || c.customers == null) {
+    return { month: monthLabel(c.cohort_month), customers: SUPPRESSED, cells: REPEAT_DAYS.map(() => "-"), suppressed: true };
+  }
+  const values = [c.r30, c.r60, c.r90];
+  return {
+    month: monthLabel(c.cohort_month),
+    customers: people(c.customers),
+    // 비어 있으면: 기간이 아직이면 "아직", 다 지났으면 서버가 숨긴 칸(다시 산 사람이 기준 미만)
+    cells: REPEAT_DAYS.map((d, i) => values[i] != null ? pct(values[i]!) : cohortDone(c.cohort_month, d, now) ? SUPPRESSED : NOT_YET),
+    suppressed: false,
+  };
+}
+
+export function retentionView(out: RetentionOutput, now: Date): RetentionView {
+  if (out.status === "insufficient") return gate(out);
+  return {
+    kind: "ok",
+    cohortTitle: "첫 구매 달별 재구매율 (코호트)",
+    columns: REPEAT_DAYS.map((d) => `${d}일 안`),
+    cohorts: out.cohorts.map((c) => cohortRow(c, now)),
+    cohortHint: `"${NOT_YET}" = 그 기간이 다 지나지 않음 · "${SUPPRESSED}" = 묶음이 작아 숨김`,
+    riskTitle: `떠날 것 같은 단골 (${out.churn_days}일 넘게 안 삼)`,
+    atRisk: out.at_risk.filter((r) => !r.suppressed && r.at_risk != null).map((r) => ({
+      label: r.label || "고른 묶음",
+      count: people(r.at_risk!),
+      detail: [
+        r.share != null ? `단골의 ${pct(r.share)}가 ${out.churn_days}일 넘게 안 삼` : null,
+        r.top_item_label ? `주로 사던 것: ${r.top_item_label}` : null,
+      ].filter(Boolean).join(" · "),
+    })),
+    riskEmpty: out.at_risk.some((r) => !r.suppressed) ? null : "보여 줄 만큼 큰 묶음이 없어요 (표본 부족)",
+    note: `"떠남" 기준 ${out.churn_days}일은 회사 설정(가정)입니다. 고객 한 명 한 명은 보여 주지 않고 묶음 수만 봅니다.`,
+    summary: out.summary,
+    badge: fakeBadge(out),
   };
 }

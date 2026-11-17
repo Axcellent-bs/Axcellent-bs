@@ -236,6 +236,8 @@ SERVICES: tuple[Service, ...] = (
             "segment_profile",
             "segment_favorites",
             "market_coverage",
+            # 재구매·이탈 (11/17, grade read)
+            "retention",
             # 이벤트 제안 (11/16). event_proposal_send는 grade A (execute 뒤 기획 receive_insight)
             "event_proposal",
             "event_proposal_send",

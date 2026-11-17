@@ -3,10 +3,10 @@ import { Empty, Waiting } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
 import { dataAi, kpiLive, type SegmentPeriod } from "@/lib/data";
 import {
-  SUPPRESSED, dataNote, coverageView, favoritesView, filterLabel, nextMonth, optionsView, parseTarget, profileView,
-  proposalsView, questionView, sectionState, sendResultText,
+  NOT_YET, SUPPRESSED, dataNote, coverageView, favoritesView, filterLabel, nextMonth, optionsView, parseTarget,
+  profileView, proposalsView, questionView, retentionView, sectionState, sendResultText,
   type CoverageView, type FavoriteList, type FavoritesView, type GateView, type OptionsView, type ProfileView,
-  type ProposalView, type ProposalsView, type QuestionView, type SectionState,
+  type ProposalView, type ProposalsView, type QuestionView, type RetentionView, type SectionState,
 } from "@/lib/segmentView";
 
 // 고객·시장 분석: 물어보기(글로 묻기 segment_question → segment_favorites) · ○○은 누가 사나(segment_profile) · 시장 커버(market_coverage)
@@ -468,6 +468,76 @@ function Proposals() {
   );
 }
 
+// ---- 5) 다시 사나 · 떠나나 (retention)
+
+function Retention() {
+  const res = useLoad("retention", () => dataAi.retention(3).then((r) => r.output));
+  const view: RetentionView | null = res.data ? retentionView(res.data, new Date()) : null;
+
+  return (
+    <Section id="seg-retention" title="다시 사나 · 떠나나" badge={view?.kind === "ok" ? view.badge : null}
+      hint="첫 구매 달별로 30·60·90일 안에 다시 산 비율과, 단골 중 한동안 안 산 사람이 많은 묶음을 봅니다.">
+      <StateBox load={res} what="재구매·이탈" />
+      {view?.kind === "gate" && <Gate view={view} />}
+      {view?.kind === "ok" && (
+        <div className="space-y-3">
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="min-w-0 space-y-2 rounded-xl bg-surface-2 px-4 py-3">
+              <p className="text-xs font-semibold text-ink-500">{view.cohortTitle}</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-ink-500">
+                      <th className="py-2 pr-3 font-medium">첫 구매</th>
+                      <th className="py-2 pr-3 text-right font-medium">고객</th>
+                      {view.columns.map((c) => <th key={c} className="py-2 pr-3 text-right font-medium">{c}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {view.cohorts.map((c) => (
+                      <tr key={c.month} className="border-t border-ink-100">
+                        <td className="py-2 pr-3 font-medium text-ink-900">{c.month}</td>
+                        <td className={`py-2 pr-3 text-right tabular-nums ${c.suppressed ? "text-xs text-ink-400" : "text-ink-700"}`}>{c.customers}</td>
+                        {c.cells.map((x, i) => (
+                          <td key={i} className={`py-2 pr-3 text-right tabular-nums ${x === NOT_YET || x === SUPPRESSED || x === "-" ? "text-xs text-ink-400" : "text-ink-700"}`}>{x}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-ink-500">{view.cohortHint}</p>
+            </div>
+            <div className="min-w-0 space-y-2 rounded-xl bg-surface-2 px-4 py-3">
+              <p className="text-xs font-semibold text-ink-500">{view.riskTitle}</p>
+              {view.riskEmpty ? <p className="text-sm text-ink-500">{view.riskEmpty}</p> : (
+                <ul className="space-y-2">
+                  {view.atRisk.map((r) => (
+                    <li key={r.label} className="border-b border-ink-100 pb-2 text-sm last:border-0">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <b className="min-w-0 text-ink-900">{r.label}</b>
+                        <span className="shrink-0 font-semibold tabular-nums text-red-700">{r.count}</span>
+                      </div>
+                      {r.detail && <p className="text-xs text-ink-500">{r.detail}</p>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {/* 보내기는 다음 단계(safety 등록 필요). 지금은 화면에만 두고 누를 수 없다 */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" className="btn-ghost" disabled title="준비 중">마케팅에 재방문 대상 고객 수 보내기</button>
+                <PreparingChip />
+              </div>
+            </div>
+          </div>
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">{view.note}</p>
+          {view.summary && <p className="text-xs text-ink-500">요약: {view.summary}</p>}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 // ---- 탭
 
 function OptionsMissing({ load }: { load: Load<unknown> }) {
@@ -510,6 +580,7 @@ export function SegmentAnalysis() {
             </>
           ) : <OptionsMissing load={opts} />}
           <Proposals />
+          <Retention />
         </>
       )}
     </div>

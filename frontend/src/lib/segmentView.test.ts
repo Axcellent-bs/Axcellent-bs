@@ -8,8 +8,10 @@ import type {
 } from "./data.ts";
 import {
   coverageView, dataNote, favoritesView, fakeBadge, filterLabel, isHigh, nextMonth, optionsView, parseTarget, pct,
-  profileView, proposalsView, questionView, readableReason, sectionState, sendResultText, times,
+  profileView, proposalsView, questionView, readableReason, retentionView, sectionState, sendResultText, times,
+  cohortDone,
 } from "./segmentView.ts";
+import type { RetentionOutput } from "./data.ts";
 
 const QUALITY: SalesQuality = {
   rows_in_period: 1234, empty_days: [], dropped_rows: 2, dropped_reasons: { "가격 없음": 2, missing_qty: 1 },
@@ -400,4 +402,50 @@ test("맨 위 안내: 가짜 데이터일 때만 '시연용 가상 데이터', �
   assert.equal(real, "바깥 시장 숫자는 공공 데이터");
   assert.equal(real!.includes("가상"), false);
   assert.equal(dataNote(null), null); // 선택지를 못 받았으면 아무 말도 하지 않는다
+});
+
+// 재구매·이탈: 기준 시각 2026-11-16 12:00 (한국)
+const RET_NOW = new Date("2026-11-16T03:00:00Z");
+const RETENTION: RetentionOutput = {
+  status: "ok", insufficient_reasons: [], filters: {}, churn_days: 60, basis: BASIS, quality: QUALITY,
+  summary: "첫 구매 달 3개 중 2개 달 재구매율 계산.",
+  cohorts: [
+    { cohort_month: "2026-08", customers: 1240, r30: 0.18, r60: 0.27, r90: null, suppressed: false },
+    { cohort_month: "2026-09", customers: 1410, r30: null, r60: null, r90: null, suppressed: false },
+    { cohort_month: "2026-10", customers: null, r30: null, r60: null, r90: null, suppressed: true },
+  ],
+  at_risk: [
+    { filters: { age_band: "40s", gender: "m" }, label: "40대 · 남성 · 직장인", regulars: 445, at_risk: 138, share: 0.31,
+      top_item_label: "경제경영", suppressed: false },
+    { filters: { age_band: "50s" }, label: "50대 이상 · 여성", regulars: 216, at_risk: 41, share: 0.19, top_item_label: null, suppressed: false },
+  ],
+};
+
+test("다시 사나: 기간이 남은 칸은 '아직', 다 지났는데 비면 '표본 부족'", () => {
+  assert.equal(cohortDone("2026-08", 90, RET_NOW), false); // 9/1 + 90일 = 11/30
+  assert.equal(cohortDone("2026-08", 60, RET_NOW), true); // 9/1 + 60일 = 10/31
+  assert.equal(cohortDone("2026-12", 30, new Date("2027-01-31T15:00:00Z")), true); // 해를 넘김 (1/1 + 30일 = 1/31 0시 한국)
+  const v = retentionView(RETENTION, RET_NOW);
+  assert.equal(v.kind, "ok");
+  if (v.kind !== "ok") return;
+  assert.deepEqual(v.columns, ["30일 안", "60일 안", "90일 안"]);
+  assert.deepEqual(v.cohorts[0], { month: "8월", customers: "1,240명", cells: ["18%", "27%", "아직"], suppressed: false });
+  assert.deepEqual(v.cohorts[1].cells, ["표본 부족", "아직", "아직"]); // 9월 30일 칸은 10/31에 다 지남 → 서버가 숨김
+  assert.deepEqual(v.cohorts[2], { month: "10월", customers: "표본 부족", cells: ["-", "-", "-"], suppressed: true });
+});
+
+test("떠나나: 묶음 수와 비율·주로 사던 것, 기준 일수는 가정으로", () => {
+  const v = retentionView(RETENTION, RET_NOW);
+  assert.ok(v.kind === "ok");
+  if (v.kind !== "ok") return;
+  assert.equal(v.riskTitle, "떠날 것 같은 단골 (60일 넘게 안 삼)");
+  assert.deepEqual(v.atRisk[0], { label: "40대 · 남성 · 직장인", count: "138명", detail: "단골의 31%가 60일 넘게 안 삼 · 주로 사던 것: 경제경영" });
+  assert.equal(v.atRisk[1].detail, "단골의 19%가 60일 넘게 안 삼");
+  assert.equal(v.riskEmpty, null);
+  assert.ok(v.note.includes("60일은 회사 설정(가정)"));
+  const none = retentionView({ ...RETENTION, at_risk: [] }, RET_NOW);
+  assert.ok(none.kind === "ok" && none.riskEmpty === "보여 줄 만큼 큰 묶음이 없어요 (표본 부족)");
+  noCodes(v, ["age_band", "40s", "50s"]);
+  const gated = retentionView({ ...RETENTION, status: "insufficient", insufficient_reasons: ["데이터 부족: 저장된 고객 기록이 없음"] }, RET_NOW);
+  assert.ok(gated.kind === "gate" && gated.reasons[0].includes("고객 기록"));
 });
