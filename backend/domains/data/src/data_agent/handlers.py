@@ -56,6 +56,7 @@ from ax_contracts.schemas.data import (
     AccuracyReportInput,
     ActivityReportInput,
     AnomalyDetectionInput,
+    BasketPairsInput,
     BriefRegenBlocked,
     CampaignEffectInput,
     CampaignResultOutput,
@@ -118,7 +119,13 @@ from data_agent.response_cache import ResponseCache
 from data_agent.sales_store import DB_ENV as SALES_DB_ENV
 from data_agent.sales_store import DEFAULT_DB as SALES_DEFAULT_DB
 from data_agent.sales_store import SalesStore
-from data_agent.skills import event_proposal, segment_analysis, segment_question, topic_category
+from data_agent.skills import (
+    basket_pairs,
+    event_proposal,
+    segment_analysis,
+    segment_question,
+    topic_category,
+)
 from data_agent.skills.accuracy_report import eval_dir, load_report
 from data_agent.skills.activity_report import InvalidActivityInput, build_report
 from data_agent.skills.anomaly_detection import detect_anomalies, env_settings, get_metric_source
@@ -528,6 +535,27 @@ async def segment_favorites(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=segment_analysis.evidence(out.basis, now, f"바깥 출처 {called}" if called else ""),
+    )
+
+
+async def basket_pairs_skill(request: AgentRequest) -> AgentResult:
+    """같은 사람이 기간 안에 둘 다 산 장르(또는 상품) 쌍: 함께 산 사람·배수 (grade read)."""
+    data = _parse(request, BasketPairsInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    out = await asyncio.to_thread(
+        basket_pairs.basket, get_sales_store(), data.tenant_id, data.level, data.period,
+        data.filters, data.max_pairs, cat.sales, cat.id, now,
+    )  # fmt: skip
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=segment_analysis.evidence(out.basis, now, f"쌍 단위 {data.level}"),
     )
 
 
@@ -1891,6 +1919,7 @@ HANDLERS = {
     "segment_profile": segment_profile,
     "segment_favorites": segment_favorites,
     "market_coverage": market_coverage,
+    "basket_pairs": basket_pairs_skill,
     "event_proposal": event_proposal_skill,
     "event_proposal_send": event_proposal_send,
     "root_cause_hypotheses": root_cause_hypotheses,

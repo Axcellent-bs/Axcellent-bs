@@ -20,8 +20,14 @@ LLM은 제안마다 제목(title)과 요약(summary)만 쓴다. 회사마다 다
 - 시즌을 못 재면(키 없음·한도·자료 없음·검색어 설정 없음·작년 같은 달이 아직 안 끝남) 후보는 남기고
   시즌 배수 1로 **가정**한다: 근거 value 1.0, source "가정값 (검색 트렌드 확인 불가)",
   문장에 "가정"과 이유, timing_basis.last_year_multiple은 None, 한계에 한 줄
-- 이벤트 종류: 후보마다 카탈로그 `event_kinds` 중 (전환율 가운데 × (1 − 할인율))이 가장 큰 것
-  (같으면 카탈로그 순서)
+- 이벤트 종류: 후보마다 카탈로그 `event_kinds` 중 묶음 할인(`BUNDLE_KIND`)을 뺀 것에서
+  (전환율 가운데 × (1 − 할인율))이 가장 큰 것(같으면 카탈로그 순서)
+- 묶음 할인 후보(11/17, 설정에 `BUNDLE_KIND`가 있을 때만): `basket_pairs`의 장르 쌍(분석 기간, 조건
+  없음) 중 숨기지 않았고 배수가 `MIN_LIFT` 이상인 것. 누구 = 그 쌍을 둘 다 산 사람이 가장 많은
+  묶음(같으면 카탈로그 순서, 기준 미만 묶음 제외), 무엇 = "a + b", 대상 고객 = 그 묶음의 a 구매자
+  (분석 기간). 근거 첫째 줄은 "a → b 함께 산 배수", 객단가는 a·b 장르 객단가의 합, 시즌은 a 장르,
+  점수의 n은 그 묶음에서 둘 다 산 사람. 제안의 `bundle`에 쌍을 담고 genre_code는 비운다.
+  한 쌍은 한 번만 고른다. 장르 쿠폰과 다른 이벤트라 묶음(누구) 자리는 장르 후보와 따로 센다
 
 점수 (순서용, 코드 상수)
 - score = 배수 × 시즌 배수(못 재면 1) × min(1, n ÷ `FULL_SAMPLE`)
@@ -107,6 +113,7 @@ from pydantic import BaseModel, ValidationError
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import (
+    BundleBasis,
     CampaignResultOutput,
     CatalogSales,
     EventKind,
@@ -138,8 +145,9 @@ from data_agent.explain import (
 )
 from data_agent.llm_budget import LLMDailyCapReached
 from data_agent.sales_quality import KST
-from data_agent.sales_store import SalesStore, StoredOrder
+from data_agent.sales_store import Cells, SalesStore, StoredOrder
 from data_agent.skills import segment_analysis as seg
+from data_agent.skills.basket_pairs import pair_rows
 from data_agent.skills.sales_analysis import NO_PRODUCT, line_nets
 from data_agent.skills.trend_history import add_months, first_of_month, last_day
 
@@ -160,6 +168,8 @@ EXCLUDED_MAX = 10  # 기준 미달로 뺀 후보를 보여 주는 수 (점수 �
 SEASON_ASSUMED_SOURCE = "가정값 (검색 트렌드 확인 불가)"
 NAVER_SOURCE = "네이버 검색어 트렌드"
 QUERIES = [*seg.QUERIES, "event_proposal_store.event_proposals"]
+# 묶음 할인 (11/17): 이 code의 이벤트 종류는 장르 후보에 쓰지 않고 basket_pairs 장르 쌍으로 만든다
+BUNDLE_KIND = "bundle_discount"
 
 # 보내기
 ACTION = "send_event_proposal"  # data 자신의 execute() 액션 (safety registry 항목 필요)
@@ -211,6 +221,15 @@ class Candidate:
     target_customers: int
     aov: int
     products: list[tuple[str, str]] = field(default_factory=list)
+    # 묶음 할인 후보면 쌍(전체 구매자 기준 배수·함께 산 사람). genre = a, genre_label = "a + b",
+    # buyers = 그 묶음에서 둘 다 산 사람, share = 그 묶음 a 구매자 중 b도 산 비율,
+    # base_share = 전체 a 구매자 중 b도 산 비율, lift = 쌍 배수, target_customers = 그 묶음 a 구매자
+    bundle: BundleBasis | None = None
+
+    @property
+    def key(self) -> str:
+        """한 번만 고르는 단위·proposal_id 재료: 장르 code, 묶음이면 "a+b"."""
+        return f"{self.bundle.a_code}+{self.bundle.b_code}" if self.bundle else self.genre
 
 
 @dataclass
@@ -304,15 +323,32 @@ def read_base(
         return Base(reasons, snap.report, snap.basis)
     least = cfg.min_group_size
     keys = [a.key for a in cfg.attributes]
+    pairs: list[tuple[BundleBasis, float, Cells]] = []
     with snap.session(keys) as s:
         cells = s.buyer_cells()
         by_genre = {code: c for code, c in s.genre_cells().items() if code in cfg.genres}
         active = s.active_cells(*active_window(cfg.active_days, now))
         aov = genre_aov(*s.genre_nets())
         products = genre_products(s.genre_products(), s.titles(genre_only=True))
+        if any(k.code == BUNDLE_KIND for k in cfg.event_kinds):
+            items, together = s.pair_counts("genre", {}, least)  # 숨긴 쌍은 후보가 아니다
+            rows = pair_rows(items, together, sum(cells.values()), cfg.genres.get, len(together))
+            for p in rows:
+                if p.suppressed or p.lift is None or p.lift < MIN_LIFT:
+                    continue
+                basis = BundleBasis(a_code=p.a_code, a_label=p.a_label, b_code=p.b_code,
+                                    b_label=p.b_label, lift=p.lift,
+                                    together_buyers=p.together_buyers)  # fmt: skip
+                pairs.append((basis, p.confidence or 0.0, s.together_cells("genre", p.a_code,
+                                                                           p.b_code)))  # fmt: skip
     overall_n = sum(cells.values())
     candidates: list[Candidate] = []
-    for filters in groups(cfg):
+    group_list = groups(cfg)
+    for basis, confidence, both in pairs:
+        if (c := bundle_candidate(basis, confidence, both, group_list, cells, by_genre, aov,
+                                  products, keys, cfg)) is not None:  # fmt: skip
+            candidates.append(c)
+    for filters in group_list:
         segment = seg.cell_count(cells, keys, filters)
         if segment < least:
             continue
@@ -336,6 +372,55 @@ def read_base(
                 products=products.get(genre, []),
             ))  # fmt: skip
     return Base([], snap.report, snap.basis, candidates)
+
+
+def merged_products(*lists: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """여러 장르의 상위 상품을 번갈아 (중복 없이) 최대 `TOP_PRODUCTS`개."""
+    out: list[tuple[str, str]] = []
+    for row in itertools.chain.from_iterable(itertools.zip_longest(*lists)):
+        if row is not None and row not in out:
+            out.append(row)
+    return out[:TOP_PRODUCTS]
+
+
+def bundle_candidate(  # noqa: PLR0913 - 쌍과 세션에서 센 숫자를 그대로 받는다
+    basis: BundleBasis,
+    confidence: float,
+    both: Cells,
+    group_list: Sequence[dict[str, str]],
+    cells: Cells,
+    by_genre: dict[str, Cells],
+    aov: dict[str, int],
+    products: dict[str, list[tuple[str, str]]],
+    keys: Sequence[str],
+    cfg: CatalogSales,
+) -> Candidate | None:
+    """묶음 할인 후보 하나: 누구 = 그 쌍을 둘 다 산 사람이 가장 많은 묶음(같으면 카탈로그 순서),
+    대상 = 그 묶음의 a 구매자(분석 기간). 묶음 안 둘 다 산 사람·a 구매자가 기준 미만이면 없음."""
+    a, b = basis.a_code, basis.b_code
+    if a not in aov or b not in aov or a not in by_genre:
+        return None
+    least = cfg.min_group_size
+    best: tuple[int, dict[str, str]] | None = None
+    for filters in group_list:
+        n = seg.cell_count(both, keys, filters)
+        if n >= least and (best is None or n > best[0]):
+            best = (n, filters)
+    if best is None:
+        return None
+    n, filters = best
+    target = seg.cell_count(by_genre[a], keys, filters)
+    if target < least:
+        return None
+    share = seg.ratio(n, target) or 0.0
+    return Candidate(
+        filters=dict(filters), label=seg.filter_label(filters, cfg), genre=a,
+        genre_label=f"{basis.a_label} + {basis.b_label}",
+        segment_size=seg.cell_count(cells, keys, filters), buyers=n, share=share,
+        base_share=confidence, lift=basis.lift or 0.0, target_customers=target,
+        aov=aov[a] + aov[b],
+        products=merged_products(products.get(a, []), products.get(b, [])), bundle=basis,
+    )  # fmt: skip
 
 
 # ---------------------------------------------------------------- 시즌 (네이버, 장르마다 한 번)
@@ -455,13 +540,23 @@ def reasons_of(
     """근거 3개: 묶음 배수 · 시즌 배수 · 전환율. 숫자 하나와 출처씩."""
     origin = data_source or "판매 저장소"
     lift = round(c.lift, 2)
-    segment = ProposalReason(
-        kind="segment",
-        text=(f"{c.label} 구매자 중 {c.genre_label} 구매 비율 {pct(c.share)} — 전체 구매자 "
-              f"{pct(c.base_share)}의 {num(lift)}배"),
-        value=lift, unit="배",
-        source=f"{origin} 주문 기록 {ANALYSIS_LABEL} (묶음 구매자 {c.segment_size:,}명)",
-    )  # fmt: skip
+    if c.bundle is not None:
+        a, b = c.bundle.a_label, c.bundle.b_label
+        segment = ProposalReason(
+            kind="segment",
+            text=(f"{a} → {b} 함께 산 배수 {num(lift)}배 — {a} 구매자 중 {pct(c.base_share)}가 "
+                  f"{b}도 삼 (함께 산 {c.bundle.together_buyers or 0:,}명)"),
+            value=lift, unit="배",
+            source=f"{origin} 주문 기록 {ANALYSIS_LABEL} (같은 사람이 둘 다 산 것)",
+        )  # fmt: skip
+    else:
+        segment = ProposalReason(
+            kind="segment",
+            text=(f"{c.label} 구매자 중 {c.genre_label} 구매 비율 {pct(c.share)} — 전체 구매자 "
+                  f"{pct(c.base_share)}의 {num(lift)}배"),
+            value=lift, unit="배",
+            source=f"{origin} 주문 기록 {ANALYSIS_LABEL} (묶음 구매자 {c.segment_size:,}명)",
+        )  # fmt: skip
     if season.multiple is not None and season.same_month is not None:
         same = season.same_month
         words = ", ".join(season.keywords[:2])
@@ -506,12 +601,25 @@ def proposal_id(tenant_id: str, month: str, filters: dict[str, str], genre: str,
 
 
 def limits_of(
-    est: ProposalEstimate, season: Season, past: Sequence[PastCampaign], data_source: str | None
+    est: ProposalEstimate,
+    season: Season,
+    past: Sequence[PastCampaign],
+    data_source: str | None,
+    bundle: BundleBasis | None = None,
 ) -> list[str]:
-    lines = [
-        f"묶음 배수는 {ANALYSIS_LABEL} 구매 기록의 연관이며 이벤트 효과를 보장하지 않음",
-        f"객단가는 {ANALYSIS_LABEL} 이 장르가 든 주문의 장르 금액(할인 뺀 값) 평균",
-    ]
+    if bundle is not None:
+        lines = [
+            f"함께 산 배수는 {ANALYSIS_LABEL} 같은 사람이 두 장르를 모두 산 기록의 연관"
+            "(같은 주문이 아닐 수 있음)이며 이벤트 효과를 보장하지 않음",
+            f"객단가는 {ANALYSIS_LABEL} {bundle.a_label}·{bundle.b_label} 각각의 객단가(장르 금액, "
+            "할인 뺀 값) 합",
+            f"대상은 그 묶음 고객 중 {ANALYSIS_LABEL} {bundle.a_label}를 산 사람",
+        ]
+    else:
+        lines = [
+            f"묶음 배수는 {ANALYSIS_LABEL} 구매 기록의 연관이며 이벤트 효과를 보장하지 않음",
+            f"객단가는 {ANALYSIS_LABEL} 이 장르가 든 주문의 장르 금액(할인 뺀 값) 평균",
+        ]
     if est.assumption:
         lines.append("전환율은 카탈로그 가정값 (지난 캠페인 기록이 없음)")
     else:
@@ -529,9 +637,17 @@ def text_facts(
     c: Candidate, kind: EventKind, month: str, est: ProposalEstimate, reasons: list[ProposalReason]
 ) -> dict[str, int | float | str]:
     """LLM 문장에 쓸 수 있는 값 (이 밖의 숫자는 검증에서 버린다)."""
+    first: dict[str, int | float | str] = (
+        {"함께 살 장르": c.genre_label, "함께 산 배수": reasons[0].value or 0.0,
+         "함께 산 사람 수": c.bundle.together_buyers or 0,
+         f"{c.bundle.a_label} 구매자 중 {c.bundle.b_label}도 산 비율(%)":
+             round(c.base_share * 100, 1)}
+        if c.bundle is not None
+        else {"장르": c.genre_label, "묶음 배수": reasons[0].value or 0.0}
+    )  # fmt: skip
     return {
-        "대상 묶음": c.label, "장르": c.genre_label, "이벤트": kind.label, "이벤트 달": month,
-        "묶음 배수": reasons[0].value or 0.0, "시즌 배수": reasons[1].value or 0.0,
+        "대상 묶음": c.label, **first, "이벤트": kind.label, "이벤트 달": month,
+        "시즌 배수": reasons[1].value or 0.0,
         "대상 고객 수": est.target_customers,
         "전환율 낮음(%)": round(est.conversion_low * 100, 2),
         "전환율 높음(%)": round(est.conversion_high * 100, 2),
@@ -569,14 +685,20 @@ def build(  # noqa: PLR0913 - 계산 재료를 그대로 받는다
         key=lambda x: (-x[0], -x[1].lift, x[1].label, x[1].genre,
                        json.dumps(sorted(x[1].filters.items()))),
     )  # fmt: skip
-    kind = pick_kind(cfg.event_kinds, past)
+    # 장르 후보는 묶음 할인(BUNDLE_KIND)을 뺀 종류 중에서, 묶음 후보는 그 종류로
+    genre_kinds = [k for k in cfg.event_kinds if k.code != BUNDLE_KIND]
+    genre_kind = pick_kind(genre_kinds, past) if genre_kinds else None
+    bundle_kind = next((k for k in cfg.event_kinds if k.code == BUNDLE_KIND), None)
     drafts: list[Draft] = []
     excluded: list[ExcludedProposal] = []
     used_genres: set[str] = set()
     used_groups: set[tuple[tuple[str, str], ...]] = set()
     for score, c in scored:
         group = tuple(sorted(c.filters.items()))
-        if c.genre in used_genres or group in used_groups:
+        kind = bundle_kind if c.bundle is not None else genre_kind
+        # 묶음 할인은 장르 쿠폰과 다른 이벤트라 묶음(누구) 자리를 같이 쓰지 않는다 (쌍만 한 번)
+        groups_used = used_groups if c.bundle is None else set()
+        if kind is None or c.key in used_genres or group in groups_used:
             continue
         season = seasons.get(c.genre) or Season((), None, "시즌을 보지 않음")
         est = estimate(c, kind, past)
@@ -586,19 +708,22 @@ def build(  # noqa: PLR0913 - 계산 재료를 그대로 받는다
                 excluded.append(ExcludedProposal(target_label=c.label, item_label=c.genre_label,
                                                  reason=" · ".join(why)))  # fmt: skip
             continue
-        used_genres.add(c.genre)
-        used_groups.add(group)
+        used_genres.add(c.key)
+        if c.bundle is None:
+            used_groups.add(group)
         reasons = reasons_of(c, season, kind, past, data_source)
         item = EventProposalItem(
-            proposal_id=proposal_id(tenant_id, month, c.filters, c.genre, kind.code),
-            target_filters=dict(c.filters), target_label=c.label, genre_code=c.genre,
+            proposal_id=proposal_id(tenant_id, month, c.filters, c.key, kind.code),
+            target_filters=dict(c.filters), target_label=c.label,
+            genre_code=None if c.bundle else c.genre,
             item_label=c.genre_label, event_kind=kind.code, event_label=kind.label,
             timing_basis=TimingBasis(
                 month=month, keywords=list(season.keywords), last_year_multiple=season.multiple,
                 source=season.note,
             ),
-            reasons=reasons, estimate=est, limits=limits_of(est, season, past, data_source),
-            score=score,
+            reasons=reasons, estimate=est,
+            limits=limits_of(est, season, past, data_source, c.bundle),
+            score=score, bundle=c.bundle,
         )  # fmt: skip
         facts = text_facts(c, kind, month, est, reasons)
         item = item.model_copy(
@@ -642,10 +767,20 @@ def template_summary(item: EventProposalItem) -> str:
         else "시즌 배수는 확인하지 못해 1배로 가정"
     )
     conv = "가정 전환율" if est.assumption else "지난 캠페인 전환율"
+    if item.bundle is not None:
+        first = (
+            f"{item.bundle.a_label}와 {item.bundle.b_label}는 같은 사람이 함께 사는 비율이 따로 살 "
+            f"때 기대의 {num(lift.value or 0)}배이고 {season_text}입니다. "
+            f"{item.target_label} {item.bundle.a_label} 구매자 {est.target_customers:,}명에 "
+        )
+    else:
+        first = (
+            f"{item.target_label} 고객은 {item.item_label} 구매 비율이 전체의 "
+            f"{num(lift.value or 0)}배이고 {season_text}입니다. "
+            f"대상 {est.target_customers:,}명에 "
+        )
     return (
-        f"{item.target_label} 고객은 {item.item_label} 구매 비율이 전체의 "
-        f"{num(lift.value or 0)}배이고 {season_text}입니다. "
-        f"대상 {est.target_customers:,}명에 {item.event_label} 이벤트를 하면 {conv} "
+        f"{first}{item.event_label} 이벤트를 하면 {conv} "
         f"{pct(est.conversion_low)}~{pct(est.conversion_high)} 기준 예상 매출 "
         f"{est.revenue_low:,}~{est.revenue_high:,}원, 할인 비용 "
         f"{est.discount_cost_low:,}~{est.discount_cost_high:,}원입니다."
@@ -801,6 +936,11 @@ def actual_of(result: CampaignResultOutput) -> int | None:
     return verdict.incremental_gross_krw if verdict else None
 
 
+def bundle_codes(item: EventProposalItem) -> tuple[str, str] | None:
+    """묶음 할인 제안의 쌍 code (a, b). 장르 제안이면 None (배수·사람 수는 비교하지 않는다)."""
+    return (item.bundle.a_code, item.bundle.b_code) if item.bundle else None
+
+
 def past_results(
     stored: Sequence[StoredProposal],
     item: EventProposalItem,
@@ -815,6 +955,7 @@ def past_results(
         if was_sent(s.item)
         and s.item.genre_code == item.genre_code and s.item.event_kind == item.event_kind
         and s.item.target_filters == item.target_filters
+        and bundle_codes(s.item) == bundle_codes(item)
     ]  # fmt: skip
     found.sort(key=lambda i: (i.timing_basis.month, i.proposal_id), reverse=True)
     rows: list[ProposalPastResult] = []
@@ -984,6 +1125,7 @@ REASON_LABEL = {
     "season": "시즌 배수 (작년 같은 달 ÷ 12개월 평균)",
     "conversion": "전환율 가운데",
 }
+BUNDLE_REASON_LABEL = "함께 산 배수 (따로 살 때 기대 대비)"
 
 
 def facts_of(item: EventProposalItem) -> list[InsightFact]:
@@ -991,15 +1133,19 @@ def facts_of(item: EventProposalItem) -> list[InsightFact]:
     est = item.estimate
     assumed = " (가정)" if est.assumption else ""
     rows: list[tuple[str, str, str]] = []
+    bundle = item.bundle
     for r in item.reasons:
         tail = " (가정)" if r.source.startswith("가정") else ""
-        rows.append((f"{REASON_LABEL[r.kind]} · {item.target_label} {item.item_label}",
+        what = BUNDLE_REASON_LABEL if bundle is not None and r.kind == "segment" else (
+            REASON_LABEL[r.kind])  # fmt: skip
+        rows.append((f"{what} · {item.target_label} {item.item_label}",
                      _value(r) + tail, r.source))  # fmt: skip
+    target = f"대상 고객 ({bundle.a_label} 구매자)" if bundle else "대상 고객 (최근 결제 고객)"
     rows += [
-        ("대상 고객 (최근 결제 고객)", f"{est.target_customers:,}명", FACT_SOURCE),
+        (target, f"{est.target_customers:,}명", FACT_SOURCE),
         ("전환율 범위", f"{pct(est.conversion_low)}~{pct(est.conversion_high)}{assumed}",
          FACT_SOURCE),
-        ("객단가 (장르)", f"{est.aov or 0:,}원", FACT_SOURCE),
+        ("객단가 (두 장르 합)" if bundle else "객단가 (장르)", f"{est.aov or 0:,}원", FACT_SOURCE),
         ("예상 주문", f"{est.orders_low:,}~{est.orders_high:,}건", FACT_SOURCE),
         ("예상 매출", f"{est.revenue_low:,}~{est.revenue_high:,}원", FACT_SOURCE),
         ("할인 비용", f"{est.discount_cost_low:,}~{est.discount_cost_high:,}원", FACT_SOURCE),

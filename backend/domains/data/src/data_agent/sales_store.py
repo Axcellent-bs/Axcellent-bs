@@ -605,16 +605,26 @@ class SalesStore:
     ) -> str | None:
         """상품 하나의 이름: 기간 안 결제 완료 주문을 (접수 시각, 주문 id, 줄 순번) 순으로 볼 때
         처음 나온 이름 (줄 인덱스로 그 상품 줄만 본다). 없으면 None."""
+        with self._lock:
+            return self.product_title_in(
+                self._conn, self._window(tenant_id, start, end), product_id
+            )
+
+    @staticmethod
+    def product_title_in(
+        conn: sqlite3.Connection, window: dict[str, object], product_id: str
+    ) -> str | None:
+        """`product_title`의 본문 (잠금을 잡은 연결, `_window` 값으로)."""
         excluded = ", ".join(f":x{i}" for i in range(len(EXCLUDED_STATUSES)))
-        rows = self._rows(
+        rows = conn.execute(
             "SELECT l.title FROM sales_order_lines l INDEXED BY idx_sales_lines_product "
             "CROSS JOIN sales_orders o INDEXED BY idx_sales_orders_byid ON o.tenant_id = :t "
             "AND o.order_id = l.order_id WHERE l.tenant_id = :t AND l.product_id = :pid "
             "AND l.title IS NOT NULL AND l.title != '' AND o.created_at >= :s "
             f"AND o.created_at < :e AND o.payment_status = :paid AND LOWER(o.status) NOT IN "
             f"({excluded}) ORDER BY o.created_at, o.order_id, l.line_no LIMIT 1",
-            {**self._window(tenant_id, start, end), "pid": product_id},
-        )
+            {**window, "pid": product_id},
+        ).fetchall()
         return rows[0]["title"] if rows else None
 
     def order_days(self, tenant_id: str, start: datetime, end: datetime) -> set[str]:
@@ -744,8 +754,9 @@ class SegmentSession:
             )
 
     def drop(self) -> None:
-        for name in ("seg_attrs", "seg_lines"):
+        for name in ("seg_attrs", "seg_lines", "seg_pi"):
             self.conn.execute(f"DROP TABLE IF EXISTS temp.{name}")
+        self._pi: tuple[str, tuple[tuple[str, str], ...]] | None = None
 
     def _all(self, sql: str, params: dict[str, object] | None = None) -> list[sqlite3.Row]:
         return self.conn.execute(sql, {**self.params, **(params or {})}).fetchall()
@@ -826,9 +837,19 @@ class SegmentSession:
             out += [(kind, r["code"], int(r["total"]), int(r["n"])) for r in rows]
         return out
 
-    def titles(self, *, genre_only: bool = False) -> dict[str, str]:
+    def titles(
+        self, *, genre_only: bool = False, ids: Iterable[str] | None = None
+    ) -> dict[str, str]:
         """상품 id → 이름: 결제 완료 주문을 (접수 시각, 주문 id, 줄 순번) 순으로 볼 때 처음 나온
-        이름. `genre_only`면 genre_code가 있는 줄만 본다."""
+        이름. `genre_only`면 genre_code가 있는 줄만 본다. `ids`를 주면 그 상품만 (주문 × 줄 조인을
+        새로 하지 않고 상품 인덱스로 찾는다)."""
+        if ids is not None:
+            found: dict[str, str] = {}
+            for pid in sorted(set(ids)):
+                title = self.store.product_title_in(self.conn, self.params, pid)
+                if title is not None:
+                    found[pid] = title
+            return found
         self.lines()
         where = f"AND {_NON_EMPTY.format(c='genre_code')} " if genre_only else ""
         rows = self._all(
@@ -867,6 +888,86 @@ class SegmentSession:
         for r in rows:
             out.setdefault(r["g"], {})[r["pid"]] = int(r["n"])
         return out
+
+    # ---- 함께 사는 쌍 (basket_pairs, 11/17). 단위 = 같은 사람이 기간 안에 둘 다 산 것
+
+    def _person_items(self, level: str, filters: dict[str, str]) -> None:
+        """임시 표 `seg_pi`(buyer_id, code): 기간 안 결제 완료 주문에서 그 사람이 산 장르(또는
+        상품) 구분 표. `filters`가 있으면 속성 조건이 모두 맞는 사람만. 같은 조건이면 다시 쓴다."""
+        want = (level, tuple(sorted(filters.items())))
+        if self._pi == want:
+            return
+        self.conn.execute("DROP TABLE IF EXISTS temp.seg_pi")
+        column = ITEM_COLUMNS[level]
+        match = " AND ".join(
+            f"a.v{self.keys.index(k)} = :f{i}" for i, k in enumerate(filters)
+        )  # fmt: skip
+        segment = f"SELECT a.buyer_id FROM seg_attrs a WHERE {match}"
+        who = f" AND o.buyer_id IN ({segment})" if match else ""
+        self.conn.execute(
+            "CREATE TEMP TABLE seg_pi (code TEXT, buyer_id TEXT, PRIMARY KEY (code, buyer_id)) "
+            "WITHOUT ROWID"
+        )
+        # 줄 인덱스(code, 주문 id)를 덮어 읽고 주문은 주문 id로 찾는다 (줄 표 본문을 읽지 않는다).
+        # code 순으로 읽혀 (code, 사람) 키에 거의 차례로 들어간다
+        self.conn.execute(
+            f"INSERT OR IGNORE INTO seg_pi SELECT l.{column}, o.buyer_id FROM sales_order_lines l "
+            f"INDEXED BY {LINE_INDEX[level]} CROSS JOIN sales_orders o "
+            "INDEXED BY idx_sales_orders_byid ON o.tenant_id = :t AND o.order_id = l.order_id "
+            f"WHERE l.tenant_id = :t AND l.{column} IS NOT NULL AND l.{column} != '' "
+            f"AND {self.paid_where}{who}",
+            {**self.params, **{f"f{i}": v for i, v in enumerate(filters.values())}},
+        )
+        self.conn.execute("CREATE INDEX temp.seg_pi_buyer ON seg_pi(buyer_id, code)")
+        self._pi = want
+
+    def pair_counts(
+        self, level: str, filters: dict[str, str], least: int = 1
+    ) -> tuple[dict[str, int], dict[tuple[str, str], int]]:
+        """(code → 산 사람 수, (a, b) → 둘 다 산 사람 수). 쌍은 a < b(code 순)이고 둘 다 산 사람이
+        `least`명 이상인 것만. `seg_pi`가 (사람, code)당 한 줄이라 COUNT(*) = COUNT(DISTINCT
+        buyer_id). 쌍은 a마다 따로 센다(a의 구매자만 (code, 사람) 키로 읽고 그 사람의 다른 code는
+        (사람, code) 인덱스로 찾아 묶음이 작다).
+        `filters`의 key는 세션 `keys`에 있어야 한다."""
+        self._person_items(level, filters)
+        items = {
+            r["code"]: int(r["n"])
+            for r in self._all("SELECT code, COUNT(*) AS n FROM seg_pi GROUP BY code")
+        }
+        together: dict[tuple[str, str], int] = {}
+        for a in sorted(items):
+            for r in self._all(
+                "SELECT y.code AS b, COUNT(*) AS n FROM seg_pi x CROSS JOIN seg_pi y "
+                "INDEXED BY seg_pi_buyer ON y.buyer_id = x.buyer_id AND y.code > :pa "
+                "WHERE x.code = :pa "
+                "GROUP BY y.code HAVING COUNT(*) >= :least",
+                {"pa": a, "least": least},
+            ):
+                together[(a, r["b"])] = int(r["n"])
+        return items, together
+
+    def hidden_pairs(
+        self, level: str, filters: dict[str, str], least: int, limit: int
+    ) -> list[tuple[str, str]]:
+        """둘 다 산 사람이 1명 이상 `least`명 미만인 쌍 (a < b, code 순) 최대 `limit`개. 숫자는
+        돌려주지 않는다 (화면에 숨김으로만 보인다)."""
+        self._person_items(level, filters)
+        rows = self._all(
+            "SELECT x.code AS a, y.code AS b FROM seg_pi x "
+            "JOIN seg_pi y ON y.buyer_id = x.buyer_id AND y.code > x.code "
+            "GROUP BY x.code, y.code HAVING COUNT(*) < :least ORDER BY x.code, y.code LIMIT :lim",
+            {"least": least, "lim": limit},
+        )
+        return [(r["a"], r["b"]) for r in rows]
+
+    def together_cells(self, level: str, a: str, b: str) -> Cells:
+        """`a`와 `b`를 둘 다 산 사람(조건 없음)을 속성 값 셀로 센다."""
+        self._person_items(level, {})
+        return self._cells_of(
+            "SELECT x.buyer_id FROM seg_pi x JOIN seg_pi y ON y.buyer_id = x.buyer_id "
+            "AND y.code = :pb WHERE x.code = :pa",
+            {"pa": a, "pb": b},
+        )
 
     def genre_nets(self) -> tuple[dict[str, tuple[int, int]], list[StoredOrder]]:
         """장르 → (그 장르 줄 순매출 합, 그 장르가 든 주문 수). 줄 할인 몫 합이 주문 할인(쿠폰 +

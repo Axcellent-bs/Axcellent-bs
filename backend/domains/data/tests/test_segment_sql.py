@@ -28,6 +28,7 @@ from data_agent.sales_collect import collect_once
 from data_agent.sales_fake import FAKE_DIR, FakeSalesSource, load_config
 from data_agent.sales_quality import kst_day, quality
 from data_agent.sales_store import SalesStore, StoredOrder, customers_source
+from data_agent.skills import basket_pairs as bp
 from data_agent.skills import event_proposal as ep
 from data_agent.skills import segment_analysis as seg
 
@@ -95,8 +96,9 @@ class OldSession:
         return [(k, code, len(who), len(who & segment))
                 for (k, code), who in item_buyers(self.paid).items()]  # fmt: skip
 
-    def titles(self, *, genre_only: bool = False):  # noqa: ANN201
-        return titles_of(self.paid, genre_only=genre_only)
+    def titles(self, *, genre_only: bool = False, ids=None):  # noqa: ANN001, ANN201
+        found = titles_of(self.paid, genre_only=genre_only)
+        return found if ids is None else {p: t for p, t in found.items() if p in set(ids)}
 
     def genre_cells(self):  # noqa: ANN201
         return {code: self._cells(who)
@@ -112,6 +114,41 @@ class OldSession:
 
     def genre_nets(self):  # noqa: ANN201
         return {}, self.paid  # 모든 주문을 line_nets 배분으로 (예전 genre_aov)
+
+    # ---- 함께 사는 쌍 (11/17): 사람마다 산 code 집합을 파이썬으로 만들어 쌍을 센다
+
+    def _person_items(self, level: str, filters: dict[str, str]) -> dict[str, set[str]]:
+        column = {"genre": "genre_code", "product": "product_id"}[level]
+        bought: dict[str, set[str]] = defaultdict(set)
+        for order in self.paid:
+            attrs = self.attrs.get(order.buyer_id, {})
+            if not all(attrs.get(k) == v for k, v in filters.items()):
+                continue
+            for line in order.lines:
+                if code := getattr(line, column):
+                    bought[order.buyer_id].add(code)
+        return bought
+
+    def _pairs(self, level: str, filters: dict[str, str]):  # noqa: ANN202
+        items: Counter[str] = Counter()
+        together: Counter[tuple[str, str]] = Counter()
+        for codes in self._person_items(level, filters).values():
+            items.update(codes)
+            ordered = sorted(codes)
+            together.update((a, b) for i, a in enumerate(ordered) for b in ordered[i + 1:])
+        return dict(items), dict(together)
+
+    def pair_counts(self, level: str, filters: dict[str, str], least: int = 1):  # noqa: ANN201
+        items, together = self._pairs(level, filters)
+        return items, {k: n for k, n in together.items() if n >= least}
+
+    def hidden_pairs(self, level: str, filters: dict[str, str], least: int, limit: int):  # noqa: ANN201
+        _, together = self._pairs(level, filters)
+        return sorted(k for k, n in together.items() if n < least)[:limit]
+
+    def together_cells(self, level: str, a: str, b: str):  # noqa: ANN201
+        return self._cells(buyer for buyer, codes in self._person_items(level, {}).items()
+                           if a in codes and b in codes)  # fmt: skip
 
 
 class PythonPath(SalesStore):
@@ -268,6 +305,32 @@ def test_event_proposal_candidates_same_as_python_path(stores, cat) -> None:  # 
     assert ep.genre_aov(totals, uneven) == ep.genre_aov({}, old.paid_of(TENANT, w.start, w.end))
 
 
+BASKETS = [
+    ("genre", {}, "90d"), ("genre", {"age_band": "20s"}, "30d"), ("product", {}, "90d"),
+    ("product", {"gender": "female", "occupation": "employee"}, "90d"), ("genre", {}, "1d"),
+    ("genre", {"age_band": "90s"}, "90d"),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("level", "filters", "period"), BASKETS)
+def test_basket_pairs_same_as_python_path(stores, cat, level, filters, period) -> None:  # noqa: ANN001
+    new, old = stores
+    args = (TENANT, level, period, filters, 20, cat.sales, cat.id, NOW)
+    got, want = bp.basket(new, *args), bp.basket(old, *args)
+    assert got == want
+    if (level, filters, period) == ("product", {}, "90d"):
+        assert got.status == "ok" and any(not p.suppressed for p in got.pairs)  # 빈 결과끼리가 아님
+
+
+def test_bundle_candidates_same_as_python_path(stores, cat, monkeypatch) -> None:  # noqa: ANN001
+    """가짜 출처의 장르 쌍은 배수가 1.2 미만이라 기준을 1.0으로 낮춰 묶음 후보를 만들고 비교한다."""
+    monkeypatch.setattr(ep, "MIN_LIFT", 1.0)
+    new, old = stores
+    got = ep.read_base(new, TENANT, cat.sales, cat.id, NOW)
+    want = ep.read_base(old, TENANT, cat.sales, cat.id, NOW)
+    assert got == want and any(c.bundle is not None for c in got.candidates)
+
+
 class NoOrderReads(SalesStore):
     """고객 기록 관문에 걸리면 주문 집계·주문 읽기를 부르면 안 된다."""
 
@@ -375,3 +438,17 @@ def test_perf_profile_on_300k_orders(tmp_path, cat) -> None:  # noqa: ANN001
     took = time.perf_counter() - started
     print(f"segment_profile 고객 기록 없음: {took:.2f}초")
     assert gated.status == "insufficient" and took < 1.0
+
+
+@pytest.mark.skipif(os.environ.get("DATA_PERF") != "1", reason="DATA_PERF=1일 때만 (느림)")
+def test_perf_basket_pairs_on_300k_orders(tmp_path, cat) -> None:  # noqa: ANN001
+    """목표 3초. 상품 단위(상품 1,200개, 사람 × 상품 43만 줄, 쌍 165만 줄)는 11/17 측정 3.5초라
+    목표에 못 미친다 — 느려지지 않게 5초로 막는다 (PR 본문에 측정값)."""
+    store = big_store(str(tmp_path / "big.db"), PERF_ORDERS, customers=True)
+    cases = (("genre", {}, 3.0), ("product", {}, 5.0), ("genre", {"age_band": "20s"}, 3.0))
+    for level, filters, limit in cases:
+        started = time.perf_counter()
+        out = bp.basket(store, TENANT, level, "90d", filters, 10, cat.sales, cat.id, NOW)
+        took = time.perf_counter() - started
+        print(f"\nbasket_pairs {level} {filters or '전체'} 주문 {PERF_ORDERS:,}건: {took:.2f}초")
+        assert out.status == "ok" and out.pairs and took < limit

@@ -301,6 +301,20 @@ export interface EventProposalItem {
   timing_basis: { month: string; keywords: string[]; last_year_multiple: number | null; source: string };
   reasons: ProposalReason[]; estimate: ProposalEstimate; limits: string[]; score: number | null;
   title: string | null; summary: string | null; sent: ProposalSent | null; past_results: ProposalPastResult[];
+  /** 묶음 할인 후보일 때만 (11/17). 예전 서버면 없음 */
+  bundle?: BundleBasis | null;
+}
+export interface BundleBasis { a_code: string; a_label: string; b_code: string; b_label: string; lift: number | null; together_buyers: number | null }
+// ---- 함께 사는 장르·상품 (basket_pairs, 11/17). 단위 = 같은 사람이 기간 안에 둘 다 산 것
+export type BasketLevel = "genre" | "product";
+export interface BasketPair {
+  a_code: string; a_label: string; b_code: string; b_label: string;
+  together_buyers: number | null; a_buyers: number | null; b_buyers: number | null;
+  confidence: number | null; lift: number | null; suppressed: boolean;
+}
+export interface BasketPairsOutput {
+  status: "ok" | "insufficient"; insufficient_reasons: string[]; level: BasketLevel; period: SegmentPeriod;
+  filters: Record<string, string>; pairs: BasketPair[]; basis: SalesBasis | null; quality: SalesQuality; summary: string;
 }
 export interface EventProposalOutput {
   status: "ok" | "insufficient"; insufficient_reasons: string[]; month: string;
@@ -2014,6 +2028,8 @@ export const dataAi = {
     askData<SegmentProfileOutput>("segment_profile", "구매자 구성", { target_kind, target_code, period }),
   marketCoverage: (attribute_keys: string[]) =>
     askData<MarketCoverageOutput>("market_coverage", "시장 커버 비율", { attribute_keys }, TREND_DEADLINE_MS),
+  basketPairs: (level: BasketLevel, period: SegmentPeriod, filters: Record<string, string>) =>
+    askData<BasketPairsOutput>("basket_pairs", "함께 사는 것", { level, period, filters }),
   eventProposal: (month: string) =>
     askData<EventProposalOutput>("event_proposal", "이벤트 제안", { month }, TREND_DEADLINE_MS),
   eventProposalSend: (proposal_id: string) =>
