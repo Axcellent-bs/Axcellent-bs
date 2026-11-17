@@ -114,7 +114,7 @@ from finance_agent.handlers import (
 )
 from finance_agent.human import human_from_authorization, label_fields
 from finance_agent.planning_questions import STORE, human_answer_request, record_sent_request
-from finance_agent.rules import load_rules
+from finance_agent.rules import load_rules, refresh_applied
 
 TODO_ITEMS = 10  # 할 일 카드에 바로 보여 줄 건수
 RECON_KO = {
@@ -133,7 +133,8 @@ def _month_confirmed(closings: dict[tuple[str, str], dict[str, Any]], month: str
 
 
 def ok(data: Any, meta: dict[str, Any]) -> dict[str, Any]:
-    return {"data": data, "meta": meta}
+    # 저장된 기록의 옛 규칙 문구 대신 지금 기준표 문구를 보인다 (refresh_applied)
+    return {"data": refresh_applied(data), "meta": meta}
 
 
 def error(status: int, code: str, message: str) -> JSONResponse:

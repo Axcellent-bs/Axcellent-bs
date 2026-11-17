@@ -77,7 +77,8 @@ export function RefList({ refs, sellers, label = "기록 번호 보기" }: { ref
  * `titleHidden`: 바로 위 탭 이름과 같은 제목이면 화면에서는 숨기고(읽기 프로그램에는 남김) 한 번만 보이게 한다.
  */
 /** 이 숫자를 계산한 회계 기준. 세무사·회계사가 아직 확인하지 않은 기준은 표시한다. 길어서 접어 둔다 */
-/** 계산·판단 기준 목록. `plain`(캠페인 예산 등 내부 관리 판단)은 세무 확인 표시와 규칙 번호를 빼고 쉬운 말로만 보인다 */
+/** 계산·판단 기준 목록. 규칙 번호는 화면에 쓰지 않고 마우스를 올리면 보인다.
+ *  `plain`(캠페인 예산 등 내부 관리 판단)은 세무사·회계사 확인 표시도 뺀다 */
 export function AppliedRules({ rules, plain = false }: { rules?: AppliedRule[]; plain?: boolean }) {
   if (!rules?.length) return null;
   const pending = plain ? 0 : rules.filter((r) => r.review === "pending").length;
@@ -90,10 +91,9 @@ export function AppliedRules({ rules, plain = false }: { rules?: AppliedRule[]; 
       <p className="mt-2 text-ink-500">{plain ? "재무 AI가 이 기준대로 계산하고 의견을 냈어요." : "재무 AI가 이 기준대로 계산했어요. 아직 세무사·회계사가 확인하지 않은 기준은 '확인 전'으로 표시해요."}</p>
       <ul className="mt-2 space-y-2">
         {rules.map((r) => (
-          <li key={r.rule_id}>
+          <li key={r.rule_id} title={`규칙 번호 ${r.rule_id}`}>
             <p className="flex flex-wrap items-center gap-2 font-medium text-ink-900">
               {r.title}
-              {!plain && <Chip label={r.rule_id} tone={TONE.muted} />}
               {!plain && r.review === "pending" && <Chip label="세무사·회계사 확인 전" tone={TONE.warn} />}
             </p>
             <p className="text-ink-700">{r.statement}</p>

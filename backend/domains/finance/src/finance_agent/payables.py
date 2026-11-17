@@ -128,6 +128,6 @@ def rollforward(
         "balanced": balanced,
         "overpaid": [r["seller_id"] for r in rows if r["overpaid"]],
         "sellers": rows,
-        "basis": "지급 = 안전 장치가 승인한 정산 묶음 (고객지원 정산, 실제 이체 결과 미연동)",
+        "basis": "지급 = 안전 장치가 승인한 판매자 정산 묶음 (고객지원 정산). 실제 이체 결과는 아직 연결되지 않음",
         "unavailable": [] if paid_known else ["seller_settlement_batches"],
     }
