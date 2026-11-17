@@ -10,7 +10,11 @@ from ax_contracts.schemas.book_issue import (
     BookIssueRow,
     CategoryCount,
 )
-from ax_contracts.schemas.finance import CampaignBudgetReviewInput
+from ax_contracts.schemas.finance import (
+    CampaignBudgetReviewInput,
+    CampaignBudgetReviewOutput,
+    CustomerReactionSummary,
+)
 
 OLD_REQUEST = {
     "campaign_id": "cmp_1",
@@ -95,3 +99,41 @@ def test_budget_review_product_ids_are_limited_and_extra_keys_still_fail() -> No
         CampaignBudgetReviewInput.model_validate({**OLD_REQUEST, "product_ids": too_many})
     with pytest.raises(ValidationError):
         CampaignBudgetReviewInput.model_validate({**OLD_REQUEST, "product_id": "prd_1"})
+
+
+OLD_OUTPUT = {
+    "review_id": "bud_1",
+    "campaign_id": "cmp_1",
+    "decision": "approved",
+    "requested_krw": 500000,
+    "approved_limit_krw": 500000,
+    "reasons": [],
+    "recommendation": "",
+    "applied_rules": [],
+}
+
+
+def test_the_budget_review_output_accepts_old_results_and_the_new_summary() -> None:
+    old = CampaignBudgetReviewOutput.model_validate(OLD_OUTPUT)  # 옛 재무의 결과는 요약이 없다
+    assert old.customer_reaction is None
+    new = CampaignBudgetReviewOutput.model_validate(
+        OLD_OUTPUT
+        | {
+            "customer_reaction": {
+                "status": "flagged",
+                "flagged": ["prd_1"],
+                "sales_unread": ["prd_2"],
+            }
+        }
+    )
+    assert new.customer_reaction == CustomerReactionSummary(
+        status="flagged", flagged=["prd_1"], sales_unread=["prd_2"]
+    )
+    assert new.customer_reaction.low_sales == []
+
+
+def test_the_reaction_summary_rejects_an_unknown_status_and_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        CustomerReactionSummary(status="maybe")  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        CustomerReactionSummary(status="clear", extra_field=1)  # type: ignore[call-arg]
