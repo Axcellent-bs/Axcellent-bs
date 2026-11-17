@@ -103,6 +103,12 @@ class ReceiveFinanceOpinionOutput(AxModel):
     duplicate: bool = False
 
 
+# 캠페인 콘텐츠 형식: shorts(유튜브 쇼츠), reels(인스타그램 릴스)
+ContentFormat = Literal["shorts", "reels"]
+# 조회수 측정 시점(데이터 `video_performance`): 게시 후 1시간·1일·3일·7일
+ViewsPoint = Literal["1h", "1d", "3d", "7d"]
+
+
 class CampaignResultInput(AxModel):
     """캠페인 성과. `gmv_krw`를 모르면 비워 둔다. 재무는 0으로 채우지 않고 판단을 미룬다."""
 
@@ -123,6 +129,14 @@ class CampaignResultInput(AxModel):
     measured_gmv_krw: int | None = None
     measured_orders: int | None = None
     effect_generated_at: str | None = None  # campaign_effect의 generated_at
+    # 아래는 옛 요청에 없다(콘텐츠 카테고리별 예산, 11/17). 모르면 비워 둔다
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)  # 예: 아재개그
+    format: ContentFormat | None = None
+    # 영상 제작비. 광고비(spend_krw)와 따로 적는다. 끝난 금액만
+    production_cost_krw: int | None = Field(default=None, ge=0)
+    # 조회수: 데이터 `video_performance`가 잰 값 그대로. views_point는 그 측정 시점
+    views: int | None = Field(default=None, ge=0)
+    views_point: ViewsPoint | None = None
 
 
 class CampaignBudgetReviewInput(AxModel):
@@ -133,6 +147,9 @@ class CampaignBudgetReviewInput(AxModel):
     # 캠페인이 다루는 상품 ID(선택, 최대 10개). 재무가 고객지원 `book_issue_stats`(`claims`)로
     # 불만 많은 책인지 읽는 데 쓴다. 비워 두면(옛 요청) 상품 신호를 반영하지 않는다
     product_ids: list[str] = Field(default_factory=list, max_length=10)
+    # 아래는 옛 요청에 없다(콘텐츠 카테고리별 예산, 11/17)
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    format: ContentFormat | None = None
 
 
 class CustomerReactionSummary(AxModel):
