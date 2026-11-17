@@ -53,7 +53,11 @@ from ax_contracts.schemas.finance import (
     FinanceOpinion,
     VerifyAmountInput,
 )
-from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
+from ax_contracts.schemas.planning import (
+    AnswerPlanningQuestionInput,
+    InsightFact,
+    ReceiveInsightInput,
+)
 from finance_agent import books as bk
 from finance_agent import campaign as cp
 from finance_agent import chat_log, closing, tax, team_budget
@@ -114,6 +118,21 @@ async def send_opinion(opinion: dict[str, Any], meta: RequestMeta) -> str | None
     )
 
 
+async def send_planning_insight(payload: dict[str, Any], meta: RequestMeta) -> dict[str, Any]:
+    """기획 skill `receive_insight`를 부른다. {problem, outcome, proposal_id}를 돌려준다."""
+    deadline = datetime.now(UTC) + timedelta(seconds=OPINION_CALL_SECONDS)
+    request = AgentRequest(
+        meta=meta.model_copy(update={"deadline": deadline}),
+        skill="receive_insight",
+        input=payload,
+    )
+    result = await call_agent("planning", request)
+    if result.status != TaskStatus.COMPLETED:
+        return {"problem": result.outcome or result.status.value}
+    out = result.output or {}
+    return {"problem": None, "outcome": out.get("outcome"), "proposal_id": out.get("proposal_id")}
+
+
 class State:
     def __init__(self, sources: Sources | None = None) -> None:
         self.sources: Sources = sources or (MockSources() if is_mock("finance") else LiveSources())
@@ -129,6 +148,9 @@ class State:
         self.opinion_sender: Callable[[dict[str, Any], RequestMeta], Awaitable[str | None]] = (
             send_opinion
         )
+        self.planning_insight_sender: Callable[
+            [dict[str, Any], RequestMeta], Awaitable[dict[str, Any]]
+        ] = send_planning_insight
         # 시뮬레이션은 시나리오의 값을 넣는다. None이면 장부로 계산한다
         self.cash_override: int | None = None
         self.budget_override: dict[str, Any] | None = None
@@ -188,6 +210,8 @@ class FinanceRecords:
         self.budget_reviews: list[dict[str, Any]] = []  # 예산 판단 기록
         self.lessons: list[dict[str, Any]] = []  # 실패 교훈
         self.opinions: list[dict[str, Any]] = []  # 총괄에 낸 의견과 전달 상태
+        # 기획에 보낸 재무 인사이트(budget_shift → receive_insight)와 전달 상태·받은 제안 번호
+        self.planning_insights: list[dict[str, Any]] = []
         self.exports: dict[str, dict[str, Any]] = {}  # 자동으로 만든 파일 묶음
         self.bank_imports: list[dict[str, Any]] = []  # 은행 내역 폴더에서 읽은 기록
         # 올린 PG 정산 파일(`pg_file.py`): 결제 번호 → 줄, 덮는 판매일 기간, 올린 기록
@@ -683,13 +707,97 @@ async def _deliver(row: dict[str, Any]) -> None:
 
 
 async def retry_opinions() -> int:
-    """전달 대기 의견을 다시 보낸다. 전달한 수."""
+    """전달 대기 의견(총괄)과 인사이트(기획)를 다시 보낸다. 전달한 수."""
     done = 0
     for row in state().records.opinions:
         if row["status"] == "pending":
             await _deliver(row)
             done += row["status"] == "delivered"
+    for row in state().records.planning_insights:
+        if row["status"] == "pending":
+            await _deliver_planning(row)
+            done += row["status"] == "delivered"
     return done
+
+
+# 기획에 보내는 인사이트 종류. 다음 회차 비중을 기획이 제안으로 만든다 (INS-005)
+PLANNING_INSIGHT_KINDS = {"budget_shift"}
+PLANNING_INSIGHT_SKILL = "finance_insights"
+
+
+def planning_insight(item: dict[str, Any]) -> dict[str, Any]:
+    """재무 인사이트 → 기획 `receive_insight` 입력. 숫자는 재무가 낸 값 그대로 facts에 싣는다."""
+    facts = [
+        InsightFact(
+            label=f"{row['content_category']} 조회당 제작비"[:120],
+            value=f"{row['cost_per_view']:,}원"[:80],
+            source=PLANNING_INSIGHT_SKILL,
+        )
+        for row in item.get("categories", [])
+    ]
+    facts += [
+        InsightFact(
+            label=f"{row['content_category']} 제작비 · 7일 조회수"[:120],
+            value=f"{fc.won(row['production_cost_krw'])} · {row['views']:,}회"[:80],
+            source=PLANNING_INSIGHT_SKILL,
+        )
+        for row in item.get("categories", [])
+    ]
+    shift = item.get("shift")
+    if shift:
+        facts.append(
+            InsightFact(
+                label=f"다음 회차 제작비 이동 ({shift['from']} → {shift['to']})"[:120],
+                value=fc.won(shift["amount_krw"])[:80],
+                source=PLANNING_INSIGHT_SKILL,
+            )
+        )
+    return ReceiveInsightInput(
+        insight_id=f"fin_{item['insight_id']}"[:80],
+        title=item["title"][:120],
+        summary=item["message"][:400],
+        skill=PLANNING_INSIGHT_SKILL,
+        facts=facts[:12],
+        generated_at=_now(),
+        body_md=(
+            f"**재무 의견** {item['recommendation']}"
+            + chr(10) * 2
+            + "재무는 결정하지 않는다. 다음 회차 비중은 기획이 제안하고 사람이 정한다."
+        ),
+    ).model_dump(mode="json")
+
+
+async def submit_planning_insight(item: dict[str, Any], context_id: str) -> dict[str, Any]:
+    """기획에 인사이트를 보낸다. 같은 인사이트는 한 번만. 못 보내면 전달 대기로 두고 다시 보낸다."""
+    payload = planning_insight(item)
+    rows = state().records.planning_insights
+    for row in rows:
+        if row["insight"]["insight_id"] == payload["insight_id"]:
+            return row
+    row = {"insight": payload, "context_id": context_id, "status": "pending", "attempts": 0}
+    rows.append(row)
+    del rows[:-MAX_OPINIONS]
+    await _deliver_planning(row)
+    return row
+
+
+async def _deliver_planning(row: dict[str, Any]) -> None:
+    row["attempts"] += 1
+    meta = _opinion_meta(row["context_id"], row["insight"]["insight_id"])
+    try:
+        got = await state().planning_insight_sender(row["insight"], meta)
+    except Exception as exc:  # 기획이 꺼져 있어도 재무 판단은 끝난다
+        got = {"problem": type(exc).__name__}
+    if got.get("problem") is None:
+        row |= {
+            "status": "delivered",
+            "delivered_at": fc.iso(fc.now()),
+            "last_problem": None,
+            "outcome": got.get("outcome"),
+            "proposal_id": got.get("proposal_id"),
+        }
+    else:
+        row["last_problem"] = str(got["problem"])[:200]
 
 
 async def cash_position() -> tuple[int | None, str]:
@@ -903,11 +1011,20 @@ async def verify_campaign_budget(request: AgentRequest) -> AgentResult:
     )
 
 
+# 같은 캠페인 결과를 다시 받을 때 비어 오면 앞 값을 지키는 칸 (콘텐츠 카테고리별 예산)
+KEEP_ON_RESEND = ("content_category", "format", "production_cost_krw", "views", "views_point")
+
+
 async def record_result(data: CampaignResultInput, context_id: str) -> dict[str, Any]:
     """손익 기록 → 교훈 반영 → 의견·인사이트 제출. 같은 내용을 다시 보내면 그대로 돌려준다."""
     records = state().records
     body = data.model_dump()
     previous = records.campaigns.get(data.campaign_id)
+    if previous is not None:
+        # 마케팅이 판매액만 다시 보내도 앞서 받은 카테고리·제작비·조회수는 지우지 않는다(11/17)
+        for key in KEEP_ON_RESEND:
+            if body.get(key) is None and previous.get(key) is not None:
+                body[key] = previous[key]
     if previous is not None and all(previous.get(k) == v for k, v in body.items()):
         return previous | {"write": "already_recorded"}
     started = await started_campaigns()
@@ -962,6 +1079,8 @@ async def submit_insights(context_id: str) -> list[dict[str, Any]]:
             },
             context_id,
         )
+        if item["kind"] in PLANNING_INSIGHT_KINDS:
+            await submit_planning_insight(item, context_id)
     return found
 
 

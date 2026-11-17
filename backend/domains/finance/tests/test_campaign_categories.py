@@ -233,3 +233,92 @@ def test_seven_day_views_send_the_shift_to_orchestrator_even_without_sales() -> 
     assert [c["content_category"] for c in view["categories"]] == ["아재개그", "몸개그"]
     insights = client.get("/api/finance/insights").json()["data"]
     assert any(i["kind"] == "budget_shift" for i in insights)
+
+
+# ------------------------------------------------------------- 기획으로 보내기 (receive_insight)
+def _planning_sender(state_: Any, reply: dict[str, Any]) -> list[dict]:
+    got: list[dict] = []
+
+    async def send(payload: dict, meta: Any) -> dict[str, Any]:
+        got.append(payload)
+        return reply
+
+    state_.planning_insight_sender = send
+    return got
+
+
+def _two_categories(client: TestClient) -> None:
+    for row in (
+        _shorts("a1", "아재개그", 100_000, 20_000),
+        _shorts("b1", "몸개그", 100_000, 2_500),
+    ):
+        client.post("/a2a", json=_body("record_campaign_result", row, "mock:marketing"))
+
+
+def test_budget_shift_goes_to_planning_once_with_finance_facts() -> None:
+    from ax_contracts.schemas.planning import ReceiveInsightInput
+
+    _sender(state())
+    sent = _planning_sender(
+        state(), {"problem": None, "outcome": "created", "proposal_id": "PROP-7"}
+    )
+    client = TestClient(app)
+    _two_categories(client)
+    assert len(sent) == 1
+    payload = ReceiveInsightInput.model_validate(sent[0])  # 기획 계약 그대로
+    assert payload.skill == "finance_insights" and payload.insight_id.startswith("fin_budget_shift")
+    values = {f.label: f.value for f in payload.facts}
+    assert (
+        values["아재개그 조회당 제작비"] == "5.0원" and values["몸개그 조회당 제작비"] == "40.0원"
+    )
+    assert all(f.source == "finance_insights" for f in payload.facts)
+    # 같은 인사이트를 다시 내도 기획에는 한 번만 간다
+    client.post(
+        "/a2a",
+        json=_body("record_campaign_result", _shorts("c1", "말장난", 1, None), "mock:marketing"),
+    )
+    assert len(sent) == 1
+    view = client.get("/api/finance/campaigns").json()["data"]
+    [row] = view["planning_insights"]
+    assert (row["status"], row["proposal_id"]) == ("delivered", "PROP-7")
+
+
+def test_planning_down_keeps_it_pending_and_retries() -> None:
+    import asyncio
+
+    from finance_agent import handlers
+
+    _sender(state())
+    _planning_sender(state(), {"problem": "unavailable"})
+    _two_categories(TestClient(app))
+    [row] = state().records.planning_insights
+    assert (row["status"], row["last_problem"]) == ("pending", "unavailable")
+    _planning_sender(state(), {"problem": None, "outcome": "created", "proposal_id": "PROP-8"})
+    assert asyncio.run(handlers.retry_opinions()) >= 1
+    assert (row["status"], row["proposal_id"]) == ("delivered", "PROP-8")
+
+
+def test_safety_lets_finance_send_insights_to_planning() -> None:
+    from ax_safety.rules import load_registry
+
+    action = next(a for a in load_registry().actions if a.action == "receive_insight")
+    assert "finance" in action.requesters and action.owner == "planning"
+
+
+def test_resending_without_views_keeps_the_views_already_recorded() -> None:
+    _sender(state())
+    client = TestClient(app)
+    first = _shorts("a1", "아재개그", 100_000, 20_000)
+    client.post("/a2a", json=_body("record_campaign_result", first, "mock:marketing"))
+    # 마케팅이 나중에 판매액만 채워 다시 보낸다(카테고리·조회수 칸은 비움)
+    later = {**first, **_strip(), "gmv_krw": 1_000_000}
+    out = client.post("/a2a", json=_body("record_campaign_result", later, "mock:marketing"))
+    got = out.json()["output"]
+    assert (got["views"], got["views_point"], got["cost_per_view"]) == (20_000, "7d", 5.0)
+    assert got["content_category"] == "아재개그" and got["status"] == "recorded"
+    # 새 값이 오면 새 값을 쓴다
+    newer = {**first, "views": 25_000}
+    got = client.post("/a2a", json=_body("record_campaign_result", newer, "mock:marketing")).json()[
+        "output"
+    ]
+    assert got["views"] == 25_000

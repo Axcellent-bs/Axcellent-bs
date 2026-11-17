@@ -1492,6 +1492,8 @@ def add_finance_api(app: FastAPI) -> None:
                 "reviews": list(reversed(records.budget_reviews)),
                 "lessons": list(reversed(records.lessons)),
                 "opinions": list(reversed(records.opinions)),
+                # 기획에 보낸 재무 인사이트와 기획이 만든 제안 번호 (INS-005 → receive_insight)
+                "planning_insights": list(reversed(records.planning_insights)),
                 "budget": {
                     "month": month,
                     "monthly_krw": budget["amount_krw"],
