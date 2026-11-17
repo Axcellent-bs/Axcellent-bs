@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { beforeAfter, canRevoke, countByAgent, deliveryOf, isQuiet, type AgentDiagnosisRow } from "./agentDiagnosis.ts";
+import { beforeAfter, canRevoke, canSeeDiagnosisInbox, countByAgent, deliveryOf, isQuiet, type AgentDiagnosisRow } from "./agentDiagnosis.ts";
 import type { EvaluatedEvent } from "./agentEval.ts";
 
 const row = (over: Partial<AgentDiagnosisRow> = {}): AgentDiagnosisRow => ({
@@ -70,4 +70,12 @@ test("전달 상태 문구와 에이전트별 건수", () => {
   assert.equal(deliveryOf(row())?.label, "에이전트가 받았어요");
   assert.equal(deliveryOf(row({ delivery: undefined })), null);
   assert.deepEqual(countByAgent([row(), row({ request_id: "diag-2" }), row({ agent: "data" })]), { infra: 2, data: 1 });
+});
+
+test("총괄 진단 칸은 운영자·관리자에게만 보인다", () => {
+  assert.equal(canSeeDiagnosisInbox("관리자"), true);
+  assert.equal(canSeeDiagnosisInbox("운영자"), true);
+  assert.equal(canSeeDiagnosisInbox("일반회원"), false);
+  assert.equal(canSeeDiagnosisInbox(null), false);
+  assert.equal(canSeeDiagnosisInbox(undefined), false);
 });

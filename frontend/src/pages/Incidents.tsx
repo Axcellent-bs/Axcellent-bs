@@ -4,6 +4,7 @@ import { Link } from "@/lib/nav";
 import { ago, shortDateTime } from "@/lib/format";
 import { DejafixNotConnectedError, ANALYSIS, SEVERITY, currentIncidents, readableTitle, dashboardSummary, recentIncidents, type DashboardSummary, type Incident, type IncidentMeta, type Measured } from "@/lib/dejafix";
 import { useSession } from "@/demo/session";
+import { AgentDiagnosisInbox } from "@/components/admin/AgentDiagnosisInbox";
 
 // 장애 대응 탭 = 지금 진행 중인 장애만. DejaFix API(GET /api/incidents?status=problem)에서 받아 AXcellent가 그린다.
 // 장애를 누르면 AXcellent 장애 상세(/infra/:id, IncidentDetail.tsx)로 간다.
@@ -338,6 +339,9 @@ export default function Incidents() {
           </div>
         </details>
       )}
+
+      {/* 총괄 AI가 인프라 AI에 보낸 진단 (읽기 전용, 없으면 숨김) */}
+      <AgentDiagnosisInbox agent="infra" />
 
       </div>
 

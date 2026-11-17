@@ -3,6 +3,7 @@ import LiveMarketing from "@/components/marketing/LiveMarketing";
 import { LinkedAi, type MarketingTab } from "@/components/marketing/LinkedAi";
 import { ReceivedBriefs } from "@/components/marketing/ReceivedBriefs";
 import { SnsMedia } from "@/components/marketing/SnsMedia";
+import { AgentDiagnosisInbox } from "@/components/admin/AgentDiagnosisInbox";
 
 // 마케팅 AI 화면. 캣북스 쇼핑몰 배너와 안전 장치 기록을 실제 백엔드에서 읽어 그린다 (LiveMarketing).
 // 공지는 확인된 사실 필드만 보여 주고 장애 원인은 적지 않는다.
@@ -25,6 +26,8 @@ export default function MarketingPage() {
       {tab === "campaign" && <LiveMarketing view="campaign" />}
       {tab === "briefs" && <div className="w-full space-y-8 px-8 pb-12 pt-6"><ReceivedBriefs /></div>}
       {tab === "sns" && <div className="w-full px-8 pb-12 pt-6"><SnsMedia /></div>}
+      {/* 총괄 AI가 마케팅에 보낸 진단(읽기 전용). 받은 진단이 없거나 일반회원이면 칸이 안 보인다 (#1244) */}
+      <div className="w-full px-8 pb-12 pt-6"><AgentDiagnosisInbox agent="marketing" /></div>
     </>
   );
 }

@@ -973,3 +973,78 @@ def test_budget_and_tax_estimate_use_entered_costs(kit: Any) -> None:
     after = tax.income_tax_estimate(books, 2026, date(2026, 10, 15), other)
     assert after["operating_result"] == before["operating_result"] - 440_000
     assert after["entered_months"] == 1
+
+
+def _switch_at(monkeypatch: pytest.MonkeyPatch, when: Any) -> None:
+    """설정의 판매 자료 교체 시각을 바꿔 끼운다 (설정 객체는 고정이라 복사본을 돌려준다)."""
+    from finance_agent import finance_config as fcfg
+
+    real = fcfg.load_config()
+    cfg = real.model_copy(
+        update={"sales_source": real.sales_source.model_copy(update={"switched_at": when})}
+    )
+    monkeypatch.setattr(fcfg, "load_config", lambda: cfg)
+
+
+def test_closings_confirmed_before_the_sales_source_switch(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """판매 서버를 새 DB로 바꾸기 전에 확정한 결산 (11/17 캣북스 새 DB 교체).
+
+    옛 판매 자료로 확정한 숫자라 차이 경고·조정·비교에 쓰지 않고, 지금 숫자와 함께
+    "판매 자료 교체 전 확정" 안내를 보인다. 확정 기록 자체는 남긴다.
+    """
+    from datetime import UTC, datetime
+
+    from finance_agent import closing
+    from finance_agent import finance_config as fcfg
+
+    day = "2026-10-21"
+    old = kit.order("o1", kit.at(day), [("s", "book", 1, 100_000)])
+    _swap_books(monkeypatch, kit.books(orders=[old]))
+    # 월 결산은 그 달이 끝나야 확정하므로(시험 시각 10/23) 날짜 결산으로 본다
+    client.post("/api/finance/closing/confirm", json={"period": "day", "date": day}, headers=HUMAN)
+    records = handlers.state().records
+    confirmation = records.closings[("day", day)]
+
+    # 판매 자료를 바꾼 시각은 그 확정 뒤, 지금은 그보다 뒤
+    switched = datetime(2026, 11, 17, 7, 29, tzinfo=UTC)
+    _switch_at(monkeypatch, switched)
+    monkeypatch.setattr(fcfg, "now", lambda: datetime(2026, 11, 17, 8, 0, tzinfo=UTC))
+    assert closing.before_source_switch(confirmation)
+    assert closing.usable_snapshot(confirmation) is None
+
+    new = kit.order("n1", kit.at(day), [("s", "book", 1, 7_000)])
+    new_books = kit.books(orders=[new])
+    _swap_books(monkeypatch, new_books)
+    # 차이 경고에서 빠진다
+    assert closing.find_drifts(new_books, records.closings) == []
+    report = client.get(f"/api/finance/closing?period=day&date={day}").json()["data"]
+    gmv = next(x["amount"] for x in report["lines"] if x["code"] == "gmv")
+    assert gmv == 7_000 and report["drift"] == [] and report["adjustment_proposal"] is None
+    info = report["source_switch"]
+    assert info["switched_at"].startswith("2026-11-17T07:29")
+    assert next(x["amount"] for x in info["confirmed_lines"] if x["code"] == "gmv") == 100_000
+    assert report["status"] == "confirmed"  # 확정 기록은 그대로다
+    # 조정은 막고, 다시 보려면 취소 후 다시 확정한다.
+    # 조정은 월 결산만 하므로 같은 기록을 월 자리에 둔다
+    records.closings[("month", "2026-10-01")] = dict(confirmation)
+    res = client.post(
+        "/api/finance/closing/adjust",
+        json={"date": "2026-10-01", "reason": "판매 자료 교체", "signature": "x"},
+        headers=HUMAN,
+    )
+    assert res.status_code == 409 and res.json()["error"]["code"] == "source_switched"
+
+
+def test_switch_time_not_reached_changes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """바꾼 시각이 아직 오지 않았으면(지금이 그 전) 확정 숫자를 그대로 쓴다."""
+    from datetime import UTC, datetime
+
+    from finance_agent import closing
+
+    _switch_at(monkeypatch, datetime(2026, 11, 17, tzinfo=UTC))
+    confirmation = {"at": "2026-10-23T12:00:00Z", "snapshot": {"lines": []}}
+    assert not closing.before_source_switch(confirmation)  # conftest 시각은 10/23
+    assert closing.usable_snapshot(confirmation) == {"lines": []}
+    assert closing.source_switch_info(confirmation) is None

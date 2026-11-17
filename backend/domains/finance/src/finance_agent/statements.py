@@ -147,7 +147,7 @@ def frozen_column(
     closings: dict[tuple[str, str], dict[str, Any]] | None, start: date
 ) -> dict[str, int | None] | None:
     """그 달을 확정했으면 확정할 때 저장한 값. 저장이 없으면 None."""
-    snap = ((closings or {}).get(("month", start.isoformat())) or {}).get("snapshot") or {}
+    snap = closing.usable_snapshot((closings or {}).get(("month", start.isoformat()))) or {}
     return snap.get("statement")
 
 
@@ -232,7 +232,10 @@ def income_statement(
             }
             for code, label, note in NOTES
         ],
-        "basis": "K-IFRS 기능별 손익계산서. 장부(판매 사이트·안전 관문 기록)에 있는 항목만 계산",
+        "basis": (
+            "국제회계기준(K-IFRS) 손익계산서 형식. "
+            "장부(판매 사이트·안전 장치 기록)에 있는 항목만 계산"
+        ),
         "confirmed": {
             "current": now_fixed == now_total,
             "previous": prev_fixed == prev_total,

@@ -114,6 +114,7 @@ def test_report_shape_and_template_commentary(kit) -> None:
         "applied_rules",
         "closable",
         "snapshot_at",
+        "source_switch",
         "drift",
         "close_warnings",
         "adjustment_proposal",

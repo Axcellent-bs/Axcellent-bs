@@ -1,8 +1,8 @@
 // node --test로 돈다 (npm test). 매출 분석 화면에 나오는 글자만 시험한다.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { SalesAnalysisOutput } from "./data.ts";
-import { changeText, koreaTime, rate, salesView, won, type SalesOkView } from "./salesView.ts";
+import type { ChannelValueOutput, SalesAnalysisOutput } from "./data.ts";
+import { changeText, channelValueView, koreaTime, rate, salesView, won, type SalesOkView } from "./salesView.ts";
 
 function sample(over: Partial<SalesAnalysisOutput> = {}): SalesAnalysisOutput {
   return {
@@ -82,4 +82,33 @@ test("품질 줄: 이름 없는 분류는 개수만, 코드는 내보내지 않�
 test("화면 글자에 코드값(book · naver · prd_ · missing_price · cpc)이 없다", () => {
   const text = JSON.stringify(salesView(sample()));
   for (const raw of ["book", "naver", "prd_", "missing_price", "cpc", "x1"]) assert.equal(text.includes(raw), false, raw);
+});
+
+const CHANNEL_VALUE: ChannelValueOutput = {
+  status: "ok", insufficient_reasons: [], period: "365d", horizon_days: 90, cost_note: "재무 연결 대기",
+  basis: null, quality: { rows_in_period: 0, empty_days: [], dropped_rows: 0, dropped_reasons: {}, last_synced_at: null, unknown_category_codes: [] },
+  summary: "최근 365일 첫 구매 고객 기준, 유튜브로 들어온 고객이 90일 동안 1인 41,200원으로 가장 높음.",
+  rows: [
+    { source: "youtube", label: "유튜브", new_customers: 820, revenue_per_customer: 41200, repeat_rate: 0.36, orders_per_customer: 1.8, cost_krw: null, suppressed: false },
+    { source: "naver", label: "네이버 검색", new_customers: 1140, revenue_per_customer: 33900, repeat_rate: 0.29, orders_per_customer: 1.46, cost_krw: null, suppressed: false },
+    { source: null, label: "기타 경로", new_customers: null, revenue_per_customer: null, repeat_rate: null, orders_per_customer: null, cost_krw: null, suppressed: true },
+  ],
+};
+
+test("유입 경로별 고객 가치: 1인 매출·재구매율·1인 주문, 비용은 재무 연결 대기, 숨긴 경로는 표본 부족", () => {
+  const v = channelValueView(CHANNEL_VALUE);
+  assert.equal(v.kind, "ok");
+  if (v.kind !== "ok") return;
+  assert.deepEqual(v.columns, ["첫 구매 경로", "새 고객", "90일 1인 매출", "재구매율", "1인 주문", "광고·쿠폰 비용"]);
+  assert.deepEqual(v.rows[0], { label: "유튜브", customers: "820명", revenue: "41,200원", repeat: "36%", orders: "1.8건", cost: "재무 연결 대기", best: true, suppressed: false });
+  assert.equal(v.rows[1].orders, "1.5건");
+  assert.equal(v.rows[1].best, false);
+  assert.deepEqual(v.rows[2], { label: "기타 경로", customers: "표본 부족", revenue: "-", repeat: "-", orders: "-", cost: "재무 연결 대기", best: false, suppressed: true });
+  assert.ok(v.hint.includes("90일 동안"));
+  const text = JSON.stringify(v);
+  for (const raw of ["youtube", "naver"]) assert.equal(text.includes(raw), false, raw);
+  const empty = channelValueView({ ...CHANNEL_VALUE, rows: [] });
+  assert.ok(empty.kind === "ok" && empty.empty === "최근 1년 안에 첫 구매하고 90일이 지난 고객이 아직 없어요");
+  const gated = channelValueView({ ...CHANNEL_VALUE, status: "insufficient", insufficient_reasons: ["데이터 부족: 저장된 고객 기록이 없음"] });
+  assert.deepEqual(gated, { kind: "gate", reasons: ["데이터 부족: 저장된 고객 기록이 없음"] });
 });

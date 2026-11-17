@@ -1,6 +1,8 @@
 import { SCREEN_KEEP_OUTCOMES, closedTimes, isBackgroundRead } from "./commFilter";
 import { DEV_HOLD_ACTIONS, FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, SETTLEMENT_HOLD_ACTION, SUPPORT_DELETION_HOLD_ACTIONS, type ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
+import { isRedeployFailed } from "./rollbackResult";
+export type { Redeploy, RollbackView } from "./rollbackResult";
 import type { CommLine, CommOutcome } from "./types";
 
 // AI 대화방: 총괄(orchestrator)의 이슈 기록, 안전 관문(safety)의 실행 기록, 공통 로그의 부서 간 소통(dashboard-api)을
@@ -37,6 +39,7 @@ export interface OrchStep {
   progress_percent?: number | null;
   progress_note?: string | null;
   async_task_id?: string | null;
+  /** 부서가 돌려준 출력. 배포 되돌리기의 redeploy·handoff_steps는 rollbackView(./rollbackResult)로 좁혀 읽는다 */
   output: Record<string, unknown>;
 }
 
@@ -336,6 +339,8 @@ function resultLine(step: OrchStep): { text: string; tone: Tone } {
     case "failed": {
       if (step.note.startsWith("canceled")) return { text: `시간 안에 끝내지 못했습니다 — 시간 초과${retryTxt}.`, tone: "fail" };
       if (step.note.startsWith("이관")) return { text: `소관이 아니라고 답했고, 이관할 부서를 찾지 못했습니다.`, tone: "fail" };
+      // 다시 배포 실패는 재시도하지 않는다(배포가 두 번 돌 수 있다). 처리 순서는 장애 상세 단계 표에 있다
+      if (isRedeployFailed(step.note)) return { text: "자동으로 되돌리지 못해 담당자에게 처리 순서를 넘겼어요.", tone: "fail" };
       return { text: `실패했습니다${retries > 0 ? ` — ${retries}회 재시도 후 중단` : ""}.`, tone: "fail" };
     }
     case "rejected_by_human":

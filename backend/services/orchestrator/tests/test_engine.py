@@ -113,6 +113,31 @@ async def test_failed_after_retries_degrades_and_skips_dependents(harness) -> No
 
 
 @pytest.mark.asyncio
+async def test_non_retryable_failure_is_called_once_and_keeps_output(harness) -> None:
+    """다시 배포 실패(`retryable: False`)는 재시도하지 않는다 (다시 부르면 배포가 두 번 돈다)."""
+    harness.fakes.script("infra", "rollback_deployment", "redeploy_failed")
+    inc = await run(harness)
+    calls = [r for _, r in harness.fakes.calls if r.skill == "rollback_deployment"]
+    assert len(calls) == 1
+    run_ = inc.steps["rollback"]
+    assert (run_.status, run_.attempts) == ("failed", 1)
+    assert run_.note == "failed: redeploy_failed"
+    # 사람이 할 처리 순서가 기록에 남아 화면에 보인다
+    assert run_.output["handoff_steps"] == ["배포 도구에서 v1을 다시 배포하세요"]
+    assert inc.outputs["rollback"]["handoff_steps"] == run_.output["handoff_steps"]
+
+
+@pytest.mark.asyncio
+async def test_final_failure_keeps_output(harness) -> None:
+    """재시도해도 실패하면 마지막 출력을 남긴다 (비어 있어도 같은 자리)."""
+    harness.fakes.script("marketing", "publish_notice", "fail", "fail", "fail")
+    inc = await run(harness)
+    assert inc.steps["publish_notice"].status == "failed"
+    assert inc.steps["publish_notice"].attempts == 3
+    assert inc.outputs["publish_notice"] == {}
+
+
+@pytest.mark.asyncio
 async def test_degraded_event_has_no_recovery_time_until_the_shop_recovers(harness) -> None:
     """장애가 안 풀린 채 대응이 끝나면 복구 시간은 비어 있고, 복구 신호가 오면 채워진다."""
     harness.fakes.script("marketing", "publish_notice", "fail", "fail", "fail")

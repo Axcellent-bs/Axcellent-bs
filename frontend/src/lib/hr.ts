@@ -3,6 +3,7 @@ import { writeAuth } from "./api";
 import { DASHBOARD_API_URL } from "./env";
 import type { OrchIncident } from "./agentChat";
 import type { AgentEvaluation } from "./agentEval";
+import type { ReceivedDiagnosis } from "./agentDiagnosis";
 
 // 인사 AI 화면 → dashboard-api(/api/dashboard/...). 응답은 ax-backend 규약 {data, meta}.
 // 모양은 ax-backend contracts/hr.py 모델 그대로다. 화면은 hr이 계산한 값을 다시 계산하지 않는다.
@@ -224,6 +225,9 @@ export const hr = {
   activity: (contextId: string) => call<AuditEntry[]>(`/hr-activity/${encodeURIComponent(contextId)}`),
   /** 에이전트 평가: 최근 장애 이슈에서 각 에이전트가 일한 시간을 기준과 견준 판정 모음 (읽기) */
   agentEvaluation: (limit = 30) => call<AgentEvaluation>(`/agent-evaluation?limit=${limit}`),
+  /** 에이전트 화면의 "총괄 AI가 보낸 진단" 칸: 그 에이전트가 받아 둔 진단 결과 (읽기) */
+  receivedDiagnoses: (agent: string) =>
+    call<ReceivedDiagnosis[]>(`/agent-diagnosis-notes?agent=${encodeURIComponent(agent)}`),
   checkPlan: (draft: PlanDraft) => post<PlanCheck>("/plan-checks", { draft }),
   /** 총괄 이슈 목록(dashboard-api가 총괄 /api/incidents를 중계). 아카이브 AI의 이슈 기록 단계(record_case)가 들어 있다 */
   incidents: () => call<OrchIncident[]>("/incidents"),

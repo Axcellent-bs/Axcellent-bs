@@ -374,7 +374,7 @@ def seller_report(books: Books, d: date | None = None) -> dict[str, Any]:
         "rows": out,
         "missing": ["business_no"] if out else [],
         "applied_rules": applied_many("VAT-005", "TAX-001"),
-        "basis": "부가가치세법 제75조 판매·중개 명세 초안. 제출 서식은 국세청 고시 확인 필요",
+        "basis": "부가가치세법의 판매·중개 명세 초안. 제출 서식은 국세청 고시를 확인해야 함",
         "unavailable": "orders" in books.unavailable,
     }
 

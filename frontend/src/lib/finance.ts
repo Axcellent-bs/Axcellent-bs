@@ -152,6 +152,8 @@ export interface ClosingReport {
   applied_rules?: AppliedRule[];
   closable?: boolean;
   snapshot_at?: string | null;
+  /** 판매 자료를 통째로 바꾸기 전에 확정한 결산이면 바꾼 시각·이유와 확정 당시 숫자 (표 숫자는 지금 판매 자료 기준) */
+  source_switch?: { switched_at: string | null; note: string; confirmed_lines: ClosingLine[] } | null;
   drift?: { code: string; label: string; confirmed: number; current: number; diff: number }[];
   close_warnings?: { code: string; message: string }[];
   adjustment_proposal?: { journal: { account: string; debit: number; credit: number; memo: string }[]; net: number; signature: string } | null;
@@ -934,8 +936,8 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
 
 /** 마케팅 화면에서 결정하는 보류 건 */
 export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_media", "start_campaign"] as const;
-/** 개발·배포 화면(/dev/work/holds)에서 결정하는 보류 건 (PR 만들기·머지·되돌리기, 자동 머지 기준 바꾸기) */
-export const DEV_HOLD_ACTIONS = ["generate_pr", "merge_pr", "repo_revert_pr", "auto_policy_update"] as const;
+/** 개발·배포 화면(/dev/work/holds)에서 결정하는 보류 건 (PR 만들기·머지·되돌리기, 자동 머지 기준 바꾸기, 배포 되돌리기) */
+export const DEV_HOLD_ACTIONS = ["generate_pr", "merge_pr", "repo_revert_pr", "auto_policy_update", "rollback_deployment"] as const;
 /** 고객지원 판매자 정산 화면에서 결정하는 보류 건 (정산 묶음 지급 승인) */
 export const SETTLEMENT_HOLD_ACTION = "confirm_settlement";
 /** 고객지원 보상 큐(/queue)에서 결정하는 보류 건 (데이터 삭제 승인, 보관 기간이 지난 문의·클레임 삭제) */

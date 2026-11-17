@@ -354,3 +354,24 @@ def test_result_without_category_takes_it_from_the_budget_request() -> None:
         "output"
     ]
     assert got["content_category"] == "몸개그"
+
+
+def test_adding_7d_views_later_updates_the_record_without_a_second_opinion() -> None:
+    """같은 campaign_id에 7일 조회수만 덧붙여 다시 보내면 기록은 갱신되고(거절 아님), 손익 판정이
+    그대로라 총괄에 같은 의견을 또 내지 않는다 (재현 11/17)."""
+    sent = _sender(state())
+    client = TestClient(app)
+    first = _shorts("v1", "아재개그", 100_000, 3_000, point="1d", gmv=1_000_000)
+    got = client.post("/a2a", json=_body("record_campaign_result", first, "mock:marketing")).json()
+    assert got["output"]["status"] == "recorded"
+    opinions = [o for o in sent if o.get("kind") != "insight"]
+    later = {**first, "views": 20_000, "views_point": "7d"}
+    got = client.post("/a2a", json=_body("record_campaign_result", later, "mock:marketing")).json()
+    out = got["output"]
+    assert got["status"] == "completed" and out["status"] == "recorded"
+    assert (out["views"], out["views_point"], out["revision"]) == (20_000, "7d", 2)
+    assert [o for o in sent if o.get("kind") != "insight"] == opinions  # 같은 의견을 또 내지 않음
+    # 판매액이 바뀌면 판정이 바뀔 수 있어 의견을 다시 낸다
+    changed = {**later, "gmv_krw": 50_000}
+    client.post("/a2a", json=_body("record_campaign_result", changed, "mock:marketing"))
+    assert len([o for o in sent if o.get("kind") != "insight"]) == len(opinions) + 1

@@ -366,6 +366,17 @@ class FakeDepartments:
         meta = req.meta
         if behavior == "fail":
             return AgentResult(meta=meta, status=TaskStatus.FAILED, outcome="upstream_error")
+        if behavior == "redeploy_failed":  # 다시 부르면 안 되는 실패: 사람이 할 처리 순서를 남긴다
+            return AgentResult(
+                meta=meta,
+                status=TaskStatus.FAILED,
+                outcome="redeploy_failed",
+                output={
+                    "message": "다시 배포 실패: forbidden",
+                    "handoff_steps": ["배포 도구에서 v1을 다시 배포하세요"],
+                    "retryable": False,
+                },
+            )
         if behavior == "timeout":
             return AgentResult(meta=meta, status=TaskStatus.CANCELED, outcome=ErrorCode.TIMEOUT)
         # 꺼진 서비스: 사람 할 일함으로 넘기지 않는 skill은 이렇게 거절된다

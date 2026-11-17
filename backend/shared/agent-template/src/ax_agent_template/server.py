@@ -50,6 +50,7 @@ from ax_agent_template.config import (
 )
 from ax_agent_template.improvement_notes import SKILL as NOTES_SKILL
 from ax_agent_template.improvement_notes import handler_for as notes_handler_for
+from ax_agent_template.improvement_notes import list_for_service as notes_for_service
 from ax_agent_template.improvement_notes import with_caution
 from ax_agent_template.logging import log_event
 from ax_agent_template.services import SERVICE_PORTS, department_of
@@ -214,6 +215,13 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
     @app.get("/health")
     def health() -> dict:
         return {"data": {"status": "ok"}, "meta": {}}
+
+    if NOTES_SKILL in skill_ids:
+
+        @app.get("/api/improvement-notes")
+        def improvement_notes() -> dict:
+            """받아 둔 진단 결과(읽기 전용). 고객 정보 없이 단계·시간·건수·진단 문장만 있다."""
+            return {"data": notes_for_service(card.name).model_dump(mode="json"), "meta": {}}
 
     @app.get("/.well-known/agent-card.json")
     def agent_card() -> dict:

@@ -238,6 +238,9 @@ SERVICES: tuple[Service, ...] = (
             "market_coverage",
             # 함께 사는 장르·상품 (11/17, 표준 판매 저장소만, grade read)
             "basket_pairs",
+            # 재구매·이탈, 첫 구매 경로별 고객 가치 (11/17, grade read)
+            "retention",
+            "channel_value",
             # 이벤트 제안 (11/16). event_proposal_send는 grade A (execute 뒤 기획 receive_insight)
             "event_proposal",
             "event_proposal_send",

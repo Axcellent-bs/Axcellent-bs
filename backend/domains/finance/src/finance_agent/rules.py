@@ -203,5 +203,30 @@ def review_checklist_docx() -> bytes:
     return out.getvalue()
 
 
+def refresh_applied(value: Any) -> Any:
+    """응답 안의 적용 규칙 줄을 지금 기준표 문구로 바꾼 복사본. 저장된 기록은 바꾸지 않는다.
+
+    캠페인 손익·예산 의견 같은 기록은 그때의 규칙 문구를 같이 저장한다. 기준표 문구를 쉬운 말로
+    고쳐도 옛 기록에는 옛 문구("REV-001과 같은 기준", "good_roi")가 남아 화면에 보였다(11/17).
+    규칙 번호·이번 판단(`detail`)·당시 규칙 버전은 그대로 두고 제목·설명·근거만 지금 것으로 보인다.
+    """
+    if isinstance(value, list):
+        return [refresh_applied(v) for v in value]
+    if not isinstance(value, dict):
+        return value
+    if "rule_id" in value and "statement" in value:
+        try:
+            r = load_rules().rule(str(value["rule_id"]))
+        except KeyError:
+            return dict(value)
+        return value | {
+            "title": r.title,
+            "statement": r.statement,
+            "basis": r.basis,
+            "review": r.review,
+        }
+    return {k: refresh_applied(v) for k, v in value.items()}
+
+
 def applied_many(*rule_ids: str) -> list[dict[str, Any]]:
     return [applied(rule_id) for rule_id in rule_ids]

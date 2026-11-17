@@ -736,11 +736,18 @@ class Engine:
                 inc.log(f"{run.label}: 마감 초과, 재시도 {canceled_retries}")
                 await asyncio.sleep(self.retry_delay)
                 continue
-            if status == TaskStatus.FAILED and failed_retries < MAX_FAILED_RETRIES:
+            # 부서가 "다시 부르지 말라"(`retryable: False`)고 한 실패는 재시도하지 않는다
+            # (예: 다시 배포 실패 — 다시 부르면 배포가 두 번 돌 수 있다)
+            retryable = result.output.get("retryable") is not False
+            if status == TaskStatus.FAILED and retryable and failed_retries < MAX_FAILED_RETRIES:
                 failed_retries += 1
                 inc.log(f"{run.label}: 실패({outcome}), 재시도 {failed_retries}")
                 await asyncio.sleep(self.retry_delay)
                 continue
+            if status == TaskStatus.FAILED:
+                # 실패해도 부서가 남긴 출력(사람이 할 처리 순서 등)은 화면에 보이도록 남긴다
+                run.output = dict(result.output)
+                inc.outputs[run.step_id] = run.output
             self._fail(inc, run, f"{status.value}: {outcome or '사유 없음'}")
             return
 

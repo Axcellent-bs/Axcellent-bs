@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { Empty, ErrorBox, Panel, Waiting, useResource } from "@/components/finance/bits";
 import { DATA_SERVER, dataAi, kpiLive, type SalesPeriod } from "@/lib/data";
+import { PreparingChip } from "@/components/Preparing";
 import {
-  SALES_PERIODS, compareLabel, salesView,
-  type ChannelView, type ProductView, type SalesGateView, type SalesOkView, type Tone,
+  SALES_PERIODS, channelValueView, compareLabel, salesView,
+  type ChannelValueView, type ChannelView, type ProductView, type SalesGateView, type SalesOkView, type Tone,
 } from "@/lib/salesView";
+import { sectionState } from "@/lib/segmentView";
 
-// 매출 분석: 무엇이 팔리나 · 누가 사나 · 유입 경로별 매출. 데이터 AI의 sales_analysis 결과를 그대로 보여 준다.
+// 매출 분석: 무엇이 팔리나 · 누가 사나 · 유입 경로별 매출 · 유입 경로별 고객 가치(channel_value).
+// 데이터 AI의 sales_analysis·channel_value 결과를 그대로 보여 준다.
 // 보여 줄 글자는 lib/salesView.ts가 만든다(숫자는 서버 값만, 여기서는 그리기만).
 
 const TONE_CLASS: Record<Tone, string> = { up: "text-emerald-700", down: "text-red-700", flat: "text-ink-500" };
@@ -80,7 +83,60 @@ function Channels({ rows }: { rows: ChannelView[] }) {
   );
 }
 
-function Body({ view }: { view: SalesOkView }) {
+/** 유입 경로별 고객 가치 (channel_value). 위 기간 버튼과 상관없이 최근 1년 첫 구매 고객의 N일 가치 */
+function ChannelValue({ tick }: { tick: number }) {
+  const res = useResource("channel-value", () => dataAi.channelValue("365d").then((r) => ({ data: r, meta: { mock: false } })), tick);
+  const view: ChannelValueView | null = res.env ? channelValueView(res.env.data.output) : null;
+  const missing = res.error != null && sectionState(res.error).kind === "missing";
+
+  return (
+    <Panel id="sales-channel-value" title="유입 경로별 고객 가치">
+      {missing ? (
+        <p role="status" className="flex flex-wrap items-center gap-2 rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
+          <PreparingChip /> 유입 경로별 고객 가치를 데이터 AI에 붙이는 중이에요. 준비되면 여기에 나옵니다.
+        </p>
+      ) : res.error ? (
+        <ErrorBox message={`유입 경로별 고객 가치를 받지 못했어요. ${res.error}`} onRetry={res.reload} />
+      ) : !view ? <Waiting /> : view.kind === "gate" ? (
+        <div className="space-y-1 rounded-xl bg-surface-2 px-4 py-3 text-sm">
+          <p className="font-medium text-ink-900">지금은 계산하지 않았어요</p>
+          <ul className="space-y-1 text-ink-700">{view.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs text-ink-500">{view.hint}</p>
+          {view.empty ? <Empty>{view.empty}</Empty> : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-ink-500">
+                    {view.columns.map((c, i) => <th key={c} className={`whitespace-nowrap py-2 pr-3 font-medium ${i > 0 ? "text-right" : ""}`}>{c}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {view.rows.map((r) => (
+                    <tr key={r.label} className="border-t border-ink-100">
+                      <td className="py-2 pr-3 font-medium text-ink-900">{r.label}</td>
+                      <td className={`py-2 pr-3 text-right tabular-nums ${r.suppressed ? "text-xs text-ink-400" : ""}`}>{r.customers}</td>
+                      <td className={`py-2 pr-3 text-right tabular-nums ${r.best ? "font-semibold text-emerald-700" : ""}`}>{r.revenue}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{r.repeat}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{r.orders}</td>
+                      <td className="py-2 pr-3 text-right text-xs text-ink-500">{r.cost}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {view.summary && <p className="rounded-xl bg-surface-2 px-3 py-2 text-sm text-ink-700"><b>요약</b> {view.summary}</p>}
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">{view.note}</p>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function Body({ view, tick }: { view: SalesOkView; tick: number }) {
   return (
     <div className="space-y-4">
       <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -140,6 +196,8 @@ function Body({ view }: { view: SalesOkView }) {
         </Panel>
       </div>
 
+      <ChannelValue tick={tick} />
+
       <p className="text-xs text-ink-500">품질 · {view.quality.join(" · ")}</p>
     </div>
   );
@@ -180,7 +238,7 @@ function Live({ tick }: { tick: number }) {
         <ErrorBox message={res.env ? `새로 받지 못해 이전 값을 보여 줍니다. ${res.error}` : `${res.error}. ${DATA_SERVER}가 켜져 있는지 확인해 주세요.`} onRetry={res.reload} />
       )}
       {view?.kind === "gate" && <Gate view={view} />}
-      {view?.kind === "ok" && <Body view={view} />}
+      {view?.kind === "ok" && <Body view={view} tick={tick} />}
     </div>
   );
 }

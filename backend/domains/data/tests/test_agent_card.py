@@ -31,6 +31,8 @@ def test_card_validates(card: AgentCard) -> None:
         "segment_favorites",
         "market_coverage",
         "basket_pairs",
+        "retention",
+        "channel_value",
         "event_proposal",
         "event_proposal_send",
         "root_cause_hypotheses",
@@ -172,6 +174,8 @@ def test_sales_analysis_is_a_read_for_screen_and_orchestrator(card: AgentCard) -
         ("segment_favorites", "SegmentFavorites"),
         ("market_coverage", "MarketCoverage"),
         ("basket_pairs", "BasketPairs"),
+        ("retention", "Retention"),
+        ("channel_value", "ChannelValue"),
     ],
 )
 def test_segment_skills_are_reads_like_sales_analysis(

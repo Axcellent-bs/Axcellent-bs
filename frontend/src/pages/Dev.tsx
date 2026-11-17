@@ -15,6 +15,7 @@ import { PrsTab } from '@/components/dev/repows'
 import { TaskBoard } from '@/components/dev/board'
 import { Reviews } from '@/components/dev/work'
 import { ActionQueue } from '@/components/finance/SafetyQueue'
+import { AgentDiagnosisInbox } from '@/components/admin/AgentDiagnosisInbox'
 import { DEV_HOLD_ACTIONS } from '@/lib/finance'
 import '@/components/dev/hier.css'
 
@@ -82,14 +83,14 @@ export default function DevPage() {
           {section === 'tasks' && <TaskBoard s={s} filter={sub} />}
           {section === 'work' && tab === 'prs' && <PrsTab s={s} d={d} parts={rest.map((x) => decodeURIComponent(x))} />}
           {section === 'work' && tab === 'reviews' && <Reviews s={s} d={d} item={item} />}
-          {section === 'work' && tab === 'holds' && <ActionQueue action={DEV_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 PR 만들기·머지·되돌리기와 자동 머지 기준 바꾸기가 여기 모입니다." />}
+          {section === 'work' && tab === 'holds' && <ActionQueue action={DEV_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 PR 만들기·머지·되돌리기, 자동 머지 기준 바꾸기, 배포 되돌리기가 여기 모입니다." />}
           {section === 'work' && tab === 'ops' && <Ops s={s} item={item} />}
           {section === 'work' && tab === 'aftercare' && <Aftercare s={s} item={item} />}
           {section === 'talk' && <Talk s={s} d={d} item={item} />}
           {section === 'agents' && <AgentTalk s={s} item={item} />}
           {section === 'metrics' && tab === 'autonomy' && <Autonomy s={s} d={d} item={item} />}
           {section === 'metrics' && tab === 'audit' && <Audit s={s} d={d} />}
-          {section === 'metrics' && tab === 'activity' && <Activity s={s} item={item} />}
+          {section === 'metrics' && tab === 'activity' && <><Activity s={s} item={item} /><AgentDiagnosisInbox agent="dev" /></>}
         </>
       )}
     </PlanningShell>

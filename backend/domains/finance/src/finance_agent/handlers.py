@@ -451,7 +451,8 @@ async def closing_report(request: AgentRequest) -> AgentResult:
         books, data.period, d, state().records.closings.get(key), state().records.closings
     )
     output = ClosingReportOutput(
-        **{k: v for k, v in report.items() if k not in ("from", "to")},
+        # source_switch(판매 자료 교체 안내)는 화면용이라 A2A 계약에는 싣지 않는다
+        **{k: v for k, v in report.items() if k not in ("from", "to", "source_switch")},
         window_from=report["from"],
         window_to=report["to"],
         unavailable=books.meta()["unavailable"],
@@ -1058,9 +1059,21 @@ async def record_result(data: CampaignResultInput, context_id: str) -> dict[str,
             await submit_insights(context_id)
         return record | {"write": "recorded"}
     record["lesson"] = cp.apply_lessons(record, records.lessons, _now())
-    await submit_opinion(cp.opinion_of(record, _now()), context_id)
+    # 7일 조회수만 덧붙여 다시 보낸 경우처럼 손익 판정이 그대로면 총괄에 같은 의견을 또 내지 않는다
+    # (의견 번호가 revision마다 달라 중복으로 걸러지지 않는다, 11/17). 인사이트는 조회수로 바뀔 수
+    # 있어 그대로 본다
+    if not _same_verdict(previous, record):
+        await submit_opinion(cp.opinion_of(record, _now()), context_id)
     await submit_insights(context_id)
     return record | {"write": "recorded"}
+
+
+# 총괄 의견에 실리는 손익 판정 칸. 이 값이 그대로면 같은 의견이다
+VERDICT_KEYS = ("verdict", "spend_krw", "gmv_krw", "profit_krw", "roi")
+
+
+def _same_verdict(previous: dict[str, Any] | None, record: dict[str, Any]) -> bool:
+    return previous is not None and all(previous.get(k) == record.get(k) for k in VERDICT_KEYS)
 
 
 async def current_insights() -> list[dict[str, Any]]:

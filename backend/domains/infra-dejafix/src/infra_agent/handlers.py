@@ -454,6 +454,8 @@ async def _redeploy(
                 "message": f"다시 배포 실패: {error}",
                 "handoff_steps": steps,
                 "fault_released": False,
+                # 다시 부르면 배포가 두 번 돌 수 있다: 오케스트레이터는 재시도하지 않는다
+                "retryable": False,
             },
             evidence=evidence,
             decision_reason=reason,

@@ -323,6 +323,29 @@ export interface EventProposalOutput {
   excluded?: ExcludedProposal[];
 }
 export interface ExcludedProposal { target_label: string; item_label: string; reason: string }
+// 재구매·이탈 (retention, 11/17). r30·r60·r90은 기간이 다 지나지 않았거나 숨기면 null
+export interface RetentionCohort {
+  cohort_month: string; customers: number | null;
+  r30: number | null; r60: number | null; r90: number | null; suppressed: boolean;
+}
+export interface RetentionAtRisk {
+  filters: Record<string, string>; label: string; regulars: number | null; at_risk: number | null;
+  share: number | null; top_item_label: string | null; suppressed: boolean;
+}
+// 첫 구매 유입 경로별 고객 가치 (channel_value, 11/17). cost_krw는 재무 연결 전까지 늘 null
+export interface ChannelValueRow {
+  source: string | null; label: string; new_customers: number | null; revenue_per_customer: number | null;
+  repeat_rate: number | null; orders_per_customer: number | null; cost_krw: number | null; suppressed: boolean;
+}
+export interface ChannelValueOutput {
+  status: "ok" | "insufficient"; insufficient_reasons: string[]; period: SegmentPeriod; horizon_days: number;
+  rows: ChannelValueRow[]; cost_note: string; basis: SalesBasis | null; quality: SalesQuality; summary: string;
+}
+export interface RetentionOutput {
+  status: "ok" | "insufficient"; insufficient_reasons: string[]; filters: Record<string, string>;
+  cohorts: RetentionCohort[]; at_risk: RetentionAtRisk[]; churn_days: number;
+  basis: SalesBasis | null; quality: SalesQuality; summary: string;
+}
 export interface EventProposalSendOutput { outcome: "created" | "duplicate" | "rejected"; proposal_ref: string | null; reason: string }
 export interface SalesAnalysisOutput {
   period: SalesPeriod;
@@ -2032,6 +2055,10 @@ export const dataAi = {
     askData<BasketPairsOutput>("basket_pairs", "함께 사는 것", { level, period, filters }),
   eventProposal: (month: string) =>
     askData<EventProposalOutput>("event_proposal", "이벤트 제안", { month }, TREND_DEADLINE_MS),
+  channelValue: (period: SegmentPeriod = "365d") =>
+    askData<ChannelValueOutput>("channel_value", "유입 경로별 고객 가치", { period }, TREND_DEADLINE_MS),
+  retention: (cohorts = 3) =>
+    askData<RetentionOutput>("retention", "재구매·이탈", { cohorts }, TREND_DEADLINE_MS),
   eventProposalSend: (proposal_id: string) =>
     askData<EventProposalSendOutput>("event_proposal_send", "기획에 넘기기", { proposal_id }),
   accuracyReport: () => askData<AccuracyReportOutput>("accuracy_report", "정확도 평가 결과"),

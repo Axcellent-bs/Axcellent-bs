@@ -120,7 +120,17 @@ export function ClosingSection({ tick, onChanged, focus }: {
                 <div className="rounded-2xl border border-ink-100 px-4 py-3">
                   {r.status === "confirmed" ? (
                     <div className="space-y-2 text-sm">
-                      <p className="text-emerald-800">{r.snapshot_at ? "이 기간의 결산은 확정됐습니다. 표의 숫자는 확정할 때 저장한 값입니다." : "이 기간의 결산은 확정됐습니다. 예전 확정이라 숫자가 저장되지 않아 지금 장부로 계산한 값입니다."}</p>
+                      {r.source_switch ? (
+                        <div className="rounded-xl bg-ink-50 px-3 py-2 text-ink-700">
+                          <p className="font-medium text-ink-900">판매 자료 교체 전 확정</p>
+                          <p className="mt-0.5">이 결산은 판매 자료를 바꾸기 전에 확정했어요{r.source_switch.switched_at ? ` (바꾼 때: ${shortDateTime(r.source_switch.switched_at)}${r.source_switch.note ? `, ${r.source_switch.note}` : ""})` : ""}. 표의 숫자는 지금 판매 자료로 계산한 값이고, 판매 자료가 바뀐 것이라 조정할 차이로 보지 않아요. 새 판매 자료로 확정하려면 확정을 취소하고 다시 확정하세요.</p>
+                          {r.source_switch.confirmed_lines.length > 0 && (
+                            <p className="mt-1 tabular-nums text-ink-500">확정 당시 숫자: {r.source_switch.confirmed_lines.filter((l) => l.amount !== null).slice(0, 3).map((l) => `${l.label} ${krw(l.amount as number)}`).join(" · ")}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-emerald-800">{r.snapshot_at ? "이 기간의 결산은 확정됐습니다. 표의 숫자는 확정할 때 저장한 값입니다." : "이 기간의 결산은 확정됐습니다. 예전 확정이라 숫자가 저장되지 않아 지금 장부로 계산한 값입니다."}</p>
+                      )}
                       {(r.close_warnings ?? []).map((w) => <p key={w.code} className="text-ink-700">확정할 때 경고: {w.message}</p>)}
                       {(r.drift ?? []).length > 0 && (
                         <div className="rounded-xl bg-amber-50 px-3 py-2 text-amber-900">

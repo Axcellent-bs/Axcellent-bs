@@ -60,6 +60,7 @@ from ax_contracts.schemas.data import (
     BriefRegenBlocked,
     CampaignEffectInput,
     CampaignResultOutput,
+    ChannelValueInput,
     ContentRecommendRequest,
     DataChatListInput,
     DataChatListOutput,
@@ -73,6 +74,7 @@ from ax_contracts.schemas.data import (
     KpiSummaryInput,
     MarketCoverageInput,
     PromoConceptsRequest,
+    RetentionInput,
     RootCauseInput,
     SalesAnalysisInput,
     SegmentFavoritesInput,
@@ -121,7 +123,9 @@ from data_agent.sales_store import DEFAULT_DB as SALES_DEFAULT_DB
 from data_agent.sales_store import SalesStore
 from data_agent.skills import (
     basket_pairs,
+    channel_value,
     event_proposal,
+    retention,
     segment_analysis,
     segment_question,
     topic_category,
@@ -577,6 +581,48 @@ async def market_coverage(request: AgentRequest) -> AgentResult:
         output=out.model_dump(mode="json"),
         # 인구 출처·기준 달 (예: "… (2026-10 기준)")을 근거에 남긴다
         evidence=segment_analysis.evidence(out.basis, now, segment_analysis.population_note(out)),
+    )
+
+
+async def retention_skill(request: AgentRequest) -> AgentResult:
+    """재구매·이탈: 첫 구매 달별 30·60·90일 재구매율과 떠날 것 같은 단골 묶음 (SQL 집계)."""
+    data = _parse(request, RetentionInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    out = await asyncio.to_thread(
+        retention.retention, get_sales_store(), data.tenant_id, data.cohorts, data.filters,
+        cat.sales, cat.id, now,
+    )  # fmt: skip
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=retention.evidence_of(out, now, cat.sales),
+    )
+
+
+async def channel_value_skill(request: AgentRequest) -> AgentResult:
+    """첫 구매 유입 경로별 새 고객의 value_horizon_days 동안 1인 매출·주문·재구매 (SQL 집계)."""
+    data = _parse(request, ChannelValueInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    out, excluded = await asyncio.to_thread(
+        channel_value.channel_value, get_sales_store(), data.tenant_id, data.period, cat.sales,
+        cat.id, now,
+    )  # fmt: skip
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=channel_value.evidence_of(out, excluded, now),
     )
 
 
@@ -1920,6 +1966,8 @@ HANDLERS = {
     "segment_favorites": segment_favorites,
     "market_coverage": market_coverage,
     "basket_pairs": basket_pairs_skill,
+    "retention": retention_skill,
+    "channel_value": channel_value_skill,
     "event_proposal": event_proposal_skill,
     "event_proposal_send": event_proposal_send,
     "root_cause_hypotheses": root_cause_hypotheses,
