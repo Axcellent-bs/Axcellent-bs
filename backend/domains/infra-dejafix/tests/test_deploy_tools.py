@@ -132,6 +132,8 @@ def test_actions_recent_maps_runs() -> None:
     ]
     assert runs[0].at == datetime(2026, 11, 16, 1, 3, tzinfo=UTC)
     assert runs[0].actor == "alice"
+    # 커밋 앞자리 버전은 표시만 하고 다시 배포 입력으로 쓰지 않게 표시한다
+    assert [r.version_from_sha for r in runs] == [False, True, True]
     assert runs[0].url == "https://github.com/acme/shop/actions/runs/3"
     assert tool.service == "shop-api" and tool.tool == "github_actions"
     assert seen[1].url.params["per_page"] == "20"

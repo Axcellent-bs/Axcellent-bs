@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -197,3 +198,75 @@ def test_poll_does_not_start_in_mock_mode(runtime, monkeypatch: pytest.MonkeyPat
         time.sleep(0.1)
     assert tool.calls == 0
     assert "v2.4.1" in _versions(runtime.history)
+
+
+def test_connected_service_hides_demo_rows_before_first_poll(
+    tmp_path, monkeypatch, a2a_body, gate, runtime
+) -> None:
+    rows = [
+        {
+            "id": "github_app-1",
+            "kind": "github_app",
+            "name": "앱",
+            "config": {"app_id": "1", "installation_id": "2"},
+            "secrets": {},
+        },
+        {
+            "id": "github_actions-1",
+            "kind": "github_actions",
+            "name": "쇼핑몰 배포",
+            "config": {
+                "app": "github_app-1",
+                "repo": "acme/shop",
+                "workflow": "deploy.yml",
+                "service": "shop-api",
+            },
+            "secrets": {},
+        },
+    ]
+    vault = tmp_path / "tool_connections.json"
+    vault.write_text(json.dumps(rows), encoding="utf-8")
+    monkeypatch.setenv(tc.FILE_ENV, str(vault))
+    tc._cache = None
+    # 연결은 됐지만 아직 받지 못했다: shop-api 시연 이력(v2.4.x)은 후보·롤백 대상이 아니다
+    diag = diagnose(runtime.history, "payment", NOW, mock=False)
+    assert diag.output.status == "undetermined"
+    assert runtime.history.find("shop-api", "v2.4.1") is None
+    fake = gate("executed")
+    out = (
+        TestClient(main.app)
+        .post(
+            "/a2a",
+            json=a2a_body("rollback_deployment", {"service": "shop-api", "from_version": "v2.4.1"}),
+        )
+        .json()
+    )
+    assert out["outcome"] == "invalid_input" and fake.calls == []
+
+
+def test_known_run_id_matches_only_that_run() -> None:
+    history = DeploymentHistory.load()
+    history.record_redeploy("shop-api", "v3.0.0", at=NOW, run_id="20")
+    # 사람이 우리 디스패치 직전에 같은 버전을 배포했다(19). 우리 실행은 20
+    tool = FakeTool(
+        runs=[_run("19", "v3.0.0", 1), _run("20", "abc1234", -2), _run("11", "v3.0.0", 60)]
+    )
+    asyncio.run(poll_once(history, [tool]))
+    marks = {d.deploy_id: d.is_rollback for d in history.deployments if d.service == "shop-api"}
+    assert marks == {"shop-api:11": False, "shop-api:19": False, "shop-api:20": True}
+
+
+def test_unrelated_connected_service_is_not_a_payment_suspect() -> None:
+    history = DeploymentHistory.load()
+    # 시연 이력에서 payment는 shop-api의 구성요소다.
+    # 구성요소를 모르는 다른 서비스의 배포는 후보가 아니다
+    asyncio.run(
+        poll_once(history, [FakeTool(service="support-api", runs=[_run("5", "v9.0.0", 2)])])
+    )
+    diag = diagnose(history, "payment", NOW, mock=False)
+    assert all(d.service == "shop-api" for d in diag.candidates)
+    assert [s.version for s in diag.output.suspects] == ["v2.4.1"]
+    # shop-api 도구 실행은 shop-api 구성요소(payment·api)를 단다
+    asyncio.run(poll_once(history, [FakeTool(runs=[_run("12", "v3.0.1", 3)])]))
+    shop = next(d for d in history.deployments if d.deploy_id == "shop-api:12")
+    assert set(shop.components) == {"payment", "api"}

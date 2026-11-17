@@ -103,6 +103,8 @@ async def _lifespan(a: FastAPI) -> AsyncIterator[None]:
             for task in (watch, poll):
                 if task:
                     task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
 
 
 app.router.lifespan_context = _lifespan

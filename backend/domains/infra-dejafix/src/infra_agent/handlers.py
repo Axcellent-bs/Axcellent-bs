@@ -254,7 +254,9 @@ async def rollback_deployment(request: AgentRequest) -> AgentResult:
     decision = await execute(
         ACTION, params, request.meta.model_copy(update={"idempotency_key": key}), evidence
     )
-    result = await _apply(request, rt, decision, target, previous.version, params, evidence)
+    result = await _apply(
+        request, rt, decision, target, previous.version, params, evidence, previous=previous
+    )
     rt.rollbacks[key] = {"context_id": context_id, "status": decision.status, "result": result}
     if result.status != TaskStatus.COMPLETED or decision.status != "executed":
         rt.rollbacks[key]["status"] = "not_executed"
@@ -269,6 +271,8 @@ async def _apply(
     to_version: str,
     params: dict[str, Any],
     evidence: Evidence,
+    *,
+    previous: Deployment | None = None,
 ) -> AgentResult:
     base = {
         "service": target.service,
@@ -289,7 +293,16 @@ async def _apply(
             # 도구 이력에서 온 배포인데 연결을 못 읽으면(보관함이 깨짐 등) 시연 경로(장애 해제)로
             # 넘어가지 않고 사람에게 넘긴다
             return await _redeploy(
-                request, rt, tool, target, to_version, output, evidence, reason, alternatives
+                request,
+                rt,
+                tool,
+                target,
+                previous,
+                to_version,
+                output,
+                evidence,
+                reason,
+                alternatives,
             )
         if target.applies_to == SHOP_PAYMENT_CONFIG:
             # 실제 되돌리기: 쇼핑몰 결제 설정을 이전 버전으로 (장애 스위치는 건드리지 않는다)
@@ -380,6 +393,7 @@ async def _redeploy(
     rt: Any,
     tool: DeployTool | None,
     target: Deployment,
+    previous: Deployment | None,
     to_version: str,
     output: dict[str, Any],
     evidence: Evidence,
@@ -390,6 +404,10 @@ async def _redeploy(
 
     실패하면(호출 오류·권한 없음·연결 확인 실패 상태) 다른 길로 넘어가지 않는다: outcome
     `redeploy_failed` + 사람이 할 처리 순서(`handoff_steps`). 오류 문구에는 비밀 값이 없다.
+
+    부르기 전에 막는 경우 (실제 파이프라인에 틀린 버전을 보내지 않는다):
+    - 대상 배포가 지금 연결된 그 도구의 이력이 아니다 (시연 이력, 도구를 바꿈, 첫 받기 전)
+    - 되돌아갈 버전이 진짜 버전이 아니라 커밋 앞자리다 (`version_from_sha`)
     """
     step = (
         tool.describe(to_version)
@@ -400,6 +418,16 @@ async def _redeploy(
     ref = None
     if tool is None:
         error = f"{target.source} 연결을 읽지 못했다 (도구 연결 확인)"
+    elif target.source != tool.tool:
+        error = (
+            f"{tool.tool} 배포 이력을 아직 받지 못해 자동으로 되돌리지 않았어요 "
+            "(이력을 받은 뒤 다시 시도하거나 사람이 처리)"
+        )
+    elif previous is not None and previous.version_from_sha:
+        error = (
+            f"되돌아갈 실행의 버전을 알 수 없어(커밋 {to_version}) 자동으로 되돌리지 않았어요 "
+            "(워크플로 run-name에 버전을 넣으면 자동으로 됨)"
+        )
     else:
         try:
             ref = await tool.redeploy(to_version)

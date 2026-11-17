@@ -57,6 +57,9 @@ class ToolRun:
     actor: str | None
     url: str | None
     run_id: str
+    # 버전이 진짜 버전이 아니라 커밋 앞자리·실행 번호다 (GitHub 실행 제목에 버전이 없음).
+    # 이 값을 다시 배포 입력으로 보내지 않는다
+    version_from_sha: bool = False
 
 
 @dataclass(frozen=True)
@@ -176,6 +179,12 @@ def _auth_for(app: ToolConnection) -> GithubAppAuth:
     return auth
 
 
+def _title_version(run: dict[str, Any]) -> str | None:
+    title = run.get("display_title")
+    m = _VERSION.search(title) if isinstance(title, str) else None
+    return m.group(0) if m else None
+
+
 def run_version(run: dict[str, Any]) -> str:
     """GitHub Actions 실행의 버전 표시 (휴리스틱).
 
@@ -183,12 +192,12 @@ def run_version(run: dict[str, Any]) -> str:
     1. 실행 제목(`display_title`)에 버전 꼴(`v2.4.1`, `v2`, `2.4.1`)이 있으면 그 값,
     2. 없으면 커밋(`head_sha`) 앞 7자리를 버전으로 본다.
     워크플로에 `run-name: Deploy ${{ inputs.version }}`을 두면 1번으로 정확해진다.
+    2번이면 `ToolRun.version_from_sha`가 True라 그 버전으로는 다시 배포하지 않는다.
     우리가 롤백으로 띄운 실행은 이 값 대신 `DeploymentHistory.record_redeploy`에 남긴 버전으로
     바꿔 쓴다 (디스패치한 버전이 곧 그 실행의 버전이다).
     """
-    title = run.get("display_title")
-    if isinstance(title, str) and (m := _VERSION.search(title)):
-        return m.group(0)
+    if (found := _title_version(run)) is not None:
+        return found
     sha = run.get("head_sha")
     return sha[:7] if isinstance(sha, str) and sha else f"run-{run.get('id')}"
 
@@ -210,6 +219,7 @@ def _actions_run(raw: Any) -> ToolRun | None:
     url = raw.get("html_url")
     return ToolRun(
         version=run_version(raw),
+        version_from_sha=_title_version(raw) is None,
         at=at,
         ok=done and raw.get("conclusion") == "success",
         actor=actor if isinstance(actor, str) else None,
