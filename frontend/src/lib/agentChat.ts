@@ -1,5 +1,5 @@
 import { SCREEN_KEEP_OUTCOMES, closedTimes, isBackgroundRead } from "./commFilter";
-import type { ExecutionRecord } from "./finance";
+import { MARKETING_HOLD_ACTIONS, SETTLEMENT_HOLD_ACTION, type ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
 import type { CommLine, CommOutcome } from "./types";
 
@@ -131,10 +131,13 @@ const METRIC_KO: Record<string, string> = {
 };
 const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
 /** 보류 건을 결정하는 화면. 환불·판매자 정산 지급은 고객지원, 쿠폰은 마케팅, 나머지는 재무 화면의 보류 큐다 */
+/** 보류(C 등급)를 사람이 결정하는 화면. 화면의 보류 칸이 받는 일과 같아야 한다
+ *  (환불 /queue, 판매자 정산 /settlements, 마케팅 5종 /marketing ActionQueue, 나머지는 재무 보류 큐).
+ *  마케팅 4종(공지·SNS·영상·캠페인)이 /finance로 가면 재무 보류 큐가 빼고 보여서 결정할 곳이 없었다 (11/17) */
 export function holdPage(action: string | null | undefined): string {
   if (action === "refund_request") return "/queue";
-  if (action === "confirm_settlement") return "/settlements";
-  if (action === "issue_coupon") return "/marketing";
+  if (action === SETTLEMENT_HOLD_ACTION) return "/settlements";
+  if (action && (MARKETING_HOLD_ACTIONS as readonly string[]).includes(action)) return "/marketing";
   return "/finance";
 }
 /** 총괄 제목 끝의 "(metric)"에서 지표 코드를 꺼낸다 */
