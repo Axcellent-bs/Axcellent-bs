@@ -130,6 +130,11 @@ def test_actions_missing_version_input_says_how_to_fix(monkeypatch, pem) -> None
         "deploy ${{inputs.version}}",
         '"${{ github.event.inputs.version }} 배포"',
         '"${{  github.event.inputs.version  }}"',
+        "\"deploy ${{ inputs['version'] }}\"",
+        "'deploy ${{ inputs[\"version\"] }}'",
+        "\"deploy ${{ github.event.inputs['version'] }}\"",
+        "\"${{ format('v{0}', inputs.version) }}\"",
+        "\"${{ format('{0}-{1}', github.sha, github.event.inputs.version) }}\"",
     ],
 )
 def test_actions_run_name_with_version_passes(monkeypatch, pem, run_name) -> None:
@@ -141,7 +146,14 @@ def test_actions_run_name_with_version_passes(monkeypatch, pem, run_name) -> Non
 
 @pytest.mark.parametrize(
     "run_name",
-    [None, '"deploy ${{ github.sha }}"', '"deploy ${{ inputs.version_old }}"', "deploy version"],
+    [
+        None,
+        '"deploy ${{ github.sha }}"',
+        '"deploy ${{ inputs.version_old }}"',
+        "deploy version",
+        "\"deploy ${{ inputs['version_old'] }}\"",
+        '"${{ github.sha }} inputs.version"',
+    ],
 )
 def test_actions_run_name_without_version_fails_with_fix(monkeypatch, pem, run_name) -> None:
     line = 'run-name: "deploy ${{ inputs.version }}"\n'

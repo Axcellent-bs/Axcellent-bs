@@ -102,9 +102,9 @@ async def _send(
     try:
         res = await client.request(method, url, **kwargs)
     except httpx.HTTPError as exc:
-        raise ToolConnectionError(
-            "unavailable", f"{where} 연결 실패 ({type(exc).__name__})"
-        ) from None
+        # 시간 초과는 요청이 이미 도착했을 수 있어 따로 구분한다 (다시 실행하기 전에 확인하도록)
+        code = "timeout" if isinstance(exc, httpx.TimeoutException) else "unavailable"
+        raise ToolConnectionError(code, f"{where} 연결 실패 ({type(exc).__name__})") from None
     if res.status_code >= 400:
         raise ToolConnectionError(_status_code(res.status_code), f"{where} → {res.status_code}")
     return res

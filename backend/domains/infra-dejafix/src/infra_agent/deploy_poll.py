@@ -66,7 +66,9 @@ async def run_forever(history: DeploymentHistory) -> None:
     """켤 때 바로, 그 뒤 주기마다 `poll_once`. 보관함은 회차마다 다시 읽는다(재시작 없이 반영)."""
     while True:
         try:
-            await poll_once(history, deploy_tools.all_tools())
+            # 보관함 파일 읽기가 이벤트 루프를 막지 않게 한다
+            tools = await asyncio.to_thread(deploy_tools.all_tools)
+            await poll_once(history, tools)
         except Exception as exc:  # noqa: BLE001 - 받기가 멈추면 이력이 낡는다: 다음 회차에 다시
             logger.warning("배포 이력 받기 회차 실패: %s", type(exc).__name__)
         await asyncio.sleep(interval_seconds())

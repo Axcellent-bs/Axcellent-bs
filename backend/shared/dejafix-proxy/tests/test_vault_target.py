@@ -87,3 +87,53 @@ async def test_proxy_refuses_blocked_vault_host_without_leaking_password() -> No
     assert res.status_code == 502
     assert rec.logins == []
     assert "topsecretpw" not in res.text
+
+
+async def test_old_session_closed_only_after_inflight_request_finishes() -> None:
+    import asyncio
+
+    from ax_dejafix_proxy.main import DejaFixSession
+
+    gate = asyncio.Event()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"data": {"token": "t"}})
+        await gate.wait()
+        return httpx.Response(200, json={"data": []})
+
+    http = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler))
+    session = DejaFixSession(http, "u", "p")
+    task = asyncio.create_task(session.get("/api/incidents", ""))
+    await asyncio.sleep(0.05)
+    session.retire()  # 대상이 바뀌어 내보내는 중
+    await asyncio.sleep(0.05)
+    assert not http.is_closed
+    gate.set()
+    res = await task
+    assert res.status_code == 200
+    await asyncio.sleep(0.05)
+    assert http.is_closed
+
+
+async def test_retire_without_inflight_closes() -> None:
+    import asyncio
+
+    from ax_dejafix_proxy.main import DejaFixSession
+
+    http = httpx.AsyncClient(
+        base_url="http://x", transport=httpx.MockTransport(lambda r: httpx.Response(200))
+    )
+    DejaFixSession(http, "u", "p").retire()
+    await asyncio.sleep(0.05)
+    assert http.is_closed
+
+
+async def test_link_local_vault_target_is_rejected() -> None:
+    _save(url="http://169.254.169.254")
+    rec = Recorder()
+    async with _client(rec) as c:
+        res = await c.get("/api/incidents")
+    assert res.status_code == 502
+    assert res.json()["error"]["code"] == "DEJAFIX_UNREACHABLE"
+    assert rec.logins == []

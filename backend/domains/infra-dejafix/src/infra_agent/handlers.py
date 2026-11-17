@@ -415,6 +415,7 @@ async def _redeploy(
         else f"배포 도구에서 {target.service}를 {to_version}으로 다시 실행"
     )
     error: str | None = None
+    timed_out = False
     ref = None
     if tool is None:
         error = f"{target.source} 연결을 읽지 못했다 (도구 연결 확인)"
@@ -433,9 +434,16 @@ async def _redeploy(
             ref = await tool.redeploy(to_version)
         except ToolConnectionError as exc:
             error = exc.message
+            timed_out = exc.code == "timeout"
         except Exception as exc:  # noqa: BLE001 - 예외 문구는 넣지 않는다(바깥 응답이 섞일 수 있다)
             error = type(exc).__name__
     if ref is None:
+        steps = [step]
+        if timed_out:
+            # 응답만 늦었고 도구에서는 이미 시작됐을 수 있다: 다시 실행하기 전에 먼저 확인한다
+            steps.insert(
+                0, "먼저 배포 도구에서 이 실행이 이미 시작됐는지 확인하세요 (중복 실행 방지)"
+            )
         base = {k: v for k, v in output.items() if k not in ("rolled_back_to", "path")}
         return AgentResult(
             meta=request.meta,
@@ -444,7 +452,7 @@ async def _redeploy(
             output={
                 **base,
                 "message": f"다시 배포 실패: {error}",
-                "handoff_steps": [step],
+                "handoff_steps": steps,
                 "fault_released": False,
             },
             evidence=evidence,
