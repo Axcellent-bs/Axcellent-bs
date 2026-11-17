@@ -4,7 +4,7 @@
 # - review: "expert"는 전문가가 확인한 규칙, "pending"은 전문가 확인 전이다
 # - 세법 조항과 회계 기준은 공개 자료로 찾아 적었다. 신고와 판단의 최종 책임은 세무사·담당자에게 있다
 
-version = 13
+version = 14
 updated = "2026-11-17"
 
 # 세무사·회계사에게 먼저 물을 질문. 묶음의 expert-review-checklist.docx에 들어간다
@@ -289,48 +289,48 @@ review = "expert"
 id = "CMP-001"
 area = "campaign"
 title = "캠페인 매출은 수수료 기준"
-statement = "캠페인 매출 = 증분 판매액 × 판매 수수료율. 판매액 전체를 매출로 보면 적자가 흑자로 보인다."
-basis = "REV-001과 같은 기준 (K-IFRS 제1115호 B34~B38)"
+statement = "캠페인 매출 = 캠페인으로 늘어난 판매액 × 판매 수수료율. 회사가 버는 돈은 판매액 전체가 아니라 판매자에게 받는 수수료라서, 판매액 전체를 매출로 보면 적자가 흑자로 보인다."
+basis = "회사 매출을 수수료로 보는 회계 기준(REV-001, K-IFRS 제1115호)과 같다"
 review = "pending"
 
 [[rules]]
 id = "CMP-002"
 area = "campaign"
 title = "캠페인 비용"
-statement = "캠페인 비용 = 광고비 + 회사 부담 쿠폰 + 증분 판매액의 PG 수수료."
-basis = "EXP-001, EXP-002, REV-003과 같은 기준"
+statement = "캠페인 비용 = 광고비 + 회사가 부담한 쿠폰 + 늘어난 판매액에 붙는 결제대행(PG) 수수료. 영상 제작비가 있으면 함께 더한다."
+basis = "회사 비용 분류 기준(광고비·쿠폰·PG 수수료)과 같다"
 review = "pending"
 
 [[rules]]
 id = "CMP-003"
 area = "campaign"
 title = "손익과 ROI"
-statement = "손익 = 캠페인 매출 − 캠페인 비용. ROI = 손익 ÷ 광고비와 쿠폰 합. 재구매는 넣지 않은 단기 손익이다."
-basis = "내부 관리 기준"
+statement = "손익 = 캠페인 매출 − 캠페인 비용. ROI(투자 대비 수익률) = 손익 ÷ 쓴 돈(광고비·제작비·쿠폰). 예: 100만 원을 써서 20만 원이 남으면 ROI 20%. 재구매는 넣지 않은 단기 손익이다."
+basis = "재무 AI 내부 관리 기준"
 review = "pending"
 
 [[rules]]
 id = "CMP-006"
 area = "campaign"
 title = "시작한 캠페인만 기록"
-statement = "안전 관문에서 실행된 캠페인만 손익을 기록한다. 광고비는 광고 플랫폼 보고서의 실제 집행액이고, 시작 금액을 넘으면 기록하되 초과액을 표시한다."
-basis = "내부 기준, shared/safety rules/registry.toml start_campaign"
+statement = "안전 장치가 실행을 허락한 캠페인만 손익을 적는다. 광고비는 광고 플랫폼 보고서의 실제 집행액이고, 시작할 때 정한 금액을 넘으면 기록하되 넘은 금액을 함께 표시한다."
+basis = "안전 장치의 캠페인 집행 규칙"
 review = "pending"
 
 [[rules]]
 id = "CMP-005"
 area = "campaign"
 title = "재구매 포함 손익 (참고)"
-statement = "장부의 구매자별 재구매 배수를 판매액에 곱한 참고 손익이다. 전체 구매자 평균이라 캠페인 고객의 실제 재구매와 다를 수 있어, 효율 판단과 브레이크는 단기 손익으로 한다."
-basis = "내부 관리 기준, [repeat] window_days, min_cohort_buyers"
+statement = "한 번 산 고객이 평균 몇 번 더 사는지(재구매 배수)를 판매액에 곱해 본 참고 손익이다. 전체 고객 평균이라 캠페인 고객과 다를 수 있어서, 좋고 나쁨 판단과 예산 의견에는 쓰지 않는다."
+basis = "재무 AI 내부 관리 기준 (최근 구매 고객이 충분히 쌓였을 때만 계산)"
 review = "pending"
 
 [[rules]]
 id = "CMP-004"
 area = "campaign"
 title = "효율 판단"
-statement = "ROI가 good_roi 이상이면 좋음, bad_roi 미만이면 나쁨, 그 사이는 보통."
-basis = "내부 관리 기준, [campaign] 값"
+statement = "ROI가 '좋음' 기준 이상이면 좋음, 0% 미만(적자)이면 나쁨, 그 사이는 보통으로 본다."
+basis = "재무 AI 내부 관리 기준 (좋음 기준은 재무 설정에 있음)"
 review = "pending"
 
 # ---------------------------------------------------------------- 재무 브레이크
@@ -338,48 +338,48 @@ review = "pending"
 id = "BRK-001"
 area = "brake"
 title = "남은 예산"
-statement = "월 예산은 직전 달 영업 결과의 일정 비율이다. 그 달 결산이 확정됐으면 확정 숫자를 쓰고, 판매일이 적으면 임시값으로 표시한다. 쓴 돈은 안전 관문 실행 기록과 기록된 결과로 센다. 요청이 남은 예산을 넘으면 남은 금액까지만 권하고, 남은 금액이 최소액보다 적으면 권하지 않는다. 직전 달이 적자면 예산이 0이다."
-basis = "내부 기준, [brake] budget_ratio_of_last_month, monthly_budget_krw, min_viable_krw"
+statement = "이달 캠페인 예산은 지난달 영업 결과의 일정 비율이다. 지난달이 적자면 이달 예산은 0원이다. 이미 쓴 돈과 진행 중인 돈을 빼고, 요청이 남은 예산보다 크면 남은 만큼만 권한다. 남은 돈이 너무 적으면 권하지 않는다."
+basis = "재무 AI 내부 기준 (비율과 최소 금액은 재무 설정에 있음)"
 review = "pending"
 
 [[rules]]
 id = "BRK-002"
 area = "brake"
 title = "연속 적자"
-statement = "같은 채널이 연속으로 정해진 횟수만큼 적자면 권하지 않는다."
-basis = "내부 기준, [brake] loss_streak_reject"
+statement = "같은 채널에서 캠페인이 정해진 횟수만큼 연속으로 적자면 그 채널에는 권하지 않는다."
+basis = "재무 AI 내부 기준 (횟수는 재무 설정에 있음)"
 review = "pending"
 
 [[rules]]
 id = "BRK-003"
 area = "brake"
 title = "이달 손실 누적"
-statement = "이달 캠페인 손실 합계가 한도 이상이면 권하지 않는다."
-basis = "내부 기준, [brake] loss_limit_krw"
+statement = "이번 달 캠페인 손실을 모두 더한 금액이 한도 이상이면 더 권하지 않는다."
+basis = "재무 AI 내부 기준 (한도 금액은 재무 설정에 있음)"
 review = "pending"
 
 [[rules]]
 id = "BRK-004"
 area = "brake"
 title = "현금 흐름"
-statement = "앞으로 몇 주의 현금 여유가 요청 금액보다 적으면 그 금액까지만 권하고, 0 이하면 권하지 않는다. 통장 잔액을 올렸으면 여유는 예상 잔액 최저값 − 최소 현금이고, 없으면 누적 순현금이다. 확인할 수 없으면 최소 금액까지만 권한다."
-basis = "내부 기준, [brake] cash_lookahead_weeks, 13주 현금 흐름 예측"
+statement = "앞으로 몇 주 동안 통장에 남을 돈의 여유가 요청 금액보다 적으면 그 여유만큼만 권하고, 여유가 없으면 권하지 않는다. 통장 잔액을 알면 '예상 잔액이 가장 낮은 때 − 꼭 남겨 둘 현금'으로 보고, 모르면 들어올 돈과 나갈 돈의 차이로 본다. 확인할 수 없으면 최소 금액만 권한다."
+basis = "재무 AI 내부 기준, ⑦ 자금·현금 흐름의 13주 예측"
 review = "pending"
 
 [[rules]]
 id = "BRK-005"
 area = "brake"
 title = "재무는 의견만 냄"
-statement = "재무는 비용을 승인·반려하지 않고 의견만 낸다. 집행은 안전 관문의 금액 규칙(건당·하루 합계)과 사람이 정한다. 쿠폰 발급과 환불은 이 규칙의 대상이 아니다."
-basis = "shared/safety rules/registry.toml start_campaign, 재무 재설계의 건별 승인 제외 원칙"
+statement = "재무는 돈을 쓰라고 허락하거나 막지 않고 의견만 낸다. 실제 집행은 안전 장치의 금액 규칙(한 건 금액·하루 합계)과 사람이 정한다. 쿠폰과 환불은 이 규칙에서 보지 않는다."
+basis = "안전 장치의 캠페인 집행 규칙, 재무는 건별 승인을 하지 않는다는 원칙"
 review = "expert"
 
 [[rules]]
 id = "CRX-001"
 area = "brake"
 title = "고객 반응이 나쁜 책이면 예산 의견을 줄임"
-statement = "캠페인이 다루는 책(상품) 중 최근 30일 판매 대비 클레임 비율이 기준 이상이고 클레임이 최소 건수 이상이거나, 불량 계열 클레임이 기준 건수 이상이면 권장 한도에 한도 배수를 요청당 한 번만 곱한다. 판매가 적은 책은 의견을 바꾸지 않고 참고만 한다. 못 읽으면 한도를 그대로 두고 못 읽었다고 남긴다. 재무는 막거나 승인하지 않고 의견만 낸다."
-basis = "멘토링(2026-11-13)의 부서 간 협업(불만 많은 책에 광고비를 올리는 결정을 막을 신호), 책별 집계 A2A 연결 설계(docs/book-issue-a2a-design.md B안), 태윤 11/17 검토"
+statement = "캠페인이 다루는 책 가운데 최근 30일 판매 대비 클레임 비율이 높거나 불량 클레임이 많은 책이 있으면, 권하는 금액을 한 번 줄인다. 판매가 적은 책은 참고만 하고, 클레임 자료를 못 읽으면 금액을 그대로 두고 못 읽었다고 남긴다."
+basis = "멘토링(11/13)의 부서 간 협업: 불만 많은 책에 광고비를 올리지 않도록 고객지원 AI의 책별 클레임 집계를 본다"
 review = "pending"
 
 # ---------------------------------------------------------------- 실수 기반 개선
@@ -387,16 +387,16 @@ review = "pending"
 id = "LRN-001"
 area = "lesson"
 title = "실패 이력으로 한도 축소"
-statement = "그 채널의 적자 캠페인이 교훈으로 남아 있으면 실패한 집행액에 건마다 limit_factor를 곱한 금액까지만 권한다. floor_factor 아래로는 내리지 않는다."
-basis = "내부 기준, [lessons]"
+statement = "그 채널에 적자 캠페인의 교훈이 남아 있으면, 실패했던 집행액보다 줄인 금액까지만 권한다. 너무 많이 줄이지는 않도록 바닥 금액이 있다."
+basis = "재무 AI 내부 기준 (줄이는 비율과 바닥은 재무 설정에 있음)"
 review = "pending"
 
 [[rules]]
 id = "LRN-002"
 area = "lesson"
 title = "좋은 결과로 교훈 해제"
-statement = "그 채널에서 효율 좋음 판단이 나오면 남아 있던 교훈을 닫아 한도를 되돌린다."
-basis = "내부 기준"
+statement = "그 채널에서 효율 '좋음'이 나오면 남아 있던 교훈을 닫아 권하는 금액을 되돌린다."
+basis = "재무 AI 내부 기준"
 review = "pending"
 
 # ---------------------------------------------------------------- 인사이트
@@ -404,40 +404,40 @@ review = "pending"
 id = "CMP-007"
 area = "campaign"
 title = "제작비와 조회당 제작비"
-statement = "영상 제작비는 광고비와 따로 적고 캠페인 비용에 더한다. 조회당 제작비 = 제작비 ÷ 게시 7일 조회수. 조회수는 데이터 AI가 잰 값만 쓰고, 7일 측정 전이면 계산하지 않는다(측정 중)."
-basis = "EXP-002와 같은 광고선전비, 데이터 video_performance"
+statement = "영상 제작비는 광고비와 따로 적고 캠페인 비용에 더한다. 조회당 제작비 = 제작비 ÷ 게시 7일 뒤 조회수. 조회수는 데이터 AI가 잰 값만 쓰고, 7일이 안 됐으면 계산하지 않는다(측정 중)."
+basis = "광고비와 같은 비용 분류, 조회수는 데이터 AI의 영상 성과 측정"
 review = "pending"
 
 [[rules]]
 id = "INS-005"
 area = "insight"
 title = "콘텐츠 카테고리 제작비 재배분"
-statement = "7일 조회수를 잰 카테고리끼리 조회당 제작비를 비교해, 가장 비싼 쪽이 가장 싼 쪽의 shift_min_ratio배 이상이면 다음 회차 제작비를 싼 쪽으로 shift_pct만큼 옮기자는 의견을 낸다. 총 제작비는 늘리지 않는다. 결정은 기획·마케팅과 사람이 한다."
-basis = "CMP-007, 내부 기준 [insights] shift_min_categories, shift_min_ratio, shift_pct"
+statement = "게시 7일 조회수를 잰 카테고리끼리 조회당 제작비를 비교한다. 가장 비싼 카테고리가 가장 싼 카테고리보다 정해 둔 배수 이상 비싸면, 다음 회차 제작비 일부를 싼 쪽으로 옮기자고 제안한다. 총 제작비는 늘리지 않고, 결정은 기획·마케팅과 사람이 한다."
+basis = "제작비·조회당 제작비 기준(CMP-007), 재무 AI 내부 기준 (배수와 옮기는 비율은 재무 설정에 있음)"
 review = "pending"
 
 [[rules]]
 id = "INS-001"
 area = "insight"
 title = "채널 효율 하락 추세"
-statement = "한 채널의 ROI가 최근 캠페인에서 연속으로 내려가면 알린다."
-basis = "내부 기준, [insights] trend_min_campaigns"
+statement = "한 채널의 ROI(투자 대비 수익률)가 최근 캠페인마다 계속 내려가면 알린다. 하나씩 보면 놓치기 쉬운 흐름이다."
+basis = "재무 AI 내부 기준 (몇 번 연속인지는 재무 설정에 있음)"
 review = "pending"
 
 [[rules]]
 id = "INS-002"
 area = "insight"
 title = "손익분기 ROAS 미달"
-statement = "채널의 실제 ROAS가 수수료·PG 구조로 계산한 손익분기 ROAS보다 낮으면 알린다."
-basis = "CMP-001, CMP-002"
+statement = "채널의 실제 ROAS(광고비 1원당 판매액)가 손익분기 ROAS보다 낮으면 알린다. 손익분기 ROAS는 손해를 보지 않으려면 광고비의 몇 배를 팔아야 하는지다. 회사 몫은 판매액의 수수료에서 PG 수수료를 뺀 만큼이라 이 배수가 높다."
+basis = "캠페인 매출·비용 기준(CMP-001, CMP-002)"
 review = "pending"
 
 [[rules]]
 id = "INS-003"
 area = "insight"
 title = "반복되는 예산 초과"
-statement = "승인 한도보다 많이 쓰거나 남은 예산 초과 요청이 기간 안에 반복되면 알린다."
-basis = "내부 기준, [insights] overrun_window_days, overrun_min_count"
+statement = "재무가 권한 금액보다 많이 쓰거나 남은 예산보다 큰 요청이 일정 기간 안에 반복되면 알린다."
+basis = "재무 AI 내부 기준 (기간과 횟수는 재무 설정에 있음)"
 review = "pending"
 
 [[rules]]

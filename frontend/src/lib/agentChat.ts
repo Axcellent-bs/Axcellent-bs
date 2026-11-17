@@ -1,5 +1,5 @@
 import { SCREEN_KEEP_OUTCOMES, closedTimes, isBackgroundRead } from "./commFilter";
-import { FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, SETTLEMENT_HOLD_ACTION, type ExecutionRecord } from "./finance";
+import { FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, SETTLEMENT_HOLD_ACTION, SUPPORT_DELETION_HOLD_ACTIONS, type ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
 import type { CommLine, CommOutcome } from "./types";
 
@@ -135,7 +135,8 @@ const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑�
  *  (환불 /queue, 판매자 정산 /settlements, 마케팅 5종 /marketing ActionQueue, 나머지는 재무 보류 큐).
  *  마케팅 4종(공지·SNS·영상·캠페인)이 /finance로 가면 재무 보류 큐가 빼고 보여서 결정할 곳이 없었다 (11/17) */
 export function holdPage(action: string | null | undefined): string {
-  if (action === "refund_request") return "/queue";
+  // 환불과 개인정보·기한 지난 기록 삭제는 고객지원 보상 큐(/queue)에서 결정한다 (#1229)
+  if (action === "refund_request" || (!!action && (SUPPORT_DELETION_HOLD_ACTIONS as readonly string[]).includes(action))) return "/queue";
   if (action === SETTLEMENT_HOLD_ACTION) return "/settlements";
   if (action && (MARKETING_HOLD_ACTIONS as readonly string[]).includes(action)) return "/marketing";
   // 담당 화면이 접힌 일은 안전규칙 화면에 "담당 화면 없음(접힘)"으로만 보인다

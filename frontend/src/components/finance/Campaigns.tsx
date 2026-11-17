@@ -24,7 +24,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
   return (
     <div className="space-y-4">
       <Panel id="campaign-pnl" title="캠페인 손익" meta={view.env?.meta}
-        hint="회사 매출은 판매액이 아니라 수수료입니다. 손익 = 판매액의 수수료 − 광고비 − 제작비 − 회사 부담 쿠폰 − PG 수수료. 효율 판단은 이 단기 손익으로 하고, 재구매 포함 손익은 참고로만 보여 줍니다.">
+        hint="회사 매출은 판매액이 아니라 수수료입니다. 손익 = 판매액의 수수료 − 광고비 − 제작비 − 회사 부담 쿠폰 − PG 수수료. 효율 판단은 이 단기 손익으로 하고, 재구매 포함 손익은 참고로만 보여 줍니다. ROI(투자 대비 수익률)는 손익 ÷ 쓴 돈으로, 100만 원을 써서 20만 원이 남으면 20%입니다. ROAS는 광고비 1원당 판매액입니다.">
         <ResourceBody res={view}>
           {(v) => (
             <div className="space-y-3">
@@ -41,6 +41,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
                 <div className="rounded-2xl border border-ink-100 px-4 py-3">
                   <dt className="text-sm text-ink-500">손익분기 ROAS</dt>
                   <dd className="mt-1 text-xl font-semibold tabular-nums text-ink-900">{v.break_even_roas === null ? "-" : `${v.break_even_roas}배`}</dd>
+                  <dd className="text-sm text-ink-500">{v.break_even_roas === null ? "광고비 1원으로 판매액이 얼마나 나와야 손해가 아닌지입니다." : `광고비의 ${v.break_even_roas}배는 팔아야 손해가 아닙니다. 회사 몫은 판매액의 수수료에서 결제 수수료를 뺀 만큼이라 이 배수가 높습니다.`}</dd>
                 </div>
               </dl>
               {v.running.length > 0 && (
@@ -72,7 +73,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
                   </table>
                 </div>
               )}
-              {v.campaigns[0] && <AppliedRules rules={v.campaigns[0].applied_rules} />}
+              {v.campaigns[0] && <AppliedRules rules={v.campaigns[0].applied_rules} plain />}
             </div>
           )}
         </ResourceBody>
@@ -145,7 +146,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
                       <details className="text-ink-500">
                         <summary className="cursor-pointer select-none hover:text-ink-700">근거 {r.applied_rules.length}개{r.decision === "approved" ? " · 모든 기준 통과" : ""}</summary>
                         <p className="mt-1 text-ink-700">{r.recommendation}</p>
-                        <div className="mt-2"><AppliedRules rules={r.applied_rules} /></div>
+                        <div className="mt-2"><AppliedRules rules={r.applied_rules} plain /></div>
                       </details>
                     </div>
                     <p className="text-sm tabular-nums text-ink-500 md:text-right">
@@ -196,7 +197,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
                   </dl>
                   <p className="mt-3 text-sm text-ink-500">{item.message}</p>
                   <p className="mt-2 rounded-xl bg-surface-2 px-3 py-2 text-sm text-ink-900"><span className="font-medium">권고</span> · {item.recommendation}</p>
-                  <div className="mt-2"><AppliedRules rules={item.applied_rules} /></div>
+                  <div className="mt-2"><AppliedRules rules={item.applied_rules} plain /></div>
                 </li>
               ))}
             </ul>
