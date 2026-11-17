@@ -246,7 +246,8 @@ class AgentDiagnoses:
                 "note_id": note.note_id,
                 "status": "skipped",
                 "reason": (
-                    f"원인 미확정 노트는 같은 단계에 {UNKNOWN_COOLDOWN_DAYS}일에 한 번만 보내요"
+                    f"원인 미확정 진단 결과는 같은 단계에"
+                    f" {UNKNOWN_COOLDOWN_DAYS}일에 한 번만 보내요"
                 ),
                 "attempts": (current or {}).get("attempts", 0),
                 "delivered_at": None,

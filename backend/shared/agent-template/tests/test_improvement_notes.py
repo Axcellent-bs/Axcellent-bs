@@ -285,7 +285,7 @@ def test_a_response_gets_a_caution_line_when_a_note_covers_its_skill(caution_cli
     assert summary.startswith(
         "되돌림 38초\n주의: 최근 이 단계가 반복해 오래 걸려 총괄 AI가 진단했어요"
     )
-    assert "원인 확정, 개선 노트 1건" in summary and "같은 유형의 이벤트" in summary
+    assert "원인 확정, 진단 결과 1건" in summary and "같은 유형의 이벤트" in summary
     assert after["output"] == before["output"]  # 결과 값은 건드리지 않는다
 
 

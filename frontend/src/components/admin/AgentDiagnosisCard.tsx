@@ -75,7 +75,7 @@ function Row({ row, onChanged }: { row: AgentDiagnosisRow; onChanged: () => void
         <div className="flex flex-wrap items-center gap-2">
           {asking ? (
             <>
-              <span className="text-xs text-ink-600">에이전트가 이 노트를 쓰지 않게 거둘까요?</span>
+              <span className="text-xs text-ink-600">에이전트가 이 진단 결과를 쓰지 않게 거둘까요?</span>
               <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => void revoke()}>{busy ? "철회하는 중…" : "철회하기"}</button>
               <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => setAsking(false)}>취소</button>
             </>
@@ -115,8 +115,8 @@ export function AgentDiagnosisCard({ tick = 0 }: { tick?: number }) {
         <Link href="/agent-eval" className="ml-auto text-sm font-medium text-brand-700 underline underline-offset-2">에이전트 평가 보기 →</Link>
       </div>
       <p className="text-sm text-ink-500">
-        인사 AI가 같은 단계의 확인 필요가 반복되는 에이전트를 찾으면 자동으로 이곳에 올라와요. 총괄 AI가 근거를 모아 진단하고, 해당 에이전트에 개선 노트로 바로 전달합니다.
-        원인을 가릴 근거가 없으면 "원인 미확정"으로 사실만 전달해요. 노트는 알림이라 에이전트의 동작을 바꾸지 않고, 진단은 평가가 아니라 원인 설명이라 틀릴 수 있어요.
+        인사 AI가 같은 단계의 확인 필요가 반복되는 에이전트를 찾으면 자동으로 이곳에 올라와요. 총괄 AI가 근거를 모아 진단하고, 해당 에이전트에 진단 결과를 바로 전달합니다.
+        원인을 가릴 근거가 없으면 "원인 미확정"으로 사실만 전달해요. 전달한 진단 결과는 알림이라 에이전트의 동작을 바꾸지 않고, 진단은 평가가 아니라 원인 설명이라 틀릴 수 있어요.
       </p>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {rows === null && !error ? <p className="text-sm text-ink-500">불러오는 중…</p> : rows && rows.length === 0 ? (
