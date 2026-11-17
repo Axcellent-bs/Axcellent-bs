@@ -286,18 +286,24 @@ def period_closed(period: str | None, today: date | None = None) -> bool:
     return today > sunday
 
 
+def _since(s: sc.SettlementConfig, today: date) -> date:
+    """지급 기한 점검·자동 요청이 보는 가장 이른 날: 점검 범위 시작과 기준일 중 늦은 쪽."""
+    since = today - timedelta(days=s.deadline_lookback_days)
+    return max(since, s.deadline_since_floor) if s.deadline_since_floor else since
+
+
 def due_weeks(today: date | None = None) -> list[str]:
     """고객지원 AI가 스스로 지급 승인을 요청할 주 (오래된 주부터).
 
-    지급 기한 점검 범위(`deadline_lookback_days`) 안에서 기간이 끝났고 지급 예정일(일요일 +
-    `pay_days_after_period_end`)이 된 주. 기한 점검에서 `at_risk`·`overdue`가 되는 미지급 주는
+    지급 기한 점검 범위(`deadline_lookback_days`·`deadline_since_floor`)에서 기간이 끝났고
+    지급 예정일(일요일 + `pay_days_after_period_end`)이 된 주.
+    기한 점검에서 `at_risk`·`overdue`가 되는 미지급 주는
     예정일이 지났거나 보류된 주라(보류된 판매자는 어차피 묶지 않는다) 이 조건에 이미 들어 있다.
+    그중 가장 최근 `auto_request_weeks`개만 낸다.
     """
     s = sc.load_policy().settlement
     today = today or sc.today()
-    _, monday, _ = sc.week_range(
-        sc.week_of(today - timedelta(days=s.deadline_lookback_days)), today
-    )
+    _, monday, _ = sc.week_range(sc.week_of(_since(s, today)), today)
     weeks = []
     while True:
         sunday = monday + timedelta(days=6)
@@ -306,7 +312,7 @@ def due_weeks(today: date | None = None) -> list[str]:
         if sunday + timedelta(days=s.pay_days_after_period_end) <= today:
             weeks.append(sc.week_of(monday))
         monday += timedelta(days=7)
-    return weeks
+    return weeks[-s.auto_request_weeks :]  # 한꺼번에 쏟아내지 않는다: 가장 최근 주 몇 개만
 
 
 def apply_batch(result: dict[str, Any], batch: dict[str, Any] | None) -> dict[str, Any]:
@@ -372,7 +378,7 @@ def deadline_report(
     cfg = sc.load_policy()
     s = cfg.settlement
     today = today or sc.today()
-    since = today - timedelta(days=s.deadline_lookback_days)
+    since = _since(s, today)
     by_week: dict[str, dict[str, Any]] = {}  # 주 → 판매자 → 정산서 행
 
     def row_of(week: str, seller_id: str) -> dict[str, Any] | None:
