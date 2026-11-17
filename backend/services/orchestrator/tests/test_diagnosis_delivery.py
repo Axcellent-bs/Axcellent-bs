@@ -107,7 +107,7 @@ async def test_a_diagnosed_request_is_sent_to_the_agent_as_a_note() -> None:
         "infra",
         "rollback",
     )
-    assert "같은 유형의 이벤트(payment:error_rate_5xx)" in note.summary
+    assert "같은 종류의 이벤트(결제 서버 오류)" in note.summary
     assert note.evidence_contexts == ["ctx_inc_a", "ctx_inc_b"]
     assert note.method == "rules" and note.revoke is False
 

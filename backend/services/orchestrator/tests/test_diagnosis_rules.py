@@ -88,7 +88,7 @@ def test_same_event_type_in_two_issues_is_a_cause_level_finding() -> None:
     assert result["status"] == "diagnosed" and result["method"] == "rules"
     kinds = {f["kind"] for f in result["findings"]}
     assert {"event_type", "retry", "slow"} <= kinds
-    assert "같은 유형의 이벤트(payment:error_rate_5xx)" in result["summary"]
+    assert "같은 종류의 이벤트(결제 서버 오류)에서 반복됐어요" in result["summary"]
     assert "인프라 AI의 '문제 배포 되돌리기' 단계가 최근 3건 중 2건" in result["summary"]
     # 문장이 가리킨 근거 번호는 실제 근거에 있다
     ids = {i["id"] for i in result["items"]}
@@ -129,7 +129,7 @@ def test_archive_cards_add_action_code_findings() -> None:
     assert result["status"] == "diagnosed"
     action = next(f for f in result["findings"] if f["kind"] == "action_code")
     assert action["value"] == "rollback_deployment" and len(action["contexts"]) == 2
-    assert "같은 처리 방식(rollback_deployment)" in result["summary"]
+    assert "같은 방식(이전 버전으로 되돌리기)으로 해결된 이슈가 반복됐어요" in result["summary"]
 
 
 def test_same_reason_code_from_the_orchestrator_record_counts() -> None:
@@ -283,3 +283,37 @@ def test_stored_diagnosis_survives_a_restart(tmp_path) -> None:
     row = again.get(out.request_id)
     assert row["status"] == "diagnosed" and row["diagnosis"]["method"] == "rules"
     assert datetime.fromisoformat(row["diagnosed_at"]).tzinfo is UTC or row["diagnosed_at"]
+
+
+def test_summary_and_evidence_lines_use_plain_words_without_english_codes() -> None:
+    import re
+
+    incidents = {
+        f"ctx_inc_{n}": _incident(
+            n, event_type="payment:error_rate_5xx", reason_code="restart_interrupted"
+        )
+        for n in ("a", "b")
+    }
+    cards = {
+        f"ctx_inc_{n}": _card(n, action_code="release_fault", event_type="payment:error_rate_5xx")
+        for n in ("a", "b")
+    }
+    result = diagnose(_row("a", "b"), incidents, cards)
+    texts = [result["summary"], *(i["text"] for i in result["items"])]
+    english = re.compile(r"[A-Za-z]{3,}")
+    for text in texts:
+        # 이슈 제목(title)은 총괄이 준 한국어 문장이라 코드가 없어야 한다
+        assert not english.search(text), text
+    assert "결제 서버 오류" in result["summary"]
+    assert "장애 상태 해제" in result["summary"]
+    assert "(E" not in result["summary"]  # 요약 문장에는 근거 번호를 늘어놓지 않는다
+    assert all(i["id"].startswith("E") for i in result["items"])  # 번호는 근거 목록에서 쓴다
+
+
+def test_unknown_codes_are_left_out_instead_of_shown_in_english() -> None:
+    incidents = {
+        f"ctx_inc_{n}": _incident(n, event_type="shipping:weird_metric") for n in ("a", "b")
+    }
+    result = diagnose(_row("a", "b"), incidents, {})
+    assert "shipping" not in result["summary"] and "weird" not in result["summary"]
+    assert "같은 종류의 이벤트에서 반복됐어요" in result["summary"]
