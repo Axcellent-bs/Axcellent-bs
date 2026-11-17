@@ -453,3 +453,42 @@ def test_shop_api_external_on_skips_traffic_launch_and_prints_line(tmp_path: Pat
     line = "판매 서버(shop-api)는 밖에서 따로 돌아요(SHOP_API_EXTERNAL=on). 8010은 건드리지 않아요."
     assert text.count(line) == 1
     assert "AX_SHOP_API_URL" not in text[text.index(EXT_BLOCK[0]) : text.index(EXT_BLOCK[1])]
+
+
+# --- SHOP_API_EXTERNAL=on: 서비스들이 판매 서버를 같은 호스트 주소로 읽는다 (AX_SHOP_API_URL) ---
+
+
+def _url_run(env: dict[str, str], tmp_path: Path) -> dict[str, str]:
+    """따로 돌리기 블록 + AX_<이름>_URL을 내보내는 부분을 tmp cwd에서 돌리고 URL 변수를 돌려준다."""
+    text = RUN_ALL.read_text(encoding="utf-8")
+    start = text.index("# 컨테이너가 아니라서 서비스 이름 대신")
+    export_part = text[start : text.index("# 부서 이름으로 부르는 코드가 있어도")]
+    snippet = (
+        f"cd \"{tmp_path.as_posix()}\"\nAPPS=$(cat <<'EOF'\n" + "\n".join(_apps()) + "\nEOF\n)\n"
+        f"{_between(*EXT_BLOCK)}\n{export_part}\n"
+        'echo "shop=${AX_SHOP_API_URL-UNSET}"\necho "safety=${AX_SAFETY_URL-UNSET}"'
+    )
+    return dict(line.split("=", 1) for line in _run(snippet, env).splitlines())
+
+
+def test_external_on_exports_local_shop_api_url_from_the_apps_port(tmp_path: Path) -> None:
+    port = next(line.split()[1] for line in _apps() if line.startswith("shop-api "))
+    out = _url_run({"SHOP_API_EXTERNAL": "on"}, tmp_path)
+    assert out["shop"] == f"http://127.0.0.1:{port}"
+    assert out["safety"].startswith("http://127.0.0.1:")  # 나머지 서비스 주소는 그대로
+
+
+def test_external_on_keeps_an_operator_set_shop_api_url(tmp_path: Path) -> None:
+    out = _url_run({"SHOP_API_EXTERNAL": "on", "AX_SHOP_API_URL": "http://10.0.0.5:9000"}, tmp_path)
+    assert out["shop"] == "http://10.0.0.5:9000"
+
+
+def test_external_on_from_dotenv_also_exports_the_url(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("SHOP_API_EXTERNAL=on\n", encoding="utf-8")
+    assert _url_run({}, tmp_path)["shop"] == "http://127.0.0.1:8010"
+
+
+def test_external_off_still_exports_the_apps_shop_api_url(tmp_path: Path) -> None:
+    """off는 예전과 같다: shop-api가 APPS에 있으니 반복문이 127.0.0.1 주소를 정한다."""
+    for env in ({}, {"SHOP_API_EXTERNAL": "off"}):
+        assert _url_run(env, tmp_path)["shop"] == "http://127.0.0.1:8010"

@@ -55,6 +55,7 @@ FOLDED="handover"
 if [ -z "${SHOP_API_EXTERNAL:-}" ] && [ -f .env ]; then
   SHOP_API_EXTERNAL=$(tr -d '\r' < .env | sed -n 's/^SHOP_API_EXTERNAL=//p' | tail -n 1 | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
 fi
+SHOP_API_PORT=$(echo "$APPS" | awk '$1 == "shop-api" {print $2}')  # 아래에서 APPS에서 빠져도 주소에 쓰도록 먼저 적어 둔다
 SHOP_EXTERNAL_ON=0
 case "${SHOP_API_EXTERNAL:-off}" in
   on | 1 | true) SHOP_EXTERNAL_ON=1; APPS=$(echo "$APPS" | awk 'NF && $1 != "shop-api"') ;;
@@ -202,6 +203,10 @@ while read -r name port _; do
   [ -n "$name" ] || continue
   export "AX_$(echo "$name" | tr 'a-z-' 'A-Z_')_URL=http://127.0.0.1:$port"
 done <<< "$APPS"
+# 판매 서버를 밖에서 따로 돌리면(APPS에 shop-api가 없다) 위 반복이 AX_SHOP_API_URL을 안 만들어 서비스들이
+# 기본값 http://shop-api:8010(컨테이너 이름)으로 빠진다. 같은 호스트의 127.0.0.1 주소를 알려 준다.
+# 운영자가 이미 정한 AX_SHOP_API_URL은 그대로 둔다 (회사 연결 파일이 있으면 그쪽이 먼저)
+[ "$SHOP_EXTERNAL_ON" = 1 ] && export AX_SHOP_API_URL="${AX_SHOP_API_URL:-http://127.0.0.1:$SHOP_API_PORT}"
 # 부서 이름으로 부르는 코드가 있어도 skill로 서비스를 고르지만(route_target), 고를 수 없는 경우를 위해 대표 서비스로 둔다
 export AX_SUPPORT_URL=http://127.0.0.1:8102 AX_HR_URL=http://127.0.0.1:8104 AX_ARCHIVE_URL=http://127.0.0.1:8114
 export AX_MARKETING_URL=http://127.0.0.1:8103 AX_INFRA_URL=http://127.0.0.1:8107
