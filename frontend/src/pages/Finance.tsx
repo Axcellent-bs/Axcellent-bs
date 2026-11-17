@@ -13,6 +13,7 @@ import { SelfTestPanel } from "@/components/finance/Kept";
 import { TeamBudgetSection } from "@/components/finance/TeamBudget";
 import { PlanningQuestionsSection, PlanningRequestsSection } from "@/components/finance/PlanningRequests";
 import { OrchestratorRequestsSection } from "@/components/finance/OrchestratorRequests";
+import { AgentDiagnosisInbox } from "@/components/admin/AgentDiagnosisInbox";
 import { ReconciliationSection } from "@/components/finance/Reconciliation";
 import { SafetyQueue } from "@/components/finance/SafetyQueue";
 import { SettlementsSection, type SettlementSource } from "@/components/finance/Settlements";
@@ -305,6 +306,8 @@ export default function FinancePage() {
         </div>
       )}
       {!exampleMode && <OrchestratorRequestsSection tick={tick} onSummary={setAiWork} />}
+      {/* 총괄 AI가 재무에 보낸 진단(읽기 전용, 운영자·관리자에게만). 없으면 칸이 안 보인다 (#1244) */}
+      {!exampleMode && <AgentDiagnosisInbox agent="finance" />}
 
       {(financeUp === false || safetyUp === false) && (
         <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
