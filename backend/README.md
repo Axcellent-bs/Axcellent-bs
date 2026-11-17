@@ -72,6 +72,7 @@ bash scripts/run_all.sh stop
   bash scripts/run_all.sh --only data-demo,incident      # 묶음과 이름을 섞어도 된다
   ```
   - 시작할 때 `띄운 서버 N개: …, 안 띄움: …`을 출력한다. 모르는 이름이면 목록을 보여 주고 멈춘다.
+  - 판매 서버(shop-api, 8010)를 서버에서 따로 돌리면 `SHOP_API_EXTERNAL=on`(환경변수 또는 `backend/.env`)을 준다. `run_all.sh`가 판매 서버와 가상 주문을 띄우지 않고, `stop`·`reset`도 8010을 건드리지 않는다. 다른 서비스는 `AX_SHOP_API_URL`(기본 127.0.0.1:8010)로 그대로 찾아간다. 안 주면 예전과 같다.
   - 안 띄운 서비스는 `AX_ENABLED_SERVICES`에서도 자동으로 빠진다. 그래서 라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다. 이미 `AX_ENABLED_SERVICES`를 줬으면 둘의 교집합이고, 남는 서비스가 없으면 `none`(모두 끔)이다.
   - 캣북스 가상 주문은 `.env`에 `SHOP_TRAFFIC=on`이 있을 때만 넣는다(기본 꺼짐, 끄면 `캣북스 가상 주문 꺼짐(…)` 한 줄). 꺼도 같은 스크립트가 발송·도착 표시와 재고 보충은 계속 한다(사람이 사이트에서 한 주문도 정산되게). 결제 장애 감지는 60초에 결제 표본 5건 이상이 필요해서 장애 시연 때는 켠다. `stop`은 지금처럼 전체 포트를 끈다.
   - shop-api의 바인드 주소는 `AX_SHOP_API_HOST`로 바꾼다(기본 `127.0.0.1`, 다른 서버는 늘 `127.0.0.1`). 예: 같은 망의 다른 PC에서 부르려면 `AX_SHOP_API_HOST=0.0.0.0 bash scripts/run_all.sh`. 이때 8010이 외부에 열리니 방화벽을 확인한다.
