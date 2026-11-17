@@ -450,13 +450,25 @@ def test_coverage_with_kosis_age_by_gender_table() -> None:
     by = {r.label: r for r in out.rows}
     row = by["20대 · 여성"]
     assert row.status == "ok" and row.population == 1000 and row.base_year == 2025  # 최근 시점
-    assert row.coverage == 0.01 and row.population_source == "연령 성별 인구"
+    assert row.coverage == 0.01 and row.population_source == "연령 성별 인구 · 2025년"
     male = by["20대 · 남성"]
     assert male.population == 900 and male.buyers == 6 and male.coverage == round(6 / 900, 8)
-    assert "커버 비율을 계산" in out.summary
+    # 고객 구성 지수 (11/17): 구매자 10·7·10·6명(33명), 인구 1000·900·1000·900명(3800명)
+    bs, ps = round(10 / 33, 4), round(1000 / 3800, 6)
+    assert (row.buyer_share, row.population_share) == (bs, ps)
+    assert row.index == round(bs / ps * 100, 1)
+    assert male.index == round(round(6 / 33, 4) / round(900 / 3800, 6) * 100, 1)
+    top = max(out.rows, key=lambda r: r.index or 0)
+    low = min(out.rows, key=lambda r: r.index or 0)
+    assert out.summary.startswith("최근 365일 구매자 기준 고객 구성 지수: ")
+    assert f"{top.label}은 인구 비중보다 우리 고객 비중이 {top.index / 100:.1f}배" in out.summary
+    assert f"{low.label}은 {low.index / 100:.1f}배(지수 {low.index:.0f})로 가장 적음" in out.summary
+    assert (seg.topic("20대 · 여성"), seg.topic("청년 플레이어"), seg.topic("PC")) == (
+        "20대 · 여성은", "청년 플레이어는", "PC은(는)")  # fmt: skip
     hidden = coverage(cfg, conn, store=small_store())  # 남성 0명 → 네 칸 모두 숨김
     row = {r.label: r for r in hidden.rows}["20대 · 남성"]
     assert row.population == 900 and row.suppressed and row.coverage is None  # 인구는 공공 통계
+    assert row.buyer_share is None and row.population_share is None and row.index is None
 
 
 def test_coverage_kosis_errors_are_reasons_not_numbers() -> None:
@@ -518,13 +530,16 @@ def test_coverage_five_year_ages_and_gender_items() -> None:
     assert women.population == 252 and women.coverage == round(10 / 252, 8)
     assert by["10대 · 남성"].population == 222 and by["20대 · 남성"].population == 262
     assert by["10대 · 여성"].population == 212  # A30은 어느 연령대에도 들지 않는다
-    assert by["20대 · 여성"].population_source == "5세별 인구 (2026-10 기준)"
+    assert by["20대 · 여성"].population_source == "5세별 인구 · 2026년 10월 말"
     assert by["20대 · 여성"].base_year == 2026
     no_answer = by["20대 · 응답 안 함"]  # 인구 통계에 없는 값 → 비율 없음
     assert no_answer.status == "population_missing" and no_answer.population is None
     assert no_answer.coverage is None
     assert no_answer.reason == "인구 통계에 없는 값이라 비율을 내지 않음"
-    assert "2026-10 기준" in seg.population_note(out)
+    # 응답 안 함은 비중·지수도 없다 (구매자 비중의 분모에서도 빠진다)
+    assert no_answer.buyer_share is None and no_answer.population_share is None
+    assert no_answer.index is None and no_answer.population_note == ""
+    assert "2026년 10월 말" in seg.population_note(out)
 
 
 def test_coverage_bad_dims_or_doubled_cells_are_reasons() -> None:
@@ -552,9 +567,14 @@ def test_catbooks_population_table_uses_national_five_year_rows() -> None:
     assert ref["codes"]["gender"]["no_answer"] == []
     ages = ["5", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55", "60", "65", "70",
             "75", "80", "85", "90", "95", "100", "105", "0"]  # fmt: skip
+
+    def age_name(code: str) -> str:  # KOSIS 분류 이름 모양 (메타: 15 = 10 - 14세 … 105 = 100+)
+        n = int(code)
+        return "계" if n == 0 else "100+" if n == 105 else f"{n - 5} - {n - 1}세"
+
     rows = [
         {"ORG_ID": "101", "TBL_ID": "DT_1B04005N", "TBL_NM": "주민등록인구", "C1": "00",
-         "C1_NM": "전국", "C2": age, "C2_NM": age, "ITM_ID": itm, "ITM_NM": itm,
+         "C1_NM": "전국", "C2": age, "C2_NM": age_name(age), "ITM_ID": itm, "ITM_NM": itm,
          "UNIT_NM": "명", "PRD_SE": "M", "PRD_DE": "202610",
          "DT": str(1000 * int(age) + {"T2": 0, "T3": 1, "T4": 2}[itm])}
         for age in ages for itm in ("T2", "T3", "T4")
@@ -572,8 +592,66 @@ def test_catbooks_population_table_uses_national_five_year_rows() -> None:
     assert women.population == (25000 + 2) + (30000 + 2)  # 20~24세 + 25~29세 여자
     fifty_plus = [55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105]
     assert older.population == sum(1000 * a + 1 for a in fifty_plus)  # 50세 이상 전부, 남자
-    assert women.population_source == "통계청 주민등록인구 (5세별) (2026-10 기준)"
+    assert women.population_source == "행정안전부 주민등록인구통계(KOSIS) · 2026년 10월 말"
+    assert "기준" not in women.population_source and women.population_source.count("년") == 1
     assert no_answer.population is None and no_answer.coverage is None
+    # 합산한 5세 구간은 KOSIS 분류 이름에서 (catbooks.toml에 나이 범위를 적지 않는다)
+    assert women.population_note == "20~24세 + 25~29세"
+    assert older.population_note == "50세 이상 합산"
+    assert no_answer.population_note == ""
+    assert "세" not in str(pop.table_ref)  # 설정에는 코드만
+
+
+def test_band_note_from_kosis_names() -> None:
+    assert seg.band_note(["10 - 14세", "15 - 19세"]) == "10~14세 + 15~19세"
+    assert seg.band_note(["50 - 54세", "95 - 99세", "100세 이상"]) == "50세 이상 합산"
+    assert seg.band_note(["55 - 59세", "100+"]) == "55세 이상 합산"
+    assert seg.band_note(["20 - 24세", ""]) == ""  # 이름이 빠지면 쓰지 않는다
+    assert seg.band_note(["남자"]) == "남자"
+
+
+def test_coverage_index_hidden_share_cannot_be_solved_from_visible_shares() -> None:
+    """보이는 비중들의 합으로 숨긴 묶음 하나의 값을 알아낼 수 없음.
+
+    연령 하나 (10대 10명, 20대 3명, 30대 9명, 응답 안 함 2명, 기타 1명). 인구에 없는 값이 둘이다.
+    1차로 20대·응답 안 함·기타를 숨긴다. 전체 합으로는 셋의 합만 나오지만, 비중의 분모(답한
+    구매자 22명)가 buyers ÷ buyer_share로 드러나 20대 = 22 − 10 − 9가 된다 → "답한 묶음 전체
+    합"도 공개 합계로 보고 하나를 더 숨긴다."""
+    ages = {"10s": "10대", "20s": "20대", "30s": "30대", "na": "응답 안 함", "etc": "기타"}
+    ref = {"org_id": "101", "tbl_id": "T_AGE", "itm_id": "T1", "prd_se": "Y",
+           "codes": {"age_band": {"10s": "A10", "20s": "A20", "30s": "A30", "na": [],
+                                  "etc": []}}}  # fmt: skip
+    cfg = CFG.model_copy(update={
+        "attributes": [AttributeDef(key="age_band", label="연령대", values=ages),
+                       CFG.attributes[1]],
+        "population": [PopulationSource(attribute_keys=["age_band"], source_id="kosis",
+                                        table_ref=ref)],
+    })  # fmt: skip
+    table = [{"ORG_ID": "101", "TBL_ID": "T_AGE", "TBL_NM": "연령 인구", "C1": c, "C1_NM": c,
+              "ITM_ID": "T1", "UNIT_NM": "명", "PRD_SE": "Y", "PRD_DE": "2025", "DT": "1000"}
+             for c in ("A10", "A20", "A30")]  # fmt: skip
+    conn, _ = _kosis(KOSIS_KEY, lambda r: httpx.Response(200, json=table))
+    f = {"gender": "female"}
+    sizes = {"a": ("10s", 10), "b": ("20s", 3), "c": ("30s", 9), "n": ("na", 2), "e": ("etc", 1)}
+    base = [b for p, (age, n) in sizes.items() for b in buyers_of(p, n, {"age_band": age, **f})]
+    # 보완 숨김 전 모양이면 풀린다: 답한 묶음 합 22 − 보이는 10 − 9 = 3 (확인용)
+    groups = seg.coverage_groups([5])
+    assert seg.is_determined(1, {1, 3, 4}, [*groups, [0, 1, 2]])
+    assert not seg.is_determined(1, {1, 3, 4}, groups)
+    out = coverage(cfg, conn, keys=("age_band",), store=small_store(base=base))
+    by = {r.label: r for r in out.rows}
+    answered = [by[n] for n in ("10대", "20대", "30대")]
+    hidden = [r for r in answered if r.suppressed]
+    assert len(hidden) >= 2  # 답한 묶음 안에서 숨긴 칸이 하나뿐이면 풀린다
+    assert by["30대"].suppressed and not by["10대"].suppressed  # 보이는 칸 중 작은 30대를 더 숨김
+    for r in hidden:
+        assert r.buyers is None and r.buyer_share is None and r.population_share is None
+        assert r.index is None
+    visible = [r for r in answered if not r.suppressed]
+    # 보이는 비중 합이 1에서 빠지는 몫은 숨긴 묶음 둘 이상에 나뉜다
+    assert 1 - sum(r.buyer_share or 0 for r in visible) > 0
+    assert by["10대"].buyer_share == round(10 / 22, 4) and by["10대"].index is not None
+    assert by["응답 안 함"].index is None and by["응답 안 함"].buyer_share is None
 
 
 def test_kosis_table_meta() -> None:

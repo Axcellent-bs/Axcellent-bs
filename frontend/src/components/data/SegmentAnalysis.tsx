@@ -5,7 +5,7 @@ import { dataAi, kpiLive, type BasketLevel, type SegmentPeriod } from "@/lib/dat
 import {
   NOT_YET, SUPPRESSED, basketNoun, basketView, dataNote, coverageView, favoritesView, filterLabel, nextMonth, optionsView,
   parseTarget, profileView, proposalsView, questionView, retentionView, sectionState, sendResultText,
-  type BasketView, type CoverageView, type FavoriteList, type FavoritesView, type GateView, type OptionsView, type ProfileView,
+  type BasketView, type CoverageRowView, type CoverageView, type FavoriteList, type IndexTone, type FavoritesView, type GateView, type OptionsView, type ProfileView,
   type ProposalView, type ProposalsView, type QuestionView, type RetentionView, type SectionState,
 } from "@/lib/segmentView";
 
@@ -370,7 +370,23 @@ function Together({ options }: { options: OptionsView }) {
   );
 }
 
-// ---- 3) 시장을 얼마나 덮고 있나
+// ---- 3) 우리 고객은 어느 층에 몰려 있나 (고객 구성 지수)
+
+const INDEX_TONE: Record<IndexTone, string> = {
+  high: "font-semibold text-emerald-700",
+  low: "font-semibold text-red-700",
+  normal: "text-ink-700",
+};
+
+/** 우리 비중(브랜드색) · 인구 비중(회색) 두 막대 */
+function TwoBars({ r }: { r: CoverageRowView }) {
+  return (
+    <div className="min-w-[6rem] space-y-1" aria-hidden>
+      <Bar pct={r.buyerPct} />
+      <Bar pct={r.populationPct} muted />
+    </div>
+  );
+}
 
 function Coverage({ options }: { options: OptionsView }) {
   const [combo, setCombo] = useState(options.coverage[0]?.value ?? "");
@@ -378,13 +394,15 @@ function Coverage({ options }: { options: OptionsView }) {
   const view: CoverageView | null = res.data ? coverageView(res.data, options.attributes) : null;
 
   return (
-    <Section id="seg-coverage" title="시장을 얼마나 덮고 있나" hint="우리 구매자 수(최근 1년)를 공공 인구 통계로 나눠 봅니다. 남은 시장이 큰 묶음이 위에 옵니다." badge={view?.kind === "ok" ? view.badge : null}>
+    <Section id="seg-coverage" title="우리 고객은 어느 층에 몰려 있나"
+      hint="우리 구매자(최근 1년) 구성을 공공 인구 구성과 견줍니다. 지수 100이면 인구와 같은 비율이고, 120 이상은 초록(많이 몰림), 80 미만은 빨강(적음)입니다. 지수 높은 묶음이 위에 옵니다."
+      badge={view?.kind === "ok" ? view.badge : null}>
       {options.coverage.length === 0 ? <Empty>인구 통계와 맞춰 볼 속성 조합이 설정에 없어요</Empty> : options.coverage.length > 1 && (
         <Select label="묶음" value={combo} onChange={setCombo}>
           {options.coverage.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
         </Select>
       )}
-      <StateBox load={res} what="시장 커버 비율" />
+      <StateBox load={res} what="고객 구성 지수" />
       {view?.kind === "gate" && <Gate view={view} />}
       {view?.kind === "buyers" && (
         <div className="space-y-2">
@@ -413,10 +431,14 @@ function Coverage({ options }: { options: OptionsView }) {
         <div className="space-y-2">
           <ul className="space-y-2 sm:hidden">
             {view.rows.map((r, i) => (
-              <li key={i} className="rounded-xl bg-surface-2 px-3 py-2 text-sm">
-                <p className="font-medium text-ink-900">{r.label}</p>
-                <p className="text-xs text-ink-700">구매자 {r.buyers} · 인구 {r.population} · 커버 {r.coverage}</p>
-                <p className="text-xs text-ink-500">{r.note ?? r.source}</p>
+              <li key={i} className="space-y-1 rounded-xl bg-surface-2 px-3 py-2 text-sm">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="min-w-0 font-medium text-ink-900">{r.label}</p>
+                  <span className={`shrink-0 tabular-nums ${INDEX_TONE[r.tone]}`}>지수 {r.index}</span>
+                </div>
+                {r.bands && <p className="text-xs text-ink-500">{r.bands}</p>}
+                <p className="text-xs text-ink-700">우리 구매자 {r.buyers} · 우리 비중 {r.buyerShare} · 인구 비중 {r.populationShare}</p>
+                {r.note ? <p className="text-xs text-ink-500">{r.note}</p> : <TwoBars r={r} />}
               </li>
             ))}
           </ul>
@@ -424,25 +446,33 @@ function Coverage({ options }: { options: OptionsView }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-ink-500">
-                  <th className="py-2 pr-3 font-medium">묶음</th><th className="py-2 pr-3 text-right font-medium">우리 구매자</th>
-                  <th className="py-2 pr-3 text-right font-medium">인구</th><th className="py-2 pr-3 text-right font-medium">커버 비율</th>
-                  <th className="py-2 font-medium">출처</th>
+                  <th className="py-2 pr-3 font-medium">묶음</th>
+                  <th className="py-2 pr-3 text-right font-medium">우리 구매자</th>
+                  <th className="py-2 pr-3 text-right font-medium">우리 비중</th>
+                  <th className="py-2 pr-3 text-right font-medium">인구 비중</th>
+                  <th className="w-1/4 py-2 pr-3 font-medium"><span className="sr-only">우리 비중과 인구 비중 막대</span></th>
+                  <th className="py-2 text-right font-medium">지수</th>
                 </tr>
               </thead>
               <tbody>
                 {view.rows.map((r, i) => (
-                  <tr key={i} className="border-t border-ink-100">
-                    <td className="py-2 pr-3 font-medium text-ink-900">{r.label}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums">{r.buyers}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums">{r.population}</td>
-                    <td className="py-2 pr-3 text-right font-semibold tabular-nums">{r.coverage}</td>
-                    <td className="py-2 text-xs text-ink-500">{r.note ?? r.source}</td>
+                  <tr key={i} className="border-t border-ink-100 align-top">
+                    <td className="py-2 pr-3">
+                      <span className="font-medium text-ink-900">{r.label}</span>
+                      {r.bands && <span className="block text-xs text-ink-500">{r.bands}</span>}
+                    </td>
+                    <td className={`py-2 pr-3 text-right tabular-nums ${r.buyers === SUPPRESSED ? "text-xs text-ink-400" : ""}`}>{r.buyers}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{r.buyerShare}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{r.populationShare}</td>
+                    <td className="py-2 pr-3">{r.note ? <span className="text-xs text-ink-500">{r.note}</span> : <TwoBars r={r} />}</td>
+                    <td className={`py-2 text-right tabular-nums ${INDEX_TONE[r.tone]}`}>{r.index}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           {view.summary && <p className="text-xs text-ink-500">요약: {view.summary}</p>}
+          {view.source && <p className="text-xs text-ink-400">{view.source}</p>}
         </div>
       ))}
     </Section>
@@ -611,7 +641,7 @@ function Retention() {
 function OptionsMissing({ load }: { load: Load<unknown> }) {
   return (
     <>
-      {["물어보기", "누가 사나", "함께 사는 것", "시장을 얼마나 덮고 있나"].map((t, i) => (
+      {["물어보기", "누가 사나", "함께 사는 것", "우리 고객은 어느 층에 몰려 있나"].map((t, i) => (
         <Section key={t} id={`seg-wait-${i}`} title={t}>
           <StateBox load={load} what="분석 선택지" />
         </Section>

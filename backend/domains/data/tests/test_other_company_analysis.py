@@ -236,7 +236,53 @@ def test_segment_options_profile_favorites_coverage_with_game_company(game: dict
     assert [r.buyers for r in cov.rows] == [10, 10, 10]
     assert {r.status for r in cov.rows} == {"population_missing"}
     assert all(r.population is None and r.coverage is None for r in cov.rows)
+    # 인구가 없으면 비중·지수도 없다 (11/17 고객 구성 지수)
+    assert all(r.buyer_share is None and r.population_share is None and r.index is None
+               for r in cov.rows)  # fmt: skip
     _no_catbooks_words(*(o.model_dump(mode="json") for o in (opts, prof, fav, cov)))
+
+
+def test_coverage_index_with_game_company_and_fake_kosis(game: dict) -> None:
+    """게임사 설정에 인구표(나이대 하나)를 붙이면 지수·합산 구간이 나온다. 이름은 KOSIS 응답에서."""
+    import httpx
+
+    from data_agent.connectors.kosis import KosisConnector
+    from data_agent.connectors.naver_shopping import DayCache
+    from data_agent.skills import segment_analysis as seg
+
+    ref = {"org_id": "999", "tbl_id": "T_GAME_AGE", "itm_id": "T1", "prd_se": "M",
+           "label": "가짜 연령 인구",
+           "codes": {"age_band": {"teen": ["K1", "K2"], "young": "K3", "adult": ["K4", "K5"]}}}
+    names = {"K1": "10 - 14세", "K2": "15 - 19세", "K3": "20 - 29세", "K4": "30 - 34세",
+             "K5": "35세 이상"}
+    people = {"K1": 100, "K2": 100, "K3": 200, "K4": 300, "K5": 400}  # 합 1,100명
+    table = [{"ORG_ID": "999", "TBL_ID": "T_GAME_AGE", "TBL_NM": "연령 인구", "C1": c,
+              "C1_NM": names[c], "ITM_ID": "T1", "UNIT_NM": "명", "PRD_SE": "M",
+              "PRD_DE": "202610", "DT": str(n)} for c, n in people.items()]  # fmt: skip
+    sales = game_catalog().sales
+    assert sales is not None
+    pop = sales.population[0].model_copy(update={"table_ref": ref})
+    cfg = sales.model_copy(update={"population": [pop]})
+    client = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json=table)))  # fmt: skip
+    conn = KosisConnector({"KOSIS_API_KEY": "test-kosis-key-0000"}, client=client,
+                          cache=DayCache(lambda: game["now"].date()))  # fmt: skip
+    out = run(seg.coverage_with_population(handlers.get_sales_store(), TENANT, ["age_band"],
+                                           cfg, "pixelforge", game["now"], kosis=conn))  # fmt: skip
+    by = {r.label: r for r in out.rows}
+    teen, young, adult = by["십대 플레이어"], by["청년 플레이어"], by["성인 플레이어"]
+    third = round(10 / 30, 4)  # 묶음마다 10명
+    assert [r.buyer_share for r in (teen, young, adult)] == [third] * 3
+    assert teen.population_share == round(200 / 1100, 6)
+    assert teen.index == round(third / round(200 / 1100, 6) * 100, 1)
+    assert adult.index == round(third / round(700 / 1100, 6) * 100, 1)
+    assert teen.population_note == "10~14세 + 15~19세"
+    assert young.population_note == ""  # 구간 하나는 따로 적지 않는다
+    assert adult.population_note == "30세 이상 합산"
+    assert teen.population_source == "가짜 연령 인구 · 2026년 10월 말"
+    assert out.summary.startswith("최근 365일 구매자 기준 고객 구성 지수: 십대 플레이어는 ")
+    assert "성인 플레이어는 0.5배(지수 52)로 가장 적음" in out.summary
+    _no_catbooks_words(out.model_dump(mode="json"))
 
 
 def test_basket_pairs_with_game_company(game: dict) -> None:

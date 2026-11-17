@@ -137,7 +137,7 @@
     },
     {
       "id": "market_coverage",
-      "description": "시장 커버 비율: 카탈로그 population에 적힌 속성 조합(예: 연령대×성별)별로 최근 365일 결제 완료 구매자 수 ÷ 인구(KOSIS 통계표)를 돌려준다. 표 설정이 없거나 못 읽으면 그 줄은 인구 없이 이유만(인구를 지어내지 않는다). 설정에 없는 조합은 '데이터 부족'. 묶음이 최소 크기 미만이면 구매자 수를 숨긴다. LLM을 쓰지 않는다. 상태를 바꾸지 않는다.",
+      "description": "고객 구성 지수: 카탈로그 population에 적힌 속성 조합(예: 연령대×성별)별로 최근 365일 결제 완료 구매자 비중(답한 구매자 중)과 인구 비중(KOSIS 통계표, 표의 모든 묶음 인구 중)을 견준 지수(구매자 비중 ÷ 인구 비중 × 100)와 합산한 인구 구간, 근거로 구매자 수 ÷ 인구를 돌려준다. 응답 안 함처럼 인구 통계에 없는 값은 지수를 내지 않는다. 표 설정이 없거나 못 읽으면 그 줄은 인구 없이 이유만(인구를 지어내지 않는다). 설정에 없는 조합은 '데이터 부족'. 묶음이 최소 크기 미만이면 구매자 수를 숨긴다. LLM을 쓰지 않는다. 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#MarketCoverageInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#MarketCoverageOutput",
       "grade": "read",
