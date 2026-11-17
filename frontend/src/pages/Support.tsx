@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
+import { AgentDiagnosisInbox } from "@/components/admin/AgentDiagnosisInbox";
 import { AtRisk } from "@/components/support/AtRisk";
 import { IncidentResponse } from "@/components/support/IncidentResponse";
 import { InquiryCheck } from "@/components/support/InquiryCheck";
@@ -77,6 +78,8 @@ export default function SupportPage() {
         {mode === "surge" && <SurgeChanges tick={tick} />}
         {mode === "response" && <IncidentResponse tick={tick} />}
       </div>
+
+      <AgentDiagnosisInbox agent="support" showService />
     </div>
   );
 }
