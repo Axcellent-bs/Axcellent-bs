@@ -154,7 +154,7 @@ def _parse(raw: Any, path: str) -> list[ToolConnection]:
 
 
 # 바뀐 시각·크기가 같으면 다시 읽지 않는다. 깨진 파일 경고도 같은 상태면 한 번만 남긴다
-_cache: tuple[str, int, int, list[ToolConnection], bool] | None = None
+_cache: tuple[str, int, int, int, list[ToolConnection], bool] | None = None
 _lock = threading.RLock()
 
 
@@ -169,9 +169,11 @@ def _load() -> tuple[list[ToolConnection], bool]:
             stat = os.stat(path)
         except OSError:
             return [], False  # 저장한 적 없음: 정상
-        key = (path, stat.st_mtime_ns, stat.st_size)
-        if _cache is not None and _cache[:3] == key:
-            return list(_cache[3]), _cache[4]
+        # st_ino: 같은 크기로 바뀐 시각 단위 안에 다시 쓴 파일(os.replace로 inode가 바뀐다)을 놓치지
+        # 않는다. 윈도에서 st_ino가 0이면 예전처럼 시각·크기만 본다
+        key = (path, stat.st_mtime_ns, stat.st_size, stat.st_ino)
+        if _cache is not None and _cache[:4] == key:
+            return list(_cache[4]), _cache[5]
         try:
             os.chmod(path, 0o600)  # 예전에 넓은 권한으로 만든 파일도 만든 사용자만 읽게 맞춘다
         except OSError:
@@ -213,8 +215,8 @@ def _writing() -> Iterator[None]:
             try:
                 fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
                 break
-            except FileExistsError:
-                pass
+            except (FileExistsError, PermissionError):
+                pass  # 윈도: 지워지는 중인 잠금 파일은 PermissionError. 다시 시도한다
             try:
                 stale = time.time() - os.stat(lock).st_mtime > LOCK_STALE
             except OSError:
@@ -233,8 +235,10 @@ def _writing() -> Iterator[None]:
             time.sleep(delay)
             delay = min(delay * 2, 0.2)
         try:
-            os.write(fd, str(os.getpid()).encode("ascii"))
-            os.close(fd)
+            try:
+                os.write(fd, str(os.getpid()).encode("ascii"))
+            finally:
+                os.close(fd)
             _cache = None  # 다른 프로세스가 막 쓴 것을 놓치지 않게 다시 읽는다
             yield
         finally:

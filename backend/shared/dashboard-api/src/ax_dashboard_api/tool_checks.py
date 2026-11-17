@@ -200,19 +200,22 @@ def _dispatch_problem(text: str, version_input: str) -> str | None:
 def _run_name_problem(text: str, version_input: str) -> str | None:
     """`run-name`이 버전 입력을 담는지 본다. 없으면 실행 제목에서 버전을 못 읽어 되돌릴 수 없다.
 
-    `${{ inputs.X }}`, `${{ github.event.inputs.X }}` 꼴(괄호 안 공백은 있어도 없어도)을 받는다.
+    `${{ inputs.X }}`, `${{ github.event.inputs.X }}`, `inputs['X']`,
+    `inputs["X"]`, `format(..., inputs.X)` 꼴(괄호 안 공백은 있어도 없어도)을 받는다.
     """
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError:
         return "워크플로 파일을 YAML로 읽지 못했어요. 문법을 확인해 주세요"
     run_name = doc.get("run-name") if isinstance(doc, dict) else None
+    name = re.escape(version_input)
+    # `${{ ... }}` 한 식 안에서만 찾는다 (식 안의 `{0}` 같은 홑 중괄호는 허용)
     pattern = (
-        r"\$\{\{[^}]*?(?<![\w.])(?:github\.event\.)?inputs\."
-        + re.escape(version_input)
-        + r"(?![\w-])[^}]*\}\}"
+        r"\$\{\{(?:(?!\}\}).)*?(?<![\w.])(?:github\.event\.)?inputs"
+        r"(?:\." + name + r"(?![\w-])|\[\s*(?:'" + name + r"'|\"" + name + r"\")\s*\])"
+        r"(?:(?!\}\}).)*\}\}"
     )
-    if isinstance(run_name, str) and re.search(pattern, run_name):
+    if isinstance(run_name, str) and re.search(pattern, run_name, re.S):
         return None
     return (
         f'워크플로에 run-name: "deploy ${{{{ inputs.{version_input} }}}}"처럼 버전을 넣어 주세요. '

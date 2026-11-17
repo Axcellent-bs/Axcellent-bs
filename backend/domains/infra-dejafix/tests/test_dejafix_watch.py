@@ -217,3 +217,34 @@ def test_watch_starts_when_vault_gets_dejafix(vault) -> None:
 
     asyncio.run(scenario())
     assert seen == [None, "http://dejafix-proxy:8030"]
+
+
+def test_run_forever_skips_round_without_url(caplog: pytest.LogCaptureFixture) -> None:
+    """주소가 없으면 요청도 경고도 없이 건너뛰고 간격만큼 쉰다."""
+    seen: list[str] = []
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) >= 2:
+            raise asyncio.CancelledError
+
+    async def run() -> None:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(dejafix_watch.asyncio, "sleep", fake_sleep)
+            mp.setattr(dejafix_watch, "run_once", _forbidden(seen))
+            await dejafix_watch.run_forever(lambda: None, interval=7)
+
+    def _forbidden(calls: list[str]):
+        async def boom(*args, **kwargs):
+            calls.append("called")
+            return []
+
+        return boom
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(run())
+    assert seen == []
+    assert sleeps == [7, 7]
+    assert not caplog.records

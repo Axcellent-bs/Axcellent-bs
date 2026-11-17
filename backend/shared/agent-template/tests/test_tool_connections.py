@@ -213,3 +213,52 @@ def test_fresh_lock_held_elsewhere_is_busy(vault: Path, monkeypatch: pytest.Monk
     assert e.value.code == "busy"
     assert lock.exists()  # 남의 잠금은 지우지 않는다
     assert tc.read_all() == []
+
+
+def test_same_size_same_mtime_rewrite_is_reread(vault: Path) -> None:
+    """바뀐 시각·크기가 같아도 파일이 바꿔치기(inode 변경)되면 다시 읽는다."""
+    _save(name="가나")
+    first = vault.stat()
+    if first.st_ino == 0:
+        pytest.skip("st_ino를 주지 않는 파일 시스템")
+    assert tc.read_all()[0].name == "가나"
+    other = vault.with_name("other.json")
+    other.write_text(vault.read_text(encoding="utf-8").replace("가나", "다라"), encoding="utf-8")
+    assert other.stat().st_size == first.st_size
+    os.utime(other, ns=(first.st_atime_ns, first.st_mtime_ns))
+    os.replace(other, vault)
+    assert tc.read_all()[0].name == "다라"
+
+
+def test_lock_permission_error_is_retried(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_open = os.open
+    calls = {"n": 0}
+
+    def flaky(path, flags, mode=0o777):
+        if str(path).endswith(".lock") and calls["n"] == 0:
+            calls["n"] += 1
+            raise PermissionError("지워지는 중")
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(tc.os, "open", flaky)
+    assert _save().id == "jenkins-1"
+    assert calls["n"] == 1
+
+
+def test_lock_fd_closed_when_write_fails(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    closed: list[int] = []
+    real_close = os.close
+
+    def bad_write(fd, data):
+        raise OSError("디스크 가득")
+
+    def spy_close(fd):
+        closed.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(tc.os, "write", bad_write)
+    monkeypatch.setattr(tc.os, "close", spy_close)
+    with pytest.raises(OSError):
+        _save()
+    assert len(closed) == 1
+    assert not Path(str(vault) + ".lock").exists()
