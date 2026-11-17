@@ -8,7 +8,7 @@ import type {
 } from "./data.ts";
 import {
   coverageView, dataNote, favoritesView, fakeBadge, filterLabel, isHigh, nextMonth, optionsView, parseTarget, pct,
-  profileView, proposalsView, questionView, sectionState, sendResultText, times,
+  profileView, proposalsView, questionView, readableReason, sectionState, sendResultText, times,
 } from "./segmentView.ts";
 
 const QUALITY: SalesQuality = {
@@ -224,6 +224,49 @@ test("시장 커버: 모든 줄에 인구가 없으면 안내 한 줄 + 연령�
   noCodes(v, ["age_band", "gender", "20s"]);
   // 인구가 있는 줄이 하나라도 있으면 지금 표 그대로
   assert.equal(coverageView(COVERAGE, o.attributes).kind, "ok");
+});
+
+// 232에서 KOSIS 키가 없을 때 서버가 모든 줄에 같은 이유로 주는 값
+const KOSIS_ERROR = "KOSIS를 읽지 못함 (UNAUTHORIZED: KOSIS_API_KEY 키가 없어 KOSIS를 부를 수 없다 (키 등록 후 가능))";
+const row = (age: string, g: string, status: "ok" | "population_missing" | "error", reason: string, buyers: number | null = 10, suppressed = false) => ({
+  values: { age_band: age, gender: g }, label: "", buyers, population: status === "ok" ? 1_000_000 : null,
+  population_source: status === "ok" ? "통계청 주민등록인구" : "", base_year: null, coverage: status === "ok" && buyers ? buyers / 1_000_000 : null,
+  suppressed, status, reason,
+});
+
+test("시장 커버: 모든 줄이 같은 이유로 오류면 한 줄 + 구매자 표 (오류 코드·설정 이름은 빼고)", () => {
+  const o = optionsView(OPTIONS);
+  const v = coverageView({ ...COVERAGE, rows: [
+    row("20s", "f", "error", KOSIS_ERROR, 120), row("20s", "m", "error", KOSIS_ERROR, 80),
+    row("30s", "f", "error", KOSIS_ERROR, null, true), row("30s", "m", "error", KOSIS_ERROR, 40),
+  ] }, o.attributes);
+  assert.equal(v.kind, "buyers");
+  if (v.kind !== "buyers") return;
+  assert.equal(v.note, "인구 통계를 읽지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요 · KOSIS를 읽지 못함 (키가 없어 KOSIS를 부를 수 없다 (키 등록 후 가능))");
+  assert.deepEqual(v.rows.slice(0, 2), [
+    { label: "20대", cells: ["120명", "80명"] },
+    { label: "30대", cells: ["표본 부족", "40명"] }, // 숨긴 칸은 표본 부족
+  ]);
+  assert.equal(/UNAUTHORIZED|KOSIS_API_KEY/.test(JSON.stringify(v)), false);
+  // 영어로만 된 이유는 붙이지 않는다
+  const english = coverageView({ ...COVERAGE, rows: [row("20s", "f", "error", "UNAVAILABLE: timeout"), row("20s", "m", "error", "UNAVAILABLE: timeout")] }, o.attributes);
+  assert.ok(english.kind === "buyers" && english.note === "인구 통계를 읽지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요");
+  assert.equal(readableReason("UNAUTHORIZED: key"), null);
+});
+
+test("시장 커버: 오류 이유가 섞이거나 일부만 ok면 지금 표 그대로", () => {
+  const o = optionsView(OPTIONS);
+  const mixed = coverageView({ ...COVERAGE, rows: [
+    row("20s", "f", "error", KOSIS_ERROR), row("20s", "m", "error", "KOSIS를 읽지 못함 (RATE_LIMITED: 한도)"),
+  ] }, o.attributes);
+  assert.equal(mixed.kind, "ok");
+  const partly = coverageView({ ...COVERAGE, rows: [
+    row("20s", "f", "ok", ""), row("20s", "m", "error", KOSIS_ERROR), row("30s", "f", "error", KOSIS_ERROR),
+  ] }, o.attributes);
+  assert.equal(partly.kind, "ok");
+  if (partly.kind !== "ok") return;
+  assert.equal(partly.rows.length, 3);
+  assert.equal(partly.rows[0].coverage === "-", false); // 인구가 있는 줄은 커버 비율을 보인다
 });
 
 test("이벤트 제안: 기준 미달 후보는 '제외한 후보 n건'으로 접는다", () => {
