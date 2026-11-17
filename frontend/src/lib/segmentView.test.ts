@@ -34,7 +34,7 @@ const OPTIONS: SegmentOptionsOutput = {
     { label: "없는 속성 질문", filters: { region: "seoul" } },
   ],
   event_kinds: [{ code: "coupon", label: "쿠폰" }],
-  periods: ["30d", "90d", "365d"],
+  periods: ["1d", "7d", "30d", "90d", "365d"],
   population_keys: [["age_band", "gender"], ["region"]],
   min_group_size: 5, data_source: "가짜 데이터(데모용)", catalog_id: "catbooks", catalog_version: "1",
 };
@@ -132,7 +132,7 @@ test("선택지는 segment_options에서만 읽고, 없는 속성을 가리키�
   assert.deepEqual(o.attributes[0].values.map((v) => v.label), ["20대", "30대", "답하지 않음"]);
   assert.deepEqual(o.chips.map((c) => c.label), ["20대 여성이 좋아하는 책은?"]);
   assert.deepEqual(o.targets.map((t) => [t.group, t.label]), [["장르", "AI 활용"], ["분류", "도서"]]);
-  assert.deepEqual(o.periods.map((p) => p.label), ["최근 30일", "최근 90일", "최근 1년"]);
+  assert.deepEqual(o.periods.map((p) => p.label), ["최근 1일", "최근 7일", "최근 30일", "최근 3개월", "최근 1년"]);
   assert.deepEqual(o.coverage, [{ value: "age_band,gender", label: "연령대 × 성별" }]);
   assert.equal(o.badge, "가짜 데이터로 본 결과");
   assert.deepEqual(parseTarget(o.targets[0].value), { kind: "genre", code: "g_ai" });
@@ -144,7 +144,7 @@ test("물어보기: 우리 쇼핑몰 순위와 바깥 시장(키 필요·한도)
   const v = favoritesView(FAVORITES, "책");
   assert.equal(v.kind, "ok");
   if (v.kind !== "ok") return;
-  assert.equal(v.header, "우리 쇼핑몰 · 20대 · 여성 구매자 412명 (최근 90일)");
+  assert.equal(v.header, "우리 쇼핑몰 · 20대 · 여성 구매자 412명 (최근 3개월)");
   assert.equal(v.genres.title, "특히 많이 사는 장르");
   assert.deepEqual(v.genres.rows[0], { label: "소설", detail: "구매자의 31% · 전체 대비 1.4배 · 128명", suppressed: false, high: true });
   assert.deepEqual(v.genres.rows[1], { label: "시", detail: "표본 부족", suppressed: true, high: false });
@@ -271,7 +271,7 @@ test("누가 사나: 대상 vs 전체 막대와 배수, 표본 부족·모름, �
   assert.equal(v.kind, "ok");
   if (v.kind !== "ok") return;
   assert.equal(v.title, "AI 활용은(는) 누가 사나");
-  assert.equal(v.header, "AI 활용 구매자 300명 · 전체 5,000명 (최근 90일)");
+  assert.equal(v.header, "AI 활용 구매자 300명 · 전체 5,000명 (최근 3개월)");
   const [t] = v.tables;
   assert.equal(t.label, "직업군");
   assert.deepEqual(t.rows[0], { label: "직장인", target: "58%", targetPct: 58, overall: "39%", lift: "1.5배", high: true, suppressed: false });

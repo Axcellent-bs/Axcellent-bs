@@ -196,7 +196,10 @@ def test_segment_inputs() -> None:
     with pytest.raises(ValidationError):
         SegmentFavoritesInput(filters={})
     with pytest.raises(ValidationError):
-        SegmentFavoritesInput(filters={"a": "b"}, period="7d")
+        SegmentFavoritesInput(filters={"a": "b"}, period="2d")  # 계약에 없는 기간
+    # 짧은 기간 1d·7d는 뒤에 더한 값이다
+    assert SegmentFavoritesInput(filters={"a": "b"}, period="1d").period == "1d"
+    assert SegmentProfileInput(target_kind="genre", target_code="ai", period="7d").period == "7d"
     with pytest.raises(ValidationError):
         MarketCoverageInput(attribute_keys=[])
     for bad in ("2026-13", "2026-1", "26-12"):
@@ -314,7 +317,8 @@ def test_segment_options_shape() -> None:
     assert [v.code for v in out.attributes[0].values] == ["20s", "10s"]  # 순서 유지
     assert SegmentOptionsOutput.model_validate(out.model_dump(mode="json")) == out
     with pytest.raises(ValidationError):
-        SegmentOptionsOutput.model_validate({"periods": ["7d"]})
+        SegmentOptionsOutput.model_validate({"periods": ["2d"]})  # 계약에 없는 기간
+    assert SegmentOptionsOutput.model_validate({"periods": ["1d", "7d"]}).periods == ["1d", "7d"]
     with pytest.raises(ValidationError):
         SegmentOptionsOutput.model_validate({"genres": [{"code": "x"}]})
 
@@ -377,4 +381,4 @@ def test_segment_question_contract() -> None:
     with pytest.raises(ValidationError):
         SegmentQuestionOutput(status="maybe")
     with pytest.raises(ValidationError):
-        SegmentQuestionOutput(status="ok", period="7d")
+        SegmentQuestionOutput(status="ok", period="2d")  # 계약에 없는 기간

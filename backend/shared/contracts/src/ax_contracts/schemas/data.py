@@ -3443,7 +3443,8 @@ class SalesAnalysisOutput(AxModel):
 #   기간 시작 시각과 같게 둔다
 # - 대상 고객(이벤트 제안) = 그 속성 묶음에서 최근 `active_days`(기본 365)일 결제 완료 주문이
 #   1회 이상인 고객
-SegmentPeriod = Literal["30d", "90d", "365d"]
+# 1d·7d는 화면의 짧은 기간으로 뒤에 더했다 (기존 값은 그대로)
+SegmentPeriod = Literal["30d", "90d", "365d", "1d", "7d"]
 SegmentTargetKind = Literal["category", "genre", "product"]
 ExternalStatus = Literal["ok", "key_missing", "limit", "error"]
 

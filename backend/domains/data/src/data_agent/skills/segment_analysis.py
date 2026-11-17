@@ -107,8 +107,16 @@ from data_agent.sales_quality import INSUFFICIENT, KST, Window, gate, quality
 from data_agent.sales_store import FAKE_SOURCE, SalesStore, StoredOrder, customers_source
 from data_agent.skills.sales_analysis import FAKE_DATA, NO_CATEGORY, NO_PRODUCT
 
-SEGMENT_DAYS: dict[str, int] = {"30d": 30, "90d": 90, "365d": 365}
-SEGMENT_LABEL: dict[str, str] = {"30d": "최근 30일", "90d": "최근 90일", "365d": "최근 365일"}
+SEGMENT_DAYS: dict[str, int] = {"1d": 1, "7d": 7, "30d": 30, "90d": 90, "365d": 365}
+SEGMENT_LABEL: dict[str, str] = {
+    "1d": "최근 1일",
+    "7d": "최근 7일",
+    "30d": "최근 30일",
+    "90d": "최근 90일",
+    "365d": "최근 365일",
+}
+# 화면(물어보기·누가 사나)이 고르는 기간. 365d는 시장 커버가 따로 쓴다
+SCREEN_PERIODS: tuple[SegmentPeriod, ...] = ("1d", "7d", "30d", "90d")
 KIND_LABEL: dict[str, str] = {"category": "분류", "genre": "장르", "product": "상품"}
 QUERIES = [
     "sales_store.sales_orders",
@@ -433,8 +441,11 @@ def evidence(basis: SalesBasis | None, now: datetime, extra: str = "") -> Eviden
 def options(cfg: CatalogSales | None, catalog_id: str, source: str | None) -> SegmentOptionsOutput:
     """화면 선택지. 카탈로그 `[sales]`를 순서 그대로 내려 준다 (숫자 없음)."""
     if cfg is None:
-        return SegmentOptionsOutput(data_source=source, catalog_id=catalog_id)
+        return SegmentOptionsOutput(
+            periods=list(SCREEN_PERIODS), data_source=source, catalog_id=catalog_id
+        )
     return SegmentOptionsOutput(
+        periods=list(SCREEN_PERIODS),
         attributes=[
             OptionAttribute(
                 key=a.key,

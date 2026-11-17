@@ -77,7 +77,7 @@ def test_game_company_twenties_men() -> None:
 
 def test_codes_outside_the_options_are_dropped() -> None:
     noisy = pick([("age_band", "99s"), ("job", "x"), ("gender", "female"), ("gender", "male")],
-                 genre="ghost", period="7d")  # fmt: skip
+                 genre="ghost", period="2d")  # fmt: skip
     out = run(sq.parse("여성", GAME, MockLLMClient(responses={sq._Pick: noisy}))).output
     # 없는 값·없는 속성·없는 장르·없는 기간은 버리고, 한 속성에는 처음 고른 값 하나
     assert out.status == "ok" and out.filters == {"gender": "female"}
