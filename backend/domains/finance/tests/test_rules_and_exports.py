@@ -406,3 +406,38 @@ def test_package_says_whether_the_month_closing_is_confirmed(
         return exports.make_package(books, {}, date(2026, 11, 4))
 
     assert asyncio.run(run())["closing_confirmed"] is False
+
+
+def test_old_records_show_the_current_plain_rule_text() -> None:
+    """저장된 기록의 옛 규칙 문구 대신 지금 기준표 문구를 보인다 (11/17 옛 문구가 남았음)."""
+    from finance_agent.rules import load_rules, refresh_applied
+
+    old = {
+        "rule_id": "CMP-004",
+        "title": "효율 판단",
+        "statement": "ROI가 good_roi 이상이면 좋음",
+        "basis": "내부 관리 기준, [campaign] 값",
+        "review": "pending",
+        "detail": "ROI 20.0% → 좋음",
+        "rules_version": 12,
+    }
+    stored = {"campaigns": [{"campaign_id": "c1", "applied_rules": [old]}]}
+    got = refresh_applied(stored)["campaigns"][0]["applied_rules"][0]
+    now = load_rules().rule("CMP-004")
+    assert (got["statement"], got["basis"], got["title"]) == (now.statement, now.basis, now.title)
+    assert got["detail"] == "ROI 20.0% → 좋음" and got["rules_version"] == 12
+    assert stored["campaigns"][0]["applied_rules"][0]["statement"].startswith("ROI가 good_roi")
+    unknown = {"rule_id": "OLD-999", "statement": "옛 규칙"}
+    assert refresh_applied([unknown]) == [unknown]
+
+
+def test_rule_text_has_no_codes_or_setting_names() -> None:
+    """재무 AI는 일반인이 쓰는 화면이라 기준 문구에 규칙 번호·설정 이름·파일 경로를 쓰지 않는다."""
+    import re
+
+    from finance_agent.rules import load_rules
+
+    code = re.compile(r"[A-Z]{2,4}-\d{3}|_[a-z]+|\[[a-z_]+\]|\.toml|\.md")
+    for r in load_rules().rules:
+        for text in (r.title, r.statement, r.basis):
+            assert not code.search(text), (r.id, text)
