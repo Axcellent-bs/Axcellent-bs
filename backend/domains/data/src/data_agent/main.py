@@ -106,6 +106,10 @@ def build_app() -> FastAPI:
             # 성과 결과를 기획에 보내기 (한 시간마다, DATA_SEND_CAMPAIGN_UPDATE가 꺼져 있으면
             # 기획을 부르지 않음)
             sends = asyncio.create_task(campaign_update.run_forever())
+            # 구매자 요약 표 (11/18): 준비되지 않았으면(예전 파일) 시작하며 채운다 (뒤에서)
+            summary = asyncio.create_task(
+                sales_reads.ensure_summary(get_sales_store(), TENANT_ID_DEFAULT)
+            )
             # 판매 분석 미리 계산 (11/18): 수집기가 새 행을 저장하면 기본 조회를 캐시에 넣는다
             warm = (
                 asyncio.create_task(sales_reads.run_forever(
@@ -120,6 +124,7 @@ def build_app() -> FastAPI:
                 if task:
                     task.cancel()
                 sends.cancel()
+                summary.cancel()
                 if warm:
                     warm.cancel()
                 await close_shared_client()  # 판매 서버 공용 HTTP 클라이언트 (#909)
