@@ -2036,8 +2036,8 @@ restart_head_mismatch() {
 }
 
 do_restart_backend() {
-  local head timeout poll waited=0 unit src db
-  local -a sqlite_files=() plain_files=() dirs=()
+  local head timeout poll waited=0 unit src db rdb seen dup
+  local -a sqlite_files=() plain_files=() dirs=() sqlite_real=()
   require_paths repo backup_dir
   service_unit
   unit="${REPLY}"
@@ -2062,6 +2062,8 @@ do_restart_backend() {
     [[ "${src}" != *..* && -f "${src}" ]] || step_fail "backup-source" "${RC_FAIL}" "백업할 파일이 없다: ${src##*/}"
     backup_dest "${src}"
     run python3 -I -c "${PY_SQLITE_BACKUP}" "${src}" "${BACKUP_DEST}"
+    # 폴더 백업의 -sqlite 복사에서 같은 파일을 또 뜨지 않도록 실제 경로를 기억해 둔다
+    rdb="$(realpath -e -- "${src}" 2>/dev/null)" && sqlite_real+=("${rdb}")
   done
   for src in "${plain_files[@]}"; do
     [[ "${src}" != *..* && -f "${src}" ]] || step_fail "backup-source" "${RC_FAIL}" "백업할 파일이 없다: ${src##*/}"
@@ -2077,6 +2079,18 @@ do_restart_backend() {
     run mkdir -m 700 -- "${BACKUP_DEST}"
     for db in "${src}"/*.db; do
       [[ -f "${db}" ]] || continue
+      # backup_sqlite 로 이미 별도 파일에 뜬 것(같은 실제 경로)은 여기서 또 뜨지 않는다(같은 파일이 두 번 저장되는 것을 막는다)
+      dup=0
+      rdb="$(realpath -e -- "${db}" 2>/dev/null)" || rdb=""
+      if [[ -n "${rdb}" ]]; then
+        for seen in "${sqlite_real[@]}"; do
+          [[ "${seen}" == "${rdb}" ]] && { dup=1; break; }
+        done
+      fi
+      if (( dup )); then
+        say "중복 건너뜀: ${db##*/} (backup_sqlite로 이미 백업)"
+        continue
+      fi
       run python3 -I -c "${PY_SQLITE_BACKUP}" "${db}" "${BACKUP_DEST}/${db##*/}"
     done
   done
