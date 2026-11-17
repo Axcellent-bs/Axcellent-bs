@@ -625,11 +625,18 @@ async def _live_books(
     }
     orders: list[dict[str, Any]] = []
     refunds: list[dict[str, Any]] = []
+    notes: dict[str, str] = {}
     if isinstance(orders_raw, list):
         orders, skipped = await asyncio.to_thread(store.merge, orders_raw, categories, since)
         refunds = await asyncio.to_thread(refunds_from_orders, orders)
         if skipped:
             unavailable.append("orders_partial")
+        if not orders:
+            # 판매 서버 전체에 주문이 0건이면 장사를 안 한 게 아니라 판매 서버를 새로 바꾸고 아직
+            # 데이터를 넣지 않은 것이다(11/17 새 캣북스 전환). 0원으로 계산하면 확정 결산이
+            # 전부 "달라짐"이 되고 지난달 대비 −100%가 뜬다. 자료 없음으로 둔다 (fail-closed)
+            unavailable.append("orders")
+            notes["orders_empty"] = EMPTY_SHOP_NOTE
     else:
         unavailable.append("orders")
     if not isinstance(products, list):
@@ -666,8 +673,14 @@ async def _live_books(
         mock=False,
         collected_at=fc.now(),
         unavailable=unavailable,
-        notes={"refund_basis": refund_basis(orders)},
+        notes={"refund_basis": refund_basis(orders), **notes},
     )
+
+
+EMPTY_SHOP_NOTE = (
+    "판매 서버에 주문 기록이 하나도 없어요. 판매 서버를 새로 바꾸고 아직 주문 데이터를 넣지 않은 "
+    "상태로 보여, 0원으로 계산하지 않고 자료 없음으로 둬요."
+)
 
 
 def _norm_exec(raw: Any) -> dict[str, Any] | None:

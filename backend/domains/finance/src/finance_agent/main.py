@@ -222,8 +222,12 @@ async def run_and_store_daily_closing(trigger: Trigger) -> dict[str, Any]:
     day = fc.today() - timedelta(days=1)
     confirmation = state().records.closings.get(closing_key("day", day))
     report = await closing.closing_report(books, "day", day, confirmation)
-    state().closing_drifts = closing.find_drifts(books, state().records.closings)
-    state().vat_drifts = tax.find_vat_drifts(books, state().records.vat_filings)
+    if books.unavailable_core():
+        # 주문을 못 읽은 장부로 비교하면 확정한 결산이 전부 "달라짐"이 된다. 비교하지 않는다
+        state().closing_drifts, state().vat_drifts = [], []
+    else:
+        state().closing_drifts = closing.find_drifts(books, state().records.closings)
+        state().vat_drifts = tax.find_vat_drifts(books, state().records.vat_filings)
     stored = {
         "date": day.isoformat(),
         "report": report,
