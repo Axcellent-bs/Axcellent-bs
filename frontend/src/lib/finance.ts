@@ -114,7 +114,7 @@ export interface CampaignRecord {
 /** 콘텐츠 카테고리별 조회당 제작비 (CMP-007). 게시 7일 조회수를 잰 캠페인만 합한다 */
 export interface CategoryViewCost {
   content_category: string; campaigns: string[]; production_cost_krw: number; views: number;
-  measuring: number; latest_production_krw: number | null; cost_per_view: number | null;
+  measuring: number; latest_production_krw: number | null; cost_per_view: number | null; format?: "shorts" | "reels" | null;
 }
 export interface BudgetReview {
   review_id: string; campaign_id: string; campaign_name: string; channel: string; requested_krw: number; approved_limit_krw: number;
