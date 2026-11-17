@@ -17,6 +17,7 @@ from ax_contracts.data_access.shop_customers import (
 from ax_contracts.data_access.shop_sales import SalesOrderLine
 from ax_contracts.schemas.data import (
     CatalogSales,
+    CoverageRow,
     EventProposalInput,
     EventProposalItem,
     EventProposalOutput,
@@ -382,3 +383,20 @@ def test_segment_question_contract() -> None:
         SegmentQuestionOutput(status="maybe")
     with pytest.raises(ValidationError):
         SegmentQuestionOutput(status="ok", period="2d")  # 계약에 없는 기간
+
+
+def test_coverage_row_index_fields_default_and_old_response() -> None:
+    """고객 구성 지수 칸(11/17): 기본값이 있어 예전 응답도 읽히고, 범위를 검사한다."""
+    old = CoverageRow.model_validate(
+        {"values": {"age_band": "20s"}, "label": "20대", "buyers": 10, "population": 1000,
+         "population_source": "인구", "base_year": 2025, "coverage": 0.01}
+    )  # fmt: skip
+    assert old.population_note == "" and old.buyer_share is None
+    assert old.population_share is None and old.index is None and old.coverage == 0.01
+    new = old.model_copy(update={"population_note": "20~24세 + 25~29세", "buyer_share": 0.3,
+                                 "population_share": 0.1, "index": 300.0})  # fmt: skip
+    again = CoverageRow.model_validate(new.model_dump(mode="json"))
+    assert again == new and again.index == 300.0
+    for bad in ({"buyer_share": 1.2}, {"population_share": -0.1}, {"index": -1}):
+        with pytest.raises(ValidationError):
+            CoverageRow.model_validate({"label": "x", **bad})

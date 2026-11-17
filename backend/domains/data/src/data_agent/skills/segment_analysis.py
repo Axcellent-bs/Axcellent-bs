@@ -67,12 +67,25 @@ LLM을 쓰지 않고 회사 상태를 바꾸지 않는다(grade read). 숫자는
   코드 목록이 빈 값(예: 응답 안 함)은 인구가 없어 비율을 내지 않는다. 월 단위 표면
   population_source에 기준 달("YYYY-MM 기준")을 붙이고 근거에도 남긴다
   커넥터 오류는 status error와 이유. 인구를 지어내지 않는다
+- 고객 구성 지수(11/17, 화면 "우리 고객은 어느 층에 몰려 있나"): 커버 비율은 근거로 남기고
+  - buyer_share = 그 묶음 구매자 ÷ 모든 속성 값을 답한 구매자 합 (응답 안 함처럼 표 `codes`가 빈
+    값이 든 묶음은 분모에서도 빠진다)
+  - population_share = 그 묶음 인구 ÷ 인구가 붙은 모든 묶음 인구 합
+  - index = buyer_share ÷ population_share × 100. 숨긴 줄·응답 안 함·인구 없는 줄은 셋 다 None
+  - 비중의 분모(답한 구매자 합)가 buyers ÷ buyer_share로 드러나므로 "답한 묶음 전체 합"도 공개
+    합계로 보고 보완 숨김(`protect`)에 넣는다
+  - population_note: 묶음마다 합산한 구간을 KOSIS 응답의 분류 이름(C1_NM·C2_NM·ITM_NM)으로 적는다
+    ("20~24세 + 25~29세", 끝이 열린 구간이 들면 "50세 이상 합산"). 설정에 나이 범위를 적지 않는다
+  - population_source = "<표 이름> · 2026년 10월 말"(월별) 또는 "· 2025년"(연별). "기준"을 붙이지
+    않고 화면은 이 문자열 하나만 쓴다
+  - 요약 = 지수가 가장 높은 묶음과 가장 낮은 묶음
 """
 
 from __future__ import annotations
 
 import asyncio
 import itertools
+import re
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
@@ -976,11 +989,18 @@ def coverage_buyers(
     least = cfg.min_group_size
     combos = list(itertools.product(*(list(values[k]) for k in keys)))
     found = [counts.get(combo, 0) for combo in combos]
+    answered = answered_combos(pop, keys, combos)
+    groups = coverage_groups([len(values[k]) for k in keys])
+    if 0 < len(answered) < len(combos):
+        # 구성 지수(11/17): 비중의 분모(답한 구매자 합)가 buyers ÷ buyer_share로 계산되므로
+        # "답한 묶음 전체 합"도 공개된 합계로 본다 (보이는 비중 합으로 숨긴 칸을 풀 수 없게)
+        groups.append(list(answered))
     hidden = protect(  # 1차(기준 미만) + 2차 숨김 (줄·전체 합계로 계산되지 않게)
         found,
         {i for i, n in enumerate(found) if n < least},
-        coverage_groups([len(values[k]) for k in keys]),
+        groups,
     )
+    answered_total = sum(found[i] for i in answered)
     rows = []
     for i, combo in enumerate(combos):
         rows.append(
@@ -990,6 +1010,9 @@ def coverage_buyers(
                 buyers=None if i in hidden else found[i],
                 suppressed=i in hidden,
                 base_year=pop.base_year,
+                buyer_share=(
+                    ratio(found[i], answered_total) if i in answered and i not in hidden else None
+                ),
             )
         )
     out = MarketCoverageOutput(**{**common, "attribute_keys": keys}, rows=rows)
@@ -1002,6 +1025,21 @@ def _codes(raw: Any) -> list[str]:
     return [str(raw)] if raw not in (None, "") else []
 
 
+def answered_combos(
+    pop: PopulationSource, keys: Sequence[str], combos: Sequence[tuple[str, ...]]
+) -> set[int]:
+    """인구 통계에 있는 값으로만 된 묶음(위치). 표 설정 `codes`에서 코드 목록이 빈 값(예: 응답
+    안 함)이 하나라도 든 묶음은 뺀다. `codes`가 없으면 모든 묶음."""
+    codes = pop.table_ref.get("codes")
+    if not isinstance(codes, dict):
+        return set(range(len(combos)))
+    return {
+        i
+        for i, combo in enumerate(combos)
+        if all(_codes(codes.get(k, {}).get(c)) for k, c in zip(keys, combo, strict=True))
+    }
+
+
 async def population_for(
     pop: PopulationSource, rows: list[CoverageRow], kosis: KosisConnector
 ) -> list[CoverageRow]:
@@ -1009,7 +1047,11 @@ async def population_for(
     ref = pop.table_ref
 
     def all_rows(status: str, reason: str) -> list[CoverageRow]:
-        return [r.model_copy(update={"status": status, "reason": reason}) for r in rows]
+        # 인구가 없으면 비중·지수도 내지 않는다
+        return [
+            r.model_copy(update={"status": status, "reason": reason, "buyer_share": None})
+            for r in rows
+        ]
 
     if not ref:
         return all_rows("population_missing", POPULATION_MISSING)
@@ -1088,6 +1130,7 @@ def _attach(
                 itm if "itm" in used else "")  # fmt: skip
 
     table: dict[tuple[str, str, str], float] = {}
+    names: dict[str, dict[str, str]] = {d: {} for d in DIMS}  # 칸 → 코드 → KOSIS 분류 이름
     doubled = False
     for p in dated:
         if p.prd_de != latest or p.value is None:
@@ -1095,10 +1138,12 @@ def _attach(
         key = cell(p.c1, p.c2, p.itm_id)
         doubled = doubled or key in table
         table[key] = p.value
-    label = str(ref.get("label") or dated[0].tbl_nm or "KOSIS")
-    month = base_month(latest, str(ref.get("prd_se", "")))
-    if month:
-        label = f"{label} ({month} 기준)"
+        for dim, code, name in (("c1", p.c1, p.c1_nm), ("c2", p.c2, p.c2_nm),
+                                ("itm", p.itm_id, p.itm_nm)):  # fmt: skip
+            if name:
+                names[dim].setdefault(code, name)
+    label = source_text(str(ref.get("label") or dated[0].tbl_nm or "KOSIS"), latest,
+                        str(ref.get("prd_se", "")))  # fmt: skip
     year = pop.base_year or (int(latest[:4]) if latest[:4].isdigit() else None)
     out = []
     for r in rows:
@@ -1106,6 +1151,11 @@ def _attach(
         per_dim = {d: [""] for d in DIMS}
         for key, dim in dims.items():
             per_dim[dim] = _codes(codes.get(key, {}).get(r.values[key]))
+        bands = " · ".join(
+            note for key, dim in dims.items()
+            if len(per_dim[dim]) > 1
+            and (note := band_note([names[dim].get(c, "") for c in per_dim[dim]]))
+        )  # fmt: skip
         cells = [cell(*c) for c in itertools.product(per_dim["c1"], per_dim["c2"], per_dim["itm"])]
         if doubled:
             update |= {"status": "population_missing", "reason": DOUBLED}
@@ -1119,12 +1169,68 @@ def _attach(
         else:
             people = round(sum(table[c] for c in cells) * scale)
             update["population"] = people
+            update["population_note"] = bands  # 합산한 구간 (인구를 붙인 줄만)
             if r.buyers is not None and people > 0:
                 if r.buyers > people:
                     update |= {"status": "error", "reason": "구매자가 인구보다 많음 (설정 확인)"}
                 else:
                     update["coverage"] = round(r.buyers / people, 8)
+        if update.get("status", r.status) != "ok" or update.get("population") is None:
+            update["buyer_share"] = None  # 응답 안 함·인구 없는 줄은 비중·지수를 내지 않는다
         out.append(r.model_copy(update=update))
+    return with_index(out)
+
+
+def source_text(label: str, latest: str, prd_se: str) -> str:
+    """출처 한 줄: "<표 이름> · 2026년 10월 말"(월별) 또는 "<표 이름> · 2025년"(연별). "기준"을
+    붙이지 않는다(화면이 기준 해를 따로 붙이지 않고 이 문자열 하나만 쓴다)."""
+    month = base_month(latest, prd_se)
+    if month:
+        return f"{label} · {int(month[:4])}년 {int(month[5:])}월 말"
+    if len(latest) >= 4 and latest[:4].isdigit():
+        return f"{label} · {latest[:4]}년"
+    return label
+
+
+_BAND = re.compile(r"^\s*(\d+)\s*[-~]\s*(\d+)\s*세?\s*$")
+_OPEN = re.compile(r"^\s*(\d+)\s*(?:세\s*이상|세?\s*\+)\s*$")
+
+
+def band_note(names: Sequence[str]) -> str:
+    """합산한 인구 구간 이름 (KOSIS 분류 이름에서). "20 - 24세", "25 - 29세" → "20~24세 + 25~29세".
+    끝이 열린 구간(예: "100세 이상", "100+")이 들면 "50세 이상 합산". 이름이 없으면 빈 문자열."""
+    if not names or any(not n for n in names):
+        return ""
+    lows: list[int] = []
+    parts: list[str] = []
+    opened = False
+    for n in names:
+        if m := _BAND.match(n):
+            lows.append(int(m[1]))
+            parts.append(f"{int(m[1])}~{int(m[2])}세")
+        elif m := _OPEN.match(n):
+            lows.append(int(m[1]))
+            opened = True
+        else:
+            parts.append(n.strip())
+    if opened and lows:
+        return f"{min(lows)}세 이상 합산"
+    return " + ".join(parts)
+
+
+def with_index(rows: list[CoverageRow]) -> list[CoverageRow]:
+    """고객 구성 지수: population_share = 그 묶음 인구 ÷ 인구가 있는 묶음 인구 합,
+    index = buyer_share ÷ population_share × 100. 숨긴 줄·응답 안 함·인구 없는 줄은 셋 다 None.
+    분모는 인구가 붙은 모든 묶음(숨긴 묶음 포함, 응답 안 함은 인구가 없어 빠진다)의 합이다."""
+    total = sum(r.population for r in rows if r.population is not None)
+    out = []
+    for r in rows:
+        share = idx = None
+        if total > 0 and r.buyer_share is not None and r.population is not None:
+            share = round(r.population / total, 6)
+            idx = round(r.buyer_share / share * 100, 1) if share > 0 else None
+        out.append(r.model_copy(update={"population_share": share, "index": idx,
+                                        "buyer_share": r.buyer_share if share else None}))
     return out
 
 
@@ -1134,10 +1240,29 @@ def population_note(out: MarketCoverageOutput) -> str:
     return f"인구 {', '.join(sources)}" if sources else ""
 
 
+def topic(word: str) -> str:
+    """주제 조사: 마지막 글자에 받침이 있으면 "은", 없으면 "는". 한글이 아니면 "은(는)"."""
+    last = word.strip()[-1:] or " "
+    if "가" <= last <= "힣":
+        return f"{word}{'은' if (ord(last) - 0xAC00) % 28 else '는'}"
+    return f"{word}은(는)"
+
+
 def coverage_summary(out: MarketCoverageOutput) -> str:
     if out.status != "ok":
-        text = "시장 커버 비율 숫자를 내지 않음 — " + "; ".join(out.insufficient_reasons)
+        text = "고객 구성 지수 숫자를 내지 않음 — " + "; ".join(out.insufficient_reasons)
         return with_source(text, out.basis)
+    ranked = sorted((r for r in out.rows if r.index is not None),
+                    key=lambda r: (-(r.index or 0), r.label))  # fmt: skip
+    if ranked:
+        top = ranked[0]
+        text = (f"최근 365일 구매자 기준 고객 구성 지수: {topic(top.label)} 인구 비중보다 우리 "
+                f"고객 비중이 {(top.index or 0) / 100:.1f}배(지수 {top.index:.0f})")  # fmt: skip
+        if len(ranked) > 1:
+            low = ranked[-1]
+            text += (f", {topic(low.label)} {(low.index or 0) / 100:.1f}배(지수 "
+                     f"{low.index:.0f})로 가장 적음")  # fmt: skip
+        return with_source(text + ".", out.basis)
     measured = [r for r in out.rows if r.coverage is not None]
     if not measured:
         reasons = sorted({r.reason for r in out.rows if r.reason})
