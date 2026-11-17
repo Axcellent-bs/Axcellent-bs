@@ -210,7 +210,7 @@ def test_run_all_checks_running_before_start_and_no_longer_restarts_silently() -
     assert "export AX_GIT_COMMIT" in text
 
 
-# --- dejafix-proxy (8030): DejaFix 계정이 있을 때만 run_all이 같이 띄운다 ---------------------
+# --- dejafix-proxy (8030): 계정이 없어도 run_all이 띄운다 ---------------------
 
 RUN_ALL = BACKEND / "scripts" / "run_all.sh"
 DEJAFIX_LINE = "dejafix-proxy 8030 ax_dejafix_proxy.main:app"
@@ -255,32 +255,11 @@ def test_dejafix_proxy_is_in_apps_before_orchestrator() -> None:
     assert names[-1] == "orchestrator"  # 총괄은 여전히 맨 뒤 (부서 카드를 모은다)
 
 
-@pytest.mark.parametrize(
-    ("username", "started"),
-    [(None, False), ("", False), ("viewer-test", True)],
-)
-def test_dejafix_proxy_starts_only_with_a_username(username: str | None, started: bool) -> None:
-    """DEJAFIX_USERNAME이 없으면 띄울 목록에서 빼고 한 줄만 찍는다. 값은 출력하지 않는다."""
-    block = _between("# >>> dejafix-proxy 계정 확인", "# <<< dejafix-proxy 계정 확인")
-    apps = "\n".join(_apps())
-    env = {"RUN_APPS": apps} | ({} if username is None else {"DEJAFIX_USERNAME": username})
-    out = _run(f'{block}\nprintf "%s\\n" "$RUN_APPS" | awk "NF {{print \\$1}}"', env)
-    lines = out.splitlines()
-    others = [line.split()[0] for line in _apps() if not line.startswith("dejafix-proxy ")]
-    if started:
-        assert lines == [line.split()[0] for line in _apps()]
-    else:
-        assert lines[0] == "dejafix-proxy 안 띄움(DEJAFIX_USERNAME 없음)"
-        assert lines[1:] == others
-    if username:
-        assert username not in out
-
-
-def test_dejafix_proxy_block_keeps_only_list_without_it() -> None:
-    """--only로 고른 목록에 dejafix-proxy가 없으면 아무것도 찍지 않는다."""
-    block = _between("# >>> dejafix-proxy 계정 확인", "# <<< dejafix-proxy 계정 확인")
-    out = _run(f'{block}\nprintf "%s\\n" "$RUN_APPS"', {"RUN_APPS": "data 8106 svc_data.main:app"})
-    assert out.splitlines() == ["data 8106 svc_data.main:app"]
+def test_dejafix_proxy_starts_without_a_username() -> None:
+    """계정이 없어도 띄운다(연결 전 503). 보관함에서 연결하면 재시작 없이 쓴다."""
+    text = RUN_ALL.read_text(encoding="utf-8")
+    assert "DEJAFIX_USERNAME" not in text
+    assert "dejafix-proxy 안 띄움" not in text
 
 
 def test_health_check_uses_healthz_for_dejafix_proxy() -> None:
@@ -388,3 +367,78 @@ def test_shop_traffic_writes_its_real_pid(tmp_path: Path) -> None:
     assert procs.lock_pids([path]) == [os.getpid()]
     module.write_pid_file(None)  # 값이 없으면 아무것도 하지 않는다
     module.write_pid_file(str(tmp_path / "no" / "dir" / "x.json"))  # 적지 못해도 멈추지 않는다
+
+
+# --- SHOP_API_EXTERNAL=on: 따로 돌리는 판매 서버·가상 주문을 run_all.sh가 건드리지 않는다 ---
+
+EXT_BLOCK = ("# >>> 판매 서버 따로 돌리기", "# <<< 판매 서버 따로 돌리기")
+
+
+def _ext_run(env: dict[str, str], tmp_path: Path, dotenv: str | None = None) -> list[str]:
+    """블록을 tmp cwd(진짜 .env가 안 읽히게)에서 돌리고 APPS 이름과 스위치를 돌려준다."""
+    if dotenv is not None:
+        (tmp_path / ".env").write_text(dotenv, encoding="utf-8")
+    block = _between(*EXT_BLOCK)
+    snippet = (
+        f'cd "{tmp_path.as_posix()}"\nAPPS=$(cat <<\'EOF\'\n' + "\n".join(_apps()) + "\nEOF\n)\n"
+        f'{block}\necho "on=$SHOP_EXTERNAL_ON"\necho "$APPS" | awk "NF {{print \\$1}}"'
+    )
+    return _run(snippet, env).splitlines()
+
+
+def test_shop_api_external_off_keeps_everything(tmp_path: Path) -> None:
+    names = [line.split()[0] for line in _apps()]
+    for value in (None, "off", "", "0"):
+        env = {} if value is None else {"SHOP_API_EXTERNAL": value}
+        assert _ext_run(env, tmp_path) == ["on=0", *names]
+    assert "shop-api" in names
+
+
+@pytest.mark.parametrize("value", ["on", "1", "true"])
+def test_shop_api_external_on_drops_shop_api(value: str, tmp_path: Path) -> None:
+    names = [line.split()[0] for line in _apps() if not line.startswith("shop-api ")]
+    assert _ext_run({"SHOP_API_EXTERNAL": value}, tmp_path) == ["on=1", *names]
+
+
+def test_shop_api_external_is_read_from_dotenv(tmp_path: Path) -> None:
+    out = _ext_run({}, tmp_path, dotenv='X=1\r\nSHOP_API_EXTERNAL="on"  # 따로\r\n')
+    assert out[0] == "on=1" and "shop-api" not in out
+    out = _ext_run({}, tmp_path, dotenv="SHOP_API_EXTERNAL=off\n")
+    assert out[0] == "on=0" and "shop-api" in out
+
+
+def test_shop_api_external_env_wins_over_dotenv(tmp_path: Path) -> None:
+    out = _ext_run({"SHOP_API_EXTERNAL": "on"}, tmp_path, dotenv="SHOP_API_EXTERNAL=off\n")
+    assert out[0] == "on=1"
+
+
+def test_shop_api_external_on_is_not_owned_for_stop_or_markers(tmp_path: Path) -> None:
+    """on이면 PORTS에 8010, MARKERS에 shop-api·shop_traffic, 잠금에 traffic pid 파일이 없다."""
+    text = RUN_ALL.read_text(encoding="utf-8")
+    head = text[text.index('APPS="') : text.index("# --only 묶음 이름")]
+    head = head.replace('MARKERS=()', 'DATA=.data\nMARKERS=()', 1)
+    tail = (
+        '\necho "ports=$PORTS"\nprintf "%s\n" "${MARKERS[@]}"'
+        '\nprintf "%s\n" "${COLLECTOR_LOCKS[@]}"'
+    )
+    snippet = f'cd "{tmp_path.as_posix()}"\n{head}{tail}'
+    off = _run(snippet, {}).splitlines()
+    on = _run(snippet, {"SHOP_API_EXTERNAL": "on"}).splitlines()
+    assert "8010" in off[0] and "uvicorn ax_shop_api.main:app" in off and "shop_traffic.py" in off
+    assert any("shop_traffic.pid.json" in x for x in off)
+    assert "8010" not in on[0].split("=")[1].split(",")
+    assert "uvicorn ax_shop_api.main:app" not in on and "shop_traffic.py" not in on
+    assert not any("shop_traffic.pid.json" in x for x in on)
+    assert "uvicorn ax_safety.main:app" in on  # 나머지는 그대로
+
+
+def test_shop_api_external_on_skips_traffic_launch_and_prints_line(tmp_path: Path) -> None:
+    """shop-api가 RUN_APPS에 없으면 가상 주문 스위치는 조용하고, 시작 줄은 한 번 찍는다."""
+    block = _between(*TRAFFIC_BLOCK)
+    apps = "\n".join(line for line in _apps() if not line.startswith("shop-api "))
+    out = _run(f'{block}\necho "orders=$SHOP_TRAFFIC_ORDERS"', {"RUN_APPS": apps})
+    assert out.splitlines() == ["orders=0"]
+    text = RUN_ALL.read_text(encoding="utf-8")
+    line = "판매 서버(shop-api)는 밖에서 따로 돌아요(SHOP_API_EXTERNAL=on). 8010은 건드리지 않아요."
+    assert text.count(line) == 1
+    assert "AX_SHOP_API_URL" not in text[text.index(EXT_BLOCK[0]) : text.index(EXT_BLOCK[1])]

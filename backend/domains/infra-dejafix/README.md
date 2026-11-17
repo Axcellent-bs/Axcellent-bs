@@ -11,7 +11,13 @@
 - 롤백(`rollback_deployment`, B): 대상 버전(`to_version`)은 이력에서 코드로 고른다(롤백된 배포는 건너뜀). 요청에 다른 버전이 오면 거부한다.
   - 경로 판정용 정수 4개를 코드로 계산해 params에 넣는다: `suspect_count`·`low_confidence`·`irreversible_count`·`prior_rollbacks`. safety 기준표에서 하나라도 걸리면 C(사람 승인)
   - `execute(rollback_deployment)` → safety가 planning `verify_rollback_target`으로 교차검증 → `executed`면 자동 경로(`path: auto`), `held`면 `input-required` + `review_id`. 사람이 승인한 뒤 같은 요청을 다시 보내면 같은 `idempotency_key`로 `executed`를 받아 실행한다(`path: human_approved`)
-  - 시연의 "롤백"은 shop-api 장애 주입 해제(`DELETE /api/shop/admin/faults`)다
+  - 대상 서비스에 배포 도구 연결(공용 보관함 `github_actions`·`jenkins`)이 있으면, 관문을 통과한 뒤 그 도구로 `to_version`을 다시 배포한다(`deploy_tools.py`). GitHub Actions는 기본 브랜치로 `workflow_dispatch`(`inputs.<버전 입력>`), Jenkins는 `buildWithParameters?<버전 매개변수>=<버전>`. 띄운 뒤 끝날 때까지 기다리지 않는다(복구는 `verify_recovery`가 지표로 본다)
+  - 다시 배포가 실패하면(호출 오류·권한 없음·연결 확인 실패 상태, 도구 이력의 배포인데 연결을 못 읽음) 장애 해제 등 다른 길로 넘어가지 않는다: `failed` + outcome `redeploy_failed` + `handoff_steps`(사람이 할 처리 순서)
+  - 부르기 전에 막는 경우(`redeploy_failed` + `handoff_steps`): 대상 배포가 지금 연결된 그 도구의 이력이 아님(시연 이력·첫 받기 전·도구를 바꿈), 되돌아갈 버전이 커밋 앞자리(GitHub 실행 제목에 버전 없음)
+  - 연결이 없는 서비스의 시연 "롤백"은 지금처럼 shop-api 장애 주입 해제(`DELETE /api/shop/admin/faults`)·결제 설정 되돌리기다
+- 배포 이력 미리 받기(`deploy_poll.py`): 실제 모드에서 켤 때와 `INFRA_DEPLOY_POLL_SECONDS`(기본 120초)마다 연결된 배포 도구의 최근 실행 20개를 받아, 그 서비스의 시연 이력(`deployments.json`)을 도구의 **성공한** 실행으로 바꾼다. 진단은 받아 둔 이력을 바로 쓴다. 받기 실패·보관함이 깨지거나 사라짐은 로그만 남기고 이전 이력을 쓴다. 연결이 있는 서비스의 시연 이력은 첫 받기 전에도 쓰지 않는다(그동안 그 서비스는 원인 후보 없음). 도구 실행은 서비스 전체 배포라 시연 이력에서 그 서비스가 가진 구성요소를 모두 단다(구성요소를 모르는 서비스는 구성요소 진단의 후보가 아님)
+  - 버전 표시: Jenkins는 버전 매개변수 값. GitHub Actions 실행 목록에는 디스패치 입력이 없어 실행 제목(`display_title`)의 버전(`v2.4.1` 꼴) → 없으면 커밋 앞 7자리. 워크플로에 `run-name: Deploy ${{ inputs.version }}`을 두면 정확하다
+  - 우리가 롤백으로 띄운 실행은 남긴 기록(실행 id를 알면 그 id만, 모르거나 Jenkins 대기열 id면 같은 버전·기록 시각 뒤)과 맞춰 디스패치한 버전과 롤백 표시를 붙이고, 원인 후보로 보지 않는다
 - 장애 감시(`dejafix_watch.py`): `INFRA_DEJAFIX_URL`(DejaFix 읽기 전용 프록시 주소)이 있으면 `INFRA_DEJAFIX_POLL_SECONDS`(기본 30초)마다 DejaFix `GET /api/incidents?status=problem`을 읽는다. `component` 태그가 붙은 장애만 총괄에 `infra.anomaly_detected`로 알린다(`metric` 태그 → `metric_code`, 없으면 `zabbix_problem`). 태그가 없는 PC·호스트 장애는 DejaFix만 맡는다. 같은 장애는 한 번만 보낸다. Zabbix 쪽에서 감시 트리거에 `component=<부위>` 태그를 달아야 한다(DJF-02). `INFRA_DEJAFIX_COMPONENTS`(쉼표 구분, 예: `payment`)를 주면 그 부위만 보낸다. Zabbix 기본 Windows·Linux 템플릿이 PC 트리거에도 `component=memory`·`cpu` 태그를 달기 때문에, 시연처럼 결제 장애만 받을 때는 `payment`로 둔다(비우면 모든 부위)
 - 복구 확인(`verify_recovery`): 30초 간격 최대 5회(`INFRA_RECOVERY_ATTEMPTS`·`INFRA_RECOVERY_INTERVAL_S`). 인프라 지표(shop-api 장애 상태)와 업무 지표(data `anomaly_detection`: `payment_fail_rate`·`order_fail_count`)가 둘 다 정상이어야 `recovered`. 업무 지표를 못 받으면(`null`) 복구로 보지 않는다. 마감(`deadline`) 전에 멈춘다
 
@@ -20,7 +26,9 @@
 | 파일 | 내용 |
 | --- | --- |
 | `data/deployments.json` | shop-api 배포 이력 (planning 시드 PR #28 `shop-api v2.4.1`과 맞춤) |
-| `deployments.py` | 배포 이력 읽기, 직전 정상 배포 찾기, 롤백 표시 |
+| `deployments.py` | 배포 이력 읽기, 직전 정상 배포 찾기, 롤백 표시, 도구 이력으로 바꾸기 |
+| `deploy_tools.py` | 배포 도구 어댑터(GitHub Actions·Jenkins): 최근 실행 읽기, 다시 배포 |
+| `deploy_poll.py` | 배포 이력 미리 받기 (실제 모드, 주기 실행) |
 | `diagnosis.py` | 원인 후보·확신도 규칙 |
 | `clients.py` | shop-api·data 호출 (URL이 없으면 목) |
 | `runtime.py` | 프로세스 메모리 상태 (진단 결과, 실행한 롤백) |
@@ -42,7 +50,7 @@ A2A (`POST /a2a`, `agent-card.json` → `/.well-known/agent-card.json`). 입출�
 | skill | 등급 | 요청 가능 | 입력 → 출력 |
 | --- | --- | --- | --- |
 | `diagnose_incident` | read | orchestrator, marketing, support | `DiagnoseIncidentInput` → `DiagnoseIncidentOutput`. evidence `ref_ids`는 `deploy:<deploy_id>` |
-| `rollback_deployment` | B (검증 planning) | orchestrator | `RollbackDeploymentParams` → `{rolled_back_to, path, fault_released, post_check_ok}`. 보류면 `input-required` + `{review_id, hold_reason}`, 거절은 `completed` + outcome `rejected`, safety 무응답은 `failed` + `safety_unavailable`. 멱등 키 `<context_id>:rollback_deployment:<service>:<from_version>` |
+| `rollback_deployment` | B (검증 planning) | orchestrator | `RollbackDeploymentParams` → `{rolled_back_to, path, fault_released, post_check_ok}`. 배포 도구로 다시 배포했으면 `redeploy: {tool, run_id, url}`(`post_check_ok` 없음, 복구는 `verify_recovery`), 다시 배포 실패는 `failed` + outcome `redeploy_failed` + `{message, handoff_steps}`. 보류면 `input-required` + `{review_id, hold_reason}`, 거절은 `completed` + outcome `rejected`, safety 무응답은 `failed` + `safety_unavailable`. 멱등 키 `<context_id>:rollback_deployment:<service>:<from_version>` |
 | `verify_recovery` | read | orchestrator | `VerifyRecoveryInput` → `VerifyRecoveryOutput`. outcome `recovered` / `not_recovered` |
 
 safety로 보내는 params: 계약 필드 + 정수 4개 + `deployed_at` + `incident_opened_at`. dev 교차검증이 이 두 시각을 쓴다. `incident_opened_at`은 요청에 있으면 그 값, 없으면 총괄 사건 기록(`GET /api/incidents`)에서 읽는다(못 읽으면 비워 두고 교차검증이 판정하지 않아 보류).
@@ -51,10 +59,12 @@ safety로 보내는 params: 계약 필드 + 정수 4개 + `deployed_at` + `incid
 - ax-contracts, ax-agent-template
 - safety(실행 관문), planning(`verify_rollback_target`, safety가 부름)
 - shop-api `/api/shop/admin/faults` (토큰 `infra`), data `anomaly_detection`
+- 공용 도구 연결 보관함(`AX_TOOL_CONNECTIONS_FILE`, 쓰기는 dashboard-api): `github_app`·`github_actions`·`jenkins`
 
 ## 5. 하지 않는 것
 - 원인·확신도·경로를 LLM으로 정하지 않는다. 등급(B/C)은 safety 기준표가 정한다
-- 운영 서버에 셸·SSH로 접속하거나 배포 도구를 직접 부르지 않는다. 시연 롤백은 장애 주입 해제뿐이다
+- 운영 서버에 셸·SSH로 접속하지 않는다. 배포 도구는 공용 보관함에 연결된 것(GitHub Actions·Jenkins)만, 관문을 통과한 롤백의 다시 배포로만 부른다. 연결이 없는 서비스의 시연 롤백은 장애 주입 해제·결제 설정 되돌리기뿐이다
+- 다시 배포가 끝날 때까지 기다리거나, 실패했을 때 다른 조치로 넘어가지 않는다 (사람에게 처리 순서를 넘긴다)
 - 사람 승인을 대신하지 않는다. C는 보류 큐에서 사람이 결정한다
 - 복구 예상 시각을 추정하지 않는다
 - 미결: 계약 `to_version` 선택 필드화, 롤백 출력 계약, safety 기준표 4개 규칙(사람 PR), Zabbix 결제 API 감시 등록과 `component` 태그(DJF-02)

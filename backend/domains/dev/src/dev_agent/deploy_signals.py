@@ -1,6 +1,7 @@
 """배포 후 확인 신호원. 작은 인터페이스 뒤에 두고 목 기본값을 쓴다.
 
-- DejaFix 장애: `GET {PLANNING_DEJAFIX_API_URL}/api/incidents?status=problem` (읽기).
+- DejaFix 장애: `GET {주소}/api/incidents?status=problem` (읽기). 주소는
+  `PLANNING_DEJAFIX_API_URL` → 보관함의 dejafix(dejafix-proxy) 순서로 찾는다.
   응답 필드 이름이 정해지지 않아 여러 이름을 받는다. 못 읽으면 `unavailable` 신호를 남긴다.
 - data `anomaly_detection`(read): 목 모드가 아닐 때만 부른다.
 - 목 신호원: 시드 사건(ctx_inc_0001)과 같은 고정 신호를 돌려준다.
@@ -8,7 +9,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -17,6 +17,7 @@ import httpx
 from pydantic import ValidationError
 
 from ax_agent_template import config as template_config
+from ax_agent_template import tool_connections
 from ax_agent_template.client import call_agent
 from ax_contracts.schemas import (
     TENANT_ID_DEFAULT,
@@ -232,14 +233,15 @@ class CombinedSource:
 
 def default_source(mock: SignalSource) -> SignalSource:
     """목 모드이고 DejaFix 주소가 없으면 목 신호원. 아니면 DejaFix + data."""
-    url = os.getenv(DEJAFIX_URL_ENV, "").strip()
+    # PLANNING_DEJAFIX_API_URL → 보관함에 dejafix가 있으면 dejafix-proxy 주소 → 없음
+    url = tool_connections.dejafix_proxy_url(DEJAFIX_URL_ENV) or ""
     if template_config.is_mock("planning") and not url:
         return mock
     sources: list[tuple[str, SignalSource]] = []
     if url:
         sources.append(("dejafix", DejaFixIncidentSource(url)))
     else:
-        sources.append(("dejafix", _Missing(f"{DEJAFIX_URL_ENV} 없음")))
+        sources.append(("dejafix", _Missing(f"{DEJAFIX_URL_ENV}·도구 연결(dejafix) 없음")))
     sources.append(("data", DataAnomalySource()))
     return CombinedSource(sources)
 

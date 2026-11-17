@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from ax_agent_template import config
+from ax_agent_template import tool_connections as tc
 from ax_agent_template.testing import reset_state  # noqa: F401  autouse, 템플릿 상태 초기화
 from ax_contracts.schemas import ExecuteDecision
 from infra_agent import handlers
@@ -34,6 +35,9 @@ def runtime(monkeypatch: pytest.MonkeyPatch, reset_state: None) -> Runtime:  # n
     monkeypatch.delenv("AX_SAFETY_URL", raising=False)
     monkeypatch.delenv("AX_SHOP_API_URL", raising=False)
     monkeypatch.delenv("AX_DATA_URL", raising=False)
+    # 개발자 PC의 도구 연결 보관함을 읽지 않는다 (배포 도구 시험은 각자 보관함을 만든다)
+    monkeypatch.delenv(tc.FILE_ENV, raising=False)
+    tc._cache = None
     config.set_agent_name("infra")
     clock = {"now": NOW}
     return set_runtime(

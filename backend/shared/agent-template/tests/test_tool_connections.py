@@ -150,3 +150,22 @@ def test_failed_write_removes_tmp(vault: Path, monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(OSError):
         _save()
     assert not vault.with_name(vault.name + ".tmp").exists()
+
+
+def test_dejafix_proxy_url_env_then_vault_then_none(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("X_DEJAFIX_URL", raising=False)
+    monkeypatch.delenv("AX_DEJAFIX_PROXY_URL", raising=False)
+    assert tc.dejafix_proxy_url("X_DEJAFIX_URL") is None
+    tc.upsert(
+        "dejafix",
+        "장애",
+        {"url": "http://df.local", "username": "v"},
+        {"password": "pw"},
+        conn_id=None,
+        by="tester",
+    )
+    assert tc.dejafix_proxy_url("X_DEJAFIX_URL") == "http://dejafix-proxy:8030"
+    monkeypatch.setenv("X_DEJAFIX_URL", " http://env.test/ ")
+    assert tc.dejafix_proxy_url("X_DEJAFIX_URL") == "http://env.test"

@@ -5,6 +5,7 @@
 #   bash backend/scripts/run_all.sh stop     # 이 스크립트가 띄운 것 끄기 (자식까지, 끝에 "남은 프로세스 0개" 확인)
 #   bash backend/scripts/run_all.sh reset    # 끄고 테스트로 쌓인 기록(.data·이벤트 버스)을 지운다
 #   bash backend/scripts/run_all.sh --only data,finance,shop-api   # 고른 서버만 (이름은 아래 APPS)
+#   SHOP_API_EXTERNAL=on bash backend/scripts/run_all.sh   # 판매 서버(shop-api 8010)·가상 주문은 안 띄우고 stop도 8010을 안 건드린다 (.env에 적어도 됨)
 #   bash backend/scripts/run_all.sh --only data-demo              # 묶음: core, data-demo (아래 GROUP_*)
 #     안 띄운 서비스는 AX_ENABLED_SERVICES에서도 빠진다(이미 줬으면 교집합). stop은 늘 전체 포트를 끈다
 # 먼저 backend/ 에서 `uv sync --all-packages` 한 번. 로그는 backend/.logs/<이름>.log
@@ -47,16 +48,30 @@ orchestrator 8000 ax_orchestrator.main:app
 "
 # 접어 둔 서비스(띄우지 않고 켠 서비스에서도 뺀다). 되살리려면 위 APPS에 줄을 되돌리고 여기서 뺀다
 FOLDED="handover"
+# >>> 판매 서버 따로 돌리기 (tests/test_run_all_procs.py가 이 부분만 실행한다)
+# SHOP_API_EXTERNAL=on(1·true)이면 캣북스 판매 서버(shop-api, 8010)를 서버에서 따로 돌린다고 보고,
+# 이 스크립트는 그 서버도 가상 주문(shop_traffic)도 띄우지 않는다. APPS에서 빼므로 stop·reset도
+# 8010 포트를 끄지 않고 shop-api·shop_traffic 표식도 찾지 않는다. 환경변수가 없으면 backend/.env에서 읽는다
+if [ -z "${SHOP_API_EXTERNAL:-}" ] && [ -f .env ]; then
+  SHOP_API_EXTERNAL=$(tr -d '\r' < .env | sed -n 's/^SHOP_API_EXTERNAL=//p' | tail -n 1 | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
+fi
+SHOP_EXTERNAL_ON=0
+case "${SHOP_API_EXTERNAL:-off}" in
+  on | 1 | true) SHOP_EXTERNAL_ON=1; APPS=$(echo "$APPS" | awk 'NF && $1 != "shop-api"') ;;
+esac
+# <<< 판매 서버 따로 돌리기
 PORTS=$(echo "$APPS" | awk 'NF {print $2}' | tr '\n' ',' | sed 's/,$//')
 # 이 스크립트가 띄우는 프로세스를 명령줄로 알아보는 표식 (scripts/procs.py: 이미 떠 있는지·끈 뒤 남았는지)
 MARKERS=()
 while read -r _ _ module; do
   [ -n "${module:-}" ] && MARKERS+=("uvicorn $module")
 done <<< "$APPS"
-MARKERS+=("data_agent.trending_collect" "data_agent.youtube_collect" "data_agent.sales_collect" "shop_traffic.py")
+MARKERS+=("data_agent.trending_collect" "data_agent.youtube_collect" "data_agent.sales_collect")
+[ "$SHOP_EXTERNAL_ON" = 1 ] || MARKERS+=("shop_traffic.py")
 # 가상 주문(shop_traffic.py)도 자기 실제 pid를 같은 모양으로 적는다 (.pid의 bash 번호만으로는 못 끌 때가 있어서)
 TRAFFIC_PID_FILE="$DATA/shop_traffic.pid.json"
 COLLECTOR_LOCKS=("$DATA/youtube_collect.lock" "$DATA/trending_collect.lock" "$DATA/sales_collect.lock" "$TRAFFIC_PID_FILE")
+[ "$SHOP_EXTERNAL_ON" = 1 ] && COLLECTOR_LOCKS=("${COLLECTOR_LOCKS[@]:0:3}")
 
 # --only 묶음 이름 (data-demo = core + data 업무 리포트가 부르는 서비스)
 GROUP_core="safety,memory,shop-api,dashboard-api,orchestrator"
@@ -306,14 +321,8 @@ for v in LLM_MODEL LLM_BASE_URL LLM_API_KEY; do
 done
 [ -n "${EMBED_MODEL:-}" ] || echo "경고: EMBED_MODEL 이 없습니다. 회사 기억(memory) 검색이 실패합니다 (예: gemini-embedding-001)." >&2
 
-# >>> dejafix-proxy 계정 확인 (tests/test_run_all_procs.py가 이 부분만 실행한다)
-# DejaFix 계정(.env의 DEJAFIX_USERNAME)이 없으면 띄우지 않는다. 띄우면 DejaFix가 없는 PC에서
-# 로그인 실패만 쌓인다. 계정·비밀번호 값은 출력하지 않는다
-if [ -z "${DEJAFIX_USERNAME:-}" ] && echo "$RUN_APPS" | awk '$1 == "dejafix-proxy" {found=1} END {exit !found}'; then
-  RUN_APPS=$(echo "$RUN_APPS" | awk 'NF && $1 != "dejafix-proxy"')
-  echo "dejafix-proxy 안 띄움(DEJAFIX_USERNAME 없음)"
-fi
-# <<< dejafix-proxy 계정 확인
+# dejafix-proxy는 계정이 없어도 띄운다. 연결 전에는 503 DEJAFIX_NOT_CONNECTED만 돌려주고,
+# 화면의 도구 연결에서 DejaFix를 저장하면 재시작 없이 쓴다.
 
 # 안 띄운 서비스는 켠 서비스에서도 뺀다 (라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다).
 # --only로 뺀 서비스와 접어 둔 서비스(FOLDED)가 대상이다. 이미 AX_ENABLED_SERVICES를 줬으면 둘의 교집합이다
@@ -421,6 +430,7 @@ token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
 } > "$DATA/web.env"
 
 RUN_COUNT=$(echo "$RUN_APPS" | awk 'NF' | wc -l | tr -d ' ')
+[ "$SHOP_EXTERNAL_ON" = 1 ] && echo "판매 서버(shop-api)는 밖에서 따로 돌아요(SHOP_API_EXTERNAL=on). 8010은 건드리지 않아요."
 echo "띄운 서버 ${RUN_COUNT}개: $(echo "$RUN_APPS" | awk 'NF {print $1}' | tr '\n' ' ' | sed 's/ $//'), 안 띄움: ${SKIPPED:-없음}"
 
 started=0
