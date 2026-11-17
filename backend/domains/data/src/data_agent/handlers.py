@@ -126,7 +126,7 @@ from data_agent.planning_questions import answer_question
 from data_agent.report_store import ReportStore, get_report_store
 from data_agent.response_cache import DB_ENV as RESPONSES_DB_ENV
 from data_agent.response_cache import ResponseCache
-from data_agent.sales_cache import stamp
+from data_agent.sales_cache import mark, stamp
 from data_agent.sales_store import DB_ENV as SALES_DB_ENV
 from data_agent.sales_store import DEFAULT_DB as SALES_DEFAULT_DB
 from data_agent.sales_store import SalesStore
@@ -442,7 +442,7 @@ async def sales_analysis(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        output=out.model_dump(mode="json"),
+        output=mark(out, got).model_dump(mode="json"),
         evidence=stamp(sales_evidence(out, now), got),
     )
 
@@ -471,7 +471,7 @@ async def segment_options(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        output=out.model_dump(mode="json"),
+        output=mark(out, got).model_dump(mode="json"),
         evidence=stamp(Evidence(
             queries=["catalog.sales", "sales_store.sync_state"],
             data_summary=extra,
@@ -525,7 +525,7 @@ async def segment_profile(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        output=out.model_dump(mode="json"),
+        output=mark(out, got).model_dump(mode="json"),
         evidence=stamp(segment_analysis.evidence(out.basis, now), got),
     )
 
@@ -553,7 +553,7 @@ async def segment_favorites(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        output=out.model_dump(mode="json"),
+        output=mark(out, got).model_dump(mode="json"),
         evidence=stamp(ev, got),
     )
 
@@ -575,7 +575,7 @@ async def basket_pairs_skill(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        output=out.model_dump(mode="json"),
+        output=mark(out, got).model_dump(mode="json"),
         evidence=stamp(segment_analysis.evidence(out.basis, now, f"쌍 단위 {data.level}"), got),
     )
 
@@ -601,7 +601,7 @@ async def market_coverage(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        output=out.model_dump(mode="json"),
+        output=mark(out, got).model_dump(mode="json"),
         evidence=stamp(ev, got),
     )
 
@@ -623,7 +623,7 @@ async def retention_skill(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        output=out.model_dump(mode="json"),
+        output=mark(out, got).model_dump(mode="json"),
         evidence=stamp(retention.evidence_of(out, now, cat.sales), got),
     )
 
@@ -644,7 +644,7 @@ async def channel_value_skill(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        output=out.model_dump(mode="json"),
+        output=mark(out, got).model_dump(mode="json"),
         evidence=stamp(channel_value.evidence_of(out, excluded, now), got),
     )
 
@@ -753,7 +753,7 @@ async def event_proposal_skill(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        output=run.output.model_dump(mode="json"),
+        output=(mark(run.output, kept[0]) if kept else run.output).model_dump(mode="json"),
         evidence=stamp(run.evidence, kept[0]) if kept else run.evidence,
         fallback=run.fallback,
         fallback_reason=run.fallback_reason,

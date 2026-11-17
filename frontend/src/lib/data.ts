@@ -213,6 +213,10 @@ export interface SalesBasis {
   rows_read: number; last_synced_at: string | null; catalog_id: string; catalog_version: string | null;
   /** 값이 있으면 가짜 원천(데모용)으로 채운 저장소 (예: "가짜 데이터(데모용)"). 실제 판매 서버면 null */
   data_source?: string | null;
+  /** 이 답을 계산한 시각 (결과 캐시, 11/17) */
+  computed_at?: string | null;
+  /** 판매 기록이 바뀌기 전 예전 결과를 먼저 준 것 (새 계산이 뒤에서 도는 중) */
+  stale?: boolean;
 }
 
 // ---- 고객·시장 분석 (11/16, 계약 #1116 + segment_options). 숫자는 서버 값 그대로
