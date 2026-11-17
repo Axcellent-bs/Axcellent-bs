@@ -22,6 +22,7 @@ from ax_contracts.data_access.shop_sales import SalesOrderLine, SalesOrderRow
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
 from ax_contracts.schemas.data import (
     CampaignResultOutput,
+    ChannelValueOutput,
     EventProposalOutput,
     EventProposalSendOutput,
     MarketCoverageOutput,
@@ -324,4 +325,35 @@ def test_retention_with_game_company(game: dict) -> None:
     top = out.at_risk[0]
     assert (top.label, top.regulars, top.at_risk, top.top_item_label) == (
         "성인 플레이어 · PC", 6, 6, "롤플레잉")
+    _no_catbooks_words(out.model_dump(mode="json"))
+
+
+def test_channel_value_with_game_company(game: dict) -> None:
+    """게임사 유입 출처 이름으로: 120일 전 앱스토어로 처음 결제한 6명의 90일 가치."""
+    now: datetime = game["now"]
+    store = handlers.get_sales_store()
+    rows = [
+        SalesOrderRow(
+            order_id=f"cv{i}_{k}", buyer_id=f"cv{i}", status="paid", created_at=when,
+            updated_at=when, items_amount=33000, payment_status="succeeded",
+            src_source="appstore" if k == 0 else None,
+            lines=[SalesOrderLine(product_id="rpg_pack", category_code="game_item",
+                                  title="rpg pack", qty=1, unit_price=33000, genre_code="rpg")],
+        )
+        for i in range(6)
+        for k, when in enumerate([now - timedelta(days=120), now - timedelta(days=100)])
+    ]  # fmt: skip
+    store.upsert(TENANT, rows, now)
+    store.upsert_customers(TENANT, [
+        CustomerRow(buyer_id=f"cv{i}", joined_at=now - timedelta(days=200),
+                    updated_at=now - timedelta(days=200), attributes={})
+        for i in range(6)
+    ], now)  # fmt: skip
+    result = run(handlers.channel_value_skill(_request("channel_value")))
+    out = ChannelValueOutput.model_validate(_ok(result))
+    assert out.status == "ok", out.insufficient_reasons
+    shown = [r for r in out.rows if not r.suppressed]
+    assert [(r.label, r.new_customers, r.revenue_per_customer, r.repeat_rate) for r in shown] == [
+        ("앱스토어 검색", 6, 66000, 1.0)]
+    assert result.evidence and "뺀 새 고객 30명" in result.evidence.data_summary  # 최근 첫 결제
     _no_catbooks_words(out.model_dump(mode="json"))

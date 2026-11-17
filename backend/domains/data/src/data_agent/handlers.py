@@ -59,6 +59,7 @@ from ax_contracts.schemas.data import (
     BriefRegenBlocked,
     CampaignEffectInput,
     CampaignResultOutput,
+    ChannelValueInput,
     ContentRecommendRequest,
     DataChatListInput,
     DataChatListOutput,
@@ -120,6 +121,7 @@ from data_agent.sales_store import DB_ENV as SALES_DB_ENV
 from data_agent.sales_store import DEFAULT_DB as SALES_DEFAULT_DB
 from data_agent.sales_store import SalesStore
 from data_agent.skills import (
+    channel_value,
     event_proposal,
     retention,
     segment_analysis,
@@ -577,6 +579,27 @@ async def retention_skill(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=retention.evidence_of(out, now, cat.sales),
+    )
+
+
+async def channel_value_skill(request: AgentRequest) -> AgentResult:
+    """첫 구매 유입 경로별 새 고객의 value_horizon_days 동안 1인 매출·주문·재구매 (SQL 집계)."""
+    data = _parse(request, ChannelValueInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    cat = metric_catalog.current()
+    now = datetime.now(UTC)
+    out, excluded = await asyncio.to_thread(
+        channel_value.channel_value, get_sales_store(), data.tenant_id, data.period, cat.sales,
+        cat.id, now,
+    )  # fmt: skip
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=channel_value.evidence_of(out, excluded, now),
     )
 
 
@@ -1920,6 +1943,7 @@ HANDLERS = {
     "segment_favorites": segment_favorites,
     "market_coverage": market_coverage,
     "retention": retention_skill,
+    "channel_value": channel_value_skill,
     "event_proposal": event_proposal_skill,
     "event_proposal_send": event_proposal_send,
     "root_cause_hypotheses": root_cause_hypotheses,
