@@ -1,5 +1,6 @@
 import { finance, krw, signedKrw, type BudgetDecision, type CampaignVerdict } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
+import { Link } from "@/lib/nav";
 import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
 // ⑥ 캠페인 예산: 마케팅이 보낸 성과를 수수료 기준 손익으로 적고, 예산 요청에 의견을 낸다(승인·반려는 하지 않는다).
@@ -16,6 +17,26 @@ const DECISION: Record<BudgetDecision, { label: string; tone: string }> = {
   conditional: { label: "줄여서 권장", tone: TONE.warn },
   rejected: { label: "권하지 않음", tone: TONE.bad },
 };
+// 칸마다 숫자가 어디서 오고 어디로 가는지. 기록이 비어 있을 때도 어느 화면에서 채워지는지 보이게 한다
+type Wire = { label: string; href: string };
+const W = {
+  marketing: { label: "마케팅 AI · 캠페인", href: "/marketing/campaign" },
+  dataPerf: { label: "데이터 AI · 트렌드 > 성과", href: "/data/trend#result" },
+  planning: { label: "기획 AI · 기획 제안", href: "/planning/proposals" },
+  orchestrator: { label: "총괄 AI · 재무가 낸 의견", href: "/orchestrator#orch-finance" },
+  safety: { label: "안전 장치 · 사람 결정 대기", href: "/safety" },
+} satisfies Record<string, Wire>;
+function Wiring({ from, to }: { from: Wire[]; to?: Wire[] }) {
+  const links = (xs: Wire[]) => xs.map((x, i) => (
+    <span key={x.href}>{i > 0 && " · "}<Link href={x.href} className="font-medium text-brand-700 underline">{x.label}</Link></span>
+  ));
+  return (
+    <span className="mt-1 block text-xs text-ink-500">
+      받는 곳: {links(from)}{to && to.length > 0 && <> <span aria-hidden>→</span> 보내는 곳: {links(to)}</>}
+    </span>
+  );
+}
+
 const pct = (v: number | null) => (v === null ? "-" : `${(v * 100).toFixed(1)}%`);
 
 export function CampaignsSection({ tick }: { tick: number }) {
@@ -24,7 +45,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
   return (
     <div className="space-y-4">
       <Panel id="campaign-pnl" title="캠페인 손익" meta={view.env?.meta}
-        hint="회사 매출은 판매액이 아니라 수수료입니다. 손익 = 판매액의 수수료 − 광고비 − 제작비 − 회사 부담 쿠폰 − PG 수수료. 효율 판단은 이 단기 손익으로 하고, 재구매 포함 손익은 참고로만 보여 줍니다. ROI(투자 대비 수익률)는 손익 ÷ 쓴 돈으로, 100만 원을 써서 20만 원이 남으면 20%입니다. ROAS는 광고비 1원당 판매액입니다.">
+        hint={<>회사 매출은 판매액이 아니라 수수료입니다. 손익 = 판매액의 수수료 − 광고비 − 제작비 − 회사 부담 쿠폰 − PG 수수료. 효율 판단은 이 단기 손익으로 하고, 재구매 포함 손익은 참고로만 보여 줍니다. ROI(투자 대비 수익률)는 손익 ÷ 쓴 돈으로, 100만 원을 써서 20만 원이 남으면 20%입니다. ROAS는 광고비 1원당 판매액입니다.<Wiring from={[W.marketing, W.dataPerf]} /></>}>
         <ResourceBody res={view}>
           {(v) => (
             <div className="space-y-3">
@@ -80,7 +101,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
       </Panel>
 
       <Panel id="campaign-categories" title="콘텐츠 카테고리별 제작비"
-        hint="쇼츠·릴스를 카테고리(예: 아재개그·몸개그)별로 묶어 조회당 제작비를 봅니다. 조회수는 데이터 AI가 잰 게시 7일 값만 쓰고, 7일이 안 된 영상은 측정 중으로 셉니다. 다음 회차 제안은 재무 의견이고, 비중은 기획·마케팅과 사람이 정합니다.">
+        hint={<>쇼츠·릴스를 카테고리(예: 아재개그·몸개그)별로 묶어 조회당 제작비를 봅니다. 조회수는 데이터 AI가 잰 게시 7일 값만 쓰고, 7일이 안 된 영상은 측정 중으로 셉니다. 다음 회차 제안은 재무 의견이고, 비중은 기획·마케팅과 사람이 정합니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.planning]} /></>}>
         <ResourceBody res={view}>
           {(v) => {
             const rows = v.categories ?? [];
@@ -119,10 +140,10 @@ export function CampaignsSection({ tick }: { tick: number }) {
       </Panel>
 
       <Panel id="campaign-reviews" title="예산 의견 (재무)"
-        hint="재무는 비용을 승인하거나 반려하지 않습니다. 마케팅의 캠페인 예산 요청에 남은 예산, 연속 적자, 이달 손실, 현금 흐름, 실패 이력을 근거로 의견만 냅니다. 집행 여부는 안전 장치의 금액 기준(건당·하루 합계)과 사람이 정합니다. 쿠폰과 환불은 보지 않습니다.">
+        hint={<>재무는 비용을 승인하거나 반려하지 않습니다. 마케팅의 캠페인 예산 요청에 남은 예산, 연속 적자, 이달 손실, 현금 흐름, 실패 이력을 근거로 의견만 냅니다. 집행 여부는 안전 장치의 금액 기준(건당·하루 합계)과 사람이 정합니다. 쿠폰과 환불은 보지 않습니다.<Wiring from={[W.marketing]} to={[W.marketing, W.safety]} /></>}>
         <ResourceBody res={view}>
           {(v) => {
-            if (v.reviews.length === 0) return <Empty>아직 예산 요청이 없습니다.</Empty>;
+            if (v.reviews.length === 0) return <Empty>아직 예산 요청이 없습니다. 마케팅 AI 화면에서 캠페인 예산을 요청하면 재무 의견이 여기에 적힙니다.</Empty>;
             // 같은 캠페인은 가장 최근 의견 한 줄만 보이고, 앞선 의견은 건수로만 (reviews는 최근 순)
             const latest = new Map<string, { r: (typeof v.reviews)[number]; earlier: number }>();
             for (const r of v.reviews) {
@@ -158,6 +179,24 @@ export function CampaignsSection({ tick }: { tick: number }) {
               </ul>
             );
           }}
+        </ResourceBody>
+      </Panel>
+
+      <Panel id="campaign-opinions" title="총괄 AI에 낸 의견" hint={<>재무가 총괄 AI에 보낸 의견입니다. 세 경우에 보냅니다: 위 예산 의견이 "줄여서 권장"·"권하지 않음"일 때, 캠페인 결과의 효율(좋음·보통·나쁨)이 정해지거나 바뀔 때, 아래 재무 인사이트가 새로 생길 때. 총괄 AI 화면의 "재무가 낸 의견" 칸에 그대로 보입니다. 못 보내면 전달 대기로 남고 자동으로 다시 보냅니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.orchestrator]} /></>}>
+        <ResourceBody res={view}>
+          {(v) => v.opinions.length === 0 ? <Empty>아직 낸 의견이 없습니다. 마케팅이 캠페인 예산을 요청하거나 결과를 보내면 생깁니다.</Empty> : (
+            <ul className="space-y-2 text-sm text-ink-700">
+              {v.opinions.slice(0, 20).map((row) => (
+                <li key={row.opinion.opinion_id}>
+                  <p className="flex flex-wrap items-center gap-2">
+                    <Chip label={row.status === "delivered" ? "전달됨" : "전달 대기"} tone={row.status === "delivered" ? TONE.ok : TONE.warn} />
+                    {row.opinion.campaign_name ?? "재무 인사이트"} · {shortDateTime(row.opinion.submitted_at)}
+                  </p>
+                  <p>{row.opinion.recommendation}</p>
+                </li>
+              ))}
+            </ul>
+          )}
         </ResourceBody>
       </Panel>
 
@@ -205,33 +244,15 @@ export function CampaignsSection({ tick }: { tick: number }) {
         </ResourceBody>
       </Panel>
 
-      <Panel id="campaign-planning" title="기획 AI에 보낸 재배분 의견" hint="카테고리 제작비를 옮기자는 재무 의견은 기획 AI에도 A2A로 보냅니다. 기획이 이 근거로 다음 회차 비중을 제안(PROP)하고 사람이 확인합니다. 못 보내면 전달 대기로 남고 자동으로 다시 보냅니다.">
+      <Panel id="campaign-planning" title="기획 AI에 보낸 재배분 의견" hint={<>위 "콘텐츠 카테고리별 제작비"에서 한 카테고리의 조회당 제작비가 다른 카테고리의 2배 이상이면, 비싼 쪽 제작비의 30%를 싼 쪽으로 옮기자는 재무 의견을 기획 AI에 보냅니다(전체 제작비는 그대로). 기획 AI가 이걸 받아 "기획 제안"을 만들고, 다음 회차 비중은 기획·마케팅과 사람이 정합니다. 못 보내면 전달 대기로 남고 자동으로 다시 보냅니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.planning]} /></>}>
         <ResourceBody res={view}>
-          {(v) => (v.planning_insights ?? []).length === 0 ? <Empty>아직 기획에 보낸 의견이 없습니다.</Empty> : (
+          {(v) => (v.planning_insights ?? []).length === 0 ? <Empty>아직 기획에 보낸 의견이 없습니다. 카테고리 두 개 이상에 7일 조회수가 모이고 조회당 제작비 차이가 2배를 넘으면 생깁니다.</Empty> : (
             <ul className="space-y-2 text-sm text-ink-700">
               {(v.planning_insights ?? []).slice(0, 10).map((row) => (
                 <li key={row.insight.insight_id} className="flex flex-wrap items-center gap-2">
                   <Chip label={row.status === "delivered" ? "전달됨" : "전달 대기"} tone={row.status === "delivered" ? TONE.ok : TONE.warn} />
                   {row.insight.title}
                   {row.proposal_id && <span className="text-ink-500">· 기획 제안 {row.proposal_id}{row.outcome === "duplicate" ? " (이미 받음)" : ""}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </ResourceBody>
-      </Panel>
-
-      <Panel id="campaign-opinions" title="총괄 AI에 낸 의견" hint="총괄 AI에 A2A로 보냅니다. 총괄 AI 쪽 받는 기능이 준비되기 전에는 전달 대기로 남고 자동으로 다시 보냅니다.">
-        <ResourceBody res={view}>
-          {(v) => v.opinions.length === 0 ? <Empty>아직 낸 의견이 없습니다.</Empty> : (
-            <ul className="space-y-2 text-sm text-ink-700">
-              {v.opinions.slice(0, 20).map((row) => (
-                <li key={row.opinion.opinion_id}>
-                  <p className="flex flex-wrap items-center gap-2">
-                    <Chip label={row.status === "delivered" ? "전달됨" : "전달 대기"} tone={row.status === "delivered" ? TONE.ok : TONE.warn} />
-                    {row.opinion.campaign_name ?? "재무 인사이트"} · {shortDateTime(row.opinion.submitted_at)}
-                  </p>
-                  <p>{row.opinion.recommendation}</p>
                 </li>
               ))}
             </ul>
