@@ -235,14 +235,18 @@ def test_lock_permission_error_is_retried(vault: Path, monkeypatch: pytest.Monke
     calls = {"n": 0}
 
     def flaky(path, flags, mode=0o777):
-        if str(path).endswith(".lock") and calls["n"] == 0:
+        if str(path).endswith(".lock"):
             calls["n"] += 1
-            raise PermissionError("지워지는 중")
+            if calls["n"] == 1:
+                Path(str(path)).write_text("1")  # 윈도에서 지워지는 중인 잠금 파일
+                raise PermissionError("지워지는 중")
+            if calls["n"] == 2:
+                Path(str(path)).unlink()  # 지우기가 끝났다
         return real_open(path, flags, mode)
 
     monkeypatch.setattr(tc.os, "open", flaky)
     assert _save().id == "jenkins-1"
-    assert calls["n"] == 1
+    assert calls["n"] == 2
 
 
 def test_lock_fd_closed_when_write_fails(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -262,3 +266,52 @@ def test_lock_fd_closed_when_write_fails(vault: Path, monkeypatch: pytest.Monkey
         _save()
     assert len(closed) == 1
     assert not Path(str(vault) + ".lock").exists()
+
+
+def test_unwritable_lock_dir_raises_instead_of_looping(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def denied(path, flags, mode=0o777):
+        raise PermissionError("denied")
+
+    real_stat = os.stat
+
+    def no_stat(path, *a, **k):
+        if str(path).endswith(".lock"):
+            raise OSError("no such file")
+        return real_stat(path, *a, **k)
+
+    monkeypatch.setattr(tc.os, "open", denied)
+    monkeypatch.setattr(tc.os, "stat", no_stat)
+    monkeypatch.setattr(tc, "LOCK_TIMEOUT", 0.2)
+    start = time.monotonic()
+    with pytest.raises(tc.ToolConnectionError) as e:
+        _save()
+    assert e.value.code == "config"
+    assert time.monotonic() - start < 2
+
+
+def test_lock_stat_failure_still_hits_deadline(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """잠금 파일이 있다고 나오는데 stat이 계속 실패해도 마감에 busy로 끝난다."""
+    real_open = os.open
+
+    def exists(path, flags, mode=0o777):
+        if str(path).endswith(".lock"):
+            raise FileExistsError
+        return real_open(path, flags, mode)
+
+    real_stat = os.stat
+
+    def no_stat(path, *a, **k):
+        if str(path).endswith(".lock"):
+            raise OSError("gone")
+        return real_stat(path, *a, **k)
+
+    monkeypatch.setattr(tc.os, "open", exists)
+    monkeypatch.setattr(tc.os, "stat", no_stat)
+    monkeypatch.setattr(tc, "LOCK_TIMEOUT", 0.2)
+    with pytest.raises(tc.ToolConnectionError) as e:
+        _save()
+    assert e.value.code == "busy"

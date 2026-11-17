@@ -215,12 +215,19 @@ def _writing() -> Iterator[None]:
             try:
                 fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
                 break
-            except (FileExistsError, PermissionError):
-                pass  # 윈도: 지워지는 중인 잠금 파일은 PermissionError. 다시 시도한다
+            except FileExistsError:
+                pass
+            except PermissionError:
+                # 윈도: 지워지는 중인 잠금 파일은 PermissionError라 다시 시도한다.
+                # 잠금 파일이 없는데도 거절되면 폴더 권한 문제라 바로 알린다
+                if not os.path.exists(lock):
+                    raise ToolConnectionError(
+                        "config", "도구 연결 보관함 폴더에 쓸 수 없어요. 폴더 권한을 확인하세요"
+                    ) from None
             try:
                 stale = time.time() - os.stat(lock).st_mtime > LOCK_STALE
             except OSError:
-                continue  # 그사이 풀렸다
+                stale = False  # 그사이 풀렸다: 마감·대기를 거쳐 다시 시도한다
             if stale:
                 logger.warning("오래된 도구 연결 잠금 파일을 지운다: %s", lock)
                 try:
