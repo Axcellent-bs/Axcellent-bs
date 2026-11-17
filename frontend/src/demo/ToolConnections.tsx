@@ -4,9 +4,16 @@ import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingStep, type Coding
 import { UsageBar } from '@/components/dev/coding'
 import { NotionConnect } from '@/components/planning/notion'
 import { humanizePlanIds } from '@/lib/format'
-import { PageHead, SectionHead, StatusChip } from '@/components/connect/parts'
+import { Notice, PageHead, SectionHead, StatusChip } from '@/components/connect/parts'
+import { GithubAppCard } from '@/components/connect/GithubAppCard'
+import { DeployTools } from '@/components/connect/DeployTools'
+import { useToolList } from '@/components/connect/ToolForm'
+import { deployRows, dejafixView } from '@/lib/toolForms'
+import { useSession } from './session'
 
-// 개발 도구 연결: 고객사 개발팀이 쓰는 형상관리·CI·배포 도구를 개발·배포 AI(dev)에 잇는 창구.
+// 도구 연결 (/system/tools, 모두 연다): 고객사 개발팀이 쓰는 형상관리·배포·문서 도구와 AI 연결을 잇는 창구.
+// 형상관리·배포·문서는 회사 공용 연결이라 관리자만 바꾸고 일반 회원은 상태만 본다. AI(사람별 MCP 연결 안내)는 모두 쓴다.
+// 배포와 맨 위 GitHub 앱은 공용 도구 연결 보관함(dashboard-api tool-connections), 레포 연결은 개발 AI 저장소다.
 // 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.
 // 연결이 2개 이상이면 AI가 PR마다 대상 레포를 제안하고 사람이 승인한다.
 const KINDS = [
@@ -45,10 +52,10 @@ export function tokenUrl(a: RepoAddr): string {
 }
 
 // 형상관리 외의 연결 지점. 형상관리 연결로 함께 되는 것과 아직 없는 것을 나눠 보여 준다
-const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'linked' | 'planned'; to?: string }[] = [
+const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'deploy' | 'dejafix' | 'planned' }[] = [
   { name: 'CI 결과', tools: 'GitHub Actions · GitLab CI · Jenkins', state: 'with-vcs' },
-  { name: '배포', tools: 'GitHub Actions · Jenkins · Argo CD', state: 'planned' },
-  { name: '배포 후 확인', tools: 'DejaFix (Zabbix)', state: 'linked', to: '/system/members?tab=pcs' },
+  { name: '배포', tools: 'GitHub Actions · Jenkins', state: 'deploy' },
+  { name: '배포 후 확인', tools: 'DejaFix (Zabbix)', state: 'dejafix' },
   { name: '요청 가져오기', tools: 'Jira · Linear · 노션 DB', state: 'planned' },
   { name: '알림', tools: '슬랙 · Teams · 잔디', state: 'planned' },
 ]
@@ -413,14 +420,25 @@ function Loading({ error }: { error: string | null }) {
   return <p className="text-sm text-ink-500">{error ?? '불러오는 중…'}</p>
 }
 
+/** 도구 연결 보관함(dashboard-api)을 받는 중이거나 못 받았을 때 */
+function ToolsLoading({ error }: { error: string | null }) {
+  return error ? <Notice tone="bad">도구 연결을 불러오지 못했어요: {error}</Notice> : <p className="text-sm text-ink-500">불러오는 중…</p>
+}
+
+/** 일반 회원: 회사 공용 연결은 상태만 본다 */
+function ReadOnlyNotice() {
+  return <Notice tone="info">회사 공용 연결이라 관리자만 바꿀 수 있어요. 지금 상태만 보여요.</Notice>
+}
+
 // 연결 창 왼쪽 메뉴 (설정 창처럼 묶음 › 항목). 고른 항목만 오른쪽에 보인다
 type AiPart = 'mode' | 'all'
-type PanelItem = 'repos' | 'others' | 'notion' | 'ai'
+type PanelItem = 'repos' | 'others' | 'deploy' | 'notion' | 'ai'
 const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }[] = [
   { label: '형상관리', items: [
     { id: 'repos', label: '레포 연결' },
     { id: 'others', label: '다른 개발 도구' },
   ] },
+  { label: '배포', items: [{ id: 'deploy', label: '배포 도구' }] }, // 공용 도구 연결 보관함 (components/connect/DeployTools.tsx)
   { label: '문서', items: [{ id: 'notion', label: '노션' }] }, // 기획 영역 (components/planning/notion.tsx)
   { label: 'AI', items: [{ id: 'ai', label: 'AI 연결' }] },
 ]
@@ -435,8 +453,11 @@ const readTab = (): PanelItem => {
   } catch { return 'repos' }
 }
 
-/** 연결 창: 왼쪽 메뉴(형상관리·AI 코딩) + 오른쪽 내용. 개발·배포 화면의 톱니바퀴 창과 시스템 관리 화면이 같이 쓴다 */
+/** 연결 창: 왼쪽 메뉴(형상관리·배포·문서·AI) + 오른쪽 내용 */
 export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClose?: () => void } = {}) {
+  const { account } = useSession()
+  const admin = !!account?.admin
+  const tools = useToolList()
   const [list, setList] = useState<VcsConnection[] | null>(null)
   const [offline, setOffline] = useState(false)
   const [tests, setTests] = useState<Record<string, VcsTestResult>>({})
@@ -538,6 +559,10 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
     return t?.ok ? { label: '연결됨', tone: TONE.ok } : t ? { label: '연결 실패', tone: TONE.bad } : { label: '확인 전', tone: TONE.wait }
   }
   const connected = !!list?.length
+  // 다른 개발 도구 목록의 배포·DejaFix 상태: 도구 연결 보관함에서 (못 받으면 상태를 쓰지 않는다)
+  const deployCount = tools.data ? deployRows(tools.data.connections).length : null
+  const dejafix = tools.data ? dejafixView(tools.data.connections).state : null
+  const dejafixLabel = dejafix === 'connected' ? '연결됨' : dejafix === 'none' ? '연결 전' : 'DejaFix 연결'
   const kindReady = KINDS.find((k) => k.id === form?.kind)?.ready
   const editing = form?.id ? list?.find((c) => c.id === form.id) : undefined
 
@@ -634,7 +659,8 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
           <div key={g.label} className="mb-3 last:mb-0">
             <div className="px-2 pb-1 text-xs text-ink-500">{g.label}</div>
             {g.items.map((it) => {
-              const hint = it.id === 'repos' && list ? (list.length ? `${list.length}개` : '없음') : ''
+              const hint = it.id === 'repos' && list ? (list.length ? `${list.length}개` : '없음')
+                : it.id === 'deploy' && deployCount !== null ? (deployCount ? `${deployCount}개` : '없음') : ''
               return (
                 <button key={it.id} type="button" aria-current={tab === it.id ? 'page' : undefined} onClick={() => pickTab(it.id)}
                   className={`flex w-full items-center justify-between gap-2 border-l-2 px-2 py-1.5 text-left text-sm ${tab === it.id ? 'border-brand-600 bg-ink-100 font-medium text-ink-900' : 'border-transparent text-ink-700 hover:bg-ink-50'}`}>
@@ -648,25 +674,34 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
       </nav>
       <div className={`relative min-w-0 flex-1 p-6 ${onClose ? 'overflow-y-auto pt-12' : ''}`}>
       {onClose && <button className="btn-quiet absolute right-3 top-3 px-2 py-1" onClick={onClose} aria-label="닫기">✕</button>}
-      {tab === 'notion' ? <NotionConnect /> : tab === 'ai' ? <CodingModeSection part="all" /> : tab === 'repos' ? (
+      {tab === 'notion' ? (
+        <div className="space-y-4">
+          {!admin && <ReadOnlyNotice />}
+          <NotionConnect readOnly={!admin} />
+        </div>
+      ) : tab === 'ai' ? <CodingModeSection part="all" /> : tab === 'deploy' ? (
+        tools.data ? <DeployTools data={tools.data} admin={admin} onChanged={tools.reload} /> : <ToolsLoading error={tools.error} />
+      ) : tab === 'repos' ? (
       <section className="space-y-4">
+        {!admin && <ReadOnlyNotice />}
+        {tools.data ? <GithubAppCard data={tools.data} admin={admin} onChanged={tools.reload} /> : <ToolsLoading error={tools.error} />}
         <SectionHead title="레포 연결"
           desc={list && list.length > 1
             ? '개발 AI가 코드를 읽고 PR을 올리는 레포예요. 레포가 여럿이면 PR마다 AI가 대상 레포를 제안하고 사람이 승인해요.'
             : '개발 AI가 코드를 읽고 PR을 올리는 레포예요. 레포마다 접근 토큰이나 GitHub App으로 연결해요.'}
           right={<>
             {offline && <StatusChip tone="wait">개발·배포 AI에 연결할 수 없음</StatusChip>}
-            {!!list?.length && <button type="button" className="btn-ghost" onClick={checkAll} disabled={checking || offline}>{checking ? '점검 중…' : '보안 점검'}</button>}
-            <button type="button" className="btn-primary px-4" disabled={offline || (!!form && !form.id)}
-              onClick={() => { setForm({ ...EMPTY }); setError(null) }}>레포 연결</button>
+            {admin && !!list?.length && <button type="button" className="btn-ghost" onClick={checkAll} disabled={checking || offline}>{checking ? '점검 중…' : '보안 점검'}</button>}
+            {admin && <button type="button" className="btn-primary px-4" disabled={offline || (!!form && !form.id)}
+              onClick={() => { setForm({ ...EMPTY }); setError(null) }}>레포 연결</button>}
           </>} />
 
-        {form && !form.id && formEl}
+        {admin && form && !form.id && formEl}
 
         {list && !list.length && !form && (
           <div className="border border-dashed border-ink-300 px-6 py-8 text-center">
             <p className="font-medium">연결한 레포가 없어요</p>
-            <p className="mt-1 text-sm text-ink-500">지금 개발 화면은 시연 데이터를 보여 줘요. 위의 레포 연결로 첫 레포를 이어 주세요.</p>
+            <p className="mt-1 text-sm text-ink-500">{admin ? '지금 개발 화면은 시연 데이터를 보여 줘요. 위의 레포 연결로 첫 레포를 이어 주세요.' : '관리자가 연결하면 여기에 보여요.'}</p>
           </div>
         )}
 
@@ -681,11 +716,13 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
                     <span className="text-base font-semibold">{c.repo}</span>
                     <span className={`chip ${st.tone}`}>{st.label}</span>
                     <span className="text-xs text-ink-500">{KIND_LABEL[c.kind] ?? c.kind} · {SOURCE[c.source] ?? c.source}</span>
-                    <div className="ml-auto flex gap-1.5">
-                      <button type="button" className="btn-ghost" onClick={() => runTest(c.id)} disabled={!!testing || offline}>연결 확인</button>
-                      <button type="button" className="btn-ghost" onClick={() => { setForm(toForm(c)); setError(null) }}>수정</button>
-                      <button type="button" className="btn-quiet" onClick={() => remove(c)}>삭제</button>
-                    </div>
+                    {admin && (
+                      <div className="ml-auto flex gap-1.5">
+                        <button type="button" className="btn-ghost" onClick={() => runTest(c.id)} disabled={!!testing || offline}>연결 확인</button>
+                        <button type="button" className="btn-ghost" onClick={() => { setForm(toForm(c)); setError(null) }}>수정</button>
+                        <button type="button" className="btn-quiet" onClick={() => remove(c)}>삭제</button>
+                      </div>
+                    )}
                   </div>
                   <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                     <div><dt className="text-xs text-ink-500">병합 대상 브랜치</dt><dd className="mt-0.5">{c.base_branch || '—'}</dd></div>
@@ -713,7 +750,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
                       </div>
                     )}
                   </dl>
-                  {form?.id === c.id && <div className="mt-4">{formEl}</div>}
+                  {admin && form?.id === c.id && <div className="mt-4">{formEl}</div>}
                 </li>
               )
             })}
@@ -732,8 +769,14 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
               <span className="text-ink-500">{o.tools}</span>
               {o.state === 'with-vcs' ? (
                 <span className={`chip ${connected ? 'bg-emerald-50 text-emerald-700' : 'bg-ink-100 text-ink-700'}`}>{connected ? '형상관리로 함께 읽음' : '형상관리 연결 뒤'}</span>
-              ) : o.state === 'linked' ? (
-                <Link href={o.to ?? '#'} className="chip bg-emerald-50 text-emerald-700">연결됨 · 사내 PC 연결</Link>
+              ) : o.state === 'deploy' ? (
+                <button type="button" className={`chip ${deployCount ? 'bg-emerald-50 text-emerald-700' : 'bg-ink-100 text-ink-700'}`} onClick={() => pickTab('deploy')}>
+                  {deployCount === null ? '배포 도구 보기' : deployCount ? `연결됨 ${deployCount}개 · 배포 도구` : '연결 전 · 배포 도구'}
+                </button>
+              ) : o.state === 'dejafix' ? (
+                admin
+                  ? <Link href="/system/members?tab=pcs" className={`chip ${dejafix === 'connected' ? 'bg-emerald-50 text-emerald-700' : 'bg-ink-100 text-ink-700'}`}>{dejafixLabel} · 회원·서버 관리</Link>
+                  : <span className={`chip ${dejafix === 'connected' ? 'bg-emerald-50 text-emerald-700' : 'bg-ink-100 text-ink-700'}`}>{dejafixLabel}</span>
               ) : (
                 <span className="chip bg-ink-100 text-ink-500">준비 중</span>
               )}
@@ -751,7 +794,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
 export default function ToolConnections() {
   return (
     <div className="space-y-6 px-4 py-8 sm:px-8">
-      <PageHead where="시스템 관리" title="도구 연결">개발 AI와 기획 AI가 쓰는 바깥 도구를 이어요. 레포·노션·AI 키는 서버에만 저장되고 화면에는 끝 4자리만 보여요.</PageHead>
+      <PageHead where="시스템 관리" title="도구 연결">AI들이 쓰는 회사 바깥 도구를 이어요. 형상관리·배포·문서는 관리자만 바꾸고, AI 연결은 누구나 해요. 키·토큰은 서버에만 저장되고 화면에는 가린 값만 보여요.</PageHead>
       <ToolConnectionsPanel />
     </div>
   )
