@@ -13,6 +13,8 @@
   매출 효과 숫자(기간·`gmv_krw`·`orders`·잰 값)를 호출자가 주지 않으면 데이터 `campaign_result`
   (view=finance)의 `finance_record`를 그대로 가져와 채운다. 집행액·이름·채널·쿠폰은 호출자 값이다.
   호출자가 준 값은 덮어쓰지 않는다. 데이터에 닿지 못하면 재무를 부르지 않고 실패로 올린다.
+  콘텐츠 카테고리·형식(`content_category`·`format`)과 영상 제작비(`production_cost_krw`)는
+  호출자가 준 값만 그대로 싣는다(예산 의견 요청에도 카테고리·형식을 싣는다). 추측하지 않는다.
 - 쿠폰 지급(`issue_coupon`)은 이 흐름과 별개다. 재무는 쿠폰을 판단하지 않는다.
 - 재무에 닿지 못하면 승인으로 보지 않는다(fail-closed): 시작은 실행하지 않고 멈춘다.
 """
@@ -42,6 +44,7 @@ from ax_contracts.schemas.finance import (
     CampaignBudgetReviewInput,
     CampaignBudgetReviewOutput,
     CampaignResultInput,
+    ContentFormat,
 )
 
 FINANCE = "finance"
@@ -62,6 +65,10 @@ class StartCampaignInput(AxModel):
     # 캠페인이 다루는 회사 상품 ID(선택, 최대 10개). 재무가 고객지원 책별 집계로 불만 많은 책인지
     # 보고 예산 의견을 줄이는 데 쓴다. 비워 두면(옛 요청) 상품 신호 없이 판단한다
     product_ids: list[str] = Field(default_factory=list, max_length=10)
+    # 콘텐츠 카테고리(예: 아재개그)와 형식(shorts·reels). 호출자가 아는 값만 받고, 마케팅은
+    # 지어내거나 기획안에서 추측하지 않는다. 비우면 재무는 카테고리 없는 캠페인으로 본다
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    format: ContentFormat | None = None
 
 
 # 데이터가 재는 매출 효과 값 묶음. 호출자가 하나라도 주면 이 묶음은 데이터로 채우지 않는다
@@ -94,6 +101,11 @@ class RecordCampaignResultInput(AxModel):
     measured_gmv_krw: int | None = None
     measured_orders: int | None = None
     effect_generated_at: str | None = None
+    # 아래는 호출자가 아는 값만 받는다(재무 계약과 같은 칸). 모르면 비워 두고 채우지 않는다.
+    # 조회수(views·views_point)는 데이터가 잰 값이라 마케팅이 받지도 보내지도 않는다
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    format: ContentFormat | None = None
+    production_cost_krw: int | None = Field(default=None, ge=0)  # 광고비(spend_krw)와 따로
 
     @model_validator(mode="after")
     def _period_in_order(self) -> RecordCampaignResultInput:
@@ -231,6 +243,8 @@ async def start_campaign(
         channel=data.channel,
         requested_krw=data.budget_krw,
         product_ids=product_ids,
+        content_category=data.content_category,
+        format=data.format,
     )
     answer = await _ask_finance(request, REVIEW_SKILL, ask)
     if answer.status != TaskStatus.COMPLETED:

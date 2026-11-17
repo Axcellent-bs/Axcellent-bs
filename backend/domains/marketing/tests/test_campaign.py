@@ -510,3 +510,93 @@ async def test_a_broken_brief_store_does_not_break_the_campaign_start(
     result = await handlers.start_campaign_skill(_req("start_campaign", START))
     assert result.status == TaskStatus.COMPLETED  # 상품 신호만 빼고 재무 의견을 받는다
     assert finance.calls[0][1].input["product_ids"] == []
+
+
+# ------------------------------------------- 콘텐츠 카테고리·형식·제작비 (재무 #1203 계약)
+CATEGORY = {"content_category": "아재개그", "format": "shorts"}
+
+
+async def test_category_and_format_go_to_the_finance_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    result = await campaign.start_campaign(_req("start_campaign", START | CATEGORY))
+    assert result.status == TaskStatus.COMPLETED
+    sent = finance.calls[0][1].input
+    assert sent["content_category"] == "아재개그" and sent["format"] == "shorts"
+
+
+async def test_review_without_category_sends_no_category_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    await campaign.start_campaign(_req("start_campaign", START))
+    sent = finance.calls[0][1].input
+    assert "content_category" not in sent and "format" not in sent  # 지어내지 않는다
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"format": "tiktok"}, {"content_category": ""}, {"content_category": "가" * 41}],
+)
+async def test_bad_category_or_format_is_refused_on_start(
+    monkeypatch: pytest.MonkeyPatch, bad: dict
+) -> None:
+    finance = Finance()
+    _wire(monkeypatch, finance)
+    result = await campaign.start_campaign(_req("start_campaign", START | bad))
+    assert result.outcome == "invalid_input" and finance.calls == []
+
+
+async def test_record_result_passes_category_format_and_production_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ax_contracts.schemas.finance import CampaignResultInput
+
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    _wire_routed(monkeypatch, finance, _data())
+    asked = CALLER | CATEGORY | {"production_cost_krw": 150_000}
+    result = await campaign.record_campaign_result(_req("record_campaign_result", asked))
+    assert result.outcome == "recorded"
+    sent = finance.calls[0][1].input
+    assert sent["content_category"] == "아재개그" and sent["format"] == "shorts"
+    assert sent["production_cost_krw"] == 150_000
+    # 조회수는 데이터가 잰 값이라 마케팅은 보내지 않는다
+    assert "views" not in sent and "views_point" not in sent
+    parsed = CampaignResultInput.model_validate(sent)  # 재무 계약이 그대로 받는다
+    assert parsed.production_cost_krw == 150_000 and parsed.spend_krw == 300_000
+
+
+async def test_record_result_without_category_leaves_them_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    _wire_routed(monkeypatch, finance, _data())
+    await campaign.record_campaign_result(_req("record_campaign_result", CALLER))
+    sent = finance.calls[0][1].input
+    for name in ("content_category", "format", "production_cost_krw"):
+        assert name not in sent  # 모르면 비워 둔다(0·빈 값으로 채우지 않는다)
+
+
+async def test_record_result_keeps_zero_production_cost(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 0원은 "제작비가 없었다"는 호출자의 값이다. 빈 값(모름)과 다르다
+    finance = Finance(output={"status": "recorded"}, outcome="recorded")
+    _wire_routed(monkeypatch, finance, _data())
+    asked = CALLER | {"production_cost_krw": 0}
+    await campaign.record_campaign_result(_req("record_campaign_result", asked))
+    assert finance.calls[0][1].input["production_cost_krw"] == 0
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"format": "tiktok"}, {"production_cost_krw": -1}, {"content_category": ""}],
+)
+async def test_record_result_bad_category_fields_never_reach_finance(
+    monkeypatch: pytest.MonkeyPatch, bad: dict
+) -> None:
+    finance = Finance()
+    _wire_routed(monkeypatch, finance, _data())
+    result = await campaign.record_campaign_result(_req("record_campaign_result", CALLER | bad))
+    assert result.outcome == "invalid_input" and finance.calls == []
