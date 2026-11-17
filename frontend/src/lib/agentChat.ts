@@ -1,5 +1,5 @@
 import { SCREEN_KEEP_OUTCOMES, closedTimes, isBackgroundRead } from "./commFilter";
-import { MARKETING_HOLD_ACTIONS, SETTLEMENT_HOLD_ACTION, type ExecutionRecord } from "./finance";
+import { FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, SETTLEMENT_HOLD_ACTION, type ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
 import type { CommLine, CommOutcome } from "./types";
 
@@ -138,7 +138,14 @@ export function holdPage(action: string | null | undefined): string {
   if (action === "refund_request") return "/queue";
   if (action === SETTLEMENT_HOLD_ACTION) return "/settlements";
   if (action && (MARKETING_HOLD_ACTIONS as readonly string[]).includes(action)) return "/marketing";
+  // 담당 화면이 접힌 일은 안전규칙 화면에 "담당 화면 없음(접힘)"으로만 보인다
+  if (holdFolded(action)) return "/safety";
   return "/finance";
+}
+
+/** 담당 화면이 접혀 결정할 곳이 없는 보류인가 (인수인계). 기한이 지나면 안전규칙이 자동 취소한다 */
+export function holdFolded(action: string | null | undefined): boolean {
+  return !!action && (FOLDED_HOLD_ACTIONS as readonly string[]).includes(action);
 }
 /** 총괄 제목 끝의 "(metric)"에서 지표 코드를 꺼낸다 */
 function metricOf(inc: Pick<OrchIncident, "title">): string | null {
