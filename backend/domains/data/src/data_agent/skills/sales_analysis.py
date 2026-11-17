@@ -25,8 +25,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable
 from datetime import datetime
 
 from ax_contracts.schemas import Evidence
@@ -41,9 +40,9 @@ from ax_contracts.schemas.data import (
     SalesPeriod,
     SalesProductMove,
 )
-from data_agent.sales_clean import counts_as_revenue
-from data_agent.sales_quality import KST, PERIOD_LABEL, Window, gate, quality, window
-from data_agent.sales_store import FAKE_SOURCE, SalesStore, StoredOrder
+from data_agent.sales_quality import KST, PERIOD_LABEL, Window, gate, quality_counted, window
+from data_agent.sales_sql import LineNet, Tally, allocate, line_nets, product_names, tally
+from data_agent.sales_store import FAKE_SOURCE, SalesStore
 
 FAKE_DATA = "가짜 데이터(데모용)"  # 저장소를 가짜 출처(`sales_fake`)가 채웠을 때 근거·요약에 붙인다
 TOP_PRODUCTS = 5
@@ -54,124 +53,10 @@ OTHER_SOURCE = "기타 경로"
 QUERIES = ["sales_store.sales_orders", "sales_store.sales_order_lines", "sales_store.sales_refunds"]
 
 
-# ---------------------------------------------------------------- 나누기 (정수 원)
-
-
-def allocate(total: int, weights: Sequence[int]) -> list[int]:
-    """`total`을 `weights` 비율로 정수로 나눈다. 합은 늘 `total`. 무게가 모두 0이면 첫 칸에."""
-    if not weights:
-        return []
-    base = sum(w for w in weights if w > 0)
-    if base <= 0:
-        return [total] + [0] * (len(weights) - 1)
-    sign = -1 if total < 0 else 1
-    amount = abs(total)
-    exact = [amount * max(w, 0) / base for w in weights]
-    parts = [int(x) for x in exact]
-    rest = amount - sum(parts)
-    order = sorted(range(len(weights)), key=lambda i: (-(exact[i] - parts[i]), i))
-    for i in order[:rest]:
-        parts[i] += 1
-    return [sign * p for p in parts]
-
-
-@dataclass(frozen=True)
-class LineNet:
-    product_id: str
-    category_code: str
-    title: str | None
-    net: int  # 줄 금액 − 할인 몫
-
-
-def line_nets(order: StoredOrder) -> list[LineNet]:
-    """결제 완료 주문의 줄 순매출. 줄이 없으면 분류 없는 한 줄로 본다."""
-    discount = order.coupon_discount + order.points_used
-    if not order.lines:
-        return [LineNet("", "", None, order.items_amount - discount)]
-    gross = [ln.qty * ln.unit_price for ln in order.lines]
-    shares = [ln.coupon_share + ln.points_share for ln in order.lines]
-    if sum(shares) != discount:
-        shares = allocate(discount, gross)
-    return [
-        LineNet(ln.product_id, ln.category_code or "", ln.title, g - s)
-        for ln, g, s in zip(order.lines, gross, shares, strict=True)
-    ]
-
-
-# ---------------------------------------------------------------- 한 기간 집계
-
-
-@dataclass
-class Tally:
-    revenue: int = 0
-    orders: int = 0
-    coupon_orders: int = 0
-    buyers: set[str] = field(default_factory=set)
-    repeat_buyers: set[str] = field(default_factory=set)
-    new_revenue: int = 0
-    repeat_revenue: int = 0
-    by_category: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    by_product: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    product_orders: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    product_meta: dict[str, tuple[str | None, str]] = field(default_factory=dict)
-    by_channel: dict[tuple[str | None, str | None], int] = field(
-        default_factory=lambda: defaultdict(int)
-    )
-    channel_orders: dict[tuple[str | None, str | None], int] = field(
-        default_factory=lambda: defaultdict(int)
-    )
-    rows: int = 0
-
-
-def tally(
-    store: SalesStore, tenant_id: str, start: datetime, end: datetime
-) -> tuple[Tally, list[StoredOrder]]:
-    """[start, end) 집계. 돌려주는 두 번째 값은 그 기간에 접수한 주문(상태 무관, 품질 보고용)."""
-    created = store.orders_created(tenant_id, start, end)
-    refunded = store.orders_refunded(tenant_id, start, end)
-    paid = [o for o in created if counts_as_revenue(o.status, o.payment_status)]
-    paid_refunded = [o for o in refunded if counts_as_revenue(o.status, o.payment_status)]
-    buyers = {o.buyer_id for o in paid} | {o.buyer_id for o in paid_refunded}
-    before = store.buyers_paid_before(tenant_id, buyers, start)
-    t = Tally(rows=len(created) + len({o.order_id for o in refunded}))
-    for order in paid:
-        nets = line_nets(order)
-        _add(t, order, nets, [n.net for n in nets], before)
-        t.orders += 1
-        t.coupon_orders += 1 if order.coupon_discount > 0 else 0
-        t.buyers.add(order.buyer_id)
-        if order.buyer_id in before:
-            t.repeat_buyers.add(order.buyer_id)
-        for pid in {n.product_id for n in nets if n.product_id}:
-            t.product_orders[pid] += 1
-        key = (order.src_source, order.src_medium)
-        t.channel_orders[key] += 1
-    for order in paid_refunded:
-        amount = sum(r.amount for r in order.refunds if start <= r.refunded_at < end)
-        if amount:
-            nets = line_nets(order)
-            parts = allocate(-amount, [n.net for n in nets])
-            _add(t, order, nets, parts, before)
-    return t, created
-
-
-def _add(
-    t: Tally, order: StoredOrder, nets: list[LineNet], amounts: list[int], before: set[str]
-) -> None:
-    total = sum(amounts)
-    t.revenue += total
-    if order.buyer_id in before:
-        t.repeat_revenue += total
-    else:
-        t.new_revenue += total
-    t.by_channel[(order.src_source, order.src_medium)] += total
-    for n, amount in zip(nets, amounts, strict=True):
-        t.by_category[n.category_code] += amount
-        if n.product_id:
-            t.by_product[n.product_id] += amount
-            known = t.product_meta.get(n.product_id)
-            t.product_meta[n.product_id] = (n.title or (known[0] if known else None),
-                                            n.category_code)  # fmt: skip
+# 나누기(`allocate`·`line_nets`)와 한 기간 집계(`Tally`·`tally`)는 `sales_sql`에 있다
+# (11/18, SQL 집계).
+# 예전 이름 그대로 여기서도 쓸 수 있게 다시 내보낸다
+__all__ = ["LineNet", "Tally", "allocate", "line_nets", "tally"]
 
 
 # ---------------------------------------------------------------- 출력 만들기
@@ -197,8 +82,8 @@ def rate(part: int, whole: int) -> float | None:
 def kpis(cur: Tally, prev: Tally) -> list[SalesKpi]:
     aov = round(cur.revenue / cur.orders) if cur.orders else None
     prev_aov = round(prev.revenue / prev.orders) if prev.orders else None
-    repeat = rate(len(cur.repeat_buyers), len(cur.buyers))
-    prev_repeat = rate(len(prev.repeat_buyers), len(prev.buyers))
+    repeat = rate(cur.repeat_buyers, cur.buyers)
+    prev_repeat = rate(prev.repeat_buyers, prev.buyers)
     repeat_change = (
         round(repeat - prev_repeat, 4) if repeat is not None and prev_repeat is not None else None
     )
@@ -230,34 +115,62 @@ def categories(cur: Tally, prev: Tally, cfg: CatalogSales) -> list[SalesCategory
     return sorted(rows, key=lambda r: (-r.revenue, r.label, r.code))
 
 
+def _top_ties(changes: list[tuple[float, str]], ascending: bool) -> list[str]:
+    """변화율 순 상위 `TOP_PRODUCTS`개와, 그 경계와 같은 변화율인 상품 (이름 순 동점 처리용)."""
+    ordered = sorted(changes, key=lambda x: x[0] if ascending else -x[0])
+    if len(ordered) <= TOP_PRODUCTS:
+        return [pid for _, pid in ordered]
+    edge = ordered[TOP_PRODUCTS - 1][0]
+    return [pid for c, pid in ordered if (c <= edge if ascending else c >= edge)]
+
+
 def products(
-    cur: Tally, prev: Tally, cfg: CatalogSales
+    cur: Tally,
+    prev: Tally,
+    cfg: CatalogSales,
+    names: Callable[[set[str]], dict[str, tuple[str | None, str]]] | None = None,
 ) -> tuple[list[SalesProductMove], list[SalesProductMove], int]:
+    """많이 늘어난·줄어든 상품. 이름·분류는 `names`(필요한 상품만 찾기,
+    `sales_sql.product_names`)로, 없으면 집계에 담긴 `product_meta`로. 순위는 변화율, 같으면
+    이름 순 (예전과 같다)."""
     ids = set(cur.by_product) | set(prev.by_product)
     least = cfg.min_product_orders
-    moves: list[SalesProductMove] = []
     low = 0
+    rated: list[tuple[float, str]] = []
+    numbers: dict[str, tuple[int, int, float | None]] = {}
     for pid in ids:
         orders, prev_orders = cur.product_orders.get(pid, 0), prev.product_orders.get(pid, 0)
         if orders < least or prev_orders < least:
             low += 1
             continue
-        title, code = cur.product_meta.get(pid) or prev.product_meta.get(pid) or (None, "")
-        moves.append(
-            SalesProductMove(
-                product_id=pid,
-                label=title or NO_PRODUCT,
-                category_label=cfg.categories.get(code, NO_CATEGORY),
-                revenue=cur.by_product.get(pid, 0),
-                previous_revenue=prev.by_product.get(pid, 0),
-                change=change(cur.by_product.get(pid, 0), prev.by_product.get(pid, 0)),
-                orders=orders,
-                previous_orders=prev_orders,
-            )
+        moved = change(cur.by_product.get(pid, 0), prev.by_product.get(pid, 0))
+        numbers[pid] = (orders, prev_orders, moved)
+        if moved is not None:
+            rated.append((moved, pid))
+    up_ids = _top_ties([x for x in rated if x[0] > 0], ascending=False)
+    down_ids = _top_ties([x for x in rated if x[0] < 0], ascending=True)
+    wanted = set(up_ids) | set(down_ids)
+    if names is None:
+        found = {p: cur.product_meta.get(p) or prev.product_meta.get(p) for p in wanted}
+    else:
+        found = dict(names(wanted))
+
+    def move(pid: str) -> SalesProductMove:
+        title, code = found.get(pid) or (None, "")
+        orders, prev_orders, moved = numbers[pid]
+        return SalesProductMove(
+            product_id=pid,
+            label=title or NO_PRODUCT,
+            category_label=cfg.categories.get(code, NO_CATEGORY),
+            revenue=cur.by_product.get(pid, 0),
+            previous_revenue=prev.by_product.get(pid, 0),
+            change=moved,
+            orders=orders,
+            previous_orders=prev_orders,
         )
-    rated = [(m.change, m) for m in moves if m.change is not None]
-    up = [m for c, m in sorted(rated, key=lambda x: (-x[0], x[1].label)) if c > 0]
-    down = [m for c, m in sorted(rated, key=lambda x: (x[0], x[1].label)) if c < 0]
+
+    up = sorted((move(p) for p in up_ids), key=lambda m: (-(m.change or 0), m.label))
+    down = sorted((move(p) for p in down_ids), key=lambda m: (m.change or 0, m.label))
     return up[:TOP_PRODUCTS], down[:TOP_PRODUCTS], low
 
 
@@ -340,7 +253,7 @@ def analyze(
     w: Window = window(period, now)
     cur, created = tally(store, tenant_id, w.start, w.end)
     prev, _ = tally(store, tenant_id, w.previous_start, w.previous_end)
-    report = quality(store, tenant_id, w, created, cfg)
+    report = quality_counted(store, tenant_id, w, created, cfg)
     fake = store.sync_state(tenant_id).source == FAKE_SOURCE
     basis = SalesBasis(
         period_from=w.start,
@@ -364,7 +277,9 @@ def analyze(
     if reasons or cfg is None:
         out = SalesAnalysisOutput(**common, status="insufficient", insufficient_reasons=reasons)
     else:
-        up, down, low = products(cur, prev, cfg)
+        up, down, low = products(
+            cur, prev, cfg, names=lambda pids: product_names(store, tenant_id, cur, pids)
+        )
         out = SalesAnalysisOutput(
             **common,
             kpis=kpis(cur, prev),
@@ -374,8 +289,8 @@ def analyze(
             products_low_sample=low,
             min_product_orders=cfg.min_product_orders,
             customers=SalesCustomerMix(
-                buyers=len(cur.buyers),
-                repeat_buyers=len(cur.repeat_buyers),
+                buyers=cur.buyers,
+                repeat_buyers=cur.repeat_buyers,
                 new_revenue=cur.new_revenue,
                 repeat_revenue=cur.repeat_revenue,
                 new_share=share(cur.new_revenue, cur.revenue),

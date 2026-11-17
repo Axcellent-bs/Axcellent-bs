@@ -45,6 +45,16 @@ export function koreaTime(iso: string | null | undefined): string | null {
   return `${p(d.getUTCMonth() + 1)}.${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
 
+/** 카드 아래 출처 줄: "계산 HH:MM (판매 기록 HH:MM까지)". 계산 시각 = 근거 collected_at(캐시에서 나와도
+ *  처음 계산한 시각), 판매 기록 = basis.last_synced_at(마지막 수집). 한국 시간. 계산 시각이 없으면 null */
+export function calcLine(computedAt: string | null | undefined, syncedAt: string | null | undefined): string | null {
+  const at = koreaTime(computedAt);
+  if (!at) return null;
+  const synced = koreaTime(syncedAt);
+  const hm = (s: string) => s.slice(-5); // "11.16 12:00" → "12:00"
+  return synced ? `계산 ${hm(at)} (판매 기록 ${hm(synced)}까지)` : `계산 ${hm(at)}`;
+}
+
 export interface KpiView { label: string; value: string; change: string; tone: Tone }
 export interface CategoryView { label: string; revenue: string; share: string; sharePct: number; change: string; tone: Tone }
 export interface ProductView { label: string; category: string | null; revenue: string; orders: string; change: string; tone: Tone }
