@@ -9,6 +9,13 @@ import type {
 } from "./data.ts";
 
 export const DATA_NOTE = "고객 속성은 시연용 가상 데이터, 바깥 시장 숫자는 공공 데이터";
+export const PUBLIC_NOTE = "바깥 시장 숫자는 공공 데이터";
+
+/** 맨 위 안내 한 줄: 가짜 출처(data_source 있음)일 때만 "시연용 가상 데이터"를 말한다. 선택지를 아직 못 받았으면 없음 */
+export function dataNote(options: { badge: string | null } | null): string | null {
+  if (!options) return null;
+  return options.badge ? DATA_NOTE : PUBLIC_NOTE;
+}
 export const SUPPRESSED = "표본 부족";
 
 const withComma = (n: number) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
