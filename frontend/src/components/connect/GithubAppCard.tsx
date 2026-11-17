@@ -4,7 +4,7 @@ import { ConnectedTool, ToolForm } from './ToolForm'
 import type { ToolList } from '@/lib/toolConnections'
 
 // 도구 연결 › 형상관리 맨 위: 공용 보관함의 GitHub 앱(github_app). 배포(GitHub Actions)가 이 앱으로 워크플로를 띄운다.
-// 아래 레포 연결(개발 AI 저장소)과는 아직 따로다. 레포 연결이 이 앱을 고르게 되는 것은 다음 단계(도구 연결 설계 PR 6).
+// 아래 레포 연결(개발 AI 저장소)도 GitHub App 인증이면 이 앱을 고른다(`app_ref`, 도구 연결 설계 PR 6).
 // 개인 키는 파일에서 읽어 보내기만 하고, 저장 뒤에는 "설정됨"만 보인다.
 export function GithubAppCard({ data, admin, onChanged }: { data: ToolList; admin: boolean; onChanged: () => void }) {
   const apps = data.connections.filter((c) => c.kind === 'github_app')
@@ -14,9 +14,9 @@ export function GithubAppCard({ data, admin, onChanged }: { data: ToolList; admi
   const done = () => { setAdding(false); setEditing(null); onChanged() }
 
   return (
-    <section className="card space-y-4 p-5" aria-label="GitHub 앱">
+    <section id="github-app" className="card space-y-4 p-5" aria-label="GitHub 앱">
       <SectionHead as="h3" title="GitHub 앱"
-        desc="배포(GitHub Actions)가 이 앱 권한으로 워크플로를 띄워요. 조직에 GitHub 앱을 만들어 설치한 뒤 앱 ID·설치 ID·개인 키를 넣어요."
+        desc="배포(GitHub Actions)와 아래 레포 연결이 이 앱 권한을 같이 써요. 조직에 GitHub 앱을 만들어 설치한 뒤 앱 ID·설치 ID·개인 키를 넣어요."
         right={<>
           {apps.length ? <StatusChip tone="ok">{apps.length}개 연결</StatusChip> : <StatusChip tone="off">연결 전</StatusChip>}
           {admin && apps.length > 0 && !adding && <button type="button" className="btn-ghost" onClick={() => setAdding(true)}>앱 하나 더</button>}

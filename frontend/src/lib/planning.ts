@@ -269,11 +269,14 @@ export interface VcsConnection {
   paths: string[]; mount?: string; token_set: boolean; token_hint: string; source: 'screen' | 'env'
   // 인증: token(사람 토큰) · app(GitHub App). App 개인 키는 넣었는지만 온다
   auth?: VcsAuth; app_id?: string; installation_id?: string; key_set?: boolean
+  // 공용 보관함의 GitHub 앱(github_app) id와 이름. 비어 있으면 예전 방식(앱 정보를 레포마다 넣음)
+  app_ref?: string; app_name?: string
 }
 export type VcsAuth = 'token' | 'app'
 export interface VcsConnectionInput {
   id?: string; kind: string; repo: string; base_url?: string; base_branch?: string; token?: string; description?: string; paths?: string[]; mount?: string
   auth?: VcsAuth; app_id?: string; installation_id?: string; private_key?: string
+  app_ref?: string // GitHub App: 보관함 github_app 연결 id (이것을 보내면 앱 정보는 보관함 것을 쓴다)
   detect_branch?: boolean // 브랜치를 비우면 레포 기본 브랜치를 읽어 넣는다 (GitHub)
 }
 export interface VcsTestResult { ok: boolean; code: string | null; message: string; checked_at: string; connection_id: string; inventory?: VcsInventory | null }
