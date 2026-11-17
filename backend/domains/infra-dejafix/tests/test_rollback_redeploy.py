@@ -116,6 +116,7 @@ def test_redeploy_failure_returns_handoff_steps(a2a_body, gate, runtime, polled)
     result = out["output"]
     assert result["handoff_steps"] == [tool.describe("v3.0.0")]
     assert "403" in result["message"]
+    assert result["retryable"] is False  # 다시 부르면 배포가 두 번 돌 수 있다
     assert "rolled_back_to" not in result
     assert runtime.shop.released == 0  # 다른 길(장애 해제)로 넘어가지 않는다
     assert runtime.history.rolled_back == set()
@@ -127,6 +128,7 @@ def test_redeploy_unexpected_error_hides_message(a2a_body, gate, runtime, polled
     tool.error = RuntimeError(f"boom {SECRET}")
     out = _rollback(a2a_body, TOOL_ROLLBACK)
     assert out["outcome"] == "redeploy_failed"
+    assert out["output"]["retryable"] is False
     assert SECRET not in str(out)
     assert runtime.shop.released == 0
 
