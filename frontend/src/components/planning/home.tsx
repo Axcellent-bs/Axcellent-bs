@@ -7,6 +7,7 @@ import { useAllReleaseChecks } from '@/lib/planning'
 import { Grade, Point, rowNav } from '@/components/planning-common/parts'
 import { LinkedLines, convoHref, idText, toPath } from '@/components/planning-common/links'
 import { STAGES, pipeline, sortRows } from './requests'
+import { AgentDiagnosisInbox } from '@/components/admin/AgentDiagnosisInbox'
 
 interface Todo { key: string; rank: number; kind: string; from: Dept; id: string; title: string; label: string; href: string; wait: boolean; at: string }
 
@@ -142,6 +143,8 @@ export function Home({ s }: { s: S }) {
           ))}
         </ol>
       </section>
+      {/* 총괄 AI가 보낸 진단 (에이전트 평가, 준하 공통 칸 #1244). 받은 진단이 없으면 아무것도 그리지 않는다 */}
+      <AgentDiagnosisInbox agent="planning" />
     </div>
   )
 }
