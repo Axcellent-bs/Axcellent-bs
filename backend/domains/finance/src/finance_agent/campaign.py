@@ -546,8 +546,9 @@ def decide(
         "customer_reaction": {
             "status": reaction.status,
             "flagged": [f.product_id for f in reaction.flagged],
-            "low_sales": list(reaction.low_sales),
-            "sales_unread": list(reaction.sales_unread),
+            # 값은 모두 상품 ID다. 제목은 화면이 붙인다(이유 문장에는 제목이 들어간다)
+            "low_sales": list(reaction.low_sales_ids),
+            "sales_unread": list(reaction.sales_unread_ids),
         },
     }
 
