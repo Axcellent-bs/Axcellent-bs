@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { Link } from "@/lib/nav";
 import { Chip, TONE } from "@/components/finance/bits";
 import { RULE_KO } from "@/components/finance/SafetyQueue";
-import { actionKo, holdPage, holdWhy, speaker } from "@/lib/agentChat";
+import { actionKo, holdFolded, holdPage, holdWhy, speaker } from "@/lib/agentChat";
 import { ACTION_KO as FINANCE_ACTION_KO, type ExecStatus, type ExecutionRecord, type Grade, type Review } from "@/lib/finance";
 import { ago, shortDateTime, won } from "@/lib/format";
 import { SAFETY_ACTION_KO, SAFETY_RULE_KO, safety, type RegisteredAction, type SafetyThresholds } from "@/lib/safety";
@@ -174,7 +174,9 @@ export default function Safety() {
                   <p className="text-sm font-medium">{speaker(r.requester)} · {jobKo(r.action)}{r.report.computed_amount != null && <span className="tabular-nums"> · {won(r.report.computed_amount)}</span>}</p>
                   <p className="mt-0.5 text-sm text-ink-500">{reviewWhy(r)} · {ago(r.created_at)} 요청 · {shortDateTime(r.expires_at)}까지</p>
                 </div>
-                <Link href={holdPage(r.action)} className="btn-ghost text-sm">결정하러 가기</Link>
+                {holdFolded(r.action)
+                  ? <span className="chip" title="담당 화면(인수인계)이 접혀 있어 결정할 곳이 없어요. 기한이 지나면 자동으로 취소돼요.">담당 화면 없음(접힘)</span>
+                  : <Link href={holdPage(r.action)} className="btn-ghost text-sm">결정하러 가기</Link>}
               </li>
             ))}
           </ul>

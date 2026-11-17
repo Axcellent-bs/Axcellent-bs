@@ -941,7 +941,10 @@ export const SUPPORT_DELETION_HOLD_ACTIONS = ["approve_data_deletion", "purge_ex
 /** 고객지원 > 판매자 정산 화면 주소 (정산 묶음 요청·지급 승인은 거기서 한다) */
 export const SUPPORT_SETTLEMENT_PATH = "/settlements";
 /** 재무 화면에서 결정하지 않는 보류 건. 환불·판매자 정산 지급은 고객지원 화면, 쿠폰·공지·SNS·영상은 마케팅 화면에서 결정한다 */
-export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", SETTLEMENT_HOLD_ACTION, ...MARKETING_HOLD_ACTIONS]);
+/** 담당 화면이 접혀 있어 사람이 결정할 곳이 없는 보류 (인사 인수인계, 준하 11/17).
+ *  handover 서비스를 띄우지 않아 보류될 경로도 꺼져 있다. 다시 켜면 인사 화면에 ActionQueue를 붙이고 여기서 뺀다 */
+export const FOLDED_HOLD_ACTIONS = ["confirm_handover", "confirm_handover_incomplete"] as const;
+export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", SETTLEMENT_HOLD_ACTION, ...MARKETING_HOLD_ACTIONS, ...FOLDED_HOLD_ACTIONS]);
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
