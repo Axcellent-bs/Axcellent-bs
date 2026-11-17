@@ -26,6 +26,16 @@
 - 회사 레포는 GitHub App(`auth=app`)으로 붙인다.
   사람 토큰은 그 사람이 가진 레포에만 닿고 사람에 묶인다.
   App 개인 키는 토큰처럼 다루고 화면에는 넣었는지만 보여 준다.
+- GitHub App은 공용 도구 연결 보관함(`ax_agent_template.tool_connections`)의 `github_app` 연결을
+  `app_ref`(보관함 id)로 가리킨다. 앱은 한 번만 넣고 개발 AI·인프라 AI(배포)가 같이 쓴다.
+  부품을 꺼낼 때마다 보관함 행을 다시 보고, 앱 정보가 바뀌었으면 부품을 다시 만든다
+  (재시작 없이 반영).
+  보관함에서 앱이 지워졌으면 `VcsError`(config)로 다시 연결하라고 알린다.
+- 예전 화면 연결에 앱 정보(앱 ID·설치 ID·개인 키)를 직접 넣어 둔 것은 켤 때(`load_saved`) 한 번
+  보관함으로 옮긴다: 같은 앱 ID·설치 ID·주소의 `github_app`이 있으면 그것을 가리키고, 없으면
+  새로 만든다(`by="migration"`). 개발 AI가 보관함에 쓰는 곳은 이 옮기기 하나뿐이다(쓰기는 원래
+  dashboard-api 한 곳). 보관함 경로가 없거나 파일이 깨졌으면 옮기지 않고 예전 값으로 계속 돈다.
+  환경변수 연결(`PLANNING_VCS_*`)은 옮기지 않는다.
 - `get_vcs()`·`configure()`·`describe()`는 첫 연결을 보는 예전 화면용 길이다.
 """
 
@@ -33,10 +43,13 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
+from ax_agent_template import tool_connections
 from dev_agent.vcs.base import (
     BRANCH_PREFIX,
     Branch,
@@ -98,6 +111,12 @@ AUTHS = ("token", "app")
 ENV_ID = "env"
 OVERRIDE_ID = "default"
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+APP_KIND = "github_app"  # 보관함에서 GitHub App 연결의 종류
+APP_MISSING = (
+    "연결된 GitHub 앱을 찾지 못했어요. 도구 연결 › 형상관리에서 GitHub 앱을 다시 연결해 주세요"
+)
+
+logger = logging.getLogger("dev_agent.vcs")
 
 
 @dataclass(frozen=True)
@@ -121,9 +140,20 @@ class Connection:
     app_id: str = ""
     installation_id: str = ""
     private_key: str = field(default="", repr=False)
+    # 보관함 `github_app` 연결 id. 있으면 위 앱 정보(app_id·installation_id·private_key) 대신 쓴다
+    app_ref: str = ""
 
     def public(self) -> dict:
         """화면에 보여 줄 모양. 토큰 값 대신 넣었는지와 끝 4자리만 준다."""
+        app = _app_row(self.app_ref) if self.app_ref else None
+        shared: dict[str, Any] = {}
+        if self.app_ref:
+            cfg = app.config if app else {}
+            shared = {
+                "app_id": str(cfg.get("app_id") or ""),
+                "installation_id": str(cfg.get("installation_id") or ""),
+                "key_set": bool(app and app.secrets.get("private_key")),
+            }
         return {
             "id": self.id,
             "kind": self.kind,
@@ -140,7 +170,24 @@ class Connection:
             "app_id": self.app_id,
             "installation_id": self.installation_id,
             "key_set": bool(self.private_key),
+            "app_ref": self.app_ref,
+            "app_name": app.name if app else "",
+            **shared,
         }
+
+
+def _app_row(app_ref: str) -> tool_connections.ToolConnection | None:
+    """보관함의 GitHub App 연결. 없거나 종류가 다르면 None."""
+    row = tool_connections.get(app_ref)
+    return row if row is not None and row.kind == APP_KIND else None
+
+
+def _app_key(conn: Connection) -> Any:
+    """부품을 다시 만들지 정하는 보관함 쪽 값 (앱 정보가 바뀌면 달라진다)."""
+    if not conn.app_ref:
+        return None
+    row = _app_row(conn.app_ref)
+    return (row.config, row.secrets) if row else "missing"
 
 
 def _hint(token: str) -> str:
@@ -154,6 +201,8 @@ _override: VcsAdapter | None = None
 _screen: dict[str, Connection] | None = None
 # 연결별 부품. 설정이 같을 때만 다시 쓴다
 _adapters: dict[str, tuple[Connection, VcsAdapter]] = {}
+# 부품을 만들 때 본 보관함 앱 값 (연결 id → `_app_key`). 앱 정보가 바뀌면 부품을 다시 만든다
+_adapter_apps: dict[str, Any] = {}
 
 
 def clean_paths(paths: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
@@ -261,16 +310,25 @@ def _build(conn: Connection) -> VcsAdapter:
 
         if conn.auth not in AUTHS:
             raise VcsError("config", f"모르는 인증 방식: {conn.auth} (가능: {', '.join(AUTHS)})")
-        app = (
-            GithubAppAuth(conn.app_id, conn.installation_id, conn.private_key)
-            if conn.auth == "app"
-            else None
-        )
+        app: GithubAppAuth | None = None
+        base_url = conn.base_url
+        if conn.auth == "app" and conn.app_ref:
+            row = _app_row(conn.app_ref)
+            if row is None:
+                raise VcsError("config", APP_MISSING)
+            app = GithubAppAuth(
+                str(row.config.get("app_id") or ""),
+                str(row.config.get("installation_id") or ""),
+                row.secrets.get("private_key") or "",
+            )
+            base_url = base_url or str(row.config.get("base_url") or "")
+        elif conn.auth == "app":
+            app = GithubAppAuth(conn.app_id, conn.installation_id, conn.private_key)
         return GithubVcsAdapter(
             repo=conn.repo,
             token="" if app else conn.token,
             app=app,
-            base_url=conn.base_url or DEFAULT_BASE_URL,
+            base_url=base_url or DEFAULT_BASE_URL,
             base_branch=conn.base_branch or "dev",
         )
     raise VcsError("config", f"모르는 PLANNING_VCS_KIND: {kind} (가능: {', '.join(KINDS)})")
@@ -285,11 +343,14 @@ def get_adapter(connection_id: str) -> VcsAdapter:
     conn = next((c for c in connections() if c.id == connection_id), None)
     if conn is None:
         raise VcsError("not_found", f"모르는 연결: {connection_id}")
+    key = _app_key(conn)
     hit = _adapters.get(conn.id)
-    if hit is not None and hit[0] == conn:
+    if hit is not None and hit[0] == conn and _adapter_apps.get(conn.id) == key:
         return hit[1]
+    _adapters.pop(conn.id, None)  # 보관함에서 앱이 지워졌으면 예전 부품을 쓰지 않는다
     adapter = _build(conn)
     _adapters[conn.id] = (conn, adapter)
+    _adapter_apps[conn.id] = key
     return adapter
 
 
@@ -312,6 +373,7 @@ def set_vcs(adapter: VcsAdapter | None) -> None:
     _override = adapter
     _cached = None
     _adapters.clear()
+    _adapter_apps.clear()
 
 
 def is_overridden() -> bool:
@@ -359,7 +421,111 @@ def load_saved() -> int:
         return 0
     _screen = conns or None
     _adapters.clear()
+    _adapter_apps.clear()
+    _migrate_inline_apps()
     return len(conns)
+
+
+def _api_url(raw: object) -> str:
+    """주소 비교용: 비어 있으면 공개 GitHub API 주소, 끝 `/`는 뗀다."""
+    from dev_agent.vcs.github import DEFAULT_BASE_URL
+
+    return (str(raw or "").strip() or DEFAULT_BASE_URL).rstrip("/")
+
+
+def _same_url(a: object, b: object) -> bool:
+    return _api_url(a) == _api_url(b)
+
+
+def _same_key(a: str, b: str) -> bool:
+    """PEM 비교: 앞뒤 공백·줄바꿈 종류(CRLF·LF) 차이는 같은 키로 본다."""
+
+    def norm(pem: str) -> str:
+        return "\n".join(line.strip() for line in pem.strip().splitlines())
+
+    return bool(a and b) and norm(a) == norm(b)
+
+
+def _migrate_inline_apps() -> None:
+    """예전 화면 연결의 앱 정보를 보관함 `github_app`으로 옮긴다 (켤 때 한 번, 다시 켜도 같다).
+
+    개발 AI가 보관함에 쓰는 유일한 곳이다. 켜기를 막지 않는다: 보관함이 없거나 깨졌거나
+    쓰지 못하면 경고 한 번을 남기고 예전 값(레포 연결에 넣은 앱 정보)으로 계속 돈다.
+
+    dashboard-api의 입력 확인(주소 정책·연결 확인)을 일부러 거치지 않는다. 이미 개발 AI에서
+    쓰던 값을 그대로 옮기는 것이라 새 입력이 아니다."""
+    global _screen
+    targets = [
+        c for c in (_screen or {}).values() if c.auth == "app" and c.private_key and not c.app_ref
+    ]
+    if not targets:
+        return
+    if not tool_connections.connections_file():
+        logger.warning(
+            "도구 연결 보관함 경로(%s)가 없어 GitHub App 정보를 옮기지 않았다 "
+            "(연결 %d개는 그대로 쓴다)",
+            tool_connections.FILE_ENV,
+            len(targets),
+        )
+        return
+    before = _screen
+    rows = dict(_screen or {})
+    moved = 0
+    try:
+        for conn in targets:
+            same_app = [
+                r
+                for r in tool_connections.read_all()
+                if r.kind == APP_KIND
+                and str(r.config.get("app_id") or "") == conn.app_id
+                and str(r.config.get("installation_id") or "") == conn.installation_id
+                and _same_url(r.config.get("base_url"), conn.base_url)
+            ]
+            found = next(
+                (
+                    r
+                    for r in same_app
+                    if _same_key(r.secrets.get("private_key", ""), conn.private_key)
+                ),
+                None,
+            )
+            if found is None and same_app:
+                # 같은 앱인데 키가 없거나 다르다: 어느 쪽이 맞는지 모르니 잇지도 지우지도 않는다
+                logger.warning(
+                    "연결 %s: 보관함의 같은 GitHub 앱과 개인 키가 달라 옮기지 않았다 (그대로 쓴다)",
+                    conn.id,
+                )
+                continue
+            if found is None:
+                config = {"app_id": conn.app_id, "installation_id": conn.installation_id}
+                if conn.base_url:
+                    config["base_url"] = conn.base_url
+                found = tool_connections.upsert(
+                    APP_KIND,
+                    f"GitHub 앱 {conn.app_id}",
+                    config,
+                    {"private_key": conn.private_key},
+                    conn_id=None,
+                    by="migration",
+                )
+            rows[conn.id] = dataclasses.replace(
+                conn, app_ref=found.id, app_id="", installation_id="", private_key=""
+            )
+            moved += 1
+        if moved:
+            _screen = rows
+            _save()
+    except (tool_connections.ToolConnectionError, OSError) as exc:
+        # 깨진 보관함·쓰기 실패 등: 레포 연결은 바꾸지 않고 예전 값으로 계속 돈다.
+        # 보관함에 이미 만든 앱은 남아도 된다 (다음에 켤 때 같은 키로 찾아 잇는다)
+        _screen = before
+        code = exc.code if isinstance(exc, tool_connections.ToolConnectionError) else "os_error"
+        logger.warning("GitHub App 정보를 보관함으로 옮기지 못했다 (%s, 그대로 쓴다)", code)
+        return
+    if moved:
+        _adapters.clear()
+        _adapter_apps.clear()
+        logger.info("GitHub App 정보 %d개를 도구 연결 보관함으로 옮겼다", moved)
 
 
 def _next_id(taken: dict[str, Connection]) -> str:
@@ -382,8 +548,12 @@ def upsert_connection(
     app_id: str | None = None,
     installation_id: str | None = None,
     private_key: str | None = None,
+    app_ref: str | None = None,
 ) -> Connection:
     """화면 연결을 넣거나 바꾼다. 토큰·App 개인 키를 비워 보내면 그 연결의 이전 값을 그대로 쓴다.
+
+    `app_ref`(보관함 `github_app` id)를 주면 앱 정보는 보관함 것을 쓰고 이 연결에는 넣지 않는다.
+    None이면 이전 값을 둔다. 인증이 token이면 비운다.
 
     부품을 바로 만들어 보고, 형식이 틀리면 `VcsError`(config)를 던지고 아무것도 바꾸지 않는다."""
     global _screen
@@ -407,6 +577,12 @@ def upsert_connection(
             "토큰에 쓸 수 없는 글자(한글·공백 등)가 들어 있어요. 토큰을 다시 복사해 넣어 주세요",
         )
     new_key = (private_key or "").strip()
+    new_auth = (auth or (before.auth if before else "token")).strip().lower()
+    ref = (app_ref if app_ref is not None else (before.app_ref if before else "")).strip()
+    if new_auth != "app":
+        ref = ""
+    if ref and _app_row(ref) is None:
+        raise VcsError("config", APP_MISSING)
     conn = Connection(
         id=cid,
         kind=kind,
@@ -418,19 +594,25 @@ def upsert_connection(
         mount=clean_mount(mount) if mount is not None else (before.mount if before else ""),
         source="screen",
         token=new_token or (before.token if before else ""),
-        auth=(auth or (before.auth if before else "token")).strip().lower(),
-        app_id=(app_id if app_id is not None else (before.app_id if before else "")).strip(),
-        installation_id=(
+        auth=new_auth,
+        app_id=""
+        if ref
+        else (app_id if app_id is not None else (before.app_id if before else "")).strip(),
+        installation_id=""
+        if ref
+        else (
             installation_id
             if installation_id is not None
             else (before.installation_id if before else "")
         ).strip(),
-        private_key=new_key or (before.private_key if before else ""),
+        private_key="" if ref else new_key or (before.private_key if before else ""),
+        app_ref=ref,
     )
     adapter = _build(conn)  # 틀리면 여기서 VcsError, 상태는 그대로
     rows[cid] = conn
     _screen = rows
     _adapters[cid] = (conn, adapter)
+    _adapter_apps[cid] = _app_key(conn)
     _save()
     return conn
 
@@ -446,6 +628,7 @@ def delete_connection(connection_id: str) -> bool:
     del rows[connection_id]
     _screen = rows or None
     _adapters.pop(connection_id, None)
+    _adapter_apps.pop(connection_id, None)
     _save()
     return True
 

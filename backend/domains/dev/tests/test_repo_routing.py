@@ -183,7 +183,7 @@ def test_connections_api() -> None:
     assert set(row) == {
         "id", "kind", "repo", "base_url", "base_branch", "description",
         "paths", "mount", "token_set", "token_hint", "source",
-        "auth", "app_id", "installation_id", "key_set",
+        "auth", "app_id", "installation_id", "key_set", "app_ref", "app_name",
     }  # fmt: skip
     assert (row["id"], row["token_set"], row["source"]) == ("conn-1", True, "screen")
     r = c.post("/api/planning/vcs/connections", json={"kind": "mock", "repo": "acme/api"})

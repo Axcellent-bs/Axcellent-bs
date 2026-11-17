@@ -106,7 +106,8 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
 
         토큰·App 개인 키를 비우면 이전 값을 둔다.
 
-        `auth`: token(사람 토큰) · app(GitHub App: `app_id`·`installation_id`·`private_key`)."""
+        `auth`: token(사람 토큰) · app(GitHub App). App은 보관함 `github_app` 연결 id(`app_ref`)로
+        고른다. 예전 방식(`app_id`·`installation_id`·`private_key`를 직접)도 받는다."""
         body = await _body(request)
         if body is None:
             return _err(400, "INVALID_VCS", "본문은 JSON 객체여야 한다")
@@ -128,6 +129,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
                 "app_id",
                 "installation_id",
                 "private_key",
+                "app_ref",
             )
         }
         if any(v is not None and not isinstance(v, str) for v in text.values()):
@@ -147,6 +149,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
                 app_id=text["app_id"],
                 installation_id=text["installation_id"],
                 private_key=text["private_key"] or None,
+                app_ref=text["app_ref"],
             )
         except vcs.VcsError as exc:
             return _err(400, "INVALID_VCS", exc.message)
@@ -177,7 +180,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
                 id=conn.id, kind=conn.kind, repo=conn.repo, base_url=conn.base_url,
                 base_branch=branch, description=conn.description, paths=list(conn.paths),
                 mount=conn.mount, auth=conn.auth, app_id=conn.app_id,
-                installation_id=conn.installation_id,
+                installation_id=conn.installation_id, app_ref=conn.app_ref,
             )  # fmt: skip
         return ""
 

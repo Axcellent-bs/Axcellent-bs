@@ -8,12 +8,14 @@ import { Notice, PageHead, SectionHead, StatusChip } from '@/components/connect/
 import { GithubAppCard } from '@/components/connect/GithubAppCard'
 import { DeployTools } from '@/components/connect/DeployTools'
 import { useToolList } from '@/components/connect/ToolForm'
-import { deployRows, dejafixView } from '@/lib/toolForms'
+import { appChoices, deployRows, dejafixView } from '@/lib/toolForms'
+import { EMPTY_REPO_FORM, repoAppLabel, repoBody, repoFormError, repoFormOf, type RepoForm } from '@/lib/repoForm'
 import { useSession } from './session'
 
 // 도구 연결 (/system/tools, 모두 연다): 고객사 개발팀이 쓰는 형상관리·배포·문서 도구와 AI 연결을 잇는 창구.
 // 형상관리·배포·문서는 회사 공용 연결이라 관리자만 바꾸고 일반 회원은 상태만 본다. AI(사람별 MCP 연결 안내)는 모두 쓴다.
 // 배포와 맨 위 GitHub 앱은 공용 도구 연결 보관함(dashboard-api tool-connections), 레포 연결은 개발 AI 저장소다.
+// 레포를 GitHub App으로 붙일 때는 맨 위 GitHub 앱 칸의 앱을 고른다(`app_ref`). 앱은 한 번만 넣고 배포와 같이 쓴다.
 // 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.
 // 연결이 2개 이상이면 AI가 PR마다 대상 레포를 제안하고 사람이 승인한다.
 const KINDS = [
@@ -61,11 +63,7 @@ const OTHERS: { name: string; tools: string; state: 'with-vcs' | 'deploy' | 'dej
 ]
 
 const api = vcsApi(DEV_API)
-type Form = { id?: string; addr: string; kind: string; base_url: string; repo: string; base_branch: string; token: string; description: string; paths: string; mount: string; auth: VcsAuth; app_id: string; installation_id: string; private_key: string; key_name: string }
-const EMPTY: Form = { addr: '', kind: 'github', base_url: '', repo: '', base_branch: '', token: '', description: '', paths: '', mount: '', auth: 'token', app_id: '', installation_id: '', private_key: '', key_name: '' }
-const toForm = (c: VcsConnection): Form => ({ id: c.id, addr: c.repo, kind: c.kind, base_url: c.base_url ?? '', repo: c.repo, base_branch: c.base_branch ?? '', token: '', description: c.description ?? '', paths: c.paths.join(', '), mount: c.mount ?? '', auth: c.auth ?? 'token', app_id: c.app_id ?? '', installation_id: c.installation_id ?? '', private_key: '', key_name: '' })
-// 담당 경로: 쉼표·줄바꿈으로 나눈다
-const splitPaths = (x: string) => x.split(/[,\n]/).map((p) => p.trim()).filter(Boolean)
+type Form = RepoForm
 const failed = (id: string, message: string): VcsTestResult => ({ ok: false, code: 'unavailable', message, checked_at: new Date().toISOString(), connection_id: id })
 
 const TONE = { ok: 'bg-emerald-50 text-emerald-700', bad: 'bg-red-50 text-red-700', wait: 'bg-amber-50 text-amber-700', none: 'bg-ink-100 text-ink-700' }
@@ -469,6 +467,8 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
   const [checking, setChecking] = useState(false)
   const putInv = (rows: VcsInventory[]) => setInv(Object.fromEntries(rows.map((r) => [r.connection_id, r])))
   const [tab, setTab] = useState<PanelItem>(readTab)
+  // 레포를 GitHub App으로 붙일 때 고르는 앱: 보관함 github_app (맨 위 GitHub 앱 칸)
+  const apps = tools.data ? appChoices(tools.data.connections) : []
   const pickTab = (t: PanelItem) => {
     setTab(t)
     try { localStorage.setItem(TAB_KEY, t) } catch { /* 저장이 막혀도 탭은 바뀐다 */ }
@@ -503,22 +503,12 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
     if (!form) return
     const editing = list?.find((c) => c.id === form.id)
     const repo = form.repo.trim()
-    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return setError('레포 주소를 넣어 주세요. 예: https://github.com/owner/name')
-    const app = form.auth === 'app'
-    if (app) {
-      if (!/^\d+$/.test(form.app_id.trim()) || !/^\d+$/.test(form.installation_id.trim())) return setError('앱 ID와 설치 ID는 숫자로 넣어 주세요.')
-      if (!form.private_key && !editing?.key_set) return setError('GitHub App 개인 키(.pem) 파일을 골라 주세요.')
-    } else if (!form.token && !editing?.token_set) return setError('접근 토큰을 넣어 주세요.')
+    const why = repoFormError(form, editing, apps.map((a) => a.id))
+    if (why) return setError(why)
     setSaving(true)
     setError(null)
     try {
-      const { paths, token, private_key, key_name: _name, app_id, installation_id, addr: _addr, ...rest } = form
-      const branch = form.base_branch.trim()
-      const next = await api.save({
-        ...rest, repo, base_url: form.base_url.trim(), base_branch: branch, detect_branch: !branch && form.kind === 'github',
-        description: form.description.trim(), paths: splitPaths(paths), mount: form.mount.trim(),
-        ...(app ? { app_id: app_id.trim(), installation_id: installation_id.trim(), ...(private_key ? { private_key } : {}) } : token ? { token } : {}),
-      })
+      const next = await api.save(repoBody(form))
       setList(next)
       setForm(null)
       // 저장한 연결을 바로 확인한다 (새 연결은 레포 이름으로 찾는다)
@@ -529,17 +519,6 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
     } finally {
       setSaving(false)
     }
-  }
-
-  // 개인 키는 파일에서 바로 읽어 보낸다. 화면에는 파일 이름만 남기고 내용은 보여 주지 않는다
-  const pickKey = (file?: File) => {
-    if (!file || !form) return
-    if (file.size > 16_000) return setError('개인 키 파일이 너무 커요. GitHub App에서 받은 .pem 파일을 골라 주세요.')
-    void file.text().then((text) => {
-      if (!text.includes('PRIVATE KEY')) return setError('GitHub App 개인 키(.pem) 파일이 아니에요.')
-      setError(null)
-      setForm((f) => (f ? { ...f, private_key: text, key_name: file.name } : f))
-    })
   }
 
   const remove = async (c: VcsConnection) => {
@@ -623,17 +602,17 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
                           className={`chip py-1 ${form.auth === a.id ? 'bg-brand-600 !text-white' : 'bg-ink-100 text-ink-700'}`}>{a.label}</button>
                       ))}
                     </div>
-                    {appAuth && (
-                      <div className="grid gap-3 md:grid-cols-3">
-                        <input className="field" inputMode="numeric" placeholder="앱 ID (App ID)" value={form.app_id} onChange={(e) => setForm({ ...form, app_id: e.target.value })} aria-label="앱 ID" />
-                        <input className="field" inputMode="numeric" placeholder="설치 ID (Installation ID)" value={form.installation_id} onChange={(e) => setForm({ ...form, installation_id: e.target.value })} aria-label="설치 ID" />
-                        <label className="field flex cursor-pointer items-center gap-2 text-sm">
-                          <input type="file" accept=".pem,application/x-pem-file" className="sr-only" onChange={(e) => pickKey(e.target.files?.[0])} aria-label="개인 키 파일" />
-                          <span className="chip bg-ink-100 text-ink-700">개인 키 .pem</span>
-                          <span className="truncate text-ink-500">{form.key_name || (editing?.key_set ? '넣음 · 바꾸려면 다시 고르기' : '파일 고르기')}</span>
-                        </label>
+                    {appAuth && (apps.length ? (
+                      <div className="space-y-1">
+                        <select className="field w-full md:w-1/2" value={form.app_ref} onChange={(e) => setForm({ ...form, app_ref: e.target.value })} aria-label="GitHub 앱">
+                          <option value="">GitHub 앱 고르기</option>
+                          {apps.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                        </select>
+                        <p className="text-xs text-ink-500">앱 ID·설치 ID·개인 키는 위 <a className="underline" href="#github-app">GitHub 앱</a> 칸에서 한 번만 넣어요. 배포와 같은 앱을 써요.</p>
                       </div>
-                    )}
+                    ) : (
+                      <p className="text-sm text-ink-500">{tools.data ? '연결한 GitHub 앱이 없어요. ' : 'GitHub 앱 목록을 불러오는 중이에요. '}<a className="underline" href="#github-app">위 GitHub 앱 칸</a>에서 먼저 앱을 연결해 주세요.</p>
+                    ))}
                   </div>
                 )}
                 <div className="grid gap-3 md:grid-cols-2">
@@ -693,7 +672,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
             {offline && <StatusChip tone="wait">개발·배포 AI에 연결할 수 없음</StatusChip>}
             {admin && !!list?.length && <button type="button" className="btn-ghost" onClick={checkAll} disabled={checking || offline}>{checking ? '점검 중…' : '보안 점검'}</button>}
             {admin && <button type="button" className="btn-primary px-4" disabled={offline || (!!form && !form.id)}
-              onClick={() => { setForm({ ...EMPTY }); setError(null) }}>레포 연결</button>}
+              onClick={() => { setForm({ ...EMPTY_REPO_FORM }); setError(null) }}>레포 연결</button>}
           </>} />
 
         {admin && form && !form.id && formEl}
@@ -719,7 +698,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
                     {admin && (
                       <div className="ml-auto flex gap-1.5">
                         <button type="button" className="btn-ghost" onClick={() => runTest(c.id)} disabled={!!testing || offline}>연결 확인</button>
-                        <button type="button" className="btn-ghost" onClick={() => { setForm(toForm(c)); setError(null) }}>수정</button>
+                        <button type="button" className="btn-ghost" onClick={() => { setForm(repoFormOf(c)); setError(null) }}>수정</button>
                         <button type="button" className="btn-quiet" onClick={() => remove(c)}>삭제</button>
                       </div>
                     )}
@@ -728,7 +707,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
                     <div><dt className="text-xs text-ink-500">병합 대상 브랜치</dt><dd className="mt-0.5">{c.base_branch || '—'}</dd></div>
                     <div><dt className="text-xs text-ink-500">API 주소</dt><dd className="mt-0.5 truncate text-xs leading-5">{c.base_url || '기본 주소'}</dd></div>
                     {c.auth === 'app' ? (
-                      <div><dt className="text-xs text-ink-500">GitHub App</dt><dd className="mt-0.5">앱 {c.app_id} · 설치 {c.installation_id}{c.key_set ? '' : ' · 키 없음'}</dd></div>
+                      <div><dt className="text-xs text-ink-500">GitHub App</dt><dd className="mt-0.5">{repoAppLabel(c)}</dd></div>
                     ) : (
                       <div><dt className="text-xs text-ink-500">접근 토큰</dt><dd className="mt-0.5">{c.token_set ? c.token_hint : '없음'}</dd></div>
                     )}
