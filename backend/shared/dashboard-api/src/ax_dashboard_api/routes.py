@@ -878,6 +878,16 @@ class CampaignStartBody(BaseModel):
     campaign_name: str = Field(min_length=1, max_length=100)
     channel: str = Field(min_length=1, max_length=50)
     budget_krw: int = Field(gt=0)
+    # 사람이 유튜브 쇼츠에 올린 영상 주소(선택). 마케팅 start_campaign이 그대로 받는다.
+    # 주소를 주면 test(시험 영상 여부)도 사람이 true·false로 정해야 한다
+    video_url: str | None = Field(default=None, min_length=1, max_length=500)
+    test: bool | None = None
+
+    @model_validator(mode="after")
+    def _test_flag_with_video(self) -> CampaignStartBody:
+        if self.video_url is not None and self.test is None:
+            raise ValueError("video_url을 주면 test(시험 영상 여부)를 true·false로 정해야 한다")
+        return self
 
 
 class CampaignResultBody(BaseModel):
@@ -906,7 +916,10 @@ async def start_campaign(body: CampaignStartBody) -> dict:
     key = f"ui:start:{body.campaign_id}:{body.budget_krw}"
     return ok(
         await marketing_client.call(
-            "start_campaign", body.model_dump(), campaign_id=body.campaign_id, key=key
+            "start_campaign",
+            body.model_dump(exclude_none=True),
+            campaign_id=body.campaign_id,
+            key=key,
         )
     )
 
