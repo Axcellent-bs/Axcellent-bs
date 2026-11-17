@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ax_agent_template.config import is_mock
 from ax_agent_template.execute import execute
+from ax_agent_template.tool_connections import ToolConnectionError
 from ax_contracts.schemas import (
     AgentRequest,
     AgentResult,
@@ -30,6 +31,8 @@ from ax_contracts.schemas.infra import (
     VerifyRecoveryInput,
     VerifyRecoveryOutput,
 )
+from infra_agent import deploy_tools
+from infra_agent.deploy_tools import DeployTool
 from infra_agent.deployments import SHOP_PAYMENT_CONFIG, Deployment
 from infra_agent.diagnosis import (
     Diagnosis,
@@ -251,7 +254,9 @@ async def rollback_deployment(request: AgentRequest) -> AgentResult:
     decision = await execute(
         ACTION, params, request.meta.model_copy(update={"idempotency_key": key}), evidence
     )
-    result = await _apply(request, rt, decision, target, previous.version, params, evidence)
+    result = await _apply(
+        request, rt, decision, target, previous.version, params, evidence, previous=previous
+    )
     rt.rollbacks[key] = {"context_id": context_id, "status": decision.status, "result": result}
     if result.status != TaskStatus.COMPLETED or decision.status != "executed":
         rt.rollbacks[key]["status"] = "not_executed"
@@ -266,6 +271,8 @@ async def _apply(
     to_version: str,
     params: dict[str, Any],
     evidence: Evidence,
+    *,
+    previous: Deployment | None = None,
 ) -> AgentResult:
     base = {
         "service": target.service,
@@ -280,6 +287,23 @@ async def _apply(
 
     if decision.status == "executed":
         output = {**base, "rolled_back_to": to_version, "path": _path_label(decision)}
+        tool = deploy_tools.tool_for(target.service)
+        if tool is not None or target.source is not None:
+            # 배포 도구가 연결된 서비스: 그 도구로 이전 버전을 다시 배포한다.
+            # 도구 이력에서 온 배포인데 연결을 못 읽으면(보관함이 깨짐 등) 시연 경로(장애 해제)로
+            # 넘어가지 않고 사람에게 넘긴다
+            return await _redeploy(
+                request,
+                rt,
+                tool,
+                target,
+                previous,
+                to_version,
+                output,
+                evidence,
+                reason,
+                alternatives,
+            )
         if target.applies_to == SHOP_PAYMENT_CONFIG:
             # 실제 되돌리기: 쇼핑몰 결제 설정을 이전 버전으로 (장애 스위치는 건드리지 않는다)
             try:
@@ -362,6 +386,82 @@ async def _apply(
 
 
 _INT_KEYS = ("suspect_count", "low_confidence", "irreversible_count", "prior_rollbacks")
+
+
+async def _redeploy(
+    request: AgentRequest,
+    rt: Any,
+    tool: DeployTool | None,
+    target: Deployment,
+    previous: Deployment | None,
+    to_version: str,
+    output: dict[str, Any],
+    evidence: Evidence,
+    reason: str,
+    alternatives: list[str],
+) -> AgentResult:
+    """관문을 통과한 롤백 = 배포 도구로 `to_version`을 다시 배포한다 (끝날 때까지 기다리지 않음).
+
+    실패하면(호출 오류·권한 없음·연결 확인 실패 상태) 다른 길로 넘어가지 않는다: outcome
+    `redeploy_failed` + 사람이 할 처리 순서(`handoff_steps`). 오류 문구에는 비밀 값이 없다.
+
+    부르기 전에 막는 경우 (실제 파이프라인에 틀린 버전을 보내지 않는다):
+    - 대상 배포가 지금 연결된 그 도구의 이력이 아니다 (시연 이력, 도구를 바꿈, 첫 받기 전)
+    - 되돌아갈 버전이 진짜 버전이 아니라 커밋 앞자리다 (`version_from_sha`)
+    """
+    step = (
+        tool.describe(to_version)
+        if tool is not None
+        else f"배포 도구에서 {target.service}를 {to_version}으로 다시 실행"
+    )
+    error: str | None = None
+    ref = None
+    if tool is None:
+        error = f"{target.source} 연결을 읽지 못했다 (도구 연결 확인)"
+    elif target.source != tool.tool:
+        error = (
+            f"{tool.tool} 배포 이력을 아직 받지 못해 자동으로 되돌리지 않았어요 "
+            "(이력을 받은 뒤 다시 시도하거나 사람이 처리)"
+        )
+    elif previous is not None and previous.version_from_sha:
+        error = (
+            f"되돌아갈 실행의 버전을 알 수 없어(커밋 {to_version}) 자동으로 되돌리지 않았어요 "
+            "(워크플로 run-name에 버전을 넣으면 자동으로 됨)"
+        )
+    else:
+        try:
+            ref = await tool.redeploy(to_version)
+        except ToolConnectionError as exc:
+            error = exc.message
+        except Exception as exc:  # noqa: BLE001 - 예외 문구는 넣지 않는다(바깥 응답이 섞일 수 있다)
+            error = type(exc).__name__
+    if ref is None:
+        base = {k: v for k, v in output.items() if k not in ("rolled_back_to", "path")}
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.FAILED,
+            outcome="redeploy_failed",
+            output={
+                **base,
+                "message": f"다시 배포 실패: {error}",
+                "handoff_steps": [step],
+                "fault_released": False,
+            },
+            evidence=evidence,
+            decision_reason=reason,
+        )
+    output["redeploy"] = {"tool": ref.tool, "run_id": ref.run_id, "url": ref.url}
+    output["fault_released"] = False  # 장애 주입은 건드리지 않는다 (복구는 verify_recovery가 본다)
+    rt.history.mark_rolled_back(target)
+    rt.history.record_redeploy(target.service, to_version, at=rt.clock(), run_id=ref.run_id)
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        output=output,
+        evidence=evidence,
+        decision_reason=reason,
+        alternatives_considered=alternatives,
+    )
 
 
 def _path_label(decision: ExecuteDecision) -> str:

@@ -248,3 +248,19 @@ def test_retries_stop_before_deadline(a2a_body, runtime) -> None:
     result = TestClient(app).post("/a2a", json=body).json()
     assert result["output"]["recovered"] is False
     assert runtime.sleep_waits == [30.0, 30.0]
+
+
+# ---- 배포 이력 파일
+
+
+def test_parse_reads_applies_to(tmp_path, monkeypatch) -> None:
+    history = _history(
+        tmp_path,
+        monkeypatch,
+        [
+            _row("v1", "2026-10-20T00:00:00Z", applies_to="shop_payment_config"),
+            _row("v1.0.1", "2026-10-21T04:50:00Z"),
+        ],
+    )
+    by_version = {d.version: d.applies_to for d in history.deployments}
+    assert by_version == {"v1": "shop_payment_config", "v1.0.1": None}

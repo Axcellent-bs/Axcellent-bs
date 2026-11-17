@@ -2,11 +2,14 @@
 
 템플릿 `create_agent_app(card, HANDLERS)`가 `/.well-known/agent-card.json`, `/health`,
 `POST /a2a`를 준다. 여기에 시연 준비 `POST /api/infra/demo-deploy`(운영자 admin만)를 더한다.
-시작할 때 DejaFix 현재 장애 감시(`dejafix_watch`, `INFRA_DEJAFIX_URL`이 있을 때만)를 켠다.
+시작할 때 DejaFix 현재 장애 감시(`dejafix_watch`, `INFRA_DEJAFIX_URL`이 있을 때만)와
+배포 이력 미리 받기(`deploy_poll`, 목 모드가 아닐 때만)를 켠다. 템플릿 앱은 FastAPI lifespan을 써서
+`on_startup`이 돌지 않으므로 lifespan을 감싼다.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 from collections.abc import AsyncIterator
@@ -16,9 +19,10 @@ from typing import Any, Literal
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import AwareDatetime, BaseModel, Field
 
+from ax_agent_template.config import is_mock
 from ax_agent_template.server import create_agent_app, verify_token
 from ax_contracts.schemas import AgentCard
-from infra_agent import dejafix_watch
+from infra_agent import dejafix_watch, deploy_poll
 from infra_agent.chat.a2a import CHAT_HANDLERS
 from infra_agent.deployments import Deployment
 from infra_agent.handlers import HANDLERS
@@ -87,11 +91,20 @@ _template_lifespan = app.router.lifespan_context
 async def _lifespan(a: FastAPI) -> AsyncIterator[None]:
     async with _template_lifespan(a):
         watch = dejafix_watch.start()
+        # 목 모드(테스트)에서는 보관함·배포 도구를 부르지 않는다
+        poll = (
+            None
+            if is_mock("infra")
+            else asyncio.create_task(deploy_poll.run_forever(get_runtime().history))
+        )
         try:
             yield
         finally:
-            if watch:
-                watch.cancel()
+            for task in (watch, poll):
+                if task:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
 
 
 app.router.lifespan_context = _lifespan
