@@ -6,7 +6,7 @@
 // 백엔드: planning receive_insight · pull_insights(data promo_concepts) · marketing receive_campaign_brief ·
 //         planning receive_campaign_update (마케팅 게시 · 데이터분석 성과)
 
-export type ProposalFrom = 'data' | 'marketing'
+export type ProposalFrom = 'data' | 'marketing' | 'finance'
 export type ProposalStatus = '확인 대기' | '기획안' | '마케팅 전달' | '진행 중' | '성과 확인' | '기획서로' | '폐기'
 
 /** 데이터 근거 한 줄: 무엇이 얼마인지 + 어느 skill이 낸 값인지 (데이터분석 값 그대로) */

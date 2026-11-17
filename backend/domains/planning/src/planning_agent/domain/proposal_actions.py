@@ -5,7 +5,7 @@
 
 사람 버튼: 받아오기(pull_insights) · 확정→마케팅(approve_proposal)
           · 확정→개발(proposal_to_request) · 폐기(reject_proposal) · 고치기(edit_proposal)
-받는 skill: receive_insight(data·marketing → 제안)
+받는 skill: receive_insight(data·marketing·finance → 제안)
           · receive_campaign_update(marketing 게시 · data 성과)
 
 LLM 초안·다른 부서 호출(data promo_concepts, marketing receive_campaign_brief)은
@@ -47,7 +47,7 @@ from planning_agent import proposals as ext
 PULL_CTX = "ctx_proposals"
 PULL_DONE = "pull_insights"  # 받아오기 결과 기록 (화면이 마지막 것을 보여 준다)
 PULL_FAILED = "pull_insights_failed"
-DEPT_LABEL = {"data": "데이터분석", "marketing": "마케팅"}
+DEPT_LABEL = {"data": "데이터분석", "marketing": "마케팅", "finance": "재무"}
 EFFECT_MAX_WINDOW = timedelta(days=7)  # 데이터분석 campaign_effect MAX_WINDOW와 같게
 
 
@@ -324,7 +324,7 @@ class ProposalMixin:
         self: Any, *, requester: str, inp: ReceiveInsightInput, near: str | None = None
     ) -> ActionResult:
         """near: 받아오기가 찾은 비슷한 앞 제안 (인사이트 id가 날마다 바뀌어도 후속으로 잇는다)."""
-        frm = "marketing" if requester == "marketing" else "data"
+        frm = requester if requester in ("marketing", "finance") else "data"
         same = _same_insight(self.state, inp.insight_id, frm) or (
             _find(self.state, near) if near else None
         )
