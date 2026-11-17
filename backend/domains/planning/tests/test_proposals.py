@@ -114,6 +114,22 @@ def test_pull_skips_similar_proposals_even_with_new_ids() -> None:
 
 
 @pytest.mark.role("planning")
+def test_finance_insight_keeps_sender_and_quotes_facts() -> None:
+    """재무 의견(budget_shift)도 제안으로 받는다: 보낸 쪽은 재무로 남고 근거는 재무 facts 그대로."""
+    svc = _svc()
+    fact = {"label": "아재개그 조회당 제작비", "value": "몸개그의 2.1배", "source": "finance"}
+    inp = _insight("budget_shift:1").model_copy(
+        update={"skill": "budget_shift", "facts": [InsightFact.model_validate(fact)]}
+    )
+    res = asyncio.run(svc.receive_insight(requester="finance", inp=inp))
+    p = _p(svc, res.output["proposal_id"])
+    assert p.from_ == "finance" and p.facts[0].value == "몸개그의 2.1배"
+    assert svc.state.activity[-1].from_ == "finance"
+    same = asyncio.run(svc.receive_insight(requester="data", inp=inp))
+    assert same.outcome == "created"  # 같은 id라도 보낸 쪽이 다르면 다른 인사이트
+
+
+@pytest.mark.role("planning")
 def test_rule_draft_quotes_facts_and_dedups_without_rewriting() -> None:
     writer = Writer()
     svc = _svc()

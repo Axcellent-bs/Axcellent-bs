@@ -193,7 +193,7 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
         <div className="pp-head">
           <span className={`rq-dept d-${p.from}`}>{DEPT_NAME[p.from]}</span>
           <Tag>{PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill}</Tag>
-          <span className="mono idc" title={p.insightId ? `${p.id} · 데이터분석 id ${p.insightId}` : p.id}>{idText(p.id)}</span>
+          <span className="mono idc" title={p.insightId ? `${p.id} · ${DEPT_NAME[p.from]} id ${p.insightId}` : p.id}>{idText(p.id)}</span>
           <span style={{ flex: 1 }} />
           <Tag tone={STATUS_TONE[p.status]}>{p.status}</Tag>
           <span className="muted small">{p.created}</span>

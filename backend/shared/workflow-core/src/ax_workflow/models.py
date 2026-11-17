@@ -606,7 +606,7 @@ class ProposalPast(DomainModel):
 class Proposal(DomainModel):
     id: str  # PROP-n
     title: str
-    from_: Literal["data", "marketing"] = Field(alias="from")
+    from_: Literal["data", "marketing", "finance"] = Field(alias="from")
     skill: str  # 인사이트를 낸 skill
     insight_id: str | None = None  # 보낸 쪽 인사이트 id (id 사슬의 시작)
     insight: str  # 받은 인사이트 (무엇을 발견했나, 보낸 쪽 문장)
