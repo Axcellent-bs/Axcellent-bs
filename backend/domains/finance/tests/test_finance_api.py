@@ -638,6 +638,26 @@ def test_find_drifts_goes_to_the_todo_list(
     assert next(t for t in todo if t["kind"] == "closing_drift")["count"] == 1
 
 
+def test_no_drift_alarm_when_orders_cannot_be_read(
+    client: TestClient, kit: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """주문을 못 읽은 장부(빈 판매 서버 등)로는 확정 결산과 비교하지 않는다 (11/17 거짓 경고)."""
+    import asyncio
+
+    from finance_agent import main as fmain
+
+    day = "2026-10-21"
+    first = kit.order("o1", kit.at(day), [("s", "book", 1, 100_000)])
+    _swap_books(monkeypatch, kit.books(orders=[first]))
+    client.post("/api/finance/closing/confirm", json={"period": "day", "date": day}, headers=HUMAN)
+    empty = kit.books(orders=[])
+    empty.unavailable.append("orders")
+    _swap_books(monkeypatch, empty)
+    handlers.state().closing_drifts = [{"stale": True}]
+    asyncio.run(fmain.run_and_store_daily_closing("manual"))
+    assert handlers.state().closing_drifts == [] and handlers.state().vat_drifts == []
+
+
 def test_cancel_keeps_the_snapshot_in_the_record(client: TestClient) -> None:
     key = {"period": "day", "date": "2026-10-22"}
     client.post("/api/finance/closing/confirm", json=key, headers=HUMAN)

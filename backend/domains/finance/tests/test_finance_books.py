@@ -205,6 +205,7 @@ EXECUTION = {
 def _transport(
     seen: list[httpx.Request],
     down: set[str] = frozenset(),  # type: ignore[assignment]
+    orders: list | None = None,
 ):
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
@@ -212,7 +213,9 @@ def _transport(
         if request.url.host in down:
             raise httpx.ConnectError("down")
         data = {
-            "/api/shop/orders": [SHOP_ORDER, {"order_id": "broken"}],
+            "/api/shop/orders": (
+                [SHOP_ORDER, {"order_id": "broken"}] if orders is None else orders
+            ),
             "/api/shop/products": [
                 {"product_id": "prd_0001", "category_code": "book"},
                 {"product_id": "prd_0004", "category_code": "stationery"},
@@ -270,6 +273,23 @@ def test_live_books_mark_missing_sources(monkeypatch: pytest.MonkeyPatch) -> Non
     books = asyncio.run(bk.live_books(_transport([], {"shop"})))
     assert {"orders", "products", "sellers", "coupons"} <= set(books.unavailable)
     assert books.orders == [] and books.meta()["unavailable"] == books.unavailable
+
+
+def test_empty_shop_is_missing_orders_not_zero_sales(monkeypatch: pytest.MonkeyPatch) -> None:
+    """판매 서버 전체에 주문이 0건이면(새 판매 서버로 바꾸고 데이터 전) 0원이 아니라 자료 없음이다.
+
+    11/17 새 캣북스 전환 때 재무가 0원으로 계산해, 확정 결산 13건이 "달라짐"이 되고 지난달 대비
+    −100%가 떴다.
+    """
+    monkeypatch.setenv("AX_SHOP_API_URL", "http://shop")
+    monkeypatch.setenv("AX_SAFETY_URL", "http://safety")
+    books = asyncio.run(bk.live_books(_transport([], orders=[])))
+    assert "orders" in books.unavailable and books.unavailable_core()
+    assert books.notes["orders_empty"] == bk.EMPTY_SHOP_NOTE
+    assert books.meta()["notes"]["orders_empty"].startswith("판매 서버에 주문 기록이 하나도")
+    # 주문이 한 건이라도 있으면 평소대로 읽는다
+    books = asyncio.run(bk.live_books(_transport([], orders=[SHOP_ORDER])))
+    assert "orders" not in books.unavailable and "orders_empty" not in books.notes
 
 
 def test_normalizers_refuse_bad_shapes() -> None:
@@ -341,7 +361,9 @@ def test_orders_get_a_longer_read_time_than_other_sources(
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen[request.url.path] = request.extensions["timeout"]["read"]
-        return httpx.Response(200, json={"data": []})
+        # 주문은 한 건 돌려준다. 0건은 "빈 판매 서버"라 자료 없음이 된다 (11/17)
+        data = [SHOP_ORDER] if request.url.path == "/api/shop/orders" else []
+        return httpx.Response(200, json={"data": data})
 
     async def run() -> bk.Books:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
