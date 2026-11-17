@@ -33,5 +33,5 @@ export const DATA_A2A_PLACEHOLDER = 'data-via-nginx'
 export const HUMAN_TOKEN_SET = SAFETY_HUMAN_TOKEN.length > 0
 
 
-/** 장애 대응: DejaFix 백엔드. 기본값 /dejafix-api는 개발 서버가 로그인까지 대신 해 주는 프록시(dejafix-proxy.ts) */
+/** 장애 대응: DejaFix 백엔드. 기본값 /dejafix-api는 개발 서버가 백엔드 dejafix-proxy(8030)로 넘기는 길(dejafix-proxy.ts) */
 export const DEJAFIX_API_URL = import.meta.env.VITE_DEJAFIX_API_URL ?? '/dejafix-api'

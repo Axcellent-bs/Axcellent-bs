@@ -340,3 +340,47 @@ def test_jenkins_outside_address_is_refused(monkeypatch) -> None:
     with pytest.raises(ToolConnectionError) as e:
         asyncio.run(tool.recent())
     assert e.value.code == "config" and calls == []
+
+
+def test_jenkins_without_version_param_uses_default_version() -> None:
+    """화면에서 버전 매개변수를 비우면 저장되지 않는다: 확인과 같이 `version`을 쓴다."""
+    blank = ToolConnection(
+        **{
+            **JENKINS_CONN.__dict__,
+            "config": {k: v for k, v in JENKINS_CONN.config.items() if k != "version_param"},
+        }
+    )
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        if req.method == "GET":
+            build = {
+                "number": 7,
+                "result": "SUCCESS",
+                "timestamp": 1_760_000_000_000,
+                "duration": 1000,
+                "actions": [{"parameters": [{"name": "version", "value": "v2.0.0"}]}],
+            }
+            return httpx.Response(200, json={"builds": [build]})
+        return httpx.Response(201, headers={"Location": f"{JENKINS}/queue/item/9/"})
+
+    tool = JenkinsTool(blank, transport=httpx.MockTransport(handler))
+    assert tool.version_param == "version"
+    assert [r.version for r in asyncio.run(tool.recent())] == ["v2.0.0"]
+    asyncio.run(tool.redeploy("v1.9.0"))
+    assert seen[-1].url.params["version"] == "v1.9.0"
+    assert "version=v1" in tool.describe("v1")
+
+
+def test_components_come_from_config() -> None:
+    """`config.components`는 쉼표로 나눠 장애 부위로 쓴다. 비우면 빈 값(이력이 다른 값을 쓴다)."""
+    config = {**JENKINS_CONN.config, "components": " payment, ,api"}
+    named = ToolConnection(**{**JENKINS_CONN.__dict__, "config": config})
+    assert JenkinsTool(named).components == ("payment", "api")
+    assert JenkinsTool(JENKINS_CONN).components == ()
+    actions = ToolConnection(
+        **{**ACTIONS.__dict__, "config": {**ACTIONS.config, "components": "checkout"}}
+    )
+    assert GithubActionsTool(actions, APP).components == ("checkout",)
+    assert GithubActionsTool(ACTIONS, APP).components == ()

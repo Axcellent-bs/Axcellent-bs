@@ -6,7 +6,7 @@ import { appChoices, bodyOf, formActions, formReducer, initForm, missingFields, 
 // 도구 연결(GitHub 앱·배포 도구·DejaFix)이 같이 쓰는 부품.
 // - ToolForm: 새 연결(또는 고치기) 하나. 칸은 서버 칸 정의(fields[kind])대로 → 연결 확인 → 저장
 // - ConnectedTool: 저장된 연결 한 줄. 상태·마지막 확인 + 다시 확인·고치기·끊기(확인 단계). 관리자만 버튼
-// 비밀 값은 보내기만 한다. 저장 뒤에는 서버가 준 가린 값(앞4글자•••• · 개인 키는 설정됨)만 보여 준다.
+// 비밀 값은 보내기만 한다. 저장 뒤에는 서버가 준 가린 값(•••• · 개인 키는 설정됨)만 보여 준다.
 
 /** 도구 연결 목록 받기. 화면 여러 곳(배포·GitHub 앱·DejaFix 카드)이 같은 목록을 다시 받는다 */
 export function useToolList() {

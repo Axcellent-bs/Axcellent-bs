@@ -201,13 +201,10 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
 
 DejaFix 화면은 띄우지 않아요. DejaFix API 계약(`DejaFix/DejaFix` `contracts/api.md` #10)의 `GET /api/incidents?status=problem`으로 **지금 진행 중인 장애만** 받아서 AXcellent가 그려요 (`src/pages/Incidents.tsx`, `src/lib/dejafix.ts`).
 
-- 항상 **실제 DejaFix 데이터**를 불러요. `frontend/.env`에 아래를 넣고 개발 서버를 다시 켜요.
-
-  ```
-  DEJAFIX_PROXY_TARGET=http://127.0.0.1:18000   # DejaFix 백엔드 주소
-  DEJAFIX_USERNAME=admin                        # DejaFix 계정 (viewer 이상)
-  DEJAFIX_PASSWORD=<DejaFix .env 의 DEMO_ADMIN_PASSWORD>
-  ```
-  DejaFix는 모든 API에 로그인 토큰을 요구해요. 개발 서버(`dejafix-proxy.ts`)가 이 계정으로 대신 로그인해서 부르기 때문에 토큰과 비밀번호는 화면 코드에 실리지 않아요. 읽기(GET)만 넘겨요.
+- 항상 **실제 DejaFix 데이터**를 불러요. DejaFix 주소·계정은 화면의 **회원·서버 관리 › DejaFix 연결**에서 정해요(도구 연결 보관함).
+  개발 서버(`dejafix-proxy.ts`)는 `/dejafix-api`를 백엔드 dejafix-proxy(`http://127.0.0.1:8030`, `run_all.sh`가 띄움)로 그대로 넘기고,
+  그 프록시가 보관함의 계정으로 대신 로그인해요. 그래서 토큰과 비밀번호는 화면 코드에 실리지 않아요. 읽기(GET)만 넘겨요.
+- 보관함을 거치지 않고 DejaFix 백엔드에 바로 붙일 때만 `frontend/.env`에 `DEJAFIX_PROXY_TARGET`(예: `http://127.0.0.1:18000`)과
+  `DEJAFIX_USERNAME`·`DEJAFIX_PASSWORD`(viewer 이상)를 넣어요. 그러면 개발 서버가 대신 로그인해요.
 - 30초마다 다시 받아요. 응답의 `meta.stale`이 true면 "수집 멈춤" 안내를 띄워요.
 - 예전에 `public/dejafix/`에 넣어 두던 DejaFix 빌드본과 `scripts/build-dejafix.mjs`는 지웠어요.

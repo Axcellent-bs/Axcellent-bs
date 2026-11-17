@@ -37,12 +37,11 @@ class ToolConnectionError(Exception):
 
 
 def mask(value: str, *, key: bool = False) -> str:
-    """화면에 보일 가린 값. 개인 키는 `설정됨`, 짧은 값은 `••••`, 나머지는 `앞4글자••••`."""
-    if key:
-        return "설정됨"
-    if len(value) <= 4:
-        return "••••"
-    return value[:4] + "••••"
+    """화면에 보일 가린 값. 개인 키는 `설정됨`, 나머지 비밀은 앞글자 없이 `••••`.
+
+    목록은 회원 모두가 보므로 토큰·비밀번호의 일부도 내보내지 않는다.
+    """
+    return "설정됨" if key else "••••"
 
 
 @dataclass(frozen=True)

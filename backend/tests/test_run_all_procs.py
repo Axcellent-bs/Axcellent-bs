@@ -210,6 +210,17 @@ def test_run_all_checks_running_before_start_and_no_longer_restarts_silently() -
     assert "export AX_GIT_COMMIT" in text
 
 
+def test_run_all_exports_tool_connections_file() -> None:
+    """도구 연결 보관함 경로를 회사 연결 파일과 같은 꼴로 내보낸다."""
+    text = (BACKEND / "scripts" / "run_all.sh").read_text(encoding="utf-8")
+    line = (
+        "export AX_TOOL_CONNECTIONS_FILE="
+        '"${AX_TOOL_CONNECTIONS_FILE:-$PWD/$DATA/tool_connections.json}"'
+    )
+    assert line in text
+    assert text.index(line) < text.index('-m uvicorn "$module"')
+
+
 # --- dejafix-proxy (8030): 계정이 없어도 run_all이 띄운다 ---------------------
 
 RUN_ALL = BACKEND / "scripts" / "run_all.sh"
@@ -380,7 +391,7 @@ def _ext_run(env: dict[str, str], tmp_path: Path, dotenv: str | None = None) -> 
         (tmp_path / ".env").write_text(dotenv, encoding="utf-8")
     block = _between(*EXT_BLOCK)
     snippet = (
-        f'cd "{tmp_path.as_posix()}"\nAPPS=$(cat <<\'EOF\'\n' + "\n".join(_apps()) + "\nEOF\n)\n"
+        f"cd \"{tmp_path.as_posix()}\"\nAPPS=$(cat <<'EOF'\n" + "\n".join(_apps()) + "\nEOF\n)\n"
         f'{block}\necho "on=$SHOP_EXTERNAL_ON"\necho "$APPS" | awk "NF {{print \\$1}}"'
     )
     return _run(snippet, env).splitlines()
@@ -416,7 +427,7 @@ def test_shop_api_external_on_is_not_owned_for_stop_or_markers(tmp_path: Path) -
     """on이면 PORTS에 8010, MARKERS에 shop-api·shop_traffic, 잠금에 traffic pid 파일이 없다."""
     text = RUN_ALL.read_text(encoding="utf-8")
     head = text[text.index('APPS="') : text.index("# --only 묶음 이름")]
-    head = head.replace('MARKERS=()', 'DATA=.data\nMARKERS=()', 1)
+    head = head.replace("MARKERS=()", "DATA=.data\nMARKERS=()", 1)
     tail = (
         '\necho "ports=$PORTS"\nprintf "%s\n" "${MARKERS[@]}"'
         '\nprintf "%s\n" "${COLLECTOR_LOCKS[@]}"'

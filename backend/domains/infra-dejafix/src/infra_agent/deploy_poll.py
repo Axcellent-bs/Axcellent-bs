@@ -59,7 +59,7 @@ async def poll_once(history: DeploymentHistory, tools: list[DeployTool]) -> None
                 type(exc).__name__,
             )
             continue
-        history.replace_service(tool.service, runs, tool=tool.tool)
+        history.replace_service(tool.service, runs, tool=tool.tool, components=tool.components)
 
 
 async def run_forever(history: DeploymentHistory) -> None:

@@ -74,6 +74,8 @@ class RunRef:
 class DeployTool(Protocol):
     service: str
     tool: str
+    # 연결에 적은 장애 부위(`config.components`, 쉼표로 나눔). 비었으면 이력이 다른 값을 쓴다
+    components: tuple[str, ...]
 
     async def recent(self, limit: int = 20) -> list[ToolRun]: ...
 
@@ -152,6 +154,12 @@ def _iso(raw: Any) -> datetime | None:
 def _text(conn: ToolConnection, key: str, default: str = "") -> str:
     value = conn.config.get(key)
     return value.strip() if isinstance(value, str) and value.strip() else default
+
+
+def _components(conn: ToolConnection) -> tuple[str, ...]:
+    """`config.components`("payment, checkout") → ("payment", "checkout"). 빈 값은 뺀다."""
+    parts = (p.strip() for p in _text(conn, "components").split(","))
+    return tuple(dict.fromkeys(p for p in parts if p))
 
 
 # ---------- GitHub Actions ----------
@@ -249,6 +257,7 @@ class GithubActionsTool:
         self.repo = _text(conn, "repo")
         self.workflow = _text(conn, "workflow")
         self.version_input = _text(conn, "version_input", "version")
+        self.components = _components(conn)
 
     def __repr__(self) -> str:
         return f"GithubActionsTool(service={self.service!r}, repo={self.repo!r})"
@@ -439,7 +448,9 @@ class JenkinsTool:
         self.service = _text(conn, "service")
         self.url = _text(conn, "url").rstrip("/")
         self.job = _text(conn, "job")
-        self.version_param = _text(conn, "version_param")
+        # 화면에서 비워 두면 저장하지 않는다: 확인(dashboard-api)과 같은 기본값 version
+        self.version_param = _text(conn, "version_param", "version")
+        self.components = _components(conn)
 
     def __repr__(self) -> str:
         return f"JenkinsTool(service={self.service!r}, job={self.job!r})"

@@ -69,7 +69,7 @@ def test_list_has_fields_and_no_secrets(calls, client) -> None:
     }
     assert len(data["connections"]) == 1
     assert SECRET not in client.get(BASE).text
-    assert data["connections"][0]["secrets_set"] == {"api_token": "jenk••••"}
+    assert data["connections"][0]["secrets_set"] == {"api_token": "••••"}
 
 
 def test_create_runs_checks_and_saves(calls, client) -> None:
@@ -296,3 +296,24 @@ def test_recheck_of_stored_link_local_url_makes_no_request(wire, client) -> None
     data = client.post(BASE + "/jenkins-1/check").json()["data"]
     assert data["ok"] is False and "INVALID_URL" in data["checks"][0]["detail"]
     assert wire == []
+
+
+def test_deploy_kinds_have_optional_components_field(calls, client) -> None:
+    fields = client.get(BASE).json()["data"]["fields"]
+    for kind in ("github_actions", "jenkins"):
+        comp = next(f for f in fields[kind] if f["key"] == "components")
+        assert comp["required"] is False and comp["secret"] is False
+        assert "DejaFix component" in comp["help"] and "서비스 이름" in comp["help"]
+        service = next(f for f in fields[kind] if f["key"] == "service")
+        assert "롤백" in service["help"]
+    base_url = next(f for f in fields["github_app"] if f["key"] == "base_url")
+    assert "https://<host>/api/v3" in base_url["help"]
+
+
+def test_components_are_kept_and_blank_is_dropped(calls, client) -> None:
+    body = _body(config={**JENKINS, "components": " payment, api "})
+    saved = client.post(BASE, json=body).json()["data"]["connection"]
+    assert saved["config"]["components"] == "payment, api"
+    blank = routes.ToolConnectionIn(**_body(config={**JENKINS, "components": " "}))
+    config, _ = routes._clean(blank)
+    assert "components" not in config

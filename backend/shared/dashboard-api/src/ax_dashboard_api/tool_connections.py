@@ -46,19 +46,30 @@ def _f(
     return {"key": key, "label": label, "secret": secret, "required": required, "help": help}
 
 
+SERVICE_HELP = (
+    "이 도구가 배포하는 서비스 이름. "
+    "장애·롤백에 나오는 서비스 이름과 같게 적어 주세요 (예: shop-api)"
+)
+BASE_URL_HELP = "비워 두면 api.github.com. Enterprise는 https://<host>/api/v3"
+COMPONENTS_HELP = (
+    "장애 부위 이름(DejaFix component 태그와 같게). 쉼표로 여럿. "
+    "비우면 서비스 이름을 씀 (예: payment)"
+)
+
 FIELDS: dict[str, list[dict[str, Any]]] = {
     "github_app": [
         _f("app_id", "앱 ID", help="GitHub 앱 설정 맨 위의 App ID (숫자)"),
         _f("installation_id", "설치 ID", help="앱을 조직에 설치한 주소 끝의 숫자"),
         _f("private_key", "개인 키(.pem)", secret=True, help="앱 설정에서 만든 개인 키 파일 내용"),
-        _f("base_url", "GitHub Enterprise 주소", required=False, help="비워 두면 api.github.com"),
+        _f("base_url", "GitHub Enterprise 주소", required=False, help=BASE_URL_HELP),
     ],
     "github_actions": [
         _f("app", "GitHub 앱 연결", help="위에서 연결한 GitHub 앱"),
         _f("repo", "레포", help="owner/name"),
         _f("workflow", "배포 워크플로 파일", help="예: deploy.yml"),
         _f("version_input", "버전 입력 이름", required=False, help="비워 두면 version"),
-        _f("service", "대상 서비스", help="이 도구가 배포하는 서비스 이름"),
+        _f("service", "대상 서비스", help=SERVICE_HELP),
+        _f("components", "장애 부위", required=False, help=COMPONENTS_HELP),
     ],
     "jenkins": [
         _f("url", "Jenkins 주소", help="예: https://jenkins.example.com"),
@@ -66,7 +77,8 @@ FIELDS: dict[str, list[dict[str, Any]]] = {
         _f("api_token", "API 토큰", secret=True),
         _f("job", "작업 이름", help="폴더 안 작업은 폴더/작업"),
         _f("version_param", "버전 매개변수 이름", required=False, help="비워 두면 version"),
-        _f("service", "대상 서비스", help="이 도구가 배포하는 서비스 이름"),
+        _f("service", "대상 서비스", help=SERVICE_HELP),
+        _f("components", "장애 부위", required=False, help=COMPONENTS_HELP),
     ],
     "dejafix": [
         _f("url", "DejaFix 백엔드 주소"),
