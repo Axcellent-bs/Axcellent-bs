@@ -20,6 +20,7 @@ DEFAULT_PORTS: dict[str, int] = {
     "memory": 8002,
     "shop-api": 8010,
     "dashboard-api": 8020,
+    "dejafix-proxy": 8030,
     "planning": 8101,
     "support": 8102,
     "marketing": 8103,

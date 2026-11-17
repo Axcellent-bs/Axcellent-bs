@@ -5,10 +5,14 @@ description = "dejafix-proxy — DejaFix 읽기 전용 로그인 대행 프록�
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "ax-agent-template",
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "httpx>=0.27",
 ]
+
+[tool.uv.sources]
+ax-agent-template = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

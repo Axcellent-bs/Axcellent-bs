@@ -52,7 +52,7 @@ AXcellent 에이전트들이 캣북스의 실제 주문·결제 데이터로 A2A
 cd backend
 uv sync --all-packages
 cp .env.example .env            # LLM_MODEL·LLM_BASE_URL·LLM_API_KEY(·EMBED_MODEL)를 채운다. 커밋하지 않는다. 이미지를 읽는 모델이면 영수증 사진 대조도 켜진다
-bash scripts/run_all.sh         # 16개 서버(DejaFix 계정이 있으면 17개) (+ SHOP_TRAFFIC=on이면 캣북스 가상 주문 트래픽). 로그 backend/.logs/, 데이터 backend/.data/
+bash scripts/run_all.sh         # 17개 서버(dejafix-proxy 포함) (+ SHOP_TRAFFIC=on이면 캣북스 가상 주문 트래픽). 로그 backend/.logs/, 데이터 backend/.data/
 bash scripts/run_web.sh         # 다른 터미널: 화면(frontend 3090)을 실제 모드 토큰으로 켠다
 bash scripts/run_all.sh stop
 ```
@@ -76,7 +76,7 @@ bash scripts/run_all.sh stop
   - 안 띄운 서비스는 `AX_ENABLED_SERVICES`에서도 자동으로 빠진다. 그래서 라우터가 그쪽으로 A2A를 보내지 않고 사람 할 일함으로 넘긴다. 이미 `AX_ENABLED_SERVICES`를 줬으면 둘의 교집합이고, 남는 서비스가 없으면 `none`(모두 끔)이다.
   - 캣북스 가상 주문은 `.env`에 `SHOP_TRAFFIC=on`이 있을 때만 넣는다(기본 꺼짐, 끄면 `캣북스 가상 주문 꺼짐(…)` 한 줄). 꺼도 같은 스크립트가 발송·도착 표시와 재고 보충은 계속 한다(사람이 사이트에서 한 주문도 정산되게). 결제 장애 감지는 60초에 결제 표본 5건 이상이 필요해서 장애 시연 때는 켠다. `stop`은 지금처럼 전체 포트를 끈다.
   - shop-api의 바인드 주소는 `AX_SHOP_API_HOST`로 바꾼다(기본 `127.0.0.1`, 다른 서버는 늘 `127.0.0.1`). 예: 같은 망의 다른 PC에서 부르려면 `AX_SHOP_API_HOST=0.0.0.0 bash scripts/run_all.sh`. 이때 8010이 외부에 열리니 방화벽을 확인한다.
-  - DejaFix 읽기 전용 프록시(`dejafix-proxy`, 8030)는 `.env`에 `DEJAFIX_USERNAME`이 있을 때만 run_all이 같이 띄운다(없으면 `dejafix-proxy 안 띄움(DEJAFIX_USERNAME 없음)` 한 줄). 인프라 AI가 DejaFix 장애를 읽게 하려면 `.env`에 `INFRA_DEJAFIX_URL=http://127.0.0.1:8030`(예시)을 둔다.
+  - DejaFix 읽기 전용 프록시(`dejafix-proxy`, 8030)는 계정이 없어도 run_all이 같이 띄운다(연결 전에는 503 `DEJAFIX_NOT_CONNECTED`). 연결은 화면의 도구 연결(보관함 `dejafix`)에서 정하면 재시작 없이 반영되고, 인프라 AI·개발 AI는 보관함에 `dejafix`가 있으면 이 프록시 주소를 쓴다(`INFRA_DEJAFIX_URL`·`PLANNING_DEJAFIX_API_URL`이 있으면 그 값이 먼저).
   - 메모리(전용 메모리, Windows 로컬 측정): 전체 16개 서버 + 트래픽은 프로세스 36개·약 940MB, `data-demo`는 26개·약 680MB다.
 - Docker가 필요하다. 이벤트 버스(Redis)를 컨테이너 `ax-redis`로 띄운다 (`REDIS_URL`을 주면 그걸 쓴다).
 - 에이전트 토큰(`AX_AGENT_TOKENS`)·사람 토큰은 켤 때마다 새로 만들어 프로세스에만 넘긴다. 화면에 넘길 값만

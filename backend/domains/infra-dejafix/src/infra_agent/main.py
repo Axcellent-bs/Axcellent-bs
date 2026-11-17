@@ -2,7 +2,7 @@
 
 템플릿 `create_agent_app(card, HANDLERS)`가 `/.well-known/agent-card.json`, `/health`,
 `POST /a2a`를 준다. 여기에 시연 준비 `POST /api/infra/demo-deploy`(운영자 admin만)를 더한다.
-시작할 때 DejaFix 현재 장애 감시(`dejafix_watch`, `INFRA_DEJAFIX_URL`이 있을 때만)와
+시작할 때 DejaFix 현재 장애 감시(`dejafix_watch`, 주소는 매 회차 정함)와
 배포 이력 미리 받기(`deploy_poll`, 목 모드가 아닐 때만)를 켠다. 템플릿 앱은 FastAPI lifespan을 써서
 `on_startup`이 돌지 않으므로 lifespan을 감싼다.
 """

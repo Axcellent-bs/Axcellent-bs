@@ -4,7 +4,7 @@
 - 쇼핑몰 결제 서버 상태 (shop-api 장애 스위치 상태: 실패 중·느림)
 - 최근 진단 결과 (이 서버가 기억하는 사건별 마지막 진단: 원인 후보·확신도)
 - 최근 장애 사건과 그 안의 인프라 단계 (총괄 `GET /api/incidents`, 읽기 전용)
-- DejaFix 현재 장애 (Zabbix 알람, `INFRA_DEJAFIX_URL`이 없으면 `configured: false`)
+- DejaFix 현재 장애 (Zabbix 알람, 주소가 없으면 `configured: false`; 환경변수 또는 보관함 연결)
 
 숫자·상태는 코드가 모으고 LLM은 풀어 쓸 뿐이다. 하나를 못 읽어도 나머지는 넣고,
 못 읽은 이름은 `unavailable`에 남긴다(모르는 값을 채워 넣지 않는다).

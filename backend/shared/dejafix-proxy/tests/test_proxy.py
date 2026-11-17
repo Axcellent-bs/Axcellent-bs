@@ -82,7 +82,7 @@ async def test_unconfigured_credentials_503(monkeypatch):
     async with _app_client(monkeypatch, up, creds=False) as c:
         res = await c.get("/api/incidents")
     assert res.status_code == 503
-    assert res.json()["error"]["code"] == "DEJAFIX_NOT_CONFIGURED"
+    assert res.json()["error"]["code"] == "DEJAFIX_NOT_CONNECTED"
     assert up.logins == 0
 
 

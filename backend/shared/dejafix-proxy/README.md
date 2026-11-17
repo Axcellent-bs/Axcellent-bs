@@ -6,9 +6,9 @@
 
 - **GET만** 넘긴다. 그 밖의 메서드는 405 `METHOD_NOT_ALLOWED`.
 - **DejaFix의 `/api/*` 조회만** 넘긴다. `/api/auth/*`(로그인 포함)와 그 밖의 경로는 404.
-- 계정은 **viewer 권한**으로만 쓴다. 환경변수로만 받고 응답·로그에 싣지 않는다.
+- 계정은 **viewer 권한**으로만 쓴다. 요청마다 공용 보관함의 `dejafix` 연결(주소·계정·비밀번호)을 먼저 보고, 없으면 환경변수를 쓴다. 대상·계정이 바뀌면 다시 로그인한다. 보관함 주소는 `company_connection.check_host` 정책을 통과해야 부른다. 응답·로그에 싣지 않는다.
 
-## 2. 환경변수 (`.env`, 커밋 금지)
+## 2. 환경변수 (`.env`, 커밋 금지; 보관함에 `dejafix`가 없을 때만 쓴다)
 | 이름 | 기본값 | 뜻 |
 | --- | --- | --- |
 | `DEJAFIX_PROXY_TARGET` | `http://127.0.0.1:18000` | 서버에서 닿는 DejaFix 백엔드 주소 (고정 주소로 정해야 한다) |
@@ -22,8 +22,8 @@ DejaFix 응답을 상태 코드·본문 그대로 돌려준다. 이 서비스가
 | --- | --- | --- |
 | 405 | `METHOD_NOT_ALLOWED` | GET이 아님 |
 | 404 | `NOT_FOUND` | `/api/*`가 아니거나 `/api/auth/*` |
-| 503 | `DEJAFIX_NOT_CONFIGURED` | 계정 환경변수가 비어 있음 |
-| 502 | `DEJAFIX_UNREACHABLE` | DejaFix 백엔드에 연결할 수 없음 |
+| 503 | `DEJAFIX_NOT_CONNECTED` | 보관함에도 환경변수에도 연결이 없음 |
+| 502 | `DEJAFIX_UNREACHABLE` | DejaFix 백엔드에 연결할 수 없음, 또는 보관함 주소가 정책에 맞지 않음 |
 
 `GET /healthz`는 DejaFix를 부르지 않고 `{"status": "ok"}`만 준다.
 
@@ -32,5 +32,5 @@ DejaFix 응답을 상태 코드·본문 그대로 돌려준다. 이 서비스가
 
 ## 5. 실행·테스트
 - 서버: `docker compose -f infra/compose.yml up dejafix-proxy`, 또는 `uv run uvicorn ax_dejafix_proxy.main:app --port 8030`
-- 로컬: `bash scripts/run_all.sh`가 같이 띄운다. `.env`에 `DEJAFIX_USERNAME`이 있을 때만(없으면 띄우지 않고 한 줄만 찍는다). 인프라 AI용 주소 예시: `INFRA_DEJAFIX_URL=http://127.0.0.1:8030`
+- 로컬: `bash scripts/run_all.sh`가 같이 띄운다. 계정이 없어도 띄운다(연결 전 503). 인프라 AI는 보관함에 `dejafix`가 있으면 이 프록시를 쓰고, 환경변수로 정하려면 `INFRA_DEJAFIX_URL=http://127.0.0.1:8030`
 - 테스트: `uv run pytest shared/dejafix-proxy` (DejaFix는 가짜 응답으로 대체, 실제 DejaFix 불필요)
