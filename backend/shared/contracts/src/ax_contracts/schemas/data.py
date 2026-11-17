@@ -3564,6 +3564,15 @@ class CoverageRow(AxModel):
     suppressed: bool = False
     status: Literal["ok", "population_missing", "error"] = "ok"
     reason: str = ""
+    # ---- 고객 구성 지수 (11/17, 모두 선택). 응답 안 함·인구 없는 줄·숨긴 줄은 None
+    # 이 묶음에 합산한 인구 구간 (사람이 읽는 말, 예: "20~24세 + 25~29세", "50세 이상 합산")
+    population_note: str = ""
+    # 이 묶음 구매자 ÷ 모든 속성 값을 답한 구매자 합 (응답 안 함 제외)
+    buyer_share: float | None = Field(default=None, ge=0, le=1)
+    # 이 묶음 인구 ÷ 표의 모든 묶음 인구 합
+    population_share: float | None = Field(default=None, ge=0, le=1)
+    # buyer_share ÷ population_share × 100 (100 = 인구 구성과 같음)
+    index: float | None = Field(default=None, ge=0)
 
 
 class MarketCoverageInput(AxModel):

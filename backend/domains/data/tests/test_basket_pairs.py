@@ -147,6 +147,29 @@ def test_product_level_and_category_is_not_a_pair() -> None:
     assert "book" not in codes  # 대분류는 쌍에 없다
 
 
+def test_rare_items_are_filtered_before_pairs_but_results_stay_the_same() -> None:
+    """산 사람이 기준(5명) 미만인 상품(p_g4, 2명)은 쌍을 세기 전에 빠진다. lift 분모(p_g1 17명)는
+    거르기 전 값, 그 상품의 쌍은 숨긴 쌍으로 그대로 보인다."""
+    store = make_store([("r", 2, {"age_band": "20s", "gender": "female"}, ["g1", "g4"])])
+    cfg = CFG.model_copy(update={"genres": {**CFG.genres, "g4": "장르4"}})
+    out = basket(store, level="product", cfg=cfg)
+    first, *hidden = out.pairs
+    assert (first.a_code, first.b_code, first.a_buyers) == ("p_g1", "p_g2", 17)
+    assert first.lift == round(10 * 30 / (17 * 13), 4)  # 전체 30명, p_g1 17명 (거르기 전)
+    assert [(p.a_code, p.b_code, p.suppressed) for p in hidden] == [
+        ("p_g1", "p_g4", True), ("p_g2", "p_g3", True)]  # fmt: skip
+    w = seg.segment_window("90d", NOW)
+    with store.segment_session(TENANT, w.start, w.end, []) as s:
+        items, together = s.pair_counts("product", {}, 5)
+        assert items["p_g4"] == 2 and together == {("p_g1", "p_g2"): 10}
+        n = s.conn.execute("SELECT COUNT(*) FROM seg_pi WHERE code = 'p_g4'").fetchone()[0]
+        assert n == 0  # 표에서 빠졌다
+        assert ("p_g1", "p_g4") in s.hidden_pairs("product", {}, 5, 10)  # 숨긴 쌍은 다시 만든 표로
+        s.pair_counts("product", {}, 5)  # 다시 거른 뒤에도
+        again, pairs = s.pair_counts("product", {}, 1)  # 기준 1이면 거르기 전 표로 다시 센다
+        assert again == items and pairs[("p_g1", "p_g4")] == 2
+
+
 def test_unknown_genres_are_left_out_of_pairs() -> None:
     store = make_store([("v", 6, {"age_band": "20s", "gender": "female"}, ["g1", "ghost"])])
     out = basket(store)

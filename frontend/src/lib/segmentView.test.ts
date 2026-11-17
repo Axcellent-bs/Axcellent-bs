@@ -7,7 +7,7 @@ import type {
   SegmentOptionsOutput, SegmentProfileOutput,
 } from "./data.ts";
 import {
-  basketNoun, basketView, coverageView, dataNote, favoritesView, fakeBadge, filterLabel, isHigh, nextMonth, optionsView, parseTarget,
+  basketNoun, basketView, coverageSource, coverageView, dataNote, indexTone, favoritesView, fakeBadge, filterLabel, isHigh, nextMonth, optionsView, parseTarget,
   pct, profileView, proposalsView, questionView, readableReason, retentionView, sectionState, sendResultText, times,
   cohortDone,
 } from "./segmentView.ts";
@@ -71,13 +71,17 @@ const PROFILE: SegmentProfileOutput = {
   quality: QUALITY, basis: FAKE, summary: "",
 };
 
+const SOURCE = "행정안전부 주민등록인구통계(KOSIS) · 2026년 10월 말";
 const COVERAGE: MarketCoverageOutput = {
   status: "ok", insufficient_reasons: [], attribute_keys: ["age_band", "gender"], period: "365d",
   rows: [
-    { values: { age_band: "30s", gender: "m" }, label: "30대 남성", buyers: 300, population: 1_000_000, population_source: "통계청 주민등록인구", base_year: 2025, coverage: 0.0003, suppressed: false, status: "ok", reason: "" },
-    { values: { age_band: "20s", gender: "f" }, label: "20대 여성", buyers: 1180, population: 3_000_000, population_source: "통계청 주민등록인구", base_year: 2025, coverage: 0.000393, suppressed: false, status: "ok", reason: "" },
-    { values: { age_band: "60s", gender: "f" }, label: "60대 여성", buyers: null, population: 2_000_000, population_source: "통계청 주민등록인구", base_year: 2025, coverage: null, suppressed: true, status: "ok", reason: "" },
-    { values: { age_band: "no_answer", gender: "f" }, label: "답하지 않음 · 여성", buyers: 40, population: null, population_source: "", base_year: null, coverage: null, suppressed: false, status: "population_missing", reason: "" },
+    { values: { age_band: "30s", gender: "m" }, label: "30대 남성", buyers: 300, population: 1_000_000, population_source: SOURCE, base_year: 2025, coverage: 0.0003, suppressed: false, status: "ok", reason: "",
+      population_note: "30~34세 + 35~39세", buyer_share: 0.2, population_share: 0.25, index: 80 },
+    { values: { age_band: "20s", gender: "f" }, label: "20대 여성", buyers: 1180, population: 3_000_000, population_source: SOURCE, base_year: 2025, coverage: 0.000393, suppressed: false, status: "ok", reason: "",
+      population_note: "20~24세 + 25~29세", buyer_share: 0.5, population_share: 0.3, index: 166.7 },
+    { values: { age_band: "60s", gender: "f" }, label: "60대 여성", buyers: null, population: 2_000_000, population_source: SOURCE, base_year: 2025, coverage: null, suppressed: true, status: "ok", reason: "",
+      population_note: "60세 이상 합산", buyer_share: null, population_share: null, index: null },
+    { values: { age_band: "no_answer", gender: "f" }, label: "답하지 않음 · 여성", buyers: 40, population: null, population_source: SOURCE, base_year: null, coverage: null, suppressed: false, status: "population_missing", reason: "인구 통계에 없는 값이라 비율을 내지 않음" },
   ],
   quality: QUALITY, basis: BASIS, summary: "",
 };
@@ -215,7 +219,7 @@ test("시장 커버: 모든 줄에 인구가 없으면 안내 한 줄 + 연령�
   const v = coverageView({ ...COVERAGE, rows: [missing("20s", "f", 120), missing("20s", "m", 80), missing("30s", "f", null, true), missing("30s", "m", 40)] }, o.attributes);
   assert.equal(v.kind, "buyers");
   if (v.kind !== "buyers") return;
-  assert.equal(v.note, "인구 통계를 아직 받지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요 · 인구 통계표 설정 필요");
+  assert.equal(v.note, "인구 통계를 아직 받지 못해 구성 지수 대신 우리 구매자 수(최근 1년)만 보여요 · 인구 통계표 설정 필요");
   assert.equal(v.corner, "연령대 \\ 성별");
   assert.deepEqual(v.columns, ["여성", "남성"]);
   assert.deepEqual(v.rows, [
@@ -244,7 +248,7 @@ test("시장 커버: 모든 줄이 같은 이유로 오류면 한 줄 + 구매�
   ] }, o.attributes);
   assert.equal(v.kind, "buyers");
   if (v.kind !== "buyers") return;
-  assert.equal(v.note, "인구 통계를 읽지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요 · KOSIS를 읽지 못함 (키가 없어 KOSIS를 부를 수 없다 (키 등록 후 가능))");
+  assert.equal(v.note, "인구 통계를 읽지 못해 구성 지수 대신 우리 구매자 수(최근 1년)만 보여요 · KOSIS를 읽지 못함 (키가 없어 KOSIS를 부를 수 없다 (키 등록 후 가능))");
   assert.deepEqual(v.rows.slice(0, 2), [
     { label: "20대", cells: ["120명", "80명"] },
     { label: "30대", cells: ["표본 부족", "40명"] }, // 숨긴 칸은 표본 부족
@@ -252,7 +256,7 @@ test("시장 커버: 모든 줄이 같은 이유로 오류면 한 줄 + 구매�
   assert.equal(/UNAUTHORIZED|KOSIS_API_KEY/.test(JSON.stringify(v)), false);
   // 영어로만 된 이유는 붙이지 않는다
   const english = coverageView({ ...COVERAGE, rows: [row("20s", "f", "error", "UNAVAILABLE: timeout"), row("20s", "m", "error", "UNAVAILABLE: timeout")] }, o.attributes);
-  assert.ok(english.kind === "buyers" && english.note === "인구 통계를 읽지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요");
+  assert.ok(english.kind === "buyers" && english.note === "인구 통계를 읽지 못해 구성 지수 대신 우리 구매자 수(최근 1년)만 보여요");
   assert.equal(readableReason("UNAUTHORIZED: key"), null);
 });
 
@@ -268,7 +272,8 @@ test("시장 커버: 오류 이유가 섞이거나 일부만 ok면 지금 표 �
   assert.equal(partly.kind, "ok");
   if (partly.kind !== "ok") return;
   assert.equal(partly.rows.length, 3);
-  assert.equal(partly.rows[0].coverage === "-", false); // 인구가 있는 줄은 커버 비율을 보인다
+  assert.equal(partly.rows[0].buyers, "10명"); // 인구가 있는 줄도 지수가 없으면 구매자 수와 이유만
+  assert.equal(partly.rows[0].note, "지수를 내지 않았어요");
 });
 
 test("이벤트 제안: 기준 미달 후보는 '제외한 후보 n건'으로 접는다", () => {
@@ -339,14 +344,39 @@ test("insufficient는 숫자 없이 이유와 품질 사실(한글만)", () => {
   assert.equal(proposalsView({ ...PROPOSALS, status: "insufficient" }).kind, "gate");
 });
 
-test("시장 커버: 남은 시장이 큰 묶음이 위, 표본 부족·인구 없음은 아래", () => {
-  const v = coverageView(COVERAGE);
+test("구성 지수: 지수 높은 묶음이 위, 표본 부족·응답 안 함은 아래, 칸·막대·색", () => {
+  const v = coverageView(COVERAGE, optionsView(OPTIONS).attributes);
   assert.equal(v.kind, "ok");
   if (v.kind !== "ok") return;
   assert.deepEqual(v.rows.map((r) => r.label), ["20대 여성", "30대 남성", "60대 여성", "답하지 않음 · 여성"]);
-  assert.deepEqual(v.rows[0], { label: "20대 여성", buyers: "1,180명", population: "3,000,000명", coverage: "0.04%", source: "통계청 주민등록인구 · 2025년", note: null });
-  assert.equal(v.rows[2].buyers, "표본 부족");
-  assert.equal(v.rows[3].note, "인구 통계를 찾지 못했어요");
+  assert.deepEqual(v.rows[0], {
+    label: "20대 여성", bands: "20~24세 + 25~29세", buyers: "1,180명", buyerShare: "50%", populationShare: "30%",
+    buyerPct: 50, populationPct: 30, index: "167", tone: "high", note: null,
+  });
+  assert.equal(v.rows[1].tone, "normal"); // 지수 80은 빨강이 아니다 (80 미만만)
+  assert.deepEqual([v.rows[2].buyers, v.rows[2].index, v.rows[2].buyerShare], ["표본 부족", "-", "-"]);
+  assert.equal(v.rows[3].note, "인구 통계에 없는 값이라 비율을 내지 않음");
+  assert.equal(v.rows[3].index, "-");
+  assert.equal(JSON.stringify(v).includes("커버"), false); // 커버 비율 칸은 화면에서 뺐다
+  noCodes(v, ["age_band", "gender", "no_answer", "20s"]);
+});
+
+test("구성 지수: 120 이상 초록, 80 미만 빨강, 그 사이 기본색", () => {
+  assert.deepEqual([indexTone(120), indexTone(119.9), indexTone(80), indexTone(79.9), indexTone(null)],
+    ["high", "normal", "normal", "low", "normal"]);
+});
+
+test("구성 지수 출처 한 줄: 기준 달은 서버 문자열 하나만 ('기준'·'년'이 겹치지 않음)", () => {
+  const v = coverageView(COVERAGE, optionsView(OPTIONS).attributes);
+  assert.ok(v.kind === "ok");
+  if (v.kind !== "ok") return;
+  assert.equal(v.source,
+    "출처: 행정안전부 주민등록인구통계(KOSIS) · 2026년 10월 말 · 20세 이상 · 각 묶음은 5세별 구간 합산 · "
+    + "비중의 분모는 연령대·성별을 답한 구매자와 20세 이상 인구 · '답하지 않음'은 인구에 없어 지수를 내지 않음");
+  assert.equal(/기준/.test(v.source!), false);
+  assert.equal(v.source!.match(/년/g)?.length, 1); // base_year(2025)를 따로 붙이지 않는다
+  // 인구를 하나도 못 붙였으면 출처 한 줄도 없다
+  assert.equal(coverageSource({ ...COVERAGE, rows: COVERAGE.rows.map((r) => ({ ...r, population_source: "" })) }), null);
 });
 
 test("이벤트 제안: 근거 3개·효과 범위·가정·이미 넘김·지난 예상 vs 실제", () => {

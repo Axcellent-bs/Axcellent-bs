@@ -276,6 +276,8 @@ export interface CoverageRow {
   values: Record<string, string>; label: string; buyers: number | null; population: number | null;
   population_source: string; base_year: number | null; coverage: number | null; suppressed: boolean;
   status: "ok" | "population_missing" | "error"; reason: string;
+  /** 고객 구성 지수 (11/17). 예전 서버면 없음. 응답 안 함·인구 없는 줄·숨긴 줄은 null */
+  population_note?: string; buyer_share?: number | null; population_share?: number | null; index?: number | null;
 }
 export interface MarketCoverageOutput {
   status: "ok" | "insufficient"; insufficient_reasons: string[]; attribute_keys: string[]; period: "365d";

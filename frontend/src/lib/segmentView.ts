@@ -344,10 +344,22 @@ export function basketView(out: BasketPairsOutput, attributes: AttributeChoice[]
   };
 }
 
-// ---- 3) 시장을 얼마나 덮고 있나 (market_coverage)
+// ---- 3) 우리 고객은 어느 층에 몰려 있나 (market_coverage: 고객 구성 지수)
 
-export interface CoverageRowView { label: string; buyers: string; population: string; coverage: string; source: string; note: string | null }
-export interface CoverageOkView { kind: "ok"; rows: CoverageRowView[]; summary: string; badge: string | null }
+export type IndexTone = "high" | "low" | "normal";
+export interface CoverageRowView {
+  label: string;
+  bands: string | null; // 합산한 인구 구간 (population_note)
+  buyers: string;
+  buyerShare: string;
+  populationShare: string;
+  buyerPct: number; // 막대 길이 0..100
+  populationPct: number;
+  index: string;
+  tone: IndexTone;
+  note: string | null; // 지수를 내지 않은 이유 (표본 부족·응답 안 함 등)
+}
+export interface CoverageOkView { kind: "ok"; rows: CoverageRowView[]; summary: string; source: string | null; badge: string | null }
 /** 인구를 하나도 못 붙였으면(모두 인구 없음, 또는 모두 ok 아님 + 같은 이유): 안내 한 줄 + 첫 속성(줄) × 둘째 속성(칸) 구매자 수 표 하나 */
 export interface BuyersTableView {
   kind: "buyers";
@@ -379,9 +391,45 @@ export function readableReason(text: string): string | null {
 }
 
 const COVERAGE_NOTE = {
-  missing: "인구 통계를 아직 받지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요",
-  error: "인구 통계를 읽지 못해 커버 비율 대신 우리 구매자 수(최근 1년)만 보여요",
+  missing: "인구 통계를 아직 받지 못해 구성 지수 대신 우리 구매자 수(최근 1년)만 보여요",
+  error: "인구 통계를 읽지 못해 구성 지수 대신 우리 구매자 수(최근 1년)만 보여요",
 };
+
+/** 지수 색: 120 이상 초록(많이 몰림), 80 미만 빨강(적음), 그 사이 기본색 */
+export const INDEX_HIGH = 120;
+export const INDEX_LOW = 80;
+export const indexTone = (v: number | null | undefined): IndexTone =>
+  v == null ? "normal" : v >= INDEX_HIGH ? "high" : v < INDEX_LOW ? "low" : "normal";
+
+const NOT_IN_STATS = "인구 통계에 없는 값";
+const barPct = (v: number | null | undefined) => (v != null ? Math.max(0, Math.min(100, Math.round(v * 1000) / 10)) : 0);
+
+/** 카드 아래 출처 한 줄. 표 이름·기준 달은 서버 문자열(population_source) 하나만 쓰고 기준 해를 따로 붙이지 않는다.
+ * 나이 범위·구간 폭은 서버가 KOSIS 이름으로 만든 population_note에서 읽는다 (회사 낱말을 박지 않는다) */
+export function coverageSource(out: MarketCoverageOutput, attributes: AttributeChoice[] = []): string | null {
+  const source = out.rows.find((r) => r.population_source)?.population_source;
+  if (!source) return null;
+  const notes = out.rows.map((r) => r.population_note ?? "").filter(Boolean);
+  const lows = notes.map((n) => Number(/^(\d+)/.exec(n)?.[1])).filter((n) => Number.isFinite(n));
+  const band = notes.map((n) => /(\d+)~(\d+)세/.exec(n)).find((m) => m);
+  const from = lows.length ? `${Math.min(...lows)}세 이상` : null;
+  const labels = out.attribute_keys.map((k) => attributes.find((a) => a.key === k)?.label).filter((x): x is string => !!x);
+  // 인구 통계에 없는 값(예: 응답 안 함): 그 값이 든 줄이 모두 그 이유로 인구가 없을 때
+  const missing: string[] = [];
+  for (const a of attributes.filter((x) => out.attribute_keys.includes(x.key))) {
+    for (const v of a.values) {
+      const rows = out.rows.filter((r) => r.values[a.key] === v.value);
+      if (rows.length && rows.every((r) => r.population == null && r.reason.includes(NOT_IN_STATS))) missing.push(`'${v.label}'`);
+    }
+  }
+  return [
+    `출처: ${source}`,
+    from,
+    band ? `각 묶음은 ${Number(band[2]) - Number(band[1]) + 1}세별 구간 합산` : null,
+    labels.length ? `비중의 분모는 ${labels.join("·")}을 답한 구매자와 ${from ?? "표의"} 인구` : null,
+    missing.length ? `${missing.join("·")}은 인구에 없어 지수를 내지 않음` : null,
+  ].filter(Boolean).join(" · ");
+}
 
 function buyersTable(out: MarketCoverageOutput, attributes: AttributeChoice[]): BuyersTableView | null {
   const attrs = out.attribute_keys.map((k) => attributes.find((a) => a.key === k));
@@ -404,10 +452,8 @@ function buyersTable(out: MarketCoverageOutput, attributes: AttributeChoice[]): 
   };
 }
 
-/** 남은 시장(인구 − 우리 구매자)이 큰 묶음을 위로. 숫자가 없는 묶음은 아래 (서버 순서 유지) */
-function remaining(r: CoverageRow): number {
-  return r.status === "ok" && !r.suppressed && r.population != null && r.buyers != null ? r.population - r.buyers : -1;
-}
+/** 지수 높은 순. 지수가 없는 묶음(숨김·응답 안 함·인구 없음)은 아래 (서버 순서 유지) */
+const indexOrder = (r: CoverageRow) => (r.index != null ? r.index : -Infinity);
 
 export function coverageView(out: MarketCoverageOutput, attributes: AttributeChoice[] = []): CoverageView {
   if (out.status === "insufficient") return gate(out);
@@ -420,23 +466,33 @@ export function coverageView(out: MarketCoverageOutput, attributes: AttributeCho
     const table = buyersTable(out, attributes);
     if (table) return table;
   }
-  const rows = out.rows.map((r, i) => ({ r, i })).sort((a, b) => remaining(b.r) - remaining(a.r) || a.i - b.i).map(({ r }) => {
-    const source = [r.population_source, r.base_year != null ? `${r.base_year}년` : null].filter(Boolean).join(" · ");
-    if (r.status !== "ok") {
-      const why = HANGUL.test(r.reason) ? r.reason : r.status === "population_missing" ? "인구 통계를 찾지 못했어요" : "읽지 못했어요";
-      return { label: r.label, buyers: r.suppressed || r.buyers == null ? "-" : people(r.buyers), population: "-", coverage: "-", source, note: why };
-    }
-    if (r.suppressed) return { label: r.label, buyers: SUPPRESSED, population: r.population != null ? people(r.population) : "-", coverage: "-", source, note: null };
-    return {
-      label: r.label,
-      buyers: r.buyers != null ? people(r.buyers) : "-",
-      population: r.population != null ? people(r.population) : "-",
-      coverage: r.coverage != null ? pct(r.coverage) : "-",
-      source,
-      note: null,
-    };
-  });
-  return { kind: "ok", rows, summary: out.summary, badge: fakeBadge(out) };
+  const rows = out.rows.map((r, i) => ({ r, i }))
+    .sort((a, b) => (indexOrder(b.r) === indexOrder(a.r) ? a.i - b.i : indexOrder(b.r) > indexOrder(a.r) ? 1 : -1))
+    .map(({ r }): CoverageRowView => {
+      const base = {
+        label: r.label, bands: r.population_note || null, buyerShare: "-", populationShare: "-", buyerPct: 0, populationPct: 0,
+        index: "-", tone: "normal" as IndexTone,
+      };
+      if (r.suppressed) return { ...base, buyers: SUPPRESSED, note: null };
+      const buyers = r.buyers != null ? people(r.buyers) : "-";
+      if (r.status !== "ok" || r.index == null) {
+        const why = r.status === "ok" ? "지수를 내지 않았어요"
+          : HANGUL.test(r.reason) ? r.reason : r.status === "population_missing" ? "인구 통계를 찾지 못했어요" : "읽지 못했어요";
+        return { ...base, buyers, note: why };
+      }
+      return {
+        ...base,
+        buyers,
+        buyerShare: r.buyer_share != null ? pct(r.buyer_share) : "-",
+        populationShare: r.population_share != null ? pct(r.population_share) : "-",
+        buyerPct: barPct(r.buyer_share),
+        populationPct: barPct(r.population_share),
+        index: String(Math.round(r.index)),
+        tone: indexTone(r.index),
+        note: null,
+      };
+    });
+  return { kind: "ok", rows, summary: out.summary, source: coverageSource(out, attributes), badge: fakeBadge(out) };
 }
 
 // ---- 4) 다음 달 이벤트 제안 (event_proposal · event_proposal_send)
