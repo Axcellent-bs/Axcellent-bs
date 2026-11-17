@@ -18,6 +18,9 @@ deadline_days = 20                  # 구매 확정일부터 이 날 안에 지�
 deadline_basis = "구매 확정일(배송 완료 시각으로 대신함)부터 (온라인플랫폼 정산 법안 계류 중, 선제 기준)"
 deadline_warn_days = 5              # 기한까지 이 날 이하로 남으면 "임박"
 deadline_lookback_days = 70         # 이 기간 안에 결제된 주문을 본다
+# 이 날짜보다 앞선 주·주문은 지급 기한 점검과 AI 자동 요청에서 뺀다 (2026-11-17 새 DB로 바꾼 뒤 옛 7주가 한꺼번에 요청된 일 이후)
+deadline_since_floor = 2026-11-09
+auto_request_weeks = 2              # AI가 한 번에 자동 요청하는 주 수 (가장 최근 주부터)
 
 [rule]
 id = "SET-001"

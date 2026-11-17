@@ -34,6 +34,10 @@ class SettlementConfig(_Strict):
     deadline_basis: str = "구매 확정일부터"
     deadline_warn_days: int = Field(default=5, ge=0)
     deadline_lookback_days: int = Field(default=70, ge=7)
+    # 이 날짜보다 앞선 주문·주는 지급 기한 점검·자동 요청에서 뺀다 (옛 주가 한꺼번에 요청되지 않게)
+    deadline_since_floor: date | None = None
+    # 고객지원 AI가 한 번에 자동 요청하는 주 수(가장 최근 주부터 센다)
+    auto_request_weeks: int = Field(default=2, ge=1)
 
 
 class RuleConfig(_Strict):

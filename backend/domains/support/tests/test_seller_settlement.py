@@ -10,6 +10,7 @@ import asyncio
 import copy
 import random
 import time
+import tomllib
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -1308,9 +1309,31 @@ def test_a_refund_only_seller_is_held_not_ready() -> None:
     assert [r["seller_id"] for r in st.ready(result)] == ["sel_b"]
 
 
-def test_period_closed_and_due_weeks() -> None:
+@pytest.fixture(autouse=True)
+def _no_floor_or_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """기존 테스트는 2026-10-23 기준이라 기준일·주 수 제한을 끄고 본다."""
+    _policy_with(monkeypatch, deadline_since_floor=None, auto_request_weeks=99)
+
+
+def test_shipped_policy_limits_auto_requests() -> None:
+    """실제 정책 파일 값: 기준일 2026-11-09, 자동 요청 최근 2주."""
+    text = (Path(sc.__file__).parent / "settlement_policy.toml").read_text("utf-8")
+    s = sc.SettlementPolicy.model_validate(
+        tomllib.loads(text)
+    ).settlement  # 덮어쓴 값이 아니라 파일 값
+    assert s.deadline_since_floor == date(2026, 11, 9) and s.auto_request_weeks == 2
+
+
+def _policy_with(monkeypatch: pytest.MonkeyPatch, **changes: Any) -> None:
+    base = sc.load_policy()
+    patched = base.model_copy(update={"settlement": base.settlement.model_copy(update=changes)})
+    monkeypatch.setattr(sc, "load_policy", lambda: patched)
+
+
+def test_period_closed_and_due_weeks(monkeypatch: pytest.MonkeyPatch) -> None:
     """오늘 2026-10-23(금): W42(10-12~18)는 끝났지만 지급 예정일(10-24) 전, W41은 지급일이
-    지났다."""
+    지났다. (제한 없이 본 범위: 기준일·주 수 제한을 끈다)"""
+    _policy_with(monkeypatch, deadline_since_floor=None, auto_request_weeks=99)
     assert st.period_closed("2026-W42", TODAY) and not st.period_closed("2026-W43", TODAY)
     assert not st.period_closed("2026-W44", TODAY)
     weeks = st.due_weeks(TODAY)
@@ -1320,6 +1343,29 @@ def test_period_closed_and_due_weeks() -> None:
     since = TODAY - timedelta(days=sc.load_policy().settlement.deadline_lookback_days)
     assert weeks[0] == sc.week_of(since)
     assert "2026-W42" in st.due_weeks(date(2026, 10, 24))  # 지급 예정일이 되면 넣는다
+
+
+def test_due_weeks_keeps_only_the_latest_weeks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AI 자동 요청은 가장 최근 `auto_request_weeks`개 주만 낸다."""
+    _policy_with(monkeypatch, deadline_since_floor=None, auto_request_weeks=2)
+    assert st.due_weeks(TODAY) == ["2026-W40", "2026-W41"]
+    _policy_with(monkeypatch, deadline_since_floor=None, auto_request_weeks=1)
+    assert st.due_weeks(TODAY) == ["2026-W41"]
+
+
+def test_due_weeks_and_deadline_start_at_the_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """기준일(11-09) 앞의 주는 주 수 제한이 남아 있어도 자동 요청하지 않는다."""
+    today = date(2026, 11, 17)  # 화요일: W45(11-02~08)는 지급 예정일 11-14이 지났고 W46은 아직
+    _policy_with(monkeypatch, deadline_since_floor=date(2026, 11, 9), auto_request_weeks=99)
+    assert st.due_weeks(today) == []  # W45는 기준일(11-09 월요일) 앞이라 뺀다
+    assert st.due_weeks(date(2026, 11, 21)) == ["2026-W46"]  # 지급일 11-21
+    # 기준일이 없으면 옛 주도 나온다
+    _policy_with(monkeypatch, deadline_since_floor=None, auto_request_weeks=99)
+    assert "2026-W45" in st.due_weeks(today)
+    # 지급 기한 점검 시작일도 같은 기준일을 따른다
+    _policy_with(monkeypatch, deadline_since_floor=date(2026, 11, 9), auto_request_weeks=2)
+    assert st._since(sc.load_policy().settlement, today) == date(2026, 11, 9)
+    assert st._since(sc.load_policy().settlement, date(2027, 2, 1)) == date(2026, 11, 23)
 
 
 @pytest.mark.asyncio
