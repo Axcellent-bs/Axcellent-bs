@@ -759,6 +759,7 @@ class SegmentSession:
         for name in ("seg_attrs", "seg_lines", "seg_buyers", "seg_first", "seg_pi"):
             self.conn.execute(f"DROP TABLE IF EXISTS temp.{name}")
         self._pi: tuple[str, tuple[tuple[str, str], ...]] | None = None
+        self._pi_filtered = False  # seg_pi에서 산 사람이 적은 code를 뺐는지 (pair_counts)
 
     def _all(self, sql: str, params: dict[str, object] | None = None) -> list[sqlite3.Row]:
         return self.conn.execute(sql, {**self.params, **(params or {})}).fetchall()
@@ -922,6 +923,7 @@ class SegmentSession:
         )
         self.conn.execute("CREATE INDEX temp.seg_pi_buyer ON seg_pi(buyer_id, code)")
         self._pi = want
+        self._pi_filtered = False
 
     def pair_counts(
         self, level: str, filters: dict[str, str], least: int = 1
@@ -931,13 +933,25 @@ class SegmentSession:
         buyer_id). 쌍은 a마다 따로 센다(a의 구매자만 (code, 사람) 키로 읽고 그 사람의 다른 code는
         (사람, code) 인덱스로 찾아 묶음이 작다).
         `filters`의 key는 세션 `keys`에 있어야 한다."""
+        if self._pi_filtered:  # 거른 표로는 거르기 전 `items`를 셀 수 없다 → 다시 만든다
+            self._pi = None
         self._person_items(level, filters)
         items = {
             r["code"]: int(r["n"])
             for r in self._all("SELECT code, COUNT(*) AS n FROM seg_pi GROUP BY code")
         }
         together: dict[tuple[str, str], int] = {}
-        for a in sorted(items):
+        # 거르기: 산 사람이 `least`명 미만인 code는 어떤 쌍도 `least`명 이상이 될 수 없어 쌍을
+        # 세기 전에 표에서 뺀다 (결과는 같다). lift 분모인 `items`는 거르기 전 값 그대로.
+        # 걸러진 표는 숨긴 쌍을 읽기 전에 다시 만든다 (`hidden_pairs`)
+        if least > 1 and any(n < least for n in items.values()):
+            self.conn.execute(
+                "DELETE FROM seg_pi WHERE code IN "
+                "(SELECT code FROM seg_pi GROUP BY code HAVING COUNT(*) < :least)",
+                {"least": least},
+            )
+            self._pi_filtered = True
+        for a in sorted(c for c, n in items.items() if n >= least):
             for r in self._all(
                 "SELECT y.code AS b, COUNT(*) AS n FROM seg_pi x CROSS JOIN seg_pi y "
                 "INDEXED BY seg_pi_buyer ON y.buyer_id = x.buyer_id AND y.code > :pa "
@@ -953,6 +967,8 @@ class SegmentSession:
     ) -> list[tuple[str, str]]:
         """둘 다 산 사람이 1명 이상 `least`명 미만인 쌍 (a < b, code 순) 최대 `limit`개. 숫자는
         돌려주지 않는다 (화면에 숨김으로만 보인다)."""
+        if self._pi_filtered:  # 거른 표에는 산 사람이 적은 code의 쌍이 없다 → 다시 만든다
+            self._pi = None
         self._person_items(level, filters)
         rows = self._all(
             "SELECT x.code AS a, y.code AS b FROM seg_pi x "
@@ -963,7 +979,8 @@ class SegmentSession:
         return [(r["a"], r["b"]) for r in rows]
 
     def together_cells(self, level: str, a: str, b: str) -> Cells:
-        """`a`와 `b`를 둘 다 산 사람(조건 없음)을 속성 값 셀로 센다."""
+        """`a`와 `b`를 둘 다 산 사람(조건 없음)을 속성 값 셀로 센다. 거른 표를 그대로 써도 된다
+        (`pair_counts`가 돌려준 쌍의 code는 산 사람이 기준 이상이라 빠지지 않았다)."""
         self._person_items(level, {})
         return self._cells_of(
             "SELECT x.buyer_id FROM seg_pi x JOIN seg_pi y ON y.buyer_id = x.buyer_id "
