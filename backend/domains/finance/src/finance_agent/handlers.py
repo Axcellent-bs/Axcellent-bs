@@ -1027,6 +1027,12 @@ async def record_result(data: CampaignResultInput, context_id: str) -> dict[str,
     records = state().records
     body = data.model_dump()
     previous = records.campaigns.get(data.campaign_id)
+    for key in ("content_category", "format"):
+        if body.get(key) is None:
+            # 시작 때 예산 요청에 적은 카테고리·형식을 잇는다(화면에서 시작한 캠페인)
+            asked = [r for r in records.budget_reviews if r["campaign_id"] == data.campaign_id]
+            if asked and asked[-1].get(key) is not None:
+                body[key] = asked[-1][key]
     if previous is not None:
         # 마케팅이 판매액만 다시 보내도 앞서 받은 카테고리·제작비·조회수는 지우지 않는다(11/17)
         for key in KEEP_ON_RESEND:

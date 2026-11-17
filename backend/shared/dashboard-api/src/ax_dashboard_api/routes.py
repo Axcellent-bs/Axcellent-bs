@@ -882,6 +882,9 @@ class CampaignStartBody(BaseModel):
     # 주소를 주면 test(시험 영상 여부)도 사람이 true·false로 정해야 한다
     video_url: str | None = Field(default=None, min_length=1, max_length=500)
     test: bool | None = None
+    # 콘텐츠 카테고리(예: 아재개그)·형식(shorts·reels). 마케팅이 재무 예산 요청에 싣는다(선택)
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    format: Literal["shorts", "reels"] | None = None
 
     @model_validator(mode="after")
     def _test_flag_with_video(self) -> CampaignStartBody:
@@ -903,6 +906,10 @@ class CampaignResultBody(BaseModel):
     measured_gmv_krw: int | None = None
     measured_orders: int | None = None
     effect_generated_at: str | None = None
+    # 영상 제작비(광고비와 따로, 선택). 카테고리·형식은 비우면 시작 때 값을 재무가 잇는다
+    production_cost_krw: int | None = Field(default=None, ge=0)
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    format: Literal["shorts", "reels"] | None = None
 
 
 class CampaignCancelBody(BaseModel):
@@ -931,7 +938,7 @@ async def record_campaign_result(campaign_id: str, body: CampaignResultBody) -> 
     payload = body.model_dump(exclude_none=True) | {"campaign_id": campaign_id}
     key = (
         f"ui:result:{campaign_id}:{body.period_from}:{body.period_to}:{body.spend_krw}"
-        f":{body.gmv_krw}:{body.orders}:{body.coupon_krw}"
+        f":{body.gmv_krw}:{body.orders}:{body.coupon_krw}:{body.production_cost_krw}"
     )
     return ok(
         await marketing_client.call(

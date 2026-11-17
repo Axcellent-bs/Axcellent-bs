@@ -561,6 +561,9 @@ def decide(
         "campaign_name": request["campaign_name"],
         "channel": channel,
         "requested_krw": requested,
+        # 콘텐츠 카테고리·형식(선택). 결과에 비어 오면 이 값을 이어 쓴다
+        "content_category": request.get("content_category"),
+        "format": request.get("format"),
         "decision": decision,
         "approved_limit_krw": limit,
         "month": month,
