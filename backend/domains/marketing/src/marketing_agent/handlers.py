@@ -64,6 +64,7 @@ from marketing_agent.briefs import (
 )
 from marketing_agent.campaign import record_campaign_result, start_campaign
 from marketing_agent.campaign_cancel import cancel_campaign
+from marketing_agent.channel_followers import channel_followers as _channel_followers
 from marketing_agent.chat import (
     ChatRefused,
     ChatService,
@@ -559,6 +560,22 @@ async def list_active_notices(request: AgentRequest) -> AgentResult:
         evidence=_evidence(
             ["list_active_notices"], summary, [item.notice_id for item in items if item.notice_id]
         ),
+    )
+
+
+async def channel_followers(request: AgentRequest) -> AgentResult:
+    """공식 SNS 채널 팔로워 수(read). 입력 없음. 모르면 unknown과 이유."""
+    out = await _channel_followers()
+    summary = (
+        "공식 SNS 팔로워 " + ", ".join(f"{c.channel} {c.followers}" for c in out.channels)
+        if out.status == "known"
+        else f"팔로워 수를 알 수 없음: {out.reason}"
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["channel_followers"], summary, []),
     )
 
 
@@ -1268,6 +1285,7 @@ HANDLERS = {
     "end_incident_notice": end_incident_notice,
     "get_notice": get_notice,
     "list_active_notices": list_active_notices,
+    "channel_followers": channel_followers,
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,
