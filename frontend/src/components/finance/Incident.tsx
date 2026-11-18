@@ -5,7 +5,7 @@ import {
   CATEGORY_KO, finance, incidentName, krw, ledgerSourceKo, purposeKo, sortIncidents,
   type IncidentDetail, type IncidentSummary,
 } from "@/lib/finance";
-import { Empty, ErrorBox, MetaLine, MockBadge, RefList, ResourceBody, Waiting, useResource, type Resource } from "./bits";
+import { Empty, ErrorBox, MetaLine, MockBadge, RefList, ResourceBody, Skeleton, useResource, type Resource } from "./bits";
 
 // 장애 이벤트 재무 (시나리오 A). 기준: ax-backend docs/notes/finance/2026-10-23-finance-redesign.md §12·§12-1
 // 재무가 하는 일: 끝난 쿠폰·환불 금액을 이벤트별 장부에 적기.
@@ -305,7 +305,7 @@ export function IncidentFinance({ list, selected, onSelect, tick }: {
 
       <div className="mt-4">
         {!list.env ? (
-          list.error ? <ErrorBox message={list.error} onRetry={list.reload} /> : <Waiting what="장애 이슈를 불러오는 중…" />
+          list.error ? <ErrorBox message={list.error} onRetry={list.reload} /> : <Skeleton label="장애 이슈를 불러오는 중…" stats={0} lines={4} />
         ) : (
           <>
             {list.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 목록을 보여 줍니다. ${list.error}`} onRetry={list.reload} /></div>}

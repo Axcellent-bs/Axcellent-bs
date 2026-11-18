@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ClosingSection } from "@/components/finance/Closing";
@@ -7,7 +7,7 @@ import { BankSection, CashflowSection, ChecklistSection, SellerTransfersSection 
 import { CampaignsSection } from "@/components/finance/Campaigns";
 import { TaxSection } from "@/components/finance/Tax";
 import { StatementsSection } from "@/components/finance/Statements";
-import { Chip, ErrorBox, MetaLine, MockBadge, TONE, Waiting, useResource } from "@/components/finance/bits";
+import { Chip, ErrorBox, MetaLine, MockBadge, Skeleton, TONE, useResource } from "@/components/finance/bits";
 import { IncidentFinance } from "@/components/finance/Incident";
 import { SelfTestPanel } from "@/components/finance/Kept";
 import { TeamBudgetSection } from "@/components/finance/TeamBudget";
@@ -179,12 +179,22 @@ export default function FinancePage() {
   // 총괄이 재무에 맡긴 일 요약: 최근 7일 실패가 있으면 지금 할 일에도 올린다
   const [aiWork, setAiWork] = useState<{ total: number; failed: number } | null>(null);
 
-  // 30초마다, 그리고 무언가를 바꾼 뒤 모든 섹션을 새로 받는다
+  // 30초마다, 그리고 무언가를 바꾼 뒤 모든 섹션을 새로 받는다.
+  // 다른 탭을 보는 동안(화면이 가려짐)은 새로 받지 않고, 돌아왔을 때 30초가 지났으면 한 번 새로 받는다
   const [tick, setTick] = useState(0);
-  const bump = useCallback(() => setTick((n) => n + 1), []);
+  const lastBump = useRef(Date.now());
+  const bump = useCallback(() => {
+    lastBump.current = Date.now();
+    setTick((n) => n + 1);
+  }, []);
   useEffect(() => {
-    const t = setInterval(bump, REFRESH_MS);
-    return () => clearInterval(t);
+    const t = setInterval(() => { if (!document.hidden) bump(); }, REFRESH_MS);
+    const onShow = () => { if (!document.hidden && Date.now() - lastBump.current >= REFRESH_MS) bump(); };
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onShow);
+    };
   }, [bump]);
 
   const overview = useResource("overview", () => finance.overview(), tick);
@@ -226,7 +236,7 @@ export default function FinancePage() {
   }, []);
   useEffect(() => {
     void loadLastTest();
-    const t = setInterval(() => void loadLastTest(), SELF_TEST_POLL_MS);
+    const t = setInterval(() => { if (!document.hidden) void loadLastTest(); }, SELF_TEST_POLL_MS);
     return () => clearInterval(t);
   }, [loadLastTest]);
   async function runTest() {
@@ -326,7 +336,7 @@ export default function FinancePage() {
           <MockBadge meta={overview.env?.meta} />
         </div>
         {overview.error && !overview.env && <div className="mt-3"><ErrorBox message={overview.error} onRetry={overview.reload} /></div>}
-        {!overview.env && !overview.error && <Waiting />}
+        {!overview.env && !overview.error && <Skeleton label="할 일을 불러오는 중…" stats={0} lines={2} />}
         {todoCount > 0 && (
           <ul className="mt-4 space-y-2">
             {todo.map((t, i) => (
@@ -398,7 +408,7 @@ export default function FinancePage() {
             </dl>
             <MetaLine meta={overview.env.meta} />
           </>
-        ) : overview.error ? <ErrorBox message={overview.error} onRetry={overview.reload} /> : <Waiting />}
+        ) : overview.error ? <ErrorBox message={overview.error} onRetry={overview.reload} /> : <Skeleton label="오늘의 재무를 불러오는 중…" />}
       </section>
 
       {/* 재무팀 업무 탭 ①~⑦. 어느 섹션이 어느 탭에 있는지는 lib/finance.ts FINANCE_SECTION_TAB과 같게 둔다 */}
