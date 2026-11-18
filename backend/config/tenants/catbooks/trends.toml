@@ -240,7 +240,55 @@ language = "ko"
 # 인스타그램 (data instagram_audio·instagram_radar·instagram_memo_*, trend_memes 인스타 칸).
 # Meta 공식 Graph API만. 값은 코드 기본값과 같다 (임시 기준, 평가셋 없음)
 [instagram]
-radar_accounts = []      # 벤치마크 프로페셔널(비즈니스·크리에이터) 계정 사용자 이름, 사람이 정함 (상한 60)
+# 벤치마크 프로페셔널(비즈니스·크리에이터) 계정 사용자 이름, 사람이 정함 (상한 200, 지금 161)
+radar_accounts = [
+  # 출판사
+  "minumsa_books", "munhakdongne", "changbi_insta", "moonji_books", "wisdomhouse_official",
+  "openbooks21", "gimmyoung", "maumsanchaek", "dasanbooks", "hyeonamsa",
+  "rhkorea_books", "sigongsa_books", "yolimwon", "jakkajungsin", "samnparkers", "hangilsa",
+  # 서점
+  "kyobobook_official", "yes24_official", "hottracks_official", "aladin_book",
+  # 트렌드·밈 미디어
+  "insight.co.kr", "wikitree", "careet.official", "univ20", "huffpostkorea", "dingo_music",
+  # 콘텐츠 플랫폼
+  "netflixkr", "tving.official", "tvn_joy", "naver_webtoon", "coupangplay", "kakaowebtoon",
+  # 릴스 잘하는 브랜드
+  "ellekorea", "harpersbazaarkorea", "cosmopolitankorea", "oliveyoung_official",
+  "starbuckskorea", "baskinrobbinskorea", "29cm.official", "toss.im",
+  # 책·웹소설
+  "kakaopage", "thanksbooks", "trevari_official", "naver_series", "wisdomhouse_kids",
+  "dasan_kids", "kyobo_ebook",
+  # 드라마·음악·영화
+  "tvn_drama", "mnet_official", "jtbcdrama", "sbsdrama.official", "spotifykr",
+  "wavve.official", "cgv_korea", "1thek", "genie_music", "dingo_story",
+  # 캐릭터
+  "kakaofriends_official", "sanrio_kr", "linefriends",
+  # 밈 마케팅 브랜드
+  "gs25_official", "innisfreeofficial", "cu_official", "dunkin_kr", "hyundaicard",
+  "ably_official", "emart24_official", "mcdonalds_kr", "compose_coffee", "lottewellfood",
+  "cocacola_korea", "ediya.coffee", "nongshim", "naver_official", "burgerkingkorea",
+  "yogiyo_official", "coupangeats", "baemin_official", "daangn", "kbank_official",
+  # 국내 크리에이터·밈
+  "readchoi", "changyonggggg", "lizzycapri", "feellikefeel1", "1993kg", "neul_e_.nong",
+  "a_rim_z", "haengzassi", "mincho_oh", "ee.izi", "choco.emong", "mirme_onestar",
+  "han__jiwoo", "nikykim", "dadakkooong", "ssamji36", "ye_976", "yuhatang",
+  "seobam_breeze", "han_ohkhui", "skyblue_0320", "grumpyaliens", "uriginality_", "waegukins",
+  "enjoycouple", "jbkwak", "psickuniv", "chimchakman_official", "syukaworld",
+  # 해외 대형 밈
+  "9gag", "theshaderoom", "memezar", "sarcasm_only", "fuckjerry", "ladbible",
+  "daquan", "epicfunnypage", "hoodclips", "thefatjewish", "mytherapistsays", "dudewithsign",
+  "shitheadsteve", "insta.single", "memes", "funnymemes", "daddyissues_", "whitepeoplehumor",
+  "memequeen", "thetinderblog", "sainthoax", "kalesalad", "tank.sinatra", "browncardigan",
+  # 해외 주제별 밈
+  "officialworkmemes", "memecentral.teb", "memeculture4", "dipraj_jadhav_edits",
+  "addicted_to__memes", "sagarcasm", "artmemescentral", "ancientcringe", "startup.mp4",
+  "ifwmemesonly", "physics.meme", "litmemesmumbai", "chucktownmemes", "blendermeme",
+  "hr.memes", "memesturbationation", "the_awkward__indian", "dank_indian_",
+  "commerce_duniyaa", "turnerclassicmeme", "ukrelatables_", "gbbomemes_", "repromemes",
+  "girl_meme_creator", "imkarthick_mc", "tigerssimplysuperb", "dj.sagar_edits", "meme_maker486",
+]
+radar_batch_size = 50          # 레이더 한 회차에 부를 계정 수 (메타 앱 시간당 한도 약 200 안에서). 다음 회차는 이어서
+radar_batch_interval_min = 20  # 레이더 묶음 사이 최소 간격(분). 한 바퀴를 다 돌면 그날 레이더 판정을 바꾼다
 media_per_account = 20   # 계정마다 최근 게시물 수
 burst_ratio = 2.5        # 터짐: 계정 최근 게시물 지표 중앙값의 이 배 이상 (릴스는 조회수, 아니면 좋아요)
 burst_days = 7           # 터짐: 게시 며칠 안

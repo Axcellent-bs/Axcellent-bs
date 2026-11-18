@@ -6,8 +6,11 @@ grade read, 메모 쓰기만 A. Meta 공식 Graph API(Facebook 로그인, graph.
 모르면 unknown + 이유이고 0으로 채우지 않는다.
 블록마다 따로 실패한다(오디오 권한 오류가 레이더를 막지 않음).
 
-- 수집(`collect`, 수집기 하루 1번): 오디오(음악·원본 사운드 각 1번), 레이더 계정마다
-  business_discovery 1번(최근 media 20개). 하루 상한 `DATA_IG_DAILY_LIMIT`(150)
+- 수집(`collect`, 수집기 회차마다): 오디오(음악·원본 사운드, 하루 1번), 레이더는 묶음으로
+  (`radar_batch`): 한 회차에 `radar_batch_size`(50)개만 business_discovery(최근 media 20개),
+  묶음 사이 최소 `radar_batch_interval_min`(20)분, 커서는 레이더 저장소(`radar_cursor`)에서
+  이어받는다. 앱 시간당 한도·하루 상한 `DATA_IG_DAILY_LIMIT`(150)이면 바로 멈추고 커서를 둔다.
+  한 바퀴를 다 돌면 그 날짜를 남기고, 판정(아래 레이더)은 다 돈 날짜만 읽는다
 - 인기 오디오(`instagram_audio`): 오늘 목록 + 어제 대비 순위 변화·새로 등장·연속 일수.
   게시물에는 오디오 id가 없어(공식 API) "겹침"은 볼 수 없다 → `overlap_reason`.
   게시 권한이 필요해 읽기 전용 데이터 토큰이면 권한 필요 이유
@@ -62,6 +65,10 @@ KST = timezone(timedelta(hours=9))
 TREND_CONFIG_ENV = "DATA_TREND_CONFIG"
 AUDIO_TYPES = ("music", "original_sound")
 HASHTAG_LIMIT = 30  # 문서: 7일 동안 고유 해시태그 30개
+RADAR_MAX_ACCOUNTS = 200
+# 회차를 멈추고 커서를 그대로 두는 오류 (다음 회차에 같은 계정부터): 앱 시간당 한도(code 4 등)·
+# 하루 호출 상한(DATA_IG_DAILY_LIMIT)·키 없음·토큰 만료. 그 밖(권한·데이터 없음 등)은 그 계정만
+STOP_CODES = frozenset({"RATE_LIMITED", "KEY_MISSING", "TOKEN_EXPIRED"})
 MEMO_ACTION = "add_instagram_memo"
 OVERLAP_REASON = (
     "게시물(IG 미디어)에는 오디오 id 칸이 없어(공식 API)"
@@ -82,6 +89,10 @@ class IgConfig:
     hashtag_reserve: int = 5
     hashtag_pages: int = 3
     memo_add_enabled: bool = False
+    # 레이더 묶음 수집: 한 회차에 이만큼만 부르고, 묶음 사이는 최소 이 분만큼 띄운다
+    # (메타 앱 시간당 한도 약 200을 넘지 않게). 다음 회차는 커서를 이어받는다
+    radar_batch_size: int = 50
+    radar_batch_interval_min: int = 20
 
 
 def load_config(env: Mapping[str, str]) -> IgConfig:
@@ -94,7 +105,8 @@ def load_config(env: Mapping[str, str]) -> IgConfig:
         base = IgConfig()
         accounts = [str(a).strip().lstrip("@") for a in raw.get("radar_accounts", [])]
         return IgConfig(
-            radar_accounts=tuple(dict.fromkeys(a for a in accounts if a))[:60],  # 상한 60
+            # 상한 200 (묶음으로 나눠 부른다)
+            radar_accounts=tuple(dict.fromkeys(a for a in accounts if a))[:RADAR_MAX_ACCOUNTS],
             media_per_account=max(1, min(50, int(raw.get("media_per_account", 20)))),
             burst_ratio=max(1.0, float(raw.get("burst_ratio", base.burst_ratio))),
             burst_days=max(1, int(raw.get("burst_days", base.burst_days))),
@@ -103,6 +115,10 @@ def load_config(env: Mapping[str, str]) -> IgConfig:
             hashtag_reserve=max(0, int(raw.get("hashtag_reserve", base.hashtag_reserve))),
             hashtag_pages=max(1, min(10, int(raw.get("hashtag_pages", base.hashtag_pages)))),
             memo_add_enabled=bool(raw.get("memo_add_enabled", False)),
+            radar_batch_size=max(1, int(raw.get("radar_batch_size", base.radar_batch_size))),
+            radar_batch_interval_min=max(
+                0, int(raw.get("radar_batch_interval_min", base.radar_batch_interval_min))
+            ),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return IgConfig()
@@ -126,17 +142,112 @@ class CollectResult:
     accounts_read: int
     accounts_failed: int
     calls: int
+    position: int = 0  # 이번 회차 뒤 커서 (다음에 부를 계정 위치)
+    total: int = 0  # 레이더 계정 수
+    note: str | None = None  # 묶음을 건너뛰거나 멈춘 이유, 바퀴를 다 돈 것
 
     def line(self) -> str:
         parts = " · ".join(f"{k} {v}" for k, v in self.audio.items())
-        return (f"[instagram] 오디오 {parts} · 레이더 {self.accounts_read}곳 읽음"
-                f" · 못 읽음 {self.accounts_failed}곳 · 호출 {self.calls}")  # fmt: skip
+        head = (f"[instagram] 오디오 {parts} · 레이더 {self.accounts_read}곳 읽음"
+                f" · 못 읽음 {self.accounts_failed}곳 · 커서 {self.position}/{self.total}"
+                f" · 호출 {self.calls}")  # fmt: skip
+        return head + (f" ({self.note})" if self.note else "")
+
+
+@dataclass(frozen=True)
+class RadarBatch:
+    read: int
+    failed: int
+    position: int
+    status: str  # 출처 줄 상태 (connected · rate_limited · key_missing · …)
+    why: str | None
+    note: str | None
+
+
+def _accounts_hash(accounts: Sequence[str]) -> str:
+    import hashlib
+
+    return hashlib.sha256("\n".join(accounts).encode()).hexdigest()[:16]
+
+
+async def radar_batch(config: IgConfig, graph: Any, store: st.RadarStore,
+                      now: datetime) -> RadarBatch:  # fmt: skip
+    """레이더 한 회차: 커서 위치부터 `radar_batch_size`개만 부른다 (순수 수집, 판정은 안 함).
+
+    - 커서는 레이더 저장소(`radar_cursor`)에 둔다. 계정 목록이 바뀌면 처음부터
+    - 마지막 묶음에서 `radar_batch_interval_min`분이 안 지났으면 부르지 않는다
+    - 한 바퀴(모든 계정)를 다 돌면 그 바퀴 날짜를 `radar_cycles`에 남긴다. 판정(instagram_radar)은
+      다 돈 날짜만 읽는다. 오늘 바퀴를 이미 다 돌았으면 날짜가 바뀔 때까지 부르지 않는다
+    - 앱 시간당 한도·하루 호출 상한·키 없음·토큰 만료면 바로 멈추고 커서는 그 계정에 둔다
+    - 바퀴가 이틀을 넘게 끝나지 않으면(오래 멈춤) 오늘 날짜로 처음부터
+    """
+    from data_agent.connectors import ConnectorUnavailable
+
+    accounts = list(config.radar_accounts)
+    total, today = len(accounts), _today(now)
+    if not accounts:
+        why = "레이더 계정이 없음 (trends.toml [instagram] radar_accounts)"
+        return RadarBatch(0, 0, 0, "failed", why, None)
+    digest = _accounts_hash(accounts)
+    cur = store.cursor()
+    cycle_day, pos, last = (today, 0, None) if cur is None else cur[:3]
+    if cur is not None and cur[3] != digest:  # 목록이 바뀜: 처음부터 (이미 읽은 계정은 건너뜀)
+        pos = 0
+    if store.completed(cycle_day):
+        if cycle_day == today:
+            note = "오늘 바퀴를 다 돌아 날짜가 바뀌면 다시"
+            return RadarBatch(0, 0, total, "connected", None, note)
+        cycle_day, pos = today, 0
+    elif (today - cycle_day).days > 1:
+        cycle_day, pos = today, 0
+    wait = timedelta(minutes=config.radar_batch_interval_min)
+    if last is not None and now - last < wait:
+        left = int((wait - (now - last)).total_seconds() // 60) + 1
+        store.save_cursor(cycle_day, pos, last, digest)
+        return RadarBatch(0, 0, pos, "connected", None, f"묶음 간격: {left}분 뒤 다음 묶음")
+    read = failed = 0
+    status, why, note = "connected", None, None
+    end = min(total, pos + config.radar_batch_size)
+    called = False
+    while pos < end:
+        account = accounts[pos]
+        if store.done(cycle_day, account):
+            pos += 1
+            continue
+        called = True
+        try:
+            media = await graph.business_media(account, config.media_per_account)
+        except ConnectorUnavailable as error:  # IgError와 하루 상한(RATE_LIMITED)
+            if error.code in STOP_CODES:
+                status = _status_of(error) if isinstance(error, IgError) else "rate_limited"
+                why = str(error)
+                note = f"멈춤: {why} (커서 유지, 다음 회차에 {account}부터)"
+                break
+            failed += 1
+            store.save(cycle_day, account, [], _status_of(error), str(error))
+            if error.code == "PERMISSION":
+                status, why = "permission", str(error)
+            pos += 1
+            continue
+        store.save(cycle_day, account, media)
+        read += 1
+        pos += 1
+    store.save_cursor(cycle_day, pos, now if called else last, digest)
+    if pos >= total:
+        store.complete(cycle_day, now, total)
+        note = f"{cycle_day} 바퀴 다 돎 ({total}곳) → 레이더 판정 갱신"
+    return RadarBatch(read, failed, pos, status, why, note)
 
 
 async def collect(env: Mapping[str, str], graph: Any, *, now: datetime | None = None,
                   audio_store: st.AudioStore | None = None,
                   radar_store: st.RadarStore | None = None) -> CollectResult:  # fmt: skip
-    """오늘 오디오·레이더를 채운다 (이미 채운 것은 건너뜀). 실패는 출처별 기록에 남긴다."""
+    """오늘 오디오(하루 1번)와 레이더 한 묶음(`radar_batch`)을 채운다.
+
+    실패는 출처별 기록에 남긴다.
+    """
+    from data_agent.connectors import ConnectorUnavailable
+
     now = now or datetime.now(UTC)
     day = _today(now)
     config = load_config(env)
@@ -154,44 +265,30 @@ async def collect(env: Mapping[str, str], graph: Any, *, now: datetime | None = 
                 continue
             try:
                 items = await graph.audio(kind)
-            except IgError as error:
+            except ConnectorUnavailable as error:  # IgError와 하루 상한
+                code = _status_of(error) if isinstance(error, IgError) else "rate_limited"
                 why = AUDIO_PERMISSION_NOTE if error.code == "PERMISSION" else str(error)
-                audio_store.log("ig_audio", day, _status_of(error), why, now)
-                audio[kind] = _status_of(error)
+                audio_store.log("ig_audio", day, code, why, now)
+                audio[kind] = code
                 continue
             audio_store.save(day, kind, items)
             audio_store.log("ig_audio", day, "connected", None, now)
             audio[kind] = "ok"
-        # 2. 레이더 (계정마다, 한 계정 실패는 그 계정만)
-        status, why = (
-            ("connected", None)
-            if config.radar_accounts
-            else ("failed", "레이더 계정이 없음 (trends.toml [instagram] radar_accounts)")
-        )
-        for account in config.radar_accounts:
-            if radar_store.done(day, account):
-                continue
-            try:
-                media = await graph.business_media(account, config.media_per_account)
-            except IgError as error:
-                failed += 1
-                radar_store.save(day, account, [], _status_of(error), str(error))
-                if error.code in ("KEY_MISSING", "PERMISSION", "RATE_LIMITED", "TOKEN_EXPIRED"):
-                    status, why = _status_of(error), str(error)
-                    if error.code != "PERMISSION":  # 키 없음·한도·토큰 만료는 나머지도 같다
-                        break
-                continue
-            radar_store.save(day, account, media)
-            read += 1
-        audio_store.log("ig_business_discovery", day, status if not read else "connected",
-                        None if read else why, now)  # fmt: skip
+        # 2. 레이더: 이번 회차 묶음만 (커서 이어받기, 한도면 바로 멈춤)
+        batch = await radar_batch(config, graph, radar_store, now)
+        read, failed = batch.read, batch.failed
+        if batch.read or batch.failed or batch.why:
+            status = "connected" if batch.read else batch.status
+            audio_store.log("ig_business_discovery", day, status,
+                            None if batch.read else batch.why, now)  # fmt: skip
     finally:
         if own_a:
             audio_store.close()
         if own_r:
             radar_store.close()
     after = graph.calls_today if hasattr(graph, "calls_today") else 0
-    return CollectResult(audio, read, failed, max(0, after - before))
+    return CollectResult(audio, read, failed, max(0, after - before),
+                         batch.position, len(config.radar_accounts), batch.note)  # fmt: skip
 
 
 async def run(env: Mapping[str, str] | None = None) -> CollectResult | None:
@@ -413,7 +510,13 @@ async def instagram_radar(
     if not config.radar_accounts:
         out.reason = "레이더 계정이 없음 (trends.toml [instagram] radar_accounts)"
     elif not media:
-        out.reason = src.reason or "레이더 수집 기록이 아직 없음"
+        pos = st.radar_position(st.path_of(env, st.RADAR_ENV))
+        first = (f"첫 바퀴를 모으는 중 ({pos}/{len(config.radar_accounts)}곳)"
+                 if pos is not None else None)  # fmt: skip
+        # 실제로 막힌 이유(키 없음·권한·한도)가 먼저, 그다음 첫 바퀴 진행 상황
+        stops = ("key_missing", "permission", "rate_limited")
+        blocked = src.reason if src.status in stops else None
+        out.reason = blocked or first or src.reason or "레이더 수집 기록이 아직 없음"
     if out.reason:
         return Result(out, Evidence(queries=["ig_radar.db"], data_summary=out.reason,
                                     collected_at=now))  # fmt: skip

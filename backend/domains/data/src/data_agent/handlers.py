@@ -1168,7 +1168,13 @@ async def instagram_radar(request: AgentRequest) -> AgentResult:
         )  # fmt: skip
         return result.output.status, result.output.model_dump(mode="json"), result.evidence
 
-    return await _stored(request, "instagram_radar", data.model_dump(mode="json"), compute)
+    # 레이더는 묶음으로 나눠 모으고 한 바퀴를 다 돌면 판정을 바꾼다. 캐시 키에 다 돈 바퀴를 넣어
+    # 바퀴마다 새로 계산한다 (다른 skill의 캐시 키는 그대로)
+    from data_agent import instagram_store as ig_store
+
+    cycle = ig_store.radar_cycle(ig_store.path_of(os.environ, ig_store.RADAR_ENV))
+    payload = {**data.model_dump(mode="json"), "radar_cycle": cycle}
+    return await _stored(request, "instagram_radar", payload, compute)
 
 
 async def instagram_memo_list(request: AgentRequest) -> AgentResult:
