@@ -3,6 +3,7 @@
 // - 연결: 고객사 시스템 관리자가 키를 넣고(확인), 회사 정보를 직접 입력해 연결한다(/system/connect). 끊는 것도 고객사가 한다.
 // 상단바의 "AXcellent with <회사>"와 로그인 화면이 연결된 회사를 따른다. 끊으면 null(회사 이름 없음).
 import { useSyncExternalStore } from 'react'
+import { companyConnection } from '@/lib/companyConnection'
 
 export type ConnectedCompany = {
   id: string
@@ -58,12 +59,41 @@ function store<T>(key: string, fallback: T) {
   }
 }
 
-// v3: 예전 브라우저에 남은 캣북스 기본 연결(v2)을 이어 쓰지 않는다
-const companyStore = store<ConnectedCompany | null>('axcellent-demo-company-v3', null)
+// v3: 예전 브라우저에 남은 캣북스 기본 연결(v2)을 이어 쓰지 않는다.
+// undefined = 이 브라우저에서 아직 정하지 않음(서버 연결을 따른다), null = 이 브라우저에서 끊음
+const companyStore = store<ConnectedCompany | null | undefined>('axcellent-demo-company-v3', undefined)
+
+// 서버에 저장된 실제 연결(회사 연결 파일: 판매 서버 주소 + 회사 설정). 키·회사 정보는 브라우저에만 있어서
+// 다른 PC는 비어 있다. 서버에 연결이 있으면 어느 PC에서 열어도 그 회사로 연결된 화면을 연다
+let serverCompany: ConnectedCompany | null = null
+const serverListeners = new Set<() => void>()
+function loadServerCompany() {
+  companyConnection.get()
+    .then((s) => {
+      const on = s.source === 'connection' && s.connection?.enabled !== false && s.tenant
+      serverCompany = on && s.tenant
+        ? { id: s.tenant.id, name: s.tenant.name, industry: '', network: '', connectedAt: s.connection?.updated_at ?? undefined }
+        : null
+      serverListeners.forEach((l) => l())
+    })
+    .catch(() => { /* 서버를 못 읽으면 이 브라우저 기록만 쓴다 */ })
+}
+try { loadServerCompany() } catch { /* 테스트 환경 등 fetch가 없으면 건너뛴다 */ }
+/** 서버 연결을 다시 읽는다 (회사 연결 저장·해제 뒤) */
+export const refreshServerCompany = loadServerCompany
+const currentCompany = (): ConnectedCompany | null => {
+  const local = companyStore.get()
+  return local === undefined ? serverCompany : local
+}
+const subscribeCompany = (l: () => void) => {
+  const off = companyStore.subscribe(l)
+  serverListeners.add(l)
+  return () => { off(); serverListeners.delete(l) }
+}
 const keyStore = store<IssuedKey[]>('axcellent-demo-keys-v3', DEFAULT_KEYS)
 
-export const getCompany = companyStore.get
-export const useCompany = () => useSyncExternalStore(companyStore.subscribe, companyStore.get)
+export const getCompany = currentCompany
+export const useCompany = () => useSyncExternalStore(subscribeCompany, currentCompany)
 export const useKeys = () => useSyncExternalStore(keyStore.subscribe, keyStore.get)
 
 const setStatus = (key: string, status: KeyStatus) => keyStore.set(keyStore.get().map((k) => (k.key === key ? { ...k, status } : k)))
@@ -104,7 +134,7 @@ export function connectWithKey(k: IssuedKey, info: CompanyInfo) {
 }
 /** 연결된 회사 정보 고치기 (연결은 그대로) */
 export function updateCompanyInfo(info: CompanyInfo) {
-  const cur = companyStore.get()
+  const cur = currentCompany()
   if (!cur) return
   const next = { ...cur, ...info }
   companyStore.set(next)
