@@ -34,7 +34,7 @@ function Tile({ label, value, note, tone }: { label: string; value: string; note
     <div className={`rounded-2xl p-4 ${tone}`}>
       <p className="text-xs">{label}</p>
       <p className="mt-1 text-3xl font-bold tabular-nums">{value}</p>
-      <p className="mt-1 text-xs opacity-80">{note}</p>
+      <p className="mt-1 text-xs">{note}</p>
     </div>
   );
 }
