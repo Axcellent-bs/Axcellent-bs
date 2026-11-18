@@ -113,10 +113,12 @@ function Column({ title, hint, cards }: { title: string; hint: string; cards: Bo
     <div className="bg-surface-2 p-3">
       <div className="mb-2 flex items-baseline gap-2"><h3 className="text-sm font-semibold">{title}</h3><span className="text-xs tabular-nums text-ink-500">{cards.length}건</span>
         <span className="ml-auto text-xs text-ink-500">{hint}</span></div>
-      <ul role="region" aria-label={`${title} 목록`} tabIndex={0} className={`space-y-2 overflow-y-auto ${COLUMN_MAX}`}>
-        {cards.map((c) => <li key={`${c.id}-${c.stage}`} className="board-card"><Card c={c} /></li>)}
-        {!cards.length && <li className="py-4 text-center text-xs text-ink-500">비어 있습니다.</li>}
-      </ul>
+      <div role="region" aria-label={`${title} 목록`} tabIndex={0} className={`overflow-y-auto ${COLUMN_MAX}`}>
+        <ul className="space-y-2">
+          {cards.map((c) => <li key={`${c.id}-${c.stage}`} className="board-card"><Card c={c} /></li>)}
+          {!cards.length && <li className="py-4 text-center text-xs text-ink-500">비어 있습니다.</li>}
+        </ul>
+      </div>
     </div>
   );
 }
