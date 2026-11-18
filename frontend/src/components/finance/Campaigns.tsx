@@ -112,7 +112,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
       </Panel>
 
       <Panel id="campaign-categories" title="콘텐츠 카테고리별 제작비"
-        hint={<>쇼츠·릴스를 카테고리(예: 아재개그·몸개그)별로 묶어 조회당 제작비를 봅니다. 조회수는 데이터 AI가 잰 게시 7일 값만 쓰고, 7일이 안 된 영상은 측정 중으로 셉니다. 다음 회차 제안은 재무 의견이고, 기획 AI가 영상 기획안을 넘기기 전에 물어 갑니다. 비중은 기획·마케팅과 사람이 정합니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.planning]} /></>}>
+        hint={<>쇼츠·릴스를 카테고리(예: 데이터 AI 숏츠 형식인 챌린지·상황극·스케치, 또는 사람이 정한 아재개그)별로 묶어 조회당 제작비를 봅니다. 조회수는 데이터 AI가 잰 게시 7일 값만 쓰고, 7일이 안 된 영상은 측정 중으로 셉니다. 다음 회차 제안은 재무 의견이고, 기획 AI가 영상 기획안을 넘기기 전에 물어 갑니다. 비중은 기획·마케팅과 사람이 정합니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.planning]} /></>}>
         <ResourceBody res={view}>
           {(v) => {
             const rows = v.categories ?? [];

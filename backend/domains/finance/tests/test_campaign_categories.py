@@ -458,3 +458,16 @@ def test_shift_opinion_to_orchestrator_carries_everything_planning_needs() -> No
     assert values["아재개그 조회당 제작비"] == "5.0원"
     # 재배분이 아닌 의견에는 싣지 않는다
     assert all(o.get("planning_insight") is None for o in opinions if o is not shift)
+
+
+def test_category_names_that_differ_only_in_spacing_share_one_row() -> None:
+    # 사람 입력(공백·" · ")과 데이터 AI 숏츠 형식 이름이 한 칸으로 묶인다
+    campaigns = _record(
+        _shorts("a", "상황극·스케치", 100_000, 10_000),
+        _shorts("b", " 상황극 · 스케치 ", 100_000, 10_000),
+    )
+    rows = cp.category_view_costs(campaigns)
+    assert [r["content_category"] for r in rows] == ["상황극·스케치"]
+    assert rows[0]["views"] == 20_000
+    advice = cp.category_budget_advice(campaigns, "상황극 ·스케치")
+    assert advice["status"] != "no_data"
