@@ -2,6 +2,8 @@
 // 고치는 법: 이 파일을 고치고 `node build.mjs`를 돌리면 index.html이 다시 만들어진다. 자세한 규칙은 README.md, 준하 님 자료 받는 자리는 INTAKE.md.
 // 규칙: 숫자·문구는 브로셔와 같게 쓴다. 시연 숫자에는 "시연 환경 기준"을 붙이고, 측정하지 않은 효과(비용 절감·인력 대체)는 쓰지 않는다.
 
+import instagram from "./instagram/load.mjs";
+
 export default {
   site: {
     lang: "ko",
@@ -180,10 +182,8 @@ export default {
     // 게시물 하나: { img: "assets/demo/cat-post-1.jpg", alt: "…", caption: "…", date: "11월 20일",
     //   metrics: [["도달", "123"], ["좋아요", "12"]], measuredAt: "11월 27일", source: "Instagram 인사이트(7일 기준)" }
     // 반응 숫자(metrics)는 실제로 잰 값만 넣고, 잰 날짜(measuredAt)와 출처(source)를 함께 적는다. 둘 중 하나라도 없으면 숫자가 화면에 안 나온다.
-    items: [
-      { name: "캣북스", badges: ["시연 가상 고객사"], summary: "", posts: [] },
-      { name: "누비투어", badges: ["시연 가상 고객사"], summary: "", posts: [] },
-    ],
+    // 게시물·반응은 instagram/instagram.json(준하 님 자료)에서 읽는다. 자료 형식·검사: instagram/README.md
+    items: instagram.casesItems,
     emptyText: "사례 준비 중",
     // 숫자를 실제 측정값으로 채우는 때에는 이 문장을 "시연용 가상 고객사 계정에서 잰 실제 값이며, 실제 기업의 매출·성과를 뜻하지 않습니다."로 맞춘다(README 참고)
     note: "게시물과 반응 숫자는 시연 환경(가상 계정) 기준이며 실제 고객 성과가 아닙니다. 모든 게시물은 AI가 요청하고 사람이 승인한 뒤에 올라갑니다.",
