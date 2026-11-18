@@ -181,8 +181,13 @@ function EffectFacts({ facts }: { facts: ProposalFact[] }) {
 /** 조회수 표기: 1만 이상은 "4.8만", 아래는 쉼표 (데이터분석 값 그대로, 계산은 단위만) */
 const views = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1).replace(/\.0$/, '')}만` : n.toLocaleString('ko-KR'))
 
-/** 콘텐츠 카테고리 예시 (마케팅 캠페인 시작 화면과 같은 목록, 자유 입력) */
-const CATEGORY_HINTS = ['아재개그', '몸개그', '말장난', '피식']
+/** 콘텐츠 카테고리 예시 (자유 입력). 앞쪽은 데이터분석 숏츠 형식 이름(`SHORTS_FORMATS`, 기타·unknown 제외)과
+ *  글자까지 같게 둔다: 재무가 카테고리를 글자 그대로 묶어서 데이터 값과 같은 칸에 쌓이게 (11/18 태윤 님 요청).
+ *  뒤쪽은 마케팅 캠페인 시작 화면과 같은 예시 */
+const CATEGORY_HINTS = [
+  '챌린지', '상황극·스케치', '리액션', '정보·팁', '비포애프터', '브이로그', '밈 패러디',
+  '아재개그', '몸개그', '말장난', '피식',
+]
 
 /** 방향 선택지 (11/18): 갈래 3개 중 하나를 고르면 그 방향으로 할 일·이유·목표를 다시 쓴다. 예전 제안은 안 보인다 */
 function AngleChoice({ p, d, open }: { p: Proposal; d: Dispatch<Action>; open: boolean }) {
