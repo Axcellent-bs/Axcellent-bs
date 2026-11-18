@@ -94,6 +94,10 @@ class FinanceOpinion(AxModel):
     recommendation: str
     applied_rules: list[dict[str, Any]] = Field(default_factory=list)
     submitted_at: str
+    # 아래는 11/18 추가. 기획이 알아야 하는 의견(콘텐츠 제작비 재배분 등)이면 총괄이 기획
+    # `receive_insight`로 그대로 넘길 입력을 함께 싣는다. 형식은 planning `ReceiveInsightInput`
+    # (계약끼리 서로 import하지 않으려고 dict로 둔다. 총괄이 넘기기 전에 검증한다)
+    planning_insight: dict[str, Any] | None = None
 
 
 class ReceiveFinanceOpinionOutput(AxModel):

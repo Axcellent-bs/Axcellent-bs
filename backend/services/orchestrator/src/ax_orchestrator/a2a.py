@@ -132,7 +132,10 @@ def answer_planning_question(get_manager: GetManager) -> Handler:
 
 
 def receive_finance_opinion(get_manager: GetManager) -> Handler:
-    """재무가 보낸 의견을 받아 보관한다. 같은 의견을 다시 받으면 `duplicate`로 답한다."""
+    """재무가 보낸 의견을 받아 보관한다. 같은 의견을 다시 받으면 `duplicate`로 답한다.
+
+    기획용 내용이 실린 의견(재배분 등)은 기획 `receive_insight`로 넘긴다 (finance_relay).
+    """
 
     async def handler(request: AgentRequest) -> AgentResult:
         try:
@@ -154,6 +157,9 @@ def receive_finance_opinion(get_manager: GetManager) -> Handler:
                 output={"errors": ["총괄이 아직 준비되지 않았다. 나중에 다시 보낸다"]},
             )
         added = manager.finance_opinions.add(opinion, request.meta.context_id)
+        # 기획이 알아야 하는 의견은 기획에 넘긴다(기다리지 않는다).
+        # 전에 못 넘긴 것도 같이 다시 보낸다
+        manager.finance_opinions.start_relays()
         return AgentResult(
             meta=request.meta,
             status=TaskStatus.COMPLETED,

@@ -152,8 +152,8 @@ class State:
         self.planning_insight_sender: Callable[
             [dict[str, Any], RequestMeta], Awaitable[dict[str, Any]]
         ] = send_planning_insight
-        # 재배분 의견을 기획 receive_insight로 먼저 보낼지 (11/18부터 끔: 기획이 영상 기획안을
-        # 마케팅에 넘기기 전에 category_budget_advice로 직접 묻는다.
+        # 재배분 의견을 재무가 기획 receive_insight로 직접 보낼지 (11/18부터 끔: 총괄에 낸 의견에
+        # 기획용 내용을 실어 총괄이 기획에 알리고, 기획은 기획안을 넘기기 전에 재무에 직접 묻는다.
         # 이미 보낸 기록의 재전송은 그대로)
         self.push_to_planning = False
         # 시뮬레이션은 시나리오의 값을 넣는다. None이면 장부로 계산한다
@@ -1109,6 +1109,10 @@ async def submit_insights(context_id: str) -> list[dict[str, Any]]:
                 "recommendation": f"{item['title']}. {item['recommendation']}",
                 "applied_rules": item["applied_rules"],
                 "submitted_at": fc.iso(fc.now()),
+                # 재배분 의견은 총괄이 기획에 넘길 내용까지 다 싣는다 (11/18: 총괄이 기획에 알린다)
+                "planning_insight": (
+                    planning_insight(item) if item["kind"] in PLANNING_INSIGHT_KINDS else None
+                ),
             },
             context_id,
         )

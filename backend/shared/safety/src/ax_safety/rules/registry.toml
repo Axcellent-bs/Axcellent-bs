@@ -591,7 +591,8 @@ base_grade = "A"
 action = "receive_insight"
 owner = "planning"
 # finance: 캠페인 콘텐츠 카테고리 제작비 재배분 의견(INS-005 budget_shift, 11/17)
-requesters = ["planning", "data", "marketing", "finance"]
+# orchestrator: 재무가 총괄에 낸 재배분 의견을 총괄이 기획에 넘긴다 (11/18)
+requesters = ["planning", "data", "marketing", "finance", "orchestrator"]
 base_grade = "A"
 
 [[actions]]

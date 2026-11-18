@@ -255,6 +255,15 @@ class IncidentStore:
             )
             self._db.commit()
 
+    def update_opinion(self, opinion_id: str, row: dict[str, Any]) -> None:
+        """이미 받은 의견 줄을 고쳐 쓴다 (기획에 넘긴 결과 `relay`를 남길 때)."""
+        body = json.dumps(row, ensure_ascii=False, default=str)
+        with self._lock:
+            self._db.execute(
+                "UPDATE finance_opinions SET body = ? WHERE opinion_id = ?", (body, opinion_id)
+            )
+            self._db.commit()
+
     def drop_opinion(self, opinion_id: str) -> None:
         with self._lock:
             self._db.execute("DELETE FROM finance_opinions WHERE opinion_id = ?", (opinion_id,))

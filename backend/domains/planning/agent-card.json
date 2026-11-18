@@ -86,7 +86,8 @@
       "allowed_requesters": [
         "data",
         "marketing",
-        "finance"
+        "finance",
+        "orchestrator"
       ],
       "verifier": null,
       "priority": "required"
