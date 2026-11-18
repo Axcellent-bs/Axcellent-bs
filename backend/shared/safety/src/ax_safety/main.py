@@ -12,7 +12,7 @@
 | `GET /api/safety/chat`, `GET /api/safety/chat/{id}` | 1:1 대화 목록·상세 | 사람(선택) |
 | `POST /api/safety/chat`, `POST .../chat/{id}/close`·`/remove` | 대화 보내기·끝내기 | **사람만** |
 
-안전규칙 AI 1:1 대화는 기준·보류 기록을 설명만 하고 아무것도 바꾸지 않는다 (`chat/turn.py`).
+에이전트 처리 로그 1:1 대화는 기준·보류 기록을 설명만 하고 아무것도 바꾸지 않는다 (`chat/turn.py`).
 남의 대화는 요약만 보인다.
 
 `ExecuteRequest.requester`는 믿지 않는다. 토큰에서 꺼낸 이름과 다르면 403이다.
@@ -278,7 +278,7 @@ def create_app(
     def registry() -> dict:
         return _ok(gate.registry.model_dump(mode="json"))
 
-    # ---- 안전규칙 AI 1:1 대화 (조회·설명만). 대화는 업무 상태가 아니라 execute()를 거치지 않는다
+    # ---- 처리 로그 1:1 대화 (조회·설명만). 대화는 업무 상태가 아니라 execute()를 거치지 않는다
     def _who(authorization: str | None, required: bool) -> str | None:
         try:
             return human_from_token(bearer(authorization))

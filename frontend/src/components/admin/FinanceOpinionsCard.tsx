@@ -35,7 +35,7 @@ export function FinanceOpinionsCard({ tick = 0 }: { tick?: number }) {
         {rows && <span className="text-sm tabular-nums text-ink-500">받은 의견 {rows.length}건</span>}
         <Link href="/finance/daily#campaigns" className="ml-auto text-sm font-medium text-brand-700 underline underline-offset-2">재무 화면 캠페인 예산에서 근거 보기 →</Link>
       </div>
-      <p className="text-sm text-ink-500">재무 AI가 캠페인 결과, 줄이거나 권하지 않은 예산, 놓치기 쉬운 패턴을 총괄 AI에 알립니다. 총괄 AI는 받아 두기만 하고, 집행 여부는 사람과 안전규칙이 정합니다.</p>
+      <p className="text-sm text-ink-500">재무 AI가 캠페인 결과, 줄이거나 권하지 않은 예산, 놓치기 쉬운 패턴을 총괄 AI에 알립니다. 총괄 AI는 받아 두기만 하고, 집행 여부는 사람과 안전 규칙이 정합니다.</p>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {rows === null && !error ? <p className="text-sm text-ink-500">불러오는 중…</p> : rows && rows.length === 0 ? (
         <p className="text-sm text-ink-500">아직 받은 의견이 없습니다. 마케팅이 캠페인 예산을 묻거나 결과를 저장하면 재무가 의견을 보냅니다.</p>

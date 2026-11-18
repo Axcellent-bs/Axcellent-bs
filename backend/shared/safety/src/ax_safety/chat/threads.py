@@ -1,4 +1,4 @@
-"""안전규칙 AI 직접 대화 저장 (SQLite). 인프라 AI 대화 저장과 같은 모양이다.
+"""에이전트 처리 로그 직접 대화 저장 (SQLite). 인프라 AI 대화 저장과 같은 모양이다.
 
 `SAFETY_CHAT_DB`(파일 경로)가 있으면 거기에, 없으면 `SAFETY_STATE_DB` 옆 `safety_chat.db`에,
 둘 다 없으면 프로세스 메모리에 둔다(테스트).
@@ -81,7 +81,7 @@ class ChatStore:
             "who": row["who"],
             "summary": row["summary"],
             "messages": json.loads(row["messages"]),
-            # 안전규칙 대화는 일을 만들지 않는다(조회·설명만).
+            # 처리 로그 대화는 일을 만들지 않는다(조회·설명만).
             # 화면이 "일이 생긴 대화"를 가릴 때 쓰는 자리
             "task_id": None,
             "created_at": row["created_at"],

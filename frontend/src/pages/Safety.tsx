@@ -7,11 +7,11 @@ import { ACTION_KO as FINANCE_ACTION_KO, type ExecStatus, type ExecutionRecord, 
 import { ago, shortDateTime, won } from "@/lib/format";
 import { SAFETY_ACTION_KO, SAFETY_RULE_KO, safety, type RegisteredAction, type SafetyThresholds } from "@/lib/safety";
 
-// 안전규칙 AI 화면: 모든 AI의 상태 변경(돈·게시·배포)은 execute()로 안전규칙 AI를 지난다.
+// 에이전트 처리 로그 화면: 모든 AI의 상태 변경(돈·게시·배포)은 execute()로 에이전트 처리 로그를 지난다.
 // ① 사람 결정 대기 → ② 최근 판단 | ③ 등록된 일(두 칸) → ④ 지키는 기준.
 // 연결 보류(개발 AI의 KEV 판정)는 251 연결이 클라우드(GitHub)뿐이라 걸릴 일이 없어 화면에서 뺐다 (서버 기능은 그대로).
 // ① 사람 결정 대기는 모든 AI의 C 등급 보류다(모든 AI의 상태 변경이 execute()로 이 관문을 지나므로 따로 연동할 곳이 없다).
-// 모두 안전규칙 AI 서버(8001)의 기록을 그대로 읽는다. 결정은 그 일을 맡은 화면에서 사람이 한다 (여기서는 링크만).
+// 모두 에이전트 처리 로그 서버(8001)의 기록을 그대로 읽는다. 결정은 그 일을 맡은 화면에서 사람이 한다 (여기서는 링크만).
 
 const POLL_MS = 15_000;
 const RECENT = 40;
@@ -31,7 +31,7 @@ const STATUS: Record<ExecStatus, { label: string; tone: string }> = {
 const OP_KO: Record<string, string> = { ">": "초과", ">=": "이상", "<": "미만", "<=": "이하" };
 const MONEY_METRIC = new Set(["amount", "unit", "daily_total", "context_total", "customer_total"]);
 
-/** 일 이름. 대화방(AI 대화방) → 재무 → 안전규칙 화면 이름표 순서로 찾는다. 채팅 일(…_chat_send/close)은 묶어 부른다 */
+/** 일 이름. 대화방(AI 대화방) → 재무 → 처리 로그 화면 이름표 순서로 찾는다. 채팅 일(…_chat_send/close)은 묶어 부른다 */
 function jobKo(a: string): string {
   if (/_chat_(send|close)$/.test(a)) return a.endsWith("_send") ? "AI 대화 보내기" : "AI 대화 닫기";
   if (/^dev_task_/.test(a)) return "개발 작업 관리";
@@ -136,15 +136,15 @@ export default function Safety() {
       <header className="card space-y-4 px-8 py-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold">안전규칙 AI</h1>
+            <h1 className="text-xl font-semibold">에이전트 처리 로그</h1>
             <p className="mt-1 max-w-3xl text-sm text-ink-500">
-              다른 AI가 돈을 쓰거나(쿠폰·환불·정산·캠페인), 밖에 글을 올리거나(공지·SNS), 배포를 바꾸려면 먼저 안전규칙 AI를 거칩니다.
+              다른 AI가 돈을 쓰거나(쿠폰·환불·정산·캠페인), 밖에 글을 올리거나(공지·SNS), 배포를 바꾸려면 먼저 안전 규칙을 거칩니다. 그 요청과 판단은 모두 이 에이전트 처리 로그에 남습니다.
               등급을 매겨 바로 실행하거나, 다른 AI에게 금액을 다시 계산하게 하거나, 사람 결정을 기다리게 보류합니다. AI끼리 A2A로 주고받는 기록은{" "}
               <Link href="/agents/chat?rooms=all" className="text-brand-700 underline">AI 대화방</Link>에서도 볼 수 있어요.
             </p>
           </div>
           <div className="flex flex-col items-end gap-2">
-            <Link href="/agents/chat?rooms=direct:safety" className="btn-primary text-sm">안전규칙 AI에게 묻기</Link>
+            <Link href="/agents/chat?rooms=direct:safety" className="btn-primary text-sm">처리 로그에 묻기</Link>
             <span className="text-sm text-ink-500">{at ? `${shortDateTime(at)} 기준 · 15초마다 새로 읽음` : "불러오는 중…"}</span>
           </div>
         </div>
@@ -184,7 +184,7 @@ export default function Safety() {
       </Section>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <Section title="② 최근 판단" desc={day ? `${dayLabel(day)}에 안전규칙 AI가 받은 실행 요청과 판단 결과입니다 (${recent.length}건).` : `안전규칙 AI가 받은 실행 요청과 판단 결과입니다 (최근 ${RECENT}건).`}
+        <Section title="② 최근 판단" desc={day ? `${dayLabel(day)}에 에이전트 처리 로그에 남은 실행 요청과 판단 결과입니다 (${recent.length}건).` : `에이전트 처리 로그에 남은 실행 요청과 판단 결과입니다 (최근 ${RECENT}건).`}
           right={days.length > 0 && (
             <label className="flex items-center gap-2 text-sm text-ink-500">
               <span className="shrink-0">날짜</span>
@@ -226,7 +226,7 @@ export default function Safety() {
           )}
         </Section>
 
-        <Section title="③ 등록된 일" desc="안전규칙 AI가 아는 일과 기본 등급입니다. 등록되지 않은 일은 실행하지 않고 보류합니다.">
+        <Section title="③ 등록된 일" desc="안전 규칙에 등록된 일과 기본 등급입니다. 등록되지 않은 일은 실행하지 않고 보류합니다.">
           {!registry ? <Empty>불러오는 중…</Empty> : (
             <div className="max-h-[640px] overflow-auto">
               <table className="w-full min-w-[460px] text-sm">

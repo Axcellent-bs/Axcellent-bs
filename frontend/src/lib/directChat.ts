@@ -58,7 +58,7 @@ async function request(ep: ChatEndpoint, suffix: string, init?: RequestInit): Pr
 
 /**
  * `closable`: 이 창구가 `POST <주소>/<id>/close`(대화 끝내기)를 갖고 있을 때만 켠다 (고객지원).
- * `getByQuery`: 상세를 `<주소>?thread_id=<id>`로 읽는다 (안전규칙: 251 nginx가 목록 주소에만 사람 토큰을 붙인다)
+ * `getByQuery`: 상세를 `<주소>?thread_id=<id>`로 읽는다 (처리 로그: 251 nginx가 목록 주소에만 사람 토큰을 붙인다)
  */
 export const directChatApi = (ep: ChatEndpoint, opts: { closable?: boolean; getByQuery?: boolean } = {}) => {
   const one = (d: unknown) => {

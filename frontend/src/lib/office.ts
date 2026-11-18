@@ -23,11 +23,11 @@ export const DESKS: DeskDef[] = [
   // 개발: 기획 맞은편 의자(뒷모습). x·y는 쓰는 곳이 없어(그림 자리는 PixelOffice SEATS) 기획 아래쪽 값만 둔다
   { key: "dev", label: "개발", x: 14, y: 150, shirt: "#232345", hair: "#3a2a1a", skin: "#f2c9a0" },
   { key: "orchestrator", label: "총괄 AI", x: 194, y: 128, shirt: "#4c1d95", hair: "#222222", skin: "#f5d0b0" },
-  // 안전규칙: 위 책상 앞쪽 의자(뒷모습). 모든 AI의 실행 요청(execute)을 받아 등급을 매긴다. x·y는 쓰는 곳이 없다
-  { key: "safety", label: "안전규칙", x: 74, y: 92, shirt: "#fde047", hair: "#1b1b1b", skin: "#f5d0b0" },
+  // 처리 로그: 위 책상 앞쪽 의자(뒷모습). 모든 AI의 실행 요청(execute)을 받아 등급을 매긴다. x·y는 쓰는 곳이 없다
+  { key: "safety", label: "처리 로그", x: 74, y: 92, shirt: "#fde047", hair: "#1b1b1b", skin: "#f5d0b0" },
 ];
 
-/** 기록의 부서 이름 → 자리. 회사 기억(memory)은 데이터 부서 담당이라 데이터 자리에 앉힌다. 안전규칙(safety)은 자기 자리가 있다 */
+/** 기록의 부서 이름 → 자리. 회사 기억(memory)은 데이터 부서 담당이라 데이터 자리에 앉힌다. 처리 로그(safety)는 자기 자리가 있다 */
 export function deskOf(name: string | null | undefined): DeskKey | null {
   if (!name) return null;
   // 서비스 이름(inquiry·coupon·org 등)은 먼저 부서로 (AI 대화방 이름과 같은 규칙)
@@ -72,7 +72,7 @@ export const BUBBLE_MS = 4500;
 export const POP_MS = 2400;
 const WALK_MS = 3200;
 /** 공통 로그 부탁에서 걷지 않는 상대. memory는 데이터 자리에 앉혀 보이지만 걸어갈 사람은 아니다.
- *  안전규칙(safety)은 공통 로그에도 실행 기록과 같은 일이 남아서, 걷기는 실행 기록(`exe:…:req`)으로만 한 번 한다 */
+ *  처리 로그(safety)는 공통 로그에도 실행 기록과 같은 일이 남아서, 걷기는 실행 기록(`exe:…:req`)으로만 한 번 한다 */
 const NO_WALK = new Set(["safety", "memory", "shop-api", "dashboard-api", "operator", "human"]);
 
 /** 숫자 덩어리: 쉼표·소수점과 뒤에 붙은 단위까지 한 덩어리 */
@@ -129,7 +129,7 @@ export function deriveOffice(
 
   // 2) 방금 들어온 말풍선 → 말한 부서 머리 위에 (승인 대기 표시는 덮지 않는다)
   for (const it of items) {
-    // 안전규칙 AI가 보류해 사람 결정을 기다리는 일이 있으면 안전규칙 자리는 "승인 대기"
+    // 에이전트 처리 로그가 보류해 사람 결정을 기다리는 일이 있으면 처리 로그 자리는 "승인 대기"
     if (it.kind === "hold" && it.state === "pending" && it.id.startsWith("exe:")) desks.safety = { ...desks.safety, state: "waiting" };
     if (it.kind === "hold" && it.state === "approved") {
       // 보류 카드는 승인돼도 id가 같아서, 승인을 처음 본 시각은 `id:approved`로 따로 기억한다
@@ -150,7 +150,7 @@ export function deriveOffice(
       desks.orchestrator.bubble = { text: "장애 접수!", kind: "alert" };
     }
     if (it.kind !== "msg") continue;
-    // 안전규칙 AI의 판단 줄은 대화방에서 가운데 줄(central)이지만 말한 쪽은 안전규칙 자리다
+    // 에이전트 처리 로그의 판단 줄은 대화방에서 가운데 줄(central)이지만 말한 쪽은 처리 로그 자리다
     const k = it.fromKey === "safety" ? "safety" : it.central ? "orchestrator" : deskOf(it.fromKey);
     // 총괄이 단계를 맡기면 그 부서가 총괄 앞으로 와서 받아 간다 (총괄은 라운지에 있다)
     if (it.central && it.id.endsWith(":req") && age < WALK_MS) {
@@ -165,7 +165,7 @@ export function deriveOffice(
       const who = deskOf(it.fromKey), to = deskOf(it.toKey);
       if (who && to && who !== to && who !== "orchestrator") visits.push({ id: it.id, who, to, at, say: short(it.text) });
     }
-    // 실행 요청(안전규칙 AI 기록): 요청한 AI가 안전규칙 자리 옆으로 가서 맡긴다
+    // 실행 요청(에이전트 처리 로그 기록): 요청한 AI가 처리 로그 자리 옆으로 가서 맡긴다
     if (it.id.startsWith("exe:") && it.id.endsWith(":req") && age < WALK_MS) {
       const who = deskOf(it.fromKey);
       if (who && who !== "safety" && who !== "orchestrator") visits.push({ id: it.id, who, to: "safety", at, say: short(it.text) });
