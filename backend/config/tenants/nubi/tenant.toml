@@ -1,0 +1,20 @@
+# 누비투어(가상 고객사, 해외 패키지 여행사) 회사 설정. 회사 한 곳 = 카탈로그 + 커넥터 + 조직도
+# 회사 연결 › 사이트 연결에서 회사 설정 "누비투어"를 고르면 서비스들이 재시작 없이 이 폴더를 따른다
+# (ax_agent_template.tenant). 누비투어 사이트는 자기 API(/api/v1)라 "다른 형식 API"(사이트 변환기)로 연결한다.
+# 비밀값을 두지 않는다. API 키는 회사 연결 화면에서 넣고 서버의 변환기 폴더에만 저장된다
+
+name = "누비투어"
+# data 지표 카탈로그 (domains/data/src/data_agent/catalogs/nubi.toml)
+catalog = "nubi"
+# 사이트 변환기가 shop-api 규격으로 바꿔 주므로 커넥터는 shop-api
+connector = "shop-api"
+org = "org.yaml"
+# 검색어 급상승·YouTube 키워드(trends.toml·youtube.toml)는 아직 없다. 여행 키워드는 사람이 정해 넣는다
+
+timezone = "Asia/Seoul"
+
+# 도메인 프로필(data domain_profile)이 읽는 회사 소개. 키워드·카테고리·출처는 적지 않는다(AI가 카탈로그로 고름)
+[profile]
+about = "누비투어는 해외 패키지 여행 상품(투어)을 온라인으로 예약받아 판매하는 여행사다."
+
+[profile.override]

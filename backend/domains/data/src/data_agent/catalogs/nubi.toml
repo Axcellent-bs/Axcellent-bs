@@ -1,0 +1,31 @@
+# 누비투어(가상 고객사, 해외 패키지 여행사) 지표 카탈로그. 형식: ax_contracts.schemas.data.MetricCatalog
+# 누비투어는 자기 API(/api/v1 예약·투어)를 사이트 변환기로 shop-api 규격으로 바꿔 읽는다.
+# 변환기로 실제로 받을 수 있는 지표만 둔다(예약 = 주문). 결제 실패율·실패 주문은 누비투어 API에 없어 넣지 않는다
+id = "nubi"
+name = "누비투어"
+connector = "shop-api"
+# 거래량 지표: 빈 구간 판단, 거래량에 따른 기준 보정
+volume_metric = "order_count"
+volume_label = "예약"
+
+[[metrics]]
+id = "order_count"
+label = "예약 수"
+bad_direction = "down"  # 감소만 이상 (특가·시즌으로 늘어난 것은 이상이 아님)
+unit = "건"
+aggregate = "sum"
+
+[[metrics]]
+id = "inquiry_count"
+label = "문의량"
+bad_direction = "up"
+unit = "건"
+aggregate = "sum"
+
+# 영향 분석·설명 문장의 단위
+[impact]
+unit_label = "예약"
+customer_label = "고객"
+money_field = "amount"
+money_unit = "원"
+money_label = "결제 실패(미결제) 금액"
