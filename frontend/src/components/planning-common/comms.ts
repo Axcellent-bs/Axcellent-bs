@@ -1,6 +1,7 @@
 // 소통 › 에이전트 대화의 원천: dashboard-api 공통 로그 조회
 // `GET /api/dashboard/communications?dept=planning` (#248·#277·#278).
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useVisibleInterval } from '@/lib/visibleInterval'
 import type { Activity, Dept } from '@/lib/planningData'
 
 const API = (import.meta.env.VITE_DASHBOARD_API_URL as string | undefined) ?? 'http://localhost:8020'
@@ -38,16 +39,14 @@ export function toActivity(l: Line): Activity {
 // 공통 로그 줄을 돌려준다 (연결 전에는 빈 목록)
 export function useCommunications(dept: Dept = 'planning'): Activity[] | null {
   const [lines, setLines] = useState<Activity[]>([])
-  useEffect(() => {
-    let alive = true
-    const load = () =>
-      fetch(`${API}/api/dashboard/communications?dept=${dept}`)
-        .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-        .then((body: { data: Line[] }) => { if (alive) setLines(body.data.map(toActivity)) })
-        .catch(() => {}) // 연결 전(503 UPSTREAM_NOT_CONNECTED 등)에는 빈 목록을 유지
-    load()
-    const i = setInterval(load, POLL_MS)
-    return () => { alive = false; clearInterval(i) }
-  }, [dept])
+  const alive = useRef(true)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  // 앞 요청이 안 끝났으면 건너뛰고, 다른 탭을 볼 때는 받지 않는다 (11/18 화면 속도 점검)
+  useVisibleInterval(() =>
+    fetch(`${API}/api/dashboard/communications?dept=${dept}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((body: { data: Line[] }) => { if (alive.current) setLines(body.data.map(toActivity)) })
+      .catch(() => {}), // 연결 전(503 UPSTREAM_NOT_CONNECTED 등)에는 빈 목록을 유지
+  POLL_MS)
   return lines
 }
