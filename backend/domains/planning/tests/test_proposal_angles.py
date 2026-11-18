@@ -277,3 +277,86 @@ def test_brief_without_angle_is_unchanged() -> None:
     _choose(svc2, pid2, "own_trend")
     _approve(svc2, pid2)
     assert m2.sent[-1].idea_angle == "own_trend" and m2.sent[-1].trend_refs == []
+
+
+# ---------------------------------------------------------------- 최종 리뷰 반영 (11/18)
+
+
+def test_rule_draft_scale_numbers_are_not_warnings() -> None:
+    """추천 이유의 규모 숫자(팔로워·지난 조회)는 받은 값이라 숫자 경고가 아니다.
+    (11/18 리뷰 Important 1)"""
+    svc = _svc(insights=Insights(), marketing=Marketing(followers=3000))
+    pid = _new(svc)
+    _choose(svc, pid, "ride_trend")
+    p = _p(svc, pid)
+    assert "3,000" in p.why and p.warnings == []
+
+
+def test_double_click_asks_finance_once() -> None:
+    """같은 제안에 방향 고르기가 겹치면 두 번째는 ANGLE_BUSY, 재무도 한 번만 (리뷰 Important 2)."""
+    gate = asyncio.Event()
+
+    class SlowWriter(AngleWriter):
+        async def draft_for_angle(self, p, option, ctx):
+            await gate.wait()
+            return await super().draft_for_angle(p, option, ctx)
+
+    fin = Finance()
+    svc = _svc(insights=Insights(), marketing=Marketing(), writer=SlowWriter(), finance=fin)
+    pid = _new(svc)
+
+    async def go():
+        act = {"type": "chooseAngle", "proposal": pid, "angle": "own_trend"}
+        first = asyncio.create_task(svc.dispatch(act))
+        second = asyncio.create_task(svc.dispatch(act))
+        await asyncio.sleep(0.05)
+        gate.set()  # 막히지 않아도 테스트가 멈추지 않게 풀어 준다
+        return await asyncio.gather(first, second, return_exceptions=True)
+
+    _, second = asyncio.run(go())
+    assert isinstance(second, ActionError) and second.code == "ANGLE_BUSY"
+    assert len(fin.asked) == 1
+    _choose(svc, pid, "ride_trend")  # 끝난 뒤에는 다시 고를 수 있다
+    assert _p(svc, pid).angle == "ride_trend"
+
+
+def test_pull_reads_trends_once_for_many_insights() -> None:
+    """받아오기 한 번에 트렌드 목록은 한 번만 부른다 (리뷰 Important 3)."""
+
+    class Pull(Insights):
+        async def pull(self, ctx):
+            topics = [
+                ("독서 챌린지", "밤의 도서관"),
+                ("요리 레시피", "집밥 노트"),
+                ("여행 브이로그", "길 위의 책"),
+            ]
+            return [
+                _insight(f"ins-{i}", title=n, summary=f"{n} 숏츠가 많이 보인다", products=[b])
+                for i, (n, b) in enumerate(topics)
+            ]
+
+    ins = Pull()
+    svc = _svc(insights=ins, marketing=Marketing())
+    out = asyncio.run(svc.dispatch({"type": "pullInsights"}))
+    assert len(out.output["created"]) == 3 and ins.trends_calls == 1
+    assert all(len(p.options) == 3 for p in svc.state.proposals)
+
+
+def test_option_sources_use_short_timeout() -> None:
+    """선택지 출처는 짧게 기다리고, 늦으면 확인할 수 없음으로 만든다 (리뷰 Important 3)."""
+    from planning_agent.domain import proposal_actions as pa
+
+    class Slow(Insights):
+        async def trends(self, ctx):
+            await asyncio.sleep(5)
+            return TRENDS
+
+    old = pa.OPTION_SOURCE_TIMEOUT
+    pa.OPTION_SOURCE_TIMEOUT = 0.05
+    try:
+        svc = _svc(insights=Slow(), marketing=Marketing())
+        p = _p(svc, _new(svc))
+    finally:
+        pa.OPTION_SOURCE_TIMEOUT = old
+    assert p.options[0].blocked_reason == "트렌드 목록을 받지 못함"
+    assert p.scale is not None and p.scale.followers == 300

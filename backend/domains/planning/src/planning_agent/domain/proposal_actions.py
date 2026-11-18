@@ -51,6 +51,9 @@ PULL_CTX = "ctx_proposals"
 PULL_DONE = "pull_insights"  # 받아오기 결과 기록 (화면이 마지막 것을 보여 준다)
 PULL_FAILED = "pull_insights_failed"
 DEPT_LABEL = {"data": "데이터분석", "marketing": "마케팅", "finance": "재무"}
+OPTION_SOURCE_TIMEOUT = (
+    10.0  # 방향 선택지 출처(트렌드·팔로워)는 짧게 기다리고, 늦으면 확인할 수 없음
+)
 EFFECT_MAX_WINDOW = timedelta(days=7)  # 데이터분석 campaign_effect MAX_WINDOW와 같게
 
 
@@ -274,7 +277,9 @@ class ProposalMixin:
             raise ActionError(
                 "INSIGHTS_OFF", "데이터분석 연결이 꺼져 있어 받아올 수 없습니다 (목 모드)"
             )
-        got = await self._insights.pull(PULL_CTX)
+        got, sources = await asyncio.gather(
+            self._insights.pull(PULL_CTX), self._option_sources(PULL_CTX)
+        )
         if isinstance(got, str):
             # 실패도 기록에 남긴다: 화면이 알림 뒤에도 "마지막 받아오기 실패 · 이유"를 보여 준다
             await self._apply(self._pull_note(PULL_FAILED, f"데이터분석 받아오기 실패\n{got}"))
@@ -288,14 +293,16 @@ class ProposalMixin:
                 if (
                     near is not None and _follow_of(self.state, near, inp) is not None
                 ):  # 후속 기획으로 잇는다
-                    res = await self.receive_insight(requester="data", inp=inp, near=near.id)
+                    res = await self.receive_insight(
+                        requester="data", inp=inp, near=near.id, sources=sources
+                    )
                     if res.outcome == "created":
                         created.append(res.output["proposal_id"])
                     continue
                 if near is not None:  # id는 새것이지만 이미 받은 제안과 같은 내용
                     similar.append({"title": inp.title, "proposal_id": near.id})
                     continue
-            res = await self.receive_insight(requester="data", inp=inp)
+            res = await self.receive_insight(requester="data", inp=inp, sources=sources)
             if res.outcome == "created":
                 created.append(res.output["proposal_id"])
             elif res.outcome == "deleted_recently":
@@ -324,9 +331,15 @@ class ProposalMixin:
     # ---- 받는 skill
 
     async def receive_insight(
-        self: Any, *, requester: str, inp: ReceiveInsightInput, near: str | None = None
+        self: Any,
+        *,
+        requester: str,
+        inp: ReceiveInsightInput,
+        near: str | None = None,
+        sources: tuple[list[TrendInsight] | None, ChannelFollowersOutput | None] | None = None,
     ) -> ActionResult:
-        """near: 받아오기가 찾은 비슷한 앞 제안 (인사이트 id가 날마다 바뀌어도 후속으로 잇는다)."""
+        """near: 받아오기가 찾은 비슷한 앞 제안 (인사이트 id가 날마다 바뀌어도 후속으로 잇는다).
+        sources: 받아오기가 한 번 받아 둔 방향 선택지 출처 (건마다 다시 부르지 않게)."""
         frm = requester if requester in ("marketing", "finance") else "data"
         if requester == "orchestrator":  # 총괄이 넘겨준 재무 의견은 재무에서 온 제안이다 (11/18)
             frm = "finance" if inp.skill == "finance_insights" else "data"
@@ -342,9 +355,15 @@ class ProposalMixin:
         if gone is not None:  # 사람이 최근 지운 제안: 일주일 동안 다시 만들지 않는다
             out = {"outcome": "deleted_recently", "proposal_id": gone.id}
             return ActionResult(changed=False, outcome="deleted_recently", output=out)
+        ctx_in = f"insight:{inp.insight_id}"
+
+        async def given() -> tuple[list[TrendInsight] | None, ChannelFollowersOutput | None]:
+            assert sources is not None
+            return sources
+
         draft, (trends, followers) = await asyncio.gather(
-            ext.write(self._proposal_writer, inp, f"insight:{inp.insight_id}"),
-            self._option_sources(f"insight:{inp.insight_id}"),
+            ext.write(self._proposal_writer, inp, ctx_in),
+            given() if sources is not None else self._option_sources(ctx_in),
         )
         scale = idea_options.scale_facts(inp.past, followers)
         options = idea_options.build_options(inp, trends, scale)
@@ -396,11 +415,18 @@ class ProposalMixin:
         async def none() -> None:
             return None
 
+        async def short(coro: Any) -> Any:
+            try:
+                return await asyncio.wait_for(coro, OPTION_SOURCE_TIMEOUT)
+            except Exception:  # noqa: BLE001 - 늦거나 실패하면 확인할 수 없음
+                return None
+
         insights, marketing = self._insights, self._marketing
         trends_f = getattr(insights, "trends", None)
         fol_f = getattr(marketing, "followers", None)
         trends, fol = await asyncio.gather(
-            trends_f(ctx) if trends_f else none(), fol_f(ctx) if fol_f else none()
+            short(trends_f(ctx)) if trends_f else none(),
+            short(fol_f(ctx)) if fol_f else none(),
         )
         return (
             trends if isinstance(trends, list) else None,
@@ -779,6 +805,31 @@ class ProposalMixin:
             return p, opt
 
         p, opt = check(self.state)
+        busy: set[str] = self.__dict__.setdefault("_angle_busy", set())
+        if p.id in busy:  # 겹친 누름: 재무를 두 번 묻지 않게 (11/18 리뷰)
+            raise ActionError(
+                "ANGLE_BUSY", f"{p.id} 방향을 쓰는 중입니다. 잠시 뒤 다시 눌러 주세요"
+            )
+        busy.add(p.id)
+        try:
+            return await self._choose_angle(p, opt)
+        finally:
+            busy.discard(p.id)
+
+    async def _choose_angle(self: Any, p: Proposal, opt: Any) -> ActionResult:
+        def check(s: State) -> tuple[Proposal, Any]:
+            q = _find(s, p.id)
+            if q is None:
+                raise ActionError("NOT_FOUND", f"제안 {p.id}이 없습니다")
+            if q.status != "확인 대기":
+                raise ActionError(
+                    "PROPOSAL_CLOSED", f"{q.id}는 확인 대기가 아니라 방향을 바꿀 수 없습니다"
+                )
+            o = next((x for x in q.options if x.id == opt.id and x.available), None)
+            if o is None:
+                raise ActionError("ANGLE_BLOCKED", "고를 수 없는 방향입니다")
+            return q, o
+
         ctx = _ctx(p)
         finance = getattr(self, "_finance", None)
         asked = finance is not None and not any(f.source == ext.FINANCE_ADVICE for f in p.facts)
@@ -803,7 +854,7 @@ class ProposalMixin:
             if t is not None:
                 q.target = ProposalTarget(label=t.label, value=t.value, measure=t.measure)
             q.format = draft.format or q.format
-            q.written_by = draft.written_by  # type: ignore[assignment]
+            q.written_by = draft.written_by
             if fin_facts and not any(f.source == ext.FINANCE_ADVICE for f in q.facts):
                 q.facts = [*q.facts, *_facts_of(fin_facts)]
             q.warnings = draft.warnings

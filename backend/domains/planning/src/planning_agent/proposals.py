@@ -23,7 +23,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -148,7 +148,7 @@ class ProposalDraft:
     why: str
     target: ProposalTarget | None
     format: str | None
-    written_by: str  # llm | rule
+    written_by: Literal["llm", "rule"]
     warnings: list[str] = field(default_factory=list)
 
 
@@ -260,8 +260,23 @@ async def write_for_angle(
     )
     facts = [InsightFact(label=f.label, value=f.value, source=f.source) for f in p.facts]
     texts = {"할 일": d.idea, "이유": d.why, "설명": p.body_md or ""}
-    d.warnings = number_warnings(texts, [*facts, *_ref_facts(option)], d.target, p.title)
+    allowed = [*facts, *_ref_facts(option), *_scale_facts(p)]
+    d.warnings = number_warnings(texts, allowed, d.target, p.title)
     return d
+
+
+def _scale_facts(p: Proposal) -> list[InsightFact]:
+    """추천 이유에 쓴 규모 숫자도 받은 값이라 근거로 본다 (마케팅 팔로워·데이터분석 지난 조회)."""
+    s = p.scale
+    if s is None:
+        return []
+    out = []
+    if s.followers is not None:
+        out.append(InsightFact(label="팔로워", value=str(s.followers), source="channel_followers"))
+    if s.past_views_median is not None:
+        value = f"{s.past_views_median:.0f} {s.past_views_count}"
+        out.append(InsightFact(label="지난 캠페인 조회 중앙값", value=value, source="past"))
+    return out
 
 
 async def write(writer: ProposalWriter | None, inp: ReceiveInsightInput, ctx: str) -> ProposalDraft:
