@@ -15,6 +15,21 @@
       }
     });
   }
+  // 지금 보고 있는 구역을 메뉴에 표시한다
+  if (nav && "IntersectionObserver" in window) {
+    var links = {};
+    nav.querySelectorAll("a[href^='#']").forEach(function (a) { links[a.getAttribute("href").slice(1)] = a; });
+    var current = null;
+    var spy = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        var a = links[en.target.id];
+        if (current) current.removeAttribute("aria-current");
+        if (a) { a.setAttribute("aria-current", "true"); current = a; } else { current = null; }
+      });
+    }, { rootMargin: "-40% 0px -55% 0px", threshold: 0 });
+    Object.keys(links).forEach(function (id) { var el = document.getElementById(id); if (el) spy.observe(el); });
+  }
   var items = document.querySelectorAll(".reveal");
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (!("IntersectionObserver" in window) || reduce) {
