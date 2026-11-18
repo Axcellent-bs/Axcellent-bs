@@ -193,7 +193,7 @@ body { overflow-x: clip; }
 .col p.pill { color: #fff; }
 
 /* ---------- 고객사 ---------- */
-.cards { margin-top: var(--gap-block); display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.cards { margin-top: var(--gap-block); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 24px; }
 .cust { background: var(--paper); border-radius: 26px; padding: 18px 18px 26px; }
 .cust img { border-radius: 16px; border: 1px solid var(--line); width: 100%; margin-bottom: 18px; }
 .cust h3 { font-size: 28px; font-weight: 800; padding: 0 8px; }
@@ -258,7 +258,7 @@ body { overflow-x: clip; }
 .loop-step b { font-size: 16px; margin-top: 4px; }
 .loop-step span:not(.ln) { font-size: 13.5px; color: #4a4a68; line-height: 1.55; }
 .loop-step em { margin-top: 6px; font-style: normal; font-size: 12px; font-weight: 700; color: #8a5a00; background: #fff1d0; border-radius: 999px; padding: 3px 10px; width: fit-content; }
-.case-cards { margin-top: var(--gap-inner); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.case-cards { margin-top: var(--gap-inner); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 20px; }
 .case { background: var(--white); border: 1px solid var(--line); border-radius: 26px; padding: 24px; display: grid; gap: 14px; align-content: start; }
 .case h3 { font-size: 24px; font-weight: 800; }
 .case-sum { color: #4a4a68; }
