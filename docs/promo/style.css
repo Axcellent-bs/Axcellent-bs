@@ -285,7 +285,7 @@ body { overflow-x: clip; }
 @media (max-width: 980px) { .flows-wide { grid-template-columns: minmax(0, 1fr); } }
 
 /* 사례 칸 게시물 카드(준하 님 시안 3-1, #1327). 이미지는 인스타 피드 비율(4:5)로 보이고 캡션 줄바꿈은 그대로 둔다. style.css 끝에 붙인다(기존 .posts·.post 규칙을 덮어쓴다). 시안: instagram/proposal/README.md */
-.case .posts, .ig-group .posts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.case .posts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .post { display: flex; flex-direction: column; }
 .post-thumb { position: relative; display: block; line-height: 0; }
 .post-thumb img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; display: block; }
@@ -294,6 +294,11 @@ body { overflow-x: clip; }
 .post-b { flex: 1; align-content: start; }
 .post-cap { margin: 0; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .post-ig { margin-top: auto; padding-top: 4px; }
-@media (max-width: 420px) { .case .posts, .ig-group .posts { grid-template-columns: minmax(0, 1fr); } }
-.ig-group { margin-top: var(--gap-block); display: grid; gap: 14px; max-width: 760px; }
+@media (max-width: 420px) { .case .posts { grid-template-columns: minmax(0, 1fr); } }
+.ig-group { margin-top: var(--gap-block); display: grid; gap: 14px; }
 .ig-group h3 { font-size: 24px; font-weight: 800; }
+/* 콘텐츠 칸 인스타 게시물: 위의 영상 카드(.vpost)와 같은 카드 폭·9:16 비율로 보인다 */
+.ig-group .posts { grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 340px)); justify-content: start; gap: 24px; }
+.ig-group .post { background: var(--paper); border-radius: 26px; padding: 16px 16px 24px; min-width: 0; }
+.ig-group .post-thumb { border-radius: 16px; overflow: hidden; }
+.ig-group .post-thumb img { aspect-ratio: 9 / 16; border-radius: 0; }
