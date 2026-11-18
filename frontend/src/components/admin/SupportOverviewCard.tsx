@@ -72,13 +72,22 @@ export function SupportOverviewCard() {
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-[11px] opacity-80">최근 {surge.window_minutes}분 문의를 지난 {surge.baseline_hours}시간의 같은 길이 평균과 견준 결과입니다. 급증이 없으면 이 경고는 나타나지 않습니다.</p>
+          <p className="mt-2 text-[11px]">최근 {surge.window_minutes}분 문의를 지난 {surge.baseline_hours}시간의 같은 길이 평균과 견준 결과입니다. 급증이 없으면 이 경고는 나타나지 않습니다.</p>
         </div>
       )}
       {surgeFailed && <p className="mt-3 text-[11px] text-ink-500">문의 급증 감지를 불러오지 못했습니다. 급증이 없다는 뜻은 아닙니다.</p>}
 
       {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
-      {loading && <p className="mt-4 text-sm text-ink-500">불러오는 중…</p>}
+      {loading && (
+        // 받은 뒤 아래 칸이 밀리지 않게 다 받았을 때와 비슷한 높이의 뼈대를 둔다
+        <div role="status" aria-live="polite" className="mt-4 min-h-44 space-y-3">
+          <span className="sr-only">고객지원 현황을 불러오는 중…</span>
+          <div aria-hidden="true" className="flex gap-8">
+            {[0, 1, 2, 3].map((i) => <div key={i} className="h-10 w-20 animate-pulse rounded bg-ink-100 motion-reduce:animate-none" />)}
+          </div>
+          {[0, 1, 2].map((i) => <div key={i} aria-hidden="true" className="h-4 animate-pulse rounded bg-ink-100 motion-reduce:animate-none" style={{ width: `${90 - i * 15}%` }} />)}
+        </div>
+      )}
 
       {kpi === null && !error && (
         <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">확인할 수 없음 · 고객지원 서비스가 꺼져 있어 문의 건수를 가져오지 못했습니다.</p>
