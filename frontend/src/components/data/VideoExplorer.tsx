@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Empty, Waiting } from "@/components/finance/bits";
 import type { SkillState } from "@/components/data/useSkill";
@@ -68,14 +68,19 @@ function ago(iso: string | null): string | null {
   return h < 24 ? `${h}시간 전` : `${Math.floor(h / 24)}일 전`;
 }
 
-function Thumb({ src, alt, wide, rank }: { src: string | null; alt: string; wide: boolean; rank: number }) {
+/** 썸네일 칸 (https만, 깨지면 회색 칸). 인스타 레이더도 쓴다: `tall`이면 세로 9:16, `children`은 칸 위 표시 */
+export function Thumb({ src, alt, wide, rank, tall = false, children }: {
+  src: string | null; alt: string; wide: boolean; rank: number; tall?: boolean; children?: ReactNode;
+}) {
   const [broken, setBroken] = useState(false);
   const ok = !!src && /^https:\/\//.test(src) && !broken;
+  const shape = tall ? "aspect-[9/16]" : wide ? "aspect-video" : "h-[284px]";
   return (
-    <span className={`relative block w-full overflow-hidden rounded-lg bg-ink-200 ${wide ? "aspect-video" : "h-[284px]"}`}>
+    <span className={`relative block w-full overflow-hidden rounded-lg bg-ink-200 ${shape}`}>
       {ok && <img src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setBroken(true)}
         className="absolute inset-0 h-full w-full object-cover" />}
       <span className="absolute left-1.5 top-1.5 min-w-[20px] rounded bg-ink-900 px-1 py-0.5 text-center text-[11px] font-bold leading-none text-white">{rank}</span>
+      {children}
     </span>
   );
 }

@@ -1776,6 +1776,10 @@ export interface InstagramRadarPost {
   permalink: string | null;
   /** 앞 80자, untrusted */
   caption_excerpt: string | null;
+  /** 썸네일 주소 (https 인스타 CDN만, 만료 전만. 릴스·영상은 thumbnail_url, 사진·캐러셀은 첫 장) */
+  thumbnail_url?: string | null;
+  /** IMAGE · VIDEO · CAROUSEL_ALBUM */
+  media_type?: string | null;
 }
 export interface InstagramRadarGroup {
   name: string;

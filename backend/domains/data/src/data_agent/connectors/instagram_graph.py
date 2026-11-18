@@ -16,7 +16,10 @@
   `GET /{우리 IG 사용자 id}?fields=business_discovery.username(계정){media.limit(n){…}}`.
   프로페셔널(비즈니스·크리에이터) 계정만, 나이 제한 계정은 반환 안 됨.
   미디어 필드 id·media_product_type·timestamp·like_count·comments_count·
-  view_count(비즈니스 검색에만)·caption·permalink (media_url은 요청하지 않음)
+  view_count(비즈니스 검색에만)·caption·permalink·media_type·media_url·thumbnail_url.
+  썸네일(실측 2026-11-18): VIDEO·릴스는 thumbnail_url만, IMAGE·CAROUSEL_ALBUM은 media_url(캐러셀은
+  첫 장). 주소는 *.cdninstagram.com 등 CDN이고 oe 쿼리(16진수 유닉스 시각, 약 4일)에 만료.
+  필드를 더해도 호출 수는 같다. 이미지는 내려받지 않고 주소만 넘긴다
   https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/business-discovery
   https://developers.facebook.com/documentation/instagram-platform/reference/instagram-media
   `.limit(n)`: https://developers.facebook.com/docs/graph-api/guides/field-expansion
@@ -68,7 +71,8 @@ AUDIO_PERMISSION_NOTE = ("권한 필요: 인기 오디오는 게시 권한(insta
                          " 데이터 토큰으로는 못 읽어요(마케팅과 방법 정하는 중)")  # fmt: skip
 RATE_CODES = frozenset({4, 17, 32, 613})
 MEDIA_FIELDS = ("id", "media_product_type", "timestamp", "like_count", "comments_count",
-                "view_count", "caption", "permalink")  # fmt: skip
+                "view_count", "caption", "permalink", "media_type", "media_url",
+                "thumbnail_url")  # fmt: skip
 
 _calls = JsonDailyCache(os.environ.get(CACHE_DB_ENV) or None)  # 하루 호출 수 (응답은 저장하지 않음)
 

@@ -88,7 +88,7 @@ def test_audio_request_and_parse_drops_download_url() -> None:
     assert items[1]["artist"] == "maker" and "download_url" not in items[0]
 
 
-def test_business_discovery_fields_without_media_url_and_empty_is_no_data() -> None:
+def test_business_discovery_fields_and_empty_is_no_data() -> None:
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -100,7 +100,11 @@ def test_business_discovery_fields_without_media_url_and_empty_is_no_data() -> N
     assert err.value.code == "NO_DATA" and "데이터 없음" in str(err.value)
     fields = seen[0].url.params["fields"]
     assert fields.startswith("business_discovery.username(agelimited){username,media.limit(20){")
-    assert "media_url" not in fields and "view_count" in fields and "permalink" in fields
+    # 2026-11-18 사양 변경: 썸네일용 media_type·media_url·thumbnail_url을 요청한다 (호출 수는 같음)
+    assert fields.endswith(
+        "{id,media_product_type,timestamp,like_count,comments_count,view_count,caption,"
+        "permalink,media_type,media_url,thumbnail_url}}"
+    )
 
 
 @pytest.mark.parametrize(("code", "want"), [
