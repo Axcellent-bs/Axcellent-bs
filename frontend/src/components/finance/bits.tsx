@@ -302,9 +302,13 @@ export function useResource<T>(key: string, load: () => Promise<Envelope<T>>, ti
   return { env, error, loading, reload, set };
 }
 
-/** 리소스 상태에 맞춰 불러오는 중 / 오류 / 본문을 고른다. 값이 있으면 오류는 위에 작게 붙인다 */
-export function ResourceBody<T>({ res, children }: { res: Resource<T>; children: (data: T) => ReactNode }) {
-  if (!res.env) return res.error ? <ErrorBox message={res.error} onRetry={res.reload} /> : <Skeleton />;
+/**
+ * 리소스 상태에 맞춰 불러오는 중 / 오류 / 본문을 고른다. 값이 있으면 오류는 위에 작게 붙인다.
+ * `quiet`: 비어 있으면 통째로 숨는 칸. 불러오는 동안 뼈대를 그리면 받은 뒤 사라지면서 아래 화면이 당겨지므로
+ * (Lighthouse 화면 밀림) 그동안 아무것도 그리지 않는다
+ */
+export function ResourceBody<T>({ res, children, quiet = false }: { res: Resource<T>; children: (data: T) => ReactNode; quiet?: boolean }) {
+  if (!res.env) return res.error ? <ErrorBox message={res.error} onRetry={res.reload} /> : quiet ? null : <Skeleton />;
   return (
     <>
       {res.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${res.error}`} onRetry={res.reload} /></div>}
