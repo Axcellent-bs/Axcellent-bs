@@ -57,7 +57,7 @@ function Pager({ page, last, onPage }: { page: number; last: number; onPage: (p:
     <nav aria-label="페이지" className="flex flex-wrap items-center justify-center gap-1">
       <button type="button" className={`${btn} text-ink-700 hover:bg-ink-100 disabled:opacity-40`} disabled={page <= 1} onClick={() => onPage(page - 1)}>이전</button>
       {pageList(page, last).map((p, i) => p === "gap"
-        ? <span key={`gap-${i}`} className="px-1 text-ink-400">…</span>
+        ? <span key={`gap-${i}`} className="px-1 text-ink-500">…</span>
         : <button key={p} type="button" aria-current={p === page ? "page" : undefined} onClick={() => onPage(p)}
             className={`${btn} ${p === page ? "bg-brand-600 font-semibold text-white" : "text-ink-700 hover:bg-ink-100"}`}>{p}</button>)}
       <button type="button" className={`${btn} text-ink-700 hover:bg-ink-100 disabled:opacity-40`} disabled={page >= last} onClick={() => onPage(page + 1)}>다음</button>

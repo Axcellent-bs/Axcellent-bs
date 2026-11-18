@@ -56,7 +56,7 @@ function Row({ row, onChanged }: { row: AgentDiagnosisRow; onChanged: () => void
       )}
       {diagnosis && diagnosis.notes.length > 0 && <p className="text-xs text-amber-800">{diagnosis.notes.join(" · ")}</p>}
       {diagnosis && (
-        <details className="text-xs text-ink-600">
+        <details className="text-xs text-ink-700">
           <summary className="cursor-pointer select-none font-medium text-ink-700">근거 {diagnosis.items.length}개 보기</summary>
           <ul className="mt-2 space-y-1">
             {diagnosis.items.map((it) => (
@@ -75,7 +75,7 @@ function Row({ row, onChanged }: { row: AgentDiagnosisRow; onChanged: () => void
         <div className="flex flex-wrap items-center gap-2">
           {asking ? (
             <>
-              <span className="text-xs text-ink-600">에이전트가 이 진단 결과를 쓰지 않게 거둘까요?</span>
+              <span className="text-xs text-ink-700">에이전트가 이 진단 결과를 쓰지 않게 거둘까요?</span>
               <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => void revoke()}>{busy ? "철회하는 중…" : "철회하기"}</button>
               <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => setAsking(false)}>취소</button>
             </>

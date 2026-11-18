@@ -71,7 +71,7 @@ function AgentCard({ a, onPick, diagnoses = 0 }: { a: AgentSummary; onPick: (ctx
           <Link href="/orchestrator#orch-eval" className="font-medium text-brand-700 underline underline-offset-2">총괄 AI의 진단 {diagnoses}건 보기 →</Link>
         </p>
       )}
-      {lastLate?.reason && <p className="mt-3 text-xs text-ink-600">가장 최근 확인이 필요했던 이유: {lastLate.reason}</p>}
+      {lastLate?.reason && <p className="mt-3 text-xs text-ink-700">가장 최근 확인이 필요했던 이유: {lastLate.reason}</p>}
       {a.repeats.length > 0 && (
         <ul className="mt-3 space-y-1 text-xs text-ink-500">
           {a.repeats.map((x) => <li key={x.event_type}>같은 유형의 이슈에서 {x.count}번 확인이 필요했어요: {x.title}</li>)}
@@ -99,7 +99,7 @@ function Trend({ data }: { data: DailyTrend[] }) {
               <title>{`${shortDate(d.day)}: 이슈 ${d.events}건 중 확인이 필요했던 이슈 ${d.with_check}건`}</title>
               <rect x={x} y={H - total} width={W - 18} height={total} rx={4} className="fill-emerald-200" />
               <rect x={x} y={H - look} width={W - 18} height={look} rx={4} className="fill-amber-400" />
-              <text x={x + (W - 18) / 2} y={H + 16} textAnchor="middle" className="fill-ink-600 text-[11px]">{shortDate(d.day)}</text>
+              <text x={x + (W - 18) / 2} y={H + 16} textAnchor="middle" className="fill-ink-700 text-[11px]">{shortDate(d.day)}</text>
               <text x={x + (W - 18) / 2} y={H + 32} textAnchor="middle" className="fill-ink-500 text-[10px]">{d.with_check}/{d.events}건</text>
             </g>
           );
@@ -150,7 +150,7 @@ function StepRow({ s, scale, legacy }: { s: EvaluatedStep; scale: number; legacy
           </div>
           <span aria-hidden title={limitText} className="absolute -top-1 h-[22px] w-0.5 rounded bg-ink-900" style={{ left: `calc(${tick}% - 1px)` }} />
         </div>
-        <p className="mt-1 text-xs text-ink-600">{timed ? `${timed}${s.reason ? ` — ${s.reason}` : ""}` : text}</p>
+        <p className="mt-1 text-xs text-ink-700">{timed ? `${timed}${s.reason ? ` — ${s.reason}` : ""}` : text}</p>
         <p className="text-[11px] text-ink-500">{limitText}{silence ? ` · ${silence}` : ""}</p>
       </div>
     </li>
@@ -275,7 +275,7 @@ export default function AgentEvaluationPage() {
 
       {data.events.length === 0 ? (
         <Section title="아직 평가할 이슈가 없어요">
-          <p className="text-sm text-ink-600">장애 이슈가 끝나면 여기에 나타나요.</p>
+          <p className="text-sm text-ink-700">장애 이슈가 끝나면 여기에 나타나요.</p>
         </Section>
       ) : (
         <>

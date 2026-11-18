@@ -204,7 +204,7 @@ export function Delta({ diff, pct, unit = "won", good, className = "" }: { diff:
       <span aria-hidden="true">{up ? "▲" : "▼"}</span>
       <span className="sr-only">{up ? "늘어남" : "줄어듦"}</span>
       <span className="font-medium">{amount}</span>
-      {rate && <span className="opacity-80">{rate}</span>}
+      {rate && <span>{rate}</span>}
     </span>
   );
 }

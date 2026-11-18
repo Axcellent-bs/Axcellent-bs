@@ -149,7 +149,7 @@ function Seg<T extends string>({ label, items, value, onPick, disabled }: {
   label: string; items: { id: T; label: string }[]; value?: T; onPick: (id: T) => void; disabled?: boolean
 }) {
   return (
-    <div className="inline-flex overflow-hidden rounded-lg border border-ink-200" role="group" aria-label={label}>
+    <div className="inline-flex overflow-hidden rounded-lg border border-ink-100" role="group" aria-label={label}>
       {items.map((it) => (
         <button key={it.id} type="button" aria-pressed={value === it.id} disabled={disabled} onClick={() => onPick(it.id)}
           className={`px-3 py-1 text-xs ${value === it.id ? 'bg-brand-600 !text-white' : 'text-ink-700 hover:bg-ink-50'}`}>
@@ -321,7 +321,7 @@ function CodingWhy({ cfg }: { cfg: CodingSettings }) {
   const who = cfg.agents_connected
   const mine = cfg.resolved === 'subscription'
   const ruled = who.length ? 'subscription' : 'agent'
-  const row = (on: boolean) => `flex flex-wrap items-center gap-1.5 ${on ? 'font-medium text-ink-900' : 'text-ink-400'}`
+  const row = (on: boolean) => `flex flex-wrap items-center gap-1.5 ${on ? 'font-medium text-ink-900' : 'text-ink-500'}`
   const target = mine ? '내 Claude · 연결한 개발자 Claude가 작업 목록에서 가져감' : '서버 AI · 서버가 바로 코딩'
   if (cfg.mode !== 'auto') {
     return <div className="space-y-1"><div className={row(true)}>회사 설정 고정 → {target}</div></div>
@@ -405,7 +405,7 @@ function Help({ label, children, right }: { label: string; children: ReactNode; 
         <>
           <span className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden="true" />
           <span role="dialog" aria-label={`${label} 도움말`}
-            className={`absolute top-7 z-40 block w-72 space-y-2 rounded-lg border border-ink-200 bg-surface p-3 text-left text-xs font-normal leading-5 text-ink-700 shadow-lg ${right ? 'right-0' : 'left-0'}`}>
+            className={`absolute top-7 z-40 block w-72 space-y-2 rounded-lg border border-ink-100 bg-surface p-3 text-left text-xs font-normal leading-5 text-ink-700 shadow-lg ${right ? 'right-0' : 'left-0'}`}>
             {children}
           </span>
         </>
@@ -690,7 +690,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
               const st = status(c)
               const t = tests[c.id]
               return (
-                <li key={c.id} className={`rounded-xl border p-4 ${form?.id === c.id ? 'border-ink-400' : 'border-ink-100'}`}>
+                <li key={c.id} className={`rounded-xl border p-4 ${form?.id === c.id ? 'border-ink-500' : 'border-ink-100'}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-base font-semibold">{c.repo}</span>
                     <span className={`chip ${st.tone}`}>{st.label}</span>
