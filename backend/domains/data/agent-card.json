@@ -476,6 +476,50 @@
       "handoff": false
     },
     {
+      "id": "instagram_audio",
+      "description": "인스타 인기 오디오. 수집기가 하루 1번 Meta 공식 Instagram Audio API(GET /ig_audio, 검색어 없이 음악·원본 사운드 각각)로 받은 인기 상승 오디오 목록을 순서 그대로 저장하고, 순위·제목·만든이·길이·인스타 링크와 어제 대비 순위 변화·새로 등장·연속 일수를 준다(미리듣기 주소는 만료돼 저장하지 않음). 이 API는 게시 권한이 필요해 읽기 전용 데이터 토큰이면 unknown과 권한 필요 이유. 게시물에는 오디오 id가 없어 유행·레이더와의 겹침은 보지 않는다. 재생 수는 메타가 주지 않고 앱 안 목록과 다를 수 있다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#InstagramAudioInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#InstagramAudioOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "marketing", "planning", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "instagram_radar",
+      "description": "인스타 레이더. 회사 설정의 벤치마크 프로페셔널 계정(최대 60)마다 수집기가 하루 1번 Meta 공식 Business Discovery로 최근 게시물 20개의 지표를 받고, 그 계정 중앙값의 2.5배 이상(릴스는 조회수, 아니면 좋아요)이고 7일 안에 게시된 터진 게시물을 해시태그·캡션 구절이 겹치는 것끼리 묶는다(2곳 이상 계정만). 묶음마다 계정 수·게시물 수·평소 대비 배수·공통점·광고 재료(공용 분류기)·대표 게시물 링크, 설명 한 줄만 LLM(숫자 없이). 캡션은 외부 글로 텍스트로만 다룬다. 권한·한도·데이터 없음은 이유로 남기고 0으로 채우지 않는다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#InstagramRadarInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#InstagramRadarOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "marketing", "planning", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "instagram_memo_list",
+      "description": "인스타 트렌드 메모 목록(수동 입력: 종류·이름·메모·적은 사람·날짜·연결할 유행)과 화면에서 추가할 수 있는지(can_add, safety 등록·회사 설정 전에는 false와 이유). 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#InstagramMemoListInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#InstagramMemoListOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "marketing", "planning", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "instagram_memo_add",
+      "description": "인스타 트렌드 메모 하나 저장(종류·이름 1~60자·메모 200자 이하·적은 사람·연결할 유행). data 자신의 safety 관문(execute, 액션 add_instagram_memo)을 지나야 저장하고, 등록·회사 설정(memo_add_enabled) 전에는 거절과 이유. 출처는 늘 수동 입력.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#InstagramMemoAddInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#InstagramMemoAddOutput",
+      "grade": "A",
+      "allowed_requesters": ["dashboard-api"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "data_chat_send",
       "description": "데이터분석 AI 직접 대화(dashboard-api /api/dashboard/data-chat). 말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 data_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. 답의 재료는 저장된 결과만(영상 탐색·지금 인기·브리프·영상 성과·보내기 상태·수집 장부, 코드가 질문 낱말로 최대 3묶음, 새 수집·계산 없음). 답 숫자가 재료에 없으면 고정 문장, 마지막 줄 근거는 서버가 붙임. 상태 변경 명령은 LLM 없이 거절. 조회·설명만 하고 업무 상태를 바꾸지 않아 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채우고 사람 말은 untrusted로만 넣는다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy·chat_limit(대화 하루 30회·80,000토큰 또는 하루 LLM 100%).",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatSendInput",

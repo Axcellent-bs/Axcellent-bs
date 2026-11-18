@@ -140,6 +140,8 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
         past: ((Array.isArray(p.past) ? p.past : []) as Json[]).map((x) => ({ ...x, noteLine: x.noteLine ?? undefined, actions: x.actions ?? [] })),
         followOf: p.followOf ?? undefined,
         angle: p.angle ?? undefined,
+        contentCategory: p.contentCategory ?? undefined,
+        contentFormat: p.contentFormat ?? undefined,
         scale: p.scale ? { ...(p.scale as Json), followers: (p.scale as Json).followers ?? undefined, followersChannel: (p.scale as Json).followersChannel ?? undefined, pastViewsMedian: (p.scale as Json).pastViewsMedian ?? undefined } : undefined,
         options: ((Array.isArray(p.options) ? p.options : []) as Json[]).map((o) => ({
           ...o, blockedReason: o.blockedReason ?? undefined, reason: o.reason ?? undefined,

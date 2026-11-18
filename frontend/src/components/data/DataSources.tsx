@@ -4,7 +4,7 @@ import { okEvidence, useSkill, type SkillState } from "@/components/data/useSkil
 import { Sources, when } from "@/components/data/Sources";
 import {
   DATA_SERVER, dataAi, kpiLive,
-  type CollectorStatus, type DataSource, type DataSourcesOutput, type DomainProfileOutput, type KeywordTrendOutput, type LlmDailyUsage, type ProfileEvidence, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput, type YouTubeChartFailure,
+  type CollectorStatus, type DataSource, type IgSourceStatus, type InstagramAudioOutput, type DataSourcesOutput, type DomainProfileOutput, type KeywordTrendOutput, type LlmDailyUsage, type ProfileEvidence, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput, type YouTubeChartFailure,
 } from "@/lib/data";
 
 // 트렌드&콘텐츠 "데이터 출처" 하위 탭 (루프 4단계와 별개, 탭 맨 끝). 서버 응답 그대로 보여 준다.
@@ -17,6 +17,7 @@ import {
 //   표 위에 스냅샷 수집기 상태(collectors: 수집 중·수집 멈춤, 마지막 수집 시각, 서버 경고 문장). 예전 응답엔 없다
 //   "등록하면 얻는 근거"는 수집 계획의 그 출처 unlocks (계획에 없는 출처는 칸이 없다)
 //   표 맨 아래 "네이버 검색광고 키워드 도구" 줄은 keyword_trend 응답의 searchad_status·searchad_reason (data_sources 목록에 없는 출처)
+//   그 아래 인스타그램 줄들(Instagram Audio·Business Discovery·해시태그 검색·수동 메모)은 instagram_audio 응답의 sources
 // - 응답들은 이 탭을 처음 열 때 받는다
 
 const NO_REASON = "서버가 이유를 주지 않았어요";
@@ -334,6 +335,38 @@ function SearchAdRow({ s }: { s: SkillState<KeywordTrendOutput> }) {
   );
 }
 
+const IG_STATUS: Record<IgSourceStatus, { label: string; tone: string }> = {
+  connected: { label: "연결됨", tone: TONE.ok },
+  key_missing: { label: "키 없음 (키 등록 후 가능)", tone: TONE.muted },
+  permission: { label: "권한 필요", tone: TONE.warn },
+  rate_limited: { label: "한도", tone: TONE.warn },
+  failed: { label: "확인 필요", tone: TONE.warn },
+  not_registered: { label: "등록 필요", tone: TONE.muted },
+};
+
+function IgRow({ name, chip, reason }: { name: string; chip: { label: string; tone: string }; reason: string | null }) {
+  return (
+    <tr className="align-top">
+      <td className="py-2 pr-3"><p className="font-semibold text-ink-900">{name}</p></td>
+      <td className="py-2 pr-3 text-ink-700">-</td>
+      <td className="py-2 pr-3 text-ink-700">-</td>
+      <td className="py-2 pr-3 text-ink-700">-</td>
+      <td className="py-2">
+        <div className="flex flex-wrap gap-1"><Chip label={chip.label} tone={chip.tone} /></div>
+        {reason && <p className="mt-1 text-xs text-ink-500">{reason}</p>}
+      </td>
+    </tr>
+  );
+}
+
+/** 인스타그램 출처 줄들 (Instagram Audio · Business Discovery · 해시태그 검색 · 수동 메모). 상태는 instagram_audio 응답의 sources 그대로 */
+function InstagramRows({ s }: { s: SkillState<InstagramAudioOutput> }) {
+  if (s.kind === "loading") return <IgRow name="Instagram" chip={{ label: "확인 중", tone: TONE.muted }} reason={null} />;
+  if (s.kind === "failed") return <IgRow name="Instagram" chip={{ label: "확인 필요", tone: TONE.warn }} reason={`인기 오디오 응답을 받지 못했어요. ${s.reason}`} />;
+  if (s.out.sources.length === 0) return <IgRow name="Instagram" chip={{ label: "확인 필요", tone: TONE.warn }} reason="서버가 인스타 출처 상태를 주지 않았어요" />;
+  return <>{s.out.sources.map((x) => <IgRow key={x.source_id} name={x.name} chip={IG_STATUS[x.status]} reason={x.reason} />)}</>;
+}
+
 function SourceTable({ out, plan, extra }: { out: DataSourcesOutput; plan: SourcePlanOutput | null; extra?: ReactNode }) {
   if (out.sources.length === 0) return <Empty>{out.summary || "출처가 없어요."}</Empty>;
   const unlocks = new Map((plan?.items ?? []).map((i) => [i.source_id, i.unlocks]));
@@ -366,6 +399,8 @@ export function DataSources() {
   const sources = useSkill(() => dataAi.dataSources());
   // 검색광고 키워드 도구 연결 상태는 keyword_trend 응답에 있다 (감지 탭과 같은 요청이면 askData가 하나로 묶는다)
   const keyword = useSkill(() => dataAi.keywordTrend("day"));
+  // 인스타그램 출처 상태는 instagram_audio 응답의 sources에 있다 (감지 탭과 같은 요청이면 하나로 묶인다)
+  const instagram = useSkill(() => dataAi.instagramAudio("music"));
   if (!kpiLive) return <Empty>데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 데이터 출처를 받지 않아요.</Empty>;
   const names = new Map((sources.state.kind === "ok" ? sources.state.out.sources : []).map((s) => [s.source_id, s.name]));
   const planOut = plan.state.kind === "ok" ? plan.state.out : null;
@@ -396,7 +431,7 @@ export function DataSources() {
             )}
             <LlmUsage usage={out.llm_usage ?? null} />
             <ChartFailures list={out.youtube_chart_failures ?? []} />
-            <SourceTable out={out} plan={planOut} extra={<SearchAdRow s={keyword.state} />} />
+            <SourceTable out={out} plan={planOut} extra={<><SearchAdRow s={keyword.state} /><InstagramRows s={instagram.state} /></>} />
           </div>
         )}</State>
       </Section>

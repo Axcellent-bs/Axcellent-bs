@@ -275,6 +275,11 @@ SERVICES: tuple[Service, ...] = (
             "trend_memes",
             # 검색 트렌드 · 도서 분야 (11/18, grade read)
             "keyword_trend",
+            # 인스타그램 (11/18): 오디오·레이더·메모 목록은 read, 메모 추가는 A (safety 등록 필요)
+            "instagram_audio",
+            "instagram_radar",
+            "instagram_memo_list",
+            "instagram_memo_add",
             "data_chat_send",
             "data_chat_list",
             "data_chat_get",

@@ -11,6 +11,10 @@ import {
 // 실제 모드: 상담 목록의 지금 상태. 재생 모드: 같은 목록을 처음부터 처리하는 모습 (영상·설명용). 어느 쪽도 데이터를 지어내지 않는다.
 
 type Mode = "live" | "replay";
+// 받은 문의가 많아도 보드가 길어져 아래 칸을 밀어내지 않게 두 열의 높이를 제한하고(안쪽 스크롤),
+// 불러오는 동안에도 같은 정도의 자리를 잡아 둔다(Lighthouse 화면 밀림)
+const COLUMN_MAX = "max-h-[28rem]";
+const MIN_BOARD = "min-h-[32rem]";
 const POLL_MS = 5000;
 const REPLAY_MS = 1600;
 
@@ -80,7 +84,7 @@ export function SupportBoard() {
       </div>
 
       {error && !real ? <p className="card px-4 py-6 text-center text-sm text-ink-500">{error}</p> : !real?.length ? (
-        <p className="card px-4 py-6 text-center text-sm text-ink-500">{real ? "아직 문의가 없습니다. 새 문의가 들어오면 이 보드에 나타납니다." : "문의 목록을 불러오는 중…"}</p>
+        <p className={`card px-4 py-6 text-center text-sm text-ink-500 ${real ? "" : MIN_BOARD}`}>{real ? "아직 문의가 없습니다. 새 문의가 들어오면 이 보드에 나타납니다." : "문의 목록을 불러오는 중…"}</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           <Column title="처리할 일" hint="새 문의 · AI 작성 · 상담원 확인" cards={todo} />
@@ -109,10 +113,12 @@ function Column({ title, hint, cards }: { title: string; hint: string; cards: Bo
     <div className="bg-surface-2 p-3">
       <div className="mb-2 flex items-baseline gap-2"><h3 className="text-sm font-semibold">{title}</h3><span className="text-xs tabular-nums text-ink-500">{cards.length}건</span>
         <span className="ml-auto text-xs text-ink-500">{hint}</span></div>
-      <ul className="space-y-2">
-        {cards.map((c) => <li key={`${c.id}-${c.stage}`} className="board-card"><Card c={c} /></li>)}
-        {!cards.length && <li className="py-4 text-center text-xs text-ink-500">비어 있습니다.</li>}
-      </ul>
+      <div role="region" aria-label={`${title} 목록`} tabIndex={0} className={`overflow-y-auto ${COLUMN_MAX}`}>
+        <ul className="space-y-2">
+          {cards.map((c) => <li key={`${c.id}-${c.stage}`} className="board-card"><Card c={c} /></li>)}
+          {!cards.length && <li className="py-4 text-center text-xs text-ink-500">비어 있습니다.</li>}
+        </ul>
+      </div>
     </div>
   );
 }

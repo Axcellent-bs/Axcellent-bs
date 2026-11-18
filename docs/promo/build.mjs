@@ -107,25 +107,22 @@ const story = `
 
 const a2a = `
 <section class="sec sec-paper" id="a2a">
-  <div class="wrap split">
-    <div class="photo-card tall reveal" style="--img:url(assets/desk.jpg)">
-      <p class="pill pill-gold">${esc(C.a2a.kicker)}</p>
-      <h2 class="h2 on-photo">${C.a2a.title.map(esc).join("<br>")}</h2>
-      <p class="on-photo-lead">${esc(C.a2a.lead)}</p>
+  <div class="wrap">
+    <div class="a2a-head reveal">
+      <p class="pill">${esc(C.a2a.kicker)}</p>
+      <h2 class="h2 ink">${C.a2a.title.map(esc).join("<br>")}</h2>
+      <p class="a2a-lead">${esc(C.a2a.lead)}</p>
     </div>
-    <div class="a2a-body reveal">
-      <p class="pill">${esc(C.a2a.listKicker)}</p>
-      <h2 class="h2 ink">${esc(C.a2a.listTitle[0])}<br><span class="brand">${esc(C.a2a.listTitle[1])}</span></h2>
-      <ul class="flows">${C.a2a.items.map((it) => `<li class="flow"><div class="who"><span class="chip chip-soft">${esc(it.from)}</span><span class="arrow" aria-label="에서">→</span><span class="chip chip-solid">${esc(it.to)}</span></div><p>${esc(it.body)}</p></li>`).join("")}</ul>
-      <p class="callout">${esc(C.a2a.closing)}</p>
-    </div>
+    <ul class="flows flows-wide">${C.a2a.items.map((it) => `<li class="flow reveal"><div class="who"><span class="chip chip-soft">${esc(it.from)}</span><span class="arrow" aria-label="에서">→</span><span class="chip chip-solid">${esc(it.to)}</span></div><p>${esc(it.body)}</p></li>`).join("")}</ul>
+    <p class="callout reveal">${esc(C.a2a.closing)}</p>
   </div>
 </section>`;
 
 const ap = C.approval;
 const approval = `
 <section class="sec sec-paper" id="approval">
-  <div class="wrap split flip">
+  <div class="wrap">
+  <div class="split flip">
     <div class="photo-card reveal" style="--img:url(assets/sign.jpg)">
       <p class="pill pill-gold">${esc(ap.kicker)}</p>
       <h2 class="h2 on-photo huge">${esc(ap.title[0])}<br><span class="em">${esc(ap.title[1])}</span></h2>
@@ -135,8 +132,9 @@ const approval = `
       <p class="pill">${esc(ap.listKicker)}</p>
       <h2 class="h2 ink">${esc(ap.listTitle[0])}<br><span class="brand">${esc(ap.listTitle[1])}</span></h2>
       <ul class="rules">${ap.items.map((it) => `<li><span class="ico" aria-hidden="true">${esc(it.icon)}</span><div><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div></li>`).join("")}</ul>
-      <figure class="shot"><img src="${esc(ap.shot.src)}" alt="${esc(ap.shot.alt)}" loading="lazy"><figcaption><b>${esc(ap.shot.title)}</b><span>${esc(ap.shot.body)}</span><em>${esc(ap.shot.note)}</em></figcaption></figure>
     </div>
+  </div>
+  <figure class="shot shot-wide reveal"><img src="${esc(ap.shot.src)}" alt="${esc(ap.shot.alt)}" loading="lazy"><figcaption><b>${esc(ap.shot.title)}</b><span>${esc(ap.shot.body)}</span><em>${esc(ap.shot.note)}</em></figcaption></figure>
   </div>
 </section>`;
 
@@ -151,16 +149,20 @@ function metricsHtml(p) {
   }
   return `<dl class="metrics">${list.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl><p class="measured">잰 날짜 ${esc(p.measuredAt)} · ${esc(p.source)}</p>`;
 }
-const casesPost = (p) => `<li class="post"><img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy"><div class="post-b">${has(p.date) ? `<span class="post-d">${esc(p.date)}</span>` : ""}${has(p.caption) ? `<p>${esc(p.caption)}</p>` : ""}${metricsHtml(p)}</div></li>`;
-const casesItems = C.cases.items.filter((it) => C.cases.showEmpty || (it.posts && it.posts.length));
-const cases = casesItems.length === 0 ? "" : `
+const casesPost = (p) => `<li class="post"><img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy"><div class="post-b">${p.aiGenerated ? `<span class="post-ai">AI가 만든 게시물</span>` : ""}${has(p.date) ? `<span class="post-d">${esc(p.date)}</span>` : ""}${has(p.caption) ? `<p>${esc(p.caption)}</p>` : ""}${metricsHtml(p)}${has(p.permalink) ? `<a class="post-ig" href="${esc(p.permalink)}" rel="noopener" target="_blank">인스타에서 보기</a>` : ""}</div></li>`;
+// 사례 칸 규칙: 채워진 사례가 하나라도 있으면 모든 고객사 카드를 보이고(빈 쪽은 "사례 준비 중"), 하나도 없으면
+// showEmpty가 true일 때만 빈 카드를 보인다. 카드가 없어도 순환 그림은 남는다(구역이 하는 말이라서)
+const casesItems = C.cases.items;
+const anyCase = casesItems.some((it) => it.posts && it.posts.length);
+const showCaseCards = anyCase || C.cases.showEmpty === true;
+const cases = `
 <section class="sec sec-light" id="cases">
   <div class="wrap">
     <p class="pill reveal">${esc(C.cases.kicker)}</p>
     <h2 class="h2 ink reveal">${esc(C.cases.title[0])}<br><span class="brand">${esc(C.cases.title[1])}</span></h2>
     <p class="cases-lead reveal">${esc(C.cases.lead)}</p>
     <ol class="loop reveal">${C.cases.loop.map((s, i) => `<li class="loop-step"><span class="ln">${i + 1}</span><b>${esc(s.label)}</b><span>${esc(s.body)}</span>${has(s.note) ? `<em>${esc(s.note)}</em>` : ""}</li>`).join("")}</ol>
-    <div class="case-cards">${casesItems.map((it) => `<article class="case reveal"><header><h3>${esc(it.name)}</h3><p class="badges">${it.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p></header>${has(it.summary) ? `<p class="case-sum">${esc(it.summary)}</p>` : ""}${it.posts && it.posts.length ? `<ul class="posts">${it.posts.map(casesPost).join("")}</ul>` : `<div class="case-empty"><span>${esc(C.cases.emptyText)}</span></div>`}</article>`).join("")}</div>
+    ${showCaseCards ? `<div class="case-cards">${casesItems.map((it) => `<article class="case reveal"><header><h3>${esc(it.name)}</h3><p class="badges">${it.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p></header>${has(it.summary) ? `<p class="case-sum">${esc(it.summary)}</p>` : ""}${it.posts && it.posts.length ? `<ul class="posts">${it.posts.map(casesPost).join("")}</ul>` : `<div class="case-empty"><span>${esc(C.cases.emptyText)}</span></div>`}</article>`).join("")}</div>` : ""}
     <p class="fine dark reveal">${esc(C.cases.note)}</p>
   </div>
 </section>`;
@@ -185,6 +187,23 @@ const customers = `
   </div>
 </section>`;
 
+const PS = C.posts;
+const postCard = (it) => `<article class="vpost reveal"><div class="vpost-media"><video controls preload="metadata" playsinline ${has(it.poster) ? `poster="${esc(it.poster)}"` : ""}><source src="${esc(it.src)}"></video>${it.aiMade ? '<span class="ai-mark">AI가 만든 영상</span>' : ""}</div><h3>${esc(it.title)}</h3>${has(it.customer) ? `<p class="badges"><span class="badge">${esc(it.customer)}</span></p>` : ""}${has(it.caption) ? `<p>${esc(it.caption)}</p>` : ""}${has(it.postUrl) ? `<a class="vpost-link" href="${esc(it.postUrl)}" rel="noopener" target="_blank">원 게시물 보기</a>` : ""}</article>`;
+const postEmpty = () => `<article class="vpost vpost-empty reveal"><div class="vpost-media"><span>${esc(PS.emptyTitle)}</span></div><h3>홍보 영상 칸</h3><p>영상이 올라오면 이 자리에 나옵니다.</p></article>`;
+const postList = PS.items.length ? PS.items.map(postCard).join("") : Array.from({ length: PS.emptySlots }, postEmpty).join("");
+
+const showPosts = PS.items.length > 0 || PS.showEmpty === true;
+const posts = !showPosts ? "" : `
+<section class="sec sec-light" id="posts">
+  <div class="wrap">
+    <p class="pill reveal">${esc(PS.kicker)}</p>
+    <h2 class="h2 ink reveal">${esc(PS.title[0])}<br><span class="brand">${esc(PS.title[1])}</span></h2>
+    <p class="posts-lead reveal">${esc(PS.lead)}</p>
+    <div class="vposts">${postList}</div>
+    <p class="callout reveal">${esc(PS.note)}</p>
+  </div>
+</section>`;
+
 const cta = `
 <section class="sec sec-cta" id="contact" style="--img:url(assets/bookstore.jpg)">
   <div class="wrap">
@@ -200,8 +219,8 @@ const header = `
   <div class="top-in">
     <a class="brand-logo" href="#top" aria-label="AXcellent 처음으로"><img src="assets/logo-white.png" alt="AXcellent" width="156" height="30"></a>
     <button class="menu" id="menu" aria-expanded="false" aria-controls="nav">메뉴</button>
-    <nav class="nav" id="nav" aria-label="구역 이동">${C.nav.map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join("")}</nav>
-    <div class="top-cta">${brochureBtn("btn btn-gold btn-sm")}${contactBtn("btn btn-ghost btn-sm")}</div>
+    <nav class="nav" id="nav" aria-label="구역 이동">${C.nav.filter(([id]) => id !== "posts" || showPosts).map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join("")}</nav>
+    <div class="top-cta">${brochureBtn("btn btn-gold btn-sm top-pdf")}${contactBtn("btn btn-ghost btn-sm")}</div>
   </div>
 </header>`;
 
@@ -231,7 +250,7 @@ const html = `<!doctype html>
 <a class="skip" href="#vision">본문으로 건너뛰기</a>
 ${header}
 <main>
-${hero}${vision}${team}${story}${a2a}${cases}${approval}${benefits}${customers}${cta}
+${hero}${vision}${team}${story}${a2a}${cases}${approval}${benefits}${customers}${posts}${cta}
 </main>
 ${footer}
 <script src="app.js" defer></script>

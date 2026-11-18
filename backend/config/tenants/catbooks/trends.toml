@@ -237,6 +237,19 @@ language = "ko"
 
 # 요즘 유행·밈 (trend_memes). 여러 채널에서 같이 늘어난 해시태그·제목 구절. 값은 코드 기본값과 같다 (임시 기준, 평가셋 없음)
 # 검색 트렌드 · 도서 분야 (keyword_trend, 키워드 풀 keyword_pool). 값은 코드 기본값과 같다 (임시 기준, 평가셋 없음)
+# 인스타그램 (data instagram_audio·instagram_radar·instagram_memo_*, trend_memes 인스타 칸).
+# Meta 공식 Graph API만. 값은 코드 기본값과 같다 (임시 기준, 평가셋 없음)
+[instagram]
+radar_accounts = []      # 벤치마크 프로페셔널(비즈니스·크리에이터) 계정 사용자 이름, 사람이 정함 (상한 60)
+media_per_account = 20   # 계정마다 최근 게시물 수
+burst_ratio = 2.5        # 터짐: 계정 최근 게시물 지표 중앙값의 이 배 이상 (릴스는 조회수, 아니면 좋아요)
+burst_days = 7           # 터짐: 게시 며칠 안
+min_accounts = 2         # 묶음: 같은 해시태그·구절을 쓴 계정이 이 수 이상
+max_groups = 8
+hashtag_reserve = 5      # 해시태그 7일 30개 중 남은 수가 이 이하면 새 해시태그는 조회하지 않음
+hashtag_pages = 3        # 최근 24시간 게시 수를 셀 때 볼 페이지 수 (페이지당 50)
+memo_add_enabled = false # 메모 추가: safety registry에 add_instagram_memo를 사람이 등록한 뒤 true
+
 [search]
 pool_max = 300       # 키워드 풀 상한 (검색량 순)
 pool_hints = 40      # 검색광고 연관어 힌트 수 상한 (힌트 5개 = 검색광고 1번)

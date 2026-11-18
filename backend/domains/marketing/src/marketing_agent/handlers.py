@@ -63,7 +63,8 @@ from marketing_agent.briefs import (
     rejection_reason,
 )
 from marketing_agent.campaign import record_campaign_result, start_campaign
-from marketing_agent.campaign_cancel import cancel_campaign
+from marketing_agent.campaign_auto import CampaignTracker
+from marketing_agent.campaign_cancel import CANCEL_HOOKS, cancel_campaign
 from marketing_agent.channel_followers import channel_followers as _channel_followers
 from marketing_agent.chat import (
     ChatRefused,
@@ -124,6 +125,7 @@ class State:
         self.notices = NoticeStore()
         self.coupons = CouponLedger()
         self.briefs = BriefStore()
+        self.campaigns = CampaignTracker()  # 시작된 캠페인 대장(자동 결과 전달)
         self.sns = SnsStore()
         self.media_ledger = MediaLedger()  # 열 수 없으면 시작 때 실패한다
         # 열 수 없으면 시작 때 ChatStorageError로 실패한다(briefs와 같다)
@@ -175,6 +177,8 @@ class State:
 
 
 STATE = State()
+# 재무가 취소를 받으면 자동 결과 전달 대장에서도 뺀다(campaign_cancel.CANCEL_HOOKS)
+CANCEL_HOOKS.append(lambda campaign_id: STATE.campaigns.mark_canceled(campaign_id))
 
 
 def reset_state() -> None:
@@ -1276,12 +1280,22 @@ async def start_campaign_skill(request: AgentRequest) -> AgentResult:
             return None, None
         return stored.brief.content_category, stored.brief.content_format
 
-    return await start_campaign(request, brief_product_ids=product_ids, brief_content=content)
+    return await start_campaign(
+        request,
+        brief_product_ids=product_ids,
+        brief_content=content,
+        on_started=STATE.campaigns.track,
+    )
 
 
 async def record_campaign_result_skill(request: AgentRequest) -> AgentResult:
     """`record_campaign_result`: 요청이 안 준 카테고리·형식은 기획안 값으로 채운다."""
-    return await record_campaign_result(request, brief_content=_brief_content)
+    return await record_campaign_result(
+        request,
+        brief_content=_brief_content,
+        started=STATE.campaigns.get,
+        on_recorded=STATE.campaigns.mark_human_recorded,
+    )
 
 
 HANDLERS = {

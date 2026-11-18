@@ -3961,6 +3961,11 @@ class MemePlatform(AxModel):
     monthly_volume: int | None = Field(default=None, ge=0)  # 최근 30일 PC + 모바일 검색량
     volume_below_10: bool = False  # 네이버가 "<10"으로 준 값이 있음 (숫자로 바꾸지 않음)
     volume_reason: str | None = None  # 검색량이 없는 이유 (키 없음 등)
+    # 아래는 11/18 인스타 세션 추가 (`instagram` 칸: Instagram 해시태그 검색)
+    # 최근 24시간 게시 수(`posts`)가 조회한 페이지 상한에 닿음 (실제는 더 많음)
+    posts_24h_capped: bool = False
+    top_like_median: float | None = Field(default=None, ge=0)  # 인기 글 좋아요 중앙값
+    status: Literal["known", "unknown", "not_hashtag", "not_checked"] | None = None
 
 
 class TrendMeme(AxModel):
@@ -4167,6 +4172,144 @@ class KeywordTrendOutput(AxModel):
     summary_reason: str | None = None
     naver_calls: int = Field(default=0, ge=0)  # 이번 계산의 데이터랩 호출
     limits: list[str] = Field(default_factory=list)
+
+
+# ---------- 인스타그램 (11/18) ----------
+# Meta 공식 Graph API(Facebook 로그인, graph.facebook.com)만
+# 캡션·제목은 외부 글(untrusted). 화면은 텍스트로만. 0으로 채우지 않고 모르면 unknown + 이유
+
+IgStatus = Literal["known", "unknown"]
+IgSourceStatus = Literal["connected", "key_missing", "permission", "rate_limited", "failed",
+                         "not_registered"]  # fmt: skip
+
+
+class InstagramSource(AxModel):
+    """화면 데이터 출처 줄 하나 (Instagram Audio·Business Discovery·해시태그 검색·수동 메모)."""
+
+    source_id: Literal["ig_audio", "ig_business_discovery", "ig_hashtag_search", "ig_memo"]
+    name: str
+    status: IgSourceStatus
+    reason: str | None = None
+
+
+class InstagramAudioInput(AxModel):
+    audio_type: Literal["music", "original_sound"] = "music"
+
+
+class InstagramAudioItem(AxModel):
+    rank: int = Field(ge=1)
+    audio_id: str
+    title: str | None = None  # untrusted
+    artist: str | None = None  # 음악은 display_artist, 원본 사운드는 만든이 ig_username
+    duration_ms: int | None = Field(default=None, ge=0)
+    link: str | None = None  # on_platform_audio_preview_link (인스타 안 미리보기 링크)
+    previous_rank: int | None = Field(default=None, ge=1)  # 어제 순위 (없으면 None)
+    rank_change: int | None = None  # 어제 순위 − 오늘 순위 (양수 = 오름)
+    is_new: bool = False  # 어제 목록에 없었음
+    streak_days: int = Field(default=1, ge=1)  # 연속으로 목록에 있던 날 수 (오늘 포함)
+    overlap: list[str] = Field(default_factory=list)  # 같은 오디오를 쓴 유행 (지금은 늘 비어 있음)
+
+
+class InstagramAudioOutput(AxModel):
+    audio_type: Literal["music", "original_sound"] = "music"
+    status: IgStatus = "unknown"
+    reason: str | None = None
+    day: dt.date | None = None  # 목록 날짜 (한국)
+    previous_day: dt.date | None = None
+    items: list[InstagramAudioItem] = Field(default_factory=list)
+    overlap_reason: str | None = None  # "겹침"을 못 보는 이유
+    limitation: str = "재생 수는 메타가 주지 않음, 앱 안 목록과 다를 수 있음"
+    sources: list[InstagramSource] = Field(default_factory=list)
+    generated_at: UtcDatetime | None = None
+
+
+class InstagramRadarInput(AxModel):
+    pass
+
+
+class InstagramRadarPost(AxModel):
+    """터진 게시물 하나 (계정 이름·게시 링크·지표, 캡션 일부는 untrusted 텍스트)."""
+
+    account: str
+    media_id: str
+    media_product_type: str | None = None  # FEED · REELS · STORY · AD
+    posted_at: UtcDatetime | None = None
+    metric: Literal["view_count", "like_count"]
+    value: int = Field(ge=0)
+    account_median: float = Field(ge=0)
+    ratio: float = Field(ge=0)  # value ÷ account_median
+    permalink: str | None = None
+    caption_excerpt: str | None = None  # 앞 80자, untrusted
+
+
+class InstagramRadarGroup(AxModel):
+    name: str
+    description: str | None = None  # LLM 한 줄 (숫자 없음)
+    description_reason: str | None = None
+    accounts: int = Field(ge=0)
+    posts: int = Field(ge=0)
+    best_ratio: float = Field(ge=0)  # 묶음 안 가장 큰 평소 대비 배수
+    members: list[str] = Field(default_factory=list)  # 묶은 해시태그·구절
+    topic_category: str | None = None
+    ad_material: Literal["ok", "caution", "excluded", "unknown"] = "unknown"
+    ad_material_reason: str = ""
+    top_posts: list[InstagramRadarPost] = Field(default_factory=list)
+
+
+class InstagramRadarOutput(AxModel):
+    status: IgStatus = "unknown"
+    reason: str | None = None
+    day: dt.date | None = None
+    accounts_total: int = Field(default=0, ge=0)  # 설정한 계정 수
+    accounts_read: int = Field(default=0, ge=0)  # 오늘 읽은 계정 수
+    accounts_failed: list[str] = Field(default_factory=list)  # 못 읽은 계정 (이유는 limits)
+    bursts: int = Field(default=0, ge=0)  # 터진 게시물 수
+    groups: list[InstagramRadarGroup] = Field(default_factory=list)
+    criteria: str = ""
+    limits: list[str] = Field(default_factory=list)
+    sources: list[InstagramSource] = Field(default_factory=list)
+    generated_at: UtcDatetime | None = None
+
+
+MemoKind = Literal["audio", "format", "hashtag", "other"]
+
+
+class InstagramMemoAddInput(AxModel):
+    kind: MemoKind
+    name: str = Field(min_length=1, max_length=60)
+    memo: str = Field(default="", max_length=200)
+    author: str = Field(min_length=1, max_length=40)
+    linked_trend: str | None = Field(default=None, max_length=60)
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class InstagramMemo(AxModel):
+    memo_id: str
+    kind: MemoKind
+    name: str
+    memo: str = ""
+    author: str
+    created_at: UtcDatetime
+    linked_trend: str | None = None
+    source: Literal["manual"] = "manual"  # 출처 표시는 늘 "수동 입력"
+
+
+class InstagramMemoAddOutput(AxModel):
+    outcome: Literal["added", "rejected"]
+    memo: InstagramMemo | None = None
+    reason: str | None = None
+
+
+class InstagramMemoListInput(AxModel):
+    limit: int = Field(default=50, ge=1, le=200)
+    tenant_id: str = TENANT_ID_DEFAULT
+
+
+class InstagramMemoListOutput(AxModel):
+    items: list[InstagramMemo] = Field(default_factory=list)
+    # 쓰기(instagram_memo_add)는 safety 등록과 회사 설정이 있어야 화면에 입력을 보인다
+    can_add: bool = False
+    add_reason: str | None = None
 
 
 TrendInsight.model_rebuild()
