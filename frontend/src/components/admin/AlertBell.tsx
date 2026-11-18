@@ -37,7 +37,9 @@ export function AlertBell() {
     };
   }, [open, alerts]);
 
-  const label = fresh.length ? `알림 ${fresh.length}개 새로 옴` : "알림";
+  // 버튼 이름에는 배지에 보이는 글자("3", "9+")를 띄어 쓴 낱말 그대로 넣는다 (보이는 글자와 이름이 다르면 음성 명령·접근성 점검에서 걸린다)
+  const badge = fresh.length > 9 ? "9+" : String(fresh.length);
+  const label = fresh.length ? `새 알림 ${badge} 개` : "알림";
   return (
     <div ref={box} className="relative">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open} aria-label={label} title={label}
@@ -45,7 +47,7 @@ export function AlertBell() {
         <IconBell size={20} />
         {fresh.length > 0 && (
           <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none !text-white">
-            {fresh.length > 9 ? "9+" : fresh.length}
+            {badge}
           </span>
         )}
       </button>
