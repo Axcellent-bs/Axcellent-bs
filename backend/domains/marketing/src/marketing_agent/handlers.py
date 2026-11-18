@@ -710,8 +710,13 @@ def _media_estimate(request: AgentRequest, record: SnsHandoffRecord | None) -> d
     if record is None or record.status != "handed" or not record.media_request:
         return None
     try:
+        stored = STATE.briefs.existing(record.proposal_id)  # 실제 생성과 같은 프롬프트로 계산
         return brief_media.estimate(
-            request, record.proposal_id, record.media_request, ledger=STATE.media_ledger
+            request,
+            record.proposal_id,
+            record.media_request,
+            ledger=STATE.media_ledger,
+            plan_fields=brief_media.plan_fields_for(stored.brief if stored else None),
         )
     except Exception:  # noqa: BLE001 - 조회는 돌려준다. 화면은 비용을 모른다고 보여 준다
         return None
