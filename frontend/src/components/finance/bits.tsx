@@ -52,10 +52,10 @@ export const Waiting = ({ what = "불러오는 중…" }: { what?: string }) => 
  * 재무 칸 뼈대: 데이터를 받는 동안 숫자 칸·줄 모양의 회색 틀을 먼저 보여 준다(빈 글자보다 덜 기다리는 느낌).
  * 읽기 프로그램에는 `label`만 읽힌다. 움직임 줄이기 설정이면 깜빡이지 않는다
  */
-export function Skeleton({ label = "불러오는 중…", stats = 3, lines = 3 }: { label?: string; stats?: number; lines?: number }) {
+export function Skeleton({ label = "불러오는 중…", stats = 3, lines = 3, minHeight }: { label?: string; stats?: number; lines?: number; minHeight?: string }) {
   const bar = "animate-pulse rounded bg-ink-100 motion-reduce:animate-none";
   return (
-    <div role="status" aria-live="polite" className="space-y-3 py-2">
+    <div role="status" aria-live="polite" className="space-y-3 py-2" style={minHeight ? { minHeight } : undefined}>
       <span className="sr-only">{label}</span>
       {stats > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" aria-hidden="true">
@@ -305,10 +305,11 @@ export function useResource<T>(key: string, load: () => Promise<Envelope<T>>, ti
 /**
  * 리소스 상태에 맞춰 불러오는 중 / 오류 / 본문을 고른다. 값이 있으면 오류는 위에 작게 붙인다.
  * `quiet`: 비어 있으면 통째로 숨는 칸. 불러오는 동안 뼈대를 그리면 받은 뒤 사라지면서 아래 화면이 당겨지므로
- * (Lighthouse 화면 밀림) 그동안 아무것도 그리지 않는다
+ * (Lighthouse 화면 밀림) 그동안 아무것도 그리지 않는다.
+ * `minHeight`: 받은 뒤 칸이 커지면 아래 칸이 밀리므로, 보통 높이만큼 뼈대의 최소 높이를 준다(예: 판매자 정산 표 "44rem")
  */
-export function ResourceBody<T>({ res, children, quiet = false }: { res: Resource<T>; children: (data: T) => ReactNode; quiet?: boolean }) {
-  if (!res.env) return res.error ? <ErrorBox message={res.error} onRetry={res.reload} /> : quiet ? null : <Skeleton />;
+export function ResourceBody<T>({ res, children, quiet = false, minHeight }: { res: Resource<T>; children: (data: T) => ReactNode; quiet?: boolean; minHeight?: string }) {
+  if (!res.env) return res.error ? <ErrorBox message={res.error} onRetry={res.reload} /> : quiet ? null : <Skeleton minHeight={minHeight} />;
   return (
     <>
       {res.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${res.error}`} onRetry={res.reload} /></div>}
