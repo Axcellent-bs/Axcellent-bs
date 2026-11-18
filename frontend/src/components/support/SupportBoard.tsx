@@ -88,7 +88,7 @@ export function SupportBoard() {
         </div>
       )}
       {mode === "replay" && real?.length ? (
-        <p className="mt-2 text-[11px] text-ink-500">처리 과정 재생은 지금 있는 실제 문의를 처음부터 처리하는 모습으로 다시 보여 줍니다. 실제 상태는 바뀌지 않습니다.</p>
+        <p className="mt-2 text-xs text-ink-500">처리 과정 재생은 지금 있는 실제 문의를 처음부터 처리하는 모습으로 다시 보여 줍니다. 실제 상태는 바뀌지 않습니다.</p>
       ) : null}
     </section>
   );
@@ -107,8 +107,8 @@ function Worker({ name, doing, active }: { name: string; doing: string; active: 
 function Column({ title, hint, cards }: { title: string; hint: string; cards: BoardCard[] }) {
   return (
     <div className="bg-surface-2 p-3">
-      <div className="mb-2 flex items-baseline gap-2"><h3 className="text-sm font-semibold">{title}</h3><span className="text-[11px] tabular-nums text-ink-500">{cards.length}건</span>
-        <span className="ml-auto text-[11px] text-ink-500">{hint}</span></div>
+      <div className="mb-2 flex items-baseline gap-2"><h3 className="text-sm font-semibold">{title}</h3><span className="text-xs tabular-nums text-ink-500">{cards.length}건</span>
+        <span className="ml-auto text-xs text-ink-500">{hint}</span></div>
       <ul className="space-y-2">
         {cards.map((c) => <li key={`${c.id}-${c.stage}`} className="board-card"><Card c={c} /></li>)}
         {!cards.length && <li className="py-4 text-center text-xs text-ink-500">비어 있습니다.</li>}

@@ -117,7 +117,7 @@ export default function IncidentCompensationQueue() {
             </div>
             <div className="scroll-thin mt-2 overflow-x-auto">
               <table className="w-full min-w-[560px] text-left text-sm">
-                <thead className="text-[11px] text-ink-500">
+                <thead className="text-xs text-ink-500">
                   <tr>
                     <th className="w-8 pb-1 pr-2 font-medium">
                       <input type="checkbox" aria-label="승인·거절할 수 있는 고객 모두 고르기" disabled={!pickable.length || busy}
@@ -140,9 +140,9 @@ export default function IncidentCompensationQueue() {
                       <td className="whitespace-nowrap py-2 pr-3 text-xs text-ink-500">{shortDateTime(r.created_at)}</td>
                       <td className="py-2">
                         <span className={`chip ${STATUS_KO[r.status].tone}`}>{STATUS_KO[r.status].label}</span>
-                        {r.status === "held" && <p className="mt-1 text-[11px] text-ink-500">마케팅 한도를 넘어 안전 장치 보류 큐에서 사람이 결정합니다.</p>}
-                        {r.decided_by && <p className="mt-1 text-[11px] text-ink-500">{r.decided_by} · {shortDateTime(r.decided_at ?? r.created_at)}</p>}
-                        {r.coupon_id && <p className="mt-0.5 font-mono text-[11px] text-ink-500">{r.coupon_id}</p>}
+                        {r.status === "held" && <p className="mt-1 text-xs text-ink-500">마케팅 한도를 넘어 안전 장치 보류 큐에서 사람이 결정합니다.</p>}
+                        {r.decided_by && <p className="mt-1 text-xs text-ink-500">{r.decided_by} · {shortDateTime(r.decided_at ?? r.created_at)}</p>}
+                        {r.coupon_id && <p className="mt-0.5 font-mono text-xs text-ink-500">{r.coupon_id}</p>}
                       </td>
                     </tr>
                   ))}
@@ -170,7 +170,7 @@ export default function IncidentCompensationQueue() {
                 <button className="btn-ghost py-1.5 text-xs" disabled={!humanTokenSet || busy || canReject === 0} onClick={() => ask(i, "reject")}>
                   선택한 {canReject}명 거절
                 </button>
-                <span className="text-[11px] text-ink-500">고객을 고른 뒤 누르면 한 번 더 확인합니다.</span>
+                <span className="text-xs text-ink-500">고객을 고른 뒤 누르면 한 번 더 확인합니다.</span>
               </div>
             )}
           </div>
@@ -181,7 +181,7 @@ export default function IncidentCompensationQueue() {
         <p className="mt-3 text-sm text-ink-500">총괄 AI가 장애 복구 뒤 영향 고객을 올리면 여기에 나타납니다. 승인하기 전에는 아무에게도 쿠폰이 나가지 않습니다.</p>
       )}
       {(list?.notes ?? []).length > 0 && incidents.length > 0 && (
-        <ul className="mt-3 list-disc space-y-0.5 pl-4 text-[11px] text-ink-500">
+        <ul className="mt-3 list-disc space-y-0.5 pl-4 text-xs text-ink-500">
           {list?.notes.map((n) => <li key={n}>{n}</li>)}
         </ul>
       )}
