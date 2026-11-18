@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from ax_agent_template import company_connection as store
+from ax_agent_template import tenant as tenants
 from ax_agent_template.config import agent_url
 from ax_dashboard_api.auth import require_human_for_writes
 from ax_dashboard_api.envelope import ApiError, ok
@@ -50,6 +51,27 @@ router = APIRouter(
 
 class ConnectionIn(BaseModel):
     url: str = Field(min_length=1, max_length=store.MAX_URL_LENGTH)
+    # 회사 설정 폴더 id (config/tenants/<id>). 없으면 저장된 회사를 그대로 둔다
+    tenant: str | None = Field(None, max_length=64)
+
+
+def pick_tenant(given: str | None, found: store.Connection | None) -> str | None:
+    """저장할 회사: 준 값(설정 폴더가 있어야 함, 없으면 422) → 저장된 회사."""
+    if given:
+        if not tenants.is_tenant(given):
+            raise ApiError(422, "UNKNOWN_TENANT", f"회사 설정이 없어요: {given}")
+        return given
+    return found.tenant if found else None
+
+
+def tenant_state() -> dict[str, Any]:
+    """지금 회사와 고를 수 있는 회사. 연결 전이면 tenant None(캣북스 기본값 없음)."""
+    listed = tenants.list_tenants()
+    now = tenants.current()
+    return {
+        "tenant": next((t for t in listed if t["id"] == now), None) if now else None,
+        "tenants": listed,
+    }
 
 
 class ModeIn(BaseModel):
@@ -164,6 +186,9 @@ def _state() -> dict[str, Any]:
         "shop_api_url": agent_url("shop-api"),
         "source": source,
         "mode": "connected" if source == "connection" else "internal",
+        # 회사 사이트에 이어져 있는지(연결 파일 또는 운영자가 준 주소). 아니면 "연결 안 됨"
+        "connected": source != "default",
+        **tenant_state(),
         "internal_url": _internal_url(),
         "connection": found.as_dict() if found else None,
         "editable": bool(store.connection_file()),
@@ -232,8 +257,9 @@ async def save_connection(body: ConnectionIn, request: Request) -> dict:
     """주소를 확인하고 저장한다. 저장하면 실제 연결 모드가 된다."""
     _require_editable()
     url = _valid(body.url)
+    tenant = pick_tenant(body.tenant, store.read_connection())
     checks = await _checked(url)
-    store.save_connection(url, verified_at=_now(), updated_by=_human(request))
+    store.save_connection(url, verified_at=_now(), updated_by=_human(request), tenant=tenant)
     logger.info("회사 연결 저장: %s (by %s)", url, _human(request))
     return ok({**_state(), "checks": [c.as_dict() for c in checks]})
 
@@ -246,7 +272,7 @@ async def switch_mode(body: ModeIn, request: Request) -> dict:
     if found is None:
         raise ApiError(409, "NO_CONNECTION", "저장한 연결이 없어 모드를 바꿀 수 없다")
     # 종류(shop-api 규격·다른 형식 API)와 변환기 주소는 그대로 둔다
-    keep = {"kind": found.kind, "adapter": found.adapter}
+    keep = {"kind": found.kind, "adapter": found.adapter, "tenant": found.tenant}
     if body.mode == "connected":
         if found.kind == "adapter" and found.adapter:
             await _adapter_checked(found.adapter["base_url"])

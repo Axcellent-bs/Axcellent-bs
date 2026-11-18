@@ -6,13 +6,13 @@
 
 from __future__ import annotations
 
-from ax_agent_template.tenant import setting as tenant_setting
 import logging
-import os
 import re
 from pathlib import Path
 
 import yaml
+
+from ax_agent_template.tenant import setting as tenant_setting
 
 ORG_ENV = "AX_ORG_CONFIG"
 _AREA = re.compile(r"^[a-z0-9][a-z0-9-]*$")

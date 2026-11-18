@@ -56,7 +56,13 @@ def _cache_seconds() -> float:
 
 def base_url() -> str:
     found = read_connection()
-    if not found or not found.enabled or found.kind != "adapter" or not found.adapter:
+    if not found or not found.enabled:
+        raise UpstreamError(
+            503,
+            "NOT_CONFIGURED",
+            "회사 사이트가 아직 연결돼 있지 않아요. 시스템 관리 › 회사 연결에서 연결해 주세요",
+        )
+    if found.kind != "adapter" or not found.adapter:
         raise UpstreamError(503, "NOT_CONFIGURED", "다른 형식 API로 연결돼 있지 않아요")
     return found.adapter["base_url"]
 

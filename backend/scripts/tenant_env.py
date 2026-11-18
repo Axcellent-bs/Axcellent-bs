@@ -2,7 +2,7 @@
 
 회사 한 곳 = 카탈로그 + 커넥터 + 조직도. `tenant.toml` 한 장이 셋을 가리킨다.
 
-    python scripts/tenant_env.py          # AX_TENANT (없으면 회사 연결에서 고른 회사를 서비스가 따른다)
+    python scripts/tenant_env.py          # AX_TENANT (없으면 서비스가 회사 연결을 따른다)
     eval "$(python scripts/tenant_env.py)"
 
 출력은 `export 이름=값` 줄이다. 이미 정한 값이 먼저다(지금 쓰는 사람이 깨지지 않게):
@@ -29,7 +29,9 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parent.parent
 TENANT_ENV = "AX_TENANT"
-NOT_PICKED = "회사: 정하지 않음 (시스템 관리 › 회사 연결에서 고른 회사를 서비스들이 재시작 없이 따른다)"
+NOT_PICKED = (
+    "회사: 정하지 않음 (시스템 관리 › 회사 연결에서 고른 회사를 서비스들이 재시작 없이 따른다)"
+)
 CATALOG_DIR = BACKEND / "domains" / "data" / "src" / "data_agent" / "catalogs"
 NO_ORG = "조직도 없음: 꺼진 서비스로 가는 일은 no_assignee로 실패합니다"
 

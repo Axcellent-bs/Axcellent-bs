@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from ax_agent_template.tenant import setting as tenant_setting
-import os
 import re
 import tomllib
 from datetime import UTC, date, datetime, time, timedelta
@@ -17,6 +15,8 @@ from importlib import resources
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from ax_agent_template.tenant import setting as tenant_setting
 
 
 class _Strict(BaseModel):

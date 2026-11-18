@@ -12,14 +12,13 @@
 
 from __future__ import annotations
 
-from ax_agent_template.tenant import setting as tenant_setting
 import logging
-import os
 import re
 from pathlib import Path
 
 import yaml
 
+from ax_agent_template.tenant import setting as tenant_setting
 from hr_agent.store import Store
 
 ORG_ENV = "AX_ORG_CONFIG"

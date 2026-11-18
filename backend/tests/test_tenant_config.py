@@ -64,14 +64,18 @@ def test_a_chosen_tenant_sets_org_and_catalog(tmp_path: Path) -> None:
 def test_a_chosen_tenant_points_at_its_trend_keywords(tmp_path: Path) -> None:
     out, _ = tenant_env.resolve(CAT, local_org=tmp_path / "org.yaml")
     assert Path(out["DATA_TREND_CONFIG"]) == (TENANTS / "catbooks" / "trends.toml").resolve()
-    given, _ = tenant_env.resolve({**CAT, "DATA_TREND_CONFIG": "mine.toml"}, local_org=tmp_path / "x")
+    given, _ = tenant_env.resolve(
+        {**CAT, "DATA_TREND_CONFIG": "mine.toml"}, local_org=tmp_path / "x"
+    )
     assert "DATA_TREND_CONFIG" not in given  # 이미 준 값은 그대로
 
 
 def test_a_chosen_tenant_points_at_its_youtube_keywords(tmp_path: Path) -> None:
     out, _ = tenant_env.resolve(CAT, local_org=tmp_path / "org.yaml")
     assert Path(out["DATA_YOUTUBE_CONFIG"]) == (TENANTS / "catbooks" / "youtube.toml").resolve()
-    given, _ = tenant_env.resolve({**CAT, "DATA_YOUTUBE_CONFIG": "mine.toml"}, local_org=tmp_path / "x")
+    given, _ = tenant_env.resolve(
+        {**CAT, "DATA_YOUTUBE_CONFIG": "mine.toml"}, local_org=tmp_path / "x"
+    )
     assert "DATA_YOUTUBE_CONFIG" not in given  # 이미 준 값은 그대로
 
 
@@ -136,7 +140,7 @@ def test_a_negative_per_head_budget_is_refused(tmp_path: Path) -> None:
 
 
 def test_data_container_leaves_the_trend_keywords_to_the_connected_company() -> None:
-    """Docker data 서비스: 캣북스 키워드 경로를 박지 않는다. 비워 두면 회사 연결에서 고른 회사를 따른다."""
+    """Docker data 서비스: 캣북스 키워드 경로를 박지 않는다(비우면 회사 연결을 따른다)."""
     compose = (BACKEND / "services" / "data" / "compose.yml").read_text(encoding="utf-8")
     line = next(ln for ln in compose.splitlines() if ln.strip().startswith("DATA_TREND_CONFIG:"))
     assert "catbooks" not in line
@@ -144,7 +148,7 @@ def test_data_container_leaves_the_trend_keywords_to_the_connected_company() -> 
 
 
 def test_without_ax_tenant_no_company_is_picked(tmp_path: Path) -> None:
-    """캣북스 기본값 없음: AX_TENANT가 없으면 회사 설정을 내보내지 않는다(서비스가 회사 연결을 따른다)."""
+    """캣북스 기본값 없음: AX_TENANT가 없으면 회사 설정을 내보내지 않는다(회사 연결을 따름)."""
     out, notes = tenant_env.resolve({}, local_org=tmp_path / "none.yaml")
     assert out == {}
     assert any("회사 연결" in n for n in notes)

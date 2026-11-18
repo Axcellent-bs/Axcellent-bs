@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ax_agent_template import company_connection as store
+from ax_agent_template import tenant as tenants
 from ax_dashboard_api.auth import require_human_for_writes
 from ax_dashboard_api.envelope import ApiError, ok
 from ax_dashboard_api.site_adapter import propose, resources, upstream
@@ -95,6 +96,7 @@ class SaveIn(BaseModel):
     base_url: str = Field(min_length=1, max_length=store.MAX_URL_LENGTH)
     token: str | None = Field(None, max_length=MAX_TOKEN)
     mapping: dict[str, Any]
+    tenant: str | None = Field(None, max_length=64)  # 회사 설정 폴더 id (없으면 저장된 회사)
 
     @field_validator("token")
     @classmethod
@@ -298,6 +300,11 @@ async def save(body: SaveIn, request: Request) -> dict:
     except ValueError as exc:
         raise ApiError(422, "MAPPING_BROKEN", f"키 헤더: {exc}") from exc
     _complete(m)
+    tenant = body.tenant or None
+    if tenant and not tenants.is_tenant(tenant):
+        raise ApiError(422, "UNKNOWN_TENANT", f"회사 설정이 없어요: {tenant}")
+    if tenant is None and (saved := store.read_connection()):
+        tenant = saved.tenant
     given = (body.token or "").strip()
     token = _token(given, base)
     counts = await verify(base, m, token)
@@ -310,7 +317,12 @@ async def save(body: SaveIn, request: Request) -> dict:
         _write_mapping(m)
         upstream.save_token(token)
         store.save_connection(
-            base, verified_at=_now(), updated_by=human, kind="adapter", adapter={"base_url": base}
+            base,
+            verified_at=_now(),
+            updated_by=human,
+            kind="adapter",
+            adapter={"base_url": base},
+            tenant=tenant,
         )
     except (ValueError, RuntimeError, OSError) as exc:
         _restore(backup)

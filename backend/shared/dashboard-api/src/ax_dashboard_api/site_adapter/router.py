@@ -41,6 +41,10 @@ def _ok(data: Any, **meta: Any) -> dict[str, Any]:
 
 def _mapping() -> SiteMapping:
     try:
+        upstream.base_url()  # 연결 안 됨이 짝 없음보다 먼저다
+    except upstream.UpstreamError as exc:
+        raise ApiError(exc.status, exc.code, str(exc)) from exc
+    try:
         found = load_mapping()
     except MappingError as exc:
         raise ApiError(502, "MAPPING_BROKEN", str(exc)) from exc

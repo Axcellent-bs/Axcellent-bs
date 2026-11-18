@@ -26,7 +26,6 @@ assignments:
 
 from __future__ import annotations
 
-from ax_agent_template.tenant import setting as tenant_setting
 import json
 import logging
 import os
@@ -37,6 +36,7 @@ from typing import Any
 import yaml
 
 from ax_agent_template.services import BY_ID, ENABLED_WITH
+from ax_agent_template.tenant import setting as tenant_setting
 
 ENABLED_ENV = "AX_ENABLED_SERVICES"
 ENABLED_FILE_ENV = "AX_ENABLED_SERVICES_FILE"

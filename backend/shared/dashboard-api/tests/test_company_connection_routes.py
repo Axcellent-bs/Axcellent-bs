@@ -56,12 +56,17 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def test_without_a_connection_the_default_address_is_reported(conn_file, client) -> None:
+def test_without_a_connection_nothing_is_connected(conn_file, client) -> None:
+    """캣북스 기본값 없음: 연결 전이면 판매 서버 주소가 사이트 변환기(연결 안 됨), 회사도 없다."""
     body = client.get(BASE).json()["data"]
+    tenants = body.pop("tenants")
+    assert {"id": "catbooks", "name": "캣북스"} in tenants
     assert body == {
-        "shop_api_url": "http://shop-api:8010",
+        "shop_api_url": "http://dashboard-api:8020/site-adapter",
         "source": "default",
         "mode": "internal",
+        "connected": False,
+        "tenant": None,
         "internal_url": "http://shop-api:8010",
         "connection": None,
         "editable": True,
