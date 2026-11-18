@@ -193,9 +193,9 @@ body { overflow-x: clip; }
 .col p.pill { color: #fff; }
 
 /* ---------- 고객사 ---------- */
-.cards { margin-top: var(--gap-block); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 24px; }
-.cust { background: var(--paper); border-radius: 26px; padding: 18px 18px 26px; }
-.cust img { border-radius: 16px; border: 1px solid var(--line); width: 100%; margin-bottom: 18px; }
+.cards { margin-top: var(--gap-block); display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.cust { background: var(--paper); border-radius: 26px; padding: 18px 18px 26px; max-width: 960px; }
+.cust img { border-radius: 16px; border: 1px solid var(--line); width: 100%; height: auto; margin-bottom: 18px; }
 .cust h3 { font-size: 28px; font-weight: 800; padding: 0 8px; }
 .badges { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 8px 8px; }
 .badge { font-size: 14px; font-weight: 700; background: var(--soft); color: var(--brand-d); padding: 4px 12px; border-radius: 999px; }
