@@ -4,7 +4,7 @@ import { sourceLabel } from '@/lib/planningLabels'
 import { useEffect, useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type State as S } from '@/lib/planningData'
-import { PROPOSAL_SKILL_LABEL, PROPOSAL_STAGES, WRITTEN_BY_LABEL, handoffRetrying, proposalEnded, proposalOpen, proposalStage, type Proposal, type ProposalFact } from '@/lib/proposals'
+import { PROPOSAL_SKILL_LABEL, PROPOSAL_STAGES, WRITTEN_BY_LABEL, handoffRetrying, proposalEnded, proposalOpen, proposalStage, judgmentKey, type IdeaOption, type Proposal, type ProposalFact } from '@/lib/proposals'
 import { Tag } from '@/components/planning-common/parts'
 import { LinkedLines, go, idText, toPath } from '@/components/planning-common/links'
 import { Pager, usePage } from '@/components/planning-common/pager'
@@ -178,12 +178,65 @@ function EffectFacts({ facts }: { facts: ProposalFact[] }) {
   )
 }
 
+/** 조회수 표기: 1만 이상은 "4.8만", 아래는 쉼표 (데이터분석 값 그대로, 계산은 단위만) */
+const views = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1).replace(/\.0$/, '')}만` : n.toLocaleString('ko-KR'))
+
+/** 방향 선택지 (11/18): 갈래 3개 중 하나를 고르면 그 방향으로 할 일·이유·목표를 다시 쓴다. 예전 제안은 안 보인다 */
+function AngleChoice({ p, d, open }: { p: Proposal; d: Dispatch<Action>; open: boolean }) {
+  const toast = useToast()
+  // 서버가 새 글을 쓰는 동안(LLM·재무, 최대 30초) 버튼을 막아 겹친 누름을 줄인다. 글이 바뀌면 풀린다
+  const [pending, setPending] = useState(false)
+  const jk = judgmentKey(p)
+  useEffect(() => { setPending(false) }, [jk])
+  useEffect(() => { if (!pending) return; const t = setTimeout(() => setPending(false), 35000); return () => clearTimeout(t) }, [pending])
+  if (p.options.length === 0) return null
+  const chosen = p.options.find((o) => o.id === p.angle)
+  const pick = (o: IdeaOption) => {
+    if (o.id === p.angle) return
+    if (p.writtenBy === 'human' && !window.confirm('고친 글을 새 방향 글로 바꿀까요?')) return
+    setPending(true)
+    d({ type: 'chooseAngle', proposal: p.id, angle: o.id })
+    toast.show(`${idText(p.id)} 방향: ${o.label} (글 쓰는 중)`)
+  }
+  return (
+    <div className="pp-angle">
+      <div className="pp-angle-head">
+        <span>이 인사이트를 어떤 방향으로 쓸까요?</span>
+        <span className="pp-by">{chosen ? `고른 방향: ${chosen.label}` : '방향 선택 대기'}</span>
+      </div>
+      <ul className="pp-angle-list">
+        {p.options.map((o) => (
+          <li key={o.id} className={o.id === p.angle ? 'on' : undefined}>
+            <button type="button" className="pp-angle-btn" disabled={!open || !o.available || pending} aria-pressed={o.id === p.angle} onClick={() => pick(o)}>
+              {o.label}{o.recommended && <span className="pp-angle-rec">추천</span>}
+            </button>
+            <div className="pp-angle-note">
+              {!o.available && o.blockedReason && <div className="muted small">고를 수 없음: {o.blockedReason}</div>}
+              {o.refs.length > 0 && (
+                <div className="small">
+                  올라탈 후보: {o.refs.map((r) => `${r.topic}${r.medianViews != null ? ` (중앙값 조회 ${views(r.medianViews)}${r.at ? `, ${r.at} 기준` : ''})` : ''}`).join(' · ')}
+                  {o.refs.some((r) => r.examples.length > 0) && <div className="muted">대표 영상: {o.refs.flatMap((r) => r.examples).slice(0, 3).join(' · ')}</div>}
+                  <div className="muted">따라 할 수 있는지는 사람이 확인</div>
+                </div>
+              )}
+              {o.reason && <div className="muted small">{o.reason}</div>}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function ProposalView({ s, d, p }: P & { p: Proposal }) {
   const toast = useToast()
   const open = proposalOpen(p)
   const save = (k: 'title' | 'idea' | 'why', v: string) => { if (v.trim() && v.trim() !== p[k]) d({ type: 'editProposal', proposal: p.id, [k]: v.trim() }) }
   const [tLabel, setTLabel] = useState(p.target?.label ?? '')
   const [tValue, setTValue] = useState(p.target?.value ?? '')
+  // 방향을 고르면 서버가 목표를 새로 쓴다: 입력 상태도 따라간다 (예전 값이 다시 저장되지 않게)
+  useEffect(() => { setTLabel(p.target?.label ?? ''); setTValue(p.target?.value ?? '') }, [p.target?.label, p.target?.value])
+  const jk = judgmentKey(p)
   const saveTarget = () => { if (tLabel.trim() && tValue.trim() && (tLabel.trim() !== p.target?.label || tValue.trim() !== p.target?.value)) d({ type: 'editProposal', proposal: p.id, targetLabel: tLabel.trim(), targetValue: tValue.trim() }) }
   const req = p.request ? s.requests.find((r) => r.id === p.request) : undefined
   return (
@@ -240,11 +293,12 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
 
         <section className="pp-part">
           <h3 className="pp-part-h"><span className="pp-no">2</span>기획 판단<span className="pp-by">{WRITTEN_BY_LABEL[p.writtenBy]}</span></h3>
+          <AngleChoice p={p} d={d} open={open} />
           <dl className="pp-fields">
             <dt>할 일</dt>
-            <dd>{open ? <textarea key={`i-${p.id}`} className="blk-p" rows={2} defaultValue={p.idea} onBlur={(e) => save('idea', e.target.value)} aria-label="할 일" /> : p.idea}</dd>
+            <dd>{open ? <textarea key={`i-${jk}`} className="blk-p" rows={2} defaultValue={p.idea} onBlur={(e) => save('idea', e.target.value)} aria-label="할 일" /> : p.idea}</dd>
             <dt>왜</dt>
-            <dd>{open ? <textarea key={`w-${p.id}`} className="blk-p" rows={2} defaultValue={p.why} onBlur={(e) => save('why', e.target.value)} aria-label="왜" /> : p.why}</dd>
+            <dd>{open ? <textarea key={`w-${jk}`} className="blk-p" rows={2} defaultValue={p.why} onBlur={(e) => save('why', e.target.value)} aria-label="왜" /> : p.why}</dd>
             <dt>목표</dt>
             <dd>
               {open ? (

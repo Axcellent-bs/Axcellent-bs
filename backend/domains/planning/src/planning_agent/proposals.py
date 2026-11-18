@@ -23,7 +23,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -45,6 +45,10 @@ from ax_contracts.schemas.finance import (
     CategoryBudgetAdviceOutput,
     ContentFormat,
 )
+from ax_contracts.schemas.marketing_channels import (
+    CHANNEL_FOLLOWERS_SKILL,
+    ChannelFollowersOutput,
+)
 from ax_contracts.schemas.planning import (
     CampaignBriefInput,
     CampaignBriefOutput,
@@ -54,6 +58,7 @@ from ax_contracts.schemas.planning import (
     ReceiveInsightInput,
 )
 from ax_workflow.hr_link import AgentCaller
+from ax_workflow.models import IdeaOption, Proposal
 
 TIMEOUT_SECONDS = 60.0  # promo_concepts는 LLM을 써서 느리다 (하루 캐시가 있으면 빠름)
 WRITE_TIMEOUT_SECONDS = 30.0
@@ -143,7 +148,7 @@ class ProposalDraft:
     why: str
     target: ProposalTarget | None
     format: str | None
-    written_by: str  # llm | rule
+    written_by: Literal["llm", "rule"]
     warnings: list[str] = field(default_factory=list)
 
 
@@ -182,6 +187,96 @@ class ProposalWriter:
         if not (idea and why):
             return None
         return ProposalDraft(idea, why, got.target, got.format, "llm")
+
+    async def draft_for_angle(
+        self, p: Proposal, option: IdeaOption, context_id: str
+    ) -> ProposalDraft | None:
+        """사람이 고른 방향으로 할 일·이유·목표를 다시 쓴다 (후보·숫자는 받은 값만)."""
+        data = {
+            "title": p.title,
+            "summary": p.insight,
+            "facts": [{"label": f.label, "value": f.value, "source": f.source} for f in p.facts],
+            "products": p.products,
+            "angle": option.label,
+            "candidates": [
+                {"topic": r.topic, "median_views": r.median_views, "examples": r.examples}
+                for r in option.refs
+            ],
+            "scale_reason": option.reason or "",
+        }
+        prompt = f"{WRITE_PROMPT}\n- 방향: {option.label}. {ANGLE_HINT[option.id]}\n"
+        try:
+            got = await asyncio.wait_for(
+                self._llm.structured(prompt, _WriteOut, untrusted=data, context_id=context_id),
+                self.timeout,
+            )
+        except (TimeoutError, ValidationError, Exception):  # noqa: BLE001 - 규칙 초안으로 대신
+            return None
+        idea = " ".join(got.idea.split())[:MAX_LEN]
+        why = " ".join(got.why.split())[:MAX_LEN]
+        if not (idea and why):
+            return None
+        return ProposalDraft(idea, why, got.target, got.format, "llm")
+
+
+# ---------------------------------------------------------------- 방향 고른 뒤 초안 (11/18)
+
+ANGLE_HINT = {
+    "ride_trend": (
+        "지금 뜨는 후보(candidates) 중 하나에 캣북스 책을 얹어 올라탄다. 후보 이름만 쓴다"
+    ),
+    "own_trend": "캣북스가 자체로 시작해 퍼뜨릴 기획을 쓴다",
+    "with_product": "연결된 우리 상품(products)을 앞에 세운다",
+}
+
+
+def _ref_facts(option: IdeaOption) -> list[InsightFact]:
+    """후보 숫자도 근거로 본다 (데이터분석 값 그대로)."""
+    return [
+        InsightFact(
+            label=r.topic[:120], value=f"{r.median_views:.0f}", source="trend_insight_brief"
+        )
+        for r in option.refs
+        if r.median_views is not None
+    ]
+
+
+def rule_draft_for_angle(p: Proposal, option: IdeaOption) -> ProposalDraft:
+    """LLM이 없을 때: 방향 이름 + 제목(+ 후보), 이유는 근거 두 줄 + 추천 이유."""
+    idea = f"{option.label}: {p.title}"
+    if option.refs:
+        idea += " · 후보 " + ", ".join(r.topic for r in option.refs)
+    why = " · ".join(f"{f.label} {f.value}" for f in p.facts[:2])
+    if option.reason:
+        why = f"{why} · {option.reason}" if why else option.reason
+    return ProposalDraft(idea[:MAX_LEN], why[:MAX_LEN], None, None, "rule")
+
+
+async def write_for_angle(
+    writer: ProposalWriter | None, p: Proposal, option: IdeaOption, ctx: str
+) -> ProposalDraft:
+    d = (await writer.draft_for_angle(p, option, ctx) if writer else None) or rule_draft_for_angle(
+        p, option
+    )
+    facts = [InsightFact(label=f.label, value=f.value, source=f.source) for f in p.facts]
+    texts = {"할 일": d.idea, "이유": d.why, "설명": p.body_md or ""}
+    allowed = [*facts, *_ref_facts(option), *_scale_facts(p)]
+    d.warnings = number_warnings(texts, allowed, d.target, p.title)
+    return d
+
+
+def _scale_facts(p: Proposal) -> list[InsightFact]:
+    """추천 이유에 쓴 규모 숫자도 받은 값이라 근거로 본다 (마케팅 팔로워·데이터분석 지난 조회)."""
+    s = p.scale
+    if s is None:
+        return []
+    out = []
+    if s.followers is not None:
+        out.append(InsightFact(label="팔로워", value=str(s.followers), source="channel_followers"))
+    if s.past_views_median is not None:
+        value = f"{s.past_views_median:.0f} {s.past_views_count}"
+        out.append(InsightFact(label="지난 캠페인 조회 중앙값", value=value, source="past"))
+    return out
 
 
 async def write(writer: ProposalWriter | None, inp: ReceiveInsightInput, ctx: str) -> ProposalDraft:
@@ -286,7 +381,7 @@ class DataInsights:
             return parsed.empty_reason or "기획안 초안 없음"
         return from_promo(parsed)
 
-    async def _brief(self, ctx: str) -> list[ReceiveInsightInput] | str:
+    async def _brief_out(self, ctx: str) -> TrendInsightBriefOutput | str:
         meta = _meta(ctx, self.tenant_id, self.timeout)
         req = AgentRequest(meta=meta, skill="trend_insight_brief", input={})
         out = await _ask(self._call, "data", req, self.timeout)
@@ -298,7 +393,18 @@ class DataInsights:
             return "trend_insight_brief 출력이 계약과 다름"
         if parsed.status != "known":
             return parsed.reason or "인사이트를 확인할 수 없음"
+        return parsed
+
+    async def _brief(self, ctx: str) -> list[ReceiveInsightInput] | str:
+        parsed = await self._brief_out(ctx)
+        if isinstance(parsed, str):
+            return parsed
         return from_brief(parsed) or "근거가 있는 인사이트 없음"
+
+    async def trends(self, ctx: str) -> list[TrendInsight] | str:
+        """방향 선택지의 올라탈 후보를 고를 트렌드 주제 목록 (값 그대로, 11/18)."""
+        parsed = await self._brief_out(ctx)
+        return parsed if isinstance(parsed, str) else list(parsed.insights)
 
     async def effect(
         self,
@@ -468,6 +574,9 @@ def _past(r) -> InsightPast:
         summary_line=(r.summary_line or "")[:300],
         note_line=note,
         actions=[x[:300] for x in r.actions][:5],
+        # 조회수 숫자는 데이터분석이 칸을 더하면 옮긴다 (11/18 부탁, 그 전에는 없음)
+        views=getattr(r, "views", None),
+        views_at=getattr(r, "views_at", None),
     )
 
 
@@ -593,6 +702,22 @@ class MarketingBrief:
         except ValidationError:
             return "receive_campaign_brief 출력이 계약과 다름"
 
+    async def followers(self, ctx: str) -> ChannelFollowersOutput | str:
+        """공식 SNS 채널 팔로워 수 (마케팅 `channel_followers`, read, 11/18).
+        마케팅에 아직 그 skill이 없으면 이유를 돌려주고 지어내지 않는다."""
+        req = AgentRequest(
+            meta=_meta(ctx, self.tenant_id, self.timeout),
+            skill=CHANNEL_FOLLOWERS_SKILL,
+            input={},
+        )
+        out = await _ask(self._call, "marketing", req, self.timeout)
+        if isinstance(out, str):
+            return out
+        try:
+            return ChannelFollowersOutput.model_validate(out.output or {})
+        except ValidationError:
+            return f"{CHANNEL_FOLLOWERS_SKILL} 출력이 계약과 다름"
+
 
 FINANCE_ADVICE = "category_budget_advice"  # 재무가 낸 숫자의 출처 (facts.source)
 
@@ -611,7 +736,7 @@ class FinanceBudget:
         self.timeout = timeout
 
     async def ask(
-        self, ctx: str, category: str, fmt: ContentFormat | None, proposal_id: str
+        self, ctx: str, category: str | None, fmt: ContentFormat | None, proposal_id: str
     ) -> CategoryBudgetAdviceOutput | str:
         inp = CategoryBudgetAdviceInput(
             content_category=category, content_format=fmt, proposal_id=proposal_id

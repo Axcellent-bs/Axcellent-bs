@@ -21,6 +21,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ax_contracts.schemas.data import TrendInsight
+from ax_contracts.schemas.marketing_channels import ChannelFollowersOutput
 from ax_contracts.schemas.planning import (
     CampaignBriefInput,
     InsightFact,
@@ -42,12 +44,16 @@ from ax_workflow.models import (
     Spec,
     State,
 )
+from planning_agent import idea_options
 from planning_agent import proposals as ext
 
 PULL_CTX = "ctx_proposals"
 PULL_DONE = "pull_insights"  # 받아오기 결과 기록 (화면이 마지막 것을 보여 준다)
 PULL_FAILED = "pull_insights_failed"
 DEPT_LABEL = {"data": "데이터분석", "marketing": "마케팅", "finance": "재무"}
+OPTION_SOURCE_TIMEOUT = (
+    10.0  # 방향 선택지 출처(트렌드·팔로워)는 짧게 기다리고, 늦으면 확인할 수 없음
+)
 EFFECT_MAX_WINDOW = timedelta(days=7)  # 데이터분석 campaign_effect MAX_WINDOW와 같게
 
 
@@ -262,7 +268,7 @@ class ProposalMixin:
         "delete_proposal": ("_delete_proposal", ProposalParams),
     }
     # 잠금 밖에서 다른 부서·LLM을 부르는 액션 (dispatch가 따로 받는다)
-    OUTSIDE_LOCK = {"pull_insights", "proposal_to_request", "measure_proposal"}
+    OUTSIDE_LOCK = {"pull_insights", "proposal_to_request", "measure_proposal", "choose_angle"}
 
     # ---- 받아오기 (data promo_concepts → 인사이트 → 제안)
 
@@ -271,7 +277,9 @@ class ProposalMixin:
             raise ActionError(
                 "INSIGHTS_OFF", "데이터분석 연결이 꺼져 있어 받아올 수 없습니다 (목 모드)"
             )
-        got = await self._insights.pull(PULL_CTX)
+        got, sources = await asyncio.gather(
+            self._insights.pull(PULL_CTX), self._option_sources(PULL_CTX)
+        )
         if isinstance(got, str):
             # 실패도 기록에 남긴다: 화면이 알림 뒤에도 "마지막 받아오기 실패 · 이유"를 보여 준다
             await self._apply(self._pull_note(PULL_FAILED, f"데이터분석 받아오기 실패\n{got}"))
@@ -285,14 +293,16 @@ class ProposalMixin:
                 if (
                     near is not None and _follow_of(self.state, near, inp) is not None
                 ):  # 후속 기획으로 잇는다
-                    res = await self.receive_insight(requester="data", inp=inp, near=near.id)
+                    res = await self.receive_insight(
+                        requester="data", inp=inp, near=near.id, sources=sources
+                    )
                     if res.outcome == "created":
                         created.append(res.output["proposal_id"])
                     continue
                 if near is not None:  # id는 새것이지만 이미 받은 제안과 같은 내용
                     similar.append({"title": inp.title, "proposal_id": near.id})
                     continue
-            res = await self.receive_insight(requester="data", inp=inp)
+            res = await self.receive_insight(requester="data", inp=inp, sources=sources)
             if res.outcome == "created":
                 created.append(res.output["proposal_id"])
             elif res.outcome == "deleted_recently":
@@ -321,9 +331,15 @@ class ProposalMixin:
     # ---- 받는 skill
 
     async def receive_insight(
-        self: Any, *, requester: str, inp: ReceiveInsightInput, near: str | None = None
+        self: Any,
+        *,
+        requester: str,
+        inp: ReceiveInsightInput,
+        near: str | None = None,
+        sources: tuple[list[TrendInsight] | None, ChannelFollowersOutput | None] | None = None,
     ) -> ActionResult:
-        """near: 받아오기가 찾은 비슷한 앞 제안 (인사이트 id가 날마다 바뀌어도 후속으로 잇는다)."""
+        """near: 받아오기가 찾은 비슷한 앞 제안 (인사이트 id가 날마다 바뀌어도 후속으로 잇는다).
+        sources: 받아오기가 한 번 받아 둔 방향 선택지 출처 (건마다 다시 부르지 않게)."""
         frm = requester if requester in ("marketing", "finance") else "data"
         if requester == "orchestrator":  # 총괄이 넘겨준 재무 의견은 재무에서 온 제안이다 (11/18)
             frm = "finance" if inp.skill == "finance_insights" else "data"
@@ -339,7 +355,18 @@ class ProposalMixin:
         if gone is not None:  # 사람이 최근 지운 제안: 일주일 동안 다시 만들지 않는다
             out = {"outcome": "deleted_recently", "proposal_id": gone.id}
             return ActionResult(changed=False, outcome="deleted_recently", output=out)
-        draft = await ext.write(self._proposal_writer, inp, f"insight:{inp.insight_id}")
+        ctx_in = f"insight:{inp.insight_id}"
+
+        async def given() -> tuple[list[TrendInsight] | None, ChannelFollowersOutput | None]:
+            assert sources is not None
+            return sources
+
+        draft, (trends, followers) = await asyncio.gather(
+            ext.write(self._proposal_writer, inp, ctx_in),
+            given() if sources is not None else self._option_sources(ctx_in),
+        )
+        scale = idea_options.scale_facts(inp.past, followers)
+        options = idea_options.build_options(inp, trends, scale)
 
         async def run(s: State) -> ActionResult:
             dup = _same_insight(s, inp.insight_id, frm) or (_find(s, near) if near else None)
@@ -362,10 +389,13 @@ class ProposalMixin:
                 format=draft.format, written_by=draft.written_by, warnings=draft.warnings,
                 created_at=self.clock(), follow_of=follow.id if follow else None,
                 past=[ProposalPast(**x.model_dump()) for x in inp.past],
+                options=options, scale=scale,
             )  # fmt: skip
             s.proposals.append(p)
             warn = f", 경고 {len(p.warnings)}" if p.warnings else ""
-            text = f'{pid} "{p.title}" 제안 (근거 {len(p.facts)}개{warn})'
+            pick = next((o.label for o in options if o.recommended), None)
+            rec = f"추천 {pick}" if pick else "추천 없음"
+            text = f'{pid} "{p.title}" 제안 (근거 {len(p.facts)}개{warn}, {rec})'
             if follow is not None:
                 text += f"\n후속 기획: {follow.id} 캠페인을 이어 감 (지난 결과 {len(p.past)}개)"
             act = self._act(self.clock(), _ctx(p), frm, "planning", "receive_insight", "A2A", text)
@@ -375,6 +405,33 @@ class ProposalMixin:
             return ActionResult(outcome="created", output=out)
 
         return await self._apply(run)
+
+    async def _option_sources(
+        self: Any, ctx: str
+    ) -> tuple[list[TrendInsight] | None, ChannelFollowersOutput | None]:
+        """방향 선택지에 쓰는 트렌드 목록(데이터분석)과 팔로워 수(마케팅).
+        꺼졌거나 실패하면 None."""
+
+        async def none() -> None:
+            return None
+
+        async def short(coro: Any) -> Any:
+            try:
+                return await asyncio.wait_for(coro, OPTION_SOURCE_TIMEOUT)
+            except Exception:  # noqa: BLE001 - 늦거나 실패하면 확인할 수 없음
+                return None
+
+        insights, marketing = self._insights, self._marketing
+        trends_f = getattr(insights, "trends", None)
+        fol_f = getattr(marketing, "followers", None)
+        trends, fol = await asyncio.gather(
+            short(trends_f(ctx)) if trends_f else none(),
+            short(fol_f(ctx)) if fol_f else none(),
+        )
+        return (
+            trends if isinstance(trends, list) else None,
+            fol if isinstance(fol, ChannelFollowersOutput) else None,
+        )
 
     async def receive_campaign_update(
         self: Any, *, inp: ReceiveCampaignUpdateInput, requester: str = "marketing"
@@ -504,6 +561,7 @@ class ProposalMixin:
             facts=_facts_in(p), target=_target_in(p), products=p.products, format=p.format,
             product_ids=p.product_ids,
             content_category=p.content_category, content_format=p.content_format,
+            idea_angle=p.angle, trend_refs=_trend_refs(p),
             approved_by="사람", note=p.note, body_md=body_md,
             continue_campaign=_prev_campaign(self.state, p),
         )  # fmt: skip
@@ -728,6 +786,95 @@ class ProposalMixin:
         )  # fmt: skip
         return await self.receive_campaign_update(inp=inp, requester="data")
 
+    async def choose_angle(self: Any, proposal: str, angle: str) -> ActionResult:
+        """사람 버튼 "방향 고르기" (11/18): 고른 방향으로 할 일·이유·목표를 다시 쓰고,
+        재무에 그 제안의 제작비를 한 번 묻는다(이미 붙어 있으면 묻지 않음). 기획 기록만 바꾼다."""
+
+        def check(s: State) -> tuple[Proposal, Any]:
+            p = _find(s, proposal)
+            if p is None:
+                raise ActionError("NOT_FOUND", f"제안 {proposal}이 없습니다")
+            if p.status != "확인 대기":
+                raise ActionError(
+                    "PROPOSAL_CLOSED", f"{p.id}는 확인 대기가 아니라 방향을 바꿀 수 없습니다"
+                )
+            opt = next((o for o in p.options if o.id == angle), None)
+            if opt is None or not opt.available:
+                why = opt.blocked_reason if opt else "모르는 방향"
+                raise ActionError("ANGLE_BLOCKED", f"고를 수 없는 방향입니다: {why}")
+            return p, opt
+
+        p, opt = check(self.state)
+        busy: set[str] = self.__dict__.setdefault("_angle_busy", set())
+        if p.id in busy:  # 겹친 누름: 재무를 두 번 묻지 않게 (11/18 리뷰)
+            raise ActionError(
+                "ANGLE_BUSY", f"{p.id} 방향을 쓰는 중입니다. 잠시 뒤 다시 눌러 주세요"
+            )
+        busy.add(p.id)
+        try:
+            return await self._choose_angle(p, opt)
+        finally:
+            busy.discard(p.id)
+
+    async def _choose_angle(self: Any, p: Proposal, opt: Any) -> ActionResult:
+        def check(s: State) -> tuple[Proposal, Any]:
+            q = _find(s, p.id)
+            if q is None:
+                raise ActionError("NOT_FOUND", f"제안 {p.id}이 없습니다")
+            if q.status != "확인 대기":
+                raise ActionError(
+                    "PROPOSAL_CLOSED", f"{q.id}는 확인 대기가 아니라 방향을 바꿀 수 없습니다"
+                )
+            o = next((x for x in q.options if x.id == opt.id and x.available), None)
+            if o is None:
+                raise ActionError("ANGLE_BLOCKED", "고를 수 없는 방향입니다")
+            return q, o
+
+        ctx = _ctx(p)
+        finance = getattr(self, "_finance", None)
+        asked = finance is not None and not any(f.source == ext.FINANCE_ADVICE for f in p.facts)
+
+        async def no_advice() -> None:
+            return None
+
+        draft, advice = await asyncio.gather(
+            ext.write_for_angle(self._proposal_writer, p, opt, ctx),
+            finance.ask(ctx, p.content_category, p.content_format, p.id) if asked else no_advice(),
+        )
+        fin_facts = (
+            ext.finance_facts(advice) if advice is not None and not isinstance(advice, str) else []
+        )
+        now = self.clock()
+
+        async def run(s: State) -> ActionResult:
+            q, o = check(s)
+            t = draft.target
+            q.angle = o.id
+            q.idea, q.why = draft.idea, draft.why
+            if t is not None:
+                q.target = ProposalTarget(label=t.label, value=t.value, measure=t.measure)
+            q.format = draft.format or q.format
+            q.written_by = draft.written_by
+            if fin_facts and not any(f.source == ext.FINANCE_ADVICE for f in q.facts):
+                q.facts = [*q.facts, *_facts_of(fin_facts)]
+            q.warnings = draft.warnings
+            text = f"{q.id} 방향 선택: {o.label}"
+            s.activity.append(
+                self._act(now, ctx, "human", "planning", "choose_angle", "사람", text)
+            )
+            if asked:
+                note = (
+                    f"{q.id} 재무 제작비 묻기 실패\n{advice}"
+                    if isinstance(advice, str)
+                    else f"{q.id} 재무에 제작비를 물음 (방향 고를 때)"
+                )
+                s.activity.append(
+                    self._act(now, ctx, "planning", "finance", ext.FINANCE_ADVICE, "A2A", note)
+                )
+            return ActionResult(output={"proposal_id": q.id, "angle": o.id})
+
+        return await self._apply(run)
+
     async def proposal_to_request(self: Any, proposal: str) -> ActionResult:
         """확정 → 개발: 요청 접수(create_ticket과 같은 길) → 기획서 흐름."""
         p = _find(self.state, proposal)
@@ -781,7 +928,20 @@ class ProposalMixin:
             if not isinstance(pid, str):
                 raise ActionError("INVALID_ACTION", "proposal이 없다")
             return await self.proposal_to_request(pid)
+        if name == "choose_angle":
+            pid, angle = action.get("proposal"), action.get("angle")
+            if not isinstance(pid, str) or not isinstance(angle, str):
+                raise ActionError("INVALID_ACTION", "proposal·angle이 없다")
+            return await self.choose_angle(pid, angle)
         return None
+
+
+def _trend_refs(p: Proposal) -> list[str]:
+    """유행에 올라타기를 골랐으면 올라탈 후보 이름 (마케팅 브리프, 11/18)."""
+    if p.angle != "ride_trend":
+        return []
+    opt = next((o for o in p.options if o.id == "ride_trend"), None)
+    return [r.topic for r in opt.refs][:3] if opt else []
 
 
 def _prev_campaign(s: State, p: Proposal) -> str | None:

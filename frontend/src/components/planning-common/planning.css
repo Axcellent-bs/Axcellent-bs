@@ -962,6 +962,17 @@ button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
 .pp-target-edit .blk-p { border-color: var(--border); }
 .pp-target-val { max-width: 140px; font-weight: 600; }
 .pp-target-chip { font-size: 12px; font-weight: 600; color: var(--text); }
+.pp-angle { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; margin: 4px 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.pp-angle-head { display: flex; align-items: baseline; gap: 8px; font-weight: 600; font-size: 14px; }
+.pp-angle-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pp-angle-list li { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 10px; align-items: start; }
+.pp-angle-btn { text-align: left; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer; }
+.pp-angle-btn:hover:not(:disabled) { background: var(--hover); }
+.pp-angle-btn:disabled { color: var(--text-3); cursor: default; }
+.pp-angle-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.pp-angle-list li.on .pp-angle-btn { border-color: var(--primary); background: var(--primary-soft); font-weight: 600; }
+.pp-angle-rec { margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--primary); }
+.pp-angle-note { display: flex; flex-direction: column; gap: 2px; line-height: 1.5; }
 .pp-warn { margin: 0; padding: 8px 12px 8px 28px; background: var(--warning-bg, #fff7e6); border-radius: 8px; color: var(--warning); font-size: 13px; }
 .pp-meta-dl { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 13px; }
 .pp-meta-dl dt { color: var(--text-2); }
