@@ -67,7 +67,9 @@ export function SelfTestPanel({ test, meta, loaded, open, running, disabled, onR
   );
 
   if (!test) {
-    if (!loaded) return null;
+    // 첫 결과를 받기 전에는 결과 칸과 같은 높이의 뼈대를 그려 둔다. 비워 두면 결과가 올 때 아래 내용이
+    // 통째로 밀린다(Lighthouse 화면 밀림 0.07의 원인, 11/18)
+    if (!loaded) return <SelfTestSkeleton />;
     return staleNote || null;
   }
 
@@ -122,5 +124,22 @@ export function SelfTestPanel({ test, meta, loaded, open, running, disabled, onR
         <p className="mt-2 text-sm">가짜 자료로 점검해서 실제 기록이나 돈에는 영향이 없습니다. 화면은 1분마다 최근 결과를 다시 받습니다.</p>
       </section>
     </div>
+  );
+}
+
+/** 재무 AI 테스트 결과를 받기 전 뼈대: 결과 칸(제목 줄·시각 줄·항목 보기·안내 줄)과 같은 틀과 높이 */
+function SelfTestSkeleton() {
+  const bar = "animate-pulse rounded bg-ink-100 motion-reduce:animate-none";
+  return (
+    <section role="status" aria-live="polite" className="rounded-2xl bg-surface px-4 py-4 ring-1 ring-ink-100 sm:px-5">
+      <span className="sr-only">재무 AI 테스트 결과를 불러오는 중…</span>
+      <div aria-hidden="true" className="flex min-h-[34px] items-center gap-3">
+        <div className={`h-5 w-48 ${bar}`} />
+        <div className={`h-4 flex-1 ${bar}`} />
+      </div>
+      <div aria-hidden="true" className={`mt-1 h-5 w-2/3 ${bar}`} />
+      <div aria-hidden="true" className={`mt-2 h-5 w-40 ${bar}`} />
+      <div aria-hidden="true" className={`mt-2 h-5 w-3/4 ${bar}`} />
+    </section>
   );
 }
