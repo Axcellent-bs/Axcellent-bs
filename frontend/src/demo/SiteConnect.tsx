@@ -3,6 +3,7 @@ import { companyConnection, type ConnectionState, type TenantOption } from '@/li
 import { SectionHead, StatusChip } from '@/components/connect/parts'
 import { Link } from '@/lib/nav'
 import Integrations from './Integrations'
+import { refreshServerCompany } from './company'
 import SiteAdapterConnect from './SiteAdapterConnect'
 
 // 사이트 연결: 실제로 되는 연결 방법만 보여 준다(고를 수만 있고 동작하지 않는 "준비 중" 칸은 두지 않는다, 2026-11-18).
@@ -16,7 +17,9 @@ const WAYS: { id: Way; title: string; desc: string }[] = [
   { id: 'adapter', title: '다른 형식 API · 플랫폼 사이트', desc: '사이트 자기 API(예약·주문·상품 목록)나 플랫폼 API를 칸 짝을 정해 바꿔 읽어요.' },
 ]
 
-export default function SiteConnect({ onShop }: { onShop: (s: ConnectionState | 'error') => void }) {
+export default function SiteConnect({ onShop: report }: { onShop: (s: ConnectionState | 'error') => void }) {
+  // 저장·해제 뒤 서버 연결을 다시 읽어, 다른 화면도 연결된 회사를 바로 따라가게 한다
+  const onShop = (s: ConnectionState | 'error') => { report(s); if (s !== 'error') refreshServerCompany() }
   const [way, setWay] = useState<Way | null>(null)
   // 회사 설정(조직도·지표·검색 키워드): 연결할 때 같이 저장한다. 연결 전에는 어느 회사도 아니다
   const [tenants, setTenants] = useState<TenantOption[]>([])
