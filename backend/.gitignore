@@ -48,3 +48,11 @@ safe-test-out/
 
 # data 평가 케이스 데이터 캐시 (DATA_EVAL_CACHE_DIR)
 .eval-cache/
+
+# 로컬 데이터 파일(sqlite). 운영·시연 데이터가 실수로 커밋되지 않게 막는다
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm

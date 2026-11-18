@@ -3,3 +3,8 @@ dist
 .env
 .env.local
 .env.*.local
+
+# 로컬 데이터 파일(sqlite)
+*.db
+*.sqlite
+*.sqlite3
