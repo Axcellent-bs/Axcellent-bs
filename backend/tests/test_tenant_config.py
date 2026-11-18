@@ -33,6 +33,7 @@ def _load_script():  # noqa: ANN202
 
 
 tenant_env = _load_script()
+CAT = {"AX_TENANT": "catbooks"}  # 캣북스를 고른 설치 (기본값은 없다)
 
 
 @pytest.mark.parametrize(
@@ -52,25 +53,25 @@ def test_catbooks_uses_the_catalog_where_it_already_is() -> None:
     assert tenant["connector"] == "shop-api"
 
 
-def test_the_default_tenant_sets_org_and_catalog(tmp_path: Path) -> None:
-    out, notes = tenant_env.resolve({}, local_org=tmp_path / "org.yaml")
+def test_a_chosen_tenant_sets_org_and_catalog(tmp_path: Path) -> None:
+    out, notes = tenant_env.resolve(CAT, local_org=tmp_path / "org.yaml")
     assert out["AX_TENANT"] == "catbooks"
     assert Path(out["AX_ORG_CONFIG"]) == (TENANTS / "catbooks" / "org.yaml").resolve()
     assert out["DATA_TENANT_CATALOG"] == "catbooks"
     assert not any(tenant_env.NO_ORG in n for n in notes)
 
 
-def test_the_default_tenant_points_at_its_trend_keywords(tmp_path: Path) -> None:
-    out, _ = tenant_env.resolve({}, local_org=tmp_path / "org.yaml")
+def test_a_chosen_tenant_points_at_its_trend_keywords(tmp_path: Path) -> None:
+    out, _ = tenant_env.resolve(CAT, local_org=tmp_path / "org.yaml")
     assert Path(out["DATA_TREND_CONFIG"]) == (TENANTS / "catbooks" / "trends.toml").resolve()
-    given, _ = tenant_env.resolve({"DATA_TREND_CONFIG": "mine.toml"}, local_org=tmp_path / "x")
+    given, _ = tenant_env.resolve({**CAT, "DATA_TREND_CONFIG": "mine.toml"}, local_org=tmp_path / "x")
     assert "DATA_TREND_CONFIG" not in given  # 이미 준 값은 그대로
 
 
-def test_the_default_tenant_points_at_its_youtube_keywords(tmp_path: Path) -> None:
-    out, _ = tenant_env.resolve({}, local_org=tmp_path / "org.yaml")
+def test_a_chosen_tenant_points_at_its_youtube_keywords(tmp_path: Path) -> None:
+    out, _ = tenant_env.resolve(CAT, local_org=tmp_path / "org.yaml")
     assert Path(out["DATA_YOUTUBE_CONFIG"]) == (TENANTS / "catbooks" / "youtube.toml").resolve()
-    given, _ = tenant_env.resolve({"DATA_YOUTUBE_CONFIG": "mine.toml"}, local_org=tmp_path / "x")
+    given, _ = tenant_env.resolve({**CAT, "DATA_YOUTUBE_CONFIG": "mine.toml"}, local_org=tmp_path / "x")
     assert "DATA_YOUTUBE_CONFIG" not in given  # 이미 준 값은 그대로
 
 
@@ -78,10 +79,10 @@ def test_given_values_come_first(tmp_path: Path) -> None:
     """지금 쓰는 사람이 깨지지 않게: 환경변수와 config/org.yaml이 회사 폴더보다 먼저다."""
     mine = tmp_path / "org.yaml"
     mine.write_text("assignments:\n  incident: {unit: 내 부서}\n", encoding="utf-8")
-    out, _ = tenant_env.resolve({}, local_org=mine)
+    out, _ = tenant_env.resolve(CAT, local_org=mine)
     assert Path(out["AX_ORG_CONFIG"]) == mine.resolve()
 
-    env = {"AX_ORG_CONFIG": str(mine), "DATA_TENANT_CATALOG": "other"}
+    env = {**CAT, "AX_ORG_CONFIG": str(mine), "DATA_TENANT_CATALOG": "other"}
     out, _ = tenant_env.resolve(env, local_org=tmp_path / "none.yaml")
     assert "AX_ORG_CONFIG" not in out and "DATA_TENANT_CATALOG" not in out  # 이미 준 값은 그대로
 
@@ -115,10 +116,10 @@ def test_an_unknown_tenant_is_refused(tmp_path: Path) -> None:
 
 def test_the_finance_per_head_budget_comes_from_the_tenant_folder(tmp_path: Path) -> None:
     """팀 예산 인당 월 단가는 회사마다 다르다: 회사 폴더 값을 쓰고, 환경변수가 먼저다."""
-    out, _ = tenant_env.resolve({}, local_org=tmp_path / "org.yaml")
+    out, _ = tenant_env.resolve(CAT, local_org=tmp_path / "org.yaml")
     assert out["FINANCE_PER_HEAD_MONTHLY"] == "100000"
     out, _ = tenant_env.resolve(
-        {"FINANCE_PER_HEAD_MONTHLY": "70000"}, local_org=tmp_path / "org.yaml"
+        {**CAT, "FINANCE_PER_HEAD_MONTHLY": "70000"}, local_org=tmp_path / "org.yaml"
     )
     assert "FINANCE_PER_HEAD_MONTHLY" not in out
 
@@ -134,18 +135,27 @@ def test_a_negative_per_head_budget_is_refused(tmp_path: Path) -> None:
         tenant_env.read_tenant(folder)
 
 
-def test_data_container_points_at_the_tenant_trend_keywords() -> None:
-    """Docker data 서비스의 기본 키워드 경로(이미지 /app = backend/)가 실제 파일을 가리킨다."""
+def test_data_container_leaves_the_trend_keywords_to_the_connected_company() -> None:
+    """Docker data 서비스: 캣북스 키워드 경로를 박지 않는다. 비워 두면 회사 연결에서 고른 회사를 따른다."""
     compose = (BACKEND / "services" / "data" / "compose.yml").read_text(encoding="utf-8")
     line = next(ln for ln in compose.splitlines() if ln.strip().startswith("DATA_TREND_CONFIG:"))
-    assert "${AX_TENANT:-catbooks}" in line
-    default = line.split(":-", 1)[1].rsplit("}", 1)[0].replace("${AX_TENANT:-catbooks}", "catbooks")
-    assert default.startswith("/app/")
-    assert (BACKEND / default.removeprefix("/app/")).is_file()
+    assert "catbooks" not in line
+    assert line.strip() == "DATA_TREND_CONFIG: ${DATA_TREND_CONFIG:-}"
 
 
-def test_the_default_tenant_sets_its_timezone(tmp_path: Path) -> None:
-    out, _ = tenant_env.resolve({}, local_org=tmp_path / "org.yaml")
+def test_without_ax_tenant_no_company_is_picked(tmp_path: Path) -> None:
+    """캣북스 기본값 없음: AX_TENANT가 없으면 회사 설정을 내보내지 않는다(서비스가 회사 연결을 따른다)."""
+    out, notes = tenant_env.resolve({}, local_org=tmp_path / "none.yaml")
+    assert out == {}
+    assert any("회사 연결" in n for n in notes)
+    mine = tmp_path / "org.yaml"
+    mine.write_text("assignments: {}\n", encoding="utf-8")
+    out, _ = tenant_env.resolve({}, local_org=mine)
+    assert out == {"AX_ORG_CONFIG": mine.resolve().as_posix()}  # 각자 덮어쓰기는 그대로
+
+
+def test_a_chosen_tenant_sets_its_timezone(tmp_path: Path) -> None:
+    out, _ = tenant_env.resolve(CAT, local_org=tmp_path / "org.yaml")
     assert out["DATA_TENANT_TIMEZONE"] == "Asia/Seoul"
-    given, _ = tenant_env.resolve({"DATA_TENANT_TIMEZONE": "UTC"}, local_org=tmp_path / "x")
+    given, _ = tenant_env.resolve({**CAT, "DATA_TENANT_TIMEZONE": "UTC"}, local_org=tmp_path / "x")
     assert "DATA_TENANT_TIMEZONE" not in given  # 이미 준 값은 그대로

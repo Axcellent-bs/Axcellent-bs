@@ -3,7 +3,9 @@
 data 엔진에서 회사마다 다른 것(지표 목록·나쁜 방향·장애 쪽 실패 코드·한국어 이름·단위·
 카테고리 이름)을 코드가 아니라 카탈로그 파일에서 읽는다. 캣북스는 `catalogs/catbooks.toml`.
 
-- 어느 카탈로그를 쓸지: 환경변수 `DATA_TENANT_CATALOG` (기본 `catbooks`).
+- 어느 카탈로그를 쓸지: 환경변수 `DATA_TENANT_CATALOG` → 회사 연결에서 고른 회사의 `catalog`.
+  회사 연결 전이면 `catbooks`의 지표 이름표를 쓴다(계약상 지표가 1개 이상이어야 해서
+  빈 카탈로그가 없다. 판매 서버는 연결 안 됨이라 숫자는 들어오지 않는다).
   이름이면 `catalogs/<이름>.toml`, `.toml`로 끝나면 그 파일 경로다.
 - 테스트는 `use_catalog()`로 바꿔 끼운다.
 - 카탈로그에 없는 지표는 이름을 그대로 쓰고 나쁜 방향은 증가로 본다(지어내지 않는다).
@@ -17,10 +19,11 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas.data import CatalogMetric, MetricCatalog
 
 CATALOG_ENV = "DATA_TENANT_CATALOG"
-DEFAULT_CATALOG = "catbooks"
+DEFAULT_CATALOG = "catbooks"  # 회사 연결 전 지표 이름표 (위 설명)
 CATALOG_DIR = Path(__file__).resolve().parent / "catalogs"
 
 _loaded: dict[str, MetricCatalog] = {}
@@ -41,7 +44,8 @@ def current(env: Mapping[str, str] | None = None) -> MetricCatalog:
     """지금 쓰는 카탈로그. `use_catalog`로 바꿔 끼웠으면 그것, 아니면 `DATA_TENANT_CATALOG`."""
     if _override is not None:
         return _override
-    key = ((os.environ if env is None else env).get(CATALOG_ENV) or DEFAULT_CATALOG).strip()
+    given = (os.environ if env is None else env).get(CATALOG_ENV)
+    key = (given or tenant_setting(CATALOG_ENV) or DEFAULT_CATALOG).strip()
     if key not in _loaded:
         _loaded[key] = load_catalog(key)
     return _loaded[key]

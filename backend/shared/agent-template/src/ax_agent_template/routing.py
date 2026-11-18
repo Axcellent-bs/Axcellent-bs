@@ -26,6 +26,7 @@ assignments:
 
 from __future__ import annotations
 
+from ax_agent_template.tenant import setting as tenant_setting
 import json
 import logging
 import os
@@ -156,7 +157,7 @@ def load_org(path: str | None = None) -> dict[str, Assignment]:
     맡은 곳을 지어내지 않는다.
     """
     global _cache
-    path = path or os.getenv(ORG_ENV, "")
+    path = path or tenant_setting(ORG_ENV)  # 환경변수 → 회사 연결에서 고른 회사의 조직도
     if not path:
         return {}
     try:

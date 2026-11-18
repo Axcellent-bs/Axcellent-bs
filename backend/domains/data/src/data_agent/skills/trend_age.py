@@ -29,6 +29,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     AgeBandTrend,
@@ -72,7 +73,7 @@ class AgeConfig:
 
 
 def load_config(env: Mapping[str, str]) -> AgeConfig:
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return AgeConfig()
     try:

@@ -40,6 +40,7 @@ class Rule:
 
 DEFAULT_RULE = Rule()
 
+
 @dataclass(frozen=True)
 class _Cand:
     source: str

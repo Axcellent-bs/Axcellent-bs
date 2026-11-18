@@ -49,6 +49,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO
 
+from ax_agent_template.tenant import setting as tenant_setting
 from data_agent import collector_lock, keyword_pool, shorts_backfill, youtube_quota
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat, YouTubeConnector
@@ -58,6 +59,7 @@ from data_agent.youtube_store import DB_ENV, DEFAULT_DB, KST, Row, SnapshotStore
 
 BACKEND = Path(__file__).resolve().parents[4]
 CONFIG_ENV = "DATA_YOUTUBE_CONFIG"
+NOT_CONNECTED = "(회사 연결 안 됨)"  # 회사 전에는 키워드가 없다(검색하지 않음)
 MAX_TRACKED = 500  # 한 번에 추적하는 영상 수 상한 (10단위)
 SEARCH_DAYS = 7  # 회사 키워드 검색은 최근 게시 영상만
 MIN_EVERY_SECONDS = 600  # --every 하한 (할당량 보호)
@@ -120,10 +122,14 @@ def load_env(env: Mapping[str, str], path: Path = BACKEND / ".env") -> dict[str,
 
 
 def config_path(env: Mapping[str, str]) -> Path:
-    if env.get(CONFIG_ENV):
-        return Path(env[CONFIG_ENV])
-    tenant = (env.get("AX_TENANT") or "catbooks").strip()
-    return BACKEND / "config" / "tenants" / tenant / "youtube.toml"
+    """회사 `youtube.toml`: 환경변수 → `AX_TENANT` 폴더 → 회사 연결에서 고른 회사.
+
+    연결 전이면 없는 경로(설정 없음)."""
+    if value := env.get(CONFIG_ENV):
+        return Path(value)
+    if tenant := (env.get("AX_TENANT") or "").strip():
+        return BACKEND / "config" / "tenants" / tenant / "youtube.toml"
+    return Path(tenant_setting(CONFIG_ENV) or NOT_CONNECTED)
 
 
 def load_config(path: Path) -> YouTubeConfig:

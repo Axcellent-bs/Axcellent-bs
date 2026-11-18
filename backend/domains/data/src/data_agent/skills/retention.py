@@ -132,9 +132,7 @@ def hide(reg: list[int], risk: list[int], least: int) -> set[int]:
         hidden = more
 
 
-def top_genre(
-    cell: tuple, genres: list[tuple[tuple, str, int]], cfg: CatalogSales
-) -> str | None:
+def top_genre(cell: tuple, genres: list[tuple[tuple, str, int]], cfg: CatalogSales) -> str | None:
     found = [(n, cfg.genres[g], g) for c, g, n in genres if c == cell and g in cfg.genres]
     if not found:
         return None

@@ -32,6 +32,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     InstagramAudioInput,
@@ -84,7 +85,7 @@ class IgConfig:
 
 
 def load_config(env: Mapping[str, str]) -> IgConfig:
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return IgConfig()
     try:
@@ -162,8 +163,11 @@ async def collect(env: Mapping[str, str], graph: Any, *, now: datetime | None = 
             audio_store.log("ig_audio", day, "connected", None, now)
             audio[kind] = "ok"
         # 2. 레이더 (계정마다, 한 계정 실패는 그 계정만)
-        status, why = ("connected", None) if config.radar_accounts else (
-            "failed", "레이더 계정이 없음 (trends.toml [instagram] radar_accounts)")
+        status, why = (
+            ("connected", None)
+            if config.radar_accounts
+            else ("failed", "레이더 계정이 없음 (trends.toml [instagram] radar_accounts)")
+        )
         for account in config.radar_accounts:
             if radar_store.done(day, account):
                 continue

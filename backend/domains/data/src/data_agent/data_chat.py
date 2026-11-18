@@ -202,7 +202,7 @@ def verified_reply(reply: str, facts: Any, bundles: list[str]) -> str:
 
 
 def kst(at: datetime | str | None) -> str | None:
-    """"11월 9일 08:30" (한국 시각). 없으면 None."""
+    """ "11월 9일 08:30" (한국 시각). 없으면 None."""
     if at is None:
         return None
     t = datetime.fromisoformat(at) if isinstance(at, str) else at
@@ -390,8 +390,11 @@ def read_performance(env: Mapping[str, str], now: datetime) -> dict | None:
         if not campaign_update.enabled(env):
             c["기획에 보내기"] = "자동 보내기 꺼짐 · safety 확인 후 켭니다"
         elif row:
-            c["기획에 보내기"] = row[0] + (f" · {kst(row[1])}" if row[1] else "") + (
-                f" · {row[2]}" if row[2] else "")
+            c["기획에 보내기"] = (
+                row[0]
+                + (f" · {kst(row[1])}" if row[1] else "")
+                + (f" · {row[2]}" if row[2] else "")
+            )
         elif o.test:  # 보내기 판정(campaign_update.decide)과 같은 이유
             c["기획에 보내기"] = "보내지 않음 · 시험 캠페인"
         elif not o.proposal_id:
@@ -480,7 +483,7 @@ def build_material(parts: list[dict | None]) -> dict:
         longest = _longest_list(material["bundles"])
         if longest is None:
             break
-        del longest[max(1, len(longest) // 2):]
+        del longest[max(1, len(longest) // 2) :]
     while _size(material) > MATERIAL_CHARS and material["bundles"]:  # 그래도 넘으면 근거만 남긴다
         for b in material["bundles"]:
             b["facts"] = {"note": "재료가 길어 생략했어요. 화면에서 확인해 주세요."}
@@ -614,8 +617,11 @@ class DataChatService:
         if chat_limit_reason(llm_budget.BUDGET) is not None:
             raise ChatRefused("chat_limit", LIMIT_TEXT)
         self.store.expire_idle()
-        th = self.store.create(make_title(message), who) if thread_id is None else self._own(
-            who, thread_id)
+        th = (
+            self.store.create(make_title(message), who)
+            if thread_id is None
+            else self._own(who, thread_id)
+        )
         outcome, th = self.store.begin_turn(th["id"], message)
         if outcome == "closed" or th is None:
             raise ChatRefused("thread_closed", "끝난 대화에는 보낼 수 없다. 새 대화를 시작한다")
@@ -647,7 +653,8 @@ class DataChatService:
         parts = material.get("bundles", [])
         if not parts:  # 저장 결과가 없다: LLM을 부르지 않는다
             self.store.finish_turn(
-                thread_id, f"아직 계산된 결과가 없어요. {screens(bundles)} 화면에서 확인해 주세요.")
+                thread_id, f"아직 계산된 결과가 없어요. {screens(bundles)} 화면에서 확인해 주세요."
+            )
             return
         data = {
             "facts": material,
@@ -657,7 +664,8 @@ class DataChatService:
         try:
             with recording(CHAT_SKILL, emit=lambda line: None):  # 장부 skill 이름 data_chat
                 out = await asyncio.wait_for(
-                    llm.structured(SYSTEM_PROMPT, ChatOut, untrusted=data), ANSWER_TIMEOUT_SEC)
+                    llm.structured(SYSTEM_PROMPT, ChatOut, untrusted=data), ANSWER_TIMEOUT_SEC
+                )
         except llm_budget.LLMDailyCapReached:
             self.store.finish_turn(thread_id, LIMIT_TEXT, kind="error")
             return

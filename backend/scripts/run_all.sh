@@ -50,9 +50,11 @@ FOLDED="handover"
 # >>> 판매 서버 주소 (tests/test_run_all_procs.py가 이 부분만 실행한다)
 # 캣북스 판매 서버(shop-api)·가상 주문은 캣북스 레포(Catbooks-demo/catbooks-demo)에 있고 따로 띄운다.
 # 이 스크립트는 판매 서버를 띄우지도 끄지도 않는다(8010 포트·표식을 맡지 않아 따로 띄운 캣북스를 끄지 않는다).
-# 서비스들은 회사 연결 파일(있으면 먼저) → AX_SHOP_API_URL(기본 아래 값, 이미 준 값이 먼저) 순으로 찾아간다.
-# 예전 스위치 SHOP_API_EXTERNAL은 이제 늘 켜진 것과 같아서 읽지 않는다(.env에 남아 있어도 상관없다)
-SHOP_API_DEFAULT_URL="http://127.0.0.1:8010"
+# 서비스들은 회사 연결 파일(있으면 먼저) → AX_SHOP_API_URL(운영자가 준 값만) 순으로 찾아간다.
+# 둘 다 없으면 "연결 안 됨"이다: 캣북스 판매 서버(127.0.0.1:8010)로 빠지지 않고 사이트 변환기가
+# 503 NOT_CONFIGURED로 답한다(ax_agent_template.config.agent_url). 캣북스는 회사 연결에서 연결한다.
+# 예전 스위치 SHOP_API_EXTERNAL은 읽지 않는다(.env에 남아 있어도 상관없다)
+SHOP_API_DEFAULT_URL=""
 # <<< 판매 서버 주소
 PORTS=$(echo "$APPS" | awk 'NF {print $2}' | tr '\n' ',' | sed 's/,$//')
 # 이 스크립트가 띄우는 프로세스를 명령줄로 알아보는 표식 (scripts/procs.py: 이미 떠 있는지·끈 뒤 남았는지)
@@ -196,10 +198,9 @@ while read -r name port _; do
   [ -n "$name" ] || continue
   export "AX_$(echo "$name" | tr 'a-z-' 'A-Z_')_URL=http://127.0.0.1:$port"
 done <<< "$APPS"
-# 판매 서버는 이 스크립트가 띄우지 않아 위 반복이 AX_SHOP_API_URL을 만들지 않는다. 그대로 두면 서비스들이
-# 기본값 http://shop-api:8010(컨테이너 이름)으로 빠지므로 같은 호스트 주소를 알려 준다(#1220).
-# 운영자가 이미 정한 AX_SHOP_API_URL(셸·아래 .env)은 그대로 둔다 (회사 연결 파일이 있으면 그쪽이 먼저)
-export AX_SHOP_API_URL="${AX_SHOP_API_URL:-$SHOP_API_DEFAULT_URL}"
+# 판매 서버는 이 스크립트가 띄우지 않아 위 반복이 AX_SHOP_API_URL을 만들지 않는다. 기본 주소를 넣지 않는다
+# (캣북스 기본값 없음, 위 설명). 운영자가 이미 정한 AX_SHOP_API_URL(셸·아래 .env)만 그대로 쓴다
+[ -n "$SHOP_API_DEFAULT_URL" ] && export AX_SHOP_API_URL="${AX_SHOP_API_URL:-$SHOP_API_DEFAULT_URL}"
 # 부서 이름으로 부르는 코드가 있어도 skill로 서비스를 고르지만(route_target), 고를 수 없는 경우를 위해 대표 서비스로 둔다
 export AX_SUPPORT_URL=http://127.0.0.1:8102 AX_HR_URL=http://127.0.0.1:8104 AX_ARCHIVE_URL=http://127.0.0.1:8114
 export AX_MARKETING_URL=http://127.0.0.1:8103 AX_INFRA_URL=http://127.0.0.1:8107
@@ -300,17 +301,17 @@ if [ -f ../.env ]; then
     [ -n "$val" ] && export "$v=$val"
   done
 fi
-# 회사 설정 (config/tenants/<AX_TENANT>/tenant.toml, 기본 catbooks): 조직도 AX_ORG_CONFIG·data 카탈로그
+# 회사 설정 (config/tenants/<AX_TENANT>/tenant.toml. AX_TENANT가 없으면 회사 연결에서 고른 회사를 서비스가 따른다): 조직도·data 카탈로그
 # DATA_TENANT_CATALOG를 정한다. 이미 준 환경변수(.env 포함)와 config/org.yaml(각자 덮어쓰기)이 먼저다
 if ! tenant_exports=$("$PY" scripts/tenant_env.py); then
-  echo "회사 설정을 읽지 못해 켜지 않습니다 (AX_TENANT=${AX_TENANT:-catbooks}, backend/README.md \"새 회사를 붙일 때\")" >&2
+  echo "회사 설정을 읽지 못해 켜지 않습니다 (AX_TENANT=${AX_TENANT:-없음}, backend/README.md \"새 회사를 붙일 때\")" >&2
   exit 2
 fi
 eval "$tenant_exports"
-if [ -z "${AX_ORG_CONFIG:-}" ] || [ ! -f "$AX_ORG_CONFIG" ]; then
+if [ -n "${AX_TENANT:-}" ] && { [ -z "${AX_ORG_CONFIG:-}" ] || [ ! -f "$AX_ORG_CONFIG" ]; }; then
   echo "==================================================================" >&2
   echo " 조직도 없음: 꺼진 서비스로 가는 일은 no_assignee로 실패합니다" >&2
-  echo " config/tenants/${AX_TENANT:-catbooks}/org.yaml 을 두거나 AX_ORG_CONFIG를 주세요" >&2
+  echo " config/tenants/${AX_TENANT}/org.yaml 을 두거나 AX_ORG_CONFIG를 주세요" >&2
   echo "==================================================================" >&2
 fi
 # 목 스위치(*_MOCK, 테스트 전용)는 남기지 않는다 (.env에 남아 있어도 끈다)

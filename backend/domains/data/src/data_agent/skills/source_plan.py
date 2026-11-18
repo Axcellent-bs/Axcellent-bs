@@ -34,6 +34,7 @@ from typing import Literal
 from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     DataSource,
@@ -90,7 +91,7 @@ class PlanConfig:
 
 
 def load_config(env: Mapping[str, str]) -> PlanConfig:
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return PlanConfig()
     try:

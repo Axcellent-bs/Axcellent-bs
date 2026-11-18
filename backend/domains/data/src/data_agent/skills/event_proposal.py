@@ -971,8 +971,11 @@ def past_results(
             rows.append(ProposalPastResult(**common))
         rows += [
             ProposalPastResult(
-                **common, campaign_id=r.campaign_id, actual=actual_of(r),
-                period_from=r.window_from, period_to=r.window_to,
+                **common,
+                campaign_id=r.campaign_id,
+                actual=actual_of(r),
+                period_from=r.window_from,
+                period_to=r.window_to,
             )  # fmt: skip
             for r in campaigns
         ]
@@ -1231,8 +1234,12 @@ async def send_proposal(  # noqa: PLR0911 - 결과 갈래마다 바로 돌려준
     item = stored.item
     decision = await gate(
         ACTION,
-        {"proposal_id": pid, "month": item.timing_basis.month, "event_kind": item.event_kind,
-         "genre_code": item.genre_code},  # fmt: skip
+        {
+            "proposal_id": pid,
+            "month": item.timing_basis.month,
+            "event_kind": item.event_kind,
+            "genre_code": item.genre_code,
+        },  # fmt: skip
         call_meta,
         Evidence(
             ref_ids=[f"event_proposal:{pid}"],

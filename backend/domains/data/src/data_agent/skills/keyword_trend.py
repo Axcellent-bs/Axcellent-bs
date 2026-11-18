@@ -89,6 +89,7 @@ def increase(
     day = 어제 − 같은 요일 4주 평균, week = 최근 7일 − 그 전 4주 주별 평균.
     """
     if window == "week":
+
         def week_sum(last: date) -> float | None:
             days = [last - timedelta(days=i) for i in range(7)]
             return sum(est[d] for d in days) if all(d in est for d in days) else None
@@ -352,8 +353,15 @@ async def keyword_trend(
                                  category=row.category, volume=_volume(row),
                                  monthly_volume=volume)  # fmt: skip
             if item.monthly_volume is None:
-                item.volume_reason = NO_VOLUME if not configured else (
-                    "검색량이 10 미만" if row.pc_below_10 or row.mobile_below_10 else "검색량 없음")
+                item.volume_reason = (
+                    NO_VOLUME
+                    if not configured
+                    else (
+                        "검색량이 10 미만"
+                        if row.pc_below_10 or row.mobile_below_10
+                        else "검색량 없음"
+                    )
+                )
                 item.increase_reason = item.volume_reason
             else:
                 est, inc = increase(estimates(points, item.monthly_volume, end), end,
@@ -450,7 +458,7 @@ async def _season(lab: Datalab, rows: Sequence[PoolRow], today: date, config: Se
     """작년 이달 비율 ÷ 지난 12개월 평균 (지난달까지 12개월). 기준 이상만, 배수 큰 순."""
     first = today.replace(day=1)
     last_month_end = first - timedelta(days=1)
-    start = (first.replace(year=first.year - 1))
+    start = first.replace(year=first.year - 1)
     target = start  # 작년 이달 1일
     out: list[SeasonKeyword] = []
     skipped = 0

@@ -48,6 +48,7 @@ from datetime import UTC, date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     ExplorerCell,
@@ -109,7 +110,7 @@ class ExplorerConfig:
 
 
 def load_config(env: Mapping[str, str]) -> ExplorerConfig:
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return ExplorerConfig()
     try:
@@ -263,8 +264,16 @@ class ExplorerStore:
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO searches VALUES (?,?,?,?,?,?,?,?)",
-                (day.isoformat(), s.category, s.length, s.window, s.status, s.query, s.found,
-                 s.reason),  # fmt: skip
+                (
+                    day.isoformat(),
+                    s.category,
+                    s.length,
+                    s.window,
+                    s.status,
+                    s.query,
+                    s.found,
+                    s.reason,
+                ),  # fmt: skip
             )
 
     def reserve(self, day: date, cat: str, length: str, window: str, cap: int) -> str:

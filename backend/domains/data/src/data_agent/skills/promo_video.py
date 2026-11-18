@@ -175,8 +175,10 @@ def judge(
     v_ok = vs_all_ratio is not None and vs_all_ratio >= gate.vs_all_ratio
     s_up = search_ratio is not None and search_ratio >= gate.naver_ratio
     # naver_min_format_ratio가 0이면 이 확인을 끈다 (회사 설정, recent_min 0과 같은 규칙)
-    s_ok = s_up and (gate.naver_min_format_ratio <= 0 or (
-        vs_all_ratio is not None and vs_all_ratio >= gate.naver_min_format_ratio))
+    s_ok = s_up and (
+        gate.naver_min_format_ratio <= 0
+        or (vs_all_ratio is not None and vs_all_ratio >= gate.naver_min_format_ratio)
+    )
     if not v_ok and not s_ok:
         if search_ratio is not None and search_ratio < 1.0:
             return False, f"{search_label} {_x(search_ratio)}배(줄어듦)"
@@ -221,8 +223,10 @@ def judge(
     if s_ok:
         why.append(f"{search_label} {_x(search_ratio or 0)}배")
     if recent is not None:
-        why.append(f"{days} 게시된 같은 형식 숏츠 {recent}개" + (
-            f" (게시 시각 모름 {recent_unknown}개 제외)" if recent_unknown else ""))
+        why.append(
+            f"{days} 게시된 같은 형식 숏츠 {recent}개"
+            + (f" (게시 시각 모름 {recent_unknown}개 제외)" if recent_unknown else "")
+        )
     return True, " · ".join(why)
 
 
@@ -293,7 +297,10 @@ def idea_facts(i: TrendInsight) -> dict[str, int | float | str]:
 
 
 async def write_ideas(
-    promos: Sequence[TrendInsight], llm: LLMClient, context_id: str | None, queries: list[str],
+    promos: Sequence[TrendInsight],
+    llm: LLMClient,
+    context_id: str | None,
+    queries: list[str],
     banned: Sequence[str] = (),
 ) -> None:
     """형식마다 캣북스 홍보 아이디어 한 줄 (묶어서 LLM 한 번, 브리프 한 줄과 같은 예산).
@@ -357,7 +364,10 @@ def build_promos(
         if name in OTHER:
             continue
         mates = [
-            t for t in trends if t.shorts_format == name and t.evidence.naver_ratio is not None
+            t
+            for t in trends
+            if t.shorts_format == name
+            and t.evidence.naver_ratio is not None
             and t.evidence.naver_ratio <= gate.max_ratio  # 평소 값이 너무 작은 배수는 빼고
         ]
         mate = max(mates, key=lambda t: t.evidence.naver_ratio or 0, default=None)

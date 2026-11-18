@@ -2,7 +2,7 @@
 
 회사 한 곳 = 카탈로그 + 커넥터 + 조직도. `tenant.toml` 한 장이 셋을 가리킨다.
 
-    python scripts/tenant_env.py          # AX_TENANT(기본 catbooks)
+    python scripts/tenant_env.py          # AX_TENANT (없으면 회사 연결에서 고른 회사를 서비스가 따른다)
     eval "$(python scripts/tenant_env.py)"
 
 출력은 `export 이름=값` 줄이다. 이미 정한 값이 먼저다(지금 쓰는 사람이 깨지지 않게):
@@ -29,7 +29,7 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parent.parent
 TENANT_ENV = "AX_TENANT"
-DEFAULT_TENANT = "catbooks"
+NOT_PICKED = "회사: 정하지 않음 (시스템 관리 › 회사 연결에서 고른 회사를 서비스들이 재시작 없이 따른다)"
 CATALOG_DIR = BACKEND / "domains" / "data" / "src" / "data_agent" / "catalogs"
 NO_ORG = "조직도 없음: 꺼진 서비스로 가는 일은 no_assignee로 실패합니다"
 
@@ -101,12 +101,20 @@ def resolve(
     local_org: Path = BACKEND / "config" / "org.yaml",
 ) -> tuple[dict[str, str], list[str]]:
     """(내보낼 환경변수, 안내 줄). 이미 정한 값은 내보내지 않는다."""
-    name = (env.get(TENANT_ENV) or DEFAULT_TENANT).strip()
+    name = (env.get(TENANT_ENV) or "").strip()
+    if not name:
+        # 캣북스 기본값 없음. 각자 덮어쓰는 조직도(config/org.yaml)만 내보낸다
+        out: dict[str, str] = {}
+        notes = [NOT_PICKED]
+        if not env.get("AX_ORG_CONFIG") and local_org.is_file():
+            out["AX_ORG_CONFIG"] = local_org.resolve().as_posix()
+            notes.append(f"조직도: {out['AX_ORG_CONFIG']} (config/org.yaml)")
+        return out, notes
     folder = tenant_dir(name, root)
     if not folder.is_dir():
         raise TenantError(f"회사 설정 폴더가 없습니다: {folder} ({TENANT_ENV}={name})")
     tenant = read_tenant(folder)
-    out: dict[str, str] = {TENANT_ENV: name}
+    out = {TENANT_ENV: name}
     notes = [f"회사: {name} ({tenant['name']}), 커넥터 {tenant['connector']}"]
 
     if env.get("AX_ORG_CONFIG"):

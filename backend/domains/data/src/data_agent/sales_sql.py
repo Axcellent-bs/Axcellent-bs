@@ -264,9 +264,7 @@ def add_amounts(  # noqa: PLR0913 - 예전 `_add` 그대로
                                                 n.category_code)  # fmt: skip
 
 
-def _odd_orders(
-    store: SalesStore, conn: sqlite3.Connection, tenant_id: str
-) -> list[StoredOrder]:
+def _odd_orders(store: SalesStore, conn: sqlite3.Connection, tenant_id: str) -> list[StoredOrder]:
     rows = conn.execute(
         "SELECT o.* FROM sa_odd d CROSS JOIN sales_orders o ON o.tenant_id = ? "
         "AND o.order_id = d.order_id ORDER BY o.created_at, o.order_id",
@@ -275,9 +273,7 @@ def _odd_orders(
     return store._with_details(tenant_id, rows, conn)  # noqa: SLF001 - 같은 분석 연결
 
 
-def tally(
-    store: SalesStore, tenant_id: str, start: datetime, end: datetime
-) -> tuple[Tally, int]:
+def tally(store: SalesStore, tenant_id: str, start: datetime, end: datetime) -> tuple[Tally, int]:
     """[start, end) 집계와 그 기간에 접수한 주문 수(상태 무관, 품질 보고용)."""
     p = _params(tenant_id, start, end)
     t = Tally(window=(start, end))

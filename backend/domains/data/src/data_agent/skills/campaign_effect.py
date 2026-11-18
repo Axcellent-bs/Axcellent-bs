@@ -45,6 +45,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 from ax_agent_template.llm import LLMClient
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     CampaignAttribution,
@@ -168,9 +169,10 @@ def tenant_timezone(env: Mapping[str, str] | None = None) -> tzinfo:
     코드에 시간대를 두지 않는다.
     """
     env = os.environ if env is None else env
-    name = env.get(TIMEZONE_ENV)
-    if not name:
-        path = BACKEND / "config" / "tenants" / (env.get("AX_TENANT") or "catbooks") / "tenant.toml"
+    name = env.get(TIMEZONE_ENV) or tenant_setting(TIMEZONE_ENV)
+    tenant = (env.get("AX_TENANT") or "").strip()
+    if not name and tenant:  # 회사 연결 전이면 회사 폴더가 없다 → UTC
+        path = BACKEND / "config" / "tenants" / tenant / "tenant.toml"
         try:
             with path.open("rb") as f:
                 name = tomllib.load(f).get("timezone")
@@ -520,9 +522,8 @@ async def _orders(
         why = f"기준선에 쓸 지난 구간이 없음 ({'; '.join(dropped)})"
         return _unknown_change(why, 0, rule), used, rule
     if rule == RULE_MULTIDAY and len(used) < MULTIDAY_MIN_WEEKS:  # 공백으로 빠져 3구간이 안 됨
-        why = (
-            f"기준선에 쓸 같은 요일 구간이 {len(used)}개뿐 (최소 {MULTIDAY_MIN_WEEKS}구간)"
-            + (f": {'; '.join(dropped)}" if dropped else "")
+        why = f"기준선에 쓸 같은 요일 구간이 {len(used)}개뿐 (최소 {MULTIDAY_MIN_WEEKS}구간)" + (
+            f": {'; '.join(dropped)}" if dropped else ""
         )
         return _unknown_change(why, len(used), rule), used, rule
     totals = [t for t in (s.total() for s in used) if t is not None]

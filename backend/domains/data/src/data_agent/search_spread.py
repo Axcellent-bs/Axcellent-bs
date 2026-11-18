@@ -51,6 +51,8 @@ async def spread(connector: Any, keyword: str, today: date) -> KeywordSpread:
         cafe_total=cafe.total,
         cafe_7d=None,
         cafe_7d_reason=CAFE_NO_DATE,
-        news=[KeywordNews(title=n.title, source=n.source, url=n.url, published_at=n.published_at)
-              for n in news.news[:NEWS_SHOWN]],  # fmt: skip
+        news=[
+            KeywordNews(title=n.title, source=n.source, url=n.url, published_at=n.published_at)
+            for n in news.news[:NEWS_SHOWN]
+        ],  # fmt: skip
     )

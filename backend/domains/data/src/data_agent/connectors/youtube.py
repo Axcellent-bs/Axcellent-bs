@@ -234,7 +234,10 @@ class YouTubeConnector:
     """
 
     def __init__(
-        self, env: Mapping[str, str] | None = None, *, client: httpx.AsyncClient | None = None,
+        self,
+        env: Mapping[str, str] | None = None,
+        *,
+        client: httpx.AsyncClient | None = None,
         caller: str | None = None,
     ) -> None:
         env = os.environ if env is None else env

@@ -119,7 +119,7 @@ def direction_of(out: CampaignResultOutput) -> str:
 
 
 def summary_of(out: CampaignResultOutput) -> str:
-    """"조회 목표의 N배 (영상 M개 중 K개 달성) · 매출 ±N원 · 주문 ±N건" (+ " · 매출 감소 경고").
+    """ "조회 목표의 N배 (영상 M개 중 K개 달성) · 매출 ±N원 · 주문 ±N건" (+ " · 매출 감소 경고").
     인사이트 "지난번 결과"와 같은 문장. 200자를 넘으면 자르지 않고 "<조회 판정> · 매출 <방향>"."""
     from data_agent.past_results import to_past
 
@@ -279,8 +279,11 @@ async def send_one(
     )
     decision = await gate(
         ACTION,
-        {"campaign_id": out.campaign_id, "proposal_id": out.proposal_id,
-         "direction": update.direction},  # fmt: skip
+        {
+            "campaign_id": out.campaign_id,
+            "proposal_id": out.proposal_id,
+            "direction": update.direction,
+        },  # fmt: skip
         meta,
         Evidence(
             ref_ids=[f"campaign:{out.campaign_id}", f"proposal:{out.proposal_id}"],

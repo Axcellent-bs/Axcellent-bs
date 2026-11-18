@@ -112,9 +112,13 @@ def build_app() -> FastAPI:
             )
             # 판매 분석 미리 계산 (11/18): 수집기가 새 행을 저장하면 기본 조회를 캐시에 넣는다
             warm = (
-                asyncio.create_task(sales_reads.run_forever(
-                    get_sales_store, metric_catalog.current, TENANT_ID_DEFAULT,
-                ))  # fmt: skip
+                asyncio.create_task(
+                    sales_reads.run_forever(
+                        get_sales_store,
+                        metric_catalog.current,
+                        TENANT_ID_DEFAULT,
+                    )
+                )  # fmt: skip
                 if sales_reads.warm_enabled()
                 else None
             )

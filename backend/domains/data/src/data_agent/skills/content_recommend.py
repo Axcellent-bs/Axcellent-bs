@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 from ax_agent_template.llm import LLMClient
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     ContentRecommendation,
@@ -127,7 +128,7 @@ class RecommendConfig:
 
 def load_config(env: Mapping[str, str]) -> RecommendConfig:
     """`DATA_TREND_CONFIG`(회사 `trends.toml`)의 `[recommend]`. 없거나 틀리면 기본값."""
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return RecommendConfig()
     try:

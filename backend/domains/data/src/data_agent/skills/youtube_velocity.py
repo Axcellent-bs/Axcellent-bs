@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     YouTubeVelocityOutput,
@@ -47,7 +48,7 @@ DEFAULT_TOP = 10
 
 def top_setting(env: Mapping[str, str]) -> int:
     """회사 `trends.toml` `[velocity] top`. 없거나 틀리면 10."""
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return DEFAULT_TOP
     try:

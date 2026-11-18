@@ -671,7 +671,9 @@ def test_tenant_timezone_comes_from_config_not_code() -> None:
     from data_agent.skills.campaign_effect import tenant_timezone
 
     assert str(tenant_timezone({"DATA_TENANT_TIMEZONE": "Asia/Tokyo"})) == "Asia/Tokyo"
-    assert str(tenant_timezone({})) == "Asia/Seoul"  # 회사 폴더 config/tenants/catbooks/tenant.toml
+    # 회사 폴더 config/tenants/catbooks/tenant.toml (회사를 고른 경우)
+    assert str(tenant_timezone({"AX_TENANT": "catbooks"})) == "Asia/Seoul"
+    assert tenant_timezone({}) == UTC  # 회사 연결 전: 캣북스 기본값 없음
     assert tenant_timezone({"DATA_TENANT_TIMEZONE": "Not/AZone"}) == UTC
 
 

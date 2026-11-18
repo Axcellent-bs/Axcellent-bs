@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from ax_agent_template.llm import LLMClient
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     PopularCategory,
@@ -133,7 +134,7 @@ class PopularConfig:
 
 
 def load_config(env: Mapping[str, str]) -> PopularConfig:
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return PopularConfig()
     try:

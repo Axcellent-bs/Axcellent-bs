@@ -233,9 +233,13 @@ class TickResult:
             + (f", 장부가 막아 안 부름 {self.ledger_refused}" if self.ledger_refused else "")
             + (f", LLM 장부가 막아 안 부름 {self.llm_refused}" if self.llm_refused else "")
             + ")"
-            + (f", 결과 {self.results}개(60초 이하 새 영상 {self.found}개"
-               + (f", 형식 판정 못 함 {self.unclassified}" if self.unclassified else "") + ")"
-               if self.searches else "")
+            + (
+                f", 결과 {self.results}개(60초 이하 새 영상 {self.found}개"
+                + (f", 형식 판정 못 함 {self.unclassified}" if self.unclassified else "")
+                + ")"
+                if self.searches
+                else ""
+            )
             + f", 새로 추적"
             f" {self.added}개, 추적 중 {self.tracking}개, 스냅샷 {self.snapshots}줄"
             + (f", {'; '.join(self.problems)}" if self.problems else "")
@@ -428,6 +432,8 @@ def status(env: Mapping[str, str] | None = None, now: datetime | None = None) ->
         # 이 작업 몫이 거의 찼거나, 전체 상한(8,000)에 남은 것이 검색 하나보다 적으면 찾기를 멈춤
         find_stopped=used + SEARCH_UNITS + 1 > cap - RESERVE
         or youtube_quota.LEDGER.units(day_of(now)) + SEARCH_UNITS > youtube_quota.cap(env),
-        line=(f"새 숏츠 추적: 오늘 {used:,}유닛 / {cap:,}, 추적 중 {tracking}개 ·"
-              f" {youtube_quota.reset_label(now)}"),
+        line=(
+            f"새 숏츠 추적: 오늘 {used:,}유닛 / {cap:,}, 추적 중 {tracking}개 ·"
+            f" {youtube_quota.reset_label(now)}"
+        ),
     )

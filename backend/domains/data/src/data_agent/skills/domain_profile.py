@@ -31,6 +31,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     DomainProfileOutput,
@@ -104,7 +105,7 @@ class TenantProfile:
 
 def load_tenant(env: Mapping[str, str]) -> TenantProfile:
     """`tenant.toml`의 이름·`[profile] about`·`[profile.override]`. 없으면 빈 값."""
-    path = env.get(TENANT_CONFIG_ENV)
+    path = env.get(TENANT_CONFIG_ENV) or tenant_setting(TENANT_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return TenantProfile()
     try:

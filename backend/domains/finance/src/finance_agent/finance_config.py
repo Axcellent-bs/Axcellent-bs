@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from ax_agent_template.tenant import setting as tenant_setting
 import os
 import re
 import tomllib
@@ -113,7 +114,7 @@ def load_config() -> FinanceConfig:
     text = resources.files("finance_agent").joinpath("finance_policy.toml").read_text("utf-8")
     raw = tomllib.loads(text)
     # 회사 폴더(tenant.toml `[finance]`)에서 run_all.sh가 넘긴 값이 먼저다 (scripts/tenant_env.py)
-    per_head = os.getenv(PER_HEAD_ENV, "").strip()
+    per_head = tenant_setting(PER_HEAD_ENV)  # 환경변수 → 회사 연결에서 고른 회사
     if per_head:
         raw.setdefault("team_budget", {})["per_head_monthly"] = int(per_head)
     return FinanceConfig.model_validate(raw)
