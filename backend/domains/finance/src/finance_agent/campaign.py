@@ -808,9 +808,13 @@ def category_budget_advice(
         no_gap = "카테고리 사이 제작비를 옮길 만큼 차이가 없습니다."
         summary = shift["recommendation"] if shift else no_gap
     elif status == "no_data":
-        summary = f"{category}는 재무에 기록된 캠페인이 없어 제작비 의견을 낼 수 없습니다."
+        summary = (
+            f"'{category}' 카테고리는 재무에 기록된 캠페인이 없어 제작비 의견을 낼 수 없습니다."
+        )
     elif status == "measuring":
-        summary = f"{category}는 게시 7일 조회수를 재는 중이라 조회당 제작비가 아직 없습니다."
+        summary = (
+            f"'{category}' 카테고리는 게시 7일 조회수를 재는 중이라 조회당 제작비가 아직 없습니다."
+        )
     else:
         rec = mine["recommended_production_krw"]
         base = mine["latest_production_krw"]
