@@ -1,6 +1,7 @@
 """YouTube 영상 통계 스냅샷 수집 (한 번 또는 `--every 초`마다). run_all.sh가 data와 같이 켠다.
 
 새 스냅샷을 저장하면 바로 트렌드 감지 탭 결과를 미리 계산해 저장한다(`trend_precompute`).
+그 바로 앞에 숏츠 표본의 빠진 게시 시각을 하루 상한 안에서 채운다(`shorts_backfill`).
 같은 DB에 수집기가 둘 돌지 않게 DB 옆 `youtube_collect.lock`을 잡는다(잡혀 있으면 바로 끝냄).
 
     cd backend
@@ -47,7 +48,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO
 
-from data_agent import collector_lock, youtube_quota
+from data_agent import collector_lock, shorts_backfill, youtube_quota
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat, YouTubeConnector
 from data_agent.stage_timing import install_sqlite_timer
@@ -353,6 +354,8 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
             print(result.line(), flush=True)
             await measure_videos(connector, env)  # 게시한 영상 성과: 지금 잴 시점만 (실패해도 계속)
             await track_fresh(env)  # 새 숏츠 추적: 같은 형식 비교 기준 표본 (실패해도 계속)
+            # 숏츠 표본의 빠진 게시 시각 채우기 (하루 상한, 미리 계산 바로 앞. 실패해도 계속)
+            await shorts_backfill.run(env)
             if result.saved and precompute_after:
                 # 새 스냅샷 직후 감지 탭 결과를 미리 계산해 저장 (화면은 읽기만).
                 # 실패해도 수집은 계속
