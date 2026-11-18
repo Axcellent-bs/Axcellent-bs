@@ -7,9 +7,9 @@ import { BLOCKER_KO, CLAIM_STATUS_KO, CLAIM_STATUS_TONE } from "@/lib/labels";
 export function Stat({ label, value, sub, tone = "", href }: { label: string; value: ReactNode; sub?: string; tone?: string; href?: string }) {
   const body = (
     <>
-      <span className="text-[11px] text-ink-500">{label}</span>
+      <span className="text-xs text-ink-500">{label}</span>
       <span className={`mt-0.5 text-xl font-semibold tabular-nums ${tone}`}>{value}</span>
-      {sub && <span className="mt-0.5 text-[11px] text-ink-500">{sub}</span>}
+      {sub && <span className="mt-0.5 text-xs text-ink-500">{sub}</span>}
     </>
   );
   const box = "card flex min-w-[130px] flex-1 flex-col px-4 py-3 leading-tight";

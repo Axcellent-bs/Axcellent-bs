@@ -106,7 +106,7 @@ export default function PlanningQuestions({ onCount }: { onCount?: (n: number) =
                   <button className="btn-primary text-xs" disabled={!humanTokenSet || !text.trim() || busy !== null} onClick={() => send(q)}>
                     {busy === q.question_id ? "보내는 중…" : "기획에 답 보내기"}
                   </button>
-                  <span className="text-[11px] text-ink-500">{text.length}/1000자 · 보낸 답은 고칠 수 없습니다</span>
+                  <span className="text-xs text-ink-500">{text.length}/1000자 · 보낸 답은 고칠 수 없습니다</span>
                 </div>
               </li>
             );

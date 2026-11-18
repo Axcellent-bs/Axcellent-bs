@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Bars, Stat } from "@/components/admin/bits";
 import { ChartWithTable, TableView } from "@/components/charts";
-import { Chip, Empty, ErrorBox, Panel, TONE, Waiting, useResource } from "@/components/finance/bits";
+import { Chip, Empty, ErrorBox, Panel, Skeleton, TONE, useResource } from "@/components/finance/bits";
 import { Link } from "@/lib/nav";
 import { shortDateTime } from "@/lib/format";
 import { api } from "@/lib/api";
@@ -11,7 +11,7 @@ import { CHANGE_STATUS_KO, DECLINE_REASON_KO, TOPIC_KO, ko, support, type Change
 
 function Surge({ tick }: { tick: number }) {
   const res = useResource("inquiry-surge", () => support.inquirySurge(), tick);
-  if (!res.env) return res.error ? <ErrorBox message={`문의 급증을 받지 못했습니다. ${res.error}`} onRetry={res.reload} /> : <Waiting />;
+  if (!res.env) return res.error ? <ErrorBox message={`문의 급증을 받지 못했습니다. ${res.error}`} onRetry={res.reload} /> : <Skeleton label="문의 급증을 불러오는 중…" stats={3} lines={4} />;
   const s = res.env.data;
   const bars: Record<string, number> = {};
   s.surges.forEach((x) => { bars[ko(TOPIC_KO, x.topic_code)] = x.count; });
@@ -163,7 +163,7 @@ function Proposal({ x, onChanged }: { x: ChangeProposal; onChanged: () => void }
 
 function Proposals({ tick, onChanged }: { tick: number; onChanged: () => void }) {
   const res = useResource("change-proposals", () => support.changeProposals(), tick);
-  if (!res.env) return res.error ? <ErrorBox message={`변경 요청 제안을 받지 못했습니다. ${res.error}`} onRetry={res.reload} /> : <Waiting />;
+  if (!res.env) return res.error ? <ErrorBox message={`변경 요청 제안을 받지 못했습니다. ${res.error}`} onRetry={res.reload} /> : <Skeleton label="변경 요청 제안을 불러오는 중…" stats={0} lines={5} />;
   const p = res.env.data;
   return (
     <Panel id="support-proposals" title="변경 요청 제안" meta={res.env.meta}
@@ -196,7 +196,7 @@ function Changes({ tick }: { tick: number }) {
           ))}
         </div>
       }>
-      {!res.env ? (res.error ? <ErrorBox message={`변경 요청을 받지 못했습니다. ${res.error}`} onRetry={res.reload} /> : <Waiting />) : (
+      {!res.env ? (res.error ? <ErrorBox message={`변경 요청을 받지 못했습니다. ${res.error}`} onRetry={res.reload} /> : <Skeleton label="변경 요청을 불러오는 중…" stats={0} lines={5} />) : (
         <>
           {res.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${res.error}`} onRetry={res.reload} /></div>}
           {res.env.data.length === 0 ? <Empty>해당하는 변경 요청이 없습니다.</Empty> : (

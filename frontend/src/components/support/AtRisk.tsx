@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Bars, Stat } from "@/components/admin/bits";
 import { ChartWithTable, TableView } from "@/components/charts";
-import { Chip, Empty, ErrorBox, Panel, RefList, TONE, Waiting, useResource } from "@/components/finance/bits";
+import { Chip, Empty, ErrorBox, Panel, RefList, Skeleton, TONE, useResource } from "@/components/finance/bits";
 import { humanId, shortDateTime } from "@/lib/format";
 import { ACTION_KO, LEVEL_KO, REASON_KO, UNKNOWN, ko, support, type CustomerSignals } from "@/lib/support";
 
@@ -15,7 +15,7 @@ const LevelChip = ({ level }: { level: string }) => {
 
 function Detail({ buyerId, tick }: { buyerId: string; tick: number }) {
   const res = useResource(`signals-${buyerId}`, () => support.signals(buyerId), tick);
-  if (!res.env) return res.error ? <ErrorBox message={`위험 신호를 받지 못했습니다. ${res.error}`} onRetry={res.reload} /> : <Waiting />;
+  if (!res.env) return res.error ? <ErrorBox message={`위험 신호를 받지 못했습니다. ${res.error}`} onRetry={res.reload} /> : <Skeleton label="위험 신호를 불러오는 중…" stats={3} lines={4} />;
   const s = res.env.data;
   const bars: Record<string, number> = {};
   s.reasons.forEach((r) => { bars[ko(REASON_KO, r.code)] = r.points; });
@@ -55,7 +55,7 @@ function Detail({ buyerId, tick }: { buyerId: string; tick: number }) {
 export function AtRisk({ tick, selected, onSelect }: { tick: number; selected: string | null; onSelect: (id: string) => void }) {
   const [min, setMin] = useState<"medium" | "high">("medium");
   const list = useResource(`at-risk-${min}`, () => support.atRisk(min), tick);
-  if (!list.env) return list.error ? <ErrorBox message={`위험 고객 목록을 받지 못했습니다. ${list.error}`} onRetry={list.reload} /> : <Waiting />;
+  if (!list.env) return list.error ? <ErrorBox message={`위험 고객 목록을 받지 못했습니다. ${list.error}`} onRetry={list.reload} /> : <Skeleton label="위험 고객 목록을 불러오는 중…" stats={3} lines={5} />;
   const items: CustomerSignals[] = list.env.data;
   const total = (list.env.meta as { total?: number }).total ?? items.length;
   const highCount = items.filter((c) => c.level === "high").length;

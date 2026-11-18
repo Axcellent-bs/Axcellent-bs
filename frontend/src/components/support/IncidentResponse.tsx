@@ -91,9 +91,9 @@ function Detail({ incident, tick }: { incident: Incident; tick: number }) {
             <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
               {stats.map(([label, value, sub]) => (
                 <div key={label} className="rounded-2xl bg-surface-2 px-3 py-2">
-                  <dt className="text-[11px] text-ink-500">{label}</dt>
+                  <dt className="text-xs text-ink-500">{label}</dt>
                   <dd className="text-base font-semibold tabular-nums">{value}</dd>
-                  <dd className="break-words text-[11px] text-ink-500">{sub}</dd>
+                  <dd className="break-words text-xs text-ink-500">{sub}</dd>
                 </div>
               ))}
             </dl>
@@ -102,17 +102,17 @@ function Detail({ incident, tick }: { incident: Incident; tick: number }) {
             ) : (
               <div className="scroll-thin overflow-x-auto">
                 <table className="w-full min-w-[640px] text-left text-sm">
-                  <thead className="text-[11px] text-ink-500">
+                  <thead className="text-xs text-ink-500">
                     <tr><th className="pb-1 pr-3 font-medium">적용 시각</th><th className="pb-1 pr-3 font-medium">사건 시작 후</th><th className="pb-1 pr-3 font-medium">처리한 내용</th><th className="pb-1 pr-3 font-medium">담당</th><th className="pb-1 font-medium">적용 여부</th></tr>
                   </thead>
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.id} className="border-t border-ink-100 align-top">
-                        <td className="whitespace-nowrap py-2 pr-3 tabular-nums"><b>{secondsOf(r.at)}</b><span className="block text-[11px] text-ink-500">{shortDateTime(r.at)}</span></td>
+                        <td className="whitespace-nowrap py-2 pr-3 tabular-nums"><b>{secondsOf(r.at)}</b><span className="block text-xs text-ink-500">{shortDateTime(r.at)}</span></td>
                         <td className="whitespace-nowrap py-2 pr-3 tabular-nums text-ink-700">{elapsed(incident.opened_at, r.at)}</td>
-                        <td className="py-2 pr-3 text-ink-900">{r.label}<span className="ml-1.5 text-[11px] text-ink-500">{r.source === "step" ? "총괄 AI 단계" : "안전 관문 기록"}</span></td>
+                        <td className="py-2 pr-3 text-ink-900">{r.label}<span className="ml-1.5 text-xs text-ink-500">{r.source === "step" ? "총괄 AI 단계" : "안전 관문 기록"}</span></td>
                         <td className="whitespace-nowrap py-2 pr-3 text-ink-700">{r.who}</td>
-                        <td className="whitespace-nowrap py-2"><Chip label={r.stateLabel} tone={STATE_TONE[r.state]} />{r.grade && <span className="ml-1.5 text-[11px] text-ink-500">{r.grade}등급</span>}</td>
+                        <td className="whitespace-nowrap py-2"><Chip label={r.stateLabel} tone={STATE_TONE[r.state]} />{r.grade && <span className="ml-1.5 text-xs text-ink-500">{r.grade}등급</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -120,7 +120,7 @@ function Detail({ incident, tick }: { incident: Incident; tick: number }) {
               </div>
             )}
             <IncidentCompensationList contextId={incident.context_id} tick={tick} />
-            <p className="text-[11px] text-ink-500">
+            <p className="text-xs text-ink-500">
               적용 시각은 안전 관문이 &quot;실행함&quot;으로 판정한 시각(또는 총괄 AI 단계가 끝난 시각)입니다. 보류·검증 중인 건은 아직 적용 전이라 시각이 요청 시각입니다.
               문의 단위 처리 내용은 <Link href="/console" className="underline">상담 콘솔</Link>의 AI 처리 내력에서 볼 수 있습니다.
             </p>

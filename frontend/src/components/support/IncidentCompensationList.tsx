@@ -25,7 +25,7 @@ export function IncidentCompensationList({ contextId, tick }: { contextId: strin
             ) : (
               <div className="scroll-thin overflow-x-auto">
                 <table className="w-full min-w-[520px] text-left text-sm">
-                  <thead className="text-[11px] text-ink-500">
+                  <thead className="text-xs text-ink-500">
                     <tr><th className="pb-1 pr-3 font-medium">고객</th><th className="pb-1 pr-3 font-medium">쿠폰</th><th className="pb-1 pr-3 font-medium">내용</th><th className="pb-1 font-medium">상태</th></tr>
                   </thead>
                   <tbody>
@@ -55,7 +55,7 @@ export function IncidentCompensationList({ contextId, tick }: { contextId: strin
                 영향 고객 목록에 없는데 보상받은 고객: {incident.outside_buyer_ids.join(", ")}
               </p>
             )}
-            <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-ink-500">
+            <ul className="list-disc space-y-0.5 pl-4 text-xs text-ink-500">
               {list.notes.map((n) => <li key={n}>{n}</li>)}
             </ul>
           </section>

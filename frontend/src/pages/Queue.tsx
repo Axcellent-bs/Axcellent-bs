@@ -102,7 +102,7 @@ export default function QueuePage() {
                               onClick={() => act("retry", async () => { await api.admin.retryRefund(e.claim_id, note); })}>다시 요청</button>
                           )}
                         </div>
-                        <p className="text-[11px] text-ink-500">
+                        <p className="text-xs text-ink-500">
                           종료하면 이 클레임은 큐에서 빠지고 같은 품목은 다시 접수할 수 없습니다. 고객 안내는 상담원이 문의 답변으로 합니다.
                           {expired && " 다시 요청하면 큐에서 ‘처리’를 눌러 안전 장치를 다시 거칩니다."}
                         </p>
@@ -140,7 +140,7 @@ export default function QueuePage() {
             </li>
           ))}
         </ul>
-        <p className="border-t border-ink-100 px-5 py-2 text-[11px] text-ink-500">입고 버튼을 누른 시각이 줄서기 순서가 됩니다. 먼저 누른 건이 앞에 섭니다.</p>
+        <p className="border-t border-ink-100 px-5 py-2 text-xs text-ink-500">입고 버튼을 누른 시각이 줄서기 순서가 됩니다. 먼저 누른 건이 앞에 섭니다.</p>
       </section>
     </div>
   );

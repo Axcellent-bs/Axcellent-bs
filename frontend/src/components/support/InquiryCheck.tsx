@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Stat } from "@/components/admin/bits";
 import { TableView } from "@/components/charts";
-import { Chip, Empty, ErrorBox, Panel, RefList, TONE, Waiting, useResource } from "@/components/finance/bits";
+import { Chip, Empty, ErrorBox, Panel, RefList, Skeleton, TONE, useResource } from "@/components/finance/bits";
 import { api } from "@/lib/api";
 import { krw } from "@/lib/finance";
 import { humanId, shortDateTime } from "@/lib/format";
@@ -38,7 +38,7 @@ function Compensation({ s }: { s: CompensationSuggestion }) {
           ["늦은 날수", f.days_late == null ? UNKNOWN : `${f.days_late}일`],
         ]} />
       )}
-      {s.notes.map((n, i) => <p key={i} className="rounded-md bg-ink-100 px-2 py-1 text-[11px] text-ink-500">{n}</p>)}
+      {s.notes.map((n, i) => <p key={i} className="rounded-md bg-ink-100 px-2 py-1 text-xs text-ink-500">{n}</p>)}
     </div>
   );
 }
@@ -69,7 +69,7 @@ function Payment({ d }: { d: PaymentDiagnosis }) {
           <RefList refs={[f.order_id, ...f.attempts.map((a) => a.payment_id)]} />
         </>
       )}
-      {d.notes.map((n, i) => <p key={i} className="rounded-md bg-ink-100 px-2 py-1 text-[11px] text-ink-500">{n}</p>)}
+      {d.notes.map((n, i) => <p key={i} className="rounded-md bg-ink-100 px-2 py-1 text-xs text-ink-500">{n}</p>)}
     </div>
   );
 }
@@ -79,7 +79,7 @@ function Result<T>({ id, title, hint, res, children }: {
 }) {
   return (
     <Panel id={id} title={title} hint={hint} meta={res.env?.meta}>
-      {!res.env ? (res.error ? <ErrorBox message={res.error} onRetry={res.reload} /> : <Waiting />) : (
+      {!res.env ? (res.error ? <ErrorBox message={res.error} onRetry={res.reload} /> : <Skeleton label="문의 진단을 불러오는 중…" stats={3} lines={4} />) : (
         <>
           {res.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${res.error}`} onRetry={res.reload} /></div>}
           {children(res.env.data)}
