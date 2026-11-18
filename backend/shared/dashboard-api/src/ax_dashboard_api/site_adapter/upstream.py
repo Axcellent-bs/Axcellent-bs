@@ -1,7 +1,8 @@
 """고객사 자기 API 호출: 인증 헤더, 커서로 끝까지 읽기, 오류를 shop-api 오류 모양으로 바꾸기.
 
 - 주소: 회사 연결 파일의 `adapter.base_url` (`kind=adapter`가 아니면 503 `NOT_CONFIGURED`)
-- 인증: `.env`의 `AX_SITE_API_TOKEN`을 짝 파일의 `auth_header`·`auth_scheme`으로 보낸다.
+- 인증: 회사 연결 화면에서 넣은 키(변환기 폴더의 `token` 파일,
+  없으면 `.env`의 `AX_SITE_API_TOKEN`)를 짝 파일의 `auth_header`·`auth_scheme`으로 보낸다.
   키 값은 응답·로그·오류 문구에 넣지 않는다.
 - 페이지: `paging.next_field`가 빌 때까지, 또는 `AX_SITE_ADAPTER_MAX_PAGES`(기본 50)까지 읽는다.
   상한에 닿으면 `truncated=True`.
@@ -17,9 +18,10 @@ from typing import Any
 import httpx
 
 from ax_agent_template.company_connection import read_connection
-from ax_dashboard_api.site_adapter.mapping import ResourceMap, SiteMapping
+from ax_dashboard_api.site_adapter.mapping import Paging, ResourceMap, SiteMapping, adapter_dir
 
 TOKEN_ENV = "AX_SITE_API_TOKEN"
+TOKEN_FILE = "token"
 MAX_PAGES_ENV = "AX_SITE_ADAPTER_MAX_PAGES"
 DEFAULT_MAX_PAGES = 50
 TIMEOUT = 10.0
@@ -66,11 +68,34 @@ def _max_pages() -> int:
         return DEFAULT_MAX_PAGES
 
 
-def _headers(m: SiteMapping) -> dict[str, str]:
-    token = os.getenv(TOKEN_ENV, "").strip()
+def saved_token() -> str:
+    """고객사 API 키: 변환기 폴더의 `token` 파일, 없으면 `AX_SITE_API_TOKEN`. 없으면 ""."""
+    try:
+        token = (adapter_dir() / TOKEN_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        token = ""
+    return token or os.getenv(TOKEN_ENV, "").strip()
+
+
+def save_token(token: str) -> None:
+    """키를 변환기 폴더에만 쓴다(주인만 읽게). 응답·로그에는 넣지 않는다."""
+    folder = adapter_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / TOKEN_FILE
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(token, encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def auth_headers(header: str, scheme: str, token: str) -> dict[str, str]:
     if not token:
         return {}
-    return {m.auth_header: f"{m.auth_scheme} {token}".strip()}
+    return {header: f"{scheme} {token}".strip()}
+
+
+def _headers(m: SiteMapping) -> dict[str, str]:
+    return auth_headers(m.auth_header, m.auth_scheme, saved_token())
 
 
 def _client() -> httpx.AsyncClient:
@@ -135,6 +160,33 @@ async def _fetch(
                 return rows, False
             params = {**params, paging.cursor_param: cursor}
     return rows, True
+
+
+async def first_page(url: str, paging: Paging, headers: dict[str, str]) -> list[dict[str, Any]]:
+    """한 쪽만 읽는다(설정 화면의 둘러보기·저장 전 확인). 캐시하지 않는다."""
+    async with _client() as client:
+        body = await _get(client, url, {paging.limit_param: paging.limit}, headers)
+    items = body.get(paging.items_field) if isinstance(body, dict) else None
+    if not isinstance(items, list):
+        raise UpstreamError(502, "MAPPING_BROKEN", f"응답에 {paging.items_field} 목록이 없어요")
+    return [r for r in items if isinstance(r, dict)]
+
+
+async def get_paths(base: str, headers: dict[str, str]) -> list[str]:
+    """고객사 `openapi.json`에서 GET으로 읽는 목록 경로(`{}` 없는 것). 없으면 빈 목록."""
+    try:
+        async with _client() as client:
+            body = await _get(client, base + "/openapi.json", {}, headers)
+    except UpstreamError:
+        return []
+    paths = body.get("paths") if isinstance(body, dict) else None
+    if not isinstance(paths, dict):
+        return []
+    return sorted(
+        p
+        for p, ops in paths.items()
+        if isinstance(p, str) and "{" not in p and isinstance(ops, dict) and "get" in ops
+    )
 
 
 async def ping() -> bool:

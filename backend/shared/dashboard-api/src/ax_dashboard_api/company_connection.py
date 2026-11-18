@@ -32,6 +32,9 @@ from ax_agent_template import company_connection as store
 from ax_agent_template.config import agent_url
 from ax_dashboard_api.auth import require_human_for_writes
 from ax_dashboard_api.envelope import ApiError, ok
+from ax_dashboard_api.site_adapter import setup as adapter_setup
+from ax_dashboard_api.site_adapter import upstream as adapter_upstream
+from ax_dashboard_api.site_adapter.mapping import MappingError, load_mapping
 
 TIMEOUT_SECONDS = 5.0
 # 테스트에서 httpx.MockTransport로 바꿔 끼운다
@@ -185,6 +188,22 @@ async def _checked(url: str) -> list[Check]:
     return checks
 
 
+async def _adapter_checked(base: str) -> None:
+    """다른 형식 API: 저장한 짝으로 고객사 첫 쪽을 바꿔 본다. 안 되면 422."""
+    try:
+        mapping = load_mapping()
+    except MappingError as exc:
+        raise ApiError(422, "MAPPING_BROKEN", str(exc)) from exc
+    if mapping is None:
+        raise ApiError(422, "CONNECTION_CHECK_FAILED", "사이트 짝이 없어 켤 수 없다")
+    try:
+        await adapter_setup.verify(_valid(base), mapping, adapter_upstream.saved_token())
+    except ApiError as exc:
+        reason = f"연결 확인에 실패했다 ({exc.message})"
+        raise ApiError(422, "CONNECTION_CHECK_FAILED", reason) from exc
+    adapter_upstream.clear_cache()
+
+
 def _human(request: Request) -> str:
     return getattr(request.state, "human", "unknown")
 
@@ -226,15 +245,23 @@ async def switch_mode(body: ModeIn, request: Request) -> dict:
     found = store.read_connection()
     if found is None:
         raise ApiError(409, "NO_CONNECTION", "저장한 연결이 없어 모드를 바꿀 수 없다")
+    # 종류(shop-api 규격·다른 형식 API)와 변환기 주소는 그대로 둔다
+    keep = {"kind": found.kind, "adapter": found.adapter}
     if body.mode == "connected":
-        await _checked(_valid(found.shop_api_url))
-        store.save_connection(found.shop_api_url, verified_at=_now(), updated_by=_human(request))
+        if found.kind == "adapter" and found.adapter:
+            await _adapter_checked(found.adapter["base_url"])
+        else:
+            await _checked(_valid(found.shop_api_url))
+        store.save_connection(
+            found.shop_api_url, verified_at=_now(), updated_by=_human(request), **keep
+        )
     else:
         store.save_connection(
             found.shop_api_url,
             verified_at=found.verified_at,
             updated_by=_human(request),
             enabled=False,
+            **keep,
         )
     logger.info("회사 연결 모드: %s (%s, by %s)", body.mode, found.shop_api_url, _human(request))
     return ok(_state())
