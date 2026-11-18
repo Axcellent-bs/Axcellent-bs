@@ -28,3 +28,11 @@ def adapter_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     shutil.copy(FIXTURES / "nubi_mapping.json", folder / "mapping.json")
     monkeypatch.setenv("AX_SITE_ADAPTER_DIR", str(folder))
     return folder
+
+
+@pytest.fixture(autouse=True)
+def _fresh_upstream_cache() -> None:
+    """시험마다 고객사 응답 캐시를 비운다 (녹화 transport를 시험마다 바꾼다)."""
+    from ax_dashboard_api.site_adapter import upstream
+
+    upstream.clear_cache()

@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 MAPPING_DIR_ENV = "AX_SITE_ADAPTER_DIR"
 DEFAULT_DIR = Path(__file__).resolve().parents[5] / ".data" / "site_adapter"
@@ -45,6 +45,21 @@ class Paging(BaseModel):
 class ResourceMap(BaseModel):
     model_config = ConfigDict(extra="forbid")
     path: str
+
+    @field_validator("path")
+    @classmethod
+    def _local_path(cls, value: str) -> str:
+        """고객사 주소 뒤에 붙는 경로만 받는다. 다른 호스트로 키가 새지 않게 한다."""
+        bad = (
+            not value.startswith("/")
+            or value.startswith("//")
+            or any(c in value for c in "@?#\\")
+            or "://" in value
+        )
+        if bad:
+            raise ValueError("path는 /로 시작하는 경로만 쓸 수 있어요(@ ? # // 금지)")
+        return value
+
     paging: Paging = Paging()
     fields: dict[str, str]
     values: dict[str, dict[str, str]] = {}

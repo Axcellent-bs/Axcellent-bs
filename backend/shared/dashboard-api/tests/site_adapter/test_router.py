@@ -83,8 +83,52 @@ def test_products_categories_users(client: TestClient) -> None:
 def test_sales_summary(client: TestClient) -> None:
     body = client.get(f"{BASE}/api/shop/sales-summary?group_by=product").json()
     assert body["data"]["rows"] == [
-        {"product_id": "JP-OSA-4D", "gross_qty": 5, "gross_amount": 4388000}
+        {"product_id": "JP-OSA-4D", "gross_qty": 3, "gross_amount": 2500000}
     ]
+
+
+def test_sales_summary_uses_from_to_window(client: TestClient) -> None:
+    q = "from=2026-11-12T00:00:00Z&to=2026-11-20T00:00:00Z&group_by=product"
+    assert client.get(f"{BASE}/api/shop/sales-summary?{q}").json()["data"]["rows"] == []
+
+
+def test_sales_export_shape(client: TestClient) -> None:
+    from ax_contracts.data_access.shop_sales import ShopSalesExportResult
+
+    body = client.get(f"{BASE}/api/shop/sales-export?limit=2").json()["data"]
+    parsed = ShopSalesExportResult.model_validate(body)
+    assert len(parsed.orders) == 2 and parsed.has_more is True and parsed.next_cursor == "2"
+
+
+def test_customers_export_shape(client: TestClient) -> None:
+    from ax_contracts.data_access.shop_customers import ShopCustomersExportResult
+
+    body = client.get(f"{BASE}/api/shop/customers-export").json()["data"]
+    parsed = ShopCustomersExportResult.model_validate(body)
+    assert [c.buyer_id for c in parsed.customers] == ["usr_01", "usr_02"] and not parsed.has_more
+
+
+def test_metric_series_echoes_metric(client: TestClient) -> None:
+    from ax_contracts.data_access.shop_metric_series import ShopMetricSeriesResult
+
+    body = client.get(f"{BASE}/api/shop/metric-series?metric=order_count&bucket=5m").json()["data"]
+    assert ShopMetricSeriesResult.model_validate(body).points == []
+
+
+def test_truncated_upstream_fails_instead_of_partial(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(up.MAX_PAGES_ENV, "1")
+    for path in [
+        "/api/shop/orders",
+        "/api/shop/orders/NB-NOPE",
+        "/api/shop/users",
+        "/api/shop/sales-summary",
+    ]:
+        resp = client.get(BASE + path)
+        assert resp.status_code == 503 and resp.json()["error"]["code"] == "UPSTREAM_TRUNCATED", (
+            path
+        )
 
 
 def test_health(client: TestClient) -> None:
@@ -94,7 +138,6 @@ def test_health(client: TestClient) -> None:
 @pytest.mark.parametrize(
     ("path", "empty"),
     [
-        ("/api/shop/metric-series?metric=x", {"points": []}),
         ("/api/shop/failed-orders", {"orders": [], "truncated": False}),
         ("/api/shop/orders/attributed", {"orders": [], "truncated": False}),
         ("/api/shop/sellers", []),

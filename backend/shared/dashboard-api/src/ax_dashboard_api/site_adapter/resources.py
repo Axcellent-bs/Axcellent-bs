@@ -45,10 +45,12 @@ def to_order(row: dict[str, Any], m: ResourceMap) -> dict[str, Any]:
     total = _int(get("total_amount"))
     paid = _int(get("paid_amount"))
     created_at = get("created_at")
+    updated_at = get("updated_at") if "updated_at" in m.fields else created_at
     return {
         "order_id": str(get("order_id")),
         "status": get("status"),
         "created_at": created_at,
+        "updated_at": updated_at,
         "buyer_id": get("buyer_id"),
         "total_amount": total,
         "refunded_amount": 0,
@@ -89,12 +91,18 @@ def users_from(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def sales_summary(orders: list[dict[str, Any]], group_by: str) -> list[dict[str, Any]]:
-    """상품별 판매 수량·금액 합. 취소 주문은 뺀다. `group_by`는 지금 `product`만."""
+    """상품별 판매 수량·금액 합. 결제된 주문(status paid + 성공한 결제)만 센다.
+
+    고객지원 `_is_paid`와 같은 기준이다.
+
+    `group_by`는 지금 `product`만.
+    """
     if group_by != "product":
         raise ValueError("group_by는 product만 받아요")
     rows: dict[str, dict[str, Any]] = {}
     for order in orders:
-        if order["status"] == "cancelled":
+        paid = any(p["status"] == "succeeded" for p in order["payments"])
+        if order["status"] != "paid" or not paid:
             continue
         for item in order["items"]:
             pid = item["product_id"]
@@ -102,3 +110,41 @@ def sales_summary(orders: list[dict[str, Any]], group_by: str) -> list[dict[str,
             row["gross_qty"] += item["qty"]
             row["gross_amount"] += order["total_amount"]
     return [rows[k] for k in sorted(rows)]
+
+
+def _buyer(order: dict[str, Any]) -> str:
+    """판매 내보내기는 buyer_id가 필수다. 비회원 주문은 주문 번호로 만든 이름표를 쓴다."""
+    return order["buyer_id"] or f"guest-{order['order_id']}"
+
+
+def to_sales_row(order: dict[str, Any]) -> dict[str, Any]:
+    """판매 기록 내보내기 한 줄 (`ax_contracts.data_access.shop_sales.SalesOrderRow`)."""
+    paid = any(p["status"] == "succeeded" for p in order["payments"])
+    return {
+        "order_id": order["order_id"],
+        "buyer_id": _buyer(order),
+        "status": order["status"],
+        "created_at": order["created_at"],
+        "updated_at": order["updated_at"],
+        "items_amount": order["total_amount"],
+        "payment_status": "succeeded" if paid else None,
+        "lines": [
+            {"product_id": i["product_id"], "qty": i["qty"], "unit_price": i["unit_price"]}
+            for i in order["items"]
+        ],
+    }
+
+
+def customers_from(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """고객 내보내기 (`CustomerRow`). 가입 시각이 없는 사이트라 첫 주문 시각을 joined_at으로."""
+    seen: dict[str, dict[str, Any]] = {}
+    for o in orders:
+        bid = o.get("buyer_id")
+        if not bid:
+            continue
+        row = seen.setdefault(
+            bid, {"buyer_id": bid, "joined_at": o["created_at"], "updated_at": o["updated_at"]}
+        )
+        row["joined_at"] = min(row["joined_at"], o["created_at"])
+        row["updated_at"] = max(row["updated_at"], o["updated_at"])
+    return sorted(seen.values(), key=lambda c: (c["updated_at"], c["buyer_id"]))

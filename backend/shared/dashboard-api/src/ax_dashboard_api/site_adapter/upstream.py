@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -22,6 +23,11 @@ TOKEN_ENV = "AX_SITE_API_TOKEN"
 MAX_PAGES_ENV = "AX_SITE_ADAPTER_MAX_PAGES"
 DEFAULT_MAX_PAGES = 50
 TIMEOUT = 10.0
+# 같은 자원을 짧은 시간에 여러 번 받지 않는다(호출하는 쪽이 쪽마다 다시 부른다).
+# 그동안 쪽 위치도 고정된다
+CACHE_SECONDS_ENV = "AX_SITE_ADAPTER_CACHE_SECONDS"
+DEFAULT_CACHE_SECONDS = 30.0
+_cache: dict[tuple[str, str | None], tuple[float, list[dict[str, Any]], bool]] = {}
 # 시험이 httpx.MockTransport로 바꾼다 (회사 연결 라우트와 같은 방식)
 TRANSPORT: httpx.AsyncBaseTransport | None = None
 
@@ -35,9 +41,20 @@ class UpstreamError(Exception):
         self.code = code
 
 
+def clear_cache() -> None:
+    _cache.clear()
+
+
+def _cache_seconds() -> float:
+    try:
+        return max(0.0, float(os.getenv(CACHE_SECONDS_ENV, "") or DEFAULT_CACHE_SECONDS))
+    except ValueError:
+        return DEFAULT_CACHE_SECONDS
+
+
 def base_url() -> str:
     found = read_connection()
-    if not found or found.kind != "adapter" or not found.adapter:
+    if not found or not found.enabled or found.kind != "adapter" or not found.adapter:
         raise UpstreamError(503, "NOT_CONFIGURED", "다른 형식 API로 연결돼 있지 않아요")
     return found.adapter["base_url"]
 
@@ -87,6 +104,18 @@ async def fetch_all(
 ) -> tuple[list[dict[str, Any]], bool]:
     """자원 하나를 끝까지 읽는다. (원본 행들, 최대 쪽 수에서 멈췄는지)."""
     url = base_url() + res.path
+    key = (url, since)
+    hit = _cache.get(key)
+    if hit and time.monotonic() - hit[0] < _cache_seconds():
+        return list(hit[1]), hit[2]
+    rows, truncated = await _fetch(m, res, url, since)
+    _cache[key] = (time.monotonic(), rows, truncated)
+    return list(rows), truncated
+
+
+async def _fetch(
+    m: SiteMapping, res: ResourceMap, url: str, since: str | None
+) -> tuple[list[dict[str, Any]], bool]:
     paging = res.paging
     params: dict[str, Any] = {paging.limit_param: paging.limit}
     if since and paging.since_param:

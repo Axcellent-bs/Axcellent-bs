@@ -101,10 +101,40 @@ def test_users_skip_guest_orders(
     ]
 
 
-def test_sales_summary_skips_cancelled(
+def test_sales_summary_counts_paid_only(
     maps: m.SiteMapping, bookings: list[dict], tours: list[dict]
 ) -> None:
     orders = [r.to_order(b, maps.resources["orders"]) for b in bookings]
     assert r.sales_summary(orders, "product") == [
-        {"product_id": "JP-OSA-4D", "gross_qty": 5, "gross_amount": 4388000},
+        {"product_id": "JP-OSA-4D", "gross_qty": 3, "gross_amount": 2500000},
     ]
+
+
+def test_order_has_updated_at(maps: m.SiteMapping, bookings: list[dict], tours: list[dict]) -> None:
+    assert (
+        r.to_order(bookings[0], maps.resources["orders"])["updated_at"]
+        == "2026-11-10T02:00:00.000Z"
+    )
+
+
+def test_sales_row_matches_export_contract(
+    maps: m.SiteMapping, bookings: list[dict], tours: list[dict]
+) -> None:
+    from ax_contracts.data_access.shop_sales import SalesOrderRow
+
+    rows = [r.to_sales_row(r.to_order(b, maps.resources["orders"])) for b in bookings]
+    parsed = [SalesOrderRow.model_validate(x) for x in rows]
+    assert parsed[0].lines[0].product_id == "JP-OSA-4D" and parsed[0].items_amount == 2500000
+    assert parsed[0].payment_status == "succeeded"
+    assert parsed[1].buyer_id == "guest-NB-20261111-0002"
+
+
+def test_customer_rows_match_contract(
+    maps: m.SiteMapping, bookings: list[dict], tours: list[dict]
+) -> None:
+    from ax_contracts.data_access.shop_customers import CustomerRow
+
+    orders = [r.to_order(b, maps.resources["orders"]) for b in bookings]
+    rows = [CustomerRow.model_validate(x) for x in r.customers_from(orders)]
+    assert [c.buyer_id for c in rows] == ["usr_01", "usr_02"]
+    assert rows[0].joined_at.isoformat().startswith("2026-11-10T01:00")

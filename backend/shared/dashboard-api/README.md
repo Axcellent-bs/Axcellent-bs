@@ -215,7 +215,9 @@ AXcellent 규격(shop-api)이 아닌 고객사 자기 API를 AI들이 shop-api�
 - 짝 파일: `<AX_SITE_ADAPTER_DIR>/mapping.json`(기본 `backend/.data/site_adapter/`). 항목 식은
   점 경로·`sum:a,b`·`const:값`. 예시: `tests/site_adapter/fixtures/nubi_mapping.json`(누비투어).
 - 키: `.env`의 `AX_SITE_API_TOKEN`을 짝 파일의 `auth_header`·`auth_scheme`으로 보낸다. 응답·로그에 넣지 않는다.
-- 페이지 상한 `AX_SITE_ADAPTER_MAX_PAGES`(기본 50). 닿으면 `meta.truncated = true`.
+- 페이지 상한 `AX_SITE_ADAPTER_MAX_PAGES`(기본 50). 닿으면 일부만 주지 않고 503 `UPSTREAM_TRUNCATED`.
+- 같은 자원은 `AX_SITE_ADAPTER_CACHE_SECONDS`(기본 30초) 동안 다시 받지 않는다(호출하는 쪽이 쪽마다 다시 부른다).
+- 읽기는 shop-api처럼 토큰 없이 받는다(사내망 전용). 화면 직접 조회(live_views)가 토큰 없이 부르기 때문이다.
 
 | 주소 | 하는 일 |
 | --- | --- |

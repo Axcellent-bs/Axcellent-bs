@@ -14,10 +14,10 @@ import hmac
 import logging
 import os
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header, Query, Request
 
 from ax_agent_template.server import verify_token
 from ax_dashboard_api.auth import bearer
@@ -51,8 +51,12 @@ def _mapping() -> SiteMapping:
     return found
 
 
-async def _rows(resource: Resource, since: str | None = None) -> tuple[list[dict[str, Any]], bool]:
-    """자원을 읽어 shop-api 모양으로 바꾼다. 오류는 shop-api 오류 모양으로."""
+async def _rows(resource: Resource, since: str | None = None) -> list[dict[str, Any]]:
+    """자원을 읽어 shop-api 모양으로 바꾼다. 오류는 shop-api 오류 모양으로.
+
+    고객사 쪽 수가 상한(`AX_SITE_ADAPTER_MAX_PAGES`)에 닿으면 일부만 주지 않고 503
+    `UPSTREAM_TRUNCATED`로 실패한다(빠진 장부·합계를 만들지 않는다).
+    """
     m = _mapping()
     res = m.resources.get(resource)
     if res is None:
@@ -62,20 +66,47 @@ async def _rows(resource: Resource, since: str | None = None) -> tuple[list[dict
     )
     try:
         raw, truncated = await upstream.fetch_all(m, res, since=since)
-        return [convert(r, res) for r in raw], truncated
+        if truncated:
+            raise ApiError(
+                503,
+                "UPSTREAM_TRUNCATED",
+                f"고객사 {resource}가 읽을 수 있는 양보다 많아 일부만 받았어요. 상한을 늘려 주세요",
+            )
+        return [convert(r, res) for r in raw]
     except upstream.UpstreamError as exc:
         raise ApiError(exc.status, exc.code, str(exc)) from exc
     except resources.MappingBroken as exc:
         raise ApiError(502, "MAPPING_BROKEN", str(exc)) from exc
 
 
-def _at(value: str | None) -> datetime | None:
+def _at(value: str | None, *, upstream_value: bool = False) -> datetime | None:
+    """ISO 시각. 시간대가 없으면 UTC로 본다. 고객사 값이 깨졌으면 502, 요청 값이면 422."""
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        at = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
+        if upstream_value:
+            raise ApiError(502, "MAPPING_BROKEN", f"고객사 시각 형식이 아니에요: {value}") from exc
         raise ApiError(422, "INVALID_REQUEST", f"시각 형식이 아니에요: {value}") from exc
+    return at if at.tzinfo else at.replace(tzinfo=UTC)
+
+
+async def _orders_in(
+    since: str | None, until: str | None, buyer_id: str | None = None
+) -> list[dict[str, Any]]:
+    """`[since, until)` 안에 만든 주문(구매자 지정 가능), 만든 시각 순."""
+    start, end = _at(since), _at(until)
+    picked = []
+    for o in await _rows("orders", since=since):
+        at = _at(o["created_at"], upstream_value=True)
+        if (start and (at is None or at < start)) or (end and (at is None or at >= end)):
+            continue
+        if buyer_id and o["buyer_id"] != buyer_id:
+            continue
+        picked.append(o)
+    picked.sort(key=lambda o: (o["created_at"] or "", o["order_id"]))
+    return picked
 
 
 def _page(items: list[Any], limit: int | None, cursor: str | None) -> tuple[list[Any], str | None]:
@@ -101,21 +132,8 @@ async def orders(
     cursor: str | None = None,
     buyer_id: str | None = None,
 ) -> dict[str, Any]:
-    start, end = _at(since), _at(until)
-    rows, truncated = await _rows("orders", since=since)
-    picked = []
-    for o in rows:
-        at = _at(o["created_at"])
-        if start and (at is None or at < start):
-            continue
-        if end and (at is None or at >= end):
-            continue
-        if buyer_id and o["buyer_id"] != buyer_id:
-            continue
-        picked.append(o)
-    picked.sort(key=lambda o: (o["created_at"] or "", o["order_id"]))
-    chunk, nxt = _page(picked, limit, cursor)
-    return _ok(chunk, next_cursor=nxt, truncated=truncated)
+    chunk, nxt = _page(await _orders_in(since, until, buyer_id), limit, cursor)
+    return _ok(chunk, next_cursor=nxt)
 
 
 @router.get("/api/shop/orders/attributed")
@@ -125,8 +143,7 @@ def attributed() -> dict[str, Any]:  # ③: 유입 꼬리표는 사이트에 없
 
 @router.get("/api/shop/orders/{order_id}")
 async def order_detail(order_id: str) -> dict[str, Any]:
-    rows, _ = await _rows("orders")
-    for o in rows:
+    for o in await _rows("orders"):
         if o["order_id"] == order_id:
             return _ok(o)
     raise ApiError(404, "NOT_FOUND", "주문을 찾지 못했어요")
@@ -134,45 +151,60 @@ async def order_detail(order_id: str) -> dict[str, Any]:
 
 @router.get("/api/shop/products")
 async def products() -> dict[str, Any]:
-    rows, _ = await _rows("products")
+    rows = await _rows("products")
     return _ok(rows, total=len(rows))
 
 
 @router.get("/api/shop/categories")
 async def categories() -> dict[str, Any]:
-    rows, _ = await _rows("products")
-    return _ok(resources.categories_from(rows))
+    return _ok(resources.categories_from(await _rows("products")))
 
 
 @router.get("/api/shop/users")
 async def users() -> dict[str, Any]:
-    rows, _ = await _rows("orders")
-    return _ok(resources.users_from(rows))
+    return _ok(resources.users_from(await _rows("orders")))
 
 
 @router.get("/api/shop/sales-summary")
 async def sales_summary(
-    group_by: str = "product", since: str | None = None, until: str | None = None
+    group_by: str = "product",
+    start: str | None = Query(default=None, alias="from"),
+    end: str | None = Query(default=None, alias="to"),
 ) -> dict[str, Any]:
-    body = await orders(since=since, until=until, limit=MAX_LIMIT)
+    """고객지원은 `from`·`to`(7일씩)로 묻는다. 그 구간 안에 만든 결제된 주문만 센다."""
     try:
-        return _ok({"rows": resources.sales_summary(body["data"], group_by)})
+        return _ok({"rows": resources.sales_summary(await _orders_in(start, end), group_by)})
     except ValueError as exc:
         raise ApiError(422, "INVALID_REQUEST", str(exc)) from exc
 
 
 @router.get("/api/shop/sales-export")
 async def sales_export(limit: int | None = None, cursor: str | None = None) -> dict[str, Any]:
-    rows, truncated = await _rows("orders")
-    chunk, nxt = _page(rows, limit, cursor)
-    return _ok(chunk, next_cursor=nxt, truncated=truncated)
+    """`ShopSalesExportResult` 모양. `(updated_at, order_id)` 순."""
+    rows = sorted(
+        (resources.to_sales_row(o) for o in await _rows("orders")),
+        key=lambda r: (r["updated_at"] or "", r["order_id"]),
+    )
+    return _ok(_export("orders", rows, limit, cursor))
 
 
 @router.get("/api/shop/customers-export")
 async def customers_export(limit: int | None = None, cursor: str | None = None) -> dict[str, Any]:
-    rows, _ = await _rows("orders")
-    chunk, nxt = _page(resources.users_from(rows), limit, cursor)
-    return _ok(chunk, next_cursor=nxt)
+    """`ShopCustomersExportResult` 모양. 가입 시각이 없는 사이트라 첫 주문 시각을 쓴다."""
+    rows = resources.customers_from(await _rows("orders"))
+    return _ok(_export("customers", rows, limit, cursor))
+
+
+def _export(
+    name: str, rows: list[dict[str, Any]], limit: int | None, cursor: str | None
+) -> dict[str, Any]:
+    chunk, nxt = _page(rows, limit or 500, cursor)
+    return {
+        name: chunk,
+        "next_cursor": nxt or cursor,
+        "has_more": nxt is not None,
+        "collected_at": datetime.now(UTC).isoformat(),
+    }
 
 
 # ---------------------------------------------------------------- ③ 사이트에 없는 자료
@@ -211,8 +243,9 @@ for _path in _EMPTY_OBJECTS:
 
 
 @router.get("/api/shop/metric-series")
-def metric_series() -> dict[str, Any]:
-    return _ok({"points": []})
+def metric_series(metric: str = "order_count", bucket: str = "5m") -> dict[str, Any]:
+    """`ShopMetricSeriesResult` 모양: 물은 지표 그대로, 점은 없음."""
+    return _ok({"metric": metric, "bucket": bucket, "points": [], "truncated": False})
 
 
 @router.get("/api/shop/failed-orders")

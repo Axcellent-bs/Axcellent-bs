@@ -147,3 +147,45 @@ def test_ping(connected: m.SiteMapping, monkeypatch: pytest.MonkeyPatch) -> None
     assert asyncio.run(up.ping()) is True
     _serve(monkeypatch, lambda req: httpx.Response(503))
     assert asyncio.run(up.ping()) is False
+
+
+def test_second_read_uses_cache(connected: m.SiteMapping, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _serve(
+        monkeypatch, lambda req: httpx.Response(200, json={"data": [], "next_cursor": None})
+    )
+    asyncio.run(up.fetch_all(connected, connected.resources["orders"]))
+    asyncio.run(up.fetch_all(connected, connected.resources["orders"]))
+    assert len(seen) == 1
+
+
+def test_disabled_connection_is_not_configured(
+    connected: m.SiteMapping, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "off.json"
+    path.write_text(
+        json.dumps(
+            {
+                "shop_api_url": SITE,
+                "enabled": False,
+                "kind": "adapter",
+                "adapter": {"base_url": SITE},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(cc.CONNECTION_FILE_ENV, str(path))
+    monkeypatch.setattr(cc, "_cache", None)
+    with pytest.raises(up.UpstreamError) as err:
+        asyncio.run(up.fetch_all(connected, connected.resources["orders"]))
+    assert err.value.code == "NOT_CONFIGURED"
+
+
+@pytest.mark.parametrize(
+    "bad", ["@evil.host/x", "//evil.host/x", "api/v1", "/x?y=1", "https://evil/x"]
+)
+def test_mapping_path_must_be_local(adapter_dir: Path, bad: str) -> None:
+    raw = json.loads((adapter_dir / "mapping.json").read_text(encoding="utf-8"))
+    raw["resources"]["orders"]["path"] = bad
+    (adapter_dir / "mapping.json").write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(m.MappingError):
+        m.load_mapping()
