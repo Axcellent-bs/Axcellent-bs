@@ -9,6 +9,9 @@
 | 결제 장애 시연 영상 | mp4(H.264), 30~60초, 15MB 이하, 소리 없이도 이해되게(자막) | `assets/demo/incident.mp4` + 첫 화면 `assets/demo/incident.jpg` | `story.media = { type: "video", src, poster, caption }` |
 | 영상 대신 쓸 화면(GIF·PNG) | 1600px 폭 이하, 2MB 이하 | `assets/demo/incident.png` | `story.media = { type: "image", src, alt, caption }` |
 | 각 AI 화면 캡처 | PNG/JPG, 가상 데이터만 | `assets/demo/` | 필요하면 구역을 추가해 연결(말씀 주세요) |
+| 고객사 마케팅 사례: 게시물 | 이미지(정사각형 권장) 1000px 이하, 가상 계정에서 AI가 만들고 사람이 승인해 올린 게시물만 | `assets/demo/` | `cases.items[].posts[]`의 `img`·`alt`·`caption`·`date` (캣북스, 누비투어 각각) |
+| 고객사 마케팅 사례: 반응 | 도달·좋아요·댓글·저장 등 **실제로 잰 값만**, 잰 날짜 | — | `posts[].metrics = [["도달", "123"], …]`. 못 잰 값은 적지 않는다(0으로 채우지 않는다) |
+| 고객사 마케팅 사례: 요약 한 줄 | 시연 환경 기준, 효과 주장 없이 | — | `cases.items[].summary` |
 | 숫자 출처 | 36초·17건·7건·6명·249,000원·12,000원이 나온 시연 이슈 기록 번호와 날짜 | 이 문서 아래 표 | `story.statsSource` |
 | 문구 수정안 | 2·3쪽(A2A·장애 대응) 원고, 단계별 문장 | — | `vision`, `a2a`, `story.steps` |
 | 브로셔 PDF 최종본 | PDF | `assets/AXcellent_홍보브로셔.pdf` | `links.brochureUrl` |

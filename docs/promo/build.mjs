@@ -140,6 +140,21 @@ const approval = `
   </div>
 </section>`;
 
+
+const casesPost = (p) => `<li class="post"><img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy"><div class="post-b">${has(p.date) ? `<span class="post-d">${esc(p.date)}</span>` : ""}${has(p.caption) ? `<p>${esc(p.caption)}</p>` : ""}${(p.metrics || []).length ? `<dl class="metrics">${p.metrics.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>` : ""}</div></li>`;
+const casesItems = C.cases.items.filter((it) => C.cases.showEmpty || (it.posts && it.posts.length));
+const cases = casesItems.length === 0 ? "" : `
+<section class="sec sec-light" id="cases">
+  <div class="wrap">
+    <p class="pill reveal">${esc(C.cases.kicker)}</p>
+    <h2 class="h2 ink reveal">${esc(C.cases.title[0])}<br><span class="brand">${esc(C.cases.title[1])}</span></h2>
+    <p class="cases-lead reveal">${esc(C.cases.lead)}</p>
+    <ol class="loop reveal">${C.cases.loop.map((s, i) => `<li class="loop-step"><span class="ln">${i + 1}</span><b>${esc(s.label)}</b><span>${esc(s.body)}</span>${has(s.note) ? `<em>${esc(s.note)}</em>` : ""}</li>`).join("")}</ol>
+    <div class="case-cards">${casesItems.map((it) => `<article class="case reveal"><header><h3>${esc(it.name)}</h3><p class="badges">${it.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p></header>${has(it.summary) ? `<p class="case-sum">${esc(it.summary)}</p>` : ""}${it.posts && it.posts.length ? `<ul class="posts">${it.posts.map(casesPost).join("")}</ul>` : `<div class="case-empty"><span>${esc(C.cases.emptyText)}</span></div>`}</article>`).join("")}</div>
+    <p class="fine dark reveal">${esc(C.cases.note)}</p>
+  </div>
+</section>`;
+
 const benefits = `
 <section class="sec sec-dark" id="benefits">
   <div class="wrap">
@@ -206,7 +221,7 @@ const html = `<!doctype html>
 <a class="skip" href="#vision">본문으로 건너뛰기</a>
 ${header}
 <main>
-${hero}${vision}${team}${story}${a2a}${approval}${benefits}${customers}${cta}
+${hero}${vision}${team}${story}${a2a}${cases}${approval}${benefits}${customers}${cta}
 </main>
 ${footer}
 <script src="app.js" defer></script>
