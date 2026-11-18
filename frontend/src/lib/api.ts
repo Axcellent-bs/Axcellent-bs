@@ -4,6 +4,7 @@ import type { ChangeProposalSent, DeclineReason, IdeaArea, IdeaDigestResult, Ide
 import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, FeedbackItem, FeedbackOverview, FeedbackStatus, Health, Kpi, Me, PurgeReport, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
 
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
+import { TIMEOUT_MESSAGE, copyShared, isShareableGet, isTimeoutError, shareInflight, timeoutSignal } from "./requestShare";
 
 // 상담원 화면 → dashboard-api. 경로 목록은 README의 API 표 참고.
 const BASE = DASHBOARD_API_URL;
@@ -39,29 +40,49 @@ export const writeAuth = (method?: string, path = ""): Record<string, string> =>
     : {};
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...writeAuth(init?.method, path), ...(init?.headers ?? {}) },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    let body: unknown;
+  // 읽기(GET)는 같은 주소가 오는 중이면 함께 받고 30초 안에 답이 없으면 끊는다(requestShare.ts). 쓰기는 그대로 한 번만 보낸다
+  const shareable = isShareableGet(init);
+  const run = async (): Promise<T> => {
     try {
-      body = await res.json();
-    } catch {
-      /* body was not JSON */
+      const res = await fetch(`${BASE}${path}`, {
+        ...init,
+        headers: { "Content-Type": "application/json", ...writeAuth(init?.method, path), ...(init?.headers ?? {}) },
+        cache: "no-store",
+        ...(shareable ? { signal: timeoutSignal() } : {}),
+      });
+      if (!res.ok) {
+        let body: unknown;
+        try {
+          body = await res.json();
+        } catch {
+          /* body was not JSON */
+        }
+        throw toError(body, res.status);
+      }
+      return res.status === 204 ? (undefined as T) : unwrap<T>(await res.json());
+    } catch (e) {
+      throw isTimeoutError(e) ? new ApiError(TIMEOUT_MESSAGE, 408) : e;
     }
-    throw toError(body, res.status);
-  }
-  return res.status === 204 ? (undefined as T) : unwrap<T>(await res.json());
+  };
+  return shareable ? copyShared(await shareInflight(`${BASE}${path}`, run)) : run();
 }
 
 /** `{data, meta}` 그대로 받는다 (meta가 필요한 목록용). 실패 처리는 request와 같다 */
 async function requestEnvelope<T, M>(path: string): Promise<{ data: T; meta: M }> {
-  const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
-  const body: unknown = await res.json().catch(() => undefined);
-  if (!res.ok) throw toError(body, res.status);
-  return body as { data: T; meta: M };
+  const run = async (): Promise<{ data: T; meta: M }> => {
+    try {
+      const res = await fetch(`${BASE}${path}`, { cache: "no-store", signal: timeoutSignal() });
+      const body: unknown = await res.json().catch((e) => {
+        if (isTimeoutError(e)) throw e;
+        return undefined;
+      });
+      if (!res.ok) throw toError(body, res.status);
+      return body as { data: T; meta: M };
+    } catch (e) {
+      throw isTimeoutError(e) ? new ApiError(TIMEOUT_MESSAGE, 408) : e;
+    }
+  };
+  return copyShared(await shareInflight(`env:${BASE}${path}`, run));
 }
 
 /** 쓰기인데 `{data, meta}`를 그대로 받는다 (판매자 정산처럼 meta에 수집 시각이 있는 응답) */
