@@ -37,6 +37,17 @@
     }, { rootMargin: "-40% 0px -55% 0px", threshold: 0 });
     Object.keys(links).forEach(function (id) { var el = document.getElementById(id); if (el) spy.observe(el); });
   }
+  // 첫 화면 밖 배경 사진은 가까이 왔을 때 불러온다(스크립트가 꺼져 있으면 noscript 규칙으로 바로 나온다)
+  var bgs = document.querySelectorAll("[data-bg]");
+  var showBg = function (el) { el.style.setProperty("--img", "url(" + el.getAttribute("data-bg") + ")"); };
+  if ("IntersectionObserver" in window) {
+    var bgio = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) { showBg(en.target); bgio.unobserve(en.target); } });
+    }, { rootMargin: "600px 0px" });
+    bgs.forEach(function (el) { bgio.observe(el); });
+  } else {
+    bgs.forEach(showBg);
+  }
   var items = document.querySelectorAll(".reveal");
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (!("IntersectionObserver" in window) || reduce) {
