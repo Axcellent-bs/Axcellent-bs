@@ -168,6 +168,14 @@ CREATE TABLE IF NOT EXISTS brief_sns_handoffs (
     payload     TEXT NOT NULL
 );
 """
+_AUTO_HANDOFF_SCHEMA = """
+CREATE TABLE IF NOT EXISTS brief_auto_handoff (
+    proposal_id TEXT PRIMARY KEY,
+    attempts    INTEGER NOT NULL,
+    last_at     TEXT NOT NULL,
+    last_reason TEXT
+);
+"""
 _log = logging.getLogger(__name__)
 
 
@@ -186,6 +194,7 @@ class BriefStore:
             with self._lock, self._conn:
                 self._conn.execute(_SCHEMA)
                 self._conn.execute(_HANDOFF_SCHEMA)
+                self._conn.execute(_AUTO_HANDOFF_SCHEMA)
         except sqlite3.Error as error:
             raise BriefStorageError(
                 f"기획안 저장소를 열 수 없다: {type(error).__name__}"
@@ -274,6 +283,60 @@ class BriefStore:
             return SnsHandoffRecord.model_validate_json(row[0])
         except ValidationError:  # 읽을 수 없는 줄은 없는 것으로 본다(다시 넘기면 덮어쓴다)
             return None
+
+    # --- 자동 넘김(brief_auto_handoff.py) ---------------------------------------------
+
+    def pending_handoff_ids(self, limit: int) -> list[str]:
+        """아직 넘기지 못한 기획안 번호(넘김 기록이 없거나 `failed`), 받은 순서대로."""
+        try:
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT b.proposal_id FROM campaign_briefs b"
+                    " LEFT JOIN brief_sns_handoffs h ON h.proposal_id = b.proposal_id"
+                    " WHERE h.proposal_id IS NULL OR h.status != 'handed'"
+                    " ORDER BY b.seq LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        except sqlite3.Error as error:
+            raise BriefStorageError(
+                f"넘길 기획안을 읽을 수 없다: {type(error).__name__}"
+            ) from error
+        return [r[0] for r in rows]
+
+    def auto_attempts(self, proposal_id: str) -> tuple[int, datetime | None]:
+        """자동 넘김 실패 횟수와 마지막 시도 시각. 시도한 적 없으면 (0, None)."""
+        try:
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT attempts, last_at FROM brief_auto_handoff WHERE proposal_id = ?",
+                    (proposal_id,),
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise BriefStorageError(
+                f"자동 넘김 기록을 읽을 수 없다: {type(error).__name__}"
+            ) from error
+        return (0, None) if row is None else (int(row[0]), datetime.fromisoformat(row[1]))
+
+    def record_auto_attempt(self, proposal_id: str, at: datetime, reason: str | None) -> int:
+        """실패한 자동 시도를 센다. 새 횟수를 돌려준다."""
+        try:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT INTO brief_auto_handoff (proposal_id, attempts, last_at, last_reason)"
+                    " VALUES (?, 1, ?, ?) ON CONFLICT(proposal_id) DO UPDATE SET"
+                    " attempts = attempts + 1, last_at = excluded.last_at,"
+                    " last_reason = excluded.last_reason",
+                    (proposal_id, at.isoformat(), reason),
+                )
+                row = self._conn.execute(
+                    "SELECT attempts FROM brief_auto_handoff WHERE proposal_id = ?",
+                    (proposal_id,),
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise BriefStorageError(
+                f"자동 넘김 기록을 저장할 수 없다: {type(error).__name__}"
+            ) from error
+        return int(row[0])
 
     def save_handoff(self, record: SnsHandoffRecord) -> None:
         """기획안당 한 줄. 다시 저장하면 덮어쓴다(실패 기록을 성공으로 바꾸는 경우)."""

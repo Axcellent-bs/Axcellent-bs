@@ -73,6 +73,14 @@
 - 기계판독 표시: 이미지는 XMP(`ai_generated=true`, 생성 모델, 시각, IPTC `trainedAlgorithmicMedia`), 영상은 MP4 메타데이터 태그. 외부 모델이 넣은 SynthID·C2PA는 재저장(이 오버레이 포함)하면 사라질 수 있어 대신하지 않는다. 시행령 제23조의 "기계가 판독할 수 있는 방법"으로 인정되는지(표준 규격 포함)는 변호사 확인 필요.
 - 환경변수: `MARKETING_MEDIA_DIR`(미디어 폴더, 자산 경로는 이 안쪽만), `MARKETING_SNS_DRAFT_DB`(초안 SQLite 파일, 비우면 메모리).
 
+### 기획안 자동 넘김 (`brief_auto_handoff.py`)
+
+받은 기획안(`receive_campaign_brief`)은 저장만 하고 넘기기는 화면 버튼이 불러야 했다. 서버 안 루프가 아직 안 넘긴 기획안(넘김 기록 없음·`failed`)을 찾아 기존 `handoff_brief_to_sns`를 `media_kind=auto`로 부른다(SNS 글 초안 + 미디어 요청 초안, 멱등 `already_handed`).
+
+- 자동은 초안까지다. 미디어 생성(`prepare_brief_media`→`generate_media`, B등급 관문·건당/월 상한·단가표 fail-closed)과 게시(`publish_sns`, C등급 사람 승인)는 부르지 않는다.
+- 실패(`failed`, 가격표 없음 등)는 재시도 간격 뒤 다시 하고 한도(기본 3번)에서 포기한다. 포기해도 화면 버튼으로 넘길 수 있다.
+- 환경변수: `MARKETING_BRIEF_AUTO_HANDOFF`(기본 꺼짐, `1`·`true`·`on`), `MARKETING_BRIEF_AUTO_HANDOFF_POLL_S`(60, 0이면 루프 없음), `..._RETRY_S`(300), `..._MAX_ATTEMPTS`(3). 매 주기 다시 읽는다.
+
 ### 기획안 미디어 만들기 (`prepare_brief_media`, `brief_media.py`)
 
 화면 SNS·미디어 탭의 "미디어 만들기" 버튼이 부른다(dashboard-api `POST /api/dashboard/marketing/briefs/{proposal_id}/media`).
