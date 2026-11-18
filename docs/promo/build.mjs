@@ -151,7 +151,7 @@ function metricsHtml(p) {
   }
   return `<dl class="metrics">${list.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl><p class="measured">잰 날짜 ${esc(p.measuredAt)} · ${esc(p.source)}</p>`;
 }
-const casesPost = (p) => `<li class="post"><img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy"><div class="post-b">${has(p.date) ? `<span class="post-d">${esc(p.date)}</span>` : ""}${has(p.caption) ? `<p>${esc(p.caption)}</p>` : ""}${metricsHtml(p)}</div></li>`;
+const casesPost = (p) => `<li class="post"><img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy"><div class="post-b">${p.aiGenerated ? `<span class="post-ai">AI가 만든 게시물</span>` : ""}${has(p.date) ? `<span class="post-d">${esc(p.date)}</span>` : ""}${has(p.caption) ? `<p>${esc(p.caption)}</p>` : ""}${metricsHtml(p)}${has(p.permalink) ? `<a class="post-ig" href="${esc(p.permalink)}" rel="noopener" target="_blank">인스타에서 보기</a>` : ""}</div></li>`;
 const casesItems = C.cases.items.filter((it) => C.cases.showEmpty || (it.posts && it.posts.length));
 const cases = casesItems.length === 0 ? "" : `
 <section class="sec sec-light" id="cases">
@@ -186,8 +186,8 @@ const customers = `
 </section>`;
 
 const PS = C.posts;
-const postCard = (it) => `<article class="post reveal"><div class="post-media"><video controls preload="metadata" playsinline ${has(it.poster) ? `poster="${esc(it.poster)}"` : ""}><source src="${esc(it.src)}"></video>${it.aiMade ? '<span class="ai-mark">AI가 만든 영상</span>' : ""}</div><h3>${esc(it.title)}</h3>${has(it.customer) ? `<p class="badges"><span class="badge">${esc(it.customer)}</span></p>` : ""}${has(it.caption) ? `<p>${esc(it.caption)}</p>` : ""}${has(it.postUrl) ? `<a class="post-link" href="${esc(it.postUrl)}" rel="noopener" target="_blank">원 게시물 보기</a>` : ""}</article>`;
-const postEmpty = () => `<article class="post post-empty reveal"><div class="post-media"><span>${esc(PS.emptyTitle)}</span></div><h3>홍보 영상 칸</h3><p>영상이 올라오면 이 자리에 나옵니다.</p></article>`;
+const postCard = (it) => `<article class="vpost reveal"><div class="vpost-media"><video controls preload="metadata" playsinline ${has(it.poster) ? `poster="${esc(it.poster)}"` : ""}><source src="${esc(it.src)}"></video>${it.aiMade ? '<span class="ai-mark">AI가 만든 영상</span>' : ""}</div><h3>${esc(it.title)}</h3>${has(it.customer) ? `<p class="badges"><span class="badge">${esc(it.customer)}</span></p>` : ""}${has(it.caption) ? `<p>${esc(it.caption)}</p>` : ""}${has(it.postUrl) ? `<a class="vpost-link" href="${esc(it.postUrl)}" rel="noopener" target="_blank">원 게시물 보기</a>` : ""}</article>`;
+const postEmpty = () => `<article class="vpost vpost-empty reveal"><div class="vpost-media"><span>${esc(PS.emptyTitle)}</span></div><h3>홍보 영상 칸</h3><p>영상이 올라오면 이 자리에 나옵니다.</p></article>`;
 const postList = PS.items.length ? PS.items.map(postCard).join("") : Array.from({ length: PS.emptySlots }, postEmpty).join("");
 
 const showPosts = PS.items.length > 0 || PS.showEmpty === true;
@@ -197,7 +197,7 @@ const posts = !showPosts ? "" : `
     <p class="pill reveal">${esc(PS.kicker)}</p>
     <h2 class="h2 ink reveal">${esc(PS.title[0])}<br><span class="brand">${esc(PS.title[1])}</span></h2>
     <p class="posts-lead reveal">${esc(PS.lead)}</p>
-    <div class="posts">${postList}</div>
+    <div class="vposts">${postList}</div>
     <p class="callout reveal">${esc(PS.note)}</p>
   </div>
 </section>`;

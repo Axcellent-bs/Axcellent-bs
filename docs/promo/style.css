@@ -66,17 +66,17 @@ body { overflow-x: clip; }
 section[id] { scroll-margin-top: 72px; }
 .top-pdf { white-space: nowrap; }
 .posts-lead { margin-top: 14px; max-width: 60ch; color: #4a4a68; }
-.posts { margin-top: 32px; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 24px; }
-.post { background: var(--paper); border-radius: 26px; padding: 16px 16px 24px; min-width: 0; }
-.post-media { position: relative; border-radius: 16px; overflow: hidden; background: #14142e; aspect-ratio: 16 / 9; display: grid; place-items: center; }
-.post-media video { width: 100%; height: 100%; object-fit: cover; display: block; }
-.post-media span { color: #b9b9d8; font-weight: 700; }
-.post .ai-mark { position: absolute; left: 10px; top: 10px; background: rgba(0, 0, 0, .65); color: #fff; font-size: 14px; padding: 4px 10px; border-radius: 999px; }
-.post h3 { margin-top: 16px; padding: 0 6px; font-size: 20px; font-weight: 800; }
-.post > p { padding: 0 6px; margin-top: 8px; color: #4a4a68; }
-.post .badges { padding: 0 6px; margin-top: 8px; }
-.post-link { display: inline-block; margin: 12px 6px 0; font-weight: 700; color: inherit; }
-.post-empty { border: 2px dashed var(--line); background: transparent; }
+.vposts { margin-top: 32px; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 24px; }
+.vpost { background: var(--paper); border-radius: 26px; padding: 16px 16px 24px; min-width: 0; }
+.vpost-media { position: relative; border-radius: 16px; overflow: hidden; background: #14142e; aspect-ratio: 16 / 9; display: grid; place-items: center; }
+.vpost-media video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vpost-media span { color: #b9b9d8; font-weight: 700; }
+.vpost .ai-mark { position: absolute; left: 10px; top: 10px; background: rgba(0, 0, 0, .65); color: #fff; font-size: 14px; padding: 4px 10px; border-radius: 999px; }
+.vpost h3 { margin-top: 16px; padding: 0 6px; font-size: 20px; font-weight: 800; }
+.vpost > p { padding: 0 6px; margin-top: 8px; color: #4a4a68; }
+.vpost .badges { padding: 0 6px; margin-top: 8px; }
+.vpost-link { display: inline-block; margin: 12px 6px 0; font-weight: 700; color: inherit; }
+.vpost-empty { border: 2px dashed var(--line); background: transparent; }
 .top-cta { margin-left: auto; display: flex; gap: 8px; }
 .menu { display: none; margin-left: auto; background: transparent; color: var(--white); border: 1px solid rgba(255, 255, 255, .4); border-radius: 10px; padding: 7px 14px; font: inherit; font-weight: 700; }
 
@@ -260,10 +260,13 @@ section[id] { scroll-margin-top: 72px; }
 .posts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .post { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--white); }
 .post img { width: 100%; aspect-ratio: 1; object-fit: cover; }
-.post-b { padding: 10px 12px 12px; display: grid; gap: 6px; font-size: 13.5px; color: #3f3f5e; }
-.post-d { font-size: 12px; color: var(--muted); font-weight: 700; }
+.post-b { padding: 10px 12px 12px; display: grid; gap: 6px; font-size: 14px; color: #3f3f5e; }
+.post-d { font-size: 14px; color: var(--muted); font-weight: 700; }
 .metrics { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; }
 .metrics div { display: flex; gap: 6px; }
 .metrics dt { color: var(--muted); font-size: 12px; } .metrics dd { margin: 0; font-weight: 800; font-size: 13px; }
 @media (max-width: 980px) { .loop { grid-template-columns: minmax(0, 1fr); } .case-cards { grid-template-columns: minmax(0, 1fr); } }
 .measured { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+
+.post-ig { font-weight: 700; color: var(--brand-d); }
+.post-ai { justify-self: start; font-size: 14px; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: var(--soft); color: var(--brand-d); }
