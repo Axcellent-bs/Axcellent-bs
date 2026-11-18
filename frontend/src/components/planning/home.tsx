@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { DEPT_NAME, TODAY, type Dept, type State as S } from '@/lib/planningData'
 import { PROPOSAL_STAGES, PROPOSAL_SKILL_LABEL, proposalEnded, proposalOpen, proposalStage } from '@/lib/proposals'
-import { useAllReleaseChecks } from '@/lib/planning'
+import { EMPTY_STATE, useAllReleaseChecks } from '@/lib/planning'
 import { Grade, Point, rowNav } from '@/components/planning-common/parts'
 import { LinkedLines, convoHref, idText, toPath } from '@/components/planning-common/links'
 import { STAGES, pipeline, sortRows } from './requests'
@@ -48,17 +48,19 @@ export function Home({ s }: { s: S }) {
   reqCount[STAGES.length - 1] = rows.filter((x) => x.finished).length
   const propCount = PROPOSAL_STAGES.map((_, i) => props.filter((p) => proposalStage(p) === i && !proposalEnded(p)).length)
 
+  // 서버 상태가 오기 전에는 빈 목록 대신 뼈대만 그린다. 빈 칸 → 카드로 바뀌며 아래가 밀리지 않게 (11/18 Lighthouse CLS)
+  if (s === EMPTY_STATE) return <HomeSkeleton />
   return (
     <div className="home-wrap">
       <section className="home-act" aria-label="지금 확인할 것">
-        <h3>지금 확인할 것 {acts.length > 0 && <span className="home-n">{acts.length}</span>}</h3>
+        <h2>지금 확인할 것 {acts.length > 0 && <span className="home-n">{acts.length}</span>}</h2>
         {!acts.length ? <div className="home-calm">사람이 확인할 것이 없어요</div> : (
           <ol className="home-cards">
             {acts.map((t) => {
               const nav = rowNav(toPath(t.href), `${t.id} 열기`)
               const { onClick, onKeyDown } = nav
               return (
-                <li key={t.key} {...nav} onClick={(e) => { markSeen([t.key]); onClick?.(e) }}
+                <li key={t.key} {...nav} role={undefined} onClick={(e) => { markSeen([t.key]); onClick?.(e) }}
                   onKeyDown={(e) => { if (e.key === 'Enter') markSeen([t.key]); onKeyDown?.(e) }}
                   className={`home-card ${nav.className ?? ''}`}>
                   <span className="home-card-top">
@@ -76,11 +78,11 @@ export function Home({ s }: { s: S }) {
       </section>
 
       <section className="home-todo">
-        <h3>
+        <h2>
           최근 받은 요청·제안
           {unread.length > 0 && <span className="home-new">새로 {unread.length}</span>}
           {unread.length > 0 && <button type="button" className="home-readall" onClick={() => markSeen(unread.map((x) => x.key))}>모두 읽음</button>}
-        </h3>
+        </h2>
         {!rest.length ? <div className="empty"><b>없음</b></div> : (
           <ol className="sl-list">
             {pg.rows.map((t) => {
@@ -88,7 +90,7 @@ export function Home({ s }: { s: S }) {
               const isNew = !seen.has(t.key)
               const { onClick, onKeyDown } = nav
               return (
-                <li key={t.key} {...nav} onClick={(e) => { markSeen([t.key]); onClick?.(e) }}
+                <li key={t.key} {...nav} role={undefined} onClick={(e) => { markSeen([t.key]); onClick?.(e) }}
                   onKeyDown={(e) => { if (e.key === 'Enter') markSeen([t.key]); onKeyDown?.(e) }}
                   className={`sl-item home-item${isNew ? ' is-new' : ''} ${nav.className ?? ''}`}>
                   <span className="home-id" title={t.id}>{idText(t.id)}</span>
@@ -113,7 +115,7 @@ export function Home({ s }: { s: S }) {
       </div>
 
       <section className="home-recent">
-        <h3>최근 활동 <span className="muted small home-recent-sub">AI·사람이 한 일 · 누르면 그 대화로</span></h3>
+        <h2>최근 활동 <span className="muted small home-recent-sub">AI·사람이 한 일 · 누르면 그 대화로</span></h2>
         <ol className="feed">
           {feedDays(s.activity.slice(-12).reverse()).map(([day, items]) => (
             <li key={day} className="feed-day">
@@ -123,7 +125,7 @@ export function Home({ s }: { s: S }) {
                   const nav = rowNav(convoHref(a.ctx), '이 요청·사건의 대화 보기')
                   const who = a.kind === '사람' || a.from === 'human' ? 'human' : a.from
                   return (
-                    <li key={i} {...nav} className={`feed-item ${nav.className ?? ''}`}>
+                    <li key={i} {...nav} role={undefined} className={`feed-item ${nav.className ?? ''}`}>
                       <span className={`feed-av d-${who}`} aria-hidden>{AV[who] ?? (DEPT_NAME[a.from] ?? a.from).slice(0, 1)}</span>
                       <div className="feed-body">
                         <div className="feed-head">
@@ -175,4 +177,15 @@ function feedDays(xs: S['activity']): [string, S['activity']][] {
     else out.push([day, [a]])
   }
   return out
+}
+
+function HomeSkeleton() {
+  return (
+    <div className="home-skel" role="status" aria-label="기획 홈 불러오는 중">
+      <span style={{ height: 24, width: 160 }} />
+      <span style={{ height: 120 }} />
+      <span style={{ height: 24, width: 200 }} />
+      <span style={{ height: 320 }} />
+    </div>
+  )
 }
