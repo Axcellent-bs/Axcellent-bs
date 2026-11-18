@@ -4,15 +4,17 @@ import { useSkill } from "@/components/data/useSkill";
 import { AD, times } from "@/components/data/TrendMemes";
 import { safeLink } from "@/components/data/InstagramAudio";
 import { Thumb } from "@/components/data/VideoExplorer";
+import { IgWhyFacts } from "@/components/data/IgWhyFacts";
 import { dataAi, type InstagramRadarGroup, type InstagramRadarOutput, type InstagramRadarPost } from "@/lib/data";
 import { type GridItem, gridItems, kindLabel, showGrid, thumbSrc } from "@/lib/igRadarGrid";
 
 // 트렌드 1 감지 "인스타" 칩의 인스타 레이더 (instagram_radar, Business Discovery). 서버가 미리 계산한 결과를 읽기만 한다.
-// - 위: "갑자기 뜬 게시물" 썸네일 그리드 (모든 묶음 대표 게시물, media_id 중복 제거, 배수 순 최대 12개).
-//   썸네일은 서버가 걸러 준 인스타 CDN https 주소만(약 4일 뒤 만료), 없거나 깨지면 회색 칸. 카드 전체가 게시물 링크(safeLink 통과만)
-// - 아래: 터진 게시물을 해시태그·구절로 묶은 표. 숫자·배수·광고 재료 판정은 서버 값
-// - 묶음마다 접힘으로 대표 게시물: 계정 · 지표 · 배수 · 게시물 링크(서버 permalink, https만) · 캡션 일부(외부 글, 텍스트로만)
-// - 모르면 0이 아니라 서버 이유를 보여 준다. 첫 바퀴 진행 중(판정 전)이면 그리드는 숨긴다
+// - 맨 위: "갑자기 뜬 게시물" 썸네일 그리드 (모든 묶음 대표 게시물, media_id 중복 제거, 배수 순 최대 12개).
+//   썸네일은 서버가 걸러 준 인스타 CDN https 주소만(약 4일 뒤 만료), 없거나 깨지면 회색 칸. 카드 전체가 게시물 링크(safeLink 통과만).
+//   카드 아래 초록 한 줄 = 그 게시물이 계정 평소와 가장 다른 점(standout, 서버 코드 템플릿)
+// - 아래: "왜 떴나" 묶음 접힘(첫 묶음만 펼침). 펼치면 AI 한 줄 결론(why_line, 숫자 없음) → 근거 숫자 표(why_facts, 코드 계산)
+//   → 공통점·광고 재료 이유 → 대표 게시물(계정 · 지표 · 배수 · 링크 · 캡션 일부, 외부 글이라 텍스트로만). 결론이 없으면 이유를 회색으로
+// - 숫자·배수·광고 재료 판정은 서버 값. 모르면 0이 아니라 서버 이유를 보여 준다. 첫 바퀴 진행 중(판정 전)이면 그리드는 숨긴다
 
 const METRIC: Record<InstagramRadarPost["metric"], string> = { view_count: "조회", like_count: "좋아요" };
 const n = (v: number) => v.toLocaleString("ko-KR");
@@ -44,6 +46,7 @@ function PostCard({ item, rank }: { item: GridItem; rank: number }) {
       <span className="truncate text-xs text-ink-700">
         {METRIC[p.metric]} {COMPACT.format(p.value)}{ago(p.posted_at) && <span className="text-ink-500"> · {ago(p.posted_at)}</span>}
       </span>
+      {p.standout && <span className="text-xs font-medium text-emerald-700">{p.standout}</span>}
       <span><span className={`chip text-[11px] ${ad.tone}`}>광고 재료 {ad.label}</span></span>
     </>
   );
@@ -93,32 +96,35 @@ function Posts({ list }: { list: InstagramRadarPost[] }) {
   );
 }
 
-function GroupRows({ g }: { g: InstagramRadarGroup }) {
+/** 묶음 하나 = 접힘. 펼치면 AI 한 줄 결론(파란 띠) → 근거 숫자 표 → 대표 게시물 */
+function GroupFold({ g, open }: { g: InstagramRadarGroup; open: boolean }) {
   const ad = AD[g.ad_material];
   return (
-    <>
-      <tr className="align-top">
-        <td className="min-w-[10rem] px-1 pt-2">
-          <b className="text-ink-900">{g.name}</b>
-          <small className="block text-xs text-ink-500">{g.description ?? g.description_reason ?? `게시물 ${n(g.posts)}개`}</small>
-        </td>
-        <td className="whitespace-nowrap px-1 pt-2 text-right tabular-nums">{n(g.accounts)}곳</td>
-        <td className="whitespace-nowrap px-1 pt-2 text-right font-semibold tabular-nums">{times(g.best_ratio)}</td>
-        <td className="min-w-[8rem] px-1 pt-2"><small className="text-xs text-ink-500">{g.members.length ? g.members.join(" · ") : "-"}</small></td>
-        <td className="min-w-[7rem] px-1 pt-2">
-          <span className={`chip text-xs ${ad.tone}`}>{ad.label}</span>
-          {g.ad_material_reason && <small className="mt-0.5 block text-[11px] text-ink-500">{g.ad_material_reason}</small>}
-        </td>
-      </tr>
-      <tr className="border-b border-ink-100">
-        <td colSpan={5} className="px-1 pb-2">
-          <details className="text-xs">
-            <summary className="cursor-pointer select-none text-ink-500">게시물 {n(g.top_posts.length)}개 보기</summary>
-            <Posts list={g.top_posts} />
-          </details>
-        </td>
-      </tr>
-    </>
+    <details open={open} className="group rounded-lg border border-ink-100">
+      <summary className="flex cursor-pointer select-none flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
+        <b className="text-ink-900">{g.name}</b>
+        <span className="text-xs tabular-nums text-ink-700">{n(g.accounts)}곳 · 최대 평소의 <b className="text-ink-900">{times(g.best_ratio)}</b></span>
+        <span className={`chip text-xs ${ad.tone}`}>광고 재료 {ad.label}</span>
+        <small className="w-full text-xs text-ink-500">{g.description ?? g.description_reason ?? `게시물 ${n(g.posts)}개`}</small>
+      </summary>
+      <div className="space-y-2 border-t border-ink-100 px-3 py-2">
+        {g.why_line ? (
+          <div className="rounded-md bg-brand-50 px-3 py-2">
+            <p className="text-sm font-semibold text-brand-700">{g.why_line}</p>
+            <small className="block text-[11px] text-brand-700/80">AI 한 줄 결론 · 아래 근거 숫자만 사용</small>
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">AI 한 줄 결론 없음 · {g.why_line_reason ?? "이유를 받지 못했어요"}</p>
+        )}
+        <IgWhyFacts facts={g.why_facts ?? []} />
+        {g.members.length > 0 && <p className="text-xs text-ink-500">공통점 · {g.members.join(" · ")}</p>}
+        {g.ad_material_reason && <p className="text-[11px] text-ink-500">광고 재료 · {g.ad_material_reason}</p>}
+        <div className="text-xs">
+          <p className="text-ink-500">대표 게시물 {n(g.top_posts.length)}개</p>
+          <Posts list={g.top_posts} />
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -128,22 +134,10 @@ function RadarBody({ out }: { out: InstagramRadarOutput }) {
       {out.status === "unknown" && <p className="text-sm text-ink-700">{out.reason ?? "레이더 결과를 모르는 상태예요."}</p>}
       <PostGrid out={out} />
       {out.groups.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-ink-100 text-left text-xs text-ink-500">
-                <th scope="col" className="whitespace-nowrap px-1 py-1.5 font-medium">묶음</th>
-                <th scope="col" className="whitespace-nowrap px-1 py-1.5 text-right font-medium">계정</th>
-                <th scope="col" className="whitespace-nowrap px-1 py-1.5 text-right font-medium">평소 대비</th>
-                <th scope="col" className="whitespace-nowrap px-1 py-1.5 font-medium">공통점</th>
-                <th scope="col" className="whitespace-nowrap px-1 py-1.5 font-medium">광고 재료</th>
-              </tr>
-            </thead>
-            <tbody>
-              {out.groups.map((g) => <GroupRows key={g.name} g={g} />)}
-            </tbody>
-          </table>
-        </div>
+        <section aria-label="레이더 묶음" className="space-y-2">
+          <h3 className="text-sm font-semibold text-ink-900">왜 떴나 <small className="font-normal text-ink-500">여러 계정이 같이 터진 묶음 · 평소와 다른 점</small></h3>
+          {out.groups.map((g, i) => <GroupFold key={g.name} g={g} open={i === 0} />)}
+        </section>
       ) : out.status === "known" ? (
         <p className="text-sm text-ink-700">평소보다 크게 터진 게시물이 없어요.</p>
       ) : null}

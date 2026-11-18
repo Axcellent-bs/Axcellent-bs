@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
+import { IgWhyFacts } from "@/components/data/IgWhyFacts";
 import { SummaryBody, SummaryCard } from "@/components/data/KeywordTrend";
 import { when } from "@/components/data/Sources";
 import { useSkill, type SkillState } from "@/components/data/useSkill";
@@ -8,6 +9,7 @@ import { dataAi, type InstagramAudioItem, type InstagramAudioOutput, type Instag
 // 트렌드 1 감지 "인스타" 칩의 인기 오디오 (instagram_audio). 서버가 미리 계산한 목록을 읽기만 한다.
 // - 음악 / 오리지널 토글 (audio_type music / original_sound). 음악 목록은 부모(PlatformViews)가 한 번 받아 종합 요약 칸과 같이 쓴다
 // - 제목·아티스트는 외부 글이라 텍스트로만. 링크는 서버가 준 link(https)만. 썸네일은 걸지 않는다
+// - 행을 누르면 "왜 뜨나" 근거 표(why_facts: 7일 전 순위·유튜브 쇼츠·네이버·확인 불가, 서버 코드 값)를 펼친다. 결론 문장은 없다
 // - 키가 없으면(igKeyMissing) 부모가 이 카드 대신 "키 등록 후 가능" 한 줄을 그린다
 
 export const KEY_LATER = "키 등록 후 가능";
@@ -56,6 +58,13 @@ function Change({ i }: { i: InstagramAudioItem }) {
 }
 
 function AudioTable({ out }: { out: InstagramAudioOutput }) {
+  // 행을 누르면 "왜 뜨나" 근거(why_facts)를 펼친다 (곡마다 따로)
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (id: string) => setOpen((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   if (out.items.length === 0) {
     return <p className="text-sm text-ink-700">{out.reason ?? "받은 오디오가 없어요."}</p>;
   }
@@ -75,19 +84,36 @@ function AudioTable({ out }: { out: InstagramAudioOutput }) {
             const title = i.title || i.audio_id;
             const link = safeLink(i.link);
             const sub = [duration(i.duration_ms), i.artist].filter(Boolean).join(" · ");
+            const facts = i.why_facts ?? [];
+            const shown = open.has(i.audio_id);
             return (
-              <tr key={i.audio_id} className="border-b border-ink-100 align-top">
-                <td className="w-10 px-1 py-2 font-semibold tabular-nums text-ink-700">{i.rank}</td>
-                <td className="min-w-[12rem] px-1 py-2">
-                  {link ? (
-                    <a href={link} target="_blank" rel="noreferrer noopener" className="font-semibold text-ink-900 underline-offset-2 hover:underline">{title}</a>
-                  ) : <span className="font-semibold text-ink-900">{title}</span>}
-                  {sub && <small className="block text-xs text-ink-500">{sub}</small>}
-                  {i.overlap.length > 0 && <small className="block text-xs text-ink-500">{i.overlap.join(", ")} 와 겹침</small>}
-                </td>
-                <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Change i={i} /></td>
-                <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums">{i.streak_days}일</td>
-              </tr>
+              <Fragment key={i.audio_id}>
+                <tr className={`align-top ${facts.length ? "cursor-pointer hover:bg-ink-50" : ""} ${shown ? "" : "border-b border-ink-100"}`}
+                  onClick={facts.length ? () => toggle(i.audio_id) : undefined}>
+                  <td className="w-10 px-1 py-2 font-semibold tabular-nums text-ink-700">{i.rank}</td>
+                  <td className="min-w-[12rem] px-1 py-2">
+                    {link ? (
+                      <a href={link} target="_blank" rel="noreferrer noopener" onClick={(e) => e.stopPropagation()}
+                        className="font-semibold text-ink-900 underline-offset-2 hover:underline">{title}</a>
+                    ) : <span className="font-semibold text-ink-900">{title}</span>}
+                    {sub && <small className="block text-xs text-ink-500">{sub}</small>}
+                    {i.overlap.length > 0 && <small className="block text-xs text-ink-500">{i.overlap.join(", ")} 와 겹침</small>}
+                    {facts.length > 0 && (
+                      <button type="button" aria-expanded={shown} onClick={(e) => { e.stopPropagation(); toggle(i.audio_id); }}
+                        className="mt-0.5 text-[11px] text-brand-700 underline-offset-2 hover:underline">
+                        왜 뜨나 {shown ? "접기 ▴" : "보기 ▾"}
+                      </button>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Change i={i} /></td>
+                  <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums">{i.streak_days}일</td>
+                </tr>
+                {shown && (
+                  <tr className="border-b border-ink-100">
+                    <td colSpan={4} className="px-1 pb-2"><IgWhyFacts facts={facts} /></td>
+                  </tr>
+                )}
+              </Fragment>
             );
           })}
         </tbody>

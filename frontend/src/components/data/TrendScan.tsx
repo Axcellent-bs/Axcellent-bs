@@ -29,7 +29,8 @@ import {
 // - 주소에 하위 탭을 남긴다: /data/trend#detect · #recommend · #handoff · #result · #sources(데이터 출처, 루프와 별개) (없으면 감지). 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
 // - 루프 띠의 단계를 누르면 그 단계가 속한 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
 // - 1 감지: 맨 위 한 줄(오늘 가장 큰 화제, trend_popular) → 플랫폼 칩(#detect?view=all|youtube|instagram|search, lib/detectView.ts)
-//   인스타 = 인기 오디오(InstagramAudio) · 인스타 레이더(InstagramRadar) · 인스타 트렌드 메모(InstagramMemo)
+//   인스타 = 인스타 레이더(InstagramRadar: 맨 위 "갑자기 뜬 게시물" 그리드 → "왜 떴나" 묶음) → 인기 오디오(InstagramAudio, 행을 누르면 "왜 뜨나")
+//   → 인스타 트렌드 메모(InstagramMemo). 키가 없으면 레이더·오디오 대신 한 줄
 //   종합 = 요약 줄(1위 유행·검색 급상승 1위·이달 시즌 1위) + 요즘 유행·밈(trend_memes, TrendMemes) / 유튜브 = 같은 유행 표(쇼츠 칸 중심) + 영상 탐색(video_explorer 숏·롱 × 카테고리 × 기간,
 //   VideoExplorer. 고른 조건은 #detect?… 주소에 남긴다. view 없이 조건만 있는 예전 주소는 유튜브 칩) /
 //   검색 = 검색 트렌드(keyword_trend, KeywordTrend) + 맨 아래 급상승 한 줄 목록(trend_scan·trend_candidates)·키워드 직접 판정.
@@ -205,7 +206,7 @@ function PreparingStage({ stage }: { stage: LoopStage }) {
 // ------------------------------------------------------------------- 1 감지 플랫폼 칩
 
 /** 종합(기본) = 요약 줄(1위 유행·검색 급상승 1위·이달 시즌 1위·인스타 인기 오디오 1위) + 요즘 유행·밈 표 / 유튜브 = 같은 유행 표(쇼츠 칸 중심) + 영상 탐색 그대로 /
- *  인스타 = 인기 오디오(instagram_audio) · 인스타 레이더(instagram_radar) · 인스타 트렌드 메모(수동 입력). 유행 표는 숨김 /
+ *  인스타 = 갑자기 뜬 게시물 그리드·레이더 묶음(instagram_radar) → 인기 오디오(instagram_audio) → 인스타 트렌드 메모(수동 입력). 유행 표는 숨김 /
  *  검색 = 검색 트렌드(keyword_trend, KeywordTrend) + 맨 아래 급상승 한 줄 목록·키워드 직접 판정(searchExtra, TrendScan이 만든 그대로).
  *  칩은 주소 #detect?view=… (lib/detectView.ts). 유행 표는 칩을 바꿔도 같은 자리(검색 칩에서는 숨김)라 다시 받지 않는다.
  *  keyword_trend는 여기서 한 번 받아 검색 칩과 종합 요약 줄이 같이 쓴다 (일간/주간을 바꾸면 다시 받는다) */
@@ -246,8 +247,8 @@ function PlatformViews({ searchExtra }: { searchExtra?: ReactNode }) {
             </p>
           ) : (
             <>
-              <InstagramAudio music={igMusic.state} onRetryMusic={igMusic.reload} />
               <InstagramRadar />
+              <InstagramAudio music={igMusic.state} onRetryMusic={igMusic.reload} />
             </>
           )}
           <InstagramMemo />
