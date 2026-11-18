@@ -1,0 +1,54 @@
+{
+  "_설명": "형식을 보여 주는 예시다. 값은 모두 지어낸 것이며 실제 게시물·수치가 아니다. 진짜 자료는 instagram.json에만 넣는다. 파일 확인 없이 형식만 검사하려면: node check.mjs example.json --no-files",
+  "version": 1,
+  "customers": [
+    {
+      "id": "catbooks",
+      "name": "캣북스",
+      "badges": ["시연 가상 고객사"],
+      "account": "catbooks.lab",
+      "profileUrl": "https://www.instagram.com/catbooks.lab/",
+      "summary": "",
+      "posts": [
+        {
+          "id": "2026-11-09-1",
+          "type": "image",
+          "img": "assets/catbooks/2026-11-09-1.jpg",
+          "media": ["assets/catbooks/2026-11-09-1.jpg"],
+          "alt": "고양이가 책을 읽는 일러스트(예시)",
+          "caption": "예시 캡션입니다.",
+          "date": "2026-11-09",
+          "permalink": "https://www.instagram.com/p/EXAMPLE/",
+          "aiGenerated": true,
+          "axcellent": false,
+          "metrics": [["도달", "0"], ["좋아요", "0"]],
+          "metricsKind": "real",
+          "measuredAt": "2026-11-16",
+          "source": "Instagram 인사이트(7일 기준)"
+        },
+        {
+          "id": "2026-11-14-1",
+          "type": "video",
+          "img": "assets/catbooks/2026-11-14-1-poster.jpg",
+          "media": ["assets/catbooks/2026-11-14-1.mp4"],
+          "alt": "서점 고양이 영상의 첫 화면(예시)",
+          "caption": "예시 캡션입니다.\n이 게시물은 AXcellent AI 직원이 기획·제작했어요(시연용).",
+          "date": "2026-11-14",
+          "permalink": "https://www.instagram.com/reel/EXAMPLE/",
+          "aiGenerated": true,
+          "axcellent": true
+        }
+      ],
+      "highlights": [
+        {
+          "id": "behind",
+          "title": "캣북스 운영 비하인드",
+          "cover": "assets/catbooks/highlight-behind-cover.jpg",
+          "slides": [
+            { "type": "image", "src": "assets/catbooks/highlight-behind-1.jpg", "date": "2026-11-12" }
+          ]
+        }
+      ]
+    }
+  ]
+}
