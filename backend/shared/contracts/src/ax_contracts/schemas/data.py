@@ -2156,6 +2156,13 @@ class BorrowFormat(AxModel):
     source: Literal["topic", "category", "all"] | None = None  # 어느 단계 숏츠 통계에서 골랐는지
 
 
+class TopicFormatExample(AxModel):
+    """이 주제 숏츠 중 고른 형식인 영상 하나 (제목·조회수는 저장된 값 그대로, 모르면 None)."""
+
+    title: str | None = None
+    views: int | None = Field(default=None, ge=0)
+
+
 class TrendInsight(AxModel):
     insight_id: str = Field(min_length=1)  # 날짜 + 주제 기반 (같은 날 같은 주제면 같은 id)
     rank: int = Field(ge=1)
@@ -2181,8 +2188,15 @@ class TrendInsight(AxModel):
     shorts_format_samples: int | None = Field(default=None, ge=0)
     shorts_format_reason: str | None = None
     # 아래는 예전 응답은 없다. 숏츠 통계와 같은 시점의 그 형식 중앙값 조회수와 기준 시각
+    # (그 형식 전체 숏츠 중앙값 (주제와 무관), 같은 형식이면 모든 주제가 같은 값)
     shorts_format_median_views: float | None = Field(default=None, ge=0)
     shorts_format_at: UtcDatetime | None = None
+    # 아래는 예전 응답은 없다. 이 주제 자기 숏츠 중 고른 형식인 영상의 조회 중앙값 (source=topic일
+    # 때만, 표본이 모자라면 None). 기준 시각 = 이 주제 인기 스냅샷 시각. 예시 = 조회 큰 순 최대 3개
+    shorts_format_topic_median_views: float | None = Field(default=None, ge=0)
+    shorts_format_topic_at: UtcDatetime | None = None
+    shorts_format_topic_examples: list[TopicFormatExample] = Field(default_factory=list)
+    shorts_format_topic_reason: str | None = None  # 값이 없을 때 이유
     # 아래는 예전 응답은 없다. 형식을 어느 단계에서 골랐는지: topic = 이 주제 근거 숏츠,
     # category = 이 주제 카테고리의 숏츠 통계, all = 전체 숏츠 통계.
     # 그 단계의 표본: count = 이 형식인 숏츠 수, total = 형식을 분류한 숏츠 수
