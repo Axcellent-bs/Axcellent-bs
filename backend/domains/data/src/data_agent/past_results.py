@@ -12,6 +12,9 @@
   둘째 줄 "조회 목표의 N배 (영상 M개 중 K개 달성) · 매출 +N원 · 주문 +N건", 셋째 줄
   "지난번 개선 방향: …" (조회 달성 + 매출 덜 팔림이면 반대 문구)
 - 조회와 매출을 합친 점수는 만들지 않는다
+- views: 시험 아닌 영상의 게시 7일 조회(잰 값, known) 중앙값 (합계 아님)·views_at = 잰 시각 중
+  가장 늦은 시각·views_videos = 쓴 영상 수. 없으면 None + views_reason
+  (측정 중·영상 없음·잰 값 없음)
 """
 
 from __future__ import annotations
@@ -50,6 +53,24 @@ def won(v: float) -> str:
 def _seven(video: Any) -> float | None:
     seven = next((c for c in video.checkpoints if c.checkpoint == "7d"), None)
     return seven.target_ratio if seven else None
+
+
+def seven_day_views(real: Sequence[Any]) -> tuple[int | None, datetime | None, int, str | None]:
+    """시험 아닌 영상의 게시 7일 조회 중앙값.
+
+    (값, 잰 시각 중 가장 늦은 시각, 영상 수, 없으면 이유). 합계가 아니라 중앙값.
+    """
+    sevens = (next((c for c in v.checkpoints if c.checkpoint == "7d"), None) for v in real)
+    known = [c for c in sevens if c is not None and c.status == "known" and c.views is not None]
+    if known:
+        stamps = [c.measured_at for c in known if c.measured_at is not None]
+        median = round(statistics.median(c.views for c in known))
+        return median, max(stamps) if stamps else None, len(known), None
+    if any(v.verdict == "measuring" for v in real):
+        return None, None, 0, "게시 7일이 아직 안 됨 (측정 중)"
+    if not real:
+        return None, None, 0, "시험 영상 말고 잰 영상이 없음"
+    return None, None, 0, "게시 7일 조회를 잰 값이 없음"
 
 
 def to_past(r: CampaignResultOutput) -> InsightPastResult:
@@ -94,6 +115,7 @@ def to_past(r: CampaignResultOutput) -> InsightPastResult:
         note: str | None = CONTRA
     else:
         note = f"지난번 개선 방향: {actions[0]}" if actions else None
+    seven, seven_at, seven_n, seven_why = seven_day_views(real)
     return InsightPastResult(
         campaign_id=r.campaign_id,
         campaign_name=r.campaign_name,
@@ -114,6 +136,11 @@ def to_past(r: CampaignResultOutput) -> InsightPastResult:
         band=band,
         summary_line=f"{first} · {second}",
         note_line=note,
+        views=seven,
+        views_at=seven_at,
+        views_checkpoint="7d" if seven is not None else None,
+        views_videos=seven_n,
+        views_reason=seven_why,
     )
 
 
