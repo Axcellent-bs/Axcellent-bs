@@ -1,6 +1,13 @@
 /* 개발 화면 시각 계층: 사람이 판단할 것을 맨 위·가장 진하게, 지나간 일은 흐리게.
    기획 화면과 같이 쓰는 planning.css는 건드리지 않고 dev- 클래스만 쓴다. */
 
+/* 글씨 색 대비 4.5:1 이상 (Lighthouse 접근성). 공용 토큰의 흐린 회색·주황·초록은 개발 바탕(#f6f6fb·주황 칸·초록 칩)에서
+   3:1 안팎이라 개발 화면 안에서만 한 단계 진하게 쓴다. 바탕·테두리 토큰은 그대로 */
+.planning-scope[data-part="dev"] { --text-3: #686887; --warning: #8a6408; --success: #22774f; }
+
+/* 링크 누르는 칸은 높이 24px 이상 (Lighthouse 터치 대상 크기) */
+.dev-board a.rq-name, .dev-board a.rq-v, .dev-board a.rq-go { display: inline-block; min-height: 24px; line-height: 24px; max-width: 100%; vertical-align: bottom; }
+
 /* ---- 작업 현황: 내가 볼 작업 */
 .dev-todo { border: 1px solid var(--warning); border-left-width: 4px; background: var(--warning-soft, #fbf3dc); padding: 14px 18px 12px; margin: 14px 0 10px; }
 .dev-todo-h { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
@@ -19,8 +26,8 @@
 .dev-board .rq-item.dev-stuck { border-left: 4px solid var(--warning); }
 .dev-board .rq-item.dev-stuck .rq-name { font-weight: 700; }
 .dev-board .rq-item.dev-stuck .rq-go { background: var(--primary); color: var(--on-primary-ink, #fff); padding: 5px 12px; text-decoration: none !important; }
-.dev-board .rq-item.fin { opacity: .72; }
-.dev-board .rq-item.fin:hover { opacity: 1; }
+/* 끝난 일은 글씨를 흐리게 하지 않고(대비 유지) 바탕만 가라앉힌다 */
+.dev-board .rq-item.fin { background: var(--surface-2); }
 .dev-sep { font-size: 12.5px; color: var(--text-3); padding: 14px 16px 6px; border-bottom: 1px solid var(--border); }
 
 /* ---- AI 교차검증: 판단 상자를 맨 위로 */
