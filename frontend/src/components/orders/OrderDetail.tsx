@@ -1,5 +1,5 @@
 import { TableView } from "@/components/charts";
-import { Chip, Empty, ErrorBox, Panel, RefList, TONE, Waiting, useResource } from "@/components/finance/bits";
+import { Chip, Empty, ErrorBox, Panel, RefList, Skeleton, TONE, useResource } from "@/components/finance/bits";
 import { humanId, shortDateTime, won } from "@/lib/format";
 import { support, type OrderDetail as Detail } from "@/lib/support";
 
@@ -25,7 +25,7 @@ const text = (v: string | number | null | undefined) => (v == null || v === "" ?
 
 export function OrderDetail({ orderNo, tick, onClose }: { orderNo: string; tick: number; onClose?: () => void }) {
   const res = useResource(`order-${orderNo}`, () => support.order(orderNo), tick);
-  if (!res.env) return res.error ? <ErrorBox message={`주문을 읽지 못했습니다. ${res.error}`} onRetry={res.reload} /> : <Waiting />;
+  if (!res.env) return res.error ? <ErrorBox message={`주문을 읽지 못했습니다. ${res.error}`} onRetry={res.reload} /> : <Skeleton label="주문을 불러오는 중…" stats={3} lines={4} />;
   const o: Detail = res.env.data;
   const facts: [string, string][] = [
     ["주문 시각", time(o.created_at)],
