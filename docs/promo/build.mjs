@@ -185,6 +185,23 @@ const customers = `
   </div>
 </section>`;
 
+const PS = C.posts;
+const postCard = (it) => `<article class="post reveal"><div class="post-media"><video controls preload="metadata" playsinline ${has(it.poster) ? `poster="${esc(it.poster)}"` : ""}><source src="${esc(it.src)}"></video>${it.aiMade ? '<span class="ai-mark">AI가 만든 영상</span>' : ""}</div><h3>${esc(it.title)}</h3>${has(it.customer) ? `<p class="badges"><span class="badge">${esc(it.customer)}</span></p>` : ""}${has(it.caption) ? `<p>${esc(it.caption)}</p>` : ""}${has(it.postUrl) ? `<a class="post-link" href="${esc(it.postUrl)}" rel="noopener" target="_blank">원 게시물 보기</a>` : ""}</article>`;
+const postEmpty = () => `<article class="post post-empty reveal"><div class="post-media"><span>${esc(PS.emptyTitle)}</span></div><h3>홍보 영상 칸</h3><p>영상이 올라오면 이 자리에 나옵니다.</p></article>`;
+const postList = PS.items.length ? PS.items.map(postCard).join("") : Array.from({ length: PS.emptySlots }, postEmpty).join("");
+
+const showPosts = PS.items.length > 0 || PS.showEmpty === true;
+const posts = !showPosts ? "" : `
+<section class="sec sec-light" id="posts">
+  <div class="wrap">
+    <p class="pill reveal">${esc(PS.kicker)}</p>
+    <h2 class="h2 ink reveal">${esc(PS.title[0])}<br><span class="brand">${esc(PS.title[1])}</span></h2>
+    <p class="posts-lead reveal">${esc(PS.lead)}</p>
+    <div class="posts">${postList}</div>
+    <p class="callout reveal">${esc(PS.note)}</p>
+  </div>
+</section>`;
+
 const cta = `
 <section class="sec sec-cta" id="contact" style="--img:url(assets/bookstore.jpg)">
   <div class="wrap">
@@ -200,8 +217,8 @@ const header = `
   <div class="top-in">
     <a class="brand-logo" href="#top" aria-label="AXcellent 처음으로"><img src="assets/logo-white.png" alt="AXcellent" width="156" height="30"></a>
     <button class="menu" id="menu" aria-expanded="false" aria-controls="nav">메뉴</button>
-    <nav class="nav" id="nav" aria-label="구역 이동">${C.nav.map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join("")}</nav>
-    <div class="top-cta">${brochureBtn("btn btn-gold btn-sm")}${contactBtn("btn btn-ghost btn-sm")}</div>
+    <nav class="nav" id="nav" aria-label="구역 이동">${C.nav.filter(([id]) => id !== "posts" || showPosts).map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join("")}</nav>
+    <div class="top-cta">${brochureBtn("btn btn-gold btn-sm top-pdf")}${contactBtn("btn btn-ghost btn-sm")}</div>
   </div>
 </header>`;
 
@@ -231,7 +248,7 @@ const html = `<!doctype html>
 <a class="skip" href="#vision">본문으로 건너뛰기</a>
 ${header}
 <main>
-${hero}${vision}${team}${story}${a2a}${cases}${approval}${benefits}${customers}${cta}
+${hero}${vision}${team}${story}${a2a}${cases}${approval}${benefits}${customers}${posts}${cta}
 </main>
 ${footer}
 <script src="app.js" defer></script>

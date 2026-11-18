@@ -35,6 +35,7 @@ export default {
     ["cases", "마케팅 사례"],
     ["approval", "승인"],
     ["customers", "고객사"],
+    ["posts", "홍보 영상"],
   ],
 
   hero: {
@@ -60,7 +61,7 @@ export default {
     kicker: "AI 직원 9명",
     title: ["대표님 곁에서", "일을 나누는 ", "총괄 AI"],
     lead: "여러 부서에 걸친 일을 한 번에 묶어 조율하고 사람이 결정해야 하는 일은 대표님께 올립니다.",
-    diagramTitle: ["AI 직원 9명을", "총괄 AI가 잇습니다."],
+    diagramTitle: ["AI 직원 9명을", "총괄 AI가 잇습니다"],
     hub: "총괄 AI",
     members: [
       { name: "인프라", role: "원인 진단·복구" },
@@ -83,7 +84,7 @@ export default {
   // 시연 장면. 준하 님 자료(영상·GIF·화면)는 media에 넣으면 이 섹션에 나온다 (INTAKE.md)
   story: {
     kicker: "시연 상황 (연출)",
-    title: ["퇴근한 밤,", "결제가 멈췄습니다."],
+    title: ["퇴근한 밤", "결제가 멈췄습니다"],
     lead: "직원은 퇴근했고 대표님은 아직 모릅니다.",
     turn: ["그런데 대표님이 깨기 전에", "AI 직원들이 먼저 움직였습니다."],
     stats: [
@@ -97,7 +98,7 @@ export default {
     // { type: "image", src: "assets/demo/incident.png", alt: "결제 장애 시연", caption: "..." }
     media: null,
     stepsKicker: "시연 속 AI 직원들의 하루",
-    stepsTitle: ["장애가 나면", "이렇게 움직입니다."],
+    stepsTitle: ["장애가 나면", "이렇게 움직입니다"],
     steps: [
       { n: "1", title: "감지", items: [["인프라 AI", "결제 오류 신호를 알아챕니다."], ["총괄 AI", "이슈를 열고 필요한 AI에게 일을 나눕니다."]] },
       { n: "2", title: "분석", items: [["아카이브 AI", "비슷한 과거 장애와 그때의 대응을 찾습니다."], ["데이터분석 AI", "실패 주문 7건, 영향 고객 6명, 피해 249,000원을 셉니다."]] },
@@ -109,10 +110,10 @@ export default {
 
   a2a: {
     kicker: "A2A 자동화",
-    title: ["사람이 중간에서", "전달하지 않아도", "일이 끝납니다."],
+    title: ["사람이 중간에서", "전달하지 않아도", "일이 끝납니다"],
     lead: "A2A 자동화는 AI 직원끼리 직접 요청을 주고받아 대표님이 일일이 전달하지 않아도 일이 이어지는 방식입니다.",
     listKicker: "AI끼리 주고받는 요청",
-    listTitle: ["부서 AI들은", "이렇게 서로 부탁합니다."],
+    listTitle: ["부서 AI들은", "이렇게 서로 부탁합니다"],
     // from → to 순서
     items: [
       { from: "데이터분석 AI", to: "기획 AI", body: "뜨는 주제를 출처와 함께 넘깁니다." },
@@ -128,11 +129,11 @@ export default {
 
   approval: {
     kicker: "위험은 이렇게 막습니다",
-    title: ["승인은", "대표님이."],
+    title: ["승인은", "대표님이"],
     lead: ["AI가 먼저 준비하고 위험한 일은 사람이 결정할 때까지 보류됩니다.", "정해 둔 범위 안의 일은 AI가 알아서 처리합니다."],
     leadEm: "보류",
     listKicker: "사람이 결정하는 일",
-    listTitle: ["이런 일은", "대표님이 결정합니다."],
+    listTitle: ["이런 일은", "대표님이 결정합니다"],
     items: [
       { icon: "₩", title: "돈", body: "환불·쿠폰은 금액이 기준을 넘으면, 판매자 정산 지급은 항상 대표님 승인 뒤에만 실행됩니다." },
       { icon: "↗", title: "외부 게시", body: "SNS 같은 외부 게시는 항상 사람 승인을 거칩니다." },
@@ -149,7 +150,7 @@ export default {
 
   benefits: {
     kicker: "대표님이 얻는 것",
-    title: ["회사 안에서 ", "안심하고", " 맡깁니다."],
+    title: ["회사 안에서 ", "안심하고", " 맡깁니다"],
     // "사내망 안에서만 열립니다 / 외부 접근은 막혀 있고"는 서버 사실 확인(재헌·태윤) 전이라 쓰지 않았다 (README의 확인 필요 목록)
     items: [
       { tag: "설치", title: ["회사 서버에", "설치합니다"], body: "AXcellent는 프로그램만 설치하고 서버도 데이터도 회사 것입니다. 쇼핑몰·앱 주소와 API 키를 넣으면 주문·문의 데이터를 받아옵니다.", img: "assets/cables.jpg", alt: "서버실 케이블" },
@@ -190,7 +191,7 @@ export default {
 
   customers: {
     kicker: "함께하는 고객사",
-    title: ["업종이 달라도", "같은 AI 직원 구조."],
+    title: ["업종이 달라도", "같은 AI 직원 구조"],
     items: [
       { name: "캣북스", badges: ["시연 가상 고객사"], body: "책과 문구를 파는 온라인 서점. 고객지원·재무·마케팅·데이터분석 AI가 판매 서버와 연결돼 일합니다.", img: "assets/shot-catbooks.jpg", alt: "캣북스 온라인 서점 화면" },
       { name: "누비투어", badges: ["시연 가상 고객사", "연결 준비 중"], body: "패키지여행 예약 사이트. AXcellent를 모르는 상태로 만든 두 번째 고객사로 연결을 준비하고 있습니다.", img: "assets/shot-nubi.jpg", alt: "누비투어 패키지여행 사이트 화면" },
@@ -198,8 +199,22 @@ export default {
     note: "회사마다 설정(상품 정보·조직도)을 따로 두어 업종이 달라도 같은 AI 직원 구조를 붙일 수 있게 설계했습니다.",
   },
 
+  // 홍보 영상·게시물 칸. items에 넣으면 칸이 채워지고, 비어 있으면 빈 칸(준비 중)을 emptySlots개 보여 준다.
+  // item: { title, caption, src(mp4, assets/demo/ 아래), poster, postUrl(원 게시물 링크, 선택), customer(고객사 이름, 선택), aiMade(true면 "AI가 만든 영상" 표시) }
+  posts: {
+    kicker: "홍보 영상·게시물",
+    title: ["고객사를 위해", "만든 홍보물"],
+    lead: "AXcellent가 고객사를 위해 만든 영상과 게시물을 모았습니다. 반응 수치는 실제로 측정한 값이 생긴 뒤에만 표시합니다.",
+    emptyTitle: "영상 준비 중",
+    // true면 영상이 없어도 빈 칸 "준비 중"을 보여 준다. 기본은 영상이 올라올 때까지 구역과 메뉴를 숨긴다
+    showEmpty: false,
+    emptySlots: 2,
+    items: [],
+    note: "시연용 가상 고객사의 홍보물입니다. AI로 만든 영상에는 “AI가 만든 영상” 표시를 붙입니다.",
+  },
+
   cta: {
-    title: ["AI끼리", "알아서 일하고", "돈과 외부 게시는", "대표님이 승인합니다."],
+    title: ["AI끼리", "알아서 일하고", "돈과 외부 게시는", "대표님이 승인합니다"],
     emIndex: 1,
     body: "동네 책방 같은 작은 가게도 회사 안에서 AI 직원들과 함께 일할 수 있습니다.",
   },
