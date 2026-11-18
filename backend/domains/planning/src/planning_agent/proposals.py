@@ -45,6 +45,10 @@ from ax_contracts.schemas.finance import (
     CategoryBudgetAdviceOutput,
     ContentFormat,
 )
+from ax_contracts.schemas.marketing_channels import (
+    CHANNEL_FOLLOWERS_SKILL,
+    ChannelFollowersOutput,
+)
 from ax_contracts.schemas.planning import (
     CampaignBriefInput,
     CampaignBriefOutput,
@@ -286,7 +290,7 @@ class DataInsights:
             return parsed.empty_reason or "기획안 초안 없음"
         return from_promo(parsed)
 
-    async def _brief(self, ctx: str) -> list[ReceiveInsightInput] | str:
+    async def _brief_out(self, ctx: str) -> TrendInsightBriefOutput | str:
         meta = _meta(ctx, self.tenant_id, self.timeout)
         req = AgentRequest(meta=meta, skill="trend_insight_brief", input={})
         out = await _ask(self._call, "data", req, self.timeout)
@@ -298,7 +302,18 @@ class DataInsights:
             return "trend_insight_brief 출력이 계약과 다름"
         if parsed.status != "known":
             return parsed.reason or "인사이트를 확인할 수 없음"
+        return parsed
+
+    async def _brief(self, ctx: str) -> list[ReceiveInsightInput] | str:
+        parsed = await self._brief_out(ctx)
+        if isinstance(parsed, str):
+            return parsed
         return from_brief(parsed) or "근거가 있는 인사이트 없음"
+
+    async def trends(self, ctx: str) -> list[TrendInsight] | str:
+        """방향 선택지의 올라탈 후보를 고를 트렌드 주제 목록 (값 그대로, 11/18)."""
+        parsed = await self._brief_out(ctx)
+        return parsed if isinstance(parsed, str) else list(parsed.insights)
 
     async def effect(
         self,
@@ -468,6 +483,9 @@ def _past(r) -> InsightPast:
         summary_line=(r.summary_line or "")[:300],
         note_line=note,
         actions=[x[:300] for x in r.actions][:5],
+        # 조회수 숫자는 데이터분석이 칸을 더하면 옮긴다 (11/18 부탁, 그 전에는 없음)
+        views=getattr(r, "views", None),
+        views_at=getattr(r, "views_at", None),
     )
 
 
@@ -593,6 +611,22 @@ class MarketingBrief:
         except ValidationError:
             return "receive_campaign_brief 출력이 계약과 다름"
 
+    async def followers(self, ctx: str) -> ChannelFollowersOutput | str:
+        """공식 SNS 채널 팔로워 수 (마케팅 `channel_followers`, read, 11/18).
+        마케팅에 아직 그 skill이 없으면 이유를 돌려주고 지어내지 않는다."""
+        req = AgentRequest(
+            meta=_meta(ctx, self.tenant_id, self.timeout),
+            skill=CHANNEL_FOLLOWERS_SKILL,
+            input={},
+        )
+        out = await _ask(self._call, "marketing", req, self.timeout)
+        if isinstance(out, str):
+            return out
+        try:
+            return ChannelFollowersOutput.model_validate(out.output or {})
+        except ValidationError:
+            return f"{CHANNEL_FOLLOWERS_SKILL} 출력이 계약과 다름"
+
 
 FINANCE_ADVICE = "category_budget_advice"  # 재무가 낸 숫자의 출처 (facts.source)
 
@@ -611,7 +645,7 @@ class FinanceBudget:
         self.timeout = timeout
 
     async def ask(
-        self, ctx: str, category: str, fmt: ContentFormat | None, proposal_id: str
+        self, ctx: str, category: str | None, fmt: ContentFormat | None, proposal_id: str
     ) -> CategoryBudgetAdviceOutput | str:
         inp = CategoryBudgetAdviceInput(
             content_category=category, content_format=fmt, proposal_id=proposal_id
