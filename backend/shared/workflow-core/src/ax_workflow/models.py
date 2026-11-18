@@ -601,6 +601,40 @@ class ProposalPast(DomainModel):
     summary_line: str = ""
     note_line: str | None = None
     actions: list[str] = Field(default_factory=list)
+    views: int | None = None  # 조회수 숫자 (데이터분석, 11/18 이전 기록은 없음)
+    views_at: UtcDatetime | None = None
+
+
+IdeaAngle = Literal["ride_trend", "own_trend", "with_product"]
+
+
+class TrendRef(DomainModel):
+    """올라탈 유행 후보 하나. 값은 데이터분석 trend_insight_brief 그대로 (11/18)."""
+
+    topic: str
+    median_views: float | None = None  # 그 주제의 숏츠 형식 중앙값 조회
+    at: UtcDatetime | None = None  # 기준 시각
+
+
+class ScaleFacts(DomainModel):
+    """고객사 규모 숫자 (받은 때 기준). 모르는 값은 None, 지어내지 않는다 (11/18)."""
+
+    followers: int | None = None  # 가장 큰 공식 SNS 채널 팔로워 (마케팅)
+    followers_channel: str | None = None
+    past_views_median: float | None = None  # 지난 캠페인 조회 중앙값 (데이터분석)
+    past_views_count: int = 0  # 중앙값에 쓴 지난 캠페인 수
+
+
+class IdeaOption(DomainModel):
+    """기획 방향 선택지 하나. 쓸 수 있는지·추천은 코드 규칙이 정한다 (idea_options.py)."""
+
+    id: IdeaAngle
+    label: str
+    available: bool
+    blocked_reason: str | None = None
+    refs: list[TrendRef] = Field(default_factory=list)
+    recommended: bool = False
+    reason: str | None = None  # 추천 이유 (코드 문장)
 
 
 class Proposal(DomainModel):
@@ -638,6 +672,10 @@ class Proposal(DomainModel):
     # 지난 캠페인 결과 (받은 때 기준)와 후속 기획이면 이어 가는 앞 제안 PROP-n
     past: list[ProposalPast] = Field(default_factory=list)
     follow_of: str | None = None
+    # 방향 선택지 (11/18). 11/18 이전 제안은 비어 있다. angle이 없으면 "방향 선택 대기"
+    options: list[IdeaOption] = Field(default_factory=list)
+    scale: ScaleFacts | None = None
+    angle: IdeaAngle | None = None
 
 
 class DeletedProposal(DomainModel):
