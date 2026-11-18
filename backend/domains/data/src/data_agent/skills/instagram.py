@@ -442,8 +442,36 @@ def bursts(media: Mapping[str, Sequence[Mapping[str, Any]]], now: datetime,
                 posted_at=at, metric=name, value=value, account_median=round(median, 1),  # type: ignore[arg-type]
                 ratio=round(value / median, 2), permalink=m.get("permalink"),
                 caption_excerpt=cap[:80] or None,
+                thumbnail_url=safe_thumb(m.get("thumb_url") or st.thumb_of(m), now),
+                media_type=m.get("media_type"),
             ))  # fmt: skip
     return out
+
+
+THUMB_HOSTS = ("cdninstagram.com", "fbcdn.net")
+
+
+def safe_thumb(url: Any, now: datetime) -> str | None:
+    """https + 인스타 CDN(*.cdninstagram.com·*.fbcdn.net)만. oe(만료 시각)가 지났으면 None."""
+    from urllib.parse import parse_qs, urlsplit
+
+    if not isinstance(url, str) or not url:
+        return None
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    if parts.scheme != "https" or not any(host.endswith("." + h) for h in THUMB_HOSTS):
+        return None
+    oe = parse_qs(parts.query).get("oe")
+    if oe:
+        try:
+            if datetime.fromtimestamp(int(oe[0], 16), UTC) <= now:
+                return None
+        except (ValueError, OverflowError, OSError):
+            return None
+    return url
 
 
 Group = tuple[str, list[str], list[InstagramRadarPost]]

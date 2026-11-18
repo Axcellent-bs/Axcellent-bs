@@ -127,12 +127,24 @@ def runs(path: str | Path) -> dict[str, tuple[str, str, str | None]]:
 # ---------------------------------------------------------------- 레이더
 
 
+THUMB_COLUMNS = ("media_type", "thumb_url")
+
+
+def thumb_of(media: Mapping[str, Any]) -> str | None:
+    """썸네일 주소: 릴스·영상은 thumbnail_url, 사진·캐러셀은 media_url (주소만, 내려받지 않음)."""
+    for key in ("thumbnail_url", "media_url"):
+        value = media.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 class RadarStore(_Store):
     SCHEMA = (
         "CREATE TABLE IF NOT EXISTS media (day TEXT NOT NULL, account TEXT NOT NULL,"
         " media_id TEXT NOT NULL, product_type TEXT, posted_at TEXT, like_count INTEGER,"
         " comments_count INTEGER, view_count INTEGER, caption TEXT, permalink TEXT,"
-        " PRIMARY KEY (day, account, media_id));"
+        " media_type TEXT, thumb_url TEXT, PRIMARY KEY (day, account, media_id));"
         "CREATE TABLE IF NOT EXISTS accounts (day TEXT NOT NULL, account TEXT NOT NULL,"
         " status TEXT NOT NULL, reason TEXT, PRIMARY KEY (day, account));"
         # 묶음 수집 커서 (줄 하나): 이번 바퀴 날짜(한국), 다음에 부를 계정 위치, 마지막 묶음 시각,
@@ -144,6 +156,15 @@ class RadarStore(_Store):
         "CREATE TABLE IF NOT EXISTS radar_cycles (day TEXT PRIMARY KEY, completed_at TEXT NOT NULL,"
         " accounts INTEGER NOT NULL);"
     )
+
+    def __init__(self, path: str | Path) -> None:
+        super().__init__(path)
+        # 예전 ig_radar.db(썸네일 열 없음)는 열 때 열만 더한다 (예전 행은 빈 값)
+        with self._lock, self._conn:
+            have = {r[1] for r in self._conn.execute("PRAGMA table_info(media)")}
+            for col in THUMB_COLUMNS:
+                if col not in have:
+                    self._conn.execute(f"ALTER TABLE media ADD COLUMN {col} TEXT")
 
     def cursor(self) -> tuple[date, int, datetime | None, str] | None:
         """(바퀴 날짜, 다음 위치, 마지막 묶음 시각, 계정 목록 해시). 없으면 None."""
@@ -182,10 +203,13 @@ class RadarStore(_Store):
             d = day.isoformat()
             self._conn.execute("DELETE FROM media WHERE day = ? AND account = ?", (d, account))
             self._conn.executemany(
-                "INSERT OR REPLACE INTO media VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO media (day, account, media_id, product_type, posted_at,"
+                " like_count, comments_count, view_count, caption, permalink, media_type,"
+                " thumb_url) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 [(d, account, str(m["id"]), m.get("media_product_type"), m.get("timestamp"),
                   m.get("like_count"), m.get("comments_count"), m.get("view_count"),
-                  m.get("caption"), m.get("permalink")) for m in media],
+                  m.get("caption"), m.get("permalink"), m.get("media_type"), thumb_of(m))
+                 for m in media],
             )  # fmt: skip
             self._conn.execute("INSERT OR REPLACE INTO accounts VALUES (?,?,?,?)",
                                (d, account, status, reason))  # fmt: skip
@@ -263,15 +287,18 @@ def radar_latest(path: str | Path) -> tuple[date | None, dict[str, list[dict[str
             return None, {}, {}
         day = row[0]
         media: dict[str, list[dict[str, Any]]] = {}
-        for acc, mid, pt, at, likes, comments, views, cap, link in conn.execute(
+        # 예전 파일(썸네일 열 없음, 아직 수집기가 열지 않음)도 읽는다: 없는 열은 NULL
+        have = {r[1] for r in conn.execute("PRAGMA table_info(media)")}
+        extra = ", ".join(c if c in have else f"NULL AS {c}" for c in THUMB_COLUMNS)
+        for acc, mid, pt, at, likes, comments, views, cap, link, mtype, thumb in conn.execute(
             "SELECT account, media_id, product_type, posted_at, like_count, comments_count,"
-            " view_count, caption, permalink FROM media WHERE day = ?",
+            f" view_count, caption, permalink, {extra} FROM media WHERE day = ?",
             (day,),
         ):
             media.setdefault(acc, []).append({
                 "id": mid, "media_product_type": pt, "timestamp": at, "like_count": likes,
                 "comments_count": comments, "view_count": views, "caption": cap,
-                "permalink": link,
+                "permalink": link, "media_type": mtype, "thumb_url": thumb,
             })  # fmt: skip
         failed = {a: r or s for a, s, r in conn.execute(
             "SELECT account, status, reason FROM accounts WHERE day = ? AND status != 'ok'",

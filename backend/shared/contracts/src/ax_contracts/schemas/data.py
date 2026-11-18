@@ -4251,6 +4251,10 @@ class InstagramRadarPost(AxModel):
     ratio: float = Field(ge=0)  # value ÷ account_median
     permalink: str | None = None
     caption_excerpt: str | None = None  # 앞 80자, untrusted
+    # 썸네일 주소 (https 인스타 CDN만, oe 만료 전만. 이미지는 내려받지 않음). 릴스·영상은
+    # thumbnail_url, 사진·캐러셀은 media_url(첫 장)
+    thumbnail_url: str | None = None
+    media_type: str | None = None  # IMAGE · VIDEO · CAROUSEL_ALBUM
 
 
 class InstagramRadarGroup(AxModel):
