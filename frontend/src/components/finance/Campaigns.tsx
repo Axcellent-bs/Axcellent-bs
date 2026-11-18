@@ -24,7 +24,7 @@ const W = {
   dataPerf: { label: "데이터 AI · 트렌드 > 성과", href: "/data/trend#result" },
   planning: { label: "기획 AI · 기획 제안", href: "/planning/proposals" },
   orchestrator: { label: "총괄 AI · 재무가 낸 의견", href: "/orchestrator#orch-finance" },
-  safety: { label: "안전 장치 · 사람 결정 대기", href: "/safety" },
+  safety: { label: "안전 처리 로그 · 사람 결정 대기", href: "/safety" },
 } satisfies Record<string, Wire>;
 function Wiring({ from, to }: { from: Wire[]; to?: Wire[] }) {
   const links = (xs: Wire[]) => xs.map((x, i) => (

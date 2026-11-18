@@ -19,15 +19,15 @@ export const FAMILIES: { id: Family; name: string; desc: string }[] = [
 ]
 
 /**
- * AXcellent가 관리하는 AI 9개와 에이전트 처리 로그. 예전 캣북스 대시보드(ax-frontend dashboard-web)에 있던 AI를 모두 이리로 옮겼다.
+ * AXcellent가 관리하는 AI 9개와 안전 처리 로그. 예전 캣북스 대시보드(ax-frontend dashboard-web)에 있던 AI를 모두 이리로 옮겼다.
  * id는 ax-backend .github/team.yml 부서 id, backend는 화면이 부르는 서버(src/lib/env.ts).
  * 왼쪽 메뉴는 이 순서대로 AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다 (AdminShell).
- * 에이전트 처리 로그(safety)는 모든 AI의 상태 변경을 execute()로 받아 판단하므로 화면(/safety)을 둔다. 회사 기억(memory)은 뒤에서 도는 서버라 넣지 않는다. 인프라는 DejaFix가 맡는다.
+ * 안전 처리 로그(safety)는 모든 AI의 상태 변경을 execute()로 받아 판단하므로 화면(/safety)을 둔다. 회사 기억(memory)은 뒤에서 도는 서버라 넣지 않는다. 인프라는 DejaFix가 맡는다.
  */
 export type AgentId = 'orchestrator' | 'safety' | 'support' | 'finance' | 'data' | 'archive' | 'hr' | 'marketing' | 'planning' | 'dev'
 export const AGENTS: { id: AgentId; name: string; Icon: ComponentType<{ size?: number }>; backend: string }[] = [
   { id: 'orchestrator', Icon: IconBolt, name: '총괄 AI', backend: 'orchestrator (8000) · 판매 서버 관리 읽기 중계 (dashboard-api 8020)' },
-  { id: 'safety', Icon: IconLock, name: '에이전트 처리 로그', backend: 'safety (8001)' },
+  { id: 'safety', Icon: IconLock, name: '안전 처리 로그', backend: 'safety (8001)' },
   { id: 'archive', Icon: IconBook, name: '아카이브 AI', backend: 'decisions (8114) · dashboard-api (8020)' },
   { id: 'support', Icon: IconUser, name: '고객지원 AI', backend: 'dashboard-api (8020)' },
   { id: 'finance', Icon: IconShield, name: '재무 AI', backend: 'finance (8105) · safety (8001)' },
@@ -173,7 +173,7 @@ export const SERVICES: Service[] = [
     desc: '여러 서비스에 걸친 사건을 묶어 조율하고 사람 승인을 받습니다.',
   },
   {
-    id: 'safety', agent: 'safety', family: 'together', name: '에이전트 처리 로그', by: 'AXcellent', Icon: IconLock, entry: '/safety', paths: ['/safety'],
+    id: 'safety', agent: 'safety', family: 'together', name: '안전 처리 로그', by: 'AXcellent', Icon: IconLock, entry: '/safety', paths: ['/safety'],
     desc: '모든 AI의 돈·게시·배포 요청에 등급을 매겨 실행하거나 사람 결정으로 보류합니다.',
   },
 ]
@@ -207,7 +207,7 @@ const ALL = SERVICES.map((s) => s.id)
 // 필수 서비스: 회사가 끌 수 없고 카탈로그에서 내릴 수도 없다. 다른 AI가 장애 기록(총괄 사건·고객지원 장애 확인·
 // 재무 장애 비용·인사 대응 시간)을 쓰므로 장애 대응과 그 감시 대상인 PC·서버 연결은 늘 켜 둔다.
 // 총괄은 AI들 사이의 일을 나누고 모으는 자리라, 어떤 서비스를 골라도 늘 켜 둔다.
-// 에이전트 처리 로그(안전 규칙)는 모든 AI의 상태 변경이 지나는 관문이라 끌 수 없다
+// 안전 처리 로그(안전 규칙)는 모든 AI의 상태 변경이 지나는 관문이라 끌 수 없다
 export const REQUIRED_SERVICES = ['incident', 'hosts', 'orchestrator', 'safety']
 export const isRequired = (id: string) => REQUIRED_SERVICES.includes(id)
 // 필수 카드 아래에 보이는 이유

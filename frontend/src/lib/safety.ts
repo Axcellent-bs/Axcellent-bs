@@ -1,7 +1,7 @@
 import { SAFETY_API_URL } from "./env";
 import type { ExecutionRecord, Review } from "./finance";
 
-// 에이전트 처리 로그(safety, 8001) 읽기 전용 클라이언트. 모든 AI의 상태 변경(돈·게시·배포)은 execute()로
+// 안전 처리 로그(safety, 8001) 읽기 전용 클라이언트. 모든 AI의 상태 변경(돈·게시·배포)은 execute()로
 // 이 관문을 지나고, 여기서 등급(A·B·C)을 매겨 바로 실행·보류(사람 결정)·거절한다.
 // 화면은 기록만 읽는다. 보류 결정은 그 일을 맡은 화면(고객지원·마케팅·재무)에서 사람이 한다.
 
@@ -44,11 +44,11 @@ async function get<T>(path: string): Promise<T> {
   try {
     res = await fetch(`${SAFETY_API_URL}${path}`, { cache: "no-store" });
   } catch {
-    throw new SafetyApiError("에이전트 처리 로그 서버에 연결하지 못했습니다. 서버가 켜져 있는지 확인하세요.");
+    throw new SafetyApiError("안전 처리 로그 서버에 연결하지 못했습니다. 서버가 켜져 있는지 확인하세요.");
   }
   const body = (await res.json().catch(() => null)) as { data?: T; error?: { message?: string } } | null;
   if (!res.ok || !body || body.data === undefined) {
-    throw new SafetyApiError(body?.error?.message ?? `에이전트 처리 로그 서버가 답하지 못했습니다 (${res.status}).`);
+    throw new SafetyApiError(body?.error?.message ?? `안전 처리 로그 서버가 답하지 못했습니다 (${res.status}).`);
   }
   return body.data;
 }
