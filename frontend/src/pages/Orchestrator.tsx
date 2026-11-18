@@ -48,8 +48,8 @@ export default function OrchestratorPage() {
             <p className={`mt-1 text-4xl font-bold tabular-nums ${tone}`}>{holds ? `${holds}건` : "없음"}</p>
           </div>
           <dl className={`flex gap-8 pb-1 text-sm ${tone}`}>
-            <div><dt className="text-xs opacity-80">장애 이슈</dt><dd className="text-lg font-semibold tabular-nums">{faults.length}건 (진행 중 {faults.filter((i) => i.status === "open").length}건)</dd></div>
-            <div><dt className="text-xs opacity-80">문의 처리 결과</dt><dd className="text-lg font-semibold tabular-nums">{inquiries.length}건</dd></div>
+            <div><dt className="text-xs">장애 이슈</dt><dd className="text-lg font-semibold tabular-nums">{faults.length}건 (진행 중 {faults.filter((i) => i.status === "open").length}건)</dd></div>
+            <div><dt className="text-xs">문의 처리 결과</dt><dd className="text-lg font-semibold tabular-nums">{inquiries.length}건</dd></div>
           </dl>
           <p className={`ml-auto max-w-sm pb-1 text-xs ${tone}`}>승인·거절은 사람이 승인 대기함에서 직접 합니다. 이슈의 단계·타임라인·해결 내용은 아카이브 AI의 장애 기록에서 봅니다.</p>
         </div>
