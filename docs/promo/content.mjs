@@ -23,10 +23,10 @@ export default {
     brochureUrl: "",
     brochureLabel: "브로셔 PDF 받기",
     // 상담 문의. 예: Instagram DM 주소 또는 mailto 주소. 연락 수단이 정해지면 채운다
-    contactUrl: "",
+    contactUrl: "mailto:dejasix66@gmail.com",
     contactLabel: "상담 문의",
     // 문의 안내 문장(링크 없이 글로만 보일 때). 비우면 안 보인다
-    contactNote: "",
+    contactNote: "도입 상담은 이메일로 받습니다: dejasix66@gmail.com",
   },
 
   nav: [
