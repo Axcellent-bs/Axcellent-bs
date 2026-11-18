@@ -908,3 +908,27 @@ def test_background_keeps_insight_once() -> None:
     assert _background(P()) == P.why  # type: ignore[arg-type]
     P.why = "독서 검색이 평균의 1.6배다."
     assert _background(P()).startswith(P.insight)  # type: ignore[arg-type]
+
+
+@pytest.mark.role("planning")
+def test_promo_carries_content_category_and_format() -> None:
+    """데이터분석 기획안의 영상 카테고리·형식(#1333)을 인사이트로 옮긴다 (11/18)."""
+    promo = PromoConceptsOutput.model_validate(
+        {
+            "concepts": [
+                {
+                    "concept_id": "c1", "title": "밤 독서", "borrowed_trend": "독서",
+                    "products": [{"product_id": "p2", "name": "밤의 도서관", "price": 16800}],
+                    "content_category": "정보·팁", "content_format": "shorts",
+                },
+                {
+                    "concept_id": "c2", "title": "낮 독서", "borrowed_trend": "독서",
+                    "products": [{"product_id": "p3", "name": "낮의 도서관", "price": 12000}],
+                },
+            ],
+            "trends": [{"name": "독서", "kind": "season", "detail": "평균의 1.6배"}],
+            "run_id": "run-3",
+        }
+    )  # fmt: skip
+    got = [(x.content_category, x.content_format) for x in proposals.from_promo(promo)]
+    assert got == [("정보·팁", "shorts"), (None, None)]

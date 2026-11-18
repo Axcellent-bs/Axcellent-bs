@@ -106,3 +106,15 @@ def test_contracts_accept_old_payloads() -> None:
             {"insight_id": "i", "title": "t", "summary": "s", "skill": "x", "facts": [fact],
              "product_ids": [f"p{n}" for n in range(11)]}  # fmt: skip
         )
+
+
+@pytest.mark.role("planning")
+def test_from_brief_carries_content_category_and_format() -> None:
+    """데이터분석이 채운 영상 카테고리·형식(#1333)을 그대로 옮긴다. 없으면 None (11/18)."""
+    t = _insight({"naver_ratio": 2.0})
+    out = TrendInsightBriefOutput(insights=[
+        t.model_copy(update={"content_category": "챌린지", "content_format": "shorts"}),
+        t.model_copy(update={"insight_id": "i2"}),
+    ])  # fmt: skip
+    got = [(i.content_category, i.content_format) for i in from_brief(out)]
+    assert got == [("챌린지", "shorts"), (None, None)]
