@@ -11,22 +11,24 @@ import { FilterButton, TrendHeadline, materialOf } from "@/components/data/Trend
 import { DETECT_VIEWS, detectViewFromHash, hashWithView, type DetectView } from "@/lib/detectView";
 import { VideoExplorer } from "@/components/data/VideoExplorer";
 import { TrendMemes } from "@/components/data/TrendMemes";
+import { KeywordSummaryCards, KeywordTrend } from "@/components/data/KeywordTrend";
 import { okOut, useSkill } from "@/components/data/useSkill";
 import { Basis, Sources, VideoLinks, when } from "@/components/data/Sources";
 import { LoopStepper, type LoopTrendState } from "@/components/data/ContentLoop";
 import { LOOP_STAGES, TREND_TABS, trendTabFromHash, trendTabHash, trendTabOfStage, type LoopProbe, type LoopStage, type TrendTab } from "@/lib/contentLoop";
 import {
   DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
-  type PromoConceptsOutput, type TrendCandidatesOutput, type TrendPopularOutput, type TrendScanOutput, type TrendVerdict,
+  type KeywordWindow, type PromoConceptsOutput, type TrendCandidatesOutput, type TrendPopularOutput, type TrendScanOutput, type TrendVerdict,
   type Evidence, type TrendingSearchEvidence, type YouTubeTagEvidence,
 } from "@/lib/data";
 
 // 트렌드&콘텐츠 화면 (/data/trend): 콘텐츠 루프 4단계와 같은 하위 탭 4개 + 맨 끝 "데이터 출처"(루프와 별개) (정의는 lib/contentLoop.ts 한 곳).
 // - 주소에 하위 탭을 남긴다: /data/trend#detect · #recommend · #handoff · #result · #sources(데이터 출처, 루프와 별개) (없으면 감지). 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
 // - 루프 띠의 단계를 누르면 그 단계가 속한 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
-// - 1 감지: 맨 위 한 줄(오늘 가장 큰 화제, trend_popular) → 플랫폼 칩(#detect?view=all|youtube, lib/detectView.ts)
-//   종합 = 요즘 유행·밈(trend_memes, TrendMemes) + 1위 요약 / 유튜브 = 같은 유행 표(쇼츠 칸 중심) + 영상 탐색(video_explorer 숏·롱 × 카테고리 × 기간,
-//   VideoExplorer. 고른 조건은 #detect?… 주소에 남긴다. view 없이 조건만 있는 예전 주소는 유튜브 칩) → 칩 밖 맨 아래 급상승 한 줄 목록(trend_scan·trend_candidates)·키워드 직접 판정.
+// - 1 감지: 맨 위 한 줄(오늘 가장 큰 화제, trend_popular) → 플랫폼 칩(#detect?view=all|youtube|search, lib/detectView.ts)
+//   종합 = 요약 줄(1위 유행·검색 급상승 1위·이달 시즌 1위) + 요즘 유행·밈(trend_memes, TrendMemes) / 유튜브 = 같은 유행 표(쇼츠 칸 중심) + 영상 탐색(video_explorer 숏·롱 × 카테고리 × 기간,
+//   VideoExplorer. 고른 조건은 #detect?… 주소에 남긴다. view 없이 조건만 있는 예전 주소는 유튜브 칩) /
+//   검색 = 검색 트렌드(keyword_trend, KeywordTrend) + 맨 아래 급상승 한 줄 목록(trend_scan·trend_candidates)·키워드 직접 판정.
 //   그래프 없음. YouTube 속도 목록은 화면을 줄이려고 뺐다
 // - trend_popular·promo_concepts는 이 화면이 한 번 받아 1단계 요약·칩 색과 2단계 기획안이 같이 쓴다 (useSkill)
 // - 2 인사이트: 인사이트 브리프(trend_insight_brief) + 맨 아래 참고용 예시(promo_concepts 기획안 카드, 접힘). 처음 열 때 그리고, 그 뒤에는 숨기기만 한다
@@ -198,9 +200,11 @@ function PreparingStage({ stage }: { stage: LoopStage }) {
 
 // ------------------------------------------------------------------- 1 감지 플랫폼 칩
 
-/** 종합(기본) = 요즘 유행·밈 표 + 1위 요약 / 유튜브 = 같은 유행 표(쇼츠 칸 중심) + 영상 탐색 그대로.
- *  칩은 주소 #detect?view=… (lib/detectView.ts). 유행 표는 칩을 바꿔도 같은 자리라 다시 받지 않는다 */
-function PlatformViews() {
+/** 종합(기본) = 요약 줄(1위 유행·검색 급상승 1위·이달 시즌 1위) + 요즘 유행·밈 표 / 유튜브 = 같은 유행 표(쇼츠 칸 중심) + 영상 탐색 그대로 /
+ *  검색 = 검색 트렌드(keyword_trend, KeywordTrend) + 맨 아래 급상승 한 줄 목록·키워드 직접 판정(searchExtra, TrendScan이 만든 그대로).
+ *  칩은 주소 #detect?view=… (lib/detectView.ts). 유행 표는 칩을 바꿔도 같은 자리(검색 칩에서는 숨김)라 다시 받지 않는다.
+ *  keyword_trend는 여기서 한 번 받아 검색 칩과 종합 요약 줄이 같이 쓴다 (일간/주간을 바꾸면 다시 받는다) */
+function PlatformViews({ searchExtra }: { searchExtra?: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const view = detectViewFromHash(location.hash);
@@ -208,13 +212,28 @@ function PlatformViews() {
     if (next === view) return;
     navigate({ pathname: location.pathname, search: location.search, hash: hashWithView(location.hash, next) }, { replace: true });
   };
+  const [kwWindow, setKwWindow] = useState<KeywordWindow>("day");
+  const kw = useSkill(() => dataAi.keywordTrend(kwWindow));
+  const pickWindow = (next: KeywordWindow) => {
+    if (next === kwWindow) return;
+    setKwWindow(next);
+    kw.reload();
+  };
   return (
     <div className="space-y-4">
       <div role="group" aria-label="플랫폼" className="flex flex-wrap gap-2">
         {DETECT_VIEWS.map((v) => <FilterButton key={v.key} on={view === v.key} onClick={() => pick(v.key)}>{v.label}</FilterButton>)}
       </div>
-      <TrendMemes focus={view} />
+      <div hidden={view === "search"}>
+        <TrendMemes focus={view} summaryCards={<KeywordSummaryCards state={kw.state} />} />
+      </div>
       {view === "youtube" && <VideoExplorer />}
+      {view === "search" && (
+        <>
+          <KeywordTrend state={kw.state} win={kwWindow} onWindow={pickWindow} onRetry={kw.reload} />
+          {searchExtra}
+        </>
+      )}
     </div>
   );
 }
@@ -385,11 +404,11 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
       {TREND_TABS.map((t) => (
         <div key={t.key} role="tabpanel" id={`trend-sub-panel-${t.key}`} aria-labelledby={`trend-sub-${t.key}`} hidden={tab.key !== t.key}>
           {t.key === "detect" ? (
-            // 순서: 오늘 가장 큰 화제 한 줄 → 플랫폼 칩(종합: 요즘 유행·밈 / 유튜브: 유행 + 영상 탐색) → 칩 밖 맨 아래 급상승·직접 판정
+            // 순서: 오늘 가장 큰 화제 한 줄 → 플랫폼 칩(종합: 요약 줄 + 요즘 유행·밈 / 유튜브: 유행 + 영상 탐색 / 검색: 검색 트렌드 + 맨 아래 급상승·직접 판정)
+            // 토큰이 없으면 칩 없이 안내(detect)만
             <div className="space-y-4">
               {kpiLive && <TrendHeadline popular={popularRes.state} />}
-              {kpiLive && <PlatformViews />}
-              {detect}
+              {kpiLive ? <PlatformViews searchExtra={detect} /> : detect}
             </div>
           ) : !seen.has(t.key) ? null : t.key === "recommend" ? (
             // 처음 열 때 그리고, 그 뒤에는 하위 탭을 오가도 남도록 숨기기만 한다

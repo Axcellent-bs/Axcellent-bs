@@ -1704,6 +1704,18 @@ export interface MemePlatform {
   posts: number | null;
   ratio: number | null;
   reason: string | null;
+  // 11/18 추가 (검색 플랫폼: 네이버 블로그·카페 글 수와 검색광고 월간 검색량). 예전 응답엔 없다
+  blog_total?: number | null;
+  /** 최근 7일 블로그 글 수 (조회한 결과 안에서) */
+  blog_7d?: number | null;
+  /** 조회한 최대 개수가 모두 7일 안이라 실제는 더 많을 수 있음 */
+  blog_7d_capped?: boolean;
+  cafe_total?: number | null;
+  /** 최근 30일 PC + 모바일 검색량 */
+  monthly_volume?: number | null;
+  /** 네이버가 "<10"으로 준 값이 있음 (숫자로 바꾸지 않음) */
+  volume_below_10?: boolean;
+  volume_reason?: string | null;
 }
 export interface MemeSkipped {
   name: string;
@@ -1740,6 +1752,118 @@ export interface TrendMemesOutput {
   limits: string[];
   generated_at: string | null;
   summary: string;
+}
+
+// ---------------------------------------------------------------- 검색 트렌드 · 도서 분야 (keyword_trend)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py KeywordTrendOutput (11/18).
+// 키워드 풀(검색광고 키워드 도구 연관어, 하루 1번) → 데이터랩 판정·추정. 숫자·판정은 서버 코드, AI 요약만 LLM(숫자 검증).
+// 검색광고 키가 없으면 검색량 칸은 null + 이유. KeywordVolume.total은 서버 property라 응답에 없다 (monthly_volume을 쓴다)
+/** day = 어제 vs 지난 4주 같은 요일, week = 최근 7일 vs 그 전 4주 */
+export type KeywordWindow = "day" | "week";
+export interface KeywordVolume {
+  pc: number | null;
+  mobile: number | null;
+  pc_below_10: boolean;
+  mobile_below_10: boolean;
+  competition: "low" | "mid" | "high" | null;
+}
+export interface KeywordNews {
+  title: string;
+  source: string | null;
+  url: string | null;
+  published_at: string | null;
+}
+export interface KeywordSpread {
+  status: "known" | "unavailable" | "not_checked";
+  reason: string | null;
+  blog_total: number | null;
+  blog_7d: number | null;
+  blog_7d_capped: boolean;
+  cafe_total: number | null;
+  /** 카페글 검색 응답에 날짜가 없어 늘 null + cafe_7d_reason */
+  cafe_7d: number | null;
+  cafe_7d_reason: string | null;
+  news: KeywordNews[];
+}
+export interface RisingKeyword {
+  keyword: string;
+  rank: number;
+  status: TrendStatus;
+  /** 평소 대비 배수 */
+  ratio: number | null;
+  score: number | null;
+  reason: string | null;
+  category: string | null;
+  volume: KeywordVolume | null;
+  monthly_volume: number | null;
+  volume_reason: string | null;
+  /** 어제(week면 최근 7일) 추정 검색 수 */
+  estimate: number | null;
+  /** 추정 − 지난 4주 같은 요일(week면 그 전 4주) 평균 */
+  increase: number | null;
+  increase_reason: string | null;
+  news_count: number | null;
+  news_source: "naver_news" | "google_rss" | null;
+  news: KeywordNews[];
+  spread: KeywordSpread | null;
+  products: number | null;
+  product_names: string[];
+  products_reason: string | null;
+}
+export interface NewKeyword {
+  keyword: string;
+  monthly_volume: number | null;
+  volume_below_10: boolean;
+}
+export interface NewKeywordDay {
+  /** "YYYY-MM-DD" (한국) */
+  day: string;
+  /** pending = 그날 풀이 아직 없음(집계 전) */
+  status: "known" | "pending";
+  reason: string | null;
+  items: NewKeyword[];
+}
+export interface SeasonKeyword {
+  keyword: string;
+  group: string | null;
+  /** 작년 이달 비율 ÷ 지난 12개월 평균 */
+  ratio: number;
+  month_volume: number | null;
+  volume_reason: string | null;
+  /** "MM-DD" */
+  peak_from: string | null;
+  peak_to: string | null;
+  peak_reason: string | null;
+  products: number | null;
+  product_names: string[];
+  products_reason: string | null;
+}
+export interface SeasonGroup {
+  name: string;
+  count: number;
+}
+export interface KeywordTrendOutput {
+  window: KeywordWindow;
+  status: "known" | "unknown";
+  reason: string | null;
+  generated_at: string | null;
+  pool_day: string | null;
+  pool_size: number;
+  searchad_status: "connected" | "key_missing" | "failed";
+  searchad_reason: string | null;
+  spread_status: "connected" | "unavailable" | "not_checked";
+  spread_reason: string | null;
+  rising: RisingKeyword[];
+  new_keywords: NewKeywordDay[];
+  season_month: number | null;
+  season: SeasonKeyword[];
+  season_groups: SeasonGroup[];
+  season_reason: string | null;
+  summary: string | null;
+  summary_fallback: boolean;
+  summary_reason: string | null;
+  naver_calls: number;
+  limits: string[];
 }
 
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
@@ -2185,6 +2309,8 @@ export const dataAi = {
     askData<VideoExplorerOutput>("video_explorer", "영상 탐색", q, TREND_DEADLINE_MS),
   /** 요즘 유행·밈 (이번 주 = 7일 vs 직전 7일, 오늘 = 어제 vs 지난 4주 같은 요일). 서버가 미리 계산한 결과를 읽는다 */
   trendMemes: (window: MemeWindow) => askData<TrendMemesOutput>("trend_memes", "요즘 유행", { window }, TREND_DEADLINE_MS),
+  /** 검색 트렌드 · 도서 분야 (서버가 미리 계산한 결과를 읽는다) */
+  keywordTrend: (window: KeywordWindow) => askData<KeywordTrendOutput>("keyword_trend", "검색 트렌드", { window }, TREND_DEADLINE_MS),
   /** 인사이트 브리프 (2단계). 서버 하루 캐시. 브리프 안에서 trend_age·임베딩·한 줄 문장(LLM)을 부른다 */
   trendInsightBrief: () => askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 브리프", {}, RECOMMEND_DEADLINE_MS),
   /** 오늘 특정 판 (version 없으면 최신 판). 저장된 판을 읽기만 한다 */

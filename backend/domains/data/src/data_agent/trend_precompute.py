@@ -31,13 +31,17 @@ from data_agent.stage_timing import recording
 # (이번 주·오늘)를 다 넣는다
 SKILLS = (
     "trend_scan", "trend_candidates", "trend_popular", "youtube_velocity", "shorts_stats",
-    "video_explorer", "trend_memes", "trend_insight_brief",
+    "video_explorer", "trend_memes", "keyword_trend", "trend_insight_brief",
 )  # fmt: skip
 ONCE = frozenset({"video_explorer"})
 CONTEXT_ID = "ctx_trend_precompute"
 PASSES = 2
 # 화면과 같은 입력. 적지 않은 skill은 {} 하나
-INPUTS: dict[str, tuple[dict[str, str], ...]] = {"trend_memes": ({}, {"window": "day"})}
+# 검색 트렌드(keyword_trend)도 화면 토글 두 가지(일간·주간)
+INPUTS: dict[str, tuple[dict[str, str], ...]] = {
+    "trend_memes": ({}, {"window": "day"}),
+    "keyword_trend": ({}, {"window": "week"}),
+}
 
 
 def _request(skill: str, payload: dict[str, str] | None = None) -> AgentRequest:
@@ -63,6 +67,7 @@ async def precompute(emit: Callable[[str], None] | None = None) -> list[str]:
         "trend_insight_brief": handlers.trend_insight_brief,
         "video_explorer": handlers.video_explorer,
         "trend_memes": handlers.trend_memes,
+        "keyword_trend": handlers.keyword_trend,
     }
     for n in range(1, PASSES + 1):
         for skill in SKILLS:

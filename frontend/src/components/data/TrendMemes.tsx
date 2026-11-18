@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
-import { useSkill } from "@/components/data/useSkill";
+import { useSkill, type SkillState } from "@/components/data/useSkill";
+import { SummaryBody, SummaryCard } from "@/components/data/KeywordTrend";
 import { dataAi, type MemeWindow, type TrendMeme, type TrendMemesOutput } from "@/lib/data";
 import type { DetectView } from "@/lib/detectView";
 
@@ -69,16 +70,21 @@ function criteriaLine(out: TrendMemesOutput, span: string, before: string) {
   return `기준: ${span} ${c.min_channels}개 이상 채널 · 영상 ${c.min_videos}개 이상 · ${before}의 ${c.min_ratio}배 이상(${before}에 없었으면 새로 등장). 인물 이름 자체·뉴스·사건은 유행에서 뺍니다(기존 분류기 그대로).`;
 }
 
-/** 종합 칩 맨 위 요약 칸: 1위 유행 하나 (서버 순위 그대로) */
-function TopMeme({ m, label, before }: { m: TrendMeme; label: string; before: string }) {
-  const ratio = m.ratio_status === "known" && m.ratio !== null ? `${before} 대비 ${times(m.ratio)}` : m.ratio_status === "new" ? "새로 등장" : null;
+/** 종합 칩 맨 위 요약 줄의 첫 칸: 1위 유행 하나 (서버 순위 그대로). 받는 중·실패·없음이면 짧은 문장 */
+function TopMeme({ s, label, before }: { s: SkillState<TrendMemesOutput>; label: string; before: string }) {
+  const m = s.kind === "ok" ? s.out.items[0] ?? null : null;
+  const ratio = !m ? null : m.ratio_status === "known" && m.ratio !== null ? `${before} 대비 ${times(m.ratio)}` : m.ratio_status === "new" ? "새로 등장" : null;
   return (
-    <div className="rounded-xl bg-brand-50 px-4 py-3">
-      <p className="text-xs font-semibold text-brand-700">{label} 1위 유행</p>
-      <p className="mt-0.5 text-lg font-bold text-ink-900">{m.name}</p>
-      <p className="text-sm text-ink-700">{[`채널 ${m.channels}곳`, `영상 ${m.videos}개`, ratio].filter(Boolean).join(" · ")}</p>
-      {m.description && <p className="mt-0.5 text-xs text-ink-500">{m.description}</p>}
-    </div>
+    <SummaryCard label={`${label} 유행`}>
+      {m ? (
+        <>
+          <SummaryBody title={m.name} lines={[`채널 ${m.channels}곳`, `영상 ${m.videos}개`, ratio]} />
+          {m.description && <p className="mt-0.5 text-xs text-ink-500">{m.description}</p>}
+        </>
+      ) : (
+        <p className="text-sm text-ink-500">{s.kind === "loading" ? "받는 중…" : s.kind === "failed" ? "받지 못했어요" : "기준을 넘은 유행이 없어요."}</p>
+      )}
+    </SummaryCard>
   );
 }
 
@@ -117,8 +123,9 @@ function Table({ out, before, youtube }: { out: TrendMemesOutput; before: string
   );
 }
 
-/** focus: 감지 플랫폼 칩 (all = 종합: 1위 요약 + 전체 칸, youtube = 쇼츠 칸 중심). 기획 넘기기 버튼·인스타·검색 플랫폼 칸은 그리지 않는다 */
-export function TrendMemes({ focus = "all" }: { focus?: DetectView }) {
+/** focus: 감지 플랫폼 칩 (all = 종합: 요약 줄 + 전체 칸, youtube = 쇼츠 칸 중심). 기획 넘기기 버튼·인스타·검색 플랫폼 칸은 그리지 않는다.
+ *  summaryCards: 종합 요약 줄에서 1위 유행 칸 뒤에 붙일 칸 (검색 급상승 1위·이달 시즌 1위, 부모가 받은 keyword_trend) */
+export function TrendMemes({ focus = "all", summaryCards }: { focus?: DetectView; summaryCards?: ReactNode }) {
   const youtube = focus === "youtube";
   const [win, setWin] = useState<MemeWindow>("week");
   const res = useSkill(() => dataAi.trendMemes(win));
@@ -142,11 +149,16 @@ export function TrendMemes({ focus = "all" }: { focus?: DetectView }) {
   return (
     <Panel id="data-trend-memes" title="요즘 유행·밈" tools={tools}
       hint={'영상 하나가 아니라 "여러 채널에서 같이 늘어난 해시태그·구절"을 하나의 유행으로 묶었어요. 검색으로도 오르는지 같이 봅니다.'}>
+      {!youtube && (
+        <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3">
+          <TopMeme s={s} label={meta.label} before={meta.before} />
+          {summaryCards}
+        </div>
+      )}
       {s.kind === "loading" ? <Waiting what="유행을 받는 중…" />
         : s.kind === "failed" ? <ErrorBox message={s.reason} onRetry={res.reload} />
         : (
           <div className="space-y-2">
-            {!youtube && s.out.items[0] && <TopMeme m={s.out.items[0]} label={meta.span} before={meta.before} />}
             {s.out.items.length ? <Table out={s.out} before={meta.before} youtube={youtube} /> : (
               <p className="text-sm text-ink-700">기준을 넘은 유행이 없어요.{s.out.status === "unknown" && s.out.reason ? ` ${s.out.reason}` : ""}</p>
             )}

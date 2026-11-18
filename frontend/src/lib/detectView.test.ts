@@ -25,5 +25,14 @@ test("칩을 바꿔도 영상 조건은 그대로", () => {
 });
 
 test("칩 목록은 배열 한 곳 (종합이 먼저)", () => {
-  assert.deepEqual(DETECT_VIEWS.map((v) => v.key), ["all", "youtube"]);
+  assert.deepEqual(DETECT_VIEWS.map((v) => v.key), ["all", "youtube", "search"]);
+});
+
+test("검색 칩 주소", () => {
+  assert.equal(detectViewFromHash("#detect?view=search"), "search");
+  assert.equal(detectViewFromHash("#detect?view=search&len=long"), "search"); // view가 있으면 영상 조건보다 먼저
+  assert.equal(hashWithView("#detect", "search"), "#detect?view=search");
+  const next = hashWithView("#detect?len=long&p=3d&view=youtube", "search");
+  assert.equal(next, "#detect?len=long&p=3d&view=search");
+  assert.equal(detectViewFromHash(next), "search");
 });

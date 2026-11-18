@@ -739,6 +739,8 @@ async def trend_memes(
     videos: Sequence[Video] | None = None,
     store: MemeStore | None = None,
     age_store: Any = None,
+    search: Any = None,
+    searchad: Any = None,
 ) -> MemesResult:
     """요즘 유행·밈. 상태를 바꾸지 않는다 (설명 하루 캐시·네이버 호출 수만 data 파일에 남김)."""
     from data_agent.skills.ad_material import load_rules
@@ -828,6 +830,10 @@ async def trend_memes(
         out.naver_calls, out.limits = calls, limits
         if calls:
             queries.append(f"naver search-trend x{calls} (caller={CALLER})")
+        # 검색 플랫폼 칸 web_search (11/18): 같은 앞 search_top개만 블로그·카페 글 수와 검색량.
+        # 위 search(네이버 검색 배수) 칸 계산은 그대로다
+        if search is not None or searchad is not None:
+            await fill_web_search(top, search, searchad, now)
         # 연결 상품 (뺌이 아닌 것만, content_recommend 기준 그대로)
         await _link_products(items, titles, llm, env, catalog_provider, context_id)
         # 설명 한 줄 (하루 캐시, 나머지는 묶어서 LLM 한 번)
@@ -856,6 +862,49 @@ async def trend_memes(
         lines.append(out.reason)
     evidence = Evidence(queries=queries, data_summary="\n".join(lines), collected_at=now)
     return MemesResult(out, evidence)
+
+
+async def fill_web_search(items: Sequence[TrendMeme], search: Any, searchad: Any,
+                          now: datetime) -> None:  # fmt: skip
+    """`web_search` 칸: 블로그 7일·블로그 전체·카페 전체 글 수(HUB 검색 API)와 월간 검색량.
+
+    월간 검색량은 검색광고 키워드 도구 값이다.
+
+    API가 꺼져 있거나 키가 없으면 그 값은 None + 이유. 유행 판정·순위에는 쓰지 않는다.
+    """
+    from ax_contracts.schemas.data import MemePlatform
+    from data_agent.connectors.naver_searchad import NO_KEY
+    from data_agent.search_spread import spread
+
+    today = (now.astimezone(UTC) + KST_OFFSET).date()
+    for it in items:
+        word = it.name.lstrip("#").strip()
+        platform = MemePlatform()
+        got = await spread(search, word, today)
+        reasons: list[str] = []
+        if got.status == "known":
+            platform.blog_total, platform.blog_7d = got.blog_total, got.blog_7d
+            platform.blog_7d_capped, platform.cafe_total = got.blog_7d_capped, got.cafe_total
+            platform.posts = got.blog_7d
+        elif got.reason:
+            reasons.append(got.reason)
+        if searchad is None or not getattr(searchad, "configured", False):
+            platform.volume_reason = f"검색광고 {NO_KEY}"
+        else:
+            try:
+                stats = await searchad.keywords([word.replace(" ", "")])
+            except ConnectorUnavailable as error:
+                platform.volume_reason = f"검색광고를 읽지 못함 [{error.code}]"
+            else:
+                key = word.replace(" ", "")
+                mine = next((s for s in stats if s.keyword.replace(" ", "") == key), None)
+                if mine is None:
+                    platform.volume_reason = "검색광고에 이 키워드 값이 없음"
+                else:
+                    platform.monthly_volume = mine.total
+                    platform.volume_below_10 = mine.pc_below_10 or mine.mobile_below_10
+        platform.reason = " · ".join(reasons) or None
+        it.web_search = platform
 
 
 async def _link_products(

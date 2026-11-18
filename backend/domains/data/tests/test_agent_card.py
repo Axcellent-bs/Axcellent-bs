@@ -60,6 +60,7 @@ def test_card_validates(card: AgentCard) -> None:
         "source_plan",
         "video_explorer",
         "trend_memes",
+        "keyword_trend",
         "data_chat_send",
         "data_chat_list",
         "data_chat_get",

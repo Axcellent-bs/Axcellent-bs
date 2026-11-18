@@ -26,6 +26,7 @@
 | `promo_concepts` | 광고·홍보 숏츠 **예시 아이디어(참고용)** 3~5개(확정 기획은 기획팀 몫): 타깃 연령대와 근거 숫자(trend_age, 없으면 미정 + 이유)· 제목·컨셉·길이(15~60초)·콘티(길이에 맞는 컷 수)·빌려 온 숏츠 형식과 그 평균 조회수·빌려 온 트렌드(없어도 됨)·맞는 이유·등장 상품·주의사항, 코드 경고(상표·초상권 확인 필요), 버린 초안과 이유, 쓴 재료·시즌 확인 키워드 | shop-api 상품·카테고리, shorts_stats(형식별 평균 조회수), trend_popular(게임·연예·스포츠·K-pop·음악·IT만), 카탈로그 카테고리·상품 핵심어 월별 흐름(trend_history, 키워드마다 네이버 1번·상한 20·하루 캐시), LLM(초안 1번). 하루 캐시·기록 `backend/.data/promo_concepts.db`(캐시 키 = 날짜 + 규칙 버전: 재료 거르기 설정 `[promo]`·분류 목록·프롬프트의 해시. 규칙이 바뀌면 다음 요청에서 다시 만든다). 설정: `trends.toml` `[promo]` |
 | `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown. 카테고리마다 화면 카드 숏츠 10개(분류·구독자 대비·광고 재료 칸) | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
 | `video_explorer` | 영상 탐색: 카테고리(게임·유머·드라마·교양·교육·책) × 기간(올린 시각 1일·3일·7일) × 길이(숏 60초 이하·롱)마다 한국 영상(제목·채널·썸네일·주소·길이·올린 시각·조회수·좋아요·구독자 대비·분류·광고 재료 칸), 정렬(조회수·구독자 대비·좋아요)은 코드, 모자란 칸은 이유 | 영상 풀: YouTube 스냅샷(올린 지 7일 이내)·숏츠 표본·하위 주제·지금 인기 보충 영상(videos.list로 다시 읽음, 하루 ≤ 10번)·보충 검색(모자란 칸만, 7일 검색 카테고리 × 길이 하루 1번 → 남은 횟수로 1일 보충, 하루 ≤ 20번). 분류는 공유 영상 분류기(저장 재사용, 새로 묻는 수 ≤ 200). 구독자 channels.list 하루 ≤ 4번. 수집기가 미리 계산해 `backend/.data/video_explorer.db`에 저장, 요청은 읽기·정렬만. 설정: `trends.toml` `[explorer]` |
+| `keyword_trend` | 검색 트렌드 · 도서 분야 4블록: 급상승 검색어(배수·판정·월간 검색량·일별 추정·증가량·관련 뉴스·블로그·카페 확산·연결 상품 수), AI 요약(숫자 검증), 새로 나타난 키워드(최근 4일), 이달 시즌 키워드(배수·월 검색량·몰리는 시기·묶음·상품). window day·week. 아래 "keyword_trend" | 키워드 풀(검색광고 키워드 도구, 하루 1번 `backend/.data/keyword_pool.db`), 네이버 데이터랩(trend_age 예산 공유), HUB 블로그·카페·뉴스(켠 경우만), Google 인기 검색어 RSS 뉴스, 공용 분류기, product_link, explain. 미리 계산(일간·주간). 설정: `trends.toml` `[search]` |
 | `trend_memes` | 요즘 유행·밈: 여러 채널 숏츠에서 같이 늘어난 해시태그·제목 구절 묶음(이름·설명 한 줄·채널 수·영상 수·직전 대비 배수·네이버 검색 배수·광고 재료·연결 상품·대표 영상 2개), 뺀 단위와 이유. window week(7일 vs 직전 7일)·day(어제 vs 지난 4주 같은 요일 평균). 아래 "trend_memes" | 숏츠 저장소(`shorts.db` searched_videos·published·video_channels)와 YouTube 인기 스냅샷의 숏츠(새 외부 호출 없음), 공유 주제 분류기(저장 재사용), 네이버 검색어 트렌드(앞 5개만, 커넥터 하루 캐시·trend_age 호출자별 예산 `trend_memes`), 상품 목록·임베딩(product_link), LLM(설명 한 줄, 묶어서 1번, 하루 캐시 `backend/.data/trend_memes.db`). 수집기가 미리 계산(이번 주·오늘 둘 다), 화면은 응답 캐시 읽기만. 설정: `trends.toml` `[memes]` |
 | `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·출처·주제 분류·묶음(회사 상품과 연결된 소재·일반 화제)·연결할 실제 상품(근거)·회사 관련성(상품 연결로, 표시만)·밈 형식·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 추천 안 함 분류(회사 설정)는 참고용 + 이유로 따로. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(후보 전체)와 같은 네이버 요청(하루 캐시 같이 씀), 회사 상품 목록(shop-api `GET /api/shop/products`·`/categories`), LLM(아이디어 문장·밈 형식·주제 분류만), 임베딩(설정이 있을 때만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
 | `answer_planning_question` | 기획이 되묻는 근거 질문의 답(answered·needs_human·unknown). 기획만 부른다 | data가 보낸 요청의 기록(`planning_questions.py`, 프로세스 안). 아직 요청을 보내는 코드가 없어 지금은 늘 unknown. 사람 답은 `human_answer_request`로 planning `receive_planning_answer`에 보낸다 |
@@ -56,6 +57,7 @@
 | `trend_insight_brief` | 없음 | 평가셋이 없어 인사이트가 맞는지 재지 않는다. 순서 가중치(`[brief]`)는 성과 자료가 없어 정한 값이다. 근거 숫자는 기존 skill 값 그대로이고 한 줄만 LLM(숫자 검증) |
 | `trend_age` | 없음 | 평가셋이 없어 "연령대 판정이 맞는지"를 재지 않는다. 판정 함수는 trend_scan과 같다(평가셋 `eval/trend`는 연령대 없이 만든 것). 값은 요청마다 최댓값이 100인 상대값이라 연령대끼리 절대량은 비교하지 않는다. 검색량이 적은 연령대는 네이버가 값을 주지 않아 unknown |
 | `promo_concepts` | 없음 | 평가셋이 없어 기획안 품질을 재지 않는다. 👍/👎 피드백이 쌓이면 그것을 평가셋으로 쓴다(피드백 저장은 safety 레지스트리 등록이 필요해 아직 없음). 코드는 상품·트렌드·숫자·형식·콘티 수만 검증한다 |
+| `keyword_trend` | 없음 | 평가셋이 없어 급상승·시즌이 맞는지 재지 않는다. 기준값(급상승 30개·시즌 20개·1.5배)은 **임시 기준**. 일별 검색 수는 "월간 검색량 × 데이터랩 비율 몫"으로 **추정한 값**(실제 일별 수가 아님). 데이터랩 호출은 trend_age 하루 예산 표(브리프·카드 우선 몫을 뺀 80번)를 같이 써서, 그날 다른 skill이 먼저 쓰면 일부는 "확인 안 함(한도)". 카페글 API는 날짜를 주지 않아 최근 7일 카페 글 수는 셀 수 없음. 네이버 뉴스 API에는 언론사 이름 칸이 없어 원문 주소 도메인을 출처로 씀. 검색광고 응답 맨 위 모양·숫자 칸 타입은 공식 문서에 없어 두 모양을 다 받음(확인 필요) |
 | `trend_memes` | 없음 | 평가셋이 없어 "유행이 맞는지"를 재지 않는다. 기준값(채널 3·영상 5·2배·흔한 태그 15%·겹침 0.6)은 **임시 기준**이다. 형태소 분석이 없어 구절 조각(`나만 몰랐어`)이 섞이고 비슷한 표기를 다 묶지 못한다. 표본이 조회수 순 검색·인기 목록이라 이미 뜬 영상 쪽으로 치우친다. 보관이 30일이라 처음 며칠·오래된 같은 요일은 배수가 unknown. 채널 id가 없는 영상은 채널 이름으로 센다 |
 | `shorts_stats` | 없음 | 인기 영상 상위 200개 안(과 조회수 순 검색 결과)에서의 비교라 이미 뜬 영상끼리 비교한다. 숏츠 여부는 길이로 판단한다. 형식 분류 정확도는 재지 않는다 |
 | `content_recommend` | 상품 연결 기준만 보정셋 `eval/product_link/`(#403, 관문 아님) | 추천 품질은 나중에 게시 성과로 잰다. 상품 연결은 임베딩 설정이 없으면 글자 일치만 본다. 임베딩 기준(1등만, 0.65)은 **임시 기준**이다. **밈 형식·주제 분류 정확도는 평가셋이 없어 재지 않는다**. 인기 검색어에서만 나온 소재는 밈 형식이 늘 unknown |
@@ -1113,6 +1115,29 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
 
 - **빠진 게시 시각 채우기**(`shorts_backfill.py`, 수집기가 미리 계산 바로 앞에 부름): `published` 표가 생기기 전에 검색한 숏츠는 게시 시각이 없어 "최근 N일"·요즘 유행·밈에서 빠진다. 최근 `retention_days`(30일) 표본(검색 저장분 + 인기 스냅샷 숏츠, 길이·언어 조건 같음) 중 게시 시각을 모르는 영상만 `videos.list` 50개씩 다시 읽어 `record_views`로 남긴다(조회수·썸네일·채널 id·게시 시각). 응답에 없는 영상(지워짐·비공개)은 `published_missing` 표에 남겨 다시 부르지 않는다. 하루 `DATA_SHORTS_BACKFILL_DAILY`번(기본 20번 = 1,000개, YouTube 장부 날짜), 장부의 부른 곳은 `shorts_backfill`, 새 숏츠 추적 예약 몫은 쓰지 않는다. 로그 `[backfill] published 채움 N · 없음 M · 남음 K`
 - **한계:** 인기 영상 상위 200개 안(과 조회수 순 검색 결과)에서의 비교라 **이미 뜬 영상끼리 비교**한다(응답 `limitation`에도). 검색 숏츠의 속도는 두 번 본 사이 구간의 평균이라, 다시 조회하는 간격에 따라 값이 달라진다. 형식 분류 정확도는 평가셋이 없어 재지 않는다
+
+### keyword_trend (검색 트렌드 · 도서 분야)
+
+트렌드 1 감지 하위 탭의 "검색" 칩(`frontend/src/components/data/KeywordTrend.tsx`). 숫자·판정·순위는 코드, AI 요약 한 줄만 LLM(`explain` 숫자 검증).
+
+- **출처**
+  - 네이버 검색광고 API 키워드 도구(`connectors/naver_searchad.py`): `GET https://api.searchad.naver.com/keywordstool?hintKeywords=…(쉼표, 최대 5개)&showDetail=1`. 헤더 `X-Timestamp`(밀리초)·`X-API-KEY`·`X-Customer`·`X-Signature` = base64(HMAC-SHA256(secret, "{timestamp}.GET./keywordstool")). 근거: 스펙 https://naver.github.io/searchad-apidoc/#/operations/GET/~2Fkeywordstool , 서명은 공식 샘플 https://github.com/naver/searchad-apidoc . 월간 검색량은 최근 30일 PC·모바일 합이고 10 미만은 `"<10"` → 숫자로 바꾸지 않고 `below_10`. 키 `NAVER_SEARCHAD_API_KEY`·`NAVER_SEARCHAD_SECRET`·`NAVER_SEARCHAD_CUSTOMER_ID`, 하루 캐시, 하루 상한 `NAVER_SEARCHAD_DAILY_LIMIT`(300)
+  - 네이버 데이터랩(기존 `naver_datalab`, trend_scan과 같은 커넥터·하루 캐시). 호출 수는 trend_age 예산 표에 호출자 `keyword_trend`로 같이 센다
+  - NAVER API HUB 블로그·카페글·뉴스 검색(`connectors/naver_search.py`, 같은 HUB 앱 키): `GET https://naverapihub.apigw.ntruss.com/search/v1/{blog|cafearticle|news}`. 근거 https://api.ncloud-docs.com/docs/naver-api-hub-search-blog (cafearticle·news 같은 형식). HUB 앱에서 이 API를 켠 경우만 동작하고, 401·403이면 "HUB에서 블로그·카페·뉴스 API를 켜면 보여요". 저장은 전체 건수와 결과 날짜, 뉴스는 제목·출처 도메인·주소까지(본문 요약·작성자 이름은 남기지 않음). 하루 캐시, 하루 상한 `NAVER_SEARCH_DAILY_LIMIT`(500)
+  - Google 인기 검색어 RSS 관련 뉴스(기존 `trending_news`): 키워드가 검색어 이름이나 뉴스 제목에 들어 있는 것만 센다
+- **키워드 풀**(`keyword_pool.py`, `backend/.data/keyword_pool.db`): 수집기가 한국 날짜 하루 1번. 힌트 = 회사 씨앗(`trends.toml` 덮어쓰기 그룹 키워드 + `[recommend] company_keywords`) + 카탈로그 카테고리 이름 + 상품 이름 핵심어(상한 `pool_hints` 40). 연관어를 날짜별로 저장. 도서 분야 = 공용 분류기가 교육·책으로 본 것, 또는 카탈로그 핵심어가 맞고 분류기가 다른 분야로 보지 않은 것. 상한 `pool_max` 300(검색량 순). 검색광고 키가 없으면 힌트만 풀로 둔다(검색량 None)
+- **추정식**
+  - 일별 추정 = 월간 검색량 × (그날 데이터랩 비율 ÷ 최근 30일 비율 합)
+  - 증가량: 일간 = 어제 추정 − 지난 4주 같은 요일 추정 평균, 주간 = 최근 7일 추정 합 − 그 전 4주 주별 합 평균
+  - 시즌 배수 = 작년 이달 월별 비율 ÷ 지난 12개월(작년 이달~지난달) 평균, `season_min` 1.5 이상
+  - 이달 검색량 = 월간 검색량 × (작년 이달 비율 ÷ 지난달 비율)
+  - 몰리는 시기 = 작년 이달 1일~다음 달 말일 일별 비율이 그 기간 평균의 `peak_ratio`(1.5)배를 넘는 가장 긴 연속 구간(없으면 "-")
+- **한도**: 급상승 `rising_check` 30개 × 데이터랩 1번, 시즌 `season_check` 20개 × 월별 1번 + 기준을 넘으면 일별 1번, 블로그·카페·뉴스는 급상승 키워드마다 3번(+ trend_memes 앞 5개 × 3번). 데이터랩은 trend_age 예산 표를 같이 써서 다 못 보면 "확인 안 함(한도)"
+- **우리 상품**: product_link 기존 기준(`[recommend]`) 통과 상품 수. 없으면 "없음 · 들여올 후보"
+- **키가 없을 때**: 검색광고 키가 없으면 검색량·추정·증가 칸은 None + "키 등록 후 가능", 배수·판정은 그대로
+- **미리 계산**: `trend_precompute`가 `{}`(일간)·`{"window":"week"}`(주간)를 응답 캐시에 넣고 화면은 읽기만
+- **trend_memes `web_search` 칸**: 같은 앞 `search_top`개만 블로그 7일·블로그 전체·카페 전체 글 수와 검색광고 월간 검색량. trend_memes의 다른 칸 계산은 그대로
+- 설정: `trends.toml` `[search]`. 서버 게이트웨이 허용 목록(ALLOWED)에 `keyword_trend`를 더해야 배포 서버 화면이 부를 수 있다(사람 일)
 
 ### trend_memes (요즘 유행·밈)
 

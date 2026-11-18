@@ -111,6 +111,7 @@ SKILL_KO: dict[str, str] = {
     "promo_concepts": "광고·홍보 숏츠 예시 아이디어(참고용)",
     "shorts_stats": "숏츠 통계 보기",
     "trend_memes": "요즘 유행·밈 보기",
+    "keyword_trend": "검색 트렌드 보기",
     "campaign_effect": "캠페인 효과 보기",
     "video_performance": "게시 영상 성과 보기",
     "campaign_result": "캠페인 성과 결과 보기",
