@@ -9,7 +9,7 @@ test("관리자가 아니면 시스템 관리 아래 도구 연결만", () => {
 });
 
 test("관리자는 네 개", () => {
-  assert.deepEqual(systemMenuFor(true).map((m) => m.href), ["/system/connect", "/system/services", "/system/members", "/system/tools"]);
+  assert.deepEqual(systemMenuFor(true).map((m) => m.href), ["/system/connect", "/system/members", "/system/tools"]);
 });
 
 test("회사 연결 전 관리자는 회사 연결만", () => {
@@ -18,5 +18,5 @@ test("회사 연결 전 관리자는 회사 연결만", () => {
 
 test("메뉴를 바꿔도 원래 목록은 그대로", () => {
   systemMenuFor(true).pop();
-  assert.equal(systemMenuFor(true).length, 4);
+  assert.equal(systemMenuFor(true).length, 3);
 });

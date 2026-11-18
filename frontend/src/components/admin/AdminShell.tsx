@@ -5,7 +5,7 @@ import { AccountSwitcher } from "@/demo/AccountSwitcher";
 import { canOpen, homeOf, servicesOf, supportViewer, useSession, type Account } from "@/demo/session";
 import { useCompany } from "@/demo/company";
 import { endSupport, supportActive, useSupport } from "@/demo/support";
-import { AGENTS, activeChild, matchPath, useEnabledServices, type Service, type SubItem } from "@/demo/services";
+import { AGENTS, activeChild, matchPath, type Service, type SubItem } from "@/demo/services";
 import { useOpenHandoffCount } from "@/lib/handoffs";
 import { AlertBell } from "./AlertBell";
 import { DEV_TASKS_HREF, ORCHESTRATOR_HREF, PLANNING_REQUESTS_HREF, useNavCounts } from "@/lib/navCounts";
@@ -13,7 +13,7 @@ import { IconAgents, IconChart, IconGear, IconInbox, IconSearch } from "../icons
 import { preConnectMenu, systemMenuFor } from "@/demo/systemMenu";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
-// 고객사 계정은 시스템 관리자 하나이고, 회사가 켠 서비스는 전부 메뉴에 보인다(서비스 고르기에서 끈 서비스만 빠짐, src/demo/session.tsx).
+// 고객사 계정은 시스템 관리자 하나이고, 서비스는 모두 필수라 전부 메뉴에 보인다(src/demo/session.tsx).
 // AI가 맡지 않은 서비스(DejaFix 장애 대응 등)와 공용 화면은 구분선 아래에 둔다.
 type SubNav = { href: string; label: string; soon?: boolean; match: string[]; children?: SubItem[]; badge?: number };
 type NavItem = { href: string; label: string; Icon: ComponentType<{ size?: number }>; logo?: string; children?: SubNav[]; match: string[]; divider?: boolean; badge?: number | null };
@@ -84,19 +84,18 @@ const systemNav = (menu: SubItem[]): NavItem => ({ href: menu[0].href, label: "�
 
 function useNav(): NavItem[] {
   const { account } = useSession();
-  const enabled = useEnabledServices();
   const company = useCompany();
   const support = useSupport();
   if (!account) return [];
   if (account.operator) {
     // 지원 모드: 관제 센터 아래에 들어간 고객사의 관리자 메뉴를 붙인다
     if (!supportActive(support, company)) return CONTROL_NAV;
-    const [first, ...more] = customerNav(supportViewer(account), enabled);
+    const [first, ...more] = customerNav(supportViewer(account));
     return first ? [...CONTROL_NAV, { ...first, divider: true }, ...more] : CONTROL_NAV;
   }
   // 회사 연결 전에는 회사 연결만 보인다
   if (!company) return account.admin ? [systemNav(preConnectMenu())] : [];
-  return customerNav(account, enabled);
+  return customerNav(account);
 }
 
 const INFRA_ID = "incident";
@@ -112,8 +111,8 @@ function withInfra(agents: NavItem[], services: Service[]): NavItem[] {
 }
 
 /** 회사에 연결된 고객사 계정의 메뉴 */
-function customerNav(account: Account, enabled: string[]): NavItem[] {
-  const services = servicesOf(account, enabled);
+function customerNav(account: Account): NavItem[] {
+  const services = servicesOf(account);
   const agents = withInfra(agentNav(services), services);
   const others = services.filter((s) => !s.agent && s.id !== INFRA_ID && !(account.admin && s.id === "hosts"));
   const rest = [...others.map(serviceNav), ...SHARED_NAV];

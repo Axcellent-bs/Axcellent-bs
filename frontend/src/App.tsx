@@ -34,10 +34,8 @@ import ToolConnections from '@/demo/ToolConnections'
 import LoginPage from '@/demo/LoginPage'
 import SignupPage from '@/demo/SignupPage'
 import PlanPurchase from '@/demo/PlanPurchase'
-import { canOpen, homeOf, useSession } from '@/demo/session'
-import { useEnabledServices } from '@/demo/services'
+import { ADMIN_HOME, canOpen, homeOf, useSession } from '@/demo/session'
 import { useCompany } from '@/demo/company'
-import ServiceCatalog from '@/demo/ServiceCatalog'
 import CompanyConnect from '@/demo/CompanyConnect'
 import MembersPage from '@/demo/MembersPage'
 import Setup from '@/demo/Setup'
@@ -62,14 +60,13 @@ export function App() {
   )
 }
 
-/** 로그인하지 않았으면 메인(카탈로그)으로, 배정되지 않았거나 회사가 끈 서비스 화면이면 내 첫 화면으로 보낸다 */
+/** 로그인하지 않았으면 메인(카탈로그)으로, 배정되지 않은 서비스 화면이면 내 첫 화면으로 보낸다 */
 function Guarded({ children }: { children: ReactNode }) {
   const { account } = useSession()
   const { pathname } = useLocation()
-  const enabled = useEnabledServices()
   const company = useCompany()
   if (!account) return <Navigate to={pathname.startsWith('/control') ? '/control/login' : '/'} replace />
-  if (!canOpen(account, pathname, enabled, !!company)) return <Navigate to={homeOf(account, enabled)} replace />
+  if (!canOpen(account, pathname, !!company)) return <Navigate to={homeOf(account)} replace />
   return <>{children}</>
 }
 
@@ -112,7 +109,8 @@ function Pages() {
           {/* PC·서버 연결은 회원·서버 관리의 탭으로 합쳤다 */}
           <Route path="/system/hosts" element={<Navigate to="/system/members?tab=pcs" replace />} />
           <Route path="/system/members" element={<MembersPage />} />
-          <Route path="/system/services" element={<ServiceCatalog />} />
+          {/* 서비스 고르기는 없앴다(모든 서비스 필수). 예전 주소는 관리자 첫 화면으로 */}
+          <Route path="/system/services" element={<Navigate to={ADMIN_HOME} replace />} />
           <Route path="/system/connect" element={<CompanyConnect />} />
           <Route path="/control/*" element={<ControlCenter />} />
           {/* 회사 서비스 연결은 회사 연결(/system/connect) 화면 아래쪽으로 합쳤다 */}

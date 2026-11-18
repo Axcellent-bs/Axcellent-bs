@@ -6,6 +6,7 @@ import { COMPANIES, COST_BY_SERVICE, COST_TREND, INCIDENTS, LATEST_VERSION, QUAL
 import KeyIssue from './KeyIssue'
 import ServiceOps from './ServiceOps'
 import { useCompany, useKeys } from '@/demo/company'
+import { ADMIN_HOME } from '@/demo/session'
 import { startSupport } from '@/demo/support'
 import { useRouter } from '@/lib/nav'
 
@@ -170,10 +171,10 @@ function Companies() {
   const enter = () => {
     if (!current) return
     startSupport(current)
-    router.push('/system/services')
+    router.push(ADMIN_HOME)
   }
   return (
-    <Page title="고객사" desc="회사별 설치 버전, 켠 서비스, 마지막 연결 시각이에요.">
+    <Page title="고객사" desc="회사별 설치 버전, 마지막 연결 시각이에요.">
       <p className="bg-brand-50 px-4 py-3 text-sm text-brand-700">
         연결은 고객사 관리자가 발급받은 키로 관리자 가입을 하면서 해요(연결 키 발급 탭). 이 데모에 지금 연결된 회사: <b>{current?.name ?? '없음'}</b>
       </p>
@@ -186,7 +187,6 @@ function Companies() {
               <th className="px-3 py-3 font-medium">버전</th>
               <th className="px-3 py-3 font-medium">마지막 신호</th>
               <th className="px-3 py-3 text-right font-medium">PC</th>
-              <th className="px-3 py-3 text-right font-medium">켠 서비스</th>
               <th className="px-3 py-3 text-right font-medium">오늘 사건</th>
               <th className="px-5 py-3"><span className="sr-only">지원 모드</span></th>
             </tr>
@@ -205,7 +205,6 @@ function Companies() {
                 </td>
                 <td className={`px-3 py-3 ${c.lastSeenMin > 30 ? 'font-medium text-red-700' : 'text-ink-700'}`}>{ago(c.lastSeenMin)}</td>
                 <td className="px-3 py-3 text-right tabular-nums">{c.pcs}</td>
-                <td className="px-3 py-3 text-right tabular-nums">{c.services} / 13</td>
                 <td className="px-3 py-3 text-right tabular-nums">{c.incidentsToday}</td>
                 <td className="px-5 py-3 text-right">
                   {current?.id === c.id && (

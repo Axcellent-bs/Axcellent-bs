@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { SERVICES, isRequired, toggleHidden, useHiddenServices, type Service } from '@/demo/services'
+import { SERVICES, type Service } from '@/demo/services'
 import { COMPANIES } from './data'
 
-// 서비스 관리 (AXcellent 운영팀). 우리가 만든 서비스의 버전·배포·카탈로그 공개를 관리한다.
-// 카탈로그에서 내리면 메인 카탈로그와 고객사 서비스 고르기에서 빠진다(이미 쓰는 고객사는 그대로).
+// 서비스 관리 (AXcellent 운영팀). 우리가 만든 서비스의 버전·배포를 관리한다.
+// 서비스는 모두 필수라 카탈로그에서 내리는 기능은 없다(2026-11-18).
 // 버전·배포는 데모 예시라 새로고침하면 처음으로 돌아간다.
 type Stage = '정식' | '베타'
 type Ops = { version: string; next?: string; stage: Stage; using: number; errors: number; released: string }
@@ -34,7 +34,6 @@ function Mark({ s }: { s: Service }) {
 }
 
 export default function ServiceOps() {
-  const hidden = useHiddenServices()
   const [ops, setOps] = useState(OPS)
   const [rolling, setRolling] = useState<Record<string, Rollout>>({})
   const [prev, setPrev] = useState<Record<string, string>>({})
@@ -78,11 +77,11 @@ export default function ServiceOps() {
       <header>
         <p className="text-sm text-ink-500">관제 센터</p>
         <h1 className="text-2xl font-semibold">서비스 관리</h1>
-        <p className="mt-1 text-sm text-ink-500">우리 서비스의 버전과 배포, 카탈로그 공개를 관리해요.</p>
+        <p className="mt-1 text-sm text-ink-500">우리 서비스의 버전과 배포를 관리해요.</p>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="card px-5 py-4"><p className="text-xs text-ink-500">카탈로그 공개</p><p className="mt-1 text-3xl font-bold tabular-nums">{SERVICES.length - hidden.length} / {SERVICES.length}</p></div>
+        <div className="card px-5 py-4"><p className="text-xs text-ink-500">서비스</p><p className="mt-1 text-3xl font-bold tabular-nums">{SERVICES.length}</p></div>
         <div className="card px-5 py-4"><p className="text-xs text-ink-500">베타</p><p className="mt-1 text-3xl font-bold tabular-nums">{list.filter((o) => o.stage === '베타').length}</p></div>
         <div className="card px-5 py-4"><p className="text-xs text-ink-500">배포할 새 버전</p><p className="mt-1 text-3xl font-bold tabular-nums">{list.filter((o) => o.next).length}</p></div>
         <div className="card px-5 py-4"><p className="text-xs text-ink-500">오늘 오류</p><p className={`mt-1 text-3xl font-bold tabular-nums ${list.some((o) => o.errors) ? 'text-red-700' : ''}`}>{list.reduce((a, o) => a + o.errors, 0)}</p></div>
@@ -98,16 +97,14 @@ export default function ServiceOps() {
               <th className="px-3 py-3 text-right font-medium">쓰는 고객사</th>
               <th className="px-3 py-3 text-right font-medium">오늘 오류</th>
               <th className="px-3 py-3 font-medium">배포</th>
-              <th className="px-3 py-3 font-medium">카탈로그</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-ink-100">
             {SERVICES.map((s) => {
               const o = ops[s.id]
               const r = rolling[s.id]
-              const off = hidden.includes(s.id)
               return (
-                <tr key={s.id} className={off ? 'bg-app' : ''}>
+                <tr key={s.id}>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-3">
                       <Mark s={s} />
@@ -138,23 +135,12 @@ export default function ServiceOps() {
                       <span className="text-xs text-ink-500">최신</span>
                     )}
                   </td>
-                  <td className="px-3 py-3">
-                    {isRequired(s.id) ? (
-                      <span className="chip bg-brand-50 text-brand-700" title="필수 서비스라 카탈로그에서 내릴 수 없어요">필수</span>
-                    ) : (
-                      <button type="button" role="switch" aria-checked={!off} onClick={() => toggleHidden(s.id)}
-                        className={`px-3 py-1 text-xs font-medium ${off ? 'bg-ink-100 text-ink-500' : 'bg-brand-50 text-brand-700'}`}>
-                        {off ? '내림' : '공개 중'}
-                      </button>
-                    )}
-                  </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
       </section>
-      <p className="text-xs text-ink-500">카탈로그에서 내리면 메인 카탈로그와 고객사 서비스 고르기에서 빠져요. 이미 쓰고 있는 고객사는 그대로 써요.</p>
     </div>
   )
 }

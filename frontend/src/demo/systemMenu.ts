@@ -7,12 +7,11 @@ export const TOOLS_HREF = "/system/tools";
 
 export const SYSTEM_MENU: readonly SubItem[] = [
   { href: "/system/connect", label: "회사 연결" },
-  { href: "/system/services", label: "서비스 고르기" },
   { href: "/system/members", label: "회원·서버 관리" },
   { href: TOOLS_HREF, label: "도구 연결" },
 ];
 
-/** 이 계정이 시스템 관리 아래에서 보는 메뉴: 관리자는 넷 다, 아니면 도구 연결만 */
+/** 이 계정이 시스템 관리 아래에서 보는 메뉴: 관리자는 셋 다, 아니면 도구 연결만 */
 export const systemMenuFor = (admin: boolean): SubItem[] =>
   admin ? [...SYSTEM_MENU] : SYSTEM_MENU.filter((m) => m.href === TOOLS_HREF);
 
