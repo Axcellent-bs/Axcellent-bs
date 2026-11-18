@@ -16,6 +16,8 @@ label = "server"      # 알림 문안 맨 앞에 붙는 이름(영어·숫자·-
 # OS 계정 → 허용 동작. 신원은 서버의 개인 계정(실제 로그인 사용자)이다.
 # 동작: status lock unlock nginx-restore nginx-add-location nginx-approve-location
 #       deploy-bundle restart-backend rollback-bundle record-pr
+#       gateway-allow-propose gateway-allow-approve gateway-allow-restore (게이트웨이 허용 목록. 아래 [gateway_allow]. 권한자 줄에
+#       직접 더한다. _default 에는 둘 수 없다)
 #       autodeploy-pause autodeploy-resume (자동 배포 정지·재개. 쓰려면 권한자 줄에 직접 더한다.
 #       _default 에는 둘 수 없다: 넣으면 게이트가 정책을 거부한다)
 #
@@ -80,6 +82,25 @@ big-body = ["client_max_body_size 50m;"]
 # 없으면 그 대상도 [location] block_lines 를 쓴다. 이름은 [nginx_targets] 에 있어야 한다. 규칙은 block_lines 와 같다.
 # [nginx_target_block_lines]
 # site-b = ["limit_except {method} { deny all; }", "proxy_pass http://127.0.0.1:{port};", "include snippets/example-proxy-b.conf;"]
+
+# 게이트웨이 허용 목록(선택): gateway-allow-propose → gateway-allow-approve (다른 권한자). 되돌리기는 gateway-allow-restore.
+# 쓰려면 [permissions] 의 권한자 줄에 "gateway-allow-propose", "gateway-allow-approve", "gateway-allow-restore" 를 직접 더한다
+# (예시 표에는 일부러 넣지 않았다. _default 에는 둘 수 없다: 넣으면 게이트가 정책을 거부한다).
+# 승인은 제안자와 다른 권한자만 한다. 같은 사람은 [self_approve] accounts 에 든 계정만(nginx 와 같은 목록을 쓴다).
+# 승인 시점에 다시 검증한다: skill 이름(^[a-z][a-z0-9_]{1,63}$), 중복 거부, 카드에 그 skill id 가 있을 것,
+# 카드 grade 가 read 일 것(write 는 자동 거부), (requester 를 적었다면) 카드 allowed_requesters 에 그 이름이 있을 것.
+# 값은 전부 자리표시자("TODO")다. 서버의 실제 위치·형식은 서버 책임자가 비공개 정책에 적는다. 이 구역의 키는 아래 일곱뿐이고, 일곱 중 requester 만 선택이다.
+# 필수 값이 하나라도 비었거나 "TODO" 면 gateway-allow-* 동작은 전부 거부된다(예시 그대로 두면 아무것도 열리지 않는다).
+# 카드는 작업 트리 파일이 아니라 card_repo 의 expected_card_sha 커밋 속 내용(git cat-file)으로 읽는다. 허용 목록 폴더, backup_dir 와 그 부모는 root 소유(그룹·기타 쓰기 금지)여야 한다.
+# 허용 목록 파일 형식은 "한 줄에 skill 하나"(빈 줄과 # 줄은 무시)로 가정한다. 서버 형식이 다르면 gateway_allow_check.py 의 어댑터만 바꾼다.
+[gateway_allow]
+list_file = "TODO"        # 게이트웨이의 허용 목록 파일(전체 경로, 일반 파일). 백업 → 임시 파일 → mv 로 교체한다
+card_path = "TODO"        # 대상 에이전트 카드 JSON 파일(전체 경로). card_repo 안에 있어야 하고, 그 커밋에 들어 있어야 한다
+reload_cmd = "TODO"       # 반영 명령(낱말을 공백으로 나눠 그대로 실행한다. 셸을 거치지 않는다. 예: systemctl reload <게이트웨이 서비스>)
+backup_dir = "TODO"       # 허용 목록 백업 폴더들의 부모(미리 만들어 둔다. gwa-... 폴더가 생긴다)
+# requester = "TODO"      # (선택) 게이트웨이 요청자 이름. 적으면 카드 allowed_requesters 에 있어야 한다(카드에 목록이 없어도 거부)
+card_repo = "TODO"        # (필수) 카드가 든 서버 레포 체크아웃(끝에 / 없이). card_path 가 그 안에 있어야 한다
+expected_card_sha = "TODO"  # (필수) 승인된 레포 HEAD(40자 소문자 SHA). card_repo 의 HEAD 가 이 값과 같아야 하고, 카드는 이 커밋의 내용으로 읽는다
 
 [lock]
 default_hours = 4     # lock 에 해제시각을 안 적었을 때 잠그는 시간
