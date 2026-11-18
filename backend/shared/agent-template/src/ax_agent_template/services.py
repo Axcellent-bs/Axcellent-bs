@@ -375,6 +375,7 @@ SERVICES: tuple[Service, ...] = (
             "planning_chat_get",
             "planning_chat_close",
             "planning_chat_remove",
+            "receive_improvement_note",
         ),
         "요청·기획서",
     ),

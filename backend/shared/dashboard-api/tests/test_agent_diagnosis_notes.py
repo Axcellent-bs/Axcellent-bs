@@ -84,12 +84,13 @@ def test_the_agents_notes_are_read_from_its_service_newest_first(
 def test_an_agent_without_received_notes_gets_an_empty_list(
     live: TestClient, upstream: Upstream
 ) -> None:
-    body = live.get(URL, params={"agent": "finance"}).json()
-    assert body["data"] == [] and body["meta"]["total"] == 0
+    for agent in ("finance", "planning"):  # 기획도 진단을 받는다 (11/18)
+        body = live.get(URL, params={"agent": agent}).json()
+        assert body["data"] == [] and body["meta"]["total"] == 0, agent
 
 
 def test_an_agent_that_does_not_receive_notes_is_not_found(live: TestClient) -> None:
-    for agent in ("safety", "planning", "hr", "nobody"):
+    for agent in ("safety", "hr", "nobody"):
         res = live.get(URL, params={"agent": agent})
         assert res.status_code == 404 and res.json()["error"]["code"] == "UNKNOWN_AGENT"
     assert live.get(URL).status_code in (400, 422)  # agent를 꼭 줘야 한다

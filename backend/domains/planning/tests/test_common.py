@@ -40,7 +40,8 @@ def test_agent_card_format_and_served() -> None:
     # 직접 대화 (11/5)
     chat = {f"planning_chat_{x}" for x in ("send", "list", "get", "close", "remove")}
     rest = {"receive_dev_result", "request_release_check"}
-    assert set(skills) == intake | proposals | chat | rest
+    notes = {"receive_improvement_note"}  # 총괄이 보낸 진단을 받는 공통 skill (11/18)
+    assert set(skills) == intake | proposals | chat | rest | notes
     for name in chat:
         assert skills[name].allowed_requesters == ["dashboard-api"], name
     assert skills["request_release_check"].allowed_requesters == ["dev"]
@@ -60,6 +61,10 @@ def test_agent_card_format_and_served() -> None:
     reads = {"planning_chat_list", "planning_chat_get"}  # 대화 목록·읽기만 read
     assert all(skills[k].grade == ("read" if k in reads else "A") for k in skills)
     for skill in card.skills:
+        if skill.id == "receive_improvement_note":  # 공통 skill: 계약이 diagnosis.py에 있다
+            assert (skill.grade, skill.allowed_requesters) == ("A", ["orchestrator"])
+            assert skill.input_schema.endswith("schemas/diagnosis.py#ReceiveImprovementNoteInput")
+            continue
         assert skill.priority == "required"
         assert skill.verifier is None
         for ref in (skill.input_schema, skill.output_schema):
@@ -187,3 +192,11 @@ def test_rest_action_gate_refusal_is_409(service, monkeypatch) -> None:
     assert res.json()["error"]["details"]["action"] == "confirm_spec"
     assert res.json()["error"]["details"]["status"] == "rejected"
     assert next(s for s in service.state.specs if s.id == "SPEC-7").status == "초안"
+
+
+@pytest.mark.role("planning")
+def test_received_diagnosis_notes_are_readable() -> None:
+    """기획 홈의 "총괄 AI가 보낸 진단" 칸이 읽는 경로가 있다 (없으면 화면이 404를 받는다)."""
+    res = TestClient(app).get("/api/improvement-notes")
+    assert res.status_code == 200
+    assert res.json()["data"]["notes"] == []
