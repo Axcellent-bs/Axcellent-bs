@@ -95,6 +95,26 @@ def test_own_trend_when_big_and_no_products() -> None:
     assert _opt(opts, "own_trend").recommended
 
 
+def test_small_scale_without_ride_or_products_says_why_own_trend() -> None:
+    """팔로워 0처럼 작은데 올라탈 후보·연결 상품이 없어 자체 기획으로 갈 때는 "퍼뜨릴 만한 규모"라고
+    하지 않는다 (11/18 232 PROP-8: 팔로워 0인데 반대 문장이 붙었음)."""
+    scale = ScaleFacts(followers=0, followers_channel="instagram")
+    opts = io.build_options(_inp(products=[]), [], scale)
+    own = _opt(opts, "own_trend")
+    assert own.recommended
+    assert "퍼뜨릴 만한 규모" not in (own.reason or "")
+    assert own.reason == (
+        "팔로워 0(instagram) · 지난 캠페인 조회 확인할 수 없음"
+        " → 규모는 작지만 올라탈 유행·연결 상품이 없어 자체 기획"
+    )
+
+
+def test_big_scale_own_trend_reason_unchanged() -> None:
+    scale = ScaleFacts(followers=50000, followers_channel="youtube")
+    opts = io.build_options(_inp(products=[]), [_t("유행 챌린지")], scale)
+    assert (_opt(opts, "own_trend").reason or "").endswith("→ 자체 기획을 퍼뜨릴 만한 규모")
+
+
 def test_no_scale_numbers_no_recommendation() -> None:
     opts = io.build_options(_inp(), [_t("유행 챌린지")], ScaleFacts())
     assert not any(o.recommended for o in opts)

@@ -152,7 +152,13 @@ def build_options(
     elif by["with_product"].available:
         pick, why = by["with_product"], f"{facts} → 우리 상품을 앞에 세우는 편이 맞음"
     else:
-        pick, why = by["own_trend"], f"{facts} → 자체 기획을 퍼뜨릴 만한 규모"
+        # 작은데 여기까지 왔으면 올라탈 후보·연결 상품이 없어서다. 규모가 크다고 말하지 않는다
+        end = (
+            "규모는 작지만 올라탈 유행·연결 상품이 없어 자체 기획"
+            if _is_small(scale)
+            else "자체 기획을 퍼뜨릴 만한 규모"
+        )
+        pick, why = by["own_trend"], f"{facts} → {end}"
     pick.recommended = True
     pick.reason = why
     return opts
