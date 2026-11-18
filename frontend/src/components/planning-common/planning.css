@@ -972,6 +972,8 @@ button.spec-pid { cursor: pointer; color: var(--primary); font-weight: 600; }
 .pp-angle-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .pp-angle-list li.on .pp-angle-btn { border-color: var(--primary); background: var(--primary-soft); font-weight: 600; }
 .pp-angle-rec { margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--primary); }
+.pp-angle-cat { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; font-size: 13px; }
+.pp-angle-cat label { display: flex; flex-direction: column; gap: 2px; color: var(--text-2); }
 .pp-angle-note { display: flex; flex-direction: column; gap: 2px; line-height: 1.5; }
 .pp-warn { margin: 0; padding: 8px 12px 8px 28px; background: var(--warning-bg, #fff7e6); border-radius: 8px; color: var(--warning); font-size: 13px; }
 .pp-meta-dl { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 13px; }
