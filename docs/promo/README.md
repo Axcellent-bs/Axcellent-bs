@@ -24,7 +24,7 @@ node build.mjs      # content.mjs → index.html
 - `links.brochureUrl` — 브로셔 PDF 받기. PDF 검수가 끝나고 공개하기로 정한 뒤에 채운다
 - `links.contactUrl`·`links.contactNote` — 상담 연락 수단(Instagram DM, 이메일 등)이 정해지면 채운다
 - `story.media` — 시연 영상·화면. 준하 님 자료가 오면 채운다(`INTAKE.md`)
-- `cases.items[].posts` — **고객사 마케팅 사례** 칸(캣북스, 누비투어). 게시물·반응 자료가 오면 채운다. 비어 있으면 "사례 준비 중" 칸으로 남고(`cases.showEmpty`), 공개할 때 `false`로 하면 채워진 사례만 보인다
+- `cases.items[].posts` — **고객사 마케팅 사례** 칸(캣북스, 누비투어). 게시물·반응 자료가 오면 채운다. 규칙: 채워진 사례가 하나라도 있으면 모든 고객사 카드가 보이고(빈 쪽은 "사례 준비 중"), 하나도 없으면 `cases.showEmpty`가 `true`일 때만 빈 카드가 보인다. 외부에 공개할 때 둘 다 비어 있으면 `false`로 두면 순환 그림만 남고 카드는 숨는다. 캣북스가 채워지면 `true`로 돌려도 된다
 - `site.noindex` — 공개하기로 정하면 `false`로 바꾼다
 
 ## 브로셔 PDF와 다른 점 (확인 필요)

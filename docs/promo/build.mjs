@@ -152,15 +152,19 @@ function metricsHtml(p) {
   return `<dl class="metrics">${list.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl><p class="measured">잰 날짜 ${esc(p.measuredAt)} · ${esc(p.source)}</p>`;
 }
 const casesPost = (p) => `<li class="post"><img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy"><div class="post-b">${p.aiGenerated ? `<span class="post-ai">AI가 만든 게시물</span>` : ""}${has(p.date) ? `<span class="post-d">${esc(p.date)}</span>` : ""}${has(p.caption) ? `<p>${esc(p.caption)}</p>` : ""}${metricsHtml(p)}${has(p.permalink) ? `<a class="post-ig" href="${esc(p.permalink)}" rel="noopener" target="_blank">인스타에서 보기</a>` : ""}</div></li>`;
-const casesItems = C.cases.items.filter((it) => C.cases.showEmpty || (it.posts && it.posts.length));
-const cases = casesItems.length === 0 ? "" : `
+// 사례 칸 규칙: 채워진 사례가 하나라도 있으면 모든 고객사 카드를 보이고(빈 쪽은 "사례 준비 중"), 하나도 없으면
+// showEmpty가 true일 때만 빈 카드를 보인다. 카드가 없어도 순환 그림은 남는다(구역이 하는 말이라서)
+const casesItems = C.cases.items;
+const anyCase = casesItems.some((it) => it.posts && it.posts.length);
+const showCaseCards = anyCase || C.cases.showEmpty === true;
+const cases = `
 <section class="sec sec-light" id="cases">
   <div class="wrap">
     <p class="pill reveal">${esc(C.cases.kicker)}</p>
     <h2 class="h2 ink reveal">${esc(C.cases.title[0])}<br><span class="brand">${esc(C.cases.title[1])}</span></h2>
     <p class="cases-lead reveal">${esc(C.cases.lead)}</p>
     <ol class="loop reveal">${C.cases.loop.map((s, i) => `<li class="loop-step"><span class="ln">${i + 1}</span><b>${esc(s.label)}</b><span>${esc(s.body)}</span>${has(s.note) ? `<em>${esc(s.note)}</em>` : ""}</li>`).join("")}</ol>
-    <div class="case-cards">${casesItems.map((it) => `<article class="case reveal"><header><h3>${esc(it.name)}</h3><p class="badges">${it.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p></header>${has(it.summary) ? `<p class="case-sum">${esc(it.summary)}</p>` : ""}${it.posts && it.posts.length ? `<ul class="posts">${it.posts.map(casesPost).join("")}</ul>` : `<div class="case-empty"><span>${esc(C.cases.emptyText)}</span></div>`}</article>`).join("")}</div>
+    ${showCaseCards ? `<div class="case-cards">${casesItems.map((it) => `<article class="case reveal"><header><h3>${esc(it.name)}</h3><p class="badges">${it.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p></header>${has(it.summary) ? `<p class="case-sum">${esc(it.summary)}</p>` : ""}${it.posts && it.posts.length ? `<ul class="posts">${it.posts.map(casesPost).join("")}</ul>` : `<div class="case-empty"><span>${esc(C.cases.emptyText)}</span></div>`}</article>`).join("")}</div>` : ""}
     <p class="fine dark reveal">${esc(C.cases.note)}</p>
   </div>
 </section>`;
