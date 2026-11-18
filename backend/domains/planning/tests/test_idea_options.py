@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -34,11 +35,19 @@ def _t(
     score: float = 1.0,
     iid: str | None = None,
     views: float | None = 50000.0,
-) -> TrendInsight:
-    return TrendInsight(
+    topic_views: float | None = 48000.0,
+) -> Any:
+    """데이터분석 TrendInsight + 11/18 재현 님이 더하는 주제 자기 숏츠 칸(아직 계약에 없음)."""
+    t = TrendInsight(
         insight_id=iid or f"t-{topic}", rank=1, topic=topic, line="l", shorts_format=fmt,
         ad_material=ad, real_entity=real, score=score, shorts_format_median_views=views,
     )  # fmt: skip
+    extra = {
+        "shorts_format_topic_median_views": topic_views,
+        "shorts_format_topic_at": None,
+        "shorts_format_topic_examples": [SimpleNamespace(title=f"{topic} 영상", views=1)],
+    }
+    return SimpleNamespace(**t.model_dump(), **extra)
 
 
 def _opt(opts, angle):
@@ -52,7 +61,16 @@ def test_candidates_filter_format_ad_entity_self() -> None:
     ]  # fmt: skip
     refs = io.trend_candidates(_inp(), trends)
     assert [r.topic for r in refs] == ["높음", "낮음"]
-    assert refs[0].median_views == 50000.0
+    assert refs[0].median_views == 48000.0  # 형식 전체가 아니라 그 주제 자기 숏츠 중앙값
+    assert refs[0].examples == ["높음 영상"]
+
+
+def test_candidates_need_topic_own_numbers() -> None:
+    """주제 자기 숏츠 중앙값이 없으면(형식이 카테고리·전체에서 채워진 주제) 후보가 아니다."""
+    assert io.trend_candidates(_inp(), [_t("빌린형식", topic_views=None)]) == []
+    plain = TrendInsight(insight_id="p", rank=1, topic="예전응답", line="l", shorts_format="챌린지",
+                         ad_material=True, real_entity=False)  # fmt: skip
+    assert io.trend_candidates(_inp(), [plain]) == []
 
 
 def test_candidates_at_most_three_and_none_without_format() -> None:

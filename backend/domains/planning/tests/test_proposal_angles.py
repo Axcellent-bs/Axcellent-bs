@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,12 +33,20 @@ def _insight(ref: str = "ins-1", **kw) -> ReceiveInsightInput:
     return ReceiveInsightInput.model_validate({**base, **kw})
 
 
+_T = TrendInsight(
+    insight_id="t-1", rank=1, topic="책장 넘기기 챌린지", line="l", shorts_format="챌린지",
+    ad_material=True, real_entity=False, score=3.0, shorts_format_median_views=5060000.0,
+)  # fmt: skip
+# 11/18 재현 님이 trend_insight_brief에 더하는 주제 자기 숏츠 칸
+# (계약에 들어오기 전이라 덧붙여 흉내)
 TRENDS = [
-    TrendInsight(
-        insight_id="t-1", rank=1, topic="책장 넘기기 챌린지", line="l", shorts_format="챌린지",
-        ad_material=True, real_entity=False, score=3.0, shorts_format_median_views=48000.0,
+    SimpleNamespace(
+        **_T.model_dump(),
+        shorts_format_topic_median_views=48000.0,
+        shorts_format_topic_at=None,
+        shorts_format_topic_examples=[SimpleNamespace(title="책장 넘기는 손", views=52000)],
     )
-]  # fmt: skip
+]
 
 
 class Insights:

@@ -612,8 +612,9 @@ class TrendRef(DomainModel):
     """올라탈 유행 후보 하나. 값은 데이터분석 trend_insight_brief 그대로 (11/18)."""
 
     topic: str
-    median_views: float | None = None  # 그 주제의 숏츠 형식 중앙값 조회
+    median_views: float | None = None  # 그 주제 자기 숏츠(같은 형식)의 조회 중앙값
     at: UtcDatetime | None = None  # 기준 시각
+    examples: list[str] = Field(default_factory=list)  # 대표 영상 제목 (최대 3개, 데이터분석)
 
 
 class ScaleFacts(DomainModel):
