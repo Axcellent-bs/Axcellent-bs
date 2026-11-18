@@ -365,7 +365,8 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
             await shorts_backfill.run(env)
             # 검색 트렌드 키워드 풀 (한국 날짜 하루 1번, 이미 채웠으면 건너뜀. 실패해도 계속)
             await keyword_pool.run(env)
-            # 인스타 인기 오디오·레이더 (한국 날짜 하루 1번, 토큰이 없으면 한 줄만. 실패해도 계속)
+            # 인스타 (이 루프 회차마다, run_all.sh는 1시간마다): 인기 오디오는 한국 날짜 하루 1번,
+            # 레이더는 회차마다 한 묶음(50곳, 커서 이어받기). 토큰이 없으면 한 줄만. 실패해도 계속
             from data_agent.skills import instagram
 
             await instagram.run(env)
