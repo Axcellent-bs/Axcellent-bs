@@ -2,7 +2,8 @@
 
 - 둘 다 읽기 전용이다(초안 저장만 한다). 상태를 바꾸는 `publish_sns`·`generate_media`는
   이 단계에 없다.
-- 초안 문안은 고정 템플릿이다. 이미 게시된 공지(`NoticeStore`)의 공개 문구 또는 공개 쿠폰 사실
+- 초안 문안은 고정 템플릿이다(기획안은 필드를 골라 SNS 형식으로 다시 짠다).
+  이미 게시된 공지(`NoticeStore`)의 공개 문구 또는 공개 쿠폰 사실
   (제약 사항 포함)만 쓰고, 원인·영향 숫자는 적지 않는다. 외부 입력(`untrusted`)은 읽지 않는다.
 - 점검은 코드 규칙이다. 필수 항목이 하나라도 빠지면 `rejected`이고, 개수는 safety 기준표
   (`ai_label_missing_count`·`text_mismatch_count`·`constraint_missing_count`)의 정의와 같게 센다.
@@ -46,6 +47,18 @@ TERMS_TEXT = "주문·결제·환불 등은 캣북스 이용약관·구매자 �
 HASHTAGS = ("#캣북스",)
 # 참여 조건부 게시 금지(체크리스트 1절): 조건을 거는 말이 캡션에 있으면 막는다
 FORBIDDEN_PHRASES = ("좋아요", "팔로우", "공유", "댓글")
+# 팀 마케팅 규칙: 성과 과장·인력 대체·시연 숫자를 실제 성과처럼 쓰는 표현을 캡션에서 막는다.
+# 공백을 뺀 글에서 찾는다(띄어쓰기로 피하지 못하게)
+FORBIDDEN_CLAIM_PATTERNS = (
+    r"인건비(를|가|은|는)?절감",
+    r"직원(을|이|은|는)?(모두|전부)?대체",
+    r"에이전트(가|는|들이)?(더|훨씬)?빨라",
+    r"최고",
+    r"무조건",
+    r"획기적",
+    r"압도적",
+    r"혁신적",
+)
 CAPTION_MAX = sns_media.CAPTION_MAX  # Instagram 캡션 길이 상한 [확인 필요: 공식 문서]
 HASHTAG_MAX = sns_media.HASHTAG_MAX
 MENTION_MAX = sns_media.MENTION_MAX
@@ -169,6 +182,10 @@ class SnsPostDraft(AxModel):
     media_from: str | None = None
     # 사본에 미디어를 붙인 뒤 돌린 `check_sns_post` 결과(verdict·publishable·problems·checked_at)
     media_check: dict[str, Any] | None = None
+    # 기획안으로 재구성한 캡션의 출처 메타(승인자용): 기획안 번호,
+    # 쓴 필드 이름·글자 수·해시 앞 12자.
+    # 값 전문은 넣지 않는다. 옛 레코드·공지·쿠폰 초안은 None이다
+    caption_source: dict[str, Any] | None = None
 
 
 class CheckSnsPostInput(AxModel):
@@ -411,15 +428,82 @@ class SourceParts:
     required: list[str]
     constraints: list[CouponConstraint]
     notice_kind: NoticeKind | None = None  # 공지 출처일 때 그 공지의 종류
+    caption_source: dict[str, Any] | None = None  # 기획안 출처 메타(`draft.caption_source`)
 
 
-def _brief_body(stored: Any) -> str:
-    """보관된 기획안의 title·idea·why·facts를 받은 그대로 옮긴다. 숫자는 만들지 않는다."""
+def has_forbidden_claim(text: str) -> bool:
+    squeezed = re.sub(r"\s+", "", text)
+    return any(re.search(pattern, squeezed) for pattern in FORBIDDEN_CLAIM_PATTERNS)
+
+
+BRIEF_HOOK_MAX = 50
+BRIEF_LINE_MAX = 120
+BRIEF_FACTS_MAX = 2
+BRIEF_TEMPLATE = "brief_caption_v1"
+_SENTENCE_END = re.compile(r"(?<=[.!?。])\s+|\n+")
+
+
+def _first_sentence(text: str, limit: int) -> str:
+    """첫 문장만, `limit`자를 넘으면 공백 경계에서 자르고 말줄임표를 붙인다."""
+    flat = text.strip()
+    if not flat:
+        return ""
+    first = _SENTENCE_END.split(flat, maxsplit=1)[0].strip()
+    if len(first) <= limit:
+        return first
+    cut = first[: limit - 1]
+    if " " in cut[limit // 2 :]:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,.") + "…"
+
+
+def _field_meta(name: str, value: str) -> dict[str, Any]:
+    return {"name": name, "chars": len(value), "sha12": _sha(value)[:12]}
+
+
+def _brief_body_and_source(stored: Any) -> tuple[str, dict[str, Any]]:
+    """기획안 필드에서 SNS 형식 본문을 다시 짠다(결정적 템플릿, LLM 없음).
+
+    첫 줄 훅(title) → 짧은 본문(idea 첫 문장) → 이유 한 줄(why 첫 문장) → 근거 한 줄(facts 앞 2개).
+    근거 값은 기획안의 값을 글자 그대로 쓰고 숫자를 만들지 않는다. target(목표치)은 성과가 아니라
+    쓰지 않는다. 마지막 줄에 출처 표기를 붙인다. 비어 있는 필드는 건너뛴다.
+    """
     b = stored.brief
-    lines = [b.title.strip(), "", b.idea.strip(), "", b.why.strip()]
-    if b.facts:
-        lines += ["", "근거"] + [f"- {f.label.strip()}: {f.value.strip()}" for f in b.facts]
-    return "\n".join(lines)
+    used: list[dict[str, Any]] = []
+    blocks: list[str] = []
+    hook = _first_sentence(b.title, BRIEF_HOOK_MAX)
+    if hook:
+        blocks.append(hook)
+        used.append(_field_meta("title", b.title))
+    idea = _first_sentence(b.idea, BRIEF_LINE_MAX)
+    if idea:
+        blocks.append(idea)
+        used.append(_field_meta("idea", b.idea))
+    why = _first_sentence(b.why, BRIEF_LINE_MAX)
+    if why:
+        blocks.append(f"왜 지금? {why}")
+        used.append(_field_meta("why", b.why))
+    facts = [f for f in b.facts if f.label.strip() and f.value.strip()][:BRIEF_FACTS_MAX]
+    if facts:
+        joined = " / ".join(f"{f.label.strip()} {f.value.strip()}" for f in facts)
+        blocks.append(f"근거(시연 환경 기준): {joined}")
+        used.append(_field_meta("facts", joined))
+    blocks.append("기획팀 제안 기반")
+    meta = {
+        "kind": "brief",
+        "proposal_id": stored.proposal_id,
+        "template": BRIEF_TEMPLATE,
+        "reconstructed": True,
+        "fields": used,
+    }
+    return "\n\n".join(blocks), meta
+
+
+def _brief_all_text(stored: Any) -> str:
+    b = stored.brief
+    parts = [b.title, b.idea, b.why]
+    parts += [f"{f.label} {f.value}" for f in b.facts]
+    return "\n".join(parts)
 
 
 def source_parts(
@@ -451,10 +535,21 @@ def source_parts(
             return _result(request, TaskStatus.FAILED, outcome="storage_error")
         if stored is None:
             return _result(request, TaskStatus.FAILED, outcome="brief_not_found")
-        body = _brief_body(stored)
-        if any(phrase in body for phrase in FORBIDDEN_PHRASES):  # 참여 조건부 게시 금지
+        # 쓰지 않는 문장까지 포함한 기획안 전체를 검사한다(막는 쪽으로 기운다)
+        full = _brief_all_text(stored)
+        if any(phrase in full for phrase in FORBIDDEN_PHRASES):  # 참여 조건부 게시 금지
             return _result(request, TaskStatus.FAILED, outcome="forbidden_phrase")
-        return SourceParts("brief", data.proposal_id, body, [body, DEMO_TEXT, TERMS_TEXT], [])
+        if has_forbidden_claim(full):  # 인건비 절감·직원 대체·과장 표현
+            return _result(request, TaskStatus.FAILED, outcome="forbidden_claim")
+        body, source_meta = _brief_body_and_source(stored)
+        return SourceParts(
+            "brief",
+            data.proposal_id,
+            body,
+            [body, DEMO_TEXT, TERMS_TEXT],
+            [],
+            caption_source=source_meta,
+        )
     assert data.coupon is not None
     facts = data.coupon
     have = {c.code for c in facts.constraints}
@@ -571,6 +666,7 @@ async def draft_sns_post(
         required_text=required,
         constraints=constraints,
         context_id=request.meta.context_id,
+        caption_source=parts.caption_source,
     )
     store.save(draft)
     return _result(
@@ -747,6 +843,8 @@ async def check_sns_post(request: AgentRequest, store: SnsStore) -> AgentResult:
     forbidden = sum(1 for phrase in FORBIDDEN_PHRASES if phrase in caption)
     if forbidden:
         problems.append("forbidden_phrase")
+    if has_forbidden_claim(caption):
+        problems.append("forbidden_claim")
 
     # 상품 홍보(`product_created` 공지)는 공지 문구 밖에 숫자가 있으면 출처를 알 수 없는 숫자다.
     # 장애 안내·정상화 안내 같은 비상품은 이 검사를 하지 않는다. 장애 원인·영향 숫자 금지는
