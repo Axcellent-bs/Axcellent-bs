@@ -174,7 +174,8 @@ def radar_latest(path: str | Path) -> tuple[date | None, dict[str, list[dict[str
         media: dict[str, list[dict[str, Any]]] = {}
         for acc, mid, pt, at, likes, comments, views, cap, link in conn.execute(
             "SELECT account, media_id, product_type, posted_at, like_count, comments_count,"
-            " view_count, caption, permalink FROM media WHERE day = ?", (day,)
+            " view_count, caption, permalink FROM media WHERE day = ?",
+            (day,),
         ):
             media.setdefault(acc, []).append({
                 "id": mid, "media_product_type": pt, "timestamp": at, "like_count": likes,
@@ -269,7 +270,8 @@ def memos(path: str | Path, tenant: str, limit: int) -> list[dict[str, Any]]:
     try:
         rows = conn.execute(
             "SELECT memo_id, kind, name, memo, author, created_at, linked_trend FROM memos"
-            " WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?", (tenant, limit),
+            " WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
+            (tenant, limit),
         ).fetchall()
     except sqlite3.DatabaseError:
         return []

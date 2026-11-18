@@ -187,10 +187,23 @@ class VideoStore:
                 " title = COALESCE(videos.title, excluded.title),"
                 " category = COALESCE(videos.category, excluded.category),"
                 " shorts_format = COALESCE(videos.shorts_format, excluded.shorts_format)",
-                (v.key, v.platform, v.video_id, v.video_url, v.campaign_id, v.insight_id,
-                 v.proposal_id, int(v.test), _iso(v.published_at), v.title,
-                 v.registered_at.isoformat(), v.category, v.shorts_format, v.promo_id,
-                 v.coupon_id),  # fmt: skip
+                (
+                    v.key,
+                    v.platform,
+                    v.video_id,
+                    v.video_url,
+                    v.campaign_id,
+                    v.insight_id,
+                    v.proposal_id,
+                    int(v.test),
+                    _iso(v.published_at),
+                    v.title,
+                    v.registered_at.isoformat(),
+                    v.category,
+                    v.shorts_format,
+                    v.promo_id,
+                    v.coupon_id,
+                ),  # fmt: skip
             )
 
     def videos(self, *, include_test: bool = True) -> list[Video]:
@@ -213,8 +226,7 @@ class VideoStore:
     def points(self, key: str) -> dict[VideoCheckpointName, Point]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT checkpoint, measured_at, views, likes, comments FROM points"
-                " WHERE key = ?",
+                "SELECT checkpoint, measured_at, views, likes, comments FROM points WHERE key = ?",
                 (key,),
             ).fetchall()
         out: dict[VideoCheckpointName, Point] = {}
@@ -441,10 +453,20 @@ def facts_of(
             add(f"{c.checkpoint} 댓글 비율", c.comment_rate, "비율", "code", at),
             add(f"{c.checkpoint} 목표 대비 배수", c.target_ratio, "배", "code", at),
             add(f"{c.checkpoint} 같은 숏츠 중앙값 대비 배수", c.peer_ratio, "배", "code", at),
-            add(f"{c.checkpoint} 같은 형식 숏츠 조회 중앙값 (시간 맞춤, 표본 {c.baseline_n})",
-                c.baseline_views, "회", "youtube_snapshots", at),
-            add(f"{c.checkpoint} 같은 형식 대비 배수 (시간 맞춤)", c.peer_age_ratio, "배", "code",
-                at),
+            add(
+                f"{c.checkpoint} 같은 형식 숏츠 조회 중앙값 (시간 맞춤, 표본 {c.baseline_n})",
+                c.baseline_views,
+                "회",
+                "youtube_snapshots",
+                at,
+            ),
+            add(
+                f"{c.checkpoint} 같은 형식 대비 배수 (시간 맞춤)",
+                c.peer_age_ratio,
+                "배",
+                "code",
+                at,
+            ),
         ]
         c.fact_ids = [i for i in ids if i]
     return rows
@@ -632,10 +654,14 @@ def baseline_progress(env: Mapping[str, str]) -> list[BaselineProgress]:
     windows = {c: (CHECKPOINTS[c], WINDOW_HOURS[c]) for c in CHECKPOINTS}
     loaded = video_baseline.load(env, windows, formats=formats)
     return [
-        BaselineProgress(shorts_format=f, checkpoint=c,
-                         n=len(loaded[f].samples.get(c, {})) if f in loaded else 0,
-                         need=video_baseline.MIN_BASELINE)  # fmt: skip
-        for f in formats for c in CHECKPOINTS
+        BaselineProgress(
+            shorts_format=f,
+            checkpoint=c,
+            n=len(loaded[f].samples.get(c, {})) if f in loaded else 0,
+            need=video_baseline.MIN_BASELINE,
+        )  # fmt: skip
+        for f in formats
+        for c in CHECKPOINTS
     ]
 
 
@@ -767,9 +793,15 @@ def performance_by_horizon(
 def table_of(rows: Sequence[VideoPerformanceHorizonGroup]) -> list[VideoPerformanceGroup]:
     """예전 표(performance_table): 목표 시점(7일) 줄만 옮긴다."""
     return [
-        VideoPerformanceGroup(key=r.key, value=r.value, videos=r.videos, measured=r.target_n,
-                              median_target_ratio=r.median_target_ratio)  # fmt: skip
-        for r in rows if r.checkpoint == TARGET_AT
+        VideoPerformanceGroup(
+            key=r.key,
+            value=r.value,
+            videos=r.videos,
+            measured=r.target_n,
+            median_target_ratio=r.median_target_ratio,
+        )  # fmt: skip
+        for r in rows
+        if r.checkpoint == TARGET_AT
     ]
 
 

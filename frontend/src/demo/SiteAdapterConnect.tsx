@@ -25,7 +25,7 @@ const STATUS: { value: string; label: string }[] = [
 ]
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
 
-export default function SiteAdapterConnect({ onState }: { onState?: (s: ConnectionState | 'error') => void }) {
+export default function SiteAdapterConnect({ onState, tenant }: { onState?: (s: ConnectionState | 'error') => void; tenant?: string }) {
   const [state, setState] = useState<SiteAdapterState | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [base, setBase] = useState('')
@@ -78,7 +78,7 @@ export default function SiteAdapterConnect({ onState }: { onState?: (s: Connecti
   }
   const save = () => void run('save', async () => {
     if (!mapping) return
-    const saved = await siteAdapter.save(base, mapping, token)
+    const saved = await siteAdapter.save(base, mapping, token, tenant)
     setState(saved); setToken('')
     const conn = await companyConnection.get()
     onState?.(conn.mode === 'internal' ? await companyConnection.mode('connected') : conn)

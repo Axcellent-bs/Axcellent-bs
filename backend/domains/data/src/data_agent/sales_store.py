@@ -1167,8 +1167,11 @@ class SegmentSession:
             self.conn.execute(
                 f"INSERT INTO seg_pi {self._ITEMS}"
                 + (f" AND i.buyer_id IN ({segment})" if match else ""),
-                {**self.params, "lv": level,
-                 **{f"f{i}": v for i, v in enumerate(filters.values())}},  # fmt: skip
+                {
+                    **self.params,
+                    "lv": level,
+                    **{f"f{i}": v for i, v in enumerate(filters.values())},
+                },  # fmt: skip
             )
             self.conn.execute("CREATE INDEX temp.seg_pi_buyer ON seg_pi(buyer_id, code)")
             self._pi = want

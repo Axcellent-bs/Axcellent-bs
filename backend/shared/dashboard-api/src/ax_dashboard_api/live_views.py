@@ -69,6 +69,15 @@ async def _shop_get(
     return data
 
 
+def shop_failure(res: httpx.Response) -> ApiError:
+    """판매 서버 실패 응답 → 화면 오류. 연결 전(503 NOT_CONFIGURED)은 그 뜻 그대로."""
+    from ax_dashboard_api.shop_relay import not_connected_error
+
+    return not_connected_error(res) or ApiError(
+        502, "UPSTREAM_ERROR", f"판매 서버에서 오류가 났습니다 (HTTP {res.status_code})"
+    )
+
+
 async def _shop_get_page(
     path: str, params: dict[str, Any] | None = None, *, not_found: str | None = None
 ) -> tuple[Any, dict[str, Any]]:
@@ -81,9 +90,7 @@ async def _shop_get_page(
     if res.status_code == 404 and not_found:
         raise ApiError(404, "NOT_FOUND", not_found)
     if res.status_code >= 400:
-        raise ApiError(
-            502, "UPSTREAM_ERROR", f"판매 서버에서 오류가 났습니다 (HTTP {res.status_code})"
-        )
+        raise shop_failure(res)
     body = res.json()
     meta = body.get("meta")
     return body.get("data"), meta if isinstance(meta, dict) else {}

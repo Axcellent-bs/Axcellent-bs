@@ -43,6 +43,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
+from ax_agent_template.tenant import setting as tenant_setting
 from data_agent.llm_budget import no_llm
 
 TOPIC_CATEGORIES: tuple[str, ...] = (
@@ -157,7 +158,7 @@ class TopicSettings:
 
 def load_settings(env: Mapping[str, str]) -> TopicSettings:
     """회사 `trends.toml` `[topics]`: 보관 기간과 덮어쓰기 표. 없거나 틀리면 기본값·빈 표."""
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return TopicSettings()
     try:

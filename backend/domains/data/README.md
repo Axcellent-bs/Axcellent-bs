@@ -615,7 +615,7 @@ LLM에는 요청 마감까지 남은 시간만 준다. LLM 마감 = 요청 `meta
   - 우선순위: 요청 그룹 > 사람 덮어쓰기(`[[override.groups]]`) > 프로필 씨앗. 프로필을 못 얻으면(LLM 없음·씨앗 없음) 덮어쓰기가 있으면 그것을, 없으면 지어내지 않고 `unknown` + 이유(`outcome="unknown"`)
   - 코드: `resolve_groups(requested, env, seed_provider)` — 테스트는 `seed_provider`로 LLM 없이 씨앗을 준다
   - **trend_history·content_recommend도 같은 우선순위**를 쓴다. trend_history는 못 정하면 `outcome="unknown"` + 이유, content_recommend는 요청 그룹 칸이 없어 덮어쓰기 > 프로필 씨앗이고, 둘 다 없으면 그룹 판정 없이 YouTube 후보만 본다
-  - Docker(`services/data/compose.yml`)는 `DATA_TREND_CONFIG`를 `/app/config/tenants/${AX_TENANT:-catbooks}/trends.toml`로 넘긴다. 바꾸려면 셸 환경변수로 준다(`.env` 값은 이 줄에 덮인다)
+  - Docker(`services/data/compose.yml`)는 `DATA_TREND_CONFIG`를 비워 넘긴다(캣북스 기본값 없음). 비어 있으면 회사 연결에서 고른 회사 폴더를 쓴다. 바꾸려면 셸 환경변수로 준다(`.env` 값은 이 줄에 덮인다)
   - **주의:** `services/*/compose.yml`·`agent-card.json`은 `scripts/split_services.py`가 만드는 파일이다. 이 줄은 손으로 넣어서 스크립트를 다시 돌리면 빠진다. 그 스크립트는 `--help` 같은 옵션을 읽지 않고 **바로 실행돼** 지금 dev에서도 `services/` 파일 66개를 다시 쓴다(줄바꿈 등). 확인하려고 옵션을 붙여 돌리지 말 것
 - 설명 문장은 LLM이 쓰고 `explain.py` 숫자 검증을 그대로 거친다(템플릿 `trend`)
 - 화면(`/data#trend`)용으로 그룹마다 받은 날짜별 값(`series`, 빠진 날은 빠진 채로), 판정 구간 시작일(`window_from`), 평소 범위 띠(`evidence.band_low`·`band_high` = exp(m ± σ)), 급상승 그룹의 설명 문장(`summary`, 그 그룹 숫자만으로, 템플릿 `trend_group`)도 준다
@@ -782,7 +782,7 @@ uv run python -m data_agent.youtube_collect --every 3600 # 1시간마다 (최소
 - 숫자 칸이 응답에 없으면(좋아요 숨김·댓글 막음) None/NULL이다. 지워졌거나 비공개가 된 영상은 결과에 없다. 0으로 채우지 않는다
 - 못 읽으면 `ConnectorUnavailable`(403 할당량 초과는 `QUOTA_EXCEEDED`). 할당량 초과가 나면 그 실행의 남은 호출을 멈추고 받은 것까지 저장한다
 - 저장: `DATA_YOUTUBE_DB`(없으면 `backend/.data/youtube_snapshots.db`, 커밋 안 함). `snapshots`는 (수집 시각, 영상 id)가 기본 키라 같은 시각 같은 영상은 한 줄이다. 칸: 수집 시각, 영상 id, 조회수·좋아요·댓글, 인기 순위, 게시 시각, 카테고리, 채널 id, 태그(JSON), 어디서 받았는지. `runs`에 실행마다 쓴 할당량 단위·개수·실패 이유
-- 회사 키워드: `config/tenants/<회사>/youtube.toml`(`tenant.toml`의 `youtube` → `scripts/tenant_env.py`가 `DATA_YOUTUBE_CONFIG`로). 없으면 `config/tenants/<AX_TENANT, 기본 catbooks>/youtube.toml`. 코드에 키워드를 두지 않는다
+- 회사 키워드: `config/tenants/<회사>/youtube.toml`(`tenant.toml`의 `youtube` → `scripts/tenant_env.py`가 `DATA_YOUTUBE_CONFIG`로). 없으면 `config/tenants/<AX_TENANT>/youtube.toml`, 그것도 없으면 회사 연결에서 고른 회사(연결 전이면 키워드 없음). 코드에 키워드를 두지 않는다
 - 키는 환경변수가 먼저고, 없으면 `backend/.env`에서 읽는다(값은 출력하지 않는다)
 - `run_all.sh`에는 아직 넣지 않았다
 

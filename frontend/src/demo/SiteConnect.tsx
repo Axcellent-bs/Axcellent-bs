@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { companyConnection, type ConnectionState } from '@/lib/companyConnection'
+import { companyConnection, type ConnectionState, type TenantOption } from '@/lib/companyConnection'
 import { SectionHead, StatusChip } from '@/components/connect/parts'
 import { Link } from '@/lib/nav'
 import Integrations from './Integrations'
@@ -18,11 +18,19 @@ const WAYS: { id: Way; title: string; desc: string }[] = [
 
 export default function SiteConnect({ onShop }: { onShop: (s: ConnectionState | 'error') => void }) {
   const [way, setWay] = useState<Way | null>(null)
+  // 회사 설정(조직도·지표·검색 키워드): 연결할 때 같이 저장한다. 연결 전에는 어느 회사도 아니다
+  const [tenants, setTenants] = useState<TenantOption[]>([])
+  const [tenant, setTenant] = useState('')
 
   useEffect(() => {
     let live = true
     companyConnection.get()
-      .then((s) => { if (live) setWay(s.connection?.kind === 'adapter' ? 'adapter' : 'shop_api') })
+      .then((s) => {
+        if (!live) return
+        setWay(s.connection?.kind === 'adapter' ? 'adapter' : 'shop_api')
+        setTenants(s.tenants ?? [])
+        setTenant(s.tenant?.id ?? s.connection?.tenant ?? '')
+      })
       .catch(() => { if (live) setWay('shop_api') })
     return () => { live = false }
   }, [])
@@ -35,6 +43,14 @@ export default function SiteConnect({ onShop }: { onShop: (s: ConnectionState | 
         <div className="space-y-4 p-6">
           <SectionHead as="h3" title="사이트 데이터 연결" desc="사이트가 데이터를 내주는 방식을 골라요. 둘 중 하나만 써요."
             right={<StatusChip tone="wait">필수</StatusChip>} />
+          <label className="block max-w-md space-y-1 text-sm">
+            <span className="text-ink-700">회사 설정</span>
+            <select className="field w-full" value={tenant} onChange={(e) => setTenant(e.target.value)} aria-describedby="tenant-help">
+              <option value="">{tenants.length ? '바꾸지 않음 (저장된 회사 그대로)' : '고를 회사 설정이 없어요'}</option>
+              {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <span id="tenant-help" className="block text-xs leading-5 text-ink-500">조직도·지표 목록·검색 키워드를 이 회사 것으로 써요. 연결을 저장할 때 같이 저장돼요.</span>
+          </label>
           <div role="radiogroup" aria-label="연결 방식" className="grid gap-2 sm:grid-cols-2">
             {WAYS.map((w) => (
               <label key={w.id} className={`flex cursor-pointer gap-3 border px-4 py-3 text-sm ${way === w.id ? 'border-brand-700 bg-brand-50/40' : 'border-ink-100'}`}>
@@ -48,8 +64,8 @@ export default function SiteConnect({ onShop }: { onShop: (s: ConnectionState | 
           </div>
         </div>
         <div className="border-t border-ink-100 p-4">
-          {way === 'shop_api' && <Integrations onState={onShop} embedded />}
-          {way === 'adapter' && <div className="p-2"><SiteAdapterConnect onState={onShop} /></div>}
+          {way === 'shop_api' && <Integrations onState={onShop} embedded tenant={tenant} />}
+          {way === 'adapter' && <div className="p-2"><SiteAdapterConnect onState={onShop} tenant={tenant} /></div>}
         </div>
       </div>
 

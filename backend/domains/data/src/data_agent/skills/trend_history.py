@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     TrendHistoryGroup,
@@ -38,7 +39,7 @@ NO_DATA = "네이버가 이 기간 값을 주지 않음 (검색량이 너무 적
 
 def months_setting(env: Mapping[str, str]) -> int:
     """회사 `trends.toml` `[history] months`. 없거나 틀리면 24."""
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return DEFAULT_MONTHS
     try:

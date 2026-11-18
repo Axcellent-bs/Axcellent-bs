@@ -43,7 +43,7 @@ const PATH = "/api/dashboard/site-adapter";
 export const siteAdapter = {
   get: () => call<SiteAdapterState>("GET", PATH),
   propose: (input: ProposeInput) => call<SiteProposal>("POST", `${PATH}/propose`, input),
-  save: (base_url: string, mapping: SiteMapping, token?: string) =>
-    call<SiteAdapterState>("PUT", PATH, { base_url, mapping, token: token || undefined }),
+  save: (base_url: string, mapping: SiteMapping, token?: string, tenant?: string) =>
+    call<SiteAdapterState>("PUT", PATH, { base_url, mapping, token: token || undefined, tenant: tenant || undefined }),
 };
 

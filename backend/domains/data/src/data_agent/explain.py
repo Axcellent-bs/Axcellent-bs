@@ -311,12 +311,11 @@ def _template(kind: str, facts: dict[str, int | float | str]) -> str:
         if top is not None:
             head += f", 1위는 {_fmt(top)}(평소 {_fmt(facts.get('급상승1 배수'))}배)"
         season = facts.get("시즌1")
-        tail = (
-            f" 이달 시즌 키워드 {_fmt(facts.get('시즌 키워드 수'))}개"
-            + (f", 1위는 {_fmt(season)}({_fmt(facts.get('시즌1 배수'))}배)" if season else "")
+        tail = f" 이달 시즌 키워드 {_fmt(facts.get('시즌 키워드 수'))}개" + (
+            f", 1위는 {_fmt(season)}({_fmt(facts.get('시즌1 배수'))}배)" if season else ""
         )
         return f"{head}입니다.{tail}입니다."
-    pairs =", ".join(f"{k}={v}" for k, v in facts.items())
+    pairs = ", ".join(f"{k}={v}" for k, v in facts.items())
     return f"{kind}: {pairs}" if pairs else f"{kind}: 표시할 값이 없습니다."
 
 

@@ -1278,7 +1278,7 @@ export interface TrendInsight {
   evidence_highlights?: EvidenceHighlight[];
   evidence_shorts?: VideoLink[];
   /**
-   * 브리프 v6 (예전 응답은 없다). trend = 트렌드 주제, promo = 실제로 오르는 숏츠 형식만 빌린 캣북스 홍보 영상 아이디어
+   * 브리프 v6 (예전 응답은 없다). trend = 트렌드 주제, promo = 실제로 오르는 숏츠 형식만 빌린 우리 회사 홍보 영상 아이디어
    * (topic = 형식 이름). promo 근거: 숏츠 전체 대비 배수(이 형식 1시간 조회 중앙값 ÷ 전체 숏츠 1시간 조회 중앙값),
    * 최근 N일 안에 게시된 같은 형식 수, 게시 시각을 몰라 세지 않은 수
    */

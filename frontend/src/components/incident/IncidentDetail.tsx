@@ -83,8 +83,8 @@ function RollbackDetail({ step }: { step: StepRow }) {
 
 /** 진행 기록 한 줄 */
 function eventKo(message: string, inc: OrchIncident): string {
-  if (message.startsWith("이벤트 수신: shop.degraded")) return "캣북스 쇼핑몰에서 장애 신호를 받음";
-  if (message.startsWith("이벤트 수신: shop.recovered")) return "캣북스 쇼핑몰에서 복구 신호를 받음";
+  if (message.startsWith("이벤트 수신: shop.degraded")) return "회사 쇼핑몰에서 장애 신호를 받음";
+  if (message.startsWith("이벤트 수신: shop.recovered")) return "회사 쇼핑몰에서 복구 신호를 받음";
   if (message.startsWith("이벤트 수신: support.inquiry_resolved")) return "고객지원 AI에서 문의 해결 신호를 받음";
   // 예전에 저장된 기록은 "이벤트"로 남아 있어 둘 다 받는다
   if (/^이(슈|벤트) 시작:/.test(message)) return `이슈 시작: ${incidentTitle(inc)}`;

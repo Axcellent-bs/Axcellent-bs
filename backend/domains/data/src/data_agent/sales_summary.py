@@ -187,8 +187,16 @@ def refresh(
             "INSERT INTO sales_buyer_summary (tenant_id, buyer_id, first_paid_at, second_paid_at, "
             "last_paid_at, paid_orders, revenue, first_src_source) VALUES (?,?,?,?,?,?,?,?)",
             [
-                (tenant_id, bid, b.first[0] if b.first else "", b.second[0] if b.second else None,
-                 b.last, b.orders, b.revenue, b.src)
+                (
+                    tenant_id,
+                    bid,
+                    b.first[0] if b.first else "",
+                    b.second[0] if b.second else None,
+                    b.last,
+                    b.orders,
+                    b.revenue,
+                    b.src,
+                )
                 for bid, b in buyers.items()
             ],  # fmt: skip
         )

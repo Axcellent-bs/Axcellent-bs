@@ -44,6 +44,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     AutoExcludedTerm,
@@ -203,7 +204,7 @@ def auto_same_targets(output: Mapping[str, Any] | None) -> dict[str, tuple[str, 
 
 def load_config(env: Mapping[str, str]) -> CandidateConfig:
     """`DATA_TREND_CONFIG`(회사 `trends.toml`)의 `[candidates]`. 없거나 틀리면 기본값."""
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return CandidateConfig()
     try:

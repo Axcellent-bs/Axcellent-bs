@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     CollectorStatus,
@@ -135,7 +136,7 @@ BY_ID = {s.source_id: s for s in SPECS}
 def approved_ids(env: Mapping[str, str]) -> set[str]:
     """회사 설정 `[sources] approved` (새 출처 수집 승인 플래그). 기존 출처는 늘 승인."""
     ids = {s.source_id for s in SPECS if s.existing}
-    path = env.get(TENANT_CONFIG_ENV)
+    path = env.get(TENANT_CONFIG_ENV) or tenant_setting(TENANT_CONFIG_ENV)
     if path and Path(path).is_file():
         try:
             with Path(path).open("rb") as f:

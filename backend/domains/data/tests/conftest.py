@@ -49,3 +49,13 @@ def _reset_llm_inflight(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(llm_inflight, "INFLIGHT", llm_inflight.Inflight(None))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_connected_company(monkeypatch: pytest.MonkeyPatch) -> None:
+    """회사 설정(`ax_agent_template.tenant`)이 개발자 PC의 회사 연결·AX_TENANT를 읽지 않게 한다.
+
+    시험이 넘긴 env가 비어 있으면 "연결 전"이어야 한다. 회사가 필요한 시험은 env에 AX_TENANT를 준다.
+    """
+    for name in ("AX_TENANT", "AX_COMPANY_CONNECTION_FILE", "AX_TENANTS_DIR"):
+        monkeypatch.delenv(name, raising=False)

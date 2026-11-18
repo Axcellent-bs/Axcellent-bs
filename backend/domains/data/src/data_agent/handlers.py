@@ -472,12 +472,15 @@ async def segment_options(request: AgentRequest) -> AgentResult:
         request,
         TaskStatus.COMPLETED,
         output=mark(out, got).model_dump(mode="json"),
-        evidence=stamp(Evidence(
-            queries=["catalog.sales", "sales_store.sync_state"],
-            data_summary=extra,
-            collected_at=now,
-            ref_ids=[],
-        ), got),  # fmt: skip
+        evidence=stamp(
+            Evidence(
+                queries=["catalog.sales", "sales_store.sync_state"],
+                data_summary=extra,
+                collected_at=now,
+                ref_ids=[],
+            ),
+            got,
+        ),  # fmt: skip
     )
 
 

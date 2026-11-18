@@ -373,11 +373,15 @@ def _url_run(env: dict[str, str], tmp_path: Path) -> dict[str, str]:
 
 
 @pytest.mark.parametrize("external", [None, "on", "off"])
-def test_shop_api_url_defaults_to_local_8010(tmp_path: Path, external: str | None) -> None:
-    """#1220: 판매 서버를 띄우지 않아도 AX_SHOP_API_URL은 늘 같은 호스트 8010으로 내보낸다."""
+def test_shop_api_url_has_no_catbooks_default(tmp_path: Path, external: str | None) -> None:
+    """캣북스 기본값 없음: 운영자가 주지 않으면 AX_SHOP_API_URL을 내보내지 않는다.
+
+    서비스들은 회사 연결 파일을 따르고, 연결 전이면 사이트 변환기가 "연결 안 됨"(503)으로 답한다.
+    (#1220의 컨테이너 이름 빠짐은 agent_url이 연결 안 됨으로 보내 막는다.)
+    """
     env = {} if external is None else {"SHOP_API_EXTERNAL": external}
     out = _url_run(env, tmp_path)
-    assert out["shop"] == "http://127.0.0.1:8010"
+    assert out["shop"] == "UNSET"
     assert out["safety"].startswith("http://127.0.0.1:")  # 나머지 서비스 주소는 그대로
 
 

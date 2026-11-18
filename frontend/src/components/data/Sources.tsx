@@ -18,7 +18,7 @@ const SOURCE_NAMES: [RegExp, string][] = [
   [/^naver search-trend/i, "네이버 데이터랩 검색어 트렌드 (상대값, 최댓값 = 100)"],
   [/^naver/i, "네이버 데이터랩"],
   [/^trending snapshot/i, "Google 인기 검색어 RSS (trends.google.com/trending/rss)"],
-  [/^shop-api/i, "캣북스 상품 목록 (shop-api)"],
+  [/^shop-api/i, "회사 상품 목록 (shop-api)"],
   [/^llm/i, "LLM (문장만 씀, 숫자는 코드 검사)"],
   [/cache/i, "오늘 만든 결과 다시 씀 (하루 캐시)"],
 ];

@@ -45,6 +45,7 @@ from typing import Any, Literal, get_args
 from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     AGE_NOTE,
@@ -190,7 +191,7 @@ def load_config(env: Mapping[str, str]) -> BriefConfig:
 
 
 def _load_toml(env: Mapping[str, str]) -> BriefConfig:
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return BriefConfig()
     try:
@@ -777,8 +778,10 @@ def topic_format_views(
     ranked = sorted(picked, key=lambda v: (v.views is None, -(v.views or 0)))
     examples = [TopicFormatExample(title=v.title, views=v.views) for v in ranked[:TOPIC_EXAMPLES]]
     short = f"이 주제 숏츠 중 {fmt} {len(picked)}개/전체 {total}개로 표본 부족"
-    if len(picked) < TOPIC_FORMAT_MIN_COUNT or not total or (
-        len(picked) / total < TOPIC_FORMAT_MIN_SHARE
+    if (
+        len(picked) < TOPIC_FORMAT_MIN_COUNT
+        or not total
+        or (len(picked) / total < TOPIC_FORMAT_MIN_SHARE)
     ):
         return TopicFormatViews(None, None, examples, short)
     views = sorted(v.views for v in picked if v.views is not None)
@@ -984,8 +987,10 @@ def build_insights(
                 insight_id=stable_insight_id(tenant, c.topic),
                 # 바뀌기 전 id: 바로 전(카테고리 포함)과 그 전(날짜 + 주제). 기획 기록과 잇기
                 legacy_insight_id=category_insight_id(tenant, c.topic, c.category()),
-                legacy_insight_ids=[category_insight_id(tenant, c.topic, c.category()),
-                                    insight_id(day, c.topic)],  # fmt: skip
+                legacy_insight_ids=[
+                    category_insight_id(tenant, c.topic, c.category()),
+                    insight_id(day, c.topic),
+                ],  # fmt: skip
                 rank=1,
                 topic=c.topic,
                 aliases=c.aliases,
@@ -1128,7 +1133,10 @@ def warned_of(profile: Any, catalog: Any = None) -> Warned:
 
 
 def company_candidates(
-    promo: PromoConceptsOutput | None, catalog: Any, taken: Sequence[Candidate], pool: int,
+    promo: PromoConceptsOutput | None,
+    catalog: Any,
+    taken: Sequence[Candidate],
+    pool: int,
     warned: Warned | None = None,
 ) -> list[Candidate]:
     """회사 관련 후보: 기획안 시즌 키워드(배율 큰 순) → 카탈로그 상품 핵심어 (손으로 안 적음).
@@ -1278,9 +1286,15 @@ def mark_format(
         names = same_target([i.topic, *i.aliases], groups)
         mine = [c for c in concepts if _norm(c.borrowed_trend) in names]
         books = [
-            InsightProduct(product_id=p.product_id, name=p.name, category_name=p.category_name,
-                           reason=f"예시 아이디어 '{c.title}'에서 이 유행과 이어짐")  # fmt: skip
-            for c in mine for p in c.products if p.product_id not in warned.product_ids
+            InsightProduct(
+                product_id=p.product_id,
+                name=p.name,
+                category_name=p.category_name,
+                reason=f"예시 아이디어 '{c.title}'에서 이 유행과 이어짐",
+            )  # fmt: skip
+            for c in mine
+            for p in c.products
+            if p.product_id not in warned.product_ids
         ]
         books = list({p.product_id: p for p in books}.values())
         no_books = None if books else "예시 아이디어에서 이 주제와 이어진 회사 상품 없음"
@@ -1830,7 +1844,8 @@ async def _make_brief(
             i.evidence_shorts = hl.evidence_shorts(i.evidence.video_links)
         for c in out.opportunities:  # 카드 근거 숏츠는 제목을 채운 뒤에 고른다
             c.evidence_highlights = hl.card_highlights(
-                c, [f for f in out.facts if f.about == c.opportunity_id],
+                c,
+                [f for f in out.facts if f.about == c.opportunity_id],
                 hl.Rule(config.highlight_min_sample, config.highlight_max_ratio),
             )
             c.evidence_shorts = hl.evidence_shorts(c.video_links)

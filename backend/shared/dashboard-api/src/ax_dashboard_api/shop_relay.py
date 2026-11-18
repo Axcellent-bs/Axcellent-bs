@@ -68,12 +68,28 @@ def _token() -> str:
     )
 
 
+def not_connected_error(res: httpx.Response) -> ApiError | None:
+    """사이트 변환기의 503 NOT_CONFIGURED(회사 사이트 연결 전)는 그 뜻 그대로 화면에 넘긴다."""
+    if res.status_code != 503:
+        return None
+    try:
+        error = res.json().get("error") or {}
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(error, dict) or error.get("code") != "NOT_CONFIGURED":
+        return None
+    message = error.get("message") or "회사 사이트가 아직 연결돼 있지 않아요"
+    return ApiError(503, "NOT_CONFIGURED", str(message))
+
+
 def _upstream_error(res: httpx.Response) -> ApiError:
     """판매 서버의 실패 응답을 화면 오류로 바꿔요.
 
     판매 서버 문장은 판매 서버 중계(총괄·마케팅)가 준 502·504일 때만 그대로 써요.
     """
     status = res.status_code
+    if (not_connected := not_connected_error(res)) is not None:
+        return not_connected
     if status in (401, 403):
         return ApiError(
             503,

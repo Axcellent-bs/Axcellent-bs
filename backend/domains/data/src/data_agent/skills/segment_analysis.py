@@ -1258,8 +1258,15 @@ def with_index(rows: list[CoverageRow]) -> list[CoverageRow]:
         if total > 0 and r.buyer_share is not None and r.population is not None:
             share = round(r.population / total, 6)
             idx = round(r.buyer_share / share * 100, 1) if share > 0 else None
-        out.append(r.model_copy(update={"population_share": share, "index": idx,
-                                        "buyer_share": r.buyer_share if share else None}))
+        out.append(
+            r.model_copy(
+                update={
+                    "population_share": share,
+                    "index": idx,
+                    "buyer_share": r.buyer_share if share else None,
+                }
+            )
+        )
     return out
 
 

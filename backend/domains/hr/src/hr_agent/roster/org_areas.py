@@ -13,12 +13,12 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from pathlib import Path
 
 import yaml
 
+from ax_agent_template.tenant import setting as tenant_setting
 from hr_agent.store import Store
 
 ORG_ENV = "AX_ORG_CONFIG"
@@ -29,7 +29,7 @@ logger = logging.getLogger("hr.roster.org_areas")
 
 def load_org_areas(path: str | None = None) -> list[str]:
     """조직도 파일의 `areas` 목록. 읽을 수 없거나 형식이 틀리면 빈 목록이다."""
-    path = path or os.getenv(ORG_ENV, "")
+    path = path or tenant_setting(ORG_ENV)  # 환경변수 → 회사 연결에서 고른 회사의 조직도
     if not path:
         return []
     try:

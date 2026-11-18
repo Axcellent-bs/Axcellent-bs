@@ -26,6 +26,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ax_agent_template.tenant import setting as tenant_setting
 from data_agent.connectors import ConnectorUnavailable
 
 DB_ENV = "DATA_KEYWORD_POOL_DB"
@@ -50,7 +51,7 @@ class SearchConfig:
 
 
 def load_config(env: Mapping[str, str]) -> SearchConfig:
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return SearchConfig()
     try:
@@ -179,7 +180,9 @@ def by_day(path: str | Path, since: date, until: date) -> dict[date, list[PoolRo
             (since.isoformat(), until.isoformat()),
         ).fetchall():
             out[date.fromisoformat(day)] = _rows(
-                conn, f"SELECT {_COLS} FROM pool WHERE day = ?", (day,)  # noqa: S608
+                conn,
+                f"SELECT {_COLS} FROM pool WHERE day = ?",
+                (day,),  # noqa: S608
             )
         return out
     except sqlite3.DatabaseError:

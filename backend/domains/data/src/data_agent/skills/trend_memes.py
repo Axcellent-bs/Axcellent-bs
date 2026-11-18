@@ -50,6 +50,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
+from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
     MemeCriteria,
@@ -116,7 +117,7 @@ class MemeConfig:
 
 
 def load_config(env: Mapping[str, str]) -> MemeConfig:
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return MemeConfig()
     try:
@@ -688,7 +689,8 @@ async def search_ratios(
         if by:
             limits.append(
                 f"네이버 하루 상한 {age_config.daily_calls}번을 trend_age 예산 표로 같이 씀 ("
-                + "·".join(f"{c} {n}번" for c, n in by.items()) + ")"
+                + "·".join(f"{c} {n}번" for c, n in by.items())
+                + ")"
             )
     finally:
         if own:

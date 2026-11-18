@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ax_agent_template.tenant import setting as tenant_setting
 from data_agent import collector_lock
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.google_trends import GoogleTrendsConnector
@@ -30,6 +31,7 @@ from data_agent.trending_store import DB_ENV, DEFAULT_DB, TrendingStore
 
 BACKEND = Path(__file__).resolve().parents[4]
 TREND_CONFIG_ENV = "DATA_TREND_CONFIG"
+NOT_CONNECTED = "(회사 연결 안 됨)"  # 회사 전에는 설정 파일이 없다(지역 기본 KR)
 MIN_EVERY_SECONDS = 600  # --every 하한 (공개 피드에 부담 주지 않게)
 
 
@@ -50,10 +52,14 @@ class RunResult:
 
 
 def config_path(env: Mapping[str, str]) -> Path:
-    if env.get(TREND_CONFIG_ENV):
-        return Path(env[TREND_CONFIG_ENV])
-    tenant = (env.get("AX_TENANT") or "catbooks").strip()
-    return BACKEND / "config" / "tenants" / tenant / "trends.toml"
+    """회사 `trends.toml`: 환경변수 → `AX_TENANT` 폴더 → 회사 연결에서 고른 회사.
+
+    연결 전이면 없는 경로(설정 없음)."""
+    if value := env.get(TREND_CONFIG_ENV):
+        return Path(value)
+    if tenant := (env.get("AX_TENANT") or "").strip():
+        return BACKEND / "config" / "tenants" / tenant / "trends.toml"
+    return Path(tenant_setting(TREND_CONFIG_ENV) or NOT_CONNECTED)
 
 
 def load_geo(path: Path) -> str:

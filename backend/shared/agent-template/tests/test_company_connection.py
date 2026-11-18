@@ -10,6 +10,11 @@ from ax_agent_template import company_connection as cc
 from ax_agent_template.config import agent_url
 
 
+def _not_connected() -> str:
+    """연결 기능이 켜졌는데 연결·주소가 없을 때: 캣북스 기본 포트가 아니라 변환기(연결 안 됨)."""
+    return agent_url("dashboard-api") + cc.ADAPTER_PATH
+
+
 @pytest.fixture
 def conn_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "company_connection.json"
@@ -56,9 +61,11 @@ def test_invalid_urls_are_refused(raw: str) -> None:
         cc.validate_shop_url(raw)
 
 
-def test_without_a_file_shop_api_keeps_the_env_and_default(conn_file: Path, monkeypatch) -> None:
+def test_without_a_file_shop_api_keeps_the_env_or_is_not_connected(
+    conn_file: Path, monkeypatch
+) -> None:
     assert cc.read_connection() is None
-    assert agent_url("shop-api") == "http://shop-api:8010"
+    assert agent_url("shop-api") == _not_connected()
     monkeypatch.setenv("AX_SHOP_API_URL", "http://127.0.0.1:8010")
     assert agent_url("shop-api") == "http://127.0.0.1:8010"
 
@@ -90,7 +97,7 @@ def test_other_targets_ignore_the_connection(conn_file: Path) -> None:
 def test_a_broken_file_is_ignored(conn_file: Path, content: str, caplog) -> None:
     conn_file.write_text(content, encoding="utf-8")
     assert cc.read_connection() is None
-    assert agent_url("shop-api") == "http://shop-api:8010"
+    assert agent_url("shop-api") == _not_connected()
     assert "회사 연결 파일이 깨져" in caplog.text
 
 
@@ -123,6 +130,12 @@ def test_a_disabled_connection_keeps_the_address_but_is_not_used(conn_file: Path
     found = cc.read_connection()
     assert found is not None and found.enabled is False
     assert cc.shop_api_override() is None
+    assert agent_url("shop-api") == _not_connected()
+
+
+def test_without_the_connection_feature_the_container_default_stays(monkeypatch) -> None:
+    monkeypatch.delenv(cc.CONNECTION_FILE_ENV, raising=False)
+    monkeypatch.delenv("AX_SHOP_API_URL", raising=False)
     assert agent_url("shop-api") == "http://shop-api:8010"
 
 

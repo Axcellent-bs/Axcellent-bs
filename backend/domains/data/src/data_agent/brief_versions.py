@@ -262,7 +262,8 @@ def start(env: Mapping[str, str], requested_by: str | None, build: Build, *,
                                                   lock_seconds(env))  # fmt: skip
         if why is None and token is None:  # 막는 조건을 본 사이 다른 쪽이 잠금을 걸었다
             why = blocked(store, day, rules, now, llm_share=share, detect=detect) or Blocked(
-                "in_progress", "지금 만드는 중이에요")
+                "in_progress", "지금 만드는 중이에요"
+            )
         if why is not None:
             return {"status": "blocked", "job_id": None,
                     "blocked": {"code": why.code, "text": why.text}}  # fmt: skip
@@ -348,7 +349,9 @@ def diff(prev: TrendInsightBriefOutput, cur: TrendInsightBriefOutput) -> dict[st
             "gone": [t for t in before if t not in after]}  # fmt: skip
 
 
-def estimate(store: Any, rows: list[dict[str, Any]], token_cap: int) -> tuple[float | None, str | None, bool]:  # noqa: E501
+def estimate(
+    store: Any, rows: list[dict[str, Any]], token_cap: int
+) -> tuple[float | None, str | None, bool]:  # noqa: E501
     """다시 추천 한 번에 드는 LLM % (최근 다시 추천 실제 토큰 중앙값 ÷ 하루 한도).
     기록이 없으면 오늘 첫 자동 브리프 토큰으로 추정 (estimated)."""
     manual = store.manual_tokens()
@@ -384,16 +387,26 @@ def decorate(out: TrendInsightBriefOutput, env: Mapping[str, str], now: datetime
     finally:
         store.close()
     update: dict[str, Any] = {
-        "versions": [BriefVersionInfo(
-            version=r["version"], label=label(r), created_at=r["created_at"],
-            trigger=r["trigger"], requested_by=r["requested_by"], detect_as_of=r["detect_as_of"],
-        ) for r in rows],  # fmt: skip
+        "versions": [
+            BriefVersionInfo(
+                version=r["version"],
+                label=label(r),
+                created_at=r["created_at"],
+                trigger=r["trigger"],
+                requested_by=r["requested_by"],
+                detect_as_of=r["detect_as_of"],
+            )
+            for r in rows
+        ],  # fmt: skip
         "latest_version": rows[-1]["version"] if rows else None,
         "regen_used": used(rows),
         "regen_limit": DAILY_REGEN,
         "regen_blocked": BriefRegenBlocked(code=why.code, text=why.text) if why else None,
-        "building": BriefBuilding(who=b["who"], trigger=b["trigger"], started_at=b["started_at"],
-                                  text=building_text(b)) if b else None,  # fmt: skip
+        "building": BriefBuilding(
+            who=b["who"], trigger=b["trigger"], started_at=b["started_at"], text=building_text(b)
+        )
+        if b
+        else None,  # fmt: skip
         "regen_job": BriefRegenJob(**job) if job else None,
         "estimated_llm_pct": pct,
         "estimated_llm_basis": basis,

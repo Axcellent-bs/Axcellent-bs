@@ -15,6 +15,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ax_agent_template.tenant import setting as tenant_setting
+
 TREND_CONFIG_ENV = "DATA_TREND_CONFIG"  # trend_scan과 같은 이름 (회사 trends.toml)
 # 광고 재료에서 늘 빼는 주제 분류
 NEVER_TREND = frozenset({"뉴스·사건", "기부·재난", "정치·사회", "인물"})
@@ -33,7 +35,7 @@ class AdRules:
 
 def load_rules(env: Mapping[str, str]) -> AdRules:
     """회사 `trends.toml`의 `[promo] trend_categories`·`[recommend] exclude_categories`."""
-    path = env.get(TREND_CONFIG_ENV)
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return AdRules()
     try:

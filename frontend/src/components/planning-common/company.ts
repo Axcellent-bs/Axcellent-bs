@@ -1,8 +1,8 @@
 // 고객사(납품처)마다 달라지는 값. 고객사가 바뀌면 .env만 바꾼다.
-// 기본값은 데모 고객사 캣북스(ax-frontend shop-web 기준).
+// 기본 회사는 없다(캣북스 기본값 없음). 정하지 않으면 이름 없이 "우리 회사"로 부른다.
 export const COMPANY = {
-  name: import.meta.env.VITE_COMPANY_NAME ?? '캣북스',
-  tagline: import.meta.env.VITE_COMPANY_TAGLINE ?? '책과 문구, 고양이가 지키는 서점',
+  name: import.meta.env.VITE_COMPANY_NAME ?? '우리 회사',
+  tagline: import.meta.env.VITE_COMPANY_TAGLINE ?? '',
   shopUrl: import.meta.env.VITE_SHOP_WEB_URL ?? 'http://localhost:3000',
 }
 
