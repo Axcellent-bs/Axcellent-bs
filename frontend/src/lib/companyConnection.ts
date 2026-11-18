@@ -1,4 +1,4 @@
-import { ApiError } from "./apiError";
+import { failureError } from "./apiError";
 import { writeAuth } from "./api";
 import { DASHBOARD_API_URL } from "./env";
 
@@ -67,10 +67,8 @@ export async function call<T>(method: string, path: string, body?: unknown): Pro
     cache: "no-store",
   });
   const parsed: unknown = await res.json().catch(() => undefined);
-  if (!res.ok) {
-    const message = (parsed as { error?: { message?: string } } | undefined)?.error?.message;
-    throw new ApiError(message ?? `요청 실패 (${res.status})`, res.status);
-  }
+  // 앞단 nginx가 막은 403·405(HTML)는 "서버 허용 경로 추가" 안내로, 앱 거절은 서버 문장 그대로
+  if (!res.ok) throw failureError(parsed, res.status);
   return (parsed as { data: T }).data;
 }
 

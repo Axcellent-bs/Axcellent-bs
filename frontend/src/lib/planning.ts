@@ -5,6 +5,7 @@ import type { Proposal } from './proposals'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useVisibleInterval } from './visibleInterval'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
+import { isNginxBlocked, NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from '@/lib/apiError'
 import { RULE_LABEL, type Action, type FillPreview, type Activity, type AuditItem, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
 
 export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
@@ -183,8 +184,11 @@ export async function approveReview(reviewId: string, note = '교차검증 대�
 
 async function call<T>(base: string, path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init })
-  const body = await res.json().catch(() => ({}))
+  const parsed: unknown = await res.json().catch(() => undefined)
+  const body = parsed ?? {}
   if (!res.ok) {
+    // 앞단 nginx가 막은 403·405는 본문이 HTML이다: 숫자만 보이지 않게 허용 경로 안내를 준다
+    if (isNginxBlocked(res.status, parsed)) throw new PlanningApiError(NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE)
     const err = (body as { error?: { code?: string; message?: string; details?: PlanningApiError['details'] } }).error
     throw new PlanningApiError(err?.code ?? `HTTP_${res.status}`, err?.message ?? `서버 응답 ${res.status}`, err?.details)
   }
