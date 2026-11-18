@@ -1695,7 +1695,7 @@ export interface TrendMeme {
   products: LinkedProduct[];
   products_reason: string | null;
   top_videos: MemeVideo[];
-  /** 뒤에 붙일 플랫폼 칸 (인스타·검색 칩). 지금은 늘 null이고 화면에 그리지 않는다 */
+  /** 다른 플랫폼 칸. instagram = Instagram 해시태그 검색 (종합 표 "인스타" 칸), web_search = 블로그·카페 */
   instagram?: MemePlatform | null;
   web_search?: MemePlatform | null;
 }
@@ -1716,6 +1716,121 @@ export interface MemePlatform {
   /** 네이버가 "<10"으로 준 값이 있음 (숫자로 바꾸지 않음) */
   volume_below_10?: boolean;
   volume_reason?: string | null;
+  // 11/18 인스타 세션 추가 (`instagram` 칸: Instagram 해시태그 검색). 예전 응답엔 없다
+  /** 최근 24시간 게시 수가 조회한 페이지 상한에 닿음 (실제는 더 많음) */
+  posts_24h_capped?: boolean;
+  /** 인기 글 좋아요 중앙값 */
+  top_like_median?: number | null;
+  status?: "known" | "unknown" | "not_hashtag" | "not_checked" | null;
+}
+
+// ------------------------------------------------------------------- 인스타그램 (11/18)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py "인스타그램 (11/18)". Meta 공식 Graph API만.
+// 캡션·제목은 외부 글(untrusted)이라 화면은 텍스트로만 그린다
+export type IgStatus = "known" | "unknown";
+export type IgSourceStatus = "connected" | "key_missing" | "permission" | "rate_limited" | "failed" | "not_registered";
+export interface InstagramSource {
+  source_id: "ig_audio" | "ig_business_discovery" | "ig_hashtag_search" | "ig_memo";
+  name: string;
+  status: IgSourceStatus;
+  reason: string | null;
+}
+export type InstagramAudioType = "music" | "original_sound";
+export interface InstagramAudioItem {
+  rank: number;
+  audio_id: string;
+  /** untrusted */
+  title: string | null;
+  artist: string | null;
+  duration_ms: number | null;
+  /** 인스타 안 미리보기 링크 */
+  link: string | null;
+  previous_rank: number | null;
+  /** 어제 순위 − 오늘 순위 (양수 = 오름) */
+  rank_change: number | null;
+  is_new: boolean;
+  streak_days: number;
+  overlap: string[];
+}
+export interface InstagramAudioOutput {
+  audio_type: InstagramAudioType;
+  status: IgStatus;
+  reason: string | null;
+  day: string | null;
+  previous_day: string | null;
+  items: InstagramAudioItem[];
+  overlap_reason: string | null;
+  limitation: string;
+  sources: InstagramSource[];
+  generated_at: string | null;
+}
+export interface InstagramRadarPost {
+  account: string;
+  media_id: string;
+  media_product_type: string | null;
+  posted_at: string | null;
+  metric: "view_count" | "like_count";
+  value: number;
+  account_median: number;
+  ratio: number;
+  permalink: string | null;
+  /** 앞 80자, untrusted */
+  caption_excerpt: string | null;
+}
+export interface InstagramRadarGroup {
+  name: string;
+  description: string | null;
+  description_reason: string | null;
+  accounts: number;
+  posts: number;
+  best_ratio: number;
+  members: string[];
+  topic_category: string | null;
+  ad_material: "ok" | "caution" | "excluded" | "unknown";
+  ad_material_reason: string;
+  top_posts: InstagramRadarPost[];
+}
+export interface InstagramRadarOutput {
+  status: IgStatus;
+  reason: string | null;
+  day: string | null;
+  accounts_total: number;
+  accounts_read: number;
+  accounts_failed: string[];
+  bursts: number;
+  groups: InstagramRadarGroup[];
+  criteria: string;
+  limits: string[];
+  sources: InstagramSource[];
+  generated_at: string | null;
+}
+export type InstagramMemoKind = "audio" | "format" | "hashtag" | "other";
+export interface InstagramMemoAddInput {
+  kind: InstagramMemoKind;
+  name: string;
+  memo: string;
+  author: string;
+  linked_trend?: string | null;
+}
+export interface InstagramMemo {
+  memo_id: string;
+  kind: InstagramMemoKind;
+  name: string;
+  memo: string;
+  author: string;
+  created_at: string;
+  linked_trend: string | null;
+  source: "manual";
+}
+export interface InstagramMemoAddOutput {
+  outcome: "added" | "rejected";
+  memo: InstagramMemo | null;
+  reason: string | null;
+}
+export interface InstagramMemoListOutput {
+  items: InstagramMemo[];
+  can_add: boolean;
+  add_reason: string | null;
 }
 export interface MemeSkipped {
   name: string;
@@ -2311,6 +2426,17 @@ export const dataAi = {
   trendMemes: (window: MemeWindow) => askData<TrendMemesOutput>("trend_memes", "요즘 유행", { window }, TREND_DEADLINE_MS),
   /** 검색 트렌드 · 도서 분야 (서버가 미리 계산한 결과를 읽는다) */
   keywordTrend: (window: KeywordWindow) => askData<KeywordTrendOutput>("keyword_trend", "검색 트렌드", { window }, TREND_DEADLINE_MS),
+  /** 인스타 인기 오디오 (서버가 미리 계산한 목록을 읽는다) */
+  instagramAudio: (audioType: InstagramAudioType) =>
+    askData<InstagramAudioOutput>("instagram_audio", "인스타 인기 오디오", { audio_type: audioType }, TREND_DEADLINE_MS),
+  /** 인스타 레이더: 벤치마크 계정 중 평소보다 크게 터진 게시물 묶음 (서버가 미리 계산) */
+  instagramRadar: () => askData<InstagramRadarOutput>("instagram_radar", "인스타 레이더", {}, TREND_DEADLINE_MS),
+  /** 인스타 트렌드 메모 목록 (수동 입력). can_add = 화면에 입력을 보일지 */
+  instagramMemoList: (limit?: number) =>
+    askData<InstagramMemoListOutput>("instagram_memo_list", "인스타 트렌드 메모", limit ? { limit } : {}),
+  /** 인스타 트렌드 메모 추가. 쓰기라 같은 입력 묶기(askData)를 거치지 않고 누를 때마다 보낸다 */
+  instagramMemoAdd: (input: InstagramMemoAddInput) =>
+    sendData<InstagramMemoAddOutput>("instagram_memo_add", "인스타 트렌드 메모 추가", { ...input }, DEADLINE_MS),
   /** 인사이트 브리프 (2단계). 서버 하루 캐시. 브리프 안에서 trend_age·임베딩·한 줄 문장(LLM)을 부른다 */
   trendInsightBrief: () => askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 브리프", {}, RECOMMEND_DEADLINE_MS),
   /** 오늘 특정 판 (version 없으면 최신 판). 저장된 판을 읽기만 한다 */

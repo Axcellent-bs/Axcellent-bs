@@ -359,6 +359,10 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
             await shorts_backfill.run(env)
             # 검색 트렌드 키워드 풀 (한국 날짜 하루 1번, 이미 채웠으면 건너뜀. 실패해도 계속)
             await keyword_pool.run(env)
+            # 인스타 인기 오디오·레이더 (한국 날짜 하루 1번, 토큰이 없으면 한 줄만. 실패해도 계속)
+            from data_agent.skills import instagram
+
+            await instagram.run(env)
             if result.saved and precompute_after:
                 # 새 스냅샷 직후 감지 탭 결과를 미리 계산해 저장 (화면은 읽기만).
                 # 실패해도 수집은 계속

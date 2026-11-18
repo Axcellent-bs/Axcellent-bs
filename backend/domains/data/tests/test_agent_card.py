@@ -61,6 +61,10 @@ def test_card_validates(card: AgentCard) -> None:
         "video_explorer",
         "trend_memes",
         "keyword_trend",
+        "instagram_audio",
+        "instagram_radar",
+        "instagram_memo_list",
+        "instagram_memo_add",
         "data_chat_send",
         "data_chat_list",
         "data_chat_get",
@@ -93,7 +97,8 @@ def test_video_explorer_is_a_read_for_screen_marketing_planning_and_orchestrator
 
 
 # 상태를 바꾸는 카드 skill은 이것만 (data 자신의 execute() 관문을 거친다)
-STATE_CHANGING = {"event_proposal_send": "A"}
+# instagram_memo_add(11/18): 인스타 트렌드 메모 저장, data 자신의 safety 관문을 지나는 A
+STATE_CHANGING = {"event_proposal_send": "A", "instagram_memo_add": "A"}
 
 
 def test_all_skills_are_read(card: AgentCard) -> None:

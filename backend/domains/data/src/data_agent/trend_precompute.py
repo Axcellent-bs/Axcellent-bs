@@ -31,7 +31,8 @@ from data_agent.stage_timing import recording
 # (이번 주·오늘)를 다 넣는다
 SKILLS = (
     "trend_scan", "trend_candidates", "trend_popular", "youtube_velocity", "shorts_stats",
-    "video_explorer", "trend_memes", "keyword_trend", "trend_insight_brief",
+    "video_explorer", "trend_memes", "keyword_trend", "instagram_audio", "instagram_radar",
+    "trend_insight_brief",
 )  # fmt: skip
 ONCE = frozenset({"video_explorer"})
 CONTEXT_ID = "ctx_trend_precompute"
@@ -41,6 +42,7 @@ PASSES = 2
 INPUTS: dict[str, tuple[dict[str, str], ...]] = {
     "trend_memes": ({}, {"window": "day"}),
     "keyword_trend": ({}, {"window": "week"}),
+    "instagram_audio": ({}, {"audio_type": "original_sound"}),
 }
 
 
@@ -68,6 +70,8 @@ async def precompute(emit: Callable[[str], None] | None = None) -> list[str]:
         "video_explorer": handlers.video_explorer,
         "trend_memes": handlers.trend_memes,
         "keyword_trend": handlers.keyword_trend,
+        "instagram_audio": handlers.instagram_audio,
+        "instagram_radar": handlers.instagram_radar,
     }
     for n in range(1, PASSES + 1):
         for skill in SKILLS:

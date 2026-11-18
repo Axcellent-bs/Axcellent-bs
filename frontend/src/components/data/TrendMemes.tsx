@@ -15,14 +15,41 @@ const WINDOWS: { key: MemeWindow; label: string; before: string; span: string }[
   { key: "day", label: "오늘", before: "지난 4주 같은 요일", span: "어제" },
 ];
 
-const AD: Record<TrendMeme["ad_material"], { label: string; tone: string }> = {
+export const AD: Record<TrendMeme["ad_material"], { label: string; tone: string }> = {
   ok: { label: "가능", tone: TONE.ok },
   caution: { label: "주의", tone: TONE.warn },
   excluded: { label: "뺌", tone: TONE.bad },
   unknown: { label: "분류 대기", tone: TONE.muted },
 };
 
-const times = (n: number) => `${n.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}배`;
+export const times = (n: number) => `${n.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}배`;
+
+/** 인스타 칸 (m.instagram, Instagram 해시태그 검색). 모르면 0이 아니라 서버 이유 */
+function Instagram({ m }: { m: TrendMeme }) {
+  const ig = m.instagram ?? null;
+  if (ig?.status === "known" && ig.posts !== null) {
+    return (
+      <>
+        24h {ig.posts.toLocaleString("ko-KR")}개{ig.posts_24h_capped ? "+" : ""}
+        {ig.top_like_median != null && <small className="block text-[11px] text-ink-500">좋아요 중앙 {ig.top_like_median.toLocaleString("ko-KR", { maximumFractionDigits: 0 })}</small>}
+      </>
+    );
+  }
+  if (ig?.status === "not_hashtag") return <span className="text-ink-500">해시태그 아님</span>;
+  return ig?.reason ? <small className="block max-w-[9rem] whitespace-normal text-[11px] text-ink-500">{ig.reason}</small> : <span className="text-ink-500">-</span>;
+}
+
+/** "3곳 동시": 쇼츠·검색·인스타가 모두 오를 때.
+ *  - 쇼츠: 배수를 알고 2배 이상이거나 새로 등장
+ *  - 검색: 서버 판정이 급상승(rising)
+ *  - 인스타: 서버가 직전 기간 기준값을 주지 않으므로 "최근 24시간에 게시물이 있음(status known, posts > 0)"을 오름으로 본다 */
+export function risingEverywhere(m: TrendMeme): boolean {
+  const shorts = (m.ratio_status === "known" && m.ratio !== null && m.ratio >= 2) || m.ratio_status === "new";
+  const search = m.search.status === "rising";
+  const ig = m.instagram ?? null;
+  const insta = ig?.status === "known" && ig.posts !== null && ig.posts > 0;
+  return shorts && search && insta;
+}
 
 function Ratio({ m }: { m: TrendMeme }) {
   if (m.ratio_status === "known" && m.ratio !== null) return <>{times(m.ratio)}</>;
@@ -99,6 +126,7 @@ function Table({ out, before, youtube }: { out: TrendMemesOutput; before: string
             <th className="whitespace-nowrap px-1 py-1.5 text-right font-medium">퍼진 정도</th>
             <th className="whitespace-nowrap px-1 py-1.5 text-right font-medium">{before} 대비</th>
             {!youtube && <th className="whitespace-nowrap px-1 py-1.5 text-right font-medium">네이버 검색</th>}
+            {!youtube && <th className="whitespace-nowrap px-1 py-1.5 text-right font-medium">인스타</th>}
             {!youtube && <th className="whitespace-nowrap px-1 py-1.5 font-medium">광고 재료</th>}
             <th className="whitespace-nowrap px-1 py-1.5 font-medium">{youtube ? "대표 쇼츠" : "대표 영상"}</th>
           </tr>
@@ -108,11 +136,13 @@ function Table({ out, before, youtube }: { out: TrendMemesOutput; before: string
             <tr key={m.name} className="border-b border-ink-100 align-top">
               <td className="min-w-[12rem] px-1 py-2">
                 <b className="text-ink-900">{m.name}</b>
+                {risingEverywhere(m) && <span className={`chip ml-1.5 align-middle text-xs ${TONE.info}`} title="쇼츠·네이버 검색·인스타에서 같이 오름">3곳 동시</span>}
                 <small className="block text-xs text-ink-500">{m.description ?? m.description_reason ?? ""}</small>
               </td>
               <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums">채널 {m.channels}곳<small className="block text-[11px] text-ink-500">영상 {m.videos}개</small></td>
               <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Ratio m={m} /></td>
               {!youtube && <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Search m={m} /></td>}
+              {!youtube && <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Instagram m={m} /></td>}
               {!youtube && <td className="px-1 py-2"><Material m={m} /></td>}
               <td className="px-1 py-2"><Videos m={m} /></td>
             </tr>
@@ -123,8 +153,9 @@ function Table({ out, before, youtube }: { out: TrendMemesOutput; before: string
   );
 }
 
-/** focus: 감지 플랫폼 칩 (all = 종합: 요약 줄 + 전체 칸, youtube = 쇼츠 칸 중심). 기획 넘기기 버튼·인스타·검색 플랫폼 칸은 그리지 않는다.
- *  summaryCards: 종합 요약 줄에서 1위 유행 칸 뒤에 붙일 칸 (검색 급상승 1위·이달 시즌 1위, 부모가 받은 keyword_trend) */
+/** focus: 감지 플랫폼 칩 (all = 종합: 요약 줄 + 전체 칸(네이버 검색·인스타·광고 재료), youtube = 쇼츠 칸 중심). 기획 넘기기 버튼은 그리지 않는다.
+ *  유행 이름 옆 "3곳 동시" 칩 = 쇼츠·검색·인스타가 모두 오름 (risingEverywhere)
+ *  summaryCards: 종합 요약 줄에서 1위 유행 칸 뒤에 붙일 칸 (검색 급상승 1위·이달 시즌 1위 = 부모가 받은 keyword_trend, 인스타 인기 오디오 1위 = instagram_audio) */
 export function TrendMemes({ focus = "all", summaryCards }: { focus?: DetectView; summaryCards?: ReactNode }) {
   const youtube = focus === "youtube";
   const [win, setWin] = useState<MemeWindow>("week");
@@ -150,7 +181,7 @@ export function TrendMemes({ focus = "all", summaryCards }: { focus?: DetectView
     <Panel id="data-trend-memes" title="요즘 유행·밈" tools={tools}
       hint={'영상 하나가 아니라 "여러 채널에서 같이 늘어난 해시태그·구절"을 하나의 유행으로 묶었어요. 검색으로도 오르는지 같이 봅니다.'}>
       {!youtube && (
-        <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3">
+        <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
           <TopMeme s={s} label={meta.label} before={meta.before} />
           {summaryCards}
         </div>

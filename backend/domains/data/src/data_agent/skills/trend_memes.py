@@ -741,6 +741,7 @@ async def trend_memes(
     age_store: Any = None,
     search: Any = None,
     searchad: Any = None,
+    instagram: Any = None,
 ) -> MemesResult:
     """요즘 유행·밈. 상태를 바꾸지 않는다 (설명 하루 캐시·네이버 호출 수만 data 파일에 남김)."""
     from data_agent.skills.ad_material import load_rules
@@ -834,6 +835,12 @@ async def trend_memes(
         # 위 search(네이버 검색 배수) 칸 계산은 그대로다
         if search is not None or searchad is not None:
             await fill_web_search(top, search, searchad, now)
+        # 인스타 칸 instagram (11/18): 같은 앞 search_top개 중 해시태그만 (7일 30개 한도 안).
+        # 위 칸 계산은 그대로다
+        if instagram is not None:
+            from data_agent.skills.instagram import fill_instagram
+
+            await fill_instagram(top, instagram, env, now)
         # 연결 상품 (뺌이 아닌 것만, content_recommend 기준 그대로)
         await _link_products(items, titles, llm, env, catalog_provider, context_id)
         # 설명 한 줄 (하루 캐시, 나머지는 묶어서 LLM 한 번)
