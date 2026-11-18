@@ -220,7 +220,10 @@ async def request_release_check(request: AgentRequest) -> AgentResult:
 
 
 async def receive_insight(request: AgentRequest) -> AgentResult:
-    """기획 제안 받기 (A, data·marketing·finance → planning). 인사이트 → 제안 PROP-n (확인 대기)."""
+    """기획 제안 받기 (A, data·marketing·finance·orchestrator → planning).
+
+    인사이트 → 제안 PROP-n (확인 대기).
+    """
     try:
         inp = ReceiveInsightInput.model_validate(request.input)
     except ValidationError as exc:

@@ -85,7 +85,7 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceiveInsightInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceiveInsightOutput",
       "grade": "A",
-      "allowed_requesters": ["data", "marketing", "finance"],
+      "allowed_requesters": ["data", "marketing", "finance", "orchestrator"],
       "verifier": null,
       "priority": "required"
     },

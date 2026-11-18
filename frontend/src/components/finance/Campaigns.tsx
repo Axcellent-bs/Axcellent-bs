@@ -139,7 +139,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
         </ResourceBody>
       </Panel>
 
-      <Panel id="campaign-planning" title="기획 AI가 물어본 제작비" hint={<>기획 AI가 영상 기획안을 마케팅에 넘기기 직전에 그 카테고리의 제작비를 재무에 직접 묻습니다(총괄을 거치지 않습니다). 재무는 위 "콘텐츠 카테고리별 제작비" 숫자로 답하고, 기획은 그 숫자를 기획안 근거에 붙여 마케팅에 넘깁니다. 조회당 제작비가 가장 싼 카테고리가 가장 비싼 카테고리보다 2배 이상 싸면, 다음 회차에 싼 쪽 제작비를 30% 올리고 그만큼 비싼 쪽에서 빼자고 답합니다(전체 제작비는 그대로). 정하는 건 기획·마케팅과 사람입니다.<Wiring from={[W.planning]} to={[W.planning]} /></>}>
+      <Panel id="campaign-planning" title="기획 AI가 물어본 제작비" hint={<>기획 AI가 영상 기획안을 마케팅에 넘기기 직전에 그 카테고리의 최신 제작비를 재무에 직접 묻습니다. 재배분 알림은 총괄 AI를 거쳐 가고, 넘기기 직전 숫자 확인은 여기서 직접 합니다. 재무는 위 "콘텐츠 카테고리별 제작비" 숫자로 답하고, 기획은 그 숫자를 기획안 근거에 붙여 마케팅에 넘깁니다. 조회당 제작비가 가장 싼 카테고리가 가장 비싼 카테고리보다 2배 이상 싸면, 다음 회차에 싼 쪽 제작비를 30% 올리고 그만큼 비싼 쪽에서 빼자고 답합니다(전체 제작비는 그대로). 정하는 건 기획·마케팅과 사람입니다.<Wiring from={[W.planning]} to={[W.planning]} /></>}>
         <ResourceBody res={view}>
           {(v) => {
             const asks = v.budget_asks ?? [];
@@ -162,7 +162,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
                 )}
                 {old.length > 0 && (
                   <details className="text-sm text-ink-500">
-                    <summary className="cursor-pointer select-none hover:text-ink-700">예전 방식으로 기획에 먼저 보낸 재배분 의견 {old.length}건 (11/18부터 보내지 않음)</summary>
+                    <summary className="cursor-pointer select-none hover:text-ink-700">재무가 기획에 직접 보내던 예전 재배분 의견 {old.length}건 (11/18부터는 총괄 AI가 넘깁니다)</summary>
                     <ul className="mt-2 space-y-1 text-ink-700">
                       {old.slice(0, 10).map((row) => (
                         <li key={row.insight.insight_id} className="flex flex-wrap items-center gap-2">
@@ -223,7 +223,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
         </ResourceBody>
       </Panel>
 
-      <Panel id="campaign-opinions" title="총괄 AI에 낸 의견" hint={<>재무가 총괄 AI에 보낸 의견입니다. 세 경우에 보냅니다: 위 예산 의견이 "줄여서 권장"·"권하지 않음"일 때, 캠페인 결과의 효율(좋음·보통·나쁨)이 정해지거나 바뀔 때, 아래 재무 인사이트가 새로 생길 때. 총괄 AI 화면의 "재무가 낸 의견" 칸에 그대로 보입니다. 못 보내면 전달 대기로 남고 자동으로 다시 보냅니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.orchestrator]} /></>}>
+      <Panel id="campaign-opinions" title="총괄 AI에 낸 의견" hint={<>재무가 총괄 AI에 보낸 의견입니다. 세 경우에 보냅니다: 위 예산 의견이 "줄여서 권장"·"권하지 않음"일 때, 캠페인 결과의 효율(좋음·보통·나쁨)이 정해지거나 바뀔 때, 아래 재무 인사이트가 새로 생길 때. 총괄 AI 화면의 "재무가 낸 의견" 칸에 그대로 보입니다. 콘텐츠 제작비 재배분 의견에는 기획 AI가 쓸 내용(카테고리·조회당 제작비 근거)까지 다 실어 보내고, 총괄 AI가 그걸 기획 AI에 넘겨 기획 제안이 됩니다. 못 보내면 전달 대기로 남고 자동으로 다시 보냅니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.orchestrator, W.planning]} /></>}>
         <ResourceBody res={view}>
           {(v) => v.opinions.length === 0 ? <Empty>아직 낸 의견이 없습니다. 마케팅이 캠페인 예산을 요청하거나 결과를 보내면 생깁니다.</Empty> : (
             <ul className="space-y-2 text-sm text-ink-700">

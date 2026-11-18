@@ -39,6 +39,8 @@ export interface FinanceOpinionRow {
     spend_krw: number | null; revenue_krw: number | null; profit_krw: number | null; roi: number | null;
     verdict: string | null; reasons: string[]; recommendation: string; submitted_at: string;
   };
+  /** 기획이 알아야 하는 의견(재배분 등)을 총괄이 기획 receive_insight로 넘긴 결과 (11/18). 없으면 넘기지 않는 의견 */
+  relay?: { to: "planning"; status: "pending" | "delivered" | "invalid"; attempts: number; outcome?: string | null; proposal_id?: string | null; problem?: string | null; at?: string };
 }
 
 export const orchestrator = {

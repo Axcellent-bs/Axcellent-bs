@@ -151,3 +151,15 @@ def test_finance_client_reads_the_contract() -> None:
         proposals.FinanceBudget(caller=caller).ask("ctx", "아재개그", "shorts", "PROP-1")
     )
     assert isinstance(out, CategoryBudgetAdviceOutput) and out.recommended_production_krw == 130_000
+
+
+@pytest.mark.role("planning")
+def test_insight_relayed_by_orchestrator_counts_as_from_finance() -> None:
+    """재무가 총괄에 낸 재배분 의견을 총괄이 넘기면, 제안 출처는 재무다 (11/18)."""
+    svc = PlanningService(gate=_gate, relater=None, insights=None, marketing=None, finance=None)
+    inp = _insight("아재개그").model_copy(update={"skill": "finance_insights"})
+    res = asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp))
+    p = next(x for x in svc.state.proposals if x.id == res.output["proposal_id"])
+    assert p.from_ == "finance"
+    again = asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp))
+    assert again.output["outcome"] == "duplicate"  # 총괄이 다시 넘겨도 한 번만

@@ -325,6 +325,8 @@ class ProposalMixin:
     ) -> ActionResult:
         """near: 받아오기가 찾은 비슷한 앞 제안 (인사이트 id가 날마다 바뀌어도 후속으로 잇는다)."""
         frm = requester if requester in ("marketing", "finance") else "data"
+        if requester == "orchestrator":  # 총괄이 넘겨준 재무 의견은 재무에서 온 제안이다 (11/18)
+            frm = "finance" if inp.skill == "finance_insights" else "data"
         same = _same_insight(self.state, inp.insight_id, frm) or (
             _find(self.state, near) if near else None
         )
