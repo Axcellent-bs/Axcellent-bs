@@ -353,3 +353,62 @@ def test_option_sources_use_short_timeout() -> None:
         pa.OPTION_SOURCE_TIMEOUT = old
     assert p.options[0].blocked_reason == "트렌드 목록을 받지 못함"
     assert p.scale is not None and p.scale.followers == 300
+
+
+# ---------------------------------------- 방향 고를 때 카테고리 고르기 (11/18 태윤 요청)
+
+
+def test_choose_sets_category_and_asks_finance_with_it() -> None:
+    """카테고리 없이 온 제안은 방향을 고를 때 사람이 카테고리·형식을 정한다.
+    재무에는 그 카테고리로 묻는다."""
+    fin = Finance()
+    m = Marketing()
+    svc = _svc(insights=Insights(), marketing=m, finance=fin)
+    pid = _new(svc)
+    act = {"type": "chooseAngle", "proposal": pid, "angle": "own_trend",
+           "category": " 아재개그 ", "format": "shorts"}  # fmt: skip
+    asyncio.run(svc.dispatch(act))
+    p = _p(svc, pid)
+    assert (p.content_category, p.content_format) == ("아재개그", "shorts")
+    assert fin.asked == [("아재개그", "shorts", pid)]
+    _approve(svc, pid)
+    assert m.sent[-1].content_category == "아재개그" and m.sent[-1].content_format == "shorts"
+
+
+def test_category_given_later_asks_finance_again_without_duplicates() -> None:
+    """처음엔 카테고리 없이 물었고 나중에 카테고리를 정하면 그걸로 다시 묻는다.
+    재무 근거는 새 답으로 바꾼다(겹치지 않음)."""
+    fin = Finance()
+    svc = _svc(insights=Insights(), marketing=Marketing(), finance=fin)
+    pid = _new(svc)
+    _choose(svc, pid, "own_trend")
+    act = {"type": "chooseAngle", "proposal": pid, "angle": "ride_trend", "category": "몸개그"}
+    asyncio.run(svc.dispatch(act))
+    assert [a[0] for a in fin.asked] == [None, "몸개그"]
+    facts = [f for f in _p(svc, pid).facts if f.source == proposals.FINANCE_ADVICE]
+    assert facts and all("몸개그" in f.label for f in facts)
+
+
+def test_category_from_insight_is_kept() -> None:
+    """데이터분석이 채운 카테고리는 화면 값으로 덮지 않는다."""
+    fin = Finance()
+    svc = _svc(insights=Insights(), marketing=Marketing(), finance=fin)
+    pid = _new(svc, content_category="피식", content_format="reels")
+    act = {"type": "chooseAngle", "proposal": pid, "angle": "own_trend", "category": "몸개그"}
+    asyncio.run(svc.dispatch(act))
+    assert _p(svc, pid).content_category == "피식"
+    assert fin.asked == [("피식", "reels", pid)]
+
+
+def test_bad_category_or_format_is_refused() -> None:
+    svc = _svc(insights=Insights(), marketing=Marketing())
+    pid = _new(svc)
+    for extra in ({"category": "가" * 41}, {"format": "tiktok"}, {"category": 3}):
+        with pytest.raises(ActionError) as e:
+            asyncio.run(
+                svc.dispatch(
+                    {"type": "chooseAngle", "proposal": pid, "angle": "own_trend", **extra}
+                )
+            )
+        assert e.value.code == "INVALID_ACTION"
+    assert _p(svc, pid).content_category is None and _p(svc, pid).angle is None
