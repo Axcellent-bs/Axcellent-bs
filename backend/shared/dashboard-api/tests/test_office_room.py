@@ -85,7 +85,7 @@ def test_write_needs_human_token(client: TestClient) -> None:
 
 
 def test_safety_thread_is_listed(client: TestClient) -> None:
-    """안전규칙 AI도 단톡방에서 말을 받는다 (11/16)."""
+    """에이전트 처리 로그도 단톡방에서 말을 받는다 (11/16)."""
     client.post(BASE, json=_body(agent="safety", thread_id="safetychat-1"), headers=HUMAN)
     assert [r["agent"] for r in client.get(BASE).json()["data"]] == ["safety"]
 

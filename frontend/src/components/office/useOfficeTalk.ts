@@ -24,7 +24,7 @@ export const TALK_KEYS = OFFICE_TALK_KEYS;
 export type TalkKey = (typeof OFFICE_TALK_KEYS)[number];
 /** 칩 이름 (사무실 자리 이름과 같다) */
 export const TALK_LABEL: Record<string, string> = {
-  dev: "개발", data: "데이터분석", support: "고객지원", finance: "재무", planning: "기획", marketing: "마케팅", hr: "인사", archive: "아카이브", orchestrator: "총괄", infra: "인프라", safety: "안전규칙",
+  dev: "개발", data: "데이터분석", support: "고객지원", finance: "재무", planning: "기획", marketing: "마케팅", hr: "인사", archive: "아카이브", orchestrator: "총괄", infra: "인프라", safety: "처리 로그",
 };
 
 export interface TalkChip { key: string; label: string; disabled: boolean; reason: string | null }

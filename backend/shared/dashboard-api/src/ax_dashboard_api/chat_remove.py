@@ -60,7 +60,7 @@ def _error_of(body: Any) -> tuple[str | None, str | None]:
 async def _remove_http(
     url: str, thread_id: str, authorization: str | None, name: str
 ) -> dict[str, Any]:
-    """HTTP로 대화를 지우는 부서(인사·안전규칙). 사람 토큰을 그대로 넘긴다."""
+    """HTTP로 대화를 지우는 부서(인사·처리 로그). 사람 토큰을 그대로 넘긴다."""
     try:
         async with httpx.AsyncClient(timeout=HR_CALL_SECONDS) as http:
             res = await http.post(url, headers={"Authorization": authorization or ""})
@@ -90,13 +90,13 @@ async def _remove_archive(thread_id: str, authorization: str | None) -> dict[str
 
 
 def _safety_base() -> str:
-    """안전규칙 대화 HTTP 주소 (safety 서버)."""
+    """처리 로그 대화 HTTP 주소 (safety 서버)."""
     return config.agent_url("safety").rstrip("/")
 
 
 async def _remove_safety(thread_id: str, authorization: str | None) -> dict[str, Any]:
     url = f"{_safety_base()}/api/safety/chat/{thread_id}/remove"
-    return await _remove_http(url, thread_id, authorization, "안전규칙 AI")
+    return await _remove_http(url, thread_id, authorization, "에이전트 처리 로그")
 
 
 async def remove(agent: str, thread_id: str, request: Request) -> dict[str, Any]:

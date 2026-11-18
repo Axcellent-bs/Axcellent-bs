@@ -94,7 +94,7 @@ export interface DemoRequest {
 // ---------------------------------------------------------------- 이름표
 export const DEPT_KO: Record<string, string> = {
   orchestrator: "총괄 AI", planning: "기획", dev: "개발", support: "고객지원", marketing: "마케팅", hr: "인사", archive: "아카이브",
-  finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전규칙", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
+  finance: "재무", data: "데이터분석", infra: "인프라", safety: "처리 로그", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
   "dashboard-api": "AXcellent 화면", operator: "운영자(사람)",
 };
 // 백엔드는 서비스 단위로 나뉘어 있다(backend/README.md). 서비스 이름 → 부서.
@@ -142,7 +142,7 @@ export function holdPage(action: string | null | undefined, target?: unknown): s
   if (action === "refund_request" || (!!action && (SUPPORT_DELETION_HOLD_ACTIONS as readonly string[]).includes(action))) return "/queue";
   if (action === SETTLEMENT_HOLD_ACTION) return "/settlements";
   if (action && (MARKETING_HOLD_ACTIONS as readonly string[]).includes(action)) return "/marketing";
-  // 담당 화면이 접힌 일은 안전규칙 화면에 "담당 화면 없음(접힘)"으로만 보인다
+  // 담당 화면이 접힌 일은 처리 로그 화면에 "담당 화면 없음(접힘)"으로만 보인다
   // PR 만들기·머지·되돌리기·자동 머지 기준은 개발 화면 안전 확인 탭에서 결정한다 (#1232)
   if (action && (DEV_HOLD_ACTIONS as readonly string[]).includes(action)) return "/dev/work/holds";
   // 기획서 확정은 그 기획서 화면의 "교차검증 대기" 칸에서 결정한다. 기획서 번호는 관문 요청의
@@ -154,7 +154,7 @@ export function holdPage(action: string | null | undefined, target?: unknown): s
   return "/finance";
 }
 
-/** 담당 화면이 접혀 결정할 곳이 없는 보류인가 (인수인계). 기한이 지나면 안전규칙이 자동 취소한다 */
+/** 담당 화면이 접혀 결정할 곳이 없는 보류인가 (인수인계). 기한이 지나면 안전 규칙이 자동 취소한다 */
 export function holdFolded(action: string | null | undefined): boolean {
   return !!action && (FOLDED_HOLD_ACTIONS as readonly string[]).includes(action);
 }
@@ -500,7 +500,7 @@ export function executionItems(rec: ExecutionRecord, room: string = SAFETY_ROOM)
   const amount = d.computed_amount != null ? ` (금액 ${fmtNum(d.computed_amount)}원)` : "";
   const out: ChatItem[] = [{
     kind: "msg", id: `${id}:req`, at: rec.created_at, room, from: speaker(req.requester), to: speaker("safety"), fromKey: req.requester, central: false,
-    text: `${actionKo(req.action)} 실행 요청${amount}`, tag: "안전규칙 AI 기록", raw: rawOf(`action: ${req.action}`, req.context_id), tone: "request", facts: [],
+    text: `${actionKo(req.action)} 실행 요청${amount}`, tag: "에이전트 처리 로그", raw: rawOf(`action: ${req.action}`, req.context_id), tone: "request", facts: [],
   }];
   if (d.verifier) {
     const verdict =
