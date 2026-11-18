@@ -7,7 +7,7 @@ import { emailTaken, homeOf, registerAccount, useSession } from './session'
 // 관리자(회사 계정) 가입: 운영자에게 받은 키 확인 → 관리자 계정 → 회사 정보 → 연결. 끝나면 그 관리자로 바로 들어간다.
 // 이 설치에 이미 연결된 회사의 키면 회사 정보·연결은 건너뛰고 그 회사의 관리자 계정만 만든다.
 // 데모라 계정은 이 브라우저에만 저장하고 비밀번호는 저장하지 않는다(session.tsx).
-const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.png`
+const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.webp`
 const STAGES = ['발급 키 확인', '관리자 계정', '회사 정보', '연결'] as const
 const RUN_STEPS = ['관리자 계정 만들기', '회사 정보 저장', '사내망 확인', '첫 상태 신호 보내기', '설정 완료'] as const
 const INDUSTRIES = ['온라인 쇼핑몰', '오프라인 유통', '여행사', '카페 체인', '병원', '제조', '기타']

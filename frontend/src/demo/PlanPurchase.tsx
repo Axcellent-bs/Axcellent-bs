@@ -5,7 +5,7 @@ import { issueKey } from './company'
 // 조직 플랜 시작: 플랜·회사 정보 → 담당자 이메일 인증 → 결제 → 발급 키(화면 + 이메일).
 // 받은 키로 관리자(회사 계정) 가입(/setup?key=)을 한다. 발급한 키는 운영자 관제 센터 키 목록(/control/keys)에도 보인다.
 // 데모라 결제·메일은 실제로 하지 않고, 인증 코드는 화면에 보여 준다.
-const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.png`
+const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.webp`
 const STAGES = ['플랜·회사 정보', '이메일 인증', '결제', '키 발급'] as const
 const PLAN = { name: '조직 플랜', price: 990_000, seats: 50, features: ['AI 서비스 13개 중 필요한 것만 켜기', '사내 설치 · 외부 접근 차단', '관리자 계정 + 일반회원 50명', 'DejaFix 인프라 감시 포함'] }
 const PAYMENTS = ['법인카드', '계좌이체', '세금계산서 발행 후 납부'] as const
