@@ -32,7 +32,7 @@ from pydantic import Field, StrictBool, ValidationError, model_validator
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel, UtcDatetime
-from marketing_agent import sns_media
+from marketing_agent import sns_hashtags, sns_media
 from marketing_agent.briefs import BriefStorageError, BriefStore
 from marketing_agent.notice import NoticeStore
 from marketing_agent.schemas import NoticeKind
@@ -62,6 +62,17 @@ FORBIDDEN_CLAIM_PATTERNS = (
 CAPTION_MAX = sns_media.CAPTION_MAX  # Instagram 캡션 길이 상한 [확인 필요: 공식 문서]
 HASHTAG_MAX = sns_media.HASHTAG_MAX
 MENTION_MAX = sns_media.MENTION_MAX
+
+
+def tag_check(tag: str) -> str | None:
+    """해시태그 설정 검증: 문자(공백·특수문자 없음)·금칙어·성과 과장 표현. 쓸 수 있으면 None."""
+    if not sns_hashtags.TAG_PATTERN.fullmatch(tag):
+        return "invalid_chars"
+    if any(phrase in tag for phrase in FORBIDDEN_PHRASES):
+        return "forbidden_phrase"
+    if has_forbidden_claim(tag):
+        return "forbidden_claim"
+    return None
 
 
 def ai_label_text(media_kind: str) -> str:
@@ -391,10 +402,9 @@ def content_id(
     return f"spd_{_sha(canonical)[:16]}"
 
 
-def _compose(body: str, media_kind: str) -> str:
-    return (
-        f"{body}\n\n{ai_label_text(media_kind)}\n{DEMO_TEXT}\n{TERMS_TEXT}\n\n{' '.join(HASHTAGS)}"
-    )
+def _compose(body: str, media_kind: str, hashtags: tuple[str, ...] = HASHTAGS) -> str:
+    tags = " ".join(hashtags)
+    return f"{body}\n\n{ai_label_text(media_kind)}\n{DEMO_TEXT}\n{TERMS_TEXT}\n\n{tags}"
 
 
 PRODUCT_NOTICE_KINDS: frozenset[str] = frozenset({"product_created"})
@@ -429,6 +439,7 @@ class SourceParts:
     constraints: list[CouponConstraint]
     notice_kind: NoticeKind | None = None  # 공지 출처일 때 그 공지의 종류
     caption_source: dict[str, Any] | None = None  # 기획안 출처 메타(`draft.caption_source`)
+    hashtags: tuple[str, ...] = HASHTAGS  # 기획안이면 주제 태그가 더해진다(`sns_hashtags`)
 
 
 def has_forbidden_claim(text: str) -> bool:
@@ -542,6 +553,10 @@ def source_parts(
         if has_forbidden_claim(full):  # 인건비 절감·직원 대체·과장 표현
             return _result(request, TaskStatus.FAILED, outcome="forbidden_claim")
         body, source_meta = _brief_body_and_source(stored)
+        tags, tag_meta = sns_hashtags.select_hashtags(
+            stored.brief, sns_hashtags.table(tag_check, HASHTAG_MAX), HASHTAG_MAX
+        )
+        source_meta["hashtags"] = tag_meta  # 어떤 태그를 어떤 필드에서 골랐는지
         return SourceParts(
             "brief",
             data.proposal_id,
@@ -549,6 +564,7 @@ def source_parts(
             [body, DEMO_TEXT, TERMS_TEXT],
             [],
             caption_source=source_meta,
+            hashtags=tags,
         )
     assert data.coupon is not None
     facts = data.coupon
@@ -610,7 +626,7 @@ async def draft_sns_post(
     source_kind, source_ref, body = parts.kind, parts.ref, parts.body
     required, constraints = parts.required, parts.constraints
 
-    caption = _compose(body, data.media_kind)
+    caption = _compose(body, data.media_kind, parts.hashtags)
     if len(caption) > CAPTION_MAX:
         return _result(request, TaskStatus.FAILED, outcome="caption_too_long")
 
@@ -661,7 +677,7 @@ async def draft_sns_post(
         platform=data.platform,
         media_kind=data.media_kind,
         caption=caption,
-        hashtags=list(HASHTAGS),
+        hashtags=list(parts.hashtags),
         caption_sha256=caption_sha,
         required_text=required,
         constraints=constraints,
