@@ -278,3 +278,91 @@ def test_live_detail_without_refund_list_is_none(
 ) -> None:
     _shop(monkeypatch, _order("ord_0012", "2026-11-10T01:00:00Z"))
     assert live_client.get("/api/dashboard/orders/ord_0012").json()["data"]["refunds"] is None
+
+
+# ---------------------------------------- 잠깐 기억해 두기 (화면이 느리다는 점검, 2026-11-18)
+
+
+def test_second_request_reuses_the_remembered_list(
+    live_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """탭·페이지를 바꿔도 같은 기간 목록은 한 번만 읽는다. 다른 기간은 따로 읽는다."""
+    calls = _shop(monkeypatch, ORDERS)
+    first = live_client.get(PAGE, params={"limit": 2}).json()
+    second = live_client.get(PAGE, params={"status": "paid", "offset": 1}).json()
+    assert len(calls) == 1  # 판매 서버 읽기 1번
+    assert first["meta"]["total"] == 5 and second["meta"]["total"] == 2
+    live_client.get(PAGE, params={"since": "2026-11-10T02:00:00Z"})
+    assert len(calls) == 2  # 기간이 다르면 다시 읽는다
+
+
+def test_remembered_list_expires(live_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """정한 시간이 지나면 새로 읽는다(주문이 바뀌면 그 뒤에는 반영된다)."""
+    calls = _shop(monkeypatch, ORDERS)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(live_views.time, "monotonic", lambda: clock["now"])
+    live_client.get(PAGE)
+    clock["now"] += live_views.ORDERS_CACHE_SECONDS - 1
+    live_client.get(PAGE)
+    assert len(calls) == 1
+    clock["now"] += 2
+    live_client.get(PAGE)
+    assert len(calls) == 2
+
+
+def test_failed_read_is_not_remembered(
+    live_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """판매 서버를 못 읽은 결과는 기억하지 않는다. 다음 요청이 다시 읽는다."""
+    state = {"fail": True, "calls": 0}
+
+    async def fake(path: str, params: dict | None = None, **_: Any) -> Any:
+        state["calls"] += 1
+        if state["fail"]:
+            raise live_views.ApiError(502, "UPSTREAM_UNAVAILABLE", "판매 서버에 닿지 못했습니다")
+        return ORDERS, {}
+
+    monkeypatch.setattr(live_views, "_shop_get_page", fake)
+    assert live_client.get(PAGE).status_code == 502
+    state["fail"] = False
+    assert live_client.get(PAGE).status_code == 200
+    assert state["calls"] == 2
+
+
+def test_concurrent_requests_share_one_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """같은 목록을 동시에 달라고 해도 판매 서버 읽기는 한 번이다(받는 중이면 같이 기다린다)."""
+    import asyncio
+
+    calls: list[int] = []
+
+    async def slow(path: str, params: dict | None = None, **_: Any) -> Any:
+        calls.append(1)
+        await asyncio.sleep(0.05)
+        return ORDERS, {}
+
+    monkeypatch.setattr(live_views, "_shop_get_page", slow)
+
+    async def many() -> list[tuple[list, int, dict]]:
+        return await asyncio.gather(
+            *[
+                live_views.order_page(
+                    status=None, since=None, until=None, q=None, buyer=None, limit=20, offset=0
+                )
+                for _ in range(5)
+            ]
+        )
+
+    results = asyncio.run(many())
+    assert len(calls) == 1
+    assert all(total == 5 for _, total, _ in results)
+
+
+def test_remembered_list_is_not_changed_by_a_request(
+    live_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """한 요청이 정렬·검색해도 기억해 둔 목록은 그대로라 다음 요청 결과가 같다."""
+    _shop(monkeypatch, ORDERS)
+    a = live_client.get(PAGE, params={"q": "ord_0003"}).json()
+    b = live_client.get(PAGE).json()
+    assert _nos(a) == ["ord_0003"]
+    assert _nos(b) == ["ord_0005", "ord_0004", "ord_0002", "ord_0003", "ord_0001"]

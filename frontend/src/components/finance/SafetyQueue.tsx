@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ago, shortDateTime, won } from "@/lib/format";
 import { ACTION_KO, SAFETY_SERVER, finance, humanTokenSet, krw, liveHumanTokenSet, type Review, type RuleHit } from "@/lib/finance";
 import { Chip, TONE } from "./bits";
+import { useVisibleInterval } from "@/lib/visibleInterval";
 import { ApproverField, deciderText, useApproverName } from "./ApproverName";
 
 // 안전 장치 보류 큐: 사람만 정할 수 있는 일(C 등급). 결정은 safety에 사람 토큰으로 보낸다.
@@ -193,10 +194,7 @@ export function ActionQueue({ action, intro, highlight = null, reloadKey = 0 }: 
       setError(null);
     } catch (e) { setError((e as Error).message); }
   }, [names]);
-  useEffect(() => {
-    void load();
-    const t = setInterval(() => void load(), QUEUE_REFRESH_MS);
-    return () => clearInterval(t);
-  }, [load, reloadKey]);
+  useEffect(() => { void load(); }, [load, reloadKey]);
+  useVisibleInterval(load, QUEUE_REFRESH_MS); // 다른 탭을 보는 동안은 쉬고, 앞 요청이 오는 중이면 건너뛴다
   return <SafetyQueue reviews={reviews} error={error} highlight={highlight} reload={load} intro={intro} live />;
 }

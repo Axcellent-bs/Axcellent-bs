@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router";
-import { Chip, Empty, ErrorBox, TONE, Waiting, useResource } from "@/components/finance/bits";
+import { Chip, Empty, ErrorBox, Skeleton, TONE, useResource } from "@/components/finance/bits";
+import { useVisibleInterval } from "@/lib/visibleInterval";
 import { DASH, OrderDetail, STATUS_TONE, money, time } from "@/components/orders/OrderDetail";
 import { CompanyName } from "@/demo/CompanyName";
 import { api } from "@/lib/api";
@@ -89,10 +90,7 @@ export default function OrdersPage() {
 
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
-  useEffect(() => {
-    const t = setInterval(bump, REFRESH_MS);
-    return () => clearInterval(t);
-  }, [bump]);
+  useVisibleInterval(bump, REFRESH_MS); // 다른 탭을 보는 동안은 새로 받지 않는다
 
   // 새로고침(tick)마다 "최근 N일"의 기준 시각을 다시 잡는다. "오늘"은 한국 날짜 0시부터
   const period = useMemo(() => {
@@ -222,7 +220,7 @@ export default function OrdersPage() {
         {users.error && <ErrorBox message={`구매자 이름을 받지 못했습니다. 구매자 번호로는 찾을 수 있어요. ${users.error}`} onRetry={users.reload} />}
 
         {!page ? (
-          list.error ? <ErrorBox message={`판매 서버에서 주문을 읽지 못했습니다. ${list.error}`} onRetry={list.reload} /> : <Waiting />
+          list.error ? <ErrorBox message={`판매 서버에서 주문을 읽지 못했습니다. ${list.error}`} onRetry={list.reload} /> : <Skeleton label="주문을 불러오는 중…" stats={0} lines={6} />
         ) : (
           <>
             {list.error && <ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${list.error}`} onRetry={list.reload} />}

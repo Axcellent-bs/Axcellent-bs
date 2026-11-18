@@ -1,5 +1,5 @@
 import { Link } from "@/lib/nav";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Bars, Blockers, Loading, OFFLINE, Stat } from "@/components/admin/bits";
 import { DeptUsage } from "@/components/admin/DeptUsage";
 import { SupportBoard } from "@/components/support/SupportBoard";
@@ -7,6 +7,7 @@ import { ChartWithTable, Legend, LineChart, RingMeter, TableView } from "@/compo
 import { IconBolt, IconChevronRight } from "@/components/icons";
 import { api } from "@/lib/api";
 import { support, type InquiryPullStatus, type StuckIntakeItem } from "@/lib/support";
+import { useVisibleInterval } from "@/lib/visibleInterval";
 import { ago, pct, shortDate, shortDateTime, won } from "@/lib/format";
 import { CATEGORY_KO, CLAIM_REASON_KO, CLAIM_TYPE_KO, RULE_KO } from "@/lib/labels";
 import type { Dashboard } from "@/lib/types";
@@ -31,13 +32,9 @@ const PULL_ERROR_KO: Record<string, string> = {
 // 고객 문의는 판매 서버(문의함)에 저장되고 고객지원이 정해진 간격으로 읽어 옵니다. 못 읽으면 조용히 비지 않고 여기에 보입니다.
 function InquiryPullBanner() {
   const [s, setS] = useState<InquiryPullStatus | null>(null);
-  useEffect(() => {
-    let alive = true;
-    const load = () => support.inquiryPull().then((e) => { if (alive) setS(e.data); }).catch(() => { if (alive) setS(null); });
-    void load();
-    const t = setInterval(load, PULL_REFRESH_MS);
-    return () => { alive = false; clearInterval(t); };
-  }, []);
+  const load = useCallback(() => support.inquiryPull().then((e) => setS(e.data)).catch(() => setS(null)), []);
+  useEffect(() => { void load(); }, [load]);
+  useVisibleInterval(load, PULL_REFRESH_MS); // 다른 탭을 보는 동안은 쉬고, 앞 요청이 오는 중이면 건너뛴다
   if (!s || !s.enabled) return null;
   const down = s.connected === false;
   const claimsDown = s.claims_unavailable === true;

@@ -17,3 +17,11 @@ def default_human_token(monkeypatch: pytest.MonkeyPatch) -> None:
         self.headers.setdefault("authorization", "Bearer test-human-token")
 
     monkeypatch.setattr(TestClient, "__init__", init)
+
+
+@pytest.fixture(autouse=True)
+def fresh_orders_cache() -> None:
+    """주문 관리 목록은 잠깐 기억해 쓴다. 테스트끼리 기억이 이어지지 않게 비운다."""
+    from ax_dashboard_api import live_views
+
+    live_views.clear_orders_cache()
