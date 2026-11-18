@@ -281,6 +281,7 @@ def _restore(backup: dict[str, str | None]) -> None:
             path.write_text(text, encoding="utf-8")
 
 
+@router.post("/save")  # PUT과 같다(운영 서버 nginx 게이트가 POST만 열 수 있어서)
 @router.put("")
 async def save(body: SaveIn, request: Request) -> dict:
     """짝을 확인하고 저장한다. 저장하면 AI들의 판매 서버 주소가 변환기로 바뀐다."""

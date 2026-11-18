@@ -8,6 +8,7 @@
 - `POST   /api/dashboard/company-connection/mode`: 내부 데이터(`internal`) ↔ 실제 연결(`connected`).
   저장한 주소는 지우지 않는다. 실제 연결로 켤 때는 다시 확인하고, 통과해야 켠다
 - `DELETE /api/dashboard/company-connection`: 연결을 지우고 원래 주소(`AX_SHOP_API_URL`·기본값)로
+- `POST /save`·`POST /clear`: PUT·DELETE와 같다(운영 서버 nginx 게이트가 POST만 열 수 있어서)
 
 쓰기(POST·PUT·DELETE)는 사람 토큰만 된다(`require_human_for_writes`). 주소 정책은
 `ax_agent_template.company_connection.check_host`(사내 주소 또는 허용 목록 + https, 링크 로컬 차단).
@@ -252,6 +253,8 @@ async def test_connection(body: ConnectionIn) -> dict:
     )
 
 
+# POST /save·/clear: 운영 서버 nginx 게이트가 POST만 열 수 있어 같은 동작을 POST로도 받는다
+@router.post("/save")
 @router.put("")
 async def save_connection(body: ConnectionIn, request: Request) -> dict:
     """주소를 확인하고 저장한다. 저장하면 실제 연결 모드가 된다."""
@@ -293,6 +296,7 @@ async def switch_mode(body: ModeIn, request: Request) -> dict:
     return ok(_state())
 
 
+@router.post("/clear")
 @router.delete("")
 def delete_connection(request: Request) -> dict:
     if store.clear_connection(_human(request)):

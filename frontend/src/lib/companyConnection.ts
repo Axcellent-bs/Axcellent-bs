@@ -89,7 +89,8 @@ export const companyConnection = {
   get: () => call<ConnectionState>("GET", PATH),
   test: (url: string) => call<ConnectionTest>("POST", `${PATH}/test`, { url }),
   save: (url: string, tenant?: string) =>
-    call<ConnectionState & { checks: ConnectionCheck[] }>("PUT", PATH, { url, tenant: tenant || undefined }),
+    call<ConnectionState & { checks: ConnectionCheck[] }>("POST", `${PATH}/save`, { url, tenant: tenant || undefined }),
   mode: (mode: ConnectionMode) => call<ConnectionState>("POST", `${PATH}/mode`, { mode }),
-  clear: () => call<ConnectionState>("DELETE", PATH),
+  // 저장·해제는 POST로 부른다(운영 서버 nginx 게이트가 POST만 열 수 있다. 서버는 PUT·DELETE도 그대로 받는다)
+  clear: () => call<ConnectionState>("POST", `${PATH}/clear`),
 };

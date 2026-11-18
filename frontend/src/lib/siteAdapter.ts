@@ -44,6 +44,6 @@ export const siteAdapter = {
   get: () => call<SiteAdapterState>("GET", PATH),
   propose: (input: ProposeInput) => call<SiteProposal>("POST", `${PATH}/propose`, input),
   save: (base_url: string, mapping: SiteMapping, token?: string, tenant?: string) =>
-    call<SiteAdapterState>("PUT", PATH, { base_url, mapping, token: token || undefined, tenant: tenant || undefined }),
+    call<SiteAdapterState>("POST", `${PATH}/save`, { base_url, mapping, token: token || undefined, tenant: tenant || undefined }),
 };
 
