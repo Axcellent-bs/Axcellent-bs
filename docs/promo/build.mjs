@@ -107,25 +107,22 @@ const story = `
 
 const a2a = `
 <section class="sec sec-paper" id="a2a">
-  <div class="wrap split">
-    <div class="photo-card tall reveal" style="--img:url(assets/desk.jpg)">
-      <p class="pill pill-gold">${esc(C.a2a.kicker)}</p>
-      <h2 class="h2 on-photo">${C.a2a.title.map(esc).join("<br>")}</h2>
-      <p class="on-photo-lead">${esc(C.a2a.lead)}</p>
+  <div class="wrap">
+    <div class="a2a-head reveal">
+      <p class="pill">${esc(C.a2a.kicker)}</p>
+      <h2 class="h2 ink">${C.a2a.title.map(esc).join("<br>")}</h2>
+      <p class="a2a-lead">${esc(C.a2a.lead)}</p>
     </div>
-    <div class="a2a-body reveal">
-      <p class="pill">${esc(C.a2a.listKicker)}</p>
-      <h2 class="h2 ink">${esc(C.a2a.listTitle[0])}<br><span class="brand">${esc(C.a2a.listTitle[1])}</span></h2>
-      <ul class="flows">${C.a2a.items.map((it) => `<li class="flow"><div class="who"><span class="chip chip-soft">${esc(it.from)}</span><span class="arrow" aria-label="에서">→</span><span class="chip chip-solid">${esc(it.to)}</span></div><p>${esc(it.body)}</p></li>`).join("")}</ul>
-      <p class="callout">${esc(C.a2a.closing)}</p>
-    </div>
+    <ul class="flows flows-wide">${C.a2a.items.map((it) => `<li class="flow reveal"><div class="who"><span class="chip chip-soft">${esc(it.from)}</span><span class="arrow" aria-label="에서">→</span><span class="chip chip-solid">${esc(it.to)}</span></div><p>${esc(it.body)}</p></li>`).join("")}</ul>
+    <p class="callout reveal">${esc(C.a2a.closing)}</p>
   </div>
 </section>`;
 
 const ap = C.approval;
 const approval = `
 <section class="sec sec-paper" id="approval">
-  <div class="wrap split flip">
+  <div class="wrap">
+  <div class="split flip">
     <div class="photo-card reveal" style="--img:url(assets/sign.jpg)">
       <p class="pill pill-gold">${esc(ap.kicker)}</p>
       <h2 class="h2 on-photo huge">${esc(ap.title[0])}<br><span class="em">${esc(ap.title[1])}</span></h2>
@@ -135,8 +132,9 @@ const approval = `
       <p class="pill">${esc(ap.listKicker)}</p>
       <h2 class="h2 ink">${esc(ap.listTitle[0])}<br><span class="brand">${esc(ap.listTitle[1])}</span></h2>
       <ul class="rules">${ap.items.map((it) => `<li><span class="ico" aria-hidden="true">${esc(it.icon)}</span><div><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div></li>`).join("")}</ul>
-      <figure class="shot"><img src="${esc(ap.shot.src)}" alt="${esc(ap.shot.alt)}" loading="lazy"><figcaption><b>${esc(ap.shot.title)}</b><span>${esc(ap.shot.body)}</span><em>${esc(ap.shot.note)}</em></figcaption></figure>
     </div>
+  </div>
+  <figure class="shot shot-wide reveal"><img src="${esc(ap.shot.src)}" alt="${esc(ap.shot.alt)}" loading="lazy"><figcaption><b>${esc(ap.shot.title)}</b><span>${esc(ap.shot.body)}</span><em>${esc(ap.shot.note)}</em></figcaption></figure>
   </div>
 </section>`;
 
