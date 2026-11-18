@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
+from marketing_agent import campaign_auto, handlers
 from marketing_agent.handlers import HANDLERS
 from marketing_agent.sns_publish import publisher
 
@@ -52,9 +53,24 @@ async def _lifespan(application: object) -> AsyncIterator[None]:
                 publisher.review_poll_loop(), name="sns-review-poll"
             )
             publisher.RT.poller = "on"
+        # 캠페인 종료 뒤 결과 자동 전달: 켜져 있을 때만 일한다
+        # (MARKETING_CAMPAIGN_AUTO_RECORD, 기본 꺼짐)
+        auto: asyncio.Task[None] | None = None
+        if campaign_auto.AutoConfig.from_env().poll_s > 0:
+            auto = asyncio.get_running_loop().create_task(
+                campaign_auto.auto_record_loop(
+                    handlers.STATE.campaigns,
+                    handlers._brief_content,  # noqa: SLF001
+                ),
+                name="campaign-auto-record",
+            )
         try:
             yield
         finally:
+            if auto is not None:
+                auto.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await auto
             if poller is not None:
                 poller.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
