@@ -135,7 +135,46 @@ class RadarStore(_Store):
         " PRIMARY KEY (day, account, media_id));"
         "CREATE TABLE IF NOT EXISTS accounts (day TEXT NOT NULL, account TEXT NOT NULL,"
         " status TEXT NOT NULL, reason TEXT, PRIMARY KEY (day, account));"
+        # 묶음 수집 커서 (줄 하나): 이번 바퀴 날짜(한국), 다음에 부를 계정 위치, 마지막 묶음 시각,
+        # 계정 목록 해시(목록이 바뀌면 처음부터)
+        "CREATE TABLE IF NOT EXISTS radar_cursor (id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " cycle_day TEXT NOT NULL, position INTEGER NOT NULL, last_batch_at TEXT,"
+        " accounts_hash TEXT NOT NULL);"
+        # 한 바퀴를 다 돈 날 (레이더 판정은 다 돈 날짜만 쓴다)
+        "CREATE TABLE IF NOT EXISTS radar_cycles (day TEXT PRIMARY KEY, completed_at TEXT NOT NULL,"
+        " accounts INTEGER NOT NULL);"
     )
+
+    def cursor(self) -> tuple[date, int, datetime | None, str] | None:
+        """(바퀴 날짜, 다음 위치, 마지막 묶음 시각, 계정 목록 해시). 없으면 None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT cycle_day, position, last_batch_at, accounts_hash FROM radar_cursor"
+            ).fetchone()
+        if row is None:
+            return None
+        at = datetime.fromisoformat(row[2]) if row[2] else None
+        return date.fromisoformat(row[0]), int(row[1]), at, str(row[3])
+
+    def save_cursor(self, cycle_day: date, position: int, last_batch_at: datetime | None,
+                    accounts_hash: str) -> None:  # fmt: skip
+        at = last_batch_at.isoformat() if last_batch_at else None
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO radar_cursor VALUES (1,?,?,?,?)",
+                (cycle_day.isoformat(), position, at, accounts_hash),
+            )
+
+    def complete(self, day: date, at: datetime, accounts: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO radar_cycles VALUES (?,?,?)",
+                               (day.isoformat(), at.isoformat(), accounts))  # fmt: skip
+
+    def completed(self, day: date) -> bool:
+        with self._lock:
+            row = self._conn.execute("SELECT 1 FROM radar_cycles WHERE day = ?",
+                                     (day.isoformat(),)).fetchone()  # fmt: skip
+        return row is not None
 
     def save(self, day: date, account: str, media: Sequence[Mapping[str, Any]],
              status: str = "ok", reason: str | None = None) -> None:  # fmt: skip
@@ -160,14 +199,66 @@ class RadarStore(_Store):
         return row is not None
 
 
+def cycle_marker_row(conn: sqlite3.Connection) -> tuple[str] | None:
+    """가장 최근에 다 돈 바퀴 날짜 (표가 없거나 비었으면 None)."""
+    try:
+        row = conn.execute("SELECT MAX(day) FROM radar_cycles").fetchone()
+    except sqlite3.DatabaseError:
+        return None
+    return row if row and row[0] else None
+
+
+def radar_position(path: str | Path) -> int | None:
+    """묶음 수집 커서 위치 (읽기 전용). 커서가 없으면(예전 방식) None."""
+    conn = _ro(path)
+    if conn is None:
+        return None
+    try:
+        row = conn.execute("SELECT position FROM radar_cursor").fetchone()
+    except sqlite3.DatabaseError:
+        return None
+    finally:
+        conn.close()
+    return int(row[0]) if row else None
+
+
+def radar_cycle(path: str | Path) -> str | None:
+    """가장 최근에 다 돈 바퀴 (날짜·끝난 시각). 응답 캐시가 바퀴마다 새로 계산하게 쓰는 표시."""
+    conn = _ro(path)
+    if conn is None:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT day, completed_at FROM radar_cycles ORDER BY day DESC LIMIT 1"
+        ).fetchone()
+    except sqlite3.DatabaseError:
+        return None
+    finally:
+        conn.close()
+    return f"{row[0]}@{row[1]}" if row else None
+
+
 def radar_latest(path: str | Path) -> tuple[date | None, dict[str, list[dict[str, Any]]],
                                            dict[str, str]]:  # fmt: skip
-    """(날짜, 계정 → 미디어, 계정 → 실패 이유). 읽기 전용."""
+    """(날짜, 계정 → 미디어, 계정 → 실패 이유). 읽기 전용.
+
+    한 바퀴를 다 돈 날짜(`radar_cycles`) 중 가장 최근 것. 묶음 수집(커서)을 쓰는데 아직 다 돈 바퀴가
+    없으면 판정하지 않는다(일부 계정만으로 판정하지 않음). 커서가 없는 예전 파일이면 예전처럼
+    가장 최근 날짜.
+    """
     conn = _ro(path)
     if conn is None:
         return None, {}, {}
     try:
-        row = conn.execute("SELECT MAX(day) FROM accounts").fetchone()
+        row = cycle_marker_row(conn)
+        if row is None:
+            try:
+                batched = conn.execute("SELECT 1 FROM radar_cursor").fetchone() is not None
+            except sqlite3.DatabaseError:
+                batched = False
+            if batched:
+                return None, {}, {}
+            row = conn.execute("SELECT MAX(day) FROM accounts").fetchone()
         if not row or not row[0]:
             return None, {}, {}
         day = row[0]
