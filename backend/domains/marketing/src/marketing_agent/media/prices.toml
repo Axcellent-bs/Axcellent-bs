@@ -13,7 +13,11 @@
 #   - gpt-image-2 1024x1280(4:5, 인스타 피드 규격): 장당 토큰 표에 없는 크기(계산기로 확인 필요).
 #     4:5 이미지는 gemini-nano-banana-2.1 928x1152로 해소됨(파일 끝 gemini 항목)
 #   - gemini-nano-banana-2.1 세 해상도 밖(2K·4K, 다른 종횡비): 이번 범위 밖이라 넣지 않음
-#   - MiniMax·Wan·Kling·Seedance: 단가 미확인
+#   - MiniMax·Wan: 단가 미확인
+#   - Seedance(seedance, BytePlus ModelArk): 공식 문서(2026-11-18)에서 토큰 단가·영상 토큰 계산식·최소 토큰을
+#     확인하지 못해 항목이 없다 = 호출 거부. 제3자 사이트 값은 서로 달라 쓰지 않는다 [확인 필요].
+#     확인되면 gemini 영상처럼 토큰 항목(output_tokens_per_second, 720p 9:16)으로 넣는다
+#   - Kling 4.0·4.0 flash 1080p: 영상 규격이 720p 한 가지라 넣지 않음
 #   - 입력 이미지(편집·참조) 단가: 이번 범위에 편집이 없어 넣지 않음
 #
 # gpt-image-2: 1M 토큰당 USD 텍스트 입력 5.00, 이미지 출력 30.00.
@@ -224,3 +228,28 @@ resolution = "full-song"
 per_item_usd = 0.08
 source = "https://aistudio.google.com/docs/pricing , https://aistudio.google.com/docs/music-generation"
 checked_on = "2026-11-11"
+
+# ---- Kling(공식 새 규격, 초당 단가 per_second_usd). 2026-11-18 https://kling.ai/document-api/pricing/base/video.md
+# 720p 텍스트→영상(입력 영상 없음): kling-4.0 1.0 Unit = 0.157 USD/초, kling-4.0-flash 0.6 Unit = 0.094 USD/초.
+# 소리 유무별 단가는 표에 없다 [확인 필요]. max_duration_s 8은 safety 기준(video_duration)과 맞춘 값이다
+# (문서 상한은 4.0 flash 20초·4.0 30초). 단가는 변동 가능하다.
+
+[[price]]
+provider = "kling"
+model = "kling-4.0"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.157
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-18"
+
+[[price]]
+provider = "kling"
+model = "kling-4.0-flash"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.094
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-18"

@@ -40,7 +40,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from marketing_agent.media.base import MediaRequest, MediaResult, Usage
+from marketing_agent.media.base import MediaProviderError, MediaRequest, MediaResult, Usage
 from marketing_agent.media.config import API_KEY_ENVS, ffmpeg_bin
 
 NAME = "gemini"
@@ -79,7 +79,7 @@ def _http_error(response: httpx.Response, key: str) -> str:
     return f"{code}: {message[:200]}"
 
 
-class GeminiVideoError(Exception):
+class GeminiVideoError(MediaProviderError):
     """어댑터 실패. 메시지에는 키·응답 본문을 넣지 않는다."""
 
 
