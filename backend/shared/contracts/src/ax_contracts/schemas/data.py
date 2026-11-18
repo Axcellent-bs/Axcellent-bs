@@ -3893,4 +3893,105 @@ class ChannelValueOutput(AxModel):
     summary: str = ""
 
 
+# ---------- trend_memes (요즘 유행·밈, 11/18) ----------
+# 영상 하나가 아니라 여러 채널에서 같이 늘어난 해시태그·제목 구절을 하나의 유행으로 묶는다.
+# 재료는 숏츠 표본(shorts_stats 저장소)과 YouTube 인기 스냅샷의 숏츠뿐(새 외부 호출 없음),
+# 네이버 검색 배수는 상위 몇 개만. 점수·순위·판정은 코드, LLM은 설명 한 줄만
+
+# week = 이번 7일 vs 직전 7일, day = 어제 vs 지난 4주 같은 요일 평균
+MemeWindow = Literal["week", "day"]
+
+
+class TrendMemesInput(AxModel):
+    window: MemeWindow = "week"
+
+
+class MemeVideo(AxModel):
+    """대표 영상 하나 (조회수 순). 썸네일은 주지 않는다(화면은 링크만)."""
+
+    video_id: str = Field(min_length=1)
+    title: str | None = None
+    channel_title: str | None = None
+    views: int | None = Field(default=None, ge=0)
+    video_url: str | None = None
+
+
+class MemeSearch(AxModel):
+    """네이버 검색어 트렌드 배수 (trend_scan과 같은 판정 함수). 상위 몇 개만 본다."""
+
+    # rising·normal·unknown = 판정 결과, not_checked = 보지 않음(순위 밖·하루 한도)
+    status: Literal["rising", "normal", "unknown", "not_checked"] = "not_checked"
+    ratio: float | None = Field(default=None, ge=0)
+    reason: str | None = None
+
+
+class TrendMeme(AxModel):
+    name: str = Field(min_length=1)  # 묶음에서 가장 많이 쓰인 표기 (해시태그면 # 붙임)
+    kind: Literal["hashtag", "phrase"]
+    members: list[str] = Field(default_factory=list)  # 하나로 합친 단위들 (표기)
+    description: str | None = None  # LLM 한 줄 (숫자 없음). 없으면 description_reason
+    description_reason: str | None = None
+    channels: int = Field(ge=0)  # 이번 기간 채널 수
+    videos: int = Field(ge=0)  # 이번 기간 영상 수
+    previous_videos: float | None = Field(default=None, ge=0)  # 직전 기간 영상 수(day는 평균)
+    # known = 배수 있음, new = 직전 0이라 새로 등장, unknown = 직전 기간 표본 없음
+    ratio_status: Literal["known", "new", "unknown"] = "unknown"
+    ratio: float | None = Field(default=None, ge=0)
+    ratio_reason: str | None = None
+    search: MemeSearch = Field(default_factory=MemeSearch)
+    topic_category: str | None = None  # 공유 분류기 결과
+    real_entity: bool | None = None
+    entity_names: list[str] = Field(default_factory=list)
+    # ok = 가능, caution = 주의(실존 이름·상표, 분위기·형식만), excluded = 뺌, unknown = 분류 대기
+    ad_material: Literal["ok", "caution", "excluded", "unknown"] = "unknown"
+    ad_material_reason: str = ""
+    products: list[LinkedProduct] = Field(default_factory=list)  # product_link 기준 통과만
+    products_reason: str | None = None  # 연결하지 못한 이유 (상품 목록·임베딩)
+    top_videos: list[MemeVideo] = Field(default_factory=list)
+
+
+class MemeSkipped(AxModel):
+    """유행에서 뺀 단위와 이유."""
+
+    name: str
+    reason: str
+    # exclude_tag = 설정 제외·회사 씨앗, stop_share = 너무 흔한 태그, category = 뉴스·사건 등 분류,
+    # person = 사람 이름 자체
+    kind: Literal["exclude_tag", "stop_share", "category", "person"]
+
+
+class MemeCriteria(AxModel):
+    min_channels: int = Field(ge=1)
+    min_videos: int = Field(ge=1)
+    min_ratio: float = Field(ge=0)
+    max_items: int = Field(ge=1)
+    stop_share: float = Field(gt=0, le=1)
+    overlap: float = Field(gt=0, le=1)
+    search_top: int = Field(ge=0)
+
+
+class TrendMemesOutput(AxModel):
+    window: MemeWindow = "week"
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None  # unknown이거나 비었으면 이유
+    current_from: UtcDatetime | None = None
+    current_to: UtcDatetime | None = None
+    # 직전 기간 (day면 같은 요일 4일 중 첫날~마지막 날)
+    previous_from: UtcDatetime | None = None
+    previous_to: UtcDatetime | None = None
+    sample_videos: int = Field(default=0, ge=0)  # 중복 뺀 숏츠 수 (게시 시각을 아는 것)
+    current_videos: int = Field(default=0, ge=0)
+    previous_videos: int = Field(default=0, ge=0)  # 직전 기간 표본 수 (0이면 배수 unknown)
+    previous_days: int | None = Field(default=None, ge=0)  # day: 표본이 있는 같은 요일 수
+    unknown_published: int = Field(default=0, ge=0)  # 게시 시각을 몰라 세지 않은 수
+    criteria: MemeCriteria | None = None
+    items: list[TrendMeme] = Field(default_factory=list)
+    skipped: list[MemeSkipped] = Field(default_factory=list)
+    below_threshold: int = Field(default=0, ge=0)  # 기준(채널·영상·배수)을 못 넘은 묶음 수
+    naver_calls: int = Field(default=0, ge=0)  # 이번 계산에서 쓴 네이버 호출
+    limits: list[str] = Field(default_factory=list)
+    generated_at: UtcDatetime | None = None
+    summary: str = ""
+
+
 TrendInsight.model_rebuild()

@@ -270,6 +270,8 @@ SERVICES: tuple[Service, ...] = (
             "domain_subtopics",
             "source_plan",
             "video_explorer",
+            # 요즘 유행·밈 (11/18, grade read)
+            "trend_memes",
             "data_chat_send",
             "data_chat_list",
             "data_chat_get",

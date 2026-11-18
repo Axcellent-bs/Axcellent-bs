@@ -454,6 +454,17 @@
       "handoff": false
     },
     {
+      "id": "trend_memes",
+      "description": "요즘 유행·밈. 영상 하나가 아니라 여러 채널 숏츠에서 같이 늘어난 해시태그(제목 #…·YouTube tags)와 제목 반복 구절(2~4어절·따옴표 안)을 하나의 유행으로 묶는다(영상 집합이 겹치면 합침). window week = 이번 7일 vs 직전 7일, day = 어제 vs 지난 4주 같은 요일 평균(게시 시각 기준, 게시 시각을 모르는 영상은 세지 않고 수만 남김, 직전 표본이 없으면 배수 unknown). 재료는 저장된 숏츠 표본과 YouTube 인기 스냅샷 숏츠뿐(새 외부 호출 없음). 일반 태그·회사 씨앗 키워드·표본의 15% 이상에 붙은 태그, 사람 이름 자체·뉴스·사건·재난·정치·사회 분류는 빼고 이유를 남긴다. 기준(채널 3·영상 5·2배, 회사 설정 [memes])과 순위는 코드. 유행마다 채널 수·영상 수·직전 대비 배수·네이버 검색 배수(앞 5개만, 하루 캐시·호출 예산 공유)·광고 재료(가능·주의·뺌)·연결 상품(product_link 기준 통과만)·대표 영상 2개, 설명 한 줄만 LLM(숫자 없이, 하루 캐시). 수집기가 미리 계산하고 요청은 저장분을 읽는다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendMemesInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendMemesOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "marketing", "planning", "orchestrator"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "data_chat_send",
       "description": "데이터분석 AI 직접 대화(dashboard-api /api/dashboard/data-chat). 말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 data_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. 답의 재료는 저장된 결과만(영상 탐색·지금 인기·브리프·영상 성과·보내기 상태·수집 장부, 코드가 질문 낱말로 최대 3묶음, 새 수집·계산 없음). 답 숫자가 재료에 없으면 고정 문장, 마지막 줄 근거는 서버가 붙임. 상태 변경 명령은 LLM 없이 거절. 조회·설명만 하고 업무 상태를 바꾸지 않아 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채우고 사람 말은 untrusted로만 넣는다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy·chat_limit(대화 하루 30회·80,000토큰 또는 하루 LLM 100%).",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatSendInput",
