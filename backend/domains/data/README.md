@@ -1110,6 +1110,7 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
    - `channel_subscribers`·`views_per_subscriber`(조회 ÷ 구독자, 소수 둘째 자리): 카드 영상들 채널만 `channels.list`(채널 50개 = 1단위). 구독자 수는 YouTube 스냅샷 DB `channel_stats`에 저장해 하루 재사용(trend_popular 근거와 같은 저장분), 하루 호출 상한 `channel_calls`(2번, `popular_videos.db` `api_calls`에 `shorts_channels`로 따로 센다). 채널 id는 검색·다시 조회 응답에 있던 값(`shorts.db` `video_channels`)과 인기 스냅샷 값. 숨김·상한·채널 모름이면 None + `subscriber_reason`
    - 통계 칸(수·평균·중앙값·`top`)은 화면 카드와 무관하고 그대로다(전·후 비교 테스트 `tests/test_shorts_screen_videos.py`)
 
+- **빠진 게시 시각 채우기**(`shorts_backfill.py`, 수집기가 미리 계산 바로 앞에 부름): `published` 표가 생기기 전에 검색한 숏츠는 게시 시각이 없어 "최근 N일"·요즘 유행·밈에서 빠진다. 최근 `retention_days`(30일) 표본(검색 저장분 + 인기 스냅샷 숏츠, 길이·언어 조건 같음) 중 게시 시각을 모르는 영상만 `videos.list` 50개씩 다시 읽어 `record_views`로 남긴다(조회수·썸네일·채널 id·게시 시각). 응답에 없는 영상(지워짐·비공개)은 `published_missing` 표에 남겨 다시 부르지 않는다. 하루 `DATA_SHORTS_BACKFILL_DAILY`번(기본 20번 = 1,000개, YouTube 장부 날짜), 장부의 부른 곳은 `shorts_backfill`, 새 숏츠 추적 예약 몫은 쓰지 않는다. 로그 `[backfill] published 채움 N · 없음 M · 남음 K`
 - **한계:** 인기 영상 상위 200개 안(과 조회수 순 검색 결과)에서의 비교라 **이미 뜬 영상끼리 비교**한다(응답 `limitation`에도). 검색 숏츠의 속도는 두 번 본 사이 구간의 평균이라, 다시 조회하는 간격에 따라 값이 달라진다. 형식 분류 정확도는 평가셋이 없어 재지 않는다
 
 ### trend_memes (요즘 유행·밈)
