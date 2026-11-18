@@ -309,6 +309,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         spec_writer: SpecWriter | None | Literal["default"] = "default",
         insights: proposals.DataInsights | None | Literal["default"] = "default",
         marketing: proposals.MarketingBrief | None | Literal["default"] = "default",
+        finance: proposals.FinanceBudget | None | Literal["default"] = "default",
         proposal_writer: proposals.ProposalWriter | None | Literal["default"] = "default",
         spec_filler: spec_fill.SpecFiller | None | Literal["default"] = "default",
     ):
@@ -317,6 +318,9 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         # (None이면 부르지 않음, 목 모드 기본값)
         self._insights = proposals.default_insights() if insights == "default" else insights
         self._marketing = proposals.default_marketing() if marketing == "default" else marketing
+        # 영상 기획안을 넘기기 전에 제작비를 묻는 곳
+        # (재무 category_budget_advice, None이면 묻지 않음)
+        self._finance = proposals.default_finance() if finance == "default" else finance
         # 자유 작성 → 필수 칸·질문 답 (None이면 소제목 읽기만, 목 모드 기본값)
         self._spec_filler = spec_fill.default_filler() if spec_filler == "default" else spec_filler
         pw = proposal_writer  # 할 일·이유·목표 초안 (None이면 규칙 초안)

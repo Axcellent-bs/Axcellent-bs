@@ -101,7 +101,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
       </Panel>
 
       <Panel id="campaign-categories" title="콘텐츠 카테고리별 제작비"
-        hint={<>쇼츠·릴스를 카테고리(예: 아재개그·몸개그)별로 묶어 조회당 제작비를 봅니다. 조회수는 데이터 AI가 잰 게시 7일 값만 쓰고, 7일이 안 된 영상은 측정 중으로 셉니다. 다음 회차 제안은 재무 의견이고, 비중은 기획·마케팅과 사람이 정합니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.planning]} /></>}>
+        hint={<>쇼츠·릴스를 카테고리(예: 아재개그·몸개그)별로 묶어 조회당 제작비를 봅니다. 조회수는 데이터 AI가 잰 게시 7일 값만 쓰고, 7일이 안 된 영상은 측정 중으로 셉니다. 다음 회차 제안은 재무 의견이고, 기획 AI가 영상 기획안을 넘기기 전에 물어 갑니다. 비중은 기획·마케팅과 사람이 정합니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.planning]} /></>}>
         <ResourceBody res={view}>
           {(v) => {
             const rows = v.categories ?? [];
@@ -133,6 +133,47 @@ export function CampaignsSection({ tick }: { tick: number }) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            );
+          }}
+        </ResourceBody>
+      </Panel>
+
+      <Panel id="campaign-planning" title="기획 AI가 물어본 제작비" hint={<>기획 AI가 영상 기획안을 마케팅에 넘기기 직전에 그 카테고리의 제작비를 재무에 직접 묻습니다(총괄을 거치지 않습니다). 재무는 위 "콘텐츠 카테고리별 제작비" 숫자로 답하고, 기획은 그 숫자를 기획안 근거에 붙여 마케팅에 넘깁니다. 조회당 제작비가 가장 싼 카테고리가 가장 비싼 카테고리보다 2배 이상 싸면, 다음 회차에 싼 쪽 제작비를 30% 올리고 그만큼 비싼 쪽에서 빼자고 답합니다(전체 제작비는 그대로). 정하는 건 기획·마케팅과 사람입니다.<Wiring from={[W.planning]} to={[W.planning]} /></>}>
+        <ResourceBody res={view}>
+          {(v) => {
+            const asks = v.budget_asks ?? [];
+            const old = v.planning_insights ?? [];
+            const ASK: Record<string, { label: string; tone: string }> = {
+              advice: { label: "답함", tone: TONE.ok }, measuring: { label: "재는 중", tone: TONE.muted }, no_data: { label: "기록 없음", tone: TONE.muted },
+            };
+            return (
+              <div className="space-y-3">
+                {asks.length === 0 ? <Empty>아직 기획 AI가 물어본 적이 없습니다. 기획 AI에서 카테고리가 있는 영상 기획안을 확정해 마케팅에 넘기면 생깁니다.</Empty> : (
+                  <ul className="divide-y divide-ink-100 text-sm">
+                    {asks.slice(0, 10).map((a) => (
+                      <li key={`${a.asked_at}-${a.proposal_id}`} className="grid gap-x-4 gap-y-1 py-2 first:pt-0 md:grid-cols-[minmax(9rem,12rem)_1fr_auto]">
+                        <span className="flex flex-wrap items-center gap-2"><Chip label={ASK[a.status].label} tone={ASK[a.status].tone} /><b className="text-ink-900">{a.content_category ?? "전체"}</b></span>
+                        <span className="text-ink-700">{a.summary}</span>
+                        <span className="tabular-nums text-ink-500 md:text-right">{a.proposal_id ?? "-"} · {shortDateTime(a.asked_at)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {old.length > 0 && (
+                  <details className="text-sm text-ink-500">
+                    <summary className="cursor-pointer select-none hover:text-ink-700">예전 방식으로 기획에 먼저 보낸 재배분 의견 {old.length}건 (11/18부터 보내지 않음)</summary>
+                    <ul className="mt-2 space-y-1 text-ink-700">
+                      {old.slice(0, 10).map((row) => (
+                        <li key={row.insight.insight_id} className="flex flex-wrap items-center gap-2">
+                          <Chip label={row.status === "delivered" ? "전달됨" : "전달 대기"} tone={row.status === "delivered" ? TONE.ok : TONE.warn} />
+                          {row.insight.title}
+                          {row.proposal_id && <span className="text-ink-500">· 기획 제안 {row.proposal_id}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </div>
             );
           }}
@@ -237,22 +278,6 @@ export function CampaignsSection({ tick }: { tick: number }) {
                   <p className="mt-3 text-sm text-ink-500">{item.message}</p>
                   <p className="mt-2 rounded-xl bg-surface-2 px-3 py-2 text-sm text-ink-900"><span className="font-medium">권고</span> · {item.recommendation}</p>
                   <div className="mt-2"><AppliedRules rules={item.applied_rules} plain /></div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </ResourceBody>
-      </Panel>
-
-      <Panel id="campaign-planning" title="기획 AI에 보낸 재배분 의견" hint={<>위 "콘텐츠 카테고리별 제작비"에서 한 카테고리의 조회당 제작비가 다른 카테고리의 2배 이상이면, 비싼 쪽 제작비의 30%를 싼 쪽으로 옮기자는 재무 의견을 기획 AI에 보냅니다(전체 제작비는 그대로). 기획 AI가 이걸 받아 "기획 제안"을 만들고, 다음 회차 비중은 기획·마케팅과 사람이 정합니다. 못 보내면 전달 대기로 남고 자동으로 다시 보냅니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.planning]} /></>}>
-        <ResourceBody res={view}>
-          {(v) => (v.planning_insights ?? []).length === 0 ? <Empty>아직 기획에 보낸 의견이 없습니다. 카테고리 두 개 이상에 7일 조회수가 모이고 조회당 제작비 차이가 2배를 넘으면 생깁니다.</Empty> : (
-            <ul className="space-y-2 text-sm text-ink-700">
-              {(v.planning_insights ?? []).slice(0, 10).map((row) => (
-                <li key={row.insight.insight_id} className="flex flex-wrap items-center gap-2">
-                  <Chip label={row.status === "delivered" ? "전달됨" : "전달 대기"} tone={row.status === "delivered" ? TONE.ok : TONE.warn} />
-                  {row.insight.title}
-                  {row.proposal_id && <span className="text-ink-500">· 기획 제안 {row.proposal_id}{row.outcome === "duplicate" ? " (이미 받음)" : ""}</span>}
                 </li>
               ))}
             </ul>

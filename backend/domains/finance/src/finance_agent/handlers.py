@@ -50,6 +50,7 @@ from ax_contracts.schemas.finance import (
     CampaignBudgetReviewOutput,
     CampaignCancelInput,
     CampaignResultInput,
+    CategoryBudgetAdviceInput,
     FinanceOpinion,
     VerifyAmountInput,
 )
@@ -151,6 +152,10 @@ class State:
         self.planning_insight_sender: Callable[
             [dict[str, Any], RequestMeta], Awaitable[dict[str, Any]]
         ] = send_planning_insight
+        # 재배분 의견을 기획 receive_insight로 먼저 보낼지 (11/18부터 끔: 기획이 영상 기획안을
+        # 마케팅에 넘기기 전에 category_budget_advice로 직접 묻는다.
+        # 이미 보낸 기록의 재전송은 그대로)
+        self.push_to_planning = False
         # 시뮬레이션은 시나리오의 값을 넣는다. None이면 장부로 계산한다
         self.cash_override: int | None = None
         self.budget_override: dict[str, Any] | None = None
@@ -212,6 +217,8 @@ class FinanceRecords:
         self.opinions: list[dict[str, Any]] = []  # 총괄에 낸 의견과 전달 상태
         # 기획에 보낸 재무 인사이트(budget_shift → receive_insight)와 전달 상태·받은 제안 번호
         self.planning_insights: list[dict[str, Any]] = []
+        # 기획이 제작비를 물은 기록 (category_budget_advice) — 재무 화면 "기획 AI가 물어본 제작비"
+        self.budget_asks: list[dict[str, Any]] = []
         self.exports: dict[str, dict[str, Any]] = {}  # 자동으로 만든 파일 묶음
         self.bank_imports: list[dict[str, Any]] = []  # 은행 내역 폴더에서 읽은 기록
         # 올린 PG 정산 파일(`pg_file.py`): 결제 번호 → 줄, 덮는 판매일 기간, 올린 기록
@@ -1105,7 +1112,7 @@ async def submit_insights(context_id: str) -> list[dict[str, Any]]:
             },
             context_id,
         )
-        if item["kind"] in PLANNING_INSIGHT_KINDS:
+        if state().push_to_planning and item["kind"] in PLANNING_INSIGHT_KINDS:
             await submit_planning_insight(item, context_id)
     return found
 
@@ -1182,7 +1189,43 @@ async def finance_insights(request: AgentRequest) -> AgentResult:
     )
 
 
+BUDGET_ASKS_KEEP = 200  # 화면에 보이는 묻기 기록 수 (오래된 것부터 버린다)
+
+
+async def category_budget_advice(request: AgentRequest) -> AgentResult:
+    """기획이 영상 기획안을 넘기기 전에 그 카테고리 제작비를 묻는다(읽기). 의견만 낸다."""
+    data = _parse(request, CategoryBudgetAdviceInput)
+    if isinstance(data, AgentResult):
+        return data
+    records = state().records
+    out = cp.category_budget_advice(records.campaigns, data.content_category)
+    records.budget_asks.append(
+        {
+            "asked_at": _now().isoformat(),
+            "context_id": request.meta.context_id,
+            "proposal_id": data.proposal_id,
+            "content_category": data.content_category,
+            "content_format": data.content_format,
+            "status": out["status"],
+            "recommended_production_krw": out["recommended_production_krw"],
+            "summary": out["summary"],
+        }
+    )
+    del records.budget_asks[:-BUDGET_ASKS_KEEP]
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=out["status"],
+        output=out,
+        evidence=_evidence(
+            ["finance.campaigns content_category"],
+            f"{data.content_category or '전체'} → {out['status']}",
+        ),
+    )
+
+
 HANDLERS = {
+    "category_budget_advice": category_budget_advice,
     "record_campaign_result": record_campaign_result,
     "review_campaign_budget": review_campaign_budget,
     "verify_campaign_budget": verify_campaign_budget,

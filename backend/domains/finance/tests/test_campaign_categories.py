@@ -245,6 +245,7 @@ def _planning_sender(state_: Any, reply: dict[str, Any]) -> list[dict]:
         return reply
 
     state_.planning_insight_sender = send
+    state_.push_to_planning = True  # 11/18부터 기본은 끔. 보내는 길 자체는 그대로 시험한다
     return got
 
 
@@ -375,3 +376,68 @@ def test_adding_7d_views_later_updates_the_record_without_a_second_opinion() -> 
     changed = {**later, "gmv_krw": 50_000}
     client.post("/a2a", json=_body("record_campaign_result", changed, "mock:marketing"))
     assert len([o for o in sent if o.get("kind") != "insight"]) == len(opinions) + 1
+
+
+# ------------------------------------------------- 기획이 직접 묻기 (category_budget_advice, 11/18)
+def _ask(client: TestClient, category: str | None, proposal: str | None = "PROP-9") -> dict:
+    from ax_contracts.schemas.finance import CategoryBudgetAdviceOutput
+
+    inp = {"content_category": category, "content_format": "shorts", "proposal_id": proposal}
+    res = client.post("/a2a", json=_body("category_budget_advice", inp, "mock:planning")).json()
+    return CategoryBudgetAdviceOutput.model_validate(res["output"]).model_dump()
+
+
+def test_shift_is_no_longer_pushed_to_planning_by_default() -> None:
+    sent: list[dict] = []
+
+    async def send(payload: dict, meta: Any) -> dict[str, Any]:
+        sent.append(payload)
+        return {"problem": None, "outcome": "created", "proposal_id": "PROP-1"}
+
+    opinions = _sender(state())
+    state().planning_insight_sender = send
+    _two_categories(TestClient(app))
+    assert sent == []  # 기획에 먼저 보내지 않는다
+    assert any(o.get("verdict") == "budget_shift" for o in opinions)  # 총괄에는 그대로 낸다
+
+
+def test_planning_asks_and_gets_the_shifted_production_cost() -> None:
+    _sender(state())
+    client = TestClient(app)
+    _two_categories(client)
+    cheap = _ask(client, "아재개그")
+    assert (cheap["status"], cheap["recommended_production_krw"]) == ("advice", 130_000)
+    assert cheap["shift"] == {
+        "from_category": "몸개그", "to_category": "아재개그", "amount_krw": 30_000, "ratio": 8.0,
+    }  # fmt: skip
+    assert "100,000원 → 130,000원" in cheap["summary"] and "8.0배 싸서" in cheap["summary"]
+    dear = _ask(client, "몸개그")
+    assert dear["recommended_production_krw"] == 70_000 and "비싸서 줄임" in dear["summary"]
+    # 물은 기록이 재무 화면에 남는다 (최근 순)
+    asks = client.get("/api/finance/campaigns").json()["data"]["budget_asks"]
+    assert [a["content_category"] for a in asks] == ["몸개그", "아재개그"]
+    assert asks[0]["proposal_id"] == "PROP-9"
+
+
+def test_unknown_or_unmeasured_category_gets_no_number() -> None:
+    _sender(state())
+    client = TestClient(app)
+    client.post(
+        "/a2a",
+        json=_body(
+            "record_campaign_result", _shorts("m1", "말장난", 50_000, 900, point="1d"),
+            "mock:marketing",
+        ),
+    )  # fmt: skip
+    measuring = _ask(client, "말장난")
+    assert (measuring["status"], measuring["recommended_production_krw"]) == ("measuring", None)
+    none = _ask(client, "피식")
+    assert (none["status"], none["recommended_production_krw"]) == ("no_data", None)
+    assert "기록된 캠페인이 없어" in none["summary"]
+
+
+def test_only_planning_can_ask_production_cost() -> None:
+    res = TestClient(app).post(
+        "/a2a", json=_body("category_budget_advice", {"content_category": "x"}, "mock:marketing")
+    )
+    assert res.json().get("status") != "completed"

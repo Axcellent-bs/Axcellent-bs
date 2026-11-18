@@ -762,6 +762,89 @@ def budget_shift(campaigns: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
     }
 
 
+def category_budget_advice(
+    campaigns: dict[str, dict[str, Any]], category: str | None
+) -> dict[str, Any]:
+    """기획이 물은 카테고리의 다음 회차 제작비 의견 (`category_budget_advice`, CMP-007·INS-005).
+
+    재배분 의견(budget_shift)이 있으면 늘릴 쪽은 더하고 줄일 쪽은 빼고, 없으면 최근 회차 그대로다.
+    7일 조회수를 잰 캠페인이 없으면 권장값을 내지 않는다(지어내지 않는다).
+    """
+    rows = category_view_costs(campaigns)
+    shift = budget_shift(campaigns)
+    move = shift["shift"] if shift else None
+
+    def recommend(row: dict[str, Any]) -> int | None:
+        base = row["latest_production_krw"]
+        if base is None:
+            return None
+        if move and row["content_category"] == move["to"]:
+            return base + move["amount_krw"]
+        if move and row["content_category"] == move["from"]:
+            return base - move["amount_krw"]
+        return base
+
+    out_rows = [
+        {
+            "content_category": r["content_category"],
+            "measured_campaigns": len(r["campaigns"]),
+            "measuring": r["measuring"],
+            "cost_per_view": r["cost_per_view"],
+            "latest_production_krw": r["latest_production_krw"],
+            "recommended_production_krw": recommend(r),
+        }
+        for r in rows
+    ]
+    mine = next((r for r in out_rows if r["content_category"] == category), None)
+    if category is None:
+        status = "advice" if any(r["cost_per_view"] is not None for r in out_rows) else "no_data"
+    elif mine is None:
+        status = "no_data"
+    elif mine["cost_per_view"] is None:
+        status = "measuring"
+    else:
+        status = "advice"
+    if category is None:
+        no_gap = "카테고리 사이 제작비를 옮길 만큼 차이가 없습니다."
+        summary = shift["recommendation"] if shift else no_gap
+    elif status == "no_data":
+        summary = f"{category}는 재무에 기록된 캠페인이 없어 제작비 의견을 낼 수 없습니다."
+    elif status == "measuring":
+        summary = f"{category}는 게시 7일 조회수를 재는 중이라 조회당 제작비가 아직 없습니다."
+    else:
+        rec = mine["recommended_production_krw"]
+        base = mine["latest_production_krw"]
+        why = (
+            f" ({move['from']}보다 조회당 제작비가 {move['ratio']}배 싸서 늘림)"
+            if move and category == move["to"]
+            else f" ({move['to']}보다 조회당 제작비가 {move['ratio']}배 비싸서 줄임)"
+            if move and category == move["from"]
+            else ""
+        )
+        summary = (
+            f"{category}: 조회 1회에 {mine['cost_per_view']:,}원. "
+            f"다음 회차 제작비 {fc.won(base)} → {fc.won(rec)} 권장{why}."
+        )
+    return {
+        "status": status,
+        "content_category": category,
+        "recommended_production_krw": mine["recommended_production_krw"] if mine else None,
+        "rows": out_rows,
+        "shift": (
+            {
+                "from_category": move["from"],
+                "to_category": move["to"],
+                "amount_krw": move["amount_krw"],
+                "ratio": move["ratio"],
+            }
+            if move
+            else None
+        ),
+        "summary": summary,
+        "applied_rules": ["CMP-007", "INS-005"] if move else ["CMP-007"],
+    }
+
+
 def insights(
     campaigns: dict[str, dict[str, Any]],
     reviews: list[dict[str, Any]],

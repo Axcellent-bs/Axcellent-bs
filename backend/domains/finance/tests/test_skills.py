@@ -84,6 +84,8 @@ def test_agent_card(client: TestClient) -> None:
         # 인사가 확정한 팀 예산 기록 (인사 → 재무, 11/13 확정은 인사로 옮김)
         "record_team_budget",
         "answer_planning_question",
+        # 기획이 영상 기획안을 넘기기 전에 카테고리 제작비를 묻는다 (기획 → 재무, 11/18)
+        "category_budget_advice",
         "record_campaign_result",
         "review_campaign_budget",
         "verify_campaign_budget",
@@ -100,6 +102,8 @@ def test_agent_card(client: TestClient) -> None:
     }
     assert skills["answer_planning_question"].allowed_requesters == ["planning"]
     assert skills["answer_planning_question"].grade == "read"
+    advice = skills["category_budget_advice"]
+    assert (advice.grade, advice.allowed_requesters) == ("read", ["planning"])
     assert skills["closing_report"].allowed_requesters == ["orchestrator", "data"]
     assert "review_threshold_change" not in skills  # 한도는 제안만, 사람이 기준표 PR로 바꾼다
     # 재무는 장애 손실을 집계·판단하지 않는다 (2026-10-27, DEP-FIN-01). 장애 흐름에서는 장부 기록만
@@ -109,8 +113,8 @@ def test_agent_card(client: TestClient) -> None:
     assert (record.grade, record.allowed_requesters) == ("read", ["orchestrator"])
     served = client.get("/.well-known/agent-card.json").json()
     assert (
-        served["name"] == "finance" and len(served["skills"]) == 16
-    )  # + record_team_budget, 개선 노트 공통 skill
+        served["name"] == "finance" and len(served["skills"]) == 17
+    )  # + record_team_budget, 개선 노트 공통 skill, category_budget_advice
 
 
 # ------------------------------------------- 금액 다시 계산 (예전 verify_amount, recheck.py)

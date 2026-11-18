@@ -204,6 +204,8 @@ SERVICES: tuple[Service, ...] = (
             # 인사가 확정한 팀 예산 기록 (11/13, 확정은 인사)
             "record_team_budget",
             "answer_planning_question",
+            # 기획이 영상 기획안을 넘기기 전에 카테고리 제작비를 묻는다 (11/18)
+            "category_budget_advice",
             "record_campaign_result",
             "review_campaign_budget",
             "verify_campaign_budget",

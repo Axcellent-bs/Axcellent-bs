@@ -59,6 +59,18 @@
       "priority": "recommended"
     },
     {
+      "id": "category_budget_advice",
+      "description": "기획이 영상 기획안을 마케팅에 넘기기 전에 그 콘텐츠 카테고리의 제작비를 재무에 직접 묻는다. 재무는 마케팅 결과와 데이터 AI 7일 조회수로 낸 조회당 제작비, 다음 회차 권장 제작비(카테고리 사이 조회당 제작비가 2배 이상 차이 나면 재배분 반영), 사람이 읽는 한 줄을 돌려준다. 7일 조회수가 없으면 measuring, 기록이 없으면 no_data로 답하고 숫자를 지어내지 않는다. 의견일 뿐 비중은 기획·마케팅과 사람이 정한다. 묻기 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CategoryBudgetAdviceInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CategoryBudgetAdviceOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "record_campaign_result",
       "description": "캠페인 성과를 받아 손익(수수료 기준)을 장부에 적고 효율을 판단해 총괄에 의견을 낸다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignResultInput",
