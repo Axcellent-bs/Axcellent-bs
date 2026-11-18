@@ -535,6 +535,17 @@ def test_close_reopen_comment(client, repo) -> None:
     assert {"repo_close_pr", "repo_reopen_pr", "repo_comment"} <= set(actions)
 
 
+def test_lists_are_remembered_briefly_and_forgotten_on_write(client, repo) -> None:
+    """같은 목록을 10초 안에 다시 열면 레포에 다시 묻지 않고, 화면에서 쓰면 바로 새로 읽는다."""
+    first = repo.seed(title="첫 PR", branch="fix/one")
+    numbers = lambda: [x["number"] for x in client.get(f"{BASE}/prs").json()["data"]["items"]]  # noqa: E731
+    assert numbers() == [first]
+    second = repo.seed(title="밖에서 올린 PR", branch="fix/two")
+    assert numbers() == [first]  # 기억한 목록
+    assert client.post(f"{BASE}/prs/{first}/close").status_code == 200
+    assert numbers() == [second]  # 쓰고 나면 새로 읽는다
+
+
 def test_issues_list_detail_comment(client, repo) -> None:
     n = repo.seed_issue(title="장바구니 버그", body="재현", labels=("bug",), author="lee")
     done = repo.seed_issue(title="끝난 일", state="closed")
