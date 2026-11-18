@@ -4,7 +4,7 @@ import { okEvidence, useSkill, type SkillState } from "@/components/data/useSkil
 import { Sources, when } from "@/components/data/Sources";
 import {
   DATA_SERVER, dataAi, kpiLive,
-  type CollectorStatus, type DataSource, type DataSourcesOutput, type DomainProfileOutput, type LlmDailyUsage, type ProfileEvidence, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput, type YouTubeChartFailure,
+  type CollectorStatus, type DataSource, type DataSourcesOutput, type DomainProfileOutput, type KeywordTrendOutput, type LlmDailyUsage, type ProfileEvidence, type SourceDataKind, type SourcePlanItem, type SourcePlanOutput, type YouTubeChartFailure,
 } from "@/lib/data";
 
 // 트렌드&콘텐츠 "데이터 출처" 하위 탭 (루프 4단계와 별개, 탭 맨 끝). 서버 응답 그대로 보여 준다.
@@ -16,7 +16,8 @@ import {
 // - 아래: 출처 현황 표(data_sources, 계약 DataSourcesOutput). 키는 이름(key_envs)만 있고 값은 응답에 없다.
 //   표 위에 스냅샷 수집기 상태(collectors: 수집 중·수집 멈춤, 마지막 수집 시각, 서버 경고 문장). 예전 응답엔 없다
 //   "등록하면 얻는 근거"는 수집 계획의 그 출처 unlocks (계획에 없는 출처는 칸이 없다)
-// - 세 응답은 이 탭을 처음 열 때 받는다
+//   표 맨 아래 "네이버 검색광고 키워드 도구" 줄은 keyword_trend 응답의 searchad_status·searchad_reason (data_sources 목록에 없는 출처)
+// - 응답들은 이 탭을 처음 열 때 받는다
 
 const NO_REASON = "서버가 이유를 주지 않았어요";
 const APPROVE_BLOCKED = "승인 기능은 승인 절차 등록 후 열려요";
@@ -309,7 +310,31 @@ function ChartFailures({ list }: { list: YouTubeChartFailure[] }) {
   );
 }
 
-function SourceTable({ out, plan }: { out: DataSourcesOutput; plan: SourcePlanOutput | null }) {
+const SEARCHAD: Record<KeywordTrendOutput["searchad_status"], { label: string; tone: string }> = {
+  connected: { label: "연결됨", tone: TONE.ok },
+  key_missing: { label: "키 없음 (키 등록 후 가능)", tone: TONE.muted },
+  failed: { label: "확인 필요", tone: TONE.warn },
+};
+
+/** 네이버 검색광고 키워드 도구 한 줄. 상태는 keyword_trend 응답(searchad_status·searchad_reason) 그대로 */
+function SearchAdRow({ s }: { s: SkillState<KeywordTrendOutput> }) {
+  const st = s.kind === "ok" ? SEARCHAD[s.out.searchad_status] : s.kind === "loading" ? { label: "확인 중", tone: TONE.muted } : { label: "확인 필요", tone: TONE.warn };
+  const reason = s.kind === "ok" ? s.out.searchad_reason : s.kind === "failed" ? `검색 트렌드 응답을 받지 못했어요. ${s.reason}` : null;
+  return (
+    <tr className="align-top">
+      <td className="py-2 pr-3"><p className="font-semibold text-ink-900">네이버 검색광고 키워드 도구</p></td>
+      <td className="py-2 pr-3 text-ink-700">{KIND.search_interest}</td>
+      <td className="py-2 pr-3 text-ink-700">-</td>
+      <td className="py-2 pr-3 text-ink-700">-</td>
+      <td className="py-2">
+        <div className="flex flex-wrap gap-1"><Chip label={st.label} tone={st.tone} /></div>
+        {reason && <p className="mt-1 text-xs text-ink-500">{reason}</p>}
+      </td>
+    </tr>
+  );
+}
+
+function SourceTable({ out, plan, extra }: { out: DataSourcesOutput; plan: SourcePlanOutput | null; extra?: ReactNode }) {
   if (out.sources.length === 0) return <Empty>{out.summary || "출처가 없어요."}</Empty>;
   const unlocks = new Map((plan?.items ?? []).map((i) => [i.source_id, i.unlocks]));
   return (
@@ -326,6 +351,7 @@ function SourceTable({ out, plan }: { out: DataSourcesOutput; plan: SourcePlanOu
         </thead>
         <tbody className="divide-y divide-ink-100">
           {out.sources.map((s) => <SourceRow key={s.source_id} s={s} unlocks={unlocks.get(s.source_id) ?? null} />)}
+          {extra}
         </tbody>
       </table>
     </div>
@@ -338,6 +364,8 @@ export function DataSources() {
   const profile = useSkill(() => dataAi.domainProfile());
   const plan = useSkill(() => dataAi.sourcePlan());
   const sources = useSkill(() => dataAi.dataSources());
+  // 검색광고 키워드 도구 연결 상태는 keyword_trend 응답에 있다 (감지 탭과 같은 요청이면 askData가 하나로 묶는다)
+  const keyword = useSkill(() => dataAi.keywordTrend("day"));
   if (!kpiLive) return <Empty>데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 데이터 출처를 받지 않아요.</Empty>;
   const names = new Map((sources.state.kind === "ok" ? sources.state.out.sources : []).map((s) => [s.source_id, s.name]));
   const planOut = plan.state.kind === "ok" ? plan.state.out : null;
@@ -368,7 +396,7 @@ export function DataSources() {
             )}
             <LlmUsage usage={out.llm_usage ?? null} />
             <ChartFailures list={out.youtube_chart_failures ?? []} />
-            <SourceTable out={out} plan={planOut} />
+            <SourceTable out={out} plan={planOut} extra={<SearchAdRow s={keyword.state} />} />
           </div>
         )}</State>
       </Section>

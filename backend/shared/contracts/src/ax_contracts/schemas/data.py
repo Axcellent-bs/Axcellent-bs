@@ -3947,12 +3947,20 @@ class MemeSearch(AxModel):
 
 
 class MemePlatform(AxModel):
-    """다른 플랫폼에서 본 같은 유행 (자리만, 아직 채우는 코드 없음)."""
+    """다른 플랫폼에서 본 같은 유행. `web_search`는 keyword_trend 세션(11/18)부터 채운다."""
 
     channels: int | None = Field(default=None, ge=0)
     posts: int | None = Field(default=None, ge=0)
     ratio: float | None = Field(default=None, ge=0)
     reason: str | None = None
+    # 아래는 11/18 추가 (검색 플랫폼: 네이버 블로그·카페 글 수와 검색광고 월간 검색량)
+    blog_total: int | None = Field(default=None, ge=0)  # 블로그 전체 검색 결과 수
+    blog_7d: int | None = Field(default=None, ge=0)  # 최근 7일 블로그 글 수 (조회한 결과 안에서)
+    blog_7d_capped: bool = False  # 조회한 최대 개수가 모두 7일 안이라 실제는 더 많을 수 있음
+    cafe_total: int | None = Field(default=None, ge=0)  # 카페글 전체 검색 결과 수
+    monthly_volume: int | None = Field(default=None, ge=0)  # 최근 30일 PC + 모바일 검색량
+    volume_below_10: bool = False  # 네이버가 "<10"으로 준 값이 있음 (숫자로 바꾸지 않음)
+    volume_reason: str | None = None  # 검색량이 없는 이유 (키 없음 등)
 
 
 class TrendMeme(AxModel):
@@ -4026,6 +4034,139 @@ class TrendMemesOutput(AxModel):
     limits: list[str] = Field(default_factory=list)
     generated_at: UtcDatetime | None = None
     summary: str = ""
+
+
+# ---------- keyword_trend (검색 트렌드 · 도서 분야, 11/18) ----------
+# 키워드 풀(검색광고 키워드 도구 연관어, 하루 1번) → 데이터랩 판정·추정. 숫자·판정은 코드,
+# AI 요약 한 줄만 LLM(explain 숫자 검증). 검색광고 키가 없으면 검색량 칸은 None + 이유, 배수·판정만
+
+# day = 어제 vs 지난 4주 같은 요일, week = 최근 7일 vs 그 전 4주
+KeywordWindow = Literal["day", "week"]
+
+
+class KeywordTrendInput(AxModel):
+    window: KeywordWindow = "day"
+
+
+class KeywordVolume(AxModel):
+    """검색광고 키워드 도구 값 (최근 30일). "<10"은 숫자로 바꾸지 않고 below_10으로 둔다."""
+
+    pc: int | None = Field(default=None, ge=0)
+    mobile: int | None = Field(default=None, ge=0)
+    pc_below_10: bool = False
+    mobile_below_10: bool = False
+    competition: Literal["low", "mid", "high"] | None = None  # compIdx (PC 광고 기준)
+
+    @property
+    def total(self) -> int | None:
+        """PC + 모바일. 한쪽이라도 모르면 None ("<10"도 None, 숫자로 바꾸지 않는다)."""
+        if self.pc is None or self.mobile is None:
+            return None
+        return self.pc + self.mobile
+
+
+class KeywordNews(AxModel):
+    title: str
+    # 네이버 뉴스: 원문 주소 도메인(언론사 이름 칸이 없음), RSS: 출처 이름
+    source: str | None = None
+    url: str | None = None
+    published_at: UtcDatetime | None = None
+
+
+class KeywordSpread(AxModel):
+    """블로그·카페·뉴스 확산 (NAVER API HUB 검색 API, HUB 앱에서 켠 경우만)."""
+
+    status: Literal["known", "unavailable", "not_checked"] = "not_checked"
+    reason: str | None = None
+    blog_total: int | None = Field(default=None, ge=0)
+    blog_7d: int | None = Field(default=None, ge=0)  # 조회한 결과(최대 개수) 안에서 날짜로 센 수
+    blog_7d_capped: bool = False
+    cafe_total: int | None = Field(default=None, ge=0)
+    # 카페글 검색 응답에는 글 날짜가 없어 최근 7일 수를 셀 수 없다 (늘 None + cafe_7d_reason)
+    cafe_7d: int | None = Field(default=None, ge=0)
+    cafe_7d_reason: str | None = None
+    news: list[KeywordNews] = Field(default_factory=list)  # 최대 3개
+
+
+class RisingKeyword(AxModel):
+    keyword: str = Field(min_length=1)
+    rank: int = Field(ge=1)
+    status: TrendStatus  # trend_scan과 같은 판정 함수
+    ratio: float | None = Field(default=None, ge=0)  # 평소 대비 배수
+    score: float | None = None  # z
+    reason: str | None = None  # unknown이면 이유
+    category: str | None = None  # 공용 분류기 분류명
+    volume: KeywordVolume | None = None  # 검색광고 키가 없으면 None
+    monthly_volume: int | None = Field(default=None, ge=0)
+    volume_reason: str | None = None
+    estimate: int | None = Field(default=None, ge=0)  # 어제(week면 최근 7일) 추정 검색 수
+    increase: int | None = None  # 추정 − 지난 4주 같은 요일(week면 그 전 4주) 평균
+    increase_reason: str | None = None
+    news_count: int | None = Field(default=None, ge=0)  # 관련 뉴스 수
+    news_source: Literal["naver_news", "google_rss"] | None = None
+    news: list[KeywordNews] = Field(default_factory=list)
+    spread: KeywordSpread | None = None
+    products: int | None = Field(default=None, ge=0)  # product_link 기준 통과 상품 수
+    product_names: list[str] = Field(default_factory=list)
+    products_reason: str | None = None
+
+
+class NewKeyword(AxModel):
+    keyword: str
+    monthly_volume: int | None = Field(default=None, ge=0)
+    volume_below_10: bool = False
+
+
+class NewKeywordDay(AxModel):
+    day: dt.date
+    status: Literal["known", "pending"] = "known"  # pending = 그날 풀이 아직 없음(집계 전)
+    reason: str | None = None
+    items: list[NewKeyword] = Field(default_factory=list)
+
+
+class SeasonKeyword(AxModel):
+    keyword: str
+    group: str | None = None  # 공용 분류기 분류명
+    ratio: float = Field(ge=0)  # 작년 이달 비율 ÷ 지난 12개월 평균
+    month_volume: int | None = Field(default=None, ge=0)  # 월간 검색량 × (이달 비율 ÷ 최근 달 비율)
+    volume_reason: str | None = None
+    peak_from: str | None = None  # "MM-DD" (작년 같은 시기 일별 비율이 평균 1.5배 넘는 연속 구간)
+    peak_to: str | None = None
+    peak_reason: str | None = None  # 구간이 없거나 못 본 이유 (화면은 "-")
+    products: int | None = Field(default=None, ge=0)
+    product_names: list[str] = Field(default_factory=list)
+    products_reason: str | None = None
+
+
+class SeasonGroup(AxModel):
+    name: str
+    count: int = Field(ge=0)
+
+
+class KeywordTrendOutput(AxModel):
+    window: KeywordWindow = "day"
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    generated_at: UtcDatetime | None = None
+    pool_day: dt.date | None = None  # 키워드 풀 날짜 (한국)
+    pool_size: int = Field(default=0, ge=0)
+    # 검색광고 키워드 도구 연결 (화면 데이터 출처 줄에도 쓴다)
+    searchad_status: Literal["connected", "key_missing", "failed"] = "key_missing"
+    searchad_reason: str | None = None
+    # 블로그·카페·뉴스 검색 (HUB에서 켠 경우만)
+    spread_status: Literal["connected", "unavailable", "not_checked"] = "not_checked"
+    spread_reason: str | None = None
+    rising: list[RisingKeyword] = Field(default_factory=list)
+    new_keywords: list[NewKeywordDay] = Field(default_factory=list)  # 최근 4일
+    season_month: int | None = Field(default=None, ge=1, le=12)
+    season: list[SeasonKeyword] = Field(default_factory=list)
+    season_groups: list[SeasonGroup] = Field(default_factory=list)
+    season_reason: str | None = None
+    summary: str | None = None  # AI 요약 (숫자 검증)
+    summary_fallback: bool = False
+    summary_reason: str | None = None
+    naver_calls: int = Field(default=0, ge=0)  # 이번 계산의 데이터랩 호출
+    limits: list[str] = Field(default_factory=list)
 
 
 TrendInsight.model_rebuild()

@@ -272,6 +272,8 @@ SERVICES: tuple[Service, ...] = (
             "video_explorer",
             # 요즘 유행·밈 (11/18, grade read)
             "trend_memes",
+            # 검색 트렌드 · 도서 분야 (11/18, grade read)
+            "keyword_trend",
             "data_chat_send",
             "data_chat_list",
             "data_chat_get",

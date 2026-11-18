@@ -1104,10 +1104,55 @@ async def trend_memes(request: AgentRequest) -> AgentResult:
             data, get_llm(), env=os.environ, connector=get_trend_connector(),
             context_id=request.meta.context_id, category_cache=get_category_cache(),
             seed_provider=_profile_seeds(request.meta.context_id), catalog_provider=catalog,
+            search=get_search_connector(), searchad=get_searchad_connector(),
         )  # fmt: skip
         return result.output.status, result.output.model_dump(mode="json"), result.evidence
 
     return await _stored(request, "trend_memes", data.model_dump(mode="json"), compute)
+
+
+def get_search_connector() -> Any:
+    """NAVER API HUB 블로그·카페·뉴스 검색. 테스트는 이 함수를 바꿔 끼운다."""
+    from data_agent.connectors.naver_search import NaverSearchConnector
+
+    return NaverSearchConnector(os.environ)
+
+
+def get_searchad_connector() -> Any:
+    """네이버 검색광고 키워드 도구. 테스트는 이 함수를 바꿔 끼운다."""
+    from data_agent.connectors.naver_searchad import NaverSearchAdConnector
+
+    return NaverSearchAdConnector(os.environ)
+
+
+async def keyword_trend(request: AgentRequest) -> AgentResult:
+    """검색 트렌드 · 도서 분야 (급상승·AI 요약·새 키워드·시즌). 조회만 한다(grade read).
+
+    수집기가 미리 계산해 둔 결과를 읽는다. 없을 때만 지금 계산하고 저장한다(`_stored`).
+    """
+    from ax_contracts.schemas.data import KeywordTrendInput
+    from data_agent.skills.keyword_trend import keyword_trend as run_keyword_trend
+
+    data = _parse(request, KeywordTrendInput)
+    if isinstance(data, AgentResult):
+        return data
+
+    async def catalog() -> Any:
+        from data_agent.skills.product_link import read_catalog
+
+        return await read_catalog(get_catalog())
+
+    async def compute() -> tuple[str, dict[str, Any], Evidence]:
+        searchad = get_searchad_connector()
+        result = await run_keyword_trend(
+            data, get_llm(), env=os.environ, connector=get_trend_connector(),
+            search=get_search_connector(), searchad_configured=searchad.configured,
+            catalog_provider=catalog, category_cache=get_category_cache(),
+            explain_cache=EXPLAINED,
+        )  # fmt: skip
+        return result.output.status, result.output.model_dump(mode="json"), result.evidence
+
+    return await _stored(request, "keyword_trend", data.model_dump(mode="json"), compute)
 
 
 async def video_explorer(request: AgentRequest) -> AgentResult:
@@ -1932,7 +1977,7 @@ async def campaign_result(request: AgentRequest) -> AgentResult:
 # 트렌드 감지 탭이 부르는 skill은 단계별 시간(sqlite·외부·LLM·계산 ms)을 로그 한 줄로 남긴다
 TIMED_SKILLS = frozenset({
     "trend_popular", "trend_scan", "trend_candidates", "youtube_velocity", "shorts_stats",
-    "promo_concepts", "trend_insight_brief", "video_explorer", "trend_memes",
+    "promo_concepts", "trend_insight_brief", "video_explorer", "trend_memes", "keyword_trend",
 })  # fmt: skip
 
 # ---- 데이터분석 AI 직접 대화 (dashboard-api → data_chat_*). 조회·설명만, execute() 안 씀
@@ -2057,5 +2102,6 @@ HANDLERS = {
     "source_plan": source_plan,
     "video_explorer": video_explorer,
     "trend_memes": trend_memes,
+    "keyword_trend": keyword_trend,
 }
 HANDLERS = {k: timed_handler(k, v) if k in TIMED_SKILLS else v for k, v in HANDLERS.items()}

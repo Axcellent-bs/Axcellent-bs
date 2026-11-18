@@ -1,13 +1,14 @@
-// 트렌드 1 감지 하위 탭의 플랫폼 칩. 주소 #detect?view=all|youtube 로 남긴다.
-// - 칩은 배열 한 곳. 인스타·검색은 뒤에서 이 배열에 더한다(이번에는 없음)
+// 트렌드 1 감지 하위 탭의 플랫폼 칩. 주소 #detect?view=all|youtube|search 로 남긴다.
+// - 칩은 배열 한 곳. 인스타는 뒤에서 이 배열에 더한다(이번에는 없음)
 // - view가 없고 영상 탐색 조건(len·p·sort·cat)만 있는 예전 주소는 유튜브 칩으로 연다
 // - 영상 탐색(VideoExplorer)의 조건 파라미터는 그대로 두고 view만 더하거나 바꾼다
 
-export type DetectView = "all" | "youtube";
+export type DetectView = "all" | "youtube" | "search";
 
 export const DETECT_VIEWS: readonly { key: DetectView; label: string }[] = [
   { key: "all", label: "종합" },
   { key: "youtube", label: "유튜브" },
+  { key: "search", label: "검색" },
 ];
 
 const EXPLORER_PARAMS = ["len", "p", "sort", "cat"];
