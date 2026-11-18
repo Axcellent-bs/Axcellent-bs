@@ -1,0 +1,11 @@
+/* [시안] 사례 칸 게시물 카드. style.css 끝에 붙인다(기존 .posts·.post 규칙을 덮어쓴다). 시안: instagram/proposal/README.md */
+.case .posts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.post { display: flex; flex-direction: column; }
+.post-thumb { position: relative; display: block; line-height: 0; }
+.post-thumb img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.post-kind { position: absolute; right: 10px; top: 10px; background: rgba(20, 20, 46, .78); color: #fff; font-size: 13px; font-weight: 700; line-height: 1.2; padding: 4px 10px; border-radius: 999px; }
+.post-ai-on { position: absolute; left: 10px; bottom: 10px; background: rgba(255, 255, 255, .94); color: var(--brand-d); font-size: 13px; font-weight: 700; line-height: 1.2; padding: 4px 10px; border-radius: 999px; }
+.post-b { flex: 1; align-content: start; }
+.post-cap { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.post-ig { margin-top: auto; padding-top: 4px; }
+@media (max-width: 420px) { .case .posts { grid-template-columns: minmax(0, 1fr); } }
