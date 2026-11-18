@@ -234,7 +234,7 @@ async function campaignPost(path: string, body: unknown): Promise<CampaignAnswer
 }
 
 export const campaigns = {
-  start: (body: { campaign_id: string; campaign_name: string; channel: string; budget_krw: number; video_url?: string; test?: boolean; content_category?: string; format?: "shorts" | "reels" }) => campaignPost("/start", body),
+  start: (body: { campaign_id: string; campaign_name: string; channel: string; budget_krw: number; video_url?: string; test?: boolean; content_category?: string; format?: "shorts" | "reels"; campaign_kind?: "video"; production_cost_krw?: number; ends_on?: string }) => campaignPost("/start", body),
   result: (id: string, body: { campaign_name: string; channel: string; period_from: string; period_to: string; spend_krw: number; coupon_krw: number; gmv_krw: number | null; orders: number | null; source: string; measured_gmv_krw: number | null; measured_orders: number | null; effect_generated_at: string | null; production_cost_krw?: number }) =>
     campaignPost(`/${encodeURIComponent(id)}/result`, body),
   cancel: (id: string, reason: string) => campaignPost(`/${encodeURIComponent(id)}/cancel`, { reason }),

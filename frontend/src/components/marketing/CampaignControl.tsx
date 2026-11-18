@@ -4,6 +4,7 @@ import { campaigns, type CampaignAnswer } from "@/lib/marketingLive";
 import { dataAi, kpiLive, type CampaignEffectOutput } from "@/lib/data";
 import { todayKst } from "@/lib/finance";
 import { videoFields, type VideoKind } from "@/lib/campaignVideo";
+import { missingVideoFields, startFields, type ContentFormat } from "@/lib/campaignStart";
 
 // 캠페인 시작·결과·취소. 재무는 예산에 의견만 내고 막지 않는다(2026-11-06). 시작을 막는 것은
 // 안전 관문의 금액 규칙(사람 승인 보류)이다. 광고 플랫폼 연결이 없어
@@ -12,8 +13,8 @@ import { videoFields, type VideoKind } from "@/lib/campaignVideo";
 
 const SOURCE = "marketing_screen_manual";
 // 쇼츠 카테고리 예시(멘토 예시). 다른 이름도 적을 수 있다. 재무가 카테고리별 조회당 제작비를 본다
+const RQ = <span className="text-red-800"> *필수</span>;
 const CATEGORY_HINTS = ["아재개그", "몸개그", "말장난", "피식"];
-type ContentFormat = "shorts" | "reels";
 
 type FinanceOpinionKind = "recommend" | "reduce" | "not_recommended";
 const OPINION_KO: Record<FinanceOpinionKind, string> = { recommend: "권장", reduce: "줄여서 권장", not_recommended: "권하지 않음" };
@@ -42,6 +43,8 @@ function explain(a: CampaignAnswer): string {
   const reasons = [...(review.reasons ?? []), review.recommendation ?? ""].join(" ").trim();
   switch (a.outcome) {
     case "executed": return "집행이 승인됐습니다.";
+    case "video_fields_required":
+    case "ends_on_in_past": return String((a.output ?? {}).message ?? "필수 입력이 빠졌습니다.");
     case "held": return "안전 관문의 금액 규칙(건당 50만 원 이상, 하루 합계 100만 원 이상)에 걸려 사람 승인을 기다립니다. 위 보류 큐에서 결정하세요.";
     // 예전 응답용. 지금은 재무가 막지 않고 의견만 내서 새 응답에는 나오지 않는다
     case "rejected_by_finance": return `이전 방식의 응답입니다. 재무 반대 의견으로 시작하지 않았습니다. ${reasons}`.trim();
@@ -100,6 +103,9 @@ export function CampaignControl() {
   const [videoKind, setVideoKind] = useState<VideoKind | null>(null);
   const [category, setCategory] = useState("");
   const [format, setFormat] = useState<ContentFormat | "">("");
+  const [isVideo, setIsVideo] = useState(true); // 영상 캠페인이 기본: 카테고리·형식·제작비 필수
+  const [production, setProduction] = useState("");
+  const [endsOn, setEndsOn] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [opinion, setOpinion] = useState<ReturnType<typeof financeOpinionOf>>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -136,10 +142,11 @@ export function CampaignControl() {
   }
 
   const video = videoFields(videoUrl, videoKind);
+  const form = { isVideo, category, format, production, endsOn };
+  const missing = missingVideoFields(form);
   const start = () => run(
-    () => campaigns.start({ campaign_id: `cmp_${Date.now()}`, campaign_name: name.trim(), channel: channel.trim(), budget_krw: Number(budget), ...video.fields,
-      ...(category.trim() ? { content_category: category.trim() } : {}), ...(format ? { format } : {}) }),
-    () => { setName(""); setBudget(""); setVideoUrl(""); setVideoKind(null); setCategory(""); setFormat(""); },
+    () => campaigns.start({ campaign_id: `cmp_${Date.now()}`, campaign_name: name.trim(), channel: channel.trim(), budget_krw: Number(budget), ...video.fields, ...startFields(form) }),
+    () => { setName(""); setBudget(""); setVideoUrl(""); setVideoKind(null); setCategory(""); setFormat(""); setProduction(""); setEndsOn(""); },
   );
 
   return (
@@ -150,17 +157,21 @@ export function CampaignControl() {
         <label className="block text-sm"><span className="text-ink-700">캠페인 이름</span><input className="field mt-0.5 w-full" value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label className="block text-sm"><span className="text-ink-700">채널</span><input className="field mt-0.5 w-full" placeholder="예: 네이버 검색" value={channel} onChange={(e) => setChannel(e.target.value)} /></label>
         <label className="block text-sm"><span className="text-ink-700">예산(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={budget} onChange={(e) => setBudget(e.target.value.replace(/[^0-9]/g, ""))} /></label>
-        <button className="btn-primary" disabled={busy || !humanTokenSet || !name.trim() || !channel.trim() || !Number(budget) || video.error !== null} onClick={start}>시작 요청</button>
+        <button className="btn-primary" disabled={busy || !humanTokenSet || !name.trim() || !channel.trim() || !Number(budget) || video.error !== null || missing.length > 0} onClick={start}>시작 요청</button>
       </div>
-      <div className="mt-2 grid gap-2 text-sm sm:grid-cols-[1fr_160px]">
-        <label className="block"><span className="text-ink-700">콘텐츠 카테고리(선택)</span><input className="field mt-0.5 w-full" list="campaign-category-hints" placeholder="예: 아재개그" maxLength={40} value={category} onChange={(e) => setCategory(e.target.value)} /></label>
+      <label className="mt-2 inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={isVideo} onChange={(e) => setIsVideo(e.target.checked)} />영상 캠페인(카테고리·형식·제작비·종료일 필수)</label>
+      <div className="mt-2 grid gap-2 text-sm sm:grid-cols-[1fr_160px_160px_160px]">
+        <label className="block"><span className="text-ink-700">콘텐츠 카테고리{isVideo ? RQ : "(선택)"}</span><input className="field mt-0.5 w-full" list="campaign-category-hints" placeholder="예: 아재개그" maxLength={40} required={isVideo} value={category} onChange={(e) => setCategory(e.target.value)} /></label>
         <datalist id="campaign-category-hints">{CATEGORY_HINTS.map((c) => <option key={c} value={c} />)}</datalist>
-        <label className="block"><span className="text-ink-700">형식(선택)</span>
-          <select className="field mt-0.5 w-full" value={format} onChange={(e) => setFormat(e.target.value as ContentFormat | "")}>
-            <option value="">정하지 않음</option><option value="shorts">유튜브 쇼츠</option><option value="reels">인스타 릴스</option>
+        <label className="block"><span className="text-ink-700">형식{isVideo ? RQ : "(선택)"}</span>
+          <select className="field mt-0.5 w-full" required={isVideo} value={format} onChange={(e) => setFormat(e.target.value as ContentFormat | "")}>
+            <option value="">{isVideo ? "고르세요" : "정하지 않음"}</option><option value="shorts">유튜브 쇼츠</option><option value="reels">인스타 릴스</option>
           </select>
         </label>
-        <p className="text-xs text-ink-500 sm:col-span-2">카테고리를 적으면 재무가 카테고리별 조회당 제작비를 보고 다음 회차 제작비 의견을 냅니다. 결과 저장 때 다시 적지 않아도 이 값이 이어집니다.</p>
+        <label className="block"><span className="text-ink-700">영상 제작비(원){isVideo ? RQ : null}</span><input className="field mt-0.5 w-full" inputMode="numeric" placeholder="없으면 0" required={isVideo} value={production} onChange={(e) => setProduction(e.target.value.replace(/[^0-9]/g, ""))} /></label>
+        <label className="block"><span className="text-ink-700">종료일(KST){isVideo ? RQ : "(선택)"}</span><input type="date" className="field mt-0.5 w-full" min={todayKst()} required={isVideo} value={endsOn} onChange={(e) => setEndsOn(e.target.value)} /></label>
+        <p className="text-xs text-ink-500 sm:col-span-4">카테고리·형식·제작비가 비면 재무 카테고리별 칸에 잡히지 않아 영상 캠페인은 시작하지 않습니다. 종료일을 적으면 기간이 끝난 뒤 결과를 재무에 자동으로 보냅니다(서버에서 켜 둔 경우에만, 실제 광고비를 적어 저장하면 그 값이 우선). 결과 저장 때 다시 적지 않아도 시작 때 값이 이어집니다.</p>
+        {missing.length > 0 && <p role="alert" className="text-xs text-red-800 sm:col-span-4">빠진 칸: {missing.join(", ")}</p>}
       </div>
       <div className="mt-2 text-sm">
         <label className="block"><span className="text-ink-700">영상 URL(유튜브 쇼츠, 선택)</span><input className="field mt-0.5 w-full" placeholder="https://youtube.com/shorts/..." value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} /></label>
