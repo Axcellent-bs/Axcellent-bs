@@ -24,7 +24,7 @@ export default function PlanPurchase() {
 
   const sendCode = () => setSent(String(Math.floor(100000 + Math.random() * 900000)))
 
-  const next = (e: FormEvent) => {
+  const next = async (e: FormEvent) => {
     e.preventDefault()
     if (stage === 0) {
       if (!form.company.trim()) return setError('회사 이름을 입력하세요.')
@@ -33,7 +33,9 @@ export default function PlanPurchase() {
       sendCode()
     }
     if (stage === 1 && code.trim() !== sent) return setError('인증 코드가 맞지 않습니다.')
-    if (stage === 2) setKey(issueKey(`${form.company.trim()} · ${PLAN.name} · ${form.email.trim()}`).key)
+    if (stage === 2) {
+      try { setKey((await issueKey(`${form.company.trim()} · ${PLAN.name} · ${form.email.trim()}`)).key) } catch (x) { return setError((x as Error).message) }
+    }
     setError(null)
     setStage((s) => s + 1)
   }

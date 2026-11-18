@@ -20,7 +20,7 @@ export default function KeyIssue() {
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    setFresh(issueKey(memo.trim()))
+    void issueKey(memo.trim()).then(setFresh).catch((x: Error) => window.alert(x.message))
     setCopied(false)
     setMemo('')
   }
@@ -71,7 +71,7 @@ export default function KeyIssue() {
           </thead>
           <tbody className="divide-y divide-ink-100">
             {keys.map((k) => (
-              <tr key={k.key}>
+              <tr key={k.id}>
                 <td className="px-5 py-3 font-mono text-xs">{mask(k.key)}</td>
                 <td className="px-3 py-3">
                   {k.company ? (
@@ -89,7 +89,7 @@ export default function KeyIssue() {
                 </td>
                 <td className="px-5 py-3 text-right">
                   {k.status !== 'revoked' && (
-                    <button type="button" className="btn-quiet px-2.5 py-1 text-xs" onClick={() => revokeKey(k.key)}>폐기</button>
+                    <button type="button" className="btn-quiet px-2.5 py-1 text-xs" onClick={() => { void revokeKey(k.id).catch((x: Error) => window.alert(x.message)) }}>폐기</button>
                   )}
                 </td>
               </tr>
