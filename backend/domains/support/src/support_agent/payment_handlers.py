@@ -174,8 +174,20 @@ async def diagnose_payment(request: AgentRequest) -> AgentResult:
         data = await shop_client.fetch_order_facts(inquiry.order_id)
     except shop_client.ShopError as exc:
         return error_result(request.meta, TaskStatus.FAILED, "shop_unavailable", str(exc))
+    if data is None:
+        # 문의는 있는데 그 주문이 판매 서버에 없다(판매 서버 자료가 바뀐 옛 문의 등).
+        # "문의를 찾을 수 없다"로 답하면 문의가 없는 것처럼 보인다.
+        # 결과는 그대로 not_found로 두고 무엇이 없는지 적는다
+        return h._done(
+            request,
+            {
+                "message": f"문의 {inquiry.id}의 주문 {inquiry.order_id}이 판매 서버에 없다"
+                "(판매 서버 자료가 바뀌기 전 문의일 수 있다)"
+            },
+            outcome="not_found",
+        )
     buyer_id = buyer_ids.from_number(inquiry.user_id)
-    if data is None or data.get("buyer_id") != buyer_id:  # 남의 주문 결제 기록은 보여주지 않는다
+    if data.get("buyer_id") != buyer_id:  # 남의 주문 결제 기록은 보여주지 않는다
         return h._not_found(request, parsed.inquiry_id)
 
     result = diagnose(data)
