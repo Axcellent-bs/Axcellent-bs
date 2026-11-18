@@ -17,7 +17,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 
 from ax_agent_template.server import verify_token
 from ax_dashboard_api.auth import bearer
@@ -25,7 +25,19 @@ from ax_dashboard_api.envelope import ApiError
 from ax_dashboard_api.site_adapter import bookkeeping, resources, upstream
 from ax_dashboard_api.site_adapter.mapping import MappingError, Resource, SiteMapping, load_mapping
 
-router = APIRouter(prefix="/site-adapter")
+
+def _require_connected() -> None:
+    """연결 전이면 모든 주소가 503 연결 안 됨이다.
+
+    빈 목록·0건·"기록함"으로 답하면 지어낸 값이 된다.
+    """
+    try:
+        upstream.base_url()
+    except upstream.UpstreamError as exc:
+        raise ApiError(exc.status, exc.code, str(exc)) from exc
+
+
+router = APIRouter(prefix="/site-adapter", dependencies=[Depends(_require_connected)])
 logger = logging.getLogger("ax.site_adapter")
 
 SOURCE = "site_adapter"

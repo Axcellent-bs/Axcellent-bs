@@ -41,8 +41,17 @@ _cache: dict[Path, tuple[int, dict[str, Any]]] = {}
 
 
 def tenants_dir() -> Path:
+    """회사 폴더들이 있는 곳: `AX_TENANTS_DIR` → 레포 backend/config/tenants → 작업 폴더.
+
+    도커 이미지는 패키지를 site-packages에 깔아(--no-editable) 레포 경로가 맞지 않는다.
+    그때는 작업 폴더(WORKDIR /app = backend)의 config/tenants를 본다.
+    """
     raw = os.getenv(TENANTS_DIR_ENV, "").strip()
-    return Path(raw) if raw else DEFAULT_TENANTS_DIR
+    if raw:
+        return Path(raw)
+    if DEFAULT_TENANTS_DIR.is_dir():
+        return DEFAULT_TENANTS_DIR
+    return Path.cwd() / "config" / "tenants"
 
 
 def _read(folder: Path) -> dict[str, Any] | None:

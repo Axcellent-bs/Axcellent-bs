@@ -80,3 +80,33 @@ def test_resaving_without_a_company_keeps_the_one_chosen(client) -> None:
     client.put(BASE, json={"url": SHOP, "tenant": "catbooks"})
     data = client.put(BASE, json={"url": SHOP}).json()["data"]
     assert data["tenant"]["id"] == "catbooks"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", "/site-adapter/health"),
+        ("get", "/site-adapter/api/shop/banners"),
+        ("get", "/site-adapter/api/shop/admin/faults"),
+        ("get", "/site-adapter/api/shop/failed-orders"),
+        ("get", "/site-adapter/api/shop/metric-series"),
+        ("post", "/site-adapter/api/shop/admin/inquiries/1/synced"),
+    ],
+)
+def test_every_adapter_route_says_not_connected(client, method, path) -> None:
+    """연결 전에는 빈 목록·0건으로 답하지 않는다(지어낸 "0건"이 된다). 모두 503 연결 안 됨."""
+    res = getattr(client, method)(path)
+    assert res.status_code == 503, res.text
+    assert res.json()["error"]["code"] == "NOT_CONFIGURED"
+
+
+def test_not_connected_reaches_the_screen_as_not_connected() -> None:
+    from ax_dashboard_api import live_views, shop_relay
+
+    answer = httpx.Response(
+        503,
+        json={"error": {"code": "NOT_CONFIGURED", "message": "회사 사이트 연결 전"}},
+    )
+    for error in (shop_relay._upstream_error(answer), live_views.shop_failure(answer)):
+        assert error.status_code == 503 and error.code == "NOT_CONFIGURED"
+        assert "연결" in error.message

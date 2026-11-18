@@ -169,9 +169,9 @@ async def run_checks(url: str) -> list[Check]:
 
 
 def _internal_url() -> str:
-    """내부 데이터 모드의 주소: 회사 연결을 빼고 정한 shop-api (`AX_SHOP_API_URL`·기본값)."""
+    """내부 데이터 모드의 주소: 운영자가 준 `AX_SHOP_API_URL`. 없으면 ""(연결 안 됨)."""
     env = os.getenv("AX_SHOP_API_URL")
-    return env.rstrip("/") if env else "http://shop-api:8010"
+    return env.rstrip("/") if env else ""  # 캣북스 기본 주소 없음: 운영자가 준 주소가 없으면 빈 값
 
 
 def _state() -> dict[str, Any]:

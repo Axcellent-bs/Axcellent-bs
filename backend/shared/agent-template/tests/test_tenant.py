@@ -112,3 +112,18 @@ def test_shop_api_before_connecting_goes_to_the_not_connected_answer(world: Path
 def test_a_disabled_connection_is_also_not_connected(world: Path) -> None:
     _connect(world, enabled=False)
     assert agent_url("shop-api") == "http://dash:8020/site-adapter"
+
+
+def test_an_installed_copy_finds_the_working_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """도커 이미지는 패키지를 site-packages에 깐다(--no-editable).
+
+    그때는 작업 폴더의 config/tenants를 본다.
+    """
+    (tmp_path / "config" / "tenants" / "cold").mkdir(parents=True)
+    (tmp_path / "config" / "tenants" / "cold" / "tenant.toml").write_text(TOML, encoding="utf-8")
+    monkeypatch.delenv(tenant.TENANTS_DIR_ENV, raising=False)
+    monkeypatch.setattr(tenant, "DEFAULT_TENANTS_DIR", tmp_path / "site-packages" / "nope")
+    monkeypatch.chdir(tmp_path)
+    assert tenant.list_tenants() == [{"id": "cold", "name": "냉장 물류"}]

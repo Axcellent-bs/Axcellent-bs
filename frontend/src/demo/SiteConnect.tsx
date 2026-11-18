@@ -46,7 +46,7 @@ export default function SiteConnect({ onShop }: { onShop: (s: ConnectionState | 
           <label className="block max-w-md space-y-1 text-sm">
             <span className="text-ink-700">회사 설정</span>
             <select className="field w-full" value={tenant} onChange={(e) => setTenant(e.target.value)} aria-describedby="tenant-help">
-              <option value="">고르지 않음 (연결 안 됨)</option>
+              <option value="">{tenants.length ? '바꾸지 않음 (저장된 회사 그대로)' : '고를 회사 설정이 없어요'}</option>
               {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             <span id="tenant-help" className="block text-xs leading-5 text-ink-500">조직도·지표 목록·검색 키워드를 이 회사 것으로 써요. 연결을 저장할 때 같이 저장돼요.</span>

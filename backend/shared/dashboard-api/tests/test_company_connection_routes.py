@@ -67,7 +67,7 @@ def test_without_a_connection_nothing_is_connected(conn_file, client) -> None:
         "mode": "internal",
         "connected": False,
         "tenant": None,
-        "internal_url": "http://shop-api:8010",
+        "internal_url": "",
         "connection": None,
         "editable": True,
         "history": [],

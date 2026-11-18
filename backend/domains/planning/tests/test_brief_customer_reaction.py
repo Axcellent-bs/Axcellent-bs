@@ -103,6 +103,12 @@ def test_contracts_accept_old_payloads() -> None:
     assert brief.product_ids == []
     with pytest.raises(ValueError):
         ReceiveInsightInput.model_validate(
-            {"insight_id": "i", "title": "t", "summary": "s", "skill": "x", "facts": [fact],
-             "product_ids": [f"p{n}" for n in range(11)]}  # fmt: skip
+            {
+                "insight_id": "i",
+                "title": "t",
+                "summary": "s",
+                "skill": "x",
+                "facts": [fact],
+                "product_ids": [f"p{n}" for n in range(11)],
+            }  # fmt: skip
         )
