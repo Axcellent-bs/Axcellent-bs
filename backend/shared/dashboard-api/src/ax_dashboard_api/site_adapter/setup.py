@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ax_agent_template import company_connection as store
 from ax_dashboard_api.auth import require_human_for_writes
@@ -44,6 +44,26 @@ router = APIRouter(
 )
 
 MAX_TOKEN = 1024
+# shop-api 주문 상태 (contracts `shop_sales.py`)
+SHOP_STATUSES = frozenset(
+    {"pending_payment", "paid", "payment_failed", "cancelled", "shipped", "delivered"}
+)
+HEADER_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-")
+
+
+def _header_ok(value: str, *, empty: bool) -> str:
+    """헤더 이름·키 앞말: 영문·숫자·`-`만 (헤더 주입·인코딩 오류를 막는다)."""
+    if (not value and not empty) or any(c not in HEADER_CHARS for c in value):
+        raise ValueError("영문·숫자·-만 쓸 수 있어요")
+    return value
+
+
+def _token_ok(value: str | None) -> str | None:
+    if value and any(not (33 <= ord(c) < 127) for c in value):
+        raise ValueError("키는 공백 없는 영문·숫자·기호만 쓸 수 있어요")
+    return value
+
+
 CONVERT = {"orders": resources.to_order, "products": resources.to_product}
 
 
@@ -55,11 +75,31 @@ class ProposeIn(BaseModel):
     orders_path: str | None = None
     products_path: str | None = None
 
+    @field_validator("auth_header")
+    @classmethod
+    def _h(cls, v: str) -> str:
+        return _header_ok(v, empty=False)
+
+    @field_validator("auth_scheme")
+    @classmethod
+    def _s(cls, v: str) -> str:
+        return _header_ok(v, empty=True)
+
+    @field_validator("token")
+    @classmethod
+    def _t(cls, v: str | None) -> str | None:
+        return _token_ok(v)
+
 
 class SaveIn(BaseModel):
     base_url: str = Field(min_length=1, max_length=store.MAX_URL_LENGTH)
     token: str | None = Field(None, max_length=MAX_TOKEN)
     mapping: dict[str, Any]
+
+    @field_validator("token")
+    @classmethod
+    def _t(cls, v: str | None) -> str | None:
+        return _token_ok(v)
 
 
 def _now() -> str:
@@ -82,8 +122,19 @@ def _resource(path: str) -> ResourceMap:
         raise ApiError(422, "INVALID_PATH", f"{path}: /로 시작하는 경로만 쓸 수 있어요") from exc
 
 
-def _token(given: str | None) -> str:
-    return (given or "").strip() or upstream.saved_token()
+def _saved_base() -> str | None:
+    conn = store.read_connection()
+    if conn and conn.kind == "adapter" and conn.adapter:
+        return conn.adapter["base_url"]
+    return None
+
+
+def _token(given: str | None, base: str) -> str:
+    """넣은 키, 없으면 저장한 키. 저장한 키는 저장한 사이트 주소로만 보낸다."""
+    typed = (given or "").strip()
+    if typed:
+        return typed
+    return upstream.saved_token() if _saved_base() == base else ""
 
 
 def _upstream_422(exc: upstream.UpstreamError) -> ApiError:
@@ -132,7 +183,7 @@ def get_state() -> dict:
 async def propose_mapping(body: ProposeIn) -> dict:
     """저장하지 않고 둘러본다. 경로 둘을 다 주면 첫 쪽을 읽어 짝을 제안한다."""
     base = _base(body.base_url)
-    headers = upstream.auth_headers(body.auth_header, body.auth_scheme, _token(body.token))
+    headers = upstream.auth_headers(body.auth_header, body.auth_scheme, _token(body.token, base))
     paths = await upstream.get_paths(base, headers)
     if not (body.orders_path and body.products_path):
         return ok({"paths": paths, "samples": None, "mapping": None})
@@ -167,7 +218,7 @@ def _complete(m: SiteMapping) -> None:
             f"{kind}.{name}={raw}"
             for name, table in res.values.items()
             for raw, to in table.items()
-            if not to.strip()
+            if to not in SHOP_STATUSES
         ]
         missing = [k for k in propose.SYNONYMS[kind] if k not in res.fields]
         empty += [f"{kind}.{k}" for k in missing]
@@ -209,6 +260,25 @@ def _write_mapping(m: SiteMapping) -> None:
     os.replace(tmp, path)
 
 
+def _snapshot() -> dict[str, str | None]:
+    out: dict[str, str | None] = {}
+    for name in (MAPPING_FILE, upstream.TOKEN_FILE):
+        try:
+            out[name] = (adapter_dir() / name).read_text(encoding="utf-8")
+        except OSError:
+            out[name] = None
+    return out
+
+
+def _restore(backup: dict[str, str | None]) -> None:
+    for name, text in backup.items():
+        path = adapter_dir() / name
+        if text is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(text, encoding="utf-8")
+
+
 @router.put("")
 async def save(body: SaveIn, request: Request) -> dict:
     """짝을 확인하고 저장한다. 저장하면 AI들의 판매 서버 주소가 변환기로 바뀐다."""
@@ -222,16 +292,30 @@ async def save(body: SaveIn, request: Request) -> dict:
     except ValidationError as exc:
         reason = f"짝 모양이 맞지 않아요: {exc.error_count()}곳"
         raise ApiError(422, "MAPPING_BROKEN", reason) from exc
+    try:
+        _header_ok(m.auth_header, empty=False)
+        _header_ok(m.auth_scheme, empty=True)
+    except ValueError as exc:
+        raise ApiError(422, "MAPPING_BROKEN", f"키 헤더: {exc}") from exc
     _complete(m)
     given = (body.token or "").strip()
-    counts = await verify(base, m, given or upstream.saved_token())
-    _write_mapping(m)
-    if given:
-        upstream.save_token(given)
+    token = _token(given, base)
+    counts = await verify(base, m, token)
     human = getattr(request.state, "human", "unknown")
-    store.save_connection(
-        base, verified_at=_now(), updated_by=human, kind="adapter", adapter={"base_url": base}
-    )
+    # 짝·키·연결 셋이 같이 바뀌어야 한다. 연결 저장이 실패하면 짝·키를 전으로 되돌린다
+    # (옛 사이트에 새 키·새 짝이 가지 않게)
+    backup = _snapshot()
     upstream.clear_cache()
+    try:
+        _write_mapping(m)
+        upstream.save_token(token)
+        store.save_connection(
+            base, verified_at=_now(), updated_by=human, kind="adapter", adapter={"base_url": base}
+        )
+    except (ValueError, RuntimeError, OSError) as exc:
+        _restore(backup)
+        raise ApiError(422, "INVALID_URL", f"연결을 저장하지 못했어요: {exc}") from exc
+    finally:
+        upstream.clear_cache()
     logger.info("사이트 변환기 저장: %s (by %s)", base, human)
     return ok({**_state(), "counts": counts})

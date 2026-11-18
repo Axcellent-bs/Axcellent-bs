@@ -61,3 +61,8 @@ def test_status_words_are_sorted_into_shop_statuses() -> None:
 def test_status_values_come_from_the_rows() -> None:
     rows = [{"status": "a_paid"}, {"status": "a_paid"}, {"status": 3}, {"x": 1}]
     assert propose.status_values(rows, "status") == ["a_paid"]
+
+
+def test_negated_status_words_are_not_paid() -> None:
+    found = propose.statuses(["unconfirmed", "incomplete", "not_paid", "unsettled"])
+    assert set(found.values()) == {"pending_payment"}

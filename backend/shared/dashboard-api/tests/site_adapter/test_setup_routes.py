@@ -215,3 +215,49 @@ def test_turning_the_adapter_back_on_rechecks_the_site(client, monkeypatch) -> N
     res = client.post(CONN + "/mode", json={"mode": "connected"})
     assert res.status_code == 422
     assert client.get(CONN).json()["data"]["mode"] == "internal"
+
+
+def test_the_saved_key_is_not_sent_to_another_address(client, seen) -> None:
+    mapping = _proposal(client)["mapping"]
+    client.put(BASE, json={"base_url": SITE, "token": KEY, "mapping": mapping})
+    seen.clear()
+    other = "http://10.0.0.77:3000"
+    res = client.post(BASE + "/propose", json={"base_url": other, **PATHS})
+    assert res.status_code == 200
+    assert seen and all("authorization" not in r.headers for r in seen)
+    seen.clear()
+    client.put(BASE, json={"base_url": other, "mapping": mapping})
+    assert seen and all("authorization" not in r.headers for r in seen)
+
+
+def test_a_failed_connection_save_leaves_the_old_files(client, monkeypatch) -> None:
+    mapping = _proposal(client)["mapping"]
+    client.put(BASE, json={"base_url": SITE, "token": KEY, "mapping": mapping})
+    before = client.get(BASE).json()["data"]
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise ValueError("이름을 찾지 못했다")
+
+    monkeypatch.setattr(cc, "save_connection", boom)
+    changed = json.loads(json.dumps(mapping))
+    changed["resources"]["products"]["fields"]["category_code"] = "country"
+    res = client.put(BASE, json={"base_url": SITE, "token": "new-key", "mapping": changed})
+    assert res.status_code == 422 and res.json()["error"]["code"] == "INVALID_URL"
+    assert client.get(BASE).json()["data"] == before
+    assert up.saved_token() == KEY
+
+
+def test_save_refuses_a_status_shop_api_does_not_know(client) -> None:
+    mapping = _proposal(client)["mapping"]
+    mapping["resources"]["orders"]["values"]["status"]["cancelled"] = "gone"
+    res = client.put(BASE, json={"base_url": SITE, "mapping": mapping})
+    assert res.status_code == 422 and res.json()["error"]["code"] == "MAPPING_INCOMPLETE"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"auth_header": "X Key"}, {"auth_scheme": "Bea\nrer"}, {"token": "키값"}],
+)
+def test_odd_auth_input_is_refused(client, extra) -> None:
+    res = client.post(BASE + "/propose", json={"base_url": SITE, **PATHS, **extra})
+    assert res.status_code == 422

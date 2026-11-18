@@ -58,6 +58,8 @@ export default function SiteAdapterConnect({ onState }: { onState?: (s: Connecti
     return () => { live = false }
   }, [])
 
+  // 주소·경로·키 보내는 방식을 바꾸면 전에 받은 짝은 그 입력과 맞지 않는다. 다시 둘러보게 한다
+  const stale = () => { setFound(null); setMapping(null) }
   const run = async (kind: 'look' | 'save', work: () => Promise<void>) => {
     setBusy(kind); setError(null); setDone(null)
     try { await work() } catch (e) { setError(message(e)) } finally { setBusy(null) }
@@ -119,7 +121,7 @@ export default function SiteAdapterConnect({ onState }: { onState?: (s: Connecti
           <label className="space-y-1 text-sm">
             <span className="text-ink-700">사이트 API 주소</span>
             <input className="field w-full font-mono" placeholder="http://192.168.0.10:3100" value={base}
-              onChange={(e) => { setBase(e.target.value); setFound(null) }} />
+              onChange={(e) => { setBase(e.target.value); stale() }} />
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-ink-700">API 키 (읽기 권한)</span>
@@ -129,18 +131,18 @@ export default function SiteAdapterConnect({ onState }: { onState?: (s: Connecti
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-ink-700">주문(예약) 목록 경로</span>
-            <input className="field w-full font-mono" list="site-paths" placeholder="/api/v1/bookings" value={ordersPath} onChange={(e) => setOrdersPath(e.target.value)} />
+            <input className="field w-full font-mono" list="site-paths" placeholder="/api/v1/bookings" value={ordersPath} onChange={(e) => { setOrdersPath(e.target.value); stale() }} />
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-ink-700">상품 목록 경로</span>
-            <input className="field w-full font-mono" list="site-paths" placeholder="/api/v1/tours" value={productsPath} onChange={(e) => setProductsPath(e.target.value)} />
+            <input className="field w-full font-mono" list="site-paths" placeholder="/api/v1/tours" value={productsPath} onChange={(e) => { setProductsPath(e.target.value); stale() }} />
           </label>
         </div>
         <datalist id="site-paths">{found?.paths.map((p) => <option key={p} value={p} />)}</datalist>
         <More summary="키를 보내는 방식 (기본: Authorization: Bearer)">
           <div className="flex flex-wrap gap-2">
-            <input aria-label="키 헤더 이름" className="field font-mono" value={header} onChange={(e) => setHeader(e.target.value)} />
-            <input aria-label="키 앞에 붙는 말" className="field font-mono" value={scheme} placeholder="(없음)" onChange={(e) => setScheme(e.target.value)} />
+            <input aria-label="키 헤더 이름" className="field font-mono" value={header} onChange={(e) => { setHeader(e.target.value); stale() }} />
+            <input aria-label="키 앞에 붙는 말" className="field font-mono" value={scheme} placeholder="(없음)" onChange={(e) => { setScheme(e.target.value); stale() }} />
           </div>
         </More>
         <div className="flex flex-wrap items-center gap-2">

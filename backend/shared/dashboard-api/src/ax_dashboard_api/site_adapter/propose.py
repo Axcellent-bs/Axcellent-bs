@@ -50,7 +50,8 @@ HEAD_PARTS = ("adults", "children")
 STATUS_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("cancel_request", "cancelrequest", "cancel_requested"), "paid"),  # 취소 신청은 아직 결제 상태
     (("cancel", "expire", "refund", "void", "fail"), "cancelled"),
-    (("pending", "wait", "unpaid", "await", "ready"), "pending_payment"),
+    # 부정 낱말(un·not·in-)은 결제 낱말보다 먼저 본다(unconfirmed·not_paid·incomplete)
+    (("pending", "wait", "await", "ready", "un", "not", "incomplete"), "pending_payment"),
     (("paid", "complete", "confirm", "done", "settle", "success"), "paid"),
 )
 
