@@ -525,7 +525,43 @@ class ProposalMixin:
     # 마케팅이 거절하면 다시 보내지 않는다. 다 실패하면 기획안으로 되돌려 사람이 다시 보낸다.
     BRIEF_RETRY_DELAYS: tuple[float, ...] = (30, 60, 120, 300, 600)
 
+    async def _with_finance(self: Any, pid: str, brief: CampaignBriefInput) -> CampaignBriefInput:
+        """영상 기획안(콘텐츠 카테고리가 있는 제안)이면 넘기기 전에 재무에 제작비를 묻는다.
+
+        총괄을 거치지 않고 기획이 재무에 직접 묻는다 (11/18). 재무가 답하지 않으면 재무 의견 없이
+        넘기고 활동 기록에 남긴다(마케팅 전달을 막지 않는다). 이미 붙였으면 다시 묻지 않는다.
+        """
+        finance = getattr(self, "_finance", None)
+        if finance is None or not brief.content_category:
+            return brief
+        if any(f.source == ext.FINANCE_ADVICE for f in brief.facts):
+            return brief
+        out = await finance.ask(
+            f"proposal:{pid}", brief.content_category, brief.content_format, pid
+        )
+        facts = [] if isinstance(out, str) else ext.finance_facts(out)
+        text = (
+            f"{pid} 재무 제작비 묻기 실패 → 재무 의견 없이 마케팅에 넘김\n{out}"
+            if isinstance(out, str)
+            else f"{pid} 재무에 {brief.content_category} 제작비를 물음\n{out.summary}"
+        )
+        now = self.clock()
+
+        async def record(s: State) -> None:
+            p = _find(s, pid)
+            if p is None:
+                return
+            if facts:
+                p.facts = [*p.facts, *_facts_of(facts)]
+            s.activity.append(
+                self._act(now, _ctx(p), "planning", "finance", ext.FINANCE_ADVICE, "A2A", text)
+            )
+
+        await self._apply(record)
+        return brief.model_copy(update={"facts": [*brief.facts, *facts]}) if facts else brief
+
     async def _send_brief(self: Any, pid: str, brief: CampaignBriefInput) -> None:
+        brief = await self._with_finance(pid, brief)
         delays = self.BRIEF_RETRY_DELAYS
         for n in range(len(delays) + 1):
             if n:

@@ -202,6 +202,46 @@ class CampaignCancelInput(AxModel):
     reason: str = Field(min_length=1)
 
 
+# ---------------------------------------------------------------- 기획 → 재무 제작비 묻기 (11/18)
+# 기획이 영상 기획안을 마케팅에 넘기기 전에 그 콘텐츠 카테고리의 제작비를 재무에 직접 묻는다
+# (finance `category_budget_advice`, read). 재무는 마케팅 결과·데이터 AI 7일 조회수로 낸
+# 조회당 제작비와 다음 회차 권장 제작비를 돌려준다. 의견일 뿐, 비중은 기획·마케팅과 사람이 정한다.
+CategoryBudgetStatus = Literal["advice", "measuring", "no_data"]
+
+
+class CategoryBudgetAdviceInput(AxModel):
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    content_format: ContentFormat | None = None
+    proposal_id: str | None = Field(default=None, max_length=40)  # 묻는 기획 제안 (기록용)
+
+
+class CategoryBudgetRow(AxModel):
+    content_category: str
+    measured_campaigns: int = Field(ge=0)  # 7일 조회수를 잰 캠페인 수
+    measuring: int = Field(ge=0)  # 7일이 안 돼 아직 재는 캠페인 수
+    cost_per_view: float | None = None  # 조회 1회당 제작비(원)
+    latest_production_krw: int | None = None  # 가장 최근 회차 제작비
+    recommended_production_krw: int | None = None  # 다음 회차 권장 제작비 (재무 의견)
+
+
+class CategoryBudgetShift(AxModel):
+    from_category: str  # 조회당 제작비가 가장 비싼 카테고리 (줄일 쪽)
+    to_category: str  # 가장 싼 카테고리 (늘릴 쪽)
+    amount_krw: int = Field(ge=0)
+    ratio: float  # 비싼 쪽 조회당 제작비 ÷ 싼 쪽
+
+
+class CategoryBudgetAdviceOutput(AxModel):
+    # advice: 물은 카테고리를 쟀다 / measuring: 재는 중 / no_data: 기록 없음
+    status: CategoryBudgetStatus
+    content_category: str | None = None
+    recommended_production_krw: int | None = None  # 물은 카테고리의 다음 회차 권장 제작비
+    rows: list[CategoryBudgetRow] = Field(default_factory=list)
+    shift: CategoryBudgetShift | None = None
+    summary: str  # 사람이 읽는 한 줄 (기획이 기획안 근거로 그대로 싣는다)
+    applied_rules: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------- 재무 AI 직접 대화 (11/9)
 # dashboard-api `/api/dashboard/finance-chat` → finance `finance_chat_*`.
 # 기획 AI 대화와 같은 모양이다. 대화로는 조회·설명만 한다(장부·결산·정산을 바꾸지 않는다).

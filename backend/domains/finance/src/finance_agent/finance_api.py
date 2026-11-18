@@ -1504,6 +1504,8 @@ def add_finance_api(app: FastAPI) -> None:
                 "opinions": list(reversed(records.opinions)),
                 # 기획에 보낸 재무 인사이트와 기획이 만든 제안 번호 (INS-005 → receive_insight)
                 "planning_insights": list(reversed(records.planning_insights)),
+                # 기획이 영상 기획안을 넘기기 전에 제작비를 물은 기록 (category_budget_advice)
+                "budget_asks": list(reversed(records.budget_asks)),
                 "budget": {
                     "month": month,
                     "monthly_krw": budget["amount_krw"],

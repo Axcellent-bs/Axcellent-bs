@@ -132,6 +132,8 @@ export interface CampaignView {
   break_even_roas: number | null;
   categories?: CategoryViewCost[];
   // 기획에 보낸 재무 인사이트(budget_shift)와 기획이 만든 제안 번호
+  // 기획이 영상 기획안을 넘기기 전에 카테고리 제작비를 물은 기록 (category_budget_advice, 최근 순)
+  budget_asks?: { asked_at: string; proposal_id: string | null; content_category: string | null; content_format: string | null; status: "advice" | "measuring" | "no_data"; recommended_production_krw: number | null; summary: string }[];
   planning_insights?: { insight: { insight_id: string; title: string }; status: "pending" | "delivered"; attempts: number; last_problem?: string | null; outcome?: string | null; proposal_id?: string | null; delivered_at?: string }[];
 }
 export interface FinanceInsight {

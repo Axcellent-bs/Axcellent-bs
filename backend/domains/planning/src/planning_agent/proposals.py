@@ -10,6 +10,9 @@
   (`number_warnings`: 근거 facts·목표 target에 없는 숫자를 경고). LLM이 없으면 규칙 초안.
 - 넘기기(`MarketingBrief.send`): 사람이 확정한 제안을 마케팅 `receive_campaign_brief`(A)에
   보낸다. 마케팅에 아직 그 skill이 없거나 응답이 없으면 지어내지 않고 실패 이유를 돌려준다.
+- 재무에 묻기(`FinanceBudget.ask`): 영상 기획안(콘텐츠 카테고리가 있는 제안)을 마케팅에 넘기기
+  직전에 재무 `category_budget_advice`(read)로 그 카테고리 제작비를 묻고, 재무가 낸 숫자를 근거
+  facts로 붙여 넘긴다 (11/18 태윤: 총괄을 거치지 않고 기획이 재무에 직접 묻는다).
 - 목 모드 기본값(`default_*`)은 다른 부서·LLM을 부르지 않는다 (`None`).
 """
 
@@ -36,6 +39,11 @@ from ax_contracts.schemas.data import (
     PromoConceptsOutput,
     TrendInsight,
     TrendInsightBriefOutput,
+)
+from ax_contracts.schemas.finance import (
+    CategoryBudgetAdviceInput,
+    CategoryBudgetAdviceOutput,
+    ContentFormat,
 )
 from ax_contracts.schemas.planning import (
     CampaignBriefInput,
@@ -584,6 +592,82 @@ class MarketingBrief:
             return CampaignBriefOutput.model_validate(out.output or {})
         except ValidationError:
             return "receive_campaign_brief 출력이 계약과 다름"
+
+
+FINANCE_ADVICE = "category_budget_advice"  # 재무가 낸 숫자의 출처 (facts.source)
+
+
+class FinanceBudget:
+    """재무 `category_budget_advice`에 콘텐츠 카테고리 제작비를 묻는다 (읽기)."""
+
+    def __init__(
+        self,
+        caller: AgentCaller | None = None,
+        tenant_id: str = TENANT_ID_DEFAULT,
+        timeout: float = 15.0,
+    ):
+        self._call = caller or (lambda target, req: call_agent(target, req))
+        self.tenant_id = tenant_id
+        self.timeout = timeout
+
+    async def ask(
+        self, ctx: str, category: str, fmt: ContentFormat | None, proposal_id: str
+    ) -> CategoryBudgetAdviceOutput | str:
+        inp = CategoryBudgetAdviceInput(
+            content_category=category, content_format=fmt, proposal_id=proposal_id
+        )
+        req = AgentRequest(
+            meta=_meta(ctx, self.tenant_id, self.timeout),
+            skill=FINANCE_ADVICE,
+            input=inp.model_dump(mode="json"),
+        )
+        out = await _ask(self._call, "finance", req, self.timeout)
+        if isinstance(out, str):
+            return out
+        try:
+            return CategoryBudgetAdviceOutput.model_validate(out.output or {})
+        except ValidationError:
+            return f"{FINANCE_ADVICE} 출력이 계약과 다름"
+
+
+def finance_facts(out: CategoryBudgetAdviceOutput) -> list[InsightFact]:
+    """재무 답을 기획안 근거 한 줄씩으로. 숫자는 재무가 낸 값 그대로 옮긴다."""
+    cat = out.content_category or "전체"
+    if out.status != "advice":
+        why = "게시 7일 조회수를 재는 중" if out.status == "measuring" else "재무 기록 없음"
+        return [InsightFact(label=f"재무 제작비 의견 ({cat})", value=why, source=FINANCE_ADVICE)]
+    row = next((r for r in out.rows if r.content_category == out.content_category), None)
+    facts = []
+    if row is not None and row.cost_per_view is not None:
+        facts.append(
+            InsightFact(
+                label=f"{cat} 조회당 제작비 (게시 7일 조회수)",
+                value=f"{row.cost_per_view:,}원",
+                source=FINANCE_ADVICE,
+            )
+        )
+    if out.recommended_production_krw is not None:
+        facts.append(
+            InsightFact(
+                label=f"재무 권장 다음 회차 제작비 ({cat})",
+                value=f"{out.recommended_production_krw:,}원",
+                source=FINANCE_ADVICE,
+            )
+        )
+    if out.shift is not None:
+        s = out.shift
+        facts.append(
+            InsightFact(
+                label="재무 재배분 의견 (조회당 제작비 차이)",
+                value=f"{s.from_category} → {s.to_category} {s.amount_krw:,}원 ({s.ratio}배)",
+                source=FINANCE_ADVICE,
+            )
+        )
+    return facts
+
+
+def default_finance() -> FinanceBudget | None:
+    return None if template_config.is_mock("planning") else FinanceBudget()
 
 
 def default_insights() -> DataInsights | None:

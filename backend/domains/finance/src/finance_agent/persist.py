@@ -75,6 +75,7 @@ def dump(s: State) -> dict[str, Any]:
             "lessons": records.lessons,
             "opinions": records.opinions,
             "planning_insights": records.planning_insights,
+            "budget_asks": records.budget_asks,
             "exports": records.exports,
             "bank_imports": records.bank_imports,
             "pg_rows": records.pg_rows,
@@ -143,6 +144,7 @@ def restore(s: State, data: dict[str, Any]) -> None:
     s.records.lessons = [dict(r) for r in rec.get("lessons", [])]
     s.records.opinions = [dict(r) for r in rec.get("opinions", [])]
     s.records.planning_insights = [dict(r) for r in rec.get("planning_insights", [])]
+    s.records.budget_asks = [dict(r) for r in rec.get("budget_asks", [])]
     s.records.exports = {k: dict(v) for k, v in rec.get("exports", {}).items()}
     s.records.bank_imports = [dict(r) for r in rec.get("bank_imports", [])]
     exports.give_legacy_ids(s.records.bank_imports)  # id 전에 읽은 기록도 뺄 수 있게
