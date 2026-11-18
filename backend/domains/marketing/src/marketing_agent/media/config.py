@@ -33,6 +33,11 @@ API_KEY_ENVS = {
     "video": "MARKETING_VIDEO_API_KEY",
     "audio": "MARKETING_AUDIO_API_KEY",
 }
+# 공급자별 키 변수. Gemini는 예전부터 종류별 키(`API_KEY_ENVS`)를 쓴다.
+# 새 공급자는 반드시 자기 변수만 읽는다
+# (`MARKETING_VIDEO_API_KEY`에 든 Google 키가 다른 회사 서버로 가면 안 된다).
+SEEDANCE_API_KEY_ENV = "MARKETING_SEEDANCE_API_KEY"
+KLING_API_KEY_ENV = "MARKETING_KLING_API_KEY"
 FFMPEG_BIN_ENV = "MARKETING_FFMPEG_BIN"
 AUDIO_MODE_ENV = "MARKETING_AUDIO_MODE"
 AUDIO_MODES = ("off", "bgm_overlay")
