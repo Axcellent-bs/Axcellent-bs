@@ -5,7 +5,7 @@ import { FAMILIES, SERVICES, agentName, type Service } from './services'
 
 // 로그인 전에 여는 메인 페이지 = 서비스 제품군 카탈로그. 어떤 서비스가 있는지 보고, 회원가입·로그인 화면으로 간다.
 // 서비스는 모두 필수라 회사가 따로 고르지 않는다. 로그인하면 전부 열린다.
-const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.png`
+const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.webp`
 
 function Mark({ s }: { s: Service }) {
   return (

@@ -4,7 +4,7 @@ import { OPERATORS, homeOf, useSession } from '@/demo/session'
 
 // 관제 센터 로그인: AXcellent 운영팀(우리 개발자) 전용 입구. 고객사 로그인(/login)과 따로 있고, 고객사 계정으로는 못 들어온다.
 // 데모라 비밀번호는 확인하지 않는다.
-const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.png`
+const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.webp`
 
 export default function OperatorLogin() {
   const { signIn } = useSession()

@@ -9,7 +9,7 @@ export function AuthAside() {
   return (
     <section className="hidden flex-col justify-between bg-[#1d1d3a] p-12 text-white lg:flex">
       <div>
-        <h1><img src={`${import.meta.env.BASE_URL}axcellent-wordmark.png`} alt="AXcellent" className="h-10 w-auto" /></h1>
+        <h1><img src={`${import.meta.env.BASE_URL}axcellent-wordmark.webp`} alt="AXcellent" className="h-10 w-auto" /></h1>
         <p className="mt-1 text-sm text-white/70">사내 설치형 AX 솔루션</p>
       </div>
       <div className="space-y-6">
