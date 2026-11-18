@@ -1105,6 +1105,7 @@ async def trend_memes(request: AgentRequest) -> AgentResult:
             context_id=request.meta.context_id, category_cache=get_category_cache(),
             seed_provider=_profile_seeds(request.meta.context_id), catalog_provider=catalog,
             search=get_search_connector(), searchad=get_searchad_connector(),
+            instagram=get_instagram_graph(),
         )  # fmt: skip
         return result.output.status, result.output.model_dump(mode="json"), result.evidence
 
@@ -1123,6 +1124,88 @@ def get_searchad_connector() -> Any:
     from data_agent.connectors.naver_searchad import NaverSearchAdConnector
 
     return NaverSearchAdConnector(os.environ)
+
+
+def get_instagram_graph() -> Any:
+    """Instagram Graph API (GET만). 테스트는 이 함수를 바꿔 끼운다."""
+    from data_agent.connectors.instagram_graph import InstagramGraph
+
+    return InstagramGraph(os.environ)
+
+
+async def instagram_audio(request: AgentRequest) -> AgentResult:
+    """인스타 인기 오디오 (수집기가 하루 1번 받은 목록 + 순위 변화). 조회만(grade read)."""
+    from ax_contracts.schemas.data import InstagramAudioInput
+    from data_agent.skills import instagram
+
+    data = _parse(request, InstagramAudioInput)
+    if isinstance(data, AgentResult):
+        return data
+
+    async def compute() -> tuple[str, dict[str, Any], Evidence]:
+        result = instagram.instagram_audio(data, env=os.environ)
+        return result.output.status, result.output.model_dump(mode="json"), result.evidence
+
+    return await _stored(request, "instagram_audio", data.model_dump(mode="json"), compute)
+
+
+async def instagram_radar(request: AgentRequest) -> AgentResult:
+    """인스타 레이더 (벤치마크 계정의 터진 게시물 묶음). 조회만(grade read)."""
+    from ax_contracts.schemas.data import InstagramRadarInput
+    from data_agent.skills import instagram
+
+    data = _parse(request, InstagramRadarInput)
+    if isinstance(data, AgentResult):
+        return data
+
+    async def compute() -> tuple[str, dict[str, Any], Evidence]:
+        result = await instagram.instagram_radar(
+            get_llm(), env=os.environ, category_cache=get_category_cache(),
+            context_id=request.meta.context_id,
+        )  # fmt: skip
+        return result.output.status, result.output.model_dump(mode="json"), result.evidence
+
+    return await _stored(request, "instagram_radar", data.model_dump(mode="json"), compute)
+
+
+async def instagram_memo_list(request: AgentRequest) -> AgentResult:
+    """인스타 트렌드 메모 목록 (수동 입력). 조회만(grade read)."""
+    from ax_contracts.schemas.data import InstagramMemoListInput
+    from data_agent.skills import instagram
+
+    data = _parse(request, InstagramMemoListInput)
+    if isinstance(data, AgentResult):
+        return data
+    out = instagram.memo_list(data, env=os.environ)
+    note = f"메모 {len(out.items)}개"
+    evidence = Evidence(queries=["ig_memo.db"], data_summary=note, collected_at=datetime.now(UTC))
+    return _result(request, TaskStatus.COMPLETED, output=out.model_dump(mode="json"),
+                   evidence=evidence)  # fmt: skip
+
+
+def get_instagram_memo_gate():  # noqa: ANN201 - 테스트가 바꿔 끼우는 자리
+    """data 자신의 safety 관문 (`execute`, 액션 add_instagram_memo)."""
+    from ax_agent_template.execute import execute
+
+    return execute
+
+
+async def instagram_memo_add(request: AgentRequest) -> AgentResult:
+    """인스타 트렌드 메모 하나 저장 (grade A, execute 먼저). 등록·설정 전에는 거절."""
+    from ax_contracts.schemas.data import InstagramMemoAddInput
+    from data_agent.skills import instagram
+
+    data = _parse(request, InstagramMemoAddInput)
+    if isinstance(data, AgentResult):
+        return data
+    if data.tenant_id != request.meta.tenant_id:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    out = await instagram.memo_add(data, request.meta, env=os.environ,
+                                   gate=get_instagram_memo_gate())  # fmt: skip
+    status = TaskStatus.COMPLETED if out.outcome == "added" else TaskStatus.REJECTED
+    return _result(request, status, outcome=out.outcome, output=out.model_dump(mode="json"),
+                   evidence=Evidence(queries=["ig_memo.db"], data_summary=out.reason or "메모 추가",
+                                     collected_at=datetime.now(UTC)))  # fmt: skip
 
 
 async def keyword_trend(request: AgentRequest) -> AgentResult:
@@ -1978,6 +2061,7 @@ async def campaign_result(request: AgentRequest) -> AgentResult:
 TIMED_SKILLS = frozenset({
     "trend_popular", "trend_scan", "trend_candidates", "youtube_velocity", "shorts_stats",
     "promo_concepts", "trend_insight_brief", "video_explorer", "trend_memes", "keyword_trend",
+    "instagram_audio", "instagram_radar",
 })  # fmt: skip
 
 # ---- 데이터분석 AI 직접 대화 (dashboard-api → data_chat_*). 조회·설명만, execute() 안 씀
@@ -2103,5 +2187,9 @@ HANDLERS = {
     "video_explorer": video_explorer,
     "trend_memes": trend_memes,
     "keyword_trend": keyword_trend,
+    "instagram_audio": instagram_audio,
+    "instagram_radar": instagram_radar,
+    "instagram_memo_list": instagram_memo_list,
+    "instagram_memo_add": instagram_memo_add,
 }
 HANDLERS = {k: timed_handler(k, v) if k in TIMED_SKILLS else v for k, v in HANDLERS.items()}

@@ -12,6 +12,9 @@ import { DETECT_VIEWS, detectViewFromHash, hashWithView, type DetectView } from 
 import { VideoExplorer } from "@/components/data/VideoExplorer";
 import { TrendMemes } from "@/components/data/TrendMemes";
 import { KeywordSummaryCards, KeywordTrend } from "@/components/data/KeywordTrend";
+import { IgAudioSummaryCard, InstagramAudio, KEY_LATER, igKeyMissing } from "@/components/data/InstagramAudio";
+import { InstagramRadar } from "@/components/data/InstagramRadar";
+import { InstagramMemo } from "@/components/data/InstagramMemo";
 import { okOut, useSkill } from "@/components/data/useSkill";
 import { Basis, Sources, VideoLinks, when } from "@/components/data/Sources";
 import { LoopStepper, type LoopTrendState } from "@/components/data/ContentLoop";
@@ -25,7 +28,8 @@ import {
 // 트렌드&콘텐츠 화면 (/data/trend): 콘텐츠 루프 4단계와 같은 하위 탭 4개 + 맨 끝 "데이터 출처"(루프와 별개) (정의는 lib/contentLoop.ts 한 곳).
 // - 주소에 하위 탭을 남긴다: /data/trend#detect · #recommend · #handoff · #result · #sources(데이터 출처, 루프와 별개) (없으면 감지). 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
 // - 루프 띠의 단계를 누르면 그 단계가 속한 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
-// - 1 감지: 맨 위 한 줄(오늘 가장 큰 화제, trend_popular) → 플랫폼 칩(#detect?view=all|youtube|search, lib/detectView.ts)
+// - 1 감지: 맨 위 한 줄(오늘 가장 큰 화제, trend_popular) → 플랫폼 칩(#detect?view=all|youtube|instagram|search, lib/detectView.ts)
+//   인스타 = 인기 오디오(InstagramAudio) · 인스타 레이더(InstagramRadar) · 인스타 트렌드 메모(InstagramMemo)
 //   종합 = 요약 줄(1위 유행·검색 급상승 1위·이달 시즌 1위) + 요즘 유행·밈(trend_memes, TrendMemes) / 유튜브 = 같은 유행 표(쇼츠 칸 중심) + 영상 탐색(video_explorer 숏·롱 × 카테고리 × 기간,
 //   VideoExplorer. 고른 조건은 #detect?… 주소에 남긴다. view 없이 조건만 있는 예전 주소는 유튜브 칩) /
 //   검색 = 검색 트렌드(keyword_trend, KeywordTrend) + 맨 아래 급상승 한 줄 목록(trend_scan·trend_candidates)·키워드 직접 판정.
@@ -200,7 +204,8 @@ function PreparingStage({ stage }: { stage: LoopStage }) {
 
 // ------------------------------------------------------------------- 1 감지 플랫폼 칩
 
-/** 종합(기본) = 요약 줄(1위 유행·검색 급상승 1위·이달 시즌 1위) + 요즘 유행·밈 표 / 유튜브 = 같은 유행 표(쇼츠 칸 중심) + 영상 탐색 그대로 /
+/** 종합(기본) = 요약 줄(1위 유행·검색 급상승 1위·이달 시즌 1위·인스타 인기 오디오 1위) + 요즘 유행·밈 표 / 유튜브 = 같은 유행 표(쇼츠 칸 중심) + 영상 탐색 그대로 /
+ *  인스타 = 인기 오디오(instagram_audio) · 인스타 레이더(instagram_radar) · 인스타 트렌드 메모(수동 입력). 유행 표는 숨김 /
  *  검색 = 검색 트렌드(keyword_trend, KeywordTrend) + 맨 아래 급상승 한 줄 목록·키워드 직접 판정(searchExtra, TrendScan이 만든 그대로).
  *  칩은 주소 #detect?view=… (lib/detectView.ts). 유행 표는 칩을 바꿔도 같은 자리(검색 칩에서는 숨김)라 다시 받지 않는다.
  *  keyword_trend는 여기서 한 번 받아 검색 칩과 종합 요약 줄이 같이 쓴다 (일간/주간을 바꾸면 다시 받는다) */
@@ -219,15 +224,35 @@ function PlatformViews({ searchExtra }: { searchExtra?: ReactNode }) {
     setKwWindow(next);
     kw.reload();
   };
+  // 인스타 인기 오디오(음악)는 여기서 한 번 받아 인스타 칩 카드와 종합 요약 칸이 같이 쓴다
+  const igMusic = useSkill(() => dataAi.instagramAudio("music"));
+  // 토큰 자체가 없을 때만(오디오·Business Discovery 둘 다 key_missing) 오디오·레이더 대신 한 줄. 권한 부족은 카드마다 자기 이유
+  const igKeyLine = igKeyMissing(igMusic.state);
   return (
     <div className="space-y-4">
       <div role="group" aria-label="플랫폼" className="flex flex-wrap gap-2">
         {DETECT_VIEWS.map((v) => <FilterButton key={v.key} on={view === v.key} onClick={() => pick(v.key)}>{v.label}</FilterButton>)}
       </div>
-      <div hidden={view === "search"}>
-        <TrendMemes focus={view} summaryCards={<KeywordSummaryCards state={kw.state} />} />
+      <div hidden={view === "search" || view === "instagram"}>
+        <TrendMemes focus={view} summaryCards={<><KeywordSummaryCards state={kw.state} /><IgAudioSummaryCard state={igMusic.state} /></>} />
       </div>
       {view === "youtube" && <VideoExplorer />}
+      {view === "instagram" && (
+        <section aria-label="인스타그램" className="space-y-4">
+          {igKeyLine !== null ? (
+            <p className="card p-4 text-sm text-ink-700">
+              <b className="text-ink-900">{KEY_LATER}</b>
+              {igKeyLine && <span className="block text-xs text-ink-500">{igKeyLine}</span>}
+            </p>
+          ) : (
+            <>
+              <InstagramAudio music={igMusic.state} onRetryMusic={igMusic.reload} />
+              <InstagramRadar />
+            </>
+          )}
+          <InstagramMemo />
+        </section>
+      )}
       {view === "search" && (
         <>
           <KeywordTrend state={kw.state} win={kwWindow} onWindow={pickWindow} onRetry={kw.reload} />
