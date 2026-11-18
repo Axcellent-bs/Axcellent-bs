@@ -191,6 +191,28 @@ class PendingStore:
                 f"마감 시각을 적을 수 없다: {type(error).__name__}"
             ) from error
 
+    def patch_result(
+        self, key: str, patch: dict[str, Any], *, where_review_status: str | None = None
+    ) -> bool:
+        """게시된 건의 `result`에 JSON merge patch를 적용한다(null이면 키 삭제, 상태 불변).
+
+        `where_review_status`가 있으면 `result.ai_label_review.status`가 그 값일 때만(원자적).
+        """
+        sql = (
+            "UPDATE sns_pending SET result = json_patch(COALESCE(result, '{}'), ?),"
+            " updated_at = ? WHERE idempotency_key = ? AND status = ?"
+        )
+        args: list[Any] = [json.dumps(patch, ensure_ascii=False), _now(), key, PUBLISHED]
+        if where_review_status is not None:
+            sql += " AND json_extract(result, '$.ai_label_review.status') = ?"
+            args.append(where_review_status)
+        try:
+            with self._lock, self._conn:
+                cur = self._conn.execute(sql, args)
+        except sqlite3.Error as error:
+            raise PendingStorageError(f"결과를 갱신할 수 없다: {type(error).__name__}") from error
+        return cur.rowcount == 1
+
     def count_posts_since(self, since: datetime) -> int:
         """`since` 이후 게시된(또는 `media_publish`를 보낸) 건수. 게시 여부가 불확실한 건도 센다."""
         try:

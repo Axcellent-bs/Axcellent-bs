@@ -21,6 +21,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -130,6 +131,9 @@ class PublishSnsOutput(AxModel):
     permalink: str | None = None
     is_ai_generated_response: bool | None = None
     ai_label_confirmed: bool | None = None
+    ai_label_check: str | None = None  # api_confirmed | api_mismatch | api_unavailable
+    ai_label_warning: str | None = None  # ai_label_mismatch | _unverified | _missing
+    ai_label_review: dict[str, Any] | None = None  # status, confirmed_by, confirmed_at
     provider: str | None = None
     item_count: int | None = None  # 캐러셀 장수
     asset_refs: list[str] | None = None  # 캐러셀 각 장의 참조(게시 순서)
@@ -319,6 +323,9 @@ def _output(row: PendingPost) -> dict[str, Any]:
         permalink=info.get("permalink"),
         is_ai_generated_response=info.get("is_ai_generated_response"),
         ai_label_confirmed=info.get("ai_label_confirmed"),
+        ai_label_check=info.get("ai_label_check"),
+        ai_label_warning=info.get("ai_label_warning"),
+        ai_label_review=info.get("ai_label_review"),
         provider=info.get("provider"),
         item_count=len(row.params["asset_refs"]) if row.params.get("asset_refs") else None,
         asset_refs=row.params.get("asset_refs") or None,
@@ -942,19 +949,122 @@ async def _verify(
     if row.result.get("children"):  # 캐러셀: 자식 컨테이너 id를 결과에 남긴다
         result["children"] = row.result["children"]
         result["item_count"] = len(row.result["children"])
+    result["published_at"] = _now().isoformat()
     if media_id is None:
-        return result | {"media_id_unresolved": True}
+        return result | {"media_id_unresolved": True} | label_fields(None)
     try:
         info = await _retrying(row, "get_media", lambda: adapter.get_media(media_id))
     except (_Fail, _NewContainer):
-        return result | {"verify_failed": True}  # 게시는 됐다. 확인 조회만 실패
-    return result | {
-        "permalink": info.permalink,
-        "timestamp": info.timestamp,
-        "media_product_type": info.media_product_type,
-        "is_ai_generated_response": info.is_ai_generated,
-        "ai_label_confirmed": info.is_ai_generated is True,
+        # 게시는 됐다. 확인 조회만 실패 → 표기는 모름(사람이 확인)
+        return result | {"verify_failed": True} | label_fields(None)
+    return (
+        result
+        | {
+            "permalink": info.permalink,
+            "timestamp": info.timestamp,
+            "media_product_type": info.media_product_type,
+            "is_ai_generated_response": info.is_ai_generated,
+        }
+        | label_fields(info.is_ai_generated)
+    )
+
+
+# -- 게시 후 AI 표기 확인
+LABEL_PENDING = "pending"
+LABEL_CONFIRMED = "confirmed"
+LABEL_CONFIRMED_MISSING = "confirmed_missing"
+LABEL_NOT_REQUIRED = "not_required"
+LABEL_CONFIRM_HOURS_ENV = "MARKETING_SNS_LABEL_CONFIRM_HOURS"
+_LABEL_CONFIRM_HOURS_DEFAULT = 24.0
+
+
+def label_fields(api_value: bool | None) -> dict[str, Any]:
+    """게시 직후 조회한 `is_ai_generated`로 표기 상태를 정한다. 모르면 확인됨이 아니다(false).
+
+    True면 API 확인(사람 확인 불필요). False면 불일치(우리는 true를 보냈다), None이면 조회 불가.
+    둘 다 `ai_label_review.status=pending`으로 사람 확인을 강제한다.
+    """
+    if api_value is True:
+        return {
+            "ai_label_confirmed": True,
+            "ai_label_check": "api_confirmed",
+            "ai_label_review": {"status": LABEL_NOT_REQUIRED},
+        }
+    if api_value is False:
+        check, warning = "api_mismatch", "ai_label_mismatch"
+    else:
+        check, warning = "api_unavailable", "ai_label_unverified"
+    return {
+        "ai_label_confirmed": False,
+        "ai_label_check": check,
+        "ai_label_warning": warning,
+        "ai_label_review": {"status": LABEL_PENDING},
     }
+
+
+def confirm_ai_label(
+    key: str, confirmed_by: str, label_visible: bool, now: datetime | None = None
+) -> bool:
+    """확인자가 앱에서 AI 표기를 보고 기록한다. 대기(`pending`) 건에만, 한 번만 된다.
+
+    보였으면 `ai_label_confirmed=true`·경고 해제, 안 보였으면 false 유지 + `ai_label_missing` 경고.
+    반환값은 기록 여부(이미 확인됐거나 대기 건이 아니면 False).
+    """
+    who = confirmed_by.strip()
+    if not who:
+        raise ValueError("확인자(confirmed_by)가 필요하다")
+    review = {
+        "status": LABEL_CONFIRMED if label_visible else LABEL_CONFIRMED_MISSING,
+        "confirmed_by": who,
+        "confirmed_at": (now or _now()).isoformat(),
+    }
+    patch = {
+        "ai_label_confirmed": bool(label_visible),
+        "ai_label_review": review,
+        "ai_label_warning": None if label_visible else "ai_label_missing",
+    }
+    done = store().patch_result(key, patch, where_review_status=LABEL_PENDING)
+    row = store().get(key) if done else None
+    if row:
+        _row_log(row, "sns_publish_attempt", {"op": "ai_label_review", "visible": label_visible})
+    return done
+
+
+def _confirm_after_hours() -> float:
+    try:
+        hours = float(os.getenv(LABEL_CONFIRM_HOURS_ENV, ""))
+    except ValueError:
+        return _LABEL_CONFIRM_HOURS_DEFAULT
+    return hours if hours > 0 else _LABEL_CONFIRM_HOURS_DEFAULT
+
+
+def ai_label_pending(now: datetime | None = None) -> list[dict[str, Any]]:
+    """표기 확인 대기 목록(오래된 순). 기한(기본 24시간)을 넘기거나 게시 시각을 모르면 `overdue`."""
+    current = now or _now()
+    limit = _confirm_after_hours()
+    out: list[dict[str, Any]] = []
+    for row in store().with_status(PUBLISHED):
+        info = row.result
+        if (info.get("ai_label_review") or {}).get("status") != LABEL_PENDING:
+            continue
+        waited: float | None = None
+        try:
+            published = datetime.fromisoformat(info["published_at"])
+            waited = (current - published).total_seconds() / 3600
+        except (KeyError, TypeError, ValueError):
+            pass
+        out.append(
+            {
+                "idempotency_key": row.idempotency_key,
+                "media_id": row.media_id,
+                "permalink": info.get("permalink"),
+                "published_at": info.get("published_at"),
+                "ai_label_warning": info.get("ai_label_warning"),
+                "hours_waiting": round(waited, 1) if waited is not None else None,
+                "overdue": waited is None or waited >= limit,
+            }
+        )
+    return sorted(out, key=lambda r: r["published_at"] or "")
 
 
 def _halted() -> bool:
