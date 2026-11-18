@@ -23,6 +23,14 @@ const REFRESH_MS = 30_000;
 const unitName = (unit: string) => (unit === "unassigned" ? "담당 미정" : unit);
 const serviceName = (id: string) => SERVICES.find((s) => s.id === id)?.name ?? AGENTS.find((g) => g.id === id)?.name ?? id;
 
+/** 같은 부서 안에서 AI가 사람에게 넘긴 일(from = to)인가. 다른 AI가 맡긴 일과 따로 보여 준다 */
+const isSelfAsk = (t: HandoffTask) => t.from_service === t.to_service;
+type Kind = "other" | "human";
+const KIND_TABS: { value: Kind; label: string }[] = [
+  { value: "other", label: "다른 AI가 맡긴 일" },
+  { value: "human", label: "우리 AI가 확인 요청한 일" },
+];
+
 const STATUS_FILTERS: { value: HandoffStatus | ""; label: string }[] = [
   { value: "open", label: "열린 일" },
   { value: "done", label: "끝난 일" },
@@ -78,7 +86,9 @@ function Detail({ task, onClosed }: { task: HandoffTask; onClosed: (t: HandoffTa
         </div>
         <h2 className="card-title">{skillLabel(task.skill)}</h2>
         <p className="text-sm text-ink-500">
-          {serviceName(task.from_service)}에서 {serviceName(task.to_service)}(으)로 가던 일이에요.
+          {isSelfAsk(task)
+            ? `${serviceName(task.from_service)} AI가 혼자 끝내지 못해 사람 확인을 요청했어요.`
+            : `${serviceName(task.from_service)}에서 ${serviceName(task.to_service)}(으)로 가던 일이에요.`}
         </p>
       </header>
 
@@ -172,6 +182,7 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
   const status = (params.get("status") ?? "open") as HandoffStatus | "";
   const unit = params.get("unit") ?? "";
   const selectedId = params.get("id");
+  const kind: Kind = params.get("kind") === "human" ? "human" : "other";
 
   const [tasks, setTasks] = useState<HandoffTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -211,7 +222,10 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
 
   // 넓은 화면은 상세를 오른쪽에, 좁은 화면은 누른 줄 바로 밑에 펼친다(다시 누르면 접힘)
   const wide = useMediaQuery("(min-width: 1280px)");
-  const selected = useMemo(() => tasks?.find((t) => t.task_id === selectedId) ?? (wide ? tasks?.[0] : undefined), [tasks, selectedId, wide]);
+  const humanCount = tasks?.filter(isSelfAsk).length ?? 0;
+  const otherCount = (tasks?.length ?? 0) - humanCount;
+  const shown = useMemo(() => tasks?.filter((t) => isSelfAsk(t) === (kind === "human")) ?? null, [tasks, kind]);
+  const selected = useMemo(() => shown?.find((t) => t.task_id === selectedId) ?? (wide ? shown?.[0] : undefined), [shown, selectedId, wide]);
   const pick = (id: string) => setParam("id", !wide && id === selected?.task_id ? null : id);
   const unreachable = error === UNREACHABLE;
 
@@ -220,8 +234,12 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">받은 요청</h1>
-          <p className="mt-1 text-sm text-ink-700">회사가 켜지 않은 서비스의 일을 AI가 우리 부서에 맡겼어요</p>
-          <p className="mt-0.5 text-sm text-ink-500">결과를 적고 끝내면 맡긴 AI에게 전해져요.</p>
+          <p className="mt-1 text-sm text-ink-700">
+            {kind === "human" ? "우리 부서 AI가 혼자 끝내지 못해 사람에게 확인을 요청했어요" : "회사가 켜지 않은 서비스의 일을 다른 AI가 우리 부서에 맡겼어요"}
+          </p>
+          <p className="mt-0.5 text-sm text-ink-500">
+            {kind === "human" ? "결과를 적고 끝내면 요청한 AI에게 전해져요. 놓치면 안 되는 일이에요." : "결과를 적고 끝내면 맡긴 AI에게 전해져요."}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           {toggle}
@@ -256,12 +274,24 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
         </p>
       )}
 
-      {tasks === null ? (
+      <div className="flex w-fit flex-wrap gap-1 rounded-full bg-ink-50 p-0.5" role="group" aria-label="요청 종류">
+        {KIND_TABS.map((k) => (
+          <button key={k.value} type="button" aria-pressed={kind === k.value}
+            onClick={() => setParams(() => { const next = new URLSearchParams(params); next.set("kind", k.value); next.delete("id"); return next; })}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${kind === k.value ? "bg-accent text-white" : "text-ink-700 hover:bg-ink-100"}`}>
+            {k.label}{tasks ? ` ${k.value === "human" ? humanCount : otherCount}` : ""}
+          </button>
+        ))}
+      </div>
+
+      {shown === null ? (
         !error && <p className="card px-5 py-6 text-sm text-ink-500">불러오는 중…</p>
-      ) : tasks.length === 0 ? (
+      ) : shown.length === 0 ? (
         <p className="card px-5 py-8 text-center text-sm text-ink-500">
           {status === "open" && !unit
-            ? "넘겨받은 일이 없어요. 회사가 켜지 않은 서비스로 가는 일이 여기 쌓여요."
+            ? kind === "human"
+              ? "사람 확인을 요청한 일이 없어요."
+              : "넘겨받은 일이 없어요. 회사가 켜지 않은 서비스로 가는 일이 여기 쌓여요."
             : "고른 조건에 맞는 일이 없어요."}
         </p>
       ) : (
@@ -270,7 +300,7 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-ink-100 text-xs text-ink-500">
                 <tr>
-                  <th className="px-4 py-2.5 font-medium">어디서</th>
+                  <th className="px-4 py-2.5 font-medium">{kind === "human" ? "요청한 AI" : "어디서"}</th>
                   <th className="px-4 py-2.5 font-medium">무슨 일</th>
                   <th className="px-4 py-2.5 font-medium">맡은 부서·담당자</th>
                   <th className="px-4 py-2.5 font-medium">받은 시각</th>
@@ -278,7 +308,7 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
                 </tr>
               </thead>
               <tbody>
-                {tasks.map((t) => {
+                {shown.map((t) => {
                   const on = t.task_id === selected?.task_id;
                   return (
                     <Fragment key={t.task_id}>
@@ -288,11 +318,11 @@ function RealHandoffs({ toggle }: { toggle: ReactNode }) {
                         <button type="button" className="text-left font-medium" onClick={(e) => { e.stopPropagation(); pick(t.task_id); }} aria-expanded={wide ? undefined : on}>
                           {serviceName(t.from_service)}
                         </button>
-                        <p className="text-xs text-ink-500">→ {serviceName(t.to_service)}</p>
+                        <p className="text-xs text-ink-500">→ {isSelfAsk(t) ? `${unitName(t.assignee_unit)} 담당자(사람)` : serviceName(t.to_service)}</p>
                       </td>
                       <td className="px-4 py-3">
                         {skillLabel(t.skill)}
-                        {t.from_service === "orchestrator" && <p className="line-clamp-2 text-xs text-ink-500">{humanizePlanIds(t.reason)}</p>}
+                        {(t.from_service === "orchestrator" || isSelfAsk(t)) && <p className="line-clamp-2 text-xs text-ink-500">{humanizePlanIds(t.reason)}</p>}
                       </td>
                       <td className="px-4 py-3">
                         {unitName(t.assignee_unit)}
