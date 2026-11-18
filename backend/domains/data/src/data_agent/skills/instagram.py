@@ -2,7 +2,8 @@
 
 grade read, 메모 쓰기만 A. Meta 공식 Graph API(Facebook 로그인, graph.facebook.com)만
 (`connectors/instagram_graph.py`, GET만). 숫자·판정·묶기·"왜 떴나" 근거(`instagram_why`)는 코드,
-레이더 묶음 설명 + 결론 한 줄만 LLM 1번(`describe_groups`, trend_memes `check_line` 규칙). 캡션·제목은 untrusted: 화면에는 텍스트로만, LLM에는 데이터 블록으로만.
+레이더 묶음 설명 + 결론 한 줄만 LLM 1번(`describe_groups`, trend_memes `check_line` 규칙).
+캡션·제목은 untrusted: 화면에는 텍스트로만, LLM에는 데이터 블록으로만.
 모르면 unknown + 이유이고 0으로 채우지 않는다.
 블록마다 따로 실패한다(오디오 권한 오류가 레이더를 막지 않음).
 
