@@ -441,3 +441,20 @@ def test_only_planning_can_ask_production_cost() -> None:
         "/a2a", json=_body("category_budget_advice", {"content_category": "x"}, "mock:marketing")
     )
     assert res.json().get("status") != "completed"
+
+
+def test_shift_opinion_to_orchestrator_carries_everything_planning_needs() -> None:
+    """재배분 의견은 총괄에만 보내고, 총괄이 기획에 넘길 내용을 다 싣는다 (11/18)."""
+    from ax_contracts.schemas.finance import FinanceOpinion
+    from ax_contracts.schemas.planning import ReceiveInsightInput
+
+    opinions = _sender(state())
+    _two_categories(TestClient(app))
+    [shift] = [o for o in opinions if o.get("verdict") == "budget_shift"]
+    FinanceOpinion.model_validate(shift)  # 총괄 계약 그대로
+    inp = ReceiveInsightInput.model_validate(shift["planning_insight"])  # 기획 계약 그대로
+    assert inp.skill == "finance_insights" and inp.content_category == "아재개그"
+    values = {f.label: f.value for f in inp.facts}
+    assert values["아재개그 조회당 제작비"] == "5.0원"
+    # 재배분이 아닌 의견에는 싣지 않는다
+    assert all(o.get("planning_insight") is None for o in opinions if o is not shift)

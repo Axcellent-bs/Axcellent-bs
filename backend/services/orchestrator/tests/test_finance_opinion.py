@@ -146,3 +146,126 @@ def test_screen_is_empty_without_manager(client, monkeypatch) -> None:
     http, _ = client
     monkeypatch.setattr(state, "manager", None)
     assert http.get("/api/finance-opinions").json()["data"] == []
+
+
+# ----------------------------------------- 기획이 알아야 하는 의견은 총괄이 기획에 넘긴다 (11/18)
+PLANNING_INSIGHT = {
+    "insight_id": "fin_budget_shift:아재개그:몸개그:b1",
+    "title": "아재개그 조회당 제작비가 몸개그의 1/8.0입니다",
+    "summary": "다음 회차 아재개그 제작비를 100,000원 → 130,000원으로 올리고 몸개그를 줄인다",
+    "skill": "finance_insights",
+    "facts": [
+        {"label": "아재개그 조회당 제작비", "value": "5.0원", "source": "finance_insights"},
+        {"label": "몸개그 조회당 제작비", "value": "40.0원", "source": "finance_insights"},
+    ],
+    "content_category": "아재개그",
+    "content_format": "shorts",
+}
+SHIFT = {
+    **OPINION,
+    "opinion_id": "ins_budget_shift",
+    "kind": "insight",
+    "campaign_id": None,
+    "verdict": "budget_shift",
+    "planning_insight": PLANNING_INSIGHT,
+}
+
+
+def _relay_rig(manager, replies: list[dict]) -> list:
+    """기획에 넘기는 곳을 바꿔 끼운다. replies를 차례로 돌려주고 받은 입력을 모은다."""
+    got: list = []
+
+    async def send(inp, context_id):
+        got.append((inp, context_id))
+        return replies[min(len(got), len(replies)) - 1]
+
+    manager.finance_opinions.relay_sender = send
+    manager.finance_opinions.retry_delays = (0, 0)
+    return got
+
+
+def test_shift_opinion_is_kept_and_queued_for_planning(client) -> None:
+    import asyncio
+
+    from ax_contracts.schemas.finance import FinanceOpinion
+
+    _, manager = client
+    fo = manager.finance_opinions
+    got = _relay_rig(manager, [{"ok": True, "outcome": "created", "proposal_id": "PROP-3"}])
+    fo.add(FinanceOpinion.model_validate(SHIFT), "ctx_ins")
+    [row] = fo.list()
+    assert row["relay"]["status"] == "pending"
+    asyncio.run(fo.relay("ins_budget_shift"))
+    [(inp, ctx)] = got
+    # 재무가 실은 내용을 숫자 그대로 넘긴다
+    assert inp.insight_id == PLANNING_INSIGHT["insight_id"] and ctx == "ctx_ins"
+    assert [f.value for f in inp.facts] == ["5.0원", "40.0원"]
+    assert (inp.content_category, inp.content_format) == ("아재개그", "shorts")
+    relay = fo.list()[0]["relay"]
+    assert (relay["status"], relay["proposal_id"], relay["attempts"]) == ("delivered", "PROP-3", 1)
+
+
+def test_planning_down_is_retried_then_kept_pending(client) -> None:
+    import asyncio
+
+    from ax_contracts.schemas.finance import FinanceOpinion
+
+    _, manager = client
+    fo = manager.finance_opinions
+    got = _relay_rig(manager, [{"ok": False, "problem": "호출 실패 (ConnectError)"}])
+    fo.add(FinanceOpinion.model_validate(SHIFT), "ctx_ins")
+    asyncio.run(fo.relay("ins_budget_shift"))
+    assert len(got) == 3  # 처음 + 다시 두 번
+    relay = fo.list()[0]["relay"]
+    assert (relay["status"], relay["problem"]) == ("pending", "호출 실패 (ConnectError)")
+    assert fo.pending_relays() == ["ins_budget_shift"]  # 다음 의견을 받을 때 다시 보낸다
+    _relay_rig(manager, [{"ok": True, "outcome": "duplicate", "proposal_id": "PROP-3"}])
+    asyncio.run(fo.relay("ins_budget_shift"))
+    assert fo.list()[0]["relay"]["status"] == "delivered" and fo.pending_relays() == []
+
+
+def test_opinions_without_planning_content_are_not_relayed(client) -> None:
+    http, manager = client
+    got = _relay_rig(manager, [{"ok": True, "outcome": "created", "proposal_id": "PROP-1"}])
+    _send(http, OPINION)
+    assert "relay" not in manager.finance_opinions.list()[0] and got == []
+
+
+def test_broken_planning_content_is_kept_but_not_sent(client) -> None:
+    from ax_contracts.schemas.finance import FinanceOpinion
+
+    _, manager = client
+    fo = manager.finance_opinions
+    bad = {**SHIFT, "opinion_id": "ins_bad", "planning_insight": {"insight_id": "x"}}
+    fo.add(FinanceOpinion.model_validate(bad), "ctx_ins")
+    relay = fo.list()[0]["relay"]
+    assert relay["status"] == "invalid" and "계약과 다름" in relay["problem"]
+    assert fo.pending_relays() == []
+
+
+def test_relay_result_survives_a_restart(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from ax_contracts.schemas.finance import FinanceOpinion
+    from ax_orchestrator.store import IncidentStore
+
+    monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
+    path = str(tmp_path / "orch.db")
+    first = IncidentManager(None, scenario_a, store=IncidentStore(path))  # type: ignore[arg-type]
+    _relay_rig(first, [{"ok": True, "outcome": "created", "proposal_id": "PROP-5"}])
+    first.finance_opinions.add(FinanceOpinion.model_validate(SHIFT), "ctx_ins")
+    asyncio.run(first.finance_opinions.relay("ins_budget_shift"))
+    assert first.store is not None
+    first.store.close()
+    again = IncidentManager(None, scenario_a, store=IncidentStore(path))  # type: ignore[arg-type]
+    again.restore()
+    relay = again.finance_opinions.list()[0]["relay"]
+    assert (relay["status"], relay["proposal_id"]) == ("delivered", "PROP-5")
+    set_agent_name("orchestrator")
+
+
+def test_planning_lets_orchestrator_relay_insights() -> None:
+    from ax_safety.rules import load_registry
+
+    action = next(a for a in load_registry().actions if a.action == "receive_insight")
+    assert "orchestrator" in action.requesters and action.owner == "planning"
