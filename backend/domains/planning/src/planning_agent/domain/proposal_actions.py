@@ -280,6 +280,8 @@ class ProposalMixin:
         got, sources = await asyncio.gather(
             self._insights.pull(PULL_CTX), self._option_sources(PULL_CTX)
         )
+        # 선택지(#1282) 전에 만들어진 제안도 고를 수 있게 채운다. 받아오기가 실패해도 한다
+        filled = await self._fill_options(sources)
         if isinstance(got, str):
             # 실패도 기록에 남긴다: 화면이 알림 뒤에도 "마지막 받아오기 실패 · 이유"를 보여 준다
             await self._apply(self._pull_note(PULL_FAILED, f"데이터분석 받아오기 실패\n{got}"))
@@ -307,7 +309,7 @@ class ProposalMixin:
                 created.append(res.output["proposal_id"])
             elif res.outcome == "deleted_recently":
                 deleted.append(res.output["proposal_id"])
-        out = {"created": created, "received": len(got), "similar": similar}
+        out = {"created": created, "received": len(got), "similar": similar, "filled": filled}
         text = f"데이터분석 받아오기: 받은 {len(got)}개 · 새 제안 {len(created)}개"
         if similar:
             near_ids = ", ".join(dict.fromkeys(x["proposal_id"] for x in similar))
@@ -319,6 +321,32 @@ class ProposalMixin:
             text += f"\n이미 받은 것 {len(got) - len(created) - len(similar) - len(deleted)}개"
         await self._apply(self._pull_note(PULL_DONE, text))
         return ActionResult(outcome="pulled", output=out)
+
+    async def _fill_options(
+        self: Any, sources: tuple[list[TrendInsight] | None, ChannelFollowersOutput | None]
+    ) -> list[str]:
+        """확인 대기인데 방향 선택지가 없는 제안(선택지 기능 전에 받은 것)에 선택지·규모를 채운다.
+        받을 때와 같은 규칙(`idea_options`)이고 LLM을 부르지 않는다. 채운 제안 번호를 돌려준다."""
+        trends, followers = sources
+        filled: list[str] = []
+
+        async def run(s: State) -> None:
+            for p in s.proposals:
+                if p.status != "확인 대기" or p.options:
+                    continue
+                scale = idea_options.scale_facts(p.past, followers)
+                p.options = idea_options.build_options(p, trends, scale)
+                p.scale = scale
+                filled.append(p.id)
+            if filled:
+                text = f"방향 선택지 채움 {', '.join(filled)} (선택지 기능 전에 받은 제안)"
+                s.activity.append(
+                    self._act(self.clock(), PULL_CTX, "planning", "planning", "fill_options",
+                              "A2A", text)
+                )  # fmt: skip
+
+        await self._apply(run)
+        return filled
 
     def _pull_note(self: Any, point: str, text: str) -> Callable[[State], Awaitable[None]]:
         async def note(s: State) -> None:
