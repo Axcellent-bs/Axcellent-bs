@@ -240,3 +240,40 @@ def test_confirm_without_angle_still_allowed() -> None:
     pid = _new(svc)
     asyncio.run(svc.dispatch({"type": "makePlan", "proposal": pid}))
     assert _p(svc, pid).status == "기획안" and _p(svc, pid).angle is None
+
+
+# ---------------------------------------------------------------- 마케팅 브리프
+
+
+def _approve(svc: PlanningService, pid: str) -> None:
+    async def go():
+        await svc.dispatch({"type": "makePlan", "proposal": pid})
+        await svc.dispatch({"type": "approveProposal", "proposal": pid})
+        while svc._sending:
+            await asyncio.gather(*list(svc._sending), return_exceptions=True)
+
+    asyncio.run(go())
+
+
+def test_brief_carries_angle_and_trend_refs() -> None:
+    m = Marketing()
+    svc = _svc(insights=Insights(), marketing=m)
+    pid = _new(svc)
+    _choose(svc, pid, "ride_trend")
+    _approve(svc, pid)
+    assert m.sent[-1].idea_angle == "ride_trend"
+    assert m.sent[-1].trend_refs == ["책장 넘기기 챌린지"]
+
+
+def test_brief_without_angle_is_unchanged() -> None:
+    m = Marketing()
+    svc = _svc(insights=Insights(), marketing=m)
+    pid = _new(svc)
+    _approve(svc, pid)
+    assert m.sent[-1].idea_angle is None and m.sent[-1].trend_refs == []
+    m2 = Marketing()
+    svc2 = _svc(insights=Insights(), marketing=m2)
+    pid2 = _new(svc2)
+    _choose(svc2, pid2, "own_trend")
+    _approve(svc2, pid2)
+    assert m2.sent[-1].idea_angle == "own_trend" and m2.sent[-1].trend_refs == []

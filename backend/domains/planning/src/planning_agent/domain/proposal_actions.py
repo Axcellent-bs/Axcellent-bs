@@ -535,6 +535,7 @@ class ProposalMixin:
             facts=_facts_in(p), target=_target_in(p), products=p.products, format=p.format,
             product_ids=p.product_ids,
             content_category=p.content_category, content_format=p.content_format,
+            idea_angle=p.angle, trend_refs=_trend_refs(p),
             approved_by="사람", note=p.note, body_md=body_md,
             continue_campaign=_prev_campaign(self.state, p),
         )  # fmt: skip
@@ -882,6 +883,14 @@ class ProposalMixin:
                 raise ActionError("INVALID_ACTION", "proposal·angle이 없다")
             return await self.choose_angle(pid, angle)
         return None
+
+
+def _trend_refs(p: Proposal) -> list[str]:
+    """유행에 올라타기를 골랐으면 올라탈 후보 이름 (마케팅 브리프, 11/18)."""
+    if p.angle != "ride_trend":
+        return []
+    opt = next((o for o in p.options if o.id == "ride_trend"), None)
+    return [r.topic for r in opt.refs][:3] if opt else []
 
 
 def _prev_campaign(s: State, p: Proposal) -> str | None:
