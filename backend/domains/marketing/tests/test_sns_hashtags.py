@@ -89,13 +89,14 @@ def test_keyword_category_format_mapping_and_sources() -> None:
     tags, meta = _select(
         title="신간 그림책 소개", content_category="정보·팁", content_format="shorts"
     )
-    assert tags == ("#캣북스", "#그림책", "#책", "#신간", "#꿀팁")
+    assert tags == ("#캣북스", "#그림책", "#책", "#신간", "#꿀팁", "#쇼츠")
     assert [(t["tag"], t["from"]) for t in meta["topic"]] == [
         ("#그림책", "title"),
         ("#책", "title"),
         ("#신간", "title"),
         ("#꿀팁", "content_category"),
-    ]  # 상한 4개라 #쇼츠는 잘린다
+        ("#쇼츠", "content_format"),
+    ]
 
 
 def test_format_tag_added_when_room() -> None:
@@ -105,7 +106,7 @@ def test_format_tag_added_when_room() -> None:
 
 
 def test_keyword_found_in_products_and_trend_refs() -> None:
-    _, meta = _select(products=["고양이 도서 세트"], trend_refs=["독서 챌린지"])
+    _, meta = _select(products=["고양이 서점 세트"], trend_refs=["독서 챌린지"])
     assert {(t["tag"], t["from"]) for t in meta["topic"]} == {
         ("#도서", "products"),
         ("#책", "products"),
@@ -125,7 +126,7 @@ def test_duplicates_are_removed() -> None:
 
 
 def test_topic_limit_and_global_cap() -> None:
-    tags, _ = _select(title="그림책 도서 독서 신간 고양이")
+    tags, _ = _select(title="그림책 서점 독서 신간 고양이")
     assert len(tags) == 1 + _tbl().max_topic
     tags, _ = sns_hashtags.select_hashtags(_brief(title="그림책"), _tbl(), 2)
     assert len(tags) <= 2
@@ -184,3 +185,28 @@ def test_missing_config_file_falls_back(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setenv(sns_hashtags.CONFIG_ENV, str(tmp_path / "none.toml"))
     sns_hashtags.reset_cache()
     assert _draft(title="그림책")["output"]["hashtags"] == ["#캣북스"]
+
+
+def test_domestic_shipping_phrase_does_not_add_book_tags() -> None:
+    tags, _ = _select(title="도서산간 배송비 안내")
+    assert tags == ("#캣북스",)
+
+
+@pytest.mark.parametrize(
+    "toml_text",
+    [
+        'brand = ["#캣북스"]\n[keyword]\nwords = ["x"]\n',
+        'brand = ["#캣북스"]\nkeyword = "x"\n',
+        'brand = ["#캣북스"]\ncategory = ["x"]\n',
+    ],
+)
+def test_malformed_structure_falls_back_to_brand_only(
+    toml_text: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "bad.toml"
+    path.write_text(toml_text, encoding="utf-8")
+    monkeypatch.setenv(sns_hashtags.CONFIG_ENV, str(path))
+    sns_hashtags.reset_cache()
+    out = _draft(title="그림책")["output"]
+    assert out["hashtags"] == ["#캣북스"]
+    assert out["caption_source"]["hashtags"]["table"] == "unavailable"

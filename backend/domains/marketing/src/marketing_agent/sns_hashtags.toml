@@ -10,7 +10,7 @@
 # 늘 붙는 브랜드 태그
 brand = ["#캣북스"]
 # 주제 태그 상한(브랜드 태그 제외). 총 개수는 별도로 sns.HASHTAG_MAX(30)를 넘지 못한다
-max_topic_tags = 4
+max_topic_tags = 5
 
 # 1) 키워드: 기획안 title·idea·products·trend_refs에 아래 단어가 글자 그대로 들어 있으면 그 태그.
 #    (why·facts는 읽지 않는다.) 위에서 아래 순서로 고른다
@@ -19,7 +19,7 @@ words = ["그림책"]
 tags = ["#그림책", "#책"]
 
 [[keyword]]
-words = ["도서", "서점"]
+words = ["도서 추천", "도서추천", "도서 소개", "서점"]  # "도서"만 쓰면 "도서산간"에 걸려 뺀다
 tags = ["#도서", "#책"]
 
 [[keyword]]

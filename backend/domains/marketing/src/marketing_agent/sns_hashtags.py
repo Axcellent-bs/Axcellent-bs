@@ -92,7 +92,8 @@ def load_table(path: Path, check: TagCheck, max_total: int) -> HashtagTable:
 def _cached(path: str, check: TagCheck, max_total: int) -> HashtagTable | None:
     try:
         return load_table(Path(path), check, max_total)
-    except HashtagConfigError as error:
+    except (HashtagConfigError, TypeError, AttributeError) as error:
+        # 구조가 어긋난 설정(예: [[keyword]]가 아닌 단일 표)도 게시를 막지 않고 브랜드 태그만 쓴다
         _log.warning("sns hashtag config rejected: %s", error)
         return None
 

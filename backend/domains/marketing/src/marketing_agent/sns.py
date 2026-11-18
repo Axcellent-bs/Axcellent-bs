@@ -597,7 +597,7 @@ def preflight_draft(
     parts = source_parts(request, data, notices, briefs)
     if isinstance(parts, AgentResult):
         return parts
-    if len(_compose(parts.body, data.media_kind)) > CAPTION_MAX:
+    if len(_compose(parts.body, data.media_kind, parts.hashtags)) > CAPTION_MAX:
         return _result(request, TaskStatus.FAILED, outcome="caption_too_long")
     return None
 
