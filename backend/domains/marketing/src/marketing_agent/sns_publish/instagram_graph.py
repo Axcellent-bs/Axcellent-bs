@@ -1,5 +1,11 @@
-"""Instagram Login 경로의 실제 어댑터 (`graph.instagram.com`, Content Publishing).
+"""Instagram 실제 어댑터 (Content Publishing, 코드 기본 호스트 `graph.instagram.com`).
 
+- 호스트 주의(2026-11-18, 서버 읽기 전용 확인): 기본값은 Instagram Login 호스트지만
+  `MARKETING_IG_API_BASE_URL`로 바꿀 수 있고 251 서버는 `https://graph.facebook.com` + `v27.0`
+  (Facebook Login 쪽)으로 설정돼 있다.
+  호스트에 따라 필요한 토큰·권한이 다르다(Instagram Login `instagram_business_*` / Facebook Login
+  `instagram_basic`·`instagram_content_publish`·`pages_read_engagement`). 토큰 종류·계정 종류는
+  서버에서 확인하지 못했다 [확인 필요]. 비교표와 근거 URL은 sns-design.md 6절.
 - 흐름: 컨테이너 생성 → 상태 조회 → `media_publish`(1회) → 미디어 조회. 인터페이스는 목과 같다.
 - 토큰·계정 ID는 환경변수에서만 읽는다(이름은 `instagram.SECRET_ENV_NAMES`).
   값은 로그·예외·결과에 내지 않는다. HTTP 예외는 URL(쿼리에 토큰이 붙는다)을 담고 있어서
