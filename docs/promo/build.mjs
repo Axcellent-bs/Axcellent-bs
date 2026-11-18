@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import C from "./content.mjs";
+import { casesPost as casesPostProposal } from "./instagram/proposal/casesPost.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -149,7 +150,7 @@ function metricsHtml(p) {
   }
   return `<dl class="metrics">${list.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl><p class="measured">잰 날짜 ${esc(p.measuredAt)} · ${esc(p.source)}</p>`;
 }
-const casesPost = (p) => `<li class="post"><img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy"><div class="post-b">${p.aiGenerated ? `<span class="post-ai">AI가 만든 게시물</span>` : ""}${has(p.date) ? `<span class="post-d">${esc(p.date)}</span>` : ""}${has(p.caption) ? `<p>${esc(p.caption)}</p>` : ""}${metricsHtml(p)}${has(p.permalink) ? `<a class="post-ig" href="${esc(p.permalink)}" rel="noopener" target="_blank">인스타에서 보기</a>` : ""}</div></li>`;
+const casesPost = (p) => casesPostProposal(p, { esc, has, metricsHtml });
 // 사례 칸 규칙: 채워진 사례가 하나라도 있으면 모든 고객사 카드를 보이고(빈 쪽은 "사례 준비 중"), 하나도 없으면
 // showEmpty가 true일 때만 빈 카드를 보인다. 카드가 없어도 순환 그림은 남는다(구역이 하는 말이라서)
 const casesItems = C.cases.items;
