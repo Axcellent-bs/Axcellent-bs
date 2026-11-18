@@ -5,7 +5,7 @@
 // - 연결: 고객사 시스템 관리자가 키를 넣고(서버가 확인), 회사 정보를 입력해 연결한다(/system/connect). 끊는 것도 고객사가 한다.
 // 상단바의 "AXcellent with <회사>"와 로그인 화면이 연결된 회사를 따른다. 끊으면 null(회사 이름 없음).
 import { useSyncExternalStore } from 'react'
-import { call } from '@/lib/companyConnection'
+import { call, companyConnection } from '@/lib/companyConnection'
 
 export type ConnectedCompany = {
   id: string
@@ -56,13 +56,28 @@ function apply(s: ServerState) {
   notify()
 }
 
-/** 서버에서 키 목록·연결 회사를 다시 읽는다 */
-export function refreshCompany(): Promise<void> {
-  return call<ServerState>('GET', PATH).then(apply).catch(() => { /* 서버를 못 읽으면 지난 값 그대로 */ })
+// 키로 연결한 회사가 없어도 서버에 사이트 연결(판매 서버 + 회사 설정)이 있으면 그 회사로 본다(#1357)
+let siteCompany: ConnectedCompany | null = null
+function loadSiteCompany(): Promise<void> {
+  return companyConnection.get()
+    .then((s) => {
+      const on = s.source === 'connection' && s.connection?.enabled !== false && s.tenant
+      siteCompany = on && s.tenant ? { id: s.tenant.id, name: s.tenant.name, industry: '', network: '', connectedAt: s.connection?.updated_at ?? undefined } : null
+      notify()
+    })
+    .catch(() => { /* 서버를 못 읽으면 지난 값 그대로 */ })
 }
+
+/** 서버에서 키 목록·연결 회사·사이트 연결을 다시 읽는다 */
+export function refreshCompany(): Promise<void> {
+  const keysNow = call<ServerState>('GET', PATH).then(apply).catch(() => { /* 지난 값 그대로 */ })
+  return Promise.all([keysNow, loadSiteCompany()]).then(() => undefined)
+}
+/** 회사 연결 저장·해제 뒤 (SiteConnect) */
+export const refreshServerCompany = refreshCompany
 try { void refreshCompany() } catch { /* fetch가 없는 환경 */ }
 
-export const getCompany = () => company
+export const getCompany = () => company ?? siteCompany
 export const useCompany = () => useSyncExternalStore(subscribe, getCompany)
 export const useKeys = () => useSyncExternalStore(subscribe, () => keys)
 
