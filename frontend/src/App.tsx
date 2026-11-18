@@ -1,47 +1,50 @@
-import type { ReactNode } from 'react'
+import { Suspense, lazy, type ReactNode } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router'
 
 import { AdminShell } from '@/components/admin/AdminShell'
-import AgentChat from '@/pages/AgentChat'
-import AgentOffice from '@/pages/AgentOffice'
-import Claims from '@/pages/Claims'
-import Console from '@/pages/Console'
-import Dashboard from '@/pages/Dashboard'
-import Data from '@/pages/Data'
-import Finance from '@/pages/Finance'
-import FinanceGuide from '@/pages/FinanceGuide'
-import Handoffs from '@/pages/Handoffs'
-import ArchiveIncidents from '@/pages/ArchiveIncidents'
-import Hr from '@/pages/Hr'
-import AgentEvaluation from '@/pages/AgentEvaluation'
-import OrgChanges from '@/pages/OrgChanges'
-import Incidents from '@/pages/Incidents'
-import IncidentDetail from '@/pages/IncidentDetail'
-import Orchestrator from '@/pages/Orchestrator'
-import Safety from '@/pages/Safety'
-import Kb from '@/pages/Kb'
-import Marketing from '@/pages/Marketing'
-import PlanningPage from '@/pages/Planning'
-import DevPage from '@/pages/Dev'
-import Queue from '@/pages/Queue'
-import Reviews from '@/pages/Reviews'
-import Voice from '@/pages/Voice'
-import Support from '@/pages/Support'
-import SellerSettlements from '@/pages/SellerSettlements'
-import Orders from '@/pages/Orders'
-import InfraHosts from '@/demo/InfraHosts'
-import ToolConnections from '@/demo/ToolConnections'
 import LoginPage from '@/demo/LoginPage'
 import SignupPage from '@/demo/SignupPage'
 import PlanPurchase from '@/demo/PlanPurchase'
 import { ADMIN_HOME, canOpen, homeOf, useSession } from '@/demo/session'
 import { useCompany } from '@/demo/company'
-import CompanyConnect from '@/demo/CompanyConnect'
-import MembersPage from '@/demo/MembersPage'
 import Setup from '@/demo/Setup'
 import CatalogHome from '@/demo/CatalogHome'
-import ControlCenter from '@/control/ControlCenter'
 import OperatorLogin from '@/control/OperatorLogin'
+
+// 로그인한 뒤 들어가는 업무 페이지는 따로 받는다(페이지별 코드 나누기). 처음 화면을 열 때 모든 페이지 코드를
+// 한꺼번에 받지 않고, 그 페이지를 처음 열 때 그 페이지 코드만 받는다. 로그인 전 화면은 바로 보이게 그대로 둔다
+const AgentChat = lazy(() => import('@/pages/AgentChat'))
+const AgentOffice = lazy(() => import('@/pages/AgentOffice'))
+const Claims = lazy(() => import('@/pages/Claims'))
+const Console = lazy(() => import('@/pages/Console'))
+const Dashboard = lazy(() => import('@/pages/Dashboard'))
+const Data = lazy(() => import('@/pages/Data'))
+const Finance = lazy(() => import('@/pages/Finance'))
+const FinanceGuide = lazy(() => import('@/pages/FinanceGuide'))
+const Handoffs = lazy(() => import('@/pages/Handoffs'))
+const ArchiveIncidents = lazy(() => import('@/pages/ArchiveIncidents'))
+const Hr = lazy(() => import('@/pages/Hr'))
+const AgentEvaluation = lazy(() => import('@/pages/AgentEvaluation'))
+const OrgChanges = lazy(() => import('@/pages/OrgChanges'))
+const Incidents = lazy(() => import('@/pages/Incidents'))
+const IncidentDetail = lazy(() => import('@/pages/IncidentDetail'))
+const Orchestrator = lazy(() => import('@/pages/Orchestrator'))
+const Safety = lazy(() => import('@/pages/Safety'))
+const Kb = lazy(() => import('@/pages/Kb'))
+const Marketing = lazy(() => import('@/pages/Marketing'))
+const PlanningPage = lazy(() => import('@/pages/Planning'))
+const DevPage = lazy(() => import('@/pages/Dev'))
+const Queue = lazy(() => import('@/pages/Queue'))
+const Reviews = lazy(() => import('@/pages/Reviews'))
+const Voice = lazy(() => import('@/pages/Voice'))
+const Support = lazy(() => import('@/pages/Support'))
+const SellerSettlements = lazy(() => import('@/pages/SellerSettlements'))
+const Orders = lazy(() => import('@/pages/Orders'))
+const InfraHosts = lazy(() => import('@/demo/InfraHosts'))
+const ToolConnections = lazy(() => import('@/demo/ToolConnections'))
+const CompanyConnect = lazy(() => import('@/demo/CompanyConnect'))
+const MembersPage = lazy(() => import('@/demo/MembersPage'))
+const ControlCenter = lazy(() => import('@/control/ControlCenter'))
 
 export function App() {
   return (
@@ -73,6 +76,7 @@ function Guarded({ children }: { children: ReactNode }) {
 function Pages() {
   return (
       <AdminShell>
+        <Suspense fallback={<PageLoading />}>
         <Routes>
           <Route path="/inquiry" element={<Dashboard />} />
           <Route path="/console" element={<Console />} />
@@ -123,7 +127,23 @@ function Pages() {
           <Route path="/admin/*" element={<LegacyAdminRedirect />} />
           <Route path="*" element={<ToHome />} />
         </Routes>
+        </Suspense>
       </AdminShell>
+  )
+}
+
+/** 페이지 코드를 받는 동안: 사이드 메뉴는 그대로 두고 본문 자리에 뼈대만 보여 준다 */
+function PageLoading() {
+  const bar = 'animate-pulse rounded bg-ink-100 motion-reduce:animate-none'
+  return (
+    <div role="status" aria-live="polite" className="space-y-4 px-8 py-6">
+      <span className="sr-only">화면을 불러오는 중…</span>
+      <div aria-hidden="true" className={`h-7 w-48 ${bar}`} />
+      <div aria-hidden="true" className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {[0, 1, 2].map((i) => <div key={i} className={`h-20 rounded-2xl ${bar}`} />)}
+      </div>
+      <div aria-hidden="true" className={`h-40 rounded-2xl ${bar}`} />
+    </div>
   )
 }
 

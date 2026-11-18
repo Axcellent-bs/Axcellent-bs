@@ -52,6 +52,9 @@ from finance_agent.rules import load_rules
 DATA_CALL_SECONDS = 10.0
 SHOP_CALL_SECONDS = 5.0
 ORCHESTRATOR_CALL_SECONDS = 5.0
+# 총괄 사건 목록을 기억하는 시간(초). 장애 이슈 목록은 사건마다 구간을 찾는데, 사건마다 목록을 새로
+# 받으면 17건이면 17번 받는다(N+1). 짧게 기억하고, 받는 중이면 같이 기다린다
+INCIDENT_LIST_SECONDS = 10.0
 # 총괄 사건 행에서 재무가 읽는 필드 ([협업] #417에서 합의한 다섯 개). 나머지 키는 보지 않는다
 INCIDENT_FIELDS = (
     "context_id",
@@ -399,6 +402,9 @@ class LiveSources:
         # (사건, 구간) → 지금 데이터분석에 묻는 중인 요청의 결과
         self._impact_inflight: dict[tuple[str, str], asyncio.Future[Impact | None]] = {}
         self._headcount_cache: dict[str, tuple[float, TeamHeadcountOutput | None]] = {}
+        # 총괄 사건 목록: (받은 시각, 본문)과 지금 받는 중인 요청
+        self._incident_list: tuple[float, Any] | None = None
+        self._incident_list_inflight: asyncio.Future[Any] | None = None
 
     async def book_issue_report(
         self, meta: RequestMeta, product_ids: list[str]
@@ -481,6 +487,33 @@ class LiveSources:
         except ValueError:
             return None
 
+    async def _incident_list_body(self) -> Any | None:
+        """총괄 사건 목록 본문. `INCIDENT_LIST_SECONDS` 동안 기억하고, 받는 중이면 같이 기다린다.
+
+        못 받은 결과(None)는 기억하지 않는다(다음 요청이 다시 묻는다).
+        """
+        cached = self._incident_list
+        if cached and time.monotonic() - cached[0] < INCIDENT_LIST_SECONDS:
+            return cached[1]
+        if self._incident_list_inflight is not None:
+            return await asyncio.shield(self._incident_list_inflight)
+        fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        self._incident_list_inflight = fut
+        try:
+            body = await self._read_json(
+                f"{agent_url('orchestrator')}/api/incidents", ORCHESTRATOR_CALL_SECONDS
+            )
+            if body is not None:
+                self._incident_list = (time.monotonic(), body)
+            fut.set_result(body)
+            return body
+        except BaseException as exc:
+            fut.set_exception(exc)
+            fut.exception()  # 같이 기다린 쪽이 없어도 "가져가지 않은 예외" 경고가 나지 않게
+            raise
+        finally:
+            self._incident_list_inflight = None
+
     async def incident_window(self, context_id: str) -> dict[str, Any] | None:
         """총괄 사건 목록에서 이 사건의 구간·부품을 읽는다 (읽기 전용, 상태를 바꾸지 않음).
 
@@ -489,9 +522,7 @@ class LiveSources:
         못 받거나 형식이 다르거나 그 사건이 없으면 None(확인할 수 없음)이고 추정하지 않는다.
         아직 열린 사건은 `window_to`가 None이라 구간이 되지 않는다(그때는 data에 묻지 않는다).
         """
-        body = await self._read_json(
-            f"{agent_url('orchestrator')}/api/incidents", ORCHESTRATOR_CALL_SECONDS
-        )
+        body = await self._incident_list_body()
         rows = body.get("data") if isinstance(body, dict) else None
         if not isinstance(rows, list):
             return None

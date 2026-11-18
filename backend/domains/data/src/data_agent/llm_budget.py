@@ -77,6 +77,7 @@ TASKS = {
     "source_plan": "계획",
     "domain_profile": "프로필",
     "promo_concepts": "예시 아이디어",
+    "trend_memes": "문장(유행 설명)",
 }
 EMBED_TASK = "임베딩"
 
