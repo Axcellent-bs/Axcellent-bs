@@ -26,13 +26,21 @@ const W = {
   orchestrator: { label: "총괄 AI · 재무가 낸 의견", href: "/orchestrator#orch-finance" },
   safety: { label: "안전 처리 로그 · 사람 결정 대기", href: "/safety" },
 } satisfies Record<string, Wire>;
-function Wiring({ from, to }: { from: Wire[]; to?: Wire[] }) {
+// ask: 상대가 재무에 묻고 재무 답이 같은 곳으로 돌아가는 칸. "받는 곳 → 보내는 곳"에 같은 이름이 두 번 나오지 않게 한 줄로 쓴다
+function Wiring({ from, to, ask }: { from?: Wire[]; to?: Wire[]; ask?: { who: Wire; back: string } }) {
   const links = (xs: Wire[]) => xs.map((x, i) => (
     <span key={x.href}>{i > 0 && " · "}<Link href={x.href} className="font-medium text-brand-700 underline">{x.label}</Link></span>
   ));
+  if (ask) {
+    return (
+      <span className="mt-1 block text-xs text-ink-500">
+        묻는 곳: {links([ask.who])} <span aria-hidden>⇄</span> 재무 답: {ask.back}
+      </span>
+    );
+  }
   return (
     <span className="mt-1 block text-xs text-ink-500">
-      받는 곳: {links(from)}{to && to.length > 0 && <> <span aria-hidden>→</span> 보내는 곳: {links(to)}</>}
+      받는 곳: {links(from ?? [])}{to && to.length > 0 && <> <span aria-hidden>→</span> 보내는 곳: {links(to)}</>}
     </span>
   );
 }
@@ -139,7 +147,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
         </ResourceBody>
       </Panel>
 
-      <Panel id="campaign-planning" title="기획 AI가 물어본 제작비" hint={<>기획 AI가 영상 기획안을 마케팅에 넘기기 직전에 그 카테고리의 최신 제작비를 재무에 직접 묻습니다. 재배분 알림은 총괄 AI를 거쳐 가고, 넘기기 직전 숫자 확인은 여기서 직접 합니다. 재무는 위 "콘텐츠 카테고리별 제작비" 숫자로 답하고, 기획은 그 숫자를 기획안 근거에 붙여 마케팅에 넘깁니다. 조회당 제작비가 가장 싼 카테고리가 가장 비싼 카테고리보다 2배 이상 싸면, 다음 회차에 싼 쪽 제작비를 30% 올리고 그만큼 비싼 쪽에서 빼자고 답합니다(전체 제작비는 그대로). 정하는 건 기획·마케팅과 사람입니다.<Wiring from={[W.planning]} to={[W.planning]} /></>}>
+      <Panel id="campaign-planning" title="기획 AI가 물어본 제작비" hint={<>기획 AI가 영상 기획안을 마케팅에 넘기기 직전에 그 카테고리의 최신 제작비를 재무에 직접 묻습니다. 재배분 알림은 총괄 AI를 거쳐 가고, 넘기기 직전 숫자 확인은 여기서 직접 합니다. 재무는 위 "콘텐츠 카테고리별 제작비" 숫자로 답하고, 기획은 그 숫자를 기획안 근거에 붙여 마케팅에 넘깁니다. 조회당 제작비가 가장 싼 카테고리가 가장 비싼 카테고리보다 2배 이상 싸면, 다음 회차에 싼 쪽 제작비를 30% 올리고 그만큼 비싼 쪽에서 빼자고 답합니다(전체 제작비는 그대로). 정하는 건 기획·마케팅과 사람입니다.<Wiring ask={{ who: W.planning, back: "같은 기획 제안의 근거에 붙어 마케팅으로 넘어갑니다" }} /></>}>
         <ResourceBody res={view}>
           {(v) => {
             const asks = v.budget_asks ?? [];
