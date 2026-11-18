@@ -7295,7 +7295,7 @@
     },
     "/api/dashboard/office-room/{room_id}/remove": {
       "post": {
-        "description": "단톡방에서 내가 만든(처음 보낸) 대화를 목록에서 지운다. POST 전용.\n\n지우기는 숨김 처리다: 줄을 지우지 않고 removed_at·removed_by를 남긴다\n(기록은 보관, 되돌릴 수 있음).\n1. 그 방에 보이는 줄이 없으면 404, 내가 만든 줄이 없으면 403 \"만든 사람만 삭제할 수 있어요\"\n2. 내가 만든 줄을 office_room.db에서 숨긴다 (다른 사람이 만든 줄은 그대로)\n3. 각 줄의 부서 대화 서버에서 그 대화를 숨긴다(`<부서>_chat_remove`, 인사·처리 로그는 HTTP).\n   한 부서가 실패해도 나머지는 계속하고 부서별 결과를 돌려준다.\n   이미 없는 대화(404)는 지운 것으로 본다\n다른 화면은 목록(GET)을 다시 읽을 때 사라진 것을 본다.",
+        "description": "단톡방에서 내가 만든(처음 보낸) 대화를 목록에서 지운다. POST 전용.\n\n지우기는 숨김 처리다: 줄을 지우지 않고 removed_at·removed_by를 남긴다\n(기록은 보관, 되돌릴 수 있음).\n1. 그 방에 보이는 줄이 없으면 404, 내가 만든 줄이 없으면 403 \"만든 사람만 삭제할 수 있어요\"\n2. 내가 만든 줄을 office_room.db에서 숨긴다 (다른 사람이 만든 줄은 그대로)\n3. 각 줄의 부서 대화 서버에서 그 대화를 숨긴다(`<부서>_chat_remove`, 인사·safety는 HTTP).\n   한 부서가 실패해도 나머지는 계속하고 부서별 결과를 돌려준다.\n   이미 없는 대화(404)는 지운 것으로 본다\n다른 화면은 목록(GET)을 다시 읽을 때 사라진 것을 본다.",
         "operationId": "remove_office_room_api_dashboard_office_room__room_id__remove_post",
         "parameters": [
           {

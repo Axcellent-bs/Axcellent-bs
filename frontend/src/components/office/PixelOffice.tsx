@@ -45,7 +45,7 @@ const SEATS: Record<DeskKey, { fx: number; fy: number; char: number; back?: bool
   support: { ...at(363, 738), char: 2, back: true, bubble: "down" },
   hr: { ...at(562, 738), char: 0, back: true, bubble: "down" },
   marketing: { ...at(775, 738), char: 4, back: true, bubble: "down" },
-  // 왼쪽 옆을 보는 책상 의자 (옆모습): 처리 로그
+  // 왼쪽 옆을 보는 책상 의자 (옆모습): 안전 처리 로그
   safety: { ...at(230, 702), char: 1, side: true, bubble: "up" },
   // 라운지 빨간 빈백 (앞모습, 왕관)
   orchestrator: { ...at(1105, 618), char: 3, bubble: "up" },

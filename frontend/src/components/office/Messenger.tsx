@@ -178,9 +178,9 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label }: {
       prev = null;
       rows.push(
         <li key={it.id} className={`flex max-w-[85%] items-start gap-2 ${pop}`}>
-          <Avatar name="에이전트 처리 로그" k="safety" />
+          <Avatar name="안전 처리 로그" k="safety" />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="text-xs text-ink-700">에이전트 처리 로그</span>
+            <span className="text-xs text-ink-700">안전 처리 로그</span>
             <div className="flex flex-wrap items-end gap-x-1.5 gap-y-0.5">
               <HoldCard h={it} hold={hold} />
               <time dateTime={it.at} className="shrink-0 pb-0.5 text-[10px] tabular-nums text-ink-500">{hhmm(it.at)}</time>

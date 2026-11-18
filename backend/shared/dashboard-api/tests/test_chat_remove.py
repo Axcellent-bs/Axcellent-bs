@@ -258,7 +258,7 @@ def test_old_db_without_removed_columns_opens_and_hides(
 def test_safety_chat_is_removed_over_http_with_the_human_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """처리 로그 대화는 A2A가 아니라 safety 서버 HTTP `/api/safety/chat/{id}/remove`로 지운다."""
+    """안전 처리 로그 대화는 A2A가 아니라 safety HTTP `/api/safety/chat/{id}/remove`로 지운다."""
     import asyncio
     from types import SimpleNamespace
 
