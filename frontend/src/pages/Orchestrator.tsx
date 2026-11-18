@@ -1,5 +1,5 @@
 import { Navigate } from "react-router";
-import { Loading } from "@/components/admin/bits";
+import { PageSkeleton } from "@/components/admin/bits";
 import { AgentDiagnosisCard } from "@/components/admin/AgentDiagnosisCard";
 import { FinanceOpinionsCard } from "@/components/admin/FinanceOpinionsCard";
 import { SupportOverviewCard } from "@/components/admin/SupportOverviewCard";
@@ -20,7 +20,7 @@ export default function OrchestratorPage() {
 
   // 예전 주소(/orchestrator?ctx=…)로 들어오면 장애 기록의 그 이슈로 보낸다
   if (ctx) return <Navigate to={`/archive/incidents?ctx=${encodeURIComponent(ctx)}`} replace />;
-  if (!incidents) return <Loading error={error} what="총괄 AI 이슈를 불러오는 중…" />;
+  if (!incidents) return <PageSkeleton error={error} what="총괄 AI 이슈를 불러오는 중…" />;
 
   const holds = incidents.reduce((n, i) => n + i.pending_holds.length, 0);
   const faults = incidents.filter((i) => !isInquiry(i.kind));
