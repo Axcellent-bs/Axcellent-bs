@@ -118,8 +118,12 @@ def test_source_meta_records_names_lengths_hashes_not_values() -> None:
     assert [f["name"] for f in meta["fields"]] == ["title", "idea", "why", "facts"]
     first = meta["fields"][0]
     assert first["chars"] == len("봄 그림책 소개") and len(first["sha12"]) == 12
-    dumped = str(meta)
-    assert "그림책" not in dumped and "1.6배" not in dumped  # 값 전문 없음
+    # 해시태그 근거(whitelist 태그 이름)는 값이 아니라 따로 둔다: 태그 `#그림책` 자체는 들어간다
+    dumped = str({k: v for k, v in meta.items() if k != "hashtags"})
+    assert "그림책" not in dumped
+    assert "그림책" not in str(meta["hashtags"]["topic"][0]["from"])
+    assert all(set(t) == {"tag", "from"} for t in meta["hashtags"]["topic"])
+    assert "1.6배" not in dumped  # 값 전문 없음
     # 저장소에서 다시 읽어도 같다
     assert handlers.STATE.sns.get(out["post_draft_id"]).caption_source == meta
 
