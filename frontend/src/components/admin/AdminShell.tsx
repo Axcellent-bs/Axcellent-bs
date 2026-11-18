@@ -50,11 +50,12 @@ function NavIcon({ item, size }: { item: NavItem; size: number }) {
 
 // 할 일함은 어느 서비스를 샀든 보이는 기본 메뉴다 (SHARED_PATHS). 열린 일이 있으면 개수를 띄운다
 const HANDOFFS_HREF = "/handoffs";
+const CHAT_HREF = "/agents/chat";
 const SHARED_NAV: NavItem[] = [
   { href: HANDOFFS_HREF, label: "받은 요청", Icon: IconInbox, match: [HANDOFFS_HREF] },
   // AI 대화방: 대화 기록(전체 대화방·사건 방·직접 대화)과 AI 오피스(픽셀 사무실)를 하위 탭으로
   {
-    href: "/agents/chat", label: "AI 대화방", Icon: IconAgents, match: ["/agents/chat", "/agents/office"],
+    href: CHAT_HREF, label: "AI 대화방", Icon: IconAgents, match: ["/agents/chat", "/agents/office"],
     children: [
       { href: "/agents/chat", label: "대화 기록", match: ["/agents/chat"] },
       { href: "/agents/office", label: "AI 오피스", match: ["/agents/office"] },
@@ -111,12 +112,24 @@ function withInfra(agents: NavItem[], services: Service[]): NavItem[] {
   return at < 0 ? [...agents, item] : [...agents.slice(0, at + 1), item, ...agents.slice(at + 1)];
 }
 
+/** 안전 처리 로그는 AI가 아니라 기록이라(11/17 멘토링) AI 묶음에서 빼서 따로 돌려준다 */
+function splitSafety(agents: NavItem[]): [NavItem[], NavItem | undefined] {
+  const name = AGENTS.find((g) => g.id === "safety")?.name;
+  const at = agents.findIndex((a) => a.label === name);
+  return at < 0 ? [agents, undefined] : [[...agents.slice(0, at), ...agents.slice(at + 1)], agents[at]];
+}
+
 /** 회사에 연결된 고객사 계정의 메뉴 */
 function customerNav(account: Account, enabled: string[]): NavItem[] {
   const services = servicesOf(account, enabled);
-  const agents = withInfra(agentNav(services), services);
+  const [agents, safety] = splitSafety(withInfra(agentNav(services), services));
   const others = services.filter((s) => !s.agent && s.id !== INFRA_ID && !(account.admin && s.id === "hosts"));
   const rest = [...others.map(serviceNav), ...SHARED_NAV];
+  // 안전 처리 로그는 "AI 대화방" 바로 밑 (AI들이 주고받은 대화 → 그 실행 요청을 안전 규칙으로 판단한 기록)
+  if (safety) {
+    const chat = rest.findIndex((n) => n.href === CHAT_HREF);
+    rest.splice(chat < 0 ? rest.length : chat + 1, 0, safety);
+  }
   if (agents.length) rest[0] = { ...rest[0], divider: true };
   // 고객사 시스템 관리자는 관리 메뉴를 맨 위에, 일반회원은 맨 아래(예전 "연결" 자리)에 도구 연결만
   const system = systemNav(systemMenuFor(!!account.admin));
