@@ -1,52 +1,43 @@
 import { useEffect, useRef } from "react";
 
-/** `visibilityState`만 보는 아주 작은 문서 모양(테스트에서 가짜로 끼운다) */
-export interface VisibleDoc {
-  hidden: boolean;
-  addEventListener(type: "visibilitychange", listener: () => void): void;
-  removeEventListener(type: "visibilitychange", listener: () => void): void;
+// 주기 새로고침 규칙: 앞 요청이 안 끝났으면 건너뛰고, 탭이 가려져 있으면 받지 않는다.
+// 다시 보이면 마지막으로 받은 뒤 간격이 지났을 때만 한 번 받는다. (수동 새로고침 버튼은 이 규칙을 거치지 않는다)
+
+export type PollerDeps = { isHidden: () => boolean; now: () => number };
+
+export function createPoller(run: () => Promise<unknown> | void, intervalMs: number, deps: PollerDeps) {
+  let inFlight = false;
+  let lastAt = deps.now();
+  const start = async (): Promise<boolean> => {
+    if (inFlight) return false;
+    inFlight = true;
+    lastAt = deps.now();
+    try { await run(); } catch { /* 호출부가 오류를 처리한다 */ } finally { inFlight = false; }
+    return true;
+  };
+  return {
+    /** 마운트 직후 첫 로드. 가려져 있어도 받는다. */
+    first: start,
+    /** 타이머 한 번. 가려져 있거나 앞 요청이 남았으면 건너뛴다. */
+    tick: (): Promise<boolean> => (deps.isHidden() ? Promise.resolve(false) : start()),
+    /** 탭이 다시 보일 때. 간격이 지났을 때만 받는다. */
+    visible: (): Promise<boolean> => (deps.isHidden() || deps.now() - lastAt < intervalMs ? Promise.resolve(false) : start()),
+  };
 }
 
 /**
- * 몇 초마다 새로 받는 화면용 반복 호출. 멈추려면 돌려받은 함수를 부른다.
- * - 다른 탭을 보는 동안(`document.hidden`)은 부르지 않는다. 돌아왔을 때 `ms`가 지났으면 한 번 바로 부른다.
- * - 앞 호출(Promise)이 아직 안 끝났으면 이번 차례는 건너뛴다(같은 요청이 겹쳐 나가지 않게).
+ * `immediate: false`면 마운트 때 첫 로드를 하지 않는다(호출부가 따로 첫 로드를 하거나, 처음 값이 다른 길로 오는 화면용).
+ * 기본은 마운트 직후 한 번 부른다.
  */
-export function startVisibleInterval(
-  run: () => void | Promise<unknown>,
-  ms: number,
-  doc: VisibleDoc = document,
-  now: () => number = Date.now,
-): () => void {
-  let last = now();
-  let busy = false;
-  const fire = () => {
-    if (busy) return;
-    last = now();
-    let out: void | Promise<unknown>;
-    try {
-      out = run();
-    } catch {
-      return;
-    }
-    if (out && typeof (out as Promise<unknown>).then === "function") {
-      busy = true;
-      const done = () => { busy = false; };
-      (out as Promise<unknown>).then(done, done);
-    }
-  };
-  const timer = setInterval(() => { if (!doc.hidden) fire(); }, ms);
-  const onShow = () => { if (!doc.hidden && now() - last >= ms) fire(); };
-  doc.addEventListener("visibilitychange", onShow);
-  return () => {
-    clearInterval(timer);
-    doc.removeEventListener("visibilitychange", onShow);
-  };
-}
-
-/** React 훅: `startVisibleInterval`을 화면이 열려 있는 동안 켠다. `run`이 바뀌어도 타이머는 다시 만들지 않는다 */
-export function useVisibleInterval(run: () => void | Promise<unknown>, ms: number): void {
+export function useVisibleInterval(run: () => Promise<unknown> | void, intervalMs: number, opts: { immediate?: boolean } = {}) {
   const runRef = useRef(run);
-  useEffect(() => { runRef.current = run; });
-  useEffect(() => startVisibleInterval(() => runRef.current(), ms), [ms]);
+  runRef.current = run;
+  useEffect(() => {
+    const poller = createPoller(() => runRef.current(), intervalMs, { isHidden: () => document.hidden, now: Date.now });
+    if (opts.immediate !== false) void poller.first();
+    const timer = window.setInterval(() => { void poller.tick(); }, intervalMs);
+    const onVis = () => { void poller.visible(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVis); };
+  }, [intervalMs]);
 }

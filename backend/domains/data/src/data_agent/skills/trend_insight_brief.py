@@ -14,6 +14,10 @@ LLM은 한 줄만 쓴다.
   인기 검색어 순위 몫 + YouTube 영상 수 몫. 광고 재료가 아닌 인사이트는 맨 아래 "참고용"
 - 한 줄: 인사이트마다 근거 숫자만 데이터 블록에 넣고 묶어서 LLM 한 번. 숫자 검증·단정 금지 검사에
   걸리면 코드가 만든 고정 문장
+- 숏츠 형식 조회: `shorts_format_median_views`는 그 형식 전체 숏츠 중앙값(주제와 무관, 같은
+  형식이면 같은 값). `shorts_format_topic_*`는 형식을 이 주제 숏츠에서 골랐을 때(topic)만, 이 주제
+  근거 숏츠 중 그 형식인 영상의 조회 중앙값(2개 이상·절반 이상일 때만)·인기 스냅샷 시각·대표 영상
+  최대 3개
 - insight_id: 날짜 + 주제 이름 해시 (같은 날 같은 주제면 같은 id)
 - 하루 캐시: 날짜 + 규칙 버전(설정·프롬프트 해시) 키. `regenerate`면 새로 묶는다
 README "trend_insight_brief".
@@ -25,6 +29,7 @@ import dataclasses
 import hashlib
 import json
 import sqlite3
+import statistics
 import threading
 import tomllib
 import uuid
@@ -52,6 +57,7 @@ from ax_contracts.schemas.data import (
     ShortsFit,
     ShortsStatsOutput,
     TopicCategory,
+    TopicFormatExample,
     TrendInsight,
     TrendInsightBriefOutput,
     TrendInsightBriefRequest,
@@ -734,6 +740,58 @@ def shorts_format(
     )
 
 
+# 주제 자기 숏츠 기준 형식 조회 중앙값의 최소 표본: 그 형식인 영상이 2개 이상이고,
+# 형식을 분류한 이 주제 숏츠 중 그 형식이 절반 이상일 때만 (한두 개 우연한 영상 값이 아니게)
+TOPIC_FORMAT_MIN_COUNT = 2
+TOPIC_FORMAT_MIN_SHARE = 0.5
+TOPIC_EXAMPLES = 3  # 대표 영상 수 (조회 큰 순)
+
+
+@dataclass(frozen=True)
+class TopicFormatViews:
+    """이 주제 숏츠 중 고른 형식인 영상의 조회 중앙값 (모르면 None + 이유)."""
+
+    median_views: float | None
+    at: datetime | None
+    examples: list[TopicFormatExample]
+    reason: str | None
+
+
+def topic_format_views(
+    p: PopularTopic | None, sp: ShortsPick, at: datetime | None
+) -> TopicFormatViews:
+    """source == topic일 때만: 근거 영상 중 숏츠이고 형식이 같은 영상의 조회 중앙값.
+
+    기준 시각은 이 주제 인기 스냅샷 시각(at, trend_popular snapshot_at) 그대로. 조회수를 모르는
+    영상은 중앙값에서 뺀다. 표본이 모자라면 None + "이 주제 숏츠 중 <형식> n개/전체 m개로 표본
+    부족".
+    """
+    if sp.source != "topic" or p is None or not sp.format:
+        return TopicFormatViews(
+            None, None, [], "주제 숏츠에서 고른 형식이 아님 (카테고리/전체 통계)"
+        )
+    fmt, total = sp.format, sp.total or 0
+    picked = [v for v in p.videos if v.is_short and v.shorts_format == fmt]
+    ranked = sorted(picked, key=lambda v: (v.views is None, -(v.views or 0)))
+    examples = [TopicFormatExample(title=v.title, views=v.views) for v in ranked[:TOPIC_EXAMPLES]]
+    short = f"이 주제 숏츠 중 {fmt} {len(picked)}개/전체 {total}개로 표본 부족"
+    if len(picked) < TOPIC_FORMAT_MIN_COUNT or not total or (
+        len(picked) / total < TOPIC_FORMAT_MIN_SHARE
+    ):
+        return TopicFormatViews(None, None, examples, short)
+    views = sorted(v.views for v in picked if v.views is not None)
+    if len(views) < TOPIC_FORMAT_MIN_COUNT:
+        why = (
+            f"이 주제 숏츠 중 {fmt} 조회수 있는 영상 {len(views)}개/전체 {total}개로 표본 부족"
+            f" (조회수 모르는 영상 {len(picked) - len(views)}개 제외)"
+        )
+        return TopicFormatViews(None, None, examples, why)
+    median = float(statistics.median(views))
+    if at is None:
+        return TopicFormatViews(median, None, examples, "기준 시각 없음 (인기 스냅샷 시각을 모름)")
+    return TopicFormatViews(median, at, examples, None)
+
+
 def facts(i: TrendInsight) -> dict[str, int | float | str]:
     e = i.evidence
     out: dict[str, int | float | str] = {}
@@ -891,6 +949,8 @@ def build_insights(
         group = next((g for g in (shorts.by_format if shorts else []) if g.name == fmt), None)
         if fmt and group is not None:  # 숏츠 통계와 같은 시점 값 (표본 수·중앙값·기준 시각)
             samples = group.count
+        # 이 주제 자기 숏츠 기준 (같은 형식 주제끼리 비교용). 기준 시각 = 인기 스냅샷 시각
+        tv = topic_format_views(c.popular, sp, popular.snapshot_at if popular else None)
         age = c.age
         band = next((b for b in age.bands if b.band == age.top_band), None) if age else None
         keys = same_target(c.names(), groups)  # 같은 대상 묶음 포함 (리그오브레전드 = t1)
@@ -963,6 +1023,10 @@ def build_insights(
                 shorts_format_samples=samples,
                 shorts_format_median_views=group.median_views if fmt and group else None,
                 shorts_format_at=shorts.snapshot_at if fmt and group and shorts else None,
+                shorts_format_topic_median_views=tv.median_views,
+                shorts_format_topic_at=tv.at,
+                shorts_format_topic_examples=tv.examples,
+                shorts_format_topic_reason=tv.reason,
                 shorts_format_reason=fmt_why,
                 shorts_format_source=sp.source,
                 shorts_format_source_count=sp.count,

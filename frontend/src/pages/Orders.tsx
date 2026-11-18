@@ -90,7 +90,7 @@ export default function OrdersPage() {
 
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
-  useVisibleInterval(bump, REFRESH_MS); // 다른 탭을 보는 동안은 새로 받지 않는다
+  useVisibleInterval(bump, REFRESH_MS, { immediate: false }); // 다른 탭을 보는 동안은 새로 받지 않는다
 
   // 새로고침(tick)마다 "최근 N일"의 기준 시각을 다시 잡는다. "오늘"은 한국 날짜 0시부터
   const period = useMemo(() => {

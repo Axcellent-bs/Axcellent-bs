@@ -965,6 +965,7 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
    - **상품 0개**: `products_reason`이 "회사 상품과 직접 연결 없음 (…이유)"
    - 순서: 순위 인사이트(점수 순) → 회사 관련 → 광고 재료 아님(참고용) → 분류 대기
 4-2. **숏츠 형식 단계**: ① `topic` 이 주제 근거 숏츠(shorts_stats가 분류해 둔 것) 중 가장 많은 형식 → 없으면 ② `category` 이 주제 분류의 숏츠 통계(`by_category[].formats`, 표본이 `[shorts] min_sample` 이상일 때만)에서 가장 많은 형식 → 없으면 ③ `all` 전체 숏츠 통계(`by_format`)에서 가장 많은 형식. ②·③에서는 목록 밖 형식 "기타"와 미분류를 고르지 않는다(표본 수에는 센다). 칸: `shorts_format_source`(단계), `shorts_format_source_count`(그 단계에서 이 형식인 숏츠 수)·`shorts_format_source_total`(그 단계에서 형식을 분류한 숏츠 수), ②·③이면 `shorts_format_reason`에 앞 단계를 못 쓴 이유. 중앙값·기준 시각(`shorts_format_median_views`·`shorts_format_at`)은 어느 단계든 숏츠 통계의 그 형식 값. 한 줄 데이터 블록에도 "숏츠 형식을 고른 단계"를 넣어 이 주제 숏츠의 형식처럼 쓰지 않게 한다
+4-3. **이 주제 숏츠 기준 형식 조회** (`shorts_format_topic_*`): `shorts_format_median_views`는 그 형식 전체 숏츠 중앙값이라 주제와 무관하다(같은 형식이면 모든 주제가 같은 값). 같은 형식 주제끼리 비교하려면 `shorts_format_topic_median_views` = ①`topic` 단계일 때만, 이 주제 근거 영상 중 숏츠이고 형식이 같은 영상의 조회 중앙값(조회수 모르는 영상은 뺌). 그 영상이 `TOPIC_FORMAT_MIN_COUNT`(2)개 미만이거나 형식을 분류한 이 주제 숏츠 중 `TOPIC_FORMAT_MIN_SHARE`(0.5) 미만이면 None + `shorts_format_topic_reason`("이 주제 숏츠 중 <형식> n개/전체 m개로 표본 부족"). ②·③이면 None + "주제 숏츠에서 고른 형식이 아님". 기준 시각 `shorts_format_topic_at` = 지금 인기 스냅샷 시각(없으면 None + "기준 시각 없음"). `shorts_format_topic_examples` = 그 영상 중 조회 큰 순 최대 3개(제목 원문·조회수)
 5. **한 줄**: 인사이트마다 근거 숫자만 데이터 블록에 넣고 묶어서 LLM 한 번. 숫자 검증(`explain`)·단정 말 검사에 걸리면 코드가 만든 고정 문장(`line_status: fixed` + 이유)
 6. **하루 캐시**: (한국 날짜, 규칙 버전 = `[brief]` 설정·프롬프트·한계 문장·칸 모양(`SHAPE`) 해시) → 브리프. `regenerate: true`면 새로 묶는다
 7. **판과 다시 추천** (v5, `brief_versions.py`, 인사이트 탭 맨 위 줄)
@@ -1110,6 +1111,7 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
    - `channel_subscribers`·`views_per_subscriber`(조회 ÷ 구독자, 소수 둘째 자리): 카드 영상들 채널만 `channels.list`(채널 50개 = 1단위). 구독자 수는 YouTube 스냅샷 DB `channel_stats`에 저장해 하루 재사용(trend_popular 근거와 같은 저장분), 하루 호출 상한 `channel_calls`(2번, `popular_videos.db` `api_calls`에 `shorts_channels`로 따로 센다). 채널 id는 검색·다시 조회 응답에 있던 값(`shorts.db` `video_channels`)과 인기 스냅샷 값. 숨김·상한·채널 모름이면 None + `subscriber_reason`
    - 통계 칸(수·평균·중앙값·`top`)은 화면 카드와 무관하고 그대로다(전·후 비교 테스트 `tests/test_shorts_screen_videos.py`)
 
+- **빠진 게시 시각 채우기**(`shorts_backfill.py`, 수집기가 미리 계산 바로 앞에 부름): `published` 표가 생기기 전에 검색한 숏츠는 게시 시각이 없어 "최근 N일"·요즘 유행·밈에서 빠진다. 최근 `retention_days`(30일) 표본(검색 저장분 + 인기 스냅샷 숏츠, 길이·언어 조건 같음) 중 게시 시각을 모르는 영상만 `videos.list` 50개씩 다시 읽어 `record_views`로 남긴다(조회수·썸네일·채널 id·게시 시각). 응답에 없는 영상(지워짐·비공개)은 `published_missing` 표에 남겨 다시 부르지 않는다. 하루 `DATA_SHORTS_BACKFILL_DAILY`번(기본 20번 = 1,000개, YouTube 장부 날짜), 장부의 부른 곳은 `shorts_backfill`, 새 숏츠 추적 예약 몫은 쓰지 않는다. 로그 `[backfill] published 채움 N · 없음 M · 남음 K`
 - **한계:** 인기 영상 상위 200개 안(과 조회수 순 검색 결과)에서의 비교라 **이미 뜬 영상끼리 비교**한다(응답 `limitation`에도). 검색 숏츠의 속도는 두 번 본 사이 구간의 평균이라, 다시 조회하는 간격에 따라 값이 달라진다. 형식 분류 정확도는 평가셋이 없어 재지 않는다
 
 ### trend_memes (요즘 유행·밈)

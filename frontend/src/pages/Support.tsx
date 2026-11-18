@@ -41,7 +41,7 @@ export default function SupportPage() {
   // 30초마다 모두 새로 받는다(다른 탭을 보는 동안은 쉰다)
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
-  useVisibleInterval(bump, REFRESH_MS);
+  useVisibleInterval(bump, REFRESH_MS, { immediate: false });
 
   // 예전 "주문 내역" 탭 주소는 주문 관리 서비스로 보낸다
   if (location.hash === "#orders") return <Navigate to={`/orders${buyer ? `?buyer=${encodeURIComponent(buyer)}` : ""}`} replace />;

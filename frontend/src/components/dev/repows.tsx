@@ -10,6 +10,7 @@ import { DEV_API, PlanningApiError, kst, repoApi, vcsApi, type MergeMethod, type
 import { layoutGraph, laneColor, type GraphRow } from '@/components/dev/graphlayout'
 import { prSlug, toPath, go, idText } from '@/components/planning-common/links'
 import { Work } from '@/components/dev/work'
+import { Skeleton } from '@/components/finance/bits'
 import { Markdown } from '@/components/planning-common/markdown'
 import { humanizePlanIds } from '@/lib/format'
 
@@ -195,7 +196,7 @@ function Board({ conn }: { conn: string }) {
         </label>
         <Button size="small" onClick={list.reload} disabled={list.loading} aria-label="새로 읽기">새로 읽기</Button>
       </div>
-      {list.error ? <LoadError error={list.error} /> : list.loading && !list.data ? <div className="empty"><b>읽는 중</b></div> : !rows.length ? <div className="empty"><b>PR 없음</b></div> : (
+      {list.error ? <LoadError error={list.error} /> : list.loading && !list.data ? <Skeleton label="읽는 중" stats={0} lines={4} /> : !rows.length ? <div className="empty"><b>PR 없음</b></div> : (
         <ul className="rp-list">
           {rows.map((p) => <PrRow key={p.number} p={p} />)}
         </ul>
@@ -273,7 +274,7 @@ function IssueBoard({ conn }: { conn: string }) {
         </label>
         <Button size="small" onClick={list.reload} disabled={list.loading} aria-label="새로 읽기">새로 읽기</Button>
       </div>
-      {list.error ? <LoadError error={list.error} /> : list.loading && !list.data ? <div className="empty"><b>읽는 중</b></div> : !rows.length ? <div className="empty"><b>이슈 없음</b></div> : (
+      {list.error ? <LoadError error={list.error} /> : list.loading && !list.data ? <Skeleton label="읽는 중" stats={0} lines={4} /> : !rows.length ? <div className="empty"><b>이슈 없음</b></div> : (
         <ul className="rp-list">
           {rows.map((i) => <IssueRow key={i.number} i={i} onLabel={setLabel} />)}
         </ul>
@@ -318,7 +319,7 @@ function IssueView({ conn, number }: { conn: string; number: number }) {
   const [busy, setBusy] = useState(false)
   const back = <a href={issueHref()} className="rp-back">‹ 이슈 목록</a>
   if (det.error) return <>{back}<LoadError error={det.error} /></>
-  if (!det.data) return <>{back}<div className="empty"><b>읽는 중</b></div></>
+  if (!det.data) return <>{back}<Skeleton label="읽는 중" stats={0} lines={4} /></>
   const x = det.data
   const i = x.issue
   const send = async () => {
@@ -391,7 +392,7 @@ function PrView({ conn, number, tab }: { conn: string; number: number; tab?: str
   const [pending, setPending] = useState<Pending>(null)
   const [busy, setBusy] = useState(false)
   if (det.error) return <><Back /><LoadError error={det.error} /></>
-  if (!det.data) return <><Back /><div className="empty"><b>읽는 중</b></div></>
+  if (!det.data) return <><Back /><Skeleton label="읽는 중" stats={0} lines={4} /></>
   const x = det.data
   const p = x.pr
   const view = tab === 'commits' ? 'commits' : tab === 'files' ? 'files' : 'talk'
@@ -601,7 +602,7 @@ function BranchTable({ conn }: { conn: string }) {
   const [del, setDel] = useState<RepoBranch | null>(null)
   const [busy, setBusy] = useState(false)
   if (list.error) return <LoadError error={list.error} />
-  if (!list.data) return <div className="empty"><b>읽는 중</b></div>
+  if (!list.data) return <Skeleton label="읽는 중" stats={0} lines={4} />
   const ro = list.data.read_only
   const remove = async (b: RepoBranch) => {
     setBusy(true)
@@ -720,7 +721,7 @@ function GraphView({ conn, sel }: { conn: string; sel?: string }) {
         )}
         <Button size="small" onClick={g.reload} disabled={g.loading} aria-label="새로 읽기">{g.loading && data ? '읽는 중' : '새로 읽기'}</Button>
       </div>
-      {g.error ? <LoadError error={g.error} /> : !data ? <div className="empty"><b>읽는 중</b></div> : !commits.length ? <div className="empty"><b>커밋 없음</b></div> : (
+      {g.error ? <LoadError error={g.error} /> : !data ? <Skeleton label="읽는 중" stats={0} lines={4} /> : !commits.length ? <div className="empty"><b>커밋 없음</b></div> : (
         <div className={sel ? 'rg-body rg-with-side' : 'rg-body'}>
           <div className="rg-scroll">
             <table className="rg-table" aria-label="커밋 그래프" aria-rowcount={commits.length}>

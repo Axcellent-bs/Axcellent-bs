@@ -1,0 +1,1006 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "AXcellent",
+    "identifier": "axcellent"
+  },
+  "entries": [
+    {
+      "identifier": "urn:air:axcellent:a2a:orchestrator",
+      "displayName": "총괄 AI",
+      "description": "여러 부서에 걸친 사건을 열고 부서에 나눠 맡기며, 부서 의견을 모아 필요한 부서에 넘긴다. 회사 안에서만 A2A로 부를 수 있다.",
+      "mediaType": "application/a2a-agent-card+json",
+      "type": "application/a2a-agent-card+json",
+      "representativeQueries": [
+        "지금 열린 장애 사건이 있어?",
+        "재무가 낸 의견을 기획에 넘겼어?"
+      ],
+      "data": {
+        "name": "orchestrator",
+        "description": "여러 부서에 걸친 사건을 열고 부서에 나눠 맡기며, 부서 의견을 모아 필요한 부서에 넘긴다.",
+        "version": "0.1.0",
+        "capabilities": {
+          "streaming": false,
+          "push_notifications": false
+        },
+        "skills": [
+          {
+            "id": "find_active_incident"
+          },
+          {
+            "id": "answer_planning_question"
+          },
+          {
+            "id": "receive_finance_opinion"
+          },
+          {
+            "id": "diagnose_agent_issue"
+          },
+          {
+            "id": "orchestrator_chat_send"
+          },
+          {
+            "id": "orchestrator_chat_list"
+          },
+          {
+            "id": "orchestrator_chat_get"
+          },
+          {
+            "id": "orchestrator_chat_close"
+          },
+          {
+            "id": "orchestrator_chat_remove"
+          }
+        ]
+      }
+    },
+    {
+      "identifier": "urn:air:axcellent:a2a:support",
+      "displayName": "고객지원 AI",
+      "description": "고객 문의를 받아 분류·답변하고, 클레임·보상과 판매자 정산을 맡는다. 회사 안에서만 A2A로 부를 수 있다.",
+      "mediaType": "application/a2a-agent-card+json",
+      "type": "application/a2a-agent-card+json",
+      "representativeQueries": [
+        "이 주문 문의에 답해 줘",
+        "이번 주 판매자 정산금은 얼마야?"
+      ],
+      "data": {
+        "name": "support",
+        "description": "고객 문의를 받아 분류·답변하고, 클레임·보상과 판매자 정산을 맡는다.",
+        "version": "0.1.0",
+        "capabilities": {
+          "streaming": true,
+          "push_notifications": false
+        },
+        "skills": [
+          {
+            "id": "list_inquiries"
+          },
+          {
+            "id": "get_inquiry"
+          },
+          {
+            "id": "check_reply"
+          },
+          {
+            "id": "summarize_inquiry"
+          },
+          {
+            "id": "create_inquiry"
+          },
+          {
+            "id": "add_customer_message"
+          },
+          {
+            "id": "send_reply"
+          },
+          {
+            "id": "reject_draft"
+          },
+          {
+            "id": "set_inquiry_status"
+          },
+          {
+            "id": "set_triage"
+          },
+          {
+            "id": "record_claim_activity"
+          },
+          {
+            "id": "submit_feedback"
+          },
+          {
+            "id": "submit_idea"
+          },
+          {
+            "id": "list_ideas"
+          },
+          {
+            "id": "send_idea_digest"
+          },
+          {
+            "id": "send_idea_report"
+          },
+          {
+            "id": "list_idea_trends"
+          },
+          {
+            "id": "inquiry_pull_status"
+          },
+          {
+            "id": "list_stuck_intake"
+          },
+          {
+            "id": "retry_stuck_intake"
+          },
+          {
+            "id": "set_feedback_status"
+          },
+          {
+            "id": "add_resolution_note"
+          },
+          {
+            "id": "preview_data_purge"
+          },
+          {
+            "id": "purge_customer_data"
+          },
+          {
+            "id": "purge_expired_inquiries"
+          },
+          {
+            "id": "reveal_original"
+          },
+          {
+            "id": "support_chat_send"
+          },
+          {
+            "id": "support_chat_close"
+          },
+          {
+            "id": "support_chat_remove"
+          },
+          {
+            "id": "support_chat_list"
+          },
+          {
+            "id": "support_chat_get"
+          },
+          {
+            "id": "list_feedback"
+          },
+          {
+            "id": "feedback_overview"
+          },
+          {
+            "id": "inquiry_overview"
+          },
+          {
+            "id": "detect_inquiry_surge"
+          },
+          {
+            "id": "inquiry_order_counts"
+          },
+          {
+            "id": "propose_change_requests"
+          },
+          {
+            "id": "decline_change_proposal"
+          },
+          {
+            "id": "answer_planning_question"
+          },
+          {
+            "id": "list_planning_questions"
+          },
+          {
+            "id": "send_planning_answer"
+          },
+          {
+            "id": "request_change"
+          },
+          {
+            "id": "list_change_requests"
+          },
+          {
+            "id": "receive_change_result"
+          },
+          {
+            "id": "diagnose_payment"
+          },
+          {
+            "id": "prepare_handoff"
+          },
+          {
+            "id": "assess_deletion_request"
+          },
+          {
+            "id": "knowledge_gap_report"
+          },
+          {
+            "id": "qa_findings"
+          },
+          {
+            "id": "get_privacy_audit"
+          },
+          {
+            "id": "analyze_receipt"
+          },
+          {
+            "id": "analyze_claim_request"
+          },
+          {
+            "id": "request_compensation"
+          },
+          {
+            "id": "list_claims"
+          },
+          {
+            "id": "get_claim"
+          },
+          {
+            "id": "claim_stats"
+          },
+          {
+            "id": "book_issue_stats"
+          },
+          {
+            "id": "claim_queue"
+          },
+          {
+            "id": "create_claim"
+          },
+          {
+            "id": "decide_claim"
+          },
+          {
+            "id": "receive_return"
+          },
+          {
+            "id": "claim_pull_status"
+          },
+          {
+            "id": "inspect_return"
+          },
+          {
+            "id": "process_claim_queue"
+          },
+          {
+            "id": "suggest_compensation"
+          },
+          {
+            "id": "request_incident_compensation"
+          },
+          {
+            "id": "list_incident_compensation"
+          },
+          {
+            "id": "propose_incident_compensation"
+          },
+          {
+            "id": "decide_incident_compensation"
+          },
+          {
+            "id": "list_incident_queue"
+          },
+          {
+            "id": "purge_expired_claims"
+          },
+          {
+            "id": "receive_improvement_note"
+          },
+          {
+            "id": "customer_signals"
+          },
+          {
+            "id": "list_at_risk_customers"
+          },
+          {
+            "id": "seller_settlement"
+          },
+          {
+            "id": "seller_settlement_weeks"
+          },
+          {
+            "id": "seller_settlement_batches"
+          },
+          {
+            "id": "seller_settlement_deadlines"
+          },
+          {
+            "id": "request_seller_settlement"
+          }
+        ]
+      }
+    },
+    {
+      "identifier": "urn:air:axcellent:a2a:finance",
+      "displayName": "재무 AI",
+      "description": "결산·재무제표, 매출·결제 대사, 팀 예산, 캠페인 예산과 콘텐츠 제작비 의견을 맡는다. 회사 안에서만 A2A로 부를 수 있다.",
+      "mediaType": "application/a2a-agent-card+json",
+      "type": "application/a2a-agent-card+json",
+      "representativeQueries": [
+        "이번 달 결산 숫자를 알려 줘",
+        "아재개그 쇼츠 다음 회차 제작비는 얼마가 좋아?"
+      ],
+      "data": {
+        "name": "finance",
+        "description": "결산·재무제표, 매출·결제 대사, 팀 예산, 캠페인 예산과 콘텐츠 제작비 의견을 맡는다.",
+        "version": "0.1.0",
+        "capabilities": {
+          "streaming": true,
+          "push_notifications": false
+        },
+        "skills": [
+          {
+            "id": "closing_report"
+          },
+          {
+            "id": "record_support_cost"
+          },
+          {
+            "id": "record_team_budget"
+          },
+          {
+            "id": "answer_planning_question"
+          },
+          {
+            "id": "category_budget_advice"
+          },
+          {
+            "id": "record_campaign_result"
+          },
+          {
+            "id": "review_campaign_budget"
+          },
+          {
+            "id": "verify_campaign_budget"
+          },
+          {
+            "id": "finance_insights"
+          },
+          {
+            "id": "cancel_campaign"
+          },
+          {
+            "id": "record_incident_finance"
+          },
+          {
+            "id": "finance_chat_send"
+          },
+          {
+            "id": "finance_chat_list"
+          },
+          {
+            "id": "finance_chat_get"
+          },
+          {
+            "id": "finance_chat_close"
+          },
+          {
+            "id": "finance_chat_remove"
+          },
+          {
+            "id": "receive_improvement_note"
+          }
+        ]
+      }
+    },
+    {
+      "identifier": "urn:air:axcellent:a2a:data",
+      "displayName": "데이터분석 AI",
+      "description": "이상 징후와 장애 영향을 찾고, 영상 성과·캠페인 효과·트렌드를 분석한다. 회사 안에서만 A2A로 부를 수 있다.",
+      "mediaType": "application/a2a-agent-card+json",
+      "type": "application/a2a-agent-card+json",
+      "representativeQueries": [
+        "이 장애로 실패한 주문은 몇 건이야?",
+        "이 쇼츠의 7일 조회수는?"
+      ],
+      "data": {
+        "name": "data",
+        "description": "이상 징후와 장애 영향을 찾고, 영상 성과·캠페인 효과·트렌드를 분석한다.",
+        "version": "0.1.0",
+        "capabilities": {
+          "streaming": true,
+          "push_notifications": false
+        },
+        "skills": [
+          {
+            "id": "anomaly_detection"
+          },
+          {
+            "id": "impact_analysis"
+          },
+          {
+            "id": "fraud_score"
+          },
+          {
+            "id": "kpi_summary"
+          },
+          {
+            "id": "sales_analysis"
+          },
+          {
+            "id": "segment_options"
+          },
+          {
+            "id": "segment_question"
+          },
+          {
+            "id": "segment_profile"
+          },
+          {
+            "id": "segment_favorites"
+          },
+          {
+            "id": "market_coverage"
+          },
+          {
+            "id": "basket_pairs"
+          },
+          {
+            "id": "retention"
+          },
+          {
+            "id": "channel_value"
+          },
+          {
+            "id": "event_proposal"
+          },
+          {
+            "id": "event_proposal_send"
+          },
+          {
+            "id": "root_cause_hypotheses"
+          },
+          {
+            "id": "accuracy_report"
+          },
+          {
+            "id": "activity_report"
+          },
+          {
+            "id": "trend_scan"
+          },
+          {
+            "id": "trend_candidates"
+          },
+          {
+            "id": "trend_history"
+          },
+          {
+            "id": "youtube_velocity"
+          },
+          {
+            "id": "content_recommend"
+          },
+          {
+            "id": "trend_popular"
+          },
+          {
+            "id": "promo_concepts"
+          },
+          {
+            "id": "shorts_stats"
+          },
+          {
+            "id": "answer_planning_question"
+          },
+          {
+            "id": "campaign_effect"
+          },
+          {
+            "id": "video_performance"
+          },
+          {
+            "id": "campaign_result"
+          },
+          {
+            "id": "receive_idea_report"
+          },
+          {
+            "id": "list_idea_reports"
+          },
+          {
+            "id": "trend_age"
+          },
+          {
+            "id": "trend_insight_brief"
+          },
+          {
+            "id": "domain_profile"
+          },
+          {
+            "id": "data_sources"
+          },
+          {
+            "id": "source_plan"
+          },
+          {
+            "id": "domain_subtopics"
+          },
+          {
+            "id": "video_explorer"
+          },
+          {
+            "id": "trend_memes"
+          },
+          {
+            "id": "data_chat_send"
+          },
+          {
+            "id": "data_chat_list"
+          },
+          {
+            "id": "data_chat_get"
+          },
+          {
+            "id": "data_chat_close"
+          },
+          {
+            "id": "data_chat_remove"
+          },
+          {
+            "id": "receive_improvement_note"
+          }
+        ]
+      }
+    },
+    {
+      "identifier": "urn:air:axcellent:a2a:archive",
+      "displayName": "아카이브 AI",
+      "description": "부서가 보낸 이슈·결정을 회사 기억에 카드로 남기고 비슷한 과거를 찾는다. 회사 안에서만 A2A로 부를 수 있다.",
+      "mediaType": "application/a2a-agent-card+json",
+      "type": "application/a2a-agent-card+json",
+      "representativeQueries": [
+        "비슷한 장애가 예전에 있었어?",
+        "이 결정의 근거 기록을 찾아 줘"
+      ],
+      "data": {
+        "name": "archive",
+        "description": "부서가 보낸 이슈·결정을 회사 기억에 카드로 남기고 비슷한 과거를 찾는다.",
+        "version": "0.1.0",
+        "capabilities": {
+          "streaming": true,
+          "push_notifications": false
+        },
+        "skills": [
+          {
+            "id": "record_case"
+          },
+          {
+            "id": "check_plan"
+          },
+          {
+            "id": "list_candidate_cards"
+          },
+          {
+            "id": "list_cards"
+          },
+          {
+            "id": "get_audit_timeline"
+          },
+          {
+            "id": "decide_candidate_card"
+          },
+          {
+            "id": "retire_request_cards"
+          },
+          {
+            "id": "find_similar_fraud_cards"
+          },
+          {
+            "id": "find_similar_cases"
+          },
+          {
+            "id": "record_resolution"
+          },
+          {
+            "id": "record_event_times"
+          },
+          {
+            "id": "list_duplicate_groups"
+          },
+          {
+            "id": "decide_duplicate_group"
+          },
+          {
+            "id": "restore_merged_card"
+          },
+          {
+            "id": "answer_planning_question"
+          },
+          {
+            "id": "find_similar_decisions"
+          },
+          {
+            "id": "receive_improvement_note"
+          }
+        ]
+      }
+    },
+    {
+      "identifier": "urn:air:axcellent:a2a:hr",
+      "displayName": "인사 AI",
+      "description": "조직 변동과 팀 인원, 인수인계를 맡는다. 회사 안에서만 A2A로 부를 수 있다.",
+      "mediaType": "application/a2a-agent-card+json",
+      "type": "application/a2a-agent-card+json",
+      "representativeQueries": [
+        "이번 달 팀별 인원은?",
+        "이 업무 인수인계는 끝났어?"
+      ],
+      "data": {
+        "name": "hr",
+        "description": "조직 변동과 팀 인원, 인수인계를 맡는다.",
+        "version": "0.1.0",
+        "capabilities": {
+          "streaming": true,
+          "push_notifications": false
+        },
+        "skills": [
+          {
+            "id": "team_headcount"
+          },
+          {
+            "id": "record_org_change"
+          },
+          {
+            "id": "decide_org_change"
+          },
+          {
+            "id": "confirm_team_budget"
+          },
+          {
+            "id": "list_org_changes"
+          },
+          {
+            "id": "set_org_roster_complete"
+          },
+          {
+            "id": "record_leave"
+          },
+          {
+            "id": "cancel_leave"
+          },
+          {
+            "id": "get_presence"
+          },
+          {
+            "id": "find_org_change_basis"
+          },
+          {
+            "id": "parse_org_change_text"
+          },
+          {
+            "id": "describe_org_change"
+          },
+          {
+            "id": "evaluate_agents"
+          },
+          {
+            "id": "request_agent_diagnosis"
+          },
+          {
+            "id": "judge_step_timings"
+          },
+          {
+            "id": "get_roster"
+          },
+          {
+            "id": "start_handover"
+          },
+          {
+            "id": "answer_handover_question"
+          },
+          {
+            "id": "confirm_handover"
+          },
+          {
+            "id": "list_handovers"
+          },
+          {
+            "id": "list_open_questions"
+          }
+        ]
+      }
+    },
+    {
+      "identifier": "urn:air:axcellent:a2a:marketing",
+      "displayName": "마케팅 AI",
+      "description": "공지·쿠폰과 캠페인을 만들고 결과를 재무·데이터에 알린다. 회사 안에서만 A2A로 부를 수 있다.",
+      "mediaType": "application/a2a-agent-card+json",
+      "type": "application/a2a-agent-card+json",
+      "representativeQueries": [
+        "장애 공지를 올려 줘",
+        "이번 캠페인 결과를 알려 줘"
+      ],
+      "data": {
+        "name": "marketing",
+        "description": "공지·쿠폰과 캠페인을 만들고 결과를 재무·데이터에 알린다.",
+        "version": "0.1.0",
+        "capabilities": {
+          "streaming": true,
+          "push_notifications": false
+        },
+        "skills": [
+          {
+            "id": "draft_notice"
+          },
+          {
+            "id": "publish_notice"
+          },
+          {
+            "id": "end_incident_notice"
+          },
+          {
+            "id": "get_notice"
+          },
+          {
+            "id": "list_active_notices"
+          },
+          {
+            "id": "receive_campaign_brief"
+          },
+          {
+            "id": "list_campaign_briefs"
+          },
+          {
+            "id": "get_campaign_brief"
+          },
+          {
+            "id": "handoff_brief_to_sns"
+          },
+          {
+            "id": "build_campaign_link"
+          },
+          {
+            "id": "issue_coupon"
+          },
+          {
+            "id": "start_campaign"
+          },
+          {
+            "id": "record_campaign_result"
+          },
+          {
+            "id": "draft_sns_post"
+          },
+          {
+            "id": "draft_outage_sns_post"
+          },
+          {
+            "id": "list_outage_sns_drafts"
+          },
+          {
+            "id": "merge_outage_sns_drafts"
+          },
+          {
+            "id": "check_sns_post"
+          },
+          {
+            "id": "publish_sns"
+          },
+          {
+            "id": "generate_media"
+          },
+          {
+            "id": "cancel_campaign"
+          },
+          {
+            "id": "marketing_chat_send"
+          },
+          {
+            "id": "marketing_chat_list"
+          },
+          {
+            "id": "marketing_chat_get"
+          },
+          {
+            "id": "marketing_chat_close"
+          },
+          {
+            "id": "marketing_chat_remove"
+          },
+          {
+            "id": "prepare_sns_post_from_media"
+          },
+          {
+            "id": "prepare_brief_media"
+          },
+          {
+            "id": "request_brief_publish"
+          },
+          {
+            "id": "prepare_outage_sns_media"
+          },
+          {
+            "id": "request_outage_sns_publish"
+          },
+          {
+            "id": "receive_improvement_note"
+          }
+        ]
+      }
+    },
+    {
+      "identifier": "urn:air:axcellent:a2a:planning",
+      "displayName": "기획 AI",
+      "description": "부서의 변경 요청을 받아 기획 제안·기획서를 만들고 마케팅·개발에 넘긴다. 회사 안에서만 A2A로 부를 수 있다.",
+      "mediaType": "application/a2a-agent-card+json",
+      "type": "application/a2a-agent-card+json",
+      "representativeQueries": [
+        "받은 변경 요청을 보여 줘",
+        "이 영상 기획안의 근거는?"
+      ],
+      "data": {
+        "name": "planning",
+        "description": "부서의 변경 요청을 받아 기획 제안·기획서를 만들고 마케팅·개발에 넘긴다.",
+        "version": "0.1.0",
+        "capabilities": {
+          "streaming": true,
+          "push_notifications": false
+        },
+        "skills": [
+          {
+            "id": "create_ticket"
+          },
+          {
+            "id": "withdraw_ticket"
+          },
+          {
+            "id": "receive_dev_result"
+          },
+          {
+            "id": "receive_planning_answer"
+          },
+          {
+            "id": "request_release_check"
+          },
+          {
+            "id": "receive_campaign_update"
+          },
+          {
+            "id": "receive_insight"
+          },
+          {
+            "id": "planning_chat_send"
+          },
+          {
+            "id": "planning_chat_list"
+          },
+          {
+            "id": "planning_chat_get"
+          },
+          {
+            "id": "planning_chat_close"
+          },
+          {
+            "id": "planning_chat_remove"
+          }
+        ]
+      }
+    },
+    {
+      "identifier": "urn:air:axcellent:a2a:dev",
+      "displayName": "개발 AI",
+      "description": "확정된 기획서로 PR·검수·머지·배포를 맡는다. 회사 안에서만 A2A로 부를 수 있다.",
+      "mediaType": "application/a2a-agent-card+json",
+      "type": "application/a2a-agent-card+json",
+      "representativeQueries": [
+        "이 기획서의 개발 진행 상황은?",
+        "최근 배포를 되돌려야 해?"
+      ],
+      "data": {
+        "name": "dev",
+        "description": "확정된 기획서로 PR·검수·머지·배포를 맡는다.",
+        "version": "0.1.0",
+        "capabilities": {
+          "streaming": true,
+          "push_notifications": false
+        },
+        "skills": [
+          {
+            "id": "find_related_prs"
+          },
+          {
+            "id": "link_incident"
+          },
+          {
+            "id": "revert_merged_pr"
+          },
+          {
+            "id": "verify_rollback_target"
+          },
+          {
+            "id": "list_in_progress"
+          },
+          {
+            "id": "list_dev_outcomes"
+          },
+          {
+            "id": "verify_handover"
+          },
+          {
+            "id": "start_dev"
+          },
+          {
+            "id": "receive_release_order"
+          },
+          {
+            "id": "receive_request_pause"
+          },
+          {
+            "id": "dev_chat_send"
+          },
+          {
+            "id": "dev_chat_list"
+          },
+          {
+            "id": "dev_chat_get"
+          },
+          {
+            "id": "dev_chat_close"
+          },
+          {
+            "id": "dev_chat_remove"
+          },
+          {
+            "id": "receive_improvement_note"
+          }
+        ]
+      }
+    },
+    {
+      "identifier": "urn:air:axcellent:a2a:infra",
+      "displayName": "인프라 AI",
+      "description": "장애가 나면 배포 이력으로 원인을 찾고 복구를 돕는다. 회사 안에서만 A2A로 부를 수 있다.",
+      "mediaType": "application/a2a-agent-card+json",
+      "type": "application/a2a-agent-card+json",
+      "representativeQueries": [
+        "지금 장애 원인이 뭐야?",
+        "어느 배포 때문에 생긴 장애야?"
+      ],
+      "data": {
+        "name": "infra",
+        "description": "장애가 나면 배포 이력으로 원인을 찾고 복구를 돕는다.",
+        "version": "0.1.0",
+        "capabilities": {
+          "streaming": true,
+          "push_notifications": false
+        },
+        "skills": [
+          {
+            "id": "diagnose_incident"
+          },
+          {
+            "id": "rollback_deployment"
+          },
+          {
+            "id": "verify_recovery"
+          },
+          {
+            "id": "release_fault"
+          },
+          {
+            "id": "infra_chat_send"
+          },
+          {
+            "id": "infra_chat_list"
+          },
+          {
+            "id": "infra_chat_get"
+          },
+          {
+            "id": "infra_chat_close"
+          },
+          {
+            "id": "infra_chat_remove"
+          },
+          {
+            "id": "receive_improvement_note"
+          }
+        ]
+      }
+    }
+  ]
+}

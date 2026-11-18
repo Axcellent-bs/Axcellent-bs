@@ -828,3 +828,104 @@ def test_promo_videos_come_first_and_weak_insights_are_held_back(tmp_path: Path)
     facts = {f.label for f in out.facts if f.about == first.insight_id}
     assert "이 형식 1시간 조회 중앙값, 숏츠 전체 대비" in facts
     assert "최근 3일 게시된 같은 형식 숏츠" in facts
+
+
+# ------------------------------------------------ 이 주제 숏츠 기준 형식 조회 (topic_*)
+
+
+def _shorts_topic(name: str, rank: int, category: str, vids: list[tuple[str, int | None]],
+                  **kw: Any) -> PopularTopic:  # fmt: skip
+    """근거 영상: (형식, 조회수) 목록. 모두 숏츠, 제목은 "<이름> <n>"."""
+    videos = [PopularVideo(video_id=f"{name}{n}", title=f"{name} {n}", is_short=True,
+                           shorts_format=f, views=v) for n, (f, v) in enumerate(vids)]  # fmt: skip
+    return _topic(name, rank, category, videos=videos, **kw)
+
+
+def _topic_views(p: PopularTopic, at: datetime | None = NOW) -> brief.TopicFormatViews:
+    return brief.topic_format_views(p, brief.shorts_format(p, "IT", None), at)
+
+
+def test_topic_format_views_median_and_examples_from_this_topic_shorts() -> None:
+    p = _shorts_topic("챌", 1, "IT", [("챌린지", 100), ("리액션", 9999), ("챌린지", 500),
+                                       ("챌린지", 300)])  # fmt: skip
+    got = _topic_views(p)  # 챌린지 3개/전체 4개
+    assert got.median_views == 300.0 and got.at == NOW and got.reason is None
+    top = [(e.title, e.views) for e in got.examples]
+    assert top == [("챌 2", 500), ("챌 3", 300), ("챌 0", 100)]
+
+
+def test_topic_format_views_needs_two_videos_and_half_of_this_topic_shorts() -> None:
+    one = _topic_views(_shorts_topic("하나", 1, "IT", [("챌린지", 100)]))
+    assert one.median_views is None and one.at is None
+    assert one.reason == "이 주제 숏츠 중 챌린지 1개/전체 1개로 표본 부족"
+    five = [("챌린지", 100), ("챌린지", 200), ("리액션", 1), ("정보·팁", 2), ("브이로그", 3)]
+    low = _topic_views(_shorts_topic("넷", 1, "IT", five))
+    assert low.median_views is None  # 2/5 = 0.4 < 0.5
+    assert low.reason == "이 주제 숏츠 중 챌린지 2개/전체 5개로 표본 부족"
+
+
+def test_topic_format_views_only_when_picked_from_topic_shorts() -> None:
+    p = POPULAR.items[2]  # 문구 하울: 근거 숏츠 없음 → 전체 통계에서 고름
+    sp = brief.shorts_format(p, "IT", _shorts_stats(None))
+    assert sp.source == "all"
+    got = brief.topic_format_views(p, sp, NOW)
+    assert got.median_views is None and got.at is None and got.examples == []
+    assert got.reason == "주제 숏츠에서 고른 형식이 아님 (카테고리/전체 통계)"
+
+
+def test_topic_format_views_skip_unknown_views() -> None:
+    p = _shorts_topic("섞", 1, "IT", [("챌린지", 100), ("챌린지", None), ("챌린지", 300)])
+    got = _topic_views(p)
+    assert got.median_views == 200.0  # None을 뺀 [100, 300]
+    assert [e.views for e in got.examples] == [300, 100, None]  # 조회수 모르는 영상은 맨 뒤
+    few = _topic_views(_shorts_topic("빈", 1, "IT", [("챌린지", 100), ("챌린지", None)]))
+    assert few.median_views is None and "표본 부족" in (few.reason or "")
+    no_at = _topic_views(p, at=None)  # 인기 스냅샷 시각을 모르면 시각만 None + 이유
+    assert no_at.median_views == 200.0 and no_at.at is None
+    assert "기준 시각 없음" in (no_at.reason or "")
+
+
+def test_same_format_topics_get_their_own_topic_median(tmp_path: Path) -> None:
+    from ax_contracts.schemas.data import ShortsGroup, ShortsStatsOutput
+
+    popular = TrendPopularOutput(snapshot_at=NOW, items=[
+        _shorts_topic("고양이 댄스", 1, "IT", [("챌린지", 1000), ("챌린지", 3000)]),
+        _shorts_topic("문구 챌린지", 2, "IT", [("챌린지", 10), ("챌린지", 30), ("챌린지", 50)]),
+    ])  # fmt: skip
+    shorts = ShortsStatsOutput(status="known", snapshot_at=NOW, by_format=[
+        ShortsGroup(name="챌린지", count=9, median_views=12000.0),
+    ])  # fmt: skip
+    out = asyncio.run(
+        brief.make_brief(
+            TrendInsightBriefRequest(), BriefLLM(), env=_env(tmp_path), popular=popular,
+            popular_reason=None, rising=[], age_fn=_ages([]), promo=None, catalog=CATALOG,
+            shorts=shorts, now=NOW,
+        )
+    ).output  # fmt: skip
+    by = {i.topic: i for i in out.insights}
+    cat, stat = by["고양이 댄스"], by["문구 챌린지"]
+    assert cat.shorts_format == stat.shorts_format == "챌린지"
+    assert cat.shorts_format_median_views == stat.shorts_format_median_views == 12000.0
+    assert cat.shorts_format_topic_median_views == 2000.0
+    assert stat.shorts_format_topic_median_views == 30.0
+    assert cat.shorts_format_topic_at == NOW and cat.shorts_format_topic_reason is None
+    assert [e.title for e in stat.shorts_format_topic_examples] == [
+        "문구 챌린지 2", "문구 챌린지 1", "문구 챌린지 0"]  # fmt: skip
+    from data_agent.skills.brief_facts import insight_facts
+
+    row = next(f for f in insight_facts(cat) if f.label == "숏츠 형식 조회 중앙값 (이 주제)")
+    assert row.value == 2000.0 and row.period == NOW.isoformat()
+
+
+def test_old_insight_json_without_topic_format_fields_still_reads() -> None:
+    from ax_contracts.schemas.data import TrendInsight
+
+    old = TrendInsight(
+        insight_id="i1", rank=1, topic="주제", line="한 줄",
+        shorts_format="챌린지", shorts_format_median_views=10.0,
+    ).model_dump(mode="json")  # fmt: skip
+    for k in [k for k in old if k.startswith("shorts_format_topic")]:
+        del old[k]
+    got = TrendInsight.model_validate(old)
+    assert got.shorts_format_topic_median_views is None and got.shorts_format_topic_at is None
+    assert got.shorts_format_topic_examples == [] and got.shorts_format_topic_reason is None

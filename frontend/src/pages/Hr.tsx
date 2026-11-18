@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Loading } from "@/components/admin/bits";
+import { useCallback, useState, type FormEvent, type ReactNode } from "react";
+import { PageSkeleton } from "@/components/admin/bits";
 import CardSections from "@/components/hr/CardSections";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { ago } from "@/lib/format";
+import { usePoll } from "@/lib/usePoll";
 import CardBody from "@/components/hr/CardBody";
 import { authorKo, hr, plainText, type HrCard, type PlanCheck, type PlanDraft } from "@/lib/hr";
 
@@ -57,13 +58,9 @@ export default function HrPage() {
       setView({ cards, decided }); setUp(true);
     } catch (e) { setUp(false); setError(errText(e)); }
   }, []);
-  useEffect(() => {
-    load();
-    const poll = setInterval(load, 15000); // 15초마다 새로 받는다
-    return () => clearInterval(poll);
-  }, [load]);
+  usePoll(load, 15000); // 15초마다 새로 받는다(앞 요청이 안 끝났거나 다른 탭을 보면 건너뜀)
 
-  if (!view) return <Loading error={error} />;
+  if (!view) return <PageSkeleton error={error} />;
   const { cards } = view;
   const todo = cards.length;
   const tone = todo ? "text-amber-800" : "text-emerald-800";

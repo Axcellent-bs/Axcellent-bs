@@ -124,7 +124,7 @@ export function DeptUsage() {
     } catch (e) { setError(relayError(e as { status?: number; message: string })); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useVisibleInterval(load, POLL_MS); // 다른 탭을 보는 동안은 쉬고, 앞 요청이 오는 중이면 건너뛴다
+  useVisibleInterval(load, POLL_MS, { immediate: false }); // 다른 탭을 보는 동안은 쉬고, 앞 요청이 오는 중이면 건너뛴다
 
   if (!relayEnabled) return null;
   const windowMin = meta.window_seconds ? Math.round(meta.window_seconds / 60) : null;

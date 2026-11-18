@@ -195,6 +195,6 @@ export function ActionQueue({ action, intro, highlight = null, reloadKey = 0 }: 
     } catch (e) { setError((e as Error).message); }
   }, [names]);
   useEffect(() => { void load(); }, [load, reloadKey]);
-  useVisibleInterval(load, QUEUE_REFRESH_MS); // 다른 탭을 보는 동안은 쉬고, 앞 요청이 오는 중이면 건너뛴다
+  useVisibleInterval(load, QUEUE_REFRESH_MS, { immediate: false }); // 다른 탭을 보는 동안은 쉬고, 앞 요청이 오는 중이면 건너뛴다
   return <SafetyQueue reviews={reviews} error={error} highlight={highlight} reload={load} intro={intro} live />;
 }

@@ -29,7 +29,7 @@ const QUEUE_INTRO = "판매자 정산 묶음 지급 승인은 고객지원 담�
 export default function SellerSettlementsPage() {
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
-  useVisibleInterval(bump, REFRESH_MS); // 다른 탭을 보는 동안은 새로 받지 않는다
+  useVisibleInterval(bump, REFRESH_MS, { immediate: false }); // 다른 탭을 보는 동안은 새로 받지 않는다
 
   // 묶음을 요청하면 보류 큐를 다시 받고 그 건을 표시한다
   const [highlight, setHighlight] = useState<string | null>(null);

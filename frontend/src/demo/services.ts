@@ -57,7 +57,7 @@ export type Service = {
   children?: SubItem[]
 }
 
-const DEJAFIX_LOGO = `${import.meta.env.BASE_URL}dejafix-logo.png`
+const DEJAFIX_LOGO = `${import.meta.env.BASE_URL}dejafix-logo.webp` // 가장 크게 26px로 그린다 → 64px WebP (예전 256px PNG 25KB)
 
 export const SERVICES: Service[] = [
   {

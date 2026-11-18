@@ -2156,6 +2156,13 @@ class BorrowFormat(AxModel):
     source: Literal["topic", "category", "all"] | None = None  # 어느 단계 숏츠 통계에서 골랐는지
 
 
+class TopicFormatExample(AxModel):
+    """이 주제 숏츠 중 고른 형식인 영상 하나 (제목·조회수는 저장된 값 그대로, 모르면 None)."""
+
+    title: str | None = None
+    views: int | None = Field(default=None, ge=0)
+
+
 class TrendInsight(AxModel):
     insight_id: str = Field(min_length=1)  # 날짜 + 주제 기반 (같은 날 같은 주제면 같은 id)
     rank: int = Field(ge=1)
@@ -2181,8 +2188,15 @@ class TrendInsight(AxModel):
     shorts_format_samples: int | None = Field(default=None, ge=0)
     shorts_format_reason: str | None = None
     # 아래는 예전 응답은 없다. 숏츠 통계와 같은 시점의 그 형식 중앙값 조회수와 기준 시각
+    # (그 형식 전체 숏츠 중앙값 (주제와 무관), 같은 형식이면 모든 주제가 같은 값)
     shorts_format_median_views: float | None = Field(default=None, ge=0)
     shorts_format_at: UtcDatetime | None = None
+    # 아래는 예전 응답은 없다. 이 주제 자기 숏츠 중 고른 형식인 영상의 조회 중앙값 (source=topic일
+    # 때만, 표본이 모자라면 None). 기준 시각 = 이 주제 인기 스냅샷 시각. 예시 = 조회 큰 순 최대 3개
+    shorts_format_topic_median_views: float | None = Field(default=None, ge=0)
+    shorts_format_topic_at: UtcDatetime | None = None
+    shorts_format_topic_examples: list[TopicFormatExample] = Field(default_factory=list)
+    shorts_format_topic_reason: str | None = None  # 값이 없을 때 이유
     # 아래는 예전 응답은 없다. 형식을 어느 단계에서 골랐는지: topic = 이 주제 근거 숏츠,
     # category = 이 주제 카테고리의 숏츠 통계, all = 전체 숏츠 통계.
     # 그 단계의 표본: count = 이 형식인 숏츠 수, total = 형식을 분류한 숏츠 수
@@ -3244,6 +3258,7 @@ class InsightPastResult(AxModel):
     """인사이트의 지난번 캠페인 결과 하나 (campaign_result 값 그대로 + 띠 문장). 기획이 받는다.
 
     조회와 매출을 합친 점수는 없다. 측정 중이면 "측정 중"만 (예상치 없음).
+    views는 영상 조회 중앙값이다 (합계가 아님, 영상 수에 따라 커지지 않게).
     """
 
     campaign_id: str
@@ -3269,6 +3284,12 @@ class InsightPastResult(AxModel):
     band: PastBand = "gray"
     summary_line: str = ""  # "조회 목표의 N배 (영상 M개 중 K개 달성) · 매출 +N원 · 주문 +N건"
     note_line: str | None = None  # "지난번 개선 방향: …" 또는 조회·매출 반대 문구
+    # 아래는 예전 응답은 없다. 캠페인 영상(시험 제외)의 게시 7일 조회 중앙값과 그 근거
+    views: int | None = Field(default=None, ge=0)  # 캠페인 영상(시험 제외)의 게시 7일 조회 중앙값
+    views_at: UtcDatetime | None = None  # 그 7일 조회를 잰 시각 중 가장 늦은 시각
+    views_checkpoint: Literal["7d"] | None = None  # 값이 있을 때만 "7d"
+    views_videos: int = Field(default=0, ge=0)  # 중앙값에 쓴 영상 수
+    views_reason: str | None = None  # 값이 없을 때 이유
 
 
 # ---------------------------------------------------------------- 데이터분석 AI 직접 대화 (11/9)

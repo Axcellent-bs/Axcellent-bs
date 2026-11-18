@@ -537,15 +537,20 @@ class GithubVcsAdapter:
 
     async def _checks_sha(self, sha: str) -> Checks:
         # 개인용 토큰(fine-grained)에는 Checks 권한이 없다. 막히면 커밋 상태만으로 판단한다
-        try:
-            runs_raw = await self._call(
-                "GET", f"/commits/{sha}/check-runs", params={"per_page": PER_PAGE}
-            )
-        except VcsError as exc:
-            if exc.code not in ("forbidden", "not_found"):
-                raise
-            runs_raw = None
-        status = await self._call("GET", f"/commits/{sha}/status")
+        async def check_runs() -> Any:
+            try:
+                return await self._call(
+                    "GET", f"/commits/{sha}/check-runs", params={"per_page": PER_PAGE}
+                )
+            except VcsError as exc:
+                if exc.code not in ("forbidden", "not_found"):
+                    raise
+                return None
+
+        # 둘은 서로 기다릴 필요가 없어 한 번에 묻는다
+        runs_raw, status = await asyncio.gather(
+            check_runs(), self._call("GET", f"/commits/{sha}/status")
+        )
         runs = [
             CheckRun(name=r.get("name", ""), state=_run_state(r))
             for r in (runs_raw or {}).get("check_runs", [])
@@ -594,32 +599,40 @@ class GithubVcsAdapter:
         if state not in ("open", "merged", "closed", "all"):
             raise VcsError("invalid", f"모르는 상태: {state}")
         limit = max(1, min(int(limit), PER_PAGE))
+        return await self._list_changes(state, query, limit)
+
+    async def _list_changes(self, state: str, query: str | None, limit: int) -> list[ChangeSummary]:
         api_state = {"open": "open", "merged": "closed", "closed": "closed"}.get(state, "all")
-        raw: list[dict] = []
-        for page in range(1, LIST_PAGES + 1):
-            rows = await self._call(
-                "GET",
-                "/pulls",
-                params={
-                    "state": api_state,
-                    "sort": "updated",
-                    "direction": "desc",
-                    "per_page": PER_PAGE,
-                    "page": page,
-                },
-            )
-            rows = rows if isinstance(rows, list) else []
-            for pr in rows:
-                c = self._summary(pr)
-                if state in ("merged", "closed") and c.state != state:
-                    continue
-                if match_query(c, query):
-                    raw.append(pr)
-                if len(raw) >= limit:
+
+        async def rows_of() -> list[dict]:
+            raw: list[dict] = []
+            for page in range(1, LIST_PAGES + 1):
+                rows = await self._call(
+                    "GET",
+                    "/pulls",
+                    params={
+                        "state": api_state,
+                        "sort": "updated",
+                        "direction": "desc",
+                        "per_page": PER_PAGE,
+                        "page": page,
+                    },
+                )
+                rows = rows if isinstance(rows, list) else []
+                for pr in rows:
+                    c = self._summary(pr)
+                    if state in ("merged", "closed") and c.state != state:
+                        continue
+                    if match_query(c, query):
+                        raw.append(pr)
+                    if len(raw) >= limit:
+                        break
+                if len(raw) >= limit or len(rows) < PER_PAGE:
                     break
-            if len(raw) >= limit or len(rows) < PER_PAGE:
-                break
-        counts = await self._comment_counts(api_state)
+            return raw
+
+        # 코멘트 수는 PR 목록과 따로 와서 PR 목록을 받는 동안 같이 묻는다
+        raw, counts = await asyncio.gather(rows_of(), self._comment_counts(api_state))
         shas = [
             sha
             for pr in raw
@@ -763,6 +776,9 @@ class GithubVcsAdapter:
         if state not in ISSUE_STATES:
             raise VcsError("invalid", f"모르는 상태: {state}")
         limit = max(1, min(int(limit), PER_PAGE))
+        return await self._list_issues(state, query, limit)
+
+    async def _list_issues(self, state: str, query: str | None, limit: int) -> list[IssueSummary]:
         out: list[IssueSummary] = []
         for page in range(1, LIST_PAGES + 1):
             rows = await self._call(
@@ -891,7 +907,9 @@ class GithubVcsAdapter:
         return _time((((got or {}).get("commit") or {}).get("committer") or {}).get("date"))
 
     async def list_branches(self, limit: int = BRANCH_LIMIT) -> list[Branch]:
-        default = await self._default_branch()
+        return await self._list_branches(limit)
+
+    async def _branch_rows(self, limit: int) -> list[dict]:
         rows: list[dict] = []
         for page in range(1, -(-limit // PER_PAGE) + 1):
             got = await self._call("GET", "/branches", params={"per_page": PER_PAGE, "page": page})
@@ -899,16 +917,18 @@ class GithubVcsAdapter:
             rows.extend(items)
             if len(items) < PER_PAGE:
                 break
-        rows = rows[:limit]
+        return rows[:limit]
+
+    async def _list_branches(self, limit: int) -> list[Branch]:
+        # 기본 브랜치·목록을 한 번에, 그다음 브랜치별 비교·기준 마지막 커밋을 한 번에 묻는다
+        default, rows = await asyncio.gather(self._default_branch(), self._branch_rows(limit))
         others = [r["name"] for r in rows if r.get("name") != self.base_branch][:BRANCH_COMPARE]
-        found = await asyncio.gather(*(self._compare(n) for n in others))
-        compared = dict(zip(others, found, strict=True))
         base_row = next((r for r in rows if r.get("name") == self.base_branch), None)
-        base_at = (
-            await self._last_commit(str((base_row.get("commit") or {}).get("sha") or ""))
-            if base_row
-            else None
+        base_sha = str(((base_row or {}).get("commit") or {}).get("sha") or "")
+        base_at, *found = await asyncio.gather(
+            self._last_commit(base_sha), *(self._compare(n) for n in others)
         )
+        compared = dict(zip(others, found, strict=True))
         out: list[Branch] = []
         for r in rows:
             name = str(r.get("name") or "")
@@ -1009,6 +1029,9 @@ class GithubVcsAdapter:
         self, branches: list[str] | None = None, limit: int = GRAPH_LIMIT
     ) -> Graph:
         limit = max(1, min(int(limit), GRAPH_MAX))
+        return await self._list_graph(branches, limit)
+
+    async def _list_graph(self, branches: list[str] | None, limit: int) -> Graph:
         default, rows, prs = await asyncio.gather(
             self._default_branch(),
             self._call("GET", "/branches", params={"per_page": PER_PAGE}),

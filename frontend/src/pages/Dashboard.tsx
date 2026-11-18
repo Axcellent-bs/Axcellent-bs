@@ -34,7 +34,7 @@ function InquiryPullBanner() {
   const [s, setS] = useState<InquiryPullStatus | null>(null);
   const load = useCallback(() => support.inquiryPull().then((e) => setS(e.data)).catch(() => setS(null)), []);
   useEffect(() => { void load(); }, [load]);
-  useVisibleInterval(load, PULL_REFRESH_MS); // 다른 탭을 보는 동안은 쉬고, 앞 요청이 오는 중이면 건너뛴다
+  useVisibleInterval(load, PULL_REFRESH_MS, { immediate: false }); // 다른 탭을 보는 동안은 쉬고, 앞 요청이 오는 중이면 건너뛴다
   if (!s || !s.enabled) return null;
   const down = s.connected === false;
   const claimsDown = s.claims_unavailable === true;

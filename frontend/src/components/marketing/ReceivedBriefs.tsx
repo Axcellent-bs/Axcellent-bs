@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { Skeleton } from "@/components/finance/bits";
+import { useVisibleInterval } from "@/lib/visibleInterval";
 import { ago, shortDateTime } from "@/lib/format";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { FIELD_SOURCE_KO, STATUS_STEPS, briefStatusKo, briefs, briefsError, briefsEnabled, draftStateKo, handoffReasonKo, mediaFieldKo, reviseProblemKo, safeLink, type BriefList, type MediaKindChoice, type StoredBrief } from "@/lib/briefs";
@@ -186,12 +188,7 @@ export function ReceivedBriefs() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!briefsEnabled) return;
-    void load();
-    const timer = window.setInterval(() => { void load(); }, REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, [load]);
+  useVisibleInterval(() => (briefsEnabled ? load() : undefined), REFRESH_MS);
 
   const items = list?.items ?? [];
   const current = items.find((i) => i.proposal_id === selected) ?? items[0] ?? null;
@@ -205,7 +202,7 @@ export function ReceivedBriefs() {
 
       {!briefsEnabled && <p className="py-4 text-center text-sm text-ink-500">받은 기획안 읽기 연결이 꺼져 있습니다. 화면 중계 서버(dashboard-api) 주소를 설정해 주세요.</p>}
       {error && <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{error}</p>}
-      {briefsEnabled && !list && !error && <p className="text-sm text-ink-500">불러오는 중입니다.</p>}
+      {briefsEnabled && !list && !error && <Skeleton stats={0} lines={3} />}
       {list && items.length === 0 && <p className="py-6 text-center text-sm text-ink-500">{list.unknown_reason ?? "받은 기획안이 없습니다."}</p>}
 
       {items.length > 0 && (

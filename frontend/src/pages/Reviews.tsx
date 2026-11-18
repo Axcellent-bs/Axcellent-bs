@@ -44,7 +44,7 @@ export default function ReviewsPage() {
     } catch (e) { setError((e as Error).message || OFFLINE); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useVisibleInterval(load, REFRESH_MS); // 다른 탭을 보는 동안은 새로 받지 않고, 앞 요청이 오는 중이면 건너뛴다
+  useVisibleInterval(load, REFRESH_MS, { immediate: false }); // 다른 탭을 보는 동안은 새로 받지 않고, 앞 요청이 오는 중이면 건너뛴다
 
   async function decide(inquiryId: number, status: "visible" | "hidden") {
     setBusy(inquiryId); setError(null);

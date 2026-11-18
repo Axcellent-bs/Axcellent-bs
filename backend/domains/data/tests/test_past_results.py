@@ -134,3 +134,62 @@ def test_keys_pick_campaigns_by_proposal_id_or_insight_id(tmp_path: Path) -> Non
     assert ids(keys={"PROP-7"}) == [("cmp_2", "PROP-7", None)]
     assert ids(keys={"ins_1", "PROP-7"}) == [("cmp_1", None, "ins_1"), ("cmp_2", "PROP-7", None)]
     assert ids(keys=set()) == [] and ids(keys={"PROP-404"}) == []
+
+
+# ------------------------------------------------ 게시 7일 조회 중앙값 (views·views_at)
+
+
+def _video(views: int | None, at: datetime | None = None, *, test: bool = False,
+           status: str = "known", verdict: str = "achieved") -> dict:  # fmt: skip
+    seven = {"checkpoint": "7d", "status": status, "views": views, "measured_at": at}
+    return {"status": "known", "test": test, "verdict": verdict, "checkpoints": [seven]}
+
+
+def _past(videos: list[dict]):  # noqa: ANN202
+    from ax_contracts.schemas.data import CampaignResultOutput
+
+    r = CampaignResultOutput.model_validate({"campaign_id": "cmp_v", "videos": videos})
+    return past_results.to_past(r)
+
+
+def test_views_is_the_median_of_seven_day_views_with_latest_measured_at() -> None:
+    a, b, c = PUB, PUB + timedelta(hours=5), PUB + timedelta(hours=2)
+    got = _past([_video(1000, a), _video(5000, b), _video(3000, c)])
+    assert (got.views, got.views_videos, got.views_checkpoint) == (3000, 3, "7d")
+    assert got.views_at == b and got.views_reason is None
+    even = _past([_video(1000), _video(2000)])  # 짝수 개는 가운데 둘의 평균, 잰 시각 모르면 None
+    assert even.views == 1500 and even.views_at is None and even.views_videos == 2
+
+
+def test_views_skip_test_videos() -> None:
+    got = _past([_video(1000, PUB), _video(3000, PUB), _video(900_000, PUB, test=True)])
+    assert got.views == 2000 and got.views_videos == 2
+
+
+def test_views_none_with_reason_when_not_measured() -> None:
+    measuring = _past([_video(None, status="unknown", verdict="measuring")])
+    assert measuring.views is None and measuring.views_checkpoint is None
+    assert measuring.views_videos == 0
+    assert measuring.views_reason == "게시 7일이 아직 안 됨 (측정 중)"
+    empty = _past([])
+    assert empty.views is None and empty.views_reason == "시험 영상 말고 잰 영상이 없음"
+    only_test = _past([_video(1000, PUB, test=True)])
+    assert only_test.views is None and only_test.views_reason == "시험 영상 말고 잰 영상이 없음"
+    missed = _past([_video(None, status="unknown", verdict="excluded")])
+    assert missed.views_reason == "게시 7일 조회를 잰 값이 없음"
+
+
+def test_views_do_not_change_existing_fields() -> None:
+    got = _past([_video(1000, PUB), _video(5000, PUB), _video(3000, PUB)])
+    assert got.views_label == "조회 판정 없음"
+    assert got.summary_line == "조회 판정 없음 · 매출 측정 불가"
+
+
+def test_old_past_result_json_without_views_still_reads() -> None:
+    from ax_contracts.schemas.data import InsightPastResult
+
+    old = {"campaign_id": "cmp_1", "views_label": "조회 달성", "sales_label": "더 팔림",
+           "band": "green", "summary_line": "x"}  # fmt: skip
+    got = InsightPastResult.model_validate(old)
+    assert got.views is None and got.views_at is None and got.views_checkpoint is None
+    assert got.views_videos == 0 and got.views_reason is None
