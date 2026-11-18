@@ -335,8 +335,9 @@ class GraphInstagramAdapter:
         return PublishingLimit(usage, total if ok_total else None)
 
     async def get_media(self, media_id: str) -> MediaInfo:
-        # `is_ai_generated` 필드는 요청하지 않는다(모르는 필드면 호출 전체가 실패할 수 있다).
-        # 앱 화면의 라벨은 사람이 따로 확인해 기록한다(설계 9-2).
+        # `is_ai_generated`는 Meta 문서(IG Media 읽기 필드, "has an AI label")에 있으나
+        # 이 로그인 경로에서도 되는지는 확인하지 못했다. 모르는 필드면 호출 전체가 실패할 수 있어
+        # permalink 조회와 따로 부르고, 실패하면 모름(None)으로 둔다(확인됨으로 만들지 않는다).
         fields = "permalink,timestamp,media_product_type"
         body = await self._request("GET", media_id, params={"fields": fields})
         return MediaInfo(
@@ -344,8 +345,16 @@ class GraphInstagramAdapter:
             permalink=_text(body.get("permalink")),
             timestamp=_text(body.get("timestamp")),
             media_product_type=_text(body.get("media_product_type")),
-            is_ai_generated=None,
+            is_ai_generated=await self._read_ai_label(media_id),
         )
+
+    async def _read_ai_label(self, media_id: str) -> bool | None:
+        try:
+            body = await self._request("GET", media_id, params={"fields": "is_ai_generated"})
+        except (IgApiError, IgResponseLost):
+            return None
+        value = body.get("is_ai_generated")
+        return value if isinstance(value, bool) else None
 
     async def delete_media(self, media_id: str) -> None:
         raise NotImplementedError("Instagram Login 경로에는 삭제 API가 없다. 앱에서 사람이 지운다")
