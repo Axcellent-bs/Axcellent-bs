@@ -12,7 +12,7 @@ const has = (v) => typeof v === "string" && v.trim() !== "";
 
 // ----- 링크 버튼 (비어 있으면 안 나온다)
 const brochureBtn = (cls = "btn btn-gold") => (has(C.links.brochureUrl) ? `<a class="${cls}" href="${esc(C.links.brochureUrl)}" download>${esc(C.links.brochureLabel)}</a>` : "");
-const contactBtn = (cls = "btn btn-ghost") => (has(C.links.contactUrl) ? `<a class="${cls}" href="${esc(C.links.contactUrl)}" rel="noopener">${esc(C.links.contactLabel)}</a>` : "");
+const contactBtn = (cls = "btn btn-gold") => (has(C.links.contactUrl) ? `<a class="${cls}" href="${esc(C.links.contactUrl)}" rel="noopener">${esc(C.links.contactLabel)}</a>` : "");
 const contactNote = () => (has(C.links.contactNote) ? `<p class="cta-note">${esc(C.links.contactNote)}</p>` : "");
 
 // ----- 히어로 허브 그림 (총괄 AI 가운데, 9명이 둘레에)
@@ -226,7 +226,7 @@ const header = `
     <a class="brand-logo" href="#top" aria-label="AXcellent 처음으로"><img src="assets/logo-white.webp" alt="AXcellent" width="156" height="30"></a>
     <button class="menu" id="menu" aria-expanded="false" aria-controls="nav">메뉴</button>
     <nav class="nav" id="nav" aria-label="구역 이동">${C.nav.filter(([id]) => id !== "posts" || showPosts).map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join("")}</nav>
-    <div class="top-cta">${brochureBtn("btn btn-gold btn-sm top-pdf")}${contactBtn("btn btn-ghost btn-sm")}</div>
+    <div class="top-cta">${brochureBtn("btn btn-gold btn-sm top-pdf")}${contactBtn("btn btn-gold btn-sm")}</div>
   </div>
 </header>`;
 

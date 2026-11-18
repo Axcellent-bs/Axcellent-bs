@@ -307,3 +307,5 @@ body { overflow-x: clip; }
 .vgroup-h h3 { font-size: 24px; font-weight: 800; }
 .vgroup-h + .vposts { margin-top: 16px; align-items: start; }
 @media (min-width: 780px) { .vpost-wide { grid-column: span 2; } }
+
+.top-cta .btn { white-space: nowrap; }
