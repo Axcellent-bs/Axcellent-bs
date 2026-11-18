@@ -18,7 +18,7 @@ export default {
   // 비워 두면 그 버튼은 화면에 나오지 않는다 (확정되기 전에 잘못된 링크가 나가지 않게)
   links: {
     // 브로셔 PDF 받기. 예: "assets/AXcellent_홍보브로셔.pdf" (PDF 검수가 끝나고 공개하기로 정한 뒤에 채운다)
-    brochureUrl: "assets/axcellent-brochure.pdf",
+    brochureUrl: "",
     brochureLabel: "브로셔 PDF 받기",
     // 상담 문의. 예: Instagram DM 주소 또는 mailto 주소. 연락 수단이 정해지면 채운다
     contactUrl: "",
