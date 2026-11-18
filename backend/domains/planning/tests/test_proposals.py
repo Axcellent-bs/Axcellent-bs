@@ -610,7 +610,9 @@ def test_measure_sends_proposal_products() -> None:
     }  # fmt: skip
 
     async def caller(target, req):
-        seen.append(dict(req.input))
+        # 받을 때 방향 선택지용 trend_insight_brief도 같은 caller로 온다 (11/18): 성과 재기만 본다
+        if req.skill == "campaign_effect":
+            seen.append(dict(req.input))
         return AgentResult(meta=req.meta, status=TaskStatus.COMPLETED, output=effect)
 
     svc = _svc(marketing=Brief(), insights=proposals.DataInsights(caller=caller))

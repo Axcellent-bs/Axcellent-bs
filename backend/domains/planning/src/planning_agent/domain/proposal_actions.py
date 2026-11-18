@@ -21,6 +21,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ax_contracts.schemas.data import TrendInsight
+from ax_contracts.schemas.marketing_channels import ChannelFollowersOutput
 from ax_contracts.schemas.planning import (
     CampaignBriefInput,
     InsightFact,
@@ -42,6 +44,7 @@ from ax_workflow.models import (
     Spec,
     State,
 )
+from planning_agent import idea_options
 from planning_agent import proposals as ext
 
 PULL_CTX = "ctx_proposals"
@@ -339,7 +342,12 @@ class ProposalMixin:
         if gone is not None:  # 사람이 최근 지운 제안: 일주일 동안 다시 만들지 않는다
             out = {"outcome": "deleted_recently", "proposal_id": gone.id}
             return ActionResult(changed=False, outcome="deleted_recently", output=out)
-        draft = await ext.write(self._proposal_writer, inp, f"insight:{inp.insight_id}")
+        draft, (trends, followers) = await asyncio.gather(
+            ext.write(self._proposal_writer, inp, f"insight:{inp.insight_id}"),
+            self._option_sources(f"insight:{inp.insight_id}"),
+        )
+        scale = idea_options.scale_facts(inp.past, followers)
+        options = idea_options.build_options(inp, trends, scale)
 
         async def run(s: State) -> ActionResult:
             dup = _same_insight(s, inp.insight_id, frm) or (_find(s, near) if near else None)
@@ -362,10 +370,13 @@ class ProposalMixin:
                 format=draft.format, written_by=draft.written_by, warnings=draft.warnings,
                 created_at=self.clock(), follow_of=follow.id if follow else None,
                 past=[ProposalPast(**x.model_dump()) for x in inp.past],
+                options=options, scale=scale,
             )  # fmt: skip
             s.proposals.append(p)
             warn = f", 경고 {len(p.warnings)}" if p.warnings else ""
-            text = f'{pid} "{p.title}" 제안 (근거 {len(p.facts)}개{warn})'
+            pick = next((o.label for o in options if o.recommended), None)
+            rec = f"추천 {pick}" if pick else "추천 없음"
+            text = f'{pid} "{p.title}" 제안 (근거 {len(p.facts)}개{warn}, {rec})'
             if follow is not None:
                 text += f"\n후속 기획: {follow.id} 캠페인을 이어 감 (지난 결과 {len(p.past)}개)"
             act = self._act(self.clock(), _ctx(p), frm, "planning", "receive_insight", "A2A", text)
@@ -375,6 +386,26 @@ class ProposalMixin:
             return ActionResult(outcome="created", output=out)
 
         return await self._apply(run)
+
+    async def _option_sources(
+        self: Any, ctx: str
+    ) -> tuple[list[TrendInsight] | None, ChannelFollowersOutput | None]:
+        """방향 선택지에 쓰는 트렌드 목록(데이터분석)과 팔로워 수(마케팅).
+        꺼졌거나 실패하면 None."""
+
+        async def none() -> None:
+            return None
+
+        insights, marketing = self._insights, self._marketing
+        trends_f = getattr(insights, "trends", None)
+        fol_f = getattr(marketing, "followers", None)
+        trends, fol = await asyncio.gather(
+            trends_f(ctx) if trends_f else none(), fol_f(ctx) if fol_f else none()
+        )
+        return (
+            trends if isinstance(trends, list) else None,
+            fol if isinstance(fol, ChannelFollowersOutput) else None,
+        )
 
     async def receive_campaign_update(
         self: Any, *, inp: ReceiveCampaignUpdateInput, requester: str = "marketing"
