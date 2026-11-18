@@ -45,6 +45,9 @@ function Wiring({ from, to, ask }: { from?: Wire[]; to?: Wire[]; ask?: { who: Wi
   );
 }
 
+// 마케팅 자동 전송(campaign_auto.AUTO_SOURCE). 광고비가 승인 예산이라 손익이 잠정이다. 값을 바꾸면 마케팅과 맞춘다
+const AUTO_BUDGET_SOURCE = "marketing.auto.approved_budget";
+
 const pct = (v: number | null) => (v === null ? "-" : `${(v * 100).toFixed(1)}%`);
 
 export function CampaignsSection({ tick }: { tick: number }) {
@@ -86,7 +89,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
                     <tbody>
                       {v.campaigns.map((c) => (
                         <tr key={c.campaign_id} className="border-t border-ink-100" title={[`출처: ${c.source}`, c.effect_generated_at ? `측정 시각: ${c.effect_generated_at}` : "", c.measured_gmv_krw != null && c.measured_gmv_krw < 0 ? `측정 증분 판매액: ${c.measured_gmv_krw}원` : "", c.measured_orders != null && c.measured_orders < 0 ? `측정 증분 주문: ${c.measured_orders}건` : ""].filter(Boolean).join("\n")}>
-                          <td className="py-2 font-medium text-ink-900">{c.campaign_name}</td>
+                          <td className="py-2 font-medium text-ink-900">{c.campaign_name}{c.source === AUTO_BUDGET_SOURCE && <> <span title="마케팅이 캠페인 종료 뒤 자동으로 보낸 결과입니다. 광고비가 실제 집행액이 아니라 승인 예산이라 손익이 실제와 다를 수 있습니다. 사람이 실제 집행액으로 다시 저장하면 이 표시가 사라집니다."><Chip label="예산 기준(잠정)" tone={TONE.warn} /></span></>}</td>
                           <td className="py-2 text-ink-700">{c.channel}</td>
                           <td className="py-2 text-right tabular-nums">{krw(c.spend_krw)}</td>
                           <td className="py-2 text-right tabular-nums">{c.gmv_krw === null ? "자료 없음" : krw(c.gmv_krw)}</td>
