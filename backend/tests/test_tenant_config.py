@@ -37,7 +37,9 @@ CAT = {"AX_TENANT": "catbooks"}  # 캣북스를 고른 설치 (기본값은 없�
 
 
 @pytest.mark.parametrize(
-    "folder", [TENANTS / "catbooks", FAKE_TENANTS / "coldchain"], ids=lambda p: p.name
+    "folder",
+    [TENANTS / "catbooks", TENANTS / "nubi", FAKE_TENANTS / "coldchain"],
+    ids=lambda p: p.name,
 )
 def test_a_tenant_folder_points_at_a_catalog_a_connector_and_an_org_chart(folder: Path) -> None:
     tenant = tenant_env.read_tenant(folder)
@@ -163,3 +165,15 @@ def test_a_chosen_tenant_sets_its_timezone(tmp_path: Path) -> None:
     assert out["DATA_TENANT_TIMEZONE"] == "Asia/Seoul"
     given, _ = tenant_env.resolve({**CAT, "DATA_TENANT_TIMEZONE": "UTC"}, local_org=tmp_path / "x")
     assert "DATA_TENANT_TIMEZONE" not in given  # 이미 준 값은 그대로
+
+
+def test_nubi_uses_its_own_catalog_and_reads_through_the_site_adapter() -> None:
+    """누비투어: 자기 API를 사이트 변환기로 읽어 커넥터는 shop-api, 지표는 변환기로 받는 것만."""
+    tenant = tenant_env.read_tenant(TENANTS / "nubi")
+    assert tenant["name"] == "누비투어" and tenant["catalog"] == "nubi"
+    assert tenant["connector"] == "shop-api"
+    from data_agent.catalog import load_catalog
+
+    catalog = load_catalog("nubi")
+    assert {m.id for m in catalog.metrics} == {"order_count", "inquiry_count"}
+    assert catalog.impact.unit_label == "예약"
