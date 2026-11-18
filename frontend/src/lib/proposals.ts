@@ -19,6 +19,14 @@ export interface ProposalHandoff { ok: boolean; reason?: string; campaign?: stri
 /** 이 인사이트로 했던 지난 캠페인 결과 (데이터분석 문장 그대로) */
 export interface ProposalPast { campaignId: string; viewsLabel: string; salesLabel: string; band: string; summaryLine: string; noteLine?: string; actions: string[] }
 
+/** 기획 방향 선택지 (11/18): 갈래·추천은 백엔드 코드 규칙(idea_options.py)이 정한다 */
+export type IdeaAngle = 'ride_trend' | 'own_trend' | 'with_product'
+/** 올라탈 유행 후보 (데이터분석 값 그대로) */
+export interface TrendRef { topic: string; medianViews?: number; at?: string; examples: string[] }
+export interface IdeaOption { id: IdeaAngle; label: string; available: boolean; blockedReason?: string; refs: TrendRef[]; recommended: boolean; reason?: string }
+/** 고객사 규모 숫자 (받은 때 기준, 모르면 비움) */
+export interface ScaleFacts { followers?: number; followersChannel?: string; pastViewsMedian?: number; pastViewsCount: number }
+
 export interface Proposal {
   id: string // PROP-n
   title: string
@@ -47,6 +55,9 @@ export interface Proposal {
   spec?: string // 확정해 만든 기획안 (기획서 SPEC-n, origin 'proposal')
   past?: ProposalPast[] // 지난 캠페인 결과 (받은 때 기준)
   followOf?: string // 후속 기획이면 이어 가는 앞 제안 PROP-n
+  options: IdeaOption[] // 방향 선택지 (11/18 이전 제안은 빈 목록)
+  scale?: ScaleFacts
+  angle?: IdeaAngle // 사람이 고른 방향 (없으면 방향 선택 대기)
 }
 
 export const PROPOSAL_STAGES = ['받음', '기획안', '실행', '성과'] as const
@@ -82,6 +93,7 @@ export type ProposalAction =
   | { type: 'rejectProposal'; proposal: string; reason: string } // 폐기
   | { type: 'deleteProposal'; proposal: string } // 삭제 (기획안으로 만든 기획서·요청도 같이, 개발 작업이 나갔으면 안 됨)
   | { type: 'measureProposal'; proposal: string } // 성과 재기 (데이터분석 campaign_effect, insight_id·제안 id 함께)
+  | { type: 'chooseAngle'; proposal: string; angle: IdeaAngle } // 방향 고르기 → 그 방향으로 기획 판단 다시 쓰기
   | { type: 'editProposal'; proposal: string; title?: string; idea?: string; why?: string; targetLabel?: string; targetValue?: string }
 
 

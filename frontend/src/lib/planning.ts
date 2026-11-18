@@ -138,6 +138,12 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
         result: r ? { ...r, at: kst(r.at) } : undefined,
         past: ((Array.isArray(p.past) ? p.past : []) as Json[]).map((x) => ({ ...x, noteLine: x.noteLine ?? undefined, actions: x.actions ?? [] })),
         followOf: p.followOf ?? undefined,
+        angle: p.angle ?? undefined,
+        scale: p.scale ? { ...(p.scale as Json), followers: (p.scale as Json).followers ?? undefined, followersChannel: (p.scale as Json).followersChannel ?? undefined, pastViewsMedian: (p.scale as Json).pastViewsMedian ?? undefined } : undefined,
+        options: ((Array.isArray(p.options) ? p.options : []) as Json[]).map((o) => ({
+          ...o, blockedReason: o.blockedReason ?? undefined, reason: o.reason ?? undefined,
+          refs: ((Array.isArray(o.refs) ? o.refs : []) as Json[]).map((r) => ({ ...r, medianViews: r.medianViews ?? undefined, at: kst(r.at) || undefined, examples: r.examples ?? [] })),
+        })),
       } as unknown as Proposal
     }),
     autoPolicy: {

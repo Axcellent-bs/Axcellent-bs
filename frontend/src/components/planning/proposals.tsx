@@ -4,7 +4,7 @@ import { sourceLabel } from '@/lib/planningLabels'
 import { useEffect, useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type State as S } from '@/lib/planningData'
-import { PROPOSAL_SKILL_LABEL, PROPOSAL_STAGES, WRITTEN_BY_LABEL, handoffRetrying, proposalEnded, proposalOpen, proposalStage, type Proposal, type ProposalFact } from '@/lib/proposals'
+import { PROPOSAL_SKILL_LABEL, PROPOSAL_STAGES, WRITTEN_BY_LABEL, handoffRetrying, proposalEnded, proposalOpen, proposalStage, type IdeaOption, type Proposal, type ProposalFact } from '@/lib/proposals'
 import { Tag } from '@/components/planning-common/parts'
 import { LinkedLines, go, idText, toPath } from '@/components/planning-common/links'
 import { Pager, usePage } from '@/components/planning-common/pager'
@@ -178,6 +178,50 @@ function EffectFacts({ facts }: { facts: ProposalFact[] }) {
   )
 }
 
+/** 조회수 표기: 1만 이상은 "4.8만", 아래는 쉼표 (데이터분석 값 그대로, 계산은 단위만) */
+const views = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1).replace(/\.0$/, '')}만` : n.toLocaleString('ko-KR'))
+
+/** 방향 선택지 (11/18): 갈래 3개 중 하나를 고르면 그 방향으로 할 일·이유·목표를 다시 쓴다. 예전 제안은 안 보인다 */
+function AngleChoice({ p, d, open }: { p: Proposal; d: Dispatch<Action>; open: boolean }) {
+  const toast = useToast()
+  if (p.options.length === 0) return null
+  const chosen = p.options.find((o) => o.id === p.angle)
+  const pick = (o: IdeaOption) => {
+    if (o.id === p.angle) return
+    if (p.writtenBy === 'human' && !window.confirm('고친 글을 새 방향 글로 바꿀까요?')) return
+    d({ type: 'chooseAngle', proposal: p.id, angle: o.id })
+    toast.show(`${idText(p.id)} 방향: ${o.label}`)
+  }
+  return (
+    <div className="pp-angle">
+      <div className="pp-angle-head">
+        <span>이 인사이트를 어떤 방향으로 쓸까요?</span>
+        <span className="pp-by">{chosen ? `고른 방향: ${chosen.label}` : '방향 선택 대기'}</span>
+      </div>
+      <ul className="pp-angle-list">
+        {p.options.map((o) => (
+          <li key={o.id} className={o.id === p.angle ? 'on' : undefined}>
+            <button type="button" className="pp-angle-btn" disabled={!open || !o.available} aria-pressed={o.id === p.angle} onClick={() => pick(o)}>
+              {o.label}{o.recommended && <span className="pp-angle-rec">추천</span>}
+            </button>
+            <div className="pp-angle-note">
+              {!o.available && o.blockedReason && <div className="muted small">고를 수 없음: {o.blockedReason}</div>}
+              {o.refs.length > 0 && (
+                <div className="small">
+                  올라탈 후보: {o.refs.map((r) => `${r.topic}${r.medianViews != null ? ` (중앙값 조회 ${views(r.medianViews)}${r.at ? `, ${r.at} 기준` : ''})` : ''}`).join(' · ')}
+                  {o.refs.some((r) => r.examples.length > 0) && <div className="muted">대표 영상: {o.refs.flatMap((r) => r.examples).slice(0, 3).join(' · ')}</div>}
+                  <div className="muted">따라 할 수 있는지는 사람이 확인</div>
+                </div>
+              )}
+              {o.reason && <div className="muted small">{o.reason}</div>}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function ProposalView({ s, d, p }: P & { p: Proposal }) {
   const toast = useToast()
   const open = proposalOpen(p)
@@ -240,6 +284,7 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
 
         <section className="pp-part">
           <h3 className="pp-part-h"><span className="pp-no">2</span>기획 판단<span className="pp-by">{WRITTEN_BY_LABEL[p.writtenBy]}</span></h3>
+          <AngleChoice p={p} d={d} open={open} />
           <dl className="pp-fields">
             <dt>할 일</dt>
             <dd>{open ? <textarea key={`i-${p.id}`} className="blk-p" rows={2} defaultValue={p.idea} onBlur={(e) => save('idea', e.target.value)} aria-label="할 일" /> : p.idea}</dd>
