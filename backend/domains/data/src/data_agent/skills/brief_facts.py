@@ -87,6 +87,9 @@ def insight_facts(i: TrendInsight) -> list[DataFact]:
     f.add("숏츠 형식 단계 표본 (전체)", i.shorts_format_source_total, "개", "shorts_stats")
     f.add("숏츠 형식 조회 중앙값", i.shorts_format_median_views, "회", "shorts_stats",
           period=_at(i.shorts_format_at))  # fmt: skip
+    # 이 주제 자기 숏츠 중 그 형식인 영상의 조회 중앙값 (기준 시각 = 이 주제 인기 스냅샷 시각)
+    f.add("숏츠 형식 조회 중앙값 (이 주제)", i.shorts_format_topic_median_views, "회", "youtube",
+          link=yt_link, period=_at(i.shorts_format_topic_at))  # fmt: skip
     s = i.shorts_fit  # v2 칸: 숏츠 적합도·목표 참고값 (표본이 모자라면 None이라 넣지 않음)
     if s is not None:
         at = _at(s.snapshot_at)
