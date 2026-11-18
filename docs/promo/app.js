@@ -14,6 +14,13 @@
         menu.setAttribute("aria-expanded", "false");
       }
     });
+    // Esc로 닫고 메뉴 버튼으로 돌아간다 (키보드로 열었으면 키보드로 닫을 수 있어야 한다)
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !nav.classList.contains("open")) return;
+      nav.classList.remove("open");
+      menu.setAttribute("aria-expanded", "false");
+      menu.focus();
+    });
   }
   // 지금 보고 있는 구역을 메뉴에 표시한다
   if (nav && "IntersectionObserver" in window) {
