@@ -205,17 +205,21 @@ export default {
   // item: { title, caption, src(mp4, assets/demo/ 아래), ratio(예: "9 / 16"), poster, postUrl(원 게시물 링크, 선택), customer(고객사 이름, 선택), aiMade(true면 "AI가 만든 영상" 표시) }
   posts: {
     kicker: "콘텐츠",
-    title: ["고객사를 위해", "만든 콘텐츠"],
-    lead: "AXcellent가 고객사를 위해 만든 영상과 인스타그램 게시물을 모았습니다. 반응 수치는 실제로 측정한 값이 생긴 뒤에만 표시합니다.",
+    title: ["AXcellent가", "만든 콘텐츠"],
+    lead: "AXcellent 홍보 영상과, 시연용 가상 고객사 캣북스를 위해 만든 인스타그램 게시물을 모았습니다. 반응 수치는 실제로 측정한 값이 생긴 뒤에만 표시합니다.",
     // 고객사별 인스타 게시물(instagram/instagram.json에서 읽는다). 게시물이 있는 고객사만 보인다
     instagram: instagram.casesItems,
     emptyTitle: "콘텐츠 준비 중",
     // true면 영상이 없어도 빈 칸 "준비 중"을 보여 준다. 기본은 영상이 올라올 때까지 구역과 메뉴를 숨긴다
     showEmpty: false,
     emptySlots: 2,
-    // 영상 추가: mp4를 assets/demo/에 넣고(영문 소문자·숫자·-, 15MB 이하) 아래에 한 줄을 더한다. ratio는 세로 영상이면 "9 / 16"
+    // 영상 묶음 이름(영상 카드 위에 보인다)
+    itemsTitle: "AXcellent 홍보 영상",
+    // 영상 추가: mp4를 assets/demo/에 넣고(영문 소문자·숫자·-, 15MB 이하) 아래에 한 줄을 더한다.
+    // ratio는 영상 비율(세로 "9 / 16", 가로 "16 / 9"), 가로 영상은 wide: true로 두 칸 폭으로 보인다
     items: [
-      { title: "캣북스 영상 (시연용)", customer: "캣북스", caption: "시연용 가상 고객사 캣북스 계정의 영상입니다.", src: "assets/demo/catbooks-video.mp4", ratio: "9 / 16", aiMade: true },
+      { title: "AXcellent 홍보 영상 (30초, 세로)", customer: "AXcellent 홍보 영상", caption: "AI 직원들이 서로 알아서 일하고 돈과 외부 게시는 대표님이 승인합니다. 자막만 나오고 소리는 없습니다. 시연 환경(가상 데이터) 기준.", src: "assets/demo/axcellent-promo-30s.mp4", ratio: "9 / 16", aiMade: true },
+      { title: "AXcellent × DejaFix (1분, 음악 포함)", customer: "AXcellent 홍보 영상", caption: "장애 하나에, AI 아홉이 일을 나눠 맡아요. 소리(배경음악)가 나옵니다. 시연 환경(가상 데이터) 기준.", src: "assets/demo/axcellent-promo-66s.mp4", ratio: "16 / 9", wide: true, aiMade: true },
     ],
     note: "시연용 가상 고객사의 홍보물입니다. AI로 만든 영상·게시물에는 “AI가 만든 영상” 표시를 붙입니다.",
   },
