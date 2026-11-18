@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
@@ -646,6 +648,17 @@ def _evidence(label: str, value: Any) -> dict[str, Any]:
     return {"label": label, "value": value}
 
 
+def category_key(value: str | None) -> str | None:
+    """카테고리 이름을 같은 칸으로 묶는 열쇠. 사람 입력(앞뒤 공백·겹친 공백·" · ")과 데이터 AI의
+    숏츠 형식 이름(예: 상황극·스케치)이 글자만 달라 따로 쌓이지 않게 한다. 비면 None."""
+    if value is None:
+        return None
+    s = unicodedata.normalize("NFC", value)
+    s = re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"\s*·\s*", "·", s)
+    return s or None
+
+
 def category_view_costs(campaigns: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """콘텐츠 카테고리별 조회당 제작비 (CMP-007). 7일 조회수를 잰 캠페인만 모은다.
 
@@ -655,7 +668,7 @@ def category_view_costs(campaigns: dict[str, dict[str, Any]]) -> list[dict[str, 
     """
     rows: dict[str, dict[str, Any]] = {}
     for c in sorted(campaigns.values(), key=lambda c: (c["period_to"], c["campaign_id"])):
-        category = c.get("content_category")
+        category = category_key(c.get("content_category"))
         if not category:
             continue
         row = rows.setdefault(
@@ -770,6 +783,7 @@ def category_budget_advice(
     재배분 의견(budget_shift)이 있으면 늘릴 쪽은 더하고 줄일 쪽은 빼고, 없으면 최근 회차 그대로다.
     7일 조회수를 잰 캠페인이 없으면 권장값을 내지 않는다(지어내지 않는다).
     """
+    category = category_key(category)
     rows = category_view_costs(campaigns)
     shift = budget_shift(campaigns)
     move = shift["shift"] if shift else None
