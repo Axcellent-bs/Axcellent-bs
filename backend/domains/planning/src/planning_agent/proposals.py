@@ -321,6 +321,9 @@ def from_promo(out: PromoConceptsOutput) -> list[ReceiveInsightInput]:
                 facts=facts[:12],
                 products=[p.name for p in c.products][:10],
                 body_md="\n".join(body)[:8000],
+                # 데이터분석이 정한 영상 카테고리·형식(#1333): 재무 제작비를 이 이름으로 묻는다
+                content_category=c.content_category,
+                content_format=c.content_format,
             )
         )
     return items
@@ -555,6 +558,8 @@ def from_brief(out: TrendInsightBriefOutput) -> list[ReceiveInsightInput]:
                 product_ids=[p.product_id for p in t.products][:10],
                 audience=t.target_age,
                 shorts_format=t.shorts_format,
+                content_category=t.content_category,  # #1333, 주제 영상 형식일 때만 값이 있다
+                content_format=t.content_format,
                 generated_at=out.generated_at,
                 body_md="\n".join(body)[:8000],
                 past=[_past(r) for r in getattr(t, "past_results", [])][:3],
