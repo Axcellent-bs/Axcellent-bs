@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from marketing_agent import campaign_auto, handlers
+from marketing_agent import brief_auto_handoff, campaign_auto, handlers
 from marketing_agent.handlers import HANDLERS
 from marketing_agent.sns_publish import publisher
 
@@ -64,9 +64,23 @@ async def _lifespan(application: object) -> AsyncIterator[None]:
                 ),
                 name="campaign-auto-record",
             )
+        # 받은 기획안 → SNS·미디어 요청 초안 자동 넘김(MARKETING_BRIEF_AUTO_HANDOFF, 기본 꺼짐).
+        # 미디어 생성·게시는 부르지 않는다
+        handoff_task: asyncio.Task[None] | None = None
+        if brief_auto_handoff.AutoHandoffConfig.from_env().poll_s > 0:
+            handoff_task = asyncio.get_running_loop().create_task(
+                brief_auto_handoff.auto_handoff_loop(
+                    lambda: handlers.STATE.briefs, handlers.handoff_brief_to_sns
+                ),
+                name="brief-auto-handoff",
+            )
         try:
             yield
         finally:
+            if handoff_task is not None:
+                handoff_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await handoff_task
             if auto is not None:
                 auto.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
