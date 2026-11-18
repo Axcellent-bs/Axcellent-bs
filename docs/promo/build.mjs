@@ -62,7 +62,7 @@ const vision = `
 const team = `
 <section class="sec sec-paper" id="team">
   <div class="wrap split">
-    <div class="photo-card reveal" style="--img:url(assets/chief.webp)">
+    <div class="photo-card reveal" data-bg="assets/chief.webp">
       <p class="pill pill-gold">총괄 AI</p>
       <h2 class="h2 on-photo">${esc(C.team.title[0])}<br>${esc(C.team.title[1])}<br><span class="em">${esc(C.team.title[2])}</span></h2>
       <p class="on-photo-lead">${esc(C.team.lead)}</p>
@@ -84,7 +84,7 @@ const media = C.story.media
   : "";
 
 const story = `
-<section class="sec sec-night" id="story" style="--img:url(assets/night.webp)">
+<section class="sec sec-night" id="story" data-bg="assets/night.webp">
   <div class="wrap">
     <div class="story-head reveal">
       <p class="pill pill-gold">${esc(C.story.kicker)}</p>
@@ -124,7 +124,7 @@ const approval = `
 <section class="sec sec-paper" id="approval">
   <div class="wrap">
   <div class="split flip">
-    <div class="photo-card reveal" style="--img:url(assets/sign.webp)">
+    <div class="photo-card reveal" data-bg="assets/sign.webp">
       <p class="pill pill-gold">${esc(ap.kicker)}</p>
       <h2 class="h2 on-photo huge">${esc(ap.title[0])}<br><span class="em">${esc(ap.title[1])}</span></h2>
       <p class="on-photo-lead">${ap.lead.map((l) => esc(l).replace(esc(ap.leadEm), `<strong>${esc(ap.leadEm)}</strong>`)).join(" ")}</p>
@@ -135,7 +135,7 @@ const approval = `
       <ul class="rules">${ap.items.map((it) => `<li><span class="ico" aria-hidden="true">${esc(it.icon)}</span><div><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div></li>`).join("")}</ul>
     </div>
   </div>
-  <figure class="shot shot-wide reveal" tabindex="0" aria-label="판매자 정산 지급 승인 화면 (좁은 화면에서는 옆으로 밀어 볼 수 있음)"><img src="${esc(ap.shot.src)}" alt="${esc(ap.shot.alt)}" loading="lazy"><figcaption><b>${esc(ap.shot.title)}</b><span>${esc(ap.shot.body)}</span><em>${esc(ap.shot.note)}</em></figcaption></figure>
+  <figure class="shot shot-wide reveal" tabindex="0" aria-label="판매자 정산 지급 승인 화면 (좁은 화면에서는 옆으로 밀어 볼 수 있음)"><img src="${esc(ap.shot.src)}"${ap.shot.w ? ` width="${ap.shot.w}" height="${ap.shot.h}"` : ""} alt="${esc(ap.shot.alt)}" loading="lazy"><figcaption><b>${esc(ap.shot.title)}</b><span>${esc(ap.shot.body)}</span><em>${esc(ap.shot.note)}</em></figcaption></figure>
   </div>
 </section>`;
 
@@ -173,7 +173,7 @@ const benefits = `
   <div class="wrap">
     <p class="pill pill-line reveal">${esc(C.benefits.kicker)}</p>
     <h2 class="h2 huge reveal">${esc(C.benefits.title[0])}<span class="em">${esc(C.benefits.title[1])}</span>${esc(C.benefits.title[2])}</h2>
-    <div class="cols">${C.benefits.items.map((b) => `<article class="col reveal" style="--img:url(${esc(b.img)})" aria-label="${esc(b.alt)}"><p class="pill pill-gold">${esc(b.tag)}</p><h3>${b.title.map(esc).join("<br>")}</h3><p>${esc(b.body)}</p></article>`).join("")}</div>
+    <div class="cols">${C.benefits.items.map((b) => `<article class="col reveal" data-bg="${esc(b.img)}" aria-label="${esc(b.alt)}"><p class="pill pill-gold">${esc(b.tag)}</p><h3>${b.title.map(esc).join("<br>")}</h3><p>${esc(b.body)}</p></article>`).join("")}</div>
     <p class="fine">${esc(C.benefits.note)}</p>
   </div>
 </section>`;
@@ -183,7 +183,7 @@ const customers = `
   <div class="wrap">
     <p class="pill reveal">${esc(C.customers.kicker)}</p>
     <h2 class="h2 ink reveal">${esc(C.customers.title[0])}<br><span class="brand">${esc(C.customers.title[1])}</span></h2>
-    <div class="cards">${C.customers.items.map((c) => `<article class="cust reveal"><img src="${esc(c.img)}" alt="${esc(c.alt)}" loading="lazy"><h3>${esc(c.name)}</h3><p class="badges">${c.badges.map((b, i) => `<span class="badge ${b.includes("준비") ? "badge-warn" : ""}">${esc(b)}</span>`).join("")}</p><p>${esc(c.body)}</p></article>`).join("")}</div>
+    <div class="cards">${C.customers.items.map((c) => `<article class="cust reveal"><img src="${esc(c.img)}"${c.w ? ` width="${c.w}" height="${c.h}"` : ""} alt="${esc(c.alt)}" loading="lazy"><h3>${esc(c.name)}</h3><p class="badges">${c.badges.map((b, i) => `<span class="badge ${b.includes("준비") ? "badge-warn" : ""}">${esc(b)}</span>`).join("")}</p><p>${esc(c.body)}</p></article>`).join("")}</div>
     <p class="callout reveal">${esc(C.customers.note)}</p>
   </div>
 </section>`;
@@ -206,7 +206,7 @@ const posts = !showPosts ? "" : `
 </section>`;
 
 const cta = `
-<section class="sec sec-cta" id="contact" style="--img:url(assets/bookstore.webp)">
+<section class="sec sec-cta" id="contact" data-bg="assets/bookstore.webp">
   <div class="wrap">
     <h2 class="h2 huge reveal">${C.cta.title.map((t, i) => (i === C.cta.emIndex ? `<span class="em">${esc(t)}</span>` : esc(t))).join("<br>")}</h2>
     <p class="cta-lead reveal">${esc(C.cta.body)}</p>
@@ -233,6 +233,12 @@ const footer = `
   </div>
 </footer>`;
 
+const mainHtml = `<main>
+${hero}${vision}${team}${story}${a2a}${cases}${approval}${benefits}${customers}${posts}${cta}
+</main>`;
+const bgFiles = [...new Set([...mainHtml.matchAll(/data-bg="([^"]+)"/g)].map((m) => m[1]))];
+const bgNoscript = bgFiles.length ? `<noscript><style>${bgFiles.map((f) => `[data-bg="${f}"]{--img:url(${f})}`).join("")}</style></noscript>` : "";
+
 const html = `<!doctype html>
 <html lang="${esc(C.site.lang)}" class="no-js">
 <head>
@@ -249,13 +255,12 @@ const html = `<!doctype html>
   <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"></noscript>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
+  ${bgNoscript}
 </head>
 <body>
 <a class="skip" href="#vision">본문으로 건너뛰기</a>
 ${header}
-<main>
-${hero}${vision}${team}${story}${a2a}${cases}${approval}${benefits}${customers}${posts}${cta}
-</main>
+${mainHtml}
 ${footer}
 <script src="app.js" defer></script>
 </body>

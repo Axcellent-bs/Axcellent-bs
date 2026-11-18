@@ -142,7 +142,7 @@ export default {
       { icon: "✓", title: "배포와 기록", body: "모든 AI의 돈·게시·배포 요청은 등급을 매겨 처리하고 안전 처리 로그에 남깁니다." },
     ],
     shot: {
-      src: "assets/shot-approve.webp",
+      src: "assets/shot-approve.webp", w: 1616, h: 280,
       alt: "판매자 정산 지급 승인 화면: 3곳 정산금 합계와 지급 승인 안내",
       title: "판매자 정산 지급 승인 화면",
       body: "AI가 정산금을 계산해 지급 승인을 요청하고 사람이 승인해야 지급이 기록됩니다.",
@@ -193,8 +193,8 @@ export default {
     kicker: "함께하는 고객사",
     title: ["업종이 달라도", "같은 AI 직원 구조"],
     items: [
-      { name: "캣북스", badges: ["시연 가상 고객사"], body: "책과 문구를 파는 온라인 서점. 고객지원·재무·마케팅·데이터분석 AI가 판매 서버와 연결돼 일합니다.", img: "assets/shot-catbooks.webp", alt: "캣북스 온라인 서점 화면" },
-      { name: "누비투어", badges: ["시연 가상 고객사", "연결 준비 중"], body: "패키지여행 예약 사이트. AXcellent를 모르는 상태로 만든 두 번째 고객사로 연결을 준비하고 있습니다.", img: "assets/shot-nubi.webp", alt: "누비투어 패키지여행 사이트 화면" },
+      { name: "캣북스", badges: ["시연 가상 고객사"], body: "책과 문구를 파는 온라인 서점. 고객지원·재무·마케팅·데이터분석 AI가 판매 서버와 연결돼 일합니다.", img: "assets/shot-catbooks.webp", w: 1141, h: 860, alt: "캣북스 온라인 서점 화면" },
+      { name: "누비투어", badges: ["시연 가상 고객사", "연결 준비 중"], body: "패키지여행 예약 사이트. AXcellent를 모르는 상태로 만든 두 번째 고객사로 연결을 준비하고 있습니다.", img: "assets/shot-nubi.webp", w: 1141, h: 860, alt: "누비투어 패키지여행 사이트 화면" },
     ],
     note: "회사마다 설정(상품 정보·조직도)을 따로 두어 업종이 달라도 같은 AI 직원 구조를 붙일 수 있게 설계했습니다.",
   },

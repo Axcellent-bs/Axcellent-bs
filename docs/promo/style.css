@@ -103,8 +103,8 @@ body { overflow-x: clip; }
 .sec-light { background: var(--white); }
 .sec-paper { background: var(--paper); }
 .sec-dark { background: var(--navy-2); color: var(--white); }
-.sec-night, .sec-cta { position: relative; color: var(--white); background: linear-gradient(rgba(14, 14, 36, .72), rgba(14, 14, 36, .88)), linear-gradient(rgba(52, 52, 140, .34), rgba(52, 52, 140, .34)), var(--img) center / cover no-repeat, var(--navy); }
-.sec-cta { background: linear-gradient(rgba(14, 14, 36, .66), rgba(14, 14, 36, .86)), linear-gradient(rgba(52, 52, 140, .34), rgba(52, 52, 140, .34)), var(--img) center / cover no-repeat, var(--navy); padding: clamp(100px, 14vw, 180px) 0; }
+.sec-night, .sec-cta { position: relative; color: var(--white); background: linear-gradient(rgba(14, 14, 36, .72), rgba(14, 14, 36, .88)), linear-gradient(rgba(52, 52, 140, .34), rgba(52, 52, 140, .34)), var(--img, none) center / cover no-repeat, var(--navy); }
+.sec-cta { background: linear-gradient(rgba(14, 14, 36, .66), rgba(14, 14, 36, .86)), linear-gradient(rgba(52, 52, 140, .34), rgba(52, 52, 140, .34)), var(--img, none) center / cover no-repeat, var(--navy); padding: clamp(100px, 14vw, 180px) 0; }
 
 /* ---------- 지향점 ---------- */
 .vision { display: grid; grid-template-columns: .9fr 1.1fr; gap: 60px; align-items: start; }
@@ -117,7 +117,7 @@ body { overflow-x: clip; }
 /* ---------- 두 칸(사진 + 내용) ---------- */
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: stretch; }
 .split.flip .photo-card { order: 0; }
-.photo-card { position: relative; min-height: 560px; border-radius: 30px; padding: 36px; display: flex; flex-direction: column; justify-content: flex-end; gap: 16px; color: var(--white); overflow: hidden; background: linear-gradient(180deg, rgba(14, 14, 36, .05) 25%, rgba(14, 14, 36, .88) 100%), linear-gradient(rgba(52, 52, 140, .34), rgba(52, 52, 140, .34)), var(--img) center / cover no-repeat, var(--navy); }
+.photo-card { position: relative; min-height: 560px; border-radius: 30px; padding: 36px; display: flex; flex-direction: column; justify-content: flex-end; gap: 16px; color: var(--white); overflow: hidden; background: linear-gradient(180deg, rgba(14, 14, 36, .05) 25%, rgba(14, 14, 36, .88) 100%), linear-gradient(rgba(52, 52, 140, .34), rgba(52, 52, 140, .34)), var(--img, none) center / cover no-repeat, var(--navy); }
 .photo-card.tall { min-height: 640px; }
 .photo-card .pill { position: absolute; top: 30px; left: 30px; }
 .on-photo { margin: 0; font-size: var(--t3); line-height: 1.1; }
@@ -185,7 +185,7 @@ body { overflow-x: clip; }
 
 /* ---------- 얻는 것 ---------- */
 .cols { margin-top: var(--gap-block); display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-.col { position: relative; min-height: 480px; border-radius: 26px; padding: 28px; display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; overflow: hidden; background: linear-gradient(180deg, rgba(14, 14, 36, .28) 10%, rgba(14, 14, 36, .94) 78%), linear-gradient(rgba(52, 52, 140, .34), rgba(52, 52, 140, .34)), var(--img) center / cover no-repeat, var(--navy); }
+.col { position: relative; min-height: 480px; border-radius: 26px; padding: 28px; display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; overflow: hidden; background: linear-gradient(180deg, rgba(14, 14, 36, .28) 10%, rgba(14, 14, 36, .94) 78%), linear-gradient(rgba(52, 52, 140, .34), rgba(52, 52, 140, .34)), var(--img, none) center / cover no-repeat, var(--navy); }
 .col .pill { align-self: flex-start; margin-bottom: auto; }
 .col h3 { font-size: var(--t4); line-height: 1.2; font-weight: 800; }
 .col p { color: #dcdcf2; font-size: 16px; }
