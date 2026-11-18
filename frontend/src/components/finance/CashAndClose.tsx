@@ -11,7 +11,7 @@ import { PlanningAskLink } from "./PlanningRequests";
 // - 은행 입금 대조(②): 사람이 올린 은행 거래내역의 입금과 PG 정산금을 날짜별로 맞춤. 거래내역 올리기·읽은 기록도 여기
 // - 은행 출금 대조(②): 항목별 출금(급여·임차료·광고비)과 설명 없는 출금. 같은 거래내역 파일을 쓰고 마감 체크도 ②로 가서 입금 대조 옆에 둔다
 // - 판매자 정산 이체(③): 승인한 판매자 정산이 실제로 통장에서 나갔는지 (은행 출금 대조 중 판매자 몫)
-// - 현금 흐름(⑦): 날짜가 정해진(확정) 들어올 돈·나갈 돈만 표시. 통장 잔액을 올렸으면 예상 잔액.
+// - 3개월 현금 흐름(⑦): 날짜가 정해진(확정) 들어올 돈·나갈 돈만 표시. 통장 잔액을 올렸으면 예상 잔액.
 //   API는 13주(뒤쪽은 평균 추정)를 주지만 추정 주는 화면에 띄우지 않는다. 예산 브레이크(BRK-004)는 그대로 API 값을 쓴다
 
 const CHECK_TONE = { done: TONE.ok, pending: TONE.warn, unknown: TONE.muted } as const;
@@ -337,8 +337,8 @@ function BankImportsPanel({ tick, onChanged }: { tick: number; onChanged: () => 
 export function CashflowSection({ tick }: { tick: number }) {
   const res = useResource("cashflow", () => finance.cashflow(), tick);
   return (
-    <Panel id="cashflow" title="현금 흐름 (확정)" meta={res.env?.meta}
-      hint="PG에서 들어올 돈과 판매자에게 나갈 돈 중 날짜가 정해진 것만 주별로 봅니다. 평균으로 채운 추정 주는 보여 주지 않습니다. 판매자 지급이 몰려 마이너스가 되는 주를 미리 봅니다.">
+    <Panel id="cashflow" title="3개월 현금 흐름 (확정)" meta={res.env?.meta}
+      hint="앞으로 3개월 동안 PG에서 들어올 돈과 판매자에게 나갈 돈 중 날짜가 정해진 것만 주별로 봅니다. 평균으로 채운 추정 주는 보여 주지 않습니다. 판매자 지급이 몰려 마이너스가 되는 주를 미리 봅니다.">
       <ResourceBody res={res}>
         {(c) => {
           // 확정 주만. 경고(잔액 부족·마이너스 주)도 확정 주 안에서만 센다
