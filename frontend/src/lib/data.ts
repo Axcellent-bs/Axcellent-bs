@@ -1655,6 +1655,93 @@ export interface DomainOpportunity {
   evidence_shorts?: VideoLink[];
 }
 
+// ---------------------------------------------------------------- 요즘 유행·밈 (trend_memes)
+// 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py TrendMemesOutput (11/18).
+// 여러 채널에서 같이 늘어난 해시태그·제목 구절 묶음. 점수·순위·판정은 서버 코드, 설명 한 줄만 LLM(숫자 없음)
+export type MemeWindow = "week" | "day";
+export interface MemeVideo {
+  video_id: string;
+  title: string | null;
+  channel_title: string | null;
+  views: number | null;
+  video_url: string | null;
+}
+export interface MemeSearch {
+  /** not_checked = 보지 않음(순위 밖·하루 한도) */
+  status: "rising" | "normal" | "unknown" | "not_checked";
+  ratio: number | null;
+  reason: string | null;
+}
+export interface TrendMeme {
+  name: string;
+  kind: "hashtag" | "phrase";
+  members: string[];
+  description: string | null;
+  description_reason: string | null;
+  channels: number;
+  videos: number;
+  previous_videos: number | null;
+  /** new = 직전 0이라 새로 등장, unknown = 직전 기간 표본 없음 */
+  ratio_status: "known" | "new" | "unknown";
+  ratio: number | null;
+  ratio_reason: string | null;
+  search: MemeSearch;
+  topic_category: string | null;
+  real_entity: boolean | null;
+  entity_names: string[];
+  /** ok = 가능, caution = 주의, excluded = 뺌, unknown = 분류 대기 */
+  ad_material: "ok" | "caution" | "excluded" | "unknown";
+  ad_material_reason: string;
+  products: LinkedProduct[];
+  products_reason: string | null;
+  top_videos: MemeVideo[];
+  /** 뒤에 붙일 플랫폼 칸 (인스타·검색 칩). 지금은 늘 null이고 화면에 그리지 않는다 */
+  instagram?: MemePlatform | null;
+  web_search?: MemePlatform | null;
+}
+export interface MemePlatform {
+  channels: number | null;
+  posts: number | null;
+  ratio: number | null;
+  reason: string | null;
+}
+export interface MemeSkipped {
+  name: string;
+  reason: string;
+  kind: "exclude_tag" | "stop_share" | "category" | "person";
+}
+export interface MemeCriteria {
+  min_channels: number;
+  min_videos: number;
+  min_ratio: number;
+  max_items: number;
+  stop_share: number;
+  overlap: number;
+  search_top: number;
+}
+export interface TrendMemesOutput {
+  window: MemeWindow;
+  status: "known" | "unknown";
+  reason: string | null;
+  current_from: string | null;
+  current_to: string | null;
+  previous_from: string | null;
+  previous_to: string | null;
+  sample_videos: number;
+  current_videos: number;
+  previous_videos: number;
+  previous_days: number | null;
+  unknown_published: number;
+  criteria: MemeCriteria | null;
+  items: TrendMeme[];
+  skipped: MemeSkipped[];
+  below_threshold: number;
+  naver_calls: number;
+  limits: string[];
+  generated_at: string | null;
+  summary: string;
+}
+
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
 // 계약: backend/shared/contracts/src/ax_contracts/schemas/data.py ShortsStatsOutput (#437).
 // 숏츠 = 길이 기준(max_seconds) 이하 영상. 숫자는 코드, 분류는 LLM(정해진 목록 안). 표본이 적은 묶음은 unknown + 이유
@@ -2096,6 +2183,8 @@ export const dataAi = {
   /** 영상 탐색 (카테고리 × 기간 × 길이). 서버가 미리 계산한 결과를 자르고 정렬만 한다(외부 호출 없음). 카테고리를 비우면 설정의 카테고리 전부 */
   videoExplorer: (q: { period: ExplorerPeriod; length: ExplorerLength; sort: ExplorerSort }) =>
     askData<VideoExplorerOutput>("video_explorer", "영상 탐색", q, TREND_DEADLINE_MS),
+  /** 요즘 유행·밈 (이번 주 = 7일 vs 직전 7일, 오늘 = 어제 vs 지난 4주 같은 요일). 서버가 미리 계산한 결과를 읽는다 */
+  trendMemes: (window: MemeWindow) => askData<TrendMemesOutput>("trend_memes", "요즘 유행", { window }, TREND_DEADLINE_MS),
   /** 인사이트 브리프 (2단계). 서버 하루 캐시. 브리프 안에서 trend_age·임베딩·한 줄 문장(LLM)을 부른다 */
   trendInsightBrief: () => askData<TrendInsightBriefOutput>("trend_insight_brief", "인사이트 브리프", {}, RECOMMEND_DEADLINE_MS),
   /** 오늘 특정 판 (version 없으면 최신 판). 저장된 판을 읽기만 한다 */

@@ -27,19 +27,23 @@ from data_agent.stage_timing import recording
 # 그 뒤엔 저장분을 읽는다
 # 영상 탐색(video_explorer)은 숏츠 통계 뒤(숏츠 표본·분류 저장분을 쓴다), 첫 번째에만 계산한다
 # (자기 저장분을 다시 계산하는 것이라 두 번째는 같은 결과)
+# 요즘 유행·밈(trend_memes)은 숏츠 통계 뒤(숏츠 표본·분류 저장분을 쓴다), 화면 토글 두 가지
+# (이번 주·오늘)를 다 넣는다
 SKILLS = (
     "trend_scan", "trend_candidates", "trend_popular", "youtube_velocity", "shorts_stats",
-    "video_explorer", "trend_insight_brief",
+    "video_explorer", "trend_memes", "trend_insight_brief",
 )  # fmt: skip
 ONCE = frozenset({"video_explorer"})
 CONTEXT_ID = "ctx_trend_precompute"
 PASSES = 2
+# 화면과 같은 입력. 적지 않은 skill은 {} 하나
+INPUTS: dict[str, tuple[dict[str, str], ...]] = {"trend_memes": ({}, {"window": "day"})}
 
 
-def _request(skill: str) -> AgentRequest:
+def _request(skill: str, payload: dict[str, str] | None = None) -> AgentRequest:
     meta = RequestMeta(context_id=CONTEXT_ID, token="collector",
                        deadline=datetime.now(UTC) + timedelta(minutes=10))  # fmt: skip
-    return AgentRequest(meta=meta, skill=skill, input={})
+    return AgentRequest(meta=meta, skill=skill, input=payload or {})
 
 
 async def precompute(emit: Callable[[str], None] | None = None) -> list[str]:
@@ -58,19 +62,21 @@ async def precompute(emit: Callable[[str], None] | None = None) -> list[str]:
         "shorts_stats": handlers.shorts_stats,
         "trend_insight_brief": handlers.trend_insight_brief,
         "video_explorer": handlers.video_explorer,
+        "trend_memes": handlers.trend_memes,
     }
     for n in range(1, PASSES + 1):
         for skill in SKILLS:
             if skill in ONCE and n > 1:
                 continue
             last = n == PASSES or skill in ONCE
-            try:
-                with recording(f"{skill}@precompute{n}", say):
-                    result = await run[skill](_request(skill))
-                if last and result.status != TaskStatus.COMPLETED:
-                    problems.append(f"{skill}: {result.outcome or result.status}")
-            except Exception as error:  # noqa: BLE001 - 미리 계산 실패가 수집을 막지 않게
-                if last:
-                    problems.append(f"{skill}: {type(error).__name__}")
-                print(f"[precompute] {skill} 실패 ({type(error).__name__})", file=sys.stderr)
+            for payload in INPUTS.get(skill, ({},)):
+                try:
+                    with recording(f"{skill}@precompute{n}", say):
+                        result = await run[skill](_request(skill, payload))
+                    if last and result.status != TaskStatus.COMPLETED:
+                        problems.append(f"{skill}: {result.outcome or result.status}")
+                except Exception as error:  # noqa: BLE001 - 미리 계산 실패가 수집을 막지 않게
+                    if last:
+                        problems.append(f"{skill}: {type(error).__name__}")
+                    print(f"[precompute] {skill} 실패 ({type(error).__name__})", file=sys.stderr)
     return problems

@@ -235,6 +235,23 @@ recheck_min_hours = 1    # 마지막으로 본 지 이 시간이 지난 숏츠�
 # 표본 언어. ko면 한국 숏츠만 남긴다(제목·채널 이름에 한글이 있거나 영상 언어가 한국어). 검색도 한국어 우선(relevanceLanguage). ""면 거르지 않음
 language = "ko"
 
+# 요즘 유행·밈 (trend_memes). 여러 채널에서 같이 늘어난 해시태그·제목 구절. 값은 코드 기본값과 같다 (임시 기준, 평가셋 없음)
+[memes]
+min_channels = 3     # 이번 기간 이 수 이상 채널
+min_videos = 5       # 이번 기간 영상 이 수 이상
+min_ratio = 2.0      # 직전 기간의 이 배 이상 (직전 0이면 "새로 등장"으로 통과)
+max_items = 8        # 보여 줄 유행 수
+stop_share = 0.15    # 전체 표본의 이 비율 이상에 붙은 단위는 너무 흔해 자동 제외
+overlap = 0.6        # 영상 집합 겹침(교집합 ÷ 작은 쪽)이 이 이상이면 하나로 묶음
+search_top = 5       # 네이버 검색 배수를 볼 앞 N개 (trend_age 호출 예산 표를 같이 씀)
+# 일반 태그 (회사 씨앗 키워드는 도메인 프로필에서 자동으로 더 뺀다)
+exclude_tags = [
+  "쇼츠", "shorts", "short", "숏츠", "쇼츠영상", "유튜브쇼츠", "youtubeshorts", "youtube",
+  "유튜브", "브이로그", "vlog", "일상", "일상브이로그", "daily", "fyp", "foryou", "foryoupage",
+  "추천", "알고리즘", "viral", "trending", "trend", "인기", "인기급상승", "급상승", "korea",
+  "korean", "한국", "funny", "meme", "밈", "챌린지", "challenge", "구독", "좋아요", "subscribe",
+]
+
 # 연령대별 상승 (trend_age). 대상은 코드가 고른다: 오늘 급상승 → 지금 인기 상위 → 시즌 키워드
 [age]
 rising_topics = 3     # 오늘 급상승 판정에서 몇 개

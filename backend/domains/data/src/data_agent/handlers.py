@@ -1082,6 +1082,34 @@ async def shorts_stats(request: AgentRequest) -> AgentResult:
     return await _stored(request, "shorts_stats", data.model_dump(mode="json"), compute)
 
 
+async def trend_memes(request: AgentRequest) -> AgentResult:
+    """요즘 유행·밈 (여러 채널에서 같이 늘어난 해시태그·구절). 조회만 한다(grade read).
+
+    수집기가 미리 계산해 둔 결과를 읽는다. 없을 때만 지금 계산하고 저장한다(`_stored`).
+    """
+    from ax_contracts.schemas.data import TrendMemesInput
+    from data_agent.skills.trend_memes import trend_memes as run_trend_memes
+
+    data = _parse(request, TrendMemesInput)
+    if isinstance(data, AgentResult):
+        return data
+
+    async def catalog() -> Any:
+        from data_agent.skills.product_link import read_catalog
+
+        return await read_catalog(get_catalog())
+
+    async def compute() -> tuple[str, dict[str, Any], Evidence]:
+        result = await run_trend_memes(
+            data, get_llm(), env=os.environ, connector=get_trend_connector(),
+            context_id=request.meta.context_id, category_cache=get_category_cache(),
+            seed_provider=_profile_seeds(request.meta.context_id), catalog_provider=catalog,
+        )  # fmt: skip
+        return result.output.status, result.output.model_dump(mode="json"), result.evidence
+
+    return await _stored(request, "trend_memes", data.model_dump(mode="json"), compute)
+
+
 async def video_explorer(request: AgentRequest) -> AgentResult:
     """영상 탐색 (카테고리 × 기간 × 길이). 수집기가 미리 계산하고 요청은 읽기·정렬만 (grade read).
 
@@ -1904,7 +1932,7 @@ async def campaign_result(request: AgentRequest) -> AgentResult:
 # 트렌드 감지 탭이 부르는 skill은 단계별 시간(sqlite·외부·LLM·계산 ms)을 로그 한 줄로 남긴다
 TIMED_SKILLS = frozenset({
     "trend_popular", "trend_scan", "trend_candidates", "youtube_velocity", "shorts_stats",
-    "promo_concepts", "trend_insight_brief", "video_explorer",
+    "promo_concepts", "trend_insight_brief", "video_explorer", "trend_memes",
 })  # fmt: skip
 
 # ---- 데이터분석 AI 직접 대화 (dashboard-api → data_chat_*). 조회·설명만, execute() 안 씀
@@ -2028,5 +2056,6 @@ HANDLERS = {
     "domain_subtopics": domain_subtopics,
     "source_plan": source_plan,
     "video_explorer": video_explorer,
+    "trend_memes": trend_memes,
 }
 HANDLERS = {k: timed_handler(k, v) if k in TIMED_SKILLS else v for k, v in HANDLERS.items()}
