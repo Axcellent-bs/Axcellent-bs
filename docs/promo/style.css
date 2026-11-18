@@ -295,3 +295,10 @@ body { overflow-x: clip; }
 .post-cap { margin: 0; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .post-ig { margin-top: auto; padding-top: 4px; }
 @media (max-width: 420px) { .case .posts { grid-template-columns: minmax(0, 1fr); } }
+.ig-group { margin-top: var(--gap-block); display: grid; gap: 14px; }
+.ig-group h3 { font-size: 24px; font-weight: 800; }
+/* 콘텐츠 칸 인스타 게시물: 위의 영상 카드(.vpost)와 같은 카드 폭·9:16 비율로 보인다 */
+.ig-group .posts { grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 340px)); justify-content: start; gap: 24px; }
+.ig-group .post { background: var(--paper); border-radius: 26px; padding: 16px 16px 24px; min-width: 0; }
+.ig-group .post-thumb { border-radius: 16px; overflow: hidden; }
+.ig-group .post-thumb img { aspect-ratio: 9 / 16; border-radius: 0; }

@@ -193,14 +193,19 @@ const postCard = (it) => `<article class="vpost reveal"><div class="vpost-media"
 const postEmpty = () => `<article class="vpost vpost-empty reveal"><div class="vpost-media"><span>${esc(PS.emptyTitle)}</span></div><h3>홍보 영상 칸</h3><p>영상이 올라오면 이 자리에 나옵니다.</p></article>`;
 const postList = PS.items.length ? PS.items.map(postCard).join("") : Array.from({ length: PS.emptySlots }, postEmpty).join("");
 
-const showPosts = PS.items.length > 0 || PS.showEmpty === true;
+// 고객사별 인스타 게시물. 게시물이 있는 고객사만 보인다
+const igGroups = (PS.instagram || []).filter((it) => it.posts && it.posts.length);
+const igHtml = igGroups.map((it) => `<div class="ig-group reveal"><header><h3>${esc(it.name)} 인스타그램</h3><p class="badges">${it.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p></header><ul class="posts">${it.posts.map(casesPost).join("")}</ul></div>`).join("");
+
+const showPosts = PS.items.length > 0 || igGroups.length > 0 || PS.showEmpty === true;
 const posts = !showPosts ? "" : `
 <section class="sec sec-light" id="posts">
   <div class="wrap">
     <p class="pill reveal">${esc(PS.kicker)}</p>
     <h2 class="h2 ink reveal">${esc(PS.title[0])}<br><span class="brand">${esc(PS.title[1])}</span></h2>
     <p class="posts-lead reveal">${esc(PS.lead)}</p>
-    <div class="vposts">${postList}</div>
+    ${PS.items.length || !igGroups.length ? `<div class="vposts">${postList}</div>` : ""}
+    ${igHtml}
     <p class="callout reveal">${esc(PS.note)}</p>
   </div>
 </section>`;
