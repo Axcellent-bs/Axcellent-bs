@@ -6,11 +6,18 @@ import { actionKo, holdFolded, holdPage, holdWhy, speaker } from "@/lib/agentCha
 import { ACTION_KO as FINANCE_ACTION_KO, type ExecStatus, type ExecutionRecord, type Grade, type Review } from "@/lib/finance";
 import { ago, shortDateTime, won } from "@/lib/format";
 import { SAFETY_ACTION_KO, SAFETY_RULE_KO, safety, type RegisteredAction, type SafetyThresholds } from "@/lib/safety";
+import { hr } from "@/lib/hr";
+
+// 관문 밖에서 사람 확인을 기다리는 일 한 줄 (A2A로 각 AI에서 받은 목록)
+type OtherWait = { key: string; who: string; what: string; why: string; since: string; href: string };
 
 // 안전 처리 로그 화면: 모든 AI의 상태 변경(돈·게시·배포)은 execute()로 안전 처리 로그를 지난다.
 // ① 사람 결정 대기 → ② 최근 판단 | ③ 등록된 일(두 칸) → ④ 지키는 기준.
 // 연결 보류(개발 AI의 KEV 판정)는 251 연결이 클라우드(GitHub)뿐이라 걸릴 일이 없어 화면에서 뺐다 (서버 기능은 그대로).
-// ① 사람 결정 대기는 모든 AI의 C 등급 보류다(모든 AI의 상태 변경이 execute()로 이 관문을 지나므로 따로 연동할 곳이 없다).
+// ① 사람 결정 대기 = 모든 AI의 C 등급 보류 + 관문 밖에서 사람 확인을 기다리는 일.
+//   관문 밖: 아카이브 AI가 확신하지 못해 미룬 기록(후보 카드), 사람이 정할 중복 결정 묶음, 인사 발령 초안.
+//   이 셋은 상태 변경이 A로 실행돼도 "사람 확인 전" 상태가 각 AI 안에 남아 C 보류에 안 잡힌다(11/18 [기획 확정] 사례).
+//   dashboard-api가 A2A로 아카이브·인사 AI에서 받은 목록을 그대로 보여 주고, 결정은 그 화면에서 한다.
 // 모두 안전 처리 로그 서버(8001)의 기록을 그대로 읽는다. 결정은 그 일을 맡은 화면에서 사람이 한다 (여기서는 링크만).
 
 const POLL_MS = 15_000;
@@ -85,6 +92,7 @@ export default function Safety() {
   const [reviews, setReviews] = useState<Review[] | null>(null);
   const [thresholds, setThresholds] = useState<SafetyThresholds | null>(null);
   const [registry, setRegistry] = useState<RegisteredAction[] | null>(null);
+  const [others, setOthers] = useState<OtherWait[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [at, setAt] = useState<string | null>(null);
 
@@ -95,7 +103,25 @@ export default function Safety() {
     if (r.status === "fulfilled") setReviews(r.value);
     if (t.status === "fulfilled") setThresholds(t.value);
     if (g.status === "fulfilled") setRegistry(g.value);
-    const failed = got.find((x) => x.status === "rejected");
+    // 관문 밖 사람 확인 대기: 하나가 실패해도 나머지는 보여 준다(실패한 곳은 문제 줄에 같이 적는다)
+    const side = await Promise.allSettled([hr.candidateCards(), hr.duplicateGroups(), hr.orgChanges()]);
+    const [cc, dg, oc] = side;
+    const list: OtherWait[] = [];
+    if (cc.status === "fulfilled") for (const c of cc.value) list.push({
+      key: `card:${c.card_id}`, who: "아카이브 AI · 업무 기록", what: c.title,
+      why: `확정 전 기록${c.confidence ? ` · AI 확신도 ${c.confidence === "low" ? "낮음" : c.confidence === "mid" ? "보통" : "높음"}` : ""}`,
+      since: c.created_at, href: "/ops",
+    });
+    if (dg.status === "fulfilled") for (const g of dg.value.groups) list.push({
+      key: `dup:${g.group_id}`, who: "아카이브 AI · 겹치는 결정", what: g.suggested_title ?? g.representative.title,
+      why: `같은 결정으로 보이는 카드 ${g.olders.length + 1}장 · 합칠지 사람이 정함`, since: g.created_at, href: "/ops",
+    });
+    if (oc.status === "fulfilled") for (const c of oc.value.changes.filter((x) => x.status === "draft")) list.push({
+      key: `org:${c.change_id}`, who: "인사 AI · 조직 변동", what: `발령 초안 (${c.effective_date} 적용)`,
+      why: "확정 전에는 팀 인원에 세지 않음", since: c.created_at, href: "/org",
+    });
+    setOthers(list.sort((a, b) => a.since.localeCompare(b.since)));
+    const failed = [...got, ...side].find((x) => x.status === "rejected");
     setProblem(failed && failed.status === "rejected" ? errText(failed.reason) : null);
     setAt(new Date().toISOString());
   }, []);
@@ -153,7 +179,7 @@ export default function Safety() {
           {[
             { k: "판단한 요청", v: counts.total, sub: "서버가 켜진 뒤" },
             { k: "실행됨", v: counts.executed, sub: "A·B 등급, 승인 뒤 실행 포함" },
-            { k: "사람 결정 대기", v: pending.length, sub: "C 등급 보류", warn: pending.length > 0 },
+            { k: "사람 결정 대기", v: pending.length + (others?.length ?? 0), sub: `C 등급 보류 ${pending.length} · 기록·발령 확인 ${others?.length ?? 0}`, warn: pending.length + (others?.length ?? 0) > 0 },
             { k: "거절·오류", v: counts.rejected, sub: "검증 거절·기한 지남 포함" },
           ].map((s) => (
             <div key={s.k} className="rounded-xl border border-ink-100 px-4 py-3">
@@ -165,8 +191,9 @@ export default function Safety() {
         </dl>
       </header>
 
-      <Section title="① 사람 결정 대기" desc="C 등급이라 사람이 승인해야 실행되는 일입니다. 결정은 그 일을 맡은 화면에서 합니다. 기한 안에 아무도 정하지 않으면 자동으로 취소돼요.">
-        {!reviews ? <Empty>불러오는 중…</Empty> : pending.length === 0 ? <Empty>지금 사람 결정을 기다리는 일이 없어요.</Empty> : (
+      <Section title="① 사람 결정 대기" desc="사람이 정해야 넘어가는 일을 모든 AI에서 모았습니다. C 등급 보류는 기한 안에 아무도 정하지 않으면 자동으로 취소돼요. 기록·발령 확인은 기한이 없고 사람이 정할 때까지 남아요. 결정은 그 일을 맡은 화면에서 합니다.">
+        <h3 className="text-sm font-semibold text-ink-700">C 등급 보류 · {reviews ? pending.length : "–"}건</h3>
+        {!reviews ? <Empty>불러오는 중…</Empty> : pending.length === 0 ? <Empty>지금 C 등급으로 보류된 일이 없어요.</Empty> : (
           <ul className="divide-y divide-ink-100">
             {pending.map((r) => (
               <li key={r.review_id} className="flex flex-wrap items-center justify-between gap-3 py-3">
@@ -177,6 +204,20 @@ export default function Safety() {
                 {holdFolded(r.action)
                   ? <span className="chip" title="담당 화면(인수인계)이 접혀 있어 결정할 곳이 없어요. 기한이 지나면 자동으로 취소돼요.">담당 화면 없음(접힘)</span>
                   : <Link href={holdPage(r.action, execs?.find((e) => e.execution_id === r.execution_id)?.request.params?.target)} className="btn-ghost text-sm">결정하러 가기</Link>}
+              </li>
+            ))}
+          </ul>
+        )}
+        <h3 className="mt-5 text-sm font-semibold text-ink-700">기록·발령 확인 · {others ? others.length : "–"}건 <span className="font-normal text-ink-500">(아카이브·인사 AI에서 A2A로 받음)</span></h3>
+        {!others ? <Empty>불러오는 중…</Empty> : others.length === 0 ? <Empty>지금 확인을 기다리는 기록·발령이 없어요.</Empty> : (
+          <ul className="divide-y divide-ink-100">
+            {others.map((o) => (
+              <li key={o.key} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{o.who} · {o.what}</p>
+                  <p className="mt-0.5 text-sm text-ink-500">{o.why} · {ago(o.since)} 올림</p>
+                </div>
+                <Link href={o.href} className="btn-ghost text-sm">결정하러 가기</Link>
               </li>
             ))}
           </ul>
