@@ -49,7 +49,13 @@ from marketing_agent.media.config import MOCK, MediaSettings, ffmpeg_bin
 from marketing_agent.media.ledger import LedgerError, MediaLedger
 from marketing_agent.media.mock import MOCK_COST_KRW
 from marketing_agent.media.pricing import PriceNotFound
-from marketing_agent.media.prompts import PromptRejected, get_template, render_prompt
+from marketing_agent.media.prompts import (
+    PromptRejected,
+    get_template,
+    plan_field_names,
+    render_prompt,
+    render_prompt_detailed,
+)
 from marketing_agent.media.registry import get_adapter
 
 ACTION = "generate_media"
@@ -96,6 +102,8 @@ class GeneratedMedia(AxModel):
     post_draft_id: str
     execution_id: str
     replayed: bool = False
+    # 기획 데이터를 반영했으면 필드 이름·길이·해시 기록(값 전체는 없다). 안 썼으면 키가 없다
+    plan_context: dict | None = None
 
 
 def _now() -> datetime:
@@ -147,9 +155,11 @@ async def generate_media(
         template = get_template(data.scene_template_id, templates_path)
         if template.kind != data.media_kind:
             return _fail(request, "invalid_input", errors=["scene_template_id: kind_mismatch"])
-        prompt = render_prompt(data.scene_template_id, data.fields, templates_path)
+        rendered = render_prompt_detailed(data.scene_template_id, data.fields, templates_path)
+        prompt = rendered.prompt
     except PromptRejected as rejected:
         return _fail(request, "prompt_rejected", reason_code=rejected.code, field=rejected.field)
+    plan_context = rendered.plan_record()
 
     kind: MediaKind = data.media_kind
     resolution = data.resolution or template.resolution
@@ -344,8 +354,14 @@ async def generate_media(
         "post_draft_id": data.post_draft_id,
         "execution_id": decision.execution_id,
     }
-    output = GeneratedMedia.model_validate(output).model_dump(mode="json", exclude={"replayed"})
-    meta = output | {"prompt": prompt, "fields": data.fields, "idempotency_key": key}
+    if plan_context is not None:
+        output["plan_context"] = plan_context
+    output = GeneratedMedia.model_validate(output).model_dump(
+        mode="json", exclude={"replayed"} | (set() if plan_context else {"plan_context"})
+    )
+    plan_names = set(plan_field_names(templates_path))  # 기획 원문은 meta에 다시 쓰지 않는다
+    meta_fields = {k: v for k, v in data.fields.items() if k not in plan_names}
+    meta = output | {"prompt": prompt, "fields": meta_fields, "idempotency_key": key}
     if kind == "video":
         meta["audio_stripped"] = result.audio_stripped
     try:

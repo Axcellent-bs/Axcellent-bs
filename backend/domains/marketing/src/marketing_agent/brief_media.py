@@ -22,6 +22,11 @@
 결과는 넘김 기록의 `prepared`에 남긴다(어느 요청 초안으로 만들었는지 `request_sha` 포함). 그동안
 요청 초안이 바뀌었으면 조회에는 보이지 않는다(`brief_handoff.prepared_of`).
 
+기획 데이터 반영: 보관된 기획안의 구조화 필드(`plan_fields_for`)를 `plan_*` 선택 필드로 같이 넘긴다.
+프롬프트 만들기(`media.prompts`)가 정리·검사해서 영상 템플릿의 `{plan_clause}` 자리에만 끼운다.
+요청 초안(`media_request`)과 그 해시는 바뀌지 않는다(기획안 본문은 보관본에서 그때그때 읽는다).
+쓴 필드 이름·길이·해시는 생성 결과(`meta.json`·장부)와 `prepared.plan_context`에 남는다.
+
 예상 비용(`estimate`)은 조회 때 `plan_cost`(=`generate_media`와 같은 단가표·환율·건당 상한 규칙)로
 계산한다. 값을 저장하거나 지어내지 않는다. 계산할 수 없으면 이유 코드만 돌려준다.
 """
@@ -36,10 +41,12 @@ from pydantic import Field, ValidationError
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel
+from ax_contracts.schemas.planning import CampaignBriefInput
 from marketing_agent.brief_handoff import request_sha, state_of
 from marketing_agent.briefs import BriefStorageError, BriefStore, SnsHandoffRecord
 from marketing_agent.media.config import MOCK, MediaSettings
 from marketing_agent.media.ledger import LedgerError, MediaLedger
+from marketing_agent.media.prompts import PromptRejected, get_template
 from marketing_agent.media.skill import FromDecision, plan_cost
 from marketing_agent.notice import NoticeStore
 from marketing_agent.sns import SnsStore
@@ -73,14 +80,54 @@ def blocked_reason(media: dict, settings: MediaSettings) -> str | None:
     return None
 
 
-def _generation_fields(media: dict) -> dict[str, Any]:
-    """요청 초안 → 생성 입력의 공통 칸. 없는 값은 넣지 않는다(템플릿 기본값을 쓴다)."""
+PLAN_FACTS_MAX = 2
+PLAN_PRODUCTS_MAX = 2
+
+
+def plan_fields_for(brief: CampaignBriefInput | None) -> dict[str, str]:
+    """기획안의 구조화 필드 -> 영상 프롬프트용 `plan_*` 원재료. 비어 있는 칸은 넣지 않는다.
+
+    쓰는 칸: idea(핵심 메시지)·why(이유)·facts[].label(근거 주제, 숫자 값 `value`는 쓰지 않는다)·
+    target.label·products·content_category·idea_angle(방향 -> 고정 분위기 문구)·trend_refs.
+    제목(title)·본문(body_md·note)·승인자·링크는 쓰지 않는다. 길이 상한·특수문자·금칙어 정리는
+    프롬프트 만들 때(`media.prompts`) 한 번 더 거치므로 여기서는 고르기만 한다.
+    """
+    if brief is None:
+        return {}
+    raw: dict[str, str | None] = {
+        "plan_idea": brief.idea,
+        "plan_why": brief.why,
+        "plan_evidence": " ".join(f.label for f in brief.facts[:PLAN_FACTS_MAX]),
+        "plan_target": brief.target.label if brief.target else None,
+        "plan_products": " ".join(brief.products[:PLAN_PRODUCTS_MAX]),
+        "plan_category": brief.content_category,
+        "plan_tone": brief.idea_angle,
+        "plan_trends": " ".join(brief.trend_refs) if brief.idea_angle == "ride_trend" else None,
+    }
+    return {k: v for k, v in raw.items() if v and v.strip()}
+
+
+def _supports_plan(media: dict) -> bool:
+    try:
+        return get_template(str(media.get("scene_template_id"))).plan_clause
+    except PromptRejected:
+        return False
+
+
+def _generation_fields(media: dict, plan_fields: dict[str, str] | None = None) -> dict[str, Any]:
+    """요청 초안 → 생성 입력의 공통 칸. 없는 값은 넣지 않는다(템플릿 기본값을 쓴다).
+
+    `plan_fields`는 기획안에서 고른 `plan_*` 원재료다. 문장 자리(`{plan_clause}`)가 있는
+    템플릿(영상)에만 붙고, 나머지는 전과 똑같다.
+    """
     kind = media["media_kind"]
     out: dict[str, Any] = {
         "media_kind": kind,
         "scene_template_id": media.get("scene_template_id"),
         "fields": dict(media.get("fields") or {}),
     }
+    if plan_fields and _supports_plan(media):
+        out["fields"] |= plan_fields
     if media.get("resolution"):
         out["resolution"] = media["resolution"]
     if kind == "image" and media.get("quality"):
@@ -90,10 +137,12 @@ def _generation_fields(media: dict) -> dict[str, Any]:
     return out
 
 
-def prepare_input(proposal_id: str, media: dict) -> dict[str, Any]:
+def prepare_input(
+    proposal_id: str, media: dict, plan_fields: dict[str, str] | None = None
+) -> dict[str, Any]:
     """`prepare_sns_post_from_media` 입력. 자유 프롬프트는 없다(템플릿 id + 화이트리스트 필드)."""
     return {"proposal_id": proposal_id, "media_ref": media.get("media_ref")} | _generation_fields(
-        media
+        media, plan_fields
     )
 
 
@@ -112,6 +161,7 @@ def estimate(
     ledger: MediaLedger,
     settings: MediaSettings | None = None,
     context_id: str | None = None,
+    plan_fields: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """지금 요청 초안으로 만들 때의 예상 비용과 상한. 외부 호출 없이 단가표·장부만 읽는다.
 
@@ -139,7 +189,7 @@ def estimate(
     reason = blocked_reason(media, settings)
     if reason is not None:
         return out | {"reason_code": reason}
-    gen_input = {"post_draft_id": media.get("media_ref")} | _generation_fields(media)
+    gen_input = {"post_draft_id": media.get("media_ref")} | _generation_fields(media, plan_fields)
     plan = plan_cost(
         _inner(request, proposal_id, "generate_media", gen_input, context_id),
         ledger=ledger,
@@ -180,6 +230,8 @@ def _prepared_record(sha: str, output: dict[str, Any], now: datetime) -> dict[st
         "asset_ref": output.get("asset_ref"),
         "asset_sha256": output.get("asset_sha256"),
         "cost_krw": generation.get("total_cost_krw", generation.get("cost_krw")),
+        # 기획 데이터를 반영했으면 쓴 필드 이름·길이·해시(값 전체 아님). 옛 기록에는 없다
+        "plan_context": generation.get("plan_context"),
         "label_text": label.get("text"),
         "check": {
             "verdict": check.get("verdict"),
@@ -258,8 +310,10 @@ async def prepare_brief_media(
             ),
         )
 
+    stored = briefs.existing(pid)
+    plan_fields = plan_fields_for(stored.brief if stored else None)
     result = await prepare(
-        _inner(request, pid, "prepare_sns_post_from_media", prepare_input(pid, media)),
+        _inner(request, pid, "prepare_sns_post_from_media", prepare_input(pid, media, plan_fields)),
         notices=notices,
         store=store,
         ledger=ledger,

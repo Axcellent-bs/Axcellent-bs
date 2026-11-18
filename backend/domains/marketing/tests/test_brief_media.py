@@ -217,13 +217,25 @@ def test_video_request_goes_to_prepare_with_stored_kind_and_fields(
         "media_ref": stored["media_ref"],
         "media_kind": "video",
         "scene_template_id": stored["scene_template_id"],
-        "fields": stored["fields"],
+        # 영상은 기획안의 구조화 필드(plan_*)가 같이 간다. 요청 초안(stored)은 그대로다
+        "fields": stored["fields"] | sent.input["fields"],
         "resolution": stored["resolution"],
         "duration_s": stored["duration_s"],
     }
+    plan = {k: v for k, v in sent.input["fields"].items() if k.startswith("plan_")}
+    assert set(plan) == {"plan_idea", "plan_why"}  # 이 기획안에는 이 두 칸만 있다
+    assert "body_md" not in plan and "title" not in plan
     assert sent.meta.context_id == "ctx_brief_PROP-5"  # 호출자와 무관하게 같은 장부 키
     assert out["meta"]["context_id"] == CTX  # 결과는 받은 요청의 메타로 돌려준다
     assert "publish_sns" not in gate.seen
+
+
+def test_image_request_gets_no_plan_fields(
+    fake_prepare: FakePrepare,
+) -> None:
+    _handed("image", fields={"category": "에세이"})
+    _make()
+    assert not any(k.startswith("plan_") for k in fake_prepare.requests[0].input["fields"])
 
 
 def test_image_request_sends_quality_not_duration(fake_prepare: FakePrepare) -> None:
