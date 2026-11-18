@@ -37,6 +37,32 @@ export function Loading({ error, what = "불러오는 중…" }: { error: string
   return <div className="flex h-64 items-center justify-center px-6 text-center text-sm text-ink-500">{error ?? what}</div>;
 }
 
+/** 처음 받는 동안 보이는 회색 뼈대. 오류가 있으면 글자로 알린다 */
+export function PageSkeleton({ error, what = "불러오는 중…" }: { error: string | null; what?: string }) {
+  if (error) return <Loading error={error} />;
+  const bar = "animate-pulse rounded bg-ink-100 motion-reduce:animate-none";
+  return (
+    <div role="status" aria-live="polite" className="space-y-4 px-8 pb-12 pt-4">
+      <span className="sr-only">{what}</span>
+      <div aria-hidden="true" className="space-y-2">
+        <div className={`h-7 w-48 ${bar}`} />
+        <div className={`h-4 w-2/3 ${bar}`} />
+      </div>
+      <div aria-hidden="true" className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="space-y-2 rounded-2xl border border-ink-100 px-4 py-3">
+            <div className={`h-3 w-1/2 ${bar}`} />
+            <div className={`h-6 w-3/4 ${bar}`} />
+          </div>
+        ))}
+      </div>
+      {[0, 1, 2].map((i) => (
+        <div key={i} aria-hidden="true" className={`h-4 ${bar}`} style={{ width: `${92 - i * 14}%` }} />
+      ))}
+    </div>
+  );
+}
+
 export const OFFLINE = "백엔드에 연결할 수 없습니다. backend 서버(포트 8000)가 실행 중인지 확인하세요.";
 
 export function Bars({ data, labels, color = "bg-brand-500", max }: { data: Record<string, number>; labels?: Record<string, string>; color?: string; max?: number }) {

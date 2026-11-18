@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Loading } from "@/components/admin/bits";
+import { useCallback, useState, type FormEvent, type ReactNode } from "react";
+import { PageSkeleton } from "@/components/admin/bits";
+import { usePoll } from "@/lib/usePoll";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { finance, krw, type TeamBudget } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
@@ -52,15 +53,10 @@ function BudgetConfirm({ month, headcountExample, busy, run }: {
 }) {
   const [budget, setBudget] = useState<TeamBudget | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    const load = () => finance.teamBudget(month)
-      .then((r) => { if (live) { setBudget(r.data); setProblem(null); } })
-      .catch((e) => { if (live) { setBudget(null); setProblem(errText(e)); } });
-    load();
-    const poll = setInterval(load, 15000);
-    return () => { live = false; clearInterval(poll); };
-  }, [month]);
+  const loadBudget = useCallback(() => finance.teamBudget(month)
+    .then((r) => { setBudget(r.data); setProblem(null); })
+    .catch((e) => { setBudget(null); setProblem(errText(e)); }), [month]);
+  usePoll(loadBudget, 15000);
 
   const done = budget?.status === "approved";
   const ready = !!budget && budget.status !== "unavailable" && !budget.example && !!budget.signature && !done && !headcountExample;
@@ -115,11 +111,7 @@ export default function OrgChangesPage() {
       setData(changes); setPreview(headcount); setError(null);
     } catch (e) { setError(errText(e)); }
   }, [month]);
-  useEffect(() => {
-    load();
-    const poll = setInterval(load, 15000);
-    return () => clearInterval(poll);
-  }, [load]);
+  usePoll(load, 15000);
 
   async function run(job: () => Promise<unknown>) {
     setBusy(true); setMsg(null);
@@ -128,7 +120,7 @@ export default function OrgChangesPage() {
     finally { setBusy(false); }
   }
 
-  if (!data) return <Loading error={error} />;
+  if (!data) return <PageSkeleton error={error} />;
   const drafts = data.changes.filter((c) => c.status === "draft");
   const teams = Array.from(new Set([
     ...(preview?.rows?.map((r) => r.team) ?? []),

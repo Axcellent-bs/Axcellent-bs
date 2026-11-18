@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loading } from "@/components/admin/bits";
+import { PageSkeleton } from "@/components/admin/bits";
+import { usePoll } from "@/lib/usePoll";
 import { beforeAfter, countByAgent, type AgentDiagnosisRow } from "@/lib/agentDiagnosis";
 import {
   MIN_EVENTS, TONE_TEXT, VERDICT, agentName, readout, secondsKo,
@@ -225,16 +226,13 @@ export default function AgentEvaluationPage() {
   const [diagnoses, setDiagnoses] = useState<AgentDiagnosisRow[]>([]);
 
   const load = useCallback(async () => {
-    try { setData(await hr.agentEvaluation()); setError(null); }
-    catch (e) { setError(errText(e)); }
-    try { setDiagnoses(await orchestrator.agentDiagnoses()); }
-    catch { setDiagnoses([]); }
+    // 서로 기다릴 필요가 없어 한 번에 받는다
+    await Promise.all([
+      hr.agentEvaluation().then((d) => { setData(d); setError(null); }).catch((e) => setError(errText(e))),
+      orchestrator.agentDiagnoses().then(setDiagnoses).catch(() => setDiagnoses([])),
+    ]);
   }, []);
-  useEffect(() => {
-    load();
-    const poll = setInterval(load, 20000);
-    return () => clearInterval(poll);
-  }, [load]);
+  usePoll(load, 20000);
   useEffect(() => { if (ctxParam) setPicked(ctxParam); }, [ctxParam]);
 
   const current = useMemo(
@@ -242,7 +240,7 @@ export default function AgentEvaluationPage() {
     [data, picked],
   );
 
-  if (!data) return <Loading error={error} />;
+  if (!data) return <PageSkeleton error={error} />;
   const counts = countByAgent(diagnoses);
   const few = data.events.length < MIN_EVENTS;
 

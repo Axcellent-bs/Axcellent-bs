@@ -1,5 +1,5 @@
 import { AgentDiagnosisInbox } from "@/components/admin/AgentDiagnosisInbox";
-import { Loading } from "@/components/admin/bits";
+import { PageSkeleton } from "@/components/admin/bits";
 import { IncidentExplorer } from "@/components/incident/IncidentExplorer";
 import { clock } from "@/lib/adminRelay";
 import { useIncidents } from "@/lib/incidents";
@@ -13,7 +13,7 @@ export default function ArchiveIncidentsPage() {
   const ctx = useSearchParams().get("ctx"); // 다른 화면에서 이슈 번호를 들고 넘어올 때
   const { incidents, error, updatedAt, reload } = useIncidents();
 
-  if (!incidents) return <Loading error={error} what="이슈를 불러오는 중…" />;
+  if (!incidents) return <PageSkeleton error={error} what="이슈를 불러오는 중…" />;
 
   return (
     <div className="space-y-8 px-8 pb-12 pt-2">
