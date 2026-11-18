@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { DeadlineSection } from "@/components/finance/CloseControls";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ActionQueue } from "@/components/finance/SafetyQueue";
@@ -6,6 +6,7 @@ import { SettlementsSection, type SettlementSource } from "@/components/finance/
 import { CompanyName } from "@/demo/CompanyName";
 import { api } from "@/lib/api";
 import { SETTLEMENT_HOLD_ACTION, liveHumanTokenSet } from "@/lib/finance";
+import { useVisibleInterval } from "@/lib/visibleInterval";
 
 // 고객지원 > 판매자 정산. 판매자 정산(정산금 계산 · 지급 승인 요청 · 묶음 상태 · 지급 기한 점검)은
 // 고객지원(settlement 서비스, 화면은 클레임·보상 메뉴 안)이 한다. 재무는 결과를 받아 재무 화면 ③에서 보여 주기만 한다.
@@ -28,10 +29,7 @@ const QUEUE_INTRO = "판매자 정산 묶음 지급 승인은 고객지원 담�
 export default function SellerSettlementsPage() {
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
-  useEffect(() => {
-    const t = setInterval(bump, REFRESH_MS);
-    return () => clearInterval(t);
-  }, [bump]);
+  useVisibleInterval(bump, REFRESH_MS, { immediate: false }); // 다른 탭을 보는 동안은 새로 받지 않는다
 
   // 묶음을 요청하면 보류 큐를 다시 받고 그 건을 표시한다
   const [highlight, setHighlight] = useState<string | null>(null);

@@ -25,12 +25,16 @@ export function createPoller(run: () => Promise<unknown> | void, intervalMs: num
   };
 }
 
-export function useVisibleInterval(run: () => Promise<unknown> | void, intervalMs: number) {
+/**
+ * `immediate: false`면 마운트 때 첫 로드를 하지 않는다(호출부가 따로 첫 로드를 하거나, 처음 값이 다른 길로 오는 화면용).
+ * 기본은 마운트 직후 한 번 부른다.
+ */
+export function useVisibleInterval(run: () => Promise<unknown> | void, intervalMs: number, opts: { immediate?: boolean } = {}) {
   const runRef = useRef(run);
   runRef.current = run;
   useEffect(() => {
     const poller = createPoller(() => runRef.current(), intervalMs, { isHidden: () => document.hidden, now: Date.now });
-    void poller.first();
+    if (opts.immediate !== false) void poller.first();
     const timer = window.setInterval(() => { void poller.tick(); }, intervalMs);
     const onVis = () => { void poller.visible(); };
     document.addEventListener("visibilitychange", onVis);

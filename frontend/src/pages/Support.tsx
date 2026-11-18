@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
 import { AgentDiagnosisInbox } from "@/components/admin/AgentDiagnosisInbox";
 import { AtRisk } from "@/components/support/AtRisk";
@@ -6,6 +6,7 @@ import { IncidentResponse } from "@/components/support/IncidentResponse";
 import { InquiryCheck } from "@/components/support/InquiryCheck";
 import { SurgeChanges } from "@/components/support/SurgeChanges";
 import { CompanyName } from "@/demo/CompanyName";
+import { useVisibleInterval } from "@/lib/visibleInterval";
 
 // 고객지원 AI 화면 = 고객사 고객지원팀. 짜임은 데이터분석 AI(/data)·재무 AI(/finance)와 같다.
 // 탭: 위험 고객(기본) · 문의 진단(보상 후보·결제 진단) · 급증·변경 요청 · 사건 대응 기록. 탭은 읽기 전용이고, 숫자는 서버가 센 값만 보여 준다.
@@ -37,13 +38,10 @@ export default function SupportPage() {
   const openBuyer = useCallback((id: string) => navigate({ search: `?buyer=${encodeURIComponent(id)}`, hash: "" }, { replace: true }), [navigate]);
   const openInquiry = useCallback((id: number) => navigate({ search: `?inquiry=${id}`, hash: "#inquiry" }, { replace: true }), [navigate]);
 
-  // 30초마다 모두 새로 받는다
+  // 30초마다 모두 새로 받는다(다른 탭을 보는 동안은 쉰다)
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
-  useEffect(() => {
-    const t = setInterval(bump, REFRESH_MS);
-    return () => clearInterval(t);
-  }, [bump]);
+  useVisibleInterval(bump, REFRESH_MS, { immediate: false });
 
   // 예전 "주문 내역" 탭 주소는 주문 관리 서비스로 보낸다
   if (location.hash === "#orders") return <Navigate to={`/orders${buyer ? `?buyer=${encodeURIComponent(buyer)}` : ""}`} replace />;

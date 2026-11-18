@@ -6,6 +6,7 @@ import { dateStr } from "@/lib/format";
 import { CATEGORY_KO } from "@/lib/labels";
 import { Link } from "@/lib/nav";
 import type { FeedbackItem, FeedbackOverview, FeedbackStatus } from "@/lib/types";
+import { useVisibleInterval } from "@/lib/visibleInterval";
 
 // 후기 관리 = 해결된 문의에 고객이 남긴 평가(별점·해결 여부·한 줄 후기)를 모아 만족도를 보고 후기를 검토하는 화면.
 // 숫자는 고객지원이 코드로 센 값이고 화면이 새로 계산하지 않는다(평가가 없으면 0이 아니라 "아직 없음").
@@ -42,11 +43,8 @@ export default function ReviewsPage() {
       setRows(r); setStats(s); setError(null);
     } catch (e) { setError((e as Error).message || OFFLINE); }
   }, []);
-  useEffect(() => {
-    void load();
-    const t = setInterval(load, REFRESH_MS);
-    return () => clearInterval(t);
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
+  useVisibleInterval(load, REFRESH_MS, { immediate: false }); // 다른 탭을 보는 동안은 새로 받지 않고, 앞 요청이 오는 중이면 건너뛴다
 
   async function decide(inquiryId: number, status: "visible" | "hidden") {
     setBusy(inquiryId); setError(null);

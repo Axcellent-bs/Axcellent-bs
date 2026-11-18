@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
+import time
 from collections import Counter
 from datetime import datetime
 from typing import Any
@@ -109,6 +111,45 @@ async def _shop_orders(params: dict[str, Any], max_rows: int) -> list[dict[str, 
         if not cursor or len(found) > max_rows:
             return found
         query = {**query, "cursor": cursor}
+
+
+# 주문 관리 화면은 탭·페이지를 바꿀 때마다 같은 기간 목록을 처음부터 다시 읽었다
+# (주문 7천 건이면 매번 약 1초). 그 목록을 잠깐 기억해 쓴다.
+# 같은 요청이 동시에 오면 한 번만 읽고 같이 기다린다(받는 중이면 같이 기다리기).
+# 주문이 바뀌어도 이 시간 안에는 이전 목록이 보인다(화면은 30초마다 새로 받는다).
+ORDERS_CACHE_SECONDS = 20.0
+_ORDERS_CACHE_MAX = 8  # 기간·구매자 조합마다 한 줄. 오래된 것부터 버린다
+_orders_cache: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
+_orders_inflight: dict[tuple[Any, ...], asyncio.Future[list[dict[str, Any]]]] = {}
+
+
+def clear_orders_cache() -> None:
+    """기억해 둔 주문 목록을 비운다(테스트용)."""
+    _orders_cache.clear()
+    _orders_inflight.clear()
+
+
+async def _shop_orders_cached(params: dict[str, Any], max_rows: int) -> list[dict[str, Any]]:
+    """`_shop_orders`를 `ORDERS_CACHE_SECONDS` 동안 기억한다. 돌려받은 목록은 고치지 않는다."""
+    key = (tuple(sorted(params.items())), max_rows)
+    hit = _orders_cache.get(key)
+    if hit is not None and time.monotonic() - hit[0] < ORDERS_CACHE_SECONDS:
+        return hit[1]
+    pending = _orders_inflight.get(key)
+    if pending is None:
+        pending = asyncio.ensure_future(_shop_orders(params, max_rows))
+        _orders_inflight[key] = pending
+
+        def _done(done: asyncio.Future[list[dict[str, Any]]]) -> None:
+            _orders_inflight.pop(key, None)
+            if not done.cancelled() and done.exception() is None:
+                _orders_cache[key] = (time.monotonic(), done.result())
+                while len(_orders_cache) > _ORDERS_CACHE_MAX:
+                    _orders_cache.pop(next(iter(_orders_cache)))
+
+        pending.add_done_callback(_done)
+    # 이 요청이 취소돼도 읽기는 끝까지 간다(같이 기다리는 다른 요청이 있을 수 있다)
+    return await asyncio.shield(pending)
 
 
 def _number(identifier: str) -> int:
@@ -251,8 +292,9 @@ async def order_page(
         params["since"] = start
     if end := _period(until, "until"):
         params["until"] = end
-    # cursor로 넘기다 MAX_ORDERS를 넘으면 거기서 멈춘다(25만 건을 다 읽지 않는다)
-    items = await _shop_orders(params, MAX_ORDERS)
+    # cursor로 넘기다 MAX_ORDERS를 넘으면 거기서 멈춘다(25만 건을 다 읽지 않는다).
+    # 같은 목록은 잠깐 기억해 둔 것을 쓴다
+    items = await _shop_orders_cached(params, MAX_ORDERS)
     if len(items) > MAX_ORDERS:
         raise ApiError(
             422,

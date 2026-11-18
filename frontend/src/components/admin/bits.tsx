@@ -1,4 +1,5 @@
 import { Link } from "@/lib/nav";
+import { Skeleton } from "@/components/finance/bits";
 import type { ReactNode } from "react";
 import { BLOCKER_KO, CLAIM_STATUS_KO, CLAIM_STATUS_TONE } from "@/lib/labels";
 
@@ -34,7 +35,9 @@ export function Blockers({ items }: { items: { code: string; message: string }[]
 }
 
 export function Loading({ error, what = "불러오는 중…" }: { error: string | null; what?: string }) {
-  return <div className="flex h-64 items-center justify-center px-6 text-center text-sm text-ink-500">{error ?? what}</div>;
+  // 오류가 없으면 받는 동안 글자 대신 칸 모양 회색 틀(뼈대)을 먼저 보여 준다
+  if (error) return <div className="flex h-64 items-center justify-center px-6 text-center text-sm text-ink-500">{error}</div>;
+  return <div className="min-h-64 px-4 py-6 sm:px-8"><Skeleton label={what} stats={3} lines={4} /></div>;
 }
 
 /** 처음 받는 동안 보이는 회색 뼈대. 오류가 있으면 글자로 알린다 */
