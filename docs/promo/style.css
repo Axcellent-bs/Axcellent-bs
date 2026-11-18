@@ -83,7 +83,7 @@ body { overflow-x: clip; }
 .menu { display: none; margin-left: auto; background: transparent; color: var(--white); border: 1px solid rgba(255, 255, 255, .4); border-radius: 10px; padding: 7px 14px; font: inherit; font-weight: 700; }
 
 /* ---------- 히어로 ---------- */
-.hero { position: relative; min-height: min(100vh, 900px); display: grid; align-items: center; padding: 120px 0 80px; color: var(--white); background: linear-gradient(100deg, rgba(14, 14, 36, .94) 8%, rgba(14, 14, 36, .72) 52%, rgba(14, 14, 36, .55) 100%), url(assets/hero.jpg) center 55% / cover no-repeat, var(--navy); }
+.hero { position: relative; min-height: min(100vh, 900px); display: grid; align-items: center; padding: 120px 0 80px; color: var(--white); background: linear-gradient(100deg, rgba(14, 14, 36, .94) 8%, rgba(14, 14, 36, .72) 52%, rgba(14, 14, 36, .55) 100%), url(assets/hero.webp) center 55% / cover no-repeat, var(--navy); }
 .hero-in { width: min(var(--wrap), calc(100% - 40px)); margin-inline: auto; display: grid; grid-template-columns: 1.05fr .95fr; gap: 40px; align-items: center; }
 .hero-title { font-size: var(--t1); line-height: 1.04; font-weight: 800; letter-spacing: -.035em; margin: 22px 0 26px; }
 .hero-lead { font-size: clamp(18px, 2.2vw, 20px); font-weight: 500; line-height: 1.55; color: #e9e9fa; }
@@ -228,16 +228,19 @@ body { overflow-x: clip; }
   .cols { grid-template-columns: minmax(0, 1fr); }
   .col { min-height: 340px; }
   .photo-card, .photo-card.tall { min-height: 420px; }
-  .top-cta { margin-left: auto; }
+  .top-cta { margin-left: auto; order: 1; }
   .top-cta .btn-ghost { display: none; }
-  .menu { margin-left: 8px; }
-  .menu { display: inline-block; }
+  .menu { margin-left: 8px; order: 2; display: inline-block; }
   .nav { position: absolute; top: 64px; left: 0; right: 0; flex-direction: column; background: #14142e; padding: 10px 20px 18px; margin: 0; display: none; }
   .nav.open { display: flex; }
   .nav a { padding: 12px 8px; font-size: 16px; }
 }
 @media (max-width: 560px) {
   .members { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .members > li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .case .case-empty { min-height: 0; padding: 14px 16px; }
+  .shot-wide { overflow-x: auto; }
+  .shot-wide img { width: 720px; max-width: none; }
   .steps { grid-template-columns: minmax(0, 1fr); }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .team-body, .a2a-body, .approval-body, .steps-card { padding: 22px; }

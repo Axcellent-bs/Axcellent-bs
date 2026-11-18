@@ -62,7 +62,7 @@ const vision = `
 const team = `
 <section class="sec sec-paper" id="team">
   <div class="wrap split">
-    <div class="photo-card reveal" style="--img:url(assets/chief.jpg)">
+    <div class="photo-card reveal" style="--img:url(assets/chief.webp)">
       <p class="pill pill-gold">총괄 AI</p>
       <h2 class="h2 on-photo">${esc(C.team.title[0])}<br>${esc(C.team.title[1])}<br><span class="em">${esc(C.team.title[2])}</span></h2>
       <p class="on-photo-lead">${esc(C.team.lead)}</p>
@@ -84,7 +84,7 @@ const media = C.story.media
   : "";
 
 const story = `
-<section class="sec sec-night" id="story" style="--img:url(assets/night.jpg)">
+<section class="sec sec-night" id="story" style="--img:url(assets/night.webp)">
   <div class="wrap">
     <div class="story-head reveal">
       <p class="pill pill-gold">${esc(C.story.kicker)}</p>
@@ -124,7 +124,7 @@ const approval = `
 <section class="sec sec-paper" id="approval">
   <div class="wrap">
   <div class="split flip">
-    <div class="photo-card reveal" style="--img:url(assets/sign.jpg)">
+    <div class="photo-card reveal" style="--img:url(assets/sign.webp)">
       <p class="pill pill-gold">${esc(ap.kicker)}</p>
       <h2 class="h2 on-photo huge">${esc(ap.title[0])}<br><span class="em">${esc(ap.title[1])}</span></h2>
       <p class="on-photo-lead">${ap.lead.map((l) => esc(l).replace(esc(ap.leadEm), `<strong>${esc(ap.leadEm)}</strong>`)).join(" ")}</p>
@@ -135,7 +135,7 @@ const approval = `
       <ul class="rules">${ap.items.map((it) => `<li><span class="ico" aria-hidden="true">${esc(it.icon)}</span><div><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div></li>`).join("")}</ul>
     </div>
   </div>
-  <figure class="shot shot-wide reveal"><img src="${esc(ap.shot.src)}" alt="${esc(ap.shot.alt)}" loading="lazy"><figcaption><b>${esc(ap.shot.title)}</b><span>${esc(ap.shot.body)}</span><em>${esc(ap.shot.note)}</em></figcaption></figure>
+  <figure class="shot shot-wide reveal" tabindex="0" aria-label="판매자 정산 지급 승인 화면 (좁은 화면에서는 옆으로 밀어 볼 수 있음)"><img src="${esc(ap.shot.src)}" alt="${esc(ap.shot.alt)}" loading="lazy"><figcaption><b>${esc(ap.shot.title)}</b><span>${esc(ap.shot.body)}</span><em>${esc(ap.shot.note)}</em></figcaption></figure>
   </div>
 </section>`;
 
@@ -206,7 +206,7 @@ const posts = !showPosts ? "" : `
 </section>`;
 
 const cta = `
-<section class="sec sec-cta" id="contact" style="--img:url(assets/bookstore.jpg)">
+<section class="sec sec-cta" id="contact" style="--img:url(assets/bookstore.webp)">
   <div class="wrap">
     <h2 class="h2 huge reveal">${C.cta.title.map((t, i) => (i === C.cta.emIndex ? `<span class="em">${esc(t)}</span>` : esc(t))).join("<br>")}</h2>
     <p class="cta-lead reveal">${esc(C.cta.body)}</p>
@@ -218,7 +218,7 @@ const cta = `
 const header = `
 <header class="top" id="header">
   <div class="top-in">
-    <a class="brand-logo" href="#top" aria-label="AXcellent 처음으로"><img src="assets/logo-white.png" alt="AXcellent" width="156" height="30"></a>
+    <a class="brand-logo" href="#top" aria-label="AXcellent 처음으로"><img src="assets/logo-white.webp" alt="AXcellent" width="156" height="30"></a>
     <button class="menu" id="menu" aria-expanded="false" aria-controls="nav">메뉴</button>
     <nav class="nav" id="nav" aria-label="구역 이동">${C.nav.filter(([id]) => id !== "posts" || showPosts).map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join("")}</nav>
     <div class="top-cta">${brochureBtn("btn btn-gold btn-sm top-pdf")}${contactBtn("btn btn-ghost btn-sm")}</div>
@@ -228,7 +228,7 @@ const header = `
 const footer = `
 <footer class="foot">
   <div class="wrap foot-in">
-    <img src="assets/logo-white.png" alt="AXcellent" width="130" height="25">
+    <img src="assets/logo-white.webp" alt="AXcellent" width="130" height="25" loading="lazy">
     <p>${esc(C.site.disclaimer)} · ${esc(C.site.photoCredit)}</p>
   </div>
 </footer>`;
@@ -244,7 +244,10 @@ const html = `<!doctype html>
   <meta property="og:description" content="${esc(C.site.description)}">
   <meta property="og:type" content="website">
   ${C.site.noindex === false ? "" : '<meta name="robots" content="noindex">'}
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"></noscript>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
