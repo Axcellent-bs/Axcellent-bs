@@ -542,8 +542,17 @@ def _latest_views(out: VideoPerformanceOutput) -> tuple[int, ViewsPoint] | None:
     return None
 
 
+def seven_day_known(out: VideoPerformanceOutput) -> bool:
+    """데이터 `video_performance`의 7d 측정이 끝났는가(`status == "known"`과 조회수 있음)."""
+    by_name = {c.checkpoint: c for c in out.checkpoints}
+    checkpoint = by_name.get("7d")
+    return bool(checkpoint and checkpoint.status == "known" and checkpoint.views is not None)
+
+
 async def _fill_views(
-    request: AgentRequest, data: RecordCampaignResultInput
+    request: AgentRequest,
+    data: RecordCampaignResultInput,
+    on_seven_day: Callable[[bool], None] | None = None,
 ) -> RecordCampaignResultInput:
     """호출자가 조회수를 안 줬으면 데이터가 잰 값을 싣는다. 못 얻으면 비워 두고 막지 않는다."""
     if data.views is not None or data.views_point is not None:
@@ -563,6 +572,8 @@ async def _fill_views(
         return data
     if out.campaign_id not in (None, data.campaign_id) or out.test:
         return data  # 다른 캠페인 답이거나 시험 영상이면 재무 결과에 싣지 않는다
+    if on_seven_day is not None:
+        on_seven_day(seven_day_known(out))  # 이 호출에서 이미 읽은 값. 새 호출은 없다
     latest = _latest_views(out)
     if latest is None:
         return data
@@ -575,6 +586,7 @@ async def record_campaign_result(
     brief_content: BriefContent | None = None,
     started: Callable[[str], StartedCampaign | None] | None = None,
     on_recorded: Callable[[str], None] | None = None,
+    on_seven_day: Callable[[bool], None] | None = None,
 ) -> AgentResult:
     """`started`는 시작 때 적어 둔 값(카테고리·형식·제작비)으로 빈 칸만 채운다(호출자 값 우선).
 
@@ -615,7 +627,7 @@ async def record_campaign_result(
                 output={"campaign_id": data.campaign_id},
             )
 
-    data = await _fill_views(request, data)
+    data = await _fill_views(request, data, on_seven_day)
     # 계약 모델 그대로 보낸다. 값이 없는 선택 필드는 보내지 않아 재무가 0으로 채우지 못한다
     try:
         contract = CampaignResultInput.model_validate(data.model_dump())

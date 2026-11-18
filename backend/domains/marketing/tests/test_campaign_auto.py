@@ -254,3 +254,222 @@ async def test_start_registers_and_human_save_marks(monkeypatch: pytest.MonkeyPa
     sent = _sent(fin)[0]
     assert sent["production_cost_krw"] == 0 and sent["content_category"] == "아재개그"
     assert handlers.STATE.campaigns.status("cmp_1") == "recorded_human"
+
+
+# ---- 자동 전송 source 값 · 7일 조회수 재확인 ----
+
+
+def _cp(name: str, views: int | None) -> dict:
+    return {
+        "checkpoint": name,
+        "status": "known" if views is not None else "unknown",
+        "views": views,
+    }
+
+
+class _VideoRouted:
+    """finance·data(campaign_result)·data(video_performance) 대역. 7d 값은 테스트가 바꾼다."""
+
+    def __init__(self, finance: Finance, checkpoints: list[dict]) -> None:
+        self.finance, self.data, self.checkpoints = finance, _data(), checkpoints
+        self.video_calls = 0
+
+    async def __call__(self, target: str, req: AgentRequest) -> AgentResult:
+        if target == "data" and req.skill == "video_performance":
+            self.video_calls += 1
+            out = {
+                "status": "known",
+                "campaign_id": "cmp_1",
+                "tracking": True,
+                "checkpoints": self.checkpoints,
+            }
+            return AgentResult(
+                meta=req.meta, status=TaskStatus.COMPLETED, outcome="completed", output=out
+            )
+        return await (self.data if target == "data" else self.finance)(target, req)
+
+
+def _wire_video_auto(
+    monkeypatch: pytest.MonkeyPatch, finance: Finance, checkpoints: list[dict]
+) -> _VideoRouted:
+    routed = _VideoRouted(finance, checkpoints)
+    monkeypatch.setattr(campaign, "call_agent", routed)
+    return routed
+
+
+DAY = timedelta(days=1)
+EARLY = [_cp("1h", 10), _cp("1d", 50), _cp("3d", 120), _cp("7d", None)]
+FULL = [*EARLY[:3], _cp("7d", 300)]
+
+
+def test_auto_source_constant_is_pinned() -> None:
+    assert campaign_auto.AUTO_SOURCE == "marketing.auto.approved_budget"
+
+
+@pytest.mark.asyncio
+async def test_auto_send_carries_fixed_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Recorded()
+    _wire_auto(monkeypatch, finance)
+    tracker = _tracker()
+    await campaign_auto.auto_record_once(tracker, _cfg(), NOW)
+    assert _sent(finance)[0]["source"] == "marketing.auto.approved_budget"
+    assert tracker.log("cmp_1")[0]["detail"]["sent"]["source"] == campaign_auto.AUTO_SOURCE
+
+
+@pytest.mark.asyncio
+async def test_human_save_does_not_send_auto_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """사람 저장은 source를 데이터 값으로 채워 재무가 덮어쓴다(자동 값이 사라진다)."""
+    finance = Recorded()
+    _wire_auto(monkeypatch, finance)
+    human = {"campaign_id": "cmp_1", "campaign_name": "n", "channel": "c", "spend_krw": 5}
+    await campaign.record_campaign_result(_req("record_campaign_result", human))
+    assert _sent(finance)[0]["source"] == "data.campaign_result"
+
+
+@pytest.mark.asyncio
+async def test_views_not_known_rechecks_next_day_then_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Recorded()
+    routed = _wire_video_auto(monkeypatch, finance, EARLY)
+    tracker = _tracker()
+    await campaign_auto.auto_record_once(tracker, _cfg(), NOW)
+    assert tracker.status("cmp_1") == "recorded_auto"
+    assert tracker.views_state("cmp_1") == "pending"
+    assert _sent(finance)[0]["views_point"] == "3d"
+    # 같은 날엔 다시 보내지 않는다
+    assert await campaign_auto.auto_record_once(tracker, _cfg(), NOW + timedelta(hours=23)) == 0
+    assert len(_sent(finance)) == 1
+    # 다음 날 다시 보낸다(7d 아직)
+    assert await campaign_auto.auto_record_once(tracker, _cfg(), NOW + DAY) == 1
+    assert len(_sent(finance)) == 2 and tracker.views_state("cmp_1") == "pending"
+    # 7d known -> 보내고 닫는다. 그 뒤로는 안 보낸다
+    routed.checkpoints = FULL
+    assert await campaign_auto.auto_record_once(tracker, _cfg(), NOW + 2 * DAY) == 1
+    sent = _sent(finance)
+    assert len(sent) == 3 and (sent[2]["views"], sent[2]["views_point"]) == (300, "7d")
+    assert tracker.views_state("cmp_1") == "done" and tracker.status("cmp_1") == "recorded_auto"
+    assert await campaign_auto.auto_record_once(tracker, _cfg(), NOW + 3 * DAY) == 0
+    assert len(_sent(finance)) == 3
+    assert [e["result"] for e in tracker.log("cmp_1")] == [
+        "recorded_auto",
+        "views_retry",
+        "views_done",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_views_known_at_first_send_closes_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Recorded()
+    _wire_video_auto(monkeypatch, finance, FULL)
+    tracker = _tracker()
+    await campaign_auto.auto_record_once(tracker, _cfg(), NOW)
+    assert tracker.views_state("cmp_1") == "done"
+    assert await campaign_auto.auto_record_once(tracker, _cfg(), NOW + DAY) == 0
+
+
+@pytest.mark.asyncio
+async def test_views_recheck_gives_up_after_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Recorded()
+    _wire_video_auto(monkeypatch, finance, EARLY)
+    tracker = _tracker()  # 시작일 11/16 KST = 11/15 15:00 UTC
+    cfg = _cfg(views_days=3)  # 기한 11/18 15:00 UTC. NOW(11/20)는 이미 지났다 -> 전송 뒤 바로 포기
+    await campaign_auto.auto_record_once(tracker, cfg, NOW)
+    assert tracker.views_state("cmp_1") == "gave_up"
+    assert await campaign_auto.auto_record_once(tracker, cfg, NOW + DAY) == 0
+    # 기한 안이면 재확인하다 기한 직전 마지막 시도 뒤 포기한다
+    other = _tracker()
+    cfg5 = _cfg(views_days=6)  # 기한 11/21 15:00 UTC
+    await campaign_auto.auto_record_once(other, cfg5, NOW)
+    assert other.views_state("cmp_1") == "pending"
+    await campaign_auto.auto_record_once(other, cfg5, NOW + DAY)
+    assert other.views_state("cmp_1") == "gave_up"
+    assert await campaign_auto.auto_record_once(other, cfg5, NOW + 2 * DAY) == 0
+    assert len(_sent(finance)) == 3
+
+
+def test_views_days_env_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(campaign_auto.VIEWS_DAYS_ENV, raising=False)
+    assert AutoConfig.from_env().views_days == 14
+    monkeypatch.setenv(campaign_auto.VIEWS_DAYS_ENV, "5")
+    assert AutoConfig.from_env().views_days == 5
+
+
+@pytest.mark.asyncio
+async def test_disabled_does_not_recheck(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Recorded()
+    _wire_video_auto(monkeypatch, finance, EARLY)
+    tracker = _tracker()
+    await campaign_auto.auto_record_once(tracker, _cfg(), NOW)
+    before = len(finance.calls)
+    assert await campaign_auto.auto_record_once(tracker, _cfg(False), NOW + 2 * DAY) == 0
+    assert len(finance.calls) == before and tracker.views_state("cmp_1") == "pending"
+
+
+@pytest.mark.asyncio
+async def test_human_save_or_cancel_stops_recheck(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Recorded()
+    _wire_video_auto(monkeypatch, finance, EARLY)
+    human, canceled = _tracker(), _tracker()
+    for t in (human, canceled):
+        await campaign_auto.auto_record_once(t, _cfg(), NOW)
+    sent_before = len(_sent(finance))
+    human.mark_human_recorded("cmp_1")
+    canceled.mark_canceled("cmp_1")
+    assert await campaign_auto.auto_record_once(human, _cfg(), NOW + DAY) == 0
+    assert await campaign_auto.auto_record_once(canceled, _cfg(), NOW + DAY) == 0
+    assert len(_sent(finance)) == sent_before
+    assert human.status("cmp_1") == "recorded_human"
+    assert canceled.views_state("cmp_1") == "done"
+
+
+@pytest.mark.asyncio
+async def test_recheck_is_duplicate_safe_and_failure_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finance = Recorded("already_recorded")
+    routed = _wire_video_auto(monkeypatch, finance, EARLY)
+    tracker = _tracker()
+    await campaign_auto.auto_record_once(tracker, _cfg(), NOW)
+    await campaign_auto.auto_record_once(tracker, _cfg(), NOW + DAY)
+    assert tracker.status("cmp_1") == "recorded_auto" and tracker.views_state("cmp_1") == "pending"
+    # 재무 오류면 7d가 known이어도 닫지 않고 다음 날 다시 한다
+    failing = Finance(status=TaskStatus.FAILED, output={}, outcome="finance_error")
+    routed.finance, routed.checkpoints = failing, FULL
+    await campaign_auto.auto_record_once(tracker, _cfg(), NOW + 2 * DAY)
+    assert tracker.views_state("cmp_1") == "pending"
+    routed.finance = finance
+    await campaign_auto.auto_record_once(tracker, _cfg(), NOW + 3 * DAY)
+    assert tracker.views_state("cmp_1") == "done"
+
+
+@pytest.mark.asyncio
+async def test_non_video_campaign_is_not_rechecked(monkeypatch: pytest.MonkeyPatch) -> None:
+    finance = Recorded()
+    routed = _wire_video_auto(monkeypatch, finance, EARLY)
+    tracker = CampaignTracker(":memory:")
+    tracker.track(_started(format=None, content_category=None, production_cost_krw=None), 6)
+    await campaign_auto.auto_record_once(tracker, _cfg(), NOW)
+    assert tracker.views_state("cmp_1") is None
+    assert await campaign_auto.auto_record_once(tracker, _cfg(), NOW + DAY) == 0
+    assert routed.video_calls == 1
+
+
+def test_old_file_ledger_gets_new_columns(tmp_path: Path) -> None:
+    import sqlite3
+
+    path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE campaign_runs (campaign_id TEXT PRIMARY KEY, status TEXT NOT NULL,"
+        " ends_on TEXT, due_at TEXT, next_try_at TEXT, attempts INTEGER NOT NULL DEFAULT 0,"
+        " started_at TEXT NOT NULL, payload TEXT NOT NULL)"
+    )
+    conn.commit()
+    conn.close()
+    tracker = CampaignTracker(path)
+    tracker.track(_started(), grace_h=6)
+    assert tracker.views_state("cmp_1") is None
+    tracker.close()
