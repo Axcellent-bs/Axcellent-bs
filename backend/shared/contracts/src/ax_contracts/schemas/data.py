@@ -1406,6 +1406,11 @@ class PromoConcept(AxModel):
     legacy_concept_id: str | None = None
     # 빌린 트렌드가 지금 인기 주제면, 브리프가 같은 주제에 주는 insight_id (stable_insight_id 규칙)
     source_insight_id: str | None = None
+    # 아래는 예전 응답은 없다 (11/18). 기획이 ReceiveInsightInput으로 옮기는 영상 카테고리·형식.
+    # shorts_stats 숏츠 형식 이름 (예: 챌린지). 재무·기획 content_category로 그대로 옮긴다
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    # finance ContentFormat과 같은 값. 데이터는 유튜브 숏츠만 보므로 shorts만 채운다
+    content_format: Literal["shorts", "reels"] | None = None
 
 
 class PromoShortsFormat(AxModel):
@@ -2268,6 +2273,12 @@ class TrendInsight(AxModel):
     promo_subtopic_excluded: int | None = Field(default=None, ge=0)
     # 기획에 넘기는 기준을 통과한 근거 한 줄 (기준을 보는 인사이트만)
     gate_reason: str | None = None
+    # 아래는 예전 응답은 없다 (11/18). 기획이 ReceiveInsightInput으로 옮기는 영상 카테고리·형식.
+    # shorts_stats 숏츠 형식 이름 (예: 챌린지). 재무·기획 content_category로 그대로 옮긴다.
+    # shorts_format_source == "topic"(이 주제 영상에서 고른 형식)일 때만 채운다
+    content_category: str | None = Field(default=None, min_length=1, max_length=40)
+    # finance ContentFormat과 같은 값. 데이터는 유튜브 숏츠만 보므로 shorts만 채운다
+    content_format: Literal["shorts", "reels"] | None = None
 
 
 class BriefGate(AxModel):
