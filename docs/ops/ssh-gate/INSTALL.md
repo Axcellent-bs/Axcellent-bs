@@ -196,11 +196,11 @@ restrict,from="<허용 출처 IP>",command="/usr/local/sbin/ax-gate <계정>" ss
 `gateway-allow-propose` / `gateway-allow-approve` / `gateway-allow-restore`는 게이트웨이의 허용 skill 목록에 읽기(read) 등급 skill을 두 사람 승인으로 더한다. 순서대로 한다(새 게이트 파일을 먼저 설치한 뒤에 정책을 고친다).
 
 1. 1절처럼 `ops-gate.sh`와 `gateway_allow_check.py`를 root 소유로 설치한다.
-2. 허용 목록 백업 폴더를 만든다(root 소유, 755).
+2. 허용 목록 백업 폴더를 만든다(root 소유, 755). 허용 목록이 든 폴더와 백업 폴더의 부모도 root 소유이고 그룹·기타 쓰기가 없어야 한다(게이트가 확인하고, 아니면 멈춘다).
 3. 서버 책임자가 서버에서 허용 목록 파일의 **실제 형식**을 확인한다. 게이트는 "한 줄에 skill 하나(빈 줄과 `#` 줄 무시)"를 가정하고, 모르는 줄이 하나라도 있으면 쓰지 않고 멈춘다. 형식이 다르면 `gateway_allow_check.py`의 `allowlist_adapter()` 한 함수만 고친다. 카드 모양(`skills[].id`, `grade`, `allowed_requesters`)도 같은 방식으로 `card_skill_entry()`/`check_card()`만 고친다.
-4. 정책 파일에 `[gateway_allow]` 구역을 채운다(`policy.example.toml` 참고): `list_file`, `card_path`, `reload_cmd`, `backup_dir`. 선택: `requester`, `card_repo` + `expected_card_sha`(카드가 든 서버 레포 HEAD가 승인된 SHA일 때만 쓴다).
+4. 정책 파일에 `[gateway_allow]` 구역을 채운다(`policy.example.toml` 참고): `list_file`, `card_path`, `reload_cmd`, `backup_dir`, **`card_repo`와 `expected_card_sha`(둘 다 필수)**. 선택: `requester`. 이 구역이 비었거나 필수 값이 없으면(또는 `TODO`면) `gateway-allow-*` 동작은 전부 거부된다. `expected_card_sha`는 서버 책임자가 카드 파일을 직접 확인한 레포 커밋의 40자 SHA다. 게이트는 `card_repo`의 HEAD가 이 값과 같을 때만 쓰고, 카드는 작업 트리 파일이 아니라 그 커밋의 내용(`git cat-file`)을 root 소유 임시 파일에 받아 검사한다(git의 `skip-worktree` 등으로 수정을 숨겨도 소용없다). 카드를 바꾸거나 레포가 앞으로 나아가면 서버 책임자가 새 SHA를 확인해 이 값을 갱신해야 한다.
 5. 권한자 계정의 `[permissions]` 줄에 `"gateway-allow-propose", "gateway-allow-approve", "gateway-allow-restore"`를 더한다. `_default`에는 넣지 않는다(넣으면 게이트가 모든 요청을 거부한다).
-6. 확인: 임시 skill로 `gateway-allow-propose <skill> --dry-run` → 제안 → 다른 권한자가 `status`로 확인값 확인 → `gateway-allow-approve <skill> <확인값> --announced` → 허용 목록 파일 소유·권한이 그대로인지, 게이트웨이에서 그 skill이 실제로 되는지 → `gateway-allow-restore <gwa-백업폴더>`로 되돌리기. `write` 등급 skill 제안이 거부되는지도 본다.
+6. 확인: 임시 skill로 `gateway-allow-propose <skill> --dry-run` → 제안 → 다른 권한자가 `status`로 확인값 확인 → `gateway-allow-approve <skill> <확인값> --announced` → 허용 목록 파일 소유·권한이 그대로인지, 게이트웨이에서 그 skill이 실제로 되는지 → `gateway-allow-restore <gwa-백업폴더>`로 되돌리기. `write` 등급 skill 제안이 거부되는지도 본다. 복원은 게이트가 만든 백업(`gwa-...` 폴더, root 소유, `.sha256` 체크섬 파일 있음)만 받는다. 체크섬이 없거나 맞지 않거나 소유가 다르면 거부하고, 복원 뒤 목록이 형식 검사를 통과하는지도 본다. (예전 버전이 만든 백업도 체크섬 파일은 있다.)
 
 끄기: 정책에서 그 구역과 권한을 지운다. 이미 더한 skill은 그대로 남는다.
 

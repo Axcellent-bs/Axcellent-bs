@@ -64,19 +64,43 @@ def check_name(skill):
 
 
 def read_text_file(path):
-    """일반 파일(심볼릭 링크 아님)만 UTF-8 로 읽는다. 크기 한도 안에서만."""
+    """일반 파일(심볼릭 링크 아님)만 UTF-8 로 읽는다. 크기 한도 안에서만.
+
+    검사와 읽기 사이에 파일을 바꿔치기(링크·FIFO·/dev/zero)해도 막히도록, 먼저 한 번만 열고(O_NOFOLLOW,
+    O_NONBLOCK) 열린 파일에 fstat 로 종류를 확인한 뒤 최대 MAX_FILE_BYTES+1 바이트만 읽는다.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     try:
-        st = os.lstat(path)
+        fd = os.open(path, flags)
     except OSError:
-        raise ConfigError("파일을 읽을 수 없다") from None
-    if not stat.S_ISREG(st.st_mode):
-        raise ConfigError("일반 파일이 아니다(심볼릭 링크·폴더는 읽지 않는다)") from None
-    if st.st_size > MAX_FILE_BYTES:
+        raise ConfigError("파일을 읽을 수 없다(심볼릭 링크는 읽지 않는다)") from None
+    try:
+        try:
+            st = os.fstat(fd)
+        except OSError:
+            raise ConfigError("파일을 읽을 수 없다") from None
+        if not stat.S_ISREG(st.st_mode):
+            raise ConfigError("일반 파일이 아니다(심볼릭 링크·폴더·FIFO·장치는 읽지 않는다)") from None
+        if st.st_size > MAX_FILE_BYTES:
+            raise ConfigError("파일이 너무 크다") from None
+        chunks = []
+        total = 0
+        try:
+            while total <= MAX_FILE_BYTES:
+                chunk = os.read(fd, MAX_FILE_BYTES + 1 - total)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+        except OSError:
+            raise ConfigError("파일을 읽을 수 없다") from None
+    finally:
+        os.close(fd)
+    if total > MAX_FILE_BYTES:
         raise ConfigError("파일이 너무 크다") from None
     try:
-        with open(path, "r", encoding="utf-8", newline="") as fh:
-            return fh.read()
-    except (OSError, UnicodeDecodeError):
+        return b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError:
         raise ConfigError("파일을 UTF-8 글로 읽을 수 없다") from None
 
 

@@ -62,9 +62,19 @@ FAKES = {
     # runuser -u <계정> -- 명령...: 어느 계정으로 돌렸는지 남기고 명령을 그대로 실행한다
     "runuser": 'echo "runuser as=$2" >> "$FAKE_LOG"\nshift 3\nexec "$@"\n',
     "git": r"""echo "git $*" >> "$FAKE_LOG"
-[[ "$1" == "-C" ]] && shift 2
+repo=""
+[[ "$1" == "-C" ]] && { repo="$2"; shift 2; }
 case "$1" in
   fetch) exit 0 ;;
+  # cat-file blob <sha>:<경로>: state/git_blobs/<sha>/<경로> 가 있으면 그것(커밋된 내용), 없으면 작업 트리 파일
+  cat-file)
+    spec="$3"
+    sha="${spec%%:*}"
+    rel="${spec#*:}"
+    if [[ -f "$FAKE_STATE/git_blobs/$sha/$rel" ]]; then cat "$FAKE_STATE/git_blobs/$sha/$rel"; exit 0; fi
+    [[ -f "$FAKE_STATE/git_blobs_only" ]] && exit 128
+    [[ -f "$repo/$rel" ]] && { cat "$repo/$rel"; exit 0; }
+    exit 128 ;;
   rev-parse)
     if [[ "$2" == "HEAD" ]]; then cat "$FAKE_STATE/git_head"; exit 0; fi
     want="${4%%^*}"
@@ -97,6 +107,18 @@ exit 1
            'while IFS= read -r real; do\n'
            '  [[ "$(dirname "$real")" != "$(dirname "$0")" ]] && exec "$real" "$@"\n'
            'done < <(type -aP cp)\nexit 127\n'),
+    # 진짜 mv 를 부른다. state/mv_swap_dest 에 적힌 곳으로 옮긴 직후 그 파일을 다른 내용으로 바꾼다(교체 뒤 확인 실패 시험용)
+    "mv": ('for last; do :; done\n'
+           'while IFS= read -r real; do\n'
+           '  if [[ "$(dirname "$real")" != "$(dirname "$0")" ]]; then\n'
+           '    "$real" "$@" || exit $?\n'
+           '    if [[ -f "$FAKE_STATE/mv_swap_dest" && "$last" == "$(cat "$FAKE_STATE/mv_swap_dest")" ]]; then\n'
+           '      rm -f "$FAKE_STATE/mv_swap_dest"\n'
+           '      printf "other_skill\n" > "$last"\n'
+           '    fi\n'
+           '    exit 0\n'
+           '  fi\n'
+           'done < <(type -aP mv)\nexit 127\n'),
     "nginx": 'echo "nginx $*" >> "$FAKE_LOG"\nexit "$(cat "$FAKE_STATE/nginx_rc" 2>/dev/null || echo 0)"\n',
     # 주소별 응답 코드: state/curl_code_<포트> 가 있으면 그 값, 없으면 state/curl_code, 그것도 없으면 200
     "curl": ('url="${@: -1}"\nport="${url##*:}"\nport="${port%%/*}"\necho "curl $url" >> "$FAKE_LOG"\n'
@@ -2347,11 +2369,29 @@ class GatewayAllowTests(GateCase):
     def write_card(self, card):
         write(self.card, json.dumps(card))
 
-    def gw_body(self, reload_cmd="gw-reload now", extra=""):
-        return (f'list_file = "{self.root}/gw/allowed.txt"\n'
+    def gw_body(self, reload_cmd="gw-reload now", extra="", repo=True, sha=True):
+        # card_repo 와 expected_card_sha 는 필수다. 카드는 card_repo(= gw 폴더) 의 그 커밋 속 내용으로 읽는다
+        body = (f'list_file = "{self.root}/gw/allowed.txt"\n'
                 f'card_path = "{self.root}/gw/card.json"\n'
                 f'reload_cmd = "{reload_cmd}"\n'
-                f'backup_dir = "{self.root}/gw/backups"\n' + extra)
+                f'backup_dir = "{self.root}/gw/backups"\n')
+        if repo:
+            body += f'card_repo = "{self.root}/gw"\n'
+        if sha:
+            body += f'expected_card_sha = "{SHA}"\n'
+        return body + extra
+
+    def commit_card(self, card, sha=SHA):
+        """커밋된 카드 내용(작업 트리 파일과 다를 수 있다)을 가짜 git 에 둔다."""
+        write(self.state / "git_blobs" / sha / "card.json", json.dumps(card))
+
+    def mark_not_root(self, *paths):
+        write(self.state / "not_root_owned", "".join(f"{x}\n" for x in paths))
+
+    def no_leftovers(self):
+        left = [n for n in os.listdir(self.rootp / "var/lib/ax-gate/pending") if n.startswith(".gwa.")]
+        left += [n for n in os.listdir(self.rootp / "gw") if ".gwa-new." in n]
+        self.assertEqual(left, [])
 
     def set_policy(self, gw_body=None, gw_extra="", self_approve=""):
         base = policy_text(self.root).replace(f"[{ALL}]", f"[{ALL}{GW_ACTIONS}]")
@@ -2636,12 +2676,6 @@ class GatewayAllowTests(GateCase):
         self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
 
     def test_expected_card_sha(self):
-        repo = self.rootp / "opt/app/repo"
-        card = repo / "agents/card.json"
-        write(card, json.dumps(GW_CARD))
-        body = self.gw_body(extra=f'card_repo = "{repo.as_posix()}"\nexpected_card_sha = "{SHA}"\n')
-        body = body.replace(f'{self.root}/gw/card.json', card.as_posix())
-        self.set_policy(gw_body=body)
         # HEAD 가 승인된 SHA 이면 통과
         digest = self.propose_gw()
         self.assertRc(self.approve_gw(digest), 0)
@@ -2653,14 +2687,190 @@ class GatewayAllowTests(GateCase):
         self.assertRc(p, 1)
         self.assertIn("result=fail:card-sha-mismatch", self.audit_text())
         self.assertEqual(self.list_text(), GW_LIST)
-        # 카드 파일에 고친 흔적이 있으면 거부
+        # 작업 트리 파일에 "고친 흔적"이 보여도(git status) 쓰는 것은 커밋 내용이다. HEAD 가 맞으면 통과
         write(self.state / "git_head", f"{SHA}\n")
-        write(self.state / "git_dirty", " M agents/card.json\n")
-        self.assertRc(self.approve_gw(digest, skill="get_item"), 1)
-        self.assertIn("result=fail:card-dirty", self.audit_text())
+        write(self.state / "git_dirty", " M card.json\n")
+        self.assertRc(self.approve_gw(digest, skill="get_item"), 0)
+        self.no_leftovers()
         # SHA 형식이 틀리면 설정 오류
-        self.set_policy(gw_body=body.replace(SHA, "abc"))
+        self.set_policy(gw_body=self.gw_body().replace(SHA, "abc"))
         self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+
+    def test_card_repo_and_expected_card_sha_are_required(self):
+        before = self.list_text()
+        cases = {
+            "no card_repo": self.gw_body(repo=False),
+            "no expected_card_sha": self.gw_body(sha=False),
+            "neither": self.gw_body(repo=False, sha=False),
+            "empty section": "",
+            "uppercase sha": self.gw_body().replace(SHA, SHA.upper()),
+            "short sha": self.gw_body().replace(SHA, SHA[:39]),
+            "card outside repo": self.gw_body().replace(f'card_repo = "{self.root}/gw"', f'card_repo = "{self.root}/opt"'),
+        }
+        for name, body in cases.items():
+            with self.subTest(name):
+                self.set_policy(gw_body=body)
+                for cmd in ("gateway-allow-propose list_items", "gateway-allow-restore gwa-x --announced"):
+                    self.assertRc(self.gate("owner-a", cmd), 5)
+        self.assertEqual(self.list_text(), before)
+        self.assertEqual(self.pending_gw(), [])
+        self.assertEqual(self.backups(), [])
+
+    def test_card_is_read_from_the_commit_not_the_worktree(self):
+        # 작업 트리 카드는 read 인데 커밋된 카드는 write 다: 거부(skip-worktree 등으로 수정을 숨기는 경우)
+        self.commit_card(dict(GW_CARD, skills=[{"id": "list_items", "grade": "write"}]))
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 2)
+        self.assertIn("result=fail:gateway-rejected", self.audit_text())
+        self.assertEqual(self.pending_gw(), [])
+        self.assertIn(f"cat-file blob {SHA}:card.json", self.calls())
+        # 반대로 작업 트리 카드가 write 여도 커밋된 카드가 read 면 통과한다(작업 트리는 보지 않는다)
+        self.commit_card(GW_CARD)
+        self.write_card(dict(GW_CARD, skills=[{"id": "list_items", "grade": "write"}]))
+        digest = self.propose_gw()
+        self.assertRc(self.approve_gw(digest), 0)
+        self.assertEqual(self.list_text(), GW_LIST + "list_items\n")
+        self.no_leftovers()
+
+    def test_commit_card_is_rechecked_at_approval(self):
+        digest = self.propose_gw()
+        # 제안 뒤에 그 SHA 의 카드 내용이 write 로 보이면 승인에서 거부한다
+        self.commit_card(dict(GW_CARD, grade="write"))
+        self.assertRc(self.approve_gw(digest), 2)
+        self.assertEqual(self.list_text(), GW_LIST)
+        self.assertEqual(self.backups(), [])
+        self.no_leftovers()
+
+    def test_head_must_equal_expected_sha_on_propose_too(self):
+        write(self.state / "git_head", f"{SHA_LOCAL}\n")
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 1)
+        self.assertIn("result=fail:card-sha-mismatch", self.audit_text())
+        self.assertEqual(self.pending_gw(), [])
+        self.no_leftovers()
+
+    def test_card_missing_in_commit_is_a_config_error(self):
+        write(self.state / "git_blobs_only", "1\n")
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+        self.assertIn("result=fail:card-not-in-commit", self.audit_text())
+        self.no_leftovers()
+
+    def test_gateway_dirs_must_be_root_owned(self):
+        before = self.list_text()
+        gw = f"{self.root}/gw"
+        for name, bad in (("list folder", gw), ("backup_dir", f"{gw}/backups")):
+            with self.subTest(name):
+                self.mark_not_root(bad)
+                self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+                self.assertIn("result=fail:config-perms", self.audit_text())
+        # backup_dir 의 부모 폴더(목록 폴더와 다른 곳에 둔 경우)
+        (self.rootp / "gwb/backups").mkdir(parents=True)
+        self.set_policy(gw_body=self.gw_body().replace(f"{gw}/backups", f"{self.root}/gwb/backups"))
+        self.mark_not_root(f"{self.root}/gwb")
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+        self.assertEqual(self.list_text(), before)
+        self.assertEqual(self.pending_gw(), [])
+
+    def test_install_temp_name_is_unpredictable(self):
+        src = GATE.read_text(encoding="utf-8")
+        body = src[src.index("ga_install() {"):src.index("ga_apply_or_revert() {")]
+        self.assertIn('mktemp "${dst}.gwa-new.XXXXXX"', body)
+        self.assertNotIn("$$", body)
+        # 실제로 한 번 돌려도 임시 파일이 남지 않는다
+        digest = self.propose_gw()
+        self.assertRc(self.approve_gw(digest), 0)
+        self.no_leftovers()
+
+    def test_list_has_failure_after_replace_reverts(self):
+        digest = self.propose_gw()
+        write(self.state / "mv_swap_dest", f"{self.root}/gw/allowed.txt\n")
+        self.assertRc(self.approve_gw(digest), 1)
+        self.assertIn("result=fail:gateway-verify-failed", self.audit_text())
+        self.assertEqual(self.list_text(), GW_LIST)
+        self.assertEqual(self.calls().count("gw-reload now"), 1)  # 바꾼 목록은 반영하지 않고, 되돌린 뒤에만 반영
+        self.assertEqual(self.pending_gw(), ["gateway-allow.list_items.req"])
+        self.no_leftovers()
+
+    def test_list_file_symlink_is_refused(self):
+        real = self.rootp / "gw/real.txt"
+        write(real, GW_LIST)
+        self.list.unlink()
+        try:
+            os.symlink(real, self.list)
+        except (OSError, NotImplementedError):
+            self.skipTest("심볼릭 링크를 만들 수 없다")
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+        self.assertEqual(real.read_text(encoding="utf-8"), GW_LIST)
+
+    # --- 복원: 소유자·체크섬·형식 ---
+    def one_backup(self):
+        digest = self.propose_gw()
+        self.assertRc(self.approve_gw(digest), 0)
+        (bdir,) = self.backups()
+        time.sleep(1.1)
+        return bdir
+
+    def restore_blocked(self, bdir, rc, code):
+        """복원이 거부되고 목록은 그대로이며 복원 전 백업·임시 파일이 생기지 않는다."""
+        before = self.list_text()
+        self.assertRc(self.gate("owner-c", f"gateway-allow-restore {bdir} --announced"), rc)
+        self.assertIn(f"result=fail:{code}", self.audit_text())
+        self.assertEqual(self.list_text(), before)
+        self.assertEqual([b for b in self.backups() if b.startswith("gwa-pre-restore-")], [])
+        self.no_leftovers()
+
+    def test_restore_refuses_backup_not_owned_by_root(self):
+        bdir = self.one_backup()
+        base = f"{self.root}/gw/backups/{bdir}"
+        for what, path in (("folder", base), ("list file", f"{base}/allowed.txt"),
+                           ("checksum", f"{base}/allowed.txt.sha256")):
+            with self.subTest(what):
+                self.mark_not_root(path)
+                self.restore_blocked(bdir, 5, "config-perms")
+        # 소유가 정상으로 돌아오면 복원된다
+        (self.state / "not_root_owned").unlink()
+        self.assertRc(self.gate("owner-c", f"gateway-allow-restore {bdir} --announced"), 0)
+        self.assertEqual(self.list_text(), GW_LIST)
+
+    def test_restore_refuses_missing_checksum(self):
+        bdir = self.one_backup()
+        # 심어 둔 백업: 체크섬 파일이 없는 폴더(카드 검사 없이 아무 skill 이나 넣어 둔 경우)
+        write(self.rootp / "gw/backups/gwa-planted/allowed.txt", "write_item\n")
+        self.restore_blocked("gwa-planted", 1, "backup-checksum-missing")
+        # 정상 백업에서 체크섬 파일을 지워도 거부
+        (self.rootp / "gw/backups" / bdir / "allowed.txt.sha256").unlink()
+        self.restore_blocked(bdir, 1, "backup-checksum-missing")
+
+    def test_restore_refuses_bad_checksum_file(self):
+        bdir = self.one_backup()
+        sumf = self.rootp / "gw/backups" / bdir / "allowed.txt.sha256"
+        good = sumf.read_text(encoding="utf-8")
+        digest = good.split()[0]
+        for what, text in (("wrong hash", "0" * 64 + "  allowed.txt\n"),
+                           ("wrong name", f"{digest}  other.txt\n"),
+                           ("garbage", "not a checksum\n"),
+                           ("empty", "")):
+            with self.subTest(what):
+                write(sumf, text)
+                self.restore_blocked(bdir, 1, "backup-checksum")
+        write(sumf, good)
+        self.assertRc(self.gate("owner-c", f"gateway-allow-restore {bdir} --announced"), 0)
+
+    def test_restore_refuses_backup_with_unreadable_list_format(self):
+        import hashlib
+        bdir = self.one_backup()
+        folder = self.rootp / "gw/backups" / bdir
+        junk = 'ALLOWED = ["a"]\n'
+        write(folder / "allowed.txt", junk)
+        write(folder / "allowed.txt.sha256", f"{hashlib.sha256(junk.encode()).hexdigest()}  allowed.txt\n")  # 체크섬은 맞는다
+        self.restore_blocked(bdir, 5, "gateway-config")
+
+    def test_restore_folder_that_is_a_symlink_is_refused(self):
+        bdir = self.one_backup()
+        link = self.rootp / "gw/backups/gwa-link"
+        try:
+            os.symlink(self.rootp / "gw/backups" / bdir, link, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("심볼릭 링크를 만들 수 없다")
+        self.restore_blocked("gwa-link", 2, "backup-not-found")
 
     def test_help_and_status_show_new_actions(self):
         p = self.gate("owner-a", "help")
@@ -2742,6 +2952,9 @@ class ExamplePolicyTests(GateCase):
         self.assertNotIn("nginx_target_block_lines", data)
         # 게이트웨이 허용 구역은 자리표시자뿐이고, 새 동작 3개는 예시 표의 어느 계정에도 열려 있지 않다
         self.assertEqual(set(data["gateway_allow"].values()), {"TODO"})
+        # 필수 값(카드 레포·승인 SHA 포함)이 자리표시자라서 예시 그대로는 gateway-allow-* 가 열리지 않는다
+        self.assertEqual(set(data["gateway_allow"]),
+                         {"list_file", "card_path", "reload_cmd", "backup_dir", "card_repo", "expected_card_sha"})
         for actions in perms.values():
             self.assertFalse({"gateway-allow-propose", "gateway-allow-approve", "gateway-allow-restore"} & set(actions))
 

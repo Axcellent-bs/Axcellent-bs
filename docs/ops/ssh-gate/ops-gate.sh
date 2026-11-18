@@ -175,7 +175,11 @@ declare -A POLICY=()
 check_root_owned() {
   # 운영에서만: root 소유이고 그룹·기타 쓰기 금지여야 한다.
   local f="$1" st uid mode
-  [[ -n "${TEST_ROOT}" ]] && return 0
+  if [[ -n "${TEST_ROOT}" ]]; then
+    # 시험용: state/not_root_owned 에 줄로 적힌 경로는 "root 소유가 아님"으로 본다(운영에서는 쓰지 않는다)
+    ! grep -qxF -- "${f}" "${TEST_ROOT}/state/not_root_owned" 2> /dev/null
+    return
+  fi
   st="$(stat -c '%u %a' -- "${f}")" || return 1
   uid="${st%% *}"
   mode="${st##* }"
@@ -1736,8 +1740,14 @@ do_nginx_approve_location() {
 # 위치·카드·반영 명령은 전부 정책 [gateway_allow] 에서 읽는다. 허용 목록 파일 형식과 카드 모양은
 # 검증기(gateway_allow_check.py)의 어댑터 함수가 아는 것만 쓴다(서버 실제 형식이 다르면 거기만 고친다).
 # ---------------------------------------------------------------------------
-GA_LIST="" GA_CARD="" GA_BACKUP="" GA_REQUESTER="" GA_STAGE=""
+GA_LIST="" GA_CARD="" GA_BACKUP="" GA_REQUESTER="" GA_STAGE="" GA_REPO="" GA_CARD_SHA="" GA_CARD_REL="" GA_CARD_TMP=""
 GA_RELOAD=()
+
+# 경로가 root 소유이고 남이 못 쓰는지(운영). 아니면 설정 오류로 멈춘다. 게이트(root)가 읽고 쓰는 곳이 대상이다.
+ga_require_root_owned() { # 경로 설명
+  check_root_owned "$1" ||
+    step_fail "config-perms" "${RC_CONFIG}" "$2 가 root 소유가 아니거나 남이 쓸 수 있다(root 소유, 그룹·기타 쓰기 금지여야 한다)"
+}
 
 load_gateway_allow() {
   local name v tok n=0
@@ -1753,10 +1763,20 @@ load_gateway_allow() {
   done
   [[ -f "${GA_LIST}" && ! -L "${GA_LIST}" ]] ||
     step_fail "config-path" "${RC_CONFIG}" "정책 [gateway_allow] list_file 이 일반 파일이 아니다"
-  [[ -f "${GA_CARD}" && ! -L "${GA_CARD}" ]] ||
-    step_fail "config-path" "${RC_CONFIG}" "정책 [gateway_allow] card_path 가 일반 파일이 아니다"
   [[ -d "${GA_BACKUP}" && ! -L "${GA_BACKUP}" ]] ||
     step_fail "config-path" "${RC_CONFIG}" "정책 [gateway_allow] backup_dir 가 폴더가 아니다(미리 만들어 둔다)"
+  # 카드는 작업 트리 파일이 아니라 card_repo 의 expected_card_sha 커밋 속 내용으로 읽는다. 둘 다 필수다.
+  GA_REPO="${POLICY[gateway_allow.card_repo]-}"
+  path_ok "${GA_REPO}" && [[ "${GA_REPO}" != */ && "${GA_CARD}" == "${GA_REPO}/"* ]] ||
+    step_fail "config-path" "${RC_CONFIG}" "정책 [gateway_allow] card_repo 가 없거나 card_path 를 품지 않는다(설치 때 채워야 한다)"
+  GA_CARD_REL="${GA_CARD#"${GA_REPO}"/}"
+  GA_CARD_SHA="${POLICY[gateway_allow.expected_card_sha]-}"
+  [[ "${GA_CARD_SHA}" =~ ${RE_SHA_FULL} ]] ||
+    step_fail "config" "${RC_CONFIG}" "정책 [gateway_allow] expected_card_sha 가 없거나 40자 소문자 SHA 가 아니다(설치 때 채워야 한다)"
+  # 게이트(root)가 쓰는 폴더: 허용 목록 폴더, 백업 폴더와 그 부모는 root 소유여야 한다
+  ga_require_root_owned "${GA_LIST%/*}" "허용 목록이 든 폴더"
+  ga_require_root_owned "${GA_BACKUP}" "backup_dir"
+  ga_require_root_owned "${GA_BACKUP%/*}" "backup_dir 의 부모 폴더"
   GA_RELOAD=()
   read -r -a GA_RELOAD <<< "${POLICY[gateway_allow.reload_cmd]-}"
   n="${#GA_RELOAD[@]}"
@@ -1772,48 +1792,54 @@ load_gateway_allow() {
   fi
 }
 
+ga_cleanup() { # 임시 파일(스테이지·읽어 온 카드)을 지운다
+  [[ -z "${GA_STAGE}" ]] || rm -f -- "${GA_STAGE}"
+  [[ -z "${GA_CARD_TMP}" ]] || rm -f -- "${GA_CARD_TMP}"
+  GA_CARD_TMP=""
+}
+
 # 검증기 호출: 통과면 0. 거부(끝 코드 2)는 사용법 오류로, 그 밖은 설정 오류로 멈춘다(검증기의 표준 오류는 그대로 나온다).
 ga_chk() {
   local rc=0
   python3 "${GA_CHECKER}" "$@" > /dev/null || rc=$?
   (( rc != 0 )) || return 0
-  [[ -z "${GA_STAGE}" ]] || rm -f -- "${GA_STAGE}"
+  ga_cleanup
   if (( rc == 2 )); then
     step_fail "gateway-rejected" "${RC_USAGE}" "게이트웨이 허용 검증기가 거부했다(위 REJECT 줄이 사유)"
   fi
   step_fail "gateway-config" "${RC_CONFIG}" "게이트웨이 허용 검증기가 파일 형식·설정 오류를 냈다(위 CONFIG 줄이 사유)"
 }
 
-# 선택 설정 expected_card_sha: 카드는 서버 레포 안 파일이고 root 로 도는 게이트의 입력이 된다.
-# 레포 HEAD 가 승인된 SHA 이고 카드 파일에 고친 흔적이 없을 때만 쓴다.
-ga_verify_card_source() {
-  local want repo head dirty
-  [[ -n "${POLICY[gateway_allow.expected_card_sha]+x}" ]] || return 0
-  want="${POLICY[gateway_allow.expected_card_sha]}"
-  [[ "${want}" =~ ${RE_SHA_FULL} ]] ||
-    step_fail "config" "${RC_CONFIG}" "정책 [gateway_allow] expected_card_sha 는 40자 SHA 여야 한다"
-  repo="${POLICY[gateway_allow.card_repo]-}"
-  path_ok "${repo}" && [[ "${GA_CARD}" == "${repo}/"* ]] ||
-    step_fail "config-path" "${RC_CONFIG}" "정책 [gateway_allow] card_repo 가 없거나 card_path 를 품지 않는다"
+# 카드는 서버 레포 안 파일이고 root 로 도는 게이트의 입력이 된다. 작업 트리 파일은 믿지 않는다(git 의
+# skip-worktree·clean 필터로 수정을 숨길 수 있다). 레포 HEAD 가 정책 expected_card_sha 와 같을 때만, 그 커밋의
+# 카드 내용을 git cat-file 로 읽어 root 소유 임시 파일(GA_CARD_TMP)에 받는다. 검사기는 이 임시 파일만 읽는다
+# (검사와 사용이 같은 바이트다. 읽은 뒤 작업 트리를 바꿔도 소용없다).
+ga_fetch_card() {
+  local head
   load_deploy_user
-  head="$(as_deploy git -C "${repo}" rev-parse HEAD 2> /dev/null)" || head=""
-  [[ "${head}" == "${want}" ]] ||
+  head="$(as_deploy git -C "${GA_REPO}" rev-parse HEAD 2> /dev/null)" || head=""
+  [[ "${head}" == "${GA_CARD_SHA}" ]] || {
+    ga_cleanup
     step_fail "card-sha-mismatch" "${RC_FAIL}" "카드가 든 레포의 HEAD 가 승인된 SHA(expected_card_sha)가 아니다"
-  dirty="$(as_deploy git -C "${repo}" status --porcelain -- "${GA_CARD}" 2> /dev/null)" ||
-    step_fail "card-sha-mismatch" "${RC_FAIL}" "카드 파일 상태를 git 으로 확인하지 못했다"
-  [[ -z "${dirty}" ]] ||
-    step_fail "card-dirty" "${RC_FAIL}" "카드 파일이 레포 HEAD 와 다르다(고친 흔적이 있다)"
+  }
+  GA_CARD_TMP="$(mktemp "${PENDING_DIR}/.gwa.card.XXXXXX")" ||
+    step_fail "config" "${RC_CONFIG}" "카드 임시 파일을 만들지 못했다"
+  if ! as_deploy git -C "${GA_REPO}" cat-file blob "${GA_CARD_SHA}:${GA_CARD_REL}" > "${GA_CARD_TMP}" 2> /dev/null; then
+    ga_cleanup
+    step_fail "card-not-in-commit" "${RC_CONFIG}" "승인된 SHA 커밋에서 카드 파일을 읽지 못했다(card_path 확인)"
+  fi
 }
 
-# 제안·승인 공통 검증: 이름 형식 → 카드(skill 존재·read 등급·요청자) → 허용 목록(중복·형식). 스테이지 파일은 새 목록.
+# 제안·승인 공통 검증: 이름 형식 → 카드(커밋 내용: skill 존재·read 등급·요청자) → 허용 목록(중복·형식). 스테이지 파일은 새 목록.
 ga_validate() { # skill 스테이지파일
   local skill="$1" req=()
   GA_STAGE="$2"
   ga_chk check-name --skill "${skill}"
-  ga_verify_card_source
+  ga_fetch_card
   [[ -z "${GA_REQUESTER}" ]] || req=(--requester "${GA_REQUESTER}")
-  ga_chk card --card "${GA_CARD}" --skill "${skill}" ${req[@]+"${req[@]}"}
-  ga_verify_card_source
+  ga_chk card --card "${GA_CARD_TMP}" --skill "${skill}" ${req[@]+"${req[@]}"}
+  rm -f -- "${GA_CARD_TMP}"
+  GA_CARD_TMP=""
   ga_chk list-add --file "${GA_LIST}" --out "${GA_STAGE}" --skill "${skill}"
 }
 
@@ -1827,7 +1853,9 @@ ga_backup() { # 폴더이름 → 지금 허용 목록을 백업하고 체크섬�
   local b="${GA_BACKUP}/$1" base="${GA_LIST##*/}"
   [[ ! -e "${b}" ]] || step_fail "backup-exists" "${RC_FAIL}" "백업 폴더가 이미 있다"
   (umask 022 && run mkdir -- "${b}")
-  run cp -p -- "${GA_LIST}" "${b}/${base}"
+  # 백업 파일은 게이트(root)가 만든 새 파일이라 root 소유다(원본 소유를 잇지 않는다). 복원 때 이 소유를 확인한다
+  run cp -- "${GA_LIST}" "${b}/${base}"
+  run chmod 644 -- "${b}/${base}"
   if (( ! DRY )); then
     (cd "${b}" && sha256sum "${base}" > "${base}.sha256")
   fi
@@ -1835,8 +1863,14 @@ ga_backup() { # 폴더이름 → 지금 허용 목록을 백업하고 체크섬�
 
 # 파일을 허용 목록 자리에 놓는다: 같은 폴더에 원본의 소유·권한을 이은 임시 파일을 만들고 mv 로 교체한다.
 ga_install() { # 새내용파일 목적지
-  local src="$1" dst="$2" tmp="$2.gwa-new.$$"
-  run cp -p -- "${dst}" "${tmp}" || return 1
+  local src="$1" dst="$2" tmp
+  # 임시 이름은 예측할 수 없게 mktemp 로 만든다(미리 심어 둔 링크를 root 가 따라 쓰지 못하게)
+  if (( DRY )); then
+    tmp="${dst}.gwa-new.DRYRUN"
+  else
+    tmp="$(mktemp "${dst}.gwa-new.XXXXXX")" || return 1
+  fi
+  run cp -p -- "${dst}" "${tmp}" || { rm -f -- "${tmp}"; return 1; }
   if ! run cp -- "${src}" "${tmp}"; then
     rm -f -- "${tmp}"
     return 1
@@ -1851,6 +1885,7 @@ ga_install() { # 새내용파일 목적지
 ga_apply_or_revert() { # 새내용파일 되돌릴백업폴더 [확인할skill]
   local src="$1" bname="$2" skill="${3:-}" bf="${GA_BACKUP}/$2/${GA_LIST##*/}" ok=1
   if ! ga_install "${src}" "${GA_LIST}"; then
+    ga_cleanup
     step_fail "gateway-replace-failed" "${RC_FAIL}" "허용 목록을 바꾸지 못했다. 바꾸기 전 그대로다(백업 ${bname})"
   fi
   if (( ! DRY )); then
@@ -1869,6 +1904,7 @@ ga_apply_or_revert() { # 새내용파일 되돌릴백업폴더 [확인할skill]
   else
     say "경고: 허용 목록을 되돌리지 못했다. 사람이 바로 봐야 한다(백업 폴더 ${bname})"
   fi
+  ga_cleanup   # 실패해도 스테이지 임시 파일은 남기지 않는다(재시도는 검증부터 다시 한다)
   if (( ok )); then
     step_fail "gateway-reload-failed" "${RC_FAIL}" "게이트웨이 반영 실패. 허용 목록을 바꾸기 전으로 되돌렸다(백업 ${bname})"
   fi
@@ -1990,31 +2026,53 @@ do_ga_approve() {
 }
 
 do_ga_restore() {
-  local folder="${ARGS[0]}" bdir src base stamp pre
+  local folder="${ARGS[0]}" bdir src base stamp pre sumf want fname got copy
   load_gateway_allow
+  [[ "${folder}" =~ ^gwa-[A-Za-z0-9_-]+$ ]] ||
+    step_fail "bad-folder" "${RC_USAGE}" "백업 폴더 이름이 잘못됐다(gwa-... 형식만)"
   base="${GA_LIST##*/}"
   bdir="${GA_BACKUP}/${folder}"
   src="${bdir}/${base}"
+  sumf="${src}.sha256"
   if [[ ! -d "${bdir}" || -L "${bdir}" || ! -f "${src}" || -L "${src}" ]]; then
     step_fail "backup-not-found" "${RC_USAGE}" "그 백업 폴더에 허용 목록 파일이 없다"
   fi
-  if [[ -f "${src}.sha256" ]]; then
-    (cd "${bdir}" && sha256sum --status -c "${base}.sha256") ||
-      step_fail "backup-checksum" "${RC_FAIL}" "백업의 체크섬이 맞지 않는다(백업이 바뀌었다)"
-    say "백업 체크섬: 일치"
-  else
-    say "백업 체크섬: 파일 없음(확인 못 하고 진행)"
+  # 게이트가 만든 백업만 쓴다: 폴더·파일·체크섬 파일이 root 소유이고 남이 못 쓰며, 체크섬 파일이 있어야 한다
+  ga_require_root_owned "${bdir}" "백업 폴더"
+  ga_require_root_owned "${src}" "백업의 허용 목록 파일"
+  if [[ ! -f "${sumf}" || -L "${sumf}" ]]; then
+    step_fail "backup-checksum-missing" "${RC_FAIL}" "백업에 체크섬 파일이 없다(게이트가 만든 백업이 아니다. 복원하지 않는다)"
   fi
-  GA_STAGE=""
-  ga_chk list-check --file "${src}"
+  ga_require_root_owned "${sumf}" "백업의 체크섬 파일"
+  # 백업 바이트를 한 번만 읽어 임시 파일에 받고, 체크섬 확인·형식 확인·교체를 모두 그 임시 파일로 한다
+  copy="$(mktemp "${PENDING_DIR}/.gwa.restore.XXXXXX")" ||
+    step_fail "config" "${RC_CONFIG}" "복원 임시 파일을 만들지 못했다"
+  GA_STAGE="${copy}"
+  cp -- "${src}" "${copy}" || {
+    ga_cleanup
+    step_fail "backup-not-found" "${RC_USAGE}" "백업의 허용 목록 파일을 읽지 못했다"
+  }
+  want="" fname=""
+  read -r want fname < "${sumf}" || true
+  fname="${fname#\*}"
+  got="$(sha256sum < "${copy}")" || got=""
+  got="${got%% *}"
+  if [[ ! "${want}" =~ ^[0-9a-f]{64}$ || "${fname}" != "${base}" || "${got}" != "${want}" ]]; then
+    ga_cleanup
+    step_fail "backup-checksum" "${RC_FAIL}" "백업의 체크섬이 맞지 않는다(백업이 바뀌었거나 체크섬 파일이 이상하다)"
+  fi
+  say "백업 체크섬: 일치"
+  ga_chk list-check --file "${copy}"
   stamp_now
   stamp="${REPLY}"
   pre="gwa-pre-restore-${stamp}"
   ga_backup "${pre}"
   say "복원 전 상태 백업: ${pre}"
-  ga_apply_or_revert "${src}" "${pre}"
+  ga_apply_or_revert "${copy}" "${pre}"
+  rm -f -- "${copy}"
+  GA_STAGE=""
   (( DRY )) || audit "restored:${folder}"
-  say "허용 목록을 ${folder} 로 복원하고 게이트웨이에 반영했다. 이 복원을 되돌리려면: gateway-allow-restore ${pre}"
+  say "허용 목록을 ${folder} 로 복원하고 게이트웨이에 반영했다(복원 뒤 목록이 형식 검사를 통과했다). 이 복원을 되돌리려면: gateway-allow-restore ${pre}"
 }
 
 do_record_pr() {

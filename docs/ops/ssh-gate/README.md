@@ -98,9 +98,9 @@
 | `deploy-bundle <SHA>` | 번들 배포(배포 스크립트를 배포 계정으로 실행). 지금 서버 코드보다 **앞선** 커밋만. 번들 백업, 직전 배포 해시 기록, 번들 점검 | 필수 |
 | `restart-backend <SHA> --ack-data-loss` | 정책의 파일들을 백업한 뒤 서비스 재시작, health가 전부 뜰 때까지 폴링 | 필수 |
 | `rollback-bundle <SHA>` | 그 SHA를 배포하기 직전의 번들 백업으로 되돌림. 코드(레포)는 그대로 | 필수 |
-| `gateway-allow-propose <skill>` | 게이트웨이 허용 목록에 skill 추가 **제안**. 검증(이름 형식·중복·카드에 있음·카드 `grade`가 `read`·요청자)만 하고 승인 대기 파일을 만든다. 허용 목록은 안 바뀐다 | |
+| `gateway-allow-propose <skill>` | 게이트웨이 허용 목록에 skill 추가 **제안**. 검증(이름 형식·중복·카드에 있음·카드 `grade`가 `read`·요청자)만 하고 승인 대기 파일을 만든다. 카드는 정책 `card_repo`의 `expected_card_sha` 커밋 내용(`git cat-file`)으로 읽고, HEAD가 그 SHA가 아니면 거부한다(두 값은 필수). 허용 목록은 안 바뀐다 | |
 | `gateway-allow-approve <skill> <확인값>` | 제안자와 **다른** 권한자가 승인하면 그때 재검증 → 백업 → 임시 파일 + `mv` 교체 → 정책의 반영 명령 실행. 실패하면 복구하고 다시 반영한다. 같은 사람은 `[self_approve]` 계정만 | 필수 |
-| `gateway-allow-restore <백업폴더명>` | 허용 목록을 `gwa-...` 백업으로 되돌리고 반영한다(복원 전 상태도 백업) | 필수 |
+| `gateway-allow-restore <백업폴더명>` | 허용 목록을 `gwa-...` 백업으로 되돌리고 반영한다(복원 전 상태도 백업). 백업 폴더·파일·체크섬 파일이 root 소유이고 체크섬이 맞아야 하며(없으면 거부), 복원될 목록이 형식 검사를 통과해야 한다 | 필수 |
 | `record-pr <참조> <PR번호>` | 감사 로그에 "이 작업 ↔ 이 PR"을 남김 | |
 | `autodeploy-pause <사유> [재개시각]` / `autodeploy-resume` | 자동 배포를 재개시각까지 멈춤 / 지금 재개. 정책의 정지 표시 파일 **하나만** 쓴다(아래 "자동 배포 정지·재개") | |
 
@@ -395,7 +395,7 @@ python -m unittest discover -s docs/ops/ssh-gate/tests -v
 ```
 
 - `tests/test_nginx_location_check.py`: 검증기의 통과·거부 규칙, 정책 블록 줄 검사, 블록 비교, 삽입.
-- `tests/test_gateway_allow_check.py`: 허용 목록 검증기(이름 형식, 카드 등급·요청자, 허용 목록 어댑터, 모르는 형식 거부).
+- `tests/test_gateway_allow_check.py`: 허용 목록 검증기(이름 형식, 카드 등급·요청자, 허용 목록 어댑터, 모르는 형식 거부, 파일 읽기: 링크·FIFO·장치·크기 한도).
 - `tests/test_ops_gate.py`: 인자 파싱(주입 시도 포함), 신원(이름 위조 시도, `SUDO_USER` 없음), 허용표, 잠금, 알림 확인, 두 사람 승인, 배포 환경변수 고정, DRY_RUN, 감사 로그, 비밀값 비출력, 사용성(help, 플래그 순서, 오류 안내). `systemctl`·`nginx`·`sudo`·`id`·`runuser`·`git`·`curl`·`journalctl`과 배포 스크립트는 임시 폴더의 가짜 명령으로 바꿔 부르고(sqlite 백업은 진짜 sqlite 파일로 시험), 게이트는 `OPS_GATE_TEST_ROOT`로 모든 경로를 임시 폴더로 돌린다.
 - 시험 모드(`OPS_GATE_TEST_ROOT`)는 SSH 접속 중이거나 root면 켜지지 않는다(테스트로 확인).
 - pytest가 있으면 `pytest docs/ops/ssh-gate/tests`로도 돈다.

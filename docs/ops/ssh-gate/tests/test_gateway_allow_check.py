@@ -120,6 +120,67 @@ class FileTests(unittest.TestCase):
         rc, _, _ = run_cli("card", "--card", big, "--skill", "list_items")
         self.assertEqual(rc, 3)
 
+    def test_special_files_are_refused_without_blocking(self):
+        # FIFO·장치·폴더는 열린 파일의 fstat 로 거르고, 읽기에서 멈추지 않는다
+        if hasattr(os, "mkfifo"):
+            fifo = self.dir / "fifo.json"
+            os.mkfifo(fifo)
+            rc, _, err = run_cli("list-check", "--file", str(fifo))
+            self.assertEqual(rc, 3)
+            self.assertIn("CONFIG", err)
+        if os.path.exists("/dev/zero"):
+            rc, _, _ = run_cli("list-check", "--file", "/dev/zero")
+            self.assertEqual(rc, 3)
+        rc, _, _ = run_cli("list-check", "--file", str(self.dir))
+        self.assertEqual(rc, 3)
+
+    def test_file_grown_after_stat_is_read_only_up_to_the_limit(self):
+        # fstat 크기를 속여(검사 뒤에 커진 파일) 커도 MAX_FILE_BYTES+1 바이트만 읽고 거부한다
+        big = self.put("big.txt", "a" * (chk.MAX_FILE_BYTES + 5000))
+        real_fstat, real_read = os.fstat, os.read
+        asked = []
+
+        class Fake:
+            def __init__(self, st):
+                self.st_mode, self.st_size = st.st_mode, 0
+
+        def fstat(fd):
+            return Fake(real_fstat(fd))
+
+        def read(fd, n):
+            asked.append(n)
+            return real_read(fd, n)
+
+        os.fstat, os.read = fstat, read
+        try:
+            with self.assertRaises(chk.ConfigError):
+                chk.read_text_file(big)
+        finally:
+            os.fstat, os.read = real_fstat, real_read
+        self.assertLessEqual(sum(asked), chk.MAX_FILE_BYTES + 1)  # 한도+1 바이트를 넘게 요청하지 않는다
+
+    def test_file_is_opened_nofollow_and_nonblocking(self):
+        flags = []
+        real_open = os.open
+
+        def spy(path, fl, *a, **k):
+            flags.append(fl)
+            return real_open(path, fl, *a, **k)
+
+        os.open = spy
+        try:
+            chk.read_text_file(self.put("ok.txt", "ok_one\n"))
+        finally:
+            os.open = real_open
+        (fl,) = flags
+        self.assertEqual(fl & getattr(os, "O_NOFOLLOW", 0), getattr(os, "O_NOFOLLOW", 0))
+        self.assertEqual(fl & getattr(os, "O_NONBLOCK", 0), getattr(os, "O_NONBLOCK", 0))
+
+    def test_exactly_limit_sized_file_is_read(self):
+        ok = self.put("limit.txt", "#" * (chk.MAX_FILE_BYTES - 1) + "\n")
+        self.assertEqual(len(chk.read_text_file(ok)), chk.MAX_FILE_BYTES)
+        self.assertEqual(run_cli("list-check", "--file", ok)[0], 0)
+
     def test_list_add_appends_and_keeps_original_text(self):
         src = self.put("list.txt", "# header\nexisting_one\n\nexisting_two")
         out = str(self.dir / "out.txt")
