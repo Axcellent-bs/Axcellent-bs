@@ -70,7 +70,7 @@ async function refresh(planning: boolean, dev: boolean, orchestrator: boolean) {
   if (orchestrator) set(ORCHESTRATOR_HREF, await heldCount())
 }
 
-/** 메뉴 주소 → 숫자. 켠 서비스만 센다 */
+/** 메뉴 주소 → 숫자. 메뉴에 보이는 서비스만 센다 */
 export function useNavCounts(planning: boolean, dev: boolean, orchestrator: boolean): Record<string, number> {
   useEffect(() => {
     if (!planning && !dev && !orchestrator) return

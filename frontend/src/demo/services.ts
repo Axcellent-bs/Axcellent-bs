@@ -1,7 +1,7 @@
 // 서비스 카탈로그. 부서를 코드에 박지 않으려고 부서 묶음을 없애고, 부서 안에 있던 기능을 서비스 하나하나로 꺼냈다.
-// 회사는 Adobe Creative Cloud처럼 필요한 서비스만 골라 쓰고(/system/services), 켠 서비스는 시스템 관리자 메뉴에 전부 보인다(session.tsx).
+// 모든 서비스는 필수라 회사가 고르지 않는다(2026-11-18). 서비스는 시스템 관리자 메뉴에 전부 보인다(session.tsx).
 // 화면은 예전 캣북스 대시보드의 AI 화면을 옮겨 온 것이다. paths가 그 서비스에 속한 화면 주소, agent가 맡은 AI다.
-import { useSyncExternalStore, type ComponentType } from 'react'
+import type { ComponentType } from 'react'
 import {
   IconBolt, IconBook, IconBox, IconCart, IconChart, IconClock, IconCode, IconLock, IconMegaphone, IconOffice, IconPlan, IconReceipt, IconShield, IconStar, IconUser, IconUsers,
 } from '@/components/icons'
@@ -181,7 +181,7 @@ export const SERVICES: Service[] = [
 /** 서비스를 맡은 AI 이름 (DejaFix 서비스는 없음) */
 export const agentName = (s: Service) => AGENTS.find((g) => g.id === s.agent)?.name
 
-/** 서비스를 고르지 않아도 모두 쓰는 화면. 할 일함은 꺼진 서비스로 가던 일이 사람에게 쌓이는 곳이라 어느 서비스를 샀든 보인다.
+/** 어느 서비스에도 속하지 않아 모든 계정이 여는 화면. 할 일함은 AI가 사람에게 넘긴 일이 쌓이는 곳이다.
  *  도구 연결(/system/tools)은 시스템 관리 아래지만 모두 연다(회사 공용 연결은 관리자만 바꾼다).
  *  /connections·/system/devtools는 도구 연결로 넘기는 예전 주소 (노션 계정 연결이 /connections?notion=…로 돌아온다) */
 export const SHARED_PATHS = ['/handoffs', '/agents/chat', '/agents/office', '/system/tools', '/connections', '/system/devtools']
@@ -195,109 +195,8 @@ export const serviceOfPath = (path: string) => SERVICES.find((s) => s.paths.some
 export const activeChild = (path: string, items: SubItem[]) =>
   items.filter((c) => matchPath(c.href, path)).sort((a, b) => b.href.length - a.href.length)[0]?.href
 
-// ---------------------------------------------------------------- 회사가 고른 서비스
-// 데모라 브라우저에만 기억한다. 메뉴·접근 검사·카탈로그 화면이 같은 값을 보도록 작은 저장소로 둔다.
-const KEY = 'axcellent-demo-services'
-// 저장한 서비스 선택과 함께, 그때 있던 서비스 목록도 남긴다. 그래야 그 뒤에 새로 생긴 서비스(예: 에이전트 평가)를
-// "끈 것"이 아니라 "새로 생긴 것"으로 알아보고 켜 둘 수 있다
-const KNOWN_KEY = 'axcellent-demo-services-known'
-// 위 목록을 남기기 전에 선택을 저장해 둔 브라우저를 위해, 그 뒤에 새로 생긴 서비스를 적어 둔다
-const ADDED_BEFORE_KNOWN_LIST = ['agent-eval', 'orders']
-const ALL = SERVICES.map((s) => s.id)
-// 필수 서비스: 회사가 끌 수 없고 카탈로그에서 내릴 수도 없다. 다른 AI가 장애 기록(총괄 사건·고객지원 장애 확인·
-// 재무 장애 비용·인사 대응 시간)을 쓰므로 장애 대응과 그 감시 대상인 PC·서버 연결은 늘 켜 둔다.
-// 총괄은 AI들 사이의 일을 나누고 모으는 자리라, 어떤 서비스를 골라도 늘 켜 둔다.
-// 안전 처리 로그(안전 규칙)는 모든 AI의 상태 변경이 지나는 관문이라 끌 수 없다
-export const REQUIRED_SERVICES = ['incident', 'hosts', 'orchestrator', 'safety']
-export const isRequired = (id: string) => REQUIRED_SERVICES.includes(id)
-// 필수 카드 아래에 보이는 이유
-export const requiredReason = (id: string) =>
-  id === 'orchestrator' ? 'AI들 사이의 일을 나누고 모아서 늘 켜 둬요'
-    : id === 'safety' ? '모든 AI의 돈·게시·배포 요청이 지나는 관문이라 늘 켜 둬요'
-      : '다른 AI가 장애 기록을 써서 늘 켜 둬요'
-const withRequired = (ids: string[]) => [...REQUIRED_SERVICES.filter((id) => !ids.includes(id)), ...ids]
-const save = (ids: string[]) => {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(ids))
-    localStorage.setItem(KNOWN_KEY, JSON.stringify(ALL))
-  } catch {
-    /* 저장이 막힌 브라우저는 새로고침하면 전부 켠 상태로 돌아간다 */
-  }
-}
-const read = (): string[] => {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return ALL
-    const ids = (JSON.parse(raw) as string[]).filter((id) => ALL.includes(id))
-    const knownRaw = localStorage.getItem(KNOWN_KEY)
-    const known = knownRaw ? (JSON.parse(knownRaw) as string[]) : null
-    const fresh = (known ? ALL.filter((id) => !known.includes(id)) : ADDED_BEFORE_KNOWN_LIST).filter(
-      (id) => ALL.includes(id) && !ids.includes(id),
-    )
-    const merged = withRequired([...ids, ...fresh])
-    if (fresh.length || !known) save(merged) // 새 서비스를 켠 채로 남기고, 다음부터는 목록으로 알아본다
-    return merged
-  } catch {
-    return ALL
-  }
-}
-let enabled = read()
-const listeners = new Set<() => void>()
+// ---------------------------------------------------------------- 서비스는 모두 필수
+// 회사가 서비스를 골라 끄거나, 운영팀이 카탈로그에서 내리지 않는다(2026-11-18 결정).
+// 꺼진 서비스를 건너뛰는 흐름을 따로 만들지 않으려고 화면은 늘 전체 서비스를 쓴다.
+// 백엔드 AX_ENABLED_SERVICES는 개발할 때 서버 일부만 띄우는 용도로만 남는다(run_all.sh --only).
 
-export const getEnabled = () => enabled
-export function setEnabled(ids: string[]) {
-  enabled = withRequired(ids)
-  save(enabled)
-  listeners.forEach((l) => l())
-}
-export const toggleService = (id: string) => {
-  if (isRequired(id)) return
-  setEnabled(enabled.includes(id) ? enabled.filter((x) => x !== id) : [...enabled, id])
-}
-
-export function useEnabledServices() {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l)
-      return () => listeners.delete(l)
-    },
-    getEnabled,
-  )
-}
-
-// ---------------------------------------------------------------- AXcellent가 공개한 서비스 (관제 센터 서비스 관리)
-// 운영팀이 카탈로그에서 내린 서비스는 메인 카탈로그와 고객사 서비스 고르기에 안 보인다. 이미 쓰고 있는 고객사는 그대로 쓴다.
-const HIDDEN_KEY = 'axcellent-demo-hidden-services'
-let hidden: string[] = (() => {
-  try {
-    return (JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]') as string[]).filter((id) => !isRequired(id))
-  } catch {
-    return []
-  }
-})()
-const hiddenListeners = new Set<() => void>()
-export const getHidden = () => hidden
-export function toggleHidden(id: string) {
-  if (isRequired(id)) return
-  hidden = hidden.includes(id) ? hidden.filter((x) => x !== id) : [...hidden, id]
-  try {
-    localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden))
-  } catch {
-    /* 새로고침하면 전부 공개 상태로 돌아간다 */
-  }
-  hiddenListeners.forEach((l) => l())
-}
-export function useHiddenServices() {
-  return useSyncExternalStore(
-    (l) => {
-      hiddenListeners.add(l)
-      return () => hiddenListeners.delete(l)
-    },
-    getHidden,
-  )
-}
-/** 카탈로그에 공개 중인 서비스 */
-export function usePublishedServices() {
-  const h = useHiddenServices()
-  return SERVICES.filter((s) => !h.includes(s.id))
-}

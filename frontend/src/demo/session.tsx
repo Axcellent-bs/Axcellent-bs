@@ -1,10 +1,10 @@
 // 데모 로그인 세션. 실제 인증이 아니다: 데모 계정 + 회원가입한 계정을 브라우저에만 기억한다.
 // 회원 역할은 셋이다.
 // - 운영자: AXcellent 운영팀. 관제 센터(/control)만 연다. 지원 모드(support.ts)로 들어가면 고객사 화면을 보기 전용으로 연다
-// - 관리자(회사 계정): 고객사 시스템 관리자. 운영자에게 받은 키로 가입하고, 시스템 관리 메뉴와 회사가 켠 서비스를 연다
+// - 관리자(회사 계정): 고객사 시스템 관리자. 운영자에게 받은 키로 가입하고, 시스템 관리 메뉴와 모든 서비스를 연다
 // - 일반회원: 고객사 직원. 관리자가 계정(이메일)이나 PC IP를 회사에 연결해야 들어간다(members.ts)
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
-import { SERVICES, SHARED_PATHS, getEnabled, matchPath } from './services'
+import { SERVICES, SHARED_PATHS, matchPath } from './services'
 import { getCompany } from './company'
 import { memberLinked, useProfiles, withProfile, type ReaderArea } from './members'
 import { endSupport, getSupport, supportActive } from './support'
@@ -18,7 +18,7 @@ export type Account = {
   email: string
   /** 배정된 서비스 id (services.ts) */
   services: string[]
-  /** 관리자(회사 계정): 서비스 고르기·회원 연결·회사 서비스 연결을 연다 */
+  /** 관리자(회사 계정): 회사 연결·회원 연결·도구 연결을 연다 */
   admin?: boolean
   /** 운영자(AXcellent 운영팀): 관제 센터(/control)만 연다. 고객사 화면은 지원 모드에서 보기 전용으로만 연다 */
   operator?: boolean
@@ -72,7 +72,7 @@ export function registerAccount(x: SignupInput, admin = false): Account {
     name: x.name.trim(),
     role: x.role?.trim() || (admin ? '관리자' : '일반회원'),
     email,
-    // 관리자·일반회원 모두 회사가 켠 서비스(DejaFix 포함)를 쓴다. 차이는 시스템 관리 메뉴뿐
+    // 관리자·일반회원 모두 모든 서비스(DejaFix 포함)를 쓴다. 차이는 시스템 관리 메뉴뿐
     services: SERVICES.map((s) => s.id),
     ...(admin ? { admin: true } : {}),
     ...(x.dept?.trim() ? { dept: x.dept.trim() } : {}),
@@ -95,23 +95,23 @@ const all = () => [...customerAccounts(), ...OPERATORS]
 // 시스템 관리 화면은 관리자만. 도구 연결(/system/tools)은 SHARED_PATHS에 있어 모두 연다
 const SYSTEM_PATHS = ['/system']
 
-/** 이 계정이 지금 쓸 수 있는 서비스: 회사가 켠 AI 서비스 전부 + 이 계정에 배정된 그 밖의 서비스(DejaFix 등) */
-export const servicesOf = (account: Account, enabled = getEnabled()) =>
-  SERVICES.filter((s) => enabled.includes(s.id) && (s.agent !== undefined || account.services.includes(s.id)))
+/** 이 계정이 지금 쓸 수 있는 서비스: AI 서비스 전부(모두 필수) + 이 계정에 배정된 그 밖의 서비스(DejaFix 등) */
+export const servicesOf = (account: Account) =>
+  SERVICES.filter((s) => s.agent !== undefined || account.services.includes(s.id))
 
-/** 이 계정에 배정된 서비스(회사가 켠 것 중). 운영팀이 아닌 계정의 첫 화면은 이걸로 정한다 */
-export const assignedOf = (account: Account, enabled = getEnabled()) =>
-  SERVICES.filter((s) => account.services.includes(s.id) && enabled.includes(s.id))
+/** 이 계정에 배정된 서비스. 운영팀이 아닌 계정의 첫 화면은 이걸로 정한다 */
+export const assignedOf = (account: Account) =>
+  SERVICES.filter((s) => account.services.includes(s.id))
 
 /** 운영자가 지원 모드에서 고객사 화면을 볼 때의 모양: 그 회사 관리자와 같은 화면을 연다(바꾸는 버튼은 AdminShell이 끈다) */
 export const supportViewer = (account: Account): Account => ({ ...account, operator: false, admin: true, services: SERVICES.map((s) => s.id) })
 /** 이 운영자가 지금 지원 모드로 고객사에 들어가 있나 */
 export const isSupporting = (account: Account) => !!account.operator && supportActive(getSupport(), getCompany())
 
-export function canOpen(account: Account, path: string, enabled = getEnabled(), connected = !!getCompany()): boolean {
+export function canOpen(account: Account, path: string, connected = !!getCompany()): boolean {
   if (account.operator) {
     if (matchPath('/control', path)) return true
-    return isSupporting(account) && canOpen(supportViewer(account), path, enabled, connected)
+    return isSupporting(account) && canOpen(supportViewer(account), path, connected)
   }
   // 회사 연결 전: 관리자는 AXcellent 연결만, 일반회원은 아무 화면도 못 연다
   if (!connected) return !!account.admin && matchPath('/system/connect', path)
@@ -120,17 +120,18 @@ export function canOpen(account: Account, path: string, enabled = getEnabled(), 
   const bases = [
     ...SHARED_PATHS,
     ...(account.admin ? SYSTEM_PATHS : []),
-    ...servicesOf(account, enabled).flatMap((s) => s.paths),
+    ...servicesOf(account).flatMap((s) => s.paths),
   ]
   return bases.some((b) => matchPath(b, path))
 }
 
-/** 로그인 뒤 처음 여는 화면: 운영자는 관제 센터, 관리자는 서비스 고르기(연결 전이면 AXcellent 연결), 일반회원은 첫 서비스(없으면 AI 대화방) */
-export const homeOf = (account: Account, enabled = getEnabled()) =>
+/** 로그인 뒤 처음 여는 화면: 운영자는 관제 센터, 관리자는 AI 대화방(연결 전이면 AXcellent 연결), 일반회원은 첫 서비스(없으면 AI 대화방) */
+export const ADMIN_HOME = '/agents/chat'
+export const homeOf = (account: Account) =>
   account.operator ? '/control'
-    : account.admin ? (getCompany() ? '/system/services' : '/system/connect')
+    : account.admin ? (getCompany() ? ADMIN_HOME : '/system/connect')
     : !isLinked(account) ? '/login'
-    : assignedOf(account, enabled)[0]?.entry ?? '/agents/chat'
+    : assignedOf(account)[0]?.entry ?? '/agents/chat'
 
 const KEY = 'axcellent-demo-account'
 const load = (): Account | null => {

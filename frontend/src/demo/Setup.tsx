@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { privateIp } from './store'
 import { checkKey, connectWithKey, useCompany, useKeys, type CompanyInfo, type IssuedKey } from './company'
-import { emailTaken, registerAccount, useSession } from './session'
+import { emailTaken, homeOf, registerAccount, useSession } from './session'
 
 // 관리자(회사 계정) 가입: 운영자에게 받은 키 확인 → 관리자 계정 → 회사 정보 → 연결. 끝나면 그 관리자로 바로 들어간다.
 // 이 설치에 이미 연결된 회사의 키면 회사 정보·연결은 건너뛰고 그 회사의 관리자 계정만 만든다.
@@ -44,7 +44,7 @@ export default function Setup() {
   function finish() {
     try {
       const a = signIn(registerAccount({ name: admin.name, email: admin.email }, true).id)
-      if (a) navigate('/system/services', { replace: true })
+      if (a) navigate(homeOf(a), { replace: true })
     } catch (x) {
       setError(x instanceof Error ? x.message : '관리자 계정을 만들지 못했어요.')
     }
@@ -129,7 +129,7 @@ export default function Setup() {
                 {company && !sameCompany && <span className="chip bg-amber-50 text-amber-700">새 회사로 연결 · 지금 연결된 {company.name}은 끊겨요</span>}
                 <span className="chip bg-emerald-50 text-emerald-700">키 확인됨</span>
               </div>
-              <p className="text-sm text-ink-500">이 계정으로 서비스 고르기와 회원·서버 관리(회원 연결, 사내 PC 연결)를 해요.</p>
+              <p className="text-sm text-ink-500">이 계정으로 회사 연결과 회원·서버 관리(회원 연결, 사내 PC 연결)를 해요.</p>
               <input className="field" placeholder="이름" value={admin.name} onChange={(e) => setAdmin({ ...admin, name: e.target.value })} aria-label="관리자 이름" />
               <input className="field" placeholder="회사 이메일" value={admin.email} onChange={(e) => setAdmin({ ...admin, email: e.target.value })} aria-label="관리자 이메일" />
               <input className="field" type="password" placeholder="비밀번호 (8자 이상)" value={admin.password} onChange={(e) => setAdmin({ ...admin, password: e.target.value })} aria-label="비밀번호" />

@@ -1,10 +1,10 @@
 import { Link } from 'react-router'
 import { IconAgents, IconOffice } from '@/components/icons'
 import { homeOf, useSession } from './session'
-import { FAMILIES, agentName, usePublishedServices, type Service } from './services'
+import { FAMILIES, SERVICES, agentName, type Service } from './services'
 
 // 로그인 전에 여는 메인 페이지 = 서비스 제품군 카탈로그. 어떤 서비스가 있는지 보고, 회원가입·로그인 화면으로 간다.
-// 회사가 실제로 켤 서비스는 로그인 뒤 시스템 관리자가 서비스 고르기(/system/services)에서 정한다.
+// 서비스는 모두 필수라 회사가 따로 고르지 않는다. 로그인하면 전부 열린다.
 const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.png`
 
 function Mark({ s }: { s: Service }) {
@@ -38,7 +38,6 @@ function ServiceCard({ s }: { s: Service }) {
 
 export default function CatalogHome() {
   const { account } = useSession()
-  const SERVICES = usePublishedServices()
 
   return (
     <div className="min-h-screen bg-app text-ink-900">
@@ -148,7 +147,7 @@ export default function CatalogHome() {
         <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-[#1d1d3a] px-8 py-8 text-white">
           <div>
             <p className="text-xl font-semibold">이미 회사에 설치돼 있나요?</p>
-            <p className="mt-1 text-sm text-white/70">회사 이메일로 로그인하면 회사가 켠 서비스가 모두 열려요.</p>
+            <p className="mt-1 text-sm text-white/70">회사 이메일로 로그인하면 모든 서비스가 열려요.</p>
           </div>
           <Link to="/login" className="rounded-full bg-white px-6 py-3 text-sm font-semibold text-[#1d1d3a] hover:bg-white/90">로그인</Link>
         </section>

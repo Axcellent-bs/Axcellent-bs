@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DangerRow, Facts, PageHead, SectionHead, StatusChip, TONE_DOT, type Tone } from '@/components/connect/parts'
 import type { ConnectionState } from '@/lib/companyConnection'
 import { privateIp, useHosts } from './store'
-import { useEnabledServices } from './services'
+import { SERVICES } from './services'
 import { checkKey, connectWithKey, disconnect, updateCompanyInfo, useCompany, useKeys, type CompanyInfo, type IssuedKey } from './company'
 import SiteConnect from './SiteConnect'
 
@@ -34,7 +34,6 @@ export default function CompanyConnect() {
   const [confirmOff, setConfirmOff] = useState(false)
   const [editing, setEditing] = useState(false)
   const [showKey, setShowKey] = useState(false)
-  const enabled = useEnabledServices()
   const [hosts] = useHosts()
   /** 판매 서버 연결 상태 (아래 판매 서버 구역이 받아 온 값을 연결 지도도 같이 쓴다) */
   const [shop, setShop] = useState<ConnectionState | 'error' | null>(null)
@@ -162,7 +161,7 @@ export default function CompanyConnect() {
                   <Facts cols={2} items={[
                     ['사내망 주소', <span className="font-mono">{company.network}</span>],
                     ['연결 키', <span className="font-mono">{company.key ? `${company.key.slice(0, 8)}••••-••••` : '—'}</span>],
-                    ['사용 중인 서비스', `${enabled.length}개`],
+                    ['사용 중인 서비스', `${SERVICES.length}개`],
                     ['연결된 사내 PC', `${online} / ${hosts.length}대`],
                   ]} />
                   <div className="border-l-2 border-ink-100 pl-4 text-sm leading-6 text-ink-700">
