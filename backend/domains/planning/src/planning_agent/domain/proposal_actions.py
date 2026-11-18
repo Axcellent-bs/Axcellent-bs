@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -786,9 +786,19 @@ class ProposalMixin:
         )  # fmt: skip
         return await self.receive_campaign_update(inp=inp, requester="data")
 
-    async def choose_angle(self: Any, proposal: str, angle: str) -> ActionResult:
+    async def choose_angle(
+        self: Any,
+        proposal: str,
+        angle: str,
+        *,
+        category: str | None = None,
+        fmt: Literal["shorts", "reels"] | None = None,
+    ) -> ActionResult:
         """사람 버튼 "방향 고르기" (11/18): 고른 방향으로 할 일·이유·목표를 다시 쓰고,
-        재무에 그 제안의 제작비를 한 번 묻는다(이미 붙어 있으면 묻지 않음). 기획 기록만 바꾼다."""
+        재무에 그 제안의 제작비를 한 번 묻는다(이미 붙어 있으면 묻지 않음). 기획 기록만 바꾼다.
+
+        카테고리 없이 온 영상 제안은 이때 사람이 카테고리·형식을 정할 수 있다(태윤 11/18).
+        데이터분석이 채운 카테고리는 덮지 않는다. 새로 정하면 그 카테고리로 재무에 다시 묻는다."""
 
         def check(s: State) -> tuple[Proposal, Any]:
             p = _find(s, proposal)
@@ -812,11 +822,17 @@ class ProposalMixin:
             )
         busy.add(p.id)
         try:
-            return await self._choose_angle(p, opt)
+            return await self._choose_angle(p, opt, category, fmt)
         finally:
             busy.discard(p.id)
 
-    async def _choose_angle(self: Any, p: Proposal, opt: Any) -> ActionResult:
+    async def _choose_angle(
+        self: Any,
+        p: Proposal,
+        opt: Any,
+        category: str | None,
+        fmt: Literal["shorts", "reels"] | None,
+    ) -> ActionResult:
         def check(s: State) -> tuple[Proposal, Any]:
             q = _find(s, p.id)
             if q is None:
@@ -832,14 +848,19 @@ class ProposalMixin:
 
         ctx = _ctx(p)
         finance = getattr(self, "_finance", None)
-        asked = finance is not None and not any(f.source == ext.FINANCE_ADVICE for f in p.facts)
+        # 데이터분석이 채운 카테고리는 그대로, 없을 때만 사람이 고른 값을 쓴다
+        new_cat = category if (category and not p.content_category) else None
+        cat = p.content_category or new_cat
+        cfmt = p.content_format or (fmt if new_cat else None)
+        had = any(f.source == ext.FINANCE_ADVICE for f in p.facts)
+        asked = finance is not None and (not had or new_cat is not None)
 
         async def no_advice() -> None:
             return None
 
         draft, advice = await asyncio.gather(
             ext.write_for_angle(self._proposal_writer, p, opt, ctx),
-            finance.ask(ctx, p.content_category, p.content_format, p.id) if asked else no_advice(),
+            finance.ask(ctx, cat, cfmt, p.id) if asked else no_advice(),
         )
         fin_facts = (
             ext.finance_facts(advice) if advice is not None and not isinstance(advice, str) else []
@@ -855,8 +876,11 @@ class ProposalMixin:
                 q.target = ProposalTarget(label=t.label, value=t.value, measure=t.measure)
             q.format = draft.format or q.format
             q.written_by = draft.written_by
-            if fin_facts and not any(f.source == ext.FINANCE_ADVICE for f in q.facts):
-                q.facts = [*q.facts, *_facts_of(fin_facts)]
+            if new_cat and not q.content_category:
+                q.content_category, q.content_format = new_cat, cfmt
+            if fin_facts and (new_cat or not any(f.source == ext.FINANCE_ADVICE for f in q.facts)):
+                kept = [f for f in q.facts if f.source != ext.FINANCE_ADVICE]
+                q.facts = [*kept, *_facts_of(fin_facts)]
             q.warnings = draft.warnings
             text = f"{q.id} 방향 선택: {o.label}"
             s.activity.append(
@@ -932,7 +956,15 @@ class ProposalMixin:
             pid, angle = action.get("proposal"), action.get("angle")
             if not isinstance(pid, str) or not isinstance(angle, str):
                 raise ActionError("INVALID_ACTION", "proposal·angle이 없다")
-            return await self.choose_angle(pid, angle)
+            cat, fmt = action.get("category"), action.get("format")
+            if cat is not None and (not isinstance(cat, str) or len(cat.strip()) > 40):
+                raise ActionError("INVALID_ACTION", "카테고리는 40자 이하 글자여야 합니다")
+            if fmt is not None and fmt not in ("shorts", "reels"):
+                raise ActionError("INVALID_ACTION", "형식은 shorts·reels 중 하나입니다")
+            cf: Literal["shorts", "reels"] | None = (
+                "shorts" if fmt == "shorts" else "reels" if fmt == "reels" else None
+            )
+            return await self.choose_angle(pid, angle, category=(cat or "").strip() or None, fmt=cf)
         return None
 
 

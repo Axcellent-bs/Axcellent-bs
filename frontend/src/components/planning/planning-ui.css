@@ -10,7 +10,15 @@
 /* ---------------------------------------------------------------- 홈 */
 .pl-ui .home-wrap { grid-template-areas: "act flows" "todo flows" "recent flows"; row-gap: 28px; }
 .pl-ui .home-act { grid-area: act; min-width: 0; }
-.pl-ui .home-wrap h3 { font-size: 15px; margin-bottom: 10px; }
+/* 글자 대비 4.5:1 이상 (11/18 Lighthouse): 흐린 글씨·초록 칩·건수 배지 */
+/* 토큰은 공통 테마가 .planning-scope에 다시 정하므로 그 안에서 덮어쓴다 (.pl-ui만으로는 안 먹음) */
+.pl-ui .planning-scope { --text-3: #686885; --warning: #8a6300; }
+.pl-ui .chip.green { color: #1f7a52; }
+.pl-ui .home-n { background: #8a6300; }
+/* 상태가 오기 전 뼈대: 화면 밀림(CLS)을 막는다 */
+.pl-ui .home-skel { display: flex; flex-direction: column; gap: 12px; }
+.pl-ui .home-skel span { display: block; border-radius: 10px; background: var(--surface-2); }
+.pl-ui .home-wrap h2 { font-size: 15px; margin-bottom: 10px; }
 .pl-ui .home-calm { padding: 14px 16px; border: 1px dashed var(--border); border-radius: 10px; color: var(--text-3); font-size: 13px; }
 .pl-ui .home-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .pl-ui .home-card { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--warning); border-radius: 10px; cursor: pointer; }
@@ -41,7 +49,7 @@
 .pl-ui .home-flow li b { order: -1; font-size: 22px; line-height: 1.2; }
 .pl-ui .home-flow li.on b { color: var(--text); }
 .pl-ui .home-flow li:not(.on) b { color: color-mix(in srgb, var(--text-3) 55%, transparent); font-weight: 500; }
-.pl-ui .home-recent h3 { font-size: 14px; color: var(--text-2); }
+.pl-ui .home-recent h2 { font-size: 14px; color: var(--text-2); }
 
 @media (max-width: 900px) { .pl-ui .home-wrap { grid-template-areas: "act" "todo" "recent" "flows"; } }
 

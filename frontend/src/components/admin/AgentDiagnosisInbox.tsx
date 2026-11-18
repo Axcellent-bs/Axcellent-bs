@@ -54,7 +54,7 @@ export function AgentDiagnosisInbox({ agent, showService = false }: { agent: str
             </p>
             <p className="text-ink-700">{r.summary}</p>
             {r.evidence_contexts.length > 0 && (
-              <p className="flex flex-wrap gap-x-2 gap-y-1 text-xs text-ink-600">
+              <p className="flex flex-wrap gap-x-2 gap-y-1 text-xs text-ink-700">
                 <span className="text-ink-500">근거 이슈</span>
                 {r.evidence_contexts.map((ctx, i) => (
                   <Link key={ctx} href={`/archive/incidents?ctx=${encodeURIComponent(ctx)}`} className="underline underline-offset-2">이슈 {i + 1}</Link>

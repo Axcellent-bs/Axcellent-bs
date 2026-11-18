@@ -200,7 +200,19 @@ PR #508의 시작값을 PR #510이 예상 사용량에 맞춰 바꿨다. 값은 
 - **Meta 서버가 접근할 수 있는 영상 URL**이 필요하다 → 로컬 볼륨만으로는 안 되고, 공개 HTTPS 호스팅(shop-web 정적 경로·오브젝트 스토리지 등) `[확인 필요 — 어디에 둘지, 누가 소유하는지]`. 서명 URL·만료 시간을 두고, 게시 뒤 원본 URL은 닫을 수 있는지 확인. 공식 문서는 "게시를 시도하는 시점에 공개 서버에 있어야 한다(Meta가 내려받는다)"고 적었다. 큰 영상용 resumable 업로드(`rupload.facebook.com`)는 Facebook Login for Business를 구현한 앱만 쓸 수 있다고 적혀 있어, 251 내부 주소만으로는 게시할 수 없다 → 10절 7번.
 - Reel 규격(공식 확인, 2026-11-06): MP4 또는 MOV(edit list 없음, moov atom 앞), 3초 이상 15분 이하, 비율 0.01:1~10:1(9:16 권장), 영상 H.264 또는 HEVC(progressive, closed GOP, 4:2:0), 23~60fps, 가로 1920px 이하, 영상 비트레이트 25Mbps 이하(VBR), 오디오 AAC 128kbps·48kHz 이하·1~2채널, 파일 300MB 이하. 커버는 JPEG·8MB 이하·sRGB(9:16 권장, `cover_url`이 `thumb_offset`보다 우선). `share_to_feed`는 true면 피드와 릴스, false면 릴스만(실제 노출은 Meta 판단). 공식 표를 설정으로 옮기고 `check_sns_post`가 ffprobe로 검사한다.
 - 이미지 규격(공식 확인): **JPEG만**(MPO·JPS 불가), 8MB 이하, sRGB, 비율 4:5~1.91:1, 너비 320~1440px. Gemini 이미지 어댑터는 JPEG(`image/jpeg`, 저장 `asset.jpg`)로 받아 변환 없이 라벨 단계로 간다. 다른 공급자가 PNG를 내면 `sns_prepare`가 JPEG로 바꾼다. `alt_text`는 이미지에만(최대 1,000자), 릴스·스토리는 안 된다. 쇼핑 태그·필터는 지원하지 않는다.
-- 권한·토큰(공식 확인): 프로페셔널 계정이 필요하고, Page 게시 승인(PPA)이 필요한 페이지는 승인 전까지 게시가 막힌다. 로그인 방식별 권한은 Instagram Login `instagram_business_basic`+`instagram_business_content_publish`(Instagram 사용자 토큰, `graph.instagram.com`), Facebook Login `instagram_basic`+`instagram_content_publish`+`pages_read_engagement`. 앱 유형은 Business. Advanced Access가 필요하면 앱 검수를 거친다. Instagram Login의 토큰은 앱 대시보드에서 만들면 60일, 로그인 흐름으로 받으면 1시간이다. 만료 전 갱신·알림은 사람과 정한다(8절 체크리스트).
+- 호스트별 토큰·권한 비교(Meta 공식 문서, 2026-11-18 정리). 근거: https://developers.facebook.com/docs/instagram-platform/overview , https://developers.facebook.com/docs/permissions
+  - **코드 기본값과 서버 설정이 다르다**: `DEFAULT_API_BASE`는 `https://graph.instagram.com`이지만 `MARKETING_IG_API_BASE_URL`로 바꿀 수 있고, 2026-11-18 251 서버 설정(서버 읽기 전용 확인)은 `https://graph.facebook.com` + `v27.0`, `MARKETING_IG_CAROUSEL_ENABLED=true`이다. 토큰·사용자 ID 변수는 설정돼 있고(값은 적지 않는다) `MARKETING_IG_APP_SECRET`은 없다. 서버 토큰이 Facebook Login(페이지 연결형)인지, 계정이 Business/Creator인지는 확인하지 못했다 `[확인 필요]`.
+
+  | 구분 | Instagram Login | Facebook Login |
+  | --- | --- | --- |
+  | 호스트 | `graph.instagram.com` (코드 기본값) | `graph.facebook.com` (251 서버 설정) |
+  | 토큰 | Instagram 사용자 토큰 | Facebook 사용자 토큰(Instagram 계정에 연결된 Facebook 페이지를 거침) |
+  | 게시 권한 | `instagram_business_basic` + `instagram_business_content_publish` | `instagram_basic` + `instagram_content_publish` + `pages_read_engagement` (`pages_show_list`에 의존) |
+  | 읽기 전용 토큰 | `instagram_business_content_publish`는 뺀다 | `instagram_content_publish`는 뺀다 |
+  | 다른 계정 읽기 | 앱 검수(Advanced Access)와 Business Verification 필요 | 같음 |
+
+  권한 목록은 위 permissions 문서의 이름과 의존 관계를 따른 것이고, 호스트별 세부(Business Verification 요건 등)는 게시 전에 원문으로 한 번 더 본다.
+- 권한·토큰(공식 확인): 프로페셔널 계정이 필요하고, Page 게시 승인(PPA)이 필요한 페이지는 승인 전까지 게시가 막힌다. 로그인 방식별 권한은 Instagram Login `instagram_business_basic`+`instagram_business_content_publish`(Instagram 사용자 토큰, `graph.instagram.com`, 코드 기본값. 251 서버 설정은 위 표대로 Facebook Login 호스트), Facebook Login `instagram_basic`+`instagram_content_publish`+`pages_read_engagement`. 앱 유형은 Business. Advanced Access가 필요하면 앱 검수를 거친다. Instagram Login의 토큰은 앱 대시보드에서 만들면 60일, 로그인 흐름으로 받으면 1시간이다. 만료 전 갱신·알림은 사람과 정한다(8절 체크리스트).
 - 실패 처리: 컨테이너 `ERROR` → 사유 코드 기록 후 `failed`(재시도는 사람 판단). 토큰 만료(190 계열) → `failed`, 사람에게 토큰 재발급 안내(에이전트는 발급 안 함). 전송 뒤 응답 유실 → 같은 `creation_id`로 재게시하지 않고 `GET /{ig-user-id}/media`로 최근 게시물에서 `creation_id`/캡션 해시 대조 `[확인 필요: 대조 가능한 필드]`.
 - 게시 한도: 공식 문서는 계정당 24시간(이동 구간) 100건, 캐러셀은 1건으로 센다고 적었고, 같은 문서의 캐러셀 절은 50건이라고 적어 **문서끼리 어긋난다**. 한도는 `media_publish`에서 적용되고 `GET /{ig-user-id}/content_publishing_limit`로 남은 양을 읽을 수 있다. 실제 값은 그 호출로 확인하고, 둘 중 하나를 코드에 박지 않는다. Meta도 예약 게시는 앱이 직접 한도를 세라고 권한다. 마케팅 설정의 일일 상한은 그보다 훨씬 낮게(`(TODO)`). safety 기준표에는 같은 취지의 `sns_daily_posts`(오늘 4건째부터 C)가 들어갔다.
 

@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "auth_header": "Authorization",
+  "auth_scheme": "Bearer",
+  "resources": {
+    "orders": {
+      "path": "/api/v1/bookings",
+      "paging": {
+        "items_field": "data",
+        "next_field": "next_cursor",
+        "cursor_param": "cursor",
+        "since_param": "updated_since",
+        "limit_param": "limit",
+        "limit": 200
+      },
+      "fields": {
+        "order_id": "code",
+        "status": "status",
+        "created_at": "created_at",
+        "buyer_id": "member_id",
+        "product_id": "product_code",
+        "qty": "sum:adults,children",
+        "total_amount": "total_amount",
+        "paid_amount": "paid_amount",
+        "updated_at": "updated_at"
+      },
+      "values": {
+        "status": {
+          "pending_deposit": "pending_payment",
+          "pending_full": "pending_payment",
+          "deposit_paid": "paid",
+          "fully_paid": "paid",
+          "completed": "paid",
+          "cancel_requested": "paid",
+          "cancelled": "cancelled",
+          "expired": "cancelled"
+        }
+      }
+    },
+    "products": {
+      "path": "/api/v1/tours",
+      "paging": {
+        "items_field": "data",
+        "next_field": "next_cursor",
+        "cursor_param": "cursor",
+        "since_param": null,
+        "limit_param": "limit",
+        "limit": 200
+      },
+      "fields": {
+        "product_id": "code",
+        "name": "name",
+        "price": "base_price",
+        "category_code": "region",
+        "active": "on_sale"
+      }
+    }
+  }
+}

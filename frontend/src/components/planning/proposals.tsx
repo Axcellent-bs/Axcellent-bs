@@ -181,21 +181,28 @@ function EffectFacts({ facts }: { facts: ProposalFact[] }) {
 /** 조회수 표기: 1만 이상은 "4.8만", 아래는 쉼표 (데이터분석 값 그대로, 계산은 단위만) */
 const views = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1).replace(/\.0$/, '')}만` : n.toLocaleString('ko-KR'))
 
+/** 콘텐츠 카테고리 예시 (마케팅 캠페인 시작 화면과 같은 목록, 자유 입력) */
+const CATEGORY_HINTS = ['아재개그', '몸개그', '말장난', '피식']
+
 /** 방향 선택지 (11/18): 갈래 3개 중 하나를 고르면 그 방향으로 할 일·이유·목표를 다시 쓴다. 예전 제안은 안 보인다 */
 function AngleChoice({ p, d, open }: { p: Proposal; d: Dispatch<Action>; open: boolean }) {
   const toast = useToast()
   // 서버가 새 글을 쓰는 동안(LLM·재무, 최대 30초) 버튼을 막아 겹친 누름을 줄인다. 글이 바뀌면 풀린다
   const [pending, setPending] = useState(false)
+  // 카테고리 없이 온 제안: 방향을 고를 때 카테고리·형식도 정해 재무 제작비 기준으로 쓴다 (11/18 태윤 요청)
+  const [cat, setCat] = useState('')
+  const [fmt, setFmt] = useState<'' | 'shorts' | 'reels'>('')
   const jk = judgmentKey(p)
   useEffect(() => { setPending(false) }, [jk])
   useEffect(() => { if (!pending) return; const t = setTimeout(() => setPending(false), 35000); return () => clearTimeout(t) }, [pending])
   if (p.options.length === 0) return null
   const chosen = p.options.find((o) => o.id === p.angle)
   const pick = (o: IdeaOption) => {
-    if (o.id === p.angle) return
+    if (o.id === p.angle && (p.contentCategory || !cat.trim())) return
     if (p.writtenBy === 'human' && !window.confirm('고친 글을 새 방향 글로 바꿀까요?')) return
     setPending(true)
-    d({ type: 'chooseAngle', proposal: p.id, angle: o.id })
+    const extra = !p.contentCategory && cat.trim() ? { category: cat.trim(), ...(fmt ? { format: fmt } : {}) } : {}
+    d({ type: 'chooseAngle', proposal: p.id, angle: o.id, ...extra })
     toast.show(`${idText(p.id)} 방향: ${o.label} (글 쓰는 중)`)
   }
   return (
@@ -204,6 +211,22 @@ function AngleChoice({ p, d, open }: { p: Proposal; d: Dispatch<Action>; open: b
         <span>이 인사이트를 어떤 방향으로 쓸까요?</span>
         <span className="pp-by">{chosen ? `고른 방향: ${chosen.label}` : '방향 선택 대기'}</span>
       </div>
+      {p.contentCategory
+        ? <div className="muted small">콘텐츠 카테고리: {p.contentCategory}{p.contentFormat ? ` · ${p.contentFormat}` : ''}</div>
+        : open && (
+          <div className="pp-angle-cat">
+            <label>콘텐츠 카테고리(선택)
+              <input className="field" list="pp-category-hints" placeholder="예: 아재개그" maxLength={40} value={cat} onChange={(e) => setCat(e.target.value)} />
+            </label>
+            <datalist id="pp-category-hints">{CATEGORY_HINTS.map((c) => <option key={c} value={c} />)}</datalist>
+            <label>형식
+              <select className="field" value={fmt} onChange={(e) => setFmt(e.target.value as '' | 'shorts' | 'reels')}>
+                <option value="">모름</option><option value="shorts">shorts</option><option value="reels">reels</option>
+              </select>
+            </label>
+            <span className="muted small">정하면 방향을 고를 때 재무에 이 카테고리 제작비를 물어요</span>
+          </div>
+        )}
       <ul className="pp-angle-list">
         {p.options.map((o) => (
           <li key={o.id} className={o.id === p.angle ? 'on' : undefined}>

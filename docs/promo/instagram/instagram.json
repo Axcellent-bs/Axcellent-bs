@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "customers": [
+    {
+      "id": "catbooks",
+      "name": "캣북스",
+      "badges": ["시연 가상 고객사"],
+      "account": "catbooks.lab",
+      "profileUrl": "https://www.instagram.com/catbooks.lab/",
+      "summary": "",
+      "posts": [],
+      "highlights": []
+    },
+    {
+      "id": "nubitour",
+      "name": "누비투어",
+      "badges": ["시연 가상 고객사", "연결 준비 중"],
+      "account": "",
+      "profileUrl": "",
+      "summary": "",
+      "posts": [],
+      "highlights": []
+    }
+  ]
+}

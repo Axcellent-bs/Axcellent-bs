@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pydantic import Field, ValidationError, field_validator
 
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
@@ -25,6 +27,8 @@ from marketing_agent.campaign import (
     _result,
 )
 
+# 취소가 확정되면 부르는 곳(마케팅 자동 결과 전달 대장). 실패해도 취소 결과는 그대로다
+CANCEL_HOOKS: list[Callable[[str], None]] = []
 CANCEL_SKILL = "cancel_campaign"
 CANCELED = "canceled"
 NOTE = (
@@ -71,6 +75,11 @@ async def cancel_campaign(request: AgentRequest) -> AgentResult:
             or released < 0
         ):
             return _finance_unusable(request, answer, "finance_cancel_invalid")
+        for hook in CANCEL_HOOKS:
+            try:
+                hook(data.campaign_id)
+            except Exception:  # noqa: BLE001, S110 - 대장 실패가 취소 결과를 바꾸지 않는다
+                pass
         return _result(
             request,
             TaskStatus.COMPLETED,

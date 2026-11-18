@@ -33,6 +33,49 @@ pii_patterns = [
   '주문|문의|환불|구매자|고객',                 # 고객 원문에서 온 말
 ]
 
+# ---- 기획 데이터 반영(영상 템플릿만, `{plan_clause}` 자리). 고정 틀은 그대로 두고 기획안의
+# 구조화 필드(핵심 메시지·근거·타깃·상품·분류·방향·유행 이름)만 정리해서 끼운다.
+# 기획 글 통째 삽입 금지: 값마다 특수문자·숫자 제거 + 길이 상한 + 아래 금칙어 검사.
+# 걸린 값은 거절하지 않고 그 필드만 뺀다(영상은 기존 문장대로 만들어진다). 비면 문구 전체가 빠진다.
+[plan]
+intro = " Story theme guidance for mood and subject only, never to be drawn as text:"
+tone_map = { ride_trend = "lively and timely", own_trend = "fresh and original", with_product = "warm and product focused" }
+
+[plan.field.plan_idea]
+max_len = 60
+phrase = " core message {value};"
+[plan.field.plan_why]
+max_len = 60
+phrase = " supporting reason {value};"
+[plan.field.plan_evidence]
+max_len = 80
+phrase = " evidence topics {value};"
+[plan.field.plan_target]
+max_len = 40
+phrase = " intended for readers of {value};"
+[plan.field.plan_products]
+max_len = 50
+phrase = " featuring books about {value};"
+[plan.field.plan_category]
+max_len = 30
+phrase = " content category {value};"
+[plan.field.plan_tone]
+phrase = " tone {value};"
+[plan.field.plan_trends]
+max_len = 80
+phrase = " inspired by the trend named {value};"
+
+[plan_rules]
+# 광고법(과장·단정)·프롬프트 주입 금칙어. 걸리면 그 필드를 뺀다
+ad_words = [
+  "best", "no.1", "number one", "guaranteed", "guarantee", "cure", "free", "cheapest", "only",
+  "최고", "1위", "최저가", "무조건", "보장", "완치", "유일", "최초", "100%", "공짜", "특효",
+]
+injection_words = [
+  "ignore", "instruction", "instructions", "system", "prompt", "assistant", "override", "jailbreak",
+  "무시", "지시", "명령", "시스템", "프롬프트", "어시스턴트",
+]
+
 # ---- 치환 가능한 필드. values가 있으면 그 값만, 없으면 짧은 단어(max_len, 영문·한글·숫자·공백)만.
 [field.season]
 values = ["spring", "summer", "autumn", "winter"]
@@ -65,7 +108,7 @@ kind = "video"
 resolution = "720p"
 duration_s = 8
 fields = ["season", "color_theme", "category"]
-sentence = "A short vertical animated clip of a friendly cartoon cat mascot walking through a cozy independent bookstore and pulling a book from a shelf, {season} atmosphere, {color_theme} color palette, a small display themed around {category}. Gentle camera movement, original character design. No text, no letters, no numbers, no logos, no real people, no real brands, no readable book covers."
+sentence = "A short vertical animated clip of a friendly cartoon cat mascot walking through a cozy independent bookstore and pulling a book from a shelf, {season} atmosphere, {color_theme} color palette, a small display themed around {category}.{plan_clause} Gentle camera movement, original character design. No text, no letters, no numbers, no logos, no real people, no real brands, no readable book covers."
 
 # ---- 오디오(BGM) 템플릿. 연주곡만: 목소리·가사·효과음 없음. 실제 곡·아티스트·브랜드 이름은 넣지 않는다.
 # 어댑터(gemini_audio)도 연주곡 제한 문구가 빠져 있으면 항상 덧붙인다.

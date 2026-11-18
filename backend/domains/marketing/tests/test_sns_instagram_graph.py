@@ -193,23 +193,36 @@ async def test_media_publish_sends_creation_id_once_and_returns_media_id() -> No
     assert rec.form()["creation_id"] == "c1"
 
 
+_MEDIA_OK = {
+    "id": "m1",
+    "permalink": "https://www.instagram.com/p/abc/",
+    "timestamp": "2026-11-06T09:00:00+0000",
+    "media_product_type": "FEED",
+}
+
+
 @pytest.mark.asyncio
-async def test_get_media_does_not_ask_for_label_field_and_reports_unknown_label() -> None:
-    rec = Recorder(
-        _json(
-            {
-                "id": "m1",
-                "permalink": "https://www.instagram.com/p/abc/",
-                "timestamp": "2026-11-06T09:00:00+0000",
-                "media_product_type": "FEED",
-            }
-        )
-    )
+async def test_get_media_reads_ai_label_in_a_separate_call() -> None:
+    rec = Recorder(_json(_MEDIA_OK), _json({"id": "m1", "is_ai_generated": True}))
     info = await _adapter(rec).get_media("m1")
-    assert "is_ai_generated" not in rec.form()["fields"]
+    assert "is_ai_generated" not in rec.form(0)["fields"]  # 필드가 없어도 permalink 조회는 산다
+    assert rec.form(1)["fields"] == "is_ai_generated"
     assert info.permalink == "https://www.instagram.com/p/abc/"
     assert info.media_product_type == "FEED"
-    assert info.is_ai_generated is None  # 앱 화면 라벨은 사람이 따로 확인한다
+    assert info.is_ai_generated is True
+
+
+@pytest.mark.asyncio
+async def test_get_media_label_unknown_when_field_call_fails_or_not_bool() -> None:
+    failed = Recorder(_json(_MEDIA_OK), _json({"error": {"code": 100, "message": "x"}}, 400))
+    info = await _adapter(failed).get_media("m1")
+    assert info.permalink and info.is_ai_generated is None  # 모름이지 확인됨이 아니다
+    lost = Recorder(_json(_MEDIA_OK), httpx.ConnectError("boom"))
+    assert (await _adapter(lost).get_media("m1")).is_ai_generated is None
+    odd = Recorder(_json(_MEDIA_OK), _json({"id": "m1", "is_ai_generated": "true"}))
+    assert (await _adapter(odd).get_media("m1")).is_ai_generated is None
+    false = Recorder(_json(_MEDIA_OK), _json({"id": "m1", "is_ai_generated": False}))
+    assert (await _adapter(false).get_media("m1")).is_ai_generated is False
 
 
 @pytest.mark.asyncio

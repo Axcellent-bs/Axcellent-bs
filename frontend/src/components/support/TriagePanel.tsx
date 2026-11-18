@@ -76,10 +76,10 @@ export function TriagePanel({ onCount }: { onCount?: (needed: number) => void })
       <div className="flex flex-wrap items-center gap-2">
         <button className={`chip ${view === "needed" ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700"}`} onClick={() => setView("needed")}>분류 필요 {neededCount}</button>
         <button className={`chip ${view === "done" ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700"}`} onClick={() => setView("done")}>분류 완료 {doneCount}</button>
-        <span className="mx-1 h-4 w-px bg-ink-200" aria-hidden />
-        <button className={`chip ${company === "all" ? "bg-ink-800 text-white" : "bg-ink-100 text-ink-700"}`} onClick={() => setCompany("all")}>모든 회사</button>
+        <span className="mx-1 h-4 w-px bg-ink-300" aria-hidden />
+        <button className={`chip ${company === "all" ? "bg-ink-900 text-white" : "bg-ink-100 text-ink-700"}`} onClick={() => setCompany("all")}>모든 회사</button>
         {companies.map(([id, n]) => (
-          <button key={id} className={`chip ${company === id ? "bg-ink-800 text-white" : "bg-ink-100 text-ink-700"}`} onClick={() => setCompany(id)}>{tenantName(id)} {n}</button>
+          <button key={id} className={`chip ${company === id ? "bg-ink-900 text-white" : "bg-ink-100 text-ink-700"}`} onClick={() => setCompany(id)}>{tenantName(id)} {n}</button>
         ))}
       </div>
       {view === "done" && labelCounts.length > 0 && (

@@ -1,6 +1,7 @@
 """프롬프트 만들기와 코드 검사. 자유 프롬프트는 받지 않는다.
 
-프롬프트 = `scene_templates.toml`의 고정 문장 + 화이트리스트 필드 치환.
+프롬프트 = `scene_templates.toml`의 고정 문장 + 화이트리스트 필드 치환
+(+ 영상 템플릿은 기획안의 구조화 필드를 정리해 끼우는 `plan_*` 선택 필드).
 필드 값에 개인정보·고객 원문 말투·글자 요청·실존 인물·브랜드가 있으면 거절한다.
 검사는 정규식과 금칙어 목록이고 LLM 판단에 맡기지 않는다.
 거절 결과에는 이유 코드와 필드 이름만 담고 입력 값은 되돌려주지 않는다(개인정보 재노출 방지).
@@ -8,8 +9,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import tomllib
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -19,6 +22,8 @@ from marketing_agent.media.base import MediaKind
 TEMPLATES_PATH = Path(__file__).with_name("scene_templates.toml")
 _FREE_WORD = re.compile(r"[A-Za-z0-9가-힣 ]+")
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
+PLAN_SLOT = "plan_clause"  # 기획 데이터 자리. 템플릿 fields에는 없고 선택이다
+_PLAN_STRIP = re.compile(r"[^A-Za-z0-9가-힣 ]+")
 
 
 class PromptRejected(Exception):
@@ -39,6 +44,17 @@ class SceneTemplate:
     duration_s: int | None
     fields: tuple[str, ...]
     sentence: str
+    plan_clause: bool = False  # 문장에 `{plan_clause}` 자리가 있다(기획 데이터를 받을 수 있다)
+
+
+@dataclass(frozen=True)
+class _PlanConfig:
+    intro: str
+    tone_map: dict[str, str]
+    max_len: dict[str, int]
+    phrase: dict[str, str]  # 필드 이름 -> 문구(순서가 문장 순서)
+    ad_words: tuple[str, ...]
+    injection_words: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -55,6 +71,7 @@ class _Config:
     field_values: dict[str, tuple[str, ...] | None]  # None이면 짧은 단어
     field_max_len: dict[str, int]
     rules: _Rules
+    plan: _PlanConfig
 
 
 @lru_cache(maxsize=4)
@@ -65,7 +82,8 @@ def _load(path: Path) -> _Config:
     templates: dict[str, SceneTemplate] = {}
     for template_id, item in raw.get("template", {}).items():
         sentence = item["sentence"]
-        used = set(_PLACEHOLDER.findall(sentence))
+        found = set(_PLACEHOLDER.findall(sentence))
+        used = found - {PLAN_SLOT}
         if used != set(item["fields"]) or not used <= set(fields):
             raise ValueError(f"템플릿 {template_id}의 자리표시자와 fields가 다르다")
         templates[template_id] = SceneTemplate(
@@ -76,7 +94,19 @@ def _load(path: Path) -> _Config:
             duration_s=item.get("duration_s"),
             fields=tuple(item["fields"]),
             sentence=sentence,
+            plan_clause=PLAN_SLOT in found,
         )
+    plan_raw = raw.get("plan", {})
+    plan_fields = plan_raw.get("field", {})
+    plan_rules = raw.get("plan_rules", {})
+    plan = _PlanConfig(
+        intro=plan_raw.get("intro", ""),
+        tone_map=dict(plan_raw.get("tone_map", {})),
+        max_len={k: int(v.get("max_len", 0)) for k, v in plan_fields.items()},
+        phrase={k: v["phrase"] for k, v in plan_fields.items()},
+        ad_words=tuple(w.lower() for w in plan_rules.get("ad_words", [])),
+        injection_words=tuple(w.lower() for w in plan_rules.get("injection_words", [])),
+    )
     return _Config(
         templates=templates,
         field_values={k: tuple(v["values"]) if "values" in v else None for k, v in fields.items()},
@@ -87,6 +117,7 @@ def _load(path: Path) -> _Config:
             brand=tuple(w.lower() for w in rules["brand_words"]),
             pii=tuple(re.compile(p) for p in rules["pii_patterns"]),
         ),
+        plan=plan,
     )
 
 
@@ -128,18 +159,122 @@ def _check_value(config: _Config, name: str, value: object) -> str:
     return value
 
 
-def render_prompt(template_id: str, fields: dict[str, object], path: Path | None = None) -> str:
-    """검사를 모두 통과한 프롬프트 문장. 걸리면 `PromptRejected`."""
+@dataclass(frozen=True)
+class RenderedPrompt:
+    """프롬프트와 기획 데이터 반영 기록. 기록에는 이름·길이·해시만 담는다(값 전체 없음)."""
+
+    prompt: str
+    plan_used: tuple[dict, ...] = ()
+    plan_skipped: tuple[dict, ...] = ()
+
+    def plan_record(self) -> dict | None:
+        """`meta.json`·장부에 남길 요약. 기획 필드를 하나도 받지 않았으면 None(옛 기록과 같다)."""
+        if not self.plan_used and not self.plan_skipped:
+            return None
+        record: dict = {
+            "fields_used": [u["field"] for u in self.plan_used],
+            "used": [{k: v for k, v in u.items() if k != "value"} for u in self.plan_used],
+            "skipped": list(self.plan_skipped),
+        }
+        trends = next((u["value"] for u in self.plan_used if u["field"] == "plan_trends"), None)
+        if trends:  # 어떤 유행 이름을 따랐는지 보이게(데이터분석이 준 이름뿐, 다른 사실은 없다)
+            record["trend_names"] = trends
+        return record
+
+
+def plan_field_names(path: Path | None = None) -> tuple[str, ...]:
+    """기획 데이터로 받을 수 있는 필드 이름(문장 순서)."""
+    return tuple(_load(path or TEMPLATES_PATH).plan.phrase)
+
+
+def _clean_plan_value(config: _Config, name: str, raw: object) -> tuple[str | None, str | None]:
+    """(정리된 값, 뺀 이유). 걸린 값은 돌려주지 않고 이유 코드만 돌려준다."""
+    if not isinstance(raw, str) or not raw.strip():
+        return None, "empty"
+    plan, rules = config.plan, config.rules
+    text = unicodedata.normalize("NFKC", raw)
+    if any(p.search(text) for p in rules.pii):  # 주소·전화·이메일·고객 말투는 정리 전에 본다
+        return None, "pii"
+    if name == "plan_tone":  # 고른 방향 코드 -> 고정 문구. 글은 받지 않는다
+        mapped = plan.tone_map.get(text.strip())
+        return (mapped, None) if mapped else (None, "unknown_value")
+    words = [w for w in _PLAN_STRIP.sub(" ", text).split() if not any(c.isdigit() for c in w)]
+    value = " ".join(words)
+    if not value:
+        return None, "empty"
+    limit = plan.max_len.get(name, 0)
+    if limit and len(value) > limit:  # 길이 초과는 단어 경계에서 자른다
+        value = value[:limit].rsplit(" ", 1)[0] or value[:limit]
+    if _contains(value, rules.text_request):
+        return None, "text_request"
+    if _contains(value, rules.person) or _contains(value, rules.brand):
+        return None, "real_person_or_brand"
+    if _contains(value, plan.ad_words):
+        return None, "ad_claim"
+    if _contains(value, plan.injection_words):
+        return None, "injection"
+    return value, None
+
+
+def _plan_clause(
+    config: _Config, plan_fields: dict[str, object]
+) -> tuple[str, list[dict], list[dict]]:
+    used: list[dict] = []
+    skipped: list[dict] = []
+    parts: list[str] = []
+    for name, phrase in config.plan.phrase.items():  # 문장 순서는 설정이 정한다(입력 순서 무관)
+        if name not in plan_fields:
+            continue
+        value, reason = _clean_plan_value(config, name, plan_fields[name])
+        if value is None:
+            skipped.append({"field": name, "reason": reason})
+            continue
+        parts.append(phrase.replace("{value}", value))
+        entry = {
+            "field": name,
+            "len": len(value),
+            "sha256": hashlib.sha256(value.encode()).hexdigest()[:16],
+        }
+        if name == "plan_trends":
+            entry["value"] = value
+        used.append(entry)
+    if not parts:
+        return "", used, skipped
+    return config.plan.intro + "".join(parts).rstrip(";") + ".", used, skipped
+
+
+def render_prompt_detailed(
+    template_id: str, fields: dict[str, object], path: Path | None = None
+) -> RenderedPrompt:
+    """검사를 모두 통과한 프롬프트 + 기획 데이터 반영 기록. 걸리면 `PromptRejected`.
+
+    `plan_*` 필드는 `{plan_clause}` 자리가 있는 템플릿에서만 받는다. 값은 정리·검사를 거치고,
+    걸린 필드는 거절하지 않고 뺀다(기획 글 때문에 생성이 막히지 않게). 비면 기존 문장 그대로다.
+    """
     config = _load(path or TEMPLATES_PATH)
     template = get_template(template_id, path)
+    plan_names = set(config.plan.phrase)
+    plan_in: dict[str, object] = {}
     for name in fields:
-        if name not in template.fields:
-            raise PromptRejected("field_not_allowed", name)
+        if name in template.fields:
+            continue
+        if template.plan_clause and name in plan_names:
+            plan_in[name] = fields[name]
+            continue
+        raise PromptRejected("field_not_allowed", name)
     for name in template.fields:
         if name not in fields:
             raise PromptRejected("field_missing", name)
     values = {name: _check_value(config, name, fields[name]) for name in template.fields}
-    return _PLACEHOLDER.sub(lambda m: values[m.group(1)], template.sentence)
+    clause, used, skipped = _plan_clause(config, plan_in) if template.plan_clause else ("", [], [])
+    values[PLAN_SLOT] = clause
+    prompt = _PLACEHOLDER.sub(lambda m: values[m.group(1)], template.sentence)
+    return RenderedPrompt(prompt, tuple(used), tuple(skipped))
+
+
+def render_prompt(template_id: str, fields: dict[str, object], path: Path | None = None) -> str:
+    """검사를 모두 통과한 프롬프트 문장. 걸리면 `PromptRejected`."""
+    return render_prompt_detailed(template_id, fields, path).prompt
 
 
 def check_field_value(name: str, value: object, path: Path | None = None) -> str:

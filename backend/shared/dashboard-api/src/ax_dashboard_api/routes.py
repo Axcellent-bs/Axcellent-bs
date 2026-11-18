@@ -886,6 +886,11 @@ class CampaignStartBody(BaseModel):
     # 콘텐츠 카테고리(예: 아재개그)·형식(shorts·reels). 마케팅이 재무 예산 요청에 싣는다(선택)
     content_category: str | None = Field(default=None, min_length=1, max_length=40)
     format: Literal["shorts", "reels"] | None = None
+    # 영상 캠페인이면 "video": 카테고리·형식·제작비가 없으면 마케팅이 시작을 거절한다.
+    # ends_on(KST, 그날 포함)을 주면 끝난 뒤 결과가 재무로 자동 전달된다(마케팅 환경변수로 켬)
+    campaign_kind: Literal["video", "general"] = "general"
+    production_cost_krw: int | None = Field(default=None, ge=0)
+    ends_on: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
 
     @model_validator(mode="after")
     def _test_flag_with_video(self) -> CampaignStartBody:

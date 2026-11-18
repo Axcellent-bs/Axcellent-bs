@@ -1,5 +1,11 @@
-"""Instagram Login 경로의 실제 어댑터 (`graph.instagram.com`, Content Publishing).
+"""Instagram 실제 어댑터 (Content Publishing, 코드 기본 호스트 `graph.instagram.com`).
 
+- 호스트 주의(2026-11-18, 서버 읽기 전용 확인): 기본값은 Instagram Login 호스트지만
+  `MARKETING_IG_API_BASE_URL`로 바꿀 수 있고 251 서버는 `https://graph.facebook.com` + `v27.0`
+  (Facebook Login 쪽)으로 설정돼 있다.
+  호스트에 따라 필요한 토큰·권한이 다르다(Instagram Login `instagram_business_*` / Facebook Login
+  `instagram_basic`·`instagram_content_publish`·`pages_read_engagement`). 토큰 종류·계정 종류는
+  서버에서 확인하지 못했다 [확인 필요]. 비교표와 근거 URL은 sns-design.md 6절.
 - 흐름: 컨테이너 생성 → 상태 조회 → `media_publish`(1회) → 미디어 조회. 인터페이스는 목과 같다.
 - 토큰·계정 ID는 환경변수에서만 읽는다(이름은 `instagram.SECRET_ENV_NAMES`).
   값은 로그·예외·결과에 내지 않는다. HTTP 예외는 URL(쿼리에 토큰이 붙는다)을 담고 있어서
@@ -335,8 +341,9 @@ class GraphInstagramAdapter:
         return PublishingLimit(usage, total if ok_total else None)
 
     async def get_media(self, media_id: str) -> MediaInfo:
-        # `is_ai_generated` 필드는 요청하지 않는다(모르는 필드면 호출 전체가 실패할 수 있다).
-        # 앱 화면의 라벨은 사람이 따로 확인해 기록한다(설계 9-2).
+        # `is_ai_generated`는 Meta 문서(IG Media 읽기 필드, "has an AI label")에 있으나
+        # 이 로그인 경로에서도 되는지는 확인하지 못했다. 모르는 필드면 호출 전체가 실패할 수 있어
+        # permalink 조회와 따로 부르고, 실패하면 모름(None)으로 둔다(확인됨으로 만들지 않는다).
         fields = "permalink,timestamp,media_product_type"
         body = await self._request("GET", media_id, params={"fields": fields})
         return MediaInfo(
@@ -344,8 +351,16 @@ class GraphInstagramAdapter:
             permalink=_text(body.get("permalink")),
             timestamp=_text(body.get("timestamp")),
             media_product_type=_text(body.get("media_product_type")),
-            is_ai_generated=None,
+            is_ai_generated=await self._read_ai_label(media_id),
         )
+
+    async def _read_ai_label(self, media_id: str) -> bool | None:
+        try:
+            body = await self._request("GET", media_id, params={"fields": "is_ai_generated"})
+        except (IgApiError, IgResponseLost):
+            return None
+        value = body.get("is_ai_generated")
+        return value if isinstance(value, bool) else None
 
     async def delete_media(self, media_id: str) -> None:
         raise NotImplementedError("Instagram Login 경로에는 삭제 API가 없다. 앱에서 사람이 지운다")

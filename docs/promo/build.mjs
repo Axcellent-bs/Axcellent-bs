@@ -140,6 +140,31 @@ const approval = `
   </div>
 </section>`;
 
+
+// 반응 숫자는 "언제 어디서 잰 값인지"(measuredAt, source)가 함께 있을 때만 보인다. 없으면 숫자를 숨기고 알린다(지어낸 숫자가 나가지 않게)
+function metricsHtml(p) {
+  const list = p.metrics || [];
+  if (!list.length) return "";
+  if (!has(p.measuredAt) || !has(p.source)) {
+    console.warn("[경고] 반응 숫자가 있는데 measuredAt·source가 없어 숨겼다: " + (p.alt || p.img));
+    return "";
+  }
+  return `<dl class="metrics">${list.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl><p class="measured">잰 날짜 ${esc(p.measuredAt)} · ${esc(p.source)}</p>`;
+}
+const casesPost = (p) => `<li class="post"><img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy"><div class="post-b">${has(p.date) ? `<span class="post-d">${esc(p.date)}</span>` : ""}${has(p.caption) ? `<p>${esc(p.caption)}</p>` : ""}${metricsHtml(p)}</div></li>`;
+const casesItems = C.cases.items.filter((it) => C.cases.showEmpty || (it.posts && it.posts.length));
+const cases = casesItems.length === 0 ? "" : `
+<section class="sec sec-light" id="cases">
+  <div class="wrap">
+    <p class="pill reveal">${esc(C.cases.kicker)}</p>
+    <h2 class="h2 ink reveal">${esc(C.cases.title[0])}<br><span class="brand">${esc(C.cases.title[1])}</span></h2>
+    <p class="cases-lead reveal">${esc(C.cases.lead)}</p>
+    <ol class="loop reveal">${C.cases.loop.map((s, i) => `<li class="loop-step"><span class="ln">${i + 1}</span><b>${esc(s.label)}</b><span>${esc(s.body)}</span>${has(s.note) ? `<em>${esc(s.note)}</em>` : ""}</li>`).join("")}</ol>
+    <div class="case-cards">${casesItems.map((it) => `<article class="case reveal"><header><h3>${esc(it.name)}</h3><p class="badges">${it.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p></header>${has(it.summary) ? `<p class="case-sum">${esc(it.summary)}</p>` : ""}${it.posts && it.posts.length ? `<ul class="posts">${it.posts.map(casesPost).join("")}</ul>` : `<div class="case-empty"><span>${esc(C.cases.emptyText)}</span></div>`}</article>`).join("")}</div>
+    <p class="fine dark reveal">${esc(C.cases.note)}</p>
+  </div>
+</section>`;
+
 const benefits = `
 <section class="sec sec-dark" id="benefits">
   <div class="wrap">
@@ -223,7 +248,7 @@ const html = `<!doctype html>
 <a class="skip" href="#vision">본문으로 건너뛰기</a>
 ${header}
 <main>
-${hero}${vision}${team}${story}${a2a}${approval}${benefits}${customers}${posts}${cta}
+${hero}${vision}${team}${story}${a2a}${cases}${approval}${benefits}${customers}${posts}${cta}
 </main>
 ${footer}
 <script src="app.js" defer></script>

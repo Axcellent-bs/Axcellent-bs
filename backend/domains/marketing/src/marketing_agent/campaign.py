@@ -26,6 +26,16 @@
   `video_performance`(campaign_id)를 읽어 가장 늦게 잰 시점의 값을 싣는다(7일 전에 끝났으면 3d 등).
   측정 중·놓침·등록 없음·시험 영상·데이터 실패면 비워 보내고 값을 지어내지 않는다(결과 전달은
   막지 않는다). 7일이 지나 다시 부르면 같은 campaign_id로 새 값이 간다(덮어쓰기는 재무가 한다).
+- 영상 캠페인 필수 입력(11/18): 영상 캠페인(`campaign_kind="video"`)은 시작할 때
+  콘텐츠 카테고리·형식·제작비(`production_cost_krw`, 0원 가능)를 모두 알아야 한다.
+  호출자가 안 준 칸은
+  기획안 값으로 채운 뒤에도 비어 있으면 재무 의견·관문을 부르지 않고 `video_fields_required`로
+  거절한다(옛 호출자는 `campaign_kind`를 안 주므로 영향이 없다). 안 채워 두면 재무 카테고리별 칸에
+  안 잡히기 때문이다(11/16 손익 2건).
+- 자동 결과 전달(11/18): 관문이 `executed`로 끝난 캠페인이 `ends_on`(종료일, KST)을 주었으면
+  `campaign_auto.py`가 종료일이 지난 뒤 이 모듈의 `record_campaign_result`로 결과를 재무에 자동으로
+  보낸다. 재무는 같은 campaign_id를 덮어쓰고 같은 내용이면 `already_recorded`로 돌려주므로 되풀이
+  전송은 안전하다. 사람이 이미 결과를 저장했으면(`on_recorded`) 자동 전송은 사람 값을 덮지 않는다.
 - 쿠폰 지급(`issue_coupon`)은 이 흐름과 별개다. 재무는 쿠폰을 판단하지 않는다.
 - 재무에 닿지 못하면 승인으로 보지 않는다(fail-closed): 시작은 실행하지 않고 멈춘다.
 """
@@ -34,8 +44,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import UTC, date, datetime
-from typing import Any
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, Literal
 
 from pydantic import Field, StrictInt, ValidationError, model_validator
 
@@ -72,6 +82,11 @@ DATA_VIDEO_SKILL = "video_performance"
 # 데이터가 재는 시점, 늦은 것부터. 가장 늦게 잰 값을 쓴다
 _POINTS_LATEST_FIRST: tuple[ViewsPoint, ...] = ("7d", "3d", "1d", "1h")
 START_ACTION = "start_campaign"
+KST_OFFSET_H = 9  # 회사 날짜는 KST
+
+
+def kst_today() -> date:
+    return (datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=KST_OFFSET_H)).date()
 
 
 class StartCampaignInput(AxModel):
@@ -92,12 +107,31 @@ class StartCampaignInput(AxModel):
     # 등록하면 `test`를 호출자가 정해야 한다: 시험 영상은 true, 시연·실제 캠페인은 false
     video_url: str | None = Field(default=None, min_length=1, max_length=500)
     test: bool | None = None
+    # 영상 캠페인이면 "video". 기본 general은 옛 호출자 호환이다
+    # (video_url만 주는 옛 호출도 그대로 통과).
+    # 영상 캠페인은 카테고리·형식·제작비를 시작할 때 모두 알아야 한다
+    # (기획안 값으로 채운 뒤에도 비면 거절)
+    campaign_kind: Literal["video", "general"] = "general"
+    production_cost_krw: StrictInt | None = Field(default=None, ge=0)  # 광고비(budget_krw)와 따로
+    # 캠페인 종료일(KST, YYYY-MM-DD, 그날 포함). 주면 끝난 뒤 결과를 재무에
+    # 자동 전달한다(끌 수 있음).
+    # 안 주면 자동 전달 대상이 아니다(사람이 결과를 저장해야 재무에 간다)
+    ends_on: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
 
     @model_validator(mode="after")
     def _test_flag_with_video(self) -> StartCampaignInput:
         if self.video_url is not None and self.test is None:
             raise ValueError("video_url을 주면 test(시험 영상 여부)를 true·false로 정해야 한다")
+        if self.ends_on is not None:
+            try:
+                date.fromisoformat(self.ends_on)
+            except ValueError as exc:
+                raise ValueError("ends_on은 실제 날짜(YYYY-MM-DD)여야 한다") from exc
         return self
+
+    @property
+    def is_video(self) -> bool:
+        return self.campaign_kind == "video"
 
 
 # 데이터가 재는 매출 효과 값 묶음. 호출자가 하나라도 주면 이 묶음은 데이터로 채우지 않는다
@@ -272,10 +306,32 @@ def _fill_content(
     )
 
 
+class StartedCampaign(AxModel):
+    """관문이 executed로 끝난 캠페인. 자동 결과 전달이 종료일 뒤에 쓰는 값이다."""
+
+    campaign_id: str
+    campaign_name: str
+    channel: str
+    budget_krw: int
+    content_category: str | None = None
+    format: ContentFormat | None = None
+    production_cost_krw: int | None = None
+    ends_on: str | None = None
+    started_on: str  # KST 날짜
+
+
+def missing_video_fields(
+    category: str | None, fmt: ContentFormat | None, cost: int | None
+) -> list[str]:
+    names = (("content_category", category), ("format", fmt), ("production_cost_krw", cost))
+    return [name for name, value in names if value is None]
+
+
 async def start_campaign(
     request: AgentRequest,
     brief_product_ids: Callable[[str], list[str]] | None = None,
     brief_content: BriefContent | None = None,
+    on_started: Callable[[StartedCampaign], None] | None = None,
 ) -> AgentResult:
     """캠페인 시작: 재무 의견을 받고 안전 관문을 거친다.
 
@@ -283,6 +339,8 @@ async def start_campaign(
     함수다(기획안의 `product_ids`). 요청이 상품을 직접 주면 그것을 쓴다.
     `brief_content`도 같은 방식으로 호출자가 안 준 `content_category`·`format`만 기획안의
     `content_category`·`content_format`으로 채운다.
+    `on_started`는 관문이 `executed`로 끝난 캠페인을 자동 결과 전달 대장에 올린다(실패해도 시작은
+    그대로, 경고만 남긴다).
     """
     try:
         data = StartCampaignInput.model_validate(request.input)
@@ -295,6 +353,29 @@ async def start_campaign(
     category, content_format = _fill_content(
         data.campaign_id, data.content_category, data.format, brief_content
     )
+    if data.is_video:
+        missing = missing_video_fields(category, content_format, data.production_cost_krw)
+        if missing:
+            return _result(
+                request,
+                TaskStatus.FAILED,
+                outcome="video_fields_required",
+                output={
+                    "missing": missing,
+                    "message": (
+                        "영상 캠페인은 시작할 때 콘텐츠 카테고리(content_category), 형식(format),"
+                        " 제작비(production_cost_krw, 없으면 0)를 모두 적어야 한다. 빠진 칸: "
+                        + ", ".join(missing)
+                    ),
+                },
+            )
+    if data.ends_on is not None and date.fromisoformat(data.ends_on) < kst_today():
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="ends_on_in_past",
+            output={"message": "ends_on(종료일)이 오늘(KST)보다 앞선다. 종료일을 다시 정한다."},
+        )
     ask = CampaignBudgetReviewInput(
         campaign_id=data.campaign_id,
         campaign_name=data.campaign_name,
@@ -350,8 +431,28 @@ async def start_campaign(
         evidence,
     )
     result = _gate_outcome(request, decision, review, evidence)
-    if data.video_url is not None and result.outcome == "executed":
-        result.output["video"] = await _register_video(request, data)
+    if result.outcome == "executed":
+        if on_started is not None:
+            started = StartedCampaign(
+                campaign_id=data.campaign_id,
+                campaign_name=data.campaign_name,
+                channel=data.channel,
+                budget_krw=data.budget_krw,
+                content_category=category,
+                format=content_format,
+                production_cost_krw=data.production_cost_krw,
+                ends_on=data.ends_on,
+                started_on=kst_today().isoformat(),
+            )
+            try:
+                on_started(started)
+            except Exception as exc:  # noqa: BLE001 - 대장 실패가 이미 시작된 캠페인을 바꾸지 않는다
+                _log.warning("캠페인 %s 자동 전달 대장 기록 실패: %s", data.campaign_id, exc)
+                result.output["auto_record"] = {"tracked": False, "warning": "대장 기록 실패"}
+            else:
+                result.output["auto_record"] = {"tracked": data.ends_on is not None}
+        if data.video_url is not None:
+            result.output["video"] = await _register_video(request, data)
     return result
 
 
@@ -470,8 +571,15 @@ async def _fill_views(
 
 
 async def record_campaign_result(
-    request: AgentRequest, brief_content: BriefContent | None = None
+    request: AgentRequest,
+    brief_content: BriefContent | None = None,
+    started: Callable[[str], StartedCampaign | None] | None = None,
+    on_recorded: Callable[[str], None] | None = None,
 ) -> AgentResult:
+    """`started`는 시작 때 적어 둔 값(카테고리·형식·제작비)으로 빈 칸만 채운다(호출자 값 우선).
+
+    `on_recorded`는 재무가 결과를 받았을 때 불러, 사람이 저장한 캠페인을 자동 전달이 덮지 않게 한다.
+    """
     try:
         data = RecordCampaignResultInput.model_validate(request.input)
     except ValidationError as error:
@@ -480,6 +588,16 @@ async def record_campaign_result(
         data.campaign_id, data.content_category, data.format, brief_content
     )
     data = data.model_copy(update={"content_category": category, "format": content_format})
+    began = started(data.campaign_id) if started is not None else None
+    if began is not None:
+        cost = data.production_cost_krw
+        data = data.model_copy(
+            update={
+                "content_category": data.content_category or began.content_category,
+                "format": data.format or began.format,
+                "production_cost_krw": cost if cost is not None else began.production_cost_krw,
+            }
+        )
 
     queries = [f"finance.{RECORD_SKILL}"]
     if data.needs_data:
@@ -504,6 +622,8 @@ async def record_campaign_result(
     except ValidationError as error:
         return _invalid(request, error)
     answer = await _ask_finance(request, RECORD_SKILL, contract)
+    if on_recorded is not None and answer.status == TaskStatus.COMPLETED:
+        on_recorded(data.campaign_id)
     return _result(
         request,
         answer.status,

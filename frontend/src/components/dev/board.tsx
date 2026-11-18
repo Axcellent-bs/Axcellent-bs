@@ -162,7 +162,8 @@ export function TaskBoard({ s, filter }: { s: S; filter?: string }) {
           const nav = rowNav(row.next.href, row.next.label)
           const fin = row.group === 'done' || row.group === 'stopped'
           return (
-            <li key={t.id} {...nav} className={`rq-item ${nav.className ?? ''}${fin ? ' fin' : ''}${row.group === 'stuck' ? ' dev-stuck' : ''}`}>
+            // 목록 칸(li)은 link 역할을 줄 수 없어(접근성) 줄 클릭만 받고, 키보드는 안의 제목 링크로 간다
+            <li key={t.id} onClick={nav.onClick} title={nav.title} className={`rq-item ${nav.className ?? ''}${fin ? ' fin' : ''}${row.group === 'stuck' ? ' dev-stuck' : ''}`}>
               <div className="rq-title">
                 <a href={row.next.href} className="rq-name plain-link">{t.title}</a>
                 <span className="rq-meta">

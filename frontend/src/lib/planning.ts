@@ -3,6 +3,7 @@
 // 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
 import type { Proposal } from './proposals'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useVisibleInterval } from './visibleInterval'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import { RULE_LABEL, type Action, type FillPreview, type Activity, type AuditItem, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
 
@@ -139,6 +140,8 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
         past: ((Array.isArray(p.past) ? p.past : []) as Json[]).map((x) => ({ ...x, noteLine: x.noteLine ?? undefined, actions: x.actions ?? [] })),
         followOf: p.followOf ?? undefined,
         angle: p.angle ?? undefined,
+        contentCategory: p.contentCategory ?? undefined,
+        contentFormat: p.contentFormat ?? undefined,
         scale: p.scale ? { ...(p.scale as Json), followers: (p.scale as Json).followers ?? undefined, followersChannel: (p.scale as Json).followersChannel ?? undefined, pastViewsMedian: (p.scale as Json).pastViewsMedian ?? undefined } : undefined,
         options: ((Array.isArray(p.options) ? p.options : []) as Json[]).map((o) => ({
           ...o, blockedReason: o.blockedReason ?? undefined, reason: o.reason ?? undefined,
@@ -242,15 +245,12 @@ export function useReleaseChecks(spec: string): ReleaseCheck[] {
 /** 모든 기획서의 배포 전 대조 기록 (최근 순). 요청 목록처럼 여러 기획서를 한 번에 볼 때 쓴다 */
 export function useAllReleaseChecks(): ReleaseCheck[] {
   const [rows, setRows] = useState<ReleaseCheck[]>([])
-  useEffect(() => {
-    let alive = true
-    const load = () => call<ReleaseCheck[]>(PLANNING_API, '/release-checks')
-      .then((all) => { if (alive) setRows(all) })
-      .catch(() => { if (alive) setRows([]) })
-    void load()
-    const t = setInterval(load, 10_000)
-    return () => { alive = false; clearInterval(t) }
-  }, [])
+  const alive = useRef(true)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  // 앞 요청이 안 끝났으면 건너뛰고, 다른 탭을 볼 때는 받지 않는다 (11/18 화면 속도 점검)
+  useVisibleInterval(() => call<ReleaseCheck[]>(PLANNING_API, '/release-checks')
+    .then((all) => { if (alive.current) setRows(all) })
+    .catch(() => { if (alive.current) setRows([]) }), 10_000)
   return rows
 }
 

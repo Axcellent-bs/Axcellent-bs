@@ -665,3 +665,114 @@ async def test_integration_with_real_gate_approval_triggers_publish(
     again = await publisher.publish_sns(_request())
     assert again.outcome == "published"
     assert adapter.calls["media_publish"] == 1
+
+
+# -- 게시 후 AI 표기 확인 (조회 가능/불가, 불일치 경고, 사람 확인, 기본값 false)
+@pytest.mark.asyncio
+async def test_api_true_is_confirmed_without_human(gate, adapter: MockInstagramAdapter) -> None:
+    row = await _approve(gate)
+    assert row.status == pending.PUBLISHED
+    assert row.result["ai_label_confirmed"] is True
+    assert row.result["ai_label_check"] == "api_confirmed"
+    assert row.result["ai_label_review"] == {"status": "not_required"}
+    assert "ai_label_warning" not in row.result
+    assert publisher.ai_label_pending() == []
+
+
+@pytest.mark.asyncio
+async def test_api_unavailable_stays_false_and_waits_for_human(
+    gate, adapter: MockInstagramAdapter
+) -> None:
+    adapter.report_ai_flag = None
+    row = await _approve(gate)
+    assert row.result["ai_label_confirmed"] is False  # 모르면 확인됨이 아니다
+    assert row.result["ai_label_check"] == "api_unavailable"
+    assert row.result["ai_label_warning"] == "ai_label_unverified"
+    assert row.result["ai_label_review"] == {"status": "pending"}
+    assert [r["idempotency_key"] for r in publisher.ai_label_pending()] == [row.idempotency_key]
+    out = publisher._output(row)  # noqa: SLF001
+    assert out["ai_label_review"] == {"status": "pending"} and out["ai_label_confirmed"] is False
+
+
+@pytest.mark.asyncio
+async def test_api_false_is_mismatch_warning(gate, adapter: MockInstagramAdapter) -> None:
+    adapter.report_ai_flag = False
+    row = await _approve(gate)
+    assert row.status == pending.PUBLISHED  # 게시 동작은 바꾸지 않는다
+    assert row.result["ai_label_confirmed"] is False
+    assert row.result["ai_label_check"] == "api_mismatch"
+    assert row.result["ai_label_warning"] == "ai_label_mismatch"
+    assert row.result["ai_label_review"]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_lookup_failure_after_publish_is_unknown(gate, adapter: MockInstagramAdapter) -> None:
+    adapter.fail_on("get_media", 190)  # 토큰 오류: 재시도 없이 조회 실패
+    row = await _approve(gate)
+    assert row.status == pending.PUBLISHED
+    assert row.result["ai_label_confirmed"] is False
+    assert row.result["ai_label_review"]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_human_confirmation_records_who_and_when_once(
+    gate, adapter: MockInstagramAdapter
+) -> None:
+    adapter.report_ai_flag = None
+    row = await _approve(gate)
+    at = datetime(2026, 11, 18, 3, 0, tzinfo=UTC)
+    assert publisher.confirm_ai_label(row.idempotency_key, " 확인자A ", True, now=at)
+    done = _row().result
+    assert done["ai_label_confirmed"] is True
+    assert done["ai_label_review"] == {
+        "status": "confirmed",
+        "confirmed_by": "확인자A",
+        "confirmed_at": at.isoformat(),
+    }
+    assert "ai_label_warning" not in done
+    assert done["permalink"]  # 기존 기록은 보존
+    assert publisher.ai_label_pending() == []
+    # 두 번째 기록은 첫 기록을 덮지 못한다
+    assert not publisher.confirm_ai_label(row.idempotency_key, "다른사람", False)
+    assert _row().result["ai_label_review"]["confirmed_by"] == "확인자A"
+
+
+@pytest.mark.asyncio
+async def test_human_reports_label_not_visible_keeps_false(
+    gate, adapter: MockInstagramAdapter
+) -> None:
+    adapter.report_ai_flag = False
+    row = await _approve(gate)
+    assert publisher.confirm_ai_label(row.idempotency_key, "확인자B", False)
+    done = _row().result
+    assert done["ai_label_confirmed"] is False
+    assert done["ai_label_review"]["status"] == "confirmed_missing"
+    assert done["ai_label_warning"] == "ai_label_missing"
+
+
+@pytest.mark.asyncio
+async def test_confirmer_required_and_api_confirmed_not_overwritten(
+    gate, adapter: MockInstagramAdapter
+) -> None:
+    row = await _approve(gate)  # API가 이미 확인
+    with pytest.raises(ValueError, match="confirmed_by"):
+        publisher.confirm_ai_label(row.idempotency_key, "  ", True)
+    assert not publisher.confirm_ai_label(row.idempotency_key, "누군가", False)
+    assert _row().result["ai_label_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_overdue_is_flagged(
+    gate, adapter: MockInstagramAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter.report_ai_flag = None
+    await _approve(gate)
+    later = datetime.now(UTC)
+    fresh = publisher.ai_label_pending(now=later + timedelta(hours=1))
+    assert fresh[0]["overdue"] is False
+    stale = publisher.ai_label_pending(now=later + timedelta(hours=25))
+    assert stale[0]["overdue"] is True and stale[0]["hours_waiting"] >= 24
+    monkeypatch.setenv("MARKETING_SNS_LABEL_CONFIRM_HOURS", "2")
+    assert publisher.ai_label_pending(now=later + timedelta(hours=3))[0]["overdue"] is True
+    monkeypatch.setenv("MARKETING_SNS_LABEL_CONFIRM_HOURS", "abc")  # 잘못된 값은 기본 24시간
+    assert publisher.ai_label_pending(now=later + timedelta(hours=3))[0]["overdue"] is False

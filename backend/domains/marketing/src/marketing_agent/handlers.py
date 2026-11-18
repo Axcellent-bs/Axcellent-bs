@@ -63,7 +63,9 @@ from marketing_agent.briefs import (
     rejection_reason,
 )
 from marketing_agent.campaign import record_campaign_result, start_campaign
-from marketing_agent.campaign_cancel import cancel_campaign
+from marketing_agent.campaign_auto import CampaignTracker
+from marketing_agent.campaign_cancel import CANCEL_HOOKS, cancel_campaign
+from marketing_agent.channel_followers import channel_followers as _channel_followers
 from marketing_agent.chat import (
     ChatRefused,
     ChatService,
@@ -123,6 +125,7 @@ class State:
         self.notices = NoticeStore()
         self.coupons = CouponLedger()
         self.briefs = BriefStore()
+        self.campaigns = CampaignTracker()  # 시작된 캠페인 대장(자동 결과 전달)
         self.sns = SnsStore()
         self.media_ledger = MediaLedger()  # 열 수 없으면 시작 때 실패한다
         # 열 수 없으면 시작 때 ChatStorageError로 실패한다(briefs와 같다)
@@ -174,6 +177,8 @@ class State:
 
 
 STATE = State()
+# 재무가 취소를 받으면 자동 결과 전달 대장에서도 뺀다(campaign_cancel.CANCEL_HOOKS)
+CANCEL_HOOKS.append(lambda campaign_id: STATE.campaigns.mark_canceled(campaign_id))
 
 
 def reset_state() -> None:
@@ -562,6 +567,22 @@ async def list_active_notices(request: AgentRequest) -> AgentResult:
     )
 
 
+async def channel_followers(request: AgentRequest) -> AgentResult:
+    """공식 SNS 채널 팔로워 수(read). 입력 없음. 모르면 unknown과 이유."""
+    out = await _channel_followers()
+    summary = (
+        "공식 SNS 팔로워 " + ", ".join(f"{c.channel} {c.followers}" for c in out.channels)
+        if out.status == "known"
+        else f"팔로워 수를 알 수 없음: {out.reason}"
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["channel_followers"], summary, []),
+    )
+
+
 async def receive_campaign_brief(request: AgentRequest) -> AgentResult:
     """기획안을 받아 보관한다. 캠페인은 시작하지 않는다.
 
@@ -710,8 +731,13 @@ def _media_estimate(request: AgentRequest, record: SnsHandoffRecord | None) -> d
     if record is None or record.status != "handed" or not record.media_request:
         return None
     try:
+        stored = STATE.briefs.existing(record.proposal_id)  # 실제 생성과 같은 프롬프트로 계산
         return brief_media.estimate(
-            request, record.proposal_id, record.media_request, ledger=STATE.media_ledger
+            request,
+            record.proposal_id,
+            record.media_request,
+            ledger=STATE.media_ledger,
+            plan_fields=brief_media.plan_fields_for(stored.brief if stored else None),
         )
     except Exception:  # noqa: BLE001 - 조회는 돌려준다. 화면은 비용을 모른다고 보여 준다
         return None
@@ -1254,12 +1280,22 @@ async def start_campaign_skill(request: AgentRequest) -> AgentResult:
             return None, None
         return stored.brief.content_category, stored.brief.content_format
 
-    return await start_campaign(request, brief_product_ids=product_ids, brief_content=content)
+    return await start_campaign(
+        request,
+        brief_product_ids=product_ids,
+        brief_content=content,
+        on_started=STATE.campaigns.track,
+    )
 
 
 async def record_campaign_result_skill(request: AgentRequest) -> AgentResult:
     """`record_campaign_result`: 요청이 안 준 카테고리·형식은 기획안 값으로 채운다."""
-    return await record_campaign_result(request, brief_content=_brief_content)
+    return await record_campaign_result(
+        request,
+        brief_content=_brief_content,
+        started=STATE.campaigns.get,
+        on_recorded=STATE.campaigns.mark_human_recorded,
+    )
 
 
 HANDLERS = {
@@ -1268,6 +1304,7 @@ HANDLERS = {
     "end_incident_notice": end_incident_notice,
     "get_notice": get_notice,
     "list_active_notices": list_active_notices,
+    "channel_followers": channel_followers,
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,
