@@ -210,11 +210,13 @@ AI 오피스 단톡방·AI 대화방 전체 대화방에서 부서 AI에게 건 
 AXcellent 규격(shop-api)이 아닌 고객사 자기 API를 AI들이 shop-api처럼 쓰게 바꿔 준다.
 설계: `docs/superpowers/specs/2026-11-18-site-adapter-design.md`.
 
-- 켜기: 회사 연결 파일에 `"kind": "adapter", "adapter": {"base_url": "<고객사 API 주소>"}`.
+- 켜기: 화면 시스템 관리 › 회사 연결 › 다른 형식 API(아래 설정 API). 손으로는 회사 연결 파일에
+  `"kind": "adapter", "adapter": {"base_url": "<고객사 API 주소>"}`.
   그러면 `agent_url("shop-api")`가 `<dashboard-api>/site-adapter`가 된다(재시작 없음).
 - 짝 파일: `<AX_SITE_ADAPTER_DIR>/mapping.json`(기본 `backend/.data/site_adapter/`). 항목 식은
   점 경로·`sum:a,b`·`const:값`. 예시: `tests/site_adapter/fixtures/nubi_mapping.json`(누비투어).
-- 키: `.env`의 `AX_SITE_API_TOKEN`을 짝 파일의 `auth_header`·`auth_scheme`으로 보낸다. 응답·로그에 넣지 않는다.
+- 키: 화면에서 넣은 키(`<AX_SITE_ADAPTER_DIR>/token`, 없으면 `.env`의 `AX_SITE_API_TOKEN`)를
+  짝 파일의 `auth_header`·`auth_scheme`으로 보낸다. 응답·로그에 넣지 않는다.
 - 페이지 상한 `AX_SITE_ADAPTER_MAX_PAGES`(기본 50). 닿으면 일부만 주지 않고 503 `UPSTREAM_TRUNCATED`.
 - 같은 자원은 `AX_SITE_ADAPTER_CACHE_SECONDS`(기본 30초) 동안 다시 받지 않는다(호출하는 쪽이 쪽마다 다시 부른다).
 - 읽기는 shop-api처럼 토큰 없이 받는다(사내망 전용). 화면 직접 조회(live_views)가 토큰 없이 부르기 때문이다.
@@ -228,6 +230,16 @@ AXcellent 규격(shop-api)이 아닌 고객사 자기 API를 AI들이 shop-api�
 
 오류: 짝 없음·연결 아님 503 `NOT_CONFIGURED`, 짝이 응답과 안 맞음 502 `MAPPING_BROKEN`,
 고객사 키 거부 503 `UPSTREAM_AUTH`, 고객사 응답 없음·5xx 503 `UPSTREAM_UNAVAILABLE`.
+
+설정 API (`/api/dashboard/site-adapter`, 쓰기는 사람 토큰. `site_adapter/setup.py`):
+
+| 주소 | 하는 일 |
+| --- | --- |
+| `GET` | 짝이 있는지·짝·키를 넣었는지(값은 안 줌)·회사 연결 |
+| `POST /propose` | 주소·키로 둘러보기. `openapi.json`의 GET 목록 경로, 주문·상품 경로를 주면 첫 쪽으로 짝 제안(규칙만, `propose.py`) |
+| `PUT` | 빈 칸이 없고(422 `MAPPING_INCOMPLETE`) 첫 쪽이 실제로 바뀌면(422 `MAPPING_BROKEN`) 짝·키를 쓰고 회사 연결을 `kind=adapter`로 저장 |
+
+회사 연결 모드 전환은 종류를 그대로 두고, 다른 형식 API를 다시 켤 때는 저장한 짝으로 다시 확인한다.
 
 ## 4. 의존
 ax-contracts, ax-agent-template

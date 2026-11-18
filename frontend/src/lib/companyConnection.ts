@@ -16,6 +16,9 @@ export interface StoredConnection {
   verified_at: string | null;
   updated_at: string | null;
   updated_by: string | null;
+  /** shop-api 규격(`shop_api`) 또는 다른 형식 API를 사이트 변환기로 잇기(`adapter`). 옛 파일은 없을 수 있다 */
+  kind?: "shop_api" | "adapter";
+  adapter?: { base_url: string } | null;
 }
 
 /** 바꾼 기록 한 줄 (새것부터) */
@@ -56,7 +59,7 @@ export interface ConnectionTest {
 
 const PATH = "/api/dashboard/company-connection";
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+export async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method,
     headers: { "Content-Type": "application/json", ...writeAuth(method, path) },
