@@ -23,6 +23,18 @@
   `CampaignTracker.log(campaign_id)`.
 - 외부 게시·돈이 드는 일이 아니라 재무 장부에 손익을 적는 내부 호출뿐이다(실제 광고는 안 나간다).
 
+- 자동 전송 값 표시(`AUTO_SOURCE`): 재무 `CampaignResultInput.source`(숫자의 출처)에 항상
+  `marketing.auto.approved_budget`을 보낸다(계약은 그대로). 광고비가 승인 예산이라 재무 화면이
+  '예산 기준(잠정)'으로 구분할 수 있다. 사람이 저장하면 `source`를 안 주거나(데이터 값으로 채움)
+  자기 값을 주므로, 재무가 같은 campaign_id를 덮어쓰며 이 값이 사라진다(`source`는 안 잇는다).
+- 7일 조회수 재확인(11/18): 조회수는 게시 7일 뒤에야 완성돼 종료일 직후 전송엔 3d 등 빠른 값이
+  실린다. 영상 캠페인(`format` 있음)은 `recorded_auto` 뒤 하루 한 번 같은 `record_campaign_result`를
+  다시 불러(재무는 같은 campaign_id를 덮어써 안전, 내용이 같으면 `already_recorded`) 데이터
+  `video_performance`의 가장 늦은 측정값을 싣는다. 그 호출 안에서 이미 읽은 `7d` 상태가 `known`이
+  되면 재확인을 닫는다(`views_state=done`). 시작일 + `MARKETING_CAMPAIGN_AUTO_VIEWS_DAYS`일(기본
+  14, 0이면 재확인 안 함)이 지나면 포기(`gave_up`).
+  사람이 저장(`recorded_human`)·취소한 캠페인은 재확인하지 않는다. 새 호출·계약은 만들지 않는다.
+
 끄는 법·기본값: `MARKETING_CAMPAIGN_AUTO_RECORD`. **기본은 꺼짐**이다. 근거: 자동 전송의 광고비가
 승인 예산 값이라 실제 집행액과 다를 수 있고, 재무 손익·교훈·총괄 의견이
 이 값으로 계산돼 사람이 모르게
@@ -32,6 +44,7 @@
 - `MARKETING_CAMPAIGN_AUTO_POLL_S`(기본 600초, 0이면 루프를 켜지 않음)
 - `MARKETING_CAMPAIGN_AUTO_GRACE_H`(기본 6시간: 종료일 다음 날 0시(KST) 뒤 데이터 집계 여유)
 - `MARKETING_CAMPAIGN_AUTO_RETRY_H`(기본 1시간), `MARKETING_CAMPAIGN_AUTO_MAX_ATTEMPTS`(기본 6)
+- `MARKETING_CAMPAIGN_AUTO_VIEWS_DAYS`(기본 14일: 7일 조회수 재확인을 시작일부터 이 날수까지만)
 """
 
 from __future__ import annotations
@@ -62,10 +75,17 @@ POLL_ENV = "MARKETING_CAMPAIGN_AUTO_POLL_S"
 GRACE_ENV = "MARKETING_CAMPAIGN_AUTO_GRACE_H"
 RETRY_ENV = "MARKETING_CAMPAIGN_AUTO_RETRY_H"
 ATTEMPTS_ENV = "MARKETING_CAMPAIGN_AUTO_MAX_ATTEMPTS"
+VIEWS_DAYS_ENV = "MARKETING_CAMPAIGN_AUTO_VIEWS_DAYS"
+# 자동 전송의 재무 `source`: 광고비가 승인 예산이라는 표시('예산 기준(잠정)'). 바꾸면 재무와 맞춘다
+AUTO_SOURCE = "marketing.auto.approved_budget"
+VIEWS_RECHECK_H = 24
 CALL_DEADLINE_S = 90
 
 ACTIVE = "active"
 RECORDED_AUTO = "recorded_auto"
+VIEWS_PENDING = "pending"  # 7d 조회수 재확인 중
+VIEWS_DONE = "done"  # 7d known 확인으로 닫음
+VIEWS_GAVE_UP = "gave_up"  # 기한까지 7d가 known이 안 돼 닫음
 RECORDED_HUMAN = "recorded_human"
 CANCELED = "canceled"
 GAVE_UP = "gave_up"
@@ -81,7 +101,9 @@ CREATE TABLE IF NOT EXISTS campaign_runs (
     next_try_at TEXT,
     attempts INTEGER NOT NULL DEFAULT 0,
     started_at TEXT NOT NULL,
-    payload TEXT NOT NULL
+    payload TEXT NOT NULL,
+    views_state TEXT,
+    views_next_at TEXT
 )
 """
 _LOG_SCHEMA = """
@@ -117,6 +139,7 @@ class AutoConfig:
     grace_h: float
     retry_h: float
     max_attempts: int
+    views_days: float = 14
 
     @classmethod
     def from_env(cls) -> AutoConfig:
@@ -126,6 +149,7 @@ class AutoConfig:
             grace_h=_env_num(GRACE_ENV, 6),
             retry_h=_env_num(RETRY_ENV, 1),
             max_attempts=max(1, int(_env_num(ATTEMPTS_ENV, 6))),
+            views_days=_env_num(VIEWS_DAYS_ENV, 14),
         )
 
 
@@ -146,6 +170,10 @@ class CampaignTracker:
         with self._lock, self._conn:
             self._conn.execute(_SCHEMA)
             self._conn.execute(_LOG_SCHEMA)
+            have = {r[1] for r in self._conn.execute("PRAGMA table_info(campaign_runs)")}
+            for column in ("views_state", "views_next_at"):
+                if column not in have:  # 이전 버전 파일 대장
+                    self._conn.execute(f"ALTER TABLE campaign_runs ADD COLUMN {column} TEXT")  # noqa: S608
 
     def close(self) -> None:
         self._conn.close()
@@ -196,6 +224,40 @@ class CampaignTracker:
 
     def mark_canceled(self, campaign_id: str) -> None:
         self._set_status(campaign_id, CANCELED, only_active=True)
+        self._close_views(campaign_id, VIEWS_DONE, only_pending=True)  # 취소하면 재확인도 멈춘다
+
+    def views_state(self, campaign_id: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT views_state FROM campaign_runs WHERE campaign_id = ?", (campaign_id,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def _set_views(self, campaign_id: str, state: str, next_at: datetime | None) -> None:
+        """재확인 칸을 쓴다. 사람이 저장·취소해 `recorded_auto`가 아니면 쓰지 않는다."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE campaign_runs SET views_state = ?, views_next_at = ?"
+                " WHERE campaign_id = ? AND status = ?",
+                (state, next_at.isoformat() if next_at else None, campaign_id, RECORDED_AUTO),
+            )
+
+    def _close_views(self, campaign_id: str, state: str, *, only_pending: bool) -> None:
+        sql = "UPDATE campaign_runs SET views_state = ?, views_next_at = NULL WHERE campaign_id = ?"
+        if only_pending:
+            sql += f" AND views_state = '{VIEWS_PENDING}'"  # noqa: S608 - 상수
+        with self._lock, self._conn:
+            self._conn.execute(sql, (state, campaign_id))
+
+    def views_due(self, now: datetime) -> list[StartedCampaign]:
+        """자동 전송을 마치고 7일 조회수 재확인 시각이 된 캠페인(사람이 저장·취소한 것은 빠진다)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload FROM campaign_runs WHERE status = ? AND views_state = ?"
+                " AND views_next_at IS NOT NULL AND views_next_at <= ? ORDER BY views_next_at",
+                (RECORDED_AUTO, VIEWS_PENDING, now.isoformat()),
+            ).fetchall()
+        return [StartedCampaign.model_validate_json(r[0]) for r in rows]
 
     def due(self, now: datetime) -> list[StartedCampaign]:
         with self._lock:
@@ -246,13 +308,20 @@ class CampaignTracker:
         ]
 
 
-def _request(item: StartedCampaign, now: datetime) -> AgentRequest:
+def views_deadline(item: StartedCampaign, cfg: AutoConfig) -> datetime:
+    """재확인 마지막 시각 = 시작일(KST 0시) + `views_days`일."""
+    start = date.fromisoformat(item.started_on)
+    midnight = datetime(start.year, start.month, start.day, tzinfo=UTC)
+    return midnight - timedelta(hours=KST_OFFSET_H) + timedelta(days=cfg.views_days)
+
+
+def _request(item: StartedCampaign, now: datetime, key: str | None = None) -> AgentRequest:
     """자동 전송 요청. 토큰은 `call_agent`가 마케팅 자기 토큰으로 바꾼다."""
     meta = RequestMeta(
         context_id=f"auto_campaign_{item.campaign_id}",
         token="internal:marketing-auto",
         deadline=now + timedelta(seconds=CALL_DEADLINE_S),
-        idempotency_key=f"auto:result:{item.campaign_id}",
+        idempotency_key=key or f"auto:result:{item.campaign_id}",
     )
     return AgentRequest(
         meta=meta,
@@ -263,6 +332,7 @@ def _request(item: StartedCampaign, now: datetime) -> AgentRequest:
             "channel": item.channel,
             # 실제 집행액을 모른다(광고 플랫폼 연결 없음). 승인 예산을 넣고 사람이 저장하면 덮는다
             "spend_krw": item.budget_krw,
+            "source": AUTO_SOURCE,
             "period_from": item.started_on,
             "period_to": item.ends_on,
             **{
@@ -292,11 +362,14 @@ async def send_one(
     request = _request(item, now)
     sent = {
         k: request.input[k]
-        for k in ("spend_krw", "period_from", "period_to", "content_category", "format")
+        for k in ("spend_krw", "source", "period_from", "period_to", "content_category", "format")
         if k in request.input
     } | {"production_cost_krw": request.input.get("production_cost_krw")}
+    seven_day: list[bool] = []
     try:
-        answer = await record_campaign_result(request, brief_content=brief_content)
+        answer = await record_campaign_result(
+            request, brief_content=brief_content, on_seven_day=seven_day.append
+        )
         finance_status, outcome, out = answer.status, answer.outcome, answer.output
     except asyncio.CancelledError:
         raise
@@ -314,6 +387,8 @@ async def send_one(
         tracker._set_status(item.campaign_id, RECORDED_AUTO, only_active=True)  # noqa: SLF001
         tracker._bump(item.campaign_id, None)  # noqa: SLF001
         tracker.add_log(item.campaign_id, RECORDED_AUTO, detail, now)
+        if item.format is not None:  # 영상 캠페인만 7일 조회수를 기다린다
+            _schedule_views(tracker, item, cfg, now, seven_day)
         return RECORDED_AUTO
     attempts = tracker._bump(item.campaign_id, now + timedelta(hours=cfg.retry_h))  # noqa: SLF001
     if attempts >= cfg.max_attempts:
@@ -323,6 +398,65 @@ async def send_one(
         return GAVE_UP
     tracker.add_log(item.campaign_id, "retry", detail | {"attempts": attempts}, now)
     return "retry"
+
+
+def _schedule_views(
+    tracker: CampaignTracker,
+    item: StartedCampaign,
+    cfg: AutoConfig,
+    now: datetime,
+    seven_day: list[bool],
+) -> str:
+    """전송 뒤 7d 상태로 재확인을 닫거나 다음 날로 잡는다. 닫은 이름 또는 `pending`."""
+    if seven_day and seven_day[-1]:
+        state = VIEWS_DONE
+    elif cfg.views_days <= 0 or now + timedelta(hours=VIEWS_RECHECK_H) > views_deadline(item, cfg):
+        state = VIEWS_GAVE_UP
+    else:
+        tracker._set_views(  # noqa: SLF001
+            item.campaign_id, VIEWS_PENDING, now + timedelta(hours=VIEWS_RECHECK_H)
+        )
+        return VIEWS_PENDING
+    tracker._set_views(item.campaign_id, state, None)  # noqa: SLF001
+    if state == VIEWS_GAVE_UP:
+        _log.warning(
+            "캠페인 %s 7일 조회수 재확인 포기(기한 %s일)", item.campaign_id, cfg.views_days
+        )
+    return state
+
+
+async def recheck_views(
+    tracker: CampaignTracker,
+    item: StartedCampaign,
+    cfg: AutoConfig,
+    now: datetime,
+    brief_content: BriefContent | None = None,
+) -> str:
+    """7일 조회수가 완성될 때까지 같은 결과를 다시 보낸다(재무는 campaign_id로 덮어쓴다)."""
+    if tracker.status(item.campaign_id) != RECORDED_AUTO:
+        return "skipped"  # 그 사이 사람이 저장하거나 취소했다
+    request = _request(item, now, f"auto:views:{item.campaign_id}:{now.date().isoformat()}")
+    seven_day: list[bool] = []
+    try:
+        answer = await record_campaign_result(
+            request, brief_content=brief_content, on_seven_day=seven_day.append
+        )
+        finance_status, outcome = answer.status, answer.outcome
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        finance_status, outcome = TaskStatus.FAILED, f"exception:{type(exc).__name__}"
+    if tracker.status(item.campaign_id) != RECORDED_AUTO:
+        return "skipped"
+    ok = finance_status == TaskStatus.COMPLETED and outcome in _DONE_OUTCOMES
+    state = _schedule_views(tracker, item, cfg, now, seven_day if ok else [])
+    tracker.add_log(
+        item.campaign_id,
+        f"views_{state}" if state != VIEWS_PENDING else "views_retry",
+        {"finance_status": finance_status.value, "outcome": outcome, "seven_day": seven_day},
+        now,
+    )
+    return state
 
 
 async def auto_record_once(
@@ -339,7 +473,10 @@ async def auto_record_once(
     items = tracker.due(now)
     for item in items:
         await send_one(tracker, item, cfg, now, brief_content)
-    return len(items)
+    rechecks = tracker.views_due(now)
+    for item in rechecks:
+        await recheck_views(tracker, item, cfg, now, brief_content)
+    return len(items) + len(rechecks)
 
 
 class Runtime:
