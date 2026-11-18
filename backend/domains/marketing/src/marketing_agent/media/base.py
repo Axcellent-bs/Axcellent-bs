@@ -50,6 +50,10 @@ class MediaResult:
     audio_stripped: bool = False  # 영상: 받은 mp4의 오디오를 ffmpeg로 제거했는지
 
 
+class MediaProviderError(Exception):
+    """어댑터 실패의 공통 부모. 메시지는 사유 코드뿐이고 키·응답 본문을 넣지 않는다."""
+
+
 class MediaProvider(Protocol):
     name: str
 

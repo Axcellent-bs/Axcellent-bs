@@ -42,8 +42,9 @@ export function PlanningQuestionsSection({ tick }: { tick: number }) {
     }
   }
 
+  // 질문이 없으면 칸이 통째로 숨는다 → 불러오는 동안에도 뼈대를 그리지 않는다(화면 밀림 방지)
   return (
-    <ResourceBody res={res}>
+    <ResourceBody res={res} quiet>
       {(d) => {
         const waiting = d.questions.filter((q) => q.status === "waiting");
         const answered = d.questions.filter((q) => q.status !== "waiting");

@@ -1,7 +1,9 @@
 import { ActionQueue } from "@/components/finance/SafetyQueue";
 import { CampaignControl } from "./CampaignControl";
 import { MARKETING_HOLD_ACTIONS } from "@/lib/finance";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
+import { Skeleton } from "@/components/finance/bits";
+import { useVisibleInterval } from "@/lib/visibleInterval";
 import { useSearchParams } from "react-router";
 import { ago, shortDateTime, won } from "@/lib/format";
 import {
@@ -65,11 +67,7 @@ export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) 
     try { setLive(await loadMarketingLive()); } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => { void load(); }, REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, [load]);
+  useVisibleInterval(load, REFRESH_MS);
 
   const incidents = live?.incidents ?? new Map();
   const coupons = live?.coupons ?? [];
@@ -97,7 +95,7 @@ export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) 
       {view === "campaign" && <CampaignControl />}
 
       {live?.errors.map((e) => <p key={e} className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{e}</p>)}
-      {!live && <p className="text-sm text-ink-500">불러오는 중입니다.</p>}
+      {!live && <Skeleton stats={4} lines={3} />}
 
       {live && view === "notice" && (
         <>

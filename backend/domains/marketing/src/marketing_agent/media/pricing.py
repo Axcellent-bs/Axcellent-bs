@@ -40,6 +40,9 @@ class PriceEntry:
     source: str
     checked_on: str
     per_item_usd: Decimal | None = None  # 오디오: 곡(클립)당 고정 가격. 토큰 단가는 0
+    per_second_usd: Decimal | None = (
+        None  # 영상: 초당 고정 가격(토큰 없이 초 단위로 파는 공급자). 토큰 단가는 0
+    )
 
 
 def _per_item(item: dict) -> Decimal:
@@ -51,6 +54,16 @@ def _per_item(item: dict) -> Decimal:
         raise PriceTableError(f"per_item_usd가 숫자가 아니다: {item['model']}") from None
     if not value.is_finite() or value <= 0:
         raise PriceTableError(f"per_item_usd는 0보다 커야 한다: {item['model']}")
+    return value
+
+
+def _per_second(item: dict) -> Decimal:
+    try:
+        value = Decimal(str(item["per_second_usd"]))
+    except ArithmeticError:
+        raise PriceTableError(f"per_second_usd가 숫자가 아니다: {item['model']}") from None
+    if not value.is_finite() or value <= 0:
+        raise PriceTableError(f"per_second_usd는 0보다 커야 한다: {item['model']}")
     return value
 
 
@@ -83,6 +96,25 @@ def load_table(path: Path = PRICES_PATH) -> list[PriceEntry]:
                     source=item["source"],
                     checked_on=item["checked_on"],
                     per_item_usd=per_item,
+                )
+            )
+            continue
+        if item["kind"] == "video" and "per_second_usd" in item:
+            entries.append(
+                PriceEntry(
+                    provider=item["provider"],
+                    model=item["model"],
+                    kind="video",
+                    resolution=item["resolution"],
+                    quality=item.get("quality"),
+                    input_usd_per_mtok=Decimal(0),
+                    output_usd_per_mtok=Decimal(0),
+                    output_tokens=None,
+                    output_tokens_per_second=None,
+                    max_duration_s=item.get("max_duration_s"),
+                    source=item["source"],
+                    checked_on=item["checked_on"],
+                    per_second_usd=_per_second(item),
                 )
             )
             continue
@@ -154,7 +186,15 @@ def output_tokens_for(entry: PriceEntry, duration_s: int | None) -> int:
         raise PriceNotFound("영상 길이가 없다")
     if entry.max_duration_s is not None and duration_s > entry.max_duration_s:
         raise PriceNotFound(f"길이 {duration_s}초는 표의 상한 {entry.max_duration_s}초를 넘는다")
-    return int(entry.output_tokens_per_second or 0) * duration_s
+    return int(entry.output_tokens_per_second or 0) * duration_s  # 초당 단가 항목은 0
+
+
+def _check_duration(entry: PriceEntry, duration_s: int | None) -> int:
+    if duration_s is None or duration_s < 1:
+        raise PriceNotFound("영상 길이가 없다")
+    if entry.max_duration_s is not None and duration_s > entry.max_duration_s:
+        raise PriceNotFound(f"길이 {duration_s}초는 표의 상한 {entry.max_duration_s}초를 넘는다")
+    return duration_s
 
 
 def input_tokens_estimate(prompt: str) -> int:
@@ -172,6 +212,8 @@ def usd_for(entry: PriceEntry, *, input_tokens: int, output_tokens: int) -> Deci
 
 
 def estimate_usd(entry: PriceEntry, *, prompt: str, duration_s: int | None) -> Decimal:
+    if entry.per_second_usd is not None:
+        return entry.per_second_usd * _check_duration(entry, duration_s)
     return usd_for(
         entry,
         input_tokens=input_tokens_estimate(prompt),

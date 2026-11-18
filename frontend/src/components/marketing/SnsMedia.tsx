@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
+import { Skeleton } from "@/components/finance/bits";
+import { useVisibleInterval } from "@/lib/visibleInterval";
 import { shortDateTime, won } from "@/lib/format";
 import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
@@ -118,11 +120,7 @@ export function SnsMedia() {
     }
   };
 
-  useEffect(() => {
-    void load();
-    const t = window.setInterval(() => void load(), REFRESH_MS);
-    return () => window.clearInterval(t);
-  }, [load]);
+  useVisibleInterval(load, REFRESH_MS);
 
   return (
     <div className="space-y-8">
@@ -188,7 +186,7 @@ export function SnsMedia() {
         )}
         {!briefsEnabled ? <Empty>마케팅 읽기 연결이 꺼져 있어 초안 목록을 읽을 수 없습니다.</Empty>
           : outageError ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{outageError}</p>
-            : outage === null ? <Empty>불러오는 중입니다.</Empty>
+            : outage === null ? <Skeleton stats={0} lines={2} />
               : outage.length === 0 ? <Empty>만들어진 초안이 없습니다.</Empty> : (
                 <ul className="space-y-3" aria-label="장애 사과·보상 글 초안 목록">
                   {outage.map((d) => (
@@ -217,7 +215,7 @@ export function SnsMedia() {
         </ol>
         {!briefsEnabled ? <Empty>받은 기획안 읽기 연결이 꺼져 있어 넘겨진 목록을 읽을 수 없습니다.</Empty>
           : handedError ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{handedError}</p>
-            : handed === null ? <Empty>불러오는 중입니다.</Empty>
+            : handed === null ? <Skeleton stats={0} lines={2} />
               : handed.length === 0 ? <Empty>넘겨진 기획안이 없습니다.</Empty> : (
                 <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100" aria-label="넘겨진 기획안 목록">
                   {handed.map((i) => {
@@ -283,7 +281,7 @@ export function SnsMedia() {
 
       <Section title="사람 결정 대기 (SNS·미디어)" desc="안전 장치 보류 큐에서 마케팅 AI가 요청한 SNS 게시·이미지·영상 만들기를 읽기만 하는 목록입니다. 게시 승인·거절은 위 기획안 카드의 승인 패널에서 하고, 이 목록에서는 누를 수 없습니다.">
         {error ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">보류 건을 읽지 못했습니다. {error}</p>
-          : holds === null ? <Empty>불러오는 중입니다.</Empty>
+          : holds === null ? <Skeleton stats={0} lines={2} />
             : holds.length === 0 ? <Empty>기다리는 건이 없습니다.</Empty> : (
               <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100">
                 {holds.map((r) => (

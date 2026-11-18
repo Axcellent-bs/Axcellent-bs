@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { DangerRow, Facts, More, Notice, SectionHead, StatusChip } from '@/components/connect/parts'
-import { PreparingChip } from '@/components/Preparing'
 import { ApiError } from '@/lib/apiError'
 import { companyConnection, type ConnectionHistory, type ConnectionState, type ConnectionTest } from '@/lib/companyConnection'
 import { HUMAN_TOKEN_SET } from '@/lib/env'
@@ -80,11 +79,10 @@ export default function Integrations({ onState, embedded = false }: { onState?: 
         <div className="space-y-6 p-6">
           {state && (
             <div className="border-t border-ink-100 pt-5">
-              <Facts cols={4} items={[
+              <Facts cols={3} items={[
                 ['마지막 확인', state.connection?.verified_at ? ago(state.connection.verified_at) : '—'],
                 ['바꾼 사람', state.connection?.updated_by ?? '—'],
                 ['받는 데이터', '주문·상품·구매자 조회'],
-                ['API 키', <PreparingChip />],
               ]} />
             </div>
           )}
@@ -128,7 +126,6 @@ export default function Integrations({ onState, embedded = false }: { onState?: 
             <More summary="어떤 주소를 쓸 수 있나요">
               <p>사내 주소(192.168.x.x 등)는 바로 돼요. 사내 밖 주소는 설치 운영자가 허용 목록(AX_COMPANY_SHOP_ALLOWED_HOSTS)에 넣은 https 주소만 돼요.</p>
               <p>연결 해제는 저장한 주소를 지우고 기본 판매 서버로 돌아가요.</p>
-              <p>토큰이 필요한 쿠폰·환불 읽기는 <PreparingChip /></p>
             </More>
           </div>
         </div>

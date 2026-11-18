@@ -41,7 +41,7 @@ function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   if (listeners.size === 1) {
     void reloadIncidents();
-    timer = setInterval(() => void reloadIncidents(), POLL_MS);
+    timer = setInterval(() => { if (!document.hidden) void reloadIncidents(); }, POLL_MS); // 다른 탭을 볼 때는 받지 않는다
   }
   return () => {
     listeners.delete(listener);
