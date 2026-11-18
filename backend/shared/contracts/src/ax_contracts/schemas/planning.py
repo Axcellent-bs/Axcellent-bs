@@ -590,7 +590,8 @@ class InsightPast(AxModel):
     summary_line: str = Field(default="", max_length=300)
     note_line: str | None = Field(default=None, max_length=300)
     actions: list[str] = Field(default_factory=list, max_length=5)  # 개선 방향 문장 그대로
-    # 아래는 예전 응답은 없다. 조회수 숫자와 잰 시각 (11/18 기획 방향 선택지: 고객사 규모를 숫자로 잼)
+    # 아래는 예전 응답은 없다. 조회수 숫자와 잰 시각
+    # (11/18 기획 방향 선택지: 고객사 규모를 숫자로 잰다)
     views: int | None = Field(default=None, ge=0)
     views_at: UtcDatetime | None = None
 
@@ -650,7 +651,8 @@ class CampaignBriefInput(AxModel):
     # format과 같은 값). `format`은 기획 초안의 자유 문구(숏폼 15초 등)라 이름을 따로 둔다
     content_category: str | None = Field(default=None, min_length=1, max_length=40)
     content_format: ContentFormat | None = None
-    # 아래는 예전 요청은 없다. 사람이 고른 기획 방향과 올라탈 유행 후보 이름 (11/18 기획 방향 선택지)
+    # 아래는 예전 요청은 없다. 사람이 고른 기획 방향과 올라탈 유행 후보 이름
+    # (11/18 기획 방향 선택지)
     idea_angle: Literal["ride_trend", "own_trend", "with_product"] | None = None
     trend_refs: list[str] = Field(default_factory=list, max_length=3)
 

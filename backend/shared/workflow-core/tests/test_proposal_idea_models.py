@@ -21,7 +21,12 @@ def test_proposal_keeps_options_scale_angle() -> None:
         refs=[TrendRef(topic="독서 챌린지", median_views=50000.0)], recommended=True, reason="r",
     )  # fmt: skip
     p = Proposal.model_validate(
-        {**OLD, "options": [opt.model_dump()], "scale": ScaleFacts().model_dump(), "angle": "ride_trend"}
+        {
+            **OLD,
+            "options": [opt.model_dump()],
+            "scale": ScaleFacts().model_dump(),
+            "angle": "ride_trend",
+        }
     )
     assert p.options[0].refs[0].topic == "독서 챌린지" and p.angle == "ride_trend"
     assert p.scale is not None and p.scale.followers is None and p.scale.past_views_count == 0
