@@ -185,7 +185,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
           </button>
           {!collapsed && (
             <Link href={home} className="-ml-2 flex items-center gap-3" aria-label="내 첫 화면">
-              <img src={`${import.meta.env.BASE_URL}axcellent-wordmark.png`} alt="AXcellent" className="h-7 w-auto" />
+              <img src={`${import.meta.env.BASE_URL}axcellent-wordmark-nav.webp`} alt="AXcellent" width={146} height={28} className="h-7 w-auto" />
             </Link>
           )}
         </div>
@@ -197,13 +197,13 @@ export function AdminShell({ children }: { children: ReactNode }) {
           return (
             <div key={href}>
               {item.divider && <div className={`my-2 border-t border-white/10 ${collapsed ? "mx-3" : "mx-[18px]"}`} aria-hidden="true" />}
-              <Link href={href} title={collapsed ? label : undefined} aria-label={label} aria-current={on && !subs ? "page" : undefined}
+              <Link href={href} title={collapsed ? label : undefined} aria-label={collapsed ? (item.badge ? `${label} 열린 일 ${item.badge}건` : label) : undefined} aria-current={on && !subs ? "page" : undefined}
                 className={`relative flex items-center gap-3.5 py-[13px] text-sm font-semibold transition ${collapsed ? "justify-center" : "px-[18px]"} ${on ? (open ? "text-white" : "bg-[#5b5bd6] text-white") : "hover:bg-white/10"}`}>
                 <NavIcon item={item} size={item.logo ? 22 : 18} />
                 {!collapsed && <span className="truncate">{label}</span>}
                 {!!item.badge && (collapsed
                   ? <span className="absolute right-3 top-2.5 h-2 w-2 rounded-full bg-amber-400" aria-label={`열린 일 ${item.badge}건`} />
-                  : <span className="ml-auto shrink-0 rounded-full bg-amber-400 px-1.5 text-[11px] font-semibold leading-[18px] text-[#1d1d3a]" aria-label={`열린 일 ${item.badge}건`}>{item.badge > 99 ? "99+" : item.badge}</span>)}
+                  : <span className="ml-auto shrink-0 rounded-full bg-amber-400 px-1.5 text-[11px] font-semibold leading-[18px] text-[#1d1d3a]">{item.badge > 99 ? "99+" : item.badge}<span className="sr-only">건 열림</span></span>)}
               </Link>
               {open && subs.map((c) => {
                 const sub = c === subOn;

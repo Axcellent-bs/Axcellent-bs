@@ -82,7 +82,7 @@ export function SelfTestPanel({ test, meta, loaded, open, running, disabled, onR
           <p className="min-w-0 flex-1 text-sm">{test.summary}</p>
           {!stale && runBtn}
         </div>
-        <p className="mt-1 text-sm opacity-80">
+        <p className="mt-1 text-sm">
           {ago(test.ran_at)} ({shortDateTime(test.ran_at)})
           {test.trigger && TRIGGER_KO[test.trigger] && ` · ${TRIGGER_KO[test.trigger]}`}
           {` · ${test.passed}/${test.total} 통과`}
@@ -119,7 +119,7 @@ export function SelfTestPanel({ test, meta, loaded, open, running, disabled, onR
             ))}
           </ul>
         </details>
-        <p className="mt-2 text-sm opacity-80">가짜 자료로 점검해서 실제 기록이나 돈에는 영향이 없습니다. 화면은 1분마다 최근 결과를 다시 받습니다.</p>
+        <p className="mt-2 text-sm">가짜 자료로 점검해서 실제 기록이나 돈에는 영향이 없습니다. 화면은 1분마다 최근 결과를 다시 받습니다.</p>
       </section>
     </div>
   );

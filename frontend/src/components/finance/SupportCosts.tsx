@@ -80,7 +80,7 @@ export function SupportCostsSection({ tick }: { tick: number }) {
           <div className="scroll-thin overflow-x-auto">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead className="text-sm text-ink-500">
-                <tr><th className="pb-1 pr-3 font-medium">문의</th><th className="pb-1 pr-3 font-medium">처리 결과</th><th className="pb-1 pr-3 font-medium">주문</th><th className="pb-1 pr-3 font-medium">배송비</th><th className="pb-1 pr-3 font-medium">경비</th><th className="pb-1 pr-3 font-medium">기록 시각</th><th /></tr>
+                <tr><th className="pb-1 pr-3 font-medium">문의</th><th className="pb-1 pr-3 font-medium">처리 결과</th><th className="pb-1 pr-3 font-medium">주문</th><th className="pb-1 pr-3 font-medium">배송비</th><th className="pb-1 pr-3 font-medium">경비</th><th className="pb-1 pr-3 font-medium">기록 시각</th><th className="pb-1 font-medium"><span className="sr-only">관련 화면</span></th><th /></tr>
               </thead>
               <tbody>{rows.map((r) => <Row key={r.record_id} r={r} />)}</tbody>
             </table>
