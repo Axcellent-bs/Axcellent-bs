@@ -11,7 +11,8 @@ import { PlanningAskLink } from "./PlanningRequests";
 // - 은행 입금 대조(②): 사람이 올린 은행 거래내역의 입금과 PG 정산금을 날짜별로 맞춤. 거래내역 올리기·읽은 기록도 여기
 // - 은행 출금 대조(②): 항목별 출금(급여·임차료·광고비)과 설명 없는 출금. 같은 거래내역 파일을 쓰고 마감 체크도 ②로 가서 입금 대조 옆에 둔다
 // - 판매자 정산 이체(③): 승인한 판매자 정산이 실제로 통장에서 나갔는지 (은행 출금 대조 중 판매자 몫)
-// - 13주 현금 흐름(⑦): 들어올 돈·나갈 돈. 확정과 추정을 나눠 표시. 통장 잔액을 올렸으면 예상 잔액
+// - 현금 흐름(⑦): 날짜가 정해진(확정) 들어올 돈·나갈 돈만 표시. 통장 잔액을 올렸으면 예상 잔액.
+//   API는 13주(뒤쪽은 평균 추정)를 주지만 추정 주는 화면에 띄우지 않는다. 예산 브레이크(BRK-004)는 그대로 API 값을 쓴다
 
 const CHECK_TONE = { done: TONE.ok, pending: TONE.warn, unknown: TONE.muted } as const;
 const CHECK_KO = { done: "끝남", pending: "남음", unknown: "확인 불가" } as const;
@@ -336,28 +337,34 @@ function BankImportsPanel({ tick, onChanged }: { tick: number; onChanged: () => 
 export function CashflowSection({ tick }: { tick: number }) {
   const res = useResource("cashflow", () => finance.cashflow(), tick);
   return (
-    <Panel id="cashflow" title="13주 현금 흐름" meta={res.env?.meta}
-      hint="앞으로 13주 동안 PG에서 들어올 돈과 판매자에게 나갈 돈입니다. 날짜가 정해진 돈은 '확정', 그 뒤는 최근 몇 주 평균으로 채운 '추정'입니다. 판매자 지급이 몰려 마이너스가 되는 주를 미리 봅니다.">
+    <Panel id="cashflow" title="현금 흐름 (확정)" meta={res.env?.meta}
+      hint="PG에서 들어올 돈과 판매자에게 나갈 돈 중 날짜가 정해진 것만 주별로 봅니다. 평균으로 채운 추정 주는 보여 주지 않습니다. 판매자 지급이 몰려 마이너스가 되는 주를 미리 봅니다.">
       <ResourceBody res={res}>
-        {(c) => (
+        {(c) => {
+          // 확정 주만. 경고(잔액 부족·마이너스 주)도 확정 주 안에서만 센다
+          const weeks = c.weeks.filter((w) => w.basis === "scheduled");
+          const shown = new Set(weeks.map((w) => w.week_start));
+          const shortWeeks = (c.short_weeks ?? []).filter((d) => shown.has(d));
+          const negativeWeeks = c.negative_weeks.filter((d) => shown.has(d));
+          return (
           <div className="space-y-3">
-            {(c.short_weeks?.length ?? 0) > 0 && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">예상 잔액이 {krw(c.min_cash_krw ?? 0)}보다 적은 주 {c.short_weeks?.length}개: {c.short_weeks?.join(", ")} 시작 주. 판매자 정산과 고정비를 낼 현금이 모자랄 수 있습니다.</p>}
+            {shortWeeks.length > 0 && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">예상 잔액이 {krw(c.min_cash_krw ?? 0)}보다 적은 주 {shortWeeks.length}개: {shortWeeks.join(", ")} 시작 주. 판매자 정산과 고정비를 낼 현금이 모자랄 수 있습니다.</p>}
             {(() => {
-              // 맨 위 큰 숫자 셋: 지금 잔액 → 13주 뒤 예상 잔액 → 모자랄 수 있는 주
-              const last = [...c.weeks].reverse().find((w) => w.balance != null);
-              const short = c.short_weeks?.length ?? 0;
+              // 맨 위 큰 숫자 셋: 지금 잔액 → 마지막 확정 주 예상 잔액 → 모자랄 수 있는 주
+              const last = [...weeks].reverse().find((w) => w.balance != null);
+              const short = shortWeeks.length;
               return (
                 <div className="grid gap-3 sm:grid-cols-3">
                   <Stat label="기초 잔액 (통장)" value={c.opening ? krw(c.opening.balance) : "통장 내역 없음"}
                     sub={c.opening ? `${c.opening.as_of} 기준${c.opening.stale ? " · 오래됨" : ""}${c.opening.ordered ? "" : " · 같은 날 순서 모름"}` : "② 매출·PG 대사에서 통장 내역을 올리면 잔액에서 시작합니다"} />
                   <Stat lead label={last ? `${last.week_start} 주 예상 잔액` : "예상 잔액"} value={last?.balance != null ? signedKrw(last.balance) : "확인할 수 없음"}
-                    sub={c.trailing_weeks ? `추정은 최근 ${c.trailing_weeks}주 평균` : "평균 낼 주가 모자라 뒤쪽 주는 비움"} />
+                    sub={last ? "날짜가 정해진 돈까지만 반영" : "확정된 돈이 있는 주가 없습니다"} />
                   <Stat label="현금 부족 예상 주" value={`${short}주`} flag={short ? "주의" : undefined}
                     sub={`예상 잔액이 ${krw(c.min_cash_krw ?? 0)}보다 적은 주`} />
                 </div>
               );
             })()}
-            {c.negative_weeks.length > 0 && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">나가는 돈이 들어오는 돈보다 많은 주 {c.negative_weeks.length}개: {c.negative_weeks.join(", ")} 시작 주</p>}
+            {negativeWeeks.length > 0 && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">나가는 돈이 들어오는 돈보다 많은 주 {negativeWeeks.length}개: {negativeWeeks.join(", ")} 시작 주</p>}
             <p className="text-sm text-ink-500">{c.note}</p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
@@ -365,10 +372,11 @@ export function CashflowSection({ tick }: { tick: number }) {
                   <tr><th className="pb-1 font-medium">주 (월요일)</th><th className="pb-1 font-medium">구분</th><th className="pb-1 text-right font-medium">들어옴 (PG)</th><th className="pb-1 text-right font-medium">나감 (판매자)</th>{c.fixed ? <th className="pb-1 text-right font-medium">고정비 (추정)</th> : null}<th className="pb-1 text-right font-medium">순현금</th><th className="pb-1 text-right font-medium">누적</th>{c.opening ? <th className="pb-1 text-right font-medium">예상 잔액</th> : null}</tr>
                 </thead>
                 <tbody>
-                  {c.weeks.map((w) => (
-                    <tr key={w.week_start} className={`border-t border-ink-100 ${w.basis === "estimated" ? "text-ink-500" : ""}`}>
+                  {weeks.length === 0 && <tr className="border-t border-ink-100"><td colSpan={8} className="py-3 text-center text-ink-500">날짜가 정해진 들어올 돈·나갈 돈이 아직 없습니다.</td></tr>}
+                  {weeks.map((w) => (
+                    <tr key={w.week_start} className="border-t border-ink-100">
                       <td className="py-1.5 tabular-nums">{w.week_start}</td>
-                      <td className="py-1.5"><Chip label={w.basis === "scheduled" ? "확정" : "추정"} tone={w.basis === "scheduled" ? TONE.info : TONE.muted} /></td>
+                      <td className="py-1.5"><Chip label="확정" tone={TONE.info} /></td>
                       <td className="py-1.5 text-right tabular-nums">{krw(w.inflow)}</td>
                       <td className="py-1.5 text-right tabular-nums">{krw(w.outflow)}</td>
                       {c.fixed ? <td className="py-1.5 text-right tabular-nums">{krw(w.fixed)}</td> : null}
@@ -381,7 +389,8 @@ export function CashflowSection({ tick }: { tick: number }) {
               </table>
             </div>
           </div>
-        )}
+          );
+        }}
       </ResourceBody>
     </Panel>
   );
