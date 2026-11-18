@@ -410,7 +410,7 @@ function PromoCard({ i, facts, gate }: { i: TrendInsight; facts: DataFact[]; gat
       )}
       <div className="rounded-xl bg-brand-50 px-3 py-2">
         <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-brand-700">
-          캣북스 홍보 아이디어
+          우리 회사 홍보 아이디어
           {i.promo_idea_fallback && <span className="chip bg-surface px-1.5 py-0 text-[11px] font-normal text-ink-500" title="LLM 문장을 쓰지 못해 코드가 만든 고정 틀 문장이에요">고정 틀</span>}
         </p>
         <p className="mt-1 text-sm text-ink-900">{i.promo_idea ?? i.line}</p>
@@ -514,7 +514,7 @@ export function InsightBrief({ state, examples, examplesCount }: {
           <h2 id="data-trend-insight-title" className="text-2xl font-bold text-ink-900">기획팀에 넘길 인사이트</h2>
           <p className="text-sm text-ink-500">
             {v6
-              ? "요즘 숏츠 전체보다 1시간 조회가 많은 형식만 빌려 캣북스 홍보 영상을 만들어요. 다른 회사·연예인 이름과 로고는 쓰지 않아요. 아래 기준을 넘은 것만 기획에 넘겨요."
+              ? "요즘 숏츠 전체보다 1시간 조회가 많은 형식만 빌려 우리 회사 홍보 영상을 만들어요. 다른 회사·연예인 이름과 로고는 쓰지 않아요. 아래 기준을 넘은 것만 기획에 넘겨요."
               : `두 가지예요. ${name} 책에서 뜨는 주제, 그리고 책 숏츠에 빌려 쓸 수 있는 요즘 유행. 숫자는 모두 데이터 근거예요.`}
           </p>
         </div>

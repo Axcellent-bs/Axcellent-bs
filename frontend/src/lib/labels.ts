@@ -127,7 +127,7 @@ export const PURGE_REASON_KO: Record<string, string> = {
 
 /** 회사(고객사) 이름표. 데모 쇼핑몰의 고객사 ID는 shop-demo(회사 폴더 catbooks)이고 캣북스다. 모르는 회사는 ID를 그대로 보여 준다 */
 export const TENANT_KO: Record<string, string> = { "shop-demo": "캣북스", catbooks: "캣북스" };
-export const tenantName = (id: string | undefined | null): string => TENANT_KO[id ?? "shop-demo"] ?? id ?? "캣북스";
+export const tenantName = (id: string | undefined | null): string => (id ? TENANT_KO[id] ?? id : "회사 연결 안 됨");
 
 /** 분류 필요가 된 까닭 */
 export const TRIAGE_REASON_KO: Record<string, string> = {

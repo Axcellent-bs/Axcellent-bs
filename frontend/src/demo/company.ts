@@ -25,11 +25,9 @@ export type IssuedKey = {
   company?: ConnectedCompany
 }
 
-const CATBOOKS: ConnectedCompany = { id: 'catbooks', name: '캣북스', industry: '온라인 쇼핑몰', network: '192.168.10.0/24', key: 'AXC-K3TB-8W2N-C4T1', connectedAt: '2026-10-20T09:30:00+09:00' }
-const DEFAULT_KEYS: IssuedKey[] = [
-  { key: 'AXC-K3TB-8W2N-C4T1', memo: '캣북스 IT 담당', issuedAt: '2026-10-20T09:00:00+09:00', status: 'connected', company: CATBOOKS },
-  { key: 'AXC-7Q2M-91KD-4F8A', memo: '카페 체인 도입 문의', issuedAt: '2026-10-28T10:40:00+09:00', status: 'issued' },
-]
+// 처음에는 어느 회사도 연결돼 있지 않고 발급한 키도 없다(캣북스 기본값 없음, 2026-11-18).
+// 캣북스 시연: 관제 센터에서 키를 발급하고 시스템 관리 › 회사 연결에서 연결한다.
+const DEFAULT_KEYS: IssuedKey[] = []
 
 // ---------------------------------------------------------------- 작은 저장소 (화면 여러 곳이 같은 값을 본다)
 function store<T>(key: string, fallback: T) {
@@ -60,8 +58,9 @@ function store<T>(key: string, fallback: T) {
   }
 }
 
-const companyStore = store<ConnectedCompany | null>('axcellent-demo-company-v2', CATBOOKS)
-const keyStore = store<IssuedKey[]>('axcellent-demo-keys-v2', DEFAULT_KEYS)
+// v3: 예전 브라우저에 남은 캣북스 기본 연결(v2)을 이어 쓰지 않는다
+const companyStore = store<ConnectedCompany | null>('axcellent-demo-company-v3', null)
+const keyStore = store<IssuedKey[]>('axcellent-demo-keys-v3', DEFAULT_KEYS)
 
 export const getCompany = companyStore.get
 export const useCompany = () => useSyncExternalStore(companyStore.subscribe, companyStore.get)

@@ -19,7 +19,7 @@ const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString(
 const DEFAULT_HOSTS: Host[] = [
   { id: 'h0', dept: '인프라팀', hostname: 'dejafix-srv-01', ip: '192.168.10.10', status: 'online', agent: 'DejaFix 0.9', lastSeen: minutesAgo(0) },
   { id: 'h1', dept: '기획팀', hostname: 'plan-pc-01', ip: '192.168.10.21', status: 'online', agent: 'AXcellent 0.9', lastSeen: minutesAgo(0) },
-  { id: 'h7', dept: '개발팀', hostname: 'dev-pc-01', ip: '192.168.10.22', status: 'online', agent: 'AXcellent 0.9', lastSeen: minutesAgo(0), owner: 'member@catbooks.example' },
+  { id: 'h7', dept: '개발팀', hostname: 'dev-pc-01', ip: '192.168.10.22', status: 'online', agent: 'AXcellent 0.9', lastSeen: minutesAgo(0), owner: 'member@company.example' },
   { id: 'h2', dept: '고객지원팀', hostname: 'cs-pc-01', ip: '192.168.10.31', status: 'online', agent: 'AXcellent 0.9', lastSeen: minutesAgo(1) },
   { id: 'h3', dept: '마케팅팀', hostname: 'mkt-pc-01', ip: '192.168.10.41', status: 'online', agent: 'AXcellent 0.9', lastSeen: minutesAgo(0) },
   { id: 'h4', dept: '인사팀', hostname: 'hr-pc-01', ip: '192.168.10.51', status: 'online', agent: 'AXcellent 0.9', lastSeen: minutesAgo(2) },

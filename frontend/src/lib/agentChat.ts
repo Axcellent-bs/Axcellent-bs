@@ -94,7 +94,7 @@ export interface DemoRequest {
 // ---------------------------------------------------------------- 이름표
 export const DEPT_KO: Record<string, string> = {
   orchestrator: "총괄 AI", planning: "기획", dev: "개발", support: "고객지원", marketing: "마케팅", hr: "인사", archive: "아카이브",
-  finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전 처리 로그", memory: "회사 기억", "shop-api": "캣북스 쇼핑몰",
+  finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전 처리 로그", memory: "회사 기억", "shop-api": "회사 쇼핑몰",
   "dashboard-api": "AXcellent 화면", operator: "운영자(사람)",
 };
 // 백엔드는 서비스 단위로 나뉘어 있다(backend/README.md). 서비스 이름 → 부서.
@@ -382,7 +382,7 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
   out.push({ kind: "separator", id: `${room}:sep`, at: opened, room, text: `${incidentTitle(inc)}${opened ? ` · ${clockKo(opened)} 시작` : ""}`, raw: `이슈 번호 ${inc.context_id}`, variant: "topic" });
   out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: inc.component.startsWith("support-inquiry-")
       ? `고객지원 AI가 문의를 해결 종료해서 총괄 AI가 "${incidentTitle(inc)}" 이슈를 열고 재무·아카이브에 넘겼어요.`
-      : `캣북스 쇼핑몰이 "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 이슈를 열었어요.` });
+      : `회사 쇼핑몰이 "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 이슈를 열었어요.` });
 
   for (const step of inc.steps) {
     const sid = `${room}:${step.step_id}`;

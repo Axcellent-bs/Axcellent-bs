@@ -13,7 +13,7 @@ const modeOf = (enabled: boolean | null) => (enabled === null ? '' : enabled ? '
 const normalize = (u: string) => u.trim().replace(/\/+$/, '')
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
 
-export default function Integrations({ onState, embedded = false }: { onState?: (s: ConnectionState | 'error') => void; embedded?: boolean } = {}) {
+export default function Integrations({ onState, embedded = false, tenant }: { onState?: (s: ConnectionState | 'error') => void; embedded?: boolean; tenant?: string } = {}) {
   const [state, setStateRaw] = useState<ConnectionState | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [url, setUrl] = useState('')
@@ -47,7 +47,7 @@ export default function Integrations({ onState, embedded = false }: { onState?: 
     void run('test', async () => setResult(await companyConnection.test(url)))
   }
   const save = () => void run('save', async () => {
-    const saved = await companyConnection.save(url)
+    const saved = await companyConnection.save(url, tenant)
     // 저장만으로 내부 데이터 모드가 풀리지 않을 수 있어, 실제로 회사 판매 서버를 읽게 한다
     setState(saved.mode === 'internal' ? await companyConnection.mode('connected') : saved)
     setResult(null)
@@ -63,7 +63,7 @@ export default function Integrations({ onState, embedded = false }: { onState?: 
   // 저장한 주소가 있는데 아직 내부 데이터로 읽는 상태: 그 주소 그대로 저장하면 바로 전환한다
   const pendingSwitch = state?.mode === 'internal' && !!state.connection && normalize(url) === normalize(state.connection.shop_api_url)
   const canWrite = HUMAN_TOKEN_SET && (state?.editable ?? false)
-  const status = !state ? null : state.mode === 'connected' ? <StatusChip tone="ok">회사 서버 연결됨</StatusChip> : <StatusChip tone="wait">내부 데이터 사용 중</StatusChip>
+  const status = !state ? null : state.mode === 'connected' ? <StatusChip tone="ok">회사 서버 연결됨</StatusChip> : state.connected === false ? <StatusChip tone="off">연결 안 됨</StatusChip> : <StatusChip tone="wait">내부 데이터 사용 중</StatusChip>
 
   return (
     <section className="space-y-4">

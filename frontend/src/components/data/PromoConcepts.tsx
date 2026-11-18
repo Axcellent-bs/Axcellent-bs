@@ -8,7 +8,7 @@ import {
   type PopularTopic, type PromoConcept, type PromoConceptsOutput, type PromoTrendKind, type ShortsStatsOutput, type TrendPopularOutput,
 } from "@/lib/data";
 
-// 트렌드 2단계(인사이트) 맨 아래 "참고용 예시" 접힘 안: 캣북스 숏츠 광고 예시 아이디어(참고용, 확정 기획은 기획팀). 예시마다 타깃 연령대(trend_age). promo_concepts(계약 PromoConceptsOutput) 응답 그대로 보여 준다.
+// 트렌드 2단계(인사이트) 맨 아래 "참고용 예시" 접힘 안: 우리 회사 숏츠 광고 예시 아이디어(참고용, 확정 기획은 기획팀). 예시마다 타깃 연령대(trend_age). promo_concepts(계약 PromoConceptsOutput) 응답 그대로 보여 준다.
 // - 맨 위: 제목 · 다시 만들기(계약 regenerate, 서버는 하루 캐시) · 재료 한 줄(상품·트렌드·시즌·형식 개수, 못 읽은 출처는 서버 이유)
 //   · "뺀 재료 N개 보기"(접힘: 뺀 지금 인기 주제·시즌 확인 키워드·버린 초안과 서버 이유)
 // - 왼쪽: 잘 되는 숏츠 형식 막대. 값은 기획안 재료 shorts_formats의 대표값 = 중앙값(평균은 보조)이고 숏츠 통계 기준 시각을 붙인다.
@@ -92,7 +92,7 @@ function conceptBasis(c: PromoConcept, { out, popular, shorts }: Ctx) {
       </>,
     });
   }
-  if (c.products.length > 0) rows.push({ source: "상품 · 캣북스 상품 목록 (shop-api)", body: "이름·가격은 상품 목록 값 그대로" });
+  if (c.products.length > 0) rows.push({ source: "상품 · 회사 상품 목록 (shop-api)", body: "이름·가격은 상품 목록 값 그대로" });
   return rows;
 }
 
@@ -281,7 +281,7 @@ export function PromoConcepts({ state, popular = null, onRegenerate }: {
       <div className="card space-y-2 p-4 sm:p-5">
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <h2 id="data-trend-promo-title" className="text-lg font-bold text-ink-900">캣북스 숏츠 광고 예시 아이디어 <span className="chip ml-1 bg-ink-100 align-middle text-xs font-semibold text-ink-700">참고용</span></h2>
+            <h2 id="data-trend-promo-title" className="text-lg font-bold text-ink-900">우리 회사 숏츠 광고 예시 아이디어 <span className="chip ml-1 bg-ink-100 align-middle text-xs font-semibold text-ink-700">참고용</span></h2>
             <p className="text-xs text-ink-500">{meta || "참고용 예시예요. 확정 기획은 기획팀, 제작·게시는 마케팅이 해요."}</p>
           </div>
           <button type="button" className="btn-ghost" disabled={state.kind === "loading"} onClick={onRegenerate}>다시 만들기</button>

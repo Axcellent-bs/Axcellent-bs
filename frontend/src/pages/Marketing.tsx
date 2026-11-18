@@ -5,7 +5,7 @@ import { ReceivedBriefs } from "@/components/marketing/ReceivedBriefs";
 import { SnsMedia } from "@/components/marketing/SnsMedia";
 import { AgentDiagnosisInbox } from "@/components/admin/AgentDiagnosisInbox";
 
-// 마케팅 AI 화면. 캣북스 쇼핑몰 배너와 안전 장치 기록을 실제 백엔드에서 읽어 그린다 (LiveMarketing).
+// 마케팅 AI 화면. 회사 쇼핑몰 배너와 안전 장치 기록을 실제 백엔드에서 읽어 그린다 (LiveMarketing).
 // 공지는 확인된 사실 필드만 보여 주고 장애 원인은 적지 않는다.
 // 사이드바 하위 메뉴 4개가 화면을 가른다(demo/services.ts coupon 서비스 children, pages/Data.tsx와 같은 짜임):
 // - /marketing 장애·공지 · /marketing/campaign 캠페인·쿠폰 · /marketing/briefs 받은 기획안 · /marketing/sns SNS·미디어

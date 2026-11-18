@@ -18,7 +18,7 @@ import { useToast } from "@/components/office/useToast";
 // 방: 전체 대화방(처음 열면 여기) / 장애·이슈 방(총괄 사건 하나 = 방 하나) / 1:1 대화(나만 보임).
 // AI 오피스와 같은 방 목록·같은 대화를 본다(lib/chatRooms.ts, components/office/useChatRooms.ts).
 // 말풍선 문장은 lib/agentChat.ts가 기록된 값으로만 만든다. 이 파일은 화면과 새로고침만 맡는다.
-// 장애는 이 화면에서 일으키지 않는다(사람이 요청하면 운영자가 캣북스에 넣는다). 화면은 캣북스 결제 상태만 읽어 보여 준다.
+// 장애는 이 화면에서 일으키지 않는다(사람이 요청하면 운영자가 회사 쇼핑몰에 넣는다). 화면은 쇼핑몰 결제 상태만 읽어 보여 준다.
 //
 // 나눠 보기: 방을 최대 3칸까지 나란히 본다. 칸마다 따로 스크롤하고 자기 입력창이 있다(입력은 그 칸의 방으로).
 // - 보기 개수(1·2·3)는 이 브라우저에만 기억한다. 화면이 좁으면 1280px 미만 2칸, 900px 미만 1칸으로 줄이고,
@@ -463,7 +463,7 @@ export default function AgentChat() {
   const [fault, setFault] = useState<FaultState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 캣북스 결제 상태 (실제 모드일 때만)
+  // 쇼핑몰 결제 상태 (실제 모드일 때만)
   useEffect(() => {
     if (orchConn !== "on" || orchMock) return;
     let live = true;
@@ -555,8 +555,8 @@ export default function AgentChat() {
             <ConnChip label="안전 처리 로그" conn={safetyConn} />
             <ConnChip label="공통 로그" conn={commConn} />
             {orchOn && !orchMock && (
-              <span className={`chip ${fault?.active ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`} title="캣북스 쇼핑몰 결제 서버 상태 (장애는 운영자가 넣고 뺀다)">
-                캣북스 결제 {fault == null ? "확인 중" : fault.active ? (fault.failing ? "장애 중" : `느림(${fault.delay_ms}ms)`) : "정상"}{fault?.degraded ? " · 감지됨" : ""}
+              <span className={`chip ${fault?.active ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`} title="회사 쇼핑몰 결제 서버 상태 (장애는 운영자가 넣고 뺀다)">
+                쇼핑몰 결제 {fault == null ? "확인 중" : fault.active ? (fault.failing ? "장애 중" : `느림(${fault.delay_ms}ms)`) : "정상"}{fault?.degraded ? " · 감지됨" : ""}
               </span>
             )}
             <span className="chip bg-ink-100 text-ink-500">{POLL_MS / 1000}초마다 새로고침</span>
@@ -622,7 +622,7 @@ function EmptyState({ orchConn, known }: { orchConn: Conn; known: boolean }) {
     return (
       <div className="mx-auto max-w-xl py-14 text-sm text-ink-700">
         <p className="font-semibold text-ink-900">총괄 AI가 꺼져 있습니다.</p>
-        <p className="mt-1 text-ink-500">backend/에서 실제 모드로 켜면 캣북스 쇼핑몰 장애로 AI들이 함께 일하는 과정을 볼 수 있습니다.</p>
+        <p className="mt-1 text-ink-500">backend/에서 실제 모드로 켜면 회사 쇼핑몰 장애로 AI들이 함께 일하는 과정을 볼 수 있습니다.</p>
         <pre className="mt-3 overflow-x-auto rounded-xl bg-surface p-3 font-mono text-xs text-ink-700"><code>{ORCH_CMD}</code></pre>
       </div>
     );
