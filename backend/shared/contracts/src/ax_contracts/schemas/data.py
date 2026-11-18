@@ -3258,6 +3258,7 @@ class InsightPastResult(AxModel):
     """인사이트의 지난번 캠페인 결과 하나 (campaign_result 값 그대로 + 띠 문장). 기획이 받는다.
 
     조회와 매출을 합친 점수는 없다. 측정 중이면 "측정 중"만 (예상치 없음).
+    views는 영상 조회 중앙값이다 (합계가 아님, 영상 수에 따라 커지지 않게).
     """
 
     campaign_id: str
@@ -3283,6 +3284,12 @@ class InsightPastResult(AxModel):
     band: PastBand = "gray"
     summary_line: str = ""  # "조회 목표의 N배 (영상 M개 중 K개 달성) · 매출 +N원 · 주문 +N건"
     note_line: str | None = None  # "지난번 개선 방향: …" 또는 조회·매출 반대 문구
+    # 아래는 예전 응답은 없다. 캠페인 영상(시험 제외)의 게시 7일 조회 중앙값과 그 근거
+    views: int | None = Field(default=None, ge=0)  # 캠페인 영상(시험 제외)의 게시 7일 조회 중앙값
+    views_at: UtcDatetime | None = None  # 그 7일 조회를 잰 시각 중 가장 늦은 시각
+    views_checkpoint: Literal["7d"] | None = None  # 값이 있을 때만 "7d"
+    views_videos: int = Field(default=0, ge=0)  # 중앙값에 쓴 영상 수
+    views_reason: str | None = None  # 값이 없을 때 이유
 
 
 # ---------------------------------------------------------------- 데이터분석 AI 직접 대화 (11/9)
