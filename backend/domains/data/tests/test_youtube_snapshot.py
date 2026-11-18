@@ -427,7 +427,12 @@ def test_company_keywords_come_from_config(tmp_path: Path) -> None:
     assert load_config(path) == YouTubeConfig(region="KR", queries=("그림책",))
     assert load_config(tmp_path / "none.toml") == YouTubeConfig()
     assert config_path({"DATA_YOUTUBE_CONFIG": str(path)}) == path
-    assert config_path({}).name == "youtube.toml" and config_path({}).parent.name == "catbooks"
+    # 캣북스를 고른 설치는 캣북스 폴더의 키워드를 쓴다
+    picked = config_path({"AX_TENANT": "catbooks"})
+    assert picked.name == "youtube.toml" and picked.parent.name == "catbooks"
+    # 회사 연결 전(캣북스 기본값 없음): 없는 경로라 키워드가 없고 검색하지 않는다
+    assert not config_path({}).is_file()
+    assert load_config(config_path({})) == YouTubeConfig()
 
 
 def test_env_file_fills_only_missing_values(tmp_path: Path) -> None:
