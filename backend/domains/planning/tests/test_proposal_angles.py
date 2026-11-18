@@ -9,9 +9,11 @@ import pytest
 
 from ax_contracts.schemas import ExecuteDecision
 from ax_contracts.schemas.data import TrendInsight
+from ax_contracts.schemas.finance import CategoryBudgetAdviceOutput
 from ax_contracts.schemas.marketing_channels import ChannelFollowersOutput
 from ax_contracts.schemas.planning import CampaignBriefOutput, ReceiveInsightInput
-from planning_agent.domain.service import PlanningService
+from planning_agent import proposals
+from planning_agent.domain.service import ActionError, PlanningService
 
 pytestmark = pytest.mark.role("planning")
 
@@ -125,3 +127,116 @@ def test_duplicate_does_not_call_sources() -> None:
     _new(svc)
     _new(svc)
     assert ins.trends_calls == 1
+
+
+# ---------------------------------------------------------------- 사람 버튼: 방향 고르기
+
+
+class AngleWriter:
+    """LLM 대신: 받은 방향을 기록하고 그 방향 글을 돌려준다."""
+
+    def __init__(self, why: str = "책장 넘기기 챌린지 중앙값 48000에 올라탄다") -> None:
+        self.angles: list[str] = []
+        self.why = why
+
+    async def draft(self, inp, ctx):
+        return None
+
+    async def draft_for_angle(self, p, option, ctx):
+        self.angles.append(option.id)
+        return proposals.ProposalDraft(f"{option.label} 숏츠", self.why, None, "숏폼 15초", "llm")
+
+
+class Finance:
+    def __init__(self) -> None:
+        self.asked: list[tuple] = []
+
+    async def ask(self, ctx, category, fmt, proposal_id):
+        self.asked.append((category, fmt, proposal_id))
+        return CategoryBudgetAdviceOutput(
+            status="advice", content_category=category, recommended_production_krw=130_000,
+            summary="권장 제작비",
+        )  # fmt: skip
+
+
+def _choose(svc: PlanningService, pid: str, angle: str):
+    return asyncio.run(svc.dispatch({"type": "chooseAngle", "proposal": pid, "angle": angle}))
+
+
+def test_choose_writes_draft_for_angle() -> None:
+    w = AngleWriter()
+    svc = _svc(insights=Insights(), marketing=Marketing(), writer=w)
+    pid = _new(svc)
+    _choose(svc, pid, "ride_trend")
+    p = _p(svc, pid)
+    assert w.angles == ["ride_trend"]
+    assert p.angle == "ride_trend" and p.idea == "유행에 올라타기 숏츠" and p.written_by == "llm"
+    assert "방향 선택: 유행에 올라타기" in svc.state.activity[-1].text
+
+
+def test_choose_falls_back_to_rule_draft() -> None:
+    svc = _svc(insights=Insights(), marketing=Marketing())
+    pid = _new(svc)
+    _choose(svc, pid, "ride_trend")
+    p = _p(svc, pid)
+    assert p.written_by == "rule" and p.idea.startswith("유행에 올라타기: 챌린지")
+    assert "책장 넘기기 챌린지" in p.idea
+
+
+def test_choose_blocked_or_closed_is_refused() -> None:
+    svc = _svc()  # 트렌드 목록 없음 → ride_trend 막힘
+    pid = _new(svc)
+    before = _p(svc, pid).model_dump()
+    with pytest.raises(ActionError) as e:
+        _choose(svc, pid, "ride_trend")
+    assert e.value.code == "ANGLE_BLOCKED" and "트렌드 목록" in e.value.message
+    with pytest.raises(ActionError) as e2:
+        _choose(svc, pid, "nope")
+    assert e2.value.code == "ANGLE_BLOCKED"
+    with pytest.raises(ActionError) as e3:
+        _choose(svc, "PROP-99", "own_trend")
+    assert e3.value.code == "NOT_FOUND"
+    asyncio.run(svc.dispatch({"type": "rejectProposal", "proposal": pid, "reason": "안 함"}))
+    with pytest.raises(ActionError) as e4:
+        _choose(svc, pid, "own_trend")
+    assert e4.value.code == "PROPOSAL_CLOSED"
+    assert _p(svc, pid).angle is None and before["idea"] == _p(svc, pid).idea
+
+
+def test_choose_asks_finance_once_with_proposal_id() -> None:
+    fin = Finance()
+    svc = _svc(insights=Insights(), marketing=Marketing(), finance=fin)
+    pid = _new(svc, content_category="아재개그", content_format="shorts")
+    _choose(svc, pid, "own_trend")
+    assert fin.asked == [("아재개그", "shorts", pid)]
+    p = _p(svc, pid)
+    assert any(f.source == proposals.FINANCE_ADVICE for f in p.facts)
+
+
+def test_choose_twice_does_not_duplicate_finance_facts() -> None:
+    fin = Finance()
+    svc = _svc(insights=Insights(), marketing=Marketing(), finance=fin)
+    pid = _new(svc)
+    _choose(svc, pid, "own_trend")
+    _choose(svc, pid, "ride_trend")
+    assert len(fin.asked) == 1 and fin.asked[0][0] is None  # 카테고리 없으면 비워서 묻는다
+    n = sum(f.source == proposals.FINANCE_ADVICE for f in _p(svc, pid).facts)
+    assert n == len(proposals.finance_facts(asyncio.run(fin.ask("c", None, None, pid))))
+
+
+def test_candidate_numbers_count_as_facts() -> None:
+    svc = _svc(insights=Insights(), marketing=Marketing(), writer=AngleWriter())
+    pid = _new(svc)
+    _choose(svc, pid, "ride_trend")
+    assert _p(svc, pid).warnings == []  # 48000은 후보 숫자라 근거로 본다
+    svc2 = _svc(insights=Insights(), marketing=Marketing(), writer=AngleWriter(why="조회 777 예상"))
+    pid2 = _new(svc2)
+    _choose(svc2, pid2, "ride_trend")
+    assert any("777" in w for w in _p(svc2, pid2).warnings)
+
+
+def test_confirm_without_angle_still_allowed() -> None:
+    svc = _svc()
+    pid = _new(svc)
+    asyncio.run(svc.dispatch({"type": "makePlan", "proposal": pid}))
+    assert _p(svc, pid).status == "기획안" and _p(svc, pid).angle is None

@@ -58,6 +58,7 @@ from ax_contracts.schemas.planning import (
     ReceiveInsightInput,
 )
 from ax_workflow.hr_link import AgentCaller
+from ax_workflow.models import IdeaOption, Proposal
 
 TIMEOUT_SECONDS = 60.0  # promo_concepts는 LLM을 써서 느리다 (하루 캐시가 있으면 빠름)
 WRITE_TIMEOUT_SECONDS = 30.0
@@ -186,6 +187,81 @@ class ProposalWriter:
         if not (idea and why):
             return None
         return ProposalDraft(idea, why, got.target, got.format, "llm")
+
+    async def draft_for_angle(
+        self, p: Proposal, option: IdeaOption, context_id: str
+    ) -> ProposalDraft | None:
+        """사람이 고른 방향으로 할 일·이유·목표를 다시 쓴다 (후보·숫자는 받은 값만)."""
+        data = {
+            "title": p.title,
+            "summary": p.insight,
+            "facts": [{"label": f.label, "value": f.value, "source": f.source} for f in p.facts],
+            "products": p.products,
+            "angle": option.label,
+            "candidates": [
+                {"topic": r.topic, "median_views": r.median_views, "examples": r.examples}
+                for r in option.refs
+            ],
+            "scale_reason": option.reason or "",
+        }
+        prompt = f"{WRITE_PROMPT}\n- 방향: {option.label}. {ANGLE_HINT[option.id]}\n"
+        try:
+            got = await asyncio.wait_for(
+                self._llm.structured(prompt, _WriteOut, untrusted=data, context_id=context_id),
+                self.timeout,
+            )
+        except (TimeoutError, ValidationError, Exception):  # noqa: BLE001 - 규칙 초안으로 대신
+            return None
+        idea = " ".join(got.idea.split())[:MAX_LEN]
+        why = " ".join(got.why.split())[:MAX_LEN]
+        if not (idea and why):
+            return None
+        return ProposalDraft(idea, why, got.target, got.format, "llm")
+
+
+# ---------------------------------------------------------------- 방향 고른 뒤 초안 (11/18)
+
+ANGLE_HINT = {
+    "ride_trend": (
+        "지금 뜨는 후보(candidates) 중 하나에 캣북스 책을 얹어 올라탄다. 후보 이름만 쓴다"
+    ),
+    "own_trend": "캣북스가 자체로 시작해 퍼뜨릴 기획을 쓴다",
+    "with_product": "연결된 우리 상품(products)을 앞에 세운다",
+}
+
+
+def _ref_facts(option: IdeaOption) -> list[InsightFact]:
+    """후보 숫자도 근거로 본다 (데이터분석 값 그대로)."""
+    return [
+        InsightFact(
+            label=r.topic[:120], value=f"{r.median_views:.0f}", source="trend_insight_brief"
+        )
+        for r in option.refs
+        if r.median_views is not None
+    ]
+
+
+def rule_draft_for_angle(p: Proposal, option: IdeaOption) -> ProposalDraft:
+    """LLM이 없을 때: 방향 이름 + 제목(+ 후보), 이유는 근거 두 줄 + 추천 이유."""
+    idea = f"{option.label}: {p.title}"
+    if option.refs:
+        idea += " · 후보 " + ", ".join(r.topic for r in option.refs)
+    why = " · ".join(f"{f.label} {f.value}" for f in p.facts[:2])
+    if option.reason:
+        why = f"{why} · {option.reason}" if why else option.reason
+    return ProposalDraft(idea[:MAX_LEN], why[:MAX_LEN], None, None, "rule")
+
+
+async def write_for_angle(
+    writer: ProposalWriter | None, p: Proposal, option: IdeaOption, ctx: str
+) -> ProposalDraft:
+    d = (await writer.draft_for_angle(p, option, ctx) if writer else None) or rule_draft_for_angle(
+        p, option
+    )
+    facts = [InsightFact(label=f.label, value=f.value, source=f.source) for f in p.facts]
+    texts = {"할 일": d.idea, "이유": d.why, "설명": p.body_md or ""}
+    d.warnings = number_warnings(texts, [*facts, *_ref_facts(option)], d.target, p.title)
+    return d
 
 
 async def write(writer: ProposalWriter | None, inp: ReceiveInsightInput, ctx: str) -> ProposalDraft:

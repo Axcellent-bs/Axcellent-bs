@@ -265,7 +265,7 @@ class ProposalMixin:
         "delete_proposal": ("_delete_proposal", ProposalParams),
     }
     # 잠금 밖에서 다른 부서·LLM을 부르는 액션 (dispatch가 따로 받는다)
-    OUTSIDE_LOCK = {"pull_insights", "proposal_to_request", "measure_proposal"}
+    OUTSIDE_LOCK = {"pull_insights", "proposal_to_request", "measure_proposal", "choose_angle"}
 
     # ---- 받아오기 (data promo_concepts → 인사이트 → 제안)
 
@@ -759,6 +759,70 @@ class ProposalMixin:
         )  # fmt: skip
         return await self.receive_campaign_update(inp=inp, requester="data")
 
+    async def choose_angle(self: Any, proposal: str, angle: str) -> ActionResult:
+        """사람 버튼 "방향 고르기" (11/18): 고른 방향으로 할 일·이유·목표를 다시 쓰고,
+        재무에 그 제안의 제작비를 한 번 묻는다(이미 붙어 있으면 묻지 않음). 기획 기록만 바꾼다."""
+
+        def check(s: State) -> tuple[Proposal, Any]:
+            p = _find(s, proposal)
+            if p is None:
+                raise ActionError("NOT_FOUND", f"제안 {proposal}이 없습니다")
+            if p.status != "확인 대기":
+                raise ActionError(
+                    "PROPOSAL_CLOSED", f"{p.id}는 확인 대기가 아니라 방향을 바꿀 수 없습니다"
+                )
+            opt = next((o for o in p.options if o.id == angle), None)
+            if opt is None or not opt.available:
+                why = opt.blocked_reason if opt else "모르는 방향"
+                raise ActionError("ANGLE_BLOCKED", f"고를 수 없는 방향입니다: {why}")
+            return p, opt
+
+        p, opt = check(self.state)
+        ctx = _ctx(p)
+        finance = getattr(self, "_finance", None)
+        asked = finance is not None and not any(f.source == ext.FINANCE_ADVICE for f in p.facts)
+
+        async def no_advice() -> None:
+            return None
+
+        draft, advice = await asyncio.gather(
+            ext.write_for_angle(self._proposal_writer, p, opt, ctx),
+            finance.ask(ctx, p.content_category, p.content_format, p.id) if asked else no_advice(),
+        )
+        fin_facts = (
+            ext.finance_facts(advice) if advice is not None and not isinstance(advice, str) else []
+        )
+        now = self.clock()
+
+        async def run(s: State) -> ActionResult:
+            q, o = check(s)
+            t = draft.target
+            q.angle = o.id
+            q.idea, q.why = draft.idea, draft.why
+            if t is not None:
+                q.target = ProposalTarget(label=t.label, value=t.value, measure=t.measure)
+            q.format = draft.format or q.format
+            q.written_by = draft.written_by  # type: ignore[assignment]
+            if fin_facts and not any(f.source == ext.FINANCE_ADVICE for f in q.facts):
+                q.facts = [*q.facts, *_facts_of(fin_facts)]
+            q.warnings = draft.warnings
+            text = f"{q.id} 방향 선택: {o.label}"
+            s.activity.append(
+                self._act(now, ctx, "human", "planning", "choose_angle", "사람", text)
+            )
+            if asked:
+                note = (
+                    f"{q.id} 재무 제작비 묻기 실패\n{advice}"
+                    if isinstance(advice, str)
+                    else f"{q.id} 재무에 제작비를 물음 (방향 고를 때)"
+                )
+                s.activity.append(
+                    self._act(now, ctx, "planning", "finance", ext.FINANCE_ADVICE, "A2A", note)
+                )
+            return ActionResult(output={"proposal_id": q.id, "angle": o.id})
+
+        return await self._apply(run)
+
     async def proposal_to_request(self: Any, proposal: str) -> ActionResult:
         """확정 → 개발: 요청 접수(create_ticket과 같은 길) → 기획서 흐름."""
         p = _find(self.state, proposal)
@@ -812,6 +876,11 @@ class ProposalMixin:
             if not isinstance(pid, str):
                 raise ActionError("INVALID_ACTION", "proposal이 없다")
             return await self.proposal_to_request(pid)
+        if name == "choose_angle":
+            pid, angle = action.get("proposal"), action.get("angle")
+            if not isinstance(pid, str) or not isinstance(angle, str):
+                raise ActionError("INVALID_ACTION", "proposal·angle이 없다")
+            return await self.choose_angle(pid, angle)
         return None
 
 
