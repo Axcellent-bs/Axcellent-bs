@@ -1,0 +1,4 @@
+{"data": [
+  {"id": "tr_01", "code": "JP-OSA-4D", "name": "오사카·교토 3박 4일", "region": "JP", "country": "일본", "cities": ["오사카", "교토"], "nights": 3, "days": 4, "airline": "가상항공", "departure_airport": "ICN", "shopping_count": 1, "base_price": 899000, "on_sale": true, "created_at": "2026-11-17T01:00:00.000Z", "updated_at": "2026-11-17T01:00:00.000Z"},
+  {"id": "tr_02", "code": "VN-DAD-5D", "name": "다낭 3박 5일", "region": "SEA", "country": "베트남", "cities": ["다낭", "호이안"], "nights": 3, "days": 5, "airline": "가상항공", "departure_airport": "ICN", "shopping_count": 2, "base_price": 749000, "on_sale": false, "created_at": "2026-11-17T01:00:00.000Z", "updated_at": "2026-11-17T02:00:00.000Z"}
+], "next_cursor": null}

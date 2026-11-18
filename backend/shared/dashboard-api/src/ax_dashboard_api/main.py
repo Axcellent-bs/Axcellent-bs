@@ -22,6 +22,7 @@ from ax_dashboard_api import (
 )
 from ax_dashboard_api.envelope import install_error_handlers, is_mock
 from ax_dashboard_api.routes import router
+from ax_dashboard_api.site_adapter.router import router as site_adapter_router
 
 DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
 
@@ -110,6 +111,8 @@ app.include_router(shop_events.router)
 app.include_router(settlements.router)
 # 판매 서버 관리 읽기 중계: 화면이 판매 서버를 직접 부르지 않게 (GET만, 서버 쪽 열람 토큰)
 app.include_router(shop_relay.router)
+# 사이트 변환기: 회사 연결이 kind=adapter면 AI들의 shop-api 주소가 여기다
+app.include_router(site_adapter_router)
 
 
 @app.get("/health")
