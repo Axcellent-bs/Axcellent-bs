@@ -124,7 +124,7 @@ export function SettlementsSection({ tick, source, request, canRequest = true, o
     <Panel id="settlements" title={title} titleHidden={titleHidden} meta={res.env?.meta}
       hint="판매자에게 줄 돈(정산금) = 판매액 − 판매 수수료 − 판매자가 부담한 쿠폰 − 환불. 오픈마켓처럼 구매가 확정된(배송 완료) 주문만 그 확정일이 속한 주에 정산하고, 아직 확정되지 않은 주문은 확정되는 주의 정산으로 넘깁니다. 환불은 이미 정산한 주문이면 환불한 주에, 확정 전 환불이면 그 주문이 확정되는 주에 뺍니다. 배송 전 취소처럼 끝내 확정되지 않은 주문의 환불은 판매자가 받은 돈이 없어 빼지 않습니다. 정산금이 0원 이하인 판매자(환불만 있는 판매자 포함)는 보류하고, 나머지를 묶어 지급 승인을 요청합니다. 지급 예정일이 된 주는 고객지원 AI가 스스로 요청하고, 고객지원 담당이 보류 큐에서 승인합니다. 아직 끝나지 않은 주는 요청하지 않습니다.">
       {note && <div className="mb-4">{note}</div>}
-      <ResourceBody res={res}>
+      <ResourceBody res={res} minHeight="44rem">
         {(s) => {
           const total = readyPayout(s.statements);
           const readyCount = s.statements.filter(isPayable).length;
