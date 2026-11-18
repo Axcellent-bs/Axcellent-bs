@@ -15,6 +15,12 @@ def load(name: str) -> Any:
 
 
 @pytest.fixture
+def nubi() -> Any:
+    """녹화 파일 읽기 (`nubi("nubi_tours.json")`). importlib 모드라 conftest를 import하지 않는다."""
+    return load
+
+
+@pytest.fixture
 def adapter_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """누비투어 짝을 깐 변환기 폴더 (`AX_SITE_ADAPTER_DIR`)."""
     folder = tmp_path / "site_adapter"
