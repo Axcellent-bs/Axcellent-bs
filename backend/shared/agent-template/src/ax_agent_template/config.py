@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from ax_agent_template.company_connection import shop_api_override
+from ax_agent_template.company_connection import ADAPTER_PATH, connection_file, shop_api_override
 from ax_agent_template.services import SERVICE_PORTS, department_of
 
 # CLAUDE.md 포트 표. 컨테이너에서는 서비스 이름이 호스트 이름이다.
@@ -151,6 +151,11 @@ def agent_url(target: str) -> str:
     override = os.getenv(f"AX_{env_prefix(target)}_URL")
     if override:
         return override.rstrip("/")
+    if target == "shop-api" and connection_file():
+        # 회사 연결 기능이 켜져 있는데 연결도 주소도 없다 = 연결 안 됨.
+        # 캣북스 판매 서버(기본 포트)로 빠지지 않고 사이트 변환기로 보낸다.
+        # 변환기는 503 NOT_CONFIGURED(연결 안 됨)로 답한다
+        return agent_url("dashboard-api") + ADAPTER_PATH
     port = DEFAULT_PORTS.get(target)
     if port is None:
         raise KeyError(f"알 수 없는 에이전트: {target}")

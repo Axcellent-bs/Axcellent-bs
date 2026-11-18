@@ -54,6 +54,7 @@ class Connection:
     enabled: bool = True
     kind: Kind = "shop_api"
     adapter: dict[str, str] | None = None  # kind=adapter: {"base_url": 고객사 API 주소}
+    tenant: str | None = None  # 회사 설정 폴더 id (config/tenants/<id>, ax_agent_template.tenant)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +65,7 @@ class Connection:
             "updated_by": self.updated_by,
             "kind": self.kind,
             "adapter": dict(self.adapter) if self.adapter else None,
+            "tenant": self.tenant,
         }
 
 
@@ -183,6 +185,9 @@ def _parse(raw: Any, path: str) -> Connection:
     if kind not in KINDS:
         raise ValueError(f"{path}: kind는 {', '.join(KINDS)} 중 하나여야 한다")
     adapter = _adapter(raw.get("adapter"), path) if kind == "adapter" else None
+    tenant = raw.get("tenant")
+    if tenant is not None and not isinstance(tenant, str):
+        raise ValueError(f"{path}: tenant는 글자여야 한다")
     return Connection(
         shop_api_url=url,
         verified_at=text("verified_at"),
@@ -191,6 +196,7 @@ def _parse(raw: Any, path: str) -> Connection:
         enabled=enabled,
         kind=kind,
         adapter=adapter,
+        tenant=tenant or None,
     )
 
 
@@ -301,6 +307,7 @@ def save_connection(
     enabled: bool = True,
     kind: Kind = "shop_api",
     adapter: dict[str, str] | None = None,
+    tenant: str | None = None,
 ) -> Connection:
     """연결을 저장한다(임시 파일에 쓰고 바꿔치기). 파일 경로가 없으면 RuntimeError."""
     path = connection_file()
@@ -311,6 +318,11 @@ def save_connection(
     if kind not in KINDS:
         raise ValueError(f"kind는 {', '.join(KINDS)} 중 하나여야 합니다")
     adapter_conf = _adapter(adapter, CONNECTION_FILE_ENV) if kind == "adapter" else None
+    if tenant is not None:
+        from ax_agent_template.tenant import is_tenant
+
+        if not is_tenant(tenant):
+            raise ValueError(f"회사 설정이 없습니다: {tenant}")
     before = read_connection()
     saved = Connection(
         shop_api_url=url,
@@ -320,6 +332,7 @@ def save_connection(
         enabled=enabled,
         kind=kind,
         adapter=adapter_conf,
+        tenant=tenant,
     )
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
