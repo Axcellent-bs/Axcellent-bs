@@ -31,6 +31,7 @@ def test_meme_fields() -> None:
                      search=capped)  # fmt: skip
     assert meme.ratio is None and meme.ad_material == "unknown" and meme.products == []
     assert meme.top_videos == [] and meme.description is None
+    assert meme.instagram is None and meme.web_search is None  # 뒤에 붙일 플랫폼 칸
     with pytest.raises(ValidationError):
         TrendMeme(name="x", kind="word", channels=1, videos=1)  # type: ignore[arg-type]
     with pytest.raises(ValidationError):

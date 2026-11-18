@@ -1695,6 +1695,15 @@ export interface TrendMeme {
   products: LinkedProduct[];
   products_reason: string | null;
   top_videos: MemeVideo[];
+  /** 뒤에 붙일 플랫폼 칸 (인스타·검색 칩). 지금은 늘 null이고 화면에 그리지 않는다 */
+  instagram?: MemePlatform | null;
+  web_search?: MemePlatform | null;
+}
+export interface MemePlatform {
+  channels: number | null;
+  posts: number | null;
+  ratio: number | null;
+  reason: string | null;
 }
 export interface MemeSkipped {
   name: string;

@@ -3925,6 +3925,15 @@ class MemeSearch(AxModel):
     reason: str | None = None
 
 
+class MemePlatform(AxModel):
+    """다른 플랫폼에서 본 같은 유행 (자리만, 아직 채우는 코드 없음)."""
+
+    channels: int | None = Field(default=None, ge=0)
+    posts: int | None = Field(default=None, ge=0)
+    ratio: float | None = Field(default=None, ge=0)
+    reason: str | None = None
+
+
 class TrendMeme(AxModel):
     name: str = Field(min_length=1)  # 묶음에서 가장 많이 쓰인 표기 (해시태그면 # 붙임)
     kind: Literal["hashtag", "phrase"]
@@ -3948,6 +3957,10 @@ class TrendMeme(AxModel):
     products: list[LinkedProduct] = Field(default_factory=list)  # product_link 기준 통과만
     products_reason: str | None = None  # 연결하지 못한 이유 (상품 목록·임베딩)
     top_videos: list[MemeVideo] = Field(default_factory=list)
+    # 뒤에 붙일 플랫폼 칸 (화면 칩 인스타·검색). 지금은 늘 None이고 화면에 그리지 않는다.
+    # 네이버 검색 배수는 위 `search` 칸이다
+    instagram: MemePlatform | None = None
+    web_search: MemePlatform | None = None
 
 
 class MemeSkipped(AxModel):

@@ -5,6 +5,7 @@ import type { SkillState } from "@/components/data/useSkill";
 import { CautionChip } from "@/components/data/ShortsCard";
 import { Sources, videoUrl, when } from "@/components/data/Sources";
 import { categoryName } from "@/components/data/TrendPopular";
+import { viewParam } from "@/lib/detectView";
 import {
   DATA_SERVER, dataAi, kpiLive,
   type ExplorerLength, type ExplorerPeriod, type ExplorerSort, type ExplorerVideo, type VideoExplorerOutput,
@@ -48,9 +49,11 @@ export function explorerQueryFromHash(hash: string): ExplorerQuery {
   };
 }
 
-function hashOf(q: ExplorerQuery): string {
+/** 조건 해시. 감지 탭의 플랫폼 칩(view)이 있으면 그대로 남긴다 (lib/detectView.ts) */
+function hashOf(q: ExplorerQuery, view: string | null = null): string {
   const params = new URLSearchParams({ len: q.length, p: q.period, sort: q.sort });
   if (q.category) params.set("cat", q.category);
+  if (view) params.set("view", view);
   return `#detect?${params.toString()}`;
 }
 
@@ -128,7 +131,7 @@ export function VideoExplorer() {
   const change = (patch: Partial<ExplorerQuery>) => {
     const next = { ...q, ...patch };
     setQ(next);
-    navigate({ pathname: location.pathname, search: location.search, hash: hashOf(next) }, { replace: true });
+    navigate({ pathname: location.pathname, search: location.search, hash: hashOf(next, viewParam(location.hash)) }, { replace: true });
   };
 
   const out = state.kind === "ok" ? state.out : null;

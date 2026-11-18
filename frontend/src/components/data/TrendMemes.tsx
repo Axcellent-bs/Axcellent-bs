@@ -2,8 +2,9 @@ import { useState } from "react";
 import { ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { useSkill } from "@/components/data/useSkill";
 import { dataAi, type MemeWindow, type TrendMeme, type TrendMemesOutput } from "@/lib/data";
+import type { DetectView } from "@/lib/detectView";
 
-// 트렌드 탭 맨 위 "요즘 유행·밈" (trend_memes). 영상 하나가 아니라 여러 채널에서 같이 늘어난 해시태그·구절 묶음.
+// 트렌드 1 감지 하위 탭의 "요즘 유행·밈" (trend_memes, 오늘 가장 큰 화제 한 줄 바로 아래 플랫폼 칩 안). 영상 하나가 아니라 여러 채널에서 같이 늘어난 해시태그·구절 묶음.
 // - 숫자·순위·판정은 서버 값 그대로. 설명 한 줄만 서버 LLM(숫자 없음)
 // - 이번 주(7일 vs 직전 7일) / 오늘(어제 vs 지난 4주 같은 요일) 토글. 서버가 미리 계산한 결과를 읽는다
 // - 대표 영상은 링크만 (썸네일을 걸지 않는다)
@@ -68,7 +69,21 @@ function criteriaLine(out: TrendMemesOutput, span: string, before: string) {
   return `기준: ${span} ${c.min_channels}개 이상 채널 · 영상 ${c.min_videos}개 이상 · ${before}의 ${c.min_ratio}배 이상(${before}에 없었으면 새로 등장). 인물 이름 자체·뉴스·사건은 유행에서 뺍니다(기존 분류기 그대로).`;
 }
 
-function Table({ out, before }: { out: TrendMemesOutput; before: string }) {
+/** 종합 칩 맨 위 요약 칸: 1위 유행 하나 (서버 순위 그대로) */
+function TopMeme({ m, label, before }: { m: TrendMeme; label: string; before: string }) {
+  const ratio = m.ratio_status === "known" && m.ratio !== null ? `${before} 대비 ${times(m.ratio)}` : m.ratio_status === "new" ? "새로 등장" : null;
+  return (
+    <div className="rounded-xl bg-brand-50 px-4 py-3">
+      <p className="text-xs font-semibold text-brand-700">{label} 1위 유행</p>
+      <p className="mt-0.5 text-lg font-bold text-ink-900">{m.name}</p>
+      <p className="text-sm text-ink-700">{[`채널 ${m.channels}곳`, `영상 ${m.videos}개`, ratio].filter(Boolean).join(" · ")}</p>
+      {m.description && <p className="mt-0.5 text-xs text-ink-500">{m.description}</p>}
+    </div>
+  );
+}
+
+/** youtube = 쇼츠 칸 중심 (네이버 검색·광고 재료 칸은 종합에서만) */
+function Table({ out, before, youtube }: { out: TrendMemesOutput; before: string; youtube: boolean }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-sm">
@@ -77,9 +92,9 @@ function Table({ out, before }: { out: TrendMemesOutput; before: string }) {
             <th className="whitespace-nowrap px-1 py-1.5 font-medium">유행</th>
             <th className="whitespace-nowrap px-1 py-1.5 text-right font-medium">퍼진 정도</th>
             <th className="whitespace-nowrap px-1 py-1.5 text-right font-medium">{before} 대비</th>
-            <th className="whitespace-nowrap px-1 py-1.5 text-right font-medium">네이버 검색</th>
-            <th className="whitespace-nowrap px-1 py-1.5 font-medium">광고 재료</th>
-            <th className="whitespace-nowrap px-1 py-1.5 font-medium">대표 영상</th>
+            {!youtube && <th className="whitespace-nowrap px-1 py-1.5 text-right font-medium">네이버 검색</th>}
+            {!youtube && <th className="whitespace-nowrap px-1 py-1.5 font-medium">광고 재료</th>}
+            <th className="whitespace-nowrap px-1 py-1.5 font-medium">{youtube ? "대표 쇼츠" : "대표 영상"}</th>
           </tr>
         </thead>
         <tbody>
@@ -91,8 +106,8 @@ function Table({ out, before }: { out: TrendMemesOutput; before: string }) {
               </td>
               <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums">채널 {m.channels}곳<small className="block text-[11px] text-ink-500">영상 {m.videos}개</small></td>
               <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Ratio m={m} /></td>
-              <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Search m={m} /></td>
-              <td className="px-1 py-2"><Material m={m} /></td>
+              {!youtube && <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Search m={m} /></td>}
+              {!youtube && <td className="px-1 py-2"><Material m={m} /></td>}
               <td className="px-1 py-2"><Videos m={m} /></td>
             </tr>
           ))}
@@ -102,7 +117,9 @@ function Table({ out, before }: { out: TrendMemesOutput; before: string }) {
   );
 }
 
-export function TrendMemes() {
+/** focus: 감지 플랫폼 칩 (all = 종합: 1위 요약 + 전체 칸, youtube = 쇼츠 칸 중심). 기획 넘기기 버튼·인스타·검색 플랫폼 칸은 그리지 않는다 */
+export function TrendMemes({ focus = "all" }: { focus?: DetectView }) {
+  const youtube = focus === "youtube";
   const [win, setWin] = useState<MemeWindow>("week");
   const res = useSkill(() => dataAi.trendMemes(win));
   const meta = WINDOWS.find((w) => w.key === win)!;
@@ -129,7 +146,8 @@ export function TrendMemes() {
         : s.kind === "failed" ? <ErrorBox message={s.reason} onRetry={res.reload} />
         : (
           <div className="space-y-2">
-            {s.out.items.length ? <Table out={s.out} before={meta.before} /> : (
+            {!youtube && s.out.items[0] && <TopMeme m={s.out.items[0]} label={meta.span} before={meta.before} />}
+            {s.out.items.length ? <Table out={s.out} before={meta.before} youtube={youtube} /> : (
               <p className="text-sm text-ink-700">기준을 넘은 유행이 없어요.{s.out.status === "unknown" && s.out.reason ? ` ${s.out.reason}` : ""}</p>
             )}
             <p className="text-xs text-ink-500">{criteriaLine(s.out, meta.span, meta.before)}</p>
