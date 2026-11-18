@@ -42,7 +42,7 @@ export default function CompanyConnect() {
   useEffect(() => {
     if (phase.at !== 'run') return
     if (step >= STEPS.length - 1) {
-      connectWithKey(phase.key, phase.info)
+      void connectWithKey(phase.key, phase.info).catch((x: Error) => setError(x.message))
       const t = setTimeout(() => { setPhase({ at: 'key' }); setInput(''); setShowKey(false) }, 900)
       return () => clearTimeout(t)
     }
@@ -50,9 +50,10 @@ export default function CompanyConnect() {
     return () => clearTimeout(t)
   }, [phase, step])
 
-  const submitKey = (e: FormEvent) => {
+  const submitKey = async (e: FormEvent) => {
     e.preventDefault()
-    const r = checkKey(input)
+    let r: Awaited<ReturnType<typeof checkKey>>
+    try { r = await checkKey(input) } catch (x) { return setError((x as Error).message) }
     if (!r.ok) return setError(r.reason)
     setError(null)
     // 같은 키로 다시 연결하면 지난번에 입력한 회사 정보를 미리 채운다
@@ -75,13 +76,14 @@ export default function CompanyConnect() {
     if (!info.name.trim()) return setError('회사 이름을 입력하세요.')
     if (!validNetwork(info.network)) return setError('사내망 주소를 192.168.30.0/24 같은 형태로 입력하세요. 사내 IP 대역만 돼요.')
     setError(null)
-    updateCompanyInfo({ ...info, name: info.name.trim(), network: info.network.trim() })
+    void updateCompanyInfo({ ...info, name: info.name.trim(), network: info.network.trim() }).catch((x: Error) => setError(x.message))
     setEditing(false)
   }
 
   // 데모 편의: 아직 안 쓴 키를 한 글자씩 넣는다
   // 아직 어느 회사도 쓴 적 없는 키를 먼저 고른다
-  const demoKey = keys.find((k) => k.status === 'issued' && !k.company) ?? keys.find((k) => k.status === 'issued')
+  // 키는 서버에 있고 목록에는 가린 키만 와서 미리 채울 수 없다(발급받은 키를 직접 넣는다)
+  const demoKey: IssuedKey | undefined = keys.length < 0 ? keys[0] : undefined
   const fillDemoKey = () => {
     if (!demoKey) return
     setError(null)

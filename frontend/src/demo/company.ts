@@ -1,22 +1,26 @@
-// 이 AXcellent에 연결된 고객사와 AXcellent가 발급한 연결 키. 데모라 브라우저에만 기억한다.
+// 이 AXcellent에 연결된 고객사와 AXcellent가 발급한 연결 키. 서버(dashboard-api `connection_keys.py`)에 저장해
+// 어느 PC에서든 같은 키 목록·연결 회사가 보인다(예전에는 브라우저에만 있어서 다른 PC는 비어 있었다).
 // - 키 발급: AXcellent 운영팀이 관제 센터(/control/keys)에서 한다. 키에는 회사 정보가 없고 "연결해도 된다"는 권한만 있다.
-// - 연결: 고객사 시스템 관리자가 키를 넣고(확인), 회사 정보를 직접 입력해 연결한다(/system/connect). 끊는 것도 고객사가 한다.
+//   전체 키는 발급할 때 한 번만 받는다. 목록에는 가린 키만 온다.
+// - 연결: 고객사 시스템 관리자가 키를 넣고(서버가 확인), 회사 정보를 입력해 연결한다(/system/connect). 끊는 것도 고객사가 한다.
 // 상단바의 "AXcellent with <회사>"와 로그인 화면이 연결된 회사를 따른다. 끊으면 null(회사 이름 없음).
 import { useSyncExternalStore } from 'react'
-import { companyConnection } from '@/lib/companyConnection'
+import { call, companyConnection } from '@/lib/companyConnection'
 
 export type ConnectedCompany = {
   id: string
   name: string
   industry: string
   network: string
-  /** 연결에 쓴 키와 연결한 시각 (AXcellent 연결 화면에 보여 준다) */
+  /** 연결에 쓴 키(가린 값)와 연결한 시각 */
   key?: string
   connectedAt?: string
 }
 export type CompanyInfo = Pick<ConnectedCompany, 'name' | 'industry' | 'network'>
 export type KeyStatus = 'issued' | 'connected' | 'revoked'
 export type IssuedKey = {
+  id: string
+  /** 목록에서는 가린 키. 발급 직후 응답만 전체 키 */
   key: string
   /** 운영팀 메모(누구에게 보냈는지). 키에는 들어가지 않는다 */
   memo?: string
@@ -26,130 +30,86 @@ export type IssuedKey = {
   company?: ConnectedCompany
 }
 
-// 처음에는 어느 회사도 연결돼 있지 않고 발급한 키도 없다(캣북스 기본값 없음, 2026-11-18).
-// 캣북스 시연: 관제 센터에서 키를 발급하고 시스템 관리 › 회사 연결에서 연결한다.
-const DEFAULT_KEYS: IssuedKey[] = []
+type ServerRow = { id: string; key: string; memo: string | null; issued_at: string; status: KeyStatus; company: CompanyInfo | null }
+type ServerCompany = CompanyInfo & { id: string; key: string | null; connected_at: string }
+type ServerState = { keys: ServerRow[]; company: ServerCompany | null; editable: boolean }
 
-// ---------------------------------------------------------------- 작은 저장소 (화면 여러 곳이 같은 값을 본다)
-function store<T>(key: string, fallback: T) {
-  let value: T = (() => {
-    try {
-      const raw = localStorage.getItem(key)
-      return raw === null ? fallback : (JSON.parse(raw) as T)
-    } catch {
-      return fallback
-    }
-  })()
-  const listeners = new Set<() => void>()
-  return {
-    get: () => value,
-    set(next: T) {
-      value = next
-      try {
-        localStorage.setItem(key, JSON.stringify(next))
-      } catch {
-        /* 저장이 막힌 브라우저는 새로고침하면 처음 상태로 돌아간다 */
-      }
-      listeners.forEach((l) => l())
-    },
-    subscribe(l: () => void) {
-      listeners.add(l)
-      return () => listeners.delete(l)
-    },
-  }
+const PATH = '/api/dashboard/connection-keys'
+let keys: IssuedKey[] = []
+let company: ConnectedCompany | null = null
+const listeners = new Set<() => void>()
+const notify = () => listeners.forEach((l) => l())
+const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
+
+function apply(s: ServerState) {
+  company = s.company
+    ? { id: s.company.id, name: s.company.name, industry: s.company.industry, network: s.company.network, key: s.company.key ?? undefined, connectedAt: s.company.connected_at }
+    : null
+  keys = s.keys.map((r) => ({
+    id: r.id,
+    key: r.key,
+    memo: r.memo ?? undefined,
+    issuedAt: r.issued_at,
+    status: r.status,
+    company: r.company ? { id: company && r.status === 'connected' ? company.id : `k-${r.id}`, ...r.company } : undefined,
+  }))
+  notify()
 }
 
-// v3: 예전 브라우저에 남은 캣북스 기본 연결(v2)을 이어 쓰지 않는다.
-// undefined = 이 브라우저에서 아직 정하지 않음(서버 연결을 따른다), null = 이 브라우저에서 끊음
-const companyStore = store<ConnectedCompany | null | undefined>('axcellent-demo-company-v3', undefined)
-
-// 서버에 저장된 실제 연결(회사 연결 파일: 판매 서버 주소 + 회사 설정). 키·회사 정보는 브라우저에만 있어서
-// 다른 PC는 비어 있다. 서버에 연결이 있으면 어느 PC에서 열어도 그 회사로 연결된 화면을 연다
-let serverCompany: ConnectedCompany | null = null
-const serverListeners = new Set<() => void>()
-function loadServerCompany() {
-  companyConnection.get()
+// 키로 연결한 회사가 없어도 서버에 사이트 연결(판매 서버 + 회사 설정)이 있으면 그 회사로 본다(#1357)
+let siteCompany: ConnectedCompany | null = null
+function loadSiteCompany(): Promise<void> {
+  return companyConnection.get()
     .then((s) => {
       const on = s.source === 'connection' && s.connection?.enabled !== false && s.tenant
-      serverCompany = on && s.tenant
-        ? { id: s.tenant.id, name: s.tenant.name, industry: '', network: '', connectedAt: s.connection?.updated_at ?? undefined }
-        : null
-      serverListeners.forEach((l) => l())
+      siteCompany = on && s.tenant ? { id: s.tenant.id, name: s.tenant.name, industry: '', network: '', connectedAt: s.connection?.updated_at ?? undefined } : null
+      notify()
     })
-    .catch(() => { /* 서버를 못 읽으면 이 브라우저 기록만 쓴다 */ })
+    .catch(() => { /* 서버를 못 읽으면 지난 값 그대로 */ })
 }
-try { loadServerCompany() } catch { /* 테스트 환경 등 fetch가 없으면 건너뛴다 */ }
-/** 서버 연결을 다시 읽는다 (회사 연결 저장·해제 뒤) */
-export const refreshServerCompany = loadServerCompany
-const currentCompany = (): ConnectedCompany | null => {
-  const local = companyStore.get()
-  return local === undefined ? serverCompany : local
-}
-const subscribeCompany = (l: () => void) => {
-  const off = companyStore.subscribe(l)
-  serverListeners.add(l)
-  return () => { off(); serverListeners.delete(l) }
-}
-const keyStore = store<IssuedKey[]>('axcellent-demo-keys-v3', DEFAULT_KEYS)
 
-export const getCompany = currentCompany
-export const useCompany = () => useSyncExternalStore(subscribeCompany, currentCompany)
-export const useKeys = () => useSyncExternalStore(keyStore.subscribe, keyStore.get)
+/** 서버에서 키 목록·연결 회사·사이트 연결을 다시 읽는다 */
+export function refreshCompany(): Promise<void> {
+  const keysNow = call<ServerState>('GET', PATH).then(apply).catch(() => { /* 지난 값 그대로 */ })
+  return Promise.all([keysNow, loadSiteCompany()]).then(() => undefined)
+}
+/** 회사 연결 저장·해제 뒤 (SiteConnect) */
+export const refreshServerCompany = refreshCompany
+try { void refreshCompany() } catch { /* fetch가 없는 환경 */ }
 
-const setStatus = (key: string, status: KeyStatus) => keyStore.set(keyStore.get().map((k) => (k.key === key ? { ...k, status } : k)))
+export const getCompany = () => company ?? siteCompany
+export const useCompany = () => useSyncExternalStore(subscribe, getCompany)
+export const useKeys = () => useSyncExternalStore(subscribe, () => keys)
 
 // ---------------------------------------------------------------- AXcellent 운영팀: 키 발급·폐기
-const part = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('')
-export function issueKey(memo: string): IssuedKey {
-  const k: IssuedKey = { key: `AXC-${part()}-${part()}-${part()}`, memo: memo || undefined, issuedAt: new Date().toISOString(), status: 'issued' }
-  keyStore.set([k, ...keyStore.get()])
-  return k
+/** 새 키 발급. 돌려받은 `key`가 전체 키(지금만 보인다) */
+export async function issueKey(memo: string): Promise<IssuedKey> {
+  const s = await call<ServerState & { id: string; key: string }>('POST', `${PATH}/issue`, { memo })
+  apply(s)
+  const row = keys.find((k) => k.id === s.id)
+  return { ...(row ?? { id: s.id, issuedAt: new Date().toISOString(), status: 'issued' as const }), key: s.key }
 }
 /** 폐기한 키로는 연결할 수 없다. 이미 그 키로 연결돼 있으면 연결도 끊는다 */
-export function revokeKey(key: string) {
-  const k = keyStore.get().find((x) => x.key === key)
-  if (k?.company && companyStore.get()?.id === k.company.id) companyStore.set(null)
-  setStatus(key, 'revoked')
+export async function revokeKey(id: string) {
+  apply(await call<ServerState>('POST', `${PATH}/revoke`, { id }))
 }
 
 // ---------------------------------------------------------------- 고객사 시스템 관리자: 키 확인 → 회사 정보 입력 → 연결
 export type KeyCheck = { ok: true; issued: IssuedKey } | { ok: false; reason: string }
-export function checkKey(input: string): KeyCheck {
+export async function checkKey(input: string): Promise<KeyCheck> {
   const key = input.trim().toUpperCase()
-  const k = keyStore.get().find((x) => x.key === key)
-  if (!k) return { ok: false, reason: 'AXcellent에서 발급한 키가 아니에요. 키를 다시 확인해 주세요.' }
-  if (k.status === 'revoked') return { ok: false, reason: '폐기된 키예요. AXcellent에 새 키를 요청해 주세요.' }
-  if (k.status === 'connected' && k.company?.id !== companyStore.get()?.id) return { ok: false, reason: '이미 다른 회사가 쓰고 있는 키예요.' }
-  return { ok: true, issued: k }
+  const r = await call<{ ok: boolean; reason: string | null; company: CompanyInfo | null }>('POST', `${PATH}/check`, { key })
+  if (!r.ok) return { ok: false, reason: r.reason ?? '쓸 수 없는 키예요.' }
+  return { ok: true, issued: { id: '', key, issuedAt: '', status: 'issued', company: r.company ? { id: '', ...r.company } : undefined } }
 }
-export function connectWithKey(k: IssuedKey, info: CompanyInfo) {
-  const company: ConnectedCompany = { id: k.company?.id ?? `c-${k.key.slice(4, 8).toLowerCase()}`, ...info, key: k.key, connectedAt: new Date().toISOString() }
-  // 다른 키로 바꿔 연결하면 이전 키는 다시 쓸 수 있는 상태로 돌린다
-  const prev = companyStore.get()
-  keyStore.set(keyStore.get().map((x) =>
-    x.key === k.key ? { ...x, status: 'connected' as const, company }
-      : prev && x.company?.id === prev.id && x.status === 'connected' ? { ...x, status: 'issued' as const } : x,
-  ))
-  companyStore.set(company)
+export async function connectWithKey(k: IssuedKey, info: CompanyInfo) {
+  apply(await call<ServerState>('POST', `${PATH}/connect`, { key: k.key, ...info }))
 }
 /** 연결된 회사 정보 고치기 (연결은 그대로) */
-export function updateCompanyInfo(info: CompanyInfo) {
-  const cur = currentCompany()
-  if (!cur) return
-  const next = { ...cur, ...info }
-  companyStore.set(next)
-  keyStore.set(keyStore.get().map((x) => (x.company?.id === cur.id ? { ...x, company: next } : x)))
+export async function updateCompanyInfo(info: CompanyInfo) {
+  apply(await call<ServerState>('POST', `${PATH}/company`, info))
 }
 /** 끊어도 키에 남긴 회사 정보는 두어서, 같은 키로 다시 연결할 때 미리 채운다 */
-export function disconnect() {
-  const prev = companyStore.get()
-  if (prev) keyStore.set(keyStore.get().map((x) => (x.company?.id === prev.id && x.status === 'connected' ? { ...x, status: 'issued' } : x)))
-  companyStore.set(null)
-}
-
-// 시연: 주소에 ?company=none 을 붙여 열면 회사 연결 전 상태로 시작한다
-try {
-  if (new URLSearchParams(window.location.search).get('company') === 'none') disconnect()
-} catch {
-  /* 주소를 못 읽는 환경은 그대로 */
+export async function disconnect() {
+  apply(await call<ServerState>('POST', `${PATH}/disconnect`))
 }

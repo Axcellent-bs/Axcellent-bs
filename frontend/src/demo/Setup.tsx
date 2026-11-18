@@ -32,7 +32,7 @@ export default function Setup() {
   useEffect(() => {
     if (run < 0 || !key) return
     if (run >= RUN_STEPS.length - 1) {
-      connectWithKey(key, info)
+      void connectWithKey(key, info).catch((x: Error) => setError(x.message))
       const t = setTimeout(finish, 1200)
       return () => clearTimeout(t)
     }
@@ -52,10 +52,11 @@ export default function Setup() {
   // 이 설치에 이미 연결된 회사의 키인가 (그러면 회사 정보·연결은 건너뛴다)
   const sameCompany = !!company && !!key && key.company?.id === company.id
 
-  const next = (e: FormEvent) => {
+  const next = async (e: FormEvent) => {
     e.preventDefault()
     if (stage === 0) {
-      const r = checkKey(keyInput)
+      let r: Awaited<ReturnType<typeof checkKey>>
+      try { r = await checkKey(keyInput) } catch (x) { return setError((x as Error).message) }
       if (!r.ok) return setError(r.reason)
       setKey(r.issued)
     }
@@ -79,9 +80,8 @@ export default function Setup() {
   // 데모 편의: 칸 채우기
   // 아직 어느 회사도 쓴 적 없는 키를 먼저 고른다
   // 이미 연결된 회사가 있으면 그 회사 키(관리자 추가 가입), 없으면 아직 안 쓴 키
-  const demoKey = company
-    ? keys.find((k) => k.company?.id === company.id && k.status === 'connected')
-    : keys.find((k) => k.status === 'issued' && !k.company) ?? keys.find((k) => k.status === 'issued')
+  // 키는 서버에 있고 목록에는 가린 키만 와서 미리 채울 수 없다(발급받은 키를 직접 넣는다)
+  const demoKey: IssuedKey | undefined = keys.length < 0 ? keys[0] : undefined
   const fillDemo = () => {
     setError(null)
     if (stage === 0 && demoKey) setKeyInput(demoKey.key)
