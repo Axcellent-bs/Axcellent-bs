@@ -35,6 +35,8 @@
   해시라 같은 재료면 날·실행이 달라도 같다(브리프 `stable_insight_id`와 같은 방식). 한 번에 같은
   재료의 초안이 또 나오면 그 초안만 제목까지 넣은 해시. 예전 무작위 id는 `legacy_concept_id`.
   지금 인기 트렌드를 빌렸으면 `source_insight_id` = 브리프가 같은 주제에 주는 insight_id
+- 영상 카테고리·형식(`content_category`·`content_format`, `content_fields.py`): 빌려 온 숏츠 형식이
+  목록 안 이름(기타·unknown 아님)이고 롱폼이 아니면 (그 형식 이름, "shorts"), 아니면 None
 README "promo_concepts".
 """
 
@@ -80,6 +82,7 @@ from ax_contracts.schemas.data import (
 )
 from data_agent import llm_failure
 from data_agent.connectors import CatalogProduct
+from data_agent.content_fields import fill_concepts
 from data_agent.explain import _bad_numbers
 from data_agent.llm_budget import no_llm
 from data_agent.skills.ad_material import NEVER_TREND
@@ -682,13 +685,15 @@ async def make_concepts(
     try:
         rules = rules_version(config)
         if not request.regenerate and (hit := store.latest(today, rules, now)) is not None:
-            out = hit.model_copy(update={"cached": True})
+            out = hit.model_copy(update={"cached": True}, deep=True)
+            fill_concepts(out.concepts)  # 예전 기록에도 같은 규칙 (다시 저장하지 않음)
             return PromoResult(out, Evidence(queries=[f"promo_concepts cache rules={rules}"],
                                data_summary=out.summary, collected_at=now))  # fmt: skip
         result = await _generate(
             config, connector, llm, env=env, catalog=catalog, now=now,
             context_id=context_id, category_cache=category_cache, board=board, youtube=youtube,
         )  # fmt: skip
+        fill_concepts(result.output.concepts)  # 기획이 옮기는 영상 카테고리·형식 (content_fields)
         # LLM 호출이 실패한 결과(두 번째 호출 실패로 첫 답만 쓴 것 등)는 저장하지 않는다
         if result.output.concepts and llm_failure.capped() and not llm_failure.failed():
             # LLM 하루 상한으로 덜 만든 것(분류 unknown·다시 묻기 못 함): 짧게만 (풀리면 다시)

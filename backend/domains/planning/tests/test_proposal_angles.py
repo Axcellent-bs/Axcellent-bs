@@ -412,3 +412,64 @@ def test_bad_category_or_format_is_refused() -> None:
             )
         assert e.value.code == "INVALID_ACTION"
     assert _p(svc, pid).content_category is None and _p(svc, pid).angle is None
+
+
+# ---------------------------------------------------------------- 예전 제안에 선택지 채우기 (11/18)
+
+
+def _old(svc: PlanningService, pid: str, status: str = "확인 대기") -> None:
+    """#1282 전에 만들어진 제안처럼 선택지·규모를 비운다."""
+    p = _p(svc, pid)
+    p.options, p.scale, p.status = [], None, status
+
+
+def test_pull_fills_options_on_open_proposals_made_before_options() -> None:
+    """예전 제안(선택지 없음)은 받아오기 때 선택지를 채운다. 같은 인사이트라 새 제안은 안 생긴다."""
+
+    class Pull(Insights):
+        async def pull(self, ctx):
+            return [_insight("ins-1")]
+
+    ins = Pull()
+    svc = _svc(insights=ins, marketing=Marketing(followers=300))
+    pid = _new(svc)
+    _old(svc, pid)
+    ins.trends_calls = 0  # 제안을 만들 때 부른 것은 빼고 받아오기만 센다
+    out = asyncio.run(svc.dispatch({"type": "pullInsights"}))
+    p = _p(svc, pid)
+    assert out.output["created"] == [] and out.output["filled"] == [pid]
+    assert [o.id for o in p.options] == ["ride_trend", "own_trend", "with_product"]
+    assert p.options[0].recommended and p.scale is not None and p.scale.followers == 300
+    assert any(f"방향 선택지 채움 {pid}" in a.text for a in svc.state.activity)
+    assert ins.trends_calls == 1
+
+
+def test_pull_fills_options_even_when_data_pull_fails() -> None:
+    """데이터분석 받아오기가 실패해도(LLM 한도 등) 예전 제안 선택지는 채운다."""
+
+    class Fail(Insights):
+        async def pull(self, ctx):
+            return "LLM 하루 상한"
+
+    svc = _svc(insights=Fail(), marketing=Marketing(followers=300))
+    pid = _new(svc)
+    _old(svc, pid)
+    with pytest.raises(ActionError):
+        asyncio.run(svc.dispatch({"type": "pullInsights"}))
+    assert len(_p(svc, pid).options) == 3
+
+
+def test_pull_does_not_touch_closed_or_already_filled_proposals() -> None:
+    class Pull(Insights):
+        async def pull(self, ctx):
+            return []
+
+    svc = _svc(insights=Pull(), marketing=Marketing(followers=300))
+    closed = _new(svc, ref="a")
+    _old(svc, closed, status="마케팅 전달")
+    filled = _new(svc, ref="b")
+    before = [o.model_dump() for o in _p(svc, filled).options]
+    out = asyncio.run(svc.dispatch({"type": "pullInsights"}))
+    assert out.output["filled"] == []
+    assert _p(svc, closed).options == []
+    assert [o.model_dump() for o in _p(svc, filled).options] == before

@@ -20,6 +20,8 @@ LLM은 한 줄만 쓴다.
   최대 3개
 - insight_id: 날짜 + 주제 이름 해시 (같은 날 같은 주제면 같은 id)
 - 하루 캐시: 날짜 + 규칙 버전(설정·프롬프트 해시) 키. `regenerate`면 새로 묶는다
+- 영상 카테고리·형식(`content_category`·`content_format`, `content_fields.py`): 형식을 이 주제
+  영상에서 골랐을 때(`shorts_format_source == "topic"`)만 (그 형식 이름, "shorts"). 응답할 때 계산
 README "trend_insight_brief".
 """
 
@@ -1509,7 +1511,9 @@ def cached_brief(
     if hit is None:
         return None
     out = hit.model_copy(update={"cached": True})
-    return BriefResult(out, as_evidence(out, [f"trend_insight_brief cache rules={rules}"], now))
+    return with_content(
+        BriefResult(out, as_evidence(out, [f"trend_insight_brief cache rules={rules}"], now))
+    )
 
 
 async def add_reactions(out: TrendInsightBriefOutput, reaction_fn: Any, queries: list[str]) -> None:
@@ -1531,7 +1535,23 @@ async def add_reactions(out: TrendInsightBriefOutput, reaction_fn: Any, queries:
         out.sources.append(cr.SKILL)
 
 
-async def make_brief(
+def with_content(result: BriefResult) -> BriefResult:
+    """응답 직전에 인사이트의 영상 카테고리·형식 칸을 채운다 (`content_fields`).
+
+    저장된 예전 브리프에도 같은 규칙으로 계산하고, 다시 저장하지 않는다(저장은 이미 끝났다).
+    """
+    from data_agent.content_fields import fill_insights
+
+    fill_insights(result.output.insights)
+    return result
+
+
+async def make_brief(*args: Any, **kwargs: Any) -> BriefResult:
+    """`_make_brief`(아래) + 응답 직전 영상 카테고리·형식 칸 (`with_content`)."""
+    return with_content(await _make_brief(*args, **kwargs))
+
+
+async def _make_brief(
     request: TrendInsightBriefRequest,
     llm: LLMClient,
     *,

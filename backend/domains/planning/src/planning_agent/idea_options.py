@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import os
 import statistics
+from collections.abc import Sequence
 
 from ax_contracts.schemas.data import TrendInsight
 from ax_contracts.schemas.marketing_channels import ChannelFollowersOutput
 from ax_contracts.schemas.planning import InsightPast, ReceiveInsightInput
-from ax_workflow.models import IdeaAngle, IdeaOption, ScaleFacts, TrendRef
+from ax_workflow.models import IdeaAngle, IdeaOption, Proposal, ProposalPast, ScaleFacts, TrendRef
+
+# 받는 인사이트 또는 이미 저장된 제안 (선택지 전에 만들어진 제안을 채울 때, 11/18)
+Source = ReceiveInsightInput | Proposal
 
 ANGLE_LABEL: dict[IdeaAngle, str] = {
     "ride_trend": "유행에 올라타기",
@@ -44,7 +48,7 @@ def small_views() -> int:
     return _env_int("PLANNING_SMALL_VIEWS", 10000)
 
 
-def trend_candidates(inp: ReceiveInsightInput, trends: list[TrendInsight]) -> list[TrendRef]:
+def trend_candidates(inp: Source, trends: list[TrendInsight]) -> list[TrendRef]:
     """인사이트와 같은 숏츠 형식이면서 광고 재료로 쓸 수 있고 실존 인물·상표가 없는 다른 주제.
 
     11/18 재현 님: `shorts_format`은 카테고리·전체 통계로 채워질 수 있어 주제 영상과 상관없을 수
@@ -75,7 +79,9 @@ def trend_candidates(inp: ReceiveInsightInput, trends: list[TrendInsight]) -> li
     ]
 
 
-def scale_facts(past: list[InsightPast], followers: ChannelFollowersOutput | None) -> ScaleFacts:
+def scale_facts(
+    past: Sequence[InsightPast | ProposalPast], followers: ChannelFollowersOutput | None
+) -> ScaleFacts:
     """가장 큰 공식 채널 팔로워와 지난 캠페인 조회 중앙값 (숫자가 있는 것만)."""
     top = None
     if followers is not None and followers.status == "known" and followers.channels:
@@ -111,7 +117,7 @@ def _is_small(scale: ScaleFacts) -> bool:
 
 
 def build_options(
-    inp: ReceiveInsightInput, trends: list[TrendInsight] | None, scale: ScaleFacts
+    inp: Source, trends: list[TrendInsight] | None, scale: ScaleFacts
 ) -> list[IdeaOption]:
     """선택지 3개(순서 고정)와 추천 하나(또는 없음). `trends`가 None이면 목록을 못 받은 것."""
     refs = trend_candidates(inp, trends or [])

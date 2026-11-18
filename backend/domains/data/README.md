@@ -935,6 +935,7 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
 
 - 예전 칸 `format`은 15초 이하 "15초 숏폼", 30초 이하 "30초 숏폼", 그 밖은 비운다(롱폼은 쓰지 않는다). 길이는 `duration_seconds`
 - 👍/👎 피드백 저장은 **아직 없다**. 상태 변경이라 `execute()`(안전 관문)와 safety 레지스트리 등록이 필요하고, 레지스트리는 사람만 바꾼다(#418 본문에 skill 이름·등급·레지스트리 항목 초안)
+- 기획안마다 `content_category`·`content_format`(기획이 `ReceiveInsightInput`으로 옮겨 재무에 제작비를 묻는 칸): 빌려 온 숏츠 형식이 숏츠 형식 목록 안 이름(기타·unknown 아님)이고 롱폼이 아니면 (그 형식 이름, `shorts`), 아니면 둘 다 None. 새 분류·LLM 없이 `shorts_format`만 쓴다(`content_fields.py`)
 - **한계:** 평가셋이 없어 초안 품질을 재지 않는다. 👍/👎가 쌓이면 그것을 평가셋으로 쓴다. 숏츠 형식 재료는 이미 뜬 숏츠(인기·조회수 순 검색)의 평균이다. 시즌 기준(1.3배)과 컷 기준은 정한 값이다. 경고는 IP 이름이 그대로 있을 때만 단다
 
 ### trend_scan 분류 칸 (#539)
@@ -988,6 +989,7 @@ YouTube·인기 검색어에서 뜨는 소재가 검색에서도 뜨는지 본�
    - **토큰.** 판마다 실제 LLM 토큰(`llm_budget.counting`, 기다려 받은 답은 0)을 남긴다. 공통 로그(`event_published`)에 `brief_regen_started`·`brief_regen_finished`/`failed`와 누가·몇 토큰
    - 평가: `eval/brief_regen/`(막는 조건·한 번만 만들기(같은 프로세스·서로 다른 두 프로세스)·잠금 만료·판 보존·규칙별 분리·insight_id·briefs 표 최신·diff, 관문 모두 1.0)
 - **다음 단계 (홍보 영상 기준)**: 지금 배수는 숏츠 전체 대비 값이라 "이 형식이 지난 기간보다 오르는지"는 보지 않는다. 같은 형식의 지난 기간(예: 지난주) 대비 상승률은 아직 만들지 않았다
+- 인사이트마다 `content_category`·`content_format`(기획이 `ReceiveInsightInput`으로 옮기는 칸): 형식을 이 주제 영상에서 골랐을 때(`shorts_format_source == "topic"`)만 (그 형식 이름, `shorts`). 카테고리·전체 단계 형식은 그 주제와 상관없어 None. 응답할 때 계산하므로 저장된 예전 브리프에도 같은 규칙이고 다시 저장하지 않는다
 
 ### domain_profile (도메인 프로필)
 
