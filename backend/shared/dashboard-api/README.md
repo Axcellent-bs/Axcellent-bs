@@ -205,6 +205,28 @@ AI 오피스 단톡방·AI 대화방 전체 대화방에서 부서 AI에게 건 
 - 화면은 4초마다 목록을 읽고, 새로 오르거나 시각이 바뀐 대화와 답을 기다리는 대화만 부서 창구에서 다시 읽는다.
 - 저장: `AX_OFFICE_ROOM_DB`(run_all은 `.data/office_room.db`). 비어 있으면 메모리(다시 켜면 사라진다).
 
+### 사이트 변환기 (`/site-adapter`)
+
+AXcellent 규격(shop-api)이 아닌 고객사 자기 API를 AI들이 shop-api처럼 쓰게 바꿔 준다.
+설계: `docs/superpowers/specs/2026-11-18-site-adapter-design.md`.
+
+- 켜기: 회사 연결 파일에 `"kind": "adapter", "adapter": {"base_url": "<고객사 API 주소>"}`.
+  그러면 `agent_url("shop-api")`가 `<dashboard-api>/site-adapter`가 된다(재시작 없음).
+- 짝 파일: `<AX_SITE_ADAPTER_DIR>/mapping.json`(기본 `backend/.data/site_adapter/`). 항목 식은
+  점 경로·`sum:a,b`·`const:값`. 예시: `tests/site_adapter/fixtures/nubi_mapping.json`(누비투어).
+- 키: `.env`의 `AX_SITE_API_TOKEN`을 짝 파일의 `auth_header`·`auth_scheme`으로 보낸다. 응답·로그에 넣지 않는다.
+- 페이지 상한 `AX_SITE_ADAPTER_MAX_PAGES`(기본 50). 닿으면 `meta.truncated = true`.
+
+| 주소 | 하는 일 |
+| --- | --- |
+| `GET /health`, `/api/shop/orders`, `/orders/{id}`, `/products`, `/categories`, `/users`, `/sales-summary`, `/sales-export`, `/customers-export` | 고객사 API를 짝대로 읽어 shop-api 모양으로 |
+| `GET` 실패 주문·유입 주문·지표·판매자·쿠폰·배너·장애 주입·결제 버전·총괄·마케팅 중계·접수 보조 목록 | 사이트에 없는 자료: 같은 모양의 빈 값 (`meta.source = "site_adapter"`) |
+| `POST /api/shop/admin/{inquiries\|claims\|ideas\|returns}/.../{synced\|failed\|view\|feedback-synced\|gone\|retry}` | 고객지원 접수 동기화: `bookkeeping.jsonl`에 기록만. 에이전트 토큰 또는 `AX_SHOP_CLIENT_KEYS` 키 |
+| 그 밖 | 404 `NOT_MAPPED` (환불·쿠폰·배너 쓰기와 문의·신청 읽기는 다음 PR) |
+
+오류: 짝 없음·연결 아님 503 `NOT_CONFIGURED`, 짝이 응답과 안 맞음 502 `MAPPING_BROKEN`,
+고객사 키 거부 503 `UPSTREAM_AUTH`, 고객사 응답 없음·5xx 503 `UPSTREAM_UNAVAILABLE`.
+
 ## 4. 의존
 ax-contracts, ax-agent-template
 ## 5. 하지 않는 것
