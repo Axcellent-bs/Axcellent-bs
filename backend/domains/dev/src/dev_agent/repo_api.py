@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import time
+import weakref
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -80,6 +82,29 @@ def _resolve(connection: str | None) -> tuple[str, VcsAdapter, vcs.Connection]:
     if conn is None:
         raise RepoError(404, "NOT_FOUND", f"연결 {cid}가 없다")
     return cid, vcs.get_adapter(cid), conn
+
+
+READ_TTL = 10.0  # 레포 목록(PR·이슈·브랜치·그래프)을 기억하는 초
+_reads: weakref.WeakKeyDictionary[Any, dict[tuple, tuple[float, Any]]] = weakref.WeakKeyDictionary()
+
+
+async def _memo(adapter: VcsAdapter, key: tuple, make: Callable[[], Awaitable[Any]]) -> Any:
+    """화면이 탭을 오가거나 다시 열 때 GitHub에 같은 목록을 또 묻지 않게 READ_TTL초 기억한다.
+
+    연결 부품(adapter)이 바뀌면(토큰·연결 변경) 기억도 같이 버려진다. 이 화면에서 쓰면 바로 비운다.
+    """
+    box = _reads.setdefault(adapter, {})
+    now = time.monotonic()
+    hit = box.get(key)
+    if hit is not None and now - hit[0] < READ_TTL:
+        return hit[1]
+    value = await make()
+    box[key] = (now, value)
+    return value
+
+
+def _forget_reads() -> None:
+    _reads.clear()
 
 
 def _first_id() -> str | None:
@@ -186,7 +211,11 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
         svc = get_service()
         return {"data": data, "meta": {"tenant_id": svc.tenant_id, "version": svc.version, **meta}}
 
-    async def guard(fn: Callable[[], Awaitable[dict]]) -> dict | JSONResponse:
+    async def guard(
+        fn: Callable[[], Awaitable[dict]], *, write: bool = False
+    ) -> dict | JSONResponse:
+        if write:  # 쓰기 전후로 기억한 목록을 버린다 (쓴 결과가 바로 보이게)
+            _forget_reads()
         try:
             return await fn()
         except RepoError as exc:
@@ -202,6 +231,9 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             )
         except ActionError as exc:
             return _err(400, exc.code, exc.message)
+        finally:
+            if write:
+                _forget_reads()
 
     # ---- 읽기
 
@@ -217,7 +249,12 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
                 raise RepoError(400, "INVALID_INPUT", f"state는 {', '.join(STATES)} 중 하나다")
             cid, adapter, conn = _resolve(connection)
             n = max(1, min(int(limit), MAX_LIST))
-            rows = await adapter.list_changes(state, (q or "").strip()[:200] or None, n)
+            query = (q or "").strip()[:200] or None
+            rows = await _memo(
+                adapter,
+                ("changes", state, query, n),
+                lambda: adapter.list_changes(state, query, n),
+            )
             linked = _linked(get_service(), cid)
             items = []
             for c in rows:
@@ -279,7 +316,12 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             cid, adapter, conn = _resolve(connection)
             _issues(adapter)
             n = max(1, min(int(limit), MAX_LIST))
-            rows = await adapter.list_issues(state, (q or "").strip()[:200] or None, n)
+            query = (q or "").strip()[:200] or None
+            rows = await _memo(
+                adapter,
+                ("issues", state, query, n),
+                lambda: adapter.list_issues(state, query, n),
+            )
             items = []
             for i in rows:
                 item = _plain(i)
@@ -330,14 +372,19 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             )
             return ok({"comment": _plain(made)})
 
-        return await guard(run)
+        return await guard(run, write=True)
 
     @router.get("/repo/branches", response_model=None)
     async def list_repo_branches(connection: str | None = None) -> dict | JSONResponse:
         async def run() -> dict:
             cid, adapter, conn = _resolve(connection)
             branches, prs = await asyncio.gather(
-                adapter.list_branches(), adapter.list_changes("all", None, MAX_LIST)
+                _memo(adapter, ("branches",), adapter.list_branches),
+                _memo(
+                    adapter,
+                    ("changes", "all", None, MAX_LIST),
+                    lambda: adapter.list_changes("all", None, MAX_LIST),
+                ),
             )
             meta = _repo_meta(cid, conn, adapter)
             by_branch: dict[str, Any] = {}
@@ -376,7 +423,9 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
                 )
             n = max(1, min(int(limit), GRAPH_MAX))
             cid, adapter, conn = _resolve(connection)
-            graph = await adapter.list_graph(names or None, n)
+            graph = await _memo(
+                adapter, ("graph", tuple(names), n), lambda: adapter.list_graph(names or None, n)
+            )
             meta = _repo_meta(cid, conn, adapter)
             rows = _graph_rows(graph, _linked(get_service(), cid))
             data = {
@@ -442,7 +491,7 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             head = await adapter.describe_change(number)
             return ok({"pr": _plain(head), "via": "repo", "internal": None})
 
-        return await guard(run)
+        return await guard(run, write=True)
 
     @router.post("/repo/prs/{number}/close", response_model=None, dependencies=HUMAN)
     async def close_repo_pr(number: int, connection: str | None = None) -> dict | JSONResponse:
@@ -467,7 +516,7 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             after = _linked(svc, cid).get(number)
             return ok({"pr": _plain(head), "internal": _internal(after)})
 
-        return await guard(run)
+        return await guard(run, write=True)
 
     @router.post("/repo/prs/{number}/reopen", response_model=None, dependencies=HUMAN)
     async def reopen_repo_pr(number: int, connection: str | None = None) -> dict | JSONResponse:
@@ -487,7 +536,7 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             )
             return ok({"pr": _plain(head)})
 
-        return await guard(run)
+        return await guard(run, write=True)
 
     @router.post("/repo/prs/{number}/comment", response_model=None, dependencies=HUMAN)
     async def comment_repo_pr(
@@ -509,7 +558,7 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             )
             return ok({"comment": _plain(made)})
 
-        return await guard(run)
+        return await guard(run, write=True)
 
     @router.post("/repo/prs/{number}/revert", response_model=None, dependencies=HUMAN)
     async def revert_repo_pr(
@@ -534,7 +583,7 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             )
             return ok({"revert": _plain(made)})
 
-        return await guard(run)
+        return await guard(run, write=True)
 
     @router.post("/repo/branches/delete", response_model=None, dependencies=HUMAN)
     async def delete_repo_branch(
@@ -568,4 +617,4 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             )
             return ok({"deleted": name})
 
-        return await guard(run)
+        return await guard(run, write=True)

@@ -117,7 +117,13 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   useEffect(() => {
     if (!poll || !cur) return
     const id = cur.id
-    const t = setInterval(() => api.get(id, chat.account).then(chat.upsert).catch(() => undefined), 2000)
+    // 다른 탭을 볼 때는 받지 않고, 앞 요청이 아직이면 이번 차례는 건너뛴다
+    let busy = false
+    const t = setInterval(() => {
+      if (busy || document.hidden) return
+      busy = true
+      api.get(id, chat.account).then(chat.upsert).catch(() => undefined).finally(() => { busy = false })
+    }, 2000)
     return () => clearInterval(t)
   }, [poll, cur?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
