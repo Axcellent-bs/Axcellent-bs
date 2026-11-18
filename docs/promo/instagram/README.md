@@ -1,8 +1,8 @@
 # 인스타 자료 (캣북스·누비투어 게시물과 하이라이트)
 
-홍보 웹페이지의 "고객사 마케팅 사례" 칸에 보여 줄 **인스타그램 게시물·하이라이트 자료**를 모아 두는 곳이다. 자료는 준하가 만들고 갱신하고, 화면에 그리는 일은 병환이 한다.
+홍보 웹페이지의 "콘텐츠" 칸(`posts.instagram`)에 보여 줄 **인스타그램 게시물·하이라이트 자료**를 모아 두는 곳이다. 자료는 준하가 만들고 갱신하고, 화면에 그리는 일은 병환이 한다.
 
-상태: **형식과 검사 도구만 있다. `instagram.json`은 비어 있다.** 실제 게시물 자료는 계정 확인(하이라이트 유무, 원본 파일 보유자)이 끝난 뒤에 채운다.
+상태: **캣북스 게시물 4개가 `instagram.json`에 들어 있다**(#1347): `2026-11-09-1`, `2026-11-12-1`, `2026-11-12-2`(릴스), `2026-11-13-1`. 4개 모두 `aiGenerated: true`, `axcellent: false`다. 누비투어·스터디온에듀는 아직 게시물이 없다. 게시물은 홍보 페이지의 **콘텐츠** 칸에 고객사별로 보인다(#1352, 이전에는 "고객사 마케팅 사례" 칸). 하이라이트는 계정 확인 전이라 비어 있다.
 
 ## 이 방식이 하는 일과 못 하는 일
 
@@ -15,7 +15,7 @@
 
 | 파일 | 하는 일 |
 | --- | --- |
-| `instagram.json` | **진짜 자료.** 게시물·하이라이트를 여기에 적는다 |
+| `instagram.json` | **진짜 자료.** 게시물·하이라이트를 여기에 적는다(지금은 캣북스 게시물 4개) |
 | `assets/` | 사진·영상 파일. 고객사별 폴더를 쓴다(`assets/catbooks/…`) |
 | `example.json` | 형식 예시. 값은 모두 지어낸 것이고 진짜 자료가 아니다 |
 | `check.mjs` | 자료를 검사한다(아래 "검사") |
@@ -91,7 +91,7 @@ import instagram from "./instagram/load.mjs";
 // cases: { ..., items: instagram.casesItems, ... }
 ```
 
-- `instagram.casesItems`는 지금 `cases.items`와 같은 모양(`name`, `badges`, `summary`, `posts`)이다. `posts` 항목은 `casesPost`가 쓰는 칸(`img`, `alt`, `caption`, `date`, `metrics`, `measuredAt`, `source`)을 그대로 갖고 있고, `date`·`measuredAt`은 "11월 13일" 같은 글자로 바꿔 준다.
+- `instagram.casesItems`는 (이름은 예전 그대로지만) 콘텐츠 칸 `posts.instagram`에 넣는 모양(`name`, `badges`, `summary`, `posts`)이다. `posts` 항목은 `casesPost`가 쓰는 칸(`img`, `alt`, `caption`, `date`, `metrics`, `measuredAt`, `source`)을 그대로 갖고 있고, `date`·`measuredAt`은 "11월 13일" 같은 글자로 바꿔 준다.
 - 추가로 `permalink`(→ "인스타에서 보기" 링크), `aiGenerated`(→ "AI가 만든" 표기), `axcellent`, `type`, `media`, `metricsKind`가 들어 있다. `metricsKind`가 `team`이면 `source` 앞에 "팀 내 시연 반응 · "이 자동으로 붙는다.
 - `instagram.customers[].highlights`에 하이라이트(`title`, `cover`, `slides`)가 들어 있다. 하이라이트 줄 화면은 계정에 하이라이트가 있다고 확인된 뒤에 붙인다.
 - 사진·영상 경로는 `index.html` 기준(`instagram/assets/…`)으로 바꿔 준다. 빌드 결과물에 `instagram/` 폴더가 함께 복사되어야 한다.
