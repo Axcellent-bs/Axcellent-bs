@@ -203,6 +203,14 @@ def test_a_missing_order_is_not_found() -> None:
     assert call(add_inquiry())["outcome"] == "not_found"
 
 
+def test_a_missing_order_says_the_order_is_missing_not_the_inquiry() -> None:
+    use_shop(None)
+    inquiry_id = add_inquiry()
+    message = call(inquiry_id)["output"]["message"]
+    assert "판매 서버에 없다" in message
+    assert f"문의 {inquiry_id}를 찾을 수 없다" not in message
+
+
 def test_when_shop_api_is_down_it_fails_without_guessing() -> None:
     use_shop(None, down=True)
     result = call(add_inquiry())
