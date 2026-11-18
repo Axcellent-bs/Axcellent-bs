@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import FastAPI
@@ -202,11 +203,11 @@ def add_incident_api(app: FastAPI) -> None:
     async def list_incidents() -> dict:
         feed = await state().executions_loader(None)
         books = await state().books()  # 환불 장부 (사건 구간·영향 고객으로 귀속)
-        rows, used = [], []
-        for ctx in known_incidents(feed):
-            detail, _ = await incident_view(ctx, feed, books)
-            used.append(detail["ledger_source"])
-            rows.append(summary_row(detail, feed))
+        # 사건끼리 서로 기다릴 일이 없어 동시에 계산한다 (예전: 17건을 차례로 1초 넘게)
+        ids = known_incidents(feed)
+        views = await asyncio.gather(*(incident_view(c, feed, books) for c in ids))
+        used = [detail["ledger_source"] for detail, _ in views]
+        rows = [summary_row(detail, feed) for detail, _ in views]
         rows.sort(key=lambda r: r["opened_at"] or "", reverse=True)
         meta: dict[str, Any] = {
             "mock": is_mock("finance"),

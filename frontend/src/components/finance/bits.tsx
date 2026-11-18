@@ -49,6 +49,32 @@ export const Waiting = ({ what = "불러오는 중…" }: { what?: string }) => 
 );
 
 /**
+ * 재무 칸 뼈대: 데이터를 받는 동안 숫자 칸·줄 모양의 회색 틀을 먼저 보여 준다(빈 글자보다 덜 기다리는 느낌).
+ * 읽기 프로그램에는 `label`만 읽힌다. 움직임 줄이기 설정이면 깜빡이지 않는다
+ */
+export function Skeleton({ label = "불러오는 중…", stats = 3, lines = 3 }: { label?: string; stats?: number; lines?: number }) {
+  const bar = "animate-pulse rounded bg-ink-100 motion-reduce:animate-none";
+  return (
+    <div role="status" aria-live="polite" className="space-y-3 py-2">
+      <span className="sr-only">{label}</span>
+      {stats > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" aria-hidden="true">
+          {Array.from({ length: stats }, (_, i) => (
+            <div key={i} className="space-y-2 rounded-2xl border border-ink-100 px-4 py-3">
+              <div className={`h-3 w-1/2 ${bar}`} />
+              <div className={`h-6 w-3/4 ${bar}`} />
+            </div>
+          ))}
+        </div>
+      )}
+      {Array.from({ length: lines }, (_, i) => (
+        <div key={i} aria-hidden="true" className={`h-4 ${bar}`} style={{ width: `${92 - i * 14}%` }} />
+      ))}
+    </div>
+  );
+}
+
+/**
  * 관련 기록 번호. 평소에는 접어 두고, 직원이 "기록 번호 보기"를 누르면 "쿠폰 3053 (cpn_3053)"처럼 보여 준다.
  * `sellers`: 판매자 번호 → 이름
  */
@@ -231,7 +257,7 @@ export interface Resource<T> {
 }
 
 /**
- * `key`가 바뀌거나 `tick`이 오르면 다시 받는다. 다시 받는 동안 이전 값은 그대로 보여 준다.
+ * `key`가 바뀌거나 `tick`이 오르면 다시 받는다(앞 요청이 아직 오는 중이면 tick은 건너뛴다). 다시 받는 동안 이전 값은 그대로 보여 준다.
  * 늦게 도착한 옛 응답은 버린다.
  */
 export function useResource<T>(key: string, load: () => Promise<Envelope<T>>, tick = 0): Resource<T> {
@@ -240,10 +266,13 @@ export function useResource<T>(key: string, load: () => Promise<Envelope<T>>, ti
   const [loading, setLoading] = useState(true);
   const loadRef = useRef(load);
   const seq = useRef(0);
+  const inflight = useRef(false);
+  const lastKey = useRef<string | null>(null);
   useEffect(() => { loadRef.current = load; });
 
   const reload = useCallback(async () => {
     const mine = ++seq.current;
+    inflight.current = true;
     setLoading(true);
     try {
       const next = await loadRef.current();
@@ -254,18 +283,28 @@ export function useResource<T>(key: string, load: () => Promise<Envelope<T>>, ti
       if (mine !== seq.current) return;
       setError((e as Error).message);
     } finally {
-      if (mine === seq.current) setLoading(false);
+      if (mine === seq.current) {
+        inflight.current = false;
+        setLoading(false);
+      }
     }
   }, []);
 
-  useEffect(() => { void reload(); }, [key, tick, reload]);
+  // 같은 요청이 겹쳐 나가지 않게: key가 그대로인데 앞 요청이 아직 오는 중이면 이번 새로 고침(tick)은 건너뛴다.
+  // key가 바뀌면(다른 달·다른 이슈) 앞 요청을 버리고 새로 받는다
+  useEffect(() => {
+    const keyChanged = lastKey.current !== key;
+    lastKey.current = key;
+    if (!keyChanged && inflight.current) return;
+    void reload();
+  }, [key, tick, reload]);
   const set = useCallback((fn: (cur: Envelope<T>) => Envelope<T>) => setEnv((cur) => (cur ? fn(cur) : cur)), []);
   return { env, error, loading, reload, set };
 }
 
 /** 리소스 상태에 맞춰 불러오는 중 / 오류 / 본문을 고른다. 값이 있으면 오류는 위에 작게 붙인다 */
 export function ResourceBody<T>({ res, children }: { res: Resource<T>; children: (data: T) => ReactNode }) {
-  if (!res.env) return res.error ? <ErrorBox message={res.error} onRetry={res.reload} /> : <Waiting />;
+  if (!res.env) return res.error ? <ErrorBox message={res.error} onRetry={res.reload} /> : <Skeleton />;
   return (
     <>
       {res.error && <div className="mb-3"><ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${res.error}`} onRetry={res.reload} /></div>}

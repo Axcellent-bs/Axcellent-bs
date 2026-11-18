@@ -694,3 +694,44 @@ def test_incident_api_works_from_a_saved_window_after_a_restart(monkeypatch, tmp
     data = detail.json()["data"]
     assert data["window"] is not None and data["recovered_at"] == fc.iso(end)
     assert data["compensation"]["coupons"][0]["buyer_id"] == "buy_1"
+
+
+def test_incident_list_is_read_once_for_many_incidents() -> None:
+    """사건마다 총괄 목록을 새로 받지 않는다(N+1). 동시에 물어도 한 번 받아 나눠 쓴다 (11/18)."""
+    import asyncio
+
+    seen: list[httpx.Request] = []
+    rows = [ORC_ROW | {"context_id": f"ctx_inc_{n}"} for n in range(5)]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"data": rows})
+
+    src = LiveSources(httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+    async def go() -> list:
+        return await asyncio.gather(*(src.incident_window(r["context_id"]) for r in rows))
+
+    found = asyncio.run(go())
+    assert all(f and f["component"] == "payment" for f in found)
+    assert len(seen) == 1
+    asyncio.run(src.incident_window("ctx_inc_0"))  # 잠시 뒤 다시 물어도 기억한 목록을 쓴다
+    assert len(seen) == 1
+
+
+def test_failed_incident_list_is_not_remembered() -> None:
+    """못 받은 목록은 기억하지 않는다. 다음에 다시 묻는다 (확인할 수 없음을 오래 끌지 않게)."""
+    import asyncio
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("orchestrator down")
+        return httpx.Response(200, json={"data": [ORC_ROW]})
+
+    src = LiveSources(httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert asyncio.run(src.incident_window(CTX)) is None
+    assert asyncio.run(src.incident_window(CTX)) is not None
+    assert calls["n"] == 2
