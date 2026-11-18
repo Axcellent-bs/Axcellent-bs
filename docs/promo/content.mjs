@@ -183,7 +183,8 @@ export default {
     //   metrics: [["도달", "123"], ["좋아요", "12"]], measuredAt: "11월 27일", source: "Instagram 인사이트(7일 기준)" }
     // 반응 숫자(metrics)는 실제로 잰 값만 넣고, 잰 날짜(measuredAt)와 출처(source)를 함께 적는다. 둘 중 하나라도 없으면 숫자가 화면에 안 나온다.
     // 게시물·반응은 instagram/instagram.json(준하 님 자료)에서 읽는다. 자료 형식·검사: instagram/README.md
-    items: instagram.casesItems,
+    // 인스타 게시물은 이 칸이 아니라 아래 "콘텐츠" 칸(posts.instagram)에 보인다. 이 칸에는 고객사 사이트 화면을 넣는다(posts는 비워 둔다)
+    items: instagram.casesItems.map((it) => ({ ...it, posts: [] })),
     emptyText: "사례 준비 중",
     // 숫자를 실제 측정값으로 채우는 때에는 이 문장을 "시연용 가상 고객사 계정에서 잰 실제 값이며, 실제 기업의 매출·성과를 뜻하지 않습니다."로 맞춘다(README 참고)
     note: "게시물과 반응 숫자는 시연 환경(가상 계정) 기준이며 실제 고객 성과가 아닙니다. 모든 게시물은 AI가 요청하고 사람이 승인한 뒤에 올라갑니다.",
@@ -204,7 +205,9 @@ export default {
   posts: {
     kicker: "콘텐츠",
     title: ["고객사를 위해", "만든 콘텐츠"],
-    lead: "AXcellent가 고객사를 위해 만든 영상을 모았습니다. 반응 수치는 실제로 측정한 값이 생긴 뒤에만 표시합니다.",
+    lead: "AXcellent가 고객사를 위해 만든 영상과 인스타그램 게시물을 모았습니다. 반응 수치는 실제로 측정한 값이 생긴 뒤에만 표시합니다.",
+    // 고객사별 인스타 게시물(instagram/instagram.json에서 읽는다). 게시물이 있는 고객사만 보인다
+    instagram: instagram.casesItems,
     emptyTitle: "콘텐츠 준비 중",
     // true면 영상이 없어도 빈 칸 "준비 중"을 보여 준다. 기본은 영상이 올라올 때까지 구역과 메뉴를 숨긴다
     showEmpty: false,
@@ -213,7 +216,7 @@ export default {
     items: [
       { title: "캣북스 영상 (시연용)", customer: "캣북스", caption: "시연용 가상 고객사 캣북스 계정의 영상입니다.", src: "assets/demo/catbooks-video.mp4", ratio: "9 / 16", aiMade: true },
     ],
-    note: "시연용 가상 고객사의 홍보물입니다. AI로 만든 영상에는 “AI가 만든 영상” 표시를 붙입니다.",
+    note: "시연용 가상 고객사의 홍보물입니다. AI로 만든 영상·게시물에는 “AI가 만든 영상” 표시를 붙입니다.",
   },
 
   cta: {
