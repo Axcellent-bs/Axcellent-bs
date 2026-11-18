@@ -8,6 +8,7 @@
 실행: python -m unittest discover -s docs/ops/ssh-gate/tests -v   (bash 가 있어야 한다)
 """
 
+import json
 import os
 import shutil
 import sqlite3
@@ -101,6 +102,10 @@ exit 1
     "curl": ('url="${@: -1}"\nport="${url##*:}"\nport="${port%%/*}"\necho "curl $url" >> "$FAKE_LOG"\n'
              'if [[ -f "$FAKE_STATE/curl_code_$port" ]]; then printf "%s" "$(cat "$FAKE_STATE/curl_code_$port")"\n'
              'else printf "%s" "$(cat "$FAKE_STATE/curl_code" 2>/dev/null || echo 200)"\nfi\n'),
+    # 게이트웨이 반영 명령(가짜). state/gw_reload_fail_once 가 있으면 한 번만 실패, state/gw_reload_rc 가 있으면 그 끝 코드
+    "gw-reload": ('echo "gw-reload $*" >> "$FAKE_LOG"\n'
+                  'if [[ -f "$FAKE_STATE/gw_reload_fail_once" ]]; then rm -f "$FAKE_STATE/gw_reload_fail_once"; exit 1; fi\n'
+                  'exit "$(cat "$FAKE_STATE/gw_reload_rc" 2>/dev/null || echo 0)"\n'),
     "journalctl": 'echo "journalctl $*" >> "$FAKE_LOG"\nexit 0\n',
     "chown": "exit 0\n",
     "python3": ('script="$1"\nshift\n'
@@ -1428,7 +1433,8 @@ class NginxRestoreAndStatusTests(GateCase):
 
 
 PAUSED_SH = HERE.parent / "autodeploy-paused.sh"
-OWNER_PLUS = ALL + ', "autodeploy-pause", "autodeploy-resume"'
+OWNER_PLUS = (ALL + ', "gateway-allow-propose", "gateway-allow-approve", "gateway-allow-restore", '
+              '"autodeploy-pause", "autodeploy-resume"')
 
 
 class AutodeployPauseTests(GateCase):
@@ -2159,9 +2165,10 @@ class UsabilityTests(GateCase):
             self.assertIn(line + "\n", p.stdout)
         self.assertNotIn("  restart-backend <SHA>", p.stdout)
         self.assertIn("이 계정에 없는 동작(권한자에게 요청한다): lock unlock nginx-restore nginx-add-location "
-                      "nginx-approve-location restart-backend rollback-bundle", p.stdout)
+                      "nginx-approve-location gateway-allow-propose gateway-allow-approve gateway-allow-restore "
+                      "restart-backend rollback-bundle", p.stdout)
         self.assertIn("--dry-run", p.stdout)
-        self.assertIn("ax-gate 0.3.0", p.stdout)
+        self.assertIn("ax-gate 0.4.0", p.stdout)
         self.assertEqual(self.calls(), "")                       # sudo 를 부르지 않는다(앞단에서 끝난다)
         self.assertIn("user=member-x\taction=help\targs=-\tmode=real\tannounced=no\tpr=-\tnote=-\t"
                       "layer=front\tresult=help", self.audit_text())
@@ -2171,8 +2178,9 @@ class UsabilityTests(GateCase):
         p = self.gate("owner-a", "help")
         self.assertRc(p, 0)
         self.assertIn("  restart-backend <SHA> --ack-data-loss\n", p.stdout)
-        # 이 테스트 정책의 권한자에게 없는 것은 자동 배포 정지·재개뿐이다(따로 적어야 열린다)
-        self.assertIn("이 계정에 없는 동작(권한자에게 요청한다): autodeploy-pause autodeploy-resume\n", p.stdout)
+        # 이 테스트 정책의 권한자에게 없는 것은 게이트웨이 허용 3개와 자동 배포 정지·재개뿐이다(따로 적어야 열린다)
+        self.assertIn("이 계정에 없는 동작(권한자에게 요청한다): gateway-allow-propose gateway-allow-approve "
+                      "gateway-allow-restore autodeploy-pause autodeploy-resume\n", p.stdout)
         p = self.gate("member-x", "help restart-backend")
         self.assertRc(p, 0)
         self.assertIn("형식: restart-backend <SHA> --ack-data-loss", p.stdout)
@@ -2309,8 +2317,368 @@ class UsabilityTests(GateCase):
 
     def test_version_has_no_draft_suffix(self):
         p = self.gate("member-x", "status")
-        self.assertIn("ax-gate 0.3.0 — status", p.stdout)
+        self.assertIn("ax-gate 0.4.0 — status", p.stdout)
         self.assertNotIn("draft", p.stdout)
+
+
+GW_ACTIONS = ', "gateway-allow-propose", "gateway-allow-approve", "gateway-allow-restore"'
+GW_CARD = {
+    "name": "example-agent",
+    "grade": "read",
+    "allowed_requesters": ["gateway-x"],
+    "skills": [{"id": "list_items", "grade": "read"}, {"id": "get_item"}, {"id": "write_item", "grade": "write"}],
+}
+GW_LIST = "# allowed skills\nexisting_skill\n"
+
+
+class GatewayAllowTests(GateCase):
+    """gateway-allow-propose / approve / restore: 임시 폴더와 가짜 reload 명령으로만 돈다."""
+
+    def setUp(self):
+        super().setUp()
+        r = self.rootp
+        (r / "gw/backups").mkdir(parents=True)
+        self.list = r / "gw/allowed.txt"
+        self.card = r / "gw/card.json"
+        write(self.list, GW_LIST)
+        self.write_card(GW_CARD)
+        self.set_policy()
+
+    def write_card(self, card):
+        write(self.card, json.dumps(card))
+
+    def gw_body(self, reload_cmd="gw-reload now", extra=""):
+        return (f'list_file = "{self.root}/gw/allowed.txt"\n'
+                f'card_path = "{self.root}/gw/card.json"\n'
+                f'reload_cmd = "{reload_cmd}"\n'
+                f'backup_dir = "{self.root}/gw/backups"\n' + extra)
+
+    def set_policy(self, gw_body=None, gw_extra="", self_approve=""):
+        base = policy_text(self.root).replace(f"[{ALL}]", f"[{ALL}{GW_ACTIONS}]")
+        body = gw_body if gw_body is not None else self.gw_body(extra='requester = "gateway-x"\n')
+        write(self.policy, base + "\n[gateway_allow]\n" + body + gw_extra + "\n" + self_approve)
+
+    def propose_gw(self, skill="list_items", key="owner-a"):
+        p = self.gate(key, f"gateway-allow-propose {skill}")
+        self.assertRc(p, 0)
+        return [ln.split()[-1] for ln in p.stdout.splitlines() if ln.strip().startswith("확인값")][0]
+
+    def approve_gw(self, digest, key="owner-b", skill="list_items"):
+        return self.gate(key, f"gateway-allow-approve {skill} {digest} --announced")
+
+    def list_text(self):
+        return self.list.read_text(encoding="utf-8")
+
+    def backups(self):
+        return sorted(os.listdir(self.rootp / "gw/backups"))
+
+    def pending_gw(self):
+        return [n for n in sorted(os.listdir(self.rootp / "var/lib/ax-gate/pending")) if n.startswith("gateway-allow.")]
+
+    def test_proposal_alone_changes_nothing(self):
+        digest = self.propose_gw()
+        self.assertEqual(self.list_text(), GW_LIST)
+        self.assertEqual(self.backups(), [])
+        self.assertNotIn("gw-reload", self.calls())
+        self.assertEqual(self.pending_gw(), ["gateway-allow.list_items.req"])
+        req = (self.rootp / "var/lib/ax-gate/pending/gateway-allow.list_items.req").read_text(encoding="utf-8")
+        self.assertIn("proposer=owner-a\n", req)
+        self.assertIn("created_epoch=", req)
+        self.assertIn(f"digest={digest}\n", req)
+        p = self.gate("member-x", "status")
+        self.assertIn(f"게이트웨이 허용 제안(승인 대기): skill list_items / 제안자 owner-a / 확인값 {digest}", p.stdout)
+        self.assertIn(f"note=digest:{digest}\tlayer=root\tresult=proposed", self.audit_text())
+
+    def test_second_owner_approval_applies_backs_up_reloads_and_records(self):
+        digest = self.propose_gw()
+        p = self.approve_gw(digest)
+        self.assertRc(p, 0)
+        self.assertEqual(self.list_text(), GW_LIST + "list_items\n")
+        self.assertIn("gw-reload now", self.calls())
+        (bdir,) = self.backups()
+        self.assertTrue(bdir.startswith("gwa-"))
+        saved = self.rootp / "gw/backups" / bdir
+        self.assertEqual((saved / "allowed.txt").read_text(encoding="utf-8"), GW_LIST)
+        self.assertTrue((saved / "allowed.txt.sha256").exists())
+        self.assertIn(f"gateway-allow-restore {bdir}", p.stdout)
+        self.assertEqual(self.pending_gw(), [])
+        (rec,) = os.listdir(self.rootp / "var/lib/ax-gate/approved")
+        text = (self.rootp / "var/lib/ax-gate/approved" / rec).read_text(encoding="utf-8")
+        self.assertIn("proposer=owner-a\n", text)
+        self.assertIn("approver=owner-b\n", text)
+        self.assertIn(f"backup={bdir}\n", text)
+        self.assertIn(f"user=owner-b\taction=gateway-allow-approve\targs=list_items {digest}\tmode=real\t"
+                      f"announced=yes\tpr=-\tnote=proposer:owner-a,digest:{digest},self-approve:no\tlayer=root\t"
+                      f"result=applied:{bdir}", self.audit_text())
+        self.assertNotIn("nginx", self.calls())
+        # 이미 들어 있으면 다시 제안할 수 없다(중복)
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 2)
+
+    def test_skill_without_skill_level_grade_uses_card_grade(self):
+        digest = self.propose_gw("get_item")
+        self.assertRc(self.approve_gw(digest, skill="get_item"), 0)
+        self.assertIn("get_item\n", self.list_text())
+
+    def test_proposer_cannot_approve_own_proposal(self):
+        digest = self.propose_gw(key="owner-a")
+        p = self.approve_gw(digest, key="owner-a")
+        self.assertRc(p, 3)
+        self.assertIn("result=fail:self-approval", self.audit_text())
+        self.assertEqual(self.list_text(), GW_LIST)
+        self.assertEqual(self.pending_gw(), ["gateway-allow.list_items.req"])
+        self.assertNotIn("gw-reload", self.calls())
+
+    def test_self_approve_only_for_listed_accounts(self):
+        self.set_policy(self_approve='[self_approve]\naccounts = ["owner-c"]\n')
+        digest = self.propose_gw(key="owner-a")
+        self.assertRc(self.approve_gw(digest, key="owner-a"), 3)
+        self.assertEqual(self.list_text(), GW_LIST)
+        self.set_policy(self_approve='[self_approve]\naccounts = ["owner-a"]\n')
+        p = self.approve_gw(digest, key="owner-a")
+        self.assertRc(p, 0)
+        self.assertIn("셀프 승인(정책 허용 계정)", p.stdout)
+        self.assertIn(f"note=proposer:owner-a,digest:{digest},self-approve:yes", self.audit_text())
+        self.assertIn("list_items\n", self.list_text())
+
+    def test_proposal_expiry_wrong_digest_and_missing(self):
+        digest = self.propose_gw()
+        wrong = "0" * 12 if digest != "0" * 12 else "1" * 12
+        self.assertRc(self.approve_gw(wrong), 2)
+        self.assertIn("result=fail:digest-mismatch", self.audit_text())
+        self.assertRc(self.approve_gw(digest, skill="get_item"), 2)
+        self.assertIn("result=fail:no-proposal", self.audit_text())
+        req = self.rootp / "var/lib/ax-gate/pending/gateway-allow.list_items.req"
+        original = req.read_text(encoding="utf-8")
+        # 제안 파일의 제안자를 바꾸면 확인값이 달라진다
+        write(req, original.replace("proposer=owner-a", "proposer=owner-c"))
+        self.assertRc(self.approve_gw(digest), 2)
+        self.assertIn("result=fail:digest-mismatch", self.audit_text())
+        # TTL 만료
+        lines = [("created_epoch=1" if ln.startswith("created_epoch=") else ln) for ln in original.splitlines()]
+        write(req, "\n".join(lines) + "\n")
+        self.assertRc(self.approve_gw(digest), 2)
+        self.assertIn("result=fail:proposal-expired", self.audit_text())
+        self.assertIn("게이트웨이 허용 제안(만료): list_items", self.gate("member-x", "status").stdout)
+        self.assertEqual(self.list_text(), GW_LIST)
+        self.assertNotIn("gw-reload", self.calls())
+
+    def test_write_grade_is_refused_at_proposal_and_at_approval(self):
+        p = self.gate("owner-a", "gateway-allow-propose write_item")
+        self.assertRc(p, 2)
+        self.assertIn("grade-not-read", p.stderr)
+        self.assertEqual(self.pending_gw(), [])
+        # 제안 뒤 카드가 write 로 바뀌면 승인 시점 재검증에서 거부된다(카드 수준·skill 수준 둘 다)
+        digest = self.propose_gw()
+        for card in (dict(GW_CARD, grade="write"),
+                     dict(GW_CARD, skills=[{"id": "list_items", "grade": "write"}])):
+            self.write_card(card)
+            self.assertRc(self.approve_gw(digest), 2)
+        self.assertEqual(self.list_text(), GW_LIST)
+        self.assertEqual(self.backups(), [])
+        self.assertNotIn("gw-reload", self.calls())
+
+    def test_card_without_any_grade_is_refused(self):
+        self.write_card({"allowed_requesters": ["gateway-x"], "skills": [{"id": "list_items"}]})
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 2)
+
+    def test_skill_not_in_card_and_duplicate(self):
+        p = self.gate("owner-a", "gateway-allow-propose unknown_skill")
+        self.assertRc(p, 2)
+        self.assertIn("skill-not-in-card", p.stderr)
+        digest = self.propose_gw()
+        # 그 사이 다른 경로로 이미 허용됐다면 승인 시점에 중복으로 거부된다
+        write(self.list, GW_LIST + "list_items\n")
+        p = self.approve_gw(digest)
+        self.assertRc(p, 2)
+        self.assertIn("duplicate", p.stderr)
+        self.assertEqual(self.list_text(), GW_LIST + "list_items\n")
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose existing_skill"), 2)
+
+    def test_requester_must_be_in_card_when_configured(self):
+        self.write_card(dict(GW_CARD, allowed_requesters=["someone-else"]))
+        p = self.gate("owner-a", "gateway-allow-propose list_items")
+        self.assertRc(p, 2)
+        self.assertIn("requester-not-allowed", p.stderr)
+        self.write_card({k: v for k, v in GW_CARD.items() if k != "allowed_requesters"})
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 2)
+        # requester 를 정책에 적지 않으면 그 검사는 하지 않는다
+        self.set_policy(gw_body=self.gw_body())
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 0)
+
+    def test_bad_names_never_reach_sudo(self):
+        for bad in ("List_items", "1abc", "a", "a-b", "a" * 65, "a;b"):
+            with self.subTest(skill=bad):
+                self.assertRc(self.gate("owner-a", f"gateway-allow-propose {bad}"), 2)
+        self.assertNotIn("sudo", self.calls())
+
+    def test_reload_failure_rolls_back_and_keeps_proposal(self):
+        digest = self.propose_gw()
+        write(self.state / "gw_reload_fail_once", "1\n")
+        p = self.approve_gw(digest)
+        self.assertRc(p, 1)
+        self.assertEqual(self.list_text(), GW_LIST)
+        self.assertEqual(self.calls().count("gw-reload now"), 2)  # 반영 시도 + 되돌린 뒤 다시 반영
+        self.assertIn("result=fail:gateway-reload-failed", self.audit_text())
+        self.assertEqual(self.pending_gw(), ["gateway-allow.list_items.req"])
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/approved"), [])
+        self.assertFalse([n for n in os.listdir(self.rootp / "gw") if ".gwa-new." in n])
+        # 반영이 되돌린 뒤에도 계속 실패하면 경고가 나온다
+        write(self.state / "gw_reload_rc", "1\n")
+        time.sleep(1.1)
+        p = self.approve_gw(digest)
+        self.assertRc(p, 1)
+        self.assertIn("경고: 되돌린 뒤에도 게이트웨이 반영 명령이 실패한다", p.stdout)
+        self.assertEqual(self.list_text(), GW_LIST)
+
+    def test_restore_returns_to_backup_and_is_undoable(self):
+        digest = self.propose_gw()
+        self.assertRc(self.approve_gw(digest), 0)
+        (bdir,) = self.backups()
+        time.sleep(1.1)
+        p = self.gate("owner-c", f"gateway-allow-restore {bdir} --announced")
+        self.assertRc(p, 0)
+        self.assertEqual(self.list_text(), GW_LIST)
+        pre = [b for b in self.backups() if b.startswith("gwa-pre-restore-")]
+        self.assertEqual(len(pre), 1)
+        self.assertIn(f"gateway-allow-restore {pre[0]}", p.stdout)
+        self.assertIn(f"result=restored:{bdir}", self.audit_text())
+        time.sleep(1.1)
+        self.assertRc(self.gate("owner-c", f"gateway-allow-restore {pre[0]} --announced"), 0)
+        self.assertEqual(self.list_text(), GW_LIST + "list_items\n")
+
+    def test_restore_checks_folder_name_checksum_and_needs_announce(self):
+        self.assertRc(self.gate("owner-c", "gateway-allow-restore pre-gate-add-x --announced"), 2)
+        self.assertRc(self.gate("owner-c", "gateway-allow-restore gwa-nothing --announced"), 2)
+        self.assertRc(self.gate("owner-c", "gateway-allow-restore gwa-nothing"), 2)
+        digest = self.propose_gw()
+        self.assertRc(self.approve_gw(digest), 0)
+        (bdir,) = self.backups()
+        write(self.rootp / "gw/backups" / bdir / "allowed.txt", "tampered\n")
+        p = self.gate("owner-c", f"gateway-allow-restore {bdir} --announced")
+        self.assertRc(p, 1)
+        self.assertIn("result=fail:backup-checksum", self.audit_text())
+        self.assertEqual(self.list_text(), GW_LIST + "list_items\n")
+
+    def test_restore_reload_failure_reverts(self):
+        digest = self.propose_gw()
+        self.assertRc(self.approve_gw(digest), 0)
+        (bdir,) = self.backups()
+        time.sleep(1.1)
+        write(self.state / "gw_reload_fail_once", "1\n")
+        self.assertRc(self.gate("owner-c", f"gateway-allow-restore {bdir} --announced"), 1)
+        self.assertEqual(self.list_text(), GW_LIST + "list_items\n")
+
+    def test_announce_permission_lock_and_default_account(self):
+        digest = self.propose_gw()
+        p = self.gate("owner-b", f"gateway-allow-approve list_items {digest}")
+        self.assertRc(p, 2)
+        self.assertIn("gateway-allow-approve list_items", p.stderr)
+        self.assertRc(self.gate("member-x", "gateway-allow-propose list_items"), 3)
+        self.assertRc(self.gate("restore-only", f"gateway-allow-approve list_items {digest} --announced"), 3)
+        self.gate("owner-a", "lock demo")
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose get_item"), 4)
+        self.assertRc(self.approve_gw(digest), 4)
+        self.assertEqual(self.list_text(), GW_LIST)
+        # _default 에는 둘 수 없다
+        write(self.policy, self.policy.read_text(encoding="utf-8").replace(
+            '_default = ["status",', '_default = ["gateway-allow-propose", "status",'))
+        self.assertRc(self.gate("owner-a", "status"), 5)
+
+    def test_proposer_permission_is_rechecked_at_approval(self):
+        digest = self.propose_gw(key="owner-a")
+        text = self.policy.read_text(encoding="utf-8")
+        write(self.policy, text.replace(f"owner-a = [{ALL}{GW_ACTIONS}]", f"owner-a = [{ALL}]"))
+        p = self.approve_gw(digest)
+        self.assertRc(p, 3)
+        self.assertIn("result=fail:proposer-not-permitted", self.audit_text())
+        self.assertEqual(self.list_text(), GW_LIST)
+
+    def test_dry_run_changes_nothing(self):
+        p = self.gate("owner-a", "gateway-allow-propose list_items --dry-run")
+        self.assertRc(p, 0)
+        self.assertEqual(self.pending_gw(), [])
+        digest = self.propose_gw()
+        p = self.gate("owner-b", f"gateway-allow-approve list_items {digest} --announced --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN", p.stdout)
+        self.assertEqual(self.list_text(), GW_LIST)
+        self.assertEqual(self.backups(), [])
+        self.assertNotIn("gw-reload", self.calls())
+        self.assertEqual(self.pending_gw(), ["gateway-allow.list_items.req"])
+        self.assertFalse([n for n in os.listdir(self.rootp / "var/lib/ax-gate/pending") if n.startswith(".gwa")])
+
+    def test_policy_values_come_from_policy_and_are_validated(self):
+        # 구역이 없으면 설정 오류
+        write(self.policy, policy_text(self.root).replace(f"[{ALL}]", f"[{ALL}{GW_ACTIONS}]"))
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+        self.assertIn("result=fail:config-path", self.audit_text())
+        # 자리표시자는 쓸 수 없다
+        self.set_policy(gw_body='list_file = "TODO"\ncard_path = "TODO"\nreload_cmd = "TODO"\nbackup_dir = "TODO"\n')
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+        # 반영 명령이 TODO 이면 거부
+        self.set_policy(gw_body=self.gw_body(reload_cmd="TODO"))
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+        # 반영 명령에 셸 문자가 있으면 거부한다
+        self.set_policy(gw_body=self.gw_body(reload_cmd="gw-reload; touch x"))
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+        self.assertNotIn("gw-reload", self.calls())
+        # 알 수 없는 키는 정책 전체를 거부한다
+        self.set_policy(gw_extra='typo_key = "x"\n')
+        self.assertRc(self.gate("member-x", "status"), 5)
+
+    def test_unknown_list_format_stops_instead_of_writing(self):
+        write(self.list, 'ALLOWED = ["a", "b"]\n')
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+        self.assertEqual(self.list_text(), 'ALLOWED = ["a", "b"]\n')
+
+    def test_missing_card_is_a_config_error(self):
+        self.card.unlink()
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+
+    def test_expected_card_sha(self):
+        repo = self.rootp / "opt/app/repo"
+        card = repo / "agents/card.json"
+        write(card, json.dumps(GW_CARD))
+        body = self.gw_body(extra=f'card_repo = "{repo.as_posix()}"\nexpected_card_sha = "{SHA}"\n')
+        body = body.replace(f'{self.root}/gw/card.json', card.as_posix())
+        self.set_policy(gw_body=body)
+        # HEAD 가 승인된 SHA 이면 통과
+        digest = self.propose_gw()
+        self.assertRc(self.approve_gw(digest), 0)
+        # HEAD 가 다르면 승인 시점에 거부
+        write(self.list, GW_LIST)
+        digest = self.propose_gw("get_item")
+        write(self.state / "git_head", f"{SHA_LOCAL}\n")
+        p = self.approve_gw(digest, skill="get_item")
+        self.assertRc(p, 1)
+        self.assertIn("result=fail:card-sha-mismatch", self.audit_text())
+        self.assertEqual(self.list_text(), GW_LIST)
+        # 카드 파일에 고친 흔적이 있으면 거부
+        write(self.state / "git_head", f"{SHA}\n")
+        write(self.state / "git_dirty", " M agents/card.json\n")
+        self.assertRc(self.approve_gw(digest, skill="get_item"), 1)
+        self.assertIn("result=fail:card-dirty", self.audit_text())
+        # SHA 형식이 틀리면 설정 오류
+        self.set_policy(gw_body=body.replace(SHA, "abc"))
+        self.assertRc(self.gate("owner-a", "gateway-allow-propose list_items"), 5)
+
+    def test_help_and_status_show_new_actions(self):
+        p = self.gate("owner-a", "help")
+        self.assertIn("gateway-allow-propose <skill>", p.stdout)
+        self.assertIn("gateway-allow-approve <skill> <확인값 12자>", p.stdout)
+        p = self.gate("member-x", "help")
+        self.assertNotIn("gateway-allow-propose <skill>", p.stdout.split("이 계정에 없는 동작")[0])
+        self.assertIn("게이트웨이 허용 제안: 없음", self.gate("member-x", "status").stdout)
+
+    def test_nginx_proposals_and_gateway_proposals_do_not_mix(self):
+        self.propose_gw()
+        nginx_digest = self.propose(key="owner-b", name="card-decision")
+        self.assertRc(self.gate("owner-c", f"nginx-approve-location card-decision {nginx_digest} --announced"), 0)
+        self.assertEqual(self.pending_gw(), ["gateway-allow.list_items.req"])
+        self.assertEqual(self.list_text(), GW_LIST)
+        out = self.gate("member-x", "status").stdout
+        self.assertIn("게이트웨이 허용 제안(승인 대기)", out)
+        self.assertNotIn("location 제안(승인 대기): 이름 list_items", out)
 
 
 class ExamplePolicyTests(GateCase):
@@ -2372,6 +2740,10 @@ class ExamplePolicyTests(GateCase):
             chk.check_profile_lines(lines, data["location"]["block_lines"])
         self.assertNotIn("nginx_targets", data)
         self.assertNotIn("nginx_target_block_lines", data)
+        # 게이트웨이 허용 구역은 자리표시자뿐이고, 새 동작 3개는 예시 표의 어느 계정에도 열려 있지 않다
+        self.assertEqual(set(data["gateway_allow"].values()), {"TODO"})
+        for actions in perms.values():
+            self.assertFalse({"gateway-allow-propose", "gateway-allow-approve", "gateway-allow-restore"} & set(actions))
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@
 ```bash
 sudo install -o root -g root -m 755 ops-gate.sh /usr/local/sbin/ax-gate
 sudo install -o root -g root -m 755 nginx_location_check.py /usr/local/sbin/ax-gate-location-check
+sudo install -o root -g root -m 755 gateway_allow_check.py /usr/local/sbin/ax-gate-gateway-allow-check   # gateway-allow-* 를 쓸 때
 
 sudo install -d -o root -g root -m 755 /etc/ax-gate
 sudo install -o root -g root -m 644 <비공개 정책 파일> /etc/ax-gate/policy.toml
@@ -190,6 +191,19 @@ restrict,from="<허용 출처 IP>",command="/usr/local/sbin/ax-gate <계정>" ss
 
 끄기: 정책에서 그 구역을 지운다. 이미 넣은 location은 그대로 남는다.
 
+## 7-0. 게이트웨이 허용 목록(선택)
+
+`gateway-allow-propose` / `gateway-allow-approve` / `gateway-allow-restore`는 게이트웨이의 허용 skill 목록에 읽기(read) 등급 skill을 두 사람 승인으로 더한다. 순서대로 한다(새 게이트 파일을 먼저 설치한 뒤에 정책을 고친다).
+
+1. 1절처럼 `ops-gate.sh`와 `gateway_allow_check.py`를 root 소유로 설치한다.
+2. 허용 목록 백업 폴더를 만든다(root 소유, 755).
+3. 서버 책임자가 서버에서 허용 목록 파일의 **실제 형식**을 확인한다. 게이트는 "한 줄에 skill 하나(빈 줄과 `#` 줄 무시)"를 가정하고, 모르는 줄이 하나라도 있으면 쓰지 않고 멈춘다. 형식이 다르면 `gateway_allow_check.py`의 `allowlist_adapter()` 한 함수만 고친다. 카드 모양(`skills[].id`, `grade`, `allowed_requesters`)도 같은 방식으로 `card_skill_entry()`/`check_card()`만 고친다.
+4. 정책 파일에 `[gateway_allow]` 구역을 채운다(`policy.example.toml` 참고): `list_file`, `card_path`, `reload_cmd`, `backup_dir`. 선택: `requester`, `card_repo` + `expected_card_sha`(카드가 든 서버 레포 HEAD가 승인된 SHA일 때만 쓴다).
+5. 권한자 계정의 `[permissions]` 줄에 `"gateway-allow-propose", "gateway-allow-approve", "gateway-allow-restore"`를 더한다. `_default`에는 넣지 않는다(넣으면 게이트가 모든 요청을 거부한다).
+6. 확인: 임시 skill로 `gateway-allow-propose <skill> --dry-run` → 제안 → 다른 권한자가 `status`로 확인값 확인 → `gateway-allow-approve <skill> <확인값> --announced` → 허용 목록 파일 소유·권한이 그대로인지, 게이트웨이에서 그 skill이 실제로 되는지 → `gateway-allow-restore <gwa-백업폴더>`로 되돌리기. `write` 등급 skill 제안이 거부되는지도 본다.
+
+끄기: 정책에서 그 구역과 권한을 지운다. 이미 더한 skill은 그대로 남는다.
+
 ## 7-1. 자동 배포 정지·재개 연결(선택)
 
 `autodeploy-pause` / `autodeploy-resume`을 쓰려면 한 번 연결한다. 게이트는 정지 표시 파일만 쓰고, 그 파일을 읽어 건너뛰는 것은 자동 배포 쪽이 한다. 순서대로 한다(새 게이트 파일을 먼저 설치한 뒤에 정책을 고친다).
@@ -254,6 +268,7 @@ sudo install -d -o root -g root -m 755 <게이트 상태 폴더>
 - [ ] 잠금 파일이 root 소유 644인지, 개인 계정으로는 못 지우는지
 - [ ] (자동 배포 정지를 켰다면) 권한자가 아닌 계정으로 `autodeploy-pause test` → 끝 코드 3. 권한자로 실행 → 정지 표시 파일이 root 소유 644로 생기고 그 밖의 파일은 안 바뀐다 → 자동 배포가 그 주기를 건너뛴다 → `autodeploy-resume` 뒤 파일이 남아 있고 `resumed_by=`가 적혀 있다
 - [ ] (자동 배포 정지를 켰다면) 최대 시간을 넘는 재개시각 → 거부. 잠금 중 `autodeploy-resume` → 끝 코드 4
+- [ ] (게이트웨이 허용을 켰다면) 권한자가 아닌 계정의 `gateway-allow-propose` → 끝 코드 3. 제안자 본인의 승인 → 끝 코드 3(`[self_approve]`에 없다면). `write` 등급 skill 제안 → 끝 코드 2. 승인 뒤 허용 목록 파일의 소유·권한이 그대로이고 `gwa-` 백업이 생긴다 → `gateway-allow-restore`로 원래대로
 - [ ] 재부팅 뒤에도 잠금 파일·방화벽 규칙·키 파일이 유지되는지
 
 SHA·배포(먼저 `--dry-run`으로)
