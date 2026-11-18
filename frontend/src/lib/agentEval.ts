@@ -87,14 +87,14 @@ export const agentName = (dept: string) => AGENT_NAME[dept] ?? dept;
 export const VERDICT: Record<Verdict, { label: string; mark: string; dot: string; chip: string }> = {
   normal: { label: "제때 끝냄", mark: "●", dot: "text-emerald-600", chip: "bg-emerald-50 text-emerald-700" },
   check: { label: "확인 필요", mark: "▲", dot: "text-amber-600", chip: "bg-amber-50 text-amber-700" },
-  no_record: { label: "기록 없음", mark: "○", dot: "text-ink-400", chip: "bg-ink-100 text-ink-600" },
+  no_record: { label: "기록 없음", mark: "○", dot: "text-ink-500", chip: "bg-ink-100 text-ink-700" },
   blocked: { label: "실패·막힘", mark: "✕", dot: "text-red-600", chip: "bg-red-50 text-red-700" },
   // 사람에게 넘김은 설계된 동작이라 실패처럼 보이지 않게 빨강·노랑을 피하고 중립 색을 쓴다
   handed_off: { label: "사람에게 넘김", mark: "⇢", dot: "text-sky-700", chip: "bg-sky-50 text-sky-800" },
   approval_expired: { label: "승인 만료", mark: "✕", dot: "text-red-600", chip: "bg-red-50 text-red-700" },
   // 긴 작업 중 부서의 응답이 끊김. 일을 못한 것이 아니라 소식이 없었다는 뜻이라 실패(빨강)와 다른 색을 쓴다
   silent: { label: "응답 끊김", mark: "◌", dot: "text-orange-600", chip: "bg-orange-50 text-orange-700" },
-  in_progress: { label: "진행 중", mark: "…", dot: "text-ink-400", chip: "bg-ink-100 text-ink-600" },
+  in_progress: { label: "진행 중", mark: "…", dot: "text-ink-500", chip: "bg-ink-100 text-ink-700" },
   absent: { label: "참여 안 함", mark: "–", dot: "text-ink-300", chip: "bg-ink-100 text-ink-500" },
 };
 
@@ -130,7 +130,7 @@ export const TONE_TEXT: Record<Tone, string> = {
   good: "text-emerald-800",
   look: "text-amber-800",
   bad: "text-red-800",
-  none: "text-ink-600",
+  none: "text-ink-700",
 };
 
 /** 3.5초 · 42초 · 2분 5초 · 1시간 20분 */

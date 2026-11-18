@@ -74,7 +74,7 @@ export function PlanningQuestionsSection({ tick }: { tick: number }) {
                 ))}
               </ul>
             )}
-            {message && <p className="mt-2 text-sm text-ink-600">{message}</p>}
+            {message && <p className="mt-2 text-sm text-ink-700">{message}</p>}
             {answered.length > 0 && (
               <details className="mt-3 text-sm">
                 <summary className="cursor-pointer text-ink-500">답한 질문 {answered.length}건</summary>
@@ -159,7 +159,7 @@ export function PlanningRequestsSection({ tick, prefill = null }: { tick: number
           <button type="button" className="btn-primary" disabled={!ready} onClick={() => void send()}>
             {busy ? "보내는 중…" : "기획에 보내기"}
           </button>
-          {message && <span className="text-sm text-ink-600">{message}</span>}
+          {message && <span className="text-sm text-ink-700">{message}</span>}
         </div>
       </div>
       <div className="mt-4">
