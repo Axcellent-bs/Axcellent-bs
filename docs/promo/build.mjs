@@ -141,7 +141,17 @@ const approval = `
 </section>`;
 
 
-const casesPost = (p) => `<li class="post"><img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy"><div class="post-b">${has(p.date) ? `<span class="post-d">${esc(p.date)}</span>` : ""}${has(p.caption) ? `<p>${esc(p.caption)}</p>` : ""}${(p.metrics || []).length ? `<dl class="metrics">${p.metrics.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>` : ""}</div></li>`;
+// 반응 숫자는 "언제 어디서 잰 값인지"(measuredAt, source)가 함께 있을 때만 보인다. 없으면 숫자를 숨기고 알린다(지어낸 숫자가 나가지 않게)
+function metricsHtml(p) {
+  const list = p.metrics || [];
+  if (!list.length) return "";
+  if (!has(p.measuredAt) || !has(p.source)) {
+    console.warn("[경고] 반응 숫자가 있는데 measuredAt·source가 없어 숨겼다: " + (p.alt || p.img));
+    return "";
+  }
+  return `<dl class="metrics">${list.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl><p class="measured">잰 날짜 ${esc(p.measuredAt)} · ${esc(p.source)}</p>`;
+}
+const casesPost = (p) => `<li class="post"><img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy"><div class="post-b">${has(p.date) ? `<span class="post-d">${esc(p.date)}</span>` : ""}${has(p.caption) ? `<p>${esc(p.caption)}</p>` : ""}${metricsHtml(p)}</div></li>`;
 const casesItems = C.cases.items.filter((it) => C.cases.showEmpty || (it.posts && it.posts.length));
 const cases = casesItems.length === 0 ? "" : `
 <section class="sec sec-light" id="cases">

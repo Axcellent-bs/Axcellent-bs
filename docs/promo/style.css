@@ -248,3 +248,4 @@ body { overflow-x: clip; }
 .metrics div { display: flex; gap: 6px; }
 .metrics dt { color: var(--muted); font-size: 12px; } .metrics dd { margin: 0; font-weight: 800; font-size: 13px; }
 @media (max-width: 980px) { .loop { grid-template-columns: minmax(0, 1fr); } .case-cards { grid-template-columns: minmax(0, 1fr); } }
+.measured { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
