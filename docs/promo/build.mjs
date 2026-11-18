@@ -189,7 +189,7 @@ const customers = `
 </section>`;
 
 const PS = C.posts;
-const postCard = (it) => `<article class="vpost reveal"><div class="vpost-media"${has(it.ratio) ? ` style="aspect-ratio:${esc(it.ratio)}"` : ""}><video controls preload="metadata" playsinline ${has(it.poster) ? `poster="${esc(it.poster)}"` : ""}><source src="${esc(it.src)}${has(it.poster) ? "" : "#t=0.1"}"></video>${it.aiMade ? '<span class="ai-mark">AI가 만든 영상</span>' : ""}</div><h3>${esc(it.title)}</h3>${has(it.customer) ? `<p class="badges"><span class="badge">${esc(it.customer)}</span></p>` : ""}${has(it.caption) ? `<p>${esc(it.caption)}</p>` : ""}${has(it.postUrl) ? `<a class="vpost-link" href="${esc(it.postUrl)}" rel="noopener" target="_blank">원 게시물 보기</a>` : ""}</article>`;
+const postCard = (it) => `<article class="vpost${it.wide ? " vpost-wide" : ""} reveal"><div class="vpost-media"${has(it.ratio) ? ` style="aspect-ratio:${esc(it.ratio)}"` : ""}><video controls preload="metadata" playsinline ${has(it.poster) ? `poster="${esc(it.poster)}"` : ""}><source src="${esc(it.src)}${has(it.poster) ? "" : "#t=0.1"}"></video>${it.aiMade ? '<span class="ai-mark">AI가 만든 영상</span>' : ""}</div><h3>${esc(it.title)}</h3>${has(it.customer) ? `<p class="badges"><span class="badge">${esc(it.customer)}</span></p>` : ""}${has(it.caption) ? `<p>${esc(it.caption)}</p>` : ""}${has(it.postUrl) ? `<a class="vpost-link" href="${esc(it.postUrl)}" rel="noopener" target="_blank">원 게시물 보기</a>` : ""}</article>`;
 const postEmpty = () => `<article class="vpost vpost-empty reveal"><div class="vpost-media"><span>${esc(PS.emptyTitle)}</span></div><h3>홍보 영상 칸</h3><p>영상이 올라오면 이 자리에 나옵니다.</p></article>`;
 const postList = PS.items.length ? PS.items.map(postCard).join("") : Array.from({ length: PS.emptySlots }, postEmpty).join("");
 
@@ -204,7 +204,7 @@ const posts = !showPosts ? "" : `
     <p class="pill reveal">${esc(PS.kicker)}</p>
     <h2 class="h2 ink reveal">${esc(PS.title[0])}<br><span class="brand">${esc(PS.title[1])}</span></h2>
     <p class="posts-lead reveal">${esc(PS.lead)}</p>
-    ${PS.items.length || !igGroups.length ? `<div class="vposts">${postList}</div>` : ""}
+    ${PS.items.length || !igGroups.length ? `${has(PS.itemsTitle) && PS.items.length ? `<header class="vgroup-h reveal"><h3>${esc(PS.itemsTitle)}</h3></header>` : ""}<div class="vposts">${postList}</div>` : ""}
     ${igHtml}
     <p class="callout reveal">${esc(PS.note)}</p>
   </div>

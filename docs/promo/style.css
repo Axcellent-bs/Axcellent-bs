@@ -302,3 +302,8 @@ body { overflow-x: clip; }
 .ig-group .post { background: var(--paper); border-radius: 26px; padding: 16px 16px 24px; min-width: 0; }
 .ig-group .post-thumb { border-radius: 16px; overflow: hidden; }
 .ig-group .post-thumb img { aspect-ratio: 9 / 16; border-radius: 0; }
+
+.vgroup-h { margin-top: var(--gap-block); }
+.vgroup-h h3 { font-size: 24px; font-weight: 800; }
+.vgroup-h + .vposts { margin-top: 16px; align-items: start; }
+@media (min-width: 780px) { .vpost-wide { grid-column: span 2; } }
