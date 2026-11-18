@@ -48,8 +48,8 @@ def trend_candidates(inp: ReceiveInsightInput, trends: list[TrendInsight]) -> li
     """인사이트와 같은 숏츠 형식이면서 광고 재료로 쓸 수 있고 실존 인물·상표가 없는 다른 주제.
 
     11/18 재현 님: `shorts_format`은 카테고리·전체 통계로 채워질 수 있어 주제 영상과 상관없을 수
-    있다. 그래서 주제 자기 숏츠 칸(`shorts_format_topic_median_views`, 데이터분석이 더하는 중)이
-    있는 주제만 후보로 쓴다. 그 칸이 계약에 들어오기 전에는 후보가 없다(지어내지 않음)."""
+    있다. 그래서 주제 자기 숏츠 칸(`shorts_format_topic_median_views`)이 있는 주제만 후보로 쓴다.
+    예전 응답(그 칸 없음)이면 후보가 없다(지어내지 않음)."""
     fmt = inp.shorts_format
     if not fmt:
         return []
@@ -61,27 +61,18 @@ def trend_candidates(inp: ReceiveInsightInput, trends: list[TrendInsight]) -> li
         and t.real_entity is False
         and t.insight_id != inp.insight_id
         and t.topic != inp.title
-        and getattr(t, "shorts_format_topic_median_views", None) is not None
+        and t.shorts_format_topic_median_views is not None
     ]
     picked.sort(key=lambda t: -t.score)
     return [
         TrendRef(
             topic=t.topic,
             median_views=t.shorts_format_topic_median_views,
-            at=getattr(t, "shorts_format_topic_at", None),
-            examples=_titles(getattr(t, "shorts_format_topic_examples", None)),
+            at=t.shorts_format_topic_at,
+            examples=[e.title[:120] for e in t.shorts_format_topic_examples if e.title][:MAX_REFS],
         )
         for t in picked[:MAX_REFS]
     ]
-
-
-def _titles(examples: object) -> list[str]:
-    """대표 영상 제목만 (최대 3개). 모양이 다르면 비운다."""
-    if not isinstance(examples, list):
-        return []
-    out = [getattr(e, "title", None) or (e.get("title") if isinstance(e, dict) else None)
-           for e in examples]  # fmt: skip
-    return [str(x)[:120] for x in out if x][:MAX_REFS]
 
 
 def scale_facts(past: list[InsightPast], followers: ChannelFollowersOutput | None) -> ScaleFacts:

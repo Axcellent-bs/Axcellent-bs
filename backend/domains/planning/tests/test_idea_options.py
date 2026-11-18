@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from ax_contracts.schemas.data import TrendInsight
+from ax_contracts.schemas.data import TopicFormatExample, TrendInsight
 from ax_contracts.schemas.marketing_channels import ChannelFollowersOutput
 from ax_contracts.schemas.planning import InsightPast, ReceiveInsightInput
 from ax_workflow.models import ScaleFacts
@@ -36,18 +35,13 @@ def _t(
     iid: str | None = None,
     views: float | None = 50000.0,
     topic_views: float | None = 48000.0,
-) -> Any:
-    """데이터분석 TrendInsight + 11/18 재현 님이 더하는 주제 자기 숏츠 칸(아직 계약에 없음)."""
-    t = TrendInsight(
+) -> TrendInsight:
+    return TrendInsight(
         insight_id=iid or f"t-{topic}", rank=1, topic=topic, line="l", shorts_format=fmt,
         ad_material=ad, real_entity=real, score=score, shorts_format_median_views=views,
+        shorts_format_topic_median_views=topic_views,
+        shorts_format_topic_examples=[TopicFormatExample(title=f"{topic} 영상", views=1)],
     )  # fmt: skip
-    extra = {
-        "shorts_format_topic_median_views": topic_views,
-        "shorts_format_topic_at": None,
-        "shorts_format_topic_examples": [SimpleNamespace(title=f"{topic} 영상", views=1)],
-    }
-    return SimpleNamespace(**t.model_dump(), **extra)
 
 
 def _opt(opts, angle):
