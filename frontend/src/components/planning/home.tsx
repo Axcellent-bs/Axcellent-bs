@@ -95,7 +95,7 @@ export function Home({ s }: { s: S }) {
                   className={`sl-item home-item${isNew ? ' is-new' : ''} ${nav.className ?? ''}`}>
                   <span className="home-id" title={t.id}>{idText(t.id)}</span>
                   <span className="home-item-main">
-                    {isNew && <span className="home-dot" aria-label="새로 옴" />}
+                    {isNew && <span className="home-dot" role="img" aria-label="새로 옴" />}
                     <b title={t.title}>{t.title}</b>
                     <span className={`rq-dept d-${t.from}`}>{DEPT_NAME[t.from]}</span>
                   </span>
