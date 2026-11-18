@@ -37,7 +37,7 @@ export default {
     ["cases", "마케팅 사례"],
     ["approval", "승인"],
     ["customers", "고객사"],
-    ["posts", "홍보 영상"],
+    ["posts", "콘텐츠"],
   ],
 
   hero: {
@@ -200,16 +200,19 @@ export default {
   },
 
   // 홍보 영상·게시물 칸. items에 넣으면 칸이 채워지고, 비어 있으면 빈 칸(준비 중)을 emptySlots개 보여 준다.
-  // item: { title, caption, src(mp4, assets/demo/ 아래), poster, postUrl(원 게시물 링크, 선택), customer(고객사 이름, 선택), aiMade(true면 "AI가 만든 영상" 표시) }
+  // item: { title, caption, src(mp4, assets/demo/ 아래), ratio(예: "9 / 16"), poster, postUrl(원 게시물 링크, 선택), customer(고객사 이름, 선택), aiMade(true면 "AI가 만든 영상" 표시) }
   posts: {
-    kicker: "홍보 영상·게시물",
-    title: ["고객사를 위해", "만든 홍보물"],
-    lead: "AXcellent가 고객사를 위해 만든 영상과 게시물을 모았습니다. 반응 수치는 실제로 측정한 값이 생긴 뒤에만 표시합니다.",
-    emptyTitle: "영상 준비 중",
+    kicker: "콘텐츠",
+    title: ["고객사를 위해", "만든 콘텐츠"],
+    lead: "AXcellent가 고객사를 위해 만든 영상을 모았습니다. 반응 수치는 실제로 측정한 값이 생긴 뒤에만 표시합니다.",
+    emptyTitle: "콘텐츠 준비 중",
     // true면 영상이 없어도 빈 칸 "준비 중"을 보여 준다. 기본은 영상이 올라올 때까지 구역과 메뉴를 숨긴다
     showEmpty: false,
     emptySlots: 2,
-    items: [],
+    // 영상 추가: mp4를 assets/demo/에 넣고(영문 소문자·숫자·-, 15MB 이하) 아래에 한 줄을 더한다. ratio는 세로 영상이면 "9 / 16"
+    items: [
+      { title: "캣북스 영상 (시연용)", customer: "캣북스", caption: "시연용 가상 고객사 캣북스 계정의 영상입니다.", src: "assets/demo/catbooks-video.mp4", ratio: "9 / 16", aiMade: true },
+    ],
     note: "시연용 가상 고객사의 홍보물입니다. AI로 만든 영상에는 “AI가 만든 영상” 표시를 붙입니다.",
   },
 

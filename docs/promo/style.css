@@ -68,10 +68,10 @@ body { overflow-x: clip; }
 /* 고정 헤더만큼 띄우는 건 html 의 scroll-padding-top 한 곳에서만 한다 (여기에도 두면 두 번 더해져 앞 구역이 80px쯤 보인다) */
 .top-pdf { white-space: nowrap; }
 .posts-lead { margin-top: var(--gap-lead); max-width: 60ch; color: #4a4a68; }
-.vposts { margin-top: var(--gap-block); display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 24px; }
+.vposts { margin-top: var(--gap-block); display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 340px)); justify-content: start; gap: 24px; }
 .vpost { background: var(--paper); border-radius: 26px; padding: 16px 16px 24px; min-width: 0; }
 .vpost-media { position: relative; border-radius: 16px; overflow: hidden; background: #14142e; aspect-ratio: 16 / 9; display: grid; place-items: center; }
-.vpost-media video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vpost-media video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
 .vpost-media span { color: #b9b9d8; font-weight: 700; }
 .vpost .ai-mark { position: absolute; left: 10px; top: 10px; background: rgba(0, 0, 0, .65); color: #fff; font-size: 14px; padding: 4px 10px; border-radius: 999px; }
 .vpost h3 { margin-top: 16px; padding: 0 6px; font-size: 20px; font-weight: 800; }
