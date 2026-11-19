@@ -345,3 +345,38 @@ per_second_usd = 0.02
 max_duration_s = 8
 source = "https://dev.pika.art/models/pika/pika-h3-flex/text-to-video"
 checked_on = "2026-11-19"
+
+# ---- Runway(크레딧 x 초, 1크레딧 = 0.01 USD). 2026-11-19 https://docs.dev.runwayml.com/guides/pricing.md
+# 720p 9:16(720:1280) 텍스트→영상, 무음만 호출한다(veo는 audio=false 단가: veo3.1 20, veo3.1_fast 10 크레딧/초).
+# 소리 켠 단가(veo3.1 40, veo3.1_fast 15)는 어댑터가 audio=false만 보내므로 넣지 않는다.
+# max_duration_s 8은 safety 기준(video_duration)과 맞춘 값이다. 단가는 변동 가능하다.
+
+[[price]]
+provider = "runway"
+model = "gen4.5"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.12
+max_duration_s = 8
+source = "https://docs.dev.runwayml.com/guides/pricing.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "runway"
+model = "veo3.1"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.20
+max_duration_s = 8
+source = "https://docs.dev.runwayml.com/guides/pricing.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "runway"
+model = "veo3.1_fast"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.10
+max_duration_s = 8
+source = "https://docs.dev.runwayml.com/guides/pricing.md"
+checked_on = "2026-11-19"
