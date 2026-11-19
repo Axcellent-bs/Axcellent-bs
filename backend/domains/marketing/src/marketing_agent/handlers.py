@@ -42,6 +42,7 @@ from marketing_agent import (
     publish_control,
     shop_client,
 )
+from marketing_agent import character_sheet as _character_sheet
 from marketing_agent.brief_handoff import (
     AUTO,
     DRAFT_MEDIA_KIND,
@@ -587,6 +588,39 @@ async def channel_followers(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=_evidence(["channel_followers"], summary, []),
+    )
+
+
+# 캐릭터 시트 프롬프트(read). 테스트는 이 값을 가짜 LLM을 돌려주는 함수로 바꾼다
+CHARACTER_SHEET_LLM: Any = None
+
+
+async def character_sheet_prompt(request: AgentRequest) -> AgentResult:
+    """올린 캐릭터 이미지로 캐릭터 시트 이미지 프롬프트를 만든다(read). 이미지는 저장하지 않는다."""
+    from marketing_agent.chat import default_llm
+
+    factory = CHARACTER_SHEET_LLM or default_llm
+    try:
+        out = await _character_sheet.make_character_sheet(
+            request.untrusted, factory, context_id=request.meta.context_id
+        )
+    except _character_sheet.CharacterSheetRefused as refused:
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome=refused.code,
+            output={"message": refused.message},
+        )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["character_sheet_prompt"],
+            f"캐릭터 시트 프롬프트 {len(out.panels)}칸 "
+            f"(본 것 {len(out.seen_ko)}, 추정 {len(out.guessed_ko)})",
+            [],
+        ),
     )
 
 
@@ -1328,6 +1362,7 @@ HANDLERS = {
     "get_notice": get_notice,
     "list_active_notices": list_active_notices,
     "channel_followers": channel_followers,
+    "character_sheet_prompt": character_sheet_prompt,
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,

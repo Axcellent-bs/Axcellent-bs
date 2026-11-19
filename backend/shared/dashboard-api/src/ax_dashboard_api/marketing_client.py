@@ -469,3 +469,48 @@ async def chat_call(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
         "message"
     ) or f"마케팅이 요청을 처리하지 못했다 ({result.outcome})"
     raise ApiError(status, code, str(message))
+
+
+# 캐릭터 시트 프롬프트(read) 거절 outcome → (HTTP 상태, 오류 코드)
+CHARACTER_SHEET_REFUSALS = {
+    "no_image": (422, "NO_IMAGE"),
+    "invalid_image": (422, "INVALID_IMAGE"),
+    "image_too_large": (413, "IMAGE_TOO_LARGE"),
+    "no_character": (422, "NO_CHARACTER"),
+    "llm_not_configured": (409, "LLM_NOT_CONFIGURED"),
+    "llm_failed": (502, "LLM_FAILED"),
+    "invalid_input": (400, "INVALID_INPUT"),
+}
+CHARACTER_SHEET_DEADLINE_SECONDS = 120  # 이미지를 읽는 LLM 호출이라 대화보다 길게 둔다
+
+
+async def character_sheet_call(image: dict[str, Any], note: str | None) -> dict[str, Any]:
+    """캐릭터 시트 프롬프트 skill.
+
+    이미지·메모는 사람이 올린 것이라 untrusted로만 넘긴다(저장 안 함).
+    """
+    config.set_agent_name(AGENT_NAME)
+    untrusted: dict[str, Any] = {"image": image}
+    if note:
+        untrusted["note"] = note
+    request = AgentRequest(
+        meta=RequestMeta(
+            context_id=f"ctx_charsheet_{uuid.uuid4().hex[:12]}",
+            token=config.agent_token(AGENT_NAME),
+            deadline=datetime.now(UTC) + timedelta(seconds=CHARACTER_SHEET_DEADLINE_SECONDS),
+            idempotency_key=f"ui:charsheet:{uuid.uuid4().hex}",
+        ),
+        skill="character_sheet_prompt",
+        input={},
+        untrusted=untrusted,
+    )
+    result = await SEND(TARGET, request)
+    if result.status == TaskStatus.COMPLETED:
+        return result.output or {}
+    if result.status == TaskStatus.CANCELED:
+        raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
+    status, code = CHARACTER_SHEET_REFUSALS.get(result.outcome or "", (502, "UPSTREAM_FAILED"))
+    message = (result.output or {}).get("message") or (
+        f"마케팅이 요청을 처리하지 못했다 ({result.outcome})"
+    )
+    raise ApiError(status, code, str(message))

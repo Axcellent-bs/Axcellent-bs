@@ -50,6 +50,7 @@ from ax_contracts.schemas.hr import (
     SetOrgRosterCompleteOutput,
     TeamHeadcountOutput,
 )
+from ax_contracts.schemas.marketing_character import MAX_CHARACTER_IMAGE_BASE64
 from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
     archive_client,
@@ -1218,6 +1219,30 @@ async def publish_video_post(body: VideoPostPublishBody) -> dict:
     """게시 요청(마케팅 `publish_sns`). C등급이라 `input-required`+`review_id`가 그대로 돌아온다."""
     _no_org_in_mock()
     return ok(await marketing_client.video_publish_call(body.publish_input))
+
+
+class CharacterSheetImageBody(BaseModel):
+    media_type: Literal["image/png", "image/jpeg", "image/webp"]
+    # 원본 2MB 이하(base64 약 2.8MB). 화면이 올리기 전에 줄여서 보낸다
+    data_base64: str = Field(min_length=1, max_length=MAX_CHARACTER_IMAGE_BASE64)
+
+
+class CharacterSheetBody(BaseModel):
+    image: CharacterSheetImageBody
+    note: str | None = Field(default=None, max_length=200)
+
+
+@router.post("/marketing/character-sheet")
+async def marketing_character_sheet(body: CharacterSheetBody) -> dict:
+    """올린 캐릭터 이미지로 캐릭터 시트 이미지 프롬프트를 만든다.
+
+    마케팅 `character_sheet_prompt`(read). 이미지는 저장하지 않고 이미지를 만들지 않는다.
+    목 모드에서는 하지 않는다(LLM이 이미지를 읽어야 한다).
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "캐릭터 시트는 실제 모드에서만 된다")
+    note = (body.note or "").strip() or None
+    return ok(await marketing_client.character_sheet_call(body.image.model_dump(), note))
 
 
 class MarketingChatSendBody(BaseModel):

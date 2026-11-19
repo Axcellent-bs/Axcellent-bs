@@ -7,6 +7,7 @@ import { holdKo } from "@/lib/marketingLive";
 import { BriefMediaMaker } from "./BriefMediaMaker";
 import { OutageProceed } from "./OutageProceed";
 import { PublishControlCard } from "./PublishControlCard";
+import { CharacterSheetMaker } from "./CharacterSheetMaker";
 import { ApiError } from "@/lib/apiError";
 import { mergeHttpErrorKo, mergeSummaryKo, previewDraftIds, skipReasonKo, type MergeAnswer } from "@/lib/outageMerge";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, outageTriggerKo, type OutageSnsDraft, type StoredBrief } from "@/lib/briefs";
@@ -134,6 +135,8 @@ export function SnsMedia() {
       </header>
 
       <PublishControlCard />
+
+      <CharacterSheetMaker />
 
       <Section title="이미지·영상 만들기" desc="B 등급 일입니다. 안전 장치가 비용(cost_krw)을 코드 규칙으로 검사하고, 적어 낸 비용과 계산이 다르거나 기준을 넘으면 사람 확인으로 보류합니다.">
         <ul className="space-y-1 text-sm text-ink-700">
