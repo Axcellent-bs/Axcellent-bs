@@ -1,14 +1,20 @@
-// 데모 로그인 세션. 실제 인증이 아니다: 데모 계정 + 회원가입한 계정을 브라우저에만 기억한다.
+// 로그인 세션. 두 갈래다(사람별 토큰 설계 2단계, docs/superpowers/specs/2026-11-19-human-session-tokens-design.md).
+// - 서버 로그인: dashboard-api `/auth/status`가 켜져 있다고 하면 이메일·비밀번호를 서버가 확인하고 세션 토큰을 준다
+//   (lib/humanSession.ts). 데모 계정 버튼·?as= 바로 들어가기는 막는다. 만료되면 로그인 화면으로 간다
+// - 데모 로그인: 서버 로그인이 꺼져 있으면(세션 비밀값 없음, 1~3단계) 지금까지처럼 데모 계정 + 회원가입한 계정을
+//   브라우저에만 기억하고 비밀번호는 보지 않는다. 쓰기는 공용 토큰으로 간다
 // 회원 역할은 셋이다.
 // - 운영자: AXcellent 운영팀. 관제 센터(/control)만 연다. 지원 모드(support.ts)로 들어가면 고객사 화면을 보기 전용으로 연다
 // - 관리자(회사 계정): 고객사 시스템 관리자. 운영자에게 받은 키로 가입하고, 시스템 관리 메뉴와 모든 서비스를 연다
 // - 일반회원: 고객사 직원. 관리자가 계정(이메일)이나 PC IP를 회사에 연결해야 들어간다(members.ts)
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { SERVICES, SHARED_PATHS, matchPath } from './services'
 import { getCompany } from './company'
 import { memberLinked, useProfiles, withProfile, type ReaderArea } from './members'
 import { endSupport, getSupport, supportActive } from './support'
 import { setActorName } from '@/lib/actor'
+import { checkSession, fetchLoginEnabled, serverLogout } from '@/lib/authApi'
+import { getSession, setSession, type HumanSession, type ServerAccount } from '@/lib/humanSession'
 
 export type Account = {
   id: string
@@ -28,13 +34,48 @@ export type Account = {
   approver?: boolean
   /** 열람 담당: 인사·재무 AI의 다른 사람 대화 요약을 본다 (그 밖의 AI는 모두가 본다) */
   readers?: ReaderArea[]
+  /** 서버 로그인 계정 (dashboard-api 계정). 회원 연결은 계정을 만든 관리자가 이미 한 것으로 본다 */
+  server?: boolean
 }
 
 export type MemberKind = '운영자' | '관리자' | '일반회원'
 export const kindOf = (a: Account): MemberKind => (a.operator ? '운영자' : a.admin ? '관리자' : '일반회원')
 /** 일반회원이 회사에 연결돼 있나 (운영자·관리자는 늘 true) */
 export const isLinked = (a: Account) =>
-  !!a.operator || !!a.admin || (!!getCompany() && (DEMO_IDS.has(a.id) || memberLinked(a.email)))
+  !!a.operator || !!a.admin || (!!getCompany() && (!!a.server || DEMO_IDS.has(a.id) || memberLinked(a.email)))
+
+/** 로그인 방식: 서버 로그인 / 데모 로그인(서버 로그인이 꺼져 있을 때) / 아직 서버에 묻는 중 */
+export type LoginMode = 'checking' | 'server' | 'demo'
+let modeNow: LoginMode = 'checking'
+export const loginMode = () => modeNow
+
+/** 서버 계정을 화면 계정으로. 부서·확인 권한은 관리자가 회원·서버 관리에서 정한다(withProfile) */
+export function accountFromServer(a: ServerAccount): Account {
+  const base = { id: a.id, name: a.name, email: a.email, server: true }
+  if (a.role === 'operator') return { ...base, role: '운영자', services: [], operator: true }
+  if (a.role === 'admin') return { ...base, role: '관리자', services: SERVICES.map((s) => s.id), admin: true, approver: true }
+  return { ...base, role: '일반회원', services: SERVICES.map((s) => s.id), approver: false }
+}
+
+// 이 브라우저에서 서버로 만든 고객사 계정(공개 칸만, 비밀번호 없음). 고객사 관리자는 서버 계정 목록을 못 읽어서
+// 회원 표에 이렇게 기억한 것만 보인다
+const SERVER_ACCOUNTS_KEY = 'axcellent-server-accounts'
+const loadServerAccounts = (): ServerAccount[] => {
+  try {
+    const rows = JSON.parse(localStorage.getItem(SERVER_ACCOUNTS_KEY) ?? '[]')
+    return Array.isArray(rows) ? (rows as ServerAccount[]).filter((a) => a && typeof a.id === 'string' && typeof a.email === 'string' && typeof a.role === 'string') : []
+  } catch {
+    return []
+  }
+}
+export function rememberServerAccount(a: ServerAccount) {
+  const row: ServerAccount = { id: a.id, name: a.name, email: a.email, role: a.role, created_at: a.created_at ?? null }
+  try {
+    localStorage.setItem(SERVER_ACCOUNTS_KEY, JSON.stringify([...loadServerAccounts().filter((x) => x.id !== a.id), row]))
+  } catch {
+    /* 저장이 막힌 브라우저는 표에 안 보일 뿐 서버 계정은 그대로다 */
+  }
+}
 
 // 데모 고객사 계정: 관리자 + 일반회원(시스템 관리 메뉴 없음, 회사에 연결된 상태). 예전 ?as=<직무 id> 링크는 관리자로 들어간다(load)
 // 화면에만 있는 계정이라 백엔드 데이터(재무 장부 등)에는 영향이 없다
@@ -56,7 +97,14 @@ const loadSignups = (): Account[] => {
   }
 }
 /** 로그인할 수 있는 고객사 계정: 데모 계정 + 회원가입한 계정 (관리자가 바꾼 부서·확인 권한을 덮어쓴다) */
-export const customerAccounts = (): Account[] => [...ACCOUNTS, ...loadSignups()].map((a) => withProfile(a))
+export const customerAccounts = (): Account[] => {
+  if (modeNow !== 'server') return [...ACCOUNTS, ...loadSignups()].map((a) => withProfile(a))
+  // 서버 로그인: 지금 로그인한 고객사 계정 + 이 브라우저에서 만든 서버 계정
+  const me = getSession()?.account
+  const rows = [...(me ? [me] : []), ...loadServerAccounts()].filter((a) => a.role !== 'operator')
+  const seen = new Set<string>()
+  return rows.filter((a) => !seen.has(a.id) && !!seen.add(a.id)).map((a) => withProfile(accountFromServer(a)))
+}
 
 /** 이미 가입된 이메일인가 (운영자 포함) */
 export const emailTaken = (email: string) =>
@@ -134,15 +182,12 @@ export const homeOf = (account: Account) =>
     : assignedOf(account)[0]?.entry ?? '/agents/chat'
 
 const KEY = 'axcellent-demo-account'
-const load = (): Account | null => {
+/** 데모 로그인으로 들어갈 계정: ?as=<계정 id> 또는 지난번 계정. 서버 로그인이 꺼져 있다고 확인된 뒤에만 쓴다 */
+const demoCandidate = (): Account | null => {
   // ?as=<계정 id> 로 열면 그 계정으로 바로 들어간다 (팀원에게 화면 링크를 줄 때)
   const as = new URLSearchParams(window.location.search).get('as')
   // 없어진 직무 계정 id(infra·support 등)로 와도 시스템 관리자로 연다
-  const direct = as ? all().find((a) => a.id === as) ?? ADMIN : null
-  if (direct) {
-    save(direct.id)
-    return direct
-  }
+  if (as) return all().find((a) => a.id === as) ?? ADMIN
   try {
     const id = localStorage.getItem(KEY)
     return id ? all().find((a) => a.id === id) ?? ADMIN : null
@@ -158,20 +203,102 @@ const save = (id: string | null) => {
     /* 저장이 막힌 브라우저는 새로고침하면 다시 로그인한다 */
   }
 }
+const fromSession = (s: HumanSession | null) => (s ? accountFromServer(s.account) : null)
 
-type Session = { account: Account | null; signIn: (id: string) => Account | null; signOut: () => void }
+type Session = {
+  account: Account | null
+  /** 서버 로그인 / 데모 로그인 / 확인 중 */
+  mode: LoginMode
+  /** 서버 세션이 만료·종료돼 로그아웃됐다 (로그인 화면에 안내) */
+  expired: boolean
+  /** 데모 로그인. 서버 로그인이 켜져 있으면 들어가지 않는다(null) */
+  signIn: (id: string) => Account | null
+  /** 서버 로그인 응답의 세션으로 들어간다 */
+  signInServer: (s: HumanSession) => Account
+  /** 로그인하려 했더니 서버가 꺼져 있다고 했다(503 LOGIN_DISABLED) → 데모 로그인으로 바꾼다 */
+  fallBackToDemo: () => void
+  signOut: () => void
+}
 const Ctx = createContext<Session | null>(null)
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [account, setAccount] = useState<Account | null>(load)
+  const [mode, setMode] = useState<LoginMode>(() => (getSession() ? 'server' : 'checking'))
+  const [account, setAccount] = useState<Account | null>(() => fromSession(getSession()))
+  const [expired, setExpired] = useState(false)
+  modeNow = mode
+
+  // 서버 로그인이 켜져 있는지 묻는다. 꺼져 있으면 데모 로그인(?as=·지난 계정)으로 들어간다
+  useEffect(() => {
+    let alive = true
+    void fetchLoginEnabled().then((on) => {
+      if (!alive) return
+      if (on) {
+        setMode('server')
+        save(null) // 서버 로그인이 켜진 뒤에는 예전 데모 계정으로 들어가지 않는다
+        return
+      }
+      if (getSession()) return // 받은 세션은 만료까지 쓴다(그 사이 서버가 꺼졌어도 토큰 검사는 서버가 한다)
+      setMode('demo')
+      const demo = demoCandidate()
+      if (demo) {
+        save(demo.id)
+        setAccount((cur) => cur ?? demo)
+      }
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const endServerSession = useCallback(() => {
+    setSession(null)
+    setAccount(null)
+    setExpired(true)
+  }, [])
+
+  // 세션 만료 시각에 로그아웃하고, 처음 열 때는 서버가 아직 이 세션을 받는지(로그아웃·계정 삭제) 본다
+  const session = account?.server ? getSession() : null
+  const expiresAt = session?.expiresAt
+  useEffect(() => {
+    if (expiresAt === undefined) return
+    const ms = expiresAt * 1000 - Date.now()
+    if (ms <= 0) return endServerSession()
+    const t = setTimeout(endServerSession, Math.min(ms, 2 ** 31 - 1))
+    return () => clearTimeout(t)
+  }, [expiresAt, endServerSession])
+  useEffect(() => {
+    if (!getSession()) return
+    void checkSession().then((alive) => {
+      if (alive === false) endServerSession()
+    })
+  }, [endServerSession])
+
   const signIn = useCallback((id: string) => {
+    if (modeNow === 'server') return null
     const next = all().find((a) => a.id === id) ?? null
     setAccount(next)
     save(next?.id ?? null)
     return next
   }, [])
+  const signInServer = useCallback((s: HumanSession) => {
+    setSession(s)
+    setMode('server')
+    setExpired(false)
+    save(null)
+    const next = accountFromServer(s.account)
+    setAccount(next)
+    return next
+  }, [])
+  const fallBackToDemo = useCallback(() => {
+    modeNow = 'demo'
+    setMode('demo')
+  }, [])
   const signOut = useCallback(() => {
+    if (getSession()) {
+      void serverLogout().finally(() => setSession(null))
+    }
     setAccount(null)
+    setExpired(false)
     save(null)
     endSupport()
   }, [])
@@ -180,7 +307,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const current = useMemo(() => (account ? withProfile(account, profiles) : null), [account, profiles])
   // 사람 결정 요청에 같이 보낼 계정 이름 (재무 기록의 "관리자(IP)" 표시용, lib/actor.ts). 같은 값을 다시 넣을 뿐이라 렌더 중에 둔다
   setActorName(current?.name)
-  const value = useMemo(() => ({ account: current, signIn, signOut }), [current, signIn, signOut])
+  const value = useMemo(
+    () => ({ account: current, mode, expired, signIn, signInServer, fallBackToDemo, signOut }),
+    [current, mode, expired, signIn, signInServer, fallBackToDemo, signOut],
+  )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 

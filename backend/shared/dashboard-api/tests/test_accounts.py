@@ -189,3 +189,51 @@ def test_short_passwords_and_bad_emails_are_refused(client) -> None:
     res = client.post(BASE + "/accounts", json=short, headers=_bearer(token))
     assert res.json()["error"]["code"] == "PASSWORD_TOO_SHORT"
     assert client.post(BASE + "/accounts", json=bad, headers=_bearer(token)).status_code == 422
+
+
+# ---- 화면 로그인 (사람별 토큰 2단계) ----
+
+
+def test_status_tells_the_screen_whether_server_login_is_on(client, monkeypatch) -> None:
+    assert client.get(BASE + "/status").json()["data"] == {"login_enabled": True}
+    monkeypatch.delenv(human_auth.SESSION_SECRET_ENV)
+    assert client.get(BASE + "/status").json()["data"] == {"login_enabled": False}
+
+
+def _make(client: TestClient, op: str, role: str, email: str) -> str:
+    pw = f"{role}-pass-1234"
+    body = {"name": role, "email": email, "role": role, "password": pw}
+    assert client.post(BASE + "/accounts", json=body, headers=_bearer(op)).status_code == 200
+    return _login(client, email, pw).json()["data"]["token"]
+
+
+def test_connection_keys_check_the_role_of_a_session_token(client) -> None:
+    op = _op_token(client)
+    admin = _make(client, op, "admin", "ad@example.com")
+    member = _make(client, op, "member", "m@example.com")
+    keys = "/api/dashboard/connection-keys"
+    # 키 발급은 운영자만
+    for token in (admin, member):
+        res = client.post(keys + "/issue", json={"memo": ""}, headers=_bearer(token))
+        assert res.status_code == 403 and res.json()["error"]["code"] == "ROLE_REQUIRED"
+    issued = client.post(keys + "/issue", json={"memo": ""}, headers=_bearer(op)).json()["data"]
+    # 연결은 고객사 관리자만
+    connect = {"key": issued["key"], "name": "새벽커피", "network": "10.0.0.0/24"}
+
+    def post(path: str, token: str, body: dict | None = None) -> int:
+        return client.post(keys + path, json=body, headers=_bearer(token)).status_code
+
+    assert post("/connect", op, connect) == 403
+    assert post("/connect", member, connect) == 403
+    assert post("/connect", admin, connect) == 200
+    assert post("/disconnect", member) == 403
+    assert post("/revoke", admin, {"id": issued["id"]}) == 403
+
+
+def test_the_shared_token_still_uses_connection_keys(client) -> None:
+    res = client.post(
+        "/api/dashboard/connection-keys/issue",
+        json={"memo": ""},
+        headers=_bearer("test-human-token"),
+    )
+    assert res.status_code == 200, res.text

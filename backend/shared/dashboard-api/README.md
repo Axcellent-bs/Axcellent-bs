@@ -265,5 +265,7 @@ ax-contracts, ax-agent-template
 
 - `POST /api/dashboard/auth/login` {email, password} → {token, expires_at, account}. 세션 토큰 `axs1.…`는 12시간. 같은 이메일로 5번 연속 틀리면 15분 막힘(429 `LOGIN_LOCKED`)
 - `POST /auth/logout`, `GET /auth/me` (세션 토큰). `GET /auth/accounts`(운영자), `POST /auth/accounts`(운영자는 모든 역할, 고객사 관리자는 일반회원만)
+- `GET /auth/status` → {login_enabled}. 화면이 서버 로그인과 데모 로그인(꺼져 있을 때) 중 무엇을 쓸지 고른다. 토큰 없이 연다
+- 연결 키(`/connection-keys`): 세션 토큰이면 역할을 본다. 발급·폐기는 운영자, 연결·회사 정보·끊기는 고객사 관리자. 공용 토큰은 지금처럼 통과
 - 세션 토큰은 쓰기 사람 토큰 자리에도 그대로 쓴다(기록 이름 = 계정 이름). 공용 사람 토큰도 계속 받는다
 - 환경변수: `AX_SESSION_SECRET`(서명 키, 32자 이상. 없으면 로그인 꺼짐 503 `LOGIN_DISABLED`), `AX_BOOTSTRAP_ADMIN="이메일:초기 비밀번호"`(계정이 하나도 없을 때만 운영자 1명), `AX_ACCOUNTS_FILE`(기본: 회사 연결 파일 옆 `accounts.json`), `AX_REVOKED_SESSIONS_FILE`(기본: 회사 연결 파일 옆 `revoked_sessions.json`)

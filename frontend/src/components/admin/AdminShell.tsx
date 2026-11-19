@@ -71,6 +71,7 @@ const CONTROL_MENU: SubItem[] = [
   { href: "/control/quality", label: "AI 품질" },
   { href: "/control/cost", label: "비용·사용량" },
   { href: "/control/keys", label: "연결 키 발급" },
+  { href: "/control/accounts", label: "계정" },
 ];
 
 const CONTROL_NAV: NavItem[] = [

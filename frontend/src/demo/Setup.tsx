@@ -6,7 +6,9 @@ import { emailTaken, homeOf, registerAccount, useSession } from './session'
 
 // 관리자(회사 계정) 가입: 운영자에게 받은 키 확인 → 관리자 계정 → 회사 정보 → 연결. 끝나면 그 관리자로 바로 들어간다.
 // 이 설치에 이미 연결된 회사의 키면 회사 정보·연결은 건너뛰고 그 회사의 관리자 계정만 만든다.
-// 데모라 계정은 이 브라우저에만 저장하고 비밀번호는 저장하지 않는다(session.tsx).
+// 데모 로그인(서버 로그인이 꺼져 있을 때)에서는 계정을 이 브라우저에만 저장하고 비밀번호는 저장하지 않는다(session.tsx).
+// 서버 로그인이 켜져 있으면 키로 관리자 계정을 만드는 서버 경로가 아직 없다. 운영자가 관제 센터(계정)에서 만든
+// 관리자 계정으로 먼저 로그인하고, 이 화면에서는 키 확인·회사 정보·연결만 한다.
 const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.webp`
 const STAGES = ['발급 키 확인', '관리자 계정', '회사 정보', '연결'] as const
 const RUN_STEPS = ['관리자 계정 만들기', '회사 정보 저장', '사내망 확인', '첫 상태 신호 보내기', '설정 완료'] as const
@@ -17,7 +19,10 @@ const validNetwork = (v: string) => /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(v.tr
 export default function Setup() {
   const company = useCompany()
   const keys = useKeys()
-  const { signIn } = useSession()
+  const { signIn, mode, account } = useSession()
+  const serverMode = mode === 'server'
+  // 서버 로그인으로 들어온 고객사 관리자 (서버 로그인일 때 연결은 이 계정으로 한다)
+  const serverAdmin = serverMode && !!account?.server && !!account.admin
   const navigate = useNavigate()
   const [stage, setStage] = useState(0)
   // 조직 플랜 결제 뒤 "이 키로 관리자 가입"으로 오면 키가 채워져 있다 (/setup?key=)
@@ -42,6 +47,11 @@ export default function Setup() {
 
   // 관리자 계정을 만들고 그 계정으로 들어간다
   function finish() {
+    if (serverMode) {
+      if (serverAdmin && account) navigate(homeOf(account), { replace: true })
+      else setError('관리자 계정으로 로그인한 뒤 연결해 주세요.')
+      return
+    }
     try {
       const a = signIn(registerAccount({ name: admin.name, email: admin.email }, true).id)
       if (a) navigate(homeOf(a), { replace: true })
@@ -60,7 +70,11 @@ export default function Setup() {
       if (!r.ok) return setError(r.reason)
       setKey(r.issued)
     }
-    if (stage === 1) {
+    if (stage === 1 && serverMode) {
+      if (!serverAdmin) return setError('운영자에게 받은 관리자 계정으로 먼저 로그인해 주세요.')
+      if (sameCompany) return finish()
+    }
+    if (stage === 1 && !serverMode) {
       if (!admin.name.trim()) return setError('관리자 이름을 입력하세요.')
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(admin.email.trim())) return setError('관리자 이메일을 확인하세요.')
       if (admin.password.length < 8) return setError('비밀번호는 8자 이상이에요.')
@@ -130,13 +144,24 @@ export default function Setup() {
                 <span className="chip bg-emerald-50 text-emerald-700">키 확인됨</span>
               </div>
               <p className="text-sm text-ink-500">이 계정으로 회사 연결과 회원·서버 관리(회원 연결, 사내 PC 연결)를 해요.</p>
+              {serverMode ? (
+                serverAdmin && account ? (
+                  <p className="rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-700">로그인한 관리자 계정 <span className="font-medium text-ink-900">{account.name}</span> <span className="font-mono text-xs text-ink-500">{account.email}</span>으로 연결해요.</p>
+                ) : (
+                  <div className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <p>서버 로그인이 켜져 있어 관리자 계정은 AXcellent 운영자가 만들어 드려요. 받은 관리자 계정으로 먼저 로그인하면 회사 연결 화면에서 이 키로 이어서 연결할 수 있어요.</p>
+                    <Link to="/login" className="btn-ghost px-3 py-1.5 text-xs">로그인하기</Link>
+                  </div>
+                )
+              ) : <>
               <input className="field" placeholder="이름" value={admin.name} onChange={(e) => setAdmin({ ...admin, name: e.target.value })} aria-label="관리자 이름" />
               <input className="field" placeholder="회사 이메일" value={admin.email} onChange={(e) => setAdmin({ ...admin, email: e.target.value })} aria-label="관리자 이메일" />
               <input className="field" type="password" placeholder="비밀번호 (8자 이상)" value={admin.password} onChange={(e) => setAdmin({ ...admin, password: e.target.value })} aria-label="비밀번호" />
+              </>}
               {error && <p className="text-sm text-red-700">{error}</p>}
               <div className="flex items-center gap-2">
-                <button className="btn-primary px-5">{sameCompany ? '가입하기' : '다음'}</button>
-                <button type="button" className="btn-ghost ml-auto px-2.5 py-1 text-xs" onClick={fillDemo}>데모: 채우기</button>
+                <button className="btn-primary px-5" disabled={serverMode && !serverAdmin}>{sameCompany ? '가입하기' : '다음'}</button>
+                {!serverMode && <button type="button" className="btn-ghost ml-auto px-2.5 py-1 text-xs" onClick={fillDemo}>데모: 채우기</button>}
               </div>
             </form>
           )}
@@ -175,7 +200,7 @@ export default function Setup() {
                     <li key={s} className={`flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm ${nowStep ? 'bg-brand-50 font-semibold text-brand-700' : done ? 'text-ink-900' : 'text-ink-500'}`}>
                       <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${done ? 'bg-emerald-700 text-white' : nowStep ? 'animate-pulse bg-brand-600 text-white' : 'bg-ink-100 text-ink-500'}`}>{done ? '✓' : i + 1}</span>
                       {s}
-                      {done && i === 0 && <span className="ml-auto text-xs font-normal text-ink-500">{admin.email}</span>}
+                      {done && i === 0 && <span className="ml-auto text-xs font-normal text-ink-500">{serverMode ? account?.email : admin.email}</span>}
                       {done && i === 2 && <span className="ml-auto font-mono text-xs font-normal text-ink-500">{info.network}</span>}
                     </li>
                   )

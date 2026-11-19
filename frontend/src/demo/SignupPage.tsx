@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { AuthAside } from './LoginPage'
+import { AuthAside, DemoLoginNotice } from './LoginPage'
 import { homeOf, registerAccount, useSession } from './session'
 import { useCompany } from './company'
 import { memberLinked, thisPcIp, useLinks } from './members'
@@ -9,9 +9,11 @@ import { DeptPicker } from './DeptPicker'
 // 일반회원 가입. 관리자(회사 계정)는 운영자에게 받은 키로 따로 가입한다(/setup).
 // 이 PC IP나 이메일이 회사에 연결돼 있으면 그 회사 회원으로 바로 들어가고, 아니면 "연결 전"으로 가입해
 // 관리자가 회원·서버 관리(/system/members)에서 묶어 줄 때까지 기다린다.
-// 데모라 계정은 이 브라우저에만 저장하고 비밀번호는 저장하지 않는다(session.tsx).
+// 데모 로그인(서버 로그인이 꺼져 있을 때)에서는 계정을 이 브라우저에만 저장하고 비밀번호는 저장하지 않는다(session.tsx).
+// 서버 로그인이 켜져 있으면 스스로 가입하는 서버 경로가 없다(설계: 일반회원은 관리자가 초대). 관리자가 회원·서버 관리에서
+// 만든 계정으로 로그인하라고 안내한다.
 export default function SignupPage() {
-  const { signIn } = useSession()
+  const { signIn, mode } = useSession()
   const company = useCompany()
   const links = useLinks()
   const navigate = useNavigate()
@@ -60,6 +62,7 @@ export default function SignupPage() {
             <Link to="/setup" role="tab" aria-selected="false" className="rounded-lg py-2 text-center text-ink-500 hover:text-ink-900">관리자 (회사 계정)</Link>
           </div>
 
+          {mode !== 'server' && (
           <dl className="rounded-xl border border-ink-100 bg-surface px-3 py-2 text-sm">
             <dt className="text-xs text-ink-500">가입할 회사</dt>
             <dd className="mt-0.5 flex items-center justify-between gap-2">
@@ -67,8 +70,16 @@ export default function SignupPage() {
               <span className="font-mono text-xs text-ink-500">이 PC {ip}</span>
             </dd>
           </dl>
+          )}
 
-          {waiting ? (
+          <DemoLoginNotice mode={mode} />
+          {mode === 'server' ? (
+            <div className="space-y-3 rounded-2xl bg-ink-50 px-4 py-4 text-sm text-ink-700">
+              <p className="font-semibold text-ink-900">일반회원 계정은 회사 관리자가 만들어요</p>
+              <p>관리자가 회원·서버 관리에서 계정을 만들면, 받은 이메일과 비밀번호로 로그인하세요.</p>
+              <Link to="/login" className="btn-primary w-full py-2.5">로그인 화면으로</Link>
+            </div>
+          ) : waiting ? (
             <div className="space-y-3 rounded-2xl bg-amber-50 px-4 py-4 text-sm text-amber-800">
               <p className="font-semibold">가입 완료 · 회사 연결 대기</p>
               <p>회사 관리자가 계정이나 이 PC를 회사에 연결하면 로그인할 수 있어요.</p>
@@ -101,7 +112,7 @@ export default function SignupPage() {
                 <span>이용 약관과 개인정보 처리에 동의합니다</span>
               </label>
               {error && <p className="text-sm text-red-600">{error}</p>}
-              <button className="btn-primary w-full py-2.5">가입하기</button>
+              <button className="btn-primary w-full py-2.5" disabled={mode === 'checking'}>가입하기</button>
             </form>
           )}
 
