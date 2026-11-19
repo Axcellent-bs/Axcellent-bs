@@ -162,7 +162,13 @@ _lock = threading.RLock()
 
 
 def _load() -> tuple[list[ToolConnection], bool]:
-    """(연결 목록, 파일이 있는데 읽지 못했는가)."""
+    """(연결 목록의 깊은 복사본, 파일이 있는데 읽지 못했는가)."""
+    found, broken = _load_shared()
+    return copy.deepcopy(found), broken
+
+
+def _load_shared() -> tuple[list[ToolConnection], bool]:
+    """캐시에 든 목록 그대로. 밖으로 내보내기 전에 꼭 복사한다."""
     global _cache
     path = connections_file()
     if not path:
@@ -176,7 +182,7 @@ def _load() -> tuple[list[ToolConnection], bool]:
         # 않는다. 윈도에서 st_ino가 0이면 예전처럼 시각·크기만 본다
         key = (path, stat.st_mtime_ns, stat.st_size, stat.st_ino)
         if _cache is not None and _cache[:4] == key:
-            return copy.deepcopy(_cache[4]), _cache[5]
+            return _cache[4], _cache[5]
         try:
             os.chmod(path, 0o600)  # 예전에 넓은 권한으로 만든 파일도 만든 사용자만 읽게 맞춘다
         except OSError:
@@ -190,7 +196,7 @@ def _load() -> tuple[list[ToolConnection], bool]:
         else:
             broken = False
         _cache = (*key, found, broken)
-        return copy.deepcopy(found), broken
+        return found, broken
 
 
 def read_all() -> list[ToolConnection]:
@@ -326,14 +332,16 @@ def _read_for_write() -> list[ToolConnection]:
 
 
 def get(conn_id: str) -> ToolConnection | None:
-    return next((c for c in read_all() if c.id == conn_id), None)
+    """id가 같은 연결(복사본). 목록 전체가 아니라 찾은 것만 복사한다."""
+    match = next((c for c in _load_shared()[0] if c.id == conn_id), None)
+    return copy.deepcopy(match) if match is not None else None
 
 
 def find(kind: str, **config_match: Any) -> ToolConnection | None:
-    """종류가 같고 config가 주어진 값과 모두 같은 첫 연결."""
-    for conn in read_all():
+    """종류가 같고 config가 주어진 값과 모두 같은 첫 연결(복사본)."""
+    for conn in _load_shared()[0]:
         if conn.kind == kind and all(conn.config.get(k) == v for k, v in config_match.items()):
-            return conn
+            return copy.deepcopy(conn)
     return None
 
 

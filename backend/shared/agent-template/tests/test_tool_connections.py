@@ -527,3 +527,25 @@ def test_stale_break_does_not_clobber_lock_taken_while_putting_back(
     assert e.value.code == "busy"
     assert lock.read_text() == "third"
     assert not list(vault.parent.glob(vault.name + ".lock.*"))
+
+
+def test_get_and_find_copy_only_the_match(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """get·find는 목록 전체가 아니라 찾은 연결 하나만 복사한다."""
+    for name in ("a", "b", "c"):
+        _save(name)
+    tc.read_all()  # 캐시를 채운다
+    real_deepcopy = tc.copy.deepcopy
+    copied: list[object] = []
+
+    def spy(obj, *a, **k):
+        copied.append(obj)
+        return real_deepcopy(obj, *a, **k)
+
+    monkeypatch.setattr(tc.copy, "deepcopy", spy)
+    got = tc.get("jenkins-2")
+    found = tc.find("jenkins", url="http://ci.local")
+    assert got is not None and got.name == "b"
+    assert found is not None and found.id == "jenkins-1"
+    assert len(copied) == 2 and all(isinstance(x, tc.ToolConnection) for x in copied)
+    assert tc.get("nope") is None and tc.find("dejafix") is None
+    assert len(copied) == 2  # 못 찾으면 복사하지 않는다
