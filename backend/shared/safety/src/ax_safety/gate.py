@@ -33,6 +33,7 @@ from typing import Any, Literal
 
 from ax_agent_template.services import department_of
 from ax_contracts.schemas import ExecuteDecision, ExecuteRequest, HoldReason
+from ax_safety import cost_policy
 from ax_safety.rules import ActionSpec, Registry, ThresholdTable, higher
 from ax_safety.store import ExecutionRecord, Review, Store, StoreWriteError
 
@@ -127,12 +128,25 @@ class Gate:
         if unknown:
             raise ValueError(f"기준표 규칙의 액션이 레지스트리에 없다: {sorted(unknown)}")
         self.registry = registry
-        self.thresholds = thresholds
+        self._base_thresholds = thresholds
         self.store = store
         self._verifier = verifier
         self._publish = publisher
         self._now = now
         self._locks: dict[tuple[str, str], asyncio.Lock] = {}
+
+    @property
+    def thresholds(self) -> ThresholdTable:
+        """기준표. 승인된 비용 임계값 파일(cost_policy)을 mtime으로 다시 읽어 덮는다."""
+        return cost_policy.effective(self._base_thresholds)
+
+    @thresholds.setter
+    def thresholds(self, table: ThresholdTable) -> None:
+        self._base_thresholds = table
+
+    @property
+    def base_thresholds(self) -> ThresholdTable:
+        return self._base_thresholds
 
     # ------------------------------------------------------------------ 진입점
     async def execute(self, request: ExecuteRequest) -> ExecuteDecision:

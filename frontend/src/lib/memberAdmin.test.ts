@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseSession, readServerAccount, type ServerAccount } from "./humanSession.ts";
 import {
-  approverOf, canEditProfile, customerRows, readAccountList, roleChangeProblem, toggleReader, updateBody,
+  approverOf, canEditProfile, limitEditorOf, limitEditorProblem, policyEditorOf, policyEditorProblem, customerRows, readAccountList, roleChangeProblem, toggleReader, updateBody,
 } from "./memberAdmin.ts";
 
 const acc = (id: string, role: ServerAccount["role"], over: Partial<ServerAccount> = {}): ServerAccount =>
@@ -107,4 +107,26 @@ test("열람 담당 켜고 끄기: 순서는 인사·재무", () => {
   assert.deepEqual(toggleReader(undefined, "finance"), ["finance"]);
   assert.deepEqual(toggleReader(["finance"], "hr"), ["hr", "finance"]);
   assert.deepEqual(toggleReader(["hr", "finance"], "hr"), ["finance"]);
+});
+
+test("비용 상한 변경 권한: 기본은 꺼짐, 일반회원은 켤 수 없다, 저장 본문에 들어간다", () => {
+  assert.equal(limitEditorOf(acc("a", "admin")), false);
+  assert.equal(limitEditorOf(acc("a", "admin", { limit_editor: true })), true);
+  assert.match(limitEditorProblem({ role: "member" }) ?? "", /일반회원/);
+  assert.equal(limitEditorProblem({ role: "admin" }), null);
+  assert.equal(limitEditorProblem({ role: "operator" }), null);
+  assert.deepEqual(updateBody({ limit_editor: true }), { limit_editor: true });
+  assert.equal(readServerAccount({ id: "a", name: "a", email: "a@b.co", role: "admin", limit_editor: true })?.limit_editor, true);
+  assert.equal(readServerAccount({ id: "a", name: "a", email: "a@b.co", role: "admin", limit_editor: "yes" })?.limit_editor, undefined);
+});
+
+test("정책 변경 권한: 기본 꺼짐, 일반회원 불가, 주는 사람은 운영자 또는 정책 담당 관리자", () => {
+  assert.equal(policyEditorOf(acc("a", "admin")), false);
+  assert.equal(policyEditorOf(acc("a", "admin", { policy_editor: true })), true);
+  assert.match(policyEditorProblem({ role: "operator" }, { role: "member" }) ?? "", /일반회원/);
+  assert.equal(policyEditorProblem({ role: "operator" }, { role: "admin" }), null);
+  assert.match(policyEditorProblem({ role: "admin" }, { role: "admin" }) ?? "", /정책 변경 권한이 있는 관리자/);
+  assert.equal(policyEditorProblem({ role: "admin", policy_editor: true }, { role: "admin" }), null);
+  assert.deepEqual(updateBody({ policy_editor: true }), { policy_editor: true });
+  assert.equal(readServerAccount({ id: "a", name: "a", email: "a@b.co", role: "admin", policy_editor: true })?.policy_editor, true);
 });

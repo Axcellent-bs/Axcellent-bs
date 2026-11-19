@@ -542,6 +542,54 @@
       ],
       "verifier": null,
       "priority": "optional"
+    },
+    {
+      "id": "get_media_cost_limits",
+      "description": "영상 비용 상한(영상 건당·월 예산) 현재 값과 출처, 이번 달 누적, 코드 상수 범위, 안전 정책 현황(읽기 전용), 대기 중 승인 요청, 변경 이력을 돌려준다. 읽기.",
+      "input_schema": "agents/marketing/src/marketing_agent/cost_limits.py#ListInput",
+      "output_schema": "agents/marketing/src/marketing_agent/cost_limits.py#LimitsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "lower_media_cost_limits",
+      "description": "영상 건당 상한·월 예산을 낮춘다(updated_by, reason, confirmed). 재무·총괄이 하향 셀프 승인을 허용한 경우에만 주의사항 확인 뒤 A등급으로 바로 적용하고, 허용이 꺼져 있으면 C등급 사람 승인(요청자≠승인자)을 거친다.",
+      "input_schema": "agents/marketing/src/marketing_agent/cost_limits.py#ChangeInput",
+      "output_schema": "agents/marketing/src/marketing_agent/cost_limits.py#LimitsOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "raise_media_cost_limits",
+      "description": "영상 건당 상한·월 예산을 올린다(updated_by, reason). 늘 C등급 사람 승인(요청자≠승인자). 안전 정책 상한·코드 절대 상한을 넘으면 거절한다.",
+      "input_schema": "agents/marketing/src/marketing_agent/cost_limits.py#ChangeInput",
+      "output_schema": "agents/marketing/src/marketing_agent/cost_limits.py#LimitsOutput",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "set_cost_limit_option",
+      "description": "하향 셀프 승인 허용 on/off(updated_by, reason). 변경 이력을 남긴다. 권한(policy_editor)은 대시보드 API가 확인한다. A등급.",
+      "input_schema": "agents/marketing/src/marketing_agent/cost_limits.py#OptionInput",
+      "output_schema": "agents/marketing/src/marketing_agent/cost_limits.py#LimitsOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
     }
   ]
 }

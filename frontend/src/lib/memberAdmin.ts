@@ -22,6 +22,31 @@ export const customerRows = (rows: readonly ServerAccount[]) => rows.filter((a) 
 /** 확인 권한: 서버가 값을 주면 그 값, 아니면 역할로 (고객사 관리자는 있음) */
 export const approverOf = (a: ServerAccount) => (typeof a.approver === "boolean" ? a.approver : a.role === "admin");
 
+/** 비용 상한 변경 권한: 서버가 준 값(없으면 꺼짐) */
+export const limitEditorOf = (a: ServerAccount) => a.limit_editor === true;
+
+/** 정책 변경 권한: 서버가 준 값(없으면 꺼짐) */
+export const policyEditorOf = (a: ServerAccount) => a.policy_editor === true;
+
+/**
+ * 정책 변경 권한을 줄 수 없는 이유. 줄 수 있으면 null.
+ * 일반회원은 못 갖고, 주는 사람은 운영자이거나 정책 변경 권한이 있는 관리자다(서버가 다시 확인한다).
+ */
+export function policyEditorProblem(
+  actor: { role: ServerRole; policy_editor?: boolean },
+  target: Pick<ServerAccount, "role">,
+): string | null {
+  if (target.role === "member") return "일반회원은 정책 변경 권한을 가질 수 없어요. 먼저 관리자로 바꿔 주세요.";
+  if (actor.role === "admin" && actor.policy_editor !== true) return "정책 변경 권한은 운영자나 정책 변경 권한이 있는 관리자만 줄 수 있어요.";
+  if (actor.role !== "operator" && actor.role !== "admin") return "관리자만 바꿀 수 있어요.";
+  return null;
+}
+
+/** 비용 상한 변경 권한을 켤 수 없는 이유(일반회원은 못 켠다). 켤 수 있으면 null */
+export function limitEditorProblem(target: Pick<ServerAccount, "role">): string | null {
+  return target.role === "member" ? "일반회원은 비용 상한 변경 권한을 가질 수 없어요. 먼저 관리자로 바꿔 주세요." : null;
+}
+
 /**
  * 이 사람이 그 계정을 그 역할로 바꿀 수 있나. 바꿀 수 있으면 null, 아니면 이유.
  * 서버 규칙: 운영자는 모든 계정, 고객사 관리자는 고객사 계정만이고 운영자 역할은 못 준다.
@@ -51,7 +76,7 @@ export function canEditProfile(actor: { role: ServerRole }, target: ServerAccoun
   return actor.role === "admin" && CUSTOMER_ROLES.includes(target.role);
 }
 
-export type AccountPatch = { role?: ServerRole; name?: string; dept?: string; approver?: boolean; readers?: ReaderAreaId[] };
+export type AccountPatch = { role?: ServerRole; name?: string; dept?: string; approver?: boolean; limit_editor?: boolean; policy_editor?: boolean; readers?: ReaderAreaId[] };
 
 /** `POST /auth/accounts/{id}/update` 본문: 보낼 칸만. 아무것도 없으면 null (빈 요청은 보내지 않는다) */
 export function updateBody(patch: AccountPatch): AccountPatch | null {
@@ -60,6 +85,8 @@ export function updateBody(patch: AccountPatch): AccountPatch | null {
   if (patch.name !== undefined) out.name = patch.name.trim();
   if (patch.dept !== undefined) out.dept = patch.dept.trim();
   if (patch.approver !== undefined) out.approver = patch.approver;
+  if (patch.limit_editor !== undefined) out.limit_editor = patch.limit_editor;
+  if (patch.policy_editor !== undefined) out.policy_editor = patch.policy_editor;
   if (patch.readers !== undefined) out.readers = READER_AREA_IDS.filter((r) => patch.readers?.includes(r));
   return Object.keys(out).length ? out : null;
 }

@@ -24,7 +24,12 @@ MEMBER_PW = "member-pass-for-tests"  # 테스트용 자리값
 ADMIN_PW = "admin-pass-for-tests"  # 테스트용 자리값
 
 # 원래부터 역할 검사가 있던 GET (시스템 관리 › 회원·서버 관리). 일반회원은 403이 맞다
-ADMIN_ONLY_GETS = {"/api/dashboard/auth/accounts"}
+ADMIN_ONLY_GETS = {
+    "/api/dashboard/auth/accounts",
+    # 비용 상한·정책 화면: 로그인한 운영자·관리자만 읽는다(일반회원·공용 토큰 403)
+    "/api/dashboard/marketing/cost-limits",
+    "/api/dashboard/cost-policy",
+}
 
 
 def _fill(path: str) -> str:
