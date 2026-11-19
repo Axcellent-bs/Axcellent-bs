@@ -42,7 +42,7 @@ test("되돌리기가 아니거나 보여 줄 게 없으면 null", () => {
 
 test("배포 도구 되돌리기 한 줄: 버전·도구·실행 번호·승인 경로", () => {
   const out = { from_version: "v2", to_version: "v1", rolled_back_to: "v1", path: "auto", redeploy: { tool: "github_actions", run_id: "123", url: null }, fault_released: false };
-  assert.equal(rollbackDoneLine(out), "되돌림 완료 · 전 v2 → 후 v1 · github_actions로 다시 배포 (실행 123) · 자동 실행");
+  assert.equal(rollbackDoneLine(out), "되돌림 완료 · 전 v2 → 후 v1 · GitHub Actions로 다시 배포 (실행 123) · 자동 실행");
 });
 
 test("결제 설정 되돌리기는 전후 버전과 확인 결과", () => {

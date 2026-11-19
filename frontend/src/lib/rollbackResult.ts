@@ -58,10 +58,12 @@ export function pathLabel(v: unknown): string | null {
   return p === "auto" ? "자동 실행" : p === "human_approved" ? "사람 승인 뒤 실행" : p;
 }
 
+const TOOL_NAME: Record<string, string> = { github_actions: "GitHub Actions", jenkins: "Jenkins" };
+
 /** 무엇으로 되돌렸는지: 배포 도구 다시 배포 · 결제 설정 되돌림 · 장애 해제(시연). 근거 키가 없으면 null */
 function methodLabel(output: Record<string, unknown>): string | null {
   const r = parseRedeploy(output);
-  if (r) return `${r.tool}로 다시 배포${r.runId ? ` (실행 ${r.runId})` : ""}`;
+  if (r) return `${TOOL_NAME[r.tool] ?? r.tool}로 다시 배포${r.runId ? ` (실행 ${r.runId})` : ""}`;
   if (isRecord(output.payment_version)) return "결제 설정 되돌림";
   if (output.fault_released === true) return "장애 주입 해제";
   if (output.fault_released === false) return "장애 주입 해제 안 됨";
