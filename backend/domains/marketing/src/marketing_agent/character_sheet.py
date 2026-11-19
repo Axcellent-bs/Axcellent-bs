@@ -15,13 +15,15 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import re
 from collections.abc import Callable
 from typing import Any
 
-from pydantic import Field, ValidationError
+from pydantic import ConfigDict, Field, ValidationError
 
 from ax_agent_template.llm import (
     ImageInput,
+    LLMFormatError,
     LLMInputError,
     LLMNotConfiguredError,
     LLMResponseError,
@@ -50,25 +52,72 @@ class CharacterSheetRefused(Exception):
         self.message = message
 
 
+class LooseColor(AxModel):
+    """LLM이 준 색 하나. HEX 형식은 코드가 맞춘다(`_clean_palette`)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = ""
+    hex: str = ""
+    use: str | None = None
+
+
 class CharacterRead(AxModel):
-    """LLM이 이미지에서 읽어 돌려주는 것. 프롬프트 문장은 여기서 만들지 않는다."""
+    """LLM이 이미지에서 읽어 돌려주는 것. 프롬프트 문장은 여기서 만들지 않는다.
+
+    모델이 길이·개수를 조금 넘기거나 칸을 더 붙여도 답이 통째로 버려지지 않게 느슨하게 받는다.
+    길이·개수·HEX 형식은 `build_output`이 맞춘다.
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     has_character: bool  # 캐릭터(사람·동물·마스코트 등)가 보이는지
-    real_person_photo: bool  # 실제 사람을 찍은 사진인지
-    summary_ko: str = Field(min_length=1, max_length=300)
-    personality_ko: str | None = Field(default=None, max_length=200)
-    face_en: str = Field(min_length=1, max_length=200)  # 얼굴형·피부톤
-    hair_en: str = Field(min_length=1, max_length=200)  # 머리 모양·색
-    eyes_en: str = Field(min_length=1, max_length=150)
-    body_en: str = Field(min_length=1, max_length=150)  # 체형·키 느낌
-    outfit_en: str = Field(min_length=1, max_length=400)  # 옷·신발 (안 보이면 추정)
-    props_en: str | None = Field(default=None, max_length=200)
-    art_style_en: str = Field(min_length=1, max_length=150)  # 그림체 (사진이면 바꿀 그림체)
-    proportions_en: str = Field(min_length=1, max_length=80)  # 예: 6 heads tall
-    palette: list[PaletteColor] = Field(min_length=3, max_length=8)
-    poses_en: list[str] = Field(min_length=2, max_length=4)  # 성격에 맞는 기본 포즈
-    seen_ko: list[str] = Field(default_factory=list, max_length=12)
-    guessed_ko: list[str] = Field(default_factory=list, max_length=12)
+    real_person_photo: bool = False  # 실제 사람을 찍은 사진인지
+    summary_ko: str = Field(min_length=1)
+    personality_ko: str | None = None
+    face_en: str = Field(min_length=1)  # 얼굴형·피부톤
+    hair_en: str = Field(min_length=1)  # 머리 모양·색
+    eyes_en: str = Field(min_length=1)
+    body_en: str = Field(min_length=1)  # 체형·키 느낌
+    outfit_en: str = Field(min_length=1)  # 옷·신발 (안 보이면 추정)
+    props_en: str | None = None
+    art_style_en: str = Field(min_length=1)  # 그림체 (사진이면 바꿀 그림체)
+    proportions_en: str = Field(min_length=1)  # 예: 6 heads tall
+    palette: list[LooseColor] = Field(default_factory=list)
+    poses_en: list[str] = Field(default_factory=list)  # 성격에 맞는 기본 포즈
+    seen_ko: list[str] = Field(default_factory=list)
+    guessed_ko: list[str] = Field(default_factory=list)
+
+
+_HEX6 = re.compile(r"^#?([0-9A-Fa-f]{6})$")
+_HEX3 = re.compile(r"^#?([0-9A-Fa-f]{3})$")
+
+
+def _cut(text: str | None, n: int) -> str:
+    return " ".join((text or "").split())[:n]
+
+
+def _clean_palette(colors: list[LooseColor]) -> list[PaletteColor]:
+    """HEX를 #RRGGBB로 맞추고, 읽을 수 없는 색은 버린다(지어내지 않는다). 최대 8개."""
+    out: list[PaletteColor] = []
+    for c in colors:
+        raw = c.hex.strip()
+        m6, m3 = _HEX6.match(raw), _HEX3.match(raw)
+        if m6:
+            hex_ = "#" + m6.group(1).upper()
+        elif m3:
+            hex_ = "#" + "".join(ch * 2 for ch in m3.group(1)).upper()
+        else:
+            continue
+        name = _cut(c.name, 40) or hex_
+        out.append(PaletteColor(name=name, hex=hex_, use=_cut(c.use, 60) or None))
+        if len(out) == 8:
+            break
+    return out
+
+
+def _clean_list(items: list[str], n: int, width: int) -> list[str]:
+    return [x for x in (_cut(i, width) for i in items) if x][:n]
 
 
 PROMPT = """너는 캐릭터 디자이너다. 데이터 블록의 이미지 속 캐릭터를 읽어 CharacterRead로만 답한다.
@@ -134,13 +183,36 @@ def _palette_text(palette: list[PaletteColor]) -> str:
 
 def build_output(read: CharacterRead, note: str | None) -> CharacterSheetPromptOutput:
     """LLM이 읽은 외형으로 시트 칸과 프롬프트를 조립한다. 방향·표정 칸은 늘 다 들어간다."""
+    palette = _clean_palette(read.palette)
+    if len(palette) < 3:
+        raise CharacterSheetRefused(
+            "llm_failed", "이미지에서 색 팔레트를 읽지 못했다. 다시 해 보세요"
+        )
+    poses = _clean_list(read.poses_en, 4, 200) or ["standing in a relaxed neutral pose"]
+    read = read.model_copy(
+        update={
+            "summary_ko": _cut(read.summary_ko, 300),
+            "personality_ko": _cut(read.personality_ko, 200) or None,
+            "face_en": _cut(read.face_en, 200),
+            "hair_en": _cut(read.hair_en, 200),
+            "eyes_en": _cut(read.eyes_en, 150),
+            "body_en": _cut(read.body_en, 150),
+            "outfit_en": _cut(read.outfit_en, 300),
+            "props_en": _cut(read.props_en, 150) or None,
+            "art_style_en": _cut(read.art_style_en, 150),
+            "proportions_en": _cut(read.proportions_en, 80),
+            "poses_en": poses,
+            "seen_ko": _clean_list(read.seen_ko, 12, 120),
+            "guessed_ko": _clean_list(read.guessed_ko, 12, 120),
+        }
+    )
     stylized = read.real_person_photo
     style = read.art_style_en
     if stylized:
         style = f"{style}, stylized illustrated character, not photorealistic"
     appearance = f"{read.face_en}; hair: {read.hair_en}; eyes: {read.eyes_en}; body: {read.body_en}"
     outfit = read.outfit_en + (f"; props: {read.props_en}" if read.props_en else "")
-    colors = _palette_text(read.palette)
+    colors = _palette_text(palette)
     consistency = (
         "The exact same character in every panel: "
         f"{appearance}; outfit: {outfit}; colors: {colors}; proportions: {read.proportions_en}. "
@@ -224,7 +296,7 @@ def build_output(read: CharacterRead, note: str | None) -> CharacterSheetPromptO
         appearance_en=appearance[:600],
         outfit_en=outfit[:400],
         proportions=read.proportions_en,
-        palette=read.palette,
+        palette=palette,
         consistency_en=consistency[:1500],
         panels=panels,
         layout_ko=layout,
@@ -252,10 +324,28 @@ async def make_character_sheet(
         ) from exc
     except LLMInputError as exc:
         raise CharacterSheetRefused("invalid_image", str(exc)) from exc
-    except LLMResponseError as exc:
+    except LLMFormatError as exc:
+        logger.warning("캐릭터 시트: LLM 응답이 형식과 맞지 않음 (%s)", image.describe())
         raise CharacterSheetRefused(
-            "llm_failed", "LLM 응답을 받지 못했다. 잠시 뒤 다시 해 보세요"
+            "llm_failed", "LLM 응답이 캐릭터 시트 형식과 맞지 않았다. 다시 해 보세요"
         ) from exc
+    except LLMResponseError as exc:
+        code = getattr(exc, "status_code", None)
+        logger.warning("캐릭터 시트: LLM API 오류 status=%s (%s)", code, image.describe())
+        if code in (400, 404, 415, 422):
+            message = (
+                f"LLM API가 {code} 오류를 돌려줬다. "
+                "마케팅 LLM이 이미지 입력을 받지 못하는 모델일 수 있다"
+            )
+        elif code:
+            message = f"LLM API가 {code} 오류를 돌려줬다. 잠시 뒤 다시 해 보세요"
+        else:
+            message = "LLM API를 부르지 못했다(시간 초과 등). 잠시 뒤 다시 해 보세요"
+        # 공급자 오류 문장(키·토큰 모양은 래퍼가 가린 앞 200자)을 짧게 붙여 원인을 볼 수 있게 한다
+        provider = _cut(getattr(exc, "provider_message", None), 120)
+        if provider:
+            message += f" — 공급자 메시지: {provider}"
+        raise CharacterSheetRefused("llm_failed", message) from exc
     logger.info("캐릭터 시트 프롬프트: %s, 메모 %s", image.describe(), "있음" if note else "없음")
     if not read.has_character:
         raise CharacterSheetRefused("no_character", "이미지에서 캐릭터를 찾지 못했다")

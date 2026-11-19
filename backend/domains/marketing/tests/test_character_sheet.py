@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ax_agent_template.llm import MockLLMClient
+from ax_agent_template.llm import LLMFormatError, LLMResponseError, MockLLMClient
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 from ax_contracts.schemas.marketing_character import (
     MAX_CHARACTER_IMAGE_BYTES,
@@ -182,3 +182,61 @@ def test_handler_refusal_is_a_failed_result_with_outcome(monkeypatch: pytest.Mon
     result = asyncio.run(handlers.HANDLERS["character_sheet_prompt"](_request({"image": IMAGE})))
     assert result.status == TaskStatus.FAILED
     assert result.outcome == "llm_not_configured"
+
+
+def test_loose_llm_answer_is_cleaned_not_thrown_away() -> None:
+    read = cs.CharacterRead.model_validate(
+        {
+            **_read().model_dump(),
+            "palette": [
+                {"name": "brown", "hex": "7b4a2d"},
+                {"name": "yellow", "hex": "#fc0", "use": "후드티"},
+                {"name": "navy", "hex": "#1F2A44"},
+                {"name": "broken", "hex": "not-a-color"},
+            ],
+            "poses_en": ["a", "b", "c", "d", "e", "f"],
+            "seen_ko": [f"본 것 {i}" for i in range(20)],
+            "summary_ko": "가" * 500,
+            "extra_field_from_model": "무시된다",
+        }
+    )
+    out = _make({"image": IMAGE}, _llm(read))
+    # 읽을 수 없는 색은 버린다
+    assert [c.hex for c in out.palette] == ["#7B4A2D", "#FFCC00", "#1F2A44"]
+    assert len([p for p in out.panels if p.kind == "pose"]) == 4
+    assert len(out.seen_ko) == 12 and len(out.summary_ko) == 300
+
+
+def test_too_few_readable_colors_is_refused_not_invented() -> None:
+    read = cs.CharacterRead.model_validate(
+        {
+            **_read().model_dump(),
+            "palette": [{"name": "x", "hex": "??"}, {"name": "y", "hex": "#123456"}],
+        }
+    )
+    with pytest.raises(cs.CharacterSheetRefused) as err:
+        _make({"image": IMAGE}, _llm(read))
+    assert err.value.code == "llm_failed" and "팔레트" in err.value.message
+
+
+class _Raises:
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    async def structured(self, *args: object, **kwargs: object) -> object:
+        raise self.exc
+
+
+@pytest.mark.parametrize(
+    ("exc", "words"),
+    [
+        (LLMResponseError("x", status_code=400), "이미지 입력"),
+        (LLMResponseError("x", status_code=503), "503"),
+        (LLMResponseError("x"), "시간 초과"),
+        (LLMFormatError("x"), "형식"),
+    ],
+)
+def test_llm_failures_say_which_kind(exc: Exception, words: str) -> None:
+    with pytest.raises(cs.CharacterSheetRefused) as err:
+        asyncio.run(cs.make_character_sheet({"image": IMAGE}, lambda: _Raises(exc)))
+    assert err.value.code == "llm_failed" and words in err.value.message
