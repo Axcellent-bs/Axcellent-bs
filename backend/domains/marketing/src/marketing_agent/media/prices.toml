@@ -15,7 +15,7 @@
 #   - gemini-nano-banana-2.1 세 해상도 밖(2K·4K, 다른 종횡비): 이번 범위 밖이라 넣지 않음
 #   - MiniMax·Wan: 단가 미확인
 #   - Seedance(seedance, BytePlus ModelArk): 공식 문서(2026-11-18)에서 토큰 단가·영상 토큰 계산식·최소 토큰을
-#     확인하지 못해 항목이 없다 = 호출 거부. 제3자 사이트 값은 서로 달라 쓰지 않는다 [확인 필요].
+#     확인하지 못해 항목이 없다 = 호출 거부(2026-11-19 재확인: 공식 문서 발췌에 가격 표 없음, 제3자 값만 있음). 제3자 사이트 값은 서로 달라 쓰지 않는다 [확인 필요].
 #     확인되면 gemini 영상처럼 토큰 항목(output_tokens_per_second, 720p 9:16)으로 넣는다
 #   - Kling 4.0·4.0 flash 1080p: 영상 규격이 720p 한 가지라 넣지 않음
 #   - 입력 이미지(편집·참조) 단가: 이번 범위에 편집이 없어 넣지 않음
@@ -253,3 +253,67 @@ per_second_usd = 0.094
 max_duration_s = 8
 source = "https://kling.ai/document-api/pricing/base/video.md"
 checked_on = "2026-11-18"
+
+# 2026-11-19 추가(같은 가격표). 소리 없음 720p 기준: 3.0 0.6 Unit=0.084, 3.0 Omni(참조 영상 없음) 0.084,
+# O1(참조 영상 없음) 0.084, 2.6·2.5 Turbo 0.3 Unit=0.042. 3.0 Turbo는 표에 '소리 있음' 행만 있어 0.112를 쓴다(보수적).
+# 참조 영상을 쓰는 요청은 더 비싸다(어댑터는 텍스트만 보낸다).
+
+[[price]]
+provider = "kling"
+model = "kling-3.0"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.084
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "kling"
+model = "kling-3.0-turbo"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.112
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "kling"
+model = "kling-3.0-omni"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.084
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "kling"
+model = "kling-o1"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.084
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "kling"
+model = "kling-2.6"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.042
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "kling"
+model = "kling-2.5-turbo"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.042
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
