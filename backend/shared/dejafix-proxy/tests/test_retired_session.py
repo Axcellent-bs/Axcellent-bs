@@ -39,6 +39,16 @@ async def test_shutdown_closes_retired_session_still_in_flight(monkeypatch):
         made.append(http)
         return http
 
+    closes = 0
+    real_aclose = main.DejaFixSession.aclose
+
+    async def counting_aclose(self):
+        nonlocal closes
+        closes += 1
+        await real_aclose(self)
+
+    monkeypatch.setattr(main.DejaFixSession, "aclose", counting_aclose)
+
     app = main.create_app()
     caller = real_client(
         transport=httpx.ASGITransport(app=app),
@@ -59,4 +69,7 @@ async def test_shutdown_closes_retired_session_still_in_flight(monkeypatch):
     assert all(http.is_closed for http in made)
     release.set()
     await asyncio.gather(slow, return_exceptions=True)
+    await asyncio.sleep(0)
+    # 종료 뒤 진행 중이던 요청이 끝나도 닫기를 또 걸지 않는다 (세션 2개 = 2번)
+    assert closes == 2
     await caller.aclose()

@@ -65,10 +65,10 @@ class DejaFixSession:
 
     async def shutdown(self) -> None:
         """앱 종료: 닫는 중이면 기다리고, 아직 진행 중이라 안 닫았으면 지금 닫는다."""
-        if self._closing is not None:
-            await self._closing
-        else:
-            await self.aclose()
+        # 닫기 작업을 먼저 붙잡아 둬야 진행 중이던 get()의 finally가 닫기를 또 걸지 않는다
+        self._close_later()
+        assert self._closing is not None
+        await self._closing
 
     async def _login(self) -> str | None:
         res = await self._client.post(
@@ -143,6 +143,8 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         fresh = DejaFixSession(http, user, password)
         if held is not None and client is None:
             held[1].retire()  # 진행 중인 요청이 있으면 끝난 뒤에 닫는다
+            # 이미 닫힌 세션(비밀번호를 쥔)은 들고 있지 않는다
+            retired[:] = [r for r in retired if r._closing is None or not r._closing.done()]
             retired.append(held[1])
         state["s"] = (target, fresh)
         return fresh
@@ -152,10 +154,12 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         refuse_mock_outside_tests(auth.MOCK_NAME)  # 목 모드는 토큰 없이 `human:`을 받으므로
         yield
         held = state.pop("s", None)
+        closing = [r.shutdown() for r in retired]
+        retired.clear()
         if held is not None and client is None:
-            await held[1].aclose()
-        while retired:
-            await retired.pop().shutdown()
+            closing.append(held[1].aclose())
+        # 하나가 실패해도 나머지는 끝까지 닫는다
+        await asyncio.gather(*closing, return_exceptions=True)
 
     app = FastAPI(
         title="dejafix-proxy",
