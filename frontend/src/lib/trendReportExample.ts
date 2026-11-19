@@ -54,6 +54,9 @@ export const TREND_REPORT_EXAMPLE: TrendReport = {
         { keyword: "예시 키워드3", search_change_pct: 480, search_reason: null, shopping_change_pct: null, shopping_reason: null,
           basis: "filtered", small_base: true, monthly_volume: 90 },
         { keyword: "예시 키워드4", search_change_pct: 5, search_reason: null, shopping_change_pct: 9, shopping_reason: null, basis: "all" },
+        // 월 검색이 10 미만이라 서버가 숫자 대신 note를 준 줄 ("월 검색 0"이 아니라 "월 검색 10 미만")
+        { keyword: "예시 키워드5", search_change_pct: null, search_reason: null, shopping_change_pct: null, shopping_reason: null,
+          basis: "volume_only", monthly_volume: null, monthly_volume_note: "under_10" },
       ],
     },
     hashtags: {

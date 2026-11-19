@@ -1353,7 +1353,8 @@ export interface TrendInsightBriefOutput {
   held_back?: HeldBack[];
   gate?: BriefGate | null;
 }
-export type BriefTrigger = "auto" | "manual";
+/** auto_retry = 자동으로 만들다 실패해 자동으로 다시 만든 판 (화면 "자동(다시)") */
+export type BriefTrigger = "auto" | "manual" | "auto_retry";
 export interface BriefVersionInfo { version: number; label: string; created_at: string; trigger: BriefTrigger; requested_by: string | null; detect_as_of: string | null }
 export interface BriefRegenBlocked { code: "daily_limit" | "cooldown" | "llm_budget" | "in_progress" | "no_new_data"; text: string }
 export interface BriefRegenJob { job_id: string; state: "running" | "done" | "failed"; requested_by: string | null; started_at: string; finished_at: string | null; version: number | null; tokens: number | null; reason: string | null }
@@ -1698,6 +1699,12 @@ export interface TrendMeme {
   /** 다른 플랫폼 칸. instagram = Instagram 해시태그 검색 (종합 표 "인스타" 칸), web_search = 블로그·카페 */
   instagram?: MemePlatform | null;
   web_search?: MemePlatform | null;
+  /** 아래는 예전 응답은 없다. 이 유행의 몫(0~1)과 직전 기간 몫, 몫 배수. judged_by share면 배수 자리에 몫을 보인다 */
+  share?: number | null;
+  previous_share?: number | null;
+  share_ratio?: number | null;
+  /** share = 몫으로 판정, count = 영상 수로 판정(예전 응답은 없음 = count) */
+  judged_by?: "share" | "count";
 }
 export interface MemePlatform {
   channels: number | null;
@@ -1879,6 +1886,8 @@ export interface TrendReportSearchRow {
   /** v2 */
   basis?: TrendSearchBasis | null;
   monthly_volume?: number | null;
+  /** "under_10"이면 월 검색이 10 미만이라 숫자를 안 줌 (monthly_volume null) */
+  monthly_volume_note?: "under_10" | null;
   small_base?: boolean;
   shopping_small_base?: boolean;
 }

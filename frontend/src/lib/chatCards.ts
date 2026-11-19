@@ -2,7 +2,7 @@
 // 카드 모양은 공통 계약(lib/planningData.ts ChatCard). 서버 글(의뢰문·결론·근거)은 그대로 글자로만 쓴다.
 import type { ReportStatus, TrendReport, TrendReportInput } from "./data.ts";
 import type { ChatCard, ChatMessage, TrendRequestCard, TrendReportDoneCard } from "./planningData.ts";
-import { formFromBrief, keepPolling, reportHash, targetText, type RequestForm } from "./trendReportView.ts";
+import { formFromBrief, keepPolling, reportHash, reportLabel, targetText, type RequestForm } from "./trendReportView.ts";
 
 // ---- 대화 응답 → 카드 (서버 모양 그대로)
 
@@ -98,7 +98,8 @@ export function formFromCard(card: TrendRequestCard): RequestForm {
 export type SubmitState =
   | { kind: "idle" }
   | { kind: "busy" }
-  | { kind: "done"; reportId: string; reused: boolean }
+  /** accepted = 서버 카드의 accepted_report_id로 안 접수 (새로고침해도 남는다) */
+  | { kind: "done"; reportId: string; reused: boolean; accepted?: boolean }
   /** missing = 서버에 skill이 아직 없음(준비 중). 다시 누를 수 없다 */
   | { kind: "error"; missing: boolean; message: string };
 
@@ -107,8 +108,15 @@ export interface SubmitView {
   button: string | null;
   disabled: boolean;
   note: string | null;
-  /** 접수된 뒤 "보고서 열기" 링크 (reused일 때) */
+  /** 접수된 뒤 "보고서 열기" 링크 (reused·서버가 접수됐다고 준 카드) */
   openReport: boolean;
+}
+
+/** 카드의 버튼 상태: 서버가 accepted_report_id를 주면 그것이 먼저(이미 접수), 없으면 이 탭이 기억한 상태, 그것도 없으면 접수 전 */
+export function submitState(card: Pick<TrendRequestCard, "accepted_report_id">, remembered: SubmitState | null | undefined): SubmitState {
+  const accepted = card.accepted_report_id?.trim();
+  if (accepted) return { kind: "done", reportId: accepted, reused: false, accepted: true };
+  return remembered ?? { kind: "idle" };
 }
 
 /** 접수 전 → 넣는 중 → 접수됨(TR-…) / 같은 의뢰 저장본. 한 번 접수되면 다시 누를 수 없다 */
@@ -118,17 +126,11 @@ export function submitView(s: SubmitState): SubmitView {
     case "busy": return { button: "의뢰 넣는 중…", disabled: true, note: null, openReport: false };
     case "done": return s.reused
       ? { button: null, disabled: true, note: "같은 의뢰 저장본을 열었어요", openReport: true }
-      : { button: null, disabled: true, note: `접수됨 · ${reportCode(s.reportId)}`, openReport: false };
+      : { button: null, disabled: true, note: `접수됨 · ${reportLabel(s.reportId)}`, openReport: s.accepted === true };
     case "error": return s.missing
       ? { button: "분석 의뢰 넣기", disabled: true, note: "분석 의뢰 기능을 데이터 AI에 붙이는 중이에요 (준비 중)", openReport: false }
       : { button: "분석 의뢰 넣기", disabled: false, note: s.message, openReport: false };
   }
-}
-
-/** 보고서 번호 짧게: 서버 id "tr_3f2a9c…" → "TR-3F2A" (화면 표시용, 링크·호출에는 원래 id를 쓴다) */
-export function reportCode(id: string): string {
-  const body = id.replace(/^tr[_-]/i, "");
-  return `TR-${body.slice(0, 4).toUpperCase()}`;
 }
 
 // ---- 진행 카드
@@ -151,7 +153,7 @@ export const progressKeepPolling = (status: ReportStatus) => keepPolling(status)
 export interface DoneView { title: string; tone: "ok" | "warn" | "bad"; evidence: string[] }
 
 export function doneView(card: TrendReportDoneCard): DoneView {
-  const code = reportCode(card.report_id);
+  const code = reportLabel(card.report_id);
   const evidence = card.top_evidence.slice(0, 3);
   if (card.status === "partial") return { title: `보고서 일부만 완료 · ${code}`, tone: "warn", evidence };
   if (card.status === "failed") return { title: `보고서 실패 · ${code}`, tone: "bad", evidence };
