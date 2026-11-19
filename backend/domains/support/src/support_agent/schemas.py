@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel
 from support_agent.categories import Category, normalize_category
@@ -250,8 +250,17 @@ class ListInquiriesInput(AxModel):
 
 
 class GetInquiryInput(AxModel):
-    inquiry_id: int
+    # 문의 번호나 context_id(재무 기록의 inquiry_ref) 중 하나.
+    # 번호는 저장소를 새로 시작하면 다시 매겨지지만 context_id는 안 바뀐다.
+    inquiry_id: int | None = None
+    context_id: str | None = None
     user_id: int | None = None  # 이 고객의 문의일 때만 (shop-api는 필수, 남의 문의는 not_found)
+
+    @model_validator(mode="after")
+    def _one_key(self) -> GetInquiryInput:
+        if (self.inquiry_id is None) == (self.context_id is None):
+            raise ValueError("inquiry_id와 context_id 중 하나만 준다")
+        return self
 
 
 class CreateInquiryInput(AxModel):

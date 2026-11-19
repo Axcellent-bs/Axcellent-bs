@@ -117,6 +117,9 @@ def _done(
     )
 
 
+GONE_BY_REF = "이 기록의 문의는 지금 고객지원 저장소에 없어요(번호가 다시 매겨지기 전 문의)"
+
+
 def _not_found(request: AgentRequest, inquiry_id: int) -> AgentResult:
     return _done(request, {"message": f"문의 {inquiry_id}를 찾을 수 없다"}, outcome="not_found")
 
@@ -386,6 +389,16 @@ async def get_inquiry(request: AgentRequest) -> AgentResult:
     parsed = _parse(request, GetInquiryInput)
     if isinstance(parsed, AgentResult):
         return parsed
+    if parsed.context_id is not None:
+        # 재무 기록의 inquiry_ref로 찾는다. 같은 context_id가 여럿이면 가장 나중 문의
+        conversation = STORE.find_by_context(parsed.context_id)
+        if conversation is None or _not_owned(conversation, parsed.user_id):
+            return _done(
+                request,
+                {"message": GONE_BY_REF},
+                outcome="not_found",
+            )
+        return _done(request, _view(conversation))
     conversation = STORE.get(parsed.inquiry_id)
     if conversation is None or _not_owned(conversation, parsed.user_id):
         return _not_found(request, parsed.inquiry_id)
