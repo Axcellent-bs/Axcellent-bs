@@ -15,15 +15,17 @@ const RESOLUTION_KO: Record<string, string> = {
 };
 const DECISION_KO: Record<string, string> = { approve: "승인", reject: "거절" };
 
+// 기록에 바뀌지 않는 문의 ID(`inquiry_ref`)가 있으면 그것으로 연다(`/support?ref=`, #1386). 번호를 맞춰 볼 필요가 없다.
+// 없는 옛 기록만 아래처럼 번호로 찾는다.
 // 고객지원 문의 번호는 고객지원 문의 DB를 새로 시작하면 다시 1부터 매겨진다(11/13 확인: 예전 기록의 #5가
 // 지금은 다른 고객의 문의). 그래서 링크를 걸기 전에 지금 그 번호 문의의 주문이 기록의 주문과 같은지 본다.
 // 같은 문의여도 그 주문이 판매 서버에 없을 수 있다(판매 서버 자료가 바뀌기 전 옛 문의). 그때는 링크 옆에 "주문 기록 없음"을 붙인다(#1378과 같은 문구).
 type InquiryMatch = "checking" | "same" | "same-no-order" | "other" | "gone" | "unknown";
 
-function useInquiryMatch(inquiryId: number, orderId: string | null): InquiryMatch {
-  const [match, setMatch] = useState<InquiryMatch>(orderId ? "checking" : "unknown");
+function useInquiryMatch(inquiryId: number, orderId: string | null, byRef: boolean): InquiryMatch {
+  const [match, setMatch] = useState<InquiryMatch>(orderId && !byRef ? "checking" : "unknown");
   useEffect(() => {
-    if (!orderId) return;
+    if (!orderId || byRef) return;
     let live = true;
     api.admin.get(inquiryId)
       .then(async (c) => {
@@ -33,13 +35,16 @@ function useInquiryMatch(inquiryId: number, orderId: string | null): InquiryMatc
       })
       .catch((e) => live && setMatch(e instanceof ApiError && e.status === 404 ? "gone" : "unknown"));
     return () => { live = false; };
-  }, [inquiryId, orderId]);
+  }, [inquiryId, orderId, byRef]);
   return match;
 }
 
 function InquiryLink({ r }: { r: SupportCostRecord }) {
-  const match = useInquiryMatch(r.inquiry_id, r.order_id);
+  const ref = r.inquiry_ref || null;
+  const match = useInquiryMatch(r.inquiry_id, r.order_id, ref !== null);
   const cls = "ml-3 whitespace-nowrap text-sm";
+  // 바뀌지 않는 ID로 연다. 그 문의가 지금 저장소에 없으면 고객지원 화면이 회색 안내 한 줄로 알려 준다
+  if (ref) return <Link href={`/support?ref=${encodeURIComponent(ref)}#inquiry`} className={`${cls} font-medium text-brand-700 underline`}>고객지원 문의 →</Link>;
   if (match === "other" || match === "gone") {
     const why = match === "other"
       ? `지금 고객지원의 문의 #${r.inquiry_id}는 다른 주문의 문의입니다. 고객지원 문의 기록이 새로 시작되기 전 기록이라 같은 번호로 찾을 수 없어요.`

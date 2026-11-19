@@ -25,6 +25,8 @@ export interface Envelope<T> { data: T; meta: FinanceMeta }
 export interface SupportCostRecord {
   record_id: string;
   inquiry_id: number;
+  /** 바뀌지 않는 문의 ID(고객지원 context_id). 11/19 전 옛 기록은 없다(번호로만 연결) */
+  inquiry_ref?: string | null;
   order_id: string | null;
   resolution: string;
   claim_decision: string | null;
