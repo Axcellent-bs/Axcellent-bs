@@ -4,6 +4,8 @@ nginx에만 기대지 않고 서버가 직접 막는다. 형식은 `Authorizatio
 - 에이전트 토큰: `AX_AGENT_TOKENS`(agent-template `verify_token`).
   목 모드에서는 `mock:<이름>`도 받는다
 - 사람 토큰: `SAFETY_HUMAN_TOKENS="이름:토큰,이름:토큰"`. 목 모드에서는 `human:<이름>`도 받는다
+- 로그인 세션 토큰(`axs1.`, `ax_agent_template.human_auth`)도 사람으로 받는다. 이름은 계정 이름.
+  위조면 403, 만료·로그아웃이면 401
 - 운영자(admin): 에이전트 토큰 명부의 `admin` 이름
 
 토큰이 없으면 401, 다른 종류의 토큰(사람 자리에 에이전트, admin 자리에 다른 에이전트 등)이면 403,
@@ -13,12 +15,12 @@ safety의 `auth.py`는 다른 패키지라 같은 규칙을 여기 작게 다시
 
 from __future__ import annotations
 
-import hmac
 import os
 from collections.abc import Callable
 
 from fastapi import Header, HTTPException
 
+from ax_agent_template import human_auth
 from ax_agent_template.config import is_mock
 from ax_agent_template.server import verify_token
 from ax_agent_template.services import department_of
@@ -34,19 +36,21 @@ def _bearer(authorization: str | None) -> str:
 
 
 def _human(token: str) -> str | None:
-    """사람 토큰이면 이름, 아니면 None."""
-    for item in os.getenv("SAFETY_HUMAN_TOKENS", "").split(","):
-        name, sep, known = item.strip().partition(":")
-        if sep and name and known and hmac.compare_digest(known, token):
-            return name
-    if is_mock("orchestrator") and token.startswith("human:") and len(token) > len("human:"):
-        return token.removeprefix("human:")
-    return None
+    """사람 토큰이면 이름, 아니면 None. 세션 토큰인데 받을 수 없으면 HTTPException."""
+    try:
+        human = human_auth.find_human(
+            token,
+            shared_tokens=human_auth.parse_shared_tokens(os.getenv("SAFETY_HUMAN_TOKENS")),
+            mock=is_mock("orchestrator"),
+        )
+    except human_auth.HumanAuthError as exc:
+        raise HTTPException(exc.status_code, exc.message) from None
+    return human.name if human else None
 
 
 def _agent(token: str) -> str | None:
     """에이전트 토큰이면 이름, 아니면 None."""
-    if token.startswith("human:"):
+    if token.startswith("human:") or human_auth.is_session_token(token):
         return None
     # 총괄은 에이전트 이름을 늦게 정하므로 목 모드 판정은 `ORCHESTRATOR_MOCK`으로 직접 한다
     if is_mock("orchestrator") and token.startswith("mock:") and len(token) > len("mock:"):

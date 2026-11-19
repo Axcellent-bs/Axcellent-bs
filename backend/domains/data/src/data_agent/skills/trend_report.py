@@ -65,7 +65,14 @@ RECENT_DAYS = 7
 PRIOR_DAYS = 28
 SEARCH_DAYS = RECENT_DAYS + PRIOR_DAYS
 MEDIA_PER_ACCOUNT = 20
-MIN_TAG_ACCOUNTS = 3
+MIN_TAG_ACCOUNTS = 3  # 읽은 계정(매거진 제외)이 MANY_ACCOUNTS 이상일 때
+FEW_TAG_ACCOUNTS = 2  # 그보다 적을 때 (11/19: 27곳에서 3곳 기준이면 비는 일이 잦음)
+MANY_ACCOUNTS = 30
+
+
+def min_tag_accounts(accounts: int) -> int:
+    """해시태그를 "같이 쓴" 것으로 볼 계정 수: 읽은 계정(매거진 제외) 30곳 미만 2곳, 이상 3곳."""
+    return MIN_TAG_ACCOUNTS if accounts >= MANY_ACCOUNTS else FEW_TAG_ACCOUNTS
 MAX_TAGS = 10
 MAX_POSTS = 8
 MAX_MEMES = 3
@@ -266,9 +273,13 @@ async def search_section(
         volumes, used = await monthly_volumes(list(rows), searchad, pool_path, today)
         calls += used
         for kw, r in rows.items():
-            r.monthly_volume = volumes.get(kw)
+            got = volumes.get(kw)
+            if got == UNDER_10:
+                r.monthly_volume, r.monthly_volume_note = None, UNDER_10  # type: ignore[assignment]
+            else:
+                r.monthly_volume = got  # type: ignore[assignment]
             if r.search_change_pct is None:
-                if r.monthly_volume is not None:
+                if r.monthly_volume is not None or r.monthly_volume_note:
                     r.basis = "volume_only"
                     r.search_reason = f"검색어 트렌드 값 없음 ({r.search_reason}) → 월 검색량만"
                 else:
@@ -365,20 +376,25 @@ def _compact(text: str) -> str:
     return "".join(text.split()).lower()
 
 
+UNDER_10 = "under_10"  # 검색광고 "< 10"(PC·모바일 둘 다 10 미만): 0이 아니라 "월 검색 10 미만"
+
+
 async def monthly_volumes(keywords: Sequence[str], searchad: Any, pool_path: Any,
-                          today: date) -> tuple[dict[str, int], int]:  # fmt: skip
+                          today: date) -> tuple[dict[str, int | str], int]:  # fmt: skip
     """키워드 → 월 검색량(PC+모바일). 그날 keyword_pool 값을 먼저 쓰고 없는 것만 검색광고 1번.
 
-    "<10"인 칸은 0으로 더한다. 두 칸 다 모르면 넣지 않는다. 반환: (값, 검색광고 호출 수).
+    두 칸 다 "< 10"이면 0이 아니라 `UNDER_10`. 한 칸만 "< 10"이면 숫자인 칸만(10 미만은 더하지
+    않은 아래쪽 값). 두 칸 다 모르면 넣지 않는다. 반환: (값, 검색광고 호출 수).
     """
     from data_agent import keyword_pool
 
-    def total(pc: int | None, mobile: int | None, pc_low: bool, mo_low: bool) -> int | None:
-        if pc is None and mobile is None and not (pc_low or mo_low):
-            return None
+    def total(pc: int | None, mobile: int | None, pc_low: bool,
+              mo_low: bool) -> int | str | None:  # fmt: skip
+        if pc is None and mobile is None:
+            return UNDER_10 if (pc_low or mo_low) else None
         return (pc or 0) + (mobile or 0)
 
-    out: dict[str, int] = {}
+    out: dict[str, int | str] = {}
     if pool_path:
         day, pool = keyword_pool.latest(pool_path)
         if day == today:
@@ -509,10 +525,12 @@ def hashtag_section(media: Mapping[str, Sequence[Mapping[str, Any]]],
                     ) -> tuple[TrendHashtagSection, list[str]]:  # fmt: skip
     """해시태그마다 쓴 계정 수(이번 7일·직전 7일)·터진 게시물 수.
 
-    표기용 태그(`HIDDEN_TAGS`)는 세지 않고, 매거진(`media_accounts`)은 쓴 계정에서 뺀다.
+    해시태그만 쓴다(`caption_noise.caption_units`의 hashtag). 표기용 태그·이벤트 상투어·숫자 날짜
+    태그·1글자 태그는 세지 않고, 매거진(`media_accounts`)은 쓴 계정에서 뺀다. 같이 쓴 계정 기준은
+    읽은 계정(매거진 제외)이 30곳 미만이면 2곳, 30곳 이상이면 3곳(`min_tag_accounts`).
     """
+    from data_agent.skills.caption_noise import caption_units
     from data_agent.skills.instagram import _posted
-    from data_agent.skills.trend_memes import units_of
 
     out = TrendHashtagSection(status="running")
     if not media:
@@ -521,6 +539,7 @@ def hashtag_section(media: Mapping[str, Sequence[Mapping[str, Any]]],
     cur_from, prev_from = now - WEEK, now - 2 * WEEK
     burst_ids = {p.media_id for p in posts}
     skip = set(media_accounts)
+    need = min_tag_accounts(sum(1 for a in media if a not in skip))
     stats: dict[str, dict[str, Any]] = {}
     short = 0
     for account, items in media.items():
@@ -533,8 +552,8 @@ def hashtag_section(media: Mapping[str, Sequence[Mapping[str, Any]]],
             at = _posted(m)
             if at is None or at < prev_from or at > now:
                 continue
-            for key, unit in units_of(str(m.get("caption") or ""), ()).items():
-                if unit.kind != "hashtag" or hidden_tag(key):
+            for key, unit in caption_units(str(m.get("caption") or "")).items():
+                if unit.kind != "hashtag":
                     continue
                 s = stats.setdefault(key, {"tag": unit.surface, "cur": {}, "prev": set(),
                                            "burst": 0})  # fmt: skip
@@ -549,9 +568,9 @@ def hashtag_section(media: Mapping[str, Sequence[Mapping[str, Any]]],
         n, prev = len(s["cur"]), len(s["prev"])
         return TrendHashtagRow(tag=s["tag"], accounts=n, previous_accounts=prev,
                                burst_posts=s["burst"], used_by=[a for a, _ in used[:MAX_USED_BY]],
-                               is_new=prev == 0 and n >= MIN_TAG_ACCOUNTS)  # fmt: skip
+                               is_new=prev == 0 and n >= need)  # fmt: skip
 
-    rows = [row(s) for s in stats.values() if len(s["cur"]) >= MIN_TAG_ACCOUNTS]
+    rows = [row(s) for s in stats.values() if len(s["cur"]) >= need]
     rows.sort(key=lambda r: (-r.accounts, -r.burst_posts, r.previous_accounts, r.tag))
     out.rows = rows[:MAX_TAGS]
     if out.rows:
@@ -996,7 +1015,9 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
     if ig.failed:
         limits.append(f"인스타 {len(ig.failed)}곳 못 읽음"
                       + (f" ({ig.stopped}, 그 자리에서 멈춤)" if ig.stopped else ""))  # fmt: skip
-    names = account_names(ig.media)
+    # 표시 이름: 읽은 name(새로 부른 것·레이더 저장분) → 없으면 프리셋 display_names
+    display = dict(resolved.preset.display_names) if resolved.preset else {}
+    names = {**display, **account_names(ig.media)}
     report.brief.competitor_names = {a: names.get(a) for a in report.brief.competitors}
     why_none = ig.stopped
     posts: list[InstagramRadarPost] = []
@@ -1020,6 +1041,8 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
     async def run_hashtags() -> None:
         media_accounts = resolved.preset.media_accounts if resolved.preset else ()
         section, more = hashtag_section(ig.media, posts, now, why_none, media_accounts)
+        section.account_names = {a: names[a] for r in section.rows for a in r.used_by
+                                 if a in names}  # fmt: skip
         report.sections.hashtags = section
         limits.extend(more)
 
@@ -1030,7 +1053,10 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
         limits.extend(more)
 
     async def run_competitors() -> None:
-        report.sections.competitors = competitor_section(report.brief.competitors, ig, now)
+        section = competitor_section(report.brief.competitors, ig, now)
+        for row in section.rows:
+            row.name = row.name or names.get(row.account)
+        report.sections.competitors = section
 
     for name, run in (("search", run_search), ("hashtags", run_hashtags),
                       ("content", run_content), ("competitors", run_competitors)):  # fmt: skip

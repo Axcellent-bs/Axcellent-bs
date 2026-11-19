@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { TONE } from "@/components/finance/bits";
 import type { CautionType, DataFact, EvidenceHighlight, EvidenceHighlightSource, ShortsFit, VideoLink } from "@/lib/data";
+import { safeLink } from "@/lib/safeLink";
 
 // 2단계 인사이트 v2 카드 틀 (v2 시안 ② 보드). 인사이트 카드와 기회 가설 카드가 같이 쓴다.
 // 왼쪽: 판정 칩 하나 → 제목 → 한 문장(서버 line) → 근거 요약(서버 evidence_highlights, #710) → 숫자 타일(서버 값이 있는 것만)
@@ -56,7 +57,7 @@ export function shortsThumbs(videoLinks: VideoLink[] | undefined, links: (string
   const out: Thumb[] = [];
   const seen = new Set<string>();
   const push = (url: string | null | undefined, thumb: string | null, id?: string, v?: VideoLink) => {
-    if (!url || !YOUTUBE.test(url) || out.length === 3) return;
+    if (!url || !safeLink(url) || !YOUTUBE.test(url) || out.length === 3) return; // https YouTube 주소만 (safeLink로 한 번 더)
     const key = id ?? idOf(url);
     if (seen.has(key)) return;
     seen.add(key);
@@ -179,7 +180,7 @@ export function FactList({ facts }: { facts: DataFact[] }) {
         <li key={f.fact_id}>
           <span className="font-semibold text-ink-900">{f.label}</span> {withUnit(f.value, f.unit)}
           {[f.source, f.period, typeof f.sample === "number" ? `표본 ${fmt(f.sample)}` : null].filter(Boolean).map((x) => <span key={x} className="text-ink-500"> · {x}</span>)}
-          {f.link && <> · <a href={f.link} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">주소</a></>}
+          {safeLink(f.link) && <> · <a href={safeLink(f.link)!} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">주소</a></>}
         </li>
       ))}
     </ul>

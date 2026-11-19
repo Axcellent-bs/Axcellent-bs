@@ -187,3 +187,32 @@ async def test_manager_owns_an_intake_and_chat_service_reaches_it(_chat) -> None
     await service.wait_idle()
     assert len(manager.work_requests.list("member")) == 1
     assert "접수했어요" in service.get("member", th["id"])["messages"][-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_runner_is_started_only_for_runnable_tasks_and_reply_says_so() -> None:
+    started: list[str] = []
+    reqs = WorkRequests()
+    intake = RequestIntake(reqs)
+    intake.on_task = started.append
+    ok = await intake.receive("m", "이번 달 매출 분석해 주세요", FakeLLM(ask("sales_analysis")))
+    assert started == [ok.request_id] and "데이터분석에 시켰어요" in ok.reply
+    blocked = await intake.receive("m", "홍보 영상 만들어 주세요", FakeLLM(ask("promo_video")))
+    assert started == [ok.request_id]  # 아직 실행 준비가 안 된 일은 시키지 않는다
+    assert "담당자가 확인해요" in blocked.reply
+
+
+@pytest.mark.asyncio
+async def test_request_remembers_its_thread_and_notes_do_not_change_the_thread_state() -> None:
+    reqs = WorkRequests()
+    intake = RequestIntake(reqs)
+    store = threads.ChatStore()
+    th = store.create("의뢰", "member")
+    r = await intake.receive(
+        "member", "이번 달 매출 분석해 주세요", FakeLLM(ask("sales_analysis")), thread_id=th["id"]
+    )
+    assert reqs.get(r.request_id)["thread_id"] == th["id"]
+    store.add_note(th["id"], "[의뢰] 알림")
+    got = store.get(th["id"])
+    assert got["status"] == "talking" and got["messages"][-1]["text"] == "[의뢰] 알림"
+    assert got["messages"][-1]["role"] == "assistant"

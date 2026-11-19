@@ -32,7 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
-from ax_agent_template.config import set_agent_name
+from ax_agent_template.config import refuse_mock_outside_tests, set_agent_name
 from ax_agent_template.logging import log_event
 from ax_contracts.schemas import ConnectionHoldNotice, ExecuteRequest
 from ax_safety.auth import agent_from_token, bearer, human_from_token
@@ -112,6 +112,7 @@ def create_app(
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        refuse_mock_outside_tests("safety")  # 실제 서버에 목 스위치가 남아 있으면 뜨지 않는다
         task = asyncio.create_task(_expire_loop(gate, expire_interval)) if expire_interval else None
         yield
         if task:

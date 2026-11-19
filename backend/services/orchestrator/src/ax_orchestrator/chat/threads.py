@@ -187,6 +187,15 @@ class ChatStore:
 
         return self._update(thread_id, mutate, summary)
 
+    def add_note(self, thread_id: str, text: str) -> dict[str, Any] | None:
+        """대화 상태는 그대로 두고 AI 알림 한 줄을 붙인다 (의뢰 진행 알림용)."""
+
+        def mutate(th: dict[str, Any], msgs: list[dict[str, Any]], at: str) -> Status | None:
+            self._add(msgs, "assistant", text, "text", at)
+            return th["status"]
+
+        return self._update(thread_id, mutate)
+
     def close(self, thread_id: str) -> dict[str, Any] | None:
         """끝낸다. 요약이 비어 있으면 첫 질문 일부를 요약으로 남긴다."""
         th = self.get(thread_id)

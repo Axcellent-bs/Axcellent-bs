@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { useSkill, type SkillState } from "@/components/data/useSkill";
+import { safeLink } from "@/lib/safeLink";
+import { judgedByShare, shareLine } from "@/lib/memeView";
 import { SummaryBody, SummaryCard } from "@/components/data/KeywordTrend";
 import { dataAi, type MemeWindow, type TrendMeme, type TrendMemesOutput } from "@/lib/data";
 import type { DetectView } from "@/lib/detectView";
@@ -9,6 +11,7 @@ import type { DetectView } from "@/lib/detectView";
 // - 숫자·순위·판정은 서버 값 그대로. 설명 한 줄만 서버 LLM(숫자 없음)
 // - 이번 주(7일 vs 직전 7일) / 오늘(어제 vs 지난 4주 같은 요일) 토글. 서버가 미리 계산한 결과를 읽는다
 // - 대표 영상은 링크만 (썸네일을 걸지 않는다)
+// - 배수 칸: 서버가 몫으로 판정했으면(judged_by share) "이번 주 몫 · 지난주 몫 (×몫 배수)", 영상 수 판정(count·예전 응답)이면 영상 수 배수 (lib/memeView.ts)
 
 const WINDOWS: { key: MemeWindow; label: string; before: string; span: string }[] = [
   { key: "week", label: "이번 주", before: "지난주", span: "이번 주" },
@@ -51,7 +54,10 @@ export function risingEverywhere(m: TrendMeme): boolean {
   return shorts && search && insta;
 }
 
-function Ratio({ m }: { m: TrendMeme }) {
+/** 배수 칸: 몫으로 판정한 유행(judged_by share)이면 "이번 주 몫 · 지난주 몫 (×몫 배수)", 영상 수 판정이면 지금처럼 배수 */
+function Ratio({ m, span, before }: { m: TrendMeme; span: string; before: string }) {
+  const share = shareLine(m, span, before);
+  if (share) return <span className="whitespace-normal">{share}</span>;
   if (m.ratio_status === "known" && m.ratio !== null) return <>{times(m.ratio)}</>;
   if (m.ratio_status === "new") return <>새로 등장</>;
   return <span className="text-ink-500">모름<small className="block text-[11px]">{m.ratio_reason ?? "지난 기간 표본 없음"}</small></span>;
@@ -81,12 +87,15 @@ function Videos({ m }: { m: TrendMeme }) {
   if (!m.top_videos.length) return <span className="text-ink-500">없음</span>;
   return (
     <ul className="min-w-[10rem] space-y-1">
-      {m.top_videos.map((v) => (
-        <li key={v.video_id} className="text-xs">
-          {v.video_url ? <a href={v.video_url} target="_blank" rel="noreferrer" className="text-brand-700 underline-offset-2 hover:underline">{v.title || v.video_id}</a> : (v.title || v.video_id)}
-          <small className="block text-[11px] text-ink-500">{[v.channel_title, v.views !== null ? `조회 ${v.views.toLocaleString("ko-KR")}` : null].filter(Boolean).join(" · ")}</small>
-        </li>
-      ))}
+      {m.top_videos.map((v) => {
+        const link = safeLink(v.video_url); // http(s)만 링크, 아니면 제목 글자만
+        return (
+          <li key={v.video_id} className="text-xs">
+            {link ? <a href={link} target="_blank" rel="noreferrer noopener" className="text-brand-700 underline-offset-2 hover:underline">{v.title || v.video_id}</a> : (v.title || v.video_id)}
+            <small className="block text-[11px] text-ink-500">{[v.channel_title, v.views !== null ? `조회 ${v.views.toLocaleString("ko-KR")}` : null].filter(Boolean).join(" · ")}</small>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -98,9 +107,10 @@ function criteriaLine(out: TrendMemesOutput, span: string, before: string) {
 }
 
 /** 종합 칩 맨 위 요약 줄의 첫 칸: 1위 유행 하나 (서버 순위 그대로). 받는 중·실패·없음이면 짧은 문장 */
-function TopMeme({ s, label, before }: { s: SkillState<TrendMemesOutput>; label: string; before: string }) {
+function TopMeme({ s, label, span, before }: { s: SkillState<TrendMemesOutput>; label: string; span: string; before: string }) {
   const m = s.kind === "ok" ? s.out.items[0] ?? null : null;
-  const ratio = !m ? null : m.ratio_status === "known" && m.ratio !== null ? `${before} 대비 ${times(m.ratio)}` : m.ratio_status === "new" ? "새로 등장" : null;
+  const ratio = !m ? null : shareLine(m, span, before)
+    ?? (m.ratio_status === "known" && m.ratio !== null ? `${before} 대비 ${times(m.ratio)}` : m.ratio_status === "new" ? "새로 등장" : null);
   return (
     <SummaryCard label={`${label} 유행`}>
       {m ? (
@@ -116,7 +126,7 @@ function TopMeme({ s, label, before }: { s: SkillState<TrendMemesOutput>; label:
 }
 
 /** youtube = 쇼츠 칸 중심 (네이버 검색·광고 재료 칸은 종합에서만) */
-function Table({ out, before, youtube }: { out: TrendMemesOutput; before: string; youtube: boolean }) {
+function Table({ out, span, before, youtube }: { out: TrendMemesOutput; span: string; before: string; youtube: boolean }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-sm">
@@ -140,7 +150,7 @@ function Table({ out, before, youtube }: { out: TrendMemesOutput; before: string
                 <small className="block text-xs text-ink-500">{m.description ?? m.description_reason ?? ""}</small>
               </td>
               <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums">채널 {m.channels}곳<small className="block text-[11px] text-ink-500">영상 {m.videos}개</small></td>
-              <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Ratio m={m} /></td>
+              <td className={`${judgedByShare(m) ? "min-w-[11rem]" : "whitespace-nowrap"} px-1 py-2 text-right tabular-nums`}><Ratio m={m} span={span} before={before} /></td>
               {!youtube && <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Search m={m} /></td>}
               {!youtube && <td className="whitespace-nowrap px-1 py-2 text-right tabular-nums"><Instagram m={m} /></td>}
               {!youtube && <td className="px-1 py-2"><Material m={m} /></td>}
@@ -182,7 +192,7 @@ export function TrendMemes({ focus = "all", summaryCards }: { focus?: DetectView
       hint={'영상 하나가 아니라 "여러 채널에서 같이 늘어난 해시태그·구절"을 하나의 유행으로 묶었어요. 검색으로도 오르는지 같이 봅니다.'}>
       {!youtube && (
         <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
-          <TopMeme s={s} label={meta.label} before={meta.before} />
+          <TopMeme s={s} label={meta.label} span={meta.span} before={meta.before} />
           {summaryCards}
         </div>
       )}
@@ -190,7 +200,7 @@ export function TrendMemes({ focus = "all", summaryCards }: { focus?: DetectView
         : s.kind === "failed" ? <ErrorBox message={s.reason} onRetry={res.reload} />
         : (
           <div className="space-y-2">
-            {s.out.items.length ? <Table out={s.out} before={meta.before} youtube={youtube} /> : (
+            {s.out.items.length ? <Table out={s.out} span={meta.span} before={meta.before} youtube={youtube} /> : (
               <p className="text-sm text-ink-700">기준을 넘은 유행이 없어요.{s.out.status === "unknown" && s.out.reason ? ` ${s.out.reason}` : ""}</p>
             )}
             <p className="text-xs text-ink-500">{criteriaLine(s.out, meta.span, meta.before)}</p>

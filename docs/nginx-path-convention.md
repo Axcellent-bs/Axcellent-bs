@@ -34,5 +34,5 @@
 
 1. 프론트 호출을 찾는다: `frontend/src/lib/*.ts`에서 `fetch` 호출의 주소를 본다(dashboard-api 호출은 모두 `dashboardAuth()`로 사람 토큰을 붙인다). 기본 주소 상수는 `frontend/src/lib/env.ts`.
 2. 그 경로를 받는 라우트를 찾는다: `backend/shared/dashboard-api/src/ax_dashboard_api/`에서 경로 문자열을 검색한다.
-3. 인증은 `auth.py`의 `require_human`이 정한다. `/api/dashboard/*`는 GET을 포함해 모든 요청에 사람 토큰(`Authorization: Bearer`)이 필요하다. 토큰 없이 열린 것은 `/health`뿐이다. 화면은 `frontend/src/lib/env.ts`의 `dashboardAuth()`로 GET에도 토큰을 붙인다.
+3. 인증은 `auth.py`의 `require_human`이 정한다. `/api/dashboard/*`는 GET을 포함해 모든 요청에 사람 토큰(`Authorization: Bearer`)이 필요하다. 토큰 없이 열린 것은 `auth.py`의 `PUBLIC_ROUTES`(상태 확인과 로그인 전 화면이 읽는 `/auth/status`·`/auth/login`·`/auth/company`)뿐이다. 로그인 전에는 세션이 없어 화면이 자리표시자 토큰을 보낼 수 있으므로, 이 공개 경로는 서버가 토큰을 보지 않는다. 화면은 `frontend/src/lib/env.ts`의 `dashboardAuth()`로 GET에도 토큰을 붙인다.
 4. 다른 서비스(대화 창구·기획·재무 등)로 직접 가는 경로는 그 서비스의 라우트 파일에서 같은 방식으로 확인한다.

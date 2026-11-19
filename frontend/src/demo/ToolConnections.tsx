@@ -8,7 +8,8 @@ import { Notice, PageHead, SectionHead, StatusChip } from '@/components/connect/
 import { GithubAppCard } from '@/components/connect/GithubAppCard'
 import { DeployTools } from '@/components/connect/DeployTools'
 import { useToolList } from '@/components/connect/ToolForm'
-import { appChoices, deployRows, dejafixView } from '@/lib/toolForms'
+import { useDejafixStatus } from '@/components/connect/DejafixConnect'
+import { appChoices, deployRows, dejafixCard, dejafixSummary } from '@/lib/toolForms'
 import { EMPTY_REPO_FORM, repoAppLabel, repoBody, repoFormError, repoFormOf, type RepoForm } from '@/lib/repoForm'
 import { useSession } from './session'
 
@@ -127,7 +128,8 @@ const CODING_MODES: { id: CodingSetting; label: string }[] = [
   { id: 'subscription', label: '내 Claude' },
 ]
 const codingApi = codingSettingsApi(DEV_API)
-const MCP_URL = `${DEV_API.replace(/\/$/, '')}/api/planning/mcp`
+// 개발 서버 프록시 주소(/dev-api)처럼 앞이 빠진 주소면 지금 화면 주소를 앞에 붙인다 (명령에 그대로 붙여 넣을 수 있게)
+const MCP_URL = new URL(`${DEV_API.replace(/\/$/, '')}/api/planning/mcp`, window.location.href).href
 // 로컬: run_all.sh가 만든 작업 대기열 전용 토큰(backend/.data/tokens.env WORK_TOKEN)을 읽어 넣는다 (Git Bash, 레포 폴더).
 // 이 값은 내 PC의 Claude Code 설정(~/.claude.json)에 남으므로 승인·머지 권한이 있는 사람 토큰은 쓰지 않는다
 const MCP_ADD = `claude mcp add --transport http axcellent-dev ${MCP_URL} --header "Authorization: Bearer $(sed -n 's/^WORK_TOKEN=//p' backend/.data/tokens.env)"`
@@ -456,6 +458,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
   const { account } = useSession()
   const admin = !!account?.admin
   const tools = useToolList()
+  const dejafixLive = useDejafixStatus()
   const [list, setList] = useState<VcsConnection[] | null>(null)
   const [offline, setOffline] = useState(false)
   const [tests, setTests] = useState<Record<string, VcsTestResult>>({})
@@ -540,8 +543,10 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
   const connected = !!list?.length
   // 다른 개발 도구 목록의 배포·DejaFix 상태: 도구 연결 보관함에서 (못 받으면 상태를 쓰지 않는다)
   const deployCount = tools.data ? deployRows(tools.data.connections).length : null
-  const dejafix = tools.data ? dejafixView(tools.data.connections).state : null
-  const dejafixLabel = dejafix === 'connected' ? '연결됨' : dejafix === 'none' ? '연결 전' : 'DejaFix 연결'
+  // DejaFix는 같이 설치된다: 연결 출처·응답 여부는 프록시 /status에서 (못 읽으면 "확인할 수 없음")
+  const dejafixSum = tools.data && dejafixLive.status !== undefined ? dejafixSummary(dejafixCard(dejafixLive.status, tools.data.connections)) : null
+  const dejafixOk = dejafixSum?.tone === 'ok'
+  const dejafixLabel = dejafixSum ? dejafixSum.label : 'DejaFix 연결'
   const kindReady = KINDS.find((k) => k.id === form?.kind)?.ready
   const editing = form?.id ? list?.find((c) => c.id === form.id) : undefined
 
@@ -754,8 +759,8 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
                 </button>
               ) : o.state === 'dejafix' ? (
                 admin
-                  ? <Link href="/system/members?tab=pcs" className={`chip ${dejafix === 'connected' ? 'bg-emerald-50 text-emerald-700' : 'bg-ink-100 text-ink-700'}`}>{dejafixLabel} · 회원·서버 관리</Link>
-                  : <span className={`chip ${dejafix === 'connected' ? 'bg-emerald-50 text-emerald-700' : 'bg-ink-100 text-ink-700'}`}>{dejafixLabel}</span>
+                  ? <Link href="/system/members?tab=pcs" className={`chip ${dejafixOk ? 'bg-emerald-50 text-emerald-700' : 'bg-ink-100 text-ink-700'}`}>{dejafixLabel} · 회원·서버 관리</Link>
+                  : <span className={`chip ${dejafixOk ?'bg-emerald-50 text-emerald-700' : 'bg-ink-100 text-ink-700'}`}>{dejafixLabel}</span>
               ) : (
                 <span className="chip bg-ink-100 text-ink-500">준비 중</span>
               )}

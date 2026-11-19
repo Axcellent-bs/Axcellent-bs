@@ -12,6 +12,11 @@
 ## 3. 입출력 계약
 응답은 성공 `{data, meta}`, 실패 `{error: {code, message}}`. 모델은 `schemas.py`이고 OpenAPI는 `contracts/openapi/dashboard-api.json`으로 CI가 내보낸다.
 
+토큰: 읽기·쓰기 모두 사람 토큰(로그인 세션·공용 토큰)이 있어야 한다(`auth.require_human`). 역할은 보지 않아서 일반회원 세션도 통과한다.
+토큰 없이 열린 경로는 `auth.PUBLIC_ROUTES` 한 곳에만 적는다: `GET /health`, 로그인 전 화면이 쓰는
+`GET /api/dashboard/auth/status`·`POST /api/dashboard/auth/login`·`GET /api/dashboard/auth/company`(설치된 회사 id·이름·사이트 주소만, `public_info.py`).
+역할로 막는 것은 계정 관리(`/auth/accounts*`)와 연결 키 쓰기(`/connection-keys/issue·revoke` 운영자, `/connect·company·disconnect` 고객사 관리자)뿐이다.
+
 ### 엔드포인트 (GET)
 | 경로 (`/api/dashboard` 아래) | 옛 경로 (`/api/admin` 등) |
 | --- | --- |
@@ -62,7 +67,7 @@ CORS 허용 출처는 `DASHBOARD_CORS_ORIGINS`(쉼표 구분, 기본 `http://loc
 ### 문의 API 연결 (목 모드가 아닐 때)
 | 경로 | support skill |
 | --- | --- |
-| GET `/conversations`, `/conversations/{id}` | `list_inquiries`, `get_inquiry` (가린 고객 메시지의 `text`는 비워서 준다) |
+| GET `/conversations`, `/conversations/{id}` | `list_inquiries`, `get_inquiry` (가린 고객 메시지의 `text`는 비워서 준다). 옛 자료 표시 `legacy_intake`(기본 false)도 그대로 전한다 |
 | GET `/conversations/by-ref/{context_id}` | `get_inquiry` (`context_id`로. 재무 기록의 `inquiry_ref`로 문의를 연다. 문의 번호는 다시 매겨질 수 있지만 이 값은 안 바뀐다. 없으면 404) |
 | POST `/conversations/{id}/messages/{message_id}/original` | `reveal_original` (사람 토큰 필요, 연 사람이 내력에 남는다) |
 | GET `/privacy/purge-preview?mode=customer_request\|expired[&inquiry_id=]` | `preview_data_purge` (읽기. 지워질 것과 보존 의무로 남을 것) |
@@ -262,3 +267,14 @@ ax-contracts, ax-agent-template
 - 토큰이 설정되지 않았고 목 모드도 아니면 읽기·쓰기 모두 거부된다 (fail-closed).
 - 직접 대화(`/support-chat`)도 읽기에 사람 토큰이 필요하다 (없으면 401, 모르는 토큰이면 403). 다른 사람 대화는 `messages: []` + `summary` + `restricted: true`로만 오고 거기에 쓰면 403이다. 다른 사람 대화의 요약(제목·메시지 수·시각·결과)은 로그인한 사람 모두 보고, 원문은 본인만 본다(관리자는 일이 생긴 대화만). 고객지원에는 따로 지정하는 담당자가 없다(예진님 2026-11-09, 예전 `staff`·`SUPPORT_CHAT_STAFF`는 없어졌다). 관리자는 에이전트 토큰 명부의 `admin` 토큰이다. 지금은 모든 요청이 같은 사람("공용")이라 서버가 사람별로 가를 수 없다.
 - 확인한 사람 이름은 요청마다 `request.state.human`에 담긴다 (A2A 요청자는 여전히 서비스 토큰).
+
+## 계정·로그인 (사람별 토큰 1단계)
+
+설계: `docs/superpowers/specs/2026-11-19-human-session-tokens-design.md`. 코드는 `accounts.py`, 토큰 검사는 공용 `ax_agent_template.human_auth`.
+
+- `POST /api/dashboard/auth/login` {email, password} → {token, expires_at, account}. 세션 토큰 `axs1.…`는 12시간. 같은 이메일로 5번 연속 틀리면 15분 막힘(429 `LOGIN_LOCKED`)
+- `POST /auth/logout`, `GET /auth/me` (세션 토큰). `GET /auth/accounts`(운영자), `POST /auth/accounts`(운영자는 모든 역할, 고객사 관리자는 일반회원만)
+- `GET /auth/status` → {login_enabled}. 화면이 서버 로그인과 데모 로그인(꺼져 있을 때) 중 무엇을 쓸지 고른다. 토큰 없이 연다
+- 연결 키(`/connection-keys`): 세션 토큰이면 역할을 본다. 발급·폐기는 운영자, 연결·회사 정보·끊기는 고객사 관리자. 공용 토큰은 지금처럼 통과
+- 세션 토큰은 쓰기 사람 토큰 자리에도 그대로 쓴다(기록 이름 = 계정 이름). 공용 사람 토큰도 계속 받는다
+- 환경변수: `AX_SESSION_SECRET`(서명 키, 32자 이상. 없으면 로그인 꺼짐 503 `LOGIN_DISABLED`), `AX_BOOTSTRAP_ADMIN="이메일:초기 비밀번호"`(계정이 하나도 없을 때만 운영자 1명), `AX_ACCOUNTS_FILE`(기본: 회사 연결 파일 옆 `accounts.json`), `AX_REVOKED_SESSIONS_FILE`(기본: 회사 연결 파일 옆 `revoked_sessions.json`)

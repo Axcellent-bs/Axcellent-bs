@@ -25,8 +25,10 @@ from pydantic import BaseModel
 from ax_agent_template import events
 from ax_agent_template.config import set_agent_name
 from ax_contracts.schemas import TENANT_ID_DEFAULT, EventEnvelope, EventType
+from ax_orchestrator import request_tasks
 from ax_orchestrator.a2a import build_a2a_app
 from ax_orchestrator.auth import require_admin, require_agent, require_human
+from ax_orchestrator.chat.turn import notify_thread
 from ax_orchestrator.diagnosis_cards import fetch_cards_via_archive
 from ax_orchestrator.diagnosis_notes import send_note_via_agent
 from ax_orchestrator.engine import Engine
@@ -132,6 +134,9 @@ class AppState:
         if self.manager is None:
             self.manager = IncidentManager(engine, scenario_a, store=self.store)
             self.manager.restore()  # 저장된 이벤트를 올린다(진행 중이던 건은 "재시작으로 중단됨")
+            self.manager.request_runner.notify = notify_thread  # 의뢰 진행을 대화로 알린다
+            # 사람에게 넘긴 의뢰를 받은 요청에 올린다. 목 모드는 올리지 않는다
+            self.manager.request_escalation.poster = None if self.mock else post_to_inbox
         else:  # 같은 이벤트 목록을 유지하면서 부서 동작만 교체
             self.manager.engine = engine
         # 인사가 보낸 에이전트 평가 진단 요청은 받자마자 진단한다(목 모드·시험은 자동 시작 안 함)
@@ -174,6 +179,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # (실제 모드, 또는 저장 파일을 준 목 모드)
     if state.manager is None and (not state.mock or os.getenv(DB_ENV)):
         await state.build()
+    if state.manager is not None:  # 다시 켠 뒤 시킬 단계가 남은 의뢰를 이어서 시킨다
+        await state.manager.request_runner.resume_open()
     try:
         yield
     finally:
@@ -372,6 +379,59 @@ async def decide(
     _require_mock()
     if not (state.manager and state.manager.hold_decision(context_id, step_id, body.approved)):
         raise HTTPException(404, "대기 중인 보류가 없음")
+    return {"data": {"ok": True}, "meta": {}}
+
+
+@app.post("/api/requests/{request_id}/steps/{step_id}/decision")
+async def decide_request_step(
+    request_id: str, step_id: str, body: Decision, who: str = Depends(require_human)
+) -> dict:
+    """사람 확인·승인 대기 중인 의뢰 단계를 승인하거나 거절한다. 사람 토큰만 받는다.
+
+    승인하면 다음 단계로 이어진다. 상태를 바꾸는 일은 부서의 안전 관문도 따로 거친다.
+    """
+    runner = state.manager.request_runner if state.manager else None
+    outcome = runner.decide(request_id, step_id, body.approved, by=who) if runner else "missing"
+    if outcome == "missing":
+        raise HTTPException(404, "없는 의뢰나 단계")
+    if outcome == "not_waiting":
+        raise HTTPException(409, "확인을 기다리는 단계가 아님")
+    return {"data": {"ok": True}, "meta": {}}
+
+
+@app.get("/api/requests")
+async def list_requests(status: str | None = None, _: str = Depends(require_human)) -> dict:
+    """접수된 고객 의뢰 (최근 것부터, 최대 100건). 고객 글이 들어 있어 사람 토큰만 본다."""
+    rows = state.manager.work_requests.list(status=status) if state.manager else []
+    tasks = [{"name": t.name, "label": t.label} for t in request_tasks.TASKS]
+    return {"data": list(reversed(rows))[:100], "meta": {"tasks": tasks}}
+
+
+@app.get("/api/requests/{request_id}")
+async def get_request(request_id: str, _: str = Depends(require_human)) -> dict:
+    row = state.manager.work_requests.get(request_id) if state.manager else None
+    if row is None:
+        raise HTTPException(404, "없는 의뢰")
+    return {"data": row, "meta": {}}
+
+
+class RerunBody(BaseModel):
+    task: str
+
+
+@app.post("/api/requests/{request_id}/rerun")
+async def rerun_request(
+    request_id: str, body: RerunBody, who: str = Depends(require_human)
+) -> dict:
+    """잘못 골랐으면 사람이 일을 바꿔 다시 돌린다. 이전 선택은 기록에 남는다."""
+    runner = state.manager.request_runner if state.manager else None
+    outcome = runner.rerun(request_id, body.task, by=who) if runner else "missing"
+    if outcome == "missing":
+        raise HTTPException(404, "없는 의뢰")
+    if outcome == "unknown_task":
+        raise HTTPException(422, "일 목록에 없는 일")
+    if outcome == "busy":
+        raise HTTPException(409, "지금 진행 중이라 바꿀 수 없음")
     return {"data": {"ok": True}, "meta": {}}
 
 

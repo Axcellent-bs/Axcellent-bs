@@ -23,7 +23,7 @@ export default function RefundHolds({ onDecided }: { onDecided?: () => void }) {
   const [runs, setRuns] = useState<Record<string, ExecutionRecord>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [approver, setApprover, approverName] = useApproverName();
+  const [approver, setApprover, approverName, decidedAs] = useApproverName();
 
   const load = useCallback(async () => {
     try {
@@ -41,7 +41,7 @@ export default function RefundHolds({ onDecided }: { onDecided?: () => void }) {
     if (!approverName) { setError("승인자 이름을 먼저 적으세요."); return; }
     setBusy(id + decision);
     try {
-      await finance.decide(id, decision, undefined, false, approverName);
+      await finance.decide(id, decision, undefined, false, decidedAs ?? undefined);
       await load();
       onDecided?.();
     } catch (e) {

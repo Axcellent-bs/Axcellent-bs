@@ -15,13 +15,13 @@
 
 from __future__ import annotations
 
-import hmac
 import os
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from ax_agent_template import human_auth
 from ax_agent_template.config import is_mock
 from hr_agent.chat import threads, turn
 from hr_agent.services import get_services
@@ -36,19 +36,23 @@ class _AuthError(Exception):
 def human_name(request: Request) -> str:
     """사람 토큰이면 그 사람 이름. 없으면 401, 사람 토큰이 아니면 403.
 
-    토큰이 설정 안 됐고 목 모드도 아니면 모두 거부한다.
+    로그인 세션 토큰(`axs1.`)이면 계정 이름. 토큰이 설정 안 됐고 목 모드도 아니면 모두 거부한다.
     """
     scheme, _, token = (request.headers.get("authorization") or "").partition(" ")
     token = token.strip()
     if scheme.lower() != "bearer" or not token:
         raise _AuthError(401, "토큰이 필요하다 (Authorization: Bearer 사람 토큰)")
-    for item in os.getenv("SAFETY_HUMAN_TOKENS", "").split(","):
-        name, sep, known = item.strip().partition(":")
-        if sep and name and known and hmac.compare_digest(known, token):
-            return name
-    if is_mock("hr") and token.startswith("human:") and len(token) > len("human:"):
-        return token.removeprefix("human:")
-    raise _AuthError(403, "사람 토큰이 아니다")
+    try:
+        human = human_auth.find_human(
+            token,
+            shared_tokens=human_auth.parse_shared_tokens(os.getenv("SAFETY_HUMAN_TOKENS")),
+            mock=is_mock("hr"),
+        )
+    except human_auth.HumanAuthError as exc:  # 세션 토큰인데 위조·만료·로그아웃
+        raise _AuthError(exc.status_code, exc.message) from None
+    if human is None:
+        raise _AuthError(403, "사람 토큰이 아니다")
+    return human.name
 
 
 def _ok(data: Any) -> dict:

@@ -3,6 +3,7 @@
 // - IP 연결: 사내 PC IP(또는 대역)를 묶는다. 그 PC에서 가입·로그인하면 회사 회원이 된다
 // 데모라 브라우저에만 기억한다. 실제로는 서버가 요청 IP를 보지만, 데모는 "이 PC" IP를 ?ip= 로 정한다.
 import { useSyncExternalStore } from 'react'
+import type { ReaderAreaId } from '@/lib/humanSession'
 
 export type MemberLinks = { emails: string[]; ips: string[] }
 
@@ -81,13 +82,15 @@ export const ipLinked = (ip: string, l = links) => l.ips.some((r) => ipMatches(i
 export const memberLinked = (email: string, ip = thisPcIp(), l = links) => l.emails.includes(norm(email)) || ipLinked(ip, l)
 
 // ---------------------------------------------------------------- 회원 부서·확인 권한
-// 관리자가 회원·서버 관리(/system/members)에서 바꾼 부서·확인 권한. 이메일을 열쇠로 기억하고 데모 계정에도 덮어쓴다.
+// 데모 로그인 전용: 관리자가 회원·서버 관리(/system/members)에서 바꾼 부서·확인 권한. 이메일을 열쇠로 기억하고 데모 계정에도 덮어쓴다.
+// 서버 로그인일 때는 쓰지 않는다. 부서·확인 권한·열람 담당은 서버 계정에 저장한다(dashboard-api `/auth/accounts/{id}/update`).
 // 확인 권한: 받은 요청 중 위험한 건(환불·롤백 등)을 승인할 수 있다.
 // 열람 담당: 인사·재무 AI의 다른 사람 대화 요약을 본다. 지정하지 않으면 관리자만 본다 (그 밖의 AI는 모두가 본다).
+// id는 서버 계정의 열람 담당 값(lib/humanSession.ts READER_AREA_IDS, dashboard-api accounts.py)과 같아야 한다
 export const READER_AREAS = [
   { id: 'hr', label: '인사' },
   { id: 'finance', label: '재무' },
-] as const
+] as const satisfies readonly { id: ReaderAreaId; label: string }[]
 export type ReaderArea = (typeof READER_AREAS)[number]['id']
 export type MemberProfile = { dept?: string; approver?: boolean; readers?: ReaderArea[] }
 const PROFILE_KEY = 'axcellent-demo-member-profiles'

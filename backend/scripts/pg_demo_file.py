@@ -55,7 +55,8 @@ EVENTS = (
 def human_token() -> str:
     try:
         for line in (DATA / "web.env").read_text(encoding="utf-8").splitlines():
-            if line.startswith("VITE_SAFETY_HUMAN_TOKEN="):
+            # AX_WEB_*: 지금 run_all.sh, VITE_*: 예전 run_all.sh가 만든 파일
+            if line.startswith(("AX_WEB_HUMAN_TOKEN=", "VITE_SAFETY_HUMAN_TOKEN=")):
                 return line.split("=", 1)[1].strip()
     except OSError:
         pass

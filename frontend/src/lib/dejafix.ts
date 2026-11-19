@@ -1,4 +1,5 @@
 import { DEJAFIX_API_URL } from "./env";
+import { parseDejafixStatus, type DejafixStatus } from "./toolForms";
 
 // 장애 대응 탭: DejaFix 화면을 띄우지 않고 DejaFix API에서 데이터만 받는다.
 // 형식은 DejaFix/DejaFix contracts/api.md #10 `GET /api/incidents`, contracts/incident.schema.json 기준. 화면 없는 함수만 둔다.
@@ -64,11 +65,22 @@ async function get<T>(path: string): Promise<T> {
     const body: unknown = await res.json().catch(() => undefined);
     if ((body as { error?: { code?: string } } | undefined)?.error?.code === "DEJAFIX_NOT_CONNECTED") throw new DejafixNotConnectedError();
   }
-  if (res.status === 502) throw new Error("DejaFix 백엔드에 연결할 수 없습니다 (회원·서버 관리 › DejaFix 연결에서 주소를 확인해 주세요).");
-  if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (회원·서버 관리 › DejaFix 연결에서 계정을 확인해 주세요).");
+  if (res.status === 502) throw new Error("DejaFix 백엔드에 연결할 수 없습니다 (서버 담당이 설치 설정의 DejaFix 주소를 확인해 주세요).");
+  if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (서버 담당이 설치 설정의 DejaFix 계정을 확인해 주세요).");
   if (res.status === 404) throw new Error("DejaFix에 없는 장애입니다.");
   if (!res.ok) throw new Error(`DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`);
   return (await res.json()) as T;
+}
+
+/** 프록시 `GET /status`(연결 출처·응답 여부). 회원·서버 관리 › DejaFix 연결 카드가 읽는다. 못 읽으면 null ("확인할 수 없음") */
+export async function dejafixStatus(): Promise<DejafixStatus | null> {
+  try {
+    const res = await fetch(`${DEJAFIX_API_URL}/status`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return parseDejafixStatus(await res.json());
+  } catch {
+    return null;
+  }
 }
 
 type List = { data?: Incident[]; meta?: IncidentMeta };

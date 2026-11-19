@@ -1168,6 +1168,12 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
   - 네이버: 검색어 트렌드 1번(필터로 값이 없는 키워드가 있으면 전체로 1번 더) + 쇼핑인사이트 키워드마다 1번(최대 7번) + 검색광고 키워드 도구 최대 1번(그날 keyword_pool에 없을 때, 검색광고 하루 상한). 커넥터 하루 캐시·네이버 전체 상한과 trend_age 예산 표(호출자 `trend_report`)를 같이 쓴다(새 예산 없음). 한도면 그 키워드만 "확인 안 함(한도)"
   - LLM: 보고서당 최대 2번
 - **실행·저장**: data 에이전트 프로세스 안 asyncio 작업, 동시에 1개(나머지 대기). 상태 queued·running·done·partial·failed·interrupted, 섹션별 상태도 저장(`trend_report_store.py`, SQLite `DATA_TREND_REPORT_DB`, 비면 메모리. `run_all.sh`는 `backend/.data/trend_reports.db`). 다시 켜지면 대기·진행으로 남은 보고서는 "중단됨 + 다시 만들기 필요". 같은 날 같은 의뢰(정규화한 입력 해시)는 저장본을 연다(`rebuild: true`면 새로). 보고서 기록은 분석 결과 보관이라 `execute()`를 부르지 않는다
+- **새 서버 점검 반영 (11/19)**
+  - 인사이트 브리프 자동 판은 한국 날짜당 한 번만 새로 만든다(`trend_insight_brief.auto_read`). 그날 자동 판이 있으면 LLM 상한·실패로 덜 만든 판이어도 미리 계산·화면은 저장분만 읽는다. 덜 만든 판이고 남은 LLM 토큰 ≥ 지난 자동 판 토큰 × 1.2(모르면 하루 상한의 30%)면 그날 한 번만 `auto_retry`. LLM이 막혔으면(우리 상한·공급자 멈춤) 재료(지금 인기·숏츠·네이버·쇼핑인사이트)를 계산하지 않고 이전 판 + "LLM 하루 상한이라 오늘 브리프는 이전 판을 보여 줘요". 판 표 `brief_versions.degraded`(capped·failed, 예전 DB 열 추가)
+  - 인스타 레이더 묶음 씨앗·보고서 해시태그는 해시태그와 따옴표·「」 안 구절만(`caption_noise.caption_units`). 표기용 태그·이벤트 상투어·흔한 말·숫자 날짜 태그(#11월·#2026)·1글자 태그는 뺀다. 보고서 해시태그 기준은 읽은 계정(매거진 제외) 30곳 미만 2곳, 이상 3곳
+  - 레이더 저장소 `accounts.name`(business_discovery `name`, 같은 호출, 예전 DB 열 추가)을 `radar_latest`가 게시물에 붙인다. 보고서·대화 카드 이름은 읽은 name → 없으면 프리셋 `display_names`
+  - 요즘 유행·밈 `[memes] judge_by`(기본 share): 몫의 배수로 판정(아래 "trend_memes"), 직전 평균 표본 30개 미만이면 unknown
+  - 보고서 번호 표기 `report_label` = "TR-" + "tr_" 뒤 앞 4글자 대문자. 접수한 대화 카드에 `accepted_report_id`. 검색광고 PC·모바일 둘 다 "< 10"이면 `monthly_volume` null + `monthly_volume_note` "under_10"(0이 아님)
 - **대화 카드로 넣은 의뢰**: `chat_thread_id`(저장소 열 `chat_thread_id`, 예전 DB는 열 추가)가 있으면 그 데이터분석 대화에 진행·완료 메시지를 붙인다(위 "직접 대화" 참고). 칸 값이 하나라도 오면 의뢰문을 LLM으로 다시 읽지 않는다(빈 칸은 프리셋)
 - **이벤트**: 완료·부분 완료·실패 때 `data.trend_report_ready`(source `data`, idempotency_key `<report_id>:<status>`, data `{report_id, status, context_id, caller, summary_line}`)를 `metric.anomaly`와 같은 `ax_agent_template.events.publish`로 보낸다. 지금 총괄은 이 이벤트를 무시한다(총괄 plan은 다음 단계). 보내지 못하면(`EventBusUnavailable` 등) 로그 한 줄만 남기고 보고서는 그대로
 - **한계**: 인스타는 프로페셔널 계정의 최근 20개만(개인 계정·해시태그 전체·게시물 오디오는 볼 수 없음). 최근 20개가 직전 7일까지 닿지 않는 계정은 해시태그 직전 7일 수가 덜 잡힌다(보고서 limits에 계정 수). 네이버 값은 요청 안 상대값이라 키워드끼리 크기는 비교하지 않는다. 영상 업로드·광고 캡처·썸네일 AI 분석·총괄 plan은 아직 없다

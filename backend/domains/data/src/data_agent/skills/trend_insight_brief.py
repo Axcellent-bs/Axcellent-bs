@@ -289,6 +289,10 @@ class BriefStore:
                 " requested_by TEXT, detect_as_of TEXT, detect_key TEXT, snapshot_id TEXT,"
                 " tokens INTEGER, output TEXT NOT NULL, PRIMARY KEY (day, rules, version))"
             )
+            # 11/19: 덜 만든 판 표시 (NULL · "capped"(LLM 상한) · "failed"(LLM 실패))
+            vcols = [r[1] for r in self._conn.execute("PRAGMA table_info(brief_versions)")]
+            if "degraded" not in vcols:
+                self._conn.execute("ALTER TABLE brief_versions ADD COLUMN degraded TEXT")
             self._conn.execute(
                 "CREATE TABLE IF NOT EXISTS brief_lock (id INTEGER PRIMARY KEY CHECK (id = 1),"
                 " token TEXT NOT NULL, who TEXT NOT NULL, trigger TEXT NOT NULL,"
@@ -326,7 +330,8 @@ class BriefStore:
             "created_at": datetime.fromisoformat(old[0]),
         }).model_dump_json()  # fmt: skip
         self._conn.execute(
-            "INSERT INTO brief_versions VALUES (?,?,1,?,'auto',NULL,NULL,NULL,NULL,NULL,?)",
+            "INSERT INTO brief_versions (day, rules, version, created_at, trigger, output)"
+            " VALUES (?,?,1,?,'auto',?)",
             (day.isoformat(), rules, old[0], body),
         )
 
@@ -345,6 +350,28 @@ class BriefStore:
             row = self._conn.execute(
                 "SELECT output FROM brief_versions WHERE day = ? AND rules = ? AND version = ?",
                 (day.isoformat(), rules, n),
+            ).fetchone()
+        return TrendInsightBriefOutput.model_validate_json(row[0]) if row else None
+
+    def auto_versions(self, day: date, rules: str) -> list[dict[str, Any]]:
+        """그날 자동 판(auto·auto_retry) 목록 (오래된 순): version·trigger·tokens·degraded."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT version, trigger, tokens, degraded FROM brief_versions"
+                " WHERE day = ? AND rules = ? AND trigger IN ('auto', 'auto_retry')"
+                " ORDER BY version",
+                (day.isoformat(), rules),
+            ).fetchall()
+        return [dict(zip(("version", "trigger", "tokens", "degraded"), r, strict=True))
+                for r in rows]  # fmt: skip
+
+    def previous(self, day: date, rules: str) -> TrendInsightBriefOutput | None:
+        """보여 줄 이전 판: 그날 최신 판(만료 무시), 없으면 그 전 날들 중 가장 최근."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT output FROM briefs WHERE rules = ? AND day <= ?"
+                " ORDER BY day DESC LIMIT 1",
+                (rules, day.isoformat()),
             ).fetchone()
         return TrendInsightBriefOutput.model_validate_json(row[0]) if row else None
 
@@ -432,7 +459,7 @@ class BriefStore:
         self._conn.close()
 
     def get(
-        self, day: date, rules: str, now: datetime | None = None
+        self, day: date, rules: str, now: datetime | None = None, *, ignore_expiry: bool = False
     ) -> TrendInsightBriefOutput | None:
         with self._lock:
             row = self._conn.execute(
@@ -441,14 +468,16 @@ class BriefStore:
             ).fetchone()
         if row is None:
             return None
-        if row[1] is not None and datetime.fromisoformat(row[1]) <= (now or now_utc()):
+        expired = row[1] is not None and datetime.fromisoformat(row[1]) <= (now or now_utc())
+        if expired and not ignore_expiry:
             return None  # 상한으로 덜 만든 브리프: 만료됨 (다시 만든다)
         return TrendInsightBriefOutput.model_validate_json(row[0])
 
     def put(self, day: date, rules: str, out: TrendInsightBriefOutput, at: datetime,
             expires_at: datetime | None = None, *, trigger: str = "auto",
             requested_by: str | None = None, detect_as_of: datetime | None = None,
-            detect_key: str | None = None, tokens: int | None = None) -> int:  # fmt: skip
+            detect_key: str | None = None, tokens: int | None = None,
+            degraded: str | None = None) -> int:  # fmt: skip
         """새 판으로 저장하고 판 번호를 돌려준다. `briefs` 표(그날 최신 판)도 같이 바꾼다."""
         with self._lock, self._conn:
             self._backfill(day, rules)
@@ -469,10 +498,12 @@ class BriefStore:
                  expires_at.isoformat() if expires_at else None),
             )  # fmt: skip
             self._conn.execute(
-                "INSERT INTO brief_versions VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO brief_versions (day, rules, version, created_at, trigger,"
+                " requested_by, detect_as_of, detect_key, snapshot_id, tokens, output, degraded)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (day.isoformat(), rules, n, at.isoformat(), trigger, requested_by,
                  detect_as_of.isoformat() if detect_as_of else None, detect_key,
-                 out.snapshot_id, tokens, body),
+                 out.snapshot_id, tokens, body, degraded),
             )  # fmt: skip
         return n
 
@@ -1492,12 +1523,83 @@ def to_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+# ------------------------------------------------------------------ 자동 판: 하루 한 번 (11/19)
+# 예전에는 LLM 상한으로 덜 만든 판을 1시간만 저장하고 실패 판은 저장하지 않아, 1시간마다 미리
+# 계산이 네이버·쇼핑인사이트·LLM을 다시 불렀다(새 서버 11/19 하루 13판). 이제 자동 판은 한국 날짜당
+# 한 번만 새로 만든다. 덜 만든 판이면 예산이 풀렸을 때 그날 한 번만 다시(auto_retry).
+
+AUTO_TRIGGERS = ("auto", "auto_retry")
+RETRY_MARGIN = 1.2  # 다시 만들기: 남은 토큰 ≥ 지난 자동 판 토큰 × 이만큼
+RETRY_SHARE = 0.3  # 지난 판 토큰을 모르면 남은 토큰 ≥ 하루 상한의 이만큼
+CAPPED_NOTE = "LLM 하루 상한이라 오늘 브리프는 이전 판을 보여 줘요"
+
+
+def llm_blocked(env: Mapping[str, str], now: datetime) -> bool:
+    """지금 LLM을 못 부르는지: 우리 하루 상한에 닿았거나 공급자 한도·키 오류로 멈춤."""
+    from data_agent.llm_budget import BUDGET
+    from data_agent.llm_halt import HALT
+
+    return BUDGET.usage(env).reached or HALT.active(now) is not None
+
+
+def retry_budget_ok(env: Mapping[str, str], estimate: int | None) -> bool:
+    from data_agent.llm_budget import BUDGET
+
+    usage = BUDGET.usage(env)
+    if usage.reached:
+        return False
+    left = usage.token_cap - usage.tokens
+    need = estimate * RETRY_MARGIN if estimate else usage.token_cap * RETRY_SHARE
+    return left >= need
+
+
+def auto_plan(store: BriefStore, day: date, rules: str, env: Mapping[str, str]) -> str:
+    """자동 요청(사람이 누른 다시 추천이 아님)이 할 일: "build"(그날 첫 자동 판) · "retry"(덜 만든
+    판을 그날 한 번만 다시) · "read"(저장분 읽기만)."""
+    autos = store.auto_versions(day, rules)
+    if not autos:
+        return "build"
+    last = autos[-1]
+    retried = any(v["trigger"] == "auto_retry" for v in autos)
+    if last["degraded"] and not retried and retry_budget_ok(env, last["tokens"]):
+        return "retry"
+    return "read"
+
+
+def previous_with_note(store: BriefStore, day: date, rules: str,
+                       now: datetime) -> TrendInsightBriefOutput:  # fmt: skip
+    """LLM이 막혔을 때 계산 없이 돌려줄 판: 이전 판 + 안내 (없으면 빈 브리프 + 안내)."""
+    prev = store.previous(day, rules)
+    if prev is None:
+        return empty(day, rules, now, CAPPED_NOTE)
+    limits = [*prev.limits, CAPPED_NOTE] if CAPPED_NOTE not in prev.limits else prev.limits
+    return prev.model_copy(update={"cached": True, "limits": limits})
+
+
+def auto_read(store: BriefStore, day: date, rules: str, env: Mapping[str, str],
+              now: datetime) -> tuple[TrendInsightBriefOutput | None, str]:  # fmt: skip
+    """자동 요청의 (바로 돌려줄 판 또는 None, 계획). None이면 계획(build·retry)대로 새로 만든다.
+
+    LLM이 막혔으면 새로 만들지 않고(네이버·쇼핑인사이트·숏츠 통계도 안 부름) 이전 판 + 안내."""
+    plan = auto_plan(store, day, rules, env)
+    if plan == "read":
+        hit = store.get(day, rules, None, ignore_expiry=True)
+        if hit is not None:
+            return hit.model_copy(update={"cached": True}), plan
+        plan = "build"
+    if llm_blocked(env, now):
+        return previous_with_note(store, day, rules, now), "blocked"
+    return None, plan
+
+
 def cached_brief(
     request: TrendInsightBriefRequest, env: Mapping[str, str], now: datetime | None = None
 ) -> BriefResult | None:
     """오늘 저장된 같은 규칙의 브리프 (make_brief 캐시 경로와 같은 응답). 없으면 None.
 
     핸들러가 지금 인기·숏츠 통계·상품 목록을 계산하기 전에 먼저 본다 (트렌드 감지 탭 속도).
+    자동 판은 하루 한 번(`auto_read`): 그날 판이 있으면 덜 만든 판이어도 읽기만 하고, LLM이
+    막혔으면 이전 판 + 안내를 돌려준다(재료를 계산하지 않는다).
     """
     if request.regenerate:
         return None
@@ -1505,14 +1607,15 @@ def cached_brief(
     rules = rules_version(load_config(env))
     store = BriefStore(env.get(DB_ENV) or DEFAULT_DB)
     try:
-        hit = store.get(today_kst(now), rules, now)
+        hit, plan = auto_read(store, today_kst(now), rules, env, now)
     finally:
         store.close()
     if hit is None:
         return None
-    out = hit.model_copy(update={"cached": True})
+    out = hit
     return with_content(
-        BriefResult(out, as_evidence(out, [f"trend_insight_brief cache rules={rules}"], now))
+        BriefResult(out, as_evidence(out, [f"trend_insight_brief cache rules={rules} {plan}"],
+                                     now))  # fmt: skip
     )
 
 
@@ -1598,14 +1701,17 @@ async def _make_brief(
     queries: list[str] = []
     stack = ExitStack()
     token: str | None = None
+    trigger = "auto" if build is None else build.trigger
     try:
-        if not request.regenerate and (hit := store.get(day, rules, now)) is not None:
-            out = hit.model_copy(update={"cached": True})
-            return BriefResult(
-                out, as_evidence(out, [f"trend_insight_brief cache rules={rules}"], now)
-            )
+        if not request.regenerate and build is None:  # 자동 판: 하루 한 번 (`auto_read`)
+            hit, plan = auto_read(store, day, rules, env, now)
+            if hit is not None:
+                return BriefResult(
+                    hit, as_evidence(hit, [f"trend_insight_brief cache rules={rules} {plan}"], now)
+                )
+            trigger = "auto_retry" if plan == "retry" else "auto"
         if build is None:  # 자동 판: 같은 "만드는 중" 잠금
-            token = store.claim_build("자동", "auto", now)
+            token = store.claim_build("자동", trigger, now)
             if token is None:
                 waited = await _wait_build(store, day, rules)
                 if waited is not None:
@@ -1619,12 +1725,12 @@ async def _make_brief(
             detect = build.detect
         box = stack.enter_context(llm_budget.counting())
 
-        def save(out: TrendInsightBriefOutput, expires_at: datetime | None = None) -> None:
+        def save(out: TrendInsightBriefOutput, degraded: str | None = None) -> None:
             version = store.put(
-                day, rules, out, now, expires_at,
-                trigger="auto" if build is None else build.trigger,
+                day, rules, out, now, None, trigger=trigger,
                 requested_by=None if build is None else build.requested_by,
                 detect_as_of=detect.as_of, detect_key=detect.key, tokens=box[0],
+                degraded=degraded,
             )  # fmt: skip
             if build is not None:
                 build.version, build.tokens = version, box[0]
@@ -1851,17 +1957,22 @@ async def _make_brief(
             c.evidence_shorts = hl.evidence_shorts(c.video_links)
         out.schema_version = SCHEMA_VERSION
         out.snapshot_id = f"brief_{day:%Y%m%d}_{rules}"
-        if llm_failure.failed():  # LLM 호출이 실패한 브리프는 저장하지 않는다 (다음 요청이 다시)
+        if llm_failure.failed() and build is not None:
+            # 사람이 누른 다시 추천: 실패한 판은 저장하지 않는다 (작업이 실패로 끝남)
             out.limits.append(
                 "LLM 호출이 실패해 이 브리프는 저장하지 않음 (다음 요청에서 다시 만든다)"
             )
-        elif llm_failure.capped():  # 상한으로 덜 만든 브리프·기회 카드: 짧게만 (풀리면 다시)
-            ttl = llm_failure.cap_ttl(env)
+        elif llm_failure.failed():
+            # 자동 판: 저장해 두고 다음 회차는 읽기만 (예산이 충분하면 그날 한 번만 다시)
             out.limits.append(
-                f"LLM 하루 상한에 닿아 덜 만든 브리프라 {int(ttl.total_seconds() // 60)}분만 저장"
-                " (상한이 풀리면 다음 미리 계산에서 다시 만든다)"
+                "LLM 호출이 실패해 덜 만든 브리프 (오늘 자동으로는 한 번만 다시 만든다)"
             )
-            save(out, expires_at=now + ttl)
+            save(out, degraded="failed")
+        elif llm_failure.capped():
+            out.limits.append(
+                "LLM 하루 상한에 닿아 덜 만든 브리프 (예산이 풀리면 오늘 한 번만 다시 만든다)"
+            )
+            save(out, degraded="capped")
         else:
             save(out)
         return BriefResult(out, as_evidence(out, queries, now))

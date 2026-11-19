@@ -69,3 +69,30 @@ def test_mock_tokens_work_only_in_mock_mode(client, monkeypatch: pytest.MonkeyPa
     assert client.post("/api/demo/incidents", json={}, headers=mock_admin).status_code == 401
     held = client.post("/api/incidents/x/holds/y", json={"approved": True}, headers=mock_human)
     assert held.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("headers", "status"), [(None, 401), (AGENT, 403), (ADMIN, 403), (HUMAN, 404)]
+)
+def test_request_step_decision_needs_human_token(client, headers, status) -> None:
+    """사람 확인·승인은 사람 토큰만. 맞는 토큰이어도 없는 의뢰면 404."""
+    r = client.post("/api/requests/wr_x/steps/c/decision", json={"approved": True}, headers=headers)
+    assert r.status_code == status
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", "/api/requests"),
+        ("get", "/api/requests/wr_x"),
+        ("post", "/api/requests/wr_x/rerun"),
+    ],
+)
+def test_request_screen_api_needs_a_human_token(client, method, path) -> None:
+    """고객 글이 든 의뢰 조회·다시 돌리기는 사람 토큰만. 토큰 없음 401, 에이전트 403."""
+    send = getattr(client, method)
+    kw = {"json": {"task": "sales_analysis"}} if method == "post" else {}
+    assert send(path, **kw).status_code == 401
+    assert send(path, headers=AGENT, **kw).status_code == 403
+    ok = send(path, headers=HUMAN, **kw).status_code
+    assert ok in (200, 404)  # 맞는 토큰이면 통과(없는 의뢰는 404)

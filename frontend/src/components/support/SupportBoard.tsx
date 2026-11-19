@@ -3,6 +3,7 @@ import { Link } from "@/lib/nav";
 import { api } from "@/lib/api";
 import type { ConversationListItem } from "@/lib/types";
 import { LANGUAGE_KO, URGENCY_DOT } from "@/lib/labels";
+import { LEGACY_HINT, LEGACY_LABEL, splitLegacy } from "@/lib/legacyIntake";
 import {
   STAGE_KO, cardsFromConversations, isDone, replayCards, replayLength, workerLine,
   type BoardCard, type Stage,
@@ -28,12 +29,14 @@ const STAGE_LOOK: Record<Stage, string> = {
   escalated: "bg-ink-100 text-ink-700",
 };
 
-// onList: 목록을 받을 때마다 원본을 넘겨 준다(문의 현황 위쪽 "분류 필요" 숫자가 같은 목록을 쓰게 — 요청은 이 보드 한 곳에서만)
+// onList: 목록을 받을 때마다 지금 보이는 목록을 넘겨 준다(문의 현황 위쪽 "분류 필요" 숫자가 같은 목록을 쓰게 — 요청은 이 보드 한 곳에서만).
+// 판매 서버 자료 재생성 전 접수(옛 자료)는 기본으로 숨기고 확인 칸으로만 보여 준다 (숫자도 같은 기준)
 export function SupportBoard({ onList }: { onList?: (l: ConversationListItem[]) => void } = {}) {
   const onListRef = useRef(onList);
   onListRef.current = onList;
   const [mode, setMode] = useState<Mode>("live");
-  const [real, setReal] = useState<BoardCard[] | null>(null);
+  const [all, setAll] = useState<ConversationListItem[] | null>(null);
+  const [showLegacy, setShowLegacy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -41,14 +44,18 @@ export function SupportBoard({ onList }: { onList?: (l: ConversationListItem[]) 
   // 실제 목록: 실제 모드에서만 5초마다 새로 받는다. 재생 중에는 한 번 받아 둔 목록을 쓴다
   useEffect(() => {
     let alive = true;
-    const load = () => api.admin.list()
-      .then((l) => { if (alive) { setReal(cardsFromConversations(l)); setError(null); onListRef.current?.(l); } })
+    const load = () => api.admin.listAll()
+      .then((l) => { if (alive) { setAll(l); setError(null); } })
       .catch(() => { if (alive) setError("문의 목록을 불러올 수 없습니다. 백엔드가 켜져 있는지 확인하세요."); });
     load();
     if (mode !== "live") return () => { alive = false; };
     const t = setInterval(() => { if (!document.hidden) load(); }, POLL_MS);
     return () => { alive = false; clearInterval(t); };
   }, [mode]);
+
+  const { shown, legacyCount } = useMemo(() => (all ? splitLegacy(all, showLegacy) : { shown: null, legacyCount: 0 }), [all, showLegacy]);
+  const real = useMemo(() => (shown ? cardsFromConversations(shown) : null), [shown]);
+  useEffect(() => { if (shown) onListRef.current?.(shown); }, [shown]);
 
   useEffect(() => {
     if (mode !== "replay" || paused || !real?.length) return;
@@ -69,7 +76,13 @@ export function SupportBoard({ onList }: { onList?: (l: ConversationListItem[]) 
 .board-card{animation:board-in .5s ease-out}@media (prefers-reduced-motion:reduce){.board-card{animation:none}}`}</style>
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <h2 className="text-xl font-semibold">고객지원 업무 보드</h2>
-        <div className="ml-auto flex items-center gap-2 text-xs">
+        <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
+          {legacyCount > 0 && (
+            <label className="flex cursor-pointer items-center gap-1.5 text-ink-700" title={LEGACY_HINT}>
+              <input type="checkbox" checked={showLegacy} onChange={(e) => setShowLegacy(e.target.checked)} />
+              <span>{LEGACY_LABEL} 보기<span className="ml-1 text-ink-500">{legacyCount}건</span></span>
+            </label>
+          )}
           {mode === "replay" && (
             <button onClick={() => setPaused((p) => !p)} className="rounded-full bg-ink-50 px-3 py-1.5 font-medium text-ink-700 hover:bg-ink-100">{paused ? "재생" : "멈춤"}</button>
           )}
@@ -136,6 +149,7 @@ function Card({ c }: { c: BoardCard }) {
         {c.lang !== "ko" && <span className="chip bg-amber-50 text-amber-700">{LANGUAGE_KO[c.lang] ?? LANGUAGE_KO.other}</span>}
         <span className={`chip ml-auto ${STAGE_LOOK[c.stage]}`}>{STAGE_KO[c.stage]}</span>
       </div>
+      {c.legacy && <p className="mt-1"><span className="chip bg-ink-100 text-ink-500" title={LEGACY_HINT}>{LEGACY_LABEL}</span></p>}
       <p className="mt-1 truncate text-sm font-medium">{c.subject}</p>
     </Link>
   );

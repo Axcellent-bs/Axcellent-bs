@@ -53,6 +53,23 @@ function UrgentCard({ incident, loading }: { incident: Incident | undefined; loa
   );
 }
 
+// 정상 호스트 "ok / total". 둘 다 못 읽으면 "확인할 수 없음"을 한 번만 쓰고 단위(대)를 붙이지 않는다.
+// 못 읽은 이유(unknown_reason)는 아래 작은 글씨로 보여 준다. 0으로 바꾸지 않는다.
+const HOST_REASON: Record<string, string> = { TOOL_ERROR: "DejaFix가 호스트 목록을 읽지 못했어요" };
+function HostsValue({ h }: { h: DashboardSummary["hosts"] }) {
+  const known = (m: Measured) => !m.unknown && m.value !== null;
+  if (!known(h.ok) && !known(h.total)) return <span className="text-sm font-normal text-ink-500">확인할 수 없음</span>;
+  return <><Num m={h.ok} /> / <Num m={h.total} /></>;
+}
+function hostsSub(h: DashboardSummary["hosts"]): string {
+  const known = (m: Measured) => !m.unknown && m.value !== null;
+  if (!known(h.ok) && !known(h.total)) {
+    const reason = h.total.unknown_reason ?? h.ok.unknown_reason;
+    return reason ? `${HOST_REASON[reason] ?? "DejaFix에서 확인할 수 없어요"} (${reason})` : "";
+  }
+  return known(h.unknown) && h.unknown.value ? `대 · 확인 불가 ${h.unknown.value}대` : "대";
+}
+
 /** 요약 4칸 = DejaFix 현황 KPI (GET /api/dashboard/summary) */
 function SummaryTiles({ s, error }: { s: DashboardSummary | null; error: string | null }) {
   const tile = (label: string, dot: string, value: ReactNode, sub: string) => (
@@ -69,8 +86,7 @@ function SummaryTiles({ s, error }: { s: DashboardSummary | null; error: string 
       <div className="grid grid-cols-2 gap-2">
         {tile("진행 중", "bg-amber-400", s ? <Num m={s.active_incidents} /> : "…", unitOf(s?.active_incidents))}
         {tile("높음 이상", "bg-red-500", s ? <Num m={s.high_incidents} /> : "…", unitOf(s?.high_incidents))}
-        {tile("정상 호스트", "bg-sky-500", s ? <><Num m={s.hosts.ok} /> / <Num m={s.hosts.total} /></> : "…",
-          s && !s.hosts.unknown.unknown && s.hosts.unknown.value ? `확인 불가 ${s.hosts.unknown.value}대` : "대")}
+        {tile("정상 호스트", "bg-sky-500", s ? <HostsValue h={s.hosts} /> : "…", s ? hostsSub(s.hosts) : "")}
         {tile("오늘 리포트", "bg-orange-500", s ? <Num m={s.reports_today} /> : "…",
           s && !s.avg_analysis_sec.unknown && s.avg_analysis_sec.value !== null ? `평균 분석 ${s.avg_analysis_sec.value}초` : unitOf(s?.reports_today))}
       </div>

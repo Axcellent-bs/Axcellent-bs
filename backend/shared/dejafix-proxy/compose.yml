@@ -4,7 +4,7 @@ services:
       context: ../..
       dockerfile: shared/dejafix-proxy/Dockerfile
     ports:
-      - "8030:8030"
+      - "127.0.0.1:8030:8030"
     env_file:
       - path: ../../.env
         required: false

@@ -377,16 +377,24 @@ class ProposalMixin:
         same = _same_insight(self.state, inp.insight_id, frm) or (
             _find(self.state, near) if near else None
         )
+        video_for = requester == "orchestrator" and inp.skill != "finance_insights"
         if (
             same is not None and _follow_of(self.state, same, inp) is None
         ):  # 재전송: LLM을 다시 부르지 않는다
             out = {"outcome": "duplicate", "proposal_id": same.id}
+            if video_for and same.video_plan is not None:
+                out["video_plan"] = same.video_plan.model_dump(mode="json")
             return ActionResult(changed=False, outcome="duplicate", output=out)
         gone = None if same is not None else recently_deleted(self.state, inp, frm, self.clock())
         if gone is not None:  # 사람이 최근 지운 제안: 일주일 동안 다시 만들지 않는다
             out = {"outcome": "deleted_recently", "proposal_id": gone.id}
             return ActionResult(changed=False, outcome="deleted_recently", output=out)
         ctx_in = f"insight:{inp.insight_id}"
+        # 총괄 의뢰: 총괄 계획의 앞 단계가 넘긴 인사이트와 숫자만 쓴다. 기획이 데이터분석·마케팅에
+        # 직접 묻지 않는다 (11/19 준하 님 16번). 재무 의견을 넘기는 건 영상 흐름이 아니다
+        relay = requester == "orchestrator"
+        if relay and sources is None:
+            sources = (None, None)
 
         async def given() -> tuple[list[TrendInsight] | None, ChannelFollowersOutput | None]:
             assert sources is not None
@@ -435,7 +443,30 @@ class ProposalMixin:
             out = {"outcome": "created", "proposal_id": pid}
             return ActionResult(outcome="created", output=out)
 
-        return await self._apply(run)
+        res = await self._apply(run)
+        if not video_for or res.outcome != "created":
+            return res
+        return await self._video_for_relay(res)
+
+    async def _video_for_relay(self: Any, res: ActionResult) -> ActionResult:
+        """총괄 의뢰로 만든 제안에 영상 제작안을 쓴다 (LLM은 잠금 밖). 사람 확인 단계가 이 초안을
+        보고, 기획안으로 만들 때 다시 쓰지 않고 이어 쓴다."""
+        pid = res.output["proposal_id"]
+        p = _find(self.state, pid)
+        if p is None:
+            return res
+        writer = self._proposal_writer  # 테스트 가짜는 llm이 없다 → 규칙 제작안
+        video = await video_plan.write(getattr(writer, "llm", None), p, _ctx(p))
+
+        async def keep(s: State) -> ActionResult:
+            q = _find(s, pid)
+            if q is not None and q.video_plan is None:
+                q.video_plan = video
+            return ActionResult(outcome="created", output=res.output)
+
+        await self._apply(keep)
+        out = {**res.output, "video_plan": video.model_dump(mode="json")}
+        return ActionResult(changed=res.changed, outcome=res.outcome, output=out)
 
     async def _option_sources(
         self: Any, ctx: str
@@ -510,7 +541,9 @@ class ProposalMixin:
         video = None
         if p is not None and p.status == "확인 대기":
             writer = self._proposal_writer  # 테스트 가짜는 llm이 없다 → 규칙 제작안
-            video = await video_plan.write(getattr(writer, "llm", None), p, _ctx(p))
+            video = p.video_plan or await video_plan.write(  # 총괄 의뢰 때 쓴 초안은 이어 쓴다
+                getattr(writer, "llm", None), p, _ctx(p)
+            )
         return await self._apply(self._make_plan, proposal=proposal, video=video)
 
     async def _make_plan(

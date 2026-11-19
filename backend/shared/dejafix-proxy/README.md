@@ -27,6 +27,11 @@ DejaFix 응답을 상태 코드·본문 그대로 돌려준다. 이 서비스가
 
 `GET /healthz`는 DejaFix를 부르지 않고 `{"status": "ok"}`만 준다.
 
+`GET /status`는 화면의 DejaFix 연결 카드(회원·서버 관리 › PC·서버)가 읽는다. `{source, reachable, detail}`
+- `source`: `builtin`(환경변수, AXcellent와 같이 설치된 DejaFix) · `custom`(화면에서 저장한 다른 DejaFix, 보관함) · `none`(둘 다 없음)
+- `reachable`: 로그인 뒤 `GET /api/incidents?status=problem&limit=1`이 200이면 `true`, 아니면 `false`, 대상이 없으면 `null`
+- 주소·계정·비밀번호·토큰은 싣지 않는다
+
 ## 4. 연결
 화면은 `/dejafix-api/*`를 부른다. 서버 gateway(nginx)가 `/dejafix-api/` 접두사를 떼고 `http://dejafix-proxy:8030/`으로 넘기면 된다 (예: `/dejafix-api/api/incidents?status=problem` → `/api/incidents?status=problem`). gateway 설정은 ax-frontend 레포의 `nginx/`에 있어서 이 레포에서는 바꾸지 않는다.
 

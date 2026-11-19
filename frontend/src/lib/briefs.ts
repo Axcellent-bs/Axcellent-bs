@@ -104,16 +104,8 @@ export const briefsEnabled = Boolean(DASHBOARD_API_URL);
 export const STATUS_STEPS = ["받음", "캠페인 시작", "게시", "성과"] as const;
 export const briefStatusKo = (_status: StoredBrief["status"]): (typeof STATUS_STEPS)[number] => "받음";
 
-/** 출처 링크는 http(s)만 연다. 그 밖의 주소(javascript: 등)는 글자로만 둔다 */
-export function safeLink(link: string | null | undefined): string | null {
-  if (!link) return null;
-  try {
-    const url = new URL(link);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
+/** 출처 링크는 http(s)만 연다. 그 밖의 주소(javascript: 등)는 글자로만 둔다. 검사는 공용 함수 하나(lib/safeLink.ts) */
+export { safeLink } from "./safeLink";
 
 async function get<T>(path: string): Promise<T> {
   if (!briefsEnabled) throw new ApiError("받은 기획안 읽기 연결이 꺼져 있습니다", 403);

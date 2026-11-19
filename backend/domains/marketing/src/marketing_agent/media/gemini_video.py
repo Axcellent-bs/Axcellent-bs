@@ -30,18 +30,24 @@ import binascii
 import hashlib
 import os
 import re
+import socket
 import subprocess
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 import httpx
 
 from marketing_agent.media.base import MediaProviderError, MediaRequest, MediaResult, Usage
 from marketing_agent.media.config import API_KEY_ENVS, ffmpeg_bin
+from marketing_agent.media.safe_fetch import (
+    PublicOnlyTransport,
+    Resolver,
+    fetch_public,
+)
 
 NAME = "gemini"
 API_HOST = "generativelanguage.googleapis.com"
@@ -176,8 +182,10 @@ class GeminiVideoProvider:
         poll_max_wait_s: float = POLL_MAX_WAIT_S,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
+        resolver: Resolver = socket.getaddrinfo,
     ) -> None:
         self._transport = transport  # 테스트용 가짜 전송
+        self._resolver = resolver
         self._poll_interval_s = poll_interval_s
         self._poll_max_wait_s = poll_max_wait_s
         self._sleep = sleep
@@ -219,7 +227,8 @@ class GeminiVideoProvider:
             "Content-Type": "application/json",
         }
         try:
-            with httpx.Client(timeout=REQUEST_TIMEOUT_S, transport=self._transport) as client:
+            transport = self._transport or PublicOnlyTransport(self._resolver)
+            with httpx.Client(timeout=REQUEST_TIMEOUT_S, transport=transport) as client:
                 response = client.post(ENDPOINT, json=payload, headers=headers)
                 if response.status_code != 200:
                     raise GeminiVideoError(_http_error(response, key))
@@ -287,21 +296,18 @@ class GeminiVideoProvider:
                 raise GeminiVideoError("poll_timeout")
             self._sleep(self._poll_interval_s)
 
-    @staticmethod
-    def _download(client: httpx.Client, url: str, key: str) -> bytes:
-        for _ in range(MAX_REDIRECTS + 1):
+    def _download(self, client: httpx.Client, url: str, key: str) -> bytes:
+        def headers_for(hop: str) -> dict[str, str]:
             # 키는 Google API 호스트에만 보낸다. 리다이렉트는 직접 따라간다.
-            send_key = urlsplit(url).hostname == API_HOST
-            response = client.get(url, headers={"x-goog-api-key": key} if send_key else {})
-            if response.status_code in (301, 302, 303, 307, 308):
-                location = response.headers.get("location")
-                if not location:
-                    raise GeminiVideoError("invalid_redirect")
-                url = urljoin(url, location)
-                if urlsplit(url).scheme != "https":
-                    raise GeminiVideoError("invalid_redirect")
-                continue
-            if response.status_code != 200:
-                raise GeminiVideoError(f"http_{response.status_code}")
-            return response.content
-        raise GeminiVideoError("too_many_redirects")
+            return {"x-goog-api-key": key} if urlsplit(hop).hostname == API_HOST else {}
+
+        return fetch_public(
+            client,
+            url,
+            resolver=self._resolver,
+            headers_for=headers_for,
+            non_https_code="invalid_redirect",
+            max_bytes=MAX_VIDEO_BYTES,
+            monotonic=self._monotonic,
+            error=GeminiVideoError,
+        )

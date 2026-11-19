@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Chip, Empty, TONE, Waiting } from "@/components/finance/bits";
 import { okEvidence, type SkillState } from "@/components/data/useSkill";
+import { safeLink } from "@/lib/safeLink";
+import { briefTriggerLabel, versionLabel } from "@/lib/briefTrigger";
 import { Sources, when } from "@/components/data/Sources";
 import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
@@ -53,12 +55,15 @@ function Evidence({ e }: { e: TrendInsight["evidence"] }) {
           {num(e.google_rank)}위{e.google_at ? ` · ${when(e.google_at)} 기준` : ""}
           {e.google_news.length > 0 && (
             <ul className="mt-0.5 space-y-0.5">
-              {e.google_news.map((n, k) => (
-                <li key={`${n.url ?? n.title}-${k}`} className="truncate">
-                  {n.url ? <a href={n.url} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">{n.title}</a> : n.title}
-                  {n.source && <span className="text-ink-500"> · {n.source}</span>}
-                </li>
-              ))}
+              {e.google_news.map((n, k) => {
+                const link = safeLink(n.url); // 피드 주소: http(s)만 링크, 아니면 제목 글자만
+                return (
+                  <li key={`${n.url ?? n.title}-${k}`} className="truncate">
+                    {link ? <a href={link} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">{n.title}</a> : n.title}
+                    {n.source && <span className="text-ink-500"> · {n.source}</span>}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </>
@@ -72,7 +77,8 @@ function Evidence({ e }: { e: TrendInsight["evidence"] }) {
     if (e.naver_until) parts.push(`${e.naver_until}까지`);
     rows.push({ source: "네이버 검색", body: parts.join(" · ") });
   }
-  const videoLinks = e.links.filter((l) => l.includes("youtube.com/watch"));
+  // "youtube.com/watch"가 들어 있어도 javascript: 같은 주소일 수 있어 safeLink를 먼저 거친다
+  const videoLinks = e.links.map(safeLink).filter((l): l is string => l != null && l.includes("youtube.com/watch"));
   return (
     <div className="space-y-1.5 text-xs text-ink-700">
       {rows.length > 0 && (
@@ -284,7 +290,9 @@ function BriefWhen({ out }: { out: TrendInsightBriefOutput }) {
   const manual = out.trigger === "manual";
   const first = manual
     ? `오늘 브리프 · ${hhmm(at)}에 다시 만듦${out.requested_by ? ` (${out.requested_by})` : ""}`
-    : `오늘 브리프 · ${mdhm(at)}에 만듦`;
+    : out.trigger === "auto_retry"
+      ? `오늘 브리프 · ${mdhm(at)}에 만듦 (${briefTriggerLabel(out.trigger)})`
+      : `오늘 브리프 · ${mdhm(at)}에 만듦`;
   const base = out.detect_as_of ? `감지 데이터 ${hhmm(out.detect_as_of)} 기준 · ` : "";
   const d = out.diff_from_previous;
   const second = manual && d
@@ -310,7 +318,7 @@ function BriefControls({ out, head, pick, start, startError }: {
       {versions.length > 0 && (
         <select className="field w-auto py-1 text-sm" aria-label="오늘 판" value={out.version ?? head.latest_version ?? ""}
           onChange={(e) => pick(Number(e.target.value))}>
-          {versions.map((v) => <option key={v.version} value={v.version}>{v.label}</option>)}
+          {versions.map((v) => <option key={v.version} value={v.version}>{versionLabel(v)}</option>)}
         </select>
       )}
       <Chip tone={TONE.muted} label={`오늘 다시 추천 ${head.regen_used ?? 0}/${head.regen_limit ?? 3}`} />

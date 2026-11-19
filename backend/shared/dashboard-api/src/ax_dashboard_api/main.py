@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -14,12 +15,14 @@ from ax_dashboard_api import (
     company_connection,
     handoffs,
     office_room,
+    public_info,
     settlements,
     shop_events,
     shop_relay,
     support_client,
     tool_connections,
 )
+from ax_dashboard_api.accounts import router as accounts_router
 from ax_dashboard_api.connection_keys import router as connection_keys_router
 from ax_dashboard_api.envelope import install_error_handlers, is_mock
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
@@ -76,6 +79,12 @@ async def _retention_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # 실제 서버에 목 스위치가 남아 있으면 뜨지 않는다. 테스트·AX_ALLOW_MOCK=1만 예외
+    if is_mock() and os.getenv("AX_ALLOW_MOCK") != "1" and "pytest" not in sys.modules:
+        raise RuntimeError(
+            "목 스위치(DASHBOARD_MOCK·AGENT_TEMPLATE_MOCK)가 켜져 있어 "
+            "서버를 시작하지 않는다. 목 모드는 테스트 전용이다."
+        )
     task = None
     # 목 모드(테스트)와 `DASHBOARD_RETENTION_SWEEP=off`에서는 돌리지 않는다
     if not is_mock() and (os.getenv("DASHBOARD_RETENTION_SWEEP") or "on").lower() != "off":
@@ -108,6 +117,10 @@ app.include_router(office_room.router)
 # 시스템 관리 > 회사 연결 (고객사 판매 서버 주소, 읽기·쓰기 모두 사람 토큰)
 app.include_router(company_connection.router)
 app.include_router(connection_keys_router)
+# 계정·로그인: 사람마다 다른 세션 토큰 (로그인은 토큰 없이, 나머지는 세션 토큰)
+app.include_router(accounts_router)
+# 로그인 전 화면이 읽는 공개 정보 (설치된 회사 이름만, 토큰 없이. auth.PUBLIC_ROUTES)
+app.include_router(public_info.router)
 app.include_router(instagram_radar_router)
 app.include_router(tool_connections.router)
 # 알림 받는 주소: 고객사 판매 서버가 회사 키로 이벤트를 보낸다 (사람 토큰 대신 회사 키)

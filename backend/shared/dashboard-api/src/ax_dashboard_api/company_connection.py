@@ -30,6 +30,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from ax_agent_template import company_connection as store
+from ax_agent_template import pinned_http
 from ax_agent_template import tenant as tenants
 from ax_agent_template.config import agent_url
 from ax_dashboard_api.auth import require_human
@@ -73,6 +74,18 @@ def tenant_state() -> dict[str, Any]:
         "tenant": next((t for t in listed if t["id"] == now), None) if now else None,
         "tenants": listed,
     }
+
+
+def public_site_company() -> dict[str, str] | None:
+    """로그인 전 화면에 보일 사이트 연결 회사: 회사 연결이 켜져 있을 때 그 회사 설정의 id·이름만.
+
+    화면 `demo/company.ts`의 사이트 회사와 같은 조건이다. 주소·기록·연결한 사람은 넣지 않는다.
+    """
+    found = store.read_connection()
+    tenant = tenant_state()["tenant"] if found and found.enabled else None
+    if not isinstance(tenant, dict) or not tenant.get("id") or not tenant.get("name"):
+        return None
+    return {"id": str(tenant["id"]), "name": str(tenant["name"]), "site_url": ""}
 
 
 class ModeIn(BaseModel):
@@ -144,7 +157,9 @@ async def run_checks(url: str) -> list[Check]:
     """판매 서버 상태·상품·구매자 읽기를 확인한다. 항목마다 통과 여부와 이유."""
     checks: list[Check] = []
     async with httpx.AsyncClient(
-        timeout=TIMEOUT_SECONDS, follow_redirects=False, transport=TRANSPORT
+        timeout=TIMEOUT_SECONDS,
+        follow_redirects=False,
+        transport=TRANSPORT or pinned_http.guarded_transport(),  # 검사한 IP로만 연결
     ) as client:
         body, error = await _get(client, f"{url}/health")
         data = body.get("data") if isinstance(body, dict) else None

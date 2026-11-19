@@ -690,7 +690,7 @@ async def test_fetch_sold_qty_reuses_one_http_client_for_all_pages(
 
     def factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
         made.append(1)
-        return real(*args, transport=httpx.MockTransport(handle), **kwargs)
+        return real(*args, **dict(kwargs, transport=httpx.MockTransport(handle)))
 
     monkeypatch.setattr(httpx, "AsyncClient", factory)
     shop_client.use_client(None)  # 바꿔 끼운 클라이언트 없이, 코드가 직접 만드는 길
@@ -818,7 +818,7 @@ def test_inquiry_order_reads_share_one_http_client(
 
     def factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
         made.append(1)
-        return real(*args, transport=httpx.MockTransport(handle), **kwargs)
+        return real(*args, **dict(kwargs, transport=httpx.MockTransport(handle)))
 
     monkeypatch.setattr(httpx, "AsyncClient", factory)
     shop_client.use_client(None)

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { when } from "@/components/data/Sources";
+import { safeLink } from "@/lib/safeLink";
 import type { SkillState } from "@/components/data/useSkill";
 import type { KeywordTrendOutput, KeywordWindow, NewKeyword, NewKeywordDay, RisingKeyword, SeasonKeyword } from "@/lib/data";
 
@@ -156,12 +157,15 @@ function RisingItem({ r }: { r: RisingKeyword }) {
           <details className="text-xs text-ink-500">
             <summary className="cursor-pointer select-none">뉴스 제목 보기</summary>
             <ul className="mt-1 space-y-0.5">
-              {r.news.slice(0, 3).map((n, i) => (
-                <li key={`${n.url ?? n.title}-${i}`}>
-                  {n.url ? <a href={n.url} target="_blank" rel="noreferrer noopener" className="text-brand-700 underline-offset-2 hover:underline">{n.title}</a> : n.title}
-                  {n.source && <span className="text-ink-500"> · {n.source}</span>}
-                </li>
-              ))}
+              {r.news.slice(0, 3).map((n, i) => {
+                const link = safeLink(n.url); // 피드 주소: http(s)만 링크, 아니면 제목 글자만
+                return (
+                  <li key={`${n.url ?? n.title}-${i}`}>
+                    {link ? <a href={link} target="_blank" rel="noreferrer noopener" className="text-brand-700 underline-offset-2 hover:underline">{n.title}</a> : n.title}
+                    {n.source && <span className="text-ink-500"> · {n.source}</span>}
+                  </li>
+                );
+              })}
             </ul>
           </details>
         )}

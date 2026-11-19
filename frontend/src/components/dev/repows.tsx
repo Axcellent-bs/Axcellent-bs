@@ -13,6 +13,7 @@ import { Work } from '@/components/dev/work'
 import { Skeleton } from '@/components/finance/bits'
 import { Markdown } from '@/components/planning-common/markdown'
 import { humanizePlanIds } from '@/lib/format'
+import { safeLink } from '@/lib/safeLink'
 
 // ---------------------------------------------------------------- 공용
 
@@ -346,7 +347,7 @@ function IssueView({ conn, number }: { conn: string; number: number }) {
             <span className={`rp-state ${issueTone(i)}`}>{i.state === 'closed' ? (i.reason === 'not_planned' ? '안 함' : '완료') : '열림'}</span>
             {i.author && <span>{i.author}</span>}
             <span>{ago(i.created_at)}</span>
-            {i.url && <a href={i.url} target="_blank" rel="noopener noreferrer" className="plain-link">레포에서 보기</a>}
+            {safeLink(i.url) && <a href={safeLink(i.url) ?? undefined} target="_blank" rel="noopener noreferrer" className="plain-link">레포에서 보기</a>}
           </div>
         </div>
       </header>
@@ -588,7 +589,7 @@ function Sidebar({ x, lines }: { x: RepoPrDetail; lines: number }) {
       <section>
         <h3>레포</h3>
         <code className="small">{x.repo || x.connection}</code>
-        {x.pr.url && /^https?:\/\//.test(x.pr.url) && <div><a href={x.pr.url} target="_blank" rel="noopener noreferrer" className="small">원본 열기 ↗</a></div>}
+        {safeLink(x.pr.url) && <div><a href={safeLink(x.pr.url) ?? undefined} target="_blank" rel="noopener noreferrer" className="small">원본 열기 ↗</a></div>}
       </section>
     </aside>
   )
@@ -916,7 +917,7 @@ function CommitPanel({ api, sha, row, base, known, onPick, onClose }: {
           </ul>
         )}
       </section>
-      {c?.url && /^https?:\/\//.test(c.url) && <a href={c.url} target="_blank" rel="noopener noreferrer" className="small rg-ext">GitHub에서 열기 ↗</a>}
+      {safeLink(c?.url) && <a href={safeLink(c?.url) ?? undefined} target="_blank" rel="noopener noreferrer" className="small rg-ext">GitHub에서 열기 ↗</a>}
     </aside>
   )
 }
