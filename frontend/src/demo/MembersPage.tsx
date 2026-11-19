@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router'
 import { useCompany } from './company'
-import InfraHosts from './InfraHosts'
 import { READER_AREAS, ipMatches, linkEmail, linkIp, setProfile, unlinkEmail, unlinkIp, useLinks, useProfiles, validRule } from './members'
 import { DeptPicker } from './DeptPicker'
 import { customerAccounts, kindOf, useSession, type Account } from './session'
@@ -16,7 +15,8 @@ import { DejafixCard } from '@/components/connect/DejafixConnect'
 
 // 회원·서버 관리 (관리자 /system/members). 회사 사람과 PC를 한 화면 탭으로 관리한다.
 // - 회원: 계정 연결(이메일)·부서(선택, 표시·조직도용)·확인 권한·열람 담당(인사·재무 AI 대화 요약)·쓰는 PC를 한 표에서
-// - PC·서버: 맨 위 DejaFix 연결(감시 대상과 같은 자리) + 조직도와 PC 연결 (InfraHosts). 예전 /system/hosts 주소는 이 탭으로 온다
+// - DejaFix 연결(탭 id pcs 유지): 장애 대응이 쓰는 DejaFix 연결 상태. 예전 /system/hosts 주소는 이 탭으로 온다.
+//   예전 "PC·서버" 목록(InfraHosts)은 코드에 박힌 예시 PC와 가짜 연결 확인이라 뺐다(11/19). 실제 감시 호스트는 DejaFix가 안다
 // - 접속 허용: 사내 PC IP나 대역. 그 PC에서 가입·로그인하면 회사 회원이 된다
 // 계정 연결과 접속 허용 중 하나라도 맞으면 그 회원은 회사 회원이다.
 // 서버 로그인이 켜져 있으면 회원 표는 서버 계정 목록(dashboard-api `GET /auth/accounts`)만 쓴다. 관리자는 일반회원을
@@ -26,7 +26,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const TABS = [
   { id: 'members', label: '회원' },
-  { id: 'pcs', label: 'PC·서버' },
+  { id: 'pcs', label: 'DejaFix 연결' },
   { id: 'access', label: '접속 허용' },
 ] as const
 type Tab = (typeof TABS)[number]['id']
@@ -63,7 +63,6 @@ function ReaderPicker({ account }: { account: Account }) {
 export default function MembersPage() {
   const company = useCompany()
   const links = useLinks()
-  const [hosts] = useHosts()
   const [params, setParams] = useSearchParams()
   const tab: Tab = TABS.some((t) => t.id === params.get('tab')) ? (params.get('tab') as Tab) : 'members'
   const { account, mode } = useSession()
@@ -72,9 +71,8 @@ export default function MembersPage() {
   useServerMembers(serverMode && (!!account?.admin || !!account?.operator))
   const accounts = customerAccounts()
 
-  const online = hosts.filter((h) => h.status === 'online').length
   const approvers = accounts.filter((a) => a.approver).length
-  const counts: Record<Tab, number | undefined> = { members: accounts.length, pcs: hosts.length, access: serverMode ? undefined : links.ips.length }
+  const counts: Record<Tab, number | undefined> = { members: accounts.length, pcs: undefined, access: serverMode ? undefined : links.ips.length }
 
   return (
     <div className="space-y-8 px-4 py-8 sm:px-8">
@@ -85,11 +83,6 @@ export default function MembersPage() {
       <Tiles label="회원·서버 요약" items={[
         { name: '회원', value: `${accounts.length}명`, tone: 'ok', note: serverMode ? '서버 계정' : `계정 연결 ${links.emails.length}개` },
         { name: '확인 권한', value: `${approvers}명`, tone: approvers ? 'ok' : 'wait', note: approvers ? 'AI 제안을 승인할 수 있어요' : '승인할 사람이 없어요' },
-        {
-          name: 'PC·서버', value: `${online} / ${hosts.length}대`,
-          tone: hosts.length === 0 ? 'off' : online === hosts.length ? 'ok' : 'wait',
-          note: hosts.length && online < hosts.length ? `${hosts.length - online}대 응답 없음` : '모두 응답해요',
-        },
         serverMode
           ? { name: '접속 허용', value: <PreparingChip />, tone: 'off', note: '사내 IP·대역' }
           : { name: '접속 허용', value: `${links.ips.length}개`, tone: links.ips.length ? 'ok' : 'off', note: '사내 IP·대역' },
@@ -102,7 +95,6 @@ export default function MembersPage() {
       {tab === 'pcs' && (
         <div className="space-y-8">
           <DejafixCard admin={!!account?.admin} />
-          <InfraHosts embedded />
         </div>
       )}
       {tab === 'access' && <Access />}
