@@ -89,12 +89,12 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return (parsed as { data: T }).data;
 }
 
-/** 서비스별 지금 돌고 있는 배포 (인프라가 배포 도구에서 받아 둔 성공 배포, dashboard-api `/deployments/latest`) */
+/** 서비스별 지금 돌고 있는 배포 (인프라가 배포 도구에서 받아 둔 성공 배포만, 시연 이력은 오지 않는다. dashboard-api `/deployments/latest`) */
 export interface LatestDeploy {
   service: string;
   version: string;
   deployed_at: string;
-  /** 배포 도구 이름(`github_actions`·`jenkins`) 또는 `demo`(시연 기록) */
+  /** 배포 도구 이름 (`github_actions`·`jenkins`) */
   source: string;
   /** 인프라가 롤백으로 다시 배포한 실행 */
   is_rollback: boolean;

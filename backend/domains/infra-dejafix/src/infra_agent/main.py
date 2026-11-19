@@ -187,23 +187,23 @@ def demo_deploy_reset(body: DemoResetInput) -> dict:
 def latest_deployments() -> dict:
     """서비스별 지금 돌고 있는 배포(되돌리지 않은 가장 최근 성공 배포). 읽기만 한다.
 
-    받아 둔 이력(`deploy_poll`이 120초마다 도구에서 받은 성공 실행, 연결 없는 서비스는 시연 이력)만
-    본다. 이력이 없는 서비스는 목록에 없다. `source`는 도구 이름(`github_actions`·`jenkins`) 또는
-    `demo`(시연 이력·시연 준비 기록). 이력은 연결 보관함 파일을 읽어 거르므로 동기 함수로 두어
-    이벤트 루프 밖(스레드 풀)에서 돈다.
+    배포 도구에서 받은 실행(`deploy_poll`이 120초마다 받는 성공 실행)만 내보낸다. 패키지 시연
+    이력(`deployments.json`)·시연 준비 기록(`source` 없음)은 화면에 보내지 않는다(지어내지 않는다).
+    도구 이력이 없는 서비스는 목록에 없다. `source`는 도구 이름(`github_actions`·`jenkins`).
+    이력은 연결 보관함 파일을 읽어 거르므로 동기 함수로 두어 이벤트 루프 밖(스레드 풀)에서 돈다.
     """
     history = get_runtime().history
     rows: list[dict[str, Any]] = []
     for service in sorted({d.service for d in history.live()}):
         latest = history.running(service)
-        if latest is None:
-            continue
+        if latest is None or latest.source is None:
+            continue  # 기록이 없거나 도구에서 받은 배포가 아니다
         rows.append(
             {
                 "service": latest.service,
                 "version": latest.version,
                 "deployed_at": latest.deployed_at.isoformat().replace("+00:00", "Z"),
-                "source": latest.source or "demo",
+                "source": latest.source,
                 "is_rollback": latest.is_rollback,
                 "version_from_sha": latest.version_from_sha,
             }

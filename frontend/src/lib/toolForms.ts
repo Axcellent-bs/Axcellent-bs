@@ -231,6 +231,6 @@ export function latestDeployView(
   const row = service ? data.rows.find((r) => r.service === service) : undefined;
   if (!row) return { tone: "off", text: "배포 기록 없음", note: null };
   const version = row.version_from_sha ? `커밋 ${row.version}` : row.version;
-  const note = row.source === "demo" ? "배포 도구가 아니라 시연 기록에서 읽은 값" : row.is_rollback ? "롤백으로 다시 배포한 버전" : null;
+  const note = row.is_rollback ? "롤백으로 다시 배포한 버전" : null;
   return { tone: "ok", text: `최근 배포 ${version} · ${fmt(row.deployed_at)}`, note };
 }

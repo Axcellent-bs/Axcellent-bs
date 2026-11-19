@@ -143,8 +143,8 @@ test("최근 배포: 못 읽으면 '확인할 수 없음' + 이유, 읽는 중�
   assert.equal(latestDeployView("shop-api", { state: "loading" }, fmt).text, "최근 배포 불러오는 중…");
 });
 
-test("최근 배포: 커밋 앞자리 버전·롤백 다시 배포·시연 기록은 그대로 밝힌다", () => {
+test("최근 배포: 커밋 앞자리 버전·롤백 다시 배포는 그대로 밝힌다", () => {
   assert.equal(latestDeployView("shop-api", { state: "ok", rows: [dep({ version: "abc1234", version_from_sha: true })] }, fmt).text, "최근 배포 커밋 abc1234 · T(2026-11-18T05:05:00Z)");
   assert.equal(latestDeployView("shop-api", { state: "ok", rows: [dep({ is_rollback: true })] }, fmt).note, "롤백으로 다시 배포한 버전");
-  assert.equal(latestDeployView("shop-api", { state: "ok", rows: [dep({ source: "demo" })] }, fmt).note, "배포 도구가 아니라 시연 기록에서 읽은 값");
+  assert.equal(latestDeployView("shop-api", { state: "ok", rows: [dep({ source: "jenkins" })] }, fmt).note, null);
 });

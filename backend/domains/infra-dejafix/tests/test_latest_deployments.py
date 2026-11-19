@@ -1,8 +1,9 @@
 """서비스별 최근 배포 읽기 (`GET /api/infra/deployments/latest`, dashboard-api·운영자 토큰만).
 
 도구 연결 화면이 "최근 배포 <버전> · <시각>"을 그린다. 받아 둔 배포 이력(`DeploymentHistory`)에서
-서비스마다 되돌리지 않은 가장 최근 배포만 준다.
-이력이 없으면 그 서비스는 목록에 없다(지어내지 않는다).
+서비스마다 되돌리지 않은 가장 최근 배포만 준다. 배포 도구에서 받은 실행만 내보낸다:
+패키지 시연 이력(`deployments.json`)·시연 준비 기록은 화면에 가지 않는다(지어내지 않는다).
+도구 이력이 없으면 그 서비스는 목록에 없다.
 """
 
 from __future__ import annotations
@@ -48,21 +49,44 @@ def _run(run_id: str, version: str, minutes_ago: int, *, ok: bool = True) -> Too
     )
 
 
-def test_latest_demo_deploy_per_service() -> None:
+def _connect_shop(runtime, *runs: ToolRun) -> None:
+    runtime.history.connected = lambda: {"shop-api"}
+    runtime.history.replace_service("shop-api", list(runs), tool="github_actions")
+
+
+def test_demo_history_is_not_returned() -> None:
+    # 패키지 시연 이력(shop-api v2.4.x)만 있다: 도구에서 받은 배포가 아니라 내보내지 않는다
+    assert _get(DASHBOARD) == []
+
+
+def test_demo_deploy_record_is_not_returned(runtime) -> None:
+    runtime.history.record(
+        service="api-gw",
+        version="v1.0.0",
+        components=("gw",),
+        change_summary="시연 준비 기록",
+        at=NOW,
+    )
+    assert _get(DASHBOARD) == []
+
+
+def test_tool_run_row_shape(runtime) -> None:
+    _connect_shop(runtime, _run("12", "v3.0.1", 5))
     assert _get(DASHBOARD) == [
         {
             "service": "shop-api",
-            "version": "v2.4.1",
-            "deployed_at": "2026-10-21T05:02:00Z",
-            "source": "demo",
+            "version": "v3.0.1",
+            "deployed_at": "2026-10-21T05:05:00Z",
+            "source": "github_actions",
             "is_rollback": False,
             "version_from_sha": False,
         }
     ]
 
 
-def test_admin_can_read_too() -> None:
-    assert [r["version"] for r in _get(ADMIN)] == ["v2.4.1"]
+def test_admin_can_read_too(runtime) -> None:
+    _connect_shop(runtime, _run("12", "v3.0.1", 5))
+    assert [r["version"] for r in _get(ADMIN)] == ["v3.0.1"]
 
 
 @pytest.mark.parametrize(
@@ -93,17 +117,24 @@ def test_connected_service_shows_tool_run_not_demo(runtime) -> None:
 
 
 def test_rolled_back_deploy_is_not_latest(runtime) -> None:
-    target = runtime.history.find("shop-api", "v2.4.1")
-    runtime.history.mark_rolled_back(target)
-    assert [r["version"] for r in _get(DASHBOARD)] == ["v2.4.0"]
+    _connect_shop(runtime, _run("12", "v3.0.1", 5), _run("11", "v3.0.0", 60))
+    runtime.history.mark_rolled_back(runtime.history.find("shop-api", "v3.0.1"))
+    assert [r["version"] for r in _get(DASHBOARD)] == ["v3.0.0"]
 
 
-def test_services_sorted_by_name(runtime) -> None:
+def test_only_tool_services_sorted_by_name(runtime) -> None:
+    runtime.history.connected = lambda: {"shop-api", "api-gw"}
+    runtime.history.replace_service("shop-api", [_run("12", "v3.0.1", 5)], tool="jenkins")
+    runtime.history.replace_service("api-gw", [_run("7", "v1.2.0", 9)], tool="github_actions")
+    # 연결 없는 서비스의 시연 준비 기록은 빠진다
     runtime.history.record(
-        service="api-gw",
-        version="v1.0.0",
-        components=("gw",),
-        change_summary="다른 서비스",
+        service="billing",
+        version="v0.1.0",
+        components=("bill",),
+        change_summary="시연 준비 기록",
         at=NOW,
     )
-    assert [r["service"] for r in _get(DASHBOARD)] == ["api-gw", "shop-api"]
+    assert [(r["service"], r["source"]) for r in _get(DASHBOARD)] == [
+        ("api-gw", "github_actions"),
+        ("shop-api", "jenkins"),
+    ]
