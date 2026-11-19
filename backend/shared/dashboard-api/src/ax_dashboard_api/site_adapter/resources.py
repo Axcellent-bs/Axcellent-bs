@@ -39,8 +39,44 @@ def _int(value: Any) -> int:
     return int(value or 0)
 
 
+def _lines(row: dict[str, Any], m: ResourceMap) -> list[dict[str, Any]]:
+    """주문 줄 목록 짝(`m.items`)으로 줄마다 상품·수량·단가·결제액을 옮긴다."""
+    assert m.items is not None
+    try:
+        raw = pick(row, m.items.path)
+    except MissingField as exc:
+        raise MappingBroken("orders", exc.field) from exc
+    if not isinstance(raw, list):
+        raise MappingBroken("orders", m.items.path)
+    out = []
+    for line in raw:
+        if not isinstance(line, dict):
+            continue
+
+        def get(name: str, default: Any = None, line: dict[str, Any] = line) -> Any:
+            expr = m.items.fields.get(name) if m.items else None  # type: ignore[union-attr]
+            if expr is None:
+                if default is None:
+                    raise MappingBroken("orders", f"{m.items.path}.{name}")  # type: ignore[union-attr]
+                return default
+            try:
+                return pick(line, expr)
+            except MissingField as exc:
+                raise MappingBroken("orders", exc.field) from exc
+
+        qty = _int(get("qty", 1)) or 1
+        paid = _int(get("paid_amount"))
+        unit = _int(get("unit_price", paid // qty if qty else 0))
+        out.append(
+            {"product_id": get("product_id"), "qty": qty, "unit_price": unit, "paid_amount": paid}
+        )
+    return out
+
+
 def to_order(row: dict[str, Any], m: ResourceMap) -> dict[str, Any]:
     get = lambda name: _get(row, m, name, "orders")  # noqa: E731
+    if m.items is not None:
+        return _to_order_lines(row, m)
     qty = _int(get("qty"))
     total = _int(get("total_amount"))
     paid = _int(get("paid_amount"))
@@ -62,6 +98,34 @@ def to_order(row: dict[str, Any], m: ResourceMap) -> dict[str, Any]:
                 "paid_amount": paid,
             }
         ],
+        "payments": (
+            [{"amount": paid, "status": "succeeded", "created_at": created_at}] if paid > 0 else []
+        ),
+    }
+
+
+def _to_order_lines(row: dict[str, Any], m: ResourceMap) -> dict[str, Any]:
+    """주문 줄이 여러 개인 주문.
+
+    받은 금액은 주문 칸(`paid_amount`)이 있으면 그것, 없으면 줄 합계.
+    """
+    get = lambda name: _get(row, m, name, "orders")  # noqa: E731
+    lines = _lines(row, m)
+    created_at = get("created_at")
+    paid = (
+        _int(get("paid_amount"))
+        if "paid_amount" in m.fields
+        else sum(line["paid_amount"] for line in lines)
+    )
+    return {
+        "order_id": str(get("order_id")),
+        "status": get("status"),
+        "created_at": created_at,
+        "updated_at": get("updated_at") if "updated_at" in m.fields else created_at,
+        "buyer_id": get("buyer_id"),
+        "total_amount": _int(get("total_amount")),
+        "refunded_amount": _int(get("refunded_amount")) if "refunded_amount" in m.fields else 0,
+        "items": lines,
         "payments": (
             [{"amount": paid, "status": "succeeded", "created_at": created_at}] if paid > 0 else []
         ),

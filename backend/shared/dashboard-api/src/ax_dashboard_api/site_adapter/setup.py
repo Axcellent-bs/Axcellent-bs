@@ -167,6 +167,14 @@ def _sample(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _proposal(kind: Resource, path: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     fields = propose.fields(kind, rows)
     out: dict[str, Any] = {"path": path, "paging": Paging().model_dump(), "fields": fields}
+    # 주문에 줄 목록이 있고 주문 칸에 상품이 없으면: 줄 짝을 제안하고 주문 칸의 상품·수량은 뺀다
+    lines = propose.order_items(rows) if kind == "orders" and not fields.get("product_id") else None
+    if lines is not None:
+        out["items"] = lines
+        for name in ("product_id", "qty"):
+            fields.pop(name, None)
+        if not fields.get("paid_amount"):
+            fields.pop("paid_amount", None)  # 줄 결제액 합계를 쓴다
     if (
         kind == "orders"
         and fields.get("status")
@@ -222,7 +230,16 @@ def _complete(m: SiteMapping) -> None:
             for raw, to in table.items()
             if to not in SHOP_STATUSES
         ]
-        missing = [k for k in propose.SYNONYMS[kind] if k not in res.fields]
+        need = list(propose.SYNONYMS[kind])
+        if res.items is not None:
+            # 줄 목록 짝이 있으면 상품·수량·결제액은 줄에서 받는다
+            need = [k for k in need if k not in ("product_id", "qty", "paid_amount")]
+            empty += [
+                f"{kind}.items.{k}"
+                for k in ("product_id", "paid_amount")
+                if not res.items.fields.get(k, "").strip()
+            ]
+        missing = [k for k in need if k not in res.fields]
         empty += [f"{kind}.{k}" for k in missing]
     if set(m.resources) != {"orders", "products"}:
         empty.append("주문·상품 경로")

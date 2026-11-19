@@ -10,6 +10,8 @@ export interface ResourceMapping {
   fields: Record<string, string>;
   /** 칸 값 바꾸기 표(주문 상태: 고객사 값 → pending_payment·paid·cancelled) */
   values?: Record<string, Record<string, string>>;
+  /** 주문 한 건에 상품이 여러 개인 사이트: 주문 줄 목록 칸과 줄마다의 짝(product_id·qty·unit_price·paid_amount) */
+  items?: { path: string; fields: Record<string, string> } | null;
 }
 
 export interface SiteMapping {
@@ -38,6 +40,10 @@ export function unfilled(mapping: SiteMapping): string[] {
   for (const res of ["orders", "products"] as const) {
     const r = mapping.resources[res];
     for (const [name, expr] of Object.entries(r.fields)) if (!expr.trim()) out.push(`${res}.${name}`);
+  }
+  const lines = mapping.resources.orders.items;
+  if (lines) {
+    for (const name of ["product_id", "paid_amount"]) if (!(lines.fields[name] ?? "").trim()) out.push(`orders.items.${name}`);
   }
   for (const [raw, to] of Object.entries(mapping.resources.orders.values?.status ?? {})) {
     if (!to) out.push(`orders.status=${raw}`);
