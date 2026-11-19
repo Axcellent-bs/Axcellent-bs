@@ -28,7 +28,7 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import config
+from ax_agent_template import config, pinned_http
 from support_agent import settlement_config as sc
 from support_agent import shop_client
 
@@ -454,7 +454,7 @@ async def live_books(
     `http_client`를 넘기면(테스트) 따로 모아 둔 주문 없이 읽는다. `recent`면 전체 읽기 때가 지났어도
     최근 주문만 다시 읽는다(처음 한 번은 전체).
     """
-    client = http_client or httpx.AsyncClient()
+    client = http_client or httpx.AsyncClient(transport=pinned_http.company_transport())
     if store is None:
         store = _STORE if http_client is None else OrderStore()
     async with store.lock:

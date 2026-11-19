@@ -30,6 +30,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from ax_agent_template import company_connection as store
+from ax_agent_template import pinned_http
 from ax_agent_template import tenant as tenants
 from ax_agent_template.config import agent_url
 from ax_dashboard_api.auth import require_human_for_writes
@@ -144,7 +145,9 @@ async def run_checks(url: str) -> list[Check]:
     """판매 서버 상태·상품·구매자 읽기를 확인한다. 항목마다 통과 여부와 이유."""
     checks: list[Check] = []
     async with httpx.AsyncClient(
-        timeout=TIMEOUT_SECONDS, follow_redirects=False, transport=TRANSPORT
+        timeout=TIMEOUT_SECONDS,
+        follow_redirects=False,
+        transport=TRANSPORT or pinned_http.guarded_transport(),  # 검사한 IP로만 연결
     ) as client:
         body, error = await _get(client, f"{url}/health")
         data = body.get("data") if isinstance(body, dict) else None

@@ -21,7 +21,7 @@ from typing import Any, get_args
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ax_agent_template import config
+from ax_agent_template import config, pinned_http
 from ax_contracts.data_access.shop_customers import ShopCustomersExportResult
 from ax_contracts.data_access.shop_failed_orders import (
     ShopFailedOrdersQuery,
@@ -74,7 +74,7 @@ _shared: tuple[asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None
 
 
 def _new_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
+    return httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=pinned_http.company_transport())
 
 
 def _shared_client() -> httpx.AsyncClient:

@@ -14,6 +14,8 @@
   사내 주소(localhost, 10/8, 172.16/12, 192.168/16)는 받고, 사내 밖은 https이면서
   `AX_COMPANY_SHOP_ALLOWED_HOSTS`(쉼표 목록, 설치 운영자가 정함)에 있어야 받는다.
   에이전트 토큰과 승인된 쓰기가 이 주소로 가기 때문이다. 이름은 IP로 풀어서 본다.
+  실제 호출은 `pinned_http`의 transport로 연결 직전에 다시 풀고 검사한 IP로만 붙는다
+  (DNS 재바인딩 차단).
 - 바꿀 때마다 `<연결 파일>.history.jsonl`에 한 줄씩 쌓는다 (언제·누가·무엇을·이전 주소·새 주소).
 - 파일이 없으면 연결이 없는 것이다(로컬 개발 기본, 경고 없음).
   깨졌으면 경고를 한 번 남기고 없는 것으로 본다.
@@ -151,17 +153,26 @@ def _private(addr: IpAddress) -> bool:
 
 
 def check_host(url: str) -> None:
-    """판매 서버 주소의 호스트 정책. 어긋나면 ValueError (이유는 화면에 그대로 보인다)."""
+    """판매 서버 주소의 호스트 정책. 어긋나면 ValueError (이유는 화면에 그대로 보인다).
+
+    이름을 풀어 본 결과만 검사하므로, 실제로 부를 때는 `pinned_http.guarded_transport`처럼
+    검사한 IP로만 연결하는 transport를 같이 써야 DNS 재바인딩을 막는다.
+    """
     parts = urlsplit(url)
     host = (parts.hostname or "").lower()
-    addrs = _resolve(host)
+    check_addrs(host, parts.scheme, _resolve(host))
+
+
+def check_addrs(host: str, scheme: str, addrs: list[IpAddress]) -> None:
+    """이미 풀어 둔 IP 목록으로 `check_host`와 같은 정책을 본다. 어긋나면 ValueError."""
+    host = host.lower()
     if any(_blocked(a) for a in addrs):
         raise ValueError("링크 로컬·메타데이터·0.0.0.0 주소는 연결할 수 없습니다")
     if all(_private(a) for a in addrs):
         return
     if host not in allowed_hosts():
         raise ValueError(f"사내 밖 주소는 허용 목록({ALLOWED_HOSTS_ENV})에 있어야 합니다")
-    if parts.scheme != "https":
+    if scheme != "https":
         raise ValueError("사내 밖 주소는 https로만 연결할 수 있습니다")
 
 
@@ -249,6 +260,18 @@ def shop_api_override() -> str | None:
 
         return agent_url("dashboard-api") + ADAPTER_PATH
     return found.shop_api_url
+
+
+def company_hosts() -> frozenset[str]:
+    """저장된 회사 연결이 가리키는 호스트들 (판매 서버·사이트 변환기 고객사 API, 소문자).
+
+    AI들이 회사 판매 서버를 부를 때 이 호스트만 `pinned_http`로 검사한 IP에 붙인다.
+    """
+    found = read_connection()
+    if not found:
+        return frozenset()
+    urls = [found.shop_api_url, *(found.adapter or {}).values()]
+    return frozenset(h for u in urls if (h := (urlsplit(u).hostname or "").lower()))
 
 
 def _now() -> str:
