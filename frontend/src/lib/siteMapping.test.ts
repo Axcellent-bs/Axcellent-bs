@@ -29,3 +29,16 @@ test("unfilled는 빈 짝 식과 정하지 않은 상태를 모은다", () => {
   };
   assert.deepEqual(unfilled(m), ["orders.paid_amount", "products.name", "orders.status=weird"]);
 });
+
+test("unfilled는 주문 줄 짝의 상품·결제액 빈 칸도 모은다", () => {
+  const m: SiteMapping = {
+    version: 1,
+    auth_header: "Authorization",
+    auth_scheme: "Bearer",
+    resources: {
+      orders: { path: "/o", fields: { order_id: "code" }, items: { path: "items", fields: { product_id: "", qty: "const:1" } } },
+      products: { path: "/p", fields: { name: "title" } },
+    },
+  };
+  assert.deepEqual(unfilled(m), ["orders.items.product_id", "orders.items.paid_amount"]);
+});
