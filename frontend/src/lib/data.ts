@@ -1736,6 +1736,15 @@ export interface InstagramSource {
   reason: string | null;
 }
 export type InstagramAudioType = "music" | "original_sound";
+/** "왜 떴나·왜 뜨나" 근거 한 줄. 숫자는 전부 서버 코드 값 (LLM 없음). 모르면 value null + reason */
+export interface InstagramWhyFact {
+  kind: "spread" | "format" | "engagement" | "caption" | "time" | "cross" | "unknown" | "rank" | "youtube" | "search";
+  label: string;
+  value: string | null;
+  baseline: string | null;
+  ratio: number | null;
+  reason: string | null;
+}
 export interface InstagramAudioItem {
   rank: number;
   audio_id: string;
@@ -1751,6 +1760,8 @@ export interface InstagramAudioItem {
   is_new: boolean;
   streak_days: number;
   overlap: string[];
+  /** "왜 뜨나" 근거 (순위·유튜브 쇼츠·네이버·확인 불가). 결론 문장 없음. 예전 저장 응답에는 없음 */
+  why_facts?: InstagramWhyFact[];
 }
 export interface InstagramAudioOutput {
   audio_type: InstagramAudioType;
@@ -1780,6 +1791,8 @@ export interface InstagramRadarPost {
   thumbnail_url?: string | null;
   /** IMAGE · VIDEO · CAROUSEL_ALBUM */
   media_type?: string | null;
+  /** 계정 평소와 가장 크게 다른 점 한 줄 (코드 템플릿, LLM 없음) */
+  standout?: string | null;
 }
 export interface InstagramRadarGroup {
   name: string;
@@ -1793,6 +1806,11 @@ export interface InstagramRadarGroup {
   ad_material: "ok" | "caution" | "excluded" | "unknown";
   ad_material_reason: string;
   top_posts: InstagramRadarPost[];
+  /** "왜 떴나" 근거 숫자 (서버 코드 계산, 평소와 다른 점만) */
+  why_facts?: InstagramWhyFact[];
+  /** AI 한 줄 결론 (숫자 없음). 없으면 why_line_reason */
+  why_line?: string | null;
+  why_line_reason?: string | null;
 }
 export interface InstagramRadarOutput {
   status: IgStatus;
