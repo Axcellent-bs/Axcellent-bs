@@ -625,6 +625,9 @@ class ReceiveInsightOutput(AxModel):
     # deleted_recently = 사람이 최근 지운 제안과 같은·비슷한 인사이트라 만들지 않음
     outcome: Literal["created", "duplicate", "deleted_recently"]
     proposal_id: str  # PROP-n
+    # 총괄 의뢰(홍보 영상 흐름)로 받으면 영상 제작안을 바로 써서 돌려준다 (11/19). 사람 확인 전
+    # 초안이라 마케팅에는 아직 안 간다. 그 밖의 요청자는 None (기획안 만들 때 쓴다)
+    video_plan: VideoPlan | None = None
 
 
 class VideoScene(AxModel):
@@ -672,6 +675,9 @@ class VideoPlan(AxModel):
         if at != self.duration_s:
             raise ValueError("마지막 장면이 duration_s에 끝나야 한다")
         return self
+
+
+ReceiveInsightOutput.model_rebuild()  # video_plan이 아래에 정의된 VideoPlan을 가리킨다
 
 
 class CampaignBriefInput(AxModel):

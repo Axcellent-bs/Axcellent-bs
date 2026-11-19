@@ -15,6 +15,7 @@ from ax_contracts.schemas.planning import (
     CampaignBriefInput,
     CampaignBriefOutput,
     ReceiveInsightInput,
+    ReceiveInsightOutput,
     VideoPlan,
 )
 from ax_workflow.models import Proposal
@@ -218,3 +219,73 @@ def test_make_plan_writes_video_plan_and_brief_carries_it(llm) -> None:
         assert brief.sent and brief.sent[0].video_plan == p.video_plan
 
     asyncio.run(run())
+
+
+# -------------------------------------------------- 총괄 의뢰 흐름 (11/19 준하 님 16번)
+
+
+class Asked:
+    """기획이 데이터분석·마케팅에 직접 물으면 기록한다 (총괄 의뢰에서는 묻지 않아야 한다)."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def trends(self, ctx):
+        self.calls.append("trends")
+        return []
+
+    async def followers(self, ctx):
+        self.calls.append("followers")
+        return None
+
+
+def test_orchestrator_request_returns_video_plan_without_asking_others() -> None:
+    asked = Asked()
+    writer = Writer(_mock(_llm_out()))
+    svc = PlanningService(
+        gate=_gate, relater=None, insights=asked, marketing=asked, proposal_writer=writer
+    )
+    res = asyncio.run(svc.receive_insight(requester="orchestrator", inp=_insight()))
+    assert asked.calls == []  # 넘겨받은 인사이트와 숫자만 쓴다
+    out = ReceiveInsightOutput.model_validate(res.output)
+    assert out.outcome == "created" and out.video_plan is not None
+    assert out.video_plan.written_by == "llm"
+    p = next(x for x in svc.state.proposals if x.id == out.proposal_id)
+    assert p.video_plan == out.video_plan
+    assert p.status == "확인 대기"  # 사람 확인 전이라 마케팅에는 아직 안 간다
+    again = ReceiveInsightOutput.model_validate(
+        asyncio.run(svc.receive_insight(requester="orchestrator", inp=_insight())).output
+    )
+    assert again.outcome == "duplicate" and again.video_plan == out.video_plan
+    assert len(writer.llm.calls) == 1  # 다시 넘겨도 제작안을 또 쓰지 않는다
+
+
+def test_make_plan_reuses_video_plan_from_orchestrator() -> None:
+    writer = Writer(_mock(_llm_out()))
+    svc = PlanningService(gate=_gate, relater=None, marketing=Brief(), proposal_writer=writer)
+    res = asyncio.run(svc.receive_insight(requester="orchestrator", inp=_insight()))
+    pid = res.output["proposal_id"]
+    asyncio.run(svc.dispatch({"type": "makePlan", "proposal": pid}))
+    p = next(x for x in svc.state.proposals if x.id == pid)
+    assert p.video_plan is not None and p.video_plan.model_dump() == res.output["video_plan"]
+    assert len(writer.llm.calls) == 1
+
+
+def test_data_request_still_has_no_video_plan_at_receive() -> None:
+    asked = Asked()
+    svc = PlanningService(gate=_gate, relater=None, insights=asked, marketing=asked)
+    res = asyncio.run(svc.receive_insight(requester="data", inp=_insight()))
+    assert ReceiveInsightOutput.model_validate(res.output).video_plan is None
+    assert sorted(asked.calls) == ["followers", "trends"]  # 데이터분석이 보낸 건 지금처럼
+
+
+def test_finance_relay_from_orchestrator_has_no_video_plan() -> None:
+    svc = PlanningService(gate=_gate, relater=None)
+    inp = _insight().model_copy(update={"skill": "finance_insights"})
+    res = asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp))
+    assert ReceiveInsightOutput.model_validate(res.output).video_plan is None
+
+
+def test_old_receive_output_without_video_plan_still_valid() -> None:
+    old = {"outcome": "created", "proposal_id": "PROP-1"}
+    assert ReceiveInsightOutput.model_validate(old).video_plan is None
