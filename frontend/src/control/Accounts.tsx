@@ -1,0 +1,108 @@
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useSession } from '@/demo/session'
+import { createAccount, listAccounts } from '@/lib/authApi'
+import { accountInputProblem, MIN_PASSWORD_LENGTH, type ServerAccount, type ServerRole } from '@/lib/humanSession'
+import { PreparingChip } from '@/components/Preparing'
+
+// 계정 (AXcellent 운영팀, /control/accounts). dashboard-api `/auth/accounts`: 운영자는 모든 역할의 계정을 만들고 목록을 본다.
+// 운영자 계정은 팀원마다 하나씩(설계 "정한 것"). 고객사 관리자 계정을 만들어 주면 그 관리자가 일반회원을 만든다.
+// 서버 로그인이 꺼져 있으면(데모 로그인) 서버 계정이 없어 이 화면은 "준비 중"이다.
+const ROLE_LABEL: Record<ServerRole, string> = { operator: '운영자', admin: '고객사 관리자', member: '일반회원' }
+const ROLES = Object.keys(ROLE_LABEL) as ServerRole[]
+const day = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—')
+
+export default function Accounts() {
+  const { mode, account } = useSession()
+  const serverOperator = mode === 'server' && !!account?.server && !!account.operator
+  const [rows, setRows] = useState<ServerAccount[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [form, setForm] = useState<{ name: string; email: string; role: ServerRole; password: string }>({ name: '', email: '', role: 'admin', password: '' })
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const reload = useCallback(() => {
+    listAccounts().then((r) => { setRows(r); setLoadError(null) }).catch((x: Error) => setLoadError(x.message))
+  }, [])
+  useEffect(() => {
+    if (serverOperator) reload()
+  }, [serverOperator, reload])
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    setDone(null)
+    const problem = accountInputProblem(form)
+    if (problem) return setError(problem)
+    setBusy(true)
+    try {
+      const row = await createAccount(form)
+      setForm({ name: '', email: '', role: form.role, password: '' })
+      setError(null)
+      setDone(`${row.name}(${row.email}, ${ROLE_LABEL[row.role]}) 계정을 만들었어요. 비밀번호는 팀 채널이나 본인에게 따로 알려 주세요.`)
+      reload()
+    } catch (x) {
+      setError(x instanceof Error ? x.message : '계정을 만들지 못했어요.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6 px-8 pb-12">
+      <header>
+        <p className="text-sm text-ink-500">관제 센터</p>
+        <h1 className="flex items-center gap-2 text-2xl font-semibold">계정 {!serverOperator && <PreparingChip />}</h1>
+        <p className="mt-1 text-sm text-ink-500">서버 로그인 계정을 만들어요. 운영자 계정은 팀원마다 하나씩 만들어 기록에 실제 이름이 남게 해요.</p>
+      </header>
+
+      {!serverOperator ? (
+        <p role="status" className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
+          {mode === 'server'
+            ? '서버 운영자 계정으로 로그인하면 계정을 만들고 볼 수 있어요.'
+            : '서버 로그인이 아직 꺼져 있어 데모 로그인으로 들어왔어요. 서버 로그인이 켜지면 여기서 계정을 만들어요.'}
+        </p>
+      ) : (
+        <>
+          <form onSubmit={(e) => void submit(e)} className="card space-y-3 p-6">
+            <h2 className="card-title">새 계정</h2>
+            <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto_1fr_auto]">
+              <input className="field" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="이름" aria-label="이름" />
+              <input className="field" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="이메일" aria-label="이메일" autoComplete="off" />
+              <select className="field" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as ServerRole })} aria-label="역할">
+                {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+              </select>
+              <input className="field" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={`처음 비밀번호 (${MIN_PASSWORD_LENGTH}자 이상)`} aria-label="처음 비밀번호" autoComplete="new-password" />
+              <button className="btn-primary px-5" disabled={busy}>{busy ? '만드는 중…' : '만들기'}</button>
+            </div>
+            {error && <p className="text-sm text-red-700">{error}</p>}
+            {done && <p className="text-sm text-emerald-700">{done}</p>}
+          </form>
+
+          <section className="card overflow-x-auto">
+            <table className="w-full whitespace-nowrap text-sm">
+              <thead className="bg-app text-left text-xs text-ink-500">
+                <tr>
+                  <th className="px-4 py-2.5 font-medium">이름</th>
+                  <th className="px-4 py-2.5 font-medium">역할</th>
+                  <th className="px-4 py-2.5 font-medium">만든 시각</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {(rows ?? []).map((r) => (
+                  <tr key={r.id}>
+                    <td className="px-4 py-2.5"><p className="font-medium text-ink-900">{r.name}</p><p className="font-mono text-xs text-ink-500">{r.email}</p></td>
+                    <td className="px-4 py-2.5"><span className="chip bg-ink-100 text-ink-700">{ROLE_LABEL[r.role] ?? r.role}</span></td>
+                    <td className="px-4 py-2.5 text-ink-500">{day(r.created_at)}</td>
+                  </tr>
+                ))}
+                {rows && !rows.length && <tr><td colSpan={3} className="px-4 py-6 text-center text-ink-500">계정이 없어요</td></tr>}
+                {!rows && !loadError && <tr><td colSpan={3} className="px-4 py-6 text-center text-ink-500">불러오는 중…</td></tr>}
+              </tbody>
+            </table>
+            {loadError && <p className="px-4 py-3 text-sm text-red-700">{loadError}</p>}
+          </section>
+        </>
+      )}
+    </div>
+  )
+}
