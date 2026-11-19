@@ -11,7 +11,7 @@ import { sectionState, type SectionState } from "@/lib/segmentView";
 import {
   BEAT_LABEL, CALLER_LABEL, EVIDENCE, HASHTAG_HIDDEN_NOTE, REPORT_POLL_MS, REPORT_STATUS, SECTION_EVIDENCE, SECTION_STATUS,
   barPct, beatEvidence, beatWidths, competitorChip, competitorSummary, evidenceDomId, evidenceExpanded, evidenceListClass, hashtagMeta,
-  headerRows, keepPolling, keyEvidence, limitGroups, searchMain, searchNotes, shareText, sortBeats, sortCompetitors, sortSearchRows,
+  headerRows, keepPolling, keyEvidence, limitGroups, reportLabel, searchMain, searchNotes, shareText, sortBeats, sortCompetitors, sortSearchRows,
   traitLines, type ChipTone, type EvidenceKind, type ReportPart,
 } from "@/lib/trendReportView";
 
@@ -405,7 +405,7 @@ export function TrendReportBody({ report, onRebuild }: { report: TrendReport; on
           <h2 className="text-lg font-bold text-ink-900">트렌드 분석 보고서{report.brief.product ? ` · ${report.brief.product}` : ""}</h2>
           <StatusChip label={st.label} t={st.tone} />
           <span className="text-xs text-ink-500">
-            {when(report.created_at)} 의뢰 · {CALLER_LABEL[report.caller] ?? report.caller}
+            <span className="font-semibold tabular-nums text-ink-700">{reportLabel(report.report_id)}</span> · {when(report.created_at)} 의뢰 · {CALLER_LABEL[report.caller] ?? report.caller}
             {report.finished_at && ` · ${when(report.finished_at)} 끝남`}
           </span>
           <span className="ml-auto flex flex-wrap gap-2 print-hide">

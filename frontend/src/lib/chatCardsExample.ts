@@ -33,6 +33,9 @@ export const REQUEST_CARD_SPARSE: TrendRequestCard = {
   brief_reason: "의뢰문에서 제품·키워드를 찾지 못했어요",
 };
 
+/** 이미 접수된 카드 (서버 accepted_report_id). 새로고침해도 "접수됨 · TR-B835" + 보고서 열기 */
+export const REQUEST_CARD_ACCEPTED: TrendRequestCard = { ...REQUEST_CARD_EXAMPLE, accepted_report_id: "tr_b8358e0011223344" };
+
 export const PROGRESS_CARD_EXAMPLE: TrendReportProgressCard = { kind: "trend_report_progress", report_id: "tr_3f2a9c0011223344" };
 
 export const DONE_CARD_EXAMPLE: TrendReportDoneCard = {
