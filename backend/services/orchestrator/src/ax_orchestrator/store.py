@@ -4,7 +4,7 @@
 비어 있으면 프로세스 메모리(`:memory:`)에 둔다(다시 켜면 사라진다. 예전 동작).
 
 저장하는 것은 이벤트 기록(단계 결과·로그·지표), 처리한 `event_id`, 재무가 보낸 의견
-(`finance_opinions`)이다. 승인 대기(`Hold`)와
+(`finance_opinions`), 고객 의뢰(`work_requests`, 재시작해도 이어 간다)다. 승인 대기(`Hold`)와
 사람 할 일함 대기(`HandoffWait`)는 `asyncio.Event`라 저장하지 않는다. 다시 켤 때 진행 중이던
 이벤트는 이어 가지 않고 "재시작으로 중단됨"으로 남긴다(`IncidentManager.restore`).
 """
@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS agent_diagnoses (
     request_id  TEXT PRIMARY KEY,
     received_at TEXT NOT NULL,
     body        TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS work_requests (
+    request_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    body       TEXT NOT NULL
 );
 """
 
@@ -314,6 +319,39 @@ class IncidentStore:
                 row = json.loads(body)
             except ValueError:
                 log.warning("저장된 진단 요청을 읽지 못해 건너뜀: %s", request_id)
+                continue
+            if isinstance(row, dict) and isinstance(row.get("request_id"), str):
+                found.append(row)
+        return found
+
+    def save_request(self, request_id: str, created_at: str, row: dict[str, Any]) -> None:
+        """고객 의뢰 한 줄(`work_requests.py`). 같은 `request_id`는 마지막 값으로 바꾼다."""
+        body = json.dumps(row, ensure_ascii=False, default=str)
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO work_requests (request_id, created_at, body) VALUES (?, ?, ?)"
+                " ON CONFLICT(request_id) DO UPDATE SET body = excluded.body",
+                (request_id, created_at, body),
+            )
+            self._db.commit()
+
+    def drop_request(self, request_id: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM work_requests WHERE request_id = ?", (request_id,))
+            self._db.commit()
+
+    def load_requests(self) -> list[dict[str, Any]]:
+        """받은 순서대로. 읽지 못하는 줄은 건너뛴다."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT request_id, body FROM work_requests ORDER BY created_at, rowid"
+            ).fetchall()
+        found: list[dict[str, Any]] = []
+        for request_id, body in rows:
+            try:
+                row = json.loads(body)
+            except ValueError:
+                log.warning("저장된 의뢰를 읽지 못해 건너뜀: %s", request_id)
                 continue
             if isinstance(row, dict) and isinstance(row.get("request_id"), str):
                 found.append(row)

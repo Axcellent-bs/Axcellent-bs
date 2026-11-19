@@ -28,6 +28,7 @@ from ax_orchestrator.naming import event_title, event_type
 from ax_orchestrator.plans.support_resolved import support_resolved
 from ax_orchestrator.resolved_log import log_resolved
 from ax_orchestrator.store import IncidentStore
+from ax_orchestrator.work_requests import WorkRequests
 
 log = logging.getLogger("orchestrator.manager")
 
@@ -128,6 +129,9 @@ class IncidentManager:
         self.incidents: dict[str, Incident] = {}
         self.finance_opinions = FinanceOpinions(store)
         self.agent_diagnoses = AgentDiagnoses(store)
+        # 고객 의뢰 기록. 장애 이벤트와 달리 재시작 때 닫지 않고 이어 간다(work_requests.py)
+        self.work_requests = WorkRequests(store)
+        self.resumed_requests: dict[str, int] = {}
         self._seen: set[str] = set()
         self._tasks: dict[str, asyncio.Task[Incident]] = {}
 
@@ -150,6 +154,7 @@ class IncidentManager:
             return 0
         self.finance_opinions.restore()  # 재무가 보낸 의견도 다시 올린다
         self.agent_diagnoses.restore()  # 인사가 보낸 평가 진단 요청도 다시 올린다
+        self.resumed_requests = self.work_requests.restore()  # 고객 의뢰는 닫지 않고 정리한다
         self._seen |= self.store.seen_ids()
         interrupted = 0
         for inc in self.store.load_all():
