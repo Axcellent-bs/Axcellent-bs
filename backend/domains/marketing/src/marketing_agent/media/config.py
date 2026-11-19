@@ -15,6 +15,10 @@
   허용 경과일 `MARKETING_FX_MAX_AGE_DAYS`·여유 `MARKETING_COST_SAFETY_MARGIN_PCT`,
   건당 상한 `MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM`, 월 상한 `MARKETING_MEDIA_MONTHLY_BUDGET_KRW`.
   비어 있으면 실제 공급자 호출을 거부한다(목 모드는 허용).
+- 영상 전용 건당 상한 `MARKETING_VIDEO_MAX_COST_KRW_PER_ITEM`(없으면 위 건당 상한).
+  이미지·BGM은 기존
+  건당 상한을 쓴다. 월 예산·영상 건당 상한은 화면에서 정한 값(`cost_limit_store`)이 환경변수보다
+  우선한다.
 - 영상 길이 상한: `MARKETING_VIDEO_MAX_DURATION_S`(운영자가 정한다, 1~90초, 기본 15).
   숫자가 아니거나 범위 밖이면 영상 생성을 거부한다(`video_max_duration_invalid`).
   경고 길이 `MARKETING_VIDEO_WARN_DURATION_S`(1~상한, 기본 30): 화면 경고창 기준(UX).
@@ -31,6 +35,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from marketing_agent.media import cost_limit_store
 from marketing_agent.media.base import MediaKind
 from marketing_agent.media.video_limits import (
     DEFAULT_MAX_DURATION_S,
@@ -149,6 +154,8 @@ class MediaSettings:
     media_dir: Path
     audio_provider: str = MOCK
     audio_model: str = ""
+    # 영상 전용 건당 상한. None이면 `max_cost_krw_per_item`을 쓴다(`item_limit`)
+    video_max_cost_krw_per_item: int | None = None
     audio_mode: str = DEFAULT_AUDIO_MODE
     video_max_duration_s: int = DEFAULT_MAX_DURATION_S
     video_max_duration_problem: str | None = None  # 설정이 잘못됐으면 코드(영상 생성 거부)
@@ -165,7 +172,10 @@ class MediaSettings:
         warn = warn_duration_from_env(max_duration.seconds)
         if warn.problem is not None:
             log.warning("video warn duration setting ignored: %s", warn.problem)  # 사유 코드만
+        ui_video, ui_monthly = cost_limit_store.video_per_item(), cost_limit_store.monthly_budget()
         return cls(
+            video_max_cost_krw_per_item=ui_video
+            or _integer("MARKETING_VIDEO_MAX_COST_KRW_PER_ITEM"),
             video_warn_duration_s=warn.seconds,
             video_max_duration_s=max_duration.seconds,
             video_max_duration_problem=max_duration.problem,
@@ -178,12 +188,18 @@ class MediaSettings:
             fx_max_age_days=_integer("MARKETING_FX_MAX_AGE_DAYS"),
             margin_pct=_decimal("MARKETING_COST_SAFETY_MARGIN_PCT"),
             max_cost_krw_per_item=_integer("MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM"),
-            monthly_budget_krw=_integer("MARKETING_MEDIA_MONTHLY_BUDGET_KRW"),
+            monthly_budget_krw=ui_monthly or _integer("MARKETING_MEDIA_MONTHLY_BUDGET_KRW"),
             audio_provider=_text("MARKETING_AUDIO_PROVIDER").lower() or MOCK,
             audio_model=_text("MARKETING_AUDIO_MODEL"),
             audio_mode=audio_mode_from_env(),
             media_dir=Path(_text(MEDIA_DIR_ENV) or Path(tempfile.gettempdir()) / "marketing_media"),
         )
+
+    def item_limit(self, kind: str | None) -> int | None:
+        """건당 상한. 영상은 영상 전용 값(없으면 기존 값), 이미지·BGM은 기존 값."""
+        if kind == "video" and self.video_max_cost_krw_per_item is not None:
+            return self.video_max_cost_krw_per_item
+        return self.max_cost_krw_per_item
 
     def provider(self, kind: MediaKind) -> str:
         if kind == "audio":

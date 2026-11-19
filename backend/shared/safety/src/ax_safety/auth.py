@@ -32,7 +32,7 @@ def agent_from_token(token: str | None) -> str:
     return verify_token(token)
 
 
-def _human_tokens() -> dict[str, str]:
+def human_tokens() -> dict[str, str]:
     return human_auth.parse_shared_tokens(os.getenv("SAFETY_HUMAN_TOKENS"))
 
 
@@ -41,7 +41,7 @@ def human_from_token(token: str | None) -> str:
     if not token or token.startswith("mock:"):
         raise PermissionError("사람 토큰이 아니다")
     try:
-        human = human_auth.find_human(token, shared_tokens=_human_tokens(), mock=is_mock("safety"))
+        human = human_auth.find_human(token, shared_tokens=human_tokens(), mock=is_mock("safety"))
     except human_auth.HumanAuthError as exc:
         raise PermissionError(exc.message) from None
     if human is None:

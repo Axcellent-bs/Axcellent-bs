@@ -22,6 +22,10 @@ export interface ServerAccount {
   dept?: string | null;
   /** 확인 권한: 위험한 요청을 승인할 수 있다 */
   approver?: boolean;
+  /** 비용 상한 변경 권한: 영상 비용 상한을 바꾸고 요청할 수 있다(운영자·관리자 계정만 켠다) */
+  limit_editor?: boolean;
+  /** 정책 변경 권한: 안전 정책 값 변경 요청·적용과 하향 셀프 승인 스위치(운영자·관리자 계정만) */
+  policy_editor?: boolean;
   /** 열람 담당: 인사·재무 AI의 다른 사람 대화 요약을 본다 */
   readers?: ReaderAreaId[];
 }
@@ -41,6 +45,8 @@ export function readServerAccount(v: unknown): ServerAccount | null {
   };
   if (a.dept === null || typeof a.dept === "string") out.dept = a.dept || null;
   if (typeof a.approver === "boolean") out.approver = a.approver;
+  if (typeof a.limit_editor === "boolean") out.limit_editor = a.limit_editor;
+  if (typeof a.policy_editor === "boolean") out.policy_editor = a.policy_editor;
   if (Array.isArray(a.readers)) out.readers = READER_AREA_IDS.filter((r) => (a.readers as unknown[]).includes(r));
   return out;
 }

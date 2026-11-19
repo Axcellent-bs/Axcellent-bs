@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -32,10 +33,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
-from ax_agent_template.config import refuse_mock_outside_tests, set_agent_name
+from ax_agent_template import human_auth
+from ax_agent_template.config import is_mock, refuse_mock_outside_tests, set_agent_name
 from ax_agent_template.logging import log_event
 from ax_contracts.schemas import ConnectionHoldNotice, ExecuteRequest
-from ax_safety.auth import agent_from_token, bearer, human_from_token
+from ax_safety import cost_policy
+from ax_safety.auth import agent_from_token, bearer, human_from_token, human_tokens
 from ax_safety.chat import threads as chat_threads
 from ax_safety.chat.turn import ChatRefused, ChatService
 from ax_safety.gate import Gate, Publisher, SelfApprovalError, Verifier
@@ -65,6 +68,14 @@ class ReviewDecisionBody(BaseModel):
     decided_as: (
         Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)] | None
     ) = None
+
+
+class CostPolicyRequestBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rule_key: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    requested_value: int
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class ChatSendBody(BaseModel):
@@ -274,6 +285,116 @@ def create_app(
     @app.get("/api/safety/thresholds")
     def thresholds() -> dict:
         return _ok(gate.thresholds.model_dump(mode="json"))
+
+    # ---- 비용 임계값 화면 변경 (cost_policy). 값은 승인된 보류 건의 요청 기록에서만 적용된다
+    def _policy_editor(authorization: str | None) -> human_auth.Human:
+        """로그인 세션의 운영자·관리자만. 공용 토큰·에이전트·일반 회원은 못 한다."""
+        token = bearer(authorization)
+        if not token or token.startswith("mock:"):
+            raise PermissionError("사람 로그인 토큰이 필요하다")
+        try:
+            human = human_auth.find_human(
+                token, shared_tokens=human_tokens(), mock=is_mock("safety")
+            )
+        except human_auth.HumanAuthError as exc:
+            raise PermissionError(exc.message) from None
+        if human is None or human.shared or human.role not in ("operator", "admin"):
+            raise PermissionError("정책 변경은 로그인한 운영자·관리자만 할 수 있다")
+        return human
+
+    def _policy_requests() -> list[dict[str, Any]]:
+        applied = cost_policy.applied_review_ids()
+        rows: list[dict[str, Any]] = []
+        for review in gate.store.list_reviews(None):
+            if review.action != cost_policy.ACTION or review.review_id in applied:
+                continue
+            record = gate.store.get_execution(review.execution_id)
+            params = record.request.params if record else {}
+            rows.append(
+                {
+                    "review_id": review.review_id,
+                    "status": review.status,
+                    "requested_at": review.created_at.isoformat(),
+                    "decided_by": review.decided_by,
+                    "rule_key": params.get("rule_key"),
+                    "requested_value": params.get("requested_value"),
+                    "requested_by": params.get("requested_by"),
+                    "reason": params.get("reason"),
+                }
+            )
+        return rows
+
+    @app.get("/api/safety/cost-policy")
+    async def cost_policy_view() -> dict:
+        await gate.expire_reviews()
+        data = cost_policy.describe(gate.base_thresholds)
+        data["requests"] = _policy_requests()
+        return _ok(data)
+
+    @app.post("/api/safety/cost-policy/requests", response_model=None)
+    async def cost_policy_request(
+        body: CostPolicyRequestBody, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        try:
+            human = _policy_editor(authorization)
+        except PermissionError as exc:
+            return _error(403, "HUMAN_ONLY", str(exc))
+        try:
+            cost_policy.check_request(gate.base_thresholds, body.rule_key, body.requested_value)
+        except cost_policy.PolicyError as exc:
+            return _error(409 if str(exc) == "no_change" else 400, str(exc).upper(), str(exc))
+        digest = hashlib.sha256(
+            f"{body.reason}|{len(cost_policy.applied_review_ids())}".encode()
+        ).hexdigest()[:16]
+        decision = await gate.execute(
+            ExecuteRequest(
+                action=cost_policy.ACTION,
+                requester="safety",
+                context_id="cost_policy",
+                idempotency_key=f"cost-policy:{body.rule_key}:{body.requested_value}:{digest}",
+                params={
+                    "rule_key": body.rule_key,
+                    "requested_value": body.requested_value,
+                    "reason": body.reason,
+                    "requested_by": human.name,
+                },
+            )
+        )
+        return _ok(decision.model_dump(mode="json"))
+
+    @app.post("/api/safety/cost-policy/requests/{review_id}/apply", response_model=None)
+    async def cost_policy_apply(
+        review_id: str, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        try:
+            _policy_editor(authorization)
+        except PermissionError as exc:
+            return _error(403, "HUMAN_ONLY", str(exc))
+        review = gate.store.get_review(review_id)
+        if review is None or review.action != cost_policy.ACTION:
+            return _error(404, "NOT_FOUND", "정책 변경 보류 건이 없다")
+        record = gate.store.get_execution(review.execution_id)
+        if record is None:
+            return _error(404, "NOT_FOUND", "정책 변경 요청 기록이 없다")
+        # 같은 요청을 관문에 다시 물어 승인(executed)을 확인한다. 값은 기록된 요청에서만 읽는다
+        decision = await gate.execute(record.request)
+        if decision.status != "executed":
+            return _error(409, "NOT_APPROVED", f"아직 승인되지 않았다: {decision.status}")
+        params = record.request.params
+        try:
+            line = cost_policy.apply_change(
+                gate.base_thresholds,
+                key=str(params.get("rule_key")),
+                value=params.get("requested_value"),  # type: ignore[arg-type]
+                requested_by=str(params.get("requested_by") or ""),
+                approved_by=str(review.decided_by or ""),
+                review_id=review_id,
+                reason=str(params.get("reason") or ""),
+            )
+        except cost_policy.PolicyError as exc:
+            status = 409 if str(exc) == "already_applied" else 400
+            return _error(status, str(exc).upper(), str(exc))
+        return _ok(line)
 
     @app.get("/api/safety/registry")
     def registry() -> dict:

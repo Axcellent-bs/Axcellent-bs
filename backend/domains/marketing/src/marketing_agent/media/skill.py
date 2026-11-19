@@ -278,7 +278,7 @@ async def generate_media(
         problem = settings.fx_problem(today)
         if problem is not None:
             return _fail(request, problem)
-        if settings.max_cost_krw_per_item is None or settings.monthly_budget_krw is None:
+        if settings.item_limit(kind) is None or settings.monthly_budget_krw is None:
             return _fail(request, "cost_limit_not_configured")
         try:
             entry = pricing.find_entry(
@@ -311,13 +311,9 @@ async def generate_media(
         return _fail(request, "ffmpeg_not_found")
 
     # --- 상한 (공급자 호출 전). 이어 붙이면 krw_est는 클립 전체의 합이다 ---
-    if settings.max_cost_krw_per_item is not None and krw_est > settings.max_cost_krw_per_item:
-        return _fail(
-            request,
-            "cost_over_single",
-            cost_krw=krw_est,
-            limit_krw=settings.max_cost_krw_per_item,
-        )
+    limit = settings.item_limit(kind)
+    if limit is not None and krw_est > limit:
+        return _fail(request, "cost_over_single", cost_krw=krw_est, limit_krw=limit)
     now = _now()
     month = now.strftime("%Y-%m")
     try:
@@ -683,7 +679,7 @@ def plan_cost(
         problem = settings.fx_problem(_now().date())
         if problem is not None:
             return _fail(request, problem)
-        if settings.max_cost_krw_per_item is None or settings.monthly_budget_krw is None:
+        if settings.item_limit(kind) is None or settings.monthly_budget_krw is None:
             return _fail(request, "cost_limit_not_configured")
         try:
             entry = pricing.find_entry(
@@ -711,7 +707,8 @@ def plan_cost(
     if with_table and kind == "video":
         table = _cost_table(adapter, entry, prompt, settings)
         clip_table = _clip_count_table(adapter, entry, set(table))
-    if settings.max_cost_krw_per_item is not None and krw_est > settings.max_cost_krw_per_item:
+    limit = settings.item_limit(kind)
+    if limit is not None and krw_est > limit:
         extra = {"by_duration": table} if table is not None else {}
         if clip_table is not None:
             extra["clips_by_duration"] = clip_table
@@ -719,7 +716,7 @@ def plan_cost(
             request,
             "cost_over_single",
             cost_krw=krw_est,
-            limit_krw=settings.max_cost_krw_per_item,
+            limit_krw=limit,
             **extra,
         )
     return CostPlan(key, krw_est, False, table, clip_table)

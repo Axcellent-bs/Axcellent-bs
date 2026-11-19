@@ -212,7 +212,7 @@ def estimate(
         "cost_krw": None,
         "settled": False,
         "basis": None,
-        "per_item_limit_krw": settings.max_cost_krw_per_item,
+        "per_item_limit_krw": settings.item_limit(kind),
         "monthly_budget_krw": settings.monthly_budget_krw,
         "month_total_krw": None,
         "video": None,

@@ -24,6 +24,7 @@ from ax_dashboard_api import (
 )
 from ax_dashboard_api.accounts import router as accounts_router
 from ax_dashboard_api.connection_keys import router as connection_keys_router
+from ax_dashboard_api.cost_limit_routes import router as cost_limit_router
 from ax_dashboard_api.envelope import install_error_handlers, is_mock
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
 from ax_dashboard_api.routes import router
@@ -109,6 +110,8 @@ app.add_middleware(
 )
 install_error_handlers(app)
 app.include_router(router)
+# 영상 비용 상한·안전 정책 화면 (로그인 세션의 운영자·관리자, 변경은 limit_editor·policy_editor)
+app.include_router(cost_limit_router)
 # 사람 할 일함: 에이전트가 넣는 창구(에이전트 토큰)와 사람이 보는 창구(읽기·쓰기 모두 사람 토큰)
 app.include_router(handoffs.intake)
 app.include_router(handoffs.inbox)

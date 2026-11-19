@@ -3,7 +3,10 @@
 - 파일: `AX_ACCOUNTS_FILE` → 회사 연결 파일 옆 `accounts.json` (연결 키처럼).
   없으면 로그인 꺼짐
 - 칸: id, 이름, 이메일, 역할(`operator`·`admin`·`member`), 비밀번호 해시(scrypt), 만든 시각,
-  프로필(부서 `dept`, 확인 권한 `approver`, 열람 담당 `readers`).
+  프로필(부서 `dept`, 확인 권한 `approver`, 열람 담당 `readers`, 비용 상한 변경 권한
+  `limit_editor`, 정책 변경 권한 `policy_editor`).
+  `limit_editor`·`policy_editor`는 운영자·고객사 관리자 계정에만 켤 수 있다(일반회원은 못 켠다,
+  일반회원으로 내리면 꺼진다). `policy_editor`는 운영자 또는 `policy_editor`인 관리자만 준다.
   열람 담당 값은 화면 `members.ts`의 `ReaderArea`와 같다
 - 첫 계정: 계정이 하나도 없을 때 `AX_BOOTSTRAP_ADMIN="이메일:초기 비밀번호"`로 운영자 1명을 만든다
 - 같은 이메일로 연속 5번 틀리면 15분 동안 로그인을 막는다(맞는 비밀번호여도).
@@ -197,6 +200,9 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     out["approver"] = approver if isinstance(approver, bool) else row.get("role") == "admin"
     readers = row.get("readers")
     out["readers"] = [r for r in READER_AREAS if r in readers] if isinstance(readers, list) else []
+    can_edit = row.get("role") in ("operator", "admin")
+    out["limit_editor"] = can_edit and row.get("limit_editor") is True
+    out["policy_editor"] = can_edit and row.get("policy_editor") is True
     return out
 
 
@@ -294,6 +300,8 @@ class AccountUpdateIn(BaseModel):
     dept: str | None = Field(None, max_length=40)
     approver: bool | None = None
     readers: list[ReaderArea] | None = Field(None, max_length=8)
+    limit_editor: bool | None = None
+    policy_editor: bool | None = None
 
 
 def login_enabled() -> bool:
@@ -503,6 +511,12 @@ def update_account(
             raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
         if human.role == "admin" and row.get("role") not in CUSTOMER_ROLES:
             raise ApiError(403, "ROLE_REQUIRED", "고객사 관리자는 고객사 계정만 바꿀 수 있어요")
+        if "policy_editor" in patch and human.role != "operator":
+            mine = next((r for r in rows if r.get("id") == human.account_id), {})
+            if mine.get("policy_editor") is not True:
+                raise ApiError(
+                    403, "POLICY_EDITOR_REQUIRED", "정책 변경 권한은 정책 담당만 줄 수 있어요"
+                )
         role_changed = "role" in patch and patch["role"] != row.get("role")
         if "role" in patch:
             _check_role_change(human, row, patch["role"], rows)
@@ -522,9 +536,34 @@ def update_account(
             row["approver"] = patch["approver"]
         if "readers" in patch:
             row["readers"] = [r for r in READER_AREAS if r in patch["readers"]]
+        if row.get("role") == "member":  # 일반회원은 변경 권한을 가질 수 없다
+            if patch.get("limit_editor") or patch.get("policy_editor"):
+                raise ApiError(422, "EDITOR_ROLE_REQUIRED", "운영자·관리자 계정에만 켤 수 있어요")
+            row.pop("limit_editor", None)
+            row.pop("policy_editor", None)
+        for flag in ("limit_editor", "policy_editor"):
+            if flag in patch:
+                row[flag] = patch[flag]
         row["updated_at"] = _now()
         _write(path, rows)
     if role_changed:
         human_auth.end_account_sessions(account_id)
     logger.info("계정을 바꿨다: %s (%s) by %s", account_id, ",".join(sorted(patch)), human.name)
     return ok(_public(row))
+
+
+# ---- 비용 상한·정책 변경 권한 (cost_limits 라우트가 쓴다) ----
+
+
+def editor_flags(authorization: str | None) -> tuple[human_auth.Human, bool, bool]:
+    """로그인 세션의 운영자·관리자만 통과. (사람, limit_editor, policy_editor).
+
+    공용 토큰·일반회원·계정이 없어진 세션은 403/401이다. 읽기 화면도 이 검사를 쓴다.
+    """
+    human = session_human(authorization)
+    if human.role not in ("operator", "admin"):
+        raise ApiError(403, "ROLE_REQUIRED", "운영자와 고객사 관리자만 쓸 수 있어요")
+    row = next((r for r in load_accounts() if r.get("id") == human.account_id), None)
+    if row is None:
+        raise ApiError(401, "ACCOUNT_GONE", "계정이 없어졌어요. 다시 로그인해 주세요")
+    return human, row.get("limit_editor") is True, row.get("policy_editor") is True

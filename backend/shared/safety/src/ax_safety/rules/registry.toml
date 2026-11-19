@@ -68,6 +68,37 @@ action = "delete_custom_video_provider"
 owner = "marketing"
 base_grade = "A"
 
+# 영상·미디어 비용 상한(화면 설정, 마케팅 소유). 건당 상한과 월 예산을 바꾼다. 마케팅 코드가 정책 임계값
+# (thresholds.toml·cost_policy.json) 안에서만 저장을 받는다.
+# - 낮추기(lower)는 재무·총괄이 셀프 승인을 허용해 둔 경우에만 주의사항 확인 뒤 바로 적용하는 A
+#   (허용이 꺼져 있으면 아래 raise와 같은 사람 승인 C로 간다)
+# - 올리기(raise)는 늘 사람 승인 C. 요청자(params.requested_by)와 승인자는 다른 사람이어야 한다
+# 사람 이름은 대시보드 API가 토큰에서 채워 보낸다
+[[actions]]
+action = "lower_media_cost_limits"
+owner = "marketing"
+base_grade = "A"
+
+[[actions]]
+action = "change_media_cost_limits"
+owner = "marketing"
+base_grade = "C"
+
+# 하향 셀프 승인 허용 스위치(기본 꺼짐). 재무·총괄(policy_editor)만 바꾸고 변경 이력을 남긴다.
+# 켜기 전까지 하향도 다른 담당의 승인을 거친다
+[[actions]]
+action = "set_cost_limit_option"
+owner = "marketing"
+base_grade = "A"
+
+# 안전 임계값(영상·이미지·BGM 건당, 하루 합계, 영상 길이)의 화면 변경. 요청자는 안전 서버 자신이고
+# 값은 승인된 보류 건의 요청 기록에서만 적용된다(ax_safety.cost_policy). 늘 사람 승인 C,
+# 요청자≠승인자, 코드 상수 하한·절대 상한 밖 값은 요청 단계에서 거절한다. 마케팅 등 에이전트는 요청할 수 없다
+[[actions]]
+action = "change_cost_policy"
+owner = "safety"
+base_grade = "C"
+
 # 수동 게시 완료 기록. 자동 게시가 꺼져 사람이 Instagram에 직접 올린 뒤 링크를 적어 닫는 일이다.
 # 공개 자체는 publish_sns(C)에서 사람 승인을 이미 받았고, 이 액션은 외부로 아무것도 보내지 않고 게시 대기
 # 건의 상태·기록만 바꾼다. 코드가 링크 형식·중복·대상 상태·AI 표시 확인을 거절하므로 B(교차검증자 필요)가

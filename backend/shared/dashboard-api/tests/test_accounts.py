@@ -399,6 +399,8 @@ def test_admin_list_hides_operators_and_internal_values(client) -> None:
                 "dept",
                 "approver",
                 "readers",
+                "limit_editor",
+                "policy_editor",
             }
     admin_rows = client.get(BASE + "/accounts", headers=_bearer(admin)).json()["data"]
     assert {r["role"] for r in admin_rows} == {"admin", "member"}
