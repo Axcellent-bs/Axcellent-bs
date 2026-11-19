@@ -1,6 +1,5 @@
 import { ApiError, failureError, statusOnlyError } from "./apiError";
-import { writeAuth } from "./api";
-import { DASHBOARD_API_URL } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import type { MergeAnswer } from "./outageMerge";
 import type { OutageMediaAnswer, OutageMediaFlow } from "./outageMedia";
 import type { ManualCompleteAnswer, ManualPackageAnswer } from "./manualPublish";
@@ -118,7 +117,7 @@ export function safeLink(link: string | null | undefined): string | null {
 
 async function get<T>(path: string): Promise<T> {
   if (!briefsEnabled) throw new ApiError("받은 기획안 읽기 연결이 꺼져 있습니다", 403);
-  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { cache: "no-store" });
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { headers: dashboardAuth(), cache: "no-store" });
   let body: { data?: T; error?: { message?: string } } = {};
   let parsed: unknown;
   try { parsed = await res.json(); body = (parsed ?? {}) as typeof body; } catch { /* 본문이 JSON이 아님 */ }
@@ -152,7 +151,7 @@ async function handoff(proposalId: string, options: HandoffOptions = {}): Promis
   const path = `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/sns-handoff`;
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
     body: JSON.stringify(payload),
     cache: "no-store",
   });
@@ -170,7 +169,7 @@ const mediaPath = (proposalId: string) => `/api/dashboard/marketing/briefs/${enc
  */
 async function makeMedia(proposalId: string): Promise<BriefMediaAnswer> {
   const path = mediaPath(proposalId);
-  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: dashboardAuth(), cache: "no-store" });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as BriefMediaAnswer;
@@ -183,7 +182,7 @@ async function makeMedia(proposalId: string): Promise<BriefMediaAnswer> {
 async function requestPublish(proposalId: string, retry = false): Promise<PublishAnswer> {
   const path = `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/publish-request`;
   // retry: 승인 시간이 지나 닫힌 건을 사람이 다시 요청한다(같은 경로, 서버가 만료 건만 받는다). 승인하지 않는다
-  const res = await fetch(`${DASHBOARD_API_URL}${path}${retry ? "?retry=true" : ""}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
+  const res = await fetch(`${DASHBOARD_API_URL}${path}${retry ? "?retry=true" : ""}`, { method: "POST", headers: dashboardAuth(), cache: "no-store" });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as PublishAnswer;
@@ -191,7 +190,7 @@ async function requestPublish(proposalId: string, retry = false): Promise<Publis
 
 /** Instagram 게시 일시 중지 스위치 읽기. 오류는 상태 코드만 담아 던진다 */
 export async function getPublishControl(): Promise<PublishControlAnswer> {
-  const res = await fetch(`${DASHBOARD_API_URL}/api/dashboard/marketing/publish-control`, { cache: "no-store" });
+  const res = await fetch(`${DASHBOARD_API_URL}/api/dashboard/marketing/publish-control`, { headers: dashboardAuth(), cache: "no-store" });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as PublishControlAnswer;
@@ -207,7 +206,7 @@ export async function setPublishControl(paused: boolean, reason: string): Promis
   const path = "/api/dashboard/marketing/publish-control/set";
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
     body: JSON.stringify({ paused, reason }),
     cache: "no-store",
   });
@@ -220,7 +219,7 @@ const manualPath = (postDraftId: string) => `/api/dashboard/marketing/manual-pub
 
 /** 수동 게시 안내 패키지 읽기(승인된 캡션·해시태그·AI 표시 문구·미디어 정보). 오류는 상태 코드만 담아 던진다 */
 export async function getManualPublishPackage(postDraftId: string): Promise<ManualPackageAnswer> {
-  const res = await fetch(`${DASHBOARD_API_URL}${manualPath(postDraftId)}`, { cache: "no-store" });
+  const res = await fetch(`${DASHBOARD_API_URL}${manualPath(postDraftId)}`, { headers: dashboardAuth(), cache: "no-store" });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as ManualPackageAnswer;
@@ -234,7 +233,7 @@ export async function completeManualPublish(postDraftId: string, permalink: stri
   const path = `${manualPath(postDraftId)}/complete`;
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
     body: JSON.stringify({ permalink, ai_label_confirmed: aiLabelConfirmed }),
     cache: "no-store",
   });
@@ -285,7 +284,7 @@ async function mergeOutageSnsDrafts(dryRun: boolean, draftIds?: string[]): Promi
   if (draftIds) payload.draft_ids = draftIds;
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
     body: JSON.stringify(payload),
     cache: "no-store",
   });
@@ -302,7 +301,7 @@ const outagePath = (draftId: string) => `/api/dashboard/marketing/outage-sns-dra
  */
 async function makeOutageMedia(draftId: string): Promise<OutageMediaAnswer> {
   const path = `${outagePath(draftId)}/media`;
-  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: dashboardAuth(), cache: "no-store" });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as OutageMediaAnswer;
@@ -311,7 +310,7 @@ async function makeOutageMedia(draftId: string): Promise<OutageMediaAnswer> {
 /** 이미지를 붙인 장애 초안의 게시 요청: 승인 대기 건(C 등급, 10분 만료)만 만든다. 게시하지 않는다 */
 async function requestOutagePublish(draftId: string, retry = false): Promise<PublishAnswer> {
   const path = `${outagePath(draftId)}/publish-request`;
-  const res = await fetch(`${DASHBOARD_API_URL}${path}${retry ? "?retry=true" : ""}`, { method: "POST", headers: writeAuth("POST", path), cache: "no-store" });
+  const res = await fetch(`${DASHBOARD_API_URL}${path}${retry ? "?retry=true" : ""}`, { method: "POST", headers: dashboardAuth(), cache: "no-store" });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as PublishAnswer;

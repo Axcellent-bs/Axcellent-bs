@@ -3,7 +3,7 @@ import type { DeadlineReport, FinanceMeta, Settlements } from "./finance";
 import type { ChangeProposalSent, DeclineReason, IdeaArea, IdeaDigestResult, IdeaKind, IncidentCompensationDecision, PlanningAnswerResult } from "./support";
 import type { AdminReview, Claim, ClaimDetail, ClaimIntake, ClaimSuggestion, ClaimStats, CommLine, CommMeta, Conversation, ConversationListItem, Dashboard, FeedbackItem, FeedbackOverview, FeedbackStatus, Health, Kpi, Me, PurgeReport, QueueRun, QueueView, ReceiptAnalysis, ReceiptImageInput, Summary, Validation } from "./types";
 
-import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import { TIMEOUT_MESSAGE, copyShared, isShareableGet, isTimeoutError, shareInflight, timeoutSignal } from "./requestShare";
 
 // 상담원 화면 → dashboard-api. 경로 목록은 README의 API 표 참고.
@@ -30,15 +30,6 @@ function toError(body: unknown, status: number): ApiError {
   return new ApiError(typeof detail === "string" ? detail : `요청 실패 (${status})`, status);
 }
 
-/**
- * 쓰기(GET 외) 요청에는 사람 토큰을 붙인다 (ax-backend #295). 토큰이 없으면 서버가 401로 거절한다.
- * `/plan-checks`는 저장하지 않는 조회라 POST여도 붙이지 않는다. 인사 화면(`hr.ts`)도 이 함수를 쓴다.
- */
-export const writeAuth = (method?: string, path = ""): Record<string, string> =>
-  method && method !== "GET" && !path.includes("/plan-checks") && SAFETY_HUMAN_TOKEN
-    ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` }
-    : {};
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // 읽기(GET)는 같은 주소가 오는 중이면 함께 받고 30초 안에 답이 없으면 끊는다(requestShare.ts). 쓰기는 그대로 한 번만 보낸다
   const shareable = isShareableGet(init);
@@ -46,7 +37,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       const res = await fetch(`${BASE}${path}`, {
         ...init,
-        headers: { "Content-Type": "application/json", ...writeAuth(init?.method, path), ...(init?.headers ?? {}) },
+        headers: { "Content-Type": "application/json", ...dashboardAuth(), ...(init?.headers ?? {}) },
         cache: "no-store",
         ...(shareable ? { signal: timeoutSignal() } : {}),
       });
@@ -71,7 +62,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 async function requestEnvelope<T, M>(path: string): Promise<{ data: T; meta: M }> {
   const run = async (): Promise<{ data: T; meta: M }> => {
     try {
-      const res = await fetch(`${BASE}${path}`, { cache: "no-store", signal: timeoutSignal() });
+      const res = await fetch(`${BASE}${path}`, { headers: dashboardAuth(), cache: "no-store", signal: timeoutSignal() });
       const body: unknown = await res.json().catch((e) => {
         if (isTimeoutError(e)) throw e;
         return undefined;
@@ -89,7 +80,7 @@ async function requestEnvelope<T, M>(path: string): Promise<{ data: T; meta: M }
 async function postEnvelope<T, M>(path: string, body: unknown): Promise<{ data: T; meta: M }> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
     body: JSON.stringify(body),
     cache: "no-store",
   });

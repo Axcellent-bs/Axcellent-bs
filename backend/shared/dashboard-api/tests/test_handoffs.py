@@ -186,12 +186,14 @@ async def test_end_to_end_a_disabled_service_reaches_a_human_and_comes_back(
         assert (result.status, result.outcome) == ("input-required", "handed_to_human")
         task_id = result.output["task_id"]
 
-        listed = (await http.get(BASE, params={"unit": "재무/정산"})).json()["data"]
+        human = {"authorization": "Bearer test-human-token"}
+        assert (await http.get(BASE, params={"unit": "재무/정산"})).status_code == 401
+        listed = (await http.get(BASE, params={"unit": "재무/정산"}, headers=human)).json()["data"]
         assert [t["task_id"] for t in listed] == [task_id]
         res = await http.post(
             f"{BASE}/{task_id}/complete",
             json={"result": "보류 해제함"},
-            headers={"authorization": "Bearer test-human-token"},
+            headers=human,
         )
         assert res.status_code == 200
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
+import { useAuthedMedia } from "@/lib/authedMedia";
 import { shortDateTime, won } from "@/lib/format";
 import { briefs, mediaKindKo, mediaPreviewUrl, type StoredBrief } from "@/lib/briefs";
 import { ApprovalPanel } from "./ApprovalPanel";
@@ -100,8 +101,10 @@ function PublishRequest({ proposalId, prepared, state, onDone }: { proposalId: s
 
 function Preview({ proposalId, prepared }: { proposalId: string; prepared: PreparedMedia }) {
   const [broken, setBroken] = useState(false);
-  const url = mediaPreviewUrl(proposalId, prepared.asset_sha256);
-  if (broken) return <p className="text-ink-500">미리보기 파일을 불러올 수 없습니다.</p>;
+  // 사람 토큰을 붙여 받는다(서버가 읽기에도 토큰을 요구한다)
+  const { src: url, failed } = useAuthedMedia(mediaPreviewUrl(proposalId, prepared.asset_sha256));
+  if (broken || failed) return <p className="text-ink-500">미리보기 파일을 불러올 수 없습니다.</p>;
+  if (!url) return null;
   return isReel(prepared.media_kind)
     ? <video className="max-h-80 rounded-xl bg-black" src={url} controls preload="metadata" onError={() => setBroken(true)} aria-label="AI 표시가 들어간 영상 미리보기" />
     : <img className="max-h-80 rounded-xl" src={url} alt="AI 표시가 들어간 이미지 미리보기" onError={() => setBroken(true)} />;

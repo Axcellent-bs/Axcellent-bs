@@ -2,7 +2,7 @@
 
 서버 파일에 저장해 어느 PC에서든 같은 키 목록·연결 회사가 보인다(예전에는 브라우저에만 있었다).
 - 전체 키는 발급 응답에서 한 번만 준다. 목록(GET)에는 가린 키만 나온다
-- 쓰기는 모두 POST + 사람 토큰(`require_human_for_writes`). 운영 nginx 게이트가 POST만 연다
+- 읽기·쓰기 모두 사람 토큰(`require_human`). 쓰기는 모두 POST. 운영 nginx 게이트가 POST만 연다
 - 파일: `AX_CONNECTION_KEYS_FILE` → 회사 연결 파일 옆 `connection_keys.json`. 없으면 읽기 전용
 """
 
@@ -20,16 +20,14 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
 from ax_agent_template import company_connection as store
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
 
 KEYS_FILE_ENV = "AX_CONNECTION_KEYS_FILE"
 KEYS_FILE = "connection_keys.json"
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
-router = APIRouter(
-    prefix="/api/dashboard/connection-keys", dependencies=[Depends(require_human_for_writes)]
-)
+router = APIRouter(prefix="/api/dashboard/connection-keys", dependencies=[Depends(require_human)])
 
 
 class IssueIn(BaseModel):

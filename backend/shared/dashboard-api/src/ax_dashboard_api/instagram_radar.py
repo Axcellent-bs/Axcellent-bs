@@ -23,16 +23,14 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from ax_agent_template import tenant
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
 
 MAX_ACCOUNTS = 200
 # 인스타 사용자 이름: 영문·숫자·`.`·`_`, 30자까지
 HANDLE = re.compile(r"^[A-Za-z0-9._]{1,30}$")
 
-router = APIRouter(
-    prefix="/api/dashboard/instagram-radar", dependencies=[Depends(require_human_for_writes)]
-)
+router = APIRouter(prefix="/api/dashboard/instagram-radar", dependencies=[Depends(require_human)])
 
 
 class SaveIn(BaseModel):

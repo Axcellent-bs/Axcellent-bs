@@ -1,4 +1,7 @@
-"""쓰기 API는 사람 토큰이 있어야 한다 (#295). 읽기는 그대로 열려 있다."""
+"""dashboard-api는 읽기·쓰기 모두 사람 토큰이 있어야 한다 (#295, 보안 점검 2차).
+
+`/health`만 토큰 없이 열려 있다.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -67,9 +70,60 @@ def test_a_configured_token_is_accepted_and_falls_back_to_the_safety_variable(
     assert res.status_code == 404
 
 
-def test_reads_and_plan_checks_need_no_token(client) -> None:
-    assert client.get(BASE + "/communications").status_code == 200
+# 판매 서버 관리 중계·도구 연결·연결 키처럼 서버 쪽 토큰으로 읽어 주는 경로가 섞여 있다
+READS = [
+    "/communications",
+    "/metrics",
+    "/health",
+    "/handoffs",
+    "/office-room",
+    "/settlements",
+    "/shop/faults",
+    "/shop/orchestrator/incidents",
+    "/shop/banners",
+    "/tool-connections",
+    "/connection-keys",
+    "/company-connection",
+    "/instagram-radar",
+    "/site-adapter",
+]
+
+
+@pytest.mark.parametrize("path", READS)
+def test_a_read_without_a_token_is_401_in_the_error_format(client, path) -> None:
+    res = client.get(BASE + path)
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "AUTH_REQUIRED"
+
+
+@pytest.mark.parametrize("path", READS)
+@pytest.mark.parametrize("token", ["mock:orchestrator", "wrong-token"])
+def test_an_agent_or_unknown_token_cannot_read(client, monkeypatch, path, token) -> None:
+    monkeypatch.delenv("DASHBOARD_MOCK")
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    assert client.get(BASE + path, headers=auth(token)).status_code == 403
+
+
+def test_health_is_open_without_a_token(client) -> None:
+    res = client.get("/health")
+    assert res.status_code == 200 and res.json()["data"]["status"] == "ok"
+
+
+@pytest.mark.parametrize("path", ["/communications", "/handoffs", "/office-room"])
+def test_a_read_with_a_human_token_is_200(client, path) -> None:
+    assert client.get(BASE + path, headers=auth("test-human-token")).status_code == 200
+
+
+def test_a_read_with_the_demo_human_token_is_200_in_mock_mode(client) -> None:
+    assert client.get(BASE + "/communications", headers=auth("human:byunghwan")).status_code == 200
+
+
+def test_plan_checks_need_a_token_too(client) -> None:
     res = client.post(BASE + "/plan-checks", json={"draft": {"title": "x"}})
+    assert res.status_code == 401
+    res = client.post(
+        BASE + "/plan-checks", json={"draft": {"title": "x"}}, headers=auth("test-human-token")
+    )
     assert res.status_code == 422  # 토큰은 통과하고 본문 검증에서 멈춘다
 
 

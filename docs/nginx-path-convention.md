@@ -32,7 +32,7 @@
 
 ## 경로가 어떤 인증 방식인지 확인하는 방법
 
-1. 프론트 호출을 찾는다: `frontend/src/lib/*.ts`에서 `fetch` 호출의 주소와 `writeAuth(...)` 사용 여부를 본다. 기본 주소 상수는 `frontend/src/lib/env.ts`.
+1. 프론트 호출을 찾는다: `frontend/src/lib/*.ts`에서 `fetch` 호출의 주소를 본다(dashboard-api 호출은 모두 `dashboardAuth()`로 사람 토큰을 붙인다). 기본 주소 상수는 `frontend/src/lib/env.ts`.
 2. 그 경로를 받는 라우트를 찾는다: `backend/shared/dashboard-api/src/ax_dashboard_api/`에서 경로 문자열을 검색한다.
-3. 인증은 `auth.py`의 `require_human_for_writes`가 정한다. GET은 열려 있고, GET이 아닌 요청은 사람 토큰(`Authorization: Bearer`)이 필요하다. 저장하지 않는 계산용 POST는 같은 파일의 `READ_ONLY_POSTS`에 있으면 토큰이 필요 없다.
+3. 인증은 `auth.py`의 `require_human`이 정한다. `/api/dashboard/*`는 GET을 포함해 모든 요청에 사람 토큰(`Authorization: Bearer`)이 필요하다. 토큰 없이 열린 것은 `/health`뿐이다. 화면은 `frontend/src/lib/env.ts`의 `dashboardAuth()`로 GET에도 토큰을 붙인다.
 4. 다른 서비스(대화 창구·기획·재무 등)로 직접 가는 경로는 그 서비스의 라우트 파일에서 같은 방식으로 확인한다.

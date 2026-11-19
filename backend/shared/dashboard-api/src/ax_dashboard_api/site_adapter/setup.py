@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ax_agent_template import company_connection as store
 from ax_agent_template import tenant as tenants
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
 from ax_dashboard_api.site_adapter import propose, resources, upstream
 from ax_dashboard_api.site_adapter.mapping import (
@@ -41,7 +41,7 @@ logger = logging.getLogger("ax.site_adapter.setup")
 
 router = APIRouter(
     prefix="/api/dashboard/site-adapter",
-    dependencies=[Depends(require_human_for_writes)],
+    dependencies=[Depends(require_human)],
 )
 
 MAX_TOKEN = 1024
