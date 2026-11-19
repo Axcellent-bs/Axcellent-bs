@@ -421,7 +421,7 @@ export SHOP_VIEWER_TOKEN="${SHOP_VIEWER_TOKEN:-$VIEWER_TOKEN}"
 [ "${#SHOP_VIEWER_TOKEN}" -ge 24 ] || echo "경고: .env의 SHOP_VIEWER_TOKEN이 24자보다 짧아 판매 서버 관리 읽기 중계(총괄·기획안·장애 상태)가 503입니다 (값은 출력하지 않음)" >&2
 # 사람 토큰: 안전 관문 보류 결정·재무·dashboard-api 쓰기. 이름 "공용"은 모두가 같이 쓰는 토큰이다
 # (화면 데모 로그인의 "운영자" 역할과는 다른 것. 사람마다 나누려면 AX_PEOPLE)
-# 사람별 토큰(AX_PEOPLE)이 있으면 같이 넣는다. 공용 토큰은 로컬 화면 빌드(web.env)가 쓴다
+# 사람별 토큰(AX_PEOPLE)이 있으면 같이 넣는다. 공용 토큰은 로컬 화면 개발 서버 프록시(web.env)가 쓴다
 HUMANS="공용:$HUMAN_TOKEN${PEOPLE_HUMAN:+,$PEOPLE_HUMAN}"
 export SAFETY_HUMAN_TOKENS="$HUMANS" FINANCE_HUMAN_TOKENS="$HUMANS"
 # 작업 대기열(MCP) 전용 토큰: 개발자 PC의 Claude Code 설정에 남는 값이라 사람 토큰과 나눈다.
@@ -431,11 +431,12 @@ export DEV_WORK_TOKENS="${DEV_WORK_TOKENS:-공용:$WORK_TOKEN${PEOPLE_WORK:+,$PE
 # 화면 "내 Claude 연결" 명령으로 다시 붙인다. 한동안 예전처럼 쓰려면 DEV_WORK_ALLOW_HUMAN=1
 export DEV_WORK_ALLOW_HUMAN="${DEV_WORK_ALLOW_HUMAN:-0}"
 token_of() { echo "$AX_AGENT_TOKENS" | tr ',' '\n' | sed -n "s/^$1=//p"; }
-# 화면(개발 서버)에 넘길 값. 이 파일은 커밋하지 않는다(.data/)
+# 화면 개발 서버(run_web.sh)에 넘길 값. 이 파일은 커밋하지 않는다(.data/)
+# VITE_ 이름을 쓰지 않는다: 진짜 토큰은 개발 서버 프록시만 쓰고 화면 번들에는 자리표시자만 들어간다(frontend/token-proxy.ts)
 {
-  echo "VITE_SAFETY_HUMAN_TOKEN=$HUMAN_TOKEN"
-  echo "VITE_SHOP_ADMIN_TOKEN=$(token_of admin)"
-  echo "VITE_DATA_A2A_TOKEN=$(token_of dashboard-api)"
+  echo "AX_WEB_HUMAN_TOKEN=$HUMAN_TOKEN"
+  echo "AX_WEB_ADMIN_TOKEN=$(token_of admin)"
+  echo "AX_WEB_DATA_A2A_TOKEN=$(token_of dashboard-api)"
 } > "$DATA/web.env"
 
 RUN_COUNT=$(echo "$RUN_APPS" | awk 'NF' | wc -l | tr -d ' ')
