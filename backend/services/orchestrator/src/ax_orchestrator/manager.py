@@ -26,6 +26,7 @@ from ax_orchestrator.finance_opinions import FinanceOpinions
 from ax_orchestrator.models import Incident, Plan, iso, now
 from ax_orchestrator.naming import event_title, event_type
 from ax_orchestrator.plans.support_resolved import support_resolved
+from ax_orchestrator.request_intake import RequestIntake
 from ax_orchestrator.resolved_log import log_resolved
 from ax_orchestrator.store import IncidentStore
 from ax_orchestrator.work_requests import WorkRequests
@@ -131,6 +132,7 @@ class IncidentManager:
         self.agent_diagnoses = AgentDiagnoses(store)
         # 고객 의뢰 기록. 장애 이벤트와 달리 재시작 때 닫지 않고 이어 간다(work_requests.py)
         self.work_requests = WorkRequests(store)
+        self.request_intake = RequestIntake(self.work_requests)  # 대화로 온 의뢰를 분류·접수
         self.resumed_requests: dict[str, int] = {}
         self._seen: set[str] = set()
         self._tasks: dict[str, asyncio.Task[Incident]] = {}

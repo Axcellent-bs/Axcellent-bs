@@ -174,6 +174,7 @@ class WorkRequests:
             "confidence": None,
             "reason": None,
             "alternatives": [],
+            "classification": None,
             "plan": [],
             "steps": {},
             "log": [{"at": stamp, "message": "의뢰를 받았다"}],
@@ -217,6 +218,14 @@ class WorkRequests:
             step["grade"] = spec.get("grade")
             row["steps"][spec["step_id"]] = step
         row["log"].append({"at": now().isoformat(), "message": f"일을 골랐다: {task}"})
+        self._save(row)
+        return copy.deepcopy(row)
+
+    def set_classification(self, request_id: str, **fields: Any) -> dict[str, Any]:
+        """분류 결과를 남긴다(지시문 버전·종류·확신도·이유·차선 후보). 정확도를 잴 때 쓴다."""
+        row = self._row(request_id)
+        row["classification"] = dict(fields)
+        row["log"].append({"at": now().isoformat(), "message": "분류 결과를 남겼다"})
         self._save(row)
         return copy.deepcopy(row)
 
