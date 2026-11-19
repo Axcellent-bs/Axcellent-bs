@@ -1,5 +1,6 @@
 import { ActionQueue } from "@/components/finance/SafetyQueue";
 import { CampaignControl } from "./CampaignControl";
+import { OutageDrafts } from "./OutageDrafts";
 import { MARKETING_HOLD_ACTIONS } from "@/lib/finance";
 import { useCallback, useState, type ReactNode } from "react";
 import { Skeleton } from "@/components/finance/bits";
@@ -222,6 +223,7 @@ export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) 
           </Section>
         </>
       )}
+      {view === "notice" && <OutageDrafts />}
     </div>
   );
 }
