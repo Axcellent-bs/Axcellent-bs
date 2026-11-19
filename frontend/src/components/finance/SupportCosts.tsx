@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/apiError";
 import { Link } from "@/lib/nav";
 import { shortDateTime } from "@/lib/format";
 import { finance, krw, type SupportCostRecord } from "@/lib/finance";
+import { support } from "@/lib/support";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
 // 고객지원 비용 기록: 고객지원이 문의를 닫으면 총괄이 재무 AI에 넘기고, 재무 AI가 끝난 환불 금액·쿠폰을 받아 주문 배송비와 함께 장부에 적은 기록.
@@ -14,26 +15,36 @@ const RESOLUTION_KO: Record<string, string> = {
 };
 const DECISION_KO: Record<string, string> = { approve: "승인", reject: "거절" };
 
+// 기록에 바뀌지 않는 문의 ID(`inquiry_ref`)가 있으면 그것으로 연다(`/support?ref=`, #1386). 번호를 맞춰 볼 필요가 없다.
+// 없는 옛 기록만 아래처럼 번호로 찾는다.
 // 고객지원 문의 번호는 고객지원 문의 DB를 새로 시작하면 다시 1부터 매겨진다(11/13 확인: 예전 기록의 #5가
 // 지금은 다른 고객의 문의). 그래서 링크를 걸기 전에 지금 그 번호 문의의 주문이 기록의 주문과 같은지 본다.
-type InquiryMatch = "checking" | "same" | "other" | "gone" | "unknown";
+// 같은 문의여도 그 주문이 판매 서버에 없을 수 있다(판매 서버 자료가 바뀌기 전 옛 문의). 그때는 링크 옆에 "주문 기록 없음"을 붙인다(#1378과 같은 문구).
+type InquiryMatch = "checking" | "same" | "same-no-order" | "other" | "gone" | "unknown";
 
-function useInquiryMatch(inquiryId: number, orderId: string | null): InquiryMatch {
-  const [match, setMatch] = useState<InquiryMatch>(orderId ? "checking" : "unknown");
+function useInquiryMatch(inquiryId: number, orderId: string | null, byRef: boolean): InquiryMatch {
+  const [match, setMatch] = useState<InquiryMatch>(orderId && !byRef ? "checking" : "unknown");
   useEffect(() => {
-    if (!orderId) return;
+    if (!orderId || byRef) return;
     let live = true;
     api.admin.get(inquiryId)
-      .then((c) => live && setMatch(String(c.order_id ?? "") === orderId ? "same" : "other"))
+      .then(async (c) => {
+        if (String(c.order_id ?? "") !== orderId) return live && setMatch("other");
+        const inShop = await support.order(orderId).then(() => true, (e) => !(e instanceof ApiError && e.status === 404));
+        if (live) setMatch(inShop ? "same" : "same-no-order");
+      })
       .catch((e) => live && setMatch(e instanceof ApiError && e.status === 404 ? "gone" : "unknown"));
     return () => { live = false; };
-  }, [inquiryId, orderId]);
+  }, [inquiryId, orderId, byRef]);
   return match;
 }
 
 function InquiryLink({ r }: { r: SupportCostRecord }) {
-  const match = useInquiryMatch(r.inquiry_id, r.order_id);
+  const ref = r.inquiry_ref || null;
+  const match = useInquiryMatch(r.inquiry_id, r.order_id, ref !== null);
   const cls = "ml-3 whitespace-nowrap text-sm";
+  // 바뀌지 않는 ID로 연다. 그 문의가 지금 저장소에 없으면 고객지원 화면이 회색 안내 한 줄로 알려 준다
+  if (ref) return <Link href={`/support?ref=${encodeURIComponent(ref)}#inquiry`} className={`${cls} font-medium text-brand-700 underline`}>고객지원 문의 →</Link>;
   if (match === "other" || match === "gone") {
     const why = match === "other"
       ? `지금 고객지원의 문의 #${r.inquiry_id}는 다른 주문의 문의입니다. 고객지원 문의 기록이 새로 시작되기 전 기록이라 같은 번호로 찾을 수 없어요.`
@@ -41,8 +52,15 @@ function InquiryLink({ r }: { r: SupportCostRecord }) {
     return <span className={`${cls} text-ink-500`} title={why}>고객지원 문의 없음</span>;
   }
   if (match === "checking") return <span className={`${cls} text-ink-500`}>문의 확인 중…</span>;
-  // same·unknown(주문 없음·확인 실패): 지금처럼 문의 진단으로 보낸다
-  return <Link href={`/support?inquiry=${r.inquiry_id}#inquiry`} className={`${cls} font-medium text-brand-700 underline`}>고객지원 문의 →</Link>;
+  // same·same-no-order·unknown(주문 없음·확인 실패): 지금처럼 문의 진단으로 보낸다
+  const link = <Link href={`/support?inquiry=${r.inquiry_id}#inquiry`} className={`${cls} font-medium text-brand-700 underline`}>고객지원 문의 →</Link>;
+  if (match !== "same-no-order") return link;
+  return (
+    <>
+      {link}
+      <span className="whitespace-nowrap text-sm text-ink-500" title={`주문 ${r.order_id}이 판매 서버에 없어요. 판매 서버 자료가 바뀌기 전 옛 문의라 문의 진단에 보상 후보·결제 진단이 나오지 않아요.`}> · 주문 기록 없음</span>
+    </>
+  );
 }
 
 function Row({ r }: { r: SupportCostRecord }) {
