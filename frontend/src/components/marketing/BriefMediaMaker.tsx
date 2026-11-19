@@ -5,9 +5,10 @@ import { useAuthedMedia } from "@/lib/authedMedia";
 import { shortDateTime, won } from "@/lib/format";
 import { briefs, mediaKindKo, mediaPreviewUrl, type StoredBrief } from "@/lib/briefs";
 import { ApprovalPanel } from "./ApprovalPanel";
+import { AudioChoice } from "./AudioChoice";
 import { LongVideoWarning } from "./LongVideoWarning";
 import { ManualPublishCard, PublishLineView } from "./ManualPublishCard";
-import { approvalLink, clampDuration, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, gateLongStart, isReel, longWarningKo, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, waitKo, PUBLISH_EXPIRY_MIN, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
+import { approvalLink, clampDuration, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, gateLongStart, isReel, longWarningKo, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, waitKo, PUBLISH_EXPIRY_MIN, type MediaEstimate, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
 
 // 넘어온 기획안 한 건의 "미디어 만들기". 저장된 미디어 요청(종류·필드)을 서버가 그대로 실행해 초안을 만든다.
 // - 누르면 먼저 예상 비용(서버가 단가표·장부에서 계산한 값)을 보여 주고, 사람이 확인해야 시작한다.
@@ -111,7 +112,7 @@ function Preview({ proposalId, prepared }: { proposalId: string; prepared: Prepa
     : <img className="max-h-80 rounded-xl" src={url} alt="AI 표시가 들어간 이미지 미리보기" onError={() => setBroken(true)} />;
 }
 
-function Prepared({ proposalId, prepared, publish, onDone }: { proposalId: string; prepared: PreparedMedia; publish: PublishState | null | undefined; onDone: () => void }) {
+function Prepared({ proposalId, prepared, publish, estimate, onDone }: { proposalId: string; prepared: PreparedMedia; publish: PublishState | null | undefined; estimate: MediaEstimate | null | undefined; onDone: () => void }) {
   const ready = prepared.stage === "draft_ready";
   return (
     <div className="space-y-2">
@@ -130,6 +131,9 @@ function Prepared({ proposalId, prepared, publish, onDone }: { proposalId: strin
         {prepared.label_text ? <>파일에 AI 표시 문구 "{prepared.label_text}"가 들어 있습니다. </> : "AI 표시를 입힌 결과 파일입니다. "}
         {!ready && prepared.check.problems.length > 0 && <>검사에 걸린 항목 {prepared.check.problems.length}개. </>}
       </p>
+      {ready && isReel(prepared.media_kind) && (
+        <AudioChoice proposalId={proposalId} prepared={prepared} estimate={estimate} publishStatus={publish?.status} onDone={onDone} />
+      )}
       {ready && <PublishRequest proposalId={proposalId} prepared={prepared} state={publish} onDone={onDone} />}
       {ready && !publish && (
         <p className="text-ink-700">
@@ -209,7 +213,7 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
 
   return (
     <div className="w-full space-y-2 rounded-lg bg-ink-50 px-3 py-3 text-xs" aria-label={`${id} 미디어 만들기`}>
-      {prepared && <Prepared proposalId={id} prepared={prepared} publish={h?.publish} onDone={onDone} />}
+      {prepared && <Prepared proposalId={id} prepared={prepared} publish={h?.publish} estimate={estimate} onDone={onDone} />}
 
       {step === "busy" ? (
         <p className="text-ink-700" role="status">만드는 중입니다 ({seconds}초 지남). {waitKo(kind)}</p>
@@ -220,6 +224,7 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
             {estimateLines(estimate, length).map((line) => <li key={line}>{line}</li>)}
             <li>{waitKo(kind)}</li>
             <li>만든 파일에는 AI 표시가 들어가고, 만든 뒤에도 게시는 사람 승인이 필요합니다.</li>
+            {isReel(kind) && <li>영상에 AI가 만든 소리가 들어갈 수 있습니다. 만든 뒤 소리를 듣고 '그대로 사용'이나 '배경음악 따로 만들기'를 한 번 고릅니다(따로 만들면 비용이 더 듭니다).</li>}
           </ul>
           <div className="flex flex-wrap gap-2">
             <button className="btn-primary text-xs" disabled={lengthProblem !== null} onClick={() => void gateLongStart(estimate, length, askLong, make)}>만들기 시작</button>

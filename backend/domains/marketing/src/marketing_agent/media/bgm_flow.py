@@ -1,5 +1,10 @@
 """영상 + AI BGM 흐름(`MARKETING_AUDIO_MODE=bgm_overlay`일 때만 동작).
 
+기본(`source`) 흐름에서는 영상을 먼저 한 번 만들고, 사람이 확인 화면에서
+"배경음악 따로 만들기"를 고를 때 `brief_media.choose_brief_audio`가 이 흐름을 그 한 번만
+부른다(설정을 `bgm_overlay`로 바꿔서). 영상은 같은 장부 키라 재생되어 비용이 다시 나지 않고,
+BGM 생성만 안전 관문(`audio_cost_single`)을 거쳐 새로 난다.
+
 순서: 영상 생성(`generate_media`, 소스 오디오는 받되 쓰지 않는다) → BGM 생성(`generate_media`,
 `media_kind="audio"`) → `overlay_bgm`(영상 오디오 제거 + BGM 입힘). 두 생성 모두 같은 안전 관문
 `execute("generate_media")`를 거친다. 모드가 `off`(기본)이거나 영상 요청이 아니면 `generate_media`를
@@ -220,6 +225,7 @@ def _final_output(
         "asset_ref": str(mixed.output_path),
         "sha256": mixed.sha256,
         "muted": False,  # 원본 소리는 버렸고 AI BGM이 들어 있다
+        "has_audio": True,  # 최종 파일의 소리는 AI BGM이다
         "audio_mode": "bgm_overlay",
         "source_video_asset_ref": video["asset_ref"],
         "source_video_sha256": video["sha256"],

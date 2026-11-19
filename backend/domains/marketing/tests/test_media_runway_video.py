@@ -114,15 +114,22 @@ def test_veo_rejects_durations_outside_enum(
     assert calls == []  # 요청 전에 거부
 
 
-def test_unknown_model_and_audio_on_rejected(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_unknown_model_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("MARKETING_RUNWAY_API_KEY", KEY)
     adapter = _adapter(lambda _r: httpx.Response(500))
     with pytest.raises(MediaProviderError, match="invalid_model_id"):
         adapter.generate(_request(tmp_path, model="gen4_turbo"))  # 이미지→영상 전용
-    with pytest.raises(MediaProviderError, match="audio_not_supported"):
-        adapter.generate(_request(tmp_path, remove_audio=False))
+
+
+def test_keep_audio_mode_still_requests_silent_video(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """소리를 두는 모드여도 소리 단가가 가격표에 없어 audio=false만 보낸다(무음 영상으로 받는다)."""
+    monkeypatch.setenv("MARKETING_RUNWAY_API_KEY", KEY)
+    seen: dict = {}
+    tasks = [{"status": "SUCCEEDED", "output": [VIDEO_URL]}]
+    _adapter(_handler(tasks, seen)).generate(_request(tmp_path, remove_audio=False))
+    assert seen["body"]["audio"] is False
 
 
 @pytest.mark.parametrize("status", ["FAILED", "CANCELLED"])

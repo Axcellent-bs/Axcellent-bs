@@ -176,6 +176,41 @@ async def brief_media_call(
     return out
 
 
+async def brief_audio_call(
+    proposal_id: str,
+    choice: str,
+    *,
+    confirmed_listened: bool = False,
+    bgm_mood: str | None = None,
+    bgm_genre: str | None = None,
+) -> dict[str, Any]:
+    """만든 영상의 소리를 정한다(`choose_brief_audio`). 게시하지 않는다.
+
+    `choice`: `keep`(이 영상 그대로 사용) | `bgm`(배경음악 따로 만들기). BGM 생성은 마케팅이
+    안전 관문(B등급)·상한을 거쳐 처리하고, 보류·상한 초과는 판단 결과로 그대로 돌려준다.
+    `confirmed_listened`는 화면의 "소리까지 들어 봤다"는 주장이며 감사 기록용으로만 넘긴다.
+    같은 기획안·같은 선택은 키가 같아 승인된 보류 건이 이어진다(영상은 장부에서 재생).
+    """
+    payload: dict[str, Any] = {"proposal_id": proposal_id, "choice": choice}
+    if confirmed_listened:
+        payload["confirmed_listened"] = True
+    if bgm_mood:
+        payload["bgm_mood"] = bgm_mood
+    if bgm_genre:
+        payload["bgm_genre"] = bgm_genre
+    out = await call(
+        "choose_brief_audio",
+        payload,
+        campaign_id=brief_media_context(proposal_id),
+        key=f"ui:brief-audio:{proposal_id}:{choice}",
+        deadline_s=video_timeout_s(),
+    )
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] in BRIEF_MEDIA_FAILURES:
+        status, code = BRIEF_MEDIA_FAILURES[out["outcome"]]
+        raise ApiError(status, code, f"영상 소리를 정할 수 없다 ({out['outcome']})")
+    return out
+
+
 async def brief_publish_request_call(proposal_id: str, retry: bool = False) -> dict[str, Any]:
     """준비된 미디어 초안의 게시 요청(`request_brief_publish`). 승인 대기 건만 만든다.
 

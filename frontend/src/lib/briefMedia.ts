@@ -19,6 +19,38 @@ export interface MediaEstimate {
   month_total_krw: number | null;
   /** 영상만. 길이 입력용: 상한은 운영자가 서버 설정(MARKETING_VIDEO_MAX_DURATION_S)으로 정한 값이다 */
   video?: VideoEstimate | null;
+  /** 영상 소리를 아직 정하지 않았을 때만. "배경음악 따로 만들기"의 추가 비용(BGM 한 곡). 옛 서버는 없다 */
+  bgm?: BgmEstimate | null;
+}
+
+export interface BgmEstimate {
+  /** BGM 한 곡의 예상 비용(원). 계산할 수 없으면 null */
+  cost_krw: number | null;
+  /** 이미 만든 곡이라 새 비용이 없다 */
+  settled: boolean;
+  reason_code: string | null;
+}
+
+/** 사람이 영상 소리를 정한 기록(감사). 한 번 정하면 바꾸지 않는다 */
+export interface AudioDecision {
+  choice: "keep" | "bgm";
+  decided_at: string | null;
+  had_source_audio: boolean;
+  confirmed_listened: boolean | null;
+  bgm_cost_krw?: number | null;
+}
+
+/** 만든 영상의 소리 상태. 이미지·옛 기록은 없다 */
+export interface AudioState {
+  /** source = 공급자가 만든 소리를 그대로 둠, off = 무음(예전 설정), bgm_overlay = 예전 묶음 흐름 */
+  mode: string | null;
+  /** 공급자가 만든 소리가 파일에 들어 있다 */
+  has_source_audio: boolean;
+  /** clip_concat_muted = 이어 붙인 영상이라 소리를 뺐다 */
+  note?: string | null;
+  /** 소리가 있어 사람이 듣고 정해야 게시 요청을 할 수 있다 */
+  needs_decision: boolean;
+  decision: AudioDecision | null;
 }
 
 export interface VideoEstimate {
@@ -50,6 +82,8 @@ export interface PreparedMedia {
   label_text: string | null;
   check: { verdict: string | null; publishable: boolean | null; problems: string[] };
   prepared_at: string | null;
+  /** 영상만. 소리 상태와 사람의 결정. 옛 서버·이미지는 없다 */
+  audio?: AudioState | null;
 }
 
 export interface BriefMediaOutput {
@@ -299,6 +333,7 @@ export const PUBLISH_EXPIRY_MIN = 10;
 const PUBLISH_FAIL_KO: Record<string, string> = {
   not_handed: "아직 SNS·미디어로 넘기지 않은 기획안입니다.",
   not_prepared: "게시할 수 있는 미디어 초안이 없습니다. 먼저 미디어를 만들어 주세요.",
+  audio_decision_required: "영상에 AI가 만든 소리가 들어 있습니다. 소리를 듣고 '이 영상 그대로 사용'이나 '배경음악 따로 만들기'를 먼저 골라 주세요.",
   check_not_passed: "초안 검사를 통과하지 못해 게시를 요청할 수 없습니다.",
   media_kind_unsupported: "캐러셀은 이 화면에서 게시를 요청할 수 없습니다.",
   draft_missing: "서버에서 초안을 찾을 수 없어 요청하지 않았습니다.",
@@ -438,3 +473,93 @@ export function decideErrorKo(status: number | undefined, code: string | null | 
 /** 승인 화면 링크: 해당 건을 강조한다(`?review=<id>`). 링크를 여는 것만으로는 아무것도 승인되지 않는다 */
 export const approvalLink = (reviewId: string | null | undefined): string =>
   reviewId ? `/marketing/campaign?review=${encodeURIComponent(reviewId)}` : "/marketing/campaign";
+
+// ---- 영상 소리 선택(이 영상 그대로 사용 / 배경음악 따로 만들기) -----------------------------
+// 영상은 공급자가 만든 소리를 그대로 두고 한 번만 만든다. 확인 단계에서 사람이 소리를 듣고 한 번 정한다.
+// 비용·결정 기록은 서버가 준 값만 쓴다. 이 선택은 게시하지 않는다(게시는 C 등급 사람 승인).
+
+export type AudioChoice = "keep" | "bgm";
+
+/** 아직 소리를 정하지 않은 영상인가(결정 칸이 있고 비어 있을 때) */
+export function audioPending(p: PreparedMedia | null | undefined): boolean {
+  return !!p && isReel(p.media_kind) && !!p.audio && p.audio.mode === "source" && !p.audio.decision;
+}
+
+/** 결정할 수 있는 상태인가: 게시 요청이 이미 올라간 뒤에는 서버가 거절하므로 버튼을 두지 않는다 */
+export function canChooseAudio(p: PreparedMedia | null | undefined, publishStatus: string | null | undefined): boolean {
+  return audioPending(p) && (!publishStatus || publishStatus === "not_requested");
+}
+
+/** 영상 소리 안내: 소리가 있으면 끝까지 듣고 고르게 한다 */
+export function audioIntroKo(a: AudioState): string[] {
+  if (a.has_source_audio) {
+    return [
+      "이 영상에는 AI가 만든 소리(음악·목소리 등)가 들어 있습니다. 소리를 끝까지 들어 보고 고르세요.",
+      "소리 안에 사람 목소리나 알아볼 만한 곡이 섞여 있으면 '배경음악 따로 만들기'를 고르세요. 소리도 AI가 만든 것이라 게시물에 AI 표시가 붙습니다.",
+    ];
+  }
+  return [
+    a.note === "clip_concat_muted"
+      ? "여러 클립을 이어 붙인 영상이라 소리를 뺐습니다(클립마다 소리가 달라 이음새가 어긋나기 때문입니다)."
+      : "이 영상에는 소리가 없습니다(영상 공급자가 소리를 만들지 않았습니다).",
+    "소리 없이 써도 되고, 배경음악을 따로 만들어 넣을 수도 있습니다.",
+  ];
+}
+
+/** "배경음악 따로 만들기" 추가 비용 안내. 서버가 준 값만 쓴다 */
+export function bgmCostKo(b: BgmEstimate | null | undefined): string {
+  if (!b) return "추가 비용을 서버가 알려 주지 않았습니다.";
+  if (b.settled) return "이미 만든 배경음악이 있어 새 비용이 나지 않습니다.";
+  if (b.cost_krw == null) return "추가 비용을 계산할 수 없습니다.";
+  return `추가 비용 약 ${won(b.cost_krw)}(곡 1개). 영상은 다시 만들지 않아 영상 비용은 다시 나지 않습니다.`;
+}
+
+/** 정해진 결정 한 줄(감사 기록을 화면에 보여 줄 때) */
+export function audioDecisionKo(d: AudioDecision): string {
+  const when = d.decided_at ? ` (${d.decided_at.slice(0, 16).replace("T", " ")} UTC)` : "";
+  if (d.choice === "keep") return `소리 선택: 이 영상 그대로 사용${when}`;
+  const cost = typeof d.bgm_cost_krw === "number" ? ` · 배경음악 비용 ${won(d.bgm_cost_krw)}` : "";
+  return `소리 선택: 배경음악을 따로 만들어 입힘${when}${cost}`;
+}
+
+const AUDIO_FAIL_KO: Record<string, string> = {
+  ...FAIL_KO,
+  audio_already_decided: "이미 소리를 정했습니다. 한 번 정하면 바꿀 수 없습니다.",
+  publish_already_requested: "게시 요청이 이미 올라가 있어 소리를 바꿀 수 없습니다.",
+  not_prepared: "먼저 미디어를 만들어 주세요.",
+  not_video: "영상만 소리를 정할 수 있습니다.",
+  bgm_unavailable: "이 영상은 배경음악을 따로 만들 수 없습니다(소리를 둔 방식으로 만든 영상만 가능합니다).",
+};
+
+export interface AudioResult { kind: "kept" | "bgm_ready" | "check_rejected" | "held" | "working" | "failed"; text: string }
+
+/** 소리 선택 응답을 화면 문구로. 서버 오류 문장을 그대로 쓰지 않는다 */
+export function audioResultKo(answer: BriefMediaAnswer, choice: AudioChoice): AudioResult {
+  if (answer.status === "completed" && answer.outcome === "audio_kept") {
+    return { kind: "kept", text: "이 영상 그대로 쓰기로 정했습니다. 이제 게시를 요청할 수 있습니다." };
+  }
+  if (answer.status === "completed" && answer.output?.stage === "draft_ready") {
+    return { kind: "bgm_ready", text: "배경음악을 입힌 영상이 준비됐습니다. 소리를 다시 한 번 들어 보세요. 이제 게시를 요청할 수 있습니다." };
+  }
+  if (answer.status === "completed" && answer.output?.stage === "check_rejected") {
+    return { kind: "check_rejected", text: "배경음악은 입혔지만 초안 검사에 걸렸습니다. 이 초안은 게시할 수 없습니다." };
+  }
+  if (answer.status === "input-required") {
+    return { kind: "held", text: "안전 장치가 배경음악 생성을 사람 확인으로 보류했습니다. 아래 '사람 결정 대기' 목록에서 승인된 뒤 다시 눌러 주세요. 영상은 그대로이고 아직 비용은 나지 않았습니다." };
+  }
+  if (answer.status === "working") return { kind: "working", text: "안전 장치가 확인하는 중입니다. 잠시 뒤 다시 눌러 주세요." };
+  const code = answer.outcome ?? "";
+  const fallback = choice === "bgm" ? "배경음악을 만들지 못했습니다. 영상은 그대로입니다. 잠시 뒤 다시 시도해 주세요" : "소리를 정하지 못했습니다. 잠시 뒤 다시 시도해 주세요";
+  return { kind: "failed", text: AUDIO_FAIL_KO[code] ?? `${fallback}${code ? ` (${code})` : ""}.` };
+}
+
+/** 소리 선택 연결 오류(HTTP 상태)를 화면 문구로 */
+export function audioHttpErrorKo(status: number | undefined, code?: string | null): string {
+  if (code === NGINX_BLOCKED_CODE) return NGINX_BLOCKED_MESSAGE;
+  if (status === 401 || status === 403) return "소리를 정할 권한이 없습니다. 사람 토큰 설정(또는 서버의 이 경로 허용)을 확인해 주세요.";
+  if (status === 404) return "기획안을 찾을 수 없거나 서버가 아직 이 기능을 지원하지 않습니다.";
+  if (status === 400 || status === 422) return "요청을 서버가 받아들이지 않았습니다. 새로고침한 뒤 다시 시도해 주세요.";
+  if (status === 502) return "마케팅 AI에 연결할 수 없습니다. 마케팅 서버가 켜져 있는지 확인해 주세요.";
+  if (status === 504) return "시간 안에 끝나지 않았습니다. 1~2분 뒤 새로고침해 확인해 주세요. 다시 눌러도 같은 배경음악을 두 번 만들지 않습니다.";
+  return "소리를 정하지 못했습니다. 잠시 뒤 다시 시도해 주세요.";
+}

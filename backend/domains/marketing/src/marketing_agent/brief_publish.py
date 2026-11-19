@@ -77,6 +77,10 @@ def publish_input_for(record: SnsHandoffRecord | None, store: SnsStore) -> tuple
     check = prepared.get("check") or {}
     if check.get("verdict") != "approved" or check.get("publishable") is not True:
         return None, "check_not_passed"
+    audio = prepared.get("audio")
+    if isinstance(audio, dict) and audio.get("needs_decision") and not audio.get("decision"):
+        # 공급자가 만든 소리가 들어 있는 영상은 사람이 듣고 정한(그대로 쓰기·BGM 교체) 뒤에만 올린다
+        return None, "audio_decision_required"
     kind = prepared.get("media_kind")
     if kind not in SUPPORTED_KINDS:
         return None, "media_kind_unsupported"

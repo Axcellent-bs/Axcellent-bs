@@ -3,7 +3,10 @@
 - 공급자·모델: `MARKETING_IMAGE_PROVIDER/MODEL`, `MARKETING_VIDEO_PROVIDER/MODEL`.
   공급자 기본은 `mock`, 모델 기본은 비움.
 - 오디오(BGM): `MARKETING_AUDIO_PROVIDER/MODEL/API_KEY`(영상·이미지와 별개),
-  모드 `MARKETING_AUDIO_MODE`(`off` 기본 | `bgm_overlay`, 모르는 값은 off),
+  모드 `MARKETING_AUDIO_MODE`(`source` 기본 | `off` | `bgm_overlay`, 모르는 값은 off).
+  `source`: 공급자가 만든 영상 소리를 그대로 쓴다(별도 BGM은 확인 단계에서 사람이 고를 때만).
+  `off`: 예전 동작(항상 무음).
+  `bgm_overlay`: 영상 소리를 버리고 BGM을 한 번에 입히는 예전 묶음 흐름.
   ffmpeg 경로 `MARKETING_FFMPEG_BIN`(기본 `ffmpeg`).
 - 키: `MARKETING_IMAGE_API_KEY`, `MARKETING_VIDEO_API_KEY`, `MARKETING_AUDIO_API_KEY`.
   이 모듈은 이름만 정의하고, 설정돼 있는지만 `has_api_key`로 알려 준다.
@@ -63,7 +66,8 @@ VIDU_API_KEY_ENV = "MARKETING_VIDU_API_KEY"
 RUNWAY_API_KEY_ENV = "MARKETING_RUNWAY_API_KEY"
 FFMPEG_BIN_ENV = "MARKETING_FFMPEG_BIN"
 AUDIO_MODE_ENV = "MARKETING_AUDIO_MODE"
-AUDIO_MODES = ("off", "bgm_overlay")
+AUDIO_MODES = ("source", "off", "bgm_overlay")
+DEFAULT_AUDIO_MODE = "source"
 
 
 def _text(name: str) -> str:
@@ -94,8 +98,13 @@ def _date(name: str) -> date | None:
 
 
 def audio_mode_from_env() -> str:
-    """`off`(기본) 또는 `bgm_overlay`. 모르는 값은 안전하게 off로 본다."""
+    """`source`(기본, 비어 있을 때)·`off`·`bgm_overlay`. 모르는 값(오타)은 off(무음)로 본다.
+
+    source여도 소리가 없는 공급자·모델은 무음 영상이고, 합성 BGM은 만들지 않는다(사람이 고를 때만).
+    """
     mode = _text(AUDIO_MODE_ENV).lower()
+    if not mode:
+        return DEFAULT_AUDIO_MODE
     return mode if mode in AUDIO_MODES else "off"
 
 
@@ -140,7 +149,7 @@ class MediaSettings:
     media_dir: Path
     audio_provider: str = MOCK
     audio_model: str = ""
-    audio_mode: str = "off"
+    audio_mode: str = DEFAULT_AUDIO_MODE
     video_max_duration_s: int = DEFAULT_MAX_DURATION_S
     video_max_duration_problem: str | None = None  # 설정이 잘못됐으면 코드(영상 생성 거부)
     # 경고창 기준 길이. 화면 안내용이며 안전 관문이 아니다(잘못된 값은 기본값으로 바꾼다)
