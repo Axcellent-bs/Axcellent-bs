@@ -3,6 +3,7 @@
 - DejaFix 장애: `GET {주소}/api/incidents?status=problem` (읽기). 주소는
   `PLANNING_DEJAFIX_API_URL` → 보관함의 dejafix(dejafix-proxy) 순서로 찾는다.
   응답 필드 이름이 정해지지 않아 여러 이름을 받는다. 못 읽으면 `unavailable` 신호를 남긴다.
+  이 에이전트의 토큰을 붙인다(프록시가 확인). 토큰이 없으면 부르지 않고 `unavailable`.
 - data `anomaly_detection`(read): 목 모드가 아닐 때만 부른다.
 - 목 신호원: 시드 사건(ctx_inc_0001)과 같은 고정 신호를 돌려준다.
 """
@@ -124,11 +125,17 @@ class DejaFixIncidentSource:
     async def signals(
         self, dep: Deployment, window_from: datetime, window_to: datetime
     ) -> list[Signal]:
+        try:
+            # dejafix-proxy는 호출자 토큰을 확인한다. 토큰이 없으면 부르지 않는다
+            headers = tool_connections.dejafix_proxy_headers()
+        except RuntimeError as exc:
+            raise SignalUnavailable(f"dejafix-proxy 토큰 없음: {exc}") from exc
         client = self._client or httpx.AsyncClient()
         try:
             res = await client.get(
                 f"{self.base_url}/api/incidents",
                 params={"status": "problem"},
+                headers=headers,
                 timeout=CALL_TIMEOUT_SECONDS,
             )
             res.raise_for_status()

@@ -1,4 +1,4 @@
-import { DEJAFIX_API_URL } from "./env";
+import { DEJAFIX_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
 
 // 장애 대응 탭: DejaFix 화면을 띄우지 않고 DejaFix API에서 데이터만 받는다.
 // 형식은 DejaFix/DejaFix contracts/api.md #10 `GET /api/incidents`, contracts/incident.schema.json 기준. 화면 없는 함수만 둔다.
@@ -56,7 +56,10 @@ export class DejafixNotConnectedError extends Error {
 async function get<T>(path: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${DEJAFIX_API_URL}${path}`, { cache: "no-store" });
+    // dejafix-proxy가 부르는 쪽 토큰을 확인한다. 다른 API처럼 사람 토큰이 있으면 붙인다
+    // (서버 화면은 실제 토큰 대신 자리표시자를 두고 gateway nginx가 Authorization을 바꿔 붙인다)
+    const headers: Record<string, string> = SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {};
+    res = await fetch(`${DEJAFIX_API_URL}${path}`, { cache: "no-store", headers });
   } catch {
     throw new Error("DejaFix 서버에 연결할 수 없습니다.");
   }
@@ -65,7 +68,13 @@ async function get<T>(path: string): Promise<T> {
     if ((body as { error?: { code?: string } } | undefined)?.error?.code === "DEJAFIX_NOT_CONNECTED") throw new DejafixNotConnectedError();
   }
   if (res.status === 502) throw new Error("DejaFix 백엔드에 연결할 수 없습니다 (회원·서버 관리 › DejaFix 연결에서 주소를 확인해 주세요).");
-  if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (회원·서버 관리 › DejaFix 연결에서 계정을 확인해 주세요).");
+  if (res.status === 401) {
+    const body: unknown = await res.json().catch(() => undefined);
+    const code = (body as { error?: { code?: string } } | undefined)?.error?.code;
+    // 프록시가 화면 토큰을 막은 경우와 DejaFix 계정 문제를 나눠 알린다
+    if (code === "AUTH_REQUIRED" || code === "TOKEN_INVALID") throw new Error("장애 목록을 볼 권한이 없습니다 (사람 토큰 VITE_SAFETY_HUMAN_TOKEN을 확인해 주세요).");
+    throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (회원·서버 관리 › DejaFix 연결에서 계정을 확인해 주세요).");
+  }
   if (res.status === 404) throw new Error("DejaFix에 없는 장애입니다.");
   if (!res.ok) throw new Error(`DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`);
   return (await res.json()) as T;

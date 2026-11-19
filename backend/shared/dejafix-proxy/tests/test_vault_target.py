@@ -12,12 +12,15 @@ from ax_dejafix_proxy.main import create_app
 
 pytestmark = pytest.mark.asyncio
 
+AGENT_TOKEN = "agent-token-infra"  # 호출자 토큰 (AX_AGENT_TOKENS)
+
 
 @pytest.fixture(autouse=True)
 def _vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(tc.FILE_ENV, str(tmp_path / "tool-connections.json"))
     monkeypatch.delenv("DEJAFIX_USERNAME", raising=False)
     monkeypatch.delenv("DEJAFIX_PASSWORD", raising=False)
+    monkeypatch.setenv("AX_AGENT_TOKENS", f"infra={AGENT_TOKEN}")
     tc._cache = None
 
 
@@ -48,7 +51,11 @@ class Recorder:
 def _client(handler: Recorder) -> httpx.AsyncClient:
     upstream = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler))
     app = create_app(upstream)
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy")
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://proxy",
+        headers={"Authorization": f"Bearer {AGENT_TOKEN}"},
+    )
 
 
 async def test_proxy_uses_vault_target() -> None:

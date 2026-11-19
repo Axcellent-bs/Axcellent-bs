@@ -2,6 +2,7 @@
 
 DejaFix는 모든 API에 로그인 토큰(JWT)을 요구한다. 서버 nginx는 로그인·토큰 갱신을 못 하므로
 이 서비스가 viewer 계정으로 대신 로그인하고, 받은 토큰을 붙여 GET만 넘긴다.
+부르는 쪽도 토큰(사람·에이전트)을 붙여야 하고, 정해 둔 조회 세 가지만 넘긴다 (`auth.py`).
 개발 서버 프록시(frontend/dejafix-proxy.ts)와 같은 동작이다.
 연결은 부를 때마다 정한다: 공용 보관함의 `dejafix` → 없으면 환경변수(DEJAFIX_PROXY_TARGET·
 DEJAFIX_USERNAME·DEJAFIX_PASSWORD) → 없으면 503. 계정은 화면·로그에 싣지 않는다.
@@ -18,6 +19,8 @@ import httpx
 from fastapi import FastAPI, Request, Response
 
 from ax_agent_template import company_connection, tool_connections
+from ax_agent_template.config import refuse_mock_outside_tests
+from ax_dejafix_proxy import auth
 
 JSON = "application/json"
 
@@ -125,6 +128,7 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        refuse_mock_outside_tests(auth.MOCK_NAME)  # 목 모드는 토큰 없이 `human:`을 받으므로
         yield
         held = state.pop("s", None)
         if held is not None and client is None:
@@ -146,11 +150,19 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         "/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     )
     async def forward(path: str, request: Request) -> Response:
+        # 순서: 호출자 토큰 → GET → 경로 조작 → 허용 목록 (auth.py)
+        try:
+            auth.check_caller(request.headers.get("authorization"))
+        except auth.AuthFailure as exc:
+            return _error(401, exc.code, exc.message)
         if request.method != "GET":
             return _error(405, "METHOD_NOT_ALLOWED", "읽기(GET)만 넘깁니다")
+        raw = request.scope.get("raw_path") or request.url.path.encode()
+        if auth.unsafe_raw_path(raw):
+            return _error(400, "INVALID_PATH", "경로를 읽을 수 없습니다")
         full = f"/{path}"
-        # 로그인 API를 밖으로 열지 않는다. 넘기는 것은 DejaFix의 /api/* 조회뿐이다.
-        if not full.startswith("/api/") or full.startswith("/api/auth"):
+        # 로그인 API 등은 밖으로 열지 않는다. 넘기는 것은 화면·AI가 쓰는 DejaFix 조회 세 가지뿐이다.
+        if not auth.allowed_path(full):
             return _error(404, "NOT_FOUND", "넘길 수 없는 경로입니다")
         found = _target()
         if found is None:

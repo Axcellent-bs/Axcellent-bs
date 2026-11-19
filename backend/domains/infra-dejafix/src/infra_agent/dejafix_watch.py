@@ -82,7 +82,9 @@ async def fetch_problems(url: str, client: httpx.AsyncClient | None = None) -> l
     if client is None:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as own:
             return await fetch_problems(url, own)
-    response = await client.get(f"{url}{PROBLEMS_PATH}")
+    # dejafix-proxy는 호출자 토큰을 확인한다 (이 에이전트의 토큰)
+    headers = tool_connections.dejafix_proxy_headers()
+    response = await client.get(f"{url}{PROBLEMS_PATH}", headers=headers)
     response.raise_for_status()
     rows = response.json().get("data") or []
     return [r for r in rows if isinstance(r, dict) and r.get("status") == "problem"]
