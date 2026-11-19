@@ -12,11 +12,12 @@ import { PreparingChip } from '@/components/Preparing'
 import { privateIp, useHosts } from './store'
 import { More, PageHead, SectionHead, StatusChip, Tabs, Tiles } from '@/components/connect/parts'
 import { DejafixCard } from '@/components/connect/DejafixConnect'
+import { ConnectedPcs } from '@/components/connect/ConnectedPcs'
 
 // 회원·서버 관리 (관리자 /system/members). 회사 사람과 PC를 한 화면 탭으로 관리한다.
 // - 회원: 계정 연결(이메일)·부서(선택, 표시·조직도용)·확인 권한·열람 담당(인사·재무 AI 대화 요약)·쓰는 PC를 한 표에서
-// - DejaFix 연결(탭 id pcs 유지): 장애 대응이 쓰는 DejaFix 연결 상태. 예전 /system/hosts 주소는 이 탭으로 온다.
-//   예전 "PC·서버" 목록(InfraHosts)은 코드에 박힌 예시 PC와 가짜 연결 확인이라 뺐다(11/19). 실제 감시 호스트는 DejaFix가 안다
+// - DejaFix 연결(탭 id pcs 유지): 장애 대응이 쓰는 DejaFix 연결 상태 + 연결한 PC(DejaFix 장애 목록에 나온 호스트의 agent 응답 여부).
+//   예전 /system/hosts 주소는 이 탭으로 온다. 예전 "PC·서버" 목록(InfraHosts)은 코드에 박힌 예시 PC와 가짜 연결 확인이라 뺐다(11/19)
 // - 접속 허용: 사내 PC IP나 대역. 그 PC에서 가입·로그인하면 회사 회원이 된다
 // 계정 연결과 접속 허용 중 하나라도 맞으면 그 회원은 회사 회원이다.
 // 서버 로그인이 켜져 있으면 회원 표는 서버 계정 목록(dashboard-api `GET /auth/accounts`)만 쓴다. 관리자는 일반회원을
@@ -95,6 +96,7 @@ export default function MembersPage() {
       {tab === 'pcs' && (
         <div className="space-y-8">
           <DejafixCard admin={!!account?.admin} />
+          <ConnectedPcs />
         </div>
       )}
       {tab === 'access' && <Access />}

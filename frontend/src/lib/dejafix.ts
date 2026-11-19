@@ -65,8 +65,8 @@ async function get<T>(path: string): Promise<T> {
     const body: unknown = await res.json().catch(() => undefined);
     if ((body as { error?: { code?: string } } | undefined)?.error?.code === "DEJAFIX_NOT_CONNECTED") throw new DejafixNotConnectedError();
   }
-  if (res.status === 502) throw new Error("DejaFix 백엔드에 연결할 수 없습니다 (회원·서버 관리 › DejaFix 연결에서 주소를 확인해 주세요).");
-  if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (회원·서버 관리 › DejaFix 연결에서 계정을 확인해 주세요).");
+  if (res.status === 502) throw new Error("DejaFix 백엔드에 연결할 수 없습니다 (서버 담당이 설치 설정의 DejaFix 주소를 확인해 주세요).");
+  if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (서버 담당이 설치 설정의 DejaFix 계정을 확인해 주세요).");
   if (res.status === 404) throw new Error("DejaFix에 없는 장애입니다.");
   if (!res.ok) throw new Error(`DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`);
   return (await res.json()) as T;
