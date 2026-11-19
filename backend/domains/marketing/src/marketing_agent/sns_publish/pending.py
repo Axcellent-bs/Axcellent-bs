@@ -60,6 +60,22 @@ CREATE TABLE IF NOT EXISTS sns_halt (
     idempotency_key TEXT,
     created_at      TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sns_publish_control (
+    channel    TEXT PRIMARY KEY,
+    paused     INTEGER NOT NULL,
+    reason     TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sns_publish_control_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel      TEXT NOT NULL,
+    paused       INTEGER NOT NULL,
+    reason       TEXT NOT NULL DEFAULT '',
+    updated_by   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    execution_id TEXT
+);
 """
 _UPDATABLE = frozenset(
     {
@@ -254,6 +270,80 @@ class PendingStore:
                 f"중단 기록을 읽을 수 없다: {type(error).__name__}"
             ) from error
         return (row[0], datetime.fromisoformat(row[1])) if row else None
+
+    def control_get(self, channel: str) -> tuple[bool, str, str, str] | None:
+        """게시 중지 스위치 한 줄 (paused, reason, updated_by, updated_at). 행이 없으면 None.
+
+        매 호출마다 DB를 읽는다(다른 프로세스·사람이 직접 고쳐도 재시작 없이 반영).
+        """
+        try:
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT paused, reason, updated_by, updated_at FROM sns_publish_control"
+                    " WHERE channel = ?",
+                    (channel,),
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise PendingStorageError(
+                f"게시 중지 설정을 읽을 수 없다: {type(error).__name__}"
+            ) from error
+        if row is None:
+            return None
+        return bool(row[0]), str(row[1] or ""), str(row[2]), str(row[3])
+
+    def control_set(
+        self,
+        channel: str,
+        paused: bool,
+        reason: str,
+        updated_by: str,
+        execution_id: str | None = None,
+    ) -> str:
+        """스위치를 쓰고 감사 기록을 한 트랜잭션에 남긴다. 바뀐 시각을 돌려준다."""
+        stamp = _now()
+        try:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT INTO sns_publish_control (channel, paused, reason, updated_by,"
+                    " updated_at) VALUES (?,?,?,?,?) ON CONFLICT(channel) DO UPDATE SET"
+                    " paused=excluded.paused, reason=excluded.reason,"
+                    " updated_by=excluded.updated_by, updated_at=excluded.updated_at",
+                    (channel, int(paused), reason, updated_by, stamp),
+                )
+                self._conn.execute(
+                    "INSERT INTO sns_publish_control_log (channel, paused, reason, updated_by,"
+                    " updated_at, execution_id) VALUES (?,?,?,?,?,?)",
+                    (channel, int(paused), reason, updated_by, stamp, execution_id),
+                )
+        except sqlite3.Error as error:
+            raise PendingStorageError(
+                f"게시 중지 설정을 저장할 수 없다: {type(error).__name__}"
+            ) from error
+        return stamp
+
+    def control_log(self, channel: str, limit: int = 20) -> list[dict[str, Any]]:
+        """변경 감사 기록(최근 순): 누가·언제·무엇으로."""
+        try:
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT paused, reason, updated_by, updated_at, execution_id"
+                    " FROM sns_publish_control_log WHERE channel = ? ORDER BY id DESC LIMIT ?",
+                    (channel, limit),
+                ).fetchall()
+        except sqlite3.Error as error:
+            raise PendingStorageError(
+                f"게시 중지 기록을 읽을 수 없다: {type(error).__name__}"
+            ) from error
+        return [
+            {
+                "paused": bool(r[0]),
+                "reason": r[1],
+                "updated_by": r[2],
+                "updated_at": r[3],
+                "execution_id": r[4],
+            }
+            for r in rows
+        ]
 
     def create(self, post: PendingPost) -> bool:
         """같은 키가 이미 있으면 False(먼저 들어간 것이 이긴다)."""

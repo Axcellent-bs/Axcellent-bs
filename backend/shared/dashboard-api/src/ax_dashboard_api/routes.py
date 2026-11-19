@@ -1040,6 +1040,31 @@ async def request_brief_publish(
     return ok(await marketing_client.brief_publish_request_call(proposal_id, retry))
 
 
+class PublishControlBody(BaseModel):
+    paused: bool
+    reason: str = Field(default="", max_length=200)
+
+
+@router.get("/marketing/publish-control")
+async def get_publish_control() -> dict:
+    """Instagram 게시 일시 중지 스위치 상태(사유·바꾼 사람·시각·최근 내력). 읽기는 누구나."""
+    _no_org_in_mock()
+    return ok(await marketing_client.publish_control_get())
+
+
+@router.put("/marketing/publish-control")
+async def set_publish_control(body: PublishControlBody, request: Request) -> dict:
+    """게시만 멈추거나 푼다. 초안·미디어·자동 넘김은 그대로 돈다. 사람 토큰이 필요하다.
+
+    마케팅 `set_publish_control`이 안전 관문을 지난다: 중지는 A(바로 적용), 재개는 C(사람 승인,
+    `outcome=held`와 `review_id`). 바꾼 사람 이름은 토큰에서만 채운다.
+    """
+    _no_org_in_mock()
+    return ok(
+        await marketing_client.publish_control_set(body.paused, body.reason, request.state.human)
+    )
+
+
 _DRAFT_ID = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
 
 

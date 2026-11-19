@@ -3,6 +3,7 @@ import { writeAuth } from "./api";
 import { DASHBOARD_API_URL } from "./env";
 import type { MergeAnswer } from "./outageMerge";
 import type { OutageMediaAnswer, OutageMediaFlow } from "./outageMedia";
+import type { PublishControlAnswer } from "./publishControl";
 import type { BriefMediaAnswer, MediaEstimate, PreparedMedia, PublishAnswer, PublishState } from "./briefMedia";
 
 // 마케팅이 기획에서 받은 기획안 읽기. 화면은 마케팅도 판매 서버도 직접 부르지 않고 dashboard-api 중계
@@ -185,6 +186,31 @@ async function requestPublish(proposalId: string, retry = false): Promise<Publis
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as PublishAnswer;
+}
+
+/** Instagram 게시 일시 중지 스위치 읽기. 오류는 상태 코드만 담아 던진다 */
+export async function getPublishControl(): Promise<PublishControlAnswer> {
+  const res = await fetch(`${DASHBOARD_API_URL}/api/dashboard/marketing/publish-control`, { cache: "no-store" });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
+  return json.data as PublishControlAnswer;
+}
+
+/**
+ * 게시 켜고 끄기(사람 토큰). 중지는 바로 적용(A 등급), 재개는 사람 승인(C 등급)이라 보류로 올 수 있다.
+ * 바꾼 사람 이름은 서버가 토큰에서 채운다(여기서 보내지 않는다).
+ */
+export async function setPublishControl(paused: boolean, reason: string): Promise<PublishControlAnswer> {
+  const path = "/api/dashboard/marketing/publish-control";
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...writeAuth("PUT", path) },
+    body: JSON.stringify({ paused, reason }),
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
+  return json.data as PublishControlAnswer;
 }
 
 /** 준비된 미디어 초안의 미리보기 주소(AI 표시를 입힌 결과 파일). `version`은 파일이 바뀌면 새로 받게 하는 값이다 */

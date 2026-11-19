@@ -189,6 +189,40 @@ async def brief_publish_request_call(proposal_id: str, retry: bool = False) -> d
     return out
 
 
+PUBLISH_CONTROL_CONTEXT = "publish_control"
+
+
+async def publish_control_get() -> dict[str, Any]:
+    """Instagram 게시 일시 중지 스위치의 현재 상태(`get_publish_control`, 읽기)."""
+    out = await call(
+        "get_publish_control",
+        {},
+        campaign_id=PUBLISH_CONTROL_CONTEXT,
+        key=f"ui:publish-control-get:{uuid.uuid4().hex[:12]}",
+    )
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] == "invalid_input":
+        raise ApiError(400, "INVALID_INPUT", "게시 상태 요청이 맞지 않는다 (invalid_input)")
+    return out
+
+
+async def publish_control_set(paused: bool, reason: str, human: str) -> dict[str, Any]:
+    """게시를 멈추거나 푼다(`set_publish_control`). 안전 관문: 중지는 A, 재개는 C(사람 승인).
+
+    `human`은 사람 토큰에서 채운 이름이다(본문에서 받지 않는다).
+    재개가 보류(`held`)로 오면 판단 결과라 그대로 돌려준다.
+    승인한 뒤 같은 요청을 다시 보내면 마케팅이 적용한다(키는 마케팅이 정한다).
+    """
+    out = await call(
+        "set_publish_control",
+        {"channel": "instagram", "paused": paused, "reason": reason, "updated_by": human},
+        campaign_id=PUBLISH_CONTROL_CONTEXT,
+        key="ui:publish-control-set",
+    )
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] == "invalid_input":
+        raise ApiError(400, "INVALID_INPUT", "게시 상태 입력이 맞지 않는다 (invalid_input)")
+    return out
+
+
 # 장애 초안 이미지·게시 요청에서 요청 자체가 틀린 실패만 HTTP 오류로 바꾼다. 막힘·상한·보류는
 # 판단 결과
 OUTAGE_MEDIA_FAILURES = {

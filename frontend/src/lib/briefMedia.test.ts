@@ -77,12 +77,30 @@ test("게시 요청 결과: 요청됨은 아직 게시되지 않았다고 알리
   assert.equal(ok.kind, "requested");
   assert.match(ok.text, /아직 게시되지 않았습니다/);
   assert.equal(publishResultKo({ status: "completed", outcome: "already_requested", output: null }).kind, "already");
-  for (const code of ["daily_limit_reached", "check_not_passed", "media_kind_unsupported", "adapter_unavailable", "publish_halted"]) {
+  for (const code of ["daily_limit_reached", "check_not_passed", "media_kind_unsupported", "adapter_unavailable", "publish_halted", "publish_paused", "publish_control_error"]) {
     const r = publishResultKo({ status: "failed", outcome: code, output: null });
     assert.equal(r.kind, "failed");
     assert.ok(!r.text.includes(code), code);
   }
   assert.equal(publishReasonKo("new_code"), "게시를 요청하지 못했습니다. 잠시 뒤 다시 시도해 주세요 (new_code).");
+});
+
+test("자동 게시 꺼짐: 요청 거절·승인 뒤 실패 문구와 사유", () => {
+  const paused = publishResultKo({ status: "failed", outcome: "publish_paused", output: { pause_reason: "계정 정지 재고 대기" } });
+  assert.equal(paused.kind, "failed");
+  assert.match(paused.text, /자동 게시가 꺼져/);
+  assert.match(paused.text, /수동 게시로 전환 예정/);
+  assert.match(paused.text, /초안과 미디어 생성은 계속 쓸 수 있습니다/);
+  assert.match(paused.text, /담당자 확인/);
+  assert.match(paused.text, /꺼 둔 사유: 계정 정지 재고 대기/);
+  // 사유가 없으면 붙이지 않는다. 다른 코드의 pause_reason은 쓰지 않는다
+  assert.doesNotMatch(publishResultKo({ status: "failed", outcome: "publish_paused", output: null }).text, /꺼 둔 사유/);
+  assert.doesNotMatch(publishResultKo({ status: "failed", outcome: "daily_limit_reached", output: { pause_reason: "x" } }).text, /꺼 둔 사유/);
+  assert.match(publishResultKo({ status: "failed", outcome: "publish_control_error", output: null }).text, /스위치를 읽을 수 없어/);
+  const failed = publishStatusLine({ status: "failed", can_request: false, failure_code: "publish_paused" } as PublishState)!;
+  assert.equal(failed.tone, "bad");
+  assert.match(failed.text, /승인 뒤 자동 게시가 꺼/);
+  assert.match(publishStatusLine({ status: "failed", can_request: false, failure_code: "publish_control_error" } as PublishState)!.text, /스위치를 읽을 수 없어/);
 });
 
 test("게시 요청 연결 오류는 서버 문장 없이 상태별 문구", () => {
