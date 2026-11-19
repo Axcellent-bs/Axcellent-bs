@@ -48,8 +48,8 @@ export default function LoginPage() {
   const { signIn } = useSession()
   const company = useCompany()
   const navigate = useNavigate()
-  const [email, setEmail] = useState(ACCOUNTS[0].email)
-  const [password, setPassword] = useState('demo')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const enter = (id: string) => {
@@ -88,11 +88,11 @@ export default function LoginPage() {
           <form onSubmit={submit} className="space-y-3">
             <label className="block space-y-1 text-sm">
               <span className="text-ink-700">회사 이메일</span>
-              <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
+              <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" />
             </label>
             <label className="block space-y-1 text-sm">
               <span className="text-ink-700">비밀번호</span>
-              <input className="field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+              <input className="field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
             </label>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <button className="btn-primary w-full py-2.5">로그인</button>

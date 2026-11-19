@@ -9,8 +9,8 @@ const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.webp`
 export default function OperatorLogin() {
   const { signIn } = useSession()
   const navigate = useNavigate()
-  const [email, setEmail] = useState(OPERATORS[0].email)
-  const [password, setPassword] = useState('demo')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const submit = (e: FormEvent) => {
@@ -33,11 +33,11 @@ export default function OperatorLogin() {
           <h1 className="text-lg font-semibold">관제 센터 로그인</h1>
           <label className="block space-y-1 text-sm">
             <span className="text-ink-700">운영자 이메일</span>
-            <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
+            <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" />
           </label>
           <label className="block space-y-1 text-sm">
             <span className="text-ink-700">비밀번호</span>
-            <input className="field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+            <input className="field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
           </label>
           {error && <p className="text-sm text-red-700">{error}</p>}
           <button className="btn-primary w-full py-2.5">로그인</button>
