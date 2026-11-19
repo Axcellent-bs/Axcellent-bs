@@ -58,7 +58,7 @@ export default function CompanyConnect() {
     setError(null)
     // 같은 키로 다시 연결하면 지난번에 입력한 회사 정보를 미리 채운다
     const prev = r.issued.company
-    setInfo(prev ? { name: prev.name, industry: prev.industry, network: prev.network } : { name: '', industry: INDUSTRIES[0], network: DETECTED_NETWORK })
+    setInfo(prev ? { name: prev.name, industry: prev.industry, network: prev.network, siteUrl: prev.siteUrl } : { name: '', industry: INDUSTRIES[0], network: DETECTED_NETWORK, siteUrl: '' })
     setPhase({ at: 'info', key: r.issued })
   }
   const submitInfo = (e: FormEvent) => {
@@ -66,6 +66,7 @@ export default function CompanyConnect() {
     if (phase.at !== 'info') return
     if (!info.name.trim()) return setError('회사 이름을 입력하세요.')
     if (!validNetwork(info.network)) return setError('사내망 주소를 192.168.30.0/24 같은 형태로 입력하세요. 사내 IP 대역만 돼요.')
+    if (info.siteUrl?.trim() && !/^https?:\/\/\S+$/.test(info.siteUrl.trim())) return setError('사이트 주소는 http:// 또는 https://로 시작해야 해요.')
     setError(null)
     setStep(0)
     setPhase({ at: 'run', key: phase.key, info: { ...info, name: info.name.trim(), network: info.network.trim() } })
@@ -75,6 +76,7 @@ export default function CompanyConnect() {
     e.preventDefault()
     if (!info.name.trim()) return setError('회사 이름을 입력하세요.')
     if (!validNetwork(info.network)) return setError('사내망 주소를 192.168.30.0/24 같은 형태로 입력하세요. 사내 IP 대역만 돼요.')
+    if (info.siteUrl?.trim() && !/^https?:\/\/\S+$/.test(info.siteUrl.trim())) return setError('사이트 주소는 http:// 또는 https://로 시작해야 해요.')
     setError(null)
     void updateCompanyInfo({ ...info, name: info.name.trim(), network: info.network.trim() }).catch((x: Error) => setError(x.message))
     setEditing(false)
@@ -128,7 +130,7 @@ export default function CompanyConnect() {
                 </div>
                 {!editing && (
                   <button type="button" className="btn-ghost"
-                    onClick={() => { setInfo({ name: company.name, industry: company.industry, network: company.network }); setEditing(true); setError(null) }}>
+                    onClick={() => { setInfo({ name: company.name, industry: company.industry, network: company.network, siteUrl: company.siteUrl ?? '' }); setEditing(true); setError(null) }}>
                     회사 정보 고치기
                   </button>
                 )}
@@ -152,6 +154,10 @@ export default function CompanyConnect() {
                       <input className="field font-mono" value={info.network} onChange={(e) => setInfo({ ...info, network: e.target.value })} />
                     </label>
                   </div>
+                  <label className="block space-y-1 text-sm">
+                    <span className="text-ink-700">사이트 주소 <span className="text-xs text-ink-500">(선택 · 머리글에 사이트 아이콘과 링크로 보여요)</span></span>
+                    <input className="field font-mono" value={info.siteUrl ?? ''} placeholder="https://www.example.com" onChange={(e) => setInfo({ ...info, siteUrl: e.target.value })} />
+                  </label>
                   {error && <p className="text-sm text-red-700">{error}</p>}
                   <div className="flex gap-2">
                     <button className="btn-primary px-5">저장</button>
@@ -241,6 +247,10 @@ export default function CompanyConnect() {
                 <label className="block space-y-1 text-sm">
                   <span className="text-ink-700">사내망 주소 <span className="text-xs text-ink-500">(이 서버에서 찾은 값, 다르면 고치세요)</span></span>
                   <input className="field font-mono" value={info.network} onChange={(e) => setInfo({ ...info, network: e.target.value })} />
+                </label>
+                <label className="block space-y-1 text-sm">
+                  <span className="text-ink-700">사이트 주소 <span className="text-xs text-ink-500">(선택 · 머리글에 사이트 아이콘과 링크로 보여요)</span></span>
+                  <input className="field font-mono" value={info.siteUrl ?? ''} placeholder="https://www.example.com" onChange={(e) => setInfo({ ...info, siteUrl: e.target.value })} />
                 </label>
                 {error && <p className="text-sm text-red-700">{error}</p>}
                 <div className="flex flex-wrap items-center gap-2">

@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ax_agent_template import company_connection as store
 from ax_dashboard_api.auth import require_human_for_writes
@@ -47,6 +48,16 @@ class InfoIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     industry: str = Field("", max_length=80)
     network: str = Field("", max_length=80)
+    # 회사 사이트 주소(머리글 파비콘·링크). 브라우저가 직접 불러 서버는 부르지 않는다
+    site_url: str = Field("", max_length=300)
+
+    @field_validator("site_url")
+    @classmethod
+    def _site(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        if value and not re.match(r"^https?://[^\s/@?#]+(/[^\s?#]*)?$", value):
+            raise ValueError("사이트 주소는 http:// 또는 https://로 시작해야 해요")
+        return value
 
 
 class ConnectIn(InfoIn):
@@ -127,6 +138,7 @@ def _info(body: InfoIn) -> dict[str, str]:
         "name": body.name.strip(),
         "industry": body.industry.strip(),
         "network": body.network.strip(),
+        "site_url": body.site_url,
     }
 
 
@@ -200,11 +212,7 @@ def connect(body: ConnectIn) -> dict:
     for k in data["keys"]:
         if prev and k["id"] == prev.get("key_id") and k["id"] != found["id"]:
             k["status"] = "issued"
-    info = {
-        "name": body.name.strip(),
-        "industry": body.industry.strip(),
-        "network": body.network.strip(),
-    }
+    info = _info(body)
     if not info["name"]:
         raise ApiError(422, "NAME_REQUIRED", "회사 이름을 넣어 주세요")
     company = {"id": f"c-{found['id']}", **info, "key_id": found["id"], "connected_at": _now()}
@@ -221,11 +229,7 @@ def update_company(body: InfoIn) -> dict:
     company = data.get("company")
     if not company:
         raise ApiError(409, "NOT_CONNECTED", "연결된 회사가 없어요")
-    info = {
-        "name": body.name.strip(),
-        "industry": body.industry.strip(),
-        "network": body.network.strip(),
-    }
+    info = _info(body)
     if not info["name"]:
         raise ApiError(422, "NAME_REQUIRED", "회사 이름을 넣어 주세요")
     company.update(info)

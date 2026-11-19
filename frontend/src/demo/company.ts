@@ -12,11 +12,13 @@ export type ConnectedCompany = {
   name: string
   industry: string
   network: string
+  /** 회사 사이트 주소(머리글 파비콘·회사 이름 링크). 없으면 빈 값 */
+  siteUrl?: string
   /** 연결에 쓴 키(가린 값)와 연결한 시각 */
   key?: string
   connectedAt?: string
 }
-export type CompanyInfo = Pick<ConnectedCompany, 'name' | 'industry' | 'network'>
+export type CompanyInfo = Pick<ConnectedCompany, 'name' | 'industry' | 'network' | 'siteUrl'>
 export type KeyStatus = 'issued' | 'connected' | 'revoked'
 export type IssuedKey = {
   id: string
@@ -30,8 +32,9 @@ export type IssuedKey = {
   company?: ConnectedCompany
 }
 
-type ServerRow = { id: string; key: string; memo: string | null; issued_at: string; status: KeyStatus; company: CompanyInfo | null }
-type ServerCompany = CompanyInfo & { id: string; key: string | null; connected_at: string }
+type ServerInfo = { name: string; industry: string; network: string; site_url?: string }
+type ServerRow = { id: string; key: string; memo: string | null; issued_at: string; status: KeyStatus; company: ServerInfo | null }
+type ServerCompany = ServerInfo & { id: string; key: string | null; connected_at: string }
 type ServerState = { keys: ServerRow[]; company: ServerCompany | null; editable: boolean }
 
 const PATH = '/api/dashboard/connection-keys'
@@ -41,9 +44,12 @@ const listeners = new Set<() => void>()
 const notify = () => listeners.forEach((l) => l())
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
 
+const fromServer = (c: ServerInfo): CompanyInfo => ({ name: c.name, industry: c.industry, network: c.network, siteUrl: c.site_url || undefined })
+const toServer = (c: CompanyInfo) => ({ name: c.name, industry: c.industry, network: c.network, site_url: c.siteUrl ?? '' })
+
 function apply(s: ServerState) {
   company = s.company
-    ? { id: s.company.id, name: s.company.name, industry: s.company.industry, network: s.company.network, key: s.company.key ?? undefined, connectedAt: s.company.connected_at }
+    ? { id: s.company.id, name: s.company.name, industry: s.company.industry, network: s.company.network, siteUrl: s.company.site_url || undefined, key: s.company.key ?? undefined, connectedAt: s.company.connected_at }
     : null
   keys = s.keys.map((r) => ({
     id: r.id,
@@ -51,7 +57,7 @@ function apply(s: ServerState) {
     memo: r.memo ?? undefined,
     issuedAt: r.issued_at,
     status: r.status,
-    company: r.company ? { id: company && r.status === 'connected' ? company.id : `k-${r.id}`, ...r.company } : undefined,
+    company: r.company ? { id: company && r.status === 'connected' ? company.id : `k-${r.id}`, ...fromServer(r.company) } : undefined,
   }))
   notify()
 }
@@ -104,16 +110,16 @@ export async function revokeKey(id: string) {
 export type KeyCheck = { ok: true; issued: IssuedKey } | { ok: false; reason: string }
 export async function checkKey(input: string): Promise<KeyCheck> {
   const key = input.trim().toUpperCase()
-  const r = await call<{ ok: boolean; reason: string | null; company: CompanyInfo | null }>('POST', `${PATH}/check`, { key })
+  const r = await call<{ ok: boolean; reason: string | null; company: ServerInfo | null }>('POST', `${PATH}/check`, { key })
   if (!r.ok) return { ok: false, reason: r.reason ?? '쓸 수 없는 키예요.' }
-  return { ok: true, issued: { id: '', key, issuedAt: '', status: 'issued', company: r.company ? { id: '', ...r.company } : undefined } }
+  return { ok: true, issued: { id: '', key, issuedAt: '', status: 'issued', company: r.company ? { id: '', ...fromServer(r.company) } : undefined } }
 }
 export async function connectWithKey(k: IssuedKey, info: CompanyInfo) {
-  apply(await call<ServerState>('POST', `${PATH}/connect`, { key: k.key, ...info }))
+  apply(await call<ServerState>('POST', `${PATH}/connect`, { key: k.key, ...toServer(info) }))
 }
 /** 연결된 회사 정보 고치기 (연결은 그대로) */
 export async function updateCompanyInfo(info: CompanyInfo) {
-  apply(await call<ServerState>('POST', `${PATH}/company`, info))
+  apply(await call<ServerState>('POST', `${PATH}/company`, toServer(info)))
 }
 /** 끊어도 키에 남긴 회사 정보는 두어서, 같은 키로 다시 연결할 때 미리 채운다 */
 export async function disconnect() {
