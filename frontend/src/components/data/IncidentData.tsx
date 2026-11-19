@@ -1,4 +1,5 @@
 import { Bars, Stat } from "@/components/admin/bits";
+import { rollbackDoneLine } from "@/lib/rollbackResult";
 import { ChartWithTable, TableView } from "@/components/charts";
 import { Chip, Empty, ErrorBox, Panel, RefList, TONE, Waiting, type Resource } from "@/components/finance/bits";
 import { incidentTitle, type OrchIncident, type OrchStep } from "@/lib/agentChat";
@@ -207,14 +208,7 @@ function gapSeconds(from: string | null | undefined, to: string | null | undefin
 /** 되돌리기 단계의 실제 결과 한 줄 (되돌림 완료 · 전 v2 → 후 v1 등) */
 function rollbackLine(step: OrchStep | undefined): string | null {
   if (!step) return null;
-  const out = step.output ?? {};
-  const pv = out.payment_version as { before?: string; after?: string } | undefined;
-  const before = pv?.before ?? (out.from_version as string | undefined);
-  const after = pv?.after ?? (out.to_version as string | undefined);
-  if (step.status === "completed") {
-    const check = out.post_check_ok === true ? " · 되돌린 뒤 확인 통과" : out.post_check_ok === false ? " · 되돌린 뒤 확인 실패" : "";
-    return `되돌림 완료 · 전 ${before ?? UNKNOWN} → 후 ${after ?? UNKNOWN}${check}`;
-  }
+  if (step.status === "completed") return rollbackDoneLine(step.output, UNKNOWN);
   if (step.status === "held") return "되돌리기 사람 승인 기다림";
   if (step.status === "transfer_queued") return "되돌리지 않고 사람에게 넘김";
   if (step.status === "skipped") return `되돌리지 않음 (${step.note || SKIP_DEFAULT})`;
