@@ -2,14 +2,13 @@ import { Link, useRouter } from "@/lib/nav";
 import { usePathname } from "@/lib/nav";
 import { useState, type ComponentType, type ReactNode } from "react";
 import { AccountSwitcher } from "@/demo/AccountSwitcher";
-import { canOpen, homeOf, servicesOf, supportViewer, useSession, type Account } from "@/demo/session";
+import { homeOf, servicesOf, supportViewer, useSession, type Account } from "@/demo/session";
 import { useCompany } from "@/demo/company";
 import { endSupport, supportActive, useSupport } from "@/demo/support";
 import { AGENTS, activeChild, matchPath, type Service, type SubItem } from "@/demo/services";
 import { useOpenHandoffCount } from "@/lib/handoffs";
-import { AlertBell } from "./AlertBell";
 import { DEV_TASKS_HREF, ORCHESTRATOR_HREF, PLANNING_REQUESTS_HREF, useNavCounts } from "@/lib/navCounts";
-import { IconAgents, IconChart, IconGear, IconInbox, IconSearch } from "../icons";
+import { IconAgents, IconChart, IconGear, IconInbox } from "../icons";
 import { preConnectMenu, systemMenuFor } from "@/demo/systemMenu";
 
 // 메뉴: AI가 상위 탭이고, 그 AI가 맡은 서비스가 하위 탭이다. 서비스 안 화면(예: 고객 문의의 상담 콘솔)은 그 아래 한 단 더.
@@ -253,8 +252,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
           )}
           <div className="flex-1" />
           <div className="flex shrink-0 items-center gap-4 text-ink-700">
-            {account && canOpen(account, "/console") && <Link href="/console" title="문의 찾기" aria-label="문의 찾기"><IconSearch size={20} /></Link>}
-            <AlertBell />
             <AccountSwitcher />
           </div>
         </header>
