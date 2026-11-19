@@ -85,6 +85,10 @@ bash scripts/run_all.sh stop
   캣북스 shop-api와 dashboard-api에 같은 값을 넣고, 화면 빌드에는 넣지 않는다. 열람 토큰은 위 읽기만 열리고
   쓰기·그 밖의 관리 API는 모두 403이다. 에이전트 토큰 명부와 따로 두어 다른 서버(총괄 등)로는 통하지 않는다.
   `.env`에 없으면 run_all.sh가 `.data/tokens.env`에 만들어 두고 다시 켤 때 그대로 쓴다.
+- 판매 서버(shop-api)가 마케팅 등을 A2A로 부를 때 쓰는 에이전트 토큰 `shop-api`도 같은 명부(`AX_AGENT_TOKENS`)에 들어간다.
+  이 값은 판매 서버(`shop.env`)가 쓰는 값과 같아야 한다. 운영 서버는 `.data/tokens.env`의 `AX_AGENT_TOKENS=` 줄에
+  `shop-api=<판매 서버가 쓰는 토큰>`을 넣고 백엔드를 다시 켠다(run_all.sh가 저장된 값을 그대로 쓴다).
+  저장된 값이 없으면 새로 만들어 판매 서버와 달라지고, 그러면 마케팅이 UNAUTHORIZED로 거부한다.
 - 공통 로그(`.data/common_log.db`)·인사(`.data/hr.db`)·아카이브(`.data/archive.db`, 검색 벡터는 `archive_vectors.db`)는 파일이라 다시 켜도 남는다.
   아카이브 파일이 없으면 예전처럼 `hr.db`를 같이 읽는다. 옛 기록은 서버를 끄고 `uv run python scripts/migrate_archive_db.py`로 옮긴다(백업 후 복사, `--dry-run`으로 건수 확인, 원본은 지우지 않음).
   예전 판매 서버 파일(`.data/shop.db`)은 이제 쓰지 않지만 `reset`도 지우지 않고 그대로 둔다(되돌릴 때를 위해).
