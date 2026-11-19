@@ -457,9 +457,19 @@ export function TrendReportBody({ report, onRebuild }: { report: TrendReport; on
   );
 }
 
-/** 보고서 id로 읽어 그린다. 서버에 skill이 아직 없으면(403) "준비 중" */
-export function TrendReportView({ id, onRebuild }: { id: string; onRebuild?: (brief: TrendReportBrief) => void }) {
+/** 보고서 id로 읽어 그린다. 서버에 skill이 아직 없으면(403) "준비 중".
+ *  autoPrint: 대화 완료 카드의 "PDF로 저장"으로 열었으면 보고서를 그린 뒤 한 번 인쇄하고 onPrinted */
+export function TrendReportView({ id, onRebuild, autoPrint = false, onPrinted }: {
+  id: string; onRebuild?: (brief: TrendReportBrief) => void; autoPrint?: boolean; onPrinted?: () => void;
+}) {
   const { load, reload } = useReport(id);
+  const ready = load.kind === "ok";
+  useEffect(() => {
+    if (!autoPrint || !ready) return;
+    // 그린 다음 프레임에 인쇄 (보고서가 화면에 들어간 뒤)
+    const t = setTimeout(() => { onPrinted?.(); printReport(); }, 0);
+    return () => clearTimeout(t);
+  }, [autoPrint, ready, onPrinted]);
   if (load.kind === "loading") return <Waiting what="보고서를 불러오는 중…" />;
   if (load.kind === "error") {
     return load.state.kind === "missing" ? (

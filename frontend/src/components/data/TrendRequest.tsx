@@ -7,11 +7,14 @@ import { TrendReportView } from "@/components/data/TrendReportView";
 import { dataAi, type TrendReportInput, type TrendReportListItem } from "@/lib/data";
 import { sectionState, type SectionState } from "@/lib/segmentView";
 import { TREND_REPORT_PRESETS } from "@/lib/trendReportPresets";
+import type { TrendNavState } from "@/lib/chatCards";
 import {
   AGE_OPTIONS, CALLER_LABEL, EMPTY_FORM, GENDER_LABEL, REPORT_STATUS, buildInput, formFromBrief, hasInput, reportHash, reportIdFromHash, type RequestForm,
 } from "@/lib/trendReportView";
 
 // 트렌드&콘텐츠 "분석 의뢰" 하위 탭 (#request, 루프 단계와 별개).
+// - 데이터분석 1:1 대화 카드에서 넘어오면(location.state, lib/chatCards.ts TrendNavState) "직접 정하기"를 카드 값으로 채워 펴 두거나,
+//   보고서를 열자마자 인쇄한다 (한 번 쓰고 state를 지운다)
 // - 위: 의뢰문 붙여 넣기(여러 줄) → 넣고 만들면 request_text만 보낸다
 // - 접힘 "직접 정하기": 프리셋(친환경 화장품 = eco_beauty, 값은 lib/trendReportPresets.ts) → 제품·타깃 성별·연령·결과물·경쟁사·키워드
 // - "보고서 만들기" → trend_report_create → 주소 #request?id=<report_id>로 보고서를 연다(TrendReportView).
@@ -84,10 +87,12 @@ function PastList({ list, current, onOpen, onRetry }: { list: ListLoad; current:
   );
 }
 
-function RequestFormCard({ form, setForm, busy, onSubmit, error, editing, onCancel }: {
+function RequestFormCard({ form, setForm, busy, onSubmit, error, editing, onCancel, openDirect = 0 }: {
   form: RequestForm; setForm: (f: RequestForm) => void; busy: boolean; onSubmit: () => void; error: SectionState | null;
   /** 보고서를 고쳐서 다시 만드는 중: 직접 정하기를 펴 두고 rebuild로 보낸다 */
   editing?: boolean; onCancel?: () => void;
+  /** 0보다 크면 대화 카드 값으로 채운 것: 직접 정하기를 펴 둔다 (값이 바뀔 때마다 다시 편다) */
+  openDirect?: number;
 }) {
   const set = <K extends keyof RequestForm>(k: K, v: RequestForm[K]) => setForm({ ...form, [k]: v });
   const pickPreset = (id: string) => {
@@ -109,7 +114,7 @@ function RequestFormCard({ form, setForm, busy, onSubmit, error, editing, onCanc
         <textarea className="field min-h-[120px] w-full" value={form.requestText} onChange={(e) => set("requestText", e.target.value)}
           placeholder="총괄·기획이 보낸 의뢰 문장을 그대로 붙여 넣으세요. 제품·타깃·결과물·경쟁사·키워드를 데이터 AI가 읽어 정합니다." />
       </label>
-      <details key={editing ? "edit" : "new"} open={editing || undefined} className="rounded-lg border border-ink-100 px-3 py-2">
+      <details key={editing ? "edit" : `new-${openDirect}`} open={editing || openDirect > 0 || undefined} className="rounded-lg border border-ink-100 px-3 py-2">
         <summary className="cursor-pointer select-none text-sm font-medium text-ink-700">직접 정하기{pasted && <span className="ml-2 text-xs font-normal text-ink-500">의뢰문이 있으면 의뢰문만 보냅니다</span>}</summary>
         <fieldset disabled={pasted} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs text-ink-500">
@@ -183,6 +188,17 @@ export function TrendRequest() {
   const [form, setForm] = useState<RequestForm>(EMPTY_FORM);
   // 열어 둔 보고서의 의뢰를 고쳐서 다시 만드는 중 (폼을 직접 정하기로 미리 채워 연다)
   const [editing, setEditing] = useState(false);
+  // 대화 카드에서 넘어옴 (lib/chatCards.ts TrendNavState): "직접 정하기"를 카드 값으로 채워 펴 둔다 · 보고서를 열자마자 인쇄
+  const [filled, setFilled] = useState(0);
+  const [printId, setPrintId] = useState<string | null>(null);
+  const nav = location.state as TrendNavState | null;
+  useEffect(() => {
+    if (!nav?.trendRequestFill && !nav?.trendReportPrint) return;
+    if (nav.trendRequestFill) { setForm(nav.trendRequestFill); setEditing(false); setError(null); setFilled((x) => x + 1); }
+    if (nav.trendReportPrint && id) setPrintId(id);
+    // 한 번 쓰고 지운다 (뒤로 가기·새로 고침으로 다시 채우거나 인쇄하지 않게)
+    navigate({ pathname: location.pathname, search: location.search, hash: location.hash }, { replace: true, state: null });
+  }, [nav, id, navigate, location.pathname, location.search, location.hash]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<SectionState | null>(null);
   // 마지막으로 넣은 의뢰: 저장본을 열었으면(reused) 같은 입력으로 다시 만들기
@@ -223,10 +239,11 @@ export function TrendRequest() {
               )}
               {error && <Problem state={error} what="분석 의뢰" />}
             </div>
-            <TrendReportView key={id} id={id} onRebuild={(b) => { setForm(formFromBrief(b)); setError(null); setEditing(true); }} />
+            <TrendReportView key={id} id={id} onRebuild={(b) => { setForm(formFromBrief(b)); setError(null); setEditing(true); }}
+              autoPrint={printId === id} onPrinted={() => setPrintId(null)} />
           </>
         ) : (
-          <RequestFormCard form={form} setForm={setForm} busy={busy} error={error} editing={editing} onCancel={() => setEditing(false)}
+          <RequestFormCard form={form} setForm={setForm} busy={busy} error={error} editing={editing} onCancel={() => setEditing(false)} openDirect={filled}
             onSubmit={() => create(buildInput(form, editing))} />
         )}
       </div>
