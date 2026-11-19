@@ -33,7 +33,7 @@ from data_agent.data_chat_store import DataChatStore
 from data_agent.handlers import TimedLLMClient
 from data_agent.skills import trend_report as tr
 from data_agent.skills import trend_report_brief as tb
-from data_agent.trend_report_runner import TrendReportService, report_path, short_id
+from data_agent.trend_report_runner import TrendReportService, report_label, report_path
 from data_agent.trend_report_store import INTERRUPTED_REASON, TrendReportStore
 
 NOW = datetime(2026, 11, 19, 3, 0, tzinfo=UTC)
@@ -129,7 +129,7 @@ EXTRACTED = {"product": "친환경 화장품", "gender": "f", "ages": ["20", "30
 
 def test_trend_request_gets_a_card_not_a_report() -> None:
     llm = Extract(EXTRACTED)
-    th = _talk(_service(llm, names={"toun28_official": "톤28"}), ECO)
+    th = _talk(_service(llm, names={"toun28_official": "톤28(보고서)"}), ECO)
     assert th["status"] == "talking"
     last = th["messages"][-1]
     assert last["text"] == (
@@ -140,7 +140,10 @@ def test_trend_request_gets_a_card_not_a_report() -> None:
     b = card.brief
     assert (b.product, b.target_gender, b.target_ages) == ("친환경 화장품", "f", ["20", "30"])
     assert b.sources.product == "request_text" and b.sources.competitors == "preset"
-    assert b.competitor_names == {"toun28_official": "톤28"}  # 이전 보고서 이름만, 인스타 안 부름
+    # 프리셋 display_names + 이전 보고서 저장값(먼저). 인스타는 부르지 않는다
+    assert b.competitor_names["toun28_official"] == "톤28(보고서)"
+    assert b.competitor_names["beplain_official"] == "비플레인"
+    assert set(b.competitor_names) == set(b.competitors)
     assert card.brief_reason is None and card.cost_note.endswith("AI 1번")
     assert th["messages"][0]["card"] is None  # 사람 말은 카드 없음
     # 의뢰문은 데이터 블록으로만, LLM은 1번
@@ -236,6 +239,7 @@ def _chat_with_card(store: DataChatStore, who: str = "재현") -> str:
     th = store.create("의뢰", who)
     store.begin_turn(th["id"], ECO)
     card = TrendRequestCard.model_validate(json.loads(FIXTURE.read_text(encoding="utf-8"))[0])
+    card = card.model_copy(update={"accepted_report_id": None})  # 아직 접수 전
     store.finish_turn(th["id"], "카드", card=card.model_dump(mode="json"))
     return th["id"]
 
@@ -282,9 +286,14 @@ def test_chat_thread_id_is_saved_and_gets_progress_and_done(
     assert service.store.chat_thread(report_id) == thread
     msgs = chat.get(thread)["messages"]  # type: ignore[index]
     progress, done = msgs[-2], msgs[-1]
-    assert progress["text"] == f"의뢰 {short_id(report_id)} 만드는 중…"
+    label = report_label(report_id)
+    assert label == "TR-" + report_id[3:7].upper()
+    assert progress["text"] == f"의뢰 {label} 만드는 중…"
     assert progress["card"] == {"kind": "trend_report_progress", "report_id": report_id}
-    assert done["text"] == f"의뢰 {short_id(report_id)} 보고서 완료"
+    assert done["text"] == f"의뢰 {label} 보고서 완료"
+    # 의뢰 카드에 접수 표시 (새로고침해도 "접수됨")
+    request_card = next(m["card"] for m in msgs if (m["card"] or {}).get("kind") == "trend_request")
+    assert request_card["accepted_report_id"] == report_id
     card = TypeAdapter(DataChatCard).validate_python(done["card"])
     assert card.kind == "trend_report_done" and card.status == "done"
     assert card.top_evidence == ["짧은 1", "짧은 2", "옛 근거 문장"]  # short 먼저, 최대 3
@@ -304,7 +313,8 @@ def test_failed_report_says_the_reason(monkeypatch: pytest.MonkeyPatch) -> None:
                                  clock=lambda: NOW, chat=lambda: chat)  # fmt: skip
     report_id = _create(service, thread)
     done = chat.get(thread)["messages"][-1]  # type: ignore[index]
-    assert done["text"] == f"의뢰 {short_id(report_id)} 실패: 보고서를 만들지 못함 (RuntimeError)"
+    want = f"의뢰 {report_label(report_id)} 실패: 보고서를 만들지 못함 (RuntimeError)"
+    assert done["text"] == want
     assert done["card"]["status"] == "failed"
 
 
@@ -339,7 +349,7 @@ def test_interrupted_on_restart_tells_the_chat(tmp_path: Path) -> None:
     TrendReportService(store, lambda: None, publish=lambda e: None,  # type: ignore[arg-type, return-value]
                        clock=lambda: NOW, chat=lambda: chat)  # fmt: skip
     done = chat.get(thread)["messages"][-1]  # type: ignore[index]
-    assert done["text"] == f"의뢰 TR-abcdef 실패: {INTERRUPTED_REASON}"
+    assert done["text"] == f"의뢰 TR-ABCD 실패: {INTERRUPTED_REASON}"  # 표기 하나로 (11/19)
     assert done["card"]["status"] == "interrupted"
 
 

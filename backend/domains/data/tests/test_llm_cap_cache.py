@@ -1,5 +1,8 @@
-"""LLM 하루 상한에 닿아 덜 만든 결과(브리프·기회 카드·예시 아이디어)는 하루 캐시가 아니라 짧게만
-(`DATA_LLM_CAP_CACHE_MINUTES`, 기본 1시간) 저장한다. 만료되면 다음 미리 계산이 다시 만든다.
+"""LLM 하루 상한에 닿아 덜 만든 결과.
+
+- 예시 아이디어는 하루 캐시가 아니라 짧게만(`DATA_LLM_CAP_CACHE_MINUTES`, 기본 1시간) 저장한다
+- 브리프 자동 판(11/19~)은 한국 날짜당 한 번만 새로 만든다. 덜 만든 판은 읽기만 하다가 예산이
+  풀리면 그날 한 번만 다시(auto_retry). LLM이 막혔으면 재료를 계산하지 않고 이전 판 + 안내
 
 수집 계획·도메인 프로필은 상한이면 상태가 unknown이라 원래 저장하지 않는다 (여기서는 그대로인지 봄).
 실제 LLM을 부르지 않는다.
@@ -112,30 +115,119 @@ def test_the_data_llm_wrapper_marks_the_cap_before_calling(monkeypatch: pytest.M
     assert s.capped and not s.failed and called == []  # 부르지 않았다
 
 
-def test_a_capped_brief_is_kept_only_for_the_short_ttl(tmp_path: Path) -> None:
-    llm = CappedLLM()
-    first = _brief(tmp_path, llm, NOW)
-    assert any("LLM 하루 상한에 닿아 덜 만든 브리프라 60분만 저장" in x for x in first.limits)
-    asked = llm.asked
-    again = _brief(tmp_path, llm, NOW + timedelta(minutes=30))
-    assert again.cached and llm.asked == asked  # 1시간 안이면 저장분
-    # 상한이 풀린 뒤 만료되면 다시 만들고, 이번엔 하루 캐시로 저장한다
-    fresh = CappedLLM(capped=False)
-    later = _brief(tmp_path, fresh, NOW + timedelta(minutes=61))
-    assert not later.cached and fresh.asked > 0
-    assert not any("분만 저장" in x for x in later.limits)
-    assert _brief(tmp_path, fresh, NOW + timedelta(hours=5)).cached  # 하루 캐시
+# 11/19: 예전에는 상한 판을 60분만 저장해 1시간마다 미리 계산이 네이버·LLM을 다시 불렀다(하루 13판).
+# 이제 자동 판은 한국 날짜당 한 번만 새로 만들고, 덜 만든 판이면 예산이 풀렸을 때 그날 한 번만 다시.
 
 
-def test_capped_brief_ttl_follows_the_setting(tmp_path: Path) -> None:
-    llm = CappedLLM()
-    out = _brief(tmp_path, llm, NOW, {llm_failure.CAP_TTL_ENV: "10"})
-    assert any("10분만 저장" in x for x in out.limits)
+class CountingAges:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def __call__(self, keywords: list[str]) -> TrendAgeOutput:
+        self.calls += 1  # 네이버(trend_age) 호출 자리
+        return TrendAgeOutput(status="known", items=[])
+
+
+def _brief_with(tmp_path: Path, llm: Any, now: datetime, ages: Any) -> Any:
+    env = {brief.DB_ENV: str(tmp_path / "brief.db")}
+
+    async def go():  # noqa: ANN202
+        with llm_failure.scope():
+            return await brief.make_brief(
+                TrendInsightBriefRequest(), llm, env=env, popular=POPULAR, popular_reason=None,
+                rising=[], age_fn=ages, promo=None, catalog=None, now=now,
+            )  # fmt: skip
+
+    return asyncio.run(go()).output
+
+
+def _autos(tmp_path: Path) -> list[str]:
     store = brief.BriefStore(tmp_path / "brief.db")
     rules = brief.rules_version(brief.load_config({}))
-    assert store.get(DAY, rules, NOW + timedelta(minutes=9)) is not None
-    assert store.get(DAY, rules, NOW + timedelta(minutes=10)) is None
-    store.close()
+    try:
+        return [v["trigger"] for v in store.auto_versions(DAY, rules)]
+    finally:
+        store.close()
+
+
+def _budget(monkeypatch: pytest.MonkeyPatch, full: bool) -> None:
+    b = llm_budget.Budget()
+    if full:
+        b.add(10**6, 10**9)
+    monkeypatch.setattr(llm_budget, "BUDGET", b)
+
+
+def test_capped_brief_is_read_only_while_capped_then_retried_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _budget(monkeypatch, full=False)
+    ages, llm = CountingAges(), CappedLLM()
+    first = _brief_with(tmp_path, llm, NOW, ages)  # 만드는 중에 상한 → 덜 만든 판
+    assert any("LLM 하루 상한에 닿아 덜 만든 브리프" in x for x in first.limits)
+    assert ages.calls == 1 and _autos(tmp_path) == ["auto"]
+    # 상한 상태: 1시간 뒤·5시간 뒤 미리 계산도 네이버·LLM을 부르지 않고 저장분만
+    _budget(monkeypatch, full=True)
+    asked = llm.asked
+    for hours in (1, 5):
+        again = _brief_with(tmp_path, llm, NOW + timedelta(hours=hours), ages)
+        assert again.cached
+    assert ages.calls == 1 and llm.asked == asked and _autos(tmp_path) == ["auto"]
+    # 예산이 풀리면 그날 한 번만 다시(auto_retry)
+    _budget(monkeypatch, full=False)
+    fresh = CappedLLM(capped=False)
+    retried = _brief_with(tmp_path, fresh, NOW + timedelta(hours=6), ages)
+    assert not retried.cached and fresh.asked > 0 and ages.calls == 2
+    assert _autos(tmp_path) == ["auto", "auto_retry"]
+    # 그 뒤로는 하루 내내 읽기만 (다시 상한으로 덜 만들어졌어도)
+    for hours in (7, 12):
+        assert _brief_with(tmp_path, CappedLLM(), NOW + timedelta(hours=hours), ages).cached
+    assert ages.calls == 2 and _autos(tmp_path) == ["auto", "auto_retry"]
+
+
+def test_failed_brief_is_saved_and_not_rebuilt_every_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Broken(CappedLLM):
+        async def structured(self, *args: Any, **kwargs: Any) -> Any:
+            self.asked += 1
+            error = RuntimeError("공급자 오류")
+            llm_failure.mark(error)
+            raise error
+
+    _budget(monkeypatch, full=False)
+    ages = CountingAges()
+    first = _brief_with(tmp_path, Broken(), NOW, ages)
+    assert any("한 번만 다시 만든다" in x for x in first.limits)
+    # 예산이 충분하니 다음 회차에 한 번만 다시, 또 실패해도 그 뒤는 읽기만
+    for hours in (1, 2, 3, 4):
+        _brief_with(tmp_path, Broken(), NOW + timedelta(hours=hours), ages)
+    assert ages.calls == 2 and _autos(tmp_path) == ["auto", "auto_retry"]
+
+
+def test_llm_blocked_stops_before_any_material(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _budget(monkeypatch, full=True)
+    ages, llm = CountingAges(), CappedLLM()
+    out = _brief_with(tmp_path, llm, NOW, ages)  # 그날 판도 없고 상한
+    assert brief.CAPPED_NOTE in out.limits or out.reason == brief.CAPPED_NOTE
+    assert ages.calls == 0 and llm.asked == 0 and _autos(tmp_path) == []
+    # 핸들러가 재료를 계산하기 전에 보는 cached_brief도 같은 판을 준다 (숏츠·네이버 안 부름)
+    env = {brief.DB_ENV: str(tmp_path / "brief.db")}
+    hit = brief.cached_brief(TrendInsightBriefRequest(), env, NOW)
+    assert hit is not None and hit.output.reason == brief.CAPPED_NOTE
+
+
+def test_blocked_shows_the_previous_day_brief_with_the_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _budget(monkeypatch, full=False)
+    _brief_with(tmp_path, CappedLLM(capped=False), NOW - timedelta(days=1), CountingAges())
+    _budget(monkeypatch, full=True)
+    ages = CountingAges()
+    out = _brief_with(tmp_path, CappedLLM(), NOW, ages)
+    assert out.cached and out.day == DAY - timedelta(days=1) and brief.CAPPED_NOTE in out.limits
+    assert ages.calls == 0
 
 
 def test_a_full_brief_is_still_a_day_cache(tmp_path: Path) -> None:

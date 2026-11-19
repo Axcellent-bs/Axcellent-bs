@@ -536,18 +536,16 @@ def group_bursts(posts: Sequence[InstagramRadarPost], captions: Mapping[str, str
                  min_accounts: int) -> list[Group]:  # fmt: skip
     """해시태그·캡션 구절(trend_memes 정규화)이 겹치는 게시물끼리 묶는다 (순수 계산).
 
-    (이름, 묶은 단위 표기, 게시물). 의미 없는 단위(`caption_noise.noise`: 표기용 태그·이벤트
-    상투어·"수 있습니다"·"of the" 같은 흔한 말)를 빼고, 같은 단위를 쓴 계정이 `min_accounts`
-    이상인 단위만 묶음 씨앗이 된다.
+    (이름, 묶은 단위 표기, 게시물). 인스타 캡션은 긴 글이라 단위는 해시태그와 따옴표·「」 안
+    구절만 쓴다(`caption_noise.caption_units`, 캡션 일반 2~4어절 구절은 씨앗이 아님). 잡음(표기용
+    태그·이벤트 상투어·흔한 말·숫자 날짜 태그·1글자 태그)은 빼고, 같은 단위를 쓴 계정이
+    `min_accounts` 이상인 단위만 묶음 씨앗이 된다. 없으면 묶음 없음이 맞는 결과다.
     """
-    from data_agent.skills.caption_noise import noise
-    from data_agent.skills.trend_memes import units_of
+    from data_agent.skills.caption_noise import caption_units
 
     units: dict[str, dict[str, Any]] = {}
     for p in posts:
-        for key, unit in units_of(captions.get(p.media_id, ""), ()).items():
-            if noise(key):
-                continue
+        for key, unit in caption_units(captions.get(p.media_id, "")).items():
             u = units.setdefault(key, {"surface": unit.surface, "posts": [], "accounts": set()})
             u["posts"].append(p)
             u["accounts"].add(p.account)
