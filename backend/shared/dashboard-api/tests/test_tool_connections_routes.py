@@ -172,7 +172,8 @@ def test_write_needs_human_token(calls, client) -> None:
     c.headers.pop("authorization")
     assert c.post(BASE, json=_body()).status_code == 401
     assert c.delete(BASE + "/jenkins-1").status_code == 401
-    assert c.get(BASE).status_code == 200
+    assert c.get(BASE).status_code == 401  # 목록 읽기도 사람 토큰이 필요하다
+    assert client.get(BASE).status_code == 200
 
 
 def test_private_url_policy_applies_to_jenkins(calls, client, monkeypatch) -> None:

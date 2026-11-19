@@ -236,12 +236,15 @@ def usd_for(entry: PriceEntry, *, input_tokens: int, output_tokens: int) -> Deci
     ) / PER_MTOK
 
 
-def estimate_usd(entry: PriceEntry, *, prompt: str, duration_s: int | None) -> Decimal:
+def estimate_usd(
+    entry: PriceEntry, *, prompt: str, duration_s: int | None, extra_input_tokens: int = 0
+) -> Decimal:
+    """클립 1개의 추정 USD. `extra_input_tokens`: 이어 붙이기 클립의 입력(이전 영상·이미지)."""
     if entry.per_second_usd is not None:
         return entry.per_second_usd * _check_duration(entry, duration_s)
     return usd_for(
         entry,
-        input_tokens=input_tokens_estimate(prompt),
+        input_tokens=input_tokens_estimate(prompt) + extra_input_tokens,
         output_tokens=output_tokens_for(entry, duration_s),
     )
 

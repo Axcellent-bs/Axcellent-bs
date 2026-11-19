@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 미디어 만들기의 비용 줄·결과 문구가 서버 값만 쓰는지.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { estimateBlockKo, estimateLines, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, remainingSeconds, remainingKo, canDecideNow, decideErrorKo, approvalLink, type MediaEstimate, type PublishState } from "./briefMedia.ts";
+import { clampDuration, durationCostKrw, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, remainingSeconds, remainingKo, canDecideNow, decideErrorKo, approvalLink, type MediaEstimate, type PublishState } from "./briefMedia.ts";
 
 const estimate = (over: Partial<MediaEstimate> = {}): MediaEstimate => ({
   status: "ok", reason_code: null, media_kind: "video", cost_krw: 835, settled: false, basis: "price_table",
@@ -161,4 +161,27 @@ test("승인 화면 링크는 건을 강조할 뿐 승인 정보를 담지 않�
   assert.equal(approvalLink("rev_1"), "/marketing/campaign?review=rev_1");
   assert.equal(approvalLink(null), "/marketing/campaign");
   assert.ok(!/approve|decision|token/i.test(approvalLink("rev_1")));
+});
+
+const video = { min_s: 1, max_s: 60, absolute_max_s: 90, current_s: 15, cost_by_duration: { "10": 800, "15": 1200, "40": 3300, "60": 5000 } };
+
+test("영상 길이: 비용은 서버 표 값만 쓰고 표에 없는 길이는 만들 수 없다고 한다", () => {
+  const e = estimate({ video, per_item_limit_krw: 4000, monthly_budget_krw: 30000, month_total_krw: 0 });
+  assert.equal(durationCostKrw(video, 40), 3300);
+  assert.equal(durationCostKrw(video, 2), null);
+  assert.equal(durationProblemKo(e, 40), null);
+  assert.match(durationProblemKo(e, 60) ?? "", /건당 상한 4,000원을 넘어/);
+  assert.match(durationProblemKo(e, 2) ?? "", /만들 수 없습니다/);
+  assert.match(durationProblemKo({ ...e, month_total_krw: 29000 }, 40) ?? "", /이달 비용 상한/);
+  assert.equal(estimateLines(e, 40)[0], "영상 40초 예상 비용 3,300원 (단가표 기준 추정)");
+});
+
+test("영상 길이: 입력은 서버가 알려 준 범위(1~운영자 상한)로 맞추고 상한이 운영자 값임을 적는다", () => {
+  assert.equal(clampDuration(video, 200), 60);
+  assert.equal(clampDuration(video, 0), 1);
+  assert.equal(clampDuration(video, 12.4), 12);
+  assert.equal(clampDuration(video, Number.NaN), null);
+  assert.match(durationNoteKo(video), /운영자가 서버 설정/);
+  assert.match(durationNoteKo(video), /최대 90초/);
+  assert.match(estimateBlockKo("video_max_duration_invalid"), /1~90초/);
 });

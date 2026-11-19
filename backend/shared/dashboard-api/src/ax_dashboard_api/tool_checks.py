@@ -218,7 +218,7 @@ def _run_name_problem(text: str, version_input: str) -> str | None:
     # `${{ ... }}` 한 식 안에서만 찾는다 (식 안의 `{0}` 같은 홑 중괄호는 허용)
     pattern = (
         r"\$\{\{(?:(?!\}\}).)*?(?<![\w.])(?:github\.event\.)?inputs"
-        r"(?:\." + name + r"(?![\w-])|\[\s*(?:'" + name + r"'|\"" + name + r"\")\s*\])"
+        r"(?:\." + name + r"(?![\w.-])|\[\s*(?:'" + name + r"'|\"" + name + r"\")\s*\])"
         r"(?:(?!\}\}).)*\}\}"
     )
     if isinstance(run_name, str) and re.search(pattern, run_name, re.S):

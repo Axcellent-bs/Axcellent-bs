@@ -40,7 +40,6 @@ const Voice = lazy(() => import('@/pages/Voice'))
 const Support = lazy(() => import('@/pages/Support'))
 const SellerSettlements = lazy(() => import('@/pages/SellerSettlements'))
 const Orders = lazy(() => import('@/pages/Orders'))
-const InfraHosts = lazy(() => import('@/demo/InfraHosts'))
 const ToolConnections = lazy(() => import('@/demo/ToolConnections'))
 const CompanyConnect = lazy(() => import('@/demo/CompanyConnect'))
 const MembersPage = lazy(() => import('@/demo/MembersPage'))
@@ -110,8 +109,9 @@ function Pages() {
           <Route path="/agents/office" element={<AgentOffice />} />
           <Route path="/support" element={<Support />} />
           <Route path="/orders" element={<Orders />} />
-          <Route path="/hosts" element={<InfraHosts />} />
-          <Route path="/infra/hosts" element={<Navigate to="/hosts" replace />} />
+          {/* 예전 PC·서버 연결 화면은 회원·서버 관리의 DejaFix 연결 탭으로 (관리자 아니면 첫 화면으로 돌아간다) */}
+          <Route path="/hosts" element={<Navigate to="/system/members?tab=pcs" replace />} />
+          <Route path="/infra/hosts" element={<Navigate to="/system/members?tab=pcs" replace />} />
           <Route path="/infra" element={<Incidents />} />
           <Route path="/infra/:id" element={<IncidentDetail />} />
           {/* 예전 DejaFix 화면 주소(/infra/reports 등)는 현재 장애로 */}

@@ -153,6 +153,7 @@ def test_actions_run_name_with_version_passes(monkeypatch, pem, run_name) -> Non
         "deploy version",
         "\"deploy ${{ inputs['version_old'] }}\"",
         '"${{ github.sha }} inputs.version"',
+        '"deploy ${{ inputs.version.foo }}"',
     ],
 )
 def test_actions_run_name_without_version_fails_with_fix(monkeypatch, pem, run_name) -> None:

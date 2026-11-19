@@ -168,7 +168,7 @@ def test_a_bus_failure_is_503_so_the_shop_server_retries(client, monkeypatch) ->
 
 
 def test_human_tokens_are_not_needed_for_this_write(client, monkeypatch) -> None:
-    """사람 토큰 확인(require_human_for_writes)을 거치지 않고 회사 키만 본다."""
+    """사람 토큰 확인(require_human)을 거치지 않고 회사 키만 본다."""
     monkeypatch.delenv("DASHBOARD_HUMAN_TOKENS", raising=False)
     monkeypatch.delenv("SAFETY_HUMAN_TOKENS", raising=False)
     assert client.post(URL, json=_envelope(), headers=AUTH).status_code == 202

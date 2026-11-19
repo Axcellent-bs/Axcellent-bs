@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ApproverField, useApproverName } from "@/components/finance/ApproverName";
 import { DASHBOARD_API_URL } from "@/lib/env";
+import { useAuthedMedia } from "@/lib/authedMedia";
 import { FinanceApiError, finance, liveHumanTokenSet } from "@/lib/finance";
 import { approvalLink, canDecideNow, decideErrorKo, remainingKo, remainingSeconds, type PublishState } from "@/lib/briefMedia";
 
@@ -30,11 +31,13 @@ export function ApprovalPanel({ state, onDone }: { state: PublishState; onDone: 
   }, []);
   useEffect(() => () => { if (timer.current != null) window.clearTimeout(timer.current); }, []);
 
+  // 미리보기는 사람 토큰을 붙여 받는다(서버가 읽기에도 토큰을 요구한다)
+  const preview = useAuthedMedia(state.status === "held" && state.preview_url ? `${DASHBOARD_API_URL}${state.preview_url}` : null);
+
   if (state.status !== "held" || !reviewId) return null;
   const remaining = remainingSeconds(state.expires_at, now);
   const expired = remaining != null && remaining <= 0;
   const enabled = canDecideNow({ tokenSet: liveHumanTokenSet, reviewed, approver: approverName, remaining, busy: step === "busy" });
-  const previewUrl = state.preview_url ? `${DASHBOARD_API_URL}${state.preview_url}` : null;
 
   async function decide(decision: "approved" | "rejected") {
     if (step === "busy" || !reviewId) return;
@@ -61,11 +64,12 @@ export function ApprovalPanel({ state, onDone }: { state: PublishState; onDone: 
         <span className="text-ink-500">시간 안에 아무도 누르지 않으면 자동으로 닫힙니다. 기한은 늘릴 수 없습니다.</span>
       </div>
 
-      {previewUrl && (
+      {preview.src && (
         state.preview_kind === "video"
-          ? <video className="max-h-80 rounded-xl bg-black" src={previewUrl} controls preload="metadata" aria-label="게시될 영상 미리보기" />
-          : <img className="max-h-80 rounded-xl" src={previewUrl} alt="게시될 이미지 미리보기" />
+          ? <video className="max-h-80 rounded-xl bg-black" src={preview.src} controls preload="metadata" aria-label="게시될 영상 미리보기" />
+          : <img className="max-h-80 rounded-xl" src={preview.src} alt="게시될 이미지 미리보기" />
       )}
+      {preview.failed && <p className="text-ink-500">미리보기 파일을 불러올 수 없습니다.</p>}
       <div>
         <p className="text-ink-500">게시될 글 전체(수정할 수 없습니다)</p>
         <p className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-white px-2 py-1 text-ink-900">{state.caption ?? "서버가 글을 알려 주지 않았습니다."}</p>

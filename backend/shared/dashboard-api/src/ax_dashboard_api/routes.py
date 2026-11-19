@@ -78,7 +78,7 @@ from ax_dashboard_api import (
 from ax_dashboard_api import (
     communications as communication_log,
 )
-from ax_dashboard_api.auth import human_from_authorization, require_human_for_writes
+from ax_dashboard_api.auth import human_from_authorization, require_human
 from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, require_mock
 from ax_dashboard_api.schemas import (
     AgentMessageBody,
@@ -121,7 +121,7 @@ from ax_dashboard_api.schemas import (
 
 HR_LIST_LIMIT = 200  # hr 조회 skill의 최대 건수
 
-router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human_for_writes)])
+router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human)])
 # 목 모드는 메모리 데이터, 실제 모드는 shop-api·support에서 읽는다 (`live_views.py`).
 # 지식 조각·후기는 아직 실제 출처가 없어 실제 모드에서는 빈 목록이다 (지어내지 않는다).
 mock_only = APIRouter()
@@ -1024,16 +1024,29 @@ async def handoff_brief_to_sns(
 _PROPOSAL_ID = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
 
 
+class BriefMediaBody(BaseModel):
+    """본문은 선택이다. 영상 길이만 받는다(종류·필드는 받지 않는다: 다른 키는 무시한다)."""
+
+    duration_s: int | None = Field(default=None, ge=1, le=90, strict=True)  # 코드 절대 상한 90초
+
+
 @router.post("/marketing/briefs/{proposal_id}/media")
-async def prepare_brief_media(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> dict:
-    """넘긴 기획안의 저장된 미디어 요청(종류·필드)으로 미디어 초안을 만든다. 본문이 없다.
+async def prepare_brief_media(
+    proposal_id: str = Path(pattern=_PROPOSAL_ID), body: BriefMediaBody | None = None
+) -> dict:
+    """넘긴 기획안의 저장된 미디어 요청(종류·필드)으로 미디어 초안을 만든다.
+
+    본문은 선택이고 영상 길이(`duration_s`, 1~90)만 받는다. 설정 상한(운영자가 정한 값)을 넘는지는
+    마케팅이 판정해 `duration_over_limit`으로 돌려준다.
 
     마케팅 `prepare_brief_media` → 기존 `prepare_sns_post_from_media`(B등급 안전 관문·비용 상한·
     AI 라벨·점검). 게시(`publish_sns`, C등급 사람 승인)는 하지 않는다. 영상은 길게 걸릴 수 있다.
     보류·상한 초과·미정 필드 같은 판단 결과는 오류가 아니라 `status`·`outcome`으로 돌려준다.
     """
     _no_org_in_mock()
-    return ok(await marketing_client.brief_media_call(proposal_id))
+    return ok(
+        await marketing_client.brief_media_call(proposal_id, body.duration_s if body else None)
+    )
 
 
 @router.get("/marketing/briefs/{proposal_id}/media/preview")
@@ -1616,18 +1629,14 @@ class LeaveBody(BaseModel):
 
 
 @router.get("/presence")
-async def presence(request: Request, area: str | None = None) -> dict:
-    """담당별 상태(근무 중·교대 외·휴가 중). 상태 코드는 모두에게 보인다.
+async def presence(area: str | None = None) -> dict:
+    """담당별 상태(근무 중·교대 외·휴가 중)와 휴가 기간·입력자.
 
-    휴가 기간·입력자는 사람 토큰이 있는 요청에만 담는다(사람별 로그인이 생기기 전까지 관리자만).
+    읽기도 사람 토큰이 있어야 하므로(`require_human`) 여기 닿은 요청은 모두 상세를 받는다.
+    사람별 로그인이 생기면 상세는 인사 지정자로 좁힌다.
     """
     _presence_on()
-    try:
-        human_from_authorization(request.headers.get("authorization"))
-        details = True
-    except ApiError:
-        details = False
-    payload: dict = {"include_details": details}
+    payload: dict = {"include_details": True}
     if area:
         payload["area"] = area
     out = await hr_client.call("get_presence", payload)

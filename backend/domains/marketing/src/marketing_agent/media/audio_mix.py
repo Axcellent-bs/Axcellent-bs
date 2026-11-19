@@ -1,7 +1,7 @@
 """BGM 후처리(ffmpeg): 영상의 오디오를 모두 버리고 AI가 만든 BGM만 입힌다.
 
 흐름(명령 2개):
-1. BGM을 영상 길이(최대 `MAX_VIDEO_S`=8초)로 자르고 페이드 인·아웃을 넣어 AAC로 인코딩한다.
+1. BGM을 영상 길이(최대 `MAX_VIDEO_S`=15초)로 자르고 페이드 인·아웃을 넣어 AAC로 인코딩한다.
 2. 영상 스트림만(`-map 0:v:0`, 입력 오디오는 모두 제외) 복사(`-c:v copy`)하고 1의 결과를 붙인다.
 
 안전 규칙:
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from marketing_agent.media.config import ffmpeg_bin
 
-MAX_VIDEO_S = 8.0  # safety 기준(video_duration)·단가표 max_duration_s와 같다
+MAX_VIDEO_S = 15.0  # safety 기준(video_duration)·단가표 max_duration_s와 같다
 FADE_IN_RANGE = (0.1, 0.3)
 FADE_OUT_RANGE = (0.5, 1.0)
 DEFAULT_FADE_IN_S = 0.2
@@ -55,7 +55,7 @@ Runner = Callable[[Sequence[str], int], RunOutput]
 class MixResult:
     output_path: Path
     sha256: str
-    duration_s: float  # BGM을 자른 길이(= 영상 길이, 최대 8초)
+    duration_s: float  # BGM을 자른 길이(= 영상 길이, 최대 15초)
     audio_tracks: int  # 항상 1
     commands: tuple[tuple[str, ...], ...]  # 실행한 ffmpeg 인자 목록(증빙)
     ffmpeg_bin: str

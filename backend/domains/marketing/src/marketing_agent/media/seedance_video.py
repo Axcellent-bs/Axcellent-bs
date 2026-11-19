@@ -9,6 +9,12 @@ BytePlus ModelArk 공식 문서(2026-11-18 확인)가 말하는 형태만 쓴다
   "generate_audio": false, "watermark": false}` → 응답 `id`.
 - 조회: `GET /api/v3/contents/generations/tasks/{id}` → `status`(queued·running·succeeded·failed·
   cancelled·expired), `content.video_url`(24시간만 유효), `usage.completion_tokens`, `error`.
+- 모델 ID(2026-11-19 확인, seedance-2-5.md):
+  Seedance 2.5 `dreamina-seedance-2-5-260628`(480p·720p·1080p·4k),
+  Seedance 2.5 flash `dreamina-seedance-2-5-flash-261115`(480p·720p).
+  둘 다 9:16, 4~30초, generate_audio 지원.
+  `MARKETING_VIDEO_MODEL`에 그대로 넣으면 이 어댑터가 처리한다(코드 변경 불필요).
+  키 없음 = 실호출 미검증.
 - 9:16 지원, 해상도 480p·720p(2.5 일반은 1080p·4k도 있으나 단가 미확인이라 열지 않는다),
   길이 4~30초.
   `generate_audio=false`면 무음. 그래도 오디오가 섞여 오면 공통 뼈대가 ffmpeg로 제거한다.

@@ -1,6 +1,6 @@
 import { ApiError } from "./apiError";
 import type { OrchIncident, OrchStep } from "./agentChat";
-import { DASHBOARD_API_URL } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 
 // 총괄 이슈·부서 사용량 읽기. 화면은 총괄도 판매 서버도 직접 부르지 않고 dashboard-api 중계(GET만,
 // `/api/dashboard/shop/*`)를 부른다. dashboard-api가 회사 연결 주소의 shop-api를 서버 쪽 열람 토큰으로 읽는다.
@@ -56,7 +56,7 @@ export const relayEnabled = Boolean(DASHBOARD_API_URL);
 
 async function get<T, M = Record<string, unknown>>(path: string): Promise<{ data: T; meta: M }> {
   if (!relayEnabled) throw new ApiError("총괄 AI 읽기 연결이 꺼져 있습니다", 403);
-  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { cache: "no-store" });
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { headers: dashboardAuth(), cache: "no-store" });
   let body: { data?: T; meta?: M; error?: { code?: string; message?: string } } = {};
   try { body = await res.json(); } catch { /* 본문이 JSON이 아님 */ }
   if (!res.ok || body.data === undefined) throw new ApiError(body.error?.message ?? `요청 실패 (${res.status})`, res.status, undefined, body.error?.code);

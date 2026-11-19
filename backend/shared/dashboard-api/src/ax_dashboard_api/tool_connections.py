@@ -9,7 +9,7 @@
 - `POST   /api/dashboard/tool-connections/{id}/check`: 저장된 연결을 다시 확인하고 결과를 남긴다
 - `DELETE /api/dashboard/tool-connections/{id}`: 지우기. 가리키는 연결이 있으면 409 `IN_USE`
 
-쓰기는 사람 토큰만 된다(`require_human_for_writes`). 주소 칸은 `check_host`(사내 주소·허용 목록)를
+읽기·쓰기 모두 사람 토큰만 된다(`require_human`). 주소 칸은 `check_host`(사내 주소·허용 목록)를
 통과해야 한다.
 보관함 파일이 깨졌거나 경로가 없어 못 쓰면 409 `STORE_UNAVAILABLE`(문구에 이유와 조치).
 비밀 값은 응답·로그·오류 문구에 넣지 않는다.
@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from ax_agent_template import company_connection as host_policy
 from ax_agent_template import tool_connections as store
 from ax_agent_template.tool_connections import ToolConnection, ToolConnectionError
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.company_connection import Check
 from ax_dashboard_api.envelope import ApiError, ok
 from ax_dashboard_api.tool_checks import run_checks
@@ -36,7 +36,7 @@ logger = logging.getLogger("ax.dashboard.tool_connections")
 
 router = APIRouter(
     prefix="/api/dashboard/tool-connections",
-    dependencies=[Depends(require_human_for_writes)],
+    dependencies=[Depends(require_human)],
 )
 
 

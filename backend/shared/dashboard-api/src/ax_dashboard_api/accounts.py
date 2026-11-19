@@ -252,7 +252,7 @@ def require_session_role(*roles: str) -> Callable[..., None]:
     """로그인 세션 토큰이면 역할을 본다. 공용 토큰·토큰 없음은 그대로 둔다(옮기는 동안, 설계 3절).
 
     공용 토큰은 누가 쓰는지 몰라 역할이 없으므로 이 검사를 건너뛰고 기존 사람 토큰 검사
-    (`require_human_for_writes`)에만 맡긴다. 공용 토큰을 끄는 단계(설계 5단계)에서 막힌다.
+    (`auth.require_human`)에만 맡긴다. 공용 토큰을 끄는 단계(설계 5단계)에서 막힌다.
     """
 
     def dependency(authorization: str | None = Header(None)) -> None:

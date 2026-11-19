@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { DASHBOARD_API_URL, HUMAN_TOKEN_SET } from "@/lib/env";
+import { useAuthedMedia } from "@/lib/authedMedia";
 import { briefs } from "@/lib/briefs";
 import type { PublishLine, PublishState } from "@/lib/briefMedia";
 import {
@@ -68,7 +69,9 @@ export function ManualPublishCard({ state, onDone }: { state: PublishState; onDo
   }
 
   const problem = permalinkProblemKo(link);
-  const previewUrl = state.preview_url ? `${DASHBOARD_API_URL}${state.preview_url}` : null;
+  // 미리보기·내려받기는 사람 토큰을 붙여 받은 브라우저 안 주소로 한다(서버가 읽기에도 토큰을 요구한다)
+  const preview = useAuthedMedia(state.preview_url ? `${DASHBOARD_API_URL}${state.preview_url}` : null);
+  const previewUrl = preview.src;
   const isVideo = state.preview_kind === "video";
 
   return (
@@ -112,6 +115,7 @@ export function ManualPublishCard({ state, onDone }: { state: PublishState; onDo
           </p>
         </div>
       )}
+      {preview.failed && <p className="text-ink-500">미리보기 파일을 불러올 수 없습니다.</p>}
 
       <label className="flex items-start gap-2 text-ink-700">
         <input type="checkbox" className="mt-0.5" checked={labelChecked} onChange={(e) => setLabelChecked(e.target.checked)} />

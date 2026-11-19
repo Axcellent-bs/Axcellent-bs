@@ -9,13 +9,13 @@
 #     밝히지 않는다. 9:16 1080p 단가·지원 여부는 [확인 필요]라 넣지 않는다(호출 거부)
 #   - gemini-omni-1.2-flash 360p·4K: 영상은 9:16 통합 규격(720p)만 쓰므로 넣지 않음
 #   - gemini-omni-1.1-flash·1.2-flash 720x1280 등 9:16 픽셀 크기 표기: 문서에서 확인하지 못함 [확인 필요]
-#   - gemini-omni-1.2-flash 9초 이상 영상: 문서는 최대 15초이나 safety 기준(video_duration) 8초로 제한
+#   - gemini-omni 단일 클립 15초 초과: 문서 상한 15초(초과 시 invalid argument)라 클립 max_duration_s는 15로 둔다. 15초 초과 요청은 코드(video_chain)가 클립으로 나눠 이어 붙이고, 전체 예상 비용은 클립별 단가의 합이다
 #   - gpt-image-2 1024x1280(4:5, 인스타 피드 규격): 장당 토큰 표에 없는 크기(계산기로 확인 필요).
 #     4:5 이미지는 gemini-nano-banana-2.1 928x1152로 해소됨(파일 끝 gemini 항목)
 #   - gemini-nano-banana-2.1 세 해상도 밖(2K·4K, 다른 종횡비): 이번 범위 밖이라 넣지 않음
 #   - MiniMax·Wan: 단가 미확인
 #   - Seedance(seedance, BytePlus ModelArk): 공식 문서(2026-11-18)에서 토큰 단가·영상 토큰 계산식·최소 토큰을
-#     확인하지 못해 항목이 없다 = 호출 거부. 제3자 사이트 값은 서로 달라 쓰지 않는다 [확인 필요].
+#     확인하지 못해 항목이 없다 = 호출 거부(2026-11-19 재확인: 공식 문서 발췌에 가격 표 없음, 제3자 값만 있음). 제3자 사이트 값은 서로 달라 쓰지 않는다 [확인 필요].
 #     확인되면 gemini 영상처럼 토큰 항목(output_tokens_per_second, 720p 9:16)으로 넣는다
 #   - Kling 4.0·4.0 flash 1080p: 영상 규격이 720p 한 가지라 넣지 않음
 #   - 입력 이미지(편집·참조) 단가: 이번 범위에 편집이 없어 넣지 않음
@@ -26,11 +26,11 @@
 #   1024x1536, 1536x1024 low 0.005 -> 167, medium 0.041 -> 1367, high 0.165 -> 5500
 #   가이드 표는 정사각이 세로형보다 비싸게 적혀 있어 이상해 보인다 [확인 필요: 계산기]. 표 값을 그대로 쓴다.
 #   인스타 피드 이미지는 가로세로비 4:5~1.91:1이라 1024x1536(2:3)은 게시할 수 없다. 단가만 적어 둔다.
-# 영상 규격: 릴스·쇼츠 통합 = 9:16 한 가지(해상도 720p, 길이 3~8초). 이 표에 있는 조합만 호출한다.
+# 영상 규격: 릴스·쇼츠 통합 = 9:16 한 가지(해상도 720p, 길이 3~15초). 이 표에 있는 조합만 호출한다.
 # gemini-omni-1.2-flash(현재 문서의 모델 ID): 1M 토큰당 USD 입력 1.50, 영상 출력 12.00, 720p 초당 5,792
 #   출력 토큰(가격 페이지, 2026-11-11 확인). 8초 720p 약 0.56 USD (입력 제외).
 # gemini-omni-1.1-flash: 1M 토큰당 USD 입력 1.50, 영상 출력 17.50, 720p 초당 5,792 출력 토큰.
-#   max_duration_s 8은 safety 기준표(video_duration)와 맞춘 값. 8초 720p 약 0.81 USD (입력 제외).
+#   max_duration_s 15는 문서 상한이자 safety 기준표(video_duration)와 맞춘 값. 8초 720p 약 0.81 USD (입력 제외).
 #   [주의] 2026-12-03부터 gemini-omni-1.1-flash 요청은 gemini-omni-1.2-flash로 자동 라우팅되고,
 #   그 뒤 청구는 1.2 기준(영상 출력 12.00)이다. 이 1.1 항목은 삭제하지 않고 남기되(그 전 설정·기록 조회용),
 #   2026-12-03 이후에는 MARKETING_VIDEO_MODEL을 gemini-omni-1.2-flash로 쓴다.
@@ -155,7 +155,7 @@ resolution = "720p"
 input_usd_per_mtok = 1.50
 output_usd_per_mtok = 17.50
 output_tokens_per_second = 5792
-max_duration_s = 8
+max_duration_s = 15
 source = "https://aistudio.google.com/docs/pricing , https://aistudio.google.com/docs/omni"
 checked_on = "2026-11-11"
 
@@ -167,7 +167,7 @@ resolution = "720p"
 input_usd_per_mtok = 1.50
 output_usd_per_mtok = 12.00
 output_tokens_per_second = 5792
-max_duration_s = 8
+max_duration_s = 15
 source = "https://aistudio.google.com/docs/pricing , https://aistudio.google.com/docs/omni , https://aistudio.google.com/docs/video"
 checked_on = "2026-11-11"
 
@@ -208,7 +208,7 @@ checked_on = "2026-11-11"
 # lyria-3-clip-preview: 30초 고정 MP3, 곡당 0.04 USD. 무료 등급 없음(가격 페이지 "Not available").
 # lyria-3.5: 풀 곡(약 2분, 프롬프트로 조절), 곡당 0.08 USD. 무료 등급 없음.
 # 입력 토큰 요금은 가격 페이지에 따로 없어 곡당 가격만 적는다 [확인 필요: 이미지 입력·긴 프롬프트 추가 과금].
-# 영상 길이(최대 8초)에 맞추려 클립을 자르는 것(ffmpeg)은 가격에 영향이 없다. 모든 출력에 SynthID 워터마크가 들어간다.
+# 영상 길이(최대 15초)에 맞추려 클립을 자르는 것(ffmpeg)은 가격에 영향이 없다. 모든 출력에 SynthID 워터마크가 들어간다.
 
 [[price]]
 provider = "gemini"
@@ -231,7 +231,7 @@ checked_on = "2026-11-11"
 
 # ---- Kling(공식 새 규격, 초당 단가 per_second_usd). 2026-11-18 https://kling.ai/document-api/pricing/base/video.md
 # 720p 텍스트→영상(입력 영상 없음): kling-4.0 1.0 Unit = 0.157 USD/초, kling-4.0-flash 0.6 Unit = 0.094 USD/초.
-# 소리 유무별 단가는 표에 없다 [확인 필요]. max_duration_s 8은 safety 기준(video_duration)과 맞춘 값이다
+# 소리 유무별 단가는 표에 없다 [확인 필요]. max_duration_s 15는 safety 기준(video_duration)과 맞춘 값이다
 # (문서 상한은 4.0 flash 20초·4.0 30초). 단가는 변동 가능하다.
 
 [[price]]
@@ -240,7 +240,7 @@ model = "kling-4.0"
 kind = "video"
 resolution = "720p"
 per_second_usd = 0.157
-max_duration_s = 8
+max_duration_s = 15
 source = "https://kling.ai/document-api/pricing/base/video.md"
 checked_on = "2026-11-18"
 
@@ -250,6 +250,133 @@ model = "kling-4.0-flash"
 kind = "video"
 resolution = "720p"
 per_second_usd = 0.094
-max_duration_s = 8
+max_duration_s = 15
 source = "https://kling.ai/document-api/pricing/base/video.md"
 checked_on = "2026-11-18"
+
+# 2026-11-19 추가(같은 가격표). 소리 없음 720p 기준: 3.0 0.6 Unit=0.084, 3.0 Omni(참조 영상 없음) 0.084,
+# O1(참조 영상 없음) 0.084, 2.6·2.5 Turbo 0.3 Unit=0.042. 3.0 Turbo는 표에 '소리 있음' 행만 있어 0.112를 쓴다(보수적).
+# 참조 영상을 쓰는 요청은 더 비싸다(어댑터는 텍스트만 보낸다).
+
+[[price]]
+provider = "kling"
+model = "kling-3.0"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.084
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "kling"
+model = "kling-3.0-turbo"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.112
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "kling"
+model = "kling-3.0-omni"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.084
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "kling"
+model = "kling-o1"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.084
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "kling"
+model = "kling-2.6"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.042
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "kling"
+model = "kling-2.5-turbo"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.042
+max_duration_s = 8
+source = "https://kling.ai/document-api/pricing/base/video.md"
+checked_on = "2026-11-19"
+
+# ---- Pika(공식 dev.pika.art, 초당 단가 per_second_usd). 2026-11-19 확인, 키 없음 [미검증].
+# pika-2.5 720p 0.04 USD/초(5초만 허용 -> max_duration_s 5). 1080p는 문서에 0.06과 0.09가 같이 보여 넣지 않음.
+# pika-h3-flex: 규격 720p는 원본 768p로 보내므로(어댑터 주석 참조) 768p 단가 0.02 USD/초를 720p 항목으로 둔다.
+#   소리 포함 생성이고 소리 유무별 단가는 없다. 성공한 생성만 과금.
+# Luma(ray-3.2)·Vidu(viduq3-*): 가격이 크레딧뿐이고 USD 환산 근거가 없어 항목을 넣지 않았다 = 호출 거부 [확인 필요].
+#   Luma 720p 5초 100크레딧(크레딧 가치는 계약별), Vidu 720p turbo 12·pro 20크레딧/초(1크레딧 0.03125 위안).
+# MiniMax Hailuo: 어댑터를 만들지 않았다. 텍스트->영상 문서에 종횡비 필드가 없어 9:16 규격을 보장할 수 없다 [미확인].
+
+[[price]]
+provider = "pika"
+model = "pika-2.5"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.04
+max_duration_s = 5
+source = "https://dev.pika.art/llms/pika/pika-2.5/text-to-video"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "pika"
+model = "pika-h3-flex"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.02
+max_duration_s = 8
+source = "https://dev.pika.art/models/pika/pika-h3-flex/text-to-video"
+checked_on = "2026-11-19"
+
+# ---- Runway(크레딧 x 초, 1크레딧 = 0.01 USD). 2026-11-19 https://docs.dev.runwayml.com/guides/pricing.md
+# 720p 9:16(720:1280) 텍스트→영상, 무음만 호출한다(veo는 audio=false 단가: veo3.1 20, veo3.1_fast 10 크레딧/초).
+# 소리 켠 단가(veo3.1 40, veo3.1_fast 15)는 어댑터가 audio=false만 보내므로 넣지 않는다.
+# max_duration_s 8은 safety 기준(video_duration)과 맞춘 값이다. 단가는 변동 가능하다.
+
+[[price]]
+provider = "runway"
+model = "gen4.5"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.12
+max_duration_s = 8
+source = "https://docs.dev.runwayml.com/guides/pricing.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "runway"
+model = "veo3.1"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.20
+max_duration_s = 8
+source = "https://docs.dev.runwayml.com/guides/pricing.md"
+checked_on = "2026-11-19"
+
+[[price]]
+provider = "runway"
+model = "veo3.1_fast"
+kind = "video"
+resolution = "720p"
+per_second_usd = 0.10
+max_duration_s = 8
+source = "https://docs.dev.runwayml.com/guides/pricing.md"
+checked_on = "2026-11-19"

@@ -1,6 +1,5 @@
 import { failureError } from "./apiError";
-import { writeAuth } from "./api";
-import { DASHBOARD_API_URL } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 
 // 마케팅 › SNS·미디어 › 캐릭터 시트 프롬프트. 올린 캐릭터 이미지 한 장으로 같은 캐릭터의
 // 캐릭터 시트(방향 7칸·표정·포즈·색 팔레트) 이미지 프롬프트를 만든다. dashboard-api
@@ -72,7 +71,7 @@ export async function shrinkImage(file: File): Promise<{ media_type: "image/jpeg
 export async function makeCharacterSheet(image: { media_type: string; data_base64: string }, note: string): Promise<CharacterSheetResult> {
   const res = await fetch(`${DASHBOARD_API_URL}${PATH}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...writeAuth("POST", PATH) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
     body: JSON.stringify({ image, note: note.trim() || undefined }),
     cache: "no-store",
   });

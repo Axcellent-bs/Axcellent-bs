@@ -16,6 +16,19 @@ MediaKind = Literal["image", "video", "audio"]
 
 
 @dataclass(frozen=True)
+class Continuation:
+    """이어 붙이기 클립의 시작 조건(영상 길이가 단일 클립 한도를 넘을 때만 쓴다).
+
+    `extend`: 이전 클립의 공급자 작업 id(`previous_job_id`)에서 이어 만든다(연장).
+    `image`: 이전 클립의 마지막 프레임(`image_path`, jpeg)을 시작 이미지로 쓴다.
+    """
+
+    mode: Literal["extend", "image"]
+    previous_job_id: str | None = None
+    image_path: Path | None = None
+
+
+@dataclass(frozen=True)
 class MediaRequest:
     """공급자에게 넘기는 정규화된 요청. 프롬프트는 장면 템플릿으로 만든 문장뿐이다."""
 
@@ -28,6 +41,7 @@ class MediaRequest:
     remove_audio: bool  # 영상: True(기본)면 무음으로 받는다. 오디오는 쓰지 않는다
     model: str  # 설정(`MARKETING_*_MODEL`)에서 온 값
     output_dir: Path  # asset을 쓸 폴더(이미 만들어 둔다)
+    continuation: Continuation | None = None  # 영상 이어 붙이기 클립만
 
 
 @dataclass(frozen=True)
@@ -48,6 +62,7 @@ class MediaResult:
     generated_at: datetime
     provider_job_id: str
     audio_stripped: bool = False  # 영상: 받은 mp4의 오디오를 ffmpeg로 제거했는지
+    clip_count: int = 1  # 영상: 이어 붙인 클립 수
 
 
 class MediaProviderError(Exception):

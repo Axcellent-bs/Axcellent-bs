@@ -41,6 +41,13 @@ export const DATA_A2A_TOKEN = (import.meta.env.VITE_DATA_A2A_TOKEN ?? '').trim()
 export const DATA_A2A_PLACEHOLDER = 'data-via-nginx'
 /** 사람 토큰이 설정돼 있는지. 없으면 쓰기 버튼을 끄고 안내한다 */
 export const HUMAN_TOKEN_SET = SAFETY_HUMAN_TOKEN.length > 0
+/**
+ * dashboard-api에 보내는 모든 요청(GET 포함)에 사람 토큰을 붙인다. 서버는 `/health` 말고는 읽기에도
+ * 토큰을 요구해서 없으면 401로 거절한다(ax-backend #295, 보안 점검 2차). dashboard-api를 부르는 곳은 모두 이 함수를 쓴다.
+ * 공유 서버에서는 이 값이 자리표시자이고 앞단 nginx가 진짜 토큰으로 바꿔 붙인다.
+ */
+export const dashboardAuth = (): Record<string, string> =>
+  SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {};
 
 
 /** 장애 대응: DejaFix 백엔드. 기본값 /dejafix-api는 개발 서버가 백엔드 dejafix-proxy(8030)로 넘기는 길(dejafix-proxy.ts) */

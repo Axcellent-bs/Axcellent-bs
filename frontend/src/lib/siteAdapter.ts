@@ -6,7 +6,7 @@ export { preview, unfilled } from "./siteMapping";
 
 // 회사 연결 › 다른 형식 API: 고객사 자기 API를 사이트 변환기(dashboard-api `/site-adapter`)로 잇는다.
 // dashboard-api `site_adapter/setup.py`. 둘러보기(짝 제안) → 사람이 짝 확인 → 연결(첫 쪽을 실제로 바꿔 본 뒤 저장).
-// 키는 서버의 변환기 폴더에만 저장되고 다시 내려오지 않는다(token_saved만 온다). 쓰기는 사람 토큰(writeAuth).
+// 키는 서버의 변환기 폴더에만 저장되고 다시 내려오지 않는다(token_saved만 온다). 읽기·쓰기 모두 사람 토큰(dashboardAuth).
 
 export interface SiteSample {
   count: number;
