@@ -31,11 +31,12 @@ function ago(iso: string | null): string | null {
   return h < 24 ? `${h}시간 전` : `${Math.floor(h / 24)}일 전`;
 }
 
-function PostCard({ item, rank }: { item: GridItem; rank: number }) {
-  const { post: p, group: g } = item;
+/** "갑자기 뜬 게시물" 카드 하나. 트렌드 분석 보고서(TrendReportView) 콘텐츠 섹션도 같이 쓴다.
+ *  adMaterial이 없으면(묶음 판정이 없는 게시물) 광고 재료 칩을 그리지 않는다 */
+export function PostCard({ post: p, rank, adMaterial }: { post: InstagramRadarPost; rank: number; adMaterial?: InstagramRadarGroup["ad_material"] }) {
   const link = safeLink(p.permalink);
   const kind = kindLabel(p);
-  const ad = AD[g.ad_material];
+  const ad = adMaterial ? AD[adMaterial] : null;
   const body = (
     <>
       <Thumb src={thumbSrc(p.thumbnail_url)} alt={p.caption_excerpt ?? `${p.account} 게시물`} wide={false} rank={rank} tall>
@@ -47,7 +48,7 @@ function PostCard({ item, rank }: { item: GridItem; rank: number }) {
         {METRIC[p.metric]} {COMPACT.format(p.value)}{ago(p.posted_at) && <span className="text-ink-500"> · {ago(p.posted_at)}</span>}
       </span>
       {p.standout && <span className="text-xs font-medium text-emerald-700">{p.standout}</span>}
-      <span><span className={`chip text-[11px] ${ad.tone}`}>광고 재료 {ad.label}</span></span>
+      {ad && <span><span className={`chip text-[11px] ${ad.tone}`}>광고 재료 {ad.label}</span></span>}
     </>
   );
   const cls = "flex flex-col gap-1 rounded-lg";
@@ -69,7 +70,7 @@ function PostGrid({ out }: { out: InstagramRadarOutput }) {
     <section aria-label="갑자기 뜬 게시물">
       <h3 className="mb-1.5 text-sm font-semibold text-ink-900">갑자기 뜬 게시물 <small className="font-normal text-ink-500">평소 대비 배수 순 · {n(items.length)}개</small></h3>
       <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {items.map((item, i) => <PostCard key={item.post.media_id} item={item} rank={i + 1} />)}
+        {items.map((item: GridItem, i) => <PostCard key={item.post.media_id} post={item.post} adMaterial={item.group.ad_material} rank={i + 1} />)}
       </ul>
     </section>
   );

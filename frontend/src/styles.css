@@ -98,3 +98,18 @@ body { @apply bg-canvas text-ink-900 antialiased; }
 }
 .row-expand { animation: row-expand 160ms ease-out; }
 @media (prefers-reduced-motion: reduce) { .row-expand { animation: none; } }
+
+/*
+  트렌드 분석 보고서 "PDF로 저장"(window.print, components/data/TrendReportView.tsx).
+  누른 동안만 body에 print-trend-report가 붙는다: 보고서(.trend-report-print)와 그 조상만 남기고
+  앱 메뉴·탭·의뢰 폼·버튼(.print-hide)은 숨긴다. 섹션 중간에서 페이지를 나누지 않고 배경은 흰색.
+*/
+@media print {
+  body.print-trend-report,
+  body.print-trend-report .trend-report-print { background: #fff !important; }
+  body.print-trend-report *:not(:has(.trend-report-print)):not(.trend-report-print):not(.trend-report-print *) { display: none !important; }
+  body.print-trend-report .trend-report-print .print-hide { display: none !important; }
+  body.print-trend-report .trend-report-print .trend-report-section,
+  body.print-trend-report .trend-report-print section { break-inside: avoid; page-break-inside: avoid; }
+  body.print-trend-report .trend-report-print .card { box-shadow: none; background: #fff; }
+}
