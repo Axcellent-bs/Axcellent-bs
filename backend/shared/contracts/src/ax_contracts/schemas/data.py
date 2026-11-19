@@ -4143,6 +4143,16 @@ class RisingKeyword(AxModel):
     products: int | None = Field(default=None, ge=0)  # product_link 기준 통과 상품 수
     product_names: list[str] = Field(default_factory=list)
     products_reason: str | None = None
+    # v3(11/20): rising · warming(normal이고 ratio ≥ [search] warming_ratio) · normal · unknown
+    level: Literal["rising", "warming", "normal", "unknown"] = "unknown"
+    # 판정에 쓴 마지막 값들(상대값, 지금은 28개)
+    points: list[float] = Field(default_factory=list, max_length=35)
+    baseline: float | None = None  # 평소 값 (판정 evidence 그대로)
+    # 후보로 고른 출처 (같은 말이면 모두)
+    candidate_sources: list[
+        Literal["new", "related_up", "youtube", "google", "company", "pool"]
+    ] = Field(default_factory=list)
+    why_line: str | None = Field(default=None, max_length=160)  # 코드 문장 (뉴스·차트·연관어)
 
 
 class NewKeyword(AxModel):
@@ -4201,6 +4211,10 @@ class KeywordTrendOutput(AxModel):
     summary_reason: str | None = None
     naver_calls: int = Field(default=0, ge=0)  # 이번 계산의 데이터랩 호출
     limits: list[str] = Field(default_factory=list)
+    # v3(11/20): 한도로 오늘 못 본 키워드에 직전 판정을 다시 썼으면 그 날짜(여럿이면 가장 오래된 날)
+    judged_on: dt.date | None = None
+    stale_reason: str | None = None  # "데이터랩 하루 몫을 다 써서 MM-DD 판정을 보여 줘요"
+    candidate_counts: dict[str, int] = Field(default_factory=dict)  # 후보 출처별 개수
 
 
 # ---------- 인스타그램 (11/18) ----------

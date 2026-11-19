@@ -300,6 +300,8 @@ SERVICES: tuple[Service, ...] = (
             "trend_report_list",
             # 총괄 plan ②: 보고서 → 기획 receive_insight 입력 (11/20, grade read)
             "trend_report_insight",
+            # 사람이 넣은 의뢰의 인사이트를 기획에 보내기 (11/20 v3, grade A, execute 먼저)
+            "trend_report_handoff",
             "data_chat_send",
             "data_chat_list",
             "data_chat_get",

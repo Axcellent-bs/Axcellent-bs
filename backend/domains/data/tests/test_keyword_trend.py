@@ -253,7 +253,8 @@ def test_skill_budget_cap_marks_not_checked(tmp_path: Path) -> None:
     lab = FakeLab()
     out = asyncio.run(kt.keyword_trend(KeywordTrendInput(), FakeLLM(), env=env, connector=lab,
                                        now=NOW)).output  # fmt: skip
-    assert lab.asked == [] and out.rising[0].reason == "확인 안 함(한도)"
+    # v3: 3일 안 직전 판정도 없으면 "오늘 판정 못 함 (확인 안 함(한도))"
+    assert lab.asked == [] and out.rising[0].reason == f"{kt.NOT_JUDGED} (확인 안 함(한도))"
     assert any("확인 안 함" in line for line in out.limits)
 
 

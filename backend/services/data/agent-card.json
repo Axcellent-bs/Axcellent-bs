@@ -718,6 +718,21 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportInsightOutput",
       "grade": "read",
       "allowed_requesters": [
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_report_handoff",
+      "description": "사람이 넣은 트렌드 분석 의뢰 보고서의 인사이트를 기획에 보낸다(화면 버튼). trend_report_insight와 같은 꾸러미(insight_id = trend_report:<report_id>, 총괄과 같은 키라 총괄이 먼저 보냈으면 기획이 duplicate)를 만들고, data 자신의 safety 관문 execute('send_trend_report_insight')를 먼저 거쳐 executed일 때만 기획 receive_insight를 부른다(idempotency_key <report_id>:insight). 결과(created·duplicate·rejected, 기획 제안 번호·시각·누른 쪽)는 보고서에 남아 trend_report_list의 handoff로 보인다. 이미 보냈으면 기획을 다시 부르지 않고 duplicate. 꾸러미가 없으면 not_sent + 이유. safety가 실행하지 않거나 기획에 닿지 못하면 남기지 않는다(다시 누를 수 있음).",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportHandoffInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportHandoffOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api",
         "orchestrator"
       ],
       "verifier": null,

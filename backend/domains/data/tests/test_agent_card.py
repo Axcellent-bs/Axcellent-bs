@@ -69,6 +69,7 @@ def test_card_validates(card: AgentCard) -> None:
         "trend_report_get",
         "trend_report_list",
         "trend_report_insight",
+        "trend_report_handoff",
         "data_chat_send",
         "data_chat_list",
         "data_chat_get",
@@ -102,7 +103,10 @@ def test_video_explorer_is_a_read_for_screen_marketing_planning_and_orchestrator
 
 # 상태를 바꾸는 카드 skill은 이것만 (data 자신의 execute() 관문을 거친다)
 # instagram_memo_add(11/18): 인스타 트렌드 메모 저장, data 자신의 safety 관문을 지나는 A
-STATE_CHANGING = {"event_proposal_send": "A", "instagram_memo_add": "A"}
+# trend_report_handoff(11/20 v3): 보고서 인사이트를 기획에 보내기,
+# data 자신의 safety 관문을 지나는 A
+STATE_CHANGING = {"event_proposal_send": "A", "instagram_memo_add": "A",
+                  "trend_report_handoff": "A"}  # fmt: skip
 
 
 def test_all_skills_are_read(card: AgentCard) -> None:
