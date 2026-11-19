@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -91,6 +92,25 @@ def is_mock(name: str | None = None) -> bool:
         return False
     # 서비스(예: claims)는 원래 부서(support)의 `<부서>_MOCK`도 따른다
     return any(os.getenv(f"{env_prefix(n)}_MOCK") == "1" for n in {name, department_of(name)})
+
+
+ALLOW_MOCK_ENV = "AX_ALLOW_MOCK"
+
+
+def refuse_mock_outside_tests(name: str | None = None) -> None:
+    """서버를 켤 때 목 스위치가 켜져 있으면 시작을 거부한다 (테스트·`AX_ALLOW_MOCK=1`만 예외).
+
+    목 모드는 `mock:<이름>`·`human:<이름>`을 토큰 없이 받는다. 실제 서버에 `*_MOCK=1`이 남으면
+    누구나 요청자나 승인자로 위조할 수 있으므로 그 상태로는 뜨지 않게 한다.
+    단위 테스트(pytest)는 `create_agent_app`의 lifespan을 돌려도 영향이 없다.
+    """
+    if os.getenv(ALLOW_MOCK_ENV) == "1" or "pytest" in sys.modules:
+        return
+    if is_mock(name):
+        raise RuntimeError(
+            "목 스위치(AGENT_TEMPLATE_MOCK·<부서>_MOCK)가 켜져 있어 서버를 시작하지 않는다. "
+            "목 모드는 테스트 전용이다. 환경변수를 지우고 다시 켠다."
+        )
 
 
 TOKENS_ENV = "AX_AGENT_TOKENS"
