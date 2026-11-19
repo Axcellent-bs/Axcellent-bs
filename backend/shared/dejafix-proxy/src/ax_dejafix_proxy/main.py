@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request, Response
 
-from ax_agent_template import company_connection, tool_connections
+from ax_agent_template import company_connection, pinned_http, tool_connections
 
 JSON = "application/json"
 
@@ -110,13 +110,17 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
     """`client`를 주면(테스트) 대상 주소가 어떻든 그 클라이언트로 부른다."""
     state: dict[str, tuple[Target, DejaFixSession]] = {}
 
-    def session_for(target: Target) -> DejaFixSession:
+    def session_for(target: Target, guarded: bool = False) -> DejaFixSession:
         """대상·계정·비밀번호가 바뀌면 세션(토큰)을 새로 만든다."""
         held = state.get("s")
         if held is not None and held[0] == target:
             return held[1]
         url, user, password = target
-        http = client or httpx.AsyncClient(base_url=url, timeout=10.0)
+        # 화면에서 정한 주소(guarded)는 검사한 IP로만 붙고 리다이렉트를 따라가지 않는다
+        transport = pinned_http.guarded_transport() if guarded else None
+        http = client or httpx.AsyncClient(
+            base_url=url, timeout=10.0, follow_redirects=False, transport=transport
+        )
         fresh = DejaFixSession(http, user, password)
         if held is not None and client is None:
             held[1].retire()  # 진행 중인 요청이 있으면 끝난 뒤에 닫는다
@@ -169,7 +173,7 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
             except ValueError as exc:
                 return _error(502, "DEJAFIX_UNREACHABLE", f"DejaFix 주소를 쓸 수 없습니다: {exc}")
         try:
-            upstream = await session_for(target).get(full, request.url.query)
+            upstream = await session_for(target, from_vault).get(full, request.url.query)
         except httpx.HTTPError:
             return _error(502, "DEJAFIX_UNREACHABLE", "DejaFix 백엔드에 연결할 수 없습니다")
         return Response(

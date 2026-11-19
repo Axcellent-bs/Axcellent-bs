@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import config
+from ax_agent_template import config, pinned_http
 from support_agent import orders
 from support_agent.orders import Order, OrderItem
 
@@ -149,7 +149,9 @@ async def _send(
             return httpx.Response(200, json={"data": {}, "meta": {}})
         raise ShopError("READ_ONLY", "읽기 전용 설치라 판매 서버에 쓰지 않는다")
     shared = client or _client  # 여러 번 부르는 읽기는 하나를 넘겨 재사용한다 (shared_client)
-    http = shared or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
+    http = shared or httpx.AsyncClient(
+        timeout=TIMEOUT_SECONDS, transport=pinned_http.company_transport()
+    )
     try:
         response = await http.request(method, _url(path), headers=_headers(), **kwargs)
         if method.upper() != "GET" and _read_only_key_refused(response):
@@ -176,7 +178,9 @@ async def shared_client() -> AsyncIterator[httpx.AsyncClient]:
     if _client is not None:  # 테스트에서 바꿔 끼운 클라이언트
         yield _client
         return
-    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+    async with httpx.AsyncClient(
+        timeout=TIMEOUT_SECONDS, transport=pinned_http.company_transport()
+    ) as client:
         yield client
 
 
