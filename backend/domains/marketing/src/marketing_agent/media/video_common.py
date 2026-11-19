@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import socket
 import time
 from collections.abc import Callable
@@ -25,6 +24,7 @@ from typing import Any, ClassVar, Literal
 
 import httpx
 
+from ax_secret_store import get_secret
 from marketing_agent.media.base import MediaProviderError, MediaRequest, MediaResult, Usage
 from marketing_agent.media.gemini_video import has_audio_track, strip_audio
 from marketing_agent.media.safe_fetch import (
@@ -116,7 +116,7 @@ class AsyncVideoProvider:
             raise VideoProviderError(f"unsupported_duration: {duration}")
         if not request.model:
             raise VideoProviderError("model_not_configured")
-        key = os.getenv(self.key_env, "").strip()
+        key = get_secret(self.key_env).strip()
         if not key:
             raise VideoProviderError("api_key_not_configured")
         try:

@@ -206,6 +206,8 @@ SERVICES: tuple[Service, ...] = (
             "lower_media_cost_limits",
             "raise_media_cost_limits",
             "set_cost_limit_option",
+            "add_secret",
+            "change_secret",
         ),
         "공지·쿠폰",
     ),

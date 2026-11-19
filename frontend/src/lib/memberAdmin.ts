@@ -42,6 +42,17 @@ export function policyEditorProblem(
   return null;
 }
 
+/** 키 담당 권한·담당 고객사: 서버가 준 값(없으면 꺼짐·빈 목록) */
+export const secretEditorOf = (a: ServerAccount) => a.secret_editor === true;
+export const secretTenantsOf = (a: ServerAccount): string[] => a.secret_tenants ?? [];
+
+/** 키 담당 권한을 줄 수 없는 이유. 일반회원은 못 갖고, 자기 자신에게는 못 준다(서버가 다시 확인한다) */
+export function secretEditorProblem(actor: { id: string; role: ServerRole }, target: Pick<ServerAccount, "id" | "role">): string | null {
+  if (target.role === "member") return "일반회원은 키 담당 권한을 가질 수 없어요. 먼저 관리자로 바꿔 주세요.";
+  if (actor.role === "admin" && actor.id === target.id) return "자기 키 담당 권한은 스스로 바꿀 수 없어요. 운영자에게 요청해 주세요.";
+  return null;
+}
+
 /** 비용 상한 변경 권한을 켤 수 없는 이유(일반회원은 못 켠다). 켤 수 있으면 null */
 export function limitEditorProblem(target: Pick<ServerAccount, "role">): string | null {
   return target.role === "member" ? "일반회원은 비용 상한 변경 권한을 가질 수 없어요. 먼저 관리자로 바꿔 주세요." : null;
@@ -76,7 +87,7 @@ export function canEditProfile(actor: { role: ServerRole }, target: ServerAccoun
   return actor.role === "admin" && CUSTOMER_ROLES.includes(target.role);
 }
 
-export type AccountPatch = { role?: ServerRole; name?: string; dept?: string; approver?: boolean; limit_editor?: boolean; policy_editor?: boolean; readers?: ReaderAreaId[] };
+export type AccountPatch = { role?: ServerRole; name?: string; dept?: string; approver?: boolean; limit_editor?: boolean; policy_editor?: boolean; secret_editor?: boolean; secret_tenants?: string[]; readers?: ReaderAreaId[] };
 
 /** `POST /auth/accounts/{id}/update` 본문: 보낼 칸만. 아무것도 없으면 null (빈 요청은 보내지 않는다) */
 export function updateBody(patch: AccountPatch): AccountPatch | null {
@@ -87,6 +98,8 @@ export function updateBody(patch: AccountPatch): AccountPatch | null {
   if (patch.approver !== undefined) out.approver = patch.approver;
   if (patch.limit_editor !== undefined) out.limit_editor = patch.limit_editor;
   if (patch.policy_editor !== undefined) out.policy_editor = patch.policy_editor;
+  if (patch.secret_editor !== undefined) out.secret_editor = patch.secret_editor;
+  if (patch.secret_tenants !== undefined) out.secret_tenants = [...new Set(patch.secret_tenants.map((t) => t.trim()).filter(Boolean))];
   if (patch.readers !== undefined) out.readers = READER_AREA_IDS.filter((r) => patch.readers?.includes(r));
   return Object.keys(out).length ? out : null;
 }

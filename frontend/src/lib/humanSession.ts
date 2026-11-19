@@ -26,6 +26,9 @@ export interface ServerAccount {
   limit_editor?: boolean;
   /** 정책 변경 권한: 안전 정책 값 변경 요청·적용과 하향 셀프 승인 스위치(운영자·관리자 계정만) */
   policy_editor?: boolean;
+  /** 키 담당 권한: 담당 고객사(secret_tenants)의 암호화 키를 넣고 바꾼다(운영자·관리자 계정만) */
+  secret_editor?: boolean;
+  secret_tenants?: string[];
   /** 열람 담당: 인사·재무 AI의 다른 사람 대화 요약을 본다 */
   readers?: ReaderAreaId[];
 }
@@ -47,6 +50,8 @@ export function readServerAccount(v: unknown): ServerAccount | null {
   if (typeof a.approver === "boolean") out.approver = a.approver;
   if (typeof a.limit_editor === "boolean") out.limit_editor = a.limit_editor;
   if (typeof a.policy_editor === "boolean") out.policy_editor = a.policy_editor;
+  if (typeof a.secret_editor === "boolean") out.secret_editor = a.secret_editor;
+  if (Array.isArray(a.secret_tenants)) out.secret_tenants = a.secret_tenants.filter((x): x is string => typeof x === "string");
   if (Array.isArray(a.readers)) out.readers = READER_AREA_IDS.filter((r) => (a.readers as unknown[]).includes(r));
   return out;
 }

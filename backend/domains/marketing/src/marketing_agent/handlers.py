@@ -41,6 +41,7 @@ from marketing_agent import (
     manual_publish,
     outage_sns_media,
     publish_control,
+    secret_requests,
     shop_client,
     video_providers,
 )
@@ -1431,7 +1432,21 @@ async def record_campaign_result_skill(request: AgentRequest) -> AgentResult:
     )
 
 
+async def add_secret_skill(request: AgentRequest) -> AgentResult:
+    return await secret_requests.apply_request(
+        request, wanted=secret_requests.ADD, from_decision=_from_decision
+    )
+
+
+async def change_secret_skill(request: AgentRequest) -> AgentResult:
+    return await secret_requests.apply_request(
+        request, wanted=secret_requests.CHANGE, from_decision=_from_decision
+    )
+
+
 HANDLERS = {
+    "add_secret": add_secret_skill,
+    "change_secret": change_secret_skill,
     "get_media_cost_limits": get_media_cost_limits_skill,
     "lower_media_cost_limits": lower_media_cost_limits_skill,
     "raise_media_cost_limits": raise_media_cost_limits_skill,

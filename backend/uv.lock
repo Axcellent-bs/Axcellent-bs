@@ -20,6 +20,7 @@ members = [
     "ax-memory",
     "ax-orchestrator",
     "ax-safety",
+    "ax-secret-store",
     "ax-svc-claims",
     "ax-svc-coupon",
     "ax-svc-data",
@@ -219,6 +220,7 @@ source = { editable = "domains/marketing" }
 dependencies = [
     { name = "ax-agent-template" },
     { name = "ax-contracts" },
+    { name = "ax-secret-store" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "uvicorn" },
@@ -228,6 +230,7 @@ dependencies = [
 requires-dist = [
     { name = "ax-agent-template", editable = "shared/agent-template" },
     { name = "ax-contracts", editable = "shared/contracts" },
+    { name = "ax-secret-store", editable = "shared/secret-store" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "uvicorn", specifier = ">=0.30" },
@@ -289,6 +292,7 @@ version = "0.1.0"
 source = { editable = "shared/agent-template" }
 dependencies = [
     { name = "ax-contracts" },
+    { name = "ax-secret-store" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -299,6 +303,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "ax-contracts", editable = "shared/contracts" },
+    { name = "ax-secret-store", editable = "shared/secret-store" },
     { name = "cryptography", specifier = ">=42" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
@@ -324,6 +329,7 @@ source = { editable = "shared/dashboard-api" }
 dependencies = [
     { name = "ax-agent-template" },
     { name = "ax-contracts" },
+    { name = "ax-secret-store" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "uvicorn" },
@@ -333,6 +339,7 @@ dependencies = [
 requires-dist = [
     { name = "ax-agent-template", editable = "shared/agent-template" },
     { name = "ax-contracts", editable = "shared/contracts" },
+    { name = "ax-secret-store", editable = "shared/secret-store" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "uvicorn", specifier = ">=0.30" },
@@ -421,6 +428,17 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
+
+[[package]]
+name = "ax-secret-store"
+version = "0.1.0"
+source = { editable = "shared/secret-store" }
+dependencies = [
+    { name = "cryptography" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cryptography", specifier = ">=42" }]
 
 [[package]]
 name = "ax-svc-claims"

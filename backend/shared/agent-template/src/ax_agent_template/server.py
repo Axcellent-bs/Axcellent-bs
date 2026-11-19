@@ -64,6 +64,7 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
+from ax_secret_store import startup_check
 
 logger = logging.getLogger("ax.template.server")
 
@@ -205,6 +206,7 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         refuse_mock_outside_tests(card.name)  # 실제 서버에 목 스위치가 남아 있으면 뜨지 않는다
+        startup_check()  # db 모드에서 마스터 키·DB가 안 맞으면 시작 거부
         # 실제 모드에서 구독이 있으면 이벤트 소비를 시작한다(목 모드·구독 없음이면 아무 일도 안 함)
         events.start_consumer()
         try:

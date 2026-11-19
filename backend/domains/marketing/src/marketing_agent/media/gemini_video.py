@@ -28,7 +28,6 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-import os
 import re
 import socket
 import subprocess
@@ -41,6 +40,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ax_secret_store import get_secret
 from marketing_agent.media.base import MediaProviderError, MediaRequest, MediaResult, Usage
 from marketing_agent.media.config import API_KEY_ENVS, ffmpeg_bin
 from marketing_agent.media.safe_fetch import (
@@ -226,7 +226,7 @@ class GeminiVideoProvider:
             raise GeminiVideoError(f"unsupported_duration: {duration}")
         if not request.model:
             raise GeminiVideoError("model_not_configured")
-        key = os.getenv(API_KEY_ENVS["video"], "").strip()
+        key = get_secret(API_KEY_ENVS["video"]).strip()
         if not key:
             raise GeminiVideoError("api_key_not_configured")
 

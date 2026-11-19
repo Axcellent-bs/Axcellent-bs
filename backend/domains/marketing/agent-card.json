@@ -600,6 +600,30 @@
       ],
       "verifier": null,
       "priority": "optional"
+    },
+    {
+      "id": "add_secret",
+      "description": "비밀 저장소(암호화 DB)에 키 추가 요청을 적용한다(request_id, updated_by). 값은 오지 않고 화면이 암호화해 둔 대기 요청 번호만 받는다. 키 담당(secret_editor)·담당 고객사 확인은 대시보드 API가 한다. A등급.",
+      "input_schema": "agents/marketing/src/marketing_agent/secret_requests.py#ApplyInput",
+      "output_schema": "agents/marketing/src/marketing_agent/secret_requests.py#ApplyInput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "change_secret",
+      "description": "비밀 저장소 키의 교체·삭제 요청을 적용한다(request_id, updated_by). 늘 C등급 사람 승인(요청자≠승인자). 승인 뒤 같은 요청을 다시 보내면 적용된다. 값은 오지 않고 로그·승인 화면에는 지문과 끝 글자만 간다.",
+      "input_schema": "agents/marketing/src/marketing_agent/secret_requests.py#ApplyInput",
+      "output_schema": "agents/marketing/src/marketing_agent/secret_requests.py#ApplyInput",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
     }
   ]
 }

@@ -13,6 +13,7 @@ from contextvars import ContextVar
 
 from ax_agent_template.company_connection import ADAPTER_PATH, connection_file, shop_api_override
 from ax_agent_template.services import SERVICE_PORTS, department_of
+from ax_secret_store import get_secret
 
 # CLAUDE.md 포트 표. 컨테이너에서는 서비스 이름이 호스트 이름이다.
 DEFAULT_PORTS: dict[str, int] = {
@@ -132,7 +133,8 @@ PLACEHOLDER_TOKEN = "data-via-nginx"
 
 def _registry_pairs() -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
-    for item in os.getenv(TOKENS_ENV, "").split(","):
+    # env 모드는 os.getenv와 같다. db 모드(AX_SECRET_STORE=db)는 암호화 저장소의 값을 쓴다
+    for item in get_secret(TOKENS_ENV).split(","):
         name, sep, token = item.strip().partition("=")
         if sep and name and token:
             pairs.append((name.strip(), token.strip()))

@@ -99,6 +99,19 @@ action = "change_cost_policy"
 owner = "safety"
 base_grade = "C"
 
+# 비밀 저장소(암호화 DB, ax_secret_store) 키 관리. 값은 관문에 오지 않고(지문·끝 글자만) 마케팅 skill이
+# 화면이 암호화해 둔 대기 요청을 적용한다. 요청자는 owner(마케팅), 사람 이름은 대시보드 API가 토큰에서 채운다.
+# 추가는 키 담당(secret_editor)이 바로 하는 A, 교체·삭제는 요청자와 다른 사람의 승인이 필요한 C
+[[actions]]
+action = "add_secret"
+owner = "marketing"
+base_grade = "A"
+
+[[actions]]
+action = "change_secret"
+owner = "marketing"
+base_grade = "C"
+
 # 수동 게시 완료 기록. 자동 게시가 꺼져 사람이 Instagram에 직접 올린 뒤 링크를 적어 닫는 일이다.
 # 공개 자체는 publish_sns(C)에서 사람 승인을 이미 받았고, 이 액션은 외부로 아무것도 보내지 않고 게시 대기
 # 건의 상태·기록만 바꾼다. 코드가 링크 형식·중복·대상 상태·AI 표시 확인을 거절하므로 B(교차검증자 필요)가

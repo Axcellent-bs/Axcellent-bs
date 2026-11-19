@@ -21,12 +21,12 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-import os
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
+from ax_secret_store import get_secret
 from marketing_agent.media.base import MediaRequest, MediaResult, Usage
 from marketing_agent.media.config import API_KEY_ENVS
 
@@ -80,7 +80,7 @@ class GeminiImageProvider:
             raise GeminiImageError(f"unsupported_resolution: {request.resolution}")
         if not request.model:
             raise GeminiImageError("model_not_configured")
-        key = os.getenv(API_KEY_ENVS["image"], "").strip()
+        key = get_secret(API_KEY_ENVS["image"]).strip()
         if not key:
             raise GeminiImageError("api_key_not_configured")
 
