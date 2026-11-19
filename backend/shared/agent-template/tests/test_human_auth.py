@@ -145,3 +145,41 @@ def test_find_human_takes_mock_names_only_under_the_mock_switch() -> None:
 def test_find_human_returns_none_for_agent_and_unknown_tokens() -> None:
     assert ha.find_human("mock:marketing", shared_tokens={"mock:marketing": "x"}, mock=True) is None
     assert ha.find_human("nobody", shared_tokens={"s3cret": "공용"}) is None
+
+
+# ---- 계정 세대 번호: 비밀번호를 바꾸면 그 계정의 기존 세션을 모두 끊는다 ----
+
+
+def test_ending_account_sessions_refuses_older_tokens_through_the_shared_file(tmp_path) -> None:
+    old = _token()
+    other = ha.issue_session(account_id="acc-2", name="태윤", role="member", now=1_000_000)[0]
+    assert ha.end_account_sessions("acc-1") == 1
+    ha.reset_revoked_for_tests()  # 다른 서비스(메모리 없음)도 파일로 안다
+    with pytest.raises(ha.HumanAuthError) as err:
+        ha.verify_session(old, now=1_000_001)
+    assert (err.value.status_code, err.value.code) == (401, "SESSION_ENDED")
+    with pytest.raises(ha.HumanAuthError):
+        ha.find_human(old, now=1_000_001)
+    # 다른 계정의 세션과 새로 만든 세션은 그대로 통과
+    assert ha.verify_session(other, now=1_000_001).name == "태윤"
+    assert ha.verify_session(_token(), now=1_000_001).name == "예진"
+    data = json.loads((tmp_path / ha.GENERATIONS_FILE).read_text(encoding="utf-8"))
+    assert data == {"acc-1": 1}
+
+
+def test_tokens_without_a_generation_count_as_zero() -> None:
+    legacy = ha.issue_session(account_id="acc-1", name="예진", role="member", now=1_000_000, gen=0)
+    assert ha.verify_session(legacy[0], now=1_000_001).account_id == "acc-1"
+    ha.end_account_sessions("acc-1")
+    with pytest.raises(ha.HumanAuthError):
+        ha.verify_session(legacy[0], now=1_000_001)
+
+
+def test_ending_sessions_without_a_file_still_works_in_this_process(monkeypatch) -> None:
+    monkeypatch.setenv(ha.REVOKED_FILE_ENV, "")
+    monkeypatch.setattr(ha.company_connection, "connection_file", lambda: None)
+    assert ha.generations_file() is None
+    old = _token()
+    ha.end_account_sessions("acc-1")
+    with pytest.raises(ha.HumanAuthError):
+        ha.verify_session(old, now=1_000_001)

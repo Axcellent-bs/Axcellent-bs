@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useSession } from '@/demo/session'
-import { createAccount, listAccounts } from '@/lib/authApi'
-import { accountInputProblem, MIN_PASSWORD_LENGTH, type ServerAccount, type ServerRole } from '@/lib/humanSession'
+import { createAccount, listAccounts, resetPassword } from '@/lib/authApi'
+import { accountInputProblem, canResetPassword, getSession, MIN_PASSWORD_LENGTH, type ServerAccount, type ServerRole } from '@/lib/humanSession'
 import { PreparingChip } from '@/components/Preparing'
 
 // 계정 (AXcellent 운영팀, /control/accounts). dashboard-api `/auth/accounts`: 운영자는 모든 역할의 계정을 만들고 목록을 본다.
@@ -20,6 +20,31 @@ export default function Accounts() {
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // 비밀번호 초기화: 고른 계정 하나만 입력칸을 연다. 임시 비밀번호는 입력칸 상태에만 둔다
+  const [resetFor, setResetFor] = useState<string | null>(null)
+  const [resetPw, setResetPw] = useState('')
+  const [resetMsg, setResetMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const me = getSession()?.account
+
+  const startReset = (id: string | null) => {
+    setResetFor(id)
+    setResetPw('')
+    setResetMsg(null)
+  }
+  const submitReset = async (row: ServerAccount) => {
+    if (resetPw.length < MIN_PASSWORD_LENGTH) return setResetMsg({ ok: false, text: `임시 비밀번호는 ${MIN_PASSWORD_LENGTH}자 이상이어야 해요.` })
+    setBusy(true)
+    try {
+      await resetPassword(row.id, resetPw)
+      setResetFor(null)
+      setResetPw('')
+      setResetMsg({ ok: true, text: `${row.name}(${row.email}) 비밀번호를 초기화했어요. 그 계정의 로그인은 모두 끊겼어요. 임시 비밀번호는 본인에게 따로 알려 주세요.` })
+    } catch (x) {
+      setResetMsg({ ok: false, text: x instanceof Error ? x.message : '비밀번호를 초기화하지 못했어요.' })
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const reload = useCallback(() => {
     listAccounts().then((r) => { setRows(r); setLoadError(null) }).catch((x: Error) => setLoadError(x.message))
@@ -85,6 +110,7 @@ export default function Accounts() {
                   <th className="px-4 py-2.5 font-medium">이름</th>
                   <th className="px-4 py-2.5 font-medium">역할</th>
                   <th className="px-4 py-2.5 font-medium">만든 시각</th>
+                  <th className="px-4 py-2.5 font-medium">비밀번호</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
@@ -93,12 +119,27 @@ export default function Accounts() {
                     <td className="px-4 py-2.5"><p className="font-medium text-ink-900">{r.name}</p><p className="font-mono text-xs text-ink-500">{r.email}</p></td>
                     <td className="px-4 py-2.5"><span className="chip bg-ink-100 text-ink-700">{ROLE_LABEL[r.role] ?? r.role}</span></td>
                     <td className="px-4 py-2.5 text-ink-500">{day(r.created_at)}</td>
+                    <td className="px-4 py-2.5">
+                      {!me || !canResetPassword(me, r) ? (
+                        <span className="text-xs text-ink-500">{me?.id === r.id ? '내 계정은 오른쪽 위 메뉴에서 바꿔요' : '—'}</span>
+                      ) : resetFor === r.id ? (
+                        <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); void submitReset(r) }}>
+                          <input className="field w-56" type="password" value={resetPw} onChange={(e) => setResetPw(e.target.value)}
+                            placeholder={`임시 비밀번호 (${MIN_PASSWORD_LENGTH}자 이상)`} aria-label={`${r.name} 임시 비밀번호`} autoComplete="new-password" />
+                          <button className="btn-primary px-4" disabled={busy}>{busy ? '초기화 중…' : '초기화'}</button>
+                          <button type="button" className="btn-ghost px-3" onClick={() => startReset(null)}>취소</button>
+                        </form>
+                      ) : (
+                        <button type="button" className="btn-ghost px-3 py-1 text-xs" onClick={() => startReset(r.id)}>비밀번호 초기화</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
-                {rows && !rows.length && <tr><td colSpan={3} className="px-4 py-6 text-center text-ink-500">계정이 없어요</td></tr>}
-                {!rows && !loadError && <tr><td colSpan={3} className="px-4 py-6 text-center text-ink-500">불러오는 중…</td></tr>}
+                {rows && !rows.length && <tr><td colSpan={4} className="px-4 py-6 text-center text-ink-500">계정이 없어요</td></tr>}
+                {!rows && !loadError && <tr><td colSpan={4} className="px-4 py-6 text-center text-ink-500">불러오는 중…</td></tr>}
               </tbody>
             </table>
+            {resetMsg && <p role="status" className={`px-4 py-3 text-sm ${resetMsg.ok ? 'text-emerald-700' : 'text-red-700'}`}>{resetMsg.text}</p>}
             {loadError && <p className="px-4 py-3 text-sm text-red-700">{loadError}</p>}
           </section>
         </>

@@ -7,6 +7,9 @@
   묻지 않고 각자 검사한다
 - 로그아웃한 토큰은 "끊은 토큰 목록" 파일에 만료까지만 남긴다(`AX_REVOKED_SESSIONS_FILE`,
   없으면 회사 연결 파일 옆 `revoked_sessions.json`). 파일이 없으면 이 프로세스 안에서만 막는다
+- 비밀번호를 바꾸거나 초기화하면 그 계정의 "세대 번호"를 올린다(`AX_SESSION_GENERATIONS_FILE`,
+  없으면 끊은 토큰 목록 옆 `session_generations.json`). 토큰은 만들 때의 세대(`gen`)를 담고,
+  계정의 지금 세대보다 낮은 토큰은 받지 않는다. 그 계정의 기존 세션을 한 번에 끊는 방법
 - 서명 키가 없거나 짧으면(32자 미만) 세션 토큰을 하나도 받지 않는다(fail-closed)
 - 공용 사람 토큰(`*_HUMAN_TOKENS`)은 `AX_ALLOW_SHARED_HUMAN_TOKEN=0`이 되기 전까지 받는다.
   받을 때마다 경고 로그를 남긴다
@@ -34,6 +37,8 @@ SESSION_SECRET_ENV = "AX_SESSION_SECRET"
 ALLOW_SHARED_ENV = "AX_ALLOW_SHARED_HUMAN_TOKEN"
 REVOKED_FILE_ENV = "AX_REVOKED_SESSIONS_FILE"
 REVOKED_FILE = "revoked_sessions.json"
+GENERATIONS_FILE_ENV = "AX_SESSION_GENERATIONS_FILE"
+GENERATIONS_FILE = "session_generations.json"
 PREFIX = "axs1"
 SESSION_TTL_SECONDS = 12 * 60 * 60  # 정한 것: 12시간 (설계 문서)
 MIN_SECRET_LENGTH = 32
@@ -42,6 +47,7 @@ SHARED_ROLE = "shared"
 
 logger = logging.getLogger("ax.human_auth")
 _revoked_in_memory: dict[str, int] = {}
+_generations_in_memory: dict[str, int] = {}
 _lock = threading.Lock()
 
 
@@ -111,9 +117,18 @@ def _sign(secret: bytes, body: str) -> str:
 
 
 def issue_session(
-    *, account_id: str, name: str, role: str, now: int | None = None, ttl: int | None = None
+    *,
+    account_id: str,
+    name: str,
+    role: str,
+    now: int | None = None,
+    ttl: int | None = None,
+    gen: int | None = None,
 ) -> tuple[str, int]:
-    """세션 토큰과 만료 시각(유닉스 초)을 만든다. 서명 키가 없으면 RuntimeError."""
+    """세션 토큰과 만료 시각(유닉스 초)을 만든다. 서명 키가 없으면 RuntimeError.
+
+    gen을 안 주면 그 계정의 지금 세대 번호를 담는다.
+    """
     secret = _secret()
     if secret is None:
         raise RuntimeError(f"{SESSION_SECRET_ENV}가 없거나 {MIN_SECRET_LENGTH}자보다 짧다")
@@ -128,6 +143,7 @@ def issue_session(
         "iat": issued,
         "exp": exp,
         "jti": secrets.token_hex(12),
+        "gen": account_generation(account_id) if gen is None else gen,
     }
     body = _b64(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     return f"{PREFIX}.{body}.{_sign(secret, body)}", exp
@@ -163,6 +179,13 @@ def verify_session(token: str, *, now: int | None = None) -> Human:
     if is_revoked(jti, now=current):
         raise HumanAuthError(401, "SESSION_REVOKED", "로그아웃한 토큰이다. 다시 로그인해 주세요")
     sub = payload.get("sub")
+    gen = payload.get("gen", 0)  # 세대 번호가 없는 토큰(이 기능 전에 만든 것)은 0세대
+    if not isinstance(gen, int) or isinstance(gen, bool):
+        raise _invalid()
+    if isinstance(sub, str) and gen < account_generation(sub):
+        raise HumanAuthError(
+            401, "SESSION_ENDED", "비밀번호가 바뀌어 로그인이 끊겼어요. 다시 로그인해 주세요"
+        )
     return Human(
         name=name,
         role=str(role),
@@ -297,6 +320,51 @@ def is_revoked(jti: str, *, now: int | None = None) -> bool:
     return bool(path and _read_revoked(path).get(jti, 0) > current)
 
 
+# ---- 계정 세대 번호 (비밀번호를 바꾸면 그 계정의 기존 세션을 모두 끊는다) ----
+
+
+def generations_file() -> Path | None:
+    raw = os.getenv(GENERATIONS_FILE_ENV, "").strip()
+    if raw:
+        return Path(raw)
+    revoked = revoked_file()
+    return revoked.with_name(GENERATIONS_FILE) if revoked else None
+
+
+def _read_generations(path: Path) -> dict[str, int]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): v for k, v in data.items() if isinstance(v, int) and not isinstance(v, bool)}
+
+
+def account_generation(account_id: str) -> int:
+    """그 계정의 지금 세대 번호. 한 번도 안 바꿨으면 0."""
+    path = generations_file()
+    stored = _read_generations(path).get(account_id, 0) if path else 0
+    return max(stored, _generations_in_memory.get(account_id, 0))
+
+
+def end_account_sessions(account_id: str) -> int:
+    """그 계정의 세대 번호를 하나 올려 지금까지 만든 세션을 모두 끊는다. 새 세대를 돌려준다."""
+    with _lock:
+        new = account_generation(account_id) + 1
+        _generations_in_memory[account_id] = new
+        path = generations_file()
+        if path is not None:
+            data = _read_generations(path)
+            data[account_id] = new
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            os.replace(tmp, path)
+        return new
+
+
 def reset_revoked_for_tests() -> None:
     with _lock:
         _revoked_in_memory.clear()
+        _generations_in_memory.clear()

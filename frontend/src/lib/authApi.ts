@@ -2,8 +2,8 @@
 // 비밀번호는 요청 본문으로만 보내고 어디에도 저장·기록하지 않는다. 토큰은 humanSession.ts가 sessionStorage에 둔다.
 import { DASHBOARD_API_URL } from "./env";
 import {
-  getSession, readLoginResponse, readLoginStatus,
-  type LoginOutcome, type ServerAccount, type ServerRole,
+  getSession, readLoginResponse, readLoginStatus, readPasswordChangeResponse,
+  type LoginOutcome, type PasswordChangeOutcome, type ServerAccount, type ServerRole,
 } from "./humanSession";
 
 const BASE = `${DASHBOARD_API_URL}/api/dashboard/auth`;
@@ -83,5 +83,30 @@ export async function createAccount(x: NewAccount): Promise<ServerAccount> {
     body: JSON.stringify({ name: x.name.trim(), email: x.email.trim(), role: x.role, password: x.password }),
   });
   if (status < 200 || status >= 300) throw new Error(errorMessage(status, body, "계정을 만들지 못했어요"));
+  return (body as { data: ServerAccount }).data;
+}
+
+/** 내 비밀번호 바꾸기. 성공하면 서버가 이 계정의 기존 세션을 모두 끊고 새 세션을 준다 */
+export async function changePassword(current: string, next: string): Promise<PasswordChangeOutcome> {
+  try {
+    const { status, body } = await send("/password", {
+      method: "POST",
+      session: true,
+      body: JSON.stringify({ current_password: current, new_password: next }),
+    });
+    return readPasswordChangeResponse(status, body);
+  } catch {
+    return { kind: "error", message: "서버에 닿지 않았어요. 잠시 뒤 다시 해 주세요." };
+  }
+}
+
+/** 비밀번호 초기화(운영자: 모든 계정, 고객사 관리자: 일반회원만). 그 계정의 기존 세션은 서버가 끊는다 */
+export async function resetPassword(accountId: string, newPassword: string): Promise<ServerAccount> {
+  const { status, body } = await send(`/accounts/${encodeURIComponent(accountId)}/reset-password`, {
+    method: "POST",
+    session: true,
+    body: JSON.stringify({ new_password: newPassword }),
+  });
+  if (status < 200 || status >= 300) throw new Error(errorMessage(status, body, "비밀번호를 초기화하지 못했어요"));
   return (body as { data: ServerAccount }).data;
 }

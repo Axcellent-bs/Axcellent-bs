@@ -2,8 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  SESSION_KEY, accountInputProblem, getSession, loginDisabled, parseSession, pickHumanToken,
-  readLoginResponse, readLoginStatus, sessionFromLogin, setSession, setStoreForTests,
+  SESSION_KEY, accountInputProblem, canResetPassword, getSession, loginDisabled, parseSession, passwordChangeProblem,
+  pickHumanToken, readLoginResponse, readLoginStatus, readPasswordChangeResponse, sessionFromLogin, setSession, setStoreForTests,
   type HumanSession, type KeyValueStore,
 } from "./humanSession.ts";
 
@@ -104,4 +104,38 @@ test("계정 만들기 입력: 이름·이메일·비밀번호 10자 이상", ()
   assert.match(accountInputProblem({ ...ok, email: "not-an-email" }) ?? "", /이메일/);
   assert.match(accountInputProblem({ ...ok, name: " " }) ?? "", /이름/);
   assert.match(accountInputProblem({ ...ok, confirm: "다른값다른값다른값" }) ?? "", /확인/);
+});
+
+test("비밀번호 바꾸기 입력: 지금 비밀번호 필요, 새 비밀번호 10자 이상·지금과 다름·확인 일치", () => {
+  const ok = { current: "temp-pass-1234", next: "my-own-pass-99", confirm: "my-own-pass-99" };
+  assert.equal(passwordChangeProblem(ok), null);
+  assert.match(passwordChangeProblem({ ...ok, current: "" }) ?? "", /지금 비밀번호/);
+  assert.match(passwordChangeProblem({ ...ok, next: "short", confirm: "short" }) ?? "", /10자 이상/);
+  assert.match(passwordChangeProblem({ ...ok, next: ok.current, confirm: ok.current }) ?? "", /달라야/);
+  assert.match(passwordChangeProblem({ ...ok, confirm: "my-own-pass-98" }) ?? "", /확인/);
+});
+
+test("비밀번호 바꾸기 응답: 성공이면 새 세션, 실패면 서버 문구(현재 비밀번호 틀림·잠금·짧음)", () => {
+  const ok = readPasswordChangeResponse(200, { data: { token: "axs1.new.sig", expires_at: NOW + 100, account } }, NOW);
+  assert.equal(ok.kind === "ok" ? ok.session.token : "", "axs1.new.sig");
+  assert.equal(readPasswordChangeResponse(200, { data: { token: "shared" } }, NOW).kind, "error");
+  assert.deepEqual(readPasswordChangeResponse(401, { error: { code: "PASSWORD_WRONG", message: "현재 비밀번호가 맞지 않아요" } }, NOW),
+    { kind: "error", message: "현재 비밀번호가 맞지 않아요" });
+  assert.deepEqual(readPasswordChangeResponse(401, undefined, NOW), { kind: "error", message: "지금 비밀번호가 맞지 않아요." });
+  const locked = readPasswordChangeResponse(429, { error: { code: "LOGIN_LOCKED", message: "15분 뒤 다시 해 주세요" } }, NOW);
+  assert.equal(locked.kind === "error" ? locked.message : "", "15분 뒤 다시 해 주세요");
+  assert.deepEqual(readPasswordChangeResponse(500, {}, NOW), { kind: "error", message: "비밀번호를 바꾸지 못했어요 (500)" });
+});
+
+test("비밀번호 초기화 권한: 운영자는 다른 모든 계정, 고객사 관리자는 일반회원만, 자기 계정은 안 된다", () => {
+  const op = { id: "op", role: "operator" as const };
+  const admin = { id: "ad", role: "admin" as const };
+  const member = { id: "m", role: "member" as const };
+  assert.equal(canResetPassword(op, admin), true);
+  assert.equal(canResetPassword(op, { id: "op2", role: "operator" }), true);
+  assert.equal(canResetPassword(op, op), false);
+  assert.equal(canResetPassword(admin, member), true);
+  assert.equal(canResetPassword(admin, { id: "ad2", role: "admin" }), false);
+  assert.equal(canResetPassword(admin, op), false);
+  assert.equal(canResetPassword(member, { id: "m2", role: "member" }), false);
 });
