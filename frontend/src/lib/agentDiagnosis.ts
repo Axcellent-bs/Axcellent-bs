@@ -76,11 +76,11 @@ export interface ReceivedDiagnosis {
 }
 
 /**
- * 칸을 보여도 되는 회원: 운영자·관리자. 총괄의 진단은 AXcellent 내부 품질 정보라
- * 고객사 일반회원(직원)에게는 보이지 않는다.
+ * 칸을 보여도 되는 회원: 로그인한 모두(운영자·관리자·일반회원).
+ * 관리자와 일반회원은 회사 연결·회원·서버 관리 두 화면 말고는 같은 화면을 본다(11/19 결정).
  */
 export const canSeeDiagnosisInbox = (kind: "운영자" | "관리자" | "일반회원" | null | undefined) =>
-  kind === "운영자" || kind === "관리자";
+  kind === "운영자" || kind === "관리자" || kind === "일반회원";
 
 export const STATUS_LABEL: Record<DiagnosisStatus, { label: string; tone: string }> = {
   received: { label: "접수", tone: "bg-ink-100 text-ink-700" },

@@ -14,7 +14,7 @@ import { EMPTY_REPO_FORM, repoAppLabel, repoBody, repoFormError, repoFormOf, typ
 import { useSession } from './session'
 
 // 도구 연결 (/system/tools, 모두 연다): 고객사 개발팀이 쓰는 형상관리·배포·문서 도구와 AI 연결을 잇는 창구.
-// 형상관리·배포·문서는 회사 공용 연결이라 관리자만 바꾸고 일반 회원은 상태만 본다. AI(사람별 MCP 연결 안내)는 모두 쓴다.
+// 관리자·일반회원 모두 같은 화면을 쓰고 바꿀 수 있다(관리자만 다른 건 회사 연결·회원·서버 관리 두 화면, 11/19 결정).
 // 배포와 맨 위 GitHub 앱은 공용 도구 연결 보관함(dashboard-api tool-connections), 레포 연결은 개발 AI 저장소다.
 // 레포를 GitHub App으로 붙일 때는 맨 위 GitHub 앱 칸의 앱을 고른다(`app_ref`). 앱은 한 번만 넣고 배포와 같이 쓴다.
 // 형상관리 연결은 레포마다 1개, 여러 개. dev 서비스(`/api/planning/vcs/connections`)에 저장되고 토큰은 끝 4자리만 온다.
@@ -457,6 +457,8 @@ const readTab = (): PanelItem => {
 export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClose?: () => void } = {}) {
   const { account } = useSession()
   const admin = !!account?.admin
+  // 도구 연결은 관리자·일반회원이 똑같이 쓴다(관리자만 다른 건 회사 연결·회원·서버 관리 두 화면). admin은 관리자 화면으로 가는 링크에만 쓴다
+  const canEdit = !!account
   const tools = useToolList()
   const dejafixLive = useDejafixStatus()
   const [list, setList] = useState<VcsConnection[] | null>(null)
@@ -660,32 +662,32 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
       {onClose && <button className="btn-quiet absolute right-3 top-3 px-2 py-1" onClick={onClose} aria-label="닫기">✕</button>}
       {tab === 'notion' ? (
         <div className="space-y-4">
-          {!admin && <ReadOnlyNotice />}
-          <NotionConnect readOnly={!admin} />
+          {!canEdit && <ReadOnlyNotice />}
+          <NotionConnect readOnly={!canEdit} />
         </div>
       ) : tab === 'ai' ? <CodingModeSection part="all" /> : tab === 'deploy' ? (
-        tools.data ? <DeployTools data={tools.data} admin={admin} onChanged={tools.reload} /> : <ToolsLoading error={tools.error} />
+        tools.data ? <DeployTools data={tools.data} admin={canEdit} onChanged={tools.reload} /> : <ToolsLoading error={tools.error} />
       ) : tab === 'repos' ? (
       <section className="space-y-4">
-        {!admin && <ReadOnlyNotice />}
-        {tools.data ? <GithubAppCard data={tools.data} admin={admin} onChanged={tools.reload} /> : <ToolsLoading error={tools.error} />}
+        {!canEdit && <ReadOnlyNotice />}
+        {tools.data ? <GithubAppCard data={tools.data} admin={canEdit} onChanged={tools.reload} /> : <ToolsLoading error={tools.error} />}
         <SectionHead title="레포 연결"
           desc={list && list.length > 1
             ? '개발 AI가 코드를 읽고 PR을 올리는 레포예요. 레포가 여럿이면 PR마다 AI가 대상 레포를 제안하고 사람이 승인해요.'
             : '개발 AI가 코드를 읽고 PR을 올리는 레포예요. 레포마다 접근 토큰이나 GitHub App으로 연결해요.'}
           right={<>
             {offline && <StatusChip tone="wait">개발·배포 AI에 연결할 수 없음</StatusChip>}
-            {admin && !!list?.length && <button type="button" className="btn-ghost" onClick={checkAll} disabled={checking || offline}>{checking ? '점검 중…' : '보안 점검'}</button>}
-            {admin && <button type="button" className="btn-primary px-4" disabled={offline || (!!form && !form.id)}
+            {canEdit && !!list?.length && <button type="button" className="btn-ghost" onClick={checkAll} disabled={checking || offline}>{checking ? '점검 중…' : '보안 점검'}</button>}
+            {canEdit && <button type="button" className="btn-primary px-4" disabled={offline || (!!form && !form.id)}
               onClick={() => { setForm({ ...EMPTY_REPO_FORM }); setError(null) }}>레포 연결</button>}
           </>} />
 
-        {admin && form && !form.id && formEl}
+        {canEdit && form && !form.id && formEl}
 
         {list && !list.length && !form && (
           <div className="border border-dashed border-ink-300 px-6 py-8 text-center">
             <p className="font-medium">연결한 레포가 없어요</p>
-            <p className="mt-1 text-sm text-ink-500">{admin ? '개발 AI가 코드를 읽고 PR을 올릴 레포가 아직 없어요. 위의 레포 연결로 첫 레포를 이어 주세요.' : '관리자가 연결하면 여기에 보여요.'}</p>
+            <p className="mt-1 text-sm text-ink-500">{canEdit ? '개발 AI가 코드를 읽고 PR을 올릴 레포가 아직 없어요. 위의 레포 연결로 첫 레포를 이어 주세요.' : '관리자가 연결하면 여기에 보여요.'}</p>
           </div>
         )}
 
@@ -700,7 +702,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
                     <span className="text-base font-semibold">{c.repo}</span>
                     <span className={`chip ${st.tone}`}>{st.label}</span>
                     <span className="text-xs text-ink-500">{KIND_LABEL[c.kind] ?? c.kind} · {SOURCE[c.source] ?? c.source}</span>
-                    {admin && (
+                    {canEdit && (
                       <div className="ml-auto flex gap-1.5">
                         <button type="button" className="btn-ghost" onClick={() => runTest(c.id)} disabled={!!testing || offline}>연결 확인</button>
                         <button type="button" className="btn-ghost" onClick={() => { setForm(repoFormOf(c)); setError(null) }}>수정</button>
@@ -734,7 +736,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
                       </div>
                     )}
                   </dl>
-                  {admin && form?.id === c.id && <div className="mt-4">{formEl}</div>}
+                  {canEdit && form?.id === c.id && <div className="mt-4">{formEl}</div>}
                 </li>
               )
             })}
@@ -778,7 +780,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
 export default function ToolConnections() {
   return (
     <div className="space-y-6 px-4 py-8 sm:px-8">
-      <PageHead where="시스템 관리" title="도구 연결">AI들이 쓰는 회사 바깥 도구를 이어요. 형상관리·배포·문서는 관리자만 바꾸고, AI 연결은 누구나 해요. 키·토큰은 서버에만 저장되고 화면에는 가린 값만 보여요.</PageHead>
+      <PageHead where="시스템 관리" title="도구 연결">AI들이 쓰는 회사 바깥 도구를 이어요. 키·토큰은 서버에만 저장되고 화면에는 가린 값만 보여요.</PageHead>
       <ToolConnectionsPanel />
     </div>
   )

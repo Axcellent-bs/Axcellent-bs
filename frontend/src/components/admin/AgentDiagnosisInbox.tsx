@@ -13,7 +13,7 @@ import { kindOf, useSession } from "@/demo/session";
 // - agent: 진단을 받는 에이전트(부서) 이름. infra·data·dev·support·marketing·finance·archive
 // - showService: 한 에이전트에 서비스가 여럿일 때(예: 고객지원) 받은 서비스 이름을 같이 보인다
 //
-// 읽기 전용이다. 철회는 총괄 화면에서만 한다. 받은 진단이 없거나, 불러오지 못했거나, 일반회원이면 아무것도 그리지 않는다.
+// 읽기 전용이다. 철회는 총괄 화면에서만 한다. 받은 진단이 없거나, 불러오지 못했거나, 로그인하지 않았으면 아무것도 그리지 않는다.
 
 export function AgentDiagnosisInbox({ agent, showService = false }: { agent: string; showService?: boolean }) {
   const { account } = useSession();
