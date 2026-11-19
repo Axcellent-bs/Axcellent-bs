@@ -18,7 +18,9 @@ SHOP="${SHOP_API_URL:-http://127.0.0.1:8010}/api/shop/admin/payment-version"
 INFRA="${INFRA_URL:-http://127.0.0.1:8107}/api/infra/demo-deploy"
 DEV="${DEV_URL:-http://127.0.0.1:8111}/api/planning/demo/incident-merge"
 SERVICE="shop-api"
-TOKEN=$(sed -n 's/^VITE_SHOP_ADMIN_TOKEN=//p' .data/web.env 2>/dev/null || true)
+TOKEN=$(sed -n 's/^AX_WEB_ADMIN_TOKEN=//p' .data/web.env 2>/dev/null || true)
+# 예전 run_all.sh 가 만든 web.env 이름도 받는다
+[ -n "$TOKEN" ] || TOKEN=$(sed -n 's/^VITE_SHOP_ADMIN_TOKEN=//p' .data/web.env 2>/dev/null || true)
 if [ -z "$TOKEN" ]; then
   echo "backend/.data/web.env 가 없습니다. 먼저 bash scripts/run_all.sh 로 실제 모드 백엔드를 띄우세요." >&2
   exit 1

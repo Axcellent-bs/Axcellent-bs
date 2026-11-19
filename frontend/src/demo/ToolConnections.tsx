@@ -127,7 +127,8 @@ const CODING_MODES: { id: CodingSetting; label: string }[] = [
   { id: 'subscription', label: '내 Claude' },
 ]
 const codingApi = codingSettingsApi(DEV_API)
-const MCP_URL = `${DEV_API.replace(/\/$/, '')}/api/planning/mcp`
+// 개발 서버 프록시 주소(/dev-api)처럼 앞이 빠진 주소면 지금 화면 주소를 앞에 붙인다 (명령에 그대로 붙여 넣을 수 있게)
+const MCP_URL = new URL(`${DEV_API.replace(/\/$/, '')}/api/planning/mcp`, window.location.href).href
 // 로컬: run_all.sh가 만든 작업 대기열 전용 토큰(backend/.data/tokens.env WORK_TOKEN)을 읽어 넣는다 (Git Bash, 레포 폴더).
 // 이 값은 내 PC의 Claude Code 설정(~/.claude.json)에 남으므로 승인·머지 권한이 있는 사람 토큰은 쓰지 않는다
 const MCP_ADD = `claude mcp add --transport http axcellent-dev ${MCP_URL} --header "Authorization: Bearer $(sed -n 's/^WORK_TOKEN=//p' backend/.data/tokens.env)"`

@@ -2,7 +2,7 @@
 
 화면은 항상 실제 백엔드(`backend/`, 실제 모드)에 붙어서 돌아요. 녹화본으로 도는 데모는 없어요.
 
-- 백엔드를 켠 뒤 `backend/`에서 `bash scripts/run_web.sh`로 띄워요 (http://localhost:3090). 실제 모드 토큰이 같이 들어가요. 처음 만든 곳은 [NYejin/axcellent-demo](https://github.com/NYejin/axcellent-demo)예요.
+- 백엔드를 켠 뒤 `backend/`에서 `bash scripts/run_web.sh`로 띄워요 (http://localhost:3090). 진짜 토큰은 번들에 들어가지 않고, 개발 서버 프록시가 자리표시자를 진짜 토큰으로 바꿔 붙여요(`token-proxy.ts`). 로그인 세션 토큰은 그대로 넘겨요. 번들 검사: `npm run check:bundle-tokens`. 처음 만든 곳은 [NYejin/axcellent-demo](https://github.com/NYejin/axcellent-demo)예요.
 - AI 화면은 [ax-frontend](https://github.com/ax-company-hq/ax-frontend) `dashboard-web`(캣북스 대시보드, dev `c1eb44a`)에서 옮겨 왔어요. 캣북스 대시보드는 없앨 예정이고, AI 7개는 여기서 관리해요 (아래 "AI 7개").
 
 ## 보여 주는 구조
