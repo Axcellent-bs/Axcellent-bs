@@ -70,8 +70,8 @@ function Guarded({ children }: { children: ReactNode }) {
   const company = useCompany()
   const loaded = useCompanyLoaded()
   if (!account) return <Navigate to={pathname.startsWith('/control') ? '/control/login' : '/'} replace />
-  // 연결 회사를 서버에서 읽기 전에는 보내지 않는다(읽는 동안 "연결 안 됨"으로 보여 회사 연결 화면으로 튕겼다)
-  if (!loaded && !company) return <PageLoading />
+  // 연결 회사를 아직 못 읽었으면 기다린다(먼저 보내 버리면 연결된 회사도 새로 열 때마다 회사 연결 화면으로 간다)
+  if (!company && !loaded) return <PageLoading />
   if (!canOpen(account, pathname, !!company)) return <Navigate to={homeOf(account)} replace />
   return <>{children}</>
 }

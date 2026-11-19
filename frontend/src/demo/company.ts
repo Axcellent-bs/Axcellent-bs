@@ -68,21 +68,23 @@ function loadSiteCompany(): Promise<void> {
     .catch(() => { /* 서버를 못 읽으면 지난 값 그대로 */ })
 }
 
-// 처음 서버 값을 읽기 전에는 "연결 안 됨"으로 단정하지 않는다(읽는 동안 회사 연결 화면으로 튕기지 않게)
-let loaded = false
 /** 서버에서 키 목록·연결 회사·사이트 연결을 다시 읽는다 */
+// 처음 읽기가 끝났는지. 끝나기 전에는 "연결 전"으로 보고 회사 연결 화면으로 보내지 않는다(App의 Guarded)
+let loaded = false
 export function refreshCompany(): Promise<void> {
   const keysNow = call<ServerState>('GET', PATH).then(apply).catch(() => { /* 지난 값 그대로 */ })
-  return Promise.all([keysNow, loadSiteCompany()]).then(() => { loaded = true; notify() })
+  return Promise.all([keysNow, loadSiteCompany()]).then(() => {
+    if (!loaded) { loaded = true; notify() }
+  })
 }
-/** 서버에서 연결 회사를 한 번이라도 읽었는지(실패도 읽은 것으로 본다) */
-export const useCompanyLoaded = () => useSyncExternalStore(subscribe, () => loaded)
 /** 회사 연결 저장·해제 뒤 (SiteConnect) */
 export const refreshServerCompany = refreshCompany
-try { void refreshCompany() } catch { /* fetch가 없는 환경 */ }
+try { void refreshCompany() } catch { loaded = true /* fetch가 없는 환경 */ }
 
 export const getCompany = () => company ?? siteCompany
 export const useCompany = () => useSyncExternalStore(subscribe, getCompany)
+/** 서버에서 연결 회사를 처음 한 번 다 읽었나 */
+export const useCompanyLoaded = () => useSyncExternalStore(subscribe, () => loaded)
 export const useKeys = () => useSyncExternalStore(subscribe, () => keys)
 
 // ---------------------------------------------------------------- AXcellent 운영팀: 키 발급·폐기
