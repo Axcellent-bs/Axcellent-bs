@@ -182,6 +182,19 @@ async def rollback_deployment(request: AgentRequest) -> AgentResult:
     key = f"{context_id}:{ACTION}:{inp.service}:{inp.from_version}"
     if (done := rt.rollbacks.get(key)) and done["status"] == "executed":
         return done["result"].model_copy(update={"meta": request.meta})
+    # 관문은 같은 멱등 키에 같은 "executed" 판정을 두 호출 모두에 준다. 그래서 같은 롤백은 한 번에
+    # 하나씩만 처리하고, 앞 요청을 기다린 요청은 그 결과(실패 포함)를 그대로 돌려준다.
+    # 실패를 다시 하지 않는 건 기다린 요청뿐이다: 끝난 뒤 새로 온 요청은 지금처럼 다시 시도한다
+    async with rt.rollback_locks.hold(key):
+        if (after := rt.rollbacks.get(key)) is not done and after is not None:
+            return after["result"].model_copy(update={"meta": request.meta})
+        return await _rollback_once(request, rt, inp, key)
+
+
+async def _rollback_once(
+    request: AgentRequest, rt: Any, inp: RollbackInput, key: str
+) -> AgentResult:
+    context_id = request.meta.context_id
     if is_pr_service(inp.service):
         return await _rollback_pr(request, rt, inp, key)
 
