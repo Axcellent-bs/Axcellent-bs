@@ -165,6 +165,11 @@ class ProposalWriter:
         self._llm = llm
         self.timeout = timeout
 
+    @property
+    def llm(self) -> LLMClient:
+        """같은 LLM으로 영상 제작안도 쓴다 (`video_plan.write`)."""
+        return self._llm
+
     async def draft(self, inp: ReceiveInsightInput, context_id: str) -> ProposalDraft | None:
         data = {
             "title": inp.title,

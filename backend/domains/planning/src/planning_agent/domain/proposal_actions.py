@@ -28,6 +28,7 @@ from ax_contracts.schemas.planning import (
     InsightFact,
     ReceiveCampaignUpdateInput,
     ReceiveInsightInput,
+    VideoPlan,
 )
 from ax_contracts.schemas.planning import ProposalTarget as TargetIn
 from ax_workflow.core import ActionError, ActionResult
@@ -44,7 +45,7 @@ from ax_workflow.models import (
     Spec,
     State,
 )
-from planning_agent import idea_options
+from planning_agent import idea_options, video_plan
 from planning_agent import proposals as ext
 
 PULL_CTX = "ctx_proposals"
@@ -268,7 +269,9 @@ class ProposalMixin:
         "delete_proposal": ("_delete_proposal", ProposalParams),
     }
     # 잠금 밖에서 다른 부서·LLM을 부르는 액션 (dispatch가 따로 받는다)
-    OUTSIDE_LOCK = {"pull_insights", "proposal_to_request", "measure_proposal", "choose_angle"}
+    OUTSIDE_LOCK = {
+        "pull_insights", "proposal_to_request", "measure_proposal", "choose_angle", "make_plan",
+    }  # fmt: skip
 
     # ---- 받아오기 (data promo_concepts → 인사이트 → 제안)
 
@@ -501,7 +504,18 @@ class ProposalMixin:
 
     # ---- 사람 버튼: 기획안으로 만들기 / 폐기 / 고치기 (마케팅·개발로 넘기기는 기획안 다음 단계)
 
-    async def _make_plan(self: Any, s: State, proposal: str) -> ActionResult | None:
+    async def make_plan(self: Any, proposal: str) -> ActionResult:
+        """사람 버튼 "기획안으로 만들기": 영상 제작안(LLM은 잠금 밖)을 먼저 쓰고 기획안을 만든다."""
+        p = _find(self.state, proposal)
+        video = None
+        if p is not None and p.status == "확인 대기":
+            writer = self._proposal_writer  # 테스트 가짜는 llm이 없다 → 규칙 제작안
+            video = await video_plan.write(getattr(writer, "llm", None), p, _ctx(p))
+        return await self._apply(self._make_plan, proposal=proposal, video=video)
+
+    async def _make_plan(
+        self: Any, s: State, proposal: str, video: VideoPlan | None = None
+    ) -> ActionResult | None:
         """사람 확정 → 기획안을 기획서(SPEC-n, 초안)로 만든다. 바로 넘기지 않고, 기획서 화면에서
         사람이 마케팅·개발 중 고른다 (자동 확정·자동 개발 전달 안 함, origin proposal)."""
         p = _find(s, proposal)
@@ -531,6 +545,9 @@ class ProposalMixin:
             body.append(f"> 타깃: {p.audience}")
         if p.body_md:
             body += ["", p.body_md]
+        if video is not None:
+            p.video_plan = video
+            body += ["", video_plan.markdown(video)]
         evidence = " · ".join(f"{f.label} {f.value}" for f in p.facts)
         s.requests.append(
             Request(
@@ -589,7 +606,7 @@ class ProposalMixin:
             facts=_facts_in(p), target=_target_in(p), products=p.products, format=p.format,
             product_ids=p.product_ids,
             content_category=p.content_category, content_format=p.content_format,
-            idea_angle=p.angle, trend_refs=_trend_refs(p),
+            idea_angle=p.angle, trend_refs=_trend_refs(p), video_plan=p.video_plan,
             approved_by="사람", note=p.note, body_md=body_md,
             continue_campaign=_prev_campaign(self.state, p),
         )  # fmt: skip
@@ -970,6 +987,11 @@ class ProposalMixin:
         """잠금 밖 액션이면 처리하고, 아니면 None (원래 dispatch가 한다)."""
         if name == "pull_insights":
             return await self.pull_insights()
+        if name == "make_plan":
+            pid = action.get("proposal")
+            if not isinstance(pid, str):
+                raise ActionError("INVALID_ACTION", "proposal이 없다")
+            return await self.make_plan(pid)
         if name == "measure_proposal":
             pid = action.get("proposal")
             if not isinstance(pid, str):
