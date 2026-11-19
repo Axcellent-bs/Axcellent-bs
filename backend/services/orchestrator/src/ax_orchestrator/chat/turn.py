@@ -229,7 +229,9 @@ class ChatService:
         if not users:
             return False
         try:
-            result = await intake.receive(th["who"], users[-1], llm, history=users[:-1])
+            result = await intake.receive(
+                th["who"], users[-1], llm, history=users[:-1], thread_id=thread_id
+            )
         except Exception as exc:  # noqa: BLE001 - 접수 문제로 대화가 막히지 않게 설명 흐름으로 넘긴다
             logger.warning("의뢰 접수 실패 %s", type(exc).__name__)
             return False
@@ -237,6 +239,13 @@ class ChatService:
             return False
         self.store.finish_turn(thread_id, result.reply, summary=result.summary)
         return True
+
+
+def notify_thread(thread_id: str, text: str) -> None:
+    """의뢰 진행을 접수한 대화에 한 줄로 알린다 (정해진 문장 틀만 온다)."""
+    from ax_orchestrator.chat import threads
+
+    threads.get_store().add_note(thread_id, text)
 
 
 _service: ChatService | None = None

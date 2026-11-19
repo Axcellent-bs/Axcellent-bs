@@ -179,6 +179,7 @@ class WorkRequests:
             "steps": {},
             "log": [{"at": stamp, "message": "의뢰를 받았다"}],
             "context_id": None,
+            "thread_id": None,  # 접수한 대화 번호. 진행을 알릴 때 쓴다
         }
         self._save(row)
         self._trim()
@@ -220,6 +221,12 @@ class WorkRequests:
         row["log"].append({"at": now().isoformat(), "message": f"일을 골랐다: {task}"})
         self._save(row)
         return copy.deepcopy(row)
+
+    def link_thread(self, request_id: str, thread_id: str | None) -> None:
+        """의뢰를 접수한 대화를 적는다 (진행 알림을 그 대화로 보낸다)."""
+        row = self._row(request_id)
+        row["thread_id"] = thread_id
+        self._save(row)
 
     def set_classification(self, request_id: str, **fields: Any) -> dict[str, Any]:
         """분류 결과를 남긴다(지시문 버전·종류·확신도·이유·차선 후보). 정확도를 잴 때 쓴다."""
