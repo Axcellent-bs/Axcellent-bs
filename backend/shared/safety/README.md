@@ -76,3 +76,11 @@ ax-contracts, ax-agent-template (`call_agent`, `publish`, 토큰 검증), 검증
 - 공용 토큰이면 보류 건에 `decided_by: "공용"`과 `decided_as`(자기 신고)를 같이 남기고, 감사 로그 `review_*`의 `detail.decided_as`에도 남긴다. 개인 토큰이면 `decided_as`를 버린다(토큰이 곧 사람)
 - 스스로 승인 막기: 요청 `params.requested_by`와 승인자(공용 토큰이면 `decided_as`, 아니면 토큰 이름)가 같으면(앞뒤 공백·대소문자 무시) 403 `SELF_APPROVAL`. AI가 올린 요청(`requested_by: support-ai` 등)은 사람 이름과 겹치지 않아 승인할 수 있다. 이름 없이 공용 토큰만 오면 예전처럼 기록만 남긴다
 - `safety.review_decided` 이벤트와 공통 로그에는 이름을 더하지 않았다(계약 그대로)
+
+## 비용 임계값 화면 변경 (`cost_policy`)
+
+`thresholds.toml`은 기본값이다. 영상·이미지·BGM 건당, 하루 합계, 영상 길이 5개 규칙은 승인 관문(`change_cost_policy`, C, 요청자≠승인자)을 거친 사람 변경만 `SAFETY_COST_POLICY_FILE`(없으면 `SAFETY_STATE_DB` 옆 `cost_policy.json`, 이력 `.history.jsonl`)에 덮어쓴다. 규칙마다 코드 상수 하한·절대 상한이 있고 범위 밖 값은 요청도 적용도 읽기도 거부한다. 안전 서버가 mtime으로 다시 읽어 재시작이 필요 없다.
+
+- `GET /api/safety/cost-policy`(조회): 현재 값·기본값·상한·이력·대기 요청
+- `POST /api/safety/cost-policy/requests`(로그인 세션의 운영자·관리자만): 변경 요청 → 보류 큐(C)
+- `POST /api/safety/cost-policy/requests/{review_id}/apply`: 승인된 건만 적용(값은 기록된 요청에서만 읽는다, 같은 건은 한 번만)

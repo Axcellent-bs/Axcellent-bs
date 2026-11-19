@@ -7,7 +7,7 @@ import { customerAccounts, kindOf, useSession, type Account } from './session'
 import { reloadServerMembers, useServerMembers } from './serverMembers'
 import { createAccount, updateAccount } from '@/lib/authApi'
 import { accountInputProblem, getSession, MIN_PASSWORD_LENGTH, type ServerAccount, type ServerRole } from '@/lib/humanSession'
-import { approverOf, canEditProfile, customerRows, roleChangeProblem, toggleReader, type AccountPatch } from '@/lib/memberAdmin'
+import { approverOf, canEditProfile, customerRows, limitEditorOf, limitEditorProblem, policyEditorOf, policyEditorProblem, roleChangeProblem, toggleReader, type AccountPatch } from '@/lib/memberAdmin'
 import { PreparingChip } from '@/components/Preparing'
 import { privateIp, useHosts } from './store'
 import { More, PageHead, SectionHead, StatusChip, Tabs, Tiles } from '@/components/connect/parts'
@@ -217,6 +217,8 @@ function ServerMembers() {
               <th className="px-4 py-2.5 font-medium">연결</th>
               <th className="px-4 py-2.5 font-medium">부서 (선택)</th>
               <th className="px-4 py-2.5 font-medium">확인 권한</th>
+              <th className="px-4 py-2.5 font-medium">비용 상한 변경 권한</th>
+              <th className="px-4 py-2.5 font-medium">정책 변경 권한</th>
               <th className="px-4 py-2.5 font-medium">열람 담당</th>
               <th className="px-4 py-2.5 font-medium">쓰는 PC</th>
             </tr>
@@ -226,6 +228,10 @@ function ServerMembers() {
               const editable = !!me && canEditProfile(me, a) && busy === null
               const approver = approverOf(a)
               const readers = a.readers ?? []
+              const limitEditor = limitEditorOf(a)
+              const limitProblem = limitEditorProblem(a)
+              const policyEditor = policyEditorOf(a)
+              const policyProblem = me ? policyEditorProblem({ role: me.role, policy_editor: me.policy_editor }, a) : '로그인이 필요해요.'
               // 바꿀 수 없는 역할이면 이유를 title로 보여 준다
               const other = CHOOSABLE.find((r) => r !== a.role)
               const roleProblem = !me ? '로그인이 필요해요.' : other ? roleChangeProblem(me, a, other, list) : null
@@ -255,6 +261,22 @@ function ServerMembers() {
                     </button>
                   </td>
                   <td className="px-4 py-2.5">
+                    <button type="button" role="switch" aria-checked={limitEditor} aria-label={`${a.name} 비용 상한 변경 권한`}
+                      disabled={!editable || (!!limitProblem && !limitEditor)} title={limitProblem ?? undefined}
+                      onClick={() => void save(a, { limit_editor: !limitEditor }, `${a.name} 비용 상한 변경 권한을 ${limitEditor ? '껐어요' : '켰어요'}.`)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition disabled:opacity-50 ${limitEditor ? 'bg-brand-600' : 'bg-ink-100'}`}>
+                      <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${limitEditor ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </button>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <button type="button" role="switch" aria-checked={policyEditor} aria-label={`${a.name} 정책 변경 권한`}
+                      disabled={!editable || (!!policyProblem && !policyEditor)} title={policyProblem ?? undefined}
+                      onClick={() => void save(a, { policy_editor: !policyEditor }, `${a.name} 정책 변경 권한을 ${policyEditor ? '껐어요' : '켰어요'}.`)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition disabled:opacity-50 ${policyEditor ? 'bg-brand-600' : 'bg-ink-100'}`}>
+                      <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${policyEditor ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </button>
+                  </td>
+                  <td className="px-4 py-2.5">
                     {a.role === 'admin' ? <span className="text-xs text-ink-500">관리자는 모두 봐요</span> : (
                       <div className="flex gap-1" role="group" aria-label={`${a.name} 열람 담당`}>
                         {READER_AREAS.map((r) => {
@@ -273,7 +295,7 @@ function ServerMembers() {
               )
             })}
             {!list.length && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-ink-500">{rows === null ? (loading ? '계정 목록을 읽는 중이에요' : '계정 목록을 아직 받지 못했어요') : '계정이 없어요'}</td></tr>
+              <tr><td colSpan={9} className="px-4 py-6 text-center text-ink-500">{rows === null ? (loading ? '계정 목록을 읽는 중이에요' : '계정 목록을 아직 받지 못했어요') : '계정이 없어요'}</td></tr>
             )}
           </tbody>
         </table>

@@ -37,6 +37,7 @@ from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutpu
 from marketing_agent import (
     brief_media,
     brief_publish,
+    cost_limits,
     manual_publish,
     outage_sns_media,
     publish_control,
@@ -1220,6 +1221,28 @@ async def delete_custom_video_provider_skill(request: AgentRequest) -> AgentResu
     return await video_providers.delete_custom(request, from_decision=_from_decision)
 
 
+async def get_media_cost_limits_skill(request: AgentRequest) -> AgentResult:
+    return await cost_limits.get_limits(request, ledger=STATE.media_ledger)
+
+
+async def lower_media_cost_limits_skill(request: AgentRequest) -> AgentResult:
+    return await cost_limits.change(
+        request, wanted="down", ledger=STATE.media_ledger, from_decision=_from_decision
+    )
+
+
+async def raise_media_cost_limits_skill(request: AgentRequest) -> AgentResult:
+    return await cost_limits.change(
+        request, wanted="up", ledger=STATE.media_ledger, from_decision=_from_decision
+    )
+
+
+async def set_cost_limit_option_skill(request: AgentRequest) -> AgentResult:
+    return await cost_limits.set_option(
+        request, ledger=STATE.media_ledger, from_decision=_from_decision
+    )
+
+
 async def get_manual_publish_package_skill(request: AgentRequest) -> AgentResult:
     return await manual_publish.get_manual_publish_package(request)
 
@@ -1373,6 +1396,10 @@ async def record_campaign_result_skill(request: AgentRequest) -> AgentResult:
 
 
 HANDLERS = {
+    "get_media_cost_limits": get_media_cost_limits_skill,
+    "lower_media_cost_limits": lower_media_cost_limits_skill,
+    "raise_media_cost_limits": raise_media_cost_limits_skill,
+    "set_cost_limit_option": set_cost_limit_option_skill,
     "list_video_providers": list_video_providers_skill,
     "select_video_provider": select_video_provider_skill,
     "save_custom_video_provider": save_custom_video_provider_skill,
