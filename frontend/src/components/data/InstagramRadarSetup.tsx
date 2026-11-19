@@ -4,7 +4,7 @@ import { ApiError } from '@/lib/apiError'
 import { HUMAN_TOKEN_SET } from '@/lib/env'
 import { instagramRadar, splitAccounts, type RadarState } from '@/lib/instagramRadar'
 
-// 인스타 레이더 계정: 데이터 AI가 반응을 지켜볼 인스타 계정(업계·경쟁·참고 계정). 회사마다 달라서 회사 연결에서 정한다.
+// 인스타 레이더 계정: 데이터 AI가 반응을 지켜볼 인스타 계정(업계·경쟁·참고 계정). 데이터분석 › 트렌드 › 인스타의 레이더 아래에서 정한다.
 // 저장하면 회사 설정 파일(trends.toml)의 목록 대신 이 목록을 쓴다. "회사 설정 파일로 되돌리기"로 저장 목록을 지운다.
 const SOURCE: Record<RadarState['source'], string> = { screen: '화면에서 저장한 목록', tenant: '회사 설정 파일', none: '없음' }
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
@@ -36,7 +36,7 @@ export default function InstagramRadarSetup() {
   return (
     <section className="card space-y-4 p-6" aria-label="인스타 레이더 계정">
       <SectionHead as="h3" title="인스타 레이더 계정" right={status}
-        desc="데이터 AI가 반응을 지켜볼 인스타 계정이에요(업계·경쟁·참고 계정). 한 줄에 하나씩 넣어요. 회사마다 달라서 여기서 정해요." />
+        desc="위 레이더가 반응을 지켜볼 인스타 계정이에요(업계·경쟁·참고 계정). 한 줄에 하나씩 넣어요." />
       {!HUMAN_TOKEN_SET && <Notice>사람 토큰이 없어 저장이 꺼져 있어요.</Notice>}
       {state && !state.editable && <Notice>서버에 회사 연결 파일 설정이 없어 저장할 수 없어요.</Notice>}
       <label className="block space-y-1 text-sm">
