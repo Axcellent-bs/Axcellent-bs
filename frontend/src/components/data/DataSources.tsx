@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Chip, Empty, TONE, Waiting } from "@/components/finance/bits";
 import { okEvidence, useSkill, type SkillState } from "@/components/data/useSkill";
+import { safeLink } from "@/lib/safeLink";
 import { Sources, when } from "@/components/data/Sources";
 import {
   DATA_SERVER, dataAi, kpiLive,
@@ -227,7 +228,7 @@ function SourceRow({ s, unlocks }: { s: DataSource; unlocks: string | null }) {
   return (
     <tr className="align-top">
       <td className="py-2 pr-3">
-        <p className="font-semibold text-ink-900">{s.docs_url ? <a href={s.docs_url} target="_blank" rel="noreferrer noopener" className="hover:underline">{s.name}</a> : s.name}</p>
+        <p className="font-semibold text-ink-900">{safeLink(s.docs_url) ? <a href={safeLink(s.docs_url)!} target="_blank" rel="noreferrer noopener" className="hover:underline">{s.name}</a> : s.name}</p>
         {s.period && <p className="text-xs text-ink-500">{s.period}</p>}
       </td>
       <td className="py-2 pr-3 text-ink-700">{s.kinds.map((k) => KIND[k]).join(", ")}</td>

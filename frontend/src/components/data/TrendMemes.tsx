@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { useSkill, type SkillState } from "@/components/data/useSkill";
+import { safeLink } from "@/lib/safeLink";
 import { SummaryBody, SummaryCard } from "@/components/data/KeywordTrend";
 import { dataAi, type MemeWindow, type TrendMeme, type TrendMemesOutput } from "@/lib/data";
 import type { DetectView } from "@/lib/detectView";
@@ -81,12 +82,15 @@ function Videos({ m }: { m: TrendMeme }) {
   if (!m.top_videos.length) return <span className="text-ink-500">없음</span>;
   return (
     <ul className="min-w-[10rem] space-y-1">
-      {m.top_videos.map((v) => (
-        <li key={v.video_id} className="text-xs">
-          {v.video_url ? <a href={v.video_url} target="_blank" rel="noreferrer" className="text-brand-700 underline-offset-2 hover:underline">{v.title || v.video_id}</a> : (v.title || v.video_id)}
-          <small className="block text-[11px] text-ink-500">{[v.channel_title, v.views !== null ? `조회 ${v.views.toLocaleString("ko-KR")}` : null].filter(Boolean).join(" · ")}</small>
-        </li>
-      ))}
+      {m.top_videos.map((v) => {
+        const link = safeLink(v.video_url); // http(s)만 링크, 아니면 제목 글자만
+        return (
+          <li key={v.video_id} className="text-xs">
+            {link ? <a href={link} target="_blank" rel="noreferrer noopener" className="text-brand-700 underline-offset-2 hover:underline">{v.title || v.video_id}</a> : (v.title || v.video_id)}
+            <small className="block text-[11px] text-ink-500">{[v.channel_title, v.views !== null ? `조회 ${v.views.toLocaleString("ko-KR")}` : null].filter(Boolean).join(" · ")}</small>
+          </li>
+        );
+      })}
     </ul>
   );
 }

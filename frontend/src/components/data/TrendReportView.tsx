@@ -3,7 +3,7 @@ import { TONE, Waiting } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
 import { when } from "@/components/data/Sources";
 import { AD, times } from "@/components/data/TrendMemes";
-import { safeLink } from "@/components/data/InstagramAudio";
+import { safeLink } from "@/lib/safeLink";
 import { PostCard } from "@/components/data/InstagramRadar";
 import { dataAi, type SectionStatus, type TrendReport, type TrendReportBeat, type TrendReportBrief, type TrendReportCompetitorRow, type TrendReportSections } from "@/lib/data";
 import { thumbSrc } from "@/lib/igRadarGrid";

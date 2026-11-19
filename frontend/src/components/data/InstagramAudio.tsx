@@ -20,9 +20,6 @@ const TYPES: { key: InstagramAudioType; label: string }[] = [
   { key: "original_sound", label: "오리지널" },
 ];
 
-// 링크 검사는 공용 함수(@/lib/safeLink). 이 파일에서 가져다 쓰던 곳을 위해 다시 내보낸다
-export { safeLink };
-
 /** 125000 → "2:05" */
 function duration(ms: number | null): string | null {
   if (ms === null) return null;
