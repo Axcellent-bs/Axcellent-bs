@@ -54,6 +54,7 @@ from marketing_agent.brief_handoff import (
     SnsMediaRequestDraft,
     build_media_request,
     media_request_for,
+    prepared_of,
     price_problem,
     state_of,
     view_of,
@@ -775,13 +776,21 @@ def _media_estimate(request: AgentRequest, record: SnsHandoffRecord | None) -> d
         return None
     try:
         stored = STATE.briefs.existing(record.proposal_id)  # 실제 생성과 같은 프롬프트로 계산
-        return brief_media.estimate(
+        out = brief_media.estimate(
             request,
             record.proposal_id,
             record.media_request,
             ledger=STATE.media_ledger,
             plan_fields=brief_media.plan_fields_for(stored.brief if stored else None),
         )
+        prepared = prepared_of(record)
+        audio = (prepared or {}).get("audio")
+        if isinstance(audio, dict) and not audio.get("decision"):
+            # 영상 소리를 아직 정하지 않았다: "배경음악 따로 만들기"의 추가 비용(BGM 한 곡)
+            out["bgm"] = brief_media.bgm_estimate(
+                request, record.proposal_id, record.media_request, ledger=STATE.media_ledger
+            )
+        return out
     except Exception:  # noqa: BLE001 - 조회는 돌려준다. 화면은 비용을 모른다고 보여 준다
         return None
 
@@ -1176,6 +1185,33 @@ async def prepare_brief_media_skill(request: AgentRequest) -> AgentResult:
     return result
 
 
+def _publish_status(record: SnsHandoffRecord) -> str | None:
+    state = _publish_state(record)
+    return state.get("status") if state else None
+
+
+async def choose_brief_audio_skill(request: AgentRequest) -> AgentResult:
+    """만든 영상의 소리를 한 번 정한다(그대로 쓰기 / 배경음악 따로 만들기). 게시는 하지 않는다."""
+    result = await brief_media.choose_brief_audio(
+        request,
+        briefs=STATE.briefs,
+        notices=STATE.notices,
+        store=STATE.sns,
+        ledger=STATE.media_ledger,
+        from_decision=_from_decision,
+        publish_status=_publish_status,
+    )
+    state = (result.output or {}).get("sns_handoff")
+    if isinstance(state, dict) and state.get("status") == "handed":
+        try:
+            record = STATE.briefs.handoff(str(request.input.get("proposal_id")))
+        except BriefStorageError:
+            record = None
+        state["media_estimate"] = _media_estimate(request, record)
+        state["publish"] = _publish_state(record)
+    return result
+
+
 async def prepare_outage_sns_media_skill(request: AgentRequest) -> AgentResult:
     """장애 초안에 이미지를 붙인다(B등급 생성). 게시는 하지 않는다(C등급 사람 승인)."""
     return await outage_sns_media.prepare_outage_sns_media(
@@ -1433,6 +1469,7 @@ HANDLERS = {
     "generate_media": generate_media_skill,
     "prepare_sns_post_from_media": prepare_sns_post_from_media_skill,
     "prepare_brief_media": prepare_brief_media_skill,
+    "choose_brief_audio": choose_brief_audio_skill,
     "request_brief_publish": request_brief_publish_skill,
     "prepare_outage_sns_media": prepare_outage_sns_media_skill,
     "request_outage_sns_publish": request_outage_sns_publish_skill,

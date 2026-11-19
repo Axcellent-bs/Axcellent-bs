@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 미디어 만들기의 비용 줄·결과 문구가 서버 값만 쓰는지.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clampDuration, durationCostKrw, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, gateLongStart, longWarningKo, needsLongWarning, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, remainingSeconds, remainingKo, canDecideNow, decideErrorKo, approvalLink, type MediaEstimate, type PublishState } from "./briefMedia.ts";
+import { clampDuration, durationCostKrw, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, gateLongStart, longWarningKo, needsLongWarning, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, remainingSeconds, remainingKo, canDecideNow, decideErrorKo, approvalLink, audioPending, canChooseAudio, audioIntroKo, bgmCostKo, audioDecisionKo, audioResultKo, audioHttpErrorKo, type AudioState, type PreparedMedia, type MediaEstimate, type PublishState } from "./briefMedia.ts";
 
 const estimate = (over: Partial<MediaEstimate> = {}): MediaEstimate => ({
   status: "ok", reason_code: null, media_kind: "video", cost_krw: 835, settled: false, basis: "price_table",
@@ -255,4 +255,76 @@ test("경고 길이를 넘고 확인하면 요청이 나가고 확인 표시가 
   assert.equal(ok, true);
   assert.equal(asked, 1);
   assert.deepEqual(sent, [true]);
+});
+
+// ---- 영상 소리 선택 ----
+
+const audioState = (over: Partial<AudioState> = {}): AudioState => ({ mode: "source", has_source_audio: true, needs_decision: true, decision: null, ...over });
+const prepared = (audio: AudioState | null | undefined, kind = "reel"): PreparedMedia => ({
+  post_draft_id: "spd_1", stage: "draft_ready", media_kind: kind, asset_ref: "a", asset_sha256: "x", cost_krw: 1000, label_text: "AI 생성",
+  check: { verdict: "approved", publishable: true, problems: [] }, prepared_at: null, audio,
+});
+
+test("소리를 아직 정하지 않은 영상만 고르는 단계를 보인다", () => {
+  assert.equal(audioPending(prepared(audioState())), true);
+  assert.equal(audioPending(prepared(audioState({ decision: { choice: "keep", decided_at: null, had_source_audio: true, confirmed_listened: true } }))), false);
+  assert.equal(audioPending(prepared(audioState({ mode: "off", has_source_audio: false, needs_decision: false }))), false); // 예전 설정
+  assert.equal(audioPending(prepared(null)), false); // 옛 서버·이미지
+  assert.equal(audioPending(prepared(undefined)), false);
+  assert.equal(audioPending(prepared(audioState(), "image")), false);
+  assert.equal(audioPending(null), false);
+});
+
+test("게시 요청이 이미 올라간 뒤에는 소리를 바꿀 수 없다", () => {
+  const p = prepared(audioState());
+  assert.equal(canChooseAudio(p, undefined), true);
+  assert.equal(canChooseAudio(p, "not_requested"), true);
+  for (const status of ["held", "publishing", "published", "rejected", "expired"]) assert.equal(canChooseAudio(p, status), false);
+});
+
+test("소리가 있으면 끝까지 듣고 고르게 하고, 없으면 이유를 알린다", () => {
+  const withSound = audioIntroKo(audioState()).join(" ");
+  assert.match(withSound, /AI가 만든 소리/);
+  assert.match(withSound, /끝까지 들어/);
+  assert.match(withSound, /AI 표시/);
+  assert.match(audioIntroKo(audioState({ has_source_audio: false, needs_decision: false })).join(" "), /소리가 없습니다/);
+  assert.match(audioIntroKo(audioState({ has_source_audio: false, needs_decision: false, note: "clip_concat_muted" })).join(" "), /이어 붙인 영상이라 소리를 뺐습니다/);
+});
+
+test("배경음악 추가 비용은 서버가 준 값만 쓴다", () => {
+  assert.match(bgmCostKo({ cost_krw: 66, settled: false, reason_code: null }), /추가 비용 약 66원/);
+  assert.match(bgmCostKo({ cost_krw: 66, settled: false, reason_code: null }), /영상 비용은 다시 나지 않습니다/);
+  assert.match(bgmCostKo({ cost_krw: 66, settled: true, reason_code: null }), /새 비용이 나지 않습니다/);
+  assert.match(bgmCostKo({ cost_krw: null, settled: false, reason_code: "price_not_found" }), /계산할 수 없습니다/);
+  assert.match(bgmCostKo(undefined), /알려 주지 않았습니다/);
+  assert.doesNotMatch(bgmCostKo(null), /\d+원/); // 지어낸 숫자 없음
+});
+
+test("정해진 소리 선택은 기록대로 한 줄로 보여 준다", () => {
+  assert.match(audioDecisionKo({ choice: "keep", decided_at: "2026-11-19T09:30:00Z", had_source_audio: true, confirmed_listened: true }), /이 영상 그대로 사용 \(2026-11-19 09:30 UTC\)/);
+  const bgm = audioDecisionKo({ choice: "bgm", decided_at: null, had_source_audio: true, confirmed_listened: null, bgm_cost_krw: 66 });
+  assert.match(bgm, /배경음악을 따로 만들어 입힘/);
+  assert.match(bgm, /66원/);
+});
+
+test("소리 선택 결과: 그대로 사용·배경음악 완료·보류·실패", () => {
+  assert.equal(audioResultKo({ status: "completed", outcome: "audio_kept", output: { stage: "draft_ready" } }, "keep").kind, "kept");
+  assert.equal(audioResultKo({ status: "completed", outcome: null, output: { stage: "draft_ready" } }, "bgm").kind, "bgm_ready");
+  assert.equal(audioResultKo({ status: "completed", outcome: "rejected_by_check", output: { stage: "check_rejected" } }, "bgm").kind, "check_rejected");
+  const held = audioResultKo({ status: "input-required", outcome: "bgm_held", output: { review_id: "r1" } }, "bgm");
+  assert.equal(held.kind, "held");
+  assert.match(held.text, /영상은 그대로/);
+  assert.match(audioResultKo({ status: "failed", outcome: "audio_already_decided", output: null }, "keep").text, /바꿀 수 없습니다/);
+  assert.match(audioResultKo({ status: "failed", outcome: "publish_already_requested", output: null }, "keep").text, /게시 요청이 이미/);
+  const unknown = audioResultKo({ status: "failed", outcome: "weird_code", output: null }, "bgm");
+  assert.equal(unknown.kind, "failed");
+  assert.match(unknown.text, /weird_code/);
+});
+
+test("소리 선택 연결 오류와 게시 조건 문구는 서버 문장 없이 고정 문구", () => {
+  for (const status of [401, 403, 404, 400, 422, 502, 504, 500, undefined]) {
+    assert.doesNotMatch(audioHttpErrorKo(status), /Traceback|exception/i);
+  }
+  assert.match(audioHttpErrorKo(504), /같은 배경음악을 두 번 만들지 않습니다/);
+  assert.match(publishReasonKo("audio_decision_required"), /소리를 듣고/);
 });

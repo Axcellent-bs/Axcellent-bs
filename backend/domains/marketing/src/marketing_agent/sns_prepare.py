@@ -366,6 +366,15 @@ def label_media(
 # --- skill ---------------------------------------------------------------------
 
 
+def _bgm_summary(gen: dict[str, Any]) -> dict[str, Any]:
+    """BGM을 따로 입힌 영상이면 BGM 증빙 요약(비용·모델·실행 id·프롬프트 해시). 아니면 비어 있다."""
+    bgm = gen.get("bgm")
+    if not isinstance(bgm, dict):
+        return {}
+    keys = ("provider", "model_id", "cost_krw", "execution_id", "prompt_sha256", "media_id")
+    return {"bgm": {k: bgm.get(k) for k in keys}}
+
+
 def _failed(request: AgentRequest, outcome: str, **output: Any) -> AgentResult:
     return AgentResult(
         meta=request.meta, status=TaskStatus.FAILED, outcome=outcome, output=output or None
@@ -575,6 +584,9 @@ async def prepare_sns_post_from_media(
             "replayed": bool(gen.get("replayed")),
             "audio_mode": gen.get("audio_mode", "off"),
             "muted": gen.get("muted"),
+            "has_audio": gen.get("has_audio"),
+            "audio_note": gen.get("audio_note"),
+            **_bgm_summary(gen),
         },
         "conversion": converted.details,
         "label": {

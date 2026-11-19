@@ -5,10 +5,12 @@
 저장·사후 정산. 공급자 함수는 상한을 넘거나 관문이 막으면 호출하지 않는다.
 
 - 상태를 바꾸는 일(돈이 나가는 외부 호출)은 관문이 `executed`를 돌려준 뒤에만 한다.
-- 모든 결과에 `ai_generated: true`를 남긴다. 영상은 무음(오디오 제거)으로만 받는다.
-  예외는 `MARKETING_AUDIO_MODE=bgm_overlay`일 때 `bgm_flow`가
-  `keep_source_audio=True`로 부르는 경우뿐이다
-  (받은 영상의 오디오는 쓰지 않고 `audio_mix`가 버린다). 기본(off)은 이전과 같다.
+- 모든 결과에 `ai_generated: true`를 남긴다. 영상 소리는 `MARKETING_AUDIO_MODE`가 정한다.
+  `source`(기본): 공급자가 만든 소리를 그대로 둔다(`keep_source_audio`). 소리가 없는 공급자·모델은
+  무음 영상이고, 클립을 이어 붙인 영상(`clip_count>1`)은 이음새·내용이 어긋나 소리를 버린다.
+  `off`: 예전처럼 항상 무음으로 받는다. `bgm_overlay`: `bgm_flow`가 `keep_source_audio=True`로
+  불러 받은 영상의 오디오를 `audio_mix`가 버리고 BGM을 입힌다.
+  결과의 `muted`는 최종 파일에 소리가 없는지, `has_audio`·`audio_mode`는 그 근거다.
 - 오디오(BGM, `media_kind="audio"`)는 `bgm_overlay`일 때만 받는다. 이미지·영상과 같은 순서로
   단가표·상한·장부·`execute()` 관문을 거치며, 관문이 보류하면 공급자를 부르지 않는다(fail-closed).
 - 글자는 모델이 그리지 않는다(프롬프트 규칙). 제목·가격·AI 라벨 오버레이는 다른 단계가 맡는다.
@@ -46,6 +48,7 @@ from ax_contracts.schemas.common import AxModel
 from marketing_agent.media import pricing
 from marketing_agent.media.base import MediaKind, MediaProviderError, MediaRequest, MediaResult
 from marketing_agent.media.config import MOCK, MediaSettings, ffmpeg_bin
+from marketing_agent.media.gemini_video import has_audio_track
 from marketing_agent.media.ledger import LedgerError, MediaLedger
 from marketing_agent.media.mock import MOCK_COST_KRW
 from marketing_agent.media.pricing import PriceNotFound
@@ -100,7 +103,11 @@ class GeneratedMedia(AxModel):
     quality: str | None = None
     duration_s: int | None = None
     clip_count: int = 1  # 영상: 이어 붙인 클립 수(1이면 단일 클립)
-    muted: bool | None = None  # 영상은 true(무음), 이미지·오디오는 None
+    muted: bool | None = None  # 영상: 받은 파일에 소리가 없으면 true, 이미지·오디오는 None
+    # 영상만. 소리 처리 기록: 모드(source·off·bgm_overlay), 받은 파일에 소리 트랙이 있는지, 비고
+    audio_mode: str | None = None
+    has_audio: bool | None = None
+    audio_note: str | None = None  # 예: "clip_concat_muted"(이어 붙인 영상은 소리를 버림)
     cost_krw: int  # 확정액(정수 원)
     cost_est_krw: int  # 호출 전 추정액
     usd_actual: str | None = None
@@ -128,6 +135,11 @@ def _fail(request: AgentRequest, outcome: str, **output: Any) -> AgentResult:
 
 def _sha(*parts: object) -> str:
     return hashlib.sha256(json.dumps(parts, ensure_ascii=False).encode()).hexdigest()
+
+
+def _audio_marker(keep_source_audio: bool) -> str:
+    """요청 해시에 넣는 소리 표식. 소리를 둔 영상과 무음 영상은 다른 장부 키다."""
+    return "src_audio_overlay" if keep_source_audio else "muted"
 
 
 def _is_image_size(resolution: str) -> bool:
@@ -184,6 +196,10 @@ async def generate_media(
         return _fail(request, "invalid_input", errors=["media_kind: audio_mode_off"])
     if keep_source_audio and data.media_kind != "video":
         return _fail(request, "invalid_input", errors=["keep_source_audio: video_only"])
+    # source 모드(기본)의 영상은 공급자가 만든 소리를 그대로 둔다. bgm_flow는 직접 True로 부른다
+    keep_source_audio = keep_source_audio or (
+        data.media_kind == "video" and settings.audio_mode == "source"
+    )
 
     # --- 프롬프트 (자유 입력 금지) ---
     try:
@@ -218,7 +234,7 @@ async def generate_media(
         )
 
     prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
-    audio_marker = "src_audio_overlay" if keep_source_audio else "muted"
+    audio_marker = _audio_marker(keep_source_audio)
     request_sha = _sha(prompt_sha, kind, resolution, quality, duration_s, audio_marker)
     media_id = f"med_{request_sha[:12]}"
     key = f"{request.meta.context_id}:{ACTION}:{data.post_draft_id}:{request_sha[:10]}"
@@ -284,6 +300,15 @@ async def generate_media(
             return _fail(request, "price_not_found", provider=provider_name, resolution=resolution)
         assert settings.fx_usd_krw is not None and settings.margin_pct is not None  # noqa: S101
         krw_est = pricing.krw_estimate(usd_est, settings.fx_usd_krw, settings.margin_pct)
+
+    if (
+        kind == "video"
+        and keep_source_audio
+        and len(clips) > 1
+        and provider_name != MOCK
+        and shutil.which(ffmpeg_bin()) is None
+    ):  # 이어 붙이려면 ffmpeg가 필요하다. 비용이 나기 전에 막는다
+        return _fail(request, "ffmpeg_not_found")
 
     # --- 상한 (공급자 호출 전). 이어 붙이면 krw_est는 클립 전체의 합이다 ---
     limit = settings.item_limit(kind)
@@ -359,7 +384,8 @@ async def generate_media(
         resolution=resolution,
         quality=quality,
         duration_s=duration_s,
-        remove_audio=not keep_source_audio,
+        # 이어 붙인 영상은 클립마다 소리가 따로 만들어져 이음새·내용이 맞지 않아 소리를 버린다
+        remove_audio=(not keep_source_audio) or len(clips) > 1,
         model="" if provider_name == MOCK else model,
         output_dir=out_dir,
     )
@@ -381,6 +407,14 @@ async def generate_media(
     usd_actual, krw_actual, source = _settle_amounts(
         result, entry, settings, kind, resolution, quality, prompt, usd_est, krw_est, prices_path
     )
+    muted: bool | None = None
+    has_audio: bool | None = None
+    audio_note: str | None = None
+    if kind == "video":
+        has_audio = has_audio_track(result.asset_path.read_bytes())
+        muted = not has_audio
+        if keep_source_audio and len(clips) > 1:
+            audio_note = "clip_concat_muted"
     output = {
         "media_id": media_id,
         "media_kind": kind,
@@ -392,7 +426,10 @@ async def generate_media(
         "quality": quality,
         "duration_s": duration_s,
         "clip_count": result.clip_count,
-        "muted": (not keep_source_audio) if kind == "video" else None,
+        "muted": muted,
+        "audio_mode": settings.audio_mode if kind == "video" else None,
+        "has_audio": has_audio,
+        "audio_note": audio_note,
         "cost_krw": krw_actual,
         "cost_est_krw": krw_est,
         "usd_actual": str(usd_actual) if usd_actual is not None else None,
@@ -409,7 +446,11 @@ async def generate_media(
     if plan_context is not None:
         output["plan_context"] = plan_context
     output = GeneratedMedia.model_validate(output).model_dump(
-        mode="json", exclude={"replayed"} | (set() if plan_context else {"plan_context"})
+        mode="json",
+        exclude={"replayed"}
+        | (set() if plan_context else {"plan_context"})
+        | (set() if kind == "video" else {"audio_mode", "has_audio", "audio_note"})
+        | (set() if audio_note else {"audio_note"}),
     )
     plan_names = set(plan_field_names(templates_path))  # 기획 원문은 meta에 다시 쓰지 않는다
     meta_fields = {k: v for k, v in data.fields.items() if k not in plan_names}
@@ -561,10 +602,11 @@ def plan_cost(
     templates_path: Path | None = None,
     allow_video: bool = False,
     with_table: bool = False,
+    allow_audio: bool = False,
 ) -> CostPlan | AgentResult:
     """`generate_media`(이미지)와 같은 규칙으로 호출 없이 비용만 계산한다. 막히면 결과 Task.
 
-    `allow_video`면 무음 영상(`MARKETING_AUDIO_MODE=off`의 `generate_media`와 같은 키)도 계산한다.
+    `allow_video`면 영상(현재 소리 모드의 `generate_media`와 같은 키)도 계산한다.
     기본은 이미지 전용이다(캐러셀).
 
     입력 검증·프롬프트 검사·공급자 어댑터·환율·단가표(fail-closed)·건당 상한은 `generate_media`와
@@ -580,9 +622,12 @@ def plan_cost(
             errors=[f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()],
         )
     kind: MediaKind = data.media_kind
-    if not _DRAFT_ID.fullmatch(data.post_draft_id) or kind not in (
-        ("image", "video") if allow_video else ("image",)
-    ):
+    allowed_kinds = (
+        "image",
+        *(("video",) if allow_video else ()),
+        *(("audio",) if allow_audio else ()),
+    )
+    if not _DRAFT_ID.fullmatch(data.post_draft_id) or kind not in allowed_kinds:
         return _fail(request, "invalid_input", errors=["media_kind/post_draft_id: invalid"])
     try:
         template = get_template(data.scene_template_id, templates_path)
@@ -605,7 +650,8 @@ def plan_cost(
             request, "invalid_input", errors=["resolution/quality/duration_s: kind_mismatch"]
         )
     prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
-    request_sha = _sha(prompt_sha, kind, resolution, quality, duration_s, "muted")
+    keep_audio = kind == "video" and settings.audio_mode == "source"
+    request_sha = _sha(prompt_sha, kind, resolution, quality, duration_s, _audio_marker(keep_audio))
     key = f"{request.meta.context_id}:{ACTION}:{data.post_draft_id}:{request_sha[:10]}"
     try:
         previous = ledger.settled_for(key)

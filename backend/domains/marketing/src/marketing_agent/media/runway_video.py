@@ -18,7 +18,8 @@ ai-context.md, guides/pricing.md)가 말하는 형태만 쓴다.
 - 해상도는 720p(9:16 = `720:1280`) 한 가지다. 1080p(`1080:1920`)는 단가 확인 전이라 열지 않는다.
 - 소리: 항상 무음으로만 쓴다. veo는 `audio: false`, gen4.5는 오디오 필드가 없다.
   그래도 mp4에 오디오가 섞여 오면 공통 뼈대가 ffmpeg로 제거한다.
-  `remove_audio=False`는 지원하지 않는다(소리 단가가 따로라 가격표에 없다).
+  소리를 두는 모드(`remove_audio=False`)여도 소리를 켜지 않는다(소리 단가가 따로라 가격표에 없다):
+  이 공급자 영상은 소리 없는 영상으로 받는다.
 - 가격은 크레딧(1크레딧 = 0.01 USD)×초 → `prices.toml`의 `per_second_usd`.
 - 키는 `MARKETING_RUNWAY_API_KEY`에서만 읽는다(Google 등 다른 공급자 키를 보내지 않는다).
   결과 URL 내려받기에는 키를 보내지 않는다(공통 뼈대, 공용 주소만).
@@ -81,8 +82,6 @@ class RunwayVideoProvider(AsyncVideoProvider):
             raise VideoProviderError("invalid_model_id")
         if request.duration_s not in spec.durations:
             raise VideoProviderError(f"unsupported_duration: {request.duration_s}")
-        if not request.remove_audio:
-            raise VideoProviderError("audio_not_supported")
         payload: dict[str, object] = {
             "model": request.model,
             "promptText": request.prompt[:1000],  # gen4.5 문서 상한 1000자

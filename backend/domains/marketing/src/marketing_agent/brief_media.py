@@ -27,23 +27,34 @@
 요청 초안(`media_request`)과 그 해시는 바뀌지 않는다(기획안 본문은 보관본에서 그때그때 읽는다).
 쓴 필드 이름·길이·해시는 생성 결과(`meta.json`·장부)와 `prepared.plan_context`에 남는다.
 
+영상 소리(`MARKETING_AUDIO_MODE`, 기본 `source`): 영상은 공급자가 만든 소리를 그대로 두고
+한 번만 만든다.
+확인 단계에서 사람이 한 번 정한다(`choose_brief_audio`, 감사 기록은 `prepared.audio.decision`):
+- `keep` "이 영상 그대로 사용": 아무것도 다시 만들지 않고 결정만 남긴다(비용 없음).
+- `bgm` "배경음악 따로 만들기": 영상은 장부에서 재생(비용 없음)하고 BGM만 새로 만들어
+  영상 소리를 대체한다. 안전 관문(B등급, `audio_cost_single`)·건당/월 상한이 그대로 적용된다.
+소리가 있는 영상(`needs_decision`)은 결정이 있어야 게시 요청을 만들 수 있다(`brief_publish`).
+이미 게시 요청이 있으면 결정을 바꾸지 않는다(`publish_already_requested`).
+
 예상 비용(`estimate`)은 조회 때 `plan_cost`(=`generate_media`와 같은 단가표·환율·건당 상한 규칙)로
 계산한다. 값을 저장하거나 지어내지 않는다. 계산할 수 없으면 이유 코드만 돌려준다.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, ValidationError
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel
 from ax_contracts.schemas.planning import CampaignBriefInput
-from marketing_agent.brief_handoff import request_sha, state_of
+from marketing_agent.brief_handoff import prepared_of, request_sha, state_of
 from marketing_agent.briefs import BriefStorageError, BriefStore, SnsHandoffRecord
+from marketing_agent.media.bgm_flow import BGM_FIELDS_KEY, BGM_TEMPLATE_KEY
 from marketing_agent.media.config import MOCK, MediaSettings
 from marketing_agent.media.ledger import LedgerError, MediaLedger
 from marketing_agent.media.prompts import PromptRejected, get_template
@@ -54,6 +65,10 @@ from marketing_agent.sns import SnsStore
 from marketing_agent.sns_prepare import prepare_sns_post_from_media
 
 ACTION = "prepare_brief_media"
+AUDIO_ACTION = "choose_brief_audio"
+# 따로 만드는 배경음악의 장면 템플릿(연주곡 전용)과 기본 분위기. 화면은 템플릿 밖 값을 보내지 못한다
+BGM_TEMPLATE = "cat_bookstore_bgm"
+BGM_DEFAULT_FIELDS = {"bgm_mood": "cozy", "bgm_genre": "lo-fi"}
 READY_STAGES = ("draft_ready", "check_rejected")
 PrepareFn = Callable[..., Awaitable[AgentResult]]
 
@@ -66,6 +81,16 @@ class PrepareBriefMediaInput(AxModel):
     # 화면의 긴 영상 경고창에서 사람이 '계속'을 눌렀다는 주장. 감사 기록용일 뿐이다.
     # 서버는 이 값을 믿지 않는다: 경고창은 UX이고 안전 관문이 아니다(상한·비용 가드는 이 값과 무관).
     confirmed_long: bool | None = Field(default=None, strict=True)
+
+
+class ChooseBriefAudioInput(AxModel):
+    proposal_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    choice: Literal["keep", "bgm"]
+    # 배경음악 분위기·장르(생략하면 기본). 템플릿이 허용한 값인지는 프롬프트 만들기에서 다시 본다
+    bgm_mood: str | None = Field(default=None, max_length=32)
+    bgm_genre: str | None = Field(default=None, max_length=32)
+    # 화면의 "소리까지 들어 봤다" 체크. 감사 기록용 주장일 뿐 서버 판정에 쓰지 않는다
+    confirmed_listened: bool | None = Field(default=None, strict=True)
 
 
 def context_id_for(proposal_id: str) -> str:
@@ -258,6 +283,24 @@ def _failed(request: AgentRequest, outcome: str, **output: Any) -> AgentResult:
     )
 
 
+def _audio_record(generation: dict[str, Any]) -> dict[str, Any] | None:
+    """영상 소리 기록. 이미지(`audio_mode` 없음)는 None. 결정(`decision`)은 사람이 정할 때 채운다.
+
+    `needs_decision`: 공급자가 만든 소리가 들어 있어 사람이 듣고 정해야 하는 영상(게시 요청의 조건).
+    """
+    mode = generation.get("audio_mode")
+    if mode is None or generation.get("has_audio") is None:
+        return None
+    has_audio = bool(generation.get("has_audio"))
+    return {
+        "mode": mode,
+        "has_source_audio": has_audio and mode == "source",
+        "note": generation.get("audio_note"),
+        "needs_decision": has_audio and mode == "source",
+        "decision": None,
+    }
+
+
 def _prepared_record(
     sha: str, output: dict[str, Any], now: datetime, confirmed_long: bool | None = None
 ) -> dict[str, Any]:
@@ -275,6 +318,7 @@ def _prepared_record(
         # 기획 데이터를 반영했으면 쓴 필드 이름·길이·해시(값 전체 아님). 옛 기록에는 없다
         "plan_context": generation.get("plan_context"),
         "label_text": label.get("text"),
+        "audio": _audio_record(generation),
         "check": {
             "verdict": check.get("verdict"),
             "publishable": check.get("publishable"),
@@ -407,3 +451,229 @@ async def prepare_brief_media(
             )
     output["sns_handoff"] = _state(latest, store)
     return result.model_copy(update={"meta": request.meta, "output": output})
+
+
+# --- 영상 소리 선택: "이 영상 그대로 사용" / "배경음악 따로 만들기" -----------------------
+
+
+def _audio_failed(request: AgentRequest, outcome: str, **output: Any) -> AgentResult:
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.FAILED,
+        outcome=outcome,
+        output={"stage": "audio_choice"} | output,
+    )
+
+
+def bgm_fields_for(data: ChooseBriefAudioInput | None = None) -> dict[str, str]:
+    """따로 만들 배경음악의 필드. 값이 템플릿 허용 목록 밖이면 프롬프트 만들기에서 거절된다."""
+    fields = dict(BGM_DEFAULT_FIELDS)
+    if data is not None:
+        if data.bgm_mood:
+            fields["bgm_mood"] = data.bgm_mood
+        if data.bgm_genre:
+            fields["bgm_genre"] = data.bgm_genre
+    return fields
+
+
+def bgm_estimate(
+    request: AgentRequest,
+    proposal_id: str,
+    media: dict,
+    *,
+    ledger: MediaLedger,
+    settings: MediaSettings | None = None,
+) -> dict[str, Any]:
+    """ "배경음악 따로 만들기"의 추가 비용 조회(외부 호출 없음). 영상은 재생이라 BGM 값만 계산한다.
+
+    `cost_krw`는 BGM 한 곡의 예상 비용(원)이다. 계산할 수 없으면 None과 이유 코드(`reason_code`).
+    `settled`면 이미 만든 곡이라 새 비용이 없다. 별도 승인이 필요할 수 있다(안전 관문 판정).
+    """
+    settings = settings or MediaSettings.from_env()
+    out: dict[str, Any] = {"cost_krw": None, "settled": False, "reason_code": None}
+    if not media.get("media_ref"):
+        return out | {"reason_code": "media_ref_missing"}
+    gen_input = {
+        "post_draft_id": media["media_ref"],
+        "media_kind": "audio",
+        "scene_template_id": BGM_TEMPLATE,
+        "fields": bgm_fields_for(),
+    }
+    plan = plan_cost(
+        _inner(request, proposal_id, "generate_media", gen_input),
+        ledger=ledger,
+        settings=settings,
+        allow_audio=True,
+    )
+    if isinstance(plan, AgentResult):
+        return out | {"reason_code": plan.outcome, "cost_krw": (plan.output or {}).get("cost_krw")}
+    return out | {"cost_krw": plan.krw_est, "settled": plan.settled}
+
+
+def _decision_record(
+    choice: str, prepared: dict[str, Any], data: ChooseBriefAudioInput, now: datetime, **extra: Any
+) -> dict[str, Any]:
+    """감사용 결정 기록. 한 번 정하면 바꾸지 않는다(`audio_already_decided`)."""
+    audio = prepared.get("audio") or {}
+    return {
+        "choice": choice,
+        "decided_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "had_source_audio": bool(audio.get("has_source_audio")),
+        # 화면이 알린 주장(감사용). 서버 판정에는 쓰지 않는다
+        "confirmed_listened": data.confirmed_listened,
+        "asset_sha256_decided": prepared.get("asset_sha256"),
+        **extra,
+    }
+
+
+async def choose_brief_audio(
+    request: AgentRequest,
+    *,
+    briefs: BriefStore,
+    notices: NoticeStore,
+    store: SnsStore,
+    ledger: Any,
+    from_decision: FromDecision,
+    settings: MediaSettings | None = None,
+    prepare: PrepareFn = prepare_sns_post_from_media,
+    publish_status: Callable[[SnsHandoffRecord], str | None] | None = None,
+) -> AgentResult:
+    """만든 영상의 소리를 한 번 정한다. `keep`은 기록만, `bgm`은 BGM 생성·믹스(관문·상한 그대로).
+
+    게시는 하지 않는다. 이미 게시 요청이 있거나(`publish_status`가 not_requested가 아님)
+    결정이 있으면 거절한다. BGM이 관문에서 보류·거절되거나 실패하면 결정을 남기지 않는다
+    (영상은 그대로다).
+    """
+    try:
+        data = ChooseBriefAudioInput.model_validate(request.input)
+    except ValidationError as error:
+        return _audio_failed(
+            request,
+            "invalid_input",
+            errors=[f"{'.'.join(map(str, e['loc']))}: {e['type']}" for e in error.errors()],
+        )
+    pid = data.proposal_id
+    try:
+        if briefs.existing(pid) is None:
+            return _audio_failed(request, "brief_not_found")
+        record = briefs.handoff(pid)
+    except BriefStorageError:
+        return _audio_failed(request, "storage_error")
+    media = record.media_request if record is not None else None
+    if record is None or record.status != "handed" or not media:
+        return _audio_failed(request, "not_handed")
+    prepared = prepared_of(record)
+    if prepared is None or prepared.get("stage") not in READY_STAGES:
+        return _audio_failed(request, "not_prepared")
+    if media.get("media_kind") != "video" or not isinstance(prepared.get("audio"), dict):
+        return _audio_failed(request, "not_video")
+    audio = prepared["audio"]
+    if audio.get("decision"):
+        return _audio_failed(request, "audio_already_decided", decision=audio["decision"])
+    if (
+        publish_status is not None
+        and (publish_status(record) or "not_requested") != "not_requested"
+    ):
+        # 게시 요청이 이미 올라간 파일을 바꾸지 않는다(승인받은 내용과 달라진다)
+        return _audio_failed(request, "publish_already_requested")
+    settings = settings or MediaSettings.from_env()
+    now = datetime.now(UTC)
+
+    if data.choice == "keep":
+        decision = _decision_record("keep", prepared, data, now)
+        return _save_audio(request, briefs, record, audio, decision, pid, store, prepared)
+
+    # --- 배경음악 따로 만들기 ---
+    if audio.get("mode") != "source":
+        return _audio_failed(request, "bgm_unavailable", reason="audio_mode_not_source")
+    if not media.get("media_ref"):
+        return _audio_failed(request, "bgm_unavailable", reason="media_ref_missing")
+    stored = briefs.existing(pid)
+    plan_fields = plan_fields_for(stored.brief if stored else None)
+    bgm_settings = dataclasses.replace(settings, audio_mode="bgm_overlay")
+    gen_input = prepare_input(pid, media, plan_fields) | {
+        BGM_TEMPLATE_KEY: BGM_TEMPLATE,
+        BGM_FIELDS_KEY: bgm_fields_for(data),
+    }
+    result = await prepare(
+        _inner(request, pid, "prepare_sns_post_from_media", gen_input),
+        notices=notices,
+        store=store,
+        ledger=ledger,
+        from_decision=from_decision,
+        settings=bgm_settings,
+        briefs=briefs,
+    )
+    output = dict(result.output or {})
+    if result.status != TaskStatus.COMPLETED or output.get("stage") not in READY_STAGES:
+        latest = briefs.handoff(pid) or record
+        output["sns_handoff"] = _state(latest, store)
+        return result.model_copy(update={"meta": request.meta, "output": output})
+    generation = output.get("generation") or {}
+    bgm = generation.get("bgm") or {}
+    try:
+        latest = briefs.handoff(pid) or record
+        new = _prepared_record(request_sha(media), output, now, prepared.get("confirmed_long"))
+        decision = _decision_record(
+            "bgm",
+            prepared,
+            data,
+            now,
+            bgm_cost_krw=bgm.get("cost_krw"),
+            bgm_model_id=bgm.get("model_id"),
+            bgm_execution_id=bgm.get("execution_id"),
+            bgm_prompt_sha256=bgm.get("prompt_sha256"),
+            previous_asset_sha256=prepared.get("asset_sha256"),
+        )
+        new["audio"] = {
+            "mode": "source",
+            "has_source_audio": bool(audio.get("has_source_audio")),
+            "note": audio.get("note"),
+            "needs_decision": False,
+            "decision": decision,
+        }
+        latest = latest.model_copy(update={"prepared": new})
+        briefs.save_handoff(latest)
+    except BriefStorageError:
+        return _audio_failed(
+            request,
+            "storage_error",
+            note="배경음악 영상은 만들어졌다. 다시 부르면 생성은 장부에서 재생된다",
+        )
+    output["sns_handoff"] = _state(latest, store)
+    return result.model_copy(update={"meta": request.meta, "output": output})
+
+
+def _save_audio(
+    request: AgentRequest,
+    briefs: BriefStore,
+    record: SnsHandoffRecord,
+    audio: dict[str, Any],
+    decision: dict[str, Any],
+    pid: str,
+    store: SnsStore,
+    prepared: dict[str, Any],
+) -> AgentResult:
+    updated = {**(record.prepared or {}), "audio": audio | {"decision": decision}}
+    try:
+        latest = record.model_copy(update={"prepared": updated})
+        briefs.save_handoff(latest)
+    except BriefStorageError:
+        return _audio_failed(request, "storage_error")
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome="audio_kept",
+        output={
+            "stage": prepared.get("stage"),
+            "post_draft_id": prepared.get("post_draft_id"),
+            "audio_decision": decision,
+            "sns_handoff": _state(latest, store),
+        },
+        evidence=Evidence(
+            queries=[AUDIO_ACTION],
+            data_summary=f"기획안 {pid} 영상 소리: 이 영상 그대로 사용",
+            collected_at=datetime.now(UTC),
+            ref_ids=[pid, str(prepared.get("post_draft_id"))],
+        ),
+    )

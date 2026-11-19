@@ -365,6 +365,45 @@ def test_brief_media_passes_judgements_and_maps_bad_requests(
     assert client.post(BRIEF_MEDIA).status_code == 504
 
 
+BRIEF_AUDIO = "/api/dashboard/marketing/briefs/PROP-5/audio"
+
+
+def test_brief_audio_sends_only_the_choice_with_a_stable_key(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outcome = "audio_kept"
+    keep = client.post(BRIEF_AUDIO, json={"choice": "keep", "confirmed_listened": True})
+    again = client.post(BRIEF_AUDIO, json={"choice": "keep", "asset_ref": "x", "fields": {}})
+    bgm = client.post(BRIEF_AUDIO, json={"choice": "bgm"})
+    assert keep.status_code == again.status_code == bgm.status_code == 200
+    (target, first), (_, second), (_, third) = fake.calls
+    assert (target, first.skill) == ("marketing", "choose_brief_audio")
+    assert first.input == {"proposal_id": "PROP-5", "choice": "keep", "confirmed_listened": True}
+    # 브라우저가 다른 값을 실어도 마케팅으로 가지 않는다
+    assert second.input == {"proposal_id": "PROP-5", "choice": "keep"}
+    assert first.meta.idempotency_key == second.meta.idempotency_key
+    assert third.input == {"proposal_id": "PROP-5", "choice": "bgm"}
+    assert third.meta.idempotency_key != first.meta.idempotency_key
+    assert all(r.skill != "publish_sns" for _, r in fake.calls)
+
+
+def test_brief_audio_rejects_bad_choice_and_passes_judgements(
+    client: TestClient, fake: Fake
+) -> None:
+    assert client.post(BRIEF_AUDIO, json={"choice": "mix"}).status_code == 422
+    assert client.post(BRIEF_AUDIO).status_code == 422
+    assert fake.calls == []
+    fake.status, fake.outcome = TaskStatus.INPUT_REQUIRED, "bgm_held"  # 안전 장치 보류
+    held = client.post(BRIEF_AUDIO, json={"choice": "bgm"})
+    assert held.status_code == 200 and held.json()["data"]["output"]["review_id"] == "rev_1"
+    for outcome in ("audio_already_decided", "publish_already_requested", "not_prepared"):
+        fake.status, fake.outcome = TaskStatus.FAILED, outcome
+        response = client.post(BRIEF_AUDIO, json={"choice": "keep"})
+        assert response.status_code == 200 and response.json()["data"]["outcome"] == outcome
+    fake.status, fake.outcome = TaskStatus.FAILED, "brief_not_found"
+    assert client.post(BRIEF_AUDIO, json={"choice": "keep"}).status_code == 404
+
+
 BRIEF_PUBLISH = "/api/dashboard/marketing/briefs/PROP-5/publish-request"
 
 

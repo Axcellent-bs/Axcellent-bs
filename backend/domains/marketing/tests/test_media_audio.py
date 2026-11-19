@@ -206,7 +206,7 @@ def test_registry_routes_audio_to_audio_adapter(tmp_path: Path, monkeypatch) -> 
 
 def test_settings_defaults_and_values(monkeypatch: pytest.MonkeyPatch) -> None:
     s = MediaSettings.from_env()
-    assert (s.audio_provider, s.audio_model, s.audio_mode) == ("mock", "", "off")
+    assert (s.audio_provider, s.audio_model, s.audio_mode) == ("mock", "", "source")
     assert ffmpeg_bin() == "ffmpeg" and not has_api_key("audio")
     monkeypatch.setenv("MARKETING_AUDIO_PROVIDER", "Gemini")
     monkeypatch.setenv("MARKETING_AUDIO_MODEL", MODEL)
@@ -218,7 +218,9 @@ def test_settings_defaults_and_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert ffmpeg_bin() == "/opt/ff/ffmpeg" and has_api_key("audio")
     assert KEY not in repr(s)
     monkeypatch.setenv("MARKETING_AUDIO_MODE", "weird")
-    assert MediaSettings.from_env().audio_mode == "off"  # 모르는 값은 끈다
+    assert MediaSettings.from_env().audio_mode == "off"  # 모르는 값(오타)은 무음으로 끈다
+    monkeypatch.setenv("MARKETING_AUDIO_MODE", "off")
+    assert MediaSettings.from_env().audio_mode == "off"
     assert MediaSettings.from_env().provider("video") == "mock"  # 영상·이미지 설정은 그대로
 
 

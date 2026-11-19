@@ -1055,6 +1055,39 @@ async def prepare_brief_media(
     )
 
 
+class BriefAudioBody(BaseModel):
+    """영상 소리 선택. `keep`은 그대로 쓰기, `bgm`은 배경음악 따로 만들기."""
+
+    choice: Literal["keep", "bgm"]
+    # 화면의 "소리까지 들어 봤다" 체크(감사 기록용 주장). 서버는 믿지 않고 가드에 쓰지 않는다
+    confirmed_listened: bool | None = Field(default=None, strict=True)
+    bgm_mood: str | None = Field(default=None, max_length=32)
+    bgm_genre: str | None = Field(default=None, max_length=32)
+
+
+@router.post("/marketing/briefs/{proposal_id}/audio")
+async def choose_brief_audio(
+    body: BriefAudioBody, proposal_id: str = Path(pattern=_PROPOSAL_ID)
+) -> dict:
+    """만든 영상의 소리를 한 번 정한다: 이 영상 그대로 사용 / 배경음악 따로 만들기.
+
+    마케팅 `choose_brief_audio`. `keep`은 결정만 기록한다(비용 없음). `bgm`은 영상은 재생하고
+    BGM만 새로 만든다(B등급 안전 관문·비용 상한 그대로, 보류·상한 초과는 오류가 아니라
+    `status`·`outcome`). 결정은 한 번만이고 게시 요청이 이미 있으면 바꾸지 않는다.
+    게시(`publish_sns`, C등급 사람 승인)는 하지 않는다.
+    """
+    _no_org_in_mock()
+    return ok(
+        await marketing_client.brief_audio_call(
+            proposal_id,
+            body.choice,
+            confirmed_listened=bool(body.confirmed_listened),
+            bgm_mood=body.bgm_mood,
+            bgm_genre=body.bgm_genre,
+        )
+    )
+
+
 @router.get("/marketing/briefs/{proposal_id}/media/preview")
 async def preview_brief_media(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> FileResponse:
     """준비된 미디어 초안의 미리보기. AI 표시를 입힌 결과 파일(`labeled.jpg|mp4`)만 내준다."""

@@ -152,6 +152,25 @@ async function handoff(proposalId: string, options: HandoffOptions = {}): Promis
   return json.data as HandoffAnswer;
 }
 
+/**
+ * 만든 영상의 소리를 한 번 정한다(dashboard-api, 사람 토큰 필요): `keep` = 이 영상 그대로 사용(기록만, 비용 없음),
+ * `bgm` = 배경음악 따로 만들기(영상은 다시 만들지 않고 BGM만 만든다. 안전 장치·비용 상한 그대로).
+ * `confirmedListened`는 "소리까지 들어 봤다"는 감사 기록용 표시일 뿐 서버는 믿지 않는다. 게시는 하지 않는다.
+ * 오류는 서버 문장 없이 상태 코드만 담아 던진다(문구는 `audioHttpErrorKo`).
+ */
+async function chooseAudio(proposalId: string, choice: "keep" | "bgm", confirmedListened = false): Promise<BriefMediaAnswer> {
+  const path = `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/audio`;
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
+    body: JSON.stringify(confirmedListened ? { choice, confirmed_listened: true } : { choice }),
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
+  return json.data as BriefMediaAnswer;
+}
+
 const mediaPath = (proposalId: string) => `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/media`;
 
 /**
@@ -327,6 +346,7 @@ export const briefs = {
   mergeOutageSnsDrafts,
   handoff,
   makeMedia,
+  chooseAudio,
   requestPublish,
   getManualPublishPackage,
   completeManualPublish,

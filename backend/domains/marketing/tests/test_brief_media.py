@@ -4,6 +4,7 @@
 가짜로 바꿔 ffmpeg 없이 돈다. 실제 변환까지 가는 시험은 도구가 없으면 건너뛴다.
 """
 
+import hashlib
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -150,6 +151,7 @@ class FakePrepare:
     def __init__(self) -> None:
         self.requests: list[AgentRequest] = []
         self.stage = "draft_ready"
+        self.asset_sha = "a" * 64
 
     async def __call__(self, request: AgentRequest, **deps) -> AgentResult:  # noqa: ANN003
         self.requests.append(request)
@@ -162,11 +164,11 @@ class FakePrepare:
             media_kind="reel" if reel else "image",
             caption="캡션",
             hashtags=[],
-            caption_sha256="c" * 64,
+            caption_sha256=hashlib.sha256("캡션".encode()).hexdigest(),
             required_text=[],
             context_id=request.meta.context_id,
             asset_ref="t/ctx/med/labeled.mp4" if reel else "t/ctx/med/labeled.jpg",
-            asset_sha256="a" * 64,
+            asset_sha256=self.asset_sha,
         )
         deps["store"].save(draft)
         ready = self.stage == "draft_ready"
@@ -505,3 +507,198 @@ def test_invalid_max_setting_blocks_the_estimate_and_the_make(
         estimate["status"] == "blocked" and estimate["reason_code"] == "video_max_duration_invalid"
     )
     assert _make()["outcome"] == "video_max_duration_invalid" and fake_prepare.requests == []
+
+
+# --- 영상 소리 선택: 이 영상 그대로 사용 / 배경음악 따로 만들기 ---------------------------------
+
+
+class FakeAudioPrepare(FakePrepare):
+    """소리가 든 영상을 만든 것처럼 흉내 낸다. BGM 호출(`bgm_overlay`)이면 BGM 증빙을 더한다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.settings: list = []
+        self.bgm_outcome: str | None = None  # 값이 있으면 BGM 단계가 그 결과로 막힌다
+        self.first_audio_mode = "source"
+        self.first_has_audio = True
+
+    async def __call__(self, request: AgentRequest, **deps) -> AgentResult:  # noqa: ANN003
+        self.settings.append(deps.get("settings"))
+        bgm = "bgm_scene_template_id" in request.input
+        if bgm and self.bgm_outcome:
+            self.requests.append(request)
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.INPUT_REQUIRED,
+                reason_code="human_input",
+                outcome=self.bgm_outcome,
+                output={"stage": "generate_media", "review_id": "rev_9"},
+            )
+        if bgm:
+            self.asset_sha = "b" * 64  # BGM을 입히면 파일이 바뀐다(초안도 새 파일로 다시 만든다)
+        result = await super().__call__(request, **deps)
+        output = dict(result.output or {})
+        generation = {
+            "cost_krw": 1000,
+            "total_cost_krw": 1100 if bgm else 1000,
+            "audio_mode": "bgm_overlay" if bgm else self.first_audio_mode,
+            "has_audio": True if bgm else self.first_has_audio,
+            "muted": False,
+        }
+        if bgm:
+            generation["bgm"] = {
+                "provider": "mock",
+                "model_id": "mock-media",
+                "cost_krw": 100,
+                "execution_id": "exe_bgm",
+                "prompt_sha256": "p" * 64,
+                "media_id": "med_bgm",
+            }
+        output["generation"] = generation
+        return result.model_copy(update={"output": output})
+
+
+@pytest.fixture
+def audio_prepare(monkeypatch: pytest.MonkeyPatch) -> FakeAudioPrepare:
+    fake = FakeAudioPrepare()
+    original_prepare = brief_media.prepare_brief_media
+    original_choose = brief_media.choose_brief_audio
+
+    async def wired(request, **deps):  # noqa: ANN001, ANN003
+        return await original_prepare(request, **deps, prepare=fake)
+
+    async def wired_choose(request, **deps):  # noqa: ANN001, ANN003
+        return await original_choose(request, **deps, prepare=fake)
+
+    monkeypatch.setattr(brief_media, "prepare_brief_media", wired)
+    monkeypatch.setattr(brief_media, "choose_brief_audio", wired_choose)
+    return fake
+
+
+def _choose(choice: str, **extra) -> dict:  # noqa: ANN003
+    return _call("choose_brief_audio", {"proposal_id": "PROP-5", "choice": choice} | extra)
+
+
+def _ready_video() -> dict:
+    _handed(fields={"category": "그림책"})
+    out = _make()
+    assert out["output"]["stage"] == "draft_ready", out
+    return out["output"]["sns_handoff"]
+
+
+def test_provider_audio_video_waits_for_a_decision_and_shows_bgm_cost(
+    audio_prepare: FakeAudioPrepare,
+) -> None:
+    state = _ready_video()
+    audio = state["prepared"]["audio"]
+    assert audio == {
+        "mode": "source",
+        "has_source_audio": True,
+        "note": None,
+        "needs_decision": True,
+        "decision": None,
+    }
+    assert state["media_estimate"]["bgm"]["cost_krw"] == skill.MOCK_COST_KRW["audio"]
+    # 듣고 정하기 전에는 게시 요청을 만들 수 없다
+    assert state["publish"]["reason_code"] == "audio_decision_required"
+    assert state["publish"]["can_request"] is False
+
+
+def test_keep_records_the_decision_once_and_unlocks_publish_request(
+    audio_prepare: FakeAudioPrepare, gate: Gate
+) -> None:
+    _ready_video()
+    out = _choose("keep", confirmed_listened=True)
+    assert out["outcome"] == "audio_kept", out
+    decision = out["output"]["audio_decision"]
+    assert decision["choice"] == "keep" and decision["had_source_audio"] is True
+    assert decision["confirmed_listened"] is True and decision["decided_at"].endswith("Z")
+    assert len(audio_prepare.requests) == 1  # 아무것도 다시 만들지 않는다
+    assert "generate_media" not in gate.seen  # 생성 관문(BGM 포함)을 부르지 않는다
+    state = _view()
+    assert state["prepared"]["audio"]["decision"] == decision
+    assert state["publish"]["reason_code"] is None and state["publish"]["can_request"] is True
+    assert state["media_estimate"].get("bgm") is None  # 정한 뒤에는 BGM 비용 안내가 없다
+    again = _choose("bgm")
+    assert again["outcome"] == "audio_already_decided" and len(audio_prepare.requests) == 1
+
+
+def test_bgm_choice_reruns_with_overlay_settings_and_records_audit(
+    audio_prepare: FakeAudioPrepare,
+) -> None:
+    _ready_video()
+    out = _choose("bgm", bgm_mood="warm")
+    assert out["status"] == "completed" and out["output"]["stage"] == "draft_ready", out
+    sent, settings = audio_prepare.requests[1], audio_prepare.settings[1]
+    assert settings.audio_mode == "bgm_overlay"  # 이때만 BGM 경로를 연다
+    assert sent.input["bgm_scene_template_id"] == brief_media.BGM_TEMPLATE
+    assert sent.input["bgm_fields"] == {"bgm_mood": "warm", "bgm_genre": "lo-fi"}
+    assert audio_prepare.requests[0].input["media_ref"] == sent.input["media_ref"]  # 영상은 재생
+    prepared = _view()["prepared"]
+    decision = prepared["audio"]["decision"]
+    assert decision["choice"] == "bgm" and decision["bgm_cost_krw"] == 100
+    assert decision["bgm_execution_id"] == "exe_bgm" and decision["bgm_prompt_sha256"] == "p" * 64
+    assert decision["previous_asset_sha256"] == "a" * 64 and prepared["asset_sha256"] == "b" * 64
+    assert prepared["cost_krw"] == 1100 and prepared["audio"]["needs_decision"] is False
+    assert _view()["publish"]["reason_code"] is None  # 결정이 있으니 게시 요청 가능
+
+
+def test_bgm_held_by_the_gate_records_no_decision(audio_prepare: FakeAudioPrepare) -> None:
+    _ready_video()
+    audio_prepare.bgm_outcome = "bgm_held"
+    out = _choose("bgm")
+    assert out["outcome"] == "bgm_held" and out["output"]["review_id"] == "rev_9"
+    assert _view()["prepared"]["audio"]["decision"] is None  # 영상은 그대로, 다시 고를 수 있다
+    audio_prepare.bgm_outcome = None
+    assert _choose("bgm")["output"]["stage"] == "draft_ready"
+
+
+def test_choice_is_refused_after_a_publish_request(
+    audio_prepare: FakeAudioPrepare, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _ready_video()
+    monkeypatch.setattr(handlers, "_publish_status", lambda record: "held")
+    out = _choose("keep")
+    assert out["outcome"] == "publish_already_requested"
+    assert _view()["prepared"]["audio"]["decision"] is None
+    assert len(audio_prepare.requests) == 1
+
+
+def test_choice_needs_a_prepared_video(audio_prepare: FakeAudioPrepare) -> None:
+    _handed(fields={"category": "그림책"})
+    assert _choose("keep")["outcome"] == "not_prepared"
+    bad = _call("choose_brief_audio", {"proposal_id": "PROP-5", "choice": "mix"})
+    assert bad["outcome"] == "invalid_input"
+
+
+def test_image_has_no_audio_choice(fake_prepare: FakePrepare) -> None:
+    _handed("image", fields={"category": "에세이"})
+    _make()
+    assert _view()["prepared"]["audio"] is None
+    assert _choose("keep")["outcome"] == "not_video"
+
+
+def test_silent_video_needs_no_decision_but_can_still_get_bgm(
+    audio_prepare: FakeAudioPrepare,
+) -> None:
+    """소리 없는 공급자·모델(또는 이어 붙인 영상)은 게시 조건이 아니고, BGM 선택은 열려 있다."""
+    audio_prepare.first_has_audio = False
+    state = _ready_video()
+    audio = state["prepared"]["audio"]
+    assert audio["needs_decision"] is False and audio["has_source_audio"] is False
+    assert state["publish"]["reason_code"] is None
+    assert _choose("bgm")["output"]["stage"] == "draft_ready"
+
+
+def test_legacy_off_mode_video_cannot_use_bgm_choice(audio_prepare: FakeAudioPrepare) -> None:
+    """off 모드 영상은 장부 키가 달라 BGM을 따로 만들면 영상을 다시 만든다. 막는다."""
+    audio_prepare.first_audio_mode = "off"
+    audio_prepare.first_has_audio = False
+    _ready_video()
+    audio = _view()["prepared"]["audio"]
+    assert audio["mode"] == "off" and audio["needs_decision"] is False
+    out = _choose("bgm")
+    assert (
+        out["outcome"] == "bgm_unavailable" and out["output"]["reason"] == "audio_mode_not_source"
+    )
+    assert len(audio_prepare.requests) == 1
