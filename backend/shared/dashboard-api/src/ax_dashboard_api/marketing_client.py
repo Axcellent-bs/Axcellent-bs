@@ -229,6 +229,66 @@ async def publish_control_set(paused: bool, reason: str, human: str) -> dict[str
     return out
 
 
+VIDEO_PROVIDERS_CONTEXT = "video_providers"
+VIDEO_PROVIDER_FAILURES = {
+    "invalid_input": (400, "INVALID_INPUT"),
+    "invalid_spec": (400, "INVALID_SPEC"),
+    "unknown_provider": (404, "NOT_FOUND"),
+    "not_found": (404, "NOT_FOUND"),
+    "provider_disabled": (409, "PROVIDER_DISABLED"),
+    "model_not_priced": (409, "MODEL_NOT_PRICED"),
+    "too_many_custom_providers": (409, "TOO_MANY"),
+}
+
+
+async def _video_provider_call(skill: str, payload: dict[str, Any], key: str) -> dict[str, Any]:
+    out = await call(skill, payload, campaign_id=VIDEO_PROVIDERS_CONTEXT, key=key)
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] in VIDEO_PROVIDER_FAILURES:
+        status, code = VIDEO_PROVIDER_FAILURES[out["outcome"]]
+        reason = (
+            (out.get("output") or {}).get("reason") if out["outcome"] == "invalid_spec" else None
+        )
+        detail = f": {reason}" if reason else ""
+        raise ApiError(
+            status, code, f"영상 공급자 요청을 처리할 수 없다 ({out['outcome']}){detail}"
+        )
+    return out
+
+
+async def video_providers_get() -> dict[str, Any]:
+    """선택 가능한 영상 공급자 목록·현재 선택(`list_video_providers`, 읽기). 키 값은 없다."""
+    return await _video_provider_call(
+        "list_video_providers", {}, f"ui:video-providers-get:{uuid.uuid4().hex[:12]}"
+    )
+
+
+async def video_provider_select(provider: str, model: str, human: str) -> dict[str, Any]:
+    """영상 공급자·모델 선택(`select_video_provider`, A). `human`은 토큰에서 채운 이름이다."""
+    return await _video_provider_call(
+        "select_video_provider",
+        {"provider": provider, "model": model, "updated_by": human},
+        "ui:video-provider-select",
+    )
+
+
+async def video_provider_save_custom(spec: dict[str, Any], human: str) -> dict[str, Any]:
+    """커스텀 영상 공급자 저장(`save_custom_video_provider`, C 사람 승인). 보류는 그대로."""
+    return await _video_provider_call(
+        "save_custom_video_provider",
+        {"spec": spec, "updated_by": human},
+        "ui:video-provider-save",
+    )
+
+
+async def video_provider_delete_custom(provider_id: str, human: str) -> dict[str, Any]:
+    """커스텀 영상 공급자 삭제(`delete_custom_video_provider`, A)."""
+    return await _video_provider_call(
+        "delete_custom_video_provider",
+        {"id": provider_id, "updated_by": human},
+        "ui:video-provider-delete",
+    )
+
+
 def manual_publish_context(post_draft_id: str) -> str:
     return f"manual_publish_{post_draft_id}"[:128]
 

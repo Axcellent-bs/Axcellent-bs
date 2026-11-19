@@ -98,6 +98,27 @@ def ffmpeg_bin() -> str:
     return _text(FFMPEG_BIN_ENV) or "ffmpeg"
 
 
+def _video_selection(provider: str, model: str) -> tuple[str, str]:
+    """화면에서 고른 영상 공급자(`video_store`)가 있으면 환경변수보다 우선한다.
+
+    고른 모델이 비어 있으면 같은 공급자일 때만 환경변수 모델을 쓰고, 커스텀 공급자는 스펙의
+    기본 모델을 쓴다. 그래도 비면 `model_not_configured`로 호출 전에 막힌다.
+    """
+    from marketing_agent.media import video_store  # 순환 import 피하려 늦게 읽는다
+
+    chosen = video_store.selection()
+    if chosen is None:
+        return provider, model
+    name = chosen["provider"].lower()
+    picked = chosen["model"].strip()
+    if not picked and name == provider:
+        picked = model
+    if not picked and name.startswith("custom:"):
+        spec = video_store.get_custom(name.removeprefix("custom:"))
+        picked = spec.defaultModel if spec else ""
+    return name, picked
+
+
 @dataclass(frozen=True)
 class MediaSettings:
     image_provider: str
@@ -120,14 +141,17 @@ class MediaSettings:
     @classmethod
     def from_env(cls) -> MediaSettings:
         fx = _decimal("MARKETING_FX_USD_KRW")
+        video_provider = _text("MARKETING_VIDEO_PROVIDER").lower() or MOCK
+        video_model = _text("MARKETING_VIDEO_MODEL")
+        video_provider, video_model = _video_selection(video_provider, video_model)
         max_duration = max_duration_from_env()
         return cls(
             video_max_duration_s=max_duration.seconds,
             video_max_duration_problem=max_duration.problem,
             image_provider=_text("MARKETING_IMAGE_PROVIDER").lower() or MOCK,
             image_model=_text("MARKETING_IMAGE_MODEL"),
-            video_provider=_text("MARKETING_VIDEO_PROVIDER").lower() or MOCK,
-            video_model=_text("MARKETING_VIDEO_MODEL"),
+            video_provider=video_provider,
+            video_model=video_model,
             fx_usd_krw=fx if fx else None,  # 0도 설정 안 한 것으로 본다
             fx_as_of=_date("MARKETING_FX_AS_OF"),
             fx_max_age_days=_integer("MARKETING_FX_MAX_AGE_DAYS"),

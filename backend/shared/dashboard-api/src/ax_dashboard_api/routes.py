@@ -1107,6 +1107,51 @@ async def set_publish_control_post(body: PublishControlBody, request: Request) -
     return await set_publish_control(body, request)
 
 
+class VideoProviderSelectBody(BaseModel):
+    provider: str = Field(min_length=1, max_length=64)
+    model: str = Field(default="", max_length=64)
+
+
+class CustomVideoProviderBody(BaseModel):
+    spec: dict
+
+
+class CustomVideoProviderDeleteBody(BaseModel):
+    id: str = Field(min_length=1, max_length=32)
+
+
+@router.get("/marketing/video-providers")
+async def get_video_providers() -> dict:
+    """선택 가능한 영상 AI 공급자 목록·현재 선택·커스텀 스펙. 키 값은 없고 설정 여부만 있다."""
+    _no_org_in_mock()
+    return ok(await marketing_client.video_providers_get())
+
+
+@router.post("/marketing/video-providers/select")
+async def select_video_provider(body: VideoProviderSelectBody, request: Request) -> dict:
+    """영상 공급자·모델을 고른다(A). 환경변수보다 우선한다. 사람 토큰이 필요하다."""
+    _no_org_in_mock()
+    return ok(
+        await marketing_client.video_provider_select(body.provider, body.model, request.state.human)
+    )
+
+
+@router.post("/marketing/video-providers/custom")
+async def save_custom_video_provider(body: CustomVideoProviderBody, request: Request) -> dict:
+    """목록에 없는 영상 API를 등록한다. 늘 사람 승인(C, `held`와 `review_id`)을 거친다."""
+    _no_org_in_mock()
+    return ok(await marketing_client.video_provider_save_custom(body.spec, request.state.human))
+
+
+@router.post("/marketing/video-providers/custom/delete")
+async def delete_custom_video_provider(
+    body: CustomVideoProviderDeleteBody, request: Request
+) -> dict:
+    """커스텀 영상 공급자를 지운다(A)."""
+    _no_org_in_mock()
+    return ok(await marketing_client.video_provider_delete_custom(body.id, request.state.human))
+
+
 _DRAFT_ID = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
 
 

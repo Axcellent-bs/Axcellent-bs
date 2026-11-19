@@ -150,6 +150,29 @@ def _cached(path: Path) -> tuple[PriceEntry, ...]:
     return tuple(load_table(path))
 
 
+def _custom_entry(provider: str, model: str, kind: MediaKind, resolution: str) -> PriceEntry:
+    from marketing_agent.media import video_store  # 순환 import 피하려 늦게 읽는다
+
+    spec = video_store.get_custom(provider.removeprefix("custom:"))
+    if spec is None or kind != "video" or resolution not in spec.limits.resolutions:
+        raise PriceNotFound(f"{provider} {kind} {resolution}")
+    return PriceEntry(
+        provider=provider,
+        model=model,
+        kind="video",
+        resolution=resolution,
+        quality=None,
+        input_usd_per_mtok=Decimal(0),
+        output_usd_per_mtok=Decimal(0),
+        output_tokens=None,
+        output_tokens_per_second=None,
+        max_duration_s=spec.limits.maxDurationSec,
+        source=spec.pricing.source,
+        checked_on="custom",
+        per_second_usd=spec.pricing.perSecondUsd,
+    )
+
+
 def find_entry(
     *,
     provider: str,
@@ -159,6 +182,8 @@ def find_entry(
     quality: str | None,
     path: Path | None = None,
 ) -> PriceEntry:
+    if provider.startswith("custom:"):  # 커스텀 영상 공급자: 저장된 스펙의 가격이 단가표다
+        return _custom_entry(provider, model, kind, resolution)
     wanted = (provider, model, kind, resolution, quality)
     entries = _cached(path or PRICES_PATH)
     for entry in entries:
