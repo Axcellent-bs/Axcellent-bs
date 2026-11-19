@@ -78,3 +78,20 @@ def test_held_resume_is_passed_through_as_a_judgement(client: TestClient, fake: 
     assert response.status_code == 200 and response.json()["data"]["outcome"] == "held"
     fake.status, fake.outcome = TaskStatus.FAILED, "invalid_input"
     assert client.put(URL, json={"paused": False}).status_code == 400
+
+
+def test_post_set_is_the_same_as_put(client: TestClient, fake: Fake) -> None:
+    """화면은 GET과 다른 주소의 POST로 바꾼다(232 nginx가 메서드별로 연다)."""
+    body = {"paused": True, "reason": "계정 정지 재고 대기", "updated_by": "남의 이름"}
+    response = client.post(URL + "/set", json=body)
+    assert response.status_code == 200
+    target, request = fake.calls[0]
+    assert (target, request.skill) == ("marketing", "set_publish_control")
+    assert request.input["paused"] is True and request.input["updated_by"] != "남의 이름"
+
+
+def test_post_set_needs_a_person_and_a_valid_body(client: TestClient, fake: Fake) -> None:
+    bad = {"authorization": "Bearer nope"}
+    assert client.post(URL + "/set", json={"paused": True}, headers=bad).status_code in (401, 403)
+    assert client.post(URL + "/set", json={"paused": "yes-please"}).status_code == 422
+    assert fake.calls == []
