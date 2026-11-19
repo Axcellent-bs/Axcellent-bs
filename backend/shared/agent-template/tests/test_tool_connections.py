@@ -401,3 +401,16 @@ def test_tmp_fd_closed_when_fdopen_fails(vault: Path, monkeypatch: pytest.Monkey
         _save()
     assert len(tmp_fds) == 1 and tmp_fds[0] in closed
     assert not list(vault.parent.glob(vault.name + "*.tmp"))
+
+
+def test_mutating_returned_connection_does_not_change_cache(vault: Path) -> None:
+    """돌려받은 연결의 config·secrets를 고쳐도 다음 읽기에 번지지 않는다."""
+    _save()
+    for got in (tc.read_all()[0], tc.get("jenkins-1"), tc.find("jenkins")):
+        assert got is not None
+        got.config["url"] = "http://evil"
+        got.secrets["token"] = "바뀜"
+    again = tc.get("jenkins-1")
+    assert again is not None
+    assert again.config == {"url": "http://ci.local"}
+    assert again.secrets == {"token": SECRET}

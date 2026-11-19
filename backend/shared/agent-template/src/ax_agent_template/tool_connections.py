@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -155,6 +156,7 @@ def _parse(raw: Any, path: str) -> list[ToolConnection]:
 
 
 # 바뀐 시각·크기가 같으면 다시 읽지 않는다. 깨진 파일 경고도 같은 상태면 한 번만 남긴다
+# 부르는 쪽이 config·secrets를 고쳐도 캐시가 바뀌지 않게 돌려줄 때마다 깊은 복사본을 준다
 _cache: tuple[str, int, int, int, list[ToolConnection], bool] | None = None
 _lock = threading.RLock()
 
@@ -174,7 +176,7 @@ def _load() -> tuple[list[ToolConnection], bool]:
         # 않는다. 윈도에서 st_ino가 0이면 예전처럼 시각·크기만 본다
         key = (path, stat.st_mtime_ns, stat.st_size, stat.st_ino)
         if _cache is not None and _cache[:4] == key:
-            return list(_cache[4]), _cache[5]
+            return copy.deepcopy(_cache[4]), _cache[5]
         try:
             os.chmod(path, 0o600)  # 예전에 넓은 권한으로 만든 파일도 만든 사용자만 읽게 맞춘다
         except OSError:
@@ -188,7 +190,7 @@ def _load() -> tuple[list[ToolConnection], bool]:
         else:
             broken = False
         _cache = (*key, found, broken)
-        return list(found), broken
+        return copy.deepcopy(found), broken
 
 
 def read_all() -> list[ToolConnection]:
