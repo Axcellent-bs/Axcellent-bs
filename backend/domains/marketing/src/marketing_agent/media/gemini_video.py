@@ -48,6 +48,7 @@ from marketing_agent.media.safe_fetch import (
     Resolver,
     fetch_public,
 )
+from marketing_agent.media.video_limits import VideoCaps
 
 NAME = "gemini"
 API_HOST = "generativelanguage.googleapis.com"
@@ -58,7 +59,21 @@ ALLOWED_RESOLUTIONS = ("720p",)  # 단가표에 있는 9:16 해상도만
 RESOLUTION = ALLOWED_RESOLUTIONS[0]
 ASPECT_RATIO = "9:16"  # 릴스·쇼츠 통합 규격 한 가지
 MIN_DURATION_S = 3  # 문서: duration 3s~15s
-MAX_DURATION_S = 15  # 문서: 15초 초과는 invalid argument. 단가표 max_duration_s·safety와 같다
+MAX_DURATION_S = (
+    15  # 문서: 15초 초과는 invalid argument. 단가표 max_duration_s와 같다(단일 클립 한도)
+)
+EXTENSION_MIN_S = 3  # 문서: 연장 회당 3~10초, 연장한 영상은 총 30초까지
+EXTENSION_MAX_S = 10
+EXTENSION_TOTAL_S = 30
+CAPS = VideoCaps(
+    min_s=MIN_DURATION_S,
+    max_s=MAX_DURATION_S,
+    extension=True,
+    extension_min_s=EXTENSION_MIN_S,
+    extension_max_s=EXTENSION_MAX_S,
+    extension_total_s=EXTENSION_TOTAL_S,
+    image_start=True,
+)
 REQUEST_TIMEOUT_S = 300.0  # 동기 생성 1회
 POLL_INTERVAL_S = 5.0
 POLL_MAX_WAIT_S = 120.0
@@ -173,6 +188,7 @@ def _json(response: httpx.Response) -> dict[str, Any]:
 
 class GeminiVideoProvider:
     name = NAME
+    video_caps = CAPS
 
     def __init__(
         self,
@@ -197,7 +213,16 @@ class GeminiVideoProvider:
         if request.resolution not in ALLOWED_RESOLUTIONS:
             raise GeminiVideoError(f"unsupported_resolution: {request.resolution}")
         duration = request.duration_s
-        if duration is None or not MIN_DURATION_S <= duration <= MAX_DURATION_S:
+        cont = request.continuation
+        lo, hi = (
+            (EXTENSION_MIN_S, EXTENSION_MAX_S)
+            if cont and cont.mode == "extend"
+            else (
+                MIN_DURATION_S,
+                MAX_DURATION_S,
+            )
+        )
+        if duration is None or not lo <= duration <= hi:
             raise GeminiVideoError(f"unsupported_duration: {duration}")
         if not request.model:
             raise GeminiVideoError("model_not_configured")
@@ -205,12 +230,13 @@ class GeminiVideoProvider:
         if not key:
             raise GeminiVideoError("api_key_not_configured")
 
-        payload = {
+        # delivery=uri 는 store=true 가 필수다. false 면 HTTP 400
+        # "store=true is required when response format has video delivery set to URI."
+        # (store=true 라야 다음 연장 요청이 previous_interaction_id 로 이어 갈 수 있다)
+        payload: dict[str, Any] = {
             "model": request.model,
             "input": request.prompt,
             "background": False,
-            # delivery=uri 는 store=true 가 필수다. false 면 HTTP 400
-            # "store=true is required when response format has video delivery set to URI."
             "store": True,
             "stream": False,
             "response_format": {
@@ -221,6 +247,33 @@ class GeminiVideoProvider:
                 "delivery": "uri",
             },
         }
+        if cont is not None and cont.mode == "extend":
+            # 문서(omni, 영상 연장): previous_interaction_id + 텍스트 입력 + duration 만 쓴다
+            if not cont.previous_job_id:
+                raise GeminiVideoError("continuation_missing_source")
+            payload["previous_interaction_id"] = cont.previous_job_id
+            payload["input"] = f"Continue the scene. {request.prompt}"
+            payload["response_format"] = {
+                "type": "video",
+                "duration": f"{duration}s",
+                "delivery": "uri",
+            }
+        elif cont is not None and cont.mode == "image":
+            # 문서(omni, 이미지→영상): 이미지는 base64 인라인 + 텍스트
+            if cont.image_path is None:
+                raise GeminiVideoError("continuation_missing_source")
+            try:
+                frame = cont.image_path.read_bytes()
+            except OSError:
+                raise GeminiVideoError("continuation_frame_unreadable") from None
+            payload["input"] = [
+                {
+                    "type": "image",
+                    "data": base64.b64encode(frame).decode("ascii"),
+                    "mime_type": "image/jpeg",
+                },
+                {"type": "text", "text": request.prompt},
+            ]
         headers = {
             "x-goog-api-key": key,
             "Api-Revision": API_REVISION,

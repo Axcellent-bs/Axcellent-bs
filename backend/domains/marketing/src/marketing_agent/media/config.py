@@ -12,6 +12,9 @@
   허용 경과일 `MARKETING_FX_MAX_AGE_DAYS`·여유 `MARKETING_COST_SAFETY_MARGIN_PCT`,
   건당 상한 `MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM`, 월 상한 `MARKETING_MEDIA_MONTHLY_BUDGET_KRW`.
   비어 있으면 실제 공급자 호출을 거부한다(목 모드는 허용).
+- 영상 길이 상한: `MARKETING_VIDEO_MAX_DURATION_S`(운영자가 정한다, 1~90초, 기본 15).
+  숫자가 아니거나 범위 밖이면 영상 생성을 거부한다(`video_max_duration_invalid`).
+  단일 클립 한도(공급자 규격)와 별개이며, 상한이 클립 한도보다 크면 클립을 이어 붙인다.
 """
 
 from __future__ import annotations
@@ -24,6 +27,10 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from marketing_agent.media.base import MediaKind
+from marketing_agent.media.video_limits import (
+    DEFAULT_MAX_DURATION_S,
+    max_duration_from_env,
+)
 
 MOCK = "mock"
 LEDGER_DB_ENV = "MARKETING_MEDIA_LEDGER_DB"
@@ -106,11 +113,16 @@ class MediaSettings:
     audio_provider: str = MOCK
     audio_model: str = ""
     audio_mode: str = "off"
+    video_max_duration_s: int = DEFAULT_MAX_DURATION_S
+    video_max_duration_problem: str | None = None  # 설정이 잘못됐으면 코드(영상 생성 거부)
 
     @classmethod
     def from_env(cls) -> MediaSettings:
         fx = _decimal("MARKETING_FX_USD_KRW")
+        max_duration = max_duration_from_env()
         return cls(
+            video_max_duration_s=max_duration.seconds,
+            video_max_duration_problem=max_duration.problem,
             image_provider=_text("MARKETING_IMAGE_PROVIDER").lower() or MOCK,
             image_model=_text("MARKETING_IMAGE_MODEL"),
             video_provider=_text("MARKETING_VIDEO_PROVIDER").lower() or MOCK,

@@ -119,7 +119,7 @@ async def test_video_within_limits_passes_on_rules_without_a_verifier_agent(
     [
         ({"cost_krw": 2000}, "video_cost_single"),
         ({"cost_krw": 0}, "media_cost_zero"),
-        ({"duration_s": 16}, "video_duration"),
+        ({"duration_s": 91}, "video_duration"),
         ({"duration_s": None}, "video_duration"),
     ],
 )
@@ -237,3 +237,13 @@ async def test_bgm_audio_has_its_own_cost_limit(gate: Gate, act) -> None:
         act("generate_media", "marketing", "a9", **_image(media_kind="audio", cost_krw=200))
     )
     assert _rule_keys(gate, held.review_id) == {"audio_cost_single"}
+
+
+@pytest.mark.asyncio
+async def test_video_up_to_the_90s_policy_limit_is_not_held_for_duration(
+    gate: Gate, verifier: Any, act
+) -> None:
+    ok = await gate.execute(
+        act("generate_media", "marketing", "v90", **_video(duration_s=90, clip_count=7))
+    )
+    assert (ok.status, ok.verifier) == ("executed", "safety")

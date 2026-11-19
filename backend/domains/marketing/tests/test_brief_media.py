@@ -358,6 +358,9 @@ def test_image_end_to_end_with_mock_provider(gate: Gate) -> None:
 
 def test_estimate_for_mock_provider_reads_fixed_cost_and_month_total() -> None:
     estimate = _handed(fields={"category": "그림책"})["media_estimate"]
+    video = estimate.pop("video")  # 길이 입력용 정보(상한은 설정값, 기본 15초)
+    assert video["max_s"] == 15 and video["absolute_max_s"] == 90 and video["current_s"] == 15
+    assert video["cost_by_duration"]["15"] == skill.MOCK_COST_KRW["video"]
     assert estimate == {
         "status": "ok",
         "reason_code": None,
@@ -369,7 +372,7 @@ def test_estimate_for_mock_provider_reads_fixed_cost_and_month_total() -> None:
         "monthly_budget_krw": None,
         "month_total_krw": 0,
     }
-    assert _view()["media_estimate"] == estimate
+    assert {k: v for k, v in _view()["media_estimate"].items() if k != "video"} == estimate
 
 
 def test_estimate_reads_price_table_and_limits(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -395,6 +398,15 @@ def test_estimate_reads_price_table_and_limits(monkeypatch: pytest.MonkeyPatch) 
     over = _view()["media_estimate"]
     assert over["status"] == "blocked" and over["reason_code"] == "cost_over_single"
     assert over["cost_krw"] == estimate["cost_krw"]
+    # 건당 상한에 걸려도 다른 길이를 고를 수 있게 길이별 비용 표는 준다(클립이 늘면 비용이 는다)
+    table = {int(k): v for k, v in over["video"]["cost_by_duration"].items()}
+    assert table[15] == estimate["cost_krw"] and table[3] < table[15]
+    assert over["video"]["max_s"] == 15 and 16 not in table
+
+    monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "90")
+    longer = _view()["media_estimate"]["video"]["cost_by_duration"]
+    assert int(longer["90"]) > int(longer["30"]) > int(longer["15"])  # 90초 = 클립 7개 이어 붙임
+    monkeypatch.delenv("MARKETING_VIDEO_MAX_DURATION_S")
 
     monkeypatch.setenv("MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM", "2000")
     monkeypatch.setenv("MARKETING_MEDIA_MONTHLY_BUDGET_KRW", "500")
@@ -412,3 +424,46 @@ def test_estimate_is_blocked_for_missing_fields_and_carousel() -> None:
     assert carousel["reason_code"] == "carousel_items_undecided" and carousel["cost_krw"] is None
     _receive("PROP-8")
     assert _view("PROP-8")["media_estimate"] is None  # 넘기지 않은 기획안에는 없다
+
+
+# --- 사람이 고른 영상 길이 ----------------------------------------------------------------
+
+
+def test_chosen_duration_is_saved_in_the_request_and_sent_to_generation(
+    fake_prepare: FakePrepare, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "60")
+    _handed(fields={"category": "그림책"})
+    out = _call("prepare_brief_media", {"proposal_id": "PROP-5", "duration_s": 45})
+    assert out["output"]["stage"] == "draft_ready", out
+    assert fake_prepare.requests[0].input["duration_s"] == 45
+    assert _view()["media_request"]["duration_s"] == 45  # 이후 비용 조회·해시도 이 길이를 따른다
+
+
+def test_duration_over_the_setting_is_refused_before_generation(
+    fake_prepare: FakePrepare, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _handed(fields={"category": "그림책"})
+    out = _call("prepare_brief_media", {"proposal_id": "PROP-5", "duration_s": 16})  # 기본 상한 15
+    assert out["outcome"] == "duration_over_limit" and out["output"]["limit_s"] == 15
+    assert fake_prepare.requests == []
+    monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "90")
+    over = _call("prepare_brief_media", {"proposal_id": "PROP-5", "duration_s": 91})
+    assert over["outcome"] == "invalid_input" and fake_prepare.requests == []  # 절대 상한 90초
+
+
+def test_duration_is_video_only(fake_prepare: FakePrepare) -> None:
+    _handed("image", fields={"category": "에세이"})
+    out = _call("prepare_brief_media", {"proposal_id": "PROP-5", "duration_s": 5})
+    assert out["outcome"] == "invalid_input" and fake_prepare.requests == []
+
+
+def test_invalid_max_setting_blocks_the_estimate_and_the_make(
+    fake_prepare: FakePrepare, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "120")
+    estimate = _handed(fields={"category": "그림책"})["media_estimate"]
+    assert (
+        estimate["status"] == "blocked" and estimate["reason_code"] == "video_max_duration_invalid"
+    )
+    assert _make()["outcome"] == "video_max_duration_invalid" and fake_prepare.requests == []

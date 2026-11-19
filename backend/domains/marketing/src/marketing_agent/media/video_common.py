@@ -32,6 +32,7 @@ from marketing_agent.media.safe_fetch import (
     Resolver,
     fetch_public,
 )
+from marketing_agent.media.video_limits import VideoCaps
 
 REQUEST_TIMEOUT_S = 60.0
 POLL_INTERVAL_S = 5.0
@@ -72,6 +73,11 @@ class AsyncVideoProvider:
     resolutions: ClassVar[tuple[str, ...]]
     min_duration_s: ClassVar[int]
     max_duration_s: ClassVar[int]
+
+    @property
+    def video_caps(self) -> VideoCaps:
+        """단일 클립 규격. 연장·시작 이미지는 아직 보내지 않으므로 긴 영상은 이어 붙이지 못한다."""
+        return VideoCaps(min_s=self.min_duration_s, max_s=self.max_duration_s)
 
     def __init__(
         self,

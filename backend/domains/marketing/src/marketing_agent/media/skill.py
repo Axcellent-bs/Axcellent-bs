@@ -57,6 +57,15 @@ from marketing_agent.media.prompts import (
     render_prompt_detailed,
 )
 from marketing_agent.media.registry import get_adapter
+from marketing_agent.media.video_chain import estimate_chain_usd, generate_chain
+from marketing_agent.media.video_limits import (
+    ABSOLUTE_MAX_DURATION_S,
+    Clip,
+    VideoCaps,
+    VideoLimitError,
+    effective_caps,
+    plan_clips,
+)
 
 ACTION = "generate_media"
 _DRAFT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
@@ -72,7 +81,9 @@ class GenerateMediaInput(AxModel):
     fields: dict[str, Any] = Field(default_factory=dict)
     resolution: str | None = Field(default=None, pattern=r"^(\d{3,4}x\d{3,4}|\d{3,4}p)$")
     quality: Literal["low", "medium", "high"] | None = None  # 이미지만
-    duration_s: StrictInt | None = Field(default=None, ge=1, le=60)  # 영상만(오디오는 받지 않는다)
+    duration_s: StrictInt | None = Field(  # 영상만(오디오는 받지 않는다). 설정 상한은 따로 본다
+        default=None, ge=1, le=ABSOLUTE_MAX_DURATION_S
+    )
     claimed_cost_krw: StrictInt | None = Field(default=None, ge=0)  # 요청 쪽 추정값(다르면 C)
 
 
@@ -88,6 +99,7 @@ class GeneratedMedia(AxModel):
     resolution: str
     quality: str | None = None
     duration_s: int | None = None
+    clip_count: int = 1  # 영상: 이어 붙인 클립 수(1이면 단일 클립)
     muted: bool | None = None  # 영상은 true(무음), 이미지·오디오는 None
     cost_krw: int  # 확정액(정수 원)
     cost_est_krw: int  # 호출 전 추정액
@@ -120,6 +132,29 @@ def _sha(*parts: object) -> str:
 
 def _is_image_size(resolution: str) -> bool:
     return "x" in resolution
+
+
+def _video_duration(
+    data: GenerateMediaInput, template_s: int | None, settings: MediaSettings
+) -> tuple[int | None, str | None, dict[str, Any]]:
+    """영상 길이와 설정 상한 검사. (길이, 거절 코드, 거절 상세)."""
+    if settings.video_max_duration_problem is not None:
+        return None, settings.video_max_duration_problem, {}
+    limit = settings.video_max_duration_s
+    # 길이를 안 정한 요청의 기본값(템플릿)은 설정 상한을 넘지 않게 맞춘다
+    duration = data.duration_s or (min(template_s, limit) if template_s else None)
+    if duration is not None and duration > limit:
+        return duration, "duration_over_limit", {"duration_s": duration, "limit_s": limit}
+    return duration, None, {}
+
+
+def _clip_plan(
+    adapter: object, entry: pricing.PriceEntry | None, duration_s: int | None
+) -> list[Clip]:
+    """공급자 클립 한도·단가표 한도로 클립을 나눈다. 못 나누면 VideoLimitError(결과 코드)."""
+    caps = getattr(adapter, "video_caps", None) or VideoCaps()
+    caps = effective_caps(caps, entry.max_duration_s if entry else None)
+    return plan_clips(duration_s or 1, caps)
 
 
 async def generate_media(
@@ -164,7 +199,11 @@ async def generate_media(
     kind: MediaKind = data.media_kind
     resolution = data.resolution or template.resolution
     quality = (data.quality or template.quality) if kind == "image" else None
-    duration_s = (data.duration_s or template.duration_s) if kind == "video" else None
+    duration_s: int | None = None
+    if kind == "video":
+        duration_s, limit_code, limit_detail = _video_duration(data, template.duration_s, settings)
+        if limit_code is not None:
+            return _fail(request, limit_code, **limit_detail)
     if (
         kind == "audio"
     ):  # 클립 길이는 모델이 정하고(템플릿 resolution), 영상 길이에 맞추는 건 ffmpeg가 한다
@@ -207,9 +246,15 @@ async def generate_media(
     today = _now().date()
     usd_est: Decimal | None = None
     entry = None
+    clips = [Clip("first", duration_s or 1)]
     if provider_name == MOCK:
         model = "mock"
         krw_est = MOCK_COST_KRW[kind]
+        if kind == "video":
+            try:
+                clips = _clip_plan(adapter, None, duration_s)
+            except VideoLimitError as error:
+                return _fail(request, str(error), provider=provider_name, duration_s=duration_s)
     else:
         model = settings.model(kind)
         if not model:
@@ -228,13 +273,19 @@ async def generate_media(
                 quality=quality,
                 path=prices_path,
             )
-            usd_est = pricing.estimate_usd(entry, prompt=prompt, duration_s=duration_s)
+            if kind == "video":
+                clips = _clip_plan(adapter, entry, duration_s)
+                usd_est = estimate_chain_usd(entry, prompt=prompt, clips=clips)
+            else:
+                usd_est = pricing.estimate_usd(entry, prompt=prompt, duration_s=duration_s)
+        except VideoLimitError as error:
+            return _fail(request, str(error), provider=provider_name, duration_s=duration_s)
         except PriceNotFound:
             return _fail(request, "price_not_found", provider=provider_name, resolution=resolution)
         assert settings.fx_usd_krw is not None and settings.margin_pct is not None  # noqa: S101
         krw_est = pricing.krw_estimate(usd_est, settings.fx_usd_krw, settings.margin_pct)
 
-    # --- 상한 (공급자 호출 전) ---
+    # --- 상한 (공급자 호출 전). 이어 붙이면 krw_est는 클립 전체의 합이다 ---
     if settings.max_cost_krw_per_item is not None and krw_est > settings.max_cost_krw_per_item:
         return _fail(
             request,
@@ -286,6 +337,7 @@ async def generate_media(
     }
     if duration_s is not None:
         params["duration_s"] = duration_s
+        params["clip_count"] = len(clips)
     if data.claimed_cost_krw is not None:
         params["claimed_cost_krw"] = data.claimed_cost_krw
     evidence = Evidence(
@@ -317,7 +369,10 @@ async def generate_media(
     )
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
-        result = await asyncio.to_thread(adapter.generate, media_request)
+        if len(clips) > 1:
+            result = await asyncio.to_thread(generate_chain, adapter, media_request, clips)
+        else:
+            result = await asyncio.to_thread(adapter.generate, media_request)
         asset_sha = hashlib.sha256(result.asset_path.read_bytes()).hexdigest()
         if asset_sha != result.sha256:
             raise ValueError("asset_hash_mismatch")
@@ -340,6 +395,7 @@ async def generate_media(
         "resolution": resolution,
         "quality": quality,
         "duration_s": duration_s,
+        "clip_count": result.clip_count,
         "muted": (not keep_source_audio) if kind == "video" else None,
         "cost_krw": krw_actual,
         "cost_est_krw": krw_est,
@@ -465,6 +521,30 @@ class CostPlan:
     key: str
     krw_est: int
     settled: bool
+    # 영상: 길이(초) → 예상 비용(원) 표(1초~설정 상한). 길이 선택 화면용. 계산 못 하는 길이는 뺀다
+    by_duration: dict[int, int] | None = None
+
+
+def _cost_table(
+    adapter: object, entry: pricing.PriceEntry | None, prompt: str, settings: MediaSettings
+) -> dict[int, int]:
+    """길이별 예상 비용(원). 목은 고정액, 실제 공급자는 클립 합산 단가. 못 만드는 길이는 뺀다."""
+    table: dict[int, int] = {}
+    for seconds in range(1, settings.video_max_duration_s + 1):
+        try:
+            clips = _clip_plan(adapter, entry, seconds)
+        except VideoLimitError:
+            continue
+        if entry is None:
+            table[seconds] = MOCK_COST_KRW["video"]
+            continue
+        assert settings.fx_usd_krw is not None and settings.margin_pct is not None  # noqa: S101
+        try:
+            usd = estimate_chain_usd(entry, prompt=prompt, clips=clips)
+        except PriceNotFound:
+            continue
+        table[seconds] = pricing.krw_estimate(usd, settings.fx_usd_krw, settings.margin_pct)
+    return table
 
 
 def plan_cost(
@@ -475,6 +555,7 @@ def plan_cost(
     prices_path: Path | None = None,
     templates_path: Path | None = None,
     allow_video: bool = False,
+    with_table: bool = False,
 ) -> CostPlan | AgentResult:
     """`generate_media`(이미지)와 같은 규칙으로 호출 없이 비용만 계산한다. 막히면 결과 Task.
 
@@ -507,7 +588,11 @@ def plan_cost(
         return _fail(request, "prompt_rejected", reason_code=rejected.code, field=rejected.field)
     resolution = data.resolution or template.resolution
     quality = (data.quality or template.quality) if kind == "image" else None
-    duration_s = (data.duration_s or template.duration_s) if kind == "video" else None
+    duration_s = None
+    if kind == "video":
+        duration_s, limit_code, limit_detail = _video_duration(data, template.duration_s, settings)
+        if limit_code is not None:
+            return _fail(request, limit_code, **limit_detail)
     if (kind == "image" and (data.duration_s is not None or not _is_image_size(resolution))) or (
         kind == "video" and (data.quality is not None or _is_image_size(resolution))
     ):
@@ -525,10 +610,17 @@ def plan_cost(
         return CostPlan(key, previous.krw_actual or previous.krw_est, True)
 
     provider_name = settings.provider(kind)
-    if get_adapter(provider_name) is None:
+    adapter = get_adapter(provider_name)
+    if adapter is None:
         return _fail(request, "provider_adapter_missing", provider=provider_name)
     if provider_name == MOCK:
         krw_est = MOCK_COST_KRW[kind]
+        entry = None
+        if kind == "video":
+            try:
+                _clip_plan(adapter, None, duration_s)
+            except VideoLimitError as error:
+                return _fail(request, str(error), provider=provider_name, duration_s=duration_s)
     else:
         model = settings.model(kind)
         if not model:
@@ -547,16 +639,28 @@ def plan_cost(
                 quality=quality,
                 path=prices_path,
             )
-            usd_est = pricing.estimate_usd(entry, prompt=prompt, duration_s=duration_s)
+            if kind == "video":
+                usd_est = estimate_chain_usd(
+                    entry, prompt=prompt, clips=_clip_plan(adapter, entry, duration_s)
+                )
+            else:
+                usd_est = pricing.estimate_usd(entry, prompt=prompt, duration_s=duration_s)
+        except VideoLimitError as error:
+            return _fail(request, str(error), provider=provider_name, duration_s=duration_s)
         except PriceNotFound:
             return _fail(request, "price_not_found", provider=provider_name, resolution=resolution)
         assert settings.fx_usd_krw is not None and settings.margin_pct is not None  # noqa: S101
         krw_est = pricing.krw_estimate(usd_est, settings.fx_usd_krw, settings.margin_pct)
+    table = None
+    if with_table and kind == "video":
+        table = _cost_table(adapter, entry, prompt, settings)
     if settings.max_cost_krw_per_item is not None and krw_est > settings.max_cost_krw_per_item:
+        extra = {"by_duration": table} if table is not None else {}
         return _fail(
             request,
             "cost_over_single",
             cost_krw=krw_est,
             limit_krw=settings.max_cost_krw_per_item,
+            **extra,
         )
-    return CostPlan(key, krw_est, False)
+    return CostPlan(key, krw_est, False, table)

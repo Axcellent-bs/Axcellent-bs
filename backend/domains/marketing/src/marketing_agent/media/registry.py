@@ -42,6 +42,8 @@ from marketing_agent.media.wan_video import WanVideoProvider
 class GeminiProvider(GeminiImageProvider):
     """`gemini` 한 이름으로 kind에 따라 이미지·영상 어댑터를 고른다(skill은 이름만 넘긴다)."""
 
+    video_caps = GeminiVideoProvider.video_caps
+
     def __init__(self) -> None:
         super().__init__()
         self._video = GeminiVideoProvider()
