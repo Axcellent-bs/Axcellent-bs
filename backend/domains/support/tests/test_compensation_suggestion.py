@@ -254,3 +254,23 @@ def test_a_missing_order_is_still_not_found() -> None:
         httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
     )
     assert call(add_inquiry("ord_0001"))["outcome"] == "not_found"
+
+
+def test_a_missing_order_says_the_order_is_missing_not_the_inquiry() -> None:
+    """판매 서버에 주문이 없으면 결과는 그대로 not_found지만, 문의가 아니라 주문이 없다고 적는다."""
+    shop_client.use_client(
+        httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+    )
+    inquiry_id = add_inquiry("ord_0001")
+    result = call(inquiry_id)
+    assert result["outcome"] == "not_found"
+    message = result["output"]["message"]
+    assert "판매 서버에 없다" in message and "ord_0001" in message
+    assert "찾을 수 없다" not in message
+
+
+def test_someone_elses_order_still_says_the_inquiry_is_not_found() -> None:
+    use_shop(shop_order(status="payment_failed", payments=[], buyer_id="buy_0002"))
+    result = call(add_inquiry("ord_0001"))
+    assert result["outcome"] == "not_found"
+    assert "찾을 수 없다" in result["output"]["message"]
