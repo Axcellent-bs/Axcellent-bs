@@ -21,14 +21,20 @@ from marketing_agent.media.higgsfield_video import NAME as HIGGSFIELD_NAME
 from marketing_agent.media.higgsfield_video import HiggsfieldVideoProvider
 from marketing_agent.media.kling_video import NAME as KLING_NAME
 from marketing_agent.media.kling_video import KlingVideoProvider
+from marketing_agent.media.luma_video import NAME as LUMA_NAME
+from marketing_agent.media.luma_video import LumaVideoProvider
 from marketing_agent.media.mock import NAME as MOCK_NAME
 from marketing_agent.media.mock import MockProvider
+from marketing_agent.media.pika_video import NAME as PIKA_NAME
+from marketing_agent.media.pika_video import PikaVideoProvider
 from marketing_agent.media.pixverse_video import NAME as PIXVERSE_NAME
 from marketing_agent.media.pixverse_video import PixVerseVideoProvider
 from marketing_agent.media.replicate_video import NAME as REPLICATE_NAME
 from marketing_agent.media.replicate_video import ReplicateVideoProvider
 from marketing_agent.media.seedance_video import NAME as SEEDANCE_NAME
 from marketing_agent.media.seedance_video import SeedanceVideoProvider
+from marketing_agent.media.vidu_video import NAME as VIDU_NAME
+from marketing_agent.media.vidu_video import ViduVideoProvider
 from marketing_agent.media.wan_video import NAME as WAN_NAME
 from marketing_agent.media.wan_video import WanVideoProvider
 
@@ -59,6 +65,9 @@ ADAPTERS: dict[str, Callable[[], MediaProvider]] = {
     HIGGSFIELD_NAME: HiggsfieldVideoProvider,  # 키 MARKETING_HIGGSFIELD_API_KEY
     WAN_NAME: WanVideoProvider,  # 키 MARKETING_WAN_API_KEY + MARKETING_WAN_WORKSPACE_ID
     PIXVERSE_NAME: PixVerseVideoProvider,  # 키 MARKETING_PIXVERSE_API_KEY
+    PIKA_NAME: PikaVideoProvider,  # 영상 전용. 키 MARKETING_PIKA_API_KEY
+    LUMA_NAME: LumaVideoProvider,  # 영상 전용. 키 MARKETING_LUMA_API_KEY
+    VIDU_NAME: ViduVideoProvider,  # 영상 전용. 키 MARKETING_VIDU_API_KEY
 }
 
 
