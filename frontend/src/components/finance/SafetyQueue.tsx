@@ -91,7 +91,7 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
   const canDecide = live ? liveHumanTokenSet : humanTokenSet;
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [approver, setApprover, approverName] = useApproverName();
+  const [approver, setApprover, approverName, decidedAs] = useApproverName();
   const pending = (reviews ?? []).filter((r) => r.status === "pending").sort((a, b) => a.expires_at.localeCompare(b.expires_at));
   const recent = (reviews ?? []).filter((r) => r.status !== "pending").slice(-5).reverse();
 
@@ -99,7 +99,7 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
     if (!approverName) { setProblem("승인자 이름을 먼저 적으세요."); return; }
     setBusy(id + decision);
     setProblem(null);
-    try { await finance.decide(id, decision, undefined, live, approverName); await reload(); }
+    try { await finance.decide(id, decision, undefined, live, decidedAs ?? undefined); await reload(); }
     catch (e) { setProblem((e as Error).message); }
     finally { setBusy(null); }
   }
