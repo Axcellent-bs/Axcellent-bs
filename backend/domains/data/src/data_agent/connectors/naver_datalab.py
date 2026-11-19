@@ -261,7 +261,7 @@ def clear_cache() -> None:
 
 
 def _request_body(query: TrendScanInput) -> dict[str, Any]:
-    return {
+    body: dict[str, Any] = {
         "startDate": query.start_date.isoformat(),
         "endDate": query.end_date.isoformat(),
         "timeUnit": query.time_unit,
@@ -269,6 +269,13 @@ def _request_body(query: TrendScanInput) -> dict[str, Any]:
             {"groupName": g.group_name, "keywords": list(g.keywords)} for g in query.keyword_groups
         ],
     }
+    # 연령·성별 필터는 있을 때만 (없으면 예전 본문 그대로 → 예전 캐시 키 그대로). 캐시 키는 본문으로
+    # 만들어 필터가 다르면 다른 키다
+    if query.ages:
+        body["ages"] = list(query.ages)
+    if query.gender:
+        body["gender"] = query.gender
+    return body
 
 
 def _limit(env: Mapping[str, str]) -> int:

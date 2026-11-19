@@ -239,6 +239,8 @@ export AX_COMMON_LOG_DB="$PWD/$DATA/common_log.db"
 export DATA_REPORT_DB="$PWD/$DATA/data_reports.db"
 # data: 트렌드 감지 탭 계산 결과 (수집기가 새 스냅샷 직후 미리 계산해 넣고, 화면은 읽기만. 다시 켜도 남음)
 export DATA_TREND_RESPONSES_DB="$PWD/$DATA/trend_responses.db"
+# data: 트렌드 분석 의뢰 보고서 (상태·섹션별 진행·결과, 그날 읽은 인스타 게시물. 다시 켜도 남음)
+export DATA_TREND_REPORT_DB="$PWD/$DATA/trend_reports.db"
 # data: 설명 문장 캐시·네이버 하루 캐시(응답·호출 수)도 파일에 (다시 켜도 LLM·네이버를 다시 안 부름)
 export DATA_EXPLAIN_DB="$PWD/$DATA/explain_cache.db"
 # data: YouTube 할당량 장부 하나 (서버·수집기가 같은 파일, 하루 상한 DATA_YOUTUBE_DAILY_UNITS 기본 8000)
