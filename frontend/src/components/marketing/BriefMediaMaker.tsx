@@ -6,7 +6,7 @@ import { shortDateTime, won } from "@/lib/format";
 import { briefs, mediaKindKo, mediaPreviewUrl, type StoredBrief } from "@/lib/briefs";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { ManualPublishCard, PublishLineView } from "./ManualPublishCard";
-import { approvalLink, estimateBlockKo, estimateLines, isReel, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, waitKo, PUBLISH_EXPIRY_MIN, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
+import { approvalLink, clampDuration, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, isReel, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, waitKo, PUBLISH_EXPIRY_MIN, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
 
 // 넘어온 기획안 한 건의 "미디어 만들기". 저장된 미디어 요청(종류·필드)을 서버가 그대로 실행해 초안을 만든다.
 // - 누르면 먼저 예상 비용(서버가 단가표·장부에서 계산한 값)을 보여 주고, 사람이 확인해야 시작한다.
@@ -149,6 +149,7 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
   const [result, setResult] = useState<MediaResult | null>(null);
   const [fresh, setFresh] = useState<{ key: string; prepared: PreparedMedia } | null>(null);
   const [seconds, setSeconds] = useState(0);
+  const [chosen, setChosen] = useState<number | null>(null); // 사람이 고른 영상 길이(초). 비면 서버가 준 현재 길이
 
   useEffect(() => {
     if (step !== "busy") return;
@@ -163,6 +164,9 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
   const prepared = h?.prepared ?? (fresh?.key === requestKey ? fresh.prepared : null);
   const ready = prepared?.stage === "draft_ready";
   const kind = request.media_kind;
+  const video = isReel(kind) ? estimate?.video ?? null : null;
+  const length = video ? chosen ?? video.current_s ?? video.max_s : null;
+  const lengthProblem = estimate && length != null ? durationProblemKo(estimate, length) : null;
 
   async function make() {
     if (inFlight.has(id)) return; // 클릭 잠금: 같은 건을 두 번 보내지 않는다
@@ -171,7 +175,7 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
     setSeconds(0);
     setResult(null);
     try {
-      const answer = await briefs.makeMedia(id);
+      const answer = await briefs.makeMedia(id, length);
       setResult(mediaResultKo(answer));
       const made = answer.output?.sns_handoff?.prepared;
       setFresh(made ? { key: requestKey, prepared: made } : null);
@@ -184,8 +188,10 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
     }
   }
 
+  // 영상은 길이를 바꿔 다시 고를 수 있으므로, 비용 상한에 걸린 것은 길이 칸이 따로 안내한다(버튼은 길이 기준으로 끈다)
+  const lengthDecides = video !== null && (estimate?.reason_code === "cost_over_single" || estimate?.reason_code === "budget_exceeded");
   const blocked = !estimate ? "서버가 예상 비용을 알려 주지 않아 만들 수 없습니다. 서버가 이 기능을 지원하는지 확인해 주세요."
-    : estimate.status !== "ok" ? estimateBlockKo(estimate.reason_code) : null;
+    : estimate.status !== "ok" && !lengthDecides ? estimateBlockKo(estimate.reason_code) : null;
 
   return (
     <div className="w-full space-y-2 rounded-lg bg-ink-50 px-3 py-3 text-xs" aria-label={`${id} 미디어 만들기`}>
@@ -197,20 +203,34 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
         <div className="space-y-2" role="group" aria-label="비용 확인">
           <p className="font-medium text-ink-700">{mediaKindKo(kind)}을(를) 만들까요?</p>
           <ul className="list-disc space-y-0.5 pl-5 text-ink-700">
-            {estimateLines(estimate).map((line) => <li key={line}>{line}</li>)}
+            {estimateLines(estimate, length).map((line) => <li key={line}>{line}</li>)}
             <li>{waitKo(kind)}</li>
             <li>만든 파일에는 AI 표시가 들어가고, 만든 뒤에도 게시는 사람 승인이 필요합니다.</li>
           </ul>
           <div className="flex flex-wrap gap-2">
-            <button className="btn-primary text-xs" onClick={() => void make()}>만들기 시작</button>
+            <button className="btn-primary text-xs" disabled={lengthProblem !== null} onClick={() => void make()}>만들기 시작</button>
             <button className="btn-ghost text-xs" onClick={() => setStep("idle")}>취소</button>
           </div>
         </div>
       ) : !ready && (
         <div className="flex flex-wrap items-center gap-2">
+          {video && length != null && (
+            <div className="w-full space-y-1" role="group" aria-label="영상 길이">
+              <label className="flex flex-wrap items-center gap-2 text-ink-700">
+                <span className="font-medium">영상 길이</span>
+                <input type="range" min={video.min_s} max={video.max_s} step={1} value={length} aria-label="영상 길이(초) 슬라이더"
+                  onChange={(e) => setChosen(clampDuration(video, Number(e.target.value)))} />
+                <input className="field w-20 text-xs" type="number" inputMode="numeric" min={video.min_s} max={video.max_s} step={1} value={length} aria-label="영상 길이(초)"
+                  onChange={(e) => { const v = clampDuration(video, Number(e.target.value)); if (v != null) setChosen(v); }} />
+                <span>초 (상한 {video.max_s}초)</span>
+              </label>
+              <p className="text-ink-500">{durationNoteKo(video)}</p>
+              {lengthProblem && <p className="text-amber-800">{lengthProblem}</p>}
+            </div>
+          )}
           <button
             className="btn-primary text-xs"
-            disabled={!HUMAN_TOKEN_SET || blocked !== null}
+            disabled={!HUMAN_TOKEN_SET || blocked !== null || lengthProblem !== null}
             title={!HUMAN_TOKEN_SET ? "사람 토큰이 없어 쓸 수 없습니다" : undefined}
             onClick={() => { setResult(null); setStep("confirm"); }}
           >

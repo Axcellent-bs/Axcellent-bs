@@ -1024,16 +1024,29 @@ async def handoff_brief_to_sns(
 _PROPOSAL_ID = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
 
 
+class BriefMediaBody(BaseModel):
+    """본문은 선택이다. 영상 길이만 받는다(종류·필드는 받지 않는다: 다른 키는 무시한다)."""
+
+    duration_s: int | None = Field(default=None, ge=1, le=90, strict=True)  # 코드 절대 상한 90초
+
+
 @router.post("/marketing/briefs/{proposal_id}/media")
-async def prepare_brief_media(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> dict:
-    """넘긴 기획안의 저장된 미디어 요청(종류·필드)으로 미디어 초안을 만든다. 본문이 없다.
+async def prepare_brief_media(
+    proposal_id: str = Path(pattern=_PROPOSAL_ID), body: BriefMediaBody | None = None
+) -> dict:
+    """넘긴 기획안의 저장된 미디어 요청(종류·필드)으로 미디어 초안을 만든다.
+
+    본문은 선택이고 영상 길이(`duration_s`, 1~90)만 받는다. 설정 상한(운영자가 정한 값)을 넘는지는
+    마케팅이 판정해 `duration_over_limit`으로 돌려준다.
 
     마케팅 `prepare_brief_media` → 기존 `prepare_sns_post_from_media`(B등급 안전 관문·비용 상한·
     AI 라벨·점검). 게시(`publish_sns`, C등급 사람 승인)는 하지 않는다. 영상은 길게 걸릴 수 있다.
     보류·상한 초과·미정 필드 같은 판단 결과는 오류가 아니라 `status`·`outcome`으로 돌려준다.
     """
     _no_org_in_mock()
-    return ok(await marketing_client.brief_media_call(proposal_id))
+    return ok(
+        await marketing_client.brief_media_call(proposal_id, body.duration_s if body else None)
+    )
 
 
 @router.get("/marketing/briefs/{proposal_id}/media/preview")

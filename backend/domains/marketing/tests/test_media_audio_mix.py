@@ -74,7 +74,7 @@ def test_short_video_uses_its_length(files) -> None:
 @pytest.mark.parametrize(
     ("kwargs", "code"),
     [
-        ({"duration_s": 8.5}, "invalid_duration"),
+        ({"duration_s": 15.5}, "invalid_duration"),
         ({"duration_s": 0}, "invalid_duration"),
         ({"duration_s": 8, "fade_in_s": 0.05}, "invalid_fade_in"),
         ({"duration_s": 8, "fade_in_s": 0.5}, "invalid_fade_in"),

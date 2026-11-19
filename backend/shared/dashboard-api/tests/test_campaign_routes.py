@@ -656,3 +656,24 @@ def test_bad_category_or_format_stops_before_marketing(
 ) -> None:
     assert client.post("/api/dashboard/campaigns/start", json=bad).status_code == 422
     assert fake.calls == []
+
+
+def test_brief_media_passes_only_a_valid_duration_with_its_own_key(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outcome = None
+    plain = client.post(BRIEF_MEDIA)
+    long = client.post(BRIEF_MEDIA, json={"duration_s": 45})
+    assert plain.status_code == long.status_code == 200
+    assert fake.calls[0][1].input == {"proposal_id": "PROP-5"}
+    assert fake.calls[1][1].input == {"proposal_id": "PROP-5", "duration_s": 45}
+    assert fake.calls[0][1].meta.idempotency_key != fake.calls[1][1].meta.idempotency_key
+    for bad in (
+        0,
+        91,
+        12.5,
+        "30",
+        True,
+    ):  # 코드 절대 상한(90초) 밖·숫자가 아닌 값은 서버에 닿기 전에 거절
+        assert client.post(BRIEF_MEDIA, json={"duration_s": bad}).status_code == 422
+    assert len(fake.calls) == 2

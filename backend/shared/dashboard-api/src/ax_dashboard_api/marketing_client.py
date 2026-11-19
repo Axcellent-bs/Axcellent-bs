@@ -145,17 +145,23 @@ def brief_media_context(proposal_id: str) -> str:
     return f"brfm_{proposal_id}"
 
 
-async def brief_media_call(proposal_id: str) -> dict[str, Any]:
+async def brief_media_call(proposal_id: str, duration_s: int | None = None) -> dict[str, Any]:
     """넘긴 기획안의 요청 초안으로 미디어 초안을 만든다(`prepare_brief_media`). 게시하지 않는다.
 
     종류·필드는 보내지 않는다(마케팅이 보관본에서 읽는다). 같은 기획안은 키가 같고, 마케팅이
     생성 장부로 중복 생성을 막는다. 영상 생성이 길어 마감은 영상 준비와 같다.
+    `duration_s`: 사람이 고른 영상 길이(설정 상한 안인지는 마케팅이 판정). 길이마다 키가 다르다.
     """
+    payload: dict[str, Any] = {"proposal_id": proposal_id}
+    key = f"ui:brief-media:{proposal_id}"
+    if duration_s is not None:
+        payload["duration_s"] = duration_s
+        key += f":{duration_s}"
     out = await call(
         "prepare_brief_media",
-        {"proposal_id": proposal_id},
+        payload,
         campaign_id=brief_media_context(proposal_id),
-        key=f"ui:brief-media:{proposal_id}",
+        key=key,
         deadline_s=video_timeout_s(),
     )
     if out["status"] == TaskStatus.FAILED.value and out["outcome"] in BRIEF_MEDIA_FAILURES:

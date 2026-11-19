@@ -17,6 +17,20 @@ export interface MediaEstimate {
   per_item_limit_krw: number | null;
   monthly_budget_krw: number | null;
   month_total_krw: number | null;
+  /** 영상만. 길이 입력용: 상한은 운영자가 서버 설정(MARKETING_VIDEO_MAX_DURATION_S)으로 정한 값이다 */
+  video?: VideoEstimate | null;
+}
+
+export interface VideoEstimate {
+  min_s: number;
+  /** 운영자가 정한 길이 상한(초). 서버 설정값 */
+  max_s: number;
+  /** 코드의 절대 상한(초). 설정은 이 값을 넘을 수 없다 */
+  absolute_max_s: number;
+  /** 지금 요청 초안의 길이(초) */
+  current_s: number | null;
+  /** 길이(초) → 예상 비용(원). 서버가 단가표로 계산한 값이고, 만들 수 없는 길이는 없다 */
+  cost_by_duration: Record<string, number>;
 }
 
 /** 지금 요청 초안으로 만든 미디어 초안(AI 표시를 입히고 검사까지 한 결과) */
@@ -52,6 +66,10 @@ const BLOCK_KO: Record<string, string> = {
   bgm_fields_required: "서버가 배경음 모드라 영상에 배경음 설정이 필요합니다. 이 화면에서는 아직 정할 수 없습니다.",
   unknown_media_kind: "미디어 종류를 알 수 없습니다. 받은 기획안 탭에서 종류를 다시 저장해 주세요.",
   cost_over_single: "예상 비용이 건당 상한을 넘어 만들 수 없습니다.",
+  video_max_duration_invalid: "서버의 영상 길이 상한 설정(MARKETING_VIDEO_MAX_DURATION_S)이 1~90초 숫자가 아니라 만들 수 없습니다. 운영자가 설정을 고쳐야 합니다.",
+  duration_over_limit: "고른 길이가 운영자가 정한 영상 길이 상한을 넘어 만들 수 없습니다.",
+  duration_under_min: "고른 길이가 공급자의 최소 길이보다 짧아 만들 수 없습니다.",
+  long_video_unsupported: "이 영상 공급자는 한 번에 만들 수 있는 길이를 넘는 영상을 이어 붙일 수 없어 만들 수 없습니다. 더 짧은 길이를 고르세요.",
   budget_exceeded: "이달 미디어 비용 상한을 넘게 되어 만들 수 없습니다.",
   price_not_found: "단가표에 없는 조합이라 만들 수 없습니다.",
   price_table_error: "단가표를 읽을 수 없어 만들 수 없습니다.",
@@ -95,9 +113,11 @@ const BASIS_KO: Record<string, string> = {
 };
 
 /** 확인 단계에 보여 줄 비용 줄. 서버가 준 값만 쓰고 없는 값은 "읽을 수 없음"으로 둔다 */
-export function estimateLines(e: MediaEstimate): string[] {
+export function estimateLines(e: MediaEstimate, seconds?: number | null): string[] {
   const lines: string[] = [];
-  if (e.cost_krw == null) lines.push("예상 비용을 계산할 수 없습니다.");
+  const chosen = e.video && seconds != null ? durationCostKrw(e.video, seconds) : null;
+  if (chosen != null && !e.settled) lines.push(`영상 ${seconds}초 예상 비용 ${won(chosen)}${e.basis ? ` (${BASIS_KO[e.basis] ?? e.basis})` : ""}`);
+  else if (e.cost_krw == null) lines.push("예상 비용을 계산할 수 없습니다.");
   else if (e.settled) lines.push(`이미 만든 미디어가 있어 다시 만들어도 새 비용이 나지 않습니다 (만들 때 든 비용 ${won(e.cost_krw)}).`);
   else lines.push(`예상 비용 ${won(e.cost_krw)}${e.basis ? ` (${BASIS_KO[e.basis] ?? e.basis})` : ""}`);
   lines.push(e.per_item_limit_krw != null ? `건당 상한 ${won(e.per_item_limit_krw)}` : "건당 상한 설정을 읽을 수 없음");
@@ -105,6 +125,32 @@ export function estimateLines(e: MediaEstimate): string[] {
   lines.push(`${month} / ${e.monthly_budget_krw != null ? `월 상한 ${won(e.monthly_budget_krw)}` : "월 상한 설정을 읽을 수 없음"}`);
   return lines;
 }
+
+/** 고른 길이의 예상 비용(원). 서버 표에 없으면(만들 수 없는 길이) null */
+export function durationCostKrw(v: VideoEstimate, seconds: number): number | null {
+  const cost = v.cost_by_duration[String(seconds)];
+  return typeof cost === "number" ? cost : null;
+}
+
+/** 입력한 길이를 정수로 바꿔 서버가 알려 준 범위(최소~운영자 상한)로 맞춘다. 숫자가 아니면 null */
+export function clampDuration(v: VideoEstimate, raw: number): number | null {
+  if (!Number.isFinite(raw)) return null;
+  return Math.min(v.max_s, Math.max(v.min_s, Math.round(raw)));
+}
+
+/** 이 길이로는 만들 수 없는 이유(서버가 준 비용·상한과 비교). 만들 수 있으면 null */
+export function durationProblemKo(e: MediaEstimate, seconds: number): string | null {
+  if (!e.video || e.settled) return null;
+  const cost = durationCostKrw(e.video, seconds);
+  if (cost == null) return `${seconds}초 길이는 이 공급자로 만들 수 없습니다. 다른 길이를 고르세요.`;
+  if (e.per_item_limit_krw != null && cost > e.per_item_limit_krw) return `${seconds}초는 예상 비용 ${won(cost)}이 건당 상한 ${won(e.per_item_limit_krw)}을 넘어 만들 수 없습니다.`;
+  if (e.monthly_budget_krw != null && e.month_total_krw != null && e.month_total_krw + cost > e.monthly_budget_krw) return `${seconds}초는 이달 비용 상한(${won(e.monthly_budget_krw)})을 넘게 되어 만들 수 없습니다.`;
+  return null;
+}
+
+/** 길이 입력 옆 안내. 상한은 운영자가 정한 값이라는 점을 밝힌다 */
+export const durationNoteKo = (v: VideoEstimate): string =>
+  `영상 길이 상한 ${v.max_s}초는 운영자가 서버 설정(MARKETING_VIDEO_MAX_DURATION_S)으로 정한 값입니다(최대 ${v.absolute_max_s}초까지만 정할 수 있습니다). 공급자가 한 번에 만드는 길이보다 길면 여러 클립을 이어 붙여 만들고, 클립 수만큼 비용이 늘어납니다.`;
 
 export const isReel = (kind: string | null | undefined) => kind === "video" || kind === "reel";
 /** 걸리는 시간 안내(영상은 생성이 길다) */

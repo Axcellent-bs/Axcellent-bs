@@ -156,12 +156,19 @@ const mediaPath = (proposalId: string) => `/api/dashboard/marketing/briefs/${enc
 
 /**
  * 넘긴 기획안의 저장된 미디어 요청(종류·필드)으로 미디어 초안을 만든다(dashboard-api, 사람 토큰 필요).
- * 종류·필드는 보내지 않는다(서버가 보관본에서 읽는다). 게시는 하지 않는다: 게시는 C 등급 사람 승인이다.
+ * 종류·필드는 보내지 않는다(서버가 보관본에서 읽는다). 영상은 길이(`durationS`)만 고를 수 있다. 게시는 하지 않는다: 게시는 C 등급 사람 승인이다.
  * 영상은 1분쯤 걸린다. 오류는 서버 문장 없이 상태 코드만 담아 던진다(문구는 `mediaHttpErrorKo`).
  */
-async function makeMedia(proposalId: string): Promise<BriefMediaAnswer> {
+async function makeMedia(proposalId: string, durationS?: number | null): Promise<BriefMediaAnswer> {
   const path = mediaPath(proposalId);
-  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: dashboardAuth(), cache: "no-store" });
+  // 영상 길이만 보낸다(1~90초 정수). 서버가 운영자 설정 상한 안인지 다시 판정한다
+  const withLength = durationS != null;
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
+    method: "POST",
+    headers: withLength ? { "Content-Type": "application/json", ...dashboardAuth() } : dashboardAuth(),
+    body: withLength ? JSON.stringify({ duration_s: durationS }) : undefined,
+    cache: "no-store",
+  });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as BriefMediaAnswer;

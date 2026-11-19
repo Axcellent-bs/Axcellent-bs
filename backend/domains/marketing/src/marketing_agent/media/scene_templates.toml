@@ -106,7 +106,7 @@ sentence = "A calm flat illustrated scene of a friendly cartoon cat mascot stand
 [template.cat_bookstore_video]
 kind = "video"
 resolution = "720p"
-duration_s = 8
+duration_s = 15
 fields = ["season", "color_theme", "category"]
 sentence = "A short vertical animated clip of a friendly cartoon cat mascot walking through a cozy independent bookstore and pulling a book from a shelf, {season} atmosphere, {color_theme} color palette, a small display themed around {category}.{plan_clause} Gentle camera movement, original character design. No text, no letters, no numbers, no logos, no real people, no real brands, no readable book covers."
 

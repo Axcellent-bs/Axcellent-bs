@@ -48,6 +48,7 @@ from marketing_agent.media.config import MOCK, MediaSettings
 from marketing_agent.media.ledger import LedgerError, MediaLedger
 from marketing_agent.media.prompts import PromptRejected, get_template
 from marketing_agent.media.skill import FromDecision, plan_cost
+from marketing_agent.media.video_limits import ABSOLUTE_MAX_DURATION_S
 from marketing_agent.notice import NoticeStore
 from marketing_agent.sns import SnsStore
 from marketing_agent.sns_prepare import prepare_sns_post_from_media
@@ -59,6 +60,9 @@ PrepareFn = Callable[..., Awaitable[AgentResult]]
 
 class PrepareBriefMediaInput(AxModel):
     proposal_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    # 영상 길이(초). 주면 보관된 요청 초안의 길이를 바꾼다.
+    # 설정 상한(`MARKETING_VIDEO_MAX_DURATION_S`)은 아래에서 따로 본다(넘으면 `duration_over_limit`)
+    duration_s: int | None = Field(default=None, ge=1, le=ABSOLUTE_MAX_DURATION_S, strict=True)
 
 
 def context_id_for(proposal_id: str) -> str:
@@ -77,6 +81,8 @@ def blocked_reason(media: dict, settings: MediaSettings) -> str | None:
         return "fields_missing"
     if kind == "video" and settings.audio_mode == "bgm_overlay":
         return "bgm_fields_required"
+    if kind == "video" and settings.video_max_duration_problem is not None:
+        return settings.video_max_duration_problem
     return None
 
 
@@ -181,6 +187,7 @@ def estimate(
         "per_item_limit_krw": settings.max_cost_krw_per_item,
         "monthly_budget_krw": settings.monthly_budget_krw,
         "month_total_krw": None,
+        "video": None,
     }
     try:
         out["month_total_krw"] = ledger.month_total(datetime.now(UTC).strftime("%Y-%m"))
@@ -190,12 +197,22 @@ def estimate(
     if reason is not None:
         return out | {"reason_code": reason}
     gen_input = {"post_draft_id": media.get("media_ref")} | _generation_fields(media, plan_fields)
+    if kind == "video" and (gen_input.get("duration_s") or 0) > settings.video_max_duration_s:
+        # 상한을 낮춘 뒤라면 상한 길이로 계산해 길이 표를 준다(고르는 값이 아니라 조회용)
+        gen_input["duration_s"] = settings.video_max_duration_s
     plan = plan_cost(
         _inner(request, proposal_id, "generate_media", gen_input, context_id),
         ledger=ledger,
         settings=settings,
         allow_video=True,
+        with_table=True,
     )
+    if kind == "video":
+        current = gen_input.get("duration_s")
+        if not current:  # 길이를 안 정한 요청 초안은 템플릿 길이(설정 상한 안으로)가 기본이다
+            template_s = get_template(str(media.get("scene_template_id"))).duration_s
+            current = min(template_s, settings.video_max_duration_s) if template_s else None
+        out["video"] = _video_info(current, settings, plan)
     if isinstance(plan, AgentResult):
         cost = (plan.output or {}).get("cost_krw")
         return out | {"reason_code": plan.outcome, "cost_krw": cost}
@@ -207,6 +224,21 @@ def estimate(
     if not plan.settled and budget is not None and out["month_total_krw"] + plan.krw_est > budget:
         return out | {"reason_code": "budget_exceeded"}
     return out | {"status": "ok"}
+
+
+def _video_info(current: int | None, settings: MediaSettings, plan: Any) -> dict[str, Any]:
+    """화면의 길이 입력용. 상한은 운영자가 정한 설정값이고 `absolute_max_s`는 코드 절대 상한이다."""
+    if isinstance(plan, AgentResult):  # 건당 상한 초과로 막혀도 다른 길이를 고를 수 있게 표는 준다
+        table = (plan.output or {}).get("by_duration")
+    else:
+        table = plan.by_duration
+    return {
+        "min_s": 1,
+        "max_s": settings.video_max_duration_s,
+        "absolute_max_s": ABSOLUTE_MAX_DURATION_S,
+        "current_s": current,
+        "cost_by_duration": {str(k): v for k, v in (table or {}).items()},
+    }
 
 
 def _failed(request: AgentRequest, outcome: str, **output: Any) -> AgentResult:
@@ -284,6 +316,24 @@ async def prepare_brief_media(
     reason = blocked_reason(media, settings)
     if reason is not None:
         return _failed(request, reason, sns_handoff=_state(record, store))
+    if data.duration_s is not None:
+        if media.get("media_kind") != "video":
+            return _failed(request, "invalid_input", errors=["duration_s: video_only"])
+        if data.duration_s > settings.video_max_duration_s:
+            return _failed(
+                request,
+                "duration_over_limit",
+                duration_s=data.duration_s,
+                limit_s=settings.video_max_duration_s,
+            )
+        if data.duration_s != media.get("duration_s"):
+            # 사람이 고른 길이를 요청 초안에 남긴다(해시·비용 장부 키가 같이 바뀐다)
+            media = media | {"duration_s": data.duration_s}
+            record = record.model_copy(update={"media_request": media})
+            try:
+                briefs.save_handoff(record)
+            except BriefStorageError:
+                return _failed(request, "storage_error")
 
     sha = request_sha(media)
     done = record.prepared if isinstance(record.prepared, dict) else None

@@ -236,8 +236,8 @@ def test_price_table_kling_per_second_and_seedance_blank() -> None:
     )
     assert entry.per_second_usd is not None
     assert str(pricing.estimate_usd(entry, prompt="x", duration_s=5)) == "0.470"
-    with pytest.raises(pricing.PriceNotFound):  # 표의 길이 상한(8초) 초과
-        pricing.estimate_usd(entry, prompt="x", duration_s=9)
+    with pytest.raises(pricing.PriceNotFound):  # 표의 길이 상한(15초) 초과
+        pricing.estimate_usd(entry, prompt="x", duration_s=16)
     for model in ("anything", "dreamina-seedance-2-5-260628"):  # 가격 없음 → 차단
         with pytest.raises(pricing.PriceNotFound):
             pricing.find_entry(
