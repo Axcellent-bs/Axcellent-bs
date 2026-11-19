@@ -48,6 +48,7 @@ from ax_contracts.schemas import (
 from ax_contracts.schemas.common import AxModel
 from marketing_agent import sns_media
 from marketing_agent.sns_publish.config import LimitsConfigError, SnsConfig
+from marketing_agent.sns_publish.control import PublishControlError, read_control
 from marketing_agent.sns_publish.instagram import (
     HALT_FAILURES,
     AdapterUnavailable,
@@ -141,6 +142,9 @@ class PublishSnsOutput(AxModel):
     config_issue: str | None = None
     reconcile_needed: bool | None = None
     limit_check_failed: bool | None = None  # 계정 한도 조회 실패(로컬 기록만으로 판단)
+    pause_reason: str | None = None  # `publish_paused`일 때 사람이 적은 사유
+    auto_publish_off: bool | None = None  # 자동 게시 스위치가 꺼져 있다(`publish_paused`)
+    manual_available: bool | None = None  # 수동 게시 가능 여부. 지금은 false(후속 PR에서 true)
 
 
 # -- 내용 해시·멱등 키
@@ -332,6 +336,9 @@ def _output(row: PendingPost) -> dict[str, Any]:
         config_issue=info.get("config_issue"),
         reconcile_needed=info.get("reconcile_needed"),
         limit_check_failed=info.get("limit_check_failed"),
+        pause_reason=info.get("pause_reason"),
+        auto_publish_off=info.get("auto_publish_off"),
+        manual_available=info.get("manual_available"),
     ).model_dump(exclude_none=True)
 
 
@@ -1076,6 +1083,26 @@ def _halted() -> bool:
     return cleared is None or latest[1] > cleared
 
 
+def _paused() -> dict[str, Any] | None:
+    """`publish_paused`: 사람이 자동 게시 스위치를 껐다.
+
+    수동 게시는 후속 PR이다. 중지가 아니면 None, 사유는 표시용.
+
+    매 호출마다 DB를 읽으므로 재시작 없이 반영된다. halt 기록은 남기지 않는다(풀기도 사람이 한다).
+    DB를 읽을 수 없으면 `PublishControlError`(fail-closed).
+    """
+    try:
+        control = read_control(store())
+    except PendingStorageError:
+        raise PublishControlError("publish_control_unreadable") from None
+    if not control.paused:
+        return None
+    flags: dict[str, Any] = {"auto_publish_off": True, "manual_available": False}
+    if control.reason:
+        flags["pause_reason"] = control.reason
+    return flags
+
+
 async def _limit_check(adapter: InstagramAdapter) -> tuple[str | None, dict[str, Any]]:
     """24시간 게시 상한. (거절 코드 또는 None, 결과에 남길 표시).
 
@@ -1104,11 +1131,16 @@ async def _limit_check(adapter: InstagramAdapter) -> tuple[str | None, dict[str,
 async def _pre_gate(adapter: InstagramAdapter) -> tuple[str | None, dict[str, Any]]:
     """승인 요청 전 점검: 중단 상태, 24시간 상한."""
     try:
+        paused = _paused()
+        if paused is not None:
+            return "publish_paused", paused
         if _halted():
             return "publish_halted", {}
         return await _limit_check(adapter)
     except LimitsConfigError:
         return "limits_config_error", {}
+    except PublishControlError:
+        return "publish_control_error", {}
 
 
 async def _run_publish(row: PendingPost) -> None:
@@ -1124,6 +1156,9 @@ async def _run_publish(row: PendingPost) -> None:
     store().update(key, attempts=row.attempts + 1)
     flags: dict[str, Any] = {}
     try:
+        if (paused := _paused()) is not None:
+            flags = paused
+            raise _Fail("publish_paused")
         if _halted():
             raise _Fail("publish_halted")
         container_id = await _prepare_container(row, adapter)
@@ -1132,6 +1167,9 @@ async def _run_publish(row: PendingPost) -> None:
             raise _Fail(refused)
         if _halted():
             raise _Fail("publish_halted")
+        if (paused := _paused()) is not None:  # 승인·컨테이너 준비 사이에 멈췄을 수 있다
+            flags = paused
+            raise _Fail("publish_paused")
         media_id, config_issue = await _publish_once(row, adapter, container_id)
     except (_Fail, _NewContainer) as failure:
         if failure.code in HALT_FAILURES:
@@ -1140,6 +1178,9 @@ async def _run_publish(row: PendingPost) -> None:
         return
     except LimitsConfigError:
         _close(row, PUBLISHING, FAILED, "limits_config_error")
+        return
+    except PublishControlError:
+        _close(row, PUBLISHING, FAILED, "publish_control_error")
         return
     except Exception as error:  # noqa: BLE001
         _row_log(row, "sns_publish_attempt", {"op": "unexpected", "error": type(error).__name__})

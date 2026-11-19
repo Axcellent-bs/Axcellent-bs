@@ -53,6 +53,7 @@ ACTION_KO = {
     "confirm_settlement": "판매자 정산 지급",
     "publish_notice": "공지 올리기",
     "publish_sns": "SNS 게시",
+    "set_publish_control": "자동 게시 켜기·끄기",
     "generate_media": "이미지·영상 만들기",
     "start_campaign": "캠페인 집행",
     "rollback_deployment": "배포 되돌리기",

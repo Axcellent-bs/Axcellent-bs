@@ -4,6 +4,7 @@
 - 점 경로 `contact.name`: 그 값 (값이 null이면 None, 경로가 없으면 `MissingField`)
 - `sum:a,b`: 정수 칸들의 합 (null은 0)
 - `const:<값>`: 그 글자 그대로
+- `first:a,b`: 비어 있지 않은 첫 값 (모두 비면 None, 경로가 하나도 없으면 `MissingField`)
 """
 
 from __future__ import annotations
@@ -42,6 +43,17 @@ class Paging(BaseModel):
     limit: int = 200
 
 
+class ItemsMap(BaseModel):
+    """주문 줄 목록 짝. `path`는 주문 안의 목록 칸.
+
+    `fields`는 줄마다의 product_id·qty·unit_price·paid_amount.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    fields: dict[str, str]
+
+
 class ResourceMap(BaseModel):
     model_config = ConfigDict(extra="forbid")
     path: str
@@ -63,6 +75,9 @@ class ResourceMap(BaseModel):
     paging: Paging = Paging()
     fields: dict[str, str]
     values: dict[str, dict[str, str]] = {}
+    # 주문 한 건에 상품이 여러 개인 사이트: 주문 줄 목록과 줄마다의 짝
+    # (없으면 주문 한 건 = 상품 하나)
+    items: ItemsMap | None = None
 
 
 class SiteMapping(BaseModel):
@@ -99,6 +114,19 @@ def pick(row: dict[str, Any], expr: str) -> Any:
         return expr[len("const:") :]
     if expr.startswith("sum:"):
         return sum(int(pick(row, part.strip()) or 0) for part in expr[len("sum:") :].split(","))
+    if expr.startswith("first:"):
+        found = False
+        for part in expr[len("first:") :].split(","):
+            try:
+                value = pick(row, part.strip())
+            except MissingField:
+                continue
+            found = True
+            if value not in (None, ""):
+                return value
+        if not found:
+            raise MissingField(expr)
+        return None
     value: Any = row
     for key in expr.split("."):
         if not isinstance(value, dict) or key not in value:

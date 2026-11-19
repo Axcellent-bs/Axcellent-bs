@@ -27,7 +27,7 @@ SYNONYMS: dict[Resource, dict[str, tuple[str, ...]]] = {
         ),
         "product_id": ("product_id", "product_code", "tour_code", "goods_id", "item_id", "sku"),
         "qty": ("qty", "quantity", "count", "headcount", "people", "persons"),
-        "total_amount": ("total_amount", "total_price", "total", "amount"),
+        "total_amount": ("total_amount", "total_price", "payable", "total", "amount"),
         "paid_amount": ("paid_amount", "amount_paid", "paid", "payment_amount"),
     },
     "products": {
@@ -40,7 +40,10 @@ SYNONYMS: dict[Resource, dict[str, tuple[str, ...]]] = {
 }
 # 찾았을 때만 넣는 칸
 OPTIONAL: dict[Resource, dict[str, tuple[str, ...]]] = {
-    "orders": {"updated_at": ("updated_at", "modified_at", "updated")},
+    "orders": {
+        "updated_at": ("updated_at", "modified_at", "updated"),
+        "refunded_amount": ("refunded_amount", "refund_amount", "refunded"),
+    },
     "products": {},
 }
 # 인원 칸이 따로 있으면 더한다(누비투어 예약: 성인 + 아동)
@@ -49,6 +52,7 @@ HEAD_PARTS = ("adults", "children")
 # 상태 낱말 → shop-api 주문 상태. 위에서부터 처음 맞는 것
 STATUS_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("cancel_request", "cancelrequest", "cancel_requested"), "paid"),  # 취소 신청은 아직 결제 상태
+    (("partial",), "paid"),  # 부분 환불은 아직 결제 상태(남은 금액은 결제됨)
     (("cancel", "expire", "refund", "void", "fail"), "cancelled"),
     # 부정 낱말(un·not·in-)은 결제 낱말보다 먼저 본다(unconfirmed·not_paid·incomplete)
     (("pending", "wait", "await", "ready", "un", "not", "incomplete"), "pending_payment"),
@@ -115,3 +119,46 @@ def statuses(values: list[str]) -> dict[str, str]:
         low = value.lower()
         out[value] = next((to for words, to in STATUS_RULES if any(w in low for w in words)), "")
     return out
+
+
+# 주문 줄(목록 칸) 안에서 찾을 이름
+LINE_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "product_id": (
+        "product_id",
+        "product_code",
+        "course_code",
+        "bundle_code",
+        "item_code",
+        "goods_id",
+        "sku",
+        "item_id",
+    ),
+    "qty": ("qty", "quantity", "count"),
+    "unit_price": ("unit_price", "price", "sale_price"),
+    "paid_amount": ("paid_amount", "amount_paid", "paid", "amount"),
+}
+
+
+def order_items(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """주문 안에 줄 목록(객체 목록) 칸이 있으면 줄 짝을 제안한다.
+
+    없으면 None(주문 한 건 = 상품 하나).
+    """
+    for row in rows:
+        for key, value in row.items():
+            lines = [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+            if not lines:
+                continue
+            paths = _paths(lines)
+            ids = [paths[_norm(n)] for n in LINE_SYNONYMS["product_id"] if _norm(n) in paths]
+            if not ids:
+                continue
+            product = ids[0] if len(ids) == 1 else "first:" + ",".join(ids[:2])
+            fields = {
+                "product_id": product,
+                "qty": _first(paths, LINE_SYNONYMS["qty"]) or "const:1",
+                "unit_price": _first(paths, LINE_SYNONYMS["unit_price"]),
+                "paid_amount": _first(paths, LINE_SYNONYMS["paid_amount"]),
+            }
+            return {"path": key, "fields": {k: v for k, v in fields.items() if v}}
+    return None

@@ -17,6 +17,8 @@ const LABEL: Record<SiteResource, Record<string, string>> = {
   products: { product_id: '상품 번호', name: '상품 이름', price: '가격', category_code: '분류', active: '판매 중' },
 }
 const RES_NAME: Record<SiteResource, string> = { orders: '주문', products: '상품' }
+// 주문 한 건에 상품이 여러 개인 사이트의 주문 줄 칸
+const LINE_LABEL: Record<string, string> = { product_id: '상품', qty: '수량', unit_price: '단가', paid_amount: '결제액' }
 const STATUS: { value: string; label: string }[] = [
   { value: '', label: '정하지 않음' },
   { value: 'pending_payment', label: '결제 전' },
@@ -88,6 +90,12 @@ export default function SiteAdapterConnect({ onState, tenant }: { onState?: (s: 
 
   const setField = (res: SiteResource, name: string, expr: string) =>
     setMapping((m) => m && { ...m, resources: { ...m.resources, [res]: { ...m.resources[res], fields: { ...m.resources[res].fields, [name]: expr } } } })
+  const setLine = (name: string, expr: string) =>
+    setMapping((m) => {
+      const lines = m?.resources.orders.items
+      if (!m || !lines) return m
+      return { ...m, resources: { ...m.resources, orders: { ...m.resources.orders, items: { ...lines, fields: { ...lines.fields, [name]: expr } } } } }
+    })
   const setStatus = (raw: string, to: string) =>
     setMapping((m) => {
       if (!m) return m
@@ -98,8 +106,9 @@ export default function SiteAdapterConnect({ onState, tenant }: { onState?: (s: 
   const canWrite = HUMAN_TOKEN_SET && state !== null
   // 빈 칸 이름: orders.qty → "주문 수량", orders.status=x → "주문 상태 x"
   const blanks = (mapping ? unfilled(mapping) : []).map((key) => {
-    const [res, rest] = key.split('.') as [SiteResource, string]
+    const [res, rest, sub] = key.split('.') as [SiteResource, string, string | undefined]
     if (rest.startsWith('status=')) return `주문 상태 ${rest.slice('status='.length)}`
+    if (rest === 'items' && sub) return `주문 줄 ${LINE_LABEL[sub] ?? sub}`
     return `${RES_NAME[res]} ${LABEL[res][rest] ?? rest}`
   })
   const linked = state?.connection?.kind === 'adapter'
@@ -184,6 +193,25 @@ export default function SiteAdapterConnect({ onState, tenant }: { onState?: (s: 
               </tbody>
             </table>
           ))}
+          {mapping.resources.orders.items && (
+            <table className="w-full text-sm" aria-label="주문 줄 짝">
+              <caption className="pb-1 text-left text-xs text-ink-500">주문 줄 · 주문 한 건에 상품이 여러 개 · <span className="font-mono">{mapping.resources.orders.items.path}</span></caption>
+              <tbody>
+                {Object.keys(LINE_LABEL).map((name) => {
+                  const expr = mapping.resources.orders.items?.fields[name] ?? ''
+                  return (
+                    <tr key={name} className="border-t border-ink-100">
+                      <td className="py-1.5 pr-2">{LINE_LABEL[name]}</td>
+                      <td className="py-1.5">
+                        <input aria-label={`주문 줄 ${LINE_LABEL[name]} 사이트 칸`} className={`field w-full font-mono ${expr.trim() || name === 'qty' || name === 'unit_price' ? '' : 'border-amber-700'}`}
+                          value={expr} placeholder={name === 'qty' ? '없으면 1' : name === 'unit_price' ? '없으면 결제액 ÷ 수량' : '정해 주세요'} onChange={(e) => setLine(name, e.target.value)} />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
           {Object.keys(mapping.resources.orders.values?.status ?? {}).length > 0 && (
             <table className="w-full text-sm" aria-label="주문 상태 짝">
               <caption className="pb-1 text-left text-xs text-ink-500">주문 상태 · 첫 쪽에 나온 값</caption>
