@@ -4,9 +4,12 @@
 1. search: 키워드마다 최근 7일 평균 ÷ 직전 28일 평균 − 1(%). 네이버 검색어 트렌드(연령·성별 필터,
    키워드 5개를 한 요청으로)와 쇼핑인사이트 키워드 연령별(키워드마다 1번, 타깃 연령 group만, 성별
    필터)을 따로. 네이버 전체 하루 상한·trend_age 예산 표를 같이 쓴다(호출자 `trend_report`).
-   한도면 그 키워드만 "확인 안 함(한도)"
+   한도면 그 키워드만 "확인 안 함(한도)". 검색은 ① 필터 → ② 전체 → ③ 검색광고 월 검색량만으로
+   대체하고 행 basis에 남긴다. 직전 28일 평균 < 2.0이거나 0인 날이 절반 이상이면 small_base.
+   쇼핑은 값이 있는 마지막 날까지 7일로 세고, 비면 요청 오류 / 분야에 없는 키워드 / 값이 너무 적음
 2. hashtags: 의뢰 계정 캡션의 해시태그(trend_memes `units_of`)마다 이번 7일·직전 7일에 쓴 계정 수와
-   이번 7일 터진(instagram `bursts` 기준) 게시물 수. 이번 7일 3곳 이상, 상위 10개
+   이번 7일 터진(instagram `bursts` 기준) 게시물 수. 이번 7일 3곳 이상, 상위 10개.
+   표기용 태그(`HIDDEN_TAGS`)는 세지 않고 매거진(프리셋 `media_accounts`)은 쓴 계정에서 뺀다
 3. content: 의뢰 계정의 터진 게시물 상위 8개(배수 순, 썸네일·standout) + trend_memes 저장 결과 중
    광고 재료 "ok" 3개
 4. competitors: 경쟁사마다 주당 게시 수(최근 20개 기간), 릴스 비율, 릴스 조회수 중앙값, 최고 게시물
@@ -39,17 +42,21 @@ from ax_contracts.schemas.data import (
     TrendBeat,
     TrendCompetitorRow,
     TrendCompetitorSection,
+    TrendCompetitorTrait,
     TrendContentSection,
     TrendHashtagRow,
     TrendHashtagSection,
+    TrendLimitGroups,
     TrendRecommendationSection,
     TrendReport,
     TrendReportBrief,
+    TrendReportEvidence,
     TrendReportMeme,
     TrendSearchRow,
     TrendSearchSection,
 )
 from data_agent import instagram_store as st
+from data_agent.skills import caption_noise
 from data_agent.skills import trend_report_brief as tb
 
 KST = timezone(timedelta(hours=9))
@@ -70,18 +77,32 @@ WEEK = timedelta(days=7)
 CAPPED = "확인 안 함(한도)"
 IG_CAPPED = "못 읽음(한도)"
 NO_DATA = "네이버가 값을 주지 않음 (검색량이 적음)"
+SMALL_BASE = 2.0  # 직전 28일 평균이 이보다 작으면 변화율을 "급증(기준값 작음)"으로
+SHOP_EXTRA_DAYS = 7  # 쇼핑인사이트 늦게 채워짐 대비: 이만큼 더 앞부터 받아 창 끝을 당긴다
+# 해시태그 "쓴 계정 수"에서 빼는 표기용 태그 (인스타 레이더 묶음과 같은 상수, caption_noise)
+HIDDEN_TAGS = caption_noise.HIDDEN_TAGS
+NO_SHARED_TAG = "뷰티 계정이 같이 쓴 태그 없음"
+MAX_USED_BY = 5
+SHORT_MAX = 30
 MUSIC_NOTE = "저작권 문제없는 라이브러리 음원 중 선택"
 BEAT_SLOTS = ("0-3", "3-15", "15-25", "25-30")
 STOP_CODES = frozenset({"RATE_LIMITED", "KEY_MISSING", "TOKEN_EXPIRED"})
-FIXED_LIMITS = (
+# 근거와 한계 (limit_groups). limits에는 METHOD → CANNOT_SEE → 이번 보고서 순으로 모두 넣는다
+METHOD_LIMITS = (
     "숫자는 전부 코드가 계산했고, AI는 결론 한 줄과 콘티 문장만 썼다(숫자 없이)",
-    "네이버 값은 요청 안의 상대값(최댓값 100)이라 키워드끼리 크기는 비교하지 않고 변화율만 본다",
-    "인스타는 공식 API(business_discovery)로 프로페셔널 계정의 최근 게시물 20개만 본다."
-    " 개인 계정·해시태그 전체 게시물·게시물에 쓴 오디오는 볼 수 없다",
-    "터짐 = 그 계정 최근 20개(릴스는 조회수, 아니면 좋아요) 중앙값의 2.5배 이상이고"
-    " 7일 안에 올린 것",
-    "음악은 추천하지 않는다 (인기 오디오는 메타가 추천하는 음원 목록이라 근거가 아님)",
+    "검색·쇼핑은 최근 7일 평균 ÷ 직전 28일 평균 − 1. 네이버 값은 요청 안의 상대값(최댓값 100)이라"
+    " 키워드끼리 크기는 비교하지 않는다",
+    "터짐 = 같은 지표끼리 그 계정 최근 20개 중앙값의 2.5배 이상이고 7일 안에 올린 것"
+    " (릴스는 릴스 조회수끼리, 그 밖은 좋아요끼리. 릴스 조회수가 3개 미만이면 좋아요로)",
 )
+CANNOT_SEE_LIMITS = (
+    "인스타는 공식 API(business_discovery)로 프로페셔널 계정의 최근 게시물 20개만 본다."
+    " 개인 계정·해시태그 전체 게시물은 볼 수 없다 (해시태그 검색은 앱 검수 전)",
+    "음악·시청자 나이·성별은 볼 수 없다. 음악은 추천하지 않는다"
+    " (인기 오디오는 메타가 추천하는 음원 목록이라 근거가 아님)",
+    "경쟁사 영상 안쪽(장면·자막)과 유료 광고 집행은 볼 수 없다",
+)
+FIXED_LIMITS = METHOD_LIMITS + CANNOT_SEE_LIMITS
 
 
 def kst_day(now: datetime) -> date:
@@ -91,20 +112,42 @@ def kst_day(now: datetime) -> date:
 # ---------------------------------------------------------------- 1. 검색·쇼핑
 
 
-def change_pct(points: Sequence[tuple[date, float]], end: date) -> tuple[float | None, str | None]:
-    """최근 7일 평균 ÷ 직전 28일 평균 − 1 (%). 값이 빠진 날은 빠진 채로 (0으로 채우지 않음)."""
-    if not points:
-        return None, NO_DATA
+def _windows(points: Sequence[tuple[date, float]], end: date) -> tuple[list[float], list[float]]:
     recent_from = end - timedelta(days=RECENT_DAYS - 1)
     prior_from = recent_from - timedelta(days=PRIOR_DAYS)
     recent = [v for d, v in points if recent_from <= d <= end]
     prior = [v for d, v in points if prior_from <= d < recent_from]
+    return recent, prior
+
+
+def change_pct(points: Sequence[tuple[date, float]], end: date) -> tuple[float | None, str | None]:
+    """최근 7일 평균 ÷ 직전 28일 평균 − 1 (%). 값이 빠진 날은 빠진 채로 (0으로 채우지 않음)."""
+    if not points:
+        return None, NO_DATA
+    recent, prior = _windows(points, end)
     if not recent or not prior:
         return None, "최근 7일 또는 직전 28일 값이 비어 있음"
     base = statistics.fmean(prior)
     if base <= 0:
         return None, "직전 28일 값이 0이라 변화율을 셀 수 없음"
     return round((statistics.fmean(recent) / base - 1) * 100, 1), None
+
+
+def small_base(points: Sequence[tuple[date, float]], end: date) -> bool:
+    """기준값이 작아 변화율이 쉽게 터지는 경우: 직전 28일 평균 < 2.0(네이버 상대값)이거나
+    35일 중 값이 0인 날이 절반 이상."""
+    recent, prior = _windows(points, end)
+    if not prior:
+        return False
+    days = recent + prior
+    zeros = sum(1 for v in days if v <= 0)
+    return statistics.fmean(prior) < SMALL_BASE or zeros * 2 >= len(days)
+
+
+def last_value_day(points: Sequence[tuple[date, float]]) -> date | None:
+    """응답에 값(0보다 큼)이 있는 마지막 날. 쇼핑인사이트는 하루 이상 늦게 채워질 수 있다."""
+    days = [d for d, v in points if v > 0]
+    return max(days) if days else None
 
 
 def _calls_diff(connector: Any, before: Any) -> int:
@@ -133,8 +176,15 @@ async def search_section(
     now: datetime,
     *,
     age_store: Any = None,
+    searchad: Any = None,
+    pool_path: Any = None,
 ) -> tuple[TrendSearchSection, int, list[str]]:
-    """(섹션, 네이버 호출 수, 한계 문장)."""
+    """(섹션, 네이버 호출 수, 한계 문장).
+
+    키워드마다 단계별로 대체한다(새 예산 없이 기존 하루 한도 안에서): ① 연령·성별 필터 검색어
+    트렌드 → ② 값이 없으면 필터 없이(전체) → ③ 그래도 없으면 검색광고 월 검색량만.
+    행의 basis에 어느 단계 값인지 남긴다. 월 검색량은 있으면 모든 행에 채운다.
+    """
     from ax_contracts.schemas.data import TrendKeywordGroup, TrendScanInput
     from data_agent.connectors import ConnectorUnavailable
     from data_agent.skills import trend_age
@@ -158,8 +208,38 @@ async def search_section(
     def cap(connector: Any) -> bool:
         return trend_age._cap_reason(store, today, 1, CALLER, config, connector) is not None  # noqa: SLF001
 
+    filtered = bool(codes or brief.target_gender)
+
+    async def trend(keywords: Sequence[str], *, with_filter: bool) -> dict[str, Any] | str:
+        """검색어 트렌드 한 요청 (키워드마다 그룹 하나). {키워드: points} 또는 실패 이유."""
+        nonlocal calls
+        groups = [TrendKeywordGroup(group_name=kw, keywords=[kw]) for kw in keywords]
+        query = TrendScanInput(keyword_groups=groups, start_date=start, end_date=end,
+                               ages=(codes or None) if with_filter else None,
+                               gender=brief.target_gender if with_filter else None)  # fmt: skip
+        before = getattr(search, "calls_today", None)
+        try:
+            response = await search.search_trend(query)
+        except ConnectorUnavailable as error:
+            return CAPPED if error.code == "RATE_LIMITED" else (
+                f"네이버 검색어 트렌드를 읽지 못함 [{error.code}]")  # fmt: skip
+        finally:
+            used = _calls_diff(search, before)
+            store.add_calls(today, used, CALLER)
+            calls += used
+        return {s.group_name: s.points for s in response.series if s.group_name in rows}
+
+    def take(r: TrendSearchRow, points: Any, basis: str) -> bool:
+        pct, why = change_pct(points or (), end)
+        if pct is None:
+            r.search_reason = r.search_reason or why
+            return False
+        r.search_change_pct, r.search_reason = pct, None
+        r.basis, r.small_base = basis, small_base(points, end)  # type: ignore[assignment]
+        return True
+
     try:
-        # 검색어 트렌드: 키워드마다 그룹 하나 (그룹마다 자기 추이만 보니 한 요청으로 받아도 된다)
+        # ① 연령·성별 필터로 검색어 트렌드 (그룹마다 자기 추이만 보니 한 요청으로 받아도 된다)
         if search is None:
             for r in rows.values():
                 r.search_reason = "네이버 검색어 트렌드 커넥터가 없음"
@@ -167,28 +247,36 @@ async def search_section(
             for r in rows.values():
                 r.search_reason = CAPPED
         else:
-            groups = [TrendKeywordGroup(group_name=kw, keywords=[kw]) for kw in rows]
-            query = TrendScanInput(keyword_groups=groups, start_date=start, end_date=end,
-                                   ages=codes or None, gender=brief.target_gender)  # fmt: skip
-            before = getattr(search, "calls_today", None)
-            try:
-                response = await search.search_trend(query)
-            except ConnectorUnavailable as error:
-                why = CAPPED if error.code == "RATE_LIMITED" else (
-                    f"네이버 검색어 트렌드를 읽지 못함 [{error.code}]")  # fmt: skip
-                for r in rows.values():
-                    r.search_reason = why
-            else:
-                for series in response.series:
-                    if series.group_name in rows:
-                        pct, why = change_pct(series.points, end)
-                        rows[series.group_name].search_change_pct = pct
-                        rows[series.group_name].search_reason = why
-            used = _calls_diff(search, before)
-            store.add_calls(today, used, CALLER)
-            calls += used
-        # 쇼핑인사이트: 키워드마다 1번, 타깃 연령 group만 합산
+            got = await trend(list(rows), with_filter=True)
+            for kw, r in rows.items():
+                if isinstance(got, str):
+                    r.search_reason = got
+                else:
+                    take(r, got.get(kw), "filtered")
+            # ② 필터로 값이 없는 키워드만 필터 없이(전체) 한 번 더
+            empty = [kw for kw, r in rows.items() if r.search_change_pct is None
+                     and r.search_reason != CAPPED and not isinstance(got, str)]  # fmt: skip
+            if filtered and empty and not cap(search):
+                again = await trend(empty, with_filter=False)
+                note = f"{tb.target_word(brief)}로 거르면 값이 없음 → 전체 기준"
+                for kw in empty:
+                    if not isinstance(again, str) and take(rows[kw], again.get(kw), "all"):
+                        rows[kw].search_reason = note
+        # ③ 월 검색량 (검색광고 키워드 도구, 그날 keyword_pool 값이 있으면 재사용)
+        volumes, used = await monthly_volumes(list(rows), searchad, pool_path, today)
+        calls += used
+        for kw, r in rows.items():
+            r.monthly_volume = volumes.get(kw)
+            if r.search_change_pct is None:
+                if r.monthly_volume is not None:
+                    r.basis = "volume_only"
+                    r.search_reason = f"검색어 트렌드 값 없음 ({r.search_reason}) → 월 검색량만"
+                else:
+                    r.basis = "none"
+        # 쇼핑인사이트: 키워드마다 1번, 타깃 연령 group만 합산. 창 끝 = 값이 있는 마지막 날
         wanted = tb.shopping_groups(brief.target_ages)
+        shop_start = start - timedelta(days=SHOP_EXTRA_DAYS)
+        lagged: list[date] = []
         for kw, r in rows.items():
             if shopping is None:
                 r.shopping_reason = "네이버 쇼핑인사이트 커넥터가 없음"
@@ -201,11 +289,11 @@ async def search_section(
                 continue
             before = getattr(shopping, "calls_today", None)
             try:
-                by_group = await shopping.keyword_age(cid, kw, start, end,
+                by_group = await shopping.keyword_age(cid, kw, shop_start, end,
                                                       gender=brief.target_gender)  # fmt: skip
             except ConnectorUnavailable as error:
                 r.shopping_reason = CAPPED if error.code == "RATE_LIMITED" else (
-                    f"네이버 쇼핑인사이트를 읽지 못함 [{error.code}]")  # fmt: skip
+                    f"요청 오류 [{error.code}]: {error}")  # fmt: skip
                 if error.code in ("UNAUTHORIZED", "REPLAY_MISS"):
                     for rest in list(rows.values())[list(rows).index(kw) + 1 :]:
                         rest.shopping_reason = r.shopping_reason
@@ -214,14 +302,12 @@ async def search_section(
                     calls += used
                     break
             else:
-                summed: dict[date, float] = {}
-                for group, points in by_group.items():
-                    if wanted and group not in wanted:
-                        continue
-                    for d, v in points:
-                        summed[d] = summed.get(d, 0.0) + v
-                pct, why = change_pct(sorted(summed.items()), end)
-                r.shopping_change_pct, r.shopping_reason = pct, why
+                r.shopping_change_pct, r.shopping_reason, last = shopping_change(by_group, wanted,
+                                                                                brief)  # fmt: skip
+                if r.shopping_change_pct is not None and last is not None:
+                    r.shopping_small_base = small_base(_summed(by_group, wanted), last)
+                    if last < end:
+                        lagged.append(last)
             used = _calls_diff(shopping, before)
             store.add_calls(today, used, CALLER)
             calls += used
@@ -230,7 +316,7 @@ async def search_section(
             store.close()
     out.rows = list(rows.values())
     known = any(r.search_change_pct is not None or r.shopping_change_pct is not None
-                for r in out.rows)  # fmt: skip
+                or r.monthly_volume is not None for r in out.rows)  # fmt: skip
     if known:
         out.status = "known"
     else:
@@ -238,7 +324,86 @@ async def search_section(
         out.status, out.reason = "unknown", first or "검색·쇼핑 값을 하나도 얻지 못함"
     if any(CAPPED in (r.search_reason or "", r.shopping_reason or "") for r in out.rows):
         limits.append("네이버 하루 상한(trend_age 예산 표 공유)에 닿아 일부 키워드는 확인 안 함")
+    if lagged:
+        limits.append(f"쇼핑인사이트 값이 {min(lagged):%m-%d}까지만 있어 그날까지 7일로 셈")
     return out, calls, limits
+
+
+def _summed(by_group: Mapping[str, Sequence[tuple[date, float]]],
+            wanted: Sequence[str]) -> list[tuple[date, float]]:  # fmt: skip
+    summed: dict[date, float] = {}
+    for group, points in by_group.items():
+        if wanted and group not in wanted:
+            continue
+        for d, v in points:
+            summed[d] = summed.get(d, 0.0) + v
+    return sorted(summed.items())
+
+
+ShopChange = tuple[float | None, str | None, date | None]
+
+
+def shopping_change(by_group: Mapping[str, Sequence[tuple[date, float]]], wanted: Sequence[str],
+                    brief: TrendReportBrief) -> ShopChange:  # fmt: skip
+    """(변화율, 비었을 때 이유, 창 끝 날). 이유를 셋으로 나눈다: 그 분야에 없는 키워드 /
+    타깃 값이 너무 적음 / (요청 오류는 부르는 쪽에서)."""
+    if not any(by_group.values()):
+        return None, "그 분야에 없는 키워드 (쇼핑인사이트가 클릭 기록을 하나도 주지 않음)", None
+    summed = _summed(by_group, wanted)
+    last = last_value_day(summed)
+    if last is None:
+        who = tb.target_word(brief)
+        return None, f"값이 너무 적음 ({who} 클릭 기록이 없음, 다른 연령에는 있음)", None
+    pct, why = change_pct(summed, last)
+    if pct is None:
+        days = sum(1 for _, v in summed if v > 0)
+        return None, f"값이 너무 적음 (값이 있는 날 {days}일, {why})", last
+    return pct, None, last
+
+
+def _compact(text: str) -> str:
+    return "".join(text.split()).lower()
+
+
+async def monthly_volumes(keywords: Sequence[str], searchad: Any, pool_path: Any,
+                          today: date) -> tuple[dict[str, int], int]:  # fmt: skip
+    """키워드 → 월 검색량(PC+모바일). 그날 keyword_pool 값을 먼저 쓰고 없는 것만 검색광고 1번.
+
+    "<10"인 칸은 0으로 더한다. 두 칸 다 모르면 넣지 않는다. 반환: (값, 검색광고 호출 수).
+    """
+    from data_agent import keyword_pool
+
+    def total(pc: int | None, mobile: int | None, pc_low: bool, mo_low: bool) -> int | None:
+        if pc is None and mobile is None and not (pc_low or mo_low):
+            return None
+        return (pc or 0) + (mobile or 0)
+
+    out: dict[str, int] = {}
+    if pool_path:
+        day, pool = keyword_pool.latest(pool_path)
+        if day == today:
+            by_key = {_compact(p.keyword): p for p in pool}
+            for kw in keywords:
+                if (p := by_key.get(_compact(kw))) and (
+                        v := total(p.pc, p.mobile, p.pc_below_10, p.mobile_below_10)) is not None:
+                    out[kw] = v
+    rest = [kw for kw in keywords if kw not in out]
+    if not rest or searchad is None or not getattr(searchad, "configured", False):
+        return out, 0
+    from data_agent.connectors import ConnectorUnavailable
+
+    before = getattr(searchad, "calls_today", None)
+    try:
+        # 검색광고 힌트는 띄어쓰기 없이 (응답 relKeyword도 붙여 쓴 모양)
+        stats = await searchad.keywords([_compact(kw) for kw in rest])
+    except ConnectorUnavailable:
+        return out, _calls_diff(searchad, before)
+    by_key = {_compact(s.keyword): s for s in stats}
+    for kw in rest:
+        if (s := by_key.get(_compact(kw))) and (
+                v := total(s.pc, s.mobile, s.pc_below_10, s.mobile_below_10)) is not None:
+            out[kw] = v
+    return out, _calls_diff(searchad, before)
 
 
 # ---------------------------------------------------------------- 인스타 읽기
@@ -320,9 +485,32 @@ def burst_posts(media: Mapping[str, Sequence[Mapping[str, Any]]],
 # ---------------------------------------------------------------- 2. 해시태그
 
 
+def hidden_tag(key: str) -> bool:
+    """뺄 해시태그인지: 표기용 태그(#광고·#협찬 등)·이벤트 상투어(#이벤트기간 등).
+    key는 trend_memes 단위 키("hashtag:광고"). 레이더 묶음과 같은 규칙(caption_noise)."""
+    return caption_noise.hidden_tag(key) or caption_noise.event_phrase(key)
+
+
+def account_names(media: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, str]:
+    """계정 → 표시 이름 (business_discovery `name`, 게시물에 붙여 둔 것). 모르면 뺀다."""
+    from data_agent.connectors.instagram_graph import OWNER_NAME
+
+    out: dict[str, str] = {}
+    for account, items in media.items():
+        name = next((m.get(OWNER_NAME) for m in items if isinstance(m.get(OWNER_NAME), str)), None)
+        if name:
+            out[account] = name
+    return out
+
+
 def hashtag_section(media: Mapping[str, Sequence[Mapping[str, Any]]],
                     posts: Sequence[InstagramRadarPost], now: datetime,
-                    why_none: str | None) -> tuple[TrendHashtagSection, list[str]]:  # fmt: skip
+                    why_none: str | None, media_accounts: Sequence[str] = (),
+                    ) -> tuple[TrendHashtagSection, list[str]]:  # fmt: skip
+    """해시태그마다 쓴 계정 수(이번 7일·직전 7일)·터진 게시물 수.
+
+    표기용 태그(`HIDDEN_TAGS`)는 세지 않고, 매거진(`media_accounts`)은 쓴 계정에서 뺀다.
+    """
     from data_agent.skills.instagram import _posted
     from data_agent.skills.trend_memes import units_of
 
@@ -332,9 +520,12 @@ def hashtag_section(media: Mapping[str, Sequence[Mapping[str, Any]]],
         return out, []
     cur_from, prev_from = now - WEEK, now - 2 * WEEK
     burst_ids = {p.media_id for p in posts}
+    skip = set(media_accounts)
     stats: dict[str, dict[str, Any]] = {}
     short = 0
     for account, items in media.items():
+        if account in skip:
+            continue
         times = [at for m in items if (at := _posted(m)) is not None]
         if times and min(times) > prev_from:
             short += 1
@@ -343,23 +534,32 @@ def hashtag_section(media: Mapping[str, Sequence[Mapping[str, Any]]],
             if at is None or at < prev_from or at > now:
                 continue
             for key, unit in units_of(str(m.get("caption") or ""), ()).items():
-                if unit.kind != "hashtag":
+                if unit.kind != "hashtag" or hidden_tag(key):
                     continue
-                s = stats.setdefault(key, {"tag": unit.surface, "cur": set(), "prev": set(),
+                s = stats.setdefault(key, {"tag": unit.surface, "cur": {}, "prev": set(),
                                            "burst": 0})  # fmt: skip
                 if at >= cur_from:
-                    s["cur"].add(account)
+                    s["cur"][account] = s["cur"].get(account, 0) + 1
                     s["burst"] += 1 if str(m.get("id")) in burst_ids else 0
                 else:
                     s["prev"].add(account)
-    rows = [TrendHashtagRow(tag=s["tag"], accounts=len(s["cur"]), previous_accounts=len(s["prev"]),
-                            burst_posts=s["burst"])
-            for s in stats.values() if len(s["cur"]) >= MIN_TAG_ACCOUNTS]  # fmt: skip
+
+    def row(s: dict[str, Any]) -> TrendHashtagRow:
+        used = sorted(s["cur"].items(), key=lambda kv: (-kv[1], kv[0]))
+        n, prev = len(s["cur"]), len(s["prev"])
+        return TrendHashtagRow(tag=s["tag"], accounts=n, previous_accounts=prev,
+                               burst_posts=s["burst"], used_by=[a for a, _ in used[:MAX_USED_BY]],
+                               is_new=prev == 0 and n >= MIN_TAG_ACCOUNTS)  # fmt: skip
+
+    rows = [row(s) for s in stats.values() if len(s["cur"]) >= MIN_TAG_ACCOUNTS]
     rows.sort(key=lambda r: (-r.accounts, -r.burst_posts, r.previous_accounts, r.tag))
     out.rows = rows[:MAX_TAGS]
-    out.status = "known"
-    if not out.rows:
-        out.reason = f"이번 7일에 {MIN_TAG_ACCOUNTS}곳 이상이 같이 쓴 해시태그가 없음"
+    if out.rows:
+        out.status = "known"
+        names = account_names(media)
+        out.account_names = {a: names[a] for r in out.rows for a in r.used_by if a in names}
+    else:
+        out.status, out.reason = "unknown", NO_SHARED_TAG
     limits = []
     if short:
         limits.append(f"최근 20개가 직전 7일까지 닿지 않은 계정 {short}곳: 해시태그의 직전 7일"
@@ -410,14 +610,37 @@ def _distance(ratio: float | None) -> float:
     return abs(math.log(ratio))
 
 
+def structured_trait(fact: Any) -> TrendCompetitorTrait | None:
+    """compare_facts 사실 → 화면용 (label·value·baseline). 네 가지 밖(릴스 아닌 형식 등)은 None."""
+    base = f"평소 {fact.baseline}" if fact.baseline else "평소 모름"
+    label = str(fact.label)
+    if fact.kind == "format":
+        if label != "형식: 릴스 비율":
+            return None
+        return TrendCompetitorTrait(label="릴스 비율", value=fact.value, baseline=base)
+    if fact.kind == "caption" and label.startswith("첫 줄"):
+        return TrendCompetitorTrait(label="첫 줄 질문", value=fact.value, baseline=base)
+    if fact.kind == "caption" and label.startswith("캡션 길이"):
+        return TrendCompetitorTrait(label="캡션 길이", value=fact.value, baseline=base)
+    if fact.kind == "time":
+        # label "올린 시간: 밤(21~24시), 한국" → value "밤(21~24시)",
+        # baseline "60%, 평소 20%" (잘 된 것 중 그 시간 비율 · 평소 비율)
+        when = label.removeprefix("올린 시간:").removesuffix(", 한국").strip()
+        return TrendCompetitorTrait(label="올린 시간", value=when,
+                                    baseline=f"{fact.value}, {base}")  # fmt: skip
+    return None
+
+
 def competitor_row(account: str, items: Sequence[Mapping[str, Any]],
                    now: datetime) -> TrendCompetitorRow:  # fmt: skip
     from dataclasses import replace
 
-    from data_agent.skills.instagram import _metric, _posted, bursts
+    from data_agent.connectors.instagram_graph import OWNER_NAME
+    from data_agent.skills.instagram import _posted, baselines, bursts, judge
     from data_agent.skills.instagram_why import compare_facts, standout
 
     row = TrendCompetitorRow(account=account)
+    row.name = next((m[OWNER_NAME] for m in items if isinstance(m.get(OWNER_NAME), str)), None)
     why: list[str] = []
     times = sorted(at for m in items if (at := _posted(m)) is not None)
     days = (now - times[0]).total_seconds() / 86400 if times else 0
@@ -446,13 +669,16 @@ def competitor_row(account: str, items: Sequence[Mapping[str, Any]],
             row.best_post.standout = standout(by_id[best[0].media_id], items)
     else:
         why.append("지표가 있는 게시물이 3개 미만이라 최고 게시물 없음")
-    # 잘 된 게시물(지표 상위 5개)의 공통점
-    ranked = sorted((m for m in items if _metric(m)[1] is not None),
-                    key=lambda m: -(_metric(m)[1] or 0))  # fmt: skip
+    # 잘 된 게시물(같은 지표 중앙값 대비 배수 상위 5개)의 공통점.
+    # 조회수·좋아요를 섞어 줄 세우지 않는다
+    base = baselines(items)
+    scored = [(got[1] / got[2], str(m.get("id")), m) for m in items if (got := judge(m, base))]
+    ranked = [m for _, _, m in sorted(scored, key=lambda t: (-t[0], t[1]))]
     if len(ranked) >= MIN_POSTS_FOR_TRAITS:
         facts = [f for f, _ in compare_facts(ranked[:TOP_POSTS], items) if f.kind in TRAIT_KINDS]
         facts.sort(key=lambda f: -_distance(f.ratio))
         row.traits = [f"{f.label}: {f.value} · 평소 {f.baseline}" for f in facts[:MAX_TRAITS]]
+        row.traits_structured = [t for f in facts[:MAX_TRAITS] if (t := structured_trait(f))]
     else:
         why.append(f"지표가 있는 게시물이 {MIN_POSTS_FOR_TRAITS}개 미만이라 공통점을 보지 않음")
     row.reason = " · ".join(why) or None
@@ -504,23 +730,42 @@ def _fmt_word(p: InstagramRadarPost) -> str:
                                                                          "게시물")  # fmt: skip
 
 
-Catalog = dict[str, tuple[str, str]]  # id → (코드 근거 문장, LLM에 줄 숫자 없는 말)
+# id → (코드 근거 문장, LLM에 줄 숫자 없는 말, 칩용 짧은 형태 30자 이내)
+Catalog = dict[str, tuple[str, str, str]]
+
+
+def short_of(text: str) -> str:
+    line = " ".join(text.split())
+    return line if len(line) <= SHORT_MAX else line[: SHORT_MAX - 1] + "…"
+
+
+def _pct0(pct: float) -> str:
+    return f"{pct:+.0f}%"
 
 
 def evidence_catalog(report: TrendReport) -> Catalog:
-    """섹션 1~4 사실 → (근거 문장, 숫자 없는 말). id = 섹션:행."""
+    """섹션 1~4 사실 → (근거 문장, 숫자 없는 말, 짧은 형태). id = 섹션:행.
+
+    결론이 기대지 않게 빼는 것: small_base(기준값 작음) 변화율, 필터 없이(전체)·월 검색량만인
+    검색 행(타깃 근거가 아님).
+    """
     s = report.sections
     who = tb.target_word(report.brief)
     out: Catalog = {}
     for n, r in enumerate(s.search.rows, start=1):
-        if (w := _trend_word(r.search_change_pct)) and r.search_change_pct is not None:
+        pct = r.search_change_pct
+        target = r.basis in (None, "filtered") and not r.small_base
+        if target and pct is not None and (w := _trend_word(pct)):
             out[f"search:{n}"] = (
-                f"네이버 검색어 '{r.keyword}' ({who}) 최근 7일이 직전 28일보다"
-                f" {_signed(r.search_change_pct)}", f"'{r.keyword}' 검색이 {w}")  # fmt: skip
-        if (w := _trend_word(r.shopping_change_pct)) and r.shopping_change_pct is not None:
+                f"네이버 검색어 '{r.keyword}' ({who}) 최근 7일이 직전 28일보다 {_signed(pct)}",
+                f"'{r.keyword}' 검색이 {w}",
+                short_of(f"{r.keyword} 검색 {_pct0(pct)}"))  # fmt: skip
+        pct = r.shopping_change_pct
+        if pct is not None and not r.shopping_small_base and (w := _trend_word(pct)):
             out[f"shopping:{n}"] = (
-                f"네이버 쇼핑 '{r.keyword}' 클릭 ({who}) 최근 7일이 직전 28일보다"
-                f" {_signed(r.shopping_change_pct)}", f"'{r.keyword}' 쇼핑 클릭이 {w}")  # fmt: skip
+                f"네이버 쇼핑 '{r.keyword}' 클릭 ({who}) 최근 7일이 직전 28일보다 {_signed(pct)}",
+                f"'{r.keyword}' 쇼핑 클릭이 {w}",
+                short_of(f"{r.keyword} 쇼핑 클릭 {_pct0(pct)}"))  # fmt: skip
     for n, h in enumerate(s.hashtags.rows, start=1):
         more = ("늘어남" if h.accounts > h.previous_accounts else
                 "줄어듦" if h.accounts < h.previous_accounts else "비슷함")  # fmt: skip
@@ -528,18 +773,21 @@ def evidence_catalog(report: TrendReport) -> Catalog:
         out[f"hashtag:{n}"] = (
             f"{h.tag}: 이번 7일 {h.accounts}곳 · 직전 7일 {h.previous_accounts}곳 사용,"
             f" 터진 게시물 {h.burst_posts}개",
-            f"{h.tag}를 쓰는 계정이 지난주보다 {more}{burst}")  # fmt: skip
+            f"{h.tag}를 쓰는 계정이 지난주보다 {more}{burst}",
+            short_of(f"{h.tag} {h.accounts}곳 사용"))  # fmt: skip
     for n, p in enumerate(s.content.posts, start=1):
         metric = "조회수" if p.metric == "view_count" else "좋아요"
         extra = f" · {p.standout}" if p.standout else ""
         cap = f" (캡션: {p.caption_excerpt})" if p.caption_excerpt else ""
         out[f"content:{n}"] = (
             f"{p.account} {_fmt_word(p)}: {metric} {p.value:,} · 평소의 {p.ratio:g}배{extra}",
-            f"{p.account}의 {_fmt_word(p)}가 평소보다 크게 뜸{cap}")  # fmt: skip
+            f"{p.account}의 {_fmt_word(p)}가 평소보다 크게 뜸{cap}",
+            short_of(f"{p.account} {_fmt_word(p)} {metric} ×{p.ratio:g}"))  # fmt: skip
     for n, m in enumerate(s.content.memes, start=1):
         desc = f": {m.description}" if m.description else ""
         out[f"meme:{n}"] = (f"같이 뜬 밈 '{m.name}' (광고 재료 가능)",
-                            f"요즘 뜨는 밈 '{m.name}'{desc}")  # fmt: skip
+                            f"요즘 뜨는 밈 '{m.name}'{desc}",
+                            short_of(f"밈 {m.name}"))  # fmt: skip
     for n, c in enumerate(s.competitors.rows, start=1):
         nums = []
         if c.posts_per_week is not None:
@@ -554,8 +802,11 @@ def evidence_catalog(report: TrendReport) -> Catalog:
         words = [f"경쟁사 {c.account}는 {style}"]
         if c.best_post and c.best_post.caption_excerpt:
             words.append(f"가장 잘 된 게시물 캡션: {c.best_post.caption_excerpt}")
+        who_c = c.name or c.account
+        brief_num = (f"릴스 {round(c.reels_share * 100)}%" if c.reels_share is not None
+                     else "지표")  # fmt: skip
         out[f"competitor:{n}"] = (f"{c.account}: {', '.join(nums) or '지표 없음'}{traits}",
-                                  ", ".join(words))  # fmt: skip
+                                  ", ".join(words), short_of(f"{who_c} {brief_num}"))  # fmt: skip
     return out
 
 
@@ -603,7 +854,7 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
     brief = report.brief
     data = {"의뢰_제품": brief.product or "모름", "의뢰_타깃": tb.target_word(brief),
             "의뢰_형식": brief.format or "모름"}  # fmt: skip
-    data.update({f"근거_{k}": word for k, (_, word) in catalog.items()})
+    data.update({f"근거_{k}": word for k, (_, word, _) in catalog.items()})
     try:
         answer = await llm.structured(_PROMPT, _Recommendation, untrusted=data,
                                       context_id=context_id)  # fmt: skip
@@ -637,7 +888,10 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
         if len(good) < len(ids):
             limits.append(f"콘티 {slot}: 없는 근거 id는 버림")
         seen.add(slot)
-        out.beats.append(TrendBeat(slot=slot, text=text, evidence=[catalog[i][0] for i in good]))  # type: ignore[arg-type]
+        out.beats.append(TrendBeat(
+            slot=slot, text=text, evidence=[catalog[i][0] for i in good],  # type: ignore[arg-type]
+            evidence_items=[TrendReportEvidence(id=i, text=catalog[i][0], short=catalog[i][2])
+                            for i in good]))  # fmt: skip
     out.beats.sort(key=lambda b: BEAT_SLOTS.index(b.slot))
     if dropped:
         limits.append("버린 콘티 칸: " + "; ".join(dropped))
@@ -664,6 +918,34 @@ class Deps:
     shopping: Any
     memes: Callable[[], Any] | None = None  # trend_memes 저장 결과 (없으면 None)
     age_store: Any = None
+    searchad: Any = None  # 검색광고 키워드 도구 (월 검색량, 없으면 안 부름)
+    pool_path: Any = None  # keyword_pool DB (그날 값이 있으면 월 검색량 재사용)
+
+
+def search_notes(report: TrendReport) -> list[str]:
+    """검색 행에서 생긴 이번 보고서 주의 (small_base·전체 기준·월 검색량만)."""
+    rows = report.sections.search.rows
+    who = tb.target_word(report.brief)
+
+    def names(pick: Callable[[TrendSearchRow], bool]) -> str:
+        return ", ".join(r.keyword for r in rows if pick(r))
+
+    out = []
+    cut = "(AI 추천 근거에서 뺌)"
+    if small := names(lambda r: r.small_base or r.shopping_small_base):
+        out.append(f"기준값이 작아 '급증(기준값 작음)'으로만 본 키워드: {small} {cut}")
+    if every := names(lambda r: r.basis == "all"):
+        out.append(f"{who}로 거르면 값이 없어 전체 기준으로 본 키워드: {every} {cut}")
+    if volume := names(lambda r: r.basis == "volume_only"):
+        out.append(f"변화율 없이 월 검색량만 있는 키워드: {volume}")
+    return out
+
+
+def limit_groups(dynamic: Sequence[str]) -> TrendLimitGroups:
+    fixed = set(FIXED_LIMITS)
+    mine = [x for x in dict.fromkeys(dynamic) if x not in fixed]
+    return TrendLimitGroups(method=list(METHOD_LIMITS), cannot_see=list(CANNOT_SEE_LIMITS),
+                            this_report=mine)  # fmt: skip
 
 
 Progress = Callable[[TrendReport], Awaitable[None] | None]
@@ -714,6 +996,8 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
     if ig.failed:
         limits.append(f"인스타 {len(ig.failed)}곳 못 읽음"
                       + (f" ({ig.stopped}, 그 자리에서 멈춤)" if ig.stopped else ""))  # fmt: skip
+    names = account_names(ig.media)
+    report.brief.competitor_names = {a: names.get(a) for a in report.brief.competitors}
     why_none = ig.stopped
     posts: list[InstagramRadarPost] = []
     try:
@@ -725,13 +1009,17 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
         cid = resolved.preset.shopping_category if resolved.preset else None
         section, calls, more = await search_section(report.brief, cid, deps.search,
                                                     deps.shopping, deps.env, now,
-                                                    age_store=deps.age_store)  # fmt: skip
+                                                    age_store=deps.age_store,
+                                                    searchad=deps.searchad,
+                                                    pool_path=deps.pool_path)  # fmt: skip
         report.sections.search = section
         report.calls.naver += calls
         limits.extend(more)
+        limits.extend(search_notes(report))
 
     async def run_hashtags() -> None:
-        section, more = hashtag_section(ig.media, posts, now, why_none)
+        media_accounts = resolved.preset.media_accounts if resolved.preset else ()
+        section, more = hashtag_section(ig.media, posts, now, why_none, media_accounts)
         report.sections.hashtags = section
         limits.extend(more)
 
@@ -748,6 +1036,7 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
                       ("content", run_content), ("competitors", run_competitors)):  # fmt: skip
         await _guard(report, name, run)
         report.limits = list(dict.fromkeys(limits))
+        report.limit_groups = limit_groups(limits)
         await save()
 
     async def run_recommendation() -> None:
@@ -762,6 +1051,7 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
     report.summary_line = rec.conclusion
     report.summary_reason = None if rec.conclusion else (rec.reason or "결론 한 줄이 없음")
     report.limits = list(dict.fromkeys(limits))
+    report.limit_groups = limit_groups(limits)
     report.status = final_status(report)  # type: ignore[assignment]
     report.finished_at = datetime.now(UTC)
     await save()

@@ -1842,6 +1842,8 @@ export interface TrendReportInput {
   context_id?: string | null;
   /** true면 같은 의뢰 저장본이 있어도 새로 만든다 */
   rebuild?: boolean;
+  /** 이번 의뢰의 목표 (v2, 옛 저장본에는 없음) */
+  goal?: string | null;
 }
 export interface TrendReportCreated {
   report_id: string;
@@ -1858,20 +1860,34 @@ export interface TrendReportBrief {
   competitors: string[];
   keywords: string[];
   preset: string | null;
-  sources: { product: FieldSource; target: FieldSource; format: FieldSource; competitors: FieldSource; keywords: FieldSource };
+  sources: { product: FieldSource; target: FieldSource; format: FieldSource; competitors: FieldSource; keywords: FieldSource; goal?: FieldSource | null };
+  /** v2 (옛 저장본에는 없음) */
+  goal?: string | null;
+  format_parts?: string[];
+  /** 인스타 아이디 → 표시 이름 */
+  competitor_names?: Record<string, string | null>;
 }
+export type TrendSearchBasis = "filtered" | "all" | "volume_only" | "none";
 export interface TrendReportSearchRow {
   keyword: string;
   search_change_pct: number | null;
   search_reason: string | null;
   shopping_change_pct: number | null;
   shopping_reason: string | null;
+  /** v2 */
+  basis?: TrendSearchBasis | null;
+  monthly_volume?: number | null;
+  small_base?: boolean;
+  shopping_small_base?: boolean;
 }
 export interface TrendReportHashtagRow {
   tag: string;
   accounts: number;
   previous_accounts: number;
   burst_posts: number;
+  /** v2: 쓴 계정 id (최대 5) */
+  used_by?: string[];
+  is_new?: boolean;
 }
 export interface TrendReportMeme {
   name: string;
@@ -1888,6 +1904,14 @@ export interface TrendReportCompetitorRow {
   best_post: InstagramRadarPost | null;
   traits: string[];
   reason: string | null;
+  /** v2 */
+  name?: string | null;
+  traits_structured?: TrendTraitStructured[];
+}
+export interface TrendTraitStructured {
+  label: "릴스 비율" | "첫 줄 질문" | "올린 시간" | "캡션 길이";
+  value: string;
+  baseline: string;
 }
 export type BeatSlot = "0-3" | "3-15" | "15-25" | "25-30";
 export interface TrendReportBeat {
@@ -1895,6 +1919,13 @@ export interface TrendReportBeat {
   text: string;
   /** 코드가 만든 근거 문장 */
   evidence: string[];
+  /** v2: evidence와 같은 순서. id = "<section>:<1-based row>" */
+  evidence_items?: TrendEvidenceItem[];
+}
+export interface TrendEvidenceItem {
+  id: string;
+  text: string;
+  short: string;
 }
 interface SectionHead {
   status: SectionStatus;
@@ -1902,7 +1933,7 @@ interface SectionHead {
 }
 export interface TrendReportSections {
   search: SectionHead & { filter_note: string; rows: TrendReportSearchRow[] };
-  hashtags: SectionHead & { rows: TrendReportHashtagRow[] };
+  hashtags: SectionHead & { rows: TrendReportHashtagRow[]; account_names?: Record<string, string> };
   content: SectionHead & { posts: InstagramRadarPost[]; memes: TrendReportMeme[] };
   competitors: SectionHead & { rows: TrendReportCompetitorRow[]; accounts_failed: { account: string; reason: string }[] };
   recommendation: SectionHead & { conclusion: string | null; beats: TrendReportBeat[]; music_note: string };
@@ -1920,7 +1951,14 @@ export interface TrendReport {
   sections: TrendReportSections;
   /** 근거와 한계 문장 (코드 고정 + 이번 보고서에서 생긴 것) */
   limits: string[];
+  /** v2 (옛 저장본에는 없음) */
+  limit_groups?: TrendLimitGroups;
   calls: { instagram: number; naver: number; llm: number };
+}
+export interface TrendLimitGroups {
+  method: string[];
+  cannot_see: string[];
+  this_report: string[];
 }
 export interface TrendReportListItem {
   report_id: string;

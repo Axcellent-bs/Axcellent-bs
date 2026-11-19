@@ -181,7 +181,10 @@ MEMES = ["known", {"items": [
 def test_preset_loads_eco_beauty() -> None:
     p = tb.load_preset("eco_beauty")
     assert p is not None
-    assert p.product == "친환경 화장품 브랜드 인지도" and p.format == "인스타 릴스 30초"
+    # v2: 목적은 product에서 떼어 goal로 (화면이 "목표 · 브랜드 인지도" 칩으로)
+    assert p.product == "친환경 화장품" and p.goal == "브랜드 인지도"
+    assert p.format == "인스타 릴스 30초"
+    assert len(p.media_accounts) == 7 and set(p.media_accounts) <= set(p.accounts)
     assert p.gender == "f" and p.ages == ("20", "30")
     assert p.shopping_category == "50000002"
     assert len(p.keywords) == 5 and "클린뷰티" in p.keywords
@@ -205,9 +208,11 @@ def test_form_values_override_preset_without_llm() -> None:
     assert llm.calls == []  # 의뢰문이 없으면 LLM을 부르지 않는다
     assert b.competitors == ["foo.bar"] and b.keywords == ["리필"]
     assert (b.target_gender, b.target_ages) == ("m", ["40"])
-    assert b.product == "친환경 화장품 브랜드 인지도"
+    assert b.product == "친환경 화장품" and b.goal == "브랜드 인지도"
+    assert b.format_parts == ["인스타 릴스", "30초"]
     assert b.sources.model_dump() == {"product": "preset", "target": "input", "format": "preset",
-                                      "competitors": "input", "keywords": "input"}  # fmt: skip
+                                      "competitors": "input", "keywords": "input",
+                                      "goal": "preset"}  # fmt: skip
     assert got.accounts[:2] == ["foo.bar", "extra_1"]  # 경쟁사·추가 계정이 먼저
     assert len(got.accounts) <= tb.MAX_ACCOUNTS
     assert got.llm_calls == 0
@@ -217,7 +222,7 @@ def test_request_text_only_extracts_brief_and_marks_sources() -> None:
     text = "비건 선크림 신제품을 20대 여성에게 알리고 싶어요. 경쟁사는 @abib.official. 릴스 15초."
     llm = FakeLLM(extract={"product": "비건 선크림 신제품", "gender": "f", "ages": ["20대"],
                            "format": "릴스 15초", "competitors": ["@Abib.Official", "브랜드 이름"],
-                           "keywords": []})  # fmt: skip
+                           "keywords": [], "goal": "출시 알리기"})  # fmt: skip
     got = asyncio.run(tb.resolve(TrendReportInput(request_text=text), llm))
     b = got.brief
     assert len(llm.calls) == 1 and llm.calls[0][1] == {"의뢰문": text}  # 데이터 블록으로만
@@ -226,16 +231,17 @@ def test_request_text_only_extracts_brief_and_marks_sources() -> None:
     assert (b.target_gender, b.target_ages) == ("f", ["20"])
     assert b.competitors == ["abib.official"]  # 아이디 모양이 아닌 것은 버림
     assert len(b.keywords) == 5  # 못 뽑은 칸은 프리셋
+    assert b.goal == "출시 알리기" and b.format_parts == ["릴스", "15초"]
     assert b.sources.model_dump() == {"product": "request_text", "target": "request_text",
                                       "format": "request_text", "competitors": "request_text",
-                                      "keywords": "preset"}  # fmt: skip
+                                      "keywords": "preset", "goal": "request_text"}  # fmt: skip
 
 
 def test_extract_failure_falls_back_to_preset_with_reason() -> None:
     llm = FakeLLM(error=LLMDailyCapReached("하루 상한"))
     got = asyncio.run(tb.resolve(TrendReportInput(request_text="친환경 화장품 홍보"), llm))
     b = got.brief
-    assert b.preset == "eco_beauty" and b.product == "친환경 화장품 브랜드 인지도"
+    assert b.preset == "eco_beauty" and b.product == "친환경 화장품"
     assert set(b.sources.model_dump().values()) == {"preset"}
     assert any("의뢰문을 해석하지 못함" in line for line in got.limits)
     assert got.llm_calls == 1
@@ -693,6 +699,7 @@ def test_frontend_questions_1380() -> None:
         "preset": None, "request_text": "의뢰", "product": None, "target_gender": None,
         "target_ages": None, "format": None, "competitors": None, "keywords": None,
         "accounts": None, "caller": "orchestrator", "context_id": None, "rebuild": False,
+        "goal": None,  # v2 추가 (기본 None)
     }  # fmt: skip
     assert TrendReportInput.model_validate({}).caller == "human"
 
@@ -708,3 +715,257 @@ def test_ready_event_for_example() -> None:
 def test_llm_not_configured_brief_reason() -> None:
     got = asyncio.run(tb.extract("의뢰", FakeLLM(error=LLMNotConfiguredError("키 없음"))))
     assert got[0] is None and got[1] and "의뢰문을 해석하지 못함" in got[1]
+
+
+# ---------------------------------------------------------------- v2 (보고서 tr_4913cb6a11274238)
+
+
+def test_format_parts_keeps_format_when_no_duration() -> None:
+    assert tb.format_parts("인스타 릴스 30초") == ["인스타 릴스", "30초"]
+    assert tb.format_parts("유튜브 쇼츠") == ["유튜브 쇼츠"]
+    assert tb.format_parts("30 초 릴스") == ["릴스", "30초"]
+    assert tb.format_parts(None) == []
+
+
+# A2 해시태그: 표기용 태그·매거진 빼기, used_by·is_new
+
+
+def test_hashtags_hide_ad_tags_and_magazines() -> None:
+    media = {a: _account(a, tag="#광고 #협찬 #AD #클린뷰티") for a in ("a", "b", "c")}
+    for m in ("voguekorea", "wkorea", "ellekorea"):
+        media[m] = _account(m, tag="#비건뷰티 #유료광고")
+    for a in ("a", "b"):  # 직전 7일 #클린뷰티: a·b → 새로 뜸 아님
+        media[a][9] = _post(a, 9, days_ago=9.5, caption="#클린뷰티")
+    media["a"][1] = _post("a", 1, days_ago=1.5, caption="#클린뷰티 또")
+    media["a"][0][st_owner()] = "톤28"
+    posts = tr.burst_posts(media, NOW)
+    section, _ = tr.hashtag_section(media, posts, NOW, None,
+                                    ("voguekorea", "wkorea", "ellekorea"))  # fmt: skip
+    tags = [r.tag for r in section.rows]
+    assert tags == ["#클린뷰티"]  # #광고·#협찬·#ad 없음, 매거진만 쓴 #비건뷰티 없음
+    row = section.rows[0]
+    assert row.used_by[0] == "a" and set(row.used_by) == {"a", "b", "c"}  # a가 두 번 써서 앞
+    assert row.is_new is False and section.account_names == {"a": "톤28"}
+    assert all(tr.hidden_tag(f"hashtag:{t}") for t in tr.HIDDEN_TAGS)
+
+
+def test_hashtags_new_tag_and_unknown_when_only_hidden() -> None:
+    media = {a: _account(a, tag="#리필스테이션") for a in ("a", "b", "c")}
+    section, _ = tr.hashtag_section(media, tr.burst_posts(media, NOW), NOW, None)
+    assert section.rows[0].is_new is True and section.rows[0].previous_accounts == 0
+    only_ads = {a: _account(a, tag="#광고 #이벤트 #giveaway") for a in ("a", "b", "c")}
+    section, _ = tr.hashtag_section(only_ads, [], NOW, None)
+    assert section.status == "unknown" and section.reason == tr.NO_SHARED_TAG
+
+
+def st_owner() -> str:
+    from data_agent.connectors.instagram_graph import OWNER_NAME
+
+    return OWNER_NAME
+
+
+# A3 기준값 작음
+
+
+def test_small_base_rule() -> None:
+    assert tr.small_base(_points(1.5, 30), END) is True  # 직전 28일 평균 < 2.0
+    assert tr.small_base(_points(10, 12), END) is False
+    # 35일 중 18일이 0 (직전 28일 평균은 2.5라 평균 규칙에는 안 걸림)
+    zeros = tuple((d, 0.0 if i % 2 == 0 else 5.0) for i, (d, _) in enumerate(_points(5, 5)))
+    assert tr.small_base(zeros, END) is True  # 0인 날이 절반 이상
+    fewer = tuple((d, 0.0 if i % 2 else 5.0) for i, (d, _) in enumerate(_points(5, 5)))
+    assert tr.small_base(fewer, END) is False  # 17일 → 절반 미만
+
+
+class GappySearch(FakeSearch):
+    """필터 요청이면 `no_filtered` 키워드, 필터 없는 요청이면 `no_all` 키워드에 값이 없다."""
+
+    def __init__(self, no_filtered: set[str], no_all: set[str], small: set[str] = frozenset()) -> None:  # noqa: E501
+        super().__init__()
+        self.no_filtered, self.no_all, self.small = no_filtered, no_all, small
+
+    async def search_trend(self, query: TrendScanInput, ages: Any = ()) -> TrendResponse:
+        self.queries.append(query)
+        self.calls_today += 1
+        empty = self.no_filtered if (query.ages or query.gender) else self.no_all
+        def pts(name: str) -> Any:
+            if name in empty:
+                return ()
+            return _points(0.5, 9) if name in self.small else _points(10, 12)
+
+        series = tuple(TrendSeries(g.group_name, tuple(g.keywords), pts(g.group_name))
+                       for g in query.keyword_groups)  # fmt: skip
+        return TrendResponse(query.start_date, query.end_date, "date", series)
+
+
+class FakeSearchAd:
+    configured = True
+
+    def __init__(self, volumes: dict[str, tuple[Any, Any]]) -> None:
+        self.volumes, self.calls_today, self.hints = volumes, 0, []
+
+    async def keywords(self, hints: list[str]) -> list[Any]:
+        from data_agent.connectors.naver_searchad import KeywordStat
+
+        self.calls_today += 1
+        self.hints.append(list(hints))
+        out = []
+        for kw, (pc, mo) in self.volumes.items():
+            out.append(KeywordStat(kw, None if pc == "<10" else pc, mo, pc == "<10", False, None))
+        return out
+
+
+# D9 검색 단계별 대체 + A3 small_base 근거 제외
+
+
+def test_search_falls_back_all_then_volume_then_none(tmp_path: Path) -> None:
+    brief = asyncio.run(tb.resolve(TrendReportInput(preset="eco_beauty"), FakeLLM())).brief
+    # 리필 화장품: 필터 값 있음 / 비건 선크림: 전체로 / 클린뷰티: 기준값 작음 /
+    # 제로웨이스트: 월 검색량만 / 비건 화장품: 아무것도 없음
+    search = GappySearch(no_filtered={"비건 선크림", "제로웨이스트", "비건 화장품"},
+                         no_all={"제로웨이스트", "비건 화장품"}, small={"클린뷰티"})  # fmt: skip
+    searchad = FakeSearchAd({"리필화장품": (300, 1200), "제로웨이스트": ("<10", 900)})
+    section, calls, limits = asyncio.run(tr.search_section(
+        brief, "50000002", search, FakeShopping(), _env(tmp_path), NOW,
+        searchad=searchad))  # fmt: skip
+    rows = {r.keyword: r for r in section.rows}
+    assert rows["리필 화장품"].basis == "filtered" and rows["리필 화장품"].monthly_volume == 1500
+    assert rows["비건 선크림"].basis == "all" and rows["비건 선크림"].search_change_pct == 20.0
+    assert "거르면 값이 없음 → 전체 기준" in (rows["비건 선크림"].search_reason or "")
+    assert rows["클린뷰티"].basis == "filtered" and rows["클린뷰티"].small_base is True
+    zero = rows["제로웨이스트"]
+    assert zero.basis == "volume_only" and zero.monthly_volume == 900
+    assert rows["비건 화장품"].basis == "none" and rows["비건 화장품"].monthly_volume is None
+    # 두 번째 요청은 필터 없이 값이 없던 3개만, 검색광고는 띄어쓰기 없는 힌트로 1번
+    assert len(search.queries) == 2 and search.queries[1].ages is None
+    assert len(search.queries[1].keyword_groups) == 3
+    assert searchad.hints == [["리필화장품", "비건선크림", "클린뷰티", "제로웨이스트",
+                               "비건화장품"]]  # fmt: skip
+    assert calls == 2 + 5 + 1  # 검색어 트렌드 2 · 쇼핑 5 · 검색광고 1
+    # AI 추천 근거에는 basis filtered이고 small_base 아닌 검색 행만
+    report = _report(TrendReportInput(preset="eco_beauty"))
+    report.brief, report.sections.search = brief, section
+    ids = [k for k in tr.evidence_catalog(report) if k.startswith("search:")]
+    assert ids == ["search:1"]
+    notes = tr.search_notes(report)
+    assert any("클린뷰티" in n and "기준값이 작아" in n for n in notes)
+    assert any("비건 선크림" in n and "전체 기준" in n for n in notes)
+    assert any("제로웨이스트" in n and "월 검색량만" in n for n in notes)
+
+
+def test_monthly_volume_reuses_keyword_pool_of_today(tmp_path: Path) -> None:
+    from data_agent import keyword_pool
+
+    path = tmp_path / "pool.db"
+    pool = keyword_pool.PoolStore(path)
+    pool.save(TODAY, [keyword_pool.PoolRow("리필화장품", 100, 200, False, False, "low",
+                                           "related", None)], "ok", None, 1, 1, NOW)  # fmt: skip
+    pool.close()
+    searchad = FakeSearchAd({"비건선크림": (10, 20)})
+    got, calls = asyncio.run(tr.monthly_volumes(["리필 화장품", "비건 선크림"], searchad, path,
+                                                TODAY))  # fmt: skip
+    assert got == {"리필 화장품": 300, "비건 선크림": 30}
+    assert searchad.hints == [["비건선크림"]] and calls == 1  # 풀에 있는 건 다시 묻지 않음
+    # 어제 풀이면 쓰지 않는다
+    got, _ = asyncio.run(tr.monthly_volumes(["리필 화장품"], None, path,
+                                            TODAY + timedelta(days=1)))  # fmt: skip
+    assert got == {}
+
+
+# A4 쇼핑인사이트: 창 끝 = 값이 있는 마지막 날, 빈 이유 셋으로
+
+
+def test_shopping_window_ends_at_last_value_day() -> None:
+    brief = asyncio.run(tb.resolve(TrendReportInput(preset="eco_beauty"), FakeLLM())).brief
+    late = END - timedelta(days=3)  # 사흘 늦게 채워짐
+    pts = [(d, v) for d, v in _points(5, 4.5, end=late)] + [(END, 0.0)]
+    pct, why, last = tr.shopping_change({"20": pts, "30": pts}, ["20", "30"], brief)
+    assert (pct, why, last) == (-10.0, None, late)
+
+
+def test_shopping_empty_reasons_are_separated() -> None:
+    brief = asyncio.run(tb.resolve(TrendReportInput(preset="eco_beauty"), FakeLLM())).brief
+    pct, why, _ = tr.shopping_change({}, ["20", "30"], brief)
+    assert pct is None and why and why.startswith("그 분야에 없는 키워드")
+    pct, why, _ = tr.shopping_change({"40": list(_points(5, 5))}, ["20", "30"], brief)
+    assert pct is None and why and why.startswith("값이 너무 적음") and "여성" in why
+    few = [(END - timedelta(days=1), 3.0), (END, 2.0)]
+    pct, why, _ = tr.shopping_change({"20": few}, ["20", "30"], brief)
+    assert pct is None and why and "값이 있는 날 2일" in why
+
+
+def test_shopping_request_error_reason_keeps_http_code(tmp_path: Path) -> None:
+    class Broken(FakeShopping):
+        async def keyword_age(self, *args: Any, **kwargs: Any) -> Any:
+            self.calls_today += 1
+            raise ConnectorUnavailable("BAD_REQUEST", "네이버 쇼핑인사이트 응답 400 (BAD_REQUEST)")
+
+    brief = asyncio.run(tb.resolve(TrendReportInput(preset="eco_beauty"), FakeLLM())).brief
+    section, _, _ = asyncio.run(tr.search_section(brief, "50000002", FakeSearch(), Broken(),
+                                                  _env(tmp_path), NOW))  # fmt: skip
+    why = section.rows[0].shopping_reason or ""
+    assert why.startswith("요청 오류 [BAD_REQUEST]") and "400" in why
+
+
+def test_shopping_request_body_and_doc_example_parse() -> None:
+    """공식 문서(naver-api-hub-shopping-insight-keyword-age.md)의 본문 필드·응답 예시."""
+    sent: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "startDate": "2023-11-01", "endDate": "2023-11-07", "timeUnit": "date",
+            "results": [{"title": "정장", "keyword": ["정장"], "data": [
+                {"period": "2023-11-01", "ratio": 18.18181, "group": "20"},
+                {"period": "2023-11-01", "ratio": 18.18181, "group": "30"},
+                {"period": "2023-11-01", "ratio": 36.36363, "group": "40"},
+                {"period": "2023-11-01", "ratio": 9.0909, "group": "50"}]}]})  # fmt: skip
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    conn = naver_shopping.NaverShoppingConnector(
+        {"NAVER_HUB_CLIENT_ID": "i", "NAVER_HUB_CLIENT_SECRET": "s"}, client=client,
+        cache=naver_shopping.DayCache())  # fmt: skip
+    got = asyncio.run(conn.keyword_age("50000000", "정장", date(2023, 11, 1), date(2023, 11, 7),
+                                       gender="f"))  # fmt: skip
+    assert sent == [{"startDate": "2023-11-01", "endDate": "2023-11-07", "timeUnit": "date",
+                     "category": "50000000", "keyword": "정장", "gender": "f"}]  # fmt: skip
+    assert got["20"] == [(date(2023, 11, 1), 18.18181)] and set(got) == {"20", "30", "40", "50"}
+
+
+# F13 경쟁사 표시 이름·traits_structured, 근거 short
+
+
+def test_competitor_name_and_structured_traits() -> None:
+    items = _account("toun28_official")
+    for i in range(10, 20):
+        items[i] = _post("toun28_official", i, days_ago=0.5 + i, reels=False)
+    for i in range(5):  # 잘 된 것(릴스 조회 상위)은 질문으로 시작
+        items[i] = _post("toun28_official", i, days_ago=0.5 + i, views=5000 + i,
+                         caption="써 보셨어요?\n긴 캡션 " * 5)  # fmt: skip
+    for m in items:
+        m[st_owner()] = "톤28"
+    row = tr.competitor_row("toun28_official", items, NOW)
+    assert row.name == "톤28"
+    labels = {t.label for t in row.traits_structured}
+    assert labels and labels <= {"릴스 비율", "첫 줄 질문", "올린 시간", "캡션 길이"}
+    assert all(t.baseline.startswith("평소") or ", 평소" in t.baseline
+               for t in row.traits_structured)  # fmt: skip
+    nameless = tr.competitor_row("x", _account("x"), NOW)
+    assert nameless.name is None
+
+
+def test_evidence_short_and_items_and_limit_groups(tmp_path: Path) -> None:
+    report = _filled(tmp_path)
+    catalog = tr.evidence_catalog(report)
+    assert catalog and all(len(short) <= tr.SHORT_MAX for _, _, short in catalog.values())
+    assert tr.short_of("가" * 40) == "가" * 29 + "…"
+    beats = report.sections.recommendation.beats
+    assert beats and all([e.text for e in b.evidence_items] == b.evidence for b in beats)
+    assert all(e.id in catalog for b in beats for e in b.evidence_items)
+    groups = report.limit_groups
+    assert groups.method == list(tr.METHOD_LIMITS)
+    assert groups.cannot_see == list(tr.CANNOT_SEE_LIMITS)
+    assert groups.this_report and not set(groups.this_report) & set(tr.FIXED_LIMITS)
+    assert set(groups.this_report) <= set(report.limits)
+    assert any("19세" in line for line in groups.this_report)
+    assert report.brief.competitor_names.keys() == set(report.brief.competitors)

@@ -430,22 +430,65 @@ def _posted(m: Mapping[str, Any]) -> datetime | None:
             return None
 
 
+MIN_BASELINE = 3  # 중앙값을 내려면 그 지표 값이 이만큼은 있어야 한다
+
+
+def _int(m: Mapping[str, Any], key: str) -> int | None:
+    v = m.get(key)
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _is_reel(m: Mapping[str, Any]) -> bool:
+    return m.get("media_product_type") == "REELS"
+
+
+def baselines(items: Sequence[Mapping[str, Any]]) -> dict[str, float]:
+    """계정 기준 중앙값: 릴스 조회수(릴스끼리)·좋아요(모든 게시물). 값이 3개 미만인 지표는 없음."""
+    views = [v for m in items if _is_reel(m) and (v := _int(m, "view_count")) is not None]
+    likes = [v for m in items if (v := _int(m, "like_count")) is not None]
+    out: dict[str, float] = {}
+    if len(views) >= MIN_BASELINE:
+        out["view_count"] = float(statistics.median(views))
+    if len(likes) >= MIN_BASELINE:
+        out["like_count"] = float(statistics.median(likes))
+    return out
+
+
+def judge(m: Mapping[str, Any], base: Mapping[str, float]) -> tuple[str, int, float] | None:
+    """(비교한 지표, 값, 그 지표 계정 중앙값). 지표를 섞지 않는다.
+
+    릴스는 릴스 조회수 중앙값과 비교하고, 릴스 조회수 값이 3개 미만(또는 이 릴스에 조회수가
+    없음)이면 좋아요끼리 비교한다. 릴스가 아니면 좋아요끼리. 비교할 수 없으면 None(판정 안 함).
+    """
+    order = ("view_count", "like_count") if _is_reel(m) else ("like_count",)
+    for metric in order:
+        value = _int(m, metric)
+        median = base.get(metric)
+        if value is not None and median is not None and median > 0:
+            return metric, value, median
+    return None
+
+
 def bursts(media: Mapping[str, Sequence[Mapping[str, Any]]], now: datetime,
            config: IgConfig) -> list[InstagramRadarPost]:  # fmt: skip
-    """계정마다 중앙값의 burst_ratio배 이상이고 게시 burst_days일 안인 게시물 (순수 계산)."""
+    """계정마다 같은 지표 중앙값의 burst_ratio배 이상이고 게시 burst_days일 안인 게시물 (순수 계산).
+
+    릴스 조회수와 사진 좋아요를 섞어 중앙값을 내지 않는다(`judge`). account_median·metric은
+    실제로 비교한 지표다.
+    """
     out: list[InstagramRadarPost] = []
     since = now - timedelta(days=config.burst_days)
     for account, items in media.items():
-        values = [v for m in items if (v := _metric(m)[1]) is not None]
-        if len(values) < 3:
-            continue
-        median = statistics.median(values)
-        if median <= 0:
+        base = baselines(items)
+        if not base:
             continue
         for m in items:
-            name, value = _metric(m)
+            got = judge(m, base)
             at = _posted(m)
-            if value is None or at is None or at < since or value < median * config.burst_ratio:
+            if got is None or at is None or at < since:
+                continue
+            name, value, median = got
+            if value < median * config.burst_ratio:
                 continue
             cap = str(m.get("caption") or "")
             out.append(InstagramRadarPost(
@@ -493,14 +536,18 @@ def group_bursts(posts: Sequence[InstagramRadarPost], captions: Mapping[str, str
                  min_accounts: int) -> list[Group]:  # fmt: skip
     """해시태그·캡션 구절(trend_memes 정규화)이 겹치는 게시물끼리 묶는다 (순수 계산).
 
-    (이름, 묶은 단위 표기, 게시물). 같은 단위를 쓴 계정이 `min_accounts` 이상인 단위만
-    묶음 씨앗이 된다.
+    (이름, 묶은 단위 표기, 게시물). 의미 없는 단위(`caption_noise.noise`: 표기용 태그·이벤트
+    상투어·"수 있습니다"·"of the" 같은 흔한 말)를 빼고, 같은 단위를 쓴 계정이 `min_accounts`
+    이상인 단위만 묶음 씨앗이 된다.
     """
+    from data_agent.skills.caption_noise import noise
     from data_agent.skills.trend_memes import units_of
 
     units: dict[str, dict[str, Any]] = {}
     for p in posts:
         for key, unit in units_of(captions.get(p.media_id, ""), ()).items():
+            if noise(key):
+                continue
             u = units.setdefault(key, {"surface": unit.surface, "posts": [], "accounts": set()})
             u["posts"].append(p)
             u["accounts"].add(p.account)

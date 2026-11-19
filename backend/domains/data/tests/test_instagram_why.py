@@ -188,7 +188,9 @@ def test_group_has_facts_line_and_fixed_unknown(tmp_path: Path) -> None:
     # 게시물 한 줄 근거 (코드 템플릿)
     assert g.top_posts[0].standout is not None
     # 판정·배수는 그대로
-    assert g.accounts == 2 and g.best_ratio == 5.0 and g.ad_material == "ok"
+    # 2026-11-19 배수 고침: 캐러셀 좋아요 5000은 좋아요 중앙값 100과 비교해 50배
+    # (예전에는 릴스 조회수 1000과 섞은 중앙값과 비교해 5배로 나왔다)
+    assert g.accounts == 2 and g.best_ratio == 50.0 and g.ad_material == "ok"
 
 
 @pytest.mark.parametrize("error", [RuntimeError("timeout"), LLMNotConfiguredError("no key"),

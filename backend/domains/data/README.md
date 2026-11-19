@@ -1154,10 +1154,17 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
   3. content: 의뢰 계정 터진 게시물 상위 8개(배수 순, 썸네일·`standout`) + trend_memes 저장 결과 중 광고 재료 `ok` 3개
   4. competitors: 경쟁사마다 주당 게시 수(최근 20개 기간), 릴스 비율, 릴스 조회수 중앙값, 최고 게시물(계정 중앙값 대비 배수), 잘 된 게시물(지표 상위 5개)의 공통점(`instagram_why.compare_facts`: 형식·첫 줄 질문·캡션 길이·시간대 중 평소와 차이 큰 것 최대 2개, 코드 템플릿). 못 읽은 계정은 `accounts_failed`
   5. recommendation: LLM 1번. 입력은 섹션 1~4 사실을 숫자 없이 말로 바꾼 것 + brief. 결론 한 줄 + 콘티 4칸(0-3 훅·3-15 전환·15-25 증거·25-30 마무리), 칸마다 근거 id(`search:1`·`hashtag:2`…)를 고르게 하고 근거 숫자 문장은 코드가 그 id로 붙인다. 없는 id·숫자 든 문장·틀린 칸은 버린다. LLM 실패·하루 상한(`DATA_LLM_DAILY_TOKENS`)이면 이 섹션만 이유와 함께 비운다. 음악은 추천하지 않는다(고정 "저작권 문제없는 라이브러리 음원 중 선택"). 결론은 `summary_line`
-  - limits: 코드 고정 문장 + 이번 보고서에서 생긴 것(못 읽은 계정·한도·밈 없음 등)
+  - limits: 코드 고정 문장 + 이번 보고서에서 생긴 것(못 읽은 계정·한도·밈 없음 등). `limit_groups`에 셋으로도 나눈다: method(숫자 계산 방식)·cannot_see(볼 수 없는 것)·this_report(이번 보고서에서 생긴 것만)
+- **v2 (2026-11-19, 보고서 tr_4913cb6a11274238에서 나온 문제)**
+  - 터짐 배수는 같은 지표끼리(`instagram.baselines`·`judge`): 릴스는 그 계정 릴스 조회수 중앙값, 나머지는 좋아요 중앙값과 비교. 릴스 조회수 값이 3개 미만이면 릴스도 좋아요끼리, 둘 다 3개 미만이면 판정하지 않음. 레이더·why_facts·보고서 섹션 3·4가 같이 바뀐다(예전 ×158.9는 사진 위주 계정 릴스 조회수를 좋아요가 섞인 중앙값과 비교한 것)
+  - 의미 없는 캡션 단위(`skills/caption_noise.py`, 보고서 해시태그·인스타 레이더 묶음이 같이 씀): 표기용 태그, 이벤트 상투어(당첨자 발표·참여 방법·추첨을 통해·지금 바로·댓글로·팔로우하고·이벤트 기간), 흔한 말(서술어가 든 구 "수 있습니다", 영어 불용어 쌍 "of the"). 레이더 `group_bursts`는 이것을 뺀 뒤 2곳 이상 남는 단위만 묶음 씨앗으로 쓴다
+  - 해시태그: 표기용 태그(`HIDDEN_TAGS`: 광고·유료광고·협찬·제작지원·체험단·이벤트·ad·sponsored 등)는 세지 않고, 매거진(프리셋 `media_accounts`)은 "쓴 계정 수"에서 뺀다(섹션 3에는 그대로). 남는 태그가 없으면 unknown "뷰티 계정이 같이 쓴 태그 없음". 행에 `used_by`(최대 5)·`is_new`(직전 0곳·이번 3곳 이상)
+  - 검색: ① 연령·성별 필터 → ② 값이 없으면 필터 없이(전체, 그 키워드만 한 요청) → ③ 그래도 없으면 검색광고 월 검색량만. 행 `basis`(filtered·all·volume_only·none)·`monthly_volume`(PC+모바일, 그날 keyword_pool 값을 먼저, 없으면 검색광고 키워드 도구 1번). 직전 28일 평균 < 2.0이거나 0인 날이 절반 이상이면 `small_base`(화면 "급증(기준값 작음)"). AI 추천 근거에는 basis filtered이고 small_base 아닌 행만
+  - 쇼핑인사이트: 7일 더 앞부터 받아 창 끝을 "값이 있는 마지막 날"로(늦게 채워짐 대비). 비면 이유를 나눈다: 요청 오류 [코드] / 그 분야에 없는 키워드 / 값이 너무 적음
+  - 계약 추가: brief `goal`·`format_parts`·`competitor_names`(business_discovery `name`, 같은 호출), 경쟁사 행 `name`·`traits_structured`, 콘티 `evidence_items`(id·text·short 30자 이내), `limit_groups`
 - **호출량·한도**
   - 인스타: 의뢰 계정(경쟁사 ∪ 추가 계정 ∪ 프리셋 계정, 최대 45곳)을 한 번씩 business_discovery(최근 20개). 하루 상한 `DATA_IG_DAILY_LIMIT`(수집기와 같은 카운터)·앱 한도(code 4 등)·키 없음·토큰 만료면 그 자리에서 멈추고 나머지는 "못 읽음(한도)". 같은 날 같은 계정은 보고서 저장소(`ig_media`) → 오늘 다 돈 레이더(`radar_latest`) 순으로 다시 쓴다
-  - 네이버: 검색어 트렌드 1번 + 쇼핑인사이트 키워드마다 1번(최대 6번). 커넥터 하루 캐시·네이버 전체 상한과 trend_age 예산 표(호출자 `trend_report`)를 같이 쓴다(새 예산 없음). 한도면 그 키워드만 "확인 안 함(한도)"
+  - 네이버: 검색어 트렌드 1번(필터로 값이 없는 키워드가 있으면 전체로 1번 더) + 쇼핑인사이트 키워드마다 1번(최대 7번) + 검색광고 키워드 도구 최대 1번(그날 keyword_pool에 없을 때, 검색광고 하루 상한). 커넥터 하루 캐시·네이버 전체 상한과 trend_age 예산 표(호출자 `trend_report`)를 같이 쓴다(새 예산 없음). 한도면 그 키워드만 "확인 안 함(한도)"
   - LLM: 보고서당 최대 2번
 - **실행·저장**: data 에이전트 프로세스 안 asyncio 작업, 동시에 1개(나머지 대기). 상태 queued·running·done·partial·failed·interrupted, 섹션별 상태도 저장(`trend_report_store.py`, SQLite `DATA_TREND_REPORT_DB`, 비면 메모리. `run_all.sh`는 `backend/.data/trend_reports.db`). 다시 켜지면 대기·진행으로 남은 보고서는 "중단됨 + 다시 만들기 필요". 같은 날 같은 의뢰(정규화한 입력 해시)는 저장본을 연다(`rebuild: true`면 새로). 보고서 기록은 분석 결과 보관이라 `execute()`를 부르지 않는다
 - **이벤트**: 완료·부분 완료·실패 때 `data.trend_report_ready`(source `data`, idempotency_key `<report_id>:<status>`, data `{report_id, status, context_id, caller, summary_line}`)를 `metric.anomaly`와 같은 `ax_agent_template.events.publish`로 보낸다. 지금 총괄은 이 이벤트를 무시한다(총괄 plan은 다음 단계). 보내지 못하면(`EventBusUnavailable` 등) 로그 한 줄만 남기고 보고서는 그대로

@@ -1,7 +1,8 @@
 // 트렌드 분석 의뢰 보고서 화면(components/data/TrendRequest.tsx · TrendReportView.tsx)의 순수 계산. node --test로 시험한다 (trendReport.test.ts).
 // 숫자는 서버 값 그대로 글자로만 바꾼다. 모르면 0이 아니라 서버 이유를 보여 준다.
 import type {
-  BeatSlot, FieldSource, ReportStatus, SectionStatus, TrendReportBeat, TrendReportCaller, TrendReportGender, TrendReportInput,
+  BeatSlot, FieldSource, ReportStatus, SectionStatus, TrendEvidenceItem, TrendReport, TrendReportBeat, TrendReportBrief, TrendReportCaller,
+  TrendReportCompetitorRow, TrendReportGender, TrendReportHashtagRow, TrendReportInput, TrendReportSearchRow, TrendTraitStructured,
 } from "./data.ts";
 
 /** 진행 중 보고서를 다시 읽는 간격 */
@@ -125,9 +126,25 @@ export interface RequestForm {
   format: string;
   competitors: string;
   keywords: string;
+  goal: string;
 }
 
-export const EMPTY_FORM: RequestForm = { requestText: "", preset: "", product: "", gender: "all", ages: [], format: "", competitors: "", keywords: "" };
+export const EMPTY_FORM: RequestForm = { requestText: "", preset: "", product: "", gender: "all", ages: [], format: "", competitors: "", keywords: "", goal: "" };
+
+/** 보고서의 의뢰 요약 → "직접 정하기" 폼 (고쳐서 다시 만들기). 의뢰문은 비운다 */
+export function formFromBrief(b: TrendReportBrief): RequestForm {
+  return {
+    ...EMPTY_FORM,
+    preset: b.preset ?? "",
+    product: b.product ?? "",
+    goal: b.goal ?? "",
+    gender: b.target_gender ?? "all",
+    ages: [...b.target_ages],
+    format: b.format ?? "",
+    competitors: b.competitors.join(", "),
+    keywords: b.keywords.join(", "),
+  };
+}
 
 /** 폼 → 서버 입력. 의뢰문이 있으면 request_text만 보낸다. 없으면 직접 정한 칸(빈 칸은 null) */
 export function buildInput(form: RequestForm, rebuild = false): TrendReportInput {
@@ -139,6 +156,7 @@ export function buildInput(form: RequestForm, rebuild = false): TrendReportInput
     ...base,
     preset: form.preset || null,
     product: form.product.trim() || null,
+    ...(form.goal.trim() ? { goal: form.goal.trim() } : {}),
     target_gender: form.gender === "all" ? null : form.gender,
     target_ages: form.ages.length ? [...form.ages].sort() : null,
     format: form.format.trim() || null,
@@ -151,4 +169,215 @@ export function buildInput(form: RequestForm, rebuild = false): TrendReportInput
 export function hasInput(form: RequestForm): boolean {
   const i = buildInput(form);
   return Boolean(i.request_text || i.preset || i.product || i.format || i.competitors || i.keywords || i.target_gender || i.target_ages);
+}
+
+// ---- v2 헤더: "항목 | 칩"
+
+export interface HeaderChip { text: string; sub: string | null }
+export interface HeaderRow { key: "product" | "target" | "format" | "competitors" | "keywords"; label: string; chips: HeaderChip[]; sourceTag: string | null }
+
+/** 출처 꼬리표: 직접 입력(또는 모름)이면 없음 */
+export function sourceTag(s: FieldSource | null | undefined): string | null {
+  if (s === "request_text") return "의뢰문에서 추정";
+  if (s === "preset") return "프리셋에서 채움";
+  return null;
+}
+
+/** 경쟁사 칩: 이름이 있으면 이름 + "@아이디", 없으면 "@아이디"만 */
+export function competitorChip(id: string, names?: Record<string, string | null> | null): HeaderChip {
+  const name = names?.[id]?.trim();
+  return name ? { text: name, sub: `@${id}` } : { text: `@${id}`, sub: null };
+}
+
+/** "여성" / "20대" / "30대" 칩 (모르면 "전체") */
+export function targetChips(gender: TrendReportGender | null, ages: string[]): string[] {
+  const out: string[] = [];
+  if (gender) out.push(GENDER_LABEL[gender]);
+  for (const a of ages) out.push(`${a}대`);
+  return out.length ? out : ["전체"];
+}
+
+/** 헤더 행들. 제품 행의 목표 칩은 화면이 brief.goal로 그린다. 결과물은 format_parts가 있으면 그것, 없으면 통째로 한 칩 (공백으로 쪼개지 않는다) */
+export function headerRows(b: TrendReportBrief): HeaderRow[] {
+  const parts = (b.format_parts ?? []).filter(Boolean);
+  const format: HeaderChip[] = parts.length ? parts.map((p) => ({ text: p, sub: null })) : b.format ? [{ text: b.format, sub: null }] : [];
+  const src = b.sources;
+  return [
+    { key: "product", label: "제품", chips: b.product ? [{ text: b.product, sub: null }] : [], sourceTag: sourceTag(src.product) },
+    { key: "target", label: "누구에게", chips: targetChips(b.target_gender, b.target_ages).map((t) => ({ text: t, sub: null })), sourceTag: sourceTag(src.target) },
+    { key: "format", label: "무엇을", chips: format, sourceTag: sourceTag(src.format) },
+    { key: "competitors", label: `경쟁사 ${b.competitors.length}`, chips: b.competitors.map((c) => competitorChip(c, b.competitor_names)), sourceTag: sourceTag(src.competitors) },
+    { key: "keywords", label: `키워드 ${b.keywords.length}`, chips: b.keywords.map((k) => ({ text: k, sub: null })), sourceTag: sourceTag(src.keywords) },
+  ];
+}
+
+// ---- v2 AI 추천: 콘티 타임라인 · 근거
+
+export const SLOT_SECONDS: Record<BeatSlot, number> = { "0-3": 3, "3-15": 12, "15-25": 10, "25-30": 5 };
+
+/** 칸 폭(%): 초에 비례 (3:12:10:5). 합이 100 */
+export function beatWidths(slots: string[]): number[] {
+  const secs = slots.map((s) => SLOT_SECONDS[s as BeatSlot] ?? 5);
+  const total = secs.reduce((a, b) => a + b, 0);
+  return total > 0 ? secs.map((s) => (s / total) * 100) : secs;
+}
+
+/** 근거 id("search:1") → 근거 데이터 행의 DOM id */
+export function evidenceDomId(id: string): string {
+  return `tr-ev-${id.replace(/[^A-Za-z0-9_-]+/g, "-")}`;
+}
+
+/** 칸의 근거 항목: evidence_items가 있으면 그것, 옛 저장본이면 문장만 (id 없음) */
+export function beatEvidence(b: TrendReportBeat): { id: string | null; text: string }[] {
+  if (b.evidence_items?.length) return b.evidence_items.map((e) => ({ id: e.id, text: e.text }));
+  return b.evidence.map((text) => ({ id: null, text }));
+}
+
+/** 핵심 근거 칩: beat 순서대로 id 중복 없이 최대 3개의 short */
+export function keyEvidence(beats: TrendReportBeat[], max = 3): TrendEvidenceItem[] {
+  const seen = new Set<string>();
+  const out: TrendEvidenceItem[] = [];
+  for (const b of beats) {
+    for (const e of b.evidence_items ?? []) {
+      if (seen.has(e.id) || !e.short) continue;
+      seen.add(e.id);
+      out.push(e);
+      if (out.length >= max) return out;
+    }
+  }
+  return out;
+}
+
+/** 근거 목록을 펼쳐 둘지: 인쇄 중이면 항상 펼친다 */
+export function evidenceExpanded(open: boolean, printing: boolean): boolean {
+  return open || printing;
+}
+/** 화면에서는 접혀도 DOM에 두고, 인쇄에서는 보이게 하는 클래스 */
+export function evidenceListClass(open: boolean): string {
+  return open ? "block" : "hidden print:block";
+}
+
+// ---- v2 1 검색
+
+export type SearchKind = "filtered" | "small_base" | "all" | "volume_only" | "none";
+
+/** basis 없는 옛 저장본: 검색 값이 있으면 filtered, 없으면 none */
+export function searchKind(r: TrendReportSearchRow): SearchKind {
+  const b = r.basis ?? (r.search_change_pct != null ? "filtered" : "none");
+  if (b === "filtered" && r.small_base) return "small_base";
+  return b;
+}
+
+const KIND_ORDER: Record<SearchKind, number> = { filtered: 0, small_base: 1, all: 2, volume_only: 3, none: 4 };
+
+/** 거른 값 변화 큰 순 → 기준값 작음 → 전체 기준 → 검색량만 → 없음 (같으면 원래 순서) */
+export function sortSearchRows(rows: TrendReportSearchRow[]): TrendReportSearchRow[] {
+  return rows.map((r, i) => ({ r, i, k: searchKind(r) }))
+    .sort((x, y) => KIND_ORDER[x.k] - KIND_ORDER[y.k]
+      || (x.k === "filtered" ? (y.r.search_change_pct ?? 0) - (x.r.search_change_pct ?? 0) : 0) || x.i - y.i)
+    .map((x) => x.r);
+}
+
+export interface SearchMain { kind: SearchKind; text: string; known: boolean; /** 막대에 쓸 값 */ bar: number | null; small: string | null }
+
+/** 검색 한 줄의 오른쪽 값 */
+export function searchMain(r: TrendReportSearchRow): SearchMain {
+  const kind = searchKind(r);
+  const p = pctText(r.search_change_pct, r.search_reason);
+  switch (kind) {
+    case "small_base": return { kind, text: "급증(기준값 작음)", known: true, bar: null, small: p.known ? p.text : null };
+    case "volume_only": return { kind, text: r.monthly_volume != null ? `월 검색 ${r.monthly_volume.toLocaleString("ko-KR")}` : "값 없음", known: false, bar: null, small: null };
+    case "none": return { kind, text: r.search_reason || "값 없음", known: false, bar: null, small: null };
+    default: return { kind, text: p.text, known: p.known, bar: p.known ? r.search_change_pct : null, small: null };
+  }
+}
+
+/** 키워드 아래 작은 글 줄들: 월 검색 · 쇼핑 · 기준 설명 */
+export function searchNotes(r: TrendReportSearchRow, b: Pick<TrendReportBrief, "target_gender" | "target_ages">): string[] {
+  const who = targetText(b.target_gender, b.target_ages);
+  const kind = searchKind(r);
+  const out: string[] = [];
+  if (r.monthly_volume != null && kind !== "volume_only") out.push(`월 검색 ${r.monthly_volume.toLocaleString("ko-KR")}`);
+  if (r.shopping_change_pct != null) {
+    const p = pctText(r.shopping_change_pct, null).text;
+    out.push(`쇼핑 클릭(${who}) ${r.shopping_small_base ? `급증(기준값 작음) ${p}` : p}`);
+  } else if (r.shopping_reason) {
+    // 비었으면 이유를 그대로 (요청 오류 / 그 분야에 없는 키워드 / 값이 너무 적음 / 한도)
+    out.push(`쇼핑: ${r.shopping_reason}`);
+  }
+  if (kind === "all") out.push(r.search_reason || `${who}로 거르면 값이 없음 → 전체 기준`);
+  return out;
+}
+
+// ---- v2 2 해시태그
+
+export const HASHTAG_HIDDEN_NOTE = "숨긴 것: 표기용 태그(#광고·#제작지원 등)와 매거진 협찬 태그는 세지 않아요";
+
+/** "톤28 · 비플레인 · 라운드랩 외 N곳 · 터진 게시물 M" */
+export function hashtagMeta(r: TrendReportHashtagRow, names: Record<string, string | null | undefined> = {}): string {
+  const shown = (r.used_by ?? []).map((id) => names[id]?.trim() || `@${id}`);
+  const parts: string[] = [];
+  if (shown.length) {
+    const more = r.accounts - shown.length;
+    parts.push(more > 0 ? `${shown.join(" · ")} 외 ${more}곳` : shown.join(" · "));
+  }
+  parts.push(`터진 게시물 ${r.burst_posts.toLocaleString("ko-KR")}`);
+  return parts.join(" · ");
+}
+
+// ---- v2 4 경쟁사
+
+/** 최고 게시물 배수 큰 순 (없으면 뒤) */
+export function sortCompetitors(rows: TrendReportCompetitorRow[]): TrendReportCompetitorRow[] {
+  return rows.map((r, i) => ({ r, i }))
+    .sort((x, y) => (y.r.best_post?.ratio ?? -1) - (x.r.best_post?.ratio ?? -1) || x.i - y.i).map((x) => x.r);
+}
+
+/** "잘 된 건 전부 릴스 (평소 35%)" 같은 문장 (코드 템플릿) */
+export function traitSentence(t: TrendTraitStructured): string {
+  switch (t.label) {
+    case "릴스 비율": return t.value.trim() === "100%" ? `잘 된 건 전부 릴스 (${t.baseline})` : `잘 된 건 릴스 ${t.value} (${t.baseline})`;
+    case "첫 줄 질문": return `첫 줄이 질문으로 시작 (${t.value}, ${t.baseline})`;
+    case "올린 시간": return `${t.value}에 올림 (${t.baseline})`;
+    case "캡션 길이": return `캡션 ${t.value} (${t.baseline})`;
+    default: return `${t.label} ${t.value} (${t.baseline})`;
+  }
+}
+
+/** 카드의 "잘 된 게시물은" 줄들: 구조화 값이 있으면 문장, 없으면 옛 traits 글 */
+export function traitLines(r: TrendReportCompetitorRow): string[] {
+  return r.traits_structured?.length ? r.traits_structured.map(traitSentence) : r.traits;
+}
+
+/** 경쟁사 위 한 줄 요약: 가장 많은 경쟁사가 공유한 특징 (같으면 릴스 먼저). 없으면 null */
+export function competitorSummary(rows: TrendReportCompetitorRow[]): string | null {
+  const total = rows.length;
+  if (!total) return null;
+  const reels = rows.filter((r) => r.best_post?.media_product_type === "REELS").length;
+  const count = (label: TrendTraitStructured["label"]) => rows.filter((r) => r.traits_structured?.some((t) => t.label === label)).length;
+  const cands: [number, string][] = [
+    [reels, `경쟁사 ${total}곳 중 ${reels}곳의 최고 게시물이 릴스`],
+    [count("첫 줄 질문"), `경쟁사 ${total}곳 중 ${count("첫 줄 질문")}곳의 잘 된 게시물이 첫 줄을 질문으로 시작`],
+    [count("올린 시간"), `경쟁사 ${total}곳 중 ${count("올린 시간")}곳의 잘 된 게시물이 비슷한 시간대에 올라옴`],
+    [count("캡션 길이"), `경쟁사 ${total}곳 중 ${count("캡션 길이")}곳의 잘 된 게시물 캡션 길이가 평소와 다름`],
+  ];
+  let best = cands[0];
+  for (const c of cands) if (c[0] > best[0]) best = c;
+  return best[0] > 0 ? best[1] : null;
+}
+
+// ---- v2 근거와 한계
+
+export const LIMIT_GROUPS = [
+  { key: "method", label: "계산 방식", cls: "bg-emerald-50 border-emerald-100 text-emerald-800" },
+  { key: "cannot_see", label: "볼 수 없는 것", cls: "bg-amber-50 border-amber-100 text-amber-800" },
+  { key: "this_report", label: "이번 주의", cls: "bg-red-50 border-red-100 text-red-800" },
+] as const;
+
+/** 한계 세 묶음. limit_groups가 없거나 모두 비면 null (옛 저장본 → 평평한 limits 목록) */
+export function limitGroups(r: Pick<TrendReport, "limit_groups">): { label: string; cls: string; items: string[] }[] | null {
+  const g = r.limit_groups;
+  if (!g) return null;
+  const out = LIMIT_GROUPS.map((x) => ({ label: x.label, cls: x.cls, items: g[x.key] ?? [] })).filter((x) => x.items.length > 0);
+  return out.length ? out : null;
 }

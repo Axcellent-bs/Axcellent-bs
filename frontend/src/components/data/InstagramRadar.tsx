@@ -33,7 +33,7 @@ function ago(iso: string | null): string | null {
 
 /** "갑자기 뜬 게시물" 카드 하나. 트렌드 분석 보고서(TrendReportView) 콘텐츠 섹션도 같이 쓴다.
  *  adMaterial이 없으면(묶음 판정이 없는 게시물) 광고 재료 칩을 그리지 않는다 */
-export function PostCard({ post: p, rank, adMaterial }: { post: InstagramRadarPost; rank: number; adMaterial?: InstagramRadarGroup["ad_material"] }) {
+export function PostCard({ post: p, rank, adMaterial, domId }: { post: InstagramRadarPost; rank: number; adMaterial?: InstagramRadarGroup["ad_material"]; domId?: string }) {
   const link = safeLink(p.permalink);
   const kind = kindLabel(p);
   const ad = adMaterial ? AD[adMaterial] : null;
@@ -53,7 +53,7 @@ export function PostCard({ post: p, rank, adMaterial }: { post: InstagramRadarPo
   );
   const cls = "flex flex-col gap-1 rounded-lg";
   return (
-    <li className="min-w-0">
+    <li id={domId} className="min-w-0">
       {link ? (
         <a href={link} target="_blank" rel="noreferrer noopener"
           className={`${cls} transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500`}

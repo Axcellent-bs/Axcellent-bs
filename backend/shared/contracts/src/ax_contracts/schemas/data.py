@@ -4386,6 +4386,7 @@ class TrendReportInput(AxModel):
     caller: ReportCaller = "human"
     context_id: str | None = None
     rebuild: bool = False  # true면 같은 의뢰 저장본이 있어도 새로 만든다
+    goal: str | None = None  # 목적 ("브랜드 인지도"). product와 따로 (v2 추가)
 
 
 class TrendReportCreated(AxModel):
@@ -4409,6 +4410,7 @@ class TrendReportBriefSources(AxModel):
     format: FieldSource
     competitors: FieldSource
     keywords: FieldSource
+    goal: FieldSource | None = None  # goal이 없으면 None (v2 추가)
 
 
 class TrendReportBrief(AxModel):
@@ -4420,6 +4422,16 @@ class TrendReportBrief(AxModel):
     keywords: list[str] = Field(default_factory=list)
     preset: str | None = None
     sources: TrendReportBriefSources
+    # v2 추가: 목적("브랜드 인지도"), 결과물 칩(코드가 길이 표현만 떼어 냄. 못 나누면 [format]),
+    # 경쟁사 표시 이름(business_discovery `name`, 못 받으면 None)
+    goal: str | None = None
+    format_parts: list[str] = Field(default_factory=list)
+    competitor_names: dict[str, str | None] = Field(default_factory=dict)
+
+
+# 검색 행의 근거: filtered(연령·성별 필터) · all(필터 없이 전체) · volume_only(검색광고 월 검색량만)
+# · none(값 없음)
+SearchBasis = Literal["filtered", "all", "volume_only", "none"]
 
 
 class TrendSearchRow(AxModel):
@@ -4428,6 +4440,12 @@ class TrendSearchRow(AxModel):
     search_reason: str | None = None
     shopping_change_pct: float | None = None
     shopping_reason: str | None = None
+    # v2 추가. small_base: 직전 28일 평균 < 2.0(네이버 상대값)이거나 0인 날이 절반 이상 → 변화율이
+    # 쉽게 커지니 "급증(기준값 작음)"으로 보이고 AI 추천 근거에서 뺀다
+    basis: SearchBasis | None = None  # v1 저장본은 None
+    monthly_volume: int | None = Field(default=None, ge=0)  # 검색광고 월 검색량 (PC+모바일)
+    small_base: bool = False  # 검색 변화율
+    shopping_small_base: bool = False  # 쇼핑 변화율
 
 
 class TrendSearchSection(AxModel):
@@ -4442,12 +4460,17 @@ class TrendHashtagRow(AxModel):
     accounts: int = Field(ge=0)  # 이번 7일에 쓴 계정 수
     previous_accounts: int = Field(ge=0)  # 직전 7일
     burst_posts: int = Field(ge=0)  # 그중 터진 게시물 수
+    # v2 추가: 이번 7일에 쓴 계정 아이디 최대 5 (그 계정 사용 수 많은 순),
+    # 새로 뜸 = 직전 7일 0곳이고 이번 7일 3곳 이상
+    used_by: list[str] = Field(default_factory=list)
+    is_new: bool = False
 
 
 class TrendHashtagSection(AxModel):
     status: SectionStatus = "waiting"
     reason: str | None = None
     rows: list[TrendHashtagRow] = Field(default_factory=list)
+    account_names: dict[str, str] = Field(default_factory=dict)  # v2: used_by 표시 이름 (아는 것만)
 
 
 class TrendReportMeme(AxModel):
@@ -4463,6 +4486,14 @@ class TrendContentSection(AxModel):
     memes: list[TrendReportMeme] = Field(default_factory=list)
 
 
+class TrendCompetitorTrait(AxModel):
+    """잘 된 게시물의 공통점 하나 (v2). 값은 화면에 그대로 쓰는 짧은 문자열."""
+
+    label: Literal["릴스 비율", "첫 줄 질문", "올린 시간", "캡션 길이"]
+    value: str  # "100%" · "밤 9~12시" · "120자"
+    baseline: str  # "평소 35%"
+
+
 class TrendCompetitorRow(AxModel):
     account: str
     posts_per_week: float | None = None
@@ -4471,6 +4502,8 @@ class TrendCompetitorRow(AxModel):
     best_post: InstagramRadarPost | None = None
     traits: list[str] = Field(default_factory=list)  # 잘 된 게시물의 공통점 (코드 템플릿)
     reason: str | None = None
+    name: str | None = None  # v2: 표시 이름 (business_discovery `name`, 못 받으면 None)
+    traits_structured: list[TrendCompetitorTrait] = Field(default_factory=list)  # v2
 
 
 class TrendAccountFailed(AxModel):
@@ -4485,10 +4518,21 @@ class TrendCompetitorSection(AxModel):
     accounts_failed: list[TrendAccountFailed] = Field(default_factory=list)
 
 
+class TrendReportEvidence(AxModel):
+    """콘티 근거 하나 (v2). id = "<섹션>:<행 번호(1부터)>" (search·shopping·hashtag·content·
+    meme·competitor). 행 번호는 그 섹션 rows(content는 posts·memes) 순서."""
+
+    id: str
+    text: str  # evidence의 같은 자리 문장
+    short: str = Field(max_length=30)  # 칩용 짧은 형태 ("비건 선크림 검색 +14%")
+
+
 class TrendBeat(AxModel):
     slot: BeatSlot
     text: str
     evidence: list[str] = Field(default_factory=list)  # 코드가 만든 근거 문장
+    # v2: evidence와 같은 순서
+    evidence_items: list[TrendReportEvidence] = Field(default_factory=list)
 
 
 class TrendRecommendationSection(AxModel):
@@ -4513,6 +4557,14 @@ class TrendReportCalls(AxModel):
     llm: int = Field(default=0, ge=0)
 
 
+class TrendLimitGroups(AxModel):
+    """근거와 한계를 셋으로 (v2). limits는 그대로 채운다."""
+
+    method: list[str] = Field(default_factory=list)  # 숫자 계산 방식
+    cannot_see: list[str] = Field(default_factory=list)  # 볼 수 없는 것
+    this_report: list[str] = Field(default_factory=list)  # 이번 보고서에서 생긴 주의
+
+
 class TrendReport(AxModel):
     report_id: str
     status: ReportStatus
@@ -4526,6 +4578,7 @@ class TrendReport(AxModel):
     sections: TrendReportSections = Field(default_factory=TrendReportSections)
     limits: list[str] = Field(default_factory=list)  # 근거와 한계 문장
     calls: TrendReportCalls = Field(default_factory=TrendReportCalls)
+    limit_groups: TrendLimitGroups = Field(default_factory=TrendLimitGroups)  # v2
 
 
 class TrendReportListItem(AxModel):
