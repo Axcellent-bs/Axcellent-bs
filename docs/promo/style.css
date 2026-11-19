@@ -194,7 +194,7 @@ body { overflow-x: clip; }
 
 /* ---------- 고객사 ---------- */
 .cards { margin-top: var(--gap-block); display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
-.cust { background: var(--paper); border-radius: 26px; padding: 18px 18px 26px; max-width: 960px; }
+.cust { background: var(--paper); border-radius: 26px; padding: 18px 18px 26px; width: 100%; margin-inline: auto; }
 .cust img { border-radius: 16px; border: 1px solid var(--line); width: 100%; height: auto; margin-bottom: 18px; }
 .cust h3 { font-size: 28px; font-weight: 800; padding: 0 8px; }
 .badges { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 8px 8px; }
