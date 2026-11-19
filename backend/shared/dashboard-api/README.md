@@ -12,6 +12,11 @@
 ## 3. 입출력 계약
 응답은 성공 `{data, meta}`, 실패 `{error: {code, message}}`. 모델은 `schemas.py`이고 OpenAPI는 `contracts/openapi/dashboard-api.json`으로 CI가 내보낸다.
 
+토큰: 읽기·쓰기 모두 사람 토큰(로그인 세션·공용 토큰)이 있어야 한다(`auth.require_human`). 역할은 보지 않아서 일반회원 세션도 통과한다.
+토큰 없이 열린 경로는 `auth.PUBLIC_ROUTES` 한 곳에만 적는다: `GET /health`, 로그인 전 화면이 쓰는
+`GET /api/dashboard/auth/status`·`POST /api/dashboard/auth/login`·`GET /api/dashboard/auth/company`(설치된 회사 id·이름·사이트 주소만, `public_info.py`).
+역할로 막는 것은 계정 관리(`/auth/accounts*`)와 연결 키 쓰기(`/connection-keys/issue·revoke` 운영자, `/connect·company·disconnect` 고객사 관리자)뿐이다.
+
 ### 엔드포인트 (GET)
 | 경로 (`/api/dashboard` 아래) | 옛 경로 (`/api/admin` 등) |
 | --- | --- |
@@ -102,7 +107,7 @@ CORS 허용 출처는 `DASHBOARD_CORS_ORIGINS`(쉼표 구분, 기본 `http://loc
 | POST `/change-proposals/decline` | `decline_change_proposal` (쓰기, 사람 토큰. 보내지 않기로 한 이유 기록. 결정한 사람은 토큰에서 채우고 기획으로는 아무것도 보내지 않는다) |
 | GET `/change-requests?inquiry_id&status` | `list_change_requests` (`items`) |
 
-고객관리 탭의 위 경로는 모두 읽기라 사람 토큰이 필요 없고, 응답은 support 출력을 그대로 둔다 (위험 단계·보상 후보는 코드가 사실에서 낸 값이다). 목 모드 값은 `mock_customers.py`에 있다.
+고객관리 탭의 위 경로는 모두 읽기다(읽기도 사람 토큰이 필요하다). 응답은 support 출력을 그대로 둔다 (위험 단계·보상 후보는 코드가 사실에서 낸 값이다). 목 모드 값은 `mock_customers.py`에 있다.
 
 support 출력은 `claim_mapping.py`에서 화면 모델로 바꾼다 (값을 지어내지 않고, support에 없는 값은 비우거나 0).
 - 상태: support의 `approved`(승인됐고 지급 대기)는 화면에 없어서 `return_received`("입고 완료·처리 대기")로 보낸다. 상태 필터는 변환 뒤에 건다.
@@ -184,7 +189,7 @@ support 출력은 `claim_mapping.py`에서 화면 모델로 바꾼다 (값을 �
 
 | 경로 | 하는 일 |
 | --- | --- |
-| `GET /api/dashboard/presence?area=` | 담당별 상태 코드(`working`·`off_shift`·`on_leave`). 모두에게 보인다. 사람 토큰이 있는 요청에만 휴가 기간·입력자(`leaves`)를 담는다 |
+| `GET /api/dashboard/presence?area=` | 담당별 상태 코드(`working`·`off_shift`·`on_leave`)와 휴가 기간·입력자(`leaves`). 사람 토큰이 필요하다(없으면 401) |
 | `POST /api/dashboard/presence/leaves` | 휴가 기간 기록(사람 토큰 필요, 입력자는 토큰의 이름). 사유·종류는 받지 않는다(보내면 422) |
 | `POST /api/dashboard/presence/leaves/{leave_id}/cancel` | 휴가 취소(사람 토큰 필요). 지우지 않고 취소한 사람(토큰의 이름)·시각만 남긴다. 이미 취소된 기록은 성공, 없는 ID는 404. 수정은 취소 + 새 기록 |
 
@@ -232,7 +237,7 @@ AXcellent 규격(shop-api)이 아닌 고객사 자기 API를 AI들이 shop-api�
 오류: 짝 없음·연결 아님 503 `NOT_CONFIGURED`, 짝이 응답과 안 맞음 502 `MAPPING_BROKEN`,
 고객사 키 거부 503 `UPSTREAM_AUTH`, 고객사 응답 없음·5xx 503 `UPSTREAM_UNAVAILABLE`.
 
-설정 API (`/api/dashboard/site-adapter`, 쓰기는 사람 토큰. `site_adapter/setup.py`):
+설정 API (`/api/dashboard/site-adapter`, 읽기·쓰기 모두 사람 토큰. `site_adapter/setup.py`):
 
 | 주소 | 하는 일 |
 | --- | --- |
@@ -248,15 +253,19 @@ ax-contracts, ax-agent-template
 - 다른 서비스 DB를 직접 읽지 않는다. 판매 사이트 환불·쿠폰 API를 직접 호출하지 않는다.
 - LLM을 직접 호출하지 않는다 (답변 초안·가드·요약은 support 에이전트).
 
-## 쓰기 API 사람 토큰 (#295)
+## 사람 토큰 (#295, 읽기까지: 보안 점검 2차)
 
-상태를 바꾸는 요청(GET·HEAD·OPTIONS 외)은 `Authorization: Bearer <사람 토큰>`이 있어야 한다. 읽기와 `POST /plan-checks`(저장 없는 판정)는 토큰 없이 열려 있다.
+`/api/dashboard/*`는 읽기(GET)·쓰기 모두 `Authorization: Bearer <사람 토큰>`이 있어야 한다(`auth.py`의 `require_human`). 판매 서버 관리 중계(`/shop/*`, 서버 쪽 열람 토큰으로 읽어 준다)·도구 연결·연결 키처럼 8020에 닿기만 하면 읽히면 안 되는 경로가 있어서다. 저장하지 않는 판정(`POST /plan-checks`, `/org-changes/basis`, `/org-changes/parse`)도 같다.
+
+- 토큰 없이 열린 것: 상태 확인 `GET /health`, CORS 사전 확인(OPTIONS).
+- 각자 따로 확인하는 것(이 규칙 밖): 에이전트가 넣는 할 일함 `POST /api/dashboard/handoffs`(에이전트 토큰), 알림 받는 주소 `POST /api/dashboard/events`(회사 키), 사이트 변환기 `/site-adapter/*`(AI들의 shop-api 자리).
+- 사람별 로그인 토큰(`docs/superpowers/specs/2026-11-19-human-session-tokens-design.md`)이 오면 `human_from_authorization` 안의 검사만 바뀐다.
 
 - 토큰: `DASHBOARD_HUMAN_TOKENS="이름:토큰,이름:토큰"` (없으면 `SAFETY_HUMAN_TOKENS`). 화면은 안전 관문과 같은 `VITE_SAFETY_HUMAN_TOKEN`을 보내면 된다.
 - 목 모드에서는 `human:<이름>`도 받는다. 에이전트 토큰(`mock:`)은 항상 거부한다.
 - 실패는 `{error: {code, message}}`: 토큰 없음 401 `AUTH_REQUIRED`, 에이전트 토큰 403 `HUMAN_TOKEN_REQUIRED`, 모르는 토큰 403 `HUMAN_TOKEN_INVALID`.
-- 토큰이 설정되지 않았고 목 모드도 아니면 쓰기는 모두 거부된다 (fail-closed).
-- 직접 대화(`/support-chat`)는 예외로 **읽기에도 사람 토큰이 필요하다** (없으면 401, 모르는 토큰이면 403). 다른 사람 대화는 `messages: []` + `summary` + `restricted: true`로만 오고 거기에 쓰면 403이다. 다른 사람 대화의 요약(제목·메시지 수·시각·결과)은 로그인한 사람 모두 보고, 원문은 본인만 본다(관리자는 일이 생긴 대화만). 고객지원에는 따로 지정하는 담당자가 없다(예진님 2026-11-09, 예전 `staff`·`SUPPORT_CHAT_STAFF`는 없어졌다). 관리자는 에이전트 토큰 명부의 `admin` 토큰이다. 지금은 모든 요청이 같은 사람("공용")이라 서버가 사람별로 가를 수 없다.
+- 토큰이 설정되지 않았고 목 모드도 아니면 읽기·쓰기 모두 거부된다 (fail-closed).
+- 직접 대화(`/support-chat`)도 읽기에 사람 토큰이 필요하다 (없으면 401, 모르는 토큰이면 403). 다른 사람 대화는 `messages: []` + `summary` + `restricted: true`로만 오고 거기에 쓰면 403이다. 다른 사람 대화의 요약(제목·메시지 수·시각·결과)은 로그인한 사람 모두 보고, 원문은 본인만 본다(관리자는 일이 생긴 대화만). 고객지원에는 따로 지정하는 담당자가 없다(예진님 2026-11-09, 예전 `staff`·`SUPPORT_CHAT_STAFF`는 없어졌다). 관리자는 에이전트 토큰 명부의 `admin` 토큰이다. 지금은 모든 요청이 같은 사람("공용")이라 서버가 사람별로 가를 수 없다.
 - 확인한 사람 이름은 요청마다 `request.state.human`에 담긴다 (A2A 요청자는 여전히 서비스 토큰).
 
 ## 계정·로그인 (사람별 토큰 1단계)

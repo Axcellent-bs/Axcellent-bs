@@ -1,5 +1,5 @@
 import { ApiError } from "./apiError";
-import { DASHBOARD_API_URL } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import type { Envelope } from "./finance";
 
 // 고객지원 AI 화면(/support)의 자료. dashboard-api의 읽기 API 6개(ax-backend #388)를 그대로 읽는다.
@@ -273,7 +273,7 @@ export interface OrderRefund { amount: number | null; created_at: string | null 
 async function get<T>(path: string): Promise<Envelope<T> & { meta: { total?: number } }> {
   let res: Response;
   try {
-    res = await fetch(`${DASHBOARD_API_URL}${path}`, { cache: "no-store" });
+    res = await fetch(`${DASHBOARD_API_URL}${path}`, { headers: dashboardAuth(), cache: "no-store" });
   } catch {
     throw new ApiError("업무 서버(dashboard-api)에 연결하지 못했습니다. 서버가 켜져 있는지 확인하세요.", 0);
   }

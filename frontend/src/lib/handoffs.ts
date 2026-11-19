@@ -2,7 +2,7 @@
 // 계약은 backend/shared/contracts/src/ax_contracts/schemas/handoff.py (HandoffTask, HandoffCompleteBody).
 import { useEffect, useSyncExternalStore } from "react";
 import { ApiError } from "./apiError";
-import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
+import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN, dashboardAuth } from "./env";
 
 export type HandoffStatus = "open" | "done" | "rejected";
 
@@ -42,7 +42,7 @@ const BASE = `${DASHBOARD_API_URL}/api/dashboard/handoffs`;
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(url, { cache: "no-store", ...init });
+    res = await fetch(url, { cache: "no-store", ...init, headers: { ...dashboardAuth(), ...(init?.headers ?? {}) } });
   } catch {
     throw new ApiError(UNREACHABLE, 0);
   }

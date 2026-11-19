@@ -4,8 +4,14 @@
 //   전체 키는 발급할 때 한 번만 받는다. 목록에는 가린 키만 온다.
 // - 연결: 고객사 시스템 관리자가 키를 넣고(서버가 확인), 회사 정보를 입력해 연결한다(/system/connect). 끊는 것도 고객사가 한다.
 // 상단바의 "AXcellent with <회사>"와 로그인 화면이 연결된 회사를 따른다. 끊으면 null(회사 이름 없음).
+// 서버는 읽기에도 사람 토큰을 요구한다. 로그인 전에는 회사 공개 정보(이름만, publicCompany.ts)로 로그인 화면을 그리고,
+// 로그인·로그아웃하면(세션이 바뀌면) 다시 읽는다. 예전처럼 처음 한 번만 읽으면 로그인 전 401·403으로 회사가 비어
+// 로그인한 일반회원이 아무 화면도 못 연다(session.tsx canOpen).
 import { useSyncExternalStore } from 'react'
 import { call, companyConnection } from '@/lib/companyConnection'
+import { DASHBOARD_API_URL } from '@/lib/env'
+import { getSession, onSessionChange } from '@/lib/humanSession'
+import { pickCompany, readPublicCompany, refusedForThisPerson } from '@/lib/publicCompany'
 
 export type ConnectedCompany = {
   id: string
@@ -71,23 +77,46 @@ function loadSiteCompany(): Promise<void> {
       siteCompany = on && s.tenant ? { id: s.tenant.id, name: s.tenant.name, industry: '', network: '', connectedAt: s.connection?.updated_at ?? undefined } : null
       notify()
     })
-    .catch(() => { /* 서버를 못 읽으면 지난 값 그대로 */ })
+    .catch((e: unknown) => {
+      // 토큰이 없거나 받지 않으면(로그인 전·로그아웃) 지난 사람이 읽은 값을 지운다. 연결 실패면 지난 값 그대로
+      if (refusedForThisPerson(e)) { siteCompany = null; notify() }
+    })
 }
 
-/** 서버에서 키 목록·연결 회사·사이트 연결을 다시 읽는다 */
+// 로그인 전 화면용 공개 정보: 회사 id·이름·사이트 주소만 (dashboard-api `/auth/company`, 토큰 없이 열린 경로)
+let publicCompany: ConnectedCompany | null = null
+function loadPublicCompany(): Promise<void> {
+  return fetch(`${DASHBOARD_API_URL}/api/dashboard/auth/company`, { cache: 'no-store' })
+    .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+    .then((body: unknown) => {
+      const c = readPublicCompany(body)
+      publicCompany = c ? { id: c.id, name: c.name, industry: '', network: '', ...(c.siteUrl ? { siteUrl: c.siteUrl } : {}) } : null
+      notify()
+    })
+    .catch(() => { /* 옛 서버(경로 없음)·연결 실패면 지난 값 그대로 */ })
+}
+
+/** 서버에서 키 목록·연결 회사·사이트 연결·공개 회사 정보를 다시 읽는다 */
 // 처음 읽기가 끝났는지. 끝나기 전에는 "연결 전"으로 보고 회사 연결 화면으로 보내지 않는다(App의 Guarded)
 let loaded = false
 export function refreshCompany(): Promise<void> {
-  const keysNow = call<ServerState>('GET', PATH).then(apply).catch(() => { /* 지난 값 그대로 */ })
-  return Promise.all([keysNow, loadSiteCompany()]).then(() => {
+  const keysNow = call<ServerState>('GET', PATH).then(apply).catch((e: unknown) => {
+    if (refusedForThisPerson(e)) { keys = []; company = null; notify() } // 연결 실패면 지난 값 그대로
+  })
+  return Promise.all([keysNow, loadSiteCompany(), loadPublicCompany()]).then(() => {
     if (!loaded) { loaded = true; notify() }
   })
 }
 /** 회사 연결 저장·해제 뒤 (SiteConnect) */
 export const refreshServerCompany = refreshCompany
 try { void refreshCompany() } catch { loaded = true /* fetch가 없는 환경 */ }
+// 로그인·로그아웃하면 그 사람 토큰으로 다시 읽는다. 아직 회사를 모르면 다 읽을 때까지 Guarded가 기다린다
+onSessionChange(() => {
+  if (getSession() && !getCompany()) { loaded = false; notify() }
+  try { void refreshCompany() } catch { loaded = true; notify() }
+})
 
-export const getCompany = () => company ?? siteCompany
+export const getCompany = () => pickCompany(company, siteCompany, publicCompany)
 export const useCompany = () => useSyncExternalStore(subscribe, getCompany)
 /** 서버에서 연결 회사를 처음 한 번 다 읽었나 */
 export const useCompanyLoaded = () => useSyncExternalStore(subscribe, () => loaded)

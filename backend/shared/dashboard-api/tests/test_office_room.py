@@ -81,7 +81,9 @@ def test_write_needs_human_token(client: TestClient) -> None:
     assert client.post(BASE, json=_body()).status_code == 401
     agent = {"authorization": "Bearer mock:inquiry"}
     assert client.post(BASE, json=_body(), headers=agent).status_code == 403
-    assert client.get(BASE).json()["data"] == []
+    assert client.get(BASE).status_code == 401  # 목록 읽기도 사람 토큰이 필요하다
+    assert client.get(BASE, headers=agent).status_code == 403
+    assert client.get(BASE, headers=HUMAN).json()["data"] == []
 
 
 def test_safety_thread_is_listed(client: TestClient) -> None:

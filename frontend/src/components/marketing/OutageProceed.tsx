@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
+import { useAuthedMedia } from "@/lib/authedMedia";
 import { briefs, outageMediaPreviewUrl, type OutageSnsDraft } from "@/lib/briefs";
 import { approvalLink, estimateLines, publishStatusLine, PUBLISH_EXPIRY_MIN, type MediaResult, type PublishResult } from "@/lib/briefMedia";
 import { OUTAGE_CONFIRM_NOTES, outageBlockKo, outageHttpErrorKo, outageMediaResultKo, outagePublishResultKo, shouldRequestPublish } from "@/lib/outageMedia";
@@ -111,7 +112,7 @@ export function OutageProceed({ draft, onDone }: { draft: OutageSnsDraft; onDone
             <span className="text-ink-500">{prepared.label_text ? `AI 표시 "${prepared.label_text}"가 이미지에 들어 있습니다.` : "AI 표시를 입힌 이미지입니다."}</span>
           </div>
           {publish?.status !== "held" && (
-            <img className="max-h-60 rounded-xl" src={outageMediaPreviewUrl(id, prepared.asset_sha256)} alt="AI 표시가 들어간 사과 이미지 미리보기" />
+            <OutagePreview draftId={id} version={prepared.asset_sha256} />
           )}
         </div>
       )}
@@ -163,4 +164,11 @@ export function OutageProceed({ draft, onDone }: { draft: OutageSnsDraft; onDone
       )}
     </div>
   );
+}
+
+/** 장애 초안 이미지 미리보기. 사람 토큰을 붙여 받는다(서버가 읽기에도 토큰을 요구한다) */
+function OutagePreview({ draftId, version }: { draftId: string; version: string | null }) {
+  const { src, failed } = useAuthedMedia(outageMediaPreviewUrl(draftId, version));
+  if (failed) return <p className="text-ink-500">미리보기 파일을 불러올 수 없습니다.</p>;
+  return src ? <img className="max-h-60 rounded-xl" src={src} alt="AI 표시가 들어간 사과 이미지 미리보기" /> : null;
 }

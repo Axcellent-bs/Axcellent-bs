@@ -31,10 +31,10 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 
 from ax_dashboard_api import support_client
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ok
 
-router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human_for_writes)])
+router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human)])
 
 # support 실패 코드 → (HTTP 상태, 화면 오류 코드)
 ERRORS: dict[str, tuple[int, str]] = {

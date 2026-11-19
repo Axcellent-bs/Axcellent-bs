@@ -10,7 +10,7 @@
 - `DELETE /api/dashboard/company-connection`: 연결을 지우고 원래 주소(`AX_SHOP_API_URL`·기본값)로
 - `POST /save`·`POST /clear`: PUT·DELETE와 같다(운영 서버 nginx 게이트가 POST만 열 수 있어서)
 
-쓰기(POST·PUT·DELETE)는 사람 토큰만 된다(`require_human_for_writes`). 주소 정책은
+읽기·쓰기 모두 사람 토큰만 된다(`require_human`). 주소 정책은
 `ax_agent_template.company_connection.check_host`(사내 주소 또는 허용 목록 + https, 링크 로컬 차단).
 확인은 서버가 그 주소로 직접 GET을 보내므로 아무 주소나 부를 수 있다.
 사내 설치·사람 토큰 전제이고, 계정이 든 주소·http(s) 밖의 주소는 받지 않는다.
@@ -33,7 +33,7 @@ from ax_agent_template import company_connection as store
 from ax_agent_template import pinned_http
 from ax_agent_template import tenant as tenants
 from ax_agent_template.config import agent_url
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
 from ax_dashboard_api.site_adapter import setup as adapter_setup
 from ax_dashboard_api.site_adapter import upstream as adapter_upstream
@@ -47,7 +47,7 @@ logger = logging.getLogger("ax.dashboard.company_connection")
 
 router = APIRouter(
     prefix="/api/dashboard/company-connection",
-    dependencies=[Depends(require_human_for_writes)],
+    dependencies=[Depends(require_human)],
 )
 
 
@@ -74,6 +74,18 @@ def tenant_state() -> dict[str, Any]:
         "tenant": next((t for t in listed if t["id"] == now), None) if now else None,
         "tenants": listed,
     }
+
+
+def public_site_company() -> dict[str, str] | None:
+    """로그인 전 화면에 보일 사이트 연결 회사: 회사 연결이 켜져 있을 때 그 회사 설정의 id·이름만.
+
+    화면 `demo/company.ts`의 사이트 회사와 같은 조건이다. 주소·기록·연결한 사람은 넣지 않는다.
+    """
+    found = store.read_connection()
+    tenant = tenant_state()["tenant"] if found and found.enabled else None
+    if not isinstance(tenant, dict) or not tenant.get("id") or not tenant.get("name"):
+        return None
+    return {"id": str(tenant["id"]), "name": str(tenant["name"]), "site_url": ""}
 
 
 class ModeIn(BaseModel):

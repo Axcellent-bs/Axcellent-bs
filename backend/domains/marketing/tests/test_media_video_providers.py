@@ -362,3 +362,59 @@ def test_real_service_uses_public_only_transport(
     with pytest.raises(MediaProviderError):
         SeedanceVideoProvider().generate(_request(tmp_path))
     assert isinstance(built[0], PublicOnlyTransport)
+
+
+# --- Kling 추가 모델(Omni·3.0·2.x) ---
+def test_kling_omni_uses_omni_video_path_and_contents(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MARKETING_KLING_API_KEY", KLING_KEY)
+    seen: dict = {}
+    rows = [{"status": "succeeded", "outputs": [{"type": "video", "url": VIDEO_URL}]}]
+    _provider(KlingVideoProvider, _kling_handler(rows, seen)).generate(
+        _request(tmp_path, model="kling-3.0-omni", duration_s=6)
+    )
+    assert seen["path"] == "/omni-video/kling-3.0-omni"
+    assert seen["body"]["contents"] == [{"type": "prompt", "text": "a cat on a book"}]
+    assert "prompt" not in seen["body"] and seen["body"]["settings"]["duration"] == 6
+
+
+def test_kling_plain_model_keeps_text_to_video_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MARKETING_KLING_API_KEY", KLING_KEY)
+    seen: dict = {}
+    rows = [{"status": "succeeded", "outputs": [{"type": "video", "url": VIDEO_URL}]}]
+    _provider(KlingVideoProvider, _kling_handler(rows, seen)).generate(
+        _request(tmp_path, model="kling-3.0-turbo")
+    )
+    assert seen["path"] == "/text-to-video/kling-3.0-turbo" and seen["body"]["prompt"]
+
+
+@pytest.mark.parametrize(("model", "duration"), [("kling-2.6", 4), ("kling-o1", 11)])
+def test_kling_per_model_duration_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, model: str, duration: int
+) -> None:
+    monkeypatch.setenv("MARKETING_KLING_API_KEY", KLING_KEY)
+    with pytest.raises(MediaProviderError, match="unsupported_duration"):
+        _provider(KlingVideoProvider, _kling_handler([{}], {})).generate(
+            _request(tmp_path, model=model, duration_s=duration)
+        )
+
+
+@pytest.mark.parametrize(
+    ("model", "usd"),
+    [
+        ("kling-3.0", "0.420"),
+        ("kling-3.0-omni", "0.420"),
+        ("kling-o1", "0.420"),
+        ("kling-3.0-turbo", "0.560"),
+        ("kling-2.6", "0.210"),
+        ("kling-2.5-turbo", "0.210"),
+    ],
+)
+def test_price_table_new_kling_models(model: str, usd: str) -> None:
+    entry = pricing.find_entry(
+        provider="kling", model=model, kind="video", resolution="720p", quality=None
+    )
+    assert str(pricing.estimate_usd(entry, prompt="x", duration_s=5)) == usd

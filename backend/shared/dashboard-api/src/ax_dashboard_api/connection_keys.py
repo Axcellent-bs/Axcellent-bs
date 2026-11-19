@@ -2,7 +2,7 @@
 
 서버 파일에 저장해 어느 PC에서든 같은 키 목록·연결 회사가 보인다(예전에는 브라우저에만 있었다).
 - 전체 키는 발급 응답에서 한 번만 준다. 목록(GET)에는 가린 키만 나온다
-- 쓰기는 모두 POST + 사람 토큰(`require_human_for_writes`). 운영 nginx 게이트가 POST만 연다
+- 읽기·쓰기 모두 사람 토큰(`require_human`). 쓰기는 모두 POST. 운영 nginx 게이트가 POST만 연다
 - 파일: `AX_CONNECTION_KEYS_FILE` → 회사 연결 파일 옆 `connection_keys.json`. 없으면 읽기 전용
 """
 
@@ -21,16 +21,14 @@ from pydantic import BaseModel, Field, field_validator
 
 from ax_agent_template import company_connection as store
 from ax_dashboard_api.accounts import require_session_role
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
 
 KEYS_FILE_ENV = "AX_CONNECTION_KEYS_FILE"
 KEYS_FILE = "connection_keys.json"
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
-router = APIRouter(
-    prefix="/api/dashboard/connection-keys", dependencies=[Depends(require_human_for_writes)]
-)
+router = APIRouter(prefix="/api/dashboard/connection-keys", dependencies=[Depends(require_human)])
 
 
 # 로그인 세션 토큰이면 역할을 본다(설계 3절): 키 발급·폐기는 운영자,
@@ -138,6 +136,21 @@ def _state(data: dict[str, Any] | None = None) -> dict[str, Any]:
             _mask(by_id[company["key_id"]]["key"]) if company.get("key_id") in by_id else None
         )
     return {"keys": rows, "company": public, "editable": _path() is not None}
+
+
+def public_company() -> dict[str, str] | None:
+    """로그인 전 화면(로그인·회원가입)에 보일 연결 회사: id·이름·사이트 주소만.
+
+    키(가린 값 포함)·메모·업종·사내망·연결 시각은 넣지 않는다(허용 목록, `public_info.py`).
+    """
+    company = _load().get("company")
+    if not isinstance(company, dict) or not str(company.get("name") or "").strip():
+        return None
+    return {
+        "id": str(company.get("id") or ""),
+        "name": str(company["name"]).strip(),
+        "site_url": str(company.get("site_url") or ""),
+    }
 
 
 def _info(body: InfoIn) -> dict[str, str]:

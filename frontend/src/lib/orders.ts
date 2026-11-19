@@ -1,5 +1,5 @@
 import { ApiError } from "./apiError";
-import { DASHBOARD_API_URL } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import type { FinanceMeta } from "./finance";
 import type { OrderRow } from "./support";
 
@@ -70,7 +70,7 @@ export async function orderPage(query: OrderQuery): Promise<OrderPage> {
   })}`;
   let res: Response;
   try {
-    res = await fetch(`${DASHBOARD_API_URL}${path}`, { cache: "no-store" });
+    res = await fetch(`${DASHBOARD_API_URL}${path}`, { headers: dashboardAuth(), cache: "no-store" });
   } catch {
     throw new ApiError("업무 서버(dashboard-api)에 연결하지 못했습니다. 서버가 켜져 있는지 확인하세요.", 0);
   }

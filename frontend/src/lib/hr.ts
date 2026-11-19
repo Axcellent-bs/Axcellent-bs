@@ -1,6 +1,5 @@
 import { ApiError } from "./apiError";
-import { writeAuth } from "./api";
-import { DASHBOARD_API_URL } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import type { OrchIncident } from "./agentChat";
 import type { AgentEvaluation } from "./agentEval";
 import type { ReceivedDiagnosis } from "./agentDiagnosis";
@@ -176,7 +175,7 @@ export function readableBody(body: string): string {
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${DASHBOARD_API_URL}/api/dashboard${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...writeAuth(init?.method, path), ...(init?.headers ?? {}) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth(), ...(init?.headers ?? {}) },
     cache: "no-store",
   });
   let body: { data?: T; error?: { message?: string } } | null = null;
