@@ -298,3 +298,23 @@ def test_poll_run_forever_reads_vault_off_the_event_loop(runtime, monkeypatch) -
 
     main_id = asyncio.run(run())
     assert seen and seen[0] != main_id
+
+
+def test_rollback_reads_tool_vault_off_the_event_loop(
+    a2a_body, gate, runtime, polled, monkeypatch
+) -> None:
+    on_loop: list[bool] = []
+
+    def recording_tool_for(service: str) -> FakeTool | None:
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(True)
+        except RuntimeError:
+            on_loop.append(False)
+        return polled if service == polled.service else None
+
+    monkeypatch.setattr(deploy_tools, "tool_for", recording_tool_for)
+    gate("executed")
+    out = _rollback(a2a_body, TOOL_ROLLBACK)
+    assert out["status"] == "completed", out
+    assert on_loop == [False]
