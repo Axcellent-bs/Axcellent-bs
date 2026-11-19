@@ -5,6 +5,7 @@ DejaFix는 모든 API에 로그인 토큰(JWT)을 요구한다. 서버 nginx는 
 개발 서버 프록시(frontend/dejafix-proxy.ts)와 같은 동작이다.
 연결은 부를 때마다 정한다: 공용 보관함의 `dejafix` → 없으면 환경변수(DEJAFIX_PROXY_TARGET·
 DEJAFIX_USERNAME·DEJAFIX_PASSWORD) → 없으면 503. 계정은 화면·로그에 싣지 않는다.
+`GET /status`는 그 연결의 출처(builtin·custom·none)와 응답 여부만 알려 준다 (화면의 연결 카드용).
 """
 
 from __future__ import annotations
@@ -145,6 +146,35 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/status")
+    async def status() -> dict[str, object]:
+        """화면의 DejaFix 연결 카드가 읽는 연결 출처와 실제 응답 여부.
+
+        source: builtin(환경 변수, AXcellent와 같이 설치된 DejaFix) · custom(화면에서 저장한
+        다른 DejaFix, 보관함) · none(둘 다 없음).
+        reachable: 로그인 뒤 현재 장애 조회가 200이면 True, 아니면 False, 부를 대상이 없으면 None.
+        주소·계정·비밀번호·토큰은 싣지 않는다.
+        """
+        found = _target()
+        if found is None:
+            return {"source": "none", "reachable": None, "detail": "연결 정보가 없어요"}
+        target, from_vault = found
+        source = "custom" if from_vault else "builtin"
+        if from_vault:
+            try:
+                await asyncio.to_thread(company_connection.check_host, target[0])
+            except ValueError:
+                return {"source": source, "reachable": False, "detail": "주소를 쓸 수 없어요"}
+        try:
+            res = await session_for(target, from_vault).get(
+                "/api/incidents", "status=problem&limit=1"
+            )
+        except httpx.HTTPError:
+            return {"source": source, "reachable": False, "detail": "DejaFix에 연결할 수 없어요"}
+        if res.status_code != 200:
+            return {"source": source, "reachable": False, "detail": f"HTTP {res.status_code}"}
+        return {"source": source, "reachable": True, "detail": "응답해요"}
 
     @app.api_route(
         "/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]

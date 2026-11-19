@@ -159,13 +159,15 @@ export function ToolForm({ kind, data, admin, existing, choices, onSaved, onCanc
 }
 
 /** 저장된 연결 한 줄: 상태 chip·마지막 확인·사실들 + 다시 확인·고치기·끊기(관리자만, 끊기는 한 번 더 묻는다) */
-export function ConnectedTool({ conn, admin, title, facts, offNote, onChanged, onEdit, children }: {
+export function ConnectedTool({ conn, admin, title, facts, offNote, offLabel = '끊기', onChanged, onEdit, children }: {
   conn: ToolConnection
   admin: boolean
   title: ReactNode
   facts?: ReactNode
   /** 끊기 전에 보여 줄 한 줄 (끊으면 무엇이 멈추나) */
   offNote: string
+  /** 끊기 단추 글자 (DejaFix: "같이 설치된 DejaFix로 돌아가기") */
+  offLabel?: string
   onChanged: () => void
   onEdit?: () => void
   children?: ReactNode
@@ -193,7 +195,7 @@ export function ConnectedTool({ conn, admin, title, facts, offNote, onChanged, o
           <div className="ml-auto flex flex-wrap gap-1.5">
             <button type="button" className="btn-ghost" disabled={busy} onClick={() => void recheck()}>{busy ? '확인 중…' : '다시 확인'}</button>
             {onEdit && <button type="button" className="btn-ghost" disabled={busy} onClick={onEdit}>고치기</button>}
-            <button type="button" className="btn-quiet text-red-700" disabled={busy} onClick={() => setConfirmOff(true)}>끊기</button>
+            <button type="button" className="btn-quiet text-red-700" disabled={busy} onClick={() => setConfirmOff(true)}>{offLabel}</button>
           </div>
         )}
       </div>
@@ -206,7 +208,7 @@ export function ConnectedTool({ conn, admin, title, facts, offNote, onChanged, o
           <p className="text-xs text-ink-500">{offNote}</p>
           <div className="flex gap-2">
             <button type="button" className="btn-quiet" disabled={busy} onClick={() => setConfirmOff(false)}>취소</button>
-            <button type="button" className="btn-primary bg-red-700 hover:bg-red-800" disabled={busy} onClick={() => void remove()}>{busy ? '끊는 중…' : '끊기'}</button>
+            <button type="button" className="btn-primary bg-red-700 hover:bg-red-800" disabled={busy} onClick={() => void remove()}>{busy ? (offLabel === '끊기' ? '끊는 중…' : '바꾸는 중…') : offLabel}</button>
           </div>
         </div>
       )}
