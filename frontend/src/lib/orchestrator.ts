@@ -2,6 +2,7 @@ import { ApiError } from "./apiError";
 import { ORCHESTRATOR_URL, RELAY_TOKEN, SAFETY_HUMAN_TOKEN } from "./env";
 import type { AgentDiagnosisRow, DiagnosisDelivery } from "./agentDiagnosis";
 import type { DemoRequest, OrchIncident } from "./agentChat";
+import type { WorkRequestRow, WorkRequestTask } from "./workRequests";
 
 // 총괄(orchestrator) API. 응답은 ax-backend 규약 {data, meta}. 형식은 orchestrator/src/ax_orchestrator/main.py 기준.
 
@@ -43,10 +44,23 @@ export interface FinanceOpinionRow {
   relay?: { to: "planning"; status: "pending" | "delivered" | "invalid"; attempts: number; outcome?: string | null; proposal_id?: string | null; problem?: string | null; at?: string };
 }
 
+/** 사람 토큰으로 읽는 GET (고객 글이 들어 있다) */
+const getAuthed = <T, M = Record<string, unknown>>(path: string, token: string) =>
+  callRaw<T, M>(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+
 export const orchestrator = {
   health: () => call<{ status: string }>("/health"),
   /** 이슈 목록 (열린 순서). 각 항목에 steps·events·pending_holds가 모두 들어 있다 */
   incidents: () => callRaw<OrchIncident[], IncidentsMeta>("/api/incidents"),
+  /** 접수된 고객 의뢰 (최근 것부터, 최대 100건)와 고를 수 있는 일 목록. 사람 토큰이 필요하다 */
+  workRequests: () =>
+    getAuthed<WorkRequestRow[], { tasks: WorkRequestTask[] }>("/api/requests", SAFETY_HUMAN_TOKEN),
+  /** 사람 확인·승인 대기 중인 의뢰 단계를 승인하거나 거절한다. 승인하면 다음 단계로 이어진다 */
+  decideRequestStep: (requestId: string, stepId: string, approved: boolean) =>
+    post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/steps/${encodeURIComponent(stepId)}/decision`, { approved }, SAFETY_HUMAN_TOKEN),
+  /** 잘못 골랐으면 일을 바꿔 다시 돌린다. 이전 선택은 기록에 남는다 */
+  rerunRequest: (requestId: string, task: string) =>
+    post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/rerun`, { task }, SAFETY_HUMAN_TOKEN),
   /** 재무가 보낸 의견 (캠페인 손익·예산 의견·인사이트). 총괄은 보관만 한다 */
   financeOpinions: () => call<FinanceOpinionRow[]>("/api/finance-opinions"),
   incident: (contextId: string) => call<OrchIncident>(`/api/incidents/${encodeURIComponent(contextId)}`),

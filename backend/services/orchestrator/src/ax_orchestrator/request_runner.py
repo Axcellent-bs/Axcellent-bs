@@ -476,6 +476,27 @@ class RequestRunner:
         self.start(request_id)
         return "ok"
 
+    def rerun(self, request_id: str, task_name: str, by: str | None = None) -> str:
+        """사람이 일을 골라 의뢰를 다시 돌린다. 돌려주는 값: ok · missing · unknown_task · busy.
+
+        계획과 단계 진행은 새로 시작한다(이전 선택은 기록에 남는다). 상태를 바꾸는 단계는 이번에도
+        승인을 거친다. 부서에 보내는 중이거나 기다리는 단계가 있으면(`busy`) 바꾸지 않는다.
+        """
+        row = self._requests.get(request_id)
+        if row is None:
+            return "missing"
+        task = request_tasks.get(task_name)
+        if task is None:
+            return "unknown_task"
+        busy = request_id in self._running or any(
+            s["status"] in ("running", "held", "waiting_async") for s in row["steps"].values()
+        )
+        if busy:
+            return "busy"
+        self._requests.replan(request_id, task=task.name, plan=request_tasks.plan_of(task), by=by)
+        self.start(request_id)
+        return "ok"
+
     def _skip_blocked(self, row: dict[str, Any]) -> None:
         """앞 단계가 성공하지 못해 시킬 수 없게 된 뒤 단계를 건너뜀으로 닫는다 (연달아 반복)."""
         rid = row["request_id"]

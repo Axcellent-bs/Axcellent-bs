@@ -2,6 +2,7 @@ import { Navigate } from "react-router";
 import { PageSkeleton } from "@/components/admin/bits";
 import { AgentDiagnosisCard } from "@/components/admin/AgentDiagnosisCard";
 import { FinanceOpinionsCard } from "@/components/admin/FinanceOpinionsCard";
+import { WorkRequestsCard } from "@/components/admin/WorkRequestsCard";
 import { SupportOverviewCard } from "@/components/admin/SupportOverviewCard";
 import { clock, incidentStatus } from "@/lib/adminRelay";
 import { incidentTitle } from "@/lib/agentChat";
@@ -55,6 +56,8 @@ export default function OrchestratorPage() {
         </div>
         <Link href="/archive/incidents" className="mt-4 inline-block text-sm font-semibold text-brand-700 underline underline-offset-2">장애 기록에서 이슈 자세히 보기 →</Link>
       </section>
+
+      <WorkRequestsCard tick={updatedAt?.getTime() ?? 0} />
 
       <SupportOverviewCard />
 

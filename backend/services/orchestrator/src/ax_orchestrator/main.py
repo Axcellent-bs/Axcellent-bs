@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from ax_agent_template import events
 from ax_agent_template.config import set_agent_name
 from ax_contracts.schemas import TENANT_ID_DEFAULT, EventEnvelope, EventType
+from ax_orchestrator import request_tasks
 from ax_orchestrator.a2a import build_a2a_app
 from ax_orchestrator.auth import require_admin, require_agent, require_human
 from ax_orchestrator.chat.turn import notify_thread
@@ -395,6 +396,42 @@ async def decide_request_step(
         raise HTTPException(404, "없는 의뢰나 단계")
     if outcome == "not_waiting":
         raise HTTPException(409, "확인을 기다리는 단계가 아님")
+    return {"data": {"ok": True}, "meta": {}}
+
+
+@app.get("/api/requests")
+async def list_requests(status: str | None = None, _: str = Depends(require_human)) -> dict:
+    """접수된 고객 의뢰 (최근 것부터, 최대 100건). 고객 글이 들어 있어 사람 토큰만 본다."""
+    rows = state.manager.work_requests.list(status=status) if state.manager else []
+    tasks = [{"name": t.name, "label": t.label} for t in request_tasks.TASKS]
+    return {"data": list(reversed(rows))[:100], "meta": {"tasks": tasks}}
+
+
+@app.get("/api/requests/{request_id}")
+async def get_request(request_id: str, _: str = Depends(require_human)) -> dict:
+    row = state.manager.work_requests.get(request_id) if state.manager else None
+    if row is None:
+        raise HTTPException(404, "없는 의뢰")
+    return {"data": row, "meta": {}}
+
+
+class RerunBody(BaseModel):
+    task: str
+
+
+@app.post("/api/requests/{request_id}/rerun")
+async def rerun_request(
+    request_id: str, body: RerunBody, who: str = Depends(require_human)
+) -> dict:
+    """잘못 골랐으면 사람이 일을 바꿔 다시 돌린다. 이전 선택은 기록에 남는다."""
+    runner = state.manager.request_runner if state.manager else None
+    outcome = runner.rerun(request_id, body.task, by=who) if runner else "missing"
+    if outcome == "missing":
+        raise HTTPException(404, "없는 의뢰")
+    if outcome == "unknown_task":
+        raise HTTPException(422, "일 목록에 없는 일")
+    if outcome == "busy":
+        raise HTTPException(409, "지금 진행 중이라 바꿀 수 없음")
     return {"data": {"ok": True}, "meta": {}}
 
 

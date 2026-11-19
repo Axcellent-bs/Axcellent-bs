@@ -303,3 +303,38 @@ async def test_text_written_by_the_llm_never_reaches_a_department() -> None:
     assert "환불" not in str(req.model_dump(mode="json"))
     assert req.untrusted == {"request_text": "이번 달 매출 분석해 주세요"}
     assert got.outcome == "task"
+
+
+# ---- 13. 받은 의뢰 화면용 API와 다시 돌리기 ------------------------------------------
+@pytest.mark.asyncio
+async def test_rerun_with_another_task_restarts_and_keeps_the_correction() -> None:
+    fake = Fake(
+        {"sales_analysis": entry("data", "sales_analysis")},
+        {"sales_analysis": [result(TaskStatus.COMPLETED)]},
+    )
+    manager = IncidentManager(fake, lambda: None)  # type: ignore[arg-type]
+    wrong = ask("claim_stats")
+    got = await manager.request_intake.receive("m", "이번 달 매출 분석해 주세요", LLM(wrong))
+    await manager.request_runner.wait_idle()
+    rid = got.request_id
+    assert manager.request_runner.rerun(rid, "nope") == "unknown_task"
+    assert manager.request_runner.rerun("wr_x", "sales_analysis") == "missing"
+    assert manager.request_runner.rerun(rid, "sales_analysis", by="준하") == "ok"
+    await manager.request_runner.wait_idle()
+    row = manager.work_requests.get(rid)
+    assert row["task"] == "sales_analysis" and row["status"] == "done"
+    fix = row["corrections"][0]
+    assert (fix["from_task"], fix["to_task"], fix["by"]) == (
+        "claim_stats",
+        "sales_analysis",
+        "준하",
+    )
+    assert row["classification"]["task"] == "claim_stats"  # 처음 분류는 그대로 남는다
+
+
+@pytest.mark.asyncio
+async def test_rerun_is_refused_while_a_step_is_waiting_on_a_department() -> None:
+    reqs, rid = make(plan=PLAN[:1])
+    reqs.update_step(rid, "a", status="waiting_async", async_task_id="t_1")
+    runner = RequestRunner(reqs, lambda: None)
+    assert runner.rerun(rid, "sales_analysis") == "busy"
