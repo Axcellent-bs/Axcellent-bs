@@ -369,31 +369,35 @@ def _write(conns: list[ToolConnection]) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = f"{target}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"  # 쓰는 곳마다 다른 임시 파일
     # 토큰·개인 키가 들어 있어 만든 사용자만 읽는다. 처음부터 0600으로 만들고 권한을 다시 맞춘다
-    fd: int | None = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         try:
             os.chmod(tmp, 0o600)
         except OSError:
             pass  # 윈도 등
-        f = os.fdopen(fd, "w", encoding="utf-8")
-        fd = None  # 이제 f가 닫는다
-        with f:
+    except BaseException:
+        os.close(fd)  # fdopen 전에 실패: 직접 닫아야 지울 수 있다(윈도)
+        _remove_quietly(tmp)
+        raise
+    try:
+        # fdopen부터는 fd를 넘겨받은 것으로 본다. 실패해도 스스로 닫으므로 다시 닫지 않는다
+        # (닫힌 번호는 다른 스레드가 바로 다시 쓸 수 있다)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump([c._row() for c in conns], f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, target)
     except BaseException:
-        if fd is not None:  # fdopen 전에 실패: 직접 닫아야 지울 수 있다(윈도)
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        _remove_quietly(tmp)
         raise
     _cache = None
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _history_path() -> Path:

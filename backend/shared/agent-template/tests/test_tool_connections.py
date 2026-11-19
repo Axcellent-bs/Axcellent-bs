@@ -375,8 +375,8 @@ def test_stale_lock_that_cannot_be_moved_waits_until_deadline(
     assert lock.exists()
 
 
-def test_tmp_fd_closed_when_fdopen_fails(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """임시 파일을 연 뒤 fdopen이 실패해도 fd를 닫고 임시 파일을 지운다."""
+def _spy_tmp_fds(monkeypatch: pytest.MonkeyPatch) -> tuple[list[int], list[int]]:
+    """임시 파일 fd와 tc가 직접 닫은 fd를 모은다."""
     real_open, real_close = os.open, os.close
     tmp_fds: list[int] = []
     closed: list[int] = []
@@ -388,18 +388,52 @@ def test_tmp_fd_closed_when_fdopen_fails(vault: Path, monkeypatch: pytest.Monkey
         return fd
 
     def spy_close(fd):
-        closed.append(fd)
+        if fd in tmp_fds:  # 잠금 파일 fd가 같은 번호를 먼저 썼어도 섞이지 않게
+            closed.append(fd)
         real_close(fd)
-
-    def bad_fdopen(*_a: object, **_k: object):
-        raise OSError("fdopen 실패")
 
     monkeypatch.setattr(tc.os, "open", spy_open)
     monkeypatch.setattr(tc.os, "close", spy_close)
+    return tmp_fds, closed
+
+
+def test_tmp_fd_closed_when_fails_before_fdopen(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """임시 파일을 연 뒤 fdopen 전에 실패하면 fd를 직접 닫고 임시 파일을 지운다."""
+    tmp_fds, closed = _spy_tmp_fds(monkeypatch)
+
+    class Stop(BaseException):
+        pass
+
+    def bad_chmod(*_a: object, **_k: object) -> None:
+        raise Stop
+
+    monkeypatch.setattr(tc.os, "chmod", bad_chmod)
+    with pytest.raises(Stop):
+        _save()
+    assert len(tmp_fds) == 1 and tmp_fds[0] in closed
+    assert not list(vault.parent.glob(vault.name + "*.tmp"))
+
+
+def test_failed_fdopen_owns_fd_and_is_not_closed_twice(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """fdopen이 fd를 넘겨받은 뒤 실패하면(스스로 닫는다) 그 번호를 다시 닫지 않는다.
+
+    닫힌 번호는 다른 스레드가 바로 다시 쓸 수 있어 두 번 닫으면 남의 파일을 닫는다.
+    """
+    real_close = os.close  # tc.os는 os 모듈이라 바꾸기 전에 잡아 둔다
+    tmp_fds, closed = _spy_tmp_fds(monkeypatch)
+
+    def bad_fdopen(fd, *_a: object, **_k: object):
+        real_close(fd)  # io.open처럼 넘겨받은 fd를 닫고 실패한다
+        raise OSError("fdopen 실패")
+
     monkeypatch.setattr(tc.os, "fdopen", bad_fdopen)
     with pytest.raises(OSError):
         _save()
-    assert len(tmp_fds) == 1 and tmp_fds[0] in closed
+    assert len(tmp_fds) == 1 and tmp_fds[0] not in closed
     assert not list(vault.parent.glob(vault.name + "*.tmp"))
 
 
