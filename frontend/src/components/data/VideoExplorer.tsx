@@ -6,6 +6,7 @@ import { CautionChip } from "@/components/data/ShortsCard";
 import { Sources, videoUrl, when } from "@/components/data/Sources";
 import { categoryName } from "@/components/data/TrendPopular";
 import { viewParam } from "@/lib/detectView";
+import { safeLink } from "@/lib/safeLink";
 import {
   DATA_SERVER, dataAi, kpiLive,
   type ExplorerLength, type ExplorerPeriod, type ExplorerSort, type ExplorerVideo, type VideoExplorerOutput,
@@ -94,7 +95,8 @@ function VideoCard({ v, rank, wide }: { v: ExplorerVideo; rank: number; wide: bo
   ].filter(Boolean).join(" · ");
   return (
     <li className="min-w-0">
-      <a href={v.video_url || videoUrl(v.video_id)} target="_blank" rel="noreferrer noopener"
+      {/* 서버 주소가 http(s)가 아니면 영상 id로 만든 YouTube 주소 (videoUrl은 https 고정 + id 인코딩) */}
+      <a href={safeLink(v.video_url) ?? videoUrl(v.video_id)} target="_blank" rel="noreferrer noopener"
         className="flex flex-col gap-1 rounded-lg transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
         aria-label={`${rank}위 ${title || v.video_id} · YouTube에서 보기`}>
         <Thumb src={v.thumbnail_url} alt={title} wide={wide} rank={rank} />

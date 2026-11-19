@@ -2,7 +2,7 @@ import { ErrorBox, Panel, Waiting } from "@/components/finance/bits";
 import { when } from "@/components/data/Sources";
 import { useSkill } from "@/components/data/useSkill";
 import { AD, times } from "@/components/data/TrendMemes";
-import { safeLink } from "@/components/data/InstagramAudio";
+import { safeLink } from "@/lib/safeLink";
 import { Thumb } from "@/components/data/VideoExplorer";
 import { IgWhyFacts } from "@/components/data/IgWhyFacts";
 import { dataAi, type InstagramRadarGroup, type InstagramRadarOutput, type InstagramRadarPost } from "@/lib/data";
