@@ -25,11 +25,11 @@ export function AuthAside() {
           </div>
           <div className="rounded-2xl bg-white/10 p-4">
             <dt className="text-white/60">접속 범위</dt>
-            <dd className="mt-1 font-semibold">{company ? `사내망 ${company.network}` : '—'}</dd>
+            <dd className="mt-1 font-semibold">{company ? '허용 IP' : '—'}</dd>
           </div>
           <div className="rounded-2xl bg-white/10 p-4">
             <dt className="text-white/60">외부 접근</dt>
-            <dd className="mt-1 font-semibold">차단</dd>
+            <dd className="mt-1 font-semibold">허용 IP만</dd>
           </div>
           <div className="rounded-2xl bg-white/10 p-4">
             <dt className="text-white/60">데이터 보관</dt>
@@ -42,7 +42,7 @@ export function AuthAside() {
   )
 }
 
-// 사내망 안에서만 열리는 로그인 화면. 계정은 데모 계정 + 회원가입한 계정이다(session.tsx).
+// 허용된 IP에서만 열리는 로그인 화면. 계정은 데모 계정 + 회원가입한 계정이다(session.tsx).
 // 데모라 비밀번호는 확인하지 않는다.
 export default function LoginPage() {
   const { signIn } = useSession()
