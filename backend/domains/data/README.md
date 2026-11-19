@@ -417,6 +417,7 @@ await call_agent("finance", AgentRequest(meta=meta.model_copy(update={"idempoten
 
 - **조회·설명만.** grade read, 요청자는 dashboard-api만. 업무 상태를 바꾸지 않아 `execute()`를 부르지 않는다(대화 기록 저장은 업무 상태가 아님 → safety registry 항목 없음). `who`는 dashboard-api가 사람 토큰에서 채우고, 사람 말은 LLM 입력의 데이터 블록(untrusted)에만 넣는다.
 - **흐름.** 보내기는 저장하고 `answering`으로 바로 돌려준다. 답은 뒤에서 붙고 `talking`. 30분 말이 없으면 자동으로 끝난다. 열람: 본인은 원문, 남의 대화는 요약만(`restricted`), 남의 대화 쓰기는 `forbidden`.
+- **분석 의뢰 카드 (11/19).** 의뢰 문장(`is_trend_request` 코드 규칙: 30자 이상 + 요청 동사 + 주제어, 지난 결과 조회·상태 명령은 제외, `is_action`보다 먼저 봄)이면 일반 답 대신 메시지 `card`에 `TrendRequestCard`(미리보기)를 싣는다. 의뢰문 → brief·프리셋은 `trend_report_brief.resolve` 재사용(LLM 1번, 장부 `data_chat`, 대화 하루 상한 그대로). 경쟁사 이름은 이전 보고서 저장값만(인스타 안 부름). LLM 실패·상한이면 프리셋 값 + `brief_reason`. **접수하지 않는다**(보고서 저장 없음): 사람이 카드 버튼으로 `trend_report_create`(caller human + `chat_thread_id` + 카드 칸 값)를 부를 때만. 그 보고서는 대화에 진행 카드("의뢰 TR-… 만드는 중…")와 완료 카드(완료·일부만·실패·중단, 근거 앞 3개, `report_path`)를 코드 문장으로 붙인다. 닫힌 대화·그 대화의 의뢰 카드(같은 의뢰문)가 없는 대화에는 붙이지 않는다. 메시지 `card`는 메시지 JSON 안 필드(예전 메시지는 null), 계약은 `data.py` "데이터분석 대화 카드"·예시 `tests/fixtures/chat_cards_example.json`
 - **재료는 저장된 결과만.** 코드가 질문 낱말로 묶음을 고른다(최대 3개, 대화 중 새 수집·계산·YouTube 호출 없음).
 
 | 묶음 | 읽는 것 (마지막 저장분) | 근거 줄 |
@@ -1167,6 +1168,7 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
   - 네이버: 검색어 트렌드 1번(필터로 값이 없는 키워드가 있으면 전체로 1번 더) + 쇼핑인사이트 키워드마다 1번(최대 7번) + 검색광고 키워드 도구 최대 1번(그날 keyword_pool에 없을 때, 검색광고 하루 상한). 커넥터 하루 캐시·네이버 전체 상한과 trend_age 예산 표(호출자 `trend_report`)를 같이 쓴다(새 예산 없음). 한도면 그 키워드만 "확인 안 함(한도)"
   - LLM: 보고서당 최대 2번
 - **실행·저장**: data 에이전트 프로세스 안 asyncio 작업, 동시에 1개(나머지 대기). 상태 queued·running·done·partial·failed·interrupted, 섹션별 상태도 저장(`trend_report_store.py`, SQLite `DATA_TREND_REPORT_DB`, 비면 메모리. `run_all.sh`는 `backend/.data/trend_reports.db`). 다시 켜지면 대기·진행으로 남은 보고서는 "중단됨 + 다시 만들기 필요". 같은 날 같은 의뢰(정규화한 입력 해시)는 저장본을 연다(`rebuild: true`면 새로). 보고서 기록은 분석 결과 보관이라 `execute()`를 부르지 않는다
+- **대화 카드로 넣은 의뢰**: `chat_thread_id`(저장소 열 `chat_thread_id`, 예전 DB는 열 추가)가 있으면 그 데이터분석 대화에 진행·완료 메시지를 붙인다(위 "직접 대화" 참고). 칸 값이 하나라도 오면 의뢰문을 LLM으로 다시 읽지 않는다(빈 칸은 프리셋)
 - **이벤트**: 완료·부분 완료·실패 때 `data.trend_report_ready`(source `data`, idempotency_key `<report_id>:<status>`, data `{report_id, status, context_id, caller, summary_line}`)를 `metric.anomaly`와 같은 `ax_agent_template.events.publish`로 보낸다. 지금 총괄은 이 이벤트를 무시한다(총괄 plan은 다음 단계). 보내지 못하면(`EventBusUnavailable` 등) 로그 한 줄만 남기고 보고서는 그대로
 - **한계**: 인스타는 프로페셔널 계정의 최근 20개만(개인 계정·해시태그 전체·게시물 오디오는 볼 수 없음). 최근 20개가 직전 7일까지 닿지 않는 계정은 해시태그 직전 7일 수가 덜 잡힌다(보고서 limits에 계정 수). 네이버 값은 요청 안 상대값이라 키워드끼리 크기는 비교하지 않는다. 영상 업로드·광고 캡처·썸네일 AI 분석·총괄 plan은 아직 없다
 

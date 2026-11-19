@@ -5,6 +5,8 @@
 - 대화 하나 = id(`datachat-N`)·title·status·who·summary·messages[]·시각.
   status: `talking`(말 걸 수 있음) · `answering`(AI 답을 만드는 중) · `closed`(끝남, 더는 못 보냄).
 - 대화 기록 저장은 업무 상태가 아니다 (execute()를 부르지 않는다).
+- 메시지마다 `card`(분석 의뢰 카드 JSON, 없으면 null). 메시지는 대화 행의 `messages` JSON에
+  들어 있어 열 대신 메시지 필드로 둔다. 예전 메시지는 읽을 때 `card: null`로 채운다.
 """
 
 from __future__ import annotations
@@ -93,13 +95,16 @@ class DataChatStore:
 
     @staticmethod
     def _view(row: sqlite3.Row) -> dict[str, Any]:
+        messages = json.loads(row["messages"])
+        for m in messages:  # 카드 이전 메시지는 card 없음 → null
+            m.setdefault("card", None)
         return {
             "id": row["id"],
             "title": row["title"],
             "status": row["status"],
             "who": row["who"],
             "summary": row["summary"],
-            "messages": json.loads(row["messages"]),
+            "messages": messages,
             "task_id": None,  # 대화로는 일이 생기지 않는다(조회·설명만)
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
@@ -147,10 +152,11 @@ class DataChatStore:
         return self.get(f"datachat-{seq}") or {}
 
     @staticmethod
-    def _message(msgs: list[dict[str, Any]], role: str, text: str, kind: str, at: str) -> None:
+    def _message(msgs: list[dict[str, Any]], role: str, text: str, kind: str, at: str,
+                 card: dict[str, Any] | None = None) -> None:  # fmt: skip
         n = max((int(m["id"][1:]) for m in msgs if str(m.get("id", "")).startswith("m")), default=0)
         msgs.append({"id": f"m{n + 1}", "role": role, "text": text, "at": at, "kind": kind,
-                     "plan": None, "task_id": None})  # fmt: skip
+                     "plan": None, "task_id": None, "card": card})  # fmt: skip
 
     def _update(
         self, thread_id: str, mutate: Callable[[dict[str, Any], str], Status | None]
@@ -201,17 +207,46 @@ class DataChatStore:
         return outcome, th
 
     def finish_turn(
-        self, thread_id: str, reply: str, *, summary: str | None = None, kind: str = "text"
+        self, thread_id: str, reply: str, *, summary: str | None = None, kind: str = "text",
+        card: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """AI 답을 붙이고 `talking`으로 되돌린다. 그 사이 닫혔으면 닫힌 채로 둔다."""
 
         def mutate(th: dict[str, Any], at: str) -> Status | None:
-            self._message(th["messages"], "assistant", reply, kind, at)
+            self._message(th["messages"], "assistant", reply, kind, at, card)
             if summary:
                 th["summary"] = summary
             return "closed" if th["status"] == "closed" else "talking"
 
         return self._update(thread_id, mutate)
+
+    def add_report_message(self, thread_id: str, text: str, card: dict[str, Any],
+                           request_text: str | None) -> str:  # fmt: skip
+        """분석 의뢰 진행·완료 메시지(코드 문장 + 카드)를 붙인다. 상태는 그대로 둔다.
+
+        붙이지 않는 경우(반환값이 이유): `missing`(없거나 숨김) · `closed`(끝난 대화) ·
+        `not_from_here`(이 대화의 의뢰 카드가 아님: 같은 의뢰문의 trend_request 카드가 없다 →
+        다른 사람 대화나 엉뚱한 id). 붙였으면 `ok`.
+        """
+        outcome = "missing"
+
+        def mutate(th: dict[str, Any], at: str) -> Status | None:
+            nonlocal outcome
+            if th["status"] == "closed":
+                outcome = "closed"
+                return None
+            cards = [m.get("card") or {} for m in th["messages"]]
+            if not request_text or not any(c.get("kind") == "trend_request"
+                                           and c.get("request_text") == request_text
+                                           for c in cards):  # fmt: skip
+                outcome = "not_from_here"
+                return None
+            outcome = "ok"
+            self._message(th["messages"], "assistant", text, "text", at, card)
+            return th["status"]
+
+        self._update(thread_id, mutate)
+        return outcome
 
     def close(self, thread_id: str) -> dict[str, Any] | None:
         """대화를 끝낸다. 요약이 비어 있으면 첫 질문 일부만 남긴다(지어내지 않는다)."""

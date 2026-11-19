@@ -105,3 +105,17 @@ def test_bad_body_stops_before_data(client: TestClient, fake: Fake) -> None:
     assert client.post(URL, json={"message": ""}).status_code == 422
     assert client.post(URL, json={"message": "x" * 2001}).status_code == 422
     assert fake.calls == []
+
+
+def test_message_cards_pass_through_get_and_send(client: TestClient, fake: Fake) -> None:
+    """메시지의 card(분석 의뢰 카드)를 버리지 않고 그대로 넘긴다. 예전 메시지는 card null."""
+    card = {"kind": "trend_report_done", "report_id": "tr_1", "status": "done",
+            "summary_line": "질문형 릴스", "top_evidence": ["#클린뷰티 6곳 사용"],
+            "report_path": "/data/trend#request?id=tr_1"}  # fmt: skip
+    msgs = [{"id": "m1", "role": "user", "text": "의뢰", "card": None},
+            {"id": "m2", "role": "assistant", "text": "보고서 완료", "card": card}]  # fmt: skip
+    fake.output = {"thread": {**THREAD, "status": "talking", "messages": msgs}}
+    got = client.get(f"{URL}/datachat-1").json()["data"]["messages"]
+    assert got == msgs
+    sent = client.post(URL, json={"message": "다시"}).json()["data"]["messages"]
+    assert sent[1]["card"] == card and sent[0]["card"] is None

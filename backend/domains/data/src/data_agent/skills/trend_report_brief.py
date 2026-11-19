@@ -241,6 +241,13 @@ class Resolved:
     accounts: list[str]  # 부를 인스타 계정 (경쟁사 먼저, 최대 MAX_ACCOUNTS)
     limits: list[str]
     llm_calls: int
+    extract_error: str | None = None  # 의뢰문 LLM 추출 실패 이유 (안 불렀거나 성공이면 None)
+
+
+def has_fields(request: TrendReportInput) -> bool:
+    """폼(또는 대화 카드) 칸 값이 하나라도 왔는지. 왔으면 의뢰문을 LLM으로 다시 읽지 않는다."""
+    return bool(request.product or request.target_gender or request.target_ages or request.format
+                or request.competitors or request.keywords)  # fmt: skip
 
 
 def _pick(given: Any, guessed: Any, preset: Any, has_text: bool) -> tuple[Any, FieldSource]:
@@ -255,15 +262,20 @@ def _pick(given: Any, guessed: Any, preset: Any, has_text: bool) -> tuple[Any, F
 
 async def resolve(request: TrendReportInput, llm: Any, *, folder: Path = PRESET_DIR,
                   context_id: str | None = None) -> Resolved:  # fmt: skip
-    """폼 값 > 의뢰문 추정 > 프리셋 순으로 칸을 채우고 출처를 남긴다."""
+    """폼 값 > 의뢰문 추정 > 프리셋 순으로 칸을 채우고 출처를 남긴다.
+
+    칸 값이 하나라도 오면(폼·대화 카드) 의뢰문을 LLM으로 다시 읽지 않는다. 빈 칸은 프리셋.
+    """
     limits: list[str] = []
     calls = 0
     text = (request.request_text or "").strip()
     guess = Extracted()
-    if text:
+    failed: str | None = None
+    if text and not has_fields(request):
         calls = 1
         got, why = await extract(text, llm, context_id=context_id)
         if got is None:
+            failed = why
             limits.append(f"{why} → 비어 있는 칸은 프리셋 값")
         else:
             guess = got
@@ -312,7 +324,7 @@ async def resolve(request: TrendReportInput, llm: Any, *, folder: Path = PRESET_
                                         goal=s_goal if goal else None),
         goal=goal or None, format_parts=format_parts(fmt),
     )  # fmt: skip
-    return Resolved(brief, preset, wanted[:MAX_ACCOUNTS], limits, calls)
+    return Resolved(brief, preset, wanted[:MAX_ACCOUNTS], limits, calls, failed)
 
 
 _DURATION = re.compile(r"\d+\s*(?:초|분)")

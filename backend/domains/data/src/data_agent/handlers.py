@@ -1253,8 +1253,10 @@ def get_trend_reports() -> Any:
         from data_agent.trend_report_runner import TrendReportService
         from data_agent.trend_report_store import TrendReportStore, path_from
 
+        # 대화 카드로 넣은 의뢰는 그 대화(data_chat 저장소)에 진행·완료 메시지를 붙인다
         _TREND_REPORTS = TrendReportService(TrendReportStore(path_from(os.environ)),
-                                            _trend_report_deps)  # fmt: skip
+                                            _trend_report_deps,
+                                            chat=lambda: get_chat().store)  # fmt: skip
     return _TREND_REPORTS
 
 

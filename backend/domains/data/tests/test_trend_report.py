@@ -700,6 +700,7 @@ def test_frontend_questions_1380() -> None:
         "target_ages": None, "format": None, "competitors": None, "keywords": None,
         "accounts": None, "caller": "orchestrator", "context_id": None, "rebuild": False,
         "goal": None,  # v2 추가 (기본 None)
+        "chat_thread_id": None,  # 11/19 대화 카드 추가 (기본 None)
     }  # fmt: skip
     assert TrendReportInput.model_validate({}).caller == "human"
 

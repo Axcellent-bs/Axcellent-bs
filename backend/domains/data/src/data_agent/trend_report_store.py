@@ -1,7 +1,8 @@
 """트렌드 분석 의뢰 보고서 저장소 (SQLite, `DATA_TREND_REPORT_DB`. 비어 있으면 메모리).
 
 - `reports`: 보고서 id·같은 의뢰 해시·한국 날짜·의뢰 입력(JSON)·호출자·context_id·상태·
-  섹션별 상태(JSON)·결과(TrendReport JSON, 만드는 동안 섹션이 끝날 때마다 덮어씀)·만든/끝난 시각
+  섹션별 상태(JSON)·결과(TrendReport JSON, 만드는 동안 섹션이 끝날 때마다 덮어씀)·만든/끝난 시각·
+  대화 카드로 넣었으면 그 대화 id(`chat_thread_id`, 예전 DB는 열 추가)
 - `ig_media`: 그날(한국) 계정별 인스타 최근 게시물
   (같은 날 다른 의뢰가 같은 계정을 다시 부르지 않게)
 
@@ -45,6 +46,10 @@ class TrendReportStore:
                 "CREATE TABLE IF NOT EXISTS ig_media (day TEXT NOT NULL, account TEXT NOT NULL,"
                 " media TEXT NOT NULL, PRIMARY KEY (day, account));"
             )
+            # 11/19 추가 열: 대화 카드에서 넣은 의뢰의 대화 id (예전 DB에는 없어서 덧붙인다)
+            have = {r[1] for r in self._conn.execute("PRAGMA table_info(reports)")}
+            if "chat_thread_id" not in have:
+                self._conn.execute("ALTER TABLE reports ADD COLUMN chat_thread_id TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -53,16 +58,34 @@ class TrendReportStore:
 
     def create(self, report_id: str, brief_hash: str, day: date, brief: Mapping[str, Any],
                caller: str, context_id: str | None, result: Mapping[str, Any],
-               created_at: datetime) -> None:  # fmt: skip
+               created_at: datetime, chat_thread_id: str | None = None) -> None:  # fmt: skip
         sections = {k: v.get("status") for k, v in (result.get("sections") or {}).items()}
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO reports VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO reports (id, brief_hash, day, brief, caller, context_id, status,"
+                " sections, result, created_at, finished_at, chat_thread_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (report_id, brief_hash, day.isoformat(), json.dumps(brief, ensure_ascii=False),
                  caller, context_id, str(result.get("status") or "queued"),
                  json.dumps(sections), json.dumps(result, ensure_ascii=False),
-                 created_at.isoformat(), None),
+                 created_at.isoformat(), None, chat_thread_id),
             )  # fmt: skip
+
+    def chat_thread(self, report_id: str) -> str | None:
+        """그 보고서를 넣은 대화 id (대화 카드로 넣지 않았으면 None)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT chat_thread_id FROM reports WHERE id = ?", (report_id,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def known_names(self, limit: int = 50) -> dict[str, str]:
+        """최근 보고서들의 경쟁사 표시 이름 {아이디: 이름} (최근 것이 이긴다, 없는 이름은 뺀다)."""
+        out: dict[str, str] = {}
+        for raw in reversed(self.recent(limit)):
+            names = ((raw.get("brief") or {}).get("competitor_names") or {})
+            out.update({k: v for k, v in names.items() if isinstance(v, str) and v})
+        return out
 
     def same(self, brief_hash: str, day: date) -> str | None:
         """같은 날 같은 의뢰의 가장 최근 저장본 (실패·중단은 빼고). 없으면 None."""
