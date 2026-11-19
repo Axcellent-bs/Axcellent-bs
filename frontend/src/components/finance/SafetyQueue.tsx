@@ -66,6 +66,7 @@ function tipOf(r: Review): string {
   if (r.action === "publish_sns") return "글과 영상이 승인한 초안과 같고 AI 생성 표시가 있으면 진행하세요. 올리면 되돌리기 어렵습니다.";
   if (r.action === "generate_media") return "비용과 길이가 예상과 맞으면 진행하세요. 진행하면 비용이 나갑니다.";
   if (r.action === "publish_notice") return "공지 내용과 채널이 맞는지 보고 진행하세요. SNS 게시라면 멈추세요.";
+  if (r.action === "set_publish_control") return "Instagram 계정 문제가 풀렸는지 확인하고 진행하세요. 진행하면 승인된 게시물이 다시 자동으로 올라갑니다.";
   if (r.action === "approve_data_deletion" || r.action === "purge_expired_inquiries" || r.action === "purge_expired_claims") return "지운 원문은 되돌릴 수 없습니다. 지울 대상과 건수가 보관 기간 기준(문의 3년, 클레임 5년)에 맞는지 보고 진행하세요. 애매하면 멈추세요.";
   switch (r.report.hold_reason) {
     case "amount_mismatch": return "요청한 AI가 금액을 잘못 적었다는 뜻입니다. 보통 멈추고 담당자에게 알리세요.";
