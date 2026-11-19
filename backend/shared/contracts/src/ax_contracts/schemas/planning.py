@@ -627,6 +627,53 @@ class ReceiveInsightOutput(AxModel):
     proposal_id: str  # PROP-n
 
 
+class VideoScene(AxModel):
+    """영상 제작안의 장면 하나 (11/19 홍보영상 솔루션 ③ 장면별 스토리보드).
+
+    `caption`은 자막(편집 때 오버레이로 넣는다)이고 영상 모델에 그리지 않는다. `prompt`는 그
+    장면을 만들 영상 생성 프롬프트(영문)이며 글자·실존 인물·실제 브랜드를 요청하지 않는다."""
+
+    n: int = Field(ge=1, le=8)
+    start_s: int = Field(ge=0, le=120)
+    end_s: int = Field(ge=1, le=120)
+    visual: str = Field(min_length=1, max_length=200)  # 화면 구성 (사람이 읽는 한국어)
+    caption: str = Field(default="", max_length=60)  # 자막 (오버레이, 비면 자막 없음)
+    prompt: str = Field(min_length=1, max_length=800)  # 영상 생성 프롬프트 (영문)
+
+    @model_validator(mode="after")
+    def _ends_after_start(self) -> VideoScene:
+        if self.end_s <= self.start_s:
+            raise ValueError("end_s는 start_s보다 커야 한다")
+        return self
+
+
+class VideoPlan(AxModel):
+    """기획 → 마케팅 영상 제작안: 콘셉트·대본·장면별 스토리보드·영상 생성 프롬프트.
+
+    `style`은 모든 장면 프롬프트에 공통으로 붙일 화풍, `negative`는 공통 금지(글자·로고·실존
+    인물·실제 브랜드). 장면 시간은 0초부터 빈틈없이 이어지고 마지막 장면이 `duration_s`에 끝난다."""
+
+    concept: str = Field(min_length=1, max_length=200)  # 홍보 콘셉트 한 줄
+    duration_s: int = Field(ge=5, le=120)
+    aspect: Literal["9:16", "1:1", "16:9"] = "9:16"
+    script: str = Field(min_length=1, max_length=800)  # 전체 흐름 대본 (한국어)
+    scenes: list[VideoScene] = Field(min_length=1, max_length=8)
+    style: str = Field(min_length=1, max_length=300)  # 공통 화풍 (영문)
+    negative: str = Field(min_length=1, max_length=300)  # 공통 금지 (영문)
+    written_by: Literal["llm", "rule", "human"] = "rule"
+
+    @model_validator(mode="after")
+    def _scenes_cover_duration(self) -> VideoPlan:
+        at = 0
+        for i, sc in enumerate(self.scenes, start=1):
+            if sc.n != i or sc.start_s != at:
+                raise ValueError("장면은 1번부터 차례로, 앞 장면이 끝난 시각에 시작해야 한다")
+            at = sc.end_s
+        if at != self.duration_s:
+            raise ValueError("마지막 장면이 duration_s에 끝나야 한다")
+        return self
+
+
 class CampaignBriefInput(AxModel):
     """기획 → 마케팅: 사람이 확정한 제안 (marketing `receive_campaign_brief`)."""
 
@@ -655,6 +702,9 @@ class CampaignBriefInput(AxModel):
     # (11/18 기획 방향 선택지)
     idea_angle: Literal["ride_trend", "own_trend", "with_product"] | None = None
     trend_refs: list[str] = Field(default_factory=list, max_length=3)
+    # 아래는 예전 요청은 없다. 영상 제작안(콘셉트·대본·장면별 스토리보드·영상 생성 프롬프트).
+    # 사람이 기획안에서 확인한 뒤 넘긴다 (11/19 홍보영상 솔루션 ③→⑤)
+    video_plan: VideoPlan | None = None
 
 
 class CampaignBriefOutput(AxModel):
