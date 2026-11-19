@@ -6,6 +6,7 @@ release_fault(같은 유형 과거 장애의 처리 방식 다시 하기: 장애
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import timedelta
 from typing import Any
@@ -287,7 +288,8 @@ async def _apply(
 
     if decision.status == "executed":
         output = {**base, "rolled_back_to": to_version, "path": _path_label(decision)}
-        tool = deploy_tools.tool_for(target.service)
+        # 보관함 파일 읽기가 이벤트 루프를 막지 않게 한다
+        tool = await asyncio.to_thread(deploy_tools.tool_for, target.service)
         if tool is not None or target.source is not None:
             # 배포 도구가 연결된 서비스: 그 도구로 이전 버전을 다시 배포한다.
             # 도구 이력에서 온 배포인데 연결을 못 읽으면(보관함이 깨짐 등) 시연 경로(장애 해제)로
