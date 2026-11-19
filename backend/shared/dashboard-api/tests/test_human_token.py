@@ -75,3 +75,13 @@ def test_reads_and_plan_checks_need_no_token(client) -> None:
 
 def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def test_the_shared_token_stops_once_switched_off(client, monkeypatch) -> None:
+    """공용 토큰도 `ax_agent_template.human_auth` 규칙: `AX_ALLOW_SHARED_HUMAN_TOKEN=0`이면 403."""
+    monkeypatch.setenv("DASHBOARD_HUMAN_TOKENS", "공용:shared-secret")
+    res = client.post(BASE + "/claims/999/approve", json={}, headers=auth("shared-secret"))
+    assert res.status_code == 404  # 사람 검사를 지나 없는 클레임
+    monkeypatch.setenv("AX_ALLOW_SHARED_HUMAN_TOKEN", "0")
+    res = client.post(BASE + "/claims/999/approve", json={}, headers=auth("shared-secret"))
+    assert res.status_code == 403 and res.json()["error"]["code"] == "HUMAN_TOKEN_INVALID"

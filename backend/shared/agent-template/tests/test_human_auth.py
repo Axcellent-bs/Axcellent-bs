@@ -105,3 +105,43 @@ def test_missing_agent_and_unknown_tokens_are_refused(header, status, code) -> N
     with pytest.raises(ha.HumanAuthError) as err:
         ha.verify_human(header, shared_tokens={"known": "공용"})
     assert (err.value.status_code, err.value.code) == (status, code)
+
+
+# ---- find_human: 서비스마다 가진 사람 검사가 쓰는 함수 ----
+
+
+def test_find_human_reads_a_session_token_as_the_account() -> None:
+    human = ha.find_human(_token(), now=1_000_001)
+    assert human is not None
+    assert (human.name, human.role, human.shared) == ("예진", "operator", False)
+
+
+def test_find_human_raises_for_a_bad_or_revoked_session() -> None:
+    token = _token()
+    prefix, body, sig = token.split(".")
+    with pytest.raises(ha.HumanAuthError):
+        ha.find_human(f"{prefix}.{body}.{'A' * len(sig)}", now=1_000_001)
+    ha.revoke_session(ha.verify_session(token, now=1_000_001), now=1_000_001)
+    with pytest.raises(ha.HumanAuthError) as err:
+        ha.find_human(token, now=1_000_002)
+    assert err.value.code == "SESSION_REVOKED"
+
+
+def test_find_human_keeps_shared_tokens_until_switched_off(monkeypatch) -> None:
+    shared = {"s3cret": "공용"}
+    human = ha.find_human("s3cret", shared_tokens=shared)
+    assert human is not None and (human.name, human.shared) == ("공용", True)
+    monkeypatch.setenv(ha.ALLOW_SHARED_ENV, "0")
+    assert ha.find_human("s3cret", shared_tokens=shared) is None
+
+
+def test_find_human_takes_mock_names_only_under_the_mock_switch() -> None:
+    assert ha.find_human("human:taeyoon") is None
+    mocked = ha.find_human("human:taeyoon", mock=True)
+    assert mocked is not None and mocked.name == "taeyoon"
+    assert ha.find_human("human:", mock=True) is None
+
+
+def test_find_human_returns_none_for_agent_and_unknown_tokens() -> None:
+    assert ha.find_human("mock:marketing", shared_tokens={"mock:marketing": "x"}, mock=True) is None
+    assert ha.find_human("nobody", shared_tokens={"s3cret": "공용"}) is None
