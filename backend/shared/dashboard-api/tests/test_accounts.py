@@ -27,6 +27,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv(cc.CONNECTION_FILE_ENV, str(tmp_path / "company_connection.json"))
     monkeypatch.delenv(accounts.ACCOUNTS_FILE_ENV, raising=False)
     monkeypatch.delenv(human_auth.REVOKED_FILE_ENV, raising=False)
+    monkeypatch.delenv(human_auth.GENERATIONS_FILE_ENV, raising=False)
     monkeypatch.delenv(human_auth.ALLOW_SHARED_ENV, raising=False)
     monkeypatch.setenv(human_auth.SESSION_SECRET_ENV, "s" * 40)  # 테스트용 자리값
     monkeypatch.setenv(accounts.BOOTSTRAP_ENV, f"{BOOT_EMAIL}:{BOOT_PW}")
@@ -237,3 +238,123 @@ def test_the_shared_token_still_uses_connection_keys(client) -> None:
         headers=_bearer("test-human-token"),
     )
     assert res.status_code == 200, res.text
+
+
+# ---- 비밀번호 바꾸기·초기화 ----
+
+NEW_PW = "new-pass-for-tests"  # 테스트용 자리값
+
+
+def _change(client: TestClient, token: str, current: str, new: str = NEW_PW):
+    body = {"current_password": current, "new_password": new}
+    return client.post(BASE + "/password", json=body, headers=_bearer(token))
+
+
+def _write_ok(client: TestClient, token: str) -> int:
+    # 사람 토큰 검사를 지나면 업무 처리에서 404 (없는 클레임)
+    res = client.post("/api/dashboard/claims/999/approve", json={}, headers=_bearer(token))
+    return res.status_code
+
+
+def test_changing_the_password_ends_old_sessions_and_returns_a_new_one(client) -> None:
+    old = _op_token(client)
+    other_old = _op_token(client)  # 다른 기기에서 로그인한 세션
+    res = _change(client, old, BOOT_PW)
+    assert res.status_code == 200, res.text
+    data = res.json()["data"]
+    assert data["account"]["email"] == BOOT_EMAIL and "password_hash" not in data["account"]
+    for token in (old, other_old):
+        me = client.get(BASE + "/me", headers=_bearer(token))
+        assert me.status_code == 401 and me.json()["error"]["code"] == "SESSION_ENDED"
+        assert _write_ok(client, token) == 401
+    assert client.get(BASE + "/me", headers=_bearer(data["token"])).status_code == 200
+    assert _write_ok(client, data["token"]) == 404
+    assert _login(client).status_code == 401
+    assert _login(client, pw=NEW_PW).status_code == 200
+
+
+def test_a_wrong_current_password_is_401_and_counts_toward_the_lock(client) -> None:
+    token = _op_token(client)
+    res = _change(client, token, "wrong-password")
+    assert res.status_code == 401 and res.json()["error"]["code"] == "PASSWORD_WRONG"
+    for _ in range(accounts.MAX_FAILURES - 1):
+        _login(client, pw="wrong-password")
+    # 비밀번호 바꾸기 1번 + 로그인 4번 = 5번 → 맞는 비밀번호도 막힌다
+    assert _login(client).json()["error"]["code"] == "LOGIN_LOCKED"
+    locked = _change(client, token, BOOT_PW)
+    assert locked.status_code == 429 and locked.json()["error"]["code"] == "LOGIN_LOCKED"
+    assert _write_ok(client, token) == 404  # 틀렸을 때는 세션을 끊지 않는다
+
+
+def test_a_short_or_unchanged_new_password_is_422(client) -> None:
+    token = _op_token(client)
+    short = _change(client, token, BOOT_PW, "short")
+    assert short.status_code == 422 and short.json()["error"]["code"] == "PASSWORD_TOO_SHORT"
+    same = _change(client, token, BOOT_PW, BOOT_PW)
+    assert same.status_code == 422 and same.json()["error"]["code"] == "PASSWORD_SAME"
+    assert _login(client).status_code == 200
+
+
+def test_the_shared_token_cannot_change_or_reset_passwords(client) -> None:
+    shared = _bearer("test-human-token")
+    body = {"current_password": BOOT_PW, "new_password": NEW_PW}
+    res = client.post(BASE + "/password", json=body, headers=shared)
+    assert res.status_code == 403 and res.json()["error"]["code"] == "SESSION_REQUIRED"
+    res = client.post(
+        BASE + "/accounts/acc-x/reset-password", json={"new_password": NEW_PW}, headers=shared
+    )
+    assert res.status_code == 403 and res.json()["error"]["code"] == "SESSION_REQUIRED"
+    assert client.post(BASE + "/password", json=body).status_code == 401
+
+
+def _account_id(client: TestClient, token: str) -> str:
+    return client.get(BASE + "/me", headers=_bearer(token)).json()["data"]["account"]["id"]
+
+
+def _reset(client: TestClient, token: str, account_id: str, pw: str = NEW_PW):
+    return client.post(
+        BASE + f"/accounts/{account_id}/reset-password",
+        json={"new_password": pw},
+        headers=_bearer(token),
+    )
+
+
+def test_operator_resets_any_account_and_its_old_sessions_end(client) -> None:
+    op = _op_token(client)
+    admin = _make(client, op, "admin", "ad@example.com")
+    admin_id = _account_id(client, admin)
+    res = _reset(client, op, admin_id)
+    assert res.status_code == 200 and "password_hash" not in res.json()["data"]
+    assert client.get(BASE + "/me", headers=_bearer(admin)).json()["error"]["code"] == (
+        "SESSION_ENDED"
+    )
+    assert _write_ok(client, admin) == 401
+    assert _login(client, "ad@example.com", "admin-pass-1234").status_code == 401
+    assert _login(client, "ad@example.com", NEW_PW).status_code == 200
+    assert _write_ok(client, op) == 404  # 초기화한 운영자의 세션은 그대로
+    assert _reset(client, op, "acc-none").status_code == 404
+    short = _reset(client, op, admin_id, "short")
+    assert short.json()["error"]["code"] == "PASSWORD_TOO_SHORT"
+
+
+def test_admin_resets_only_members_and_members_reset_nobody(client) -> None:
+    op = _op_token(client)
+    admin = _make(client, op, "admin", "ad@example.com")
+    other_admin = _make(client, op, "admin", "ad2@example.com")
+    member = _make(client, op, "member", "m@example.com")
+    op_id, member_id = _account_id(client, op), _account_id(client, member)
+    for target in (op_id, _account_id(client, other_admin)):
+        res = _reset(client, admin, target)
+        assert res.status_code == 403 and res.json()["error"]["code"] == "ROLE_REQUIRED"
+    assert _reset(client, member, member_id).status_code == 403
+    assert _reset(client, admin, member_id).status_code == 200
+    assert _write_ok(client, member) == 401
+    assert _write_ok(client, other_admin) == 404  # 다른 계정은 그대로
+    assert _login(client, "m@example.com", NEW_PW).status_code == 200
+
+
+def test_passwords_never_reach_the_logs(client, caplog) -> None:
+    caplog.set_level("DEBUG")
+    token = _op_token(client)
+    _change(client, token, BOOT_PW)
+    assert BOOT_PW not in caplog.text and NEW_PW not in caplog.text
