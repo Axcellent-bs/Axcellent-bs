@@ -122,6 +122,8 @@ export const api = {
     kb: () => request<{ id: string; category: string; title: string; section: string; text: string }[]>("/api/dashboard/kb-chunks"),
     list: () => request<ConversationListItem[]>("/api/dashboard/conversations"),
     get: (id: number) => request<Conversation>(`/api/dashboard/conversations/${id}`),
+    /** 재무 기록의 inquiry_ref(문의의 context_id)로 연다. 문의 번호는 다시 매겨질 수 있지만 이 값은 안 바뀐다 */
+    byRef: (ref: string) => request<Conversation>(`/api/dashboard/conversations/by-ref/${encodeURIComponent(ref)}`),
     create: (b: { user_id: number; subject: string; message: string; order_id?: string | null }) => post<Conversation>("/api/dashboard/conversations", b),
     customerMessage: (id: number, text: string) => post<Conversation>(`/api/dashboard/conversations/${id}/customer-messages`, { text }),
     check: (id: number, text: string) => post<Validation>(`/api/dashboard/conversations/${id}/check`, { text }),

@@ -395,6 +395,24 @@ async def conversations(language: str | None = None) -> dict:
     return ok(items, total=len(items))
 
 
+@router.get("/conversations/by-ref/{context_id}")
+async def conversation_by_ref(context_id: str) -> dict:
+    """재무 기록의 `inquiry_ref`(= 문의의 context_id)로 문의를 연다.
+
+    문의 번호는 저장소를 새로 시작하면 다시 매겨져 남의 문의를 가리킬 수 있다.
+    context_id는 안 바뀐다. 없으면 404.
+    """
+    if is_mock():
+        # 목 데이터에는 context_id가 없다
+        raise ApiError(
+            404,
+            "NOT_FOUND",
+            "이 기록의 문의는 지금 고객지원 저장소에 없어요(번호가 다시 매겨지기 전 문의)",
+        )
+    out = await support_client.call("get_inquiry", {"context_id": context_id})
+    return ok(await _conversation(out))
+
+
 @router.get("/conversations/{conversation_id}")
 async def conversation(conversation_id: int) -> dict:
     if is_mock():

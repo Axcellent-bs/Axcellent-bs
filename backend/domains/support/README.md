@@ -14,7 +14,7 @@
 | skill | 등급 | 요청 가능 | 내용 |
 | --- | --- | --- | --- |
 | `list_inquiries` | read | dashboard-api, orchestrator | 문의 목록 (상태 필터) |
-| `get_inquiry` | read | dashboard-api, orchestrator | 메시지·분석 포함 상세 |
+| `get_inquiry` | read | dashboard-api, orchestrator | 메시지·분석 포함 상세 (`inquiry_id` 또는 `context_id` 중 하나로) |
 | `reveal_original` | A | dashboard-api | 욕설로 가린 고객 메시지의 원문 열기. 연 사람을 내력에 남긴다 |
 | `preview_data_purge` | read | dashboard-api | 개인정보 삭제 미리보기(고객 요청·3년 만료). 지워질 것과 보존 의무로 남을 것(`retained_until`) |
 | `purge_customer_data` | C | dashboard-api | 고객 요청 삭제: 삭제를 요청한 문의의 구매자 문의 원문을 `[삭제됨]`으로. `approve_data_deletion`으로 늘 사람이 승인 |
