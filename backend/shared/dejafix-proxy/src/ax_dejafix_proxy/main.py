@@ -43,6 +43,7 @@ class DejaFixSession:
         self._lock = asyncio.Lock()
         self._inflight = 0
         self._retired = False
+        self._closing: asyncio.Task[None] | None = None
 
     @property
     def configured(self) -> bool:
@@ -51,11 +52,23 @@ class DejaFixSession:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    def _close_later(self) -> None:
+        # 작업을 붙잡아 둬야 중간에 가비지 컬렉션되지 않고, 종료 때 기다릴 수 있다
+        if self._closing is None:
+            self._closing = asyncio.get_running_loop().create_task(self.aclose())
+
     def retire(self) -> None:
         """더 쓰지 않는 세션. 진행 중인 요청이 끝난 뒤에 클라이언트를 닫는다."""
         self._retired = True
         if self._inflight == 0:
-            asyncio.get_running_loop().create_task(self.aclose())
+            self._close_later()
+
+    async def shutdown(self) -> None:
+        """앱 종료: 닫는 중이면 기다리고, 아직 진행 중이라 안 닫았으면 지금 닫는다."""
+        # 닫기 작업을 먼저 붙잡아 둬야 진행 중이던 get()의 finally가 닫기를 또 걸지 않는다
+        self._close_later()
+        assert self._closing is not None
+        await self._closing
 
     async def _login(self) -> str | None:
         res = await self._client.post(
@@ -75,7 +88,7 @@ class DejaFixSession:
         finally:
             self._inflight -= 1
             if self._retired and self._inflight == 0:
-                asyncio.get_running_loop().create_task(self.aclose())
+                self._close_later()
 
     async def _get(self, path: str, query: str) -> httpx.Response:
         url = f"{path}?{query}" if query else path
@@ -114,6 +127,7 @@ def _target() -> tuple[Target, bool] | None:
 def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
     """`client`를 주면(테스트) 대상 주소가 어떻든 그 클라이언트로 부른다."""
     state: dict[str, tuple[Target, DejaFixSession]] = {}
+    retired: list[DejaFixSession] = []  # 종료 때 끝까지 닫는다
 
     def session_for(target: Target, guarded: bool = False) -> DejaFixSession:
         """대상·계정·비밀번호가 바뀌면 세션(토큰)을 새로 만든다."""
@@ -129,6 +143,9 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         fresh = DejaFixSession(http, user, password)
         if held is not None and client is None:
             held[1].retire()  # 진행 중인 요청이 있으면 끝난 뒤에 닫는다
+            # 이미 닫힌 세션(비밀번호를 쥔)은 들고 있지 않는다
+            retired[:] = [r for r in retired if r._closing is None or not r._closing.done()]
+            retired.append(held[1])
         state["s"] = (target, fresh)
         return fresh
 
@@ -137,8 +154,12 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         refuse_mock_outside_tests(auth.MOCK_NAME)  # 목 모드는 토큰 없이 `human:`을 받으므로
         yield
         held = state.pop("s", None)
+        closing = [r.shutdown() for r in retired]
+        retired.clear()
         if held is not None and client is None:
-            await held[1].aclose()
+            closing.append(held[1].aclose())
+        # 하나가 실패해도 나머지는 끝까지 닫는다
+        await asyncio.gather(*closing, return_exceptions=True)
 
     app = FastAPI(
         title="dejafix-proxy",
