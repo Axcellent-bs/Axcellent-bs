@@ -20,6 +20,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from data_agent.connectors.instagram_graph import OWNER_NAME
+
 DATA = Path(__file__).resolve().parents[4] / ".data"  # backend/.data
 AUDIO_ENV, RADAR_ENV = "DATA_IG_AUDIO_DB", "DATA_IG_RADAR_DB"
 HASHTAG_ENV, MEMO_ENV = "DATA_IG_HASHTAGS_DB", "DATA_IG_MEMO_DB"
@@ -165,6 +167,10 @@ class RadarStore(_Store):
             for col in THUMB_COLUMNS:
                 if col not in have:
                     self._conn.execute(f"ALTER TABLE media ADD COLUMN {col} TEXT")
+            # 11/19: 계정 표시 이름 (business_discovery `name`, 같은 호출). 예전 파일은 열만 더한다
+            acc = {r[1] for r in self._conn.execute("PRAGMA table_info(accounts)")}
+            if "name" not in acc:
+                self._conn.execute("ALTER TABLE accounts ADD COLUMN name TEXT")
 
     def cursor(self) -> tuple[date, int, datetime | None, str] | None:
         """(바퀴 날짜, 다음 위치, 마지막 묶음 시각, 계정 목록 해시). 없으면 None."""
@@ -211,8 +217,12 @@ class RadarStore(_Store):
                   m.get("caption"), m.get("permalink"), m.get("media_type"), thumb_of(m))
                  for m in media],
             )  # fmt: skip
-            self._conn.execute("INSERT OR REPLACE INTO accounts VALUES (?,?,?,?)",
-                               (d, account, status, reason))  # fmt: skip
+            name = next((m.get(OWNER_NAME) for m in media
+                         if isinstance(m.get(OWNER_NAME), str)), None)  # fmt: skip
+            self._conn.execute(
+                "INSERT OR REPLACE INTO accounts (day, account, status, reason, name)"
+                " VALUES (?,?,?,?,?)", (d, account, status, reason, name),
+            )  # fmt: skip
 
     def done(self, day: date, account: str) -> bool:
         with self._lock:
@@ -303,6 +313,14 @@ def radar_latest(path: str | Path) -> tuple[date | None, dict[str, list[dict[str
         failed = {a: r or s for a, s, r in conn.execute(
             "SELECT account, status, reason FROM accounts WHERE day = ? AND status != 'ok'",
             (day,))}  # fmt: skip
+        # 계정 표시 이름을 게시물마다 붙인다 (보고서가 재사용할 때 쓴다). 예전 파일은 이름 열이 없다
+        acc_cols = {r[1] for r in conn.execute("PRAGMA table_info(accounts)")}
+        if "name" in acc_cols:
+            for acc, name in conn.execute(
+                "SELECT account, name FROM accounts WHERE day = ? AND name IS NOT NULL", (day,)
+            ):
+                for m in media.get(acc, []):
+                    m[OWNER_NAME] = name
         return date.fromisoformat(day), media, failed
     except sqlite3.DatabaseError:
         return None, {}, {}

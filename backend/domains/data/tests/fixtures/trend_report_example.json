@@ -42,7 +42,8 @@
           "basis": "filtered",
           "monthly_volume": 12300,
           "small_base": false,
-          "shopping_small_base": false
+          "shopping_small_base": false,
+          "monthly_volume_note": null
         },
         {
           "keyword": "비건 선크림",
@@ -53,7 +54,8 @@
           "basis": "all",
           "monthly_volume": 8100,
           "small_base": false,
-          "shopping_small_base": false
+          "shopping_small_base": false,
+          "monthly_volume_note": null
         },
         {
           "keyword": "클린뷰티",
@@ -64,7 +66,8 @@
           "basis": "filtered",
           "monthly_volume": 2400,
           "small_base": true,
-          "shopping_small_base": false
+          "shopping_small_base": false,
+          "monthly_volume_note": null
         },
         {
           "keyword": "제로웨이스트",
@@ -73,9 +76,10 @@
           "shopping_change_pct": null,
           "shopping_reason": "확인 안 함(한도)",
           "basis": "volume_only",
-          "monthly_volume": 900,
+          "monthly_volume": null,
           "small_base": false,
-          "shopping_small_base": false
+          "shopping_small_base": false,
+          "monthly_volume_note": "under_10"
         }
       ]
     },
