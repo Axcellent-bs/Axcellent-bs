@@ -11,16 +11,26 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from marketing_agent.media.base import MediaProvider, MediaRequest, MediaResult
+from marketing_agent.media.fal_video import NAME as FAL_NAME
+from marketing_agent.media.fal_video import FalVideoProvider
 from marketing_agent.media.gemini_audio import GeminiAudioProvider
 from marketing_agent.media.gemini_image import NAME as GEMINI_NAME
 from marketing_agent.media.gemini_image import GeminiImageProvider
 from marketing_agent.media.gemini_video import GeminiVideoProvider
+from marketing_agent.media.higgsfield_video import NAME as HIGGSFIELD_NAME
+from marketing_agent.media.higgsfield_video import HiggsfieldVideoProvider
 from marketing_agent.media.kling_video import NAME as KLING_NAME
 from marketing_agent.media.kling_video import KlingVideoProvider
 from marketing_agent.media.mock import NAME as MOCK_NAME
 from marketing_agent.media.mock import MockProvider
+from marketing_agent.media.pixverse_video import NAME as PIXVERSE_NAME
+from marketing_agent.media.pixverse_video import PixVerseVideoProvider
+from marketing_agent.media.replicate_video import NAME as REPLICATE_NAME
+from marketing_agent.media.replicate_video import ReplicateVideoProvider
 from marketing_agent.media.seedance_video import NAME as SEEDANCE_NAME
 from marketing_agent.media.seedance_video import SeedanceVideoProvider
+from marketing_agent.media.wan_video import NAME as WAN_NAME
+from marketing_agent.media.wan_video import WanVideoProvider
 
 
 class GeminiProvider(GeminiImageProvider):
@@ -44,6 +54,11 @@ ADAPTERS: dict[str, Callable[[], MediaProvider]] = {
     GEMINI_NAME: GeminiProvider,
     SEEDANCE_NAME: SeedanceVideoProvider,  # 영상 전용. 키 MARKETING_SEEDANCE_API_KEY
     KLING_NAME: KlingVideoProvider,  # 영상 전용. 키 MARKETING_KLING_API_KEY
+    FAL_NAME: FalVideoProvider,  # 게이트웨이. 키 MARKETING_FAL_API_KEY
+    REPLICATE_NAME: ReplicateVideoProvider,  # 게이트웨이. 키 MARKETING_REPLICATE_API_KEY
+    HIGGSFIELD_NAME: HiggsfieldVideoProvider,  # 키 MARKETING_HIGGSFIELD_API_KEY
+    WAN_NAME: WanVideoProvider,  # 키 MARKETING_WAN_API_KEY + MARKETING_WAN_WORKSPACE_ID
+    PIXVERSE_NAME: PixVerseVideoProvider,  # 키 MARKETING_PIXVERSE_API_KEY
 }
 
 
