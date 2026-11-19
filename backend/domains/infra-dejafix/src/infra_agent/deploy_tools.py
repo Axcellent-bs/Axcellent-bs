@@ -43,6 +43,9 @@ DISPATCH_LOOKUPS = 3
 DISPATCH_LOOKUP_WAIT = 1.0
 # 디스패치 시각(GitHub `Date` 헤더, 초 단위)보다 이만큼 앞서 만들어진 실행까지 우리 것으로 본다
 DISPATCH_SKEW = timedelta(seconds=2)
+# 다시 배포 요청이 시간 초과일 때 실제로 들어갔는지 찾는 데 쓰는 전체 한도(초).
+# 넘으면 원래 timeout 오류를 그대로 낸다
+DISPATCH_RECHECK_LIMIT = 15.0
 
 _REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _FILE = re.compile(r"[A-Za-z0-9_.-]+")
@@ -113,6 +116,20 @@ async def _send(
     if res.status_code >= 400:
         raise ToolConnectionError(_status_code(res.status_code), f"{where} → {res.status_code}")
     return res
+
+
+def _list(value: Any) -> list[Any]:
+    """목록이면 그대로, 아니면 빈 목록 (응답 모양이 달라도 TypeError를 내지 않게)."""
+    return value if isinstance(value, list) else []
+
+
+async def _recheck(lookup: Awaitable[Any]) -> Any:
+    """시간 초과 뒤 확인을 한도 안에서 돌린다. 한도를 넘거나 응답 모양이 달라 깨지면 None
+    (못 찾음: 부른 쪽이 원래 timeout 오류를 그대로 낸다)."""
+    try:
+        return await asyncio.wait_for(lookup, DISPATCH_RECHECK_LIMIT)
+    except (TimeoutError, ToolConnectionError, TypeError, ValueError, AttributeError, KeyError):
+        return None
 
 
 def _json(res: httpx.Response, where: str) -> dict[str, Any]:
@@ -348,14 +365,16 @@ class GithubActionsTool:
                 if exc.code != "timeout":
                     raise
                 # 요청이 들어갔을 수 있다: 디스패치 직전(레포 응답의 GitHub 시각) 이후에 생긴
-                # 같은 버전 실행이 있으면 그것을 쓴다. 없으면 같은 timeout 오류 (다시 보내지 않는다)
-                landed = await self._find_dispatched(
-                    client,
-                    base,
-                    headers,
-                    branch,
-                    _server_time(repo_res) - DISPATCH_SKEW,
-                    version=version,
+                # 같은 버전 실행이 있으면 그것을 쓴다.
+                # 없으면 같은 timeout 오류 (다시 보내지 않는다).
+                # GitHub 시각을 모르면 기준을 세울 수 없어 찾지 않는다
+                before = _header_time(repo_res)
+                if before is None:
+                    raise
+                landed = await _recheck(
+                    self._find_dispatched(
+                        client, base, headers, branch, before - DISPATCH_SKEW, version=version
+                    )
                 )
                 if landed is None:
                     raise
@@ -417,7 +436,7 @@ class GithubActionsTool:
                 return None  # 디스패치는 이미 됐다: 실행 id만 모른다
             fresh = [
                 (created, raw)
-                for raw in rows or []
+                for raw in _list(rows)
                 if isinstance(raw, dict)
                 and (created := _iso(raw.get("created_at"))) is not None
                 and created >= since
@@ -428,13 +447,18 @@ class GithubActionsTool:
         return None
 
 
-def _server_time(res: httpx.Response) -> datetime:
-    """디스패치를 받은 GitHub 서버 시각 (`Date` 머리글). 없으면 지금."""
+def _header_time(res: httpx.Response) -> datetime | None:
+    """응답을 보낸 서버 시각 (`Date` 머리글). 없거나 틀리면 None."""
     try:
         at = parsedate_to_datetime(res.headers.get("date", ""))
     except (TypeError, ValueError):
-        return datetime.now(UTC)
+        return None
     return at if at.tzinfo else at.replace(tzinfo=UTC)
+
+
+def _server_time(res: httpx.Response) -> datetime:
+    """디스패치를 받은 GitHub 서버 시각 (`Date` 머리글). 없으면 지금."""
+    return _header_time(res) or datetime.now(UTC)
 
 
 # ---------- Jenkins ----------
@@ -449,10 +473,10 @@ def _job_path(job: str) -> str:
 
 
 def _jenkins_param(build: dict[str, Any], name: str) -> str | None:
-    for action in build.get("actions") or []:
+    for action in _list(build.get("actions")):
         if not isinstance(action, dict):
             continue
-        for param in action.get("parameters") or []:
+        for param in _list(action.get("parameters")):
             if isinstance(param, dict) and param.get("name") == name:
                 value = param.get("value")
                 return None if value is None or value == "" else str(value)
@@ -460,10 +484,10 @@ def _jenkins_param(build: dict[str, Any], name: str) -> str | None:
 
 
 def _jenkins_actor(build: dict[str, Any]) -> str | None:
-    for action in build.get("actions") or []:
+    for action in _list(build.get("actions")):
         if not isinstance(action, dict):
             continue
-        for cause in action.get("causes") or []:
+        for cause in _list(action.get("causes")):
             if isinstance(cause, dict) and isinstance(cause.get("userId"), str):
                 return str(cause["userId"])
     return None
@@ -577,7 +601,9 @@ class JenkinsTool:
                     raise
                 # 요청이 들어갔을 수 있다: 요청 직전 이후 같은 버전이 대기열·빌드에 있으면
                 # 그것을 쓴다. 없으면 같은 timeout 오류 (다시 보내지 않는다)
-                landed = await self._find_dispatched(client, job_url, auth, version, started)
+                landed = await _recheck(
+                    self._find_dispatched(client, job_url, auth, version, started)
+                )
                 if landed is None:
                     raise
                 return landed
@@ -598,7 +624,7 @@ class JenkinsTool:
         """요청 직전(`started`, monotonic) 이후 대기열에 들어왔거나 시작한 같은 버전 빌드.
 
         시각은 Jenkins 시계로 비교한다: 조회 응답의 `Date`에서 요청 뒤 지난 시간을 빼
-        요청 직전 Jenkins 시각을 구한다 (`Date`가 없으면 이 서버 시계).
+        요청 직전 Jenkins 시각을 구한다. `Date`가 없으면 기준을 세울 수 없어 None.
         대기열을 먼저 보고, 없으면 빌드를 본다.
         조회가 실패하면 None (요청이 들어갔는지 모른다).
         """
@@ -618,6 +644,8 @@ class JenkinsTool:
                     },
                     auth=auth,
                 )
+                # `Date`는 대기열 응답의 시각이다: 지난 시간도 그 응답을 받은 때까지로 잰다
+                answered = time.monotonic()
                 items = _json(queue_res, queue_where).get("items")
                 builds_res = await _send(
                     client,
@@ -632,10 +660,12 @@ class JenkinsTool:
                 builds = _json(builds_res, builds_where).get("builds")
             except ToolConnectionError:
                 return None
-            since_ms = _jenkins_since_ms(queue_res, started)
+            since_ms = _jenkins_since_ms(queue_res, started, answered)
+            if since_ms is None:
+                return None
             queued = [
                 item
-                for item in (items if isinstance(items, list) else [])
+                for item in _list(items)
                 if isinstance(item, dict)
                 and isinstance(item.get("id"), int)
                 and isinstance(item.get("inQueueSince"), int)
@@ -652,7 +682,7 @@ class JenkinsTool:
                 )
             started_builds = [
                 build
-                for build in (builds if isinstance(builds, list) else [])
+                for build in _list(builds)
                 if isinstance(build, dict)
                 and isinstance(build.get("number"), int)
                 and isinstance(build.get("timestamp"), int)
@@ -676,14 +706,16 @@ def _task_path(item: dict[str, Any]) -> str | None:
     return urlsplit(url).path.rstrip("/") if isinstance(url, str) else None
 
 
-def _jenkins_since_ms(res: httpx.Response, started: float) -> int:
-    """요청 직전 Jenkins 시각(ms)에서 여유를 뺀 값.
+def _jenkins_since_ms(res: httpx.Response, started: float, answered: float) -> int | None:
+    """요청 직전 Jenkins 시각(ms)에서 여유를 뺀 값. `Date`가 없으면 None.
 
-    응답 `Date`(초 단위) - 요청 뒤 지난 시간 - `DISPATCH_SKEW`.
+    응답 `Date`(초 단위) - (응답을 받은 때 - 요청 직전) - `DISPATCH_SKEW`.
     """
-    elapsed = timedelta(seconds=max(0.0, time.monotonic() - started))
-    before = _server_time(res) - elapsed - DISPATCH_SKEW
-    return int(before.timestamp() * 1000)
+    server = _header_time(res)
+    if server is None:
+        return None
+    elapsed = timedelta(seconds=max(0.0, answered - started))
+    return int((server - elapsed - DISPATCH_SKEW).timestamp() * 1000)
 
 
 # ---------- 보관함 → 도구 ----------
