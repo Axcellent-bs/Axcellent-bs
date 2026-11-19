@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Chip, Empty, TONE, Waiting } from "@/components/finance/bits";
 import { okEvidence, type SkillState } from "@/components/data/useSkill";
 import { safeLink } from "@/lib/safeLink";
+import { briefTriggerLabel, versionLabel } from "@/lib/briefTrigger";
 import { Sources, when } from "@/components/data/Sources";
 import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
@@ -289,7 +290,9 @@ function BriefWhen({ out }: { out: TrendInsightBriefOutput }) {
   const manual = out.trigger === "manual";
   const first = manual
     ? `오늘 브리프 · ${hhmm(at)}에 다시 만듦${out.requested_by ? ` (${out.requested_by})` : ""}`
-    : `오늘 브리프 · ${mdhm(at)}에 만듦`;
+    : out.trigger === "auto_retry"
+      ? `오늘 브리프 · ${mdhm(at)}에 만듦 (${briefTriggerLabel(out.trigger)})`
+      : `오늘 브리프 · ${mdhm(at)}에 만듦`;
   const base = out.detect_as_of ? `감지 데이터 ${hhmm(out.detect_as_of)} 기준 · ` : "";
   const d = out.diff_from_previous;
   const second = manual && d
@@ -315,7 +318,7 @@ function BriefControls({ out, head, pick, start, startError }: {
       {versions.length > 0 && (
         <select className="field w-auto py-1 text-sm" aria-label="오늘 판" value={out.version ?? head.latest_version ?? ""}
           onChange={(e) => pick(Number(e.target.value))}>
-          {versions.map((v) => <option key={v.version} value={v.version}>{v.label}</option>)}
+          {versions.map((v) => <option key={v.version} value={v.version}>{versionLabel(v)}</option>)}
         </select>
       )}
       <Chip tone={TONE.muted} label={`오늘 다시 추천 ${head.regen_used ?? 0}/${head.regen_limit ?? 3}`} />

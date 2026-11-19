@@ -9,6 +9,9 @@
 - 재개(`paused=false`)는 안전 레이어 규칙(`publish_resume_needs_human`, `resume`>0)으로 C등급:
   사람이 승인해야 한다. 보류되면 `held`와 `review_id`를 돌려주고, 승인한 뒤 같은 요청을 다시 보내면
   (키는 현재 상태 시각이 들어가 있어 상태가 바뀌면 옛 승인은 쓰이지 않는다) 그때 적용한다.
+  보류가 승인 없이 만료되거나 사람이 거절하면 같은 키는 그 판정을 계속 돌려주므로, 채널별 시도 번호
+  (`sns_publish_control_attempt`)를 올려 새 키로 한 번 다시 요청한다(새 보류 = 새 사람 승인).
+  승인 대기·승인됨이면 시도 번호를 그대로 둬서 같은 키로 이어진다.
 - `updated_by`는 대시보드 API가 사람 토큰에서 채워 보낸다(요청자가 dashboard-api일 때만 쓰기 가능,
   Agent Card). 바뀐 내력은 `sns_publish_control_log`에 남는다(누가·언제·무엇으로·execution_id).
 """
@@ -22,12 +25,19 @@ from typing import Any, Literal
 from pydantic import Field, StrictBool, ValidationError
 
 from ax_agent_template.execute import execute
-from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
+from ax_contracts.schemas import (
+    AgentRequest,
+    AgentResult,
+    Evidence,
+    ExecuteDecision,
+    TaskStatus,
+)
 from ax_contracts.schemas.common import AxModel
 from marketing_agent.sns_publish import publisher
 from marketing_agent.sns_publish.control import (
     DEFAULT_CHANNEL,
     MAX_REASON,
+    ChannelControl,
     PublishControlError,
     clean_reason,
     read_control,
@@ -110,6 +120,34 @@ async def get_publish_control(request: AgentRequest) -> AgentResult:
     )
 
 
+def _review_closed_unapproved(decision: ExecuteDecision) -> bool:
+    """보류 건이 승인 없이 닫혔다(만료 `review_timeout` 또는 사람 거절).
+
+    safety는 닫힌 보류의 판정을 `held` → `rejected`로 바꾸고 `review_id`를 남긴다. 보류를 거치지
+    않은 거부(safety 무응답·기록 실패·교차검증 거절)에는 `review_id`가 없어 여기에 들지 않는다.
+    """
+    return decision.status == "rejected" and decision.review_id is not None
+
+
+async def _execute(
+    request: AgentRequest,
+    params: dict[str, Any],
+    current: ChannelControl,
+    attempt: int,
+    evidence: Evidence,
+) -> ExecuteDecision:
+    """키 = 채널·바랄 상태·사유·현재 상태 시각(+시도 번호). 같은 키면 이전 판정이 온다."""
+    material = [params["channel"], str(params["paused"]), params["reason"]]
+    material.append(current.updated_at or "none")
+    if attempt:  # 0번은 예전 키 그대로(이미 승인 대기 중인 건이 이어지게)
+        material.append(f"attempt={attempt}")
+    digest = hashlib.sha256("|".join(material).encode()).hexdigest()[:24]
+    key = f"{request.meta.context_id}:{ACTION}:{digest}"
+    return await execute(
+        ACTION, params, request.meta.model_copy(update={"idempotency_key": key}), evidence
+    )
+
+
 async def set_publish_control(request: AgentRequest, *, from_decision: Any) -> AgentResult:
     """`from_decision`은 `handlers._from_decision`(executed가 아니면 결과를 만든다)."""
     try:
@@ -128,10 +166,6 @@ async def set_publish_control(request: AgentRequest, *, from_decision: Any) -> A
             outcome="unchanged",
             output=_state(data.channel),
         )
-    digest = hashlib.sha256(
-        "|".join([data.channel, str(data.paused), reason, current.updated_at or "none"]).encode()
-    ).hexdigest()[:24]
-    key = f"{request.meta.context_id}:{ACTION}:{digest}"
     verb = "끄기" if data.paused else "켜기"
     evidence = Evidence(
         queries=[ACTION],
@@ -139,20 +173,23 @@ async def set_publish_control(request: AgentRequest, *, from_decision: Any) -> A
         collected_at=datetime.now(UTC),
         ref_ids=[data.channel],
     )
-    decision = await execute(
-        ACTION,
-        {
-            "channel": data.channel,
-            "paused": data.paused,
-            "resume": 0 if data.paused else 1,  # 재개만 안전 규칙에 걸려 사람 승인(C)
-            "reason": reason,
-            "updated_by": data.updated_by,
-        },
-        request.meta.model_copy(update={"idempotency_key": key}),
-        evidence,
-    )
+    params = {
+        "channel": data.channel,
+        "paused": data.paused,
+        "resume": 0 if data.paused else 1,  # 재개만 안전 규칙에 걸려 사람 승인(C)
+        "reason": reason,
+        "updated_by": data.updated_by,
+    }
+    try:
+        attempt = publisher.store().control_attempt(data.channel)
+        decision = await _execute(request, params, current, attempt, evidence)
+        if _review_closed_unapproved(decision):  # 만료·거절된 옛 보류: 새 키로 한 번만 다시
+            attempt = publisher.store().control_attempt_next(data.channel)
+            decision = await _execute(request, params, current, attempt, evidence)
+    except (PublishControlError, PendingStorageError):
+        return _unreadable(request)
     blocked = from_decision(request, decision, evidence)
-    if blocked:  # 보류·거절: 바꾸지 않는다. 승인 뒤 같은 요청을 다시 보내면 이어서 처리한다
+    if blocked:  # 보류·거절: 바꾸지 않는다. 승인 뒤 같은 요청을 다시 보내면 같은 키로 이어진다
         return blocked
     try:
         publisher.store().control_set(

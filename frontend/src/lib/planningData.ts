@@ -363,6 +363,8 @@ export interface TrendRequestCard {
   cost_note: string
   /** 의뢰문에서 칸을 못 뽑았을 때 이유 */
   brief_reason: string | null
+  /** 이미 접수된 카드면 그 보고서 id (예전 응답은 없음). 탭 기억보다 서버 값이 우선 */
+  accepted_report_id?: string | null
 }
 export interface TrendReportProgressCard { kind: 'trend_report_progress'; report_id: string }
 export interface TrendReportDoneCard {

@@ -76,6 +76,10 @@ CREATE TABLE IF NOT EXISTS sns_publish_control_log (
     updated_at   TEXT NOT NULL,
     execution_id TEXT
 );
+CREATE TABLE IF NOT EXISTS sns_publish_control_attempt (
+    channel TEXT PRIMARY KEY,
+    attempt INTEGER NOT NULL
+);
 """
 _UPDATABLE = frozenset(
     {
@@ -320,6 +324,39 @@ class PendingStore:
                 f"게시 중지 설정을 저장할 수 없다: {type(error).__name__}"
             ) from error
         return stamp
+
+    def control_attempt(self, channel: str) -> int:
+        """스위치 변경 요청의 시도 번호(안전 관문 키 재료). 행이 없으면 0."""
+        try:
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT attempt FROM sns_publish_control_attempt WHERE channel = ?",
+                    (channel,),
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise PendingStorageError(
+                f"게시 중지 시도 번호를 읽을 수 없다: {type(error).__name__}"
+            ) from error
+        return int(row[0]) if row else 0
+
+    def control_attempt_next(self, channel: str) -> int:
+        """시도 번호를 하나 올리고 새 번호를 돌려준다(보류가 만료·거절된 뒤 새로 요청할 때)."""
+        try:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT INTO sns_publish_control_attempt (channel, attempt) VALUES (?, 1)"
+                    " ON CONFLICT(channel) DO UPDATE SET attempt = attempt + 1",
+                    (channel,),
+                )
+                row = self._conn.execute(
+                    "SELECT attempt FROM sns_publish_control_attempt WHERE channel = ?",
+                    (channel,),
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise PendingStorageError(
+                f"게시 중지 시도 번호를 저장할 수 없다: {type(error).__name__}"
+            ) from error
+        return int(row[0])
 
     def control_log(self, channel: str, limit: int = 20) -> list[dict[str, Any]]:
         """변경 감사 기록(최근 순): 누가·언제·무엇으로."""
