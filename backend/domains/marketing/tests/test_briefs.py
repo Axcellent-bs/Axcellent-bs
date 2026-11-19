@@ -371,3 +371,35 @@ def test_storage_failure_is_a_failed_result_and_retry_continues(  # noqa: ANN001
 def test_unopenable_path_fails_fast_with_a_clear_error(tmp_path) -> None:  # noqa: ANN001
     with pytest.raises(briefs.BriefStorageError):
         briefs.BriefStore(str(tmp_path / "no_such_dir" / "briefs.db"))
+
+
+def test_list_campaign_briefs_response_passes_old_contract_copy() -> None:
+    """판매서버(옛 계약 사본: Evidence 4필드, extra=forbid)가 응답을 거부하지 않는다."""
+    from pydantic import BaseModel, ConfigDict, Field
+
+    class OldEvidence(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        queries: list[str] = Field(default_factory=list)
+        data_summary: str = ""
+        collected_at: datetime | None = None
+        ref_ids: list[str] = Field(default_factory=list)
+
+    class OldResult(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        meta: dict
+        status: str
+        outcome: str | None = None
+        output: dict = Field(default_factory=dict)
+        evidence: OldEvidence = Field(default_factory=OldEvidence)
+        reason_code: str | None = None
+        decision_reason: str | None = None
+        alternatives_considered: list[str] = Field(default_factory=list)
+        fallback: bool = False
+        fallback_reason: str | None = None
+        fallback_numbers: list[float] = Field(default_factory=list)
+
+    _receive()
+    for skill in ("list_campaign_briefs", "get_campaign_brief"):
+        raw = _call(skill, {"proposal_id": "PROP-1"} if skill.startswith("get") else {})
+        assert "notices" not in raw["evidence"]
+        assert OldResult.model_validate(raw).status == "completed"

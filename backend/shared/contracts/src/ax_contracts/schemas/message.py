@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import Field, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
 
@@ -84,6 +84,20 @@ class Evidence(AxModel):
     # 응답을 읽는 사람·AI에게 알리는 주의 사항. `data_summary`(숫자 검증을 거친 문장)와 섞지 않는다.
     # 예: 총괄이 이 단계의 반복 지연을 진단해 보냈다는 알림(에이전트 평가)
     notices: list[str] = Field(default_factory=list)
+
+    # 호환: 비어 있는 `notices`는 직렬화에서 키째 뺀다.
+    # 판매서버(shop-api)는 계약을 자체 사본(11/16판)으로 쓰고 그 Evidence에는 `notices`가 없는데
+    # 기반 클래스가 extra="forbid"라, 기본값 `"notices": []`만 실려도 INVALID_OUTPUT으로 거부했다.
+    # 받는 쪽(model_validate)은 키가 없으면 기본값 []라 AXcellent 안에서는 차이가 없다.
+    # 한계: 노트가 하나라도 있으면 `notices`가 그대로 나가므로 옛 계약 사본을 쓰는 호출자
+    # (shop-api)는 같은 이유로 거부할 수 있다. 호출자별로 빼는 옵션은 요청자 식별이 단순하지 않아
+    # 이번엔 하지 않았다(후속). 필드는 삭제·이름 변경 없이 그대로 둔다.
+    @model_serializer(mode="wrap")
+    def _omit_empty_notices(self, handler: SerializerFunctionWrapHandler):  # noqa: ANN202
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("notices"):
+            data.pop("notices", None)
+        return data
 
 
 class AgentRequest(AxModel):
