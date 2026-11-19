@@ -315,3 +315,61 @@ def test_lock_stat_failure_still_hits_deadline(
     with pytest.raises(tc.ToolConnectionError) as e:
         _save()
     assert e.value.code == "busy"
+
+
+def test_stale_lock_replaced_by_fresh_one_is_not_removed(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """오래됐다고 본 사이 다른 프로세스가 새 잠금을 잡았으면 그 잠금을 지우지 않는다."""
+    lock = Path(str(vault) + ".lock")
+    lock.write_text("12345")
+    old = time.time() - tc.LOCK_STALE - 5
+    os.utime(lock, (old, old))
+    real_stat = os.stat
+    swapped = {"done": False}
+
+    def racy_stat(path, *a, **k):
+        result = real_stat(path, *a, **k)
+        if str(path) == str(lock) and not swapped["done"]:
+            swapped["done"] = True
+            lock.write_text("other")  # 그사이 다른 프로세스가 오래된 잠금을 깨고 새로 잡았다
+        return result
+
+    monkeypatch.setattr(tc.os, "stat", racy_stat)
+    monkeypatch.setattr(tc, "LOCK_TIMEOUT", 0.3)
+    with pytest.raises(tc.ToolConnectionError) as e:
+        _save()
+    assert e.value.code == "busy"
+    assert lock.read_text() == "other"  # 남의 새 잠금은 그대로
+    assert not list(vault.parent.glob(vault.name + ".lock.*"))  # 옆에 둔 파일도 남기지 않는다
+    assert tc.read_all() == []
+
+
+def test_stale_lock_that_cannot_be_moved_waits_until_deadline(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """윈도에서 오래된 잠금을 옮기거나 지우지 못해도 쉬지 않고 돌지 않고 마감에 busy로 끝난다."""
+    lock = Path(str(vault) + ".lock")
+    lock.write_text("12345")
+    old = time.time() - tc.LOCK_STALE - 5
+    os.utime(lock, (old, old))
+    calls = {"n": 0}
+
+    def denied(src, *a, **k):
+        if str(src) == str(lock):
+            calls["n"] += 1
+            if calls["n"] > 200:
+                raise RuntimeError("쉬지 않고 돈다")
+            raise PermissionError("사용 중")
+        raise AssertionError("다른 파일은 옮기지 않는다")
+
+    monkeypatch.setattr(tc.os, "replace", denied)
+    monkeypatch.setattr(tc.os, "rename", denied)
+    monkeypatch.setattr(tc.os, "remove", denied)
+    monkeypatch.setattr(tc, "LOCK_TIMEOUT", 0.2)
+    start = time.monotonic()
+    with pytest.raises(tc.ToolConnectionError) as e:
+        _save()
+    assert e.value.code == "busy"
+    assert time.monotonic() - start < 2
+    assert lock.exists()

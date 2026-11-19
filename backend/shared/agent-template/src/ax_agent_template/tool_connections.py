@@ -5,7 +5,8 @@
   `dev_agent.vcs`).
   비밀 값이 들어 있어 `0600` 임시 파일에 쓰고 `os.replace`로 바꿔치기한다.
   쓰는 프로세스가 둘이라 읽고-고치고-쓰기는 `<파일>.lock`(O_EXCL로 만드는 잠금 파일)으로 막는다.
-  임시 파일 이름은 쓸 때마다 다르다. 30초 넘은 잠금은 죽은 프로세스가 남긴 것으로 보고 지운다.
+  임시 파일 이름은 쓸 때마다 다르다. 30초 넘은 잠금은 죽은 프로세스가 남긴 것으로 보고
+  다른 이름으로 옮긴 뒤 다시 확인하고 지운다 (`_break_stale`).
 - 읽기: 부를 때마다 바뀐 시각·크기로 확인해 읽는다 (재시작 없이 반영).
   파일이 없으면 연결이 없는 것이다(경고 없음). 깨졌으면 경고를 한 번 남기고 없는 것으로 본다.
 - 비밀 값(`secrets`)은 repr·로그·오류 문구·이력 줄에 넣지 않는다. 화면에는 `public()`만 준다.
@@ -199,6 +200,44 @@ def _lock_path() -> str:
     return connections_file() + ".lock"
 
 
+def _is_stale(path: str) -> bool:
+    try:
+        return time.time() - os.stat(path).st_mtime > LOCK_STALE
+    except OSError:
+        return False  # 그사이 풀렸다: 마감·대기를 거쳐 다시 시도한다
+
+
+def _break_stale(lock: str) -> bool:
+    """오래된 잠금을 깬다. 깼으면 True.
+
+    두 프로세스가 같은 잠금을 오래됐다고 보고 둘 다 지우면, 뒤에 지운 쪽이 그사이 다른
+    프로세스가 새로 잡은 잠금을 지울 수 있다. 그래서 지우지 않고 저마다 다른 이름으로 옮긴 뒤
+    (옮기기는 한 프로세스만 성공한다) 옮긴 파일이 여전히 오래됐는지 다시 본다.
+    새 잠금을 옮겨 왔으면 잠금 자리가 비어 있을 때만 되돌린다(덮어쓰지 않는 os.link).
+    """
+    aside = f"{lock}.stale.{os.getpid()}.{uuid.uuid4().hex[:8]}"
+    try:
+        os.replace(lock, aside)
+    except OSError:
+        return False  # 다른 프로세스가 먼저 옮겼거나 윈도에서 쓰는 중: 기다렸다 다시 본다
+    try:
+        if _is_stale(aside):
+            logger.warning("오래된 도구 연결 잠금 파일을 지운다: %s", lock)
+            return True
+        try:
+            os.link(aside, lock)  # 남의 새 잠금: 자리가 비었을 때만 되돌린다
+        except OSError:
+            # 자리를 이미 다른 프로세스가 잡았거나 하드 링크를 못 만든다. 남의 잠금을
+            # 덮어쓰지 않는 쪽을 택한다
+            logger.warning("새 도구 연결 잠금을 되돌리지 못했다: %s", lock)
+        return False
+    finally:
+        try:
+            os.remove(aside)
+        except OSError:
+            pass
+
+
 @contextmanager
 def _writing() -> Iterator[None]:
     """읽고-고치고-쓰기 잠금: 프로세스 안(RLock)과 프로세스 사이(`<파일>.lock`)."""
@@ -224,17 +263,8 @@ def _writing() -> Iterator[None]:
                     raise ToolConnectionError(
                         "config", "도구 연결 보관함 폴더에 쓸 수 없어요. 폴더 권한을 확인하세요"
                     ) from None
-            try:
-                stale = time.time() - os.stat(lock).st_mtime > LOCK_STALE
-            except OSError:
-                stale = False  # 그사이 풀렸다: 마감·대기를 거쳐 다시 시도한다
-            if stale:
-                logger.warning("오래된 도구 연결 잠금 파일을 지운다: %s", lock)
-                try:
-                    os.remove(lock)
-                except OSError:
-                    pass
-                continue
+            if _is_stale(lock) and _break_stale(lock):
+                continue  # 깼으면 바로 다시 잡는다. 못 깼으면 마감·대기를 거친다
             if time.monotonic() >= deadline:
                 raise ToolConnectionError(
                     "busy", "다른 곳에서 도구 연결을 저장하는 중이에요. 잠시 뒤 다시 시도하세요"
