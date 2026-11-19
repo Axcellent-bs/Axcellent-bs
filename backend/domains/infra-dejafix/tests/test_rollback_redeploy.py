@@ -318,3 +318,42 @@ def test_rollback_reads_tool_vault_off_the_event_loop(
     out = _rollback(a2a_body, TOOL_ROLLBACK)
     assert out["status"] == "completed", out
     assert on_loop == [False]
+
+
+def _record_vault_reads(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """배포 도구 보관함 읽기(`all_tools`)가 이벤트 루프 위에서 불렸는지 차례로 남긴다."""
+    on_loop: list[bool] = []
+
+    def recording_all_tools() -> list:
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(True)
+        except RuntimeError:
+            on_loop.append(False)
+        return []
+
+    monkeypatch.setattr(deploy_tools, "all_tools", recording_all_tools)
+    return on_loop
+
+
+def test_rollback_reads_connected_services_off_the_event_loop(
+    a2a_body, gate, runtime, polled, monkeypatch
+) -> None:
+    on_loop = _record_vault_reads(monkeypatch)
+    gate("executed")
+    out = _rollback(a2a_body, TOOL_ROLLBACK)
+    assert out["status"] == "completed", out
+    assert on_loop and True not in on_loop
+
+
+def test_diagnose_reads_connected_services_off_the_event_loop(
+    a2a_body, runtime, monkeypatch
+) -> None:
+    on_loop = _record_vault_reads(monkeypatch)
+    out = (
+        TestClient(app)
+        .post("/a2a", json=a2a_body("diagnose_incident", {"component": "payment"}))
+        .json()
+    )
+    assert out["status"] == "completed", out
+    assert on_loop and True not in on_loop
