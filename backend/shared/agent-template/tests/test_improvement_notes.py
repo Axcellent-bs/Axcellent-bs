@@ -280,7 +280,7 @@ def _add(note_id="note-diag-1", skill="rollback_deployment", **kw) -> None:
 def test_a_response_gets_a_caution_line_when_a_note_covers_its_skill(caution_client) -> None:
     before = _call(caution_client, "rollback_deployment")
     assert before["evidence"]["data_summary"] == "되돌림 38초"  # 노트가 없으면 그대로
-    assert before["evidence"]["notices"] == []
+    assert "notices" not in before["evidence"]  # 비면 키째 뺀다(옛 계약 사본 호환)
     _add()
     after = _call(caution_client, "rollback_deployment")
     # 주의 한 줄은 별도 칸에만 붙는다. 숫자 검증을 거친 문장(data_summary)은 그대로다
@@ -303,9 +303,9 @@ def test_no_caution_for_other_skills_revoked_notes_failures_or_missing_evidence(
     _add()
     assert not (_call(caution_client, "bare").get("evidence") or {}).get("notices")
     assert _call(caution_client, "bare")["output"] == {"ok": True}
-    assert _call(caution_client, "failing")["evidence"]["notices"] == []
+    assert _call(caution_client, "failing")["evidence"].get("notices", []) == []
     improvement_notes.store_for("incident").revoke("note-diag-1")
-    assert _call(caution_client, "rollback_deployment")["evidence"]["notices"] == []
+    assert _call(caution_client, "rollback_deployment")["evidence"].get("notices", []) == []
 
 
 def test_the_caution_is_not_added_twice_and_notes_skill_is_never_decorated(caution_client) -> None:
