@@ -37,6 +37,7 @@ from typing import Any
 
 import httpx
 
+from ax_agent_template import pinned_http
 from ax_agent_template.config import agent_token, agent_url, is_mock
 from finance_agent import finance_config as fc
 
@@ -586,7 +587,7 @@ async def live_books(
     `http_client`를 넘기면(테스트·한 번 쓰기) 따로 모아 둔 주문 없이 전체를 읽는다. 넘기지 않으면
     서버가 모아 둔 주문(`_STORE`)에 최근 주문만 받아 끼운다.
     """
-    client = http_client or httpx.AsyncClient()
+    client = http_client or httpx.AsyncClient(transport=pinned_http.company_transport())
     unavailable: list[str] = []
     if store is None:
         store = _STORE if http_client is None else OrderStore()

@@ -180,3 +180,116 @@ async def test_raw_path_with_query_passes() -> None:
     status, _ = await _raw_get(up, b"/api/incidents?status=problem")
     assert status == 200
     assert up.seen == ["/api/incidents"]
+
+
+# ---- 로그인 세션 토큰 (axs1., human_auth) ----
+
+SECRET = "s" * 40
+
+
+@pytest.fixture
+def sessions(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    from ax_agent_template import human_auth
+
+    monkeypatch.setenv(human_auth.SESSION_SECRET_ENV, SECRET)
+    monkeypatch.setenv(human_auth.REVOKED_FILE_ENV, str(tmp_path / "revoked.json"))
+    monkeypatch.setenv(human_auth.GENERATIONS_FILE_ENV, str(tmp_path / "gen.json"))
+    human_auth.reset_revoked_for_tests()
+    yield human_auth
+    human_auth.reset_revoked_for_tests()
+
+
+@pytest.mark.parametrize("role", ["operator", "admin", "member"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/api/incidents?status=problem&limit=100",
+        "/api/incidents?limit=100",
+        "/api/incidents/42",
+        "/api/dashboard/summary",
+    ],
+)
+async def test_session_token_every_role_passes(sessions, role: str, url: str) -> None:
+    """화면이 부르는 조회는 관리자·일반회원 세션 모두 통과한다 (읽기라 역할을 가리지 않는다)."""
+    token, _ = sessions.issue_session(account_id=f"acc-{role}", name=f"{role}-user", role=role)
+    up = Upstream()
+    async with _client(up, token=token) as c:
+        res = await c.get(url)
+    assert res.status_code == 200
+    assert len(up.seen) == 1
+
+
+@pytest.mark.parametrize("role", ["admin", "member"])
+async def test_session_token_reads_status(sessions, role: str) -> None:
+    token, _ = sessions.issue_session(account_id=f"acc-{role}", name="u", role=role)
+    async with _client(Upstream(), token=token) as c:
+        res = await c.get("/status")
+    assert res.status_code == 200
+    assert res.json()["source"] == "builtin"
+
+
+async def test_status_requires_token() -> None:
+    up = Upstream()
+    async with _client(up, token=None) as c:
+        res = await c.get("/status")
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "AUTH_REQUIRED"
+    assert not up.seen
+
+
+async def test_healthz_without_token() -> None:
+    async with _client(Upstream(), token=None) as c:
+        res = await c.get("/healthz")
+    assert res.status_code == 200
+
+
+async def test_session_token_without_secret_rejected(
+    monkeypatch: pytest.MonkeyPatch, sessions
+) -> None:
+    token, _ = sessions.issue_session(account_id="acc", name="u", role="member")
+    monkeypatch.delenv(sessions.SESSION_SECRET_ENV)
+    up = Upstream()
+    async with _client(up, token=token) as c:
+        res = await c.get("/api/incidents")
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "TOKEN_INVALID"
+    assert not up.seen
+
+
+async def test_forged_session_token_rejected(sessions) -> None:
+    token, _ = sessions.issue_session(account_id="acc", name="u", role="member")
+    head, body, _sig = token.split(".")
+    up = Upstream()
+    async with _client(up, token=f"{head}.{body}.forged") as c:
+        res = await c.get("/api/incidents")
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "TOKEN_INVALID"
+    assert not up.seen
+
+
+async def test_expired_session_token_401(sessions) -> None:
+    token, _ = sessions.issue_session(account_id="acc", name="u", role="member", now=1, ttl=1)
+    up = Upstream()
+    async with _client(up, token=token) as c:
+        res = await c.get("/api/incidents")
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "SESSION_EXPIRED"
+    assert not up.seen
+
+
+async def test_logged_out_session_token_401(sessions) -> None:
+    token, _ = sessions.issue_session(account_id="acc", name="u", role="admin")
+    sessions.revoke_session(sessions.verify_session(token))
+    up = Upstream()
+    async with _client(up, token=token) as c:
+        res = await c.get("/api/incidents")
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "SESSION_REVOKED"
+
+
+async def test_shared_human_token_off_when_disallowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AX_ALLOW_SHARED_HUMAN_TOKEN", "0")
+    async with _client(Upstream(), token=HUMAN_TOKEN) as c:
+        assert (await c.get("/api/incidents")).status_code == 401
+    async with _client(Upstream(), token=AGENT_TOKEN) as c:  # 에이전트 토큰은 그대로
+        assert (await c.get("/api/incidents")).status_code == 200

@@ -34,7 +34,8 @@ DEV = "http://127.0.0.1:8111"
 
 def admin_token() -> str:
     for line in (BACKEND / ".data" / "web.env").read_text(encoding="utf-8").splitlines():
-        if line.startswith("VITE_SHOP_ADMIN_TOKEN="):
+        # AX_WEB_*: 지금 run_all.sh, VITE_*: 예전 run_all.sh가 만든 파일
+        if line.startswith(("AX_WEB_ADMIN_TOKEN=", "VITE_SHOP_ADMIN_TOKEN=")):
             return line.split("=", 1)[1].strip()
     sys.exit("backend/.data/web.env 에 관리자 토큰이 없습니다. run_all.sh 로 띄우세요.")
 

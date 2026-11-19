@@ -5,10 +5,10 @@ import { dataAi, type TrendReport } from "@/lib/data";
 import type { ChatCard, TrendReportDoneCard, TrendReportProgressCard, TrendRequestCard } from "@/lib/planningData";
 import { sectionState, type SectionState } from "@/lib/segmentView";
 import {
-  cardInput, doneView, formFromCard, progressKeepPolling, progressPct, reportCode, reportPath, requestCardRows, submitView,
+  cardInput, doneView, formFromCard, progressKeepPolling, progressPct, reportPath, requestCardRows, submitState, submitView,
   type SubmitState, type TrendNavState,
 } from "@/lib/chatCards";
-import { REPORT_POLL_MS, REPORT_STATUS, reportHash } from "@/lib/trendReportView";
+import { REPORT_POLL_MS, REPORT_STATUS, reportHash, reportLabel } from "@/lib/trendReportView";
 
 // 데이터분석 1:1 대화(DirectChat, 데이터분석 AI만)의 메시지 카드 3종 (공통 계약 lib/planningData.ts ChatCard).
 // - 분석 의뢰 카드: 칸 요약(프리셋 꼬리표) · 이유 · 예상 호출 · [분석 의뢰 넣기](trend_report_create, 한 번만) · [분석 의뢰 탭에서 고치기] · [아니에요](접기)
@@ -27,9 +27,11 @@ export function ChatCardView({ card, messageId, threadId }: { card: ChatCard; me
 
 function RequestCard({ card, messageId, threadId }: { card: TrendRequestCard; messageId: string; threadId: string | null }) {
   const navigate = useNavigate();
-  const [state, setState] = useState<SubmitState>(() => submitted.get(messageId) ?? { kind: "idle" });
+  // 서버가 accepted_report_id를 주면 그것이 먼저(새로고침해도 접수됨), 없으면 이 탭이 기억한 상태
+  const [local, setLocal] = useState<SubmitState | null>(() => submitted.get(messageId) ?? null);
+  const state = submitState(card, local);
   const [folded, setFolded] = useState(false);
-  const set = (s: SubmitState) => { submitted.set(messageId, s); setState(s); };
+  const set = (s: SubmitState) => { submitted.set(messageId, s); setLocal(s); };
   const view = submitView(state);
   const done = state.kind === "done";
 
@@ -111,7 +113,7 @@ function ProgressCard({ card }: { card: TrendReportProgressCard }) {
     return () => { live = false; if (timer) clearTimeout(timer); };
   }, [card.report_id, tick]);
 
-  const code = reportCode(card.report_id);
+  const code = reportLabel(card.report_id);
   const pct = load.kind === "ok" ? progressPct(load.report) : 0;
   const st = load.kind === "ok" ? REPORT_STATUS[load.report.status] : null;
   const running = load.kind === "ok" && progressKeepPolling(load.report.status);

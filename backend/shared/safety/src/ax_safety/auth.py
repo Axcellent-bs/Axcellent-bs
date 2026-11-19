@@ -4,13 +4,14 @@
   (agent-template `verify_token`과 같은 규칙, 목 모드는 `mock:<이름>`).
 - 사람: C 보류 결정은 사람 토큰만 받는다. `SAFETY_HUMAN_TOKENS="이름:토큰,이름:토큰"`.
   목 모드에서는 `human:<이름>`도 받는다. 에이전트 토큰은 항상 거부한다.
+- 로그인 세션 토큰(`axs1.`)도 받는다(`ax_agent_template.human_auth`). 기록 이름은 계정 이름
 """
 
 from __future__ import annotations
 
-import hmac
 import os
 
+from ax_agent_template import human_auth
 from ax_agent_template.config import is_mock
 from ax_agent_template.server import verify_token
 
@@ -32,21 +33,17 @@ def agent_from_token(token: str | None) -> str:
 
 
 def _human_tokens() -> dict[str, str]:
-    pairs: dict[str, str] = {}
-    for item in os.getenv("SAFETY_HUMAN_TOKENS", "").split(","):
-        name, sep, token = item.strip().partition(":")
-        if sep and name and token:
-            pairs[token] = name
-    return pairs
+    return human_auth.parse_shared_tokens(os.getenv("SAFETY_HUMAN_TOKENS"))
 
 
 def human_from_token(token: str | None) -> str:
     """사람 이름을 돌려준다. 에이전트 토큰이거나 모르는 토큰이면 PermissionError."""
     if not token or token.startswith("mock:"):
         raise PermissionError("사람 토큰이 아니다")
-    for known, name in _human_tokens().items():
-        if hmac.compare_digest(known, token):
-            return name
-    if is_mock("safety") and token.startswith("human:") and len(token) > len("human:"):
-        return token.removeprefix("human:")
-    raise PermissionError("사람 토큰을 검증할 수 없다")
+    try:
+        human = human_auth.find_human(token, shared_tokens=_human_tokens(), mock=is_mock("safety"))
+    except human_auth.HumanAuthError as exc:
+        raise PermissionError(exc.message) from None
+    if human is None:
+        raise PermissionError("사람 토큰을 검증할 수 없다")
+    return human.name

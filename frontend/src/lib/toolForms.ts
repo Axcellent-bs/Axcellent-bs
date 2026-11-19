@@ -141,21 +141,74 @@ export function deployRows(connections: ToolConnection[]): DeployRow[] {
 export const appChoices = (connections: ToolConnection[]) =>
   connections.filter((c) => c.kind === "github_app").map((c) => ({ id: c.id, label: c.name || `GitHub 앱 ${c.config.app_id ?? ""}` }));
 
-/** "현재 장애 n건": 확인 결과 문구에서만 읽는다. 없으면 null (지어내지 않는다) */
-export function incidentCount(detail: string | null | undefined): number | null {
-  const m = detail?.match(/현재 장애 ([\d,]+)건/);
-  return m ? Number(m[1].replace(/,/g, "")) : null;
-}
-
 export type DejafixView =
   | { state: "none" }
-  | { state: "connected"; conn: ToolConnection; status: { tone: Tone; label: string }; incidents: number | null; checkedAt: string | null };
+  | { state: "connected"; conn: ToolConnection; status: { tone: Tone; label: string } };
 
-/** DejaFix 카드: 연결은 하나만 */
+/** 보관함에 예전에 화면으로 저장한 DejaFix 연결 (하나만). 지금은 화면에서 새로 넣지 않고 지우기만 한다 */
 export function dejafixView(connections: ToolConnection[]): DejafixView {
   const conn = connections.find((c) => c.kind === "dejafix");
   if (!conn) return { state: "none" };
-  return { state: "connected", conn, status: statusOf(conn), incidents: conn.check_ok ? incidentCount(conn.check_detail) : null, checkedAt: conn.checked_at };
+  return { state: "connected", conn, status: statusOf(conn) };
+}
+
+/** 프록시(dejafix-proxy) `GET /status`의 연결 출처.
+ * builtin = AXcellent와 같이 설치된 DejaFix(서버 환경 변수) · custom = 화면에서 저장한 다른 DejaFix(보관함) · none = 둘 다 없음 */
+export type DejafixSource = "builtin" | "custom" | "none";
+export interface DejafixStatus {
+  source: DejafixSource;
+  /** 실제 응답 여부. 부를 대상이 없으면 null */
+  reachable: boolean | null;
+  detail: string;
+}
+
+/** 프록시 응답 모양 검사. 모르는 모양이면 null (상태를 지어내지 않는다) */
+export function parseDejafixStatus(body: unknown): DejafixStatus | null {
+  if (!body || typeof body !== "object") return null;
+  const b = body as Record<string, unknown>;
+  if (b.source !== "builtin" && b.source !== "custom" && b.source !== "none") return null;
+  if (b.reachable !== null && typeof b.reachable !== "boolean") return null;
+  return { source: b.source, reachable: b.reachable, detail: typeof b.detail === "string" ? b.detail : "" };
+}
+
+export type SavedDejafix = Extract<DejafixView, { state: "connected" }>;
+
+/** DejaFix 연결 카드 상태. 출처는 프록시 `/status`에서, 저장한 연결(주소·계정)은 도구 연결 목록에서 읽는다 */
+export type DejafixCardView =
+  /** 같이 설치된 DejaFix (설치 설정). 보관함에 남은 연결은 프록시가 쓰지 않으니 보여 주지 않는다 */
+  | { mode: "builtin"; live: { tone: Tone; label: string }; detail: string }
+  /** 예전에 화면에서 저장한 다른 DejaFix (보관함). 화면은 "같이 설치된 DejaFix로 돌아가기"만 준다 */
+  | { mode: "custom"; live: { tone: Tone; label: string }; detail: string; saved: SavedDejafix }
+  | { mode: "none" }
+  /** 상태를 못 읽었거나 목록과 맞지 않음. 저장한 연결이 있으면 그대로 보여 준다 */
+  | { mode: "unknown"; saved: SavedDejafix | null };
+
+/** 지금 응답하는지 (프록시가 방금 확인한 값) */
+export function liveOf(reachable: boolean | null): { tone: Tone; label: string } {
+  return reachable === true ? { tone: "ok", label: "응답함" } : reachable === false ? { tone: "bad", label: "응답 없음" } : { tone: "off", label: "확인할 수 없음" };
+}
+
+export function dejafixCard(status: DejafixStatus | null, connections: ToolConnection[]): DejafixCardView {
+  const view = dejafixView(connections);
+  const saved = view.state === "connected" ? view : null;
+  if (!status) return { mode: "unknown", saved };
+  if (status.source === "none") return { mode: "none" };
+  if (status.source === "custom") {
+    // 프록시는 보관함 연결을 쓴다는데 목록에 없다: 어느 쪽이 맞는지 모른다
+    if (!saved) return { mode: "unknown", saved: null };
+    return { mode: "custom", live: liveOf(status.reachable), detail: status.detail, saved };
+  }
+  return { mode: "builtin", live: liveOf(status.reachable), detail: status.detail };
+}
+
+/** 카드 머리·다른 화면 칩에 쓰는 한 줄 상태 */
+export function dejafixSummary(card: DejafixCardView): { tone: Tone; label: string } {
+  if (card.mode === "none") return { tone: "wait", label: "같이 설치된 DejaFix 설정 안 됨" };
+  if (card.mode === "unknown") return { tone: "off", label: "확인할 수 없음" };
+  const who = card.mode === "builtin" ? "AXcellent와 같이 설치된 DejaFix" : "다른 DejaFix";
+  if (card.live.tone === "ok") return { tone: "ok", label: `${who}에 연결됨` };
+  if (card.live.tone === "bad") return { tone: "bad", label: `${who} 응답 없음` };
+  return { tone: "off", label: `${who} · 확인할 수 없음` };
 }
 
 export const when = (iso: string | null | undefined) =>

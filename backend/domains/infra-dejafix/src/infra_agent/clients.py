@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from ax_agent_template import call_agent
+from ax_agent_template import call_agent, pinned_http
 from ax_agent_template.company_connection import shop_api_override
 from ax_agent_template.config import agent_token, agent_url, is_mock
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
@@ -25,6 +25,13 @@ PAYMENT_VERSION_PATH = "/api/shop/admin/payment-version"
 SHOP_TIMEOUT_SECONDS = 10.0
 DATA_TIMEOUT_SECONDS = 20.0
 PAYMENT_METRICS = ["payment_fail_rate", "order_fail_count"]
+
+
+def _shop_client() -> httpx.AsyncClient:
+    """판매 서버 클라이언트. 회사 연결 주소면 검사한 IP로만 붙는다(DNS 재바인딩 차단)."""
+    return httpx.AsyncClient(
+        timeout=SHOP_TIMEOUT_SECONDS, transport=pinned_http.company_transport()
+    )
 
 
 class ShopClient(Protocol):
@@ -104,26 +111,26 @@ class HttpShop:
         return {"Authorization": f"Bearer {agent_token('infra')}"}
 
     async def fault_state(self) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=SHOP_TIMEOUT_SECONDS) as client:
+        async with _shop_client() as client:
             response = await client.get(self.base_url + FAULTS_PATH, headers=self._headers())
         response.raise_for_status()
         return dict(response.json().get("data") or {})
 
     async def release_fault(self) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=SHOP_TIMEOUT_SECONDS) as client:
+        async with _shop_client() as client:
             response = await client.delete(self.base_url + FAULTS_PATH, headers=self._headers())
         response.raise_for_status()
         return dict(response.json().get("data") or {})
 
     async def payment_version(self) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=SHOP_TIMEOUT_SECONDS) as client:
+        async with _shop_client() as client:
             url = self.base_url + PAYMENT_VERSION_PATH
             response = await client.get(url, headers=self._headers())
         response.raise_for_status()
         return dict(response.json().get("data") or {})
 
     async def rollback_payment_version(self, to_version: str) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=SHOP_TIMEOUT_SECONDS) as client:
+        async with _shop_client() as client:
             response = await client.post(
                 self.base_url + PAYMENT_VERSION_PATH + "/rollback",
                 json={"to_version": to_version},

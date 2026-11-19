@@ -2,7 +2,7 @@
 
 화면은 항상 실제 백엔드(`backend/`, 실제 모드)에 붙어서 돌아요. 녹화본으로 도는 데모는 없어요.
 
-- 백엔드를 켠 뒤 `backend/`에서 `bash scripts/run_web.sh`로 띄워요 (http://localhost:3090). 실제 모드 토큰이 같이 들어가요. 처음 만든 곳은 [NYejin/axcellent-demo](https://github.com/NYejin/axcellent-demo)예요.
+- 백엔드를 켠 뒤 `backend/`에서 `bash scripts/run_web.sh`로 띄워요 (http://localhost:3090). 진짜 토큰은 번들에 들어가지 않고, 개발 서버 프록시가 자리표시자를 진짜 토큰으로 바꿔 붙여요(`token-proxy.ts`). 로그인 세션 토큰은 그대로 넘겨요. 번들 검사: `npm run check:bundle-tokens`. 처음 만든 곳은 [NYejin/axcellent-demo](https://github.com/NYejin/axcellent-demo)예요.
 - AI 화면은 [ax-frontend](https://github.com/ax-company-hq/ax-frontend) `dashboard-web`(캣북스 대시보드, dev `c1eb44a`)에서 옮겨 왔어요. 캣북스 대시보드는 없앨 예정이고, AI 7개는 여기서 관리해요 (아래 "AI 7개").
 
 ## 보여 주는 구조
@@ -203,8 +203,8 @@ DejaFix 화면은 띄우지 않아요. DejaFix API 계약(`DejaFix/DejaFix` `con
 - 항상 **실제 DejaFix 데이터**를 불러요. DejaFix 주소·계정은 화면의 **회원·서버 관리 › DejaFix 연결**에서 정해요(도구 연결 보관함).
   개발 서버(`dejafix-proxy.ts`)는 `/dejafix-api`를 백엔드 dejafix-proxy(`http://127.0.0.1:8030`, `run_all.sh`가 띄움)로 그대로 넘기고,
   그 프록시가 보관함의 계정으로 대신 로그인해요. 그래서 DejaFix 토큰과 비밀번호는 화면 코드에 실리지 않아요. 읽기(GET)만 넘겨요.
-- dejafix-proxy는 부르는 쪽 토큰을 확인해요. 화면은 사람 토큰(`VITE_SAFETY_HUMAN_TOKEN`)이 있으면 `Authorization: Bearer`로 붙이고,
-  서버에서는 gateway nginx가 `/dejafix-api/`에 사람 토큰을 바꿔 붙여요. 토큰이 없거나 틀리면 "권한이 없습니다" 안내를 띄워요.
+- dejafix-proxy는 부르는 쪽 토큰을 확인해요(`/healthz`만 토큰 없이). 화면은 다른 백엔드 호출처럼 사람 토큰(로그인 세션 토큰, 없으면 공용
+  `VITE_SAFETY_HUMAN_TOKEN`)을 `Authorization: Bearer`로 붙여요. 관리자·일반회원 세션 모두 통과해요. 토큰이 없거나 끊겼으면 "다시 로그인" 안내를 띄워요.
 - 보관함을 거치지 않고 DejaFix 백엔드에 바로 붙일 때만 `frontend/.env`에 `DEJAFIX_PROXY_TARGET`(예: `http://127.0.0.1:18000`)과
   `DEJAFIX_USERNAME`·`DEJAFIX_PASSWORD`(viewer 이상)를 넣어요. 그러면 개발 서버가 대신 로그인해요.
 - 30초마다 다시 받아요. 응답의 `meta.stale`이 true면 "수집 멈춤" 안내를 띄워요.

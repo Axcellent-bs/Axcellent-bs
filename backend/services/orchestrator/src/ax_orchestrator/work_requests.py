@@ -179,6 +179,8 @@ class WorkRequests:
             "steps": {},
             "log": [{"at": stamp, "message": "의뢰를 받았다"}],
             "context_id": None,
+            "thread_id": None,  # 접수한 대화 번호. 진행을 알릴 때 쓴다
+            "handoff_task_id": None,  # 사람 받은 요청에 올린 일 번호
         }
         self._save(row)
         self._trim()
@@ -218,6 +220,57 @@ class WorkRequests:
             step["grade"] = spec.get("grade")
             row["steps"][spec["step_id"]] = step
         row["log"].append({"at": now().isoformat(), "message": f"일을 골랐다: {task}"})
+        self._save(row)
+        return copy.deepcopy(row)
+
+    def link_thread(self, request_id: str, thread_id: str | None) -> None:
+        """의뢰를 접수한 대화를 적는다 (진행 알림을 그 대화로 보낸다)."""
+        row = self._row(request_id)
+        row["thread_id"] = thread_id
+        self._save(row)
+
+    def note(self, request_id: str, message: str) -> None:
+        """진행 로그에 한 줄을 남긴다."""
+        row = self._row(request_id)
+        row["log"].append({"at": now().isoformat(), "message": message})
+        self._save(row)
+
+    def set_handoff(self, request_id: str, task_id: str) -> None:
+        """사람 받은 요청에 올린 일 번호를 적는다."""
+        row = self._row(request_id)
+        row["handoff_task_id"] = task_id
+        self._save(row)
+
+    def replan(
+        self, request_id: str, *, task: str, plan: list[dict[str, Any]], by: str | None
+    ) -> dict[str, Any]:
+        """사람이 일을 바꿔 다시 돌린다. 이전 선택은 `corrections`에 남겨 정확도 평가에 쓴다."""
+        row = self._row(request_id)
+        before = {
+            "at": now().isoformat(),
+            "by": by,
+            "from_task": row.get("task"),
+            "to_task": task,
+            "from_status": row.get("status"),
+            "from_confidence": row.get("confidence"),
+        }
+        self.set_plan(
+            request_id,
+            task=task,
+            confidence=None,
+            reason=f"사람이 골랐다{f' ({by})' if by else ''}",
+            alternatives=[],
+            plan=plan,
+        )
+        row = self._row(request_id)
+        row.setdefault("corrections", []).append(before)
+        row["handoff_task_id"] = None  # 다시 사람에게 넘겨야 하면 새로 올린다
+        row["log"].append(
+            {
+                "at": before["at"],
+                "message": f"사람이 일을 바꿔 다시 돌린다: {before['from_task']} → {task}",
+            }
+        )
         self._save(row)
         return copy.deepcopy(row)
 

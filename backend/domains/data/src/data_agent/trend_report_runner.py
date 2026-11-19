@@ -76,8 +76,12 @@ DONE_WORDS = {"done": "보고서 완료", "partial": "일부만 완료"}
 MAX_TOP_EVIDENCE = 3
 
 
-def short_id(report_id: str) -> str:
-    return "TR-" + report_id.removeprefix("tr_")[:6]
+def report_label(report_id: str) -> str:
+    """보고서 번호 표기 (화면·대화 문장 공통): "TR-" + "tr_" 뒤 앞 4글자 대문자.
+
+    예: tr_b8358e… → TR-B835
+    """
+    return "TR-" + report_id.removeprefix("tr_")[:4].upper()
 
 
 def report_path(report_id: str) -> str:
@@ -97,7 +101,7 @@ def top_evidence(report: TrendReport) -> list[str]:
 
 
 def done_text(report: TrendReport) -> str:
-    head = f"의뢰 {short_id(report.report_id)}"
+    head = f"의뢰 {report_label(report.report_id)}"
     if report.status in DONE_WORDS:
         return f"{head} {DONE_WORDS[report.status]}"
     if report.status == "interrupted":
@@ -173,13 +177,27 @@ class TrendReportService:
         thread = request.chat_thread_id
         if not thread:
             return
+        self._mark_accepted(thread, request.request_text, report_id)
         if status in FINAL:
             report = self.get(report_id)
             if report is not None:
                 self._say(thread, request.request_text, done_text(report), done_card(report))
             return
         card = TrendReportProgressCard(report_id=report_id).model_dump(mode="json")
-        self._say(thread, request.request_text, f"의뢰 {short_id(report_id)} 만드는 중…", card)
+        self._say(thread, request.request_text, f"의뢰 {report_label(report_id)} 만드는 중…", card)
+
+    def _mark_accepted(self, thread: str, request_text: str | None, report_id: str) -> None:
+        """그 대화의 같은 의뢰문 의뢰 카드에 accepted_report_id를 적는다 (새로고침해도 "접수됨")."""
+        try:
+            chat = self._chat() if self._chat is not None else None
+            if chat is None:
+                return
+            outcome = chat.mark_accepted(thread, request_text, report_id)
+        except Exception as error:  # noqa: BLE001 - 표시를 못 해도 보고서는 그대로
+            log.warning("trend_report 대화 %s 카드 표시 못 함 (%s)", thread, type(error).__name__)
+            return
+        if outcome != "ok":
+            log.info("trend_report 대화 %s 카드 표시 안 함 (%s)", thread, outcome)
 
     # ---------------------------------------------------------------- 의뢰 넣기·읽기
 

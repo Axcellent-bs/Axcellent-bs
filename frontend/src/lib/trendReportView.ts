@@ -13,6 +13,13 @@ export function keepPolling(status: ReportStatus): boolean {
   return status === "queued" || status === "running";
 }
 
+// ---- 보고서 번호 표기 (공통 계약): "TR-" + report_id에서 "tr_" 뒤 앞 4글자 대문자 (tr_b8358e… → TR-B835)
+// 보고서 화면·지난 의뢰 목록·대화 카드가 모두 이 함수 하나를 쓴다. 호출·링크에는 원래 id를 쓴다
+
+export function reportLabel(id: string): string {
+  return `TR-${id.replace(/^tr_/, "").slice(0, 4).toUpperCase()}`;
+}
+
 // ---- 주소: 보고서는 #request?id=<report_id>
 
 export function reportHash(id: string): string {
@@ -280,13 +287,19 @@ export function sortSearchRows(rows: TrendReportSearchRow[]): TrendReportSearchR
 
 export interface SearchMain { kind: SearchKind; text: string; known: boolean; /** 막대에 쓸 값 */ bar: number | null; small: string | null }
 
+/** 월 검색 글자: note가 under_10이면 "월 검색 10 미만"(숫자 0으로 보이지 않게), 숫자가 있으면 "월 검색 N", 둘 다 없으면 null */
+export function volumeText(r: Pick<TrendReportSearchRow, "monthly_volume" | "monthly_volume_note">): string | null {
+  if (r.monthly_volume_note === "under_10") return "월 검색 10 미만";
+  return r.monthly_volume != null ? `월 검색 ${r.monthly_volume.toLocaleString("ko-KR")}` : null;
+}
+
 /** 검색 한 줄의 오른쪽 값 */
 export function searchMain(r: TrendReportSearchRow): SearchMain {
   const kind = searchKind(r);
   const p = pctText(r.search_change_pct, r.search_reason);
   switch (kind) {
     case "small_base": return { kind, text: "급증(기준값 작음)", known: true, bar: null, small: p.known ? p.text : null };
-    case "volume_only": return { kind, text: r.monthly_volume != null ? `월 검색 ${r.monthly_volume.toLocaleString("ko-KR")}` : "값 없음", known: false, bar: null, small: null };
+    case "volume_only": return { kind, text: volumeText(r) ?? "값 없음", known: false, bar: null, small: null };
     case "none": return { kind, text: r.search_reason || "값 없음", known: false, bar: null, small: null };
     default: return { kind, text: p.text, known: p.known, bar: p.known ? r.search_change_pct : null, small: null };
   }
@@ -297,7 +310,8 @@ export function searchNotes(r: TrendReportSearchRow, b: Pick<TrendReportBrief, "
   const who = targetText(b.target_gender, b.target_ages);
   const kind = searchKind(r);
   const out: string[] = [];
-  if (r.monthly_volume != null && kind !== "volume_only") out.push(`월 검색 ${r.monthly_volume.toLocaleString("ko-KR")}`);
+  const volume = volumeText(r);
+  if (volume && kind !== "volume_only") out.push(volume);
   if (r.shopping_change_pct != null) {
     const p = pctText(r.shopping_change_pct, null).text;
     out.push(`쇼핑 클릭(${who}) ${r.shopping_small_base ? `급증(기준값 작음) ${p}` : p}`);

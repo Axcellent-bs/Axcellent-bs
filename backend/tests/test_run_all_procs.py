@@ -429,7 +429,7 @@ def _fault(backend: Path, env: dict[str, str]) -> subprocess.CompletedProcess[st
 def test_shop_fault_prefers_env_url_and_token(tmp_path: Path) -> None:
     clone, backend = _fault_env(tmp_path)
     (backend / ".data" / "web.env").write_text(
-        "VITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
+        "AX_WEB_ADMIN_TOKEN=local-tok\nVITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
     )
     env = {
         "CATBOOKS_DEMO_DIR": str(clone),
@@ -445,7 +445,7 @@ def test_shop_fault_does_not_fall_back_to_local_web_env(tmp_path: Path) -> None:
     """AXcellent는 판매 서버를 띄우지 않으니 web.env의 토큰을 판매 서버로 보내지 않는다."""
     clone, backend = _fault_env(tmp_path)
     (backend / ".data" / "web.env").write_text(
-        "VITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
+        "AX_WEB_ADMIN_TOKEN=local-tok\nVITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
     )
     out = _fault(backend, {"CATBOOKS_DEMO_DIR": str(clone)})
     assert out.returncode == 1
@@ -464,7 +464,7 @@ def test_shop_fault_with_only_one_of_url_and_token_stops(
     """하나만 주면 멈춘다: 로컬 토큰을 다른 주소로도, 토큰만 127.0.0.1로도 보내지 않는다."""
     clone, backend = _fault_env(tmp_path)
     (backend / ".data" / "web.env").write_text(
-        "VITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
+        "AX_WEB_ADMIN_TOKEN=local-tok\nVITE_SHOP_ADMIN_TOKEN=local-tok\n", encoding="utf-8"
     )
     out = _fault(backend, {"CATBOOKS_DEMO_DIR": str(clone), **given})
     assert out.returncode == 1

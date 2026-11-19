@@ -4,6 +4,7 @@ import { ago } from '@/lib/format'
 import { useCompany } from './company'
 import { useProfiles } from './members'
 import { customerAccounts } from './session'
+import { useServerMembers } from './serverMembers'
 import { newId, now, privateIp, useHosts, type Host } from './store'
 import { PageHead, SectionHead, StatusChip, type Tone } from '@/components/connect/parts'
 
@@ -28,6 +29,7 @@ export default function InfraHosts({ embedded = false }: { embedded?: boolean })
   const [hosts, setHosts] = useHosts()
   const company = useCompany()
   useProfiles() // 회원 부서를 바꾸면 쓰는 사람 칸의 부서 표시를 다시 그린다
+  useServerMembers(false) // 서버 로그인: 서버 계정 목록이 바뀌면 다시 그린다(읽기는 회원·서버 관리가 한다)
   const accounts = customerAccounts()
   const [form, setForm] = useState({ dept: '', hostname: '', ip: '', owner: '' })
   // 팀 이름은 회사가 정한다. 이미 쓰는 이름을 제안만 하고 새 이름도 받는다

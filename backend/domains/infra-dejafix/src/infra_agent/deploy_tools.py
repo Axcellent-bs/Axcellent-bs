@@ -26,12 +26,13 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 
-from ax_agent_template import tool_connections
+from ax_agent_template import pinned_http, tool_connections
 from ax_agent_template.company_connection import check_host
 from ax_agent_template.github_app import GithubAppAuth
 from ax_agent_template.tool_connections import ToolConnection, ToolConnectionError
 
 GITHUB_API = "https://api.github.com"
+_GH_HOST = httpx.URL(GITHUB_API).host  # 공용 API는 주소 정책 예외 (사용자가 넣은 주소만 검사)
 TIMEOUT_SECONDS = 10.0
 # 디스패치 뒤 새 실행을 찾는 횟수와 간격(초). 못 찾아도 다시 배포는 성공이다(실행 id만 비움)
 DISPATCH_LOOKUPS = 3
@@ -269,7 +270,11 @@ class GithubActionsTool:
         )
 
     def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(transport=self._transport, timeout=TIMEOUT_SECONDS)
+        # 사용자가 넣은 주소는 검사한 IP로만 붙고(DNS 재바인딩 차단) 리다이렉트를 따라가지 않는다
+        transport = self._transport or pinned_http.guarded_transport(exempt=[_GH_HOST])
+        return httpx.AsyncClient(
+            transport=transport, timeout=TIMEOUT_SECONDS, follow_redirects=False
+        )
 
     def _workflow_path(self) -> str:
         return f"/repos/{self.repo}/actions/workflows/{quote(self.workflow, safe='')}"
@@ -470,7 +475,11 @@ class JenkinsTool:
         return f"{self.url}{_job_path(self.job)}", httpx.BasicAuth(user, token)
 
     def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(transport=self._transport, timeout=TIMEOUT_SECONDS)
+        # 사용자가 넣은 주소는 검사한 IP로만 붙고(DNS 재바인딩 차단) 리다이렉트를 따라가지 않는다
+        transport = self._transport or pinned_http.guarded_transport(exempt=[_GH_HOST])
+        return httpx.AsyncClient(
+            transport=transport, timeout=TIMEOUT_SECONDS, follow_redirects=False
+        )
 
     async def recent(self, limit: int = 20) -> list[ToolRun]:
         limit = max(1, min(limit, 100))

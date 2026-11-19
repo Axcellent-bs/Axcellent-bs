@@ -1,8 +1,10 @@
 import type { Plugin } from 'vite'
+import { proxyAuthorization, proxyTokens } from './token-proxy.ts'
 
 // /dejafix-api/* → DejaFix. 장애 대응 탭은 읽기만 하므로 GET만 넘긴다.
 // 기본은 백엔드 dejafix-proxy(8030, run_all.sh가 띄움)로 브라우저의 Authorization(사람 토큰)과 함께 그대로 넘긴다
-// (그 프록시가 토큰을 확인한다). 그 프록시가 도구 연결 보관함
+// (그 프록시가 토큰을 확인한다). 사람 토큰 자리표시자(human-via-nginx)는 다른 human 경로처럼 진짜 토큰(AX_WEB_HUMAN_TOKEN)으로
+// 바꾸고, 로그인 세션 토큰(axs1.)은 그대로 둔다 (token-proxy.ts). 그 프록시가 도구 연결 보관함
 // (회원·서버 관리 › DejaFix 연결)의 계정으로 로그인하므로 여기서는 로그인하지 않는다 (서버 배포의 nginx와 같은 길).
 // DEJAFIX_PROXY_TARGET에 DejaFix 백엔드를 직접 적고 DEJAFIX_USERNAME·DEJAFIX_PASSWORD를 넣으면
 // 예전처럼 개발 서버가 대신 로그인한다 (VITE_ 접두사가 없어서 화면 코드에 실리지 않는다).
@@ -18,6 +20,7 @@ export function dejafixHandler(env: Env): (req: Req, res: Res) => Promise<void> 
   const target = (env.DEJAFIX_PROXY_TARGET || DEFAULT_TARGET).replace(/\/$/, '')
   const username = env.DEJAFIX_USERNAME
   const password = env.DEJAFIX_PASSWORD
+  const tokens = proxyTokens(env)
   let token: string | null = null
 
   async function login(): Promise<string | null> {
@@ -48,7 +51,7 @@ export function dejafixHandler(env: Env): (req: Req, res: Res) => Promise<void> 
     if (req.method !== 'GET') return send(405, JSON.stringify({ error: { code: 'METHOD_NOT_ALLOWED', message: '읽기(GET)만 넘깁니다' } }))
     const path = req.url || '/'
     const raw = req.headers?.authorization
-    const browserAuth = Array.isArray(raw) ? raw[0] : raw
+    const browserAuth = (req.headers && proxyAuthorization('human', req.headers, tokens)) ?? (Array.isArray(raw) ? raw[0] : raw)
     try {
       if (!token) token = await login()
       let upstream = await call(path, browserAuth)

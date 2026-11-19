@@ -77,8 +77,9 @@ bash scripts/run_all.sh stop
   - DejaFix 읽기 전용 프록시(`dejafix-proxy`, 8030)는 계정이 없어도 run_all이 같이 띄운다(연결 전에는 503 `DEJAFIX_NOT_CONNECTED`). 연결은 화면의 도구 연결(보관함 `dejafix`)에서 정하면 재시작 없이 반영되고, 인프라 AI·개발 AI는 보관함에 `dejafix`가 있으면 이 프록시 주소를 쓴다(`INFRA_DEJAFIX_URL`·`PLANNING_DEJAFIX_API_URL`이 있으면 그 값이 먼저).
   - 메모리(전용 메모리, Windows 로컬 측정): 전체 서버(예전 판매 서버·가상 주문 포함 측정)는 프로세스 36개·약 940MB, `data-demo`는 26개·약 680MB다.
 - Docker가 필요하다. 이벤트 버스(Redis)를 컨테이너 `ax-redis`로 띄운다 (`REDIS_URL`을 주면 그걸 쓴다).
-- 에이전트 토큰(`AX_AGENT_TOKENS`)·사람 토큰은 켤 때마다 새로 만들어 프로세스에만 넘긴다. 화면에 넘길 값만
-  `backend/.data/web.env`에 쓴다 (커밋 안 함).
+- 에이전트 토큰(`AX_AGENT_TOKENS`)·사람 토큰은 켤 때마다 새로 만들어 프로세스에만 넘긴다. 화면 개발 서버에 넘길 값만
+  `backend/.data/web.env`에 쓴다 (커밋 안 함, 이름은 `AX_WEB_*_TOKEN`). `run_web.sh`는 이 값을 개발 서버 프록시에만 넘기고,
+  화면 번들(`VITE_*_TOKEN`)에는 자리표시자만 넣는다. 프록시가 자리표시자를 진짜 토큰으로 바꿔 붙인다(`frontend/token-proxy.ts`, 서버 nginx와 같은 구조).
 - 화면은 판매 서버(shop-api) 관리 읽기(총괄 사건·부서, 받은 기획안·장애 SNS 초안, 공지 배너, 장애 상태)를
   직접 부르지 않고 dashboard-api의 `/api/dashboard/shop/*`(GET만)를 부른다. dashboard-api가 회사 연결 주소
   (`agent_url("shop-api")`)로 **읽기 전용 열람 토큰** `SHOP_VIEWER_TOKEN`(24자 이상)을 붙여 부른다.

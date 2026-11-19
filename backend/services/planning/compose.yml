@@ -4,7 +4,7 @@ services:
       context: ../..
       dockerfile: services/planning/Dockerfile
     ports:
-      - "8101:8101"
+      - "127.0.0.1:8101:8101"
     env_file:
       - path: ../../.env
         required: false

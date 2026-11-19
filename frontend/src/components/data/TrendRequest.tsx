@@ -9,7 +9,7 @@ import { sectionState, type SectionState } from "@/lib/segmentView";
 import { TREND_REPORT_PRESETS } from "@/lib/trendReportPresets";
 import type { TrendNavState } from "@/lib/chatCards";
 import {
-  AGE_OPTIONS, CALLER_LABEL, EMPTY_FORM, GENDER_LABEL, REPORT_STATUS, buildInput, formFromBrief, hasInput, reportHash, reportIdFromHash, type RequestForm,
+  AGE_OPTIONS, CALLER_LABEL, EMPTY_FORM, GENDER_LABEL, REPORT_STATUS, buildInput, formFromBrief, hasInput, reportHash, reportIdFromHash, reportLabel, type RequestForm,
 } from "@/lib/trendReportView";
 
 // 트렌드&콘텐츠 "분석 의뢰" 하위 탭 (#request, 루프 단계와 별개).
@@ -73,7 +73,7 @@ function PastList({ list, current, onOpen, onRetry }: { list: ListLoad; current:
                     className={`w-full rounded-lg border px-3 py-2 text-left transition hover:border-brand-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${current === it.report_id ? "border-brand-500 bg-brand-50" : "border-ink-100"}`}>
                     <span className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
                       <span className={`chip text-[11px] ${TONE[st.tone]}`}>{st.label}</span>
-                      {when(it.created_at)} · {CALLER_LABEL[it.caller] ?? it.caller}
+                      <span className="font-semibold tabular-nums text-ink-700">{reportLabel(it.report_id)}</span> · {when(it.created_at)} · {CALLER_LABEL[it.caller] ?? it.caller}
                     </span>
                     <span className="mt-0.5 block truncate text-sm font-medium text-ink-900">{it.product ?? "제품 정하지 않음"}</span>
                     {it.summary_line && <span className="block truncate text-xs text-ink-700">{it.summary_line}</span>}

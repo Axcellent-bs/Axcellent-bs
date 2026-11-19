@@ -84,11 +84,20 @@ class _Clock:
         self.now += seconds
 
 
+def _public(host: str, port: int, **_kw: object) -> list[tuple]:
+    return [(2, 1, 6, "", ("93.184.216.34", port))]
+
+
+def _public(host: str, port: int, **_kw: object) -> list[tuple]:
+    return [(2, 1, 6, "", ("93.184.216.34", port))]
+
+
 def _provider(
     handler: Callable[[httpx.Request], httpx.Response],
     clock: _Clock | None = None,
     *,
     max_wait: float = 20.0,
+    resolver: Callable[..., list[tuple]] | None = None,
 ) -> GeminiVideoProvider:
     clock = clock or _Clock()
     return GeminiVideoProvider(
@@ -97,6 +106,7 @@ def _provider(
         poll_max_wait_s=max_wait,
         sleep=clock.sleep,
         monotonic=clock.monotonic,
+        resolver=resolver or _public,
     )
 
 
@@ -483,3 +493,68 @@ def test_http_error_message_is_cut_to_200_chars(tmp_path: Path) -> None:
     with pytest.raises(GeminiVideoError) as info:
         _provider(handler).generate(_request(tmp_path))
     assert str(info.value) == "http_400: " + "x" * 200
+
+
+# --- 공용 주소 전용 내려받기(SSRF) ---
+def _uri_handler(redirect_to: str | None, seen: list[httpx.Request]):
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        if req.method == "POST":
+            return httpx.Response(200, json=_body({"type": "video", "uri": FILE_URI}))
+        if req.url.path == "/v1beta/files/abc123":
+            return httpx.Response(200, json={"state": "ACTIVE"})
+        if redirect_to and req.url.host == "generativelanguage.googleapis.com":
+            return httpx.Response(302, headers={"location": redirect_to})
+        return httpx.Response(200, content=MUTED_MP4)
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["https://169.254.169.254/x", "https://127.0.0.1/x", "https://10.0.0.5/x", "https://[::1]/x"],
+)
+def test_redirect_to_private_host_refused(tmp_path: Path, target: str) -> None:
+    seen: list[httpx.Request] = []
+    with pytest.raises(GeminiVideoError, match="blocked_video_host"):
+        _provider(_uri_handler(target, seen)).generate(_request(tmp_path))
+    assert all(r.url.host == "generativelanguage.googleapis.com" for r in seen)
+
+
+def test_redirect_to_name_resolving_private_refused(tmp_path: Path) -> None:
+    def resolver(host: str, port: int, **_kw: object) -> list[tuple]:
+        ip = "10.0.0.5" if host == "cdn.internal.test" else "93.184.216.34"
+        return [(2, 1, 6, "", (ip, port))]
+
+    seen: list[httpx.Request] = []
+    handler = _uri_handler("https://cdn.internal.test/v.mp4", seen)
+    with pytest.raises(GeminiVideoError, match="blocked_video_host"):
+        _provider(handler, resolver=resolver).generate(_request(tmp_path))
+    assert all(r.url.host != "cdn.internal.test" for r in seen)
+
+
+def test_redirect_to_http_refused_and_key_not_sent(tmp_path: Path) -> None:
+    seen: list[httpx.Request] = []
+    handler = _uri_handler("http://cdn.example.com/v.mp4", seen)
+    with pytest.raises(GeminiVideoError, match="invalid_redirect"):
+        _provider(handler).generate(_request(tmp_path))
+    assert all(r.url.host == "generativelanguage.googleapis.com" for r in seen)
+
+
+def test_too_many_redirects(tmp_path: Path) -> None:
+    seen: list[httpx.Request] = []
+    handler = _uri_handler("/v1beta/files/abc123:download?alt=media", seen)
+    with pytest.raises(GeminiVideoError, match="too_many_redirects"):
+        _provider(handler).generate(_request(tmp_path))
+
+
+def test_download_oversize_content_length_refused(tmp_path: Path) -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST":
+            return httpx.Response(200, json=_body({"type": "video", "uri": FILE_URI}))
+        if req.url.path == "/v1beta/files/abc123":
+            return httpx.Response(200, json={"state": "ACTIVE"})
+        return httpx.Response(200, headers={"content-length": str(64 * 1024 * 1024 + 1)})
+
+    with pytest.raises(GeminiVideoError, match="invalid_video_size"):
+        _provider(handler).generate(_request(tmp_path))

@@ -58,15 +58,15 @@ services:
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   postgres:
     image: pgvector/pgvector:pg16
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: ${COMPOSE_POSTGRES_USER:-ax}
-      POSTGRES_PASSWORD: ${COMPOSE_POSTGRES_PASSWORD:-ax}
+      POSTGRES_PASSWORD: ${COMPOSE_POSTGRES_PASSWORD:?infra/.env에 COMPOSE_POSTGRES_PASSWORD를 적어 주세요}
       POSTGRES_DB: ${COMPOSE_POSTGRES_DB:-ax}
     volumes:
       - pgdata:/var/lib/postgresql/data

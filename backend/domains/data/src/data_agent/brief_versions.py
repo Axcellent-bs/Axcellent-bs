@@ -72,10 +72,11 @@ def _josa(name: str) -> str:
 
 
 def label(row: Mapping[str, Any]) -> str:
-    """판 이름: "00:27 자동" · "11:16 다시 추천"."""
+    """판 이름: "00:27 자동" · "13:05 자동(다시)" · "11:16 다시 추천"."""
     at = row["created_at"]
     at = datetime.fromisoformat(at) if isinstance(at, str) else at
-    return f"{hhmm(at)} {'자동' if row['trigger'] == 'auto' else '다시 추천'}"
+    word = {"auto": "자동", "auto_retry": "자동(다시)"}.get(row["trigger"], "다시 추천")
+    return f"{hhmm(at)} {word}"
 
 
 # ---------------------------------------------------------------- 감지 스냅샷
@@ -165,7 +166,8 @@ def blocked(store: Any, day: Any, rules: str, now: datetime, *, llm_share: float
     """지금 다시 추천을 누르면 막히는 이유 (통과면 None)."""
     b = store.building(now)
     if b is not None:
-        who = "자동으로" if b["trigger"] == "auto" else f"{b['who']}{_josa(b['who'])}"
+        who = ("자동으로" if b["trigger"] in ("auto", "auto_retry")
+               else f"{b['who']}{_josa(b['who'])}")  # fmt: skip
         at = hhmm(b["started_at"])
         return Blocked("in_progress", f"지금 만드는 중이에요 ({who} {at}에 시작)")
     rows = store.versions(day, rules)

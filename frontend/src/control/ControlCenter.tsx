@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 import { COMPANIES, COST_BY_SERVICE, COST_TREND, INCIDENTS, LATEST_VERSION, QUALITY, won, type Health, type Origin } from './data'
 import KeyIssue from './KeyIssue'
+import Accounts from './Accounts'
 import ServiceOps from './ServiceOps'
 import { useCompany, useKeys } from '@/demo/company'
 import { ADMIN_HOME } from '@/demo/session'
@@ -346,6 +347,7 @@ export default function ControlCenter() {
   if (tab === 'quality') return <Quality />
   if (tab === 'cost') return <Cost />
   if (tab === 'keys') return <KeyIssue />
+  if (tab === 'accounts') return <Accounts />
   if (tab === 'services') return <ServiceOps />
   return <Overview />
 }

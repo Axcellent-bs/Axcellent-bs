@@ -2,12 +2,16 @@
 
 nginx에만 기대지 않고 프록시가 직접 막는다. 형식은 `Authorization: Bearer <토큰>`.
 - 에이전트 토큰: `AX_AGENT_TOKENS`(agent-template `verify_token`). 인프라·개발 AI가 붙인다
-- 사람 토큰: `SAFETY_HUMAN_TOKENS="이름:토큰,이름:토큰"`. 화면이 붙인다
-  (서버에서는 nginx가 바꿔 붙인다)
+- 사람 토큰: 로그인 세션 토큰(`axs1.`, `ax_agent_template.human_auth`, 역할 상관없이 관리자·일반회원
+  모두)과 공용 사람 토큰(`SAFETY_HUMAN_TOKENS="이름:토큰,이름:토큰"`,
+  `AX_ALLOW_SHARED_HUMAN_TOKEN=0`이 되기 전까지). 화면이 붙인다.
+  장애 조회는 읽기라 역할을 가리지 않는다
 - 목 모드(`DEJAFIX_PROXY_MOCK=1`, 테스트 전용)에서만 `human:<이름>`·`mock:<이름>`도 받는다
 - 자리표시자(`data-via-nginx`)는 받지 않는다. nginx가 바꿔 붙이지 않았다는 뜻이다
 
 토큰이 없으면 401 `AUTH_REQUIRED`, 모르는 토큰이면 401 `TOKEN_INVALID`.
+세션 토큰이 만료·로그아웃·비밀번호 변경으로 끊겼으면 401과 그 코드(`SESSION_EXPIRED` 등),
+위조면 `TOKEN_INVALID`.
 토큰이 설정되지 않았고 목 모드도 아니면 모두 거부한다(fail-closed).
 총괄(`ax_orchestrator/auth.py`)·기획(`ax_workflow/auth.py`)의 `check_caller`와 같은 규칙을
 다른 패키지라 여기 작게 다시 쓴다.
@@ -15,10 +19,10 @@ nginx에만 기대지 않고 프록시가 직접 막는다. 형식은 `Authoriza
 
 from __future__ import annotations
 
-import hmac
 import os
 import re
 
+from ax_agent_template import human_auth
 from ax_agent_template.config import PLACEHOLDER_TOKEN, is_mock
 from ax_agent_template.server import verify_token
 
@@ -48,21 +52,27 @@ def _bearer(authorization: str | None) -> str:
 
 
 def _human(token: str) -> str | None:
-    """사람 토큰이면 이름, 아니면 None."""
-    for item in os.getenv("SAFETY_HUMAN_TOKENS", "").split(","):
-        name, sep, known = item.strip().partition(":")
-        known = known.strip()
-        if sep and name and known and known != PLACEHOLDER_TOKEN:
-            if hmac.compare_digest(known, token):
-                return name.strip()
-    if is_mock(MOCK_NAME) and token.startswith("human:") and len(token) > len("human:"):
-        return token.removeprefix("human:")
-    return None
+    """사람 토큰(세션·공용·목 `human:`)이면 이름, 아니면 None.
+
+    세션 토큰인데 받을 수 없으면 AuthFailure.
+    """
+    shared = {
+        known: name
+        for known, name in human_auth.parse_shared_tokens(os.getenv("SAFETY_HUMAN_TOKENS")).items()
+        if known != PLACEHOLDER_TOKEN
+    }
+    try:
+        human = human_auth.find_human(token, shared_tokens=shared, mock=is_mock(MOCK_NAME))
+    except human_auth.HumanAuthError as exc:
+        # 만료·로그아웃·세대 지남은 그 코드로, 위조(403 HUMAN_TOKEN_INVALID)는 모르는 토큰과 같이
+        code = exc.code if exc.status_code == 401 else "TOKEN_INVALID"
+        raise AuthFailure(code, exc.message) from None
+    return human.name if human else None
 
 
 def _agent(token: str) -> str | None:
     """에이전트 토큰이면 이름, 아니면 None."""
-    if token.startswith("human:"):
+    if token.startswith("human:") or human_auth.is_session_token(token):
         return None
     if token.startswith("mock:"):
         name = token.removeprefix("mock:")

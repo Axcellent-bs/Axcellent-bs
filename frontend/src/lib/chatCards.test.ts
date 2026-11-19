@@ -2,13 +2,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  cardInput, competitorsText, doneView, formFromCard, keywordsText, progressKeepPolling, progressPct, reportCode, reportPath, requestCardRows, submitView,
+  cardInput, competitorsText, doneView, formFromCard, keywordsText, progressKeepPolling, progressPct, reportPath, requestCardRows, submitView,
 } from "./chatCards.ts";
 import { DONE_CARD_EXAMPLE, DONE_CARD_FAILED, REQUEST_CARD_EXAMPLE, REQUEST_CARD_SPARSE } from "./chatCardsExample.ts";
 import { withRawCards } from "./chatCards.ts";
 import type { ChatCard, ChatMessage } from "./planningData.ts";
 import { TREND_REPORT_EXAMPLE } from "./trendReportExample.ts";
-import { buildInput } from "./trendReportView.ts";
+import { buildInput, reportLabel } from "./trendReportView.ts";
 
 test("의뢰 카드 표시: 타깃 연령, 경쟁사 이름/@아이디·외 N곳, 키워드 외 N개, 프리셋 꼬리표", () => {
   const rows = requestCardRows(REQUEST_CARD_EXAMPLE);
@@ -67,7 +67,7 @@ test("버튼 상태: 접수 전 → 넣는 중 → 접수됨(TR-…) / 같은 �
   assert.equal(missing.disabled, true);
   assert.ok(missing.note?.includes("준비 중"));
   assert.equal(submitView({ kind: "error", missing: false, message: "지금은 받지 못했어요" }).disabled, false);
-  assert.equal(reportCode("tr_abcd1234"), "TR-ABCD");
+  assert.equal(reportLabel("tr_abcd1234"), "TR-ABCD");
 });
 
 test("완료 카드: 완료 초록 · 실패 빨강, 근거 최대 3개, 앱 밖 주소는 쓰지 않는다", () => {

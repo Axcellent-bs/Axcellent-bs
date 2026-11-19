@@ -4,7 +4,7 @@ services:
       context: ../..
       dockerfile: services/decisions/Dockerfile
     ports:
-      - "8114:8114"
+      - "127.0.0.1:8114:8114"
     env_file:
       - path: ../../.env
         required: false

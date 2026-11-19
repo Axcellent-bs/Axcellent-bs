@@ -19,6 +19,10 @@
   쓰인 단위의 가장 많이 쓰인 표기
 - 기준: 채널 `min_channels`·영상 `min_videos` 이상, 직전 대비 `min_ratio`배 이상(직전 0이면
   새로 등장으로 통과, 직전 표본이 없으면 unknown으로 통과). 순위는 채널 수 → 영상 수 → 배수
+- 배수(11/19, `[memes] judge_by`): share(기본)는 몫의 배수(이번 영상 수 ÷ 이번 표본) ÷ (직전
+  평균 영상 수 ÷ 직전 평균 표본)로 판정한다(표본 수가 주마다 크게 달라도 공정하게). 직전 평균
+  표본이 `min_previous_sample`(30) 미만이면 unknown + 이유. count는 예전 영상 수 배수.
+  ratio·previous_videos는 어느 쪽이든 채운다(화면 호환)
 - 칸: 네이버 검색 배수(앞 `search_top`개만, trend_scan `judge_series`·커넥터 하루 캐시·
   trend_age 호출자별 예산 `calls_by_caller`를 같이 씀. 한도면 "확인 안 함(한도)"), 광고 재료
   (`ad_material.judge`), 연결 상품(`product_link.pick_links`, content_recommend 기준 그대로),
@@ -107,6 +111,10 @@ class MemeConfig:
     overlap: float = 0.6
     search_top: int = 5
     exclude_tags: tuple[str, ...] = DEFAULT_EXCLUDE_TAGS
+    # 11/19: share(기본) = 표본 대비 몫의 배수로 판정, count = 영상 수 배수(예전).
+    # 이번 주 숏츠 표본이 지난주보다 크게 적으면(307 → 104) 영상 수 배수는 기준을 못 넘는다
+    judge_by: Literal["share", "count"] = "share"
+    min_previous_sample: int = 30  # share: 직전 평균 표본이 이보다 적으면 ratio_status unknown
 
     def criteria(self) -> MemeCriteria:
         return MemeCriteria(
@@ -114,6 +122,16 @@ class MemeConfig:
             max_items=self.max_items, stop_share=self.stop_share, overlap=self.overlap,
             search_top=self.search_top,
         )  # fmt: skip
+
+
+def criteria_text(config: MemeConfig, window: str = "week") -> str:
+    """기준 문구. share면 "이번 주 표본 중 몫이 지난주의 2배 이상"."""
+    now, before = ("이번 주", "지난주") if window == "week" else ("어제", "지난 같은 요일")
+    if config.judge_by == "share":
+        ratio = f"{now} 표본 중 몫이 {before}의 {config.min_ratio:g}배 이상"
+    else:
+        ratio = f"직전의 {config.min_ratio:g}배 이상"
+    return f"{config.min_channels}개 이상 채널·영상 {config.min_videos}개 이상·{ratio}"
 
 
 def load_config(env: Mapping[str, str]) -> MemeConfig:
@@ -134,7 +152,10 @@ def load_config(env: Mapping[str, str]) -> MemeConfig:
             overlap=min(1.0, max(0.05, float(raw.get("overlap", base.overlap)))),
             search_top=max(0, int(raw.get("search_top", base.search_top))),
             exclude_tags=tuple(str(t) for t in tags if str(t).strip()),
-        )
+            judge_by="count" if str(raw.get("judge_by", base.judge_by)) == "count" else "share",
+            min_previous_sample=max(1, int(raw.get("min_previous_sample",
+                                                   base.min_previous_sample))),
+        )  # fmt: skip
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return MemeConfig()
 
@@ -379,6 +400,14 @@ class Candidate:
     ratio_status: Literal["known", "new", "unknown"]
     ratio: float | None
     ratio_reason: str | None
+    share: float | None = None
+    previous_share: float | None = None
+    share_ratio: float | None = None
+    judged_by: Literal["share", "count"] = "count"
+
+
+def share_of(n: float, sample: float) -> float | None:
+    return round(n / sample, 4) if sample else None
 
 
 @dataclass
@@ -486,6 +515,8 @@ def build(
     # 3. 이름·기준
     candidates: list[Candidate] = []
     below = 0
+    by_share = config.judge_by == "share"
+    prev_sample = (sum(previous_n[i] for i in used_slots) / len(used_slots)) if used_slots else 0.0
     for c in clusters:
         # 가장 많이 쓰인 단위. 같으면 해시태그(직접 붙인 표기) → 긴 것
         lead = max(c.keys, key=lambda k: (len(cur[k]), kinds[k] == "hashtag", len(k), k))
@@ -501,9 +532,19 @@ def build(
                 status, ratio, why = "new", None, "직전 기간 0개라 새로 등장"
             else:
                 status, ratio, why = "known", round(n_videos / prev_videos, 2), None
+        # 몫: 이번 기간 영상 수 ÷ 이번 표본, 직전은 평균 영상 수 ÷ 평균 표본
+        share = share_of(n_videos, current_n)
+        prev_share = share_of(prev_videos, prev_sample) if prev_videos is not None else None
+        share_ratio = (round(share / prev_share, 2)
+                       if share is not None and prev_share else None)  # fmt: skip
+        if by_share and status == "known" and prev_sample < config.min_previous_sample:
+            status, why = "unknown", (
+                f"직전 표본이 평균 {prev_sample:.0f}개라 몫을 비교하지 않음"
+                f" (기준 {config.min_previous_sample}개 이상)")  # fmt: skip
+        metric = share_ratio if by_share else ratio
         passes = (
             n_channels >= config.min_channels and n_videos >= config.min_videos
-            and (status != "known" or (ratio or 0.0) >= config.min_ratio)
+            and (status != "known" or (metric or 0.0) >= config.min_ratio)
         )  # fmt: skip
         if not passes:
             below += 1
@@ -512,11 +553,13 @@ def build(
         candidates.append(Candidate(
             c.name, c.kind, c.members, ordered, n_channels, n_videos,
             None if prev_videos is None else round(prev_videos, 2), status, ratio, why,
+            share, prev_share, share_ratio, config.judge_by,
         ))  # fmt: skip
     rank_ratio = {"new": math.inf, "known": 0.0, "unknown": -1.0}
 
     def order(x: Candidate) -> tuple[int, int, float, str]:
-        ratio = x.ratio if x.ratio is not None else rank_ratio[x.ratio_status]
+        got = x.share_ratio if by_share else x.ratio
+        ratio = got if got is not None else rank_ratio[x.ratio_status]
         return (-x.channels, -x.videos, -ratio, x.name)
 
     candidates.sort(key=order)
@@ -808,6 +851,8 @@ async def trend_memes(
             name=c.name, kind=c.kind, members=c.members, channels=c.channels, videos=c.videos,
             previous_videos=c.previous_videos, ratio_status=c.ratio_status, ratio=c.ratio,
             ratio_reason=c.ratio_reason,
+            share=c.share, previous_share=c.previous_share, share_ratio=c.share_ratio,
+            judged_by=c.judged_by,
             topic_category=cat.category if cat else "unknown",
             real_entity=cat.real_entity if cat else None,
             entity_names=list(cat.entity_names) if cat else [],
@@ -854,10 +899,7 @@ async def trend_memes(
     if not pool:
         out.reason = "숏츠 표본이 없음 (shorts_stats 수집·YouTube 인기 스냅샷이 없음)"
     elif not items:
-        out.reason = (
-            f"기준을 넘은 유행이 없음: {config.min_channels}개 이상 채널·영상 {config.min_videos}개"
-            f" 이상·직전의 {config.min_ratio:g}배 이상"
-        )
+        out.reason = f"기준을 넘은 유행이 없음: {criteria_text(config, request.window)}"
     span = "이번 7일" if request.window == "week" else "어제"
     before = (
         f" 직전 기간 표본 {out.previous_videos}개." if out.previous_videos else f" {NO_PREVIOUS}."

@@ -65,11 +65,14 @@ export function App() {
 
 /** 로그인하지 않았으면 메인(카탈로그)으로, 배정되지 않은 서비스 화면이면 내 첫 화면으로 보낸다 */
 function Guarded({ children }: { children: ReactNode }) {
-  const { account } = useSession()
+  const { account, mode, expired } = useSession()
   const { pathname } = useLocation()
   const company = useCompany()
   const loaded = useCompanyLoaded()
-  if (!account) return <Navigate to={pathname.startsWith('/control') ? '/control/login' : '/'} replace />
+  // 서버 로그인이 켜져 있는지 묻는 동안은 기다린다(데모 로그인의 ?as=·지난 계정은 꺼져 있다고 확인된 뒤에 들어간다)
+  if (!account && mode === 'checking') return <PageLoading />
+  // 서버 세션이 만료되면 로그인 화면으로
+  if (!account) return <Navigate to={pathname.startsWith('/control') ? '/control/login' : expired ? '/login' : '/'} replace />
   // 연결 회사를 아직 못 읽었으면 기다린다(먼저 보내 버리면 연결된 회사도 새로 열 때마다 회사 연결 화면으로 간다)
   if (!company && !loaded) return <PageLoading />
   if (!canOpen(account, pathname, !!company)) return <Navigate to={homeOf(account)} replace />

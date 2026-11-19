@@ -17,6 +17,8 @@ export interface BoardCard {
   stage: Stage;
   /** 이 카드를 지금 만지는 일꾼 (재생 모드에서만) */
   worker?: "ai" | "human";
+  /** 판매 서버 자료 재생성 전 접수 (옛 자료) */
+  legacy?: boolean;
 }
 
 export const TODO_STAGES: Stage[] = ["new", "drafting", "review"];
@@ -39,6 +41,7 @@ export function cardsFromConversations(list: ConversationListItem[]): BoardCard[
     subject: c.subject_display || c.subject,
     lang: c.language ?? "ko",
     urgency: c.urgency,
+    legacy: c.legacy_intake === true,
     stage: c.status === "resolved" ? "resolved" : c.status === "escalated" ? "escalated" : c.awaiting_reply ? "review" : "sent",
   }));
 }

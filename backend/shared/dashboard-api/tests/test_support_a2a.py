@@ -425,3 +425,14 @@ def test_by_ref_not_found_says_the_inquiry_is_gone(client: TestClient, fake: Fak
     response = client.get(BASE + "/conversations/by-ref/ctx_inq_9999")
     assert response.status_code == 404
     assert "고객지원 저장소에 없어요" in response.json()["error"]["message"]
+
+
+def test_list_passes_the_legacy_intake_mark_through(client: TestClient, fake: Fake) -> None:
+    fake.output = {"items": [{**ITEM, "legacy_intake": True}, {**ITEM, "id": 8}]}
+    rows = client.get(BASE + "/conversations").json()["data"]
+    assert [r["legacy_intake"] for r in rows] == [True, False]  # 없으면 표시하지 않는다
+
+
+def test_detail_passes_the_legacy_intake_mark_through(client: TestClient, fake: Fake) -> None:
+    fake.output = {**ITEM, "legacy_intake": True, "messages": []}
+    assert client.get(BASE + "/conversations/7").json()["data"]["legacy_intake"] is True

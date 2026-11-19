@@ -220,6 +220,28 @@ class DataChatStore:
 
         return self._update(thread_id, mutate)
 
+    def mark_accepted(self, thread_id: str, request_text: str | None, report_id: str) -> str:
+        """같은 의뢰문의 의뢰 카드(가장 최근 것)에 `accepted_report_id`를 적는다. 상태는 그대로.
+
+        `ok` · `missing` · `not_from_here`(그 카드가 없음). 닫힌 대화여도 표시는 적는다(기록일 뿐).
+        """
+        outcome = "missing"
+
+        def mutate(th: dict[str, Any], at: str) -> Status | None:
+            nonlocal outcome
+            hit = next((m for m in reversed(th["messages"])
+                        if (m.get("card") or {}).get("kind") == "trend_request"
+                        and m["card"].get("request_text") == request_text), None)  # fmt: skip
+            if not request_text or hit is None:
+                outcome = "not_from_here"
+                return None
+            outcome = "ok"
+            hit["card"] = {**hit["card"], "accepted_report_id": report_id}
+            return th["status"]
+
+        self._update(thread_id, mutate)
+        return outcome
+
     def add_report_message(self, thread_id: str, text: str, card: dict[str, Any],
                            request_text: str | None) -> str:  # fmt: skip
         """분석 의뢰 진행·완료 메시지(코드 문장 + 카드)를 붙인다. 상태는 그대로 둔다.

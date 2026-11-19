@@ -17,6 +17,7 @@ from typing import Any
 
 import httpx
 
+from ax_agent_template import pinned_http
 from ax_agent_template.company_connection import read_connection
 from ax_dashboard_api.site_adapter.mapping import Paging, ResourceMap, SiteMapping, adapter_dir
 
@@ -105,7 +106,12 @@ def _headers(m: SiteMapping) -> dict[str, str]:
 
 
 def _client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=TIMEOUT, transport=TRANSPORT)
+    # 고객사 주소는 검사한 IP로만 붙고(DNS 재바인딩 차단) 리다이렉트를 따라가지 않는다
+    return httpx.AsyncClient(
+        timeout=TIMEOUT,
+        follow_redirects=False,
+        transport=TRANSPORT or pinned_http.guarded_transport(),
+    )
 
 
 async def _get(

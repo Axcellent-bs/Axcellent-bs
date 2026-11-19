@@ -67,7 +67,7 @@ def test_orchestrator_lookup_reads_the_incident_record(monkeypatch: pytest.Monke
     real_client = httpx.AsyncClient
     monkeypatch.setattr(clients, "is_mock", lambda _name=None: False)
     monkeypatch.setattr(
-        clients.httpx, "AsyncClient", lambda **kw: real_client(transport=transport, **kw)
+        clients.httpx, "AsyncClient", lambda **kw: real_client(**dict(kw, transport=transport))
     )
     assert asyncio.run(clients.orchestrator_opened_at("ctx_inc_0001")) == OPENED
     assert asyncio.run(clients.orchestrator_opened_at("ctx_inc_none")) is None

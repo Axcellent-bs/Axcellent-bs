@@ -21,6 +21,7 @@ from ax_dashboard_api import (
     support_client,
     tool_connections,
 )
+from ax_dashboard_api.accounts import router as accounts_router
 from ax_dashboard_api.connection_keys import router as connection_keys_router
 from ax_dashboard_api.envelope import install_error_handlers, is_mock
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
@@ -115,6 +116,8 @@ app.include_router(office_room.router)
 # 시스템 관리 > 회사 연결 (고객사 판매 서버 주소, 쓰기는 사람 토큰)
 app.include_router(company_connection.router)
 app.include_router(connection_keys_router)
+# 계정·로그인: 사람마다 다른 세션 토큰 (로그인은 토큰 없이, 나머지는 세션 토큰)
+app.include_router(accounts_router)
 app.include_router(instagram_radar_router)
 app.include_router(tool_connections.router)
 # 알림 받는 주소: 고객사 판매 서버가 회사 키로 이벤트를 보낸다 (사람 토큰 대신 회사 키)
