@@ -14,6 +14,7 @@ import { TrendMemes } from "@/components/data/TrendMemes";
 import { KeywordSummaryCards, KeywordTrend } from "@/components/data/KeywordTrend";
 import { IgAudioSummaryCard, InstagramAudio, KEY_LATER, igKeyMissing } from "@/components/data/InstagramAudio";
 import { InstagramRadar } from "@/components/data/InstagramRadar";
+import InstagramRadarSetup from "@/components/data/InstagramRadarSetup";
 import { InstagramMemo } from "@/components/data/InstagramMemo";
 import { okOut, useSkill } from "@/components/data/useSkill";
 import { Basis, Sources, VideoLinks, when } from "@/components/data/Sources";
@@ -251,6 +252,8 @@ function PlatformViews({ searchExtra }: { searchExtra?: ReactNode }) {
               <InstagramAudio music={igMusic.state} onRetryMusic={igMusic.reload} />
             </>
           )}
+          {/* 레이더가 지켜볼 계정: 키가 없어도 미리 정해 둘 수 있다 */}
+          <InstagramRadarSetup />
           <InstagramMemo />
         </section>
       )}
