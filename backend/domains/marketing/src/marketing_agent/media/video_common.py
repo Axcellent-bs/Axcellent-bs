@@ -16,23 +16,28 @@ from __future__ import annotations
 
 import hashlib
 import os
+import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Literal
-from urllib.parse import urljoin, urlsplit
 
 import httpx
 
 from marketing_agent.media.base import MediaProviderError, MediaRequest, MediaResult, Usage
 from marketing_agent.media.gemini_video import has_audio_track, strip_audio
+from marketing_agent.media.safe_fetch import (
+    PublicOnlyTransport,
+    Resolver,
+    fetch_public,
+)
 
 REQUEST_TIMEOUT_S = 60.0
 POLL_INTERVAL_S = 5.0
 POLL_MAX_WAIT_S = 600.0  # 작업 큐 방식은 동기 생성보다 오래 걸린다
 MAX_VIDEO_BYTES = 64 * 1024 * 1024
-MAX_REDIRECTS = 3
+MAX_REDIRECTS = 3  # fetch_public과 같은 값
 
 
 class VideoProviderError(MediaProviderError):
@@ -76,8 +81,10 @@ class AsyncVideoProvider:
         poll_max_wait_s: float = POLL_MAX_WAIT_S,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
+        resolver: Resolver = socket.getaddrinfo,
     ) -> None:
         self._transport = transport  # 테스트용 가짜 전송
+        self._resolver = resolver
         self._poll_interval_s = poll_interval_s
         self._poll_max_wait_s = poll_max_wait_s
         self._sleep = sleep
@@ -107,7 +114,9 @@ class AsyncVideoProvider:
         if not key:
             raise VideoProviderError("api_key_not_configured")
         try:
-            with httpx.Client(timeout=REQUEST_TIMEOUT_S, transport=self._transport) as client:
+            # 실서비스(transport 없음)는 공용 주소로만 연결한다. 테스트 가짜 전송은 그대로 쓴다
+            transport = self._transport or PublicOnlyTransport(self._resolver)
+            with httpx.Client(timeout=REQUEST_TIMEOUT_S, transport=transport) as client:
                 job_id = self.submit(client, request, key)
                 done = self._wait(client, job_id, key)
                 data = self._download(client, str(done.video_url))
@@ -144,20 +153,13 @@ class AsyncVideoProvider:
                 raise VideoProviderError("poll_timeout")
             self._sleep(self._poll_interval_s)
 
-    @staticmethod
-    def _download(client: httpx.Client, url: str) -> bytes:
-        for _ in range(MAX_REDIRECTS + 1):
-            parts = urlsplit(url)
-            if parts.scheme != "https" or not parts.hostname:
-                raise VideoProviderError("unexpected_video_uri")
-            response = client.get(url)  # 키를 보내지 않는다
-            if response.status_code in (301, 302, 303, 307, 308):
-                location = response.headers.get("location")
-                if not location:
-                    raise VideoProviderError("invalid_redirect")
-                url = urljoin(url, location)
-                continue
-            if response.status_code != 200:
-                raise VideoProviderError(f"http_{response.status_code}")
-            return response.content
-        raise VideoProviderError("too_many_redirects")
+    def _download(self, client: httpx.Client, url: str) -> bytes:
+        """https·공용 주소만, 홉마다 재검사. 키를 보내지 않는다. 크기·시간 상한을 지킨다."""
+        return fetch_public(
+            client,
+            url,
+            resolver=self._resolver,
+            max_bytes=MAX_VIDEO_BYTES,
+            monotonic=self._monotonic,
+            error=VideoProviderError,
+        )
