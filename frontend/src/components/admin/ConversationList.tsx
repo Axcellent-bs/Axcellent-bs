@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CATEGORY_KO, LANGUAGE_KO, STATUS_KO, URGENCY_DOT } from "@/lib/labels";
+import { LEGACY_HINT, LEGACY_LABEL, isLegacy, splitLegacy } from "@/lib/legacyIntake";
 import type { ConversationListItem } from "@/lib/types";
 
 type Filter = "all" | "waiting" | "triage" | "escalated";
@@ -7,9 +8,12 @@ type LangFilter = string; // "all" 또는 언어 코드
 const BASE_LANGS: LangFilter[] = ["all", "ko", "en", "ja", "zh"];
 const langOf = (c: ConversationListItem) => c.language ?? "ko";
 
-export function ConversationList({ items, selectedId, onSelect, onNew }: {
+export function ConversationList({ items: all, selectedId, onSelect, onNew }: {
   items: ConversationListItem[]; selectedId: number | null; onSelect: (id: number) => void; onNew: () => void;
 }) {
+  // 판매 서버 자료 재생성 전 접수(옛 자료)는 기본으로 숨기고 아래 확인 칸으로만 보여 준다 (숫자도 같은 기준)
+  const [showLegacy, setShowLegacy] = useState(false);
+  const { shown: items, legacyCount } = splitLegacy(all, showLegacy);
   const [filter, setFilter] = useState<Filter>("all");
   const test: Record<Filter, (c: ConversationListItem) => boolean> = {
     all: () => true, waiting: (c) => c.awaiting_reply && c.status === "open", triage: (c) => c.triage?.state === "needed", escalated: (c) => c.status === "escalated",
@@ -47,6 +51,12 @@ export function ConversationList({ items, selectedId, onSelect, onNew }: {
           </button>
         ))}
       </div>
+      {legacyCount > 0 && (
+        <label className="mx-4 mb-2 flex cursor-pointer items-center gap-2 text-xs text-ink-700" title={LEGACY_HINT}>
+          <input type="checkbox" checked={showLegacy} onChange={(e) => setShowLegacy(e.target.checked)} />
+          <span>{LEGACY_LABEL} 보기<span className="ml-1 text-ink-500">{legacyCount}건</span></span>
+        </label>
+      )}
       <ul className="scroll-thin flex-1 overflow-y-auto">
         {shown.map((c) => (
           <li key={c.id}>
@@ -64,6 +74,7 @@ export function ConversationList({ items, selectedId, onSelect, onNew }: {
                 {c.awaiting_reply && c.status === "open" && <span className="chip bg-red-50 text-red-700">답변 대기</span>}
                 {c.triage?.state === "needed" && <span className="chip bg-amber-50 text-amber-800">분류 필요</span>}
                 {c.status !== "open" && <span className="chip bg-ink-100 text-ink-500">{STATUS_KO[c.status]}</span>}
+                {isLegacy(c) && <span className="chip bg-ink-100 text-ink-500" title={LEGACY_HINT}>{LEGACY_LABEL}</span>}
               </div>
             </button>
           </li>
