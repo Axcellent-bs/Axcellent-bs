@@ -5,6 +5,7 @@ import { privateIp, useHosts } from './store'
 import { SERVICES } from './services'
 import { checkKey, connectWithKey, disconnect, updateCompanyInfo, useCompany, useKeys, type CompanyInfo, type IssuedKey } from './company'
 import SiteConnect from './SiteConnect'
+import InstagramRadarSetup from './InstagramRadarSetup'
 
 // 회사 연결 (고객사 시스템 관리자). 맨 위: 연결 지도(이 서버 → 회사 → 판매 서버 → 사내 PC 상태 한 줄),
 // 아래: AXcellent 연결, 사이트 연결(플랫폼·직접 만든 사이트, 회사가 연결된 뒤에만).
@@ -276,6 +277,7 @@ export default function CompanyConnect() {
       </section>
 
       {connected && <SiteConnect onShop={setShop} />}
+      {connected && <InstagramRadarSetup />}
     </div>
   )
 }

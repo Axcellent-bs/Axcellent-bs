@@ -6,7 +6,7 @@ import LoginPage from '@/demo/LoginPage'
 import SignupPage from '@/demo/SignupPage'
 import PlanPurchase from '@/demo/PlanPurchase'
 import { ADMIN_HOME, canOpen, homeOf, useSession } from '@/demo/session'
-import { useCompany } from '@/demo/company'
+import { useCompany, useCompanyLoaded } from '@/demo/company'
 import Setup from '@/demo/Setup'
 import CatalogHome from '@/demo/CatalogHome'
 import OperatorLogin from '@/control/OperatorLogin'
@@ -68,7 +68,10 @@ function Guarded({ children }: { children: ReactNode }) {
   const { account } = useSession()
   const { pathname } = useLocation()
   const company = useCompany()
+  const loaded = useCompanyLoaded()
   if (!account) return <Navigate to={pathname.startsWith('/control') ? '/control/login' : '/'} replace />
+  // 연결 회사를 서버에서 읽기 전에는 보내지 않는다(읽는 동안 "연결 안 됨"으로 보여 회사 연결 화면으로 튕겼다)
+  if (!loaded && !company) return <PageLoading />
   if (!canOpen(account, pathname, !!company)) return <Navigate to={homeOf(account)} replace />
   return <>{children}</>
 }

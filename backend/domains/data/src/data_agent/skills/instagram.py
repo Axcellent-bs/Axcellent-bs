@@ -35,6 +35,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ax_agent_template.tenant import ig_radar_accounts
 from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
@@ -97,13 +98,21 @@ class IgConfig:
 
 def load_config(env: Mapping[str, str]) -> IgConfig:
     path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
-    if not path or not Path(path).is_file():
+    has_file = bool(path) and Path(path).is_file()
+    # 회사 설정 파일이 없어도 화면에서 저장한 레이더 계정은 쓴다
+    # (누비투어처럼 키워드 파일이 없는 회사)
+    if not has_file and ig_radar_accounts() is None:
         return IgConfig()
     try:
-        with Path(path).open("rb") as f:
-            raw = tomllib.load(f).get("instagram") or {}
+        raw: dict = {}
+        if has_file:
+            with Path(path).open("rb") as f:
+                raw = tomllib.load(f).get("instagram") or {}
         base = IgConfig()
-        accounts = [str(a).strip().lstrip("@") for a in raw.get("radar_accounts", [])]
+        # 회사 연결 화면에서 저장한 목록이 있으면 그것이 먼저다(tenant.ig_radar_accounts)
+        saved = ig_radar_accounts()
+        listed = saved if saved is not None else raw.get("radar_accounts", [])
+        accounts = [str(a).strip().lstrip("@") for a in listed]
         return IgConfig(
             # 상한 200 (묶음으로 나눠 부른다)
             radar_accounts=tuple(dict.fromkeys(a for a in accounts if a))[:RADAR_MAX_ACCOUNTS],
