@@ -442,8 +442,11 @@ def upsert(
         return saved
 
 
-def record_check(conn_id: str, ok: bool, detail: str) -> ToolConnection:
-    """확인 결과를 남긴다 (`detail`에는 비밀 값이 없어야 한다)."""
+def record_check(conn_id: str, ok: bool, detail: str, *, by: str = "system") -> ToolConnection:
+    """확인 결과를 남긴다 (`detail`에는 비밀 값이 없어야 한다).
+
+    이력에는 다른 변경처럼 `check` 한 줄만 남긴다 (결과·문구는 넣지 않는다).
+    """
     with _writing():
         conns = _read_for_write()
         before = next((c for c in conns if c.id == conn_id), None)
@@ -458,6 +461,7 @@ def record_check(conn_id: str, ok: bool, detail: str) -> ToolConnection:
             }
         )
         _write([saved if c.id == conn_id else c for c in conns])
+        _record("check", saved, by)
         return saved
 
 

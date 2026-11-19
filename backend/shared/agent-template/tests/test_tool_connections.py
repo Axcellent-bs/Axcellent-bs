@@ -414,3 +414,15 @@ def test_mutating_returned_connection_does_not_change_cache(vault: Path) -> None
     assert again is not None
     assert again.config == {"url": "http://ci.local"}
     assert again.secrets == {"token": SECRET}
+
+
+def test_record_check_is_written_to_history(vault: Path) -> None:
+    """확인 결과도 바꾼 것이라 이력에 한 줄 남긴다. 비밀·config·확인 문구는 넣지 않는다."""
+    conn = _save()
+    tc.record_check(conn.id, False, "확인 실패 문구")
+    raw = vault.with_name(vault.name + ".history.jsonl").read_text(encoding="utf-8")
+    lines = [json.loads(x) for x in raw.splitlines()]
+    assert [x["action"] for x in lines] == ["save", "check"]
+    assert lines[1]["id"] == conn.id and lines[1]["kind"] == "jenkins"
+    assert set(lines[1]) == {"at", "by", "action", "id", "kind", "name"}
+    assert SECRET not in raw and "ci.local" not in raw and "확인 실패 문구" not in raw
