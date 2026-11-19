@@ -50,6 +50,7 @@ export const IconBox = (p: P) => <Icon {...p}><path d="m3 7 9-4 9 4v10l-9 4-9-4V
 export const IconReceipt = (p: P) => <Icon {...p}><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z" /><path d="M9 8h6M9 12h6" /></Icon>;
 export const IconRefresh = (p: P) => <Icon {...p}><path d="M20 11a8 8 0 0 0-14.5-4M4 13a8 8 0 0 0 14.5 4" /><path d="M5 3v4h4M19 21v-4h-4" /></Icon>;
 export const IconCheck = (p: P) => <Icon {...p}><path d="m5 12 5 5L20 7" /></Icon>;
+export const IconHelp = (p: P) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6" /><path d="M12 17h.01" /></Icon>;
 export const IconAlert = (p: P) => <Icon {...p}><path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.01" /></Icon>;
 export const IconTruck = (p: P) => <Icon {...p}><path d="M2 6h11v10H2zM13 9h4l3 3v4h-7" /><circle cx="7" cy="18" r="1.8" /><circle cx="17" cy="18" r="1.8" /></Icon>;
 export const IconAgents = (p: P) => <Icon {...p}><path d="M4 6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H9l-3 2.5V12H6a2 2 0 0 1-2-2V6Z" /><path d="M15 9h3a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2v2.5L15 17h-3a2 2 0 0 1-2-2v-1" /></Icon>;
