@@ -76,6 +76,7 @@ def make(plan=PLAN, text="홍보 영상 만들어 주세요", task="demo"):
 
 
 def runner(reqs, fake, **kw) -> RequestRunner:
+    kw.setdefault("scope_check", lambda *_: True)  # 시험용 계획은 일 목록에 없다
     return RequestRunner(reqs, lambda: fake, retry_delay=0, **kw)
 
 
@@ -114,7 +115,7 @@ async def test_failed_first_step_skips_the_rest() -> None:
     )
     await runner(reqs, fake).run(rid)
     row = reqs.get(rid)
-    assert row["status"] == "failed"
+    assert row["status"] == "needs_human"  # 재시도 뒤에도 실패하면 사람에게 넘긴다
     assert row["steps"]["a"]["status"] == "failed"
     assert row["steps"]["b"]["status"] == "skipped"
     assert len(fake.calls) == 1  # 뒤 부서는 부르지 않는다
@@ -186,7 +187,7 @@ async def test_unknown_or_forbidden_skill_fails_without_calling() -> None:
     await runner(reqs, fake).run(rid)
     row = reqs.get(rid)
     assert row["steps"]["a"]["reason_code"] == "no_agent"
-    assert row["status"] == "failed" and fake.calls == []
+    assert row["status"] == "needs_human" and fake.calls == []
 
 
 @pytest.mark.asyncio
@@ -225,7 +226,7 @@ async def test_exception_in_caller_fails_the_step_and_does_not_loop() -> None:
     row = reqs.get(rid)
     assert row["steps"]["a"]["status"] == "failed"
     assert "secret-key-1" not in str(row)
-    assert row["status"] == "failed"
+    assert row["status"] == "needs_human"
 
 
 @pytest.mark.asyncio
@@ -291,7 +292,7 @@ async def test_sentence_is_not_accepted_as_a_result_number_and_next_step_is_not_
     row = reqs.get(rid)
     assert row["steps"]["a"]["result_ref"] is None
     assert row["steps"]["b"]["reason_code"] == "no_ref" and len(fake.calls) == 1
-    assert row["status"] == "failed"
+    assert row["status"] == "needs_human"
 
 
 # ---- 9번: 사람 확인과 알림 ------------------------------------------------------------

@@ -54,6 +54,18 @@ NO_REF = "no_ref"
 APPROVED = "approved"
 REF_PATTERN = re.compile(r"[\w:.\-]{1,80}")  # 부서가 정한 결과 번호 모양 (문장은 받지 않는다)
 Notifier = Callable[[str, str], None]
+Escalator = Callable[[str, str, str | None], None]
+ScopeCheck = Callable[[dict[str, Any], dict[str, Any]], bool]
+OUT_OF_SCOPE = "out_of_scope"
+
+
+def in_catalog(row: dict[str, Any], spec: dict[str, Any]) -> bool:
+    """이 단계가 고른 일의 일 목록에 있는 단계(부서·skill)와 같은가. 다르면 시키지 않는다."""
+    task = request_tasks.get(row.get("task"))
+    return task is not None and any(
+        s.dept == spec.get("dept") and s.skill == spec.get("skill") and s.kind == spec.get("kind")
+        for s in task.steps
+    )
 
 
 class RequestRunner:
@@ -65,6 +77,8 @@ class RequestRunner:
         step_timeout: float = STEP_TIMEOUT,
         retry_delay: float = RETRY_DELAY,
         notify: Notifier | None = None,
+        escalate: Escalator | None = None,
+        scope_check: ScopeCheck = in_catalog,
     ) -> None:
         self._requests = requests
         self._get_engine = get_engine
@@ -72,6 +86,9 @@ class RequestRunner:
         self._retry_delay = retry_delay
         # 의뢰자에게 진행을 알린다: (대화 번호, 문장). 정해진 문장 틀만 보낸다. None이면 안 알린다
         self.notify = notify
+        # 끝내지 못한 의뢰를 사람 받은 요청에 올린다: (번호, 이유, 실패 단계). None이면 기록만
+        self.escalate = escalate
+        self._scope_check = scope_check
         self._running: set[str] = set()
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -165,8 +182,21 @@ class RequestRunner:
                 started_at=stamp(),
             )
             return
+        if not self._scope_check(row, spec):  # 일 목록에 없는 단계는 어떤 부서에도 보내지 않는다
+            self._update(
+                rid,
+                step_id,
+                status="failed",
+                reason_code=OUT_OF_SCOPE,
+                note="고른 일의 목록에 없는 단계라 시키지 않았다",
+                started_at=stamp(),
+                finished_at=stamp(),
+            )
+            return
         engine = self._get_engine()
         entry = engine.registry.find(spec["skill"]) if engine else None
+        if engine is not None and entry is not None and entry.dept != spec.get("dept"):
+            entry = None  # 계획의 부서와 카드의 부서가 다르면 부르지 않는다
         if engine is None or entry is None or not entry.callable_by_orchestrator:
             self._update(
                 rid,
@@ -372,9 +402,15 @@ class RequestRunner:
         if any(s in WAITING for s in states):
             self._requests.set_status(rid, "waiting", "승인이나 사람 확인을 기다린다")
             self._tell(row, "확인이 필요한 단계가 있어 담당자의 확인을 기다리고 있어요.")
-        elif any(s in NOT_OK for s in states):
-            self._requests.set_status(rid, "failed", "일부 단계가 끝나지 못했다")
+        elif "failed" in states:  # 재시도 뒤에도 끝내지 못했다: 멈추지 않고 사람에게 넘긴다
+            self._requests.set_status(rid, "needs_human", "단계가 끝나지 못해 사람에게 넘겼다")
             self._tell(row, "일부 단계를 끝내지 못했어요. 담당자가 확인할 거예요.")
+            failed = next(k for k, v in row["steps"].items() if v["status"] == "failed")
+            if self.escalate is not None:
+                self.escalate(rid, "step_failed", failed)
+        elif any(s in NOT_OK for s in states):  # 사람이 거절했거나 앞 단계 때문에 건너뜀
+            self._requests.set_status(rid, "failed", "사람이 거절했거나 앞 단계가 끝나지 못했다")
+            self._tell(row, "의뢰를 진행하지 않기로 했어요.")
         elif all(s == "completed" for s in states):
             self._requests.set_status(rid, "done", "모든 단계를 마쳤다")
             self._tell(row, "모든 단계를 마쳤어요.")

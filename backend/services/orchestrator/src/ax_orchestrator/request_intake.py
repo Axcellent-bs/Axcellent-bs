@@ -26,6 +26,7 @@ from ax_orchestrator.request_classifier import PROMPT_VERSION, Decision, classif
 from ax_orchestrator.work_requests import OPEN_STATES, WorkRequests
 
 DEDUPE_MINUTES = 10
+CLARIFY_MINUTES = 30  # 대화 번호가 없을 때 "이미 되물었다"를 보는 시간
 DAILY_LIMIT = 20  # 의뢰자 한 명이 하루(서울 시간)에 접수할 수 있는 의뢰 수
 KST = timedelta(hours=9)
 UNKNOWN_ACCOUNT = "unknown"
@@ -56,6 +57,8 @@ class RequestIntake:
         self._daily_limit = daily_limit
         # 일을 정해 기록하면 번호를 넘겨 실행을 시작한다(`RequestRunner.start`). None이면 접수만
         self.on_task: Callable[[str], None] | None = None
+        # 사람에게 넘길 의뢰를 받은 요청에 올린다: (의뢰 번호, 이유). None이면 기록만 한다
+        self.on_escalate: Callable[[str, str], None] | None = None
 
     def _duplicate(self, account: str, text: str) -> dict[str, Any] | None:
         """같은 사람이 같은 글을 최근에 이미 접수했나(거절된 의뢰는 다시 보낼 수 있다)."""
@@ -69,6 +72,32 @@ class RequestIntake:
             ):
                 return row
         return None
+
+    def _clarified_before(self, account: str, thread_id: str | None, own_id: str) -> bool:
+        """같은 대화(없으면 같은 사람의 최근 30분)에서 이미 되물었나. 되묻기는 한 번만 한다."""
+        since = now() - timedelta(minutes=CLARIFY_MINUTES)
+        for row in self._requests.list(account):
+            if row["status"] != "received" or row["request_id"] == own_id:
+                continue
+            if thread_id:
+                same = row.get("thread_id") == thread_id
+            else:
+                same = datetime.fromisoformat(row["created_at"]) >= since
+            if same:
+                return True
+        return False
+
+    def _close_clarifications(self, account: str, thread_id: str | None, new_id: str) -> None:
+        """되물은 뒤 고객이 답해 일이 정해지면, 되묻고 기다리던 이전 기록을 이어졌다고 닫는다."""
+        for row in self._requests.list(account):
+            if (
+                row["status"] == "received"
+                and row["request_id"] != new_id
+                and (not thread_id or row.get("thread_id") == thread_id)
+            ):
+                self._requests.set_status(
+                    row["request_id"], "done", f"되묻기에 답해 새 의뢰({new_id})로 이어졌다"
+                )
 
     def _today(self, account: str) -> int:
         today = _day(now().isoformat())
@@ -119,6 +148,7 @@ class RequestIntake:
             alternatives=d.alternatives,
         )
         if d.outcome == "task" and d.task is not None:
+            self._close_clarifications(account, thread_id, rid)
             self._requests.set_plan(
                 rid,
                 task=d.task.name,
@@ -139,10 +169,28 @@ class RequestIntake:
                 rid,
             )
         if d.outcome == "clarify":
+            if self._clarified_before(
+                account, thread_id, rid
+            ):  # 두 번째부터는 되묻지 않고 사람에게
+                self._requests.set_status(
+                    rid, "needs_human", "되물었는데도 일을 정하지 못해 사람에게 넘겼다"
+                )
+                self._escalate(rid, "unclear")
+                return IntakeResult(
+                    True,
+                    "unclear",
+                    f"내용을 정하지 못했어요. 담당자가 확인해서 알려 드릴게요. (번호 {rid})",
+                    "의뢰 확인 필요",
+                    rid,
+                )
             self._requests.set_status(rid, "received", "일을 정하지 못해 되물었다")
             return IntakeResult(True, "clarify", d.clarify or "", "의뢰 확인 중", rid)
         if d.outcome == "rejected":
-            self._requests.set_status(rid, "rejected", "위험하거나 권한 밖이라 거절했다")
+            self._requests.set_status(
+                rid,
+                "rejected",
+                f"위험하거나 권한 밖이라 거절했다 (분류 이유: {d.reason or '없음'})",
+            )
             return IntakeResult(
                 True,
                 "rejected",
@@ -152,6 +200,7 @@ class RequestIntake:
             )
         # unknown: 목록에 맞는 일이 없다 → 담당 불명, 사람에게
         self._requests.set_status(rid, "needs_human", "맡을 부서를 정하지 못했다 (담당 불명)")
+        self._escalate(rid, "unknown")
         return IntakeResult(
             True,
             "unknown",
@@ -159,6 +208,10 @@ class RequestIntake:
             "의뢰 담당 불명",
             rid,
         )
+
+    def _escalate(self, rid: str, why: str) -> None:
+        if self.on_escalate is not None:
+            self.on_escalate(rid, why)
 
     @staticmethod
     def _task_reply(rid: str, task: request_tasks.TaskDef, started: bool) -> str:
