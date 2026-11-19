@@ -1084,6 +1084,16 @@ async def set_publish_control(body: PublishControlBody, request: Request) -> dic
     )
 
 
+@router.post("/marketing/publish-control/set")
+async def set_publish_control_post(body: PublishControlBody, request: Request) -> dict:
+    """`PUT /marketing/publish-control`과 같다. 화면은 이 주소를 쓴다.
+
+    232 nginx 게이트는 쓰기 경로를 메서드별 location으로 연다. GET과 같은 주소에 PUT 전용
+    location을 두면 그 주소의 GET(스위치 상태 읽기)까지 막혀서, 바꾸기는 다른 주소의 POST로 둔다.
+    """
+    return await set_publish_control(body, request)
+
+
 _DRAFT_ID = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
 
 

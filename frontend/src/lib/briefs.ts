@@ -202,10 +202,12 @@ export async function getPublishControl(): Promise<PublishControlAnswer> {
  * 바꾼 사람 이름은 서버가 토큰에서 채운다(여기서 보내지 않는다).
  */
 export async function setPublishControl(paused: boolean, reason: string): Promise<PublishControlAnswer> {
-  const path = "/api/dashboard/marketing/publish-control";
+  // 바꾸기는 상태 읽기(GET)와 다른 주소의 POST로 보낸다. 232 nginx는 쓰기를 메서드별 location으로 여는데,
+  // GET과 같은 주소에 PUT 전용 location을 두면 상태 읽기까지 막힌다(서버는 PUT도 그대로 받는다)
+  const path = "/api/dashboard/marketing/publish-control/set";
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json", ...writeAuth("PUT", path) },
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
     body: JSON.stringify({ paused, reason }),
     cache: "no-store",
   });
