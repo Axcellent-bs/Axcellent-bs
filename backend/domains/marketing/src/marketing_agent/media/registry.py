@@ -1,4 +1,4 @@
-"""공급자 어댑터 등록부. 목, Gemini(이미지·영상·오디오), Seedance·Kling(영상) 어댑터가 있다.
+"""공급자 어댑터 등록부. 목, Gemini(이미지·영상·오디오), Seedance·Kling·Runway(영상) 어댑터가 있다.
 
 실제 공급자 이름(`openai`, `gemini` 등)이 설정돼도 여기에 어댑터가 없으면 호출 전에 거부된다.
 영상 공급자 추가 = `video_common.AsyncVideoProvider`를 상속한 어댑터 파일 1개 + 이 표 한 줄 +
@@ -31,6 +31,8 @@ from marketing_agent.media.pixverse_video import NAME as PIXVERSE_NAME
 from marketing_agent.media.pixverse_video import PixVerseVideoProvider
 from marketing_agent.media.replicate_video import NAME as REPLICATE_NAME
 from marketing_agent.media.replicate_video import ReplicateVideoProvider
+from marketing_agent.media.runway_video import NAME as RUNWAY_NAME
+from marketing_agent.media.runway_video import RunwayVideoProvider
 from marketing_agent.media.seedance_video import NAME as SEEDANCE_NAME
 from marketing_agent.media.seedance_video import SeedanceVideoProvider
 from marketing_agent.media.vidu_video import NAME as VIDU_NAME
@@ -68,6 +70,7 @@ ADAPTERS: dict[str, Callable[[], MediaProvider]] = {
     PIKA_NAME: PikaVideoProvider,  # 영상 전용. 키 MARKETING_PIKA_API_KEY
     LUMA_NAME: LumaVideoProvider,  # 영상 전용. 키 MARKETING_LUMA_API_KEY
     VIDU_NAME: ViduVideoProvider,  # 영상 전용. 키 MARKETING_VIDU_API_KEY
+    RUNWAY_NAME: RunwayVideoProvider,  # 영상 전용(Runway). 키 MARKETING_RUNWAY_API_KEY
 }
 
 
