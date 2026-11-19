@@ -89,7 +89,7 @@ test("자동 게시 꺼짐: 요청 거절·승인 뒤 실패 문구와 사유", 
   const paused = publishResultKo({ status: "failed", outcome: "publish_paused", output: { pause_reason: "계정 정지 재고 대기" } });
   assert.equal(paused.kind, "failed");
   assert.match(paused.text, /자동 게시가 꺼져/);
-  assert.match(paused.text, /수동 게시로 전환 예정/);
+  assert.doesNotMatch(paused.text, /전환 예정/);
   assert.match(paused.text, /초안과 미디어 생성은 계속 쓸 수 있습니다/);
   assert.match(paused.text, /담당자 확인/);
   assert.match(paused.text, /꺼 둔 사유: 계정 정지 재고 대기/);
@@ -99,7 +99,8 @@ test("자동 게시 꺼짐: 요청 거절·승인 뒤 실패 문구와 사유", 
   assert.match(publishResultKo({ status: "failed", outcome: "publish_control_error", output: null }).text, /스위치를 읽을 수 없어/);
   const failed = publishStatusLine({ status: "failed", can_request: false, failure_code: "publish_paused" } as PublishState)!;
   assert.equal(failed.tone, "bad");
-  assert.match(failed.text, /승인 뒤 자동 게시가 꺼/);
+  assert.match(failed.text, /자동 게시가 꺼져 자동으로 올리지 않았습니다/);
+  assert.match(failed.text, /수동 게시로 안내/);
   assert.match(publishStatusLine({ status: "failed", can_request: false, failure_code: "publish_control_error" } as PublishState)!.text, /스위치를 읽을 수 없어/);
 });
 

@@ -1,5 +1,5 @@
 // Instagram 자동 게시 스위치(마케팅 `get_publish_control`·`set_publish_control`, dashboard-api 중계).
-// 자동 게시만 끄고 초안·미디어·자동 넘김은 그대로 돈다(수동 게시는 후속 PR). 순수 계산은 `npm test`가 그대로 돈다.
+// 자동 게시만 끄고 초안·미디어·자동 넘김은 그대로 돈다(꺼진 동안은 수동 게시). 순수 계산은 `npm test`가 그대로 돈다.
 // 값은 서버가 준 것만 쓴다. 끄기는 바로 적용(A 등급), 켜기는 사람 승인(C 등급, 보류되면 승인 뒤 다시 누른다).
 import { NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from "./apiError.ts";
 
@@ -29,7 +29,7 @@ export function publishControlLine(state: PublishControlState | null | undefined
   if (!state) return { tone: "bad", title: "자동 게시 상태를 읽을 수 없음", detail: "서버가 자동 게시 스위치를 주지 않았습니다. 이 경우 서버는 안전하게 자동 게시를 막습니다." };
   const who = state.updated_by && state.updated_at ? `${state.updated_by} · ${shown(state.updated_at)}` : "바뀐 기록 없음(기본값)";
   if (state.paused) {
-    return { tone: "warn", title: "자동 게시가 꺼져 있습니다", detail: `${state.reason ? `사유: ${state.reason}. ` : ""}수동 게시로 전환 예정입니다. 초안과 미디어 생성은 계속 쓸 수 있습니다. 바꾼 사람·시각: ${who}` };
+    return { tone: "warn", title: "자동 게시가 꺼져 있습니다", detail: `${state.reason ? `사유: ${state.reason}. ` : ""}승인된 건은 사람이 직접 올리고 링크를 기록하는 수동 게시로 이어집니다. 초안과 미디어 생성은 계속 쓸 수 있습니다. 바꾼 사람·시각: ${who}` };
   }
   return { tone: "ok", title: "자동 게시 켜짐", detail: `게시는 그대로 사람 승인(C 등급)을 거칩니다. 바꾼 사람·시각: ${who}` };
 }

@@ -7,11 +7,11 @@ const state = (over: Partial<PublishControlState> = {}): PublishControlState => 
   channel: "instagram", paused: false, reason: "", updated_by: null, updated_at: null, source: "default", history: [], ...over,
 });
 
-test("상태 줄: 꺼져 있으면 사유·바꾼 사람·시각과 수동 게시 전환 예정·초안·미디어는 계속된다는 말", () => {
+test("상태 줄: 꺼져 있으면 사유·바꾼 사람·시각과 수동 게시 안내·초안·미디어는 계속된다는 말", () => {
   const line = publishControlLine(state({ paused: true, reason: "계정 정지 재고 대기", updated_by: "재헌", updated_at: "2026-11-19T01:00:00Z", source: "db" }), (s) => `at ${s}`);
   assert.equal(line.tone, "warn");
   assert.equal(line.title, "자동 게시가 꺼져 있습니다");
-  assert.match(line.detail, /수동 게시로 전환 예정/);
+  assert.match(line.detail, /수동 게시로 이어집니다/);
   assert.match(line.detail, /사유: 계정 정지 재고 대기/);
   assert.match(line.detail, /재헌 · at 2026-11-19T01:00:00Z/);
   assert.match(line.detail, /초안과 미디어 생성은 계속/);

@@ -77,6 +77,7 @@ ACTION = "publish_sns"
 SOURCE = "marketing"
 REVIEW_REJECTED = "review_rejected"  # 사람이 거절했다(옛 기록은 만료와 구분되지 않는다)
 REVIEW_TIMEOUT = "review_timeout"  # 마감까지 결정이 없어 자동 거절됐다(사람 재요청 대상)
+MANUAL_PENDING = "manual_publish_pending"  # 승인됨, 사람이 직접 올리고 링크를 기록하기를 기다린다
 NOT_READY = "ig_not_ready"  # 9007/2207027
 NOT_READY_RETRIES = 1
 CAPTION_MAX = 2200
@@ -144,7 +145,11 @@ class PublishSnsOutput(AxModel):
     limit_check_failed: bool | None = None  # 계정 한도 조회 실패(로컬 기록만으로 판단)
     pause_reason: str | None = None  # `publish_paused`일 때 사람이 적은 사유
     auto_publish_off: bool | None = None  # 자동 게시 스위치가 꺼져 있다(`publish_paused`)
-    manual_available: bool | None = None  # 수동 게시 가능 여부. 지금은 false(후속 PR에서 true)
+    manual_available: bool | None = None  # 자동 게시가 꺼져 있어 사람이 직접 올릴 수 있다
+    manual_pending: bool | None = None  # 승인됨·사람이 올린 뒤 링크를 기록하기를 기다린다
+    manual: bool | None = None  # 사람이 직접 올린 게시(링크를 사람이 기록했다)
+    posted_by: str | None = None  # 수동 게시를 기록한 사람
+    published_at: str | None = None  # 사람이 올린 시각(입력 또는 기록 시각)
 
 
 # -- 내용 해시·멱등 키
@@ -339,6 +344,10 @@ def _output(row: PendingPost) -> dict[str, Any]:
         pause_reason=info.get("pause_reason"),
         auto_publish_off=info.get("auto_publish_off"),
         manual_available=info.get("manual_available"),
+        manual_pending=info.get("manual_pending"),
+        manual=info.get("manual"),
+        posted_by=info.get("posted_by"),
+        published_at=info.get("published_at"),
     ).model_dump(exclude_none=True)
 
 
@@ -352,6 +361,15 @@ def _result_for(request: AgentRequest, row: PendingPost) -> AgentResult:
             reason_code=InputReason.HUMAN_INPUT,
             outcome="held",
             output=out | {"grade": "C"},
+            evidence=ev,
+        )
+    if row.status == APPROVED and row.result.get("manual_pending"):
+        return AgentResult(  # 자동 게시가 꺼져 있다: 사람이 직접 올리고 링크를 기록해야 닫힌다
+            meta=request.meta,
+            status=TaskStatus.INPUT_REQUIRED,
+            reason_code=InputReason.HUMAN_INPUT,
+            outcome=MANUAL_PENDING,
+            output=out,
             evidence=ev,
         )
     if row.status in (APPROVED, PUBLISHING):
@@ -462,20 +480,29 @@ async def publish_sns(
     sha = params_sha(params)
     key = idempotency_key(request.meta.context_id, data.post_draft_id, sha, attempt)
 
-    # 실제 어댑터가 없으면 승인을 받으러 가기 전에 거부한다(받아도 게시할 수 없다)
+    # 자동 게시가 꺼져 있으면(수동 게시) Instagram 어댑터를 쓰지 않는다. 스위치를 읽을 수 없으면
+    # 여기서는 자동 경로로 보고, 아래 `_pre_gate`가 `publish_control_error`로 막는다(fail-closed)
     try:
-        adapter = get_adapter()
-    except AdapterUnavailable:
-        return AgentResult(
-            meta=request.meta,
-            status=TaskStatus.FAILED,
-            outcome="adapter_unavailable",
-            output={
-                "reason": "Instagram 어댑터 설정이 없다 (MARKETING_SNS_PROVIDER, MARKETING_IG_*)"
-            },
-        )
+        manual_mode = _paused() is not None
+    except PublishControlError:
+        manual_mode = False
+    # 자동 게시인데 실제 어댑터가 없으면 승인을 받으러 가기 전에 거부한다(받아도 게시할 수 없다)
+    adapter: InstagramAdapter | None = None
+    if not manual_mode:
+        try:
+            adapter = get_adapter()
+        except AdapterUnavailable:
+            return AgentResult(
+                meta=request.meta,
+                status=TaskStatus.FAILED,
+                outcome="adapter_unavailable",
+                output={
+                    "reason": "Instagram 어댑터 설정이 없다 "
+                    "(MARKETING_SNS_PROVIDER, MARKETING_IG_*)"
+                },
+            )
     if data.media_kind == "carousel":
-        if not getattr(adapter, "supports_carousel", False):
+        if adapter is not None and not getattr(adapter, "supports_carousel", False):
             return AgentResult(
                 meta=request.meta,
                 status=TaskStatus.FAILED,
@@ -503,13 +530,13 @@ async def publish_sns(
                 existing = store().get(key) or existing
             return _result_for(request, existing)
 
-        refused, _flags = await _pre_gate(adapter)
+        refused, gate_flags = await _pre_gate(adapter)
         if refused:  # 중단 중이거나 24시간 상한이다. 승인을 받으러 가지 않는다
             return AgentResult(
                 meta=request.meta,
                 status=TaskStatus.FAILED,
                 outcome=refused,
-                output={"reason": refused, **_flags},
+                output={"reason": refused, **gate_flags},
             )
         meta = request.meta.model_copy(update={"idempotency_key": key})
         decision = await execute(
@@ -558,6 +585,8 @@ async def publish_sns(
         )
         if not store().create(row):  # 동시에 같은 요청이 먼저 들어갔다
             return _result_for(request, store().get(key) or row)
+        if gate_flags.get("auto_publish_off"):  # 승인 대기 중에도 수동 게시 예정임을 보여 준다
+            store().update(key, result=dict(gate_flags))
         if row.status == APPROVED:
             await _run_publish(row)
         return _result_for(request, store().get(key) or row)
@@ -1037,6 +1066,37 @@ def confirm_ai_label(
     return done
 
 
+def finish_manual(row: PendingPost, record: dict[str, Any], confirmed_by: str) -> bool:
+    """수동 게시 완료를 기록한다: `approved` → `publishing` → `published`(compare-and-swap).
+
+    `record`는 사람이 입력한 값(permalink·published_at·posted_by)이다. 같은 transition 한 번에
+    기록 전체를 적어 두므로 도중에 멈춰도 `recover_interrupted`가 이어서 닫는다. 이긴 쪽만 True.
+    """
+    stamp = _now().isoformat()
+    result = {
+        **row.result,
+        **record,
+        "manual": True,
+        "manual_pending": False,
+        "provider": "manual",
+        "manual_recorded_at": stamp,
+        "ai_label_confirmed": True,
+        "ai_label_check": "human_confirmed",
+        "ai_label_warning": None,
+        "ai_label_review": {
+            "status": LABEL_CONFIRMED,
+            "confirmed_by": confirmed_by,
+            "confirmed_at": stamp,
+        },
+    }
+    result = {k: v for k, v in result.items() if v is not None}
+    key = row.idempotency_key
+    if not store().transition(key, APPROVED, PUBLISHING, result=result):
+        return False
+    _close(row, PUBLISHING, PUBLISHED, None, result=result)
+    return True
+
+
 def _confirm_after_hours() -> float:
     try:
         hours = float(os.getenv(LABEL_CONFIRM_HOURS_ENV, ""))
@@ -1084,9 +1144,10 @@ def _halted() -> bool:
 
 
 def _paused() -> dict[str, Any] | None:
-    """`publish_paused`: 사람이 자동 게시 스위치를 껐다.
+    """자동 게시 스위치가 꺼져 있는지. 꺼졌으면 수동 게시 표시(flags), 아니면 None.
 
-    수동 게시는 후속 PR이다. 중지가 아니면 None, 사유는 표시용.
+    꺼진 동안 승인된 건은 자동으로 올리지 않고 `approved`로 두어 사람이 직접 올리고 링크를
+    기록하게 한다(`manual_pending`). 사유는 표시용.
 
     매 호출마다 DB를 읽으므로 재시작 없이 반영된다. halt 기록은 남기지 않는다(풀기도 사람이 한다).
     DB를 읽을 수 없으면 `PublishControlError`(fail-closed).
@@ -1097,7 +1158,7 @@ def _paused() -> dict[str, Any] | None:
         raise PublishControlError("publish_control_unreadable") from None
     if not control.paused:
         return None
-    flags: dict[str, Any] = {"auto_publish_off": True, "manual_available": False}
+    flags: dict[str, Any] = {"auto_publish_off": True, "manual_available": True}
     if control.reason:
         flags["pause_reason"] = control.reason
     return flags
@@ -1128,12 +1189,24 @@ async def _limit_check(adapter: InstagramAdapter) -> tuple[str | None, dict[str,
     return None, flags
 
 
-async def _pre_gate(adapter: InstagramAdapter) -> tuple[str | None, dict[str, Any]]:
-    """승인 요청 전 점검: 중단 상태, 24시간 상한."""
+def _local_limit_check() -> str | None:
+    """Graph 호출 없이 로컬 기록(수동 게시 포함)만으로 보는 24시간 상한."""
+    used = store().count_posts_since(_now() - DAILY_WINDOW)
+    return "daily_limit_reached" if used >= config().max_posts_per_24h else None
+
+
+async def _pre_gate(adapter: InstagramAdapter | None) -> tuple[str | None, dict[str, Any]]:
+    """승인 요청 전 점검: 자동 게시 꺼짐(수동 게시), 중단 상태, 24시간 상한.
+
+    꺼져 있으면 Graph를 부르지 않는다. 승인 요청은 그대로 만들고(수동 게시도 사람 승인 C등급),
+    로컬 기록만으로 상한을 본다. 이때 두 번째 값(수동 게시 표시)은 대기 건에 남는다.
+    """
     try:
         paused = _paused()
         if paused is not None:
-            return "publish_paused", paused
+            return _local_limit_check(), paused
+        if adapter is None:
+            return "adapter_unavailable", {}
         if _halted():
             return "publish_halted", {}
         return await _limit_check(adapter)
@@ -1144,8 +1217,26 @@ async def _pre_gate(adapter: InstagramAdapter) -> tuple[str | None, dict[str, An
 
 
 async def _run_publish(row: PendingPost) -> None:
-    """`approved` 건을 게시한다. `execute()`가 `executed`를 돌려준 뒤에만 호출된다."""
+    """`approved` 건을 게시한다. `execute()`가 `executed`를 돌려준 뒤에만 호출된다.
+
+    자동 게시가 꺼져 있으면(또는 이미 수동 게시 대기면) 올리지 않고 `approved`로 둔다. 사람이 직접
+    올리고 링크를 기록하면(`finish_manual`) 그때 닫힌다. 수동 대기 건은 스위치가 다시 켜져도
+    자동으로 올리지 않는다(사람이 이미 올렸을 수 있어 두 번 올라가는 것을 막는다).
+    """
     key = row.idempotency_key
+    fresh = store().get(key) or row
+    if fresh.status != APPROVED:
+        return
+    if fresh.result.get("manual_pending"):
+        return
+    try:
+        paused = _paused()
+    except PublishControlError:
+        paused = None  # 아래 기존 점검이 `publish_control_error`로 닫는다
+    if paused is not None:
+        store().update(key, result={**fresh.result, **paused, "manual_pending": True})
+        _row_log(fresh, "sns_publish_attempt", {"op": "manual_pending"})
+        return
     try:
         adapter = get_adapter()
     except AdapterUnavailable:
@@ -1202,6 +1293,11 @@ async def recover_interrupted() -> int:
         await _run_publish(row)
         handled += 1
     for row in store().with_status(PUBLISHING):
+        if row.result.get("manual") and row.result.get("permalink"):
+            # 수동 게시 기록 도중 멈췄다: 링크까지 적은 건이라 닫는다(다시 올릴 것이 없다)
+            _close(row, PUBLISHING, PUBLISHED, None, result=row.result)
+            handled += 1
+            continue
         if not (row.publish_sent and row.container_id):
             _close(row, PUBLISHING, FAILED, "interrupted_before_publish")
         else:

@@ -4,6 +4,7 @@ import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { shortDateTime, won } from "@/lib/format";
 import { briefs, mediaKindKo, mediaPreviewUrl, type StoredBrief } from "@/lib/briefs";
 import { ApprovalPanel } from "./ApprovalPanel";
+import { ManualPublishCard, PublishLineView } from "./ManualPublishCard";
 import { approvalLink, estimateBlockKo, estimateLines, isReel, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, waitKo, PUBLISH_EXPIRY_MIN, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
 
 // 넘어온 기획안 한 건의 "미디어 만들기". 저장된 미디어 요청(종류·필드)을 서버가 그대로 실행해 초안을 만든다.
@@ -53,7 +54,8 @@ function PublishRequest({ proposalId, prepared, state, onDone }: { proposalId: s
     ? publishReasonKo(state.retry_reason_code) : null;
   return (
     <div className="space-y-2" aria-label={`${proposalId} 게시 요청`}>
-      {line && <p className={`rounded-xl px-3 py-2 ${TONE[line.tone]}`} role="status">{line.text}</p>}
+      {line && <PublishLineView line={line} tone={TONE} />}
+      {state?.status === "manual_pending" && <ManualPublishCard key={state.post_draft_id ?? "manual"} state={state} onDone={onDone} />}
       {state?.status === "held" && <ApprovalPanel key={state.review_id ?? "held"} state={state} onDone={onDone} />}
       {state?.status === "held" && <p>{link}</p>}
       {retryBlocked && <p className="text-ink-500">{retryBlocked}</p>}

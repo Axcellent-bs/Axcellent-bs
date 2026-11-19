@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 from ax_contracts.schemas.hr import (
     AnswerHandoverQuestionOutput,
@@ -1084,6 +1084,40 @@ async def set_publish_control(body: PublishControlBody, request: Request) -> dic
 
 
 _DRAFT_ID = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+
+
+class ManualPublishBody(BaseModel):
+    permalink: str = Field(default="", max_length=500)
+    ai_label_confirmed: StrictBool
+    published_at: str | None = Field(default=None, max_length=64)  # 사람이 올린 시각(시각대 포함)
+
+
+@router.get("/marketing/manual-publish/{post_draft_id}")
+async def get_manual_publish_package(post_draft_id: str = Path(pattern=_DRAFT_ID)) -> dict:
+    """수동 게시 안내 패키지(승인된 캡션·해시태그·AI 표시 문구·미디어 정보). 읽기는 누구나."""
+    _no_org_in_mock()
+    return ok(await marketing_client.manual_publish_package_get(post_draft_id))
+
+
+@router.post("/marketing/manual-publish/{post_draft_id}/complete")
+async def complete_manual_publish(
+    body: ManualPublishBody, request: Request, post_draft_id: str = Path(pattern=_DRAFT_ID)
+) -> dict:
+    """사람이 Instagram에 직접 올린 건을 게시물 링크와 함께 완료로 기록한다. 사람 토큰이 필요하다.
+
+    링크가 비었거나 형식이 틀리면 거절하고 게시 완료로 넘기지 않는다.
+    링크가 실제로 있는 게시물인지는 확인하지 못한다. 기록한 사람은 토큰에서만 채운다.
+    """
+    _no_org_in_mock()
+    return ok(
+        await marketing_client.manual_publish_complete(
+            post_draft_id,
+            body.permalink,
+            body.ai_label_confirmed,
+            body.published_at,
+            request.state.human,
+        )
+    )
 
 
 @router.post("/marketing/outage-sns-drafts/{post_draft_id}/media")

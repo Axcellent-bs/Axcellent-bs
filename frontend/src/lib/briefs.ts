@@ -3,6 +3,7 @@ import { writeAuth } from "./api";
 import { DASHBOARD_API_URL } from "./env";
 import type { MergeAnswer } from "./outageMerge";
 import type { OutageMediaAnswer, OutageMediaFlow } from "./outageMedia";
+import type { ManualCompleteAnswer, ManualPackageAnswer } from "./manualPublish";
 import type { PublishControlAnswer } from "./publishControl";
 import type { BriefMediaAnswer, MediaEstimate, PreparedMedia, PublishAnswer, PublishState } from "./briefMedia";
 
@@ -213,6 +214,33 @@ export async function setPublishControl(paused: boolean, reason: string): Promis
   return json.data as PublishControlAnswer;
 }
 
+const manualPath = (postDraftId: string) => `/api/dashboard/marketing/manual-publish/${encodeURIComponent(postDraftId)}`;
+
+/** 수동 게시 안내 패키지 읽기(승인된 캡션·해시태그·AI 표시 문구·미디어 정보). 오류는 상태 코드만 담아 던진다 */
+export async function getManualPublishPackage(postDraftId: string): Promise<ManualPackageAnswer> {
+  const res = await fetch(`${DASHBOARD_API_URL}${manualPath(postDraftId)}`, { cache: "no-store" });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
+  return json.data as ManualPackageAnswer;
+}
+
+/**
+ * 사람이 직접 올린 건을 게시 완료로 기록한다(사람 토큰). 링크는 필수이고 서버가 형식·중복을 검사한다.
+ * 기록한 사람 이름은 서버가 토큰에서 채운다(여기서 보내지 않는다). 오류는 상태 코드와 코드만 담아 던진다.
+ */
+export async function completeManualPublish(postDraftId: string, permalink: string, aiLabelConfirmed: boolean): Promise<ManualCompleteAnswer> {
+  const path = `${manualPath(postDraftId)}/complete`;
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    body: JSON.stringify({ permalink, ai_label_confirmed: aiLabelConfirmed }),
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data) throw failureError(json, res.status); // 문구는 `manualRecordErrorKo`가 코드로 정한다
+  return json.data as ManualCompleteAnswer;
+}
+
 /** 준비된 미디어 초안의 미리보기 주소(AI 표시를 입힌 결과 파일). `version`은 파일이 바뀌면 새로 받게 하는 값이다 */
 export const mediaPreviewUrl = (proposalId: string, version: string | null) =>
   `${DASHBOARD_API_URL}${mediaPath(proposalId)}/preview${version ? `?v=${encodeURIComponent(version.slice(0, 12))}` : ""}`;
@@ -299,6 +327,8 @@ export const briefs = {
   handoff,
   makeMedia,
   requestPublish,
+  getManualPublishPackage,
+  completeManualPublish,
   makeOutageMedia,
   requestOutagePublish,
 };
