@@ -37,6 +37,7 @@ from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutpu
 from marketing_agent import (
     brief_media,
     brief_publish,
+    manual_publish,
     outage_sns_media,
     publish_control,
     shop_client,
@@ -1168,6 +1169,14 @@ async def set_publish_control_skill(request: AgentRequest) -> AgentResult:
     return await publish_control.set_publish_control(request, from_decision=_from_decision)
 
 
+async def get_manual_publish_package_skill(request: AgentRequest) -> AgentResult:
+    return await manual_publish.get_manual_publish_package(request)
+
+
+async def complete_manual_publish_skill(request: AgentRequest) -> AgentResult:
+    return await manual_publish.complete_manual_publish(request, from_decision=_from_decision)
+
+
 async def publish_sns_skill(request: AgentRequest) -> AgentResult:
     return await publish_sns(request, STATE.sns)
 
@@ -1335,6 +1344,8 @@ HANDLERS = {
     "publish_sns": publish_sns_skill,
     "get_publish_control": get_publish_control_skill,
     "set_publish_control": set_publish_control_skill,
+    "get_manual_publish_package": get_manual_publish_package_skill,
+    "complete_manual_publish": complete_manual_publish_skill,
     "cancel_campaign": cancel_campaign,
     "generate_media": generate_media_skill,
     "prepare_sns_post_from_media": prepare_sns_post_from_media_skill,

@@ -48,6 +48,15 @@ action = "set_publish_control"
 owner = "marketing"
 base_grade = "A"
 
+# 수동 게시 완료 기록. 자동 게시가 꺼져 사람이 Instagram에 직접 올린 뒤 링크를 적어 닫는 일이다.
+# 공개 자체는 publish_sns(C)에서 사람 승인을 이미 받았고, 이 액션은 외부로 아무것도 보내지 않고 게시 대기
+# 건의 상태·기록만 바꾼다. 코드가 링크 형식·중복·대상 상태·AI 표시 확인을 거절하므로 B(교차검증자 필요)가
+# 아니라 A다. 사람 이름(posted_by)은 대시보드 API가 토큰에서 채워 보내고 요청자는 owner(마케팅)다
+[[actions]]
+action = "complete_manual_publish"
+owner = "marketing"
+base_grade = "A"
+
 # 캠페인 예산 집행. 재무는 비용을 승인·반려하지 않는다(멘토 피드백, 2026-11-06).
 # 재무는 남은 예산·실패 이력·현금으로 의견만 내고(마케팅이 근거로 붙인다), 집행 여부는 금액 규칙과 사람이 정한다.
 # 안전 레이어 코드 규칙(건당·하루 누적, thresholds.toml)을 통과하면 B로 실행하고, 넘으면 C로 사람이 본다

@@ -1,5 +1,6 @@
 // 기획안 "미디어 만들기"의 응답 모양과 화면 문구. 숫자·상태는 마케팅 서버가 준 값만 쓴다(지어내지 않는다).
 // 이 파일은 순수 계산만 한다(화면·환경 값을 가져오지 않음): `npm test`(node --test)에서 그대로 돈다.
+import { safePermalink } from "./manualPublish.ts";
 import { NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from "./apiError.ts";
 
 /** 지금 요청 초안으로 만들 때의 예상 비용·상한. 마케팅이 조회 때 단가표·장부에서 계산한다 */
@@ -146,7 +147,7 @@ export function mediaHttpErrorKo(status: number | undefined, code?: string | nul
 // 진행을 눌러야 게시된다. 글·파일은 서버가 보관본에서 읽는다(화면은 기획안 번호만 보낸다).
 
 /** rejected = 사람이 거절, expired = 승인 시간(10분)이 지나 자동 거절(사람이 다시 요청할 수 있다) */
-export type PublishStatus = "not_requested" | "held" | "publishing" | "published" | "rejected" | "expired" | "failed" | "unknown";
+export type PublishStatus = "not_requested" | "held" | "publishing" | "manual_pending" | "published" | "rejected" | "expired" | "failed" | "unknown";
 
 /** 서버가 승인 대기 저장소에서 읽어 준 게시 요청 상태. 옛 서버는 이 칸이 없다 */
 export interface PublishState {
@@ -173,12 +174,22 @@ export interface PublishState {
   /** true일 때만 "다시 요청" 버튼을 둔다(만료로 닫힌 건) */
   can_retry?: boolean;
   retry_reason_code?: string | null;
+  // 수동 게시(자동 게시가 꺼진 동안 사람이 직접 올리고 링크를 기록). 해당할 때만 온다
+  post_draft_id?: string;
+  /** 승인됐고 사람이 올린 뒤 링크를 기록하기를 기다린다(status=manual_pending) */
+  manual_pending?: boolean;
+  /** 사람이 직접 올린 게시(링크를 사람이 기록했다) */
+  manual?: boolean;
+  posted_by?: string | null;
+  published_at?: string | null;
+  /** 승인 대기 중인데 자동 게시가 꺼져 있다(승인되면 수동 게시로 이어진다) */
+  auto_publish_off?: boolean;
 }
 
 export interface PublishAnswer {
   status: string;
   outcome: string | null;
-  output: { publish?: PublishState | null; review_id?: string; pause_reason?: string; auto_publish_off?: boolean; manual_available?: boolean } | null;
+  output: { publish?: PublishState | null; review_id?: string; pause_reason?: string; auto_publish_off?: boolean; manual_available?: boolean; manual_pending?: boolean } | null;
 }
 
 export const PUBLISH_EXPIRY_MIN = 10;
@@ -194,7 +205,7 @@ const PUBLISH_FAIL_KO: Record<string, string> = {
   daily_limit_reached: "24시간 게시 상한에 도달해 지금은 요청할 수 없습니다. 나중에 다시 시도해 주세요.",
   publish_halted: "게시가 중단된 상태라 요청할 수 없습니다. 담당자 확인이 필요합니다.",
   limits_config_error: "서버의 게시 한도 설정을 읽을 수 없어 요청하지 않았습니다.",
-  publish_paused: "자동 게시가 꺼져 있어 요청할 수 없습니다(수동 게시로 전환 예정). 초안과 미디어 생성은 계속 쓸 수 있습니다. 담당자 확인이 필요합니다.",
+  publish_paused: "자동 게시가 꺼져 있습니다. 초안과 미디어 생성은 계속 쓸 수 있습니다. 담당자 확인이 필요합니다.",
   publish_control_error: "서버의 자동 게시 스위치를 읽을 수 없어 안전하게 요청하지 않았습니다. 초안과 미디어 생성은 계속 쓸 수 있습니다. 담당자 확인이 필요합니다.",
   adapter_unavailable: "서버에 Instagram 게시 설정이 없어 요청하지 않았습니다. 승인을 받아도 게시할 수 없는 상태입니다.",
   execute_rejected: "안전 장치가 이 게시 요청을 거절했습니다.",
@@ -217,7 +228,7 @@ const PUBLISH_FAILURE_KO: Record<string, string> = {
   review_timeout: "승인 시간이 지나 자동으로 닫혔습니다.",
   daily_limit_reached: "24시간 게시 상한에 도달해 게시하지 못했습니다.",
   publish_halted: "게시가 중단돼 게시하지 못했습니다.",
-  publish_paused: "승인 뒤 자동 게시가 꺼져 게시하지 않았습니다(수동 게시로 전환 예정). 자동 게시가 켜진 뒤 새로 요청해야 합니다.",
+  publish_paused: "게시 도중 자동 게시가 꺼져 자동으로 올리지 않았습니다. 이 건은 닫혔습니다. 새로 요청하면 수동 게시로 안내합니다.",
   publish_control_error: "자동 게시 스위치를 읽을 수 없어 안전하게 게시하지 않았습니다. 담당자 확인이 필요합니다.",
   adapter_unavailable: "서버에 Instagram 게시 설정이 없어 게시하지 못했습니다.",
 };
@@ -225,18 +236,28 @@ const PUBLISH_FAILURE_KO: Record<string, string> = {
 export const publishReasonKo = (code: string | null | undefined): string =>
   (code && PUBLISH_FAIL_KO[code]) || `게시를 요청하지 못했습니다. 잠시 뒤 다시 시도해 주세요${code ? ` (${code})` : ""}.`;
 
-export interface PublishLine { tone: "info" | "ok" | "warn" | "bad"; text: string }
+export interface PublishLine {
+  tone: "info" | "ok" | "warn" | "bad";
+  text: string;
+  /** 게시된 건의 Instagram 링크(형식이 맞는 값만). 있으면 화면이 새 탭 링크로 건다 */
+  link?: string;
+}
 
 /** 서버가 준 게시 요청 상태를 화면 한 줄로. 요청 전(not_requested)이면 null */
 export function publishStatusLine(p: PublishState | null | undefined): PublishLine | null {
   if (!p) return null;
   switch (p.status) {
     case "held":
-      return { tone: "info", text: `게시 승인 대기 중입니다. 사람이 ${PUBLISH_EXPIRY_MIN}분 안에 승인해야 게시되고, 시간이 지나면 만료됩니다.` };
+      return { tone: "info", text: `게시 승인 대기 중입니다. 사람이 ${PUBLISH_EXPIRY_MIN}분 안에 승인해야 게시되고, 시간이 지나면 만료됩니다.${p.auto_publish_off ? " 자동 게시가 꺼져 있어 승인되면 사람이 직접 올리는 수동 게시로 이어집니다." : ""}` };
+    case "manual_pending":
+      return { tone: "info", text: "승인됐습니다. 자동 게시가 꺼져 있어 사람이 Instagram에 직접 올린 뒤 게시물 링크를 기록해야 게시 완료로 닫힙니다." };
     case "publishing":
       return { tone: "info", text: "승인됐습니다. Instagram에 게시하는 중입니다." };
-    case "published":
-      return { tone: "ok", text: "Instagram에 게시됐습니다." };
+    case "published": {
+      const link = safePermalink(p.permalink) ?? undefined;
+      if (p.manual) return { tone: "ok", text: `직접 게시됨${p.posted_by ? ` (${p.posted_by} 기록)` : ""}. 링크는 사람이 입력한 값이며 시스템이 확인하지 않았습니다.`, link };
+      return { tone: "ok", text: "Instagram에 게시됐습니다.", link };
+    }
     case "rejected":
       return { tone: "warn", text: p.rejected_cause === "human"
         ? "사람이 거절했습니다. 이 초안은 다시 요청할 수 없습니다."
@@ -258,7 +279,8 @@ export interface PublishResult { kind: PublishResultKind; text: string }
 /** 게시 요청 응답을 화면 문구로 */
 export function publishResultKo(answer: PublishAnswer): PublishResult {
   if (answer.status === "completed" && answer.outcome === "requested") {
-    return { kind: "requested", text: `게시 요청을 보냈습니다. 아직 게시되지 않았습니다. 사람이 ${PUBLISH_EXPIRY_MIN}분 안에 승인 화면에서 진행을 눌러야 합니다.` };
+    const manual = answer.output?.auto_publish_off ? " 자동 게시가 꺼져 있어 승인 뒤 사람이 직접 올리고 링크를 기록하는 수동 게시로 이어집니다." : "";
+    return { kind: "requested", text: `게시 요청을 보냈습니다. 아직 게시되지 않았습니다. 사람이 ${PUBLISH_EXPIRY_MIN}분 안에 승인 화면에서 진행을 눌러야 합니다.${manual}` };
   }
   if (answer.status === "completed" && answer.outcome === "already_requested") {
     return { kind: "already", text: "이미 요청된 건입니다. 새로 요청하지 않았습니다." };

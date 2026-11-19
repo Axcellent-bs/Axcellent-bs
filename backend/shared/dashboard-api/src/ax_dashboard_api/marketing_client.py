@@ -223,6 +223,73 @@ async def publish_control_set(paused: bool, reason: str, human: str) -> dict[str
     return out
 
 
+def manual_publish_context(post_draft_id: str) -> str:
+    return f"manual_publish_{post_draft_id}"[:128]
+
+
+async def manual_publish_package_get(post_draft_id: str) -> dict[str, Any]:
+    """수동 게시 안내용 복사 패키지(`get_manual_publish_package`, 읽기). 대기 건이 없으면 404."""
+    out = await call(
+        "get_manual_publish_package",
+        {"post_draft_id": post_draft_id},
+        campaign_id=manual_publish_context(post_draft_id),
+        key=f"ui:manual-package:{uuid.uuid4().hex[:12]}",
+    )
+    if out["status"] == TaskStatus.FAILED.value:
+        if out["outcome"] == "not_manual_pending":
+            raise ApiError(404, "NOT_FOUND", "수동 게시 대기 건이 없다")
+        if out["outcome"] == "invalid_input":
+            raise ApiError(400, "INVALID_INPUT", "수동 게시 입력이 맞지 않는다 (invalid_input)")
+    return out
+
+
+# 완료 기록에서 요청이 틀렸거나 상태가 맞지 않아 거절된 결과. 화면이 코드별 문구로 바꾼다
+MANUAL_PUBLISH_REFUSALS = {
+    "invalid_permalink": (400, "INVALID_PERMALINK"),
+    "ai_label_not_confirmed": (400, "AI_LABEL_NOT_CONFIRMED"),
+    "published_at_in_future": (400, "INVALID_INPUT"),
+    "invalid_input": (400, "INVALID_INPUT"),
+    "not_found": (404, "NOT_FOUND"),
+    "not_manual_pending": (409, "NOT_MANUAL_PENDING"),
+    "already_published": (409, "ALREADY_PUBLISHED"),
+    "permalink_already_used": (409, "PERMALINK_ALREADY_USED"),
+}
+
+
+async def manual_publish_complete(
+    post_draft_id: str,
+    permalink: str,
+    ai_label_confirmed: bool,
+    published_at: str | None,
+    human: str,
+) -> dict[str, Any]:
+    """사람이 직접 올린 건을 게시 완료로 기록한다(`complete_manual_publish`, 안전 관문 A등급).
+
+    `human`은 사람 토큰에서 채운 이름이다(본문에서 받지 않는다). 링크 형식·중복·대상 상태·AI 표시
+    확인은 마케팅이 검사해 거절하고, 여기서는 그 거절을 HTTP 오류로 바꾼다.
+    링크 진위는 확인하지 않는다.
+    같은 건은 키가 같아 다시 보내도 한 번만 기록된다(마케팅이 대기 건 키로 정한다).
+    """
+    payload: dict[str, Any] = {
+        "post_draft_id": post_draft_id,
+        "permalink": permalink,
+        "ai_label_confirmed": ai_label_confirmed,
+        "posted_by": human,
+    }
+    if published_at:
+        payload["published_at"] = published_at
+    out = await call(
+        "complete_manual_publish",
+        payload,
+        campaign_id=manual_publish_context(post_draft_id),
+        key=f"ui:manual-complete:{post_draft_id}",
+    )
+    if out["status"] == TaskStatus.FAILED.value and out["outcome"] in MANUAL_PUBLISH_REFUSALS:
+        status, code = MANUAL_PUBLISH_REFUSALS[out["outcome"]]
+        raise ApiError(status, code, f"게시 완료를 기록할 수 없다 ({out['outcome']})")
+    return out
+
+
 # 장애 초안 이미지·게시 요청에서 요청 자체가 틀린 실패만 HTTP 오류로 바꾼다. 막힘·상한·보류는
 # 판단 결과
 OUTAGE_MEDIA_FAILURES = {

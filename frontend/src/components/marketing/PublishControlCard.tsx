@@ -7,7 +7,7 @@ import { approvalLink } from "@/lib/briefMedia";
 import { useVisibleInterval } from "@/lib/visibleInterval";
 import { publishControlHttpErrorKo, publishControlLine, publishControlResultKo, type PublishControlResult, type PublishControlState } from "@/lib/publishControl";
 
-// Instagram 자동 게시 스위치. 계정이 정지돼도 초안·미디어·자동 넘김은 그대로 돌고 자동 게시만 끈다(수동 게시는 후속 PR).
+// Instagram 자동 게시 스위치. 계정이 정지돼도 초안·미디어·자동 넘김은 그대로 돌고 자동 게시만 끈다. 꺼진 동안은 승인된 건을 사람이 직접 올리고 링크를 기록한다(수동 게시).
 // - 현재 상태·사유·바꾼 사람·시각은 서버가 준 값만 보여 준다(못 받으면 게시 가능이라고 짐작하지 않는다).
 // - 끄기는 누르면 바로 적용된다(A 등급). 켜기는 사람 승인(C 등급)이 한 번 들어가므로 보류로 올 수 있고,
 //   승인 화면에서 승인한 뒤 같은 버튼을 다시 누르면 적용된다. 이 화면이 대신 승인하지 않는다.
@@ -65,7 +65,7 @@ export function PublishControlCard() {
       <div>
         <h2 className="text-lg font-semibold">Instagram 자동 게시</h2>
         <p className="mt-1 text-xs text-ink-500">
-          계정 문제가 있을 때 자동 게시만 끌 수 있습니다(수동 게시로 전환 예정). 초안·미디어 요청·미디어 생성·자동 넘김은 멈추지 않습니다. 끄기는 바로 적용되고, 다시 켜기는 사람 승인이 한 번 필요합니다.
+          계정 문제가 있을 때 자동 게시만 끌 수 있습니다. 꺼 두면 승인된 건은 사람이 Instagram에 직접 올리고 게시물 링크를 기록하는 수동 게시로 이어집니다. 초안·미디어 요청·미디어 생성·자동 넘김은 멈추지 않습니다. 끄기는 바로 적용되고, 다시 켜기는 사람 승인이 한 번 필요합니다.
         </p>
       </div>
       {!loaded && <p className="text-sm text-ink-500">불러오는 중</p>}

@@ -154,16 +154,17 @@ def _graph_calls(adapter: MockInstagramAdapter) -> int:
 
 
 @pytest.mark.asyncio
-async def test_paused_refuses_before_approval_and_never_touches_the_adapter(
+async def test_paused_still_asks_for_approval_and_never_touches_the_adapter(
     gate: FakeGate, adapter: MockInstagramAdapter, ctl: Path
 ) -> None:
     _pause(ctl)
     result = await publisher.publish_sns(_request())
-    assert result.status == TaskStatus.FAILED and result.outcome == "publish_paused"
+    # 거절하지 않고 사람 승인(C)을 받으러 간다. 수동 게시로 이어진다
+    assert result.status == TaskStatus.INPUT_REQUIRED and result.outcome == "held"
     assert result.output["pause_reason"] == "계정 정지 재고 대기"
     assert result.output["auto_publish_off"] is True  # 자동 게시만 꺼졌다
-    assert result.output["manual_available"] is False  # 수동 게시는 후속 PR
-    assert gate.calls == []  # 승인 요청을 만들지 않는다
+    assert result.output["manual_available"] is True
+    assert len(gate.calls) == 1
     assert _graph_calls(adapter) == 0
     assert publisher.store().halt_latest() is None  # halt 상태를 새로 세우지 않는다
 
@@ -197,7 +198,7 @@ async def test_env_default_pauses_only_while_there_is_no_row(
 ) -> None:
     monkeypatch.setenv(DEFAULT_ENV, "true")
     result = await publisher.publish_sns(_request())
-    assert result.outcome == "publish_paused" and "초기 기본값" in result.output["pause_reason"]
+    assert result.outcome == "held" and "초기 기본값" in result.output["pause_reason"]
     publisher.store().control_set("instagram", False, "", "tester")  # 행이 생기면 행이 우선
     assert (await publisher.publish_sns(_request())).status == TaskStatus.INPUT_REQUIRED
 
@@ -206,7 +207,7 @@ async def test_env_default_pauses_only_while_there_is_no_row(
 
 
 @pytest.mark.asyncio
-async def test_pause_after_approval_blocks_media_publish(
+async def test_pause_after_approval_keeps_the_row_approved_for_manual_publish(
     gate: FakeGate, adapter: MockInstagramAdapter, ctl: Path
 ) -> None:
     held = await publisher.publish_sns(_request())
@@ -215,10 +216,11 @@ async def test_pause_after_approval_blocks_media_publish(
     gate.approve_all()
     await publisher.apply_decision(_row(), "approved", "event")
     row = _row()
-    assert (row.status, row.failure_code) == (pending.FAILED, "publish_paused")
-    assert adapter.calls["media_publish"] == 0
+    assert (row.status, row.failure_code) == (pending.APPROVED, None)  # 닫지 않고 수동 대기
+    assert _graph_calls(adapter) == 0
     assert row.result["pause_reason"] == "계정 정지 재고 대기"
-    assert row.result["auto_publish_off"] is True and row.result["manual_available"] is False
+    assert row.result["auto_publish_off"] is True and row.result["manual_available"] is True
+    assert row.result["manual_pending"] is True
     assert publisher.store().halt_latest() is None
 
 
@@ -248,7 +250,7 @@ async def test_switching_takes_effect_without_restart_and_resumes(
 ) -> None:
     assert (await publisher.publish_sns(_request("spd_1"))).status == TaskStatus.INPUT_REQUIRED
     _pause(ctl)
-    assert (await publisher.publish_sns(_request("spd_2"))).outcome == "publish_paused"
+    assert (await publisher.publish_sns(_request("spd_2"))).output["auto_publish_off"] is True
     _resume(ctl)
     assert (await publisher.publish_sns(_request("spd_2"))).status == TaskStatus.INPUT_REQUIRED
 
@@ -265,7 +267,7 @@ async def test_direct_sql_update_by_another_connection_is_picked_up(
         " VALUES('instagram',1,'긴급','수동',datetime('now'))"
     )
     other.commit()
-    assert (await publisher.publish_sns(_request("spd_2"))).outcome == "publish_paused"
+    assert (await publisher.publish_sns(_request("spd_2"))).output["auto_publish_off"] is True
     other.execute("UPDATE sns_publish_control SET paused = 0 WHERE channel = 'instagram'")
     other.commit()
     other.close()
@@ -278,7 +280,7 @@ async def test_pause_survives_a_restart(
 ) -> None:
     _pause(ctl)
     publisher.reset_runtime()
-    assert (await publisher.publish_sns(_request())).outcome == "publish_paused"
+    assert (await publisher.publish_sns(_request())).output["auto_publish_off"] is True
 
 
 # -- fail-closed ---------------------------------------------------------------------

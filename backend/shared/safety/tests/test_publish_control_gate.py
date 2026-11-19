@@ -29,3 +29,15 @@ async def test_only_marketing_can_request_it_and_a_missing_flag_is_held(gate: Ga
     assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
     missing = await gate.execute(act("set_publish_control", "marketing", "pc-4", paused=True))
     assert (missing.grade, missing.status) == ("C", "held")  # resume 필드가 없으면 fail-closed
+
+
+@pytest.mark.asyncio
+async def test_complete_manual_publish_is_a_and_only_marketing_can_request_it(
+    gate: Gate, act
+) -> None:
+    done = await gate.execute(
+        act("complete_manual_publish", "marketing", "mp-1", post_draft_id="spd_1", posted_by="재헌")
+    )
+    assert (done.grade, done.status) == ("A", "executed")
+    other = await gate.execute(act("complete_manual_publish", "support", "mp-2"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)

@@ -52,7 +52,7 @@ PendingGet = Callable[[str], pend.PendingPost | None]
 # 대기 건 상태 → 화면에 보이는 상태
 _STATUS = {
     pend.HELD: "held",  # 승인 대기
-    pend.APPROVED: "publishing",  # 승인됨, 게시 중
+    pend.APPROVED: "publishing",  # 승인됨, 게시 중(자동 게시가 꺼져 있으면 아래에서 manual_pending)
     pend.PUBLISHING: "publishing",
     pend.PUBLISHED: "published",
     pend.REJECTED: "rejected",  # 사람 거절(만료는 failure_code로 가려 "expired"로 낸다)
@@ -222,6 +222,22 @@ def publish_state(
     return state_from_chain(base, data, context_id_for(record.proposal_id), get)
 
 
+def _manual_fields(row: pend.PendingPost, data: dict, manual_pending: bool) -> dict[str, Any]:
+    """수동 게시 관련 칸. 해당할 때만 넣는다(자동 게시 건의 응답 모양은 그대로)."""
+    manual_done = row.status == pend.PUBLISHED and bool(row.result.get("manual"))
+    if manual_pending or manual_done:
+        return {
+            "post_draft_id": data["post_draft_id"],
+            "manual_pending": manual_pending,
+            "manual": manual_done,
+            "posted_by": row.result.get("posted_by") if manual_done else None,
+            "published_at": row.result.get("published_at") if manual_done else None,
+        }
+    if row.status == pend.HELD and row.result.get("auto_publish_off"):
+        return {"auto_publish_off": True}  # 승인되면 자동 게시 대신 수동 게시로 안내한다
+    return {}
+
+
 def state_from_chain(
     base: dict[str, Any], data: dict, context_id: str, get: PendingGet | None = None
 ) -> dict[str, Any]:
@@ -238,18 +254,25 @@ def state_from_chain(
     cause = rejected_cause(row)
     if row.status == pend.REJECTED and cause is None:
         status = "expired"
+    manual_pending = row.status == pend.APPROVED and bool(row.result.get("manual_pending"))
+    if manual_pending:  # 자동 게시가 꺼져 있다: 사람이 직접 올리고 링크를 기록해야 닫힌다
+        status = "manual_pending"
     problem = retry_problem(chain, same)
-    return base | {
-        "status": status,
-        "review_id": row.review_id if row.status == pend.HELD else None,
-        "failure_code": row.failure_code,
-        "permalink": row.result.get("permalink") if row.status == pend.PUBLISHED else None,
-        "expires_at": row.result.get("review_expires_at") if row.status == pend.HELD else None,
-        "rejected_cause": cause,
-        "attempt": len(chain) - 1,
-        "can_retry": problem is None,
-        "retry_reason_code": problem if status in ("expired", "rejected") else None,
-    }
+    return (
+        base
+        | _manual_fields(row, data, manual_pending)
+        | {
+            "status": status,
+            "review_id": row.review_id if row.status == pend.HELD else None,
+            "failure_code": row.failure_code,
+            "permalink": row.result.get("permalink") if row.status == pend.PUBLISHED else None,
+            "expires_at": row.result.get("review_expires_at") if row.status == pend.HELD else None,
+            "rejected_cause": cause,
+            "attempt": len(chain) - 1,
+            "can_retry": problem is None,
+            "retry_reason_code": problem if status in ("expired", "rejected") else None,
+        }
+    )
 
 
 def _failed(request: AgentRequest, outcome: str, **output: Any) -> AgentResult:
@@ -369,11 +392,12 @@ async def submit_publish(
             await publisher.remember_expiry(held_row)
     output["publish"] = state_of()
     held = result.outcome == "held"
+    waiting = held or result.outcome == publisher.MANUAL_PENDING  # 사람이 이어서 할 일이 남은 요청
     return result.model_copy(
         update={
             "meta": request.meta,
-            "status": TaskStatus.COMPLETED if held else result.status,
-            "reason_code": None if held else result.reason_code,
+            "status": TaskStatus.COMPLETED if waiting else result.status,
+            "reason_code": None if waiting else result.reason_code,
             "outcome": "requested" if held else result.outcome,
             "output": output,
         }

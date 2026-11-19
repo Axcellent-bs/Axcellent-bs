@@ -5,6 +5,7 @@ import { briefs, outageMediaPreviewUrl, type OutageSnsDraft } from "@/lib/briefs
 import { approvalLink, estimateLines, publishStatusLine, PUBLISH_EXPIRY_MIN, type MediaResult, type PublishResult } from "@/lib/briefMedia";
 import { OUTAGE_CONFIRM_NOTES, outageBlockKo, outageHttpErrorKo, outageMediaResultKo, outagePublishResultKo, shouldRequestPublish } from "@/lib/outageMedia";
 import { ApprovalPanel } from "./ApprovalPanel";
+import { ManualPublishCard, PublishLineView } from "./ManualPublishCard";
 
 // 장애 사과·보상 글 초안 카드의 "이 초안으로 진행".
 // 1) 사람이 한 번 누르면 확인 단계(예상 비용·상한·누적, 게시는 사람 승인이 한 번 더 필요함)가 나온다.
@@ -115,7 +116,8 @@ export function OutageProceed({ draft, onDone }: { draft: OutageSnsDraft; onDone
         </div>
       )}
 
-      {line && <p className={`rounded-xl px-3 py-2 ${TONE[line.tone]}`} role="status">{line.text}</p>}
+      {line && <PublishLineView line={line} tone={TONE} />}
+      {publish?.status === "manual_pending" && <ManualPublishCard key={publish.post_draft_id ?? "manual"} state={publish} onDone={onDone} />}
       {publish?.status === "held" && <ApprovalPanel key={publish.review_id ?? "held"} state={publish} onDone={onDone} />}
       {publish?.status === "held" && <p>{link}</p>}
 
