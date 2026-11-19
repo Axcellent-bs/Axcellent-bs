@@ -69,3 +69,12 @@ def test_mock_tokens_work_only_in_mock_mode(client, monkeypatch: pytest.MonkeyPa
     assert client.post("/api/demo/incidents", json={}, headers=mock_admin).status_code == 401
     held = client.post("/api/incidents/x/holds/y", json={"approved": True}, headers=mock_human)
     assert held.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("headers", "status"), [(None, 401), (AGENT, 403), (ADMIN, 403), (HUMAN, 404)]
+)
+def test_request_step_decision_needs_human_token(client, headers, status) -> None:
+    """사람 확인·승인은 사람 토큰만. 맞는 토큰이어도 없는 의뢰면 404."""
+    r = client.post("/api/requests/wr_x/steps/c/decision", json={"approved": True}, headers=headers)
+    assert r.status_code == status

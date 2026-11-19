@@ -243,7 +243,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
             company ? (
               <>
                 <span className="shrink-0 text-[15px] font-semibold">AXcellent <span className="font-normal text-ink-500">with</span> <CompanyBrand name={company.name} siteUrl={company.siteUrl} /></span>
-                <span className="chip hidden bg-emerald-50 text-emerald-700 xl:inline-flex" title="사내망에서만 열리고 외부 접근은 막혀 있습니다">사내망 {company.network}</span>
+                <span className="chip hidden bg-emerald-50 text-emerald-700 xl:inline-flex" title="허용된 IP에서만 열립니다. 허용 목록 밖의 접근은 막혀 있습니다">접속 범위 허용 IP</span>
               </>
             ) : (
               <>
