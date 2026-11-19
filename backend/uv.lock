@@ -326,6 +326,7 @@ dependencies = [
     { name = "ax-contracts" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "pyyaml" },
     { name = "uvicorn" },
 ]
 
@@ -335,6 +336,7 @@ requires-dist = [
     { name = "ax-contracts", editable = "shared/contracts" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "pyyaml", specifier = ">=6" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
