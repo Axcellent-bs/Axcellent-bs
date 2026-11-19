@@ -319,10 +319,11 @@ def save_connection(
         raise ValueError(f"kind는 {', '.join(KINDS)} 중 하나여야 합니다")
     adapter_conf = _adapter(adapter, CONNECTION_FILE_ENV) if kind == "adapter" else None
     if tenant is not None:
-        from ax_agent_template.tenant import is_tenant
+        from ax_agent_template.tenant import is_tenant, remember
 
         if not is_tenant(tenant):
             raise ValueError(f"회사 설정이 없습니다: {tenant}")
+        remember(tenant)
     before = read_connection()
     saved = Connection(
         shop_api_url=url,
