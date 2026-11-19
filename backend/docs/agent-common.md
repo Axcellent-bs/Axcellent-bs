@@ -22,11 +22,13 @@ Oct 21, 2026 · @재현
 | `planning` | 기획 | 예진 | 8101 | 변경 요청 허브, 기획서 확정 → 개발로 넘김 |
 | `dev` | 개발 | 예진 | 8111 | PR·머지·배포, 장애-PR 연결 (2026-11-02 기획에서 분리) |
 | `support` | 고객지원 | 병환 | 8102 | 문의 응대, 클레임 판정, 개별 보상, 판매자 정산(2026-11-12 재무에서 옮김) |
-| `marketing` | 마케팅 | 재헌 | 8103 | 공지, 캠페인, 사건 보상 쿠폰 |
+| `marketing` | 마케팅 | 재현(메인1)·태윤(메인2)·예진(메인3), 재헌(서브) | 8103 | 공지, 캠페인, 사건 보상 쿠폰 |
 | `hr` | 인사 | 준하 | 8104 | 업무 기록·결정 카드, 인수인계 |
 | `finance` | 재무/정산 | 태윤 | 8105 | 장부(쿠폰·환불은 끝난 금액만 적음)·결산, 매출·PG 대사, 판매자 정산 결과 받아 보여 주기(계산·지급 요청은 고객지원), 팀 예산 |
 | `data` | 데이터분석 | 재현 | 8106 | 업무 지표 이상 탐지, 영향 분석 |
 | `infra` | 인프라 (DejaFix 래퍼) | 예진 | 8107 | 장애 진단, 롤백, 복구 확인 |
+
+> 마케팅 담당 변경(2026-11-19): 메인1 재현, 메인2 태윤, 메인3 예진, 서브 재헌. 리뷰·결정은 메인 순서대로 먼저 받고, 재헌은 서브로 같이 본다. 판매 서버(shop-api)는 그대로 재헌.
 
 **서비스 (코드만, LLM 없음)**
 
@@ -341,7 +343,7 @@ C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`s
 | infra (예진) | `diagnose_incident`, `rollback_deployment`(B), `verify_recovery` | `restart_service` |
 | data (재현) | `anomaly_detection`, `impact_analysis` | `fraud_score`, `kpi_summary` |
 | planning (예진) | `find_related_prs`, `link_incident` | `create_ticket` 등 권장, 기획서→PR 파이프라인 선택 |
-| marketing (재헌) | `draft_notice`, `publish_notice`, `end_incident_notice`, `get_notice`, `issue_coupon`(compensation, 직렬) | `draft_campaign`, `campaign_report`, `notice_check` 연동 |
+| marketing (재현·태윤·예진, 서브 재헌) | `draft_notice`, `publish_notice`, `end_incident_notice`, `get_notice`, `issue_coupon`(compensation, 직렬) | `draft_campaign`, `campaign_report`, `notice_check` 연동 |
 | support (병환) | `inquiry_draft`, `reply_send`, `compensation_request`, 문의 위젯 이벤트 | `claim_evaluate`·보상 큐(불량·반품 흐름), `refund_request`, `support.inquiry_surge`, `notice_check`, 판매자 정산(`seller_settlement*`, `confirm_settlement` C) |
 | finance (태윤) | 장부 기록: 장애 중 나간 보상 쿠폰·환불은 이벤트로, 문의 처리 결과는 총괄 호출(`record_support_cost`)로 장부에 기록 | 장부·결산(`closing_report`), 일일 대사, 판매자 정산 결과 표시(고객지원에서 받음) |
 | hr (준하) | `record_case` → memory에 사건 카드 저장 | 인수인계, 발령·교대, 온보딩, 계획 비교 |
