@@ -784,11 +784,12 @@ class DataChatService:
             _log.warning("데이터 대화 의뢰 카드 실패: %s", type(error).__name__)
             self.store.finish_turn(thread_id, LLM_FAILED, kind="error")
             return
+        # 표시 이름: 프리셋 display_names 위에 이전 보고서 저장값(읽은 name)을 덮는다
+        names = dict(resolved.preset.display_names) if resolved.preset else {}
         try:
-            names = dict(self._report_names())
+            names.update(self._report_names())
         except Exception as error:  # noqa: BLE001 - 이름은 없어도 된다
             _log.warning("이전 보고서 이름을 읽지 못함: %s", type(error).__name__)
-            names = {}
         card = request_card(text, resolved, names)
         reply = card_text(text, resolved.extract_error is not None)
         self.store.finish_turn(thread_id, reply, card=card,

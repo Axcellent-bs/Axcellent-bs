@@ -2438,7 +2438,9 @@ class TrendInsightBriefOutput(AxModel):
     gate: BriefGate | None = None
 
 
-BriefTrigger = Literal["auto", "manual"]
+# auto_retry(11/19 추가): 그날 자동 판이 LLM 상한·실패로 덜 만들어졌고 예산이 풀렸을 때 그날 한 번만
+# 자동으로 다시 만든 판 (화면 표시 "자동(다시)")
+BriefTrigger = Literal["auto", "manual", "auto_retry"]
 BriefRegenCode = Literal["daily_limit", "cooldown", "llm_budget", "in_progress", "no_new_data"]
 
 
@@ -4013,6 +4015,14 @@ class TrendMeme(AxModel):
     # 네이버 검색 배수는 위 `search` 칸이다
     instagram: MemePlatform | None = None
     web_search: MemePlatform | None = None
+    # 11/19 몫(share) 판정: 이번 기간 그 묶음 영상 수 ÷ 이번 기간 전체 숏츠 표본 수,
+    # 직전은 직전 칸들 평균 영상 수 ÷ 평균 표본 수. share_ratio = share ÷ previous_share.
+    # judged_by가 "share"면 기준(min_ratio)을 share_ratio에 쓴다.
+    # ratio·previous_videos는 그대로 채운다(화면 호환)
+    share: float | None = Field(default=None, ge=0)
+    previous_share: float | None = Field(default=None, ge=0)
+    share_ratio: float | None = Field(default=None, ge=0)
+    judged_by: Literal["share", "count"] = "count"
 
 
 class MemeSkipped(AxModel):
@@ -4448,6 +4458,8 @@ class TrendSearchRow(AxModel):
     monthly_volume: int | None = Field(default=None, ge=0)  # 검색광고 월 검색량 (PC+모바일)
     small_base: bool = False  # 검색 변화율
     shopping_small_base: bool = False  # 쇼핑 변화율
+    # 11/19: monthly_volume이 null이고 이 값이 "under_10"이면 "월 검색 10 미만" (검색광고 "< 10")
+    monthly_volume_note: Literal["under_10"] | None = None
 
 
 class TrendSearchSection(AxModel):
@@ -4630,6 +4642,8 @@ class TrendRequestCard(AxModel):
     preset: str | None = None
     cost_note: str  # "인스타 약 45번·네이버 약 6번·AI 2번"
     brief_reason: str | None = None  # 의뢰문에서 칸을 못 뽑았을 때 이유
+    # 11/19: 값이 있으면 이미 접수된 카드 (trend_report_create가 chat_thread_id와 오면 data가 적음)
+    accepted_report_id: str | None = None
 
 
 class TrendReportProgressCard(AxModel):

@@ -91,6 +91,18 @@ class Preset:
     goal: str | None = None
     # 매거진처럼 협찬 태그를 많이 다는 계정: 해시태그 "쓴 계정 수"에서만 뺀다 (섹션 3에는 그대로)
     media_accounts: tuple[str, ...] = ()
+    # 계정 표시 이름 (인스타를 못 읽었거나 레이더 저장분에 이름이 없을 때 쓴다)
+    display_names: Mapping[str, str] = field(default_factory=dict)
+
+
+def _names(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for k, v in raw.items():
+        if (acc := clean_account(str(k))) and isinstance(v, str) and v.strip():
+            out[acc] = v.strip()[:60]
+    return out
 
 
 def _strs(raw: Any) -> tuple[str, ...]:
@@ -137,6 +149,7 @@ def load_preset(name: str, folder: Path = PRESET_DIR) -> Preset | None:
         accounts=_accounts(raw.get("beauty_accounts")),
         goal=str(brief["goal"]).strip() or None if brief.get("goal") else None,
         media_accounts=_accounts(raw.get("media_accounts")),
+        display_names=_names(raw.get("display_names")),
     )  # fmt: skip
 
 
