@@ -341,18 +341,25 @@ def _write(conns: list[ToolConnection]) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = f"{target}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"  # 쓰는 곳마다 다른 임시 파일
     # 토큰·개인 키가 들어 있어 만든 사용자만 읽는다. 처음부터 0600으로 만들고 권한을 다시 맞춘다
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd: int | None = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass  # 윈도 등
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass  # 윈도 등
+        f = os.fdopen(fd, "w", encoding="utf-8")
+        fd = None  # 이제 f가 닫는다
+        with f:
             json.dump([c._row() for c in conns], f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, target)
     except BaseException:
+        if fd is not None:  # fdopen 전에 실패: 직접 닫아야 지울 수 있다(윈도)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         try:
             os.remove(tmp)
         except OSError:

@@ -373,3 +373,31 @@ def test_stale_lock_that_cannot_be_moved_waits_until_deadline(
     assert e.value.code == "busy"
     assert time.monotonic() - start < 2
     assert lock.exists()
+
+
+def test_tmp_fd_closed_when_fdopen_fails(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """임시 파일을 연 뒤 fdopen이 실패해도 fd를 닫고 임시 파일을 지운다."""
+    real_open, real_close = os.open, os.close
+    tmp_fds: list[int] = []
+    closed: list[int] = []
+
+    def spy_open(path, flags, mode=0o777):
+        fd = real_open(path, flags, mode)
+        if str(path).endswith(".tmp"):
+            tmp_fds.append(fd)
+        return fd
+
+    def spy_close(fd):
+        closed.append(fd)
+        real_close(fd)
+
+    def bad_fdopen(*_a: object, **_k: object):
+        raise OSError("fdopen 실패")
+
+    monkeypatch.setattr(tc.os, "open", spy_open)
+    monkeypatch.setattr(tc.os, "close", spy_close)
+    monkeypatch.setattr(tc.os, "fdopen", bad_fdopen)
+    with pytest.raises(OSError):
+        _save()
+    assert len(tmp_fds) == 1 and tmp_fds[0] in closed
+    assert not list(vault.parent.glob(vault.name + "*.tmp"))
