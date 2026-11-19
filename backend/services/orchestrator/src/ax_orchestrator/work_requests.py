@@ -180,6 +180,7 @@ class WorkRequests:
             "log": [{"at": stamp, "message": "의뢰를 받았다"}],
             "context_id": None,
             "thread_id": None,  # 접수한 대화 번호. 진행을 알릴 때 쓴다
+            "handoff_task_id": None,  # 사람 받은 요청에 올린 일 번호
         }
         self._save(row)
         self._trim()
@@ -226,6 +227,18 @@ class WorkRequests:
         """의뢰를 접수한 대화를 적는다 (진행 알림을 그 대화로 보낸다)."""
         row = self._row(request_id)
         row["thread_id"] = thread_id
+        self._save(row)
+
+    def note(self, request_id: str, message: str) -> None:
+        """진행 로그에 한 줄을 남긴다."""
+        row = self._row(request_id)
+        row["log"].append({"at": now().isoformat(), "message": message})
+        self._save(row)
+
+    def set_handoff(self, request_id: str, task_id: str) -> None:
+        """사람 받은 요청에 올린 일 번호를 적는다."""
+        row = self._row(request_id)
+        row["handoff_task_id"] = task_id
         self._save(row)
 
     def set_classification(self, request_id: str, **fields: Any) -> dict[str, Any]:

@@ -134,6 +134,8 @@ class AppState:
             self.manager = IncidentManager(engine, scenario_a, store=self.store)
             self.manager.restore()  # 저장된 이벤트를 올린다(진행 중이던 건은 "재시작으로 중단됨")
             self.manager.request_runner.notify = notify_thread  # 의뢰 진행을 대화로 알린다
+            # 사람에게 넘긴 의뢰를 받은 요청에 올린다. 목 모드는 올리지 않는다
+            self.manager.request_escalation.poster = None if self.mock else post_to_inbox
         else:  # 같은 이벤트 목록을 유지하면서 부서 동작만 교체
             self.manager.engine = engine
         # 인사가 보낸 에이전트 평가 진단 요청은 받자마자 진단한다(목 모드·시험은 자동 시작 안 함)
