@@ -16,6 +16,11 @@
 - `GET  /api/dashboard/auth/me` (세션 토큰) → 내 계정
 - `GET  /api/dashboard/auth/accounts` (운영자) → 계정 목록 (해시는 내보내지 않는다)
 - `POST /api/dashboard/auth/accounts` (운영자: 모든 역할 / 고객사 관리자: 일반회원만) → 계정 만들기
+- `POST /api/dashboard/auth/password` (세션 토큰) {current_password, new_password}
+  → 내 비밀번호 바꾸기. 현재 비밀번호가 틀리면 로그인 실패와 같이 센다. 성공하면 그 계정의
+  기존 세션을 모두 끊고 새 세션 토큰을 돌려준다
+- `POST /api/dashboard/auth/accounts/{id}/reset-password` {new_password}
+  (운영자: 모든 계정 / 고객사 관리자: 일반회원만) → 임시 비밀번호로 초기화, 그 계정의 세션을 끊는다
 """
 
 from __future__ import annotations
@@ -247,6 +252,15 @@ class AccountIn(BaseModel):
     password: str = Field(max_length=200)
 
 
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(max_length=200)
+    new_password: str = Field(max_length=200)
+
+
+class PasswordResetIn(BaseModel):
+    new_password: str = Field(max_length=200)
+
+
 def login_enabled() -> bool:
     return human_auth.sessions_enabled() and _path() is not None
 
@@ -257,14 +271,7 @@ def status() -> dict:
     return ok({"login_enabled": login_enabled()})
 
 
-@router.post("/login")
-def login(body: LoginIn) -> dict:
-    if not human_auth.sessions_enabled():
-        raise ApiError(503, "LOGIN_DISABLED", f"{human_auth.SESSION_SECRET_ENV}가 설정되지 않았다")
-    if _path() is None:
-        raise ApiError(503, "LOGIN_DISABLED", f"{store.CONNECTION_FILE_ENV}가 없어 계정이 없다")
-    email = _norm_email(body.email)
-    now = time.time()
+def _raise_if_locked(email: str, now: float) -> None:
     until = _locked_until(email, now)
     if until is not None:
         minutes = max(1, int((until - now + 59) // 60))
@@ -273,6 +280,38 @@ def login(body: LoginIn) -> dict:
             "LOGIN_LOCKED",
             f"로그인을 여러 번 틀려 잠시 막았어요. {minutes}분 뒤 다시 해 주세요",
         )
+
+
+def _check_new_password(password: str) -> None:
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise ApiError(
+            422, "PASSWORD_TOO_SHORT", f"비밀번호는 {MIN_PASSWORD_LENGTH}자 이상이어야 해요"
+        )
+
+
+def _editable_path() -> Path:
+    path = _path()
+    if path is None:
+        raise ApiError(
+            409, "ACCOUNTS_NOT_EDITABLE", f"{store.CONNECTION_FILE_ENV}가 없어 저장할 수 없다"
+        )
+    return path
+
+
+def _set_password(row: dict[str, Any], password: str) -> None:
+    row["password_hash"] = hash_password(password)
+    row["password_changed_at"] = _now()
+
+
+@router.post("/login")
+def login(body: LoginIn) -> dict:
+    if not human_auth.sessions_enabled():
+        raise ApiError(503, "LOGIN_DISABLED", f"{human_auth.SESSION_SECRET_ENV}가 설정되지 않았다")
+    if _path() is None:
+        raise ApiError(503, "LOGIN_DISABLED", f"{store.CONNECTION_FILE_ENV}가 없어 계정이 없다")
+    email = _norm_email(body.email)
+    now = time.time()
+    _raise_if_locked(email, now)
     row = next((r for r in load_accounts() if r.get("email") == email), None)
     matched = check_password(body.password, str(row["password_hash"]) if row else _DUMMY_HASH)
     if row is None or not matched:
@@ -319,15 +358,8 @@ def create_account(body: AccountIn, authorization: str | None = Header(None)) ->
     email = _norm_email(body.email)
     if not EMAIL_RE.match(email):
         raise ApiError(422, "EMAIL_INVALID", "이메일 형식이 아니에요")
-    if len(body.password) < MIN_PASSWORD_LENGTH:
-        raise ApiError(
-            422, "PASSWORD_TOO_SHORT", f"비밀번호는 {MIN_PASSWORD_LENGTH}자 이상이어야 해요"
-        )
-    path = _path()
-    if path is None:
-        raise ApiError(
-            409, "ACCOUNTS_NOT_EDITABLE", f"{store.CONNECTION_FILE_ENV}가 없어 저장할 수 없다"
-        )
+    _check_new_password(body.password)
+    path = _editable_path()
     with _file_lock:
         rows = _bootstrap(path, _read(path))
         if any(r.get("email") == email for r in rows):
@@ -336,4 +368,62 @@ def create_account(body: AccountIn, authorization: str | None = Header(None)) ->
         rows.append(row)
         _write(path, rows)
     logger.info("계정을 만들었다: %s(%s) by %s", email, body.role, human.name)
+    return ok(_public(row))
+
+
+@router.post("/password")
+def change_password(body: PasswordChangeIn, authorization: str | None = Header(None)) -> dict:
+    """내 비밀번호 바꾸기. 성공하면 이 계정의 기존 세션을 모두 끊고 새 세션을 준다."""
+    human = session_human(authorization)
+    _check_new_password(body.new_password)
+    path = _editable_path()
+    now = time.time()
+    with _file_lock:
+        rows = _bootstrap(path, _read(path))
+        row = next((r for r in rows if r.get("id") == human.account_id), None)
+        if row is None:
+            raise ApiError(401, "ACCOUNT_GONE", "계정이 없어졌어요. 다시 로그인해 주세요")
+        email = str(row.get("email", ""))
+        _raise_if_locked(email, now)
+        # check_password는 hmac.compare_digest로 비교한다(상수 시간)
+        if not check_password(body.current_password, str(row.get("password_hash", ""))):
+            _record_failure(email, now)  # 로그인 실패와 같은 잠금 규칙에 같이 센다
+            raise ApiError(401, "PASSWORD_WRONG", "현재 비밀번호가 맞지 않아요")
+        _clear_failures(email)
+        if hmac.compare_digest(
+            body.new_password.encode("utf-8"), body.current_password.encode("utf-8")
+        ):
+            raise ApiError(422, "PASSWORD_SAME", "새 비밀번호는 지금 비밀번호와 달라야 해요")
+        _set_password(row, body.new_password)
+        _write(path, rows)
+    human_auth.end_account_sessions(str(row["id"]))
+    token, exp = human_auth.issue_session(
+        account_id=str(row["id"]), name=str(row["name"]), role=str(row["role"])
+    )
+    logger.info("비밀번호를 바꿨다: %s", row["id"])
+    return ok({"token": token, "expires_at": exp, "account": _public(row)})
+
+
+@router.post("/accounts/{account_id}/reset-password")
+def reset_password(
+    account_id: str, body: PasswordResetIn, authorization: str | None = Header(None)
+) -> dict:
+    """운영자(모든 계정)·고객사 관리자(일반회원만)가 임시 비밀번호로 초기화한다."""
+    human = session_human(authorization)
+    if human.role not in ("operator", "admin"):
+        raise ApiError(403, "ROLE_REQUIRED", "비밀번호를 초기화할 권한이 없어요")
+    _check_new_password(body.new_password)
+    path = _editable_path()
+    with _file_lock:
+        rows = _bootstrap(path, _read(path))
+        row = next((r for r in rows if r.get("id") == account_id), None)
+        if row is None:
+            raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
+        if human.role == "admin" and row.get("role") != "member":
+            raise ApiError(403, "ROLE_REQUIRED", "고객사 관리자는 일반회원만 초기화할 수 있어요")
+        _set_password(row, body.new_password)
+        _write(path, rows)
+    _clear_failures(str(row.get("email", "")))
+    human_auth.end_account_sessions(account_id)
+    logger.info("비밀번호를 초기화했다: %s by %s", account_id, human.name)
     return ok(_public(row))

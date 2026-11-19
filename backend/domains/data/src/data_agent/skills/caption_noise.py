@@ -11,6 +11,9 @@
 
 from __future__ import annotations
 
+import re
+from typing import Any
+
 # 표기용 태그 (광고 표시·이벤트 표기). 2026-11-19 보고서 tr_4913cb6a11274238에서 #광고가 1위였다
 HIDDEN_TAGS = frozenset({
     "광고", "유료광고", "광고포함", "협찬", "제작지원", "체험단", "이벤트", "경품", "event", "ad",
@@ -69,4 +72,38 @@ def common_phrase(key: str) -> bool:
 
 def noise(key: str) -> bool:
     """묶음 씨앗·해시태그 집계에서 뺄 단위인지."""
-    return hidden_tag(key) or event_phrase(key) or common_phrase(key)
+    return hidden_tag(key) or event_phrase(key) or common_phrase(key) or weak_tag(key)
+
+
+_DATE_WORDS = re.compile(r"[\d\s./\-년월일시주]")
+
+
+def weak_tag(key: str) -> bool:
+    """숫자·날짜만 있는 태그(#11월·#2026·#11월19일)와 1글자 태그."""
+    kind, value = _value(key)
+    if kind != "hashtag":
+        return False
+    flat = value.replace(" ", "")
+    return len(flat) <= 1 or not _DATE_WORDS.sub("", flat)
+
+
+# 인스타 캡션은 긴 글이라 2~4어절 구절로 묶으면 잡음("one of"·"프로필 링크에서")이 많다.
+# 그래서 인스타는 해시태그와 따옴표·「」 안 구절만 단위로 쓴다. 영어 아포스트로피(')는 따옴표로
+# 보지 않는다("don't … it's"가 구절로 잡히지 않게)
+_QUOTED = re.compile(r"[\"“”‘’「『]([^\"“”‘’「」『』\n]{2,40})[\"“”‘’」』]")
+
+
+def caption_units(caption: str) -> dict[str, Any]:
+    """인스타 캡션 → 단위 {키: trend_memes Unit}: 해시태그 + 따옴표 안 구절. 잡음은 뺀다."""
+    from data_agent.skills.trend_memes import Unit, normalize, units_of
+
+    out = {k: u for k, u in units_of(caption or "", ()).items()
+           if u.kind == "hashtag" and not noise(k)}  # fmt: skip
+    for raw in _QUOTED.findall(caption or ""):
+        value = normalize(raw)
+        if len(value.replace(" ", "")) < 2 or value.replace(" ", "").isdigit():
+            continue
+        key = f"phrase:{value}"
+        if not noise(key):
+            out.setdefault(key, Unit(key, "phrase", " ".join(raw.split())))
+    return out

@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -15,6 +16,11 @@ SEED_KEY = "seed-SECRET-123"
 KLING_KEY = "kling-SECRET-456"
 MUTED_MP4 = b"\x00\x00\x00\x20ftypisom....moov....hdlr\x00\x00\x00\x00\x00\x00\x00\x00vide-fake"
 VIDEO_URL = "https://cdn.example.test/out.mp4"
+
+
+def public_resolver(host: str, port: int, **_kw: object) -> list[tuple]:
+    """네트워크 없이 모든 이름을 공용 IP로 푼다."""
+    return [(2, 1, 6, "", ("93.184.216.34", port))]
 
 
 def _request(
@@ -40,7 +46,12 @@ def _provider(cls, handler, calls: list[httpx.Request] | None = None):
             calls.append(request)
         return handler(request)
 
-    return cls(httpx.MockTransport(wrapped), poll_interval_s=0, sleep=lambda _s: None)
+    return cls(
+        httpx.MockTransport(wrapped),
+        poll_interval_s=0,
+        sleep=lambda _s: None,
+        resolver=public_resolver,
+    )
 
 
 # --- Seedance ---
@@ -243,3 +254,111 @@ def test_price_table_rejects_bad_per_second(tmp_path: Path) -> None:
     )
     with pytest.raises(pricing.PriceTableError):
         pricing.load_table(path)
+
+
+# --- 공용 주소 전용 내려받기(SSRF) ---
+def _done_body(url: str) -> dict:
+    return {"status": "succeeded", "content": {"video_url": url}}
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://169.254.169.254/latest/meta-data",
+        "https://127.0.0.1/a.mp4",
+        "https://[::1]/a.mp4",
+        "https://[::ffff:127.0.0.1]/a.mp4",
+        "https://192.168.0.232/a.mp4",
+        "https://2130706433/a.mp4",
+    ],
+)
+def test_download_refuses_private_hosts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, url: str
+) -> None:
+    monkeypatch.setenv("MARKETING_SEEDANCE_API_KEY", SEED_KEY)
+    calls: list[httpx.Request] = []
+    adapter = _provider(SeedanceVideoProvider, _seedance_handler([_done_body(url)], {}), calls)
+    with pytest.raises(MediaProviderError, match="blocked_video_host"):
+        adapter.generate(_request(tmp_path))
+    assert all(r.url.host != urlsplit(url).hostname for r in calls)
+
+
+def test_download_refuses_name_resolving_to_private(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def mixed(host: str, port: int, **_kw: object) -> list[tuple]:
+        return [(2, 1, 6, "", ("93.184.216.34", port)), (2, 1, 6, "", ("10.0.0.5", port))]
+
+    adapter = SeedanceVideoProvider(
+        httpx.MockTransport(_seedance_handler([_done_body(VIDEO_URL)], {})),
+        poll_interval_s=0,
+        sleep=lambda _s: None,
+        resolver=mixed,
+    )
+    monkeypatch.setenv("MARKETING_SEEDANCE_API_KEY", SEED_KEY)
+    with pytest.raises(MediaProviderError, match="blocked_video_host"):
+        adapter.generate(_request(tmp_path))
+
+
+def test_download_redirect_to_private_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MARKETING_SEEDANCE_API_KEY", SEED_KEY)
+    inner = _seedance_handler([_done_body(VIDEO_URL)], {})
+    hosts: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        hosts.append(req.url.host)
+        if req.url.host == "cdn.example.test":
+            return httpx.Response(302, headers={"location": "https://169.254.169.254/x"})
+        return inner(req)
+
+    with pytest.raises(MediaProviderError, match="blocked_video_host"):
+        _provider(SeedanceVideoProvider, handler).generate(_request(tmp_path))
+    assert "169.254.169.254" not in hosts
+
+
+def test_download_too_many_redirects(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MARKETING_SEEDANCE_API_KEY", SEED_KEY)
+    inner = _seedance_handler([_done_body(VIDEO_URL)], {})
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.host == "cdn.example.test":
+            return httpx.Response(302, headers={"location": "/loop"})
+        return inner(req)
+
+    with pytest.raises(MediaProviderError, match="too_many_redirects"):
+        _provider(SeedanceVideoProvider, handler).generate(_request(tmp_path))
+
+
+def test_download_content_length_over_cap_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MARKETING_SEEDANCE_API_KEY", SEED_KEY)
+    inner = _seedance_handler([_done_body(VIDEO_URL)], {})
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.host == "cdn.example.test":
+            return httpx.Response(200, headers={"content-length": str(64 * 1024 * 1024 + 1)})
+        return inner(req)
+
+    with pytest.raises(MediaProviderError, match="invalid_video_size"):
+        _provider(SeedanceVideoProvider, handler).generate(_request(tmp_path))
+
+
+def test_real_service_uses_public_only_transport(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from marketing_agent.media.safe_fetch import PublicOnlyTransport
+
+    built: list[object] = []
+
+    def spy(*_args, **kwargs):
+        built.append(kwargs.get("transport"))
+        raise httpx.ConnectError("stop")
+
+    monkeypatch.setenv("MARKETING_SEEDANCE_API_KEY", SEED_KEY)
+    monkeypatch.setattr(httpx, "Client", spy)
+    with pytest.raises(MediaProviderError):
+        SeedanceVideoProvider().generate(_request(tmp_path))
+    assert isinstance(built[0], PublicOnlyTransport)

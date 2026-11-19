@@ -164,3 +164,35 @@ export function accountInputProblem(x: { name: string; email: string; password: 
   if (x.confirm !== undefined && x.password !== x.confirm) return "비밀번호 확인이 일치하지 않아요.";
   return null;
 }
+
+// ---- 비밀번호 바꾸기·초기화 (dashboard-api `/auth/password`, `/auth/accounts/{id}/reset-password`) ----
+
+/** 비밀번호 바꾸기 전 화면 검사 (서버도 길이·현재와 같은지 다시 본다) */
+export function passwordChangeProblem(x: { current: string; next: string; confirm: string }): string | null {
+  if (!x.current) return "지금 비밀번호를 입력하세요.";
+  if (x.next.length < MIN_PASSWORD_LENGTH) return `새 비밀번호는 ${MIN_PASSWORD_LENGTH}자 이상이어야 해요.`;
+  if (x.next === x.current) return "새 비밀번호는 지금 비밀번호와 달라야 해요.";
+  if (x.next !== x.confirm) return "새 비밀번호 확인이 일치하지 않아요.";
+  return null;
+}
+
+export type PasswordChangeOutcome = { kind: "ok"; session: HumanSession } | { kind: "error"; message: string };
+
+/** 비밀번호 바꾸기 응답: 성공이면 새 세션(기존 세션은 서버가 모두 끊었다) */
+export function readPasswordChangeResponse(status: number, body: unknown, now = nowSeconds()): PasswordChangeOutcome {
+  if (status >= 200 && status < 300) {
+    const session = sessionFromLogin((body as { data?: unknown } | null)?.data, now);
+    return session ? { kind: "ok", session } : { kind: "error", message: "응답을 읽지 못했어요. 다시 로그인해 주세요." };
+  }
+  const message = (body as { error?: { message?: unknown } } | null)?.error?.message;
+  if (typeof message === "string" && message) return { kind: "error", message };
+  if (status === 401) return { kind: "error", message: "지금 비밀번호가 맞지 않아요." };
+  return { kind: "error", message: `비밀번호를 바꾸지 못했어요 (${status})` };
+}
+
+/** 이 사람이 그 계정의 비밀번호를 초기화할 수 있나: 운영자는 모든 계정, 고객사 관리자는 일반회원만. 자기 계정은 "비밀번호 바꾸기"로 */
+export function canResetPassword(actor: { id: string; role: ServerRole }, target: { id: string; role: ServerRole }): boolean {
+  if (actor.id === target.id) return false;
+  if (actor.role === "operator") return true;
+  return actor.role === "admin" && target.role === "member";
+}

@@ -28,6 +28,44 @@ media_accounts = [
     "cosmopolitankorea",
 ]
 
+# 계정 표시 이름 (2026-11-19 business_discovery 확인값). 인스타를 못 읽었거나 레이더 저장분에 이름이
+# 없을 때 보고서·대화 의뢰 카드가 쓴다 (읽은 name이 있으면 그것이 먼저)
+[display_names]
+toun28_official = "톤28"
+beplain_official = "비플레인"
+purito_official = "퓨리토"
+mixsoon_official = "믹순"
+torriden_official = "토리든"
+sidmool = "시드물"
+"abib.official" = "아비브"
+anua_kr = "아누아"
+amuse = "어뮤즈"
+needly_official = "니들리"
+skinfood_official = "스킨푸드"
+illiyoon_official = "일리윤"
+drjart_kr = "닥터자르트"
+innisfreeofficial = "이니스프리"
+laneige_kr = "라네즈"
+mamonde_official = "마몽드"
+iope_official = "아이오페"
+banilaco_official = "바닐라코"
+cosrx = "코스알엑스"
+oliveyoung_official = "올리브영"
+allurekorea = "얼루어 코리아"
+voguekorea = "보그 코리아"
+wkorea = "W 코리아"
+marieclairekorea = "마리끌레르 코리아"
+ellekorea = "엘르 코리아"
+harpersbazaarkorea = "하퍼스 바자 코리아"
+cosmopolitankorea = "코스모폴리탄 코리아"
+glowpick_official = "글로우픽"
+hwahae_official = "화해"
+risabae_art = "이사배"
+ponysmakeup = "포니"
+ssinnim = "씬님"
+leojmakeup = "레오제이"
+directorpi = "디렉터파이"
+
 [brief]
 product = "친환경 화장품"
 goal = "브랜드 인지도"

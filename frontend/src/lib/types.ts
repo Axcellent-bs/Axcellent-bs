@@ -148,6 +148,8 @@ export interface ConversationListItem {
   tenant_id?: string;
   /** 로그·오류 코드로 원인을 모르는 문의를 따로 모은 "분류 필요" 표시. 없으면 일반 문의 */
   triage?: Triage | null;
+  /** 판매 서버 자료를 다시 만들기 전에 받은 문의(옛 자료). 접수일과 설정값만 비교한 표시. 없으면 일반 문의 */
+  legacy_intake?: boolean;
 }
 /** 분류 필요 표시. needed=분류가 필요함, done=상담원이 분류 이름을 정하고 마침 */
 export interface Triage {

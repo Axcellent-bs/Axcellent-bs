@@ -419,6 +419,9 @@ class ConversationListItem(BaseModel):
     language: str = "ko"  # 고객이 마지막으로 쓴 언어 (ko·en·ja·zh·other)
     tenant_id: str = "shop-demo"  # 어느 회사(고객사)의 문의인지. 회사별로 따로 본다
     triage: Triage | None = None  # "분류 필요" 표시 (없으면 일반 문의)
+    # 판매 서버 자료를 다시 만들기 전에 받은 문의("옛 자료").
+    # 접수일과 설정값만 비교한 표시이고 상태·재무와 무관하다
+    legacy_intake: bool = False
 
 
 class ActivityEntry(BaseModel):

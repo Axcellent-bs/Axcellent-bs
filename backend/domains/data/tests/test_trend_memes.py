@@ -95,13 +95,46 @@ def test_unknown_ratio_when_no_previous_sample() -> None:
     assert built.previous == 0
 
 
+COUNT = tm.MemeConfig(judge_by="count")  # 예전 판정 (영상 수 배수)
+
+
 def test_below_criteria_channels_and_ratio() -> None:
     few_channels = _meme(6, 2, 1) + _filler(40, 2) + _filler(10, 10, "g")
     built = tm.build(few_channels, tm.windows("week", NOW), CONFIG)
     assert built.candidates == [] and built.below >= 1
-    # 직전 4개 → 이번 6개 = 1.5배 < 2배
+    # count 모드(예전 결과 그대로): 직전 4개 → 이번 6개 = 1.5배 < 2배
     slow = _meme(6, 4, 1) + _meme(4, 4, 10, "p") + _filler(60, 2) + _filler(10, 10, "g")
-    assert tm.build(slow, tm.windows("week", NOW), CONFIG).candidates == []
+    assert tm.build(slow, tm.windows("week", NOW), COUNT).candidates == []
+    # share 모드: 직전 표본이 14개(< 30)라 몫을 비교하지 않음 → unknown + 이유
+    got = tm.build(slow, tm.windows("week", NOW), CONFIG).candidates
+    assert [c.ratio_status for c in got] == ["unknown"] and "몫을 비교하지 않음" in (
+        got[0].ratio_reason or "")
+    # share 모드, 직전 표본 충분: 몫 6/72 ÷ 4/44 = 0.92배 < 2배 → 아님
+    enough = slow + _filler(30, 10, "h")
+    assert tm.build(enough, tm.windows("week", NOW), CONFIG).candidates == []
+
+
+def test_share_passes_when_sample_shrinks_but_share_rises() -> None:
+    """지난주 표본 300 → 이번 주 100: 영상 수는 10 → 12(1.2배)라 count로는 떨어지지만
+    몫은 3.3% → 12%(3.6배)라 share로는 통과 (새 서버 11/19: 표본 307 → 104)."""
+    videos = (_meme(12, 4, 1) + _meme(10, 4, 10, "p") + _filler(88, 2)
+              + _filler(290, 10, "g"))  # fmt: skip
+    win = tm.windows("week", NOW)
+    assert tm.build(videos, win, COUNT).candidates == []
+    c = tm.build(videos, win, CONFIG).candidates[0]
+    assert c.judged_by == "share" and c.ratio == 1.2 and c.previous_videos == 10
+    assert c.share == round(12 / 100, 4) and c.previous_share == round(10 / 300, 4)
+    assert c.share_ratio == round(c.share / c.previous_share, 2) and c.share_ratio >= 2.0
+    assert "몫이 지난주의 2배 이상" in tm.criteria_text(CONFIG)
+    assert "몫" not in tm.criteria_text(COUNT)
+
+
+def test_judge_by_setting(tmp_path: Path) -> None:
+    cfg = tmp_path / "trends.toml"
+    cfg.write_text('[memes]\njudge_by = "count"\nmin_previous_sample = 50\n', encoding="utf-8")
+    got = tm.load_config({tm.TREND_CONFIG_ENV: str(cfg)})
+    assert got.judge_by == "count" and got.min_previous_sample == 50
+    assert tm.MemeConfig().judge_by == "share" and tm.MemeConfig().min_previous_sample == 30
 
 
 def test_exclude_tags_seeds_and_stop_share_are_skipped_with_reasons() -> None:

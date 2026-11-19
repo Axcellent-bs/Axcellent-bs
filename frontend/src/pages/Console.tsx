@@ -12,6 +12,7 @@ import { OFFLINE } from "@/components/admin/bits";
 import { usePlanningQuestionCount } from "@/components/support/PlanningQuestions";
 import { Link } from "@/lib/nav";
 import { api } from "@/lib/api";
+import { LEGACY_HINT, LEGACY_LABEL } from "@/lib/legacyIntake";
 import { STATUS_KO, tenantName } from "@/lib/labels";
 import type { Conversation, ConversationListItem, Kpi } from "@/lib/types";
 
@@ -33,7 +34,7 @@ function Console() {
   const planningWaiting = usePlanningQuestionCount();
 
   const refresh = useCallback(async () => {
-    const [l, k] = await Promise.all([api.admin.list(), api.admin.kpi()]);
+    const [l, k] = await Promise.all([api.admin.listAll(), api.admin.kpi()]); // 옛 자료는 문의함이 기본으로 숨긴다
     setList(l); setKpi(k);
     return l;
   }, []);
@@ -55,7 +56,7 @@ function Console() {
         const l = await refresh();
         const wanted = Number(params.get("id"));
         if (wanted && l.some((c) => c.id === wanted)) await open(wanted);
-        else if (l.length) await open(l[0].id);
+        else if (l.length) await open((l.find((c) => !c.legacy_intake) ?? l[0]).id); // 처음에는 숨기지 않는 문의부터
       } catch { setError(OFFLINE); }
     })();
   }, [refresh, open, params]);
@@ -68,6 +69,7 @@ function Console() {
       const item: ConversationListItem = {
         id: c.id, customer_name: c.customer_name, subject: c.subject, subject_display: c.subject_display, category: c.category, sentiment: c.sentiment,
         urgency: c.urgency, status: c.status, order_id: c.order_id, updated_at: c.updated_at, preview: c.preview, awaiting_reply: c.awaiting_reply,
+        legacy_intake: c.legacy_intake,
       };
       return prev.some((i) => i.id === c.id) ? prev.map((i) => (i.id === c.id ? item : i)) : [item, ...prev];
     });
@@ -95,7 +97,7 @@ function Console() {
             <main className="card flex min-w-0 flex-1 flex-col overflow-hidden">
               <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink-100 bg-surface px-6 py-3">
                 <div className="min-w-[16rem] flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><h1 className="truncate text-base font-semibold">{conv.customer_name}</h1><span className="chip whitespace-nowrap bg-ink-100 text-ink-500">{STATUS_KO[conv.status]}</span><span className="chip whitespace-nowrap bg-indigo-50 text-indigo-800">{tenantName(conv.tenant_id)}</span>{conv.triage && <span className="chip whitespace-nowrap bg-amber-50 text-amber-800">{conv.triage.state === "done" ? `분류 완료${conv.triage.label ? ` · ${conv.triage.label}` : ""}` : "분류 필요"}</span>}</div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><h1 className="truncate text-base font-semibold">{conv.customer_name}</h1><span className="chip whitespace-nowrap bg-ink-100 text-ink-500">{STATUS_KO[conv.status]}</span><span className="chip whitespace-nowrap bg-indigo-50 text-indigo-800">{tenantName(conv.tenant_id)}</span>{conv.triage && <span className="chip whitespace-nowrap bg-amber-50 text-amber-800">{conv.triage.state === "done" ? `분류 완료${conv.triage.label ? ` · ${conv.triage.label}` : ""}` : "분류 필요"}</span>}{conv.legacy_intake && <span className="chip whitespace-nowrap bg-ink-100 text-ink-500" title={LEGACY_HINT}>{LEGACY_LABEL}</span>}</div>
                   <p className="truncate text-xs text-ink-500">{conv.subject_display ?? conv.subject}{conv.order_no && ` · 주문 ${conv.order_no}`} · 문의 #{conv.id}</p>
                 </div>
                 <div className="ml-auto flex flex-wrap gap-2">
