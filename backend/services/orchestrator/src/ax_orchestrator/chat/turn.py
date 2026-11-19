@@ -13,6 +13,9 @@
 - 열람: 본인(`who` 같음)은 원문 전부, 다른 사람 대화는 `messages: []` + 요약 + `restricted: true`.
   남의 대화에 쓰기(보내기·끝내기)는 거절(403).
 - LLM 오류는 이유 한 줄만 답으로 남긴다(예외 내용·비밀 값은 넣지 않는다).
+- 답하기 전에 의뢰 접수(`request_intake`)가 글을 먼저 본다. "~ 만들어 주세요" 같은 의뢰면 분류해
+  기록하고 접수 안내로 답한다(설명 LLM은 부르지 않는다). 질문이거나 분류하지 못하면
+  아래 설명 흐름으로 넘어간다.
 """
 
 from __future__ import annotations
@@ -114,10 +117,13 @@ class ChatService:
         store: Callable[[], ChatStore],
         get_manager: Callable[[], Any] = lambda: None,
         llm: Callable[[], Any] = default_llm,
+        intake: Callable[[], Any] = lambda: None,
     ) -> None:
         self._store = store
         self._get_manager = get_manager
         self._llm = llm
+        # 의뢰 접수(`RequestIntake`)를 돌려준다. None이면 의뢰를 가리지 않는다
+        self._intake = intake
         self._pending: set[asyncio.Task[None]] = set()
 
     @property
@@ -191,6 +197,8 @@ class ChatService:
         th = self.store.get(thread_id)
         if th is None:
             return
+        if await self._try_intake(thread_id, th, llm):
+            return
         data = {
             "facts": facts.collect(self._get_manager()),
             "conversation": [
@@ -212,6 +220,24 @@ class ChatService:
         logger.warning("총괄 대화 LLM 실패 %s: %s", type(error).__name__, error)
         self.store.finish_turn(thread_id, failed_reply(error), kind="error")
 
+    async def _try_intake(self, thread_id: str, th: dict[str, Any], llm: Any) -> bool:
+        """의뢰면 접수하고 접수 안내로 답했는지(True). 질문·분류 실패면 False(설명 흐름으로)."""
+        intake = self._intake()
+        if intake is None:
+            return False
+        users = [m["text"] for m in th["messages"] if m["role"] == "user"]
+        if not users:
+            return False
+        try:
+            result = await intake.receive(th["who"], users[-1], llm, history=users[:-1])
+        except Exception as exc:  # noqa: BLE001 - 접수 문제로 대화가 막히지 않게 설명 흐름으로 넘긴다
+            logger.warning("의뢰 접수 실패 %s", type(exc).__name__)
+            return False
+        if not result.handled:
+            return False
+        self.store.finish_turn(thread_id, result.reply, summary=result.summary)
+        return True
+
 
 _service: ChatService | None = None
 
@@ -222,7 +248,12 @@ def get_chat_service(get_manager: Callable[[], Any] | None = None) -> ChatServic
     if _service is None:
         from ax_orchestrator.chat import threads
 
-        _service = ChatService(threads.get_store, get_manager or (lambda: None))
+        getter = get_manager or (lambda: None)
+        _service = ChatService(
+            threads.get_store,
+            getter,
+            intake=lambda: getattr(getter(), "request_intake", None),
+        )
     return _service
 
 

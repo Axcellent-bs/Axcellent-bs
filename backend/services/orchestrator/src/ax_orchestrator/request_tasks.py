@@ -1,0 +1,273 @@
+"""의뢰 일 목록: 분류기가 고를 수 있는 일과, 일마다 어느 부서의 어떤 skill을 어떤 순서로 시키는지.
+
+분류 LLM(`request_classifier.py`)은 이 목록에 있는 `name`만 고를 수 있고, 순서와 등급은 여기서
+정한 대로만 돈다(LLM은 순서를 만들지 못한다). 부서 이름(`dept`)과 skill은 부서 카드의 것과 같아야
+하며 시험(`test_request_tasks.py`)이 카드와 맞는지 확인한다.
+
+- 흐름: 부서가 이어지는 일(홍보 영상: 데이터분석 → 기획 → 사람 확인 → 마케팅).
+- 단독 의뢰: 부서 하나의 skill 하나를 시키는 일. 처음에는 읽기 위주이고, 상태를 바꾸는 일은
+  등급(A·B·C)에 따라 안전 관문과 승인을 거친다.
+- `blocked_by`가 있으면 끝까지 돌릴 준비가 안 된 일이다(다른 팀 작업 대기). 접수·분류는 되고
+  실행(2단계)이 이 값을 보고 사람에게 넘긴다.
+부서 일 조사: `backend/docs/notes/orchestrator/request-catalog.md`.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+DEPT_LABEL = {
+    "data": "데이터분석",
+    "planning": "기획",
+    "marketing": "마케팅",
+    "support": "고객지원",
+    "finance": "재무",
+    "dev": "개발",
+    "infra": "인프라",
+    "hr": "인사",
+    "archive": "아카이브",
+}
+READ_GRADE = "read"
+
+
+@dataclass(frozen=True)
+class TaskStep:
+    step_id: str
+    dept: str | None  # 사람 확인 단계(kind == "human")는 None
+    skill: str
+    label: str
+    grade: str | None  # read · A · B · C (사람 확인 단계는 None)
+    after: tuple[str, ...] = ()
+    kind: str = "agent"  # agent | human
+
+
+@dataclass(frozen=True)
+class TaskDef:
+    name: str  # 분류기가 고르는 값(영어 소문자와 _)
+    label: str  # 화면·안내에 쓰는 이름
+    description: str  # 분류기가 읽는 설명
+    examples: tuple[str, ...]  # 이런 글이 오면 이 일이다
+    steps: tuple[TaskStep, ...]
+    blocked_by: str | None = None
+
+    @property
+    def first_dept(self) -> str | None:
+        first = next((s for s in self.steps if not s.after), self.steps[0])
+        return first.dept
+
+    @property
+    def changes_state(self) -> bool:
+        return any(s.grade not in (READ_GRADE, None) for s in self.steps)
+
+
+def _one(
+    name: str,
+    label: str,
+    description: str,
+    examples: tuple[str, ...],
+    dept: str,
+    skill: str,
+    grade: str = READ_GRADE,
+    blocked_by: str | None = None,
+) -> TaskDef:
+    step = TaskStep("run", dept, skill, label, grade)
+    return TaskDef(name, label, description, examples, (step,), blocked_by)
+
+
+PROMO_VIDEO = TaskDef(
+    "promo_video",
+    "홍보 영상 만들기",
+    "상품·서비스를 알리는 영상을 만들어 달라는 의뢰. 트렌드를 분석하고 영상 제작안을 정한 뒤 "
+    "사람이 확인하고 제작한다(여러 부서가 차례로 한다).",
+    (
+        "홍보 영상 만들어 주세요",
+        "신간 소개 숏츠 영상 만들어 줘",
+        "우리 브랜드 광고 영상이 필요해요",
+    ),
+    (
+        TaskStep("trend", "data", "trend_report_create", "트렌드 분석 보고서", READ_GRADE),
+        TaskStep("plan", "planning", "receive_insight", "영상 제작안", "A", after=("trend",)),
+        TaskStep("confirm", None, "human_check", "사람 확인", None, after=("plan",), kind="human"),
+        TaskStep("make", "marketing", "generate_media", "영상 제작", "B", after=("confirm",)),
+    ),
+    blocked_by="데이터분석 긴 작업 연결(receive_insight)과 기획 영상 제작안(VideoPlan) 연결 대기",
+)
+
+TASKS: tuple[TaskDef, ...] = (
+    PROMO_VIDEO,
+    _one(
+        "trend_report",
+        "트렌드·경쟁사 분석 보고서",
+        "시장 트렌드, 경쟁사, 타깃 선호를 분석한 보고서를 만들어 달라는 의뢰(몇 분 걸린다).",
+        ("경쟁사 대비 트렌드 보고서 만들어 주세요", "20대 여성 타깃 화장품 트렌드 분석해 줘"),
+        "data",
+        "trend_report_create",
+        blocked_by="데이터분석 긴 작업 연결 대기",
+    ),
+    _one(
+        "campaign_performance",
+        "캠페인·영상 성과 조회",
+        "지난 캠페인이나 영상의 성과(조회수·효과)를 알려 달라는 의뢰.",
+        ("지난 캠페인 결과 알려 주세요", "올린 영상 성과 어때요"),
+        "data",
+        "campaign_result",
+    ),
+    _one(
+        "sales_analysis",
+        "매출 분석",
+        "기간별 매출을 분석해 달라는 의뢰.",
+        ("이번 달 매출 분석해 주세요", "지난 7일 매출 정리해 줘"),
+        "data",
+        "sales_analysis",
+    ),
+    _one(
+        "customer_segment",
+        "고객층 분석",
+        "연령·성별 같은 고객층의 구성이나 선호를 분석해 달라는 의뢰.",
+        ("20대 여성은 뭘 많이 사요", "30대 남성이 즐겨 사는 책 알려 주세요"),
+        "data",
+        "segment_question",
+    ),
+    _one(
+        "anomaly_check",
+        "지표 이상 점검",
+        "주문·결제 같은 지표가 평소와 다르게 튄 곳이 있는지 점검해 달라는 의뢰.",
+        ("어제 결제 실패가 튄 곳이 있나요", "지표에 이상한 데 없는지 봐 주세요"),
+        "data",
+        "anomaly_detection",
+    ),
+    _one(
+        "event_proposal",
+        "이벤트 제안",
+        "다음 달 이벤트·프로모션 아이디어를 제안해 달라는 의뢰.",
+        ("12월 이벤트 제안해 주세요", "연말 프로모션 아이디어 줘"),
+        "data",
+        "event_proposal",
+    ),
+    _one(
+        "inquiry_status",
+        "문의 현황 정리",
+        "고객 문의 현황(건수·대기·만족도)을 정리해 달라는 의뢰.",
+        ("이번 달 문의 현황 정리해 주세요", "답변 대기 문의가 몇 건인지 알려 줘"),
+        "support",
+        "inquiry_overview",
+    ),
+    _one(
+        "claim_stats",
+        "클레임 현황 정리",
+        "환불·교환 클레임 현황을 집계해 달라는 의뢰.",
+        ("이번 달 환불 클레임 몇 건인지 알려 주세요", "클레임 현황 정리해 줘"),
+        "support",
+        "claim_stats",
+    ),
+    _one(
+        "seller_settlement",
+        "판매자 정산 조회",
+        "판매자 정산 내역을 조회해 달라는 의뢰.",
+        ("지난주 판매자 정산 내역 보여 주세요",),
+        "support",
+        "seller_settlement",
+    ),
+    _one(
+        "closing_report",
+        "손익 정리",
+        "기간별 손익(매출·비용)을 정리해 달라는 의뢰.",
+        ("이번 달 손익 정리해 주세요", "주간 결산 만들어 줘"),
+        "finance",
+        "closing_report",
+    ),
+    _one(
+        "notice_draft",
+        "공지 초안 작성",
+        "고객에게 보낼 공지 글 초안을 써 달라는 의뢰.",
+        ("점검 공지 초안 써 주세요", "배송 지연 안내 공지 만들어 줘"),
+        "marketing",
+        "draft_notice",
+    ),
+    _one(
+        "sns_draft",
+        "SNS 글 초안 작성",
+        "SNS에 올릴 글 초안을 써 달라는 의뢰(올리는 것은 아니다).",
+        ("인스타 글 초안 만들어 주세요", "신간 소개 SNS 문구 써 줘"),
+        "marketing",
+        "draft_sns_post",
+    ),
+    _one(
+        "dev_status",
+        "개발 진행 현황",
+        "개발이 어디까지 진행됐는지 알려 달라는 의뢰.",
+        ("요청한 기능 개발 어디까지 됐어요", "진행 중인 개발 작업 보여 주세요"),
+        "dev",
+        "list_in_progress",
+    ),
+    _one(
+        "similar_cases",
+        "비슷한 과거 기록 찾기",
+        "비슷했던 과거 장애·업무 기록을 찾아 달라는 의뢰.",
+        ("비슷한 과거 장애 기록 찾아 주세요",),
+        "archive",
+        "find_similar_cases",
+    ),
+    _one(
+        "team_headcount",
+        "팀별 인원 조회",
+        "기간별 팀 인원을 알려 달라는 의뢰.",
+        ("다음 달 팀별 인원 알려 주세요",),
+        "hr",
+        "team_headcount",
+    ),
+    _one(
+        "feature_request",
+        "기능 개발 요청",
+        "서비스에 없는 기능을 만들어 달라거나 고쳐 달라는 의뢰(기획이 접수한다).",
+        ("회원 등급 기능 만들어 주세요", "주문 화면에 필터를 추가해 줘"),
+        "planning",
+        "create_ticket",
+        grade="A",
+    ),
+    _one(
+        "claim_register",
+        "환불·교환 접수",
+        "주문의 환불·교환을 접수해 달라는 의뢰(고객지원이 접수한다).",
+        ("이 주문 환불 접수해 주세요",),
+        "support",
+        "create_claim",
+        grade="A",
+    ),
+)
+
+BY_NAME: dict[str, TaskDef] = {t.name: t for t in TASKS}
+
+
+def get(name: str | None) -> TaskDef | None:
+    return BY_NAME.get(name or "")
+
+
+def dept_label(dept: str | None) -> str:
+    return DEPT_LABEL.get(dept or "", dept or "사람")
+
+
+def plan_of(task: TaskDef) -> list[dict[str, Any]]:
+    """`WorkRequests.set_plan`에 넘기는 계획(단계 목록)."""
+    return [
+        {
+            "step_id": s.step_id,
+            "dept": s.dept,
+            "skill": s.skill,
+            "label": s.label,
+            "after": list(s.after),
+            "grade": s.grade,
+            "kind": s.kind,
+        }
+        for s in task.steps
+    ]
+
+
+def catalog_text(tasks: tuple[TaskDef, ...] = TASKS) -> str:
+    """분류기 지시문에 넣는 일 목록 (이름 | 이름표 | 설명 | 예시)."""
+    lines = []
+    for t in tasks:
+        examples = " / ".join(f'"{e}"' for e in t.examples)
+        lines.append(f"- {t.name} | {t.label} | {t.description} | 예: {examples}")
+    return "\n".join(lines)
