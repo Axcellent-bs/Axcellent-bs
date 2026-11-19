@@ -1146,7 +1146,14 @@ async def instagram_audio(request: AgentRequest) -> AgentResult:
         return data
 
     async def compute() -> tuple[str, dict[str, Any], Evidence]:
+        from datetime import UTC, datetime
+
+        from data_agent.skills import instagram_why
+
         result = instagram.instagram_audio(data, env=os.environ)
+        # "왜 뜨나" 근거 (순위·유튜브 쇼츠·네이버 상위 5곡, 결론 문장 없음)
+        await instagram_why.audio_why(result.output, os.environ, datetime.now(UTC),
+                                      connector=get_trend_connector())  # fmt: skip
         return result.output.status, result.output.model_dump(mode="json"), result.evidence
 
     return await _stored(request, "instagram_audio", data.model_dump(mode="json"), compute)
@@ -1164,7 +1171,7 @@ async def instagram_radar(request: AgentRequest) -> AgentResult:
     async def compute() -> tuple[str, dict[str, Any], Evidence]:
         result = await instagram.instagram_radar(
             get_llm(), env=os.environ, category_cache=get_category_cache(),
-            context_id=request.meta.context_id,
+            context_id=request.meta.context_id, connector=get_trend_connector(),
         )  # fmt: skip
         return result.output.status, result.output.model_dump(mode="json"), result.evidence
 

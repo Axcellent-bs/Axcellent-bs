@@ -4207,6 +4207,24 @@ class InstagramAudioInput(AxModel):
     audio_type: Literal["music", "original_sound"] = "music"
 
 
+class InstagramWhyFact(AxModel):
+    """"왜 떴나·왜 뜨나" 근거 한 줄. 숫자는 전부 코드가 계산한 값 (LLM 없음).
+
+    레이더 묶음: spread(퍼짐) · format(형식) · engagement(댓글률) · caption(첫 줄 질문·길이) ·
+    time(올린 시간대) · cross(유튜브·네이버) · unknown(공식 API로 볼 수 없는 것).
+    인기 오디오: rank(7일 전 → 오늘) · youtube(쇼츠 제목·태그) · search(네이버) · unknown.
+    모르면 value None + reason (0으로 채우지 않음).
+    """
+
+    kind: Literal["spread", "format", "engagement", "caption", "time", "cross", "unknown",
+                  "rank", "youtube", "search"]  # fmt: skip
+    label: str
+    value: str | None = None  # 이번 값 (화면 표기)
+    baseline: str | None = None  # 평소 값 (비교 기준 표기, 없으면 None)
+    ratio: float | None = Field(default=None, ge=0)  # 이번 ÷ 평소 (구할 수 없으면 None)
+    reason: str | None = None  # 값을 모르는 이유
+
+
 class InstagramAudioItem(AxModel):
     rank: int = Field(ge=1)
     audio_id: str
@@ -4219,6 +4237,8 @@ class InstagramAudioItem(AxModel):
     is_new: bool = False  # 어제 목록에 없었음
     streak_days: int = Field(default=1, ge=1)  # 연속으로 목록에 있던 날 수 (오늘 포함)
     overlap: list[str] = Field(default_factory=list)  # 같은 오디오를 쓴 유행 (지금은 늘 비어 있음)
+    # "왜 뜨나" 근거 (결론 문장 없음)
+    why_facts: list[InstagramWhyFact] = Field(default_factory=list)
 
 
 class InstagramAudioOutput(AxModel):
@@ -4255,6 +4275,8 @@ class InstagramRadarPost(AxModel):
     # thumbnail_url, 사진·캐러셀은 media_url(첫 장)
     thumbnail_url: str | None = None
     media_type: str | None = None  # IMAGE · VIDEO · CAROUSEL_ALBUM
+    # 계정 평소와 가장 크게 다른 점 한 줄 (코드 템플릿, LLM 없음). 다른 점이 없으면 None
+    standout: str | None = None
 
 
 class InstagramRadarGroup(AxModel):
@@ -4269,6 +4291,10 @@ class InstagramRadarGroup(AxModel):
     ad_material: Literal["ok", "caution", "excluded", "unknown"] = "unknown"
     ad_material_reason: str = ""
     top_posts: list[InstagramRadarPost] = Field(default_factory=list)
+    # "왜 떴나": 근거 숫자(코드 계산, 평소와 다른 점만) + LLM 결론 한 줄(숫자 없음, 120자 이하)
+    why_facts: list[InstagramWhyFact] = Field(default_factory=list)
+    why_line: str | None = None
+    why_line_reason: str | None = None  # why_line이 없는 이유
 
 
 class InstagramRadarOutput(AxModel):
