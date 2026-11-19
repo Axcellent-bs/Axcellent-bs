@@ -4,6 +4,7 @@ import { IgWhyFacts } from "@/components/data/IgWhyFacts";
 import { SummaryBody, SummaryCard } from "@/components/data/KeywordTrend";
 import { when } from "@/components/data/Sources";
 import { useSkill, type SkillState } from "@/components/data/useSkill";
+import { safeLink } from "@/lib/safeLink";
 import { dataAi, type InstagramAudioItem, type InstagramAudioOutput, type InstagramAudioType } from "@/lib/data";
 
 // 트렌드 1 감지 "인스타" 칩의 인기 오디오 (instagram_audio). 서버가 미리 계산한 목록을 읽기만 한다.
@@ -19,8 +20,8 @@ const TYPES: { key: InstagramAudioType; label: string }[] = [
   { key: "original_sound", label: "오리지널" },
 ];
 
-/** 서버가 준 링크 중 https만 연다 (외부 값이라 javascript: 등은 막는다) */
-export const safeLink = (url: string | null | undefined): string | null => (url && /^https:\/\//i.test(url) ? url : null);
+// 링크 검사는 공용 함수(@/lib/safeLink). 이 파일에서 가져다 쓰던 곳을 위해 다시 내보낸다
+export { safeLink };
 
 /** 125000 → "2:05" */
 function duration(ms: number | null): string | null {
