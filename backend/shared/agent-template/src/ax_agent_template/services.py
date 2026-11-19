@@ -184,6 +184,8 @@ SERVICES: tuple[Service, ...] = (
             "merge_outage_sns_drafts",
             "check_sns_post",
             "publish_sns",
+            "get_publish_control",
+            "set_publish_control",
             "generate_media",
             "prepare_sns_post_from_media",
             "prepare_brief_media",
