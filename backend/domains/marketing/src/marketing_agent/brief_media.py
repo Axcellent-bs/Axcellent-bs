@@ -63,6 +63,9 @@ class PrepareBriefMediaInput(AxModel):
     # 영상 길이(초). 주면 보관된 요청 초안의 길이를 바꾼다.
     # 설정 상한(`MARKETING_VIDEO_MAX_DURATION_S`)은 아래에서 따로 본다(넘으면 `duration_over_limit`)
     duration_s: int | None = Field(default=None, ge=1, le=ABSOLUTE_MAX_DURATION_S, strict=True)
+    # 화면의 긴 영상 경고창에서 사람이 '계속'을 눌렀다는 주장. 감사 기록용일 뿐이다.
+    # 서버는 이 값을 믿지 않는다: 경고창은 UX이고 안전 관문이 아니다(상한·비용 가드는 이 값과 무관).
+    confirmed_long: bool | None = Field(default=None, strict=True)
 
 
 def context_id_for(proposal_id: str) -> str:
@@ -230,14 +233,19 @@ def _video_info(current: int | None, settings: MediaSettings, plan: Any) -> dict
     """화면의 길이 입력용. 상한은 운영자가 정한 설정값이고 `absolute_max_s`는 코드 절대 상한이다."""
     if isinstance(plan, AgentResult):  # 건당 상한 초과로 막혀도 다른 길이를 고를 수 있게 표는 준다
         table = (plan.output or {}).get("by_duration")
+        clips = (plan.output or {}).get("clips_by_duration")
     else:
         table = plan.by_duration
+        clips = plan.clips_by_duration
     return {
         "min_s": 1,
         "max_s": settings.video_max_duration_s,
         "absolute_max_s": ABSOLUTE_MAX_DURATION_S,
+        # 화면 경고창 기준(UX). 이 길이를 넘으면 화면이 시작 전에 확인을 받는다. 안전 관문이 아니다
+        "warn_duration_s": settings.video_warn_duration_s,
         "current_s": current,
         "cost_by_duration": {str(k): v for k, v in (table or {}).items()},
+        "clips_by_duration": {str(k): v for k, v in (clips or {}).items()},
     }
 
 
@@ -250,7 +258,9 @@ def _failed(request: AgentRequest, outcome: str, **output: Any) -> AgentResult:
     )
 
 
-def _prepared_record(sha: str, output: dict[str, Any], now: datetime) -> dict[str, Any]:
+def _prepared_record(
+    sha: str, output: dict[str, Any], now: datetime, confirmed_long: bool | None = None
+) -> dict[str, Any]:
     check = output.get("check") or {}
     generation = output.get("generation") or {}
     label = output.get("label") or {}
@@ -271,6 +281,8 @@ def _prepared_record(sha: str, output: dict[str, Any], now: datetime) -> dict[st
             "problems": list(check.get("problems") or []),
         },
         "prepared_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        # 사람이 긴 영상 경고창에서 '계속'을 눌렀다고 화면이 알린 값(감사용, 판정에 쓰지 않는다)
+        "confirmed_long": confirmed_long,
     }
 
 
@@ -378,7 +390,11 @@ async def prepare_brief_media(
             # 만드는 동안 요청 초안이 바뀌었을 수 있다. 최신 기록에 `prepared`만 덧붙인다
             latest = briefs.handoff(pid) or record
             latest = latest.model_copy(
-                update={"prepared": _prepared_record(sha, output, datetime.now(UTC))}
+                update={
+                    "prepared": _prepared_record(
+                        sha, output, datetime.now(UTC), data.confirmed_long
+                    )
+                }
             )
             briefs.save_handoff(latest)
         except BriefStorageError:

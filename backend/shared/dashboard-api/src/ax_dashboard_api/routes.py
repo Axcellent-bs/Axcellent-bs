@@ -1028,6 +1028,8 @@ class BriefMediaBody(BaseModel):
     """본문은 선택이다. 영상 길이만 받는다(종류·필드는 받지 않는다: 다른 키는 무시한다)."""
 
     duration_s: int | None = Field(default=None, ge=1, le=90, strict=True)  # 코드 절대 상한 90초
+    # 경고창에서 '계속'을 눌렀다는 화면의 주장(감사 기록용). 서버는 믿지 않고 가드에 쓰지 않는다
+    confirmed_long: bool | None = Field(default=None, strict=True)
 
 
 @router.post("/marketing/briefs/{proposal_id}/media")
@@ -1045,7 +1047,11 @@ async def prepare_brief_media(
     """
     _no_org_in_mock()
     return ok(
-        await marketing_client.brief_media_call(proposal_id, body.duration_s if body else None)
+        await marketing_client.brief_media_call(
+            proposal_id,
+            body.duration_s if body else None,
+            confirmed_long=bool(body and body.confirmed_long),
+        )
     )
 
 

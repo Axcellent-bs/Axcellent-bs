@@ -5,6 +5,8 @@
   영상 생성을 거부한다(`video_max_duration_invalid`, 호출 전 fail-closed).
   safety 정책(`thresholds.toml`의 `video_duration`)도 같은 90초라 설정이 정책 상한을 넘을 수 없다
   (같은 값인지 시험이 확인한다).
+- 경고 길이 `MARKETING_VIDEO_WARN_DURATION_S`(1~운영 상한, 기본 30)는 화면 경고창 기준이다.
+  UX 안내일 뿐 안전 관문이 아니다(잘못된 값은 기본값으로 바꾸고 사유 코드만 로그에 남긴다).
 - 단일 클립 한도는 공급자 사실이다(`VideoCaps`, 공급자 어댑터가 `video_caps`로 알린다. 없으면 길이
   제한 없는 단일 클립으로 본다. 목 포함). 요청 길이가 단일 클립 한도를 넘으면 `plan_clips`가 클립
   길이 목록을 만든다.
@@ -24,6 +26,8 @@ from typing import Literal
 ABSOLUTE_MAX_DURATION_S = 90  # 숏폼 상한. safety `video_duration` 정책값과 같아야 한다
 DEFAULT_MAX_DURATION_S = 15
 MAX_DURATION_ENV = "MARKETING_VIDEO_MAX_DURATION_S"
+DEFAULT_WARN_DURATION_S = 30
+WARN_DURATION_ENV = "MARKETING_VIDEO_WARN_DURATION_S"
 
 ClipMode = Literal["first", "extend", "image"]
 
@@ -74,6 +78,33 @@ def parse_max_duration(raw: str | None) -> MaxDuration:
 
 def max_duration_from_env() -> MaxDuration:
     return parse_max_duration(os.getenv(MAX_DURATION_ENV))
+
+
+@dataclass(frozen=True)
+class WarnDuration:
+    """경고창을 띄우는 길이(초). 이 길이를 넘는 요청은 화면이 시작 전에 사람 확인을 받는다.
+
+    화면(UX) 안내용 값일 뿐 안전 관문이 아니다. 상한·비용 가드는 이 값과 무관하게 그대로 돈다.
+    `problem`은 설정이 잘못돼 기본값으로 바꿨다는 사유 코드(로그용, 값은 담지 않는다).
+    """
+
+    seconds: int
+    problem: str | None = None
+
+
+def parse_warn_duration(raw: str | None, max_s: int) -> WarnDuration:
+    """`1 ~ max_s`(운영 상한) 정수만 받는다. 비었거나 잘못되면 기본값(상한 이하)이다."""
+    default = min(DEFAULT_WARN_DURATION_S, max_s)
+    text = (raw or "").strip()
+    if not text:
+        return WarnDuration(default)
+    if not text.isascii() or not text.isdigit() or not 1 <= int(text) <= max_s:
+        return WarnDuration(default, "video_warn_duration_invalid")
+    return WarnDuration(int(text))
+
+
+def warn_duration_from_env(max_s: int) -> WarnDuration:
+    return parse_warn_duration(os.getenv(WARN_DURATION_ENV), max_s)
 
 
 def _split(total: int, lo: int, hi: int) -> list[int]:

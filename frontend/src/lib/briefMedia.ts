@@ -31,6 +31,10 @@ export interface VideoEstimate {
   current_s: number | null;
   /** 길이(초) → 예상 비용(원). 서버가 단가표로 계산한 값이고, 만들 수 없는 길이는 없다 */
   cost_by_duration: Record<string, number>;
+  /** 이 길이(초)를 넘기면 시작 전에 경고창을 띄운다(서버 설정 MARKETING_VIDEO_WARN_DURATION_S). 화면 안내용이며 안전 관문이 아니다. 옛 서버는 없다 */
+  warn_duration_s?: number;
+  /** 길이(초) → 이어 붙일 클립 수. 옛 서버는 없다 */
+  clips_by_duration?: Record<string, number>;
 }
 
 /** 지금 요청 초안으로 만든 미디어 초안(AI 표시를 입히고 검사까지 한 결과) */
@@ -146,6 +150,57 @@ export function durationProblemKo(e: MediaEstimate, seconds: number): string | n
   if (e.per_item_limit_krw != null && cost > e.per_item_limit_krw) return `${seconds}초는 예상 비용 ${won(cost)}이 건당 상한 ${won(e.per_item_limit_krw)}을 넘어 만들 수 없습니다.`;
   if (e.monthly_budget_krw != null && e.month_total_krw != null && e.month_total_krw + cost > e.monthly_budget_krw) return `${seconds}초는 이달 비용 상한(${won(e.monthly_budget_krw)})을 넘게 되어 만들 수 없습니다.`;
   return null;
+}
+
+/** 긴 영상 경고창을 띄워야 하는 길이인가. 서버가 경고 길이를 알려 줬고 고른 길이가 그보다 길 때만 true(같으면 경고 없음) */
+export function needsLongWarning(v: VideoEstimate | null | undefined, seconds: number | null | undefined): boolean {
+  if (!v || seconds == null || typeof v.warn_duration_s !== "number") return false;
+  return seconds > v.warn_duration_s;
+}
+
+export interface LongWarning { title: string; lines: string[]; notes: string[]; confirmLabel: string; cancelLabel: string }
+
+/** 경고창 문구. 숫자는 서버가 준 값만 쓰고, 없으면 읽을 수 없다고 적는다(지어내지 않는다) */
+export function longWarningKo(e: MediaEstimate, seconds: number): LongWarning {
+  const v = e.video;
+  const cost = v ? durationCostKrw(v, seconds) : null;
+  const clips = v?.clips_by_duration?.[String(seconds)];
+  const lines = [
+    `선택한 길이: ${seconds}초${typeof v?.warn_duration_s === "number" ? ` (경고 기준 ${v.warn_duration_s}초보다 깁니다)` : ""}`,
+    typeof clips === "number" ? `이어 붙일 클립 수: ${clips}개` : "이어 붙일 클립 수를 읽을 수 없음",
+    cost != null ? `예상 비용: ${won(cost)}${e.basis ? ` (${BASIS_KO[e.basis] ?? e.basis})` : ""}` : "예상 비용을 계산할 수 없습니다.",
+    e.per_item_limit_krw != null ? `건당 상한: ${won(e.per_item_limit_krw)}` : "건당 상한 설정을 읽을 수 없음",
+  ];
+  const month = e.month_total_krw != null ? `이달 누적 ${won(e.month_total_krw)}` : "이달 누적을 읽을 수 없음";
+  lines.push(`${month} / ${e.monthly_budget_krw != null ? `월 상한 ${won(e.monthly_budget_krw)}` : "월 상한 설정을 읽을 수 없음"}`);
+  return {
+    title: "긴 영상을 만들까요?",
+    lines,
+    notes: [
+      "길이가 길수록 장면이나 인물이 이어지지 않을 수 있습니다. 짧은 영상을 여러 개 만들어 이어 붙이기 때문입니다.",
+      "비용은 클립 수만큼 늘어납니다.",
+      "예상 비용이 건당 상한을 넘으면 만들기 전에 사람 승인 단계로 넘어갈 수 있습니다.",
+    ],
+    confirmLabel: "계속",
+    cancelLabel: "길이 줄이기",
+  };
+}
+
+/**
+ * '시작'을 눌렀을 때의 관문(화면 안내일 뿐 안전 관문이 아니다: 서버가 상한·비용을 따로 막는다).
+ * 경고 길이를 넘으면 `ask`로 사람 확인을 받고, 확인하지 않으면 `send`를 부르지 않는다.
+ * 부른 쪽이 `send(confirmedLong)`으로 요청을 보낸다. 보냈으면 true.
+ */
+export async function gateLongStart(
+  e: MediaEstimate | null | undefined,
+  seconds: number | null | undefined,
+  ask: () => Promise<boolean>,
+  send: (confirmedLong: boolean) => Promise<void>,
+): Promise<boolean> {
+  if (!needsLongWarning(e?.video, seconds)) { await send(false); return true; }
+  if (!(await ask())) return false;
+  await send(true);
+  return true;
 }
 
 /** 길이 입력 옆 안내. 상한은 운영자가 정한 값이라는 점을 밝힌다 */

@@ -523,6 +523,15 @@ class CostPlan:
     settled: bool
     # 영상: 길이(초) → 예상 비용(원) 표(1초~설정 상한). 길이 선택 화면용. 계산 못 하는 길이는 뺀다
     by_duration: dict[int, int] | None = None
+    # 영상: 길이(초) → 이어 붙일 클립 수. 비용 표와 같은 길이만 담는다(경고창 안내용)
+    clips_by_duration: dict[int, int] | None = None
+
+
+def _clip_count_table(
+    adapter: object, entry: pricing.PriceEntry | None, seconds_ok: set[int]
+) -> dict[int, int]:
+    """길이별 클립 수. `_clip_plan`이 만드는 계획의 길이만 센다(외부 호출 없음)."""
+    return {s: len(_clip_plan(adapter, entry, s)) for s in sorted(seconds_ok)}
 
 
 def _cost_table(
@@ -652,10 +661,14 @@ def plan_cost(
         assert settings.fx_usd_krw is not None and settings.margin_pct is not None  # noqa: S101
         krw_est = pricing.krw_estimate(usd_est, settings.fx_usd_krw, settings.margin_pct)
     table = None
+    clip_table = None
     if with_table and kind == "video":
         table = _cost_table(adapter, entry, prompt, settings)
+        clip_table = _clip_count_table(adapter, entry, set(table))
     if settings.max_cost_krw_per_item is not None and krw_est > settings.max_cost_krw_per_item:
         extra = {"by_duration": table} if table is not None else {}
+        if clip_table is not None:
+            extra["clips_by_duration"] = clip_table
         return _fail(
             request,
             "cost_over_single",
@@ -663,4 +676,4 @@ def plan_cost(
             limit_krw=settings.max_cost_krw_per_item,
             **extra,
         )
-    return CostPlan(key, krw_est, False, table)
+    return CostPlan(key, krw_est, False, table, clip_table)

@@ -14,11 +14,13 @@
   비어 있으면 실제 공급자 호출을 거부한다(목 모드는 허용).
 - 영상 길이 상한: `MARKETING_VIDEO_MAX_DURATION_S`(운영자가 정한다, 1~90초, 기본 15).
   숫자가 아니거나 범위 밖이면 영상 생성을 거부한다(`video_max_duration_invalid`).
+  경고 길이 `MARKETING_VIDEO_WARN_DURATION_S`(1~상한, 기본 30): 화면 경고창 기준(UX).
   단일 클립 한도(공급자 규격)와 별개이며, 상한이 클립 한도보다 크면 클립을 이어 붙인다.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from dataclasses import dataclass
@@ -29,8 +31,12 @@ from pathlib import Path
 from marketing_agent.media.base import MediaKind
 from marketing_agent.media.video_limits import (
     DEFAULT_MAX_DURATION_S,
+    DEFAULT_WARN_DURATION_S,
     max_duration_from_env,
+    warn_duration_from_env,
 )
+
+log = logging.getLogger(__name__)
 
 MOCK = "mock"
 LEDGER_DB_ENV = "MARKETING_MEDIA_LEDGER_DB"
@@ -137,6 +143,8 @@ class MediaSettings:
     audio_mode: str = "off"
     video_max_duration_s: int = DEFAULT_MAX_DURATION_S
     video_max_duration_problem: str | None = None  # 설정이 잘못됐으면 코드(영상 생성 거부)
+    # 경고창 기준 길이. 화면 안내용이며 안전 관문이 아니다(잘못된 값은 기본값으로 바꾼다)
+    video_warn_duration_s: int = DEFAULT_WARN_DURATION_S
 
     @classmethod
     def from_env(cls) -> MediaSettings:
@@ -145,7 +153,11 @@ class MediaSettings:
         video_model = _text("MARKETING_VIDEO_MODEL")
         video_provider, video_model = _video_selection(video_provider, video_model)
         max_duration = max_duration_from_env()
+        warn = warn_duration_from_env(max_duration.seconds)
+        if warn.problem is not None:
+            log.warning("video warn duration setting ignored: %s", warn.problem)  # 사유 코드만
         return cls(
+            video_warn_duration_s=warn.seconds,
             video_max_duration_s=max_duration.seconds,
             video_max_duration_problem=max_duration.problem,
             image_provider=_text("MARKETING_IMAGE_PROVIDER").lower() or MOCK,

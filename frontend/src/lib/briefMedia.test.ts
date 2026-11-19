@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 미디어 만들기의 비용 줄·결과 문구가 서버 값만 쓰는지.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clampDuration, durationCostKrw, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, remainingSeconds, remainingKo, canDecideNow, decideErrorKo, approvalLink, type MediaEstimate, type PublishState } from "./briefMedia.ts";
+import { clampDuration, durationCostKrw, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, gateLongStart, longWarningKo, needsLongWarning, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, remainingSeconds, remainingKo, canDecideNow, decideErrorKo, approvalLink, type MediaEstimate, type PublishState } from "./briefMedia.ts";
 
 const estimate = (over: Partial<MediaEstimate> = {}): MediaEstimate => ({
   status: "ok", reason_code: null, media_kind: "video", cost_krw: 835, settled: false, basis: "price_table",
@@ -184,4 +184,75 @@ test("영상 길이: 입력은 서버가 알려 준 범위(1~운영자 상한)�
   assert.match(durationNoteKo(video), /운영자가 서버 설정/);
   assert.match(durationNoteKo(video), /최대 90초/);
   assert.match(estimateBlockKo("video_max_duration_invalid"), /1~90초/);
+});
+
+// --- 긴 영상 경고창(화면 안내일 뿐 안전 관문이 아니다) ---
+
+const warnVideo = (over: Partial<NonNullable<MediaEstimate["video"]>> = {}) => ({
+  min_s: 1, max_s: 90, absolute_max_s: 90, current_s: 15, warn_duration_s: 30,
+  cost_by_duration: { "15": 835, "30": 1700, "31": 1800, "60": 3400, "90": 5100 },
+  clips_by_duration: { "15": 1, "30": 2, "31": 3, "60": 5, "90": 7 }, ...over,
+});
+
+test("경고창은 경고 길이를 넘을 때만 뜬다(같은 길이는 경고 없음)", () => {
+  const v = warnVideo();
+  assert.equal(needsLongWarning(v, 15), false);
+  assert.equal(needsLongWarning(v, 30), false);
+  assert.equal(needsLongWarning(v, 31), true);
+  assert.equal(needsLongWarning(v, 90), true);
+});
+
+test("서버가 경고 길이를 주지 않으면(옛 서버)·길이가 없으면 경고창을 띄우지 않는다", () => {
+  assert.equal(needsLongWarning(warnVideo({ warn_duration_s: undefined }), 90), false);
+  assert.equal(needsLongWarning(null, 90), false);
+  assert.equal(needsLongWarning(warnVideo(), null), false);
+});
+
+test("경고창 문구는 서버 값(길이·클립 수·비용·건당/월 한도)과 쉬운 안내를 담는다", () => {
+  const w = longWarningKo(estimate({ video: warnVideo() }), 60);
+  const text = w.lines.join(" ");
+  assert.match(text, /선택한 길이: 60초/);
+  assert.match(text, /이어 붙일 클립 수: 5개/);
+  assert.match(text, /예상 비용: 3,400원/);
+  assert.match(text, /건당 상한: 2,000원/);
+  assert.match(text, /이달 누적 1,670원 \/ 월 상한 30,000원/);
+  const notes = w.notes.join(" ");
+  assert.match(notes, /장면이나 인물이 이어지지 않을 수 있습니다/);
+  assert.match(notes, /클립 수만큼 늘어납니다/);
+  assert.match(notes, /건당 상한을 넘으면.*사람 승인/);
+  assert.equal(w.confirmLabel, "계속");
+  assert.equal(w.cancelLabel, "길이 줄이기");
+});
+
+test("경고창은 서버가 주지 않은 값을 지어내지 않는다", () => {
+  const w = longWarningKo(estimate({ per_item_limit_krw: null, month_total_krw: null, video: warnVideo({ clips_by_duration: undefined, cost_by_duration: {} }) }), 60);
+  const text = w.lines.join(" ");
+  assert.match(text, /클립 수를 읽을 수 없음/);
+  assert.match(text, /예상 비용을 계산할 수 없습니다/);
+  assert.match(text, /건당 상한 설정을 읽을 수 없음/);
+});
+
+test("경고 길이 이하면 묻지 않고 바로 보낸다(확인 표시 없음)", async () => {
+  const sent: boolean[] = [];
+  let asked = 0;
+  const ok = await gateLongStart(estimate({ video: warnVideo() }), 30, async () => { asked += 1; return true; }, async (c) => { sent.push(c); });
+  assert.equal(ok, true);
+  assert.equal(asked, 0);
+  assert.deepEqual(sent, [false]);
+});
+
+test("경고 길이를 넘고 취소하면 요청이 나가지 않는다", async () => {
+  const sent: boolean[] = [];
+  const ok = await gateLongStart(estimate({ video: warnVideo() }), 60, async () => false, async (c) => { sent.push(c); });
+  assert.equal(ok, false);
+  assert.deepEqual(sent, []);
+});
+
+test("경고 길이를 넘고 확인하면 요청이 나가고 확인 표시가 붙는다", async () => {
+  const sent: boolean[] = [];
+  let asked = 0;
+  const ok = await gateLongStart(estimate({ video: warnVideo() }), 60, async () => { asked += 1; return true; }, async (c) => { sent.push(c); });
+  assert.equal(ok, true);
+  assert.equal(asked, 1);
+  assert.deepEqual(sent, [true]);
 });

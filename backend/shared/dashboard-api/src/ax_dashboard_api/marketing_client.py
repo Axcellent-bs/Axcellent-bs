@@ -145,18 +145,24 @@ def brief_media_context(proposal_id: str) -> str:
     return f"brfm_{proposal_id}"
 
 
-async def brief_media_call(proposal_id: str, duration_s: int | None = None) -> dict[str, Any]:
+async def brief_media_call(
+    proposal_id: str, duration_s: int | None = None, *, confirmed_long: bool = False
+) -> dict[str, Any]:
     """넘긴 기획안의 요청 초안으로 미디어 초안을 만든다(`prepare_brief_media`). 게시하지 않는다.
 
     종류·필드는 보내지 않는다(마케팅이 보관본에서 읽는다). 같은 기획안은 키가 같고, 마케팅이
     생성 장부로 중복 생성을 막는다. 영상 생성이 길어 마감은 영상 준비와 같다.
     `duration_s`: 사람이 고른 영상 길이(설정 상한 안인지는 마케팅이 판정). 길이마다 키가 다르다.
+    `confirmed_long`: 화면의 긴 영상 경고창에서 '계속'을 눌렀다는 주장. 감사 기록용으로만 넘기고
+    멱등 키에는 넣지 않는다(경고창은 UX일 뿐 안전 관문이 아니다: 상한·비용 가드는 마케팅이 본다).
     """
     payload: dict[str, Any] = {"proposal_id": proposal_id}
     key = f"ui:brief-media:{proposal_id}"
     if duration_s is not None:
         payload["duration_s"] = duration_s
         key += f":{duration_s}"
+    if confirmed_long:
+        payload["confirmed_long"] = True
     out = await call(
         "prepare_brief_media",
         payload,
