@@ -576,6 +576,16 @@ metric = "daily_count"
 op = ">"
 value = 3
 
+# 게시 재개(`resume`=1)는 사람이 한 번 확인한다. 중지(`resume`=0)는 걸리지 않아 A로 바로 된다.
+# 필드가 없거나 정수가 아니면 걸린 것으로 본다(fail-closed)
+[[rules]]
+key = "publish_resume_needs_human"
+action = "set_publish_control"
+metric = "param"
+field = "resume"
+op = ">"
+value = 0
+
 # 공지의 SNS 채널은 publish_sns로 보내야 한다 (마케팅 쪽 거부와 이중 방어)
 [[rules]]
 key = "notice_sns_channel"

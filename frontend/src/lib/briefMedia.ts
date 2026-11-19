@@ -178,7 +178,7 @@ export interface PublishState {
 export interface PublishAnswer {
   status: string;
   outcome: string | null;
-  output: { publish?: PublishState | null; review_id?: string } | null;
+  output: { publish?: PublishState | null; review_id?: string; pause_reason?: string; auto_publish_off?: boolean; manual_available?: boolean } | null;
 }
 
 export const PUBLISH_EXPIRY_MIN = 10;
@@ -194,6 +194,8 @@ const PUBLISH_FAIL_KO: Record<string, string> = {
   daily_limit_reached: "24시간 게시 상한에 도달해 지금은 요청할 수 없습니다. 나중에 다시 시도해 주세요.",
   publish_halted: "게시가 중단된 상태라 요청할 수 없습니다. 담당자 확인이 필요합니다.",
   limits_config_error: "서버의 게시 한도 설정을 읽을 수 없어 요청하지 않았습니다.",
+  publish_paused: "자동 게시가 꺼져 있어 요청할 수 없습니다(수동 게시로 전환 예정). 초안과 미디어 생성은 계속 쓸 수 있습니다. 담당자 확인이 필요합니다.",
+  publish_control_error: "서버의 자동 게시 스위치를 읽을 수 없어 안전하게 요청하지 않았습니다. 초안과 미디어 생성은 계속 쓸 수 있습니다. 담당자 확인이 필요합니다.",
   adapter_unavailable: "서버에 Instagram 게시 설정이 없어 요청하지 않았습니다. 승인을 받아도 게시할 수 없는 상태입니다.",
   execute_rejected: "안전 장치가 이 게시 요청을 거절했습니다.",
   execute_failed: "안전 장치에서 요청을 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.",
@@ -215,6 +217,8 @@ const PUBLISH_FAILURE_KO: Record<string, string> = {
   review_timeout: "승인 시간이 지나 자동으로 닫혔습니다.",
   daily_limit_reached: "24시간 게시 상한에 도달해 게시하지 못했습니다.",
   publish_halted: "게시가 중단돼 게시하지 못했습니다.",
+  publish_paused: "승인 뒤 자동 게시가 꺼져 게시하지 않았습니다(수동 게시로 전환 예정). 자동 게시가 켜진 뒤 새로 요청해야 합니다.",
+  publish_control_error: "자동 게시 스위치를 읽을 수 없어 안전하게 게시하지 않았습니다. 담당자 확인이 필요합니다.",
   adapter_unavailable: "서버에 Instagram 게시 설정이 없어 게시하지 못했습니다.",
 };
 
@@ -259,7 +263,10 @@ export function publishResultKo(answer: PublishAnswer): PublishResult {
   if (answer.status === "completed" && answer.outcome === "already_requested") {
     return { kind: "already", text: "이미 요청된 건입니다. 새로 요청하지 않았습니다." };
   }
-  return { kind: "failed", text: publishReasonKo(answer.outcome) };
+  const base = publishReasonKo(answer.outcome);
+  // 꺼 둔 사유는 담당자가 적은 짧은 글이다(비밀값 없음). 있을 때만 붙인다
+  const why = answer.outcome === "publish_paused" ? answer.output?.pause_reason : null;
+  return { kind: "failed", text: why ? `${base} 꺼 둔 사유: ${why}` : base };
 }
 
 /** 연결 오류(HTTP 상태)를 화면 문구로. 서버가 보낸 문장은 쓰지 않는다 */

@@ -258,12 +258,39 @@
     },
     {
       "id": "publish_sns",
-      "description": "내용이 확정된 SNS 게시(post_draft_id, asset_ref, asset_sha256, caption, media_kind)를 Instagram에 올린다. C 등급이라 항상 사람 승인이 필요하다: 멱등 키는 내용 해시(content_sha)를 포함하고, held면 input-required로 돌려준다. 승인(safety.review_decided 구독, 대비책 폴링) 뒤 같은 키로 execute()를 다시 불러 executed를 받은 뒤에만 어댑터를 부른다. 상태 held→approved→publishing→published/failed, media_publish는 1회, 내용이 바뀌면 content_changed. media_kind=carousel이면 이미지 2~10장(asset_refs·asset_sha256s, 장마다 AI 라벨·규격 점검을 통과한 초안과 같아야 하고 아니면 승인 요청 전에 carousel_not_publishable): 자식 컨테이너 → 부모 컨테이너(AI 표시는 부모에만) → media_publish 1회이며, 승인 대기 큐 요약과 결과에 장수·각 참조가 남고 재시작 복구는 부모 컨테이너 상태로 판정해 두 번 올리지 않는다. 실제 어댑터의 캐러셀은 MARKETING_IG_CAROUSEL_ENABLED를 켜기 전에는 carousel_unsupported로 거부한다. 지금은 목 어댑터만 있고 실제 모드는 adapter_unavailable로 거부한다.",
+      "description": "자동 게시 스위치(get/set_publish_control, DB 표 sns_publish_control의 paused=자동 게시 꺼짐)가 꺼짐이면 승인 요청 전에 publish_paused로 거절하고(사유는 output.pause_reason, Graph 호출·승인 요청 없음) 이미 승인된 건도 media_publish 직전에 막으며, 스위치를 읽을 수 없으면 publish_control_error로 막는다. 초안·미디어·자동 넘김은 영향이 없다. 내용이 확정된 SNS 게시(post_draft_id, asset_ref, asset_sha256, caption, media_kind)를 Instagram에 올린다. C 등급이라 항상 사람 승인이 필요하다: 멱등 키는 내용 해시(content_sha)를 포함하고, held면 input-required로 돌려준다. 승인(safety.review_decided 구독, 대비책 폴링) 뒤 같은 키로 execute()를 다시 불러 executed를 받은 뒤에만 어댑터를 부른다. 상태 held→approved→publishing→published/failed, media_publish는 1회, 내용이 바뀌면 content_changed. media_kind=carousel이면 이미지 2~10장(asset_refs·asset_sha256s, 장마다 AI 라벨·규격 점검을 통과한 초안과 같아야 하고 아니면 승인 요청 전에 carousel_not_publishable): 자식 컨테이너 → 부모 컨테이너(AI 표시는 부모에만) → media_publish 1회이며, 승인 대기 큐 요약과 결과에 장수·각 참조가 남고 재시작 복구는 부모 컨테이너 상태로 판정해 두 번 올리지 않는다. 실제 어댑터의 캐러셀은 MARKETING_IG_CAROUSEL_ENABLED를 켜기 전에는 carousel_unsupported로 거부한다. 지금은 목 어댑터만 있고 실제 모드는 adapter_unavailable로 거부한다.",
       "input_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsInput",
       "output_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsOutput",
       "grade": "C",
       "allowed_requesters": [
         "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "get_publish_control",
+      "description": "Instagram 자동 게시 스위치의 현재 상태(paused·reason·updated_by·updated_at, 최근 변경 내력)를 읽는다. 행이 없으면 source=default(게시 가능, 환경변수 MARKETING_SNS_PUBLISH_PAUSED가 켜져 있으면 중지). 상태를 바꾸지 않는다. DB를 읽을 수 없으면 publish_control_error.",
+      "input_schema": "agents/marketing/src/marketing_agent/publish_control.py#GetPublishControlInput",
+      "output_schema": "agents/marketing/src/marketing_agent/publish_control.py#PublishControlOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "orchestrator",
+        "dashboard-api",
+        "shop-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "set_publish_control",
+      "description": "Instagram 자동 게시 스위치를 끄거나 켠다(channel, paused=자동 게시 꺼짐, reason, updated_by). 자동 게시(publish_sns)만 끄고 수동 게시는 후속 PR이며 응답에 auto_publish_off·manual_available(지금 false)을 둔다. 초안·미디어·자동 넘김은 계속 돈다. 끄기는 A등급으로 바로 되고, 켜기는 안전 레이어 규칙(publish_resume_needs_human)으로 C등급 사람 승인을 거친다(보류되면 held와 review_id, 승인 뒤 같은 요청을 다시 보내면 적용). 바뀐 내력(누가·언제·사유·execution_id)을 sns_publish_control_log에 남긴다. updated_by는 대시보드 API가 사람 토큰에서 채운다. 같은 상태로 다시 보내면 unchanged.",
+      "input_schema": "agents/marketing/src/marketing_agent/publish_control.py#SetPublishControlInput",
+      "output_schema": "agents/marketing/src/marketing_agent/publish_control.py#PublishControlOutput",
+      "grade": "A",
+      "allowed_requesters": [
         "dashboard-api"
       ],
       "verifier": null,

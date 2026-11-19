@@ -34,7 +34,13 @@ from ax_contracts.schemas import (
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.finance import ContentFormat
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
-from marketing_agent import brief_media, brief_publish, outage_sns_media, shop_client
+from marketing_agent import (
+    brief_media,
+    brief_publish,
+    outage_sns_media,
+    publish_control,
+    shop_client,
+)
 from marketing_agent.brief_handoff import (
     AUTO,
     DRAFT_MEDIA_KIND,
@@ -1154,6 +1160,14 @@ async def request_brief_publish_skill(request: AgentRequest) -> AgentResult:
     )
 
 
+async def get_publish_control_skill(request: AgentRequest) -> AgentResult:
+    return await publish_control.get_publish_control(request)
+
+
+async def set_publish_control_skill(request: AgentRequest) -> AgentResult:
+    return await publish_control.set_publish_control(request, from_decision=_from_decision)
+
+
 async def publish_sns_skill(request: AgentRequest) -> AgentResult:
     return await publish_sns(request, STATE.sns)
 
@@ -1319,6 +1333,8 @@ HANDLERS = {
     "merge_outage_sns_drafts": merge_outage_sns_drafts_skill,
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,
+    "get_publish_control": get_publish_control_skill,
+    "set_publish_control": set_publish_control_skill,
     "cancel_campaign": cancel_campaign,
     "generate_media": generate_media_skill,
     "prepare_sns_post_from_media": prepare_sns_post_from_media_skill,

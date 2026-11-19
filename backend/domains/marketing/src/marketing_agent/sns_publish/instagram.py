@@ -149,6 +149,8 @@ ERROR_RULES: tuple[ErrorRule, ...] = (
     ErrorRule(9, 2207042, "ig_daily_limit", "fail"),
     ErrorRule(4, 2207051, "ig_spam_suspected", "fail"),
     ErrorRule(25, 2207050, "ig_account_restricted", "fail"),
+    # 368: Graph 공통 오류 "정책 위반으로 일시 차단". 서브코드는 확인하지 않고 정지 계열로 묶는다
+    ErrorRule(368, None, "ig_account_restricted", "fail"),
     ErrorRule(24, 2207006, "ig_media_not_found", "new_container"),
     ErrorRule(24, 2207008, "ig_container_missing", "retry"),
     ErrorRule(9004, 2207052, "ig_media_url_unreachable", "fail"),
@@ -162,6 +164,9 @@ ERROR_RULES: tuple[ErrorRule, ...] = (
 )
 # 이 실패 코드가 나면 이후 게시를 사람 확인 전까지 막는다(`publish_halted`)
 HALT_FAILURES = frozenset({"ig_daily_limit", "ig_spam_suspected", "ig_account_restricted"})
+# [확인 필요] 아래 코드는 근거가 불확실해 매핑을 바꾸지 않았다(모르면 `ig_unknown_error`로 실패).
+#  - 10(권한 없음)·200번대(권한 오류)는 계정 정지와 구분할 수 없다. 실제 응답을 본 뒤 정한다.
+#  - 190은 토큰 오류인데 계정 정지(세션 무효 서브코드)에서도 올 수 있는지 확인하지 못했다.
 TOKEN_ERROR_CODE = 190  # 공식 표에 없음 [확인 필요]. 사람이 토큰을 다시 발급한다
 
 
