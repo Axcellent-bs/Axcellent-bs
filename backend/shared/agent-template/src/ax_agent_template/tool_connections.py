@@ -216,6 +216,7 @@ def _break_stale(lock: str) -> bool:
     프로세스가 새로 잡은 잠금을 지울 수 있다. 그래서 지우지 않고 저마다 다른 이름으로 옮긴 뒤
     (옮기기는 한 프로세스만 성공한다) 옮긴 파일이 여전히 오래됐는지 다시 본다.
     새 잠금을 옮겨 왔으면 잠금 자리가 비어 있을 때만 되돌린다(덮어쓰지 않는 os.link).
+    되돌리지 못해도 그 잠금의 주인은 풀 때 표(`_release`)를 보고 남의 잠금을 지우지 않는다.
     """
     aside = f"{lock}.stale.{os.getpid()}.{uuid.uuid4().hex[:8]}"
     try:
@@ -238,6 +239,25 @@ def _break_stale(lock: str) -> bool:
             os.remove(aside)
         except OSError:
             pass
+
+
+def _release(lock: str, token: str) -> None:
+    """내 표가 적힌 잠금만 지운다.
+
+    오래 붙잡아 남이 오래된 잠금으로 보고 깨고 새로 잡았으면, 그 자리의 잠금은 남의 것이라
+    지우지 않는다. 읽고-지우기 사이 틈은 남지만 LOCK_STALE초 넘게 붙잡았을 때만 생긴다.
+    """
+    try:
+        held = Path(lock).read_text(encoding="ascii", errors="replace")
+    except OSError:
+        return  # 이미 없다
+    if held != token:
+        logger.warning("도구 연결 잠금이 남의 것으로 바뀌어 지우지 않는다: %s", lock)
+        return
+    try:
+        os.remove(lock)
+    except OSError:
+        pass
 
 
 @contextmanager
@@ -273,18 +293,24 @@ def _writing() -> Iterator[None]:
                 )
             time.sleep(delay)
             delay = min(delay * 2, 0.2)
+        # 잠금마다 다른 표(pid.uuid)를 적어 둔다. 풀 때 표가 같을 때만 지운다
+        token = f"{os.getpid()}.{uuid.uuid4().hex}"
         try:
             try:
-                os.write(fd, str(os.getpid()).encode("ascii"))
+                os.write(fd, token.encode("ascii"))
             finally:
                 os.close(fd)
+        except BaseException:
+            try:
+                os.remove(lock)  # 방금 O_EXCL로 만든 내 잠금이라 표 없이도 지운다
+            except OSError:
+                pass
+            raise
+        try:
             _cache = None  # 다른 프로세스가 막 쓴 것을 놓치지 않게 다시 읽는다
             yield
         finally:
-            try:
-                os.remove(lock)
-            except OSError:
-                pass
+            _release(lock, token)
 
 
 def _read_for_write() -> list[ToolConnection]:

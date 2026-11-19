@@ -426,3 +426,70 @@ def test_record_check_is_written_to_history(vault: Path) -> None:
     assert lines[1]["id"] == conn.id and lines[1]["kind"] == "jenkins"
     assert set(lines[1]) == {"at", "by", "action", "id", "kind", "name"}
     assert SECRET not in raw and "ci.local" not in raw and "확인 실패 문구" not in raw
+
+
+def test_release_keeps_lock_now_held_by_someone_else(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """내 잠금이 그사이 남의 잠금으로 바뀌었으면 풀 때 지우지 않는다."""
+    lock = Path(str(vault) + ".lock")
+    real_write = tc._write
+
+    def write_then_lose_lock(conns):
+        real_write(conns)
+        lock.write_text("other-token")  # 오래 걸려 남이 깨고 새로 잡았다
+
+    monkeypatch.setattr(tc, "_write", write_then_lose_lock)
+    assert _save().id == "jenkins-1"
+    assert lock.read_text() == "other-token"
+
+
+def test_lock_file_holds_unique_token_and_is_released(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = Path(str(vault) + ".lock")
+    seen: list[str] = []
+    real_write = tc._write
+
+    def spy(conns):
+        seen.append(lock.read_text())
+        real_write(conns)
+
+    monkeypatch.setattr(tc, "_write", spy)
+    _save()
+    _save("두 번째")
+    assert len(seen) == 2 and seen[0] != seen[1]
+    assert all(s.startswith(f"{os.getpid()}.") for s in seen)
+    assert not lock.exists()
+
+
+def test_stale_break_does_not_clobber_lock_taken_while_putting_back(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """남의 새 잠금을 되돌리려는데 그 자리를 또 다른 프로세스가 잡았으면 덮어쓰지 않는다."""
+    lock = Path(str(vault) + ".lock")
+    lock.write_text("12345")
+    old = time.time() - tc.LOCK_STALE - 5
+    os.utime(lock, (old, old))
+    real_stat, real_link = os.stat, os.link
+    swapped = {"done": False}
+
+    def racy_stat(path, *a, **k):
+        result = real_stat(path, *a, **k)
+        if str(path) == str(lock) and not swapped["done"]:
+            swapped["done"] = True
+            lock.write_text("second")
+        return result
+
+    def racy_link(src, dst, *a, **k):
+        Path(str(dst)).write_text("third")  # 되돌리기 직전 세 번째 프로세스가 잡았다
+        return real_link(src, dst, *a, **k)
+
+    monkeypatch.setattr(tc.os, "stat", racy_stat)
+    monkeypatch.setattr(tc.os, "link", racy_link)
+    monkeypatch.setattr(tc, "LOCK_TIMEOUT", 0.3)
+    with pytest.raises(tc.ToolConnectionError) as e:
+        _save()
+    assert e.value.code == "busy"
+    assert lock.read_text() == "third"
+    assert not list(vault.parent.glob(vault.name + ".lock.*"))
