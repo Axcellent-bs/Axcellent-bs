@@ -256,7 +256,9 @@ def _done_build(status: str = "done") -> Any:
         ]
         report.finished_at = NOW
         if kwargs.get("progress"):
-            kwargs["progress"](report)
+            got = kwargs["progress"](report)  # 실제 build처럼 코루틴이면 기다린다
+            if asyncio.iscoroutine(got):
+                await got
         return report
 
     return build

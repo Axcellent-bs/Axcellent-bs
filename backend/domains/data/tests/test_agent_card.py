@@ -68,6 +68,7 @@ def test_card_validates(card: AgentCard) -> None:
         "trend_report_create",
         "trend_report_get",
         "trend_report_list",
+        "trend_report_insight",
         "data_chat_send",
         "data_chat_list",
         "data_chat_get",

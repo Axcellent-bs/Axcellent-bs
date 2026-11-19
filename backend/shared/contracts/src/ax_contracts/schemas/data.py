@@ -15,6 +15,7 @@ from typing import Any, Literal, Self
 from pydantic import Field, model_validator
 
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
+from ax_contracts.schemas.planning import ReceiveInsightInput
 
 # ---------- impact_analysis ----------
 
@@ -4602,10 +4603,61 @@ class TrendReportListItem(AxModel):
     caller: ReportCaller
     product: str | None = None
     summary_line: str | None = None
+    # v3(11/20): 기획 입력을 만들 수 있는지(저장된 보고서로 계산), 기획에 보낸 결과
+    has_insight: bool | None = None
+    handoff: TrendReportHandoffOutput | None = None
 
 
 class TrendReportListOutput(AxModel):
     items: list[TrendReportListItem] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------- 총괄 연결 (11/20, 15번)
+# 총괄 plan: ① data trend_report_create(caller orchestrator → 긴 작업: WORKING + task_id, 진행
+# task.progress, 끝 task.completed) → ② data trend_report_insight(report_id) → ③ planning
+# receive_insight(②의 insight 그대로). 총괄은 결과에서 번호만 넘긴다.
+
+
+class TrendReportCompletedOutput(AxModel):
+    """task.completed output (번호와 짧은 사실만, 보고서 본문은 싣지 않는다)."""
+
+    report_id: str
+    status: ReportStatus
+    summary_line: str | None = None
+    report_path: str  # "/data/trend#request?id=<id>"
+    has_insight: bool = False  # trend_report_insight가 기획 입력을 만들 수 있는지
+    insight_reason: str | None = None  # 못 만들면 이유
+
+
+class TrendReportInsightInput(AxModel):
+    report_id: str = Field(min_length=1, max_length=64)
+
+
+class TrendReportInsightOutput(AxModel):
+    """보고서 → 기획 receive_insight 입력 그대로 (같은 보고서면 늘 같은 결과, insight_id 고정)."""
+
+    report_id: str
+    insight: ReceiveInsightInput | None = None
+    reason: str | None = None  # insight가 null인 이유 (보고서 없음·아직 만드는 중·근거 없음)
+
+
+# ---------------------------------------------------------------- 기획에 보내기 (11/20, v3)
+# 사람이 보낸 의뢰의 인사이트를 기획 receive_insight로 (trend_report_handoff, grade A, execute
+# "send_trend_report_insight" 먼저). insight_id = "trend_report:" + report_id (총괄과 같은 키라
+# 총괄이 먼저 보냈어도 기획이 duplicate로 받는다).
+
+
+class TrendReportHandoffInput(AxModel):
+    report_id: str = Field(min_length=1, max_length=64)
+
+
+class TrendReportHandoffOutput(AxModel):
+    report_id: str
+    outcome: Literal["created", "duplicate", "rejected", "not_sent"]
+    proposal_id: str | None = None
+    reason: str | None = None
+    sent_at: UtcDatetime | None = None
+    by: str | None = None
 
 
 # ---------------------------------------------------------------- 데이터분석 대화 카드 (11/19)

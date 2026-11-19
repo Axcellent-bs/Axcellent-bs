@@ -1267,7 +1267,16 @@ async def trend_report_create(request: AgentRequest) -> AgentResult:
     data = _parse(request, TrendReportInput)
     if isinstance(data, AgentResult):
         return data
-    out = await get_trend_reports().create(data, request.meta.context_id)
+    service = get_trend_reports()
+    if data.caller == "orchestrator":
+        # 총괄 긴 작업(15번): WORKING + task_id(요청마다 새로) + 예상 소요. 진행·완료는 알림으로,
+        # 보고서 번호는 완료 output의 report_id로 넘긴다
+        from ax_agent_template.async_task import accepted, new_task_id
+
+        task_id = new_task_id()
+        out = await service.create(data, request.meta.context_id, waiter=(request, task_id))
+        return accepted(request, task_id, expected_seconds=service.expected_seconds(out.report_id))
+    out = await service.create(data, request.meta.context_id)
     summary = f"트렌드 분석 의뢰 {out.report_id} ({'저장본' if out.reused else '새로'})"
     return _result(request, TaskStatus.COMPLETED, outcome=out.status,
                    output=out.model_dump(mode="json"),
@@ -1291,6 +1300,28 @@ async def trend_report_get(request: AgentRequest) -> AgentResult:
                    evidence=Evidence(queries=["trend_reports.db"],
                                      data_summary=f"트렌드 분석 보고서 {report.report_id}",
                                      collected_at=datetime.now(UTC)))  # fmt: skip
+
+
+async def trend_report_insight(request: AgentRequest) -> AgentResult:
+    """보고서 → 기획 receive_insight 입력 그대로 (grade read, LLM 없음, 같은 보고서면 같은 결과).
+
+    총괄 plan ②: 번호(report_id)만 받아 꺼낸다. 없거나 아직 만드는 중이면 insight null + 이유.
+    """
+    from ax_contracts.schemas.data import TrendReportInsightInput, TrendReportInsightOutput
+    from data_agent.skills.trend_report_insight import build_insight
+
+    data = _parse(request, TrendReportInsightInput)
+    if isinstance(data, AgentResult):
+        return data
+    insight, why = build_insight(get_trend_reports().get(data.report_id))
+    out = TrendReportInsightOutput(report_id=data.report_id, insight=insight, reason=why)
+    summary = (f"트렌드 분석 보고서 {data.report_id} → 기획 입력 (근거 {len(insight.facts)}개)"
+               if insight else f"트렌드 분석 보고서 {data.report_id}: {why}")  # fmt: skip
+    return _result(request, TaskStatus.COMPLETED, outcome="ready" if insight else "not_ready",
+                   output=out.model_dump(mode="json"),
+                   evidence=Evidence(queries=["trend_reports.db"], data_summary=summary,
+                                     collected_at=datetime.now(UTC),
+                                     ref_ids=[f"trend_report:{data.report_id}"]))  # fmt: skip
 
 
 async def trend_report_list(request: AgentRequest) -> AgentResult:
@@ -2162,7 +2193,7 @@ TIMED_SKILLS = frozenset({
     "trend_popular", "trend_scan", "trend_candidates", "youtube_velocity", "shorts_stats",
     "promo_concepts", "trend_insight_brief", "video_explorer", "trend_memes", "keyword_trend",
     "instagram_audio", "instagram_radar", "trend_report_create", "trend_report_get",
-    "trend_report_list",
+    "trend_report_list", "trend_report_insight",
 })  # fmt: skip
 
 # ---- 데이터분석 AI 직접 대화 (dashboard-api → data_chat_*). 조회·설명만, execute() 안 씀
@@ -2295,5 +2326,6 @@ HANDLERS = {
     "trend_report_create": trend_report_create,
     "trend_report_get": trend_report_get,
     "trend_report_list": trend_report_list,
+    "trend_report_insight": trend_report_insight,
 }
 HANDLERS = {k: timed_handler(k, v) if k in TIMED_SKILLS else v for k, v in HANDLERS.items()}

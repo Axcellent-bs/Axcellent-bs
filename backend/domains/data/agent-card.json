@@ -521,7 +521,7 @@
     },
     {
       "id": "trend_report_create",
-      "description": "트렌드 분석 의뢰 넣기. 폼 값(제품·타깃 성별·나이 구간·형식·경쟁사 인스타 아이디·키워드·추가 계정) 또는 의뢰 문장(request_text)만으로 받는다. 총괄·기획이 의뢰문(request_text)만으로 부를 수 있음, 완료 시 data.trend_report_ready 발행(완료·부분 완료·실패, data={report_id, status, context_id, caller, summary_line}). 바로 report_id·status·예상 소요(eta_seconds)를 주고 data 에이전트 안에서 하나씩 만든다(동시에 1개). 같은 날 같은 의뢰는 저장본을 연다(reused, rebuild=true면 새로). 의뢰문은 LLM 1번으로 칸을 뽑고(untrusted 데이터 블록), 비면 프리셋(report_presets, match_words로 고름) 값과 칸마다 출처. 섹션: 1 네이버 검색어 트렌드(연령·성별)·쇼핑인사이트 최근 7일÷직전 28일, 2 인스타 해시태그 계정 수(이번 7일·직전 7일), 3 터진 게시물 8개 + 광고 재료 ok 밈 3개, 4 경쟁사 주당 게시·릴스 비율·조회 중앙값·최고 게시물·잘 된 게시물 공통점, 5 결론 한 줄 + 30초 콘티 4칸(LLM 1번, 숫자 금지, 칸마다 코드 근거 문장). 인스타는 Meta 공식 business_discovery로 의뢰당 최대 45곳(하루 상한 공유, 한도면 멈춤). 모르면 unknown + 이유, 섹션마다 따로 실패. 보고서 기록은 분석 결과 보관이라 execute()를 부르지 않는다.",
+      "description": "트렌드 분석 의뢰 넣기. 폼 값(제품·타깃 성별·나이 구간·형식·경쟁사 인스타 아이디·키워드·추가 계정) 또는 의뢰 문장(request_text)만으로 받는다. 총괄·기획이 의뢰문(request_text)만으로 부를 수 있음, 완료 시 data.trend_report_ready 발행(완료·부분 완료·실패, data={report_id, status, context_id, caller, summary_line}). 바로 report_id·status·예상 소요(eta_seconds)를 주고 data 에이전트 안에서 하나씩 만든다(동시에 1개). 같은 날 같은 의뢰는 저장본을 연다(reused, rebuild=true면 새로). 의뢰문은 LLM 1번으로 칸을 뽑고(untrusted 데이터 블록), 비면 프리셋(report_presets, match_words로 고름) 값과 칸마다 출처. 섹션: 1 네이버 검색어 트렌드(연령·성별)·쇼핑인사이트 최근 7일÷직전 28일, 2 인스타 해시태그 계정 수(이번 7일·직전 7일), 3 터진 게시물 8개 + 광고 재료 ok 밈 3개, 4 경쟁사 주당 게시·릴스 비율·조회 중앙값·최고 게시물·잘 된 게시물 공통점, 5 결론 한 줄 + 30초 콘티 4칸(LLM 1번, 숫자 금지, 칸마다 코드 근거 문장). 인스타는 Meta 공식 business_discovery로 의뢰당 최대 45곳(하루 상한 공유, 한도면 멈춤). 모르면 unknown + 이유, 섹션마다 따로 실패. 보고서 기록은 분석 결과 보관이라 execute()를 부르지 않는다. caller orchestrator면 긴 작업(async_task 규약): 바로 WORKING + task_id(요청마다 새로) + expected_seconds(최소 120)를 돌려주고, 섹션이 끝날 때·인스타 계정 10곳마다·120초마다(대기 중이면 '대기 중 (앞에 N개)') task.progress, 끝에 task.completed 한 번(done·partial → output TrendReportCompletedOutput: report_id·status·summary_line·report_path·has_insight·insight_reason, failed·interrupted → failed + note). 총괄은 다음 단계 trend_report_insight(report_id)로 기획 입력을 꺼낸다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportCreated",
       "grade": "read",
@@ -548,6 +548,17 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportListOutput",
       "grade": "read",
       "allowed_requesters": ["dashboard-api", "orchestrator", "planning"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_report_insight",
+      "description": "총괄 plan ②: 트렌드 분석 보고서 번호(report_id)로 기획 receive_insight 입력(ReceiveInsightInput) 그대로를 꺼낸다(insight_id = trend_report:<report_id>, 같은 보고서면 늘 같은 결과). facts 최대 12(콘티 근거 행 먼저, 검색 상위 3·해시태그 3·콘텐츠 2·경쟁사 2), audience·shorts_format·body_md, 상품 칸은 비움. 보고서가 없거나 아직 만드는 중이거나 근거가 0개면 insight null + reason. 코드만(LLM 없음), 조회만.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportInsightInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportInsightOutput",
+      "grade": "read",
+      "allowed_requesters": ["orchestrator"],
       "verifier": null,
       "priority": "recommended",
       "handoff": false
