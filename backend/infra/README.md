@@ -16,7 +16,7 @@ docker compose -f infra/compose.yml config          # 설정 검사
 
 - 각 서버 패키지의 `compose.yml`을 `infra/compose.yml`이 `include:`로 불러온다. 서비스 이름은 폴더 이름이다.
 - 공용 서비스: `redis`(이벤트 버스, Redis Streams), `postgres`(pgvector, memory·공통 로그·각 서비스 DB, 볼륨 `pgdata`).
-- Postgres 기본 계정은 `ax` / `ax` / DB `ax`. 바꾸려면 `infra/.env`에 `COMPOSE_POSTGRES_*`를 적는다. compose 안에서의 주소는 `postgresql://ax:ax@postgres:5432/ax`, Redis는 `redis://redis:6379/0`.
+- Postgres 사용자·DB 기본값은 `ax`, 비밀번호는 기본값이 없어 `infra/.env`의 `COMPOSE_POSTGRES_PASSWORD`에 반드시 적는다. 포트는 모두 `127.0.0.1`에만 연다. compose 안에서의 주소는 `postgresql://ax:<비밀번호>@postgres:5432/ax`, Redis는 `redis://redis:6379/0`.
 - 목 모드: 서비스별 `<부서>_MOCK=1` (예: `DATA_MOCK=1`).
 - 공통 로그(COM-08, #249): 모든 서비스에 `AX_COMMON_LOG_DB=/common-log/common_log.db`와 named volume `common-log`를 붙인다. 붙이는 파일은 `infra/common-log/<서비스>.yml`이고 `include`의 `path` 목록으로 각 서비스 compose 뒤에 합친다. SQLite WAL을 여러 컨테이너가 함께 쓰므로 Windows bind mount와 `:ro`(dashboard-api 포함)는 쓰지 않는다. `down -v`를 하면 공통 로그가 지워진다. 새 서비스를 추가하면 `common-log/<서비스>.yml`도 만든다.
 

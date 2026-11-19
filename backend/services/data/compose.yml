@@ -4,7 +4,7 @@ services:
       context: ../..
       dockerfile: services/data/Dockerfile
     ports:
-      - "8106:8106"
+      - "127.0.0.1:8106:8106"
     env_file:
       - path: ../../.env
         required: false
