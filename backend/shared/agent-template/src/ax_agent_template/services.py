@@ -186,6 +186,8 @@ SERVICES: tuple[Service, ...] = (
             "publish_sns",
             "get_publish_control",
             "set_publish_control",
+            "get_manual_publish_package",
+            "complete_manual_publish",
             "generate_media",
             "prepare_sns_post_from_media",
             "prepare_brief_media",

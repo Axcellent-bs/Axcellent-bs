@@ -54,6 +54,7 @@ ACTION_KO = {
     "publish_notice": "공지 올리기",
     "publish_sns": "SNS 게시",
     "set_publish_control": "자동 게시 켜기·끄기",
+    "complete_manual_publish": "수동 게시 완료 기록",
     "generate_media": "이미지·영상 만들기",
     "start_campaign": "캠페인 집행",
     "rollback_deployment": "배포 되돌리기",

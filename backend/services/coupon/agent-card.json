@@ -299,6 +299,31 @@
       "priority": "optional"
     },
     {
+      "id": "get_manual_publish_package",
+      "description": "수동 게시 안내용 복사 패키지를 읽는다(post_draft_id). 자동 게시가 꺼져 있어 승인된 뒤 approved·manual_pending으로 기다리는 건(없으면 수동으로 게시된 건)의 승인된 캡션 전문·해시태그·AI 표시 문구(sns.ai_label_text)·미디어 종류와 파일 위치(마지막 두 구간만, 서버 절대 경로·토큰·서명 URL 없음)·sha256을 돌려준다. permalink_verified는 항상 false다(링크 진위는 확인하지 않는다). 상태를 바꾸지 않는다. 해당 건이 없으면 not_manual_pending.",
+      "input_schema": "agents/marketing/src/marketing_agent/manual_publish.py#GetManualPublishPackageInput",
+      "output_schema": "agents/marketing/src/marketing_agent/manual_publish.py#ManualPublishPackage",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "complete_manual_publish",
+      "description": "사람이 Instagram에 직접 올린 건을 게시 완료로 기록한다(post_draft_id, permalink 필수, ai_label_confirmed=true 필수, posted_by는 대시보드 API가 사람 토큰에서 채움, published_at 선택). permalink는 https://www.instagram.com/p|reel|tv/<코드>/ 형식만 받고(쿼리·프래그먼트 제거, http는 https로) 비었거나 형식이 틀리면 invalid_permalink, 다른 건에 이미 쓰인 링크는 permalink_already_used, ai_label_confirmed가 true가 아니면 ai_label_not_confirmed로 거절하며 published로 넘기지 않는다. approved이고 manual_pending인 건만 허용하고(이미 published·failed·rejected면 거절) approved→publishing→published CAS로 닫고 result에 manual:true·permalink·published_at·posted_by·ai_label_review(confirmed_by·confirmed_at)를 남긴다. 이미 공개된 게시물을 기록할 뿐 외부 호출은 없고 링크의 진위·계정 소유는 확인하지 못한다. 일일 한도 집계에는 포함된다. 기록은 execute() 관문을 지난다(A등급: 사람이 올린 뒤의 완료 기록이고 공개는 이미 사람 승인(C, publish_sns)을 받았다).",
+      "input_schema": "agents/marketing/src/marketing_agent/manual_publish.py#CompleteManualPublishInput",
+      "output_schema": "agents/marketing/src/marketing_agent/sns_publish/publisher.py#PublishSnsOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "generate_media",
       "description": "이미지 또는 영상(media_kind)을 만든다. 프롬프트는 자유 입력이 아니라 장면 템플릿(scene_template_id)의 고정 문장에 화이트리스트 필드만 채운 것이고, 개인정보·고객 원문·글자 요청·실존 인물·브랜드는 코드 검사로 거절한다(prompt_rejected). 호출 전에 단가표로 비용을 계산해 건당·월 상한을 넘으면 공급자를 부르지 않고(cost_over_single·budget_exceeded), 환율·기준일이 비었거나 오래됐거나 단가표에 없는 조합이면 실제 공급자를 거부한다(fail-closed). 안전 관문 execute(generate_media)가 executed를 돌려준 뒤에만 공급자를 부르고, 응답 사용량으로 사후 정산해 장부(SQLite)에 남긴다(사용량이 없으면 추정액). 영상은 무음이며 결과 메타에 ai_generated=true를 항상 남긴다. 같은 키 재요청은 이전 결과를 돌려준다. 지금은 목 어댑터뿐이며 실제 공급자 이름은 어댑터가 없어 거부한다. safety 등록부에 아직 없어 live 관문에서는 fail-closed다.",
       "input_schema": "agents/marketing/src/marketing_agent/media/skill.py#GenerateMediaInput",
