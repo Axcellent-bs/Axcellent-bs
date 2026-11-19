@@ -101,10 +101,25 @@ def test_business_discovery_fields_and_empty_is_no_data() -> None:
     fields = seen[0].url.params["fields"]
     assert fields.startswith("business_discovery.username(agelimited){username,media.limit(20){")
     # 2026-11-18 사양 변경: 썸네일용 media_type·media_url·thumbnail_url을 요청한다 (호출 수는 같음)
+    # 2026-11-19: 계정 표시 이름(name)도 같은 호출에서 받는다 (호출 수 그대로)
     assert fields.endswith(
         "{id,media_product_type,timestamp,like_count,comments_count,view_count,caption,"
-        "permalink,media_type,media_url,thumbnail_url}}"
+        "permalink,media_type,media_url,thumbnail_url},name}"
     )
+
+
+def test_business_media_attaches_account_name() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"business_discovery": {
+            "name": " 톤28 ", "media": {"data": [{"id": "1"}, {"id": "2"}]}}})  # fmt: skip
+
+    got = asyncio.run(_graph(handler).business_media("toun28_official", 20))
+    assert [m[ig.OWNER_NAME] for m in got] == ["톤28", "톤28"]
+
+    def nameless(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"business_discovery": {"media": {"data": [{"id": "1"}]}}})
+
+    assert ig.OWNER_NAME not in asyncio.run(_graph(nameless).business_media("x", 20))[0]
 
 
 @pytest.mark.parametrize(("code", "want"), [

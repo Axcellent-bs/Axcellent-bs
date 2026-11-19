@@ -8,7 +8,7 @@ import { dataAi, type TrendReportInput, type TrendReportListItem } from "@/lib/d
 import { sectionState, type SectionState } from "@/lib/segmentView";
 import { TREND_REPORT_PRESETS } from "@/lib/trendReportPresets";
 import {
-  AGE_OPTIONS, CALLER_LABEL, EMPTY_FORM, GENDER_LABEL, REPORT_STATUS, buildInput, hasInput, reportHash, reportIdFromHash, type RequestForm,
+  AGE_OPTIONS, CALLER_LABEL, EMPTY_FORM, GENDER_LABEL, REPORT_STATUS, buildInput, formFromBrief, hasInput, reportHash, reportIdFromHash, type RequestForm,
 } from "@/lib/trendReportView";
 
 // 트렌드&콘텐츠 "분석 의뢰" 하위 탭 (#request, 루프 단계와 별개).
@@ -84,8 +84,10 @@ function PastList({ list, current, onOpen, onRetry }: { list: ListLoad; current:
   );
 }
 
-function RequestFormCard({ form, setForm, busy, onSubmit, error }: {
+function RequestFormCard({ form, setForm, busy, onSubmit, error, editing, onCancel }: {
   form: RequestForm; setForm: (f: RequestForm) => void; busy: boolean; onSubmit: () => void; error: SectionState | null;
+  /** 보고서를 고쳐서 다시 만드는 중: 직접 정하기를 펴 두고 rebuild로 보낸다 */
+  editing?: boolean; onCancel?: () => void;
 }) {
   const set = <K extends keyof RequestForm>(k: K, v: RequestForm[K]) => setForm({ ...form, [k]: v });
   const pickPreset = (id: string) => {
@@ -101,13 +103,13 @@ function RequestFormCard({ form, setForm, busy, onSubmit, error }: {
   const pasted = form.requestText.trim().length > 0;
   return (
     <form onSubmit={submit} className="card min-w-0 space-y-3 p-4 sm:p-5 print-hide" aria-labelledby="trend-request-title">
-      <h3 id="trend-request-title" className="text-base font-semibold text-ink-900">트렌드 분석 의뢰</h3>
+      <h3 id="trend-request-title" className="text-base font-semibold text-ink-900">{editing ? "의뢰 고쳐서 다시 만들기" : "트렌드 분석 의뢰"}</h3>
       <label className="flex flex-col gap-1 text-sm text-ink-700">
         의뢰문 붙여 넣기
         <textarea className="field min-h-[120px] w-full" value={form.requestText} onChange={(e) => set("requestText", e.target.value)}
           placeholder="총괄·기획이 보낸 의뢰 문장을 그대로 붙여 넣으세요. 제품·타깃·결과물·경쟁사·키워드를 데이터 AI가 읽어 정합니다." />
       </label>
-      <details className="rounded-lg border border-ink-100 px-3 py-2">
+      <details key={editing ? "edit" : "new"} open={editing || undefined} className="rounded-lg border border-ink-100 px-3 py-2">
         <summary className="cursor-pointer select-none text-sm font-medium text-ink-700">직접 정하기{pasted && <span className="ml-2 text-xs font-normal text-ink-500">의뢰문이 있으면 의뢰문만 보냅니다</span>}</summary>
         <fieldset disabled={pasted} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs text-ink-500">
@@ -120,6 +122,10 @@ function RequestFormCard({ form, setForm, busy, onSubmit, error }: {
           <label className="flex flex-col gap-1 text-xs text-ink-500">
             제품
             <input className="field" value={form.product} onChange={(e) => set("product", e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-ink-500">
+            목표
+            <input className="field" value={form.goal} onChange={(e) => set("goal", e.target.value)} placeholder="브랜드 인지도" />
           </label>
           <div className="flex flex-col gap-1 text-xs text-ink-500" role="group" aria-label="타깃 성별">
             타깃 성별
@@ -157,7 +163,8 @@ function RequestFormCard({ form, setForm, busy, onSubmit, error }: {
         </fieldset>
       </details>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="submit" className="btn-primary" disabled={busy || !hasInput(form)}>{busy ? "의뢰 넣는 중…" : "보고서 만들기"}</button>
+        <button type="submit" className="btn-primary" disabled={busy || !hasInput(form)}>{busy ? "의뢰 넣는 중…" : editing ? "고쳐서 다시 만들기" : "보고서 만들기"}</button>
+        {editing && onCancel && <button type="button" className="btn-ghost" disabled={busy} onClick={onCancel}>취소</button>}
         {!hasInput(form) && <span className="text-xs text-ink-500">의뢰문을 붙여 넣거나 직접 정할 칸을 채워 주세요.</span>}
       </div>
       {error && <Problem state={error} what="분석 의뢰" />}
@@ -174,6 +181,8 @@ export function TrendRequest() {
   }, [navigate, location.pathname, location.search]);
 
   const [form, setForm] = useState<RequestForm>(EMPTY_FORM);
+  // 열어 둔 보고서의 의뢰를 고쳐서 다시 만드는 중 (폼을 직접 정하기로 미리 채워 연다)
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<SectionState | null>(null);
   // 마지막으로 넣은 의뢰: 저장본을 열었으면(reused) 같은 입력으로 다시 만들기
@@ -188,6 +197,7 @@ export function TrendRequest() {
       .then((r) => {
         setLast({ id: r.output.report_id, reused: r.output.reused, input });
         setListRun((x) => x + 1);
+        setEditing(false);
         open(r.output.report_id);
       })
       .catch((e: Error) => setError(sectionState(e.message)))
@@ -199,7 +209,7 @@ export function TrendRequest() {
     // 보고서를 열면 보고서가 넓게 쓰도록 지난 의뢰 목록은 아래로
     <div className={`grid grid-cols-1 gap-4 ${id ? "" : "lg:grid-cols-[minmax(0,1fr)_320px]"}`}>
       <div className="min-w-0 space-y-4">
-        {id ? (
+        {id && !editing ? (
           <>
             <div className="flex flex-wrap items-center gap-2 print-hide">
               <button type="button" className="btn-ghost" onClick={() => open(null)}>← 새 의뢰</button>
@@ -213,10 +223,11 @@ export function TrendRequest() {
               )}
               {error && <Problem state={error} what="분석 의뢰" />}
             </div>
-            <TrendReportView key={id} id={id} />
+            <TrendReportView key={id} id={id} onRebuild={(b) => { setForm(formFromBrief(b)); setError(null); setEditing(true); }} />
           </>
         ) : (
-          <RequestFormCard form={form} setForm={setForm} busy={busy} error={error} onSubmit={() => create(buildInput(form))} />
+          <RequestFormCard form={form} setForm={setForm} busy={busy} error={error} editing={editing} onCancel={() => setEditing(false)}
+            onSubmit={() => create(buildInput(form, editing))} />
         )}
       </div>
       <PastList list={list} current={id} onOpen={open} onRetry={reload} />

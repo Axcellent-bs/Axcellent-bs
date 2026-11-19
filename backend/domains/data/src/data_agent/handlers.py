@@ -1236,11 +1236,14 @@ def get_shopping_connector() -> Any:
 
 
 def _trend_report_deps() -> Any:
+    from data_agent import keyword_pool
     from data_agent.skills.trend_report import Deps
 
+    pool = os.environ.get(keyword_pool.DB_ENV) or keyword_pool.DEFAULT_DB
     return Deps(env=os.environ, llm=get_llm(), graph=get_instagram_graph(),
                 search=get_trend_connector(), shopping=get_shopping_connector(),
-                memes=lambda: RESPONSES.latest("trend_memes"))  # fmt: skip
+                memes=lambda: RESPONSES.latest("trend_memes"),
+                searchad=get_searchad_connector(), pool_path=pool)  # fmt: skip
 
 
 def get_trend_reports() -> Any:

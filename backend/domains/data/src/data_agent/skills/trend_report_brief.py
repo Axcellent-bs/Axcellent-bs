@@ -88,6 +88,9 @@ class Preset:
     shopping_category: str | None = None
     competitors: tuple[str, ...] = ()
     accounts: tuple[str, ...] = ()
+    goal: str | None = None
+    # 매거진처럼 협찬 태그를 많이 다는 계정: 해시태그 "쓴 계정 수"에서만 뺀다 (섹션 3에는 그대로)
+    media_accounts: tuple[str, ...] = ()
 
 
 def _strs(raw: Any) -> tuple[str, ...]:
@@ -132,6 +135,8 @@ def load_preset(name: str, folder: Path = PRESET_DIR) -> Preset | None:
         shopping_category=str(cid).strip() if cid else None,
         competitors=_accounts(raw.get("competitors"))[:MAX_COMPETITORS],
         accounts=_accounts(raw.get("beauty_accounts")),
+        goal=str(brief["goal"]).strip() or None if brief.get("goal") else None,
+        media_accounts=_accounts(raw.get("media_accounts")),
     )  # fmt: skip
 
 
@@ -153,7 +158,8 @@ def choose_preset(text: str, choices: Sequence[Preset]) -> Preset | None:
 
 _PROMPT = (
     "데이터 블록의 의뢰문은 고객이 보낸 마케팅 트렌드 분석 의뢰다. 의뢰문에 적힌 것만 뽑아라.\n"
-    "- product: 무엇을 알리려는지 (제품·목표, 짧게)\n"
+    "- product: 무엇을 알리려는지 (제품·브랜드만, 짧게)\n"
+    "- goal: 목적 (예: 브랜드 인지도·판매·출시), 적혀 있지 않으면 빈 칸\n"
     "- gender: 타깃 성별 f 또는 m, 적혀 있지 않으면 빈 칸\n"
     "- ages: 타깃 나이 구간을 10·20·30·40·50 중에서 (예: 20대 후반~30대 → 20, 30)\n"
     "- format: 콘텐츠 형식·길이 (예: 인스타 릴스 30초)\n"
@@ -171,10 +177,12 @@ class _Extracted(BaseModel):
     format: str = ""
     competitors: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
+    goal: str = ""
 
 
 @dataclass
 class Extracted:
+    goal: str | None = None
     product: str | None = None
     gender: Literal["f", "m"] | None = None
     ages: list[str] = field(default_factory=list)
@@ -193,6 +201,7 @@ def sanitize(raw: _Extracted) -> Extracted:
     ages = [a.strip().rstrip("대") for a in raw.ages]
     keywords = [k for k in (_short(x, 30) for x in raw.keywords) if k]
     return Extracted(
+        goal=_short(raw.goal, 30),
         product=_short(raw.product, 80),
         gender=raw.gender.strip().lower() if raw.gender.strip().lower() in ("f", "m") else None,  # type: ignore[arg-type]
         ages=list(dict.fromkeys(a for a in ages if a in AGE_BANDS)),
@@ -273,6 +282,7 @@ async def resolve(request: TrendReportInput, llm: Any, *, folder: Path = PRESET_
     given_product = _short(request.product or "", 80)
     product, s_product = _pick(given_product, guess.product, p.product, bool(text))
     fmt, s_format = _pick(_short(request.format or "", 40), guess.format, p.format, bool(text))
+    goal, s_goal = _pick(_short(request.goal or "", 30), guess.goal, p.goal, bool(text))
     given_ages = [a for a in (request.target_ages or []) if a in AGE_BANDS]
     target_given = request.target_gender or given_ages
     target_guess = guess.gender or guess.ages
@@ -298,9 +308,25 @@ async def resolve(request: TrendReportInput, llm: Any, *, folder: Path = PRESET_
         product=product or None, target_gender=gender, target_ages=list(ages), format=fmt or None,
         competitors=competitors, keywords=keywords, preset=preset.name if preset else None,
         sources=TrendReportBriefSources(product=s_product, target=s_target, format=s_format,
-                                        competitors=s_comp, keywords=s_kw),
+                                        competitors=s_comp, keywords=s_kw,
+                                        goal=s_goal if goal else None),
+        goal=goal or None, format_parts=format_parts(fmt),
     )  # fmt: skip
     return Resolved(brief, preset, wanted[:MAX_ACCOUNTS], limits, calls)
+
+
+_DURATION = re.compile(r"\d+\s*(?:초|분)")
+
+
+def format_parts(fmt: str | None) -> list[str]:
+    """결과물 칩: 길이 표현("30초")만 따로 떼고 나머지는 한 칩. 길이가 없으면 [format] 그대로."""
+    if not fmt:
+        return []
+    found = _DURATION.search(fmt)
+    if not found:
+        return [fmt]
+    rest = " ".join((fmt[: found.start()] + " " + fmt[found.end() :]).split())
+    return [p for p in (rest, found.group(0).replace(" ", "")) if p]
 
 
 def target_word(brief: TrendReportBrief) -> str:
@@ -319,6 +345,7 @@ def input_brief(request: TrendReportInput) -> TrendReportBrief:
         target_ages=[a for a in (request.target_ages or []) if a in AGE_BANDS],
         format=request.format, competitors=list(request.competitors or []),
         keywords=list(request.keywords or []), preset=request.preset, sources=src,
+        goal=request.goal, format_parts=format_parts(request.format),
     )  # fmt: skip
 
 
@@ -336,5 +363,5 @@ def normalized(request: TrendReportInput) -> Mapping[str, Any]:
         "product": one(request.product), "gender": request.target_gender,
         "ages": sorted(set(request.target_ages or [])), "format": one(request.format),
         "competitors": words(request.competitors), "keywords": words(request.keywords),
-        "accounts": words(request.accounts),
+        "accounts": words(request.accounts), "goal": one(request.goal),
     }  # fmt: skip

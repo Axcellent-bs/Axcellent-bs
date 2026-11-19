@@ -6,7 +6,9 @@ import { sectionState } from "./segmentView.ts";
 import { TREND_REPORT_EXAMPLE } from "./trendReportExample.ts";
 import { TREND_REPORT_PRESETS } from "./trendReportPresets.ts";
 import {
-  EMPTY_FORM, barPct, buildInput, hasInput, keepPolling, pctText, reportHash, reportIdFromHash, shareText, sortBeats, sourceLabel, targetText,
+  EMPTY_FORM, barPct, beatEvidence, beatWidths, buildInput, competitorSummary, evidenceDomId, evidenceExpanded, evidenceListClass, formFromBrief,
+  hasInput, hashtagMeta, headerRows, keepPolling, keyEvidence, limitGroups, pctText, reportHash, reportIdFromHash, searchKind, searchMain,
+  searchNotes, shareText, sortBeats, sortCompetitors, sortSearchRows, sourceLabel, sourceTag, targetText, traitLines, traitSentence,
 } from "./trendReportView.ts";
 
 test("하위 탭 순서: 감지 · 인사이트 · 넘김 · 성과 · 분석 의뢰 · 데이터 출처", () => {
@@ -82,6 +84,97 @@ test("의뢰 입력: 의뢰문이 있으면 request_text만, 없으면 직접 �
   assert.equal(hasInput(EMPTY_FORM), false);
   assert.equal(hasInput({ ...EMPTY_FORM, keywords: "클린뷰티" }), true);
   assert.equal(buildInput({ ...EMPTY_FORM, gender: "all" }).target_gender, null);
+});
+
+test("v2 헤더 칩: input은 꼬리표 없음, 이름 없으면 @id만, 결과물은 쪼개지 않는다", () => {
+  const b = TREND_REPORT_EXAMPLE.brief;
+  const rows = headerRows(b);
+  const by = (k: string) => rows.find((r) => r.key === k)!;
+  assert.equal(by("product").sourceTag, "프리셋에서 채움");
+  assert.equal(by("target").sourceTag, "의뢰문에서 추정");
+  assert.equal(by("competitors").sourceTag, null);
+  assert.deepEqual(by("target").chips.map((c) => c.text), ["여성", "20대", "30대"]);
+  assert.deepEqual(by("format").chips.map((c) => c.text), ["인스타 릴스", "30초"]);
+  assert.deepEqual(headerRows({ ...b, format_parts: [] }).find((r) => r.key === "format")!.chips.map((c) => c.text), ["인스타 릴스 30초"]);
+  assert.deepEqual(by("competitors").chips, [{ text: "예시 브랜드A", sub: "@example_a" }, { text: "@example_b", sub: null }]);
+  assert.equal(by("competitors").label, "경쟁사 2");
+  assert.equal(sourceTag("input"), null);
+  assert.equal(sourceTag(null), null);
+});
+
+test("v2 고쳐서 다시 만들기: 보고서 요약 → 폼 → 입력", () => {
+  const form = formFromBrief(TREND_REPORT_EXAMPLE.brief);
+  assert.equal(form.goal, "브랜드 인지도");
+  const input = buildInput(form, true);
+  assert.equal(input.rebuild, true);
+  assert.equal(input.goal, "브랜드 인지도");
+  assert.deepEqual(input.target_ages, ["20", "30"]);
+  assert.deepEqual(input.competitors, ["example_a", "example_b"]);
+});
+
+test("v2 타임라인 폭 3:12:10:5, 근거 id → DOM id, 핵심 근거 칩(중복 제거·최대 3)", () => {
+  const w = beatWidths(["0-3", "3-15", "15-25", "25-30"]);
+  assert.deepEqual(w, [10, 40, (10 / 30) * 100, (5 / 30) * 100]);
+  assert.equal(Math.round(w.reduce((a, b) => a + b, 0)), 100);
+  assert.equal(evidenceDomId("search:1"), "tr-ev-search-1");
+  const beats = sortBeats(TREND_REPORT_EXAMPLE.sections.recommendation.beats);
+  assert.deepEqual(keyEvidence(beats).map((e) => e.id), ["search:1", "competitor:1", "content:1"]);
+  assert.equal(keyEvidence(beats, 2).length, 2);
+  assert.deepEqual(beatEvidence(beats[2]), []);
+});
+
+test("v2 인쇄: 근거는 인쇄 중이면 펼친다", () => {
+  assert.equal(evidenceExpanded(false, true), true);
+  assert.equal(evidenceExpanded(false, false), false);
+  assert.equal(evidenceListClass(false), "hidden print:block");
+  assert.equal(evidenceListClass(true), "block");
+});
+
+test("v2 검색: 정렬(거른 값 → 기준값 작음 → 전체 → 검색량만 → 없음)과 표시", () => {
+  const base = { search_reason: null, shopping_change_pct: null, shopping_reason: null };
+  const rows = [
+    { keyword: "n", search_change_pct: null, ...base, basis: "none" as const },
+    { keyword: "v", search_change_pct: null, ...base, basis: "volume_only" as const, monthly_volume: 1200 },
+    { keyword: "a", search_change_pct: 50, ...base, basis: "all" as const },
+    { keyword: "s", search_change_pct: 300, ...base, basis: "filtered" as const, small_base: true },
+    { keyword: "f1", search_change_pct: 5, ...base, basis: "filtered" as const },
+    { keyword: "f2", search_change_pct: 20, ...base, basis: "filtered" as const },
+    { keyword: "old", search_change_pct: 1, ...base },
+  ];
+  assert.deepEqual(sortSearchRows(rows).map((r) => r.keyword), ["f2", "f1", "old", "s", "a", "v", "n"]);
+  assert.equal(searchKind({ ...rows[6], keyword: "x", search_change_pct: null }), "none");
+  const s = searchMain(rows[3]);
+  assert.deepEqual([s.text, s.small, s.bar], ["급증(기준값 작음)", "+300%", null]);
+  assert.equal(searchMain(rows[1]).text, "월 검색 1,200");
+  const who = { target_gender: "f" as const, target_ages: ["20", "30"] };
+  assert.deepEqual(searchNotes({ ...rows[2], shopping_change_pct: 9, monthly_volume: 12300 }, who),
+    ["월 검색 12,300", "쇼핑 클릭(여성 20·30대) +9%", "여성 20·30대로 거르면 값이 없음 → 전체 기준"]);
+  // 쇼핑 값이 비면 백엔드가 나눈 이유를 그대로 (한 문장으로 뭉뚱그리지 않음)
+  assert.deepEqual(searchNotes({ ...rows[0], shopping_change_pct: null, shopping_reason: "그 분야에 없는 키워드" }, who),
+    ["쇼핑: 그 분야에 없는 키워드"]);
+});
+
+test("v2 해시태그 메타와 경쟁사 문장·요약", () => {
+  const r = { tag: "x", accounts: 7, previous_accounts: 1, burst_posts: 2, used_by: ["a", "b", "c"] };
+  assert.equal(hashtagMeta(r, { a: "톤28", b: "비플레인" }), "톤28 · 비플레인 · @c 외 4곳 · 터진 게시물 2");
+  assert.equal(traitSentence({ label: "릴스 비율", value: "100%", baseline: "평소 35%" }), "잘 된 건 전부 릴스 (평소 35%)");
+  assert.equal(traitSentence({ label: "릴스 비율", value: "80%", baseline: "평소 35%" }), "잘 된 건 릴스 80% (평소 35%)");
+  assert.equal(traitSentence({ label: "첫 줄 질문", value: "3/5", baseline: "평소 1/5" }), "첫 줄이 질문으로 시작 (3/5, 평소 1/5)");
+  assert.equal(traitSentence({ label: "올린 시간", value: "밤 9~12시", baseline: "평소 28%" }), "밤 9~12시에 올림 (평소 28%)");
+  assert.equal(traitSentence({ label: "캡션 길이", value: "120자", baseline: "평소 60자" }), "캡션 120자 (평소 60자)");
+  const rows = TREND_REPORT_EXAMPLE.sections.competitors.rows;
+  assert.deepEqual(traitLines(rows[0])[0], "잘 된 건 전부 릴스 (평소 35%)");
+  assert.deepEqual(traitLines({ ...rows[0], traits_structured: [] }), ["첫 장면에 손", "자막 크게"]);
+  assert.equal(competitorSummary(rows), "경쟁사 2곳 중 1곳의 최고 게시물이 릴스");
+  assert.deepEqual(sortCompetitors([rows[1], rows[0]]).map((x) => x.account), ["example_a", "example_d"]);
+  assert.equal(competitorSummary([rows[1]]), null);
+});
+
+test("v2 근거와 한계: 묶음이 없으면 null(옛 목록으로)", () => {
+  const g = limitGroups(TREND_REPORT_EXAMPLE)!;
+  assert.deepEqual(g.map((x) => x.label), ["계산 방식", "볼 수 없는 것"]);
+  assert.equal(limitGroups({}), null);
+  assert.equal(limitGroups({ limit_groups: { method: [], cannot_see: [], this_report: [] } }), null);
 });
 
 test("skill이 아직 없으면(403·FORBIDDEN_SKILL) 준비 중, 그 밖은 실패", () => {

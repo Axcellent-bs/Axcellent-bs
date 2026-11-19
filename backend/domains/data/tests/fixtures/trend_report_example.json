@@ -6,20 +6,24 @@
   "caller": "orchestrator",
   "context_id": "ctx_trend_1",
   "brief": {
-    "product": "친환경 화장품 브랜드 인지도",
+    "product": "친환경 화장품",
     "target_gender": "f",
     "target_ages": ["20", "30"],
     "format": "인스타 릴스 30초",
     "competitors": ["toun28_official", "beplain_official"],
-    "keywords": ["리필 화장품", "비건 선크림"],
+    "keywords": ["리필 화장품", "비건 선크림", "클린뷰티", "제로웨이스트"],
     "preset": "eco_beauty",
     "sources": {
       "product": "request_text",
       "target": "request_text",
       "format": "preset",
       "competitors": "preset",
-      "keywords": "preset"
-    }
+      "keywords": "preset",
+      "goal": "preset"
+    },
+    "goal": "브랜드 인지도",
+    "format_parts": ["인스타 릴스", "30초"],
+    "competitor_names": {"toun28_official": "톤28", "beplain_official": null}
   },
   "summary_line": "리필·비건을 실제 사용 장면으로 보여 주는 질문형 릴스가 맞음",
   "summary_reason": null,
@@ -34,14 +38,44 @@
           "search_change_pct": 18.4,
           "search_reason": null,
           "shopping_change_pct": -3.2,
-          "shopping_reason": null
+          "shopping_reason": null,
+          "basis": "filtered",
+          "monthly_volume": 12300,
+          "small_base": false,
+          "shopping_small_base": false
         },
         {
           "keyword": "비건 선크림",
-          "search_change_pct": null,
-          "search_reason": "네이버가 값을 주지 않음 (검색량이 적음)",
+          "search_change_pct": 14.0,
+          "search_reason": "여성 20대·30대로 거르면 값이 없음 → 전체 기준",
           "shopping_change_pct": null,
-          "shopping_reason": "확인 안 함(한도)"
+          "shopping_reason": "값이 너무 적음 (값이 있는 날 3일, 최근 7일 또는 직전 28일 값이 비어 있음)",
+          "basis": "all",
+          "monthly_volume": 8100,
+          "small_base": false,
+          "shopping_small_base": false
+        },
+        {
+          "keyword": "클린뷰티",
+          "search_change_pct": 1659.7,
+          "search_reason": null,
+          "shopping_change_pct": null,
+          "shopping_reason": "그 분야에 없는 키워드 (쇼핑인사이트가 클릭 기록을 하나도 주지 않음)",
+          "basis": "filtered",
+          "monthly_volume": 2400,
+          "small_base": true,
+          "shopping_small_base": false
+        },
+        {
+          "keyword": "제로웨이스트",
+          "search_change_pct": null,
+          "search_reason": "검색어 트렌드 값 없음 (네이버가 값을 주지 않음 (검색량이 적음)) → 월 검색량만",
+          "shopping_change_pct": null,
+          "shopping_reason": "확인 안 함(한도)",
+          "basis": "volume_only",
+          "monthly_volume": 900,
+          "small_base": false,
+          "shopping_small_base": false
         }
       ]
     },
@@ -49,8 +83,16 @@
       "status": "known",
       "reason": null,
       "rows": [
-        {"tag": "#클린뷰티", "accounts": 6, "previous_accounts": 3, "burst_posts": 2}
-      ]
+        {
+          "tag": "#클린뷰티",
+          "accounts": 6,
+          "previous_accounts": 0,
+          "burst_posts": 2,
+          "used_by": ["toun28_official", "roundlab_official", "hwahae_official"],
+          "is_new": true
+        }
+      ],
+      "account_names": {"toun28_official": "톤28", "hwahae_official": "화해"}
     },
     "content": {
       "status": "known",
@@ -87,7 +129,11 @@
           "reels_view_median": 8000,
           "best_post": null,
           "traits": ["첫 줄이 질문(?)인 비율: 80% · 평소 20%"],
-          "reason": "지표가 있는 게시물이 3개 미만이라 최고 게시물 없음"
+          "reason": "지표가 있는 게시물이 3개 미만이라 최고 게시물 없음",
+          "name": "톤28",
+          "traits_structured": [
+            {"label": "첫 줄 질문", "value": "80%", "baseline": "평소 20%"}
+          ]
         }
       ],
       "accounts_failed": [
@@ -102,7 +148,14 @@
         {
           "slot": "0-3",
           "text": "리필 용기를 여는 손 클로즈업과 질문 자막",
-          "evidence": ["#클린뷰티: 이번 7일 6곳 · 직전 7일 3곳 사용, 터진 게시물 2개"]
+          "evidence": ["#클린뷰티: 이번 7일 6곳 · 직전 7일 0곳 사용, 터진 게시물 2개"],
+          "evidence_items": [
+            {
+              "id": "hashtag:1",
+              "text": "#클린뷰티: 이번 7일 6곳 · 직전 7일 0곳 사용, 터진 게시물 2개",
+              "short": "#클린뷰티 6곳 사용"
+            }
+          ]
         }
       ],
       "music_note": "저작권 문제없는 라이브러리 음원 중 선택"
@@ -110,7 +163,21 @@
   },
   "limits": [
     "숫자는 전부 코드가 계산했고, AI는 결론 한 줄과 콘티 문장만 썼다(숫자 없이)",
-    "인스타 1곳 못 읽음 (못 읽음(한도), 그 자리에서 멈춤)"
+    "인스타 1곳 못 읽음 (못 읽음(한도), 그 자리에서 멈춤)",
+    "기준값이 작아 '급증(기준값 작음)'으로만 본 키워드: 클린뷰티 (AI 추천 근거에서 뺌)"
   ],
-  "calls": {"instagram": 44, "naver": 6, "llm": 2}
+  "calls": {"instagram": 44, "naver": 7, "llm": 2},
+  "limit_groups": {
+    "method": [
+      "숫자는 전부 코드가 계산했고, AI는 결론 한 줄과 콘티 문장만 썼다(숫자 없이)"
+    ],
+    "cannot_see": [
+      "음악·시청자 나이·성별은 볼 수 없다. 음악은 추천하지 않는다 (인기 오디오는 메타가 추천하는 음원 목록이라 근거가 아님)"
+    ],
+    "this_report": [
+      "20대는 네이버 19~24세 칸을 써서 19세가 섞임",
+      "인스타 1곳 못 읽음 (못 읽음(한도), 그 자리에서 멈춤)",
+      "기준값이 작아 '급증(기준값 작음)'으로만 본 키워드: 클린뷰티 (AI 추천 근거에서 뺌)"
+    ]
+  }
 }
