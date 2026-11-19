@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+os.environ.setdefault("AX_ALLOW_MOCK", "1")  # 개발 전용 데모라 목 시작 거부를 허용한다
 os.environ.setdefault("AGENT_TEMPLATE_MOCK", "1")
 os.environ.setdefault("HR_MOCK", "1")
 

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -76,6 +77,12 @@ async def _retention_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # 실제 서버에 목 스위치가 남아 있으면 뜨지 않는다. 테스트·AX_ALLOW_MOCK=1만 예외
+    if is_mock() and os.getenv("AX_ALLOW_MOCK") != "1" and "pytest" not in sys.modules:
+        raise RuntimeError(
+            "목 스위치(DASHBOARD_MOCK·AGENT_TEMPLATE_MOCK)가 켜져 있어 "
+            "서버를 시작하지 않는다. 목 모드는 테스트 전용이다."
+        )
     task = None
     # 목 모드(테스트)와 `DASHBOARD_RETENTION_SWEEP=off`에서는 돌리지 않는다
     if not is_mock() and (os.getenv("DASHBOARD_RETENTION_SWEEP") or "on").lower() != "off":

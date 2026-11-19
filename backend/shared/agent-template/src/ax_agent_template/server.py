@@ -45,6 +45,7 @@ from ax_agent_template.config import (
     agent_name_scope,
     is_mock,
     placeholder_entries,
+    refuse_mock_outside_tests,
     set_agent_name,
     token_registry,
 )
@@ -203,6 +204,7 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        refuse_mock_outside_tests(card.name)  # 실제 서버에 목 스위치가 남아 있으면 뜨지 않는다
         # 실제 모드에서 구독이 있으면 이벤트 소비를 시작한다(목 모드·구독 없음이면 아무 일도 안 함)
         events.start_consumer()
         try:
