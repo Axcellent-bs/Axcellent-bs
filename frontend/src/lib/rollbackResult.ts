@@ -48,3 +48,38 @@ export function rollbackView(step: { skill: string; note: string; output: Record
   const redeploy = parseRedeploy(output);
   return redeploy ? { kind: "redeployed", redeploy } : null;
 }
+
+const str = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null);
+
+/** output.path(승인 경로)를 사람 말로. 모르는 값은 그대로 */
+export function pathLabel(v: unknown): string | null {
+  const p = str(v);
+  if (!p) return null;
+  return p === "auto" ? "자동 실행" : p === "human_approved" ? "사람 승인 뒤 실행" : p;
+}
+
+/** 무엇으로 되돌렸는지: 배포 도구 다시 배포 · 결제 설정 되돌림 · 장애 해제(시연). 근거 키가 없으면 null */
+function methodLabel(output: Record<string, unknown>): string | null {
+  const r = parseRedeploy(output);
+  if (r) return `${r.tool}로 다시 배포${r.runId ? ` (실행 ${r.runId})` : ""}`;
+  if (isRecord(output.payment_version)) return "결제 설정 되돌림";
+  if (output.fault_released === true) return "장애 주입 해제";
+  if (output.fault_released === false) return "장애 주입 해제 안 됨";
+  return null;
+}
+
+/** 되돌리기가 끝난 단계의 결과 한 줄. 없는 값은 빼고 "모름"(unknown)만 버전 자리에 쓴다 */
+export function rollbackDoneLine(raw: Record<string, unknown> | null | undefined, unknown = "모름"): string {
+  const output = isRecord(raw) ? raw : {};
+  const pv = isRecord(output.payment_version) ? output.payment_version : {};
+  const before = str(pv.before) ?? str(output.from_version);
+  const after = str(pv.after) ?? str(output.rolled_back_to) ?? str(output.to_version);
+  const parts = [`되돌림 완료 · 전 ${before ?? unknown} → 후 ${after ?? unknown}`];
+  const method = methodLabel(output);
+  if (method) parts.push(method);
+  const path = pathLabel(output.path);
+  if (path) parts.push(path);
+  if (output.post_check_ok === true) parts.push("되돌린 뒤 확인 통과");
+  else if (output.post_check_ok === false) parts.push("되돌린 뒤 확인 실패");
+  return parts.join(" · ");
+}
