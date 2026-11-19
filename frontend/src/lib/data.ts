@@ -1844,6 +1844,8 @@ export interface TrendReportInput {
   rebuild?: boolean;
   /** 이번 의뢰의 목표 (v2, 옛 저장본에는 없음) */
   goal?: string | null;
+  /** 데이터분석 1:1 대화에서 의뢰 카드로 넣었으면 그 대화 id (기본 null) */
+  chat_thread_id?: string | null;
 }
 export interface TrendReportCreated {
   report_id: string;

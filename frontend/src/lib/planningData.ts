@@ -339,6 +339,44 @@ export interface State {
 export type ChatStatus = 'talking' | 'handed' | 'started' | 'blocked' | 'waiting' | 'answering' | 'closed'
 export type ChatKind = 'text' | 'question' | 'plan' | 'started' | 'waiting' | 'handoff' | 'error'
 export interface ChatPlan { title: string; plan: string; done: string[]; paths: string[] }
+
+// ---- 데이터분석 1:1 대화 카드 (data_chat_get·data_chat_send 메시지의 card, 공통 계약).
+// 서버 모양(snake_case) 그대로 둔다: 경쟁사 이름 표(competitor_names)의 키가 인스타 아이디라 바꾸면 안 된다 (lib/directChat.ts toThread)
+export type ChatCardSource = 'request_text' | 'preset'
+export interface TrendRequestCard {
+  kind: 'trend_request'
+  /** 의뢰 문장 그대로 (untrusted, 글자로만) */
+  request_text: string
+  brief: {
+    product: string | null
+    target_gender: 'f' | 'm' | null
+    target_ages: string[]
+    format: string | null
+    competitors: string[]
+    keywords: string[]
+    /** 인스타 아이디 → 이름 (없으면 {}) */
+    competitor_names: Record<string, string>
+    sources: { product: ChatCardSource; target: ChatCardSource; format: ChatCardSource; competitors: ChatCardSource; keywords: ChatCardSource }
+  }
+  preset: string | null
+  /** "인스타 약 45번·네이버 약 6번·AI 2번" */
+  cost_note: string
+  /** 의뢰문에서 칸을 못 뽑았을 때 이유 */
+  brief_reason: string | null
+}
+export interface TrendReportProgressCard { kind: 'trend_report_progress'; report_id: string }
+export interface TrendReportDoneCard {
+  kind: 'trend_report_done'
+  report_id: string
+  status: 'queued' | 'running' | 'done' | 'partial' | 'failed' | 'interrupted'
+  summary_line: string | null
+  /** 최대 3 */
+  top_evidence: string[]
+  /** "/data/trend#request?id=<id>" */
+  report_path: string
+}
+export type ChatCard = TrendRequestCard | TrendReportProgressCard | TrendReportDoneCard
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -347,6 +385,8 @@ export interface ChatMessage {
   kind: ChatKind
   plan?: ChatPlan | null
   taskId?: string | null
+  /** 데이터분석 1:1 대화 카드 (예전 메시지·다른 부서는 없음·null) */
+  card?: ChatCard | null
 }
 export interface ChatThread {
   id: string

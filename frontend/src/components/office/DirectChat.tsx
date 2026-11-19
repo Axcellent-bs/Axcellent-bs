@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { PreparingChip } from "@/components/Preparing";
 import { HandoffLine, PlanCard, PROCEED_TEXT } from "@/components/office/DevCards";
+import { ChatCardView } from "@/components/office/ChatCards";
 import { ConfirmRemove, REMOVE_LABEL } from "@/components/office/ConfirmRemove";
 import { removeFailText, useToast } from "@/components/office/useToast";
 import { DASHBOARD_API_URL, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from "@/lib/env";
@@ -333,6 +334,7 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
           ) : (
             <ol role="log" aria-live="polite" aria-label={`${agent.name}와 나눈 대화`} className="flex flex-col gap-3">
               {messages.map((m) => <Bubble key={m.id} m={m} name={agent.name} me={!readOnly} requestId={thread?.requestId ?? null}
+                cards={agent.key === "data" && !readOnly} threadId={thread?.id ?? null}
                 onGo={m.id === goId ? () => void send(undefined, PROCEED_TEXT) : undefined} goBusy={goBusy} />)}
               {isAnswering(thread) && !sending && <li className="animate-pulse px-1 text-xs text-ink-500">{agent.name}가 답하는 중…</li>}
               {sending && (
@@ -379,7 +381,10 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
   );
 }
 
-function Bubble({ m, name, me, requestId = null, onGo, goBusy = false }: { m: ChatMessage; name: string; me: boolean; requestId?: string | null; onGo?: () => void; goBusy?: boolean }) {
+/** `cards`: 메시지 카드(분석 의뢰·보고서 진행·완료)를 그린다. 데이터분석 AI 1:1만 켠다 (다른 부서 대화는 그대로) */
+function Bubble({ m, name, me, requestId = null, onGo, goBusy = false, cards = false, threadId = null }: {
+  m: ChatMessage; name: string; me: boolean; requestId?: string | null; onGo?: () => void; goBusy?: boolean; cards?: boolean; threadId?: string | null;
+}) {
   const mine = m.role === "user";
   return (
     <li className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
@@ -390,6 +395,7 @@ function Bubble({ m, name, me, requestId = null, onGo, goBusy = false }: { m: Ch
         {m.kind === "handoff" && <HandoffLine requestId={requestId} />}
         {m.kind === "started" && <p className="mt-1 text-xs opacity-80">코딩 작업을 시작했어요. 개발 AI 작업 현황에서 볼 수 있어요.</p>}
       </div>
+      {cards && m.card && <ChatCardView card={m.card} messageId={m.id} threadId={threadId} />}
     </li>
   );
 }

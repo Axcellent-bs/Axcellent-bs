@@ -2,6 +2,7 @@
 // 응답: `{data, meta}` 봉투, 실패는 `{error:{code,message}}`. 쓰기(POST)에는 사람 토큰을 붙인다. 지어낸 값은 없다.
 import { SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import type { ChatThread as BaseThread } from "@/lib/planningData";
+import { withRawCards } from "@/lib/chatCards";
 
 /** 대화 하나. 서버가 남의 대화를 가리면 messages가 비고 restricted·summary가 온다 */
 export type ChatThread = BaseThread & { who?: string; summary?: string; restricted?: boolean; messageCount?: number };
@@ -42,7 +43,8 @@ function camelize(v: unknown): unknown {
 }
 type Json = Record<string, unknown>;
 const isThread = (x: unknown): x is Json => !!x && typeof x === "object" && typeof (x as Json).id === "string" && Array.isArray((x as Json).messages);
-export const toThread = (x: Json): ChatThread => camelize(x) as ChatThread;
+// 카드(데이터분석 1:1)는 camelize하지 않는다: competitor_names의 키(인스타 아이디 "toun28_official")가 바뀌면 이름을 못 찾는다
+export const toThread = (x: Json): ChatThread => withRawCards(camelize(x) as ChatThread, x.messages as unknown[]);
 export const toThreads = (d: unknown): ChatThread[] => (Array.isArray(d) ? d.filter(isThread).map(toThread) : []);
 
 async function request(ep: ChatEndpoint, suffix: string, init?: RequestInit): Promise<unknown> {
