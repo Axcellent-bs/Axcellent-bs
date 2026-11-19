@@ -9,6 +9,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from ax_agent_template import config as template_config
 from ax_contracts.schemas import AgentResult, ExecuteDecision, TaskStatus
 from dev_agent.deploy import (
     Deployment,
@@ -257,6 +258,46 @@ def test_dejafix_source_with_mock_transport() -> None:
     assert seen[0].url.params["status"] == "problem"
     assert rows[0].ref == "inc_9"
     assert rows[0].at is None  # open_time은 모르는 이름 → 시각 없음 → watch
+
+
+def test_dejafix_source_sends_agent_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("AGENT_TEMPLATE_MOCK", "PLANNING_MOCK", "DEV_MOCK", "DEV_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AX_AGENT_TOKENS", "dev=tok-dev")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    async def run() -> list[Signal]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            with template_config.agent_name_scope("dev"):
+                return await DejaFixIncidentSource("http://d", client=http).signals(_dep(), T0, T0)
+
+    asyncio.run(run())
+    assert seen[0].headers["authorization"] == "Bearer tok-dev"
+
+
+def test_dejafix_source_without_token_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    names = ("AGENT_TEMPLATE_MOCK", "PLANNING_MOCK", "DEV_MOCK", "DEV_TOKEN", "AX_AGENT_TOKENS")
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+    called: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        called.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    async def run() -> list[Signal]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            src = CombinedSource([("dejafix", DejaFixIncidentSource("http://d", client=http))])
+            with template_config.agent_name_scope("dev"):
+                return await src.signals(_dep(), T0, T0)
+
+    rows = asyncio.run(run())
+    assert [r.kind for r in rows] == ["unavailable"]
+    assert not called
 
 
 def test_dejafix_source_error_becomes_unavailable() -> None:

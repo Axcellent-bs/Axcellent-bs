@@ -77,3 +77,47 @@ test("GET이 아니면 넘기지 않는다", async () => {
   assert.equal(calls.length, 0);
   assert.equal(out.statusCode, 405);
 });
+
+test("기본: 브라우저가 붙인 사람 토큰(Authorization)을 dejafix-proxy로 그대로 넘긴다", async () => {
+  const calls = stub(() => new Response('{"data":[]}', { status: 200 }));
+  const { res } = fakeRes();
+  await dejafixHandler({})({ method: "GET", url: "/api/incidents", headers: { authorization: "Bearer human-tok" } }, res);
+  assert.deepEqual(calls, [{ url: "http://127.0.0.1:8030/api/incidents", method: "GET", auth: "Bearer human-tok" }]);
+});
+
+test("DejaFix 직접 로그인(옛 방식)일 때는 브라우저 토큰 대신 자기 로그인 토큰을 쓴다", async () => {
+  const calls = stub((url) =>
+    url.endsWith("/api/auth/login")
+      ? new Response('{"data":{"token":"jwt-1"}}', { status: 200 })
+      : new Response("[]", { status: 200 }),
+  );
+  const { res } = fakeRes();
+  const env = { DEJAFIX_PROXY_TARGET: "http://127.0.0.1:18000", DEJAFIX_USERNAME: "viewer", DEJAFIX_PASSWORD: "pw" };
+  await dejafixHandler(env)({ method: "GET", url: "/api/incidents", headers: { authorization: "Bearer human-tok" } }, res);
+  assert.equal(calls[1].url, "http://127.0.0.1:18000/api/incidents");
+  assert.equal(calls[1].auth, "Bearer jwt-1");
+});
+
+test("사람 토큰 자리표시자는 진짜 사람 토큰(AX_WEB_HUMAN_TOKEN)으로 바꿔 넘긴다 (다른 human 경로와 같다)", async () => {
+  const calls = stub(() => new Response('{"data":[]}', { status: 200 }));
+  const { res } = fakeRes();
+  const headers = { host: "localhost:3090", "sec-fetch-site": "same-origin", authorization: "Bearer human-via-nginx" };
+  await dejafixHandler({ AX_WEB_HUMAN_TOKEN: "real-human-1" })({ method: "GET", url: "/api/incidents", headers }, res);
+  assert.equal(calls[0].auth, "Bearer real-human-1");
+});
+
+test("로그인 세션 토큰(axs1.)은 바꾸지 않고 그대로 넘긴다", async () => {
+  const calls = stub(() => new Response('{"data":[]}', { status: 200 }));
+  const { res } = fakeRes();
+  const headers = { host: "localhost:3090", "sec-fetch-site": "same-origin", authorization: "Bearer axs1.a.b" };
+  await dejafixHandler({ AX_WEB_HUMAN_TOKEN: "real-human-1" })({ method: "GET", url: "/status", headers }, res);
+  assert.equal(calls[0].auth, "Bearer axs1.a.b");
+});
+
+test("다른 사이트에서 온 요청에는 진짜 토큰을 붙이지 않는다", async () => {
+  const calls = stub(() => new Response('{"data":[]}', { status: 200 }));
+  const { res } = fakeRes();
+  const headers = { host: "localhost:3090", "sec-fetch-site": "cross-site", authorization: "Bearer human-via-nginx" };
+  await dejafixHandler({ AX_WEB_HUMAN_TOKEN: "real-human-1" })({ method: "GET", url: "/api/incidents", headers }, res);
+  assert.equal(calls[0].auth, "Bearer human-via-nginx");
+});

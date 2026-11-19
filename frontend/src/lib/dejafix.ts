@@ -1,4 +1,4 @@
-import { DEJAFIX_API_URL } from "./env";
+import { DEJAFIX_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
 import { parseDejafixStatus, type DejafixStatus } from "./toolForms";
 
 // 장애 대응 탭: DejaFix 화면을 띄우지 않고 DejaFix API에서 데이터만 받는다.
@@ -54,10 +54,16 @@ export class DejafixNotConnectedError extends Error {
   }
 }
 
+/** dejafix-proxy가 부르는 쪽 토큰을 확인한다. 다른 백엔드 호출처럼 사람 토큰(로그인 세션 우선, env.ts)을 붙인다 */
+const authHeaders = (): Record<string, string> => (SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {});
+
+/** dejafix-proxy가 화면 토큰을 막았을 때의 코드 (DejaFix 계정 문제의 401과 나눠 알린다) */
+const PROXY_AUTH_CODES = new Set(["AUTH_REQUIRED", "TOKEN_INVALID", "SESSION_EXPIRED", "SESSION_REVOKED", "SESSION_ENDED"]);
+
 async function get<T>(path: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${DEJAFIX_API_URL}${path}`, { cache: "no-store" });
+    res = await fetch(`${DEJAFIX_API_URL}${path}`, { cache: "no-store", headers: authHeaders() });
   } catch {
     throw new Error("DejaFix 서버에 연결할 수 없습니다.");
   }
@@ -66,7 +72,12 @@ async function get<T>(path: string): Promise<T> {
     if ((body as { error?: { code?: string } } | undefined)?.error?.code === "DEJAFIX_NOT_CONNECTED") throw new DejafixNotConnectedError();
   }
   if (res.status === 502) throw new Error("DejaFix 백엔드에 연결할 수 없습니다 (서버 담당이 설치 설정의 DejaFix 주소를 확인해 주세요).");
-  if (res.status === 401) throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (서버 담당이 설치 설정의 DejaFix 계정을 확인해 주세요).");
+  if (res.status === 401) {
+    const body: unknown = await res.json().catch(() => undefined);
+    const code = (body as { error?: { code?: string } } | undefined)?.error?.code;
+    if (code && PROXY_AUTH_CODES.has(code)) throw new Error("장애 목록을 볼 권한이 없거나 로그인이 끊겼습니다. 다시 로그인해 주세요.");
+    throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (서버 담당이 설치 설정의 DejaFix 계정을 확인해 주세요).");
+  }
   if (res.status === 404) throw new Error("DejaFix에 없는 장애입니다.");
   if (!res.ok) throw new Error(`DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`);
   return (await res.json()) as T;
@@ -75,7 +86,7 @@ async function get<T>(path: string): Promise<T> {
 /** 프록시 `GET /status`(연결 출처·응답 여부). 회원·서버 관리 › DejaFix 연결 카드가 읽는다. 못 읽으면 null ("확인할 수 없음") */
 export async function dejafixStatus(): Promise<DejafixStatus | null> {
   try {
-    const res = await fetch(`${DEJAFIX_API_URL}/status`, { cache: "no-store" });
+    const res = await fetch(`${DEJAFIX_API_URL}/status`, { cache: "no-store", headers: authHeaders() });
     if (!res.ok) return null;
     return parseDejafixStatus(await res.json());
   } catch {

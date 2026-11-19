@@ -202,7 +202,9 @@ DejaFix 화면은 띄우지 않아요. DejaFix API 계약(`DejaFix/DejaFix` `con
 
 - 항상 **실제 DejaFix 데이터**를 불러요. DejaFix 주소·계정은 화면의 **회원·서버 관리 › DejaFix 연결**에서 정해요(도구 연결 보관함).
   개발 서버(`dejafix-proxy.ts`)는 `/dejafix-api`를 백엔드 dejafix-proxy(`http://127.0.0.1:8030`, `run_all.sh`가 띄움)로 그대로 넘기고,
-  그 프록시가 보관함의 계정으로 대신 로그인해요. 그래서 토큰과 비밀번호는 화면 코드에 실리지 않아요. 읽기(GET)만 넘겨요.
+  그 프록시가 보관함의 계정으로 대신 로그인해요. 그래서 DejaFix 토큰과 비밀번호는 화면 코드에 실리지 않아요. 읽기(GET)만 넘겨요.
+- dejafix-proxy는 부르는 쪽 토큰을 확인해요(`/healthz`만 토큰 없이). 화면은 다른 백엔드 호출처럼 사람 토큰(로그인 세션 토큰, 없으면 공용
+  `VITE_SAFETY_HUMAN_TOKEN`)을 `Authorization: Bearer`로 붙여요. 관리자·일반회원 세션 모두 통과해요. 토큰이 없거나 끊겼으면 "다시 로그인" 안내를 띄워요.
 - 보관함을 거치지 않고 DejaFix 백엔드에 바로 붙일 때만 `frontend/.env`에 `DEJAFIX_PROXY_TARGET`(예: `http://127.0.0.1:18000`)과
   `DEJAFIX_USERNAME`·`DEJAFIX_PASSWORD`(viewer 이상)를 넣어요. 그러면 개발 서버가 대신 로그인해요.
 - 30초마다 다시 받아요. 응답의 `meta.stale`이 true면 "수집 멈춤" 안내를 띄워요.

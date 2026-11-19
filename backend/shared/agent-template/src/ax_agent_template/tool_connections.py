@@ -292,6 +292,16 @@ def dejafix_proxy_url(env_name: str) -> str | None:
     return None
 
 
+def dejafix_proxy_headers() -> dict[str, str]:
+    """dejafix-proxy를 부를 때 붙이는 헤더: 이 에이전트의 토큰(`agent_token(get_agent_name())`).
+
+    프록시는 토큰이 없거나 모르는 토큰이면 401로 막는다. 이름·토큰이 없으면 `RuntimeError`.
+    """
+    from ax_agent_template.config import agent_token, get_agent_name
+
+    return {"Authorization": f"Bearer {agent_token(get_agent_name())}"}
+
+
 def _write(conns: list[ToolConnection]) -> None:
     global _cache
     path = connections_file()

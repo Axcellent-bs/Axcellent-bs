@@ -15,6 +15,7 @@ pytestmark = pytest.mark.asyncio
 ENV_PW = "env-secret-pw"
 VAULT_PW = "vault-secret-pw"
 TOKEN = "tok-secret-123"
+CALLER = "caller-human-token"
 
 
 @pytest.fixture(autouse=True)
@@ -22,6 +23,8 @@ def _vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(tc.FILE_ENV, str(tmp_path / "tool-connections.json"))
     monkeypatch.delenv("DEJAFIX_USERNAME", raising=False)
     monkeypatch.delenv("DEJAFIX_PASSWORD", raising=False)
+    monkeypatch.setenv("SAFETY_HUMAN_TOKENS", f"yejin:{CALLER}")
+    monkeypatch.delenv("AX_ALLOW_SHARED_HUMAN_TOKEN", raising=False)
     tc._cache = None
 
 
@@ -55,7 +58,9 @@ def _handler(incidents_status: int = 200):
 def _client(handler) -> httpx.AsyncClient:
     upstream = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler))
     return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app(upstream)), base_url="http://proxy"
+        transport=httpx.ASGITransport(app=create_app(upstream)),
+        base_url="http://proxy",
+        headers={"Authorization": f"Bearer {CALLER}"},  # /status도 호출자 토큰을 확인한다
     )
 
 

@@ -71,6 +71,23 @@ def _run(
     return asyncio.run(go())
 
 
+def test_fetch_sends_agent_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """dejafix-proxy가 호출자 토큰을 확인하므로 인프라 AI 토큰을 붙인다."""
+    monkeypatch.setenv("INFRA_TOKEN", "tok-infra")
+    auth: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        auth.append(request.headers.get("authorization"))
+        return httpx.Response(200, json={"data": []})
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await dejafix_watch.fetch_problems(URL, client)
+
+    assert asyncio.run(go()) == []
+    assert auth == ["Bearer tok-infra"]
+
+
 def test_tagged_problem_is_sent_to_orchestrator() -> None:
     seen: list[str] = []
     [env] = _run([_incident(1, tags=PAYMENT)], seen)

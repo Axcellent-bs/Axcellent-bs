@@ -5,6 +5,8 @@ from ax_dejafix_proxy.main import create_app
 
 pytestmark = pytest.mark.asyncio
 
+AGENT_TOKEN = "agent-token-infra"  # 호출자(인프라 AI) 토큰. 프록시가 AX_AGENT_TOKENS로 확인한다
+
 
 def _app_client(monkeypatch, handler, *, creds=True) -> httpx.AsyncClient:
     if creds:
@@ -13,11 +15,16 @@ def _app_client(monkeypatch, handler, *, creds=True) -> httpx.AsyncClient:
     else:
         monkeypatch.delenv("DEJAFIX_USERNAME", raising=False)
         monkeypatch.delenv("DEJAFIX_PASSWORD", raising=False)
+    monkeypatch.setenv("AX_AGENT_TOKENS", f"infra={AGENT_TOKEN}")
     upstream = httpx.AsyncClient(
         base_url="http://dejafix.test", transport=httpx.MockTransport(handler)
     )
     app = create_app(upstream)
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy")
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://proxy",
+        headers={"Authorization": f"Bearer {AGENT_TOKEN}"},
+    )
 
 
 class Upstream:
