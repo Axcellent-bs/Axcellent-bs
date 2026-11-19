@@ -322,7 +322,7 @@ def test_real_ffmpeg_strips_audio_from_synthetic_mp4(tmp_path: Path) -> None:
         ("360p", 8),
         ("4k", 8),
         ("1024x1024", 8),
-        ("720p", 9),
+        ("720p", 16),
         ("720p", 2),
         ("720p", 0),
         ("720p", None),
@@ -558,3 +558,21 @@ def test_download_oversize_content_length_refused(tmp_path: Path) -> None:
 
     with pytest.raises(GeminiVideoError, match="invalid_video_size"):
         _provider(handler).generate(_request(tmp_path))
+
+
+def test_omni_accepts_documented_maximum_15s(tmp_path: Path) -> None:
+    """회귀: 어댑터·단가표 상한이 8초로 막혀 있었다. 문서 상한 15초까지 보낸다."""
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        return httpx.Response(200, json=_body(_inline()))
+
+    _provider(handler).generate(_request(tmp_path, duration_s=15))
+    assert json.loads(seen[0].content)["response_format"]["duration"] == "15s"
+    assert MAX_DURATION_S == 15
+    for model in ("gemini-omni-1.1-flash", "gemini-omni-1.2-flash"):
+        entry = pricing.find_entry(
+            provider="gemini", model=model, kind="video", resolution="720p", quality=None
+        )
+        assert pricing.output_tokens_for(entry, 15) == 5792 * 15

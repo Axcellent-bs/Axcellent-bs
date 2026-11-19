@@ -605,7 +605,7 @@ metric = "param_in"
 field = "media_kind"
 allowed = ["image", "video", "audio"]
 
-# 영상 8초 720p 약 0.81 USD(약 1,150원). 2,000원 이상이면 단가표·환율이 이상한 것이라 사람이 본다
+# 영상 8초 720p 약 0.81 USD(약 1,150원), omni 1.2 15초 약 1.04 USD(약 1,560원). 2,000원 이상이면 단가표·환율이 이상한 것이라 사람이 본다
 [[rules]]
 key = "video_cost_single"
 action = "generate_media"
@@ -651,13 +651,14 @@ op = "<"
 value = 1
 
 [[rules]]
+# 영상 길이 상한 15초(Omni 문서 상한 3~15초). 15초를 넘으면 사람이 본다
 key = "video_duration"
 action = "generate_media"
 when = { media_kind = "video" }
 metric = "param"
 field = "duration_s"
 op = ">"
-value = 8
+value = 15
 
 # ---- 캠페인 예산. 값은 시작값. 재무는 승인하지 않으므로 금액 기준은 이 표가 맡는다.
 # 월 예산(재무 finance_rules.toml, 임시 100만 원)의 절반 이상은 사람이 본다

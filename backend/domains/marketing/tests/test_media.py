@@ -190,10 +190,10 @@ async def test_mock_image_and_video_work_without_any_settings(gate: Gate) -> Non
         ledger, media_kind="video", scene_template_id="cat_bookstore_video", post_draft_id="D2"
     )
     assert video.outcome == "generated" and video.output is not None
-    assert video.output["muted"] is True and video.output["duration_s"] == 8
+    assert video.output["muted"] is True and video.output["duration_s"] == 15
     assert video.output["ai_generated"] is True and video.output["cost_krw"] == 1000
     assert [s["action"] for s in gate.seen] == ["generate_media", "generate_media"]
-    assert gate.seen[1]["params"]["duration_s"] == 8
+    assert gate.seen[1]["params"]["duration_s"] == 15
 
 
 @pytest.mark.asyncio
@@ -293,7 +293,7 @@ def test_shipped_price_table_has_no_entry_for_unconfirmed_combinations() -> None
                 resolution="1080p",
                 quality=None,
             )
-    with pytest.raises(PriceNotFound):  # 8초를 넘는 영상
+    with pytest.raises(PriceNotFound):  # 15초를 넘는 영상
         entry = pricing.find_entry(
             provider="gemini",
             model="gemini-omni-1.1-flash",
@@ -301,7 +301,7 @@ def test_shipped_price_table_has_no_entry_for_unconfirmed_combinations() -> None
             resolution="720p",
             quality=None,
         )
-        pricing.output_tokens_for(entry, 9)
+        pricing.output_tokens_for(entry, 16)
     entry = pricing.find_entry(
         provider="gemini",
         model="gemini-omni-1.1-flash",

@@ -11,8 +11,8 @@
   (`.../v1beta/files/<id>:download?alt=media`). `uri`면 `GET /v1beta/files/<id>`의 `state`가
   `ACTIVE`가 될 때까지 폴링(`FAILED`면 실패)한 뒤 `:download?alt=media`로 받는다.
   폴링 간격·총 대기 상한은 생성자 인자이며, 상한을 넘으면 실패한다.
-- 규격은 '릴스·쇼츠 통합 9:16' 한 가지다: 종횡비 9:16, 해상도 `720p`, 길이 3~8초
-  (문서 하한 3초·상한 15초, 단가표 `max_duration_s` 8). 허용 조합은 단가표에 있는 것만이다.
+- 규격은 '릴스·쇼츠 통합 9:16' 한 가지다: 종횡비 9:16, 해상도 `720p`, 길이 3~15초
+  (문서 하한 3초·상한 15초, 단가표 `max_duration_s` 15). 허용 조합은 단가표에 있는 것만이다.
   1080p는 문서가 9:16 해상도를 밝히지 않아 단가표에 없고, 업스케일(ffmpeg)은 여기서 하지 않는다.
 - 모델 ID는 코드에 두지 않는다. `MARKETING_VIDEO_MODEL`로 gemini-omni-1.1-flash·1.2-flash 중
   단가표에 있는 것을 고른다(2026-12-03부터 1.1 요청은 1.2로 라우팅·청구된다).
@@ -58,7 +58,7 @@ ALLOWED_RESOLUTIONS = ("720p",)  # 단가표에 있는 9:16 해상도만
 RESOLUTION = ALLOWED_RESOLUTIONS[0]
 ASPECT_RATIO = "9:16"  # 릴스·쇼츠 통합 규격 한 가지
 MIN_DURATION_S = 3  # 문서: duration 3s~15s
-MAX_DURATION_S = 8  # 단가표 max_duration_s·safety 기준
+MAX_DURATION_S = 15  # 문서: 15초 초과는 invalid argument. 단가표 max_duration_s·safety와 같다
 REQUEST_TIMEOUT_S = 300.0  # 동기 생성 1회
 POLL_INTERVAL_S = 5.0
 POLL_MAX_WAIT_S = 120.0

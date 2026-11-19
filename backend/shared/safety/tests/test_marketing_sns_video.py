@@ -119,7 +119,7 @@ async def test_video_within_limits_passes_on_rules_without_a_verifier_agent(
     [
         ({"cost_krw": 2000}, "video_cost_single"),
         ({"cost_krw": 0}, "media_cost_zero"),
-        ({"duration_s": 9}, "video_duration"),
+        ({"duration_s": 16}, "video_duration"),
         ({"duration_s": None}, "video_duration"),
     ],
 )
