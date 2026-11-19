@@ -7,7 +7,12 @@
 - 총괄 사건(`GET /api/incidents`)은 그대로 중계하되 `untrusted` 키는 걸러 낸다.
 - 안전 관문 기록은 화면에 필요한 필드만 남긴다. 요청의 `params`·`evidence`·멱등 키·`report`·고객
   정보는 넘기지 않고, 금액은 안전 레이어가 계산한 `decision.computed_amount`만 보여 준다.
-- 주소는 `AX_ORCHESTRATOR_URL`·`AX_SAFETY_URL`(없으면 `http://<이름>:<포트>`, 템플릿 `agent_url`).
+- 서비스별 최근 배포(도구 연결 › 배포)는 인프라(`GET /api/infra/deployments/latest`)를 읽는다.
+  인프라는 dashboard-api·운영자 에이전트 토큰만 받으므로 이 경로만
+  dashboard-api 에이전트 토큰을 붙인다.
+  사람 토큰은 넘기지 않는다. 화면에 필요한 필드만 남긴다.
+- 주소는 `AX_ORCHESTRATOR_URL`·`AX_SAFETY_URL`·`AX_INCIDENT_URL`
+  (없으면 `http://<이름>:<포트>`, 템플릿 `agent_url`).
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ import httpx
 from ax_agent_template import config
 from ax_dashboard_api.envelope import ApiError
 
+AGENT_NAME = "dashboard-api"
 TIMEOUT_SECONDS = 10.0
 _client: httpx.AsyncClient | None = None  # 테스트가 `use_client`로 바꿔 끼운다
 
@@ -49,10 +55,17 @@ def scrub(value: Any) -> Any:
     return value
 
 
-async def _get(target: str, path: str, params: dict[str, str] | None = None) -> Any:
+async def _get(
+    target: str,
+    path: str,
+    params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+) -> Any:
     client = _client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
     try:
-        response = await client.get(f"{config.agent_url(target)}{path}", params=params)
+        response = await client.get(
+            f"{config.agent_url(target)}{path}", params=params, headers=headers
+        )
     except httpx.TimeoutException as exc:
         raise ApiError(504, "UPSTREAM_TIMEOUT", f"{target}가 제때 응답하지 않았다") from exc
     except httpx.HTTPError as exc:
@@ -82,6 +95,29 @@ async def incident(context_id: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ApiError(502, "UPSTREAM_ERROR", "orchestrator 응답 형식이 다르다")
     return scrub(data)
+
+
+DEPLOYMENT_FIELDS = (
+    "service",
+    "version",
+    "deployed_at",
+    "source",
+    "is_rollback",
+    "version_from_sha",
+)
+
+
+async def latest_deployments() -> list[dict[str, Any]]:
+    """서비스별 지금 돌고 있는 배포 (인프라가 받아 둔 이력). 이력이 없는 서비스는 목록에 없다."""
+    token = config.agent_token(AGENT_NAME)
+    data = await _get(
+        "incident",
+        "/api/infra/deployments/latest",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if not isinstance(data, list):
+        raise ApiError(502, "UPSTREAM_ERROR", "incident 응답 형식이 다르다")
+    return [{k: row.get(k) for k in DEPLOYMENT_FIELDS} for row in data if isinstance(row, dict)]
 
 
 def project_execution(record: dict[str, Any]) -> dict[str, Any]:

@@ -1,17 +1,32 @@
-import { useState } from 'react'
-import { Facts, Notice, SectionHead } from './parts'
+import { useEffect, useState } from 'react'
+import { Facts, Notice, SectionHead, TONE_DOT } from './parts'
 import { ConnectedTool, ToolForm } from './ToolForm'
-import type { ToolList } from '@/lib/toolConnections'
-import { DEPLOY_CHOICES, appChoices, deployRows } from '@/lib/toolForms'
+import { listLatestDeploys, type ToolList } from '@/lib/toolConnections'
+import { DEPLOY_CHOICES, appChoices, deployRows, latestDeployView, type LatestDeploys } from '@/lib/toolForms'
 
 // 도구 연결 › 배포: 인프라 AI가 장애 때 승인된 롤백을 다시 배포하는 도구(GitHub Actions·Jenkins).
 // 맨 위 새 연결 하나(도구 고르기 → 그 도구 칸 → 연결 확인 → 저장), 아래는 연결된 배포 도구만.
 // 한 서비스에 배포 도구는 하나 (두 번째는 서버가 409로 막는다). 관리자만 바꾸고 일반 회원은 상태만 본다.
+// 연결마다 "최근 배포 <버전> · <시각>": 인프라가 도구에서 받아 둔 성공 배포(dashboard-api /deployments/latest).
+// 기록이 없으면 "배포 기록 없음", 못 읽으면 "확인할 수 없음" + 이유 (지어내지 않는다).
 export function DeployTools({ data, admin, onChanged }: { data: ToolList; admin: boolean; onChanged: () => void }) {
   const rows = deployRows(data.connections)
   const [editing, setEditing] = useState<string | null>(null)
   const byId = new Map(data.connections.map((c) => [c.id, c]))
   const appName = new Map(appChoices(data.connections).map((a) => [a.id, a.label]))
+  const [latest, setLatest] = useState<LatestDeploys>({ state: 'loading' })
+  const hasRows = rows.length > 0
+
+  // 연결 목록이 바뀌면(저장·끊기 뒤) 다시 읽는다. 연결된 배포 도구가 없으면 부르지 않는다
+  useEffect(() => {
+    if (!hasRows) return
+    let alive = true
+    setLatest({ state: 'loading' })
+    listLatestDeploys()
+      .then((r) => { if (alive) setLatest({ state: 'ok', rows: r }) })
+      .catch((e: unknown) => { if (alive) setLatest({ state: 'error', reason: e instanceof Error ? e.message : '알 수 없는 오류' }) })
+    return () => { alive = false }
+  }, [data, hasRows])
 
   return (
     <section className="space-y-6">
@@ -35,11 +50,18 @@ export function DeployTools({ data, admin, onChanged }: { data: ToolList; admin:
             {rows.map((r) => {
               const conn = byId.get(r.id)
               if (!conn) return null
+              const dep = latestDeployView(r.service, latest)
               return (
                 <ConnectedTool key={r.id} conn={conn} admin={admin} title={<>{r.service || '대상 서비스 없음'} <span className="font-normal text-ink-500">· {r.tool}</span></>}
                   offNote={`끊으면 인프라 AI가 ${r.service || '이 서비스'}의 롤백을 이 도구로 다시 배포하지 않아요.`}
                   onChanged={() => { setEditing(null); onChanged() }} onEdit={() => setEditing(editing === r.id ? null : r.id)}
-                  facts={<Facts cols={3} items={conn.kind === 'github_actions' ? [
+                  facts={<>
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" aria-label="최근 배포">
+                    <span aria-hidden="true" className={`h-1.5 w-1.5 ${TONE_DOT[dep.tone]}`} />
+                    <span className={dep.tone === 'ok' ? 'font-medium text-ink-900' : 'text-ink-500'}>{dep.text}</span>
+                    {dep.note && <span className="text-xs text-ink-500">· {dep.note}</span>}
+                  </p>
+                  <Facts cols={3} items={conn.kind === 'github_actions' ? [
                     ['레포 · 워크플로', <span className="mono">{r.target || '—'}</span>],
                     ['GitHub 앱', appName.get(conn.config.app) ?? '—'],
                     ['버전 입력', <span className="mono">{conn.config.version_input || 'version'}</span>],
@@ -47,7 +69,8 @@ export function DeployTools({ data, admin, onChanged }: { data: ToolList; admin:
                     ['Jenkins 작업', <span className="mono">{r.target || '—'}</span>],
                     ['주소', <span className="mono">{conn.config.url || '—'}</span>],
                     ['버전 매개변수', <span className="mono">{conn.config.version_param || 'version'}</span>],
-                  ]} />}>
+                  ]} />
+                  </>}>
                   {editing === r.id && (
                     <div className="border-t border-ink-100 pt-4">
                       <ToolForm kind={conn.kind} existing={conn} data={data} admin={admin} title={`${r.service} 배포 도구 고치기`}

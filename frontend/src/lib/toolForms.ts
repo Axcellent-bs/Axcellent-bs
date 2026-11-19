@@ -1,7 +1,7 @@
 // 도구 연결 화면의 순수 함수: 새 연결 폼 상태(고르기 → 칸 → 연결 확인 → 저장)와 목록 모양.
 // 화면(components/connect/ToolForm.tsx·DeployTools.tsx·DejafixConnect.tsx)이 쓰고, node --test로 시험한다 (toolForms.test.ts).
 // 데이터를 지어내지 않는다: 상태·숫자는 서버가 준 값(check_ok·checked_at·check_detail)에서만 읽는다.
-import type { ToolBody, ToolCheck, ToolConnection, ToolField, ToolKind } from "./toolConnections";
+import type { LatestDeploy, ToolBody, ToolCheck, ToolConnection, ToolField, ToolKind } from "./toolConnections";
 
 export const KIND_LABEL: Record<ToolKind, string> = {
   github_app: "GitHub 앱",
@@ -213,3 +213,24 @@ export function dejafixSummary(card: DejafixCardView): { tone: Tone; label: stri
 
 export const when = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+
+/** 서비스별 최근 배포 읽기 상태 (배포 탭이 한 번 읽어 연결마다 나눠 쓴다) */
+export type LatestDeploys =
+  | { state: "loading" }
+  | { state: "error"; reason: string }
+  | { state: "ok"; rows: LatestDeploy[] };
+
+/** 연결된 배포 도구 한 줄의 "최근 배포". 서버가 준 행만 쓰고, 없으면 "배포 기록 없음", 못 읽으면 "확인할 수 없음" */
+export function latestDeployView(
+  service: string,
+  data: LatestDeploys,
+  fmt: (iso: string) => string = when,
+): { tone: Tone; text: string; note: string | null } {
+  if (data.state === "loading") return { tone: "off", text: "최근 배포 불러오는 중…", note: null };
+  if (data.state === "error") return { tone: "off", text: "최근 배포 확인할 수 없음", note: data.reason };
+  const row = service ? data.rows.find((r) => r.service === service) : undefined;
+  if (!row) return { tone: "off", text: "배포 기록 없음", note: null };
+  const version = row.version_from_sha ? `커밋 ${row.version}` : row.version;
+  const note = row.source === "demo" ? "배포 도구가 아니라 시연 기록에서 읽은 값" : row.is_rollback ? "롤백으로 다시 배포한 버전" : null;
+  return { tone: "ok", text: `최근 배포 ${version} · ${fmt(row.deployed_at)}`, note };
+}

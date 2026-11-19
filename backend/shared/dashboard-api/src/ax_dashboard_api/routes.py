@@ -2180,6 +2180,14 @@ async def executions(context_id: str | None = None) -> dict:
     return ok(items, total=len(items))
 
 
+# ------------------------------------ 도구 연결 › 배포: 서비스별 최근 배포 (읽기 전용 중계)
+@router.get("/deployments/latest")
+async def latest_deployments() -> dict:
+    """인프라가 받아 둔 서비스별 최근 배포(버전·시각·출처). 목 모드는 출처가 없어 빈 목록."""
+    items = [] if is_mock() else await relay.latest_deployments()
+    return ok(items, total=len(items))
+
+
 # ---------------------------------------- 고객지원 AI와 직접 대화 (support chat_* skill)
 # 응답 모양은 개발 AI `/dev-chat`과 같다 (id·title·status·messages[]·who·created_at·updated_at +
 # summary·task_ids·redacted). 보내기는 말을 저장하고 곧바로 돌려준다(status answering). 화면은
