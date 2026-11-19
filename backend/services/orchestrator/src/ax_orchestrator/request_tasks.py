@@ -40,6 +40,10 @@ class TaskStep:
     grade: str | None  # read · A · B · C (사람 확인 단계는 None)
     after: tuple[str, ...] = ()
     kind: str = "agent"  # agent | human
+    # 결과 번호: 이 단계 결과에서 부서가 정한 번호를 읽을 칸 이름(예: "report_id"),
+    # 그리고 이 단계가 앞 단계 번호를 받을 입력 칸 이름. 큰 결과는 부서 저장소에 두고 번호만 넘긴다
+    ref_key: str | None = None
+    takes_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,7 +90,14 @@ PROMO_VIDEO = TaskDef(
         "우리 브랜드 광고 영상이 필요해요",
     ),
     (
-        TaskStep("trend", "data", "trend_report_create", "트렌드 분석 보고서", READ_GRADE),
+        TaskStep(
+            "trend",
+            "data",
+            "trend_report_create",
+            "트렌드 분석 보고서",
+            READ_GRADE,
+            ref_key="report_id",
+        ),
         TaskStep("plan", "planning", "receive_insight", "영상 제작안", "A", after=("trend",)),
         TaskStep("confirm", None, "human_check", "사람 확인", None, after=("plan",), kind="human"),
         TaskStep("make", "marketing", "generate_media", "영상 제작", "B", after=("confirm",)),
@@ -259,6 +270,8 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "after": list(s.after),
             "grade": s.grade,
             "kind": s.kind,
+            "ref_key": s.ref_key,
+            "takes_ref": s.takes_ref,
         }
         for s in task.steps
     ]

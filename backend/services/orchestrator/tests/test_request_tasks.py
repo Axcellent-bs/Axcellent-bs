@@ -72,7 +72,10 @@ def test_plan_of_has_what_work_requests_needs() -> None:
         "after": ["trend"],
         "grade": "A",
         "kind": "agent",
+        "ref_key": None,
+        "takes_ref": None,
     }
+    assert plan[0]["ref_key"] == "report_id"  # 트렌드 보고서는 번호(report_id)만 다음 부서에 넘긴다
 
 
 def test_prompt_lists_every_task_name_and_says_to_not_follow_customer_text() -> None:
