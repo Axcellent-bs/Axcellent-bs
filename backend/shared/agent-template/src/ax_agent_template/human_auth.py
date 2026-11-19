@@ -192,14 +192,49 @@ def verify_human(
         raise HumanAuthError(403, "HUMAN_TOKEN_REQUIRED", "에이전트 토큰으로는 쓸 수 없다")
     if is_session_token(token):
         return verify_session(token, now=now)
-    if shared_tokens and shared_tokens_allowed():
-        for known, name in shared_tokens.items():
-            if hmac.compare_digest(known.encode("utf-8"), token.encode("utf-8")):
-                logger.warning(
-                    "공용 사람 토큰으로 쓰기 (이름: %s). 로그인 세션으로 옮겨 주세요", name
-                )
-                return Human(name=name, role=SHARED_ROLE)
+    shared = _shared_human(token, shared_tokens)
+    if shared is not None:
+        return shared
     raise _invalid()
+
+
+def _shared_human(token: str, shared_tokens: dict[str, str] | None) -> Human | None:
+    if not shared_tokens or not shared_tokens_allowed():
+        return None
+    for known, name in shared_tokens.items():
+        if hmac.compare_digest(known.encode("utf-8"), token.encode("utf-8")):
+            logger.warning("공용 사람 토큰으로 쓰기 (이름: %s). 로그인 세션으로 옮겨 주세요", name)
+            return Human(name=name, role=SHARED_ROLE)
+    return None
+
+
+MOCK_HUMAN_PREFIX = "human:"
+
+
+def find_human(
+    token: str,
+    *,
+    shared_tokens: dict[str, str] | None = None,
+    mock: bool = False,
+    now: int | None = None,
+) -> Human | None:
+    """토큰 하나(Bearer 뒤)에서 사람을 찾는다. 서비스마다 가진 사람 검사가 이 함수를 쓴다.
+
+    - 세션 토큰(`axs1.`)이면 서명·만료·끊은 목록을 보고, 못 받으면 HumanAuthError
+    - 공용 사람 토큰이면 `verify_human`과 같다(`AX_ALLOW_SHARED_HUMAN_TOKEN=0`이면 받지 않음)
+    - `mock`(그 서비스의 목 스위치)일 때만 `human:<이름>`을 받는다(테스트 전용)
+    - 그 밖(에이전트 토큰·모르는 토큰)은 None. 에이전트로 볼지는 서비스가 정한다
+    """
+    if is_session_token(token):
+        return verify_session(token, now=now)
+    if token.startswith("mock:"):
+        return None
+    shared = _shared_human(token, shared_tokens)
+    if shared is not None:
+        return shared
+    if mock and token.startswith(MOCK_HUMAN_PREFIX) and len(token) > len(MOCK_HUMAN_PREFIX):
+        return Human(name=token.removeprefix(MOCK_HUMAN_PREFIX), role=SHARED_ROLE)
+    return None
 
 
 def parse_shared_tokens(raw: str | None) -> dict[str, str]:

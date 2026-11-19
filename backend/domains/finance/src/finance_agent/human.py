@@ -4,6 +4,8 @@
 - 설정된 토큰: `FINANCE_HUMAN_TOKENS="이름:토큰,이름:토큰"`(없으면 `SAFETY_HUMAN_TOKENS`를 읽는다.
   재무 화면은 안전 관문과 같은 사람 토큰 `VITE_SAFETY_HUMAN_TOKEN`을 쓴다)
 - 목 모드에서는 `human:<이름>`도 받는다. 에이전트 토큰(`mock:`)은 항상 거부한다.
+- 로그인 세션 토큰(`axs1.`)도 받는다(`ax_agent_template.human_auth`). 기록 이름은 계정 이름이고,
+  공용 토큰이 아니라서 아래 `by_label`을 붙이지 않는다
 
 부서끼리 import하지 않으므로 safety의 `auth.py`를 쓰지 않고 같은 규칙을 여기 작게 다시 쓴다.
 
@@ -15,13 +17,13 @@
 
 from __future__ import annotations
 
-import hmac
 import ipaddress
 import os
 import re
 from typing import Any
 from urllib.parse import unquote
 
+from ax_agent_template import human_auth
 from ax_agent_template.config import is_mock
 
 
@@ -36,12 +38,7 @@ def bearer(authorization: str | None) -> str | None:
 
 def _configured() -> dict[str, str]:
     raw = os.getenv("FINANCE_HUMAN_TOKENS") or os.getenv("SAFETY_HUMAN_TOKENS") or ""
-    pairs: dict[str, str] = {}
-    for item in raw.split(","):
-        name, sep, token = item.strip().partition(":")
-        if sep and name and token:
-            pairs[token] = name
-    return pairs
+    return human_auth.parse_shared_tokens(raw)
 
 
 def human_from_authorization(authorization: str | None) -> str:
@@ -49,12 +46,13 @@ def human_from_authorization(authorization: str | None) -> str:
     token = bearer(authorization)
     if not token or token.startswith("mock:"):
         raise PermissionError("사람 토큰이 필요하다 (Authorization: Bearer human:<이름>)")
-    for known, name in _configured().items():
-        if hmac.compare_digest(known, token):
-            return name
-    if is_mock("finance") and token.startswith("human:") and len(token) > len("human:"):
-        return token.removeprefix("human:")
-    raise PermissionError("사람 토큰을 검증할 수 없다")
+    try:
+        human = human_auth.find_human(token, shared_tokens=_configured(), mock=is_mock("finance"))
+    except human_auth.HumanAuthError as exc:
+        raise PermissionError(exc.message) from None
+    if human is None:
+        raise PermissionError("사람 토큰을 검증할 수 없다")
+    return human.name
 
 
 SHARED_HUMAN = "공용"  # 모든 화면이 같이 쓰는 사람 토큰의 이름

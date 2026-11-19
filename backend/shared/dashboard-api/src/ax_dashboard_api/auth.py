@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import hmac
 import os
 
 from fastapi import Request
@@ -43,12 +42,7 @@ def bearer(authorization: str | None) -> str | None:
 
 def _configured() -> dict[str, str]:
     raw = os.getenv("DASHBOARD_HUMAN_TOKENS") or os.getenv("SAFETY_HUMAN_TOKENS") or ""
-    pairs: dict[str, str] = {}
-    for item in raw.split(","):
-        name, sep, token = item.strip().partition(":")
-        if sep and name and token:
-            pairs[token] = name
-    return pairs
+    return human_auth.parse_shared_tokens(raw)
 
 
 def human_from_authorization(authorization: str | None) -> str:
@@ -58,17 +52,13 @@ def human_from_authorization(authorization: str | None) -> str:
         raise ApiError(401, "AUTH_REQUIRED", "사람 토큰이 필요하다 (Authorization: Bearer 토큰)")
     if token.startswith("mock:"):
         raise ApiError(403, "HUMAN_TOKEN_REQUIRED", "에이전트 토큰으로는 쓸 수 없다")
-    if human_auth.is_session_token(token):  # 로그인 세션 토큰 (accounts.py)
-        try:
-            return human_auth.verify_session(token).name
-        except human_auth.HumanAuthError as err:
-            raise ApiError(err.status_code, err.code, err.message) from None
-    for known, name in _configured().items():
-        if hmac.compare_digest(known, token):
-            return name
-    if is_mock() and token.startswith("human:") and len(token) > len("human:"):
-        return token.removeprefix("human:")
-    raise ApiError(403, "HUMAN_TOKEN_INVALID", "사람 토큰을 검증할 수 없다")
+    try:  # 로그인 세션 토큰(accounts.py)·공용 토큰·목 `human:` (ax_agent_template.human_auth)
+        human = human_auth.find_human(token, shared_tokens=_configured(), mock=is_mock())
+    except human_auth.HumanAuthError as err:
+        raise ApiError(err.status_code, err.code, err.message) from None
+    if human is None:
+        raise ApiError(403, "HUMAN_TOKEN_INVALID", "사람 토큰을 검증할 수 없다")
+    return human.name
 
 
 def require_human_for_writes(request: Request) -> None:
