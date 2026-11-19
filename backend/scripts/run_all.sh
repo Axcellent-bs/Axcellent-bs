@@ -377,7 +377,12 @@ export AX_NOTES_DIR="$PWD/$DATA/notes"
 # 사람별 토큰: AX_PEOPLE="예진,준하"처럼 이름을 주면 사람마다 사람 토큰(승인·머지·재무 결정)과
 # 작업 대기열 토큰(내 Claude MCP)을 따로 만든다. 누가 결정했는지 관문·화면 기록에 이름이 남는다.
 # 내 작업 토큰 보기: sed -n 's/^WORK_TOKEN\.예진=//p' backend/.data/tokens.env (내 Claude 연결에 넣는다)
-NAMES="$(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ') support marketing hr archive infra admin"
+# shop-api는 판매 서버(캣북스 레포, 따로 띄움)가 우리 에이전트(마케팅 등)를 A2A로 부를 때 쓰는 이름이다.
+# 명부에 없으면 마케팅이 UNAUTHORIZED로 거부한다. 토큰은 판매 서버 shop.env와 같아야 하므로
+# 운영 서버는 tokens.env의 AX_AGENT_TOKENS에 판매 서버가 쓰는 shop-api=<토큰> 항목을 먼저 넣어 두면
+# 아래에서 그 값을 그대로 쓴다(덮어쓰지 않는다). 저장된 값이 없으면 새로 만들지만 판매 서버와 달라
+# 계속 UNAUTHORIZED가 되니, 그때는 판매 서버 값을 tokens.env에 넣고 백엔드를 다시 켠다.
+NAMES="$(echo "$APPS" | awk 'NF {print $1}' | tr '\n' ' ') support marketing hr archive infra admin shop-api"
 read -r AX_AGENT_TOKENS HUMAN_TOKEN WORK_TOKEN PEOPLE_HUMAN PEOPLE_WORK VIEWER_TOKEN < <("$PY" -c "
 import os, secrets, sys
 names, path = sys.argv[1].split(), sys.argv[2]
