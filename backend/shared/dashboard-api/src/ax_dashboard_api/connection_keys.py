@@ -28,14 +28,15 @@ KEYS_FILE_ENV = "AX_CONNECTION_KEYS_FILE"
 KEYS_FILE = "connection_keys.json"
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
+router = APIRouter(
+    prefix="/api/dashboard/connection-keys", dependencies=[Depends(require_human_for_writes)]
+)
+
+
 # 로그인 세션 토큰이면 역할을 본다(설계 3절): 키 발급·폐기는 운영자,
 # 연결·회사 정보·끊기는 고객사 관리자. 공용 토큰은 지금처럼 통과한다(옮기는 동안)
 OPERATOR_ONLY = [Depends(require_session_role("operator"))]
 ADMIN_ONLY = [Depends(require_session_role("admin"))]
-
-router = APIRouter(
-    prefix="/api/dashboard/connection-keys", dependencies=[Depends(require_human_for_writes)]
-)
 
 
 class IssueIn(BaseModel):
