@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/nav";
 import { api } from "@/lib/api";
+import type { ConversationListItem } from "@/lib/types";
 import { LANGUAGE_KO, URGENCY_DOT } from "@/lib/labels";
 import {
   STAGE_KO, cardsFromConversations, isDone, replayCards, replayLength, workerLine,
@@ -27,7 +28,10 @@ const STAGE_LOOK: Record<Stage, string> = {
   escalated: "bg-ink-100 text-ink-700",
 };
 
-export function SupportBoard() {
+// onList: 목록을 받을 때마다 원본을 넘겨 준다(문의 현황 위쪽 "분류 필요" 숫자가 같은 목록을 쓰게 — 요청은 이 보드 한 곳에서만)
+export function SupportBoard({ onList }: { onList?: (l: ConversationListItem[]) => void } = {}) {
+  const onListRef = useRef(onList);
+  onListRef.current = onList;
   const [mode, setMode] = useState<Mode>("live");
   const [real, setReal] = useState<BoardCard[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +42,7 @@ export function SupportBoard() {
   useEffect(() => {
     let alive = true;
     const load = () => api.admin.list()
-      .then((l) => { if (alive) { setReal(cardsFromConversations(l)); setError(null); } })
+      .then((l) => { if (alive) { setReal(cardsFromConversations(l)); setError(null); onListRef.current?.(l); } })
       .catch(() => { if (alive) setError("문의 목록을 불러올 수 없습니다. 백엔드가 켜져 있는지 확인하세요."); });
     load();
     if (mode !== "live") return () => { alive = false; };
