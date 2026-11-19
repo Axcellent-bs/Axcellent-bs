@@ -187,7 +187,7 @@ def test_mock_mode_has_no_org_records(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res.status_code == 501
 
 
-def test_basis_search_goes_to_hr_without_a_human_token(client: TestClient, fake: Fake) -> None:
+def test_basis_search_needs_a_human_token_and_goes_to_hr(client: TestClient, fake: Fake) -> None:
     fake.outputs["find_org_change_basis"] = {
         "candidates": [
             {
@@ -201,7 +201,6 @@ def test_basis_search_goes_to_hr_without_a_human_token(client: TestClient, fake:
         "method": "dense",
         "collected_at": NOW,
     }
-    client.headers.pop("authorization", None)  # 찾기만 하는 요청이라 사람 토큰이 필요 없다
     res = client.post(BASE + "/org-changes/basis", json={"reason": "개발팀 인력 부족으로 이동"})
     assert res.status_code == 200 and res.json()["data"]["candidates"][0]["card_id"] == "card_1"
     assert fake.last("find_org_change_basis").input == {
@@ -209,6 +208,11 @@ def test_basis_search_goes_to_hr_without_a_human_token(client: TestClient, fake:
         "limit": 3,
     }
     assert client.post(BASE + "/org-changes/basis", json={"reason": "가"}).status_code == 422
+    # 저장하지 않는 찾기도 읽기와 같아서 사람 토큰이 필요하다
+    calls = len(fake.sent)
+    client.headers.pop("authorization", None)
+    res = client.post(BASE + "/org-changes/basis", json={"reason": "개발팀 인력 부족으로 이동"})
+    assert res.status_code == 401 and len(fake.sent) == calls
 
 
 def test_parse_goes_to_hr_and_an_unavailable_llm_is_not_an_error(client, fake) -> None:
@@ -216,10 +220,12 @@ def test_parse_goes_to_hr_and_an_unavailable_llm_is_not_an_error(client, fake) -
         "available": False,
         "message": "문장을 정리하지 못했다. 직접 입력한다",
     }
-    client.headers.pop("authorization", None)
     res = client.post(BASE + "/org-changes/parse", json={"text": "다음 달 1일자 emp_03 이동"})
     assert res.status_code == 200 and res.json()["data"]["available"] is False
     assert fake.last("parse_org_change_text").input == {"text": "다음 달 1일자 emp_03 이동"}
+    client.headers.pop("authorization", None)
+    res = client.post(BASE + "/org-changes/parse", json={"text": "다음 달 1일자 emp_03 이동"})
+    assert res.status_code == 401
 
 
 def test_description_is_a_get_and_conflicts_become_409(client: TestClient, fake: Fake) -> None:

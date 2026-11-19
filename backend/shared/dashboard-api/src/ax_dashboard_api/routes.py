@@ -78,7 +78,7 @@ from ax_dashboard_api import (
 from ax_dashboard_api import (
     communications as communication_log,
 )
-from ax_dashboard_api.auth import human_from_authorization, require_human_for_writes
+from ax_dashboard_api.auth import human_from_authorization, require_human
 from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, require_mock
 from ax_dashboard_api.schemas import (
     AgentMessageBody,
@@ -121,7 +121,7 @@ from ax_dashboard_api.schemas import (
 
 HR_LIST_LIMIT = 200  # hr 조회 skill의 최대 건수
 
-router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human_for_writes)])
+router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human)])
 # 목 모드는 메모리 데이터, 실제 모드는 shop-api·support에서 읽는다 (`live_views.py`).
 # 지식 조각·후기는 아직 실제 출처가 없어 실제 모드에서는 빈 목록이다 (지어내지 않는다).
 mock_only = APIRouter()
@@ -1571,18 +1571,14 @@ class LeaveBody(BaseModel):
 
 
 @router.get("/presence")
-async def presence(request: Request, area: str | None = None) -> dict:
-    """담당별 상태(근무 중·교대 외·휴가 중). 상태 코드는 모두에게 보인다.
+async def presence(area: str | None = None) -> dict:
+    """담당별 상태(근무 중·교대 외·휴가 중)와 휴가 기간·입력자.
 
-    휴가 기간·입력자는 사람 토큰이 있는 요청에만 담는다(사람별 로그인이 생기기 전까지 관리자만).
+    읽기도 사람 토큰이 있어야 하므로(`require_human`) 여기 닿은 요청은 모두 상세를 받는다.
+    사람별 로그인이 생기면 상세는 인사 지정자로 좁힌다.
     """
     _presence_on()
-    try:
-        human_from_authorization(request.headers.get("authorization"))
-        details = True
-    except ApiError:
-        details = False
-    payload: dict = {"include_details": details}
+    payload: dict = {"include_details": True}
     if area:
         payload["area"] = area
     out = await hr_client.call("get_presence", payload)

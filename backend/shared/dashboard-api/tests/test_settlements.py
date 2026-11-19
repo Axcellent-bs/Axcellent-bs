@@ -221,10 +221,12 @@ def test_batch_refuses_an_agent_token(client: TestClient, fake: Fake) -> None:
     assert not fake.sent
 
 
-def test_reading_needs_no_token(client: TestClient, fake: Fake) -> None:
-    client.headers.pop("authorization")
+def test_reading_needs_a_human_token(client: TestClient, fake: Fake) -> None:
     fake.outputs["seller_settlement"] = deepcopy(SETTLEMENT)
     assert client.get(BASE).status_code == 200
+    client.headers.pop("authorization")
+    res = client.get(BASE)
+    assert res.status_code == 401 and res.json()["error"]["code"] == "AUTH_REQUIRED"
 
 
 def test_preparing_books_are_a_503_preparing(client: TestClient, fake: Fake) -> None:

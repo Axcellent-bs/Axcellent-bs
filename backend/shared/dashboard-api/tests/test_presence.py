@@ -87,13 +87,12 @@ def test_스위치를_켜지_않으면_읽기도_기록도_닫혀_있다(
     assert fake.sent == []
 
 
-def test_사람_토큰이_없으면_상태만_받고_상세는_요청하지_않는다(
+def test_사람_토큰이_없으면_상태도_읽지_못하고_hr를_부르지_않는다(
     client: TestClient, fake: Fake, on: None
 ) -> None:
-    fake.outputs["get_presence"]["leaves"] = []
-    data = _anonymous(client).get(BASE + "/presence").json()["data"]
-    assert data["entries"][0]["status"] == "on_leave"
-    assert fake.last("get_presence").input == {"include_details": False}
+    res = _anonymous(client).get(BASE + "/presence")
+    assert res.status_code == 401 and res.json()["error"]["code"] == "AUTH_REQUIRED"
+    assert fake.sent == []
 
 
 def test_사람_토큰이_있으면_상세를_요청한다(client: TestClient, fake: Fake, on: None) -> None:
@@ -102,13 +101,13 @@ def test_사람_토큰이_있으면_상세를_요청한다(client: TestClient, f
     assert fake.last("get_presence").input == {"include_details": True, "area": "payment"}
 
 
-def test_에이전트_토큰이나_틀린_토큰은_상세를_받지_못한다(
+def test_에이전트_토큰이나_틀린_토큰은_읽지_못한다(
     client: TestClient, fake: Fake, on: None
 ) -> None:
     for token in ("Bearer mock:finance", "Bearer wrong"):
         client.headers["authorization"] = token
-        assert client.get(BASE + "/presence").status_code == 200
-        assert fake.last("get_presence").input["include_details"] is False
+        assert client.get(BASE + "/presence").status_code == 403
+    assert fake.sent == []
 
 
 def test_기록은_사람_토큰이_필요하고_입력자는_토큰의_이름이다(

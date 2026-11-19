@@ -1,9 +1,8 @@
 import { failureError } from "./apiError";
-import { writeAuth } from "./api";
-import { DASHBOARD_API_URL } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 
 // 시스템 관리 > 회사 연결: 고객사 판매 서버(shop-api 규격) 주소. dashboard-api `company_connection.py`.
-// 저장하면 모든 부서 AI가 재시작 없이 이 주소를 읽는다. 모드 전환으로 내부 데이터와 오갈 수 있다(주소는 남김). 쓰기는 사람 토큰이 필요하다(writeAuth).
+// 저장하면 모든 부서 AI가 재시작 없이 이 주소를 읽는다. 모드 전환으로 내부 데이터와 오갈 수 있다(주소는 남김). 읽기·쓰기 모두 사람 토큰이 필요하다(dashboardAuth).
 
 export type ConnectionSource = "connection" | "env" | "default";
 /** 내부 데이터(원래 판매 서버) ↔ 실제 연결(저장한 고객사 주소) */
@@ -75,7 +74,7 @@ const PATH = "/api/dashboard/company-connection";
 export async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method,
-    headers: { "Content-Type": "application/json", ...writeAuth(method, path) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
   });

@@ -38,7 +38,7 @@ from ax_contracts.schemas import (
     HandoffStatus,
     HandoffTask,
 )
-from ax_dashboard_api.auth import bearer, require_human_for_writes
+from ax_dashboard_api.auth import bearer, require_human
 from ax_dashboard_api.envelope import ApiError, ok
 
 DB_ENV = "AX_HANDOFF_DB"
@@ -170,8 +170,8 @@ def _agent_from(authorization: str | None) -> str:
 
 # 에이전트가 넣는 창구: 사람 토큰 대신 에이전트 토큰을 본다
 intake = APIRouter(prefix="/api/dashboard")
-# 사람이 보는 창구: 쓰기(complete)는 사람 토큰이 필요하다
-inbox = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human_for_writes)])
+# 사람이 보는 창구: 목록 읽기와 쓰기(complete) 모두 사람 토큰이 필요하다
+inbox = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human)])
 
 
 @intake.post("/handoffs", status_code=201)

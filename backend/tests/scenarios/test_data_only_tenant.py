@@ -236,7 +236,8 @@ async def _work_through_inbox(  # noqa: ANN202
             incs = list(manager.incidents.values())
             if incs and all(i.status != "open" for i in incs):
                 return incs[0], done
-            listed = (await http.get(INBOX, params={"status": "open"})).json()["data"]
+            res = await http.get(INBOX, params={"status": "open"}, headers=HUMAN)
+            listed = res.json()["data"]
             waiting = {
                 r.handoff_task_id
                 for i in incs
@@ -291,7 +292,7 @@ def test_data_only_tenant_end_to_end(tenant, world, monkeypatch) -> None:  # noq
             AgentRequest(meta=meta, skill="activity_report", input={"start": today.isoformat()}),
         )
         async with httpx.AsyncClient(transport=router) as http:
-            left = (await http.get(INBOX, params={"status": "open"})).json()["data"]
+            left = (await http.get(INBOX, params={"status": "open"}, headers=HUMAN)).json()["data"]
         return registry, manager, emitted, anomaly, inc, done, report, left
 
     registry, manager, emitted, anomaly, inc, done, report, left_open = asyncio.run(scenario())

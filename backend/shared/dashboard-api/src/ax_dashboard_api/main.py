@@ -15,6 +15,7 @@ from ax_dashboard_api import (
     company_connection,
     handoffs,
     office_room,
+    public_info,
     settlements,
     shop_events,
     shop_relay,
@@ -108,23 +109,26 @@ app.add_middleware(
 )
 install_error_handlers(app)
 app.include_router(router)
-# 사람 할 일함: 에이전트가 넣는 창구(에이전트 토큰)와 사람이 보는 창구(쓰기는 사람 토큰)
+# 사람 할 일함: 에이전트가 넣는 창구(에이전트 토큰)와 사람이 보는 창구(읽기·쓰기 모두 사람 토큰)
 app.include_router(handoffs.intake)
 app.include_router(handoffs.inbox)
-# 오피스 단톡방 대화 목록 (단톡방 대화는 모두에게 보인다, 쓰기는 사람 토큰)
+# 오피스 단톡방 대화 목록 (단톡방 대화는 모두에게 보인다, 읽기·쓰기 모두 사람 토큰)
 app.include_router(office_room.router)
-# 시스템 관리 > 회사 연결 (고객사 판매 서버 주소, 쓰기는 사람 토큰)
+# 시스템 관리 > 회사 연결 (고객사 판매 서버 주소, 읽기·쓰기 모두 사람 토큰)
 app.include_router(company_connection.router)
 app.include_router(connection_keys_router)
 # 계정·로그인: 사람마다 다른 세션 토큰 (로그인은 토큰 없이, 나머지는 세션 토큰)
 app.include_router(accounts_router)
+# 로그인 전 화면이 읽는 공개 정보 (설치된 회사 이름만, 토큰 없이. auth.PUBLIC_ROUTES)
+app.include_router(public_info.router)
 app.include_router(instagram_radar_router)
 app.include_router(tool_connections.router)
 # 알림 받는 주소: 고객사 판매 서버가 회사 키로 이벤트를 보낸다 (사람 토큰 대신 회사 키)
 app.include_router(shop_events.router)
 # 판매자 정산: 고객지원(support)이 계산·지급 승인 요청을 한다 (요청은 사람 토큰)
 app.include_router(settlements.router)
-# 판매 서버 관리 읽기 중계: 화면이 판매 서버를 직접 부르지 않게 (GET만, 서버 쪽 열람 토큰)
+# 판매 서버 관리 읽기 중계: 화면이 판매 서버를 직접 부르지 않게
+# (GET만, 서버 쪽 열람 토큰. 부르는 화면은 사람 토큰)
 app.include_router(shop_relay.router)
 # 사이트 변환기: 회사 연결이 kind=adapter면 AI들의 shop-api 주소가 여기다
 app.include_router(site_adapter_router)

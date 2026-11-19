@@ -1,5 +1,4 @@
-import { writeAuth } from "./api";
-import { DASHBOARD_API_URL } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import { MARKETING_HOLD_ACTIONS, finance, type ExecutionRecord, type Review } from "./finance";
 import { shortDateTime } from "./format";
 
@@ -108,7 +107,7 @@ export const incidentClosed = (contextId: string, incidents: Map<string, Inciden
 async function getJson<T>(url: string, server: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(url, { cache: "no-store" });
+    res = await fetch(url, { headers: dashboardAuth(), cache: "no-store" });
   } catch {
     throw new Error(`${server}에 연결하지 못했습니다.`);
   }
@@ -225,7 +224,7 @@ export interface CampaignAnswer { status: string; outcome: string | null; output
 async function campaignPost(path: string, body: unknown): Promise<CampaignAnswer> {
   const res = await fetch(`${DASHBOARD_API_URL}/api/dashboard/campaigns${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
     body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => null);

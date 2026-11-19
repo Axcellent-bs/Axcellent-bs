@@ -1,9 +1,8 @@
 import { ApiError } from "./apiError";
-import { writeAuth } from "./api";
-import { DASHBOARD_API_URL } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 
 // 시스템 관리 > 도구 연결: GitHub 앱·배포 도구(GitHub Actions·Jenkins)·DejaFix 연결. dashboard-api `tool_connections.py`.
-// 연결은 공용 보관함 한 곳에 두고 인프라 AI·개발 AI·DejaFix 프록시가 재시작 없이 읽는다. 쓰기는 사람 토큰이 필요하다(writeAuth).
+// 연결은 공용 보관함 한 곳에 두고 인프라 AI·개발 AI·DejaFix 프록시가 재시작 없이 읽는다. 읽기·쓰기 모두 사람 토큰이 필요하다(dashboardAuth).
 // 비밀 값은 보내기만 한다. 응답에는 가린 값(`secrets_set`: •••• · 개인 키는 설정됨)만 온다.
 // 화면 없는 순수 함수(폼 상태·목록 모양)는 toolForms.ts (node --test로 시험).
 
@@ -76,7 +75,7 @@ const PATH = "/api/dashboard/tool-connections";
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method,
-    headers: { "Content-Type": "application/json", ...writeAuth(method, path) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
   });

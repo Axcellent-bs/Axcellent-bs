@@ -37,7 +37,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from ax_dashboard_api import chat_remove
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
 
 DB_ENV = "AX_OFFICE_ROOM_DB"
@@ -212,7 +212,7 @@ def _now() -> datetime:
 
 
 # 쓰기(POST)는 사람 토큰, 읽기는 열려 있다
-router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human_for_writes)])
+router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human)])
 
 
 @router.post("/office-room", status_code=201)

@@ -23,7 +23,7 @@ import httpx
 from fastapi import APIRouter, Depends, Query
 
 from ax_agent_template.config import agent_url
-from ax_dashboard_api.auth import require_human_for_writes
+from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, is_mock, ok
 
 TIMEOUT_SECONDS = 10.0
@@ -45,7 +45,7 @@ UPSTREAM = {
     "faults": "/api/shop/admin/faults",
 }
 
-router = APIRouter(prefix="/api/dashboard/shop", dependencies=[Depends(require_human_for_writes)])
+router = APIRouter(prefix="/api/dashboard/shop", dependencies=[Depends(require_human)])
 
 
 def _token() -> str:

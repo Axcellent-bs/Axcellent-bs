@@ -312,9 +312,11 @@ def test_support_errors_become_api_errors(fake: Fake, monkeypatch: pytest.Monkey
     assert res.status_code == 404 and res.json()["error"]["code"] == "NOT_FOUND"
 
 
-def test_the_new_routes_are_reads_so_they_need_no_token(mock_client: TestClient) -> None:
-    mock_client.headers.pop("authorization")
+def test_the_new_read_routes_need_a_human_token(mock_client: TestClient) -> None:
     assert mock_client.get(BASE + "/customers/at-risk").status_code == 200
+    mock_client.headers.pop("authorization")
+    res = mock_client.get(BASE + "/customers/at-risk")
+    assert res.status_code == 401 and res.json()["error"]["code"] == "AUTH_REQUIRED"
 
 
 # ---------------------------------------------------------------- 장애 보상 대기 → 사람 승인
