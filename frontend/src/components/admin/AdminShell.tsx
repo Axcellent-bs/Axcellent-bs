@@ -1,6 +1,7 @@
 import { Link, useRouter } from "@/lib/nav";
 import { usePathname } from "@/lib/nav";
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { findSiteIconOrNull } from "@/components/planning-common/company";
 import { AccountSwitcher } from "@/demo/AccountSwitcher";
 import { homeOf, servicesOf, supportViewer, useSession, type Account } from "@/demo/session";
 import { useCompany } from "@/demo/company";
@@ -240,7 +241,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
             /* 지금 연결된 고객사 이름. 연결을 끊으면 with 뒤를 비운다 (demo/company.ts) */
             company ? (
               <>
-                <span className="shrink-0 text-[15px] font-semibold">AXcellent <span className="font-normal text-ink-500">with</span> {company.name}</span>
+                <span className="shrink-0 text-[15px] font-semibold">AXcellent <span className="font-normal text-ink-500">with</span> <CompanyBrand name={company.name} siteUrl={company.siteUrl} /></span>
                 <span className="chip hidden bg-emerald-50 text-emerald-700 xl:inline-flex" title="사내망에서만 열리고 외부 접근은 막혀 있습니다">사내망 {company.network}</span>
               </>
             ) : (
@@ -269,4 +270,22 @@ export function AdminShell({ children }: { children: ReactNode }) {
       </div>
     </div>
   );
+}
+
+/** 머리글의 연결된 회사 이름. 사이트 주소가 있으면 이름을 누르면 회사 사이트가 새 탭으로 열리고, 오른쪽에 사이트 파비콘을 띄운다 */
+function CompanyBrand({ name, siteUrl }: { name: string; siteUrl?: string }) {
+  const [icon, setIcon] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    setIcon(null)
+    if (siteUrl) void findSiteIconOrNull(siteUrl).then((found) => { if (live) setIcon(found) })
+    return () => { live = false }
+  }, [siteUrl])
+  const mark = icon && <img src={icon} alt="" aria-hidden="true" className="ml-1.5 inline h-4 w-4 rounded-sm align-[-2px]" />
+  if (!siteUrl) return <>{name}</>
+  return (
+    <a href={siteUrl} target="_blank" rel="noopener noreferrer" title={`${name} 사이트 열기`} className="hover:underline">
+      {name}{mark}
+    </a>
+  )
 }

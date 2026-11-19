@@ -110,3 +110,13 @@ def test_without_the_connection_file_env_it_is_read_only(client, monkeypatch) ->
     assert client.get(BASE).json()["data"] == {"keys": [], "company": None, "editable": False}
     res = client.post(BASE + "/issue", json={})
     assert res.status_code == 409
+
+
+def test_the_company_site_url_is_kept_for_the_header_icon(client) -> None:
+    key = _issue(client)["key"]
+    body = {"key": key, **INFO, "site_url": "http://10.0.0.9:3000/"}
+    res = client.post(BASE + "/connect", json=body)
+    assert res.status_code == 200, res.text
+    assert client.get(BASE).json()["data"]["company"]["site_url"] == "http://10.0.0.9:3000"
+    res = client.post(BASE + "/company", json={**INFO, "site_url": "javascript:alert(1)"})
+    assert res.status_code == 422

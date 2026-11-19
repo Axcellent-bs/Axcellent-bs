@@ -32,6 +32,22 @@ async function iconFromHtml(site: string): Promise<string | undefined> {
   }
 }
 
+/** 사이트 파비콘을 찾는다. 못 찾으면 null(기본 로고로 채우지 않는다). 머리글의 회사 아이콘에 쓴다 */
+export async function findSiteIconOrNull(siteUrl: string): Promise<string | null> {
+  let site: string
+  try {
+    site = new URL(siteUrl).href
+  } catch {
+    return null
+  }
+  const paths = COMMON_PATHS.map((p) => new URL(p, site).href)
+  const ok = await Promise.all(paths.map((p) => loads(p)))
+  const hit = paths.find((_, i) => ok[i])
+  if (hit) return hit
+  const fromHtml = await iconFromHtml(site)
+  return fromHtml && (await loads(fromHtml)) ? fromHtml : null
+}
+
 // 앞에서부터 먼저 불러지는 것을 쓴다 (경로 후보는 한꺼번에 확인)
 export async function findSiteIcon(shopUrl = COMPANY.shopUrl): Promise<string> {
   // 게이트웨이(한 포트)에서는 판매 사이트 주소가 '/' 같은 상대 경로라 지금 주소 기준으로 바꾼다
