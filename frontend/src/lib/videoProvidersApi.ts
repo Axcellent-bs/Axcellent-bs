@@ -1,7 +1,6 @@
 // 영상 AI 공급자 목록·선택·커스텀 등록 호출(dashboard-api). 오류는 상태 코드만 담아 던진다.
 import { statusOnlyError } from "./apiError";
-import { writeAuth } from "./api";
-import { DASHBOARD_API_URL } from "./env";
+import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import type { VideoProvidersAnswer } from "./videoProviders";
 
 const BASE = "/api/dashboard/marketing/video-providers";
@@ -9,7 +8,7 @@ const BASE = "/api/dashboard/marketing/video-providers";
 async function post(path: string, body: unknown): Promise<VideoProvidersAnswer> {
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...writeAuth("POST", path) },
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
     body: JSON.stringify(body),
     cache: "no-store",
   });
@@ -19,7 +18,7 @@ async function post(path: string, body: unknown): Promise<VideoProvidersAnswer> 
 }
 
 export async function getVideoProviders(): Promise<VideoProvidersAnswer> {
-  const res = await fetch(`${DASHBOARD_API_URL}${BASE}`, { cache: "no-store" });
+  const res = await fetch(`${DASHBOARD_API_URL}${BASE}`, { cache: "no-store", headers: dashboardAuth() });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.data) throw statusOnlyError(json, res.status);
   return json.data as VideoProvidersAnswer;
