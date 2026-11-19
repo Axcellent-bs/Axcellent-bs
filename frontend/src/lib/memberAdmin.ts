@@ -1,0 +1,73 @@
+// 회원·서버 관리(/system/members) 회원 표의 서버 로그인 규칙 (dashboard-api `accounts.py`의 목록·update와 같은 규칙).
+// 화면은 버튼을 끄고 이유를 보여 줄 뿐이고, 최종 판단은 서버가 다시 한다. 순수 계산이라 `npm test`가 그대로 돈다.
+import { READER_AREA_IDS, readServerAccount, type ReaderAreaId, type ServerAccount, type ServerRole } from "./humanSession.ts";
+
+/** 고객사 계정 역할 (회원 표에 나오는 역할) */
+export const CUSTOMER_ROLES: readonly ServerRole[] = ["admin", "member"];
+
+/** `GET /auth/accounts` 응답을 읽는다. 모양이 틀린 줄은 버리고 공개 칸만 남긴다 */
+export function readAccountList(status: number, body: unknown): { ok: true; rows: ServerAccount[] } | { ok: false; message: string } {
+  if (status >= 200 && status < 300) {
+    const data = (body as { data?: unknown } | null)?.data;
+    if (!Array.isArray(data)) return { ok: false, message: "계정 목록을 읽지 못했어요." };
+    return { ok: true, rows: data.map(readServerAccount).filter((a): a is ServerAccount => !!a) };
+  }
+  const m = (body as { error?: { message?: unknown } } | null)?.error?.message;
+  return { ok: false, message: typeof m === "string" && m ? m : `계정 목록을 읽지 못했어요 (${status})` };
+}
+
+/** 회원 표에 보일 고객사 계정만 (운영자 계정은 고객사 회원이 아니다) */
+export const customerRows = (rows: readonly ServerAccount[]) => rows.filter((a) => CUSTOMER_ROLES.includes(a.role));
+
+/** 확인 권한: 서버가 값을 주면 그 값, 아니면 역할로 (고객사 관리자는 있음) */
+export const approverOf = (a: ServerAccount) => (typeof a.approver === "boolean" ? a.approver : a.role === "admin");
+
+/**
+ * 이 사람이 그 계정을 그 역할로 바꿀 수 있나. 바꿀 수 있으면 null, 아니면 이유.
+ * 서버 규칙: 운영자는 모든 계정, 고객사 관리자는 고객사 계정만이고 운영자 역할은 못 준다.
+ * 자기 역할은 스스로 못 바꾸고, 마지막 남은 고객사 관리자는 못 내린다.
+ */
+export function roleChangeProblem(
+  actor: { id: string; role: ServerRole },
+  target: ServerAccount,
+  next: ServerRole,
+  rows: readonly ServerAccount[],
+): string | null {
+  if (next === target.role) return null;
+  if (actor.role !== "operator" && actor.role !== "admin") return "관리자만 역할을 바꿀 수 있어요.";
+  if (actor.role === "admin" && (!CUSTOMER_ROLES.includes(target.role) || !CUSTOMER_ROLES.includes(next))) {
+    return "고객사 관리자는 고객사 계정만 관리자·일반회원으로 바꿀 수 있어요.";
+  }
+  if (actor.id === target.id) return "자기 역할은 스스로 바꿀 수 없어요.";
+  if (target.role === "admin" && rows.filter((r) => r.role === "admin").length <= 1) {
+    return "마지막 남은 관리자는 내릴 수 없어요. 다른 관리자를 먼저 정해 주세요.";
+  }
+  return null;
+}
+
+/** 이 사람이 그 계정의 부서·확인 권한·열람 담당을 바꿀 수 있나 */
+export function canEditProfile(actor: { role: ServerRole }, target: ServerAccount): boolean {
+  if (actor.role === "operator") return true;
+  return actor.role === "admin" && CUSTOMER_ROLES.includes(target.role);
+}
+
+export type AccountPatch = { role?: ServerRole; name?: string; dept?: string; approver?: boolean; readers?: ReaderAreaId[] };
+
+/** `POST /auth/accounts/{id}/update` 본문: 보낼 칸만. 아무것도 없으면 null (빈 요청은 보내지 않는다) */
+export function updateBody(patch: AccountPatch): AccountPatch | null {
+  const out: AccountPatch = {};
+  if (patch.role !== undefined) out.role = patch.role;
+  if (patch.name !== undefined) out.name = patch.name.trim();
+  if (patch.dept !== undefined) out.dept = patch.dept.trim();
+  if (patch.approver !== undefined) out.approver = patch.approver;
+  if (patch.readers !== undefined) out.readers = READER_AREA_IDS.filter((r) => patch.readers?.includes(r));
+  return Object.keys(out).length ? out : null;
+}
+
+/** 열람 담당 하나를 켜고 끈다 (순서는 READER_AREA_IDS 순) */
+export function toggleReader(current: readonly ReaderAreaId[] | undefined, area: ReaderAreaId): ReaderAreaId[] {
+  const on = new Set(current ?? []);
+  if (on.has(area)) on.delete(area);
+  else on.add(area);
+  return READER_AREA_IDS.filter((r) => on.has(r));
+}

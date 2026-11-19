@@ -13,8 +13,10 @@ import { getCompany } from './company'
 import { memberLinked, useProfiles, withProfile, type ReaderArea } from './members'
 import { endSupport, getSupport, supportActive } from './support'
 import { setActorName } from '@/lib/actor'
-import { checkSession, fetchLoginEnabled, serverLogout } from '@/lib/authApi'
+import { fetchLoginEnabled, fetchMe, serverLogout } from '@/lib/authApi'
 import { getSession, setSession, type HumanSession, type ServerAccount } from '@/lib/humanSession'
+import { approverOf, customerRows } from '@/lib/memberAdmin'
+import { clearServerMembers, getServerMembers } from './serverMembers'
 
 export type Account = {
   id: string
@@ -49,32 +51,16 @@ export type LoginMode = 'checking' | 'server' | 'demo'
 let modeNow: LoginMode = 'checking'
 export const loginMode = () => modeNow
 
-/** 서버 계정을 화면 계정으로. 부서·확인 권한은 관리자가 회원·서버 관리에서 정한다(withProfile) */
+/** 서버 계정을 화면 계정으로. 역할·부서·확인 권한·열람 담당은 서버 계정 값을 쓴다(관리자가 회원·서버 관리에서 서버에 저장) */
 export function accountFromServer(a: ServerAccount): Account {
-  const base = { id: a.id, name: a.name, email: a.email, server: true }
+  const base = {
+    id: a.id, name: a.name, email: a.email, server: true,
+    ...(a.dept ? { dept: a.dept } : {}),
+    readers: a.readers ?? [],
+  }
   if (a.role === 'operator') return { ...base, role: '운영자', services: [], operator: true }
-  if (a.role === 'admin') return { ...base, role: '관리자', services: SERVICES.map((s) => s.id), admin: true, approver: true }
-  return { ...base, role: '일반회원', services: SERVICES.map((s) => s.id), approver: false }
-}
-
-// 이 브라우저에서 서버로 만든 고객사 계정(공개 칸만, 비밀번호 없음). 고객사 관리자는 서버 계정 목록을 못 읽어서
-// 회원 표에 이렇게 기억한 것만 보인다
-const SERVER_ACCOUNTS_KEY = 'axcellent-server-accounts'
-const loadServerAccounts = (): ServerAccount[] => {
-  try {
-    const rows = JSON.parse(localStorage.getItem(SERVER_ACCOUNTS_KEY) ?? '[]')
-    return Array.isArray(rows) ? (rows as ServerAccount[]).filter((a) => a && typeof a.id === 'string' && typeof a.email === 'string' && typeof a.role === 'string') : []
-  } catch {
-    return []
-  }
-}
-export function rememberServerAccount(a: ServerAccount) {
-  const row: ServerAccount = { id: a.id, name: a.name, email: a.email, role: a.role, created_at: a.created_at ?? null }
-  try {
-    localStorage.setItem(SERVER_ACCOUNTS_KEY, JSON.stringify([...loadServerAccounts().filter((x) => x.id !== a.id), row]))
-  } catch {
-    /* 저장이 막힌 브라우저는 표에 안 보일 뿐 서버 계정은 그대로다 */
-  }
+  if (a.role === 'admin') return { ...base, role: '관리자', services: SERVICES.map((s) => s.id), admin: true, approver: approverOf(a) }
+  return { ...base, role: '일반회원', services: SERVICES.map((s) => s.id), approver: approverOf(a) }
 }
 
 // 데모 고객사 계정: 관리자 + 일반회원(시스템 관리 메뉴 없음, 회사에 연결된 상태). 예전 ?as=<직무 id> 링크는 관리자로 들어간다(load)
@@ -99,11 +85,11 @@ const loadSignups = (): Account[] => {
 /** 로그인할 수 있는 고객사 계정: 데모 계정 + 회원가입한 계정 (관리자가 바꾼 부서·확인 권한을 덮어쓴다) */
 export const customerAccounts = (): Account[] => {
   if (modeNow !== 'server') return [...ACCOUNTS, ...loadSignups()].map((a) => withProfile(a))
-  // 서버 로그인: 지금 로그인한 고객사 계정 + 이 브라우저에서 만든 서버 계정
+  // 서버 로그인: 서버 계정 목록(serverMembers.ts)만 쓴다. 브라우저에 기억한 계정·프로필은 보지 않는다.
+  // 목록을 아직 못 받았거나 읽을 수 없는 역할(일반회원)이면 지금 로그인한 고객사 계정만
   const me = getSession()?.account
-  const rows = [...(me ? [me] : []), ...loadServerAccounts()].filter((a) => a.role !== 'operator')
-  const seen = new Set<string>()
-  return rows.filter((a) => !seen.has(a.id) && !!seen.add(a.id)).map((a) => withProfile(accountFromServer(a)))
+  const rows = getServerMembers().rows ?? (me ? [me] : [])
+  return customerRows(rows).map(accountFromServer)
 }
 
 /** 이미 가입된 이메일인가 (운영자 포함) */
@@ -218,6 +204,8 @@ type Session = {
   /** 로그인하려 했더니 서버가 꺼져 있다고 했다(503 LOGIN_DISABLED) → 데모 로그인으로 바꾼다 */
   fallBackToDemo: () => void
   signOut: () => void
+  /** 서버 로그인: 내 계정 값(`/auth/me`)을 다시 읽어 화면 권한에 쓴다. 데모 로그인이면 아무것도 안 한다 */
+  refreshMe: () => Promise<void>
 }
 const Ctx = createContext<Session | null>(null)
 
@@ -251,6 +239,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const endServerSession = useCallback(() => {
+    clearServerMembers()
     setSession(null)
     setAccount(null)
     setExpired(true)
@@ -266,12 +255,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const t = setTimeout(endServerSession, Math.min(ms, 2 ** 31 - 1))
     return () => clearTimeout(t)
   }, [expiresAt, endServerSession])
-  useEffect(() => {
+  // 서버 계정 값을 다시 읽는다(`/auth/me`): 관리자가 부서·확인 권한·열람 담당을 바꾸면 이 화면 권한에도 바로 쓴다.
+  // 역할이 바뀌면 서버가 세션을 끊으므로 401 → 로그아웃
+  const refreshMe = useCallback(async () => {
     if (!getSession()) return
-    void checkSession().then((alive) => {
-      if (alive === false) endServerSession()
-    })
+    const r = await fetchMe()
+    if (r.kind === 'ended') return endServerSession()
+    if (r.kind !== 'alive') return
+    const s = getSession()
+    if (!s || s.account.id !== r.account.id) return
+    setSession({ ...s, account: r.account })
+    setAccount(accountFromServer(r.account))
   }, [endServerSession])
+  // 처음 열 때와 탭으로 돌아올 때 본다
+  useEffect(() => {
+    void refreshMe()
+    const onFocus = () => void refreshMe()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refreshMe])
 
   const signIn = useCallback((id: string) => {
     if (modeNow === 'server') return null
@@ -281,6 +283,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return next
   }, [])
   const signInServer = useCallback((s: HumanSession) => {
+    clearServerMembers()
     setSession(s)
     setMode('server')
     setExpired(false)
@@ -300,16 +303,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setAccount(null)
     setExpired(false)
     save(null)
+    clearServerMembers()
     endSupport()
   }, [])
-  // 관리자가 부서·확인 권한을 바꾸면 로그인한 계정에도 바로 보인다
+  // 데모 로그인: 관리자가 바꾼 부서·확인 권한(브라우저에 기억)을 로그인한 계정에도 바로 보인다.
+  // 서버 로그인: 서버 계정 값(`/auth/me`)을 그대로 쓰고 브라우저 프로필은 덮어쓰지 않는다
   const profiles = useProfiles()
-  const current = useMemo(() => (account ? withProfile(account, profiles) : null), [account, profiles])
+  const current = useMemo(
+    () => (account ? (account.server ? account : withProfile(account, profiles)) : null),
+    [account, profiles],
+  )
   // 사람 결정 요청에 같이 보낼 계정 이름 (재무 기록의 "관리자(IP)" 표시용, lib/actor.ts). 같은 값을 다시 넣을 뿐이라 렌더 중에 둔다
   setActorName(current?.name)
   const value = useMemo(
-    () => ({ account: current, mode, expired, signIn, signInServer, fallBackToDemo, signOut }),
-    [current, mode, expired, signIn, signInServer, fallBackToDemo, signOut],
+    () => ({ account: current, mode, expired, signIn, signInServer, fallBackToDemo, signOut, refreshMe }),
+    [current, mode, expired, signIn, signInServer, fallBackToDemo, signOut, refreshMe],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

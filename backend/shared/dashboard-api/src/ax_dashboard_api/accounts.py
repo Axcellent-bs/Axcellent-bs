@@ -2,7 +2,9 @@
 
 - 파일: `AX_ACCOUNTS_FILE` → 회사 연결 파일 옆 `accounts.json` (연결 키처럼).
   없으면 로그인 꺼짐
-- 칸: id, 이름, 이메일, 역할(`operator`·`admin`·`member`), 비밀번호 해시(scrypt), 만든 시각
+- 칸: id, 이름, 이메일, 역할(`operator`·`admin`·`member`), 비밀번호 해시(scrypt), 만든 시각,
+  프로필(부서 `dept`, 확인 권한 `approver`, 열람 담당 `readers`).
+  열람 담당 값은 화면 `members.ts`의 `ReaderArea`와 같다
 - 첫 계정: 계정이 하나도 없을 때 `AX_BOOTSTRAP_ADMIN="이메일:초기 비밀번호"`로 운영자 1명을 만든다
 - 같은 이메일로 연속 5번 틀리면 15분 동안 로그인을 막는다(맞는 비밀번호여도).
   이 프로세스 메모리에 센다
@@ -14,7 +16,15 @@
 - `POST /api/dashboard/auth/login` {email, password} → {token, expires_at, account}
 - `POST /api/dashboard/auth/logout` (세션 토큰) → 끊은 토큰 목록에 올린다
 - `GET  /api/dashboard/auth/me` (세션 토큰) → 내 계정
-- `GET  /api/dashboard/auth/accounts` (운영자) → 계정 목록 (해시는 내보내지 않는다)
+- `GET  /api/dashboard/auth/accounts`
+  (운영자: 모든 계정 / 고객사 관리자: 고객사 계정(admin·member)만) → 계정 목록
+  (공개 칸만. 비밀번호 해시·세대 번호 같은 내부 값은 내보내지 않는다)
+- `POST /api/dashboard/auth/accounts/{id}/update` {role?, name?, dept?, approver?, readers?}
+  (운영자: 모든 계정 / 고객사 관리자: 고객사 계정만, 운영자 역할로 올리지 못한다)
+  → 역할·프로필 바꾸기.
+  자기 역할은 스스로 바꾸지 못하고, 마지막 남은 고객사 관리자는 내리지 못한다.
+  역할이 바뀌면 그 계정의 기존 세션을 모두 끊는다(토큰에 역할이 들어 있어서)
+  nginx 게이트가 POST만 열어서 PATCH 대신 POST
 - `POST /api/dashboard/auth/accounts` (운영자: 모든 역할 / 고객사 관리자: 일반회원만) → 계정 만들기
 - `POST /api/dashboard/auth/password` (세션 토큰) {current_password, new_password}
   → 내 비밀번호 바꾸기. 현재 비밀번호가 틀리면 로그인 실패와 같이 센다. 성공하면 그 계정의
@@ -55,6 +65,9 @@ MAX_FAILURES = 5
 LOCK_SECONDS = 15 * 60
 # scrypt: 메모리 16MiB(128 * n * r), 로그인 한 번에 수십 ms
 SCRYPT_N, SCRYPT_R, SCRYPT_P, SCRYPT_LEN = 2**14, 8, 1, 32
+# 열람 담당 영역: 화면 `frontend/src/demo/members.ts`의 READER_AREAS id와 같다
+READER_AREAS = ("hr", "finance")
+CUSTOMER_ROLES = ("admin", "member")
 EMAIL_RE = re.compile(r"^[^@\s:]+@[^@\s:]+\.[^@\s:]+$")
 
 logger = logging.getLogger("ax.dashboard.accounts")
@@ -64,6 +77,7 @@ _failures: dict[str, tuple[int, float]] = {}  # 이메일 → (연속 실패 수
 
 router = APIRouter(prefix="/api/dashboard/auth")
 Role = Literal["operator", "admin", "member"]
+ReaderArea = Literal["hr", "finance"]
 
 
 # ---- 비밀번호 ----
@@ -172,7 +186,18 @@ def load_accounts() -> list[dict[str, Any]]:
 
 
 def _public(row: dict[str, Any]) -> dict[str, Any]:
-    return {k: row.get(k) for k in ("id", "name", "email", "role", "created_at")}
+    """밖으로 내보내는 칸만 고른다(허용 목록). 해시·비밀번호 바꾼 시각 같은 내부 값은 넣지 않는다.
+
+    확인 권한을 한 번도 정하지 않은 계정은 역할로 정한다(고객사 관리자는 있음, 일반회원은 없음).
+    """
+    out = {k: row.get(k) for k in ("id", "name", "email", "role", "created_at")}
+    dept = row.get("dept")
+    out["dept"] = dept if isinstance(dept, str) and dept else None
+    approver = row.get("approver")
+    out["approver"] = approver if isinstance(approver, bool) else row.get("role") == "admin"
+    readers = row.get("readers")
+    out["readers"] = [r for r in READER_AREAS if r in readers] if isinstance(readers, list) else []
+    return out
 
 
 # ---- 실패 횟수 제한 ----
@@ -261,6 +286,16 @@ class PasswordResetIn(BaseModel):
     new_password: str = Field(max_length=200)
 
 
+class AccountUpdateIn(BaseModel):
+    """보낸 칸만 바꾼다. 부서는 빈 문자열이면 지운다"""
+
+    role: Role | None = None
+    name: str | None = Field(None, min_length=1, max_length=80)
+    dept: str | None = Field(None, max_length=40)
+    approver: bool | None = None
+    readers: list[ReaderArea] | None = Field(None, max_length=8)
+
+
 def login_enabled() -> bool:
     return human_auth.sessions_enabled() and _path() is not None
 
@@ -342,10 +377,15 @@ def me(authorization: str | None = Header(None)) -> dict:
 
 @router.get("/accounts")
 def list_accounts(authorization: str | None = Header(None)) -> dict:
+    """운영자는 모든 계정, 고객사 관리자는 고객사 계정(admin·member)만 본다."""
     human = session_human(authorization)
-    if human.role != "operator":
-        raise ApiError(403, "ROLE_REQUIRED", "운영자만 볼 수 있어요")
-    rows = [_public(r) for r in load_accounts()]
+    if human.role == "operator":
+        visible = load_accounts()
+    elif human.role == "admin":
+        visible = [r for r in load_accounts() if r.get("role") in CUSTOMER_ROLES]
+    else:
+        raise ApiError(403, "ROLE_REQUIRED", "운영자와 고객사 관리자만 볼 수 있어요")
+    rows = [_public(r) for r in visible]
     return ok(rows, total=len(rows))
 
 
@@ -426,4 +466,65 @@ def reset_password(
     _clear_failures(str(row.get("email", "")))
     human_auth.end_account_sessions(account_id)
     logger.info("비밀번호를 초기화했다: %s by %s", account_id, human.name)
+    return ok(_public(row))
+
+
+def _check_role_change(
+    human: human_auth.Human, row: dict[str, Any], new_role: str, rows: list[dict[str, Any]]
+) -> None:
+    """역할 바꾸기 규칙. 회사에 고객사 관리자가 0명이 되면 안 된다."""
+    old_role = row.get("role")
+    if new_role == old_role:
+        return
+    if row.get("id") == human.account_id:
+        raise ApiError(409, "SELF_ROLE_CHANGE", "자기 역할은 스스로 바꿀 수 없어요")
+    if human.role == "admin" and new_role not in CUSTOMER_ROLES:
+        raise ApiError(403, "ROLE_REQUIRED", "고객사 관리자는 운영자 역할을 줄 수 없어요")
+    if old_role == "admin" and sum(1 for r in rows if r.get("role") == "admin") <= 1:
+        raise ApiError(409, "LAST_ADMIN", "마지막 남은 고객사 관리자는 내릴 수 없어요")
+
+
+@router.post("/accounts/{account_id}/update")
+def update_account(
+    account_id: str, body: AccountUpdateIn, authorization: str | None = Header(None)
+) -> dict:
+    """역할·이름·부서·확인 권한·열람 담당 바꾸기. 역할이 바뀌면 그 계정의 세션을 끊는다."""
+    human = session_human(authorization)
+    if human.role not in ("operator", "admin"):
+        raise ApiError(403, "ROLE_REQUIRED", "계정을 바꿀 권한이 없어요")
+    patch = body.model_dump(exclude_unset=True)
+    if not patch or any(v is None for v in patch.values()):
+        raise ApiError(422, "NOTHING_TO_UPDATE", "바꿀 칸을 보내 주세요")
+    path = _editable_path()
+    with _file_lock:
+        rows = _bootstrap(path, _read(path))
+        row = next((r for r in rows if r.get("id") == account_id), None)
+        if row is None:
+            raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
+        if human.role == "admin" and row.get("role") not in CUSTOMER_ROLES:
+            raise ApiError(403, "ROLE_REQUIRED", "고객사 관리자는 고객사 계정만 바꿀 수 있어요")
+        role_changed = "role" in patch and patch["role"] != row.get("role")
+        if "role" in patch:
+            _check_role_change(human, row, patch["role"], rows)
+            row["role"] = patch["role"]
+        if "name" in patch:
+            name = patch["name"].strip()
+            if not name:
+                raise ApiError(422, "NAME_EMPTY", "이름을 입력해 주세요")
+            row["name"] = name
+        if "dept" in patch:
+            dept = patch["dept"].strip()
+            if dept:
+                row["dept"] = dept
+            else:
+                row.pop("dept", None)
+        if "approver" in patch:
+            row["approver"] = patch["approver"]
+        if "readers" in patch:
+            row["readers"] = [r for r in READER_AREAS if r in patch["readers"]]
+        row["updated_at"] = _now()
+        _write(path, rows)
+    if role_changed:
+        human_auth.end_account_sessions(account_id)
+    logger.info("계정을 바꿨다: %s (%s) by %s", account_id, ",".join(sorted(patch)), human.name)
     return ok(_public(row))
