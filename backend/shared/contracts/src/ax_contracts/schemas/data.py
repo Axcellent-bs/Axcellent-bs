@@ -4387,6 +4387,8 @@ class TrendReportInput(AxModel):
     context_id: str | None = None
     rebuild: bool = False  # true면 같은 의뢰 저장본이 있어도 새로 만든다
     goal: str | None = None  # 목적 ("브랜드 인지도"). product와 따로 (v2 추가)
+    # 데이터분석 대화 카드에서 넣은 의뢰면 그 대화 id. 진행·완료 메시지를 그 대화에 붙인다
+    chat_thread_id: str | None = Field(default=None, max_length=64)
 
 
 class TrendReportCreated(AxModel):
@@ -4592,6 +4594,59 @@ class TrendReportListItem(AxModel):
 
 class TrendReportListOutput(AxModel):
     items: list[TrendReportListItem] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------- 데이터분석 대화 카드 (11/19)
+# data_chat_get·data_chat_send 응답의 messages[] 하나에 선택 필드 `card`(없거나 null이면 일반 글).
+# 대화는 의뢰 카드(미리보기)만 만들고 접수하지 않는다. 접수는 사람이 카드 버튼으로
+# trend_report_create(caller "human" + chat_thread_id)를 부를 때만. 프론트와 같이 쓰는 모양이라
+# 이름·값을 바꾸지 않는다.
+CardFieldSource = Literal["request_text", "preset"]
+
+
+class TrendRequestCardSources(AxModel):
+    product: CardFieldSource
+    target: CardFieldSource
+    format: CardFieldSource
+    competitors: CardFieldSource
+    keywords: CardFieldSource
+
+
+class TrendRequestCardBrief(AxModel):
+    product: str | None = None
+    target_gender: Literal["f", "m"] | None = None
+    target_ages: list[str] = Field(default_factory=list)
+    format: str | None = None
+    competitors: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    competitor_names: dict[str, str] = Field(default_factory=dict)  # 아는 것만, 없으면 {}
+    sources: TrendRequestCardSources
+
+
+class TrendRequestCard(AxModel):
+    kind: Literal["trend_request"] = "trend_request"
+    request_text: str
+    brief: TrendRequestCardBrief
+    preset: str | None = None
+    cost_note: str  # "인스타 약 45번·네이버 약 6번·AI 2번"
+    brief_reason: str | None = None  # 의뢰문에서 칸을 못 뽑았을 때 이유
+
+
+class TrendReportProgressCard(AxModel):
+    kind: Literal["trend_report_progress"] = "trend_report_progress"
+    report_id: str
+
+
+class TrendReportDoneCard(AxModel):
+    kind: Literal["trend_report_done"] = "trend_report_done"
+    report_id: str
+    status: ReportStatus
+    summary_line: str | None = None
+    top_evidence: list[str] = Field(default_factory=list, max_length=3)
+    report_path: str  # "/data/trend#request?id=<id>"
+
+
+DataChatCard = TrendRequestCard | TrendReportProgressCard | TrendReportDoneCard
 
 
 TrendInsight.model_rebuild()

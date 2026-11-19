@@ -15,6 +15,10 @@
 - 답 검증: 답에 재료에 없는 숫자가 있으면 그 답을 버리고 고정 문장
   (`explain._bad_numbers`, 브리프 한 줄 검증과 같은 규칙: 쉼표·날짜 시각·배수·%는 재료 값이면 통과).
   마지막 줄 "근거: …"는 서버가 붙인다.
+- 분석 의뢰 문장(`is_trend_request`, 코드 규칙: 30자 이상 + 요청 동사 + 주제어, 조회 질문·상태
+  명령 제외)은 일반 답 대신 의뢰 카드(TrendRequestCard)로 답한다. 의뢰문 → brief는
+  trend_report_brief를 재사용(LLM 1번, 장부 data_chat, 의뢰문은 데이터 블록). 접수하지 않는다
+  (보고서 저장 없음). 접수는 사람이 카드 버튼으로 trend_report_create를 부를 때만.
 - 상태를 바꾸라는 명령(보내·켜·꺼·수집·다시 계산·시작·삭제·등록·승인 …)은 LLM 없이 거절 문장.
   질문("보냈어?")은 잡지 않는다.
   대화는 `execute()`를 부르지 않는다(대화 기록 저장은 업무 상태가 아님).
@@ -136,6 +140,75 @@ def pick_bundles(question: str) -> list[str]:
 
 def is_action(text: str) -> bool:
     return bool(_ACTION.search(text))
+
+
+# ---------------------------------------------------------------- 분석 의뢰 알아보기 (코드 규칙)
+
+TREND_MIN_CHARS = 30
+# 요청 동사: 만들어 주세요·만들어줘·해 주세요·분석해·알려 줘·추천해 …
+_REQUEST = re.compile(
+    r"(만들어|분석해|알려|추천해|짜|기획해|정리해|찾아|조사해)\s*(주세요|줘|주실래요|줄래요|"
+    r"주시겠어요|봐\s*줘|봐\s*주세요)|분석해|추천해|해\s*(주세요|줘)|부탁(해요|합니다|드려요|드립니다)"
+)
+TREND_TOPICS = ("홍보", "광고", "영상", "릴스", "숏츠", "쇼츠", "트렌드", "밈", "타깃", "타겟",
+                "경쟁사", "브랜드", "인지도", "캠페인")  # fmt: skip
+# 지난 결과를 묻는 조회 ("지난 보고서 결론 뭐였어?")는 의뢰가 아니다
+_LOOKUP = re.compile(
+    r"(지난|이전|저번|어제)\s*(보고서|의뢰|분석|결과)|뭐였|어땠|나왔어|였어\?|었어\?"
+)
+_VIDEO_WORDS = ("영상", "제작", "릴스", "숏츠", "쇼츠")
+
+
+def is_trend_request(text: str) -> bool:
+    """분석 의뢰 문장인지 (코드 규칙, LLM 아님): 30자 이상, 요청 동사 1개 이상, 주제어 1개 이상.
+
+    지난 결과 조회 질문과 상태를 바꾸라는 명령(`is_action`)은 잡지 않는다.
+    """
+    one = " ".join(text.split())
+    if len(one) < TREND_MIN_CHARS or is_action(one) or _LOOKUP.search(one):
+        return False
+    return bool(_REQUEST.search(one)) and any(w in one for w in TREND_TOPICS)
+
+
+CARD_INTRO = "트렌드 분석 의뢰로 보여요."
+CARD_VIDEO = "영상 제작은 마케팅 몫이라, "
+CARD_BODY = "데이터는 먼저 근거가 되는 트렌드 분석 보고서를 만들어 드릴게요. 이렇게 넣을까요?"
+CARD_FALLBACK = "의뢰문에서 칸을 뽑지 못해 기본값으로 채웠어요."
+
+
+def card_text(request_text: str, failed: bool) -> str:
+    """카드 답 글. 영상·제작 말이 없으면 "영상 제작은 마케팅 몫이라," 절은 뺀다."""
+    video = CARD_VIDEO if any(w in request_text for w in _VIDEO_WORDS) else ""
+    body = f"{CARD_INTRO} {video}{CARD_BODY}"
+    return f"{body} {CARD_FALLBACK}" if failed else body
+
+
+def cost_note(accounts: int, keywords: int, ai: int) -> str:
+    return f"인스타 약 {accounts}번·네이버 약 {1 + keywords}번·AI {ai}번"
+
+
+def request_card(text: str, resolved: Any, names: Mapping[str, str]) -> dict[str, Any]:
+    """의뢰문 → TrendRequestCard (접수하지 않는다). 출처 input은 대화에 없으니 request_text로."""
+    from ax_contracts.schemas.data import TrendRequestCard
+
+    b = resolved.brief
+    src = {k: ("preset" if v == "preset" else "request_text")
+           for k, v in b.sources.model_dump().items()
+           if k in ("product", "target", "format", "competitors", "keywords")}  # fmt: skip
+    filled = any([b.product, b.target_gender, b.target_ages, b.format, b.competitors, b.keywords])
+    card = TrendRequestCard(
+        request_text=text,
+        brief={"product": b.product, "target_gender": b.target_gender,
+               "target_ages": list(b.target_ages), "format": b.format,
+               "competitors": list(b.competitors), "keywords": list(b.keywords),
+               "competitor_names": {a: names[a] for a in b.competitors if names.get(a)},
+               "sources": src},
+        preset=b.preset,
+        # 카드 칸 값으로 접수하면 의뢰문을 다시 읽지 않아 보고서 쪽 AI는 추천 1번
+        cost_note=cost_note(len(resolved.accounts), len(b.keywords), 1 if filled else 2),
+        brief_reason=resolved.extract_error,
+    )  # fmt: skip
+    return card.model_dump(mode="json")
 
 
 def screens(bundles: list[str]) -> str:
@@ -558,16 +631,25 @@ def default_material(bundles: list[str]) -> dict:
     return read_material(bundles, os.environ, datetime.now(UTC))
 
 
+def default_report_names() -> dict[str, str]:
+    """이전 보고서 저장값의 경쟁사 표시 이름 (인스타를 부르지 않는다)."""
+    from data_agent.handlers import get_trend_reports
+
+    return get_trend_reports().store.known_names()
+
+
 class DataChatService:
     def __init__(
         self,
         store: DataChatStore,
         material: Callable[[list[str]], dict] = default_material,
         llm: Callable[[], Any] = default_llm,
+        report_names: Callable[[], Mapping[str, str]] = default_report_names,
     ) -> None:
         self.store = store
         self._material = material
         self._llm = llm
+        self._report_names = report_names
         self._pending: set[asyncio.Task[None]] = set()
 
     # ---- 읽기 ----------------------------------------------------------------
@@ -642,6 +724,9 @@ class DataChatService:
         if th is None:
             return
         last = th["messages"][-1]["text"] if th["messages"] else ""
+        if is_trend_request(last):  # 분석 의뢰: 카드(미리보기)만, 접수하지 않는다
+            await self._request_card(thread_id, last, llm)
+            return
         if is_action(last):  # 상태 변경 요청: LLM 없이 안내만
             self.store.finish_turn(thread_id, NO_CHAT_ACTIONS)
             return
@@ -682,3 +767,29 @@ class DataChatService:
         basis = ", ".join(p["basis"] for p in parts)
         self.store.finish_turn(thread_id, f"{body}\n근거: {basis}",
                                summary=out.summary.strip() or None)  # fmt: skip
+
+    async def _request_card(self, thread_id: str, text: str, llm: Any) -> None:
+        """의뢰문 → brief(trend_report_brief, LLM 1번·장부 data_chat) → TrendRequestCard 답.
+
+        보고서를 저장하지 않는다(접수는 사람이 카드 버튼으로). LLM 실패·상한이면 프리셋 값과 이유.
+        """
+        from ax_contracts.schemas.data import TrendReportInput
+        from data_agent.skills import trend_report_brief as tb
+
+        try:
+            with recording(CHAT_SKILL, emit=lambda line: None):  # 장부 skill 이름 data_chat
+                resolved = await asyncio.wait_for(
+                    tb.resolve(TrendReportInput(request_text=text), llm), ANSWER_TIMEOUT_SEC)
+        except Exception as error:  # noqa: BLE001 - 시간 초과 등: 일반 실패 문장
+            _log.warning("데이터 대화 의뢰 카드 실패: %s", type(error).__name__)
+            self.store.finish_turn(thread_id, LLM_FAILED, kind="error")
+            return
+        try:
+            names = dict(self._report_names())
+        except Exception as error:  # noqa: BLE001 - 이름은 없어도 된다
+            _log.warning("이전 보고서 이름을 읽지 못함: %s", type(error).__name__)
+            names = {}
+        card = request_card(text, resolved, names)
+        reply = card_text(text, resolved.extract_error is not None)
+        self.store.finish_turn(thread_id, reply, card=card,
+                               summary=f"분석 의뢰 카드: {make_title(text)}")  # fmt: skip
