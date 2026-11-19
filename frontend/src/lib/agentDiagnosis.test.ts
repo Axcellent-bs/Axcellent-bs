@@ -72,10 +72,10 @@ test("전달 상태 문구와 에이전트별 건수", () => {
   assert.deepEqual(countByAgent([row(), row({ request_id: "diag-2" }), row({ agent: "data" })]), { infra: 2, data: 1 });
 });
 
-test("총괄 진단 칸은 운영자·관리자에게만 보인다", () => {
+test("총괄 진단 칸은 로그인한 모두에게 보이고, 계정이 없으면 안 보인다", () => {
   assert.equal(canSeeDiagnosisInbox("관리자"), true);
   assert.equal(canSeeDiagnosisInbox("운영자"), true);
-  assert.equal(canSeeDiagnosisInbox("일반회원"), false);
+  assert.equal(canSeeDiagnosisInbox("일반회원"), true);
   assert.equal(canSeeDiagnosisInbox(null), false);
   assert.equal(canSeeDiagnosisInbox(undefined), false);
 });

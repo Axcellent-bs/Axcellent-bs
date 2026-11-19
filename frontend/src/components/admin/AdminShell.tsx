@@ -101,6 +101,7 @@ function useNav(): NavItem[] {
 }
 
 const INFRA_ID = "incident";
+const HOSTS_ID = "hosts";
 
 /** 인프라 AI는 AI 묶음의 일원이다: 구분선 아래로 떨어지지 않게 기획 AI 바로 밑(개발 AI 앞)에 둔다 */
 function withInfra(agents: NavItem[], services: Service[]): NavItem[] {
@@ -123,7 +124,8 @@ function splitSafety(agents: NavItem[]): [NavItem[], NavItem | undefined] {
 function customerNav(account: Account): NavItem[] {
   const services = servicesOf(account);
   const [agents, safety] = splitSafety(withInfra(agentNav(services), services));
-  const others = services.filter((s) => !s.agent && s.id !== INFRA_ID && !(account.admin && s.id === "hosts"));
+  // PC·서버 연결(hosts)은 회원·서버 관리의 "DejaFix 연결" 탭(관리자)으로 옮겨서 메뉴에 두지 않는다 (예전 /hosts 화면은 예시 PC를 보여 주던 가짜라 없앴다)
+  const others = services.filter((s) => !s.agent && s.id !== INFRA_ID && s.id !== HOSTS_ID);
   const rest = [...others.map(serviceNav), ...SHARED_NAV];
   // 안전 처리 로그는 "AI 대화방" 바로 밑 (AI들이 주고받은 대화 → 그 실행 요청을 안전 규칙으로 판단한 기록)
   if (safety) {
@@ -131,9 +133,9 @@ function customerNav(account: Account): NavItem[] {
     rest.splice(chat < 0 ? rest.length : chat + 1, 0, safety);
   }
   if (agents.length) rest[0] = { ...rest[0], divider: true };
-  // 고객사 시스템 관리자는 관리 메뉴를 맨 위에, 일반회원은 맨 아래(예전 "연결" 자리)에 도구 연결만
+  // 관리자와 일반회원의 메뉴는 같은 순서다. 다른 건 시스템 관리 아래 항목뿐(관리자: 회사 연결·회원·서버 관리·도구 연결, 일반회원: 도구 연결)
   const system = systemNav(systemMenuFor(!!account.admin));
-  return account.admin ? [system, ...agents, ...rest] : [...agents, ...rest, system];
+  return [system, ...agents, ...rest];
 }
 
 const isOn = (path: string, item: NavItem) => item.match.some((m) => matchPath(m, path));
