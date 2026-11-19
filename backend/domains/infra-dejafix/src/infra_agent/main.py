@@ -193,21 +193,28 @@ def latest_deployments() -> dict:
     이력은 연결 보관함 파일을 읽어 거르므로 동기 함수로 두어 이벤트 루프 밖(스레드 풀)에서 돈다.
     """
     history = get_runtime().history
-    rows: list[dict[str, Any]] = []
-    for service in sorted({d.service for d in history.live()}):
-        latest = history.running(service)
-        if latest is None or latest.source is None:
-            continue  # 기록이 없거나 도구에서 받은 배포가 아니다
-        rows.append(
-            {
-                "service": latest.service,
-                "version": latest.version,
-                "deployed_at": latest.deployed_at.isoformat().replace("+00:00", "Z"),
-                "source": latest.source,
-                "is_rollback": latest.is_rollback,
-                "version_from_sha": latest.version_from_sha,
-            }
-        )
+    # 한 번만 읽은 사본으로 고른다. live()는 보관함을 읽으므로 서비스마다 부르지 않고(요청당 한 번),
+    # deploy_poll이 이벤트 루프에서 이력 목록을 통째로 바꿔도 이 스레드는 같은 사본을 본다
+    live = list(history.live())
+    rolled_back = set(history.rolled_back)
+    latest: dict[str, Deployment] = {}
+    for d in live:
+        if d.source is None or d.deploy_id in rolled_back:
+            continue  # 도구에서 받은 배포가 아니거나 되돌린 배포
+        current = latest.get(d.service)
+        if current is None or d.deployed_at > current.deployed_at:
+            latest[d.service] = d
+    rows: list[dict[str, Any]] = [
+        {
+            "service": d.service,
+            "version": d.version,
+            "deployed_at": d.deployed_at.isoformat().replace("+00:00", "Z"),
+            "source": d.source,
+            "is_rollback": d.is_rollback,
+            "version_from_sha": d.version_from_sha,
+        }
+        for _, d in sorted(latest.items())
+    ]
     return {"data": rows}
 
 

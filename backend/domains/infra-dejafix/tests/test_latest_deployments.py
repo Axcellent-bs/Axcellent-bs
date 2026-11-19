@@ -138,3 +138,19 @@ def test_only_tool_services_sorted_by_name(runtime) -> None:
         ("api-gw", "github_actions"),
         ("shop-api", "jenkins"),
     ]
+
+
+def test_reads_the_vault_once_per_request(runtime) -> None:
+    """서비스마다 보관함을 다시 읽지 않는다 (connected()는 요청당 한 번)."""
+    calls: list[int] = []
+
+    def connected() -> set[str]:
+        calls.append(1)
+        return {"shop-api", "api-gw", "billing"}
+
+    runtime.history.connected = connected
+    for service in ("shop-api", "api-gw", "billing"):
+        runtime.history.replace_service(service, [_run("1", "v1.0.0", 5)], tool="jenkins")
+    calls.clear()
+    assert len(_get(DASHBOARD)) == 3
+    assert len(calls) == 1

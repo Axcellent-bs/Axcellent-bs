@@ -220,16 +220,17 @@ export type LatestDeploys =
   | { state: "error"; reason: string }
   | { state: "ok"; rows: LatestDeploy[] };
 
-/** 연결된 배포 도구 한 줄의 "최근 배포". 서버가 준 행만 쓰고, 없으면 "배포 기록 없음", 못 읽으면 "확인할 수 없음" */
+/** 연결된 배포 도구 한 줄의 "최근 배포". 서버가 준 행만 쓰고, 없으면 "아직 받은 배포 기록 없음",
+ * 못 읽으면 "확인할 수 없음"(기록 없음과 다른 색). 인프라가 2분마다 도구에서 받고 화면도 2분마다 다시 읽는다 */
 export function latestDeployView(
   service: string,
   data: LatestDeploys,
   fmt: (iso: string) => string = when,
 ): { tone: Tone; text: string; note: string | null } {
   if (data.state === "loading") return { tone: "off", text: "최근 배포 불러오는 중…", note: null };
-  if (data.state === "error") return { tone: "off", text: "최근 배포 확인할 수 없음", note: data.reason };
+  if (data.state === "error") return { tone: "wait", text: "최근 배포 확인할 수 없음", note: data.reason };
   const row = service ? data.rows.find((r) => r.service === service) : undefined;
-  if (!row) return { tone: "off", text: "배포 기록 없음", note: null };
+  if (!row) return { tone: "off", text: "아직 받은 배포 기록 없음 (2분마다 확인)", note: null };
   const version = row.version_from_sha ? `커밋 ${row.version}` : row.version;
   const note = row.is_rollback ? "롤백으로 다시 배포한 버전" : null;
   return { tone: "ok", text: `최근 배포 ${version} · ${fmt(row.deployed_at)}`, note };

@@ -133,13 +133,15 @@ test("최근 배포: 그 서비스 행의 버전 · 시각", () => {
   assert.deepEqual(v, { tone: "ok", text: "최근 배포 v3.0.1 · T(2026-11-18T05:05:00Z)", note: null });
 });
 
-test("최근 배포: 기록이 없으면 '배포 기록 없음' (지어내지 않는다)", () => {
-  assert.deepEqual(latestDeployView("shop-api", { state: "ok", rows: [] }, fmt), { tone: "off", text: "배포 기록 없음", note: null });
-  assert.equal(latestDeployView("", { state: "ok", rows: [dep()] }, fmt).text, "배포 기록 없음");
+test("최근 배포: 기록이 없으면 '아직 받은 배포 기록 없음' (지어내지 않는다)", () => {
+  assert.deepEqual(latestDeployView("shop-api", { state: "ok", rows: [] }, fmt), { tone: "off", text: "아직 받은 배포 기록 없음 (2분마다 확인)", note: null });
+  assert.equal(latestDeployView("", { state: "ok", rows: [dep()] }, fmt).text, "아직 받은 배포 기록 없음 (2분마다 확인)");
 });
 
 test("최근 배포: 못 읽으면 '확인할 수 없음' + 이유, 읽는 중은 따로", () => {
-  assert.deepEqual(latestDeployView("shop-api", { state: "error", reason: "incident에 연결할 수 없다" }, fmt), { tone: "off", text: "최근 배포 확인할 수 없음", note: "incident에 연결할 수 없다" });
+  assert.deepEqual(latestDeployView("shop-api", { state: "error", reason: "incident에 연결할 수 없다" }, fmt), { tone: "wait", text: "최근 배포 확인할 수 없음", note: "incident에 연결할 수 없다" });
+  // 못 읽음과 기록 없음은 다른 색
+  assert.notEqual(latestDeployView("shop-api", { state: "error", reason: "x" }, fmt).tone, latestDeployView("shop-api", { state: "ok", rows: [] }, fmt).tone);
   assert.equal(latestDeployView("shop-api", { state: "loading" }, fmt).text, "최근 배포 불러오는 중…");
 });
 
