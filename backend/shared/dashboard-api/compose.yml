@@ -4,7 +4,7 @@ services:
       context: ../..
       dockerfile: shared/dashboard-api/Dockerfile
     ports:
-      - "8020:8020"
+      - "127.0.0.1:8020:8020"
     env_file:
       - path: ../../.env
         required: false

@@ -4,7 +4,7 @@ services:
       context: ../..
       dockerfile: services/handover/Dockerfile
     ports:
-      - "8104:8104"
+      - "127.0.0.1:8104:8104"
     env_file:
       - path: ../../.env
         required: false

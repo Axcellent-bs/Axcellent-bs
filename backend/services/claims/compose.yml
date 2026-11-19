@@ -4,7 +4,7 @@ services:
       context: ../..
       dockerfile: services/claims/Dockerfile
     ports:
-      - "8112:8112"
+      - "127.0.0.1:8112:8112"
     env_file:
       - path: ../../.env
         required: false
