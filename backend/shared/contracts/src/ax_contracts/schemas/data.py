@@ -681,6 +681,10 @@ class TrendScanInput(AxModel):
     start_date: dt.date  # 기준선 시작 (한국 날짜)
     end_date: dt.date  # 판정할 마지막 날 (한국 날짜, 네이버는 하루 늦게 채워진다)
     time_unit: TrendTimeUnit = "date"
+    # 선택: 네이버 검색어 트렌드 연령·성별 필터. 없으면 전체(지금과 같음). ages는 네이버 연령 코드
+    # 그대로 "1"~"11" (3=19~24세, 4=25~29, 5=30~34, 6=35~39). 사람 나이("20")를 넣지 않는다
+    ages: list[str] | None = None
+    gender: Literal["f", "m"] | None = None
 
     @model_validator(mode="after")
     def _range(self) -> Self:
@@ -689,6 +693,9 @@ class TrendScanInput(AxModel):
         names = [g.group_name for g in self.keyword_groups]
         if len(names) != len(set(names)):
             raise ValueError("group_name이 겹친다")
+        codes = {str(n) for n in range(1, 12)}
+        if self.ages is not None and any(a not in codes for a in self.ages):
+            raise ValueError("ages는 네이버 연령 코드 1~11만")
         return self
 
 
@@ -4351,6 +4358,187 @@ class InstagramMemoListOutput(AxModel):
     # 쓰기(instagram_memo_add)는 safety 등록과 회사 설정이 있어야 화면에 입력을 보인다
     can_add: bool = False
     add_reason: str | None = None
+
+
+# --------------------------------------------------------------- 트렌드 분석 의뢰 보고서
+# 고객 의뢰(제품·타깃·영상 길이·경쟁사·키워드)를 폼 값이나 의뢰 문장으로 받아 보고서를 만든다
+# (trend_report_create · trend_report_get · trend_report_list). 숫자는 전부 코드가 계산하고 LLM은
+# 결론 한 줄과 콘티 문장만 쓴다(숫자 금지). 모르면 status "unknown" + reason, 0으로 채우지 않는다.
+# 프론트와 같이 쓰는 계약이라 필드 이름·값을 바꾸지 않는다.
+
+ReportStatus = Literal["queued", "running", "done", "partial", "failed", "interrupted"]
+SectionStatus = Literal["waiting", "running", "known", "unknown", "failed"]
+FieldSource = Literal["input", "request_text", "preset"]
+ReportCaller = Literal["human", "orchestrator", "planning"]
+BeatSlot = Literal["0-3", "3-15", "15-25", "25-30"]
+
+
+class TrendReportInput(AxModel):
+    preset: str | None = None  # "eco_beauty" 등. null이면 request_text(또는 제품·키워드)로 고른다
+    request_text: str | None = Field(default=None, max_length=4000)  # 의뢰 문장 그대로, untrusted
+    product: str | None = None
+    target_gender: Literal["f", "m"] | None = None
+    target_ages: list[str] | None = None  # 사람 나이 구간 "10","20","30","40","50"
+    format: str | None = None  # "인스타 릴스 30초"
+    competitors: list[str] | None = None  # 인스타 아이디
+    keywords: list[str] | None = None
+    accounts: list[str] | None = None  # 추가로 볼 인스타 아이디
+    caller: ReportCaller = "human"
+    context_id: str | None = None
+    rebuild: bool = False  # true면 같은 의뢰 저장본이 있어도 새로 만든다
+
+
+class TrendReportCreated(AxModel):
+    report_id: str
+    status: ReportStatus
+    reused: bool  # 같은 의뢰 저장본을 연 것
+    eta_seconds: int | None = None
+
+
+class TrendReportRef(AxModel):
+    report_id: str
+
+
+class TrendReportListInput(AxModel):
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class TrendReportBriefSources(AxModel):
+    product: FieldSource
+    target: FieldSource
+    format: FieldSource
+    competitors: FieldSource
+    keywords: FieldSource
+
+
+class TrendReportBrief(AxModel):
+    product: str | None = None
+    target_gender: Literal["f", "m"] | None = None
+    target_ages: list[str] = Field(default_factory=list)
+    format: str | None = None
+    competitors: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    preset: str | None = None
+    sources: TrendReportBriefSources
+
+
+class TrendSearchRow(AxModel):
+    keyword: str
+    search_change_pct: float | None = None  # 최근 7일 평균 ÷ 직전 28일 평균 − 1 (%)
+    search_reason: str | None = None
+    shopping_change_pct: float | None = None
+    shopping_reason: str | None = None
+
+
+class TrendSearchSection(AxModel):
+    status: SectionStatus = "waiting"
+    reason: str | None = None
+    filter_note: str = ""  # 연령·성별 필터를 어떻게 걸었는지
+    rows: list[TrendSearchRow] = Field(default_factory=list)
+
+
+class TrendHashtagRow(AxModel):
+    tag: str
+    accounts: int = Field(ge=0)  # 이번 7일에 쓴 계정 수
+    previous_accounts: int = Field(ge=0)  # 직전 7일
+    burst_posts: int = Field(ge=0)  # 그중 터진 게시물 수
+
+
+class TrendHashtagSection(AxModel):
+    status: SectionStatus = "waiting"
+    reason: str | None = None
+    rows: list[TrendHashtagRow] = Field(default_factory=list)
+
+
+class TrendReportMeme(AxModel):
+    name: str
+    description: str | None = None
+    ad_material: Literal["ok", "caution", "excluded", "unknown"]
+
+
+class TrendContentSection(AxModel):
+    status: SectionStatus = "waiting"
+    reason: str | None = None
+    posts: list[InstagramRadarPost] = Field(default_factory=list)  # 썸네일·standout 포함
+    memes: list[TrendReportMeme] = Field(default_factory=list)
+
+
+class TrendCompetitorRow(AxModel):
+    account: str
+    posts_per_week: float | None = None
+    reels_share: float | None = Field(default=None, ge=0, le=1)
+    reels_view_median: int | None = None
+    best_post: InstagramRadarPost | None = None
+    traits: list[str] = Field(default_factory=list)  # 잘 된 게시물의 공통점 (코드 템플릿)
+    reason: str | None = None
+
+
+class TrendAccountFailed(AxModel):
+    account: str
+    reason: str
+
+
+class TrendCompetitorSection(AxModel):
+    status: SectionStatus = "waiting"
+    reason: str | None = None
+    rows: list[TrendCompetitorRow] = Field(default_factory=list)
+    accounts_failed: list[TrendAccountFailed] = Field(default_factory=list)
+
+
+class TrendBeat(AxModel):
+    slot: BeatSlot
+    text: str
+    evidence: list[str] = Field(default_factory=list)  # 코드가 만든 근거 문장
+
+
+class TrendRecommendationSection(AxModel):
+    status: SectionStatus = "waiting"
+    reason: str | None = None
+    conclusion: str | None = None
+    beats: list[TrendBeat] = Field(default_factory=list)
+    music_note: str = ""
+
+
+class TrendReportSections(AxModel):
+    search: TrendSearchSection = Field(default_factory=TrendSearchSection)
+    hashtags: TrendHashtagSection = Field(default_factory=TrendHashtagSection)
+    content: TrendContentSection = Field(default_factory=TrendContentSection)
+    competitors: TrendCompetitorSection = Field(default_factory=TrendCompetitorSection)
+    recommendation: TrendRecommendationSection = Field(default_factory=TrendRecommendationSection)
+
+
+class TrendReportCalls(AxModel):
+    instagram: int = Field(default=0, ge=0)
+    naver: int = Field(default=0, ge=0)
+    llm: int = Field(default=0, ge=0)
+
+
+class TrendReport(AxModel):
+    report_id: str
+    status: ReportStatus
+    created_at: UtcDatetime
+    finished_at: UtcDatetime | None = None
+    caller: ReportCaller
+    context_id: str | None = None
+    brief: TrendReportBrief
+    summary_line: str | None = None
+    summary_reason: str | None = None
+    sections: TrendReportSections = Field(default_factory=TrendReportSections)
+    limits: list[str] = Field(default_factory=list)  # 근거와 한계 문장
+    calls: TrendReportCalls = Field(default_factory=TrendReportCalls)
+
+
+class TrendReportListItem(AxModel):
+    report_id: str
+    status: ReportStatus
+    created_at: UtcDatetime
+    caller: ReportCaller
+    product: str | None = None
+    summary_line: str | None = None
+
+
+class TrendReportListOutput(AxModel):
+    items: list[TrendReportListItem] = Field(default_factory=list)
 
 
 TrendInsight.model_rebuild()

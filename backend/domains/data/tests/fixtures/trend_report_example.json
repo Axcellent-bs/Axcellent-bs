@@ -1,0 +1,116 @@
+{
+  "report_id": "tr_0123456789abcdef",
+  "status": "done",
+  "created_at": "2026-11-19T03:00:00Z",
+  "finished_at": "2026-11-19T03:01:24Z",
+  "caller": "orchestrator",
+  "context_id": "ctx_trend_1",
+  "brief": {
+    "product": "친환경 화장품 브랜드 인지도",
+    "target_gender": "f",
+    "target_ages": ["20", "30"],
+    "format": "인스타 릴스 30초",
+    "competitors": ["toun28_official", "beplain_official"],
+    "keywords": ["리필 화장품", "비건 선크림"],
+    "preset": "eco_beauty",
+    "sources": {
+      "product": "request_text",
+      "target": "request_text",
+      "format": "preset",
+      "competitors": "preset",
+      "keywords": "preset"
+    }
+  },
+  "summary_line": "리필·비건을 실제 사용 장면으로 보여 주는 질문형 릴스가 맞음",
+  "summary_reason": null,
+  "sections": {
+    "search": {
+      "status": "known",
+      "reason": null,
+      "filter_note": "검색어 트렌드: 여성 20대·30대 (20대는 네이버 19~24세 칸을 써서 19세가 섞임) · 쇼핑인사이트: 여성 20대·30대 합산 · 최근 7일 평균 ÷ 직전 28일 평균 − 1",
+      "rows": [
+        {
+          "keyword": "리필 화장품",
+          "search_change_pct": 18.4,
+          "search_reason": null,
+          "shopping_change_pct": -3.2,
+          "shopping_reason": null
+        },
+        {
+          "keyword": "비건 선크림",
+          "search_change_pct": null,
+          "search_reason": "네이버가 값을 주지 않음 (검색량이 적음)",
+          "shopping_change_pct": null,
+          "shopping_reason": "확인 안 함(한도)"
+        }
+      ]
+    },
+    "hashtags": {
+      "status": "known",
+      "reason": null,
+      "rows": [
+        {"tag": "#클린뷰티", "accounts": 6, "previous_accounts": 3, "burst_posts": 2}
+      ]
+    },
+    "content": {
+      "status": "known",
+      "reason": null,
+      "posts": [
+        {
+          "account": "toun28_official",
+          "media_id": "17900000000000001",
+          "media_product_type": "REELS",
+          "posted_at": "2026-11-17T12:00:00Z",
+          "metric": "view_count",
+          "value": 52000,
+          "account_median": 8000.0,
+          "ratio": 6.5,
+          "permalink": "https://www.instagram.com/reel/AAAA/",
+          "caption_excerpt": "리필 해 보셨어요? #클린뷰티",
+          "thumbnail_url": "https://scontent-ssn1-1.cdninstagram.com/v/t51.2885-15/thumb.jpg",
+          "media_type": "VIDEO",
+          "standout": "첫 줄이 질문 · 평소 10%"
+        }
+      ],
+      "memes": [
+        {"name": "#오늘의루틴", "description": "아침 루틴을 빠르게 보여 주는 영상이 몰림", "ad_material": "ok"}
+      ]
+    },
+    "competitors": {
+      "status": "known",
+      "reason": null,
+      "rows": [
+        {
+          "account": "toun28_official",
+          "posts_per_week": 4.5,
+          "reels_share": 0.6,
+          "reels_view_median": 8000,
+          "best_post": null,
+          "traits": ["첫 줄이 질문(?)인 비율: 80% · 평소 20%"],
+          "reason": "지표가 있는 게시물이 3개 미만이라 최고 게시물 없음"
+        }
+      ],
+      "accounts_failed": [
+        {"account": "beplain_official", "reason": "못 읽음(한도)"}
+      ]
+    },
+    "recommendation": {
+      "status": "known",
+      "reason": null,
+      "conclusion": "리필·비건을 실제 사용 장면으로 보여 주는 질문형 릴스가 맞음",
+      "beats": [
+        {
+          "slot": "0-3",
+          "text": "리필 용기를 여는 손 클로즈업과 질문 자막",
+          "evidence": ["#클린뷰티: 이번 7일 6곳 · 직전 7일 3곳 사용, 터진 게시물 2개"]
+        }
+      ],
+      "music_note": "저작권 문제없는 라이브러리 음원 중 선택"
+    }
+  },
+  "limits": [
+    "숫자는 전부 코드가 계산했고, AI는 결론 한 줄과 콘티 문장만 썼다(숫자 없이)",
+    "인스타 1곳 못 읽음 (못 읽음(한도), 그 자리에서 멈춤)"
+  ],
+  "calls": {"instagram": 44, "naver": 6, "llm": 2}
+}

@@ -27,6 +27,7 @@
 | `shorts_stats` | YouTube 숏츠 통계(카테고리별·형식별): 숏츠 수·평균 조회수·평균 시간당 조회 증가·조회수 상위 3개, 표본 부족은 unknown. 카테고리마다 화면 카드 숏츠 10개(분류·구독자 대비·광고 재료 칸) | YouTube 스냅샷 DB(길이 `video_details`), 숏츠 검색(`search.list`, 하루 1번·상한 8번, `backend/.data/shorts.db`), LLM(카테고리·형식 분류, 묶어서·저장). 설정: `trends.toml` `[shorts]` |
 | `video_explorer` | 영상 탐색: 카테고리(게임·유머·드라마·교양·교육·책) × 기간(올린 시각 1일·3일·7일) × 길이(숏 60초 이하·롱)마다 한국 영상(제목·채널·썸네일·주소·길이·올린 시각·조회수·좋아요·구독자 대비·분류·광고 재료 칸), 정렬(조회수·구독자 대비·좋아요)은 코드, 모자란 칸은 이유 | 영상 풀: YouTube 스냅샷(올린 지 7일 이내)·숏츠 표본·하위 주제·지금 인기 보충 영상(videos.list로 다시 읽음, 하루 ≤ 10번)·보충 검색(모자란 칸만, 7일 검색 카테고리 × 길이 하루 1번 → 남은 횟수로 1일 보충, 하루 ≤ 20번). 분류는 공유 영상 분류기(저장 재사용, 새로 묻는 수 ≤ 200). 구독자 channels.list 하루 ≤ 4번. 수집기가 미리 계산해 `backend/.data/video_explorer.db`에 저장, 요청은 읽기·정렬만. 설정: `trends.toml` `[explorer]` |
 | `instagram_audio`·`instagram_radar`·`instagram_memo_list`·`instagram_memo_add` | 인스타 칩: 인기 오디오(순위 변화·새로 등장·연속 일수), 레이더(벤치마크 계정의 터진 게시물 묶음), 트렌드 메모(수동 입력, 추가는 A·safety 등록 필요). 아래 "인스타그램" | Meta 공식 Graph API(Audio API·Business Discovery·해시태그 검색, GET만), 수집기(`youtube_collect`, 1시간마다)가 오디오는 하루 1번·레이더는 회차마다 50곳씩 `ig_audio.db`·`ig_radar.db`, `ig_hashtags.db`(7일 30개), `ig_memo.db`. 설정: `trends.toml` `[instagram]` |
+| `trend_report_create`·`trend_report_get`·`trend_report_list` | 트렌드 분석 의뢰 보고서: 폼 값 또는 의뢰문으로 받아 검색·쇼핑, 인스타 해시태그, 뜨는 콘텐츠·밈, 경쟁사, 추천 방향·30초 콘티, 근거와 한계. 완료 시 `data.trend_report_ready`. 아래 "분석 의뢰" | 인스타 business_discovery(의뢰당 최대 45곳, 하루 상한 공유), 네이버 검색어 트렌드·쇼핑인사이트(최대 6번, trend_age 예산 공유), trend_memes 저장 결과, LLM(최대 2번). 프리셋 `report_presets/*.toml`, 저장 `DATA_TREND_REPORT_DB` |
 | `keyword_trend` | 검색 트렌드 · 도서 분야 4블록: 급상승 검색어(배수·판정·월간 검색량·일별 추정·증가량·관련 뉴스·블로그·카페 확산·연결 상품 수), AI 요약(숫자 검증), 새로 나타난 키워드(최근 4일), 이달 시즌 키워드(배수·월 검색량·몰리는 시기·묶음·상품). window day·week. 아래 "keyword_trend" | 키워드 풀(검색광고 키워드 도구, 하루 1번 `backend/.data/keyword_pool.db`), 네이버 데이터랩(trend_age 예산 공유), HUB 블로그·카페·뉴스(켠 경우만), Google 인기 검색어 RSS 뉴스, 공용 분류기, product_link, explain. 미리 계산(일간·주간). 설정: `trends.toml` `[search]` |
 | `trend_memes` | 요즘 유행·밈: 여러 채널 숏츠에서 같이 늘어난 해시태그·제목 구절 묶음(이름·설명 한 줄·채널 수·영상 수·직전 대비 배수·네이버 검색 배수·광고 재료·연결 상품·대표 영상 2개), 뺀 단위와 이유. window week(7일 vs 직전 7일)·day(어제 vs 지난 4주 같은 요일 평균). 아래 "trend_memes" | 숏츠 저장소(`shorts.db` searched_videos·published·video_channels)와 YouTube 인기 스냅샷의 숏츠(새 외부 호출 없음), 공유 주제 분류기(저장 재사용), 네이버 검색어 트렌드(앞 5개만, 커넥터 하루 캐시·trend_age 호출자별 예산 `trend_memes`), 상품 목록·임베딩(product_link), LLM(설명 한 줄, 묶어서 1번, 하루 캐시 `backend/.data/trend_memes.db`). 수집기가 미리 계산(이번 주·오늘 둘 다), 화면은 응답 캐시 읽기만. 설정: `trends.toml` `[memes]` |
 | `content_recommend` | 지금 만들 만한 영상 소재(급상승만, 최대 N개): 순위·점수 근거(z·배수·두 소스)·출처·주제 분류·묶음(회사 상품과 연결된 소재·일반 화제)·연결할 실제 상품(근거)·회사 관련성(상품 연결로, 표시만)·밈 형식·영상 아이디어 1~2문장·형식(숏폼·롱폼)·fallback. 추천 안 함 분류(회사 설정)는 참고용 + 이유로 따로. 콘텐츠 루프 2단계 | trend_scan(회사 기본 키워드 그룹)·trend_candidates(후보 전체)와 같은 네이버 요청(하루 캐시 같이 씀), 회사 상품 목록(shop-api `GET /api/shop/products`·`/categories`), LLM(아이디어 문장·밈 형식·주제 분류만), 임베딩(설정이 있을 때만). 설정: 회사 폴더 `trends.toml` `[recommend]` |
@@ -1140,6 +1141,27 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
 - **트렌드 메모**: 수동 입력(종류·이름 1~60자·메모 ≤200자·적은 사람·날짜·연결할 유행), `ig_memo.db`, 출처 표시는 늘 "수동 입력". 추가(`instagram_memo_add`, A)는 data 자신의 safety 관문(`execute`, 액션 `add_instagram_memo`)을 지나야 한다. **registry.toml 등록은 사람 일**이고, 등록 뒤 `trends.toml [instagram] memo_add_enabled = true`로 켠다. 그 전에는 화면에 목록만 보인다
 - 개인정보: 일반 개인 계정은 조회하지 않는다(Business Discovery는 프로페셔널만). 댓글 본문·작성자는 받지 않는다. 캡션·제목은 untrusted로 화면엔 텍스트로만, LLM엔 데이터 블록으로만
 - 설정: `trends.toml` `[instagram]`
+
+### 분석 의뢰 (trend_report_create · trend_report_get · trend_report_list)
+
+고객 의뢰(제품·타깃·영상 길이·경쟁사·키워드)를 폼 값이나 의뢰 문장(`request_text`)으로 받아 트렌드 분석 보고서를 만든다. 총괄·기획은 의뢰문만으로 부를 수 있다. **숫자는 전부 코드**, LLM은 의뢰문 해석 1번 + 결론 한 줄·콘티 문장 1번(보고서당 최대 2번, trend_memes `check_line`: 숫자 금지·120자). 모르면 `unknown` + 이유, 0으로 채우지 않는다. 섹션마다 따로 실패한다. 스크래핑·비공식 API는 쓰지 않는다.
+
+- **skill**: `trend_report_create`(`TrendReportInput` → `TrendReportCreated`: report_id·status·reused·eta_seconds), `trend_report_get`(`{report_id}` → `TrendReport`, 없으면 outcome `not_found`), `trend_report_list`(`{limit}` → `{items}`). 계약은 `ax_contracts/schemas/data.py` "트렌드 분석 의뢰 보고서"(프론트와 같이 쓰는 모양, 예시 `tests/fixtures/trend_report_example.json`)
+- **brief**: 폼 값 > 의뢰문에서 추정(LLM 1번, 의뢰문은 untrusted 데이터 블록, 나이 구간·인스타 아이디 모양·길이 검사) > 프리셋. 칸마다 출처(`input`·`request_text`·`preset`). 프리셋은 `src/data_agent/report_presets/<이름>.toml`(지금 `eco_beauty`), `preset`이 없으면 `match_words`가 가장 많이 든 프리셋, 맞는 게 없으면 프리셋 없이. 의뢰마다 자기 설정이고 회사(tenant) 설정은 바꾸지 않는다. LLM 실패면 전부 프리셋 + 이유
+- **섹션**
+  1. search: 키워드(최대 5)마다 최근 7일 평균 ÷ 직전 28일 평균 − 1(%). 네이버 검색어 트렌드(연령·성별 필터, 키워드 5개를 한 요청)와 쇼핑인사이트 키워드 연령별(키워드마다 1번, 프리셋 분야 cid, 성별 필터, 타깃 연령 group만 합산)을 따로. 사람 나이 → 네이버 코드는 `trend_report_brief.search_age_codes`(20대 → 3·4, 19~24세 칸이라 19세가 섞임은 한계에 적음)
+  2. hashtags: 의뢰 계정 캡션의 해시태그(`units_of`)마다 이번 7일·직전 7일에 쓴 계정 수와 이번 7일 터진(`instagram.bursts`, 2.5배·7일) 게시물 수. 이번 7일 3곳 이상, 상위 10개
+  3. content: 의뢰 계정 터진 게시물 상위 8개(배수 순, 썸네일·`standout`) + trend_memes 저장 결과 중 광고 재료 `ok` 3개
+  4. competitors: 경쟁사마다 주당 게시 수(최근 20개 기간), 릴스 비율, 릴스 조회수 중앙값, 최고 게시물(계정 중앙값 대비 배수), 잘 된 게시물(지표 상위 5개)의 공통점(`instagram_why.compare_facts`: 형식·첫 줄 질문·캡션 길이·시간대 중 평소와 차이 큰 것 최대 2개, 코드 템플릿). 못 읽은 계정은 `accounts_failed`
+  5. recommendation: LLM 1번. 입력은 섹션 1~4 사실을 숫자 없이 말로 바꾼 것 + brief. 결론 한 줄 + 콘티 4칸(0-3 훅·3-15 전환·15-25 증거·25-30 마무리), 칸마다 근거 id(`search:1`·`hashtag:2`…)를 고르게 하고 근거 숫자 문장은 코드가 그 id로 붙인다. 없는 id·숫자 든 문장·틀린 칸은 버린다. LLM 실패·하루 상한(`DATA_LLM_DAILY_TOKENS`)이면 이 섹션만 이유와 함께 비운다. 음악은 추천하지 않는다(고정 "저작권 문제없는 라이브러리 음원 중 선택"). 결론은 `summary_line`
+  - limits: 코드 고정 문장 + 이번 보고서에서 생긴 것(못 읽은 계정·한도·밈 없음 등)
+- **호출량·한도**
+  - 인스타: 의뢰 계정(경쟁사 ∪ 추가 계정 ∪ 프리셋 계정, 최대 45곳)을 한 번씩 business_discovery(최근 20개). 하루 상한 `DATA_IG_DAILY_LIMIT`(수집기와 같은 카운터)·앱 한도(code 4 등)·키 없음·토큰 만료면 그 자리에서 멈추고 나머지는 "못 읽음(한도)". 같은 날 같은 계정은 보고서 저장소(`ig_media`) → 오늘 다 돈 레이더(`radar_latest`) 순으로 다시 쓴다
+  - 네이버: 검색어 트렌드 1번 + 쇼핑인사이트 키워드마다 1번(최대 6번). 커넥터 하루 캐시·네이버 전체 상한과 trend_age 예산 표(호출자 `trend_report`)를 같이 쓴다(새 예산 없음). 한도면 그 키워드만 "확인 안 함(한도)"
+  - LLM: 보고서당 최대 2번
+- **실행·저장**: data 에이전트 프로세스 안 asyncio 작업, 동시에 1개(나머지 대기). 상태 queued·running·done·partial·failed·interrupted, 섹션별 상태도 저장(`trend_report_store.py`, SQLite `DATA_TREND_REPORT_DB`, 비면 메모리. `run_all.sh`는 `backend/.data/trend_reports.db`). 다시 켜지면 대기·진행으로 남은 보고서는 "중단됨 + 다시 만들기 필요". 같은 날 같은 의뢰(정규화한 입력 해시)는 저장본을 연다(`rebuild: true`면 새로). 보고서 기록은 분석 결과 보관이라 `execute()`를 부르지 않는다
+- **이벤트**: 완료·부분 완료·실패 때 `data.trend_report_ready`(source `data`, idempotency_key `<report_id>:<status>`, data `{report_id, status, context_id, caller, summary_line}`)를 `metric.anomaly`와 같은 `ax_agent_template.events.publish`로 보낸다. 지금 총괄은 이 이벤트를 무시한다(총괄 plan은 다음 단계). 보내지 못하면(`EventBusUnavailable` 등) 로그 한 줄만 남기고 보고서는 그대로
+- **한계**: 인스타는 프로페셔널 계정의 최근 20개만(개인 계정·해시태그 전체·게시물 오디오는 볼 수 없음). 최근 20개가 직전 7일까지 닿지 않는 계정은 해시태그 직전 7일 수가 덜 잡힌다(보고서 limits에 계정 수). 네이버 값은 요청 안 상대값이라 키워드끼리 크기는 비교하지 않는다. 영상 업로드·광고 캡처·썸네일 AI 분석·총괄 plan은 아직 없다
 
 ### keyword_trend (검색 트렌드 · 도서 분야)
 

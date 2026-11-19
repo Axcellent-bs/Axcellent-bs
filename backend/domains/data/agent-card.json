@@ -520,6 +520,39 @@
       "handoff": false
     },
     {
+      "id": "trend_report_create",
+      "description": "트렌드 분석 의뢰 넣기. 폼 값(제품·타깃 성별·나이 구간·형식·경쟁사 인스타 아이디·키워드·추가 계정) 또는 의뢰 문장(request_text)만으로 받는다. 총괄·기획이 의뢰문(request_text)만으로 부를 수 있음, 완료 시 data.trend_report_ready 발행(완료·부분 완료·실패, data={report_id, status, context_id, caller, summary_line}). 바로 report_id·status·예상 소요(eta_seconds)를 주고 data 에이전트 안에서 하나씩 만든다(동시에 1개). 같은 날 같은 의뢰는 저장본을 연다(reused, rebuild=true면 새로). 의뢰문은 LLM 1번으로 칸을 뽑고(untrusted 데이터 블록), 비면 프리셋(report_presets, match_words로 고름) 값과 칸마다 출처. 섹션: 1 네이버 검색어 트렌드(연령·성별)·쇼핑인사이트 최근 7일÷직전 28일, 2 인스타 해시태그 계정 수(이번 7일·직전 7일), 3 터진 게시물 8개 + 광고 재료 ok 밈 3개, 4 경쟁사 주당 게시·릴스 비율·조회 중앙값·최고 게시물·잘 된 게시물 공통점, 5 결론 한 줄 + 30초 콘티 4칸(LLM 1번, 숫자 금지, 칸마다 코드 근거 문장). 인스타는 Meta 공식 business_discovery로 의뢰당 최대 45곳(하루 상한 공유, 한도면 멈춤). 모르면 unknown + 이유, 섹션마다 따로 실패. 보고서 기록은 분석 결과 보관이라 execute()를 부르지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportCreated",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "planning"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_report_get",
+      "description": "트렌드 분석 의뢰 보고서 하나(상태 queued·running·done·partial·failed·interrupted, 섹션별 진행 상태, brief와 칸별 출처, 섹션 1~5, 근거와 한계, 호출 수). 없는 id는 outcome not_found. 조회만.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportRef",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReport",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "planning"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
+      "id": "trend_report_list",
+      "description": "최근 트렌드 분석 의뢰 보고서 목록(최신 순, limit 기본 20): id·상태·만든 시각·호출자·제품·결론 한 줄. 조회만.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportListInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/data.py#TrendReportListOutput",
+      "grade": "read",
+      "allowed_requesters": ["dashboard-api", "orchestrator", "planning"],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "data_chat_send",
       "description": "데이터분석 AI 직접 대화(dashboard-api /api/dashboard/data-chat). 말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 data_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. 답의 재료는 저장된 결과만(영상 탐색·지금 인기·브리프·영상 성과·보내기 상태·수집 장부, 코드가 질문 낱말로 최대 3묶음, 새 수집·계산 없음). 답 숫자가 재료에 없으면 고정 문장, 마지막 줄 근거는 서버가 붙임. 상태 변경 명령은 LLM 없이 거절. 조회·설명만 하고 업무 상태를 바꾸지 않아 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채우고 사람 말은 untrusted로만 넣는다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy·chat_limit(대화 하루 30회·80,000토큰 또는 하루 LLM 100%).",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#DataChatSendInput",

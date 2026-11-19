@@ -280,6 +280,10 @@ SERVICES: tuple[Service, ...] = (
             "instagram_radar",
             "instagram_memo_list",
             "instagram_memo_add",
+            # 트렌드 분석 의뢰 보고서 (11/19, grade read, 끝나면 data.trend_report_ready)
+            "trend_report_create",
+            "trend_report_get",
+            "trend_report_list",
             "data_chat_send",
             "data_chat_list",
             "data_chat_get",

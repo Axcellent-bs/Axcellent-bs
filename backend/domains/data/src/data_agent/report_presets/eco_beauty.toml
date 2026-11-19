@@ -1,0 +1,29 @@
+# 트렌드 분석 의뢰 프리셋: 친환경 화장품 (의뢰마다 자기 설정, 지금 회사 설정은 바꾸지 않는다)
+# 의뢰 폼(또는 의뢰문에서 뽑은) 값이 이 값을 덮어쓴다(경쟁사·키워드·타깃).
+
+keywords = ["리필 화장품", "비건 선크림", "클린뷰티", "제로웨이스트", "비건 화장품"]
+# request_text로 프리셋을 고를 때 쓰는 낱말 (하나라도 들어 있으면 후보)
+match_words = ["화장품", "뷰티", "코스메틱", "스킨케어", "비건", "친환경"]
+# 네이버 쇼핑인사이트 분야: 화장품/미용 (naver_shopping.py 주석의 공식 예시 id)
+shopping_category = "50000002"
+competitors = [
+    "toun28_official", "beplain_official", "abib.official", "mixsoon_official",
+    "purito_official", "amuse", "sidmool",
+]
+# 2026-11-19 business_discovery로 확인한 34곳
+beauty_accounts = [
+    "toun28_official", "beplain_official", "purito_official", "mixsoon_official",
+    "torriden_official", "sidmool", "abib.official",
+    "anua_kr", "amuse", "needly_official", "skinfood_official", "illiyoon_official", "drjart_kr",
+    "innisfreeofficial", "laneige_kr", "mamonde_official", "iope_official", "banilaco_official",
+    "cosrx", "oliveyoung_official",
+    "allurekorea", "voguekorea", "wkorea", "marieclairekorea", "ellekorea", "harpersbazaarkorea",
+    "cosmopolitankorea",
+    "glowpick_official", "hwahae_official", "risabae_art", "ponysmakeup", "ssinnim", "leojmakeup",
+    "directorpi",
+]
+
+[brief]
+product = "친환경 화장품 브랜드 인지도"
+target = { gender = "f", ages = ["20", "30"] }
+format = "인스타 릴스 30초"
