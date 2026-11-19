@@ -21,7 +21,7 @@ export function ApprovalPanel({ state, onDone }: { state: PublishState; onDone: 
   const [reviewed, setReviewed] = useState(false);
   const [step, setStep] = useState<"idle" | "confirm" | "busy">("idle");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const [approver, setApprover, approverName] = useApproverName();
+  const [approver, setApprover, approverName, decidedAs] = useApproverName();
   const timer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -41,7 +41,7 @@ export function ApprovalPanel({ state, onDone }: { state: PublishState; onDone: 
     setStep("busy");
     setMessage(null);
     try {
-      await finance.decide(reviewId, decision, undefined, true, approverName);
+      await finance.decide(reviewId, decision, undefined, true, decidedAs ?? undefined);
       setMessage({ ok: true, text: decision === "approved" ? "승인했습니다. 게시는 서버가 이어서 진행합니다. 잠시 뒤 상태가 바뀝니다." : "거절했습니다. 게시하지 않습니다." });
       onDone();
       timer.current = window.setTimeout(onDone, QUICK_RELOAD_MS);
