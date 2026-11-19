@@ -27,6 +27,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from ax_secret_store import get_secret
+
 PROVIDER_PREFIX = "custom:"
 ALLOWED_HOSTS_ENV = "MARKETING_CUSTOM_VIDEO_ALLOWED_HOSTS"
 SECRET_REF_PREFIX = "MARKETING_CUSTOM_"
@@ -311,5 +313,5 @@ def secret_refs(spec: CustomVideoSpec) -> list[str]:
 def public_view(spec: CustomVideoSpec) -> dict[str, Any]:
     """화면·API에 내는 모양. 키 값은 애초에 없고, 변수 이름과 설정 여부만 있다."""
     data = spec.model_dump(mode="json")
-    data["keyConfigured"] = all(os.getenv(r, "").strip() for r in secret_refs(spec))
+    data["keyConfigured"] = all(get_secret(r).strip() for r in secret_refs(spec))
     return data

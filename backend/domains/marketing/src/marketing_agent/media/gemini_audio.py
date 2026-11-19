@@ -21,12 +21,12 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-import os
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
+from ax_secret_store import get_secret
 from marketing_agent.media.base import MediaRequest, MediaResult, Usage
 from marketing_agent.media.config import API_KEY_ENVS
 from marketing_agent.media.gemini_video import API_REVISION, ENDPOINT
@@ -80,7 +80,7 @@ class GeminiAudioProvider:
             raise GeminiAudioError("unsupported_media_kind")
         if not request.model:
             raise GeminiAudioError("model_not_configured")
-        key = os.getenv(API_KEY_ENVS["audio"], "").strip()
+        key = get_secret(API_KEY_ENVS["audio"]).strip()
         if not key:
             raise GeminiAudioError("api_key_not_configured")
 

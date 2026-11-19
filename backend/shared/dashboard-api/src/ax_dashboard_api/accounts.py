@@ -5,6 +5,8 @@
 - 칸: id, 이름, 이메일, 역할(`operator`·`admin`·`member`), 비밀번호 해시(scrypt), 만든 시각,
   프로필(부서 `dept`, 확인 권한 `approver`, 열람 담당 `readers`, 비용 상한 변경 권한
   `limit_editor`, 정책 변경 권한 `policy_editor`).
+  키 담당 `secret_editor`와 담당 고객사 목록 `secret_tenants`(암호화 키 관리, `secret_routes.py`):
+  운영자는 누구에게나, 고객사 관리자는 자기 담당 고객사 안에서만, 자기 자신에게는 못 준다.
   `limit_editor`·`policy_editor`는 운영자·고객사 관리자 계정에만 켤 수 있다(일반회원은 못 켠다,
   일반회원으로 내리면 꺼진다). `policy_editor`는 운영자 또는 `policy_editor`인 관리자만 준다.
   열람 담당 값은 화면 `members.ts`의 `ReaderArea`와 같다
@@ -59,6 +61,7 @@ from pydantic import BaseModel, Field
 from ax_agent_template import company_connection as store
 from ax_agent_template import human_auth
 from ax_dashboard_api.envelope import ApiError, ok
+from ax_secret_store.service import TENANT_RE
 
 ACCOUNTS_FILE_ENV = "AX_ACCOUNTS_FILE"
 ACCOUNTS_FILE = "accounts.json"
@@ -71,6 +74,7 @@ SCRYPT_N, SCRYPT_R, SCRYPT_P, SCRYPT_LEN = 2**14, 8, 1, 32
 # 열람 담당 영역: 화면 `frontend/src/demo/members.ts`의 READER_AREAS id와 같다
 READER_AREAS = ("hr", "finance")
 CUSTOMER_ROLES = ("admin", "member")
+MAX_SECRET_TENANTS = 20
 EMAIL_RE = re.compile(r"^[^@\s:]+@[^@\s:]+\.[^@\s:]+$")
 
 logger = logging.getLogger("ax.dashboard.accounts")
@@ -188,6 +192,14 @@ def load_accounts() -> list[dict[str, Any]]:
         return _bootstrap(path, _read(path))
 
 
+def secret_tenants_of(row: dict[str, Any]) -> list[str]:
+    """키 담당 고객사 목록(형식이 맞는 것만, 중복 없이)."""
+    raw = row.get("secret_tenants")
+    if not isinstance(raw, list):
+        return []
+    return list(dict.fromkeys(t for t in raw if isinstance(t, str) and TENANT_RE.match(t)))
+
+
 def _public(row: dict[str, Any]) -> dict[str, Any]:
     """밖으로 내보내는 칸만 고른다(허용 목록). 해시·비밀번호 바꾼 시각 같은 내부 값은 넣지 않는다.
 
@@ -203,6 +215,8 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     can_edit = row.get("role") in ("operator", "admin")
     out["limit_editor"] = can_edit and row.get("limit_editor") is True
     out["policy_editor"] = can_edit and row.get("policy_editor") is True
+    out["secret_editor"] = can_edit and row.get("secret_editor") is True
+    out["secret_tenants"] = secret_tenants_of(row) if can_edit else []
     return out
 
 
@@ -302,6 +316,8 @@ class AccountUpdateIn(BaseModel):
     readers: list[ReaderArea] | None = Field(None, max_length=8)
     limit_editor: bool | None = None
     policy_editor: bool | None = None
+    secret_editor: bool | None = None
+    secret_tenants: list[str] | None = Field(None, max_length=MAX_SECRET_TENANTS)
 
 
 def login_enabled() -> bool:
@@ -492,6 +508,34 @@ def _check_role_change(
         raise ApiError(409, "LAST_ADMIN", "마지막 남은 고객사 관리자는 내릴 수 없어요")
 
 
+def _clean_tenants(raw: list[str]) -> list[str]:
+    for tenant in raw:
+        if not TENANT_RE.match(tenant):
+            raise ApiError(422, "TENANT_INVALID", "고객사 ID 형식이 아니에요 (영소문자·숫자·-·_)")
+    return list(dict.fromkeys(raw))
+
+
+def _check_secret_grant(
+    human: human_auth.Human, row: dict[str, Any], patch: dict[str, Any], rows: list[dict[str, Any]]
+) -> None:
+    """키 담당 권한(secret_editor)·담당 고객사(secret_tenants) 주기.
+
+    운영자는 누구에게나. 고객사 관리자는 자기가 키 담당인 고객사 안에서, 자기 자신에게는 못 준다.
+    일반회원에게는 줄 수 없다(`update_account`가 막는다).
+    """
+    if "secret_tenants" in patch:
+        _clean_tenants(patch["secret_tenants"])
+    if human.role == "operator":
+        return
+    mine = next((r for r in rows if r.get("id") == human.account_id), {})
+    if row.get("id") == human.account_id:
+        raise ApiError(409, "SELF_SECRET_GRANT", "자기 키 담당 권한은 스스로 바꿀 수 없어요")
+    allowed = set(secret_tenants_of(mine)) if mine.get("secret_editor") is True else set()
+    wanted = set(patch.get("secret_tenants") or []) | set(secret_tenants_of(row))
+    if not allowed or not wanted <= allowed:
+        raise ApiError(403, "SECRET_TENANT_FORBIDDEN", "내가 담당한 고객사 안에서만 줄 수 있어요")
+
+
 @router.post("/accounts/{account_id}/update")
 def update_account(
     account_id: str, body: AccountUpdateIn, authorization: str | None = Header(None)
@@ -517,6 +561,8 @@ def update_account(
                 raise ApiError(
                     403, "POLICY_EDITOR_REQUIRED", "정책 변경 권한은 정책 담당만 줄 수 있어요"
                 )
+        if "secret_editor" in patch or "secret_tenants" in patch:
+            _check_secret_grant(human, row, patch, rows)
         role_changed = "role" in patch and patch["role"] != row.get("role")
         if "role" in patch:
             _check_role_change(human, row, patch["role"], rows)
@@ -537,13 +583,22 @@ def update_account(
         if "readers" in patch:
             row["readers"] = [r for r in READER_AREAS if r in patch["readers"]]
         if row.get("role") == "member":  # 일반회원은 변경 권한을 가질 수 없다
-            if patch.get("limit_editor") or patch.get("policy_editor"):
+            if (
+                patch.get("limit_editor")
+                or patch.get("policy_editor")
+                or patch.get("secret_editor")
+                or patch.get("secret_tenants")
+            ):
                 raise ApiError(422, "EDITOR_ROLE_REQUIRED", "운영자·관리자 계정에만 켤 수 있어요")
             row.pop("limit_editor", None)
             row.pop("policy_editor", None)
-        for flag in ("limit_editor", "policy_editor"):
+            row.pop("secret_editor", None)
+            row.pop("secret_tenants", None)
+        for flag in ("limit_editor", "policy_editor", "secret_editor"):
             if flag in patch:
                 row[flag] = patch[flag]
+        if "secret_tenants" in patch:
+            row["secret_tenants"] = _clean_tenants(patch["secret_tenants"])
         row["updated_at"] = _now()
         _write(path, rows)
     if role_changed:
@@ -567,3 +622,15 @@ def editor_flags(authorization: str | None) -> tuple[human_auth.Human, bool, boo
     if row is None:
         raise ApiError(401, "ACCOUNT_GONE", "계정이 없어졌어요. 다시 로그인해 주세요")
     return human, row.get("limit_editor") is True, row.get("policy_editor") is True
+
+
+def secret_flags(authorization: str | None) -> tuple[human_auth.Human, bool, list[str]]:
+    """키 관리 화면용. 로그인 세션의 운영자·관리자만 통과. (사람, secret_editor, 담당 고객사)."""
+    human = session_human(authorization)
+    if human.role not in ("operator", "admin"):
+        raise ApiError(403, "ROLE_REQUIRED", "운영자와 고객사 관리자만 쓸 수 있어요")
+    row = next((r for r in load_accounts() if r.get("id") == human.account_id), None)
+    if row is None:
+        raise ApiError(401, "ACCOUNT_GONE", "계정이 없어졌어요. 다시 로그인해 주세요")
+    editor = row.get("secret_editor") is True
+    return human, editor, secret_tenants_of(row) if editor else []

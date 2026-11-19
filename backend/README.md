@@ -7,7 +7,7 @@ AXcellent AI 백엔드. ax-company-hq/ax-backend(dev `04f0e28`, 10/28)를 복사
 
 | 폴더 | 내용 |
 | --- | --- |
-| `shared/` | 공통: `contracts`(계약), `agent-template`(에이전트 틀·서비스 대응표), `safety`(안전 관문), `memory`(회사 기억), `dashboard-api`(화면 중계). 고객사 판매 서버(shop-api)는 캣북스 레포 [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)로 옮겼다 |
+| `shared/` | 공통: `contracts`(계약), `agent-template`(에이전트 틀·서비스 대응표), `safety`(안전 관문), `memory`(회사 기억), `dashboard-api`(화면 중계), `secret-store`(비밀값 암호화 저장소, 스위치 `AX_SECRET_STORE=env|db`, [README](shared/secret-store/README.md)). 고객사 판매 서버(shop-api)는 캣북스 레포 [`Catbooks-demo/catbooks-demo`](https://github.com/Catbooks-demo/catbooks-demo)로 옮겼다 |
 | `domains/` | 업무 로직. 원래 부서 패키지 그대로(support·hr·marketing·finance·data·planning·infra-dejafix). 직접 띄우지 않고 서비스가 가져다 쓴다 |
 | `services/` | 서비스 에이전트 14개. 각자 카드(`agent-card.json`)·포트·실행 설정을 가진다 |
 | `infra/` | docker compose (`infra/compose.yml`이 `shared/*`·`services/*` compose를 모은다) |

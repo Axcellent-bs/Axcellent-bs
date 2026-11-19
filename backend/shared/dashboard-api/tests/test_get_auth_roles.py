@@ -29,6 +29,8 @@ ADMIN_ONLY_GETS = {
     # 비용 상한·정책 화면: 로그인한 운영자·관리자만 읽는다(일반회원·공용 토큰 403)
     "/api/dashboard/marketing/cost-limits",
     "/api/dashboard/cost-policy",
+    # 키 관리 화면: 로그인한 운영자·관리자만(일반회원·공용 토큰 403)
+    "/api/dashboard/secrets",
 }
 
 

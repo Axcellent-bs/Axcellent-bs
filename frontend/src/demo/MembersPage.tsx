@@ -7,7 +7,8 @@ import { customerAccounts, kindOf, useSession, type Account } from './session'
 import { reloadServerMembers, useServerMembers } from './serverMembers'
 import { createAccount, updateAccount } from '@/lib/authApi'
 import { accountInputProblem, getSession, MIN_PASSWORD_LENGTH, type ServerAccount, type ServerRole } from '@/lib/humanSession'
-import { approverOf, canEditProfile, customerRows, limitEditorOf, limitEditorProblem, policyEditorOf, policyEditorProblem, roleChangeProblem, toggleReader, type AccountPatch } from '@/lib/memberAdmin'
+import { parseTenants, tenantListProblem } from '@/lib/secretStore'
+import { approverOf, canEditProfile, customerRows, limitEditorOf, limitEditorProblem, policyEditorOf, policyEditorProblem, roleChangeProblem, secretEditorOf, secretEditorProblem, secretTenantsOf, toggleReader, type AccountPatch } from '@/lib/memberAdmin'
 import { PreparingChip } from '@/components/Preparing'
 import { privateIp, useHosts } from './store'
 import { More, PageHead, SectionHead, StatusChip, Tabs, Tiles } from '@/components/connect/parts'
@@ -167,6 +168,22 @@ function ServerDeptCell({ row, disabled, onSave }: { row: ServerAccount; disable
   )
 }
 
+/** 키 담당 고객사 목록 입력(쉼표로 구분). 바뀌면 저장 버튼이 나온다 */
+function SecretTenantsCell({ row, disabled, onSave }: { row: ServerAccount; disabled: boolean; onSave: (tenants: string[]) => void }) {
+  const saved = secretTenantsOf(row).join(', ')
+  const [draft, setDraft] = useState(saved)
+  const problem = tenantListProblem(draft)
+  return (
+    <div className="flex items-center gap-1">
+      <input className="field w-40 py-1 text-xs" aria-label={`${row.name} 담당 고객사`} placeholder="고객사 ID, 쉼표로 구분" value={draft} disabled={disabled}
+        onChange={(e) => setDraft(e.target.value)} />
+      {draft.trim() !== saved && (
+        <button type="button" className="btn-ghost px-2 py-1 text-xs" disabled={disabled || !!problem} title={problem ?? undefined} onClick={() => onSave(parseTenants(draft))}>저장</button>
+      )}
+    </div>
+  )
+}
+
 /**
  * 서버 로그인 회원 표: 서버 계정 목록만 쓴다. 바꾸면 서버에 저장하고, 성공하면 목록을 다시 읽는다.
  * 연결(이메일·PC IP)·쓰는 PC는 서버에 저장소가 없어 "준비 중"이다.
@@ -219,6 +236,7 @@ function ServerMembers() {
               <th className="px-4 py-2.5 font-medium">확인 권한</th>
               <th className="px-4 py-2.5 font-medium">비용 상한 변경 권한</th>
               <th className="px-4 py-2.5 font-medium">정책 변경 권한</th>
+              <th className="px-4 py-2.5 font-medium">키 담당 (고객사)</th>
               <th className="px-4 py-2.5 font-medium">열람 담당</th>
               <th className="px-4 py-2.5 font-medium">쓰는 PC</th>
             </tr>
@@ -231,6 +249,8 @@ function ServerMembers() {
               const limitEditor = limitEditorOf(a)
               const limitProblem = limitEditorProblem(a)
               const policyEditor = policyEditorOf(a)
+              const secretEditor = secretEditorOf(a)
+              const secretProblem = me ? secretEditorProblem(me, a) : '로그인이 필요해요.'
               const policyProblem = me ? policyEditorProblem({ role: me.role, policy_editor: me.policy_editor }, a) : '로그인이 필요해요.'
               // 바꿀 수 없는 역할이면 이유를 title로 보여 준다
               const other = CHOOSABLE.find((r) => r !== a.role)
@@ -277,6 +297,20 @@ function ServerMembers() {
                     </button>
                   </td>
                   <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <button type="button" role="switch" aria-checked={secretEditor} aria-label={`${a.name} 키 담당 권한`}
+                        disabled={!editable || (!!secretProblem && !secretEditor)} title={secretProblem ?? undefined}
+                        onClick={() => void save(a, { secret_editor: !secretEditor }, `${a.name} 키 담당 권한을 ${secretEditor ? '껐어요' : '켰어요'}.`)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition disabled:opacity-50 ${secretEditor ? 'bg-brand-600' : 'bg-ink-100'}`}>
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${secretEditor ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      </button>
+                      {secretEditor && (
+                        <SecretTenantsCell key={`${a.id}:${secretTenantsOf(a).join(',')}`} row={a} disabled={!editable || !!secretProblem}
+                          onSave={(tenants) => void save(a, { secret_tenants: tenants }, `${a.name} 담당 고객사를 저장했어요.`)} />
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">
                     {a.role === 'admin' ? <span className="text-xs text-ink-500">관리자는 모두 봐요</span> : (
                       <div className="flex gap-1" role="group" aria-label={`${a.name} 열람 담당`}>
                         {READER_AREAS.map((r) => {
@@ -295,7 +329,7 @@ function ServerMembers() {
               )
             })}
             {!list.length && (
-              <tr><td colSpan={9} className="px-4 py-6 text-center text-ink-500">{rows === null ? (loading ? '계정 목록을 읽는 중이에요' : '계정 목록을 아직 받지 못했어요') : '계정이 없어요'}</td></tr>
+              <tr><td colSpan={10} className="px-4 py-6 text-center text-ink-500">{rows === null ? (loading ? '계정 목록을 읽는 중이에요' : '계정 목록을 아직 받지 못했어요') : '계정이 없어요'}</td></tr>
             )}
           </tbody>
         </table>
