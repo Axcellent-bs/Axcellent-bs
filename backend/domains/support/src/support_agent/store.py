@@ -79,6 +79,15 @@ class InquiryStore:
     def get(self, inquiry_id: int) -> Conversation | None:
         return self._conversations.get(inquiry_id)
 
+    def find_by_context(self, context_id: str) -> Conversation | None:
+        """이 context_id의 문의 (여럿이면 번호가 가장 큰 것). 개인정보를 지운 문의는 뺀다."""
+        found = [
+            c
+            for c in self._conversations.values()
+            if c.context_id == context_id and not c.purged_at
+        ]
+        return max(found, key=lambda c: c.id) if found else None
+
     def create(
         self,
         *,

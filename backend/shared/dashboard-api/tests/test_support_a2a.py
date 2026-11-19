@@ -409,3 +409,19 @@ def test_triage_route_rejects_an_unknown_action_and_a_long_label(
     long = {"action": "decide", "label": "가" * 41}
     assert client.post(BASE + "/conversations/7/triage", json=long).status_code == 422
     assert fake.sent == []
+
+
+def test_by_ref_asks_get_inquiry_with_the_context_id(client: TestClient, fake: Fake) -> None:
+    fake.output = {**ITEM, "messages": []}
+    body = client.get(BASE + "/conversations/by-ref/ctx_inq_0001").json()
+    assert body["data"]["id"] == 7
+    assert fake.sent[0].skill == "get_inquiry"
+    assert fake.sent[0].input == {"context_id": "ctx_inq_0001"}
+
+
+def test_by_ref_not_found_says_the_inquiry_is_gone(client: TestClient, fake: Fake) -> None:
+    fake.outcome = "not_found"
+    fake.output = {"message": "이 기록의 문의는 지금 고객지원 저장소에 없어요"}
+    response = client.get(BASE + "/conversations/by-ref/ctx_inq_9999")
+    assert response.status_code == 404
+    assert "고객지원 저장소에 없어요" in response.json()["error"]["message"]

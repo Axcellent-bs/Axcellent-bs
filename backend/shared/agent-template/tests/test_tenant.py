@@ -127,3 +127,23 @@ def test_an_installed_copy_finds_the_working_folder(
     monkeypatch.setattr(tenant, "DEFAULT_TENANTS_DIR", tmp_path / "site-packages" / "nope")
     monkeypatch.chdir(tmp_path)
     assert tenant.list_tenants() == [{"id": "cold", "name": "냉장 물류"}]
+
+
+def test_the_company_survives_clearing_and_resaving_the_connection(world: Path) -> None:
+    """회사 설정은 설치 기록이다: 연결을 끊었다 다시 저장해도 그대로다(11/18 사고)."""
+    cc.save_connection("http://10.0.0.5:8010", verified_at=None, updated_by="t", tenant="cold")
+    assert tenant.current() == "cold"
+    cc.clear_connection("t")
+    assert tenant.current() == "cold"
+    cc.save_connection("http://10.0.0.5:8010", verified_at=None, updated_by="t")
+    assert tenant.current() == "cold"
+
+
+def test_ax_tenant_still_wins_over_the_install_record(
+    world: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (world / "other").mkdir()
+    (world / "other" / "tenant.toml").write_text(TOML, encoding="utf-8")
+    cc.save_connection("http://10.0.0.5:8010", verified_at=None, updated_by="t", tenant="cold")
+    monkeypatch.setenv(tenant.TENANT_ENV, "other")
+    assert tenant.current() == "other"

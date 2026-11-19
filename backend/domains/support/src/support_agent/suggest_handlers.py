@@ -56,6 +56,18 @@ async def suggest_compensation(request: AgentRequest) -> AgentResult:
             raw = await shop_client.fetch_order_facts(inquiry.order_id)
         except shop_client.ShopError as exc:
             return error_result(request.meta, TaskStatus.FAILED, "shop_unavailable", str(exc))
+        if raw is None:
+            # 문의는 있는데 그 주문이 판매 서버에 없다(판매 서버 자료가 바뀐 옛 문의 등).
+            # "문의를 찾을 수 없다"로 답하면 문의가 없는 것처럼 보인다(결제 진단 #1355와 같은 처리).
+            # 결과는 그대로 not_found로 두고 무엇이 없는지 적는다
+            return h._done(
+                request,
+                {
+                    "message": f"문의 {inquiry.id}의 주문 {inquiry.order_id}이 판매 서버에 없다"
+                    "(판매 서버 자료가 바뀌기 전 문의일 수 있다)"
+                },
+                outcome="not_found",
+            )
         if raw is not None and raw.get("buyer_id") == buyer_id:
             return h._done(
                 request,

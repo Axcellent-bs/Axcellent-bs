@@ -106,7 +106,47 @@ def current() -> str | None:
     if not name:
         found = read_connection()
         name = (found.tenant or "") if found else ""
+    if not name:
+        name = _remembered()
     return name if is_tenant(name) else None
+
+
+# 설치 기록: 회사 설정은 연결이 아니라 설치에 딸린다. 연결을 끊었다 다시 저장해도 유지되게
+# 회사 연결 파일 옆 `install_tenant.json`에 마지막으로 정한 회사를 남긴다
+# (11/18 연결 해제로 회사 설정이 사라짐)
+INSTALL_TENANT_FILE = "install_tenant.json"
+
+
+def _install_file() -> Path | None:
+    conn = os.getenv("AX_COMPANY_CONNECTION_FILE", "").strip()
+    return Path(conn).with_name(INSTALL_TENANT_FILE) if conn else None
+
+
+def _remembered() -> str:
+    import json
+
+    path = _install_file()
+    if path is None:
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    name = data.get("tenant") if isinstance(data, dict) else None
+    return name if isinstance(name, str) else ""
+
+
+def remember(name: str) -> None:
+    """이 설치의 회사 설정을 남긴다(회사 연결을 저장할 때)."""
+    import json
+
+    path = _install_file()
+    if path is None or not is_tenant(name):
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps({"tenant": name}, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def setting(env_name: str) -> str:
