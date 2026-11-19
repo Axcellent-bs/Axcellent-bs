@@ -139,3 +139,37 @@ def setting(env_name: str) -> str:
     per_head = finance.get("per_head_monthly") if isinstance(finance, dict) else None
     ok = isinstance(per_head, int) and not isinstance(per_head, bool) and per_head >= 0
     return str(per_head) if ok else ""
+
+
+# ---------------------------------------------------------------- 인스타 레이더 계정
+# 회사 연결 › 인스타 레이더 계정에서 저장한 목록.
+# 있으면 회사 설정 trends.toml [instagram] radar_accounts보다 먼저다.
+# 파일: `AX_IG_RADAR_FILE` → 회사 연결 파일 옆 `instagram_radar.json`.
+# dashboard-api가 쓰고 data가 읽는다
+IG_RADAR_FILE_ENV = "AX_IG_RADAR_FILE"
+IG_RADAR_FILE = "instagram_radar.json"
+
+
+def ig_radar_file() -> Path | None:
+    raw = os.getenv(IG_RADAR_FILE_ENV, "").strip()
+    if raw:
+        return Path(raw)
+    conn = os.getenv("AX_COMPANY_CONNECTION_FILE", "").strip()
+    return Path(conn).with_name(IG_RADAR_FILE) if conn else None
+
+
+def ig_radar_accounts() -> list[str] | None:
+    """화면에서 저장한 레이더 계정. 저장한 적 없거나 깨졌으면 None(회사 설정 파일을 쓴다)."""
+    import json
+
+    path = ig_radar_file()
+    if path is None:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    accounts = data.get("accounts") if isinstance(data, dict) else None
+    if not isinstance(accounts, list):
+        return None
+    return [a for a in accounts if isinstance(a, str) and a]
