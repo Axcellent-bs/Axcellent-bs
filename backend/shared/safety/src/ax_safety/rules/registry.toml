@@ -48,6 +48,26 @@ action = "set_publish_control"
 owner = "marketing"
 base_grade = "A"
 
+# 영상 AI 공급자 선택(화면 드롭다운). 어떤 공급자·모델로 만들지만 바꾸고, 비용은 단가표·상한이 그대로 막는다.
+# 요청자는 owner(마케팅), 사람 이름(updated_by)은 대시보드 API가 토큰에서 채워 보낸다
+[[actions]]
+action = "select_video_provider"
+owner = "marketing"
+base_grade = "A"
+
+# 목록에 없는 영상 API를 직접 등록(커스텀 공급자). 외부 주소로 요청이 나가고 인증 헤더에 키가 실리는
+# 설정이라 저장·켜기 모두 늘 사람이 승인한다(C). 스펙은 코드가 저장 전에 검사한다(허용 호스트·키 변수 이름 접두어)
+[[actions]]
+action = "save_custom_video_provider"
+owner = "marketing"
+base_grade = "C"
+
+# 커스텀 영상 공급자 삭제. 쓰지 않게 되는 쪽(안전한 방향)이라 A
+[[actions]]
+action = "delete_custom_video_provider"
+owner = "marketing"
+base_grade = "A"
+
 # 수동 게시 완료 기록. 자동 게시가 꺼져 사람이 Instagram에 직접 올린 뒤 링크를 적어 닫는 일이다.
 # 공개 자체는 publish_sns(C)에서 사람 승인을 이미 받았고, 이 액션은 외부로 아무것도 보내지 않고 게시 대기
 # 건의 상태·기록만 바꾼다. 코드가 링크 형식·중복·대상 상태·AI 표시 확인을 거절하므로 B(교차검증자 필요)가

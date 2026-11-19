@@ -41,6 +41,7 @@ from marketing_agent import (
     outage_sns_media,
     publish_control,
     shop_client,
+    video_providers,
 )
 from marketing_agent import character_sheet as _character_sheet
 from marketing_agent.brief_handoff import (
@@ -1203,6 +1204,22 @@ async def set_publish_control_skill(request: AgentRequest) -> AgentResult:
     return await publish_control.set_publish_control(request, from_decision=_from_decision)
 
 
+async def list_video_providers_skill(request: AgentRequest) -> AgentResult:
+    return await video_providers.list_providers(request)
+
+
+async def select_video_provider_skill(request: AgentRequest) -> AgentResult:
+    return await video_providers.select_provider(request, from_decision=_from_decision)
+
+
+async def save_custom_video_provider_skill(request: AgentRequest) -> AgentResult:
+    return await video_providers.save_custom(request, from_decision=_from_decision)
+
+
+async def delete_custom_video_provider_skill(request: AgentRequest) -> AgentResult:
+    return await video_providers.delete_custom(request, from_decision=_from_decision)
+
+
 async def get_manual_publish_package_skill(request: AgentRequest) -> AgentResult:
     return await manual_publish.get_manual_publish_package(request)
 
@@ -1356,6 +1373,10 @@ async def record_campaign_result_skill(request: AgentRequest) -> AgentResult:
 
 
 HANDLERS = {
+    "list_video_providers": list_video_providers_skill,
+    "select_video_provider": select_video_provider_skill,
+    "save_custom_video_provider": save_custom_video_provider_skill,
+    "delete_custom_video_provider": delete_custom_video_provider_skill,
     "draft_notice": draft_notice,
     "publish_notice": publish_notice,
     "end_incident_notice": end_incident_notice,
