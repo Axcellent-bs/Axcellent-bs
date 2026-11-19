@@ -246,12 +246,20 @@ class NaverShoppingConnector:
         return _series(await self._call(PATH_KEYWORDS, body), "keyword")
 
     async def keyword_age(
-        self, cid: str, keyword: str, start: date, end: date, time_unit: str = "date"
+        self,
+        cid: str,
+        keyword: str,
+        start: date,
+        end: date,
+        time_unit: str = "date",
+        gender: str | None = None,
     ) -> AgeSeries:
-        """분야 안 키워드 하나의 연령별 추이."""
+        """분야 안 키워드 하나의 연령별 추이. `gender`("f"·"m")가 있으면 그 성별만 (없으면 전체)."""
         body = _base(start, end, time_unit)
         body["category"] = cid
         body["keyword"] = keyword
+        if gender:
+            body["gender"] = gender
         return _by_group(await self._call(PATH_KEYWORD_AGE, body))
 
     async def verify_categories(

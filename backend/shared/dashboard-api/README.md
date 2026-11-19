@@ -63,6 +63,7 @@ CORS 허용 출처는 `DASHBOARD_CORS_ORIGINS`(쉼표 구분, 기본 `http://loc
 | 경로 | support skill |
 | --- | --- |
 | GET `/conversations`, `/conversations/{id}` | `list_inquiries`, `get_inquiry` (가린 고객 메시지의 `text`는 비워서 준다) |
+| GET `/conversations/by-ref/{context_id}` | `get_inquiry` (`context_id`로. 재무 기록의 `inquiry_ref`로 문의를 연다. 문의 번호는 다시 매겨질 수 있지만 이 값은 안 바뀐다. 없으면 404) |
 | POST `/conversations/{id}/messages/{message_id}/original` | `reveal_original` (사람 토큰 필요, 연 사람이 내력에 남는다) |
 | GET `/privacy/purge-preview?mode=customer_request\|expired[&inquiry_id=]` | `preview_data_purge` (읽기. 지워질 것과 보존 의무로 남을 것) |
 | POST `/conversations/{id}/customer-data-purge` | `purge_customer_data` (사람 토큰 필요. 안전 관문이 사람에게 보류해 처음엔 409 NOT_EXECUTED, 승인 뒤 같은 버튼을 다시 누르면 집행) |

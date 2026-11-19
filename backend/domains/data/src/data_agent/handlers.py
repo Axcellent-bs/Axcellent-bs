@@ -1224,6 +1224,85 @@ async def instagram_memo_add(request: AgentRequest) -> AgentResult:
                                      collected_at=datetime.now(UTC)))  # fmt: skip
 
 
+# ---- 트렌드 분석 의뢰 보고서 (trend_report_*). 보고서 기록은 분석 결과 보관이라 execute() 안 씀
+_TREND_REPORTS: Any = None
+
+
+def get_shopping_connector() -> Any:
+    """네이버 쇼핑인사이트 (트렌드 분석 의뢰용 호출자 이름). 테스트는 이 함수를 바꿔 끼운다."""
+    from data_agent.connectors.naver_shopping import NaverShoppingConnector
+
+    return NaverShoppingConnector(os.environ, caller="trend_report")
+
+
+def _trend_report_deps() -> Any:
+    from data_agent.skills.trend_report import Deps
+
+    return Deps(env=os.environ, llm=get_llm(), graph=get_instagram_graph(),
+                search=get_trend_connector(), shopping=get_shopping_connector(),
+                memes=lambda: RESPONSES.latest("trend_memes"))  # fmt: skip
+
+
+def get_trend_reports() -> Any:
+    """보고서 실행기 (처음 부를 때 `DATA_TREND_REPORT_DB`를 열고, 남은 대기·진행을 중단됨으로)."""
+    global _TREND_REPORTS
+    if _TREND_REPORTS is None:
+        from data_agent.trend_report_runner import TrendReportService
+        from data_agent.trend_report_store import TrendReportStore, path_from
+
+        _TREND_REPORTS = TrendReportService(TrendReportStore(path_from(os.environ)),
+                                            _trend_report_deps)  # fmt: skip
+    return _TREND_REPORTS
+
+
+async def trend_report_create(request: AgentRequest) -> AgentResult:
+    """트렌드 분석 의뢰 넣기 (폼 값 또는 의뢰문). 바로 report_id를 주고 뒤에서 만든다."""
+    from ax_contracts.schemas.data import TrendReportInput
+
+    data = _parse(request, TrendReportInput)
+    if isinstance(data, AgentResult):
+        return data
+    out = await get_trend_reports().create(data, request.meta.context_id)
+    summary = f"트렌드 분석 의뢰 {out.report_id} ({'저장본' if out.reused else '새로'})"
+    return _result(request, TaskStatus.COMPLETED, outcome=out.status,
+                   output=out.model_dump(mode="json"),
+                   evidence=Evidence(queries=["trend_reports.db"], data_summary=summary,
+                                     collected_at=datetime.now(UTC)))  # fmt: skip
+
+
+async def trend_report_get(request: AgentRequest) -> AgentResult:
+    """보고서 하나 (상태·섹션별 진행·결과)."""
+    from ax_contracts.schemas.data import TrendReportRef
+
+    data = _parse(request, TrendReportRef)
+    if isinstance(data, AgentResult):
+        return data
+    report = get_trend_reports().get(data.report_id)
+    if report is None:
+        return _result(request, TaskStatus.FAILED, outcome="not_found",
+                       output={"report_id": data.report_id})  # fmt: skip
+    return _result(request, TaskStatus.COMPLETED, outcome=report.status,
+                   output=report.model_dump(mode="json"),
+                   evidence=Evidence(queries=["trend_reports.db"],
+                                     data_summary=f"트렌드 분석 보고서 {report.report_id}",
+                                     collected_at=datetime.now(UTC)))  # fmt: skip
+
+
+async def trend_report_list(request: AgentRequest) -> AgentResult:
+    """최근 보고서 목록."""
+    from ax_contracts.schemas.data import TrendReportListInput, TrendReportListOutput
+
+    data = _parse(request, TrendReportListInput)
+    if isinstance(data, AgentResult):
+        return data
+    out = TrendReportListOutput(items=get_trend_reports().list(data.limit))
+    return _result(request, TaskStatus.COMPLETED, outcome="listed",
+                   output=out.model_dump(mode="json"),
+                   evidence=Evidence(queries=["trend_reports.db"],
+                                     data_summary=f"트렌드 분석 보고서 {len(out.items)}개",
+                                     collected_at=datetime.now(UTC)))  # fmt: skip
+
+
 async def keyword_trend(request: AgentRequest) -> AgentResult:
     """검색 트렌드 · 도서 분야 (급상승·AI 요약·새 키워드·시즌). 조회만 한다(grade read).
 
@@ -2077,7 +2156,8 @@ async def campaign_result(request: AgentRequest) -> AgentResult:
 TIMED_SKILLS = frozenset({
     "trend_popular", "trend_scan", "trend_candidates", "youtube_velocity", "shorts_stats",
     "promo_concepts", "trend_insight_brief", "video_explorer", "trend_memes", "keyword_trend",
-    "instagram_audio", "instagram_radar",
+    "instagram_audio", "instagram_radar", "trend_report_create", "trend_report_get",
+    "trend_report_list",
 })  # fmt: skip
 
 # ---- 데이터분석 AI 직접 대화 (dashboard-api → data_chat_*). 조회·설명만, execute() 안 씀
@@ -2207,5 +2287,8 @@ HANDLERS = {
     "instagram_radar": instagram_radar,
     "instagram_memo_list": instagram_memo_list,
     "instagram_memo_add": instagram_memo_add,
+    "trend_report_create": trend_report_create,
+    "trend_report_get": trend_report_get,
+    "trend_report_list": trend_report_list,
 }
 HANDLERS = {k: timed_handler(k, v) if k in TIMED_SKILLS else v for k, v in HANDLERS.items()}

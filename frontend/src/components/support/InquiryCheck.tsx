@@ -89,6 +89,9 @@ function Result<T>({ id, title, hint, res, children }: {
   );
 }
 
+// 문의는 있는데 그 주문이 판매 서버에 없는 경우(판매 서버 자료가 바뀌기 전 옛 문의 등). 서버가 "…주문 …이 판매 서버에 없다"로 답한다
+const orderMissing = (error: string | null | undefined): boolean => !!error && error.includes("판매 서버에 없다");
+
 export function InquiryCheck({ tick, selected, onSelect }: { tick: number; selected: number | null; onSelect: (id: number) => void }) {
   // 문의 목록은 상담 콘솔과 같은 API. 못 받아도 번호를 직접 넣어 볼 수 있다
   const convs = useResource("support-conversations", async () => ({ data: await api.admin.list(), meta: { mock: false } }), tick);
@@ -131,7 +134,11 @@ export function InquiryCheck({ tick, selected, onSelect }: { tick: number; selec
         </form>
       </div>
       {convs.error && !convs.env && <ErrorBox message={`문의 목록을 받지 못했습니다. 번호로 직접 열 수 있습니다. ${convs.error}`} onRetry={convs.reload} />}
-      {current == null ? <Empty>문의를 고르면 보상 후보와 결제 진단이 나옵니다.</Empty> : (
+      {current != null && !comp.env && !pay.env && orderMissing(comp.error) && orderMissing(pay.error) ? (
+        <div role="status" className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink-700">
+          <b className="text-ink-900">주문 기록 없음</b> · {pay.error}
+        </div>
+      ) : current == null ? <Empty>문의를 고르면 보상 후보와 결제 진단이 나옵니다.</Empty> : (
         <div className="grid gap-5 lg:grid-cols-2">
           <Result id="support-comp" title={`문의 #${current} 보상 후보`} res={comp}
             hint="주문의 배송 기록으로 정책표에 맞는 보상 쿠폰 후보를 냅니다. 요청은 사람이 승인한 뒤 따로 보냅니다.">

@@ -43,6 +43,7 @@ class EventType(StrEnum):
     SUPPORT_INCIDENT_COMPENSATION_DECIDED = "support.incident_compensation_decided"
     # 데이터분석
     METRIC_ANOMALY = "metric.anomaly"
+    TREND_REPORT_READY = "data.trend_report_ready"
     # 인프라(DejaFix 어댑터)
     INFRA_ANOMALY_DETECTED = "infra.anomaly_detected"
     # 재무: 더 이상 발행하지 않는다 (재무 감사를 없앴다). 값은 계약 호환으로만 남긴다
@@ -454,6 +455,20 @@ class TaskProgressData(AxModel):
     note: str | None = Field(default=None, max_length=200)
 
 
+class TrendReportReadyData(AxModel):
+    """`data.trend_report_ready`. 트렌드 분석 의뢰 보고서가 끝났다(완료·부분 완료·실패).
+
+    멱등 키는 `<report_id>:<status>`. 보고서 본문은 `trend_report_get`으로 읽는다.
+    `summary_line`은 보고서 결론 한 줄(LLM, 숫자 없음)이고 없으면 None이다.
+    """
+
+    report_id: str
+    status: Literal["done", "partial", "failed"]
+    context_id: str | None = None
+    caller: Literal["human", "orchestrator", "planning"]
+    summary_line: str | None = None
+
+
 class TaskCompletedData(AxModel):
     """`task.completed`. 긴 작업이 끝났을 때 한 번 알린다. 멱등 키는 `task.completed:<task_id>`.
 
@@ -500,4 +515,5 @@ EVENT_DATA_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.HANDOFF_COMPLETED: HandoffCompletedData,
     EventType.TASK_PROGRESS: TaskProgressData,
     EventType.TASK_COMPLETED: TaskCompletedData,
+    EventType.TREND_REPORT_READY: TrendReportReadyData,
 }

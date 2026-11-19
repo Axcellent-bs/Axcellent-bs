@@ -38,7 +38,12 @@ CAT = {"AX_TENANT": "catbooks"}  # 캣북스를 고른 설치 (기본값은 없�
 
 @pytest.mark.parametrize(
     "folder",
-    [TENANTS / "catbooks", TENANTS / "nubi", FAKE_TENANTS / "coldchain"],
+    [
+        TENANTS / "catbooks",
+        TENANTS / "nubi",
+        TENANTS / "studyon",
+        FAKE_TENANTS / "coldchain",
+    ],
     ids=lambda p: p.name,
 )
 def test_a_tenant_folder_points_at_a_catalog_a_connector_and_an_org_chart(folder: Path) -> None:
@@ -177,3 +182,14 @@ def test_nubi_uses_its_own_catalog_and_reads_through_the_site_adapter() -> None:
     catalog = load_catalog("nubi")
     assert {m.id for m in catalog.metrics} == {"order_count", "inquiry_count"}
     assert catalog.impact.unit_label == "예약"
+
+
+def test_studyon_uses_its_own_catalog_and_reads_through_the_site_adapter() -> None:
+    """스터디온에듀: 자기 API를 사이트 변환기로 읽어 커넥터는 shop-api, 지표는 받는 것만."""
+    tenant = tenant_env.read_tenant(TENANTS / "studyon")
+    assert tenant["name"] == "스터디온에듀" and tenant["catalog"] == "studyon"
+    from data_agent.catalog import load_catalog
+
+    catalog = load_catalog("studyon")
+    assert {m.id for m in catalog.metrics} == {"order_count", "inquiry_count"}
+    assert catalog.impact.customer_label == "수강생"

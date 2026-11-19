@@ -14,6 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ax_contracts.schemas import TENANT_ID_DEFAULT, UtcDatetime
+from ax_contracts.schemas.planning import VideoPlan
 
 Dept = Literal[
     "planning",
@@ -677,6 +678,8 @@ class Proposal(DomainModel):
     options: list[IdeaOption] = Field(default_factory=list)
     scale: ScaleFacts | None = None
     angle: IdeaAngle | None = None
+    # 영상 제작안 (11/19). 기획안으로 만들 때 쓰고 마케팅 전달 때 같이 넘긴다
+    video_plan: VideoPlan | None = None
 
 
 class DeletedProposal(DomainModel):

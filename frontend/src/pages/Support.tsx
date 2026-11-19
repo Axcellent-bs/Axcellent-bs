@@ -1,5 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
+import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiError";
 import { AgentDiagnosisInbox } from "@/components/admin/AgentDiagnosisInbox";
 import { AtRisk } from "@/components/support/AtRisk";
 import { IncidentResponse } from "@/components/support/IncidentResponse";
@@ -38,6 +40,19 @@ export default function SupportPage() {
   const openBuyer = useCallback((id: string) => navigate({ search: `?buyer=${encodeURIComponent(id)}`, hash: "" }, { replace: true }), [navigate]);
   const openInquiry = useCallback((id: number) => navigate({ search: `?inquiry=${id}`, hash: "#inquiry" }, { replace: true }), [navigate]);
 
+  // `?ref=<context_id>`: 재무 기록이 달고 있는 안 바뀌는 문의 ID. 지금 문의 번호로 바꿔 연다.
+  // 문의 번호는 저장소를 새로 시작하면 다시 매겨져 남의 문의를 가리킬 수 있어서 번호로 걸지 않는다.
+  const ref = params.get("ref");
+  const [refGone, setRefGone] = useState<string | null>(null);
+  useEffect(() => {
+    if (!ref) { setRefGone(null); return; }
+    let alive = true;
+    api.admin.byRef(ref)
+      .then((c) => { if (alive) { setRefGone(null); navigate({ search: `?inquiry=${c.id}`, hash: "#inquiry" }, { replace: true }); } })
+      .catch((e) => { if (alive) setRefGone(e instanceof ApiError && e.status === 404 ? e.message : "문의를 불러오지 못했습니다. 잠시 뒤 다시 시도하세요."); });
+    return () => { alive = false; };
+  }, [ref, navigate]);
+
   // 30초마다 모두 새로 받는다(다른 탭을 보는 동안은 쉰다)
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
@@ -72,6 +87,9 @@ export default function SupportPage() {
 
       <div role="tabpanel" id={`support-mode-panel-${mode}`} aria-labelledby={`support-mode-${mode}`}>
         {mode === "risk" && <AtRisk tick={tick} selected={buyer} onSelect={openBuyer} />}
+        {mode === "inquiry" && ref && refGone && (
+          <div role="status" className="mb-4 rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink-700"><b className="text-ink-900">문의를 찾을 수 없음</b> · {refGone}</div>
+        )}
         {mode === "inquiry" && <InquiryCheck tick={tick} selected={inquiry} onSelect={openInquiry} />}
         {mode === "surge" && <SurgeChanges tick={tick} />}
         {mode === "response" && <IncidentResponse tick={tick} />}
