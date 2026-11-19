@@ -181,6 +181,8 @@ async def rollback_deployment(request: AgentRequest) -> AgentResult:
         return _failed(request, "invalid_input", str(exc))
     rt = get_runtime()
     context_id = request.meta.context_id
+    # to_version·release_fault_injection은 키에 넣지 않는다 (to_version은 이력이 정하고, 같은 배포를
+    # 되돌리는 요청은 하나로 본다: 기존 중복 확인과 같다)
     key = f"{context_id}:{ACTION}:{inp.service}:{inp.from_version}"
     if (done := rt.rollbacks.get(key)) and done["status"] == "executed":
         return done["result"].model_copy(update={"meta": request.meta})
@@ -271,16 +273,53 @@ async def _rollback_once(
         collected_at=rt.clock(),
         ref_ids=[f"deploy:{target.deploy_id}", f"deploy:{previous.deploy_id}"],
     )
-    decision = await execute(
-        ACTION, params, request.meta.model_copy(update={"idempotency_key": key}), evidence
-    )
-    result = await _apply(
-        request, rt, decision, target, previous.version, params, evidence, previous=previous
-    )
+    try:
+        decision = await execute(
+            ACTION, params, request.meta.model_copy(update={"idempotency_key": key}), evidence
+        )
+        result = await _apply(
+            request, rt, decision, target, previous.version, params, evidence, previous=previous
+        )
+    except BaseException:
+        # 취소(요청자 연결 끊김·시간 초과)나 예상 못 한 오류로 중간에 멈췄다. 다시 배포가 이미
+        # 시작됐을 수 있으니, 기다리던 같은 요청이 또 부르지 않게 확인하라는 결과를 남긴다
+        # (실행 안 됨으로 남겨 둘 다 끝난 뒤 새로 온 요청은 다시 시도할 수 있다)
+        rt.rollbacks[key] = {
+            "context_id": context_id,
+            "status": "not_executed",
+            "result": _interrupted(request, target, previous.version, evidence),
+        }
+        raise
     rt.rollbacks[key] = {"context_id": context_id, "status": decision.status, "result": result}
     if result.status != TaskStatus.COMPLETED or decision.status != "executed":
         rt.rollbacks[key]["status"] = "not_executed"
     return result
+
+
+def _interrupted(
+    request: AgentRequest, target: Deployment, to_version: str, evidence: Evidence
+) -> AgentResult:
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.FAILED,
+        outcome="redeploy_failed",
+        output={
+            "service": target.service,
+            "from_version": target.version,
+            "to_version": to_version,
+            "message": (
+                "되돌리기가 중간에 멈췄어요. 다시 배포가 시작됐을 수 있어요. "
+                "배포 도구에서 확인한 뒤 다시 하세요"
+            ),
+            "handoff_steps": [
+                "먼저 배포 도구에서 이 실행이 이미 시작됐는지 확인하세요 (중복 실행 방지)",
+                f"시작되지 않았으면 배포 도구에서 {target.service}를 {to_version}으로 다시 실행",
+            ],
+            "fault_released": False,
+            "retryable": False,
+        },
+        evidence=evidence,
+    )
 
 
 async def _apply(

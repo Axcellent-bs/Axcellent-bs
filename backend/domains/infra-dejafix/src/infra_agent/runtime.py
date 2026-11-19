@@ -30,7 +30,10 @@ def _now() -> datetime:
 
 
 class KeyLocks:
-    """키마다 하나씩만 들어가는 잠금. 그 키를 기다리는 요청이 없으면 잠금을 지운다(쌓이지 않음)."""
+    """키마다 하나씩만 들어가는 잠금. 그 키를 기다리는 요청이 없으면 잠금을 지운다(쌓이지 않음).
+
+    프로세스 안에서만 막는다 (infra 서버는 워커 하나로 돈다. 여러 프로세스로 띄우면 막지 못한다).
+    """
 
     def __init__(self) -> None:
         self._locks: dict[str, tuple[asyncio.Lock, int]] = {}

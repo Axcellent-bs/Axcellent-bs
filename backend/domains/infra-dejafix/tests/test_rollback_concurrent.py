@@ -115,3 +115,66 @@ def test_concurrent_duplicate_gets_first_failure_and_later_retry_runs(
     assert tool.redeployed == ["v3.0.0", "v3.0.0"]
     assert len(fake.calls) == 2
     assert runtime.rollback_locks.empty()
+
+
+def _first_stops_mid_redeploy(a2a_body, tool: SlowTool, stop) -> AgentResult:
+    """첫 요청이 다시 배포 도중 멈추고(`stop`), 그동안 기다리던 같은 요청의 결과."""
+
+    async def run() -> AgentResult:
+        first = asyncio.create_task(handlers.rollback_deployment(_request(a2a_body)))
+        while not tool.redeployed:
+            await asyncio.sleep(0)
+        waiter = asyncio.create_task(handlers.rollback_deployment(_request(a2a_body)))
+        for _ in range(3):  # 기다리는 요청이 잠금 앞에 서게 한다
+            await asyncio.sleep(0)
+        await stop(first)
+        return await waiter
+
+    return asyncio.run(run())
+
+
+async def _cancel(task: asyncio.Task) -> None:
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+def _assert_waiter_got_check_first(out: AgentResult, tool: SlowTool, runtime) -> None:
+    assert tool.redeployed == ["v3.0.0"]  # 기다린 요청은 다시 배포하지 않는다
+    assert out.status == "failed"
+    assert out.outcome == "redeploy_failed"
+    assert out.output["retryable"] is False
+    assert "시작됐을 수 있어요" in out.output["message"]
+    assert runtime.rollback_locks.empty()
+
+
+def test_cancelled_first_request_does_not_let_waiter_redeploy(
+    a2a_body, gate, runtime, tool
+) -> None:
+    fake = gate("executed")
+    out = _first_stops_mid_redeploy(a2a_body, tool, _cancel)
+    _assert_waiter_got_check_first(out, tool, runtime)
+    assert len(fake.calls) == 1
+
+    # 둘 다 끝난 뒤 새로 온 요청은 지금처럼 다시 시도한다
+    later = asyncio.run(handlers.rollback_deployment(_request(a2a_body)))
+    assert later.status == "completed", later
+    assert tool.redeployed == ["v3.0.0", "v3.0.0"]
+
+
+def test_error_after_dispatch_does_not_let_waiter_redeploy(
+    a2a_body, gate, runtime, tool, monkeypatch
+) -> None:
+    gate("executed")
+
+    def broken_record(*args, **kwargs):
+        raise RuntimeError("기록 실패")
+
+    monkeypatch.setattr(runtime.history, "record_redeploy", broken_record)
+
+    async def wait_error(task: asyncio.Task) -> None:
+        with pytest.raises(RuntimeError):
+            await task
+
+    out = _first_stops_mid_redeploy(a2a_body, tool, wait_error)
+    _assert_waiter_got_check_first(out, tool, runtime)
