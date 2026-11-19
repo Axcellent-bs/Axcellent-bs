@@ -28,6 +28,7 @@ from marketing_agent.media.video_limits import (
     VideoCaps,
     VideoLimitError,
     parse_max_duration,
+    parse_warn_duration,
     plan_clips,
 )
 
@@ -70,6 +71,45 @@ def test_settings_read_the_env_variable(monkeypatch: pytest.MonkeyPatch) -> None
     assert MediaSettings.from_env().video_max_duration_s == 60
     monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "91")
     assert MediaSettings.from_env().video_max_duration_problem == "video_max_duration_invalid"
+
+
+@pytest.mark.parametrize(
+    ("raw", "max_s", "seconds", "problem"),
+    [
+        (None, 90, 30, None),  # 기본 30
+        ("", 90, 30, None),
+        (None, 15, 15, None),  # 상한이 30보다 작으면 기본값도 상한을 넘지 않는다
+        ("20", 90, 20, None),
+        (" 45 ", 90, 45, None),
+        ("1", 90, 1, None),
+        ("90", 90, 90, None),  # 상한과 같은 값은 허용(사실상 경고 없음)
+        ("0", 90, 30, "video_warn_duration_invalid"),
+        ("91", 90, 30, "video_warn_duration_invalid"),
+        ("16", 15, 15, "video_warn_duration_invalid"),  # 운영 상한 초과
+        ("abc", 60, 30, "video_warn_duration_invalid"),
+        ("-3", 60, 30, "video_warn_duration_invalid"),
+        ("1.5", 60, 30, "video_warn_duration_invalid"),
+    ],
+)
+def test_warn_duration_setting_is_one_to_max_default_thirty(
+    raw: str | None, max_s: int, seconds: int, problem: str | None
+) -> None:
+    parsed = parse_warn_duration(raw, max_s)
+    assert (parsed.seconds, parsed.problem) == (seconds, problem)
+
+
+def test_settings_read_the_warn_env_and_log_only_the_reason_code(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "60")
+    monkeypatch.delenv("MARKETING_VIDEO_WARN_DURATION_S", raising=False)
+    assert MediaSettings.from_env().video_warn_duration_s == 30
+    monkeypatch.setenv("MARKETING_VIDEO_WARN_DURATION_S", "20")
+    assert MediaSettings.from_env().video_warn_duration_s == 20
+    monkeypatch.setenv("MARKETING_VIDEO_WARN_DURATION_S", "secret-77")
+    with caplog.at_level("WARNING"):
+        assert MediaSettings.from_env().video_warn_duration_s == 30
+    assert "video_warn_duration_invalid" in caplog.text and "secret-77" not in caplog.text
 
 
 def test_safety_policy_duration_limit_equals_the_code_absolute_limit() -> None:

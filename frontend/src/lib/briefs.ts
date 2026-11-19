@@ -159,14 +159,15 @@ const mediaPath = (proposalId: string) => `/api/dashboard/marketing/briefs/${enc
  * 종류·필드는 보내지 않는다(서버가 보관본에서 읽는다). 영상은 길이(`durationS`)만 고를 수 있다. 게시는 하지 않는다: 게시는 C 등급 사람 승인이다.
  * 영상은 1분쯤 걸린다. 오류는 서버 문장 없이 상태 코드만 담아 던진다(문구는 `mediaHttpErrorKo`).
  */
-async function makeMedia(proposalId: string, durationS?: number | null): Promise<BriefMediaAnswer> {
+async function makeMedia(proposalId: string, durationS?: number | null, confirmedLong = false): Promise<BriefMediaAnswer> {
   const path = mediaPath(proposalId);
   // 영상 길이만 보낸다(1~90초 정수). 서버가 운영자 설정 상한 안인지 다시 판정한다
   const withLength = durationS != null;
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method: "POST",
     headers: withLength ? { "Content-Type": "application/json", ...dashboardAuth() } : dashboardAuth(),
-    body: withLength ? JSON.stringify({ duration_s: durationS }) : undefined,
+    // confirmed_long: 긴 영상 경고창에서 '계속'을 눌렀다는 감사 기록용 표시. 서버는 믿지 않고 상한·비용은 따로 막는다
+    body: withLength ? JSON.stringify(confirmedLong ? { duration_s: durationS, confirmed_long: true } : { duration_s: durationS }) : undefined,
     cache: "no-store",
   });
   const json = await res.json().catch(() => null);

@@ -5,8 +5,9 @@ import { useAuthedMedia } from "@/lib/authedMedia";
 import { shortDateTime, won } from "@/lib/format";
 import { briefs, mediaKindKo, mediaPreviewUrl, type StoredBrief } from "@/lib/briefs";
 import { ApprovalPanel } from "./ApprovalPanel";
+import { LongVideoWarning } from "./LongVideoWarning";
 import { ManualPublishCard, PublishLineView } from "./ManualPublishCard";
-import { approvalLink, clampDuration, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, isReel, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, waitKo, PUBLISH_EXPIRY_MIN, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
+import { approvalLink, clampDuration, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, gateLongStart, isReel, longWarningKo, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, waitKo, PUBLISH_EXPIRY_MIN, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
 
 // 넘어온 기획안 한 건의 "미디어 만들기". 저장된 미디어 요청(종류·필드)을 서버가 그대로 실행해 초안을 만든다.
 // - 누르면 먼저 예상 비용(서버가 단가표·장부에서 계산한 값)을 보여 주고, 사람이 확인해야 시작한다.
@@ -150,6 +151,10 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
   const [fresh, setFresh] = useState<{ key: string; prepared: PreparedMedia } | null>(null);
   const [seconds, setSeconds] = useState(0);
   const [chosen, setChosen] = useState<number | null>(null); // 사람이 고른 영상 길이(초). 비면 서버가 준 현재 길이
+  const [warning, setWarning] = useState(false); // 긴 영상 경고창(화면 안내일 뿐 안전 관문이 아니다)
+  const answerWarning = useRef<((ok: boolean) => void) | null>(null);
+
+  useEffect(() => () => { answerWarning.current?.(false); answerWarning.current = null; }, []); // 화면이 사라지면 취소로 닫는다
 
   useEffect(() => {
     if (step !== "busy") return;
@@ -168,14 +173,23 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
   const length = video ? chosen ?? video.current_s ?? video.max_s : null;
   const lengthProblem = estimate && length != null ? durationProblemKo(estimate, length) : null;
 
-  async function make() {
+  function askLong(): Promise<boolean> {
+    return new Promise((resolve) => { answerWarning.current = resolve; setWarning(true); });
+  }
+  function closeWarning(ok: boolean) {
+    setWarning(false);
+    answerWarning.current?.(ok);
+    answerWarning.current = null;
+  }
+
+  async function make(confirmedLong = false) {
     if (inFlight.has(id)) return; // 클릭 잠금: 같은 건을 두 번 보내지 않는다
     inFlight.add(id);
     setStep("busy");
     setSeconds(0);
     setResult(null);
     try {
-      const answer = await briefs.makeMedia(id, length);
+      const answer = await briefs.makeMedia(id, length, confirmedLong);
       setResult(mediaResultKo(answer));
       const made = answer.output?.sns_handoff?.prepared;
       setFresh(made ? { key: requestKey, prepared: made } : null);
@@ -208,7 +222,7 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
             <li>만든 파일에는 AI 표시가 들어가고, 만든 뒤에도 게시는 사람 승인이 필요합니다.</li>
           </ul>
           <div className="flex flex-wrap gap-2">
-            <button className="btn-primary text-xs" disabled={lengthProblem !== null} onClick={() => void make()}>만들기 시작</button>
+            <button className="btn-primary text-xs" disabled={lengthProblem !== null} onClick={() => void gateLongStart(estimate, length, askLong, make)}>만들기 시작</button>
             <button className="btn-ghost text-xs" onClick={() => setStep("idle")}>취소</button>
           </div>
         </div>
@@ -239,6 +253,10 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
           {blocked ? <span className="text-amber-800">{blocked}</span>
             : <span className="text-ink-500">누르면 예상 비용을 먼저 보여 줍니다. 게시는 하지 않습니다.</span>}
         </div>
+      )}
+
+      {warning && estimate && length != null && (
+        <LongVideoWarning warning={longWarningKo(estimate, length)} onConfirm={() => closeWarning(true)} onCancel={() => closeWarning(false)} />
       )}
 
       {result && step !== "busy" && result.kind !== "ready" && (

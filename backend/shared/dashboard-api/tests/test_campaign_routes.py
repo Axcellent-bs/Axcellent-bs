@@ -677,3 +677,23 @@ def test_brief_media_passes_only_a_valid_duration_with_its_own_key(
     ):  # 코드 절대 상한(90초) 밖·숫자가 아닌 값은 서버에 닿기 전에 거절
         assert client.post(BRIEF_MEDIA, json={"duration_s": bad}).status_code == 422
     assert len(fake.calls) == 2
+
+
+def test_brief_media_forwards_confirmed_long_for_audit_without_changing_the_key(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.outcome = None
+    assert client.post(BRIEF_MEDIA, json={"duration_s": 45}).status_code == 200
+    assert (
+        client.post(BRIEF_MEDIA, json={"duration_s": 45, "confirmed_long": True}).status_code == 200
+    )
+    assert (
+        client.post(BRIEF_MEDIA, json={"duration_s": 45, "confirmed_long": False}).status_code
+        == 200
+    )
+    plain, confirmed, denied = (c[1] for c in fake.calls[-3:])
+    assert plain.input == {"proposal_id": "PROP-5", "duration_s": 45}
+    assert confirmed.input == {"proposal_id": "PROP-5", "duration_s": 45, "confirmed_long": True}
+    assert denied.input == plain.input
+    assert plain.meta.idempotency_key == confirmed.meta.idempotency_key  # 경고창은 UX, 키는 같다
+    assert client.post(BRIEF_MEDIA, json={"confirmed_long": "yes"}).status_code == 422

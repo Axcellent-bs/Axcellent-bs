@@ -360,6 +360,8 @@ def test_estimate_for_mock_provider_reads_fixed_cost_and_month_total() -> None:
     estimate = _handed(fields={"category": "그림책"})["media_estimate"]
     video = estimate.pop("video")  # 길이 입력용 정보(상한은 설정값, 기본 15초)
     assert video["max_s"] == 15 and video["absolute_max_s"] == 90 and video["current_s"] == 15
+    assert video["warn_duration_s"] == 15  # 기본 30이지만 운영 상한(15)을 넘지 않는다
+    assert video["clips_by_duration"]["15"] == 1
     assert video["cost_by_duration"]["15"] == skill.MOCK_COST_KRW["video"]
     assert estimate == {
         "status": "ok",
@@ -401,10 +403,22 @@ def test_estimate_reads_price_table_and_limits(monkeypatch: pytest.MonkeyPatch) 
     # 건당 상한에 걸려도 다른 길이를 고를 수 있게 길이별 비용 표는 준다(클립이 늘면 비용이 는다)
     table = {int(k): v for k, v in over["video"]["cost_by_duration"].items()}
     assert table[15] == estimate["cost_krw"] and table[3] < table[15]
+    assert over["video"]["clips_by_duration"]["15"] == 1  # 막혀도 클립 수 표는 준다
     assert over["video"]["max_s"] == 15 and 16 not in table
 
     monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "90")
-    longer = _view()["media_estimate"]["video"]["cost_by_duration"]
+    video90 = _view()["media_estimate"]["video"]
+    longer = video90["cost_by_duration"]
+    # 경고창용 정보: 경고 길이(기본 30)와 길이별 클립 수(표와 같은 길이)
+    assert video90["warn_duration_s"] == 30
+    clips = video90["clips_by_duration"]
+    assert set(clips) == set(longer) and clips["15"] == 1 and clips["90"] == 7
+    assert clips["30"] >= 2 and clips["90"] > clips["30"]
+    monkeypatch.setenv("MARKETING_VIDEO_WARN_DURATION_S", "45")
+    assert _view()["media_estimate"]["video"]["warn_duration_s"] == 45
+    monkeypatch.setenv("MARKETING_VIDEO_WARN_DURATION_S", "100")  # 상한 밖 -> 기본값
+    assert _view()["media_estimate"]["video"]["warn_duration_s"] == 30
+    monkeypatch.delenv("MARKETING_VIDEO_WARN_DURATION_S")
     assert int(longer["90"]) > int(longer["30"]) > int(longer["15"])  # 90초 = 클립 7개 이어 붙임
     monkeypatch.delenv("MARKETING_VIDEO_MAX_DURATION_S")
 
@@ -438,6 +452,30 @@ def test_chosen_duration_is_saved_in_the_request_and_sent_to_generation(
     assert out["output"]["stage"] == "draft_ready", out
     assert fake_prepare.requests[0].input["duration_s"] == 45
     assert _view()["media_request"]["duration_s"] == 45  # 이후 비용 조회·해시도 이 길이를 따른다
+
+
+def test_confirmed_long_is_only_an_audit_note_and_never_a_gate(
+    fake_prepare: FakePrepare, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "60")
+    _handed(fields={"category": "그림책"})
+    # 확인했다는 주장과 무관하게 상한 가드는 같다: 넘으면 거절, 안이면 만든다
+    over = _call(
+        "prepare_brief_media", {"proposal_id": "PROP-5", "duration_s": 61, "confirmed_long": True}
+    )
+    assert (
+        over["outcome"] in ("duration_over_limit", "invalid_input") and fake_prepare.requests == []
+    )
+    out = _call(
+        "prepare_brief_media", {"proposal_id": "PROP-5", "duration_s": 45, "confirmed_long": True}
+    )
+    assert out["output"]["stage"] == "draft_ready", out
+    assert (
+        "confirmed_long" not in fake_prepare.requests[0].input
+    )  # 생성 입력(비용 키)에 안 들어간다
+    assert _view()["prepared"]["confirmed_long"] is True
+    bad = _call("prepare_brief_media", {"proposal_id": "PROP-5", "confirmed_long": "yes"})
+    assert bad["outcome"] == "invalid_input"
 
 
 def test_duration_over_the_setting_is_refused_before_generation(
