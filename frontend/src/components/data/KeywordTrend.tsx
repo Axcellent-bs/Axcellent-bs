@@ -1,15 +1,16 @@
 import { useState, type ReactNode } from "react";
-import { ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
+import { ErrorBox, Panel, Waiting } from "@/components/finance/bits";
 import { when } from "@/components/data/Sources";
-import { safeLink } from "@/lib/safeLink";
 import type { SkillState } from "@/components/data/useSkill";
-import type { KeywordTrendOutput, KeywordWindow, NewKeyword, NewKeywordDay, RisingKeyword, SeasonKeyword } from "@/lib/data";
+import { RisingKeywords } from "@/components/data/RisingKeywords";
+import { judgedLine, topRising } from "@/lib/keywordTrendView";
+import type { KeywordTrendOutput, KeywordWindow, NewKeyword, NewKeywordDay, SeasonKeyword } from "@/lib/data";
 
 // 트렌드 1 감지 하위 탭 "검색" 칩의 검색 트렌드 · 도서 분야 (keyword_trend). 서버가 미리 계산한 결과를 읽기만 한다.
-// - 블록 4개: 급상승 검색어(단어 구름 + 순위 목록) · AI 요약 · 새로 나타난 키워드(최근 4일) · 이달 시즌 키워드(분류 탭)
-// - 숫자·판정은 서버 값 그대로. 검색광고 키가 없으면 검색량·증가 칸은 서버 이유(없으면 "키 등록 후 가능"), 배수·판정은 그대로 보여 준다
-// - 받기(useSkill)는 부모(PlatformViews)가 한다. 종합 칩 요약 칸(KeywordSummaryCards)도 같은 응답을 쓴다
-// - 단어 구름은 글자 크기(CSS)만 쓴다. 라이브러리 없음
+// - 블록 4개: 급상승 검색어(RisingKeywords: 동그란 단어 구름 · 급상승 카드 · 오르는 중 · 나머지 표) · AI 요약 · 새로 나타난 키워드(최근 4일) · 이달 시즌 키워드(분류 탭)
+// - 숫자·판정은 서버 값 그대로. 검색광고·확산 키가 없으면 급상승 패널 위에 한 줄로만 알린다(줄마다 반복하지 않음)
+// - 받기(useSkill)는 부모(PlatformViews)가 한다. 종합 칩 요약 칸(KeywordSummaryCards)도 같은 응답·같은 판정(level rising 첫 줄)을 쓴다
+// - 단어 구름 자리는 lib/wordOrb.ts 순수 함수. 라이브러리 없음
 
 const KEY_LATER = "키 등록 후 가능";
 
@@ -77,7 +78,9 @@ export function KeywordSummaryCards({ state }: { state: SkillState<KeywordTrendO
     );
   }
   const out = state.out;
-  const top = out.rising.find((r) => r.status === "rising") ?? null;
+  // 급상승 패널과 같은 판정: level rising 첫 줄 (직전 판정 재사용이면 "(MM-DD 판정)")
+  const topHit = topRising(out);
+  const top = topHit?.row ?? null;
   const season = out.season[0] ?? null;
   return (
     <>
@@ -86,6 +89,7 @@ export function KeywordSummaryCards({ state }: { state: SkillState<KeywordTrendO
           <SummaryBody title={top.keyword} lines={[
             top.ratio !== null ? `평소 ${timesKo(top.ratio)}` : null,
             top.products !== null ? (top.products > 0 ? `상품 ${top.products}종` : "상품 없음") : null,
+            topHit?.stale,
           ]} />
         ) : <SummaryNote>급상승한 검색어가 없어요.{out.reason ? ` ${out.reason}` : ""}</SummaryNote>}
       </SummaryCard>
@@ -103,103 +107,7 @@ export function KeywordSummaryCards({ state }: { state: SkillState<KeywordTrendO
 
 // ------------------------------------------------------------------- 1 급상승 검색어
 
-/** 단어 구름: 배수가 클수록 크게. 급상승은 강조색 굵게, 나머지는 옅게. 순위 목록과 같은 내용이라 읽기 프로그램에는 숨긴다 */
-function WordCloud({ list }: { list: RisingKeyword[] }) {
-  const max = Math.max(1, ...list.map((r) => r.ratio ?? 0));
-  return (
-    <div aria-hidden="true" className="flex min-h-[8rem] flex-wrap content-center items-center justify-center gap-x-3 gap-y-1 rounded-xl bg-ink-50 px-3 py-4">
-      {list.map((r) => {
-        const size = 0.8 + 1.2 * Math.min(1, (r.ratio ?? 0) / max);
-        const rising = r.status === "rising";
-        return (
-          <span key={r.keyword} title={r.ratio !== null ? `평소 ${timesKo(r.ratio)}` : undefined} style={{ fontSize: `${size.toFixed(2)}rem` }}
-            className={`max-w-full break-keep leading-tight ${rising ? "font-bold text-accent" : "text-ink-500"}`}>
-            {r.keyword}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-function ProductChip({ r }: { r: RisingKeyword }) {
-  if (r.products !== null && r.products > 0) {
-    return <span className={`chip text-xs ${TONE.info}`} title={r.product_names.join(", ") || undefined}>상품 {r.products}</span>;
-  }
-  return <span className={`chip text-xs ${TONE.muted}`} title={r.products_reason ?? undefined}>{r.products === 0 ? "상품 없음" : "상품 모름"}</span>;
-}
-
-function RisingItem({ r }: { r: RisingKeyword }) {
-  const rising = r.status === "rising";
-  const ratio = r.ratio !== null ? `평소 ${timesKo(r.ratio)}` : `배수 모름${r.reason ? ` (${r.reason})` : ""}`;
-  const line = [
-    r.news_count !== null ? `뉴스 ${r.news_count.toLocaleString("ko-KR")}` : null,
-    ratio,
-    r.monthly_volume !== null ? `월 검색 ${compactKo(r.monthly_volume)}` : null,
-    rising ? null : r.status === "normal" ? "평범" : "판정 못 함",
-  ].filter(Boolean).join(" · ");
-  const sp = r.spread?.status === "known" ? r.spread : null;
-  const spread = sp ? [
-    sp.blog_7d !== null ? `블로그 7일 ${sp.blog_7d.toLocaleString("ko-KR")}${sp.blog_7d_capped ? "+" : ""}` : null,
-    sp.cafe_total !== null ? `카페 전체 ${compactKo(sp.cafe_total)}` : null,
-  ].filter(Boolean).join(" · ") : "";
-  return (
-    <li className="flex gap-3 py-2">
-      <span className={`w-5 shrink-0 text-sm font-semibold tabular-nums ${rising ? "text-ink-900" : "text-ink-500"}`}>{r.rank}</span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className={`break-keep ${rising ? "font-semibold text-ink-900" : "text-ink-700"}`}>{r.keyword}</span>
-          <ProductChip r={r} />
-        </div>
-        <p className="text-xs text-ink-500">{line}</p>
-        {spread && <p className="text-xs text-ink-500">{spread}</p>}
-        {r.news.length > 0 && (
-          <details className="text-xs text-ink-500">
-            <summary className="cursor-pointer select-none">뉴스 제목 보기</summary>
-            <ul className="mt-1 space-y-0.5">
-              {r.news.slice(0, 3).map((n, i) => {
-                const link = safeLink(n.url); // 피드 주소: http(s)만 링크, 아니면 제목 글자만
-                return (
-                  <li key={`${n.url ?? n.title}-${i}`}>
-                    {link ? <a href={link} target="_blank" rel="noreferrer noopener" className="text-brand-700 underline-offset-2 hover:underline">{n.title}</a> : n.title}
-                    {n.source && <span className="text-ink-500"> · {n.source}</span>}
-                  </li>
-                );
-              })}
-            </ul>
-          </details>
-        )}
-      </div>
-      <div className="shrink-0 text-right">
-        {r.increase !== null ? (
-          <span className={`text-sm font-semibold tabular-nums ${r.increase > 0 ? "text-emerald-700" : "text-ink-500"}`}>
-            {r.increase > 0 ? "+" : ""}{compactKo(r.increase)}
-          </span>
-        ) : (
-          <span className="block max-w-[8rem] text-[11px] text-ink-500">{r.increase_reason ?? r.volume_reason ?? KEY_LATER}</span>
-        )}
-      </div>
-    </li>
-  );
-}
-
-function RisingBlock({ out }: { out: KeywordTrendOutput }) {
-  if (out.rising.length === 0) {
-    return <p className="text-sm text-ink-700">급상승 검색어가 없어요.{out.reason ? ` ${out.reason}` : ""}</p>;
-  }
-  const spreadNote = out.spread_status !== "connected" ? (out.spread_reason ?? null) : null;
-  return (
-    <div className="space-y-2">
-      <div className="grid gap-4 md:grid-cols-2">
-        <WordCloud list={out.rising} />
-        <ol className="divide-y divide-ink-100" aria-label="급상승 검색어 순위">
-          {out.rising.map((r) => <RisingItem key={r.keyword} r={r} />)}
-        </ol>
-      </div>
-      {spreadNote && <p className="text-xs text-ink-500">블로그·카페 · {spreadNote}</p>}
-    </div>
-  );
-}
+// 본문은 RisingKeywords.tsx (동그란 단어 구름 · 급상승 카드 · 오르는 중 · 나머지 표, 11/20 v3)
 
 // ------------------------------------------------------------------- 3 새로 나타난 키워드
 
@@ -304,17 +212,14 @@ export function KeywordTrend({ state, win, onWindow, onRetry }: {
     </>
   );
   const out = state.kind === "ok" ? state.out : null;
-  const hint = out ? [
-    out.pool_day ? `키워드 풀 ${out.pool_day}` : null,
-    out.pool_size ? `${out.pool_size.toLocaleString("ko-KR")}개` : null,
-    out.generated_at ? `계산 ${when(out.generated_at)}` : null,
-  ].filter(Boolean).join(" · ") || undefined : undefined;
+  // 머리 줄: "MM-DD HH:mm 판정 · 데이터랩 N번" (예전 응답도 계산 시각으로 같은 모양)
+  const hint = out ? (judgedLine(out) ?? (out.generated_at ? `계산 ${when(out.generated_at)}` : undefined)) : undefined;
   return (
     <div className="space-y-4">
       <Panel id="data-trend-keyword-rising" title="급상승 검색어" hint={hint} tools={tools}>
         {state.kind === "loading" ? <Waiting what="검색 트렌드를 받는 중…" />
           : state.kind === "failed" ? <ErrorBox message={state.reason} onRetry={onRetry} />
-          : <RisingBlock out={state.out} />}
+          : <RisingKeywords out={state.out} win={win} />}
       </Panel>
       {out && (
         <>

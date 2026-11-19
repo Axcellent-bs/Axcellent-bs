@@ -70,12 +70,12 @@ export const LOOP_STAGES: LoopStage[] = [
   {
     no: 3,
     tab: "handoff",
-    title: "넘김",
+    title: "기획 전달",
     owner: "기획 → 마케팅",
-    live: false,
-    // 루프 띠와 탭 안 안내가 같은 문장을 쓴다
-    description: "기획팀이 이 인사이트를 가져가 제안을 만들어요. 가져간 기록 보기는 준비 중",
-    status: { label: "준비 중", tone: "muted" },
+    live: true,
+    // 기획 AI 상태(GET /state)의 proposals 중 데이터에서 온 것 (components/data/PlanningHandoff.tsx)
+    description: "기획 AI가 받은 데이터 인사이트와 진행 상태",
+    status: { label: "동작 중", tone: "ok" },
   },
   {
     no: 4,
@@ -91,18 +91,27 @@ export const LOOP_STAGES: LoopStage[] = [
   },
 ];
 
-/** 트렌드&콘텐츠 화면 하위 탭: 루프 4단계(감지 → 인사이트 → 넘김 → 성과)와 하나씩 같은 탭
- *  + "분석 의뢰"(트렌드 분석 보고서 의뢰·읽기) + 맨 끝 "데이터 출처". 둘은 루프와 별개라 stages 없음 */
+/** 트렌드&콘텐츠 화면 하위 탭 (11/20 v3 순서): 감지 → 분석 의뢰 → 인사이트 → 기획 전달 → 성과 + 탭 줄 오른쪽 끝 "⚙ 데이터 출처"(side).
+ *  분석 의뢰·데이터 출처는 루프 단계와 별개라 stages 없음. 주소(#detect·#request·#recommend·#handoff·#result·#sources)는 그대로 */
 export interface TrendTab {
   key: "detect" | "recommend" | "handoff" | "result" | "request" | "sources";
   title: string;
   /** 이 탭이 보여 주는 루프 단계의 tab 값(LoopStage.tab) */
   stages: string[];
+  /** 탭 줄 오른쪽 끝에 따로 두는 설정 성격 탭 (데이터 출처) */
+  side?: boolean;
 }
+const stageTab = (key: "detect" | "recommend" | "handoff" | "result"): TrendTab => {
+  const s = LOOP_STAGES.find((x) => x.tab === key)!;
+  return { key, title: s.title, stages: [s.tab] };
+};
 export const TREND_TABS: TrendTab[] = [
-  ...LOOP_STAGES.map((s) => ({ key: s.tab as TrendTab["key"], title: s.title, stages: [s.tab] })),
+  stageTab("detect"),
   { key: "request", title: "분석 의뢰", stages: [] },
-  { key: "sources", title: "데이터 출처", stages: [] },
+  stageTab("recommend"),
+  stageTab("handoff"),
+  stageTab("result"),
+  { key: "sources", title: "데이터 출처", stages: [], side: true },
 ];
 
 /** 예전 5단계 주소 조각 → 지금 탭 (옛 주소 `#trend/<단계>` 호환) */

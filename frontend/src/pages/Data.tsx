@@ -15,7 +15,7 @@ import { useCompany } from "@/demo/company";
 // 왼쪽 사이드바의 하위 탭 3개가 화면을 가른다(demo/services.ts data 서비스 children):
 // - /data 장애 영향 분석: 장애 사건 데이터(이상 감지 → 영향 분석 → 복구 확인 → 처리 시간 요약, ?incident=로 사건 고르기) + 그 아래 회사 현황 리포트(activity_report의 회사 숫자·달라진 점)
 // - /data/ops 운영 지표: 복구 속도 · AI 단독 처리율 · 평상시 지표 (components/data/LearningKpi.tsx)
-// - /data/trend 트렌드&콘텐츠: 감지 → 추천 → 넘김 → 성과 (components/data/TrendScan.tsx, 하위 탭은 #detect 등)
+// - /data/trend 트렌드&콘텐츠: 감지 → 분석 의뢰 → 인사이트 → 기획 전달 → 성과 + ⚙ 데이터 출처 (components/data/TrendScan.tsx, 하위 탭은 #detect 등)
 // - /data/sales 매출 분석 (components/data/SalesAnalysis.tsx)
 // - /data/segments 고객·시장 분석: 물어보기 · 누가 사나 · 시장 커버 · 다음 달 이벤트 제안 (components/data/SegmentAnalysis.tsx)
 // 옛 주소(/data#daily · #report · #trend · #trend/<단계>)는 새 주소로 옮긴다. 숫자는 서버가 계산한 값만 보여 주고, 없으면 빈 상태를 보여 준다(예시 숫자를 만들지 않는다).
@@ -88,7 +88,7 @@ export default function DataPage() {
           <h1 className="text-2xl font-bold tracking-tight">데이터 분석</h1>
           <p className="mt-1 text-sm text-ink-500">
             {company ? `${company.name} 데이터분석팀입니다.` : "데이터분석팀입니다."} 장애가 나면 실패한 주문·영향 고객·결제 실패(미결제) 금액을 세고, 복구됐는지 지표로 확인하고, 처리 시간을 요약합니다.
-            운영 지표에서는 복구 속도와 AI 단독 처리율을, 트렌드&콘텐츠에서는 감지 → 추천 → 넘김 → 성과를 봅니다.
+            운영 지표에서는 복구 속도와 AI 단독 처리율을, 트렌드&콘텐츠에서는 감지 → 분석 의뢰 → 인사이트 → 기획 전달 → 성과를 봅니다.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs sm:ml-auto">
