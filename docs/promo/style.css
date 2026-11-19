@@ -178,7 +178,8 @@ body { overflow-x: clip; }
 .rules h3 { font-size: 16px; margin-bottom: 3px; }
 .rules p { color: #4a4a68; font-size: 16px; }
 .shot { margin-top: var(--gap-inner); border-radius: 20px; overflow: hidden; border: 1px solid var(--line); background: var(--white); box-shadow: 0 14px 40px rgba(40, 40, 120, .12); }
-.shot img { width: 100%; }
+/* 캡처에 width·height 속성이 있어서 폭만 100%로 두면 높이가 속성값(280px)에 고정돼 세로로 늘어난다. 높이는 비율대로 자동 */
+.shot img { width: 100%; height: auto; }
 .shot figcaption { display: grid; gap: 4px; padding: 14px 18px 18px; font-size: 14px; color: #4a4a68; }
 .shot b { color: var(--ink); font-size: 16px; }
 .shot em { font-style: normal; font-size: 14px; font-weight: 700; color: var(--brand-d); }
