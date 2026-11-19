@@ -7,6 +7,10 @@ import { isNginxBlocked } from "./apiError.ts";
 
 export type ServerRole = "operator" | "admin" | "member";
 
+/** 열람 담당 영역 (dashboard-api `accounts.py`의 READER_AREAS, 화면 `demo/members.ts`의 READER_AREAS id와 같다) */
+export const READER_AREA_IDS = ["hr", "finance"] as const;
+export type ReaderAreaId = (typeof READER_AREA_IDS)[number];
+
 /** 서버 계정 (dashboard-api `accounts.py`의 공개 칸. 해시는 오지 않는다) */
 export interface ServerAccount {
   id: string;
@@ -14,6 +18,31 @@ export interface ServerAccount {
   email: string;
   role: ServerRole;
   created_at?: string | null;
+  /** 부서 (관리자가 회원·서버 관리에서 정한다). 없으면 null */
+  dept?: string | null;
+  /** 확인 권한: 위험한 요청을 승인할 수 있다 */
+  approver?: boolean;
+  /** 열람 담당: 인사·재무 AI의 다른 사람 대화 요약을 본다 */
+  readers?: ReaderAreaId[];
+}
+
+/**
+ * 서버가 준 계정 한 줄을 공개 칸만 골라 읽는다(허용 목록. 해시 같은 다른 칸이 와도 버린다).
+ * 모양이 틀리면 null. 프로필 칸은 왔을 때만 넣는다.
+ */
+export function readServerAccount(v: unknown): ServerAccount | null {
+  if (!v || typeof v !== "object") return null;
+  const a = v as Record<string, unknown>;
+  if (typeof a.id !== "string" || typeof a.name !== "string" || typeof a.email !== "string") return null;
+  if (typeof a.role !== "string" || !ROLES.includes(a.role)) return null;
+  const out: ServerAccount = {
+    id: a.id, name: a.name, email: a.email, role: a.role as ServerRole,
+    created_at: typeof a.created_at === "string" ? a.created_at : null,
+  };
+  if (a.dept === null || typeof a.dept === "string") out.dept = a.dept || null;
+  if (typeof a.approver === "boolean") out.approver = a.approver;
+  if (Array.isArray(a.readers)) out.readers = READER_AREA_IDS.filter((r) => (a.readers as unknown[]).includes(r));
+  return out;
 }
 
 export interface HumanSession {
@@ -48,18 +77,12 @@ export function parseSession(raw: string | null, now = nowSeconds()): HumanSessi
   }
   if (!v || typeof v !== "object") return null;
   const o = v as { token?: unknown; expiresAt?: unknown; account?: unknown };
-  const a = o.account as Partial<ServerAccount> | undefined;
+  const account = readServerAccount(o.account);
   const ok =
     typeof o.token === "string" && o.token.startsWith("axs1.") &&
-    typeof o.expiresAt === "number" && Number.isFinite(o.expiresAt) &&
-    !!a && typeof a.id === "string" && typeof a.name === "string" && typeof a.email === "string" &&
-    typeof a.role === "string" && ROLES.includes(a.role);
-  if (!ok) return null;
-  const s: HumanSession = {
-    token: o.token as string,
-    expiresAt: o.expiresAt as number,
-    account: { id: a.id as string, name: a.name as string, email: a.email as string, role: a.role as ServerRole, created_at: a.created_at ?? null },
-  };
+    typeof o.expiresAt === "number" && Number.isFinite(o.expiresAt) && !!account;
+  if (!ok || !account) return null;
+  const s: HumanSession = { token: o.token as string, expiresAt: o.expiresAt as number, account };
   return isExpired(s, now) ? null : s;
 }
 

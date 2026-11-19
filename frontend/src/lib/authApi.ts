@@ -2,9 +2,10 @@
 // 비밀번호는 요청 본문으로만 보내고 어디에도 저장·기록하지 않는다. 토큰은 humanSession.ts가 sessionStorage에 둔다.
 import { DASHBOARD_API_URL } from "./env";
 import {
-  getSession, readLoginResponse, readLoginStatus, readPasswordChangeResponse,
+  getSession, readLoginResponse, readLoginStatus, readPasswordChangeResponse, readServerAccount,
   type LoginOutcome, type PasswordChangeOutcome, type ServerAccount, type ServerRole,
 } from "./humanSession";
+import { readAccountList, updateBody, type AccountPatch } from "./memberAdmin";
 
 const BASE = `${DASHBOARD_API_URL}/api/dashboard/auth`;
 
@@ -55,22 +56,45 @@ export async function serverLogout(): Promise<void> {
   }
 }
 
-/** 세션이 아직 살아 있나(`GET /auth/me`). 401이면 끝난 세션(로그아웃·계정 삭제), 연결 실패는 판단하지 않는다(null) */
-export async function checkSession(): Promise<boolean | null> {
+export type MeOutcome = { kind: "alive"; account: ServerAccount } | { kind: "ended" } | { kind: "unknown" };
+
+/**
+ * 내 계정(`GET /auth/me`): 세션이 살아 있으면 서버의 지금 계정 값(역할·부서·확인 권한·열람 담당).
+ * 401이면 끝난 세션(로그아웃·계정 삭제·역할 변경), 연결 실패·못 읽은 응답은 판단하지 않는다(unknown)
+ */
+export async function fetchMe(): Promise<MeOutcome> {
   try {
-    const { status } = await send("/me", { session: true });
-    if (status === 401) return false;
-    return status >= 200 && status < 300 ? true : null;
+    const { status, body } = await send("/me", { session: true });
+    if (status === 401) return { kind: "ended" };
+    if (status < 200 || status >= 300) return { kind: "unknown" };
+    const account = readServerAccount((body as { data?: { account?: unknown } } | null)?.data?.account);
+    return account ? { kind: "alive", account } : { kind: "unknown" };
   } catch {
-    return null;
+    return { kind: "unknown" };
   }
 }
 
+/** 계정 목록: 운영자는 모든 계정, 고객사 관리자는 고객사 계정(admin·member)만 (서버가 고른다) */
 export async function listAccounts(): Promise<ServerAccount[]> {
   const { status, body } = await send("/accounts", { session: true });
-  if (status < 200 || status >= 300) throw new Error(errorMessage(status, body, "계정 목록을 읽지 못했어요"));
-  const rows = (body as { data?: unknown } | null)?.data;
-  return Array.isArray(rows) ? (rows as ServerAccount[]) : [];
+  const r = readAccountList(status, body);
+  if (!r.ok) throw new Error(r.message);
+  return r.rows;
+}
+
+/** 역할·이름·부서·확인 권한·열람 담당 바꾸기. 역할이 바뀌면 서버가 그 계정의 기존 세션을 끊는다 */
+export async function updateAccount(accountId: string, patch: AccountPatch): Promise<ServerAccount> {
+  const payload = updateBody(patch);
+  if (!payload) throw new Error("바꿀 칸이 없어요.");
+  const { status, body } = await send(`/accounts/${encodeURIComponent(accountId)}/update`, {
+    method: "POST",
+    session: true,
+    body: JSON.stringify(payload),
+  });
+  if (status < 200 || status >= 300) throw new Error(errorMessage(status, body, "계정을 바꾸지 못했어요"));
+  const row = readServerAccount((body as { data?: unknown } | null)?.data);
+  if (!row) throw new Error("응답을 읽지 못했어요. 목록을 다시 읽어 주세요.");
+  return row;
 }
 
 export type NewAccount = { name: string; email: string; role: ServerRole; password: string };

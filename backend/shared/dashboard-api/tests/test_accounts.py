@@ -158,7 +158,7 @@ def test_operator_creates_accounts_and_the_new_person_logs_in(client) -> None:
     assert {r["email"] for r in listed} == {BOOT_EMAIL, "ty@example.com"}
 
 
-def test_admin_creates_only_members_and_cannot_list(client) -> None:
+def test_admin_creates_only_members_and_lists_only_customer_accounts(client) -> None:
     op = _op_token(client)
     admin = {
         "name": "관리자",
@@ -173,7 +173,12 @@ def test_admin_creates_only_members_and_cannot_list(client) -> None:
     other_admin = {**admin, "email": "ad2@example.com"}
     res = client.post(BASE + "/accounts", json=other_admin, headers=_bearer(token))
     assert res.status_code == 403
-    assert client.get(BASE + "/accounts", headers=_bearer(token)).status_code == 403
+    # 고객사 관리자는 고객사 계정(admin·member)만 본다. 운영자는 안 보인다
+    listed = client.get(BASE + "/accounts", headers=_bearer(token))
+    assert listed.status_code == 200, listed.text
+    assert {r["email"] for r in listed.json()["data"]} == {"ad@example.com", "m@example.com"}
+    member_token = _login(client, member["email"], member["password"]).json()["data"]["token"]
+    assert client.get(BASE + "/accounts", headers=_bearer(member_token)).status_code == 403
 
 
 def test_the_shared_token_cannot_manage_accounts(client) -> None:
@@ -358,3 +363,133 @@ def test_passwords_never_reach_the_logs(client, caplog) -> None:
     token = _op_token(client)
     _change(client, token, BOOT_PW)
     assert BOOT_PW not in caplog.text and NEW_PW not in caplog.text
+
+
+# ---- 계정 목록·역할·프로필 (회원·서버 관리 표) ----
+
+INTERNAL_KEYS = {"password_hash", "password_changed_at", "gen", "updated_at"}
+
+
+def _update(client: TestClient, token: str, account_id: str, **body):
+    return client.post(BASE + f"/accounts/{account_id}/update", json=body, headers=_bearer(token))
+
+
+def _company(client: TestClient):
+    """운영자 + 고객사 관리자 1명 + 일반회원 1명"""
+    op = _op_token(client)
+    admin = _make(client, op, "admin", "ad@example.com")
+    member = _make(client, op, "member", "m@example.com")
+    return op, admin, member
+
+
+def test_admin_list_hides_operators_and_internal_values(client) -> None:
+    op, admin, member = _company(client)
+    _change(client, admin, "admin-pass-1234")  # 비밀번호 바꾼 시각·세대가 생긴다
+    admin = _login(client, "ad@example.com", NEW_PW).json()["data"]["token"]
+    for token in (op, admin):
+        rows = client.get(BASE + "/accounts", headers=_bearer(token)).json()["data"]
+        for r in rows:
+            assert not INTERNAL_KEYS & set(r), r
+            assert set(r) == {
+                "id",
+                "name",
+                "email",
+                "role",
+                "created_at",
+                "dept",
+                "approver",
+                "readers",
+            }
+    admin_rows = client.get(BASE + "/accounts", headers=_bearer(admin)).json()["data"]
+    assert {r["role"] for r in admin_rows} == {"admin", "member"}
+    op_rows = client.get(BASE + "/accounts", headers=_bearer(op)).json()["data"]
+    assert "operator" in {r["role"] for r in op_rows}
+
+
+def test_profile_is_saved_and_read_back_in_list_and_me(client) -> None:
+    _, admin, member = _company(client)
+    member_id = _account_id(client, member)
+    # 처음: 부서 없음, 확인 권한은 역할로(일반회원 없음), 열람 담당 없음
+    me = client.get(BASE + "/me", headers=_bearer(member)).json()["data"]["account"]
+    assert (me["dept"], me["approver"], me["readers"]) == (None, False, [])
+    res = _update(
+        client,
+        admin,
+        member_id,
+        name="회원 이름",
+        dept="개발팀",
+        approver=True,
+        readers=["finance", "hr", "hr"],
+    )
+    assert res.status_code == 200, res.text
+    assert not INTERNAL_KEYS & set(res.json()["data"])
+    me = client.get(BASE + "/me", headers=_bearer(member)).json()["data"]["account"]
+    assert me["name"] == "회원 이름" and me["dept"] == "개발팀" and me["approver"] is True
+    assert me["readers"] == ["hr", "finance"]
+    # 역할이 안 바뀌면 세션은 그대로
+    assert _write_ok(client, member) == 404
+    listed = client.get(BASE + "/accounts", headers=_bearer(admin)).json()["data"]
+    row = next(r for r in listed if r["id"] == member_id)
+    assert row["dept"] == "개발팀" and row["readers"] == ["hr", "finance"]
+    # 빈 부서는 지운다, 모르는 열람 영역·빈 요청·null은 거절
+    assert _update(client, admin, member_id, dept="").json()["data"]["dept"] is None
+    assert _update(client, admin, member_id, readers=["sales"]).status_code == 422
+    assert _update(client, admin, member_id).json()["error"]["code"] == "NOTHING_TO_UPDATE"
+    assert _update(client, admin, member_id, approver=None).status_code == 422
+    assert _update(client, admin, member_id, name=" ").json()["error"]["code"] == "NAME_EMPTY"
+
+
+def test_role_change_permissions(client) -> None:
+    op, admin, member = _company(client)
+    op_id, member_id = _account_id(client, op), _account_id(client, member)
+    # 일반회원은 아무것도 못 바꾼다
+    assert _update(client, member, member_id, dept="개발팀").status_code == 403
+    # 고객사 관리자: 운영자 계정은 못 바꾸고 운영자 역할로 못 올린다
+    res = _update(client, admin, op_id, dept="개발팀")
+    assert res.status_code == 403 and res.json()["error"]["code"] == "ROLE_REQUIRED"
+    assert _update(client, admin, member_id, role="operator").status_code == 403
+    # 고객사 관리자가 일반회원을 관리자로 올린다
+    res = _update(client, admin, member_id, role="admin")
+    assert res.status_code == 200 and res.json()["data"]["role"] == "admin"
+    # 공용 토큰은 거절
+    shared = client.post(
+        BASE + f"/accounts/{member_id}/update",
+        json={"role": "member"},
+        headers=_bearer("test-human-token"),
+    )
+    assert shared.status_code == 403 and shared.json()["error"]["code"] == "SESSION_REQUIRED"
+    assert _update(client, op, "acc-none", dept="x").status_code == 404
+    # 운영자는 모든 계정을 바꾼다(관리자 둘 중 하나를 운영자로)
+    assert _update(client, op, member_id, role="operator").status_code == 200
+
+
+def test_self_demotion_and_the_last_admin_are_refused(client) -> None:
+    op, admin, member = _company(client)
+    admin_id, member_id = _account_id(client, admin), _account_id(client, member)
+    res = _update(client, admin, admin_id, role="member")
+    assert res.status_code == 409 and res.json()["error"]["code"] == "SELF_ROLE_CHANGE"
+    # 운영자도 마지막 남은 고객사 관리자는 내리지 못한다(일반회원으로도, 운영자로도)
+    for role in ("member", "operator"):
+        res = _update(client, op, admin_id, role=role)
+        assert res.status_code == 409 and res.json()["error"]["code"] == "LAST_ADMIN"
+    # 관리자가 둘이면 한 명은 내릴 수 있다
+    assert _update(client, admin, member_id, role="admin").status_code == 200
+    new_admin = _login(client, "m@example.com", "member-pass-1234").json()["data"]["token"]
+    assert _update(client, new_admin, admin_id, role="member").status_code == 200
+    # 같은 역할로 보내는 건 바꾸기가 아니다(자기 자신이어도 됨)
+    assert _update(client, new_admin, member_id, role="admin").status_code == 200
+
+
+def test_a_role_change_ends_that_accounts_sessions(client) -> None:
+    op, admin, member = _company(client)
+    member_id = _account_id(client, member)
+    assert _update(client, admin, member_id, role="admin").status_code == 200
+    assert client.get(BASE + "/me", headers=_bearer(member)).json()["error"]["code"] == (
+        "SESSION_ENDED"
+    )
+    assert _write_ok(client, member) == 401
+    assert _write_ok(client, admin) == 404  # 바꾼 사람의 세션은 그대로
+    again = _login(client, "m@example.com", "member-pass-1234").json()["data"]
+    assert again["account"]["role"] == "admin"
+    # 새 세션은 관리자 권한으로 목록을 본다
+    assert client.get(BASE + "/accounts", headers=_bearer(again["token"])).status_code == 200
