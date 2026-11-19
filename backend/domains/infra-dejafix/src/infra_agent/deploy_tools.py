@@ -11,12 +11,16 @@
   통과해야 한다 (dashboard-api 저장 정책과 같다).
 - 오류는 `ToolConnectionError(code, message)`. 문구에 토큰·개인 키·응답 본문을 넣지 않는다.
 - 다시 배포를 띄운 뒤 끝날 때까지 기다리지 않는다 (복구 확인은 `verify_recovery`가 지표로 한다).
+- 다시 배포 요청이 시간 초과면 요청이 이미 들어갔을 수 있다. 오류를 내기 전에 요청 직전 이후에 생긴
+  같은 버전 실행(GitHub: 제목의 버전, Jenkins: 대기열·빌드의 버전 매개변수)을 찾아, 있으면 그 실행을
+  쓴다(두 번 배포하지 않게). 없으면 지금처럼 `timeout` 오류이고 저절로 다시 보내지 않는다.
 """
 
 from __future__ import annotations
 
 import asyncio
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -324,22 +328,38 @@ class GithubActionsTool:
         async with self._client() as client:
             base, headers = await self._prepare(client)
             where = f"GET /repos/{self.repo}"
-            repo = _json(
-                await _send(client, "GET", f"{base}/repos/{self.repo}", where, headers=headers),
-                where,
+            repo_res = await _send(
+                client, "GET", f"{base}/repos/{self.repo}", where, headers=headers
             )
-            branch = repo.get("default_branch")
+            branch = _json(repo_res, where).get("default_branch")
             if not isinstance(branch, str) or not branch:
                 raise ToolConnectionError("unavailable", f"{where} 기본 브랜치가 없다")
             where = f"POST {self._workflow_path()}/dispatches"
-            res = await _send(
-                client,
-                "POST",
-                f"{base}{self._workflow_path()}/dispatches",
-                where,
-                headers=headers,
-                json={"ref": branch, "inputs": {self.version_input: version}},
-            )
+            try:
+                res = await _send(
+                    client,
+                    "POST",
+                    f"{base}{self._workflow_path()}/dispatches",
+                    where,
+                    headers=headers,
+                    json={"ref": branch, "inputs": {self.version_input: version}},
+                )
+            except ToolConnectionError as exc:
+                if exc.code != "timeout":
+                    raise
+                # 요청이 들어갔을 수 있다: 디스패치 직전(레포 응답의 GitHub 시각) 이후에 생긴
+                # 같은 버전 실행이 있으면 그것을 쓴다. 없으면 같은 timeout 오류 (다시 보내지 않는다)
+                landed = await self._find_dispatched(
+                    client,
+                    base,
+                    headers,
+                    branch,
+                    _server_time(repo_res) - DISPATCH_SKEW,
+                    version=version,
+                )
+                if landed is None:
+                    raise
+                return RunRef(tool=self.tool, run_id=landed.run_id, url=landed.url)
             ref = self._ref_from_dispatch(res)
             if ref is not None:
                 return ref
@@ -372,8 +392,14 @@ class GithubActionsTool:
         headers: dict[str, str],
         branch: str,
         since: datetime,
+        *,
+        version: str | None = None,
     ) -> ToolRun | None:
-        """디스패치 뒤에 생긴 `workflow_dispatch` 실행 중 가장 먼저 생긴 것 (우리가 띄운 실행)."""
+        """디스패치 뒤에 생긴 `workflow_dispatch` 실행 중 가장 먼저 생긴 것 (우리가 띄운 실행).
+
+        `version`을 주면 실행 제목의 버전이 그 값과 같은 실행만 본다 (시간 초과 뒤 확인용:
+        제목에 버전이 없는 실행은 우리 것인지 알 수 없어 고르지 않는다).
+        """
         where = f"GET {self._workflow_path()}/runs?event=workflow_dispatch"
         for _ in range(DISPATCH_LOOKUPS):
             await self._sleep(DISPATCH_LOOKUP_WAIT)
@@ -395,6 +421,7 @@ class GithubActionsTool:
                 if isinstance(raw, dict)
                 and (created := _iso(raw.get("created_at"))) is not None
                 and created >= since
+                and (version is None or _title_version(raw) == version)
             ]
             if fresh:
                 return _actions_run(min(fresh, key=lambda pair: pair[0])[1])
@@ -447,9 +474,16 @@ class JenkinsTool:
 
     tool = "jenkins"
 
-    def __init__(self, conn: ToolConnection, *, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        conn: ToolConnection,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        sleep: Callable[[float], Awaitable[Any]] | None = None,
+    ):
         self._conn = conn
         self._transport = transport
+        self._sleep = sleep or asyncio.sleep
         self.service = _text(conn, "service")
         self.url = _text(conn, "url").rstrip("/")
         self.job = _text(conn, "job")
@@ -526,20 +560,130 @@ class JenkinsTool:
         job_url, auth = await self._prepare()
         where = f"POST /job/{self.job}/buildWithParameters"
         async with self._client() as client:
-            # 버전은 쿼리 매개변수로 인코딩해 넣는다 (공백·`&`·한글이 다른 매개변수를 만들지 않게)
-            res = await _send(
-                client,
-                "POST",
-                f"{job_url}/buildWithParameters",
-                where,
-                params={self.version_param: version},
-                auth=auth,
-            )
+            started = time.monotonic()
+            try:
+                # 버전은 쿼리 매개변수로 인코딩해 넣는다
+                # (공백·`&`·한글이 다른 매개변수를 만들지 않게)
+                res = await _send(
+                    client,
+                    "POST",
+                    f"{job_url}/buildWithParameters",
+                    where,
+                    params={self.version_param: version},
+                    auth=auth,
+                )
+            except ToolConnectionError as exc:
+                if exc.code != "timeout":
+                    raise
+                # 요청이 들어갔을 수 있다: 요청 직전 이후 같은 버전이 대기열·빌드에 있으면
+                # 그것을 쓴다. 없으면 같은 timeout 오류 (다시 보내지 않는다)
+                landed = await self._find_dispatched(client, job_url, auth, version, started)
+                if landed is None:
+                    raise
+                return landed
         location = res.headers.get("location") or None
         queued = re.search(r"/queue/item/(\d+)", location or "")
         return RunRef(
             tool=self.tool, run_id=f"queue-{queued.group(1)}" if queued else None, url=location
         )
+
+    async def _find_dispatched(
+        self,
+        client: httpx.AsyncClient,
+        job_url: str,
+        auth: httpx.BasicAuth,
+        version: str,
+        started: float,
+    ) -> RunRef | None:
+        """요청 직전(`started`, monotonic) 이후 대기열에 들어왔거나 시작한 같은 버전 빌드.
+
+        시각은 Jenkins 시계로 비교한다: 조회 응답의 `Date`에서 요청 뒤 지난 시간을 빼
+        요청 직전 Jenkins 시각을 구한다 (`Date`가 없으면 이 서버 시계).
+        대기열을 먼저 보고, 없으면 빌드를 본다.
+        조회가 실패하면 None (요청이 들어갔는지 모른다).
+        """
+        job_path = urlsplit(job_url).path.rstrip("/")
+        queue_where = "GET /queue/api/json"
+        builds_where = f"GET /job/{self.job}/api/json"
+        for _ in range(DISPATCH_LOOKUPS):
+            await self._sleep(DISPATCH_LOOKUP_WAIT)
+            try:
+                queue_res = await _send(
+                    client,
+                    "GET",
+                    f"{self.url}/queue/api/json",
+                    queue_where,
+                    params={
+                        "tree": "items[id,inQueueSince,task[url],actions[parameters[name,value]]]"
+                    },
+                    auth=auth,
+                )
+                items = _json(queue_res, queue_where).get("items")
+                builds_res = await _send(
+                    client,
+                    "GET",
+                    f"{job_url}/api/json",
+                    builds_where,
+                    params={
+                        "tree": "builds[number,timestamp,url,actions[parameters[name,value]]]{0,10}"
+                    },
+                    auth=auth,
+                )
+                builds = _json(builds_res, builds_where).get("builds")
+            except ToolConnectionError:
+                return None
+            since_ms = _jenkins_since_ms(queue_res, started)
+            queued = [
+                item
+                for item in (items if isinstance(items, list) else [])
+                if isinstance(item, dict)
+                and isinstance(item.get("id"), int)
+                and isinstance(item.get("inQueueSince"), int)
+                and item["inQueueSince"] >= since_ms
+                and _task_path(item) == job_path
+                and _jenkins_param(item, self.version_param) == version
+            ]
+            if queued:
+                item = min(queued, key=lambda i: i["inQueueSince"])
+                return RunRef(
+                    tool=self.tool,
+                    run_id=f"queue-{item['id']}",
+                    url=f"{self.url}/queue/item/{item['id']}/",
+                )
+            started_builds = [
+                build
+                for build in (builds if isinstance(builds, list) else [])
+                if isinstance(build, dict)
+                and isinstance(build.get("number"), int)
+                and isinstance(build.get("timestamp"), int)
+                and build["timestamp"] >= since_ms
+                and _jenkins_param(build, self.version_param) == version
+            ]
+            if started_builds:
+                build = min(started_builds, key=lambda b: b["timestamp"])
+                url = build.get("url")
+                return RunRef(
+                    tool=self.tool,
+                    run_id=str(build["number"]),
+                    url=url if isinstance(url, str) else None,
+                )
+        return None
+
+
+def _task_path(item: dict[str, Any]) -> str | None:
+    task = item.get("task")
+    url = task.get("url") if isinstance(task, dict) else None
+    return urlsplit(url).path.rstrip("/") if isinstance(url, str) else None
+
+
+def _jenkins_since_ms(res: httpx.Response, started: float) -> int:
+    """요청 직전 Jenkins 시각(ms)에서 여유를 뺀 값.
+
+    응답 `Date`(초 단위) - 요청 뒤 지난 시간 - `DISPATCH_SKEW`.
+    """
+    elapsed = timedelta(seconds=max(0.0, time.monotonic() - started))
+    before = _server_time(res) - elapsed - DISPATCH_SKEW
+    return int(before.timestamp() * 1000)
 
 
 # ---------- 보관함 → 도구 ----------
