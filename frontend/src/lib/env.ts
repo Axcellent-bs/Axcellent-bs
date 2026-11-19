@@ -2,6 +2,7 @@
 // 포트는 backend/infra/README.md 포트 표 기준이고, 바꿀 때는 frontend/.env.example 을 보고 .env 에 적는다.
 // 토큰은 backend/scripts/run_web.sh가 켤 때마다 만든 값(backend/.data/web.env)을 넣는다. 기본값은 비어 있고,
 // 비어 있으면 그 토큰이 필요한 버튼·조회를 끄고 안내한다.
+import { getSession, onSessionChange, pickHumanToken } from './humanSession'
 
 /** 고객지원·인사·AI 대화방 공통 로그: dashboard-api(8020) */
 export const DASHBOARD_API_URL = import.meta.env.VITE_DASHBOARD_API_URL ?? 'http://localhost:8020'
@@ -10,8 +11,17 @@ export const SAFETY_API_URL = import.meta.env.VITE_SAFETY_API_URL ?? 'http://loc
 export const FINANCE_AGENT_URL = import.meta.env.VITE_FINANCE_AGENT_URL ?? 'http://localhost:8105'
 /** 회사 쇼핑몰 화면 주소. 재무 판매자 정산의 상품을 쇼핑몰 상품 화면(`/products/<번호>`)으로 잇는다. 비어 있으면 링크 없이 번호만 */
 export const SHOP_WEB_URL = (import.meta.env.VITE_SHOP_WEB_URL ?? '').trim().replace(/\/+$/, '')
-/** C 보류 결정·할 일함 완료 등 쓰기에 쓰는 사람 토큰. 비어 있으면 쓰기 버튼을 끈다 */
-export const SAFETY_HUMAN_TOKEN = import.meta.env.VITE_SAFETY_HUMAN_TOKEN ?? ''
+/** 공용 사람 토큰(번들 값, 공유 서버에서는 nginx가 바꿔 붙이는 자리표시자). 로그인 세션이 없을 때 쓴다 */
+const SHARED_HUMAN_TOKEN = import.meta.env.VITE_SAFETY_HUMAN_TOKEN ?? ''
+/**
+ * C 보류 결정·할 일함 완료 등 쓰기에 쓰는 사람 토큰. 비어 있으면 쓰기 버튼을 끈다.
+ * 서버 로그인 세션이 있으면 세션 토큰, 없으면 공용 토큰이다(humanSession.ts, 사람별 토큰 설계 2단계).
+ * 토큰을 붙이는 곳은 모두 이 값을 읽으므로 로그인·로그아웃하면 여기서 한 번에 바뀐다(ES 모듈의 살아 있는 바인딩).
+ */
+export let SAFETY_HUMAN_TOKEN = pickHumanToken(getSession(), SHARED_HUMAN_TOKEN)
+onSessionChange(() => {
+  SAFETY_HUMAN_TOKEN = pickHumanToken(getSession(), SHARED_HUMAN_TOKEN)
+})
 /** 총괄(orchestrator, 8000). 총괄은 CORS가 없어 기본값은 Vite 개발 프록시(/orch → vite.config.ts) */
 export const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL ?? '/orch'
 /**

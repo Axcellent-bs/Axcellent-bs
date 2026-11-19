@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
 from ax_agent_template import company_connection as store
+from ax_dashboard_api.accounts import require_session_role
 from ax_dashboard_api.auth import require_human_for_writes
 from ax_dashboard_api.envelope import ApiError, ok
 
@@ -30,6 +31,12 @@ ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 router = APIRouter(
     prefix="/api/dashboard/connection-keys", dependencies=[Depends(require_human_for_writes)]
 )
+
+
+# 로그인 세션 토큰이면 역할을 본다(설계 3절): 키 발급·폐기는 운영자,
+# 연결·회사 정보·끊기는 고객사 관리자. 공용 토큰은 지금처럼 통과한다(옮기는 동안)
+OPERATOR_ONLY = [Depends(require_session_role("operator"))]
+ADMIN_ONLY = [Depends(require_session_role("admin"))]
 
 
 class IssueIn(BaseModel):
@@ -167,7 +174,7 @@ def get_keys() -> dict:
     return ok(_state())
 
 
-@router.post("/issue")
+@router.post("/issue", dependencies=OPERATOR_ONLY)
 def issue(body: IssueIn) -> dict:
     if _path() is None:
         raise ApiError(
@@ -200,7 +207,7 @@ def check(body: KeyIn) -> dict:
     return ok({"ok": True, "reason": None, "company": prefill})
 
 
-@router.post("/connect")
+@router.post("/connect", dependencies=ADMIN_ONLY)
 def connect(body: ConnectIn) -> dict:
     data = _load()
     found = _find(data, body.key)
@@ -223,7 +230,7 @@ def connect(body: ConnectIn) -> dict:
     return ok(_state(data))
 
 
-@router.post("/company")
+@router.post("/company", dependencies=ADMIN_ONLY)
 def update_company(body: InfoIn) -> dict:
     data = _load()
     company = data.get("company")
@@ -240,7 +247,7 @@ def update_company(body: InfoIn) -> dict:
     return ok(_state(data))
 
 
-@router.post("/revoke")
+@router.post("/revoke", dependencies=OPERATOR_ONLY)
 def revoke(body: RevokeIn) -> dict:
     data = _load()
     found = next((k for k in data["keys"] if k["id"] == body.id), None)
@@ -254,7 +261,7 @@ def revoke(body: RevokeIn) -> dict:
     return ok(_state(data))
 
 
-@router.post("/disconnect")
+@router.post("/disconnect", dependencies=ADMIN_ONLY)
 def disconnect() -> dict:
     data = _load()
     company = data.get("company")

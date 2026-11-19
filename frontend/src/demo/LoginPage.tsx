@@ -1,7 +1,24 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { ACCOUNTS, customerAccounts, homeOf, isLinked, useSession } from './session'
+import { ACCOUNTS, customerAccounts, homeOf, isLinked, useSession, type LoginMode } from './session'
 import { useCompany } from './company'
+import { serverLogin } from '@/lib/authApi'
+
+/** 서버 로그인이 꺼져 있어 데모 로그인을 쓰는 동안 로그인·가입 화면에 다는 안내 */
+export function DemoLoginNotice({ mode }: { mode: LoginMode }) {
+  if (mode !== 'demo') return null
+  return (
+    <p role="status" className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
+      서버 로그인이 아직 꺼져 있어 데모 로그인으로 들어갑니다. 비밀번호는 확인하지 않고, 계정은 이 브라우저에만 기억해요.
+    </p>
+  )
+}
+
+/** 서버 세션이 끝나 로그인 화면으로 왔을 때 안내 */
+export function ExpiredNotice({ expired }: { expired: boolean }) {
+  if (!expired) return null
+  return <p role="status" className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">로그인이 만료됐어요. 다시 로그인해 주세요.</p>
+}
 
 /** 로그인·회원가입 왼쪽 안내 칸 */
 export function AuthAside() {
@@ -42,22 +59,41 @@ export function AuthAside() {
   )
 }
 
-// 허용된 IP에서만 열리는 로그인 화면. 계정은 데모 계정 + 회원가입한 계정이다(session.tsx).
-// 데모라 비밀번호는 확인하지 않는다.
+// 허용된 IP에서만 열리는 로그인 화면.
+// - 서버 로그인이 켜져 있으면 이메일·비밀번호를 서버가 확인한다(dashboard-api `/auth/login`). 데모 계정 버튼은 없다
+// - 꺼져 있으면(503 LOGIN_DISABLED) 데모 로그인: 데모 계정 + 회원가입한 계정, 비밀번호는 확인하지 않는다(session.tsx)
 export default function LoginPage() {
-  const { signIn } = useSession()
+  const { signIn, signInServer, fallBackToDemo, mode, expired } = useSession()
   const company = useCompany()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
   const enter = (id: string) => {
     const a = signIn(id)
     if (a) navigate(homeOf(a), { replace: true })
   }
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault()
+    setError(null)
+    if (mode !== 'demo') {
+      if (!email.trim() || !password) return setError('이메일과 비밀번호를 입력하세요.')
+      setBusy(true)
+      const r = await serverLogin(email, password)
+      setBusy(false)
+      if (r.kind === 'ok') {
+        const role = r.session.account.role
+        if (role === 'operator') return setError('운영자 계정은 관제 센터 로그인(/control/login)에서 들어가요.')
+        if (!company && role !== 'admin') return setError('회사 연결 전에는 관리자만 로그인할 수 있어요.')
+        setPassword('')
+        const a = signInServer(r.session)
+        return navigate(homeOf(a), { replace: true })
+      }
+      if (r.kind === 'error') return setError(r.message)
+      fallBackToDemo() // 서버 로그인이 꺼져 있다 → 아래 데모 로그인으로
+    }
     const a = customerAccounts().find((x) => x.email === email.trim().toLowerCase())
     if (!a) return setError('등록되지 않은 계정입니다. 아래 데모 계정으로 들어가세요.')
     if (!company && !a.admin) return setError('회사 연결 전에는 관리자만 로그인할 수 있어요.')
@@ -77,6 +113,8 @@ export default function LoginPage() {
             <p className="mt-6 text-sm text-ink-500">{company ? `${company.name} 워크스페이스` : 'AXcellent'}</p>
             <h1 className="mt-1 text-2xl font-semibold">로그인</h1>
           </div>
+          <ExpiredNotice expired={expired} />
+          <DemoLoginNotice mode={mode} />
           {!company && (
             <div className="space-y-3 rounded-2xl bg-amber-50 px-4 py-4 text-sm text-amber-800">
               <p className="font-semibold">아직 회사가 연결되지 않았어요</p>
@@ -85,22 +123,23 @@ export default function LoginPage() {
               <p className="text-xs">연결을 끊은 경우에는 관리자로 로그인해서 다시 연결해요.</p>
             </div>
           )}
-          <form onSubmit={submit} className="space-y-3">
+          <form onSubmit={(e) => void submit(e)} className="space-y-3">
             <label className="block space-y-1 text-sm">
               <span className="text-ink-700">회사 이메일</span>
               <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" />
             </label>
             <label className="block space-y-1 text-sm">
               <span className="text-ink-700">비밀번호</span>
-              <input className="field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+              <input className="field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
             </label>
             {error && <p className="text-sm text-red-600">{error}</p>}
-            <button className="btn-primary w-full py-2.5">로그인</button>
+            <button className="btn-primary w-full py-2.5" disabled={busy}>{busy ? '확인하는 중…' : '로그인'}</button>
           </form>
           <p className="text-center text-sm text-ink-500">
             계정이 없나요? <Link to="/signup" className="font-semibold text-brand-600 hover:underline">회원가입</Link>
           </p>
-          <div className="space-y-2">
+          {/* 데모 계정 버튼은 서버 로그인이 꺼져 있을 때만 (켜져 있으면 비밀번호 없이 들어가는 길을 막는다) */}
+          {mode === 'demo' && <div className="space-y-2">
             <p className="text-xs font-medium text-ink-500">데모 계정</p>
             <div className="grid gap-2">
               {ACCOUNTS.map((a) => {
@@ -115,7 +154,7 @@ export default function LoginPage() {
                 )
               })}
             </div>
-          </div>
+          </div>}
         </div>
       </section>
     </div>

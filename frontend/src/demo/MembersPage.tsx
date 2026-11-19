@@ -4,7 +4,10 @@ import { useCompany } from './company'
 import InfraHosts from './InfraHosts'
 import { READER_AREAS, ipMatches, linkEmail, linkIp, setProfile, unlinkEmail, unlinkIp, useLinks, useProfiles, validRule } from './members'
 import { DeptPicker } from './DeptPicker'
-import { customerAccounts, kindOf, useSession, type Account } from './session'
+import { customerAccounts, kindOf, rememberServerAccount, useSession, type Account } from './session'
+import { createAccount } from '@/lib/authApi'
+import { accountInputProblem, MIN_PASSWORD_LENGTH } from '@/lib/humanSession'
+import { PreparingChip } from '@/components/Preparing'
 import { privateIp, useHosts } from './store'
 import { More, PageHead, SectionHead, StatusChip, Tabs, Tiles } from '@/components/connect/parts'
 import { DejafixCard } from '@/components/connect/DejafixConnect'
@@ -14,6 +17,9 @@ import { DejafixCard } from '@/components/connect/DejafixConnect'
 // - PC·서버: 맨 위 DejaFix 연결(감시 대상과 같은 자리) + 조직도와 PC 연결 (InfraHosts). 예전 /system/hosts 주소는 이 탭으로 온다
 // - 접속 허용: 사내 PC IP나 대역. 그 PC에서 가입·로그인하면 회사 회원이 된다
 // 계정 연결과 접속 허용 중 하나라도 맞으면 그 회원은 회사 회원이다.
+// 서버 로그인이 켜져 있으면 회원은 관리자가 서버 계정으로 만든다(dashboard-api `/auth/accounts`, 일반회원만).
+// 서버에는 고객사 관리자가 계정 목록을 읽는 경로·PC IP 연결이 없어서, 표에는 이 브라우저에서 만든 계정만 보이고
+// 접속 허용 탭은 "준비 중"이다.
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const TABS = [
@@ -98,7 +104,51 @@ export default function MembersPage() {
 }
 
 /** 회원 한 표: 연결 · 부서 · 확인 권한 · 열람 담당 · 쓰는 PC */
+/** 서버 로그인: 일반회원 계정 만들기 (비밀번호는 서버로만 보내고 화면에 남기지 않는다) */
+function CreateMember({ onCreated }: { onCreated: () => void }) {
+  const [form, setForm] = useState({ name: '', email: '', password: '' })
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    setDone(null)
+    const problem = accountInputProblem(form)
+    if (problem) return setError(problem)
+    setBusy(true)
+    try {
+      const row = await createAccount({ ...form, role: 'member' })
+      rememberServerAccount(row)
+      setForm({ name: '', email: '', password: '' })
+      setError(null)
+      setDone(`${row.name}(${row.email}) 계정을 만들었어요. 비밀번호는 본인에게 따로 알려 주세요.`)
+      onCreated()
+    } catch (x) {
+      setError(x instanceof Error ? x.message : '계정을 만들지 못했어요.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form onSubmit={(e) => void submit(e)} className="card space-y-3 p-5">
+      <h3 className="card-title">일반회원 계정 만들기</h3>
+      <div className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
+        <input className="field" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="이름" aria-label="회원 이름" />
+        <input className="field" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="회원 이메일" aria-label="회원 이메일" autoComplete="off" />
+        <input className="field" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={`처음 비밀번호 (${MIN_PASSWORD_LENGTH}자 이상)`} aria-label="처음 비밀번호" autoComplete="new-password" />
+        <button className="btn-primary px-4" disabled={busy}>{busy ? '만드는 중…' : '계정 만들기'}</button>
+      </div>
+      {error && <p className="text-sm text-red-700">{error}</p>}
+      {done && <p className="text-sm text-emerald-700">{done}</p>}
+      <p className="text-xs text-ink-500">관리자는 일반회원만 만들 수 있어요. 아래 표에는 이 브라우저에서 만든 계정만 보여요(관리자용 계정 목록은 준비 중).</p>
+    </form>
+  )
+}
+
 function Members() {
+  const { mode } = useSession()
+  const serverMode = mode === 'server'
+  const [, setVersion] = useState(0)
   const links = useLinks()
   useProfiles() // 부서·확인 권한을 바꾸면 다시 그린다
   const [hosts] = useHosts()
@@ -107,7 +157,7 @@ function Members() {
 
   const accounts = customerAccounts()
   const known = new Set(accounts.map((m) => m.email))
-  const pending = links.emails.filter((e) => !known.has(e))
+  const pending = serverMode ? [] : links.emails.filter((e) => !known.has(e))
   const pcsOf = (e: string) => hosts.filter((h) => h.owner === e)
 
   const addEmail = (e: FormEvent) => {
@@ -120,14 +170,15 @@ function Members() {
 
   return (
     <section className="space-y-4">
-      <SectionHead title="회원" desc="이메일을 연결하면 가입 전이어도 미리 회사 회원으로 넣어 둬요."
-        right={
+      <SectionHead title="회원" desc={serverMode ? '관리자가 만든 계정이 회사 회원이에요.' : '이메일을 연결하면 가입 전이어도 미리 회사 회원으로 넣어 둬요.'}
+        right={serverMode ? undefined :
           <form onSubmit={addEmail} className="flex gap-2">
             <input className="field w-64" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="회원 이메일" aria-label="연결할 회원 이메일" />
             <button className="btn-primary px-4">회원 연결</button>
           </form>
         } />
       {error && <p className="text-sm text-red-700">{error}</p>}
+      {serverMode && <CreateMember onCreated={() => setVersion((v) => v + 1)} />}
       <div className="card overflow-x-auto">
         <table className="w-full whitespace-nowrap text-sm">
           <thead className="bg-app text-left text-xs text-ink-500">
@@ -153,6 +204,7 @@ function Members() {
                   <td className="px-4 py-2.5 text-ink-700">{kindOf(m)}</td>
                   <td className="px-4 py-2.5">
                     {!member ? <span className="text-xs text-ink-500">–</span>
+                      : m.server ? <StatusChip tone="ok">서버 계정</StatusChip>
                       : byEmail ? <StatusChip tone="ok">계정 연결</StatusChip>
                       : <StatusChip tone="off">연결 전</StatusChip>}
                   </td>
@@ -163,7 +215,7 @@ function Members() {
                     {pcs.length ? pcs.map((h) => <span key={h.id} className="mr-1 font-mono">{h.hostname}</span>) : <span className="text-ink-500">없음</span>}
                   </td>
                   <td className="px-4 py-2.5 text-right">
-                    {member && (byEmail
+                    {member && !m.server && (byEmail
                       ? <button type="button" className="btn-quiet px-2 py-1 text-xs" onClick={() => unlinkEmail(m.email)}>해제</button>
                       : <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => linkEmail(m.email)}>연결</button>)}
                   </td>
@@ -199,6 +251,22 @@ function Members() {
 
 /** 접속 허용: 사내 PC IP·대역 */
 function Access() {
+  const { mode } = useSession()
+  if (mode === 'server') {
+    return (
+      <section className="space-y-4">
+        <SectionHead title="접속 허용" desc="사내 PC IP로 회원을 잇는 기능이에요." right={<PreparingChip />} />
+        <p role="status" className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
+          서버 로그인에서는 아직 PC IP로 회원을 잇지 않아요. 회원은 회원 탭에서 계정을 만들어 주세요.
+        </p>
+      </section>
+    )
+  }
+  return <DemoAccess />
+}
+
+/** 데모 로그인: 이 브라우저에 IP 규칙을 기억한다(members.ts) */
+function DemoAccess() {
   const company = useCompany()
   const links = useLinks()
   const [hosts] = useHosts()

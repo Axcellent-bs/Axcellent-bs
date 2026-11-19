@@ -24,6 +24,7 @@ import httpx
 import yaml
 
 from ax_agent_template import company_connection as host_policy
+from ax_agent_template import pinned_http
 from ax_agent_template.github_app import GithubAppAuth
 from ax_agent_template.tool_connections import ToolConnection, ToolConnectionError
 from ax_dashboard_api.company_connection import Check
@@ -37,6 +38,7 @@ GITHUB_HEADERS = {
     "Accept": "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
 }
+GITHUB_HOST = httpx.URL(GITHUB_API).host
 REPO_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 Lookup = Callable[[str], ToolConnection | None]
@@ -65,7 +67,11 @@ def _s(config: dict[str, Any], key: str, default: str = "") -> str:
 
 def _client(**kwargs: Any) -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        timeout=TIMEOUT_SECONDS, follow_redirects=False, transport=TRANSPORT, **kwargs
+        timeout=TIMEOUT_SECONDS,
+        follow_redirects=False,
+        # 사용자가 넣은 주소는 검사한 IP로만 연결한다. 공용 API(GITHUB_API)는 예외
+        transport=TRANSPORT or pinned_http.guarded_transport(exempt=[GITHUB_HOST]),
+        **kwargs,
     )
 
 
