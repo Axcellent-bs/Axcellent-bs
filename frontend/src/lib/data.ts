@@ -1812,6 +1812,128 @@ export interface InstagramRadarGroup {
   why_line?: string | null;
   why_line_reason?: string | null;
 }
+
+// ---- 트렌드 분석 의뢰 보고서 (trend_report_create · trend_report_get · trend_report_list). 백엔드 data skill과 같은 공통 계약.
+// 화면: 트렌드&콘텐츠 "분석 의뢰" 탭 (components/data/TrendRequest.tsx · TrendReportView.tsx)
+export type ReportStatus = "queued" | "running" | "done" | "partial" | "failed" | "interrupted";
+export type SectionStatus = "waiting" | "running" | "known" | "unknown" | "failed";
+/** 의뢰 요약 칸의 출처: 직접 입력 · 의뢰문에서 추정 · 프리셋 */
+export type FieldSource = "input" | "request_text" | "preset";
+export type TrendReportCaller = "human" | "orchestrator" | "planning";
+export type TrendReportGender = "f" | "m";
+export interface TrendReportInput {
+  /** "eco_beauty" 등. null이면 request_text로 고른다 */
+  preset?: string | null;
+  /** 의뢰 문장 그대로 (총괄·기획·사람 붙여 넣기) */
+  request_text?: string | null;
+  product?: string | null;
+  target_gender?: TrendReportGender | null;
+  /** 사람 나이 구간 "10","20","30","40","50" */
+  target_ages?: string[] | null;
+  /** "인스타 릴스 30초" */
+  format?: string | null;
+  /** 인스타 아이디 */
+  competitors?: string[] | null;
+  keywords?: string[] | null;
+  /** 추가로 볼 인스타 아이디 */
+  accounts?: string[] | null;
+  /** 기본 "human" */
+  caller?: TrendReportCaller;
+  context_id?: string | null;
+  /** true면 같은 의뢰 저장본이 있어도 새로 만든다 */
+  rebuild?: boolean;
+}
+export interface TrendReportCreated {
+  report_id: string;
+  status: ReportStatus;
+  /** 같은 의뢰 저장본을 연 것 */
+  reused: boolean;
+  eta_seconds: number | null;
+}
+export interface TrendReportBrief {
+  product: string | null;
+  target_gender: TrendReportGender | null;
+  target_ages: string[];
+  format: string | null;
+  competitors: string[];
+  keywords: string[];
+  preset: string | null;
+  sources: { product: FieldSource; target: FieldSource; format: FieldSource; competitors: FieldSource; keywords: FieldSource };
+}
+export interface TrendReportSearchRow {
+  keyword: string;
+  search_change_pct: number | null;
+  search_reason: string | null;
+  shopping_change_pct: number | null;
+  shopping_reason: string | null;
+}
+export interface TrendReportHashtagRow {
+  tag: string;
+  accounts: number;
+  previous_accounts: number;
+  burst_posts: number;
+}
+export interface TrendReportMeme {
+  name: string;
+  description: string | null;
+  /** 계약은 이름만 정함. 요즘 유행·밈(TrendMeme)과 같은 값으로 읽는다 */
+  ad_material: TrendMeme["ad_material"];
+}
+export interface TrendReportCompetitorRow {
+  account: string;
+  posts_per_week: number | null;
+  /** 0~1 */
+  reels_share: number | null;
+  reels_view_median: number | null;
+  best_post: InstagramRadarPost | null;
+  traits: string[];
+  reason: string | null;
+}
+export type BeatSlot = "0-3" | "3-15" | "15-25" | "25-30";
+export interface TrendReportBeat {
+  slot: BeatSlot;
+  text: string;
+  /** 코드가 만든 근거 문장 */
+  evidence: string[];
+}
+interface SectionHead {
+  status: SectionStatus;
+  reason: string | null;
+}
+export interface TrendReportSections {
+  search: SectionHead & { filter_note: string; rows: TrendReportSearchRow[] };
+  hashtags: SectionHead & { rows: TrendReportHashtagRow[] };
+  content: SectionHead & { posts: InstagramRadarPost[]; memes: TrendReportMeme[] };
+  competitors: SectionHead & { rows: TrendReportCompetitorRow[]; accounts_failed: { account: string; reason: string }[] };
+  recommendation: SectionHead & { conclusion: string | null; beats: TrendReportBeat[]; music_note: string };
+}
+export interface TrendReport {
+  report_id: string;
+  status: ReportStatus;
+  created_at: string;
+  finished_at: string | null;
+  caller: TrendReportCaller;
+  context_id: string | null;
+  brief: TrendReportBrief;
+  summary_line: string | null;
+  summary_reason: string | null;
+  sections: TrendReportSections;
+  /** 근거와 한계 문장 (코드 고정 + 이번 보고서에서 생긴 것) */
+  limits: string[];
+  calls: { instagram: number; naver: number; llm: number };
+}
+export interface TrendReportListItem {
+  report_id: string;
+  status: ReportStatus;
+  created_at: string;
+  caller: TrendReportCaller;
+  product: string | null;
+  summary_line: string | null;
+}
+export interface TrendReportListOutput {
+  items: TrendReportListItem[];
+}
+
 export interface InstagramRadarOutput {
   status: IgStatus;
   reason: string | null;
@@ -2446,6 +2568,13 @@ export const dataAi = {
     askData<VideoExplorerOutput>("video_explorer", "영상 탐색", q, TREND_DEADLINE_MS),
   /** 요즘 유행·밈 (이번 주 = 7일 vs 직전 7일, 오늘 = 어제 vs 지난 4주 같은 요일). 서버가 미리 계산한 결과를 읽는다 */
   trendMemes: (window: MemeWindow) => askData<TrendMemesOutput>("trend_memes", "요즘 유행", { window }, TREND_DEADLINE_MS),
+  /** 트렌드 분석 의뢰 보고서 만들기 (분석 의뢰 탭). 서버가 뒤에서 만들고 report_id를 준다. skill이 없으면 403 → "준비 중" */
+  trendReportCreate: (input: TrendReportInput) =>
+    askData<TrendReportCreated>("trend_report_create", "분석 의뢰", { ...input }, TREND_DEADLINE_MS),
+  /** 보고서 하나 (진행 중이면 섹션별 상태) */
+  trendReportGet: (reportId: string) => askData<TrendReport>("trend_report_get", "분석 보고서", { report_id: reportId }, TREND_DEADLINE_MS),
+  /** 지난 의뢰 목록 (최신순) */
+  trendReportList: (limit = 20) => askData<TrendReportListOutput>("trend_report_list", "지난 의뢰", { limit }, TREND_DEADLINE_MS),
   /** 검색 트렌드 · 도서 분야 (서버가 미리 계산한 결과를 읽는다) */
   keywordTrend: (window: KeywordWindow) => askData<KeywordTrendOutput>("keyword_trend", "검색 트렌드", { window }, TREND_DEADLINE_MS),
   /** 인스타 인기 오디오 (서버가 미리 계산한 목록을 읽는다) */

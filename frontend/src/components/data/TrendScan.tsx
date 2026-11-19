@@ -7,6 +7,7 @@ import { VideoPerformance } from "@/components/data/VideoPerformance";
 import { PromoConcepts } from "@/components/data/PromoConcepts";
 import { InsightBrief } from "@/components/data/InsightBrief";
 import { DataSources } from "@/components/data/DataSources";
+import { TrendRequest } from "@/components/data/TrendRequest";
 import { FilterButton, TrendHeadline, materialOf } from "@/components/data/TrendPopular";
 import { DETECT_VIEWS, detectViewFromHash, hashWithView, type DetectView } from "@/lib/detectView";
 import { VideoExplorer } from "@/components/data/VideoExplorer";
@@ -26,7 +27,8 @@ import {
 } from "@/lib/data";
 
 // 트렌드&콘텐츠 화면 (/data/trend): 콘텐츠 루프 4단계와 같은 하위 탭 4개 + 맨 끝 "데이터 출처"(루프와 별개) (정의는 lib/contentLoop.ts 한 곳).
-// - 주소에 하위 탭을 남긴다: /data/trend#detect · #recommend · #handoff · #result · #sources(데이터 출처, 루프와 별개) (없으면 감지). 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
+// - 주소에 하위 탭을 남긴다: /data/trend#detect · #recommend · #handoff · #result · #request(분석 의뢰, 보고서는 #request?id=<report_id>)
+//   · #sources(데이터 출처) (분석 의뢰·데이터 출처는 루프와 별개, 없으면 감지). 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
 // - 루프 띠의 단계를 누르면 그 단계가 속한 하위 탭으로 간다. 루프 띠는 모든 하위 탭 위에 있다
 // - 1 감지: 맨 위 한 줄(오늘 가장 큰 화제, trend_popular) → 플랫폼 칩(#detect?view=all|youtube|instagram|search, lib/detectView.ts)
 //   인스타 = 인스타 레이더(InstagramRadar: 맨 위 "갑자기 뜬 게시물" 그리드 → "왜 떴나" 묶음) → 인기 오디오(InstagramAudio, 행을 누르면 "왜 뜨나")
@@ -416,7 +418,7 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
         {snapshot && <span className="ml-auto text-xs text-ink-500">YouTube 인기 {when(snapshot)} 기준</span>}
       </div>
 
-      {/* 하위 탭: 감지 → 인사이트 → 넘김 → 성과 (루프 4단계와 같다) + 데이터 출처 (lib/contentLoop.ts TREND_TABS) */}
+      {/* 하위 탭: 감지 → 인사이트 → 넘김 → 성과 (루프 4단계와 같다) + 분석 의뢰 · 데이터 출처 (루프와 별개, lib/contentLoop.ts TREND_TABS) */}
       <div role="tablist" aria-label="트렌드&콘텐츠 단계" className="flex w-full gap-6 overflow-x-auto border-b border-ink-100">
         {TREND_TABS.map((t) => (
           <button key={t.key} type="button" role="tab" id={`trend-sub-${t.key}`} aria-selected={tab.key === t.key} aria-controls={`trend-sub-panel-${t.key}`}
@@ -441,6 +443,9 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
             // 인사이트 브리프(trend_insight_brief) + 맨 아래 "참고용 예시 N개" 접힘(숏츠 광고 예시 아이디어, promo_concepts)
             <InsightBrief state={briefRes.state} examplesCount={promoOut ? promoOut.concepts.length : null}
               examples={<PromoConcepts state={promoRes.state} popular={popularOut} onRegenerate={promoRes.reload} />} />
+          ) : t.key === "request" ? (
+            // 분석 의뢰 (루프와 별개): 의뢰 넣기 · 지난 의뢰 · 보고서(#request?id=<report_id>). 처음 열 때 그린다
+            <TrendRequest />
           ) : t.key === "sources" ? (
             // 데이터 출처 (루프와 별개): 회사 이해 · 수집 계획 · 출처 현황. 처음 열 때 받는다
             <DataSources />
