@@ -1,8 +1,9 @@
 """노션 연결 토큰 (연결 페이지 › 문서 › 노션). 개발의 고객사 API 키(llm_key.py)와 같은 방식.
 
 - 토큰은 이 프로세스 메모리와 저장 파일(`PLANNING_STATE_DIR`/notion_token.json, run_all.sh가
-  git에 안 올라가는 backend/.data/에 둔다)에만 둔다. 화면·로그·상태 파일로는 돌려주지 않는다
-  (넣었는지, 끝 4자리, 확인한 워크스페이스 이름만).
+  git에 안 올라가는 backend/.data/에 둔다)에만 둔다. 회사 폴더를 켰으면(`AX_COMPANIES_DIR`,
+  여러 회사 설계 1-6) `<회사 폴더>/catbooks/notion_token.json`(`planning_agent.company_folder`).
+  화면·로그·상태 파일로는 돌려주지 않는다 (넣었는지, 끝 4자리, 확인한 워크스페이스 이름만).
 - 저장한 토큰이 없으면 서버 환경변수(`PLANNING_NOTION_TOKEN`·`NOTION_TOKEN`)를 쓴다.
 - 넣고 지우기는 관리자만 (api.py `ADMIN`).
 """
@@ -13,6 +14,8 @@ import json
 import os
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+
+from planning_agent import company_folder
 
 FILE_NAME = "notion_token.json"
 
@@ -37,8 +40,8 @@ def _hint(key: str) -> str:
 
 
 def _path() -> str:
-    base = os.getenv("PLANNING_STATE_DIR", "").strip()
-    return os.path.join(base, FILE_NAME) if base else ""
+    # 회사 폴더(켰을 때) 또는 PLANNING_STATE_DIR, 없으면 저장하지 않음 (company_folder)
+    return company_folder.state_path(FILE_NAME)
 
 
 def _save() -> None:
