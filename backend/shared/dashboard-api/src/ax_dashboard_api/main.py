@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ax_dashboard_api import (
     change_detector,
+    company_ai,
     company_connection,
     handoffs,
     office_room,
@@ -123,6 +124,9 @@ app.include_router(router)
 app.include_router(cost_limit_router)
 # 시스템 > 키 관리: 암호화 DB의 고객사별 키 (세션의 운영자·관리자 중 secret_editor, 값 조회 불가)
 app.include_router(secret_router)
+# 회사 AI 설정(고객사 관리자)과 AI 연결 보기(회원 모두): 회사당 키·모델 하나, 키는 끝 글자만
+app.include_router(company_ai.admin_router)
+app.include_router(company_ai.view_router)
 # 사람 할 일함: 에이전트가 넣는 창구(에이전트 토큰)와 사람이 보는 창구(읽기·쓰기 모두 사람 토큰)
 app.include_router(handoffs.intake)
 app.include_router(handoffs.inbox)

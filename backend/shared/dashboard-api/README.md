@@ -16,6 +16,7 @@
 토큰 없이 열린 경로는 `auth.PUBLIC_ROUTES` 한 곳에만 적는다: `GET /health`, 로그인 전 화면이 쓰는
 `GET /api/dashboard/auth/status`·`POST /api/dashboard/auth/login`·`GET /api/dashboard/auth/company`(설치된 회사 id·이름·사이트 주소만, `public_info.py`).
 역할로 막는 것은 계정 관리(`/auth/accounts*`)와 연결 키 쓰기(`/connection-keys/issue·revoke` 운영자, `/connect·company·disconnect` 고객사 관리자)뿐이다.
+회사 AI 설정(`/company-ai*`, `company_ai.py`)은 고객사 관리자 세션만, AI 연결 보기(`/ai-connection/status`·`/usage`)는 로그인한 회원 모두다(공용 토큰은 둘 다 403).
 
 ### 엔드포인트 (GET)
 | 경로 (`/api/dashboard` 아래) | 옛 경로 (`/api/admin` 등) |

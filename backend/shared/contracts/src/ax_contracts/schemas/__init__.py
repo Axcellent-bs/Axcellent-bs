@@ -15,6 +15,13 @@ from ax_contracts.schemas.common import (
     UtcDatetime,
 )
 from ax_contracts.schemas.company import Company, CompanyRole, Membership
+from ax_contracts.schemas.company_ai import (
+    COMPANY_AI_KEY_NAMES,
+    CompanyAiCoder,
+    CompanyAiCoderMode,
+    CompanyAiSettings,
+    CompanyAiVideo,
+)
 from ax_contracts.schemas.data import (
     AccuracyMiss,
     AccuracyReportInput,
@@ -464,6 +471,11 @@ __all__ = [
     "Company",
     "CompanyRole",
     "Membership",
+    "COMPANY_AI_KEY_NAMES",
+    "CompanyAiCoder",
+    "CompanyAiCoderMode",
+    "CompanyAiSettings",
+    "CompanyAiVideo",
     "ActionReviewInput",
     "ActionReviewOutput",
     "AgentCard",

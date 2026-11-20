@@ -31,6 +31,8 @@ ADMIN_ONLY_GETS = {
     "/api/dashboard/cost-policy",
     # 키 관리 화면: 로그인한 운영자·관리자만(일반회원·공용 토큰 403)
     "/api/dashboard/secrets",
+    # 회사 AI 설정(공통 AI 도구 연결): 고객사 관리자만. 회원은 /ai-connection/* 로 본다
+    "/api/dashboard/company-ai",
 }
 
 
