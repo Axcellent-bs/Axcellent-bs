@@ -19,8 +19,8 @@ export default {
 
   // 비워 두면 그 버튼은 화면에 나오지 않는다 (확정되기 전에 잘못된 링크가 나가지 않게)
   links: {
-    // 브로셔 PDF 받기. 예: "assets/AXcellent_홍보브로셔.pdf" (PDF 검수가 끝나고 공개하기로 정한 뒤에 채운다)
-    brochureUrl: "",
+    // 브로셔 PDF 받기(맨 위 메뉴·첫 화면·마지막 안내 버튼과 콘텐츠 칸의 받기 카드가 이 주소를 쓴다)
+    brochureUrl: "assets/axcellent-brochure.pdf",
     brochureLabel: "브로셔 PDF 받기",
     // 상담 문의. 예: Instagram DM 주소 또는 mailto 주소. 연락 수단이 정해지면 채운다
     contactUrl: "mailto:dejasix66@gmail.com",
@@ -213,6 +213,12 @@ export default {
     // true면 영상이 없어도 빈 칸 "준비 중"을 보여 준다. 기본은 영상이 올라올 때까지 구역과 메뉴를 숨긴다
     showEmpty: false,
     emptySlots: 2,
+    // 콘텐츠 칸 맨 위의 받기 카드. 브로셔 주소(links.brochureUrl)가 비어 있으면 카드는 안 보인다
+    brochure: {
+      title: "AXcellent 홍보 브로셔 (PDF)",
+      body: "AI 직원 9명이 서로 일을 넘기고, 돈과 외부 게시는 대표님이 승인하는 흐름을 8쪽으로 정리했습니다. 이 자료의 화면·숫자는 시연 환경(가상 데이터) 기준입니다.",
+      size: "8쪽 · 약 6.6MB",
+    },
     // 영상 묶음 이름(영상 카드 위에 보인다)
     itemsTitle: "AXcellent 홍보 영상",
     // 영상 추가: mp4를 assets/demo/에 넣고(영문 소문자·숫자·-, 15MB 이하) 아래에 한 줄을 더한다.
