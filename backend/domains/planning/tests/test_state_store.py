@@ -62,6 +62,63 @@ def test_running_coding_becomes_failed_after_restart(tmp_path, monkeypatch) -> N
     assert cr.status == "failed" and "다시 켜서" in cr.error and cr.waiting_for == []
 
 
+def _with_open_pr(svc: DevService, task, status: str, mode: str = "agent") -> None:
+    from planning_agent.domain.models import PR, PrGate  # noqa: PLC0415
+
+    task.coding = CodingRun(
+        status=status, updated_at=svc.clock(), mode=mode, pr="PR #90", transient=True
+    )
+    svc.state.prs.append(
+        PR(
+            id="PR #90", number=90, task=task.id, title="R1: x", branch="gen/x",
+            reviews=[], gate=PrGate(result="통과", lines=1, files=1, paths="x"), merged=False,
+        )
+    )  # fmt: skip
+
+
+def test_coding_with_open_pr_waits_for_human_after_restart(tmp_path, monkeypatch) -> None:
+    """PR을 연 뒤(리뷰·CI 확인 중) 다시 켜면 그 실행은 없다. 열린 PR이 있어 다시 시도는
+    거절되므로 사람 확인(머지·추가 지시)으로 둔다."""
+    for status in ("opened", "reviewing", "queued"):
+        monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path / status))
+        svc = DevService(gate=_gate, relater=None)
+        task = svc.state.tasks[0]
+        _with_open_pr(svc, task, status)
+        svc._save()
+        again = DevService(gate=_gate, relater=None)
+        cr = next(t for t in again.state.tasks if t.id == task.id).coding
+        assert cr.status == "waiting_human" and not cr.transient, status
+        assert "서버 재시작으로 리뷰를 다시 확인" in cr.error
+
+
+def test_opened_task_with_merged_pr_is_not_failed_after_restart(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path))
+    svc = DevService(gate=_gate, relater=None)
+    task = svc.state.tasks[0]
+    _with_open_pr(svc, task, "opened")
+    svc.state.prs[-1].merged = True
+    svc._save()
+    again = DevService(gate=_gate, relater=None)
+    cr = next(t for t in again.state.tasks if t.id == task.id).coding
+    assert cr.status == "opened" and cr.error is None
+
+
+def test_subscription_coding_is_left_alone_after_restart(tmp_path, monkeypatch) -> None:
+    """내 Claude 작업은 이 서버가 돌리지 않는다: 대기·PR 열림은 다시 켜도 그대로."""
+    monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path))
+    svc = DevService(gate=_gate, relater=None)
+    queued = svc.state.tasks[0]
+    opened = queued.model_copy(update={"id": "T-SUB2"})
+    svc.state.tasks.append(opened)
+    queued.coding = CodingRun(status="queued", updated_at=svc.clock(), mode="subscription")
+    _with_open_pr(svc, opened, "opened", mode="subscription")
+    svc._save()
+    again = DevService(gate=_gate, relater=None)
+    by = {t.id: t.coding for t in again.state.tasks}
+    assert by[queued.id].status == "queued" and by[queued.id].error is None
+    assert by[opened.id].status == "opened"
+
+
 def test_reset_overwrites_saved_state(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path))
     svc = PlanningService(gate=_gate, relater=None)

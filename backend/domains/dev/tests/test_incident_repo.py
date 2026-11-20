@@ -208,3 +208,80 @@ def test_revert_merged_pr_a2a(service, repo, a2a_body) -> None:
     # 인프라만 부를 수 있다
     denied = _call(a2a_body("revert_merged_pr", ask, token="mock:data", idempotency_key="k4"))
     assert denied["status"] != "completed"
+
+
+# ---------------------------------------------------------------- 되돌리기 결과를 사건에 남기기
+
+
+def test_revert_result_recorded_on_incident(repo) -> None:
+    n = _bad_merge(repo)
+    svc = DevService(gate=Gate())
+    out = run(
+        incident_repo.revert_merged(
+            svc,
+            context_id="ctx_req_1",
+            requester="infra",
+            connection_id=CID,
+            pr_number=n,
+            reason="결제 오류",
+            incident_context_id="ctx_inc_0001",
+        )
+    )
+    inc = next(i for i in svc.state.incidents if i.context_id == "ctx_inc_0001")
+    assert inc.revert is not None
+    assert (inc.revert.connection_id, inc.revert.source_pr) == (CID, n)
+    assert (inc.revert.revert_pr, inc.revert.status) == (out.revert_pr_number, "merged")
+
+
+def test_revert_held_recorded_and_unknown_incident_untouched(repo) -> None:
+    n = _bad_merge(repo)
+    svc = DevService(gate=Gate(hold={"repo_revert_pr"}))
+    before = [i.context_id for i in svc.state.incidents]
+    run(
+        incident_repo.revert_merged(
+            svc,
+            context_id="ctx_req_1",
+            requester="infra",
+            connection_id=CID,
+            pr_number=n,
+            reason="결제 오류",
+            incident_context_id="ctx_inc_0001",
+        )
+    )
+    inc = next(i for i in svc.state.incidents if i.context_id == "ctx_inc_0001")
+    assert inc.revert is not None
+    assert (inc.revert.revert_pr, inc.revert.status) == (None, "held")
+    run(
+        incident_repo.revert_merged(
+            svc,
+            context_id="ctx_unknown",
+            requester="infra",
+            connection_id=CID,
+            pr_number=n,
+            reason="결제 오류",
+        )
+    )
+    assert [i.context_id for i in svc.state.incidents] == before
+
+
+def test_revert_result_kept_when_recording_fails(repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    """사건 기록이 실패해도 되돌리기 결과는 그대로 돌려준다 (이미 외부에서 한 일이다)."""
+    n = _bad_merge(repo)
+    svc = DevService(gate=Gate())
+
+    def boom(**_: object) -> None:
+        raise RuntimeError("기록 실패")
+
+    monkeypatch.setattr(incident_repo, "IncidentRevert", boom)
+    out = run(
+        incident_repo.revert_merged(
+            svc,
+            context_id="ctx_req_1",
+            requester="infra",
+            connection_id=CID,
+            pr_number=n,
+            reason="결제 오류",
+            incident_context_id="ctx_inc_0001",
+        )
+    )
+    assert out.status == "merged" and out.revert_pr_number is not None

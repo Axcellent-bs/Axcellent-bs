@@ -34,6 +34,7 @@ const ERR: Record<string, string> = {
   REPO_NOT_APPROVED: '올릴 레포를 먼저 승인해 주세요',
   VCS_CONFLICT: '이미 바뀐 상태라 처리하지 않았어요',
   VCS_MERGE_FAILED: '머지하지 못했어요',
+  MERGE_FAILED: '머지하지 못했어요',
   VCS_UNAUTHORIZED: '레포 토큰이 맞지 않아요',
   VCS_FORBIDDEN: '레포 토큰 권한이 부족해요',
   VCS_RATE_LIMITED: '요청 한도에 걸렸어요. 잠시 뒤 다시 해 주세요',
@@ -41,7 +42,11 @@ const ERR: Record<string, string> = {
   UNAUTHORIZED: '로그인이 필요해요',
   FORBIDDEN: '권한이 없어요. 다시 로그인해 주세요',
 }
-const errText = (e: unknown) => (e instanceof PlanningApiError ? ERR[e.code] ?? `처리하지 못했어요 (${e.code})` : '개발·배포 서버에 연결하지 못했어요')
+// 머지 실패는 이유(보호 규칙·충돌 등)를 붙여 보여 준다
+const WITH_REASON = new Set(['MERGE_FAILED', 'VCS_MERGE_FAILED'])
+const errText = (e: unknown) => (e instanceof PlanningApiError
+  ? WITH_REASON.has(e.code) ? `${ERR[e.code]} · ${e.message}` : ERR[e.code] ?? `처리하지 못했어요 (${e.code})`
+  : '개발·배포 서버에 연결하지 못했어요')
 
 /** ISO 시각 → "방금 · n분 전 · n시간 전 · n일 전", 30일 넘으면 날짜 */
 export function ago(iso?: string | null): string {

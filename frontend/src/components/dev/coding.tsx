@@ -2,14 +2,14 @@
 // 진행 상태는 Task.coding으로 SSE를 타고 온다
 import { useEffect, useState, type FormEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, RELATION_LABEL, byRelation, type CodingRun, type CodingStatus, type Request, type State as S, type Task } from '@/lib/planningData'
+import { DEPT_NAME, RELATION_LABEL, byRelation, type CodingRun, type CodingStatus, type PR, type Request, type State as S, type Task } from '@/lib/planningData'
 import { DEV_API, PlanningApiError, approveReview, chatApi, devTaskApi, planningApi, useCodingLimits } from '@/lib/planning'
 import { openDevChat } from '@/components/dev/chatOpen'
 import { useSession } from '@/demo/session'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Step } from '@/components/planning-common/flow'
 import './usage.css'
-import { Ref, idText, toPath } from '@/components/planning-common/links'
+import { Ref, idText, repoPrHref, toPath } from '@/components/planning-common/links'
 import { humanizePlanIds } from '@/lib/format'
 import { recoveryOf, type RecoveryAction } from '@/lib/codingRecovery'
 import { Link } from '@/lib/nav'
@@ -269,25 +269,43 @@ export const codingState = (c: CodingRun) =>
     : c.status === 'claimed' ? `맡음 · ${c.claimedBy ?? '개발자'}`
     : CODING_LABEL[c.status] ?? c.status
 
-/** 작업·PR 흐름 맨 위 "코딩 에이전트" 단계 */
-export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
+/** 작업·PR 흐름 맨 위 "코딩 에이전트" 단계. prs는 상태의 PR 목록 (이 작업의 열린 PR·주소를 본다) */
+export function CodingStep({ task, on, prs }: { task: Task; on?: boolean; prs?: PR[] }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  // 관문이 머지 등을 보류함: 안전 확인 탭에서 사람이 승인해야 한다 (내부 문장 대신 안내 + 링크)
+  const [held, setHeld] = useState(false)
   const account = useSession().account?.id ?? 'guest'
   const c = task.coding
   const lim = useCodingLimits()
   if (!c) return null
   // 열린 PR로 사람 확인을 기다리면: 다시 시도 대신 수정 지시·사람 머지
   const waitingPr = c.status === 'waiting_human' && !!c.pr
+  // 이 작업의 열린 PR (머지·닫힘 아님). PR 목록을 못 받으면 코딩 기록의 PR을 열린 것으로 본다
+  const pr = prs?.find((p) => p.task === task.id && !p.merged && !p.closed)
+  const prOpen = prs ? !!pr : !!c.pr
+  const mine = c.mode === 'subscription'
+  // 머지 버튼: 열린 PR로 사람 확인 대기, 또는 내 Claude가 연 PR (서버 리뷰 없이 사람이 머지한다)
+  const mergeable = prOpen && (c.status === 'waiting_human' || (mine && c.status === 'opened'))
+  // 추가 지시는 서버 AI 작업만 (내 Claude 작업은 서버가 받지 않는다 → PR 코멘트)
+  const revisable = waitingPr && prOpen && !mine
+  const prId = pr?.id ?? c.pr
+  const prHref = pr ? (pr.vcsNumber != null ? repoPrHref(pr.vcsNumber, pr.target?.connectionId) : pr.url || undefined) : undefined
   const act = async (run: () => Promise<unknown>, done: string) => {
     setBusy(true)
     try {
       await run()
+      setHeld(false)
       toast.show(done)
       return true
     } catch (x) {
-      toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
+      if (x instanceof PlanningApiError && x.code === 'GATE_REJECTED' && x.details?.status === 'held') {
+        setHeld(true)
+        toast.show('안전 확인 탭에서 승인 필요')
+      } else {
+        toast.show(x instanceof PlanningApiError ? x.message : '개발·배포 서버에 연결할 수 없어요')
+      }
       return false
     } finally {
       setBusy(false)
@@ -298,8 +316,8 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
     if (note.trim() && await act(() => api.revise(task.id, note.trim()), `${c.pr} 추가 지시 보냄`)) setNote('')
   }
   const merge = () => {
-    if (c.pr && window.confirm(`${idText(c.pr)}를 머지할까요? 자동 머지 기준 밖이라 사람이 머지한 것으로 기록돼요.`)) {
-      void act(() => actions.action({ type: 'mergePr', pr: c.pr! }), `${c.pr} 머지`)
+    if (prId && window.confirm(`${idText(prId)}를 머지할까요? 자동 머지 기준 밖이라 사람이 머지한 것으로 기록돼요.`)) {
+      void act(() => actions.action({ type: 'mergePr', pr: prId }), `${prId} 머지`)
     }
   }
   const files = c.files ?? []
@@ -325,6 +343,21 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
   // 개발자 Claude 대기열에서 아무도 안 가져감: 서버 AI로 넘길 수 있다
   const unclaimed = c.mode === 'subscription' && c.status === 'queued' && !c.claimedBy
   const toAgent = () => act(() => api.toAgent(task.id), `${task.id} 서버 AI로 넘김`)
+  // 멈춘 서버 AI 작업(열린 PR 없음): 내 Claude 대기열로 넘긴다 (예산·체험 한도를 다 썼을 때 등).
+  // 회사 설정이 서버 AI만이어도 된다 (예산을 다 쓰면 새 작업도 내 Claude로 간다)
+  const toMine = !mine && !prOpen && !task.discarded && STUCK.concat('canceled').includes(c.status)
+  const toSubscription = () => {
+    if (window.confirm(`${idText(task.id)}를 내 Claude 대기열로 넘길까요? 개발자 본인 Claude가 가져가 코딩해요.`)) {
+      void act(() => api.toSubscription(task.id), `${task.id} 내 Claude로 넘김`)
+    }
+  }
+  // 앞 작업 순서를 기다림 (같은 파일·파일 고르는 중). 앞 작업이 사람 확인으로 멈추면 끝없이 기다리므로 사람이 건너뛴다
+  const queueWait = !mine && c.status === 'queued' && !!c.waitingFor?.length && !c.skipQueue
+  const skipQueue = () => {
+    if (window.confirm(`${idText(task.id)}를 앞 작업(${(c.waitingFor ?? []).join(', ')})을 기다리지 않고 지금 진행할까요? 같은 파일을 고치면 머지할 때 충돌할 수 있어요.`)) {
+      void act(() => api.skipQueue(task.id), `${task.id} 지금 진행`)
+    }
+  }
   // 작업 글 경고: 사람이 글을 보고 확인해야 내 Claude가 가져간다 (에이전트는 스스로 확인 못 함)
   const warns = c.textWarnings ?? []
   const textHeld = c.mode === 'subscription' && c.status === 'queued' && warns.length > 0 && !c.textOkBy
@@ -400,21 +433,30 @@ export function CodingStep({ task, on }: { task: Task; on?: boolean }) {
           <b>{rec.who === 'agent' ? '에이전트가 이어서 해요' : '다음 할 일'}</b> · {rec.say}
           {rec.actions.includes('connect') && <> <Link href="/system/tools" className="plain-link">도구 연결</Link></>}
           {rec.actions.includes('reviews') && <> <a href={toPath('work/reviews')} className="plain-link">AI 교차검증</a></>}
+          {rec.actions.includes('holds') && <> <a href={toPath('work/holds')} className="plain-link">안전 확인</a></>}
         </p>
       )}
+      {held && (
+        <p className="small" role="status"><b>안전 확인 탭에서 승인 필요</b> · 안전 장치가 보류했어요. 승인한 뒤 다시 눌러 주세요. <a href={toPath('work/holds')} className="plain-link">안전 확인</a></p>
+      )}
+      {mine && prOpen && (c.status === 'waiting_human' || c.status === 'opened') && (
+        <p className="small muted">내 Claude 작업이라 추가 지시는 PR에 코멘트로 남겨 주세요.{prHref && <> <a href={prHref} className="plain-link">{idText(prId ?? '')} 보기</a></>}</p>
+      )}
       {c.error && <p className="tag-amber pre-line">{c.error.includes('generate_pr를 허락하지 않음') ? 'PR 열기 보류됨 · 승인 필요' : c.error}</p>}
-      {waitingPr && (
+      {revisable && (
         <form className="flex gap-2" onSubmit={revise}>
           <input className="field flex-1" value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} placeholder="추가로 고칠 내용 (같은 PR에 커밋)" aria-label="추가 지시" />
           <Button size="small" type="submit" disabled={busy || !note.trim()}>추가 지시</Button>
         </form>
       )}
       <span className="tags">
-        {waitingPr && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
+        {mergeable && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
+        {queueWait && <Button size="small" onClick={skipQueue} disabled={busy}>지금 진행</Button>}
         {heldPr && <Button size="small" variant="primary" onClick={() => void approveHold()} disabled={busy}>{busy ? '보내는 중…' : '승인하고 PR 열기'}</Button>}
         {(STUCK.includes(c.status) || c.status === 'canceled' || c.status === 'returned') && !waitingPr && !task.discarded && can('retry') && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.returnedTo ? '개발에 다시 맡기기' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드 기준으로 다시 작성' : '다시 시도'}</Button>}
         {textHeld && <Button size="small" onClick={textOk} disabled={busy}>작업 글 확인함</Button>}
         {unclaimed && <Button size="small" onClick={() => void toAgent()} disabled={busy}>서버 AI로 넘기기</Button>}
+        {toMine && <Button size="small" onClick={toSubscription} disabled={busy}>내 Claude로 넘기기</Button>}
         {noChange && can('covered') && <Button size="small" onClick={closeCovered} disabled={busy}>이미 반영됨으로 닫기</Button>}
         {stuck && can('chat') && <Button size="small" onClick={() => void toChat()} disabled={busy}>AI 대화로 넘기기</Button>}
         <CancelButton taskId={task.id} status={c.status} />

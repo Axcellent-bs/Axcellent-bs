@@ -1119,10 +1119,14 @@ async def _wait_turn(svc: DevService, job: Job, paths: list[str]) -> bool:
             waited = True
         await asyncio.sleep(QUEUE_POLL_SECONDS)
     if waited:
+        text = (
+            "사람이 지금 진행 → 앞 작업을 기다리지 않고 최신 코드로 이어서 씀"
+            if svc.queue_skipped(job)
+            else "앞 작업이 끝나 최신 코드로 이어서 씀"
+        )
         await svc.coding_step(
-            job, "writing", point="code.queue", text="앞 작업이 끝나 최신 코드로 이어서 씀",
-            error=None, waiting_for=[],
-        )  # fmt: skip
+            job, "writing", point="code.queue", text=text, error=None, waiting_for=[]
+        )
     return waited
 
 

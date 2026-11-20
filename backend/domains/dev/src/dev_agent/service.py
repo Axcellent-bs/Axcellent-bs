@@ -84,6 +84,7 @@ from ax_workflow.models import (
     RelatedItem,
     RepoTarget,
     Request,
+    RollbackCheck,
     Spec,
     State,
     Task,
@@ -735,6 +736,8 @@ class DevService(PlanningCore):
             sp = next((x for x in s.specs if task and x.id == task.spec), None)
             if sp is None or sp.request not in flow or p.merged or p.auto_review is not None:
                 continue
+            if task is not None and task.coding is not None:
+                continue  # 코딩 작업 PR은 개발 AI가 고치고 다시 리뷰한다 (coder)
             if p.reviews and p.reviews[-1] == "불일치" and p.reviews.count("불일치") < 2:
                 await self._review_pr(s, p.id)
                 return True
@@ -1244,6 +1247,67 @@ class DevService(PlanningCore):
         self._spawn_coder(task_id)
         return result
 
+    async def hand_to_subscription(self, task_id: str) -> ActionResult:
+        """사람이 '내 Claude로 넘기기': 멈춘 서버 AI 작업을 개발자 Claude 대기열에 올린다
+        (서버 AI로 넘기기의 반대). 서버 AI 예산·체험 한도를 다 썼을 때 이어 가는 길이다.
+
+        실패·사람 확인·중단으로 멈췄고 열린 PR이 없는 작업만. 회사 설정이 서버 AI만(`agent`)이어도
+        된다: 예산을 다 쓰면 새 작업도 내 Claude로 가기 때문이다 (`coding_choice`와 같게).
+        다시 시도와 같은 관문(dev_task_retry)을 지난다 (코드를 안 바꿔 A). 확인은 잠금 안에서
+        다시 한다 (그 사이 다시 시도·자동 다시 하기가 작업을 띄웠으면 거절)."""
+        self._check_to_subscription(self.state, task_id)
+
+        async def run(s: State) -> ActionResult:
+            x = self._check_to_subscription(s, task_id)
+            assert x.coding is not None
+            sp = next((p for p in s.specs if p.id == x.spec), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            ctx = req.context_id if req else f"task:{task_id}"
+            old = x.coding
+            text = f"{task_id} 사람이 내 Claude로 넘김 (연결 {old.connection})"
+            point = "dev_task_to_subscription"
+            n = sum(1 for g in self.gate_calls if g.action == "dev_task_retry") + 1
+            await self._execute(
+                "dev_task_retry", ctx, f"{task_id}:{n}", text,
+                {"connection": old.connection, "mode": "subscription"},
+            )  # fmt: skip
+            warns = _text_warnings(s, x)  # 내 Claude는 글 경고를 사람이 확인해야 가져간다
+            x.coding = CodingRun(
+                status="queued", updated_at=self.clock(), connection=old.connection,
+                llm_calls=old.llm_calls, llm_tokens=old.llm_tokens, mode="subscription",
+                picked=list(old.picked), text_warnings=warns,
+                text_ok_by=old.text_ok_by if set(warns) <= set(old.text_warnings) else None,
+            )  # fmt: skip
+            x.state = "진행 중"
+            s.activity.append(self._act(self.clock(), ctx, "human", "dev", point, "사람", text))
+            return ActionResult(
+                outcome="queued",
+                output={"task_id": task_id, "status": "queued", "mode": "subscription"},
+            )
+
+        result = await self._apply(run)
+        coder.drop_draft(self, task_id)  # 내 Claude는 서버가 써 둔 코드를 이어 쓰지 않는다
+        return result
+
+    def _check_to_subscription(self, s: State, task_id: str) -> Task:
+        """내 Claude로 넘길 수 있는 작업인가 (아니면 ActionError). 넘길 작업."""
+        task = next((t for t in s.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        cr = task.coding
+        if task.discarded:
+            raise ActionError("NOT_MOVABLE", f"{task_id}는 폐기한 작업이다")
+        if self.task_paused(s, task_id):
+            raise ActionError("REQUEST_PAUSED", f"{task_id}의 요청이 사람 중단 중이다 → 재개 뒤")
+        stopped = ("failed", "waiting_human", "canceled")
+        if cr.mode != "agent" or cr.status not in stopped or task_id in self._coding:
+            raise ActionError("NOT_MOVABLE", f"{task_id}는 멈춘 서버 AI 작업이 아니다")
+        if self._open_pr(s, task_id) is not None:
+            raise ActionError(
+                "NOT_MOVABLE", f"{task_id}는 PR이 열려 있다 → PR 화면에서 머지·추가 지시"
+            )
+        return task
+
     def coding_settings(self, s: State | None = None) -> dict[str, Any]:
         s = s or self.state
         mode, why = self.coding_choice(s)
@@ -1519,6 +1583,8 @@ class DevService(PlanningCore):
             and t.coding.mode == "agent" and t.coding.auto_retries < AUTO_RETRY_MAX
             and not t.discarded and t.id not in self._coding
             and (t.coding.updated_at is None or t.coding.updated_at <= due)
+            # 열린 PR이 있으면 다시 시도가 거절된다 (머지 충돌만 PR을 닫고 다시 쓴다)
+            and (t.coding.merge_conflict or self._open_pr(self.state, t.id) is None)
         ]  # fmt: skip
         done: list[str] = []
         for task_id in ids:
@@ -2127,10 +2193,21 @@ class DevService(PlanningCore):
                     "read",
                 )
             )
+            merged = ", ".join(p.id for p in prs)
+            why = f"배포 직전 머지 {merged} 확인 ({reason})" if approved else reason
             if approved:
-                reply = f"승인 · 배포 직전 머지 {', '.join(p.id for p in prs)} 확인 ({reason})"
+                reply = f"승인 · {why}"
             else:
                 reply = f"거절 · {reason} → completed + rejected_by_review"
+            # 아는 사건이면 "되돌리기" 단계에 결과를 남긴다. 모르는 사건은 만들지 않는다
+            # (사건 기록은 교차검증의 자기 기록이라 요청 값으로 지어내지 않는다)
+            incident = next((i for i in s.incidents if i.context_id == context_id), None)
+            if incident is not None:
+                incident.rollback_check = RollbackCheck(
+                    target=f"{service} {target_version}",
+                    result="승인" if approved else "거절",
+                    why=why,
+                )
             s.activity.append(
                 self._act(
                     t,
@@ -2634,11 +2711,17 @@ class DevService(PlanningCore):
         if over:
             raise ActionError("BUDGET_EXHAUSTED", f"{over} → 내 Claude로 넘기거나 예산을 늘린다")
         llm = None if sub else self._coding_llm()
+        mode = task.coding.mode
 
         async def run(s: State) -> ActionResult:
             x = next((t for t in s.tasks if t.id == task_id), None)
             if x is None or x.coding is None:
                 raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+            # 잠금 안에서 다시 본다: 그 사이 다른 클릭(내 Claude로 넘기기 등)이 바꿨으면 거절
+            if x.coding.mode != mode or x.coding.status not in resumable or x.discarded:
+                raise ActionError(
+                    "NOT_RETRYABLE", f"{task_id}는 그 사이 바뀌었다 → 화면을 다시 본다"
+                )
             sp = next((p for p in s.specs if p.id == x.spec), None)
             req = self._request_of_spec(s, sp) if sp else None
             ctx = req.context_id if req else f"task:{task_id}"
@@ -3041,6 +3124,25 @@ class DevService(PlanningCore):
 
         await self._apply(run)
 
+    @staticmethod
+    def _open_pr(s: State, task_id: str) -> PR | None:
+        """작업의 열린(병합·닫힘 아닌) PR."""
+        return next((p for p in s.prs if p.task == task_id and not p.merged and not p.closed), None)
+
+    def _keep_open_pr(self, s: State, task: Task, cr: CodingRun) -> None:
+        """열린 PR이 있는데 실패로 멈추면 사람 확인으로 둔다 (오류 글은 그대로).
+
+        다시 시도·폐기는 열린 PR이 있으면 서버가 거절하므로, 실패로 두면 사람이 할 수 있는 게
+        없다. 사람 확인이면 머지 버튼·추가 지시(같은 PR에 커밋)로 이어 간다. 에이전트 자동 다시
+        하기(`auto_retry_stuck`)도 PR이 있으면 못 하므로 잠깐 오류 표시를 끈다.
+        머지 충돌만 예외: 다시 시도가 PR을 닫고 최신 코드로 다시 쓴다."""
+        if cr.status != "failed" or cr.merge_conflict:
+            return
+        if self._open_pr(s, task.id) is None:
+            return
+        cr.status = "waiting_human"
+        cr.transient = False
+
     def coding_pr(self, job: coder.Job) -> PR | None:
         """이 작업이 연 PR (병합·닫힘 아닌 것). 수정 지시 실행이 고칠 대상."""
         return next(
@@ -3113,6 +3215,8 @@ class DevService(PlanningCore):
         mine = set(paths)
         same: list[str] = []
         undecided: list[str] = []
+        if self.queue_skipped(job):
+            return same, undecided  # 사람이 '지금 진행'을 누름: 기다리지 않는다
         for t in self.state.tasks:
             if t.id == job.task_id:
                 break  # 뒤에 만든 작업은 보지 않는다 (먼저 만든 쪽이 먼저 간다)
@@ -3127,6 +3231,60 @@ class DevService(PlanningCore):
             elif files & mine:
                 same.append(t.id)
         return same, undecided
+
+    def queue_skipped(self, job: coder.Job) -> bool:
+        """사람이 이 작업을 '지금 진행'으로 순서에서 뺐나 (실행 중에 눌러도 다음 확인 때 본다)."""
+        task = next((t for t in self.state.tasks if t.id == job.task_id), None)
+        return bool(job.skip_queue or (task and task.coding and task.coding.skip_queue))
+
+    async def skip_queue_dev_task(self, task_id: str, who: str | None = None) -> ActionResult:
+        """사람이 '지금 진행': 앞 작업(같은 파일·파일 고르는 중)을 기다리는 작업을 바로 잇게 한다.
+
+        앞 작업이 사람 확인(열린 PR)으로 멈추면 뒤 작업은 끝없이 기다리기 때문이다. 사람이
+        누를 때만 바뀐다 (에이전트는 켜지 않는다). 코드를 쓰는 건 그대로 PR 열기 관문을 지난다.
+        서버 AI 작업이 순서를 기다리는 중(`queued` + 기다리는 앞 작업)일 때만 된다. 확인은 잠금
+        안에서 다시 한다. 기다리던 실행이 없어 새로 띄워야 하면 예산도 본다."""
+        self._check_skip_queue(self.state, task_id)
+        spawn = False
+
+        async def run(s: State) -> ActionResult:
+            nonlocal spawn
+            x = self._check_skip_queue(s, task_id)
+            assert x.coding is not None
+            spawn = task_id not in self._coding
+            over = self.budget_over(s) if spawn else None
+            if over:
+                raise ActionError(
+                    "BUDGET_EXHAUSTED", f"{over} → 내 Claude로 넘기거나 예산을 늘린다"
+                )
+            sp = next((p for p in s.specs if p.id == x.spec), None)
+            req = self._request_of_spec(s, sp) if sp else None
+            ctx = req.context_id if req else f"task:{task_id}"
+            ahead = ", ".join(x.coding.waiting_for)
+            by = f" · {who}" if who else ""
+            text = f"{task_id} 지금 진행 (앞 작업 {ahead} 기다리지 않음, 사람{by})"
+            x.coding.skip_queue = True
+            x.coding.updated_at = self.clock()
+            s.activity.append(
+                self._act(self.clock(), ctx, "human", "dev", "dev_task_skip_queue", "사람", text)
+            )
+            return ActionResult(output={"task_id": task_id, "skip_queue": True})
+
+        result = await self._apply(run)
+        if spawn and task_id not in self._coding:  # 기다리던 실행이 없으면(재시작 등) 새로 띄운다
+            self._spawn_coder(task_id)
+        return result
+
+    def _check_skip_queue(self, s: State, task_id: str) -> Task:
+        """'지금 진행'을 받을 수 있는 작업인가 (아니면 ActionError). 그 작업."""
+        task = next((t for t in s.tasks if t.id == task_id), None)
+        if task is None or task.coding is None:
+            raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
+        cr = task.coding
+        waiting = cr.mode == "agent" and cr.status == "queued" and bool(cr.waiting_for)
+        if task.discarded or not waiting or cr.skip_queue:
+            raise ActionError("NOT_WAITING", f"{task_id}는 앞 작업 순서를 기다리는 중이 아니다")
+        return task
 
     def _coding_of(self, s: State, job: coder.Job) -> tuple[Task, CodingRun]:
         """이 실행의 작업. 초기화됐거나 새 실행으로 바뀌었으면 `CoderGone`."""
@@ -3171,7 +3329,8 @@ class DevService(PlanningCore):
                         s.usage_by_month.get(month, 0) + cr.llm_tokens - before
                     )
             cr.updated_at = self.clock()
-            if status == "waiting_human" and cr.pr is None:
+            self._keep_open_pr(s, task, cr)
+            if cr.status == "waiting_human" and cr.pr is None:
                 task.state = "C 보류"
             if status == "returned":  # 기획에 돌려보냄: receive_dev_result로 기획이 받는다
                 task.state = "중단"
@@ -3506,6 +3665,7 @@ class DevService(PlanningCore):
                         cr.error = f"{fail.text} → 사람 머지 버튼으로 다시 시도"
                     else:
                         cr.error = "형상관리 병합 실패 → 사람 머지 버튼으로 다시 시도"
+                    self._keep_open_pr(s, task, cr)  # 충돌이 아니면 사람 머지 버튼으로
                     self._code_act(s, job, "code.failed", cr.error)
                 return
             task.state = "PR 검수"
@@ -3564,6 +3724,7 @@ class DevService(PlanningCore):
                 cr.status = "failed"
                 cr.error = note.text
                 cr.updated_at = self.clock()
+                self._keep_open_pr(s, task, cr)  # PR은 그대로 열려 있다 → 머지·추가 지시
                 self._code_act(s, job, "code.failed", cr.error)
                 return
             p.gate = PrGate(result="통과", lines=lines, files=files, paths=coder.area_of(paths))
@@ -3666,6 +3827,12 @@ class DevService(PlanningCore):
         if p is None:
             return
         task = next((t for t in s.tasks if t.id == p.task), None)
+        if task is not None and task.coding is not None:
+            # 코딩 작업 PR은 개발 AI가 실제로 리뷰한다. LLM 없이 통과를 남기지 않는다
+            raise ActionError(
+                "NOT_REVIEWABLE",
+                f"{p.id}는 코딩 작업 PR이다 → 추가 지시를 보내면 같은 PR을 고치고 다시 리뷰한다",
+            )
         ctx = self._ctx_of_pr(s, p)
         text = f"{p.id} 수정 커밋 후 재검수 통과"
         await self._execute("review_pr", ctx, f"{p.id}:r{len(p.reviews) + 1}", text)
@@ -3677,14 +3844,47 @@ class DevService(PlanningCore):
         )
         await self._try_auto_merge(s, p)
 
-    async def _merge_pr(self, s: State, pr: str | int) -> None:
-        """사람 머지 버튼 (교차검증 대기·사람 확인 건의 판단도 여기서 한다)."""
+    async def _merge_pr(self, s: State, pr: str | int) -> ActionResult | None:
+        """사람 머지 버튼 (교차검증 대기·사람 확인 건의 판단도 여기서 한다).
+
+        형상관리 병합이 실패하면 기록(활동·작업 오류·충돌 표시)은 남기고 `merge_failed`를
+        돌려준다. `dispatch`가 그것을 이유가 담긴 `MERGE_FAILED` 오류로 바꾼다 (성공처럼
+        답하지 않는다). 충돌이면 다시 시도가 PR을 닫고 최신 코드로 다시 쓰게 표시한다."""
         p = self._find_pr(s, pr)
         if p is None or p.merged:
-            return
+            return None
         if self._repo_pending(p):
             raise ActionError("REPO_NOT_APPROVED", f"{p.id} 올릴 레포를 먼저 승인해야 한다")
-        await self._do_merge(s, p, pr_check(s, p), auto=False)
+        fail = await self._do_merge(s, p, pr_check(s, p), auto=False)
+        if fail is None:
+            return None
+        conflict = vcs_bridge.CONFLICT_MARK in fail
+        task = next((t for t in s.tasks if t.id == p.task), None)
+        cr = task.coding if task is not None else None
+        if task is not None and cr is not None and task.id not in self._coding:
+            if cr.status in ("opened", "waiting_human", "failed"):  # 내 Claude가 쥔 것은 그대로
+                cr.merge_conflict = conflict
+                cr.transient = False
+                if conflict:
+                    cr.status = "failed"
+                    cr.error = f"{p.id} 머지 충돌 → 최신 코드 기준으로 다시 작성"
+                else:
+                    cr.status = "waiting_human"
+                    cr.error = f"{fail} → 사람 머지 버튼으로 다시 시도"
+                cr.updated_at = self.clock()
+        return ActionResult(
+            outcome="merge_failed",
+            output={"pr": p.id, "reason": fail, "merge_conflict": conflict},
+        )
+
+    async def dispatch(self, action: dict) -> ActionResult:
+        """화면 액션. 사람 머지가 형상관리에서 실패하면 기록을 남긴 뒤 이유와 함께 오류로 답한다."""
+        result = await super().dispatch(action)
+        if result.outcome == "merge_failed":
+            out = result.output or {}
+            why = out.get("reason") or "형상관리 병합 실패"
+            raise ActionError("MERGE_FAILED", f"{why} → 머지하지 않음")
+        return result
 
     async def _try_auto_merge(self, s: State, p: PR) -> bool:
         """마지막 검수 통과 + merge_pr 규칙에 안 걸리면 자동 머지.
@@ -3866,7 +4066,8 @@ class DevService(PlanningCore):
         req = self._request_of_spec(s, sp) if sp else None
         return req.context_id if req else f"pr:{p.number}"
 
-    async def _do_merge(self, s: State, p: PR, check: Check, *, auto: bool) -> None:
+    async def _do_merge(self, s: State, p: PR, check: Check, *, auto: bool) -> str | None:
+        """관문 merge_pr 뒤 형상관리에서 병합한다. 병합하지 못하면 그 이유 한 줄 (됐으면 None)."""
         task = next((t for t in s.tasks if t.id == p.task), None)
         spec_id = task.spec if task else None
         sp = next((x for x in s.specs if x.id == spec_id), None)
@@ -3891,7 +4092,7 @@ class DevService(PlanningCore):
                 self._act(self.clock(), ctx, "planning", "planning", note.point, "API", note.text)
             )
             if not note.ok:
-                return
+                return note.text
         case = f"① kind pr_merged · {p.id}" + (" (자동 머지)" if auto else "")
         merged_hr = await self._send_hr(
             ctx, RecordKind.PR_MERGED, f"{p.id}:pr_merged", case,

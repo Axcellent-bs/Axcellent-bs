@@ -183,6 +183,8 @@ export interface Incident {
   at: string
   candidates: { pr: string; spec: string; para: string; mergedAt: string }[]
   rollbackCheck?: { target: string; result: '승인' | '거절'; why: string }
+  // 레포 되돌리기 PR 결과 (revert_merged_pr). at은 ISO 그대로 온다
+  revert?: { connectionId: string; sourcePr: number; revertPr: number | null; status: 'merged' | 'auto_merge_scheduled' | 'held'; url?: string | null; at: string } | null
   /** PR·문단에 연결함(link_incident). 장애 복구와는 상관없다 */
   linked: boolean
   followUp?: string
