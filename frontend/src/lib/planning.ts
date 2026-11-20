@@ -5,6 +5,7 @@ import type { Proposal } from './proposals'
 import { toVideoPlan } from './videoPlan'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useVisibleInterval } from './visibleInterval'
+import { createLatestGate } from './devChatView'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import { isNginxBlocked, NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from '@/lib/apiError'
 import { tokenFree } from '@/lib/apiDirect'
@@ -454,7 +455,8 @@ const isThread = (x: unknown): x is Json => !!x && typeof x === 'object' && type
 const toThread = (x: Json): ChatThread => camelize(x) as ChatThread
 // 개발 화면 대화 패널에는 이 화면에서 연 대화(origin screen)만 넣는다. 대시보드 AI 대화방 대화와
 // 어디서 열었는지 모르는 예전 대화는 뺀다 (SSE 상태에는 같이 실려 온다)
-const onScreen = (x: Json) => x.origin === 'screen'
+// 숨긴 대화(removed_at)도 뺀다 (기록으로 남아 SSE 상태에 같이 실려 온다)
+const onScreen = (x: Json) => x.origin === 'screen' && !x.removed_at
 export const toThreads = (d: unknown): ChatThread[] => (Array.isArray(d) ? d.filter(isThread).filter(onScreen).map(toThread) : [])
 
 export const chatApi = (base: string) => {
@@ -469,6 +471,10 @@ export const chatApi = (base: string) => {
     send: (x: ChatSend) => call<unknown>(base, '/dev-chat', post(x)).then(one),
     // 멈춘 작업을 AI 대화로 넘기기: 작업과 이어진 새 대화. 대화에서 파일을 정하고 '진행해'면 같은 작업을 다시 시도
     fromTask: (taskId: string, account: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/to-chat`, post({ account })).then(one),
+    // 끝내기(closed): 띄운 작업은 그대로 돈다. 답하는 중이면 THREAD_BUSY
+    close: (id: string, account: string) => call<unknown>(base, `/dev-chat/${encodeURIComponent(id)}/close?account=${encodeURIComponent(account)}`, post()).then(one),
+    // 숨기기: 목록에서 뺀다 (기록은 서버에 남는다). 띄운 작업은 그대로 돈다
+    remove: (id: string, account: string) => call<unknown>(base, `/dev-chat/${encodeURIComponent(id)}/remove?account=${encodeURIComponent(account)}`, post()).then(() => id),
   }
 }
 
@@ -567,9 +573,12 @@ export function useSharedStore(base: string): [State, SendAction, boolean] {
 
   useEffect(() => {
     let alive = true
+    // 갱신마다 교차검증 대기열을 따로 읽으므로 늦게 끝난 오래된 갱신이 최신을 덮을 수 있다 → 버린다
+    const gate = createLatestGate()
     const apply = async (raw: Record<string, unknown>) => {
+      const n = gate.start()
       const queue = await api.reviewQueue().catch(() => [] as QueueItem[])
-      if (alive) setState(fromBackend(raw, queue))
+      if (alive && gate.fresh(n)) setState(fromBackend(raw, queue))
     }
     const es = new EventSource(api.eventsUrl())
     es.addEventListener('state', (e) => {

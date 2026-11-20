@@ -419,6 +419,9 @@ export interface ChatThread {
   messages: ChatMessage[]
   taskId: string | null
   requestId?: string | null // 기획에 넘긴 요청 (REQ-…)
+  duplicateOf?: string | null // 기획이 같은 요청에 묶었으면 그 원래 요청
+  lastError?: string | null // 뒤에서 만든 답을 대화에 적지 못했을 때 한 줄 (다음 메시지가 적히면 지워짐)
+  removedAt?: string | null // 숨긴 대화 (SSE 상태에는 기록으로 남아 실려 온다)
   connection: string | null
   waitingFor?: string[] // 끝나기를 기다리는 요청 (충돌하는 요청이 끝나면 시작)
   mode?: CodingMode // 이 대화가 띄울 작업을 누가 코딩하나
