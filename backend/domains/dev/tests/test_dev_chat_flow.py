@@ -20,6 +20,7 @@ from ax_agent_template.llm import LLMResponseError
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
 from ax_workflow.models import Request, Spec, Task
 from dev_agent import dev_chat, vcs
+from dev_agent.dev_chat import ChatTurn, TurnPlan
 from dev_agent.main import app
 from planning_agent.domain.service import PlanningService
 
@@ -274,3 +275,213 @@ def test_handoff_with_repo_has_no_repo_hint(service: PlanningService, adapter) -
     with TestClient(app) as c:
         th = c.post(URL, json={"message": GO_MSG}).json()["data"]
     assert dev_chat.REPO_HINT not in th["messages"][-1]["text"]
+
+
+# ---------------------------------------------------------------- 리뷰 반영 (11/20)
+
+ASK = ChatTurn(reply="언제까지 필요한가요?", action="ask")
+
+
+def test_handed_chat_keeps_waiting_after_more_talk(service: PlanningService, adapter) -> None:
+    """넘긴 뒤 묻기만 하면 handed 그대로. 계획 답으로 talking이 돼도 요청을 기다리는 대화라
+    30분에 끝나지 않고, 확정되면 작업과 잇는다."""
+    later = TurnPlan(title="다른 계획", plan="문구를 또 바꾼다", done=["보인다"])
+    dev_chat.set_llm(ChatLLM([START, ASK, ChatTurn(reply="이렇게요", action="ask", plan=later)]))
+    with TestClient(app) as c:
+        c.post(URL, json={"message": GO_MSG})
+        th = c.post(URL, json={"thread_id": "chat-1", "message": "언제 돼?"}).json()["data"]
+        assert th["status"] == "handed"
+        th = c.post(URL, json={"thread_id": "chat-1", "message": "문구 또 바꿀래"}).json()["data"]
+        assert th["status"] == "talking" and th["request_id"] == "REQ-91"
+    base = service.clock()
+    service.clock = lambda: base + timedelta(minutes=dev_chat.CLOSE_AFTER_MINUTES + 1)
+    assert asyncio.run(dev_chat.close_idle(service)) == []
+    task_id = _start_dev(service, "REQ-91")
+    got = service.chat_of("chat-1")
+    assert got.status == "started" and got.task_id == task_id
+
+
+def test_chat_upkeep_steps_run_even_if_one_fails(
+    service: PlanningService, adapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ran: list[str] = []
+
+    async def boom(svc) -> list[str]:
+        raise RuntimeError("close_idle 실패")
+
+    def spy(name):
+        async def step(svc, *a) -> list[str]:
+            ran.append(name)
+            return []
+
+        return step
+
+    monkeypatch.setattr(dev_chat, "notice_long_waits", boom)
+    monkeypatch.setattr(dev_chat, "close_idle", boom)
+    monkeypatch.setattr(dev_chat, "release_stuck", spy("release_stuck"))
+    monkeypatch.setattr(dev_chat, "link_confirmed", spy("link_confirmed"))
+    failed = asyncio.run(service.chat_upkeep())
+    assert failed == ["notice_long_waits", "close_idle"]
+    assert ran == ["release_stuck", "link_confirmed"]
+
+
+class TwoTickets:
+    """첫 요청은 새 REQ-91, 다음 요청은 REQ-91에 묶인 REQ-92."""
+
+    def __init__(self):
+        self.got: list[AgentRequest] = []
+
+    async def __call__(self, req: AgentRequest) -> AgentResult:
+        self.got.append(req)
+        if len(self.got) == 1:
+            out = {"request_id": "REQ-91", "duplicate_of": None}
+            return AgentResult(
+                meta=req.meta, status=TaskStatus.COMPLETED, outcome="created", output=out
+            )
+        out = {"request_id": f"REQ-9{len(self.got)}", "duplicate_of": "REQ-91"}
+        return AgentResult(
+            meta=req.meta, status=TaskStatus.COMPLETED, outcome="linked_duplicate", output=out
+        )
+
+
+@pytest.mark.parametrize("other", [True, False])
+def test_duplicate_of_someone_elses_request_is_view_only(
+    service: PlanningService, adapter, monkeypatch: pytest.MonkeyPatch, other: bool
+) -> None:
+    """남의 요청에 묶여 이은 작업은 진행만 보여 준다 (PR 수정 지시를 보내지 않는다).
+    같은 계정이 낸 요청에 묶였으면 지금처럼 수정 지시가 간다."""
+    dev_chat.set_ticket_sender(TwoTickets())
+    dev_chat.set_llm(ChatLLM([START, START]))
+    with TestClient(app) as c:
+        c.post(URL, json={"message": GO_MSG, "account": "u1"})
+        b = c.post(URL, json={"message": GO_MSG, "account": "u2" if other else "u1"}).json()
+    b_id = b["data"]["id"]
+    task_id = _start_dev(service, "REQ-91")
+    got = service.chat_of(b_id)
+    assert got.status == "started" and got.task_id == task_id
+    assert dev_chat.view_only(service, got) is other
+    assert ("진행만 볼 수 있어요" in got.messages[-1].text) is other
+
+    revised: list[str] = []
+
+    async def revise(svc, llm, th, text):
+        revised.append(th.id)
+        return th
+
+    monkeypatch.setattr(dev_chat, "_open_pr_waiting", lambda svc, task_id: True)
+    monkeypatch.setattr(dev_chat, "_revise", revise)
+    dev_chat.set_llm(ChatLLM([]))
+    asyncio.run(dev_chat.send(service, b_id, "버튼 색도 바꿔 줘", account=got.account))
+    if other:
+        assert revised == [] and service.chat_of(b_id).messages[-1].text == dev_chat.VIEW_ONLY
+    else:
+        assert revised == [b_id]
+
+
+def test_link_confirmed_at_once_writes_one_started(service: PlanningService, adapter) -> None:
+    """확정 잇기가 겹쳐 와도(start_dev 직후 + 주기 루프) started는 한 번만 남는다."""
+    dev_chat.set_llm(ChatLLM([START]))
+    with TestClient(app) as c:
+        c.post(URL, json={"message": GO_MSG})
+    # start_dev 안의 잇기를 거치지 않게 다른 요청으로 작업을 받은 뒤 그 기획서를 이 요청에 붙인다
+    task_id = _start_dev(service, "REQ-5")
+    next(sp for sp in service.state.specs if sp.request == "REQ-5").request = "REQ-91"
+
+    async def both() -> list[list[str]]:
+        return await asyncio.gather(
+            dev_chat.link_confirmed(service), dev_chat.link_confirmed(service)
+        )
+
+    got = asyncio.run(both())
+    th = service.chat_of("chat-1")
+    assert sorted(len(x) for x in got) == [0, 1]
+    assert th.task_id == task_id and sum(1 for m in th.messages if m.kind == "started") == 1
+    # 잠금 밖에서 고른 뒤 늦게 온 잇기(이미 이어짐)는 잠금 안에서 다시 보고 적지 않는다
+    assert asyncio.run(dev_chat._started(service, "chat-1", task_id)) is False
+    th = service.chat_of("chat-1")
+    assert sum(1 for m in th.messages if m.kind == "started") == 1
+
+
+def test_link_confirmed_skips_answering_thread(service: PlanningService, adapter) -> None:
+    dev_chat.set_llm(ChatLLM([START]))
+    with TestClient(app) as c:
+        c.post(URL, json={"message": GO_MSG})
+    asyncio.run(service.chat_set("chat-1", status="answering"))
+    _start_dev(service, "REQ-91")
+    th = service.chat_of("chat-1")
+    assert th.status == "answering" and th.task_id is None  # 답하는 턴을 덮지 않는다
+    # 고른 뒤 답하는 턴이 시작됐으면(잠금 안에서 answering) 그 턴을 덮지 않는다
+    task_id = dev_chat.request_task(service, th)
+    assert asyncio.run(dev_chat._started(service, "chat-1", task_id)) is False
+    assert service.chat_of("chat-1").task_id is None
+    asyncio.run(service.chat_set("chat-1", status="handed"))
+    assert asyncio.run(dev_chat.link_confirmed(service)) == ["chat-1"]
+
+
+class SlowLLM:
+    """풀어 줄 때까지 답하지 않는 가짜 (갇힌 답)."""
+
+    def __init__(self, turn: ChatTurn):
+        from ax_agent_template.llm import LLMSettings
+
+        self.settings = LLMSettings(model="fake-chat", base_url="http://llm.invalid")
+        self.turn = turn
+        self.go: asyncio.Event | None = None
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+        assert self.go is not None
+        await self.go.wait()
+        return self.turn
+
+
+def test_late_answer_after_release_is_dropped(service: PlanningService, adapter) -> None:
+    """갇혀서 되돌린 뒤 늦게 온 답은 적지 않고, 상태도 바꾸지 않는다."""
+    slow = SlowLLM(START)
+    dev_chat.set_llm(slow)
+    dev_chat.set_background(True)
+
+    async def run() -> None:
+        slow.go = asyncio.Event()
+        th = await dev_chat.send(service, None, "배너 문구 바꿔 줘", who="yejin")
+        await asyncio.sleep(0.05)
+        base = service.clock()
+        service.clock = lambda: base + timedelta(seconds=dev_chat.ANSWER_STUCK_SECONDS + 1)
+        assert await dev_chat.release_stuck(service) == [th.id]
+        await service.chat_set(th.id, status="handed")  # 되돌린 뒤 다른 갱신이 있었다고 치고
+        slow.go.set()
+        await dev_chat.wait_idle()
+        got = service.chat_of(th.id)
+        assert got.status == "handed"
+        assert [m.kind for m in got.messages] == ["text", "error"]  # 늦은 계획은 버렸다
+
+    asyncio.run(run())
+
+
+def test_stuck_answering_in_linked_chat_goes_back_to_started(
+    service: PlanningService, adapter
+) -> None:
+    dev_chat.set_llm(ChatLLM([START]))
+    with TestClient(app) as c:
+        c.post(URL, json={"message": GO_MSG})
+    _start_dev(service, "REQ-91")
+
+    async def run() -> None:
+        await service.chat_add("chat-1", "user", "어떻게 돼?", status="answering")
+        base = service.clock()
+        service.clock = lambda: base + timedelta(seconds=dev_chat.ANSWER_STUCK_SECONDS + 1)
+        assert await dev_chat.release_stuck(service) == ["chat-1"]
+        assert service.chat_of("chat-1").status == "started"
+
+    asyncio.run(run())
+
+
+def test_request_task_picks_most_recent(service: PlanningService, adapter) -> None:
+    dev_chat.set_llm(ChatLLM([START]))
+    with TestClient(app) as c:
+        c.post(URL, json={"message": GO_MSG})
+    first = _start_dev(service, "REQ-91", n=1)
+    second = _start_dev(service, "REQ-91", n=2)
+    for t in service.state.tasks:
+        if t.id in (first, second):
+            t.coding = None
+    assert dev_chat.request_task(service, service.chat_of("chat-1")) == second

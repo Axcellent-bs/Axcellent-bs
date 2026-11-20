@@ -538,6 +538,8 @@ async def _go_on(
 ) -> ChatThread:
     """'진행해': 멈춘 작업과 이어진 대화면 같은 작업을 다시 시도, 아니면 기획에 요청으로 넘긴다."""
     if th.task_id and stuck_task(svc, th.task_id):
+        if view_only(svc, th):  # 남이 낸 같은 요청의 작업: 여기서 다시 시도하지 않는다
+            return await svc.chat_add(tid, "assistant", VIEW_ONLY, kind="error", plan=plan)
         return await _retry_with(svc, th, plan, reply)
     return await _handoff(svc, tid, plan, reply, connection=cid)
 
@@ -784,21 +786,42 @@ async def turn(
 async def _answer(
     svc: DevService, llm: Any, tid: str, text: str, conns: list[vcs.Connection], prev: str
 ) -> ChatThread:
-    """답 하나를 적는다. 답이 상태를 정하지 않았으면 보내기 전 상태로 되돌린다."""
+    """답 하나를 적는다. 답이 상태를 정하지 않았으면 보내기 전 상태로 되돌린다.
+
+    이 턴(마지막 사람 말)이 끝난 뒤(갇혀서 `release_stuck`이 되돌렸거나 새 말이 왔으면)에는
+    늦게 온 답·오류를 적지 않고, 다른 턴의 answering도 풀지 않는다."""
+    turn = _new_turn(tid)
     try:
-        await _reply(svc, llm, tid, text, conns, prev)
+        await _reply(svc, llm, tid, text, conns, prev, turn)
     except Exception as exc:  # noqa: BLE001 - 뒤에서 도는 답이라 오류도 대화에 남긴다
         log.warning("대화 %s 답을 적지 못함 (%s)", tid, type(exc).__name__)
-        await _note_error(
-            svc, tid, f"답을 만들지 못했어요 ({type(exc).__name__}). 다시 보내 주세요."
-        )
+        if _same_turn(svc, tid, turn):
+            await _note_error(
+                svc, tid, f"답을 만들지 못했어요 ({type(exc).__name__}). 다시 보내 주세요."
+            )
     th = svc.chat_of(tid)
-    if th is not None and th.status == "answering":
+    if th is not None and th.status == "answering" and _same_turn(svc, tid, turn):
         await svc.chat_set(tid, status=prev)
     found = svc.chat_of(tid)
     if found is None:  # 답하는 사이 사람이 대화를 지웠다
         raise ActionError("NOT_FOUND", f"대화 {tid}가 없다")
     return found
+
+
+# 대화마다 지금 답을 만드는 턴 번호 (이 프로세스 안). 새 턴이 시작되거나 갇혀서 되돌리면(
+# `release_stuck`) 번호가 바뀌어, 늦게 끝난 앞 턴은 답을 적지도 상태를 풀지도 않는다.
+# 다시 켜지면 비지만 그때 남은 answering은 `recover_orphans`가 되돌린다
+_turns: dict[str, int] = {}
+
+
+def _new_turn(tid: str) -> int:
+    _turns[tid] = _turns.get(tid, 0) + 1
+    return _turns[tid]
+
+
+def _same_turn(svc: DevService, tid: str, turn: int | None) -> bool:
+    """아직 이 턴이 대화의 지금 턴인가 (대화가 남아 있고 그 뒤로 새 턴·되돌리기가 없다)."""
+    return svc.chat_of(tid) is not None and (turn is None or _turns.get(tid) == turn)
 
 
 async def _note_error(svc: DevService, tid: str, text: str, status: str | None = None) -> None:
@@ -826,16 +849,22 @@ async def _answer_background(
 
 
 async def _reply(
-    svc: DevService, llm: Any, tid: str, text: str, conns: list[vcs.Connection], prev: str
+    svc: DevService,
+    llm: Any,
+    tid: str,
+    text: str,
+    conns: list[vcs.Connection],
+    prev: str,
+    turn: int | None = None,
 ) -> ChatThread:
     th = svc.chat_of(tid)
     assert th is not None
 
     # 기획에 넘긴 요청의 기획서가 확정돼 개발 작업이 생겼으면 그 작업을 이 대화에 잇는다
-    if prev == "handed":
-        found = request_task(svc, th)
-        if found is not None and found != th.task_id:
-            await _started(svc, tid, found)
+    # (넘긴 뒤 사람이 더 말해 talking이 된 대화도 요청이 남아 있으면 잇는다)
+    found = request_task(svc, th) if th.request_id else None
+    if found is not None and found != th.task_id:
+        if await _started(svc, tid, found, answering=True):
             th = svc.chat_of(tid)
             assert th is not None
             prev = "started"
@@ -848,6 +877,8 @@ async def _reply(
         ):
             return await svc.chat_add(tid, "assistant", status_reply(svc, th))
         if _open_pr_waiting(svc, th.task_id):
+            if view_only(svc, th):  # 남이 낸 같은 요청의 PR: 여기서 커밋하지 않는다
+                return await svc.chat_add(tid, "assistant", VIEW_ONLY, kind="error")
             return await _revise(svc, llm, th, text)
 
     # "진행해"만 왔고 세운 계획이 있으면 LLM을 부르지 않고 정해 둔 답으로 넘긴다
@@ -863,7 +894,12 @@ async def _reply(
             tid, "assistant", "AI 응답이 늦어 멈췄어요. 다시 보내 주세요.", kind="error"
         )
     except Exception as exc:  # noqa: BLE001 - 예외 내용 대신 종류만 남긴다
+        if not _same_turn(svc, tid, turn):
+            return svc.chat_of(tid) or th
         return await svc.chat_add(tid, "assistant", llm_error_text(exc), kind="error")
+    if not _same_turn(svc, tid, turn):  # 답이 오는 사이 턴이 끝났다 (갇혀서 되돌림·지움): 버린다
+        log.info("대화 %s 늦게 온 답을 버림", tid)
+        return svc.chat_of(tid) or th
 
     reply = str(out.reply or "").strip()[:MAX_REPLY_CHARS]
     new_plan = clean_plan(out.plan)
@@ -896,13 +932,15 @@ async def _reply(
                 status="talking",
             )
         kind = "plan" if new_plan else "question"
+        # 기획 확정을 기다리는 대화에 묻기만 했으면 기다림(handed)을 그대로 둔다
+        rest = "handed" if prev == "handed" and new_plan is None else "talking"
         return await svc.chat_add(
             tid,
             "assistant",
             reply or "조금 더 알려 주세요.",
             kind=kind,
             plan=new_plan,
-            status="talking",
+            status=rest,
         )
 
     assert plan is not None
@@ -959,8 +997,9 @@ async def _link(
     request_id: str | None = None,
     task_id: str | None = None,
     duplicate_of: str | None = None,
+    only_if: Callable[[ChatThread, State], bool] | None = None,
 ) -> None:
-    """대화에 기획 요청·개발 작업을 잇는다.
+    """대화에 기획 요청·개발 작업을 잇는다. `only_if`가 있으면 잠금 안에서 확인하고 아니면 둔다.
 
     메시지 없이 바꾸는 대화 기록일 뿐이라 관문을 다시 타지 않는다."""
 
@@ -968,6 +1007,8 @@ async def _link(
         th = next((c for c in _live(s) if c.id == tid), None)
         if th is None:
             raise ActionError("NOT_FOUND", f"대화 {tid}가 없다")
+        if only_if is not None and not only_if(th, s):
+            return
         if request_id is not None:
             th.request_id = request_id
             th.duplicate_of = duplicate_of  # 새로 넘긴 요청이면 지난 묶음은 지운다
@@ -979,58 +1020,121 @@ async def _link(
     await svc._apply(run)
 
 
-def request_task(svc: DevService, th: ChatThread) -> str | None:
+def request_task(svc: DevService, th: ChatThread, s: State | None = None) -> str | None:
     """대화가 기획에 넘긴 요청으로 생긴 개발 작업. 없으면 None.
 
     기획서가 확정돼 개발로 넘어온 작업이다 (start_dev). 기획이 같은 요청에 묶었으면
     (`duplicate_of`) 원래 요청의 기획서 작업도 본다. 코딩이 이미 붙은 작업을 먼저 고르고,
     start_dev로 막 받아 코딩 기록이 아직 없는 작업도 잇는다."""
+    st = s or svc.state
     rids = {r for r in (th.request_id, th.duplicate_of) if r}
     if not rids:
         return None
-    specs = {sp.id for sp in svc.state.specs if sp.request in rids}
-    tasks = [t for t in svc.state.tasks if t.spec in specs and not t.discarded]
+    specs = {sp.id for sp in st.specs if sp.request in rids}
+    tasks = [t for t in st.tasks if t.spec in specs and not t.discarded]
+    # 가장 최근 것: 코딩이 붙은 작업 중 최근 → 없으면 받은 작업 중 최근
     task = next((t for t in reversed(tasks) if t.coding is not None), None) or next(
-        iter(tasks), None
+        reversed(tasks), None
     )
     return task.id if task else None
 
 
-async def _started(svc: DevService, tid: str, task_id: str) -> None:
-    """기획서 확정으로 생긴 작업을 대화에 잇고 started 메시지(작업 카드)를 남긴다.
+def waits_request(svc: DevService, th: ChatThread, s: State | None = None) -> bool:
+    """기획에 넘긴 요청이 아직 이 대화의 작업으로 이어지지 않았나 (확정 기다림 또는 막 확정됨).
 
+    넘긴 뒤 사람이 더 말해 talking이 된 대화도 같은 기준으로 본다 (잇기·자동 끝내기)."""
+    if not th.request_id or th.status == "closed":
+        return False
+    found = request_task(svc, th, s)
+    return found is None or found != th.task_id
+
+
+# 남이 낸 같은 요청에 묶여 이은 작업: 진행만 보여 주고 PR 수정·다시 시도는 하지 않는다
+VIEW_ONLY = (
+    "이 작업은 다른 사람이 낸 같은 요청의 작업이라 여기서는 진행만 볼 수 있어요. "
+    "바꿀 내용은 새 대화로 요청해 주세요."
+)
+
+
+def _owns_request(th: ChatThread, rid: str, s: State) -> bool:
+    """`rid`를 넘긴 다른 대화가 같은 계정·같은 사람의 것인가 (대화가 아닌 요청이면 False)."""
+    return any(
+        c.id != th.id and c.request_id == rid and c.account == th.account and c.who == th.who
+        for c in s.chats
+    )
+
+
+def view_only(svc: DevService, th: ChatThread, s: State | None = None) -> bool:
+    """이은 작업이 묶인 원래 요청(`duplicate_of`)의 것이고, 그 요청이 남의 것인가."""
+    st = s or svc.state
+    if not th.task_id or not th.duplicate_of:
+        return False
+    task = next((t for t in st.tasks if t.id == th.task_id), None)
+    spec = next((sp for sp in st.specs if task is not None and sp.id == task.spec), None)
+    if spec is None or spec.request != th.duplicate_of or spec.request == th.request_id:
+        return False
+    return not _owns_request(th, th.duplicate_of, st)
+
+
+async def _started(svc: DevService, tid: str, task_id: str, *, answering: bool = False) -> bool:
+    """기획서 확정으로 생긴 작업을 대화에 잇고 started 메시지(작업 카드)를 남긴다. 이었으면 True.
+
+    잠금 안에서 다시 확인한다: 아직 이 작업으로 안 이었고, 끝내지 않았고, 답하는 중이 아니다
+    (`answering`이면 답하는 중인 대화도 잇는다: 그 턴 안에서 부를 때). 그래서 같은 확정이 겹쳐
+    와도 started는 한 번만 남고, 다른 턴의 answering을 덮지 않는다.
     메시지를 관문이 막으면 카드 없이 잇기만 한다 (관문을 안 타는 대화 기록)."""
-    text = f"기획서가 확정돼 {task_id} 작업이 시작됐어요. 진행은 여기서 볼 수 있어요."
+    ok: list[bool] = []
+
+    def fresh(th: ChatThread, s: State) -> bool:
+        good = (
+            th.status != "closed"
+            and (answering or th.status != "answering")
+            and th.task_id != task_id
+            and request_task(svc, th, s) == task_id
+        )
+        ok.append(good)
+        return good
+
+    th = svc.chat_of(tid)
+    watch = th is not None and view_only(svc, th.model_copy(update={"task_id": task_id}))
+    text = (
+        f"같은 요청 {th.duplicate_of}의 기획서가 확정돼 {task_id} 작업이 시작됐어요. "
+        "다른 사람이 낸 요청이라 여기서는 진행만 볼 수 있어요."
+        if watch and th is not None
+        else f"기획서가 확정돼 {task_id} 작업이 시작됐어요. 진행은 여기서 볼 수 있어요."
+    )
     try:
         await svc.chat_add(
-            tid, "assistant", text, kind="started", task_id=task_id, status="started"
-        )
+            tid, "assistant", text, kind="started", task_id=task_id, status="started",
+            only_if=fresh,
+        )  # fmt: skip
     except ActionError:
         raise  # 지운 대화
     except Exception:  # noqa: BLE001 - 관문 거절 등: 작업과 잇기는 한다
         log.warning("대화 %s에 작업 %s 시작을 적지 못함", tid, task_id, exc_info=True)
-        await _link(svc, tid, task_id=task_id)
+        ok.clear()
+        await _link(svc, tid, task_id=task_id, only_if=fresh)
+    return bool(ok) and ok[-1]
 
 
 async def link_confirmed(svc: DevService, request_id: str | None = None) -> list[str]:
-    """기획에 넘긴(handed) 대화 중 기획서가 확정돼 작업이 생긴 대화를 그 작업과 잇는다.
+    """기획에 넘긴 요청이 아직 작업과 안 이어진 대화 중 기획서가 확정돼 작업이 생긴 대화를 잇는다.
 
     `request_id`를 주면 그 요청(또는 그 요청에 묶인 대화)만 본다 (start_dev 직후).
     답하는 중(answering)인 대화는 답이 끝난 뒤 다음 차례(주기 루프·다음 말)에 잇는다.
     실패는 로그만 남긴다 (부르는 쪽 흐름을 막지 않는다). 이은 대화 id를 준다."""
     linked: list[str] = []
-    for th in [c for c in _live(svc.state) if c.status == "handed"]:
+    for th in [c for c in _live(svc.state) if c.status != "answering" and waits_request(svc, c)]:
         if request_id is not None and request_id not in (th.request_id, th.duplicate_of):
             continue
         found = request_task(svc, th)
-        if found is None or found == th.task_id:
+        if found is None:
             continue
         try:
-            await _started(svc, th.id, found)
+            if await _started(svc, th.id, found):
+                linked.append(th.id)
         except Exception:  # noqa: BLE001 - 다음 차례에 다시
             log.warning("대화 %s를 작업 %s에 잇지 못함", th.id, found, exc_info=True)
-            continue
-        linked.append(th.id)
     return linked
 
 
@@ -1287,7 +1391,11 @@ async def remove(
 
 
 def _idle_closable(svc: DevService, th: ChatThread) -> bool:
-    """오래 말이 없을 때 끝내도 되나: 작업이 돌거나 PR 확인·앞 요청을 기다리면 두고 본다."""
+    """오래 말이 없을 때 끝내도 되나: 작업이 돌거나 PR 확인·앞 요청·기획 확정을 기다리면 둔다.
+
+    기획에 넘긴 요청을 기다리는 대화는 넘긴 뒤 더 말해 talking이 됐어도 handed처럼 둔다."""
+    if waits_request(svc, th):
+        return False
     if th.status in ("talking", "blocked"):
         return True
     if th.status != "started":
@@ -1342,15 +1450,18 @@ async def recover_orphans(svc: DevService) -> list[str]:
 
 
 def _resting_status(th: ChatThread) -> str:
-    """갇힌 answering을 되돌릴 상태: 마지막 AI 말로 본다 (작업 시작·기획 넘기기·그 밖은 대화 중)."""
+    """갇힌 answering을 되돌릴 상태.
+
+    마지막 AI 말이 기획 넘기기면 handed, 계획·질문이면 talking. 그 밖에는 작업이 이어진
+    대화(started 메시지가 있음)면 started, 요청만 넘겼으면 handed, 아니면 talking."""
     last = next((m for m in reversed(th.messages) if m.role == "assistant"), None)
-    if last is None:
-        return "handed" if th.request_id and not th.task_id else "talking"
-    if last.kind == "started" or (last.kind == "text" and th.task_id):
-        return "started"
-    if last.kind == "handoff":
+    if last is not None and last.kind == "handoff":
         return "handed"
-    return "talking"
+    if last is not None and last.kind in ("plan", "question"):
+        return "talking"
+    if th.task_id and any(m.kind == "started" for m in th.messages):
+        return "started"
+    return "handed" if th.request_id else "talking"
 
 
 async def release_stuck(svc: DevService) -> list[str]:
@@ -1363,6 +1474,7 @@ async def release_stuck(svc: DevService) -> list[str]:
         th = svc.chat_of(tid)
         if th is None:
             continue
+        _new_turn(tid)  # 아직 도는 답이 있으면 그 턴을 끝난 것으로 (늦게 와도 버린다)
         await _note_error(
             svc, tid, "답이 너무 오래 걸려 멈췄어요. 다시 보내 주세요.", status=_resting_status(th)
         )

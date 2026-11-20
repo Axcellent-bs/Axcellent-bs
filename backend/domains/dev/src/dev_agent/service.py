@@ -241,15 +241,31 @@ class DevService(PlanningCore):
                     await self.recheck_ci()  # CI 실패로 멈춘 PR: 나중에 통과하면 다시 판단
                     await self.auto_retry_stuck()  # 잠깐 생긴 오류로 멈춘 작업: 한 번 다시
                     await work_queue.expire_leases(self)  # 진행 보고가 끊긴 구독형 작업 되돌리기
-                    # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
-                    await dev_chat.notice_long_waits(self)
-                    await dev_chat.close_idle(self)  # 30분 말이 없는 대화를 끝낸다
-                    await dev_chat.release_stuck(self)  # 답이 너무 오래 안 오는 대화를 되돌린다
-                    await dev_chat.link_confirmed(self)  # 확정된 기획서 작업을 넘긴 대화에 잇기
                 except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
-                    continue  # 다음 차례에 다시
+                    pass  # 다음 차례에 다시 (대화 손보기는 그대로 돈다)
+                await self.chat_upkeep()
 
         self._pr_sync = asyncio.get_running_loop().create_task(loop())
+
+    async def chat_upkeep(self) -> list[str]:
+        """개발 AI 대화 주기 손보기. 단계마다 따로 잡아 앞 단계가 실패해도 다음 단계는 돈다.
+
+        오래 기다리는 대화 알림 → 30분 말 없는 대화 끝내기 → 갇힌 답 되돌리기 → 확정된 기획서
+        작업 잇기. 실패한 단계 이름을 준다 (시험·점검용)."""
+        from dev_agent import dev_chat
+
+        failed: list[str] = []
+        for name, step in (
+            ("notice_long_waits", dev_chat.notice_long_waits),
+            ("close_idle", dev_chat.close_idle),
+            ("release_stuck", dev_chat.release_stuck),
+            ("link_confirmed", dev_chat.link_confirmed),
+        ):
+            try:
+                await step(self)
+            except Exception:  # noqa: BLE001 - 한 단계 실패로 다른 단계가 멈추지 않게 한다
+                failed.append(name)
+        return failed
 
     # ---- 기획 → 개발 넘기기 (서비스 역할이 있을 때만)
 
@@ -2459,10 +2475,13 @@ class DevService(PlanningCore):
         who: str | None = None,
         origin: str | None = None,
         account: str | None = None,
+        only_if: Callable[[ChatThread, State], bool] | None = None,
     ) -> ChatThread:
         """대화에 메시지 하나를 더한다. thread_id가 없으면 새 대화(`chat-n`)를 연다.
 
-        `origin`(screen·dashboard)·`account`(개발 화면 계정)는 새 대화에만 남긴다."""
+        `origin`(screen·dashboard)·`account`(개발 화면 계정)는 새 대화에만 남긴다.
+        `only_if`가 있으면 상태 잠금 안에서 그 대화를 확인하고, 아니면 아무것도 적지 않는다
+        (확인과 적기 사이에 다른 갱신이 끼지 않게)."""
 
         async def run(s: State) -> ActionResult:
             t = self.clock()
@@ -2482,6 +2501,8 @@ class DevService(PlanningCore):
                 if found is None:
                     raise ActionError("NOT_FOUND", f"대화 {thread_id}가 없다")
                 th = found
+                if only_if is not None and not only_if(th, s):
+                    return ActionResult(outcome="chat", output={"thread_id": th.id})
             mid = f"m{len(th.messages) + 1}"
             await self._execute(
                 "dev_chat",

@@ -32,6 +32,7 @@ const EXAMPLES = [
   '로그인 실패 시 안내 문구를 친절하게 바꿔 줘',
 ]
 const RECENT_MS = 10 * 60_000
+const SETTINGS_RELOAD_MS = 60_000 // 패널을 연 동안 설정·레포 연결을 다시 읽는 간격
 
 const taskOf = (s: S, t: ChatThread): Task | undefined => (t.taskId ? s.tasks.find((x) => x.id === t.taskId) : undefined)
 
@@ -98,15 +99,27 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   const box = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
 
+  // 설정(서버 AI 키)·레포 연결은 패널을 연 동안 다시 읽는다: 도구 연결에서 키·레포를 넣고 돌아오거나
+  // (창 포커스) 다른 사람이 바꿨을 때 (SETTINGS_RELOAD_MS마다, 화면이 보일 때만) 안내가 풀린다
   useEffect(() => {
-    codingSettingsApi(DEV_API).get().then(setSetting).catch(() => setSetting(null))
-  }, [])
-  useEffect(() => {
-    vcsApi(DEV_API).list().then((c) => {
-      setConns(c)
-      setConnsRead(true)
-      setConn((x) => x || c[0]?.id || '')
-    }).catch(() => setConns([]))
+    const load = () => {
+      codingSettingsApi(DEV_API).get().then(setSetting).catch(() => setSetting(null))
+      vcsApi(DEV_API).list().then((c) => {
+        setConns(c)
+        setConnsRead(true)
+        setConn((x) => x || c[0]?.id || '')
+      }).catch(() => setConns([]))
+    }
+    load()
+    const onFocus = () => { if (!document.hidden) load() }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
+    const t = setInterval(onFocus, SETTINGS_RELOAD_MS)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
+      clearInterval(t)
+    }
   }, [])
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => e.key === 'Escape' && onClose()
