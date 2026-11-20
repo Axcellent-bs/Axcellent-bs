@@ -289,3 +289,30 @@ def test_finance_relay_from_orchestrator_has_no_video_plan() -> None:
 def test_old_receive_output_without_video_plan_still_valid() -> None:
     old = {"outcome": "created", "proposal_id": "PROP-1"}
     assert ReceiveInsightOutput.model_validate(old).video_plan is None
+
+
+# ------------------------------------- 마케팅 장면 템플릿 힌트 (11/20 재헌 님과 맞춤, PR #1496)
+
+
+def test_media_hints_season_from_kst_month_and_color_from_angle() -> None:
+    # 11/30 15:00 UTC = 12/1 00:00 KST → 겨울
+    late = vp.rule_plan(_prop(created_at=datetime(2026, 11, 30, 15, 0, tzinfo=UTC)))
+    assert late.media_hints is not None and late.media_hints.season == "winter"
+    plan = vp.rule_plan(_prop())  # 11/19 → 가을, 상품 앞세우기 → 따뜻한 크림
+    assert plan.media_hints is not None
+    assert (plan.media_hints.season, plan.media_hints.color_theme) == ("autumn", "warm cream")
+    assert plan.media_hints.category is None  # 책 분류는 기획이 모르니 지어내지 않는다
+    assert vp.rule_plan(_prop(angle=None)).media_hints.color_theme is None
+
+
+def test_llm_plan_carries_same_hints() -> None:
+    plan = asyncio.run(vp.write(_mock(_llm_out()), _prop(), "ctx-1"))
+    assert plan.written_by == "llm" and plan.media_hints == vp.media_hints(_prop())
+
+
+def test_old_video_plan_without_media_hints_still_valid() -> None:
+    old = vp.rule_plan(_prop()).model_dump(exclude={"media_hints"})
+    assert VideoPlan.model_validate(old).media_hints is None
+    dumped = vp.rule_plan(_prop()).model_dump(mode="json")
+    assert dumped["media_hints"] == {"season": "autumn", "color_theme": "warm cream",
+                                     "category": None}  # fmt: skip

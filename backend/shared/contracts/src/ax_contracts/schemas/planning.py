@@ -630,6 +630,17 @@ class ReceiveInsightOutput(AxModel):
     video_plan: VideoPlan | None = None
 
 
+class VideoMediaHints(AxModel):
+    """마케팅 장면 템플릿 필드에 넣을 기획 힌트 (11/20 재헌 님과 맞춤). 모두 선택 짧은 문자열.
+
+    마케팅이 `check_field_value`로 검사해 통과한 값만 쓰고, 비거나 걸리면 자기 추천값을 쓴다.
+    화이트리스트는 마케팅 `scene_templates.toml`에만 있다(여기에 enum으로 복사하지 않는다)."""
+
+    season: str | None = Field(default=None, max_length=30)  # spring·summer·autumn·winter
+    color_theme: str | None = Field(default=None, max_length=30)  # 예: warm cream
+    category: str | None = Field(default=None, max_length=30)  # 책 분류 짧은 단어
+
+
 class VideoScene(AxModel):
     """영상 제작안의 장면 하나 (11/19 홍보영상 솔루션 ③ 장면별 스토리보드).
 
@@ -664,6 +675,7 @@ class VideoPlan(AxModel):
     style: str = Field(min_length=1, max_length=300)  # 공통 화풍 (영문)
     negative: str = Field(min_length=1, max_length=300)  # 공통 금지 (영문)
     written_by: Literal["llm", "rule", "human"] = "rule"
+    media_hints: VideoMediaHints | None = None  # 마케팅 장면 템플릿 힌트 (11/20, 선택)
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:
