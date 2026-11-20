@@ -39,6 +39,7 @@ _FACT_KEYS = (
     "media_id", "media_kind", "post_draft_id", "asset_ref", "sha256", "provider", "model_id",
     "resolution", "quality", "duration_s", "clip_count", "muted", "usage", "usage_source",
     "ai_generated", "execution_id", "request_sha256", "scene_template_id", "replayed",
+    "label", "label_reason", "labeled_ref", "labeled_sha256", "draft_stage",
 )  # fmt: skip
 
 Runner = Callable[[AgentRequest], Awaitable[AgentResult]]

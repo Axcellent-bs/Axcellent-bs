@@ -52,6 +52,7 @@ from marketing_agent import (
     manual_publish,
     outage_sns_media,
     publish_control,
+    request_video,
     secret_requests,
     shop_client,
     video_draft,
@@ -1347,6 +1348,10 @@ async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentRes
     return video_draft.prepare_video_draft(request, STATE.sns)
 
 
+async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
+    return await request_video.list_request_videos(request, STATE.sns)
+
+
 async def draft_outage_sns_post_skill(request: AgentRequest) -> AgentResult:
     """장애 사과·보상 SNS 글 초안만 만든다. 게시·미디어 생성은 부르지 않는다."""
     return await draft_outage_sns_post(request, STATE.notices, STATE.sns)
@@ -1377,9 +1382,11 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
 
 
 async def _generate_media_sync(request: AgentRequest) -> AgentResult:
-    return await generate_media_flow(
+    result = await generate_media_flow(
         request, ledger=STATE.media_ledger, from_decision=_from_decision
     )
+    # 의뢰 영상 초안이면 완료 직전에 AI 라벨을 입혀 초안에 연결한다(동기·비동기 공통)
+    return await request_video.attach_label_after_generate(request, result, store=STATE.sns)
 
 
 async def generate_media_skill(request: AgentRequest) -> AgentResult:
@@ -1717,6 +1724,7 @@ HANDLERS = {
     "prepare_video_draft_from_plan": prepare_video_draft_from_plan_skill,
     "draft_outage_sns_post": draft_outage_sns_post_skill,
     "list_outage_sns_drafts": list_outage_sns_drafts_skill,
+    "list_request_videos": list_request_videos_skill,
     "merge_outage_sns_drafts": merge_outage_sns_drafts_skill,
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,

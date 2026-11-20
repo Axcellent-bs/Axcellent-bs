@@ -280,7 +280,9 @@ def prepare_video_draft(
         platform_options=options_meta,
         caption_source=meta,
     )
-    store.save(draft)
+    existing = store.get(draft.post_draft_id)
+    if existing is None or not existing.asset_ref:  # 영상이 이미 연결된 초안은 덮어쓰지 않는다
+        store.save(draft)
 
     used_s = template.duration_s or plan.duration_s
     generate_input: dict[str, Any] = {
