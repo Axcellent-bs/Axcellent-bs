@@ -9,6 +9,7 @@ import { PublishControlCard } from "./PublishControlCard";
 import { VideoProviderCard } from "./VideoProviderCard";
 import { CostLimitCard } from "./CostLimitCard";
 import { CharacterSheetMaker } from "./CharacterSheetMaker";
+import { RequestVideos } from "./RequestVideos";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, type StoredBrief } from "@/lib/briefs";
 
 // SNS·미디어 탭. 이미지·영상 생성을 안내하고(SNS 게시 흐름·캐러셀·AI 표시 안내는 Instagram 자동 게시 카드의 물음표),
@@ -88,6 +89,8 @@ export function SnsMedia() {
       <CostLimitCard />
 
       <CharacterSheetMaker />
+
+      <RequestVideos />
 
       <Section title="받은 기획안에서 넘어온 작업" desc="받은 기획안 탭에서 SNS·미디어로 넘긴 기획안입니다. 넘기면 글 초안과 미디어 요청 초안까지만 만들고, 아래 다음 단계는 사람이 이어서 합니다. '미디어 만들기'를 누르면 예상 비용을 확인한 뒤 저장된 종류·필드로 미디어를 만들고 초안 검사까지 합니다. 게시는 하지 않으며 사람 승인(C 등급)이 따로 필요합니다. 종류와 필드는 받은 기획안 탭에서 바꿀 수 있습니다.">
         <ol className="flex flex-wrap items-center gap-1 text-xs text-ink-700" aria-label="다음 단계">
