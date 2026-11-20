@@ -46,6 +46,14 @@ class Fake:
 
 @pytest.fixture(autouse=True)
 def _real_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ax_dashboard_api import chat_read
+
+    async def own_thread(agent: str, thread_id: str, who: str, authorization: object) -> dict:
+        # 단톡방에 처음 올릴 때 본인 확인: 올리는 사람 대화라고 답한다
+        # (본인 확인 자체는 test_office_shared_read가 따로 시험)
+        return {"id": thread_id, "who": who, "restricted": False, "messages": []}
+
+    monkeypatch.setattr(chat_read, "get_thread", own_thread)
     monkeypatch.delenv("DASHBOARD_MOCK", raising=False)
     monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
     monkeypatch.setenv("DASHBOARD_API_TOKEN", "test-token")

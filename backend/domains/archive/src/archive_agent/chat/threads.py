@@ -24,11 +24,14 @@ CREATE TABLE IF NOT EXISTS archive_chat_threads (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   removed_at TEXT,
-  removed_by TEXT
+  removed_by TEXT,
+  room_id TEXT
 )
 """
-# 숨김 처리(지우지 않고 `removed_at`·`removed_by`만 남긴다)를 더하기 전에 만든 DB에 붙일 칸
-_ADDED_COLUMNS = ("removed_at", "removed_by")
+# 숨김 처리(지우지 않고 `removed_at`·`removed_by`만 남긴다)를 더하기 전에 만든 DB에 붙일 칸.
+# room_id(11/20): 단톡방(전체 대화방 "all"·이슈 방 context_id)에서 만든 대화.
+# 있으면 누구나 원문을 읽는다
+_ADDED_COLUMNS = ("removed_at", "removed_by", "room_id")
 _LIVE = "removed_at IS NULL"  # 숨긴 대화는 모든 조회에서 뺀다
 
 
@@ -52,6 +55,7 @@ def _view(row: dict[str, Any]) -> dict[str, Any]:
         "task_id": None,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "room_id": row.get("room_id"),  # 단톡방에서 만든 대화면 그 방 (1:1이면 None)
     }
 
 
@@ -85,7 +89,8 @@ def remove(svc: Services, thread_id: str, by: str) -> bool:
     return changed > 0
 
 
-def create(svc: Services, title: str, who: str | None) -> dict[str, Any]:
+def create(svc: Services, title: str, who: str | None,
+           room_id: str | None = None) -> dict[str, Any]:  # fmt: skip
     ensure(svc)
     row = svc.store.one("SELECT COALESCE(MAX(seq), 0) AS n FROM archive_chat_threads")
     seq = int(row["n"]) + 1 if row else 1
@@ -93,9 +98,9 @@ def create(svc: Services, title: str, who: str | None) -> dict[str, Any]:
     thread_id = f"archchat-{seq}"
     svc.store.execute(
         "INSERT INTO archive_chat_threads"
-        "(id, seq, title, status, who, summary, messages, created_at, updated_at)"
-        " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?)",
-        (thread_id, seq, title, who, now, now),
+        "(id, seq, title, status, who, summary, messages, created_at, updated_at, room_id)"
+        " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?, ?)",
+        (thread_id, seq, title, who, now, now, room_id),
     )
     return get(svc, thread_id) or {}
 

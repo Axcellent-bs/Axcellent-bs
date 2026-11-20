@@ -75,6 +75,19 @@ ScopeCheck = Callable[[dict[str, Any], dict[str, Any]], bool]
 OUT_OF_SCOPE = "out_of_scope"
 
 
+def _dig(out: dict[str, Any], path: str) -> Any:
+    """`items.0.campaign_id`처럼 점으로 이은 길을 따라 결과 안쪽 값을 꺼낸다. 없으면 None."""
+    cur: Any = out
+    for part in path.split("."):
+        if isinstance(cur, dict):
+            cur = cur.get(part)
+        elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+            cur = cur[int(part)]
+        else:
+            return None
+    return cur
+
+
 def in_catalog(row: dict[str, Any], spec: dict[str, Any]) -> bool:
     """이 단계가 고른 일의 일 목록에 있는 단계(부서·skill)와 같은가. 다르면 시키지 않는다."""
     task = request_tasks.get(row.get("task"))
@@ -258,7 +271,9 @@ class RequestRunner:
         if spec.get(
             "fill"
         ):  # 고객 문장에서 기간 같은 입력을 채운다. 못 채우면 부서에 보내지 않는다
-            filled = request_inputs.fill(spec["fill"], row["text"], self._clock())
+            filled = request_inputs.fill(
+                spec["fill"], row["text"], self._clock(), row["request_id"]
+            )
             if filled.ask:
                 self._update(
                     rid,
@@ -426,7 +441,7 @@ class RequestRunner:
     def _ref_of(out: dict[str, Any], spec: dict[str, Any]) -> str | None:
         """부서가 정한 결과 번호만 읽는다. 번호 모양이 아니면(문장 등) 버린다."""
         key = spec.get("ref_key")
-        ref = out.get(key) if key else None
+        ref = _dig(out, key) if key else None
         return ref if isinstance(ref, str) and REF_PATTERN.fullmatch(ref) else None
 
     def _wait(self, rid: str, step_id: str, result: AgentResult, out: dict[str, Any]) -> None:
