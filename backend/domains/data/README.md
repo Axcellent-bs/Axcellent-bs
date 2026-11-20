@@ -1168,6 +1168,12 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
   - 네이버: 검색어 트렌드 1번(필터로 값이 없는 키워드가 있으면 전체로 1번 더) + 쇼핑인사이트 키워드마다 1번(최대 7번) + 검색광고 키워드 도구 최대 1번(그날 keyword_pool에 없을 때, 검색광고 하루 상한). 커넥터 하루 캐시·네이버 전체 상한과 trend_age 예산 표(호출자 `trend_report`)를 같이 쓴다(새 예산 없음). 한도면 그 키워드만 "확인 안 함(한도)"
   - LLM: 보고서당 최대 2번
 - **실행·저장**: data 에이전트 프로세스 안 asyncio 작업, 동시에 1개(나머지 대기). 상태 queued·running·done·partial·failed·interrupted, 섹션별 상태도 저장(`trend_report_store.py`, SQLite `DATA_TREND_REPORT_DB`, 비면 메모리. `run_all.sh`는 `backend/.data/trend_reports.db`). 다시 켜지면 대기·진행으로 남은 보고서는 "중단됨 + 다시 만들기 필요". 같은 날 같은 의뢰(정규화한 입력 해시)는 저장본을 연다(`rebuild: true`면 새로). 보고서 기록은 분석 결과 보관이라 `execute()`를 부르지 않는다
+- **총괄 연결 (11/20, 15번)**: 총괄 plan ① data `trend_report_create`(caller orchestrator) → ② data `trend_report_insight`(① 완료 output의 report_id) → ③ planning `receive_insight`(②의 insight 그대로). 총괄은 결과에서 번호만 넘긴다
+  - ①은 긴 작업(`ax_agent_template.async_task` 규약): 접수 즉시 WORKING + task_id(요청마다 새로, 같은 보고서를 두 사건이 기다려도 완료 멱등 키가 겹치지 않게) + expected_seconds(최소 120). 기다리는 쪽은 `report_waiters` 표(요청마다 한 줄, 토큰 저장 안 함)
+  - 진행 `task.progress`: 섹션이 끝날 때 · 인스타 계정 10곳마다 · 120초마다 생존(대기열이면 "대기 중 (앞에 N개)"), 총괄 끊김 기준 300초보다 자주. 완료 `task.completed` 한 번: done·partial → output `TrendReportCompletedOutput`(report_id·status·summary_line·report_path·has_insight·insight_reason, 본문 없음), failed·interrupted → failed + note(200자). 이미 끝난 저장본이면 접수 뒤 바로 완료. 다시 켜지면 waiter 표로 중단 보고서에 failed 완료(요청이 없으면 같은 모양 envelope를 직접 만든다)
+  - 알림은 `trend_report_hooks.py` 한곳(대화 카드 진행·완료 메시지도 여기). `data.trend_report_ready`는 그대로
+  - ② `trend_report_insight`(grade read, LLM 없음): `ReceiveInsightInput` 그대로(`skills/trend_report_insight.py`). insight_id = "trend_report:" + report_id, title "트렌드 분석: <제품>", summary = 결론 한 줄(없으면 이유), facts 최대 12(콘티 근거 행 → 검색 상위 3(filtered·small_base 제외) → 해시태그 3 → 콘텐츠 2(link) → 경쟁사 2), audience("20~30대 여성"), shorts_format(가장 많이 뜬 형식), body_md(결론·콘티·섹션 요약·한계, 캡션 없음), generated_at = 끝난 시각, 상품 칸은 비움. 보고서 없음·아직 만드는 중·근거 0개면 insight null + reason. 같은 보고서면 늘 같은 결과
+- **기획에 보내기 (11/20 v3, `trend_report_handoff`, grade A)**: 사람이 넣은 의뢰의 인사이트를 기획 receive_insight로. `trend_report_insight`와 같은 꾸러미 → data 자신의 `execute("send_trend_report_insight")`(safety registry 항목 필요, 없으면 held로 보내지 않음) → executed일 때만 기획. idempotency_key `<report_id>:insight`, insight_id `trend_report:<report_id>`(총괄과 같은 키라 먼저 보냈으면 기획이 duplicate). 결과는 보고서 `handoff` 열(이미 created·duplicate면 기획을 다시 부르지 않고 duplicate, safety·기획 실패는 남기지 않음). `trend_report_list` 항목에 `has_insight`·`handoff`. `trend_report_insight`도 화면(dashboard-api)이 부른다
 - **새 서버 점검 반영 (11/19)**
   - 인사이트 브리프 자동 판은 한국 날짜당 한 번만 새로 만든다(`trend_insight_brief.auto_read`). 그날 자동 판이 있으면 LLM 상한·실패로 덜 만든 판이어도 미리 계산·화면은 저장분만 읽는다. 덜 만든 판이고 남은 LLM 토큰 ≥ 지난 자동 판 토큰 × 1.2(모르면 하루 상한의 30%)면 그날 한 번만 `auto_retry`. LLM이 막혔으면(우리 상한·공급자 멈춤) 재료(지금 인기·숏츠·네이버·쇼핑인사이트)를 계산하지 않고 이전 판 + "LLM 하루 상한이라 오늘 브리프는 이전 판을 보여 줘요". 판 표 `brief_versions.degraded`(capped·failed, 예전 DB 열 추가)
   - 인스타 레이더 묶음 씨앗·보고서 해시태그는 해시태그와 따옴표·「」 안 구절만(`caption_noise.caption_units`). 표기용 태그·이벤트 상투어·흔한 말·숫자 날짜 태그(#11월·#2026)·1글자 태그는 뺀다. 보고서 해시태그 기준은 읽은 계정(매거진 제외) 30곳 미만 2곳, 이상 3곳
@@ -1181,6 +1187,12 @@ YouTube 숏츠를 카테고리별·형식별로 센다. 숫자는 코드, 분류
 ### keyword_trend (검색 트렌드 · 도서 분야)
 
 트렌드 1 감지 하위 탭의 "검색" 칩(`frontend/src/components/data/KeywordTrend.tsx`). 숫자·판정·순위는 코드, AI 요약 한 줄만 LLM(`explain` 숫자 검증).
+
+- **v3 급상승 검색어 (11/20)**. 예전에는 풀(검색량 큰 순) 앞 30개만 키워드 하나에 1번씩 판정해 늘 큰 단어만 보고, 한도면 그날 받아 둔 값도 "확인 안 함(한도)"였고, 모두 unknown이면 가나다순이었다
+  - 후보(`skills/keyword_candidates.py`): `rising_check`(30) 자리를 new(최근 4일 새 키워드 ≤12)·related_up(직전 풀보다 1.3배 이상 ≤10)·youtube·google(trend_candidates 최신 저장분, 다시 계산 안 함 ≤8)·company(trend_scan 그룹 이름 ≤6)·pool(남은 자리, 검색량 순)로 섞어 고른다. 같은 말은 합치고 출처를 모두(`candidate_sources`, 출처별 `candidate_counts`). 그날 처음 고른 30개는 keyword_pool `rising_candidates`에 남겨 그날 그대로. 설정 `[search]` cand_new·cand_related_up·cand_external·cand_company·related_up_ratio·warming_ratio
+  - 데이터랩: 월 검색량이 비슷한 것끼리 5개씩 한 요청(`Datalab.series_many`, 30개 = 최대 6번). 상대값이라도 판정은 키워드마다 자기 평소와 비교라 묶어도 같다. 커넥터 하루 캐시(`NaverDatalabConnector.cached`)에 있으면 한도 검사 없이 쓴다. trend_age 우선 몫(`PRIORITY_CALLERS`)에 keyword_trend, 미리 계산은 trend_candidates 바로 뒤
+  - 판정 다시 쓰기: keyword_pool `rising_judgments`(하루 1번, 일간·주간 창 공용). 오늘 판정이 있으면 호출 0. 한도로 못 본 키워드는 3일 안 직전 판정(`judged_on`·`stale_reason`), 없으면 unknown "오늘 판정 못 함"
+  - 줄: level(rising → warming(normal이고 배수 ≥ 1.5) → normal → unknown)·points(마지막 28개)·baseline·why_line(뉴스 첫 줄 → YouTube 인기 차트 영상 N개 → 같이 오른 연관어). unknown 줄도 풀 검색량을 채우고 increase_reason "판정 못 해 증가 추정 없음". 정렬은 level → 배수 → 월 검색량, rank는 전부 1부터
 
 - **출처**
   - 네이버 검색광고 API 키워드 도구(`connectors/naver_searchad.py`): `GET https://api.searchad.naver.com/keywordstool?hintKeywords=…(쉼표, 최대 5개)&showDetail=1`. 헤더 `X-Timestamp`(밀리초)·`X-API-KEY`·`X-Customer`·`X-Signature` = base64(HMAC-SHA256(secret, "{timestamp}.GET./keywordstool")). 근거: 스펙 https://naver.github.io/searchad-apidoc/#/operations/GET/~2Fkeywordstool , 서명은 공식 샘플 https://github.com/naver/searchad-apidoc . 월간 검색량은 최근 30일 PC·모바일 합이고 10 미만은 `"<10"` → 숫자로 바꾸지 않고 `below_10`. 키 `NAVER_SEARCHAD_API_KEY`·`NAVER_SEARCHAD_SECRET`·`NAVER_SEARCHAD_CUSTOMER_ID`, 하루 캐시, 하루 상한 `NAVER_SEARCHAD_DAILY_LIMIT`(300)

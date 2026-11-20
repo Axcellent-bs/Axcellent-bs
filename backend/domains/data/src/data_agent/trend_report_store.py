@@ -47,9 +47,17 @@ class TrendReportStore:
                 " media TEXT NOT NULL, PRIMARY KEY (day, account));"
             )
             # 11/19 추가 열: 대화 카드에서 넣은 의뢰의 대화 id (예전 DB에는 없어서 덧붙인다)
+            # 11/20 추가 열: 기획에 보낸 결과 (TrendReportHandoffOutput JSON, 보낸 것만)
             have = {r[1] for r in self._conn.execute("PRAGMA table_info(reports)")}
-            if "chat_thread_id" not in have:
-                self._conn.execute("ALTER TABLE reports ADD COLUMN chat_thread_id TEXT")
+            for col in ("chat_thread_id", "handoff"):
+                if col not in have:
+                    self._conn.execute(f"ALTER TABLE reports ADD COLUMN {col} TEXT")
+            # 11/20: 총괄 긴 작업으로 이 보고서를 기다리는 쪽 (요청마다 한 줄, 토큰은 저장 안 함)
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS report_waiters (task_id TEXT PRIMARY KEY,"
+                " report_id TEXT NOT NULL, tenant_id TEXT, context_id TEXT, skill TEXT NOT NULL,"
+                " requested_at TEXT NOT NULL, completed_sent INTEGER NOT NULL DEFAULT 0)"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -78,6 +86,48 @@ class TrendReportStore:
                 "SELECT chat_thread_id FROM reports WHERE id = ?", (report_id,)
             ).fetchone()
         return row[0] if row else None
+
+    # ---------------------------------------------------------------- 총괄 긴 작업 (기다리는 쪽)
+
+    _WAITER_COLS = ("task_id", "report_id", "tenant_id", "context_id", "skill", "requested_at",
+                    "completed_sent")  # fmt: skip
+
+    def add_waiter(self, report_id: str, task_id: str, tenant_id: str | None,
+                   context_id: str | None, skill: str, at: datetime) -> None:  # fmt: skip
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO report_waiters (task_id, report_id, tenant_id, context_id,"
+                " skill, requested_at) VALUES (?,?,?,?,?,?)",
+                (task_id, report_id, tenant_id, context_id, skill, at.isoformat()),
+            )
+
+    def waiters(self, report_id: str | None = None) -> list[dict[str, Any]]:
+        """완료 알림을 아직 못 받은 기다리는 쪽 (report_id가 없으면 전부)."""
+        sql = f"SELECT {', '.join(self._WAITER_COLS)} FROM report_waiters WHERE completed_sent = 0"  # noqa: S608
+        args: tuple[Any, ...] = ()
+        if report_id is not None:
+            sql, args = sql + " AND report_id = ?", (report_id,)
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY requested_at", args).fetchall()
+        return [dict(zip(self._WAITER_COLS, r, strict=True)) for r in rows]
+
+    def mark_completed_sent(self, task_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE report_waiters SET completed_sent = 1 WHERE task_id = ?",
+                               (task_id,))  # fmt: skip
+
+    # ---------------------------------------------------------------- 기획에 보낸 결과
+
+    def handoff(self, report_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute("SELECT handoff FROM reports WHERE id = ?",
+                                     (report_id,)).fetchone()  # fmt: skip
+        return json.loads(row[0]) if row and row[0] else None
+
+    def save_handoff(self, report_id: str, value: Mapping[str, Any]) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE reports SET handoff = ? WHERE id = ?",
+                               (json.dumps(value, ensure_ascii=False), report_id))  # fmt: skip
 
     def known_names(self, limit: int = 50) -> dict[str, str]:
         """최근 보고서들의 경쟁사 표시 이름 {아이디: 이름} (최근 것이 이긴다, 없는 이름은 뺀다)."""
@@ -127,11 +177,15 @@ class TrendReportStore:
         return (row[0], json.loads(row[1])) if row else None
 
     def recent(self, limit: int) -> list[dict[str, Any]]:
+        return [r for r, _ in self.recent_with_handoff(limit)]
+
+    def recent_with_handoff(self, limit: int) -> list[tuple[dict[str, Any], dict[str, Any] | None]]:
+        """최근 보고서 (결과, 기획에 보낸 결과 또는 None)."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT result FROM reports ORDER BY created_at DESC LIMIT ?", (limit,)
+                "SELECT result, handoff FROM reports ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
-        return [json.loads(r[0]) for r in rows]
+        return [(json.loads(r[0]), json.loads(r[1]) if r[1] else None) for r in rows]
 
     def waiting_ahead(self, report_id: str) -> int:
         """이 보고서보다 먼저 들어와 아직 끝나지 않은 보고서 수."""

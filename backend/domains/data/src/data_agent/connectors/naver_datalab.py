@@ -327,15 +327,28 @@ class NaverDatalabConnector:
             "Content-Type": "application/json",
         }
 
+    @staticmethod
+    def _body(query: TrendScanInput, ages: Sequence[str] = ()) -> dict[str, Any]:
+        body = _request_body(query)
+        if ages:
+            body["ages"] = list(ages)
+        return body
+
+    def _key(self, body: Mapping[str, Any]) -> str:
+        return f"{self.url}|{json.dumps(body, ensure_ascii=False, sort_keys=True)}"
+
+    def cached(self, query: TrendScanInput, ages: Sequence[str] = ()) -> TrendResponse | None:
+        """그날 이미 받아 둔 같은 질의의 응답 (없으면 None). 부르지 않고 한도도 세지 않는다."""
+        got = self._cache.get(self._key(self._body(query, ages)))
+        return got if isinstance(got, TrendResponse) else None
+
     async def search_trend(self, query: TrendScanInput, ages: Sequence[str] = ()) -> TrendResponse:
         """키워드 그룹별 상대값 시계열. 못 읽으면 `ConnectorUnavailable`.
 
         `ages`(네이버 연령 코드 1~11)를 주면 그 연령대만 센 값이다. 값은 그 요청 안에서만 비교한다.
         """
-        body = _request_body(query)
-        if ages:
-            body["ages"] = list(ages)
-        key = f"{self.url}|{json.dumps(body, ensure_ascii=False, sort_keys=True)}"
+        body = self._body(query, ages)
+        key = self._key(body)
         cached = self._cache.get(key)
         if cached is not None:
             return cached

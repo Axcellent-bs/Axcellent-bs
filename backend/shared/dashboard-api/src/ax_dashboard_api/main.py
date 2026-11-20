@@ -28,8 +28,10 @@ from ax_dashboard_api.cost_limit_routes import router as cost_limit_router
 from ax_dashboard_api.envelope import install_error_handlers, is_mock
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
 from ax_dashboard_api.routes import router
+from ax_dashboard_api.secret_routes import router as secret_router
 from ax_dashboard_api.site_adapter.router import router as site_adapter_router
 from ax_dashboard_api.site_adapter.setup import router as site_adapter_setup_router
+from ax_secret_store import startup_check
 
 DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
 
@@ -86,6 +88,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             "목 스위치(DASHBOARD_MOCK·AGENT_TEMPLATE_MOCK)가 켜져 있어 "
             "서버를 시작하지 않는다. 목 모드는 테스트 전용이다."
         )
+    startup_check()  # AX_SECRET_STORE=db인데 마스터 키·DB가 맞지 않으면 시작을 거부한다
     task = None
     # 목 모드(테스트)와 `DASHBOARD_RETENTION_SWEEP=off`에서는 돌리지 않는다
     if not is_mock() and (os.getenv("DASHBOARD_RETENTION_SWEEP") or "on").lower() != "off":
@@ -112,6 +115,8 @@ install_error_handlers(app)
 app.include_router(router)
 # 영상 비용 상한·안전 정책 화면 (로그인 세션의 운영자·관리자, 변경은 limit_editor·policy_editor)
 app.include_router(cost_limit_router)
+# 시스템 > 키 관리: 암호화 DB의 고객사별 키 (세션의 운영자·관리자 중 secret_editor, 값 조회 불가)
+app.include_router(secret_router)
 # 사람 할 일함: 에이전트가 넣는 창구(에이전트 토큰)와 사람이 보는 창구(읽기·쓰기 모두 사람 토큰)
 app.include_router(handoffs.intake)
 app.include_router(handoffs.inbox)

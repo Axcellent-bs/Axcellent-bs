@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -48,6 +49,13 @@ class SearchConfig:
     season_min: float = 1.5
     peak_ratio: float = 1.5
     max_new: int = 5  # 날마다 보여 줄 새 키워드 수
+    # v3(11/20) 급상승 후보 출처별 상한 (rising_check 자리를 섞어 고른다, 남은 자리는 풀 검색량 순)
+    cand_new: int = 12  # 최근 4일 새 키워드
+    cand_related_up: int = 10  # 직전 풀 날짜보다 검색량이 크게 는 것
+    cand_external: int = 8  # trend_candidates 저장분 (YouTube·인기 검색어)
+    cand_company: int = 6  # 회사 trend_scan 그룹 이름
+    related_up_ratio: float = 1.3  # 직전 풀 대비 이 배 이상 늘면 related_up
+    warming_ratio: float = 1.5  # normal이고 배수가 이 이상이면 level warming
 
 
 def load_config(env: Mapping[str, str]) -> SearchConfig:
@@ -66,6 +74,12 @@ def load_config(env: Mapping[str, str]) -> SearchConfig:
             season_min=max(1.0, float(raw.get("season_min", base.season_min))),
             peak_ratio=max(1.0, float(raw.get("peak_ratio", base.peak_ratio))),
             max_new=max(1, int(raw.get("max_new", base.max_new))),
+            cand_new=max(0, int(raw.get("cand_new", base.cand_new))),
+            cand_related_up=max(0, int(raw.get("cand_related_up", base.cand_related_up))),
+            cand_external=max(0, int(raw.get("cand_external", base.cand_external))),
+            cand_company=max(0, int(raw.get("cand_company", base.cand_company))),
+            related_up_ratio=max(1.0, float(raw.get("related_up_ratio", base.related_up_ratio))),
+            warming_ratio=max(1.0, float(raw.get("warming_ratio", base.warming_ratio))),
         )
     except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError):
         return SearchConfig()
@@ -105,6 +119,15 @@ class PoolStore:
                 " category TEXT, PRIMARY KEY (day, keyword));"
                 "CREATE TABLE IF NOT EXISTS runs (day TEXT PRIMARY KEY, status TEXT NOT NULL,"
                 " reason TEXT, hints INTEGER NOT NULL, calls INTEGER NOT NULL, at TEXT NOT NULL);"
+                # v3(11/20): 급상승 후보(그날 처음 고른 것을 그날 그대로)·
+                # 판정(하루 1번, 일간·주간 공용)
+                "CREATE TABLE IF NOT EXISTS rising_candidates (day TEXT NOT NULL,"
+                " position INTEGER NOT NULL, keyword TEXT NOT NULL, sources TEXT NOT NULL,"
+                " PRIMARY KEY (day, position));"
+                "CREATE TABLE IF NOT EXISTS rising_judgments (day TEXT NOT NULL,"
+                " keyword TEXT NOT NULL, status TEXT NOT NULL, ratio REAL, baseline REAL,"
+                " points_json TEXT NOT NULL, judged_at TEXT NOT NULL, score REAL, reason TEXT,"
+                " PRIMARY KEY (day, keyword));"
             )
 
     def close(self) -> None:
@@ -130,6 +153,50 @@ class PoolStore:
                 "INSERT OR REPLACE INTO runs VALUES (?,?,?,?,?,?)",
                 (day.isoformat(), status, reason, hints, calls, at.isoformat()),
             )
+
+
+    # ---- v3 급상승 후보·판정 ------------------------------------------------------------
+
+    def candidates(self, day: date) -> list[tuple[str, list[str]]]:
+        """그날 처음 고른 후보 [(키워드, 출처들)] (순서대로). 없으면 빈 목록."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT keyword, sources FROM rising_candidates WHERE day = ? ORDER BY position",
+                (day.isoformat(),),
+            ).fetchall()
+        return [(k, list(json.loads(s))) for k, s in rows]
+
+    def save_candidates(self, day: date, items: Sequence[tuple[str, Sequence[str]]]) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM rising_candidates WHERE day = ?", (day.isoformat(),))
+            self._conn.executemany(
+                "INSERT INTO rising_candidates VALUES (?,?,?,?)",
+                [(day.isoformat(), n, k, json.dumps(list(s))) for n, (k, s) in enumerate(items)],
+            )
+
+    _JUDGE_COLS = ("day", "keyword", "status", "ratio", "baseline", "points_json", "judged_at",
+                   "score", "reason")  # fmt: skip
+
+    def judgments(self, since: date, until: date) -> list[dict[str, Any]]:
+        """since~until 판정 (최근 날짜 먼저)."""
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT {', '.join(self._JUDGE_COLS)} FROM rising_judgments"  # noqa: S608
+                " WHERE day >= ? AND day <= ? ORDER BY day DESC",
+                (since.isoformat(), until.isoformat()),
+            ).fetchall()
+        return [dict(zip(self._JUDGE_COLS, r, strict=True)) for r in rows]
+
+    def save_judgment(self, day: date, keyword: str, status: str, ratio: float | None,
+                      baseline: float | None, points: Sequence[tuple[date, float]], at: datetime,
+                      score: float | None = None, reason: str | None = None) -> None:  # fmt: skip
+        body = json.dumps([[d.isoformat(), v] for d, v in points])
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO rising_judgments VALUES (?,?,?,?,?,?,?,?,?)",
+                (day.isoformat(), keyword, status, ratio, baseline, body, at.isoformat(), score,
+                 reason),
+            )  # fmt: skip
 
 
 def _rows(conn: sqlite3.Connection, sql: str, args: Sequence[Any]) -> list[PoolRow]:

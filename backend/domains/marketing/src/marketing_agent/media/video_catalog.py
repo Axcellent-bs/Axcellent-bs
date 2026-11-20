@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from ax_secret_store import get_secret
 from marketing_agent.media import pricing, video_store
 from marketing_agent.media.config import API_KEY_ENVS, MOCK, MediaSettings
 from marketing_agent.media.custom_spec import public_view
@@ -33,7 +34,7 @@ def _priced_models(provider: str) -> list[str]:
 
 
 def _configured(env: str) -> bool:
-    return bool(os.getenv(env, "").strip())
+    return bool(get_secret(env).strip())
 
 
 def _builtin() -> list[dict[str, Any]]:

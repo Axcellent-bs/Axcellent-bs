@@ -21,7 +21,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import re
 import time
 from collections import deque
@@ -30,6 +29,7 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 
+from ax_secret_store import get_secret
 from marketing_agent.media.base import MediaRequest, MediaResult
 from marketing_agent.media.custom_spec import PLACEHOLDER_RE, CustomVideoSpec, allowed_hosts
 from marketing_agent.media.safe_fetch import fetch_public
@@ -134,7 +134,7 @@ class CustomVideoProvider(AsyncVideoProvider):
         auth = self.spec.auth
         secret = key
         if auth.type == "jwt_hs256":
-            access = os.getenv(auth.accessKeyRef or "", "").strip()
+            access = get_secret(auth.accessKeyRef or "").strip()
             if not access:
                 raise VideoProviderError("api_key_not_configured")
             secret = sign_jwt(access, key, self._now())
@@ -266,5 +266,5 @@ class CustomVideoProvider(AsyncVideoProvider):
 
     @property
     def _download_headers(self) -> dict[str, str]:
-        key = os.getenv(self.key_env, "").strip()
+        key = get_secret(self.key_env).strip()
         return self._headers(key)

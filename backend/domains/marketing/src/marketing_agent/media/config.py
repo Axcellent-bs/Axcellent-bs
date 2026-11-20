@@ -35,6 +35,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from ax_secret_store import get_secret
 from marketing_agent.media import cost_limit_store
 from marketing_agent.media.base import MediaKind
 from marketing_agent.media.video_limits import (
@@ -77,6 +78,11 @@ DEFAULT_AUDIO_MODE = "source"
 
 def _text(name: str) -> str:
     return os.getenv(name, "").strip()
+
+
+def _secret(name: str) -> str:
+    """API 키. 스위치가 db면 암호화 저장소, env면 os.getenv와 같다."""
+    return get_secret(name).strip()
 
 
 def _decimal(name: str) -> Decimal | None:
@@ -224,4 +230,4 @@ class MediaSettings:
 
 def has_api_key(kind: MediaKind) -> bool:
     """키가 설정돼 있는지만 알려 준다. 값은 돌려주지 않는다."""
-    return bool(_text(API_KEY_ENVS[kind]))
+    return bool(_secret(API_KEY_ENVS[kind]))

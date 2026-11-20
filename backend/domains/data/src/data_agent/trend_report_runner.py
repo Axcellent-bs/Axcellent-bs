@@ -8,10 +8,10 @@
   `ax_agent_template.events.publish`로 보낸다. 보내지 못해도 보고서는 그대로(로그 한 줄만)
 - 보고서 기록은 분석 결과 보관이고 회사 업무 상태를 바꾸지 않아 `execute()`를 부르지 않는다
   (data_chat 대화 기록과 같은 이유)
-- `chat_thread_id`(데이터분석 대화 카드로 넣은 의뢰)면 그 대화에 코드 문장 메시지를 붙인다(LLM 없음,
-  DataChatStore 직접): 접수 직후 "의뢰 TR-… 만드는 중…" + 진행 카드, 끝(완료·부분·실패·중단)에
-  "보고서 완료"·"일부만 완료"·"실패: 이유" + 완료 카드. 대화가 닫혔거나 그 대화의 의뢰 카드
-  (같은 의뢰문)가 없으면(남의 대화·엉뚱한 id) 붙이지 않고 로그만
+- 알림(대화 카드·총괄 긴 작업)은 `trend_report_hooks` 한곳에서 보낸다. 러너는 훅만 부른다:
+  - 대화 카드(`chat_thread_id`): 접수 직후 진행 카드, 끝에 완료 카드
+  - 총괄 긴 작업(caller orchestrator, 15번): 요청마다 task_id를 새로 만들어 `report_waiters`에
+    남기고, 섹션이 끝날 때·인스타 계정 10곳마다·`HEARTBEAT_SECONDS`(120초)마다 진행, 끝에 완료
 """
 
 from __future__ import annotations
@@ -21,27 +21,40 @@ import hashlib
 import json
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from ax_contracts.schemas import EventEnvelope, EventType
+from ax_contracts.schemas import AgentRequest, EventEnvelope, EventType
 from ax_contracts.schemas.data import (
     TrendReport,
     TrendReportCreated,
-    TrendReportDoneCard,
+    TrendReportHandoffOutput,
     TrendReportInput,
     TrendReportListItem,
-    TrendReportProgressCard,
 )
 from ax_contracts.schemas.event import TrendReportReadyData
+from data_agent import trend_report_hooks as hooks_mod
 from data_agent.skills import trend_report as tr
 from data_agent.skills import trend_report_brief as tb
-from data_agent.trend_report_store import INTERRUPTED_REASON, TrendReportStore
+from data_agent.trend_report_hooks import (  # noqa: F401 - 예전 import 자리 (테스트·대화)
+    FINAL,
+    TrendReportHooks,
+    done_card,
+    done_text,
+    report_label,
+    report_path,
+    top_evidence,
+)
+from data_agent.trend_report_store import TrendReportStore
 
 log = logging.getLogger("data_agent.trend_report")
 ETA_SECONDS = 90  # 보고서 하나 대략 (인스타 45곳 + 네이버 6번 + LLM 2번)
-FINAL = ("done", "partial", "failed")
+MIN_EXPECTED_SECONDS = 120  # 총괄 긴 작업 접수 응답의 예상 소요 하한
+HEARTBEAT_SECONDS = 120.0  # 총괄 생존 알림 간격 (총괄 끊김 기준 기본 300초보다 짧게)
+ACCOUNT_STEP = 10  # 인스타 계정 이만큼 읽을 때마다 진행 알림
+LIVE = ("queued", "running")
+LIVE_SECTION = ("waiting", "running")
 
 
 def brief_hash(request: TrendReportInput) -> str:
@@ -69,150 +82,74 @@ def ready_event(report: TrendReport, now: datetime) -> EventEnvelope:
 Publish = Callable[[EventEnvelope], Any]
 DepsFactory = Callable[[], tr.Deps]
 ChatFactory = Callable[[], Any]  # DataChatStore (없으면 None)
-
-# ---------------------------------------------------------------- 대화 카드 메시지 (LLM 없음)
-
-DONE_WORDS = {"done": "보고서 완료", "partial": "일부만 완료"}
-MAX_TOP_EVIDENCE = 3
-
-
-def report_label(report_id: str) -> str:
-    """보고서 번호 표기 (화면·대화 문장 공통): "TR-" + "tr_" 뒤 앞 4글자 대문자.
-
-    예: tr_b8358e… → TR-B835
-    """
-    return "TR-" + report_id.removeprefix("tr_")[:4].upper()
-
-
-def report_path(report_id: str) -> str:
-    return f"/data/trend#request?id={report_id}"
-
-
-def top_evidence(report: TrendReport) -> list[str]:
-    """콘티 근거 앞쪽 3개 (short가 있으면 그것, 같은 것은 한 번)."""
-    out: list[str] = []
-    for beat in report.sections.recommendation.beats:
-        items = ([e.short or e.text for e in beat.evidence_items] if beat.evidence_items
-                 else list(beat.evidence))  # fmt: skip
-        for text in items:
-            if text and text not in out:
-                out.append(text)
-    return out[:MAX_TOP_EVIDENCE]
-
-
-def done_text(report: TrendReport) -> str:
-    head = f"의뢰 {report_label(report.report_id)}"
-    if report.status in DONE_WORDS:
-        return f"{head} {DONE_WORDS[report.status]}"
-    if report.status == "interrupted":
-        why = INTERRUPTED_REASON
-    else:
-        why = report.summary_reason or (report.limits[-1] if report.limits else "이유 모름")
-    return f"{head} 실패: {why}"
-
-
-def done_card(report: TrendReport) -> dict[str, Any]:
-    card = TrendReportDoneCard(report_id=report.report_id, status=report.status,
-                               summary_line=report.summary_line,
-                               top_evidence=top_evidence(report),
-                               report_path=report_path(report.report_id))  # fmt: skip
-    return card.model_dump(mode="json")
+Sleep = Callable[[float], Awaitable[None]]
+Waiter = tuple[AgentRequest, str]  # (총괄 요청, 새 task_id)
 
 
 class TrendReportService:
     def __init__(self, store: TrendReportStore, deps: DepsFactory, *,
                  publish: Publish | None = None,
                  clock: Callable[[], datetime] | None = None,
-                 chat: ChatFactory | None = None) -> None:  # fmt: skip
+                 chat: ChatFactory | None = None,
+                 sleep: Sleep | None = None,
+                 heartbeat: float = HEARTBEAT_SECONDS) -> None:  # fmt: skip
         self.store = store
         self._deps = deps
         self._publish = publish
         self._clock = clock or (lambda: datetime.now(UTC))
-        self._chat = chat
+        self.hooks = TrendReportHooks(store, chat=chat, publish=publish)
+        self._sleep = sleep or asyncio.sleep
+        self._heartbeat = heartbeat
         self._lock = asyncio.Lock()
         self._tasks: dict[str, asyncio.Task[None]] = {}
-        # 같은 의뢰 저장본을 연 대화도 끝 메시지를 받는다: 보고서 id → [(대화 id, 의뢰문)]
-        self._watchers: dict[str, list[tuple[str, str | None]]] = {}
+        self._beats: dict[str, asyncio.Task[None]] = {}
+        self._side: set[asyncio.Task[Any]] = set()
         # 다시 켜졌을 때: 프로세스 안에만 있던 작업은 사라졌다
         self.interrupted = store.interrupt_live(self._clock())
         for report_id in self.interrupted:
-            self._chat_done(report_id)
-
-    # ---------------------------------------------------------------- 대화에 붙이기
-
-    def _say(self, thread_id: str, request_text: str | None, text: str,
-             card: dict[str, Any]) -> None:  # fmt: skip
-        """대화에 코드 문장 + 카드를 붙인다. 닫혔거나 이 대화 카드가 아니면 붙이지 않고 로그만."""
+            if (report := self.get(report_id)) is not None:
+                self.hooks.chat_done(report)
+        # 끝났는데 완료를 못 보낸 총괄 기다림(중단 포함)에 완료를 보낸다 (루프가 있으면 바로)
+        self._resumed = False
         try:
-            chat = self._chat() if self._chat is not None else None
-            if chat is None:
-                return
-            outcome = chat.add_report_message(thread_id, text, card, request_text)
-        except Exception as error:  # noqa: BLE001 - 대화에 못 붙여도 보고서는 그대로
-            log.warning("trend_report 대화 %s에 못 붙임 (%s)", thread_id, type(error).__name__)
-            return
-        if outcome != "ok":
-            log.info("trend_report 대화 %s에 붙이지 않음 (%s)", thread_id, outcome)
+            asyncio.get_running_loop()
+        except RuntimeError:  # 이벤트 루프 밖에서 만들었으면 첫 create에서
+            pass
+        else:
+            self._spawn(self.resume())
 
-    def _chat_targets(self, report_id: str) -> list[tuple[str, str | None]]:
-        targets = list(self._watchers.pop(report_id, []))
-        thread = self.store.chat_thread(report_id)
-        if thread:
-            row = self.store.get(report_id) or {}
-            targets.insert(0, (thread, (row.get("input") or {}).get("request_text")))
-        return list(dict.fromkeys(targets))
+    def _spawn(self, coro: Awaitable[Any]) -> asyncio.Task[Any]:
+        task = asyncio.get_running_loop().create_task(coro)  # type: ignore[arg-type]
+        self._side.add(task)
+        task.add_done_callback(self._side.discard)
+        return task
 
-    def _chat_done(self, report_id: str) -> None:
-        targets = self._chat_targets(report_id)
-        if not targets:
-            return
-        report = self.get(report_id)
-        if report is None:
-            return
-        for thread, text in targets:
-            self._say(thread, text, done_text(report), done_card(report))
-
-    def _chat_started(self, report_id: str, request: TrendReportInput, status: str) -> None:
-        """접수 직후 진행 메시지. 저장본이 이미 끝났으면 바로 끝 메시지."""
-        thread = request.chat_thread_id
-        if not thread:
-            return
-        self._mark_accepted(thread, request.request_text, report_id)
-        if status in FINAL:
-            report = self.get(report_id)
-            if report is not None:
-                self._say(thread, request.request_text, done_text(report), done_card(report))
-            return
-        card = TrendReportProgressCard(report_id=report_id).model_dump(mode="json")
-        self._say(thread, request.request_text, f"의뢰 {report_label(report_id)} 만드는 중…", card)
-
-    def _mark_accepted(self, thread: str, request_text: str | None, report_id: str) -> None:
-        """그 대화의 같은 의뢰문 의뢰 카드에 accepted_report_id를 적는다 (새로고침해도 "접수됨")."""
-        try:
-            chat = self._chat() if self._chat is not None else None
-            if chat is None:
-                return
-            outcome = chat.mark_accepted(thread, request_text, report_id)
-        except Exception as error:  # noqa: BLE001 - 표시를 못 해도 보고서는 그대로
-            log.warning("trend_report 대화 %s 카드 표시 못 함 (%s)", thread, type(error).__name__)
-            return
-        if outcome != "ok":
-            log.info("trend_report 대화 %s 카드 표시 안 함 (%s)", thread, outcome)
+    async def resume(self) -> None:
+        """다시 켜진 뒤: 끝났는데(중단 포함) 완료를 못 받은 총괄 기다림에 완료 알림."""
+        self._resumed = True
+        await self.hooks.resume(self.get)
 
     # ---------------------------------------------------------------- 의뢰 넣기·읽기
 
-    async def create(self, request: TrendReportInput, context_id: str | None = None
-                     ) -> TrendReportCreated:  # fmt: skip
+    async def create(self, request: TrendReportInput, context_id: str | None = None, *,
+                     waiter: Waiter | None = None) -> TrendReportCreated:  # fmt: skip
+        """의뢰를 넣는다. `waiter`(총괄 요청, task_id)가 있으면 기다리는 쪽으로 남긴다."""
+        if not self._resumed:
+            await self.resume()
         now = self._clock()
         digest, day = brief_hash(request), tr.kst_day(now)
         if not request.rebuild and (same := self.store.same(digest, day)) is not None:
             state = self.store.statuses(same)
             status = state[0] if state else "done"
-            eta = self._eta(same) if status in ("queued", "running") else None
-            if request.chat_thread_id and status not in FINAL and same in self._tasks:
-                self._watchers.setdefault(same, []).append(
-                    (request.chat_thread_id, request.request_text))
-            self._chat_started(same, request, status)
+            eta = self._eta(same) if status in LIVE else None
+            done = self.get(same) if status in FINAL else None
+            if waiter is not None:
+                self.hooks.add_waiter(same, waiter[0], waiter[1], now)
+                if done is not None:  # 이미 끝난 저장본: 접수 응답 뒤 바로 완료
+                    self._spawn(self.hooks.completed(done))
+                else:
+                    self._ensure_beat(same)
+            self.hooks.chat_started(same, request, status, done, live=same in self._tasks)
             return TrendReportCreated(report_id=same, status=status, reused=True,  # type: ignore[arg-type]
                                       eta_seconds=eta)  # fmt: skip
         report_id = "tr_" + uuid.uuid4().hex[:16]
@@ -223,33 +160,74 @@ class TrendReportService:
         self.store.create(report_id, digest, day, request.model_dump(mode="json"), request.caller,
                           ctx, report.model_dump(mode="json"), now,
                           chat_thread_id=request.chat_thread_id)  # fmt: skip
-        self._chat_started(report_id, request, "queued")
+        self.hooks.chat_started(report_id, request, "queued", None, live=True)
+        if waiter is not None:
+            self.hooks.add_waiter(report_id, waiter[0], waiter[1], now)
         self._tasks[report_id] = asyncio.create_task(self._run(report_id, request, ctx))
+        if waiter is not None:
+            self._ensure_beat(report_id)
         return TrendReportCreated(report_id=report_id, status="queued", reused=False,
                                   eta_seconds=self._eta(report_id))  # fmt: skip
 
     def _eta(self, report_id: str) -> int:
         return ETA_SECONDS * (1 + self.store.waiting_ahead(report_id))
 
+    def expected_seconds(self, report_id: str) -> int:
+        """총괄 접수 응답의 예상 소요 (앞 대기 포함, 최소 120초)."""
+        return max(MIN_EXPECTED_SECONDS, self._eta(report_id))
+
     def get(self, report_id: str) -> TrendReport | None:
         row = self.store.get(report_id)
         return TrendReport.model_validate(row["result"]) if row else None
 
     def list(self, limit: int) -> list[TrendReportListItem]:
+        from data_agent.skills.trend_report_insight import build_insight
+
         out = []
-        for raw in self.store.recent(limit):
+        for raw, handoff in self.store.recent_with_handoff(limit):
             r = TrendReport.model_validate(raw)
-            out.append(TrendReportListItem(report_id=r.report_id, status=r.status,
-                                           created_at=r.created_at, caller=r.caller,
-                                           product=r.brief.product,
-                                           summary_line=r.summary_line))  # fmt: skip
+            insight, _ = build_insight(r)
+            out.append(TrendReportListItem(
+                report_id=r.report_id, status=r.status, created_at=r.created_at, caller=r.caller,
+                product=r.brief.product, summary_line=r.summary_line,
+                has_insight=None if r.status in LIVE else insight is not None,
+                handoff=TrendReportHandoffOutput.model_validate(handoff) if handoff else None,
+            ))  # fmt: skip
         return out
 
     async def wait(self, report_id: str) -> None:
-        """테스트·내부용: 그 보고서 작업이 끝날 때까지."""
+        """테스트·내부용: 그 보고서 작업(과 생존 알림)이 끝날 때까지."""
         task = self._tasks.get(report_id)
         if task is not None:
             await task
+        beat = self._beats.get(report_id)
+        if beat is not None:
+            await asyncio.gather(beat, return_exceptions=True)
+        while self._side:
+            await asyncio.gather(*list(self._side), return_exceptions=True)
+
+    # ---------------------------------------------------------------- 생존 알림
+
+    def _ensure_beat(self, report_id: str) -> None:
+        running = self._beats.get(report_id)
+        if running is None or running.done():
+            self._beats[report_id] = asyncio.create_task(self._beat(report_id))
+
+    async def _beat(self, report_id: str) -> None:
+        """120초마다 생존 알림. 대기열이면 "대기 중 (앞에 N개)". 끝나면 멈춘다."""
+        while True:
+            await self._sleep(self._heartbeat)
+            state = self.store.statuses(report_id)
+            if state is None or state[0] not in LIVE:
+                return
+            if state[0] == "queued":
+                note = f"대기 중 (앞에 {self.store.waiting_ahead(report_id)}개)"
+                percent = 0
+            else:
+                report = self.get(report_id)
+                note = "만드는 중"
+                percent = hooks_mod.section_percent(report) if report else None
+            await self.hooks.progress(report_id, percent=percent, note=note)
 
     # ---------------------------------------------------------------- 만들기
 
@@ -259,21 +237,40 @@ class TrendReportService:
             if row is None:
                 return
             report = TrendReport.model_validate(row["result"])
+            seen: set[str] = set()
+
+            async def saved(r: TrendReport) -> None:
+                self.store.save(r.report_id, r.model_dump(mode="json"))
+                done = {name for name in hooks_mod.SECTION_NAMES
+                        if getattr(r.sections, name).status not in LIVE_SECTION}  # fmt: skip
+                if done - seen:  # 섹션 하나가 끝날 때마다
+                    seen.update(done)
+                    await self.hooks.progress(report_id, percent=hooks_mod.section_percent(r),
+                                              note=f"섹션 {len(done)}/5")  # fmt: skip
+
+            async def accounts(read: int, total: int) -> None:
+                if read % ACCOUNT_STEP == 0 or read == total:
+                    await self.hooks.progress(report_id, percent=0,
+                                              note=f"인스타 계정 {read}/{total}")  # fmt: skip
+
             try:
                 deps = self._deps()
                 await tr.build(report, request, deps, self.store, now=self._clock(),
-                               progress=lambda r: self.store.save(r.report_id,
-                                                                  r.model_dump(mode="json")),
-                               context_id=ctx)  # fmt: skip
+                               progress=saved, context_id=ctx,
+                               account_progress=accounts)  # fmt: skip
             except Exception as error:  # noqa: BLE001 - 보고서 전체 실패도 기록하고 알린다
                 log.warning("trend_report %s 실패 (%s)", report_id, type(error).__name__)
                 report.status = "failed"
                 report.finished_at = self._clock()
                 report.limits = [*report.limits, f"보고서를 만들지 못함 ({type(error).__name__})"]
                 self.store.save(report_id, report.model_dump(mode="json"))
+            beat = self._beats.pop(report_id, None)
+            if beat is not None:  # 끝났으니 생존 알림은 멈춘다
+                beat.cancel()
             await self._notify(report)
             if report.status in FINAL:
-                self._chat_done(report_id)
+                self.hooks.chat_done(report)
+                await self.hooks.completed(report)
         self._tasks.pop(report_id, None)
 
     async def _notify(self, report: TrendReport) -> None:

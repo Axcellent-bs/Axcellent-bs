@@ -220,6 +220,7 @@ export default {
     items: [
       { title: "AXcellent 홍보 영상 (30초, 세로)", customer: "AXcellent 홍보 영상", caption: "AI 직원들이 서로 알아서 일하고 돈과 외부 게시는 대표님이 승인합니다. 자막만 나오고 소리는 없습니다. 시연 환경(가상 데이터) 기준.", src: "assets/demo/axcellent-promo-30s.mp4", ratio: "9 / 16", aiMade: true },
       { title: "AXcellent × DejaFix (1분, 음악 포함)", customer: "AXcellent 홍보 영상", caption: "장애 하나에, AI 아홉이 일을 나눠 맡아요. 소리(배경음악)가 나옵니다. 시연 환경(가상 데이터) 기준. 영상 속 안전 관문의 “10분”은 쿠폰·환불 같은 일반 보류 기준이며, 판매자 정산 지급 보류는 24시간입니다.", src: "assets/demo/axcellent-promo-66s.mp4", ratio: "16 / 9", wide: true, aiMade: true },
+      { title: "AXcellent 홍보 영상 (13초, 소리 포함)", customer: "AXcellent 홍보 영상", caption: "AI 직원들이 서로 일을 이어받고, 돈과 외부 게시는 대표님이 승인합니다. 남성 나레이션과 BGM이 나옵니다(소리가 나옵니다). 장면과 인물은 AI가 만든 것이며 시연 환경(가상 데이터) 기준.", src: "assets/demo/axcellent-promo-ai-13s.mp4", ratio: "16 / 9", wide: true, aiMade: true },
     ],
     note: "시연용 가상 고객사의 홍보물입니다. AI로 만든 영상·게시물에는 “AI가 만든 영상” 표시를 붙입니다.",
   },

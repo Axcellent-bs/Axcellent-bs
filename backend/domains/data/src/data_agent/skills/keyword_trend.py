@@ -3,9 +3,14 @@
 재료는 키워드 풀(`keyword_pool.db`, 수집기가 하루 1번)과 네이버 데이터랩. 숫자·판정·순위는 코드,
 AI 요약 한 줄만 LLM(`explain` 숫자 검증).
 
-1. 급상승 검색어: 풀 상위 `rising_check`(30)개만 데이터랩 일별 비율
-   (최근 63일, 키워드 하나 = 요청 하나)로 `trend_scan.judge_series` 판정
-   (같은 함수·커넥터 하루 캐시·trend_age `calls_by_caller` 예산 공유, 호출자 `keyword_trend`).
+1. 급상승 검색어: `rising_check`(30)개를 출처를 섞어 고르고(`keyword_candidates`: 새 키워드·
+   검색량이 는 것·trend_candidates 저장분·회사 그룹·풀, 그날 처음 고른 것을 그날 그대로)
+   데이터랩 일별 비율(최근 63일, 월 검색량이 비슷한 것끼리 5개씩 한 요청)로
+   `trend_scan.judge_series` 판정(같은 함수·커넥터 하루 캐시·trend_age `calls_by_caller` 예산 공유,
+   호출자 `keyword_trend`, 브리프와 같은 우선 몫). 캐시에 있는 질의는 한도와 상관없이 쓴다.
+   판정은 keyword_pool `rising_judgments`에 남겨 그날 다시 부르지 않고(일간·주간 창 공용), 한도로
+   못 본 키워드는 3일 안 직전 판정을 쓴다(`judged_on`·`stale_reason`). 줄마다 level(rising·warming·
+   normal·unknown)·points·baseline·candidate_sources·why_line. 정렬은 level → 배수 → 월 검색량.
    - 일별 추정 = 월간 검색량 × (그날 비율 ÷ 최근 30일 비율 합)
    - 증가량(day) = 어제 추정 − 지난 4주 같은 요일 추정 평균
    - 증가량(week) = 최근 7일 추정 합 − 그 전 4주 주별 합 평균
@@ -27,6 +32,7 @@ AI 요약 한 줄만 LLM(`explain` 숫자 검증).
 
 from __future__ import annotations
 
+import json
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -50,6 +56,7 @@ from ax_contracts.schemas.data import (
 from data_agent import keyword_pool
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.keyword_pool import PoolRow, SearchConfig, compact
+from data_agent.skills import keyword_candidates as kc
 
 KST = timezone(timedelta(hours=9))
 CALLER = "keyword_trend"
@@ -57,6 +64,7 @@ NEW_DAYS = 4
 NEW_LOOKBACK = 30
 NO_VOLUME = "검색광고 키가 없어 검색량 없음 (키 등록 후 가능)"
 NO_PRODUCT = "없음 · 들여올 후보"
+NOT_JUDGED = "오늘 판정 못 함"  # 한도로 못 보고 3일 안 직전 판정도 없음
 
 
 @dataclass(frozen=True)
@@ -190,33 +198,61 @@ class Datalab:
         if self._own and self.store is not None:
             self.store.close()
 
+    def _cached(self, query: TrendScanInput) -> Any:
+        """커넥터 하루 캐시에 같은 질의가 있으면 그 응답 (없거나 캐시 기능이 없으면 None)."""
+        lookup = getattr(self.connector, "cached", None)
+        return lookup(query) if callable(lookup) else None
+
     async def series(
         self, keyword: str, start: date, end: date, unit: str = "date"
     ) -> tuple[list[tuple[date, float]] | None, str | None]:
-        """(값, 못 받은 이유). 예산·한도면 "확인 안 함(한도)"."""
+        """(값, 못 받은 이유). 예산·한도면 "확인 안 함(한도)".
+
+        그날 받아 둔 질의는 한도와 상관없이 쓴다."""
+        got = await self.series_many([keyword], start, end, unit)
+        return got[keyword]
+
+    async def series_many(
+        self, keywords: Sequence[str], start: date, end: date, unit: str = "date"
+    ) -> dict[str, tuple[list[tuple[date, float]] | None, str | None]]:
+        """키워드 최대 5개를 한 요청으로 (그룹마다 자기 추이). {키워드: (값, 못 받은 이유)}.
+
+        네이버 값은 요청 안 최댓값 기준 상대값이지만, 판정은 키워드마다 자기 평소 값과 비교하므로
+        묶어도 같다. 커넥터 하루 캐시에 있으면 한도 검사 없이 쓰고, 없을 때만 한도를 본다.
+        예산 기록은 실제 호출 수로 남긴다."""
+        words = list(dict.fromkeys(keywords))
         if self.connector is None:
-            return None, "네이버 데이터랩 커넥터가 없음"
-        store = self._store()
-        if self._ta._cap_reason(store, self.today, 1, CALLER, self.config, self.connector):  # noqa: SLF001
-            self.capped += 1
-            return None, "확인 안 함(한도)"
-        group = TrendKeywordGroup(group_name=keyword, keywords=[keyword])
-        query = TrendScanInput(keyword_groups=[group], start_date=start, end_date=end,
+            return {k: (None, "네이버 데이터랩 커넥터가 없음") for k in words}
+        groups = [TrendKeywordGroup(group_name=k, keywords=[k]) for k in words]
+        query = TrendScanInput(keyword_groups=groups, start_date=start, end_date=end,
                                time_unit=unit)  # type: ignore[arg-type]  # fmt: skip
-        before = getattr(self.connector, "calls_today", None)
-        try:
-            response = await self.connector.search_trend(query)
-        except ConnectorUnavailable as error:
-            store.add_calls(self.today, 1, CALLER)
-            self.calls += 1
-            return None, f"네이버 검색어 트렌드를 읽지 못함 [{error.code}]"
-        after = getattr(self.connector, "calls_today", None)
-        used = (after - before) if isinstance(before, int) and isinstance(after, int) else 1
-        store.add_calls(self.today, used, CALLER)
-        self.calls += used
-        if not response.series or not response.series[0].points:
-            return None, "자료 없음: 네이버가 값을 주지 않음 (검색량이 적음)"
-        return list(response.series[0].points), None
+        response = self._cached(query)
+        if response is None:
+            store = self._store()
+            if self._ta._cap_reason(store, self.today, 1, CALLER, self.config, self.connector):  # noqa: SLF001
+                self.capped += len(words)
+                return {k: (None, "확인 안 함(한도)") for k in words}
+            before = getattr(self.connector, "calls_today", None)
+            try:
+                response = await self.connector.search_trend(query)
+            except ConnectorUnavailable as error:
+                store.add_calls(self.today, 1, CALLER)
+                self.calls += 1
+                why = f"네이버 검색어 트렌드를 읽지 못함 [{error.code}]"
+                return {k: (None, why) for k in words}
+            after = getattr(self.connector, "calls_today", None)
+            used = (after - before) if isinstance(before, int) and isinstance(after, int) else 1
+            store.add_calls(self.today, used, CALLER)
+            self.calls += used
+        by_name = {s.group_name: s for s in response.series}
+        out: dict[str, tuple[list[tuple[date, float]] | None, str | None]] = {}
+        for k in words:
+            s = by_name.get(k)
+            if s is None or not s.points:
+                out[k] = (None, "자료 없음: 네이버가 값을 주지 않음 (검색량이 적음)")
+            else:
+                out[k] = (list(s.points), None)
+        return out
 
 
 # ---------------------------------------------------------------- 뉴스 (Google RSS)
@@ -293,13 +329,18 @@ async def keyword_trend(
     explain_cache: Any = None,
     now: datetime | None = None,
     age_store: Any = None,
+    candidates: Any = None,
 ) -> KeywordTrendResult:
-    """검색 트렌드 4블록. 상태를 바꾸지 않는다 (네이버 호출 수만 예산 표에 남김)."""
+    """검색 트렌드 4블록. 상태를 바꾸지 않는다 (네이버 호출 수만 예산 표에 남김).
+
+    `candidates`: trend_candidates 최신 저장분([결과, 출력, 근거], 핸들러가 응답 캐시에서 읽어
+    넘긴다. 다시 계산하지 않는다). 급상승 후보 출처 youtube·google로 쓴다.
+    """
     from data_agent.connectors.naver_searchad import has_keys
     from data_agent.explain import explain
     from data_agent.search_spread import spread
     from data_agent.skills.topic_category import TopicInput, classify_topics
-    from data_agent.skills.trend_scan import REQUEST_DAYS, judge_series, yesterday_kst
+    from data_agent.skills.trend_scan import REQUEST_DAYS, yesterday_kst
 
     now = now or datetime.now(UTC)
     today = _today(now)
@@ -334,48 +375,13 @@ async def keyword_trend(
                                                 collected_at=now))  # fmt: skip
     lab = Datalab(connector, env, now, age_store)
     try:
-        # 1. 급상승
+        # 1. 급상승 (v3: 후보를 섞어 고르고, 5개씩 묶어 부르고, 그날 판정은 다시 쓴다)
         end = yesterday_kst(now)
         start = end - timedelta(days=REQUEST_DAYS - 1)
-        from data_agent.connectors.naver_datalab import TrendSeries
-
-        rising: list[RisingKeyword] = []
-        for row in pool[: config.rising_check]:
-            points, why = await lab.series(row.keyword, start, end)
-            if points is None:
-                rising.append(RisingKeyword(keyword=row.keyword, rank=1, status="unknown",
-                                            reason=why, category=row.category))  # fmt: skip
-                continue
-            v = judge_series(TrendSeries(row.keyword, (row.keyword,), tuple(points)), start, end)
-            volume = row.total if row.source == "related" else None
-            item = RisingKeyword(keyword=row.keyword, rank=1, status=v.status, ratio=v.ratio,
-                                 score=v.evidence.score, reason=v.unknown_reason,
-                                 category=row.category, volume=_volume(row),
-                                 monthly_volume=volume)  # fmt: skip
-            if item.monthly_volume is None:
-                item.volume_reason = (
-                    NO_VOLUME
-                    if not configured
-                    else (
-                        "검색량이 10 미만"
-                        if row.pc_below_10 or row.mobile_below_10
-                        else "검색량 없음"
-                    )
-                )
-                item.increase_reason = item.volume_reason
-            else:
-                est, inc = increase(estimates(points, item.monthly_volume, end), end,
-                                    request.window)  # fmt: skip
-                item.estimate = round(est) if est is not None else None
-                item.increase = round(inc) if inc is not None else None
-                if inc is None:
-                    item.increase_reason = "비교할 지난 4주 값이 없음"
-            rising.append(item)
-        order = {"rising": 0, "normal": 1, "unknown": 2}
-        rising.sort(key=lambda r: (order[r.status], -(r.ratio or 0), r.keyword))
-        for n, r in enumerate(rising, start=1):
-            r.rank = n
-        queries.append(f"naver search-trend date x{len(rising)} {start}~{end} (caller={CALLER})")
+        rising, video = await _rising(lab, path, pool, pools, out, config, configured,
+                                      request.window, start, end, today, now, candidates,
+                                      env)  # fmt: skip
+        queries.append(f"naver search-trend date {lab.calls}번 {start}~{end} (caller={CALLER})")
         # 뉴스 (RSS 일치) + 확산 (HUB, 켜져 있을 때)
         news = rss_news(env, [r.keyword for r in rising])
         for r in rising:
@@ -386,6 +392,12 @@ async def keyword_trend(
                 r.spread = await spread(search, r.keyword, today)
                 if r.spread.news:
                     r.news, r.news_source = list(r.spread.news), "naver_news"
+        up = [r.keyword for r in rising if r.level in ("rising", "warming")]
+        for r in rising:
+            me = compact(r.keyword)
+            together = [k for k in up if compact(k) != me
+                        and (compact(k) in me or me in compact(k))]  # fmt: skip
+            r.why_line = kc.why_line(r.news, video.get(r.keyword), together)
         out.rising = rising
 
         # 3. 시즌
@@ -439,6 +451,141 @@ async def keyword_trend(
     note = (f"풀 {out.pool_size}개({out.pool_day}) 중 {len(out.rising)}개 판정, 급상승 {len(up)}개,"
             f" 시즌 {len(out.season)}개, 데이터랩 {out.naver_calls}번")  # fmt: skip
     return KeywordTrendResult(out, Evidence(queries=queries, data_summary=note, collected_at=now))
+
+
+def _volume_reason(row: PoolRow | None, configured: bool) -> str:
+    if not configured:
+        return NO_VOLUME
+    if row is not None and (row.pc_below_10 or row.mobile_below_10):
+        return "검색량이 10 미만"
+    return "검색량 없음" if row is not None else "키워드 풀에 없는 후보라 검색량 없음"
+
+
+def _pool_volume(row: PoolRow | None) -> int | None:
+    return row.total if row is not None and row.source == "related" else None
+
+
+RisingResult = tuple[list[RisingKeyword], dict[str, int]]
+
+
+async def _rising(lab: Datalab, path: Any, pool: Sequence[PoolRow],
+                  pools: Mapping[date, Sequence[PoolRow]], out: KeywordTrendOutput,
+                  config: SearchConfig, configured: bool, window: str, start: date, end: date,
+                  today: date, now: datetime, stored_candidates: Any,
+                  env: Mapping[str, str]) -> RisingResult:  # fmt: skip
+    """급상승 줄들과 {키워드: YouTube 인기 차트 영상 수}.
+
+    후보: 그날 처음 고른 것(저장)을 그대로. 판정: 그날 판정이 있으면 다시 부르지 않고, 없는 것만
+    월 검색량이 비슷한 것끼리 5개씩 묶어 부른다. 한도로 못 본 것은 3일 안 직전 판정을 쓴다.
+    """
+    from data_agent.connectors.naver_datalab import TrendSeries
+    from data_agent.skills.trend_scan import default_groups, judge_series
+
+    by_key = {compact(r.keyword): r for r in pool}
+    store = keyword_pool.PoolStore(path)
+    try:
+        saved = store.candidates(today)
+        external, had = kc.external_from(stored_candidates)
+        video = {k: v for k, s, v in external if s == "youtube" and v}
+        if saved:
+            cands = [kc.Candidate(k, s) for k, s in saved]
+            for c in cands:
+                c.video_count = next((v for k, v in video.items() if compact(k) == compact(
+                    c.keyword)), None)  # fmt: skip
+        else:
+            fresh = sorted((i for d in out.new_keywords for i in d.items),
+                           key=lambda i: (-(i.monthly_volume or 0), i.keyword))  # fmt: skip
+            before = [d for d in pools if d < today]
+            prev = pools[max(before)] if before else []
+            company = [g.group_name for g in default_groups(env)][: config.cand_company]
+            cands = kc.pick(new=[i.keyword for i in fresh],
+                            up=kc.related_up(pool, prev, config.related_up_ratio),
+                            external=external, company=company, pool=pool,
+                            config=config)  # fmt: skip
+            store.save_candidates(today, [(c.keyword, c.sources) for c in cands])
+        if not had:
+            out.limits.append(kc.NO_EXTERNAL)
+        out.candidate_counts = kc.counts(cands)
+        # 판정: 오늘 것은 다시 쓰고, 없는 것만 부른다 (일간·주간 창이 같은 판정을 쓴다)
+        recent = store.judgments(today - timedelta(days=kc.STALE_DAYS), today)
+        todays = {compact(r["keyword"]): r for r in recent if r["day"] == today.isoformat()}
+        need = [c.keyword for c in cands if compact(c.keyword) not in todays]
+        volumes = {c.keyword: _pool_volume(by_key.get(compact(c.keyword))) for c in cands}
+        for chunk in kc.volume_chunks(need, volumes):
+            got = await lab.series_many(chunk, start, end)
+            for k, (points, why) in got.items():
+                if why == "확인 안 함(한도)" or (points is None and why and "읽지 못함" in why):
+                    continue  # 한도·오류는 저장하지 않는다 (다음에 다시)
+                if points is None:
+                    store.save_judgment(today, k, "unknown", None, None, [], now, reason=why)
+                else:
+                    v = judge_series(TrendSeries(k, (k,), tuple(points)), start, end)
+                    ev = v.evidence
+                    store.save_judgment(today, k, v.status, v.ratio, ev.baseline_value, points,
+                                        now, ev.score, v.unknown_reason)  # fmt: skip
+                todays[compact(k)] = {"day": today.isoformat(), "keyword": k}
+            if any(why == "확인 안 함(한도)" for _, why in got.values()):
+                for k, (_, why) in got.items():
+                    if why == "확인 안 함(한도)":
+                        todays.setdefault(compact(k), {"capped": why})
+        recent = store.judgments(today - timedelta(days=kc.STALE_DAYS), today)
+    finally:
+        store.close()
+    todays_rows = {compact(r["keyword"]): r for r in recent if r["day"] == today.isoformat()}
+    rising: list[RisingKeyword] = []
+    stale_days: list[date] = []
+    for c in cands:
+        row = by_key.get(compact(c.keyword))
+        judged = todays_rows.get(compact(c.keyword))
+        if judged is None and (old := kc.latest_before(recent, c.keyword, today)) is not None:
+            judged = old
+            stale_days.append(date.fromisoformat(old["day"]))
+        item = _row_item(c, row, judged, todays.get(compact(c.keyword)), config, configured,
+                         window, end)  # fmt: skip
+        rising.append(item)
+    rising.sort(key=kc.sort_key)
+    for n, r in enumerate(rising, start=1):
+        r.rank = n
+    if stale_days:
+        out.judged_on = min(stale_days)
+        out.stale_reason = f"데이터랩 하루 몫을 다 써서 {out.judged_on:%m-%d} 판정을 보여 줘요"
+    return rising, video
+
+
+def _row_item(c: kc.Candidate, row: PoolRow | None, judged: Mapping[str, Any] | None,
+              today_mark: Mapping[str, Any] | None, config: SearchConfig, configured: bool,
+              window: str, end: date) -> RisingKeyword:  # fmt: skip
+    """후보 하나 → 화면 줄. 판정이 없으면 unknown(풀 검색량은 채운다)."""
+    item = RisingKeyword(keyword=c.keyword, rank=1, status="unknown",
+                         category=row.category if row else None,
+                         volume=_volume(row) if row else None, monthly_volume=_pool_volume(row),
+                         candidate_sources=c.sources)  # type: ignore[arg-type]  # fmt: skip
+    if item.monthly_volume is None:
+        item.volume_reason = _volume_reason(row, configured)
+    if judged is None or "status" not in judged:
+        capped = (today_mark or {}).get("capped")
+        item.reason = f"{NOT_JUDGED} ({capped})" if capped else NOT_JUDGED
+        item.increase_reason = "판정 못 해 증가 추정 없음"
+        return item
+    points = [(date.fromisoformat(d), float(v)) for d, v in json.loads(judged["points_json"])]
+    item.status = judged["status"]
+    item.ratio = judged["ratio"]
+    item.score = judged["score"]
+    item.reason = judged["reason"]
+    item.baseline = judged["baseline"]
+    item.points = [v for _, v in points][-28:]
+    item.level = kc.level(item.status, item.ratio, config.warming_ratio)  # type: ignore[assignment]
+    if item.status == "unknown":
+        item.increase_reason = "판정 못 해 증가 추정 없음"
+    elif item.monthly_volume is None:
+        item.increase_reason = item.volume_reason
+    elif points:
+        est, inc = increase(estimates(points, item.monthly_volume, end), end, window)
+        item.estimate = round(est) if est is not None else None
+        item.increase = round(inc) if inc is not None else None
+        if inc is None:
+            item.increase_reason = "비교할 지난 4주 값이 없음"
+    return item
 
 
 def _set_products(item: Any, linked: Mapping[str, list[str]], why: str | None) -> None:
