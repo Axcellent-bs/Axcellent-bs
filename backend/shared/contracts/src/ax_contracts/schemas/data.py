@@ -4393,7 +4393,9 @@ class InstagramMemoListOutput(AxModel):
 
 ReportStatus = Literal["queued", "running", "done", "partial", "failed", "interrupted"]
 SectionStatus = Literal["waiting", "running", "known", "unknown", "failed"]
-FieldSource = Literal["input", "request_text", "preset"]
+# company(11/20 추가): 연결된 회사(tenant)의 domain_profile·판매 집단·키워드 풀·확인된 인스타
+# 계정으로 채운 칸 (값 우선순위: 폼 > 의뢰문 > 프리셋 > 회사)
+FieldSource = Literal["input", "request_text", "preset", "company"]
 ReportCaller = Literal["human", "orchestrator", "planning"]
 BeatSlot = Literal["0-3", "3-15", "15-25", "25-30"]
 
@@ -4679,7 +4681,7 @@ class TrendReportHandoffOutput(AxModel):
 # 대화는 의뢰 카드(미리보기)만 만들고 접수하지 않는다. 접수는 사람이 카드 버튼으로
 # trend_report_create(caller "human" + chat_thread_id)를 부를 때만. 프론트와 같이 쓰는 모양이라
 # 이름·값을 바꾸지 않는다.
-CardFieldSource = Literal["request_text", "preset"]
+CardFieldSource = Literal["request_text", "preset", "company"]  # company: 11/20 추가
 
 
 class TrendRequestCardSources(AxModel):

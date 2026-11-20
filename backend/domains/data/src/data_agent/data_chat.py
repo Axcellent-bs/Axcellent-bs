@@ -192,7 +192,7 @@ def request_card(text: str, resolved: Any, names: Mapping[str, str]) -> dict[str
     from ax_contracts.schemas.data import TrendRequestCard
 
     b = resolved.brief
-    src = {k: ("preset" if v == "preset" else "request_text")
+    src = {k: (v if v in ("preset", "company") else "request_text")
            for k, v in b.sources.model_dump().items()
            if k in ("product", "target", "format", "competitors", "keywords")}  # fmt: skip
     filled = any([b.product, b.target_gender, b.target_ages, b.format, b.competitors, b.keywords])

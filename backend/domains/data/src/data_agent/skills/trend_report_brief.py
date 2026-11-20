@@ -255,6 +255,8 @@ class Resolved:
     limits: list[str]
     llm_calls: int
     extract_error: str | None = None  # 의뢰문 LLM 추출 실패 이유 (안 불렀거나 성공이면 None)
+    shopping_category: str | None = None  # 쇼핑인사이트 분야 (프리셋, 없으면 회사)
+    names: dict[str, str] = field(default_factory=dict)  # 계정 표시 이름 (회사에서 확인한 것)
 
 
 def has_fields(request: TrendReportInput) -> bool:
@@ -337,7 +339,30 @@ async def resolve(request: TrendReportInput, llm: Any, *, folder: Path = PRESET_
                                         goal=s_goal if goal else None),
         goal=goal or None, format_parts=format_parts(fmt),
     )  # fmt: skip
-    return Resolved(brief, preset, wanted[:MAX_ACCOUNTS], limits, calls, failed)
+    return Resolved(brief, preset, wanted[:MAX_ACCOUNTS], limits, calls, failed,
+                    preset.shopping_category if preset else None)  # fmt: skip
+
+
+def apply_company(resolved: Resolved, ctx: Any) -> None:
+    """빈칸만 회사 값(`trend_report_company.CompanyContext`)으로 채우고 출처를 "company"로.
+
+    값 우선순위: 폼 > 의뢰문 > 프리셋 > 회사. 이미 찬 칸은 건드리지 않는다."""
+    b, src = resolved.brief, resolved.brief.sources
+    if not b.product and ctx.product:
+        b.product, src.product = ctx.product, "company"
+    if not b.format and ctx.format:
+        b.format, src.format = ctx.format, "company"
+        b.format_parts = format_parts(ctx.format)
+    if not b.keywords and ctx.keywords:
+        b.keywords, src.keywords = list(ctx.keywords)[:MAX_KEYWORDS], "company"
+    if not b.competitors and ctx.competitors:
+        b.competitors, src.competitors = list(ctx.competitors)[:MAX_COMPETITORS], "company"
+    if not resolved.shopping_category and ctx.shopping_category:
+        resolved.shopping_category = ctx.shopping_category
+    wanted = list(dict.fromkeys([*resolved.accounts, *b.competitors, *ctx.accounts]))
+    resolved.accounts = wanted[:MAX_ACCOUNTS]
+    resolved.names = {**ctx.names, **resolved.names}
+    resolved.limits.extend(x for x in ctx.limits if x not in resolved.limits)
 
 
 _DURATION = re.compile(r"\d+\s*(?:초|분)")

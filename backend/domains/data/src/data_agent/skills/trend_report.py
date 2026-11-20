@@ -958,6 +958,14 @@ class Deps:
     age_store: Any = None
     searchad: Any = None  # 검색광고 키워드 도구 (월 검색량, 없으면 안 부름)
     pool_path: Any = None  # keyword_pool DB (그날 값이 있으면 월 검색량 재사용)
+    # 연결된 회사로 빈칸 채우기 (11/20): async (brief, 의뢰문, 진행 알림) →
+    # (CompanyContext, LLM 호출 수, 인스타 호출 수). 없으면 회사 값을 쓰지 않는다
+    company: Callable[..., Awaitable[tuple[Any, int, int]]] | None = None
+
+
+def needs_company(brief: TrendReportBrief) -> bool:
+    """폼·의뢰문·프리셋으로 다 못 채운 칸이 있는지 (있을 때만 회사 정보를 읽는다)."""
+    return not (brief.product and brief.format and brief.keywords and brief.competitors)
 
 
 def search_notes(report: TrendReport) -> list[str]:
@@ -1011,8 +1019,13 @@ async def _guard(report: TrendReport, name: str, run: Callable[[], Awaitable[Non
 async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
                 now: datetime | None = None, progress: Progress | None = None,
                 context_id: str | None = None,
-                account_progress: AccountProgress | None = None) -> TrendReport:  # fmt: skip
-    """대기 중 보고서(`report`)를 채운다. 섹션이 끝날 때마다 `progress`로 저장한다."""
+                account_progress: AccountProgress | None = None,
+                note: Callable[[str], Awaitable[None] | None] | None = None,
+                ) -> TrendReport:  # fmt: skip
+    """대기 중 보고서(`report`)를 채운다. 섹션이 끝날 때마다 `progress`로 저장한다.
+
+    폼·의뢰문·프리셋으로 못 채운 칸은 연결된 회사(`deps.company`)로 채운다. 회사 경쟁사가 아직
+    확인 전이면 이 자리에서 한 번 찾는다(`note`로 "회사 경쟁사 찾는 중")."""
     now = now or datetime.now(UTC)
 
     async def save() -> None:
@@ -1024,8 +1037,20 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
     report.status = "running"
     await save()
     resolved = await tb.resolve(request, deps.llm, context_id=context_id)
-    report.brief = resolved.brief
     report.calls.llm += resolved.llm_calls
+    if deps.company is not None and needs_company(resolved.brief):
+        try:
+            ctx, llm_calls, ig_calls = await deps.company(resolved.brief,
+                                                          getattr(request, "request_text", None),
+                                                          note)  # fmt: skip
+        except Exception as error:  # noqa: BLE001 - 회사 정보를 못 읽어도 보고서는 만든다
+            resolved.limits.append(f"회사 정보를 읽지 못해 회사 값으로 채우지 않음 "
+                                   f"({type(error).__name__})")  # fmt: skip
+        else:
+            tb.apply_company(resolved, ctx)
+            report.calls.llm += llm_calls
+            report.calls.instagram += ig_calls
+    report.brief = resolved.brief
     limits = [*FIXED_LIMITS, *resolved.limits]
     await save()
     ig = await read_accounts(resolved.accounts, deps.graph, store, deps.env, now,
@@ -1038,7 +1063,7 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
                       + (f" ({ig.stopped}, 그 자리에서 멈춤)" if ig.stopped else ""))  # fmt: skip
     # 표시 이름: 읽은 name(새로 부른 것·레이더 저장분) → 없으면 프리셋 display_names
     display = dict(resolved.preset.display_names) if resolved.preset else {}
-    names = {**display, **account_names(ig.media)}
+    names = {**display, **resolved.names, **account_names(ig.media)}
     report.brief.competitor_names = {a: names.get(a) for a in report.brief.competitors}
     why_none = ig.stopped
     posts: list[InstagramRadarPost] = []
@@ -1048,7 +1073,7 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
         posts = []
 
     async def run_search() -> None:
-        cid = resolved.preset.shopping_category if resolved.preset else None
+        cid = resolved.shopping_category  # 프리셋, 없으면 회사 업종이 분야 이름과 같을 때만
         section, calls, more = await search_section(report.brief, cid, deps.search,
                                                     deps.shopping, deps.env, now,
                                                     age_store=deps.age_store,

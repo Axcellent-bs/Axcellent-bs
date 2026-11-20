@@ -1243,7 +1243,72 @@ def _trend_report_deps() -> Any:
     return Deps(env=os.environ, llm=get_llm(), graph=get_instagram_graph(),
                 search=get_trend_connector(), shopping=get_shopping_connector(),
                 memes=lambda: RESPONSES.latest("trend_memes"),
-                searchad=get_searchad_connector(), pool_path=pool)  # fmt: skip
+                searchad=get_searchad_connector(), pool_path=pool,
+                company=_trend_report_company)  # fmt: skip
+
+
+async def _trend_report_company(brief: Any, request_text: str | None,
+                                note: Any) -> tuple[Any, int, int]:  # fmt: skip
+    """연결된 회사로 보고서 빈칸 채우기 (같은 data 프로세스 안 함수, A2A 아님).
+
+    프로필은 저장분(카탈로그·소개 해시가 같으면 LLM 안 부름), 판매 집단 순위는 판매 저장소,
+    키워드 풀은 최신 날, 경쟁사는 company_accounts(30일 재사용, 확인 전이면 찾음)."""
+    from ax_contracts.schemas.data import DomainProfileRequest
+    from data_agent import keyword_pool
+    from data_agent.skills import company_accounts as ca
+    from data_agent.skills import trend_report_company as trc
+    from data_agent.skills.domain_profile import make_profile
+    from data_agent.skills.product_link import read_catalog
+
+    env = os.environ
+
+    async def profile() -> Any:
+        got = await make_profile(DomainProfileRequest(), get_llm(), env=env,
+                                 catalog=await read_catalog(get_catalog()))  # fmt: skip
+        return got.output
+
+    async def favorites(b: Any) -> tuple[list[str], str | None]:
+        cat = metric_catalog.current()
+        attributes = list(getattr(cat.sales, "attributes", []) or []) if cat.sales else []
+        filters = trc.target_filters(attributes, b.target_gender, b.target_ages)
+        if not filters:
+            return [], "타깃 성별·나이가 없거나 판매 기록 속성과 맞지 않음"
+        labels: list[str] = []
+        reasons: list[str] = []
+        now = datetime.now(UTC)
+        from data_agent.sales_collect import TENANT_ENV
+
+        tenant = (env.get(TENANT_ENV) or TENANT_ID_DEFAULT).strip()  # 판매 수집기와 같은 회사 id
+        for f in filters:
+            got = await asyncio.to_thread(sales_reads.segment_favorites, get_sales_store(),
+                                          tenant, f, "90d", 10, cat, now)  # fmt: skip
+            out = got.value
+            if out.status == "insufficient":
+                reasons += out.insufficient_reasons or ["판매 기록이 모자람"]
+                continue
+            labels += [i.label for i in out.internal if i.kind in ("genre", "category")]
+        return labels, ("; ".join(dict.fromkeys(reasons)) if not labels and reasons else None)
+
+    async def pool_words() -> list[str]:
+        _, rows = keyword_pool.latest(env.get(keyword_pool.DB_ENV) or keyword_pool.DEFAULT_DB)
+        return [r.keyword for r in rows[:20]]
+
+    async def accounts(p: Any, on_note: Any) -> Any:
+        store = ca.AccountStore(env.get(ca.DB_ENV) or ca.DEFAULT_DB)
+        try:
+            tenant, key = ca.tenant_key(p)
+            hit = store.get(tenant, key)
+            if (hit is None or datetime.now(UTC) - hit[0] >= ca.REUSE) and on_note is not None:
+                got = on_note("회사 경쟁사 찾는 중")
+                if asyncio.iscoroutine(got):
+                    await got
+            return await ca.find(p, get_llm(), get_instagram_graph(), env=env, store=store)
+        finally:
+            store.close()
+
+    return await trc.gather(brief, request_text, note, env=env, profile_fn=profile,
+                            favorites_fn=favorites, pool_fn=pool_words,
+                            accounts_fn=accounts)  # fmt: skip
 
 
 def get_trend_reports() -> Any:
