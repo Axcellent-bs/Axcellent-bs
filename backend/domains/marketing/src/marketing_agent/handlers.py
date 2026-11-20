@@ -43,6 +43,7 @@ from marketing_agent import (
     publish_control,
     secret_requests,
     shop_client,
+    video_draft,
     video_providers,
 )
 from marketing_agent import character_sheet as _character_sheet
@@ -1165,6 +1166,11 @@ async def draft_sns_post_skill(request: AgentRequest) -> AgentResult:
     return await draft_sns_post(request, STATE.notices, STATE.sns, STATE.briefs)
 
 
+async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentResult:
+    """총괄용: 영상 제작안(video_plan)으로 SNS 초안·장면 템플릿을 정한다(생성·게시 안 함)."""
+    return video_draft.prepare_video_draft(request, STATE.sns)
+
+
 async def draft_outage_sns_post_skill(request: AgentRequest) -> AgentResult:
     """장애 사과·보상 SNS 글 초안만 만든다. 게시·미디어 생성은 부르지 않는다."""
     return await draft_outage_sns_post(request, STATE.notices, STATE.sns)
@@ -1519,6 +1525,7 @@ HANDLERS = {
     "start_campaign": start_campaign_skill,
     "record_campaign_result": record_campaign_result_skill,
     "draft_sns_post": draft_sns_post_skill,
+    "prepare_video_draft_from_plan": prepare_video_draft_from_plan_skill,
     "draft_outage_sns_post": draft_outage_sns_post_skill,
     "list_outage_sns_drafts": list_outage_sns_drafts_skill,
     "merge_outage_sns_drafts": merge_outage_sns_drafts_skill,
