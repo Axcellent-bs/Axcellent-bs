@@ -1445,7 +1445,7 @@ async def marketing_chat_send(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     try:
-        thread = STATE.chat.send(data.who, data.thread_id, data.message)
+        thread = STATE.chat.send(data.who, data.thread_id, data.message, data.record_id)
     except ChatRefused as refused:
         return _chat_failed(request, refused)
     except ChatStorageError:
