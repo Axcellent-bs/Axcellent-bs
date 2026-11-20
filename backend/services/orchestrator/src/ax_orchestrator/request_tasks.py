@@ -46,7 +46,7 @@ class TaskStep:
     ref_key: str | None = None
     takes_ref: str | None = None
     # 부서가 요구하는 고정 입력(예: 긴 작업으로 받기 `caller`), 고객 문장을 넣을 입력 칸 이름
-    fixed_input: tuple[tuple[str, str], ...] = ()
+    fixed_input: tuple[tuple[str, Any], ...] = ()
     text_key: str | None = None
     # 이 단계 결과에서 다음 단계가 그대로 받을 값의 칸 이름 / 앞 단계가 둔 값을 입력으로 받는다
     carries: str | None = None
@@ -67,6 +67,7 @@ class TaskDef:
     examples: tuple[str, ...]  # 이런 글이 오면 이 일이다
     steps: tuple[TaskStep, ...]
     blocked_by: str | None = None
+    note: str | None = None  # 접수 안내에 붙일 "어떻게 읽었는지" (예: 가장 최근 캠페인 기준)
 
     @property
     def first_dept(self) -> str | None:
@@ -157,13 +158,33 @@ TASKS: tuple[TaskDef, ...] = (
         ("경쟁사 대비 트렌드 보고서 만들어 주세요", "20대 여성 타깃 화장품 트렌드 분석해 줘"),
         (replace(TREND_STEP, step_id="run", label="트렌드·경쟁사 분석 보고서"),),
     ),
-    _one(
+    # 캠페인 번호는 고객이 모르므로 마케팅 목록에서 가장 최근 것을 찾아 그 번호로 성과를 묻는다
+    TaskDef(
         "campaign_performance",
         "캠페인·영상 성과 조회",
         "지난 캠페인이나 영상의 성과(조회수·효과)를 알려 달라는 의뢰.",
         ("지난 캠페인 결과 알려 주세요", "올린 영상 성과 어때요"),
-        "data",
-        "campaign_result",
+        (
+            TaskStep(
+                "latest",
+                "marketing",
+                "list_campaign_briefs",
+                "최근 캠페인 찾기",
+                READ_GRADE,
+                fixed_input=(("limit", 1),),
+                ref_key="items.0.campaign_id",
+            ),
+            TaskStep(
+                "run",
+                "data",
+                "campaign_result",
+                "캠페인 성과 조회",
+                READ_GRADE,
+                after=("latest",),
+                takes_ref="campaign_id",
+            ),
+        ),
+        note="가장 최근 캠페인 기준",
     ),
     _one(
         "sales_analysis",
@@ -242,6 +263,7 @@ TASKS: tuple[TaskDef, ...] = (
         ("점검 공지 초안 써 주세요", "배송 지연 안내 공지 만들어 줘"),
         "marketing",
         "draft_notice",
+        fill="notice_kind",
     ),
     _one(
         "sns_draft",
@@ -286,6 +308,7 @@ TASKS: tuple[TaskDef, ...] = (
         "create_ticket",
         grade="A",
         human_gate=True,
+        fill="ticket_text",
     ),
     _one(
         "claim_register",
