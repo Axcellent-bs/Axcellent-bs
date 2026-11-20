@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { DangerRow, Facts, PageHead, SectionHead, StatusChip, TONE_DOT, type Tone } from '@/components/connect/parts'
+import { DangerRow, Facts, PageHead, SectionHead, StatusChip, Tabs, TONE_DOT, type Tone } from '@/components/connect/parts'
+import CompanyAiTools from '@/components/connect/CompanyAiTools'
 import type { ConnectionState } from '@/lib/companyConnection'
 import { privateIp, useHosts } from './store'
 import { SERVICES } from './services'
 import { checkKey, connectWithKey, disconnect, updateCompanyInfo, useCompany, useKeys, type CompanyInfo, type IssuedKey } from './company'
 import SiteConnect from './SiteConnect'
+import { useSession } from './session'
 
 // 회사 연결 (고객사 시스템 관리자). 맨 위: 연결 지도(이 서버 → 회사 → 판매 서버 → 사내 PC 상태 한 줄),
 // 아래: AXcellent 연결, 사이트 연결(플랫폼·직접 만든 사이트, 회사가 연결된 뒤에만).
@@ -17,6 +19,11 @@ const INDUSTRIES = ['온라인 쇼핑몰', '오프라인 유통', '여행사', '
 const DETECTED_NETWORK = '192.168.30.0/24'
 const DEMO_INFO: CompanyInfo = { name: '새벽커피', industry: '카페 체인', network: DETECTED_NETWORK }
 
+// 탭: 사이트·API 연결(예전 이 화면 전체) / 공통 AI 도구 연결(회사 AI 모델·키·예산, 회사 AI 연결 설계)
+const TABS = [{ id: 'site', label: '사이트·API 연결' }, { id: 'ai', label: '공통 AI 도구 연결' }] as const
+type TabId = (typeof TABS)[number]['id']
+const readTab = (): TabId => (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab') === 'ai' ? 'ai' : 'site')
+
 type Phase = { at: 'key' } | { at: 'info'; key: IssuedKey } | { at: 'run'; key: IssuedKey; info: CompanyInfo }
 
 const validNetwork = (v: string) => /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(v.trim()) && privateIp(v.trim().split('/')[0])
@@ -26,6 +33,8 @@ const when = (iso?: string | null) =>
 export default function CompanyConnect() {
   const company = useCompany()
   const keys = useKeys()
+  const { account } = useSession()
+  const [tab, setTab] = useState<TabId>(readTab)
   const [phase, setPhase] = useState<Phase>({ at: 'key' })
   const [input, setInput] = useState('')
   const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: INDUSTRIES[0], network: DETECTED_NETWORK })
@@ -113,6 +122,9 @@ export default function CompanyConnect() {
         이 워크스페이스를 회사와 잇고, 부서 AI가 읽을 회사 판매 서버를 정해요. 업무 데이터는 회사 밖으로 나가지 않아요.
       </PageHead>
 
+      <Tabs label="회사 연결" items={TABS} value={tab} onPick={setTab} />
+
+      {tab === 'ai' ? <CompanyAiTools me={account?.name ?? ''} /> : <>
       <ConnectionMap company={company?.name ?? null} shop={company ? shop : null} pcs={{ online, total: hosts.length }} />
 
       <section className="space-y-4">
@@ -286,6 +298,7 @@ export default function CompanyConnect() {
       </section>
 
       {connected && <SiteConnect onShop={setShop} />}
+      </>}
     </div>
   )
 }
