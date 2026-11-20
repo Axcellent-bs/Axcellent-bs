@@ -297,6 +297,7 @@ ax-contracts, ax-agent-template
 
 - `POST /api/dashboard/auth/login` {email, password} → {token, expires_at, account}. 세션 토큰 `axs1.…`는 12시간. 같은 이메일로 5번 연속 틀리면 15분 막힘(429 `LOGIN_LOCKED`)
 - `POST /auth/logout`, `GET /auth/me` (세션 토큰). `GET /auth/accounts`(운영자), `POST /auth/accounts`(운영자는 모든 역할, 고객사 관리자는 일반회원만)
+- `POST /auth/company` {company_id} (세션 토큰) → 그 회사로 다시 서명한 세션 토큰(같은 계정·새 `cid`·`crole`·만료 시각 그대로). 계정 소속에 없는 회사는 403 `TENANT_MISMATCH`, 별칭 `shop-demo`는 `catbooks`. 로그인·`/auth/me` 응답의 `company_list`(소속 회사 이름·사이트 주소)로 화면 머리글이 소속이 둘 이상일 때만 회사 고르기를 띄운다(여러 회사 설계 1-8)
 - `GET /auth/status` → {login_enabled}. 화면이 서버 로그인과 데모 로그인(꺼져 있을 때) 중 무엇을 쓸지 고른다. 토큰 없이 연다
 - 연결 키(`/connection-keys`): 세션 토큰이면 역할을 본다. 발급·폐기는 운영자, 연결·회사 정보·끊기는 고객사 관리자. 공용 토큰은 지금처럼 통과
 - 세션 토큰은 쓰기 사람 토큰 자리에도 그대로 쓴다(기록 이름 = 계정 이름). 공용 사람 토큰도 계속 받는다

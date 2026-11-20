@@ -59,11 +59,61 @@ export function readServerAccount(v: unknown): ServerAccount | null {
   return out;
 }
 
+/** 계정이 속한 회사 하나 (서버 `company_list` 한 줄: 회사 목록의 이름·사이트 주소 + 그 회사 안 역할, 여러 회사 설계 1-8) */
+export interface SessionCompany {
+  id: string;
+  name: string;
+  /** 회사 안 역할. 화면 권한 판단은 계정 역할(account.role)로 하고 이 값은 쓰지 않는다(1단계) */
+  role: "admin" | "member";
+  siteUrl?: string;
+}
+
 export interface HumanSession {
   token: string;
   /** 만료 시각 (유닉스 초, 서버 `expires_at`) */
   expiresAt: number;
   account: ServerAccount;
+  /** 소속 회사 (서버가 준 것만. 옛 서버·옛 저장 값에는 없다) */
+  companies?: SessionCompany[];
+  /** 세션 토큰의 지금 회사 (`cid`) */
+  companyId?: string;
+}
+
+const COMPANY_ROLES: readonly string[] = ["admin", "member"];
+
+/** 서버 `company_list`(또는 저장한 `companies`)를 읽는다. 모양이 틀린 줄·같은 회사 두 번째 줄은 버린다 */
+export function readSessionCompanies(v: unknown): SessionCompany[] {
+  if (!Array.isArray(v)) return [];
+  const out: SessionCompany[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== "object") continue;
+    const c = item as Record<string, unknown>;
+    const id = typeof c.company_id === "string" ? c.company_id : c.id;
+    if (typeof id !== "string" || !id || typeof c.name !== "string" || !c.name) continue;
+    if (typeof c.role !== "string" || !COMPANY_ROLES.includes(c.role)) continue;
+    if (out.some((o) => o.id === id)) continue;
+    const site = typeof c.site_url === "string" ? c.site_url : c.siteUrl;
+    out.push({ id, name: c.name, role: c.role as SessionCompany["role"], ...(typeof site === "string" && site ? { siteUrl: site } : {}) });
+  }
+  return out;
+}
+
+/** 서버 응답의 회사 칸(`company_list`·`company_id`)을 세션에 붙인다. 응답에 칸이 없으면(옛 서버) 세션 그대로 */
+export function withCompanies(s: HumanSession, data: unknown): HumanSession {
+  const d = (data ?? {}) as { company_list?: unknown; company_id?: unknown };
+  if (!Array.isArray(d.company_list)) return s;
+  const next: HumanSession = { ...s, companies: readSessionCompanies(d.company_list) };
+  if (typeof d.company_id === "string" && d.company_id) next.companyId = d.company_id;
+  else delete next.companyId;
+  return next;
+}
+
+/** 머리글 회사 고르기: 소속이 둘 이상이고 지금 회사가 그 안에 있을 때만. 아니면 null(지금처럼 고르기 없음) */
+export function companyChoice(s: HumanSession | null): { current: SessionCompany; options: SessionCompany[] } | null {
+  const options = s?.companies ?? [];
+  if (options.length < 2) return null;
+  const current = options.find((c) => c.id === s?.companyId);
+  return current ? { current, options } : null;
 }
 
 /** 브라우저 저장소 중 이 모듈이 쓰는 부분 (테스트에서 바꿔 끼운다) */
@@ -90,20 +140,23 @@ export function parseSession(raw: string | null, now = nowSeconds()): HumanSessi
     return null;
   }
   if (!v || typeof v !== "object") return null;
-  const o = v as { token?: unknown; expiresAt?: unknown; account?: unknown };
+  const o = v as { token?: unknown; expiresAt?: unknown; account?: unknown; companies?: unknown; companyId?: unknown };
   const account = readServerAccount(o.account);
   const ok =
     typeof o.token === "string" && o.token.startsWith("axs1.") &&
     typeof o.expiresAt === "number" && Number.isFinite(o.expiresAt) && !!account;
   if (!ok || !account) return null;
   const s: HumanSession = { token: o.token as string, expiresAt: o.expiresAt as number, account };
+  if (Array.isArray(o.companies)) s.companies = readSessionCompanies(o.companies);
+  if (typeof o.companyId === "string" && o.companyId) s.companyId = o.companyId;
   return isExpired(s, now) ? null : s;
 }
 
-/** 로그인 응답(`{token, expires_at, account}`)을 세션으로. 모양이 다르면 null */
+/** 로그인 응답(`{token, expires_at, account, company_list?, company_id?}`)을 세션으로. 모양이 다르면 null */
 export function sessionFromLogin(data: unknown, now = nowSeconds()): HumanSession | null {
   const d = (data ?? {}) as { token?: unknown; expires_at?: unknown; account?: unknown };
-  return parseSession(JSON.stringify({ token: d.token, expiresAt: d.expires_at, account: d.account }), now);
+  const s = parseSession(JSON.stringify({ token: d.token, expiresAt: d.expires_at, account: d.account }), now);
+  return s ? withCompanies(s, data) : null;
 }
 
 /** 사람 토큰 고르기: 만료 전 세션이 있으면 세션 토큰, 없으면 공용 토큰(옮기는 동안, 설계 3절) */
@@ -232,4 +285,19 @@ export function canResetPassword(actor: { id: string; role: ServerRole }, target
   if (actor.id === target.id) return false;
   if (actor.role === "operator") return true;
   return actor.role === "admin" && target.role === "member";
+}
+
+// ---- 회사 고르기 (dashboard-api `POST /auth/company`, 여러 회사 설계 1-8) ----
+
+export type CompanyPickOutcome = { kind: "ok"; session: HumanSession } | { kind: "error"; message: string };
+
+/** 회사 고르기 응답: 성공이면 그 회사로 다시 서명한 새 세션. 소속이 아니면 서버 문구(403 TENANT_MISMATCH) */
+export function readCompanyPickResponse(status: number, body: unknown, now = nowSeconds()): CompanyPickOutcome {
+  if (status >= 200 && status < 300) {
+    const session = sessionFromLogin((body as { data?: unknown } | null)?.data, now);
+    return session ? { kind: "ok", session } : { kind: "error", message: "응답을 읽지 못했어요. 다시 해 주세요." };
+  }
+  const message = (body as { error?: { message?: unknown } } | null)?.error?.message;
+  if (typeof message === "string" && message) return { kind: "error", message };
+  return { kind: "error", message: `회사를 바꾸지 못했어요 (${status})` };
 }

@@ -29,10 +29,19 @@
 경로
 - `GET  /api/dashboard/auth/status` → {login_enabled}
   (화면이 서버 로그인과 데모 로그인 중 무엇을 쓸지 고른다)
-- `POST /api/dashboard/auth/login` {email, password} → {token, expires_at, account, companies}
+- `POST /api/dashboard/auth/login` {email, password} → {token, expires_at, account, companies,
+  company_list, company_id, company_role}
   (companies = 소속 목록. 토큰은 첫 소속 회사로 서명한다(`cid`·`crole`), 소속이 없으면 회사 없이)
 - `POST /api/dashboard/auth/logout` (세션 토큰) → 끊은 토큰 목록에 올린다
 - `GET  /api/dashboard/auth/me` (세션 토큰) → 내 계정, companies, 지금 회사(company_id·company_role)
+  로그인·내 계정·비밀번호 바꾸기·회사 고르기 응답의 `company_list`: 소속 회사마다
+  {company_id, role, name, site_url}(회사 목록의 값. 화면 머리글의 회사 고르기용, 설계 1-8)
+- `POST /api/dashboard/auth/company` (세션 토큰) {company_id} → 그 회사로 다시 서명한 세션 토큰
+  (설계 1-8). 같은 계정, 새 `cid`·`crole`, 만료 시각은 그대로
+  (회사를 바꿔 로그인 시간을 늘리지 않는다).
+  계정 소속에 없는 회사·모르는 회사·형식이 틀린 값은 403 `TENANT_MISMATCH`(계약 `ErrorCode`).
+  별칭 `shop-demo`는 `catbooks`로 본다. 공용·에이전트 토큰은 세션이 아니라 403.
+  회사를 고르는 GET(`public_info.py`, 로그인 전 공개 정보)과 경로는 같고 메서드가 다르다
 - `GET  /api/dashboard/auth/accounts`
   (운영자: 모든 계정 / 고객사 관리자: 고객사 계정(admin·member)만) → 계정 목록
   (공개 칸만. 비밀번호 해시·세대 번호 같은 내부 값은 내보내지 않는다)
@@ -76,6 +85,7 @@ from ax_agent_template import company_connection as store
 from ax_agent_template import human_auth
 from ax_contracts.schemas import Membership
 from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
+from ax_contracts.schemas.message import ErrorCode
 from ax_dashboard_api.envelope import ApiError, ok
 from ax_secret_store.service import TENANT_RE
 
@@ -250,18 +260,77 @@ def _companies_out(memberships: list[Membership]) -> list[dict[str, Any]]:
     return [m.model_dump(mode="json") for m in memberships]
 
 
-def _issue_for(row: dict[str, Any]) -> tuple[str, int, list[Membership]]:
-    """계정의 세션 토큰. 첫 소속 회사로 서명한다(회사 고르기는 뒤 단계에서)."""
+def _company_list_out(memberships: list[Membership]) -> list[dict[str, Any]]:
+    """소속 회사마다 회사 목록의 이름·사이트 주소를 붙인다(화면 회사 고르기용, 설계 1-8).
+
+    `memberships_of`가 회사 목록에 있는 회사만 남기므로 이름은 늘 회사 목록에서 온다."""
+    out: list[dict[str, Any]] = []
+    for m in memberships:
+        company = company_list.get_company(m.company_id)
+        if company is None:
+            continue
+        out.append(
+            {
+                "company_id": m.company_id,
+                "role": m.role,
+                "name": company.name,
+                "site_url": company.site_url,
+            }
+        )
+    return out
+
+
+def _pick_membership(memberships: list[Membership], company_id: str | None) -> Membership | None:
+    """company_id 소속이 있으면 그것, 없으면 첫 소속(소속이 없으면 None)."""
+    if company_id is not None:
+        for m in memberships:
+            if m.company_id == company_id:
+                return m
+    return memberships[0] if memberships else None
+
+
+def _issue_for(
+    row: dict[str, Any],
+    *,
+    company_id: str | None = None,
+    expires_at: int | None = None,
+) -> tuple[str, int, list[Membership], Membership | None]:
+    """계정의 세션 토큰. company_id 소속이 있으면 그 회사, 없으면 첫 소속 회사로 서명한다.
+
+    expires_at을 주면 그 만료 시각을 그대로 쓴다(회사 고르기는 로그인 시간을 늘리지 않는다)."""
     memberships = memberships_of(row)
-    first = memberships[0] if memberships else None
+    chosen = _pick_membership(memberships, company_id)
+    now = int(time.time())
+    ttl = None if expires_at is None else max(1, expires_at - now)
     token, exp = human_auth.issue_session(
         account_id=str(row["id"]),
         name=str(row["name"]),
         role=str(row["role"]),
-        company_id=first.company_id if first else None,
-        company_role=first.role if first else None,
+        now=now,
+        ttl=ttl,
+        company_id=chosen.company_id if chosen else None,
+        company_role=chosen.role if chosen else None,
     )
-    return token, exp, memberships
+    return token, exp, memberships, chosen
+
+
+def _session_out(
+    row: dict[str, Any],
+    token: str,
+    exp: int,
+    memberships: list[Membership],
+    chosen: Membership | None,
+) -> dict[str, Any]:
+    """새 세션 토큰을 주는 응답(로그인·비밀번호 바꾸기·회사 고르기)."""
+    return {
+        "token": token,
+        "expires_at": exp,
+        "account": _public(row),
+        "companies": _companies_out(memberships),
+        "company_list": _company_list_out(memberships),
+        "company_id": chosen.company_id if chosen else None,
+        "company_role": chosen.role if chosen else None,
+    }
 
 
 def _sync_catbooks_membership(row: dict[str, Any], new_role: str) -> None:
@@ -473,15 +542,7 @@ def login(body: LoginIn) -> dict:
         _record_failure(email, now)
         raise ApiError(401, "LOGIN_FAILED", "이메일이나 비밀번호가 맞지 않아요")
     _clear_failures(email)
-    token, exp, memberships = _issue_for(row)
-    return ok(
-        {
-            "token": token,
-            "expires_at": exp,
-            "account": _public(row),
-            "companies": _companies_out(memberships),
-        }
-    )
+    return ok(_session_out(row, *_issue_for(row)))
 
 
 @router.post("/logout")
@@ -502,6 +563,7 @@ def me(authorization: str | None = Header(None)) -> dict:
             "account": _public(row),
             "expires_at": human.expires_at,
             "companies": _companies_out(memberships_of(row)),
+            "company_list": _company_list_out(memberships_of(row)),
             "company_id": human.company_id,
             "company_role": human.company_role,
         }
@@ -570,16 +632,31 @@ def change_password(body: PasswordChangeIn, authorization: str | None = Header(N
         _set_password(row, body.new_password)
         _write(path, rows)
     human_auth.end_account_sessions(str(row["id"]))
-    token, exp, memberships = _issue_for(row)
+    # 고른 회사는 새 토큰에도 그대로 둔다(소속이 빠졌으면 첫 소속으로)
+    issued = _issue_for(row, company_id=human.company_id)
     logger.info("비밀번호를 바꿨다: %s", row["id"])
-    return ok(
-        {
-            "token": token,
-            "expires_at": exp,
-            "account": _public(row),
-            "companies": _companies_out(memberships),
-        }
-    )
+    return ok(_session_out(row, *issued))
+
+
+class CompanyPickIn(BaseModel):
+    # 형식 검사는 아래에서 한다: 틀린 값도 422가 아니라 소속 아님(403)으로 같이 답한다
+    company_id: Any = None
+
+
+@router.post("/company")
+def pick_company(body: CompanyPickIn, authorization: str | None = Header(None)) -> dict:
+    """지금 회사 바꾸기(설계 1-8): 같은 계정·같은 만료 시각으로 그 회사의 세션 토큰을 다시 준다."""
+    human = session_human(authorization)
+    row = next((r for r in load_accounts() if r.get("id") == human.account_id), None)
+    if row is None:
+        raise ApiError(401, "ACCOUNT_GONE", "계정이 없어졌어요. 다시 로그인해 주세요")
+    wanted = company_list.canonical_company_id(body.company_id)  # 별칭 shop-demo → catbooks
+    if wanted is None or all(m.company_id != wanted for m in memberships_of(row)):
+        # 모르는 회사와 소속이 아닌 회사를 같은 답으로(회사가 있는지 알려 주지 않는다)
+        raise ApiError(403, ErrorCode.TENANT_MISMATCH.value, "이 계정이 속한 회사가 아니에요")
+    issued = _issue_for(row, company_id=wanted, expires_at=human.expires_at)
+    logger.info("회사를 바꿨다: %s → %s", row["id"], wanted)
+    return ok(_session_out(row, *issued))
 
 
 @router.post("/accounts/{account_id}/reset-password")

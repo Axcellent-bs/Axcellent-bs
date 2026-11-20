@@ -14,7 +14,7 @@ import { memberLinked, useProfiles, withProfile, type ReaderArea } from './membe
 import { endSupport, getSupport, supportActive } from './support'
 import { setActorName } from '@/lib/actor'
 import { fetchLoginEnabled, fetchMe, serverLogout } from '@/lib/authApi'
-import { getSession, setSession, type HumanSession, type ServerAccount } from '@/lib/humanSession'
+import { getSession, setSession, withCompanies, type HumanSession, type ServerAccount } from '@/lib/humanSession'
 import { approverOf, customerRows } from '@/lib/memberAdmin'
 import { clearServerMembers, getServerMembers } from './serverMembers'
 
@@ -264,7 +264,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (r.kind !== 'alive') return
     const s = getSession()
     if (!s || s.account.id !== r.account.id) return
-    setSession({ ...s, account: r.account })
+    setSession(withCompanies({ ...s, account: r.account }, r.data)) // 소속 회사도 서버 값으로(회사 고르기)
     setAccount(accountFromServer(r.account))
   }, [endServerSession])
   // 처음 열 때와 탭으로 돌아올 때 본다

@@ -1,10 +1,12 @@
 import { Link, useRouter } from "@/lib/nav";
 import { usePathname } from "@/lib/nav";
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import { findSiteIconOrNull } from "@/components/planning-common/company";
 import { AccountSwitcher } from "@/demo/AccountSwitcher";
 import { homeOf, servicesOf, supportViewer, useSession, type Account } from "@/demo/session";
 import { useCompany } from "@/demo/company";
+import { switchCompany } from "@/lib/authApi";
+import { companyChoice, getSession, onSessionChange, setSession } from "@/lib/humanSession";
 import { endSupport, supportActive, useSupport } from "@/demo/support";
 import { AGENTS, activeChild, matchPath, type Service, type SubItem } from "@/demo/services";
 import { useOpenHandoffCount } from "@/lib/handoffs";
@@ -167,6 +169,10 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const home = account ? homeOf(account) : "/";
   const company = useCompany();
   const router = useRouter();
+  // 소속 회사가 둘 이상일 때만 머리글에 회사 고르기(여러 회사 설계 1-8). 하나면 null이라 머리글은 지금과 같다
+  const choice = companyChoice(useSyncExternalStore(onSessionChange, getSession));
+  // 회사를 바꾸면 늘려서 화면(main 안)을 새로 그린다. 각 화면이 새 회사 토큰으로 다시 읽는다
+  const [companyEpoch, setCompanyEpoch] = useState(0);
   // 지원 모드: 운영자가 고객사 화면을 보는 동안 위에 띠를 띄우고, 고객사 화면 안의 버튼·입력은 끈다(보기 전용)
   const support = useSupport();
   const supporting = !!account?.operator && supportActive(support, company);
@@ -241,6 +247,14 @@ export function AdminShell({ children }: { children: ReactNode }) {
           {matchPath("/control", path) ? (
             <span className="shrink-0 text-[15px] font-semibold">AXcellent <span className="font-normal text-ink-500">관제 센터</span></span>
           ) : (
+            /* 소속 회사가 둘 이상이면 지금 회사(세션 토큰의 회사) 이름 + 회사 고르기 */
+            choice ? (
+              <>
+                <span className="shrink-0 text-[15px] font-semibold">AXcellent <span className="font-normal text-ink-500">with</span> <CompanyBrand name={choice.current.name} siteUrl={choice.current.siteUrl} /></span>
+                <CompanyPicker currentId={choice.current.id} options={choice.options} onPicked={() => setCompanyEpoch((n) => n + 1)} />
+                <span className="chip hidden bg-emerald-50 text-emerald-700 xl:inline-flex" title="허용된 IP에서만 열립니다. 허용 목록 밖의 접근은 막혀 있습니다">접속 범위 허용 IP</span>
+              </>
+            ) :
             /* 지금 연결된 고객사 이름. 연결을 끊으면 with 뒤를 비운다 (demo/company.ts) */
             company ? (
               <>
@@ -268,10 +282,40 @@ export function AdminShell({ children }: { children: ReactNode }) {
         )}
         <main className="relative min-h-0 flex-1 overflow-y-auto pt-6">
           {/* 보기 전용: fieldset disabled가 안의 버튼·입력을 모두 끈다. 링크(화면 이동)는 그대로 된다 */}
-          {viewOnly ? <fieldset disabled className="contents">{children}</fieldset> : children}
+          <div key={companyEpoch} className="contents">
+            {viewOnly ? <fieldset disabled className="contents">{children}</fieldset> : children}
+          </div>
         </main>
       </div>
     </div>
+  );
+}
+
+/**
+ * 머리글 회사 고르기(소속이 둘 이상일 때만). 고르면 서버가 그 회사로 다시 서명한 세션 토큰을 저장하고 화면을 새로 그린다.
+ * 목록은 서버가 준 소속 회사뿐이다. 권한(관리자·일반회원 화면)은 계정 역할 그대로라 여기서 바꾸지 않는다
+ */
+function CompanyPicker({ currentId, options, onPicked }: { currentId: string; options: { id: string; name: string }[]; onPicked: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pick = async (id: string) => {
+    if (id === currentId || busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await switchCompany(id);
+    setBusy(false);
+    if (r.kind === "error") return setError(r.message);
+    setSession(r.session);
+    onPicked();
+  };
+  return (
+    <span className="flex shrink-0 items-center gap-2">
+      <select aria-label="회사 고르기" className="field w-auto py-1 text-[13px]" value={currentId} disabled={busy}
+        onChange={(e) => void pick(e.target.value)}>
+        {options.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      {error && <span className="text-xs text-red-600" role="alert">{error}</span>}
+    </span>
   );
 }
 

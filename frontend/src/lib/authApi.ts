@@ -2,8 +2,8 @@
 // 비밀번호는 요청 본문으로만 보내고 어디에도 저장·기록하지 않는다. 토큰은 humanSession.ts가 sessionStorage에 둔다.
 import { DASHBOARD_API_URL } from "./env";
 import {
-  getSession, readLoginResponse, readLoginStatus, readPasswordChangeResponse, readServerAccount,
-  type LoginOutcome, type PasswordChangeOutcome, type ServerAccount, type ServerRole,
+  getSession, readCompanyPickResponse, readLoginResponse, readLoginStatus, readPasswordChangeResponse, readServerAccount,
+  type CompanyPickOutcome, type LoginOutcome, type PasswordChangeOutcome, type ServerAccount, type ServerRole,
 } from "./humanSession";
 import { readAccountList, updateBody, type AccountPatch } from "./memberAdmin";
 
@@ -56,7 +56,8 @@ export async function serverLogout(): Promise<void> {
   }
 }
 
-export type MeOutcome = { kind: "alive"; account: ServerAccount } | { kind: "ended" } | { kind: "unknown" };
+/** alive의 data: 응답 본문 그대로(회사 칸 `company_list`·`company_id`는 humanSession.withCompanies가 읽는다) */
+export type MeOutcome = { kind: "alive"; account: ServerAccount; data: unknown } | { kind: "ended" } | { kind: "unknown" };
 
 /**
  * 내 계정(`GET /auth/me`): 세션이 살아 있으면 서버의 지금 계정 값(역할·부서·확인 권한·열람 담당).
@@ -67,8 +68,9 @@ export async function fetchMe(): Promise<MeOutcome> {
     const { status, body } = await send("/me", { session: true });
     if (status === 401) return { kind: "ended" };
     if (status < 200 || status >= 300) return { kind: "unknown" };
-    const account = readServerAccount((body as { data?: { account?: unknown } } | null)?.data?.account);
-    return account ? { kind: "alive", account } : { kind: "unknown" };
+    const data = (body as { data?: { account?: unknown } } | null)?.data;
+    const account = readServerAccount(data?.account);
+    return account ? { kind: "alive", account, data } : { kind: "unknown" };
   } catch {
     return { kind: "unknown" };
   }
@@ -133,4 +135,14 @@ export async function resetPassword(accountId: string, newPassword: string): Pro
   });
   if (status < 200 || status >= 300) throw new Error(errorMessage(status, body, "비밀번호를 초기화하지 못했어요"));
   return (body as { data: ServerAccount }).data;
+}
+
+/** 지금 회사 바꾸기(여러 회사 설계 1-8): 서버가 그 계정 소속 회사로만 세션 토큰을 다시 서명해 준다 */
+export async function switchCompany(companyId: string): Promise<CompanyPickOutcome> {
+  try {
+    const { status, body } = await send("/company", { method: "POST", session: true, body: JSON.stringify({ company_id: companyId }) });
+    return readCompanyPickResponse(status, body);
+  } catch {
+    return { kind: "error", message: "서버에 닿지 않았어요. 잠시 뒤 다시 해 주세요." };
+  }
 }

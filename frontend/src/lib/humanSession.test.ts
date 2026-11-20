@@ -2,8 +2,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  SESSION_KEY, accountInputProblem, canResetPassword, getSession, loginDisabled, parseSession, passwordChangeProblem,
-  pickHumanToken, readLoginResponse, readLoginStatus, readPasswordChangeResponse, sessionFromLogin, setSession, setStoreForTests,
+  SESSION_KEY, accountInputProblem, canResetPassword, companyChoice, getSession, loginDisabled, parseSession, passwordChangeProblem,
+  pickHumanToken, readCompanyPickResponse, readLoginResponse, readLoginStatus, readPasswordChangeResponse, readSessionCompanies,
+  sessionFromLogin, setSession, setStoreForTests, withCompanies,
   type HumanSession, type KeyValueStore,
 } from "./humanSession.ts";
 
@@ -138,4 +139,59 @@ test("비밀번호 초기화 권한: 운영자는 다른 모든 계정, 고객�
   assert.equal(canResetPassword(admin, { id: "ad2", role: "admin" }), false);
   assert.equal(canResetPassword(admin, op), false);
   assert.equal(canResetPassword(member, { id: "m2", role: "member" }), false);
+});
+
+// ---- 회사 고르기 (여러 회사 설계 1-8): 소속이 둘 이상일 때만 머리글에 고르기 ----
+
+const NUBI = { company_id: "nubi", role: "admin", name: "누비투어", site_url: "" };
+const CATBOOKS = { company_id: "catbooks", role: "member", name: "캣북스", site_url: "https://catbooks.example.com" };
+
+test("로그인 응답의 company_list·company_id를 세션에 담는다. 없으면(옛 서버) 칸을 만들지 않는다", () => {
+  const s = sessionFromLogin({ token: "axs1.a.b", expires_at: NOW + 60, account, company_list: [NUBI, CATBOOKS], company_id: "nubi" }, NOW);
+  assert.deepEqual(s?.companies, [
+    { id: "nubi", role: "admin", name: "누비투어" },
+    { id: "catbooks", role: "member", name: "캣북스", siteUrl: "https://catbooks.example.com" },
+  ]);
+  assert.equal(s?.companyId, "nubi");
+  const old = sessionFromLogin({ token: "axs1.a.b", expires_at: NOW + 60, account }, NOW);
+  assert.ok(old && !("companies" in old) && !("companyId" in old));
+  // 저장했다가 다시 읽어도 같다
+  assert.deepEqual(parseSession(JSON.stringify(s), NOW), s);
+});
+
+test("회사 목록 읽기: 모양이 틀린 줄·같은 회사 두 번째 줄은 버리고 지어내지 않는다", () => {
+  assert.deepEqual(readSessionCompanies([NUBI, { company_id: "x" }, "junk", { ...NUBI, name: "다른 이름" }, { ...CATBOOKS, role: "owner" }]), [
+    { id: "nubi", role: "admin", name: "누비투어" },
+  ]);
+  assert.deepEqual(readSessionCompanies(undefined), []);
+});
+
+test("회사 고르기는 소속이 둘 이상이고 지금 회사가 그 안에 있을 때만", () => {
+  const two = sessionFromLogin({ token: "axs1.a.b", expires_at: NOW + 60, account, company_list: [NUBI, CATBOOKS], company_id: "catbooks" }, NOW);
+  const choice = companyChoice(two);
+  assert.equal(choice?.current.id, "catbooks");
+  assert.deepEqual(choice?.options.map((c) => c.id), ["nubi", "catbooks"]);
+  const one = sessionFromLogin({ token: "axs1.a.b", expires_at: NOW + 60, account, company_list: [CATBOOKS], company_id: "catbooks" }, NOW);
+  assert.equal(companyChoice(one), null);
+  assert.equal(companyChoice(session()), null);
+  assert.equal(companyChoice(null), null);
+  const stray = sessionFromLogin({ token: "axs1.a.b", expires_at: NOW + 60, account, company_list: [NUBI, CATBOOKS], company_id: "studyon" }, NOW);
+  assert.equal(companyChoice(stray), null);
+});
+
+test("회사 고르기 응답: 성공이면 새 세션, 403이면 서버 문구", () => {
+  const okRes = readCompanyPickResponse(200, { data: { token: "axs1.n.s", expires_at: NOW + 60, account, company_list: [NUBI, CATBOOKS], company_id: "nubi" } }, NOW);
+  assert.equal(okRes.kind, "ok");
+  if (okRes.kind === "ok") assert.equal(okRes.session.companyId, "nubi");
+  assert.deepEqual(readCompanyPickResponse(403, { error: { code: "TENANT_MISMATCH", message: "이 계정이 속한 회사가 아니에요" } }, NOW), { kind: "error", message: "이 계정이 속한 회사가 아니에요" });
+  assert.deepEqual(readCompanyPickResponse(500, null, NOW), { kind: "error", message: "회사를 바꾸지 못했어요 (500)" });
+  assert.equal(readCompanyPickResponse(200, { data: { token: "nope" } }, NOW).kind, "error");
+});
+
+test("내 계정 응답으로 세션의 회사 칸을 고친다. 칸이 없는 응답(옛 서버)은 그대로 둔다", () => {
+  const s = session();
+  const next = withCompanies(s, { company_list: [NUBI, CATBOOKS], company_id: "catbooks" });
+  assert.equal(next.companyId, "catbooks");
+  assert.equal(next.companies?.length, 2);
+  assert.equal(withCompanies(s, { account }), s);
 });
