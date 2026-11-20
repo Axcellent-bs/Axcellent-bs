@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 사건이 닫힌 뒤의 조회 줄만 숨기는지.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { closedTimes, isBackgroundRead, LEGACY_SCREEN_CONTEXTS } from "./commFilter.ts";
+import { closedTimes, isBackgroundRead, LEGACY_SCREEN_CONTEXTS, WORK_CONTEXT, mergeClosed, requestClosedTimes } from "./commFilter.ts";
 
 // lib/data.ts UI_CONTEXT와 같은 값 (data.ts는 env를 읽어 node --test로 바로 가져오지 않는다)
 const UI_CONTEXT_FOR_TEST = "ctx_ui_dashboard";
@@ -84,4 +84,41 @@ test("ctx_req_dashboard라도 실패(거절)·보류·사람 확인 줄과 쓰�
     assert.equal(isBackgroundRead(bookStats({ outcome })), false, outcome);
   }
   assert.equal(isBackgroundRead(bookStats({ grade: "A", skill: "send_event_proposal" })), false);
+});
+
+// 11/20 14:36 의뢰 wr_732efb95e9: 총괄 → 데이터 trend_report_create(read)가 ctx_wr_로 남는다
+const WR = "ctx_wr_732efb95e9";
+const reportLine = (over: Partial<CommLine>) =>
+  line({ from_agent: "data", to_agent: "planning", skill: "receive_insight", context_id: WR, occurred_at: "2026-11-20T05:37:00Z", ...over });
+
+test("고객 의뢰(ctx_wr_) 진행 중의 조회 줄은 남긴다 (데이터분석 말풍선)", () => {
+  const open = requestClosedTimes([{ request_id: "wr_732efb95e9", status: "running", updated_at: "2026-11-20T05:36:40Z" }]);
+  assert.equal(open.size, 0);
+  assert.equal(isBackgroundRead(reportLine({}), open), false);
+  assert.equal(isBackgroundRead(reportLine({})), false); // 의뢰 목록을 못 읽어도 진행 중으로 본다
+  for (const status of ["received", "classified", "waiting"] as const) {
+    assert.equal(requestClosedTimes([{ request_id: "wr_x", status, updated_at: "2026-11-20T05:00:00Z" }]).size, 0, status);
+  }
+});
+
+test("끝난 의뢰의 뒤 조회 줄은 사건처럼 숨긴다, 끝나기 전 줄은 남긴다", () => {
+  for (const status of ["done", "failed", "rejected", "needs_human"] as const) {
+    const ended = requestClosedTimes([{ request_id: "wr_732efb95e9", status, updated_at: "2026-11-20T05:36:00Z" }]);
+    assert.equal(ended.get(WR), "2026-11-20T05:36:00Z", status);
+    assert.equal(isBackgroundRead(reportLine({}), ended), true, status); // 끝난 뒤
+    assert.equal(isBackgroundRead(reportLine({ occurred_at: "2026-11-20T05:35:00Z" }), ended), false, status); // 끝나기 전
+  }
+  // 서버가 context_id를 따로 주면 그것으로
+  assert.ok(requestClosedTimes([{ request_id: "wr_1", context_id: "ctx_wr_custom", status: "done", updated_at: "2026-11-20T05:00:00Z" }]).has("ctx_wr_custom"));
+  // 사건·의뢰 닫힌 시각을 합쳐도 서로 덮지 않는다
+  const both = mergeClosed(closed, requestClosedTimes([{ request_id: "wr_732efb95e9", status: "done", updated_at: "2026-11-20T05:36:00Z" }]));
+  assert.equal(both.get(CTX), CLOSED);
+  assert.equal(both.get(WR), "2026-11-20T05:36:00Z");
+});
+
+test("ctx_wr_를 더해도 ctx_ui_·ctx_req_dashboard 규칙은 그대로", () => {
+  assert.equal(isBackgroundRead(bookStats({ context_id: UI_CONTEXT_FOR_TEST })), true);
+  assert.equal(isBackgroundRead(bookStats({})), true);
+  assert.equal(isBackgroundRead(bookStats({ context_id: "ctx_req_7f3a91c2" })), false);
+  assert.ok(WORK_CONTEXT.test(WR) && !WORK_CONTEXT.test("ctx_ui_dashboard") && !WORK_CONTEXT.test("ctx_wrong"));
 });

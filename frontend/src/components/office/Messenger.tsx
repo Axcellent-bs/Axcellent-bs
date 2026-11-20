@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { HandoffLine, PlanCard } from "@/components/office/DevCards";
+import { RequestProgressCard } from "@/components/office/RequestProgressCard";
 import { TALK_LABEL, proceed, type OfficeTalk } from "@/components/office/useOfficeTalk";
 import { INCIDENT_STATUS_KO, type ChatItem, type OrchIncident, type Tone } from "@/lib/agentChat";
 import { clock, detectorName, impactOf, num, rootCauseOf } from "@/lib/data";
@@ -216,6 +217,8 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label }: {
             <Bubble m={it} talk={talk} />
             {repeat}{time}
           </div>
+          {/* 총괄에게 맡긴 고객 의뢰: 번호가 처음 나온 총괄 말풍선 아래 진행 카드 (useOfficeTalk withRequestCards) */}
+          {it.requestCard && <RequestProgressCard requestId={it.requestCard} />}
         </div>
       </li>,
     );
