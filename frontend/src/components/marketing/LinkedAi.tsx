@@ -1,7 +1,7 @@
 // 마케팅 화면 탭 위의 "이 화면에서 연계되는 AI" 카드. 누가 시키고 누구에게 시키는지 한 줄씩만 적는다.
 // 근거는 backend/domains/marketing 의 skill 이름과 호출 코드에서 확인된 것만 쓴다(여기서 새로 정하지 않는다).
 
-export type MarketingTab = "notice" | "campaign" | "briefs" | "sns";
+export type MarketingTab = "notice" | "campaign" | "briefs" | "sns" | "records";
 
 interface Link { who: string; dir: "받음" | "시킴"; line: string }
 
@@ -24,6 +24,9 @@ const LINKS: Record<MarketingTab, Link[]> = {
   ],
   sns: [
     { who: "안전 장치", dir: "시킴", line: "이미지·영상 생성(generate_media)과 SNS 게시(publish_sns)를 execute로 요청합니다. 게시는 항상 사람 승인을 거칩니다." },
+  ],
+  records: [
+    { who: "이 화면", dir: "받음", line: "SNS·미디어에서 만든 이미지 시트·스토리보드 기록을 읽기만 합니다(creative_records_list·creative_record_get)." },
   ],
 };
 

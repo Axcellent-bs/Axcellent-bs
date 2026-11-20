@@ -1344,6 +1344,9 @@ class CharacterSheetImageBody(BaseModel):
 class CharacterSheetBody(BaseModel):
     image: CharacterSheetImageBody
     note: str | None = Field(default=None, max_length=200)
+    # 제작 기록에 남길 작은 미리보기(긴 변 256px JPEG base64).
+    # 없거나 이상하면 미리보기 없이 기록한다
+    thumbnail_base64: str | None = Field(default=None, max_length=80_000)
 
 
 @router.post("/marketing/character-sheet")
@@ -1356,7 +1359,11 @@ async def marketing_character_sheet(body: CharacterSheetBody) -> dict:
     if is_mock():
         raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "캐릭터 시트는 실제 모드에서만 된다")
     note = (body.note or "").strip() or None
-    return ok(await marketing_client.character_sheet_call(body.image.model_dump(), note))
+    return ok(
+        await marketing_client.character_sheet_call(
+            body.image.model_dump(), note, body.thumbnail_base64 or None
+        )
+    )
 
 
 @router.get("/marketing/higgsfield/status")
@@ -1372,6 +1379,7 @@ class StoryboardBody(BaseModel):
     character_en: str | None = Field(default=None, max_length=MAX_CHARACTER_EN)
     style_en: str | None = Field(default=None, max_length=MAX_STYLE_EN)
     shots: Literal[6, 9, 12] = DEFAULT_SHOTS
+    record_id: str | None = Field(default=None, pattern=r"^CR-[0-9a-f]{12}$")  # 이어 붙일 제작 기록
 
 
 @router.post("/marketing/storyboard")
@@ -1392,8 +1400,27 @@ async def marketing_storyboard(body: StoryboardBody) -> dict:
             (body.character_en or "").strip() or None,
             (body.style_en or "").strip() or None,
             body.shots,
+            body.record_id,
         )
     )
+
+
+@router.get("/marketing/creative-records")
+async def marketing_creative_records(limit: int = Query(50, ge=1, le=200)) -> dict:
+    """이미지 시트·스토리보드 제작 기록 목록(마케팅 `creative_records_list`, read)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    return ok(await marketing_client.creative_records_call(limit))
+
+
+@router.get("/marketing/creative-records/{record_id}")
+async def marketing_creative_record(
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """제작 기록 하나(마케팅 `creative_record_get`, read)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    return ok(await marketing_client.creative_record_call(record_id))
 
 
 class MarketingChatSendBody(BaseModel):

@@ -108,6 +108,7 @@ export const SERVICES: Service[] = [
       { href: '/marketing/campaign', label: '캠페인·쿠폰' },
       { href: '/marketing/briefs', label: '받은 기획안' },
       { href: '/marketing/sns', label: 'SNS·미디어' },
+      { href: '/marketing/records', label: '제작 기록' },
     ],
   },
   {

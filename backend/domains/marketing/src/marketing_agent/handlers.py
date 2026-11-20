@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -33,6 +34,12 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.finance import ContentFormat
+from ax_contracts.schemas.marketing_creative import (
+    CreativeRecordGetInput,
+    CreativeRecordGetOutput,
+    CreativeRecordsListInput,
+    CreativeRecordsListOutput,
+)
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import (
     brief_media,
@@ -46,6 +53,7 @@ from marketing_agent import (
     video_providers,
 )
 from marketing_agent import character_sheet as _character_sheet
+from marketing_agent import creative_records as _creative
 from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import storyboard as _storyboard
 from marketing_agent.brief_handoff import (
@@ -628,6 +636,7 @@ async def storyboard_prompt(request: AgentRequest) -> AgentResult:
             outcome=refused.code,
             output={"message": refused.message},
         )
+    out = out.model_copy(update={"record_id": _record_storyboard(out, request.untrusted)})
     return _result(
         request,
         TaskStatus.COMPLETED,
@@ -638,6 +647,72 @@ async def storyboard_prompt(request: AgentRequest) -> AgentResult:
             f"(캐릭터 문장 {'사용' if out.character_used else '없음'})",
             [],
         ),
+    )
+
+
+_RECORD_ID = re.compile(r"CR-[0-9a-f]{12}")
+
+
+def _record_sheet(out: Any, untrusted: dict[str, Any]) -> str | None:
+    """시트 결과를 제작 기록에 남긴다. 실패해도 결과는 그대로 돌려준다."""
+    try:
+        return _creative.store().add_sheet(
+            out.model_dump(mode="json", exclude={"record_id"}),
+            _character_sheet.clean_note(untrusted.get("note")),
+            _creative.clean_thumbnail(untrusted.get("thumbnail")),
+        )
+    except Exception:  # noqa: BLE001 - 기록은 부가 기능이라 결과를 막지 않는다
+        _creative.logger.exception("제작 기록: 이미지 시트를 남기지 못함")
+        return None
+
+
+def _record_storyboard(out: Any, untrusted: dict[str, Any]) -> str | None:
+    """`untrusted.record_id`가 있으면 그 기록에 스토리보드를 붙인다."""
+    rid = untrusted.get("record_id")
+    if not isinstance(rid, str) or not _RECORD_ID.fullmatch(rid):
+        return None
+    story = " ".join(str(untrusted.get("story") or "").split())
+    try:
+        done = _creative.store().attach_storyboard(
+            rid, story, len(out.shots), out.model_dump(mode="json", exclude={"record_id"})
+        )
+    except Exception:  # noqa: BLE001 - 기록은 부가 기능이라 결과를 막지 않는다
+        _creative.logger.exception("제작 기록: 스토리보드를 붙이지 못함")
+        return None
+    return rid if done else None
+
+
+async def creative_records_list(request: AgentRequest) -> AgentResult:
+    """이미지 시트·스토리보드 제작 기록 목록(read)."""
+    data = _parse(request, CreativeRecordsListInput)
+    if isinstance(data, AgentResult):
+        return data
+    items = _creative.store().list(data.limit)
+    out = CreativeRecordsListOutput.model_validate({"items": items})
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["creative_records"], f"제작 기록 {len(items)}건", []),
+    )
+
+
+async def creative_record_get(request: AgentRequest) -> AgentResult:
+    """제작 기록 하나(read). 없으면 not_found."""
+    data = _parse(request, CreativeRecordGetInput)
+    if isinstance(data, AgentResult):
+        return data
+    row = _creative.store().get(data.record_id)
+    if row is None:
+        return _result(
+            request, TaskStatus.FAILED, outcome="not_found", output={"message": "기록이 없다"}
+        )
+    out = CreativeRecordGetOutput.model_validate(row)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["creative_records"], f"제작 기록 {data.record_id}", []),
     )
 
 
@@ -661,6 +736,7 @@ async def character_sheet_prompt(request: AgentRequest) -> AgentResult:
             outcome=refused.code,
             output={"message": refused.message},
         )
+    out = out.model_copy(update={"record_id": _record_sheet(out, request.untrusted)})
     return _result(
         request,
         TaskStatus.COMPLETED,
@@ -1510,6 +1586,8 @@ HANDLERS = {
     "character_sheet_prompt": character_sheet_prompt,
     "storyboard_prompt": storyboard_prompt,
     "higgsfield_status": higgsfield_status,
+    "creative_records_list": creative_records_list,
+    "creative_record_get": creative_record_get,
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,

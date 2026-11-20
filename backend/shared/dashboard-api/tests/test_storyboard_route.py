@@ -98,3 +98,32 @@ def test_higgsfield_status_is_a_read_skill_call(client: TestClient, fake: Fake) 
 def test_higgsfield_status_failure_is_502(client: TestClient, fake: Fake) -> None:
     fake.status, fake.outcome, fake.output = TaskStatus.FAILED, "boom", {}
     assert client.get(HF_URL).status_code == 502
+
+
+def test_record_id_goes_with_the_storyboard(client: TestClient, fake: Fake) -> None:
+    body = {"story": "들판", "record_id": "CR-0123456789ab"}
+    assert client.post(URL, json=body).status_code == 200
+    assert fake.calls[0][1].untrusted["record_id"] == "CR-0123456789ab"
+    assert client.post(URL, json={"story": "들판", "record_id": "CR-x"}).status_code in (400, 422)
+
+
+def test_creative_records_list_and_get(client: TestClient, fake: Fake) -> None:
+    fake.output = {"items": []}
+    assert client.get("/api/dashboard/marketing/creative-records?limit=5").status_code == 200
+    assert (fake.calls[0][1].skill, fake.calls[0][1].input) == (
+        "creative_records_list",
+        {"limit": 5},
+    )
+    fake.output = {"record_id": "CR-0123456789ab"}
+    assert (
+        client.get("/api/dashboard/marketing/creative-records/CR-0123456789ab").status_code == 200
+    )
+    assert fake.calls[1][1].input == {"record_id": "CR-0123456789ab"}
+    assert client.get("/api/dashboard/marketing/creative-records/nope").status_code == 422
+
+
+def test_missing_creative_record_is_404(client: TestClient, fake: Fake) -> None:
+    fake.status, fake.outcome, fake.output = TaskStatus.FAILED, "not_found", {}
+    assert (
+        client.get("/api/dashboard/marketing/creative-records/CR-0123456789ab").status_code == 404
+    )

@@ -78,3 +78,4 @@ class StoryboardPromptOutput(AxModel):
     shots: list[StoryboardShot] = Field(min_length=1, max_length=12)
     sheet_prompt_en: str = Field(min_length=1, max_length=12000)  # 한 장짜리 스토리보드 시트
     negative_prompt_en: str = Field(min_length=1, max_length=1000)
+    record_id: str | None = None  # 붙인 제작 기록 번호. 붙이지 않았으면 None

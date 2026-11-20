@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { ACCEPT, makeCharacterSheet, shrinkImage, type CharacterSheetResult } from "@/lib/characterSheet";
 import { MAX_STORY, SHOT_COUNTS, makeStoryboard, type ShotCount, type StoryboardResult } from "@/lib/storyboard";
+import { Link } from "react-router";
 import { PromptBox } from "./PromptParts";
+import { SheetBoard } from "./SheetBoard";
 import { StoryboardView } from "./StoryboardMaker";
 
 // 마케팅 › SNS·미디어 › 이미지 시트 · 스토리보드 만들기.
@@ -11,7 +13,7 @@ import { StoryboardView } from "./StoryboardMaker";
 // 캐릭터 이미지 한 장(+ 선택 메모)을 올리면 마케팅 AI가 같은 캐릭터의 캐릭터 시트 이미지 프롬프트를 만든다.
 // 방향 7칸·표정 칸은 서버 코드가 넣는다. 이미지는 저장하지 않고, 이미지를 만들거나 게시하지 않는다.
 
-type Picked = { media_type: string; data_base64: string; preview: string; name: string };
+type Picked = { media_type: string; data_base64: string; preview: string; thumb_base64: string; name: string };
 
 function Result({ r }: { r: CharacterSheetResult }) {
   return (
@@ -87,12 +89,12 @@ export function CharacterSheetMaker() {
     try {
       if (!sheet) {
         setStep("sheet");
-        sheet = await makeCharacterSheet({ media_type: picked.media_type, data_base64: picked.data_base64 }, note);
+        sheet = await makeCharacterSheet({ media_type: picked.media_type, data_base64: picked.data_base64 }, note, picked.thumb_base64);
         setResult(sheet);
       }
       if (story.trim()) {
         setStep("board");
-        setBoard(await makeStoryboard({ story, shots, character_en: sheet.consistency_en }));
+        setBoard(await makeStoryboard({ story, shots, character_en: sheet.consistency_en, record_id: sheet.record_id }));
       }
     } catch (e) {
       const what = sheet ? "스토리보드" : "이미지 시트";
@@ -152,7 +154,13 @@ export function CharacterSheetMaker() {
         {result && (
           <details open={!board}>
             <summary className="cursor-pointer text-sm font-semibold text-ink-900">이미지 시트</summary>
-            <div className="pt-3"><Result r={result} /></div>
+            <div className="space-y-4 pt-3">
+              <SheetBoard r={result} thumb={picked?.preview} />
+              <details>
+                <summary className="cursor-pointer text-xs text-ink-500">프롬프트와 자세한 내용</summary>
+                <div className="pt-3"><Result r={result} /></div>
+              </details>
+            </div>
           </details>
         )}
         {board && (
@@ -160,6 +168,9 @@ export function CharacterSheetMaker() {
             <h3 className="text-sm font-semibold text-ink-900">스토리보드</h3>
             <StoryboardView r={board} />
           </div>
+        )}
+        {result?.record_id && (
+          <p className="text-xs text-ink-500">제작 기록 <Link className="underline" to={`/marketing/records?id=${result.record_id}`}>{result.record_id}</Link>에 남겼어요.</p>
         )}
         {!busy && !error && !result && <p className="text-sm text-ink-500">이미지와 줄거리를 넣고 만들기를 누르면 여기에 이미지 시트와 스토리보드가 나와요.</p>}
       </div>

@@ -91,3 +91,4 @@ class CharacterSheetPromptOutput(AxModel):
     layout_ko: list[str] = Field(min_length=1)  # 칸 배치 설명
     prompt_en: str = Field(min_length=1, max_length=8000)  # 이미지 생성기에 바로 붙이는 프롬프트
     negative_prompt_en: str = Field(min_length=1, max_length=1000)
+    record_id: str | None = None  # 제작 기록 번호(CR-…). 기록을 못 남기면 None

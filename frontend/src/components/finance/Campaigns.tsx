@@ -166,7 +166,13 @@ export function CampaignsSection({ tick }: { tick: number }) {
                       <li key={`${a.asked_at}-${a.proposal_id}`} className="grid gap-x-4 gap-y-1 py-2 first:pt-0 md:grid-cols-[minmax(9rem,12rem)_1fr_auto]">
                         <span className="flex flex-wrap items-center gap-2"><Chip label={ASK[a.status].label} tone={ASK[a.status].tone} /><b className="text-ink-900">{a.content_category ?? "전체"}</b></span>
                         <span className="text-ink-700">{a.summary}</span>
-                        <span className="tabular-nums text-ink-500 md:text-right">{a.proposal_id ?? "-"} · {shortDateTime(a.asked_at)}</span>
+                        <span className="flex flex-wrap items-center gap-x-2 tabular-nums text-ink-500 md:justify-end">
+                          {a.proposal_id
+                            ? <Link href={`/planning/proposals/${encodeURIComponent(a.proposal_id)}`} className="font-medium text-brand-700 underline" title="기획 AI의 이 기획 제안으로 이동">{a.proposal_id} ›</Link>
+                            : "-"}
+                          {a.context_id && <Link href={`/planning/agents/${encodeURIComponent(a.context_id)}`} className="underline" title="기획 AI와 재무 AI가 주고받은 대화">대화</Link>}
+                          <span>· {shortDateTime(a.asked_at)}</span>
+                        </span>
                       </li>
                     ))}
                   </ul>
