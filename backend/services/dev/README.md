@@ -8,6 +8,7 @@
 | `link_incident` | A |
 | `verify_rollback_target` | read |
 | `list_in_progress` | read |
+| `list_dev_progress` | read |
 | `verify_handover` | read |
 | `start_dev` | A |
 

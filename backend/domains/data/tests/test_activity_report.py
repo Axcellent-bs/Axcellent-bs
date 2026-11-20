@@ -704,6 +704,7 @@ def test_skill_without_korean_name_shows_other_work() -> None:
 
     assert skill_label("receive_dev_result") == "개발 결과 받기"
     assert skill_label("start_dev") == "개발 시작"
+    assert skill_label("list_dev_progress") == "개발 진행 현황 보기"
     assert skill_label("brand_new_skill") == "기타 작업(brand_new_skill)"
 
 

@@ -12,6 +12,7 @@ from ax_contracts.schemas import (
     HandoverAnswerRequest,
     HandoverQuestion,
     InProgressItem,
+    ListDevProgressInput,
     ListInProgressInput,
     ListInProgressOutput,
     PlanDraft,
@@ -65,6 +66,16 @@ def test_record_case_output_outcomes() -> None:
         RecordCaseOutput.model_validate({"outcome": "saved"})
     with pytest.raises(ValidationError):  # 확신도는 low·mid·high만 (퍼센트 금지)
         RecordCaseOutput.model_validate({"outcome": "candidate", "confidence": "0.4"})
+
+
+def test_list_dev_progress_input() -> None:
+    """총괄용 개발 진행 현황: 담당자 없이 영역만 (선택). 출력은 ListInProgressOutput을 쓴다."""
+    assert ListDevProgressInput.model_validate({}).area is None
+    assert ListDevProgressInput.model_validate({"area": "payment"}).area == "payment"
+    with pytest.raises(ValidationError):  # 담당자로 거르지 않는다 (list_in_progress 몫)
+        ListDevProgressInput.model_validate({"owner_id": "emp_7"})
+    with pytest.raises(ValidationError):
+        ListDevProgressInput.model_validate({"area": 3})
 
 
 def test_list_in_progress_and_verify_handover() -> None:
