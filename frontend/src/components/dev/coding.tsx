@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, RELATION_LABEL, byRelation, type CodingRun, type CodingStatus, type PR, type Request, type State as S, type Task } from '@/lib/planningData'
-import { DEV_API, PlanningApiError, approveReview, chatApi, devTaskApi, planningApi, useCodingLimits } from '@/lib/planning'
+import { DEV_API, PlanningApiError, approveReview, chatApi, devTaskApi, needAccount, planningApi, useCodingLimits } from '@/lib/planning'
 import { openDevChat } from '@/components/dev/chatOpen'
 import { useSession } from '@/demo/session'
 import { State, Tag } from '@/components/planning-common/parts'
@@ -276,7 +276,7 @@ export function CodingStep({ task, on, prs }: { task: Task; on?: boolean; prs?: 
   const [note, setNote] = useState('')
   // 관문이 머지 등을 보류함: 안전 확인 탭에서 사람이 승인해야 한다 (내부 문장 대신 안내 + 링크)
   const [held, setHeld] = useState(false)
-  const account = useSession().account?.id ?? 'guest'
+  const account = useSession().account?.id ?? null // 세션을 읽는 중이면 null (보내지 않는다)
   const c = task.coding
   const lim = useCodingLimits()
   if (!c) return null
@@ -339,7 +339,7 @@ export function CodingStep({ task, on, prs }: { task: Task; on?: boolean; prs?: 
   // 멈춘 이유별 다음 할 일 (lib/codingRecovery.ts). 정해진 게 없으면(중단·돌려보냄 등) 예전 버튼 그대로
   const rec = task.discarded ? null : recoveryOf(c)
   const can = (a: RecoveryAction) => !rec || rec.actions.includes(a)
-  const toChat = () => act(async () => openDevChat(await chats.fromTask(task.id, account)), `${task.id} AI 대화로 넘김`)
+  const toChat = () => act(async () => openDevChat(await chats.fromTask(task.id, needAccount(account))), `${task.id} AI 대화로 넘김`)
   // 개발자 Claude 대기열에서 아무도 안 가져감: 서버 AI로 넘길 수 있다
   const unclaimed = c.mode === 'subscription' && c.status === 'queued' && !c.claimedBy
   const toAgent = () => act(() => api.toAgent(task.id), `${task.id} 서버 AI로 넘김`)

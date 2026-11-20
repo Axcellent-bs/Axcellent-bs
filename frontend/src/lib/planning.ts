@@ -5,11 +5,12 @@ import type { Proposal } from './proposals'
 import { toVideoPlan } from './videoPlan'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useVisibleInterval } from './visibleInterval'
-import { createLatestGate } from './devChatView'
+import { createLatestGate, toStamps } from './devChatView'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import { isNginxBlocked, NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from '@/lib/apiError'
 import { tokenFree } from '@/lib/apiDirect'
 import { sessionAuth } from '@/lib/humanToken'
+import { actorAccount } from '@/lib/actor'
 import { auditOf, paramLines, routeAction, routeWhyOf, tokenFor } from '@/lib/devView'
 import { type Action, type FillPreview, type Activity, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
 
@@ -147,7 +148,7 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
     draftsAccepted: Number(s.draftsAccepted ?? 0),
     warnings: Number(s.warnings ?? 0),
     firstPrMinutes: (s.firstPrMinutes as number[]) ?? [],
-    ...(Array.isArray(s.chats) ? { chats: toThreads(raw.chats) } : {}),
+    ...(Array.isArray(s.chats) ? { chats: toStamps(s.chats) } : {}),
     proposals: list<Json>('proposals').map((p) => {
       const h = p.handoff as Json | null
       const r = p.result as Json | null
@@ -417,34 +418,52 @@ export const codingSettingsApi = (base: string) => ({
 export interface DevTaskInput { title: string; plan: string; done?: string; paths?: string[]; connection?: string }
 export interface DevTaskStarted { request_id: string; spec_id: string; task_id: string; status: 'queued' }
 
+/** 로그인 계정을 아직 모를 때(세션을 읽는 중) 대화·작업 조작을 보내지 않는다 */
+export const NO_ACCOUNT = 'NO_ACCOUNT'
+export function needAccount(account: string | null | undefined): string {
+  if (!account) throw new PlanningApiError(NO_ACCOUNT, '로그인 계정을 읽는 중이에요. 잠시 뒤 다시 해 주세요')
+  return account
+}
+
+// 작업 조작에 지금 계정을 싣는다: 남이 낸 요청(대화)의 작업이면 서버가 VIEW_ONLY로 거절한다
+// (그 대화를 연 사람이나 관리자만). 세션 모드면 서버는 토큰의 계정만 보고, 이 값이 다르면 거절한다.
+// 계정을 아직 모르면 보내지 않는다 ('guest'로 보내지 않는다)
+const taskCall = <T,>(base: string, taskId: string, path: string, init?: RequestInit): Promise<T> => {
+  try {
+    const account = needAccount(actorAccount())
+    return call<T>(base, `/dev-tasks/${encodeURIComponent(taskId)}/${path}?account=${encodeURIComponent(account)}`, init)
+  } catch (e) {
+    return Promise.reject(e)
+  }
+}
 export const devTaskApi = (base: string) => ({
   // 목(녹화 데모)은 POST에 {ok:true}만 준다. task_id가 없으면 실패로 본다
   create: (x: DevTaskInput) => call<Partial<DevTaskStarted>>(base, '/dev-tasks', post(x)).then((d) => {
     if (!d || typeof d.task_id !== 'string') throw new PlanningApiError('NO_TASK', '개발·배포 서버가 작업을 만들지 않았어요')
     return d as DevTaskStarted
   }),
-  retry: (taskId: string, approved = false) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post(approved ? { approved } : {})),
+  retry: (taskId: string, approved = false) => taskCall<unknown>(base, taskId, 'retry', post(approved ? { approved } : {})),
   // 파일 직접 고르기: 사람이 고른 파일로 다시 시도 (AI가 파일을 고르지 않고 바로 쓴다)
-  retryWith: (taskId: string, paths: string[]) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/retry`, post({ paths })),
+  retryWith: (taskId: string, paths: string[]) => taskCall<unknown>(base, taskId, 'retry', post({ paths })),
   // 파일 직접 고르기 후보: 작업 연결 레포 파일 (q로 검색, 최대 50개)
   files: (taskId: string, q = '') => call<{ files: string[]; existing: number }>(base, `/dev-tasks/${encodeURIComponent(taskId)}/files?q=${encodeURIComponent(q)}`),
   // PR 열기 보류 건 새로 받기 (만료·모름). 받은 review_id를 사람이 승인한 뒤 retry(approved)
-  renewHold: (taskId: string) => call<{ review_id: string | null }>(base, `/dev-tasks/${encodeURIComponent(taskId)}/renew-hold`, post()),
-  cancel: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/cancel`, post()),
+  renewHold: (taskId: string) => taskCall<{ review_id: string | null }>(base, taskId, 'renew-hold', post()),
+  cancel: (taskId: string) => taskCall<unknown>(base, taskId, 'cancel', post()),
   // 멈춘 작업(중단·실패·돌려보냄) 폐기. 다시 돌리지 않고 작업 목록에서 숨길 수 있다
-  discard: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/discard`, post()),
+  discard: (taskId: string) => taskCall<unknown>(base, taskId, 'discard', post()),
   // 사람이 기획에 돌려보내기 (코드 변경이 아닌 일). 돌고 있으면 멈추고 열린 PR은 닫는다
-  returnToPlanning: (taskId: string, to: string, reason: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/return`, post({ to, reason })),
+  returnToPlanning: (taskId: string, to: string, reason: string) => taskCall<unknown>(base, taskId, 'return', post({ to, reason })),
   // 서버 AI로 넘기기: 개발자 Claude 대기열에서 아무도 안 가져간 작업을 서버 AI가 맡는다
-  toAgent: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/to-agent`, post()),
+  toAgent: (taskId: string) => taskCall<unknown>(base, taskId, 'to-agent', post()),
   // 내 Claude로 넘기기 (서버 AI로 넘기기의 반대): 멈춘 서버 AI 작업(열린 PR 없음)을 개발자 Claude 대기열에
-  toSubscription: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/to-subscription`, post()),
+  toSubscription: (taskId: string) => taskCall<unknown>(base, taskId, 'to-subscription', post()),
   // 지금 진행: 앞 작업 순서를 기다리는 작업을 기다리지 않고 잇는다 (사람이 누를 때만)
-  skipQueue: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/skip-queue`, post()),
-  textOk: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/text-ok`, post()),
+  skipQueue: (taskId: string) => taskCall<unknown>(base, taskId, 'skip-queue', post()),
+  textOk: (taskId: string) => taskCall<unknown>(base, taskId, 'text-ok', post()),
   // 반영됨으로 닫기: 바뀐 내용이 없어 멈춘 작업을 앞 작업 PR이 반영한 것으로 완료 (PR 없음)
-  closeCovered: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/close-covered`, post()),
-  revise: (taskId: string, note: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/revise`, post({ note })),
+  closeCovered: (taskId: string) => taskCall<unknown>(base, taskId, 'close-covered', post()),
+  revise: (taskId: string, note: string) => taskCall<unknown>(base, taskId, 'revise', post({ note })),
 })
 
 // ---- AI와 대화 (dev 서비스 `/api/planning/dev-chat`). 답이 오면 바뀐 대화 전체를 돌려준다 (5~30초)
@@ -454,8 +473,7 @@ export interface ChatSend { thread_id?: string; message: string; connection?: st
 const isThread = (x: unknown): x is Json => !!x && typeof x === 'object' && typeof (x as Json).id === 'string' && Array.isArray((x as Json).messages)
 const toThread = (x: Json): ChatThread => camelize(x) as ChatThread
 // 개발 화면 대화 패널에는 이 화면에서 연 대화(origin screen)만 넣는다. 대시보드 AI 대화방 대화와
-// 어디서 열었는지 모르는 예전 대화는 뺀다 (SSE 상태에는 같이 실려 온다)
-// 숨긴 대화(removed_at)도 뺀다 (기록으로 남아 SSE 상태에 같이 실려 온다)
+// 어디서 열었는지 모르는 예전 대화는 뺀다. 숨긴 대화(removed_at)도 뺀다 (서버도 거르지만 한 번 더)
 const onScreen = (x: Json) => x.origin === 'screen' && !x.removed_at
 export const toThreads = (d: unknown): ChatThread[] => (Array.isArray(d) ? d.filter(isThread).filter(onScreen).map(toThread) : [])
 

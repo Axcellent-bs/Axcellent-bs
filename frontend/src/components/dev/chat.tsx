@@ -1,17 +1,18 @@
 // AI와 대화: 개발 에이전트와 대화하다 필요한 것이 모이면 에이전트가 코딩 작업(→ PR)을 시작한다.
-// 대화는 REST(/dev-chat)로 주고받고, SSE에 chats가 있으면 그걸로 갱신한다. 없으면 2초마다 다시 읽는다
+// 대화는 REST(/dev-chat, 서버가 계정을 확인)로 주고받는다. SSE의 chats에는 원문 없이 id·상태·시각만 있어서
+// 그게 바뀌면 /dev-chat을 다시 읽는다. SSE가 없으면 2초마다 다시 읽는다
 // (SSE가 있어도 답을 기다리는 동안은 4초마다 다시 읽는다: 갱신을 놓쳐 "생각 중"이 안 풀리는 일 막기)
 // 보내면 서버가 말을 적고 answering으로 바로 돌려준다. 답은 뒤에서 붙는다 (SSE·다시 읽기로 본다)
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingMode, CodingStatus, State as S, Task } from '@/lib/planningData'
-import { DEV_API, PlanningApiError, chatApi, codingSettingsApi, useMe, vcsApi, type CodingSettings, type VcsConnection } from '@/lib/planning'
+import { DEV_API, PlanningApiError, chatApi, needAccount, codingSettingsApi, useMe, vcsApi, type CodingSettings, type VcsConnection } from '@/lib/planning'
 import { CODING_LABEL, CancelButton, ResumeButton, codingState, isRunning } from '@/components/dev/coding'
 import { State } from '@/components/planning-common/parts'
 import { go, toPath, idText } from '@/components/planning-common/links'
 import { Tag } from '@/components/planning-common/parts'
 import { humanizePlanIds } from '@/lib/format'
-import { canClose, chatNotice, mergeThreads, needsTools, pollInterval, sendErrorText } from '@/lib/devChatView'
+import { canClose, chatNotice, mergeThreads, needsTools, pollInterval, sendErrorText, stampKey } from '@/lib/devChatView'
 import { useSession } from '@/demo/session'
 
 const api = chatApi(DEV_API)
@@ -45,9 +46,10 @@ function running(s: S, t: ChatThread): boolean {
 }
 
 /** 헤더 칩과 패널이 같이 쓰는 대화 상태. 패널을 닫았다 열어도 남는다.
- *  지금 계정이 연 대화만 다룬다 (SSE 상태에는 모든 계정의 대화가 실려 와서 여기서 거른다) */
+ *  지금 계정이 연 대화만 다룬다 (서버가 계정을 확인해 그 계정 대화만 주고, 여기서도 한 번 더 거른다) */
 export function useDevChat(s: S, on: boolean) {
-  const account = useSession().account?.id ?? 'guest'
+  // 세션을 읽는 중이면 null: 목록을 읽거나 보내지 않는다 ('guest'로 보내지 않는다)
+  const account = useSession().account?.id ?? null
   const [local, setLocal] = useState<ChatThread[]>([])
   const [curId, setCurId] = useState<string | null | undefined>(undefined) // undefined = 아직 안 고름(가장 최근 대화)
   const [draft, setDraft] = useState('')
@@ -58,10 +60,25 @@ export function useDevChat(s: S, on: boolean) {
     setCurId(undefined)
     setHidden([])
   }, [account])
+  // SSE 대화 바뀜 표시(id·상태·시각)가 바뀌면 다시 읽는다. 늦게 온 다른 계정 목록은 버린다
+  // 고른 대화가 목록 상한(최근 20개) 밖이어도 바뀌면 그 대화를 id로 다시 읽는다
+  const stamp = stampKey(s.chats)
+  const picked = useRef<string | null | undefined>(undefined)
+  picked.current = curId
   useEffect(() => {
-    if (on) api.list(account).then(setLocal).catch(() => undefined)
-  }, [on, account])
-  const threads = mergeThreads(s.chats ?? [], local).filter((t) => t.account === account && !hidden.includes(t.id))
+    if (!on || !account) return
+    let alive = true
+    api.list(account).then((rows) => {
+      if (!alive) return
+      setLocal((prev) => mergeThreads(prev, rows))
+      const id = picked.current
+      if (id && !rows.some((t) => t.id === id)) {
+        api.get(id, account).then((t) => { if (alive) setLocal((prev) => mergeThreads(prev, [t])) }).catch(() => undefined)
+      }
+    }).catch(() => undefined)
+    return () => { alive = false }
+  }, [on, account, stamp])
+  const threads = mergeThreads(local, []).filter((t) => t.account === account && !hidden.includes(t.id))
   const upsert = (t: ChatThread) => setLocal((prev) => [t, ...prev.filter((x) => x.id !== t.id)])
   const cur = curId === null ? undefined : threads.find((t) => t.id === (curId ?? threads[0]?.id))
   return {
@@ -137,14 +154,15 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   // SSE가 없으면 답·작업을 기다리는 동안, SSE가 있어도 답을 기다리는 동안은 다시 읽는다
   const poll = cur ? pollInterval(chat.live, busy, running(s, cur)) : null
   useEffect(() => {
-    if (!poll || !cur) return
+    const account = chat.account
+    if (!poll || !cur || !account) return
     const id = cur.id
     // 다른 탭을 볼 때는 받지 않고, 앞 요청이 아직이면 이번 차례는 건너뛴다
     let busy = false
     const t = setInterval(() => {
       if (busy || document.hidden) return
       busy = true
-      api.get(id, chat.account).then(chat.upsert).catch(() => undefined).finally(() => { busy = false })
+      api.get(id, account).then(chat.upsert).catch(() => undefined).finally(() => { busy = false })
     }, poll)
     return () => clearInterval(t)
   }, [poll, cur?.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -173,7 +191,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
     setErr(null)
     setDraft('')
     try {
-      const t = await api.send({ ...(cur ? { thread_id: cur.id } : {}), message, ...(repo ? { connection: repo } : {}), mode, account: chat.account })
+      const t = await api.send({ ...(cur ? { thread_id: cur.id } : {}), message, ...(repo ? { connection: repo } : {}), mode, account: needAccount(chat.account) })
       chat.upsert(t)
       chat.select(t.id)
     } catch (x) {
@@ -193,8 +211,8 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
     if (kind === 'remove' && !window.confirm('이 대화를 목록에서 숨길까요? 띄운 작업은 그대로 돌아요.')) return
     setActing(true)
     try {
-      if (kind === 'close') chat.upsert(await api.close(cur.id, chat.account))
-      else chat.drop(await api.remove(cur.id, chat.account))
+      if (kind === 'close') chat.upsert(await api.close(cur.id, needAccount(chat.account)))
+      else chat.drop(await api.remove(cur.id, needAccount(chat.account)))
     } catch (x) {
       toast.show(x instanceof PlanningApiError ? sendErrorText(x.code, x.message) : '개발·배포 서버에 연결할 수 없어요')
     } finally {
@@ -255,7 +273,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
           </div>
         )}
         {msgs.map((m, i) => (
-          <Msg key={m.id} m={m} s={s} onOpen={onClose} onTools={onTools}
+          <Msg key={m.id} m={m} s={s} onOpen={onClose} onTools={onTools} viewOnly={!!cur?.viewOnly}
             onGo={i === msgs.length - 1 && m.kind === 'plan' && !!m.plan && cur?.status === 'talking' && !busy && !ended ? () => void send('진행해') : undefined} />
         ))}
         {pending && msgs[msgs.length - 1]?.text !== pending && <div className="bubble user">{pending}</div>}
@@ -291,7 +309,8 @@ const Tools = ({ onTools }: { onTools: () => void }) => (
 
 // onGo: 마지막 계획 카드의 "이대로 진행" (누르면 "진행해"를 보내 기획에 넘긴다)
 // onTools: AI 키 오류(401·403) 메시지에 붙이는 도구 연결 버튼
-function Msg({ m, s, onOpen, onGo, onTools }: { m: ChatMessage; s: S; onOpen: () => void; onGo?: () => void; onTools: () => void }) {
+// viewOnly: 남이 낸 같은 요청의 작업을 잇는 대화. 작업 카드의 중단·재개 버튼을 숨긴다 (서버 작업 API도 거절한다)
+function Msg({ m, s, onOpen, onGo, onTools, viewOnly }: { m: ChatMessage; s: S; onOpen: () => void; onGo?: () => void; onTools: () => void; viewOnly: boolean }) {
   if (m.role === 'user') return <div className="bubble user">{humanizePlanIds(m.text)}</div>
   if (m.kind === 'error') return <div className="bubble ai err">{humanizePlanIds(m.text)}{needsTools(null, m.text) && <Tools onTools={onTools} />}</div>
   if (m.kind === 'question' || m.kind === 'waiting') return <div className="bubble ai q">{humanizePlanIds(m.text)}</div>
@@ -311,11 +330,11 @@ function Msg({ m, s, onOpen, onGo, onTools }: { m: ChatMessage; s: S; onOpen: ()
       </>
     )
   }
-  if (m.kind === 'started') return <Started m={m} s={s} onOpen={onOpen} />
+  if (m.kind === 'started') return <Started m={m} s={s} onOpen={onOpen} viewOnly={viewOnly} />
   return <div className="bubble ai">{humanizePlanIds(m.text)}</div>
 }
 
-function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void }) {
+function Started({ m, s, onOpen, viewOnly }: { m: ChatMessage; s: S; onOpen: () => void; viewOnly: boolean }) {
   const id = m.taskId
   const task = id ? s.tasks.find((t) => t.id === id) : undefined
   const c = task?.coding
@@ -333,8 +352,8 @@ function Started({ m, s, onOpen }: { m: ChatMessage; s: S; onOpen: () => void })
           {files > 0 ? <Tag>{files}파일</Tag> : <span />}
           {id && (
             <span className="tags">
-              <CancelButton taskId={id} status={c?.status} />
-              <ResumeButton taskId={id} status={c?.status} discarded={task?.discarded} />
+              {!viewOnly && <CancelButton taskId={id} status={c?.status} />}
+              {!viewOnly && <ResumeButton taskId={id} status={c?.status} discarded={task?.discarded} />}
               <button type="button" className="btn-ghost" onClick={() => { onOpen(); go(toPath(`work/prs/${encodeURIComponent(id)}`)) }}>작업 보기</button>
             </span>
           )}

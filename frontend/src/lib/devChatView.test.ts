@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ChatThread } from "./planningData.ts";
 import {
-  KEY_HINT, LIVE_ANSWER_POLL_MS, POLL_MS, canClose, chatNotice, createLatestGate, isShown, mergeThreads, needsTools, pollInterval, sendErrorText,
+  KEY_HINT, LIVE_ANSWER_POLL_MS, POLL_MS, canClose, chatNotice, createLatestGate, isShown, mergeThreads, needsTools, pollInterval, sendErrorText, stampKey, toStamps,
 } from "./devChatView.ts";
 
 const th = (id: string, status: ChatThread["status"], updatedAt: string, n = 1): ChatThread => ({
@@ -58,4 +58,14 @@ test("끝내기는 답하는 중·끝난 대화에서 못 한다, 숨긴 대화�
   assert.ok(!canClose(th("a", "closed", "t")));
   assert.ok(!canClose(undefined));
   assert.ok(isShown({ removedAt: null }) && !isShown({ removedAt: "2026-11-20T00:00:00Z" }));
+});
+
+test("SSE 대화는 id·상태·시각만 읽고, 그게 바뀌면 열쇠가 바뀐다 (원문은 /dev-chat으로)", () => {
+  const stamps = toStamps([{ id: "chat-1", status: "talking", updatedAt: "t1", messages: [{ text: "원문" }] }, "x", { status: "talking" }]);
+  assert.deepEqual(stamps, [{ id: "chat-1", status: "talking", updatedAt: "t1" }]);
+  assert.deepEqual(toStamps(null), []);
+  const before = stampKey(stamps);
+  assert.equal(stampKey([{ id: "chat-1", status: "talking", updatedAt: "t1" }]), before);
+  assert.notEqual(stampKey([{ id: "chat-1", status: "answering", updatedAt: "t2" }]), before);
+  assert.equal(stampKey(undefined), "");
 });

@@ -341,7 +341,8 @@ export interface State {
   warnings: number
   firstPrMinutes: number[]
   autoPolicy: AutoPolicy
-  chats?: ChatThread[] // AI와 대화 (dev 서비스 SSE에 있을 때만)
+  // AI와 대화의 바뀜 표시 (dev 서비스 SSE에 있을 때만). 원문은 SSE에 없고 계정을 확인하는 /dev-chat으로 읽는다
+  chats?: ChatStamp[]
   proposals?: Proposal[] // 기획 제안 (데이터분석·마케팅 인사이트 → 제안 → 마케팅)
 }
 
@@ -412,6 +413,9 @@ export interface ChatMessage {
   /** 데이터분석 1:1 대화 카드 (예전 메시지·다른 부서는 없음·null) */
   card?: ChatCard | null
 }
+/** SSE 상태의 대화 한 줄: id·상태·바뀐 시각만 (누구나 읽는 길이라 원문·계정은 싣지 않는다) */
+export interface ChatStamp { id: string; status: ChatStatus; updatedAt: string }
+
 export interface ChatThread {
   id: string
   title: string
@@ -426,6 +430,7 @@ export interface ChatThread {
   waitingFor?: string[] // 끝나기를 기다리는 요청 (충돌하는 요청이 끝나면 시작)
   mode?: CodingMode // 이 대화가 띄울 작업을 누가 코딩하나
   account?: string | null // 개발 화면에서 대화를 연 계정 id
+  viewOnly?: boolean // 남이 낸 같은 요청의 작업을 잇는 대화: 진행만 보고 작업 버튼은 숨긴다 (서버도 막는다)
   createdAt: string
   updatedAt: string
 }
