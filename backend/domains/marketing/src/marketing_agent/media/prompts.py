@@ -288,6 +288,16 @@ def check_field_value(name: str, value: object, path: Path | None = None) -> str
     return _check_value(config, name, value)
 
 
+def list_templates(path: Path | None = None) -> tuple[SceneTemplate, ...]:
+    """장면 템플릿 전부(파일 순서). 종류별 후보를 찾을 때 쓴다."""
+    return tuple(_load(path or TEMPLATES_PATH).templates.values())
+
+
+def contains_pii(text: str, path: Path | None = None) -> bool:
+    """글에 개인정보·식별자 패턴(전화·이메일·주문번호·주소 등)이 있는지. 값은 돌려주지 않는다."""
+    return any(p.search(text) for p in _load(path or TEMPLATES_PATH).rules.pii)
+
+
 def field_choices(name: str, path: Path | None = None) -> tuple[tuple[str, ...] | None, int]:
     """필드의 (고를 수 있는 값 목록 | None=짧은 단어, 짧은 단어 최대 길이). 화면 선택지에 쓴다."""
     config = _load(path or TEMPLATES_PATH)

@@ -266,6 +266,18 @@
       "priority": "optional"
     },
     {
+      "id": "prepare_video_draft_from_plan",
+      "description": "총괄 전용. 기획 receive_insight 응답의 proposal_id와 video_plan(concept·script·duration_s·aspect, 선택 media_hints)을 그대로 받아 홍보 영상 제작 준비를 한다. (1) SNS 릴스 캡션 초안을 고정 템플릿(LLM 없음)으로 만들어 보관하고 post_draft_id를 돌려준다(concept·script 첫 문장만 옮기고 숫자를 만들지 않으며, 금칙 문구·과장·개인정보는 입력 값을 되돌리지 않고 거절한다). (2) scene_template_id는 기획이 아니라 마케팅이 media_kind=video 기존 매핑으로 정하고, 매핑이 없고 영상 템플릿이 여럿이면 지어내지 않고 scene_template_ambiguous와 후보(candidates)로 거절한다. (3) 템플릿 필드(season·color_theme·category)는 호출자 fields(admin) > video_plan.media_hints(검사 통과분만) > 기획 글 규칙 추천(recommended) 순이고 field_sources에 출처를 남긴다. 걸린 힌트는 필드 이름만 rejected_hints에 남긴다. 끝내 못 정하면 template_fields_missing(+고를 값)으로 거절한다. (4) 템플릿 길이(15초)가 우선이며 video_plan.duration_s가 다르면 duration_adjusted{requested,used}로, 비율이 9:16이 아니면 aspect_adjusted로 알린다. 결과의 generate_media_input을 generate_media에 그대로 넘기면 된다. 미디어 생성(B등급)과 게시(C등급 사람 승인)는 부르지 않고 초안 한 건만 저장하므로 draft_sns_post와 같은 read 등급이다.",
+      "input_schema": "agents/marketing/src/marketing_agent/video_draft.py#PrepareVideoDraftInput",
+      "output_schema": "agents/marketing/src/marketing_agent/video_draft.py#PreparedVideoDraft",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "draft_outage_sns_post",
       "description": "장애가 났을 때 사과 공지가 나갔거나(trigger=apology_notice, 게시한 장애·정상화 공지 notice_id 필수) 보상 쿠폰을 드렸으면(trigger=compensation) Instagram 글 초안을 바로 만든다. 초안만 저장하고 게시하지 않는다(게시는 publish_sns C등급 사람 승인, 미디어 생성도 부르지 않음). 원인은 장애 기록의 코드(cause_code·action_code)만 받아 일반인이 읽는 고정 문장으로 쓴다: 원인으로 본 업데이트를 되돌려 복구가 확인된 경우(recent_update)에만 원인을 말하고 그 밖에는 '원인 확인 중'이라고 쓴다. 자유 글·버전·지표·영향 숫자는 받지 않으며, 기술 용어·서버 이름·IP·계정·토큰 모양이 있으면 forbidden_term으로 만들지 않는다. AI 생성 안내·시연용 가상 서비스·약관 문구는 draft_sns_post와 같다. 공지가 없으면 notice_not_found, 장애 공지가 아니면 notice_not_incident.",
       "input_schema": "agents/marketing/src/marketing_agent/outage_sns.py#DraftOutageSnsPostInput",
