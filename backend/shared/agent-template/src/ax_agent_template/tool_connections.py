@@ -5,7 +5,8 @@
   `dev_agent.vcs`).
   비밀 값이 들어 있어 `0600` 임시 파일에 쓰고 `os.replace`로 바꿔치기한다.
   쓰는 프로세스가 둘이라 읽고-고치고-쓰기는 `<파일>.lock`(O_EXCL로 만드는 잠금 파일)으로 막는다.
-  임시 파일 이름은 쓸 때마다 다르다. 30초 넘은 잠금은 죽은 프로세스가 남긴 것으로 보고 지운다.
+  임시 파일 이름은 쓸 때마다 다르다. 30초 넘은 잠금은 죽은 프로세스가 남긴 것으로 보고
+  다른 이름으로 옮긴 뒤 다시 확인하고 지운다 (`_break_stale`).
 - 읽기: 부를 때마다 바뀐 시각·크기로 확인해 읽는다 (재시작 없이 반영).
   파일이 없으면 연결이 없는 것이다(경고 없음). 깨졌으면 경고를 한 번 남기고 없는 것으로 본다.
 - 비밀 값(`secrets`)은 repr·로그·오류 문구·이력 줄에 넣지 않는다. 화면에는 `public()`만 준다.
@@ -14,6 +15,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -154,12 +156,19 @@ def _parse(raw: Any, path: str) -> list[ToolConnection]:
 
 
 # 바뀐 시각·크기가 같으면 다시 읽지 않는다. 깨진 파일 경고도 같은 상태면 한 번만 남긴다
+# 부르는 쪽이 config·secrets를 고쳐도 캐시가 바뀌지 않게 돌려줄 때마다 깊은 복사본을 준다
 _cache: tuple[str, int, int, int, list[ToolConnection], bool] | None = None
 _lock = threading.RLock()
 
 
 def _load() -> tuple[list[ToolConnection], bool]:
-    """(연결 목록, 파일이 있는데 읽지 못했는가)."""
+    """(연결 목록의 깊은 복사본, 파일이 있는데 읽지 못했는가)."""
+    found, broken = _load_shared()
+    return copy.deepcopy(found), broken
+
+
+def _load_shared() -> tuple[list[ToolConnection], bool]:
+    """캐시에 든 목록 그대로. 밖으로 내보내기 전에 꼭 복사한다."""
     global _cache
     path = connections_file()
     if not path:
@@ -173,7 +182,7 @@ def _load() -> tuple[list[ToolConnection], bool]:
         # 않는다. 윈도에서 st_ino가 0이면 예전처럼 시각·크기만 본다
         key = (path, stat.st_mtime_ns, stat.st_size, stat.st_ino)
         if _cache is not None and _cache[:4] == key:
-            return list(_cache[4]), _cache[5]
+            return _cache[4], _cache[5]
         try:
             os.chmod(path, 0o600)  # 예전에 넓은 권한으로 만든 파일도 만든 사용자만 읽게 맞춘다
         except OSError:
@@ -187,7 +196,7 @@ def _load() -> tuple[list[ToolConnection], bool]:
         else:
             broken = False
         _cache = (*key, found, broken)
-        return list(found), broken
+        return found, broken
 
 
 def read_all() -> list[ToolConnection]:
@@ -197,6 +206,64 @@ def read_all() -> list[ToolConnection]:
 
 def _lock_path() -> str:
     return connections_file() + ".lock"
+
+
+def _is_stale(path: str) -> bool:
+    try:
+        return time.time() - os.stat(path).st_mtime > LOCK_STALE
+    except OSError:
+        return False  # 그사이 풀렸다: 마감·대기를 거쳐 다시 시도한다
+
+
+def _break_stale(lock: str) -> bool:
+    """오래된 잠금을 깬다. 깼으면 True.
+
+    두 프로세스가 같은 잠금을 오래됐다고 보고 둘 다 지우면, 뒤에 지운 쪽이 그사이 다른
+    프로세스가 새로 잡은 잠금을 지울 수 있다. 그래서 지우지 않고 저마다 다른 이름으로 옮긴 뒤
+    (옮기기는 한 프로세스만 성공한다) 옮긴 파일이 여전히 오래됐는지 다시 본다.
+    새 잠금을 옮겨 왔으면 잠금 자리가 비어 있을 때만 되돌린다(덮어쓰지 않는 os.link).
+    되돌리지 못해도 그 잠금의 주인은 풀 때 표(`_release`)를 보고 남의 잠금을 지우지 않는다.
+    """
+    aside = f"{lock}.stale.{os.getpid()}.{uuid.uuid4().hex[:8]}"
+    try:
+        os.replace(lock, aside)
+    except OSError:
+        return False  # 다른 프로세스가 먼저 옮겼거나 윈도에서 쓰는 중: 기다렸다 다시 본다
+    try:
+        if _is_stale(aside):
+            logger.warning("오래된 도구 연결 잠금 파일을 지운다: %s", lock)
+            return True
+        try:
+            os.link(aside, lock)  # 남의 새 잠금: 자리가 비었을 때만 되돌린다
+        except OSError:
+            # 자리를 이미 다른 프로세스가 잡았거나 하드 링크를 못 만든다. 남의 잠금을
+            # 덮어쓰지 않는 쪽을 택한다
+            logger.warning("새 도구 연결 잠금을 되돌리지 못했다: %s", lock)
+        return False
+    finally:
+        try:
+            os.remove(aside)
+        except OSError:
+            pass
+
+
+def _release(lock: str, token: str) -> None:
+    """내 표가 적힌 잠금만 지운다.
+
+    오래 붙잡아 남이 오래된 잠금으로 보고 깨고 새로 잡았으면, 그 자리의 잠금은 남의 것이라
+    지우지 않는다. 읽고-지우기 사이 틈은 남지만 LOCK_STALE초 넘게 붙잡았을 때만 생긴다.
+    """
+    try:
+        held = Path(lock).read_text(encoding="ascii", errors="replace")
+    except OSError:
+        return  # 이미 없다
+    if held != token:
+        logger.warning("도구 연결 잠금이 남의 것으로 바뀌어 지우지 않는다: %s", lock)
+        return
+    try:
+        os.remove(lock)
+    except OSError:
+        pass
 
 
 @contextmanager
@@ -224,35 +291,32 @@ def _writing() -> Iterator[None]:
                     raise ToolConnectionError(
                         "config", "도구 연결 보관함 폴더에 쓸 수 없어요. 폴더 권한을 확인하세요"
                     ) from None
-            try:
-                stale = time.time() - os.stat(lock).st_mtime > LOCK_STALE
-            except OSError:
-                stale = False  # 그사이 풀렸다: 마감·대기를 거쳐 다시 시도한다
-            if stale:
-                logger.warning("오래된 도구 연결 잠금 파일을 지운다: %s", lock)
-                try:
-                    os.remove(lock)
-                except OSError:
-                    pass
-                continue
+            if _is_stale(lock) and _break_stale(lock):
+                continue  # 깼으면 바로 다시 잡는다. 못 깼으면 마감·대기를 거친다
             if time.monotonic() >= deadline:
                 raise ToolConnectionError(
                     "busy", "다른 곳에서 도구 연결을 저장하는 중이에요. 잠시 뒤 다시 시도하세요"
                 )
             time.sleep(delay)
             delay = min(delay * 2, 0.2)
+        # 잠금마다 다른 표(pid.uuid)를 적어 둔다. 풀 때 표가 같을 때만 지운다
+        token = f"{os.getpid()}.{uuid.uuid4().hex}"
         try:
             try:
-                os.write(fd, str(os.getpid()).encode("ascii"))
+                os.write(fd, token.encode("ascii"))
             finally:
                 os.close(fd)
+        except BaseException:
+            try:
+                os.remove(lock)  # 방금 O_EXCL로 만든 내 잠금이라 표 없이도 지운다
+            except OSError:
+                pass
+            raise
+        try:
             _cache = None  # 다른 프로세스가 막 쓴 것을 놓치지 않게 다시 읽는다
             yield
         finally:
-            try:
-                os.remove(lock)
-            except OSError:
-                pass
+            _release(lock, token)
 
 
 def _read_for_write() -> list[ToolConnection]:
@@ -268,14 +332,16 @@ def _read_for_write() -> list[ToolConnection]:
 
 
 def get(conn_id: str) -> ToolConnection | None:
-    return next((c for c in read_all() if c.id == conn_id), None)
+    """id가 같은 연결(복사본). 목록 전체가 아니라 찾은 것만 복사한다."""
+    match = next((c for c in _load_shared()[0] if c.id == conn_id), None)
+    return copy.deepcopy(match) if match is not None else None
 
 
 def find(kind: str, **config_match: Any) -> ToolConnection | None:
-    """종류가 같고 config가 주어진 값과 모두 같은 첫 연결."""
-    for conn in read_all():
+    """종류가 같고 config가 주어진 값과 모두 같은 첫 연결(복사본)."""
+    for conn in _load_shared()[0]:
         if conn.kind == kind and all(conn.config.get(k) == v for k, v in config_match.items()):
-            return conn
+            return copy.deepcopy(conn)
     return None
 
 
@@ -313,22 +379,33 @@ def _write(conns: list[ToolConnection]) -> None:
     # 토큰·개인 키가 들어 있어 만든 사용자만 읽는다. 처음부터 0600으로 만들고 권한을 다시 맞춘다
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass  # 윈도 등
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass  # 윈도 등
+    except BaseException:
+        os.close(fd)  # fdopen 전에 실패: 직접 닫아야 지울 수 있다(윈도)
+        _remove_quietly(tmp)
+        raise
     try:
+        # fdopen부터는 fd를 넘겨받은 것으로 본다. 실패해도 스스로 닫으므로 다시 닫지 않는다
+        # (닫힌 번호는 다른 스레드가 바로 다시 쓸 수 있다)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump([c._row() for c in conns], f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, target)
     except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        _remove_quietly(tmp)
         raise
     _cache = None
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _history_path() -> Path:
@@ -403,8 +480,11 @@ def upsert(
         return saved
 
 
-def record_check(conn_id: str, ok: bool, detail: str) -> ToolConnection:
-    """확인 결과를 남긴다 (`detail`에는 비밀 값이 없어야 한다)."""
+def record_check(conn_id: str, ok: bool, detail: str, *, by: str = "system") -> ToolConnection:
+    """확인 결과를 남긴다 (`detail`에는 비밀 값이 없어야 한다).
+
+    이력에는 다른 변경처럼 `check` 한 줄만 남긴다 (결과·문구는 넣지 않는다).
+    """
     with _writing():
         conns = _read_for_write()
         before = next((c for c in conns if c.id == conn_id), None)
@@ -419,6 +499,7 @@ def record_check(conn_id: str, ok: bool, detail: str) -> ToolConnection:
             }
         )
         _write([saved if c.id == conn_id else c for c in conns])
+        _record("check", saved, by)
         return saved
 
 
