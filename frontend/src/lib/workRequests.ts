@@ -3,6 +3,13 @@
 
 export type RequestStatus = "received" | "classified" | "running" | "waiting" | "done" | "failed" | "rejected" | "needs_human";
 
+/** 열린 의뢰 (아직 부서가 일하거나 사람을 기다림). 끝난 의뢰는 done·failed·rejected·needs_human.
+ *  AI 대화방 조회 줄 거르기(lib/commFilter.ts requestClosedTimes)와 AI 오피스 자리 불(lib/officeRequests.ts)이 같이 쓴다 */
+export const OPEN_REQUEST_STATES: ReadonlySet<RequestStatus> = new Set(["received", "classified", "running", "waiting"]);
+export const isOpenRequest = (r: { status: RequestStatus }) => OPEN_REQUEST_STATES.has(r.status);
+/** 의뢰의 공통 로그 context (서버가 따로 주지 않으면 "ctx_" + request_id = ctx_wr_…) */
+export const requestContext = (r: { request_id: string; context_id?: string | null }) => r.context_id || `ctx_${r.request_id}`;
+
 export type StepStatus =
   | "pending" | "running" | "completed" | "failed" | "skipped" | "rejected_by_human"
   | "held" | "waiting_human" | "waiting_async";
@@ -46,6 +53,8 @@ export interface WorkRequestRow {
   steps: Record<string, WorkRequestStep>;
   log: { at: string; message: string }[];
   thread_id?: string | null;
+  /** 공통 로그 context (서버 기록에 있을 때만. 없으면 ctx_<request_id>) */
+  context_id?: string | null;
   handoff_task_id?: string | null;
   corrections?: { at: string; by: string | null; from_task: string | null; to_task: string }[];
 }

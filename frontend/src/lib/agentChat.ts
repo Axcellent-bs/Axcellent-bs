@@ -1,9 +1,10 @@
-import { SCREEN_KEEP_OUTCOMES, closedTimes, isBackgroundRead } from "./commFilter";
+import { SCREEN_KEEP_OUTCOMES, closedTimes, isBackgroundRead, mergeClosed, requestClosedTimes } from "./commFilter";
 import { DEV_HOLD_ACTIONS, FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, PLANNING_HOLD_ACTION, SETTLEMENT_HOLD_ACTION, SUPPORT_DELETION_HOLD_ACTIONS, type ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
 import { isRedeployFailed } from "./rollbackResult";
 export type { Redeploy, RollbackView } from "./rollbackResult";
 import type { CommLine, CommOutcome } from "./types";
+import type { WorkRequestRow } from "./workRequests";
 
 // AI 대화방: 총괄(orchestrator)의 이슈 기록, 안전 관문(safety)의 실행 기록, 공통 로그의 부서 간 소통(dashboard-api)을
 // "누가 누구에게 무엇을 보냈나" 메시지로 바꾼다. 문장은 기록된 값(skill·상태·숫자·id)으로만 만들고
@@ -233,6 +234,8 @@ export type ChatItem =
   | { kind: "msg"; id: string; at: string; room: string; from: string; to: string; fromKey: string; central: boolean; text: string; tag?: string; raw?: string; tone: Tone; facts: Fact[]; repeat?: number; lastAt?: string; human?: boolean
       /** 사람과 부서 AI 직접 대화에서만: 개발 AI 계획 카드, 기획에 넘김 줄, "이대로 진행"을 보낼 받는 곳 */
       plan?: { title: string; done: string[] }; handoff?: { requestId: string | null }; goKey?: string
+      /** 총괄 말풍선 아래 붙일 고객 의뢰 진행 카드의 의뢰 번호 (wr_…, 그 방에서 처음 나온 줄에만) */
+      requestCard?: string
       /** 받는 쪽 원래 이름(공통 로그 to_agent). AI 오피스가 부서끼리 걸어가는 데 쓴다 */
       toKey?: string }
   | { kind: "system"; id: string; at: string; room: string; text: string }
@@ -613,11 +616,12 @@ export function isScreenRead(line: CommLine): boolean {
 // 부서끼리 조회만 주고받은 줄(사건·요청 밖, 또는 사건이 닫힌 뒤)은 lib/commFilter.ts가 가른다
 export { closedTimes, isBackgroundRead };
 
-export function commItems(comms: CommLine[], incidents: OrchIncident[], executions: ExecutionRecord[]) {
+/** requests: 고객 의뢰 목록(사람 토큰이 있을 때만). 끝난 의뢰(ctx_wr_)의 뒤 조회는 사건처럼 거른다 */
+export function commItems(comms: CommLine[], incidents: OrchIncident[], executions: ExecutionRecord[], requests: WorkRequestRow[] = []) {
   const byId = new Map(incidents.map((i) => [i.context_id, i]));
   const ids = new Set(byId.keys());
   const safetyIds = new Set(executions.map((e) => e.execution_id));
-  const closedAt = closedTimes(incidents);
+  const closedAt = mergeClosed(closedTimes(incidents), requestClosedTimes(requests));
   return comms
     .filter((line) => !CHAT_READ_SKILL.test(line.skill ?? "") && !isScreenRead(line) && !isBackgroundRead(line, closedAt))
     .map((line) => ({ line, room: commRoom(line, ids) }))
@@ -629,7 +633,7 @@ export function commItems(comms: CommLine[], incidents: OrchIncident[], executio
 const time = (iso: string) => (iso ? new Date(iso).getTime() : 0);
 
 /** 방 하나(또는 전체)의 타임라인. 시간순, 같은 시각이면 만들어진 순서를 지킨다 */
-export function buildTimeline(incidents: OrchIncident[], executions: ExecutionRecord[], comms: CommLine[], room: string): ChatItem[] {
+export function buildTimeline(incidents: OrchIncident[], executions: ExecutionRecord[], comms: CommLine[], room: string, requests: WorkRequestRow[] = []): ChatItem[] {
   const items: ChatItem[] = [];
   for (const inc of incidents) {
     if (room !== ALL_ROOM && room !== inc.context_id) continue;
@@ -642,7 +646,7 @@ export function buildTimeline(incidents: OrchIncident[], executions: ExecutionRe
     .sort((a, b) => time(a.created_at) - time(b.created_at));
   for (const rec of recs) items.push(...executionItems(rec, room));
   const shownExecs = new Set(recs.map((r) => r.execution_id));
-  for (const c of commItems(comms, incidents, executions)) {
+  for (const c of commItems(comms, incidents, executions, requests)) {
     // 안전 관문 기록을 같이 보이는 방에서는 같은 건(execution_id 일치)을 두 번 보이지 않는다
     if (room === ALL_ROOM ? !c.dupOf : room === c.room && !(c.dupOf && shownExecs.has(c.dupOf))) {
       const { dupOf: _dup, ...msg } = c;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { TONE } from "@/components/finance/bits";
 import { dataAi, type TrendReport } from "@/lib/data";
@@ -96,10 +96,13 @@ function RequestCard({ card, messageId, threadId }: { card: TrendRequestCard; me
 
 type ProgressLoad = { kind: "loading" } | { kind: "ok"; report: TrendReport } | { kind: "error"; state: SectionState };
 
-function ProgressCard({ card }: { card: TrendReportProgressCard }) {
+/** 보고서 진행 카드. onDone: 보고서가 끝나면(폴링을 멈출 때) 그 보고서를 넘긴다 (대화방 의뢰 진행 카드가 완료 카드로 바꿀 때) */
+export function ProgressCard({ card, onDone }: { card: TrendReportProgressCard; onDone?: (report: TrendReport) => void }) {
   const navigate = useNavigate();
   const [load, setLoad] = useState<ProgressLoad>({ kind: "loading" });
   const [tick, setTick] = useState(0);
+  const doneRef = useRef(onDone);
+  useEffect(() => { doneRef.current = onDone; });
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -108,6 +111,7 @@ function ProgressCard({ card }: { card: TrendReportProgressCard }) {
         if (!live) return;
         setLoad({ kind: "ok", report: r.output });
         if (progressKeepPolling(r.output.status)) timer = setTimeout(() => setTick((x) => x + 1), REPORT_POLL_MS);
+        else doneRef.current?.(r.output);
       })
       .catch((e: Error) => { if (live) setLoad({ kind: "error", state: sectionState(e.message) }); });
     return () => { live = false; if (timer) clearTimeout(timer); };
@@ -142,7 +146,7 @@ const DONE_TONE = {
   bad: { border: "border-red-400", title: "text-red-800" },
 } as const;
 
-function DoneCard({ card }: { card: TrendReportDoneCard }) {
+export function DoneCard({ card }: { card: TrendReportDoneCard }) {
   const navigate = useNavigate();
   const v = doneView(card);
   const tone = DONE_TONE[v.tone];

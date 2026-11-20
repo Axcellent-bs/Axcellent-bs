@@ -1,15 +1,17 @@
 import type { CommLine } from "./types";
+import { OPEN_REQUEST_STATES, requestContext, type RequestStatus } from "./workRequests.ts";
 
 // AI 대화방에서 공통 로그 소통 줄 중 "일과 상관없는 조회"를 가른다 (lib/agentChat.ts commItems가 쓴다).
-// 이 파일은 다른 모듈을 값으로 가져오지 않는다: `node --test`로 바로 시험한다 (commFilter.test.ts).
+// 값으로 가져오는 것은 import가 없는 lib/workRequests.ts뿐이다: `node --test`로 바로 시험한다 (commFilter.test.ts).
 // 원본 공통 로그는 그대로이고, 화면에서만 뺀다.
 
 /** 실패·보류·거절·사람 확인은 화면 줄·조회 줄이어도 남긴다 */
 export const SCREEN_KEEP_OUTCOMES: ReadonlySet<string> = new Set(["failed", "rejected", "held", "needs_human"]);
 
-// 사건(ctx_inc_)·변경 요청(ctx_req_) 안의 조회는 일의 흐름이라 남긴다.
-// 그 밖의 조회는 화면 탭을 열 때마다 쌓인다(재무 → 인사 팀 인원, 문의 → 기억 카드 검색 등)
-export const WORK_CONTEXT = /^ctx_(inc|req)_/;
+// 사건(ctx_inc_)·변경 요청(ctx_req_)·고객 의뢰(ctx_wr_) 안의 조회는 일의 흐름이라 남긴다.
+// 그 밖의 조회는 화면 탭을 열 때마다 쌓인다(재무 → 인사 팀 인원, 문의 → 기억 카드 검색 등).
+// 11/20 14:36 의뢰 wr_732efb95e9: 총괄 → 데이터 trend_report_create(read)가 ctx_wr_로 남는데 여기서 걸러져 말풍선이 없었다
+export const WORK_CONTEXT = /^ctx_(inc|req|wr)_/;
 
 // 화면이 쓰던 고정 context. 이름은 ctx_req_로 시작하지만 변경 요청이 아니라 데이터 화면 조회다.
 // 11/20 12:08: 트렌드 화면이 이 context로 data trend_insight_brief를 부르자 data가 같은 context로
@@ -42,3 +44,16 @@ export function isBackgroundRead(line: CommLine, closedAt?: ReadonlyMap<string, 
 /** 사건 번호 → 닫힌 시각 (총괄 사건의 closed_at, 닫힌 사건만) */
 export const closedTimes = (incidents: { context_id: string; closed_at: string | null }[]): ReadonlyMap<string, string> =>
   new Map(incidents.filter((i) => i.closed_at).map((i) => [i.context_id, i.closed_at as string]));
+
+/** 의뢰 context(ctx_wr_…) → 닫힌 시각: 끝난 의뢰(열린 상태가 아닌 것)의 updated_at. 사건 closedTimes와 같은 규칙으로 끝난 뒤 조회를 거른다 */
+export const requestClosedTimes = (
+  requests: { request_id: string; context_id?: string | null; status: RequestStatus; updated_at: string }[],
+): ReadonlyMap<string, string> =>
+  new Map(requests.filter((r) => !OPEN_REQUEST_STATES.has(r.status) && r.updated_at).map((r) => [requestContext(r), r.updated_at]));
+
+/** 사건·의뢰 닫힌 시각을 하나로 */
+export const mergeClosed = (...maps: ReadonlyMap<string, string>[]): ReadonlyMap<string, string> => {
+  const out = new Map<string, string>();
+  for (const m of maps) for (const [k, v] of m) out.set(k, v);
+  return out;
+};

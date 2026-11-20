@@ -1,40 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { speaker } from "@/lib/agentChat";
-import { SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { ago } from "@/lib/format";
-import { orchestrator } from "@/lib/orchestrator";
 import { handoffRequests, requestTitle, shortNo } from "@/lib/requestHandoffs";
-import { REQUEST_STATUS, type WorkRequestRow, type WorkRequestTask } from "@/lib/workRequests";
+import { REQUEST_STATUS } from "@/lib/workRequests";
+import { useWorkRequests } from "@/components/office/useWorkRequests";
 
 // 고객 의뢰가 부서 사이로 넘어가는 모습: AI 대화방·AI 오피스 공용 카드. 장애 이슈와 따로, 의뢰 전용으로 그린다.
 // 평소에는 접어 두고(의뢰가 늘어도 아래 대화 칸이 밀리지 않게) 펼치면 한 줄에 카드 3개씩 보인다.
 // 의뢰 목록(GET /api/requests)은 사람 토큰이 있어야 읽힌다. 토큰이 없으면(직원 로그인 전) 아무것도 그리지 않고 조회도 하지 않는다.
 // 고객 글·부서가 돌려준 문장은 옮기지 않는다. 일 이름·단계 이름·부서·상태만 보인다.
 
-const POLL_MS = 10_000;
 const SHOWN = 12;
 
 export function RequestHandoffCard() {
-  const hasToken = SAFETY_HUMAN_TOKEN.length > 0;
-  const [rows, setRows] = useState<WorkRequestRow[] | null>(null);
-  const [tasks, setTasks] = useState<WorkRequestTask[]>([]);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    if (!hasToken) return;
-    let live = true;
-    const load = async () => {
-      try {
-        const { data, meta } = await orchestrator.workRequests();
-        if (live) { setRows(data); setTasks(meta.tasks ?? []); setFailed(false); }
-      } catch {
-        if (live) setFailed(true);
-      }
-    };
-    void load();
-    const t = setInterval(() => void load(), POLL_MS);
-    return () => { live = false; clearInterval(t); };
-  }, [hasToken]);
+  // 의뢰 목록은 같은 페이지의 AI 오피스 자리 불·대화방 진행 카드와 한 번만 읽어 나눠 쓴다 (10초마다, 사람 토큰 없으면 읽지 않음)
+  const { hasToken, rows, tasks, failed } = useWorkRequests();
 
   const all = useMemo(() => handoffRequests(rows ?? []), [rows]);
   const groups = all.slice(0, SHOWN);

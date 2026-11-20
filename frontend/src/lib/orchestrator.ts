@@ -55,6 +55,9 @@ export const orchestrator = {
   /** 접수된 고객 의뢰 (최근 것부터, 최대 100건)와 고를 수 있는 일 목록. 사람 토큰이 필요하다 */
   workRequests: () =>
     getAuthed<WorkRequestRow[], { tasks: WorkRequestTask[] }>("/api/requests", SAFETY_HUMAN_TOKEN),
+  /** 의뢰 하나 (목록 최근 100건에 없을 때 대화방 진행 카드가 한 번 부른다). 사람 토큰이 필요하다 */
+  workRequest: (requestId: string) =>
+    getAuthed<WorkRequestRow>(`/api/requests/${encodeURIComponent(requestId)}`, SAFETY_HUMAN_TOKEN).then((r) => r.data),
   /** 사람 확인·승인 대기 중인 의뢰 단계를 승인하거나 거절한다. 승인하면 다음 단계로 이어진다 */
   decideRequestStep: (requestId: string, stepId: string, approved: boolean) =>
     post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/steps/${encodeURIComponent(stepId)}/decision`, { approved }, SAFETY_HUMAN_TOKEN),

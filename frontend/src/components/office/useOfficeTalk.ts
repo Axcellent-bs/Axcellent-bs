@@ -6,6 +6,8 @@ import { POLL_MS, classifyFailure, isAnswering } from "@/lib/directChat";
 import { ROOM_POLL_MS, listOfficeRoom, touchOfficeRoom, type OfficeEntry } from "@/lib/officeRoom";
 import { loadOwners, saveOwner } from "@/lib/directThreads";
 import { notThreadOwner, officeSendBody, ownsThread, senderName, threadDisplay } from "@/lib/officeTalkView";
+import { placeRequestCards } from "@/lib/requestCards";
+import { SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { useSession, type Account } from "@/demo/session";
 
 // 단톡방(전체 대화방·장애·이슈 방)에서 부서 AI에게 말 걸기. 단톡방 대화는 모두에게 보인다.
@@ -271,10 +273,22 @@ export function useOfficeTalk(): OfficeTalk {
       const a = agents.find((x) => sk.startsWith(`${x.key}@`));
       if (a) out.push({ kind: "msg", id: `direct:${sk}:sending`, at: pending.at, room: pending.room, from: account.name || "나", to: a.name, fromKey: "human", central: false, human: true, text: pending.text, tone: "request", facts: [] });
     }
-    return out.sort(byAt);
+    return withRequestCards(out.sort(byAt));
   }, [account, agents, loaded, notes, sending]);
 
   return { account: account ?? null, chips, busy, busyIn, busyKeys, send, items, quiet: quiet.current };
+}
+
+/**
+ * 고객 의뢰 진행 카드(11/20): 의뢰 번호가 처음 나온 총괄 말풍선에 requestCard를 붙이고, 같은 방의 같은 의뢰 다음 알림 줄("[의뢰 wr_…] …")은 숨긴다
+ * (카드가 보여 준다, 원본 대화는 그대로). 사람 토큰이 없으면 카드를 못 그려서 지금처럼 글만 둔다. 시각순으로 넘긴다
+ */
+export function withRequestCards(items: ChatItem[], hasToken = SAFETY_HUMAN_TOKEN.length > 0): ChatItem[] {
+  if (!hasToken) return items;
+  const { cardAt, hidden } = placeRequestCards(items.flatMap((it) =>
+    it.kind === "msg" ? [{ id: it.id, room: it.room, text: it.text, fromOrchestrator: it.fromKey === "orchestrator" && !it.human }] : []));
+  if (cardAt.size === 0) return items;
+  return items.filter((it) => !hidden.has(it.id)).map((it) => (it.kind === "msg" && cardAt.has(it.id) ? { ...it, requestCard: cardAt.get(it.id) } : it));
 }
 
 /** 계획 카드의 "이대로 진행": 같은 방의 같은 대화에 "진행해"를 보낸다 */

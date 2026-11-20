@@ -1,4 +1,6 @@
 import { ALL_ROOM, deptOf, skillKo, speaker, type ChatItem, type OrchIncident, type OrchStep } from "./agentChat";
+import { applyRequestDesks, requestDesks } from "./officeRequests";
+import type { WorkRequestRow } from "./workRequests";
 
 // AI 오피스: AI 대화방과 같은 기록(총괄 사건·안전 관문·공통 로그)을 픽셀 사무실 상태로 바꾼다.
 // 상태는 기록된 값(단계 status·말풍선 문장·facts)으로만 정하고, 화면 없는 순수 함수만 둔다.
@@ -108,7 +110,11 @@ export function focusIncident(incidents: OrchIncident[]): OrchIncident | null {
  */
 export function deriveOffice(
   incidents: OrchIncident[], items: ChatItem[], seen: ReadonlyMap<string, number>, now: number,
-  opts: { desks?: Partial<Record<DeskKey, Omit<DeskView, "bubble"> & { bubble?: Bubble | null }>>; board?: BoardText; overlay?: OfficeView["overlay"] } = {},
+  opts: {
+    desks?: Partial<Record<DeskKey, Omit<DeskView, "bubble"> & { bubble?: Bubble | null }>>; board?: BoardText; overlay?: OfficeView["overlay"];
+    /** 고객 의뢰(GET /api/requests). 사람 토큰이 없으면 넘기지 않는다(지금 화면 그대로) */
+    requests?: WorkRequestRow[] | null;
+  } = {},
 ): OfficeView {
   const desks = Object.fromEntries(DESKS.map((d) => [d.key, { state: "idle", bubble: null, skill: null } as DeskView])) as Record<DeskKey, DeskView>;
   const inc = focusIncident(incidents);
@@ -126,6 +132,8 @@ export function deriveOffice(
       if (step.status === "held" || inc.pending_holds.some((h) => h.step_id === step.step_id)) desks[k] = { state: "waiting", bubble: null, skill: step.skill };
     }
   }
+  // 1-2) 고객 의뢰(wr_) 단계 → 작업 중 / 승인 대기 (가장 최근 열린 의뢰 하나, 사건이 쓰는 자리는 사건이 먼저. lib/officeRequests.ts)
+  applyRequestDesks(desks, requestDesks(opts.requests).map((d) => ({ ...d, bubble: d.bubble ? short(d.bubble, 16) : null })), deskOf);
 
   // 2) 방금 들어온 말풍선 → 말한 부서 머리 위에 (승인 대기 표시는 덮지 않는다)
   for (const it of items) {
