@@ -127,3 +127,35 @@ def test_missing_creative_record_is_404(client: TestClient, fake: Fake) -> None:
     assert (
         client.get("/api/dashboard/marketing/creative-records/CR-0123456789ab").status_code == 404
     )
+
+
+VIDEO_URL = "/api/dashboard/marketing/creative-records/CR-0123456789ab/video"
+
+
+def test_video_request_goes_to_marketing_with_the_record(client: TestClient, fake: Fake) -> None:
+    fake.output = {"record_id": "CR-0123456789ab", "video": {"status": "awaiting_approval"}}
+    res = client.post(VIDEO_URL)
+    assert res.status_code == 200
+    assert res.json()["data"]["video"]["status"] == "awaiting_approval"
+    target, request = fake.calls[0]
+    assert (target, request.skill) == ("marketing", "creative_video_request")
+    assert request.input["record_id"] == "CR-0123456789ab"
+
+
+@pytest.mark.parametrize(
+    ("outcome", "status"),
+    [("board_image_not_ready", 409), ("model_not_configured", 409), ("not_found", 404)],
+)
+def test_video_refusals_map_to_http(
+    client: TestClient, fake: Fake, outcome: str, status: int
+) -> None:
+    fake.status, fake.outcome, fake.output = TaskStatus.FAILED, outcome, {"message": outcome}
+    assert client.post(VIDEO_URL).status_code == status
+
+
+def test_asset_without_a_finished_render_is_404(client: TestClient, fake: Fake) -> None:
+    fake.output = {"record_id": "CR-0123456789ab", "render": {}}
+    url = "/api/dashboard/marketing/creative-records/CR-0123456789ab/asset/sheet_image"
+    assert client.get(url).status_code == 404
+    bad = "/api/dashboard/marketing/creative-records/CR-0123456789ab/asset/secret"
+    assert client.get(bad).status_code == 422

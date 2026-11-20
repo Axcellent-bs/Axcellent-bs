@@ -1427,6 +1427,35 @@ async def marketing_creative_record(
     return ok(await marketing_client.creative_record_call(record_id))
 
 
+@router.post("/marketing/creative-records/{record_id}/video")
+async def marketing_creative_video(
+    request: Request, record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$")
+) -> dict:
+    """스토리보드 그림으로 Higgsfield 영상 만들기를 사람 승인에 올린다(`creative_video_request`, C).
+
+    승인 전에는 아무것도 만들지 않는다. 요청한 사람 이름은 사람 토큰에서 채운다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.creative_video_call(record_id, who))
+
+
+@router.get("/marketing/creative-records/{record_id}/asset/{part}")
+async def marketing_creative_asset(
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+    part: str = Path(pattern=r"^(sheet_image|board_image|video)$"),
+) -> FileResponse:
+    """제작 기록의 Higgsfield 결과 파일(시트 그림·스토리보드 그림·영상).
+
+    기록된 sha256과 같을 때만 내준다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    path, media_type = await marketing_client.creative_asset(record_id, part)
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+
 class MarketingChatSendBody(BaseModel):
     thread_id: str | None = Field(default=None, min_length=1, max_length=64)
     message: str = Field(min_length=1, max_length=2000)
