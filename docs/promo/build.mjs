@@ -195,7 +195,11 @@ const postList = PS.items.length ? PS.items.map(postCard).join("") : Array.from(
 
 // 고객사별 인스타 게시물. 게시물이 있는 고객사만 보인다
 const igGroups = (PS.instagram || []).filter((it) => it.posts && it.posts.length);
-const igHtml = igGroups.map((it) => `<div class="ig-group reveal"><header><h3>${esc(it.name)} 인스타그램</h3><p class="badges">${it.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p></header><ul class="posts">${it.posts.map(casesPost).join("")}</ul></div>`).join("");
+// 게시물이 3개를 넘으면 처음에는 3개만 보이고, 세 번째 오른쪽의 화살표 버튼(app.js가 켠다)을 눌러야 나머지가 보인다.
+// 스크립트가 꺼져 있으면 버튼은 숨겨진 채로 전부 보인다.
+const IG_FIRST = 3;
+const igMore = (it) => it.posts.length > IG_FIRST ? `<button type="button" class="posts-more" hidden aria-expanded="false" aria-label="게시물 더 보기"><span aria-hidden="true">›</span></button>` : "";
+const igHtml = igGroups.map((it) => `<div class="ig-group reveal"><header><h3>${esc(it.name)} 인스타그램</h3><p class="badges">${it.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p></header><div class="posts-wrap"><ul class="posts">${it.posts.map(casesPost).join("")}</ul>${igMore(it)}</div></div>`).join("");
 
 const showPosts = PS.items.length > 0 || igGroups.length > 0 || PS.showEmpty === true;
 const posts = !showPosts ? "" : `

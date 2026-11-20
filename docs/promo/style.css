@@ -298,13 +298,27 @@ body { overflow-x: clip; }
 @media (max-width: 420px) { .case .posts { grid-template-columns: minmax(0, 1fr); } }
 .ig-group { margin-top: var(--gap-block); display: grid; gap: 14px; }
 .ig-group h3 { font-size: 24px; font-weight: 800; }
-/* 콘텐츠 칸 인스타 게시물: 위의 영상 카드(.vpost)와 같은 카드 폭·9:16 비율로 보인다 */
-.ig-group .posts { grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 340px)); justify-content: start; gap: 24px; }
+/* 콘텐츠 칸 인스타 게시물: 인스타 피드 비율(가로 4 : 세로 5)로 한 줄에 3개씩 보인다.
+   3개를 넘으면 처음에는 3개만 보이고(.is-collapsed), 세 번째 오른쪽 화살표(.posts-more)를 눌러야 나머지가 보인다 */
+.posts-wrap { display: flex; align-items: flex-start; gap: 16px; }
+.ig-group .posts { flex: 1; min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
 .ig-group .post { background: var(--paper); border-radius: 26px; padding: 16px 16px 24px; min-width: 0; }
 .ig-group .post-thumb { border-radius: 16px; overflow: hidden; }
-.ig-group .post-thumb img { aspect-ratio: 9 / 16; border-radius: 0; }
-/* 누비투어 게시물은 인스타 피드 비율(4:5)로 만든 그림이라 9:16으로 자르면 글자가 잘린다. 누비투어만 4:5로 보인다(캣북스 카드는 그대로) */
-.ig-group .post-thumb img[src*="/nubitour/"] { aspect-ratio: 4 / 5; }
+.ig-group .post-thumb img { aspect-ratio: 4 / 5; border-radius: 0; }
+.ig-group .posts.is-collapsed .post:nth-child(n+4) { display: none; }
+.posts-more { flex: none; align-self: center; width: 48px; height: 48px; border-radius: 50%; border: 1px solid #d9d9ee; background: #fff; color: var(--brand-d); font-size: 30px; line-height: 1; cursor: pointer; display: grid; place-items: center; box-shadow: 0 2px 10px rgba(20, 20, 46, .12); }
+.posts-more[hidden] { display: none; }
+.posts-more:hover { background: var(--paper); }
+.posts-more:focus-visible { outline: 3px solid var(--brand-d); outline-offset: 2px; }
+.posts-more span { display: block; transform: translateY(-2px); }
+.posts-more[aria-expanded="true"] span { transform: translateY(-2px) rotate(180deg); }
+@media (max-width: 780px) {
+  .posts-wrap { flex-direction: column; align-items: stretch; }
+  .ig-group .posts { grid-template-columns: minmax(0, 1fr); }
+  .posts-more { align-self: center; }
+  .posts-more span { transform: translateY(-2px) rotate(90deg); }
+  .posts-more[aria-expanded="true"] span { transform: translateY(-2px) rotate(-90deg); }
+}
 
 .vgroup-h { margin-top: var(--gap-block); }
 .vgroup-h h3 { font-size: 24px; font-weight: 800; }
