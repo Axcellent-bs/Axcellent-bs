@@ -1,6 +1,6 @@
 {
   "name": "coupon",
-  "owner": "재현·태윤·예진 (서브 재헌)",
+  "owner": "태윤·재현·예진 (서브 재헌)",
   "description": "공지·쿠폰 — marketing 업무 중 이 서비스 skill만 맡는다. 마케팅 — 사건·상품 이벤트로 공지를 만들고, 공지 사실을 조회해 주고, 쿠폰을 지급한다",
   "url": "http://coupon:8103/a2a",
   "version": "0.1.0",
