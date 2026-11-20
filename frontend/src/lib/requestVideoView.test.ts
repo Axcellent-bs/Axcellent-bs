@@ -42,6 +42,10 @@ test("칸 표시: 라벨 입힌 영상만 재생, 그 밖에는 안내", () => {
   assert.equal(videoPane(vid({ labeled: false, preview_path: null })).kind, "waiting");
   assert.equal(videoPane(vid({ labeled: false, preview_path: "/raw" })).kind, "waiting"); // 라벨 없으면 경로가 있어도 재생 안 함
   assert.equal(videoPane(vid({ labeled: true, preview_path: null })).kind, "waiting");
+  assert.equal(videoPane(vid({ status: "label_missing" })).kind, "waiting"); // label_missing이면 값이 어긋나도 재생 안 함
+  assert.equal(videoPane(vid({ status: "label_missing", labeled: false, preview_path: null })).kind, "waiting");
+  assert.equal(videoPane(vid({ status: "check_rejected" })).kind, "play"); // 라벨은 있으니 재생, 상태만 표시
+  assert.equal(videoPane(vid({ status: "draft_ready" })).kind, "play");
 });
 
 test("길이·상태 문구, 의뢰 필터 정렬", () => {
@@ -49,6 +53,9 @@ test("길이·상태 문구, 의뢰 필터 정렬", () => {
   assert.equal(durationKo(null), "길이 미정");
   assert.equal(durationKo(0), "길이 미정");
   assert.equal(statusKo("draft"), "초안");
+  assert.equal(statusKo("draft_ready"), "초안 준비됨");
+  assert.equal(statusKo("check_rejected"), "점검에서 거절됨");
+  assert.equal(statusKo("label_missing"), "AI 표시 아직 없음");
   assert.equal(statusKo("zzz"), "zzz");
   assert.equal(statusKo(""), "상태 미정");
   const a = vid({ post_draft_id: "a", request_id: "wr_0000000001" });
