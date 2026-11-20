@@ -278,7 +278,8 @@ AI가 shop-api(→ 변환기)에 보내는 쓰기는 아래가 전부다(`backen
 | 동작 | 스터디온에듀 | 판정 |
 |---|---|---|
 | `inquiry_answer` | `POST /api/v1/inquiries/{id}/answer` | 직접 쓰기 |
-| `coupon_issue` | `POST /api/v1/coupons` (코드형. 칸: `code`·`kind`(`fixed`·`percent`)·`value`·`target`(`all`·`category`·`course`·`instructor`)·`per_user_once`·`total_limit`·`starts_at`·`ends_at`. 받는 사람(`user_id`) 칸 없음, `per_user_once`는 1인 1회일 뿐) | **직접 쓰기(공용 쿠폰)**: 사이트에 회원별 메시지함이 없으니 모두가 쓰는 공용 쿠폰(`target: all`)으로 발급한다(11/20 결정). 고객별 쿠폰은 사이트에 회원별 메시지함이 생긴 뒤 그걸로 보낸다. 아래 "정한 것" 1번 |
+| `coupon_issue` | `POST /api/v1/coupons` (코드형. 칸: `code`·`kind`(`fixed`·`percent`)·`value`·`target`(`all`·`category`·`course`·`instructor`)·`per_user_once`·`total_limit`·`starts_at`·`ends_at`·`private`(11/20 추가: `true`면 받은 회원만 1인 1회, 아니면 403 `COUPON_NOT_YOURS`)) → `POST /api/v1/coupons/{code}/grants` 보냄 `{member_ids:[...], message?:{title?,body?}}` → `{coupon, granted, already, not_found}` (멱등: 같은 요청 여러 번 → 한 번 발급, 한 번 최대 500명, `member_ids`는 v1 응답의 `member_id`, 새로 받은 회원 메시지함에 안내 1건(기본 문구 있음), 꺼진 쿠폰 409·기간 지남 400·강사 추천 코드 400) | **고객별 쿠폰 = 돈이 걸린 쓰기**: safety 관문 통과 뒤, 변환기가 실행 기록과 대조하고 ① `private: true` 쿠폰 생성 ② `grants` 순서로 직접 쓴다. ② 실패 시 할 일함으로 보내고 ①의 쿠폰은 **남긴다**(아래 근거). **공용 쿠폰**(`target: all`, `private` 없음)은 회원 지정이 필요 없을 때만 쓴다. 아래 "정한 것" 1번 |
+| `notice_inbox` (메시지함 안내) | `POST /api/v1/inbox` 보냄 `{member_ids, title, body, kind?="notice", link?}` → 201 `{sent, not_found}` (돈과 무관한 안내용, `link`는 `/`로 시작하는 사이트 안 경로만) | **돈과 무관한 쓰기**: 승인 없이 직접 쓴다. 회사 연결에서 켜야 동작, 기본 꺼짐 |
 | `banner_post`·`banner_end` | 장애 공지 `POST /api/v1/incidents`·`PATCH /api/v1/incidents/{id}`(`status: resolved`)만 있음. 일반 공지 없음 | 장애 공지(배너의 `context_id`가 장애 건)만 직접 쓰기 후보, 그 밖은 할 일함. 1차는 할 일함 |
 | `refund`·`claim_result` | 없음 (`GET /api/v1/refunds`만, 승인은 직원 화면 `admin/refunds/[id]`) | 할 일함 |
 | `payment_rollback`·`fault_release` | 없음 (서비스 모드·대기열은 있지만 같은 일이 아님) | 할 일함 |
@@ -297,7 +298,7 @@ AXcellent는 사이트 코드를 고치지 않는다. 아래는 사이트를 만
 | 누비투어 | `POST /api/v1/notices`, `DELETE /api/v1/notices/{id}` (문구·기간) | `banner_post`·`banner_end` | |
 | 누비투어 | (선택) 쿠폰 기능과 `POST /api/v1/coupons` | `coupon_issue` | 여행사에 쿠폰이 필요할 때만 |
 | 스터디온에듀 | `POST /api/v1/refunds/{id}/decision` (`approve`·`reject`, `amount`·`adjust_reason`) | `refund`·`claim_result` | 지금은 직원 화면에서만 승인 |
-| 스터디온에듀 | ① 회원 메시지함: 마이페이지 화면, 회원별 읽기 API, AX가 쓰는 API(예: `POST /api/v1/members/{id}/messages`) ② 쿠폰에 받는 사람 지정 칸 | `coupon_issue` (고객별) | 지금은 회원별 메시지함이 없다(`messages` 테이블은 관리자 화면에서만 보이는 발송 기록이고, 회원이 읽는 화면·API가 없음, study-on-edu origin/dev 11/20 확인). 예진 님이 고객별 쿠폰이 필요하다고 할 때 만든다 |
+| 스터디온에듀 | ~~① 회원 메시지함 ② 쿠폰에 받는 사람 지정 칸~~ → **생김** (11/20, study-on-edu #13 dev 머지, 예진 PC 서버엔 아직 배포 전): `private` 쿠폰 + `POST /api/v1/coupons/{code}/grants`, `POST /api/v1/inbox` | `coupon_issue` (고객별)·메시지함 안내 | 모두 write 키, 사이트 감사 기록 `api:<키 이름>`, 발신 출처 값은 `site`·`admin`·`api`(AX 전용 값 없음). 발급 내역·메시지함 read 목록 API는 없다 → 쿠폰 사용 여부는 주문으로 확인 |
 | 스터디온에듀 | `POST /api/v1/notices`, `DELETE /api/v1/notices/{id}` | `banner_post`·`banner_end` (장애 아닌 공지) | |
 
 #### 단계 (PR 단위)
@@ -306,7 +307,7 @@ AXcellent는 사이트 코드를 고치지 않는다. 아래는 사이트를 만
 2. **W2 관문 확인**: safety `GET /api/safety/executions/{execution_id}` 추가(또는 `context_id` 목록), 환불·쿠폰 기록 확인(판정 2). 확인 실패 시험.
 3. **W3 직접 쓰기 + 문의 답변**: 고객사 호출(시간 초과·응답 처리, 판정 5·7), ① 문의 읽기 짝과 `link:` 장부, `inquiry_answer` 직접 쓰기(누비투어·스터디온에듀). 고객지원의 문의 화면 값 쓰기가 사이트 답변으로 간다.
 4. **W4 화면**: 회사 연결 "동작별 직접 쓰기" 켜기(기본 꺼짐)·"최근 사이트 쓰기"·"키에 쓰기 권한 없음", 결과 칩 "사이트에 반영됨"/"사이트 반영 대기".
-5. **W5 사이트가 경로를 더한 뒤**: 고객별 쿠폰(스터디온에듀 회원별 메시지함. 공용 쿠폰은 W3 뒤 바로 가능), 환불·신청 결과(사이트 `decision` 경로), 공지. 사이트 경로마다 PR 하나.
+5. **W5 사이트가 경로를 더한 뒤**: 고객별 쿠폰(스터디온에듀 `private` 쿠폰 + `grants`, 11/20 생김. 공용 쿠폰은 W3 뒤 바로 가능)·메시지함 안내(`/inbox`), 환불·신청 결과(사이트 `decision` 경로), 공지. 사이트 경로마다 PR 하나.
 6. 롤백·장애 해제: 도메인 클라이언트가 `context_id`를 보내게 바꾼 뒤 따로 정한다(그때까지 할 일함).
 
 #### 시험
@@ -333,8 +334,11 @@ AXcellent는 사이트 코드를 고치지 않는다. 아래는 사이트를 만
 
 #### 정한 것 (예진 님, 11/20)
 
-1. **스터디온에듀 쿠폰**: 사이트에 회원별 메시지함이 없으면 **모두가 쓰는 공용 쿠폰**으로 발급한다(직접 쓰기). 고객별 쿠폰이 필요하면 사이트에 **회원별 메시지함을 만들어** 그걸로 그 고객에게 쿠폰을 보낸다(사이트 쪽 작업, catbooks-demo 세션 몫: ① 회원 메시지함 ② 쿠폰 받는 사람 지정 칸. 예진 님이 필요하다고 할 때 만든다). 11/20 확인: 지금 사이트에는 회원이 읽는 메시지함이 없고(`messages` 테이블은 관리자용 발송 기록), 공용 쿠폰은 `POST /api/v1/coupons`(write 키)로 바로 된다. 앞서 추천한 "회원 지정 칸이 생길 때까지 할 일함"은 이 결정으로 대체한다.
-2. **돈과 상관없는 쓰기(문의 답변·신청 처리 결과 표시)**: 승인 없이 바로 쓴다. 단 고객사 관리자가 회사 연결에서 켜야 동작하고, **기본 꺼짐**.
+1. **스터디온에듀 쿠폰**: (11/20 갱신, study-on-edu #13 dev 머지, 예진 PC 서버엔 아직 배포 전) 사이트에 회원 메시지함과 받는 사람 지정이 **생겼다**. 고객별 쿠폰은 `POST /api/v1/coupons`(`private: true`) → `POST /api/v1/coupons/{code}/grants` 두 단계 직접 쓰기다(돈이 걸린 쓰기: safety 관문 통과 뒤, 실행 기록과 대조). 공용 쿠폰(`target: all`)은 **회원 지정이 필요 없을 때**만 쓴다.
+   - **두 번째 단계(`grants`) 실패 시**: 할 일함으로 보내고, 첫 단계로 만든 쿠폰은 **비활성 처리하지 않고 남긴다.** 근거: ① `private` 쿠폰은 받은 회원만 쓸 수 있어 발급 전엔 아무도 못 쓰므로(다른 회원은 403 `COUPON_NOT_YOURS`) 남겨도 돈이 새지 않는다 ② `grants`는 멱등이라 사람이 할 일함에서 같은 코드로 다시 보내면 된다(쿠폰을 다시 만들면 `DUPLICATE_CODE` 409) ③ 비활성 처리는 또 하나의 쓰기라 그것도 실패할 수 있고, 위 v1 경로에 끄는 경로도 정해져 있지 않다. 장부에는 쿠폰 코드와 "발급 대기"를 남긴다.
+   - 발급 내역 읽기 API가 없으니 쿠폰을 썼는지는 주문으로 확인한다.
+   - 메시지함 안내(`POST /api/v1/inbox`)는 아래 2번(돈과 상관없는 쓰기)에 든다.
+2. **돈과 상관없는 쓰기(문의 답변·신청 처리 결과 표시·메시지함 안내 `/inbox`)**: 승인 없이 바로 쓴다. 단 고객사 관리자가 회사 연결에서 켜야 동작하고, **기본 꺼짐**.
 
 #### 열린 질문
 
