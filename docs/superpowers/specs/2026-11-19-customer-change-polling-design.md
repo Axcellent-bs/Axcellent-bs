@@ -36,6 +36,11 @@
 - 대체 경로(이미 있음): Zabbix → DejaFix → 인프라 `infra_agent/dejafix_watch.py`가 `GET /api/incidents?status=problem`을 30초마다 읽고 `component` 태그가 붙은 장애를 `infra.anomaly_detected`로 보내요. 총괄은 이것도 `INCIDENT_EVENTS`로 받아 사건을 열어요. **열기는 이미 대체돼요.**
 - 빈 곳: **복구 신호**예요. `dejafix_watch`는 장애가 목록에서 빠져도 아무것도 보내지 않아요. 그래서 DejaFix 길로 열린 사건은 `recovered_at`이 비고, 복구를 기다리는 단계(배너 내리기)가 안 돌아요.
 - **결정(예진 님 11/20)**, 인프라·총괄 몫(PR 6): `dejafix_watch`가 직전 회차에 보냈던 장애가 `problem` 목록에서 빠지면 복구 신호를 하나 보내요. 새 종류 `infra.recovered`를 계약에 **추가**하고(데이터는 `InfraAnomalyData` 재사용), 총괄이 `SHOP_RECOVERED`와 같은 길로 받아요. `shop.recovered`를 인프라가 그대로 쓰는 방법도 있지만 "쇼핑몰이 알린 사실"이라는 뜻과 `source=shop-api` 표시가 섞여서 권하지 않아요.
+- **복구 신호 요구사항(총괄 준하 님 PR #1457 의견, 11/20)**:
+  1. **가짜 복구 막기**: DejaFix 조회 실패(오류·시간 초과)나 빈 목록은 "장애가 빠짐"으로 보지 않아요. **조회가 성공한 응답**에서 직전 회차에 있던 장애가 명시적으로 빠졌을 때만 세고, **연속 두 번** 빠졌을 때 `infra.recovered`를 보내요.
+  2. **복구 시각**: `recovered_at`은 `dejafix_watch`가 알아챈 시각(30초 주기)이 아니라 **DejaFix가 알려 주는 해소 시각**을 써요. 에이전트 평가(MTTR)에 들어가는 시간이라서예요.
+  3. **복구 방식 칸**: `infra.recovered` 데이터에 `recovery` 칸을 **추가만** 해요. 값은 `ShopDegradedData.recovery`와 같게 `fault_released`·`metrics_normal`(모르면 비움). `InfraAnomalyData`를 재사용하되 `recovery: Literal["fault_released", "metrics_normal"] | None = None`, `recovered_at: UtcDatetime | None = None`을 기본값 있는 칸으로 덧붙여 기존 `infra.anomaly_detected`는 그대로 통과하게 해요.
+  4. **같은 부위로 잇기**: 복구 신호에 장애 신호와 같은 `component`(그리고 `source_ref`)를 실어, 총괄이 열린 장애와 이어 붙이게 해요.
 - 그 전까지 캣북스의 `shop.degraded`·`shop.recovered` 전송은 **그대로 둬요**(시연 장애 주입 흐름 `fault_released`가 여기에 걸려 있어요). 이 문서의 "outbox 제거"는 주문·결제·환불·반품·판매자 7종만이에요.
 
 ## 읽기 경로 조사
@@ -171,7 +176,7 @@
 | 3 | 화면: 회사 연결 연결 지도에 "변화 감지" 상태, 출처 이름표 추가 | 프론트 |
 | 4 | 전환: 그림자 모드 끄기, `POST /events` `deprecated` 표시 추가, `AX_COMPANY_KEYS` 기본값·안내 정리, `agent-common.md` 카탈로그 정리 | dashboard-api, 재무 |
 | 5 (catbooks-demo) | 캣북스 outbox 7종 전송 제거 | 캣북스 판매 서버(재헌) |
-| 6 (따로) | 장애 복구 신호(11/20 결정): `infra.recovered` 계약 추가, `dejafix_watch`가 장애가 닫히면(`problem` 목록에서 빠지면) 복구 알림, 총괄이 받기 | 인프라, 총괄(준하) |
+| 6 (따로) | 장애 복구 신호(11/20 결정): `infra.recovered` 계약 추가, `dejafix_watch`가 장애가 닫히면(성공한 조회에서 연속 두 번 빠지면) 복구 알림(`recovery`·`recovered_at`=DejaFix 해소 시각·같은 `component`). 총괄이 `infra.recovered`를 `SHOP_RECOVERED`와 같은 길로 받는 건 **준하 님 담당** | 인프라, 총괄(준하) |
 
 ## 하지 않을 것 (이번)
 
