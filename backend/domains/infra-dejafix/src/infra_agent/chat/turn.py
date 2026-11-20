@@ -159,8 +159,17 @@ class ChatService:
             raise ChatRefused("not_found", f"대화 {thread_id}가 없다")
         return thread_id
 
-    def send(self, who: str | None, thread_id: str | None, message: str) -> dict[str, Any]:
-        """글을 저장하고 `answering`으로 돌려준다. 답은 뒤에서 붙는다(이벤트 루프 안에서 부른다)."""
+    def send(
+        self,
+        who: str | None,
+        thread_id: str | None,
+        message: str,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """글을 저장하고 `answering`으로 돌려준다. 답은 뒤에서 붙는다(이벤트 루프 안에서 부른다).
+
+        `tenant_id`: 새 대화에 적을 회사(요청 메타). 없으면 캣북스.
+        """
         message = message.strip()
         if not message or len(message) > MAX_MESSAGE_CHARS:
             raise ChatRefused("invalid_input", f"message는 1~{MAX_MESSAGE_CHARS}자여야 한다")
@@ -168,7 +177,7 @@ class ChatService:
         if llm is None:
             raise ChatRefused("llm_not_configured", "LLM 설정이 없다 (INFRA_LLM_*·LLM_*)")
         self.store.expire_idle()
-        th = self.store.create(make_title(message), who) if thread_id is None else None
+        th = self.store.create(make_title(message), who, tenant_id) if thread_id is None else None
         if th is None:
             th = self._own(who, thread_id or "")
         outcome, th = self.store.begin_turn(th["id"], message)

@@ -25,7 +25,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from finance_agent import bank, bank_file, statements, tax
+from finance_agent import bank, bank_file, company_folder, statements, tax
 from finance_agent import finance_config as fc
 from finance_agent.books import Books
 from finance_agent.rules import applied, load_rules, review_checklist_docx
@@ -41,8 +41,17 @@ def _dir(env: str) -> Path | None:
     return Path(raw) if raw else None
 
 
+EXPORT_ENV = "FINANCE_EXPORT_DIR"
+EXPORT_NAME = "finance_exports"
+
+
 def export_dir() -> Path | None:
-    return _dir("FINANCE_EXPORT_DIR")
+    """`FINANCE_EXPORT_DIR` → 회사 폴더(`<회사 폴더>/catbooks/finance_exports`) → None.
+
+    회사 폴더 쪽은 여러 회사 설계 1-6. 옛 자리 폴더가 있으면 처음 읽을 때 통째로 옮긴다.
+    기록(`records.exports`)에는 묶음 id·파일 이름만 있어 폴더를 옮겨도 그대로 읽힌다.
+    """
+    return company_folder.path_for(EXPORT_ENV, EXPORT_NAME)
 
 
 def inbox_dir() -> Path | None:

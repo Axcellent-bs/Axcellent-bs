@@ -38,7 +38,9 @@ from typing import Any
 import httpx
 
 from ax_agent_template import pinned_http
+from ax_agent_template.companies import canonical_company_id
 from ax_agent_template.config import agent_token, agent_url, is_mock
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 from finance_agent import finance_config as fc
 
 logger = logging.getLogger("ax.finance.books")
@@ -574,7 +576,18 @@ class OrderStore:
         return list(self.orders.values()), len(self.skipped)
 
 
-_STORE = OrderStore()
+# 회사 ID → 모아 둔 주문 (여러 회사 설계 1-6). 회사마다 판매 서버가 달라 섞이면 안 된다.
+# 지금은 회사가 캣북스 하나라 늘 캣북스 모음이다(동작 그대로)
+_STORES: dict[str, OrderStore] = {}
+
+
+def order_store(company_id: str | None = None) -> OrderStore:
+    """그 회사의 주문 모음. 별칭은 정식 id로, 없거나 맞지 않으면 캣북스."""
+    cid = canonical_company_id(company_id) or TENANT_ID_CATBOOKS
+    store = _STORES.get(cid)
+    if store is None:
+        store = _STORES[cid] = OrderStore()
+    return store
 
 
 async def live_books(
@@ -585,12 +598,12 @@ async def live_books(
     """shop-api·safety에서 장부를 모은다.
 
     `http_client`를 넘기면(테스트·한 번 쓰기) 따로 모아 둔 주문 없이 전체를 읽는다. 넘기지 않으면
-    서버가 모아 둔 주문(`_STORE`)에 최근 주문만 받아 끼운다.
+    서버가 모아 둔 캣북스 주문(`order_store()`)에 최근 주문만 받아 끼운다.
     """
     client = http_client or httpx.AsyncClient(transport=pinned_http.company_transport())
     unavailable: list[str] = []
     if store is None:
-        store = _STORE if http_client is None else OrderStore()
+        store = order_store() if http_client is None else OrderStore()
     async with store.lock:
         return await _live_books(client, http_client is None, store, full, unavailable)
 
@@ -695,8 +708,9 @@ _live_inflight: asyncio.Task[Books] | None = None
 
 
 def clear_live_cache() -> None:
-    global _live_cache, _live_inflight, _STORE
-    _live_cache, _live_inflight, _STORE = None, None, OrderStore()
+    global _live_cache, _live_inflight
+    _live_cache, _live_inflight = None, None
+    _STORES.clear()
 
 
 def warm(books: Books) -> None:

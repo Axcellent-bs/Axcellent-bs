@@ -2,6 +2,8 @@
 
 실제 배포 시스템이 없어 JSON 파일 하나가 배포 기록이다. 기본은 패키지 안의 `data/deployments.json`
 (planning 초기 데이터와 같은 버전·시각)이고 `INFRA_DEPLOYMENTS_FILE`로 바꿀 수 있다.
+안 정했고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 여러 회사 설계 1-6) 회사 폴더의
+`infra_deployments.json`이 있을 때 그것을 쓴다.
 롤백한 배포는 "되돌림"으로 표시해 직전 정상 버전을 고를 때 건너뛴다.
 
 배포 도구(GitHub Actions·Jenkins)가 연결된 서비스는 이력 미리 받기(`deploy_poll`)가
@@ -21,6 +23,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from ax_agent_template import company_files
 from infra_agent import deploy_tools
 from infra_agent.deploy_tools import ToolRun
 
@@ -84,10 +87,29 @@ def connected_services() -> set[str]:
     return {tool.service for tool in deploy_tools.all_tools()}
 
 
-def load_rows() -> list[dict[str, Any]]:
-    override = os.getenv("INFRA_DEPLOYMENTS_FILE")
+FILE_ENV = "INFRA_DEPLOYMENTS_FILE"
+# 회사 폴더의 배포 기록 (여러 회사 설계 1-6). 옛 자리는 `<회사 폴더의 부모>/infra_deployments.json`
+COMPANY_FILE = "infra_deployments.json"
+
+
+def deployments_file() -> Path | None:
+    """배포 기록 파일. `INFRA_DEPLOYMENTS_FILE` → 회사 폴더(켰고 파일이 있을 때) → None(패키지 안).
+
+    회사 폴더는 `AX_COMPANIES_DIR`을 정했을 때만 본다(`company_files`). 옛 자리에 있으면 옮긴다.
+    """
+    override = os.getenv(FILE_ENV)
     if override:
-        text = Path(override).read_text(encoding="utf-8")
+        return Path(override)
+    if not company_files.folders_on():
+        return None
+    path = company_files.company_file(COMPANY_FILE)
+    return path if path.is_file() else None
+
+
+def load_rows() -> list[dict[str, Any]]:
+    path = deployments_file()
+    if path is not None:
+        text = path.read_text(encoding="utf-8")
     else:
         text = (
             resources.files("infra_agent")

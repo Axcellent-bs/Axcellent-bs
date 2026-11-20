@@ -47,9 +47,10 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-from ax_agent_template import tool_connections
+from ax_agent_template import company_files, tool_connections
 from dev_agent.vcs.base import (
     BRANCH_PREFIX,
     Branch,
@@ -383,14 +384,33 @@ def is_overridden() -> bool:
 # 화면 연결을 저장하는 파일 (`PLANNING_VCS_STORE`). 서버를 다시 켜도 연결이 남는다.
 # 토큰이 들어 있어 `.env`처럼 다루고 커밋하지 않는다
 # (run_all.sh가 git에 안 올라가는 backend/.data/에 둔다)
+# 정하지 않았고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 여러 회사 설계 1-6)
+# `<회사 폴더>/catbooks/vcs_connections.json`. 옛 자리에 있으면 처음 읽을 때 옮긴다
+# (`company_files`).
+# `AX_COMPANY_FOLDERS=off`로 옛 경로를 정해 켜면 옛 경로가 비어 있을 때 회사 폴더 값으로 되살린다
+STORE_ENV = "PLANNING_VCS_STORE"
+STORE_NAME = "vcs_connections.json"
+
+
 def _store_path() -> str:
-    return os.getenv("PLANNING_VCS_STORE") or ""
+    explicit = os.getenv(STORE_ENV) or ""
+    if explicit:
+        company_files.restore_old(STORE_NAME, target=Path(explicit))
+        return explicit
+    if not company_files.folders_on():
+        return ""
+    return str(company_files.company_file(STORE_NAME))
 
 
 def _save() -> None:
     path = _store_path()
     if not path:
         return
+    folder = Path(path).parent
+    if not folder.exists():  # 회사 폴더가 아직 없다. 토큰이 들어 있어 만든 사용자만 연다
+        folder.parent.parent.mkdir(parents=True, exist_ok=True)
+        folder.parent.mkdir(mode=company_files.DIR_MODE, exist_ok=True)
+        folder.mkdir(mode=company_files.DIR_MODE, exist_ok=True)
     rows = [{**dataclasses.asdict(c), "paths": list(c.paths)} for c in (_screen or {}).values()]
     tmp = path + ".tmp"
     # 토큰·App 개인 키가 들어 있어 만든 사용자만 읽는다 (llm_key와 같은 방식). 프로세스 umask

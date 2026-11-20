@@ -1,6 +1,8 @@
 """대화 저장 (기획 SQLite).
 
 `PLANNING_STATE_DIR`가 있으면 그 폴더의 `planning_chat.db`에, 없으면 프로세스 메모리에 둔다(테스트).
+회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 여러 회사 설계 1-6) `<회사 폴더>/catbooks/planning_chat.db`
+(옛 자리에 있으면 처음 열 때 옮긴다, `planning_agent.company_folder`).
 표는 처음 쓸 때 만든다.
 
 status: `talking`(말 걸 수 있음) · `answering`(AI 답을 만드는 중) · `closed`(끝남, 더는 못 보냄).
@@ -10,12 +12,13 @@ status: `talking`(말 걸 수 있음) · `answering`(AI 답을 만드는 중) ·
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
+
+from planning_agent import company_folder
 
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
 SUMMARY_CHARS = 200
@@ -248,8 +251,10 @@ _store: ChatStore | None = None
 def get_store() -> ChatStore:
     global _store
     if _store is None:
-        base = os.getenv("PLANNING_STATE_DIR", "").strip()
-        _store = ChatStore(os.path.join(base, FILE_NAME) if base else "")
+        # 회사 폴더(켰을 때) 또는 PLANNING_STATE_DIR, 없으면 메모리 (company_folder)
+        _store = ChatStore(
+            company_folder.state_path(FILE_NAME, extras=company_folder.SQLITE_EXTRAS)
+        )
         _store.recover_orphans()
     return _store
 

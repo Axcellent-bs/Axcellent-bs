@@ -1,7 +1,9 @@
 """재무 AI 직접 대화 저장 (SQLite).
 
 `FINANCE_CHAT_DB`(파일 경로)가 있으면 거기에, 없으면 `FINANCE_STATE_FILE`과 같은 폴더의
-`finance_chat.db`에, 둘 다 없으면 프로세스 메모리에 둔다(테스트).
+`finance_chat.db`에, 둘 다 없고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 여러 회사 설계 1-6)
+`<회사 폴더>/catbooks/finance_chat.db`에(옛 자리에 있으면 처음 열 때 옮긴다),
+모두 없으면 프로세스 메모리에 둔다(테스트).
 표는 처음 쓸 때 만든다.
 
 status: `talking`(말 걸 수 있음) · `answering`(AI 답을 만드는 중) · `closed`(끝남, 더는 못 보냄).
@@ -16,7 +18,11 @@ import sqlite3
 import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Literal
+
+from ax_agent_template import company_files
+from finance_agent import company_folder
 
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
 SUMMARY_CHARS = 200
@@ -245,14 +251,23 @@ class ChatStore:
 _store: ChatStore | None = None
 
 
+def chat_path() -> str:
+    """`FINANCE_CHAT_DB` → `FINANCE_STATE_FILE` 옆 → 회사 폴더 → "" (메모리)."""
+    extras = company_folder.SQLITE_EXTRAS
+    pinned = company_folder.explicit("FINANCE_CHAT_DB", FILE_NAME, extras=extras)
+    if pinned is None and (state_file := os.getenv("FINANCE_STATE_FILE", "").strip()):
+        beside = Path(os.path.dirname(os.path.abspath(state_file))) / FILE_NAME
+        company_files.restore_old(FILE_NAME, target=beside, extras=extras)
+        pinned = beside
+    if pinned is None:
+        pinned = company_folder.in_company_folder(FILE_NAME, extras=extras)
+    return str(pinned) if pinned is not None else ""
+
+
 def get_store() -> ChatStore:
     global _store
     if _store is None:
-        path = os.getenv("FINANCE_CHAT_DB", "").strip()
-        state_file = os.getenv("FINANCE_STATE_FILE", "").strip()
-        if not path and state_file:
-            path = os.path.join(os.path.dirname(os.path.abspath(state_file)), FILE_NAME)
-        _store = ChatStore(path)
+        _store = ChatStore(chat_path())
         _store.recover_orphans()
     return _store
 
