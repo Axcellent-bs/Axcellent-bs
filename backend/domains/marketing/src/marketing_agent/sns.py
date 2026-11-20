@@ -260,6 +260,9 @@ class SnsPostDraft(AxModel):
     needs_confirmation: list[str] = Field(default_factory=list)
     # 근거와 topic이 함께 와서 topic을 캡션에 쓰지 않았다
     topic_ignored: bool = False
+    # 의뢰 영상 초안(`request_video`): 생성 직후 라벨을 입혀 연결한 결과 `{"prepared": {...}}`.
+    # 옛 레코드는 기본값(None)으로 읽는다
+    media_flow: dict[str, Any] | None = None
 
 
 class CheckSnsPostInput(AxModel):

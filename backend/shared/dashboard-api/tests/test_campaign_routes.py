@@ -736,3 +736,94 @@ def test_brief_media_forwards_confirmed_long_for_audit_without_changing_the_key(
     assert denied.input == plain.input
     assert plain.meta.idempotency_key == confirmed.meta.idempotency_key  # 경고창은 UX, 키는 같다
     assert client.post(BRIEF_MEDIA, json={"confirmed_long": "yes"}).status_code == 422
+
+
+REQUEST_VIDEOS = "/api/dashboard/marketing/request-videos"
+DRAFT_PREVIEW = "/api/dashboard/marketing/sns-drafts/spd_abc/media/preview"
+
+
+def _videos_setup(monkeypatch: pytest.MonkeyPatch, items: list[dict], seen: list) -> None:
+    async def send(target: str, request: AgentRequest) -> AgentResult:
+        assert (target, request.skill) == ("marketing", "list_request_videos")
+        seen.append(request.input)
+        return AgentResult(meta=request.meta, status=TaskStatus.COMPLETED, output={"items": items})
+
+    monkeypatch.setattr(marketing_client, "SEND", send)
+
+
+def test_request_videos_list_contract_and_preview_path(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = {
+        "request_id": "wr_1",
+        "context_id": "ctx_wr_1",
+        "media_id": "med_1",
+        "media_kind": "video",
+        "duration_s": 15,
+        "caption_ko": "캡션",
+        "created_at": "2026-11-20T01:00:00+00:00",
+        "status": "draft_ready",
+    }
+    prepared = {"asset_ref": "x", "asset_sha256": "y"}
+    items = [
+        base | {"post_draft_id": "spd_a", "labeled": True, "prepared": prepared},
+        base | {"post_draft_id": "spd_b", "labeled": False, "prepared": None},
+        # 라벨이 참이라고 와도 파일 확인 정보가 없으면 미리보기를 주지 않는다
+        base | {"post_draft_id": "spd_c", "labeled": True, "prepared": None},
+    ]
+    seen: list = []
+    _videos_setup(monkeypatch, items, seen)
+    response = client.get(REQUEST_VIDEOS + "?request_id=wr_1&limit=5")
+    assert response.status_code == 200 and "meta" in response.json()
+    got = response.json()["data"]["items"]
+    assert seen == [{"limit": 5, "request_id": "wr_1"}]
+    assert got[0]["preview_path"] == (
+        "/dashboard-api/api/dashboard/marketing/sns-drafts/spd_a/media/preview"
+    )
+    assert got[1]["preview_path"] is None and got[1]["labeled"] is False
+    assert got[2]["preview_path"] is None and got[2]["labeled"] is False
+    assert all("prepared" not in item for item in got)
+    assert got[0]["media_kind"] == "video" and got[0]["caption_ko"] == "캡션"
+    for bad in ("?request_id=abc", "?limit=0", "?limit=101"):
+        assert client.get(REQUEST_VIDEOS + bad).status_code == 422, bad
+    client.get(REQUEST_VIDEOS)
+    assert seen[-1] == {"limit": 20}
+
+
+def _draft_preview_setup(monkeypatch: pytest.MonkeyPatch, tmp_path, ref, sha) -> None:
+    prepared = None if sha is None else {"asset_ref": ref, "asset_sha256": sha}
+    _videos_setup(monkeypatch, [{"post_draft_id": "spd_abc", "prepared": prepared}], [])
+    monkeypatch.setenv(marketing_client.MEDIA_DIR_ENV, str(tmp_path / "media"))
+
+
+def test_sns_draft_media_preview_serves_only_the_checked_labeled_file(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    import hashlib
+
+    folder = tmp_path / "media" / "t" / "ctx" / "med_1"
+    folder.mkdir(parents=True)
+    content = b"labeled-video-bytes"
+    (folder / "labeled.mp4").write_bytes(content)
+    (folder / "asset.mp4").write_bytes(content)  # 라벨을 입히기 전 원본
+    (tmp_path / "labeled.mp4").write_bytes(content)  # 미디어 폴더 밖
+    sha = hashlib.sha256(content).hexdigest()
+
+    _draft_preview_setup(monkeypatch, tmp_path, "t/ctx/med_1/labeled.mp4", sha)
+    response = client.get(DRAFT_PREVIEW)
+    assert response.status_code == 200 and response.content == content
+    assert response.headers["content-type"] == "video/mp4"
+    assert response.headers["cache-control"] == "no-store"
+
+    for ref, digest in (
+        ("t/ctx/med_1/asset.mp4", sha),
+        ("../labeled.mp4", sha),
+        ("t/ctx/med_1/labeled.mp4", "0" * 64),
+        ("t/ctx/none/labeled.mp4", sha),
+        ("t/ctx/med_1/labeled.mp4", None),
+    ):
+        _draft_preview_setup(monkeypatch, tmp_path, ref, digest)
+        assert client.get(DRAFT_PREVIEW).status_code == 404, ref
+    assert client.get("/api/dashboard/marketing/sns-drafts/bad.id/media/preview").status_code == 422
+    monkeypatch.delenv(marketing_client.MEDIA_DIR_ENV)
+    assert client.get(DRAFT_PREVIEW).status_code == 404

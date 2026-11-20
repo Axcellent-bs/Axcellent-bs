@@ -1260,6 +1260,27 @@ async def preview_outage_sns_media(post_draft_id: str = Path(pattern=_DRAFT_ID))
     return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
 
 
+@router.get("/marketing/request-videos")
+async def list_request_videos(
+    request_id: str | None = Query(default=None, pattern=r"^wr_[A-Za-z0-9_-]{1,60}$"),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> dict:
+    """의뢰(`wr_*`) 홍보 영상 목록(읽기). 영상이 만들어진 초안만, 최신 순.
+
+    `labeled`가 참일 때만 `preview_path`(AI 라벨 입힌 `labeled.mp4`)가 있다. 게시하지 않는다.
+    """
+    _no_org_in_mock()
+    return ok(await marketing_client.request_videos_call(request_id, limit))
+
+
+@router.get("/marketing/sns-drafts/{post_draft_id}/media/preview")
+async def preview_sns_draft_media(post_draft_id: str = Path(pattern=_DRAFT_ID)) -> FileResponse:
+    """의뢰 영상 초안의 미리보기. AI 표시를 입힌 결과 파일(`labeled.mp4|jpg`)만 내준다."""
+    _no_org_in_mock()
+    path, media_type = await marketing_client.sns_draft_media_preview(post_draft_id)
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+
 @router.post("/marketing/outage-sns-drafts/{post_draft_id}/publish-request")
 async def request_outage_sns_publish(
     post_draft_id: str = Path(pattern=_DRAFT_ID), retry: bool = False
