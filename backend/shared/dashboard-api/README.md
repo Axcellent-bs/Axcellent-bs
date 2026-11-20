@@ -247,6 +247,23 @@ AXcellent 규격(shop-api)이 아닌 고객사 자기 API를 AI들이 shop-api�
 
 회사 연결 모드 전환은 종류를 그대로 두고, 다른 형식 API를 다시 켤 때는 저장한 짝으로 다시 확인한다.
 
+### 변화 감지기 (`change_detector.py`, 기본 꺼짐)
+
+고객사 판매 기록(`GET /api/shop/sales-export`)을 주기적으로 읽어, 바뀐 것만 `payment.refunded`·`order.cancelled` 이벤트로 만든다(설계: `docs/superpowers/specs/2026-11-19-customer-change-polling-design.md`). 지금은 캣북스(shop-api 직결)만 읽고, 변환기 고객사는 변환기 보완 뒤에 켠다.
+
+| 설정 | 기본 | 뜻 |
+| --- | --- | --- |
+| `AX_CHANGE_DETECTOR_SECONDS` | 비움(꺼짐) | 주기(초). 0·비움이면 돌지 않음, 최소 30 |
+| `AX_CHANGE_DETECTOR_PUBLISH` | 비움(그림자) | `1`이면 버스에 넣음. 그 밖은 "내보냈을 이벤트"만 상태 파일·로그에 |
+| `AX_CHANGE_DETECTOR_DIR` | `backend/.data/change_detector/` | 상태 파일(커서·직전 상태 표·마지막 오류) |
+| `AX_CHANGE_DETECTOR_MAX_CALLS` | 30 | 한 회차 판매 서버 호출 상한 |
+
+- 처음 켤 때는 상태 표만 채우고 이벤트를 내보내지 않는다. 회사 연결이 바뀌어도 같다
+- `event_id`는 변화 내용으로 정한다(`chg:<회사>:payment.refunded:<주문>:<환불>`, `chg:<회사>:order.cancelled:<주문>`)
+- 취소 사유(`cancel_reason_code`)가 없는 취소는 이벤트를 만들지 않고 건수만 센다
+- 판매 서버에는 dashboard-api 토큰을 붙인다. 캣북스 `sales-export`가 이 토큰을 받아야 한다
+- 상태: `GET /api/dashboard/change-detector/status` (사람 토큰)
+
 ## 4. 의존
 ax-contracts, ax-agent-template
 ## 5. 하지 않는 것

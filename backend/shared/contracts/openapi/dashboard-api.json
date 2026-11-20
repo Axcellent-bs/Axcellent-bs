@@ -2427,6 +2427,26 @@
         "summary": "Restore Merged Card"
       }
     },
+    "/api/dashboard/change-detector/status": {
+      "get": {
+        "operationId": "get_status_api_dashboard_change_detector_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Status Api Dashboard Change Detector Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Status"
+      }
+    },
     "/api/dashboard/change-proposals": {
       "get": {
         "description": "문의 급증에서 만든 기획 변경 요청안. 제안만 돌려주고 아무것도 보내지 않는다.",

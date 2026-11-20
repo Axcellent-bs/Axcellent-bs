@@ -132,3 +132,15 @@ def test_sales_basis_data_source_is_optional() -> None:
     fake = SalesBasis.model_validate({**old, "data_source": "가짜 데이터(데모용)"})
     assert fake.data_source == "가짜 데이터(데모용)"
     assert SalesBasis.model_validate(fake.model_dump(mode="json")) == fake
+
+
+def test_order_row_cancel_reason_code_is_optional_and_closed() -> None:
+    """취소 사유 칸은 추가만 했다: 없으면 None, 있으면 buyer·seller·system만 (11/20)."""
+    assert SalesOrderRow.model_validate(ROW).cancel_reason_code is None
+    for code in ("buyer", "seller", "system"):
+        row = SalesOrderRow.model_validate(
+            {**ROW, "status": "cancelled", "cancel_reason_code": code}
+        )
+        assert row.cancel_reason_code == code
+    with pytest.raises(ValidationError):
+        SalesOrderRow.model_validate({**ROW, "cancel_reason_code": "unknown"})

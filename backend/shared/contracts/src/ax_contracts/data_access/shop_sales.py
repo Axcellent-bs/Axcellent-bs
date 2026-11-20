@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
@@ -74,6 +76,10 @@ class SalesOrderRow(AxModel):
     lines: list[SalesOrderLine] = Field(default_factory=list)
     refunds: list[SalesOrderRefund] = Field(default_factory=list)
     tenant_id: str = TENANT_ID_DEFAULT
+    # 취소 주체 (11/20 추가). 손님 취소 → buyer, 판매자·관리자 → seller, 결제 시간 초과 등 자동 →
+    # system. 취소가 아니거나 판매 서버가 모르면 None (지어내지 않는다). 변화 감지기가
+    # `order.cancelled`의 `reason_code`로 쓰고, 비어 있으면 그 이벤트를 만들지 않는다
+    cancel_reason_code: Literal["buyer", "seller", "system"] | None = None
 
 
 class ShopSalesExportResult(AxModel):

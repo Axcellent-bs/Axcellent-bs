@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ax_dashboard_api import (
+    change_detector,
     company_connection,
     handoffs,
     office_room,
@@ -93,11 +94,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # 목 모드(테스트)와 `DASHBOARD_RETENTION_SWEEP=off`에서는 돌리지 않는다
     if not is_mock() and (os.getenv("DASHBOARD_RETENTION_SWEEP") or "on").lower() != "off":
         task = asyncio.create_task(_retention_loop())
+    # 변화 감지기: AX_CHANGE_DETECTOR_SECONDS가 0보다 클 때만 (기본 꺼짐, 목 모드에서도 돌지 않는다)
+    detector = None
+    if not is_mock() and change_detector.interval_seconds() > 0:
+        detector = asyncio.create_task(change_detector.loop())
     try:
         yield
     finally:
-        if task is not None:
-            task.cancel()
+        for running in (task, detector):
+            if running is not None:
+                running.cancel()
 
 
 app = FastAPI(title="ax-dashboard-api", lifespan=lifespan)
@@ -141,6 +147,8 @@ app.include_router(shop_relay.router)
 # 사이트 변환기: 회사 연결이 kind=adapter면 AI들의 shop-api 주소가 여기다
 app.include_router(site_adapter_router)
 app.include_router(site_adapter_setup_router)
+# 변화 감지기 상태 (사람 토큰): 고객사 판매 기록을 읽어 바뀐 것만 내부 이벤트로 만든다
+app.include_router(change_detector.router)
 
 
 @app.get("/health")
