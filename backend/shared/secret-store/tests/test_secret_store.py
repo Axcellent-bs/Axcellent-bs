@@ -315,3 +315,82 @@ def test_migrate_cli_reports_reason_code_without_master_key(
 ) -> None:
     assert migrate.main(["migrate", "--env-file", str(_envfile(tmp_path))]) == 2
     assert errors.MASTER_KEY_MISSING in capsys.readouterr().err
+
+
+# ---- 회사 공간 나누기 1-7: tenant default → catbooks ----
+
+
+def test_retenant_moves_values_reencrypted_and_resolver_reads_new_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_mode(monkeypatch)
+    svc = SecretService.from_env()
+    put(svc, "default", "MARKETING_VIDEO_API_KEY", DUMMY)
+    put(svc, "default", "AX_AGENT_TOKENS", DUMMY2)
+    assert svc.retenant("default", "catbooks", "cli", dry_run=True) == [
+        ("AX_AGENT_TOKENS", "would_move"),
+        ("MARKETING_VIDEO_API_KEY", "would_move"),
+    ]
+    assert svc.repo.list(["catbooks"]) == []  # dry-run은 바꾸지 않는다
+
+    assert sorted(svc.retenant("default", "catbooks", "cli")) == [
+        ("AX_AGENT_TOKENS", "moved"),
+        ("MARKETING_VIDEO_API_KEY", "moved"),
+    ]
+    assert svc.repo.list(["default"]) == []
+    row = svc.repo.get("catbooks", "MARKETING_VIDEO_API_KEY")
+    assert row is not None and row.version == 2 and row.hint
+    assert svc.reveal_for_runtime("catbooks", "MARKETING_VIDEO_API_KEY") == DUMMY
+    # 새 tenant의 AAD로 다시 암호화됐다: 옛 tenant 이름으로는 풀리지 않는다
+    with pytest.raises(SecretStoreError):
+        svc.keyring.decrypt("default", row.name, row.kid, row.nonce, row.ciphertext)
+    monkeypatch.setenv("AX_SECRET_DEFAULT_TENANT", "catbooks")
+    resolver.startup_check()
+    assert resolver.get_secret("MARKETING_VIDEO_API_KEY") == DUMMY
+    actions = [h["action"] for h in svc.history(None)]
+    assert "retenant_from_default" in actions
+
+
+def test_retenant_keeps_both_on_conflict_and_drops_exact_duplicate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_mode(monkeypatch)
+    svc = SecretService.from_env()
+    put(svc, "default", "MARKETING_VIDEO_API_KEY", DUMMY)
+    put(svc, "catbooks", "MARKETING_VIDEO_API_KEY", DUMMY2)  # 회사 화면에서 이미 넣은 다른 값
+    put(svc, "default", "MARKETING_IMAGE_API_KEY", DUMMY)
+    put(svc, "catbooks", "MARKETING_IMAGE_API_KEY", DUMMY)  # 같은 값
+    got = dict(svc.retenant("default", "catbooks", "cli"))
+    assert got == {"MARKETING_VIDEO_API_KEY": "conflict", "MARKETING_IMAGE_API_KEY": "same_exists"}
+    assert svc.reveal_for_runtime("catbooks", "MARKETING_VIDEO_API_KEY") == DUMMY2  # 덮지 않았다
+    assert svc.reveal_for_runtime("default", "MARKETING_VIDEO_API_KEY") == DUMMY  # 옛 값도 남는다
+    assert svc.repo.get("default", "MARKETING_IMAGE_API_KEY") is None
+
+
+def test_retenant_refuses_with_pending_requests_and_bad_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_mode(monkeypatch)
+    svc = SecretService.from_env()
+    put(svc, "default", "MARKETING_VIDEO_API_KEY", DUMMY)
+    svc.stage("replace", "default", "MARKETING_VIDEO_API_KEY", DUMMY2, "민지")
+    with pytest.raises(SecretStoreError) as err:
+        svc.retenant("default", "catbooks", "cli")
+    assert err.value.code == errors.PENDING_EXISTS
+    assert svc.repo.list(["catbooks"]) == []
+    for source, target in (("default", "default"), ("default", "Bad Tenant")):
+        with pytest.raises(SecretStoreError):
+            svc.retenant(source, target, "cli")
+
+
+def test_retenant_cli_prints_names_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_mode(monkeypatch)
+    put(SecretService.from_env(), "default", "MARKETING_VIDEO_API_KEY", DUMMY)
+    assert migrate.main(["retenant", "--dry-run"]) == 0
+    assert migrate.main(["retenant"]) == 0
+    out = capsys.readouterr().out
+    assert "MARKETING_VIDEO_API_KEY\tmoved" in out and DUMMY not in out
+    after = SecretService.from_env()
+    assert after.reveal_for_runtime("catbooks", "MARKETING_VIDEO_API_KEY") == DUMMY
