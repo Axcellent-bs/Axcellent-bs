@@ -222,6 +222,13 @@ export default {
       { title: "AXcellent × DejaFix (1분, 음악 포함)", customer: "AXcellent 홍보 영상", caption: "장애 하나에, AI 아홉이 일을 나눠 맡아요. 소리(배경음악)가 나옵니다. 시연 환경(가상 데이터) 기준. 영상 속 안전 관문의 “10분”은 쿠폰·환불 같은 일반 보류 기준이며, 판매자 정산 지급 보류는 24시간입니다.", src: "assets/demo/axcellent-promo-66s.mp4", ratio: "16 / 9", wide: true, aiMade: true },
       { title: "AXcellent 홍보 영상 (13초, 소리 포함)", customer: "AXcellent 홍보 영상", caption: "AI 직원들이 서로 일을 이어받고, 돈과 외부 게시는 대표님이 승인합니다. 남성 나레이션과 BGM이 나옵니다(소리가 나옵니다). 장면과 인물은 AI가 만든 것이며 시연 환경(가상 데이터) 기준.", src: "assets/demo/axcellent-promo-ai-13s.mp4", ratio: "16 / 9", wide: true, aiMade: true },
     ],
+    // 고객사별 영상 묶음(맨 아래에 보인다). items는 위 영상 카드와 같은 모양이다.
+    // items가 비어 있으면 묶음 이름과 "영상 준비 중" 칸 하나를 보여 주고, 영상을 넣으면 그 칸이 영상으로 바뀐다.
+    // 영상 추가: mp4를 assets/demo/에 넣고(영문 소문자·숫자·-, 15MB 이하) items에 한 줄을 더한다.
+    // 스터디온에듀 영상(소개 영상 v2, 강의 영상)은 예진 님 검수 뒤에 넣는다(지금은 유튜브 비공개)
+    videoGroups: [
+      { title: "스터디온에듀 영상", badges: ["시연 가상 고객사"], items: [] },
+    ],
     note: "시연용 가상 고객사의 홍보물입니다. AI로 만든 영상·게시물에는 “AI가 만든 영상” 표시를 붙입니다.",
   },
 
