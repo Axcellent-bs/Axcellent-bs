@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from collections.abc import Awaitable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -100,6 +101,7 @@ from marketing_agent.chat import (
 from marketing_agent.chat_store import ChatStorageError, ChatStore
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.links import BuildCampaignLinkInput, CampaignLink, build_campaign_link
+from marketing_agent.media import long_run
 from marketing_agent.media.bgm_flow import generate_media_flow
 from marketing_agent.media.config import MediaSettings
 from marketing_agent.media.ledger import MediaLedger
@@ -1277,9 +1279,13 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
 
 
 async def generate_media_skill(request: AgentRequest) -> AgentResult:
-    return await generate_media_flow(
-        request, ledger=STATE.media_ledger, from_decision=_from_decision
-    )
+    def run() -> Awaitable[AgentResult]:
+        return generate_media_flow(request, ledger=STATE.media_ledger, from_decision=_from_decision)
+
+    if long_run.is_orchestrator(request):
+        # 총괄은 30초 안에 답이 없으면 실패로 본다. 길어지면 긴 작업(task_id)으로 넘긴다
+        return await long_run.run_for_orchestrator(request, run)
+    return await run()
 
 
 async def prepare_sns_post_from_media_skill(request: AgentRequest) -> AgentResult:
