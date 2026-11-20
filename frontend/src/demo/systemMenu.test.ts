@@ -8,8 +8,8 @@ test("관리자가 아니면 시스템 관리 아래 도구 연결만", () => {
   assert.equal(systemMenuFor(false)[0].label, "도구 연결");
 });
 
-test("관리자는 다섯 개(회사 연결·회원·서버 관리·사용량·안전 정책·키 관리·도구 연결)", () => {
-  assert.deepEqual(systemMenuFor(true).map((m) => m.href), ["/system/connect", "/system/members", "/system/policy", "/system/keys", "/system/tools"]);
+test("관리자는 세 개(회사 연결·회원·서버 관리·도구 연결). 사용량·안전 정책·키 관리는 뺐다(11/20)", () => {
+  assert.deepEqual(systemMenuFor(true).map((m) => m.href), ["/system/connect", "/system/members", "/system/tools"]);
 });
 
 test("회사 연결 전 관리자는 회사 연결만", () => {
@@ -18,5 +18,5 @@ test("회사 연결 전 관리자는 회사 연결만", () => {
 
 test("메뉴를 바꿔도 원래 목록은 그대로", () => {
   systemMenuFor(true).pop();
-  assert.equal(systemMenuFor(true).length, 5);
+  assert.equal(systemMenuFor(true).length, 3);
 });
