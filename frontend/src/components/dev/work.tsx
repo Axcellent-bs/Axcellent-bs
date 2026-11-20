@@ -117,7 +117,11 @@ function Waiting({ s, d, r, listed }: { s: S; d: SendAction; r: CrossReview; lis
 export function Work({ s, d, item, repo }: P & { item?: string; repo?: string }) {
   const [line, setLine] = useState<CodeLine>()
   useEffect(() => { setLine(undefined) }, [item])
-  const prOf = (taskId: string) => s.prs.find((p) => p.task === taskId)
+  // 작업의 PR: 열린 PR 먼저, 없으면 마지막 것 (충돌로 다시 쓰면 닫힌 PR 뒤에 새 PR이 생긴다. board.tsx와 같게)
+  const prOf = (taskId: string) => {
+    const all = s.prs.filter((p) => p.task === taskId)
+    return all.find((p) => !p.merged && !p.closed) ?? all[all.length - 1]
+  }
   // 주소가 작업 id면 그 작업의 PR, PR이 아직 없으면 작업만 보여 준다 (직접 개발 직후)
   const byTask = s.tasks.find((t) => t.id === item)
   const taskOnly = byTask && !prOf(byTask.id) ? byTask : undefined
@@ -147,7 +151,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
           <Step name="작업" on href={toPath(`work/specs/${taskOnly.spec}/${taskOnly.para}`)} title={<><span className="mono idc" title={taskOnly.id}>{idText(taskOnly.id)}</span> <span className="mono idc" title={taskOnly.spec}>{idText(taskOnly.spec)} {taskOnly.para}</span></>}>
             {text && <p>{text}</p>}
           </Step>
-          <CodingStep task={taskOnly} />
+          <CodingStep task={taskOnly} prs={s.prs} />
           <Step name="PR" on={false} title="PR 전" />
         </Flow>
       </Layout>
@@ -178,7 +182,7 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
           {para?.warn && <Tag tone="amber">경고 {para.warn.card}</Tag>}
           {para?.incident && <Tag tone="amber">장애 {para.incident}</Tag>}
         </Step>
-        {task && <CodingStep task={task} />}
+        {task && <CodingStep task={task} prs={s.prs} />}
         {sel.target && (
           <Step name="대상 레포" on={sel.target.status === 'approved'} title={sel.target.status === 'approved' ? sel.target.repo : sel.target.status === 'rejected' ? '거절됨' : '승인 대기'}>
             <RepoTargetBlock key={sel.id} p={sel} d={d} />
@@ -186,7 +190,9 @@ export function Work({ s, d, item, repo }: P & { item?: string; repo?: string })
         )}
         <Step name="범위 점검" on title={<>{sel.gate.result} · {sel.gate.lines}줄·{sel.gate.files}파일 · <span className="mono">{sel.gate.paths}</span></>} />
         <Step name="리뷰" on={last === '통과'} title={sel.reviews.join(' → ')}>
-          {!sel.merged && (last === '불일치' || rejected) && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: sel.id })}>다시 리뷰</Button>}
+          {/* 코딩 작업 PR은 개발 AI가 실제로 다시 리뷰한다: 추가 지시를 보내면 같은 PR을 고치고 리뷰한다 (LLM 없는 통과 기록 없음) */}
+          {!sel.merged && (last === '불일치' || rejected) && !task?.coding && <Button size="small" onClick={() => d({ type: 'reviewPr', pr: sel.id })}>다시 리뷰</Button>}
+          {!sel.merged && !sel.closed && last === '불일치' && task?.coding && task.coding.mode !== 'subscription' && <p className="muted small">다시 리뷰하려면 위 AI 코딩 단계에서 추가 지시를 보내 주세요. 같은 PR을 고치고 다시 리뷰해요.</p>}
         </Step>
         {!!sel.crossEvidence?.length && (() => {
           const ev = sel.crossEvidence

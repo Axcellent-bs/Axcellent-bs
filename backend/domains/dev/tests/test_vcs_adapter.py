@@ -26,7 +26,7 @@ from dev_agent.runtime import set_service
 from dev_agent.service import DevService
 from dev_agent.vcs import CheckRun, MockVcsAdapter, VcsError, parse_trace
 from dev_agent.vcs.github import GithubVcsAdapter, added_lines
-from planning_agent.domain.service import PlanningService
+from planning_agent.domain.service import ActionError, PlanningService
 
 pytestmark = pytest.mark.role("dev")  # 분리 3단계: 개발 서비스 역할로 돈다
 
@@ -792,7 +792,9 @@ def test_domain_merge_failure_keeps_pr_unmerged(service: PlanningService) -> Non
     assert failed and "conflict" in failed[0].text
     # 나중에 부품이 고쳐지면 사람 머지 버튼으로 다시 시도한다
     vcs.set_vcs(MockVcsAdapter())
-    run(service.merge_pr("PR #31"))
+    with pytest.raises(ActionError) as err:  # 사람 머지가 병합하지 못하면 이유와 함께 실패로 답한다
+        run(service.merge_pr("PR #31"))
+    assert err.value.code == "MERGE_FAILED" and "not_found" in err.value.message
     assert not _prs(service)["PR #31"].merged  # 새 부품에는 그 변경이 없다 → 여전히 안 함
 
 

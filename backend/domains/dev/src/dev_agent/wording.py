@@ -17,6 +17,7 @@ _ACTION = {
     "dev_task_retry": "다시 시도",
     "dev_task_return": "기획에 돌려보내기",
     "dev_task_revise": "추가 지시",
+    "code_write": "코드 쓰기",
 }
 _DECISION = {"held": "보류", "rejected": "거절", "expired": "만료"}
 
