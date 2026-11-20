@@ -20,6 +20,8 @@ export interface ServerAccount {
   created_at?: string | null;
   /** 부서 (관리자가 회원·서버 관리에서 정한다). 없으면 null */
   dept?: string | null;
+  /** 연결한 shop-api 구매자 번호(buy_0001). 총괄 대화방의 환불·교환 같은 일이 누구 주문인지 서버가 정한다. 없으면 null */
+  buyer_id?: string | null;
   /** 확인 권한: 위험한 요청을 승인할 수 있다 */
   approver?: boolean;
   /** 비용 상한 변경 권한: 영상 비용 상한을 바꾸고 요청할 수 있다(운영자·관리자 계정만 켠다) */
@@ -47,6 +49,7 @@ export function readServerAccount(v: unknown): ServerAccount | null {
     created_at: typeof a.created_at === "string" ? a.created_at : null,
   };
   if (a.dept === null || typeof a.dept === "string") out.dept = a.dept || null;
+  if (a.buyer_id === null || typeof a.buyer_id === "string") out.buyer_id = a.buyer_id || null;
   if (typeof a.approver === "boolean") out.approver = a.approver;
   if (typeof a.limit_editor === "boolean") out.limit_editor = a.limit_editor;
   if (typeof a.policy_editor === "boolean") out.policy_editor = a.policy_editor;

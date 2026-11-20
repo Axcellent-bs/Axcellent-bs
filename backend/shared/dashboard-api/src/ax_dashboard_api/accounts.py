@@ -7,6 +7,11 @@
   `limit_editor`, 정책 변경 권한 `policy_editor`).
   키 담당 `secret_editor`와 담당 고객사 목록 `secret_tenants`(암호화 키 관리, `secret_routes.py`):
   운영자는 누구에게나, 고객사 관리자는 자기 담당 고객사 안에서만, 자기 자신에게는 못 준다.
+  구매자 연결 `buyer_id`(shop-api 구매자 번호 `buy_0001` 꼴): 이 계정이 총괄 대화방에서
+  환불·교환 같은 구매자 일을 맡길 때 어느 구매자의 주문인지를 서버가 정하는 값이다
+  (대화 문장·화면이 보낸 값은 쓰지 않는다). 운영자·고객사 관리자가 정하고,
+  한 구매자는 계정 하나에만 연결한다. 자기 계정의 연결은 운영자만 바꾼다.
+  다른 서비스는 `buyer_id_of_account(계정 번호)`로 읽는다.
   `limit_editor`·`policy_editor`는 운영자·고객사 관리자 계정에만 켤 수 있다(일반회원은 못 켠다,
   일반회원으로 내리면 꺼진다). `policy_editor`는 운영자 또는 `policy_editor`인 관리자만 준다.
   열람 담당 값은 화면 `members.ts`의 `ReaderArea`와 같다
@@ -24,7 +29,8 @@
 - `GET  /api/dashboard/auth/accounts`
   (운영자: 모든 계정 / 고객사 관리자: 고객사 계정(admin·member)만) → 계정 목록
   (공개 칸만. 비밀번호 해시·세대 번호 같은 내부 값은 내보내지 않는다)
-- `POST /api/dashboard/auth/accounts/{id}/update` {role?, name?, dept?, approver?, readers?}
+- `POST /api/dashboard/auth/accounts/{id}/update`
+  {role?, name?, dept?, approver?, readers?, buyer_id?}
   (운영자: 모든 계정 / 고객사 관리자: 고객사 계정만, 운영자 역할로 올리지 못한다)
   → 역할·프로필 바꾸기.
   자기 역할은 스스로 바꾸지 못하고, 마지막 남은 고객사 관리자는 내리지 못한다.
@@ -76,6 +82,9 @@ READER_AREAS = ("hr", "finance")
 CUSTOMER_ROLES = ("admin", "member")
 MAX_SECRET_TENANTS = 20
 EMAIL_RE = re.compile(r"^[^@\s:]+@[^@\s:]+\.[^@\s:]+$")
+# shop-api 구매자 번호: `buy_` + 4자리 (고객지원 `buyer_ids.py`와 같은 규칙).
+# \d는 유니코드 숫자도 받아서 쓰지 않는다
+BUYER_ID_RE = re.compile(r"^buy_[0-9]{4}$")
 
 logger = logging.getLogger("ax.dashboard.accounts")
 _file_lock = threading.Lock()
@@ -200,6 +209,20 @@ def secret_tenants_of(row: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(t for t in raw if isinstance(t, str) and TENANT_RE.match(t)))
 
 
+def _buyer_id_of(row: dict[str, Any]) -> str | None:
+    """연결한 구매자 번호(형식이 맞을 때만). 없으면 None."""
+    value = row.get("buyer_id")
+    return value if isinstance(value, str) and BUYER_ID_RE.match(value) else None
+
+
+def buyer_id_of_account(account_id: str) -> str | None:
+    """계정에 연결한 shop-api 구매자 번호. 연결이나 계정이 없으면 None (지어내지 않는다)."""
+    for row in load_accounts():
+        if row.get("id") == account_id:
+            return _buyer_id_of(row)
+    return None
+
+
 def _public(row: dict[str, Any]) -> dict[str, Any]:
     """밖으로 내보내는 칸만 고른다(허용 목록). 해시·비밀번호 바꾼 시각 같은 내부 값은 넣지 않는다.
 
@@ -208,6 +231,7 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     out = {k: row.get(k) for k in ("id", "name", "email", "role", "created_at")}
     dept = row.get("dept")
     out["dept"] = dept if isinstance(dept, str) and dept else None
+    out["buyer_id"] = _buyer_id_of(row)
     approver = row.get("approver")
     out["approver"] = approver if isinstance(approver, bool) else row.get("role") == "admin"
     readers = row.get("readers")
@@ -312,6 +336,7 @@ class AccountUpdateIn(BaseModel):
     role: Role | None = None
     name: str | None = Field(None, min_length=1, max_length=80)
     dept: str | None = Field(None, max_length=40)
+    buyer_id: str | None = Field(None, max_length=20)  # 빈 문자열이면 연결을 푼다
     approver: bool | None = None
     readers: list[ReaderArea] | None = Field(None, max_length=8)
     limit_editor: bool | None = None
@@ -536,11 +561,32 @@ def _check_secret_grant(
         raise ApiError(403, "SECRET_TENANT_FORBIDDEN", "내가 담당한 고객사 안에서만 줄 수 있어요")
 
 
+def _set_buyer_link(
+    human: human_auth.Human, row: dict[str, Any], raw: str, rows: list[dict[str, Any]]
+) -> None:
+    """구매자 연결을 정하거나(`buy_0001`) 푼다(빈 문자열).
+
+    자기 계정의 연결은 운영자만 바꾼다(관리자가 스스로 남의 구매자 주문을 맡을 수 없게).
+    한 구매자는 계정 하나에만 연결한다.
+    """
+    if human.role != "operator" and row.get("id") == human.account_id:
+        raise ApiError(403, "SELF_BUYER_LINK", "자기 계정의 구매자 연결은 운영자만 바꿀 수 있어요")
+    buyer = raw.strip()
+    if not buyer:
+        row.pop("buyer_id", None)
+        return
+    if not BUYER_ID_RE.match(buyer):
+        raise ApiError(422, "BUYER_ID_INVALID", "구매자 번호는 buy_0001처럼 buy_와 숫자 4자리예요")
+    if any(r.get("buyer_id") == buyer and r is not row for r in rows):
+        raise ApiError(409, "BUYER_ALREADY_LINKED", "이미 다른 계정에 연결된 구매자예요")
+    row["buyer_id"] = buyer
+
+
 @router.post("/accounts/{account_id}/update")
 def update_account(
     account_id: str, body: AccountUpdateIn, authorization: str | None = Header(None)
 ) -> dict:
-    """역할·이름·부서·확인 권한·열람 담당 바꾸기. 역할이 바뀌면 그 계정의 세션을 끊는다."""
+    """역할·이름·부서·구매자 연결·확인 권한·열람 담당 바꾸기. 역할이 바뀌면 세션을 끊는다."""
     human = session_human(authorization)
     if human.role not in ("operator", "admin"):
         raise ApiError(403, "ROLE_REQUIRED", "계정을 바꿀 권한이 없어요")
@@ -578,6 +624,8 @@ def update_account(
                 row["dept"] = dept
             else:
                 row.pop("dept", None)
+        if "buyer_id" in patch:
+            _set_buyer_link(human, row, patch["buyer_id"], rows)
         if "approver" in patch:
             row["approver"] = patch["approver"]
         if "readers" in patch:

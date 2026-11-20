@@ -397,6 +397,7 @@ def test_admin_list_hides_operators_and_internal_values(client) -> None:
                 "role",
                 "created_at",
                 "dept",
+                "buyer_id",
                 "approver",
                 "readers",
                 "limit_editor",
@@ -441,6 +442,44 @@ def test_profile_is_saved_and_read_back_in_list_and_me(client) -> None:
     assert _update(client, admin, member_id).json()["error"]["code"] == "NOTHING_TO_UPDATE"
     assert _update(client, admin, member_id, approver=None).status_code == 422
     assert _update(client, admin, member_id, name=" ").json()["error"]["code"] == "NAME_EMPTY"
+
+
+def test_buyer_link_is_set_read_back_and_guarded(client) -> None:
+    op, admin, member = _company(client)
+    op_id, admin_id, member_id = (_account_id(client, t) for t in (op, admin, member))
+    me = client.get(BASE + "/me", headers=_bearer(member)).json()["data"]["account"]
+    assert me["buyer_id"] is None and accounts.buyer_id_of_account(member_id) is None
+    # 관리자가 일반회원에게 연결한다. 앞뒤 공백은 지운다
+    res = _update(client, admin, member_id, buyer_id=" buy_0007 ")
+    assert res.status_code == 200, res.text
+    assert res.json()["data"]["buyer_id"] == "buy_0007"
+    me = client.get(BASE + "/me", headers=_bearer(member)).json()["data"]["account"]
+    assert me["buyer_id"] == "buy_0007"
+    listed = client.get(BASE + "/accounts", headers=_bearer(admin)).json()["data"]
+    assert next(r for r in listed if r["id"] == member_id)["buyer_id"] == "buy_0007"
+    assert accounts.buyer_id_of_account(member_id) == "buy_0007"
+    assert accounts.buyer_id_of_account("acc_nobody") is None  # 없는 계정은 지어내지 않는다
+    # 연결을 바꿔도 세션은 그대로
+    assert _write_ok(client, member) == 404
+    # 형식이 틀린 번호는 거절 (숫자 4자리, 전각 숫자·옛 `usr_` 형식 포함)
+    for bad in ("7", "buy_7", "usr_0007", "buy_00007", "buy_００７７"):
+        res = _update(client, admin, member_id, buyer_id=bad)
+        assert res.status_code == 422 and res.json()["error"]["code"] == "BUYER_ID_INVALID", bad
+    # 한 구매자는 계정 하나에만. 같은 계정이 같은 값을 다시 저장하는 것은 괜찮다
+    other = _make(client, op, "member", "m2@example.com")
+    other_id = _account_id(client, other)
+    res = _update(client, admin, other_id, buyer_id="buy_0007")
+    assert res.status_code == 409 and res.json()["error"]["code"] == "BUYER_ALREADY_LINKED"
+    assert _update(client, admin, member_id, buyer_id="buy_0007").status_code == 200
+    # 자기 계정의 연결은 운영자만 바꾼다
+    res = _update(client, admin, admin_id, buyer_id="buy_0009")
+    assert res.status_code == 403 and res.json()["error"]["code"] == "SELF_BUYER_LINK"
+    assert _update(client, op, op_id, buyer_id="buy_0001").json()["data"]["buyer_id"] == "buy_0001"
+    # 일반회원은 아무에게도 못 바꾼다
+    assert _update(client, member, other_id, buyer_id="buy_0003").status_code == 403
+    # 빈 문자열이면 연결을 푼다
+    assert _update(client, admin, member_id, buyer_id="").json()["data"]["buyer_id"] is None
+    assert accounts.buyer_id_of_account(member_id) is None
 
 
 def test_role_change_permissions(client) -> None:
