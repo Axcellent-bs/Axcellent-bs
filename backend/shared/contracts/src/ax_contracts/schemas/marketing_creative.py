@@ -32,6 +32,7 @@ class CreativeRecordSummary(AxModel):
     storyboard_title_ko: str | None = None
     shot_count: int = 0
     storyboard_at: str | None = None
+    render: dict[str, str] = Field(default_factory=dict)  # 단계별 상태(Higgsfield 그림·영상)
 
 
 class CreativeRecordsListOutput(AxModel):
@@ -52,3 +53,23 @@ class CreativeRecordGetOutput(AxModel):
     sheet: dict[str, Any]  # CharacterSheetPromptOutput 모양
     storyboard: dict[str, Any] | None = None  # StoryboardPromptOutput 모양
     storyboard_at: str | None = None
+    # Higgsfield 그림·영상:
+    # {sheet_image|board_image|video: {status, error, asset, sha256, review_id, at}}
+    render: dict[str, Any] = Field(default_factory=dict)
+
+
+CREATIVE_VIDEO_REQUEST_SKILL = "creative_video_request"
+# 렌더 단계 상태: running(만드는 중) · done · failed · blocked(관문·예산) · unavailable(설정 없음)
+# · awaiting_approval(영상, 사람 승인 대기) · rejected(영상, 거절)
+
+
+class CreativeVideoRequestInput(AxModel):
+    """스토리보드 그림으로 영상 만들기를 사람 승인에 올린다(C `generate_creative_video`)."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    who: str | None = Field(default=None, max_length=80)  # 요청한 사람(대시보드 사람 토큰)
+
+
+class CreativeVideoRequestOutput(AxModel):
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    video: dict[str, Any]  # render.video

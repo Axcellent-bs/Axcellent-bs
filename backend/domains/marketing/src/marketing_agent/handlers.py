@@ -39,6 +39,8 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeRecordGetOutput,
     CreativeRecordsListInput,
     CreativeRecordsListOutput,
+    CreativeVideoRequestInput,
+    CreativeVideoRequestOutput,
 )
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import (
@@ -55,6 +57,7 @@ from marketing_agent import (
 )
 from marketing_agent import character_sheet as _character_sheet
 from marketing_agent import creative_records as _creative
+from marketing_agent import creative_render as _render
 from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import storyboard as _storyboard
 from marketing_agent.brief_handoff import (
@@ -153,6 +156,13 @@ class State:
         self.media_ledger = MediaLedger()  # 열 수 없으면 시작 때 실패한다
         # 열 수 없으면 시작 때 ChatStorageError로 실패한다(briefs와 같다)
         self.chat = ChatService(ChatStore(), self.chat_facts)
+        # 대화에서 만든 스토리보드·영상 요청도 Higgsfield 렌더로 잇는다
+        self.chat.on_board = lambda meta, rid: _render.maybe_start_board(
+            self.media_ledger, meta, rid
+        )
+        self.chat.on_video = lambda meta, rid, who: _render.request_video(
+            self.media_ledger, meta, rid, who
+        )
 
     def chat_facts(self) -> dict[str, Any]:
         """대화에 넣는 사실. 마케팅 저장소를 읽기만 한다(구매자·고객 정보는 넣지 않는다)."""
@@ -638,6 +648,9 @@ async def storyboard_prompt(request: AgentRequest) -> AgentResult:
             output={"message": refused.message},
         )
     out = out.model_copy(update={"record_id": _record_storyboard(out, request.untrusted)})
+    rid = out.record_id
+    if rid:
+        _safe_render(lambda: _render.maybe_start_board(STATE.media_ledger, request.meta, rid))
     return _result(
         request,
         TaskStatus.COMPLETED,
@@ -703,6 +716,14 @@ async def creative_record_get(request: AgentRequest) -> AgentResult:
     data = _parse(request, CreativeRecordGetInput)
     if isinstance(data, AgentResult):
         return data
+    if (
+        _creative.store().get(data.record_id) is not None
+    ):  # 승인된 영상은 이어 만들고 끊긴 단계는 정리
+        try:
+            _render.expire_stale(data.record_id)
+            await _render.check_video(STATE.media_ledger, request.meta, data.record_id)
+        except Exception:  # noqa: BLE001 - 진행 확인 실패는 읽기를 막지 않는다
+            _render.logger.exception("제작 기록: 영상 승인 확인 실패")
     row = _creative.store().get(data.record_id)
     if row is None:
         return _result(
@@ -714,6 +735,48 @@ async def creative_record_get(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=_evidence(["creative_records"], f"제작 기록 {data.record_id}", []),
+    )
+
+
+def _safe_render(fn: Any) -> None:
+    try:
+        fn()
+    except Exception:  # noqa: BLE001 - 그림 생성 시작 실패는 프롬프트 결과를 막지 않는다
+        _render.logger.exception("Higgsfield 렌더를 시작하지 못함")
+
+
+def _start_sheet_render(request: AgentRequest, out: Any) -> None:
+    ref: bytes | None = None
+    try:
+        ref = _character_sheet.decode_image(request.untrusted.get("image")).data
+    except Exception:  # noqa: BLE001 - 참조 없이도 만든다
+        ref = None
+    sheet = out.model_dump(mode="json", exclude={"record_id"})
+    rid = out.record_id
+    _safe_render(lambda: _render.start_sheet(STATE.media_ledger, request.meta, rid, sheet, ref))
+
+
+async def creative_video_request(request: AgentRequest) -> AgentResult:
+    """스토리보드 그림으로 영상 만들기를 사람 승인에 올린다(C). 승인 뒤에만 Higgsfield를 부른다."""
+    data = _parse(request, CreativeVideoRequestInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        video = await _render.request_video(
+            STATE.media_ledger, request.meta, data.record_id, data.who
+        )
+    except _render.RenderError as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome=str(error), output={"message": str(error)}
+        )
+    out = CreativeVideoRequestOutput(record_id=data.record_id, video=video)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["creative_video_request"], f"영상 요청 {data.record_id}: {video.get('status')}", []
+        ),
     )
 
 
@@ -738,6 +801,8 @@ async def character_sheet_prompt(request: AgentRequest) -> AgentResult:
             output={"message": refused.message},
         )
     out = out.model_copy(update={"record_id": _record_sheet(out, request.untrusted)})
+    if out.record_id:  # Higgsfield로 이미지 시트 그림(키·모델이 없으면 기록에 이유만)
+        _start_sheet_render(request, out)
     return _result(
         request,
         TaskStatus.COMPLETED,
@@ -1445,7 +1510,9 @@ async def marketing_chat_send(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     try:
-        thread = STATE.chat.send(data.who, data.thread_id, data.message, data.record_id)
+        thread = STATE.chat.send(
+            data.who, data.thread_id, data.message, data.record_id, meta=request.meta
+        )
     except ChatRefused as refused:
         return _chat_failed(request, refused)
     except ChatStorageError:
@@ -1594,6 +1661,7 @@ HANDLERS = {
     "higgsfield_status": higgsfield_status,
     "creative_records_list": creative_records_list,
     "creative_record_get": creative_record_get,
+    "creative_video_request": creative_video_request,
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,

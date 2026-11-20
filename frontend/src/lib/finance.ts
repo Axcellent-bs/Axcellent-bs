@@ -958,7 +958,7 @@ export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", SETTLEMENT
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
-  publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", start_campaign: "캠페인 집행", set_publish_control: "Instagram 자동 게시 다시 켜기",
+  publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", generate_creative_video: "스토리보드 영상 만들기", start_campaign: "캠페인 집행", set_publish_control: "Instagram 자동 게시 다시 켜기",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기", merge_pr: "코드 변경 합치기", repo_revert_pr: "코드 변경 되돌리기", auto_policy_update: "자동 머지 기준 바꾸기",
   approve_data_deletion: "데이터 삭제 승인", purge_expired_inquiries: "기한 지난 문의 지우기", purge_expired_claims: "기한 지난 클레임 지우기",
 };

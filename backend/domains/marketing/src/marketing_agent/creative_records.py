@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS marketing_creative_records (
     thumbnail TEXT,
     sheet TEXT NOT NULL,
     storyboard TEXT,
-    storyboard_at TEXT
+    storyboard_at TEXT,
+    render TEXT
 )
 """
 
@@ -67,6 +68,9 @@ class CreativeRecords:
         self._conn.row_factory = sqlite3.Row
         with self._lock, self._conn:
             self._conn.execute(_SCHEMA)
+            info = self._conn.execute("PRAGMA table_info(marketing_creative_records)")
+            if "render" not in {r["name"] for r in info}:  # 2026-11-20 Higgsfield 그림·영상 칸
+                self._conn.execute("ALTER TABLE marketing_creative_records ADD COLUMN render TEXT")
 
     def add_sheet(self, sheet: dict[str, Any], note: str | None, thumbnail: str | None) -> str:
         record_id = f"CR-{uuid.uuid4().hex[:12]}"
@@ -120,6 +124,7 @@ class CreativeRecords:
                     "storyboard_title_ko": board.get("title_ko") if board else None,
                     "shot_count": len(board.get("shots", [])) if board else 0,
                     "storyboard_at": r["storyboard_at"],
+                    "render": _statuses(r["render"]),
                 }
             )
         return out
@@ -141,7 +146,28 @@ class CreativeRecords:
             "sheet": json.loads(r["sheet"]),
             "storyboard": json.loads(r["storyboard"]) if r["storyboard"] else None,
             "storyboard_at": r["storyboard_at"],
+            "render": json.loads(r["render"]) if r["render"] else {},
         }
+
+    def get_render(self, record_id: str) -> dict[str, Any]:
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT render FROM marketing_creative_records WHERE record_id = ?", (record_id,)
+            ).fetchone()
+        return json.loads(r["render"]) if r is not None and r["render"] else {}
+
+    def set_render(self, record_id: str, render: dict[str, Any]) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE marketing_creative_records SET render = ? WHERE record_id = ?",
+                (json.dumps(render, ensure_ascii=False), record_id),
+            )
+
+
+def _statuses(raw: str | None) -> dict[str, str]:
+    """목록용: 단계별 상태만(sheet_image·board_image·video)."""
+    render = json.loads(raw) if raw else {}
+    return {k: str((v or {}).get("status") or "") for k, v in render.items() if isinstance(v, dict)}
 
 
 _store: CreativeRecords | None = None

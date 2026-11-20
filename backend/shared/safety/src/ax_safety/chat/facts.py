@@ -54,6 +54,7 @@ ACTION_KO = {
     "set_publish_control": "자동 게시 켜기·끄기",
     "complete_manual_publish": "수동 게시 완료 기록",
     "generate_media": "이미지·영상 만들기",
+    "generate_creative_video": "스토리보드 영상 만들기",
     "start_campaign": "캠페인 집행",
     "rollback_deployment": "배포 되돌리기",
     "restart_service": "서비스 다시 켜기",
