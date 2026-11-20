@@ -114,6 +114,7 @@ SERVICES: tuple[Service, ...] = (
             "request_compensation",
             "list_claims",
             "get_claim",
+            "list_buyer_orders",
             "claim_stats",
             "book_issue_stats",
             "claim_queue",
