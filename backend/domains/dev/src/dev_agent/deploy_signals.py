@@ -29,7 +29,7 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.data import AnomalyDetectionInput, AnomalyDetectionOutput
 from ax_workflow.models import Incident
-from dev_agent.deploy import Deployment, Signal
+from dev_agent.deploy import Deployment, Signal, UnavailableReason
 
 DEJAFIX_URL_ENV = "PLANNING_DEJAFIX_API_URL"
 CALL_TIMEOUT_SECONDS = 5.0
@@ -55,7 +55,11 @@ _LIST_KEYS = ("data", "items", "incidents", "results")
 
 
 class SignalUnavailable(Exception):
-    """신호원을 읽지 못했다."""
+    """신호원을 읽지 못했다. `reason`: 연결이 없음(not_connected) · 읽다가 오류(error)."""
+
+    def __init__(self, message: str = "", reason: UnavailableReason = "error"):
+        super().__init__(message)
+        self.reason: UnavailableReason = reason
 
 
 class SignalSource(Protocol):
@@ -234,7 +238,9 @@ class CombinedSource:
             try:
                 out.extend(await src.signals(dep, window_from, window_to))
             except SignalUnavailable as exc:
-                out.append(Signal(kind="unavailable", source=name, title=str(exc)[:200]))
+                out.append(
+                    Signal(kind="unavailable", source=name, title=str(exc)[:200], reason=exc.reason)
+                )
         return out
 
 
@@ -260,4 +266,4 @@ class _Missing:
     async def signals(
         self, dep: Deployment, window_from: datetime, window_to: datetime
     ) -> list[Signal]:
-        raise SignalUnavailable(self._why)
+        raise SignalUnavailable(self._why, reason="not_connected")

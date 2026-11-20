@@ -183,6 +183,7 @@ export interface Incident {
   at: string
   candidates: { pr: string; spec: string; para: string; mergedAt: string }[]
   rollbackCheck?: { target: string; result: '승인' | '거절'; why: string }
+  /** PR·문단에 연결함(link_incident). 장애 복구와는 상관없다 */
   linked: boolean
   followUp?: string
 }

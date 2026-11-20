@@ -26,7 +26,7 @@ def _order(pr_numbers: list[int], check: str = "RC-9") -> ReceiveReleaseOrderInp
     )
 
 
-def test_simple_request_asks_release_check_and_gets_deployed() -> None:
+def test_simple_request_asks_release_check_and_records_approved_deploy() -> None:
     get_deploy_store().reset()
     w = Wire()
     w.run(w.planning.inbound("support_simple"))
@@ -37,7 +37,8 @@ def test_simple_request_asks_release_check_and_gets_deployed() -> None:
     texts = [a.text for a in w.dev.state.activity if a.point == "receive_release_order"]
     assert any("배포 지시 받음 (기획 AI, dev" in t and "배포 요청 DEP-" in t for t in texts)
     pr = w.dev.state.prs[-1]
-    assert any(pr.number in d.pr_numbers for d in get_deploy_store().deployments)
+    mine = [d for d in get_deploy_store().deployments if pr.number in d.pr_numbers]
+    assert mine and mine[-1].status == "approved" and mine[-1].executed is False  # 배포 도구 없음
 
     w.run(w.dev.tick())  # 같은 PR 묶음이면 다시 묻지 않는다
     assert w.skills().count("request_release_check") == 1
