@@ -429,6 +429,10 @@ export const devTaskApi = (base: string) => ({
   returnToPlanning: (taskId: string, to: string, reason: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/return`, post({ to, reason })),
   // 서버 AI로 넘기기: 개발자 Claude 대기열에서 아무도 안 가져간 작업을 서버 AI가 맡는다
   toAgent: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/to-agent`, post()),
+  // 내 Claude로 넘기기 (서버 AI로 넘기기의 반대): 멈춘 서버 AI 작업(열린 PR 없음)을 개발자 Claude 대기열에
+  toSubscription: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/to-subscription`, post()),
+  // 지금 진행: 앞 작업 순서를 기다리는 작업을 기다리지 않고 잇는다 (사람이 누를 때만)
+  skipQueue: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/skip-queue`, post()),
   textOk: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/text-ok`, post()),
   // 반영됨으로 닫기: 바뀐 내용이 없어 멈춘 작업을 앞 작업 PR이 반영한 것으로 완료 (PR 없음)
   closeCovered: (taskId: string) => call<unknown>(base, `/dev-tasks/${encodeURIComponent(taskId)}/close-covered`, post()),

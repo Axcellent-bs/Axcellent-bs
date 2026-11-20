@@ -44,6 +44,8 @@ CODING_CONFLICT = {
     "NOT_REVISABLE",
     "WRONG_ROLE",
     "TRIAL_EXHAUSTED",  # 서버 AI 체험 한도를 다 씀
+    "NOT_MOVABLE",  # 서버 AI·내 Claude로 넘기기: 넘길 수 없는 상태
+    "NOT_WAITING",  # 지금 진행: 순서를 기다리는 작업이 아님
 }
 MAX_CHATS_LISTED = 20
 APPROVER_MAX = 40  # 화면 승인자 이름 칸(ApproverName.tsx)과 같은 길이
@@ -489,6 +491,28 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _coding_err(exc)
         except GateRefused as exc:
             return _gate_err(exc)
+        return _ok(result.output, svc)
+
+    @router.post("/dev-tasks/{task_id}/to-subscription", response_model=None, dependencies=HUMAN)
+    async def post_dev_task_to_subscription(task_id: str) -> dict | JSONResponse:
+        """내 Claude로 넘기기: 멈춘 서버 AI 작업(열린 PR 없음)을 개발자 Claude 대기열에 올린다."""
+        svc = get_service()
+        try:
+            result = await svc.hand_to_subscription(task_id)
+        except ActionError as exc:
+            return _coding_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(result.output, svc)
+
+    @router.post("/dev-tasks/{task_id}/skip-queue", response_model=None, dependencies=HUMAN)
+    async def post_dev_task_skip_queue(task_id: str, request: Request) -> dict | JSONResponse:
+        """지금 진행: 앞 작업 순서를 기다리는 작업을 기다리지 않고 잇게 한다 (사람이 누를 때만)."""
+        svc = get_service()
+        try:
+            result = await svc.skip_queue_dev_task(task_id, _person(request))
+        except ActionError as exc:
+            return _coding_err(exc)
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/text-ok", response_model=None)

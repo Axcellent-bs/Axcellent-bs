@@ -12,7 +12,8 @@ export type RecoveryAction =
   | "instruct" // 같은 PR에 추가 지시
   | "merge" // 사람 머지
   | "connect" // 연결 화면 (레포·AI 키)
-  | "reviews"; // AI 교차검증 화면
+  | "reviews" // AI 교차검증 화면
+  | "holds"; // 안전 확인 탭 (관문이 보류한 건 승인)
 
 export interface Recovery {
   who: "agent" | "human";
@@ -30,7 +31,14 @@ const any = (...ws: string[]) => (e: string) => ws.some((w) => e.includes(w));
 const AUTO_MAX = 1; // 백엔드 AUTO_RETRY_MAX와 같은 값
 const agentWillRetry = (c: CodingRun) => !!c.transient && (c.autoRetries ?? 0) < AUTO_MAX;
 
+// 관문이 코드 쓰기·리뷰를 보류함 (PR 열기 보류는 "승인하고 PR 열기"가 따로 있다)
+const gateHeld = (e: string) => e.includes("안전 점검에서") && e.includes("보류") && !e.includes("PR 열기");
+
 const RULES: Rule[] = [
+  // 관문 보류: 안전 확인 탭에서 사람이 승인한다
+  { when: gateHeld, get: (c) => ({ who: "human", say: `안전 점검이 ${c.error?.includes("리뷰") ? "PR 리뷰" : "코드 쓰기"}를 보류했어요. 안전 확인 탭에서 보류 이유를 보고 승인해 주세요.`, actions: c.pr ? ["holds", "merge", "instruct"] : ["holds"] }) },
+  // 서버를 다시 켜서 PR 리뷰·CI 확인이 끊김: PR은 열려 있다
+  { when: has("서버 재시작으로 리뷰"), get: () => ({ who: "human", say: "서버 재시작으로 리뷰가 끊겼어요. PR을 보고 머지하거나, 추가 지시로 같은 PR을 고치고 다시 리뷰해 주세요.", actions: ["merge", "instruct"] }) },
   // 파일 고르기 문제: 사람이 파일을 정하면 바로 이어 간다
   { when: has("고칠 파일을 고르지 못함"), get: () => ({ who: "human", say: "AI가 고칠 파일을 찾지 못했어요. 파일을 직접 고르거나 AI 대화로 같이 정해 주세요.", actions: ["pick", "chat", "return"] }) },
   { when: (e) => /고칠 파일 \d+개 > \d+개/.test(e), get: () => ({ who: "human", say: "고칠 파일이 한도(5개)보다 많아요. 꼭 필요한 파일만 고르거나, 기획으로 돌려보내 작업을 나눠 주세요.", actions: ["pick", "chat", "return"] }) },
@@ -61,17 +69,36 @@ const RULES: Rule[] = [
   { when: any("rate_limited", "호출 한도"), get: (c) => (agentWillRetry(c)
     ? { who: "agent", say: "GitHub 호출 한도라 에이전트가 잠시 뒤 다시 해요.", actions: ["retry"] }
     : { who: "human", say: "GitHub 호출 한도가 계속 걸려요. 잠시 뒤 다시 시도해 주세요.", actions: ["retry"] }) },
-  { when: has("읽기 전용"), get: () => ({ who: "human", say: "읽기 전용 연결이라 쓸 수 없어요. 쓰기 권한이 있는 연결로 바꾸거나 직접 반영해 주세요.", actions: ["connect", "return"] }) },
+  { when: any("읽기 전용", "(read_only)"), get: () => ({ who: "human", say: "읽기 전용 연결이라 쓸 수 없어요. 쓰기 권한이 있는 연결로 바꾸거나 직접 반영해 주세요.", actions: ["connect", "return"] }) },
   { when: has("형상관리"), get: () => ({ who: "human", say: "레포 연결(토큰·권한)을 확인한 뒤 다시 시도해 주세요.", actions: ["connect", "retry"] }) },
   { when: has("코딩 에이전트 오류"), get: () => ({ who: "human", say: "예상하지 못한 오류예요. 다시 시도해 보고, 반복되면 개발팀에 알려 주세요.", actions: ["retry", "chat"] }) },
 ];
 
 const STOPPED = ["failed", "waiting_human"];
 
+// 열린 PR로 사람 확인을 기다림: 다시 시도는 서버가 거절하고(PR 있음) 에이전트도 다시 하지 않는다.
+// 머지하거나 같은 PR에 추가 지시로 이어 간다
+const OPEN_PR: Recovery = { who: "human", say: "PR은 열려 있어요. PR을 보고 머지하거나, 추가 지시로 같은 PR을 고치고 다시 리뷰해 주세요.", actions: ["merge", "instruct"] };
+// 내 Claude 작업은 서버가 추가 지시를 받지 않는다: PR 코멘트로 개발자 Claude에게 남긴다
+const MY_CLAUDE_PR: Recovery = { who: "human", say: "내 Claude 작업이라 추가 지시는 PR에 코멘트로 남겨 주세요. 괜찮으면 머지해 주세요.", actions: ["merge"] };
+
+const PERMISSION_PR: Recovery = { who: "human", say: "레포 토큰·권한 문제로 멈췄어요. 도구 연결에서 권한을 확인한 뒤 머지하거나 추가 지시로 다시 보내 주세요.", actions: ["connect", "merge", "instruct"] };
+
+function pick(c: CodingRun): Recovery {
+  const e = c.error ?? "";
+  for (const r of RULES) if (r.when(e, c)) return r.get(c);
+  return { who: "human", say: "멈춘 이유를 보고 다시 시도하거나 AI 대화로 넘겨 주세요.", actions: ["retry", "chat"] };
+}
+
 /** 멈춘 코딩의 다음 할 일. 진행 중·끝남·사람이 멈춘 것(중단·돌려보냄)·PR 보류 승인은 null (기존 버튼) */
 export function recoveryOf(c: CodingRun): Recovery | null {
   if (!STOPPED.includes(c.status) || !c.error) return null;
   if (c.error.includes("PR 열기") && c.error.includes("안전 점검")) return null; // 승인하고 PR 열기 (따로 있음)
-  for (const r of RULES) if (r.when(c.error, c)) return r.get(c);
-  return { who: "human", say: "멈춘 이유를 보고 다시 시도하거나 AI 대화로 넘겨 주세요.", actions: ["retry", "chat"] };
+  const r = pick(c);
+  if (c.status !== "waiting_human" || !c.pr) return r;
+  if (c.mode === "subscription") return MY_CLAUDE_PR;
+  // 레포 토큰·권한 문제: 도구 연결 안내는 남긴다 (고친 뒤 머지·추가 지시)
+  if (/forbidden|unauthorized|권한|토큰/.test(c.error)) return PERMISSION_PR;
+  // 다시 시도·에이전트가 다시 함은 열린 PR에선 안 된다 → 머지·추가 지시
+  return r.actions.includes("retry") || (r.who === "agent" && !r.actions.includes("merge")) ? OPEN_PR : r;
 }

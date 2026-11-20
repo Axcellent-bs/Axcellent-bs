@@ -8,8 +8,10 @@
   (`_unsent`)도 남긴다.
   재시작 뒤 같은 넘기기를 다시 처리하지 않게 하려는 것이다.
 - 쓰기는 임시 파일에 쓰고 바꿔 끼운다(쓰는 중에 꺼져도 앞 파일이 남는다).
-- 읽을 때 돌던 코딩 작업(읽기·쓰기·리뷰 중)은 실패로 바꾼다. 다시 켜면 그 실행은 없기 때문이다.
-  사람이 다시 시도·재개로 이어 간다.
+- 읽을 때 돌던 서버 AI 코딩 작업(대기·읽기·쓰기·리뷰 중, PR 연 직후)은 다시 켜면 그 실행이 없다.
+  열린 PR이 없으면 실패로 바꿔 사람이 다시 시도·재개로 잇고, 열린 PR이 있으면 사람 확인으로
+  바꿔 머지·추가 지시로 잇는다 (열린 PR이 있으면 다시 시도는 거절되기 때문이다).
+  내 Claude(구독형) 작업은 이 서버가 돌리지 않아 그대로 둔다.
 """
 
 from __future__ import annotations
@@ -64,10 +66,22 @@ def load(path: str) -> tuple[State, dict[str, dict], dict[str, str], dict[str, l
         return None
     for task in state.tasks:
         cr = task.coding
-        if cr is not None and cr.status in RUNNING:
-            cr.status = "failed"
-            cr.error = "서버를 다시 켜서 멈춤 → 다시 시도로 이어서"
-            cr.waiting_for = []
+        if cr is None or cr.mode == "subscription":
+            continue  # 내 Claude 작업은 이 서버가 돌리지 않는다 (대기열·임대·PR 맞추기가 본다)
+        if cr.status not in (*RUNNING, "opened"):
+            continue
+        cr.waiting_for = []
+        if cr.status == "opened" and any(p.id == cr.pr and p.merged for p in state.prs):
+            continue  # 연 PR이 이미 머지됨: 끊긴 실행이 없으니 실패로 바꾸지 않는다
+        open_pr = any(p.task == task.id and not p.merged and not p.closed for p in state.prs)
+        if open_pr:
+            # PR은 열려 있어 다시 시도는 거절된다: 사람이 리뷰를 보고 머지·추가 지시로 잇는다
+            cr.status = "waiting_human"
+            cr.transient = False
+            cr.error = "서버 재시작으로 리뷰를 다시 확인해야 해요 → PR을 보고 머지하거나 추가 지시"
+            continue
+        cr.status = "failed"
+        cr.error = "서버를 다시 켜서 멈춤 → 다시 시도로 이어서"
     return (
         state,
         dict(data.get("idempotent") or {}),
