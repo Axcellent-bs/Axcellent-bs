@@ -226,6 +226,40 @@ class GetClaimInput(AxModel):
     claim_id: int
 
 
+class ListBuyerOrdersInput(AxModel):
+    """구매자 한 명의 결제가 끝난 주문 목록(읽기).
+
+    `buyer_id`는 호출한 쪽이 로그인 계정의 연결(계정 `buyer_id`)에서 서버가 정한 값이어야 한다.
+    대화 문장에서 뽑은 값을 넣지 않는다. 이 skill은 그 값이 요청한 사람의 것인지 알 수 없다.
+    """
+
+    buyer_id: str = Field(pattern=r"^buy_[0-9]{4}$")  # \d는 유니코드 숫자도 받아서 쓰지 않는다
+    limit: int = Field(default=20, ge=1, le=50)
+
+
+class BuyerOrderItem(AxModel):
+    order_item_id: str
+    title: str
+    qty: int
+    paid_amount: int  # 이 품목에 실제 낸 현금(포인트·쿠폰 제외)
+
+
+class BuyerOrder(AxModel):
+    order_id: str  # 환불·교환 접수(`create_claim`)의 `order_id`로 쓴다
+    status: str  # preparing | delivered (결제가 끝난 주문만 나온다)
+    paid_at: str  # UTC ISO
+    delivered_at: str | None = None
+    shipping_fee: int = 0
+    total_paid: int = 0  # 품목별 현금 합계
+    items: list[BuyerOrderItem] = Field(default_factory=list)
+
+
+class BuyerOrders(AxModel):
+    buyer_id: str
+    items: list[BuyerOrder] = Field(default_factory=list)  # 결제 시각 최근 순
+    truncated: bool = False  # 판매 서버에 더 있는데 `limit`에서 멈췄다
+
+
 class DecideClaimInput(AxModel):
     """상담원 결정. 메모는 `untrusted.note`로 받는다."""
 

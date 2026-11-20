@@ -52,6 +52,19 @@
       "handoff": false
     },
     {
+      "id": "list_buyer_orders",
+      "description": "구매자 한 명의 결제가 끝난 주문 목록(주문 번호·품목·결제 현금·배송 상태)을 결제 시각 최근 순으로 돌려준다. 환불·교환 접수 전에 어느 주문인지 고르게 한다. 읽기만 한다. buyer_id는 호출한 쪽이 로그인 계정의 연결에서 정한 값이어야 한다.",
+      "input_schema": "agents/support/src/support_agent/claim_schemas.py#ListBuyerOrdersInput",
+      "output_schema": "agents/support/src/support_agent/claim_schemas.py#BuyerOrders",
+      "grade": "read",
+      "allowed_requesters": [
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "claim_stats",
       "description": "클레임 상태별 건수와 규칙 적중 횟수를 코드로 센다.",
       "input_schema": "agents/support/src/support_agent/claim_schemas.py#ListClaimsInput",

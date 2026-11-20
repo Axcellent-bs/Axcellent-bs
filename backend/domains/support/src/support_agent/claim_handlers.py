@@ -23,11 +23,15 @@ from support_agent import handlers as h
 from support_agent.book_issue_schemas import PERIOD_DAYS, BookIssueInput, InquiryOrderCounts
 from support_agent.book_issue_stats import OrderInquiry, OrderStatus
 from support_agent.claim_schemas import (
+    BuyerOrder,
+    BuyerOrderItem,
+    BuyerOrders,
     ClaimReasonHit,
     CreateClaimInput,
     DecideClaimInput,
     GetClaimInput,
     InspectReturnInput,
+    ListBuyerOrdersInput,
     ListClaimsInput,
     ProcessClaimQueueInput,
     QueueRun,
@@ -130,6 +134,43 @@ async def get_claim(request: AgentRequest) -> AgentResult:
     if claim is None:
         return _claim_not_found(request, parsed.claim_id)
     return h._done(request, claim.model_dump(mode="json"))
+
+
+async def list_buyer_orders(request: AgentRequest) -> AgentResult:
+    """구매자 한 명의 결제가 끝난 주문 목록(읽기). 환불·교환 접수 전에 어느 주문인지 고르게 한다.
+
+    `buyer_id`가 요청한 사람의 것인지는 여기서 알 수 없다.
+    총괄이 로그인 계정의 연결에서 정한 값만 넣는다.
+    """
+    parsed = h._parse(request, ListBuyerOrdersInput)
+    if isinstance(parsed, AgentResult):
+        return parsed
+    try:
+        found, truncated = await shop_client.load_buyer_orders(parsed.buyer_id, parsed.limit)
+    except shop_client.ShopError as exc:
+        return error_result(request.meta, TaskStatus.FAILED, "shop_unavailable", str(exc))
+    result = BuyerOrders(
+        buyer_id=parsed.buyer_id,
+        items=[
+            BuyerOrder(
+                order_id=o.id,
+                status=o.status,
+                paid_at=o.paid_at.isoformat(),
+                delivered_at=o.delivered_at.isoformat() if o.delivered_at else None,
+                shipping_fee=o.shipping_fee,
+                total_paid=sum(i.paid_amount for i in o.items),
+                items=[
+                    BuyerOrderItem(
+                        order_item_id=i.id, title=i.title, qty=i.qty, paid_amount=i.paid_amount
+                    )
+                    for i in o.items
+                ],
+            )
+            for o in found
+        ],
+        truncated=truncated,
+    )
+    return h._done(request, result.model_dump(mode="json"))
 
 
 async def claim_stats(request: AgentRequest) -> AgentResult:
@@ -638,6 +679,7 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
 CLAIM_HANDLERS = {
     "list_claims": list_claims,
     "get_claim": get_claim,
+    "list_buyer_orders": list_buyer_orders,
     "claim_stats": claim_stats,
     "book_issue_stats": book_issue_stats_skill,
     "claim_queue": claim_queue,
