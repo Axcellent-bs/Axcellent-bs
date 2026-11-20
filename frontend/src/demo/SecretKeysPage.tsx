@@ -85,7 +85,7 @@ export default function SecretKeysPage() {
   const noValue = (op: Op) => (op === 'delete' ? true : !!value && !valueIssue)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-4 py-8 sm:px-8">
       <PageHead where="시스템 관리" title="키 관리">
         고객사별 API 키·토큰을 암호화해 저장해요. 한 번 넣은 값은 다시 볼 수 없고 교체만 할 수 있어요. 화면에는 '설정됨'과 끝 4자리 이하만 보여요.
       </PageHead>
