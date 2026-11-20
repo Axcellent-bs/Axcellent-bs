@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
+import { DEV_API, codingSettingsApi, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
 import { UsageBar } from '@/components/dev/coding'
 import { NotionConnect } from '@/components/planning/notion'
 import { humanizePlanIds } from '@/lib/format'
@@ -13,7 +13,7 @@ import { appChoices, deployRows, dejafixCard, dejafixSummary } from '@/lib/toolF
 import { EMPTY_REPO_FORM, repoAppLabel, repoBody, repoFormError, repoFormOf, type RepoForm } from '@/lib/repoForm'
 import { useSession } from './session'
 import AiConnectionView from '@/components/connect/AiConnectionView'
-import PersonalAiConnect from '@/components/connect/PersonalAiConnect'
+import PersonalMcpConnect from '@/components/connect/PersonalMcpConnect'
 
 // 도구 연결 (/system/tools, 모두 연다): 고객사 개발팀이 쓰는 형상관리·배포·문서 도구와 AI 연결을 잇는 창구.
 // 관리자·일반회원 모두 같은 화면을 쓰고 바꿀 수 있다(관리자만 다른 건 회사 연결·회원·서버 관리 두 화면, 11/19 결정).
@@ -130,24 +130,6 @@ const CODING_MODES: { id: CodingSetting; label: string }[] = [
   { id: 'subscription', label: '내 Claude' },
 ]
 const codingApi = codingSettingsApi(DEV_API)
-// 개발 서버 프록시 주소(/dev-api)처럼 앞이 빠진 주소면 지금 화면 주소를 앞에 붙인다 (명령에 그대로 붙여 넣을 수 있게)
-const MCP_URL = new URL(`${DEV_API.replace(/\/$/, '')}/api/planning/mcp`, window.location.href).href
-// 로컬: run_all.sh가 만든 작업 대기열 전용 토큰(backend/.data/tokens.env WORK_TOKEN)을 읽어 넣는다 (Git Bash, 레포 폴더).
-// 이 값은 내 PC의 Claude Code 설정(~/.claude.json)에 남으므로 승인·머지 권한이 있는 사람 토큰은 쓰지 않는다
-const MCP_ADD = `claude mcp add --transport http axcellent-dev ${MCP_URL} --header "Authorization: Bearer $(sed -n 's/^WORK_TOKEN=//p' backend/.data/tokens.env)"`
-// Codex·Cursor는 토큰을 설정 파일이 아니라 환경변수(AXCELLENT_WORK_TOKEN)에서 읽는다
-const TOKEN_ENV = 'AXCELLENT_WORK_TOKEN'
-const SET_TOKEN_ENV = `setx ${TOKEN_ENV} "$(sed -n 's/^WORK_TOKEN=//p' backend/.data/tokens.env)"`
-const CODEX_ADD = `codex mcp add axcellent-dev --url ${MCP_URL} --bearer-token-env-var ${TOKEN_ENV}`
-const CURSOR_JSON = JSON.stringify({ mcpServers: { 'axcellent-dev': { url: MCP_URL, headers: { Authorization: `Bearer \${env:${TOKEN_ENV}}` } } } }, null, 2)
-const ASK = 'axcellent-dev에서 작업 목록 보여 줘. 하나 가져가서 명세대로 구현하고 PR 올려 줘.'
-type AiClient = 'claude' | 'codex' | 'cursor'
-const AI_CLIENTS: { id: AiClient; label: string }[] = [
-  { id: 'claude', label: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'cursor', label: 'Cursor' },
-]
-
 /** 여러 개 중 하나 고르기 (연결 페이지는 기획 화면 CSS를 안 읽어서 이 화면 안에서 그린다). 고른 것은 파란 바탕·흰 글씨 */
 function Seg<T extends string>({ label, items, value, onPick, disabled }: {
   label: string; items: { id: T; label: string }[]; value?: T; onPick: (id: T) => void; disabled?: boolean
@@ -160,69 +142,6 @@ function Seg<T extends string>({ label, items, value, onPick, disabled }: {
           {it.label}
         </button>
       ))}
-    </div>
-  )
-}
-
-function CopyLine({ text }: { text: string }) {
-  const [done, setDone] = useState(false)
-  const copy = () => {
-    navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) }).catch(() => {})
-  }
-  return (
-    <div className="flex items-start gap-2">
-      <code className="mono min-w-0 flex-1 break-all rounded-md bg-ink-50 px-3 py-2 text-xs">{text}</code>
-      <button type="button" className="btn-ghost shrink-0 px-2 py-1 text-xs" onClick={copy}>{done ? '복사됨' : '복사'}</button>
-    </div>
-  )
-}
-
-/** AI 도구 연결: 내 PC의 AI 코딩 도구(Claude Code·Codex·Cursor)에 작업 대기열 MCP 서버를 붙이는 순서 */
-function ClaudeConnect({ connected }: { connected: string[] }) {
-  const me = useMe()
-  const mine = me?.name ? me.claude_connected : null
-  const [client, setClient] = useState<AiClient>('claude')
-  return (
-    <div className="space-y-3 rounded-lg border border-ink-100 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-medium">AI 도구 연결</h3>
-        {me?.name && !connected.includes(me.name) && <span className={`chip ${mine ? TONE.ok : TONE.none}`} title="최근 7일 작업 목록을 열었는지">{me.name} {mine ? '연결됨' : '연결 없음'}</span>}
-        <span className={`chip ${connected.length ? TONE.ok : TONE.none}`} title="최근 7일 작업 목록을 연 사람">{connected.length ? `연결됨 ${connected.join(', ')}` : '연결 없음'}</span>
-      </div>
-      <Seg label="AI 도구" items={AI_CLIENTS} value={client} onPick={setClient} />
-      <ol className="list-decimal space-y-3 pl-5 text-sm">
-        {client === 'claude' ? (
-          <>
-            <li className="space-y-1">
-              <span className="flex flex-wrap items-center gap-2">작업 대기열 서버 붙이기 <span className="chip bg-ink-100 text-ink-500">Git Bash · 레포 폴더</span></span>
-              <CopyLine text={MCP_ADD} />
-            </li>
-            <li className="space-y-1"><span>확인</span><CopyLine text="claude mcp list" /></li>
-          </>
-        ) : (
-          <>
-            <li className="space-y-1">
-              <span className="flex flex-wrap items-center gap-2">토큰을 환경변수로 <span className="chip bg-ink-100 text-ink-500">Git Bash · 레포 폴더 · 다시 켠 뒤 적용</span></span>
-              <CopyLine text={SET_TOKEN_ENV} />
-            </li>
-            {client === 'codex' ? (
-              <>
-                <li className="space-y-1"><span>작업 대기열 서버 붙이기</span><CopyLine text={CODEX_ADD} /></li>
-                <li className="space-y-1"><span>확인</span><CopyLine text="codex mcp list" /></li>
-              </>
-            ) : (
-              <li className="space-y-1">
-                <span className="flex flex-wrap items-center gap-2">작업 대기열 서버 붙이기 <span className="chip bg-ink-100 text-ink-500">~/.cursor/mcp.json</span></span>
-                <CopyLine text={CURSOR_JSON} />
-              </li>
-            )}
-          </>
-        )}
-        <li className="space-y-1">
-          <span>레포 폴더에서 작업 가져가기</span>
-          <CopyLine text={ASK} />
-        </li>
-      </ol>
     </div>
   )
 }
@@ -251,7 +170,7 @@ function CodingWhy({ cfg }: { cfg: CodingSettings }) {
   )
 }
 
-/** 내 연결 › 고급 · 개발자 PC 연결: 요청 작업 코딩 방식(회사 설정, 개발 AI) + 개발자 PC AI 도구(MCP) 안내 */
+/** 내 연결 › 고급 · 개발 요청을 누가 코딩할지: 요청 작업 코딩 방식(회사 설정, 개발 AI). MCP 안내는 내 연결 ④로 옮겼다 */
 function DevPcSection() {
   const [cfg, setCfg] = useState<CodingSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -280,7 +199,6 @@ function DevPcSection() {
         </dl>
       )}
     </section>
-    <ClaudeConnect connected={cfg?.agents_connected ?? []} />
     </div>
   )
 }
@@ -331,7 +249,7 @@ const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }
   { label: '배포', items: [{ id: 'deploy', label: '배포 도구' }] }, // 공용 도구 연결 보관함 (components/connect/DeployTools.tsx)
   { label: '문서', items: [{ id: 'notion', label: '노션' }] }, // 기획 영역 (components/planning/notion.tsx)
   // AI 연결: 회사 AI 상태·사용량 + 개발 AI 코딩 설정 보기(components/connect/AiConnectionView.tsx·DevCodingSummary.tsx).
-  // 내 연결: 개인 AI 연결(components/connect/PersonalAiConnect.tsx) + 고급 · 개발자 PC 연결(코딩 방식·MCP 안내)
+  // 내 연결: 개인 MCP 연결(components/connect/PersonalMcpConnect.tsx: 토큰·AI 직원·내 몫 %·연결 방법) + 고급 · 코딩 방식
   { label: 'AI', items: [{ id: 'ai', label: 'AI 연결' }, { id: 'mine', label: '내 연결' }] },
 ]
 const PANEL_IDS = PANEL_GROUPS.flatMap((g) => g.items.map((i) => i.id))
@@ -559,11 +477,11 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
         </div>
       ) : tab === 'ai' ? <AiConnectionView /> : tab === 'mine' ? (
         <div className="space-y-8">
-          <PersonalAiConnect />
+          <PersonalMcpConnect />
           <details className="card group p-6">
-            <summary className="cursor-pointer select-none text-[15px] font-semibold">고급 · 개발자 PC 연결</summary>
+            <summary className="cursor-pointer select-none text-[15px] font-semibold">고급 · 개발 요청을 누가 코딩할지</summary>
             <div className="mt-4 space-y-6">
-              <p className="text-sm text-ink-700">개발자가 자기 PC의 Claude Code·Codex·Cursor로 작업 목록에서 요청 작업을 가져가 코딩하게 해요. 여기서 쓰는 토큰은 작업 대기열 전용이에요.</p>
+              <p className="text-sm text-ink-700">기획에서 넘어온 요청 작업을 서버 AI가 코딩할지, 내 AI 도구(위 연결 방법으로 붙인 Claude Code 등)가 작업 목록에서 가져가 코딩할지 정해요.</p>
               <DevPcSection />
             </div>
           </details>

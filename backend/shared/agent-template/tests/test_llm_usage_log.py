@@ -218,7 +218,7 @@ def _rec(log_id: str, account_id: str | None = None) -> LlmCallRecord:
 
 
 def test_account_id_is_stored_and_can_be_filtered(store: SqliteUsageStore) -> None:
-    """개인 키 호출의 계정 칸(11/20). 계정을 주면 그 계정 호출만, 안 주면 모두."""
+    """개인 MCP 연결 호출의 계정 칸(11/20). 계정을 주면 그 계정 호출만, 안 주면 모두."""
     store.write(_rec("a"))
     store.write(_rec("b", "acc-1"))
     store.write(_rec("c", "acc-2"))
@@ -263,3 +263,62 @@ def test_record_call_takes_an_account_id(store: SqliteUsageStore) -> None:
     )
     [record] = _all(store, tenant_id="catbooks")
     assert record.account_id == "acc-1"
+
+
+def test_account_scope_fills_the_account_of_calls_inside_it(store: SqliteUsageStore) -> None:
+    """개인 MCP 연결로 시킨 일 안의 호출은 그 사람 계정으로 남는다. 밖은 None(11/20)."""
+    with llm_usage.account_scope("acc-7"):
+        llm_usage.record_call(
+            source="data", department="data", model="m", input_tokens=2, output_tokens=3,
+            success=True, tenant_id="catbooks",
+        )
+    llm_usage.record_call(
+        source="data", department="data", model="m", input_tokens=1, output_tokens=1,
+        success=True, tenant_id="catbooks",
+    )
+    with llm_usage.account_scope(None):
+        llm_usage.record_call(
+            source="data", department="data", model="m", input_tokens=1, output_tokens=1,
+            success=True, tenant_id="catbooks",
+        )
+    rows = _all(store, tenant_id="catbooks")
+    assert [r.account_id for r in rows] == ["acc-7", None, None]
+
+
+@pytest.mark.asyncio
+async def test_a2a_request_on_behalf_of_names_the_account_of_its_llm_calls(
+    store: SqliteUsageStore,
+) -> None:
+    """받은 A2A 메타의 on_behalf_of가 그 요청을 처리하며 부른 LLM 호출의 계정 칸이 된다."""
+    from ax_agent_template.server import create_agent_app
+    from ax_contracts.schemas import AgentCard, AgentRequest, AgentResult, TaskStatus
+
+    card = AgentCard.model_validate(
+        {
+            "name": "usage_agent", "owner": "test", "description": "테스트용",
+            "url": "http://usage_agent:9999/a2a",
+            "skills": [{
+                "id": "talk", "description": "talk 테스트 skill. 상태를 바꾸지 않는다.",
+                "input_schema": "x", "output_schema": "x", "grade": "read",
+                "allowed_requesters": ["orchestrator"], "priority": "optional",
+            }],
+        }
+    )
+
+    async def talk(request: AgentRequest) -> AgentResult:
+        await MockLLMClient(dept="usage").embed(["x"], context_id=request.meta.context_id)
+        return AgentResult(meta=request.meta, status=TaskStatus.COMPLETED, output={})
+
+    import httpx
+
+    app = create_agent_app(card, {"talk": talk})
+    deadline = (datetime.now(UTC) + timedelta(seconds=60)).isoformat()
+    for person in ("acc-9", None):
+        meta: dict = {"context_id": "ctx-u", "token": "mock:orchestrator", "deadline": deadline}
+        if person:
+            meta["on_behalf_of"] = person
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://u") as http:
+            res = await http.post("/a2a", json={"meta": meta, "skill": "talk", "input": {}})
+        assert res.status_code == 200 and res.json()["status"] == "completed", res.text
+    assert [r.account_id for r in _all(store)] == ["acc-9", None]

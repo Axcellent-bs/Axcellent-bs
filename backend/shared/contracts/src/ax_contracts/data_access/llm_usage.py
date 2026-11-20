@@ -15,9 +15,10 @@ from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
 class LlmCallRecord(AxModel):
     """LLM 호출 1회. `context_id`는 사건과 무관한 호출이면 None이다.
 
-    `account_id`: 개인 키(개인 AI 연결)로 부른 호출이면 그 사람의 계정 ID, 회사 키·체험 키 호출이면
-    None(옛 기록도 None). 개인 키 호출은 회사 월 예산에 세지 않고 개인 한도로만 센다(11/20).
-    값은 공통 LLM 호출부가 개인 키를 골랐을 때 채운다.
+    `account_id`: 개인 MCP 연결(내 AI 도구 → MCP)로 시킨 일에서 나온 호출이면 그 사람의 계정 ID,
+    아니면 None(옛 기록도 None). 회사 키로 부른 호출이라 회사 월 예산에도 그대로 세고, 같은 기록을
+    "회사 예산 중 내 MCP 몫(%)"으로도 센다(11/20). 값은 받은 A2A 요청의
+    `RequestMeta.on_behalf_of`에서 에이전트 서버가 채운다.
     """
 
     log_id: str
@@ -44,7 +45,7 @@ class LlmUsageQuery(AxModel):
     to: UtcDatetime | None = None
     limit: int = Field(default=1000, ge=1, le=5000)
     tenant_id: str = TENANT_ID_DEFAULT
-    # 이 계정의 개인 키 호출만. None이면 계정을 가리지 않는다
+    # 이 계정이 개인 MCP 연결로 시킨 호출만. None이면 계정을 가리지 않는다
     account_id: str | None = None
 
 

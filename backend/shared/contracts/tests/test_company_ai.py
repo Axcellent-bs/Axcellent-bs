@@ -72,3 +72,15 @@ def test_key_names_are_the_three_from_the_design() -> None:
         "DEV_CODER_LLM_API_KEY",
         "MARKETING_VIDEO_API_KEY",
     )
+
+
+def test_monthly_limit_percent_is_optional_and_between_1_and_100() -> None:
+    """월 예산 상한 %(예산의 몇 %에 이르면 AI 호출을 멈출지, 11/20). None이면 100으로 본다."""
+    assert CompanyAiSettings().monthly_limit_percent is None
+    assert CompanyAiSettings(monthly_limit_percent=80).monthly_limit_percent == 80
+    for bad in (0, 101, -1):
+        with pytest.raises(ValidationError):
+            CompanyAiSettings(monthly_limit_percent=bad)
+    old = CompanyAiSettings().model_dump(mode="json")
+    old.pop("monthly_limit_percent")
+    assert CompanyAiSettings.model_validate(old).monthly_limit_percent is None

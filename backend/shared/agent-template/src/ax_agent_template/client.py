@@ -4,7 +4,7 @@
 
 1. 호출 전에 `path`에 자기 이름을 붙이고, 토큰은 자기 에이전트 토큰으로 바꾼다
    (받는 쪽은 토큰에서 요청자를 꺼낸다). 나머지 메타(`on_behalf_of` 포함)는 그대로 복사한다.
-   문맥에 사람 계정이 묶여 있으면(dashboard-api, `on_behalf.py`) `on_behalf_of`를
+   문맥에 사람 계정이 묶여 있으면(개인 MCP 연결, `on_behalf.py`) `on_behalf_of`를
    그 값으로 덮어쓴다.
 2. `deadline`이 이미 지났으면 호출하지 않고 `canceled`(`TIMEOUT`)를 돌려준다.
 3. 마감까지 응답이 없으면 포기하고 `canceled`(`TIMEOUT`), 연결·응답 오류는 `failed`로 돌려준다.
@@ -71,7 +71,7 @@ async def call_agent(
 
     update: dict[str, object] = {"path": [*req.meta.path, name], "token": agent_token(name)}
     is_bound, person = on_behalf.bound()
-    if is_bound:  # dashboard-api: 세션 계정(세션이 아니면 None)으로 덮어쓴다
+    if is_bound:  # 개인 MCP 연결: 토큰 주인 계정으로 덮어쓴다
         update["on_behalf_of"] = person
     meta = req.meta.model_copy(update=update)
     sent = req.model_copy(update={"meta": meta})

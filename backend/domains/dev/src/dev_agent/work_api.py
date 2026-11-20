@@ -5,6 +5,9 @@
   `initialize`·`tools/list`·`tools/call`·`ping`). 패키지를 더 넣지 않는다.
 - 작업 대기열 토큰(`DEV_WORK_TOKENS`, work_auth.py)을 받는다. 한동안 사람 토큰도 받는다.
   토큰 이름이 가져간 사람이 된다.
+- 개인 MCP 연결 토큰(`axm_…`, 11/20)도 받는다. dashboard-api 검사(고른 AI 직원·한도)를 지나면
+  토큰 주인 계정으로 도구를 돌린다: 그동안 `on_behalf`(A2A 메타 `on_behalf_of`)와 LLM 사용 기록
+  계정(`llm_usage.account_scope`)이 그 계정이다. 도구 입력에 적힌 계정 값은 쓰지 않는다.
 - 상태 변화는 work_queue.py. 사용법은 docs/dev-mcp.md.
 """
 
@@ -13,16 +16,20 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
+from ax_agent_template import llm_usage, on_behalf
 from ax_workflow.core import ActionError, GateRefused
 from dev_agent import work_queue
 from dev_agent.service import DevService
 from dev_agent.wording import gate_text
-from dev_agent.work_auth import require_worker
+from dev_agent.work_auth import Caller, require_caller
+
+# 부른 사람(작업·사람 토큰, 개인 MCP 연결 토큰). work_auth.require_caller
+CallerDep = Annotated[Caller, Depends(require_caller)]
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")  # 앞이 최신
 SERVER_INFO = {"name": "axcellent-dev-work", "version": "0.1.0"}
@@ -139,6 +146,18 @@ async def _run(svc: DevService, who: str, name: str, args: dict) -> Any:
     raise _Bad(f"모르는 도구: {name}")
 
 
+async def _as(svc: DevService, caller: Caller, name: str, args: dict) -> Any:
+    """`_run`을 부른 사람으로 돌린다. 개인 MCP 연결이면 그 계정을 문맥에 묶는다."""
+    if caller.account_id is None:
+        return await _run(svc, caller.name, name, args)
+    token = on_behalf.bind(caller.account_id)
+    try:
+        with llm_usage.account_scope(caller.account_id):
+            return await _run(svc, caller.name, name, args)
+    finally:
+        on_behalf.unbind(token)
+
+
 def _fail(exc: Exception) -> tuple[int, str, str]:
     if isinstance(exc, ActionError):
         return STATUS.get(exc.code, 400), exc.code, exc.message
@@ -168,10 +187,10 @@ def _rpc(id_: Any, result: Any = None, error: dict | None = None) -> JSONRespons
 
 
 def add_work_routes(router: APIRouter, get_service: Callable[[], DevService]) -> None:
-    async def rest(who: str, name: str, args: dict) -> dict | JSONResponse:
+    async def rest(who: Caller, name: str, args: dict) -> dict | JSONResponse:
         svc = get_service()
         try:
-            data = await _run(svc, who, name, args)
+            data = await _as(svc, who, name, args)
         except (ActionError, GateRefused, _Bad) as exc:
             status, code, message = _fail(exc)
             return JSONResponse(
@@ -187,30 +206,30 @@ def add_work_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
         return body if isinstance(body, dict) else {}
 
     @router.get("/work/tasks", response_model=None)
-    async def list_work(who: str = Depends(require_worker)) -> dict | JSONResponse:
+    async def list_work(who: CallerDep) -> dict | JSONResponse:
         return await rest(who, "list_tasks", {})
 
     @router.post("/work/tasks/{task_id}/claim", response_model=None)
-    async def claim_work(task_id: str, who: str = Depends(require_worker)) -> dict | JSONResponse:
+    async def claim_work(task_id: str, who: CallerDep) -> dict | JSONResponse:
         return await rest(who, "claim_task", {"task_id": task_id})
 
     @router.post("/work/tasks/{task_id}/progress", response_model=None)
     async def progress_work(
-        task_id: str, request: Request, who: str = Depends(require_worker)
+        task_id: str, request: Request, who: CallerDep
     ) -> dict | JSONResponse:
         """`{text}` 진행 글. 임대가 늘어난다."""
         return await rest(who, "report_progress", {**await body_of(request), "task_id": task_id})
 
     @router.post("/work/tasks/{task_id}/pr", response_model=None)
     async def pr_work(
-        task_id: str, request: Request, who: str = Depends(require_worker)
+        task_id: str, request: Request, who: CallerDep
     ) -> dict | JSONResponse:
         """`{number, url?}` 올린 PR 번호."""
         return await rest(who, "report_pr", {**await body_of(request), "task_id": task_id})
 
     @router.post("/work/tasks/{task_id}/release", response_model=None)
     async def release_work(
-        task_id: str, request: Request, who: str = Depends(require_worker)
+        task_id: str, request: Request, who: CallerDep
     ) -> dict | JSONResponse:
         """`{reason?}` 내려놓기 → 대기열."""
         return await rest(who, "release_task", {**await body_of(request), "task_id": task_id})
@@ -223,7 +242,7 @@ def add_work_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
         return Response(status_code=405, headers={"Allow": "POST"})
 
     @router.post("/mcp", response_model=None)
-    async def mcp(request: Request, who: str = Depends(require_worker)) -> Response:
+    async def mcp(request: Request, who: CallerDep) -> Response:
         bad = origin_refused(request.headers.get("origin"))
         if bad:  # MCP 규칙: 브라우저에서 온 요청(DNS 리바인딩)은 Origin을 보고 403
             return JSONResponse({"error": {"code": "FORBIDDEN", "message": bad}}, status_code=403)
@@ -259,7 +278,7 @@ def add_work_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
         if name not in {t["name"] for t in TOOLS}:
             return _rpc(id_, error={"code": -32602, "message": f"모르는 도구: {name}"})
         try:
-            data = await _run(get_service(), who, str(name), args)
+            data = await _as(get_service(), who, str(name), args)
         except (ActionError, GateRefused, _Bad) as exc:
             _, code, message = _fail(exc)
             text = json.dumps({"error": {"code": code, "message": message}}, ensure_ascii=False)

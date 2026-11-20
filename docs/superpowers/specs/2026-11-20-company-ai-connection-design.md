@@ -110,7 +110,7 @@
 - 서버 시작 때 만드는 이벤트 소비 작업(`events.py`)·스케줄 작업은 contextvar 회사 ID가 비어 있다. 이 경로는 이벤트·작업에 실린 회사 ID를 넘기고, 없으면 `from_env` 폴백 또는 멈춤을 경로별로 명시한다(2번 PR에서 42곳 기준 목록)
 
 월 예산 검사
-- 부르기 전에 이번 달 회사 사용 토큰(`llm_usage` 합)과 `monthly_budget_tokens`를 비교. 넘으면 `BUDGET_EXHAUSTED`로 멈춘다
+- 부르기 전에 이번 달 회사 사용 토큰(`llm_usage` 합)과 `monthly_budget_tokens × monthly_limit_percent`(없으면 100%)를 비교. 넘으면 `BUDGET_EXHAUSTED`로 멈춘다
 - 80%·100%에 관리자 알림 한 번씩
 - data의 `llm_budget.py`(일 상한·예비 비율)는 부서 안쪽 한도로 남기고 회사 예산 아래에서 돈다
 
@@ -152,58 +152,71 @@
 - 모델·예산 변경도 같은 규칙인지 → 열린 질문 2
 - 상태 변경은 agent-template `execute()`로만(규칙). 이력에는 지문·끝 4자리만
 
-## 9. 개인 AI 연결 (내 연결) — 11/20 예진 결정으로 고침
+## 9. 개인 MCP 연결 (내 연결) — 11/20 예진 결정으로 다시 고침
 
-시스템 관리 › 도구 연결 › 내 연결 › "내 AI 도구로 AXcellent 쓰기". **연결을 간단하게** 한다.
+시스템 관리 › 도구 연결 › 내 연결. **내 연결은 API 키 연결이 아니라 MCP 연결이다.** 내 AI 도구(Claude Code·Codex·Cursor)가
+MCP로 AXcellent에 붙어 AI 직원에게 일을 시킨다. 모델·비용은 내 도구 몫이라 키·모델·주소는 받지 않는다
+(예전 안: 개인 API 키·모델·주소·월 한도 토큰 → 뺐다).
 
-화면
-- 입력은 네 가지: API 키, 모델, 주소(목록에 없는 모델·OpenAI 호환일 때만), 월 한도(토큰)
-- "내 키로 부를 AI 직원" 고르기: 총괄·고객지원·재무·데이터분석·인사·마케팅·기획·개발·인프라·아카이브
-  (계약 `PERSONAL_AI_AGENTS`, 서비스 목록·LLM 부서 이름과 같다). 고른 직원에게 **내가** 일을 시킬 때만 회사 키 대신 내 키로 부른다
-- 상태: 연결됨(끝 4자리)·이번 달 내 키 사용량/한도 %·고른 직원 칩. 저장·키 지우기. 키는 저장 뒤 끝 4자리만
-- 나만 보이고 나만 바꾼다(관리자도 남의 개인 키·설정을 못 본다). 고객사 관리자·일반회원 모두 쓴다(운영자는 아님)
+화면 (카드 순서)
+1. **내 AI 도구로 AXcellent 쓰기**: 상태 칩 `연결됨 ••••끝4` / `연결 안 됨`. [연결 토큰 발급] → 원문은 점선 상자에
+   "지금 한 번만 보여요" + 복사 + [다 넣었어요]. 발급 뒤 [다시 발급](옛 것 바로 무효) [끊기]
+2. **쓸 AI 직원**: 체크 칩 10개(총괄·고객지원·재무·데이터분석·인사·마케팅·기획·개발·인프라·아카이브, 계약 `PERSONAL_MCP_AGENTS`,
+   서비스 목록·LLM 부서 이름과 같다). 고른 직원만 이 토큰으로 부를 수 있다(고르지 않은 직원은 막힘)
+3. **한도**: 회사 월 예산(토큰) 중 내 MCP 사용이 쓸 수 있는 몫 %(1~100, 비우면 제한 없음).
+   막대 + "이번 달 N / 한도 토큰 (내 몫의 x%) · 회사 예산의 y%". 실제 기록에서 센 값만
+4. **연결 방법**: Claude Code·Codex·Cursor 세그먼트 + 복사용 설정. 토큰 자리는 `axm_…`(원문은 설정 글에 싣지 않는다).
+   MCP 주소는 예전 개발자 PC 연결 안내와 같은 개발 서비스 MCP 서버 `<개발 서비스>/api/planning/mcp`, 서버 이름 `axcellent-dev`
+5. [저장] (고른 직원·내 몫 %)
+6. 접기 "고급 · 개발 요청을 누가 코딩할지": 요청 작업 코딩 방식(자동·서버 AI·내 Claude) 그대로
+- 나만 보이고 나만 바꾼다(관리자도 남의 토큰·설정을 못 본다). 고객사 관리자·일반회원 모두 쓴다(운영자는 아님)
 
-저장 (dashboard-api `personal_ai.py`, 계약 `ax_contracts.schemas.personal_ai`)
-- 키: 키 저장소(`ax-secret-store`) 이름 `PERSONAL_LLM_API_KEY`, tenant = `p-` + `sha256("<회사 ID>
-<계정 ID>")` 앞 38자.
-  회사 ID와 계정 ID **둘 다**로 나눈다 → 회사 키(tenant=회사 ID)·같은 회사 다른 계정·다른 회사 같은 계정과 섞이지 않는다(시험).
-  키 관리 화면은 담당 고객사 tenant만 보이므로 여기에도 안 나온다. 나만 쓰는 키라 승인 없이 바로 적용
-- 설정: 회사 AI 설정 폴더 `<회사 ID>/personal/<sha256(계정 ID) 앞 32자>.json`(계약 `PersonalAiSettings`:
-  model·provider·base_url·monthly_limit_tokens·agents). 이력은 같은 이름 `.history.jsonl`, 키는 끝 4자리만
-- 키 저장소가 꺼져 있으면 키·설정 저장을 막고 이유(409 `SECRET_STORE_DISABLED`)
+토큰 (dashboard-api `personal_mcp.py`, 계약 `ax_contracts.schemas.personal_mcp`)
+- `axm_` + 무작위 32바이트. 원문은 발급·다시 발급 응답에만. 저장은 **sha256 해시만**
+  (`<AI 설정 폴더>/personal_mcp_tokens.json`: 해시 → 회사 ID·계정 ID). 회사 ID는 로그인 세션의 회사(#1524 `company_id`)
+- 설정: `<AI 설정 폴더>/<회사 ID>/personal/<sha256(계정 ID) 앞 32자>.json`(고른 직원·내 몫 %·끝 4자리·발급 시각).
+  이력은 같은 이름 `.history.jsonl`(settings·token_issue·token_reissue·token_delete). 키 저장소는 쓰지 않는다
+- 계정이 없어지면 검사에서 `ACCOUNT_GONE`
 
-API (로그인 세션만, 본인만. 에이전트·공용 토큰 403. 경로·본문에 계정 자리 없음. nginx: GET·HEAD·POST만)
+API (보기·발급·설정은 로그인 세션 본인만. 에이전트·공용 토큰 403. 경로·본문에 계정 자리 없음. nginx: GET·HEAD·POST만,
+`/dashboard-api/api/dashboard/me/ai-connection` 아래 최대 3단계)
 
 | 메서드 | 경로 | 하는 일 |
 |---|---|---|
-| GET | `/api/dashboard/me/ai-connection` | 내 상태·설정·이번 달 사용량·고를 수 있는 직원 |
-| POST | `/api/dashboard/me/ai-connection/settings` | 모델·주소·월 한도·고른 직원(전체 저장) |
-| POST | `/api/dashboard/me/ai-connection/key` | 키 넣기·바꾸기 |
-| POST | `/api/dashboard/me/ai-connection/key/delete` | 키 지우기 |
+| GET | `/api/dashboard/me/ai-connection` | 내 상태·토큰 끝 4자리·고른 직원·내 몫·이번 달 사용량 |
+| POST | `/api/dashboard/me/ai-connection/token` | 발급(이미 있으면 409 `TOKEN_EXISTS`) |
+| POST | `/api/dashboard/me/ai-connection/token/reissue` | 다시 발급(옛 것 바로 무효) |
+| POST | `/api/dashboard/me/ai-connection/token/delete` | 끊기 |
+| POST | `/api/dashboard/me/ai-connection/settings` | 고른 직원·내 몫 %(전체 저장) |
+| POST | `/api/dashboard/me/ai-connection/mcp/check` | MCP 서버 → 토큰 검사(**에이전트 토큰 `dev`만**, `auth.MACHINE_ROUTES`) |
 
-누가 시켰나 (`RequestMeta.on_behalf_of`, 계약 추가)
-- dashboard-api가 사람 로그인 세션 요청일 때만 세션 계정으로 채운다(미들웨어 → `call_agent`가 덮어씀). 본문·다른 출처 값은 버린다. 에이전트·공용 토큰 요청은 비운다
-- `call_agent`는 메타를 복사하므로 총괄 → 부서로 이어진다(시험). 다만 총괄이 새 `RequestMeta`를 만드는 경로(요청 작업 `request_runner`, 사건 단계 `engine` 등)는 아직 안 이어진다 → 후속
-- **dashboard-api에서 시작한 요청에서만 믿는다.** 에이전트가 적어 넣어 남의 개인 키를 쓰지 못하게, 읽는 쪽이 확인한다
+MCP 서버 (새로 만들지 않고 기존 개발 서비스 작업 대기열 MCP `/api/planning/mcp`에 붙였다)
+- `work_auth.require_caller`: 토큰이 `axm_`로 시작하면 dashboard-api 검사 API에 묻는다(계약 `PersonalMcpCheckInput`
+  `{token, agent: "dev"}` → `PersonalMcpCheckOutput`). 도메인끼리 import하지 않는다. 작업 토큰·사람 토큰은 예전 그대로
+- 막힌 이유는 계약 `code`·`message` 그대로: `TOKEN_UNKNOWN`·`ACCOUNT_GONE` 401, `AGENT_NOT_CHOSEN` 403,
+  `LIMIT_REACHED`·`COMPANY_LIMIT_REACHED` 429. dashboard-api에 닿지 않으면 통과시키지 않고 503 `MCP_CHECK_UNAVAILABLE`
+- 지금 이 서버의 도구는 개발 AI 작업 대기열(목록·가져가기·진행·PR·내려놓기)뿐이라 실제로 부를 수 있는 직원은 **개발 AI**.
+  다른 직원 도구(직원별 대화·업무 skill)는 후속(열린 질문 5)
+
+누가 시켰나 (`RequestMeta.on_behalf_of`, 계약 추가 · 비면 직렬화에서 뺀다)
+- MCP 서버가 검사를 지난 요청의 도구를 돌리는 동안 토큰 주인 계정을 `ax_agent_template.on_behalf`로 묶는다 →
+  `call_agent`가 메타 값을 덮어쓴다(도구 입력·본문 값은 버린다). 메타를 복사하므로 총괄 → 부서로 이어진다
+- dashboard-api 사람 세션 미들웨어(예전 안)는 뺐다. 화면에서 시킨 일까지 "내 MCP 사용량"에 섞이지 않게
+- **권한 판단에는 쓰지 않는다.** 기록·사용량 셈에만
 
 사용량·한도
-- `llm_calls`에 `account_id` 칸(계약 `LlmCallRecord.account_id`, 옛 DB는 시작 때 한 번 `ALTER TABLE`). 개인 키로 부른 호출에만 채운다(공통 LLM 호출부 몫)
-- **개인 키 호출은 회사 월 예산·회사 사용량에 세지 않고 개인 한도로만 센다**(제안, 예진 확인 중). 회사 쪽 합계는 `account_id`가 빈 기록만
-- 개인 사용량 % = 이번 달(회사 시간대) 이 회사·이 계정 기록 합 / `monthly_limit_tokens`
+- `llm_calls.account_id`(계약 `LlmCallRecord.account_id`, 옛 DB는 시작 때 한 번 `ALTER TABLE`): 에이전트 서버가 받은 A2A 메타의
+  `on_behalf_of`로 처리 중 LLM 호출 기록에 계정을 붙인다(`llm_usage.account_scope`, server.py). MCP 서버 자신도 같다
+- MCP로 시킨 일도 **회사 키로 돈다 → 회사 월 예산·회사 사용량에 그대로 센다**(예전 안의 "개인 키 호출 제외"는 뺐다)
+- 내 사용량 = 이번 달(회사 시간대) 이 회사·이 계정 기록 합. 내 몫 = 회사 월 예산 × 내 몫 %. 예산이 없으면 % 한도는 걸지 않는다
+- 회사 상한(`CompanyAiSettings.monthly_limit_percent`, 아래)에 이르면 MCP도 막는다
 
-공통 LLM 호출부(`settings_for`, 준하 님 몫)가 고를 순서 — 제안
-1. 요청이 dashboard-api 사람 세션에서 시작했고(`on_behalf_of`가 있고 믿을 수 있음) 그 사람이 이 직원을 `agents`에 골랐고 개인 키가 있으면 → **개인 키**(개인 모델·주소, 개인 한도 검사, 기록에 `account_id`)
-2. 아니면 → 회사 키(4장)
-3. 회사 키도 없으면 → 체험 키(4장)
-- 개인 한도를 다 쓰면 `PERSONAL_LIMIT_EXHAUSTED`로 멈춘다. **개인 키 호출이 실패해도 회사 키로 자동 전환하지 않고 멈춘다**(내 키 문제를 회사 비용으로 덮지 않는다)
-
-### 9.1 개발자 PC MCP 연결 (예전 개인 연결 토큰 안)
-화면에서는 내 연결 › "고급 · 개발자 PC 연결" 접기 안에 있다(요청 작업 코딩 방식 + Claude Code·Codex·Cursor MCP 안내).
-- 각자 화면에서 만든다. 만들 때 한 번만 원문을 보여 주고 이후엔 이름·끝 4자리·만든 날·마지막 사용
-- 저장은 해시만(dashboard-api 계정 저장소, 회사 ID·사람 ID 붙임). 만료 기본 90일, 언제든 끊기
-- 권한은 지금 `DEV_WORK_TOKENS`와 같은 **좁은 권한**(작업 대기열·읽기). 관문 승인·머지·재무 같은 사람 결정은 못 한다
-- `work_auth.py`는 환경변수 토큰과 함께 이 토큰도 받게 하고, 옮긴 뒤 환경변수 방식은 끈다
-- 개인 도구의 LLM 요금은 개인 계정 → 회사 예산·사용량에 세지 않는다
+### 9.1 회사 월 예산 상한 % (11/20 추가)
+- 공통 AI 도구 연결 › 회사 AI 모델: 월 예산(토큰) 옆 **상한 %**(1~100, 비우면 100). 계약 `CompanyAiSettings.monthly_limit_percent`(필드 추가만)
+- 이력·알림은 모델·예산 변경과 같다(바로 적용 + 회원 알림, 이력 `changed`에 `monthly_limit_percent`)
+- 상태 `budget_exhausted`는 사용량 ≥ 예산 × 상한 %일 때. `/ai-connection/status`·`/usage`에 `limit_percent`·`limit_tokens`
+- 화면: 사용량 막대에 상한선(세로 선) + "x%(N 토큰)에서 멈춰요"
+- 실제로 LLM 호출을 멈추는 검사는 공통 LLM 호출부 몫(4장 월 예산 검사, 준하 님). 지금은 상태 표시와 개인 MCP 검사만 막는다
 
 ## 10. 이전 계획
 
@@ -221,9 +234,9 @@ API (로그인 세션만, 본인만. 에이전트·공용 토큰 403. 경로·�
 | 4 | 화면: 공통 AI 도구 연결 탭, AI 연결 탭 | frontend | 예진 |
 | 5 | dev BYOK 이전·체험 한도 합치기·코딩 분리 | dev | 예진 |
 | 6 | 마케팅 영상 키 화면 이전·예산 표시 맞추기(#1490과 맞춤) | marketing | **재헌 님** |
-| 7 | 개인 AI 연결(9장: 키·설정·`on_behalf_of`·사용량 계정 칸) | contracts, agent-template, dashboard-api, frontend | 예진 |
-| 7-2 | `settings_for` 개인 키 고르기(9장 순서) | agent-template | **준하 님** |
-| 7-3 | 개발자 PC MCP 토큰 + `work_auth`(9.1) | dashboard-api, dev | 예진 |
+| 7 | 개인 MCP 연결(9장: 토큰·고른 직원·내 몫 %·`on_behalf_of`·사용량 계정 칸·MCP 서버 검사) + 회사 상한 %(9.1) | contracts, agent-template, dashboard-api, dev, frontend | 예진 |
+| 7-2 | 월 예산 검사에 상한 % 반영(4장) | agent-template | **준하 님** |
+| 7-3 | MCP 서버에 개발 AI 밖 직원 도구 붙이기(열린 질문 5) | dashboard-api 또는 각 도메인 | 결정 대기 |
 
 순서: 1 → 2 → (3, 5, 6 나란히) → 4 → 7. 1·3은 예진이 한 PR로 묶어 먼저 진행(계약 `CompanyAiSettings` 포함, 회사 ID는 지금 있는 `tenant.current()`). 2(준하 님)는 1과 회사 공간 1단계(`meta.tenant_id` 채우기) 머지 뒤 시작. 번호는 이 표를 기준으로 부른다.
 
@@ -239,5 +252,7 @@ API (로그인 세션만, 본인만. 에이전트·공용 토큰 403. 경로·�
 2. 모델·예산 변경도 다른 관리자 승인을 받을지(추천: 예산을 **올리는** 것만 승인, 모델 변경·예산 내리기는 바로 + 알림)
 3. 체험 키를 둘지, 회사 공간 설계대로 "키 없으면 멈춤"만 할지(추천: 체험 키는 회사별 토큰 한도로 두고 사용량을 그 회사로 센다)
 4. 월 예산의 "월" 기준(추천: 회사 시간대 1일 0시)
-5. 개발자 PC MCP 토큰 만료 기본값(추천: 90일)
-6. 개인 키 호출을 회사 예산에서 빼는 것 확정(9장 제안, 예진 확인 중)
+5. 개인 MCP 연결로 개발 AI 밖 직원을 부르는 길(9장). 직원별 대화 skill(`*_chat_send`)은 요청자가 dashboard-api만이라
+   (a) dashboard-api에 MCP 도구 창구를 두거나 (b) 각 직원 카드 `allowed_requesters`에 MCP 서버를 더해야 한다. 추천: (a)
+6. 개인 MCP 연결 토큰 만료(지금은 만료 없음, 다시 발급·끊기로만. 추천: 90일)
+7. ~~개인 키 호출을 회사 예산에서 빼는 것~~ → 11/20: 개인 키 안을 뺐다. MCP로 시킨 일은 회사 키로 돌아 회사 예산에 센다

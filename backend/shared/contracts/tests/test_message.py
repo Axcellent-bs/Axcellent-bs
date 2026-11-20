@@ -118,7 +118,7 @@ def test_result_roundtrip_json() -> None:
 
 
 def test_on_behalf_of_is_optional_and_defaults_to_none() -> None:
-    """사람 계정 ID 칸(개인 AI 연결, 11/20). 옛 메타는 그대로 읽힌다."""
+    """사람 계정 ID 칸(개인 MCP 연결, 11/20). 옛 메타는 그대로 읽힌다."""
     assert _meta().on_behalf_of is None
     meta = _meta(on_behalf_of="acc-1")
     assert meta.on_behalf_of == "acc-1"

@@ -7,6 +7,10 @@
 저장소는 SQLite 파일 하나다(WAL). 위치는 환경변수 `AX_LLM_USAGE_DB`로 정하고, 비어 있으면 파일에
 쓰지 않는다(표준 로거에만 남긴다). 프롬프트·응답·고객 원문은 담지 않는다(부서·모델 이름과 숫자만).
 기록이 실패해도 LLM 호출은 멈추지 않는다(경고만 남긴다).
+
+계정 칸(`account_id`, 11/20): 개인 MCP 연결로 시킨 일이면 그 사람 계정. 에이전트 서버가 받은
+A2A 메타의 `on_behalf_of`로 `account_scope`를 열고(server.py), 그 안의 호출은 따로 넘기지 않아도
+그 계정으로 남는다. 회사 키 호출이라 회사 사용량에도 그대로 센다.
 """
 
 from __future__ import annotations
@@ -16,6 +20,9 @@ import os
 import sqlite3
 import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -23,6 +30,17 @@ from ax_contracts.data_access.llm_usage import LlmCallRecord, LlmUsageQuery, Llm
 
 DB_ENV = "AX_LLM_USAGE_DB"
 _logger = logging.getLogger("ax.llm_usage")
+_account: ContextVar[str | None] = ContextVar("ax_llm_usage_account", default=None)
+
+
+@contextmanager
+def account_scope(account_id: str | None) -> Iterator[None]:
+    """이 안의 LLM 호출 기록에 계정을 붙인다(개인 MCP 연결로 시킨 일). None이면 계정 없음."""
+    token = _account.set(account_id or None)
+    try:
+        yield
+    finally:
+        _account.reset(token)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS llm_calls (
@@ -183,7 +201,7 @@ def record_call(
 ) -> None:
     """호출 1회의 사용량을 저장소에 남긴다. 실패해도 예외를 밖으로 내지 않는다.
 
-    `account_id`는 개인 키로 부른 호출일 때만 넘긴다(공통 LLM 호출부 몫, 11/20).
+    `account_id`를 넘기지 않으면 `account_scope`로 열린 계정(없으면 None)을 쓴다(11/20).
     """
     try:
         fields = {
@@ -196,7 +214,7 @@ def record_call(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "success": success,
-            "account_id": account_id,
+            "account_id": account_id if account_id is not None else _account.get(),
         }
         if tenant_id is not None:
             fields["tenant_id"] = tenant_id

@@ -9,16 +9,20 @@
   `check_admin`)는 이 토큰을 모르는 토큰(401)으로 본다.
 - 토큰 이름이 가져간 사람이 된다 (사람 토큰과 같은 이름을 쓰면 화면의 "내 Claude"와 이어진다).
 - 예전처럼 사람 토큰도 한동안 받는다. `DEV_WORK_ALLOW_HUMAN=0`이면 작업 토큰만 받는다.
+- 개인 MCP 연결 토큰(`axm_…`, 내 연결에서 회원이 발급, 11/20)도 받는다. dashboard-api에 물어
+  주인 계정을 받는다(personal_mcp.py). 이름은 계정 이름, `account_id`는 그 계정(`Caller`).
 """
 
 from __future__ import annotations
 
 import hmac
 import os
+from dataclasses import dataclass
 
 from fastapi import Header
 
 from ax_workflow.auth import AuthError, check_human
+from dev_agent import personal_mcp
 
 
 def _worker(token: str) -> str | None:
@@ -50,3 +54,22 @@ def check_worker(authorization: str | None) -> str:
 
 def require_worker(authorization: str | None = Header(default=None)) -> str:
     return check_worker(authorization)
+
+
+@dataclass(frozen=True)
+class Caller:
+    """작업 대기열·MCP를 부른 사람. 개인 MCP 연결 토큰이면 `account_id`가 그 계정."""
+
+    name: str
+    account_id: str | None = None
+
+
+async def require_caller(authorization: str | None = Header(default=None)) -> Caller:
+    """개인 MCP 연결 토큰이면 dashboard-api 검사, 아니면 작업·사람 토큰 규칙(`check_worker`)."""
+    scheme, _, token = (authorization or "").partition(" ")
+    token = token.strip()
+    if scheme.lower() == "bearer" and personal_mcp.is_personal(token):
+        out = await personal_mcp.verify(token)
+        assert out.account_id  # verify가 확인했다
+        return Caller(name=out.name or out.account_id, account_id=out.account_id)
+    return Caller(check_worker(authorization))

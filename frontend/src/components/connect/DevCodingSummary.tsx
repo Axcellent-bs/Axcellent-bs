@@ -6,7 +6,7 @@ import { Facts, Notice, SectionHead } from './parts'
 // 도구 연결 › AI 연결 › 개발 AI 코딩 (회원 모두, 보기만).
 // 예전 "내 연결"에 있던 개발 AI의 회사 단위 설정(요청 작업 코딩 방식·서버 AI 키·월 예산·단계별 모델)을 보기로 옮겼다(11/20).
 // 값은 개발 AI(dev 서비스 `/api/planning/coding-settings`)가 준 것만. 키는 끝 4자리만.
-// 바꾸는 곳: 코딩 방식은 내 연결 › 고급 · 개발자 PC 연결, 키·모델·예산은 회사 연결 › 공통 AI 도구 연결(관리자).
+// 바꾸는 곳: 코딩 방식은 내 연결 › 고급 · 개발 요청을 누가 코딩할지, 키·모델·예산은 회사 연결 › 공통 AI 도구 연결(관리자).
 
 const MODE_KO: Record<string, string> = { auto: '자동', agent: '서버 AI', subscription: '내 Claude' }
 const STEPS: { id: CodingStep; label: string }[] = [
@@ -39,7 +39,7 @@ export default function DevCodingSummary() {
           <p className="text-xs text-ink-500">
             단계별 모델: {STEPS.map((s) => `${s.label} ${cfg.models?.[s.id] || cfg.model_default || '기본 모델'}`).join(' · ')}
           </p>
-          <Notice tone="info">코딩 방식은 내 연결 › 고급 · 개발자 PC 연결에서, 키·모델·예산은 관리자가 회사 연결 › 공통 AI 도구 연결에서 바꿔요.</Notice>
+          <Notice tone="info">코딩 방식은 내 연결 › 고급 · 개발 요청을 누가 코딩할지에서, 키·모델·예산은 관리자가 회사 연결 › 공통 AI 도구 연결에서 바꿔요.</Notice>
         </>
       )}
     </section>

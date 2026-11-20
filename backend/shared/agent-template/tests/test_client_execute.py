@@ -150,7 +150,7 @@ async def test_call_agent_carries_on_behalf_of_to_the_next_agent(app: FastAPI) -
 
 @pytest.mark.asyncio
 async def test_bound_person_overwrites_whatever_the_meta_says(app: FastAPI) -> None:
-    """dashboard-api가 묶은 값(세션 계정, 세션이 아니면 None)이 메타에 적힌 값을 덮어쓴다."""
+    """MCP 서버가 묶은 값(토큰 주인 계정, 묶은 값이 None이면 None)이 메타에 적힌 값을 덮어쓴다."""
     config.set_agent_name("orchestrator")
     req = _request()
     forged = req.model_copy(update={"meta": req.meta.model_copy(update={"on_behalf_of": "x-9"})})

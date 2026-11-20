@@ -6,6 +6,8 @@
 - 키 값은 이 모양에 없다. 키는 암호화 키 저장소(`ax-secret-store`, tenant=회사 ID)의
   `COMPANY_AI_KEY_NAMES` 이름에 있다
 - 월 예산은 토큰 수(`monthly_budget_tokens`). 화면은 사용 %만 계산해 보인다. None이면 예산 없음
+- 상한 %(`monthly_limit_percent`, 1~100, None이면 100): 사용량이 예산의 이 %에 이르면
+  AI 호출을 멈춘다
 - 모델 이름은 코드에 적지 않는다. `provider="auto"`면 공통 LLM 호출부가 모델 이름 앞부분으로
   공급자를 판별하고, `openai_compatible`이면 `base_url`을 쓴다
 - 임베딩(`embed_model`·`embed_base_url`)은 결정 대기라 선택 칸만 둔다. 비어 있으면 지금처럼
@@ -55,6 +57,8 @@ class CompanyAiSettings(AxModel):
     provider: str = Field("auto", pattern=r"^[a-z0-9_]{1,40}$")
     base_url: str = Field("", max_length=500)
     monthly_budget_tokens: int | None = Field(None, ge=0, le=10**13)
+    # 월 예산의 몇 %에 이르면 AI 호출을 멈출지(1~100). None이면 100(11/20 추가)
+    monthly_limit_percent: int | None = Field(None, ge=1, le=100)
     coder: CompanyAiCoder = Field(default_factory=CompanyAiCoder)
     video: CompanyAiVideo = Field(default_factory=CompanyAiVideo)
     embed_model: str = Field("", max_length=200)

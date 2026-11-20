@@ -67,13 +67,12 @@ class RequestMeta(AxModel):
     - `deadline`: 응답 마감. 넘으면 실행하지 않고 보고한다.
     - `idempotency_key`: `context_id + 액션 + 대상`. 상태 변경 요청이면 필수다.
     - `requester`: 토큰에서 채워지는 값이다. 요청 본문에 적힌 값은 믿지 않고 무시한다.
-    - `on_behalf_of`: 이 일을 시킨 사람의 계정 ID(개인 AI 연결, 11/20). dashboard-api가 사람 로그인
-      세션 요청일 때만 세션의 계정으로 채운다. 요청 본문·다른 출처의 값은 버리고 덮어쓰며,
-      에이전트 토큰·공용 토큰으로 온 요청이면 비운다(`requester`와 같은 방식).
-      `call_agent`는 메타를 복사하므로 총괄 → 부서로 그대로 이어진다.
-      **이 칸은 dashboard-api 토큰으로 시작한 요청에서만 믿는다.** 에이전트가 이 칸을 적어 남의
-      개인 키를 쓰지 못하게, 읽는 쪽(공통 LLM 호출부)은 dashboard-api에서 시작한 요청인지 확인한 뒤
-      쓰고, 그렇지 않으면 없는 값으로 본다. 개인 키를 고를 때 말고는 쓰지 않는다.
+    - `on_behalf_of`: 이 일을 시킨 사람의 계정 ID(개인 MCP 연결, 11/20). MCP 서버(개발 서비스
+      `/api/planning/mcp`)가 개인 MCP 연결 토큰을 dashboard-api에서 검사한 뒤 토큰 주인 계정으로
+      채운다(`ax_agent_template.on_behalf`로 문맥에 묶으면 `call_agent`가 메타 값을 덮어쓴다).
+      요청 본문·도구 입력에 적힌 값은 버린다. `call_agent`는 메타를 복사하므로 다음 에이전트로
+      이어진다. 받는 에이전트 서버는 이 값으로 LLM 사용 기록(`LlmCallRecord.account_id`)을 채워
+      "내 MCP 사용량"을 센다. **권한 판단에는 쓰지 않는다**(누가 시켰는지 기록·사용량 셈에만).
     """
 
     context_id: str

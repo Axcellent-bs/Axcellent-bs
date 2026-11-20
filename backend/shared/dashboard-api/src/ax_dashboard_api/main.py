@@ -17,7 +17,7 @@ from ax_dashboard_api import (
     company_connection,
     handoffs,
     office_room,
-    personal_ai,
+    personal_mcp,
     public_info,
     settlements,
     shop_events,
@@ -30,7 +30,6 @@ from ax_dashboard_api.connection_keys import router as connection_keys_router
 from ax_dashboard_api.cost_limit_routes import router as cost_limit_router
 from ax_dashboard_api.envelope import install_error_handlers, is_mock
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
-from ax_dashboard_api.on_behalf import OnBehalfMiddleware
 from ax_dashboard_api.routes import router
 from ax_dashboard_api.secret_routes import router as secret_router
 from ax_dashboard_api.site_adapter.router import router as site_adapter_router
@@ -120,8 +119,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# 사람 로그인 세션 요청이면 A2A 메타 on_behalf_of에 그 계정을 싣는다(개인 AI 연결, 11/20)
-app.add_middleware(OnBehalfMiddleware)
 install_error_handlers(app)
 app.include_router(router)
 # 영상 비용 상한·안전 정책 화면 (로그인 세션의 운영자·관리자, 변경은 limit_editor·policy_editor)
@@ -131,8 +128,9 @@ app.include_router(secret_router)
 # 회사 AI 설정(고객사 관리자)과 AI 연결 보기(회원 모두): 회사당 키·모델 하나, 키는 끝 글자만
 app.include_router(company_ai.admin_router)
 app.include_router(company_ai.view_router)
-# 도구 연결 › 내 연결: 개인 AI 연결(본인 세션만, 나만 보고 나만 바꾼다)
-app.include_router(personal_ai.router)
+# 도구 연결 › 내 연결: 개인 MCP 연결(본인 세션만)과 MCP 서버의 토큰 검사(에이전트 토큰)
+app.include_router(personal_mcp.router)
+app.include_router(personal_mcp.check_router)
 # 사람 할 일함: 에이전트가 넣는 창구(에이전트 토큰)와 사람이 보는 창구(읽기·쓰기 모두 사람 토큰)
 app.include_router(handoffs.intake)
 app.include_router(handoffs.inbox)
