@@ -1823,9 +1823,12 @@ export interface InstagramRadarGroup {
 // ---- 트렌드 분석 의뢰 보고서 (trend_report_create · trend_report_get · trend_report_list). 백엔드 data skill과 같은 공통 계약.
 // 화면: 트렌드&콘텐츠 "분석 의뢰" 탭 (components/data/TrendRequest.tsx · TrendReportView.tsx)
 export type ReportStatus = "queued" | "running" | "done" | "partial" | "failed" | "interrupted";
-export type SectionStatus = "waiting" | "running" | "known" | "unknown" | "failed";
-/** 의뢰 요약 칸의 출처: 직접 입력 · 의뢰문에서 추정 · 프리셋 */
-export type FieldSource = "input" | "request_text" | "preset";
+/** skipped(#1540): 이 의뢰에는 계산하지 않는 섹션 (주제 후보가 find 의뢰가 아닐 때) */
+export type SectionStatus = "waiting" | "running" | "known" | "unknown" | "failed" | "skipped";
+/** 의뢰 요약 칸의 출처: 직접 입력 · 의뢰문에서 추정 · 프리셋 · 회사 정보(#1491) · 주제 후보(#1540) */
+export type FieldSource = "input" | "request_text" | "preset" | "company" | "theme";
+/** find: 주제 안의 대상을 찾아 순위 · use: 주제를 그대로 씀 (#1540) */
+export type ThemeMode = "find" | "use";
 export type TrendReportCaller = "human" | "orchestrator" | "planning";
 export type TrendReportGender = "f" | "m";
 export interface TrendReportInput {
@@ -1853,6 +1856,9 @@ export interface TrendReportInput {
   goal?: string | null;
   /** 데이터분석 1:1 대화에서 의뢰 카드로 넣었으면 그 대화 id (기본 null) */
   chat_thread_id?: string | null;
+  /** 의뢰 주제("아이돌")와 쓰임 (#1540). 카드·폼 칸 값으로 접수해도 주제가 남게 넘긴다 */
+  theme?: string | null;
+  theme_mode?: ThemeMode | null;
 }
 export interface TrendReportCreated {
   report_id: string;
@@ -1869,12 +1875,36 @@ export interface TrendReportBrief {
   competitors: string[];
   keywords: string[];
   preset: string | null;
-  sources: { product: FieldSource; target: FieldSource; format: FieldSource; competitors: FieldSource; keywords: FieldSource; goal?: FieldSource | null };
+  sources: { product: FieldSource; target: FieldSource; format: FieldSource; competitors: FieldSource; keywords: FieldSource; goal?: FieldSource | null; theme?: FieldSource | null };
   /** v2 (옛 저장본에는 없음) */
   goal?: string | null;
   format_parts?: string[];
   /** 인스타 아이디 → 표시 이름 */
   competitor_names?: Record<string, string | null>;
+  /** #1540 (옛 저장본에는 없음) */
+  theme?: string | null;
+  theme_mode?: ThemeMode | null;
+}
+export type TrendThemeSeenIn = "radar" | "youtube" | "llm";
+export interface TrendThemeRow {
+  name: string;
+  /** 0~100, 가장 큰 후보 = 100 */
+  level: number;
+  /** 최근 7일 평균 ÷ 직전 28일 평균 − 1 (%) */
+  change_pct: number | null;
+  seen_in: TrendThemeSeenIn[];
+  /** 이름이 든 회사 상품 (최대 3) */
+  products: string[];
+  basis: string;
+}
+export interface TrendThemeSection {
+  status: SectionStatus;
+  reason: string | null;
+  theme: string | null;
+  target_word: string;
+  rows: TrendThemeRow[];
+  dropped: { name: string; reason: string }[];
+  method: string;
 }
 export type TrendSearchBasis = "filtered" | "all" | "volume_only" | "none";
 export interface TrendReportSearchRow {
@@ -1948,6 +1978,8 @@ export interface TrendReportSections {
   content: SectionHead & { posts: InstagramRadarPost[]; memes: TrendReportMeme[] };
   competitors: SectionHead & { rows: TrendReportCompetitorRow[]; accounts_failed: { account: string; reason: string }[] };
   recommendation: SectionHead & { conclusion: string | null; beats: TrendReportBeat[]; music_note: string };
+  /** #1540 주제 후보 (옛 저장본은 없거나 기본값 waiting · theme null) */
+  theme?: TrendThemeSection;
 }
 export interface TrendReport {
   report_id: string;
