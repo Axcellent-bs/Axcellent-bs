@@ -260,16 +260,22 @@ export function useAllReleaseChecks(): ReleaseCheck[] {
 
 // ---- 배포 기록·배포 후 확인 (dev 서비스 `/api/planning/deployments`). SSE 상태와 따로 읽는다
 export interface RollbackSuggestion { suspect_count: number; low_confidence: number; irreversible_count: number; prior_rollbacks: number; grade: 'B' | 'C'; rules: string[] }
-export interface DeployCheck { deployment: string; at: string; window_minutes: number; verdict: 'ok' | 'watch' | 'suspect'; evidence: string[]; candidate_prs: string[]; rollback: RollbackSuggestion | null }
+// 배포 후 확인에 쓴 신호. unavailable이면 reason: 연결 없음(not_connected) · 읽다가 오류(error)
+export interface DeploySignal { kind: 'incident' | 'anomaly' | 'unavailable'; source: string; ref: string | null; title: string; at: string | null; reason?: 'not_connected' | 'error' | null }
+export interface DeployCheck { deployment: string; at: string; window_minutes: number; verdict: 'ok' | 'watch' | 'suspect'; evidence: string[]; candidate_prs: string[]; rollback: RollbackSuggestion | null; signals?: DeploySignal[] }
 export interface Deployment {
   id: string; pr_numbers: number[]; version: string | null; env: 'dev' | 'prod'; at: string
-  status: 'requested' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
+  // approved: 배포 허가됨. 배포 도구가 연결되지 않아 실제 배포는 하지 않았다 (executed false)
+  status: 'requested' | 'approved' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
   approved_by: string | null; approval_reasons: string[]; protected_paths: string[]; check: DeployCheck | null
+  /** 배포 도구가 실제로 배포했나. 예전 서버 응답에는 없을 수 있다 (없으면 status로 본다) */
+  executed?: boolean; note?: string | null
 }
 
 export const deployApi = (base: string) => ({
   list: () => call<unknown>(base, '/deployments').then((d) => (Array.isArray(d) ? (d as Deployment[]).filter((x) => x && typeof x.id === 'string') : [])),
-  approve: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, post()),
+  /** 승인자 이름이 꼭 있어야 한다 (서버가 없으면 400 APPROVER_REQUIRED) */
+  approve: (id: string, approvedBy: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, post({ approved_by: approvedBy })),
   check: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/check`, post()),
 })
 
