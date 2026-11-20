@@ -96,7 +96,7 @@ export function CreativeRecords() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">제작 기록</h1>
-          <p className="mt-1 text-sm text-ink-500">SNS·미디어에서 만든 이미지 시트와 이어 만든 스토리보드를 다시 봐요. 최근 200건까지 남고, 올린 원본 이미지는 저장하지 않아 작은 미리보기만 보여요.</p>
+          <p className="mt-1 text-sm text-ink-500">SNS·미디어에서 만든 이미지 시트와 이어 만든 스토리보드를 다시 봐요. 최근 200건까지 남고, 올린 원본 이미지는 저장하지 않아 작은 미리보기만 보여요. 총괄 홍보 영상 의뢰로 만든 영상은 <Link to="/marketing/sns#request-videos" className="underline">SNS·미디어의 '의뢰로 만든 영상'</Link>에서 봐요.</p>
         </div>
         <Link to="/marketing/sns" className="btn-ghost ml-auto text-xs">새로 만들기 ›</Link>
       </header>

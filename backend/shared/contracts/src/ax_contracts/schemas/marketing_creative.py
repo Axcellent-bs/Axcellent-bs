@@ -73,3 +73,29 @@ class CreativeVideoRequestInput(AxModel):
 class CreativeVideoRequestOutput(AxModel):
     record_id: str = Field(pattern=RECORD_ID_PATTERN)
     video: dict[str, Any]  # render.video
+
+
+CREATIVE_RECORD_ATTACH_SKILL = "creative_record_attach"
+# 사람이 직접 올릴 수 있는 칸: Higgsfield 칸 3개 + 완성 영상(다른 도구로 만든 최종본)
+CREATIVE_ATTACH_PARTS = ("sheet_image", "board_image", "video", "final_video")
+
+
+class CreativeRecordAttachInput(AxModel):
+    """사람이 올린 그림·영상을 제작 기록에 붙인다(A `attach_creative_file`, 2026-11-20).
+
+    파일은 dashboard-api가 미디어 폴더 `creative/<기록>/`에 먼저 저장하고 이름·sha256만 넘긴다.
+    """
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    part: str = Field(pattern=r"^(sheet_image|board_image|video|final_video)$")
+    asset: str = Field(pattern=r"^(sheet|board|video|final)\.(jpg|png|mp4)$")
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(ge=1)
+    label: str | None = Field(default=None, max_length=120)  # 올린 파일 이름
+    who: str | None = Field(default=None, max_length=80)  # 올린 사람(대시보드 사람 토큰)
+
+
+class CreativeRecordAttachOutput(AxModel):
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    part: str
+    item: dict[str, Any]  # render.<part>

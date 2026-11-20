@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { speaker } from "@/lib/agentChat";
 import { orchestrator } from "@/lib/orchestrator";
 import { apiBase, fromBackend, planningApi } from "@/lib/planning";
+import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestTitle } from "@/lib/requestHandoffs";
 import { REQUEST_STATUS, type WorkRequestRow } from "@/lib/workRequests";
 import { planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, showRequestCard, stepRows, type PlanCardView, type PlanLookup, type StepDot } from "@/lib/requestCards";
@@ -115,6 +116,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   const found = proposal ? proposals?.find((p) => p.id === proposal) : undefined;
   const plan = found ? planCard(found) : null;
   const st = REQUEST_STATUS[row.status];
+  const videoLink = requestVideoLink(row);
   const stale = staleHours(row, Date.now());
 
   const decide = (stepId: string, approved: boolean) => {
@@ -153,6 +155,9 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                   </span>
                 </p>
                 {s.muted && <p className="text-xs text-ink-500">{s.muted}</p>}
+                {videoLink && s.skill === "generate_media" && (
+                  <button type="button" className="btn-ghost mt-1 px-2.5 py-1 text-xs" onClick={() => navigate(videoLink)}>영상 열기</button>
+                )}
                 {report && <ReportCell reportId={report} />}
                 {isInsight && plan && <PlanCell card={plan} />}
                 {isInsight && proposal && !plan && (
