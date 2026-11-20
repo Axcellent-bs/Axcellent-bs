@@ -201,6 +201,10 @@ const IG_FIRST = 3;
 const igMore = (it) => it.posts.length > IG_FIRST ? `<button type="button" class="posts-more" hidden aria-expanded="false" aria-label="게시물 더 보기"><span aria-hidden="true">›</span></button>` : "";
 const igHtml = igGroups.map((it) => `<div class="ig-group reveal"><header><h3>${esc(it.name)} 인스타그램</h3><p class="badges">${it.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p></header><div class="posts-wrap"><ul class="posts">${it.posts.map(casesPost).join("")}</ul>${igMore(it)}</div></div>`).join("");
 
+// 고객사별 영상 묶음. 영상이 아직 없으면 "영상 준비 중" 칸 하나를 보인다(영상을 넣으면 그 칸이 영상으로 바뀐다)
+const groupEmpty = (g) => `<article class="vpost vpost-empty reveal"><div class="vpost-media"><span>영상 준비 중</span></div><h3>${esc(g.title)} 칸</h3><p>영상이 올라오면 이 자리에 나옵니다.</p></article>`;
+const vgroupHtml = (PS.videoGroups || []).map((g) => `<div class="vgroup reveal"><header class="vgroup-h"><h3>${esc(g.title)}</h3>${(g.badges || []).length ? `<p class="badges">${g.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p>` : ""}</header><div class="vposts">${g.items && g.items.length ? g.items.map(postCard).join("") : groupEmpty(g)}</div></div>`).join("");
+
 const showPosts = PS.items.length > 0 || igGroups.length > 0 || PS.showEmpty === true;
 const posts = !showPosts ? "" : `
 <section class="sec sec-light" id="posts">
@@ -210,6 +214,7 @@ const posts = !showPosts ? "" : `
     <p class="posts-lead reveal">${esc(PS.lead)}</p>
     ${PS.items.length || !igGroups.length ? `${has(PS.itemsTitle) && PS.items.length ? `<header class="vgroup-h reveal"><h3>${esc(PS.itemsTitle)}</h3></header>` : ""}<div class="vposts">${postList}</div>` : ""}
     ${igHtml}
+    ${vgroupHtml}
     <p class="callout reveal">${esc(PS.note)}</p>
   </div>
 </section>`;
