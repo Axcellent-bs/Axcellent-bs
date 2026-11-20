@@ -1,0 +1,72 @@
+// 기획 → 마케팅 영상 제작안 (계약 ax_contracts.schemas.planning VideoPlan·VideoScene과 같은 칸, 화면은 camelCase).
+// 기획 state 응답 proposals[].video_plan(fromBackend가 camelize하면 videoPlan)을 읽는다. node --test (videoPlan.test.ts)
+// 모양이 틀리면 undefined (화면이 섹션을 그리지 않는다). 던지지 않는다. 값은 서버 그대로이고 지어내지 않는다
+
+export interface VideoSceneView {
+  n: number
+  startS: number
+  endS: number
+  visual: string // 화면 구성 (한국어)
+  caption: string // 자막 (비면 자막 없음)
+  prompt: string // 영상 생성 프롬프트 (영문)
+}
+
+export interface VideoPlanView {
+  concept: string
+  durationS: number
+  aspect: string // "9:16" · "1:1" · "16:9"
+  script: string
+  scenes: VideoSceneView[]
+  style: string // 공통 화풍
+  negative: string // 공통 금지
+  writtenBy: 'llm' | 'rule' | 'human'
+  mediaHints?: { season?: string; colorTheme?: string; category?: string }
+}
+
+type Json = Record<string, unknown>
+const obj = (v: unknown): Json | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Json) : null)
+/** snake_case(서버 원본)·camelCase(fromBackend camelize 뒤) 둘 다 */
+const pick = (o: Json, camel: string, snake: string): unknown => (o[camel] !== undefined ? o[camel] : o[snake])
+const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+const int = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null)
+const ASPECTS = new Set(['9:16', '1:1', '16:9'])
+
+function toScene(raw: unknown): VideoSceneView | null {
+  const o = obj(raw)
+  if (!o) return null
+  const n = int(o.n), startS = int(pick(o, 'startS', 'start_s')), endS = int(pick(o, 'endS', 'end_s'))
+  const visual = str(o.visual), prompt = str(o.prompt)
+  if (n === null || startS === null || endS === null || endS <= startS || !visual) return null
+  return { n, startS, endS, visual, caption: str(o.caption), prompt }
+}
+
+/** 응답의 video_plan(또는 videoPlan) → 화면 값. 콘셉트·길이·장면이 없거나 장면 하나라도 모양이 틀리면 undefined */
+export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
+  const o = obj(raw)
+  if (!o) return undefined
+  const concept = str(o.concept)
+  const durationS = int(pick(o, 'durationS', 'duration_s'))
+  const list = Array.isArray(o.scenes) ? o.scenes : []
+  const scenes = list.map(toScene)
+  if (!concept || durationS === null || durationS <= 0 || scenes.length === 0 || scenes.some((x) => x === null)) return undefined
+  const aspect = str(o.aspect) || '9:16'
+  if (!ASPECTS.has(aspect)) return undefined
+  const wb = pick(o, 'writtenBy', 'written_by')
+  const h = obj(pick(o, 'mediaHints', 'media_hints'))
+  const hints = h ? { season: str(h.season) || undefined, colorTheme: str(pick(h, 'colorTheme', 'color_theme')) || undefined, category: str(h.category) || undefined } : undefined
+  return {
+    concept, durationS, aspect, script: str(o.script),
+    scenes: (scenes as VideoSceneView[]).slice().sort((a, b) => a.n - b.n),
+    style: str(o.style), negative: str(o.negative),
+    writtenBy: wb === 'llm' || wb === 'human' ? wb : 'rule',
+    ...(hints && (hints.season || hints.colorTheme || hints.category) ? { mediaHints: hints } : {}),
+  }
+}
+
+export const VIDEO_WRITTEN_BY: Record<VideoPlanView['writtenBy'], string> = { llm: 'AI 초안', rule: '규칙 초안', human: '사람' }
+/** 장면 시간 "0~2초" */
+export const sceneTime = (s: Pick<VideoSceneView, 'startS' | 'endS'>) => `${s.startS}~${s.endS}초`
+/** 섹션 머리 칩 "AI 초안 · 15초 · 9:16" */
+export const videoPlanChip = (v: Pick<VideoPlanView, 'writtenBy' | 'durationS' | 'aspect'>) => `${VIDEO_WRITTEN_BY[v.writtenBy]} · ${v.durationS}초 · ${v.aspect}`
+/** 요약 한 줄 "영상 제작안 · 15초 · 9:16 · 장면 4" */
+export const videoPlanSummary = (v: Pick<VideoPlanView, 'durationS' | 'aspect' | 'scenes'>) => `영상 제작안 · ${v.durationS}초 · ${v.aspect} · 장면 ${v.scenes.length}`

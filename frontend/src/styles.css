@@ -131,3 +131,38 @@ body { @apply bg-canvas text-ink-900 antialiased; }
   body.print-trend-report .trend-report-print h3 { break-after: avoid; page-break-after: avoid; }
   body.print-trend-report .trend-report-print .card { box-shadow: none; background: #fff; }
 }
+
+/*
+  기획서·기획 제안 "PDF로 저장"(components/planning/specs.tsx · proposals.tsx, lib/print.ts printDoc · 대화 카드 ?print=1도 같은 printDoc).
+  보고서 인쇄와 같은 방식: 누른 동안만 body에 print-doc가 붙고, 그때만 .doc-print와 그 조상만 남긴다.
+  앱 메뉴·탭·제안 알림 줄·버튼(.print-hide)·오른쪽 수정 이력은 숨기고, 입력칸 대신 .print-only 읽기 글을 보인다.
+  방향 선택 버튼은 테두리 없는 글로 보인다. 화면에서는 .print-only가 늘 숨어 있다
+*/
+.print-only { display: none; }
+@page plan-doc { size: A4; margin: 14mm; }
+@media print {
+  body.print-doc,
+  body.print-doc .doc-print { background: #fff !important; }
+  body.print-doc *:not(:has(.doc-print)):not(.doc-print):not(.doc-print *) { display: none !important; }
+  body.print-doc *:has(.doc-print) {
+    height: auto !important; max-height: none !important; min-height: 0 !important;
+    overflow: visible !important; display: block !important; position: static !important;
+  }
+  body.print-doc .doc-print { page: plan-doc; max-width: none !important; width: auto !important; }
+  body.print-doc .doc-print .print-hide { display: none !important; }
+  body.print-doc .doc-print .print-only { display: block !important; white-space: pre-line; }
+  body.print-doc .doc-print span.print-only { display: inline !important; }
+  body.print-doc .doc-print button { border: 0 !important; background: none !important; box-shadow: none !important; color: inherit !important; padding: 0 !important; text-align: left; }
+  body.print-doc .doc-print input,
+  body.print-doc .doc-print select,
+  body.print-doc .doc-print textarea { border: 0 !important; background: none !important; box-shadow: none !important; resize: none; appearance: none; padding: 0 !important; }
+  body.print-doc .doc-print .vp-scenes { overflow: visible !important; }
+  body.print-doc .doc-print .vp-scenes table { min-width: 0 !important; }
+  body.print-doc .doc-print li,
+  body.print-doc .doc-print tr,
+  body.print-doc .doc-print dl > div,
+  body.print-doc .doc-print section > p { break-inside: avoid; page-break-inside: avoid; }
+  body.print-doc .doc-print h1,
+  body.print-doc .doc-print h2,
+  body.print-doc .doc-print h3 { break-after: avoid; page-break-after: avoid; }
+}

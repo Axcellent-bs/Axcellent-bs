@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 대화방 의뢰 진행 카드: 번호 찾기(총괄 문장만) · 단계 칩·버튼 · 같은 의뢰 알림 줄 숨김 · 보고서·제안 잇기 · 토큰 없으면 카드 없음.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { noticeIdOf, placeRequestCards, proposalOfRequest, reportIdOfRequest, requestIdOf, showRequestCard, stepRows } from "./requestCards.ts";
+import { noticeIdOf, placeRequestCards, planCard, planLookupDue, proposalOfRequest, reportIdOfRequest, requestIdOf, showRequestCard, stepRows } from "./requestCards.ts";
 import { progressKeepPolling } from "./chatCards.ts";
 import type { StepStatus, WorkRequestRow } from "./workRequests.ts";
 
@@ -81,4 +81,27 @@ test("보고서 진행 폴링은 끝나면 멈추고, 토큰이 없으면 카드
   assert.equal(showRequestCard(false, RID), false);
   assert.equal(showRequestCard(true, null), false);
   assert.equal(showRequestCard(true, RID), true);
+});
+
+test("기획 단계 칸: 영상 제작안이 있으면 '영상 제작안 · 15초 · 9:16 · 장면 4' + 콘셉트, 기획서가 있으면 칩 '기획서 23'·기획서로 열기", () => {
+  const scenes = [0, 2, 6, 11].map((s, i, a) => ({ n: i + 1, startS: s, endS: a[i + 1] ?? 15, visual: "v", caption: "", prompt: "p" }));
+  const c = planCard({ id: "PROP-15", spec: "SPEC-23", title: "트렌드 분석: 책", idea: "할 일", videoPlan: { concept: "첫 문장에 빠지는 순간", durationS: 15, aspect: "9:16", scenes } });
+  assert.deepEqual(c, {
+    chip: "기획서 23", head: "영상 제작안 · 15초 · 9:16 · 장면 4", line: "첫 문장에 빠지는 순간",
+    openPath: "/planning/work/specs/SPEC-23", printPath: "/planning/work/specs/SPEC-23?print=1",
+  });
+});
+
+test("기획 단계 칸: 영상 제작안·기획서가 없으면 '기획 제안' + 할 일 한 줄, 칩 '제안 15'·제안 화면으로", () => {
+  assert.deepEqual(planCard({ id: "PROP-15", title: "트렌드 분석: 책", idea: "10대 소설 숏폼 3편" }), {
+    chip: "제안 15", head: "기획 제안", line: "10대 소설 숏폼 3편",
+    openPath: "/planning/proposals/PROP-15", printPath: "/planning/proposals/PROP-15?print=1",
+  });
+  assert.equal(planCard({ id: "PROP-15", title: "제목만", idea: "" }).line, "제목만");
+});
+
+test("기획 기록 다시 읽기는 1분에 한 번까지", () => {
+  assert.equal(planLookupDue(null, 1_000), true);
+  assert.equal(planLookupDue(1_000, 1_000 + 59_999), false);
+  assert.equal(planLookupDue(1_000, 1_000 + 60_000), true);
 });

@@ -2,6 +2,7 @@
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
 // 백엔드에 없는 값(학습 기준)은 빈 값으로 두고 지어내지 않는다. 감사 목록은 서버가 남긴 활동에서 센다.
 import type { Proposal } from './proposals'
+import { toVideoPlan } from './videoPlan'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useVisibleInterval } from './visibleInterval'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
@@ -155,6 +156,7 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
         past: ((Array.isArray(p.past) ? p.past : []) as Json[]).map((x) => ({ ...x, noteLine: x.noteLine ?? undefined, actions: x.actions ?? [] })),
         followOf: p.followOf ?? undefined,
         angle: p.angle ?? undefined,
+        videoPlan: toVideoPlan(p.videoPlan ?? p.video_plan),
         contentCategory: p.contentCategory ?? undefined,
         contentFormat: p.contentFormat ?? undefined,
         scale: p.scale ? { ...(p.scale as Json), followers: (p.scale as Json).followers ?? undefined, followersChannel: (p.scale as Json).followersChannel ?? undefined, pastViewsMedian: (p.scale as Json).pastViewsMedian ?? undefined } : undefined,

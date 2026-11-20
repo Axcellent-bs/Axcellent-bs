@@ -5,7 +5,9 @@ import { orchestrator } from "@/lib/orchestrator";
 import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestTitle } from "@/lib/requestHandoffs";
 import { REQUEST_STATUS, type WorkRequestRow } from "@/lib/workRequests";
-import { proposalOfRequest, reportIdOfRequest, showRequestCard, stepRows, type StepDot } from "@/lib/requestCards";
+import { planCard, planLookupDue, proposalOfRequest, reportIdOfRequest, showRequestCard, stepRows, type PlanCardView, type PlanLookup, type StepDot } from "@/lib/requestCards";
+import { planDocPath } from "@/lib/planDoc";
+import { planId } from "@/lib/format";
 import { keyEvidence, reportHash, sortBeats } from "@/lib/trendReportView";
 import type { TrendReportDoneCard } from "@/lib/planningData";
 import type { TrendReport as Report } from "@/lib/data";
@@ -16,7 +18,8 @@ import { refreshWorkRequests, useWorkRequests } from "@/components/office/useWor
 // - 데이터: 의뢰 목록(useWorkRequests, 10초)에서 찾고, 없으면 GET /api/requests/{id}를 한 번. 사람 토큰이 없으면 카드 없이 지금 글만
 // - 머리: 일 이름 · 의뢰 상태 칩 · 번호. 단계: plan 순서로 번호 점 · 부서 · 단계 이름 · 상태 칩
 // - 데이터 trend_report_create 단계에 보고서(tr_)가 있으면: 진행 중 = 진행 카드(5초 폴링, 끝나면 멈춤), 끝남 = 완료 카드 (ChatCards 그대로)
-// - 기획 receive_insight가 끝나면 "기획 제안 열기"(result_ref 또는 기획 기록의 insightId "trend_report:<보고서>")
+// - 기획 receive_insight가 끝나면 기획 기록을 읽어(1분에 한 번까지) 칩 "기획서 N"/"제안 N" + 작은 칸(영상 제작안 요약·콘셉트 · [기획서 열기] [PDF로 저장]).
+//   제안은 result_ref 또는 기획 기록의 insightId "trend_report:<보고서>". PDF로 저장은 그 화면을 ?print=1로 연다(그린 뒤 한 번 인쇄)
 // - 사람 확인 단계: "<다음 단계> 진행"·"여기서 멈추기" → decideRequestStep. 누른 뒤 끄고 결과는 다음 읽기에 반영
 // - 실패·건너뜀: 회색 + 의뢰 note(코드 문장). 고객 글·부서 문장은 옮기지 않는다. 계산은 lib/requestCards.ts
 
@@ -50,16 +53,47 @@ function ReportCell({ reportId }: { reportId: string }) {
   return <ProgressCard card={{ kind: "trend_report_progress", report_id: reportId }} onDone={finish} />;
 }
 
-/** 기획 기록에서 insightId로 제안 찾기 (단계 result_ref가 없을 때만 한 번 읽는다) */
-function useProposalLookup(need: boolean): { id: string; insightId?: string }[] | null {
-  const [list, setList] = useState<{ id: string; insightId?: string }[] | null>(null);
+// 기획 기록 읽기 (카드 여러 개가 같이 쓴다). 1분에 한 번 넘게 다시 읽지 않는다 (lib/requestCards.ts planLookupDue)
+let planCache: { at: number | null; list: PlanLookup[] | null; inflight: Promise<PlanLookup[]> | null } = { at: null, list: null, inflight: null };
+function loadPlanLookup(): Promise<PlanLookup[]> {
+  if (planCache.inflight) return planCache.inflight;
+  if (planCache.list && !planLookupDue(planCache.at, Date.now())) return Promise.resolve(planCache.list);
+  const inflight = planningApi(apiBase("planning")).state()
+    .then((raw) => (fromBackend(raw, []).proposals ?? []).map((p): PlanLookup => ({
+      id: p.id, insightId: p.insightId, spec: p.spec, title: p.title, idea: p.idea, videoPlan: p.videoPlan,
+    })))
+    .catch(() => planCache.list ?? [])
+    .then((list) => { planCache = { at: Date.now(), list, inflight: null }; return list; });
+  planCache = { ...planCache, inflight };
+  return inflight;
+}
+
+/** 기획 receive_insight 단계가 끝나면 기획 기록을 읽는다 (result_ref가 PROP-여도: 기획서·영상 제작안을 보려고).
+ *  의뢰가 바뀌면(updated_at) 다시 읽되 1분에 한 번까지 */
+function usePlanLookup(need: boolean, version: string | undefined): PlanLookup[] | null {
+  const [list, setList] = useState<PlanLookup[] | null>(planCache.list);
   useEffect(() => {
-    if (!need || list) return;
-    planningApi(apiBase("planning")).state()
-      .then((raw) => setList((fromBackend(raw, []).proposals ?? []).map((p) => ({ id: p.id, insightId: p.insightId }))))
-      .catch(() => setList([]));
-  }, [need, list]);
+    if (!need) return;
+    let alive = true;
+    void loadPlanLookup().then((x) => { if (alive) setList(x); });
+    return () => { alive = false; };
+  }, [need, version]);
   return list;
+}
+
+/** 기획 단계 칸 (보고서 완료 카드와 같은 모양): 영상 제작안 요약 · 콘셉트 한 줄 · [기획서 열기] [PDF로 저장] */
+function PlanCell({ card }: { card: PlanCardView }) {
+  const navigate = useNavigate();
+  return (
+    <section aria-label={card.head} className="mt-1.5 w-full space-y-1.5 rounded-xl border border-ink-100 bg-ink-50 px-3 py-2.5">
+      <h4 className="text-[12.5px] font-semibold text-ink-900">{card.head}</h4>
+      {card.line && <p className="line-clamp-2 break-words text-[12.5px] text-ink-700">{card.line}</p>}
+      <div className="flex flex-wrap gap-1.5 pt-0.5">
+        <button type="button" className="btn-primary px-2.5 py-1 text-xs" onClick={() => navigate(card.openPath)}>기획서 열기</button>
+        <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => navigate(card.printPath)}>PDF로 저장</button>
+      </div>
+    </section>
+  );
 }
 
 export function RequestProgressCard({ requestId }: { requestId: string }) {
@@ -70,10 +104,11 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   const rows = useMemo(() => (row ? stepRows(row) : []), [row]);
   const insightStep = row?.plan.find((p) => p.skill === "receive_insight");
   const insightDone = !!(insightStep && row?.steps[insightStep.step_id]?.status === "completed");
-  const needLookup = insightDone && !(row?.steps[insightStep!.step_id]?.result_ref ?? "").startsWith("PROP-");
-  const proposals = useProposalLookup(needLookup);
+  const proposals = usePlanLookup(insightDone, row?.updated_at);
   if (!showRequestCard(hasToken, requestId) || !row) return null;
   const proposal = proposalOfRequest(row, proposals);
+  const found = proposal ? proposals?.find((p) => p.id === proposal) : undefined;
+  const plan = found ? planCard(found) : null;
   const st = REQUEST_STATUS[row.status];
 
   const decide = (stepId: string, approved: boolean) => {
@@ -101,12 +136,15 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
               <div className={`min-w-0 ${s.muted ? "text-ink-500" : "text-ink-900"}`}>
                 <p className="flex flex-wrap items-center gap-1.5">
                   <b className="font-semibold">{s.dept ? `${speaker(s.dept).replace(/\s*AI$/, "")} · ` : ""}{s.label}</b>
-                  <span className={`chip text-[11px] ${s.chip.tone}`}>{isInsight && proposal ? proposal : s.chip.label}</span>
+                  <span className={`chip text-[11px] ${s.chip.tone}`} title={isInsight && proposal ? (found?.spec ? `${proposal} · ${found.spec}` : proposal) : undefined}>
+                    {isInsight && proposal ? (plan?.chip ?? planId(proposal)) : s.chip.label}
+                  </span>
                 </p>
                 {s.muted && <p className="text-xs text-ink-500">{s.muted}</p>}
                 {report && <ReportCell reportId={report} />}
-                {isInsight && proposal && (
-                  <button type="button" className="btn-ghost mt-1 px-2.5 py-1 text-xs" onClick={() => navigate(`/planning/proposals/${encodeURIComponent(proposal)}`)}>기획 제안 열기</button>
+                {isInsight && plan && <PlanCell card={plan} />}
+                {isInsight && proposal && !plan && (
+                  <button type="button" className="btn-ghost mt-1 px-2.5 py-1 text-xs" onClick={() => navigate(planDocPath({ id: proposal }))}>기획 제안 열기</button>
                 )}
                 {s.decide && !decided.has(s.stepId) && (
                   <span className="mt-1 flex flex-wrap gap-1.5">

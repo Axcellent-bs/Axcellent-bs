@@ -4,6 +4,7 @@ import { PreparingChip } from "@/components/Preparing";
 import { when } from "@/components/data/Sources";
 import { AD, times } from "@/components/data/TrendMemes";
 import { safeLink } from "@/lib/safeLink";
+import { printWithClass, usePrinting } from "@/lib/print";
 import { PostCard } from "@/components/data/InstagramRadar";
 import {
   dataAi, type SectionStatus, type TrendReport, type TrendReportBeat, type TrendReportBrief, type TrendReportCompetitorRow, type TrendReportHandoffOutput,
@@ -345,18 +346,6 @@ function BeatCell({ b, width }: { b: TrendReportBeat; width: number }) {
   );
 }
 
-/** 인쇄 중인지 (beforeprint~afterprint) */
-function usePrinting(): boolean {
-  const [p, setP] = useState(false);
-  useEffect(() => {
-    const on = () => setP(true), off = () => setP(false);
-    window.addEventListener("beforeprint", on);
-    window.addEventListener("afterprint", off);
-    return () => { window.removeEventListener("beforeprint", on); window.removeEventListener("afterprint", off); };
-  }, []);
-  return p;
-}
-
 /** AI 추천: 위쪽 강조 카드. 결론 + 핵심 근거 칩 + 콘티 타임라인 */
 function AiPick({ s, summaryReason }: { s: TrendReportSections["recommendation"]; summaryReason: string | null }) {
   const beats = sortBeats(s.beats);
@@ -395,13 +384,7 @@ function AiPick({ s, summaryReason }: { s: TrendReportSections["recommendation"]
   );
 }
 
-function printReport() {
-  const body = document.body;
-  body.classList.add(PRINT_CLASS);
-  const done = () => { body.classList.remove(PRINT_CLASS); window.removeEventListener("afterprint", done); };
-  window.addEventListener("afterprint", done);
-  window.print();
-}
+const printReport = () => printWithClass(PRINT_CLASS);
 
 export function TrendReportBody({ report, onRebuild }: { report: TrendReport; onRebuild?: (brief: TrendReportBrief) => void }) {
   const st = REPORT_STATUS[report.status];
