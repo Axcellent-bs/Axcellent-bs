@@ -4,6 +4,7 @@ import { matchRoom, roomPeople, roomTime, type ChatRoom } from "@/lib/chatRooms"
 import { Link, useRouter, useSearchParams } from "@/lib/nav";
 import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
 import { Avatar, MessengerLog, PinNotice, StatusChip, TypingLines } from "@/components/office/Messenger";
+import { RequestHandoffCard } from "@/components/office/RequestHandoffCard";
 import { TalkInput } from "@/components/office/TalkInput";
 import { useChatRooms, type ChatRooms, type Conn } from "@/components/office/useChatRooms";
 import { orchestrator } from "@/lib/orchestrator";
@@ -580,6 +581,8 @@ export default function AgentChat() {
           ? <span>목록 줄의 ＋를 누르거나 방을 칸으로 끌어다 놓아요. 그냥 누르면 선택된 칸의 방이 바뀌어요.</span>
           : count > 1 && <span>화면이 좁아 지금은 {limit}개만 보여요. 넓히면 나머지 칸이 다시 보여요.</span>}
       </div>
+
+      <RequestHandoffCard />
 
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{error}</p>}
 

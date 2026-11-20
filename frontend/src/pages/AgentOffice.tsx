@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
 import { OfficeChat, type Typing } from "@/components/office/OfficeChat";
 import { useChatRooms, type Conn } from "@/components/office/useChatRooms";
+import { RequestHandoffCard } from "@/components/office/RequestHandoffCard";
 import { PixelOffice } from "@/components/office/PixelOffice";
 import { ALL_ROOM, buildTimeline, incidentTitle, skillKo, type ChatItem } from "@/lib/agentChat";
 import { mergeTalk } from "@/lib/officeTalk";
@@ -245,6 +246,8 @@ export default function AgentOffice() {
           캠페인 리플레이는 <b>예시 흐름</b>입니다. 숫자는 시연용 값입니다. (데이터 → 기획 → 사람 확인 → 마케팅 → 재무 → 데이터 → 기획 → 재무)
         </p>
       )}
+
+      {mode === "live" && <RequestHandoffCard />}
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 xl:flex-row">
         <section aria-label="부서 AI 사무실" className="card flex min-w-0 shrink-0 flex-col gap-3 p-4 xl:flex-1">
