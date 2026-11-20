@@ -414,13 +414,26 @@ class RollbackCheck(DomainModel):
     why: str
 
 
+class IncidentRevert(DomainModel):
+    """레포 되돌리기 PR(`revert_merged_pr`) 결과. 사건의 "되돌리기" 단계에 보여 준다."""
+
+    connection_id: str
+    source_pr: int  # 되돌린 레포 PR 번호
+    revert_pr: int | None = None  # 관문이 열기부터 막으면(held) None
+    status: Literal["merged", "auto_merge_scheduled", "held"]
+    url: str | None = None  # 되돌리기 PR 주소 (형상관리가 주면)
+    at: UtcDatetime
+
+
 class Incident(DomainModel):
     context_id: str
     tenant_id: str = TENANT_ID_DEFAULT
     title: str
     opened_at: UtcDatetime
     candidates: list[IncidentCandidate] = Field(default_factory=list)
-    rollback_check: RollbackCheck | None = None
+    rollback_check: RollbackCheck | None = None  # 배포 롤백 교차검증 결과 (verify_rollback_target)
+    revert: IncidentRevert | None = None
+    # PR·문단에 연결함(link_incident). 장애가 복구됐다는 뜻은 아니다
     linked: bool = False
     follow_up: str | None = None
 

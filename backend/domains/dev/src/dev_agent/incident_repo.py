@@ -6,6 +6,8 @@
   새 관문 액션을 만들지 않고 레포 작업 공간과 같은
   `repo_revert_pr`(B) → `merge_pr`(B) 관문을 거친다.
   CI를 기다려야 하면 자동 머지를 예약한다. 같은 연결·PR을 다시 부르면 이미 연 되돌리기 PR을 쓴다.
+  결과(되돌리기 PR 번호·상태)는 아는 사건이면 그 사건의 `revert`에 남긴다(화면 "되돌리기" 단계).
+  모르는 사건은 새로 만들지 않는다.
 
 원인은 판정하지 않는다. 어떤 PR을 되돌릴지는 요청한 쪽(인프라 진단)이 정한다.
 """
@@ -13,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -21,7 +24,7 @@ from typing import Any, Literal
 from ax_contracts.schemas.planning import RelatedPr, RevertMergedPrOutput
 from ax_workflow.core import ActionError, ActionResult, GateRefused
 from ax_workflow.handover import area_of_path
-from ax_workflow.models import PR, State
+from ax_workflow.models import PR, IncidentRevert, State
 from dev_agent import vcs
 from dev_agent.service import DevService
 from dev_agent.vcs.base import Change, VcsAdapter, VcsError
@@ -29,6 +32,7 @@ from dev_agent.vcs.base import Change, VcsAdapter, VcsError
 REPO_TIMEOUT_SECONDS = 15.0  # 연결 하나를 읽는 데 기다리는 시간
 MERGE_METHOD = "squash"
 _locks: dict[str, asyncio.Lock] = {}
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------- 관련 PR
@@ -214,6 +218,39 @@ def _out(number: int | None, status: Status, change: Change | None = None) -> Re
     )
 
 
+async def _record(
+    svc: DevService,
+    ctx: str,
+    connection_id: str,
+    pr_number: int,
+    out: RevertMergedPrOutput,
+    rev: Change | None,
+) -> RevertMergedPrOutput:
+    """되돌리기 결과를 아는 사건에 남긴다. 되돌리기는 이미 외부에서 한 일이라
+    기록이 어떤 이유로 실패해도 결과는 그대로 돌려준다 (로그만 남김)."""
+    try:
+        if not any(i.context_id == ctx for i in svc.state.incidents):
+            return out
+        row = IncidentRevert(
+            connection_id=connection_id,
+            source_pr=pr_number,
+            revert_pr=out.revert_pr_number,
+            status=out.status,
+            url=rev.url if rev is not None else None,
+            at=svc.clock(),
+        )
+
+        async def put(s: State) -> None:
+            incident = next((i for i in s.incidents if i.context_id == ctx), None)
+            if incident is not None:
+                incident.revert = row
+
+        await svc._apply(put)
+    except Exception:  # 기록 실패가 되돌리기 결과를 바꾸지 않게 한다
+        log.exception("되돌리기 결과를 사건 %s에 남기지 못함", ctx)
+    return out
+
+
 async def revert_merged(
     svc: DevService,
     *,
@@ -228,8 +265,6 @@ async def revert_merged(
 
     `ActionError`: 모르는 연결(NOT_FOUND)·읽기 전용(READ_ONLY)·병합 안 된 PR(NOT_MERGED).
     형상관리 오류는 `VcsError`로 그대로 던진다."""
-    from dev_agent.repo_api import _size_params  # repo_api가 service를 불러 순환을 피한다
-
     if vcs.find_connection(connection_id) is None:
         raise ActionError("NOT_FOUND", f"모르는 연결: {connection_id}")
     adapter = vcs.get_adapter(connection_id)
@@ -238,6 +273,23 @@ async def revert_merged(
     key = f"{connection_id}#{pr_number}"
     ctx = incident_context_id or context_id
     why = " ".join(reason.split())[:200]
+    out, rev = await _revert(svc, adapter, ctx, key, connection_id, pr_number, why, requester)
+    return await _record(svc, ctx, connection_id, pr_number, out, rev)
+
+
+async def _revert(
+    svc: DevService,
+    adapter: VcsAdapter,
+    ctx: str,
+    key: str,
+    connection_id: str,
+    pr_number: int,
+    why: str,
+    requester: str,
+) -> tuple[RevertMergedPrOutput, Change | None]:
+    """되돌리기 결과와 되돌리기 PR(열었으면). 관문이 열기부터 막으면 PR은 None."""
+    from dev_agent.repo_api import _size_params  # repo_api가 service를 불러 순환을 피한다
+
     async with _locks.setdefault(key, asyncio.Lock()):
         src = await adapter.get_change(pr_number)
         if not src.merged:
@@ -256,12 +308,13 @@ async def revert_merged(
                     requester,
                 )
             except GateRefused:
-                return _out(None, "held")
+                return _out(None, "held"), None
             number = int(made.number)
         rev = await adapter.get_change(number)
         if rev.merged:
-            return _out(number, "merged", rev)
-        return await _merge(svc, adapter, ctx, connection_id, number, rev, why, requester)
+            return _out(number, "merged", rev), rev
+        out = await _merge(svc, adapter, ctx, connection_id, number, rev, why, requester)
+        return out, rev
 
 
 async def _merge(

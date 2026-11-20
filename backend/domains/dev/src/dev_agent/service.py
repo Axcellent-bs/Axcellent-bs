@@ -84,6 +84,7 @@ from ax_workflow.models import (
     RelatedItem,
     RepoTarget,
     Request,
+    RollbackCheck,
     Spec,
     State,
     Task,
@@ -2109,10 +2110,21 @@ class DevService(PlanningCore):
                     "read",
                 )
             )
+            merged = ", ".join(p.id for p in prs)
+            why = f"배포 직전 머지 {merged} 확인 ({reason})" if approved else reason
             if approved:
-                reply = f"승인 · 배포 직전 머지 {', '.join(p.id for p in prs)} 확인 ({reason})"
+                reply = f"승인 · {why}"
             else:
                 reply = f"거절 · {reason} → completed + rejected_by_review"
+            # 아는 사건이면 "되돌리기" 단계에 결과를 남긴다. 모르는 사건은 만들지 않는다
+            # (사건 기록은 교차검증의 자기 기록이라 요청 값으로 지어내지 않는다)
+            incident = next((i for i in s.incidents if i.context_id == context_id), None)
+            if incident is not None:
+                incident.rollback_check = RollbackCheck(
+                    target=f"{service} {target_version}",
+                    result="승인" if approved else "거절",
+                    why=why,
+                )
             s.activity.append(
                 self._act(
                     t,

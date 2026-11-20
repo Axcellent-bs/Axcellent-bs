@@ -3,10 +3,10 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Button, Notice, useToast } from '@dejafix/common-frontend'
 import { type State as S } from '@/lib/planningData'
 import { ActivityList, Grade, State, Stats } from '@/components/planning-common/parts'
-import { Ref, convoHref, go, hrefOf, prName, prSlug, toPath, idText } from '@/components/planning-common/links'
+import { Ref, convoHref, go, hrefOf, prName, prSlug, repoPrHref, toPath, idText } from '@/components/planning-common/links'
 import { Flow, Pairs, Step, mergedLabel } from '@/components/planning-common/flow'
 import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from '@/lib/planning'
-import { deployExecuted, deployStatusText, deployedPrCount, incidentStageText, needsToolLink, type Tone } from '@/lib/devOps'
+import { deployExecuted, deployStatusText, deployedPrCount, incidentStageText, needsToolLink, revertText, type Tone } from '@/lib/devOps'
 import { currentIncidents, DejafixNotConnectedError, readableTitle, SEVERITY, type Incident as LiveIncident } from '@/lib/dejafix'
 import { ApproverField, useApproverName } from '@/components/finance/ApproverName'
 import { useVisibleInterval } from '@/lib/visibleInterval'
@@ -199,7 +199,7 @@ export function Aftercare({ s, item }: { s: S; item?: string }) {
         <div className="inc-grid">
           {incidents.map((i) => {
             // 오른쪽 흐름(Flow)과 같은 규칙: 뒤 단계가 켜졌으면 앞 단계도 켠다
-            const raw = [true, i.candidates.length > 0, !!i.rollbackCheck, i.linked, !!i.followUp]
+            const raw = [true, i.candidates.length > 0, !!i.rollbackCheck || !!i.revert, i.linked, !!i.followUp]
             const last = raw.lastIndexOf(true)
             const done = raw.map((on, n) => on || n < last)
             return (
@@ -209,7 +209,7 @@ export function Aftercare({ s, item }: { s: S; item?: string }) {
                 <ol className="inc-steps" aria-label="흐름">
                   {INC_STEPS.map((x, n) => <li key={x} className={done[n] ? 'on' : ''}>{x}</li>)}
                 </ol>
-                <span className="inc-card-meta">{i.at} · 원인 PR {i.candidates.map((c) => c.pr).join(', ') || '없음'}{i.rollbackCheck ? ` · 롤백 ${i.rollbackCheck.result}` : ''}</span>
+                <span className="inc-card-meta">{i.at} · 원인 PR {i.candidates.map((c) => c.pr).join(', ') || '없음'}{i.rollbackCheck ? ` · 롤백 ${i.rollbackCheck.result}` : ''}{i.revert ? ` · ${revertText(i.revert)}` : ''}</span>
               </a>
             )
           })}
@@ -225,6 +225,7 @@ function IncidentPanel({ s, i }: { s: S; i: S['incidents'][number] }) {
   const follow = s.requests.find((r) => r.id === i.followUp)
   const c0 = i.candidates[0]
   const specOk = (c: { spec: string; para: string }) => c.spec !== '-' && c.para !== '-' // 문단을 모르면 링크를 걸지 않는다
+  const rv = i.revert
   const acts = s.activity.filter((a) => a.ctx === i.ctx)
   const [newest, setNewest] = useState(true) // 활동 순서: 최신순 · 오래된순
   return (
@@ -239,8 +240,9 @@ function IncidentPanel({ s, i }: { s: S; i: S['incidents'][number] }) {
           <Step name="원인 PR" on={i.candidates.length > 0} title={i.candidates.map((c) => c.pr).join(', ') || '없음'}>
             <ul>{i.candidates.map((c) => <li key={c.pr}><Ref s={s} id={c.pr} /> · {specOk(c) ? <a href={toPath(`work/specs/${c.spec}/${c.para}`)} className="plain-link" title={`${c.spec} ${c.para}`}>{idText(c.spec)} {c.para}</a> : <span className="muted">기획서 문단 모름</span>} · {kst(c.mergedAt) || c.mergedAt} 머지</li>)}</ul>
           </Step>
-          <Step name="되돌리기" on={!!i.rollbackCheck} title={i.rollbackCheck ? `배포 롤백 교차검증 ${i.rollbackCheck.result} · ${i.rollbackCheck.target}` : '없음'}>
+          <Step name="되돌리기" on={!!i.rollbackCheck || !!rv} title={[i.rollbackCheck && `배포 롤백 교차검증 ${i.rollbackCheck.result} · ${i.rollbackCheck.target}`, rv && revertText(rv)].filter(Boolean).join(' · ') || '없음'}>
             {i.rollbackCheck && <p className="muted">{i.rollbackCheck.why}</p>}
+            {rv && <p>{rv.revertPr != null && <><a href={repoPrHref(rv.revertPr, rv.connectionId)} className="plain-link">되돌리기 PR #{rv.revertPr} 보기</a> · </>}{rv.status === 'held' && <><Link href={HOLDS} className="plain-link">안전 확인 보기</Link> · </>}<span className="muted small">{kst(rv.at)}</span></p>}
           </Step>
           <Step name="PR·기획 연결" on={i.linked} href={c0 && i.linked && specOk(c0) ? toPath(`work/specs/${c0.spec}/${c0.para}`) : undefined} title={i.linked ? i.candidates.map((c) => (specOk(c) ? `${c.spec} ${c.para}` : `${c.pr} (문단 모름)`)).join(', ') || 'PR 없음' : '아직 안 이음'} />
           <Step name="후속 요청" on={!!follow} href={follow ? hrefOf(s, follow.id) : undefined} title={follow ? `${idText(follow.id)} · ${follow.state}` : '없음'}>

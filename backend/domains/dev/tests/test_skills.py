@@ -335,3 +335,33 @@ def test_verify_review_format_bad_input_fails(a2a_body) -> None:
     other = _rollback_review(a2a_body, action="restart_service")
     assert (other["status"], other["outcome"]) == ("failed", "invalid_input")
     assert _safety_verdict(other) == "unavailable"
+
+
+# ---- verify_rollback_target: 결과를 그 사건의 "되돌리기" 단계에 남긴다
+
+
+def test_verify_records_result_on_known_incident(a2a_body, service) -> None:
+    _verify(a2a_body, "2026-10-21T05:10:00Z")  # 장애 뒤 배포 → 거절
+    inc = next(i for i in service.state.incidents if i.context_id == "ctx_inc_0001")
+    assert inc.rollback_check is not None
+    assert inc.rollback_check.result == "거절"
+    assert inc.rollback_check.target == "shop-api v2.4.1"
+    assert "deploy_after_incident" in inc.rollback_check.why
+    _verify(a2a_body, "2026-10-21T05:03:00Z")  # 승인
+    inc = next(i for i in service.state.incidents if i.context_id == "ctx_inc_0001")
+    assert inc.rollback_check.result == "승인"
+    assert "PR #28" in inc.rollback_check.why
+
+
+def test_verify_does_not_make_incident_for_unknown_context(a2a_body, service) -> None:
+    """모르는 사건이면 사건을 새로 만들지 않는다 (교차검증의 '자기 기록'을 지어내지 않는다)."""
+    before = [i.context_id for i in service.state.incidents]
+    payload = {
+        "service": "shop-api",
+        "target_version": "v2.4.1",
+        "deployed_at": "2026-10-21T05:03:00Z",
+        "incident_opened_at": "2026-10-21T05:04:00Z",
+    }
+    body = a2a_body("verify_rollback_target", payload, token="mock:safety", context_id="ctx_x9")
+    assert _call(body)["status"] == "completed"
+    assert [i.context_id for i in service.state.incidents] == before

@@ -1,6 +1,7 @@
 // 개발 화면 "배포"·"장애 대응"의 표시 규칙. 순수 계산만 한다(화면·환경 값을 가져오지 않음): `npm test`(node --test)에서 그대로 돈다.
 // 값은 서버가 준 것만 쓴다. 배포 도구가 실행하지 않은 배포를 "배포됨"으로, PR 연결을 "완료"로 보이지 않게 한다.
 import type { DeployCheck, Deployment } from "./planning";
+import type { Incident } from "./planningData";
 
 export type Tone = "green" | "amber" | "neutral";
 
@@ -29,3 +30,14 @@ export const needsToolLink = (c: DeployCheck | null | undefined): boolean => !!c
 
 /** 사건 카드 상태. linked는 PR·문단에 연결했다는 뜻이고 장애가 복구됐다는 뜻이 아니다 */
 export const incidentStageText = (linked: boolean): string => (linked ? "PR 연결됨" : "PR 연결 전");
+
+const REVERT: Record<NonNullable<Incident["revert"]>["status"], string> = {
+  merged: "머지됨",
+  auto_merge_scheduled: "자동 머지 예약 (CI 대기)",
+  held: "안전 확인 대기",
+};
+
+export function revertText(r: NonNullable<Incident["revert"]>): string {
+  const pr = r.revertPr != null ? ` 되돌리기 PR #${r.revertPr}` : " 되돌리기";
+  return `레포 PR #${r.sourcePr}${pr} ${REVERT[r.status] ?? r.status}`;
+}
