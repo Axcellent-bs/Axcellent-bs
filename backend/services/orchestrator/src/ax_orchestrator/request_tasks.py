@@ -350,6 +350,7 @@ TASKS: tuple[TaskDef, ...] = (
         "create_claim",
         grade="A",
         human_gate=True,
+        fill="claim_input",
     ),
 )
 

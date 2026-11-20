@@ -536,3 +536,14 @@ def test_a_role_change_ends_that_accounts_sessions(client) -> None:
     assert again["account"]["role"] == "admin"
     # 새 세션은 관리자 권한으로 목록을 본다
     assert client.get(BASE + "/accounts", headers=_bearer(again["token"])).status_code == 200
+
+
+def test_buyer_id_from_authorization_reads_only_the_session_accounts_own_link(client) -> None:
+    _, admin, member = _company(client)
+    member_id = _account_id(client, member)
+    assert auth.buyer_id_from_authorization(f"Bearer {member}") is None  # 연결 전
+    assert _update(client, admin, member_id, buyer_id="buy_0007").status_code == 200
+    assert auth.buyer_id_from_authorization(f"Bearer {member}") == "buy_0007"
+    assert auth.buyer_id_from_authorization(f"Bearer {admin}") is None  # 다른 계정의 연결이 아니다
+    for bad in (None, "", "Bearer ", "Bearer mock:x", "Basic abc", "Bearer garbage"):
+        assert auth.buyer_id_from_authorization(bad) is None  # 지어내지 않는다

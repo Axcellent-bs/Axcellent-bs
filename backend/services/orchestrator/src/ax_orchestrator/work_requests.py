@@ -183,6 +183,7 @@ class WorkRequests:
             "thread_id": None,  # 접수한 대화 번호. 진행을 알릴 때 쓴다
             "handoff_task_id": None,  # 사람 받은 요청에 올린 일 번호
             "carry": {},  # 다음 단계로 그대로 넘길 앞 단계 결과 (화면·조회에는 내지 않는다)
+            "buyer_id": None,  # 의뢰자 계정에 연결된 구매자 번호 (대시보드가 로그인 세션에서 준 값)
         }
         self._save(row)
         self._trim()
@@ -225,6 +226,12 @@ class WorkRequests:
         row["log"].append({"at": now().isoformat(), "message": f"일을 골랐다: {task}"})
         self._save(row)
         return copy.deepcopy(row)
+
+    def set_buyer(self, request_id: str, buyer_id: str | None) -> None:
+        """의뢰자의 구매자 번호를 적는다. 환불·교환 접수가 이 값으로만 구매자를 정한다."""
+        row = self._row(request_id)
+        row["buyer_id"] = buyer_id
+        self._save(row)
 
     def set_carry(self, request_id: str, step_id: str, value: dict[str, Any] | None) -> None:
         """단계 결과 중 다음 단계가 그대로 받을 값을 둔다 (None이면 비운다). 쓰고 나면 지운다."""

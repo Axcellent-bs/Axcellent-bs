@@ -59,7 +59,7 @@ async def orchestrator_chat_send(request: AgentRequest) -> AgentResult:
     except ValidationError as exc:
         return _invalid(request, exc)
     try:
-        thread = get_chat_service().send(inp.who, inp.thread_id, inp.message)
+        thread = get_chat_service().send(inp.who, inp.thread_id, inp.message, buyer_id=inp.buyer_id)
     except ChatRefused as exc:
         return _refused(request, exc)
     return _done(request, "orchestrator_chat_send", {"thread": thread})
