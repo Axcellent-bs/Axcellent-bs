@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from marketing_agent import company_scope
 
 FILE_ENV = "MARKETING_COST_LIMITS_FILE"
 MEDIA_DIR_ENV = "MARKETING_MEDIA_DIR"
@@ -64,13 +65,8 @@ def valid_amount(field: str, value: object) -> bool:
 
 
 def store_path() -> Path:
-    explicit = os.getenv(FILE_ENV, "").strip()
-    if explicit:
-        return Path(explicit)
-    base = os.getenv(MEDIA_DIR_ENV, "").strip() or str(
-        Path(tempfile.gettempdir()) / "marketing_media"
-    )
-    return Path(base) / "cost_limits.json"
+    """`MARKETING_COST_LIMITS_FILE` → 회사 폴더(옛 자리에서 옮김) → 옛 자리."""
+    return company_scope.config_file(FILE_ENV, "cost_limits.json")
 
 
 def _history_path() -> Path:

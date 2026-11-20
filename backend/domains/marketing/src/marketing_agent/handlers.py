@@ -35,6 +35,8 @@ from ax_contracts.schemas import (
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.finance import ContentFormat
 from ax_contracts.schemas.marketing_creative import (
+    CreativeRecordAttachInput,
+    CreativeRecordAttachOutput,
     CreativeRecordGetInput,
     CreativeRecordGetOutput,
     CreativeRecordsListInput,
@@ -50,6 +52,7 @@ from marketing_agent import (
     manual_publish,
     outage_sns_media,
     publish_control,
+    request_video,
     secret_requests,
     shop_client,
     video_draft,
@@ -782,6 +785,37 @@ async def creative_video_request(request: AgentRequest) -> AgentResult:
     )
 
 
+async def creative_record_attach(request: AgentRequest) -> AgentResult:
+    """사람이 올린 그림·영상을 제작 기록에 붙인다(A `attach_creative_file`)."""
+    data = _parse(request, CreativeRecordAttachInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        item = await _render.attach_upload(
+            request.meta,
+            data.record_id,
+            data.part,
+            data.asset,
+            data.sha256,
+            data.size_bytes,
+            data.label,
+            data.who,
+        )
+    except _render.RenderError as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome=str(error), output={"message": str(error)}
+        )
+    out = CreativeRecordAttachOutput(record_id=data.record_id, part=data.part, item=item)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["creative_record_attach"], f"파일 붙임 {data.record_id} {data.part}", []
+        ),
+    )
+
+
 # 캐릭터 시트 프롬프트(read). 테스트는 이 값을 가짜 LLM을 돌려주는 함수로 바꾼다
 CHARACTER_SHEET_LLM: Any = None
 
@@ -1314,6 +1348,10 @@ async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentRes
     return video_draft.prepare_video_draft(request, STATE.sns)
 
 
+async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
+    return await request_video.list_request_videos(request, STATE.sns)
+
+
 async def draft_outage_sns_post_skill(request: AgentRequest) -> AgentResult:
     """장애 사과·보상 SNS 글 초안만 만든다. 게시·미디어 생성은 부르지 않는다."""
     return await draft_outage_sns_post(request, STATE.notices, STATE.sns)
@@ -1344,9 +1382,11 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
 
 
 async def _generate_media_sync(request: AgentRequest) -> AgentResult:
-    return await generate_media_flow(
+    result = await generate_media_flow(
         request, ledger=STATE.media_ledger, from_decision=_from_decision
     )
+    # 의뢰 영상 초안이면 완료 직전에 AI 라벨을 입혀 초안에 연결한다(동기·비동기 공통)
+    return await request_video.attach_label_after_generate(request, result, store=STATE.sns)
 
 
 async def generate_media_skill(request: AgentRequest) -> AgentResult:
@@ -1671,6 +1711,7 @@ HANDLERS = {
     "creative_records_list": creative_records_list,
     "creative_record_get": creative_record_get,
     "creative_video_request": creative_video_request,
+    "creative_record_attach": creative_record_attach,
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,
@@ -1683,6 +1724,7 @@ HANDLERS = {
     "prepare_video_draft_from_plan": prepare_video_draft_from_plan_skill,
     "draft_outage_sns_post": draft_outage_sns_post_skill,
     "list_outage_sns_drafts": list_outage_sns_drafts_skill,
+    "list_request_videos": list_request_videos_skill,
     "merge_outage_sns_drafts": merge_outage_sns_drafts_skill,
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,

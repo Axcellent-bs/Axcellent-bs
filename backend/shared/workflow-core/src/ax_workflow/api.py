@@ -6,7 +6,8 @@
 - `POST /actions`는 프로토타입 Action(`{"type": "confirmSpec", "spec": "SPEC-7"}`)을 그대로 받는다
   (`confirm_spec`처럼 snake_case도 받는다). 서비스마다 받는 액션 표가 다르다.
 - `GET /events`는 SSE(`text/event-stream`). 연결하면 현재 상태를 한 번 보내고, 상태가 바뀔 때마다
-  `event: state` + 전체 상태 JSON을 보낸다. 15초마다 주석 줄로 연결을 유지한다.
+  `event: state` + 상태 JSON을 보낸다 (개발 AI 대화는 원문 없이, core.public_snapshot).
+  15초마다 주석 줄로 연결을 유지한다.
 - 쓰기(`POST`)는 `Authorization: Bearer <토큰>`이 있어야 한다 (auth.py).
 """
 
@@ -107,7 +108,7 @@ def add_common_routes(router: APIRouter, get_service: Callable[[], Any]) -> None
     @router.get("/state")
     def get_state() -> dict:
         svc = get_service()
-        return _ok(svc.snapshot(), svc)
+        return _ok(svc.public_snapshot(), svc)
 
     @router.get("/requests")
     def list_requests(state: str | None = None) -> dict:
@@ -246,7 +247,7 @@ def add_common_routes(router: APIRouter, get_service: Callable[[], Any]) -> None
         except GateRefused as exc:
             return _gate_err(exc)
         return _ok(
-            svc.snapshot(),
+            svc.public_snapshot(),
             svc,
             changed=result.changed,
             outcome=result.outcome,
@@ -257,7 +258,7 @@ def add_common_routes(router: APIRouter, get_service: Callable[[], Any]) -> None
     def post_reset() -> dict:
         svc = get_service()
         svc.reset()
-        return _ok(svc.snapshot(), svc)
+        return _ok(svc.public_snapshot(), svc)
 
     @router.get("/events")
     async def events(max_events: int | None = None) -> StreamingResponse:
@@ -265,7 +266,7 @@ def add_common_routes(router: APIRouter, get_service: Callable[[], Any]) -> None
         svc = get_service()
 
         def frame() -> str:
-            data = json.dumps(svc.snapshot(), ensure_ascii=False)
+            data = json.dumps(svc.public_snapshot(), ensure_ascii=False)
             return f"id: {svc.version}\nevent: state\ndata: {data}\n\n"
 
         async def stream():

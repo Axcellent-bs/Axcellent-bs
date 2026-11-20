@@ -17,6 +17,7 @@ from ax_dashboard_api import (
     company_connection,
     handoffs,
     office_room,
+    personal_mcp,
     public_info,
     settlements,
     shop_events,
@@ -127,6 +128,9 @@ app.include_router(secret_router)
 # 회사 AI 설정(고객사 관리자)과 AI 연결 보기(회원 모두): 회사당 키·모델 하나, 키는 끝 글자만
 app.include_router(company_ai.admin_router)
 app.include_router(company_ai.view_router)
+# 도구 연결 › 내 연결: 개인 MCP 연결(본인 세션만)과 MCP 서버의 토큰 검사(에이전트 토큰)
+app.include_router(personal_mcp.router)
+app.include_router(personal_mcp.check_router)
 # 사람 할 일함: 에이전트가 넣는 창구(에이전트 토큰)와 사람이 보는 창구(읽기·쓰기 모두 사람 토큰)
 app.include_router(handoffs.intake)
 app.include_router(handoffs.inbox)

@@ -12,7 +12,7 @@ import { SERVICES, SHARED_PATHS, matchPath } from './services'
 import { getCompany } from './company'
 import { memberLinked, useProfiles, withProfile, type ReaderArea } from './members'
 import { endSupport, getSupport, supportActive } from './support'
-import { setActorName } from '@/lib/actor'
+import { setActorAccount, setActorName } from '@/lib/actor'
 import { fetchLoginEnabled, fetchMe, serverLogout } from '@/lib/authApi'
 import { getSession, setSession, type HumanSession, type ServerAccount } from '@/lib/humanSession'
 import { approverOf, customerRows } from '@/lib/memberAdmin'
@@ -315,6 +315,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   )
   // 사람 결정 요청에 같이 보낼 계정 이름 (재무 기록의 "관리자(IP)" 표시용, lib/actor.ts). 같은 값을 다시 넣을 뿐이라 렌더 중에 둔다
   setActorName(current?.name)
+  setActorAccount(current?.id)
   const value = useMemo(
     () => ({ account: current, mode, expired, signIn, signInServer, fallBackToDemo, signOut, refreshMe }),
     [current, mode, expired, signIn, signInServer, fallBackToDemo, signOut, refreshMe],

@@ -14,13 +14,12 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from marketing_agent.media.config import MEDIA_DIR_ENV
+from marketing_agent import company_scope
 from marketing_agent.media.custom_spec import MAX_PROVIDERS, CustomVideoSpec, validate_spec
 
 FILE_ENV = "MARKETING_VIDEO_PROVIDERS_FILE"
@@ -32,13 +31,8 @@ class VideoStoreError(Exception):
 
 
 def store_path() -> Path:
-    explicit = os.getenv(FILE_ENV, "").strip()
-    if explicit:
-        return Path(explicit)
-    base = os.getenv(MEDIA_DIR_ENV, "").strip() or str(
-        Path(tempfile.gettempdir()) / "marketing_media"
-    )
-    return Path(base) / "video_providers.json"
+    """`MARKETING_VIDEO_PROVIDERS_FILE` → 회사 폴더(옛 자리에서 옮김) → 옛 자리."""
+    return company_scope.config_file(FILE_ENV, "video_providers.json")
 
 
 def _read() -> dict[str, Any]:

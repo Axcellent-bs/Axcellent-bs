@@ -279,3 +279,16 @@ async def test_generate_media_accepts_the_skill_output(
     assert result.output["scene_template_id"] == prepared["scene_template_id"]
     assert result.output["provider"] == "mock" and result.output["ai_generated"] is True
     assert [s["action"] for s in gate.seen] == ["generate_media"]
+
+
+def test_reprepare_keeps_an_already_attached_video() -> None:
+    first = _ok()
+    store = handlers.STATE.sns
+    draft = store.get(first["post_draft_id"])
+    store.update_meta(
+        [draft.model_copy(update={"asset_ref": "t/c/m/labeled.mp4", "asset_sha256": "a" * 64})]
+    )
+    again = _ok()
+    assert again["post_draft_id"] == first["post_draft_id"]
+    kept = store.get(first["post_draft_id"])
+    assert kept.asset_ref == "t/c/m/labeled.mp4" and kept.asset_sha256 == "a" * 64

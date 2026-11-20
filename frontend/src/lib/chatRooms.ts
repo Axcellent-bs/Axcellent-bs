@@ -4,6 +4,7 @@ import { incidentNo } from "@/lib/format";
 import { mergeTalk } from "@/lib/officeTalk";
 import type { CommLine } from "@/lib/types";
 import type { WorkRequestRow } from "@/lib/workRequests";
+import { cardContextsIn } from "@/lib/requestCards";
 
 // AI 대화방의 방 목록과 방별 대화. 대화 기록(/agents/chat)과 AI 오피스(/agents/office)가 같이 쓴다.
 // 방은 세 가지다.
@@ -86,14 +87,21 @@ export function sortIncidentRooms(incidents: OrchIncident[]): OrchIncident[] {
 /** 방 하나의 대화: 기록(buildTimeline) + 그 방에서 사람이 건 말. 1:1 방은 비어 있다(DirectChat이 따로 그린다) */
 export function roomItems(room: string, src: RoomSources): ChatItem[] {
   if (room !== ALL_ROOM && !src.incidents.some((i) => i.context_id === room)) return [];
-  const base = buildTimeline(src.incidents, src.executions, src.comms, room, src.requests ?? []);
-  return mergeTalk(base, src.talk.filter((t) => t.room === room));
+  const talk = src.talk.filter((t) => t.room === room);
+  // 이 방에 의뢰 진행 카드가 보이는 의뢰(총괄 말풍선에 번호 + 의뢰 목록에 있음 + 사람 토큰)는 그 의뢰 안 부서 호출을 작업 기록으로 접는다.
+  // 의뢰 목록은 사람 토큰이 있을 때만 읽히므로 목록이 있으면 토큰이 있다
+  const requests = src.requests ?? [];
+  const lines = talk.flatMap((t) => (t.kind === "msg" ? [{ text: t.text, fromOrchestrator: t.fromKey === "orchestrator" && !t.human }] : []));
+  const cards = cardContextsIn(lines, requests, requests.length > 0);
+  const base = buildTimeline(src.incidents, src.executions, src.comms, room, requests, cards);
+  return mergeTalk(base, talk);
 }
 
 /** 마지막 말 한 줄과 시각 (말풍선·시스템 줄 중 마지막) */
 function lastLine(items: ChatItem[]): { preview?: string; lastAt?: string } {
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
+    if (it.kind === "msg" && it.lane === "log") continue; // 작업 기록 줄은 미리보기에 쓰지 않는다
     if (it.kind === "msg") return { preview: `${it.from}: ${it.text}`, lastAt: it.at || undefined };
     if (it.kind === "system") return { preview: it.text, lastAt: it.at || undefined };
     if (it.kind === "hold") return { preview: `사람 판단 필요: ${it.title}`, lastAt: it.at || undefined };

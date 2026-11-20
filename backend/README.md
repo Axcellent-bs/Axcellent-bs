@@ -260,9 +260,15 @@ assignments:
 | 기획 대화·노션 연결 (planning, 1-6) | `PLANNING_STATE_DIR/planning_chat.db`·`notion_token.json` | `companies/catbooks/` 같은 이름 | 없음. `PLANNING_STATE_DIR`가 없으면 메모리만. 업무 흐름 상태 파일은 `PLANNING_STATE_DIR` 그대로 |
 | 재무 기록·내보내기·대화 (finance, 1-6) | `.data/finance_state.json`·`finance_exports/`·`finance_chat.db` | `companies/catbooks/` 같은 이름 | `FINANCE_STATE_FILE`·`FINANCE_EXPORT_DIR`·`FINANCE_CHAT_DB`(대화는 예전처럼 `FINANCE_STATE_FILE` 옆도) |
 | 인프라 배포 기록 (infra, 1-6) | 패키지 안 `data/deployments.json` | `companies/catbooks/infra_deployments.json`(있을 때만) | `INFRA_DEPLOYMENTS_FILE` |
+| 마케팅 미디어 폴더 (1-6) | 임시 폴더 `marketing_media`(또는 `<회사 폴더의 부모>/marketing_media`) | `companies/catbooks/marketing_media/` | `MARKETING_MEDIA_DIR`(정했으면 그 경로. SNS 자산 해석은 이 값을 정했을 때만, 예전 그대로) |
+| 마케팅 비용 한도·영상 공급자 설정 (1-6) | `<MARKETING_MEDIA_DIR>/cost_limits.json`·`video_providers.json`(+ `.history.jsonl`) | `companies/catbooks/` 같은 이름 | `MARKETING_COST_LIMITS_FILE`·`MARKETING_VIDEO_PROVIDERS_FILE` |
 
 회사 칸(1-6): `infra_chat.db`는 줄마다 `tenant_id`(옛 줄은 켤 때 `catbooks`로 채움). 재무 메모리 주문 모음은
 회사 ID마다 따로(`finance_agent.books.order_store`).
+
+마케팅 DB 6개(`marketing_briefs`·`media_ledger`·`sns_pending`·`sns_drafts`·`marketing_chat`·`marketing_creative`)는 파일은 그대로
+두고 표마다 `tenant_id` 칸이 붙는다(1-6). 옛 줄은 `catbooks`로 채워지고(멱등), 저장소는 자기 회사 줄만 읽는다.
+run_all.sh가 칸을 붙이기 전 한 번 `.data/backup-before-marketing-company-<시각>.tgz`(0600)를 만든다.
 
 - 켜는 값은 `AX_COMPANIES_DIR`(run_all.sh 기본 `.data/companies`). 안 정하면 모두 예전 자리다
 - 옮기기(`ax_agent_template.company_files`): 예전 자리에 있고 회사 폴더에 없으면 처음 읽을 때 한 번 옮긴다.

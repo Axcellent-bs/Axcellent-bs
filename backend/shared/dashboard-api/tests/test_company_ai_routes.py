@@ -432,3 +432,51 @@ def test_usage_recording_off(
     assert data["recording"] is False and data["total_tokens"] == 0
     s = client.get(f"{VIEW}/status", headers=people["a-3"]).json()["data"]
     assert s["usage"]["recording"] is False
+
+
+# ---- 월 예산 상한 %(11/20) ----
+
+
+def test_limit_percent_is_saved_logged_and_told(client: TestClient, people: Any) -> None:
+    """상한 %도 모델·예산 변경과 같다: 바로 적용, 이력에 남고 회원에게 알린다."""
+    body = {"model": "m", "monthly_budget_tokens": 1000, "monthly_limit_percent": 80}
+    res = client.post(f"{ADMIN}/settings", json=body, headers=people["a-1"])
+    assert res.status_code == 200, res.text
+    assert res.json()["data"]["settings"]["monthly_limit_percent"] == 80
+    assert "monthly_limit_percent" in res.json()["data"]["changed"]
+    notices = client.get(f"{VIEW}/status", headers=people["a-3"]).json()["data"]["notices"]
+    assert "monthly_limit_percent" in notices[0]["changed"]
+    history = client.get(ADMIN, headers=people["a-2"]).json()["data"]["history"]
+    assert "monthly_limit_percent" in history[0]["changed"]
+    for bad in (0, 101):
+        res = client.post(
+            f"{ADMIN}/settings", json={**body, "monthly_limit_percent": bad}, headers=people["a-1"]
+        )
+        assert res.status_code == 422
+
+
+def test_status_stops_at_the_limit_percent(client: TestClient, people: Any) -> None:
+    _put_key(client, people["a-1"])
+    body = {"model": "m", "monthly_budget_tokens": 100, "monthly_limit_percent": 50}
+    client.post(f"{ADMIN}/settings", json=body, headers=people["a-1"])
+    _usage("catbooks", "finance", 20, 29, datetime.now(UTC))
+    s = client.get(f"{VIEW}/status", headers=people["a-3"]).json()["data"]
+    assert s["state"] == "connected"
+    assert s["usage"]["limit_percent"] == 50 and s["usage"]["limit_tokens"] == 50
+    _usage("catbooks", "finance", 1, 0, datetime.now(UTC))
+    s = client.get(f"{VIEW}/status", headers=people["a-3"]).json()["data"]
+    assert s["state"] == "budget_exhausted" and s["usage"]["percent"] == 50.0
+    u = client.get(f"{VIEW}/usage", headers=people["a-3"]).json()["data"]
+    assert u["limit_percent"] == 50 and u["limit_tokens"] == 50
+
+
+def test_no_limit_percent_means_the_whole_budget(client: TestClient, people: Any) -> None:
+    _put_key(client, people["a-1"])
+    client.post(
+        f"{ADMIN}/settings", json={"model": "m", "monthly_budget_tokens": 100},
+        headers=people["a-1"],
+    )
+    _usage("catbooks", "finance", 50, 49, datetime.now(UTC))
+    s = client.get(f"{VIEW}/status", headers=people["a-3"]).json()["data"]
+    assert s["state"] == "connected" and s["usage"]["limit_percent"] == 100
+    assert s["usage"]["limit_tokens"] == 100

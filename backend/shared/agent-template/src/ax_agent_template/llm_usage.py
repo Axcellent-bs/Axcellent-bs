@@ -7,6 +7,10 @@
 저장소는 SQLite 파일 하나다(WAL). 위치는 환경변수 `AX_LLM_USAGE_DB`로 정하고, 비어 있으면 파일에
 쓰지 않는다(표준 로거에만 남긴다). 프롬프트·응답·고객 원문은 담지 않는다(부서·모델 이름과 숫자만).
 기록이 실패해도 LLM 호출은 멈추지 않는다(경고만 남긴다).
+
+계정 칸(`account_id`, 11/20): 개인 MCP 연결로 시킨 일이면 그 사람 계정. 에이전트 서버가 받은
+A2A 메타의 `on_behalf_of`로 `account_scope`를 열고(server.py), 그 안의 호출은 따로 넘기지 않아도
+그 계정으로 남는다. 회사 키 호출이라 회사 사용량에도 그대로 센다.
 """
 
 from __future__ import annotations
@@ -16,6 +20,9 @@ import os
 import sqlite3
 import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -23,6 +30,17 @@ from ax_contracts.data_access.llm_usage import LlmCallRecord, LlmUsageQuery, Llm
 
 DB_ENV = "AX_LLM_USAGE_DB"
 _logger = logging.getLogger("ax.llm_usage")
+_account: ContextVar[str | None] = ContextVar("ax_llm_usage_account", default=None)
+
+
+@contextmanager
+def account_scope(account_id: str | None) -> Iterator[None]:
+    """이 안의 LLM 호출 기록에 계정을 붙인다(개인 MCP 연결로 시킨 일). None이면 계정 없음."""
+    token = _account.set(account_id or None)
+    try:
+        yield
+    finally:
+        _account.reset(token)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS llm_calls (
@@ -36,7 +54,8 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     model         TEXT,
     input_tokens  INTEGER NOT NULL,
     output_tokens INTEGER NOT NULL,
-    success       INTEGER NOT NULL
+    success       INTEGER NOT NULL,
+    account_id    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_llm_calls_context ON llm_calls (context_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_time ON llm_calls (occurred_at);
@@ -64,6 +83,14 @@ class SqliteUsageStore:
         if path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        self._add_account_column()
+
+    def _add_account_column(self) -> None:
+        """옛 DB(계정 칸 없음)에 `account_id`를 한 번 더한다. 옛 기록은 NULL(회사 사용량)."""
+        with self._lock, self._conn:
+            cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(llm_calls)")}
+            if "account_id" not in cols:
+                self._conn.execute("ALTER TABLE llm_calls ADD COLUMN account_id TEXT")
 
     def write(self, record: LlmCallRecord) -> None:
         row = (
@@ -77,12 +104,13 @@ class SqliteUsageStore:
             record.input_tokens,
             record.output_tokens,
             int(record.success),
+            record.account_id,
         )
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR IGNORE INTO llm_calls (log_id, tenant_id, context_id, occurred_at,"
-                " source, department, model, input_tokens, output_tokens, success)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                " source, department, model, input_tokens, output_tokens, success, account_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 row,
             )
 
@@ -95,6 +123,9 @@ class SqliteUsageStore:
         if query.departments:
             where.append(f"department IN ({','.join('?' * len(query.departments))})")
             args += query.departments
+        if query.account_id is not None:
+            where.append("account_id = ?")
+            args.append(query.account_id)
         if query.from_ is not None:
             where.append("occurred_at >= ?")
             args.append(_iso(query.from_))
@@ -166,8 +197,12 @@ def record_call(
     success: bool,
     context_id: str | None = None,
     tenant_id: str | None = None,
+    account_id: str | None = None,
 ) -> None:
-    """호출 1회의 사용량을 저장소에 남긴다. 실패해도 예외를 밖으로 내지 않는다."""
+    """호출 1회의 사용량을 저장소에 남긴다. 실패해도 예외를 밖으로 내지 않는다.
+
+    `account_id`를 넘기지 않으면 `account_scope`로 열린 계정(없으면 None)을 쓴다(11/20).
+    """
     try:
         fields = {
             "log_id": f"llm_{uuid.uuid4().hex[:16]}",
@@ -179,6 +214,7 @@ def record_call(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "success": success,
+            "account_id": account_id if account_id is not None else _account.get(),
         }
         if tenant_id is not None:
             fields["tenant_id"] = tenant_id

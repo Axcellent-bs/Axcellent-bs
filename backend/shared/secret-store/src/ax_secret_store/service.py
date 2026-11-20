@@ -299,6 +299,59 @@ class SecretService:
             changed += 1
         return changed
 
+    def retenant(
+        self, source: str, target: str, who: str, *, dry_run: bool = False
+    ) -> list[tuple[str, str]]:
+        """`source` tenant의 값을 `target`으로 옮긴다(회사 공간 나누기 1-7: default → catbooks).
+
+        암호문의 AAD·지문에 tenant가 들어 있어 행의 tenant 칸만 바꿀 수 없다. 값마다 옛 tenant로
+        풀고 새 tenant로 다시 암호화한 뒤, 새 행 쓰기와 옛 행 지우기를 한 트랜잭션으로 한다.
+        결과(이름별): `moved` · `would_move`(dry-run) · `same_exists`(대상에 같은 값이 있어 옛 행만
+        지움) · `conflict`(대상에 다른 값이 있어 둘 다 그대로). 처리 안 된 요청이 `source`에 있으면
+        `PENDING_EXISTS`로 아무것도 하지 않는다(대기 암호문도 tenant에 묶여 있어서다).
+        """
+        check_tenant(source)
+        check_tenant(target)
+        if source == target:
+            raise SecretStoreError(errors.INVALID_TENANT)
+        if self.repo.list_pending([source]):
+            raise SecretStoreError(errors.PENDING_EXISTS)
+        results: list[tuple[str, str]] = []
+        for r in self.repo.list([source]):
+            plain = self.decrypt_row(r)
+            there = self.repo.get(target, r.name)
+            if there is not None:
+                same = self.decrypt_row(there) == plain
+                if not same:
+                    results.append((r.name, "conflict"))
+                    continue
+                if not dry_run:
+                    stamp = _now()
+                    history = {
+                        "at": stamp, "by": who[:64], "action": "retenant_drop_duplicate",
+                        "tenant": source, "name": r.name,
+                    }  # fmt: skip
+                    self.repo.commit(delete=(source, r.name), history=history)
+                results.append((r.name, "same_exists"))
+                continue
+            if dry_run:
+                results.append((r.name, "would_move"))
+                continue
+            stamp = _now()
+            kid, nonce, blob = self.keyring.encrypt(target, r.name, plain)
+            row = SecretRow(
+                tenant=target, name=r.name, kid=kid, nonce=nonce, ciphertext=blob,
+                hint=r.hint, version=r.version + 1, created_at=r.created_at,
+                updated_by=who[:64], updated_at=stamp,
+            )  # fmt: skip
+            history = {
+                "at": stamp, "by": who[:64], "action": f"retenant_from_{source}"[:64],
+                "tenant": target, "name": r.name,
+            }  # fmt: skip
+            self.repo.commit(upsert=row, delete=(source, r.name), history=history)
+            results.append((r.name, "moved"))
+        return results
+
     def fingerprint_of_stored(self, tenant: str, name: str) -> str | None:
         plain = self.reveal_for_runtime(tenant, name)
         return None if plain is None else self.keyring.fingerprint(tenant, name, plain)

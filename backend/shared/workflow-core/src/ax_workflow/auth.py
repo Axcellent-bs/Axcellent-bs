@@ -99,6 +99,62 @@ def check_caller(authorization: str | None) -> str:
     raise AuthError(401, "토큰을 검증할 수 없다")
 
 
+def session_mode() -> bool:
+    """서버가 로그인 세션을 쓰는 설정인가 (`AX_SESSION_SECRET` 32자 이상, sessions_enabled).
+
+    켜져 있으면 개발 AI 대화·작업 조작은 세션 토큰이 있어야 하고 계정은 세션 계정만 쓴다.
+    꺼진 데모 모드(공용 토큰 데모 로그인)에서만 화면이 적은 계정을 쓴다. 판정이 실패하면 켜진
+    것으로 본다 (fail-closed)."""
+    try:
+        return human_auth.sessions_enabled()
+    except Exception:  # noqa: BLE001 - 설정을 못 읽으면 막는 쪽
+        return True
+
+
+def session_human(authorization: str | None) -> human_auth.Human | None:
+    """로그인 세션 토큰의 사람. 세션 토큰이 아니면(공용·목·에이전트·없음) None.
+
+    세션 토큰인데 받을 수 없으면(위조 403, 만료·로그아웃 401) AuthError. 읽기(GET)에도 쓴다."""
+    token = human_auth.bearer(authorization)
+    if not token or not human_auth.is_session_token(token):
+        return None
+    try:
+        return human_auth.verify_session(token)
+    except human_auth.HumanAuthError as exc:
+        raise AuthError(exc.status_code, exc.message) from None
+
+
+def session_account(authorization: str | None) -> str | None:
+    """로그인 세션 토큰의 계정 id. 세션 토큰이 아니면 None."""
+    human = session_human(authorization)
+    return human.account_id if human else None
+
+
+def session_admin(authorization: str | None) -> bool:
+    """세션 토큰의 사람이 회사 관리자인가 (계정 역할 admin 또는 회사 역할 admin)."""
+    human = session_human(authorization)
+    return human is not None and (human.role == "admin" or human.company_role == "admin")
+
+
+def scoped_account(authorization: str | None, given: str | None) -> str | None:
+    """화면이 적은 계정(`?account=`·본문 `account`)을 토큰으로 확인한다.
+
+    - 세션 모드(`session_mode`): 세션 토큰이 있어야 하고(없으면 401, 공용·에이전트 토큰이면 403)
+      계정은 세션 계정이다. 적은 계정이 다르면 403
+    - 세션 설정이 꺼진 데모 모드: 세션 토큰이면 위와 같고, 아니면 적은 값을 그대로 쓴다
+      (계정을 모르면 None: 계정이 있는 대화·작업의 주인이 되지 못한다)"""
+    mine = session_account(authorization)
+    if mine is None:
+        if not session_mode():
+            return given
+        if not human_auth.bearer(authorization):
+            raise AuthError(401, "로그인 세션 토큰이 필요하다")
+        raise AuthError(403, "로그인 세션 토큰이 필요하다 (공용·에이전트 토큰으로는 안 된다)")
+    if given is not None and given != mine:
+        raise AuthError(403, "로그인한 계정과 다른 계정으로 요청했다")
+    return mine
+
+
 def require_human(authorization: str | None = Header(default=None)) -> str:
     return check_human(authorization)
 

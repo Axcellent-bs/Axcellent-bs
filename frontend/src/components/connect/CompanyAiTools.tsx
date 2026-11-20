@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { Notice, SectionHead, StatusChip } from './parts'
 import { PreparingChip } from '@/components/Preparing'
 import {
-  KEY_LABEL, budgetKo, canApprove, historyLineKo, keyHintKo, keyResultKo, parseBudget, percentKo, providerToSave, providerView,
+  KEY_LABEL, budgetKo, canApprove, limitLineKo, parseLimitPercent, historyLineKo, keyHintKo, keyResultKo, parseBudget, percentKo, providerToSave, providerView,
   saveBlockReason, settingsBody, stateView, tokensKo, videoView, whenKo,
   type AiStatus, type CompanyAiAdmin, type CoderMode, type KeyRequest,
 } from '@/lib/companyAi'
@@ -36,12 +36,16 @@ function Result({ msg, error }: { msg: string | null; error: string | null }) {
   return msg ? <p role="status" className="text-sm text-emerald-700">{msg}</p> : null
 }
 
-function Meter({ percent, label }: { percent: number | null; label: string }) {
+/** 사용 막대. `cap`(상한 %)이 있으면 그 자리에 세로 선을 긋고 `capLabel`을 막대 위에 적는다 */
+function Meter({ percent, label, cap, capLabel }: { percent: number | null; label: string; cap?: number; capLabel?: string | null }) {
   const w = Math.max(0, Math.min(100, percent ?? 0))
+  const stop = cap ?? 100
   return (
     <div className="space-y-1">
-      <div className="h-2 overflow-hidden rounded-full bg-ink-100" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(w)} aria-label={label}>
-        <div className={`h-full ${w >= 100 ? 'bg-red-700' : w >= 80 ? 'bg-amber-600' : 'bg-brand-600'}`} style={{ width: `${w}%` }} />
+      {capLabel && <p className="text-xs text-ink-700">{capLabel}</p>}
+      <div className="relative h-2 overflow-hidden rounded-full bg-ink-100" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(w)} aria-label={label}>
+        <div className={`h-full ${w >= stop ? 'bg-red-700' : w >= stop * 0.8 ? 'bg-amber-600' : 'bg-brand-600'}`} style={{ width: `${w}%` }} />
+        {cap != null && cap < 100 && <span aria-hidden="true" className="absolute inset-y-0 w-0.5 bg-ink-900" style={{ left: `${cap}%` }} title={capLabel ?? undefined} />}
       </div>
       <p className="text-xs text-ink-500">{label}</p>
     </div>
@@ -99,6 +103,7 @@ function CompanyModelCard({ a, status, blocked, onDone }: { a: CompanyAiAdmin; s
   const [baseUrl, setBaseUrl] = useState(s.base_url)
   const [value, setValue] = useState('')
   const [budget, setBudget] = useState(s.monthly_budget_tokens == null ? '' : String(s.monthly_budget_tokens))
+  const [cap, setCap] = useState(s.monthly_limit_percent == null ? '' : String(s.monthly_limit_percent))
   const act = useAct(onDone)
   const st = status ? stateView(status.state) : null
   const trial = status?.trial
@@ -108,10 +113,12 @@ function CompanyModelCard({ a, status, blocked, onDone }: { a: CompanyAiAdmin; s
     e.preventDefault()
     const n = parseBudget(budget)
     if (n === 'invalid') return act.setError('월 예산은 0 이상 정수(토큰)로 넣어 주세요. 비우면 예산 없음이에요.')
+    const limit = parseLimitPercent(cap)
+    if (limit === 'invalid') return act.setError('상한 %는 1~100 사이 정수로 넣어 주세요. 비우면 100%예요.')
     if (urlNeeded(model, baseUrl, s.provider)) return act.setError('목록에 없는 모델이라 OpenAI 호환 주소가 필요해요.')
     const v = value.trim()
     void act.run(async () => {
-      const r = await saveCompanyAiSettings(settingsBody(s, { model, base_url: baseUrl, monthly_budget_tokens: n }))
+      const r = await saveCompanyAiSettings(settingsBody(s, { model, base_url: baseUrl, monthly_budget_tokens: n, monthly_limit_percent: limit }))
       const parts = [r.changed.length ? '설정을 저장했어요. 회원 모두에게 알렸어요.' : '설정은 그대로예요.']
       if (v) {
         parts.push(keyResultKo(await putCompanyAiKey('LLM_API_KEY', v), a.approval.admins))
@@ -136,10 +143,18 @@ function CompanyModelCard({ a, status, blocked, onDone }: { a: CompanyAiAdmin; s
         <ModelFields model={model} baseUrl={baseUrl} provider={s.provider} onModel={setModel} onUrl={setBaseUrl} disabled={blocked || act.busy} />
         <KeyInput value={value} onChange={setValue} hasKey={key.has_key} hint={key.hint} disabled={blocked || act.busy}
           emptyNote="저장하면 관리자도 다시 볼 수 없어요. 끝 4자리만 보여요" placeholder="회사 공급자 계정의 키" />
-        <Field label="월 예산 (토큰)" note={status ? budgetKo(status.usage) : '이번 달 사용량을 불러오는 중…'}>
-          <input className="field font-mono" inputMode="numeric" value={budget} onChange={(e) => setBudget(e.target.value)} disabled={blocked || act.busy} placeholder="비우면 예산 없음 · 예: 5000000" />
-        </Field>
+        <div className="grid grid-cols-[1fr_7rem] gap-3">
+          <Field label="월 예산 (토큰)" note={status ? budgetKo(status.usage) : '이번 달 사용량을 불러오는 중…'}>
+            <input className="field font-mono" inputMode="numeric" value={budget} onChange={(e) => setBudget(e.target.value)} disabled={blocked || act.busy} placeholder="비우면 예산 없음 · 예: 5000000" />
+          </Field>
+          <Field label="상한 %" note="여기 이르면 멈춰요">
+            <input className="field font-mono" inputMode="numeric" value={cap} onChange={(e) => setCap(e.target.value)} disabled={blocked || act.busy} placeholder="100" />
+          </Field>
+        </div>
       </div>
+      {status?.usage?.recording && status.usage.budget_tokens != null && (
+        <Meter percent={status.usage.percent} label={budgetKo(status.usage)} cap={status.usage.limit_percent} capLabel={limitLineKo(status.usage)} />
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-primary px-5" disabled={blocked || act.busy}>{act.busy ? '저장 중…' : '저장'}</button>
         <button type="button" className="btn-ghost" onClick={clear} disabled={blocked || act.busy || !key.has_key}>키 지우기</button>

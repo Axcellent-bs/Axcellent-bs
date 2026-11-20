@@ -31,3 +31,4 @@ NOT_FOUND = "not_found"
 REQUEST_NOT_FOUND = "request_not_found"
 REQUEST_EXPIRED = "request_expired"
 REQUEST_MISMATCH = "request_mismatch"
+PENDING_EXISTS = "pending_exists"  # 옮길 tenant에 아직 처리 안 된 요청이 있다

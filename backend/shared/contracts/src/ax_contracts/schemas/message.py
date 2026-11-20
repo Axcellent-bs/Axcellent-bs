@@ -67,6 +67,14 @@ class RequestMeta(AxModel):
     - `deadline`: 응답 마감. 넘으면 실행하지 않고 보고한다.
     - `idempotency_key`: `context_id + 액션 + 대상`. 상태 변경 요청이면 필수다.
     - `requester`: 토큰에서 채워지는 값이다. 요청 본문에 적힌 값은 믿지 않고 무시한다.
+    - `on_behalf_of`: 이 일을 시킨 사람의 계정 ID(개인 MCP 연결, 11/20). MCP 서버(개발 서비스
+      `/api/planning/mcp`)가 개인 MCP 연결 토큰을 dashboard-api에서 검사한 뒤 토큰 주인 계정으로
+      채운다(`ax_agent_template.on_behalf`로 문맥에 묶으면 `call_agent`가 메타 값을 덮어쓴다).
+      요청 본문·도구 입력에 적힌 값은 버린다. `call_agent`는 메타를 복사하므로 다음 에이전트로
+      이어진다. 받는 에이전트 서버는 이 값으로 LLM 사용 기록(`LlmCallRecord.account_id`)을 채워
+      "내 MCP 사용량"을 센다. **권한 판단에는 쓰지 않는다**(누가 시켰는지 기록·사용량 셈에만).
+      에이전트 토큰을 가진 쪽은 어느 에이전트든 이 값을 적어 넘길 수 있어서 서명이 없다. 이 값으로
+      권한을 판단하게 되면 그때 dashboard-api 서명을 붙인다(11/20 태윤 님 리뷰).
     """
 
     context_id: str
@@ -76,6 +84,16 @@ class RequestMeta(AxModel):
     deadline: UtcDatetime
     idempotency_key: str | None = None
     requester: str | None = None
+    on_behalf_of: str | None = None
+
+    # 호환: 비어 있는 `on_behalf_of`는 직렬화에서 키째 뺀다(Evidence.notices와 같은 이유).
+    # 판매서버(shop-api)의 옛 계약 사본은 extra="forbid"라 `"on_behalf_of": null`만 실려도 거부한다.
+    @model_serializer(mode="wrap")
+    def _omit_empty_on_behalf_of(self, handler: SerializerFunctionWrapHandler):  # noqa: ANN202
+        data = handler(self)
+        if isinstance(data, dict) and data.get("on_behalf_of") is None:
+            data.pop("on_behalf_of", None)
+        return data
 
 
 class Evidence(AxModel):

@@ -115,3 +115,12 @@ def test_result_roundtrip_json() -> None:
         alternatives_considered=["재시도 없음"],
     )
     assert AgentResult.model_validate_json(result.model_dump_json()) == result
+
+
+def test_on_behalf_of_is_optional_and_defaults_to_none() -> None:
+    """사람 계정 ID 칸(개인 MCP 연결, 11/20). 옛 메타는 그대로 읽힌다."""
+    assert _meta().on_behalf_of is None
+    meta = _meta(on_behalf_of="acc-1")
+    assert meta.on_behalf_of == "acc-1"
+    again = RequestMeta.model_validate(meta.model_dump(mode="json"))
+    assert again.on_behalf_of == "acc-1"

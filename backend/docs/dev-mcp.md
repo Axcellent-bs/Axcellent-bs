@@ -24,6 +24,15 @@
 
 작업은 개발 화면에서 만들거나 `POST /api/planning/dev-tasks`에 `"mode": "subscription"`을 넣어 만듭니다 (넣지 않으면 지금처럼 서버 코딩 에이전트가 돕니다).
 
+## 개인 MCP 연결 토큰 (내 연결, 11/20)
+
+화면 시스템 관리 › 도구 연결 › 내 연결에서 회원이 직접 **개인 MCP 연결 토큰**(`axm_…`)을 발급·다시 발급·끊기 합니다. 원문은 발급 순간 한 번만 보이고, 서버(dashboard-api)에는 해시만 남습니다. 같은 화면에 Claude Code·Codex·Cursor 설정 글이 있습니다(토큰 자리는 `axm_…`).
+
+- 이 서버는 토큰을 직접 풀지 않고 dashboard-api `POST /api/dashboard/me/ai-connection/mcp/check`에 개발 서비스 에이전트 토큰으로 묻습니다(계약 `PersonalMcpCheckInput`·`PersonalMcpCheckOutput`). 그래서 dev 서비스는 dashboard-api 주소(`AX_DASHBOARD_API_URL`, 없으면 `http://dashboard-api:8020`)와 `AX_AGENT_TOKENS`의 `dev` 토큰이 필요합니다.
+- 내 연결에서 **개발 AI**를 골라야 통과합니다(`AGENT_NOT_CHOSEN` 403). 회사 월 예산 중 내 몫 %·회사 상한 %를 넘으면 `LIMIT_REACHED`·`COMPANY_LIMIT_REACHED` 429. 모르는·끊은 토큰은 `TOKEN_UNKNOWN` 401. dashboard-api에 닿지 않으면 503 `MCP_CHECK_UNAVAILABLE`(통과시키지 않음).
+- 가져간 사람 이름은 계정 이름입니다. 도구를 돌리는 동안 A2A 메타 `on_behalf_of`와 LLM 사용 기록 계정(`llm_calls.account_id`)이 토큰 주인 계정입니다(도구 입력 값은 무시).
+- 아래 작업 대기열 토큰(`DEV_WORK_TOKENS`)·사람 토큰도 예전처럼 받습니다.
+
 ## Claude Code에 붙이기
 
 서버 관리자에게 내 **작업 대기열 토큰**을 받습니다 (서버 `DEV_WORK_TOKENS`의 `이름:토큰`, 로컬은 `run_all.sh`가 만든 `backend/.data/tokens.env`의 `WORK_TOKEN`, 데모 목 모드는 `human:<내 이름>`).

@@ -38,7 +38,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from ax_agent_template import events
+from ax_agent_template import events, llm_usage
 from ax_agent_template.config import (
     MAX_PATH_LENGTH,
     PLACEHOLDER_TOKEN,
@@ -395,7 +395,9 @@ async def _process(
     check_idempotency_key(card, request)
 
     try:
-        raw_result = await handlers[request.skill](request)
+        # 개인 MCP 연결로 시킨 일이면 이 처리 중 LLM 사용 기록에 그 사람 계정을 붙인다(11/20)
+        with llm_usage.account_scope(meta.on_behalf_of):
+            raw_result = await handlers[request.skill](request)
     except Exception:
         logger.exception("핸들러 오류: skill=%s context_id=%s", request.skill, meta.context_id)
         return error_result(meta, TaskStatus.FAILED, "handler_error")

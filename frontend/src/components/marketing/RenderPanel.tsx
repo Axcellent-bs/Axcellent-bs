@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useAuthedMedia } from "@/lib/authedMedia";
-import { assetUrl, getCreativeRecord, requestCreativeVideo, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
+import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
+// 다른 도구로 만든 결과(그림·완성 영상)는 칸마다 [파일 올리기]로 직접 붙인다.
 // SNS·미디어 카드, 제작 기록 상세, AI 대화방 카드가 같이 쓴다. 만드는 중·승인 대기면 5초마다 다시 읽는다
 // (기록을 읽을 때 마케팅이 영상 승인 여부를 다시 확인해 승인됐으면 만들기 시작한다).
 
@@ -30,16 +31,48 @@ function Status({ part }: { part?: RenderPart | null }) {
   return <span className={`chip ${tone}`}>{STATUS_KO[s] ?? s}</span>;
 }
 
-function Picture({ recordId, part, info, label }: { recordId: string; part: RenderPartKey; info?: RenderPart | null; label: string }) {
+const IS_VIDEO = (part: RenderPartKey) => part === "video" || part === "final_video";
+
+function UploadButton({ recordId, part, onDone, onError }: { recordId: string; part: RenderPartKey; onDone: () => void; onError: (m: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const pick = async (file?: File) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      await uploadCreativeFile(recordId, part, file);
+      onDone();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "파일을 올리지 못했어요");
+    } finally {
+      setBusy(false);
+      if (input.current) input.current.value = "";
+    }
+  };
+  return (
+    <>
+      <input ref={input} type="file" className="hidden" accept={IS_VIDEO(part) ? "video/mp4" : "image/jpeg,image/png"} onChange={(e) => void pick(e.target.files?.[0])} />
+      <button type="button" className="btn-ghost ml-auto text-xs" disabled={busy} onClick={() => input.current?.click()}>{busy ? "올리는 중…" : "파일 올리기"}</button>
+    </>
+  );
+}
+
+function Picture({ recordId, part, info, label, onChanged, onError }: { recordId: string; part: RenderPartKey; info?: RenderPart | null; label: string; onChanged: () => void; onError: (m: string) => void }) {
   const done = info?.status === "done" && !!info.sha256;
+  const uploaded = info?.source === "upload";
+  const busy = info?.status === "running" || info?.status === "awaiting_approval";
   const { src, failed } = useAuthedMedia(done ? assetUrl(recordId, part, info?.sha256 ?? null) : null);
   return (
     <figure className="space-y-1">
-      <figcaption className="flex items-center gap-2 text-xs font-medium text-ink-700">{label} <Status part={info} /></figcaption>
+      <figcaption className="flex items-center gap-2 text-xs font-medium text-ink-700">
+        {label} <Status part={info} />
+        {uploaded && <span className="chip bg-ink-50 text-ink-700" title={info?.by ? `${info.by}님이 올림` : undefined}>직접 올림{info?.label ? ` · ${info.label}` : ""}</span>}
+        {!busy && <UploadButton recordId={recordId} part={part} onDone={onChanged} onError={onError} />}
+      </figcaption>
       {done ? (
-        src ? (part === "video"
+        src ? (IS_VIDEO(part)
           ? <video src={src} controls playsInline className="w-full max-w-sm rounded-xl bg-black" />
-          : <img src={src} alt={`${label} (Higgsfield, AI 생성)`} className="w-full rounded-xl ring-1 ring-ink-100" />)
+          : <img src={src} alt={uploaded ? label : `${label} (Higgsfield, AI 생성)`} className="w-full rounded-xl ring-1 ring-ink-100" />)
           : <div className="flex h-32 items-center justify-center rounded-xl bg-ink-50 text-xs text-ink-500">{failed ? "파일을 불러오지 못했어요" : "불러오는 중…"}</div>
       ) : (
         <div className={`flex h-32 items-center justify-center rounded-xl bg-ink-50 px-3 text-center text-xs text-ink-500 ${PENDING.has(info?.status ?? "") ? "animate-pulse" : ""}`}>
@@ -91,13 +124,13 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   if (!rec && !error) return <p className="text-xs text-ink-500">Higgsfield 결과를 불러오는 중…</p>;
   return (
     <section className="space-y-3 rounded-2xl bg-surface p-3 ring-1 ring-ink-100" aria-label="Higgsfield로 만든 그림과 영상">
-      <p className="text-xs font-semibold text-ink-900">Higgsfield로 만든 결과 <span className="font-normal text-ink-500">· AI 생성</span></p>
+      <p className="text-xs font-semibold text-ink-900">만든 결과 <span className="font-normal text-ink-500">· Higgsfield AI 생성 또는 직접 올림</span></p>
       <div className="grid gap-3 md:grid-cols-2">
-        <Picture recordId={recordId} part="sheet_image" info={render.sheet_image} label="이미지 시트 그림" />
-        <Picture recordId={recordId} part="board_image" info={render.board_image} label="스토리보드 그림" />
+        <Picture recordId={recordId} part="sheet_image" info={render.sheet_image} label="이미지 시트 그림" onChanged={() => void load()} onError={setError} />
+        <Picture recordId={recordId} part="board_image" info={render.board_image} label="스토리보드 그림" onChanged={() => void load()} onError={setError} />
       </div>
       <div className="space-y-2 border-t border-ink-100 pt-3">
-        <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" />
+        <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" onChanged={() => void load()} onError={setError} />
         {video?.status === "awaiting_approval" && (
           <p className="text-xs text-ink-700">사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>
         )}
@@ -107,6 +140,9 @@ export function RenderPanel({ recordId }: { recordId: string }) {
           </button>
         )}
         {!canAsk && !video?.status && render.board_image?.status !== "done" && <p className="text-xs text-ink-500">스토리보드 그림이 끝나면 영상을 요청할 수 있어요.</p>}
+      </div>
+      <div className="border-t border-ink-100 pt-3">
+        <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError} />
       </div>
       {error && <p className="text-xs text-accent" role="alert">{error}</p>}
     </section>

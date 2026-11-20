@@ -475,7 +475,7 @@ async def test_link_of_an_auto_published_row_counts_as_used(gate: FakeGate, done
     store.create(
         pending.PendingPost(
             idempotency_key="k_auto",
-            tenant_id="t",
+            tenant_id="shop-demo",
             context_id="c",
             post_draft_id="spd_auto",
             content_sha="x" * 64,
