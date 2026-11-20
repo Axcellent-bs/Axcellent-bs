@@ -1,4 +1,4 @@
-import { failureError } from "./apiError";
+import { storyboardFailure } from "./storyboardError";
 import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 
 // 마케팅 › SNS·미디어 › 스토리보드. 줄거리와 이미지 시트의 캐릭터 고정 문장(consistency_en)으로
@@ -43,6 +43,6 @@ export async function makeStoryboard(body: { story: string; character_en?: strin
     cache: "no-store",
   });
   const parsed: unknown = await res.json().catch(() => undefined);
-  if (!res.ok) throw failureError(parsed, res.status, "스토리보드를 만들지 못했어요");
+  if (!res.ok) throw storyboardFailure(parsed, res.status);
   return (parsed as { data: StoryboardResult }).data;
 }
