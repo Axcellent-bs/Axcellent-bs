@@ -17,6 +17,7 @@ export interface RequestVideo {
   labeled: boolean;
   /** labeled일 때만 값이 있다 (서버가 이 파일만 내준다). 화면은 이 값 대신 draft 번호로 주소를 만든다 */
   preview_path: string | null;
+  /** draft_ready | check_rejected | label_missing (백엔드 request_video._item). label_missing이면 labeled:false */
   status: string;
 }
 
@@ -41,7 +42,7 @@ export const requestFilterOf = (param: string | null | undefined): string | null
 
 export const durationKo = (s: number | null | undefined) => (s == null || !Number.isFinite(s) || s <= 0 ? "길이 미정" : `${Math.round(s)}초`);
 
-const STATUS_KO: Record<string, string> = { draft: "초안", merged: "합쳐짐", pending_approval: "게시 승인 대기", approved: "승인됨", published: "게시됨", rejected: "거절됨" };
+const STATUS_KO: Record<string, string> = { draft: "초안", merged: "합쳐짐", pending_approval: "게시 승인 대기", approved: "승인됨", published: "게시됨", rejected: "거절됨", draft_ready: "초안 준비됨", check_rejected: "점검에서 거절됨", label_missing: "AI 표시 아직 없음" };
 export const statusKo = (s: string | null | undefined) => (s ? STATUS_KO[s] ?? s : "상태 미정");
 
 export type VideoPane =
@@ -49,8 +50,8 @@ export type VideoPane =
   | { kind: "waiting"; text: string };
 
 /** 칸 표시: 라벨 입힌 영상이면 재생, 아니면 안내(원본은 어떤 경우에도 보여 주지 않는다) */
-export function videoPane(v: Pick<RequestVideo, "labeled" | "preview_path">): VideoPane {
-  if (v.labeled && v.preview_path) return { kind: "play" };
+export function videoPane(v: Pick<RequestVideo, "labeled" | "preview_path" | "status">): VideoPane {
+  if (v.status !== "label_missing" && v.labeled && v.preview_path) return { kind: "play" };
   return { kind: "waiting", text: "AI 표시(라벨)를 입히는 중이거나 아직 없어요. 라벨이 입혀진 영상만 여기서 볼 수 있어요." };
 }
 
