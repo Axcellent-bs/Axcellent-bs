@@ -8,6 +8,9 @@
   범위 밖 값은 쓰기도 거부하고 읽을 때도 무시한다(손으로 고친 파일도 기본값으로: fail-closed).
 - 파일: `SAFETY_COST_POLICY_FILE`(없으면 `SAFETY_STATE_DB` 옆 `cost_policy.json`,
   둘 다 없으면 덮어쓰기 없음 = 기본값만, 변경 요청은 거절). 이력은 `<파일>.history.jsonl`.
+  `SAFETY_COST_POLICY_FILE`을 정하지 않았고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 설계 1-4)
+  `<회사 폴더>/catbooks/cost_policy.json`. `SAFETY_STATE_DB` 옆 옛 파일은 처음 읽을 때
+  이력과 같이 옮긴다.
 - 쓰는 곳은 안전 서버의 적용 경로(`apply_change`) 한 곳이다. 값은 승인된 보류 건의 요청
   기록에서만 온다. 마케팅·대시보드 코드는 이 파일을 쓰지 않는다(읽기 API만 있다).
 - 안전 서버는 규칙을 볼 때마다 `effective()`로 파일의 mtime을 확인해 재시작 없이 다시 읽는다.
@@ -25,6 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ax_agent_template import company_files
 from ax_safety.rules import ThresholdTable
 
 FILE_ENV = "SAFETY_COST_POLICY_FILE"
@@ -53,12 +57,18 @@ class PolicyError(Exception):
     """변경을 받을 수 없다. 메시지는 사유 코드다."""
 
 
+POLICY_NAME = "cost_policy.json"
+
+
 def policy_path() -> Path | None:
     explicit = os.getenv(FILE_ENV, "").strip()
     if explicit:
         return Path(explicit)
     state = os.getenv("SAFETY_STATE_DB", "").strip()
-    return Path(state).with_name("cost_policy.json") if state else None
+    old = Path(state).with_name(POLICY_NAME) if state else None
+    if company_files.folders_on():
+        return company_files.company_file(POLICY_NAME, source=old, extras=(".history.jsonl",))
+    return old
 
 
 def in_range(key: str, value: object) -> bool:

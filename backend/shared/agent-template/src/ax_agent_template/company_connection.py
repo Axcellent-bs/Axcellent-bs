@@ -2,6 +2,10 @@
 
 - 저장: `AX_COMPANY_CONNECTION_FILE`이 가리키는 JSON 파일
   (`{"shop_api_url", "enabled", "verified_at", "updated_at", "updated_by"}`).
+  회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 설계 1-4) `<회사 폴더>/catbooks/company_connection.json`에
+  두고, `AX_COMPANY_CONNECTION_FILE` 자리에 옛 파일이 있으면 처음 읽을 때 옮긴다(`company_files`).
+  `AX_COMPANY_CONNECTION_FILE`은 그대로 설치 기준 자리다: 계정·연결 키·설치 기록처럼 회사 밖
+  파일이 그 옆에 있다(`connection_file()`). 연결 파일을 읽고 쓰는 곳은 `connection_path()`.
   쓰는 곳은 dashboard-api 한 곳이다 (시스템 관리 > 회사 연결, 사람 토큰).
 - 읽기: `config.agent_url("shop-api")`가 부를 때마다 바뀐 시각·크기로 확인해 읽는다
   (재시작 없이 반영).
@@ -72,8 +76,30 @@ class Connection:
 
 
 def connection_file() -> str:
-    """연결 파일 경로. 설정하지 않았으면 빈 문자열(연결 기능 꺼짐)."""
+    """설치 기준 자리(예전 연결 파일 경로). 설정하지 않았으면 빈 문자열(연결 기능 꺼짐).
+
+    계정·연결 키·설치 기록 같은 회사 밖 파일이 이 옆에 있다. 연결 파일 자체는 `connection_path()`.
+    """
     return os.getenv(CONNECTION_FILE_ENV, "").strip()
+
+
+CONNECTION_NAME = "company_connection.json"
+HISTORY_SUFFIX = ".history.jsonl"
+
+
+def connection_path() -> str:
+    """연결 파일을 읽고 쓰는 경로. 회사 폴더를 켰으면 캣북스 폴더(옛 파일은 처음에 옮긴다)."""
+    anchor = connection_file()
+    if not anchor:
+        return ""
+    from ax_agent_template import company_files
+
+    if not company_files.folders_on():
+        return anchor
+    path = company_files.company_file(
+        CONNECTION_NAME, source=Path(anchor), extras=(HISTORY_SUFFIX,)
+    )
+    return str(path)
 
 
 def validate_shop_url(raw: str) -> str:
@@ -228,7 +254,7 @@ _cache: tuple[str, int, int, Connection | None] | None = None
 def read_connection() -> Connection | None:
     """저장된 회사 연결. 파일 경로가 없거나 파일이 없거나 깨졌으면 None."""
     global _cache
-    path = connection_file()
+    path = connection_path()
     if not path:
         return None
     try:
@@ -279,8 +305,8 @@ def _now() -> str:
 
 
 def _history_path() -> Path:
-    path = connection_file()
-    return Path(path).with_name(Path(path).name + ".history.jsonl")
+    path = connection_path()
+    return Path(path).with_name(Path(path).name + HISTORY_SUFFIX)
 
 
 def _record(action: str, before: Connection | None, after: Connection | None, by: str) -> None:
@@ -333,7 +359,7 @@ def save_connection(
     tenant: str | None = None,
 ) -> Connection:
     """연결을 저장한다(임시 파일에 쓰고 바꿔치기). 파일 경로가 없으면 RuntimeError."""
-    path = connection_file()
+    path = connection_path()
     if not path:
         raise RuntimeError(f"{CONNECTION_FILE_ENV}가 설정되지 않아 저장할 수 없다")
     url = validate_shop_url(url)
@@ -372,7 +398,7 @@ def save_connection(
 
 def clear_connection(updated_by: str = "unknown") -> bool:
     """연결 파일을 지운다. 지웠으면 True, 원래 없었으면 False."""
-    path = connection_file()
+    path = connection_path()
     if not path:
         return False
     before = read_connection()

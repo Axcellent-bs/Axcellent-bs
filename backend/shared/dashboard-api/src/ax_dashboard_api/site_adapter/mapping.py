@@ -1,6 +1,8 @@
 """짝 파일: 고객사 API 자원(예약·투어)을 shop-api 자원(주문·상품)에 잇는 규칙.
 
 파일은 `<AX_SITE_ADAPTER_DIR>/mapping.json`(기본 `backend/.data/site_adapter/`). 항목 식은 셋뿐이다.
+`AX_SITE_ADAPTER_DIR`을 정하지 않았고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 설계 1-4)
+`<회사 폴더>/catbooks/site_adapter/`(옛 폴더 `.data/site_adapter`는 처음 읽을 때 통째로 옮긴다).
 - 점 경로 `contact.name`: 그 값 (값이 null이면 None, 경로가 없으면 `MissingField`)
 - `sum:a,b`: 정수 칸들의 합 (null은 0)
 - `const:<값>`: 그 글자 그대로
@@ -15,6 +17,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+
+from ax_agent_template import company_files
 
 MAPPING_DIR_ENV = "AX_SITE_ADAPTER_DIR"
 DEFAULT_DIR = Path(__file__).resolve().parents[5] / ".data" / "site_adapter"
@@ -88,9 +92,17 @@ class SiteMapping(BaseModel):
     resources: dict[Resource, ResourceMap]
 
 
+ADAPTER_DIR_NAME = "site_adapter"
+
+
 def adapter_dir() -> Path:
+    """변환기 폴더. 환경변수 → 회사 폴더(켰을 때) → 기본 `backend/.data/site_adapter`."""
     raw = os.getenv(MAPPING_DIR_ENV, "").strip()
-    return Path(raw) if raw else DEFAULT_DIR
+    if raw:
+        return Path(raw)
+    if company_files.folders_on():
+        return company_files.company_file(ADAPTER_DIR_NAME)
+    return DEFAULT_DIR
 
 
 def load_mapping() -> SiteMapping | None:

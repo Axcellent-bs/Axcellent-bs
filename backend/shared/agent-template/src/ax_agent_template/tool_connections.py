@@ -1,6 +1,8 @@
 """공용 도구 연결 보관함: 화면에서 정한 외부 도구 연결(주소·토큰·개인 키)을 한 파일에 둔다.
 
-- 저장: `AX_TOOL_CONNECTIONS_FILE`이 가리키는 JSON 파일 (연결 목록).
+- 저장: `AX_TOOL_CONNECTIONS_FILE`이 가리키는 JSON 파일 (연결 목록). 정하지 않았고 회사 폴더를
+  켰으면(`AX_COMPANIES_DIR`, 설계 1-4) `<회사 폴더>/catbooks/tool_connections.json`
+  (옛 자리 `.data/tool_connections.json`에 있으면 처음 읽을 때 옮긴다, `company_files`).
   쓰는 곳은 dashboard-api 한 곳이다 (예외: 개발 AI가 켤 때 예전 GitHub App 정보를 한 번 옮긴다,
   `dev_agent.vcs`).
   비밀 값이 들어 있어 `0600` 임시 파일에 쓰고 `os.replace`로 바꿔치기한다.
@@ -110,9 +112,19 @@ class ToolConnection:
         }
 
 
+FILE_NAME = "tool_connections.json"
+
+
 def connections_file() -> str:
-    """보관함 파일 경로. 설정하지 않았으면 빈 문자열(연결 없음)."""
-    return os.getenv(FILE_ENV, "").strip()
+    """보관함 파일 경로. 환경변수 → 회사 폴더. 둘 다 없으면 빈 문자열(연결 없음)."""
+    explicit = os.getenv(FILE_ENV, "").strip()
+    if explicit:
+        return explicit
+    from ax_agent_template import company_files
+
+    if not company_files.folders_on():
+        return ""
+    return str(company_files.company_file(FILE_NAME, extras=(".history.jsonl",)))
 
 
 def _now() -> str:
