@@ -1,4 +1,4 @@
-"""목 어댑터. 가짜 asset 파일과 고정 비용만 돌려준다. 외부 호출·키가 없다."""
+"""목 어댑터. 가짜 asset 파일만 돌려준다. 외부 호출·키가 없다."""
 
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ from marketing_agent.media.base import MediaRequest, MediaResult
 
 NAME = "mock"
 MODEL_ID = "mock-media"
-# 고정 비용(원). 0원은 safety 규칙(`media_cost_zero`)이 보류하므로 0이 아닌 값으로 둔다
-MOCK_COST_KRW = {"image": 100, "video": 1000, "audio": 100}
 
 
 def _tiny_png() -> bytes:

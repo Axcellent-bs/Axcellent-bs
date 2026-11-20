@@ -372,7 +372,7 @@
     },
     {
       "id": "generate_media",
-      "description": "이미지 또는 영상(media_kind)을 만든다. 프롬프트는 자유 입력이 아니라 장면 템플릿(scene_template_id)의 고정 문장에 화이트리스트 필드만 채운 것이고, 개인정보·고객 원문·글자 요청·실존 인물·브랜드는 코드 검사로 거절한다(prompt_rejected). 호출 전에 단가표로 비용을 계산해 건당·월 상한을 넘으면 공급자를 부르지 않고(cost_over_single·budget_exceeded), 환율·기준일이 비었거나 오래됐거나 단가표에 없는 조합이면 실제 공급자를 거부한다(fail-closed). 안전 관문 execute(generate_media)가 executed를 돌려준 뒤에만 공급자를 부르고, 응답 사용량으로 사후 정산해 장부(SQLite)에 남긴다(사용량이 없으면 추정액). 영상은 무음이며 결과 메타에 ai_generated=true를 항상 남긴다. 같은 키 재요청은 이전 결과를 돌려준다. 지금은 목 어댑터뿐이며 실제 공급자 이름은 어댑터가 없어 거부한다. safety 등록부에 아직 없어 live 관문에서는 fail-closed다.",
+      "description": "이미지 또는 영상(media_kind)을 만든다. 프롬프트는 자유 입력이 아니라 장면 템플릿(scene_template_id)의 고정 문장에 화이트리스트 필드만 채운 것이고, 개인정보·고객 원문·글자 요청·실존 인물·브랜드는 코드 검사로 거절한다(prompt_rejected). 원화 단가표·금액 상한은 쓰지 않는다. 사용량은 공급자 단위 그대로(영상 초·이미지 장·BGM 곡)이고 응답에 토큰이 있으면 같이 남긴다(output.usage). 우리 키(MARKETING_MEDIA_KEY_OWNER=server, 기본)로 만들 때는 종류별 월 사용량 예산을 넘으면 공급자를 부르지 않고(quota_exceeded), 그 종류의 예산이 비었으면 실제 공급자를 거부한다(quota_not_configured, fail-closed). 고객사 키(customer)는 예산을 안 건다. 안전 관문 execute(generate_media)가 executed를 돌려준 뒤에만 공급자를 부르고, 사용량을 장부(SQLite)에 남긴다(cost_krw·cost_est_krw는 예전 필드라 늘 0). 영상은 무음이며 결과 메타에 ai_generated=true를 항상 남긴다. 같은 키 재요청은 이전 결과를 돌려준다. 지금은 목 어댑터뿐이며 실제 공급자 이름은 어댑터가 없어 거부한다. safety 등록부에 아직 없어 live 관문에서는 fail-closed다.",
       "input_schema": "agents/marketing/src/marketing_agent/media/skill.py#GenerateMediaInput",
       "output_schema": "agents/marketing/src/marketing_agent/media/skill.py#GeneratedMedia",
       "grade": "B",
@@ -444,7 +444,7 @@
     },
     {
       "id": "prepare_sns_post_from_media",
-      "description": "생성(generate_media: B등급 안전 관문·건당/월 상한 그대로) → Instagram 규격 변환(이미지 JPEG·비율 4:5~1.91:1·너비 320~1440, 영상은 필요할 때만 재인코딩) → AI 라벨 오버레이·기계판독 표시(sns_label) → draft_sns_post → check_sns_post를 한 번에 잇는다. 출처는 게시된 공지(notice_id), 공개 쿠폰 사실(coupon), 보관된 기획안(proposal_id) 중 정확히 하나(proposal_id는 carousel_items와 함께 못 쓴다. 글은 보관본의 title·idea·why·facts를 그대로 옮기고 금칙어를 거른다). 출처·미디어 폴더·ffmpeg·글꼴은 생성 전에 확인해 막히면 비용이 나지 않는다. 결과에 점검 결과와 publish_sns 입력값(publish_input)을 담지만 게시하지 않는다: 게시는 C등급 publish_sns를 사람이 승인해야 한다. 같은 입력을 다시 부르면 생성은 장부에서 재생된다. carousel_items(이미지 2~10장, 영상 섞기 없음)를 주면 장마다 같은 단계를 거치되 생성 전에 장수만큼 비용을 더해(건당 상한·단가표 fail-closed) 월 상한을 넘으면 한 장도 만들지 않고 거절한다. AI 표시 라벨은 이미지·영상 모두 오른쪽 하단(sns_label.toml의 position·align·margin)에 입힌다.",
+      "description": "생성(generate_media: B등급 안전 관문·우리 키 월 사용량 예산 그대로) → Instagram 규격 변환(이미지 JPEG·비율 4:5~1.91:1·너비 320~1440, 영상은 필요할 때만 재인코딩) → AI 라벨 오버레이·기계판독 표시(sns_label) → draft_sns_post → check_sns_post를 한 번에 잇는다. 출처는 게시된 공지(notice_id), 공개 쿠폰 사실(coupon), 보관된 기획안(proposal_id) 중 정확히 하나(proposal_id는 carousel_items와 함께 못 쓴다. 글은 보관본의 title·idea·why·facts를 그대로 옮기고 금칙어를 거른다). 출처·미디어 폴더·ffmpeg·글꼴은 생성 전에 확인해 막히면 비용이 나지 않는다. 결과에 점검 결과와 publish_sns 입력값(publish_input)을 담지만 게시하지 않는다: 게시는 C등급 publish_sns를 사람이 승인해야 한다. 같은 입력을 다시 부르면 생성은 장부에서 재생된다. carousel_items(이미지 2~10장, 영상 섞기 없음)를 주면 장마다 같은 단계를 거치되 생성 전에 장수를 더해 월 이미지 예산(장)을 넘으면 한 장도 만들지 않고 거절한다(quota_exceeded). AI 표시 라벨은 이미지·영상 모두 오른쪽 하단(sns_label.toml의 position·align·margin)에 입힌다.",
       "input_schema": "agents/marketing/src/marketing_agent/sns_prepare.py#PrepareSnsPostInput",
       "output_schema": "agents/marketing/src/marketing_agent/sns.py#SnsPostCheck",
       "grade": "B",
@@ -591,7 +591,7 @@
     },
     {
       "id": "lower_media_cost_limits",
-      "description": "영상 건당 상한·월 예산을 낮춘다(updated_by, reason, confirmed). 재무·총괄이 하향 셀프 승인을 허용한 경우에만 주의사항 확인 뒤 A등급으로 바로 적용하고, 허용이 꺼져 있으면 C등급 사람 승인(요청자≠승인자)을 거친다.",
+      "description": "우리 키 월 사용량 예산(영상 초·이미지 장·BGM 곡)을 낮춘다(updated_by, reason, confirmed). 재무·총괄이 하향 셀프 승인을 허용한 경우에만 주의사항 확인 뒤 A등급으로 바로 적용하고, 허용이 꺼져 있으면 C등급 사람 승인(요청자≠승인자)을 거친다.",
       "input_schema": "agents/marketing/src/marketing_agent/cost_limits.py#ChangeInput",
       "output_schema": "agents/marketing/src/marketing_agent/cost_limits.py#LimitsOutput",
       "grade": "A",
@@ -603,7 +603,7 @@
     },
     {
       "id": "raise_media_cost_limits",
-      "description": "영상 건당 상한·월 예산을 올린다(updated_by, reason). 늘 C등급 사람 승인(요청자≠승인자). 안전 정책 상한·코드 절대 상한을 넘으면 거절한다.",
+      "description": "우리 키 월 사용량 예산(영상 초·이미지 장·BGM 곡)을 올린다(updated_by, reason). 늘 C등급 사람 승인(요청자≠승인자). 코드 절대 상한을 넘으면 거절한다.",
       "input_schema": "agents/marketing/src/marketing_agent/cost_limits.py#ChangeInput",
       "output_schema": "agents/marketing/src/marketing_agent/cost_limits.py#LimitsOutput",
       "grade": "C",

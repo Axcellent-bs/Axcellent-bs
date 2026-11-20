@@ -54,12 +54,10 @@ MEDIA_ENV = (
     "MARKETING_VIDEO_PROVIDER",
     "MARKETING_VIDEO_MODEL",
     "MARKETING_AUDIO_MODE",
-    "MARKETING_FX_USD_KRW",
-    "MARKETING_FX_AS_OF",
-    "MARKETING_FX_MAX_AGE_DAYS",
-    "MARKETING_COST_SAFETY_MARGIN_PCT",
-    "MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM",
-    "MARKETING_MEDIA_MONTHLY_BUDGET_KRW",
+    "MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY",
+    "MARKETING_QUOTA_IMAGE_COUNT_MONTHLY",
+    "MARKETING_QUOTA_AUDIO_COUNT_MONTHLY",
+    "MARKETING_MEDIA_KEY_OWNER",
     "MARKETING_SNS_PROVIDER",
     "MARKETING_SNS_PENDING_DB",
     "REDIS_URL",
@@ -464,8 +462,10 @@ def test_flow_state_shows_estimate_before_click_and_list_hides_copies(env: Env) 
     state = _state(origin.post_draft_id)
     assert state["stage"] == "not_started" and state["can_proceed"] is True
     est = state["estimate"]
-    assert est["status"] == "ok" and est["cost_krw"] and est["settled"] is False
-    assert est["month_total_krw"] == 0 and "per_item_limit_krw" in est
+    assert est["status"] == "ok" and est["settled"] is False
+    assert (est["usage"]["unit"], est["usage"]["amount"]) == ("images", 1)
+    assert est["quota"]["used"] == 0 and est["quota"]["unit"] == "images"
+    assert "cost_krw" not in est and "month_total_krw" not in est
     _prepare(env, origin.post_draft_id)
     listed = _call("list_outage_sns_drafts", {})["output"]
     assert [i["post_draft_id"] for i in listed["items"]] == [origin.post_draft_id]

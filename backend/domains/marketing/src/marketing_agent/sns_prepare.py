@@ -37,6 +37,7 @@ from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel
 from marketing_agent import sns, sns_label, sns_media
 from marketing_agent.briefs import BriefStore
+from marketing_agent.media import usage as usage_mod
 from marketing_agent.media.audio_mix import AudioMixError, Runner, subprocess_runner
 from marketing_agent.media.bgm_flow import generate_media_flow
 from marketing_agent.media.config import MediaSettings, ffmpeg_bin
@@ -367,11 +368,11 @@ def label_media(
 
 
 def _bgm_summary(gen: dict[str, Any]) -> dict[str, Any]:
-    """BGM을 따로 입힌 영상이면 BGM 증빙 요약(비용·모델·실행 id·프롬프트 해시). 아니면 비어 있다."""
+    """BGM을 따로 입힌 영상이면 BGM 증빙 요약(사용량·모델·실행 id·해시). 아니면 비어 있다."""
     bgm = gen.get("bgm")
     if not isinstance(bgm, dict):
         return {}
-    keys = ("provider", "model_id", "cost_krw", "execution_id", "prompt_sha256", "media_id")
+    keys = ("provider", "model_id", "usage", "execution_id", "prompt_sha256", "media_id")
     return {"bgm": {k: bgm.get(k) for k in keys}}
 
 
@@ -520,8 +521,8 @@ async def prepare_sns_post_from_media(
             stage=error.stage,
             reason=error.code,
             media_id=gen["media_id"],
-            cost_krw=gen.get("total_cost_krw", gen["cost_krw"]),
-            note="생성 비용은 이미 장부에 남았다. 같은 입력으로 다시 부르면 생성은 재생된다",
+            usage=gen.get("usage"),
+            note="생성 사용량은 이미 장부에 남았다. 같은 입력으로 다시 부르면 생성은 재생된다",
         )
 
     # 4) 초안 → 점검
@@ -578,8 +579,7 @@ async def prepare_sns_post_from_media(
             "provider": gen["provider"],
             "model_id": gen["model_id"],
             "resolution": gen["resolution"],
-            "cost_krw": gen["cost_krw"],
-            "total_cost_krw": gen.get("total_cost_krw", gen["cost_krw"]),
+            "usage": gen.get("usage"),
             "execution_id": gen["execution_id"],
             "replayed": bool(gen.get("replayed")),
             "audio_mode": gen.get("audio_mode", "off"),
@@ -643,10 +643,11 @@ async def _prepare_carousel(
     runner: Runner,
     prices_path: Path | None,
 ) -> AgentResult:
-    """이미지 2~10장 캐러셀. 순서: 입력·출처·도구 확인 → 총비용 → 장마다 생성·변환·라벨 → 초안·점검.
+    """이미지 2~10장 캐러셀. 순서: 입력·출처·도구 확인 → 총 사용량 → 장마다 생성·변환·라벨
+    → 초안·점검.
 
-    - 총비용: 장마다 `plan_cost`(건당 상한·단가표 fail-closed)로 계산해 더하고, 이번 달 누적과 합쳐
-      월 상한을 넘으면 **한 장도 만들지 않고** 거절한다. 장부에 이미 끝난 장은 비용에 넣지 않는다.
+    - 총 사용량: 장마다 `plan_cost`로 장 수를 더하고, 이번 달 사용량과 합쳐 우리 키의 월 이미지
+      예산(장)을 넘으면 **한 장도 만들지 않고** 거절한다. 장부에 이미 끝난 장은 넣지 않는다.
     - 생성은 장마다 `generate_media_flow`(B등급 안전 관문·장부 예약)를 그대로 거친다. 중간에 막히면
       그 결과를 돌려주고, 같은 입력으로 다시 부르면 끝난 장은 재생된다.
     - 장마다 규격 변환·AI 라벨 오버레이(오른쪽 하단)를 하고, 모든 장이 `check_sns_post`를 통과해야
@@ -675,7 +676,7 @@ async def _prepare_carousel(
     media_ref = _media_ref(data)
     item_ids = [f"{media_ref[:58]}-{index:02d}" for index in range(1, len(items) + 1)]
 
-    # 1) 총비용 미리 계산(돈이 나가기 전)
+    # 1) 총 사용량 미리 계산(공급자를 부르기 전)
     plans: list[CostPlan] = []
     for index, (item, item_id) in enumerate(zip(items, item_ids, strict=True), 1):
         gen_request = request.model_copy(
@@ -689,23 +690,27 @@ async def _prepare_carousel(
                 }
             )
         plans.append(plan)
-    new_cost = sum(p.krw_est for p in plans if not p.settled)
-    total_est = sum(p.krw_est for p in plans)
-    if settings.monthly_budget_krw is not None:
+    new_images = sum(p.usage.amount for p in plans if not p.settled)
+    total_est = sum(p.usage.amount for p in plans)
+    cap = settings.quota("image") if settings.quota_applies else None
+    if cap is not None:
         try:
-            month_total = ledger.month_total(datetime.now(UTC).strftime("%Y-%m"))
-        except Exception:  # noqa: BLE001 - 장부를 못 읽으면 비용을 알 수 없다(fail-closed)
+            month_used = ledger.month_usage(datetime.now(UTC).strftime("%Y-%m"), "image")
+        except Exception:  # noqa: BLE001 - 장부를 못 읽으면 사용량을 알 수 없다(fail-closed)
             return _failed(request, "storage_error", stage="cost_preflight")
-        if month_total + new_cost > settings.monthly_budget_krw:
+        if month_used + new_images > cap:
             return _failed(
                 request,
-                "budget_exceeded",
+                "quota_exceeded",
                 stage="cost_preflight",
+                media_kind="image",
+                unit="images",
                 item_count=len(items),
-                cost_krw=new_cost,
-                month_total_krw=month_total,
-                limit_krw=settings.monthly_budget_krw,
-                note="장 수만큼 비용을 더해 월 상한을 넘는다. 한 장도 만들지 않았다",
+                requested=new_images,
+                month_used=month_used,
+                limit=cap,
+                remaining_pct=usage_mod.remaining_pct(month_used, cap),
+                note="장 수만큼 더해 월 이미지 예산을 넘는다. 한 장도 만들지 않았다",
             )
 
     # 2) 장마다 생성 → 변환·라벨
@@ -765,7 +770,7 @@ async def _prepare_carousel(
                 "provider": gen["provider"],
                 "model_id": gen["model_id"],
                 "resolution": gen["resolution"],
-                "cost_krw": gen["cost_krw"],
+                "usage": gen.get("usage"),
                 "execution_id": gen["execution_id"],
                 "replayed": bool(gen.get("replayed")),
                 "conversion": converted.details,
@@ -820,7 +825,7 @@ async def _prepare_carousel(
     check = checked.output or {}
     ready = check.get("verdict") == "approved" and check.get("publishable") is True
     assets = draft["assets"]
-    total_cost = sum(g.get("total_cost_krw", g["cost_krw"]) for g in generations)
+    total_used = sum((g.get("usage") or {}).get("amount", 0) for g in generations)
     output = {
         "stage": "draft_ready" if ready else "check_rejected",
         "post_draft_id": draft["post_draft_id"],
@@ -830,10 +835,11 @@ async def _prepare_carousel(
         "asset_sha256": draft["asset_sha256"],
         "caption": draft["caption"],
         "items": item_details,
-        "cost": {
-            "estimated_krw": total_est,
-            "new_estimated_krw": new_cost,
-            "total_cost_krw": total_cost,
+        "usage": {
+            "unit": "images",
+            "estimated": total_est,
+            "new_estimated": new_images,
+            "total": total_used,
         },
         "check": check,
         # 사람이 승인해 `publish_sns`(C등급)를 부를 때 쓸 값. 이 skill은 부르지 않는다

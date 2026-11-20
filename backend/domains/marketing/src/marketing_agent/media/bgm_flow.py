@@ -59,7 +59,8 @@ class BgmEvidence(AxModel):
     scene_template_id: str
     asset_ref: str
     sha256: str
-    cost_krw: int
+    cost_krw: int = 0  # 원화는 더 계산하지 않는다(늘 0, 예전 필드)
+    usage: dict[str, Any] | None = None  # {unit: tracks, amount, 토큰은 응답에 있을 때만}
     execution_id: str
     ai_generated: Literal[True] = True
     replayed: bool = False
@@ -81,7 +82,7 @@ class GeneratedVideoWithBgm(GeneratedMedia):
     source_video_sha256: str
     bgm: BgmEvidence
     postprocess: PostprocessEvidence
-    total_cost_krw: int  # 영상 + BGM 확정액
+    total_cost_krw: int = 0  # 예전 필드(늘 0). 사용량은 종류마다 단위가 달라 합치지 않는다
 
 
 def _split_input(raw: dict[str, Any]) -> tuple[dict[str, Any], str | None, dict[str, Any] | None]:
@@ -239,7 +240,8 @@ def _final_output(
             "scene_template_id": bgm["scene_template_id"],
             "asset_ref": bgm["asset_ref"],
             "sha256": bgm["sha256"],
-            "cost_krw": bgm["cost_krw"],
+            "cost_krw": 0,
+            "usage": bgm.get("usage"),
             "execution_id": bgm["execution_id"],
             "replayed": bool(bgm.get("replayed")),
         },
@@ -250,5 +252,5 @@ def _final_output(
             "duration_s": mixed.duration_s,
             "final_sha256": mixed.sha256,
         },
-        "total_cost_krw": video["cost_krw"] + bgm["cost_krw"],
+        "total_cost_krw": 0,
     }

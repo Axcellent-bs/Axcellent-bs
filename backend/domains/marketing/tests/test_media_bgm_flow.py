@@ -173,7 +173,8 @@ async def test_overlay_runs_video_then_bgm_then_postprocess(gate: Gate, overlay:
     assert [g["params"]["media_kind"] for g in gate.seen] == ["video", "audio"]
     audio_params = gate.seen[1]["params"]
     assert audio_params["resolution"] == "30s" and "duration_s" not in audio_params
-    assert audio_params["ai_generated"] is True and audio_params["cost_krw"] == 100
+    assert audio_params["ai_generated"] is True and "cost_krw" not in audio_params
+    assert (audio_params["usage_unit"], audio_params["usage_amount"]) == ("tracks", 1)
     assert len(runner.calls) == 2  # 자르기 + 합치기
     assert out["bgm"]["model_id"] == "mock-media" and len(out["bgm"]["prompt_sha256"]) == 64
     assert out["bgm"]["provider_job_id"].startswith("mock_")
@@ -185,7 +186,8 @@ async def test_overlay_runs_video_then_bgm_then_postprocess(gate: Gate, overlay:
     assert out["sha256"] == out["postprocess"]["final_sha256"] == hashlib.sha256(MUXED).hexdigest()
     assert hashlib.sha256(final.read_bytes()).hexdigest() == out["sha256"]
     assert out["source_video_asset_ref"] != out["asset_ref"] and out["muted"] is False
-    assert out["total_cost_krw"] == 1100 and out["ai_generated"] is True
+    assert out["total_cost_krw"] == 0 and out["ai_generated"] is True  # 원화는 더 계산하지 않는다
+    assert out["usage"]["unit"] == "seconds" and out["bgm"]["usage"]["unit"] == "tracks"
     assert result.evidence is not None and "exe_2" in result.evidence.ref_ids
 
 

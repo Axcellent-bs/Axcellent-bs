@@ -23,6 +23,7 @@ from marketing_agent.main import app
 from marketing_agent.media import registry, skill
 from marketing_agent.media.base import MediaRequest, MediaResult
 from marketing_agent.media.ledger import MediaLedger
+from marketing_agent.media.usage import UsageAmount
 
 CTX = "ctx_carp_0001"
 client = TestClient(app)
@@ -102,12 +103,10 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         "MARKETING_IMAGE_MODEL",
         "MARKETING_VIDEO_PROVIDER",
         "MARKETING_AUDIO_MODE",
-        "MARKETING_FX_USD_KRW",
-        "MARKETING_FX_AS_OF",
-        "MARKETING_FX_MAX_AGE_DAYS",
-        "MARKETING_COST_SAFETY_MARGIN_PCT",
-        "MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM",
-        "MARKETING_MEDIA_MONTHLY_BUDGET_KRW",
+        "MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY",
+        "MARKETING_QUOTA_IMAGE_COUNT_MONTHLY",
+        "MARKETING_QUOTA_AUDIO_COUNT_MONTHLY",
+        "MARKETING_MEDIA_KEY_OWNER",
         sns_label.CONFIG_ENV,
         sns_label.FONT_ENV,
     ):
@@ -146,12 +145,7 @@ def _real_env(monkeypatch: pytest.MonkeyPatch, **over: str) -> None:
     values = {
         "MARKETING_IMAGE_PROVIDER": "fakeco",
         "MARKETING_IMAGE_MODEL": "fm",
-        "MARKETING_FX_USD_KRW": "1500",
-        "MARKETING_FX_AS_OF": datetime.now(UTC).date().isoformat(),
-        "MARKETING_FX_MAX_AGE_DAYS": "7",
-        "MARKETING_COST_SAFETY_MARGIN_PCT": "10",
-        "MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM": "1000",
-        "MARKETING_MEDIA_MONTHLY_BUDGET_KRW": "100000",
+        "MARKETING_QUOTA_IMAGE_COUNT_MONTHLY": "100",
     } | over
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -255,7 +249,7 @@ async def test_missing_tools_stop_before_generation(
 
 
 @pytest.mark.asyncio
-async def test_plan_cost_equals_what_generate_media_charges(
+async def test_plan_usage_equals_what_generate_media_counts(
     gate: Gate, fake_provider: FakeProvider, prices: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _real_env(monkeypatch)
@@ -271,78 +265,60 @@ async def test_plan_cost_equals_what_generate_media_charges(
     request = _request(data).model_copy(update={"skill": "generate_media"})
     ledger = MediaLedger()
     plan = skill.plan_cost(request, ledger=ledger, settings=settings, prices_path=prices)
-    assert isinstance(plan, skill.CostPlan) and plan.settled is False and 80 <= plan.krw_est <= 100
+    assert isinstance(plan, skill.CostPlan) and plan.settled is False
+    assert (plan.usage.unit, plan.usage.amount) == ("images", 1)
     done = await skill.generate_media(
         request, ledger=ledger, from_decision=handlers._from_decision, prices_path=prices
     )
-    assert done.output is not None and done.output["cost_est_krw"] == plan.krw_est
+    assert done.output is not None and done.output["usage"]["amount"] == plan.usage.amount
     again = skill.plan_cost(request, ledger=ledger, settings=settings, prices_path=prices)
-    assert isinstance(again, skill.CostPlan) and again.settled is True  # 재생이라 비용이 없다
+    assert isinstance(again, skill.CostPlan) and again.settled is True  # 재생이라 사용량이 안 는다
 
 
 @pytest.mark.asyncio
-async def test_total_over_monthly_cap_makes_no_image_at_all(
+async def test_total_over_monthly_quota_makes_no_image_at_all(
     gate: Gate,
     fake_provider: FakeProvider,
     prices: Path,
     no_tools_check: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _real_env(monkeypatch, MARKETING_MEDIA_MONTHLY_BUDGET_KRW="250")  # 3장 x 약 89 = 267 > 250
+    _real_env(monkeypatch, MARKETING_QUOTA_IMAGE_COUNT_MONTHLY="2")  # 3장 > 2장
     result = await _prepare(_input(3), prices)
-    assert result.status == "failed" and result.outcome == "budget_exceeded"
+    assert result.status == "failed" and result.outcome == "quota_exceeded"
     out = result.output or {}
     assert out["stage"] == "cost_preflight" and out["item_count"] == 3
-    assert out["cost_krw"] > 250 and out["limit_krw"] == 250
+    assert (out["unit"], out["requested"], out["month_used"], out["limit"]) == ("images", 3, 0, 2)
+    assert out["remaining_pct"] == 100
     assert fake_provider.calls == 0 and gate.seen == []  # 공급자도 관문도 부르지 않았다
 
 
 @pytest.mark.asyncio
-async def test_existing_month_spend_counts_toward_the_carousel_total(
+async def test_existing_month_usage_counts_toward_the_carousel_total(
     gate: Gate,
     fake_provider: FakeProvider,
     prices: Path,
     no_tools_check: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _real_env(monkeypatch, MARKETING_MEDIA_MONTHLY_BUDGET_KRW="250")
+    _real_env(monkeypatch, MARKETING_QUOTA_IMAGE_COUNT_MONTHLY="2")
     reserved = handlers.STATE.media_ledger.reserve(
         key="other",
         month=datetime.now(UTC).strftime("%Y-%m"),
         media_kind="image",
         provider="fakeco",
         model_id="fm",
-        krw_est=100,
-        usd_est=None,
-        monthly_cap=250,
+        usage=UsageAmount("images", 1),
+        monthly_cap=2,
         now=datetime.now(UTC),
     )
     assert reserved.outcome == "reserved"
-    result = await _prepare(_input(2), prices)  # 100(이미 씀) + 2 x 90 = 280 > 250
-    assert result.outcome == "budget_exceeded" and fake_provider.calls == 0
+    result = await _prepare(_input(2), prices)  # 1장(이미 씀) + 2장 > 2장
+    assert result.outcome == "quota_exceeded" and fake_provider.calls == 0
 
 
 @pytest.mark.asyncio
-async def test_single_item_cap_and_missing_price_stop_before_generation(
-    gate: Gate,
-    fake_provider: FakeProvider,
-    prices: Path,
-    no_tools_check: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _real_env(monkeypatch, MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM="50")
-    over = await _prepare(_input(2), prices)
-    assert over.outcome == "cost_over_single" and (over.output or {})["item_index"] == 1
-    _real_env(monkeypatch)
-    items = _input(2)
-    items["carousel_items"][1]["resolution"] = "1024x1280"  # 단가표에 없는 조합(fail-closed)
-    missing = await _prepare(items, prices)
-    assert missing.outcome == "price_not_found" and (missing.output or {})["item_index"] == 2
-    assert fake_provider.calls == 0 and gate.seen == []
-
-
-@pytest.mark.asyncio
-async def test_real_provider_without_cost_limits_is_refused(
+async def test_a_price_table_entry_is_not_needed_to_plan_a_carousel_item(
     gate: Gate,
     fake_provider: FakeProvider,
     prices: Path,
@@ -350,9 +326,35 @@ async def test_real_provider_without_cost_limits_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _real_env(monkeypatch)
-    monkeypatch.delenv("MARKETING_MEDIA_MONTHLY_BUDGET_KRW")
+    from marketing_agent.media.config import MediaSettings
+
+    data = {
+        "post_draft_id": "DRAFT-1",
+        "media_kind": "image",
+        "scene_template_id": "cat_bookstore_image",
+        "fields": _scenes(1)[0]["fields"],
+        "resolution": "1024x1280",  # 예전에는 단가표에 없는 조합이라 fail-closed였다
+    }
+    request = _request(data).model_copy(update={"skill": "generate_media"})
+    plan = skill.plan_cost(
+        request, ledger=MediaLedger(), settings=MediaSettings.from_env(), prices_path=prices
+    )
+    assert isinstance(plan, skill.CostPlan) and plan.usage.amount == 1
+    assert fake_provider.calls == 0 and gate.seen == []  # 계획만 세웠다
+
+
+@pytest.mark.asyncio
+async def test_real_provider_without_a_quota_is_refused(
+    gate: Gate,
+    fake_provider: FakeProvider,
+    prices: Path,
+    no_tools_check: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _real_env(monkeypatch)
+    monkeypatch.delenv("MARKETING_QUOTA_IMAGE_COUNT_MONTHLY")
     result = await _prepare(_input(2), prices)
-    assert result.outcome == "cost_limit_not_configured" and fake_provider.calls == 0
+    assert result.outcome == "quota_not_configured" and fake_provider.calls == 0
 
 
 # --- 관문은 우회하지 않는다 ---
@@ -399,7 +401,13 @@ async def test_mock_carousel_end_to_end_is_publishable_and_never_published(
         assert sns_media.sha256_file(asset) == sha
         assert sns_media.check_image(asset).problems == []
         assert sns_media.read_machine_mark(asset, "image")["ai_generated"] == "true"
-    assert out["cost"]["total_cost_krw"] == 100 * count  # 목 이미지 1장 100원 x 장수
+    assert out["usage"] == {
+        "unit": "images",
+        "estimated": count,
+        "new_estimated": count,
+        "total": count,
+    }
+    assert "cost" not in out  # 원화 합계는 없다
     assert "사람 승인" in out["next_step"]
     assert str(sns_media.media_root()) not in str(out)  # 절대 경로가 결과에 없다
 
@@ -410,9 +418,9 @@ async def test_second_call_replays_every_item_without_new_cost(gate: Gate) -> No
     first = (await _prepare(_input(2))).output or {}
     ledger = handlers.STATE.media_ledger
     month = datetime.now(UTC).strftime("%Y-%m")
-    spent = ledger.month_total(month)
+    spent = ledger.month_usage(month, "image")
     second = (await _prepare(_input(2))).output or {}
     assert all(item["replayed"] for item in second["items"])
     assert all(item["label"]["reused"] for item in second["items"])
     assert second["post_draft_id"] == first["post_draft_id"]
-    assert ledger.month_total(month) == spent
+    assert ledger.month_usage(month, "image") == spent

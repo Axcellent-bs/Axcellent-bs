@@ -103,7 +103,7 @@ export function VideoProviderCard() {
       <div>
         <h2 className="text-lg font-semibold">영상 AI 공급자</h2>
         <p className="mt-1 text-xs text-ink-500">
-          영상을 만들 AI와 모델을 고릅니다. 고른 값은 서버 환경변수 설정보다 우선합니다. 단가가 확인되지 않은 모델은 비용 상한 때문에 호출이 막힙니다. 목록에 없는 API는 아래에서 직접 추가할 수 있습니다(사람 승인 필요).
+          영상을 만들 AI와 모델을 고릅니다. 고른 값은 서버 환경변수 설정보다 우선합니다. 서버 모델 표에 없는 모델은 고를 수 없습니다. 원화 단가는 보지 않습니다. 목록에 없는 API는 아래에서 직접 추가할 수 있습니다(사람 승인 필요).
         </p>
       </div>
       {!loaded && <p className="text-sm text-ink-500">불러오는 중</p>}
@@ -131,7 +131,7 @@ export function VideoProviderCard() {
                     {row.models.map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
                 ) : (
-                  <span className="mt-1 block rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">단가가 확인된 모델 없음</span>
+                  <span className="mt-1 block rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">지원하는 모델 없음</span>
                 )}
               </label>
             )}

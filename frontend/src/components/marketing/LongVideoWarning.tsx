@@ -1,7 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import type { LongWarning } from "@/lib/briefMedia";
 
-// 긴 영상 경고창(화면 안 모달). 화면 안내일 뿐 안전 관문이 아니다: 확인해도 서버가 상한·비용을 따로 막는다.
+// 긴 영상 경고창(화면 안 모달). 화면 안내일 뿐 안전 관문이 아니다: 확인해도 서버가 길이 상한·사용량 예산을 따로 막는다.
 // 키보드: 처음 포커스는 '길이 줄이기'(안전한 쪽), Tab은 두 버튼 사이에서만 돌고, Esc는 취소다.
 // 닫히면 포커스는 창을 연 버튼으로 돌아간다.
 export function LongVideoWarning({ warning, onConfirm, onCancel }: { warning: LongWarning; onConfirm: () => void; onCancel: () => void }) {

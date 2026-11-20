@@ -1,8 +1,10 @@
 """skill `generate_media`: 이미지·영상 생성 (등급 B, 검증자 safety 코드 규칙. 등록은 safety 쪽).
 
-순서: 입력 검증 → 프롬프트 만들기·검사 → 같은 키 재요청이면 이전 결과 → 공급자·환율·단가 확인 →
-비용 계산 → 건당·월 상한 → 장부 예약 → `execute("generate_media")` → `executed`일 때만 공급자 호출 →
-저장·사후 정산. 공급자 함수는 상한을 넘거나 관문이 막으면 호출하지 않는다.
+순서: 입력 검증 → 프롬프트 만들기·검사 → 같은 키 재요청이면 이전 결과 → 공급자·모델 확인 →
+예상 사용량 계산 → (우리 키만) 월 사용량 예산 + 장부 예약 → `execute("generate_media")` →
+`executed`일 때만 공급자 호출 → 저장·사후 정산. 공급자 함수는 예산을 넘기거나 관문이 막으면
+호출하지 않는다. 원화 단가표·환율·건당 금액 상한은 쓰지 않는다. 사용량은 공급자 단위 그대로
+(영상 초·이미지 장·BGM 곡)이고 토큰이 응답에 있으면 같이 남긴다(`usage.py`).
 
 - 상태를 바꾸는 일(돈이 나가는 외부 호출)은 관문이 `executed`를 돌려준 뒤에만 한다.
 - 모든 결과에 `ai_generated: true`를 남긴다. 영상 소리는 `MARKETING_AUDIO_MODE`가 정한다.
@@ -12,12 +14,12 @@
   불러 받은 영상의 오디오를 `audio_mix`가 버리고 BGM을 입힌다.
   결과의 `muted`는 최종 파일에 소리가 없는지, `has_audio`·`audio_mode`는 그 근거다.
 - 오디오(BGM, `media_kind="audio"`)는 `bgm_overlay`일 때만 받는다. 이미지·영상과 같은 순서로
-  단가표·상한·장부·`execute()` 관문을 거치며, 관문이 보류하면 공급자를 부르지 않는다(fail-closed).
+  예산·장부·`execute()` 관문을 거치며, 관문이 보류하면 공급자를 부르지 않는다(fail-closed).
 - 글자는 모델이 그리지 않는다(프롬프트 규칙). 제목·가격·AI 라벨 오버레이는 다른 단계가 맡는다.
 - 멱등 키: `<context_id>:generate_media:<post_draft_id>:<request_sha[:10]>`.
   `request_sha`는 프롬프트와 종류·해상도·품질·길이·무음 여부를 함께 해시한 값이라
   같은 프롬프트라도 설정이 바뀌면 다른 키다.
-- 재시도(같은 키로 다시 호출)할 때마다 비용을 다시 계산하고 상한과 다시 비교한다.
+- 재시도(같은 키로 다시 호출)할 때마다 사용량을 다시 계산하고 예산과 다시 비교한다.
 """
 
 from __future__ import annotations
@@ -30,7 +32,6 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -46,12 +47,12 @@ from ax_contracts.schemas import (
 )
 from ax_contracts.schemas.common import AxModel
 from marketing_agent.media import pricing
-from marketing_agent.media.base import MediaKind, MediaProviderError, MediaRequest, MediaResult
+from marketing_agent.media import usage as usage_mod
+from marketing_agent.media.base import MediaKind, MediaProviderError, MediaRequest
 from marketing_agent.media.config import MOCK, MediaSettings, ffmpeg_bin
 from marketing_agent.media.gemini_video import has_audio_track
 from marketing_agent.media.ledger import LedgerError, MediaLedger
-from marketing_agent.media.mock import MOCK_COST_KRW
-from marketing_agent.media.pricing import PriceNotFound
+from marketing_agent.media.pricing import PriceNotFound, PriceTableError
 from marketing_agent.media.prompts import (
     PromptRejected,
     get_template,
@@ -60,7 +61,8 @@ from marketing_agent.media.prompts import (
     render_prompt_detailed,
 )
 from marketing_agent.media.registry import get_adapter
-from marketing_agent.media.video_chain import estimate_chain_usd, generate_chain
+from marketing_agent.media.usage import UsageAmount
+from marketing_agent.media.video_chain import generate_chain
 from marketing_agent.media.video_limits import (
     ABSOLUTE_MAX_DURATION_S,
     Clip,
@@ -91,7 +93,7 @@ class GenerateMediaInput(AxModel):
 
 
 class GeneratedMedia(AxModel):
-    """생성 결과. 비용·사용량 출처와 AI 생성 사실(`ai_generated`, 항상 true)을 함께 남긴다."""
+    """생성 결과. 사용량·출처와 AI 생성 사실(`ai_generated`, 항상 true)을 함께 남긴다."""
 
     media_id: str
     media_kind: Literal["image", "video", "audio"]
@@ -108,9 +110,13 @@ class GeneratedMedia(AxModel):
     audio_mode: str | None = None
     has_audio: bool | None = None
     audio_note: str | None = None  # 예: "clip_concat_muted"(이어 붙인 영상은 소리를 버림)
-    cost_krw: int  # 확정액(정수 원)
-    cost_est_krw: int  # 호출 전 추정액
+    # 원화 비용은 더 계산하지 않는다(늘 0). 예전 필드라 지우지 않고 남긴다(계약은 추가만)
+    cost_krw: int = 0
+    cost_est_krw: int = 0
     usd_actual: str | None = None
+    # 사용량: {unit(seconds·images·tracks), amount, input_tokens, output_tokens}
+    # 토큰은 응답에 있을 때만 들어간다
+    usage: dict[str, Any] | None = None
     usage_source: Literal["actual", "estimate"]
     ai_generated: Literal[True] = True
     generated_at: datetime
@@ -167,6 +173,43 @@ def _clip_plan(
     caps = getattr(adapter, "video_caps", None) or VideoCaps()
     caps = effective_caps(caps, entry.max_duration_s if entry else None)
     return plan_clips(duration_s or 1, caps)
+
+
+def _model_entry(
+    provider: str,
+    model: str,
+    kind: MediaKind,
+    resolution: str,
+    quality: str | None,
+    prices_path: Path | None,
+) -> pricing.PriceEntry | None:
+    """모델 능력표(클립 최대 길이)용 조회. 가격은 안 쓴다. 없거나 못 읽으면 None(막지 않는다)."""
+    try:
+        return pricing.find_entry(
+            provider=provider,
+            model=model,
+            kind=kind,
+            resolution=resolution,
+            quality=quality,
+            path=prices_path,
+        )
+    except (PriceNotFound, PriceTableError):
+        return None
+
+
+def _over_budget(
+    request: AgentRequest, kind: MediaKind, expected: UsageAmount, used: int, cap: int
+) -> AgentResult:
+    return _fail(
+        request,
+        "quota_exceeded",
+        media_kind=kind,
+        unit=expected.unit,
+        requested=expected.amount,
+        month_used=used,
+        limit=cap,
+        remaining_pct=usage_mod.remaining_pct(used, cap),
+    )
 
 
 async def generate_media(
@@ -247,7 +290,7 @@ async def generate_media(
     if previous is not None and previous.result_json:
         return _completed(request, json.loads(previous.result_json), replayed=True)
 
-    # --- 공급자·환율·단가 확인 (호출 전, fail-closed) ---
+    # --- 공급자·모델 확인 (호출 전, fail-closed) ---
     provider_name = settings.provider(kind)
     adapter = get_adapter(provider_name)
     if adapter is None:
@@ -259,47 +302,23 @@ async def generate_media(
         and shutil.which(ffmpeg_bin()) is None
     ):  # 무음으로 받은 영상에 오디오가 섞여 오면 ffmpeg로 제거한다. 비용이 나기 전에 막는다
         return _fail(request, "ffmpeg_not_found")
-    today = _now().date()
-    usd_est: Decimal | None = None
     entry = None
     clips = [Clip("first", duration_s or 1)]
     if provider_name == MOCK:
         model = "mock"
-        krw_est = MOCK_COST_KRW[kind]
-        if kind == "video":
-            try:
-                clips = _clip_plan(adapter, None, duration_s)
-            except VideoLimitError as error:
-                return _fail(request, str(error), provider=provider_name, duration_s=duration_s)
     else:
         model = settings.model(kind)
         if not model:
             return _fail(request, "model_not_configured", provider=provider_name)
-        problem = settings.fx_problem(today)
-        if problem is not None:
-            return _fail(request, problem)
-        if settings.item_limit(kind) is None or settings.monthly_budget_krw is None:
-            return _fail(request, "cost_limit_not_configured")
+        if settings.quota_applies and settings.quota(kind) is None:
+            return _fail(request, "quota_not_configured", media_kind=kind)
+        entry = _model_entry(provider_name, model, kind, resolution, quality, prices_path)
+    if kind == "video":
         try:
-            entry = pricing.find_entry(
-                provider=provider_name,
-                model=model,
-                kind=kind,
-                resolution=resolution,
-                quality=quality,
-                path=prices_path,
-            )
-            if kind == "video":
-                clips = _clip_plan(adapter, entry, duration_s)
-                usd_est = estimate_chain_usd(entry, prompt=prompt, clips=clips)
-            else:
-                usd_est = pricing.estimate_usd(entry, prompt=prompt, duration_s=duration_s)
+            clips = _clip_plan(adapter, entry, duration_s)
         except VideoLimitError as error:
             return _fail(request, str(error), provider=provider_name, duration_s=duration_s)
-        except PriceNotFound:
-            return _fail(request, "price_not_found", provider=provider_name, resolution=resolution)
-        assert settings.fx_usd_krw is not None and settings.margin_pct is not None  # noqa: S101
-        krw_est = pricing.krw_estimate(usd_est, settings.fx_usd_krw, settings.margin_pct)
+    expected = usage_mod.planned(kind, clips if kind == "video" else None)
 
     if (
         kind == "video"
@@ -310,10 +329,8 @@ async def generate_media(
     ):  # 이어 붙이려면 ffmpeg가 필요하다. 비용이 나기 전에 막는다
         return _fail(request, "ffmpeg_not_found")
 
-    # --- 상한 (공급자 호출 전). 이어 붙이면 krw_est는 클립 전체의 합이다 ---
-    limit = settings.item_limit(kind)
-    if limit is not None and krw_est > limit:
-        return _fail(request, "cost_over_single", cost_krw=krw_est, limit_krw=limit)
+    # --- 사용량 예산(우리 키만, 공급자 호출 전). 이어 붙이면 사용량은 클립 전체의 합이다 ---
+    cap = settings.quota(kind) if settings.quota_applies else None
     now = _now()
     month = now.strftime("%Y-%m")
     try:
@@ -323,21 +340,14 @@ async def generate_media(
             media_kind=kind,
             provider=provider_name,
             model_id=model,
-            krw_est=krw_est,
-            usd_est=usd_est,
-            monthly_cap=settings.monthly_budget_krw,
+            usage=expected,
+            monthly_cap=cap,
             now=now,
         )
     except LedgerError:
         return _fail(request, "storage_error")
-    if reservation.outcome == "over_budget":
-        return _fail(
-            request,
-            "budget_exceeded",
-            cost_krw=krw_est,
-            month_total_krw=reservation.month_total,
-            limit_krw=settings.monthly_budget_krw,
-        )
+    if reservation.outcome == "over_budget" and cap is not None:
+        return _over_budget(request, kind, expected, reservation.month_used, cap)
     if reservation.outcome == "settled" and reservation.row and reservation.row.result_json:
         return _completed(request, json.loads(reservation.row.result_json), replayed=True)
     if reservation.outcome == "in_progress" or reservation.row is None:
@@ -346,7 +356,6 @@ async def generate_media(
 
     # --- 안전 관문 ---
     params: dict[str, Any] = {
-        "cost_krw": krw_est,
         "media_kind": kind,
         "resolution": resolution,
         "provider": provider_name,
@@ -354,13 +363,16 @@ async def generate_media(
         "post_draft_id": data.post_draft_id,
         "request_sha256": request_sha,
         "ai_generated": True,
-        "summary": f"{kind} 생성 {resolution} 예상 {krw_est}원 (AI 생성)",
+        "usage_unit": expected.unit,
+        "usage_amount": expected.amount,
+        "summary": (
+            f"{kind} 생성 {resolution} 예상 {expected.amount}"
+            f"{usage_mod.UNIT_LABELS_KO[expected.unit]} (AI 생성)"
+        ),
     }
     if duration_s is not None:
         params["duration_s"] = duration_s
         params["clip_count"] = len(clips)
-    if data.claimed_cost_krw is not None:
-        params["claimed_cost_krw"] = data.claimed_cost_krw
     evidence = Evidence(
         queries=[ACTION],
         data_summary=f"{kind} 생성 요청 {data.post_draft_id}",
@@ -404,8 +416,9 @@ async def generate_media(
         return _fail(request, "provider_failed", error_type=type(error).__name__, **detail)
 
     # --- 저장·사후 정산 ---
-    usd_actual, krw_actual, source = _settle_amounts(
-        result, entry, settings, kind, resolution, quality, prompt, usd_est, krw_est, prices_path
+    used = usage_mod.measured(kind, expected, result)
+    source: Literal["actual", "estimate"] = (
+        "actual" if used.output_tokens is not None else "estimate"
     )
     muted: bool | None = None
     has_audio: bool | None = None
@@ -430,9 +443,10 @@ async def generate_media(
         "audio_mode": settings.audio_mode if kind == "video" else None,
         "has_audio": has_audio,
         "audio_note": audio_note,
-        "cost_krw": krw_actual,
-        "cost_est_krw": krw_est,
-        "usd_actual": str(usd_actual) if usd_actual is not None else None,
+        "cost_krw": 0,
+        "cost_est_krw": 0,
+        "usd_actual": None,
+        "usage": used.as_dict(),
         "usage_source": source,
         "ai_generated": True,
         "generated_at": result.generated_at.isoformat(),
@@ -464,16 +478,13 @@ async def generate_media(
         ledger.settle(
             seq,
             model_id=result.model_id,
-            usd_actual=usd_actual,
-            krw_actual=krw_actual,
-            fx=settings.fx_usd_krw,
-            fx_as_of=settings.fx_as_of.isoformat() if settings.fx_as_of else None,
+            usage=used,
             usage_source=source,
             result_json=json.dumps(output, ensure_ascii=False),
             now=_now(),
         )
     except (LedgerError, OSError):
-        # 생성은 끝났고 비용이 났을 수 있다. 예약(추정액)은 그대로 남겨 월 누적에 센다
+        # 생성은 끝났고 비용이 났을 수 있다. 예약(추정 사용량)은 그대로 남겨 월 사용량에 센다
         return _fail(request, "storage_error", media_id=media_id)
     return _completed(request, output, replayed=False, evidence=evidence)
 
@@ -481,48 +492,8 @@ async def generate_media(
 def _safe(action: Callable[[], None]) -> None:
     try:
         action()
-    except LedgerError:  # 풀지 못해도 예약이 남아 월 누적이 더 보수적일 뿐이다
+    except LedgerError:  # 풀지 못해도 예약이 남아 월 사용량이 더 보수적일 뿐이다
         pass
-
-
-def _settle_amounts(
-    result: MediaResult,
-    entry: pricing.PriceEntry | None,
-    settings: MediaSettings,
-    kind: MediaKind,
-    resolution: str,
-    quality: str | None,
-    prompt: str,
-    usd_est: Decimal | None,
-    krw_est: int,
-    prices_path: Path | None,
-) -> tuple[Decimal | None, int, Literal["actual", "estimate"]]:
-    """응답 사용량이 있으면 실제 비용, 없으면 추정액을 확정액으로 남긴다(보수적)."""
-    usage = result.usage
-    if usage is None or usage.output_tokens is None or entry is None or settings.fx_usd_krw is None:
-        return usd_est, krw_est, "estimate"
-    try:  # 응답이 알려 준 모델 ID의 단가로 계산한다
-        actual_entry = pricing.find_entry(
-            provider=result.provider,
-            model=result.model_id,
-            kind=kind,
-            resolution=resolution,
-            quality=quality,
-            path=prices_path,
-        )
-    except PriceNotFound:
-        return usd_est, krw_est, "estimate"
-    if actual_entry.per_second_usd is not None:  # 초당 단가는 토큰 사용량으로 정산하지 않는다
-        return usd_est, krw_est, "estimate"
-    input_tokens = (
-        usage.input_tokens
-        if usage.input_tokens is not None
-        else pricing.input_tokens_estimate(prompt)
-    )
-    usd = pricing.usd_for(
-        actual_entry, input_tokens=input_tokens, output_tokens=usage.output_tokens
-    )
-    return usd, pricing.krw_actual(usd, settings.fx_usd_krw), "actual"
 
 
 def _completed(
@@ -548,48 +519,34 @@ def _completed(
     )
 
 
-# --- 여러 건을 한 번에 만들기 전의 비용 미리 계산 (캐러셀) ---
+# --- 여러 건을 한 번에 만들기 전의 사용량 미리 계산 (캐러셀) ---
 
 
 @dataclass(frozen=True)
 class CostPlan:
-    """생성 한 건의 호출 전 비용. `settled`면 장부에 이미 끝난 키라 다시 비용이 나지 않는다."""
+    """생성 한 건의 호출 전 예상 사용량. `settled`면 장부에 이미 끝난 키라 다시 쓰지 않는다.
+
+    이름은 예전 그대로(비용 미리 계산)지만 원화는 없다. 사용량은 영상 초·이미지 장·BGM 곡이다.
+    """
 
     key: str
-    krw_est: int
+    usage: UsageAmount
     settled: bool
-    # 영상: 길이(초) → 예상 비용(원) 표(1초~설정 상한). 길이 선택 화면용. 계산 못 하는 길이는 뺀다
-    by_duration: dict[int, int] | None = None
-    # 영상: 길이(초) → 이어 붙일 클립 수. 비용 표와 같은 길이만 담는다(경고창 안내용)
+    # 영상: 길이(초) → 이어 붙일 클립 수(1초~설정 상한). 길이 선택·경고창 안내용.
+    # 못 만드는 길이는 뺀다
     clips_by_duration: dict[int, int] | None = None
 
 
 def _clip_count_table(
-    adapter: object, entry: pricing.PriceEntry | None, seconds_ok: set[int]
+    adapter: object, entry: pricing.PriceEntry | None, settings: MediaSettings
 ) -> dict[int, int]:
     """길이별 클립 수. `_clip_plan`이 만드는 계획의 길이만 센다(외부 호출 없음)."""
-    return {s: len(_clip_plan(adapter, entry, s)) for s in sorted(seconds_ok)}
-
-
-def _cost_table(
-    adapter: object, entry: pricing.PriceEntry | None, prompt: str, settings: MediaSettings
-) -> dict[int, int]:
-    """길이별 예상 비용(원). 목은 고정액, 실제 공급자는 클립 합산 단가. 못 만드는 길이는 뺀다."""
     table: dict[int, int] = {}
     for seconds in range(1, settings.video_max_duration_s + 1):
         try:
-            clips = _clip_plan(adapter, entry, seconds)
+            table[seconds] = len(_clip_plan(adapter, entry, seconds))
         except VideoLimitError:
             continue
-        if entry is None:
-            table[seconds] = MOCK_COST_KRW["video"]
-            continue
-        assert settings.fx_usd_krw is not None and settings.margin_pct is not None  # noqa: S101
-        try:
-            usd = estimate_chain_usd(entry, prompt=prompt, clips=clips)
-        except PriceNotFound:
-            continue
-        table[seconds] = pricing.krw_estimate(usd, settings.fx_usd_krw, settings.margin_pct)
     return table
 
 
@@ -604,14 +561,14 @@ def plan_cost(
     with_table: bool = False,
     allow_audio: bool = False,
 ) -> CostPlan | AgentResult:
-    """`generate_media`(이미지)와 같은 규칙으로 호출 없이 비용만 계산한다. 막히면 결과 Task.
+    """`generate_media`(이미지)와 같은 규칙으로 호출 없이 예상 사용량만 계산한다. 막히면 결과 Task.
 
     `allow_video`면 영상(현재 소리 모드의 `generate_media`와 같은 키)도 계산한다.
     기본은 이미지 전용이다(캐러셀).
 
-    입력 검증·프롬프트 검사·공급자 어댑터·환율·단가표(fail-closed)·건당 상한은 `generate_media`와
-    같은 규칙·결과 코드다. 월 상한과 장부 예약은 하지 않는다(부르는 쪽이 합계로 본다).
-    같은 키가 이미 확정이면 `settled=True`(재생이라 비용이 다시 나지 않는다).
+    입력 검증·프롬프트 검사·공급자 어댑터·모델 설정은 `generate_media`와 같은 규칙·결과 코드다.
+    월 예산 검사와 장부 예약은 하지 않는다(부르는 쪽이 합계로 본다).
+    같은 키가 이미 확정이면 `settled=True`(재생이라 사용량이 다시 늘지 않는다).
     """
     try:
         data = GenerateMediaInput.model_validate(request.input)
@@ -658,65 +615,28 @@ def plan_cost(
     except LedgerError:
         return _fail(request, "storage_error")
     if previous is not None and previous.result_json:
-        return CostPlan(key, previous.krw_actual or previous.krw_est, True)
+        amount = previous.usage_actual or previous.usage_est or 0
+        return CostPlan(key, UsageAmount(usage_mod.unit_for(kind), amount), True)
 
     provider_name = settings.provider(kind)
     adapter = get_adapter(provider_name)
     if adapter is None:
         return _fail(request, "provider_adapter_missing", provider=provider_name)
-    if provider_name == MOCK:
-        krw_est = MOCK_COST_KRW[kind]
-        entry = None
-        if kind == "video":
-            try:
-                _clip_plan(adapter, None, duration_s)
-            except VideoLimitError as error:
-                return _fail(request, str(error), provider=provider_name, duration_s=duration_s)
-    else:
+    entry = None
+    if provider_name != MOCK:
         model = settings.model(kind)
         if not model:
             return _fail(request, "model_not_configured", provider=provider_name)
-        problem = settings.fx_problem(_now().date())
-        if problem is not None:
-            return _fail(request, problem)
-        if settings.item_limit(kind) is None or settings.monthly_budget_krw is None:
-            return _fail(request, "cost_limit_not_configured")
+        if settings.quota_applies and settings.quota(kind) is None:
+            return _fail(request, "quota_not_configured", media_kind=kind)
+        entry = _model_entry(provider_name, model, kind, resolution, quality, prices_path)
+    clips: list[Clip] | None = None
+    if kind == "video":
         try:
-            entry = pricing.find_entry(
-                provider=provider_name,
-                model=model,
-                kind=kind,
-                resolution=resolution,
-                quality=quality,
-                path=prices_path,
-            )
-            if kind == "video":
-                usd_est = estimate_chain_usd(
-                    entry, prompt=prompt, clips=_clip_plan(adapter, entry, duration_s)
-                )
-            else:
-                usd_est = pricing.estimate_usd(entry, prompt=prompt, duration_s=duration_s)
+            clips = _clip_plan(adapter, entry, duration_s)
         except VideoLimitError as error:
             return _fail(request, str(error), provider=provider_name, duration_s=duration_s)
-        except PriceNotFound:
-            return _fail(request, "price_not_found", provider=provider_name, resolution=resolution)
-        assert settings.fx_usd_krw is not None and settings.margin_pct is not None  # noqa: S101
-        krw_est = pricing.krw_estimate(usd_est, settings.fx_usd_krw, settings.margin_pct)
-    table = None
     clip_table = None
     if with_table and kind == "video":
-        table = _cost_table(adapter, entry, prompt, settings)
-        clip_table = _clip_count_table(adapter, entry, set(table))
-    limit = settings.item_limit(kind)
-    if limit is not None and krw_est > limit:
-        extra = {"by_duration": table} if table is not None else {}
-        if clip_table is not None:
-            extra["clips_by_duration"] = clip_table
-        return _fail(
-            request,
-            "cost_over_single",
-            cost_krw=krw_est,
-            limit_krw=limit,
-            **extra,
-        )
-    return CostPlan(key, krw_est, False, table, clip_table)
+        clip_table = _clip_count_table(adapter, entry, settings)
+    return CostPlan(key, usage_mod.planned(kind, clips), False, clip_table)

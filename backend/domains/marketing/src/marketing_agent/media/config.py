@@ -11,14 +11,13 @@
 - 키: `MARKETING_IMAGE_API_KEY`, `MARKETING_VIDEO_API_KEY`, `MARKETING_AUDIO_API_KEY`.
   이 모듈은 이름만 정의하고, 설정돼 있는지만 `has_api_key`로 알려 준다.
   값은 돌려주지도 로그에 내지도 않는다 (실제 어댑터가 직접 읽는다).
-- 비용: 환율 `MARKETING_FX_USD_KRW`·기준일 `MARKETING_FX_AS_OF`·
-  허용 경과일 `MARKETING_FX_MAX_AGE_DAYS`·여유 `MARKETING_COST_SAFETY_MARGIN_PCT`,
-  건당 상한 `MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM`, 월 상한 `MARKETING_MEDIA_MONTHLY_BUDGET_KRW`.
-  비어 있으면 실제 공급자 호출을 거부한다(목 모드는 허용).
-- 영상 전용 건당 상한 `MARKETING_VIDEO_MAX_COST_KRW_PER_ITEM`(없으면 위 건당 상한).
-  이미지·BGM은 기존
-  건당 상한을 쓴다. 월 예산·영상 건당 상한은 화면에서 정한 값(`cost_limit_store`)이 환경변수보다
-  우선한다.
+- 사용량 예산(우리 키 전용): 원화 단가표·환율은 쓰지 않는다. 종류별 월 예산을 공급자 단위 그대로
+  정한다: 영상 초 `MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY`, 이미지 장
+  `MARKETING_QUOTA_IMAGE_COUNT_MONTHLY`, BGM 곡 `MARKETING_QUOTA_AUDIO_COUNT_MONTHLY`.
+  화면에서 정한 값(`quota_store`)이 환경변수보다 우선한다. 우리 키로 실제 공급자를 부르는데
+  그 종류의 예산이 비어 있으면 호출을 거부한다(`quota_not_configured`, 목 모드는 허용).
+- 키 주인 `MARKETING_MEDIA_KEY_OWNER`: `server`(기본, 우리 키라 예산을 건다) | `customer`
+  (고객사가 가져온 자기 키라 예산을 안 건다). 모르는 값은 server로 본다.
 - 영상 길이 상한: `MARKETING_VIDEO_MAX_DURATION_S`(운영자가 정한다, 1~90초, 기본 15).
   숫자가 아니거나 범위 밖이면 영상 생성을 거부한다(`video_max_duration_invalid`).
   경고 길이 `MARKETING_VIDEO_WARN_DURATION_S`(1~상한, 기본 30): 화면 경고창 기준(UX).
@@ -31,12 +30,10 @@ import logging
 import os
 import tempfile
 from dataclasses import dataclass
-from datetime import date
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from ax_secret_store import get_secret
-from marketing_agent.media import cost_limit_store
+from marketing_agent.media import quota_store
 from marketing_agent.media.base import MediaKind
 from marketing_agent.media.video_limits import (
     DEFAULT_MAX_DURATION_S,
@@ -73,6 +70,14 @@ LUMA_API_KEY_ENV = "MARKETING_LUMA_API_KEY"
 VIDU_API_KEY_ENV = "MARKETING_VIDU_API_KEY"
 RUNWAY_API_KEY_ENV = "MARKETING_RUNWAY_API_KEY"
 FFMPEG_BIN_ENV = "MARKETING_FFMPEG_BIN"
+QUOTA_ENVS = {
+    "video": "MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY",
+    "image": "MARKETING_QUOTA_IMAGE_COUNT_MONTHLY",
+    "audio": "MARKETING_QUOTA_AUDIO_COUNT_MONTHLY",
+}
+KEY_OWNER_ENV = "MARKETING_MEDIA_KEY_OWNER"
+KEY_OWNER_SERVER = "server"
+KEY_OWNER_CUSTOMER = "customer"
 AUDIO_MODE_ENV = "MARKETING_AUDIO_MODE"
 AUDIO_MODES = ("source", "off", "bgm_overlay")
 DEFAULT_AUDIO_MODE = "source"
@@ -87,27 +92,9 @@ def _secret(name: str) -> str:
     return get_secret(name).strip()
 
 
-def _decimal(name: str) -> Decimal | None:
-    raw = _text(name)
-    if not raw:
-        return None
-    try:
-        value = Decimal(raw)
-    except InvalidOperation:
-        return None
-    return value if value.is_finite() and value >= 0 else None
-
-
 def _integer(name: str) -> int | None:
     raw = _text(name)
     return int(raw) if raw.isdigit() and int(raw) > 0 else None
-
-
-def _date(name: str) -> date | None:
-    try:
-        return date.fromisoformat(_text(name))
-    except ValueError:
-        return None
 
 
 def audio_mode_from_env() -> str:
@@ -119,6 +106,12 @@ def audio_mode_from_env() -> str:
     if not mode:
         return DEFAULT_AUDIO_MODE
     return mode if mode in AUDIO_MODES else "off"
+
+
+def key_owner_from_env() -> str:
+    """`customer`만 고객사 키로 본다. 비었거나 모르는 값은 server(예산을 건다)."""
+    owner = _text(KEY_OWNER_ENV).lower()
+    return KEY_OWNER_CUSTOMER if owner == KEY_OWNER_CUSTOMER else KEY_OWNER_SERVER
 
 
 def ffmpeg_bin() -> str:
@@ -153,17 +146,14 @@ class MediaSettings:
     image_model: str
     video_provider: str
     video_model: str
-    fx_usd_krw: Decimal | None
-    fx_as_of: date | None
-    fx_max_age_days: int | None
-    margin_pct: Decimal | None
-    max_cost_krw_per_item: int | None
-    monthly_budget_krw: int | None
     media_dir: Path
     audio_provider: str = MOCK
     audio_model: str = ""
-    # 영상 전용 건당 상한. None이면 `max_cost_krw_per_item`을 쓴다(`item_limit`)
-    video_max_cost_krw_per_item: int | None = None
+    # 종류별 월 사용량 예산(영상 초·이미지 장·BGM 곡). 없으면 None. 우리 키(server)에만 쓴다
+    video_quota: int | None = None
+    image_quota: int | None = None
+    audio_quota: int | None = None
+    key_owner: str = KEY_OWNER_SERVER
     audio_mode: str = DEFAULT_AUDIO_MODE
     video_max_duration_s: int = DEFAULT_MAX_DURATION_S
     video_max_duration_problem: str | None = None  # 설정이 잘못됐으면 코드(영상 생성 거부)
@@ -172,7 +162,6 @@ class MediaSettings:
 
     @classmethod
     def from_env(cls) -> MediaSettings:
-        fx = _decimal("MARKETING_FX_USD_KRW")
         video_provider = _text("MARKETING_VIDEO_PROVIDER").lower() or MOCK
         video_model = _text("MARKETING_VIDEO_MODEL")
         video_provider, video_model = _video_selection(video_provider, video_model)
@@ -180,10 +169,11 @@ class MediaSettings:
         warn = warn_duration_from_env(max_duration.seconds)
         if warn.problem is not None:
             log.warning("video warn duration setting ignored: %s", warn.problem)  # 사유 코드만
-        ui_video, ui_monthly = cost_limit_store.video_per_item(), cost_limit_store.monthly_budget()
         return cls(
-            video_max_cost_krw_per_item=ui_video
-            or _integer("MARKETING_VIDEO_MAX_COST_KRW_PER_ITEM"),
+            video_quota=quota_store.quota("video") or _integer(QUOTA_ENVS["video"]),
+            image_quota=quota_store.quota("image") or _integer(QUOTA_ENVS["image"]),
+            audio_quota=quota_store.quota("audio") or _integer(QUOTA_ENVS["audio"]),
+            key_owner=key_owner_from_env(),
             video_warn_duration_s=warn.seconds,
             video_max_duration_s=max_duration.seconds,
             video_max_duration_problem=max_duration.problem,
@@ -191,23 +181,27 @@ class MediaSettings:
             image_model=_text("MARKETING_IMAGE_MODEL"),
             video_provider=video_provider,
             video_model=video_model,
-            fx_usd_krw=fx if fx else None,  # 0도 설정 안 한 것으로 본다
-            fx_as_of=_date("MARKETING_FX_AS_OF"),
-            fx_max_age_days=_integer("MARKETING_FX_MAX_AGE_DAYS"),
-            margin_pct=_decimal("MARKETING_COST_SAFETY_MARGIN_PCT"),
-            max_cost_krw_per_item=_integer("MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM"),
-            monthly_budget_krw=ui_monthly or _integer("MARKETING_MEDIA_MONTHLY_BUDGET_KRW"),
             audio_provider=_text("MARKETING_AUDIO_PROVIDER").lower() or MOCK,
             audio_model=_text("MARKETING_AUDIO_MODEL"),
             audio_mode=audio_mode_from_env(),
             media_dir=Path(_text(MEDIA_DIR_ENV) or Path(tempfile.gettempdir()) / "marketing_media"),
         )
 
-    def item_limit(self, kind: str | None) -> int | None:
-        """건당 상한. 영상은 영상 전용 값(없으면 기존 값), 이미지·BGM은 기존 값."""
-        if kind == "video" and self.video_max_cost_krw_per_item is not None:
-            return self.video_max_cost_krw_per_item
-        return self.max_cost_krw_per_item
+    @property
+    def quota_applies(self) -> bool:
+        """우리 키(server)로 만들 때만 예산을 건다. 고객사 키(customer)는 안 건다."""
+        return self.key_owner != KEY_OWNER_CUSTOMER
+
+    def quota(self, kind: str | None) -> int | None:
+        """그 종류의 월 사용량 예산(영상 초·이미지 장·BGM 곡). 없으면 None."""
+        if kind == "video":
+            return self.video_quota
+        if kind == "image":
+            return self.image_quota
+        return self.audio_quota if kind == "audio" else None
+
+    def quotas(self) -> dict[str, int | None]:
+        return {"video": self.video_quota, "image": self.image_quota, "audio": self.audio_quota}
 
     def provider(self, kind: MediaKind) -> str:
         if kind == "audio":
@@ -218,16 +212,6 @@ class MediaSettings:
         if kind == "audio":
             return self.audio_model
         return self.image_model if kind == "image" else self.video_model
-
-    def fx_problem(self, today: date) -> str | None:
-        """실제 공급자 호출을 막아야 하면 이유 코드, 괜찮으면 None."""
-        if self.fx_usd_krw is None or self.fx_as_of is None or self.margin_pct is None:
-            return "fx_not_configured"
-        if self.fx_max_age_days is None:
-            return "fx_max_age_not_configured"
-        if self.fx_as_of > today or (today - self.fx_as_of).days > self.fx_max_age_days:
-            return "fx_stale"
-        return None
 
 
 def has_api_key(kind: MediaKind) -> bool:

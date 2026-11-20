@@ -131,16 +131,16 @@ base_grade = "B"
 verifier = "safety"
 amount = { amount_field = "budget_krw" }
 
-# 이미지·영상 생성 (#487, #677). 유료 API라 안전 레이어 코드 규칙이 비용·길이를 본다.
-# 통과하면 B로 실행. 금액은 마케팅 코드가 공급자 단가표로 계산해 보낸 cost_krw다.
-# 매체 종류 media_kind(image | video | audio)에 따라 건당 상한과 길이 규칙이 다르다(thresholds.toml).
+# 이미지·영상 생성 (#487, #677). 안전 레이어 코드 규칙이 매체 종류·길이를 본다.
+# 통과하면 B로 실행. 원화 금액은 보내지도 보지도 않는다(단가표·금액 상한 없음). 우리 키의 월 사용량
+# 예산(영상 초·이미지 장·BGM 곡)은 마케팅 코드가 호출 전에 건다. 고객사 키는 예산이 없다.
+# 매체 종류 media_kind(image | video | audio)에 따라 길이 규칙이 다르다(thresholds.toml).
 # audio는 영상에 입히는 AI 연주곡 BGM이다(같은 generate_media, 같은 B)
 [[actions]]
 action = "generate_media"
 owner = "marketing"
 base_grade = "B"
 verifier = "safety"
-amount = { amount_field = "cost_krw", claimed_fields = ["claimed_cost_krw"] }
 
 # 사람과 마케팅 AI의 직접 대화. 대화 글을 저장하고 닫을 뿐 쿠폰·공지·게시는 건드리지 않는다
 # (그런 일은 기존 skill로 execute()와 안전 관문을 거친다). 고객지원·기획 대화와 같은 A

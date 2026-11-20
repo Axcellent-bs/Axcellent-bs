@@ -9,7 +9,7 @@ import { ApprovalPanel } from "./ApprovalPanel";
 import { ManualPublishCard, PublishLineView } from "./ManualPublishCard";
 
 // 장애 사과·보상 글 초안 카드의 "이 초안으로 진행".
-// 1) 사람이 한 번 누르면 확인 단계(예상 비용·상한·누적, 게시는 사람 승인이 한 번 더 필요함)가 나온다.
+// 1) 사람이 한 번 누르면 확인 단계(예상 사용량·이번 달 예산, 게시는 사람 승인이 한 번 더 필요함)가 나온다.
 // 2) 확인하면 이미지를 만들어 초안에 붙이고, 곧바로 게시 요청(승인 대기 건, 10분 만료)까지 보낸다. 게시는 하지 않는다.
 // 3) 같은 카드에 승인 패널이 뜨고, 사람이 이미지·최종 글을 보고 직접 승인/거절해야 게시된다(두 번째 사람 결정).
 // - 첫 클릭은 게시 권한이 아니라 "이미지 생성 진행 확인"이다. 자동 승인·승인 우회·기한 연장은 없다.
@@ -96,7 +96,7 @@ export function OutageProceed({ draft, onDone }: { draft: OutageSnsDraft; onDone
   const canStart = HUMAN_TOKEN_SET && flow.stage === "not_started" && flow.can_proceed && flow.estimate?.status === "ok";
   const blocked = flow.stage === "not_started" && !flow.can_proceed
     ? outageBlockKo(flow.reason_code)
-    : flow.stage === "not_started" && !flow.estimate ? "서버가 예상 비용을 알려 주지 않아 진행할 수 없습니다." : null;
+    : flow.stage === "not_started" && !flow.estimate ? "서버가 예상 사용량을 알려 주지 않아 진행할 수 없습니다." : null;
   const canSend = HUMAN_TOKEN_SET && flow.stage === "draft_ready" && publish?.status === "not_requested" && publish.can_request === true;
   const canRetry = HUMAN_TOKEN_SET && publish?.status === "expired" && publish.can_retry === true;
   const busy = step === "image" || step === "request";
@@ -141,7 +141,7 @@ export function OutageProceed({ draft, onDone }: { draft: OutageSnsDraft; onDone
       ) : canStart ? (
         <div className="flex flex-wrap items-center gap-2">
           <button className="btn-primary text-xs" onClick={() => { setResult(null); setStep("confirm"); }}>이 초안으로 진행</button>
-          <span className="text-ink-500">누르면 예상 비용을 먼저 보여 줍니다. 게시는 사람이 승인해야 합니다.</span>
+          <span className="text-ink-500">누르면 예상 사용량을 먼저 보여 줍니다. 게시는 사람이 승인해야 합니다.</span>
         </div>
       ) : canRetry ? (
         <div className="flex flex-wrap items-center gap-2">

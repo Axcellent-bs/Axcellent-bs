@@ -19,11 +19,9 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from marketing_agent.media import pricing
 from marketing_agent.media.base import (
     Continuation,
     MediaProvider,
@@ -38,29 +36,11 @@ from marketing_agent.media.video_limits import Clip
 
 FFMPEG_TIMEOUT_S = 180
 MAX_FINAL_BYTES = 512 * 1024 * 1024
-IMAGE_INPUT_TOKENS = 2000  # 시작 이미지 입력 토큰 추정(보수적)
 Runner = Callable[..., Any]
 
 
 class VideoChainError(MediaProviderError):
     """이어 붙이기 실패. 메시지는 사유 코드뿐이다."""
-
-
-def estimate_chain_usd(entry: pricing.PriceEntry, *, prompt: str, clips: list[Clip]) -> Decimal:
-    """클립별 추정 USD의 합(전체 예상 비용 = 클립 수 × 단가). 단일 클립이면 전과 같다."""
-    tps = entry.output_tokens_per_second or 0
-    total = Decimal(0)
-    for clip in clips:
-        if clip.mode == "extend":
-            extra = clip.prev_extend_s * tps  # 연장은 앞 영상의 끝 10초까지를 입력으로 읽는다
-        elif clip.mode == "image":
-            extra = IMAGE_INPUT_TOKENS
-        else:
-            extra = 0
-        total += pricing.estimate_usd(
-            entry, prompt=prompt, duration_s=clip.duration_s, extra_input_tokens=extra
-        )
-    return total
 
 
 def _ffmpeg(args: list[str], run: Runner, code: str) -> None:

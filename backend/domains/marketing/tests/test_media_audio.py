@@ -23,6 +23,7 @@ from marketing_agent.media.gemini_video import API_REVISION, ENDPOINT
 from marketing_agent.media.ledger import MediaLedger
 from marketing_agent.media.pricing import PriceNotFound, PriceTableError
 from marketing_agent.media.prompts import PromptRejected, get_template, render_prompt
+from marketing_agent.media.usage import UsageAmount
 
 KEY = "test-key-SECRET-123"
 MODEL = "test-audio-model"
@@ -286,7 +287,7 @@ def test_audio_cost_estimate_krw_rounds_up() -> None:
     assert pricing.krw_estimate(usd, Decimal(1500), Decimal(10)) == 66  # ceil(0.04*1500*1.1)
 
 
-# ---- 비용 상한(장부) ----
+# ---- 사용량 예산(장부) ----
 
 
 def test_ledger_applies_monthly_cap_to_audio() -> None:
@@ -300,12 +301,12 @@ def test_ledger_applies_monthly_cap_to_audio() -> None:
             media_kind="audio",
             provider="gemini",
             model_id=MODEL,
-            krw_est=66,
-            usd_est=Decimal("0.04"),
-            monthly_cap=100,
+            usage=UsageAmount("tracks", 1),
+            monthly_cap=1,
             now=now,
         )
 
     assert reserve("a").outcome == "reserved"
-    assert reserve("b").outcome == "over_budget"  # 66 + 66 > 100
-    assert ledger.month_total("2026-11") == 66
+    assert reserve("b").outcome == "over_budget"  # 1곡 + 1곡 > 1곡
+    assert ledger.month_usage("2026-11", "audio") == 1
+    assert ledger.month_usage("2026-11", "video") == 0  # 종류마다 따로 센다

@@ -1,26 +1,31 @@
-"""영상 비용 상한 설정 스킬(화면에서 건당 상한·월 예산을 정한다).
+"""우리 키 사용량 예산 설정 스킬(화면에서 종류별 월 예산을 정한다).
 
-- `get_media_cost_limits`(읽기): 현재 값·출처·이번 달 누적·코드 상수 범위·
+원화 단가표·건당 금액 상한은 없다. 예산은 공급자 단위 그대로의 월 사용량이다:
+영상 초(`video_seconds_monthly`)·이미지 장(`image_count_monthly`)·BGM 곡(`audio_count_monthly`).
+우리 키(`MARKETING_MEDIA_KEY_OWNER=server`, 기본)에만 걸고 고객사 키(`customer`)는 안 건다.
+스킬 이름(`*_media_cost_limits`)과 안전 액션 이름은 예전 그대로다(계약은 추가만).
+
+- `get_media_cost_limits`(읽기): 현재 값·출처·이번 달 종류별 사용량과 남은 %·코드 상수 범위·
   안전 정책 현황·대기 요청·이력.
-- `lower_media_cost_limits`: 금액을 낮추는 변경. 재무·총괄이 셀프 승인을 허용해 둔
+- `lower_media_cost_limits`: 예산을 낮추는 변경. 재무·총괄이 셀프 승인을 허용해 둔
   경우(기본 꺼짐)에만 주의사항 확인(`confirmed`) 뒤 바로 적용하는 A. 꺼져 있으면
   상향과 같은 사람 승인 C(`change_media_cost_limits`)로 간다.
-- `raise_media_cost_limits`: 금액을 올리는 변경. 늘 사람 승인 C. 요청자(`requested_by`)와 승인자는
+- `raise_media_cost_limits`: 예산을 올리는 변경. 늘 사람 승인 C. 요청자(`requested_by`)와 승인자는
   달라야 한다(안전 관문이 막는다). 승인 뒤 같은 요청을 다시 보내면 적용된다. 값이 없던 것을 처음
   정하는 것도 상향이다.
 - `set_cost_limit_option`(A): 하향 셀프 승인 허용 on/off. 변경 이력을 남긴다.
 쓰기는 요청자가 dashboard-api일 때만(Agent Card). 권한(limit_editor·policy_editor)·
 로그인 세션 검사는 대시보드 API가 하고, 사람 이름은 토큰에서 채운다.
-저장 전 검사: 하한 1원, 코드 절대 상한, 안전 정책
-상한(상향만), 월 예산 >= 영상 건당 상한, 한 번에 올림·내림 섞기 금지. 진행 중 생성 건은 영향이 없다.
-Slack 등 알림은 보내지 않는다(변경 이력·승인 목록까지). TODO: 알림 연동.
+저장 전 검사: 하한 1, 코드 절대 상한, 한 번에 올림·내림 섞기 금지. 예전 원화 칸
+(`video_per_item_krw`·`monthly_budget_krw`)을 보내면 거절한다(`deprecated_krw_limit`).
+진행 중 생성 건은 영향이 없다. Slack 등 알림은 보내지 않는다(변경 이력·승인 목록까지).
+TODO: 알림 연동.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -29,8 +34,9 @@ from pydantic import Field, ValidationError
 from ax_agent_template.execute import execute
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel
-from marketing_agent.media import cost_limit_store as store
 from marketing_agent.media import policy_view
+from marketing_agent.media import quota_store as store
+from marketing_agent.media import usage as usage_mod
 from marketing_agent.media.config import MediaSettings
 from marketing_agent.media.ledger import LedgerError, MediaLedger
 
@@ -38,7 +44,6 @@ from marketing_agent.media.ledger import LedgerError, MediaLedger
 ACTION_LOWER = "lower_media_cost_limits"
 ACTION_CHANGE = "change_media_cost_limits"
 ACTION_OPTION = "set_cost_limit_option"
-VIDEO_POLICY_KEY = "video_cost_single"
 READ_ACTION = "get_media_cost_limits"
 
 
@@ -48,7 +53,10 @@ class ListInput(AxModel):
 
 class LimitsOutput(AxModel):
     month: str
-    month_total_krw: int | None
+    # 예전 필드(원화 합계). 원화는 더 세지 않아 늘 None이다(계약은 추가만)
+    month_total_krw: int | None = None
+    # 종류별 이번 달 사용량·예산·남은 %: {video|image|audio: {unit, used, limit, remaining_pct}}
+    usage: dict[str, Any] = Field(default_factory=dict)
     limits: dict[str, Any]
     bounds: dict[str, Any]
     options: dict[str, Any]
@@ -58,6 +66,10 @@ class LimitsOutput(AxModel):
 
 
 class ChangeInput(AxModel):
+    video_seconds_monthly: int | None = None
+    image_count_monthly: int | None = None
+    audio_count_monthly: int | None = None
+    # 예전 원화 칸. 보내면 거절한다(`deprecated_krw_limit`). 입력 계약은 지우지 않는다
     video_per_item_krw: int | None = None
     monthly_budget_krw: int | None = None
     reason: str = Field(default="", max_length=200)
@@ -106,51 +118,47 @@ async def _gate(
     return from_decision(request, decision, evidence)
 
 
-def _month_total(ledger: MediaLedger | None) -> tuple[str, int | None]:
+def _month_usage(ledger: MediaLedger | None) -> tuple[str, dict[str, int] | None]:
     month = datetime.now(UTC).strftime("%Y-%m")
     if ledger is None:
         return month, None
     try:
-        return month, ledger.month_total(month)
+        return month, ledger.month_usage_all(month)
     except LedgerError:
         return month, None
 
 
 def _sources(settings: MediaSettings) -> dict[str, str]:
-    video_env = bool(os.getenv("MARKETING_VIDEO_MAX_COST_KRW_PER_ITEM", "").strip())
-    if store.video_per_item() is not None:
-        video = "ui"
-    elif settings.video_max_cost_krw_per_item is not None and video_env:
-        video = "env_video"
-    elif settings.max_cost_krw_per_item is not None:
-        video = "env_item"
-    else:
-        video = "none"
-    if store.monthly_budget() is not None:
-        monthly = "ui"
-    else:
-        monthly = "env" if settings.monthly_budget_krw is not None else "none"
-    return {"video_source": video, "monthly_source": monthly}
+    """종류별 값의 출처: ui(화면) | env(환경변수) | none."""
+    out: dict[str, str] = {}
+    for kind in store.FIELD_BY_KIND:
+        if store.quota(kind) is not None:
+            out[f"{kind}_source"] = "ui"
+        else:
+            out[f"{kind}_source"] = "env" if settings.quota(kind) is not None else "none"
+    return out
 
 
 async def state(ledger: MediaLedger | None) -> dict[str, Any]:
     settings = MediaSettings.from_env()
-    month, total = _month_total(ledger)
+    month, used = _month_usage(ledger)
     policy = policy_view.with_limits(await policy_view.fetch())
+    limits = settings.quotas()
     return {
         "month": month,
-        "month_total_krw": total,
+        "month_total_krw": None,
+        "usage": usage_mod.snapshot(used, limits) if used is not None else {},
         "limits": {
-            "video_per_item_krw": settings.item_limit("video"),
-            "monthly_budget_krw": settings.monthly_budget_krw,
-            "image_audio_per_item_krw": settings.max_cost_krw_per_item,
+            **{field: limits[kind] for kind, field in store.FIELD_BY_KIND.items()},
+            "key_owner": settings.key_owner,
+            "quota_applies": settings.quota_applies,
             **_sources(settings),
             **store.meta(),
         },
         "bounds": {
-            "min_krw": store.MIN_KRW,
-            "video_item_max_krw": store.ABSOLUTE_MAX_VIDEO_ITEM_KRW,
-            "monthly_max_krw": store.ABSOLUTE_MAX_MONTHLY_KRW,
+            "min": store.MIN_AMOUNT,
+            "max": dict(store.ABSOLUTE_MAX),
+            "units": {field: usage_mod.UNITS[kind] for kind, field in store.FIELD_BY_KIND.items()},
         },
         "options": {"lower_self_approve": store.lower_self_approve(), **store.option_meta()},
         "policy": policy,
@@ -167,7 +175,7 @@ def _result(
         status=TaskStatus.COMPLETED,
         outcome=outcome,
         output=output,
-        evidence=evidence or _evidence(READ_ACTION, "영상 비용 상한 현황"),
+        evidence=evidence or _evidence(READ_ACTION, "사용량 예산 현황"),
     )
 
 
@@ -176,10 +184,7 @@ async def get_limits(request: AgentRequest, *, ledger: MediaLedger | None) -> Ag
 
 
 def _current(settings: MediaSettings) -> dict[str, int | None]:
-    return {
-        "video_per_item_krw": settings.item_limit("video"),
-        "monthly_budget_krw": settings.monthly_budget_krw,
-    }
+    return {field: settings.quota(kind) for kind, field in store.FIELD_BY_KIND.items()}
 
 
 def _direction(old: int | None, new: int) -> str:
@@ -196,11 +201,10 @@ async def _check(
 ) -> tuple[str, list[dict[str, Any]]] | AgentResult:
     """저장 전 검사. 통과하면 (방향, 경고), 아니면 실패 결과."""
     for field, new in changes.items():
-        if new < store.MIN_KRW:
-            return _fail(request, "below_minimum", field=field, min_krw=store.MIN_KRW)
+        if new < store.MIN_AMOUNT:
+            return _fail(request, "below_minimum", field=field, min=store.MIN_AMOUNT)
         if new > store.absolute_max(field):
-            top = store.absolute_max(field)
-            return _fail(request, "over_absolute_max", field=field, max_krw=top)
+            return _fail(request, "over_absolute_max", field=field, max=store.absolute_max(field))
     kinds = {f: _direction(current[f], v) for f, v in changes.items()}
     changed = {k for k in kinds.values() if k != "same"}
     if not changed:
@@ -208,33 +212,20 @@ async def _check(
     if changed == {"up", "down"}:
         return _fail(request, "mixed_direction")
     direction = changed.pop()
-    video_new = changes.get("video_per_item_krw", current["video_per_item_krw"])
-    monthly_new = changes.get("monthly_budget_krw", current["monthly_budget_krw"])
-    if video_new is not None and monthly_new is not None and monthly_new < video_new:
-        return _fail(request, "monthly_below_item", monthly_krw=monthly_new, item_krw=video_new)
-    if direction == "up" and "video_per_item_krw" in changes:
-        cap = policy_view.ceiling(await policy_view.fetch(), VIDEO_POLICY_KEY)
-        if cap is None:
-            return _fail(request, "policy_unavailable")
-        if changes["video_per_item_krw"] > cap[1]:
-            return _fail(
-                request,
-                "over_policy_ceiling",
-                field="video_per_item_krw",
-                policy_krw=cap[0],
-                policy_key=VIDEO_POLICY_KEY,
-            )
     warnings: list[dict[str, Any]] = []
-    if "monthly_budget_krw" in changes and direction == "down":
-        _, total = _month_total(ledger)
-        if total is not None and changes["monthly_budget_krw"] < total:
-            warnings.append(
-                {
-                    "code": "monthly_below_month_total",
-                    "month_total_krw": total,
-                    "monthly_krw": changes["monthly_budget_krw"],
-                }
-            )
+    if direction == "down":
+        _, used = _month_usage(ledger)
+        for kind, field in store.FIELD_BY_KIND.items():
+            if field in changes and used is not None and changes[field] < used[kind]:
+                warnings.append(
+                    {
+                        "code": "quota_below_month_usage",
+                        "media_kind": kind,
+                        "unit": usage_mod.UNITS[kind],
+                        "month_used": used[kind],
+                        "limit": changes[field],
+                    }
+                )
     return direction, warnings
 
 
@@ -253,6 +244,8 @@ async def change(
     reason = data.reason.strip()
     if not reason:
         return _fail(request, "reason_required")
+    if data.video_per_item_krw is not None or data.monthly_budget_krw is not None:
+        return _fail(request, "deprecated_krw_limit")
     changes = {f: v for f in store.FIELDS if (v := getattr(data, f)) is not None}
     if not changes:
         return _fail(request, "invalid_input", errors=["변경할 값이 없다"])
@@ -274,7 +267,7 @@ async def change(
         "reason": reason,
         "requested_by": data.updated_by,
     }
-    ev = _evidence(action, f"영상 비용 상한 {direction} 변경 ({data.updated_by})")
+    ev = _evidence(action, f"사용량 예산 {direction} 변경 ({data.updated_by})")
     blocked = await _gate(request, action, params, ev, from_decision)
     kind = "raise" if direction == "up" else "lower"
     if blocked:

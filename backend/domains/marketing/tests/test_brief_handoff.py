@@ -156,7 +156,7 @@ def test_state_is_included_in_list_and_get() -> None:
         "reason_code": None,
         "handed_at": None,
         "draft_state": None,
-        "media_estimate": None,  # 넘기지 않은 기획안에는 예상 비용·만든 미디어가 없다
+        "media_estimate": None,  # 넘기지 않은 기획안에는 예상 사용량·만든 미디어가 없다
         "prepared": None,
         "publish": None,
     }
@@ -170,23 +170,44 @@ def test_unknown_brief_fails_cleanly() -> None:
     assert _call("handoff_brief_to_sns", {})["outcome"] == "invalid_input"
 
 
-def test_price_table_missing_fails_closed_and_can_retry(monkeypatch) -> None:  # noqa: ANN001
+def test_missing_quota_or_model_fails_closed_and_can_retry(monkeypatch) -> None:  # noqa: ANN001
     _receive()
+    monkeypatch.delenv("MARKETING_QUOTA_IMAGE_COUNT_MONTHLY", raising=False)
+    monkeypatch.delenv("MARKETING_MEDIA_KEY_OWNER", raising=False)
     monkeypatch.setenv("MARKETING_IMAGE_PROVIDER", "openai")
     monkeypatch.setenv("MARKETING_IMAGE_MODEL", "no-such-model")
     out = _handoff()
     assert out["status"] == "completed" and out["outcome"] == "failed"
     state = out["output"]["sns_handoff"]
-    assert state["status"] == "failed" and state["reason_code"] == "price_not_found"
+    assert state["status"] == "failed" and state["reason_code"] == "quota_not_configured"
     assert state["draft_id"] is None
     assert handlers.STATE.sns._conn.execute("SELECT COUNT(*) FROM sns_drafts").fetchone()[0] == 0
     listed = _call("list_campaign_briefs", {})["output"]["items"][0]["sns_handoff"]
-    assert listed["status"] == "failed" and listed["reason_code"] == "price_not_found"
+    assert listed["status"] == "failed" and listed["reason_code"] == "quota_not_configured"
     monkeypatch.setenv("MARKETING_IMAGE_MODEL", "")
     assert _handoff()["output"]["sns_handoff"]["reason_code"] == "model_not_configured"
     monkeypatch.delenv("MARKETING_IMAGE_PROVIDER")  # 목 모드로 돌아오면 다시 넘길 수 있다
     monkeypatch.delenv("MARKETING_IMAGE_MODEL")
     assert _handoff()["outcome"] == "handed"
+
+
+def test_customer_key_needs_no_quota_but_a_server_key_does(monkeypatch) -> None:  # noqa: ANN001
+    from types import SimpleNamespace
+
+    from marketing_agent.brief_handoff import media_problem
+    from marketing_agent.media.config import MediaSettings
+
+    image = SimpleNamespace(media_kind="image")
+    monkeypatch.setenv("MARKETING_IMAGE_PROVIDER", "openai")
+    monkeypatch.setenv("MARKETING_IMAGE_MODEL", "some-model")
+    monkeypatch.delenv("MARKETING_QUOTA_IMAGE_COUNT_MONTHLY", raising=False)
+    monkeypatch.delenv("MARKETING_MEDIA_KEY_OWNER", raising=False)
+    assert media_problem(image, MediaSettings.from_env()) == "quota_not_configured"  # type: ignore[arg-type]
+    monkeypatch.setenv("MARKETING_MEDIA_KEY_OWNER", "customer")
+    assert media_problem(image, MediaSettings.from_env()) is None  # type: ignore[arg-type]
+    monkeypatch.setenv("MARKETING_MEDIA_KEY_OWNER", "server")
+    monkeypatch.setenv("MARKETING_QUOTA_IMAGE_COUNT_MONTHLY", "5")
+    assert media_problem(image, MediaSettings.from_env()) is None  # type: ignore[arg-type]
 
 
 def test_forbidden_phrase_in_brief_is_failed_not_drafted() -> None:

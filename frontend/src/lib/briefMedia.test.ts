@@ -1,35 +1,56 @@
-// node --test로 돈다 (npm test). 미디어 만들기의 비용 줄·결과 문구가 서버 값만 쓰는지.
+// node --test로 돈다 (npm test). 미디어 만들기의 사용량 줄·결과 문구가 서버 값만 쓰는지(원화 없음).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clampDuration, durationCostKrw, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, gateLongStart, longWarningKo, needsLongWarning, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, remainingSeconds, remainingKo, canDecideNow, decideErrorKo, approvalLink, audioPending, canChooseAudio, audioIntroKo, bgmCostKo, audioDecisionKo, audioResultKo, audioHttpErrorKo, type AudioState, type PreparedMedia, type MediaEstimate, type PublishState } from "./briefMedia.ts";
+import { clampDuration, durationClips, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, gateLongStart, longWarningKo, needsLongWarning, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, remainingSeconds, remainingKo, canDecideNow, decideErrorKo, approvalLink, audioPending, canChooseAudio, audioIntroKo, bgmUsageKo, quotaKo, usageKo, audioDecisionKo, audioResultKo, audioHttpErrorKo, type AudioState, type PreparedMedia, type MediaEstimate, type PublishState } from "./briefMedia.ts";
 
 const estimate = (over: Partial<MediaEstimate> = {}): MediaEstimate => ({
-  status: "ok", reason_code: null, media_kind: "video", cost_krw: 835, settled: false, basis: "price_table",
-  per_item_limit_krw: 2000, monthly_budget_krw: 30000, month_total_krw: 1670, ...over,
+  status: "ok", reason_code: null, media_kind: "video", settled: false, basis: "estimate",
+  usage: { unit: "seconds", amount: 15, input_tokens: null, output_tokens: null },
+  quota: { unit: "seconds", used: 100, limit: 600, remaining_pct: 83, applies: true }, ...over,
 });
 
-test("비용 줄은 서버가 준 숫자를 그대로 쓴다", () => {
-  assert.deepEqual(estimateLines(estimate()), [
-    "예상 비용 835원 (단가표 기준 추정)",
-    "건당 상한 2,000원",
-    "이달 누적 1,670원 / 월 상한 30,000원",
+test("사용량 줄은 서버가 준 숫자를 그대로 쓰고 원화가 없다", () => {
+  const lines = estimateLines(estimate());
+  assert.deepEqual(lines, [
+    "예상 사용량 15초 (요청한 만큼으로 센 예상)",
+    "이번 달 사용량 100초 / 월 예산 600초 · 남은 사용량 83%",
   ]);
+  assert.ok(!lines.join(" ").match(/원/));
+});
+
+test("토큰이 있으면 같이 보여 주고, 없으면 단위 사용량만 보여 준다", () => {
+  assert.equal(usageKo({ unit: "images", amount: 1, input_tokens: 100, output_tokens: 1200 }), "1장 (토큰 입력 100 · 출력 1,200)");
+  assert.equal(usageKo({ unit: "tracks", amount: 1, input_tokens: null, output_tokens: null }), "1곡");
+  assert.equal(usageKo(null), "사용량을 읽을 수 없음");
 });
 
 test("서버가 주지 않은 값은 지어내지 않고 읽을 수 없다고 적는다", () => {
-  const lines = estimateLines(estimate({ cost_krw: null, basis: null, per_item_limit_krw: null, monthly_budget_krw: null, month_total_krw: null }));
-  assert.deepEqual(lines, ["예상 비용을 계산할 수 없습니다.", "건당 상한 설정을 읽을 수 없음", "이달 누적을 읽을 수 없음 / 월 상한 설정을 읽을 수 없음"]);
-  assert.ok(!lines.join(" ").match(/\d+원/));
+  const lines = estimateLines(estimate({ usage: null, basis: null, quota: null }));
+  assert.deepEqual(lines, ["예상 사용량을 계산할 수 없습니다.", "이번 달 사용량을 읽을 수 없음"]);
+  assert.ok(!lines.join(" ").match(/\d/));
 });
 
-test("이미 만든 미디어는 새 비용이 나지 않는다고 적는다", () => {
-  assert.match(estimateLines(estimate({ settled: true, basis: "ledger" }))[0], /새 비용이 나지 않습니다/);
+test("고객사 키는 예산이 없다고 밝히고 남은 비율을 지어내지 않는다", () => {
+  const line = quotaKo({ unit: "images", used: 30, limit: null, remaining_pct: null, applies: false });
+  assert.match(line, /이번 달 사용량 30장/);
+  assert.match(line, /고객사 키라 예산을 걸지 않습니다/);
+  assert.doesNotMatch(line, /%/);
+  assert.match(quotaKo({ unit: "images", used: 3, limit: null, remaining_pct: null, applies: true }), /예산 설정을 읽을 수 없음/);
+});
+
+test("이미 만든 미디어는 사용량이 늘지 않는다고 적는다", () => {
+  assert.match(estimateLines(estimate({ settled: true, basis: "ledger" }))[0], /사용량이 늘지 않습니다/);
 });
 
 test("막힌 이유는 사람이 읽는 문구로, 모르는 코드는 코드만 덧붙인다", () => {
   assert.match(estimateBlockKo("carousel_items_undecided"), /캐러셀/);
-  assert.match(estimateBlockKo("budget_exceeded"), /이달 미디어 비용 상한/);
+  assert.match(estimateBlockKo("quota_exceeded"), /이달 사용량 예산/);
+  assert.match(estimateBlockKo("quota_not_configured"), /예산이 설정되지 않아/);
   assert.equal(estimateBlockKo("new_code"), "지금은 만들 수 없습니다 (new_code).");
+  // 원화 단가표·환율 이유는 더 없다
+  for (const old of ["cost_over_single", "budget_exceeded", "price_not_found", "fx_stale", "cost_limit_not_configured"]) {
+    assert.equal(estimateBlockKo(old), `지금은 만들 수 없습니다 (${old}).`);
+  }
 });
 
 test("만들기 결과: 준비됨·검사 걸림·보류·실패", () => {
@@ -40,9 +61,9 @@ test("만들기 결과: 준비됨·검사 걸림·보류·실패", () => {
   const held = mediaResultKo({ status: "input-required", outcome: "held", output: { review_id: "rev_1" } });
   assert.equal(held.kind, "held");
   assert.match(held.text, /사람 확인으로 보류/);
-  const over = mediaResultKo({ status: "failed", outcome: "budget_exceeded", output: null });
+  const over = mediaResultKo({ status: "failed", outcome: "quota_exceeded", output: null });
   assert.equal(over.kind, "failed");
-  assert.match(over.text, /상한/);
+  assert.match(over.text, /사용량 예산/);
   assert.match(mediaResultKo({ status: "failed", outcome: "in_progress", output: null }).text, /이미 만드는 중/);
 });
 
@@ -163,17 +184,29 @@ test("승인 화면 링크는 건을 강조할 뿐 승인 정보를 담지 않�
   assert.ok(!/approve|decision|token/i.test(approvalLink("rev_1")));
 });
 
-const video = { min_s: 1, max_s: 60, absolute_max_s: 90, current_s: 15, cost_by_duration: { "10": 800, "15": 1200, "40": 3300, "60": 5000 } };
+const video = { min_s: 1, max_s: 60, absolute_max_s: 90, current_s: 15, clips_by_duration: { "10": 1, "15": 1, "40": 4, "60": 5 } };
 
-test("영상 길이: 비용은 서버 표 값만 쓰고 표에 없는 길이는 만들 수 없다고 한다", () => {
-  const e = estimate({ video, per_item_limit_krw: 4000, monthly_budget_krw: 30000, month_total_krw: 0 });
-  assert.equal(durationCostKrw(video, 40), 3300);
-  assert.equal(durationCostKrw(video, 2), null);
+test("영상 길이: 표에 없는 길이는 만들 수 없다고 하고, 남은 예산을 넘는 길이는 막는다", () => {
+  const e = estimate({ video, quota: { unit: "seconds", used: 0, limit: 50, remaining_pct: 100, applies: true } });
+  assert.equal(durationClips(video, 40), 4);
+  assert.equal(durationClips(video, 2), null);
   assert.equal(durationProblemKo(e, 40), null);
-  assert.match(durationProblemKo(e, 60) ?? "", /건당 상한 4,000원을 넘어/);
+  assert.match(durationProblemKo(e, 60) ?? "", /이달 영상 예산\(50초\)을 넘게 되어/);
   assert.match(durationProblemKo(e, 2) ?? "", /만들 수 없습니다/);
-  assert.match(durationProblemKo({ ...e, month_total_krw: 29000 }, 40) ?? "", /이달 비용 상한/);
-  assert.equal(estimateLines(e, 40)[0], "영상 40초 예상 비용 3,300원 (단가표 기준 추정)");
+  const used = { ...e, quota: { unit: "seconds" as const, used: 20, limit: 50, remaining_pct: 60, applies: true } };
+  assert.match(durationProblemKo(used, 40) ?? "", /남은 사용량은 30초/);
+  assert.equal(durationProblemKo(used, 10), null);
+  assert.equal(estimateLines(e, 40)[0], "영상 40초 사용 예정 (요청한 만큼으로 센 예상)");
+});
+
+test("영상 길이: 고객사 키면 예산 검사를 하지 않는다", () => {
+  const e = estimate({ video, quota: { unit: "seconds", used: 9999, limit: null, remaining_pct: null, applies: false } });
+  assert.equal(durationProblemKo(e, 60), null);
+});
+
+test("영상 길이: 옛 서버(클립 표 없음)는 길이를 막지 않는다", () => {
+  const e = estimate({ video: { min_s: 1, max_s: 60, absolute_max_s: 90, current_s: 15 }, quota: null });
+  assert.equal(durationProblemKo(e, 40), null);
 });
 
 test("영상 길이: 입력은 서버가 알려 준 범위(1~운영자 상한)로 맞추고 상한이 운영자 값임을 적는다", () => {
@@ -190,7 +223,6 @@ test("영상 길이: 입력은 서버가 알려 준 범위(1~운영자 상한)�
 
 const warnVideo = (over: Partial<NonNullable<MediaEstimate["video"]>> = {}) => ({
   min_s: 1, max_s: 90, absolute_max_s: 90, current_s: 15, warn_duration_s: 30,
-  cost_by_duration: { "15": 835, "30": 1700, "31": 1800, "60": 3400, "90": 5100 },
   clips_by_duration: { "15": 1, "30": 2, "31": 3, "60": 5, "90": 7 }, ...over,
 });
 
@@ -208,28 +240,27 @@ test("서버가 경고 길이를 주지 않으면(옛 서버)·길이가 없으�
   assert.equal(needsLongWarning(warnVideo(), null), false);
 });
 
-test("경고창 문구는 서버 값(길이·클립 수·비용·건당/월 한도)과 쉬운 안내를 담는다", () => {
+test("경고창 문구는 서버 값(길이·클립 수·사용량·월 예산)과 쉬운 안내를 담는다", () => {
   const w = longWarningKo(estimate({ video: warnVideo() }), 60);
   const text = w.lines.join(" ");
   assert.match(text, /선택한 길이: 60초/);
   assert.match(text, /이어 붙일 클립 수: 5개/);
-  assert.match(text, /예상 비용: 3,400원/);
-  assert.match(text, /건당 상한: 2,000원/);
-  assert.match(text, /이달 누적 1,670원 \/ 월 상한 30,000원/);
+  assert.match(text, /사용 예정: 60초/);
+  assert.match(text, /이번 달 사용량 100초 \/ 월 예산 600초/);
+  assert.doesNotMatch(text, /원/);
   const notes = w.notes.join(" ");
   assert.match(notes, /장면이나 인물이 이어지지 않을 수 있습니다/);
-  assert.match(notes, /클립 수만큼 늘어납니다/);
-  assert.match(notes, /건당 상한을 넘으면.*사람 승인/);
+  assert.match(notes, /사용량은 길이만큼 늘어납니다/);
+  assert.match(notes, /이달 영상 예산을 넘으면.*막힙니다/);
   assert.equal(w.confirmLabel, "계속");
   assert.equal(w.cancelLabel, "길이 줄이기");
 });
 
 test("경고창은 서버가 주지 않은 값을 지어내지 않는다", () => {
-  const w = longWarningKo(estimate({ per_item_limit_krw: null, month_total_krw: null, video: warnVideo({ clips_by_duration: undefined, cost_by_duration: {} }) }), 60);
+  const w = longWarningKo(estimate({ quota: null, video: warnVideo({ clips_by_duration: undefined }) }), 60);
   const text = w.lines.join(" ");
   assert.match(text, /클립 수를 읽을 수 없음/);
-  assert.match(text, /예상 비용을 계산할 수 없습니다/);
-  assert.match(text, /건당 상한 설정을 읽을 수 없음/);
+  assert.match(text, /이번 달 사용량을 읽을 수 없음/);
 });
 
 test("경고 길이 이하면 묻지 않고 바로 보낸다(확인 표시 없음)", async () => {
@@ -261,7 +292,7 @@ test("경고 길이를 넘고 확인하면 요청이 나가고 확인 표시가 
 
 const audioState = (over: Partial<AudioState> = {}): AudioState => ({ mode: "source", has_source_audio: true, needs_decision: true, decision: null, ...over });
 const prepared = (audio: AudioState | null | undefined, kind = "reel"): PreparedMedia => ({
-  post_draft_id: "spd_1", stage: "draft_ready", media_kind: kind, asset_ref: "a", asset_sha256: "x", cost_krw: 1000, label_text: "AI 생성",
+  post_draft_id: "spd_1", stage: "draft_ready", media_kind: kind, asset_ref: "a", asset_sha256: "x", usage: { unit: "seconds", amount: 15, input_tokens: null, output_tokens: null }, label_text: "AI 생성",
   check: { verdict: "approved", publishable: true, problems: [] }, prepared_at: null, audio,
 });
 
@@ -291,20 +322,21 @@ test("소리가 있으면 끝까지 듣고 고르게 하고, 없으면 이유를
   assert.match(audioIntroKo(audioState({ has_source_audio: false, needs_decision: false, note: "clip_concat_muted" })).join(" "), /이어 붙인 영상이라 소리를 뺐습니다/);
 });
 
-test("배경음악 추가 비용은 서버가 준 값만 쓴다", () => {
-  assert.match(bgmCostKo({ cost_krw: 66, settled: false, reason_code: null }), /추가 비용 약 66원/);
-  assert.match(bgmCostKo({ cost_krw: 66, settled: false, reason_code: null }), /영상 비용은 다시 나지 않습니다/);
-  assert.match(bgmCostKo({ cost_krw: 66, settled: true, reason_code: null }), /새 비용이 나지 않습니다/);
-  assert.match(bgmCostKo({ cost_krw: null, settled: false, reason_code: "price_not_found" }), /계산할 수 없습니다/);
-  assert.match(bgmCostKo(undefined), /알려 주지 않았습니다/);
-  assert.doesNotMatch(bgmCostKo(null), /\d+원/); // 지어낸 숫자 없음
+test("배경음악 추가 사용량은 서버가 준 값만 쓴다", () => {
+  const one = { unit: "tracks" as const, amount: 1, input_tokens: null, output_tokens: null };
+  assert.match(bgmUsageKo({ usage: one, settled: false, reason_code: null }), /추가 사용량 1곡/);
+  assert.match(bgmUsageKo({ usage: one, settled: false, reason_code: null }), /영상 사용량은 늘지 않습니다/);
+  assert.match(bgmUsageKo({ usage: one, settled: true, reason_code: null }), /사용량이 늘지 않습니다/);
+  assert.match(bgmUsageKo({ usage: null, settled: false, reason_code: "quota_not_configured" }), /계산할 수 없습니다/);
+  assert.match(bgmUsageKo(undefined), /알려 주지 않았습니다/);
+  assert.doesNotMatch(bgmUsageKo(null), /\d/); // 지어낸 숫자 없음
 });
 
 test("정해진 소리 선택은 기록대로 한 줄로 보여 준다", () => {
   assert.match(audioDecisionKo({ choice: "keep", decided_at: "2026-11-19T09:30:00Z", had_source_audio: true, confirmed_listened: true }), /이 영상 그대로 사용 \(2026-11-19 09:30 UTC\)/);
-  const bgm = audioDecisionKo({ choice: "bgm", decided_at: null, had_source_audio: true, confirmed_listened: null, bgm_cost_krw: 66 });
+  const bgm = audioDecisionKo({ choice: "bgm", decided_at: null, had_source_audio: true, confirmed_listened: null, bgm_usage: { unit: "tracks", amount: 1, input_tokens: null, output_tokens: null } });
   assert.match(bgm, /배경음악을 따로 만들어 입힘/);
-  assert.match(bgm, /66원/);
+  assert.match(bgm, /배경음악 1곡/);
 });
 
 test("소리 선택 결과: 그대로 사용·배경음악 완료·보류·실패", () => {

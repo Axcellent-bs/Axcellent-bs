@@ -77,7 +77,7 @@ export interface SnsHandoff {
   reason_code: string | null;
   handed_at: string | null;
   draft_state: "caption_only" | "media_attached" | "missing" | null;
-  /** 지금 요청 초안으로 만들 때의 예상 비용·상한. 옛 서버는 이 칸이 없다 */
+  /** 지금 요청 초안으로 만들 때의 예상 사용량·이번 달 예산. 옛 서버는 이 칸이 없다 */
   media_estimate?: MediaEstimate | null;
   /** 지금 요청 초안으로 만든 미디어 초안. 없거나 요청 초안이 바뀌었으면 null */
   prepared?: PreparedMedia | null;
@@ -153,8 +153,8 @@ async function handoff(proposalId: string, options: HandoffOptions = {}): Promis
 }
 
 /**
- * 만든 영상의 소리를 한 번 정한다(dashboard-api, 사람 토큰 필요): `keep` = 이 영상 그대로 사용(기록만, 비용 없음),
- * `bgm` = 배경음악 따로 만들기(영상은 다시 만들지 않고 BGM만 만든다. 안전 장치·비용 상한 그대로).
+ * 만든 영상의 소리를 한 번 정한다(dashboard-api, 사람 토큰 필요): `keep` = 이 영상 그대로 사용(기록만, 사용량 없음),
+ * `bgm` = 배경음악 따로 만들기(영상은 다시 만들지 않고 BGM만 만든다. 안전 장치·월 사용량 예산 그대로).
  * `confirmedListened`는 "소리까지 들어 봤다"는 감사 기록용 표시일 뿐 서버는 믿지 않는다. 게시는 하지 않는다.
  * 오류는 서버 문장 없이 상태 코드만 담아 던진다(문구는 `audioHttpErrorKo`).
  */
@@ -355,9 +355,8 @@ export const briefs = {
 };
 
 export const HANDOFF_REASON_KO: Record<string, string> = {
-  price_not_found: "이미지 단가표에 없는 조합이라 넘기지 않았습니다",
+  quota_not_configured: "이 종류의 월 사용량 예산(우리 키)이 서버에 없어 넘기지 않았습니다",
   model_not_configured: "이미지 모델이 설정되지 않아 넘기지 않았습니다",
-  price_table_error: "단가표를 읽을 수 없어 넘기지 않았습니다",
   unknown_scene_template: "장면 템플릿을 찾을 수 없습니다",
   caption_too_long: "캡션이 너무 길어 초안을 만들 수 없습니다",
   forbidden_phrase: "참여를 조건으로 거는 말이 있어 초안을 만들 수 없습니다",

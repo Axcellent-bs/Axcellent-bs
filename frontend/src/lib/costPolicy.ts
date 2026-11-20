@@ -1,10 +1,11 @@
-// 비용·안전 정책 창(dashboard-api `/api/dashboard/cost-policy*`, 안전 서버가 값·승인·적용을 맡는다). 순수 계산이라 `npm test`가 그대로 돈다.
+// 사용량·안전 정책 창(dashboard-api `/api/dashboard/cost-policy*`, 안전 서버가 값·승인·적용을 맡는다). 순수 계산이라 `npm test`가 그대로 돈다.
 // - 값은 서버가 준 것만 보여 준다. 화면 검사는 안내용이고 서버가 다시 한다(하한~절대 상한, 현재 값과 같으면 거절).
 // - 변경 요청은 사람 승인(요청자와 다른 사람)이 필요하고, 승인 뒤 '적용'을 눌러야 파일에 반영된다. 안전 서버는 재시작 없이 다시 읽는다.
 // - 이 창의 응답은 `{status, outcome, output}`으로 싸지 않은 일반 data다.
 
-export type PolicyScope = "video_item" | "image_item" | "audio_item" | "daily_all_media" | "video_duration";
-export const POLICY_SCOPES: PolicyScope[] = ["video_item", "image_item", "audio_item", "daily_all_media", "video_duration"];
+// 원화 비용 규칙(건당·하루 합계)은 없앴다. 고칠 수 있는 안전 정책은 영상 길이 하나다
+export type PolicyScope = "video_duration";
+export const POLICY_SCOPES: PolicyScope[] = ["video_duration"];
 
 export interface PolicyRule {
   key: string; label: string; scope: PolicyScope; unit: "krw" | "s"; op: string;
@@ -41,7 +42,7 @@ export function readCostPolicy(data: unknown): CostPolicyState | null {
     const r = rec(x);
     if (!r || typeof r.key !== "string" || !isNum(r.value) || !isNum(r.default) || !isNum(r.min) || !isNum(r.absolute_max)) return [];
     return [{
-      key: r.key, label: str(r.label, r.key), scope: POLICY_SCOPES.includes(r.scope as PolicyScope) ? (r.scope as PolicyScope) : "video_item",
+      key: r.key, label: str(r.label, r.key), scope: POLICY_SCOPES.includes(r.scope as PolicyScope) ? (r.scope as PolicyScope) : "video_duration",
       unit: r.unit === "s" ? "s" : "krw", op: str(r.op), default: r.default, value: r.value, min: r.min, absolute_max: r.absolute_max,
       source: r.source === "file" ? "file" : "default", updated_by: strOrNull(r.updated_by), updated_at: strOrNull(r.updated_at),
     }];

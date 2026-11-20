@@ -11,7 +11,7 @@ export interface VideoProviderRow {
   resolutions: string[];
   min_duration_s: number;
   max_duration_s: number;
-  /** 단가표에 영상 단가가 있는 모델. 비어 있으면 가격 미확인(호출 막힘) */
+  /** 서버 모델 표(길이·해상도 능력표)에 있는 영상 모델. 비어 있으면 아직 지원 모델이 없다. 원화 단가는 보지 않는다 */
   models: string[];
   priced: boolean;
   selectable: boolean;
@@ -39,7 +39,7 @@ const FAIL_KO: Record<string, string> = {
   invalid_input: "입력이 맞지 않습니다",
   unknown_provider: "목록에 없는 공급자입니다",
   provider_disabled: "꺼져 있는 공급자는 고를 수 없습니다. 사람 승인으로 켠 뒤 고르세요",
-  model_not_priced: "단가가 확인된 모델만 고를 수 있습니다",
+  model_not_priced: "서버 모델 표에 있는 모델만 고를 수 있습니다",
   not_found: "이미 없는 공급자입니다",
   too_many_custom_providers: "커스텀 공급자는 20개까지입니다",
   video_store_error: "서버가 설정을 저장하지 못했습니다",
@@ -66,16 +66,16 @@ export function videoProviderHttpErrorKo(status: number | undefined, code?: stri
   if (status === 401 || status === 403) return "바꿀 권한이 없습니다. 사람 토큰 설정을 확인해 주세요.";
   if (status === 404) return "서버가 아직 이 기능을 지원하지 않습니다.";
   if (status === 400 || status === 422) return code === "INVALID_SPEC" ? "스펙이 규칙에 맞지 않습니다." : "입력을 서버가 받아들이지 않았습니다.";
-  if (status === 409) return "지금 상태에서는 할 수 없습니다(꺼진 공급자이거나 단가가 없는 모델).";
+  if (status === 409) return "지금 상태에서는 할 수 없습니다(꺼진 공급자이거나 모델 표에 없는 모델).";
   return "영상 공급자 서버에 닿지 못했습니다. 잠시 뒤 다시 시도해 주세요.";
 }
 
-/** 드롭다운 항목 한 줄. 막힌 사유를 같이 적는다(고를 수 없음·단가 미확인·키 없음) */
+/** 드롭다운 항목 한 줄. 막힌 사유를 같이 적는다(고를 수 없음·지원 모델 없음·키 없음) */
 export function providerOptionLabel(row: VideoProviderRow): string {
   const notes: string[] = [];
   if (row.kind === "custom") notes.push("직접 추가");
   if (!row.selectable) notes.push("꺼짐");
-  if (row.id !== "mock" && !row.priced) notes.push("단가 미확인");
+  if (row.id !== "mock" && !row.priced) notes.push("지원 모델 없음");
   if (row.key_env && !row.key_configured) notes.push("키 없음");
   return notes.length ? `${row.label} (${notes.join(", ")})` : row.label;
 }
@@ -85,8 +85,8 @@ export function selectionProblem(row: VideoProviderRow | undefined, model: strin
   if (!row) return "목록에 없는 공급자입니다.";
   if (!row.selectable) return "꺼져 있는 공급자입니다.";
   if (row.id === "mock") return null;
-  if (row.kind === "builtin" && !row.priced) return "단가가 확인되지 않아 영상 생성이 비용 상한에서 막힙니다.";
-  if (row.kind === "builtin" && !row.models.includes(model)) return "단가가 확인된 모델을 고르세요.";
+  if (row.kind === "builtin" && !row.priced) return "서버 모델 표에 지원하는 모델이 없어 영상을 만들 수 없습니다.";
+  if (row.kind === "builtin" && !row.models.includes(model)) return "서버 모델 표에 있는 모델을 고르세요.";
   if (row.key_env && !row.key_configured) return `키 환경변수 ${row.key_env}가 서버에 없어 호출이 실패합니다.`;
   return null;
 }
