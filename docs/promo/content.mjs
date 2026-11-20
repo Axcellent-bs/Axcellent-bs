@@ -22,8 +22,9 @@ export default {
     // 브로셔 PDF 받기(맨 위 메뉴·첫 화면·마지막 안내 버튼과 콘텐츠 칸의 받기 카드가 이 주소를 쓴다)
     brochureUrl: "assets/axcellent-brochure.pdf",
     brochureLabel: "브로셔 PDF 받기",
-    // 상담 문의. 예: Instagram DM 주소 또는 mailto 주소. 연락 수단이 정해지면 채운다
-    contactUrl: "mailto:dejasix66@gmail.com",
+    // 상담 문의 버튼(노란 버튼). 비워 두면 맨 위 메뉴·첫 화면·마지막 안내의 버튼이 모두 안 보이고, 아래 contactNote 글만 마지막 안내에 남는다.
+    // 버튼을 다시 보이려면 mailto 주소(예: "mailto:dejasix66@gmail.com") 또는 Instagram DM 주소를 채운다
+    contactUrl: "",
     contactLabel: "상담 문의",
     // 문의 안내 문장(링크 없이 글로만 보일 때). 비우면 안 보인다
     contactNote: "도입 상담은 이메일로 받습니다: dejasix66@gmail.com",
