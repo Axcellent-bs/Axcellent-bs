@@ -434,11 +434,15 @@ class IgRead:
     stopped: str | None = None
 
 
+AccountProgress = Callable[[int, int], Awaitable[None] | None]
+
+
 async def read_accounts(accounts: Sequence[str], graph: Any, store: Any,
-                        env: Mapping[str, str], now: datetime) -> IgRead:  # fmt: skip
+                        env: Mapping[str, str], now: datetime,
+                        on_account: AccountProgress | None = None) -> IgRead:  # fmt: skip
     """계정마다 최근 20개. 그날 저장분(보고서 저장소 → 오늘 레이더)을 먼저 쓴다.
 
-    한도면 그 자리에서 멈춘다.
+    한도면 그 자리에서 멈춘다. `on_account(읽은 수, 전체)`는 계정 하나를 볼 때마다 부른다.
     """
     from data_agent.connectors import ConnectorUnavailable
     from data_agent.connectors.instagram_graph import NO_KEY
@@ -450,32 +454,47 @@ async def read_accounts(accounts: Sequence[str], graph: Any, store: Any,
     radar_today = radar if radar_day == day else {}
     if graph is None or not getattr(graph, "configured", False):
         out.stopped = f"인스타 토큰·계정 id 없음 ({NO_KEY})"
-    for account in accounts:
-        if account in cached:
-            out.media[account], out.reused = cached[account], out.reused + 1
-            continue
-        if account in radar_today:
-            out.media[account], out.reused = radar_today[account], out.reused + 1
-            store.save_media(day, account, radar_today[account])
-            continue
-        if out.stopped:
-            out.failed[account] = out.stopped
-            continue
-        before = getattr(graph, "calls_today", None)
+    for n, account in enumerate(accounts, start=1):
         try:
-            items = await graph.business_media(account, MEDIA_PER_ACCOUNT)
-        except ConnectorUnavailable as error:
-            out.calls += _calls_diff(graph, before)  # 하루 상한으로 막힌 것은 0
-            if error.code in STOP_CODES:
-                out.stopped = IG_CAPPED if error.code == "RATE_LIMITED" else str(error)
-                out.failed[account] = out.stopped
-                continue
-            out.failed[account] = str(error)
-            continue
-        out.calls += _calls_diff(graph, before)
-        store.save_media(day, account, items)
-        out.media[account] = items
+            await _read_one(account, graph, store, day, cached, radar_today, out,
+                            ConnectorUnavailable)  # fmt: skip
+        finally:
+            if on_account is not None:
+                got = on_account(n, len(accounts))
+                if got is not None:
+                    await got
     return out
+
+
+async def _read_one(account: str, graph: Any, store: Any, day: date,
+                    cached: Mapping[str, Any], radar_today: Mapping[str, Any], out: IgRead,
+                    unavailable: type[Exception]) -> None:  # fmt: skip
+    """계정 하나: 그날 보고서 저장분 → 오늘 레이더 → business_discovery. 멈췄으면 못 읽음."""
+    if account in cached:
+        out.media[account], out.reused = cached[account], out.reused + 1
+        return
+    if account in radar_today:
+        out.media[account], out.reused = radar_today[account], out.reused + 1
+        store.save_media(day, account, radar_today[account])
+        return
+    if out.stopped:
+        out.failed[account] = out.stopped
+        return
+    before = getattr(graph, "calls_today", None)
+    try:
+        items = await graph.business_media(account, MEDIA_PER_ACCOUNT)
+    except unavailable as error:
+        out.calls += _calls_diff(graph, before)  # 하루 상한으로 막힌 것은 0
+        code = getattr(error, "code", None)
+        if code in STOP_CODES:
+            out.stopped = IG_CAPPED if code == "RATE_LIMITED" else str(error)
+            out.failed[account] = out.stopped
+            return
+        out.failed[account] = str(error)
+        return
+    out.calls += _calls_diff(graph, before)
+    store.save_media(day, account, items)
+    out.media[account] = items
 
 
 def _burst_config() -> Any:
@@ -991,7 +1010,8 @@ async def _guard(report: TrendReport, name: str, run: Callable[[], Awaitable[Non
 
 async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
                 now: datetime | None = None, progress: Progress | None = None,
-                context_id: str | None = None) -> TrendReport:  # fmt: skip
+                context_id: str | None = None,
+                account_progress: AccountProgress | None = None) -> TrendReport:  # fmt: skip
     """대기 중 보고서(`report`)를 채운다. 섹션이 끝날 때마다 `progress`로 저장한다."""
     now = now or datetime.now(UTC)
 
@@ -1008,7 +1028,8 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
     report.calls.llm += resolved.llm_calls
     limits = [*FIXED_LIMITS, *resolved.limits]
     await save()
-    ig = await read_accounts(resolved.accounts, deps.graph, store, deps.env, now)
+    ig = await read_accounts(resolved.accounts, deps.graph, store, deps.env, now,
+                             on_account=account_progress)  # fmt: skip
     report.calls.instagram += ig.calls
     if ig.reused:
         limits.append(f"인스타 {ig.reused}곳은 오늘 이미 읽은 값을 다시 씀")

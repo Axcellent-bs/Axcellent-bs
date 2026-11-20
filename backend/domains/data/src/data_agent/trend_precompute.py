@@ -23,6 +23,8 @@ from data_agent.stage_timing import recording
 
 # 판정(trend_scan·trend_candidates)을 먼저: 판정판에 오늘 판정을 남겨야
 # 지금 인기의 배지·키가 화면과 같다
+# 검색 트렌드(keyword_trend)는 trend_candidates 바로 뒤(v3): 그 저장분을 급상승 후보로 쓰고,
+# 데이터랩 몫이 다른 skill에 먼저 쓰이기 전에 하루 1번 판정한다(최대 6번, 브리프와 같은 우선 몫)
 # 브리프는 마지막: 하루 캐시라 그날 처음 한 번만 만들고(26~38초, LLM·쇼핑인사이트),
 # 그 뒤엔 저장분을 읽는다
 # 영상 탐색(video_explorer)은 숏츠 통계 뒤(숏츠 표본·분류 저장분을 쓴다), 첫 번째에만 계산한다
@@ -30,8 +32,8 @@ from data_agent.stage_timing import recording
 # 요즘 유행·밈(trend_memes)은 숏츠 통계 뒤(숏츠 표본·분류 저장분을 쓴다), 화면 토글 두 가지
 # (이번 주·오늘)를 다 넣는다
 SKILLS = (
-    "trend_scan", "trend_candidates", "trend_popular", "youtube_velocity", "shorts_stats",
-    "video_explorer", "trend_memes", "keyword_trend", "instagram_audio", "instagram_radar",
+    "trend_scan", "trend_candidates", "keyword_trend", "trend_popular", "youtube_velocity",
+    "shorts_stats", "video_explorer", "trend_memes", "instagram_audio", "instagram_radar",
     "trend_insight_brief",
 )  # fmt: skip
 ONCE = frozenset({"video_explorer"})

@@ -57,7 +57,9 @@ DEFAULT_BANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("50대 이상", ("9", "10", "11")),
 )
 NAVER_AGES = {str(n) for n in range(1, 12)}
-PRIORITY_CALLERS = frozenset({"trend_insight_brief"})  # 브리프·기회 카드는 상한 전부를 쓴다
+# 브리프·기회 카드는 상한 전부를 쓴다. 급상승 검색어(keyword_trend, v3)도 같은 몫: 판정은 하루 1번,
+# 키워드 30개를 5개씩 묶어 최대 6번이라 브리프 몫(priority_reserve 120)을 거의 쓰지 않는다
+PRIORITY_CALLERS = frozenset({"trend_insight_brief", "keyword_trend"})
 
 
 @dataclass(frozen=True)
