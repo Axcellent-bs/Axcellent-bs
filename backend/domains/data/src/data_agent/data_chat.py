@@ -6,7 +6,10 @@
   코드가 질문 낱말로 묶음을 고른다 (최대 3개, `pick_bundles`):
   감지(영상 탐색·지금 인기 저장분) · 인사이트(마지막 저장 브리프) ·
   성과(저장된 영상 성과·보내기 상태) ·
-  수집 상태(YouTube·LLM 장부, 수집기 마지막 실행, 새 숏츠 추적 수).
+  수집 상태(YouTube·LLM 장부, 수집기 마지막 실행, 새 숏츠 추적 수, 네이버 하루 몫: 커넥터 카운터·
+  trend_age 호출 표, 못 읽은 칸은 "데이터 출처 화면에서 확인") ·
+  인스타(레이더 커서·바퀴·출처별 마지막 기록·레이더 판정 저장분, 토큰 값은 안 넣음) ·
+  분석 의뢰(보고서 최근 5개·기획 전달). 감지에는 급상승 검색어(keyword_trend day 저장분)도.
   못 고르면 "답할 수 있는 것" 안내.
   저장 결과가 없으면 LLM 없이 "아직 계산된 결과가 없어요. ○○ 화면에서 확인해 주세요".
   고객 ID·개인정보가 든 결과(impact_analysis·fraud_score 등)는 묶음에 없다.
@@ -67,14 +70,23 @@ BUNDLES: dict[str, tuple[str, str]] = {
     "insight": ("인사이트", "인사이트"),
     "performance": ("성과", "영상 성과"),
     "collect": ("수집 상태", "출처 현황"),
+    "instagram": ("인스타", "인스타 레이더"),
+    "report": ("분석 의뢰", "분석 의뢰"),
 }
 _WORDS: dict[str, tuple[str, ...]] = {
     "detect": ("인기", "뜨는", "급상승", "트렌드", "영상 탐색", "조회수 높은", "카테고리", "숏츠",
-               "키워드"),
+               "키워드", "검색어", "검색량"),
     "insight": ("인사이트", "브리프", "기회", "넘길", "광고 재료", "추천 주제"),
     "performance": ("성과", "시험 영상", "v5", "캠페인", "측정", "매출", "보냈", "보내기"),
-    "collect": ("수집", "할당량", "유닛", "장부", "llm", "토큰", "추적", "초기화", "쿼터"),
+    "collect": ("수집", "할당량", "유닛", "장부", "llm", "토큰", "추적", "초기화", "쿼터",
+                "네이버", "데이터랩", "검색광고", "한도"),
+    # 맨 "토큰"은 LLM 토큰(수집 상태)과 겹쳐 인스타는 만료·액세스 토큰만 ("인스타 토큰"은 "인스타")
+    "instagram": ("인스타", "인스타그램", "레이더", "릴스", "해시태그", "오디오", "경쟁사 계정",
+                  "토큰 만료", "액세스 토큰"),
+    # 질문형만 온다: 의뢰 문장은 is_trend_request(의뢰 카드)가 먼저 가져간다
+    "report": ("분석 의뢰", "보고서", "tr-", "의뢰"),
 }  # fmt: skip
+MATERIAL_ROWS = 5  # 새 묶음(인스타·분석 의뢰·네이버·급상승)의 목록 줄 상한 (재료 4,000자 안)
 _NOT_DETECT = re.compile(r"새\s*숏츠|숏츠\s*추적")  # "새 숏츠 추적"은 수집 상태
 
 LLM_FAILED = "LLM 응답을 받지 못했어요. 잠시 뒤 다시 보내 주세요."
@@ -86,7 +98,8 @@ NO_CHAT_ACTIONS = (
 GUIDE = (
     "저는 저장된 데이터 결과를 읽고 설명해요. 이렇게 물어봐 주세요: 지금 인기·영상 탐색(감지), "
     "브리프 주제·기회 카드(인사이트), 영상 성과·캠페인 결과·다음 측정(성과), "
-    "YouTube·LLM 사용량·수집기·새 숏츠 추적(수집 상태)."
+    "YouTube·LLM 사용량·수집기·새 숏츠 추적(수집 상태), "
+    "인스타 레이더 수집·오디오(인스타), 분석 의뢰 보고서 진행(분석 의뢰)."
 )
 # 상태를 바꾸라는 명령형. 질문("보냈어?", "꺼져 있어?")은 잡지 않는다
 _ACTION = re.compile(
@@ -331,7 +344,8 @@ def read_detect(env: Mapping[str, str], now: datetime) -> dict | None:
 
     explorer = _cached(env, "video_explorer", default_view)
     popular = _cached(env, "trend_popular", lambda o: True)
-    if explorer is None and popular is None:
+    keywords = _cached(env, "keyword_trend", lambda o: o.get("window", "day") == "day")
+    if explorer is None and popular is None and keywords is None:
         return None
     facts: dict[str, Any] = {}
     times = []
@@ -366,8 +380,13 @@ def read_detect(env: Mapping[str, str], now: datetime) -> dict | None:
             ]
             for group in popular.get("by_category", [])
         }
+    if keywords is not None:
+        facts["급상승 검색어"] = keyword_facts(keywords)
+        times.append(keywords.get("generated_at"))
     at = max((t for t in times if t), default=None)
-    name = "영상 탐색·지금 인기"
+    # 예전 이름 그대로 (급상승 검색어가 있으면 뒤에 덧붙인다)
+    name = "·".join(n for n, got in (("영상 탐색·지금 인기", explorer or popular),
+                                     ("급상승 검색어", keywords)) if got)  # fmt: skip
     return {"name": name, "basis": f"{name} · {kst(at) or '시각 모름'}", "facts": facts}
 
 
@@ -506,7 +525,171 @@ def read_collect(env: Mapping[str, str], now: datetime) -> dict | None:
         "수집기 마지막 실행": kst(last[0][0]) if last and last[0][0] else "기록 없음",
         "새 숏츠 추적 중": tracked[0][0] if tracked else 0,
     }
+    facts.update(naver_usage(env, now))
     return {"name": "수집 장부", "basis": f"수집 장부 · {kst(now)}", "facts": facts}
+
+
+NAVER_SCREEN = "데이터 출처 화면에서 확인"
+
+
+def _counted(cache: Any) -> int | None:
+    """커넥터 `calls_today`와 같은 값: 같은 data 프로세스의 하루 카운터 (네이버를 부르지 않는다)."""
+    try:
+        cache.get("")  # 날짜가 바뀌었으면 비운다 (calls_today와 같은 순서)
+        calls = cache.calls
+    except Exception:  # noqa: BLE001 - 못 읽으면 칸을 비운다
+        return None
+    return calls if isinstance(calls, int) else None
+
+
+def naver_usage(env: Mapping[str, str], now: datetime) -> dict[str, Any]:
+    """네이버 하루 몫 (오늘 사용/한도). 커넥터 카운터·trend_age 호출 표만 읽는다. 새로 세지 않는다.
+
+    출처를 못 읽은 칸은 넣지 않고 "데이터 출처 화면에서 확인"을 적는다."""
+    from data_agent.connectors import naver_datalab, naver_searchad, naver_shopping
+    from data_agent.skills import trend_age
+
+    out: dict[str, Any] = {}
+    missing: list[str] = []
+    rows = (
+        ("데이터랩", naver_datalab._cache, naver_datalab._limit(env)),
+        ("검색광고", naver_searchad._cache,
+         naver_searchad.limit_of(env, naver_searchad.DAILY_LIMIT_ENV,
+                                 naver_searchad.DEFAULT_DAILY_LIMIT)),
+        ("쇼핑인사이트", naver_shopping._cache, naver_shopping._limit(env)),
+    )  # fmt: skip
+    for label, cache, limit in rows:
+        used = _counted(cache)
+        if used is None:
+            missing.append(label)
+            continue
+        out[f"네이버 {label} 오늘 사용"] = f"{used:,}/{limit:,}번"
+    day = now.astimezone(KST).date().isoformat()
+    age_db = env.get(trend_age.DB_ENV) or trend_age.DEFAULT_DB
+    shared = _rows(age_db, "SELECT calls FROM calls WHERE day = ?", (day,))
+    if Path(age_db).is_file():
+        cap = trend_age.load_config(env).daily_calls
+        used = shared[0][0] if shared else 0
+        out["데이터랩 중 연령대·급상승 공유 몫"] = f"{used:,}/{cap:,}번"
+    else:
+        missing.append("데이터랩 공유 몫")
+    if out:
+        out["네이버 다음 초기화"] = "한국 0시"
+    if missing:
+        out["네이버 확인 못 한 칸"] = f"{'·'.join(missing)}: {NAVER_SCREEN}"
+    return out
+
+
+def keyword_facts(o: Mapping[str, Any]) -> dict[str, Any]:
+    """급상승 검색어 저장 결과(keyword_trend day) → 판정일·직전 판정 이유·후보 수·rising 상위 5."""
+    rising = [r for r in o.get("rising", []) if r.get("level") == "rising"]
+    return {
+        "판정 기준 시각": kst(o.get("generated_at")),
+        "직전 판정을 다시 쓴 날": o.get("judged_on"),
+        "직전 판정 이유": (o.get("stale_reason") or "")[:120] or None,
+        "후보 출처별 개수": o.get("candidate_counts") or {},
+        "급상승": [{"키워드": r.get("keyword"), "배수": r.get("ratio"),
+                   "왜": (r.get("why_line") or "")[:60] or None}
+                  for r in rising[:MATERIAL_ROWS]],  # fmt: skip
+        "오르는 중 수": sum(1 for r in o.get("rising", []) if r.get("level") == "warming"),
+    }
+
+
+def read_instagram(env: Mapping[str, str], now: datetime) -> dict | None:
+    """인스타 레이더 수집 상태: 커서·바퀴·출처별 마지막 기록·레이더 판정 저장분.
+
+    토큰 값·계정 비밀은 읽지 않는다(설정값은 계정 수·묶음 크기·간격만)."""
+    from data_agent import instagram_store as st
+    from data_agent.skills import instagram
+
+    radar = st.path_of(env, st.RADAR_ENV)
+    cursor = _rows(radar, "SELECT cycle_day, position, last_batch_at FROM radar_cursor")
+    cycle = _rows(radar, "SELECT day, completed_at, accounts FROM radar_cycles"
+                  " ORDER BY day DESC LIMIT 1")  # fmt: skip
+    runs = st.runs(st.path_of(env, st.AUDIO_ENV))
+    judged = _cached(env, "instagram_radar", lambda o: True)
+    if not (cursor or cycle or runs or judged):
+        return None
+    config = instagram.load_config(env)
+    total = len(config.radar_accounts)
+    facts: dict[str, Any] = {
+        "레이더 계정 수(설정)": total,
+        "묶음 크기(설정)": f"{config.radar_batch_size}곳",
+        "묶음 간격(설정)": f"{config.radar_batch_interval_min}분",
+    }
+    if cursor:
+        day, pos, last = cursor[0]
+        facts["이번 바퀴 진행"] = f"{pos}/{total}곳"
+        facts["바퀴 시작일"] = day
+        facts["마지막 묶음 시각"] = kst(last) if last else "기록 없음"
+    if cycle:
+        facts["마지막 완료 바퀴"] = f"{cycle[0][0]} ({kst(cycle[0][1])}, {cycle[0][2]}곳)"
+    else:
+        facts["마지막 완료 바퀴"] = "아직 없음"
+    names = {"ig_business_discovery": "레이더 계정 읽기", "ig_audio": "인기 오디오",
+             "ig_hashtag_search": "해시태그"}  # fmt: skip
+    for source, label in names.items():
+        if source in runs:
+            run_day, status, reason = runs[source]
+            facts[f"{label} 마지막 기록"] = {"날짜": run_day, "상태": status,
+                                          "이유": (reason or "")[:200] or None}  # fmt: skip
+    if judged is not None:
+        facts["레이더 판정"] = {"날짜": judged.get("day"), "상태": judged.get("status"),
+                              "읽은 계정": judged.get("accounts_read"),
+                              "터진 게시물": judged.get("bursts"),
+                              "계산 시각": kst(judged.get("generated_at"))}  # fmt: skip
+    facts["토큰 만료까지"] = "모름 (저장된 만료일 없음)"
+    times = [last for *_, last in cursor if last] + [judged.get("generated_at") if judged else None]
+    at = max((t for t in times if t), default=None)
+    name = "인스타 레이더"
+    return {"name": name, "basis": f"{name} · {kst(at) or kst(now)}", "facts": facts}
+
+
+def _percent(sections: Mapping[str, Any]) -> int:
+    """화면·진행 알림과 같은 규칙 (`trend_report_hooks.section_percent`): 끝난 섹션 비율."""
+    from data_agent.trend_report_hooks import SECTION_NAMES
+
+    done = sum(1 for n in SECTION_NAMES
+               if (sections.get(n) or {}).get("status") not in ("waiting", "running"))  # fmt: skip
+    return round(done * 100 / len(SECTION_NAMES))
+
+
+def read_report(env: Mapping[str, str], now: datetime) -> dict | None:
+    """분석 의뢰 보고서 최근 5개 (번호·제품·상태·진행·시각·결론 한 줄·기획 전달)."""
+    from data_agent import trend_report_store
+    from data_agent.trend_report_hooks import report_label
+
+    path = env.get(trend_report_store.DB_ENV)
+    rows = _rows(path, "SELECT result, handoff FROM reports ORDER BY created_at DESC LIMIT ?",
+                 (MATERIAL_ROWS,))  # fmt: skip
+    if not rows:
+        return None
+    items = []
+    for raw, raw_handoff in rows:
+        try:
+            r = json.loads(raw)
+            handoff = json.loads(raw_handoff) if raw_handoff else None
+        except ValueError:
+            continue
+        item = {
+            "번호": report_label(str(r.get("report_id", ""))),
+            "제품": (r.get("brief") or {}).get("product"),
+            "상태": r.get("status"),
+            "진행": f"{_percent(r.get('sections') or {})}%",
+            "만든 시각": kst(r.get("created_at")),
+            "끝난 시각": kst(r.get("finished_at")),
+            "결론 한 줄": (r.get("summary_line") or "")[:120] or None,
+        }
+        if handoff:
+            item["기획 전달"] = {"결과": handoff.get("outcome"),
+                              "제안 id": handoff.get("proposal_id")}  # fmt: skip
+        items.append(item)
+    if not items:
+        return None
+    name = "분석 의뢰 보고서"
+    latest = items[0]["만든 시각"]
+    basis = f"{name} · {latest or kst(now)}"
+    return {"name": name, "basis": basis, "facts": {"최근 보고서": items}}
 
 
 READERS: dict[str, Callable[[Mapping[str, str], datetime], dict | None]] = {
@@ -514,6 +697,8 @@ READERS: dict[str, Callable[[Mapping[str, str], datetime], dict | None]] = {
     "insight": read_insight,
     "performance": read_performance,
     "collect": read_collect,
+    "instagram": read_instagram,
+    "report": read_report,
 }
 
 
