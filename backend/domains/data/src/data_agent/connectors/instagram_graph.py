@@ -179,6 +179,21 @@ class InstagramGraph:
 
     # ------------------------------------------------------------ 비즈니스 검색
 
+    async def business_profile(self, username: str) -> dict[str, Any]:
+        """프로페셔널 계정 하나의 공개 정보 (이름·팔로워 수·게시물 수). 호출 1번.
+
+        개인 계정·없는 계정은 business_discovery가 오류를 준다(IgError). 응답이 오면 프로페셔널
+        계정이다."""
+        info = "username,name,followers_count,media_count"
+        fields = f"business_discovery.username({username}){{{info}}}"
+        payload = await self._get(self.user_id, {"fields": fields})
+        bd = payload.get("business_discovery") if isinstance(payload, dict) else None
+        if not isinstance(bd, dict) or not bd.get("username"):
+            raise IgError("NO_DATA", "계정 정보를 주지 않음")
+        return {"username": str(bd["username"]), "name": bd.get("name"),
+                "followers_count": bd.get("followers_count"),
+                "media_count": bd.get("media_count")}  # fmt: skip
+
     async def business_media(self, username: str, limit: int = 20) -> list[dict[str, Any]]:
         """프로페셔널 계정 하나의 최근 미디어 (limit개). 개인 계정·나이 제한 계정은 오류."""
         n = max(1, min(50, limit))

@@ -255,9 +255,12 @@ class TrendReportService:
 
             try:
                 deps = self._deps()
+                async def note(text: str) -> None:  # 예: "회사 경쟁사 찾는 중"
+                    await self.hooks.progress(report_id, percent=0, note=text)
+
                 await tr.build(report, request, deps, self.store, now=self._clock(),
                                progress=saved, context_id=ctx,
-                               account_progress=accounts)  # fmt: skip
+                               account_progress=accounts, note=note)  # fmt: skip
             except Exception as error:  # noqa: BLE001 - 보고서 전체 실패도 기록하고 알린다
                 log.warning("trend_report %s 실패 (%s)", report_id, type(error).__name__)
                 report.status = "failed"
