@@ -1,12 +1,8 @@
-import { useState } from "react";
-import type { CharacterSheetResult } from "@/lib/characterSheet";
-import { MAX_STORY, SHOT_COUNTS, STYLES, makeStoryboard, type ShotCount, type StoryboardResult, type StoryboardShot } from "@/lib/storyboard";
-import { CopyButton, PromptBox } from "./CharacterSheetMaker";
+import type { StoryboardResult, StoryboardShot } from "@/lib/storyboard";
+import { CopyButton, PromptBox } from "./PromptParts";
 
-// 마케팅 › SNS·미디어 › 스토리보드.
-// 줄거리를 적으면 마케팅 AI가 장면을 나누고, 칸마다 샷 크기·카메라 앵글·화면 배치(구도)를 정한
-// 스토리보드와 칸별·시트 한 장짜리 이미지 프롬프트를 만든다. 위 이미지 시트를 만들었으면 그 캐릭터
-// 고정 문장(consistency_en)을 같이 보내 모든 칸이 같은 캐릭터가 되게 한다. 이미지는 만들지 않는다.
+// 마케팅 › SNS·미디어 › 스토리보드 결과 보기 (CharacterSheetMaker가 만든 결과를 그린다).
+// 칸마다 번호·샷 크기·카메라 앵글·장면·화면 배치와 구도 그림을 보여 주고, 칸별·시트 한 장 프롬프트를 복사하게 한다.
 
 const HORIZON: Record<string, number> = { eye_level: 52, low: 72, high: 26, ground: 82, dutch: 52, birds_eye: -10 };
 
@@ -97,7 +93,7 @@ function ShotCard({ shot }: { shot: StoryboardShot }) {
   );
 }
 
-function Result({ r }: { r: StoryboardResult }) {
+export function StoryboardView({ r }: { r: StoryboardResult }) {
   return (
     <div className="space-y-5">
       <div>
@@ -110,68 +106,5 @@ function Result({ r }: { r: StoryboardResult }) {
       <PromptBox title={`스토리보드 시트 한 장 프롬프트 (${r.shots.length}칸 · ${r.columns}열)`} text={r.sheet_prompt_en} />
       <PromptBox title="네거티브 프롬프트" text={r.negative_prompt_en} />
     </div>
-  );
-}
-
-export function StoryboardMaker({ sheet }: { sheet: CharacterSheetResult | null }) {
-  const [story, setStory] = useState("");
-  const [shots, setShots] = useState<ShotCount>(12);
-  const [style, setStyle] = useState(STYLES[0].value);
-  const [useSheet, setUseSheet] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<StoryboardResult | null>(null);
-
-  const make = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      setResult(await makeStoryboard({ story, shots, style_en: style, character_en: sheet && useSheet ? sheet.consistency_en : undefined }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "스토리보드를 만들지 못했어요");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <section className="card space-y-4 p-6" aria-labelledby="storyboard-title">
-      <div>
-        <h2 id="storyboard-title" className="text-lg font-semibold">스토리보드 만들기</h2>
-        <p className="mt-1 text-xs text-ink-500">줄거리를 적으면 장면을 나누고, 칸마다 화면을 얼마나 넓게 담을지(샷 크기)와 카메라를 어디서 볼지(앵글), 화면 안 배치를 정해요. 위에서 이미지 시트를 만들었으면 그 캐릭터 문장을 넣어 모든 칸이 같은 캐릭터가 돼요. 이미지는 만들지 않고 프롬프트만 만들어요.</p>
-      </div>
-      <label className="block">
-        <span className="mb-1 block text-xs font-medium text-ink-700">줄거리</span>
-        <textarea value={story} maxLength={MAX_STORY} rows={3} onChange={(e) => setStory(e.target.value)} placeholder="예: 가을 들판에서 자전거를 타던 소녀가 길가의 고양이를 만나 바구니에 태우고, 노을을 보며 주먹밥을 나눠 먹는다" className="field w-full text-sm" />
-        <span className="mt-1 block text-right text-xs tabular-nums text-ink-500">{story.length}/{MAX_STORY}</span>
-      </label>
-      <div className="flex flex-wrap items-end gap-4">
-        <fieldset>
-          <legend className="mb-1 text-xs font-medium text-ink-700">칸 수</legend>
-          <div className="flex gap-1">
-            {SHOT_COUNTS.map((n) => (
-              <button key={n} type="button" aria-pressed={shots === n} onClick={() => setShots(n)} className={shots === n ? "btn-primary text-xs" : "btn-ghost text-xs"}>{n}칸</button>
-            ))}
-          </div>
-        </fieldset>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-ink-700">그림체</span>
-          <select value={style} onChange={(e) => setStyle(e.target.value)} className="field text-sm">
-            {STYLES.map((s) => <option key={s.label} value={s.value}>{s.label}</option>)}
-          </select>
-        </label>
-        <label className={`flex items-center gap-2 text-sm ${sheet ? "text-ink-700" : "text-ink-500"}`}>
-          <input type="checkbox" checked={!!sheet && useSheet} disabled={!sheet} onChange={(e) => setUseSheet(e.target.checked)} />
-          {sheet ? "이미지 시트 캐릭터 넣기" : "이미지 시트를 먼저 만들면 캐릭터를 넣을 수 있어요"}
-        </label>
-        <button type="button" className="btn-primary ml-auto" disabled={!story.trim() || busy} onClick={() => void make()}>{busy ? "만드는 중…" : "스토리보드 만들기"}</button>
-      </div>
-      <div className="min-h-[8rem] border-t border-ink-100 pt-4" aria-live="polite">
-        {error ? <p className="text-sm text-accent" role="alert">{error}</p>
-          : busy ? <p className="text-sm text-ink-500">장면을 나누고 구도를 정하는 중이에요…</p>
-          : result ? <Result r={result} />
-          : <p className="text-sm text-ink-500">줄거리를 적고 만들기를 누르면 여기에 칸이 나와요.</p>}
-      </div>
-    </section>
   );
 }

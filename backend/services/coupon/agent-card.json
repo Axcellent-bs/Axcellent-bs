@@ -113,6 +113,18 @@
       "priority": "recommended"
     },
     {
+      "id": "higgsfield_status",
+      "description": "Higgsfield 키(MARKETING_HIGGSFIELD_API_KEY)가 설정돼 있는지, 있으면 Higgsfield에 없는 요청 번호의 상태 조회를 한 번 보내 키가 받아들여지는지(ok·invalid_key·unreachable·not_configured) 돌려준다. 이미지 모델 경로 설정값(MARKETING_HIGGSFIELD_IMAGE_MODEL)도 보여 준다. 키 값은 내지 않고, 이미지를 만들지 않고 크레딧을 쓰지 않는다. 결과는 20초 동안 기억한다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_higgsfield.py#HiggsfieldStatusInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_higgsfield.py#HiggsfieldStatusOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "receive_campaign_brief",
       "description": "기획이 확정한 기획안(CampaignBriefInput)을 받아 보관한다. 같은 proposal_id는 한 번만 받고 다시 오면 duplicate(보관본 그대로, 처음 campaign_id 반환). 받으면 accepted와 campaign_id(cmp_ + proposal_id, start_campaign도 같은 id를 쓴다), 받을 수 없으면 rejected와 reason_code(unsupported_schema_version·invalid_proposal_id·empty_title·empty_idea·empty_why). facts·target은 받은 그대로 보관하며 숫자를 계산하지 않는다. 캠페인은 시작하지 않는다. 저장소는 메모리라 다시 시작하면 사라진다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CampaignBriefInput",

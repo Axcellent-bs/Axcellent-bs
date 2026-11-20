@@ -82,3 +82,19 @@ def test_bad_body_stops_before_marketing(client: TestClient, fake: Fake, body: d
 def test_refusals_map_to_http(client: TestClient, fake: Fake, outcome: str, status: int) -> None:
     fake.status, fake.outcome, fake.output = TaskStatus.FAILED, outcome, {"message": "이유"}
     assert client.post(URL, json={"story": "들판"}).status_code == status
+
+
+HF_URL = "/api/dashboard/marketing/higgsfield/status"
+
+
+def test_higgsfield_status_is_a_read_skill_call(client: TestClient, fake: Fake) -> None:
+    fake.output = {"connection": "ok", "key_configured": True}
+    res = client.get(HF_URL)
+    assert res.status_code == 200 and res.json()["data"]["connection"] == "ok"
+    target, request = fake.calls[0]
+    assert (target, request.skill, request.input) == ("marketing", "higgsfield_status", {})
+
+
+def test_higgsfield_status_failure_is_502(client: TestClient, fake: Fake) -> None:
+    fake.status, fake.outcome, fake.output = TaskStatus.FAILED, "boom", {}
+    assert client.get(HF_URL).status_code == 502

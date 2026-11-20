@@ -46,6 +46,7 @@ from marketing_agent import (
     video_providers,
 )
 from marketing_agent import character_sheet as _character_sheet
+from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import storyboard as _storyboard
 from marketing_agent.brief_handoff import (
     AUTO,
@@ -593,6 +594,17 @@ async def channel_followers(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=_evidence(["channel_followers"], summary, []),
+    )
+
+
+async def higgsfield_status(request: AgentRequest) -> AgentResult:
+    """Higgsfield 키가 받아들여지는지 가볍게 확인한다(read). 키 값은 내지 않는다."""
+    out = await _higgsfield_status.status()
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["higgsfield_status"], f"Higgsfield 연결 {out.connection}", []),
     )
 
 
@@ -1497,6 +1509,7 @@ HANDLERS = {
     "channel_followers": channel_followers,
     "character_sheet_prompt": character_sheet_prompt,
     "storyboard_prompt": storyboard_prompt,
+    "higgsfield_status": higgsfield_status,
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,

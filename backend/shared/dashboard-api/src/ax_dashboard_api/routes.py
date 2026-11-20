@@ -1358,6 +1358,14 @@ async def marketing_character_sheet(body: CharacterSheetBody) -> dict:
     return ok(await marketing_client.character_sheet_call(body.image.model_dump(), note))
 
 
+@router.get("/marketing/higgsfield/status")
+async def marketing_higgsfield_status() -> dict:
+    """Higgsfield 연결 상태(마케팅 `higgsfield_status`, read). 키 값은 돌려주지 않는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "Higgsfield 연결 확인은 실제 모드에서만 된다")
+    return ok(await marketing_client.higgsfield_status_call())
+
+
 class StoryboardBody(BaseModel):
     story: str = Field(min_length=1, max_length=MAX_STORY)
     character_en: str | None = Field(default=None, max_length=MAX_CHARACTER_EN)
