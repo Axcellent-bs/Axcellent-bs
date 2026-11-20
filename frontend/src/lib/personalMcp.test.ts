@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  MCP_AGENTS, TOKEN_PLACEHOLDER, mcpSetup, mineStateView, readIssued, readMine, shareBody, shareUsageKo, toggleAgent,
+  MCP_AGENTS, MCP_GATEWAY_NAME, MCP_GATEWAY_PATH, MCP_NO_TOOL, TOKEN_PLACEHOLDER, mcpSetup, mineStateView, readIssued, readMine, shareBody, shareUsageKo, toggleAgent,
 } from "./personalMcp.ts";
 
 const RAW = {
@@ -81,4 +81,15 @@ test("연결 방법: 도구별 설정에 MCP 주소와 토큰 자리(axm_…)만
 test("AI 직원 고르기는 목록 순서를 지킨다", () => {
   assert.deepEqual(toggleAgent(["dev"], "planning"), ["planning", "dev"]);
   assert.deepEqual(toggleAgent(["planning", "dev"], "dev"), ["planning"]);
+});
+
+test("전 직원 창구: 서버 이름 axcellent, dashboard-api 주소, 같은 토큰 자리", () => {
+  const url = `http://localhost:8020${MCP_GATEWAY_PATH}`;
+  assert.equal(MCP_GATEWAY_PATH, "/api/dashboard/me/ai-connection/mcp");
+  const claude = mcpSetup("claude", url, MCP_GATEWAY_NAME);
+  assert.equal(claude[0].text, `claude mcp add --transport http axcellent ${url} --header "Authorization: Bearer ${TOKEN_PLACEHOLDER}"`);
+  assert.ok(mcpSetup("codex", url, MCP_GATEWAY_NAME).some((s) => s.text === `codex mcp add axcellent --url ${url} --bearer-token-env-var AXCELLENT_MCP_TOKEN`));
+  const json = JSON.parse(mcpSetup("cursor", url, MCP_GATEWAY_NAME).find((s) => s.text.startsWith("{"))!.text);
+  assert.deepEqual(Object.keys(json.mcpServers), ["axcellent"]);
+  assert.deepEqual([...MCP_NO_TOOL], ["hr", "archive"]);
 });

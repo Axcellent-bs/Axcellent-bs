@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Notice, SectionHead, StatusChip } from './parts'
 import { DEV_API } from '@/lib/planning'
+import { DASHBOARD_API_URL } from '@/lib/env'
 import { errText } from '@/lib/companyAiApi'
 import {
-  MCP_AGENTS, MCP_CLIENTS, mcpSetup, mineBlockReason, mineStateView, shareBody, shareUsageKo, toggleAgent,
+  MCP_AGENTS, MCP_CLIENTS, MCP_DEV_QUEUE_PATH, MCP_GATEWAY_NAME, MCP_GATEWAY_PATH, MCP_NO_TOOL, mcpSetup, mineBlockReason, mineStateView, shareBody, shareUsageKo, toggleAgent,
   type McpAgentId, type McpClient, type PersonalMcp,
 } from '@/lib/personalMcp'
 import { disconnectMcp, getMyMcp, issueMcpToken, reissueMcpToken, saveMyMcpSettings } from '@/lib/personalMcpApi'
@@ -12,11 +13,16 @@ import { disconnectMcp, getMyMcp, issueMcpToken, reissueMcpToken, saveMyMcpSetti
 // 내 AI 도구(Claude Code·Codex·Cursor)가 MCP로 AXcellent에 붙어 AI 직원에게 일을 시킨다. 모델·비용은 내 도구 몫이라
 // 키·모델·주소는 받지 않는다. 순서: ① 연결 토큰 ② 쓸 AI 직원 ③ 한도(회사 월 예산 중 내 몫 %) ④ 연결 방법 ⑤ 저장.
 // 값은 dashboard-api `/me/ai-connection`에서만 받는다. 토큰 원문은 발급 순간 한 번만 보이고 그 뒤로는 끝 4자리만.
-// MCP 주소는 예전 개발자 PC 연결 안내와 같은 개발 서비스 MCP 서버(`/api/planning/mcp`).
+// MCP 주소: 전 직원 창구(dashboard-api `/api/dashboard/me/ai-connection/mcp`, 서버 이름 axcellent, 고른 직원마다 ask_<직원>)와
+// 개발 작업 대기열(고급, 개발 서비스 `/api/planning/mcp`, 서버 이름 axcellent-dev). 같은 토큰으로 둘 다 붙는다.
 
-// 개발 서버 프록시 주소(/dev-api)처럼 앞이 빠진 주소면 지금 화면 주소를 앞에 붙인다 (명령에 그대로 붙여 넣을 수 있게)
-const MCP_URL = new URL(`${DEV_API.replace(/\/$/, '')}/api/planning/mcp`, window.location.href).href
-const ASK = 'axcellent-dev에서 작업 목록 보여 줘. 하나 가져가서 명세대로 구현하고 PR 올려 줘.'
+// 프록시 주소(/dashboard-api, /dev-api)처럼 앞이 빠진 주소면 지금 화면 주소를 앞에 붙인다 (명령에 그대로 붙여 넣을 수 있게)
+const abs = (base: string, path: string) => new URL(`${base.replace(/\/$/, '')}${path}`, window.location.href).href
+const GATEWAY_URL = abs(DASHBOARD_API_URL, MCP_GATEWAY_PATH)
+const DEV_QUEUE_URL = abs(DEV_API, MCP_DEV_QUEUE_PATH)
+const ASK = 'axcellent에서 데이터분석 AI에게 이번 주 매출 요약을 물어봐 줘.'
+const ASK_DEV = 'axcellent-dev에서 작업 목록 보여 줘. 하나 가져가서 명세대로 구현하고 PR 올려 줘.'
+const NO_TOOL = MCP_AGENTS.filter((a) => MCP_NO_TOOL.includes(a.id)).map((a) => a.name).join('·')
 
 function CopyBox({ text, dashed }: { text: string; dashed?: boolean }) {
   const [done, setDone] = useState(false)
@@ -136,7 +142,7 @@ function Form({ mine, onDone }: { mine: PersonalMcp; onDone: () => void }) {
             )
           })}
         </div>
-        <p className="text-xs text-ink-500">지금 MCP 서버가 여는 도구는 개발 AI 작업 대기열(작업 보기·가져가기·진행·PR 알리기)이에요. 다른 AI 직원 도구는 준비 중이에요.</p>
+        <p className="text-xs text-ink-500">고른 AI 직원마다 그 직원에게 말 거는 도구(<code className="mono">ask_직원</code>)가 생겨요. 화면 AI 대화방과 같은 대화이고, 승인이 필요한 일은 그대로 사람 승인에 올라가요. {NO_TOOL}는 아직 대화 창구가 없어 도구가 없어요.</p>
       </Step>
 
       <Step n={3} title="한도">
@@ -160,14 +166,27 @@ function Form({ mine, onDone }: { mine: PersonalMcp; onDone: () => void }) {
           ))}
         </div>
         <ol className="list-decimal space-y-3 pl-5 text-sm">
-          {mcpSetup(client, MCP_URL).map((s) => (
+          {mcpSetup(client, GATEWAY_URL, MCP_GATEWAY_NAME).map((s) => (
             <li key={s.label} className="space-y-1">
               <span className="flex flex-wrap items-center gap-2">{s.label}{s.note && <span className="chip bg-ink-100 text-ink-500">{s.note}</span>}</span>
               <CopyBox text={s.text} />
             </li>
           ))}
-          <li className="space-y-1"><span>레포 폴더에서 써 보기</span><CopyBox text={ASK} /></li>
+          <li className="space-y-1"><span>써 보기</span><CopyBox text={ASK} /></li>
         </ol>
+        <details className="space-y-3 rounded-lg border border-ink-100 px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium text-ink-700">개발 작업 대기열(고급)</summary>
+          <p className="text-xs text-ink-500">개발 AI가 만든 코딩 작업을 내 AI 도구가 직접 가져가 구현하고 PR을 알리는 서버예요(작업 보기·가져가기·진행·PR 알리기). 쓸 AI 직원에서 개발 AI를 골라야 붙어요. 같은 토큰을 써요.</p>
+          <ol className="list-decimal space-y-3 pl-5 text-sm">
+            {mcpSetup(client, DEV_QUEUE_URL).map((s) => (
+              <li key={s.label} className="space-y-1">
+                <span className="flex flex-wrap items-center gap-2">{s.label}{s.note && <span className="chip bg-ink-100 text-ink-500">{s.note}</span>}</span>
+                <CopyBox text={s.text} />
+              </li>
+            ))}
+            <li className="space-y-1"><span>레포 폴더에서 써 보기</span><CopyBox text={ASK_DEV} /></li>
+          </ol>
+        </details>
         <p className="text-xs text-ink-500">토큰은 내 PC 설정에만 넣어요. 토큰이 든 설정 파일(.mcp.json 등)을 레포에 커밋하지 않아요.</p>
       </Step>
 

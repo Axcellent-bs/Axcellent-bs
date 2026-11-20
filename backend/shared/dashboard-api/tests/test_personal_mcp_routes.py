@@ -155,7 +155,8 @@ def test_paths_fit_the_proxy_rule_and_name_no_account(client: TestClient, people
 
     paths = {p: ops for p, ops in app.openapi()["paths"].items() if p.startswith(ME)}
     assert sorted(paths) == [
-        ME, CHECK, f"{ME}/settings", f"{ME}/token", f"{ME}/token/delete", f"{ME}/token/reissue",
+        ME, f"{ME}/mcp", CHECK, f"{ME}/settings", f"{ME}/token", f"{ME}/token/delete",
+        f"{ME}/token/reissue",
     ]
     for p in paths:
         rest = p[len(ME):]

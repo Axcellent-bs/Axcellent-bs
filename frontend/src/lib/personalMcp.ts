@@ -123,7 +123,9 @@ export function shareBody(f: { share: string; agents: McpAgentId[] }): McpSettin
 export const toggleAgent = (cur: McpAgentId[], id: McpAgentId): McpAgentId[] =>
   cur.includes(id) ? cur.filter((x) => x !== id) : ordered([...cur, id]);
 
-// ---- 연결 방법 (도구별 복사용 설정). 서버 이름은 예전 개발자 PC 연결과 같은 axcellent-dev ----
+// ---- 연결 방법 (도구별 복사용 설정) ----
+// 전 직원 창구: dashboard-api `/api/dashboard/me/ai-connection/mcp`, 서버 이름 axcellent (고른 AI 직원마다 ask_<직원> 도구)
+// 개발 작업 대기열(고급): 개발 서비스 `/api/planning/mcp`, 서버 이름은 예전 개발자 PC 연결과 같은 axcellent-dev
 
 export type McpClient = "claude" | "codex" | "cursor";
 export const MCP_CLIENTS: { id: McpClient; label: string }[] = [
@@ -134,24 +136,31 @@ export const MCP_CLIENTS: { id: McpClient; label: string }[] = [
 /** 설정에 넣는 토큰 자리. 원문은 발급 상자에서 복사해 이 자리에 넣는다(설정 글에 원문을 싣지 않는다) */
 export const TOKEN_PLACEHOLDER = "axm_…";
 export const MCP_SERVER_NAME = "axcellent-dev";
+export const MCP_GATEWAY_NAME = "axcellent";
+export const MCP_GATEWAY_PATH = "/api/dashboard/me/ai-connection/mcp";
+export const MCP_DEV_QUEUE_PATH = "/api/planning/mcp";
 // Codex·Cursor는 토큰을 설정 파일이 아니라 환경변수에서 읽는다
 export const TOKEN_ENV = "AXCELLENT_MCP_TOKEN";
 
-export function mcpSetup(client: McpClient, url: string): { label: string; note?: string; text: string }[] {
+/** 대화 창구가 없어 도구가 없는 AI 직원(dashboard-api mcp_gateway.NOT_YET) */
+export const MCP_NO_TOOL: readonly McpAgentId[] = ["hr", "archive"];
+
+/** 도구 설정. `name`을 주지 않으면 개발 작업 대기열 서버 이름(axcellent-dev) */
+export function mcpSetup(client: McpClient, url: string, name: string = MCP_SERVER_NAME): { label: string; note?: string; text: string }[] {
   const setEnv = { label: "토큰을 환경변수로", note: "Git Bash · 다시 켠 뒤 적용", text: `setx ${TOKEN_ENV} "${TOKEN_PLACEHOLDER}"` };
   if (client === "claude") {
     return [
-      { label: "MCP 서버 붙이기", note: "터미널", text: `claude mcp add --transport http ${MCP_SERVER_NAME} ${url} --header "Authorization: Bearer ${TOKEN_PLACEHOLDER}"` },
+      { label: "MCP 서버 붙이기", note: "터미널", text: `claude mcp add --transport http ${name} ${url} --header "Authorization: Bearer ${TOKEN_PLACEHOLDER}"` },
       { label: "확인", text: "claude mcp list" },
     ];
   }
   if (client === "codex") {
     return [
       setEnv,
-      { label: "MCP 서버 붙이기", text: `codex mcp add ${MCP_SERVER_NAME} --url ${url} --bearer-token-env-var ${TOKEN_ENV}` },
+      { label: "MCP 서버 붙이기", text: `codex mcp add ${name} --url ${url} --bearer-token-env-var ${TOKEN_ENV}` },
       { label: "확인", text: "codex mcp list" },
     ];
   }
-  const json = { mcpServers: { [MCP_SERVER_NAME]: { url, headers: { Authorization: `Bearer \${env:${TOKEN_ENV}}` } } } };
+  const json = { mcpServers: { [name]: { url, headers: { Authorization: `Bearer \${env:${TOKEN_ENV}}` } } } };
   return [setEnv, { label: "MCP 서버 붙이기", note: "~/.cursor/mcp.json", text: JSON.stringify(json, null, 2) }];
 }

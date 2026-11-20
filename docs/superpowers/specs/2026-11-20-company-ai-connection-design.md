@@ -166,7 +166,9 @@ MCP로 AXcellent에 붙어 AI 직원에게 일을 시킨다. 모델·비용은 �
 3. **한도**: 회사 월 예산(토큰) 중 내 MCP 사용이 쓸 수 있는 몫 %(1~100, 비우면 제한 없음).
    막대 + "이번 달 N / 한도 토큰 (내 몫의 x%) · 회사 예산의 y%". 실제 기록에서 센 값만
 4. **연결 방법**: Claude Code·Codex·Cursor 세그먼트 + 복사용 설정. 토큰 자리는 `axm_…`(원문은 설정 글에 싣지 않는다).
-   MCP 주소는 예전 개발자 PC 연결 안내와 같은 개발 서비스 MCP 서버 `<개발 서비스>/api/planning/mcp`, 서버 이름 `axcellent-dev`
+   MCP 주소는 **전 직원 창구** `<dashboard-api>/api/dashboard/me/ai-connection/mcp`, 서버 이름 `axcellent`(아래 9.2).
+   접기 "개발 작업 대기열(고급)"에 예전 개발자 PC 연결 안내와 같은 개발 서비스 MCP 서버 `<개발 서비스>/api/planning/mcp`,
+   서버 이름 `axcellent-dev`. 같은 토큰으로 둘 다 붙는다
 5. [저장] (고른 직원·내 몫 %)
 6. 접기 "고급 · 개발 요청을 누가 코딩할지": 요청 작업 코딩 방식(자동·서버 AI·내 Claude) 그대로
 - 나만 보이고 나만 바꾼다(관리자도 남의 토큰·설정을 못 본다). 고객사 관리자·일반회원 모두 쓴다(운영자는 아님)
@@ -189,14 +191,14 @@ API (보기·발급·설정은 로그인 세션 본인만. 에이전트·공용 
 | POST | `/api/dashboard/me/ai-connection/token/delete` | 끊기 |
 | POST | `/api/dashboard/me/ai-connection/settings` | 고른 직원·내 몫 %(전체 저장) |
 | POST | `/api/dashboard/me/ai-connection/mcp/check` | MCP 서버 → 토큰 검사(**에이전트 토큰 `dev`만**, `auth.MACHINE_ROUTES`) |
+| POST | `/api/dashboard/me/ai-connection/mcp` | 전 직원 MCP 창구(**개인 토큰 `axm_`만**, `auth.MACHINE_ROUTES`, 9.2). GET은 405(스트림 없음) |
 
 MCP 서버 (새로 만들지 않고 기존 개발 서비스 작업 대기열 MCP `/api/planning/mcp`에 붙였다)
 - `work_auth.require_caller`: 토큰이 `axm_`로 시작하면 dashboard-api 검사 API에 묻는다(계약 `PersonalMcpCheckInput`
   `{token, agent: "dev"}` → `PersonalMcpCheckOutput`). 도메인끼리 import하지 않는다. 작업 토큰·사람 토큰은 예전 그대로
 - 막힌 이유는 계약 `code`·`message` 그대로: `TOKEN_UNKNOWN`·`ACCOUNT_GONE` 401, `AGENT_NOT_CHOSEN` 403,
   `LIMIT_REACHED`·`COMPANY_LIMIT_REACHED` 429. dashboard-api에 닿지 않으면 통과시키지 않고 503 `MCP_CHECK_UNAVAILABLE`
-- 지금 이 서버의 도구는 개발 AI 작업 대기열(목록·가져가기·진행·PR·내려놓기)뿐이라 실제로 부를 수 있는 직원은 **개발 AI**.
-  다른 직원 도구(직원별 대화·업무 skill)는 후속(열린 질문 5)
+- 이 서버의 도구는 개발 AI 작업 대기열(목록·가져가기·진행·PR·내려놓기)이다. 다른 직원은 9.2 전 직원 창구로 부른다
 
 누가 시켰나 (`RequestMeta.on_behalf_of`, 계약 추가 · 비면 직렬화에서 뺀다)
 - MCP 서버가 검사를 지난 요청의 도구를 돌리는 동안 토큰 주인 계정을 `ax_agent_template.on_behalf`로 묶는다 →
@@ -218,6 +220,30 @@ MCP 서버 (새로 만들지 않고 기존 개발 서비스 작업 대기열 MCP
 - 화면: 사용량 막대에 상한선(세로 선) + "x%(N 토큰)에서 멈춰요"
 - 실제로 LLM 호출을 멈추는 검사는 공통 LLM 호출부 몫(4장 월 예산 검사, 준하 님). 지금은 상태 표시와 개인 MCP 검사만 막는다
 
+### 9.2 전 직원 MCP 창구 (11/20, 열린 질문 5 → (a))
+
+dashboard-api `mcp_gateway.py`. `POST /api/dashboard/me/ai-connection/mcp`(nginx 규칙 `me/ai-connection*` 안, 3단계 안).
+개발 서비스 작업 대기열 MCP와 같은 작은 구현(streamable HTTP, JSON 응답만, `initialize`·`tools/list`·`tools/call`·`ping`,
+알림은 202, GET 405). 새 패키지 없음
+
+- 인증: `axm_` 개인 토큰만(세션·공용·에이전트 토큰 401 `PERSONAL_TOKEN_REQUIRED`). 같은 서버라 HTTP로 묻지 않고
+  `personal_mcp.inspect(토큰, 직원)`를 바로 부른다(`check`와 같은 몸통). `initialize`·`tools/list`는 토큰·계정만,
+  `tools/call`은 그 직원까지: `TOKEN_UNKNOWN`·`ACCOUNT_GONE` 401, `AGENT_NOT_CHOSEN` 403, `LIMIT_REACHED`·`COMPANY_LIMIT_REACHED` 429.
+  `Origin`이 있으면 `DASHBOARD_MCP_ALLOWED_ORIGINS`에 있어야 한다(403)
+- 도구: 고른 직원마다 `ask_<직원>`(입력 `message`, 선택 `thread_id`). `tools/list`는 그 토큰이 고른 직원 도구만.
+  대화 창구가 있는 8명: 총괄·고객지원·재무·데이터분석·마케팅·기획·개발·인프라. **인사·아카이브는 대화 창구가 없어 도구가 없다**(준비 중,
+  `initialize` 안내와 화면에 그렇게 쓴다)
+- 내부: 화면 AI 대화방이 쓰는 dashboard-api → 부서 A2A 대화 경로 그대로(`<직원>_chat_send`, 읽기 `chat_read.get_thread` → `<직원>_chat_get`).
+  본문 모양도 화면 경로와 같다(고객지원은 말을 `untrusted`로 + 숫자 집계, 총괄은 계정의 구매자 연결). 말한 사람 `who`는 토큰 주인 계정 이름,
+  도구 입력의 사람·계정·skill 값은 버린다. 남의 대화 이어 쓰기는 부서의 본인 검사가 막는다(도구 오류로 돌려줌)
+- 답 기다리기: 보낸 뒤 `answering`이 끝날 때까지 `DASHBOARD_MCP_WAIT_SECONDS`(기본 20초) 기다린다. 그래도 답하는 중이면 그대로 돌려주고,
+  같은 `thread_id`로 `message` 없이 부르면 읽기만 한다
+- 메타: 도구를 도는 동안 `on_behalf.bind(계정)` → `RequestMeta.on_behalf_of`, `tenant_id` = 토큰의 회사(대화 호출 함수에 `tenant_id` 인자 추가, 화면은 그대로)
+- 관문: 창구가 부르는 skill은 대화 skill뿐(`skills_of`)이고 그 skill은 화면과 같은 카드 규칙(요청자 `dashboard-api`, 등급 read·A).
+  돈·고객·공개에 닿는 일은 부서가 대화 중에 `execute()`(safety)로 올린다. 창구에는 업무 skill을 바로 부르는 도구가 없다
+  (시험 `test_mcp_has_no_path_around_the_gate`)
+- 개발 AI: 같은 방식으로 `ask_dev`(개발 AI 대화). 코딩 작업을 직접 가져가는 일은 개발 서비스 작업 대기열 MCP(`axcellent-dev`)를 그대로 쓴다
+
 ## 10. 이전 계획
 
 1. dev 평문 BYOK → 키 저장소: 시작 때 `llm_key.json`이 있으면 `tenant=<설치 회사>`의 `LLM_API_KEY`(코딩 전용이었으면 `DEV_CODER_LLM_API_KEY` + `coder.mode=separate`)로 옮기고 파일을 지운다. 한 버전 동안 읽기만 남긴 뒤 코드 삭제. `monthly_budget_tokens`는 `company_ai.json`으로
@@ -236,7 +262,7 @@ MCP 서버 (새로 만들지 않고 기존 개발 서비스 작업 대기열 MCP
 | 6 | 마케팅 영상 키 화면 이전·예산 표시 맞추기(#1490과 맞춤) | marketing | **재헌 님** |
 | 7 | 개인 MCP 연결(9장: 토큰·고른 직원·내 몫 %·`on_behalf_of`·사용량 계정 칸·MCP 서버 검사) + 회사 상한 %(9.1) | contracts, agent-template, dashboard-api, dev, frontend | 예진 |
 | 7-2 | 월 예산 검사에 상한 % 반영(4장) | agent-template | **준하 님** |
-| 7-3 | MCP 서버에 개발 AI 밖 직원 도구 붙이기(열린 질문 5) | dashboard-api 또는 각 도메인 | 결정 대기 |
+| 7-3 | 전 직원 MCP 창구(9.2, 열린 질문 5 (a)) | dashboard-api, frontend | 예진 |
 
 순서: 1 → 2 → (3, 5, 6 나란히) → 4 → 7. 1·3은 예진이 한 PR로 묶어 먼저 진행(계약 `CompanyAiSettings` 포함, 회사 ID는 지금 있는 `tenant.current()`). 2(준하 님)는 1과 회사 공간 1단계(`meta.tenant_id` 채우기) 머지 뒤 시작. 번호는 이 표를 기준으로 부른다.
 
@@ -252,7 +278,7 @@ MCP 서버 (새로 만들지 않고 기존 개발 서비스 작업 대기열 MCP
 2. 모델·예산 변경도 다른 관리자 승인을 받을지(추천: 예산을 **올리는** 것만 승인, 모델 변경·예산 내리기는 바로 + 알림)
 3. 체험 키를 둘지, 회사 공간 설계대로 "키 없으면 멈춤"만 할지(추천: 체험 키는 회사별 토큰 한도로 두고 사용량을 그 회사로 센다)
 4. 월 예산의 "월" 기준(추천: 회사 시간대 1일 0시)
-5. 개인 MCP 연결로 개발 AI 밖 직원을 부르는 길(9장). 직원별 대화 skill(`*_chat_send`)은 요청자가 dashboard-api만이라
-   (a) dashboard-api에 MCP 도구 창구를 두거나 (b) 각 직원 카드 `allowed_requesters`에 MCP 서버를 더해야 한다. 추천: (a)
+5. ~~개인 MCP 연결로 개발 AI 밖 직원을 부르는 길~~ → 11/20 예진 결정: (a) dashboard-api에 MCP 도구 창구를 둔다(9.2).
+   카드 `allowed_requesters`는 바꾸지 않는다. 남은 것: 인사·아카이브 대화 창구(생기면 도구 표에 더한다)
 6. 개인 MCP 연결 토큰 만료(지금은 만료 없음, 다시 발급·끊기로만. 추천: 90일)
 7. ~~개인 키 호출을 회사 예산에서 빼는 것~~ → 11/20: 개인 키 안을 뺐다. MCP로 시킨 일은 회사 키로 돌아 회사 예산에 센다
