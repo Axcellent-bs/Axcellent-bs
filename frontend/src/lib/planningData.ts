@@ -377,7 +377,14 @@ export interface TrendReportDoneCard {
   /** "/data/trend#request?id=<id>" */
   report_path: string
 }
-export type ChatCard = TrendRequestCard | TrendReportProgressCard | TrendReportDoneCard
+/** 마케팅 1:1 대화: 올린 캐릭터(attached)와 그 이미지 시트·스토리보드 결과(result). 기록은 /marketing/creative-records/{id} */
+export interface CreativeCard {
+  kind: 'creative'
+  record_id: string
+  role: 'attached' | 'result'
+  has_storyboard: boolean
+}
+export type ChatCard = TrendRequestCard | TrendReportProgressCard | TrendReportDoneCard | CreativeCard
 
 export interface ChatMessage {
   id: string

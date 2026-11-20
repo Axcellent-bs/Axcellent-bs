@@ -12,6 +12,7 @@ import type { ChatMessage, ChatStatus, ChatThread as BaseThread } from "@/lib/pl
 import { READER_AREAS } from "@/demo/members";
 import { useSession, type Account } from "@/demo/session";
 import { humanizePlanIds } from "@/lib/format"
+import { ACCEPT, makeCharacterSheet, shrinkImage } from "@/lib/characterSheet"
 
 // AI 대화방의 직접 대화. 사람이 부서 AI 하나를 골라 바로 말을 건다.
 // 사람 말을 바로 받는 창구: 개발 AI(dashboard-api /api/dashboard/dev-chat), 인사 AI(/api/hr/chat), 기획 AI(dashboard-api /api/dashboard/planning-chat), 마케팅 AI(dashboard-api /api/dashboard/marketing-chat), 재무 AI(dashboard-api /api/dashboard/finance-chat), 총괄 AI(dashboard-api /api/dashboard/orchestrator-chat), 인프라 AI(dashboard-api /api/dashboard/infra-chat). 나머지 AI는 창구가 생길 때까지 "준비 중"으로 둔다.
@@ -136,6 +137,10 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
   const [thread, setThread] = useState<ChatThread | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState<string | null>(null);
+  // 마케팅 1:1만: 올릴 캐릭터 이미지(보내면 먼저 이미지 시트를 만들고 그 기록 번호를 말과 함께 보낸다)
+  const [picked, setPicked] = useState<{ media_type: string; data_base64: string; preview: string; thumb_base64: string } | null>(null);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [all, setAll] = useState<ChatThread[]>([]);
   const [closing, setClosing] = useState(false);
@@ -205,15 +210,35 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
     if (el) el.scrollTop = el.scrollHeight;
   }, [thread, sending]);
 
+  const pickImage = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      setPicked(await shrinkImage(file));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "이미지를 읽을 수 없어요");
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
   const send = async (e?: FormEvent, said?: string) => {
     e?.preventDefault();
-    const message = (said ?? text).trim();
+    const image = said === undefined ? picked : null;
+    const message = (said ?? text).trim() || (image ? "이 캐릭터로 이미지 시트 만들어 줘" : "");
     if (!message || sending || readOnly || prep || locked) return;
     setSending(message);
     if (said === undefined) setText("");
     setError(null);
     try {
-      const next = await api.send({ ...(thread ? { thread_id: thread.id } : {}), message });
+      let record_id: string | undefined;
+      if (image) {
+        setSheetBusy(true);
+        const sheet = await makeCharacterSheet({ media_type: image.media_type, data_base64: image.data_base64 }, "", image.thumb_base64).finally(() => setSheetBusy(false));
+        if (!sheet.record_id) throw new Error("이미지 시트는 만들었지만 기록 번호를 받지 못했어요. 다시 올려 주세요.");
+        record_id = sheet.record_id;
+        setPicked(null);
+      }
+      const next = await api.send({ ...(thread ? { thread_id: thread.id } : {}), message, ...(record_id ? { record_id } : {}) });
       if (!thread) { saveOwner(next.id, account.id); setOwners(loadOwners()); }
       setThread(next);
       saveThreadId(tkey, next.id);
@@ -336,13 +361,13 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
           ) : (
             <ol role="log" aria-live="polite" aria-label={`${agent.name}와 나눈 대화`} className="flex flex-col gap-3">
               {messages.map((m) => <Bubble key={m.id} m={m} name={agent.name} me={!readOnly} requestId={thread?.requestId ?? null}
-                cards={agent.key === "data" && !readOnly} threadId={thread?.id ?? null}
+                cards={(agent.key === "data" || agent.key === "marketing") && !readOnly} threadId={thread?.id ?? null}
                 onGo={m.id === goId ? () => void send(undefined, PROCEED_TEXT) : undefined} goBusy={goBusy} />)}
               {isAnswering(thread) && !sending && <li className="animate-pulse px-1 text-xs text-ink-500">{agent.name}가 답하는 중…</li>}
               {sending && (
                 <>
                   <Bubble m={{ id: "sending", role: "user", text: sending, at: "", kind: "text" }} name={agent.name} me />
-                  <li className="animate-pulse px-1 text-xs text-ink-500">{agent.name}가 답하는 중… (5~30초)</li>
+                  <li className="animate-pulse px-1 text-xs text-ink-500">{sheetBusy ? "올린 이미지로 이미지 시트를 만드는 중… (10~40초)" : `${agent.name}가 답하는 중… (5~30초)`}</li>
                 </>
               )}
             </ol>
@@ -362,10 +387,23 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
               <button type="button" className="btn-ghost" onClick={reset}>새 대화</button>
             </div>
           ) : (
-          <form onSubmit={send} className="flex items-end gap-2 border-t border-ink-100 px-4 py-3 lg:px-6">
+          <form onSubmit={send} className="flex flex-wrap items-end gap-2 border-t border-ink-100 px-4 py-3 lg:px-6">
+            {agent.key === "marketing" && picked && (
+              <div className="flex w-full items-center gap-2 text-xs text-ink-700">
+                <img src={picked.preview} alt="올릴 캐릭터 이미지" className="h-14 w-14 rounded-lg bg-surface object-contain ring-1 ring-ink-100" />
+                <span>보내면 이 이미지로 이미지 시트를 만들고, 말에 줄거리가 있으면 스토리보드까지 만들어요.</span>
+                <button type="button" className="btn-ghost ml-auto text-xs" onClick={() => setPicked(null)} disabled={!!sending}>빼기</button>
+              </div>
+            )}
+            {agent.key === "marketing" && (
+              <>
+                <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => void pickImage(e.target.files?.[0])} />
+                <button type="button" className="btn-ghost" onClick={() => fileRef.current?.click()} disabled={!!sending || prep || !!locked} aria-label="캐릭터 이미지 올리기" title="캐릭터 이미지 올리기 (PNG·JPEG·WebP)">이미지</button>
+              </>
+            )}
             <textarea className="field min-h-[44px] flex-1 resize-none" rows={2} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
               placeholder={`${agent.name}에게 보낼 말 (Enter 보내기, Shift+Enter 줄바꿈)`} aria-label={`${agent.name}에게 보낼 말`} disabled={!!sending || prep || !!locked} />
-            <button className="btn-primary" disabled={!text.trim() || !!sending || prep || !!locked || isAnswering(thread)}>보내기</button>
+            <button className="btn-primary" disabled={(!text.trim() && !picked) || !!sending || prep || !!locked || isAnswering(thread)}>보내기</button>
             {api.close && thread && (
               <button type="button" className="btn-ghost" onClick={finish} disabled={!!sending || closing || isAnswering(thread)}>{closing ? "끝내는 중…" : "대화 끝내기"}</button>
             )}
