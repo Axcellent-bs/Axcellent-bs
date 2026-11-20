@@ -234,7 +234,7 @@ export default function AgentOffice() {
           </div>
         ) : (
           <OfficeChat
-            items={chatItems.slice(-80)}
+            items={chatItems}
             typing={typing}
             freshIds={freshIds}
             picker={picker}

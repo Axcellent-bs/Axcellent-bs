@@ -1,4 +1,4 @@
-import { SCREEN_KEEP_OUTCOMES, closedTimes, isBackgroundRead, mergeClosed, requestClosedTimes } from "./commFilter";
+import { SCREEN_KEEP_OUTCOMES, chatLanes, closedTimes, isBackgroundRead, mergeClosed, requestClosedTimes } from "./commFilter";
 import { DEV_HOLD_ACTIONS, FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, PLANNING_HOLD_ACTION, SETTLEMENT_HOLD_ACTION, SUPPORT_DELETION_HOLD_ACTIONS, type ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
 import { isRedeployFailed } from "./rollbackResult";
@@ -6,6 +6,7 @@ export type { Redeploy, RollbackView } from "./rollbackResult";
 import type { CommLine, CommOutcome } from "./types";
 import type { WorkRequestRow } from "./workRequests";
 import { foldSafety, type FoldLine } from "./safetyFold.ts";
+import { chatMessageCount, timelineLanes } from "./quietLog.ts";
 
 // AI 대화방: 총괄(orchestrator)의 이슈 기록, 안전 관문(safety)의 실행 기록, 공통 로그의 부서 간 소통(dashboard-api)을
 // "누가 누구에게 무엇을 보냈나" 메시지로 바꾼다. 문장은 기록된 값(skill·상태·숫자·id)으로만 만들고
@@ -222,7 +223,9 @@ export type ChatItem =
       /** 안전 관문 실행 기록 줄: 실행 요청(request) · 검증·실행 결과(check) */
       safetyRole?: "request" | "check"
       /** 이 말풍선에 합친 안전 확인 통과 줄 ("🛡 안전 확인 통과" 칩, 눌러서 펼침) */
-      safety?: FoldLine[] }
+      safety?: FoldLine[]
+      /** 작업 기록 줄 (lib/commFilter.ts chatLane). 대화 칸에서 접히고 펼치면 회색 작은 말풍선. 안 읽은 수·방 미리보기에서 뺀다 */
+      lane?: "log" }
   | { kind: "system"; id: string; at: string; room: string; text: string }
   | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string; decideAt?: string
       /** 결정을 기다리는 부서 (사건 단계가 없을 때만) */
@@ -487,7 +490,9 @@ export function executionItems(rec: ExecutionRecord, room: string = SAFETY_ROOM)
   const id = `exe:${rec.execution_id}`;
   const amount = d.computed_amount != null ? ` (금액 ${fmtNum(d.computed_amount)}원)` : "";
   // 안전 확인 줄 합치기 기준. C 등급(사람 승인)은 합치지 않고 지금처럼 하나하나 보인다
-  const fold = d.grade === "C" ? {} : { execId: rec.execution_id };
+  // 작업 기록(⑤ 안전 처리 통과): 실행됨 · C 등급 아님 · 사건 흐름 밖 · 안전 처리 로그 방이 아님 → 대화 칸에서 접는다
+  const passLog = d.status === "executed" && d.grade !== "C" && room !== SAFETY_ROOM && !(req.context_id ?? "").startsWith("ctx_inc_");
+  const fold = { ...(d.grade === "C" ? {} : { execId: rec.execution_id }), ...(passLog ? { lane: "log" as const } : {}) };
   const out: ChatItem[] = [{
     kind: "msg", id: `${id}:req`, at: rec.created_at, room, from: speaker(req.requester), to: speaker("safety"), fromKey: req.requester, central: false,
     text: `${actionKo(req.action)} 실행 요청${amount}`, tag: "안전 처리 로그", raw: rawOf(`action: ${req.action}`, req.context_id), tone: "request", facts: [],
@@ -598,7 +603,7 @@ export const CHAT_READ_SKILL = /_chat_(list|get)$/;
 // 하루 한 번 보관 기간 청소(purge_expired_inquiries·purge_expired_claims)도 성공하면 뺀다.
 const SCREEN = "dashboard-api";
 
-/** 화면(dashboard-api)이 주고받은 줄 중 기록에서 뺄 줄인가 */
+/** 화면(dashboard-api)이 주고받은 줄 중 기록에서 뺄 줄인가. 실패·보류 등(SCREEN_KEEP_OUTCOMES)은 남긴다(대화 칸에서는 chatLane ④가 작업 기록으로 접는다) */
 export function isScreenRead(line: CommLine): boolean {
   if (line.from_agent !== SCREEN && line.to_agent !== SCREEN) return false;
   return !SCREEN_KEEP_OUTCOMES.has(line.outcome);
@@ -608,23 +613,28 @@ export function isScreenRead(line: CommLine): boolean {
 export { closedTimes, isBackgroundRead };
 
 /** requests: 고객 의뢰 목록(사람 토큰이 있을 때만). 끝난 의뢰(ctx_wr_)의 뒤 조회는 사건처럼 거른다 */
-export function commItems(comms: CommLine[], incidents: OrchIncident[], executions: ExecutionRecord[], requests: WorkRequestRow[] = []) {
+/** cardContexts: 이 방에 의뢰 진행 카드가 보이는 의뢰의 context (그 의뢰 안 부서 호출은 작업 기록으로 접는다, chatLane ①) */
+export function commItems(comms: CommLine[], incidents: OrchIncident[], executions: ExecutionRecord[], requests: WorkRequestRow[] = [], cardContexts: ReadonlySet<string> = new Set()) {
   const byId = new Map(incidents.map((i) => [i.context_id, i]));
   const ids = new Set(byId.keys());
   const safetyIds = new Set(executions.map((e) => e.execution_id));
   const closedAt = mergeClosed(closedTimes(incidents), requestClosedTimes(requests));
-  return comms
-    .filter((line) => !CHAT_READ_SKILL.test(line.skill ?? "") && !isScreenRead(line) && !isBackgroundRead(line, closedAt))
+  const kept = comms.filter((line) => !CHAT_READ_SKILL.test(line.skill ?? "") && !isScreenRead(line) && !isBackgroundRead(line, closedAt));
+  const lanes = chatLanes(kept, { cardContexts });
+  return kept
     .map((line) => ({ line, room: commRoom(line, ids) }))
     .filter(({ line, room }) => !coveredByIncident(line, byId.get(room)))
-    .map(({ line, room }) => commItem(line, room, safetyIds));
+    .map(({ line, room }) => {
+      const it = commItem(line, room, safetyIds);
+      return lanes.get(line.log_id) === "log" ? { ...it, lane: "log" as const } : it;
+    });
 }
 
 // ---------------------------------------------------------------- 합치기
 const time = (iso: string) => (iso ? new Date(iso).getTime() : 0);
 
 /** 방 하나(또는 전체)의 타임라인. 시간순, 같은 시각이면 만들어진 순서를 지킨다 */
-export function buildTimeline(incidents: OrchIncident[], executions: ExecutionRecord[], comms: CommLine[], room: string, requests: WorkRequestRow[] = []): ChatItem[] {
+export function buildTimeline(incidents: OrchIncident[], executions: ExecutionRecord[], comms: CommLine[], room: string, requests: WorkRequestRow[] = [], cardContexts: ReadonlySet<string> = new Set()): ChatItem[] {
   const items: ChatItem[] = [];
   for (const inc of incidents) {
     if (room !== ALL_ROOM && room !== inc.context_id) continue;
@@ -637,7 +647,8 @@ export function buildTimeline(incidents: OrchIncident[], executions: ExecutionRe
     .sort((a, b) => time(a.created_at) - time(b.created_at));
   for (const rec of recs) items.push(...executionItems(rec, room));
   const shownExecs = new Set(recs.map((r) => r.execution_id));
-  for (const c of commItems(comms, incidents, executions, requests)) {
+  // 안전 처리 로그 방은 줄을 접지 않는다 (원본 그대로)
+  for (const c of commItems(comms, incidents, executions, requests, room === SAFETY_ROOM ? new Set() : cardContexts)) {
     // 안전 관문 기록을 같이 보이는 방에서는 같은 건(execution_id 일치)을 두 번 보이지 않는다
     if (room === ALL_ROOM ? !c.dupOf : room === c.room && !(c.dupOf && shownExecs.has(c.dupOf))) {
       const { dupOf: _dup, ...msg } = c;
@@ -659,7 +670,7 @@ function collapseRepeats(items: ChatItem[]): ChatItem[] {
   const last = new Map<string, Extract<ChatItem, { kind: "msg" }>>();
   for (const it of items) {
     if (it.kind !== "msg") { out.push(it); continue; }
-    const key = [it.fromKey, it.to, it.text, it.tone].join("|");
+    const key = [it.fromKey, it.to, it.text, it.tone, it.lane ?? ""].join("|");
     const prev = last.get(key);
     if (prev && time(it.at) - time(prev.lastAt ?? prev.at) <= REPEAT_WINDOW_MS) {
       prev.repeat = (prev.repeat ?? 1) + 1;
@@ -698,5 +709,8 @@ function dayLabel(d: Date) {
 
 /** 방 목록에 쓰는 메시지 수 (말풍선만) */
 export function messageCount(items: ChatItem[]) {
-  return items.filter((i) => i.kind === "msg").length;
+  return chatMessageCount(items); // 작업 기록 줄은 세지 않는다 (lib/quietLog.ts)
 }
+
+// 대화 줄 / 작업 기록 줄 나누기는 lib/quietLog.ts (node --test로 바로 시험한다)
+export { timelineLanes };

@@ -57,3 +57,80 @@ export const mergeClosed = (...maps: ReadonlyMap<string, string>[]): ReadonlyMap
   for (const m of maps) for (const [k, v] of m) out.set(k, v);
   return out;
 };
+
+// ---------------------------------------------------------------- 대화 줄 / 작업 기록 줄 나누기
+// 11/20 16:46~16:49 전체 대화방에 말풍선 9개가 떴는데 사람이 읽을 대화는 하나도 없었다:
+// 총괄↔마케팅 generate_media 실패 ×3(의뢰 wr_ada8f37811 안) · 기획→개발 start_dev ×5(REQ-21·30·34·45·DEV-1 다시 보냄) ·
+// 화면→마케팅 creative_video_request 실패 · 기획→회사 기억 card_write · 안전 처리 통과.
+// 여기서 "log"로 가른 줄은 대화 칸에서 접히고("작업 기록 N줄 접힘"), 펼치면 제자리에 회색 작은 말풍선으로 보인다.
+// 원본 공통 로그와 안전 처리 로그 방(SAFETY_ROOM)은 그대로다. AI 오피스 그림(걷기·불꽃)은 모든 줄로 계산한다.
+
+export type Lane = "chat" | "log";
+
+const SCREEN_AGENT = "dashboard-api";
+const MEMORY_WRITE = /(^|\.)card_write$/;
+/** 사람이 꼭 봐야 하는 줄: 보류·사람 확인 필요는 어느 규칙에 걸려도 대화로 남긴다 */
+const MUST_SEE: ReadonlySet<string> = new Set(["held", "needs_human"]);
+/** 다시 시도한 실패: 같은 키가 이 시간 안에 뒤에서 completed면 실패도 접는다 */
+export const RETRY_WINDOW_MS = 5 * 60_000;
+
+/** 같은 일을 가르는 키: 보낸 곳 · 받는 곳 · skill · context_id */
+export const commKey = (l: Pick<CommLine, "from_agent" | "to_agent" | "skill" | "context_id">) =>
+  [l.from_agent, l.to_agent ?? "", l.skill ?? "", l.context_id ?? ""].join("|");
+
+export interface LaneContext {
+  /** 이 방에 의뢰 진행 카드가 실제로 보이는 의뢰의 context (ctx_wr_…). 카드가 없는 방·토큰이 없으면 비어 있다 */
+  cardContexts: ReadonlySet<string>;
+  /** 이 줄보다 앞에서 이미 completed였던 키 (commKey) */
+  completedBefore: ReadonlySet<string>;
+  /** 이 줄 뒤 RETRY_WINDOW_MS 안에 같은 키가 completed가 됐나 (다시 시도해 끝난 실패) */
+  retriedOk: boolean;
+  /** 안전 처리 로그 방이면 참 (⑤를 접지 않는다) */
+  safetyRoom?: boolean;
+}
+
+/**
+ * 공통 로그 한 줄이 대화(chat)인가 작업 기록(log)인가.
+ * - 사건(ctx_inc_) 흐름은 언제나 chat
+ * - ① 의뢰 진행 카드가 보이는 방의 그 의뢰(ctx_wr_) 안 부서 호출 → log (카드가 단계·실패를 보여 준다)
+ * - ② 다시 보낸 줄: 같은 키가 앞에서 이미 completed → log (그 대답 줄도 같은 키라 같이)
+ * - ③ 다시 시도한 실패: rejected인데 5분 안에 같은 키가 뒤에서 completed → log
+ * - ④ 화면 호출: dashboard-api가 보내거나 받았고 context가 사건·요청·의뢰 밖 → log (실패도. 화면이 자기 오류를 보여 준다)
+ * - ⑤ 회사 기억 쓰기(card_write)·안전 처리(safety) 통과 → log. 안전 처리 로그 방에서는 접지 않는다
+ * - 보류(held)·사람 확인 필요(needs_human)는 어느 규칙에 걸려도 chat. 위에 안 걸리는 실패도 chat
+ */
+export function chatLane(line: CommLine, ctx: LaneContext): Lane {
+  const c = line.context_id ?? "";
+  if (c.startsWith("ctx_inc_")) return "chat";
+  if (MUST_SEE.has(line.outcome)) return "chat";
+  if (c && ctx.cardContexts.has(c)) return "log"; // ①
+  if (ctx.completedBefore.has(commKey(line))) return "log"; // ②
+  if (line.outcome === "rejected" && ctx.retriedOk) return "log"; // ③
+  const screen = line.from_agent === SCREEN_AGENT || line.to_agent === SCREEN_AGENT;
+  if (screen && !WORK_CONTEXT.test(c)) return "log"; // ④
+  if (!ctx.safetyRoom && line.outcome !== "rejected") {
+    if (line.to_agent === "memory" && MEMORY_WRITE.test(line.skill ?? "")) return "log"; // ⑤ 회사 기억 쓰기
+    if (line.from_agent === "safety" || line.to_agent === "safety") return "log"; // ⑤ 안전 처리 통과
+  }
+  return "chat";
+}
+
+const ms = (iso: string) => { const t = Date.parse(iso); return Number.isFinite(t) ? t : 0; };
+
+/** 여러 줄을 시각순으로 보며 앞에서 끝난 키·뒤에서 다시 끝난 실패를 계산해 줄마다 lane (log_id → lane) */
+export function chatLanes(lines: readonly CommLine[], opts: { cardContexts?: ReadonlySet<string>; safetyRoom?: boolean } = {}): Map<string, Lane> {
+  const sorted = [...lines].sort((a, b) => ms(a.occurred_at) - ms(b.occurred_at));
+  const doneAt = new Map<string, number[]>(); // 키 → completed 시각들
+  for (const l of sorted) if (l.outcome === "completed") (doneAt.get(commKey(l)) ?? doneAt.set(commKey(l), []).get(commKey(l))!).push(ms(l.occurred_at));
+  const completedBefore = new Set<string>();
+  const out = new Map<string, Lane>();
+  const cardContexts = opts.cardContexts ?? new Set<string>();
+  for (const l of sorted) {
+    const key = commKey(l);
+    const t = ms(l.occurred_at);
+    const retriedOk = l.outcome === "rejected" && (doneAt.get(key) ?? []).some((d) => d > t && d - t <= RETRY_WINDOW_MS);
+    out.set(l.log_id, chatLane(l, { cardContexts, completedBefore, retriedOk, safetyRoom: opts.safetyRoom }));
+    if (l.outcome === "completed") completedBefore.add(key);
+  }
+  return out;
+}
