@@ -215,7 +215,7 @@ def request_card(text: str, resolved: Any, names: Mapping[str, str]) -> dict[str
                "target_ages": list(b.target_ages), "format": b.format,
                "competitors": list(b.competitors), "keywords": list(b.keywords),
                "competitor_names": {a: names[a] for a in b.competitors if names.get(a)},
-               "sources": src},
+               "sources": src, "theme": b.theme, "theme_mode": b.theme_mode},
         preset=b.preset,
         # 카드 칸 값으로 접수하면 의뢰문을 다시 읽지 않아 보고서 쪽 AI는 추천 1번
         cost_note=cost_note(len(resolved.accounts), len(b.keywords), 1 if filled else 2),
@@ -698,15 +698,26 @@ def read_report(env: Mapping[str, str], now: datetime) -> dict | None:
             item["기획 전달"] = {"결과": handoff.get("outcome"),
                               "제안 id": handoff.get("proposal_id")}  # fmt: skip
         sections = r.get("sections") or {}
+        brief = r.get("brief") or {}
+        find = brief.get("theme_mode") == "find"
+        labels = {**SECTION_LABELS, "theme": "주제 후보"} if find else SECTION_LABELS
+        if brief.get("theme"):  # 11/20: 의뢰 주제와 상위 후보 3개 (코드가 계산한 순위)
+            item["주제"] = brief["theme"]
+            theme = sections.get("theme") or {}
+            if theme.get("status") == "known":
+                item["주제 후보"] = [{"이름": t.get("name"), "관심(최대 100)": t.get("level"),
+                                   "최근 7일 변화 %": t.get("change_pct")}
+                                  for t in (theme.get("rows") or [])[:3]]  # fmt: skip
         if r.get("status") in ("partial", "failed"):
             missing = [{"칸": label, "이유": ((sections.get(key) or {}).get("reason") or
                                              "이유 기록 없음")[:120]}
-                       for key, label in SECTION_LABELS.items()
+                       for key, label in labels.items()
                        if (sections.get(key) or {}).get("status") != "known"]  # fmt: skip
             if missing:
                 item["다 못 채운 칸"] = missing
             if r.get("status") == "partial":
-                item["판정 규칙"] = PARTIAL_RULE
+                rule = f"{len(labels)}칸 중 다 채운 칸이 일부라 일부 완료"
+                item["판정 규칙"] = rule if find else PARTIAL_RULE
         items.append(item)
     if not items:
         return None

@@ -73,6 +73,11 @@ def row_facts(report: TrendReport) -> dict[str, Row]:
     who = tb.target_word(b)
     names = {**b.competitor_names, **s.hashtags.account_names}
     out: dict[str, Row] = {}
+    if s.theme.status == "known":  # 주제 후보 상위 3 (11/20)
+        for n, t in enumerate(s.theme.rows[:3], start=1):
+            change = f" · 최근 7일 {_signed(t.change_pct)}" if t.change_pct is not None else ""
+            out[f"theme:{n}"] = (f"주제 '{s.theme.theme}' 후보 {t.name} ({who}) 네이버 검색 관심",
+                                 f"{t.level}/100{change}", None)  # fmt: skip
     for n, r in enumerate(s.search.rows, start=1):
         if r.search_change_pct is not None and r.basis in (None, "filtered") and not r.small_base:
             out[f"search:{n}"] = (f"네이버 검색 '{r.keyword}' ({who}) 최근 7일 vs 직전 28일",
@@ -124,7 +129,9 @@ def _top(report: TrendReport, rows: dict[str, Row]) -> list[str]:
 def pick_facts(report: TrendReport) -> list[InsightFact]:
     rows = row_facts(report)
     beat_ids = [e.id for b in report.sections.recommendation.beats for e in b.evidence_items]
-    order = list(dict.fromkeys([*(i for i in beat_ids if i in rows), *_top(report, rows)]))
+    theme_ids = [k for k in rows if k.startswith("theme:")]  # 콘티 근거 → 주제 후보 → 지금 순서
+    order = list(dict.fromkeys([*(i for i in beat_ids if i in rows), *theme_ids,
+                                *_top(report, rows)]))  # fmt: skip
     return [InsightFact(label=clip(rows[i][0], LABEL_MAX), value=clip(rows[i][1], VALUE_MAX),
                         source=clip(SOURCE, SOURCE_MAX),
                         link=rows[i][2][:500] if rows[i][2] else None)
@@ -209,6 +216,13 @@ def body_md(report: TrendReport, facts: list[InsightFact] | None = None) -> str:
                     lines.append(f"  - 근거: {word}")
         if rec.music_note and safe(rec.music_note):
             lines.append(f"- 음악: {rec.music_note}")
+    if s.theme.status == "known" and s.theme.rows:  # 11/20: 숫자는 facts에 있는 값만
+        lines.append(f"## 주제 후보 · {s.theme.theme}")
+        for t in s.theme.rows[:3]:
+            line = f"- {t.name}: 네이버 검색 관심 {t.level}/100"
+            lines.append(line if safe(line) else f"- {t.name}" if safe(t.name) else "- (이름 생략)")
+        lines.append("- 이름은 근거로만 써요. 광고에 이름·사진·음원을 쓰려면 권리자 허락이"
+                     " 필요해요")  # fmt: skip
     lines.append("## 섹션 요약")
     known = sum(1 for r in s.search.rows if r.search_change_pct is not None)
     lines.append(f"- 검색: {_part(known, len(s.search.rows), '키워드 변화율')}")

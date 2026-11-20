@@ -98,9 +98,11 @@ def done_card(report: TrendReport) -> dict[str, Any]:
 
 
 def section_percent(report: TrendReport) -> int:
-    done = sum(1 for name in SECTION_NAMES
+    """끝난 섹션 비율. 주제 후보(find 의뢰만)도 섹션 하나로 센다."""
+    names = (*SECTION_NAMES, "theme") if report.brief.theme_mode == "find" else SECTION_NAMES
+    done = sum(1 for name in names
                if getattr(report.sections, name).status not in ("waiting", "running"))  # fmt: skip
-    return round(done * 100 / len(SECTION_NAMES))
+    return round(done * 100 / len(names))
 
 
 def completed_output(report: TrendReport) -> dict[str, Any]:

@@ -212,7 +212,7 @@ def test_form_values_override_preset_without_llm() -> None:
     assert b.format_parts == ["인스타 릴스", "30초"]
     assert b.sources.model_dump() == {"product": "preset", "target": "input", "format": "preset",
                                       "competitors": "input", "keywords": "input",
-                                      "goal": "preset"}  # fmt: skip
+                                      "goal": "preset", "theme": None}  # fmt: skip
     assert got.accounts[:2] == ["foo.bar", "extra_1"]  # 경쟁사·추가 계정이 먼저
     assert len(got.accounts) <= tb.MAX_ACCOUNTS
     assert got.llm_calls == 0
@@ -234,7 +234,8 @@ def test_request_text_only_extracts_brief_and_marks_sources() -> None:
     assert b.goal == "출시 알리기" and b.format_parts == ["릴스", "15초"]
     assert b.sources.model_dump() == {"product": "request_text", "target": "request_text",
                                       "format": "request_text", "competitors": "request_text",
-                                      "keywords": "preset", "goal": "request_text"}  # fmt: skip
+                                      "keywords": "preset", "goal": "request_text",
+                                      "theme": None}  # fmt: skip (주제 없는 의뢰)
 
 
 def test_extract_failure_falls_back_to_preset_with_reason() -> None:
@@ -242,7 +243,9 @@ def test_extract_failure_falls_back_to_preset_with_reason() -> None:
     got = asyncio.run(tb.resolve(TrendReportInput(request_text="친환경 화장품 홍보"), llm))
     b = got.brief
     assert b.preset == "eco_beauty" and b.product == "친환경 화장품"
-    assert set(b.sources.model_dump().values()) == {"preset"}
+    sources = b.sources.model_dump()
+    assert sources.pop("theme") is None and b.theme is None  # 의뢰문을 못 읽었으니 주제도 없음
+    assert set(sources.values()) == {"preset"}
     assert any("의뢰문을 해석하지 못함" in line for line in got.limits)
     assert got.llm_calls == 1
 
@@ -701,6 +704,7 @@ def test_frontend_questions_1380() -> None:
         "accounts": None, "caller": "orchestrator", "context_id": None, "rebuild": False,
         "goal": None,  # v2 추가 (기본 None)
         "chat_thread_id": None,  # 11/19 대화 카드 추가 (기본 None)
+        "theme": None, "theme_mode": None,  # 11/20 주제 추가 (기본 None)
     }  # fmt: skip
     assert TrendReportInput.model_validate({}).caller == "human"
 

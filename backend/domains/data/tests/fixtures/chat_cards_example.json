@@ -16,7 +16,9 @@
         "format": "request_text",
         "competitors": "preset",
         "keywords": "preset"
-      }
+      },
+      "theme": null,
+      "theme_mode": null
     },
     "preset": "eco_beauty",
     "cost_note": "인스타 약 34번·네이버 약 6번·AI 1번",
