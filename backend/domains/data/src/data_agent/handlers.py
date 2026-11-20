@@ -1244,7 +1244,19 @@ def _trend_report_deps() -> Any:
                 search=get_trend_connector(), shopping=get_shopping_connector(),
                 memes=lambda: RESPONSES.latest("trend_memes"),
                 searchad=get_searchad_connector(), pool_path=pool,
-                company=_trend_report_company)  # fmt: skip
+                company=_trend_report_company, theme_inputs=_trend_report_theme_inputs)  # fmt: skip
+
+
+async def _trend_report_theme_inputs() -> tuple[list[str], list[str], list[str]]:
+    """주제 후보 재료: 저장된 레이더·YouTube 인기(응답 캐시)와 회사 상품명. 새로 부르지 않는다."""
+    from data_agent.skills.product_link import read_catalog
+    from data_agent.skills.trend_report_theme import theme_sources
+
+    radar, youtube = theme_sources(RESPONSES.latest("instagram_radar"),
+                                   RESPONSES.latest("trend_popular"),
+                                   RESPONSES.latest("video_explorer"))  # fmt: skip
+    catalog = await read_catalog(get_catalog())
+    return radar, youtube, [p.name for p in catalog.products]
 
 
 async def _trend_report_company(brief: Any, request_text: str | None,

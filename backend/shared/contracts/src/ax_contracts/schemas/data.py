@@ -4410,10 +4410,13 @@ class InstagramMemoListOutput(AxModel):
 # 프론트와 같이 쓰는 계약이라 필드 이름·값을 바꾸지 않는다.
 
 ReportStatus = Literal["queued", "running", "done", "partial", "failed", "interrupted"]
-SectionStatus = Literal["waiting", "running", "known", "unknown", "failed"]
+# skipped(11/20 추가): 이 의뢰에는 계산하지 않는 섹션 (주제 섹션이 theme_mode find가 아닐 때)
+SectionStatus = Literal["waiting", "running", "known", "unknown", "failed", "skipped"]
 # company(11/20 추가): 연결된 회사(tenant)의 domain_profile·판매 집단·키워드 풀·확인된 인스타
 # 계정으로 채운 칸 (값 우선순위: 폼 > 의뢰문 > 프리셋 > 회사)
-FieldSource = Literal["input", "request_text", "preset", "company"]
+# theme(11/20 추가): 주제 섹션이 데이터랩으로 확인해 순위를 매긴 후보를 키워드 앞에 넣은 칸
+FieldSource = Literal["input", "request_text", "preset", "company", "theme"]
+ThemeMode = Literal["find", "use"]  # find: 주제 안에서 대상을 찾아 달라 · use: 주제를 그대로 쓴다
 ReportCaller = Literal["human", "orchestrator", "planning"]
 BeatSlot = Literal["0-3", "3-15", "15-25", "25-30"]
 
@@ -4434,6 +4437,9 @@ class TrendReportInput(AxModel):
     goal: str | None = None  # 목적 ("브랜드 인지도"). product와 따로 (v2 추가)
     # 데이터분석 대화 카드에서 넣은 의뢰면 그 대화 id. 진행·완료 메시지를 그 대화에 붙인다
     chat_thread_id: str | None = Field(default=None, max_length=64)
+    # 11/20 추가: 의뢰 주제와 쓰임 (대화 카드 칸 값으로 접수할 때 의뢰문을 다시 읽지 않아도 남게)
+    theme: str | None = Field(default=None, max_length=30)
+    theme_mode: ThemeMode | None = None
 
 
 class TrendReportCreated(AxModel):
@@ -4458,6 +4464,7 @@ class TrendReportBriefSources(AxModel):
     competitors: FieldSource
     keywords: FieldSource
     goal: FieldSource | None = None  # goal이 없으면 None (v2 추가)
+    theme: FieldSource | None = None  # theme이 없으면 None (11/20 추가)
 
 
 class TrendReportBrief(AxModel):
@@ -4474,6 +4481,10 @@ class TrendReportBrief(AxModel):
     goal: str | None = None
     format_parts: list[str] = Field(default_factory=list)
     competitor_names: dict[str, str | None] = Field(default_factory=dict)
+    # 11/20 추가: 의뢰가 다루는 주제·소재("아이돌", "캠핑")와 그 쓰임(find·use).
+    # 의뢰문에 없으면 None
+    theme: str | None = Field(default=None, max_length=30)
+    theme_mode: ThemeMode | None = None
 
 
 # 검색 행의 근거: filtered(연령·성별 필터) · all(필터 없이 전체) · volume_only(검색광고 월 검색량만)
@@ -4592,12 +4603,46 @@ class TrendRecommendationSection(AxModel):
     music_note: str = ""
 
 
+ThemeSeenIn = Literal["radar", "youtube", "llm"]
+
+
+class TrendThemeRow(AxModel):
+    """주제 후보 하나 (11/20). 이름은 저장된 수집 데이터·LLM에서 모으고 데이터랩 값이 있는 것만
+    남긴다."""
+
+    name: str
+    level: int = Field(ge=0, le=100)  # 최근 28일 평균, 가장 큰 후보 = 100 (묶음 기준 이름으로 맞춤)
+    change_pct: float | None = None  # 최근 7일 평균 ÷ 직전 28일 평균 − 1 (%)
+    seen_in: list[ThemeSeenIn] = Field(default_factory=list)  # 어디서 나온 이름인지
+    products: list[str] = Field(default_factory=list, max_length=3)  # 이름이 든 회사 상품 (이름만)
+    basis: str = ""  # "네이버 검색 · 여성 10대" 같은 근거 줄
+
+
+class TrendThemeDropped(AxModel):
+    name: str
+    reason: str
+
+
+class TrendThemeSection(AxModel):
+    """주제 후보 순위 (11/20 추가). theme_mode find일 때만 계산, 아니면 skipped."""
+
+    status: SectionStatus = "waiting"
+    reason: str | None = None
+    theme: str | None = None
+    target_word: str = ""  # "여성 10대"
+    rows: list[TrendThemeRow] = Field(default_factory=list)
+    dropped: list[TrendThemeDropped] = Field(default_factory=list)  # 값 없음 등으로 버린 후보
+    method: str = ""  # 순위 계산 방식 한 줄
+
+
 class TrendReportSections(AxModel):
     search: TrendSearchSection = Field(default_factory=TrendSearchSection)
     hashtags: TrendHashtagSection = Field(default_factory=TrendHashtagSection)
     content: TrendContentSection = Field(default_factory=TrendContentSection)
     competitors: TrendCompetitorSection = Field(default_factory=TrendCompetitorSection)
     recommendation: TrendRecommendationSection = Field(default_factory=TrendRecommendationSection)
+    # 11/20 추가. 예전 저장본은 기본값(waiting)으로 읽히니 화면은 theme이 없으면 숨긴다
+    theme: TrendThemeSection = Field(default_factory=TrendThemeSection)
 
 
 class TrendReportCalls(AxModel):
@@ -4719,6 +4764,9 @@ class TrendRequestCardBrief(AxModel):
     keywords: list[str] = Field(default_factory=list)
     competitor_names: dict[str, str] = Field(default_factory=dict)  # 아는 것만, 없으면 {}
     sources: TrendRequestCardSources
+    # 11/20 추가: 의뢰 주제와 쓰임 (없으면 None)
+    theme: str | None = None
+    theme_mode: ThemeMode | None = None
 
 
 class TrendRequestCard(AxModel):

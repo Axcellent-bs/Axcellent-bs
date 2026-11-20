@@ -19,11 +19,14 @@
       "format": "preset",
       "competitors": "preset",
       "keywords": "preset",
-      "goal": "preset"
+      "goal": "preset",
+      "theme": null
     },
     "goal": "브랜드 인지도",
     "format_parts": ["인스타 릴스", "30초"],
-    "competitor_names": {"toun28_official": "톤28", "beplain_official": null}
+    "competitor_names": {"toun28_official": "톤28", "beplain_official": null},
+    "theme": null,
+    "theme_mode": null
   },
   "summary_line": "리필·비건을 실제 사용 장면으로 보여 주는 질문형 릴스가 맞음",
   "summary_reason": null,
@@ -163,6 +166,15 @@
         }
       ],
       "music_note": "저작권 문제없는 라이브러리 음원 중 선택"
+    },
+    "theme": {
+      "status": "skipped",
+      "reason": "의뢰 주제 없음",
+      "theme": null,
+      "target_word": "여성 20~30대",
+      "rows": [],
+      "dropped": [],
+      "method": ""
     }
   },
   "limits": [

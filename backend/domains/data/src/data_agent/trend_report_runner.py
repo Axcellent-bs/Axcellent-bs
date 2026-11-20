@@ -241,12 +241,13 @@ class TrendReportService:
 
             async def saved(r: TrendReport) -> None:
                 self.store.save(r.report_id, r.model_dump(mode="json"))
-                done = {name for name in hooks_mod.SECTION_NAMES
+                names = tr.counted_sections(r)  # 주제 후보(find 의뢰)도 섹션 하나로
+                done = {name for name in names
                         if getattr(r.sections, name).status not in LIVE_SECTION}  # fmt: skip
                 if done - seen:  # 섹션 하나가 끝날 때마다
                     seen.update(done)
                     await self.hooks.progress(report_id, percent=hooks_mod.section_percent(r),
-                                              note=f"섹션 {len(done)}/5")  # fmt: skip
+                                              note=f"섹션 {len(done)}/{len(names)}")  # fmt: skip
 
             async def accounts(read: int, total: int) -> None:
                 if read % ACCOUNT_STEP == 0 or read == total:
