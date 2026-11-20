@@ -8,7 +8,7 @@ import { printWithClass, usePrinting } from "@/lib/print";
 import { PostCard } from "@/components/data/InstagramRadar";
 import {
   dataAi, type SectionStatus, type TrendReport, type TrendReportBeat, type TrendReportBrief, type TrendReportCompetitorRow, type TrendReportHandoffOutput,
-  type TrendReportSections,
+  type TrendReportSections, type TrendThemeSection,
 } from "@/lib/data";
 import { useCompany } from "@/demo/company";
 import { DeliveryBadge, HandoffButton, ReportInsightCard, usePlanningRecord } from "@/components/data/ReportInsights";
@@ -17,15 +17,15 @@ import { thumbSrc } from "@/lib/igRadarGrid";
 import { sectionState, type SectionState } from "@/lib/segmentView";
 import {
   BEAT_LABEL, CALLER_LABEL, EVIDENCE, HASHTAG_HIDDEN_NOTE, REPORT_POLL_MS, REPORT_STATUS, SECTION_EVIDENCE, SECTION_STATUS,
-  barPct, beatEvidence, beatWidths, competitorChip, competitorSummary, evidenceDomId, evidenceExpanded, evidenceListClass, hashtagMeta,
-  headerRows, keepPolling, keyEvidence, limitGroups, printHeaderLine, reportLabel, searchMain, searchNotes, shareText, sortBeats, sortCompetitors, sortSearchRows,
-  traitLines, type ChipTone, type EvidenceKind, type ReportPart,
+  barPct, beatEvidence, beatWidths, competitorChip, competitorSummary, countedSections, evidenceDomId, evidenceExpanded, evidenceListClass, hashtagMeta,
+  headerRows, keepPolling, keyEvidence, limitGroups, printHeaderLine, reportLabel, searchMain, searchNotes, shareText, showThemeSection, sortBeats,
+  sortCompetitors, sortSearchRows, themeRowView, traitLines, type ChipTone, type EvidenceKind, type ReportPart,
 } from "@/lib/trendReportView";
 
 // 트렌드 분석 의뢰 보고서 하나 (trend_report_get). 주소 #request?id=<report_id> (분석 의뢰 탭, TrendRequest.tsx가 연다).
 // - 진행 중(queued·running)이면 섹션별 진행 칩을 보여 주고 5초마다 다시 읽는다. 완료·부분·실패·중단이면 멈춘다
 // - 헤더: "항목 | 칩" 목록(추정·프리셋 출처만 꼬리표) · "의뢰 고쳐서 다시 만들기"(TrendRequest가 폼을 연다)
-// - 위에서 아래로: 헤더 → AI 추천(콘티 타임라인) → "근거 데이터"(범례 칩 + 1 검색 · 2 해시태그 · 3 콘텐츠 · 4 경쟁사)
+// - 위에서 아래로: 헤더 → AI 추천(콘티 타임라인) → "근거 데이터"(범례 칩 + 0 주제 후보(find 의뢰만) · 1 검색 · 2 해시태그 · 3 콘텐츠 · 4 경쟁사)
 //   → 다음 단계(보고서 인사이트 카드: 기획에 보내기, ReportInsights.tsx) → 근거와 한계
 // - 머리 "기획에 보내기"(trend_report_handoff)와 맨 아래 카드는 결과를 같이 쓴다. 기획 기록에 이미 있으면 버튼 대신 전달 칩
 // - 인쇄(PDF): 맨 위에 인쇄 때만 머리글 한 줄("TR-xxxx · 회사 · 만든 시각 · 상태"), 콘티는 2×2 (styles.css)
@@ -92,16 +92,17 @@ function Part({ no, title, part, status, reason, children }: {
   );
 }
 
-const SECTION_NAMES: [keyof TrendReportSections, string][] = [
-  ["search", "검색"], ["hashtags", "해시태그"], ["content", "콘텐츠"], ["competitors", "경쟁사"], ["recommendation", "추천"],
-];
+const SECTION_LABEL: Record<ReturnType<typeof countedSections>[number], string> = {
+  theme: "주제 후보", search: "검색", hashtags: "해시태그", content: "콘텐츠", competitors: "경쟁사", recommendation: "추천",
+};
 
+/** 섹션별 진행 칩 (주제 후보는 보일 때만, lib/trendReportView countedSections) */
 function Progress({ report }: { report: TrendReport }) {
   return (
     <ul className="flex flex-wrap gap-2 print-hide" aria-label="섹션별 진행">
-      {SECTION_NAMES.map(([k, label]) => {
-        const s = SECTION_STATUS[report.sections[k].status];
-        return <li key={k}><span className={`chip text-xs ${tone(s.tone)}`}>{label} · {s.label}</span></li>;
+      {countedSections(report).map((k) => {
+        const s = SECTION_STATUS[report.sections[k]?.status ?? "waiting"];
+        return <li key={k}><span className={`chip text-xs ${tone(s.tone)}`}>{SECTION_LABEL[k]} · {s.label}</span></li>;
       })}
     </ul>
   );
@@ -111,11 +112,11 @@ function SourceTag({ text }: { text: string | null }) {
   return text ? <span className="chip bg-ink-100 text-[11px] text-ink-500">{text}</span> : null;
 }
 
-/** 헤더: 항목 | 칩 목록 */
-function BriefList({ brief: b }: { brief: TrendReportBrief }) {
+/** 헤더: 항목 | 칩 목록. 주제가 있으면 "주제" 줄(값 + 쓰임 칩), 주제 후보에서 온 키워드는 앞에 ★ */
+function BriefList({ brief: b, theme }: { brief: TrendReportBrief; theme?: TrendThemeSection }) {
   return (
     <dl className="space-y-2">
-      {headerRows(b).map((row) => (
+      {headerRows(b, theme).map((row) => (
         <div key={row.key} className="print-keep-grid grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-1">
           <dt className="pt-0.5 text-xs text-ink-500">{row.label}</dt>
           <dd className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -126,7 +127,8 @@ function BriefList({ brief: b }: { brief: TrendReportBrief }) {
               </>
             ) : row.chips.length === 0 ? <span className="text-sm text-ink-500">없음</span>
               : row.chips.map((c, i) => (
-                <span key={i} className="chip bg-ink-100 text-ink-900">
+                <span key={i} className={`chip ${row.key === "theme" && i > 0 ? "bg-brand-50 text-brand-700" : "bg-ink-100 text-ink-900"}`}>
+                  {c.star && <span className="text-[10px] text-brand-600" aria-label="주제 후보에서 온 키워드">★</span>}
                   {c.text}{c.sub && <small className="font-normal text-ink-500">{c.sub}</small>}
                 </span>
               ))}
@@ -146,6 +148,68 @@ function jumpToEvidence(id: string) {
   const cls = ["ring-2", "ring-brand-500", "bg-brand-50"];
   el.classList.add(...cls);
   setTimeout(() => el.classList.remove(...cls), 1800);
+}
+
+/** 0 주제 후보 (#1540): 후보 · 관심 막대(0~100) · 최근 7일 · 함께 본 곳 · 이름이 든 우리 상품. 버린 후보는 접기(인쇄 때 펼침) */
+function ThemePart({ s }: { s: TrendThemeSection }) {
+  const [open, setOpen] = useState(false);
+  const printing = usePrinting();
+  const shown = evidenceExpanded(open, printing);
+  const title = `주제 후보 · ${s.theme ?? ""}${s.target_word ? ` (${s.target_word})` : ""}`;
+  return (
+    <Part no={0} title={title} part="theme" status={s.status} reason={s.reason}>
+      {s.rows.length === 0 ? <p className="text-sm text-ink-500">데이터랩에서 값이 나온 후보가 없어요.</p> : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="text-left text-xs text-ink-500">
+                <th className="py-1 pr-2 font-medium">후보</th>
+                <th className="py-1 pr-2 font-medium">검색 관심 (최대 100)</th>
+                <th className="py-1 pr-2 text-right font-medium">최근 7일</th>
+                <th className="py-1 pr-2 font-medium">함께 본 곳</th>
+                <th className="py-1 font-medium">이름이 든 우리 상품</th>
+              </tr>
+            </thead>
+            <tbody>
+              {s.rows.map((r, i) => {
+                const v = themeRowView(r);
+                return (
+                  <tr key={r.name} id={evidenceDomId(`theme:${i + 1}`)} className="border-t border-ink-100 align-top transition">
+                    <td className="py-1.5 pr-2 font-medium text-ink-900">{v.name}</td>
+                    <td className="py-1.5 pr-2">
+                      <span className="flex items-center gap-2">
+                        <span className="relative h-2 w-28 shrink-0 bg-ink-100" aria-hidden="true">
+                          <span className="absolute inset-y-0 left-0 bg-brand-500" style={{ width: `${v.level}%` }} />
+                        </span>
+                        <span className="tabular-nums text-ink-700">{v.level}</span>
+                      </span>
+                    </td>
+                    <td className={`py-1.5 pr-2 text-right tabular-nums ${v.change.startsWith("+") ? "text-emerald-700" : "text-ink-700"}`}>{v.change}</td>
+                    <td className="py-1.5 pr-2">
+                      <span className="flex flex-wrap gap-1">{v.seenIn.map((x) => <span key={x} className="chip bg-ink-100 text-[11px] text-ink-700">{x}</span>)}</span>
+                    </td>
+                    <td className="py-1.5 text-xs text-ink-700">{v.products}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {s.method && <p className="text-xs text-ink-500">{s.method}</p>}
+      {s.rows[0]?.basis && <p className="text-xs text-ink-500">{s.rows[0].basis}</p>}
+      {s.dropped.length > 0 && (
+        <div>
+          <button type="button" className="text-xs text-brand-700 hover:underline print-hide" aria-expanded={shown} onClick={() => setOpen(!open)}>
+            버린 후보 {s.dropped.length}개 {shown ? "▲" : "▼"}
+          </button>
+          <ul className={`mt-1 space-y-0.5 text-xs text-ink-500 ${evidenceListClass(open)}`}>
+            {s.dropped.map((d) => <li key={d.name}><b className="font-medium text-ink-700">{d.name}</b> · {d.reason}</li>)}
+          </ul>
+        </div>
+      )}
+    </Part>
+  );
 }
 
 function SearchPart({ s, brief }: { s: TrendReportSections["search"]; brief: TrendReportBrief }) {
@@ -417,7 +481,7 @@ export function TrendReportBody({ report, onRebuild }: { report: TrendReport; on
           </span>
         </div>
         {keepPolling(report.status) && <Progress report={report} />}
-        <BriefList brief={report.brief} />
+        <BriefList brief={report.brief} theme={sec.theme} />
       </header>
 
       <AiPick s={sec.recommendation} summaryReason={report.summary_reason} />
@@ -426,6 +490,7 @@ export function TrendReportBody({ report, onRebuild }: { report: TrendReport; on
         <h3 className="text-base font-bold text-ink-900">근거 데이터</h3>
         <EvidenceChip kind="api" /><EvidenceChip kind="ai" /><EvidenceChip kind="human" />
       </div>
+      {sec.theme && showThemeSection(report) && <ThemePart s={sec.theme} />}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SearchPart s={sec.search} brief={report.brief} />
         <HashtagPart s={sec.hashtags} brief={report.brief} />

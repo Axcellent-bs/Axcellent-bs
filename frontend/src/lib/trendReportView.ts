@@ -1,8 +1,9 @@
 // 트렌드 분석 의뢰 보고서 화면(components/data/TrendRequest.tsx · TrendReportView.tsx)의 순수 계산. node --test로 시험한다 (trendReport.test.ts).
 // 숫자는 서버 값 그대로 글자로만 바꾼다. 모르면 0이 아니라 서버 이유를 보여 준다.
 import type {
-  BeatSlot, FieldSource, ReportStatus, SectionStatus, TrendEvidenceItem, TrendReport, TrendReportBeat, TrendReportBrief, TrendReportCaller,
-  TrendReportCompetitorRow, TrendReportGender, TrendReportHashtagRow, TrendReportInput, TrendReportSearchRow, TrendTraitStructured,
+  BeatSlot, FieldSource, ReportStatus, SectionStatus, ThemeMode, TrendEvidenceItem, TrendReport, TrendReportBeat, TrendReportBrief, TrendReportCaller,
+  TrendReportCompetitorRow, TrendReportGender, TrendReportHashtagRow, TrendReportInput, TrendReportSearchRow, TrendThemeRow, TrendThemeSeenIn,
+  TrendThemeSection, TrendTraitStructured,
 } from "./data.ts";
 
 /** 진행 중 보고서를 다시 읽는 간격 */
@@ -65,12 +66,15 @@ export const SECTION_STATUS: Record<SectionStatus, { label: string; tone: ChipTo
   known: { label: "완료", tone: "ok" },
   unknown: { label: "자료 없음", tone: "warn" },
   failed: { label: "실패", tone: "bad" },
+  skipped: { label: "해당 없음", tone: "muted" },
 };
 
 export const CALLER_LABEL: Record<TrendReportCaller, string> = { human: "사람", orchestrator: "총괄", planning: "기획" };
 
 /** 의뢰 요약 칸 출처 (작은 글씨) */
-export const SOURCE_LABEL: Record<FieldSource, string> = { input: "직접 입력", request_text: "의뢰문에서 추정", preset: "프리셋" };
+export const SOURCE_LABEL: Record<FieldSource, string> = {
+  input: "직접 입력", request_text: "의뢰문에서 추정", preset: "프리셋", company: "회사 정보로 채움", theme: "주제 후보에서",
+};
 export function sourceLabel(s: FieldSource | null | undefined): string {
   return s ? SOURCE_LABEL[s] ?? "출처 모름" : "출처 모름";
 }
@@ -82,9 +86,9 @@ export const EVIDENCE: Record<EvidenceKind, { label: string; tone: ChipTone }> =
   ai: { label: "AI 분석", tone: "info" },
   human: { label: "사람 입력", tone: "warn" },
 };
-export type ReportPart = "search" | "hashtags" | "content" | "competitors" | "recommendation" | "summary";
+export type ReportPart = "theme" | "search" | "hashtags" | "content" | "competitors" | "recommendation" | "summary";
 export const SECTION_EVIDENCE: Record<ReportPart, EvidenceKind> = {
-  search: "api", hashtags: "api", content: "api", competitors: "api", recommendation: "ai", summary: "ai",
+  theme: "api", search: "api", hashtags: "api", content: "api", competitors: "api", recommendation: "ai", summary: "ai",
 };
 
 // ---- 숫자
@@ -146,9 +150,21 @@ export interface RequestForm {
   competitors: string;
   keywords: string;
   goal: string;
+  /** 주제(예: 아이돌, #1540). 비면 theme·theme_mode 둘 다 null */
+  theme: string;
+  /** 체크 = 이 주제 안에서 후보를 찾아 순위 매기기(find), 안 하면 use */
+  themeFind: boolean;
 }
 
-export const EMPTY_FORM: RequestForm = { requestText: "", preset: "", product: "", gender: "all", ages: [], format: "", competitors: "", keywords: "", goal: "" };
+export const EMPTY_FORM: RequestForm = {
+  requestText: "", preset: "", product: "", gender: "all", ages: [], format: "", competitors: "", keywords: "", goal: "", theme: "", themeFind: false,
+};
+
+/** 폼 주제 칸 → 서버 값. 주제가 비면 둘 다 null */
+export function themeInput(theme: string, find: boolean): { theme: string | null; theme_mode: ThemeMode | null } {
+  const t = theme.trim();
+  return t ? { theme: t, theme_mode: find ? "find" : "use" } : { theme: null, theme_mode: null };
+}
 
 /** 보고서의 의뢰 요약 → "직접 정하기" 폼 (고쳐서 다시 만들기). 의뢰문은 비운다 */
 export function formFromBrief(b: TrendReportBrief): RequestForm {
@@ -162,6 +178,8 @@ export function formFromBrief(b: TrendReportBrief): RequestForm {
     format: b.format ?? "",
     competitors: b.competitors.join(", "),
     keywords: b.keywords.join(", "),
+    theme: b.theme ?? "",
+    themeFind: b.theme_mode === "find",
   };
 }
 
@@ -181,26 +199,33 @@ export function buildInput(form: RequestForm, rebuild = false): TrendReportInput
     format: form.format.trim() || null,
     competitors: list(form.competitors),
     keywords: list(form.keywords),
+    // 주제가 있을 때만 (비면 칸을 넣지 않는다 = 서버 기본 null)
+    ...(themeInput(form.theme, form.themeFind).theme ? themeInput(form.theme, form.themeFind) : {}),
   };
 }
 
 /** 직접 정한 칸이 하나라도 있는지 (의뢰문도 칸도 비면 만들기 버튼을 막는다) */
 export function hasInput(form: RequestForm): boolean {
   const i = buildInput(form);
-  return Boolean(i.request_text || i.preset || i.product || i.format || i.competitors || i.keywords || i.target_gender || i.target_ages);
+  return Boolean(i.request_text || i.preset || i.product || i.format || i.competitors || i.keywords || i.target_gender || i.target_ages || i.theme);
 }
 
 // ---- v2 헤더: "항목 | 칩"
 
-export interface HeaderChip { text: string; sub: string | null }
-export interface HeaderRow { key: "product" | "target" | "format" | "competitors" | "keywords"; label: string; chips: HeaderChip[]; sourceTag: string | null }
+/** star: 주제 후보에서 온 키워드(앞에 작은 ★) */
+export interface HeaderChip { text: string; sub: string | null; star?: boolean }
+export interface HeaderRow { key: "product" | "theme" | "target" | "format" | "competitors" | "keywords"; label: string; chips: HeaderChip[]; sourceTag: string | null }
 
 /** 출처 꼬리표: 직접 입력(또는 모름)이면 없음 */
 export function sourceTag(s: FieldSource | null | undefined): string | null {
   if (s === "request_text") return "의뢰문에서 추정";
   if (s === "preset") return "프리셋에서 채움";
+  if (s === "company") return "회사 정보로 채움";
+  if (s === "theme") return "주제 후보에서";
   return null;
 }
+
+export const THEME_MODE_LABEL: Record<ThemeMode, string> = { find: "찾아서 순위", use: "그대로 씀" };
 
 /** 경쟁사 칩: 이름이 있으면 이름 + "@아이디", 없으면 "@아이디"만 */
 export function competitorChip(id: string, names?: Record<string, string | null> | null): HeaderChip {
@@ -217,17 +242,55 @@ export function targetChips(gender: TrendReportGender | null, ages: string[]): s
 }
 
 /** 헤더 행들. 제품 행의 목표 칩은 화면이 brief.goal로 그린다. 결과물은 format_parts가 있으면 그것, 없으면 통째로 한 칩 (공백으로 쪼개지 않는다) */
-export function headerRows(b: TrendReportBrief): HeaderRow[] {
+export function headerRows(b: TrendReportBrief, theme?: TrendThemeSection | null): HeaderRow[] {
   const parts = (b.format_parts ?? []).filter(Boolean);
   const format: HeaderChip[] = parts.length ? parts.map((p) => ({ text: p, sub: null })) : b.format ? [{ text: b.format, sub: null }] : [];
   const src = b.sources;
-  return [
+  // 주제 후보에서 온 키워드: 키워드 칸 출처가 theme이면 후보 표에 있는 이름에 ★
+  const fromTheme = new Set(src.keywords === "theme" ? (theme?.rows ?? []).map((r) => r.name) : []);
+  const rows: HeaderRow[] = [
     { key: "product", label: "제품", chips: b.product ? [{ text: b.product, sub: null }] : [], sourceTag: sourceTag(src.product) },
     { key: "target", label: "누구에게", chips: targetChips(b.target_gender, b.target_ages).map((t) => ({ text: t, sub: null })), sourceTag: sourceTag(src.target) },
     { key: "format", label: "무엇을", chips: format, sourceTag: sourceTag(src.format) },
     { key: "competitors", label: `경쟁사 ${b.competitors.length}`, chips: b.competitors.map((c) => competitorChip(c, b.competitor_names)), sourceTag: sourceTag(src.competitors) },
-    { key: "keywords", label: `키워드 ${b.keywords.length}`, chips: b.keywords.map((k) => ({ text: k, sub: null })), sourceTag: sourceTag(src.keywords) },
+    { key: "keywords", label: `키워드 ${b.keywords.length}`, chips: b.keywords.map((k) => ({ text: k, sub: null, star: fromTheme.has(k) })), sourceTag: sourceTag(src.keywords) },
   ];
+  if (b.theme) {
+    const chips: HeaderChip[] = [{ text: b.theme, sub: null }];
+    if (b.theme_mode) chips.push({ text: THEME_MODE_LABEL[b.theme_mode], sub: null });
+    rows.splice(1, 0, { key: "theme", label: "주제", chips, sourceTag: sourceTag(src.theme) });
+  }
+  return rows;
+}
+
+// ---- #1540 0 주제 후보
+
+/** 주제 후보 섹션을 보일지: 섹션이 있고 skipped가 아니며 brief가 find일 때만 (예전 저장본·use·없음은 숨김) */
+export function showThemeSection(r: Pick<TrendReport, "sections"> & { brief?: Pick<TrendReportBrief, "theme" | "theme_mode"> }): boolean {
+  const t = r.sections.theme;
+  return Boolean(t && t.status !== "skipped" && r.brief?.theme_mode === "find" && r.brief.theme);
+}
+
+/** 진행을 세는 섹션 이름 (주제 후보는 보일 때만 더한다). brief가 없으면 주제 후보는 세지 않는다 */
+export function countedSections(r: Pick<TrendReport, "sections"> & { brief?: Pick<TrendReportBrief, "theme" | "theme_mode"> }): ("theme" | "search" | "hashtags" | "content" | "competitors" | "recommendation")[] {
+  const base = ["search", "hashtags", "content", "competitors", "recommendation"] as const;
+  return showThemeSection(r) ? ["theme", ...base] : [...base];
+}
+
+export const SEEN_IN_LABEL: Record<TrendThemeSeenIn, string> = { radar: "인스타 레이더", youtube: "YouTube 인기", llm: "AI 제안" };
+
+export interface ThemeRowView { name: string; level: number; change: string; seenIn: string[]; products: string }
+
+/** 표 한 줄: 변화가 없으면 "–", 상품이 없으면 "–" */
+export function themeRowView(r: TrendThemeRow): ThemeRowView {
+  const p = pctText(r.change_pct, null);
+  return {
+    name: r.name,
+    level: Math.max(0, Math.min(100, Math.round(r.level))),
+    change: p.known ? p.text : "–",
+    seenIn: r.seen_in.map((s) => SEEN_IN_LABEL[s] ?? s),
+    products: r.products.length ? r.products.join(", ") : "–",
+  };
 }
 
 // ---- v2 AI 추천: 콘티 타임라인 · 근거

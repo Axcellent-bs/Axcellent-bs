@@ -351,7 +351,8 @@ export interface ChatPlan { title: string; plan: string; done: string[]; paths: 
 
 // ---- 데이터분석 1:1 대화 카드 (data_chat_get·data_chat_send 메시지의 card, 공통 계약).
 // 서버 모양(snake_case) 그대로 둔다: 경쟁사 이름 표(competitor_names)의 키가 인스타 아이디라 바꾸면 안 된다 (lib/directChat.ts toThread)
-export type ChatCardSource = 'request_text' | 'preset'
+/** company: 회사 정보로 채움 (#1491) */
+export type ChatCardSource = 'request_text' | 'preset' | 'company'
 export interface TrendRequestCard {
   kind: 'trend_request'
   /** 의뢰 문장 그대로 (untrusted, 글자로만) */
@@ -366,6 +367,9 @@ export interface TrendRequestCard {
     /** 인스타 아이디 → 이름 (없으면 {}) */
     competitor_names: Record<string, string>
     sources: { product: ChatCardSource; target: ChatCardSource; format: ChatCardSource; competitors: ChatCardSource; keywords: ChatCardSource }
+    /** 의뢰 주제와 쓰임 (#1540, 예전 카드는 없음) */
+    theme?: string | null
+    theme_mode?: 'find' | 'use' | null
   }
   preset: string | null
   /** "인스타 약 45번·네이버 약 6번·AI 2번" */

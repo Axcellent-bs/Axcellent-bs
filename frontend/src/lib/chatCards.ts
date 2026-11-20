@@ -2,7 +2,7 @@
 // 카드 모양은 공통 계약(lib/planningData.ts ChatCard). 서버 글(의뢰문·결론·근거)은 그대로 글자로만 쓴다.
 import type { ReportStatus, TrendReport, TrendReportInput } from "./data.ts";
 import type { ChatCard, ChatMessage, TrendRequestCard, TrendReportDoneCard } from "./planningData.ts";
-import { formFromBrief, keepPolling, reportHash, reportLabel, targetText, type RequestForm } from "./trendReportView.ts";
+import { THEME_MODE_LABEL, countedSections, formFromBrief, keepPolling, reportHash, reportLabel, targetText, type RequestForm } from "./trendReportView.ts";
 
 // ---- 대화 응답 → 카드 (서버 모양 그대로)
 
@@ -23,7 +23,7 @@ export function withRawCards<T extends { messages: ChatMessage[] }>(thread: T, r
 // ---- 의뢰 카드 표시
 
 export interface CardRow {
-  key: "product" | "target" | "format" | "competitors" | "keywords";
+  key: "product" | "theme" | "target" | "format" | "competitors" | "keywords";
   label: string;
   value: string;
   /** 이 칸을 프리셋에서 채웠으면 "프리셋" 꼬리표 */
@@ -52,13 +52,19 @@ export function keywordsText(keywords: string[]): string {
 export function requestCardRows(card: TrendRequestCard): CardRow[] {
   const b = card.brief;
   const src = b.sources;
-  return [
+  const rows: CardRow[] = [
     { key: "product", label: "제품", value: b.product ?? "정하지 않음", preset: src.product === "preset" },
     { key: "target", label: "타깃", value: targetText(b.target_gender, b.target_ages), preset: src.target === "preset" },
     { key: "format", label: "결과물", value: b.format ?? "정하지 않음", preset: src.format === "preset" },
     { key: "competitors", label: "경쟁사", value: competitorsText(b.competitors, b.competitor_names), preset: src.competitors === "preset" },
     { key: "keywords", label: "키워드", value: keywordsText(b.keywords), preset: src.keywords === "preset" },
   ];
+  const theme = b.theme?.trim();
+  if (theme) {
+    // "아이돌 · 찾아서 순위" (주제가 있을 때만, 제품 다음 줄)
+    rows.splice(1, 0, { key: "theme", label: "주제", value: b.theme_mode ? `${theme} · ${THEME_MODE_LABEL[b.theme_mode]}` : theme, preset: false });
+  }
+  return rows;
 }
 
 /** "분석 의뢰 넣기"가 보내는 값: 의뢰문 + 카드 칸 그대로 + caller human + 대화 id (칸이 오면 서버는 의뢰문을 다시 읽지 않는다) */
@@ -74,6 +80,8 @@ export function cardInput(card: TrendRequestCard, threadId: string | null): Tren
     keywords: [...b.keywords],
     caller: "human",
     chat_thread_id: threadId,
+    // 칸 값으로 접수하면 서버가 의뢰문을 다시 읽지 않으니 주제도 같이 넘긴다 (#1540). 주제가 없으면 칸을 넣지 않는다(서버 기본 null)
+    ...(b.theme?.trim() ? { theme: b.theme.trim(), theme_mode: b.theme_mode ?? "use" } : {}),
   };
 }
 
@@ -90,6 +98,8 @@ export function formFromCard(card: TrendRequestCard): RequestForm {
     preset: card.preset,
     sources: { product: b.sources.product, target: b.sources.target, format: b.sources.format, competitors: b.sources.competitors, keywords: b.sources.keywords },
     competitor_names: b.competitor_names,
+    theme: b.theme ?? null,
+    theme_mode: b.theme_mode ?? null,
   });
 }
 
@@ -135,14 +145,21 @@ export function submitView(s: SubmitState): SubmitView {
 
 // ---- 진행 카드
 
+/** 주제 후보 섹션이 없는 보고서의 칸 수 (주제 후보가 보이는 find 의뢰면 6) */
 export const SECTION_COUNT = 5;
 const FINISHED = new Set(["known", "unknown", "failed"]);
 
-/** 진행 %: 끝난 섹션 수 ÷ 5 (서버 섹션 상태로 센다). 보고서가 끝났으면 100 */
-export function progressPct(r: Pick<TrendReport, "status" | "sections">): number {
+/** 진행 칸 수: 보고서 화면과 같은 규칙(주제 후보는 보일 때만 센다) */
+export function sectionCount(r: Pick<TrendReport, "sections"> & { brief?: TrendReport["brief"] }): number {
+  return countedSections(r).length;
+}
+
+/** 진행 %: 끝난 섹션 수 ÷ 칸 수 (서버 섹션 상태로 센다). 보고서가 끝났으면 100 */
+export function progressPct(r: Pick<TrendReport, "status" | "sections"> & { brief?: TrendReport["brief"] }): number {
   if (!keepPolling(r.status)) return 100;
-  const done = Object.values(r.sections).filter((s) => FINISHED.has(s.status)).length;
-  return Math.round((Math.min(done, SECTION_COUNT) / SECTION_COUNT) * 100);
+  const names = countedSections(r);
+  const done = names.filter((n) => FINISHED.has(r.sections[n]?.status ?? "waiting")).length;
+  return Math.round((done / names.length) * 100);
 }
 
 /** 진행 카드가 다시 읽을지: 대기·만드는 중이면 5초마다, 끝나면 멈춘다 */
