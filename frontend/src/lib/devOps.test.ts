@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 개발 화면 배포·장애 대응의 표시 규칙 (devOps.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deployExecuted, deployedPrCount, deployStatusText, incidentStageText, needsToolLink } from "./devOps.ts";
+import { deployExecuted, deployedPrCount, deployStatusText, incidentStageText, needsToolLink, revertText } from "./devOps.ts";
 import type { Deployment } from "./planning";
 
 const dep = (over: Partial<Deployment>): Deployment => ({
@@ -40,4 +40,10 @@ test("신호원이 없거나 못 읽으면 도구 연결 링크를 띄운다", (
 test("사건 카드 상태는 'PR 연결됨'이고 '완료'라고 하지 않는다 (복구 확인과 무관)", () => {
   assert.equal(incidentStageText(true), "PR 연결됨");
   assert.equal(incidentStageText(false), "PR 연결 전");
+});
+
+test("되돌리기 PR 결과를 사람이 읽는 말로", () => {
+  assert.equal(revertText({ connectionId: "c", sourcePr: 7, revertPr: 9, status: "merged", at: "" }), "레포 PR #7 되돌리기 PR #9 머지됨");
+  assert.equal(revertText({ connectionId: "c", sourcePr: 7, revertPr: 9, status: "auto_merge_scheduled", at: "" }), "레포 PR #7 되돌리기 PR #9 자동 머지 예약 (CI 대기)");
+  assert.equal(revertText({ connectionId: "c", sourcePr: 7, revertPr: null, status: "held", at: "" }), "레포 PR #7 되돌리기 안전 확인 대기");
 });
