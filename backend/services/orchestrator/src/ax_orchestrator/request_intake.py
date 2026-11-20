@@ -118,6 +118,7 @@ class RequestIntake:
         *,
         history: list[str] | None = None,
         thread_id: str | None = None,
+        buyer_id: str | None = None,
     ) -> IntakeResult:
         account = who or UNKNOWN_ACCOUNT
         dup = self._duplicate(account, text)
@@ -135,15 +136,22 @@ class RequestIntake:
             return IntakeResult(
                 True, "limited", "오늘 접수할 수 있는 의뢰 수를 넘었어요. 내일 다시 보내 주세요."
             )
-        return self._record(account, text, decision, thread_id)
+        return self._record(account, text, decision, thread_id, buyer_id)
 
     def _record(
-        self, account: str, text: str, d: Decision, thread_id: str | None = None
+        self,
+        account: str,
+        text: str,
+        d: Decision,
+        thread_id: str | None = None,
+        buyer_id: str | None = None,
     ) -> IntakeResult:
         row = self._requests.create(account, text)
         rid = row["request_id"]
         if thread_id:
             self._requests.link_thread(rid, thread_id)
+        if buyer_id:
+            self._requests.set_buyer(rid, buyer_id)
         self._requests.set_classification(
             rid,
             prompt_version=PROMPT_VERSION,
@@ -155,7 +163,12 @@ class RequestIntake:
             alternatives=d.alternatives,
         )
         if d.outcome == "task" and d.task is not None:
-            ask, notes = request_inputs.check(d.task, text, self._clock())
+            ctx = {"name": account, "buyer_id": buyer_id}
+            ask, notes, handoff = request_inputs.check(d.task, text, self._clock(), ctx)
+            if (
+                handoff is not None
+            ):  # 고객이 고칠 수 없는 이유(구매자 연결 없음): 되묻지 않고 사람에게
+                return self._no_link(rid, handoff)
             if d.task.note and ask is None:
                 notes = [*notes, d.task.note]
             if (
@@ -222,6 +235,12 @@ class RequestIntake:
             "의뢰 담당 불명",
             rid,
         )
+
+    def _no_link(self, rid: str, message: str) -> IntakeResult:
+        """계정에 구매자 연결이 없어 접수할 수 없다: 부서에 보내지 않고 사람 받은 요청에 올린다."""
+        self._requests.set_status(rid, "needs_human", "계정에 구매자 연결이 없어 사람에게 넘겼다")
+        self._escalate(rid, "no_link")
+        return IntakeResult(True, "no_link", f"{message} (번호 {rid})", "의뢰 확인 필요", rid)
 
     def _ask_input(self, rid: str, account: str, thread_id: str | None, ask: str) -> IntakeResult:
         """일은 정했는데 필요한 입력(기간 등)이 문장에 없다: 한 번만 되묻고, 또 없으면 사람에게."""

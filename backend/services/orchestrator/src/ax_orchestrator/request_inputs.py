@@ -33,6 +33,8 @@ class Fill:
     payload: dict[str, Any] = field(default_factory=dict)
     ask: str | None = None
     note: str | None = None  # 어떻게 읽었는지 (고객 안내에 붙인다)
+    # 고객이 고칠 수 없어 되묻지 않고 사람에게 넘길 이유(예: 구매자 연결 없음). 고객 안내 문장
+    handoff: str | None = None
 
 
 def _today(now: datetime) -> date:
@@ -86,7 +88,9 @@ HEADCOUNT_ASK = "몇 월의 팀별 인원을 알려 드릴까요? 예: '이번 �
 SETTLEMENT_ASK = "판매자 정산은 주 단위로 볼 수 있어요. 어느 주로 볼까요? 예: '이번 주', '지난주'"
 
 
-def sales_period(text: str, now: datetime, request_id: str | None = None) -> Fill:
+def sales_period(
+    text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+) -> Fill:
     """매출 분석: 오늘·최근 7일·최근 30일만 지원한다. 기간 말이 없으면 부서 기본값(7일)."""
     unsupported = (
         r"어제|그제|그저께|지난\s*달|지난달|작년|올해|분기|지난\s*주|지난주|(?<!\d)\d{1,2}\s*월"
@@ -102,7 +106,9 @@ def sales_period(text: str, now: datetime, request_id: str | None = None) -> Fil
     return Fill()
 
 
-def closing_period(text: str, now: datetime, request_id: str | None = None) -> Fill:
+def closing_period(
+    text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+) -> Fill:
     """손익 정리: 일·주·월 단위와 그 기준 날짜. 말이 없으면 오늘 하루."""
     today = _today(now)
     if _has(text, r"지난\s*달|지난달|전월|저번\s*달"):
@@ -133,7 +139,9 @@ def closing_period(text: str, now: datetime, request_id: str | None = None) -> F
 
 
 def _month_rule(ask: str, *, upcoming: bool) -> Callable[..., Fill]:
-    def rule(text: str, now: datetime, request_id: str | None = None) -> Fill:
+    def rule(
+        text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+    ) -> Fill:
         found = _month_of(text, _today(now), upcoming=upcoming)
         if found is None:
             return Fill(ask=ask)
@@ -143,7 +151,9 @@ def _month_rule(ask: str, *, upcoming: bool) -> Callable[..., Fill]:
     return rule
 
 
-def settlement_week(text: str, now: datetime, request_id: str | None = None) -> Fill:
+def settlement_week(
+    text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+) -> Fill:
     """판매자 정산: ISO 주(`YYYY-Www`). 주가 없으면 부서 기본 주. 달 단위 말은 지원하지 않는다."""
     today = _today(now)
     if _has(text, r"지난\s*달|지난달|이번\s*달|이번달|월간|월별|(?<!\d)\d{1,2}\s*월"):
@@ -155,7 +165,9 @@ def settlement_week(text: str, now: datetime, request_id: str | None = None) -> 
     return Fill()
 
 
-def anomaly_window(text: str, now: datetime, request_id: str | None = None) -> Fill:
+def anomaly_window(
+    text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+) -> Fill:
     """지표 이상 점검: 시간대가 있는 시각 구간. 말이 없으면 최근 24시간."""
     end = now if now.tzinfo else now.replace(tzinfo=KST)
     end = end.astimezone(KST).replace(microsecond=0)
@@ -175,12 +187,16 @@ def anomaly_window(text: str, now: datetime, request_id: str | None = None) -> F
     return Fill({"window_from": start.isoformat(), "window_to": stop.isoformat()}, note=note)
 
 
-def customer_text(text: str, now: datetime, request_id: str | None = None) -> Fill:
+def customer_text(
+    text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+) -> Fill:
     """고객 질문 그대로(고객층 질문 `text`). 문장은 데이터로만 쓰이며 길이만 자른다."""
     return Fill({"text": text.strip()[:MAX_SEGMENT_TEXT]})
 
 
-def search_query(text: str, now: datetime, request_id: str | None = None) -> Fill:
+def search_query(
+    text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+) -> Fill:
     """과거 기록 찾기 `query`: 고객 문장 그대로(길이만 자른다)."""
     return Fill({"query": text.strip()[:MAX_QUERY]})
 
@@ -190,7 +206,9 @@ MAX_TICKET_TITLE = 100
 MAX_TICKET_EVIDENCE = 400
 
 
-def notice_kind(text: str, now: datetime, request_id: str | None = None) -> Fill:
+def notice_kind(
+    text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+) -> Fill:
     """공지 초안: 문장의 키워드로 공지 종류를 정한다. 시각 같은 세부 값은 비워 보낸다(고정 문안)."""
     if _has(text, r"복구|정상화|복귀|해결|재개"):
         kind, note = "incident_resolved", "복구 안내 공지로 작성"
@@ -203,7 +221,9 @@ def notice_kind(text: str, now: datetime, request_id: str | None = None) -> Fill
     return Fill({"kind": kind, "facts": {}}, note=note)
 
 
-def ticket_text(text: str, now: datetime, request_id: str | None = None) -> Fill:
+def ticket_text(
+    text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+) -> Fill:
     """기능 개발 요청: 문장을 제목으로, 근거는 의뢰 번호와 문장 앞부분으로 채운다(길이는 자른다)."""
     one = re.sub(r"\s+", " ", text).strip()
     tag = f" {request_id}" if request_id else ""
@@ -216,7 +236,65 @@ def ticket_text(text: str, now: datetime, request_id: str | None = None) -> Fill
     return Fill(payload)
 
 
+BUYER_LINK_MSG = (
+    "환불·교환 접수는 계정에 구매자 연결이 있어야 해요. 담당자가 확인해서 알려 드릴게요."
+)
+ORDER_ASK = "어느 주문인가요? 주문 번호(ord_로 시작)를 알려 주세요."
+CLAIM_TYPE_ASK = "환불, 교환, 취소 중 어떤 접수인가요?"
+_ORDER_ID = re.compile(r"ord_[A-Za-z0-9_-]{1,40}")
+# (접수 유형, 문장 속 말, 화면에 쓰는 이름). 둘 이상이 함께 나오면 어느 쪽인지 몰라 되묻는다
+CLAIM_TYPES = (
+    ("cancel", r"취소", "취소"),
+    ("exchange", r"교환", "교환"),
+    ("return", r"환불|반품|환급", "환불·반품"),
+)
+# 위에서부터 처음 걸리는 사유. 못 읽으면 other(부서도 못 정할 때 쓰는 값)
+CLAIM_REASONS = (
+    ("damaged", r"파손|깨졌|깨져|부서|찢어|훼손|망가", "파손"),
+    ("defect", r"불량|고장|하자|작동\s*안|오작동", "불량"),
+    ("wrong_item", r"오배송|잘못\s*(온|배송|왔)|다른\s*(상품|책|제품)", "오배송"),
+    ("missing_item", r"누락|빠졌|빠져|덜\s*왔", "누락"),
+    ("late_delivery", r"지연|늦게|안\s*와|도착\s*안|배송\s*안", "배송 지연"),
+    ("change_of_mind", r"변심|마음에\s*안|필요\s*없|단순", "단순 변심"),
+)
+MAX_NAME = 80
+
+
+def claim_input(
+    text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+) -> Fill:
+    """환불·교환 접수. 구매자 번호와 이름은 로그인 계정(`ctx`)에서만 온다. 문장에서는 읽지 않는다.
+
+    주문 번호·유형·사유만 문장에서 읽는다. 주문이 정말 그 구매자의 것인지는 고객지원이 주문 조회로
+    확인한다(다른 사람 주문이면 접수되지 않는다). 못 읽으면 지어내지 않고 되묻는다.
+    """
+    buyer = (ctx or {}).get("buyer_id")
+    name = str((ctx or {}).get("name") or "").strip()[:MAX_NAME]
+    if not buyer or not name:
+        return Fill(handoff=BUYER_LINK_MSG)
+    order = _ORDER_ID.search(text)
+    if order is None:
+        return Fill(ask=ORDER_ASK)
+    kinds = [(code, ko) for code, pattern, ko in CLAIM_TYPES if _has(text, pattern)]
+    if len(kinds) != 1:
+        return Fill(ask=CLAIM_TYPE_ASK)
+    reason, reason_ko = next(
+        ((code, ko) for code, pattern, ko in CLAIM_REASONS if _has(text, pattern)),
+        ("other", "기타"),
+    )
+    payload = {
+        "buyer_id": buyer,
+        "customer_name": name,
+        "order_id": order.group(0),
+        "type": kinds[0][0],
+        "reason": reason,
+    }
+    note = f"주문 {order.group(0)} {kinds[0][1]} 접수 (사유: {reason_ko})"
+    return Fill(payload, note=note)
+
+
 RULES: dict[str, Callable[..., Fill]] = {
+    "claim_input": claim_input,
     "notice_kind": notice_kind,
     "ticket_text": ticket_text,
     "sales_period": sales_period,
@@ -230,20 +308,30 @@ RULES: dict[str, Callable[..., Fill]] = {
 }
 
 
-def fill(rule: str, text: str, now: datetime, request_id: str | None = None) -> Fill:
+def fill(
+    rule: str,
+    text: str,
+    now: datetime,
+    request_id: str | None = None,
+    ctx: dict[str, Any] | None = None,
+) -> Fill:
     """규칙 이름으로 입력을 만든다. 모르는 규칙 이름이면 오류(일 목록의 오타를 시험이 잡는다)."""
-    return RULES[rule](text, now, request_id)
+    return RULES[rule](text, now, request_id, ctx)
 
 
-def check(task: Any, text: str, now: datetime) -> tuple[str | None, list[str]]:
-    """일의 모든 단계를 채워 본다. 돌려주는 값: (되물을 문장 또는 None, 안내에 붙일 읽은 방법들)."""
+def check(
+    task: Any, text: str, now: datetime, ctx: dict[str, Any] | None = None
+) -> tuple[str | None, list[str], str | None]:
+    """일의 모든 단계를 채워 본다. 돌려주는 값: (되물을 문장, 읽은 방법들, 사람에게 넘길 이유)."""
     notes: list[str] = []
     for step in task.steps:
         if not step.fill:
             continue
-        result = fill(step.fill, text, now)
+        result = fill(step.fill, text, now, None, ctx)
+        if result.handoff:
+            return None, [], result.handoff
         if result.ask:
-            return result.ask, []
+            return result.ask, [], None
         if result.note:
             notes.append(result.note)
-    return None, notes
+    return None, notes, None

@@ -192,6 +192,11 @@ class RequestRunner:
             await asyncio.gather(*(self._step(row, sid) for sid in ready))
         self._finish(request_id)
 
+    @staticmethod
+    def _ctx(row: dict[str, Any]) -> dict[str, Any]:
+        """입력 규칙이 쓰는 의뢰자 정보: 이름(계정)과 구매자 번호(로그인 계정에서 받은 값)."""
+        return {"name": row.get("account"), "buyer_id": row.get("buyer_id")}
+
     def _stale(self, row: dict[str, Any], task: request_tasks.TaskDef) -> bool:
         """시작 전인데 저장된 계획이 지금 일 목록과 다른가 (옛 계획으로 돌지 않게)."""
         if any(s["status"] != "pending" for s in row["steps"].values()):
@@ -272,9 +277,9 @@ class RequestRunner:
             "fill"
         ):  # 고객 문장에서 기간 같은 입력을 채운다. 못 채우면 부서에 보내지 않는다
             filled = request_inputs.fill(
-                spec["fill"], row["text"], self._clock(), row["request_id"]
+                spec["fill"], row["text"], self._clock(), row["request_id"], self._ctx(row)
             )
-            if filled.ask:
+            if filled.ask or filled.handoff:
                 self._update(
                     rid,
                     step_id,
@@ -295,7 +300,8 @@ class RequestRunner:
                 status="waiting_human",
                 grade=grade,
                 reason_code=NEEDS_APPROVAL,
-                note="상태를 바꾸는 일이라 사람 승인을 기다린다",
+                note="상태를 바꾸는 일이라 사람 승인을 기다린다"
+                + (f" ({filled.note})" if filled is not None and filled.note else ""),
                 started_at=stamp(),
             )
             return

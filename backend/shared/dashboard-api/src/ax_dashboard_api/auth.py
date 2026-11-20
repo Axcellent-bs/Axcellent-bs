@@ -84,6 +84,24 @@ def human_from_authorization(authorization: str | None) -> str:
     return human.name
 
 
+def buyer_id_from_authorization(authorization: str | None) -> str | None:
+    """로그인 세션 계정에 연결된 구매자 번호. 세션이 아니거나 연결이 없으면 None(지어내지 않는다).
+
+    공용 사람 토큰에는 계정이 없어 구매자도 없다. 값은 이 함수로만 읽고 화면의 값은 쓰지 않는다."""
+    token = bearer(authorization)
+    if not token or token.startswith("mock:"):
+        return None
+    try:
+        human = human_auth.find_human(token, shared_tokens=_configured(), mock=is_mock())
+    except human_auth.HumanAuthError:
+        return None
+    if human is None or not human.account_id:
+        return None
+    from ax_dashboard_api import accounts
+
+    return accounts.buyer_id_of_account(human.account_id)
+
+
 def require_human(request: Request) -> None:
     """읽기·쓰기 모두 사람 토큰을 요구한다. 없으면 401, 에이전트·모르는 토큰이면 403."""
     if request.method in OPEN_METHODS:

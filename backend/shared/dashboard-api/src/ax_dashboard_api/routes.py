@@ -85,7 +85,11 @@ from ax_dashboard_api import (
 from ax_dashboard_api import (
     communications as communication_log,
 )
-from ax_dashboard_api.auth import human_from_authorization, require_human
+from ax_dashboard_api.auth import (
+    buyer_id_from_authorization,
+    human_from_authorization,
+    require_human,
+)
 from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, require_mock
 from ax_dashboard_api.schemas import (
     AgentMessageBody,
@@ -1562,9 +1566,12 @@ async def orchestrator_chat_get(thread_id: str, request: Request) -> dict:
 async def orchestrator_chat_send(body: OrchestratorChatSendBody, request: Request) -> dict:
     """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
     who = human_from_authorization(request.headers.get("authorization"))
+    buyer = buyer_id_from_authorization(request.headers.get("authorization"))
     payload = {"who": who, "message": body.message} | (
         {"thread_id": body.thread_id} if body.thread_id else {}
     )
+    if buyer:  # 로그인 계정에 구매자 연결이 있을 때만(환불·교환 접수가 이 값으로 구매자를 정한다)
+        payload["buyer_id"] = buyer
     out = await orchestrator_chat.call("orchestrator_chat_send", payload)
     return ok(out["thread"])
 

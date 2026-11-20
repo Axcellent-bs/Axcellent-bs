@@ -15,6 +15,11 @@ class OrchestratorChatSendInput(AxModel):
     who: str = Field(min_length=1, max_length=80)
     thread_id: str | None = Field(default=None, min_length=1, max_length=64)
     message: str = Field(min_length=1, max_length=ORCHESTRATOR_CHAT_MESSAGE_MAX)
+    # 이 사람의 로그인 계정에 연결된 shop-api 구매자 번호(`buy_0001` 꼴). 대시보드가 세션에서만
+    # 채운다(대화 문장이나 화면이 보낸 값이 아니다). 환불·교환 접수가 이 값으로만 구매자를 정한다.
+    buyer_id: str | None = Field(
+        default=None, min_length=1, max_length=20, pattern=r"^[A-Za-z0-9_-]+$"
+    )
 
 
 class OrchestratorChatListInput(AxModel):

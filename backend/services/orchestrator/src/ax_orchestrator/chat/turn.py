@@ -166,7 +166,13 @@ class ChatService:
             raise ChatRefused("not_found", f"대화 {thread_id}가 없다")
         return {"thread_id": thread_id, "removed": True}
 
-    def send(self, who: str | None, thread_id: str | None, message: str) -> dict[str, Any]:
+    def send(
+        self,
+        who: str | None,
+        thread_id: str | None,
+        message: str,
+        buyer_id: str | None = None,
+    ) -> dict[str, Any]:
         """글을 저장하고 `answering`으로 돌려준다. 답은 뒤에서 붙는다(이벤트 루프 안에서 부른다)."""
         message = message.strip()
         if not message or len(message) > MAX_MESSAGE_CHARS:
@@ -183,7 +189,7 @@ class ChatService:
             raise ChatRefused("thread_closed", "끝난 대화에는 보낼 수 없다. 새 대화를 시작한다")
         if outcome == "busy":
             raise ChatRefused("thread_busy", "AI가 아직 답하는 중이다")
-        task = asyncio.get_running_loop().create_task(self._answer(th["id"], llm))
+        task = asyncio.get_running_loop().create_task(self._answer(th["id"], llm, buyer_id))
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
         return visible(th, who)
@@ -193,11 +199,11 @@ class ChatService:
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
 
-    async def _answer(self, thread_id: str, llm: Any) -> None:
+    async def _answer(self, thread_id: str, llm: Any, buyer_id: str | None = None) -> None:
         th = self.store.get(thread_id)
         if th is None:
             return
-        if await self._try_intake(thread_id, th, llm):
+        if await self._try_intake(thread_id, th, llm, buyer_id):
             return
         data = {
             "facts": facts.collect(self._get_manager()),
@@ -220,7 +226,9 @@ class ChatService:
         logger.warning("총괄 대화 LLM 실패 %s: %s", type(error).__name__, error)
         self.store.finish_turn(thread_id, failed_reply(error), kind="error")
 
-    async def _try_intake(self, thread_id: str, th: dict[str, Any], llm: Any) -> bool:
+    async def _try_intake(
+        self, thread_id: str, th: dict[str, Any], llm: Any, buyer_id: str | None = None
+    ) -> bool:
         """의뢰면 접수하고 접수 안내로 답했는지(True). 질문·분류 실패면 False(설명 흐름으로)."""
         intake = self._intake()
         if intake is None:
@@ -230,7 +238,12 @@ class ChatService:
             return False
         try:
             result = await intake.receive(
-                th["who"], users[-1], llm, history=users[:-1], thread_id=thread_id
+                th["who"],
+                users[-1],
+                llm,
+                history=users[:-1],
+                thread_id=thread_id,
+                buyer_id=buyer_id,
             )
         except Exception as exc:  # noqa: BLE001 - 접수 문제로 대화가 막히지 않게 설명 흐름으로 넘긴다
             logger.warning("의뢰 접수 실패 %s", type(exc).__name__)

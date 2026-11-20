@@ -27,12 +27,14 @@ log = logging.getLogger("orchestrator.request_inbox")
 UNKNOWN = "unknown"
 UNCLEAR = "unclear"
 STEP_FAILED = "step_failed"
+NO_LINK = "no_link"
 GENERIC_SERVICE = "orchestrator"
 GENERIC_SKILL = "work_request"
 TO_CHECK = {
     UNKNOWN: "어느 부서가 맡을지 정하지 못한 의뢰입니다. 담당을 정해 처리해 주세요",
     UNCLEAR: "되물었는데도 무슨 일인지 알 수 없는 의뢰입니다. 고객에게 확인해 주세요",
     STEP_FAILED: "부서가 재시도 뒤에도 일을 끝내지 못했습니다. 원인을 확인해 주세요",
+    NO_LINK: "계정에 구매자 연결이 없어 환불·교환을 접수하지 못했습니다. 연결을 확인해 주세요",
 }
 
 

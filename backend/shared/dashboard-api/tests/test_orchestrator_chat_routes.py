@@ -97,3 +97,26 @@ def test_bad_body_stops_before_finance(client: TestClient, fake: Fake) -> None:
     assert client.post(URL, json={"message": ""}).status_code == 422
     assert client.post(URL, json={"message": "x" * 2001}).status_code == 422
     assert fake.calls == []
+
+
+def test_send_adds_the_buyer_number_of_the_login_account_not_a_body_value(
+    client: TestClient, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ax_dashboard_api import routes
+
+    monkeypatch.setattr(routes, "buyer_id_from_authorization", lambda _auth: "buy_0007")
+    res = client.post(URL, json={"message": "환불 접수해 주세요", "buyer_id": "buy_9999"})
+    assert res.status_code == 200
+    assert fake.calls[0][1].input["buyer_id"] == "buy_0007"  # 화면이 보낸 값이 아니다
+
+
+def test_send_has_no_buyer_number_when_the_account_has_no_link(
+    client: TestClient, fake: Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ax_dashboard_api import routes
+
+    monkeypatch.setattr(routes, "buyer_id_from_authorization", lambda _auth: None)
+    assert (
+        client.post(URL, json={"message": "환불 접수", "buyer_id": "buy_9999"}).status_code == 200
+    )
+    assert "buyer_id" not in fake.calls[0][1].input  # 연결이 없으면 값을 만들지 않는다
