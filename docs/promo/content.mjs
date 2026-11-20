@@ -19,8 +19,10 @@ export default {
 
   // 비워 두면 그 버튼은 화면에 나오지 않는다 (확정되기 전에 잘못된 링크가 나가지 않게)
   links: {
-    // 브로셔 PDF 받기(맨 위 메뉴·첫 화면·마지막 안내 버튼과 콘텐츠 칸의 받기 카드가 이 주소를 쓴다)
-    brochureUrl: "assets/axcellent-brochure.pdf",
+    // 브로셔 PDF 받기(맨 위 메뉴·첫 화면·마지막 안내 버튼과 콘텐츠 칸의 받기 카드가 이 주소를 쓴다).
+    // 뒤의 ?v=는 Cloudflare 캐시를 피하는 값이다: 파일이 서버에 올라가기 전에 받아 간 404가 캐시에 4시간 남아 받기가 실패했다.
+    // PDF를 바꿔 올릴 때마다 이 값을 올린다(예: 20261121)
+    brochureUrl: "assets/axcellent-brochure.pdf?v=20261120",
     brochureLabel: "브로셔 PDF 받기",
     // 상담 문의 버튼(노란 버튼). 비워 두면 맨 위 메뉴·첫 화면·마지막 안내의 버튼이 모두 안 보이고, 아래 contactNote 글만 마지막 안내에 남는다.
     // 버튼을 다시 보이려면 mailto 주소(예: "mailto:dejasix66@gmail.com") 또는 Instagram DM 주소를 채운다
