@@ -5,6 +5,8 @@
 재무 화면과 멱등 처리(같은 요청을 두 번 실행하지 않음)가 이어진다.
 
 - 경로가 없으면(테스트·단독 실행) 아무것도 하지 않는다
+- `FINANCE_STATE_FILE`을 안 정했고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 여러 회사 설계 1-6)
+  `<회사 폴더>/catbooks/finance_state.json` (옛 자리에 있으면 처음 읽을 때 옮긴다, `company_folder`)
 - 몇 초마다 바뀐 것만 쓰고, 서버를 끌 때 한 번 더 쓴다
 - 임시 파일에 쓴 뒤 바꿔 끼워 반쯤 쓴 파일이 남지 않게 한다
 - 읽다가 형식이 틀리면 버리지 않고 옆에 `.broken`으로 옮기고 빈 상태로 시작한다
@@ -16,12 +18,11 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
 from ax_contracts.schemas import TENANT_ID_DEFAULT
-from finance_agent import exports
+from finance_agent import company_folder, exports
 from finance_agent.handlers import State
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,13 @@ VERSION = 1
 SAVE_SECONDS = 5.0
 
 
+STATE_ENV = "FINANCE_STATE_FILE"
+STATE_NAME = "finance_state.json"
+
+
 def state_file() -> Path | None:
-    raw = os.getenv("FINANCE_STATE_FILE", "").strip()
-    return Path(raw) if raw else None
+    """`FINANCE_STATE_FILE` → 회사 폴더(`<회사 폴더>/catbooks/finance_state.json`) → None."""
+    return company_folder.path_for(STATE_ENV, STATE_NAME)
 
 
 def dump(s: State) -> dict[str, Any]:
