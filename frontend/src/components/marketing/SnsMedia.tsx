@@ -6,8 +6,6 @@ import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
 import { BriefMediaMaker } from "./BriefMediaMaker";
 import { PublishControlCard } from "./PublishControlCard";
-import { VideoProviderCard } from "./VideoProviderCard";
-import { CostLimitCard } from "./CostLimitCard";
 import { CharacterSheetMaker } from "./CharacterSheetMaker";
 import { RequestVideos } from "./RequestVideos";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, type StoredBrief } from "@/lib/briefs";
@@ -85,8 +83,6 @@ export function SnsMedia() {
       </header>
 
       <PublishControlCard />
-      <VideoProviderCard />
-      <CostLimitCard />
 
       <CharacterSheetMaker />
 
