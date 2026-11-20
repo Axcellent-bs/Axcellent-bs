@@ -99,6 +99,18 @@
       "priority": "recommended"
     },
     {
+      "id": "storyboard_prompt",
+      "description": "사람이 적은 줄거리(untrusted.story, 1000자 이하)와 이미지 시트의 캐릭터 고정 문장(untrusted.character_en, 선택), 그림체(untrusted.style_en, 선택), 칸 수(untrusted.shots: 6·9·12, 기본 12)로 장면마다 샷 크기·카메라 앵글·화면 배치를 정한 스토리보드 칸과 칸별 이미지 프롬프트, 3열 스토리보드 시트 프롬프트를 만든다. 샷 크기·앵글 이름과 영어 구도 문장은 코드 표(SHOT_SIZES·CAMERA_ANGLES)에서만 나온다. 이미지는 만들지 않고 상태를 바꾸지 않는다. 거절 outcome: no_story·invalid_input·llm_not_configured·llm_failed.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_storyboard.py#StoryboardInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_storyboard.py#StoryboardPromptOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "receive_campaign_brief",
       "description": "기획이 확정한 기획안(CampaignBriefInput)을 받아 보관한다. 같은 proposal_id는 한 번만 받고 다시 오면 duplicate(보관본 그대로, 처음 campaign_id 반환). 받으면 accepted와 campaign_id(cmp_ + proposal_id, start_campaign도 같은 id를 쓴다), 받을 수 없으면 rejected와 reason_code(unsupported_schema_version·invalid_proposal_id·empty_title·empty_idea·empty_why). facts·target은 받은 그대로 보관하며 숫자를 계산하지 않는다. 캠페인은 시작하지 않는다. 저장소는 메모리라 다시 시작하면 사라진다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CampaignBriefInput",

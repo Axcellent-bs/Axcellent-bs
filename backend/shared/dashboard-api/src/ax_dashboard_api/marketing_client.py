@@ -621,3 +621,49 @@ async def character_sheet_call(image: dict[str, Any], note: str | None) -> dict[
         f"마케팅이 요청을 처리하지 못했다 ({result.outcome})"
     )
     raise ApiError(status, code, str(message))
+
+
+# 스토리보드 프롬프트(read) 거절 outcome → (HTTP 상태, 오류 코드)
+STORYBOARD_REFUSALS = {
+    "no_story": (422, "NO_STORY"),
+    "invalid_input": (400, "INVALID_INPUT"),
+    "llm_not_configured": (409, "LLM_NOT_CONFIGURED"),
+    "llm_failed": (502, "LLM_FAILED"),
+}
+STORYBOARD_DEADLINE_SECONDS = 120  # 칸 12개를 쓰는 LLM 호출이라 대화보다 길게 둔다
+
+
+async def storyboard_call(
+    story: str, character_en: str | None, style_en: str | None, shots: int
+) -> dict[str, Any]:
+    """스토리보드 프롬프트 skill.
+
+    줄거리·캐릭터 문장·그림체는 사람이 넣은 것이라 untrusted로만 넘긴다.
+    """
+    config.set_agent_name(AGENT_NAME)
+    untrusted: dict[str, Any] = {"story": story, "shots": shots}
+    if character_en:
+        untrusted["character_en"] = character_en
+    if style_en:
+        untrusted["style_en"] = style_en
+    request = AgentRequest(
+        meta=RequestMeta(
+            context_id=f"ctx_storyboard_{uuid.uuid4().hex[:12]}",
+            token=config.agent_token(AGENT_NAME),
+            deadline=datetime.now(UTC) + timedelta(seconds=STORYBOARD_DEADLINE_SECONDS),
+            idempotency_key=f"ui:storyboard:{uuid.uuid4().hex}",
+        ),
+        skill="storyboard_prompt",
+        input={},
+        untrusted=untrusted,
+    )
+    result = await SEND(TARGET, request)
+    if result.status == TaskStatus.COMPLETED:
+        return result.output or {}
+    if result.status == TaskStatus.CANCELED:
+        raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
+    status, code = STORYBOARD_REFUSALS.get(result.outcome or "", (502, "UPSTREAM_FAILED"))
+    message = (result.output or {}).get("message") or (
+        f"마케팅이 요청을 처리하지 못했다 ({result.outcome})"
+    )
+    raise ApiError(status, code, str(message))

@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { ACCEPT, makeCharacterSheet, shrinkImage, type CharacterSheetResult } from "@/lib/characterSheet";
 
-// 마케팅 › SNS·미디어 › 캐릭터 시트 프롬프트.
+// 마케팅 › SNS·미디어 › 이미지 시트 만들기 (캐릭터 시트 프롬프트).
 // 캐릭터 이미지 한 장(+ 선택 메모)을 올리면 마케팅 AI가 같은 캐릭터의 캐릭터 시트 이미지 프롬프트를 만든다.
 // 방향 7칸·표정 칸은 서버 코드가 넣는다. 이미지는 저장하지 않고, 이미지를 만들거나 게시하지 않는다.
 
 type Picked = { media_type: string; data_base64: string; preview: string; name: string };
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+export function CopyButton({ text, label }: { text: string; label: string }) {
   const [state, setState] = useState<"idle" | "ok" | "failed">("idle");
   const copy = () => navigator.clipboard.writeText(text).then(() => setState("ok"), () => setState("failed"));
   return (
@@ -17,7 +17,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-function PromptBox({ title, text }: { title: string; text: string }) {
+export function PromptBox({ title, text }: { title: string; text: string }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -69,7 +69,7 @@ function Result({ r }: { r: CharacterSheetResult }) {
   );
 }
 
-export function CharacterSheetMaker() {
+export function CharacterSheetMaker({ onResult }: { onResult?: (r: CharacterSheetResult) => void } = {}) {
   const [picked, setPicked] = useState<Picked | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -94,9 +94,11 @@ export function CharacterSheetMaker() {
     setBusy(true);
     setError(null);
     try {
-      setResult(await makeCharacterSheet({ media_type: picked.media_type, data_base64: picked.data_base64 }, note));
+      const r = await makeCharacterSheet({ media_type: picked.media_type, data_base64: picked.data_base64 }, note);
+      setResult(r);
+      onResult?.(r);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "캐릭터 시트 프롬프트를 만들지 못했어요");
+      setError(e instanceof Error ? e.message : "이미지 시트 프롬프트를 만들지 못했어요");
     } finally {
       setBusy(false);
     }
@@ -105,8 +107,8 @@ export function CharacterSheetMaker() {
   return (
     <section className="card space-y-4 p-6" aria-labelledby="character-sheet-title">
       <div>
-        <h2 id="character-sheet-title" className="text-lg font-semibold">캐릭터 시트 프롬프트</h2>
-        <p className="mt-1 text-xs text-ink-500">캐릭터 그림·사진 한 장을 올리면 같은 캐릭터의 정면·뒷면·왼쪽·오른쪽·위·아래·3/4 각도와 표정·포즈·색 팔레트가 한 장에 들어간 이미지 프롬프트를 만들어요. 읽기 일이라 아무것도 바꾸지 않고, 올린 이미지는 저장하지 않아요. 이미지는 만들지 않아요.</p>
+        <h2 id="character-sheet-title" className="text-lg font-semibold">이미지 시트 만들기</h2>
+        <p className="mt-1 text-xs text-ink-500">캐릭터 그림·사진 한 장을 올리면 같은 캐릭터의 정면·뒷면·왼쪽·오른쪽·위·아래·3/4 각도와 표정·포즈·색 팔레트가 한 장에 들어간 이미지 프롬프트를 만들어요. 여기서 나온 캐릭터 문장은 아래 스토리보드에 이어서 쓸 수 있어요. 읽기 일이라 아무것도 바꾸지 않고, 올린 이미지는 저장하지 않아요. 이미지는 만들지 않아요.</p>
       </div>
       <div className="flex flex-wrap items-start gap-4">
         <div className="flex h-32 w-32 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-surface ring-1 ring-ink-100">
