@@ -1,7 +1,11 @@
 """인사 AI 직접 대화 REST. 개발 AI의 `/dev-chat`과 같은 모양이다.
 (`{data}` 봉투, 대화 = id·title·status·messages[]·who·시각)
 
-- `POST /api/hr/chat` `{thread_id?, message}` → 바뀐 대화 전체. AI 답 하나까지 기다린다.
+- `POST /api/hr/chat` `{thread_id?, message, room_id?}` → 바뀐 대화 전체. AI 답 하나까지 기다린다.
+  `room_id`(1~64자, 11/20): 단톡방(전체 대화방 "all"·이슈 방 context_id)에서 보낼 때만
+  화면이 넣는다.
+  새 대화를 만들 때만 저장하고 이어 쓰기에서는 무시한다. 단톡방 대화는 누구나 원문을 읽는다
+  (`shared: true`, `owner` = 건 사람). 이어 쓰기·지우기는 건 사람만 그대로.
 - `GET /api/hr/chat` 목록, `GET /api/hr/chat/{id}` 하나.
 - `POST /api/hr/chat/{id}/remove` 본인 대화를 숨긴다(지우지 않고 removed_at·removed_by 기록).
   남의 대화 403, 없거나 이미 숨겼으면 404.
@@ -25,6 +29,8 @@ from ax_agent_template import human_auth
 from ax_agent_template.config import is_mock
 from hr_agent.chat import threads, turn
 from hr_agent.services import get_services
+
+ROOM_MAX = 64
 
 
 class _AuthError(Exception):
@@ -68,9 +74,23 @@ def _auth_err(exc: _AuthError) -> JSONResponse:
 
 
 def _visible(th: dict[str, Any], who: str) -> dict[str, Any]:
-    if not th["who"] or th["who"] == who:
-        return {**th, "restricted": False, "message_count": len(th["messages"])}
-    return {**th, "messages": [], "restricted": True, "message_count": len(th["messages"])}
+    """본인은 원문 전부. 단톡방(room_id)에서 만든 대화는 누구나 원문(shared, owner=건 사람).
+    그 밖의 남의 1:1 대화는 요약만(restricted). 쓰기(이어 쓰기·지우기)는 본인만 그대로."""
+    count = len(th["messages"])
+    shared = {"shared": bool(th.get("room_id")), "owner": th["who"] if th.get("room_id") else None}
+    if not th["who"] or th["who"] == who or th.get("room_id"):
+        return {**th, "restricted": False, "message_count": count, **shared}
+    return {**th, "messages": [], "restricted": True, "message_count": count, **shared}
+
+
+def room_of(body: dict[str, Any]) -> str | None:
+    """보내기 본문의 선택 room_id (1~64자 문자열). 틀리면 ValueError."""
+    room = body.get("room_id")
+    if room is None:
+        return None
+    if not isinstance(room, str) or not 1 <= len(room) <= ROOM_MAX:
+        raise ValueError(f"room_id는 1~{ROOM_MAX}자 문자열이어야 한다")
+    return room
 
 
 def create_chat_router() -> APIRouter:
@@ -119,7 +139,11 @@ def create_chat_router() -> APIRouter:
                 400, "INVALID_INPUT", f"message는 1~{turn.MAX_MESSAGE_CHARS}자 문자열이어야 한다"
             )
         try:
-            th = await turn.turn(get_services(), thread_id, message.strip(), who)
+            room = room_of(body)
+        except ValueError as exc:
+            return _err(400, "INVALID_INPUT", str(exc))
+        try:
+            th = await turn.turn(get_services(), thread_id, message.strip(), who, room)
         except turn.ChatRefused as exc:
             return _err(exc.status, exc.code, exc.message)
         return _ok(_visible(th, who))

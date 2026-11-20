@@ -115,11 +115,15 @@ def make_title(message: str) -> str:
 
 
 def visible(th: dict[str, Any], who: str | None) -> dict[str, Any]:
-    """본인 대화는 전부, 남의 대화는 원문 없이 요약만."""
+    """본인 대화는 전부, 남의 대화는 원문 없이 요약만.
+
+    단톡방(room_id)에서 만든 대화는 누구나 원문(shared, owner=건 사람). 쓰기는 `_own` 그대로."""
     count = len(th["messages"])
-    if not th["who"] or th["who"] == who:
-        return {**th, "restricted": False, "message_count": count}
-    return {**th, "messages": [], "restricted": True, "message_count": count}
+    room = th.get("room_id")
+    shared = {"shared": bool(room), "owner": th.get("who") if room else None}
+    if not th["who"] or th["who"] == who or room:
+        return {**th, "restricted": False, "message_count": count, **shared}
+    return {**th, "messages": [], "restricted": True, "message_count": count, **shared}
 
 
 class ChatService:
@@ -173,8 +177,11 @@ class ChatService:
             raise ChatRefused("not_found", f"대화 {thread_id}가 없다")
         return thread_id
 
-    def send(self, who: str | None, thread_id: str | None, message: str) -> dict[str, Any]:
-        """글을 저장하고 `answering`으로 돌려준다. 답은 뒤에서 붙는다(이벤트 루프 안에서 부른다)."""
+    def send(self, who: str | None, thread_id: str | None, message: str,
+             room_id: str | None = None) -> dict[str, Any]:  # fmt: skip
+        """글을 저장하고 `answering`으로 돌려준다. 답은 뒤에서 붙는다(이벤트 루프 안에서 부른다).
+
+        `room_id`(단톡방)는 새 대화를 만들 때만 저장한다. 이어 쓰기에서는 무시한다."""
         message = message.strip()
         if not message or len(message) > MAX_MESSAGE_CHARS:
             raise ChatRefused("invalid_input", f"message는 1~{MAX_MESSAGE_CHARS}자여야 한다")
@@ -182,7 +189,7 @@ class ChatService:
         if llm is None:
             raise ChatRefused("llm_not_configured", "LLM 설정이 없다 (SAFETY_LLM_*·LLM_*)")
         self.store.expire_idle()
-        th = self.store.create(make_title(message), who) if thread_id is None else None
+        th = self.store.create(make_title(message), who, room_id) if thread_id is None else None
         if th is None:
             th = self._own(who, thread_id or "")
         outcome, th = self.store.begin_turn(th["id"], message)

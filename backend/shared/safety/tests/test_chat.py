@@ -136,3 +136,71 @@ def test_detail_by_query_is_the_same_as_the_path(chat_client: TestClient) -> Non
     assert by_query["id"] == tid and by_query["restricted"] is False
     assert by_query["messages"][0]["text"] == "등급이 뭐야?"
     assert chat_client.get("/api/safety/chat?thread_id=safetychat-99").status_code == 404
+
+
+# ---- 단톡방(room_id)에서 만든 대화는 누구나 원문 (11/20) ----
+
+URL = "/api/safety/chat"
+
+
+def test_room_thread_is_readable_by_others_but_writes_stay_owner_only(
+    chat_client: TestClient,
+) -> None:
+    th = chat_client.post(URL, json={"message": "보류 있어?", "room_id": "all"},
+                          headers=HUMAN).json()["data"]  # fmt: skip
+    assert th["room_id"] == "all" and th["shared"] is True and th["owner"] == "taeyun"
+    for path in (f"{URL}/{th['id']}", f"{URL}?thread_id={th['id']}"):
+        other = chat_client.get(path, headers=OTHER).json()["data"]
+        assert other["restricted"] is False and other["messages"]
+        assert other["shared"] is True and other["owner"] == "taeyun"
+    # 다른 계정의 끝내기·지우기는 그대로 막힌다
+    assert chat_client.post(f"{URL}/{th['id']}/close", headers=OTHER).status_code == 403
+    assert chat_client.post(f"{URL}/{th['id']}/remove", headers=OTHER).status_code == 403
+    # 지우면 숨기고, 숨긴 대화는 공유하지 않는다
+    assert chat_client.post(f"{URL}/{th['id']}/remove", headers=HUMAN).status_code == 200
+    assert chat_client.get(f"{URL}/{th['id']}", headers=OTHER).status_code == 404
+
+
+def test_one_to_one_thread_is_still_hidden_and_room_id_on_reply_is_ignored(
+    chat_client: TestClient,
+) -> None:
+    th = chat_client.post(URL, json={"message": "1:1 질문"}, headers=HUMAN).json()["data"]
+    assert th["room_id"] is None and th["shared"] is False and th["owner"] is None
+    other = chat_client.get(f"{URL}/{th['id']}", headers=OTHER).json()["data"]
+    assert other["restricted"] is True and other["messages"] == [] and other["shared"] is False
+
+
+@pytest.mark.asyncio
+async def test_room_id_on_a_reply_is_ignored(gate: Gate, llm: FakeLLM) -> None:
+    store = ChatStore()
+    service = ChatService(lambda: store, gate, llm=lambda: llm)
+    th = service.send("taeyun", None, "1:1 질문")
+    await service.wait_idle()
+    again = service.send("taeyun", th["id"], "더", "all")  # 이어 쓰기에서 준 room_id
+    await service.wait_idle()
+    assert store.get(th["id"])["room_id"] is None and again["shared"] is False
+    assert service.get("junha", th["id"])["restricted"] is True
+
+
+def test_room_id_must_be_1_to_64_chars(chat_client: TestClient) -> None:
+    for bad in ("", "x" * 65, 3):
+        res = chat_client.post(URL, json={"message": "안녕", "room_id": bad}, headers=HUMAN)
+        assert res.status_code in (400, 422)
+
+
+def test_old_db_without_room_column_is_upgraded(tmp_path: Any) -> None:
+    import sqlite3
+
+    path = str(tmp_path / "chat.db")
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE safety_chat_threads (id TEXT PRIMARY KEY, seq INTEGER NOT NULL,"
+                 " title TEXT NOT NULL, status TEXT NOT NULL, who TEXT,"
+                 " summary TEXT NOT NULL DEFAULT '', messages TEXT NOT NULL,"
+                 " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")  # fmt: skip
+    conn.execute("INSERT INTO safety_chat_threads VALUES ('safetychat-1', 1, '옛', 'talking',"
+                 " 'taeyun', '', '[]', '2026-11-01', '2026-11-01')")  # fmt: skip
+    conn.commit()
+    conn.close()
+    store = ChatStore(path)
+    ChatStore(path)  # 두 번째 열기도 안전
+    assert store.get("safetychat-1")["room_id"] is None
