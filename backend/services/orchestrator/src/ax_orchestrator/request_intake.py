@@ -254,8 +254,10 @@ class RequestIntake:
             reply = head + f"{first}부터 시작할 일이에요. 지금은 접수까지만 되고 담당자가 확인해요."
         if notes:
             reply += f" ({', '.join(notes)})"
-        if task.changes_state:
-            reply += " 상태를 바꾸는 일이라 승인을 거친 뒤에 진행돼요."
+        if task.needs_human_approval:
+            reply += " 사람 승인이 필요한 일이라 승인을 거친 뒤에 진행돼요."
+        elif task.changes_state:
+            reply += " 상태를 바꾸는 일이라 안전 확인을 거쳐 진행돼요."
         return reply
 
     def open_for(self, account: str) -> list[dict[str, Any]]:

@@ -137,7 +137,7 @@ async def test_read_step_is_retried_then_succeeds() -> None:
 
 @pytest.mark.asyncio
 async def test_state_changing_step_is_not_run_without_approval() -> None:
-    plan = [{**PLAN[0], "grade": "A"}]
+    plan = [{**PLAN[0], "grade": "A", "human_gate": True}]
     reqs, rid = make(plan=plan)
     fake = Fake({"s_a": entry("data", "s_a", grade="A")}, {"s_a": [result(TaskStatus.COMPLETED)]})
     await runner(reqs, fake).run(rid)
@@ -372,7 +372,7 @@ async def test_decision_only_works_on_a_waiting_step_and_only_once() -> None:
 
 @pytest.mark.asyncio
 async def test_approved_state_change_is_sent_to_the_department_after_approval() -> None:
-    plan = [{**PLAN[0], "grade": "A"}]
+    plan = [{**PLAN[0], "grade": "A", "human_gate": True}]
     reqs, rid = make(plan=plan)
     fake = Fake({"s_a": entry("data", "s_a", grade="A")}, {"s_a": [result(TaskStatus.COMPLETED)]})
     r = runner(reqs, fake)

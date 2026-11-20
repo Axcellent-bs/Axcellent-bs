@@ -43,7 +43,7 @@ async def test_request_is_recorded_with_plan_and_customer_gets_a_receipt() -> No
     result = await intake.receive("member", "홍보 영상 만들어 주세요", llm)
     assert result.handled and result.outcome == "task"
     assert "접수했어요" in result.reply and "데이터분석부터" in result.reply
-    assert "승인" in result.reply  # 상태를 바꾸는 일이 든 흐름
+    assert "안전 확인" in result.reply  # 상태를 바꾸는 일이 든 흐름(부서 관문이 등급대로 처리)
     row = reqs.get(result.request_id)
     assert row["account"] == "member"
     assert row["text"] == "홍보 영상 만들어 주세요"

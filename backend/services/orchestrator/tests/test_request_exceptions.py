@@ -229,17 +229,26 @@ async def test_plan_that_is_not_in_the_catalog_is_never_sent_to_a_department() -
     reqs = WorkRequests()
     row = reqs.create("m", "매출 알려 줘")
     rid = row["request_id"]
+    done = {
+        "step_id": "pre",
+        "dept": "data",
+        "skill": "sales_analysis",
+        "label": "p",
+        "after": [],
+        "grade": "read",
+    }
     spec = {
         "step_id": "run",
         "dept": "support",
         "skill": "claim_stats",
         "label": "x",
-        "after": [],
+        "after": ["pre"],
         "grade": "read",
     }
     reqs.set_plan(
-        rid, task="sales_analysis", confidence=0.9, reason="r", alternatives=[], plan=[spec]
+        rid, task="sales_analysis", confidence=0.9, reason="r", alternatives=[], plan=[done, spec]
     )
+    reqs.update_step(rid, "pre", status="completed")  # 이미 시작한 의뢰는 계획을 새로 만들지 않는다
     await RequestRunner(reqs, lambda: fake, retry_delay=0).run(rid)  # 기본 검사
     got = reqs.get(rid)
     assert fake.calls == [] and got["steps"]["run"]["reason_code"] == "out_of_scope"

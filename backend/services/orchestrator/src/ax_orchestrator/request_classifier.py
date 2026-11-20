@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -109,13 +110,31 @@ def _clean_question(text: str | None) -> str:
     return one
 
 
+def _squash(value: str) -> str:
+    return re.sub(r"\s+", "", value).casefold()
+
+
+def _resolve(value: str | None, tasks: tuple[TaskDef, ...]) -> TaskDef | None:
+    """LLM이 준 값을 일 목록의 일로 바꾼다. 번호(`name`)가 정답이지만 일 이름표(`label`)로 와도
+    받는다(띄어쓰기·대소문자는 무시). 목록에 없는 값은 None이다(지어내지 않는다)."""
+    key = _squash(value or "")
+    if not key:
+        return None
+    for t in tasks:
+        if key in (_squash(t.name), _squash(t.label)):
+            return t
+    return None
+
+
 def decide(raw: Classification, tasks: tuple[TaskDef, ...] = TASKS) -> Decision:
     """LLM 결과를 검사한다. 목록에 없는 값과 낮은 확신은 그대로 믿지 않는다."""
-    by_name = {t.name: t for t in tasks}
-    task = by_name.get(raw.task or "")
-    alternatives = [
-        a for a in dict.fromkeys(raw.alternatives) if a in by_name and a != (task and task.name)
-    ][:MAX_ALTERNATIVES]
+    task = _resolve(raw.task, tasks)
+    alternatives: list[str] = []
+    for value in raw.alternatives:
+        other = _resolve(value, tasks)
+        if other is not None and other is not task and other.name not in alternatives:
+            alternatives.append(other.name)
+    alternatives = alternatives[:MAX_ALTERNATIVES]
     confidence = min(1.0, max(0.0, raw.confidence))
     base = {
         "kind": raw.kind,
