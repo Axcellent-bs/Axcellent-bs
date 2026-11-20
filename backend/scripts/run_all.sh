@@ -353,6 +353,38 @@ off|0|false|no)
   fi
   ;;
 esac
+# 마케팅 회사 칸(여러 회사 1-6): 마케팅 DB 6개는 켤 때 tenant_id 칸이 덧붙는다(옛 줄은 catbooks, 되돌려도 옛 코드는
+# 새 칸을 무시해서 안전). 칸을 붙이기 전에 한 번만 .data/backup-before-marketing-company-<시각>.tgz로 백업한다
+# (umask 077). 성공하면 표식 .data/.marketing-company-backup-done을 둬서 다시 만들지 않는다.
+# MARKETING_MEDIA_DIR 안의 설정 파일(cost_limits.json·video_providers.json과 .history.jsonl)도 회사 폴더로
+# 옮겨지니 아직 안 옮겼으면 같이 묶는다
+if [ ! -e "$PWD/$DATA/.marketing-company-backup-done" ]; then
+  _mk_db=""
+  for _f in marketing_briefs.db marketing_media_ledger.db marketing_sns_pending.db     marketing_sns_drafts.db marketing_chat.db marketing_creative.db; do
+    [ -e "$PWD/$DATA/$_f" ] && _mk_db="$_mk_db $_f"
+  done
+  _mk_cfg=""
+  if [ -n "${MARKETING_MEDIA_DIR:-}" ]; then
+    for _f in cost_limits.json cost_limits.json.history.jsonl video_providers.json       video_providers.json.history.jsonl; do
+      if [ -e "$MARKETING_MEDIA_DIR/$_f" ] && [ ! -e "$AX_COMPANIES_DIR/catbooks/$_f" ]; then
+        _mk_cfg="$_mk_cfg $_f"
+      fi
+    done
+  fi
+  if [ -z "$_mk_db$_mk_cfg" ]; then
+    : > "$PWD/$DATA/.marketing-company-backup-done"
+  else
+    _bk="$PWD/$DATA/backup-before-marketing-company-$(date +%Y%m%d%H%M%S).tgz"
+    # shellcheck disable=SC2086
+    if ( umask 077; tar czf "$_bk" ${_mk_db:+-C "$PWD/$DATA" $_mk_db}       ${_mk_cfg:+-C "$MARKETING_MEDIA_DIR" $_mk_cfg} ); then
+      echo "마케팅 회사 칸을 붙이기 전 백업: $_bk ($_mk_db $_mk_cfg )"
+      : > "$PWD/$DATA/.marketing-company-backup-done"
+    else
+      rm -f "$_bk"
+      echo "경고: 마케팅 회사 칸을 붙이기 전 백업을 만들지 못했습니다 ($_bk). 다음에 켤 때 다시 시도합니다" >&2
+    fi
+  fi
+fi
 # backend/.env 에 없으면 레포 맨 위 .env 에서 LLM·임베딩 설정 6개만 읽는다 (DejaFix 형식 .env 를 같이 쓰는 경우).
 # 다른 값(메일·Zabbix 등)은 서버에 넘기지 않고, 줄 끝 주석(공백 뒤 #)은 뗀다
 if [ -f ../.env ]; then

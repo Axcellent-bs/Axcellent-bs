@@ -31,6 +31,7 @@ import httpx
 from pydantic import Field, StrictBool, ValidationError, model_validator
 
 from ax_agent_template import events
+from ax_agent_template.companies import canonical_company_id
 from ax_agent_template.config import agent_token, agent_url, get_agent_name
 from ax_agent_template.execute import execute
 from ax_agent_template.logging import log_event
@@ -686,7 +687,9 @@ async def on_review_decided(envelope: EventEnvelope) -> None:
     if data.action != ACTION or data.requester not in accepted:
         return
     row = store().by_review(data.review_id)
-    if row is None or row.tenant_id != envelope.tenant_id:
+    if row is None or canonical_company_id(row.tenant_id) != canonical_company_id(
+        envelope.tenant_id
+    ):
         return
     # 마감 만료는 안전 관문이 `system` 이름으로 자동 거절한다(사람 이름이 아니다)
     await apply_decision(row, data.decision, "event", expired=data.decided_by == "system")

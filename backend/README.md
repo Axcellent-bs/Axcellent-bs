@@ -245,7 +245,7 @@ assignments:
 - 회사 폴더가 없거나 틀리면(카탈로그 없음, 커넥터가 카탈로그와 다름) 서버를 켜지 않고 이유를 알려 준다.
 - 조직도를 찾지 못하면 켜면서 분명히 알린다: `조직도 없음: 꺼진 서비스로 가는 일은 no_assignee로 실패합니다`
 
-## 회사 폴더 (여러 회사 1-4)
+## 회사 폴더 (여러 회사 1-4·1-6 마케팅)
 
 회사마다 다른 공통층 파일은 `.data/companies/<회사 ID>/` 아래에 둔다. 지금은 캣북스 하나(`catbooks`).
 
@@ -256,6 +256,12 @@ assignments:
 | 켠 서비스 | `.data/enabled_services.json` | `companies/catbooks/enabled_services.json` | `AX_ENABLED_SERVICES_FILE` |
 | 변환기 폴더 | `.data/site_adapter/` | `companies/catbooks/site_adapter/` | `AX_SITE_ADAPTER_DIR` |
 | 비용 정책 + 기록 | `SAFETY_STATE_DB` 옆 `cost_policy.json` | `companies/catbooks/cost_policy.json` | `SAFETY_COST_POLICY_FILE` |
+| 마케팅 미디어 폴더 (1-6) | 임시 폴더 `marketing_media`(또는 `<회사 폴더의 부모>/marketing_media`) | `companies/catbooks/marketing_media/` | `MARKETING_MEDIA_DIR`(정했으면 그 경로. SNS 자산 해석은 이 값을 정했을 때만, 예전 그대로) |
+| 마케팅 비용 한도·영상 공급자 설정 (1-6) | `<MARKETING_MEDIA_DIR>/cost_limits.json`·`video_providers.json`(+ `.history.jsonl`) | `companies/catbooks/` 같은 이름 | `MARKETING_COST_LIMITS_FILE`·`MARKETING_VIDEO_PROVIDERS_FILE` |
+
+마케팅 DB 6개(`marketing_briefs`·`media_ledger`·`sns_pending`·`sns_drafts`·`marketing_chat`·`marketing_creative`)는 파일은 그대로
+두고 표마다 `tenant_id` 칸이 붙는다(1-6). 옛 줄은 `catbooks`로 채워지고(멱등), 저장소는 자기 회사 줄만 읽는다.
+run_all.sh가 칸을 붙이기 전 한 번 `.data/backup-before-marketing-company-<시각>.tgz`(0600)를 만든다.
 
 - 켜는 값은 `AX_COMPANIES_DIR`(run_all.sh 기본 `.data/companies`). 안 정하면 모두 예전 자리다
 - 옮기기(`ax_agent_template.company_files`): 예전 자리에 있고 회사 폴더에 없으면 처음 읽을 때 한 번 옮긴다.
